@@ -349,6 +349,9 @@ fn keys_that_decode_nothing_leave_the_state_alone_and_a_fitting_key_decodes_once
 /// on; (b) loaded, rerank off; (c) no small model (W is 61 then: the first freeze is at the 62nd key); (d) loaded, rerank on, demotion
 /// table off (no jobs). H = 0 makes the freeze come at every key past W (65 double decodes), and gating the freeze on `jobs_on()`, on the
 /// small model or on the demotion table leaves (b), (c) or (d) with free stretches up to 127.
+/// `Engine::decodes` counts the calls of `refresh`, the one place that decodes (settings and `clear_all` do not count). A key that types at the
+/// end decodes once, and the freeze adds one: the left neighbour of the cursor is a free word there, so repick-freeze 7.4's extra tentative
+/// decodes (a frozen neighbour touching the cursor) do not occur, and the bound counts keys with two decodes.
 #[test]
 fn the_freeze_has_a_buffer_and_needs_neither_the_rerank_nor_the_model() {
     let syls = material(25, MAX_SYLLABLES - 1, 47);
@@ -468,4 +471,175 @@ fn a_piece_left_by_backspace_is_frozen_again_when_a_syllable_follows() {
     assert_eq!(shown.chars().count(), 78);
     e.key(k(KeyKind::End)).unwrap();
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, shown);
+}
+
+/// Contract 2, test 2b (revision 2). The same state as test 2 (a free stretch of 61 characters), the cursor at the start: Home, then
+/// ㄉㄧㄢˋ ㄋㄠˇ ㄓㄨㄛ. At the second syllable the stretch is past W and the longest common prefix is 1, and the word typed first (電/店) ends
+/// less than `CAP_EDGE` syllables before it: it is not frozen, so the next syllables still make 電腦桌 with it (it used to be frozen as
+/// the single character and show 店腦). With `CAP_EDGE` = 0 this fails.
+#[test]
+fn the_word_being_typed_in_the_middle_is_not_frozen_as_a_single_character() {
+    let syls = material(25, 61, 47);
+    let mut e = engine(true);
+    for s in &syls {
+        syllable(&mut e, s);
+        settle(&mut e);
+    }
+    assert!(frozen(&e).is_empty());
+    e.key(k(KeyKind::Home)).unwrap();
+    for s in ["ㄉㄧㄢˋ", "ㄋㄠˇ", "ㄓㄨㄛ"] {
+        let o = syllable(&mut e, s);
+        let (_, applied) = settle(&mut e);
+        let shown = applied.map_or(o.preedit, |o| o.preedit);
+        assert!(frozen(&e).iter().all(|f| f.0 >= 3), "after {s}: frozen {:?} (shown {shown})", frozen(&e));
+    }
+    let shown = e.key(k(KeyKind::End)).unwrap().preedit;
+    assert!(shown.starts_with("電腦桌"), "{shown}");
+}
+
+/// The generation filter of `cap_after`: a stretch that stays longer than W after a key that decoded (a syllable typed in front, where the
+/// common prefix is too short to freeze anything) must not be frozen by the keys that decode nothing after it. ← and ↓ leave the preedit,
+/// the frozen words and the decode count alone. Without the filter the ← key would freeze the head of the 62-character stretch.
+#[test]
+fn keys_that_decode_nothing_do_not_freeze_a_stretch_that_stays_too_long() {
+    let syls = material(25, 62, 47);
+    let mut e = engine(true);
+    for s in &syls[..61] {
+        syllable(&mut e, s);
+        settle(&mut e);
+    }
+    e.key(k(KeyKind::Home)).unwrap();
+    for _ in 0..5 {
+        e.key(k(KeyKind::Right)).unwrap();
+    }
+    let o = syllable(&mut e, &syls[61]);
+    assert_eq!(o.preedit.chars().count(), 62);
+    assert!(frozen(&e).is_empty(), "premise: the edit is too close to anything the stretch could freeze: {:?}", frozen(&e));
+    let (_, applied) = settle(&mut e);
+    let shown = applied.map_or(o.preedit, |o| o.preedit);
+    let decodes = e.decodes();
+    for key in [k(KeyKind::Left), k(KeyKind::Down)] {
+        let o = e.key(key).unwrap();
+        assert_eq!(o.preedit, shown, "preedit after {}", key.kind as u32);
+        assert!(frozen(&e).is_empty());
+        assert_eq!(e.decodes(), decodes, "no decode after {}", key.kind as u32);
+    }
+}
+
+/// `forgot`, the ⌘⌫ guard. A pick taught under 帳單 makes the word before the tail show as the taught one and freezes it with the head; the
+/// window's ⌘⌫ on it at the boundary (R = 60 characters behind it) releases and forgets it. The stretch (the word, R) is then past W and the
+/// frozen word is the first one the freeze would put back, from the path shown before the key: the guard stops there, so the forget shows
+/// (the decode without the record), the word is not frozen again and the key does not decode twice.
+#[test]
+fn a_forgotten_head_word_is_not_frozen_back_in_the_same_key() {
+    const DAY: i64 = 20_000;
+    let build = || {
+        let mut e = engine(false);
+        e.set_today(Some(DAY));
+        e.set_learning(true);
+        e
+    };
+    let mut e = build();
+    // Teach: after 帳單, ㄧˇ ㄐㄧㄥ shows its first candidate; the second is picked and committed.
+    e.set_left_context("帳單");
+    for s in ["ㄧˇ", "ㄐㄧㄥ"] {
+        syllable(&mut e, s);
+    }
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    let default = o.candidates[o.selected.unwrap()].clone();
+    // The first other candidate of two characters (the window lists the prediction row's longer words first).
+    let taught = loop {
+        let o = e.key(k(KeyKind::Right)).unwrap();
+        let w = o.candidates[o.selected.unwrap()].clone();
+        if w.chars().count() == 2 && w != default {
+            break w;
+        }
+    };
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, taught);
+    assert_eq!(e.learner().records().len(), 1);
+    e.set_left_context("");
+    let syls = material(25, 78, 45);
+    for s in &syls {
+        syllable(&mut e, s);
+        settle(&mut e);
+    }
+    let end = frozen(&e).last().unwrap().1;
+    let last = frozen(&e).last().unwrap().clone();
+    assert!(last.2 == taught && last.1 - last.0 == 2, "premise: the taught word {taught} is the last frozen word: {:?}", frozen(&e));
+    for _ in end..78 {
+        e.key(k(KeyKind::Left)).unwrap();
+    }
+    let mut o = e.key(k(KeyKind::Space)).unwrap();
+    for _ in 0..50 {
+        if o.candidates[o.selected.unwrap()] == taught {
+            break;
+        }
+        o = e.key(k(KeyKind::Right)).unwrap();
+    }
+    assert_eq!(o.candidates[o.selected.unwrap()], taught);
+    let decodes = e.decodes();
+    let forget = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
+    let o = e.key(forget).unwrap();
+    assert_eq!(e.learner().records().len(), 0, "the record is gone");
+    let now: String = o.preedit.chars().skip(last.0).take(2).collect();
+    assert_eq!(now, "已經", "the forget shows (the decode without the record) instead of {taught}");
+    assert!(frozen(&e).iter().all(|f| f.1 <= last.0), "the word is not frozen again: {:?}", frozen(&e));
+    assert_eq!(e.decodes() - decodes, 1, "one decode: nothing was frozen after it");
+}
+
+/// The alignment guard on the path shown before the key: a composition typed before any model was set has no path (the next `load_lm`
+/// does not decode it again). The key after the load decodes it and, there being no path of the old composition to freeze words from,
+/// freezes nothing (the stretch stays past W until a key that has a path), without failing.
+#[test]
+fn a_composition_typed_before_a_model_has_no_path_to_freeze_from() {
+    let syls = long_material();
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    for s in &syls[..64] {
+        syllable(&mut e, s);
+    }
+    e.load_lm(&data("bigram.sjlm")).unwrap();
+    let o = syllable(&mut e, &syls[64]);
+    assert_eq!(o.preedit.chars().count(), 65);
+    assert!(frozen(&e).is_empty(), "no path before the key: {:?}", frozen(&e));
+    // The next key has a path and freezes.
+    syllable(&mut e, &syls[65]);
+    assert!(!frozen(&e).is_empty());
+}
+
+/// The rows of the ⌘⌫ forgets are built after the freeze's decode, not from the decode before it: a stretch left past W (a syllable typed
+/// in front), then the cursor to the end and ⌘⌫ on the prediction row's item and on a row item of the window. Each freezes the head in that
+/// key (two decodes: the forget's and the freeze's) and shows rows equal to those of a fresh recompute.
+#[test]
+fn rows_rebuilt_by_a_forget_come_from_the_decode_after_the_freeze() {
+    let syls = material(25, 62, 47);
+    let forget = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
+    for window in [false, true] {
+        let mut e = engine(false);
+        for s in &syls[..61] {
+            syllable(&mut e, s);
+        }
+        e.key(k(KeyKind::Home)).unwrap();
+        for _ in 0..5 {
+            e.key(k(KeyKind::Right)).unwrap();
+        }
+        syllable(&mut e, &syls[61]);
+        assert!(frozen(&e).is_empty(), "premise: a stretch past W is left");
+        e.key(k(KeyKind::End)).unwrap();
+        let end = e.set_prediction(true).unwrap(); // the row at the end (a decode outside a key: it freezes nothing)
+        assert!(!end.candidates.is_empty() && frozen(&e).is_empty(), "premise: a prediction row, stretch still past W");
+        let o = if window { e.key(k(KeyKind::Space)).unwrap() } else { e.key(k(KeyKind::Tab)).unwrap() };
+        assert!(o.selected.is_some(), "premise: an item is selected");
+        let decodes = e.decodes();
+        let o = e.key(forget).unwrap();
+        assert!(!frozen(&e).is_empty(), "the head froze in the forget's key");
+        assert_eq!(e.decodes() - decodes, 2, "the forget's decode and the freeze's");
+        if window {
+            assert!(!o.candidates.is_empty());
+        } else {
+            let row = o.candidates.clone();
+            let fresh = e.set_prediction(true).unwrap().candidates;
+            assert_eq!(row, fresh, "the row of the forget is the row of the decode after the freeze");
+        }
+    }
 }
