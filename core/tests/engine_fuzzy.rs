@@ -295,6 +295,18 @@ fn only_the_unknown_syllable_uses_its_alternative() {
     let last = o.preedit.chars().last().unwrap().to_string();
     let exact: Vec<&str> = shared().lex.entries(&["ㄗ".to_string()]).iter().map(|e| e.0).collect();
     assert!(exact.contains(&last.as_str()), "the legal syllable stays an entry of its own reading");
+
+    // Whole n-best with bit 4 alone: the legal ㄒㄧㄣ beside the unknown ㄅㄩ is not read through ㄒㄧㄥ, in a word spanning both syllables
+    // included (鱉星 is a lexicon word of ㄅㄧㄝ ㄒㄧㄥ): a span with an unknown syllable uses its adjacent readings only (section
+    // 2.1b), whatever a sound pair would allow. The pair itself, on, does read a span of known syllables that way.
+    let s = shared();
+    let syls: Syls = vec![UNKNOWN.to_string(), "ㄒㄧㄣ".to_string()];
+    let surfaces = |flags| -> Vec<String> {
+        decode_from_fuzzy(&s.capped, &syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags).unwrap().into_iter().map(|(_, w)| w.concat()).collect()
+    };
+    assert!(s.lex.entries(&["ㄅㄧㄝ".to_string(), "ㄒㄧㄥ".to_string()]).iter().any(|e| e.0 == "鱉星"), "premise: 鱉星 is a word of the pair's reading");
+    assert!(!surfaces(FUZZY_ADJACENT).iter().any(|w| w == "鱉星"), "bit 4 alone does not read ㄒㄧㄣ as ㄒㄧㄥ");
+    assert!(surfaces(FUZZY_ALL).iter().any(|w| w == "鱉星"), "with the pair on, the span of the known syllable alone is read through it");
 }
 
 /// Section 3.4, ETen: the neighbour table is the standard layout's keyboard, so with the ETen layout bit 4 accepts nothing (the
