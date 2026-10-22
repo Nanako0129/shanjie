@@ -4,7 +4,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, BATCH, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::collections::BTreeMap;
@@ -144,9 +144,11 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
 /// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
 /// Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+/// `extra` (`--tinylm-scores-topk`) continues the `ll` list past the 8 the rerank scored: one entry per further candidate, `null` for a
+/// candidate the small model could not score (longer than its context); it is empty without the option, so the line is then unchanged.
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, extra: &[Option<f64>]) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
-    if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
+    if !ng.iter().chain(ll.unwrap_or(&[])).chain(extra.iter().flatten()).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
     }
     let list = |v: Vec<String>| format!("[{}]", v.join(", "));
@@ -158,7 +160,8 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
         list(ed.iter().map(u32::to_string).collect())
     );
     if let Some(ll) = ll {
-        s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
+        let all = ll.iter().map(|x| format!("{x:?}")).chain(extra.iter().map(|x| x.map_or("null".to_string(), |x| format!("{x:?}"))));
+        s += &format!(", \"ll\": {}", list(all.collect()));
     }
     Ok(s + "}\n")
 }
@@ -178,6 +181,8 @@ struct RowOut {
     ok: bool,
     in64: bool,
     long: bool,
+    /// `--tinylm-scores-topk`: candidates 9..N the small model could not score (longer than its context).
+    no_ll: usize,
     rerank: Option<Duration>,
     /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
     first: String,
@@ -207,6 +212,10 @@ struct RowOut {
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
 ///
+/// `--tinylm-scores-topk N` (N >= 8, default 8; research, experiments/r1-reading-decode): the `--tinylm-scores` `ll` covers the first N
+/// candidates of the n-gram order instead of 8, the extra ones scored by `TinyLm::ll_many` under the key `rerank_ll` uses (a candidate over the model's context gets `null`, counted on stderr). The pick `c`, the
+/// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
+///
 /// `--no-reading-channel` (research only; docs/contracts/reading-channel.md section 2.2): where the colloquial term applies it is applied alone, the P4d
 /// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
 /// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
@@ -223,6 +232,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
+    let mut scores_topk = None::<usize>;
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
@@ -254,6 +264,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--rowstats" => rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
+            "--tinylm-scores-topk" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= TOPK => scores_topk = Some(n),
+                _ => return Err(format!("--tinylm-scores-topk takes a whole number of at least {TOPK}")),
+            },
             "--rerank-level" => {
                 level = Some(match val()?.as_str() {
                     "conservative" => RerankLevel::Conservative,
@@ -285,6 +299,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         return Err("--rerank-level needs --tinylm".into());
     }
     let level = level.unwrap_or(RerankLevel::Standard);
+    if scores_topk.is_some() && tinylm_scores.is_none() {
+        return Err("--tinylm-scores-topk needs --tinylm-scores".into());
+    }
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
@@ -420,10 +437,38 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if ll.is_some() {
                 out.rerank = Some(t0.elapsed());
             }
+            // `--tinylm-scores-topk N`: the candidates 9..N get an `ll` from `ll_many` under the key `TinyLm::rerank_ll` builds (SENTINEL = the
+            // empty k; keep the two the same, the test scores_topk_extends_ll_and_changes_nothing_else pins it), apart from the pick, which stays
+            // on the first 8. Scored in blocks of BATCH like `ll_many` does; a block with a candidate over the model's context is scored one by
+            // one, so only that candidate loses its `ll` (null in the record, counted in `out.no_ll`).
+            let mut extra: Vec<Option<f64>> = Vec::new();
+            if want_scores && scores_topk.is_some_and(|n| n > TOPK) && ll.is_some() {
+                let k = if key == SENTINEL { "" } else { key };
+                let more: Vec<&str> = surf.iter().skip(TOPK).take(scores_topk.unwrap_or(TOPK) - TOPK).map(String::as_str).collect();
+                for block in more.chunks(BATCH) {
+                    let items: Vec<(&str, &str)> = block.iter().map(|c| (k, *c)).collect();
+                    match tl.ll_many(&items) {
+                        Ok(v) => extra.extend(v.into_iter().map(Some)),
+                        Err(TinyLmError::TooLong) => {
+                            for it in &items {
+                                match tl.ll_many(std::slice::from_ref(it)) {
+                                    Ok(v) => extra.push(Some(v[0])),
+                                    Err(TinyLmError::TooLong) => {
+                                        extra.push(None);
+                                        out.no_ll += 1;
+                                    }
+                                    Err(e) => return Err(e.to_string()),
+                                }
+                            }
+                        }
+                        Err(e) => return Err(e.to_string()),
+                    }
+                }
+            }
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &extra)?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;
@@ -444,11 +489,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Ok(out)
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    let mut no_ll = 0usize;
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
     let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
         top1 += out.ok as usize;
         o64 += out.in64 as usize;
         long += out.long as usize;
+        no_ll += out.no_ll;
         rerank.extend(out.rerank);
         if let Some(w) = scores.as_mut() {
             w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
@@ -527,6 +574,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
+    }
+    if scores_topk.is_some_and(|n| n > TOPK) {
+        // stderr only, in the style of the latency line below: candidates 9..N the small model could not score (`null` in the record).
+        eprintln!("tinylm: --tinylm-scores-topk candidates without ll (candidate over the context) {no_ll}");
     }
     if let (Some((_, load, _)), false) = (&tl, rerank.is_empty()) {
         // Latency record (S7c-1 item 6), stderr only: one rerank = the forward pass over up to 8 candidates of a row (rows with fewer

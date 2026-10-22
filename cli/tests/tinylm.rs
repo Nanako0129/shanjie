@@ -352,3 +352,81 @@ fn summary_line_records_a_non_standard_level() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// `--tinylm-scores-topk N` (experiments/r1-reading-decode): at N 8 every output file is byte for byte that of a run without the option,
+/// and at N 16 the first 8 `ll` of each row are those of the N 8 run (the pick `c` and the rowstats unchanged), the row gaining the
+/// `ll` of candidates 9..16. A value below 8 is refused, and so is the option without `--tinylm-scores`.
+#[test]
+fn scores_topk_extends_ll_and_changes_nothing_else() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("topk", Path::new(&lm));
+    let rows = dir.join("rows.txt");
+    let src = std::fs::read_to_string(root().join("eval/dev/homophones.txt")).unwrap();
+    std::fs::write(&rows, src.lines().filter(|l| l.split('|').count() == 3).take(40).collect::<Vec<_>>().join("\n") + "\n").unwrap();
+    let p = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    let run_with = |tag: &str, topk: Option<&str>| {
+        let (d, w, s, r) = (p(&format!("{tag}-d")), p(&format!("{tag}-w")), p(&format!("{tag}-s")), p(&format!("{tag}-r")));
+        let mut a = vec!["--lm", &lm, "--profile", "chat", "--context", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--dump", &d,
+            "--dump-words", &w, "--tinylm-scores", &s, "--rowstats", &r];
+        if let Some(n) = topk {
+            a.extend(["--tinylm-scores-topk", n]);
+        }
+        let o = run(&a);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        let f = |x: &str| std::fs::read(x).unwrap();
+        (f(&d), f(&w), f(&s), f(&r), o.stdout)
+    };
+    let base = run_with("base", None);
+    assert_eq!(base, run_with("n8", Some("8")), "N 8 is byte for byte the run without the option");
+    let n16 = run_with("n16", Some("16"));
+    assert_eq!((&base.0, &base.1, &base.3, &base.4), (&n16.0, &n16.1, &n16.3, &n16.4), "dump, words, rowstats and summary are unchanged");
+    let (mut longer, mut rows_n) = (0, 0);
+    for (a, b) in text(&base.2).lines().zip(text(&n16.2).lines()) {
+        rows_n += 1;
+        assert_eq!(a.contains("\"ll\": ["), b.contains("\"ll\": ["));
+        if !a.contains("\"ll\": [") {
+            assert_eq!(a, b);
+            continue;
+        }
+        let (la, lb) = (list_of(a, "ll"), list_of(b, "ll"));
+        assert_eq!(la.len(), 8.min(list_of(a, "ng").len()));
+        assert_eq!(la.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), lb[..la.len()].iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        for k in ["i", "n", "ng", "ok", "ed", "glen", "c"] {
+            assert_eq!(a.split(&format!("\"{k}\": ")).nth(1).unwrap().split(", \"").next(), b.split(&format!("\"{k}\": ")).nth(1).unwrap().split(", \"").next());
+        }
+        longer += (lb.len() > la.len()) as usize;
+    }
+    assert_eq!(rows_n, 40);
+    assert!(longer > 0, "some row has a 9th candidate, or the check proves nothing");
+    // The extra `ll` are those of `TinyLm::rerank_ll`'s rule: ll_many of (k, candidate) with k = the context key, SENTINEL (no Han
+    // character before the cursor) being the empty k. Computed here by calling ll_many directly, in the same block of 8 as the CLI.
+    let tl = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap();
+    let dump = text(&n16.0);
+    let ctxs: Vec<String> = std::fs::read_to_string(&rows).unwrap().lines().map(|l| l.split('|').next().unwrap().to_string()).collect();
+    let (mut checked, mut empty_k) = (0, 0);
+    for (i, line) in text(&n16.2).lines().enumerate() {
+        if !line.contains("\"ll\": [") {
+            continue;
+        }
+        let cands: Vec<&str> = dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[0] == (i + 1).to_string()).map(|f| f[2]).collect();
+        let key = core::learn::context_key(&ctxs[i]);
+        empty_k += (key == core::learn::SENTINEL) as usize;
+        let k = if key == core::learn::SENTINEL { "" } else { key.as_str() };
+        let items: Vec<(&str, &str)> = cands.iter().skip(8).take(8).map(|c| (k, *c)).collect();
+        let want = if items.is_empty() { vec![] } else { tl.ll_many(&items).unwrap() };
+        let got = list_of(line, "ll");
+        assert_eq!(got[8..].iter().map(|x| x.to_bits()).collect::<Vec<_>>(), want.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), "row {}", i + 1);
+        checked += want.len();
+    }
+    assert!(checked > 0 && empty_k > 0, "extra candidates were compared, with an empty context among them");
+    for bad in [&["--tinylm-scores-topk", "7"][..], &["--tinylm-scores-topk", "x"]] {
+        let mut a = vec!["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--tinylm-scores", "/dev/null"];
+        a.extend(bad);
+        assert!(!run(&a).status.success());
+    }
+    for n in ["8", "16"] {   // given at all, any value, without --tinylm-scores
+        let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--tinylm-scores-topk", n]);
+        assert!(!o.status.success() && text(&o.stderr).contains("--tinylm-scores"), "topk {n}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
