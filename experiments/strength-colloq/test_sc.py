@@ -347,6 +347,16 @@ class Clauses(unittest.TestCase):
         self.assertEqual(arm["vs_ship"]["breaks"], 30)
         self.assertFalse(arm["verdict"])
         self.assertLess(arm["bootstrap90_lower_pp"], -1.0)
+        cand = [(int(r["sc"]["ok"][1]), r["sc"]["ed"][1], 4) for r in rows]
+        lo90, lo95 = (S.evalstats.paired_bootstrap(ship_rows, cand, level=lv)[0][0] for lv in (0.90, 0.95))
+        self.assertNotEqual(lo90, lo95)
+        self.assertEqual(arm["bootstrap90_lower_rows"], lo90, "the 90% level, against the level's shipping rows")
+
+    def test_clause_3_threshold_is_minus_one_point(self):
+        self.assertTrue(S.boot_ok(-2, 200))              # exactly -1.0 pp
+        self.assertFalse(S.boot_ok(-3, 200))
+        self.assertTrue(S.boot_ok(0, 200) and S.boot_ok(5, 200))
+        self.assertTrue(S.boot_ok(-32, 3286) and not S.boot_ok(-34, 3286))
 
     def test_arm_numbers_are_against_the_shipping_value_and_the_ngram_first(self):
         # ngram first right on rows 0..3; ship right on 0..1; the cell keeps the first (delta 100) -> vs ship: 2 fixes; vs ngram: none
@@ -488,7 +498,7 @@ class Checks(unittest.TestCase):
             S.check_tag(self.tag(lv), lv, self.TL)
         bad = [("standard", self.tag("standard", rc=False)), ("conservative", self.tag("conservative", rc=True)),
                ("conservative", self.tag("standard")), ("standard", self.tag("conservative")), ("aggressive", self.tag("conservative")),
-               ("standard", self.tag("standard", tl="00000000")), ("standard", self.tag("standard").replace("+acg", "")),
+               ("standard", self.tag("standard", tl="00000000")), ("standard", self.tag("standard", rl="+rl:conservative")), ("standard", self.tag("standard").replace("+acg", "")),
                ("standard", self.tag("standard").replace(self.CO, "00000000")), ("standard", self.tag("standard").replace("lm-chat", "lm-formal")),
                ("standard", self.tag("standard", extra="-nodemote")), ("standard", self.tag("standard").replace("+ctx", ""))]
         for lv, t in bad:

@@ -278,6 +278,11 @@ def verdict(role, s):
     return bool({"1": lambda: Q.verdict("1", s), "2": lambda: Q.verdict("2a", s), "4": lambda: Q.verdict("3", s)}[role]())
 
 
+def boot_ok(lo, n):
+    """Clause 3: the 90% paired bootstrap lower bound of the top1 change, in percentage points of the set, is at least -1.0."""
+    return 100 * lo / n >= -1.0
+
+
 def arm_of(name, rows, ship_ok, ship_rows, ng_ok, cell, plain):
     """One cell on one set -> {cell, ok, vs_ngram, vs_ship, verdict ...}; every number against the n-gram first (gates) and against `ship_ok`
     (the level's CLI shipping value, the clauses). ship_rows: the rowstats (ok, errors, gold length) of that run, the bootstrap's base."""
@@ -288,7 +293,7 @@ def arm_of(name, rows, ship_ok, ship_rows, ng_ok, cell, plain):
     if role == "3":
         cand = [(int(r["sc"]["ok"][j]), r["sc"]["ed"][j], r["sc"]["glen"]) for r, j in zip(rows, picks)]
         (lo, _), _ = evalstats.paired_bootstrap(ship_rows, cand, level=0.90)
-        arm.update({"bootstrap90_lower_rows": lo, "bootstrap90_lower_pp": 100 * lo / len(rows), "verdict": 100 * lo / len(rows) >= -1.0})
+        arm.update({"bootstrap90_lower_rows": lo, "bootstrap90_lower_pp": 100 * lo / len(rows), "verdict": boot_ok(lo, len(rows))})
     elif role in ("1", "2", "4"):
         arm["verdict"] = verdict(role, s)
     if name == "dev302":      # chat: report only, the reader labels each break by category
