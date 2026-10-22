@@ -159,6 +159,26 @@ class Rules(Fixture):
         self.assertIn("甲乙丙丁", files["quotes-add.tsv"])
         self.assertEqual(manifest["first_without_quote_pack"], {"chat": 1, "formal": 1})
 
+    def test_taiwan_ellipsis_and_full_width_marks_split_and_extension_han_counts_as_han(self):
+        self.assertEqual(Q.split_clauses("甲乙⋯⋯丙丁‧戊己．庚辛／壬癸"), ["甲乙", "丙丁", "戊己", "庚辛", "壬癸"])
+        self.assertTrue(Q.HAN.match("〇㐀𠀀豈"))
+        self.assertFalse(Q.HAN.match("甲a"))
+
+    def test_a_reading_given_for_a_clause_that_is_not_collected_does_not_stop_the_build(self):
+        _, manifest, _ = self.build([row("甲乙3丙，戊己庚辛", reading="ㄐㄧㄚˇ ㄧˇ ㄅㄧㄥˇ｜ㄨˋ ㄐㄧˇ ㄍㄥ ㄒㄧㄣ")])
+        self.assertEqual((manifest["skipped"]["not Han"], manifest["clauses"]), (1, 1))
+
+    def test_two_lines_giving_one_clause_different_readings_stop_the_build(self):
+        with self.assertRaises(SystemExit):
+            self.build([row("甲乙丙丁", reading="ㄐㄧㄚˇ ㄧˇ ㄅㄧㄥˇ ㄉㄧㄥ"), row("甲乙丙丁", reading="ㄐㄧㄚˇ ㄧˇ ㄅㄧㄥˇ ㄉㄧㄥˋ")])
+
+    def test_a_dropped_clause_is_not_listed_as_collected_under_check(self):
+        def decode(pairs, prof, packs=None):
+            return ["既有詞" if packs is None and w == "戊己庚辛" else w for w, _ in pairs]      # 戊己庚辛 (CHECK in the fixture) loses to a lexicon word
+        _, manifest, report = self.build([row("甲乙丙丁，戊己庚辛")], decode=decode, have={"既有詞"})
+        self.assertEqual(manifest["dropped_by_lexicon_rule"], 1)
+        self.assertNotIn("戊己庚辛", report.split("## 讀音工具標 CHECK")[1].split("## 依規則")[0])
+
     def test_output_is_deterministic_and_independent_of_the_line_order(self):
         lines = [row("甲乙丙丁，戊己庚辛"), row("你不要一個人"), row("天地玄黃宇宙洪荒，同音乙"), row("同音甲，甲乙丙丁")]
         a = self.build(lines)

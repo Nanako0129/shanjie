@@ -942,6 +942,24 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "你好")
     }
 
+    /// quote-pack.md section 2: with both packs on, a broken file costs only its own pack. Each case breaks one file and gives the
+    /// other a row (score 0) that wins 「ㄋㄧˇ ㄏㄠˇ」, so the pick shows which pack the fallback engine kept.
+    func testWithBothPacksOnABrokenFileKeepsTheOtherPack() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        for (broken, kept, word) in [("acg-add.tsv", "quotes-add.tsv", "擬好"), ("quotes-add.tsv", "acg-add.tsv", "泥好")] {
+            try "not a row\n".write(to: packs.appendingPathComponent(broken), atomically: true, encoding: .utf8)
+            try "ㄋㄧˇ-ㄏㄠˇ\t\(word)\t0.0\tx\n".write(to: packs.appendingPathComponent(kept), atomically: true, encoding: .utf8)
+            let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(true), quotePackStore: MemoryQuotePackStore(true), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+            XCTAssertNotNil(shell.engine, broken)
+            let c = Controller(shell)
+            c.session.activate()
+            c.type("su3cl3")
+            XCTAssertEqual(c.client.marked, word, "\(broken) broken: \(kept) is still loaded")
+        }
+    }
+
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {
         let c = Controller(makeShell())
         c.session.activate()

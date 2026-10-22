@@ -88,7 +88,7 @@ fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, S
     for (bit, file) in PACK_FILES {
         let path = pdir.join(file);
         if packs & bit != 0 && !path.is_file() {
-            return Err(format!("--packs {}: pack file not found: {}", if bit == PACK_ACG { "acg" } else { "quotes" }, path.display()));
+            return Err(format!("--packs {}: pack file not found: {}", file.trim_end_matches("-add.tsv"), path.display()));
         }
     }
     Ok(pdir)

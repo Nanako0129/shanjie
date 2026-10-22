@@ -883,11 +883,11 @@ public final class Shell {
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
             // Any build failure retries with fewer packs, so the first code alone does not say whose fault it is: with both packs on, try
-            // the ACG pack alone (a broken quote file must not take the default-on ACG pack with it), then none. Blame the packs only if a
-            // retry works; otherwise the last code is the real cause. The stored choices are untouched and nothing is shown; the next
-            // rebuild tries the packs again.
+            // each pack alone (a broken file must not take the other pack with it; the default-on ACG pack first), then none. Blame the
+            // packs only if a retry works; otherwise the last code is the real cause. The stored choices are untouched and nothing is
+            // shown; the next rebuild tries the packs again.
             let packCode = code
-            let retries: [UInt32] = mask == (mask & CoreEngine.packACG) || mask & CoreEngine.packACG == 0 ? [0] : [CoreEngine.packACG, 0]
+            let retries: [UInt32] = mask == CoreEngine.packACG | CoreEngine.packQuotes ? [CoreEngine.packACG, CoreEngine.packQuotes, 0] : [0]
             for retry in retries where made == nil {
                 (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: retry != 0 ? packsDir : nil, packs: retry)
                 if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(retry)") }

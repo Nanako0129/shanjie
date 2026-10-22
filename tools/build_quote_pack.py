@@ -33,13 +33,16 @@ PACK_FILE = "quotes-add.tsv"
 MIN_LEN, MAX_LEN = 2, 10          # 契約 §2：分數規則（length_scores）只涵蓋 2–10 字，引擎每個位置試的詞長也由詞庫最長的詞決定
 UNCHECKED = frozenset({"", "待核對"})   # 核對來源欄：空白或起始清單的「待核對」都是還沒核對（契約 §1）
 LEXICON_RULE_ROUNDS = 5           # 丟一個分句只會讓少數鄰居改變，實測幾輪就穩（和 ACG 詞包相同）
-# 契約 §2 解碼設定：出貨的 data/lm（model-v6 的 bigram.sjlm、classes-v5 的 classes.sjc、kn.sjkn），開始前核對；這三個檔決定出貨設定下的第一名。
+# 契約 §2 解碼設定：出貨的 data/lm（model-v6 的 bigram.sjlm、classes-v5 的 classes.sjc、kn.sjkn，書面另讀 trigram.sjt3），開始前核對；
+# 這四個檔決定出貨設定下的第一名（評測 CLI 只在 --profile formal 讀 trigram.sjt3）。雜湊同 data/*.sha256。
 SHIPPED_LM_SHA = {"bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
                   "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
-                  "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e"}
-HAN = re.compile(r"^[一-鿿]+$")
+                  "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+                  "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"}
+# 漢字：基本區、擴充 A、相容區、〇，以及擴充 B 以後（讀音工具讀不出的字照樣進「讀音拼不出」的報告，不當成非漢字）。
+HAN = re.compile(r"^[〇㐀-䶿一-鿿豈-\uFAFF\U00020000-\U0003FFFF]+$")
 # 標點與空白（含全形與半形的引號、刪節號、破折號）。不在這裡也不是漢字的字元（英文、數字、符號）留在分句裡，讓那個分句被擋下。
-PUNCT = re.compile(r"[\s，。！？、；：…—─–·・～~,.!?;:\"'“”‘’「」『』（）()《》〈〉【】〔〕\[\]<>\-]+")
+PUNCT = re.compile(r"[\s，。！？、；：…⋯—─–·・‧．／/～~,.!?;:\"'“”‘’「」『』（）()《》〈〉【】〔〕\[\]<>\-]+")
 
 
 def sha256_file(path):
@@ -60,7 +63,7 @@ def split_clauses(text):
 
 def read_list(path):
     """清單 → [(行號, 原文, 出處, 年份, 核對來源, 收錄人, [各分句的讀音或 None])]。少於五欄、原文空白、讀音的分句數超過原文的分句數、
-    某個分句的讀音音節數和字數對不上（分句是 2–10 個漢字的才檢查），都中止並指出行號。"""
+    某個分句的讀音音節數和字數對不上（分句是 2–10 個漢字的才檢查；其他分句不收，讀音也不用），都中止並指出行號。"""
     out = []
     with open(path, encoding="utf-8-sig") as f:
         lines = f.read().splitlines()
@@ -76,7 +79,7 @@ def read_list(path):
         if len(reads) > len(clauses):
             raise SystemExit(f"{path}:{n}: {len(reads)} readings for {len(clauses)} clauses")
         for c, r in zip(clauses, reads):
-            if r and len(r.split()) != len(c):
+            if r and HAN.match(c) and MIN_LEN <= len(c) <= MAX_LEN and len(r.split()) != len(c):
                 raise SystemExit(f"{path}:{n}: reading of {c!r} has {len(r.split())} syllables")
         out.append((n, f[0], f[1], f[2], f[3], f[4], [r.split() if r else None for r in reads] + [None] * (len(clauses) - len(reads))))
     return out
@@ -161,14 +164,13 @@ def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings
                 skipped["in the lexicon"].append((n, c))
             else:
                 src[c].add(f"{work}@{n}")
-                if r:
-                    override.setdefault(c, r)
+                if r and override.setdefault(c, r) != r:
+                    raise SystemExit(f"{list_path}:{n}: reading of {c!r} differs from an earlier line's ({' '.join(override[c])})")
     cand = sorted(src)
     rd = readings([c for c in cand if c not in override])
     unread = [c for c in cand if c not in override and c not in rd]
     words = [c for c in cand if c in override or c in rd]
     reading = {c: override.get(c) or rd[c][0] for c in words}
-    check = [c for c in words if c not in override and rd[c][1]]
     sc = bap.scores(bap.base_lexicon())
     dropped = []
     for _ in range(LEXICON_RULE_ROUNDS):
@@ -183,6 +185,7 @@ def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings
         words = [w for w in words if w not in gone]
     else:
         raise SystemExit(f"type (c) collisions not settled after {LEXICON_RULE_ROUNDS} rounds")
+    check = [c for c in words if c not in override and rd[c][1]]   # 規則丟掉的分句不列（報告這一節是「已收」的）
     same = sorted((r, e[0], e[4]) for r, v in found.items() for e in v if e[1] == "a")      # 台詞分句之間的同音：開詞包後第一名是另一句（只報告）
     firsts = first_places(words, reading, rows, decode)
     base_first = {prof: sum(1 for (w, _), v in firsts.items() if v[prof][0] == w) for prof in ("chat", "formal")}
