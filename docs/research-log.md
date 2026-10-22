@@ -8714,3 +8714,64 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **私人集合的逐列比對**（GCP VM，CLI commit `6ae50f3c`，`experiments/colloq-levels/parity.sh`；之後的 `56378128` 只改了比對工具的清理與檢查、核心的選字不變）：chatclause 5,761、discordtune 4,958、cvtune-clean 3,286，以及打字測驗、錯字回報 157 列、dev302，在標準、保守、積極三檔都是 **0 列不同**。核心的選字和探索片的離線選中格逐列相同。
 - **實機確認**（繁中 tart 虛擬機，裝本分支的開發版）：用 `defaults write` 把開發版容器偏好檔（`~/Library/Containers/<bundle id>/Data/Library/Preferences/<bundle id>.plist`）的 `rerankLevel` 設成 `aggressive`、`profileMode` 設成 `chat`，在文字編輯打錯字回報第 54 列 `ㄎㄜˇ ㄧˇ ㄓㄨㄣˇ ㄅㄟˋ ㄗㄨㄛˋ`，組字區是「可以準備做」。同一句用 CLI 量：本分支只有積極選「做」（標準、保守是「作」），main 的積極是「作」。所以引擎吃到了寫進去的積極設定，常談在積極生效。v0.5.0 的輸入法在這台虛擬機沒有啟用，沒有實機對照，對照用 CLI。
 - 順帶確認：改設定不用新程式，輸入法程序沒在跑時用 `defaults write` 寫容器偏好檔，下次啟動就讀到（程序在跑時要先結束它）。
+
+## 2026-10-23：模糊輸入合併 main、公開集合驗收（`docs/contracts/fuzzy-input.md` §3.1、§3.2、§3.4）
+
+- **合併**：`feat/fuzzy-input`（從 2026-10-14 的 `b6989e7f` 分出）merge commit 併入 main `67651c73`（11 個檔衝突）。解法：以 main 的解碼器為底（`Scoring`、trigram 狀態、新詞、四欄的詞元組），`decode_segment_learned` 變成 `decode_segment_fuzzy(.., fuzzy=0)` 的外殼；每個區段的主體對每個讀音來源各跑一次（打的讀音在前，帶 main 的新詞與學習，沒動；容錯的來源在後，沒有新詞、學習查詞庫讀音），容錯扣分還是放在路徑詞元的 delta。引擎的 `window_list` 回傳（清單、位置→詞庫讀音）；預測列的項目照 main 排在最前面，容錯得到的詞接在完全吻合的詞之後（`Cands.alt` 在 `open_with_rows` 和預測列的忘記路徑都存）。`set_fuzzy` 與 main 的 `set_english_inline` 並存；殼的「模糊輸入」一節放在「選字」頁；CLI 的 `--fuzzy` 放進 main 逐列工作的函式裡（`--threads` 輸出不變）。沒有動 main 的行為。
+- **旗標全關和 main 完全相同**（出貨設定指令、`--context --packs acg --tinylm`，聊天另加 `--colloquial-core`；基準是 `git archive origin/main` 自己編的 CLI）：dev302、typing76、錯字回報（157 列）× 聊天、書面，6 格的摘要行（含設定標記）與 `top1_sha256` 全部逐字相同；`make test-golden` 不變。
+- **測試**：`make test-rust` 743 通過、16 忽略、0 失敗；`test-golden` 25；`test-python` 全過（`experiments/fuzzy/test_*.py` 另跑也過）；`test-swift` 340（1 略過）。合併後調整的測試：CLI 摘要行的設定標記順序、視窗測試關掉預測列（它的項目排在視窗最前面）、Shell 建構子多一個 spacing store。新增兩個引擎測試：出貨模型（小模型、口語表、前文）下容錯音節的重排工作；組字區上限（128）下組字頭有一個收下的鄰鍵音節。
+- **§3.2 乾淨輸入，公開集合**（出貨設定，基準不給 `--fuzzy`；`tools/evalstats.py compare --net`）：
+  - `--fuzzy 16`：6 格的 `top1_sha256` 都和全關逐字相同。
+  - `--fuzzy 15`（四對模糊音全開）：
+
+| 集合 | n | top1 基準 | top1 新 | 改對 | 改壞 | p | CER 基準 | CER 新 | 淨值 | 改壞率 | 改壞數 95% 上界 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 聊天 dev302 | 302 | 269 | 267 | 0 | 2 | 0.5000 | 1.80% | 1.91% | -2 | 0.66% | 6.3 |
+| 聊天 typing76 | 76 | 72 | 72 | 0 | 0 | 1.0000 | 0.53% | 0.53% | 0 | 0.00% | 3.0 |
+| 聊天 錯字回報 | 157 | 56 | 56 | 0 | 0 | 1.0000 | 10.63% | 10.54% | 0 | 0.00% | 3.0 |
+| 書面 dev302 | 302 | 265 | 263 | 0 | 2 | 0.5000 | 1.95% | 2.03% | -2 | 0.66% | 6.3 |
+| 書面 typing76 | 76 | 69 | 69 | 0 | 0 | 1.0000 | 1.19% | 1.19% | 0 | 0.00% | 3.0 |
+| 書面 錯字回報 | 157 | 49 | 49 | 0 | 0 | 1.0000 | 11.56% | 11.56% | 0 | 0.00% | 3.0 |
+
+  - **契約 §5 的停止條件成立**：dev302 兩種設定都改壞 2 列（第 217 列「生為台灣人…」、第 298 列「這家店的排骨酥…」）。cvtune、wikitune 是私人集合，這裡沒跑。
+  - **原因**（用 `--dump` 看 n-gram 前 8 名；重排實際選了哪一句沒有逐列查，所以「小模型選到它們」是推論）：兩列在不載小模型的設定（研究與 §3.1 的設定）下第一名沒有變，在出貨設定下才壞，而且壞的是 n-gram 本來就排第一或第二的正解：容錯得到的詞擠進前 8 名，小模型重排的候選變了。第 217 列（正解「生為」是 n-gram 第一名）：`--fuzzy 15` 的前 8 名多了「身為…」（ㄕㄥ→ㄕㄣ，-20.42，只比第一名 -20.19 低 0.23）、「深為」「森為」。第 298 列（正解「酥」，基準是 n-gram 第 2 名、重排選對）：前 8 名多了「書」「輸」「殊」（ㄙㄨ→ㄕㄨ），「酥」從第 2 名掉到第 6 名。單獨開一對（聊天，dev302）：ㄣ／ㄥ（`--fuzzy 1`）壞第 217 列、ㄕ／ㄙ（`--fuzzy 8`）壞第 298 列，ㄓ／ㄗ（2）、ㄔ／ㄘ（4）各自 0。合併前的分支沒有在出貨設定下跑過，所以沒有核對合併前是不是一樣；機制（容錯詞進前 8 名）和合併無關，是推論。
+  - 要維護者決定的方向（本地沒有改，也沒有改 δ）：容錯的詞不進語意校正的前 8 名（只當候選窗的項目）、或進前 8 名但重排時照 δ 扣分、或接受並重定閘門。
+- **§3.1 模糊音，Rust 對 Python 研究**（`export_rows.py`，dev299＋typing76，p＝0.1，`--fuzzy 15`，不加 `--context --packs --tinylm`；Python 是 `8007b25c14cd6c80` 那次的模糊音 G2、合法讀音那一類）：
+
+| 設定 | 讀音有改變 | 乾淨就錯 | 解錯 | 第一名救回 |
+|---|---|---|---|---|
+| Python `8007b25c…` G2 | 102 | 21 | 81 | 77 |
+| Rust，`--no-kn`（研究的解碼器沒有 KN 項） | 102 | 20 | 82 | 78 |
+| Rust，預設（KN 開，聊天） | 102 | 16 | 86 | 82 |
+| Rust，預設（KN 開，書面，另有 trigram） | 102 | 11 | 91 | 87 |
+
+  - 預設設定的絕對差是 5 列（超過契約的 3 列）；原因是 main 的 KN 項讓乾淨輸入多解對 5 列（乾淨就錯 21 → 16），解錯的分母變成 86。救回率 95.3% 對 95.1%，關掉 KN 的絕對差是 1 列。→ 同一個演算法（推論：只用這一項消融核對過，沒有逐列比對 Python 與 Rust 的第一名）。不合法讀音那一類（15 列，解錯 14）Rust 救回 0：契約 §2.1b 已寫明這一類留給之後一片（Python 是 12）。
+- **§3.4 突變**（乾淨的工作樹，每次 `git checkout --`／還原；結束碼 101＝測試以斷言失敗；沒有一項是編譯錯誤）：
+
+| 突變 | 失敗的測試 |
+|---|---|
+| 模糊音表拿掉 ㄔ／ㄘ 這一對 | `fuzzy::tests::sound_pairs_by_bit` |
+| 鄰鍵一鍵步距 1 → 2 | `adjacent_follows_the_composer_columns` |
+| 區段有兩個詞庫沒有的音節也容錯 | `tolerant_readings_change_one_syllable_per_word` |
+| 模糊音扣分 δ 1 → 0 | `a_sound_pair_costs_one_and_an_adjacent_slip_two` |
+| 鄰鍵扣分 δ 2 → 0.5 | 同上 |
+| 扣分的正負號反過來 | 同上 |
+| 含詞庫沒有音節的區段，其他音節也走模糊音（兩個音節同時換） | `only_the_unknown_syllable_uses_its_alternative`（第一次突變寫錯：只換一個音節、成不了讀音，活下來；測試加了 n-gram 斷言、突變寫對之後被殺） |
+| 旗標全關時仍用四對模糊音 | `all_off_and_adjacent_only_replay_the_python_golden` |
+| 收下音節不看有沒有語言模型 | `no_model_never_accepts` |
+| 收下音節不看排列 | `eten_does_not_accept` |
+| 收下音節不看位元 4 | `adjacent_accepts_when_on_and_refuses_when_off`、`accepted_syllable_survives_turning_bit_4_off` |
+| 解碼時詞庫沒有的音節也要位元 4 才用鄰鍵 | `accepted_syllable_survives_turning_bit_4_off`、`a_sound_pair_costs_one_and_an_adjacent_slip_two` |
+| 選容錯的詞不換成詞庫讀音 | `choosing_an_adjacent_word_rewrites_the_unknown_syllable`、`choosing_the_shown_tolerant_word_rewrites_the_span`、`window_lists_tolerant_words_last_and_choosing_one_teaches_the_lexicon_reading` |
+| 容錯的詞用打的讀音去查學習紀錄 | `window_lists_tolerant_words_last_and_choosing_one_teaches_the_lexicon_reading` |
+| ABI 不擋未定義的位元 | `ffi::tests::child_fuzzy`、`fuzzy_codes_through_the_c_abi` |
+| CLI 解不出的列照舊中止 | `fuzzy_tags_the_summary_counts_an_uncovered_row_wrong_and_goes_on` |
+| CLI 摘要行不加 `+fz:` | 同上 |
+| 殼建引擎時送 0 而不是存的旗標 | `FuzzyShellTests.testFlagsChangeWhatTheCoreShows` |
+| 倚天排列不灰掉鄰鍵勾選 | `testAdjacentCheckboxIsGreyedInTheEtenLayout` |
+| 存的旗標不遮掉未定義位元 | `testStoredFlagsKeepOnlyKnownBits` |
+| 設定時不寫進 store | `testFlagsAreStoredAndSentToEveryNewEngine` |
+
+  - **活下來的兩個突變**（都是守門條件，在出貨詞庫上到不了）：(1) 收下音節時「至少一個替代讀音有單音節詞條」那一項：詞庫 1,417 個音節都有單音節詞條（s3a），4,742 個長得像音節但詞庫沒有的字串裡 1,721 個有鄰鍵替代讀音，沒有一個的替代讀音全都沒有單音節詞條，所以這個條件永遠為真；(2) 候選窗容錯詞的 `seen.insert` 去重：試了所有有模糊音替代的單音節與幾句，沒有一個重複，拿掉不影響。兩個都沒有改程式碼（契約 §2.1b 寫了第一個），留給維護者決定要刪還是留作防線。
+- **§3.3 只做了冒煙**（Mac、單一測試執行緒、不是量測）：每鍵 p95 全開對全關 1.03 倍（1.93 ms 對 1.88 ms）；`shanjie-eval` 最大常駐記憶體（dev302，聊天，不載小模型）main 266.6 MiB、分支旗標全關 267.6、`--fuzzy 31` 273.0（比 main 多約 6.7 MiB；CLI 的數字，不是 App 的）。正式量測在別的機器：`cargo test --release --locked -p core --test engine_fuzzy per_key_latency -- --ignored --nocapture --test-threads=1`（Linux 機器上跑，p95 倍數 ≤ 2）；記憶體增量（≤ 20 MiB）沒有測試，要量 App 或引擎的常駐記憶體。
+- **還沒做、沒驗證**：cvtune、wikitune（私人，在 GCP 跑，§3.2 的改壞率 ≤ 0.5% 與 `--fuzzy 16` 的雜湊）；§3.3 的正式延遲與記憶體；§3.2 的停止條件要維護者決定；保留集這一片不用（契約已改，發版前基準才跑）；實機（設定視窗的勾選、打 `ㄗ ㄉㄠˋ`）沒有跑。

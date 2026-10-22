@@ -66,7 +66,7 @@
 - 指令一律是出貨設定：`shanjie-eval --lm data/lm/bigram.sjlm --profile <chat|formal> --context --packs acg --tinylm data/lm/tinylm.sjtl [--fuzzy <flags>] --set|--rows … --rowstats <檔>`，基準不給 `--fuzzy`。
 - **鄰鍵開、模糊音關**（`--fuzzy 16`）：dev302、typing76、錯字回報、cvtune、wikitune × 聊天、書面，`top1_sha256` 和全關**逐字相同**（打對的音節都在詞庫裡，不走鄰鍵；不同就停）。
 - **模糊音四對全開**（`--fuzzy 15`）：同樣的集合 `tools/evalstats.py compare --net` 對全關；dev302、typing76、錯字回報改壞 0；cvtune、wikitune 改壞率 ≤ 0.5%（兩種設定）。
-- 保留集：收尾時 fresh verifier 跑一次（同一條出貨設定指令，全關對 `--fuzzy 31`，兩種設定），只回表格；淨值 < 0 就停下來問。
+- 保留集：這一片不用（維護者後來的規則：保留集只在推 `v*` tag 前由 fresh verifier 跑一次，`CLAUDE.md`「評測與資料」）；發版前的跨版本基準測試（`docs/verification.md`）才跑，同一條出貨設定指令、全關對 `--fuzzy 31`、兩種設定，淨值 < 0 就停下來問。（原本寫「收尾時 fresh verifier 跑一次」，2026-10-23 改。）
 
 ### 3.3 延遲與記憶體
 
@@ -84,13 +84,13 @@
 
 ## 5. 停止條件
 
-- §3.2 鄰鍵開時 `top1_sha256` 有任何不同；模糊音全開時 dev302、typing76、錯字回報有改壞，或 tune 改壞率 > 0.5%；保留集淨值 < 0。
+- §3.2 鄰鍵開時 `top1_sha256` 有任何不同；模糊音全開時 dev302、typing76、錯字回報有改壞，或 tune 改壞率 > 0.5%；保留集淨值 < 0（發版前的基準測試才量，見 §3.2）。
 - §3.3 延遲倍數 > 2 或記憶體 > 20 MiB。
 - §3.1 差超過 3 列而查不出原因。
 
 ## 6. 負責人與順序
 
-main：這份契約 → plan-verifier → `pilotfish:executor`（§2.1–§2.3 與測試；不連網、不安裝、不啟動 App、不讀保留集與私人資料、不 push）→ main：§3 在 188 量測、§2.4 研究、研究紀錄 → /code-review → fresh verifier（含保留集）→ CI → 建置安裝、維護者實機 → merge commit。預算：executor 一輪＋一次修正。
+main：這份契約 → plan-verifier → `pilotfish:executor`（§2.1–§2.3 與測試；不連網、不安裝、不啟動 App、不讀保留集與私人資料、不 push）→ main：§3 在 188 量測、§2.4 研究、研究紀錄 → /code-review → fresh verifier（不含保留集）→ CI → 建置安裝、維護者實機 → merge commit。預算：executor 一輪＋一次修正。
 
 ## 7. 審查紀錄
 
