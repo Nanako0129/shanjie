@@ -61,8 +61,7 @@ ROW_SHA256 = {"chatclause": "81c035b086f91a0ff15143ed0b2e05f2d6af3b1947ebb2425fc
               "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775",
               "cvtune-clean": "d0960ebec0dc4562f104013951026d91950a73b33f85b10792d967185675d5fb",
               "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
-              # 2026-10-22 (main c8842c8e): row 3 reads 一 as ㄧˊ; P5 ran on b78834cb… (reproduce it from a commit before c8842c8e)
-              "user-reported": "63f67b724e877bba26b8ddc307f56360dbd599823924303639d366e711a11cef",
+              "user-reported": "b78834cb3aab2ad2d37b66f887000bfa6948d7558a46c928bb62a879a95efeae",
               "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"}
 P4D_ANCHORS = {"chatclause": (113, 37), "discordtune": (74, 43), "cvtune-clean": (45, 17), "typing76": (0, 0), "user-reported": (17, 4),
                "dev302": (9, 2)}   # README: the P4d cell against shipping, fixes / breaks

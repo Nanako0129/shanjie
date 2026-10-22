@@ -25,9 +25,7 @@ EVAL_DEV = os.path.join(ROOT, "eval", "dev")
 # S7b section 2.2: `--reported-rows 66` keeps user-reported at S7a's first 66 rows (new reports are appended at the end), so n
 # matches the models scored on them; without it the whole file is used, as every other evaluation does.
 REPORTED_ROWS = 66
-# 2026-10-22 (main c8842c8e): row 3 now reads 一 as ㄧˊ, so the pinned head changed; S7b itself ran on 6e338dc1… (rerun it from a
-# commit before c8842c8e to reproduce those numbers).
-REPORTED_SHA = "3a2bc5afb0c387fedb855862cd99e80ba204492f7425bbe69017122b6b2c3a98"
+REPORTED_SHA = "6e338dc1293060162585c09e02bbb252c93148c9928d61007faea5e8860369e8"
 # S7e section 2.1: the function-word sentences, frozen at 186 rows; rows may be appended, the first 186 must not change.
 FW_PATH = os.path.join(ROOT, "eval", "rerank", "s7e-function-words.txt")
 FW_ROWS = 186
