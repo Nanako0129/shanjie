@@ -197,7 +197,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(self.aggr({c(0.5, 2.0, 0.0): eq, c(0.5, INF, 0.1): eq}), c(0.5, 2.0, 0.0))      # tau before delta
 
     def test_select_writes_the_standard_cell_when_no_cell_qualifies(self):
-        cells = {"name": "chatclause", "anchor1": "ok", "anchor2": {lv: "ok" for lv in S.LEVELS}, "std": {S.label(S.STD): STD_STATS},
+        cells = {"name": "chatclause", "anchor1": "ok", "anchor2": {lv: "ok" for lv in S.LEVELS}, "std": {lv: {S.label(S.STD): STD_STATS} for lv in S.LEVELS},
                  "cells": {lv: table(lv, {}) for lv in S.LEVELS}}
         cells["cells"]["aggressive"][S.label(S.AGGR[0])] = {"fixes": 130, "breaks": 20}
         with tempfile.TemporaryDirectory() as d:
@@ -209,7 +209,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(sel["selection_fallback"], {"conservative": True, "aggressive": False})
 
     def test_select_refuses_what_is_not_the_anchored_chatclause_cells(self):
-        base = {"name": "chatclause", "anchor1": "ok", "anchor2": {lv: "ok" for lv in S.LEVELS}, "std": {S.label(S.STD): STD_STATS},
+        base = {"name": "chatclause", "anchor1": "ok", "anchor2": {lv: "ok" for lv in S.LEVELS}, "std": {lv: {S.label(S.STD): STD_STATS} for lv in S.LEVELS},
                 "cells": {lv: table(lv, {}) for lv in S.LEVELS}}
         for bad in ({"name": "discordtune"}, {"anchor1": "no"}, {"anchor2": {"conservative": "ok"}}, {"anchor2": {"conservative": "ok", "aggressive": "no"}}):
             with tempfile.TemporaryDirectory() as d:
@@ -485,7 +485,7 @@ class Checks(unittest.TestCase):
         sjtl, t2 = (os.path.join(S.ROOT, "data/lm", f) for f in ("tinylm.sjtl", "colloquial.sjlm"))
         if not (os.path.exists(sjtl) and os.path.exists(t2)):
             self.skipTest("data/lm models not present")
-        S.check_models(sjtl, t2)
+        self.assertEqual(S.check_models(sjtl, t2), "e7c179d8")
         with tempfile.TemporaryDirectory() as d:
             other = write(os.path.join(d, "x"), "not a model")
             exits(self, S.check_models, other, t2)
@@ -538,14 +538,18 @@ class Checks(unittest.TestCase):
         a.cons_scores = write(os.path.join(d, "sc"), "".join(json.dumps(r) + "\n" for r in recs))
         return a
 
+    @staticmethod
+    def load(a, n):
+        return S.load_level(a, "conservative", n, S.sha_file(a.sjtl)[:8])
+
     def test_load_level_checks_counts_top1_and_tag(self):
         with tempfile.TemporaryDirectory() as d:
-            base, recs = S.load_level(self.level_args(d, 3, 2, self.tag("conservative")), "conservative", 3)
+            base, recs = self.load(self.level_args(d, 3, 2, self.tag("conservative")), 3)
             self.assertEqual((len(base), len(recs)), (3, 3))
-            exits(self, S.load_level, self.level_args(d, 3, 2, self.tag("conservative")), "conservative", 4)       # registered count
-            exits(self, S.load_level, self.level_args(d, 3, 1, self.tag("conservative")), "conservative", 3)       # summary top1
-            exits(self, S.load_level, self.level_args(d, 3, 2, self.tag("standard")), "conservative", 3)           # tag of another level
-            exits(self, S.load_level, self.level_args(d, 3, 2, self.tag("conservative"), recs=[scores([-1.0, -2.0], None, [1, 0])] * 2), "conservative", 3)
+            exits(self, self.load, self.level_args(d, 3, 2, self.tag("conservative")), 4)       # registered count
+            exits(self, self.load, self.level_args(d, 3, 1, self.tag("conservative")), 3)       # summary top1
+            exits(self, self.load, self.level_args(d, 3, 2, self.tag("standard")), 3)           # tag of another level
+            exits(self, self.load, self.level_args(d, 3, 2, self.tag("conservative"), recs=[scores([-1.0, -2.0], None, [1, 0])] * 2), 3)
 
 
 def run_json(name, lv_data, sel_sha, n=None):
@@ -648,6 +652,49 @@ class Final(unittest.TestCase):
         exits(self, S.main, ["final", self.sel] + self.write_runs()[:4])
         paths = self.write_runs()
         exits(self, S.main, ["final", self.sel] + paths + paths[:1])
+
+
+class RunFallback(unittest.TestCase):
+    """cmd_run end to end on one synthetic row whose col is not finite: the plain fallback must be the triple of the level being judged."""
+    HDR = {"standard": (0.3, 2.0, 0.25), "conservative": (1.0, 2.0, 0.25), "aggressive": (0.5, 2.0, 0.25)}
+
+    def run_cmd(self, d, mode):
+        r = row([-10.0, -10.3], [-5.0, -3.8], [1, 0], [0.0, INF], [0.0, 0.0])
+        # plain at the standard triple keeps candidate 0 (0.3 * 1.2 - 0.3 < 0.25); at conservative (alpha 1.0) it picks candidate 1 (0.9); at
+        # aggressive (alpha 0.5) 0.6 - 0.3 = 0.3 picks 1 too, so only the conservative and standard triples differ in what they pick here.
+        base = [(1, 0, 4)]
+        ship = {lv: (base, [scores([-10.0, -10.3], [-5.0, -3.8], [1, 0])]) for lv in S.LEVELS}
+        out = os.path.join(d, "out.json")
+        rows_file = os.path.join(S.ROOT, "eval/bench/suite-v1/typing76.txt")
+        a = ["run", "--name", "typing76", "--rows", rows_file, "--sjtl", "x", "--t2", "x", "--dump", "x", "--dump-words", "x", "--rowstats", "x",
+             "--tinylm-scores", "x", "--summary", "x", "--out", out]
+        for p in S.ARGS.values():
+            for k in ("rowstats", "scores", "summary"):
+                a += [f"--{p}-{k}", "x"]
+        with mock.patch.object(S, "check_models", return_value="00000000"), mock.patch.object(S, "check_headers", return_value=self.HDR), \
+                mock.patch.object(S, "load_standard", return_value=([r], base, "")), mock.patch.object(S, "anchor1"), mock.patch.object(S, "anchor2"), \
+                mock.patch.object(S, "load_level", side_effect=lambda a, lv, n, h: ship[lv]), mock.patch.object(S, "sha_file", return_value="0" * 64), \
+                mock.patch.object(S.Q, "check_out"), mock.patch.object(S, "check_rows_sha"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(S.main(a + mode), 0)
+        return jload(out)
+
+    def test_cells_mode_uses_each_levels_triple_for_its_cells_and_the_standard_cell(self):
+        with tempfile.TemporaryDirectory() as d:
+            res = self.run_cmd(d, ["--cells"])
+        # n-gram first is right; a cell that picks candidate 1 (ok 0) is a break. The non-finite col makes every cell take the plain pick.
+        self.assertEqual(res["std"]["conservative"][S.label(S.STD)]["breaks"], 1)       # plain (1.0, 2, 0.25) picks 1; the standard triple would keep 0
+        self.assertEqual(res["cells"]["conservative"][S.label(S.CONS[0])]["breaks"], 1)
+        self.assertEqual(res["std"]["aggressive"][S.label(S.STD)]["breaks"], 1)         # plain (0.5, 2, 0.25) picks 1
+        self.assertEqual(res["cells"]["aggressive"][S.label(S.AGGR[0])]["breaks"], 1)
+
+    def test_sel_mode_arms_use_the_levels_triple(self):
+        with tempfile.TemporaryDirectory() as d:
+            sel = os.path.join(d, "sel.json")
+            jdump({"chosen": {"conservative": S.label(S.CONS[0]), "aggressive": S.label(S.AGGR[0])}}, sel)
+            res = self.run_cmd(d, ["--sel", sel])
+        for lv in S.LEVELS:
+            for k in ("std", "chosen"):
+                self.assertEqual(res["levels"][lv]["arms"][k]["ok"], "0", (lv, k))      # picked candidate 1, whose ok is 0
 
 
 class Cli(unittest.TestCase):

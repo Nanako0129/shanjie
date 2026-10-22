@@ -39,6 +39,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "experiments", "p5-reading-channel"))
 sys.path.insert(0, os.path.join(ROOT, "experiments", "s7a-tinylm"))
 import p5 as Q  # noqa: E402  (puts p4d, p4, d23, tools, p4c on sys.path)
+import bench  # noqa: E402
 import evalstats  # noqa: E402
 import triage as T  # noqa: E402
 import p4c  # noqa: E402
@@ -91,9 +92,7 @@ def cell_of(text):
     stop(f"off-grid cell refused: {text}")
 
 
-def sha_file(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+sha_file = bench.sha_file
 
 
 # ---------------------------------------------------------------- checks of what the run is
@@ -104,10 +103,13 @@ def check_rows_sha(name, path):
 
 
 def check_models(sjtl, t2):
-    if sha_file(sjtl) != PAIRED_SJTL_SHA256:
+    """STOP unless both models are the registered ones. -> the first 8 hex digits of the .sjtl's sha256 (the summary tags' +tl:), hashed once."""
+    h = sha_file(sjtl)
+    if h != PAIRED_SJTL_SHA256:
         stop("--sjtl is not the small model the terms were measured with (sha256)")
     if sha_file(t2) != P.T2_SHA256:
         stop("--t2 is not P4's colloquial table (sha256)")
+    return h[:8]
 
 
 def header_triples(path):
@@ -190,15 +192,14 @@ def cell_pick(r, cell, plain):
 
 
 def ok_at(rows, picks):
-    return [bool(r["sc"]["ok"][j]) for r, j in zip(rows, picks)]
+    return Q.ok_of([r["sc"] for r in rows], picks)
 
 
 def vs(base_ok, rows, picks):
     return p4c.stats(base_ok, ok_at(rows, picks))
 
 
-def short(s):
-    return {k: s[k] for k in ("fixes", "breaks", "net")}
+short = Q.short
 
 
 # ---------------------------------------------------------------- anchors
@@ -304,7 +305,7 @@ def arm_of(name, rows, ship_ok, ship_rows, ng_ok, cell, plain):
 
 # ---------------------------------------------------------------- loading
 
-def load_standard(a):
+def load_standard(a, sjtl8):
     """The chat standard run -> (rows [{"sc", "col", "ch"}], base rowstats, summary tag). Everything is read for the first 8 candidates only."""
     import d23 as D
     import p4
@@ -312,7 +313,7 @@ def load_standard(a):
     rows_in = T.parse_rows(T.read_text(a.rows))
     base = evalstats.read_rowstats(a.rowstats)
     tag, n_sum, top1 = read_summary(a.summary)
-    check_tag(tag, "standard", sha_file(a.sjtl)[:8])
+    check_tag(tag, "standard", sjtl8)
     cands, _, recs = T.read_cli_files(a.dump, a.dump_words, a.tinylm_scores, len(rows_in))
     for what, n in (("rows", len(rows_in)), ("rowstats", len(base)), ("summary", n_sum), ("scores", sum(r is not None for r in recs)),
                     ("dump", sum(bool(c) for c in cands))):
@@ -339,12 +340,12 @@ def load_standard(a):
     return rows, base, tag
 
 
-def load_level(a, level, n_want):
+def load_level(a, level, n_want, sjtl8):
     """A level's run (rowstats, scores records) after its row counts and summary tag."""
     p = ARGS[level]
     rs, sc, sm = (getattr(a, f"{p}_{k}") for k in ("rowstats", "scores", "summary"))
     tag, n_sum, top1 = read_summary(sm)
-    check_tag(tag, level, sha_file(a.sjtl)[:8])
+    check_tag(tag, level, sjtl8)
     base = evalstats.read_rowstats(rs)
     recs = [json.loads(l) for l in T.lines_of(T.read_text(sc))]
     for what, n in (("rowstats", len(base)), ("scores", len(recs)), ("summary", n_sum)):
@@ -361,26 +362,28 @@ def cmd_run(a):
         stop("chatclause is the selection set: it takes --cells, never --sel")
     Q.check_out(a.out, a.sel)
     check_rows_sha(a.name, a.rows)
-    check_models(a.sjtl, a.t2)
+    sjtl8 = check_models(a.sjtl, a.t2)
     hdr = check_headers(a.sjtl)
-    rows, base, tag = load_standard(a)
+    rows, base, tag = load_standard(a, sjtl8)
     n = len(rows)
     base_ok = [bool(b[0]) for b in base]
     anchor1(rows, base_ok, hdr["standard"])
     ship = {}
     for lv in LEVELS:
-        ship[lv] = load_level(a, lv, n)
+        ship[lv] = load_level(a, lv, n, sjtl8)
         anchor2(lv, rows, ship[lv][1], [bool(b[0]) for b in ship[lv][0]], hdr[lv])
     ng_ok = [bool(r["sc"]["ok"][0]) for r in rows]
     res = {"name": a.name, "role": ROLE[a.name], "n": n, "anchor1": "ok", "anchor2": {lv: "ok" for lv in LEVELS}, "scores_sha256": sha_file(a.tinylm_scores),
            "shipping": {lv: list(SHIP[lv]) for lv in LEVELS}}
     print(f"{a.name} n {n} anchor 1 ok; anchor 2 ok at conservative and aggressive")
     if a.cells:
-        picks = lambda c: [cell_pick(r, c, hdr["standard"]) for r in rows]
-        res["std"] = {label(STD): short(vs(ng_ok, rows, picks(STD)))}
-        res["cells"] = {lv: {label(c): short(vs(ng_ok, rows, picks(c))) for c in GRID[lv]} for lv in LEVELS}
-        print(f"cell {label(STD)} (standard) fixes {res['std'][label(STD)]['fixes']} breaks {res['std'][label(STD)]['breaks']}")
+        # a cell at a level falls back (non-finite col) to that level's own header triple, the standard cell included
+        stats = lambda lv, c: short(vs(ng_ok, rows, [cell_pick(r, c, hdr[lv]) for r in rows]))
+        res["std"] = {lv: {label(STD): stats(lv, STD)} for lv in LEVELS}
+        res["cells"] = {lv: {label(c): stats(lv, c) for c in GRID[lv]} for lv in LEVELS}
         for lv in LEVELS:
+            s = res["std"][lv][label(STD)]
+            print(f"cell {lv} {label(STD)} (standard) fixes {s['fixes']} breaks {s['breaks']}")
             for k, s in res["cells"][lv].items():
                 print(f"cell {lv} {k} fixes {s['fixes']} breaks {s['breaks']} net {s['net']}")
         Q.write_atomic(a.out, json.dumps(res, indent=1))
@@ -393,8 +396,8 @@ def cmd_run(a):
     res["levels"] = {}
     for lv in LEVELS:
         chosen = cell_of(sel["chosen"][lv])
-        arms = {"std": arm_of(a.name, rows, [bool(b[0]) for b in ship[lv][0]], ship[lv][0], ng_ok, STD, hdr["standard"])}
-        arms["chosen"] = arms["std"] if chosen == STD else arm_of(a.name, rows, [bool(b[0]) for b in ship[lv][0]], ship[lv][0], ng_ok, chosen, hdr["standard"])
+        arms = {"std": arm_of(a.name, rows, [bool(b[0]) for b in ship[lv][0]], ship[lv][0], ng_ok, STD, hdr[lv])}
+        arms["chosen"] = arms["std"] if chosen == STD else arm_of(a.name, rows, [bool(b[0]) for b in ship[lv][0]], ship[lv][0], ng_ok, chosen, hdr[lv])
         res["levels"][lv] = {"chosen": label(chosen), "ship_ok": "".join(str(int(b[0])) for b in ship[lv][0]), "arms": arms}
         for k in ("std", "chosen"):
             s = arms[k]["vs_ship"]
@@ -418,10 +421,9 @@ def cmd_select(a):
     if d.get("name") != "chatclause" or "cells" not in d or d.get("anchor1") != "ok" or any(v != "ok" for v in d.get("anchor2", {}).values()) \
             or set(d.get("anchor2", {})) != set(LEVELS):
         stop(f"{a.cells} is not the --cells output of chatclause with both anchors ok")
-    std = d["std"][label(STD)]
     chosen, fallback = {}, {}
     for lv in LEVELS:
-        c = choose(lv, d["cells"][lv], std)
+        c = choose(lv, d["cells"][lv], d["std"][lv][label(STD)])
         chosen[lv], fallback[lv] = label(c or STD), c is None
         print(f"{lv} " + (label(c) if c else f"NO CELL QUALIFIES -> the standard cell {label(STD)}"))
     Q.write_atomic(a.out, json.dumps({"chosen": chosen, "selection_fallback": fallback, "std": d["std"], "cells": d["cells"]}, indent=1))
