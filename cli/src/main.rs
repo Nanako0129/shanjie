@@ -327,7 +327,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         None => None,
     };
     // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test.
-    let colloq_on = colloq.as_ref().filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, level, m)));
+    let colloq_on = colloq.as_ref().filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m)));
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;

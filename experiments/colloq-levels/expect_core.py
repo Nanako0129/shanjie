@@ -15,6 +15,9 @@ Compared per row: the scores record's `c` and its right/wrong (`ok[c]`), and the
 Prints counts and row numbers only; never a sentence, context, word or character of a row (so it can run on private sets). Exit 0: 0 differing
 rows at both levels; 1: STOP (a hash, a count, a tag, a candidate/ll mismatch, or any differing row).
 """
+# The helpers `cell_pick`, `header_triples`, `check_tag` (here: the `+rc` ending at every level), `load_standard` / `check_row` and `load_level`
+# are copies of experiments/strength-colloq/sc.py as of commit 558ab60a on exp/strength-colloq (not on main). test_expect_core.py compares
+# `cell_pick` with sc.py's on synthetic rows when SC_PY points to that file.
 import argparse, json, math, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -110,6 +113,18 @@ def cell_pick(r, cell, plain):
     return T.pick(ng, eff, alpha, tau, delta)
 
 
+def check_row(i, cs, sc, base_row):
+    """sc.py `load_standard`'s per-row consistency checks: the scores record's ng is the dump's first 8, every dumped candidate has a word split,
+    and the gold length is the same in the scores record and in rowstats."""
+    k = len(sc["ng"])
+    if k != min(len(cs), TOP_K) or sc["ng"] != [c[1] for c in cs[:k]]:
+        stop(f"row {i}: the scores record's ng is not the dump's first {TOP_K}")
+    if any(c[2] is None for c in cs[:TOP_K]):
+        stop(f"row {i}: a dumped candidate has no word split")
+    if sc["glen"] != base_row[2]:
+        stop(f"row {i}: gold length differs between scores and rowstats")
+
+
 def load_standard(a, sjtl8):
     """sc.py `load_standard`: the chat standard run -> (rows [{"sc", "col", "ch"}], rowstats). Everything is read for the first 8 candidates."""
     import d23 as D
@@ -126,11 +141,7 @@ def load_standard(a, sjtl8):
     if sum(b[0] for b in base) != top1:
         stop(f"{a.name}: rowstats top1 {sum(b[0] for b in base)} != summary top1 {top1}")
     for i, (cs, sc) in enumerate(zip(cands, recs), 1):
-        k = len(sc["ng"])
-        if k != min(len(cs), TOP_K) or sc["ng"] != [c[1] for c in cs[:k]]:
-            stop(f"row {i}: the scores record's ng is not the dump's first {TOP_K}")
-        if any(c[2] is None for c in cs[:TOP_K]):
-            stop(f"row {i}: a dumped candidate has no word split")
+        check_row(i, cs, sc, base[i - 1])
     lex, ovl = D.load_lex_scores()
     logp = Q.lex_logp(lex)
     try:
@@ -191,7 +202,7 @@ def main():
     if sha_file(a.t2) != P.T2_SHA256:
         stop("--t2 is not P4's colloquial table (sha256)")
     hdr = header_triples(a.sjtl)
-    if hdr["conservative"] != HEADER["conservative"] or hdr["aggressive"] != HEADER["aggressive"] or hdr["standard"][1:] != HEADER["standard"][1:]:
+    if hdr != HEADER:      # the standard triple too: it is the standard level's fallback `plain`
         stop(f"the .sjtl header's chat triples {hdr} are not the expected {HEADER}")
     rows, base = load_standard(a, sjtl[:8])
     n = len(rows)

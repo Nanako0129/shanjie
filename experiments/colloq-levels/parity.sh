@@ -5,24 +5,40 @@
 # session runs this on the cloud VM for the private sets; the public sets run on the Mac the same way. Agents do not run it on the VM.
 #
 #   REPO=<checkout at the commit under test, with data/lm/ models, target/release/shanjie-eval built or buildable>  OUT=<new or empty dir>
-#   [SETS="chatclause discordtune cvtune-clean typing76 user-reported dev302"] [ROWS_DIR=~/sets] [THREADS=n] [PY="$HOME/venv/bin/python -W ignore"]
+#   [SETS="chatclause discordtune cvtune-clean typing76 user-reported dev302"] [ROWS_DIR=~/sets] [DELETE_ROWS=1] [THREADS=n] [PY="$HOME/venv/bin/python -W ignore"]
 #   bash experiments/colloq-levels/parity.sh
 #
-# ROWS_DIR holds the private rows files under their own names (mapping in PRIVATE); they are deleted on exit (a failed run needs them uploaded
-# again), only for the sets in SETS. Every rows file and model is checked against its registered sha256 before any CLI run; expect_core.py
-# checks them again. One machine for all three levels of a set (the arms must share a CPU).
+# ROWS_DIR holds the private rows files under their own names (mapping in PRIVATE). They are deleted on exit (a failed run needs them uploaded
+# again), only for the sets in SETS, and ONLY with DELETE_ROWS=1, which the VM wrapper sets for its uploaded copies; without it nothing in ROWS_DIR
+# is ever removed (so a run on the Mac never deletes originals), and DELETE_ROWS=1 is refused when ROWS_DIR is inside ~/side-project.
+# Every rows file and model is checked against its registered sha256 before any CLI run; expect_core.py checks them again. One machine for all three levels of a set (the arms must share a CPU).
 set -euo pipefail
+
+declare -A PRIVATE=([chatclause]=tune.rows.txt [discordtune]=discord-tune-rows.txt [cvtune-clean]=cvtune-clean.txt)
+W=""
+ROWS_DIR=${ROWS_DIR:-$HOME/sets}
+SETS=${SETS:-"chatclause discordtune cvtune-clean typing76 user-reported dev302"}
+# The trap comes first, so that every later exit (a missing variable, a non-empty OUT, a failed hash check) also removes the temp dir and,
+# with DELETE_ROWS=1, the uploaded private rows files.
+scrub() {
+  if [ -n "$W" ]; then rm -rf "${W:?}"; fi
+  if [ "${DELETE_ROWS:-}" = 1 ]; then
+    for n in $SETS; do if [ -n "${PRIVATE[$n]:-}" ]; then rm -f "${ROWS_DIR:?}/${PRIVATE[$n]}"; fi; done
+  fi
+}
+trap scrub EXIT
+if [ "${DELETE_ROWS:-}" = 1 ]; then
+  case "$(cd "$ROWS_DIR" 2>/dev/null && pwd -P)/" in
+    "$HOME"/side-project/*) echo "STOP: DELETE_ROWS=1 is refused for a ROWS_DIR inside ~/side-project"; exit 1 ;;
+  esac
+fi
 
 REPO=${REPO:?set REPO to the checkout}
 OUT=${OUT:?set OUT to the output directory}
-ROWS_DIR=${ROWS_DIR:-$HOME/sets}
-SETS=${SETS:-"chatclause discordtune cvtune-clean typing76 user-reported dev302"}
 THREADS=${THREADS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 PY=${PY:-python3 -W ignore}      # numpy is needed (the VM's venv); $PY is deliberately unquoted below (the flag is part of the command)
 CLI=${CLI:-$REPO/target/release/shanjie-eval}
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
-
-declare -A PRIVATE=([chatclause]=tune.rows.txt [discordtune]=discord-tune-rows.txt [cvtune-clean]=cvtune-clean.txt)
 
 cd "$REPO"
 mkdir -p "$OUT"
@@ -32,11 +48,6 @@ for n in $SETS; do
 done
 
 W=$(mktemp -d)
-scrub() {
-  rm -rf "${W:?}"
-  for n in $SETS; do if [ -n "${PRIVATE[$n]:-}" ]; then rm -f "${ROWS_DIR:?}/${PRIVATE[$n]}"; fi; done
-}
-trap scrub EXIT
 
 rows_of() {
   case "$1" in
@@ -59,7 +70,7 @@ for f in bigram.sjlm classes.sjc kn.sjkn tinylm.sjtl colloquial.sjlm; do
 done
 [ -f eval/variants.tsv ] || { echo "missing eval/variants.tsv"; exit 1; }
 
-git diff --quiet || { echo "STOP: tracked files differ from HEAD"; exit 1; }
+git diff --quiet HEAD || { echo "STOP: tracked files differ from HEAD"; exit 1; }
 cargo build --release -q -p cli
 [ -x "$CLI" ] || { echo "no CLI at $CLI"; exit 1; }
 export SHANJIE_VARIANTS="$REPO/eval/variants.tsv"

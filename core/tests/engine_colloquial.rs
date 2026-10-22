@@ -196,6 +196,10 @@ const CHANNEL_ROWS: [(&str, &str, usize, usize); 3] = [
 /// The term rides on the colloquial term: with the table loaded and the conditions holding the channel decides (and `set_reading_channel(false)`
 /// leaves the colloquial term alone); wherever the colloquial term does not apply (no table, formal, another small model) the jobs are those of an
 /// engine without the table, the channel included. At the aggressive strength the channel decides as at the standard one (the same alpha).
+/// There is no conservative row here: on dev302, typing76 and the 157 user-reported rows, `--rerank-level conservative` with and without
+/// `--no-reading-channel` pick the same candidate on every row (checked with the CLI), so no public row has the channel deciding at that strength. Its
+/// guard is the unit test `the_terms_weigh_the_same_at_every_alpha` (nu / alpha at alpha 1.0) and the engine tests on the other levels, which fail
+/// when `channel_lex` is gated on one level (the mutation in the research log).
 #[test]
 fn the_reading_channel_applies_only_where_the_colloquial_term_does() {
     let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
@@ -212,10 +216,13 @@ fn the_reading_channel_applies_only_where_the_colloquial_term_does() {
             e.set_profile(Profile::Formal).unwrap();
         }
         assert_eq!(picks(&mut on), picks(&mut none), "row {i}, formal: neither term is used");
-        for e in [&mut on, &mut none] {
+        for e in [&mut on, &mut off, &mut none] {
             e.set_profile(Profile::Chat).unwrap();
             e.set_rerank_level(RerankLevel::Aggressive).unwrap();
         }
+        // Precondition: without the channel the aggressive cell keeps the colloquial term's pick (the CLI's `--no-reading-channel` gives the same
+        // [0, 1, 1] at both strengths), so the channel's pick below is the channel acting at this level.
+        assert_eq!(picks(&mut off), vec![*alone], "row {i}, aggressive: the colloquial term alone");
         assert_eq!(picks(&mut on), vec![*with], "row {i}, aggressive: the channel decides as at the standard strength");
         let (a, b) = (picks(&mut engine_row(PACK_ACG, &other, Some((&table, false)), ctx, row)), picks(&mut engine_row(PACK_ACG, &other, None, ctx, row)));
         assert_eq!(a, b, "row {i}, another .sjtl: neither term is used");
@@ -266,16 +273,15 @@ fn each_level_uses_its_own_cell() {
     }
 }
 
-/// `colloquial::applies` is the engine's and the CLI's one decision: chat, whatever the strength, and the measured small model only.
+/// `colloquial::applies` is the engine's and the CLI's one decision: chat and the measured small model only. It has no strength parameter; that the
+/// terms run at every strength is `each_level_uses_its_own_cell`.
 #[test]
-fn applies_is_chat_and_the_paired_model_at_every_level() {
+fn applies_is_chat_and_the_paired_model() {
     let lm = core::lm::Lm::load(&data("bigram.sjlm")).unwrap();
     let real = core::tinylm::TinyLm::load_paired(&data("tinylm.sjtl"), &lm).unwrap();
     let other = other_sjtl("applies");
     let flipped = core::tinylm::TinyLm::load_paired(&other, &lm).unwrap();
-    for level in [RerankLevel::Conservative, RerankLevel::Standard, RerankLevel::Aggressive] {
-        assert!(core::colloquial::applies(Profile::Chat, level, &real), "chat {level:?}");
-        assert!(!core::colloquial::applies(Profile::Formal, level, &real), "formal {level:?}");
-        assert!(!core::colloquial::applies(Profile::Chat, level, &flipped), "another .sjtl {level:?}");
-    }
+    assert!(core::colloquial::applies(Profile::Chat, &real), "chat, the measured model");
+    assert!(!core::colloquial::applies(Profile::Formal, &real), "formal");
+    assert!(!core::colloquial::applies(Profile::Chat, &flipped), "another .sjtl");
 }

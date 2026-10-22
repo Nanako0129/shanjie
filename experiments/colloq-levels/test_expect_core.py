@@ -28,6 +28,37 @@ class T(unittest.TestCase):
         self.assertEqual(E.compare("conservative", [ROW], [rec], [(1,)], HDR), [])
         self.assertEqual(E.compare("conservative", [ROW], [dict(rec, c=0)], [(0,)], HDR), [1])
 
+    def test_row_check_stops_on_a_gold_length_mismatch(self):
+        cs = [("a", -1.0, ["a"]), ("b", -2.0, ["b"])]
+        sc = {"ng": [-1.0, -2.0], "glen": 3}
+        E.check_row(1, cs, sc, (1, 0, 3))                                   # consistent: no exit
+        with self.assertRaises(SystemExit):
+            E.check_row(1, cs, sc, (1, 0, 4))                               # gold length differs between scores and rowstats
+        with self.assertRaises(SystemExit):
+            E.check_row(1, cs, dict(sc, ng=[-1.0, -2.5]), (1, 0, 3))        # ng is not the dump's
+        with self.assertRaises(SystemExit):
+            E.check_row(1, [("a", -1.0, None), cs[1]], sc, (1, 0, 3))       # no word split
+
+    @unittest.skipUnless(os.environ.get("SC_PY"), "set SC_PY to experiments/strength-colloq/sc.py (exp/strength-colloq, not on main)")
+    def test_cell_pick_equals_sc_py_on_synthetic_rows(self):
+        import importlib.util, random
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("sc_ref", os.environ["SC_PY"])
+        ref = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ref)
+        rnd = random.Random(7)
+        n = 0
+        for _ in range(300):
+            k = rnd.randint(2, 8)
+            ng = sorted((-rnd.uniform(0, 30) for _ in range(k)), reverse=True)
+            r = {"sc": {"ng": ng, "ll": [-rnd.uniform(0, 40) for _ in range(k)]}, "col": [-rnd.uniform(0, 30) for _ in range(k)], "ch": [-rnd.choice([0, 0, 1, 2.5, 4, 8]) for _ in range(k)]}
+            if rnd.random() < 0.15:
+                r["col"][rnd.randrange(k)] = rnd.choice([math.inf, -math.inf, math.nan])
+            for lv, cell in E.CELL.items():
+                self.assertEqual(E.cell_pick(r, cell, E.HEADER[lv]), ref.cell_pick(r, cell, E.HEADER[lv]))
+                n += 1
+        self.assertEqual(n, 900)
+
 
 if __name__ == "__main__":
     unittest.main()

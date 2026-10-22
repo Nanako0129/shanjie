@@ -2454,7 +2454,7 @@ impl Engine {
         // then do the stretches keep their syllables, so formal, the other strengths, no table and the channel off allocate nothing for it.
         let channel = self.reading_channel
             && self.colloquial.is_some()
-            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, self.rerank_level, m));
+            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -2540,7 +2540,7 @@ impl Engine {
             let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
             // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
-            let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, self.rerank_level, model));
+            let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
             let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
             self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, left, stretches });
         }

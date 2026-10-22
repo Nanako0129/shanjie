@@ -175,9 +175,9 @@ pub fn fuse(ll: &[f64], col: &[f64], alpha: f64) -> Vec<f64> {
 }
 
 /// Whether the term is used for a rerank (docs/contracts/colloquial-term.md section 2.2, docs/contracts/colloquial-levels.md): the chat profile,
-/// any of the three strengths (each with its own `cell`) and the small model the registered cells were measured with (`PAIRED_TINYLM_SHA256`).
+/// any of the three strengths (so no level parameter; each strength has its own `cell`) and the small model the registered cells were measured with (`PAIRED_TINYLM_SHA256`).
 /// The fourth condition, a loaded table, is the caller having one. The engine (per job) and the evaluation CLI both decide with this function.
-pub fn applies(profile: Profile, _level: RerankLevel, model: &TinyLm) -> bool {
+pub fn applies(profile: Profile, model: &TinyLm) -> bool {
     profile == Profile::Chat && model.file_sha256() == PAIRED_TINYLM_SHA256
 }
 
