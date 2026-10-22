@@ -37,7 +37,7 @@ P = Q.P
 TOP_K = 8
 LAMBDAS, CS = (0.25, 0.5, 1.0, 2.0), (1, 2, 4)
 GRID = [(lam, c) for lam in LAMBDAS for c in CS]        # 12 cells, estimator lex only
-SHIP_NU, SHIP_C = 1.0, 4                                 # P5's registered cell lex,1.0,4 (the shipping chat-std cell with the P4d cell)
+SHIP_NU, SHIP_C = 1.0, 4                                 # P5's registered cell lex,1.0,4 (the shipping chat cell of every level, with its colloquial cell)
 TRI8, COLLOQ8 = "fdd3b05d", P.T2_SHA256[:8]
 LEVELS = {"conservative": 0, "standard": 1, "aggressive": 2}
 # core/src/colloquial.rs `cell(level)` (STANDARD, CONSERVATIVE, AGGRESSIVE): the chat (alpha, tau, delta) the colloquial term fuses with
@@ -128,7 +128,7 @@ def check_tag(tag, setting, sjtl_sha8, rc):
 
 def load_run(a, setting, name):
     """Everything one CLI run gives, checked: per row the 64 candidates (surface, ng, words), ok / ed of all 64, the scores record,
-    P5's terms, and for chat-std the colloquial cols of all 64. Anchors are checked by the caller."""
+    P5's terms, and for chat the colloquial cols of all 64. Anchors are checked by the caller."""
     import d23 as D
     profile, level = SETTINGS[setting]
     n_want = ROW_COUNTS[name]
@@ -314,7 +314,7 @@ def anchor2(a, p4d, rows, setting, name):
         stop(f"anchor 2: the --no-reading-channel run has other row counts than {name}")
     bad = [i for i, (r, rec, j, o) in enumerate(zip(rows, recs, p4d, ok2), 1) if rec["i"] != i or rec["c"] != j or r["ok64"][j] != o]
     if bad:
-        stop(f"anchor 2 mismatch: the P4d cell offline differs from the --no-reading-channel run on {len(bad)} rows, first rows {bad[:10]}")
+        stop(f"anchor 2 mismatch: the colloquial cell of {setting} offline differs from the --no-reading-channel run on {len(bad)} rows, first rows {bad[:10]}")
 
 
 def check_lambda0(cfg, rows, ship):
@@ -448,7 +448,7 @@ def cmd_run(a):
     anchor1(cfg, rows, base_ok)
     res = {"setting": a.setting, "name": a.name, "role": role, "n": len(rows), "anchor1": "ok", "scores_sha256": sha_file(a.tinylm_scores),
            "gold_in_64": sum(any(r["ok64"]) for r in rows), "terms": term_counts(rows),
-           "shipping_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False)),
+           "shipping_params": list(cfg.get("cell", cfg["plain"])), "fallback_params": list(cfg["plain"]), "sandhi_exempt": bool(getattr(a, "sandhi_exempt", False)),
            "floor_mc": bool(getattr(a, "floor_mc", False)), "sandhi_variant": bool(getattr(a, "sandhi_of", None))}
     p4d = ship_picks(cfg_r1, rows)        # chat: the level's colloquial cell (nu 0); formal: the shipping cell again
     if needs2:

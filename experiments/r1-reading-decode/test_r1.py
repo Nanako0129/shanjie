@@ -81,6 +81,8 @@ class Pick(unittest.TestCase):
         cons = {**cfg, "cell": R.COLLOQ_CELLS["conservative"]}
         self.assertEqual(R.r1_pick(cons, r, 0.5, 4)[0], 0)
         self.assertEqual(R.r1_pick(cons, row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 16.0]), 0.5, 4)[0], 1)   # 4 - 0.5 = 3.5 >= 3
+        # alpha cancels in alpha * (mu / alpha): with standard's alpha 0.5 in mu / alpha, col 10 would fuse 0.5 * 1.0 * 10 - 0.5 = 4.5 >= 3
+        self.assertEqual(R.r1_pick(cons, row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 10.0]), 0.5, 4)[0], 0)   # 2.5 - 0.5 = 2.0 < 3
         r2 = row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 0.0], ch=[0.0, -4.0])
         self.assertEqual(R.r1_pick(cfg, r2, 0.0, 4)[0], 0)
         ship = {**cfg, "nu": 1.0}                                          # P5 term: only the shipping cell has it
@@ -89,6 +91,14 @@ class Pick(unittest.TestCase):
         self.assertEqual(R.ship_picks(cfg, [r3]), [0])
         bad = row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, float("inf")])  # non-finite col: the plain triple, no terms
         self.assertEqual(R.ship_picks(ship, [bad]), [0])
+
+    def test_colloquial_cells_are_core_colloquial_rs(self):
+        import re
+        with open(os.path.join(R.ROOT, "core", "src", "colloquial.rs"), encoding="utf-8") as f:
+            src = f.read()
+        for level, name in (("standard", "STANDARD"), ("conservative", "CONSERVATIVE"), ("aggressive", "AGGRESSIVE")):
+            m = re.search(rf"pub const {name}: \(f64, f64, f64\) = \(([^)]*)\);", src)
+            self.assertEqual(tuple(float(x) for x in m.group(1).split(",")), R.COLLOQ_CELLS[level], name)
 
     def test_rows_without_ll_keep_the_first(self):
         self.assertEqual(R.ship_picks(PLAIN, [row([0.0, -0.1], None, [0, 1])]), [0])
@@ -141,7 +151,8 @@ class Tags(unittest.TestCase):
     def test_each_setting_has_its_tag(self):
         R.check_tag(self.CHAT + "+rc", "chat-std", "e7c179d8", True)
         R.check_tag(self.CHAT, "chat-std", "e7c179d8", False)                # the --no-reading-channel twin
-        R.check_tag(self.CHAT.replace("+acg", "+rl:conservative+acg"), "chat-cons", "e7c179d8", False)
+        R.check_tag(self.CHAT.replace("+acg", "+rl:conservative+acg") + "+rc", "chat-cons", "e7c179d8", True)    # PR #271: +rc at every level
+        R.check_tag(self.CHAT.replace("+acg", "+rl:conservative+acg"), "chat-cons", "e7c179d8", False)            # its --no-reading-channel twin
         R.check_tag(self.FORMAL.replace("+acg", "+rl:aggressive+acg"), "formal-aggr", "e7c179d8", False)
         R.check_tag(self.FORMAL, "formal-std", "e7c179d8", False)
 
@@ -150,6 +161,7 @@ class Tags(unittest.TestCase):
         self.bad(self.CHAT + "+rc", "chat-std", False)
         self.bad(self.CHAT + "+rc", "chat-cons")                             # +rc and no +rl:
         self.bad(self.CHAT, "chat-aggr")                                     # no +rl:aggressive
+        self.bad(self.CHAT.replace("+acg", "+rl:aggressive+acg"), "chat-aggr", True)   # shipping chat-aggr without +rc
         self.bad(self.FORMAL.replace(f"+tri:{R.TRI8}", ""), "formal-std")    # no +tri
         self.bad(self.FORMAL + f"+colloq:{R.COLLOQ8}", "formal-std")
         self.bad(self.CHAT.replace("+ctx", ""), "chat-cons")
