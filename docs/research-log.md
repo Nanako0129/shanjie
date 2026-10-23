@@ -8819,3 +8819,27 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - 因 δ 或規則而改的既有測試：`cli/tests/fuzzy.rs`（預設改 2.5、另一個值用 1）、`engine_fuzzy.rs` 的分數測試（讀常數）與出貨模型測試（救回句沒有工作）、C ABI 子程序測試（玩具詞庫的「星」降到 −6.0，讓「鑫」在 δ 2.5 下仍勝）。golden（沒給 `--fuzzy`）一行都沒變。
 - **更正**：上面「模糊音 δ 重選」之前的一則寫「dev302 `--fuzzy 15`（出貨指令）在預設與 `--fuzzy-delta-sound 1` 下都等於紀錄的 δ 1 結果」，那個測試（`fuzzy_delta_sound_one_reproduces_the_recorded_dev302_results`）這次刪掉：它釘住的是 δ 1、沒有過濾的舊重排，規則改了之後本來就不會相同；對應的判讀在 GCP。
 - **沒做、沒驗證**：容錯詞有學習加分時仍是容錯詞（程式上成立，因為旗標來自 `Source`、不看 lp），沒有專門的測試；§3.6 的判讀（dev302、打字測驗、錯字回報、cvtune-clean、wikitune-clean、另報救回數）還沒跑。
+
+## 2026-10-23：§3.6 實作的審查修正（契約 `fuzzy-input.md` §3.6、§3.5、§2.1）
+
+`/code-review` 對 `66afe51d` 提的問題，逐項處理；沒有跑任何判讀的數字（dev302、打字測驗、錯字回報、cvtune、wikitune 都沒碰，判讀仍是 §3.6 登記的那一次，在 GCP）。
+
+- **兩個更正**：
+  - 摘要行的標記 `+fz:15` 現在指 δ 2.5 加過濾的池子（§3.6）；§3.2 那張表（含「dev302 聊天改壞 2」）的 `+fz:15` 是 δ 1、沒有過濾。同一個標記指不同的設定；要看舊值要給 `--fuzzy-delta-sound 1`（標記變成 `+fz:15:d1`），契約 §3.2 與 §3.5 已各加一句。
+  - 上一則寫的「(f) 同一份輸入引擎的工作與 CLI 的分數紀錄：候選相同、選字相同」，在這次修測試之前只在兩邊都選第一名（池內第 0 條）的情形成立：玩具小模型只認得約 117 個字，池子裡的字都當成同一個未知字，LL 完全相同，選字永遠是第一條，所以 CLI 的 `chosen = pool[c]` 改成 `chosen = c` 也不會失敗。候選清單相同這一半一直成立。
+- **測試現在會選字**（`core/tests/common/toy.rs` 的 `sjtl_with_vocab`：把池子各條的字放進玩具模型的詞彙表，LL 才不同）：`ㄙㄨ`（LL 權重 8，池子是 n-best 的第 0、1、2、4、9、10、15、19 條，小模型選池內第 5 條＝n-best 第 10 條，它前面的 n-best 第 3、5、6、7、8 條是容錯路徑）與 `ㄆㄧㄥˋ`（權重 100，池子「聘」「䀻」，選池內第 1 條＝n-best 第 2 條）。前提都用斷言寫死：模型離開第一名、而且池內索引不等於 n-best 索引。引擎組字區顯示的字、CLI 的 `c`、CLI 的 rowstats `ok`（列的正解設成引擎顯示的字）、CLI 紀錄的 `ng`（等於傾印裡 `idx` 各條的分數）全部指向 n-best[池[選]]。權重 100 時 `ng` 改不了選字（引擎的工作拿 n-best 前幾條的分數代替池子的分數，測試仍過），所以 `ㄙㄨ` 用 8；`ㄆㄧㄥˋ` 的第二條 n-gram 分數落後 4（−5.3 對 −9.3，量過），只有 LL 能把它選出來，留在 100。
+- **學習守門的計數**：池子少於 2 條的段本來就沒有工作，不是守門擋掉的，`guard_skips` 不再計（`ㄋㄥˋ ㄋㄥˋ`：一條沒有容錯詞的路徑「濘濘」、學到的新詞，其餘全是容錯路徑；原本記 1）。有完整池子又有學習加分的段（學到「身為」的 `ㄕㄣ ㄨㄟˊ`）照記。
+- **學習加分的容錯詞仍是容錯詞**：上一則「沒做、沒驗證」那一項補上測試。`learning.tsv`（暫存目錄）記著「之道」讀 `ㄓ-ㄉㄠˋ`，打 `ㄗ ㄉㄠˋ`：學習把「之道」推到第一名（沒有記錄時是「知道」），它仍是容錯路徑，`fuzzy_skips` 1、`guard_skips` 0、沒有工作。
+- **其他**：`rerank_pool` 的 `topk` 為 0 回 `None`（原本是空池子）；路徑上的詞元組有名字 `lm::DecodedWord`（不叫 `PathWord`，引擎裡已經有同名的結構）；CLI 去掉重複的 `nb`；測試的共用函式搬到 `core/tests/common/toy.rs`。
+- **讀分數紀錄的工具**：有 `idx` 時 `c` 是 n-best 索引，`ng`／`ok`／`ed`／`ll` 是池子順序。`tools/triage.py` 把池內的選擇經 `idx` 對應回 `c` 才比（`check_choice`，`run_cell` 與 d23 共用）、D2 的池子只有一條算 D2-none（原本會讀 `ng[1]`）；`d23.py` 的偏置分析用 `by_nbest` 讀 `ng`／`ll`（池子沒列的候選算要重評分）；`p4d.py` 與 `expect_core.py` 的項只算傾印的前 8 條，遇到有 `idx` 的紀錄就停（`refuse_pool`）。
+- **驗證**：
+  - `make test-rust` 757 通過、0 失敗；`make test-golden` 25 通過；`make test-python` 891 個測試全過，另跑 `test_d23.py`（27）、`test_expect_core.py`、`test_p4d.py` 都過；沒有模糊音位元時（不給 `--fuzzy`、`--fuzzy 0`、`--fuzzy 16`）eval/dev 400 列、聊天（含常談）與書面的 stdout、`--dump`、`--dump-words`、`--rowstats`、`--tinylm-scores` 和這次修正之前的建置逐位元組相同（30 組檔案）。
+  - 突變（乾淨的樹，每個都以斷言失敗，結束碼非 0、有跑到測試、不是建置錯誤，`git checkout --` 還原）：
+    - CLI `chosen = pool[c]` → `chosen = c`：`cli/tests/fuzzy_rerank.rs` 的 `c` 斷言失敗（左 6 右 15）。
+    - 引擎的池子用 `0..池長` 當 n-best 索引：`engine_fuzzy_rerank.rs` 的候選清單斷言失敗；CLI 的池子改成前 8 條：`fuzzy_rerank.rs` 失敗。
+    - 引擎的 `ng` 取 n-best 前幾條：`engine_fuzzy_rerank.rs` 的顯示字斷言失敗（`ㄙㄨ` 權重 8 之後；權重 100 時存活）；CLI 的 `ng` 同樣的改法：`fuzzy_rerank.rs` 的 `ng` 斷言失敗。
+    - 解碼器對有學習加分的詞拿掉容錯標記：學習加分那條測試失敗。守門的判斷放在容錯判斷之前：學習加分那條與守門計數那條都失敗。守門計數改回舊寫法（先判 `guarded` 再判池子少於 2）：守門計數那條失敗。
+    - `rerank_pool` 的 `topk` 0 回空池子：`lm.rs` 的單元測試失敗。
+    - 玩具小模型的詞彙表補丁不生效：引擎與 CLI 的前提斷言（模型離開第一名）失敗。
+    - `check_choice` 不經 `idx` 對應：`test_triage.py` 與 `test_d23.py` 各一條失敗（`RuntimeError` 在不該丟的測試裡丟出）；`nbest_index` 不看 `idx`、`by_nbest` 照位置、D2 池子一條不特別處理、`refuse_pool` 不作用：各有斷言失敗。
+- **沒做**：§3.6 的判讀（dev302、打字測驗、錯字回報、cvtune-clean、wikitune-clean、另報救回數）仍在 GCP，這次沒跑；Swift 這邊沒有改動，沒跑 `make test-swift`。
