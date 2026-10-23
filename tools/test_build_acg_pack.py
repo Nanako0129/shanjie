@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_acg_pack as B  # noqa: E402
+import readings as R  # noqa: E402
 
 
 def second_column(path):
@@ -198,6 +199,8 @@ class LexiconWords(unittest.TestCase):
 
 
 class LiReading(unittest.TestCase):
+    # The real reading tool needs the MoeDict and McBopomofo inputs, which CI does not have (tools/readings.py MOEDICT, HETERO).
+    @unittest.skipUnless(all(os.path.isfile(p) for p in (R.MOEDICT, R.HETERO)), "reading-tool inputs not on this machine")
     def test_li_in_names_reads_li4(self):        # 契約 A4：名字裡的「麗」讀 ㄌㄧˋ（tools/reading_overrides.tsv），ㄌㄧˊ 只留給詞庫裡的詞（高麗）
         rd = B.make_readings(["愛麗兒", "朵麗絲"])
         self.assertEqual((rd["愛麗兒"][0][1], rd["朵麗絲"][0][1]), ("ㄌㄧˋ", "ㄌㄧˋ"))
