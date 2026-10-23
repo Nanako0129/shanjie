@@ -45,6 +45,7 @@ class Rule(unittest.TestCase):
         self.assertEqual(t["一", "ㄧˊ"], 0.0)                 # sandhi stays at T0's value
         self.assertEqual([r for r in rows if r[0] in "甲丙"], [r for r in T0 if r[0] in "甲丙"])
         self.assertEqual([(c, r) for c, r, _ in rows], [(c, r) for c, r, _ in T0])   # T0's row order
+        self.assertIs(T.SANDHI, T.B1.SANDHI_PAIRS)   # build_t1's pairs, not a copy
 
 
 class Files(unittest.TestCase):
@@ -59,7 +60,7 @@ class Files(unittest.TestCase):
                 f.write("乙\tx\t0.0\n乙\ty\t-1.0\n")
             lab = os.path.join(d, "lab.tsv")
             with open(lab, "w", encoding="utf-8") as f:
-                f.writelines(f"i{k}\t乙\t{'x' if k < 6 else 'y'}\n" for k in range(12))
+                f.writelines(f"wiki-4e59-{k}\t乙\t{'x' if k < 6 else 'y'}\n" for k in range(12))
             patches = [mock.patch.object(T.S, "load_merged", return_value=({"乙": ["x", "y"]}, {})), mock.patch.object(T.S, "single_pairs", return_value={("x", "乙"), ("y", "乙")}),
                        mock.patch.object(T.S, "primary_readings", return_value={"乙": "x"})]
             for p in patches:
@@ -82,8 +83,20 @@ class Files(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):   # --out exists
                     T.main(["--t0", t0, "--labels", lab, "--usable", "seg", "--chars", chars, "--out", os.path.join(d, "t2.1")])
+            for bad_id in ("user-reported-3-1", "typing76-1-0", "dev302-5-2", "i99"):   # calibration positions never feed n_r
+                with open(lab + "." + bad_id, "w", encoding="utf-8") as f:
+                    f.write(f"{bad_id}\t乙\tx\n")
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                    T.main(["--t0", t0, "--labels", lab + "." + bad_id, "--usable", "seg", "--chars", chars, "--out", os.path.join(d, "t2." + bad_id)])
             with open(lab, "a", encoding="utf-8") as f:
-                f.write("i99\t乙\tz\n")
+                f.write("wiki-4e59-0\t乙\ty\n")   # a repeated id
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    T.main(["--t0", t0, "--labels", lab, "--usable", "seg", "--chars", chars, "--out", os.path.join(d, "t2.5")])
+            with open(lab, "w", encoding="utf-8") as f:
+                f.write("wiki-4e59-0\t乙\tx\n")
+            with open(lab, "a", encoding="utf-8") as f:
+                f.write("wiki-4e59-1\t乙\tz\n")
             with contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):   # a label that is not a reading of the character
                     T.main(["--t0", t0, "--labels", lab, "--usable", "seg", "--chars", chars, "--out", os.path.join(d, "t2.4")])

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Step 2 of README.md in this directory: the positions where a character of step2-chars.txt stands alone, and the character classes.
 
-  sample_single.py sample --chars step2-chars.txt (--wiki [--articles 200000] | --text FILE) [--per 50] [--seed 20261023] --out positions.tsv
+  sample_single.py sample --chars step2-chars.txt (--wiki [--articles 200000] | --text FILE) --expect-sha256 PREFIX [--per 50] [--seed 20261023] --out positions.tsv
   sample_single.py human  --chars step2-chars.txt --rows ROWS --out human.tsv
 
 `sample`: one fixed-seed reservoir (Algorithm R, the draw of experiments/reading-aware/sample_labels.py `reservoir`) per character over the stream of
-that character's standing-alone positions: the sentence stream, the conversion and the lexicon-score cut (build_counts.segment over a Han run of >= 2
-characters) are sample_labels.py's. Writes `id, source, sentence, pos, char` (pos = index of the character in the sentence; id = <source>-<hex of the
+that character's standing-alone positions: the sentence stream, the conversion and the lexicon-score cut (build_counts.segment over a Han run; a run of
+one character is that character standing alone) are sample_labels.py's. `--expect-sha256` (required) is a prefix of the SHA-256 of the input file (the
+wiki dump, or the --text file): the run stops unless it matches, and prints the full hash (registered: zhwiki 5db9052e, colloquial-train.txt 3e833d06). Writes `id, source, sentence, pos, char` (pos = index of the character in the sentence; id = <source>-<hex of the
 character>-<k>, unique across a wiki run and a text run because the source differs: `wiki`, or `text-<file name without extension>`). Run it once for
 the wiki and once for the colloquial text and `cat` the two. Sentences holding a tab are skipped (and counted).
 `human`: ROWS in the repo's eval format (`context|sentence|syllables`); for every standing-alone position of a set character in the row's sentence
@@ -14,10 +15,10 @@ the wiki and once for the colloquial text and `cat` the two. Sentences holding a
 the row's syllable at that position, tool = the reading tools/readings.py gives that sentence at that position (its own program, run on the sentences;
 its CHECK lines are not shown). The first five columns are what label_llm.py `requests` reads, so human.tsv is also its input. Rows are public files.
 The class of a character (`classify`): `tone` when all its single-character readings in the merged lexicon share initial and final (only the tone or
-neutral differ), else `seg`. Also here: the merged lexicon loader, shared with label_llm.py, calib.py and build_t2.py.
+neutral differ), else `seg`. Also here: the merged lexicon loader and the labels reader (`read_labels`, a repeated id stops), shared with label_llm.py, calib.py and build_t2.py.
 Output is positions and counts. Exit 0 done, 1 stop.
 """
-import argparse, collections, functools, os, random, sys
+import argparse, collections, functools, hashlib, os, random, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -32,6 +33,7 @@ import sample_labels as SL  # noqa: E402
 DEFAULT_CHARS = os.path.join(HERE, "step2-chars.txt")
 SEED = 20261023
 MAX_EXAMPLES = 3
+CORPUS_PREFIXES = ("wiki-", "text-")   # the ids `sample` writes; the ids of `human` are calibration positions
 
 
 def load_chars(path):
@@ -78,11 +80,13 @@ def classify(rs):
 
 
 def primary_readings(readings, t0=None, tiebreak=None):
-    """-> {char: r*}. r* = the reading with T0's t = 0 ({(char, reading): t}; every reading when t0 is None); more than one such reading: tiebreak(char)
-    (default: tools/readings.py's own primary, units.Labeller.primary) when it is one of them, else the first in lexicon order."""
+    """-> {char: r*}. r* = the reading with T0's t = 0 ({(char, reading): t}; every reading when t0 is None); when no reading has t = 0 (乜 掇 溴 鉈 in
+    T0), the reading with the largest t; more than one such reading: tiebreak(char) (default: tools/readings.py's own primary, units.Labeller.primary)
+    when it is one of them, else the first in lexicon order."""
     out, tb = {}, tiebreak
     for c, rs in readings.items():
-        zero = [r for r in rs if t0 is None or t0.get((c, r), 0.0) == 0.0]
+        ts = [0.0 if t0 is None else t0.get((c, r), 0.0) for r in rs]
+        zero = [r for r, t in zip(rs, ts) if t == max(ts)]
         if len(zero) > 1:
             if tb is None:
                 tb = readings_primary()
@@ -107,12 +111,13 @@ def cut_lexicon():
 
 
 def standalone(sentence, lex, chars):
-    """[(pos, char)] of the characters of `chars` that stand alone in the lexicon-score cut of their Han run of >= 2 characters (sample_labels.candidates)."""
+    """[(pos, char)] of the characters of `chars` that stand alone in the lexicon-score cut of their Han run (a run of one character is that character
+    alone; sample_labels.candidates skips those, step 2 does not). Runs without a set character are not segmented."""
     if not any(c in chars for c in sentence):
         return []
     out, pos = [], 0
     for kind, raw, _ in mapping.tokenize(sentence):
-        if kind == "han" and len(raw) >= 2:
+        if kind == "han" and any(c in chars for c in raw):
             at = 0
             for w in bc.segment(lex, raw) or ():
                 if len(w) == 1 and w in chars:
@@ -143,20 +148,33 @@ class Reservoirs:
                 keep[j] = x
 
 
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def source_tag(a):
     return "wiki" if a.wiki else "text-" + os.path.splitext(os.path.basename(a.text))[0]
 
 
 def sample(a):
     chars = load_chars(a.chars)
-    res, skipped, sentences, lex = Reservoirs(chars, a.per, a.seed), 0, 0, cut_lexicon()
+    path = bc.DUMP if a.wiki else a.text
+    full = file_sha256(path)
+    print(f"sample_single: input sha256 {full}")
+    if not a.expect_sha256 or not full.startswith(a.expect_sha256.lower()):
+        B1.stop("the input file's SHA-256 does not start with --expect-sha256")
+    res, skipped, sentences = Reservoirs(chars, a.per, a.seed), 0, 0
     ns = argparse.Namespace(wiki=a.wiki, articles=a.articles, paths=[a.text] if a.text else None)
     for _, s in SL.sentences(ns):
         sentences += 1
         if "\t" in s:
             skipped += 1
             continue
-        for pos, c in standalone(s, lex, res.keep):
+        for pos, c in standalone(s, bc._W["lex"], res.keep):   # the lexicon count.init3 built (SL.sentences calls it before the first sentence)
             res.add(c, (s, pos))
     tag = source_tag(a)
     with open(a.out, "x", encoding="utf-8", newline="\n") as f:
@@ -210,6 +228,18 @@ def human(a):
     return 0
 
 
+def read_labels(path):
+    """-> {id: (char, reading)} of a label_llm.py `collect` file (an empty reading = an invalid answer); a repeated id stops."""
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for l in f:
+            i, c, r = l.rstrip("\n").split("\t")
+            if i in out:
+                B1.stop("a repeated id in the labels")
+            out[i] = (c, r)
+    return out
+
+
 def read_positions(path):
     """-> [(id, source, sentence, pos, char, rest...)] of a positions or human TSV (the first five columns are the contract)."""
     out = []
@@ -234,6 +264,7 @@ def main(argv=None):
             g.add_argument("--wiki", action="store_true")
             g.add_argument("--text")
             p.add_argument("--articles", type=int, default=200000)
+            p.add_argument("--expect-sha256", required=True, metavar="PREFIX")
             p.add_argument("--per", type=int, default=50)
             p.add_argument("--seed", type=int, default=SEED)
         else:

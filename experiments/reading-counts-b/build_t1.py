@@ -26,7 +26,8 @@ P5_MC_EXTRA = p5.mc_extra
 EPS = 1e-9
 NEUTRAL_CAP = -1.0
 TAIL_PARTICLES = "嗎啦嘛吧啊呀"
-EXEMPT_PAIRS = {("波", "ㄅㄛ"), ("癌", "ㄞˊ"), ("和", "ㄏㄜˊ"), ("麼", "ㄇㄛ˙"), ("一", "ㄧˊ"), ("一", "ㄧˋ"), ("不", "ㄅㄨˊ")}
+SANDHI_PAIRS = {("一", "ㄧˊ"), ("一", "ㄧˋ"), ("不", "ㄅㄨˊ")}   # B-f's own sandhi readings
+EXEMPT_PAIRS = {("波", "ㄅㄛ"), ("癌", "ㄞˊ"), ("和", "ㄏㄜˊ"), ("麼", "ㄇㄛ˙")} | SANDHI_PAIRS
 # reading-aware-0.md section 3.2 "降": characters that are never read neutral on their own (neutral only at the end of a word)
 A1_CHARS = set("西公巴水太謝意思和阿夫寶弟妹爸姊嫂舅叔嬸姑婆娘奶姥娃鼓係價遮匙裳碌簍蟆蟇掇蔔罷嗦遢晢琶杷")
 assert len(A1_CHARS) == 44 and not (A1_CHARS & set(TAIL_PARTICLES))

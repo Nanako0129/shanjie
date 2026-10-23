@@ -20,7 +20,7 @@ import sample_single as S  # noqa: E402
 B1 = S.B1
 K = 5
 MIN_N = 10
-SANDHI = {("一", "ㄧˊ"), ("一", "ㄧˋ"), ("不", "ㄅㄨˊ")}
+SANDHI = B1.SANDHI_PAIRS
 
 
 def build(t0_rows, counts, classes, usable, primary):
@@ -48,18 +48,16 @@ def build(t0_rows, counts, classes, usable, primary):
 
 
 def read_counts(path, readings):
-    """-> {char: Counter(reading)} of the valid labels; STOP on a repeated id or a reading that is not one of the character's."""
-    out, seen = collections.defaultdict(collections.Counter), set()
-    with open(path, encoding="utf-8") as f:
-        for l in f:
-            i, c, r = l.rstrip("\n").split("\t")
-            if i in seen:
-                B1.stop("a repeated id in the labels")
-            seen.add(i)
-            if r:
-                if r not in readings.get(c, ()):
-                    B1.stop("a label that is not a single-character reading of its character")
-                out[c][r] += 1
+    """-> {char: Counter(reading)} of the valid labels; STOP on a repeated id (S.read_labels), on an id that is not a corpus id (`wiki-` / `text-`:
+    calibration labels must never feed n_r) and on a reading that is not one of the character's."""
+    out = collections.defaultdict(collections.Counter)
+    for i, (c, r) in S.read_labels(path).items():
+        if not i.startswith(S.CORPUS_PREFIXES):
+            B1.stop("a label id that is not a corpus position (wiki-... or text-...)")
+        if r:
+            if r not in readings.get(c, ()):
+                B1.stop("a label that is not a single-character reading of its character")
+            out[c][r] += 1
     return out
 
 

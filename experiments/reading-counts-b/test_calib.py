@@ -70,8 +70,30 @@ class Cli(unittest.TestCase):
             rc, out = self.run_cli(["agree", self.write("h.tsv", human), self.write("l.tsv", lab)])
         self.assertEqual(rc, 0)
         self.assertIn("BOTH UNUSABLE: stop", out)
-        self.assertIn("usable: \n", out)
+        self.assertIn("usable by agreement only (seg still needs manual-rate): \n", out)
         self.assertIn("tone\tpositions 5\tlabeller 5/5 = 1.0000\ttool 5/5 = 1.0000\tUNUSABLE", out)
+
+    def test_manual_check_gates_seg(self):
+        n = 25
+        human = "".join(f"h{i}\ts\t句子\t0\t{'甲' if i < n else '乙'}\ta\ta\n" for i in range(2 * n))
+        lab = "".join(f"h{i}\t{'甲' if i < n else '乙'}\ta\n" for i in range(2 * n))
+        h, l = self.write("h.tsv", human), self.write("l.tsv", lab)
+        line = "i\ts\t句\t0\t乙\ty\t[乙]\t%s\n"
+        good = self.write("good.tsv", "".join(line % "ok" for _ in range(135)) + "".join(line % "x" for _ in range(15)))
+        bad = self.write("bad.tsv", "".join(line % "ok" for _ in range(134)) + "".join(line % "x" for _ in range(16)))
+        blank = self.write("blank.tsv", line % "")
+        cls = ({"甲": ["a", "a˙"], "乙": ["x", "y"]}, {})
+        with mock.patch.object(C.S, "load_chars", return_value=["甲", "乙"]), mock.patch.object(C.S, "load_merged", return_value=cls):
+            self.assertIn("\nusable: tone,seg\n", "\n" + self.run_cli(["agree", h, l, "--manual", good])[1])
+            out = self.run_cli(["agree", h, l, "--manual", bad])[1]
+            self.assertIn("\nusable: tone\n", "\n" + out)
+            self.assertIn("16/150", out)
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.run_cli(["agree", h, l, "--manual", blank])
+            self.assertIn("usable by agreement only (seg still needs manual-rate): tone,seg", self.run_cli(["agree", h, l])[1])
+            self.assertIn("\nusable: tone\n", "\n" + self.run_cli(["agree", h, l, "--manual", self.write("empty.tsv", "")])[1])   # nothing judged: seg stays out
+            worse = self.write("w.tsv", "".join(f"h{i}\t{'甲' if i < n else '乙'}\t{'a' if i < n else 'y'}\n" for i in range(2 * n)))   # seg labels all wrong
+            self.assertIn("\nusable: tone\n", "\n" + self.run_cli(["agree", h, worse, "--manual", good])[1])   # a good manual check does not rescue seg
 
     def sample_files(self):
         positions = "".join(f"p{i}\tsrc\t我有第{i}個乙乙\t{i % 3}\t{'乙' if i % 2 else '甲'}\n" for i in range(40))

@@ -45,6 +45,18 @@ class Requests(unittest.TestCase):
         self.assertGreater(est, 50)
         self.assertNotIn("temperature", L.build_requests(POS, READINGS, EXAMPLES, temperature=False)[0][0]["params"])
 
+    def test_long_and_pre_marked_sentences(self):
+        sentence = "甲" * 100 + "【乙】" + "丙" * 20 + "個" + "丁" * 100 + "】"
+        pos = sentence.index("個")
+        text = L.build_requests([("a-1", "s", sentence, pos, "個")], READINGS, EXAMPLES)[0][0]["params"]["messages"][0]["content"]
+        line = [l for l in text.splitlines() if l.startswith("句子：")][0][3:]
+        self.assertEqual(line, "甲" * 37 + "「乙」" + "丙" * 20 + "【個】" + "丁" * 60)   # 60 characters kept on each side, 【乙】 became 「乙」
+        self.assertEqual(line.count("【"), 1)
+        left, right = line.split("【個】")
+        self.assertEqual((len(left), len(right)), (60, 60))
+        short = L.build_requests([("a-2", "s", "有【個】朋友", 2, "個")], READINGS, EXAMPLES)[0][0]["params"]["messages"][0]["content"]
+        self.assertIn("句子：有「【個】」朋友", short)   # an existing bracket pair around the target is replaced, then the target is marked
+
     def test_bad_ids_and_misplaced_characters_stop(self):
         for bad in ([("a b", "s", "我有個朋友", 2, "個")], [POS[0], POS[0]], [("a-1", "s", "我有個朋友", 1, "個")], [("a-1", "s", "我有X朋友", 2, "X")]):
             with self.assertRaises(SystemExit):
@@ -94,7 +106,7 @@ class Collect(unittest.TestCase):
             lines = "\n".join(result(i, "A" if k >= bad else "oops") for k, i in enumerate(self.SIDE))
             seen = []
 
-            def fake(req, timeout=None):
+            def fake(req, timeout=None, context=None):
                 seen.append(req)
                 if req.full_url.endswith("/batches/msgbatch_1"):
                     return Resp({"id": "msgbatch_1", "processing_status": "ended", "results_url": L.API + "/v1/messages/batches/msgbatch_1/results"})
@@ -119,32 +131,108 @@ class Collect(unittest.TestCase):
             self.assertEqual(req.get_header("Anthropic-version"), "2023-06-01")
 
 
+def batch_lines(n, model="claude-opus-5-5"):
+    return "".join(json.dumps({"custom_id": f"a-{k}", "params": {"model": model, "max_tokens": 8, "messages": [{"role": "user", "content": f"q{k}"}]}}) + "\n"
+                   for k in range(n))
+
+
 class Api(unittest.TestCase):
-    def test_submit_status_endpoints_and_the_key_never_shown_or_written(self):
+    def test_price_then_submit_status_endpoints_and_the_key_never_shown_or_written(self):
         d = tempfile.mkdtemp()
         try:
             b = os.path.join(d, "b.jsonl")
             with open(b, "w", encoding="utf-8") as f:
-                f.write(json.dumps({"custom_id": "a-1", "params": {"max_tokens": 8}}) + "\n")
+                f.write(batch_lines(10))
             calls = []
 
-            def fake(req, timeout=None):
+            def fake(req, timeout=None, context=None):
                 calls.append((req.get_method(), req.full_url, req.data))
+                if req.full_url.endswith("/count_tokens"):
+                    return Resp({"input_tokens": 1000})
                 return Resp({"id": "msgbatch_9", "processing_status": "in_progress", "request_counts": {"processing": 1}})
             with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": KEY}), mock.patch("urllib.request.urlopen", fake), \
                     contextlib.redirect_stdout(io.StringIO()) as so, contextlib.redirect_stderr(io.StringIO()) as se:
-                self.assertEqual(L.main(["submit", b]), 0)
+                self.assertEqual(L.main(["price", b, "--sample", "4"]), 0)
+                self.assertEqual(len(calls), 4)
+                self.assertEqual(calls[0][:2], ("POST", "https://api.anthropic.com/v1/messages/count_tokens"))
+                self.assertEqual(set(json.loads(calls[0][2])), {"model", "messages"})   # no max_tokens / temperature on count_tokens
+                est = json.load(open(b + ".price.json", encoding="utf-8"))
+                # 10 requests x 1000 input tokens at $2/MTok + 10 x 8 output tokens at $10/MTok
+                self.assertEqual((est["input_tokens"], est["output_tokens_upper"], est["usd"]), (10000, 80, round((10000 * 2 + 80 * 10) / 1e6, 4)))
+                self.assertEqual(L.main(["submit", b, "--max-usd", "1"]), 0)
                 self.assertEqual(L.main(["status", "msgbatch_9"]), 0)
-            self.assertEqual(calls[0][:2], ("POST", "https://api.anthropic.com/v1/messages/batches"))
-            self.assertEqual(json.loads(calls[0][2]), {"requests": [{"custom_id": "a-1", "params": {"max_tokens": 8}}]})
-            self.assertEqual(calls[1][:2], ("GET", "https://api.anthropic.com/v1/messages/batches/msgbatch_9"))
+            self.assertEqual(calls[4][:2], ("POST", "https://api.anthropic.com/v1/messages/batches"))
+            self.assertEqual(len(json.loads(calls[4][2])["requests"]), 10)
+            self.assertEqual(calls[5][:2], ("GET", "https://api.anthropic.com/v1/messages/batches/msgbatch_9"))
             shown = so.getvalue() + se.getvalue()
             self.assertIn("msgbatch_9", shown)
             self.assertNotIn(KEY, shown)
-            self.assertNotIn(KEY, os.listdir(d).__repr__() + open(b, encoding="utf-8").read())
-            self.assertEqual(os.listdir(d), ["b.jsonl"])
+            files = "".join(open(os.path.join(d, n), encoding="utf-8").read() for n in os.listdir(d))
+            self.assertNotIn(KEY, files)
+            self.assertEqual(sorted(os.listdir(d)), ["b.jsonl", "b.jsonl.price.json"])
         finally:
             shutil.rmtree(d)
+
+    def test_submit_needs_a_fresh_price_for_this_batch_and_a_budget(self):
+        d = tempfile.mkdtemp()
+        try:
+            b = os.path.join(d, "b.jsonl")
+            with open(b, "w", encoding="utf-8") as f:
+                f.write(batch_lines(10))
+            calls = []
+
+            def fake(req, timeout=None, context=None):
+                calls.append(req.full_url)
+                return Resp({"input_tokens": 1000} if req.full_url.endswith("/count_tokens") else {"id": "m", "processing_status": "in_progress"})
+            env = mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": KEY})
+            with env, mock.patch("urllib.request.urlopen", fake), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    L.main(["submit", b, "--max-usd", "100"])         # no price file
+                L.main(["price", b, "--sample", "3"])
+                with self.assertRaises(SystemExit):
+                    L.main(["submit", b, "--max-usd", "0.01"])        # estimate $0.0208 > $0.01
+                with open(b, "a", encoding="utf-8") as f:
+                    f.write(batch_lines(1).replace("a-0", "a-99"))
+                with self.assertRaises(SystemExit):
+                    L.main(["submit", b, "--max-usd", "100"])         # the batch changed after the price
+                with self.assertRaises(SystemExit):
+                    L.main(["submit", b])                             # --max-usd is required (argparse)
+                self.assertFalse([c for c in calls if c.endswith("/batches")])
+                L.main(["price", b, "--sample", "3"])
+                self.assertEqual(L.main(["submit", b, "--max-usd", "100"]), 0)
+            self.assertTrue([c for c in calls if c.endswith("/batches")])
+        finally:
+            shutil.rmtree(d)
+
+    def test_estimate_scales_the_sample_and_prices_by_model(self):
+        reqs = [{"params": {"model": "claude-fable-5-1", "max_tokens": 8}} for _ in range(100)]
+        e = L.estimate(reqs, 600, 6)   # 100 tokens a request
+        self.assertEqual((e["input_tokens"], e["output_tokens_upper"], e["usd"]), (10000, 800, round((10000 * 5 + 800 * 25) / 1e6, 4)))
+        with contextlib.redirect_stderr(io.StringIO()):
+            for bad in ([{"params": {"model": "gpt", "max_tokens": 8}}], reqs[:1] + [{"params": {"model": "claude-opus-5-5", "max_tokens": 8}}]):
+                with self.assertRaises(SystemExit):
+                    L.estimate(bad, 10, 1)
+
+    def test_every_call_uses_the_extra_ca_file_when_set(self):
+        seen = []
+
+        def fake(req, timeout=None, context=None):
+            seen.append(context)
+            return Resp({"processing_status": "in_progress"})
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": KEY, "NODE_EXTRA_CA_CERTS": "/x/ca.pem"}), mock.patch("urllib.request.urlopen", fake), \
+                mock.patch("ssl.SSLContext.load_verify_locations") as load:
+            L.api("GET", L.API + "/v1/messages/batches/x")
+            L.api("POST", L.API + "/v1/messages/count_tokens", {})
+        load.assert_called_with("/x/ca.pem")
+        self.assertEqual(load.call_count, 2)
+        self.assertTrue(all(isinstance(c, L.ssl.SSLContext) for c in seen) and len(seen) == 2)
+        env = {"ANTHROPIC_API_KEY": KEY, "SSL_CERT_FILE": "/y/ca.pem"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("ssl.SSLContext.load_verify_locations") as load:
+            L.ssl_context()
+        load.assert_called_once_with("/y/ca.pem")
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch("ssl.SSLContext.load_verify_locations") as load:
+            L.ssl_context()
+        load.assert_not_called()
 
     def test_no_key_no_call_and_http_errors_show_only_the_status(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("urllib.request.urlopen") as u, contextlib.redirect_stderr(io.StringIO()):

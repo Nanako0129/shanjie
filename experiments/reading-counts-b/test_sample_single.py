@@ -41,6 +41,28 @@ class Primary(unittest.TestCase):
         self.assertEqual(p, {"甲": "b", "乙": "d", "丙": "f"})   # a tiebreak outside the tie falls back to the first of the tie
         self.assertEqual(S.primary_readings(self.R, None, tiebreak=lambda c: self.R[c][-1]), {"甲": "b", "乙": "e", "丙": "g"})
 
+    def test_no_reading_with_t_zero_falls_back_to_the_largest_t(self):
+        t0 = {("甲", "a"): -1.0, ("甲", "b"): -0.5, ("乙", "c"): -2.0, ("乙", "d"): -2.0, ("乙", "e"): -3.0, ("丙", "f"): -0.1, ("丙", "g"): -0.1}
+        p = S.primary_readings(self.R, t0, tiebreak=lambda c: {"乙": "d", "丙": "g"}[c])
+        self.assertEqual(p, {"甲": "b", "乙": "d", "丙": "g"})   # largest t; ties go to the tiebreak
+        self.assertEqual(S.primary_readings(self.R, {("乙", "c"): -2.0, ("乙", "d"): -2.0, ("乙", "e"): -3.0}, tiebreak=lambda c: "zz")["乙"], "c")
+
+
+class Labels(unittest.TestCase):
+    def test_reader_stops_on_a_repeated_id(self):
+        d = tempfile.mkdtemp()
+        try:
+            p = os.path.join(d, "l.tsv")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("a\t甲\tx\nb\t甲\t\n")
+            self.assertEqual(S.read_labels(p), {"a": ("甲", "x"), "b": ("甲", "")})
+            with open(p, "a", encoding="utf-8") as f:
+                f.write("a\t甲\ty\n")
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                S.read_labels(p)
+        finally:
+            shutil.rmtree(d)
+
 
 class Reservoir(unittest.TestCase):
     def test_same_draw_as_sample_labels_reservoir(self):
@@ -66,10 +88,18 @@ class Standalone(unittest.TestCase):
     def test_a_character_inside_a_word_is_not_standalone(self):
         self.assertEqual(S.standalone("我個人覺得很好", self.lex, {"我", "個", "覺"}), [(0, "我")])
         self.assertEqual(S.standalone("hello", self.lex, {"我"}), [])
-        self.assertEqual(S.standalone("我", self.lex, {"我"}), [])   # a run of one is not a cut (sample_labels.candidates)
+        self.assertEqual(S.standalone("我", self.lex, {"我"}), [(0, "我")])   # a run of one character is that character alone
+        self.assertEqual(S.standalone("好，我，好", self.lex, {"我"}), [(2, "我")])
+        self.assertEqual(S.standalone("我個人", self.lex, {"我"}), [(0, "我")] if S.bc.segment(self.lex, "我個人")[0] == "我" else [])
 
     def test_positions_after_a_non_han_token_are_sentence_positions(self):
         self.assertEqual(S.standalone("ab我個人", self.lex, {"我"}), [(2, "我")])
+
+
+    def test_a_run_without_a_set_character_is_not_segmented(self):
+        with mock.patch.object(S.bc, "segment", wraps=S.bc.segment) as seg:
+            S.standalone("好朋友，我很好", self.lex, {"我"})
+        self.assertEqual([c.args[1] for c in seg.call_args_list], ["我很好"])
 
 
 class Sample(unittest.TestCase):
@@ -83,10 +113,12 @@ class Sample(unittest.TestCase):
             open(text, "w", encoding="utf-8").write("".join(f"我個人覺得第{i}個很好\n" for i in range(30)) + "no han\ttab我個人\n")
             outs = []
             lines = lambda a: (("t", l.rstrip("\n")) for l in open(text, encoding="utf-8"))   # the conversion tables are not this test's business
+            with open(text, "rb") as f:
+                sha = S.hashlib.sha256(f.read()).hexdigest()
             for k in (1, 2):
                 out = os.path.join(d, f"p{k}.tsv")
-                with mock.patch.object(S.SL, "sentences", side_effect=lines):
-                    rc, msg = run(["sample", "--chars", chars, "--text", text, "--per", "7", "--out", out])
+                with mock.patch.object(S.SL, "sentences", side_effect=lines), mock.patch.dict(S.bc._W, {"lex": S.cut_lexicon()}):
+                    rc, msg = run(["sample", "--chars", chars, "--text", text, "--per", "7", "--expect-sha256", sha[:8], "--out", out])
                 self.assertEqual(rc, 0)
                 with open(out, encoding="utf-8") as f:
                     outs.append(f.read())
@@ -97,8 +129,14 @@ class Sample(unittest.TestCase):
             self.assertEqual(len({r[0] for r in rows}), 7)
             self.assertTrue(all(r[0].startswith("text-colloquial-train-6211-") and r[2][int(r[3])] == "我" and r[4] == "我" for r in rows))
             self.assertIn("1 skipped for a tab", msg)
+            self.assertIn("input sha256 " + sha, msg)   # the full hash is printed
             with self.assertRaises(SystemExit):   # --out exists
-                run(["sample", "--chars", chars, "--text", text, "--out", out])
+                run(["sample", "--chars", chars, "--text", text, "--expect-sha256", sha[:8], "--out", out])
+            bad = os.path.join(d, "p3.tsv")
+            for prefix in ("0" * 8, ""):   # a wrong prefix stops before anything is written; the prefix is required to be non-empty
+                with mock.patch.object(S.SL, "sentences", side_effect=lines), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                    run(["sample", "--chars", chars, "--text", text, "--expect-sha256", prefix, "--out", bad])
+            self.assertFalse(os.path.exists(bad))
         finally:
             shutil.rmtree(d)
 
