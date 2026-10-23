@@ -219,6 +219,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut dump_words = None::<String>;
     let (mut classes, mut kn, mut tri) = (true, true, true);
+    let (mut formal_kn, mut kn_beta) = (false, None::<f64>);
     // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
@@ -267,6 +268,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-classes" => classes = false,
             "--no-kn" => kn = false,
             "--no-tri" => tri = false,
+            "--formal-kn" => formal_kn = true,
+            "--kn-beta" => kn_beta = Some(val()?.parse::<f64>().map_err(|_| "--kn-beta takes a number")?),
             "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
@@ -307,7 +310,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
     // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
     // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
-    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
+    let mut lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
+    if let Some(b) = kn_beta {
+        lm.research_set_kn_beta(b)?;
+    }
+    core::lm::RESEARCH_FORMAL_KN.store(formal_kn, std::sync::atomic::Ordering::Relaxed);
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;

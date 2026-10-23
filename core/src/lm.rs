@@ -135,6 +135,10 @@ struct Kn {
 
 const KN_N: usize = 64;
 
+/// Research only (exp/kn-research, CLI `--formal-kn`): the formal profile keeps Kneser-Ney on with the trigram table.
+// ponytail: process-wide switch for one exploration; a product slice would put it in `Scoring` from the profile settings.
+pub static RESEARCH_FORMAL_KN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl Kn {
     fn hashed(&self) -> &([u8; 32], String) {
         self.hashed.get_or_init(|| {
@@ -356,7 +360,18 @@ impl Lm {
     /// `Engine::total_score` take this; the prediction row scores with `word_by_id` and keeps the side file whatever the profile.
     pub fn scoring(&self, profile: Profile) -> Scoring {
         let tri = profile == Profile::Formal && self.tri.is_some();
-        Scoring { lam: profile.lambda(), kn: !tri, tri }
+        Scoring { lam: profile.lambda(), kn: !tri || RESEARCH_FORMAL_KN.load(std::sync::atomic::Ordering::Relaxed), tri }
+    }
+
+    /// Research only (exp/kn-research, CLI `--kn-beta`): replace the side file's β. The summary tag shows the new β.
+    pub fn research_set_kn_beta(&mut self, beta: f64) -> Result<(), String> {
+        let kn = self.kn.as_mut().ok_or("--kn-beta needs a kn.sjkn beside the model")?;
+        if !(0.0..=1.0).contains(&beta) {
+            return Err("--kn-beta must be in [0, 1]".into());
+        }
+        kn.beta = beta;
+        kn.hashed = OnceLock::new();
+        Ok(())
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
