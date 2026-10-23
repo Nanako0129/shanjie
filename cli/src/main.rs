@@ -418,24 +418,22 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
             Err(e) => return Err(e.to_string()),
         };
-        // The decoder's n-best with the fuzzy-word markers dropped: the strings the rest of the row works with.
-        let nb: Vec<(f64, Vec<String>)> = scored.iter().map(|(sc, ws)| (*sc, ws.iter().map(|w| w.0.to_string()).collect())).collect();
-        let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
+        let mut surf: Vec<String> = scored.iter().map(|(_, ws)| ws.iter().map(|w| w.0).collect()).collect();
         let t = len.apply(truth);
-        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the decoder's order).
+        // The row's chosen candidate: the first, or the small model's pick among the pool (below; the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
             // The engine's rule (fuzzy-input section 3.6, `rerank_pool`): the pool is the first 8 paths with no fuzzy word, in n-best order; a
             // fuzzy n-gram first path is not reranked (a pool of just that path: n 1, `c` 0, no `ll`). `pool` holds the paths' n-best indices.
             let pool: Vec<usize> = rerank_pool(&scored, TOPK).unwrap_or_else(|| vec![0]);
             let top: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
-            let ng: Vec<f64> = pool.iter().map(|&p| nb[p].0).collect();
+            let ng: Vec<f64> = pool.iter().map(|&p| scored[p].0).collect();
             // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
             let t0 = Instant::now();
             let key = left.as_deref().unwrap_or("");
             let picked = match colloq_on {
                 Some(co) => {
-                    let words: Vec<Vec<&str>> = pool.iter().map(|&p| nb[p].1.iter().map(String::as_str).collect()).collect();
+                    let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
                     tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
                 }
@@ -467,15 +465,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         out.ok = len.apply(&surf[chosen]) == t;
         out.in64 = surf.iter().any(|s| len.apply(s) == t);
         if want_dump {
-            for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
+            for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
                 writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
             }
         }
         if want_words {
             let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
             writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
-            for (r, (_, ws)) in nb.iter().enumerate() {
-                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).unwrap();
+            for (r, (_, ws)) in scored.iter().enumerate() {
+                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.iter().map(|w| w.0).collect::<Vec<_>>().join(" ")).unwrap();
             }
         }
         out.first = surf.swap_remove(chosen);

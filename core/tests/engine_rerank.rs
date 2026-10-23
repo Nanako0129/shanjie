@@ -11,96 +11,17 @@
 use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::learn::context_key;
-use core::lm::{decode_segment_learned, CappedLexicon, Demote, End, Lm, Profile};
+use core::lm::{decode_segment_learned, CappedLexicon, End, Lm, Profile};
 use core::tinylm::{TinyLm, TOPK};
 use core::{Lexicon, Syls, BEAM_S1};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
-}
-/// The shipped model as data/lm holds it (with kn.sjkn since model-v6).
-fn real_lm_path() -> PathBuf {
-    let p = root().join("data/lm/bigram.sjlm");
-    assert!(p.exists() && root().join("data/lm/classes.sjc").exists(), "data/lm/bigram.sjlm and classes.sjc are needed: see engine_lm.rs");
-    p
-}
-/// data/lm/bigram.sjlm and classes.sjc symlinked into a temporary directory without kn.sjkn, for the version 1 toy.
-// ponytail: the directory (two symlinks) is left in the temp dir; a OnceLock never drops.
-fn lm_path() -> PathBuf {
-    static P: OnceLock<PathBuf> = OnceLock::new();
-    P.get_or_init(|| {
-        let real = real_lm_path();
-        let d = std::env::temp_dir().join(format!("shanjie-rerank-nokn-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        for f in ["bigram.sjlm", "classes.sjc"] {
-            let _ = std::fs::remove_file(d.join(f));
-            std::os::unix::fs::symlink(real.with_file_name(f), d.join(f)).unwrap();
-        }
-        d.join("bigram.sjlm")
-    })
-    .clone()
-}
+#[path = "common/toy.rs"]
+mod toy;
+use toy::*;
 
-struct Shared {
-    lex: Arc<Lexicon>,
-    lm: Arc<Lm>,
-    capped: Arc<CappedLexicon>,
-}
-/// The capped lexicon has the demotion table, as `Engine::load_lm` builds it.
-fn shared_for(lm_file: &Path) -> Shared {
-    let dir = root().join("data/lexicon");
-    let lex = load_lexicon(&dir).unwrap();
-    let lm = Lm::load(lm_file).unwrap();
-    let overlay = capping_overlay(&dir, "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
-    let demote = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
-    let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&demote)).unwrap());
-    Shared { lex, lm: Arc::new(lm), capped }
-}
-/// Loaded once per test binary, without the Kneser-Ney side file (`lm_path`).
-fn shared() -> &'static Shared {
-    static S: OnceLock<Shared> = OnceLock::new();
-    S.get_or_init(|| shared_for(&lm_path()))
-}
-
-fn sha_bytes(file: &Path) -> Vec<u8> {
-    let h = core::eval::sha256_hex(&std::fs::read(file).unwrap());
-    (0..32).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect()
-}
-
-/// The toy model with `alpha` / `tau` for both profiles and the n-gram hash of `lm` (None: left as recorded, i.e. kn-tiny's).
-fn sjtl_for(alpha: f64, tau: f64, lm: Option<&Path>) -> TempFile {
-    let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap();
-    if let Some(lm) = lm {
-        b[68..100].copy_from_slice(&sha_bytes(lm));
-    }
-    for at in [36, 52] {
-        b[at..at + 8].copy_from_slice(&alpha.to_le_bytes());
-        b[at + 8..at + 16].copy_from_slice(&tau.to_le_bytes());
-    }
-    // One file per call (tests run in parallel), removed when the guard drops.
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let n = N.fetch_add(1, Ordering::Relaxed);
-    let p = std::env::temp_dir().join(format!("shanjie-rerank-{}-{n}.sjtl", std::process::id()));
-    std::fs::write(&p, b).unwrap();
-    TempFile(p)
-}
-/// A temporary file, deleted on drop; derefs to its path.
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-impl std::ops::Deref for TempFile {
-    type Target = Path;
-    fn deref(&self) -> &Path {
-        &self.0
-    }
-}
 /// Lets the toy model's LLs decide.
 fn rerank_model() -> TempFile {
     sjtl_for(100.0, f64::INFINITY, Some(&lm_path()))
@@ -124,36 +45,8 @@ fn engine() -> Engine {
     engine_with(Some(&rerank_model()))
 }
 
-fn keys_of(syl: &str) -> Vec<Key> {
-    let layout = Layout::Standard;
-    let mut v = Vec::new();
-    let mut toned = false;
-    for c in syl.chars() {
-        match layout.key_of_tone(c) {
-            Some(tk) => {
-                v.push(Key::ch(tk, 0));
-                toned = true;
-            }
-            None => v.push(Key::ch(layout.key_of_symbol(c).expect("symbol has a key"), 0)),
-        }
-    }
-    if !toned {
-        v.push(Key::new(KeyKind::Space));
-    }
-    v
-}
 fn k(kind: KeyKind) -> Key {
     Key::new(kind)
-}
-
-fn type_syls(e: &mut Engine, syls: &[String]) -> Output {
-    let mut last = None;
-    for syl in syls {
-        for key in keys_of(syl) {
-            last = Some(e.key(key).unwrap());
-        }
-    }
-    last.unwrap()
 }
 
 /// The 302 rows of `--set dev --limit 302` as (sentence, reading), as engine_lm.rs reads them.
@@ -245,7 +138,7 @@ fn no_model_or_switch_off_makes_no_job_and_keys_are_unchanged() {
     plain.set_rerank(true).unwrap(); // the switch on, so only the missing model keeps jobs away
     let mut jobs = 0;
     for syl in &syls {
-        for key in keys_of(syl) {
+        for key in keys_of(Layout::Standard, syl) {
             assert!(plain.key(key).unwrap() == with.key(key).unwrap(), "a loaded model changed a key's output");
             assert!(plain.take_rerank_job().is_none(), "a job without a model");
             jobs += with.take_rerank_job().is_some() as usize;
@@ -295,7 +188,7 @@ fn stale_results_are_dropped() {
     let r = e.take_rerank_job().unwrap().run();
     assert!(e.key(k(KeyKind::Backspace)).unwrap().preedit != shown, "premise: Backspace deleted a syllable");
     assert!(e.apply_rerank(r).unwrap().is_none(), "a re-decoding key after the take");
-    for key in keys_of(syls.last().unwrap()) {
+    for key in keys_of(Layout::Standard, syls.last().unwrap()) {
         e.key(key).unwrap();
     }
     for change in 0..2 {
@@ -542,7 +435,7 @@ fn auto_commit_voids_the_job() {
     type_syls(&mut e, &ni);
     let r = e.take_rerank_job().expect("a job at 127").run();
     let mut o = None;
-    for key in keys_of("ㄋㄧˇ") {
+    for key in keys_of(Layout::Standard, "ㄋㄧˇ") {
         o = Some(e.key(key).unwrap());
     }
     assert!(!o.unwrap().commit.is_empty(), "premise: the 128th syllable commits");
@@ -705,7 +598,7 @@ fn rerank_is_off_until_set_rerank() {
     e.load_lm(&lm_path()).unwrap();
     e.load_tinylm(&rerank_model()).unwrap();
     for syl in &syls {
-        for key in keys_of(syl) {
+        for key in keys_of(Layout::Standard, syl) {
             e.key(key).unwrap();
             assert!(e.take_rerank_job().is_none(), "a job without set_rerank(true)");
         }
@@ -819,7 +712,7 @@ fn replay(e: &mut Engine, rows: &[(String, Syls)]) -> Replay {
     for (_, syls) in rows {
         let mut commit = String::new();
         let (mut prev_ng, mut prev_shown): (Vec<char>, Vec<char>) = (Vec::new(), Vec::new());
-        for key in syls.iter().flat_map(|s| keys_of(s)).chain([k(KeyKind::Enter)]) {
+        for key in syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).chain([k(KeyKind::Enter)]) {
             let t = Instant::now();
             let o = e.key(key).unwrap();
             let job = e.take_rerank_job();

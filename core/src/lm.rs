@@ -882,32 +882,37 @@ pub enum End<'a> {
     Next { word: &'a str, lp: f64, delta: f64 },
 }
 
-/// A path: total score and its words with the lp each was scored with, its demotion delta, the count of syllables it covers, and
-/// whether it is a fuzzy word (docs/contracts/fuzzy-input.md section 3.6): read through the fuzzy-sound alternative of a span with no
-/// unknown syllable. The marker is set by the decoder from the word's `Source`, never inferred from the delta or the scores.
-pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64, usize, bool)>);
+/// A word of a decoded path: the text, the lp it was scored with, its demotion delta, the count of syllables it covers (`.3`), and the
+/// fuzzy-sound marker (`.4`, docs/contracts/fuzzy-input.md section 3.6): the word was read through the fuzzy-sound alternative of a span
+/// with no unknown syllable. The decoder sets the marker from the word's `Source`, never from the delta or the scores, and a learning
+/// boost does not take it off.
+pub type DecodedWord<'a> = (&'a str, f64, f64, usize, bool);
+
+/// A path: total score and its words.
+pub type Scored<'a> = (f64, Vec<DecodedWord<'a>>);
 
 /// A path with a fuzzy word is a fuzzy path.
-fn fuzzy_path(ws: &[(&str, f64, f64, usize, bool)]) -> bool {
+fn fuzzy_path(ws: &[DecodedWord]) -> bool {
     ws.iter().any(|w| w.4)
 }
 
 /// The fuzzy-sound rule of the semantic correction (docs/contracts/fuzzy-input.md section 3.6), the one function the engine's rerank job
 /// and the evaluation CLI both use. From the decoder's n-best (one path per surface): `None` when the n-gram first path is a fuzzy path
-/// (a rescue: no rerank, the segment shows the n-gram first), otherwise the indices into the n-best of the first `topk` paths that are
-/// not fuzzy paths, in n-best order (all of them if fewer; the n-gram first is the first). Without a fuzzy-sound bit no word is a fuzzy
-/// word, so this is the first `topk` indices, as before.
+/// (a rescue: no rerank, the segment shows the n-gram first) or `topk` is 0 (nothing to rerank), otherwise the indices into the n-best of
+/// the first `topk` paths that are not fuzzy paths, in n-best order (all of them if fewer; the n-gram first is the first). Without a
+/// fuzzy-sound bit no word is a fuzzy word, so this is the first `topk` indices, as before.
 pub fn rerank_pool(best: &[Scored<'_>], topk: usize) -> Option<Vec<usize>> {
     if fuzzy_path(&best.first()?.1) {
         return None;
     }
-    Some(best.iter().enumerate().filter(|(_, (_, ws))| !fuzzy_path(ws)).map(|(i, _)| i).take(topk).collect())
+    let pool: Vec<usize> = best.iter().enumerate().filter(|(_, (_, ws))| !fuzzy_path(ws)).map(|(i, _)| i).take(topk).collect();
+    (!pool.is_empty()).then_some(pool)
 }
 
 struct Hyp<'a> {
     score: f64,
     surface: String,
-    words: Vec<(&'a str, f64, f64, usize, bool)>,
+    words: Vec<DecodedWord<'a>>,
     /// The two history words (docs/contracts/trigram-core.md): `prev` the one before `last`, `None` when unknown.
     prev: Option<u32>,
     last: Option<u32>,
@@ -1262,7 +1267,7 @@ pub fn decode_segment_fuzzy_delta<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize, bool)>, String)> = last
+    let mut out: Vec<(f64, Vec<DecodedWord<'a>>, String)> = last
         .into_iter()
         .map(|h| {
             // (b') a one-word segment from an unknown start closes without the table.
@@ -1957,5 +1962,6 @@ mod tests {
         assert_eq!(rerank_pool(&nb(&[true, false, false]), 8), None, "fuzzy first: no rerank");
         assert_eq!(rerank_pool(&nb(&[false, false, false, false]), 2), Some(vec![0, 1]));
         assert_eq!(rerank_pool(&[], 8), None);
+        assert_eq!(rerank_pool(&nb(&[false, false]), 0), None, "topk 0: no rerank, not an empty pool");
     }
 }

@@ -6,12 +6,13 @@ use core::eval::{parse_rows, usable};
 use core::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
 use core::lm::{decode_from, decode_from_fuzzy, CappedLexicon, Lm, Profile};
 use core::{Lexicon, Syls, BEAM_S1};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
-}
+#[path = "common/toy.rs"]
+mod toy;
+use toy::{keys_of, root, type_syls_in};
+
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
     assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v3 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
@@ -50,32 +51,9 @@ fn engine(layout: Layout, flags: u32, learn: bool) -> Engine {
     e
 }
 
-fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
-    let mut v = Vec::new();
-    let mut toned = false;
-    for c in syl.chars() {
-        match layout.key_of_tone(c) {
-            Some(tk) => {
-                v.push(Key::ch(tk, 0));
-                toned = true;
-            }
-            None => v.push(Key::ch(layout.key_of_symbol(c).expect("symbol has a key"), 0)),
-        }
-    }
-    if !toned {
-        v.push(Key::new(KeyKind::Space));
-    }
-    v
-}
 /// Types the space-separated syllables; the last output. Every key must be accepted without an internal error.
 fn type_syls(e: &mut Engine, layout: Layout, reading: &str) -> Output {
-    let mut last = None;
-    for s in reading.split(' ') {
-        for k in keys_of(layout, s) {
-            last = Some(e.key(k).expect("no internal error"));
-        }
-    }
-    last.unwrap()
+    type_syls_in(e, layout, &reading.split(' ').collect::<Vec<_>>())
 }
 fn press(e: &mut Engine, kind: KeyKind) -> Output {
     e.key(Key::new(kind)).expect("no internal error")
