@@ -229,6 +229,93 @@ class Ordering(unittest.TestCase):
         self.assertEqual(B.ordered(["丙丙", "甲甲", "乙乙"], n.get), B.ordered(["乙乙", "丙丙", "甲甲"], n.get))
 
 
+class PackOovGrading(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1 item 3 and section 2 item 5: the graded score, the order inside a reading, the frozen counts table."""
+    N = 10 ** 9
+
+    def table(self, d, body="a\t5\n", n=None):
+        path = os.path.join(d, "acg-counts.tsv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(f"#model_sha256\t{'0' * 64}\n#N\t{n or self.N}\n{body}")
+        return path
+
+    def test_graded_score_formula(self):
+        g = B.grade_fn({"高頻": 10 ** 6, "低頻": 1}, self.N, 0.5)
+        self.assertEqual(g("高頻", -7.0), max(-7.0, -3.0 + 0.5))          # log10(1e6 / 1e9) + B beats S_len
+        self.assertEqual(g("低頻", -7.0), -7.0)                            # log10(1e-9) + B = -8.5 is below S_len
+        self.assertEqual(g("沒有", -7.0), -7.0)                            # not in the table: S_len
+        self.assertEqual(B.grade_fn({"高頻": 10 ** 6}, self.N, 0.0)("高頻", -7.0), -3.0)
+        self.assertEqual(B.grade_fn({"高頻": 10 ** 6}, self.N, 1.0)("高頻", -7.0), -2.0)
+
+    def test_order_inside_a_reading_follows_ordered_even_when_a_later_word_is_more_frequent(self):
+        reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"], "丙丙": ["ㄅ", "ㄅ"]}
+        g = B.grade_fn({"甲甲": 10, "乙乙": 10 ** 6, "丙丙": 10 ** 7}, self.N, 0.0)
+        rows = B.pack_rows(["甲甲", "乙乙", "丙丙"], reading, {2: -7.0}, grade=g)
+        score = {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        self.assertEqual(score["甲甲"], -7.0)                               # g = max(-7, -8 + 0)
+        self.assertAlmostEqual(score["乙乙"], -7.0 - B.TIE, places=8)       # g = -3 but never above the row before
+        self.assertAlmostEqual(score["丙丙"], -7.0 - 2 * B.TIE, places=8)
+        self.assertGreater(score["甲甲"], score["乙乙"])
+        self.assertGreater(score["乙乙"], score["丙丙"])
+
+    def test_a_reading_is_lifted_as_a_whole_and_new_words_still_sit_behind_shipped_ones(self):
+        reading = {"舊詞": ["ㄅ", "ㄅ"], "新詞": ["ㄅ", "ㄅ"], "新乙": ["ㄅ", "ㄅ"]}
+        g = B.grade_fn({"舊詞": 10 ** 6, "新詞": 10 ** 6, "新乙": 10 ** 6}, self.N, 0.0)
+        score = lambda rows: {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        got = score(B.pack_rows(["舊詞", "新詞", "新乙"], reading, {2: -7.0}, shipped={"舊詞"}, grade=g))
+        self.assertEqual(got["舊詞"], -3.0)
+        self.assertAlmostEqual(got["新詞"], -3.0 - B.TIE - B.NEW_BEHIND_SHIPPED, places=8)    # chain first, the penalty after
+        self.assertAlmostEqual(got["新乙"], -3.0 - 2 * B.TIE - B.NEW_BEHIND_SHIPPED, places=8)   # the penalty does not stack down the chain
+
+    def test_no_grade_is_the_old_s_len_rows(self):
+        reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"]}
+        rows = B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0})
+        self.assertEqual([l.split("\t")[2] for l in rows], ["-7.0", repr(round(-7.0 - B.TIE, 8))])
+
+    def test_counts_table_missing_or_changed_stops_and_the_model_file_is_not_looked_at(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.table(d, "a\t5\nb\t7\n")
+            sha = B.sha256_file(path)
+            with self.assertRaises(SystemExit):
+                B.load_counts(os.path.join(d, "nope.tsv"), sha)                  # missing
+            with self.assertRaises(SystemExit):
+                B.load_counts(path, "")                                           # pin not set
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("c\t9\n")
+            with self.assertRaises(SystemExit):
+                B.load_counts(path, sha)                                          # the table was edited
+            path = self.table(d, "a\t5\nb\t7\n")
+            want = B.load_counts(path, sha)
+            self.assertEqual(want, ({"a": 5, "b": 7}, self.N))
+            with mock.patch.object(B, "LM", os.path.join(d, "another-model.sjlm")):    # data/lm replaced by something else: same table, same rows
+                got = B.load_counts(path, sha)
+                reading = {"甲甲": ["ㄅ", "ㄅ"]}
+                self.assertEqual(got, want)
+                self.assertEqual(B.pack_rows(["甲甲"], reading, {2: -7.0}, grade=B.grade_fn(*got, 0.0)), B.pack_rows(["甲甲"], reading, {2: -7.0}, grade=B.grade_fn(*want, 0.0)))
+
+    def test_freeze_counts_checks_the_model_and_records_it(self):
+        model = os.path.join(B.ROOT, "eval", "golden", "kn-tiny", "bigram.sjlm")
+        with tempfile.TemporaryDirectory() as d:
+            add, out = os.path.join(d, "add.tsv"), os.path.join(d, "counts.tsv")
+            with open(add, "w", encoding="utf-8") as f:
+                f.write("ㄊㄚ\t他\t-7.0\tacg\nㄓㄢˋ\t占\t-7.0\tacg\nㄅ\t沒見過\t-7.0\tacg\n")
+            with self.assertRaises(SystemExit):
+                B.freeze_counts(model, out, add, model_sha="0" * 64)               # not the pinned model: nothing written
+            self.assertFalse(os.path.exists(out))
+            self.assertGreater(B.freeze_counts(model, out, add, model_sha=B.sha256_file(model)), 0)
+            lines = open(out, encoding="utf-8").read().splitlines()
+            self.assertEqual(lines[0], f"#model_sha256\t{B.sha256_file(model)}")
+            self.assertTrue(lines[1].startswith("#N\t"))
+            words = dict(l.split("\t") for l in lines[2:])
+            self.assertIn("他", words)
+            self.assertNotIn("沒見過", words)                                        # count 0: left out, so it falls back to S_len
+
+    def test_the_committed_pack_shares_no_string_with_lexicon_words(self):
+        pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
+        self.assertGreater(len(pack), 10000)
+        self.assertEqual(pack & B.lexicon_words(), set())
+
+
 # ---- a fake API serving a small, fixed corner of Wikipedia
 
 YEAR_LIST = """{{noteTA|G1=Anime}}

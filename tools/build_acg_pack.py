@@ -10,6 +10,8 @@
       --recheck                                       不重建：用 data/lm 的出貨模型重驗 --out 裡的詞包（契約 A3.5 第 6 項）
       --recheck-rule                                  --recheck 改用規則模型（--rule-lm）
       --base DIR                                      --recheck 時另外比 v0.4.0 詞包（DIR/acg-add.tsv）每一列的第一名有沒有變
+      --bonus B                                       分級分數的加分 B（契約 pack-oov 第 1 節第 3 項：g(w) = max(S_len, log10(c/N) + B)，預設 0）
+      freeze-counts                                   子命令：從 data/lm 的 model-v6 凍結詞包詞的次數，寫 data/packs/acg-counts.tsv；一般建置只讀這份表
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
@@ -20,6 +22,7 @@ import collections
 import functools
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -39,6 +42,11 @@ import ime  # noqa: E402
 PACKS = os.path.join(ROOT, "data", "packs")
 LEX = os.path.join(ROOT, "data", "lexicon")
 LM = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
+COUNTS = os.path.join(PACKS, "acg-counts.tsv")
+# docs/contracts/pack-oov.md 第 1 節第 3 項：凍結的次數表（只有 `freeze-counts` 會寫），一般建置只讀它，不看 data/lm 是哪一版。
+# 表檔的 SHA-256 釘在這裡；空字串＝還沒釘（freeze-counts 之後由人填），一般建置遇到就中止。
+COUNTS_SHA = ""
+MODEL_V6_SHA = "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42"
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/acg")
 UA = "shanjie-acg-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"
 WORKS = 400                       # 契約 A.1：sitelink 數最多的作品數
@@ -792,14 +800,57 @@ NEW_BEHIND_SHIPPED = 3.0
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
 
 
-def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None):
+def freeze_counts(lm_path=LM, out=COUNTS, add=os.path.join(PACKS, "acg-add.tsv"), model_sha=MODEL_V6_SHA):
+    """子命令 freeze-counts：data/lm 的模型雜湊要等於 model_sha（model-v6）才寫；寫出 add 裡每個詞在模型裡的次數（次數 0 的不寫，查不到就是 S_len）。
+    檔頭兩行記模型雜湊與 N。"""
+    if sha256_file(lm_path) != model_sha:
+        raise SystemExit(f"{lm_path}: not the model whose counts are frozen (SHA-256 {model_sha})")
+    sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+    import lm as L          # 延後載入：只有這個子命令要讀模型
+    lm = L.BigramLM(lm_path, classes=False)
+    words = sorted({l.split("\t")[1] for l in open(add, encoding="utf-8") if l.strip()})
+    lines = [f"#model_sha256\t{model_sha}\n", f"#N\t{lm.N}\n"] + [f"{w}\t{c}\n" for w in words for c in [lm.count(w)] if c]
+    with open(out, "w", encoding="utf-8", newline="") as f:
+        f.writelines(lines)
+    return len(lines) - 2
+
+
+def load_counts(path=COUNTS, sha=None):
+    """凍結的次數表 → ({詞: 次數}, N)。表不存在、或檔的 SHA-256 不等於釘住的常數（COUNTS_SHA）就中止；不讀 data/lm。"""
+    sha = COUNTS_SHA if sha is None else sha
+    if not os.path.exists(path):
+        raise SystemExit(f"{path}: missing; run `build_acg_pack.py freeze-counts` first")
+    if not sha or sha256_file(path) != sha:
+        raise SystemExit(f"{path}: SHA-256 is not the pinned {sha or '(unset)'}")
+    counts, n = {}, None
+    for l in open(path, encoding="utf-8"):
+        f = l.rstrip("\n").split("\t")
+        if f[0] == "#N":
+            n = int(f[1])
+        elif not f[0].startswith("#"):
+            counts[f[0]] = int(f[1])
+    if not n:
+        raise SystemExit(f"{path}: no #N header")
+    return counts, n
+
+
+def grade_fn(counts, n, bonus):
+    """分級分數 g(w) = max(S_len, log10(c/N) + B)；不在表裡的詞一律 S_len。回傳 (詞, S_len) → 分數。"""
+    return lambda w, s_len: max(s_len, math.log10(counts[w] / n) + bonus) if w in counts else s_len
+
+
+def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, grade=None):
     """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
     extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。
     shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。
+    grade（契約 pack-oov）：(詞, S_len) → 分級分數；給了就用它取代 S_len，而且同讀音內依 order 走：第 i 列 = min(g(w_i), 第 i−1 列 − TIE)，所以分級只會
+    把整個讀音一起抬高或壓低、不改讀音內的先後；NEW_BEHIND_SHIPPED 在這之後才扣。沒給＝原本的 S_len 減 k × TIE。
     first（契約 A4，維護者 2026-10-23）：{讀音（空白分隔）: 處置列要它排第一的詞}；這個詞在那個讀音上不減 NEW_BEHIND_SHIPPED，處置列的順序勝過「已出貨優先」。"""
     rows, seen = [], collections.Counter()
     extra = extra or {}
-    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, sc[len(w)], TAG)]
+    score_of = (lambda w: grade(w, sc[len(w)])) if grade else (lambda w: sc[len(w)])
+    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, score_of(w), TAG)]
+    prev = {}
     ship_keys = {f[0] for w in order if w in shipped for _, _, f in gen(w)}
     for w in order:
         for _, _, (key, word, score, tag) in gen(w):
@@ -808,6 +859,11 @@ def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None):
             # ponytail: the exemption matches the disposition's reading only; a first-named word's sandhi or extra-reading rows on a
             # shipped key are still penalized (A4: 0 of 145 first-named words have such a row). Match the word's derived keys if one appears.
             pen = NEW_BEHIND_SHIPPED if w not in shipped and key in ship_keys and (first or {}).get(key.replace("-", " ")) != w else 0
+            if grade:
+                s = min(float(score), prev[key] - TIE) if key in prev else float(score)
+                prev[key] = s
+                rows.append(f"{key}\t{word}\t{round(s - pen, 8)!r}\t{tag}\n")
+                continue
             rows.append(f"{key}\t{word}\t{score}\t{tag}\n" if not (k or pen) else f"{key}\t{word}\t{round(float(score) - k * TIE - pen, 8)!r}\t{tag}\n")
     return rows
 
@@ -982,7 +1038,7 @@ def open_collisions(found, decided, keep_now, keep_both, shipped=frozenset(), pa
 
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS, a3=True, v040_words=V040_WORDS, v040_sha=V040_SHA, keep_both_tsv=os.path.join(PACKS, "acg-keep-both.tsv"), info=None):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS, a3=True, v040_words=V040_WORDS, v040_sha=V040_SHA, keep_both_tsv=os.path.join(PACKS, "acg-keep-both.tsv"), info=None, counts=None, bonus=0.0):
     """a3：關掉就是 v0.4.0 的抽取（A3.1、A3.2、A3.4 不做）。info：給了就把報告要用的中間結果放進去（詞的來源、讀音）。"""
     log = lambda *a: print(*a, file=sys.stderr)
     v040 = load_v040(v040_words, v040_sha)
@@ -1115,7 +1171,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         return sum(len(s) for k, s in src[w].items() if k != "char") + len(name_base[w]) - (w in A3_MANUAL and "manual" in src[w])
     for _ in range(LEXICON_RULE_ROUNDS):
         order = ordered(words, nsrc, rank, reading, extra, shipped)
-        rows = pack_rows(order, reading, sc, extra, shipped, first_named(rank, set(words)))
+        rows = pack_rows(order, reading, sc, extra, shipped, first_named(rank, set(words)), grade_fn(*counts, bonus) if counts else None)
         found = detect_collisions(words, reading, rows, ref, decode, extra=extra)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
         if not hit:
@@ -1278,6 +1334,9 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
 
 
 def main():
+    if sys.argv[1:2] == ["freeze-counts"]:
+        print(f"{COUNTS}: {freeze_counts()} words; pin its SHA-256 ({sha256_file(COUNTS)}) in COUNTS_SHA")
+        return
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", default=CACHE)
     ap.add_argument("--out", default=PACKS)
@@ -1287,6 +1346,7 @@ def main():
     ap.add_argument("--a3", choices=("on", "off"), default="on")
     ap.add_argument("--recheck", action="store_true")
     ap.add_argument("--recheck-rule", action="store_true", help="--recheck 用規則模型（--rule-lm）而不是出貨的 data/lm")
+    ap.add_argument("--bonus", type=float, default=0.0, help="分級分數的加分 B（契約 pack-oov 第 1 節第 3 項）")
     ap.add_argument("--base", help="--recheck：v0.4.0 詞包所在的資料夾，多比已出貨的詞的第一名有沒有變")
     a = ap.parse_args()
     if a.recheck:
@@ -1298,7 +1358,8 @@ def main():
     rule = check_rule_lm(a.rule_lm)
     decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
     info = {}
-    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
+    counts = load_counts()          # 先於抓取：表有問題就不浪費一輪網路
+    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info, counts=counts, bonus=a.bonus)
     lost = sorted(info["v040"] - set(info["words"]) - model_v6_dropped() - approved_removed())
     if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔（model-v6 §3.3 照 A2 規則排除的、A4 維護者核准拿掉的不算）
         raise SystemExit(f"v0.4.0 words missing from the new pack ({len(lost)}), nothing written: {lost}")
