@@ -542,7 +542,8 @@ pub struct Engine {
     /// `load_lm` caps; `None` with no pack, so a pack-off engine holds nothing extra.
     pack_text: Option<String>,
     /// How many leading bytes of `pack_text` are the rows of the enabled `PACK_OOV` packs, which `load_lm` exempts from the cap.
-    /// They are a prefix because `PACK_FILES` lists the `PACK_OOV` packs first; a length, not a copy, so the engine holds the rows once.
+    /// They are a prefix because `read_packs_split` reads the `PACK_OOV` packs first; a length, not a copy, so the engine holds the
+    /// rows once.
     pack_oov_len: usize,
     lm: Option<LmState>,
     profile: Profile,
@@ -723,23 +724,34 @@ fn read_file(p: PathBuf) -> Result<String, LoadError> {
 /// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
 /// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
 pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
-    let mut text = String::new();
-    for (bit, name) in PACK_FILES {
-        if mask & bit == 0 {
-            continue;
-        }
-        match read_file(dir.join(name)) {
-            Ok(t) => {
-                if !text.is_empty() && !text.ends_with('\n') {
-                    text.push('\n');
-                }
-                text.push_str(&t);
+    read_packs_split(dir, mask).map(|(text, _)| text)
+}
+
+/// `read_packs_detailed` and the length of its `PACK_OOV` prefix: the `PACK_OOV` packs are read first, so their rows are
+/// `text[..len]`, exactly what `read_packs_detailed(dir, mask & PACK_OOV)` returns.
+fn read_packs_split(dir: &Path, mask: u32) -> Result<(String, usize), LoadError> {
+    let (mut text, mut oov_len) = (String::new(), 0);
+    for oov in [true, false] {
+        for (bit, name) in PACK_FILES {
+            if mask & bit == 0 || (bit & PACK_OOV != 0) != oov {
+                continue;
             }
-            Err(LoadError::Read { kind: std::io::ErrorKind::NotFound, .. }) => {}
-            Err(e) => return Err(e),
+            match read_file(dir.join(name)) {
+                Ok(t) => {
+                    if !text.is_empty() && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    text.push_str(&t);
+                }
+                Err(LoadError::Read { kind: std::io::ErrorKind::NotFound, .. }) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        if oov {
+            oov_len = text.len();
         }
     }
-    Ok(text)
+    Ok((text, oov_len))
 }
 
 /// The always-on names layer (docs/contracts/names-lexicon.md, model-v6 section 2.5): read after `sandhi-add.tsv` into the lexicon
@@ -763,6 +775,11 @@ pub fn load_lexicon_packs_detailed(data_dir: &Path, packs: Option<(&Path, u32)>)
 /// the same way. `None`: exactly `load_lexicon_packs_detailed`. A missing or unreadable file is a load failure naming it.
 /// `names` false (the CLI's evaluation-only `--no-names`) leaves `names-add.tsv` out of the lexicon; the engine always passes true.
 pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String), LoadError> {
+    load_lexicon_split(data_dir, packs, extra_file, names).map(|(lex, text, _)| (lex, text))
+}
+
+/// `load_lexicon_extra_detailed` and the length of the `PACK_OOV` prefix of the returned text (`read_packs_split`).
+fn load_lexicon_split(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String, usize), LoadError> {
     let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
     let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
     let sandhi = read_file(data_dir.join("sandhi-add.tsv"))?;
@@ -770,9 +787,9 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
     if names {
         text = join_overlays(text, &read_file(data_dir.join(NAMES_FILE))?);
     }
-    let mut extra = match packs {
-        Some((dir, mask)) => read_packs_detailed(dir, mask)?,
-        None => String::new(),
+    let (mut extra, oov_len) = match packs {
+        Some((dir, mask)) => read_packs_split(dir, mask)?,
+        None => (String::new(), 0),
     };
     if let Some(f) = extra_file {
         extra = join_overlays(extra, &read_file(f.to_path_buf())?);
@@ -781,7 +798,7 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
         text = join_overlays(text, &extra);
     }
     let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
-    Ok((Arc::new(lex), extra))
+    Ok((Arc::new(lex), extra, oov_len))
 }
 
 /// The text `CappedLexicon::with_packs` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
@@ -824,16 +841,10 @@ impl Engine {
             return Err(EngineError::LoadFailed);
         }
         let packs = packs.filter(|&(_, m)| m != 0);
-        let (lex, pack_text) = load_lexicon_packs(data_dir, packs)?;
+        let (lex, pack_text, oov_len) = load_lexicon_split(data_dir, packs, None, true).map_err(|_| EngineError::LoadFailed)?;
         let mut e = Engine::with_lexicon(lex, layout);
         e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
-        if let Some((dir, mask)) = packs {
-            let oov = read_packs_detailed(dir, mask & PACK_OOV).map_err(|_| EngineError::LoadFailed)?;
-            if !e.pack_text.as_deref().unwrap_or("").starts_with(&oov) {
-                return Err(EngineError::LoadFailed);
-            }
-            e.pack_oov_len = oov.len();
-        }
+        e.pack_oov_len = oov_len;
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;

@@ -780,9 +780,12 @@ pub struct CappedLexicon {
     /// The optional-pack words (docs/contracts/pack-oov.md): `(off, len)` into `base.words`, one per distinct string, sorted by the
     /// string's bytes. Empty without a pack (the lexicon then behaves exactly as before).
     packs: Vec<(u32, u32)>,
-    /// One bit per base entry (base order) whose word is in the overlay, so `readings` can redo the capping without the pack's
-    /// exemption; empty without a pack.
+    /// One bit per entry position whose word is in the overlay (`overlay_bits`) or an optional-pack word (`pack_bits`), so
+    /// `readings` can redo the capping without the pack's exemption; both empty without a pack.
     overlay_bits: Vec<u64>,
+    pack_bits: Vec<u64>,
+    /// `Lm::identity` of the model the lexicon was capped with: `readings` must get the same one.
+    built_for: (u64, usize, usize),
 }
 
 /// An overlay word's score capped at its corpus frequency, or lowered by the unseen penalty when the model never saw it.
@@ -791,8 +794,13 @@ fn capped_score(lm: &Lm, score: f64, w: &str) -> f64 {
     if c != 0 { score.min((c as f64 / lm.n as f64).log10()) } else { score - UNSEEN_OVERLAY_PENALTY }
 }
 
-fn by_score<T>(a: &(T, f64), b: &(T, f64)) -> std::cmp::Ordering {
-    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+/// Best first, the one order both the decoder's entries and `readings` sort by (stable, NaN as equal).
+fn desc(a: f64, b: f64) -> std::cmp::Ordering {
+    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn bit(bits: &[u64], p: usize) -> bool {
+    bits[p / 64] >> (p % 64) & 1 == 1
 }
 
 impl CappedLexicon {
@@ -838,21 +846,24 @@ impl CappedLexicon {
         let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let mut packs: Vec<(u32, u32)> = Vec::new();
         let mut ents = base.ents.clone();
-        let mut overlay_bits = if pack.is_empty() { Vec::new() } else { vec![0u64; ents.len().div_ceil(64)] };
+        let bits = if pack.is_empty() { 0 } else { ents.len().div_ceil(64) };
+        let (mut overlay_bits, mut pack_bits) = (vec![0u64; bits], vec![0u64; bits]);
         for i in 0..base.readings.len() {
             let range = base.range(i);
             for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
                 let w = &base.words[e.off as usize..(e.off + e.len) as usize];
-                if words.contains(w) && !overlay_bits.is_empty() {
-                    overlay_bits[p / 64] |= 1 << (p % 64);
+                let (in_overlay, in_pack) = (words.contains(w), pack.contains(w));
+                if bits != 0 {
+                    overlay_bits[p / 64] |= (in_overlay as u64) << (p % 64);
+                    pack_bits[p / 64] |= (in_pack as u64) << (p % 64);
                 }
-                if pack.contains(w) {
+                if in_pack {
                     packs.push((e.off, e.len));
-                } else if words.contains(w) {
+                } else if in_overlay {
                     e.score = capped_score(lm, e.score, w);
                 }
             }
-            ents[range].sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            ents[range].sort_by(|a, b| desc(a.score, b.score));
         }
         let deltas = match demote {
             Some(d) => d.resolve(&base, &ents)?,
@@ -860,7 +871,7 @@ impl CappedLexicon {
         };
         packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
         packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, built_for: lm.identity() })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -907,20 +918,23 @@ impl CappedLexicon {
     /// pack word is rebuilt here the way `new` without the exemption orders it (base order, pack words capped with `lm`, the model the
     /// lexicon was built with, then a stable sort), so the engine keeps no second copy of those lists.
     pub fn readings<'s, 'm>(&'s self, lm: &'m Lm) -> impl Iterator<Item = (Vec<&'s str>, Vec<(&'s str, f64)>)> + use<'s, 'm> {
+        debug_assert!(self.built_for == lm.identity(), "readings() needs the model the lexicon was capped with");
         (0..self.base.readings.len()).map(move |r| {
             let key = self.base.key_of(&self.base.readings[r]).iter().map(|&i| self.base.syl_names[i as usize].as_str());
             let range = self.base.range(r);
-            let mut list: Vec<(&str, f64)> = range.clone().map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect();
-            if !self.packs.is_empty() && list.iter().any(|&(w, _)| self.is_pack(w)) {
-                let overlay = |p: usize| self.overlay_bits[p / 64] >> (p % 64) & 1 == 1;
-                list = range
+            // `pack_bits` is set per position; `ents` permutes positions only within a reading, so `range` covers the same bits.
+            let list = if !self.pack_bits.is_empty() && range.clone().any(|p| bit(&self.pack_bits, p)) {
+                let mut l: Vec<(&str, f64)> = range
                     .map(|p| {
                         let (b, w) = (&self.base.ents[p], self.word_of(&self.base.ents[p]));
-                        (w, if overlay(p) { capped_score(lm, b.score, w) } else { b.score })
+                        (w, if bit(&self.overlay_bits, p) { capped_score(lm, b.score, w) } else { b.score })
                     })
                     .collect();
-                list.sort_by(by_score);
-            }
+                l.sort_by(|a, b| desc(a.1, b.1));
+                l
+            } else {
+                range.map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect()
+            };
             (key.collect(), list)
         })
     }
