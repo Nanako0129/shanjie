@@ -2,10 +2,12 @@
 No network: the build runs against a fake API. It needs the repo's data (data/lexicon, data/lm/bigram.sjlm) and the evaluation CLI
 (built on demand with cargo) for the collision detection; it fails loudly without them, never skips."""
 import atexit
+import collections
 import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -227,6 +229,91 @@ class Ordering(unittest.TestCase):
         n = {"乙乙": 1, "甲甲": 1, "丙丙": 3}
         self.assertEqual(B.ordered(["乙乙", "甲甲", "丙丙"], n.get), ["丙丙"] + sorted(["乙乙", "甲甲"]))
         self.assertEqual(B.ordered(["丙丙", "甲甲", "乙乙"], n.get), B.ordered(["乙乙", "丙丙", "甲甲"], n.get))
+
+
+class PackOovRegrade(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1 item 3a: regrade keeps every row and recomputes only the scores."""
+    SC = {2: -7.0}
+    TIE = B.TIE
+
+    def rows(self, *items):
+        return [f"{k}\t{w}\t{s!r}\tacg\n" for k, w, s in items]
+
+    def test_formula_offsets_penalty_and_order(self):
+        s, tie = self.SC[2], self.TIE
+        lines = self.rows(("a-b", "甲甲", s), ("a-b", "乙乙", s - tie - 3.0),     # shipped, then a new word with the shipped penalty
+                          ("c-b", "甲甲", s - 0.5), ("c-b", "丙丙", s - 0.5 - tie - 3.0))   # the sandhi rows of the same words
+        grade = B.grade_fn({"甲甲": 10 ** 3, "乙乙": 10 ** 4}, 10 ** 9, 0.0)        # log10 = -6 and -5, both above S_len
+        out = [l.split("\t") for l in B.regrade_rows(lines, self.SC, grade, {})]
+        self.assertEqual([(k, w) for k, w, _, _ in out], [("a-b", "甲甲"), ("a-b", "乙乙"), ("c-b", "甲甲"), ("c-b", "丙丙")])
+        got = {(k, w): float(x) for k, w, x, _ in out}
+        self.assertAlmostEqual(got[("a-b", "甲甲")], -6.0)
+        self.assertAlmostEqual(got[("a-b", "乙乙")], -6.0 - tie - 3.0, msg="min chain then the kept penalty: the count does not lift it past the shipped word")
+        self.assertAlmostEqual(got[("c-b", "甲甲")], -6.5, msg="a sandhi row is g(w) - 0.5")
+        self.assertAlmostEqual(got[("c-b", "丙丙")], min(s - 0.5, -6.5 - tie) - 3.0, msg="a penalized sandhi row is min(g - 0.5, prev - TIE) - 3.0")
+
+    def test_collision_rank_reorders_and_first_named_drops_the_penalty(self):
+        s, tie = self.SC[2], self.TIE
+        lines = self.rows(("a-b", "甲甲", s), ("a-b", "乙乙", s - tie - 3.0))
+        rank = B.collision_rank([["a b", "乙乙", "+甲甲", "test"]])
+        out = {(k, w): float(x) for k, w, x, _ in (l.split("\t") for l in B.regrade_rows(lines, self.SC, B.grade_fn({}, 1, 0.0), rank))}
+        self.assertAlmostEqual(out[("a-b", "乙乙")], s, msg="named first: first in the reading and not penalized")
+        self.assertAlmostEqual(out[("a-b", "甲甲")], s - tie)
+
+    def test_the_committed_pack_is_regrade_bonus_0_of_the_a4_pack(self):
+        texts = {n: self.a4_pack(n) for n in ("acg-add.tsv", "acg-sources.tsv", "acg.json")}
+        if None in texts.values():
+            self.skipTest("the A4 commit is not in this clone")
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "src"), os.path.join(d, "out")
+            os.makedirs(src)
+            for n, x in texts.items():
+                open(os.path.join(src, n), "w", encoding="utf-8", newline="").write(x)
+            B.regrade(src, out, 0.0)
+            for n in ("acg-add.tsv", "acg-sources.tsv", "acg.json"):
+                self.assertEqual(open(os.path.join(out, n), "rb").read(), open(os.path.join(B.PACKS, n), "rb").read(), n)
+            with self.assertRaises(SystemExit):             # a graded pack is not a valid input
+                B.regrade(out, os.path.join(d, "again"), 0.0)
+
+    def test_a_yield_row_drops_by_the_shipped_penalty(self):
+        s = self.SC[2]
+        lines = self.rows(("a-b", "甲甲", s))
+        out = float(B.regrade_rows(lines, self.SC, B.grade_fn({}, 1, 0.0), {}, {("a b", "甲甲")})[0].split("\t")[2])
+        self.assertAlmostEqual(out, s - B.NEW_BEHIND_SHIPPED)
+
+    def test_the_committed_yield_list_names_pack_rows(self):
+        pack = {(l.split("\t")[0].replace("-", " "), l.split("\t")[1]) for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8")}
+        ys = B.read_tsv(os.path.join(B.PACKS, "acg-yield.tsv"))
+        self.assertEqual(len(ys), 6)                                                  # 維護者 2026-10-24 審 B=0 清單
+        self.assertTrue(all((r, w) in pack for r, w, _ in ys), [(r, w) for r, w, _ in ys if (r, w) not in pack])
+
+    def test_an_offset_outside_the_four_groups_stops(self):
+        with self.assertRaises(SystemExit):
+            B.regrade_rows(self.rows(("a-b", "甲甲", self.SC[2] - 1.0)), self.SC, B.grade_fn({}, 1, 0.0), {})
+
+    @staticmethod
+    def a4_pack(name="acg-add.tsv"):
+        r = subprocess.run(["git", "-C", B.ROOT, "show", f"{B.REGRADE_SRC_COMMIT}:data/packs/{name}"], capture_output=True)
+        return r.stdout.decode() if r.returncode == 0 else None
+
+    def test_empty_counts_keep_the_a4_order_outside_the_a4_readings(self):
+        text = self.a4_pack()
+        if text is None:
+            self.skipTest("the A4 commit is not in this clone")
+        lines = text.splitlines(keepends=True)
+        sc = B.scores(B.base_lexicon())
+        rank = B.collision_rank(B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")))
+        out = B.regrade_rows(lines, sc, B.grade_fn({}, 1, 0.0), rank)
+        def order_and_groups(ls):
+            by = collections.defaultdict(list)
+            for k, w, x, _ in (l.rstrip("\n").split("\t") for l in ls):
+                by[k].append((float(x), w, round((sc[len(w)] - float(x)) / 0.5) * 0.5))
+            return {k: [(w, g) for _, w, g in sorted(v, reverse=True)] for k, v in by.items()}
+        a, b = order_and_groups(lines), order_and_groups(out)
+        a4 = {"ㄧ-ㄌㄧˋ-ㄙ", "ㄎㄜˋ-ㄌㄚ-ㄌㄧˋ-ㄙ", "ㄅㄨˋ-ㄌㄧˋ-ㄊㄚˇ", "ㄅㄨˋ-ㄌㄧˋ-ㄐㄧ-ㄊㄜˋ", "ㄞˋ-ㄌㄧˋ-ㄎㄚˇ", "ㄇㄟˊ-ㄌㄧˋ", "ㄇㄧˇ-ㄙㄚˋ-ㄌㄧˋ",
+              "ㄒㄧㄝˋ-ㄌㄧˋ-ㄦˇ", "ㄉㄨㄛ-ㄌㄧˋ-ㄙ", "ㄋㄚˋ-ㄒㄧㄡ"}
+        self.assertEqual({k for k in a if a[k] != b[k]} - a4, set(), "regrade changed the order or an offset group outside the 10 A4 readings")
+        self.assertEqual([l.split("\t")[:2] for l in lines], [l.split("\t")[:2] for l in out])
 
 
 class PackOovGrading(unittest.TestCase):
@@ -949,7 +1036,7 @@ class A3(unittest.TestCase):
         self.assertEqual(len(kept), 175)                                      # 契約 A3.3a 的 178 個，加 A4 的「多莉」，減 A4 讀音改了之後不再同音的 4 個
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (259, 138))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音；加 A4 的 22 列、10 組讀音（其中 ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本就有，只多艾麗卡）與 ㄞˋ ㄌㄧˋ ㄕㄚ 的 2 個詞（「麗」改讀 ㄌㄧˋ 後通語 SJ-LM-6-9.1M 詞表裡的寫法靠語料排前，維護者先不處理）
+        self.assertEqual((len(both), len({r for r, _ in both})), (237, 129))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音；加 A4 的 22 列、10 組讀音（其中 ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本就有，只多艾麗卡）與 ㄞˋ ㄌㄧˋ ㄕㄚ 的 2 個詞（「麗」改讀 ㄌㄧˋ 後通語 SJ-LM-6-9.1M 詞表裡的寫法靠語料排前，維護者先不處理）；pack-oov（2026-10-24）把 A4 那 10 組讀音的 22 列移回 acg-collisions.tsv 的研究順序（ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本那三列留著）
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
         dropped = B.model_v6_dropped()

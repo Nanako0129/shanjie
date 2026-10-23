@@ -45,7 +45,7 @@ LM = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
 COUNTS = os.path.join(PACKS, "acg-counts.tsv")
 # docs/contracts/pack-oov.md 第 1 節第 3 項：凍結的次數表（只有 `freeze-counts` 會寫），一般建置只讀它，不看 data/lm 是哪一版。
 # 表檔的 SHA-256 釘在這裡；空字串＝還沒釘（freeze-counts 之後由人填），一般建置遇到就中止。
-COUNTS_SHA = ""
+COUNTS_SHA = "2ad50f02953ead839aef985be872941d987742197ecd34a9bb34532c6b8174ec"
 MODEL_V6_SHA = "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42"
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/acg")
 UA = "shanjie-acg-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"
@@ -1333,9 +1333,69 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
     return "\n".join(out) + "\n"
 
 
+def regrade_rows(lines, sc, grade, rank, yields=frozenset()):
+    """契約 pack-oov 第 1 節第 3a 項：已提交的詞包列 → 只換分數的列（順序、讀音、詞、來源標籤都不動）。
+    每個鍵（讀音）內：處置列有名次的詞照 collision_rank 在前，其餘照原分數由高到低；每列原本相對 S_len 的差距
+    round((S_len − 分數) / 0.5) × 0.5 只會是 0、0.5（「一」「不」變調列）、3.0（NEW_BEHIND_SHIPPED）、3.5；
+    分級值 = g(w) − 變調差距，第 i 列 = min(分級值, 第 i−1 列 − TIE)，原本扣過 3.0 的列再扣 3.0（first_named 不扣）。
+    yields：{(讀音（空白分隔）, 詞)}，acg-yield.tsv（維護者審過的讓位）；這些列再扣 NEW_BEHIND_SHIPPED，讓詞庫的詞排第一、詞包詞還在候選。"""
+    rows = [l.rstrip("\n").split("\t") for l in lines if l.strip()]
+    first = first_named(rank, {w for _, w, _, _ in rows})
+    by_key = collections.defaultdict(list)
+    for key, w, s, tag in rows:
+        off = round((sc[len(w)] - float(s)) / VARIANT_STEP) * VARIANT_STEP
+        if off not in (0.0, 0.5, 3.0, 3.5):
+            raise SystemExit(f"regrade: {key} {w} {s} is {off} below S_len, not one of 0, 0.5, 3.0, 3.5")
+        by_key[key].append((w, float(s), off))
+    new = {}
+    for key, items in by_key.items():
+        r = key.replace("-", " ")
+        prev = None
+        for w, s, off in sorted(items, key=lambda x: (rank.get((r, x[0]), len(rank)), -x[1])):
+            v = grade(w, sc[len(w)]) - (off % NEW_BEHIND_SHIPPED)
+            prev = v if prev is None else min(v, prev - TIE)
+            pen = NEW_BEHIND_SHIPPED if off >= NEW_BEHIND_SHIPPED and first.get(r) != w else 0
+            new[(key, w)] = round(prev - pen - (NEW_BEHIND_SHIPPED if (r, w) in yields else 0), 8)
+    return [f"{key}\t{w}\t{new[(key, w)]!r}\t{tag}\n" for key, w, _, tag in rows]
+
+
+VARIANT_STEP = 0.5      # the offsets regrade recovers are multiples of bo.VARIANT_PENALTY
+# regrade's only input (contract pack-oov 3a): the ungraded A4 pack main shipped (PR #274, c0a9c6bf). Its rows carry the offsets regrade
+# recovers; a graded pack does not, so regrading regrade's own output is refused.
+REGRADE_SRC_COMMIT = "c0a9c6bfff676a7cff378065298865f16f3ed673"
+REGRADE_SRC_SHA = "24b303ec1093498724583dbdfcc8cd339d414f85d58a7a5ad7d5eb7b3f17c59c"
+assert bo.VARIANT_PENALTY == VARIANT_STEP
+
+
+def regrade(src, out=PACKS, bonus=0.0, empty_counts=False):
+    """子命令 regrade：src 的 acg-add.tsv 只重算分數寫到 out；acg-sources.tsv 原樣複製；acg.json 換檔案雜湊與 version，加 regrade_bonus。"""
+    counts, n = ({}, 1) if empty_counts else load_counts()
+    rank = collision_rank(read_tsv(os.path.join(PACKS, "acg-collisions.tsv")))
+    if sha256_file(os.path.join(src, "acg-add.tsv")) != REGRADE_SRC_SHA:
+        raise SystemExit(f"{src}/acg-add.tsv is not the ungraded A4 pack (SHA-256 {REGRADE_SRC_SHA}); get it with "
+                         f"`git show {REGRADE_SRC_COMMIT[:8]}:data/packs/acg-add.tsv` (and acg-sources.tsv, acg.json)")
+    lines = open(os.path.join(src, "acg-add.tsv"), encoding="utf-8").readlines()
+    yp = os.path.join(PACKS, "acg-yield.tsv")
+    yields = {(r[0], r[1]) for r in read_tsv(yp)} if os.path.exists(yp) else set()
+    add = "".join(regrade_rows(lines, scores(base_lexicon()), grade_fn(counts, n, bonus), rank, yields))
+    manifest = {k: v for k, v in json.load(open(os.path.join(src, "acg.json"), encoding="utf-8")).items() if k != "files"}
+    manifest.update(version=manifest["version"].split("-")[0] + "-" + hashlib.sha256(add.encode()).hexdigest()[:8], regrade_bonus=None if empty_counts else bonus)
+    write_all({"acg-add.tsv": add, "acg-sources.tsv": open(os.path.join(src, "acg-sources.tsv"), encoding="utf-8").read()}, manifest, out)
+    return len(lines)
+
+
 def main():
     if sys.argv[1:2] == ["freeze-counts"]:
         print(f"{COUNTS}: {freeze_counts()} words; pin its SHA-256 ({sha256_file(COUNTS)}) in COUNTS_SHA")
+        return
+    if sys.argv[1:2] == ["regrade"]:
+        rp = argparse.ArgumentParser(prog="build_acg_pack.py regrade")
+        rp.add_argument("--bonus", type=float, default=0.0)
+        rp.add_argument("--empty-counts", action="store_true", help="every word g = S_len (the gate baseline)")
+        rp.add_argument("--src", required=True, help="folder with the ungraded A4 pack (REGRADE_SRC_SHA)")
+        rp.add_argument("--out", required=True)
+        r = rp.parse_args(sys.argv[2:])
+        print(f"regrade: {regrade(r.src, r.out, r.bonus, r.empty_counts)} rows written to {r.out}")
         return
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", default=CACHE)
