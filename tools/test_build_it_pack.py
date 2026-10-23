@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import urllib.parse
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_it_pack as T  # noqa: E402
@@ -217,6 +218,23 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(rows, T.check_rows(info, seed=1, n=8)[0])
         info["check"][words[0]] = True
         self.assertNotIn(f"|{words[0]}|", "".join(T.check_rows(info, seed=1, n=19)[0]))
+
+
+class DecodeThreads(unittest.TestCase):
+    def test_the_build_decodes_on_every_core(self):
+        # 只開 1 個執行緒時 32 核的 VM 只用到一個核心（維護者 2026-10-23：「單核心跑太浪費了」）
+        seen = []
+
+        def run(cmd, **_):
+            seen.append(cmd)
+            raise RuntimeError
+
+        with mock.patch.object(T.subprocess, "run", run), mock.patch.object(T.B, "eval_bin", lambda: "shanjie-eval"):
+            with self.assertRaises(RuntimeError):
+                T.decoder(os.devnull)([("詞", ["ㄘˊ"])], "chat")
+        self.assertEqual(seen[0][seen[0].index("--threads") + 1], str(T.THREADS))
+        if not os.environ.get("SHANJIE_THREADS"):
+            self.assertEqual(T.THREADS, os.cpu_count())
 
 
 class FakeWeb:
