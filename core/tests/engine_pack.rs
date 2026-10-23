@@ -105,6 +105,52 @@ fn the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file() {
     }
 }
 
+/// it-pack contract section 3.1: the IT+AI pack is bit 2 (`PACK_IT`) and reads `it-add.tsv`, appended after the anime pack. Its own switch
+/// through the shipping constructor, alone and with the anime pack; off (the bit clear, or no file) is the engine without it.
+/// 圖像生成 is one of the hand-written words the shipping decoder does not already type right (chat and formal both spell 圖象生成; measured with the CLI)
+/// and that the pack does win back in the sentence decode, with the score build_it_pack.py gives 4-character words.
+const IT_PACK: &str = "ㄊㄨˊ-ㄒㄧㄤˋ-ㄕㄥ-ㄔㄥˊ\t圖像生成\t-6.60980192\tit\n";
+
+/// The first candidate of the window after typing `syls`, per profile.
+fn window_first(packs: Option<(&Path, u32)>, syls: &[&str]) -> Vec<String> {
+    let mut e = Engine::new_with_packs(&root().join("data/lexicon"), L, packs).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    [Profile::Chat, Profile::Formal]
+        .iter()
+        .map(|&p| {
+            e.set_profile(p).unwrap();
+            e.reset(ResetMode::Discard);
+            e.set_prediction(false).unwrap();
+            for k in syls.iter().flat_map(|s| syl_keys(s)) {
+                e.key(k).unwrap();
+            }
+            e.key(Key::new(KeyKind::Down)).unwrap().candidates[0].clone()
+        })
+        .collect()
+}
+
+#[test]
+fn the_it_pack_has_its_own_bit_and_file() {
+    assert_eq!(PACK_IT, 4);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_IT);
+    let syls = ["ㄊㄨˊ", "ㄒㄧㄤˋ", "ㄕㄥ", "ㄔㄥˊ"];
+    let (both, none) = (tempdir("it-both", Some(PACK)), tempdir("it-none", None));
+    std::fs::write(both.join("it-add.tsv"), IT_PACK).unwrap();
+    let plain = window_first(None, &syls);
+    assert!(plain.iter().all(|w| w != "圖像生成"), "the word is already the first candidate without the pack: {plain:?}");
+    // Bit clear with the file present, and the bit set with no file: both are the engine without the IT pack.
+    assert_eq!(window_first(Some((&both, PACK_ACG)), &syls), plain, "it-add.tsv was read without the IT bit");
+    assert_eq!(window_first(Some((&none, PACK_IT)), &syls), plain, "a missing it-add.tsv changes the engine");
+    assert_eq!(window_first(Some((&both, PACK_IT)), &syls), vec!["圖像生成"; 2]);
+    assert_eq!(window_first(Some((&both, PACK_ACG | PACK_IT)), &syls), vec!["圖像生成"; 2]);
+    // The anime pack's word still works beside it.
+    let acg = window_first(Some((&both, PACK_ACG | PACK_IT)), &["ㄉㄧㄥˋ", "ㄩㄢˊ", "ㄊㄤˊ"]);
+    assert_eq!(acg, vec!["碇源堂"; 2]);
+    for d in [both, none] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
 #[test]
 fn an_unknown_pack_bit_is_refused() {
     let d = tempdir("bit", None);

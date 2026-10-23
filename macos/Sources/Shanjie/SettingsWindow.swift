@@ -329,6 +329,7 @@ struct SettingsPageForm: View {
                     if let line = model.acgDataLine {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
+                    Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
                 }
             case .appearance:
                 Section("外觀") {

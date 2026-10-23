@@ -205,6 +205,18 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
     }
 
+    func testItPackSwitchFromTheWindowReachesStoreAndMenu() {
+        let r = rig()
+        let before = r.shell.engine
+        XCTAssertTrue(r.model.itPack, "default on")
+        r.model.setItPack(false)
+        XCTAssertFalse(r.model.itPack)
+        XCTAssertEqual(item(r, .toggleItPack)?.checked, false)
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        r.controller.session.perform(.toggleItPack)
+        XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
+    }
+
     /// acg-pack A2.4: the window shows the same grey data-date line as the menu, from the same Shell value, also with the pack off.
     func testAcgDataDateLineIsTheMenusLine() throws {
         let packs = resources.appendingPathComponent("packs")
@@ -236,7 +248,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "資訊與 AI 詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)

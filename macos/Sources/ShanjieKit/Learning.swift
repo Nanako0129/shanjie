@@ -56,6 +56,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleAbbreviation
         case toggleRerank
         case toggleAcgPack
+        case toggleItPack
         case toggleAppChat
         case openSettings
         /// docs/contracts/about-update.md section 1: a silent check, then 善解更新 (standalone-updater.md) if it confirms one.
@@ -87,6 +88,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let abbreviation = "可省略韻母"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
+        public static let itPack = "資訊與 AI 詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         /// No app name in the title (profile-choice section 2.3).
         public static let appChat = "這個 App 用聊天設定"
@@ -232,6 +234,7 @@ extension Session {
         items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
         items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
         if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
+        items.append(MenuEntry(title: T.itPack, action: .toggleItPack, checked: shell.itPackOn))   // it-pack contract 3.2
         // profile-choice section 2.3: absent without a bundle ID (nothing to store); greyed outside auto, checked as forced.
         if let bundle, !bundle.isEmpty {
             items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
@@ -271,6 +274,8 @@ extension Session {
             shell.applyRerank(!shell.rerankOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
+        case .toggleItPack:
+            shell.setItPack(!shell.itPackOn)
         case .toggleAppChat:
             toggleAppChat()
         case .openSettings:

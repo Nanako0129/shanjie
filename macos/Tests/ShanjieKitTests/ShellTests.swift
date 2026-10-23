@@ -899,6 +899,44 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "碇源堂")
     }
 
+    /// it-pack contract 3.2: the "資訊與 AI 詞" item is checked when `itPack` was never set (the maskless default is on), a toggle rebuilds the engine without
+    /// the pack, the choice is stored under `itPack`, and a new shell reads it. The ACG switch is independent. The fixture pack spells 圖像生成, which the
+    /// base lexicon cannot (the chat and formal first candidates differ from it without the pack: core/tests/engine_pack.rs).
+    func testItPackMenuItemTogglesStoresAndSurvivesRestart() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        let store = MemoryItPackStore()
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: store)
+        }
+        let name = "wj6vu;4g/ t/6"  // ㄊㄨˊ ㄒㄧㄤˋ ㄕㄥ ㄔㄥˊ (a space is the first tone)
+        let c = Controller(make(), bundle: "com.hnc.Discord")
+        c.session.activate()
+        let item = { c.session.menu.first { $0.action == .toggleItPack } }
+        XCTAssertEqual(item()?.title, "資訊與 AI 詞")
+        XCTAssertEqual(item()?.checked, true, "default on")
+        c.type(name)
+        XCTAssertEqual(c.client.marked, "圖像生成")
+        c.press(Keys.esc)
+        c.session.perform(.toggleItPack)
+        XCTAssertEqual(store.itPack, false)
+        XCTAssertEqual(item()?.checked, false)
+        c.type(name)
+        XCTAssertNotEqual(c.client.marked, "圖像生成")
+        c.press(Keys.esc)
+        let again = Controller(make(), bundle: "com.hnc.Discord")
+        again.session.activate()
+        again.type(name)
+        XCTAssertNotEqual(again.client.marked, "圖像生成", "a new shell reads the stored off")
+        again.press(Keys.esc)
+        again.session.perform(.toggleItPack)
+        XCTAssertEqual(store.itPack, true)
+        again.type(name)
+        XCTAssertEqual(again.client.marked, "圖像生成")
+    }
+
     /// acg-pack A2.4: the grey line under "動漫與遊戲詞" says how old the data is. The date is the manifest's `latest_source_revision` as a UTC date
     /// (23:59:59Z must not become the next day in the local zone), the entry has no action, it stays with the pack off, and a missing file or
     /// field means no line.
@@ -915,7 +953,7 @@ final class ShellTests: XCTestCase {
         try #"{"latest_source_revision": "2026-10-06T23:59:59Z", "version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
         let on = make(MemoryAcgPackStore())
         let line = "資料更新至 2026-10-06（維基百科）"
-        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", line, "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", line, "資訊與 AI 詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertNil(on.session.menu.first { $0.title == line }?.action, "not clickable")
         XCTAssertTrue(titles(make(MemoryAcgPackStore(false))).contains(line), "shown with the pack off too")
         try #"{"version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)

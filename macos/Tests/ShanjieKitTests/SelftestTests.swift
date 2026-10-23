@@ -17,6 +17,20 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: try XCTUnwrap(TestData.resources())), 0)
     }
 
+    /// it-pack contract 3.2: the IT+AI pack ships on by default too, so a bundle without it-add.tsv, or with a broken one, fails the selftest.
+    func testFailsWithoutTheBundledItPack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res, itPack: false)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithACorruptBundledItPack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "not a row\n".write(to: res.appendingPathComponent("packs/it-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithACorruptBundledPack() throws {
         let res = try XCTUnwrap(TestData.resources())
         let packs = res.appendingPathComponent("packs")
