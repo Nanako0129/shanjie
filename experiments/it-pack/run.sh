@@ -3,7 +3,8 @@
 # No private data is read. Prints numbers and the public rows that differ; everything is written under $OUT (copy it back).
 #
 #   REPO=<checkout of feat/it-pack>  OUT=<new or empty dir>  SOURCES=<the sources/it cache dir>  [BASE_REF=67651c73]
-#   [THREADS=n]  [SHANJIE_MOEDICT=... SHANJIE_HETERO=...]   (the two reading-tool inputs, see tools/readings.py)
+#   [THREADS=n]  [MIN_COUNT=n BONUS=x]  (exploration: frequency floor and pack score bonus)
+#    [SHANJIE_MOEDICT=... SHANJIE_HETERO=...]   (the two reading-tool inputs, see tools/readings.py)
 #   bash experiments/it-pack/run.sh build      pack + report (stops there; read $OUT/report/collisions.txt)
 #   bash experiments/it-pack/run.sh checks     3.3, 3.4, 3.5 with the pack that `build` wrote (or a later one in $OUT/packs, see below)
 #   bash experiments/it-pack/run.sh all        both
@@ -33,7 +34,7 @@ build() {
   [ -d "$SOURCES" ] || { echo "no sources cache: $SOURCES"; exit 1; }
   cargo build --release --locked -q -p cli
   python3 -W ignore tools/build_it_pack.py build --offline --cache "$SOURCES" --counts build/it-pack/wiki-counts.tsv \
-    --out "$OUT/pack" --report "$OUT/report" 2>&1 | tee "$OUT/build.log"
+    --out "$OUT/pack" --report "$OUT/report" ${MIN_COUNT:+--min-count "$MIN_COUNT"} ${BONUS:+--bonus "$BONUS"} 2>&1 | tee "$OUT/build.log"
   mkdir -p "$OUT/packs"
   cp data/packs/acg-add.tsv "$OUT/pack/it-add.tsv" "$OUT/packs/"
   sha "$OUT/packs/"* | tee "$OUT/packs.sha256"

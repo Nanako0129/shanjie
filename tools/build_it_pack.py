@@ -372,6 +372,7 @@ def report_text(manifest, col, unread, ldrop, acg_words, checks):
 
 
 def main():
+    global MIN_COUNT
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("cmd", nargs="?", choices=["fetch", "build"], default="build")
     ap.add_argument("--cache", default=S.CACHE)
@@ -382,6 +383,8 @@ def main():
     ap.add_argument("--manual", default=os.path.join(PACKS, "it-manual.tsv"))
     ap.add_argument("--collisions", default=os.path.join(PACKS, "it-collisions.tsv"))
     ap.add_argument("--acg-pack", default=ACG_PACK)
+    ap.add_argument("--min-count", type=int, default=MIN_COUNT, help="frequency floor (exploration; the registered value is MIN_COUNT)")
+    ap.add_argument("--bonus", type=float, default=0.0, help="added to every pack row's log10 score (exploration)")
     a = ap.parse_args()
     if a.cmd == "build" and not a.offline:
         sys.exit("build runs --offline only (contract section 2a); run `fetch` online first")
@@ -397,7 +400,10 @@ def main():
     check_shipping_lm()
     acg_words = read_acg_words(a.acg_pack)
     info = {}
-    files, manifest, col, unread, ref, ldrop = build(src, counts, decoder(a.acg_pack), acg_words=acg_words, collisions_tsv=a.collisions, info=info)
+    MIN_COUNT = a.min_count
+    sc = {k: v + a.bonus for k, v in B.scores(B.base_lexicon()).items()}
+    files, manifest, col, unread, ref, ldrop = build(src, counts, decoder(a.acg_pack), acg_words=acg_words, collisions_tsv=a.collisions, sc=sc, info=info)
+    manifest.update(min_count=a.min_count, bonus=a.bonus)
     meta = source_meta(f)
     manifest.update(
         version=max(m["fetched"] for m in meta.values()).replace("-", "") + "-" + sha256_text(files["it-add.tsv"])[:8],
