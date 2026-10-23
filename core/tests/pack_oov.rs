@@ -151,7 +151,7 @@ fn total_score_treats_a_pack_word_as_unknown_in_every_place() {
 /// The Python decoder's output (tools/gen_pack_oov.py) reproduced byte for byte, for three pack sets, both starts (`<s>` and the
 /// history word of a left context that ends with a pack word), both profiles, with and without the side file.
 #[test]
-fn decode_matches_python_byte_for_byte() {
+fn pack_oov_decode_matches_python_golden() {
     let want = String::from_utf8(std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov/decode.tsv")).unwrap()).unwrap();
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov");
     let lex = Arc::new(Lexicon::parse(&std::fs::read_to_string(golden.join("lexicon.txt")).unwrap()).unwrap());
