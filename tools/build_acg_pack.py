@@ -792,10 +792,11 @@ NEW_BEHIND_SHIPPED = 3.0
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
 
 
-def pack_rows(order, reading, sc, extra=None, shipped=frozenset()):
+def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None):
     """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
     extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。
-    shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。"""
+    shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。
+    first（契約 A4，維護者 2026-10-23）：{讀音（空白分隔）: 處置列要它排第一的詞}；這個詞在那個讀音上不減 NEW_BEHIND_SHIPPED，處置列的順序勝過「已出貨優先」。"""
     rows, seen = [], collections.Counter()
     extra = extra or {}
     gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, sc[len(w)], TAG)]
@@ -804,12 +805,19 @@ def pack_rows(order, reading, sc, extra=None, shipped=frozenset()):
         for _, _, (key, word, score, tag) in gen(w):
             k = seen[key]
             seen[key] += 1
-            pen = NEW_BEHIND_SHIPPED if w not in shipped and key in ship_keys else 0
+            # ponytail: the exemption matches the disposition's reading only; a first-named word's sandhi or extra-reading rows on a
+            # shipped key are still penalized (A4: 0 of 145 first-named words have such a row). Match the word's derived keys if one appears.
+            pen = NEW_BEHIND_SHIPPED if w not in shipped and key in ship_keys and (first or {}).get(key.replace("-", " ")) != w else 0
             rows.append(f"{key}\t{word}\t{score}\t{tag}\n" if not (k or pen) else f"{key}\t{word}\t{round(float(score) - k * TIE - pen, 8)!r}\t{tag}\n")
     return rows
 
 
 # ---------------------------------------------------------------- 同音衝突（契約 A.1）
+
+# 解碼 CLI 的執行緒數：CLI 保證任何 N 的輸出檔都和 N = 1 逐位元組相同（cli/src/main.rs `--threads`），只影響速度。
+# Mac 上預設 1（「Mac 不跑重運算」：make test-python 的真解碼測試在 Mac 跑），其他機器（GCP、188）預設用滿核心；SHANJIE_THREADS 可改，至少 1。
+THREADS = max(1, int(os.environ.get("SHANJIE_THREADS") or (1 if sys.platform == "darwin" else os.cpu_count() or 1)))
+
 
 @functools.lru_cache(maxsize=1)
 def eval_bin():
@@ -826,7 +834,7 @@ def top1(pairs, profile, packs_dir=None, lm=LM):
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump]
+        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump, "--threads", str(THREADS)]
         if lm != LM:   # 釘住的規則模型不含 KN 側檔、名單層也不在它的詞庫裡，加 --no-kn --no-names 固定結果；出貨的 data/lm（--recheck）照出貨設定：旁邊有 kn.sjkn 就開、名單層常開（model-v6 §3.3）
             cmd += ["--no-kn", "--no-names"]
         if packs_dir:
@@ -880,6 +888,11 @@ MODEL_V6_C = "model-v6："      # acg-collisions.tsv 理由欄的開頭：model-
 def model_v6_dropped(path=os.path.join(PACKS, "acg-collisions.tsv")):
     """model-v6 上擠下詞庫詞、照 A2 規則排除的詞包詞（含 v0.4.0 出貨過的詞）；契約 A3.5 第 3 項 (ii)「v0.4.0 的詞不能少」不算它們。"""
     return {r[2] for r in read_tsv(path) if len(r) == 4 and r[3].startswith(MODEL_V6_C)} if os.path.exists(path) else set()
+
+
+def approved_removed(path=os.path.join(PACKS, "acg-removed.tsv")):
+    """維護者核准拿掉的已出貨詞（契約 A4）；「v0.4.0 的詞不能少」不算它們。"""
+    return {r[0] for r in read_tsv(path)} if os.path.exists(path) else set()
 
 
 def read_collisions(path):
@@ -1102,7 +1115,7 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         return sum(len(s) for k, s in src[w].items() if k != "char") + len(name_base[w]) - (w in A3_MANUAL and "manual" in src[w])
     for _ in range(LEXICON_RULE_ROUNDS):
         order = ordered(words, nsrc, rank, reading, extra, shipped)
-        rows = pack_rows(order, reading, sc, extra, shipped)
+        rows = pack_rows(order, reading, sc, extra, shipped, first_named(rank, set(words)))
         found = detect_collisions(words, reading, rows, ref, decode, extra=extra)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
         if not hit:
@@ -1286,8 +1299,8 @@ def main():
     decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
     info = {}
     files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
-    lost = sorted(info["v040"] - set(info["words"]) - model_v6_dropped())
-    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔（model-v6 §3.3 照 A2 規則排除的不算）
+    lost = sorted(info["v040"] - set(info["words"]) - model_v6_dropped() - approved_removed())
+    if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔（model-v6 §3.3 照 A2 規則排除的、A4 維護者核准拿掉的不算）
         raise SystemExit(f"v0.4.0 words missing from the new pack ({len(lost)}), nothing written: {lost}")
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)

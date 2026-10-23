@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_acg_pack as B  # noqa: E402
+import readings as R  # noqa: E402
 
 
 def second_column(path):
@@ -195,6 +196,14 @@ class LexiconWords(unittest.TestCase):
         self.assertLessEqual(names, B.lexicon_words())
         w = sorted(names)[0]
         self.assertEqual(B.dedupe([w, "碇源堂"], B.lexicon_words()), ["碇源堂"])
+
+
+class LiReading(unittest.TestCase):
+    # The real reading tool needs the MoeDict and McBopomofo inputs, which CI does not have (tools/readings.py MOEDICT, HETERO).
+    @unittest.skipUnless(all(os.path.isfile(p) for p in (R.MOEDICT, R.HETERO)), "reading-tool inputs not on this machine")
+    def test_li_in_names_reads_li4(self):        # 契約 A4：名字裡的「麗」讀 ㄌㄧˋ（tools/reading_overrides.tsv），ㄌㄧˊ 只留給詞庫裡的詞（高麗）
+        rd = B.make_readings(["愛麗兒", "朵麗絲"])
+        self.assertEqual((rd["愛麗兒"][0][1], rd["朵麗絲"][0][1]), ("ㄌㄧˋ", "ㄌㄧˋ"))
 
 
 class Dedupe(unittest.TestCase):
@@ -595,6 +604,23 @@ class Build(unittest.TestCase):
             self.assertEqual(bad, [], prof)
 
 
+class DecodeThreads(unittest.TestCase):
+    def test_the_build_decodes_on_every_core(self):
+        # 建置的解碼都經過 top1；只開 1 個執行緒時 32 核的 VM 只用到一個核心（維護者 2026-10-23：「單核心跑太浪費了」）
+        seen = []
+
+        def run(cmd, **_):
+            seen.append(cmd)
+            raise RuntimeError
+
+        with mock.patch.object(B.subprocess, "run", run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"):
+            with self.assertRaises(RuntimeError):
+                B.top1([("詞", ["ㄘˊ"])], "chat")
+        self.assertEqual(seen[0][seen[0].index("--threads") + 1], str(B.THREADS))
+        if not os.environ.get("SHANJIE_THREADS"):
+            self.assertEqual(B.THREADS, 1 if sys.platform == "darwin" else os.cpu_count())
+
+
 class TopOneKneserNeyTest(unittest.TestCase):
     """model-v6 §3.3: the pinned rule model decodes with --no-kn and --no-names; the shipped data/lm (--recheck) decodes like the shipped App."""
 
@@ -764,6 +790,8 @@ class A3(unittest.TestCase):
         self.assertEqual((with_shipped["舊甲"], with_shipped["舊乙"]), (plain["舊甲"], plain["舊乙"]))          # 已出貨的分數和沒有新詞時一樣
         self.assertAlmostEqual(plain["新詞"] - with_shipped["新詞"], B.NEW_BEHIND_SHIPPED)                    # 新詞在已出貨的讀音上另外減分
         self.assertEqual(with_shipped["別的"], plain["別的"])                                                 # 沒有已出貨的詞的讀音：不動
+        named = score(B.pack_rows(["新詞", "舊甲", "舊乙", "別的"], reading, sc, shipped={"舊甲", "舊乙"}, first={"ㄅ ㄅ": "新詞"}))
+        self.assertGreater(named["新詞"], max(named["舊甲"], named["舊乙"]))                                   # 契約 A4：處置列要它排第一的新詞不減分
 
     def test_a_new_word_that_resolves_to_a_shipped_word_is_fine_but_not_the_other_way(self):
         r, shipped = "ㄅ ㄅ", frozenset({"舊甲", "舊乙"})
@@ -831,18 +859,20 @@ class A3(unittest.TestCase):
             k, w, *_ = l.split("\t")
             pack.setdefault(w, set()).add(k.replace("-", " "))
         kept = B.read_tsv(os.path.join(B.PACKS, "acg-kept-c.tsv"))
-        self.assertEqual(len(kept), 178)                                      # 契約 A3.3a
+        self.assertEqual(len(kept), 175)                                      # 契約 A3.3a 的 178 個，加 A4 的「多莉」，減 A4 讀音改了之後不再同音的 4 個
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (235, 129))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音
+        self.assertEqual((len(both), len({r for r, _ in both})), (259, 138))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音；加 A4 的 22 列、10 組讀音（其中 ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本就有，只多艾麗卡）與 ㄞˋ ㄌㄧˋ ㄕㄚ 的 2 個詞（「麗」改讀 ㄌㄧˋ 後通語 SJ-LM-6-9.1M 詞表裡的寫法靠語料排前，維護者先不處理）
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
         dropped = B.model_v6_dropped()
         self.assertEqual(len(dropped), 106)                                   # model-v6 §3.3（使用者 2026-10-15）：A2 規則排除的類型 (c)，105 個加第二輪的 1 個
-        self.assertTrue(set(B.load_v040()) - dropped <= set(pack))             # v0.4.0 的詞一個都不能少，A2 規則排除的除外
-        self.assertFalse(dropped & set(pack))
+        removed = B.approved_removed()
+        self.assertEqual(len(removed), 19)                                    # 契約 A4：來源消失的 15 個、瀬能葵、本条二亞、塞德利克、奧菲莉婭（維護者 2026-10-23）
+        self.assertTrue(set(B.load_v040()) - dropped - removed <= set(pack))   # v0.4.0 的詞一個都不能少，A2 規則排除的與 A4 核准拿掉的除外
+        self.assertFalse((dropped | removed) & set(pack))
         self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
-        self.assertTrue({"ㄏㄨ ㄓㄤˋ ㄧㄡ ㄖㄣˊ", "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"} <= pack["虎杖悠仁"])
+        self.assertEqual(pack["虎杖悠仁"], {"ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"})          # A4：讀音覆寫「虎 ㄏㄨˇ」之後工具也選三聲，A3.4 留著的 ㄏㄨ 那一列就沒了
         self.assertNotIn("艾文斯", pack)                                           # 契約 A3：新詞若在 model-v5 擠下詞庫的詞就不收（kb 例外只給已出貨的詞）
 
 
