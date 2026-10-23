@@ -43,12 +43,8 @@ KINDS = ("manual", "cgroup", "naer75", "naer16", "ai")
 TAIWAN_KINDS = ("manual", "cgroup", "naer75", "naer16")      # 台灣來源：出現在其中任何一個，大陸寫法清單就放行
 FREQ_KINDS = ("naer16", "ai")                                # 頻率門檻與子字串標記只用在這兩種
 # 契約 §2：解碼用的出貨 data/lm（照 data/*.sha256），開始前核對。
-SHIPPING_LM = {
-    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
-    "classes.sjc": "9e343d3e3ce83f1008e371f62de5d8e62721df97e7b02562503ef2cc57226f3f",
-    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
-    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84",
-}
+SHIPPING_LM = {n: open(os.path.join(ROOT, "data", n + ".sha256")).read().split()[0]
+               for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3")}
 SHIP_ARGS = []        # 出貨設定在評測 CLI 上的額外選項（見 decoder()）
 ACG_PACK = os.path.join(PACKS, "acg-add.tsv")
 
