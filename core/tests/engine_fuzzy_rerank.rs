@@ -42,19 +42,20 @@ fn nbest(syls: &[&str], flags: u32) -> Vec<(String, bool, f64)> {
 }
 
 /// A free composition whose n-gram first path is the typed reading, with the pool the rule makes (restated here, not read from the core),
-/// a toy model that knows the pool's characters, and what `TinyLm::rerank` picks among the pool: an index into the pool.
+/// a toy model (LL weight `alpha`, tau infinite) that knows the pool's characters, and what `TinyLm::rerank` picks among the pool: an
+/// index into the pool.
 struct Pooled {
     nb: Vec<(String, bool, f64)>,
     pool: Vec<usize>,
     model: TempFile,
     pick: usize,
 }
-fn pooled(syls: &[&str], flags: u32) -> Pooled {
+fn pooled(syls: &[&str], flags: u32, alpha: f64) -> Pooled {
     let nb = nbest(syls, flags);
     assert!(!nb[0].1, "premise: the n-gram first path is the typed reading");
     let pool: Vec<usize> = nb.iter().enumerate().filter(|(_, p)| !p.1).map(|(i, _)| i).take(8).collect();
     let cands: Vec<&str> = pool.iter().map(|&i| nb[i].0.as_str()).collect();
-    let model = sjtl_with_vocab(100.0, f64::INFINITY, Some(&lm_path()), &cands.concat());
+    let model = sjtl_with_vocab(alpha, f64::INFINITY, Some(&lm_path()), &cands.concat());
     let tl = TinyLm::load(&model).unwrap();
     let ng: Vec<f64> = pool.iter().map(|&i| nb[i].2).collect();
     let pick = tl.rerank(&ng, &cands, &context_key(""), tl.alpha_tau_delta(Profile::Chat)).unwrap().0;
@@ -68,8 +69,11 @@ fn pooled(syls: &[&str], flags: u32) -> Pooled {
 /// matters that the pool skips a fuzzy path before the choice and that the model chooses something other than the first.
 #[test]
 fn the_pool_is_the_first_eight_non_fuzzy_paths_in_nbest_order_and_the_choice_is_one_of_them() {
-    for (syls, flags, all_fewer_than_8) in [(["ㄙㄨ"], 15, false), (["ㄆㄧㄥˋ"], 15, true)] {
-        let p = pooled(&syls, flags);
+    // alpha is the LL's weight. The pool of ㄆㄧㄥˋ is 聘 (n-gram -5.3) and 䀻 (-9.3, measured): the model leaves the first only when the LLs
+    // decide (alpha 100). With ㄙㄨ at alpha 8 the n-gram scores (-4.4 to -9.3 over its pool) still count, so a pool whose scores are not
+    // the pool's own can change the choice.
+    for (syls, flags, all_fewer_than_8, alpha) in [(["ㄙㄨ"], 15, false, 8.0), (["ㄆㄧㄥˋ"], 15, true, 100.0)] {
+        let p = pooled(&syls, flags, alpha);
         assert!(p.nb[..8.min(p.nb.len())].iter().any(|x| x.1), "premise: a fuzzy path stands among the first 8");
         let want: Vec<String> = p.pool.iter().map(|&i| p.nb[i].0.clone()).collect();
         assert_eq!(want.len() < 8, all_fewer_than_8, "premise: {syls:?}");

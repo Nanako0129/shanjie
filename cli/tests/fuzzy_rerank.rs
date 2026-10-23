@@ -19,6 +19,9 @@ const VOCAB: &str = "蘇酥甦穌疎踈囌䔫聘䀻";
 /// there, and from the rowstats whether the row's chosen candidate is the row's text.
 struct CliRow {
     nbest: Vec<String>,
+    /// The dump's n-gram scores, in n-best order, and the record's `ng` (the pool's, in pool order).
+    scores: Vec<f64>,
+    ng: Vec<f64>,
     n: usize,
     c: usize,
     idx: Vec<usize>,
@@ -50,12 +53,15 @@ fn cli_row(syls: &str, truth: &str, flags: &str) -> CliRow {
     }
     let o = cmd.output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let nbest = std::fs::read_to_string(&dump).unwrap().lines().map(|l| l.split('\t').nth(2).unwrap().to_string()).collect();
+    let dumped = std::fs::read_to_string(&dump).unwrap();
+    let nbest = dumped.lines().map(|l| l.split('\t').nth(2).unwrap().to_string()).collect();
+    let scores_col: Vec<f64> = dumped.lines().map(|l| l.split('\t').nth(3).unwrap().parse().unwrap()).collect();
     let line = std::fs::read_to_string(&scores).unwrap();
     let idx = if line.contains("\"idx\"") { ints(&field(&line, "idx")) } else { Vec::new() };
     // rowstats: row, ok, ... (numbers only)
     let ok = std::fs::read_to_string(&rowstats).unwrap().split('\t').nth(1).unwrap() == "1";
-    let row = CliRow { nbest, n: field(&line, "ng").trim_matches(['[', ']']).split(", ").count(), c: field(&line, "c").parse().unwrap(), idx, ll: line.contains("\"ll\""), ok };
+    let ng: Vec<f64> = field(&line, "ng").trim_matches(['[', ']']).split(", ").map(|x| x.parse().unwrap()).collect();
+    let row = CliRow { nbest, scores: scores_col, n: ng.len(), ng, c: field(&line, "c").parse().unwrap(), idx, ll: line.contains("\"ll\""), ok };
     std::fs::remove_dir_all(&dir).unwrap();
     row
 }
@@ -93,6 +99,7 @@ fn the_engine_and_the_cli_rerank_the_same_pool_and_choose_alike() {
         let pool: Vec<String> = cli.idx.iter().map(|&i| cli.nbest[i].clone()).collect();
         assert_eq!(pool, cands, "{syls}: the candidates");
         assert_eq!((cli.n, cli.ll), (cands.len(), true), "{syls}: the record lists the pool");
+        assert_eq!(cli.ng, cli.idx.iter().map(|&i| cli.scores[i]).collect::<Vec<_>>(), "{syls}: the record's n-gram scores are the pool's own");
         assert!(cli.idx.len() < cli.nbest.len() && cli.idx != (0..cli.idx.len()).collect::<Vec<_>>(), "{syls}: premise: the pool skips a path");
         assert!(pick != 0 && cli.idx[pick] != pick, "{syls}: premise: the model leaves the first and its pool index is not its n-best index");
         assert_eq!(cli.c, cli.idx[pick], "{syls}: the choice, as an n-best index");
