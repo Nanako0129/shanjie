@@ -92,7 +92,7 @@
 
 ### A.2 引擎
 
-- 核心載入時，`data/packs/acg-add.tsv` 存在就當成第二個疊加層併入，規則和 `overlay-add.tsv` 相同（`CappedLexicon` 依語料頻率封頂、沒看過的減 1.0）。
+- 核心載入時，`data/packs/acg-add.tsv` 存在就當成第二個疊加層併入，規則和 `overlay-add.tsv` 相同（`CappedLexicon` 依語料頻率封頂、沒看過的減 1.0）。〔2026-10-24 改，`docs/contracts/pack-oov.md`〕詞包的詞改成不封頂、用詞包檔的分數，解碼時當成通語不認識的詞；分數由 `build_acg_pack.py regrade` 依凍結次數表分級（A4 的詞與讀音不變），A4 那 10 個讀音照研究順序改回 `acg-collisions.tsv`，另有讓位清單 `acg-yield.tsv`。
 - 檔案不存在，或開關關閉時，詞庫和現在完全相同。
 - CLI：`shanjie-eval --packs acg` 才載入詞包，預設不載入。要求詞包時檔案不在就結束並報錯、訊息含路徑；單用 `--packs-dir` 沒有 `--packs` 也是錯誤。詞包列由 `engine::load_lexicon_packs` 讀一次，同時給詞庫與封頂用；封頂用的 `overlay-add.tsv` 由 `engine::capping_overlay` 讀（`load_lm` 每次載入模型時重讀，引擎不留那份約 17 MB 的副本），引擎與 CLI 共用這兩個函式。單用 `--packs-dir` 的檢查在讀模型與詞庫之前（變體表 `eval/variants.tsv` 讀得更早）。`--predict` 也接受 `--packs`／`--packs-dir`，用來量詞包對預測的影響。摘要行在載入詞包時多一個 `+acg` 標記（沒有詞包時一字不變，既有 golden 不動）。A.3 的基準就是不加這個選項，所以兩邊的指令可以照抄重跑。
 - 開關：
