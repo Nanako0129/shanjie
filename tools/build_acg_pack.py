@@ -805,6 +805,8 @@ def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None):
         for _, _, (key, word, score, tag) in gen(w):
             k = seen[key]
             seen[key] += 1
+            # ponytail: the exemption matches the disposition's reading only; a first-named word's sandhi or extra-reading rows on a
+            # shipped key are still penalized (A4: 0 of 145 first-named words have such a row). Match the word's derived keys if one appears.
             pen = NEW_BEHIND_SHIPPED if w not in shipped and key in ship_keys and (first or {}).get(key.replace("-", " ")) != w else 0
             rows.append(f"{key}\t{word}\t{score}\t{tag}\n" if not (k or pen) else f"{key}\t{word}\t{round(float(score) - k * TIE - pen, 8)!r}\t{tag}\n")
     return rows
@@ -813,7 +815,8 @@ def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None):
 # ---------------------------------------------------------------- 同音衝突（契約 A.1）
 
 # 解碼 CLI 的執行緒數：CLI 保證任何 N 的輸出檔都和 N = 1 逐位元組相同（cli/src/main.rs `--threads`），只影響速度。
-THREADS = int(os.environ.get("SHANJIE_THREADS") or os.cpu_count() or 1)
+# Mac 上預設 1（「Mac 不跑重運算」：make test-python 的真解碼測試在 Mac 跑），其他機器（GCP、188）預設用滿核心；SHANJIE_THREADS 可改，至少 1。
+THREADS = max(1, int(os.environ.get("SHANJIE_THREADS") or (1 if sys.platform == "darwin" else os.cpu_count() or 1)))
 
 
 @functools.lru_cache(maxsize=1)
