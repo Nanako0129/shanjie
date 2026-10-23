@@ -1045,7 +1045,7 @@ class A3(unittest.TestCase):
         self.assertEqual(len(kept), 175)                                      # 契約 A3.3a 的 178 個，加 A4 的「多莉」，減 A4 讀音改了之後不再同音的 4 個
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (237, 129))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音；加 A4 的 22 列、10 組讀音（其中 ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本就有，只多艾麗卡）與 ㄞˋ ㄌㄧˋ ㄕㄚ 的 2 個詞（「麗」改讀 ㄌㄧˋ 後通語 SJ-LM-6-9.1M 詞表裡的寫法靠語料排前，維護者先不處理）；pack-oov（2026-10-24）把 A4 那 10 組讀音的 22 列移回 acg-collisions.tsv 的研究順序（ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本那三列留著）
+        self.assertEqual((len(both), len({r for r, _ in both})), (234, 128))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音；加 A4 的 22 列、10 組讀音（其中 ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本就有，只多艾麗卡）與 ㄞˋ ㄌㄧˋ ㄕㄚ 的 2 個詞（「麗」改讀 ㄌㄧˋ 後通語 SJ-LM-6-9.1M 詞表裡的寫法靠語料排前，維護者先不處理）；pack-oov（2026-10-24）把 A4 那 10 組讀音的 22 列移回 acg-collisions.tsv 的研究順序（ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本那三列也拿掉，改由處置列決定）
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
         dropped = B.model_v6_dropped()
