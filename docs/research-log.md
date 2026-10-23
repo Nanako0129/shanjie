@@ -8714,3 +8714,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **私人集合的逐列比對**（GCP VM，CLI commit `6ae50f3c`，`experiments/colloq-levels/parity.sh`；之後的 `56378128` 只改了比對工具的清理與檢查、核心的選字不變）：chatclause 5,761、discordtune 4,958、cvtune-clean 3,286，以及打字測驗、錯字回報 157 列、dev302，在標準、保守、積極三檔都是 **0 列不同**。核心的選字和探索片的離線選中格逐列相同。
 - **實機確認**（繁中 tart 虛擬機，裝本分支的開發版）：用 `defaults write` 把開發版容器偏好檔（`~/Library/Containers/<bundle id>/Data/Library/Preferences/<bundle id>.plist`）的 `rerankLevel` 設成 `aggressive`、`profileMode` 設成 `chat`，在文字編輯打錯字回報第 54 列 `ㄎㄜˇ ㄧˇ ㄓㄨㄣˇ ㄅㄟˋ ㄗㄨㄛˋ`，組字區是「可以準備做」。同一句用 CLI 量：本分支只有積極選「做」（標準、保守是「作」），main 的積極是「作」。所以引擎吃到了寫進去的積極設定，常談在積極生效。v0.5.0 的輸入法在這台虛擬機沒有啟用，沒有實機對照，對照用 CLI。
 - 順帶確認：改設定不用新程式，輸入法程序沒在跑時用 `defaults write` 寫容器偏好檔，下次啟動就讀到（程序在跑時要先結束它）。
+
+## 2026-10-23：錯字回報第 158 列（我再釐清一下）
+
+- 維護者打「我再釐清一下」，送出成「我在釐清一下」（訊息裡標「（錯字）」）。加到 `eval/dev/user-reported.txt` 最後面：`|我再釐清一下|ㄨㄛˇ ㄗㄞˋ ㄌㄧˊ ㄑㄧㄥ ㄧ ㄒㄧㄚˋ`（讀音由 `tools/readings.py` 產生，沒有 CHECK；句首沒有前文）。
+- 出貨設定（`cli --context --packs acg --tinylm`，聊天加常談）：聊天與書面都錯，n-gram 第一名「我在釐清一下」、正解第 2（聊天 −13.55 對 −14.40），語意校正沒有換。
+- golden 的兩行錯字集重產（`--context`）：n 158，top1 聊天 33、書面 43 不變，oracle@64 154 → 155。
