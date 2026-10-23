@@ -541,8 +541,9 @@ pub struct Engine {
     /// The enabled packs' rows `new` read (acg-pack contract A.2), appended to `overlay-add.tsv` when
     /// `load_lm` caps; `None` with no pack, so a pack-off engine holds nothing extra.
     pack_text: Option<String>,
-    /// The rows of the enabled `PACK_OOV` packs among `pack_text`, which `load_lm` exempts from the cap; `None` with none.
-    pack_oov_text: Option<String>,
+    /// How many leading bytes of `pack_text` are the rows of the enabled `PACK_OOV` packs, which `load_lm` exempts from the cap.
+    /// They are a prefix because `PACK_FILES` lists the `PACK_OOV` packs first; a length, not a copy, so the engine holds the rows once.
+    pack_oov_len: usize,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -827,7 +828,11 @@ impl Engine {
         let mut e = Engine::with_lexicon(lex, layout);
         e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
         if let Some((dir, mask)) = packs {
-            e.pack_oov_text = Some(read_packs_detailed(dir, mask & PACK_OOV).map_err(|_| EngineError::LoadFailed)?).filter(|t| !t.is_empty());
+            let oov = read_packs_detailed(dir, mask & PACK_OOV).map_err(|_| EngineError::LoadFailed)?;
+            if !e.pack_text.as_deref().unwrap_or("").starts_with(&oov) {
+                return Err(EngineError::LoadFailed);
+            }
+            e.pack_oov_len = oov.len();
         }
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
@@ -847,7 +852,7 @@ impl Engine {
             lex,
             data_dir: None,
             pack_text: None,
-            pack_oov_text: None,
+            pack_oov_len: 0,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -1389,7 +1394,7 @@ impl Engine {
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, self.pack_oov_text.as_deref().unwrap_or(""), &lm, Some(&demote))
+        let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, &self.pack_text.as_deref().unwrap_or("")[..self.pack_oov_len], &lm, Some(&demote))
             .ok_or(EngineError::LoadFailed)?;
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);

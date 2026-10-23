@@ -780,9 +780,19 @@ pub struct CappedLexicon {
     /// The optional-pack words (docs/contracts/pack-oov.md): `(off, len)` into `base.words`, one per distinct string, sorted by the
     /// string's bytes. Empty without a pack (the lexicon then behaves exactly as before).
     packs: Vec<(u32, u32)>,
-    /// For each reading that holds a pack word, its entries as they would be without the pack's exemption (pack words capped like
-    /// any overlay word), best first: what prediction and the digits layer read (`readings`), unchanged by design.
-    capped_readings: HashMap<usize, Vec<crate::Ent>>,
+    /// One bit per base entry (base order) whose word is in the overlay, so `readings` can redo the capping without the pack's
+    /// exemption; empty without a pack.
+    overlay_bits: Vec<u64>,
+}
+
+/// An overlay word's score capped at its corpus frequency, or lowered by the unseen penalty when the model never saw it.
+fn capped_score(lm: &Lm, score: f64, w: &str) -> f64 {
+    let c = lm.count(w);
+    if c != 0 { score.min((c as f64 / lm.n as f64).log10()) } else { score - UNSEEN_OVERLAY_PENALTY }
+}
+
+fn by_score<T>(a: &(T, f64), b: &(T, f64)) -> std::cmp::Ordering {
+    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
 }
 
 impl CappedLexicon {
@@ -828,35 +838,21 @@ impl CappedLexicon {
         let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let mut packs: Vec<(u32, u32)> = Vec::new();
         let mut ents = base.ents.clone();
-        let mut capped_readings = HashMap::new();
-        let cap = |e: &mut crate::Ent, w: &str| {
-            let c = lm.count(w);
-            e.score = if c != 0 { e.score.min((c as f64 / lm.n as f64).log10()) } else { e.score - UNSEEN_OVERLAY_PENALTY };
-        };
-        let by_score = |a: &crate::Ent, b: &crate::Ent| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal);
+        let mut overlay_bits = if pack.is_empty() { Vec::new() } else { vec![0u64; ents.len().div_ceil(64)] };
         for i in 0..base.readings.len() {
             let range = base.range(i);
-            let mut has_pack = false;
-            let mut alt = ents[range.clone()].to_vec();
-            for (e, a) in ents[range.clone()].iter_mut().zip(alt.iter_mut()) {
+            for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
                 let w = &base.words[e.off as usize..(e.off + e.len) as usize];
-                let in_pack = pack.contains(w);
-                if words.contains(w) {
-                    cap(a, w);
-                    if !in_pack {
-                        e.score = a.score;
-                    }
+                if words.contains(w) && !overlay_bits.is_empty() {
+                    overlay_bits[p / 64] |= 1 << (p % 64);
                 }
-                if in_pack {
+                if pack.contains(w) {
                     packs.push((e.off, e.len));
-                    has_pack = true;
+                } else if words.contains(w) {
+                    e.score = capped_score(lm, e.score, w);
                 }
             }
-            ents[range].sort_by(by_score);
-            if has_pack {
-                alt.sort_by(by_score);
-                capped_readings.insert(i, alt);
-            }
+            ents[range].sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         }
         let deltas = match demote {
             Some(d) => d.resolve(&base, &ents)?,
@@ -864,7 +860,7 @@ impl CappedLexicon {
         };
         packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
         packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, capped_readings })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -907,14 +903,24 @@ impl CappedLexicon {
     }
 
     /// Every reading with its capped (word, score) list, best first (build-time use, allocates). Pack words are capped here like any
-    /// overlay word (`capped_readings`): the prediction index and the digits layer read this, and they are unchanged by the pack.
-    pub fn readings(&self) -> impl Iterator<Item = (Vec<&str>, Vec<(&str, f64)>)> + '_ {
-        (0..self.base.readings.len()).map(|r| {
+    /// overlay word: the prediction index and the digits layer read this, and they are unchanged by the pack. A reading that holds a
+    /// pack word is rebuilt here the way `new` without the exemption orders it (base order, pack words capped with `lm`, the model the
+    /// lexicon was built with, then a stable sort), so the engine keeps no second copy of those lists.
+    pub fn readings<'s, 'm>(&'s self, lm: &'m Lm) -> impl Iterator<Item = (Vec<&'s str>, Vec<(&'s str, f64)>)> + use<'s, 'm> {
+        (0..self.base.readings.len()).map(move |r| {
             let key = self.base.key_of(&self.base.readings[r]).iter().map(|&i| self.base.syl_names[i as usize].as_str());
-            let list = match self.capped_readings.get(&r) {
-                Some(alt) => alt.iter().map(|e| (self.word_of(e), e.score)).collect(),
-                None => self.base.range(r).map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect(),
-            };
+            let range = self.base.range(r);
+            let mut list: Vec<(&str, f64)> = range.clone().map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect();
+            if !self.packs.is_empty() && list.iter().any(|&(w, _)| self.is_pack(w)) {
+                let overlay = |p: usize| self.overlay_bits[p / 64] >> (p % 64) & 1 == 1;
+                list = range
+                    .map(|p| {
+                        let (b, w) = (&self.base.ents[p], self.word_of(&self.base.ents[p]));
+                        (w, if overlay(p) { capped_score(lm, b.score, w) } else { b.score })
+                    })
+                    .collect();
+                list.sort_by(by_score);
+            }
             (key.collect(), list)
         })
     }

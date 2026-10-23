@@ -216,8 +216,12 @@ fn prediction_and_digits_see_the_capped_score_and_only_pack_rows_are_exempt() {
     let lex = Arc::new(Lexicon::parse_with(LEX, None).unwrap());
     let plain = CappedLexicon::new(lex.clone(), &rows(&["占", "站"]), &lm, None).unwrap();
     let packed = CappedLexicon::with_packs(lex.clone(), &rows(&["占", "站"]), &rows(&["占"]), &lm, None).unwrap();
-    assert_eq!(packed.readings().collect::<Vec<_>>(), plain.readings().collect::<Vec<_>>(), "readings() (prediction index, digits layer) is the capped list");
+    assert_eq!(packed.readings(&lm).collect::<Vec<_>>(), plain.readings(&lm).collect::<Vec<_>>(), "readings() (prediction index, digits layer) is the capped list");
     assert_eq!(packed.best_lp(&syls("ㄓㄢˋ"), "占"), Some(-0.05), "decoder: the pack row keeps its score");
     assert!(plain.best_lp(&syls("ㄓㄢˋ"), "占").unwrap() < -0.05, "premise: capped without the exemption");
     assert_eq!(packed.best_lp(&syls("ㄓㄢˋ"), "站"), Some(-4.0), "decoder: an overlay row outside pack_text is capped (unseen penalty)");
+    // `readings()` rebuilds the reading that holds the pack word: a word of the same reading that is not in the overlay stays uncapped.
+    let plain = CappedLexicon::new(lex.clone(), &rows(&["占"]), &lm, None).unwrap();
+    let packed = CappedLexicon::with_packs(lex.clone(), &rows(&["占"]), &rows(&["占"]), &lm, None).unwrap();
+    assert_eq!(packed.readings(&lm).collect::<Vec<_>>(), plain.readings(&lm).collect::<Vec<_>>(), "a non-overlay word next to a pack word");
 }
