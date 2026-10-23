@@ -185,7 +185,7 @@ pub unsafe extern "C" fn shanjie_engine_new(
 }
 
 /// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
-/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG). Mask 0 ignores `packs_dir` (may be
+/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG, bit 2 IT). Mask 0 ignores `packs_dir` (may be
 /// NULL) and is exactly `shanjie_engine_new`. A pack whose file is missing contributes nothing. A bit outside
 /// the known ones returns 2.
 ///

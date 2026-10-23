@@ -8769,7 +8769,7 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **做了什麼**：
   - `tools/build_it_pack.py`（`fetch` 與 `build --offline` 共用同一個 `gather()`；建置工具是純函式 `build()`，測試用假來源與假解碼器）；`tools/build_acg_pack.py` 的 `pack_rows` 加 `tag` 參數（預設不變）。
   - 引擎：`PACK_IT = 4`（位元 2；值 2 留給台詞詞包）、`PACK_FILES` 加 `it-add.tsv`、`PACK_ALL` 跟著改；CLI `--packs` 接受 `acg`、`it`、`acg,it`（摘要行多 `+it`）；`shanjie.h` 與 `s3a.md` 的遮罩說明已改。
-  - App：選單與設定視窗加「資訊與 AI 詞」，偏好鍵 `itPack`，沒設過當成開，切換時重建引擎；`build-app.sh` 打包、`check-app.sh` 核對 `it.json` 的雜湊與署名；selftest 用「圖像生成」確認 `it-add.tsv` 生效。
+  - App：選單與設定視窗加「資訊與 AI 詞」（之後依維護者 10-23 的決定改成只在設定，選單只列「已開啟的詞包」，見 it-pack 契約 §3.2），偏好鍵 `itPack`，沒設過當成開，切換時重建引擎；`build-app.sh` 打包、`check-app.sh` 核對 `it.json` 的雜湊與署名；selftest 用「圖像生成」確認 `it-add.tsv` 生效。
   - 延遲量測：`engine_predict.rs` 的 `timing_typing76_keys` 讀 `PACKS=acg,it`（`PACKS_DIR` 選填），開頭斷言載入的讀音數等於從檔案直接數出的「基底＋三個常開疊加層＋指定詞包」。
 - **來源層的暫定數字**（Mac 上用快取離線量，還沒有 CGroup 的 zh-cn 轉 zh-hant 與 Wikidata P31，所以大陸寫法清單偏小、專有名詞過濾是 0；GCP 建置後以 `it.json` 為準）：
   - 各來源的字串數（2–10 漢字）：15416 122,716、15275 2,065、AI 標題 903、CGroup 的 zh-tw 值 1,322（166 個退回 zh-hant）、手寫清單 151；去重後 124,609 個。
@@ -8777,7 +8777,7 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - 剩 19,782 個字串；不在詞庫（基底、overlay、sandhi、names）也不在動漫詞包的 11,586 個；其中 11,583 個讀音工具讀得出，128 個標 CHECK。
 - **「已經打得對」這條對手寫清單的影響**（出貨解碼器、開動漫詞包、不開資訊詞包，單獨打每個詞；151 個手寫詞）：聊天與書面第一名**都不是**這個詞的只有 11 個（語意搜尋、分詞器、圖像生成、訓練集、測試集、開分支、語意化版本、鎖定檔、多型、外鍵、擴充座）。把這 11 個用建置工具的分數與排序做成詞包再打一次：聊天翻成對的有 4 個（語意搜尋、圖像生成、語意化版本、鎖定檔；其餘 7 個的詞包列贏不了句子解碼），書面 3 個（沒有鎖定檔）；也就是說「詞包的列在句子解碼贏不贏」是 §3.5 門檻（60 個至少 45 個）的真正風險。也就是說手寫清單大部分的詞現行引擎已經打得對（例如檢索增強生成），照契約不收；詞包裡手寫來源的詞會只剩這幾個加上其他來源重複的。這是契約規則的直接結果，不是建置錯誤；最終數字等 GCP 建置。
 - **解碼層級**：建置用的解碼是 n-gram 層（同動漫詞包的 `top1`：`data/lm` 的 KN 與名單層），沒有開小模型與常談。在 3,000 個候選詞的讀音上，加 `--context --tinylm --colloquial-core` 與不加，聊天與書面的第一名逐列相同（0 列不同），所以沿用較快的做法；最終的 §3.4 評測用完整的出貨旗標。
-- **測試**：`tools/test_build_it_pack.py` 23 個（夾具，不連網）；`core/tests/engine_pack.rs` 加 `the_it_pack_has_its_own_bit_and_file`；`cli` 加 `packs_flag_takes_acg_it_and_both`；Swift 加 `testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackSwitchFromTheWindowReachesStoreAndMenu`、selftest 缺檔／壞檔兩個。
+- **測試**：`tools/test_build_it_pack.py` 23 個（夾具，不連網）；`core/tests/engine_pack.rs` 加 `the_it_pack_has_its_own_bit_and_file`；`cli` 加 `packs_flag_takes_acg_it_and_both`；Swift 加 `testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackSwitchFromTheWindowReachesStoreAndMenuLine`、selftest 缺檔／壞檔兩個。
 - **還沒做**（等 main 抓資料、GCP 建置與集合）：詞包本身與 §3.3–§3.7 的數字、新的 (a)(b) 衝突與 CHECK 讀音交維護者決定、`eval/dev/it/words.txt`。
 
 ## 2026-10-23：資訊＋AI 詞包的 GCP 建置、門檻×加分格點與確認登記（契約 `docs/contracts/it-pack.md`）

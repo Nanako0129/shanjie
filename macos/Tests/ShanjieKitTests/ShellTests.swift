@@ -861,7 +861,7 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(make(try XCTUnwrap(TestData.resources())).englishAvailable)
     }
 
-    /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" item is checked by default (user decision 2026-10-09), a toggle rebuilds the engine
+    /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" switch is on by default (user decision 2026-10-09), a toggle rebuilds the engine
     /// without the pack (the fixture pack spells 碇源堂, which the base lexicon cannot), the choice is stored, and a new shell
     /// reads it. On again: back to the engine with the pack.
     func testAcgPackMenuItemTogglesStoresAndSurvivesRestart() throws {
@@ -899,7 +899,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "碇源堂")
     }
 
-    /// it-pack contract 3.2: the "資訊與 AI 詞" item is checked when `itPack` was never set (the maskless default is on), a toggle rebuilds the engine without
+    /// it-pack contract 3.2: the "資訊與 AI 詞" switch is on when `itPack` was never set (the maskless default is on), a toggle rebuilds the engine without
     /// the pack, the choice is stored under `itPack`, and a new shell reads it. The ACG switch is independent. The fixture pack spells 圖像生成, which the
     /// base lexicon cannot (the chat and formal first candidates differ from it without the pack: core/tests/engine_pack.rs).
     func testItPackMenuItemTogglesStoresAndSurvivesRestart() throws {
