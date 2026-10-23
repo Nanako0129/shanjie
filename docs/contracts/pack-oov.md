@@ -10,23 +10,23 @@
 - **維護者的決定**：「這個是通語的問題…通語本身詞庫其實還需要與其他詞包去重」；第一片選「所有選用詞包詞＋分級分數」：解碼時只在選用詞包裡的詞不走通語的統計，分數由詞包建置時給。model-v7 再把選用詞包的詞拿出通語的計數（另一片）。
 - **要做到**：開詞包時，詞包詞彼此（與和詞庫的詞）怎麼排，由詞包的分數決定；關詞包時一切照舊。
 - **怎麼看到**：開詞包打 ㄧ ㄌㄧˋ ㄙ，第一名是處置列指定的「伊莉絲」；A4 那 10 個讀音照研究的順序；關詞包時和 main 逐位元組相同。由 main 在 GCP 量、在 tart VM 實機打一次。
-- **前提**：動漫詞包 A4（`feat/acg-refresh`）先合併；這一片的詞包重建與第 1 節第 3、4 項都以 A4 之後的清單為準。
+- **前提**：動漫詞包 A4（`feat/acg-refresh`）先合併；這一片在 A4 合併後 rebase，詞包重建與第 1 節第 3、4 項都以實際合併的清單為準（A4 那 10 個讀音與 keep-both 22 列合併後再核對一次）。
 
 ## 1. 規則
 
 1. **詞包詞是字串集合**：核心載入的選用詞包檔（現在只有動漫詞包；之後的資訊詞包同一套）第二欄的所有字串。核心不另外比對其他詞庫層；「詞包字串和基底、疊加層、變調列、名單層沒有交集」由測試守住（第 2 節第 5 項）。
 2. **核心**（`core/src/lm.rs`、`core/src/engine.rs`、`cli/src/main.rs`；`reference/proto/lm.py` 鏡像）：
-   - `CappedLexicon` 多存詞包字串集合（建構時傳入；沒有詞包時是空集合，任何判斷都不成立）。
+   - `CappedLexicon` 多存「哪些條目來自選用詞包」：用每個條目一個位元、或 `base.words` 上排序好的位移清單，不用 `HashSet<String>`（4.4 萬個字串會超過第 2 節第 6 項的記憶體上限）；判斷字串時以這份資料查。集合只從選用詞包檔（`read_packs_detailed` 讀到的列）建，不含 `--extra-overlay` 的列；沒有詞包時是空的，任何判斷都不成立。
    - `CappedLexicon::new`：詞包字串的條目分數就是詞包檔的分數，**不封頂**（不取 `min(score, log10(c/N))`）、**不扣** `UNSEEN_OVERLAY_PENALTY`。
    - **每個用 `lm.word_id(字串)` 的地方，字串是詞包詞時一律當成 `None`**，逐一是：
      - 解碼的詞項與句尾項（`decode_segment_learned` 裡算 `wid` 的地方，`core/src/lm.rs:1071` 一帶）；
      - 解碼狀態裡記下的前一詞（`last: wid`，`:1113` 一帶），所以詞包詞當前文時是 `ctx_of(None)`；
      - 段開頭的固定詞或前文詞（`start`，`:988` 一帶）；
      - 右邊接續的詞（`End::Next`，`:1134` 一帶）；
-     - `Engine::total_score` 走路徑與 `history()` 的地方（`core/src/engine.rs:1939`、`:1952–1975` 一帶）。
+     - `Engine::total_score` 走路徑與 `history()` 的地方（`core/src/engine.rs:1939`、`:1952–1982` 一帶）。它把字串交給 `Lm::word3_in`、`Lm::eos3_in`、`Lm::word_learned`，這三個方法內部再呼叫 `word_id`（`core/src/lm.rs:576–578`、`:611–622`）；改法是給這三個方法加吃 `Option<u32>` 的版本（或多一個「這個字串當成未知」的參數），由 `total_score` 先用同一個判斷算好 id 再傳進去。
      實作用一個小函式（例如 `CappedLexicon::model_id(&self, lm, word) -> Option<u32>`）集中這個判斷，呼叫點都改用它。
    - 建構子的接線：`Engine::load_lm`、`load_lexicon_packs` 把詞包字串傳下去（`core/src/engine.rs:783–790`、`:1378` 一帶），`cli/src/main.rs` 同一條路。
-   - 候選清單、V3 預測、學習、降權表、會意的輸入不動。
+   - 候選清單、V3 預測（`core/src/predict.rs` 的 `word_id`）、學習、降權表、會意的輸入、常談項（`core/src/colloquial.rs` 的 `lc`、`k`）不動：這一片只處理解碼器裡詞包詞和通語統計的關係，其他層對詞包詞的處理照舊。
 3. **詞包的分級分數**（`tools/build_acg_pack.py`）：
    - **凍結計數表** `data/packs/acg-counts.tsv`（詞、次數；檔頭記來源模型雜湊與 N）：只有明確的子命令 `build_acg_pack.py freeze-counts` 會產生，產生前核對 `data/lm/bigram.sjlm` 是 model-v6（`fc2bddd1…`），不是就中止。一般建置只讀這份表：表不存在、或表檔的 SHA-256 不等於工具裡釘住的常數，就中止；**不看** `data/lm` 是哪一版。
    - 每個詞的分級分數 `g(w) = max(S_len, log10(c(w)/N) + B)`；不在表裡的詞（之後新加的詞）一律 `S_len`。`S_len` 是現在依詞長給的分數，`B` 是加分（第 4 項）。
@@ -46,8 +46,8 @@
 3. **動漫與名單**（選格時看過，只報）：選定的 B 對現行出貨（main 的詞包）的改對／改壞與淨值。
 4. **出貨標準四條**（開詞包＝出貨預設，對 main）：discordtune、打字測驗與 dev302 書面、cvtune-clean 聊天、錯字回報，照規則判。
 5. **測試**（每條有會讓它失敗的突變，看結束碼與斷言數）：
-   - 核心（合成小模型＋小詞包）：詞包詞的詞項等於沒有模型 id 時的值、不封頂也不扣未見罰分；非詞包詞不變；詞包詞分別放在段開頭的固定詞、前文詞、`End::Next` 三個位置時，`total_score` 都等於解碼第一名的分數。突變：任一呼叫點不換成 `None`、詞包詞仍封頂，各至少讓一條失敗。
-   - 跨語言：`reference/proto/lm.py` 的 `cap_overlay` 鏡像收同一份詞包字串集合，Rust 與 Python 在同一組合成資料上的分數與第一名逐位元組相同（Python 端只加這個集合參數，不加詞包載入）。
+   - 核心（合成小模型＋小詞包）：詞包詞的詞項等於沒有模型 id 時的值、不封頂也不扣未見罰分；非詞包詞不變；詞包詞分別放在段開頭的固定詞、前文詞、`End::Next` 三個位置時，`total_score` 都等於解碼第一名的分數。突變：任一解碼呼叫點不換成 `None`、`total_score` 對詞包詞仍用字串查 `word_id`、詞包詞仍封頂，各至少讓一條失敗。
+   - 跨語言：`reference/proto/lm.py` 的 `cap_overlay` 收同一份詞包字串集合，而且 `decode` 與 `history`（詞項、前一詞、段開頭、句尾，`lm.py:142–163`、`:219–226`、`:283–306` 一帶）對詞包詞一律當未知 id。合成資料裡的詞包詞**要在合成模型的詞彙裡、而且有保留的二元組**；Rust 與 Python 在這組資料上的分數與第一名逐位元組相同。突變：拿掉 Python `decode` 端的對應，跨語言測試失敗。Python 端不加詞包檔載入。
    - 建置工具（`tools/test_build_acg_pack.py`）：分級公式（有次數、沒次數、B）；同一讀音裡排後面的詞次數較高時，列分數仍照 `ordered` 遞減；計數表三種情況（表不存在→中止、表被改→中止、`data/lm` 換成別的雜湊→照樣成功且產出不變）；已提交的詞包和 `lexicon_words()` 的交集為空（故意製造重疊時失敗）。
 6. **延遲與記憶體**（Mac、閒置窗）：`timing_typing76_keys` p95 ≤ 16 ms；開詞包的 RSS 對 main 增加 ≤ 1 MiB。
 7. **確認**：這一片改了解碼器，不是「只加詞的詞包片」。規則要求探索片過了四條後，在沒看過的判讀集確認一發。改動只碰詞包詞的讀音，私人聊天判讀集裡這類列很少〔推論〕，一發大概量不出顯著差。所以 B 選定、四條過了之後，**先出選擇題給維護者**：(a) 照規則在下一份判讀集確認一發（規則與數字之前 commit）；(b) 例外：以動漫五集與名單檢查集的另一份抽樣（之後補的列）確認，記進 `decisions.md`。
@@ -59,7 +59,7 @@
 
 ## 4. 停止條件、預算、範圍外、回退
 
-- **停止**：關詞包有任何一格不是逐位元組相同；三格 B 都沒通過守門；選定的 B `first_named` 失敗清單不為空；出貨標準任一條不過；記憶體 > 1 MiB；核心改動超出 `CappedLexicon`、解碼的 `word_id` 呼叫點、`total_score`／`history()`、建構子接線（`Engine::load_lm`、`load_lexicon_packs`、`cli/src/main.rs`）與 `lm.py`。
+- **停止**：關詞包有任何一格不是逐位元組相同；三格 B 都沒通過守門；選定的 B `first_named` 失敗清單不為空；出貨標準任一條不過；記憶體 > 1 MiB；核心改動超出 `CappedLexicon`、解碼的 `word_id` 呼叫點、`total_score`／`history()`、`Lm::word3_in`／`Lm::eos3_in`／`Lm::word_learned`（或它們吃 id 的新版本）、建構子接線（`Engine::load_lm`、`load_lexicon_packs`、`cli/src/main.rs`）與 `lm.py`。
 - **預算**：GCP ≤ 2 小時（三格建置與量測、關詞包對照）；executor 實作 1 次＋修正 1 次。
 - **範圍外**：重建通語（model-v7）；單字與疊加層讀音修正（維護者：等 model-v7）；承接的去留（另跑關掉的對照）；資訊詞包（之後照同一套接上）；名單層（常開詞庫，留在通語）。
 - **回退**：revert 這一片的 merge commit。核心改動、`data/packs/acg-add.tsv`、`acg-sources.tsv`、`acg.json`、新檔 `acg-counts.tsv`、`acg-collisions.tsv` 與 `acg-keep-both.tsv` 這一片改的列、`tools/build_acg_pack.py` 一起回到合併前。因為關詞包時逐位元組相同，revert 只影響開詞包的選字。
