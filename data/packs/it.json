@@ -9,14 +9,14 @@
  "dropped_unreadable": 3,
  "files": {
   "it-add.tsv": {
-   "bytes": 56239,
-   "lines": 1020,
-   "sha256": "313947ab39f8596254e331d7688e456c6ec4e3d3fdf9366198fda1a9d656186c"
+   "bytes": 54616,
+   "lines": 1021,
+   "sha256": "8777420b2d669e40f12ab4cf3ee719c317f51a0d43bad8a0ea294e07001815e4"
   },
   "it-sources.tsv": {
-   "bytes": 43510,
-   "lines": 1058,
-   "sha256": "dbf4584b5fe8ab76be8e23d2f46568207b3307731b0a9b29ee13bce49dbdc865"
+   "bytes": 43556,
+   "lines": 1059,
+   "sha256": "215ee493c4a1570fcf5f0942b17b1b036f8ecf7e50bd1f571e37427b8b0399e5"
   }
  },
  "manual_file": {
@@ -42,7 +42,7 @@
  },
  "min_count": 50,
  "reference_strings": 124609,
- "rows": 1020,
+ "rows": 1021,
  "rules": {
   "claims_in": {
    "ai": 903,
@@ -131,12 +131,12 @@
   "ai": 8,
   "cgroup": 123,
   "manual": 15,
-  "naer16": 654,
+  "naer16": 655,
   "naer75": 257
  },
  "stages": {
   "after_source_rules": 14664,
-  "already_right": 5893,
+  "already_right": 5892,
   "dedupe_acg": 50,
   "dedupe_lexicon": 7548,
   "dropped_by_c_rule": 133,
@@ -145,6 +145,6 @@
   "unreadable": 3
  },
  "unresolved_collision_readings": 0,
- "version": "20261023-313947ab",
- "words": 1016
+ "version": "20261023-8777420b",
+ "words": 1017
 }
