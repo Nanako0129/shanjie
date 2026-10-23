@@ -462,7 +462,7 @@ impl Engine {
             let Some(mut syl) = body.iter().map(|&k| Layout::Standard.symbol_of(k).map(|x| x.1)).collect::<Option<String>>() else { continue };
             syl.push(mark);
             if env.cache.legal.has_han_syllable(&syl) {
-                let word = self.lex.entries(std::slice::from_ref(&syl)).first().map(|(w, _)| w.to_string())?;
+                let word = self.window_entries(std::slice::from_ref(&syl)).first().map(|(w, _)| w.to_string())?;
                 return Some((n, syl, word));
             }
         }

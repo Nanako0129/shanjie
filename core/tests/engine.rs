@@ -48,7 +48,9 @@ fn expect_cands(ks: &[&str], from_start: bool) -> Vec<String> {
     for n in (1..=l.max_len.min(ks.len())).rev() {
         let part = if from_start { &ks[..n] } else { &ks[ks.len() - n..] };
         let key: Vec<String> = part.iter().map(|s| s.to_string()).collect();
-        for (w, _) in l.entries(&key) {
+        // docs/contracts/reading-decoder.md: the one-syllable segment of the window goes by raw score plus the reading term
+        let entries = if n == 1 { l.entries_by_reading(&key) } else { l.entries(&key) };
+        for (w, _) in entries {
             if seen.insert(w.to_string()) {
                 out.push(w.to_string());
             }
@@ -59,9 +61,13 @@ fn expect_cands(ks: &[&str], from_start: bool) -> Vec<String> {
 fn cands(ks: &[&str]) -> Vec<String> {
     expect_cands(ks, false)
 }
-/// Top-1 of a single syllable (what the engine displays for it).
+/// Top-1 of a single syllable (what the engine displays for it): without a language model the display is the lexicon's own first, and the window
+/// lists the syllable in the reading term's order (`cands`).
 fn top(s: &str) -> String {
-    cands(&[s])[0].clone()
+    l_first(s)
+}
+fn l_first(s: &str) -> String {
+    lex().entries(&[s.to_string()])[0].0.to_string()
 }
 /// Open candidates for "ㄕˋ" (many homophones) and return the full expected list.
 fn open_shi(e: &mut Engine) -> Vec<String> {
@@ -631,9 +637,10 @@ fn grid_columns_are_always_nine() {
         let o = expanded_for(syls);
         assert!(o.columns == 9, "{syls:?}: {}", o.columns);
     }
-    // ㄏㄨㄚ (keys c j 8 space, space, down): row 1 is all emoji, wider than the Han in row 0.
+    // ㄏㄨㄚ (keys c j 8 space, space, down): row 1 is all emoji, wider than the Han in row 0. (The reading term moves 華, whose ㄏㄨㄚ is a floor-score
+    // reading, behind the emoji; the lexicon's own order had it fourth and the first emoji at index 10.)
     let o = expanded_for(&["ㄏㄨㄚ"]);
-    assert!(o.candidates[1] == "化" && o.candidates[10] == "🌷");
+    assert!(o.candidates[1] == "化" && o.candidates[9] == "🌷" && !o.candidates[..9].contains(&"華".to_string()));
 }
 #[test]
 fn pick_follows_candidate_first() {

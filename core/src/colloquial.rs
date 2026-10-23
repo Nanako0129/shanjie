@@ -2,8 +2,8 @@
 //! colloquial table, SJ-CL) as a log-linear term, minus a penalty for overlay words. Definitions are those of
 //! experiments/p4-colloquial/p4.py, word for word; the fusion that uses them is `TinyLm::rerank_colloquial`.
 //!
-//! The reading-channel term (docs/contracts/reading-channel.md) rides on the same fusion: `channel_of` is p5.py's `lex` estimator, `NU` and `CAP`
-//! its cell `lex,1.0,4` (experiments/p5-reading-channel/README.md); `fused_pick` adds it after `fuse` when it is given.
+//! There is no reading term in the fusion (docs/contracts/reading-decoder.md): the reading term the P5 cell `lex,1.0,4` put here went into the
+//! n-gram decoder (core/src/reading.rs), where it reaches every setting and every strength.
 //!
 //! The constants are the cell P4d registered and chatjudge-2 confirmed (experiments/p4d-colloquial/README.md): mu 0.5, soft gate
 //! T 1.0, gamma = mu / 2, and at the standard strength alpha 0.5, tau 2, delta 0.25. The conservative and aggressive strengths use the two
@@ -11,7 +11,6 @@
 //! header.
 use crate::lm::{Lm, LmError, Profile};
 use crate::tinylm::{pick, RerankLevel, TinyLm};
-use crate::Lexicon;
 use std::collections::HashSet;
 use std::fmt;
 use std::io::BufRead;
@@ -41,11 +40,6 @@ pub fn cell(level: RerankLevel) -> (f64, f64, f64) {
         RerankLevel::Aggressive => AGGRESSIVE,
     }
 }
-
-/// The reading-channel term's weight: ll_eff gains (NU / alpha) * (ch_i - ch_0), alpha being the level's (P5 registered cell `lex,1.0,4`, selected on chatclause).
-pub const NU: f64 = 1.0;
-/// The reading-channel term's clip: each single-character word contributes at least -CAP (P5 registered cell `lex,1.0,4`).
-pub const CAP: f64 = 4.0;
 
 /// SHA-256 of the `.sjtl` the cell was measured with (data/tinylm.sjtl.sha256); the term applies to no other small model.
 pub const PAIRED_TINYLM_SHA256: &str = "e7c179d85405ec42a40bb22adb58a7485c58f77aed89dfc2ca76a0d89568ed5e";
@@ -181,61 +175,18 @@ pub fn applies(profile: Profile, model: &TinyLm) -> bool {
     profile == Profile::Chat && model.file_sha256() == PAIRED_TINYLM_SHA256
 }
 
-/// What the reading-channel term reads besides the words of a path: the engine's lexicon and the stretch's syllables (one per character).
-#[derive(Clone, Copy)]
-pub struct ReadingChannel<'a> {
-    pub lex: &'a Lexicon,
-    pub syls: &'a [String],
-}
-
-/// ch of one candidate's word split (p5.py `word_terms` / `ch_of`, estimator `lex`): the syllables are cut over the words in order, one per
-/// character; each single-character word w read r adds max(s(r, w) - max_r' s(r', w), -CAP), s being the lexicon's score (largest over
-/// duplicate rows, before demotion and learning). A multi-character word adds 0, a single-character (r, w) the lexicon lacks adds 0, and
-/// words that do not cover the syllables exactly make the whole path 0.
-///
-/// Guarantees that hold by type, so no test can observe them: s is read from the raw `Lexicon` (demotion lives in `CappedLexicon`, a separate
-/// type, and learning never mutates the `Lexicon`), so it is before demotion and learning. The `len(w) == 1` guard states the contract; removing it
-/// is an equivalent mutant (a one-syllable lookup never holds a multi-character word). Cost, measured on the cloud VM at 093fc11c (CLI --threads 1,
-/// dev302 chat, the `tinylm: rerank` line): p95 248.844 ms without the term, 248.740 ms with it; replay dev302 peak RSS 436,144 vs 436,148 KB, so
-/// the lookups are not memoized.
-pub fn channel_of<S: AsRef<str>>(lex: &Lexicon, syls: &[String], words: &[S]) -> f64 {
-    let len = |w: &str| w.chars().count();
-    if words.iter().map(|w| len(w.as_ref())).sum::<usize>() != syls.len() {
-        return 0.0;
-    }
-    let (mut at, mut ch) = (0, 0.0);
-    for w in words {
-        let w = w.as_ref();
-        if len(w) == 1 {
-            if let (Some(s), Some(best)) = (lex.syllable_score(&syls[at], w), lex.best_word_score(w)) {
-                ch += (s - best).max(-CAP);
-            }
-        }
-        at += len(w);
-    }
-    ch
-}
-
 /// The index `rerank_colloquial` chooses: `pick` over the fused scores with `cell`, the level's (alpha, tau, delta) (never the `.sjtl`
-/// header's). `ng`, `ll`, `col` and `ch` (the reading-channel term, None for the colloquial term alone) are the first candidates of one
-/// n-best list, in the n-gram order: ll_eff_i = `fuse` + (NU / alpha) * (ch_i - ch_0).
-pub fn fused_pick(ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell: (f64, f64, f64)) -> usize {
+/// header's). `ng`, `ll` and `col` are the first candidates of one n-best list, in the n-gram order.
+pub fn fused_pick(ng: &[f64], ll: &[f64], col: &[f64], cell: (f64, f64, f64)) -> usize {
     let (alpha, tau, delta) = cell;
-    let mut eff = fuse(ll, col, alpha);
-    if let Some(ch) = ch {
-        // Candidate 0 is the anchor: its own term is 0, as in `fuse`.
-        for (e, c) in eff.iter_mut().zip(ch).skip(1) {
-            *e += (NU / alpha) * (c - ch[0]);
-        }
-    }
-    pick(ng, &eff, alpha, tau, delta)
+    pick(ng, &fuse(ll, col, alpha), alpha, tau, delta)
 }
 
-/// `fused_pick` with `cell`, unless a col is not finite (a word the table scores as log10 0, or a NaN): then no colloquial term at all and no
-/// reading-channel term, the plain `pick` with `plain` (the `.sjtl` header's alpha, tau, delta of the same level), so an infinity or NaN never decides.
-pub fn guarded_pick(ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell: (f64, f64, f64), plain: (f64, f64, f64)) -> usize {
+/// `fused_pick` with `cell`, unless a col is not finite (a word the table scores as log10 0, or a NaN): then no colloquial term at all, the plain
+/// `pick` with `plain` (the `.sjtl` header's alpha, tau, delta of the same level), so an infinity or NaN never decides.
+pub fn guarded_pick(ng: &[f64], ll: &[f64], col: &[f64], cell: (f64, f64, f64), plain: (f64, f64, f64)) -> usize {
     if col.iter().all(|c| c.is_finite()) {
-        return fused_pick(ng, ll, col, ch, cell);
+        return fused_pick(ng, ll, col, cell);
     }
     let (alpha, tau, delta) = plain;
     pick(ng, ll, alpha, tau, delta)
@@ -280,12 +231,12 @@ mod tests {
     /// ll [-5.0, -3.8], candidate 1 gains 0.5 * 1.2 - 0.3 = 0.3 >= delta at alpha 0.5 but 0.3 * 1.2 - 0.3 = 0.06 at alpha 0.3.
     #[test]
     fn fused_pick_uses_the_registered_cell() {
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], None, STANDARD), 1, "alpha 0.5: gain 0.3 >= delta");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], STANDARD), 1, "alpha 0.5: gain 0.3 >= delta");
         assert_eq!(pick(&[-10.0, -10.3], &[-5.0, -3.8], 0.3, STANDARD.1, STANDARD.2), 0, "premise: the shipping alpha keeps the first");
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.2], &[0.0, 0.0], None, STANDARD), 0, "gain 0.1 < delta");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.2], &[0.0, 0.0], STANDARD), 0, "gain 0.1 < delta");
         // tau: an n-gram margin of 2 or more keeps the first whatever the small model says
-        assert_eq!(fused_pick(&[-10.0, -12.0], &[-50.0, 0.0], &[0.0, 0.0], None, STANDARD), 0);
-        assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0], None, STANDARD), 1);
+        assert_eq!(fused_pick(&[-10.0, -12.0], &[-50.0, 0.0], &[0.0, 0.0], STANDARD), 0);
+        assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0], STANDARD), 1);
     }
 
     /// A col that is +inf, -inf or NaN (the anchor's or another candidate's) must not decide: the plain pick with the given triple is used.
@@ -294,107 +245,20 @@ mod tests {
     #[test]
     fn non_finite_col_falls_back_to_the_plain_pick() {
         let (ng, ll, plain) = ([-10.0, -10.3], [-5.0, -3.8], (0.3, STANDARD.1, STANDARD.2));
-        assert_eq!(fused_pick(&ng, &ll, &[0.0, f64::INFINITY], None, STANDARD), 1, "premise: unguarded, +inf decides");
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::INFINITY], None, STANDARD, plain), 0);
-        assert_eq!(guarded_pick(&ng, &ll, &[f64::NEG_INFINITY, 0.0], None, STANDARD, plain), 0, "-inf anchor");
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, STANDARD, plain), 0);
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], None, STANDARD, plain), fused_pick(&ng, &ll, &[0.0, 0.0], None, STANDARD), "finite cols: the term as before");
+        assert_eq!(fused_pick(&ng, &ll, &[0.0, f64::INFINITY], STANDARD), 1, "premise: unguarded, +inf decides");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::INFINITY], STANDARD, plain), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[f64::NEG_INFINITY, 0.0], STANDARD, plain), 0, "-inf anchor");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], STANDARD, plain), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], STANDARD, plain), fused_pick(&ng, &ll, &[0.0, 0.0], STANDARD), "finite cols: the term as before");
     }
 
-    /// The reading channel's lexicon: 甲 has three readings (a -1.0 twice over, b -3.0, c -9.0: the duplicate row a -5.0 loses to a -1.0), 乙 ties
-    /// under a and b, 丁 has one reading, and 甲甲 is a two-character word whose characters would score -2 each if they were counted.
-    const LEX: &str = "a 甲 -1.0\nb 甲 -3.0\nc 甲 -9.0\na 甲 -5.0\na 乙 -2.0\nb 乙 -2.0\nd 丁 -7.0\na-a 甲甲 -5.0\n";
-
-    fn ch(syls: &[&str], words: &[&str]) -> f64 {
-        let lex = Lexicon::parse(LEX).unwrap();
-        channel_of(&lex, &syls.iter().map(|s| s.to_string()).collect::<Vec<_>>(), words)
-    }
-
-    /// A single-character word is scored against its own best reading (the largest over its rows, duplicates included); a reading tied with
-    /// the best, or the only one, is 0. Rule: t = s(r, w) - max_r' s(r', w).
-    #[test]
-    fn channel_is_relative_to_the_words_best_reading() {
-        close(ch(&["b"], &["甲"]), -2.0);
-        close(ch(&["a"], &["甲"]), 0.0);
-        close(ch(&["a"], &["乙"]), 0.0);
-        close(ch(&["b"], &["乙"]), 0.0);
-        close(ch(&["d"], &["丁"]), 0.0);
-    }
-
-    /// Each word's term is clipped at -CAP before the sum (-8 becomes -4) and the terms add up.
-    #[test]
-    fn channel_clips_each_word_at_the_cap_and_sums() {
-        assert_eq!(CAP, 4.0);
-        close(ch(&["c"], &["甲"]), -4.0);
-        close(ch(&["c", "b"], &["甲", "甲"]), -6.0);
-        close(ch(&["b", "b", "b"], &["甲", "甲", "甲"]), -6.0);
-    }
-
-    /// A multi-character word adds nothing, whatever its characters would score alone.
-    #[test]
-    fn channel_counts_single_character_words_only() {
-        close(ch(&["b", "b"], &["甲甲"]), 0.0);
-        close(ch(&["b", "a", "a"], &["甲", "甲甲"]), -2.0);
-        close(ch(&["b", "b"], &["甲", "甲"]), -4.0);
-    }
-
-    /// A single-character (r, w) the lexicon lacks adds 0 (an unknown syllable, a reading of the syllable that has no such word, a word it
-    /// lacks), and the other words of the path still count.
-    #[test]
-    fn channel_missing_pair_is_zero() {
-        close(ch(&["z"], &["甲"]), 0.0);
-        close(ch(&["a"], &["丁"]), 0.0);
-        close(ch(&["a"], &["戊"]), 0.0);
-        close(ch(&["a", "b"], &["丁", "甲"]), -2.0);
-    }
-
-    /// Words that do not cover the syllables exactly (too many or too few characters) make the whole path 0, the words that would score
-    /// included.
-    #[test]
-    fn channel_syllable_mismatch_zeroes_the_whole_path() {
-        close(ch(&["b", "b"], &["甲", "甲"]), -4.0);
-        close(ch(&["b"], &["甲", "甲"]), 0.0);
-        close(ch(&["b", "b", "b"], &["甲", "甲"]), 0.0);
-        close(ch(&["b", "b"], &["甲"]), 0.0);
-    }
-
-    /// ll_eff_i = fuse + (NU / alpha) (ch_i - ch_0): with ng [-10.0, -10.3] and equal ll, candidate 1 gains NU * d - 0.3 in the pick's score, so a
-    /// ch gap d of 0.4 stays under delta (0.25) and 0.6 passes it; with the factor taken from the shipping alpha 0.3 (3.33 instead of 2) the 0.4
-    /// gap would pass too.
-    #[test]
-    fn channel_factor_is_nu_over_alpha() {
-        let (ng, ll, col) = ([-10.0, -10.3], [-5.0, -5.0], [0.0, 0.0]);
-        assert_eq!(NU / STANDARD.0, 2.0);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[0.0, 0.4]), STANDARD), 0);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[0.0, 0.6]), STANDARD), 1);
-        assert_eq!(fused_pick(&ng, &ll, &col, None, STANDARD), 0, "premise: without the term candidate 1 loses");
-    }
-
-    /// The term is a difference to the anchor: adding a constant to every ch changes nothing, and a candidate's gap to ch_0 decides (-2.4 against
-    /// the anchor's -3.0 is the same gap of 0.6 as above).
-    #[test]
-    fn channel_is_relative_to_the_anchor() {
-        let (ng, ll, col) = ([-10.0, -10.3], [-5.0, -5.0], [0.0, 0.0]);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[-3.0, -2.4]), STANDARD), 1);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[97.0, 97.6]), STANDARD), 1);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[-3.0, -3.0]), STANDARD), 0);
-    }
-
-    /// A non-finite col drops the reading-channel term with the colloquial term: the plain pick, whatever ch says.
-    #[test]
-    fn non_finite_col_drops_the_channel_too() {
-        let (ng, ll, plain) = ([-10.0, -10.3], [-5.0, -5.0], (0.3, STANDARD.1, STANDARD.2));
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], Some(&[0.0, 5.0]), STANDARD, plain), 1, "premise: finite cols, the term decides");
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], Some(&[0.0, 5.0]), STANDARD, plain), 0);
-    }
-
-    /// colloquial-levels section 2.1: each level's `fused_pick` uses its own (alpha, tau, delta). With no colloquial or channel term (equal col) the
+    /// colloquial-levels section 2.1: each level's `fused_pick` uses its own (alpha, tau, delta). With no colloquial term (equal col) the
     /// candidates gain, over candidate 0, 1 gains 0.5 * 1.2 - 0.4 = 0.2 at alpha 0.5 (delta 0.1 takes it, delta 0.25 does not) and 2 gains 8 - 4 = 4 at
     /// alpha 1.0 against 0.5 * 8 - 4 = 0 at alpha 0.5 (delta 3 takes it): standard keeps 0, conservative picks 2, aggressive picks 1.
     #[test]
     fn each_level_picks_with_its_own_cell() {
         let (ng, ll, col) = ([0.0, -0.4, -4.0], [0.0, 1.2, 8.0], [0.0; 3]);
-        let by_level = |l| fused_pick(&ng, &ll, &col, None, cell(l));
+        let by_level = |l| fused_pick(&ng, &ll, &col, cell(l));
         assert_eq!([by_level(RerankLevel::Standard), by_level(RerankLevel::Conservative), by_level(RerankLevel::Aggressive)], [0, 2, 1]);
         assert_eq!(STANDARD, (0.5, 2.0, 0.25));
         assert_eq!(CONSERVATIVE, (1.0, 2.0, 3.0));
@@ -402,16 +266,15 @@ mod tests {
         assert_eq!([cell(RerankLevel::Standard), cell(RerankLevel::Conservative), cell(RerankLevel::Aggressive)], [STANDARD, CONSERVATIVE, AGGRESSIVE]);
     }
 
-    /// The colloquial and reading-channel terms weigh the same in the fused score at every alpha (s = ng + alpha * ll + g * MU * dcol + NU * dch), so
-    /// the coefficients in ll_eff are MU / alpha and NU / alpha of the level's alpha: at alpha 1.0 a divisor of 0.5 (the standard alpha) doubles
-    /// both terms. With ng [0, -0.5], ll equal (gate 0.5) and the conservative cell (alpha 1, delta 3): a col gap of 10 gains -0.5 + 0.5 * 0.5 * 10 =
-    /// 2 < 3 (a doubled term would gain 4.5) and a gap of 16 gains 3.5; a ch gap of 3 gains -0.5 + 3 = 2.5 (doubled: 5.5) and 3.6 gains 3.1.
+    /// The colloquial term weighs the same in the fused score at every alpha (s = ng + alpha * ll + g * MU * dcol), so the coefficient in ll_eff is
+    /// MU / alpha of the level's alpha: at alpha 1.0 a divisor of 0.5 (the standard alpha) doubles the term. With ng [0, -0.5], ll equal (gate 0.5)
+    /// and the conservative cell (alpha 1, delta 3): a col gap of 10 gains -0.5 + 0.5 * 0.5 * 10 = 2 < 3 (a doubled term would gain 4.5) and a gap
+    /// of 16 gains 3.5.
     #[test]
-    fn the_terms_weigh_the_same_at_every_alpha() {
+    fn the_term_weighs_the_same_at_every_alpha() {
         let (ng, ll) = ([0.0, -0.5], [-5.0, -5.0]);
-        let c = |col: f64, ch: f64| fused_pick(&ng, &ll, &[0.0, col], Some(&[0.0, ch]), CONSERVATIVE);
-        assert_eq!([c(10.0, 0.0), c(16.0, 0.0)], [0, 1], "the colloquial term");
-        assert_eq!([c(0.0, 3.0), c(0.0, 3.6)], [0, 1], "the reading-channel term");
+        let c = |col: f64| fused_pick(&ng, &ll, &[0.0, col], CONSERVATIVE);
+        assert_eq!([c(10.0), c(16.0)], [0, 1], "the colloquial term");
         // fuse itself: the coefficient is MU / alpha with the alpha given
         let eff = fuse(&[-5.0, -5.0], &[0.0, 10.0], 1.0);
         close(eff[1], -5.0 + sigmoid(0.0) * (MU / 1.0) * 10.0);
@@ -422,8 +285,8 @@ mod tests {
     fn the_fallback_is_the_plain_pick_whatever_the_cell() {
         let (ng, ll) = ([-10.0, -10.3], [-5.0, -3.8]);
         for cell in [STANDARD, CONSERVATIVE, AGGRESSIVE] {
-            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, cell, (0.3, 2.0, 0.25)), 0);
-            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, cell, (0.5, 2.0, 0.25)), 1, "the plain triple decides: gain 0.5 * 1.2 - 0.3 = 0.3");
+            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], cell, (0.3, 2.0, 0.25)), 0);
+            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], cell, (0.5, 2.0, 0.25)), 1, "the plain triple decides: gain 0.5 * 1.2 - 0.3 = 0.3");
         }
     }
 }

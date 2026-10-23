@@ -1,7 +1,9 @@
-//! Reading decode, evaluation only (experiments/r1-reading-decode/README.md, section "R1d"): the n-gram decoder adds a reading term to the path
-//! score of every single-character word, `LAMBDA * max(t(r, w), -CAP)`, t being P5's reading term (experiments/p5-reading-channel/p5.py
-//! `lex_logp`) with the two exceptions of r1.py (`sandhi_exempt`, `floor_mc`), the registered arm B-f of section R1c. It is switched on only by
-//! `CappedLexicon::with_reading_decode` (the CLI's `--reading-decode`); the engine never calls it, and without it the decoder's arithmetic is untouched.
+//! The reading term of the decoder (docs/contracts/reading-decoder.md; exploration: experiments/r1-reading-decode/README.md, R1c to R1e): the
+//! n-gram decoder adds `LAMBDA * max(t(r, w), -CAP)` to the path score of every single-character word w read r, and the candidate window orders
+//! the one-syllable entries by it. t is P5's reading term (experiments/p5-reading-channel/p5.py `lex_logp`) with the two exceptions of r1.py
+//! (`SANDHI`, `LEX_FLOOR` read as mc), the registered arm B-f of section R1c. The term is a function of the lexicon alone, so it is computed once
+//! when the lexicon is loaded (`Lexicon::with_reading_terms`, called by `load_lexicon_packs`) into an array aligned with the entries of the
+//! one-syllable readings, and the decoder and the window read it from there; nothing is looked up by string while decoding.
 use crate::Lexicon;
 use std::collections::HashMap;
 
@@ -47,7 +49,9 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
     if by_char.is_empty() {
         return HashMap::new();
     }
-    // The multi-character rows of `base`, one per (reading, word) at its largest score, in first-occurrence order.
+    // The multi-character rows of `base`, one per (reading, word) at its largest score, in first-occurrence order. Only a row with a position
+    // that adds to a floor character's mass is kept (the sum below skips every other position): the same sums, and the 150,000 other rows are never held
+    // (keeping them cost about 18 MiB of peak RSS at load, measured).
     let (mut at, mut rows): (HashMap<(&str, &str), usize>, Vec<(&str, &str, f64)>) = (HashMap::new(), Vec::new());
     for l in base.lines() {
         if l.starts_with(['#', '_']) {
@@ -57,6 +61,9 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
         let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else { continue };
         let n = word.chars().count();
         if n < 2 || n != reading.split('-').count() {
+            continue;
+        }
+        if !word.chars().zip(reading.split('-')).any(|(c, syl)| by_char.contains_key(&c) && lex.syl_ids.contains_key(syl)) {
             continue;
         }
         let Ok(score) = score.parse::<f64>() else { continue };
@@ -126,6 +133,61 @@ impl ReadingDecode {
     }
 }
 
+/// `ReadingTerms::start` of a reading that is not a one-syllable one: it has no terms.
+const NONE: u32 = u32::MAX;
+
+/// The reading term of every entry of the one-syllable readings, in the order of `Lexicon::ents` (a multi-character entry of such a reading,
+/// which only an overlay row can be, carries 0). `start[r]` is where reading r's entries begin in `terms`, `NONE` for a longer reading.
+pub struct ReadingTerms {
+    start: Vec<u32>,
+    terms: Vec<f64>,
+}
+
+impl Lexicon {
+    /// Builds the reading terms from this lexicon and `base_text`, the text of `mcbpmf-data.txt` (what the mc estimate of the floor readings
+    /// is counted from, `ReadingDecode::new`). The term of an entry is `ReadingDecode::term`: it reads the raw lexicon scores, before capping,
+    /// demotion and learning.
+    pub fn with_reading_terms(mut self, base_text: &str) -> Lexicon {
+        let rd = ReadingDecode::new(&self, base_text);
+        let mut start = vec![NONE; self.readings.len()];
+        let mut terms = Vec::new();
+        for (r, reading) in self.readings.iter().enumerate().filter(|(_, x)| x.key_len == 1) {
+            start[r] = terms.len() as u32;
+            let syl = &self.syl_names[self.key_pool[reading.key_off as usize] as usize];
+            terms.extend(self.range(r).map(|p| rd.term(&self, syl, self.word(p))));
+        }
+        self.rd = Some(ReadingTerms { start, terms });
+        self
+    }
+
+    /// Where reading `r`'s terms begin in the table (`terms_of`, the capped lexicon's copy of it): `Some` for a one-syllable reading of a
+    /// lexicon that has the table.
+    pub(crate) fn reading_term_start(&self, r: usize) -> Option<usize> {
+        self.rd.as_ref().map(|t| t.start[r]).filter(|&s| s != NONE).map(|s| s as usize)
+    }
+
+    /// The table as loaded, in `ents` order (empty without it); `CappedLexicon::new` copies it and sorts the copy with its entries.
+    pub(crate) fn reading_terms(&self) -> &[f64] {
+        self.rd.as_ref().map_or(&[], |t| &t.terms)
+    }
+
+    /// The candidate window's one-syllable list (docs/contracts/reading-decoder.md section 1, "Candidate window"): `entries(key)` for a key of
+    /// one syllable with the entries ordered by raw score plus the reading term, best first, a stable sort (equal keys keep the lexicon's
+    /// order). A longer key, and a lexicon without the table, give `entries(key)` unchanged. The one ordering of the window's l = 1 segment,
+    /// of the English window's Chinese item and of the digit layer's second reading.
+    pub fn entries_by_reading(&self, key: &[String]) -> Vec<(&str, f64)> {
+        let Some(r) = self.find(&self.ids(key)) else { return Vec::new() };
+        let mut list: Vec<(&str, f64)> = self.reading_entries(r).collect();
+        if let Some(s) = self.reading_term_start(r) {
+            let terms = &self.reading_terms()[s..s + list.len()];
+            let mut keyed: Vec<(&str, f64, f64)> = list.iter().zip(terms).map(|(&(w, sc), t)| (w, sc, sc + t)).collect();
+            keyed.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+            list = keyed.into_iter().map(|(w, sc, _)| (w, sc)).collect();
+        }
+        list
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,10 +226,11 @@ mod tests {
     fn a_multi_character_word_gets_no_term() {
         // the base file drops such a row; an overlay row (pack, learned word) can carry one
         let base = "a 甲 -1.0\nb 甲 -3.0\n";
-        let lex = Lexicon::parse_with(base, Some("b\t甲乙\t-9.0\tx\n")).unwrap();
+        // the word has two one-syllable readings, so its own lookup would charge the rarer one (-8, clipped to -4); the guard is what makes it 0
+        let lex = Lexicon::parse_with(base, Some("b\t甲乙\t-9.0\tx\na\t甲乙\t-1.0\tx\n")).unwrap();
         let rd = ReadingDecode::new(&lex, base);
         close(rd.term(&lex, "b", "甲"), LAMBDA * -2.0);
-        assert!(rd.logp(&lex, "b", "甲乙").is_some());
+        close(rd.logp(&lex, "b", "甲乙").unwrap(), -8.0);
         close(rd.term(&lex, "b", "甲乙"), 0.0);
     }
 
@@ -211,5 +274,60 @@ mod tests {
         // with no multi-character word at all the pair costs its lexicon difference
         let (lex, rd) = mk("a 長 -1.0\nb 長 -6.8\n");
         close(rd.logp(&lex, "b", "長").unwrap(), (10f64.powf(-6.8)).log10() - (10f64.powf(-1.0)).log10());
+    }
+
+    /// The table built at load (`with_reading_terms`) is the term of each entry looked up by string: for every entry of every one-syllable reading, in
+    /// the lexicon's order, whatever the entry is (a floor pair, a sandhi pair, a duplicate row, a multi-character overlay word); a longer reading has none.
+    #[test]
+    fn the_table_equals_the_lookup_by_string() {
+        let base = "ㄧˊ 一 -5.0\nㄧ 一 -1.0\na 長 -1.0\nb 長 -6.8\nb-a 長長 -2.0\na 長 -4.0\nb 短 -1.0\nb 乙 -2.0\na 乙 -2.0\na-b 丙丁 -3.0\n";
+        let lex = Lexicon::parse_with(base, Some("b\t長乙\t-2.5\tx\n")).unwrap().with_reading_terms(base);
+        let rd = ReadingDecode::new(&lex, base);
+        let (mut one, mut longer) = (0, 0);
+        for r in 0..lex.readings.len() {
+            match lex.reading_term_start(r) {
+                Some(at) => {
+                    let syl = &lex.syl_names[lex.key_pool[lex.readings[r].key_off as usize] as usize];
+                    for (k, p) in lex.range(r).enumerate() {
+                        assert_eq!(lex.reading_terms()[at + k].to_bits(), rd.term(&lex, syl, lex.word(p)).to_bits(), "{syl} {}", lex.word(p));
+                        one += 1;
+                    }
+                }
+                None => {
+                    assert!(lex.readings[r].key_len != 1);
+                    longer += 1;
+                }
+            }
+        }
+        assert!(one >= 9 && longer == 2, "{one} entries of one-syllable readings, {longer} longer readings");
+        // the cases are really there: the sandhi reading is free, the floor reading takes mc, and the overlay word carries 0
+        assert_eq!(rd.term(&lex, "ㄧˊ", "一"), 0.0);
+        assert!(rd.term(&lex, "b", "長") < 0.0 && rd.term(&lex, "b", "長") > -LAMBDA * CAP);
+        assert_eq!(rd.term(&lex, "b", "長乙"), 0.0);
+        // a lexicon parsed bare has no table: every entry is 0 and the window order is the lexicon's
+        let bare = Lexicon::parse(base).unwrap();
+        assert!(bare.reading_term_start(0).is_none() && bare.reading_terms().is_empty());
+    }
+
+    /// The window's order (`Lexicon::entries_by_reading`): raw score plus the term, best first, stable (equal keys keep the lexicon's order), only a
+    /// single-character entry's key moves (the multi-character overlay word keeps its raw score), the scores returned are the raw ones, and a key of
+    /// more than one syllable, an unknown reading and a lexicon without the table give `entries`.
+    #[test]
+    fn the_window_order_is_score_plus_term_and_stable() {
+        let base = "x a -0.5\ny a -0.6\nx b -0.1\ny b -0.55\ny c -0.55\ny d -0.55\nx-y ab -1.0\n";
+        let key = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let lex = Lexicon::parse_with(base, Some("y\tbc\t-0.5\tx\n")).unwrap().with_reading_terms(base);
+        fn words(v: Vec<(&str, f64)>) -> Vec<&str> {
+            v.into_iter().map(|e| e.0).collect()
+        }
+        // raw: bc -0.5, then b, c, d tied at -0.55 in file order, a -0.6. Terms under y: a -0.1 * 2, b -0.45 * 2, c and d (one reading) 0.
+        assert_eq!(words(lex.entries(&key("y"))), ["bc", "b", "c", "d", "a"]);
+        assert_eq!(words(lex.entries_by_reading(&key("y"))), ["bc", "c", "d", "a", "b"]);
+        let raw: HashMap<&str, f64> = lex.entries(&key("y")).into_iter().collect();
+        assert!(lex.entries_by_reading(&key("y")).iter().all(|&(w, sc)| raw[w] == sc), "the scores are the raw ones");
+        assert_eq!(lex.entries_by_reading(&key("x-y")), lex.entries(&key("x-y")));
+        assert!(lex.entries_by_reading(&key("zz")).is_empty());
+        let bare = Lexicon::parse_with(base, Some("y\tbc\t-0.5\tx\n")).unwrap();
+        assert_eq!(bare.entries_by_reading(&key("y")), bare.entries(&key("y")));
     }
 }

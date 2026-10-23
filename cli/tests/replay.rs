@@ -328,12 +328,12 @@ fn colloquial_replay_agrees_with_the_cli() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// docs/contracts/reading-channel.md section 2.2 and item 4: the replay's engine adds the reading-channel term to the colloquial term by default,
-/// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 10, 81 and 102 of the set, where the term moves the
-/// pick; `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
+/// docs/contracts/reading-decoder.md: the replay's engine has the reading term in its decoder by default, so its choices are the CLI's `--colloquial-core`
+/// choices (equal `top1_sha256`) on rows 10, 81 and 102 of the set, where the term moves the pick; `--no-reading-decode` is the colloquial term alone, the
+/// CLI's `--no-reading-decode`. The tags: `+colloq:<sha8>+rd` by default, `+colloq:<sha8>` with the switch, no `+rc` either way.
 #[test]
-fn reading_channel_replay_agrees_with_the_cli() {
-    let dir = std::env::temp_dir().join(format!("shanjie-replay-rc-{}", std::process::id()));
+fn reading_term_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-rd-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let rows = dir.join("rows.txt");
     let all = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
@@ -349,14 +349,21 @@ fn reading_channel_replay_agrees_with_the_cli() {
         a.extend_from_slice(extra);
         run(eval, &a)
     };
-    let (with, alone) = (cli(&[]), cli(&["--no-reading-channel"]));
-    let (rep_with, rep_alone) = (run(replay, &["--rows", rows]), run(replay, &["--rows", rows, "--no-reading-channel"]));
-    assert_ne!(sha_of(&with), sha_of(&alone), "premise: the channel moves a choice among these rows");
+    let (with, alone) = (cli(&[]), cli(&["--no-reading-decode"]));
+    let (rep_with, rep_alone) = (run(replay, &["--rows", rows]), run(replay, &["--rows", rows, "--no-reading-decode"]));
+    assert_ne!(sha_of(&with), sha_of(&alone), "premise: the term moves a choice among these rows");
     assert_eq!(sha_of(&with), sha_of(&rep_with));
     assert_eq!(sha_of(&alone), sha_of(&rep_alone));
-    assert!(rep_with.contains("+colloq:2984eeb5+rc") && rep_alone.contains("+colloq:2984eeb5") && !rep_alone.contains("+rc"), "{rep_with}{rep_alone}");
-    // no table loaded: nothing to switch off, the summary is the one without the option
-    assert_eq!(run(replay, &["--rows", rows, "--no-colloquial"]), run(replay, &["--rows", rows, "--no-colloquial", "--no-reading-channel"]));
+    assert!(rep_with.contains("+colloq:2984eeb5+rd") && rep_alone.contains("+colloq:2984eeb5") && !rep_alone.contains("+rd"), "{rep_with}{rep_alone}");
+    assert!(!rep_with.contains("+rc") && !rep_alone.contains("+rc"), "{rep_with}{rep_alone}");
+    // no table loaded: the replay is the CLI without `--colloquial-core`, the term in the decoder or not
+    let plain = |extra: &[&str]| {
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+        a.extend_from_slice(extra);
+        run(eval, &a)
+    };
+    assert_eq!(sha_of(&plain(&[])), sha_of(&run(replay, &["--rows", rows, "--no-colloquial"])));
+    assert_eq!(sha_of(&plain(&["--no-reading-decode"])), sha_of(&run(replay, &["--rows", rows, "--no-colloquial", "--no-reading-decode"])));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

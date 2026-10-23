@@ -75,9 +75,12 @@ fn full_run(dir: &Path, base: &[&str], set: &[&str], extra: &[&str]) -> Out {
 /// The summary line without the tag the option adds.
 fn untagged(out: &str) -> String {
     let i = out.find("+colloq:").expect("the tag");
-    let rest = &out[i + "+colloq:".len() + 8..];
-    format!("{}{}", &out[..i], rest.strip_prefix("+rc").unwrap_or(rest))
+    format!("{}{}", &out[..i], &out[i + "+colloq:".len() + 8..])
 }
+
+/// The decoder without the reading term (docs/contracts/reading-decoder.md): the pins below are the colloquial term's own, measured before the
+/// term was in the decoder.
+const NORD: &str = "--no-reading-decode";
 
 /// The files and the summary line are equal, the summary tag aside (stderr holds timings).
 fn same_outputs(a: &Out, b: &Out, what: &str) {
@@ -94,14 +97,15 @@ fn row202(dir: &Path) -> String {
 }
 
 /// Without `--colloquial-core` every output is what the CLI wrote before the option existed (hashes taken from the binary before this change:
-/// `--dev 16 --context --packs acg --tinylm data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`, model-v6 files).
+/// `--dev 16 --context --packs acg --tinylm data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`, model-v6 files; with
+/// `--no-reading-decode`, the term of docs/contracts/reading-decoder.md being what the default run now adds).
 // macOS only: the dump and scores carry f64 values that the Linux libm rounds differently in the last bit (the WSL runner skips the existing
 // tests of that kind too); this is the one check against the binary from before the option existed.
 #[cfg(target_os = "macos")]
 #[test]
 fn no_option_is_byte_identical_to_before() {
     let d = tmp("golden");
-    let o = full_run(&d, &BASE, &["16"], &[]);
+    let o = full_run(&d, &BASE, &["16"], &[NORD]);
     let h = |s: &str| sha256_hex(s.as_bytes());
     assert_eq!(h(&o.dump), "7cd2988473895b8df271d8276489349809d2d6f50f761c56f3c96424b298c95a");
     assert_eq!(h(&o.words), "42152c06fa5c3b55a2e765ed9103128d4c780bfed4ff35e9f192220e3dce2a72");
@@ -183,9 +187,10 @@ fn level_rows(dir: &Path) -> String {
 }
 
 /// docs/contracts/colloquial-levels.md: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those of the offline arithmetic (experiments/strength-colloq `cell_pick`, checked
+/// tag says so (`+colloq:<sha8>`, after `+rl:` at the other two). The picks are those of the offline arithmetic (experiments/strength-colloq `cell_pick`, checked
 /// row by row on the whole public sets by experiments/colloq-levels): standard [5, 4, 0, 3]; conservative (1.0, 2, 3.0) keeps the n-gram first on all four,
 /// where the header triple without the term picks [1, 0, 0, 7]; aggressive (0.5, 2, 0.1) picks [5, 4, 1, 3], the header triple (0.3, 2, 0.25) [1, 0, 0, 7].
+/// All runs are `--no-reading-decode`: the offline arithmetic has no reading term.
 #[test]
 fn the_term_applies_at_every_strength() {
     let d = tmp("lvrows");
@@ -200,11 +205,11 @@ fn the_term_applies_at_every_strength() {
     .enumerate()
     {
         let (a, b) = (tmp(&format!("lv{i}a")), tmp(&format!("lv{i}b")));
-        let extra = ["--rerank-level", level];
+        let extra = ["--rerank-level", level, NORD];
         let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
         assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
         let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
-        assert!(new.stdout.contains(&format!("{rl}+acg+colloq:2984eeb5+rc  {{")), "{level}: {}", new.stdout);
+        assert!(new.stdout.contains(&format!("{rl}+acg+colloq:2984eeb5  {{")), "{level}: {}", new.stdout);
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
@@ -257,23 +262,23 @@ fn chosen(sc: &str) -> Vec<usize> {
     sc.lines().map(|l| l.split("\"c\": ").nth(1).unwrap().split(',').next().unwrap().parse().unwrap()).collect()
 }
 
-/// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (the three rows
-/// of the set where it matters move to the picks `p5.py --cell lex,1.0,4` gives, [2, 0, 0]); `--no-reading-channel` is the colloquial term alone
-/// (the P4d picks, [0, 1, 1]) and its summary tag lacks the `+rc` of the default run; without `--colloquial-core` the option changes nothing at all.
+/// docs/contracts/reading-decoder.md: the reading term is in the decoder and the fusion has none. With `--colloquial-core` the three rows of the set where
+/// the term matters pick [0, 1, 0] by default (row 10's decoder first is the right `版控`) and the colloquial term alone, `--no-reading-decode`,
+/// picks [0, 1, 1]; the version before the term picked [2, 0, 0] with a reading-channel term in the fusion. The default tag ends in `+rd`
+/// (`+colloq:<sha8>+rd`, no `+rc`), the other has neither; the decoder's order (the dump) is what differs.
 #[test]
-fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_alone() {
-    let d = tmp("rc");
+fn the_reading_term_is_in_the_decoder_and_the_fusion_has_none() {
+    let d = tmp("rd");
     let rows = channel_rows(&d);
     let set = ["--rows", rows.as_str()];
-    let (a, b, c, e) = (tmp("rc-a"), tmp("rc-b"), tmp("rc-c"), tmp("rc-d"));
+    let (a, b) = (tmp("rd-a"), tmp("rd-b"));
     let with = full_run(&a, &BASE[..9], &set, &["--colloquial-core", TABLE]);
-    let alone = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, "--no-reading-channel"]);
-    assert_eq!(chosen(&with.sc), vec![2, 0, 0], "the channel's picks");
+    let alone = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, NORD]);
+    assert_eq!(chosen(&with.sc), vec![0, 1, 0], "with the term in the decoder");
     assert_eq!(chosen(&alone.sc), vec![0, 1, 1], "the colloquial term alone");
-    assert!(with.stdout.contains("+colloq:2984eeb5+rc  {") && alone.stdout.contains("+colloq:2984eeb5  {"), "{}{}", with.stdout, alone.stdout);
-    assert_eq!((&with.dump, &with.words), (&alone.dump, &alone.words), "the decoder's order is the same");
-    // without the table the option has nothing to switch: every output, the summary line included, is the plain run's
-    let plain = full_run(&c, &BASE[..9], &set, &[]);
-    let flag_only = full_run(&e, &BASE[..9], &set, &["--no-reading-channel"]);
-    assert_eq!((&flag_only.stdout, &flag_only.dump, &flag_only.words, &flag_only.rs, &flag_only.sc), (&plain.stdout, &plain.dump, &plain.words, &plain.rs, &plain.sc));
+    assert!(with.stdout.contains("+colloq:2984eeb5+rd  {") && alone.stdout.contains("+colloq:2984eeb5  {"), "{}{}", with.stdout, alone.stdout);
+    assert!(!with.stdout.contains("+rc") && !alone.stdout.contains("+rc"), "no reading-channel tag any more");
+    assert_ne!(with.dump, alone.dump, "the decoder's order is what the term changes");
+    let first = |dump: &str| dump.lines().find(|l| l.starts_with("1\t1\t")).unwrap().split('\t').nth(2).unwrap().to_string();
+    assert_eq!((first(&with.dump).as_str(), first(&alone.dump).as_str()), ("你有東西要先進版控嗎", "你有東西要先進版空嗎"));
 }

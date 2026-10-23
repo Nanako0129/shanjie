@@ -1,9 +1,9 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
-use core::colloquial::{self, Colloquial, ReadingChannel};
+use core::colloquial::{self, Colloquial};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
-use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
+use core::lm::{decode_from_scoring, history, CappedLexicon, Demote, Lm, Profile, Scoring};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, BATCH, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -216,20 +216,12 @@ struct RowOut {
 /// candidates of the n-gram order instead of 8, the extra ones scored by `TinyLm::ll_many` under the key `rerank_ll` uses (a candidate over the model's context gets `null`, counted on stderr). The pick `c`, the
 /// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
 ///
-/// `--no-reading-channel` (research only; docs/contracts/reading-channel.md section 2.2): where the colloquial term applies it is applied alone, the P4d
-/// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
-/// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
-/// engine. It changes nothing where the colloquial term does not apply. The summary tag marks the shipping behavior: where the colloquial term
-/// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal or another
-/// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
-/// changes nothing.
-///
-/// `--reading-decode` (evaluation only; experiments/r1-reading-decode, section R1d; not in the engine or the C ABI): the n-gram decoder adds
-/// `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the
-/// multi-character words: arm B-f) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
-/// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it the path is the one it was: cli/tests/reading_decode.rs checks the summary line of eight settings
-/// (chat and formal, with and without `--tinylm`, dev302 and typing76) and, on macOS, the sha256 of the `--dump` file of the four n-gram-only ones
-/// against the binary before the option; other outputs (rowstats, `--tinylm-scores`, `--dump-words`) are not compared.
+/// The reading term (docs/contracts/reading-decoder.md): the n-gram decoder adds `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of
+/// 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words) to the path score of every single-character
+/// word, in every setting, so the beam, the n-best, the dump, `--tinylm-scores` `ng` and the pick all see it. The fusion of `--colloquial-core`
+/// has no reading term of its own. The summary tag gains `+rd` at its very end. `--no-reading-decode` (evaluation only; not in the engine's
+/// C ABI) leaves the term out of the decoder, as the engine's `set_reading_decode(false)` does, and the tag has no `+rd`: the n-gram path of the
+/// version before the term, with the colloquial term as shipped.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -246,8 +238,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
-    let mut reading_channel = true;
-    let mut reading_decode = false;
+    let mut reading_decode = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -294,8 +285,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
-            "--no-reading-channel" => reading_channel = false,
-            "--reading-decode" => reading_decode = true,
+            "--no-reading-decode" => reading_decode = false,
             _ => return Err("unknown argument".into()),
         }
     }
@@ -334,7 +324,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
     // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
     let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
-    let scoring = lm.scoring(prof);
+    let scoring = Scoring { rd: reading_decode, ..lm.scoring(prof) };
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
     // Section 2.3: a version 1 or 2 file has only the standard set; another level would silently measure the standard one.
@@ -359,13 +349,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
     let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
-    // R1d: the mc estimate of the floor readings counts the multi-character rows of mcbpmf-data.txt alone (the base the lexicon was parsed from).
-    let capped = if reading_decode {
-        let base = fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|e| format!("--reading-decode: cannot read mcbpmf-data.txt ({:?})", e.kind()))?;
-        capped.with_reading_decode(&base)
-    } else {
-        capped
-    };
 
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
@@ -418,7 +401,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
-        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
+        let nb = decode_from_scoring(&capped, syls, &lm, scoring, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut out = RowOut::default();
         let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
         let t = len.apply(truth);
@@ -433,8 +416,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
-                    let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, level)
                 }
                 None => tl.rerank(&ng, &top, key, tl.params(prof, level)),
             };
@@ -628,7 +610,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}", &co.sha256()[..8])), if reading_decode { "+rd" } else { "" }, rows.len());
     Ok(())
 }
 

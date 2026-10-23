@@ -727,10 +727,19 @@ fn rss_kb() -> u64 {
     String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
 }
 
+/// docs/contracts/reading-decoder.md section 2.4: the engine that is timed carries the reading term, or the timing would be that of the decoder
+/// before it. Row 10 of eval/dev/user-reported.txt (public) is shown with the right `控` only when the term is in the decoder (its n-gram first is
+/// `版空` without it); the typed row is the engine's own composition, so this is the first the key path shows.
+fn assert_reading_term(mut e: Engine) {
+    let syls = ["ㄋㄧˇ", "ㄧㄡˇ", "ㄉㄨㄥ", "ㄒㄧ", "ㄧㄠˋ", "ㄒㄧㄢ", "ㄐㄧㄣˋ", "ㄅㄢˇ", "ㄎㄨㄥˋ", "ㄇㄚ"];
+    assert_eq!(typ(&mut e, &syls, "").preedit, "你有東西要先進版控嗎", "the timed engine has the reading term");
+}
+
 /// Every key of every typing76 sample (chat profile, with its left context), through `Engine::key`.
 #[test]
 #[ignore]
 fn timing_typing76_keys() {
+    assert_reading_term(engine());
     time_typing76(None);
 }
 
@@ -771,6 +780,8 @@ fn timing_composition_cap_128_syllables() {
         v[v.len() / 2]
     };
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    assert_reading_term(build(true));
+    assert_reading_term(build(false));
     let (mut on_keys, mut on_jobs, mut off_keys) = (Vec::new(), Vec::new(), Vec::new());
     // The slowest single key of every round: (milliseconds, the syllable it finished), rerank on and rerank off.
     let (mut on_max, mut off_max) = (Vec::new(), Vec::new());

@@ -47,11 +47,15 @@ pub struct Scoring {
     pub lam: f64,
     pub kn: bool,
     pub tri: bool,
+    /// Whether the decoder adds the reading term (docs/contracts/reading-decoder.md) to a single-character word's path score. On wherever a
+    /// `Scoring` is made; off only for the evaluation switches (`--no-reading-decode`, `Engine::set_reading_decode(false)`). A lexicon without
+    /// the term table (`Lexicon::with_reading_terms`) adds 0 either way.
+    pub rd: bool,
 }
 
 impl From<f64> for Scoring {
     fn from(lam: f64) -> Scoring {
-        Scoring { lam, kn: true, tri: false }
+        Scoring { lam, kn: true, tri: false, rd: true }
     }
 }
 
@@ -356,7 +360,7 @@ impl Lm {
     /// `Engine::total_score` take this; the prediction row scores with `word_by_id` and keeps the side file whatever the profile.
     pub fn scoring(&self, profile: Profile) -> Scoring {
         let tri = profile == Profile::Formal && self.tri.is_some();
-        Scoring { lam: profile.lambda(), kn: !tri, tri }
+        Scoring { lam: profile.lambda(), kn: !tri, tri, rd: true }
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
@@ -771,19 +775,12 @@ pub struct CappedLexicon {
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
     deltas: Vec<(usize, f64)>,
-    /// Evaluation only (`with_reading_decode`, the CLI's `--reading-decode`): the decoder then adds the reading term to every single-character
-    /// word. `None` for the engine and every other caller, whose arithmetic is then untouched.
-    reading: Option<crate::reading::ReadingDecode>,
+    /// The base lexicon's reading terms (`Lexicon::with_reading_terms`) in this lexicon's entry order: the one-syllable readings are re-sorted
+    /// by the capped score, and each term travels with its entry. Empty when the base has no table.
+    rd_terms: Vec<f64>,
 }
 
 impl CappedLexicon {
-    /// Switches the reading term on (experiments/r1-reading-decode, R1d): `base_text` is the text of `mcbpmf-data.txt`, the rows the mc estimate
-    /// of the lexicon's floor-score readings is counted from (`reading::ReadingDecode::new`).
-    pub fn with_reading_decode(mut self, base_text: &str) -> CappedLexicon {
-        self.reading = Some(crate::reading::ReadingDecode::new(&self.base, base_text));
-        self
-    }
-
     /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB). Later
     /// calls must pass the same model (checked in debug builds by `Lm::identity`); the index holds its word ids.
     pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {
@@ -804,6 +801,7 @@ impl CappedLexicon {
     pub fn new(base: Arc<Lexicon>, overlay: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let mut ents = base.ents.clone();
+        let mut rd_terms = base.reading_terms().to_vec();
         for i in 0..base.readings.len() {
             let range = base.range(i);
             for e in &mut ents[range.clone()] {
@@ -817,13 +815,24 @@ impl CappedLexicon {
                     };
                 }
             }
-            ents[range].sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            match base.reading_term_start(i) {
+                // A one-syllable reading with terms: the same stable sort, over (entry, term) pairs, so each term stays with its entry.
+                Some(at) => {
+                    let mut pairs: Vec<(crate::Ent, f64)> = ents[range.clone()].iter().copied().zip(rd_terms[at..at + range.len()].iter().copied()).collect();
+                    pairs.sort_by(|a, b| b.0.score.partial_cmp(&a.0.score).unwrap_or(std::cmp::Ordering::Equal));
+                    for (k, (e, t)) in pairs.into_iter().enumerate() {
+                        ents[range.start + k] = e;
+                        rd_terms[at + k] = t;
+                    }
+                }
+                None => ents[range].sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)),
+            }
         }
         let deltas = match demote {
             Some(d) => d.resolve(&base, &ents)?,
             None => Vec::new(),
         };
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, reading: None })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, rd_terms })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -1041,6 +1050,7 @@ pub fn decode_segment_learned<'a>(
             let range = found.map_or(0..0, |r| base.range(r));
             let best = lex.ents.get(range.start).map_or(0.0, |e| e.score);
             let dl = if demote { lex.deltas_in(&range) } else { &[] };
+            let rd_at = found.filter(|_| cfg.rd && l == 1).and_then(|r| base.reading_term_start(r));
             // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
             // usable on a path whose context has a learned record for them).
             let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
@@ -1080,9 +1090,11 @@ pub fn decode_segment_learned<'a>(
             for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
                 let (wid, pb0) = (lm.word_id(word), pow10(lp0));
                 let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1);
-                // R1d (evaluation only): a single-character word of a lexicon entry adds its reading term to the path score, so the beam prunes on it.
-                let rd_term = match (&lex.reading, p, l) {
-                    (Some(rd), Some(_), 1) => rd.term(base, &syls[i - 1], word),
+                // The reading term (docs/contracts/reading-decoder.md): a single-character word of a lexicon entry adds it to the path score, so the
+                // beam prunes on it. Read from the table `CappedLexicon::new` aligned with the entries; 0 for a multi-syllable span, a new word and a
+                // lexicon without the table.
+                let rd_term = match (rd_at, p) {
+                    (Some(at), Some(p)) => lex.rd_terms[at + p - range.start],
                     _ => 0.0,
                 };
                 for (hi, h) in hyps[i - l].iter().enumerate() {
@@ -1204,7 +1216,20 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment_learned(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote)?
+    decode_from_scoring(lex, syls, lm, lm.scoring(profile), beam, start, demote)
+}
+
+/// `decode_from` with the `Scoring` given (the evaluation CLI's `--no-reading-decode` passes the profile's with `rd` off).
+pub fn decode_from_scoring(
+    lex: &CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    scoring: Scoring,
+    beam: usize,
+    start: &str,
+    demote: bool,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    Ok(decode_segment_learned(lex, syls, lm, scoring, start, End::Eos, beam, None, demote)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
@@ -1330,30 +1355,61 @@ mod tests {
         assert_eq!(score(&from_b, "a"), lm.word(0.5, "b", "a", -1.0) + lm.eos(0.5, "a"));
     }
 
-    /// R1d (evaluation only): `with_reading_decode` adds LAMBDA * max(t, -CAP) to the score of a single-character word's path, so a rare reading
-    /// can lose the first place; the sandhi reading of 一 costs nothing; a path without the switch is the decoder as it was.
+    /// The reading term (docs/contracts/reading-decoder.md): a lexicon with `with_reading_terms` adds LAMBDA * max(t, -CAP) to the score of a
+    /// single-character word's path, so a rare reading can lose the first place; the sandhi reading of 一 costs nothing; `Scoring::rd` false, and
+    /// a lexicon without the table, are the decoder as it was (bit for bit).
     #[test]
-    fn reading_decode_adds_the_term_to_the_path_score() {
+    fn reading_term_is_added_to_the_path_score() {
         use crate::reading::{CAP, LAMBDA};
         let lm = Lm::parse(&tiny()).unwrap();
         // a: best reading x, rare reading y (t -1.1); b has only y; 乙 reads ㄧˊ rarely (t -5.5, clipped to -CAP); 一 reads ㄧˊ as a sandhi reading.
         let text = "x a -0.1\ny a -1.2\ny b -1.5\nㄧ 一 -0.1\nㄧˊ 一 -3.0\nㄧ 乙 -0.5\nㄧˊ 乙 -6.0\n";
-        let capped = || CappedLexicon::new(Arc::new(Lexicon::parse(text).unwrap()), "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
-        let (off, on) = (capped(), capped().with_reading_decode(text));
-        let run = |c: &CappedLexicon, s: &str| -> Vec<(f64, String)> {
-            decode_segment_learned(c, &[s.to_string()], &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap().into_iter().map(|(sc, ws)| (sc, ws[0].0.to_string())).collect()
+        let capped = |terms: bool| {
+            let lex = Lexicon::parse(text).unwrap();
+            let lex = if terms { lex.with_reading_terms(text) } else { lex };
+            CappedLexicon::new(Arc::new(lex), "", &lm, Some(&Demote::parse("").unwrap())).unwrap()
+        };
+        let (off, on) = (capped(false), capped(true));
+        let run = |c: &CappedLexicon, rd: bool, s: &str| -> Vec<(f64, String)> {
+            let cfg = Scoring { rd, ..Scoring::from(0.5) };
+            decode_segment_learned(c, &[s.to_string()], &lm, cfg, "<s>", End::Eos, 64, None, true).unwrap().into_iter().map(|(sc, ws)| (sc, ws[0].0.to_string())).collect()
         };
         let score = |v: &[(f64, String)], w: &str| v.iter().find(|(_, x)| x == w).unwrap().0;
-        let (o, n) = (run(&off, "y"), run(&on, "y"));
+        let bits = |v: Vec<(f64, String)>| v.into_iter().map(|(s, w)| (s.to_bits(), w)).collect::<Vec<_>>();
+        let (o, n) = (run(&off, true, "y"), run(&on, true, "y"));
         assert_eq!(o[0].1, "a", "premise: without the term the common reading's word wins");
         assert_eq!(n[0].1, "b", "the rare reading of a loses the first place");
         assert!((score(&n, "a") - (score(&o, "a") + LAMBDA * -1.1)).abs() < 1e-9);
         assert!((score(&n, "b") - score(&o, "b")).abs() < 1e-12, "b's only reading: its own best, 0");
-        let (o, n) = (run(&off, "ㄧˊ"), run(&on, "ㄧˊ"));
+        let (o, n) = (run(&off, true, "ㄧˊ"), run(&on, true, "ㄧˊ"));
         assert!((score(&n, "一") - score(&o, "一")).abs() < 1e-12, "the sandhi reading is free");
         assert!((score(&n, "乙") - (score(&o, "乙") - LAMBDA * CAP)).abs() < 1e-9, "clipped at -CAP");
-        // the switch alone changes nothing about a reading with no single-character word, or a word the lexicon has one reading of
-        assert_eq!(run(&off, "x").iter().map(|r| r.0.to_bits()).collect::<Vec<_>>(), run(&on, "x").iter().map(|r| r.0.to_bits()).collect::<Vec<_>>());
+        // the switch off, and the lexicon without the table, are one and the same decoder as before
+        for s in ["y", "x", "ㄧˊ", "ㄧ"] {
+            assert_eq!(bits(run(&on, false, s)), bits(run(&off, true, s)), "rd off on a lexicon with the table: {s}");
+        }
+        // a reading with no single-character word the term touches
+        assert_eq!(bits(run(&off, true, "x")), bits(run(&on, true, "x")));
+    }
+
+    /// The table travels with the entries when the capped score re-sorts a reading: 甲 is a word the corpus never saw, capped below b, so its
+    /// place in the capped list of the reading y is not its place in the lexicon's, and its term (not b's) is still 甲's.
+    #[test]
+    fn reading_terms_follow_their_entries_through_the_cap_sort() {
+        use crate::reading::LAMBDA;
+        let lm = Lm::parse(&tiny()).unwrap();
+        let text = "x 甲 -0.1\ny 甲 -0.9\ny b -1.5\n";
+        let (lex, key) = (Arc::new(Lexicon::parse(text).unwrap().with_reading_terms(text)), ["y".to_string()]);
+        let capped = CappedLexicon::new(lex.clone(), "y\t甲\t-0.9\tx\n", &lm, None).unwrap();
+        fn words(v: Vec<(&str, f64)>) -> Vec<&str> {
+            v.into_iter().map(|e| e.0).collect()
+        }
+        assert_eq!(words(lex.entries(&key)), ["甲", "b"], "premise: the lexicon's order");
+        assert_eq!(words(capped.entries(&key)), ["b", "甲"], "premise: the cap re-sorted the reading");
+        let at = lex.reading_term_start(lex.find(&lex.ids(&key)).unwrap()).unwrap();
+        // raw order: 甲 then b; capped order: b then 甲
+        assert!((lex.reading_terms()[at] - LAMBDA * -0.8).abs() < 1e-9 && lex.reading_terms()[at + 1] == 0.0, "raw table");
+        assert!(capped.rd_terms[at] == 0.0 && (capped.rd_terms[at + 1] - LAMBDA * -0.8).abs() < 1e-9, "capped table: {:?}", &capped.rd_terms[at..at + 2]);
     }
 
     /// 4.3: classes.sjc must be this model's (SHA-256), with the right magic and exact length; the parse never panics.
@@ -1638,7 +1694,7 @@ mod tests {
         let model = tiny();
         let mut lm = Lm::parse(&model).unwrap();
         lm.add_tri(tiny_tri(&model)).unwrap();
-        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true, rd: true };
         let (lp, d) = (-1.0, 0.75);
         let pb = pow10(lp);
         // kept entry: (<s>, <s>) -> a
@@ -1673,7 +1729,7 @@ mod tests {
         let model = tiny();
         let mut lm = Lm::parse(&model).unwrap();
         lm.add_tri(tri_bytes(&model, 0.75, &[((0, 0), 6, &[(2, 6)])])).unwrap();
-        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true, rd: true };
         let (lp, d) = (-1.0, 0.75);
         let pb = pow10(lp);
         let back3 = 1.0 - (6.0 - d) / 6.0;
@@ -1695,11 +1751,11 @@ mod tests {
     fn scoring_follows_the_profile() {
         let model = tiny();
         let mut lm = Lm::parse(&model).unwrap();
-        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: true, tri: false }, "no table: as before");
-        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false });
+        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: true, tri: false, rd: true }, "no table: as before");
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false, rd: true });
         lm.add_tri(tiny_tri(&model)).unwrap();
-        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: false, tri: true });
-        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false }, "chat ignores the table");
+        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: false, tri: true, rd: true });
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false, rd: true }, "chat ignores the table");
         assert!(lm.tri_tag().unwrap().starts_with("+tri:") && lm.tri_tag().unwrap().len() == 13);
     }
 
@@ -1767,7 +1823,7 @@ mod tests {
         mem.add_tri(good.clone()).unwrap();
         assert_eq!(mem.tri_is_mapped(), Some(false));
         assert_eq!(mapped.tri_tag(), mem.tri_tag());
-        let cfg = Scoring { lam: 0.5, kn: true, tri: true };
+        let cfg = Scoring { lam: 0.5, kn: true, tri: true, rd: true };
         for u in [None, Some("<s>"), Some("a"), Some("b")] {
             for v in ["<s>", "a", "b"] {
                 for w in ["a", "b", "<s>"] {

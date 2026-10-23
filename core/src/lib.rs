@@ -67,6 +67,9 @@ pub struct Lexicon {
     words: String,
     /// Entry positions of each distinct word's by_word winner, sorted by word bytes.
     by_word: Vec<u32>,
+    /// The reading term of every entry of the one-syllable readings (docs/contracts/reading-decoder.md section 1, "Table"), built once when the
+    /// lexicon is loaded (`load_lexicon_packs`); `None` for a lexicon parsed bare (tests), whose entries then all carry 0.
+    rd: Option<reading::ReadingTerms>,
 }
 
 #[derive(Clone, Copy)]
@@ -242,7 +245,7 @@ impl Builder {
         }
         let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
         let ents = order.iter().map(|&f| raw[f as usize].ent).collect();
-        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word };
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, rd: None };
         lex.words.shrink_to_fit();
         Ok(lex)
     }
@@ -299,13 +302,13 @@ impl Lexicon {
     }
 
     /// Score of the row (`syl`, `word`) of the one-syllable reading `syl`: the largest over duplicate rows (a reading's entries are sorted
-    /// best first), before any demotion or learning; `None` when the lexicon has no such row. The reading-channel term's s(r, w).
+    /// best first), before any demotion or learning; `None` when the lexicon has no such row. The reading term's s(r, w).
     pub fn syllable_score(&self, syl: &str, word: &str) -> Option<f64> {
         let r = self.find(&[*self.syl_ids.get(syl)?])?;
         self.reading_entries(r).find(|&(w, _)| w == word).map(|(_, s)| s)
     }
 
-    /// The highest score of `word` under any of its readings (the by_word winner's), `None` for a word the lexicon lacks. The reading-channel
+    /// The highest score of `word` under any of its readings (the by_word winner's), `None` for a word the lexicon lacks. The reading
     /// term's max over r' of s(r', w).
     pub fn best_word_score(&self, word: &str) -> Option<f64> {
         self.winner(word).map(|p| self.ents[p].score)

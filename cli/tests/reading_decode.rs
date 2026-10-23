@@ -1,8 +1,9 @@
-//! `--reading-decode` (experiments/r1-reading-decode, section R1d; evaluation only): the n-gram decoder adds the reading term to the path
-//! score of every single-character word. Without the option the CLI is what it was: the summary lines of eight settings (chat and formal,
-//! with and without `--tinylm`, on dev302 and typing76 of eval/bench/suite-v1, `--context --packs acg`) and the dump of the four n-gram ones
-//! are pinned to what the binary before the option printed (recorded 2026-10-23, Mac arm64, data/lm as in data/*.sha256). With it, a public
-//! row's decoder first changes and the scores file's `ng` is the decoder's score with the term in it.
+//! The reading term in the n-gram decoder (docs/contracts/reading-decoder.md; exploration: experiments/r1-reading-decode, sections R1d and R1e): the
+//! decoder adds it to the path score of every single-character word by default, and `--no-reading-decode` (evaluation only) leaves it out. With the
+//! switch the CLI is what it was before the term: the summary lines of eight settings (chat and formal, with and without `--tinylm`, on dev302 and
+//! typing76 of eval/bench/suite-v1, `--context --packs acg`) and the dump of the four n-gram ones are pinned to what the binary before the term printed
+//! (recorded 2026-10-23, Mac arm64, data/lm as in data/*.sha256). By default a public row's decoder first changes and the scores file's `ng` is the
+//! decoder's score with the term in it.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -35,7 +36,7 @@ fn tmp(name: &str) -> Dir {
     Dir(d)
 }
 
-/// (profile, with --tinylm, set, n, top1, oracle@64, top1_sha256) of the binary before the option existed.
+/// (profile, with --tinylm, set, n, top1, oracle@64, top1_sha256) of the binary before the term existed.
 const BEFORE: [(&str, bool, &str, usize, usize, usize, &str); 8] = [
     ("chat", false, "dev302", 302, 246, 300, "d8ac58795e5649a557bcd62e7639cee2a9bbdbbe13860f13794ff95092ce5be8"),
     ("chat", false, "typing76", 76, 70, 76, "192b2bf3c1d59ba9a35586cf21292ffee7c54590dba16ef0e246a45557bb292c"),
@@ -47,7 +48,7 @@ const BEFORE: [(&str, bool, &str, usize, usize, usize, &str); 8] = [
     ("formal", true, "typing76", 76, 69, 76, "1311928bb7f109a478ccc145c2f3e4f7139749a8081a39c61db33b6b870decaa"),
 ];
 
-/// sha256 of the `--dump` file (all 64 candidates and their path scores) of the n-gram-only runs before the option existed.
+/// sha256 of the `--dump` file (all 64 candidates and their path scores) of the n-gram-only runs before the term existed.
 const DUMP_BEFORE: [(&str, &str, &str); 4] = [
     ("chat", "dev302", "def3f2f9abb5de591955ec2b16a46177b571e57405f69479b647f5800f4dbd73"),
     ("chat", "typing76", "ade53bfc6a06c6db8ab488b18b4c82e57a3ec63ad04d7172b59e4d6eb400c371"),
@@ -63,16 +64,16 @@ fn args<'a>(profile: &'a str, tinylm: bool, rows: &'a str) -> Vec<&'a str> {
     a
 }
 
-/// The default path is untouched: the summary line (tag, n, top1, oracle@64, top1_sha256) of eight settings is that of the binary before
-/// `--reading-decode`, and (macOS only: the f64 dump values round differently under the Linux libm) so is the dump of four.
+/// `--no-reading-decode` is the path as it was: the summary line (tag, n, top1, oracle@64, top1_sha256) of eight settings is that of the binary before
+/// the term, without a `+rd`, and (macOS only: the f64 dump values round differently under the Linux libm) so is the dump of four.
 #[test]
-fn without_the_option_every_output_is_what_it_was() {
+fn with_the_switch_every_output_is_what_it_was() {
     let dir = tmp("off");
     for (profile, tinylm, set, n, top1, o64, sha) in BEFORE {
         let rows = format!("eval/bench/suite-v1/{set}.txt");
         let dump = dir.0.join(format!("{profile}-{set}-{tinylm}.dump")).to_string_lossy().into_owned();
         let mut a = args(profile, tinylm, &rows);
-        a.extend(["--dump", &dump]);
+        a.extend(["--dump", &dump, "--no-reading-decode"]);
         let o = run(&a);
         assert!(o.status.success(), "{}", text(&o.stderr));
         let line = text(&o.stdout);
@@ -87,11 +88,11 @@ fn without_the_option_every_output_is_what_it_was() {
     }
 }
 
-/// With the option: the tag ends in `+rd`; row 10 of eval/dev/user-reported.txt (`版控`, whose `空` reading ㄎㄨㄥˋ is a lexicon floor score) has
-/// another decoder first than without it, the right one; and the scores file's `ng` of that row is the decoder's score with the term in it (the
-/// dump's), not the score without. A reading that changes nothing for a row keeps the row's first and its score.
+/// By default the tag ends in `+rd`; row 10 of eval/dev/user-reported.txt (`版控`, whose `空` reading ㄎㄨㄥˋ is a lexicon floor score) has another
+/// decoder first than with the switch, the right one; and the scores file's `ng` of that row is the decoder's score with the term in it (the dump's),
+/// not the score without. A row the term does not touch keeps its first and its score.
 #[test]
-fn with_the_option_the_decoder_first_changes_and_ng_carries_the_term() {
+fn by_default_the_decoder_first_changes_and_ng_carries_the_term() {
     let dir = tmp("on");
     let src = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
     let rows = dir.0.join("rows.txt");
@@ -102,8 +103,8 @@ fn with_the_option_the_decoder_first_changes_and_ng_carries_the_term() {
         let (d, s) = (dir.0.join(format!("{profile}-{rd}.dump")).to_string_lossy().into_owned(), dir.0.join(format!("{profile}-{rd}.scores")).to_string_lossy().into_owned());
         let mut a = args(profile, true, &rows);
         a.extend(["--dump", &d, "--tinylm-scores", &s]);
-        if rd {
-            a.push("--reading-decode");
+        if !rd {
+            a.push("--no-reading-decode");
         }
         let o = run(&a);
         assert!(o.status.success(), "{}", text(&o.stderr));

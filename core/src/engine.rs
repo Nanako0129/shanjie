@@ -1,11 +1,11 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::colloquial::{self, Colloquial, ReadingChannel};
+use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
-use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
+use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile, Scoring};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 mod digit_layer;
@@ -35,9 +35,6 @@ struct Stretch {
     paths: Vec<Vec<(String, f64, f64, usize)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
-    /// does not read the term.
-    syls: Vec<String>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
     /// n-gram text of stretches left out of the job.
     gap: String,
@@ -54,12 +51,9 @@ pub struct RerankJob {
     /// The colloquial term (docs/contracts/colloquial-term.md section 2.2), decided when the job was made: `Some` only for chat (any
     /// strength) and the small model the term was measured with. `None`: the plain `rerank` with `params`.
     colloquial: Option<Arc<Colloquial>>,
-    /// The engine's rerank level when the job was made (docs/contracts/colloquial-levels.md): the colloquial and reading-channel terms use that
-    /// level's (alpha, tau, delta), and their fallback the header triple of that level. Copy, like `params`.
+    /// The engine's rerank level when the job was made (docs/contracts/colloquial-levels.md): the colloquial term uses that level's
+    /// (alpha, tau, delta), and its fallback the header triple of that level. Copy, like `params`.
     level: RerankLevel,
-    /// The engine's lexicon, `Some` only where the reading-channel term applies (docs/contracts/reading-channel.md): when `colloquial` is
-    /// `Some` and the engine's reading channel is on (the default; `Engine::set_reading_channel`).
-    channel_lex: Option<Arc<Lexicon>>,
     /// The engine's left context when the job was made.
     left: String,
     stretches: Vec<Stretch>,
@@ -99,8 +93,7 @@ impl RerankJob {
                 let pick = match &self.colloquial {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
-                        let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, self.level)
                     }
                     None => self.model.rerank(&s.ng, &cands, &key, self.params),
                 }
@@ -612,9 +605,10 @@ pub struct Engine {
     /// The colloquial table and the word sets of its k term (`load_colloquial`); independent of the n-gram and the small model.
     /// Whether a job uses it is decided per job in `refresh_lm`.
     colloquial: Option<Arc<Colloquial>>,
-    /// Whether the reading-channel term (docs/contracts/reading-channel.md) goes with the colloquial term (default on, the App's behavior).
-    /// Off only from `set_reading_channel`, an evaluation switch for `shanjie-replay --no-reading-channel`; not in shanjie.h.
-    reading_channel: bool,
+    /// Whether the reading term (docs/contracts/reading-decoder.md) goes into the decoder's path scores and the candidate window's order of the
+    /// one-syllable entries (default on, the App's behavior). Off only from `set_reading_decode`, an evaluation switch for
+    /// `shanjie-replay --no-reading-decode`; not in shanjie.h.
+    reading_decode: bool,
     /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
     /// `load_tinylm` leaves it as it is.
     rerank_on: bool,
@@ -629,7 +623,7 @@ pub struct Engine {
     guard_skips: usize,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
     /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `load_colloquial`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
-    /// learning open/clear, the evaluation-only `set_learn_guard` and `set_reading_channel`).
+    /// learning open/clear, the evaluation-only `set_learn_guard` and `set_reading_decode`).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
@@ -743,6 +737,9 @@ pub const NAMES_FILE: &str = "names-add.tsv";
 /// `load_lexicon` with the rows of `packs` (`(directory, mask)`, see `read_packs_detailed`) after `names-add.tsv`,
 /// plus those rows alone (empty with no pack), for `capping_overlay`. `None` or an empty mask: exactly
 /// `load_lexicon`. The engine and the evaluation CLI share this.
+///
+/// Every lexicon this module loads carries the reading term of its one-syllable entries (`Lexicon::with_reading_terms`, built from
+/// `mcbpmf-data.txt` once, here: docs/contracts/reading-decoder.md section 1), for the decoder (`CappedLexicon::new` copies it) and the candidate window.
 pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
     load_lexicon_packs_detailed(data_dir, packs).map_err(|_| EngineError::LoadFailed)
 }
@@ -775,6 +772,8 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
         text = join_overlays(text, &extra);
     }
     let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
+    // The reading term of every one-syllable entry (docs/contracts/reading-decoder.md section 1, "Table"): once, here, for the decoder and the window.
+    let lex = lex.with_reading_terms(&base);
     Ok((Arc::new(lex), extra))
 }
 
@@ -876,7 +875,7 @@ impl Engine {
             tinylm: None,
             rerank_on: false,
             colloquial: None,
-            reading_channel: true,
+            reading_decode: true,
             rerank_level: RerankLevel::Standard,
             learn_guard: true,
             guard_skips: 0,
@@ -970,11 +969,24 @@ impl Engine {
         self.learn_guard = on;
     }
 
-    /// Evaluation only (`shanjie-replay --no-reading-channel`): with `false` the colloquial term stands alone, the P4d cell the reading-channel
-    /// term was measured against. The next decode uses it; the pending job is dropped like any decoding change.
-    pub fn set_reading_channel(&mut self, on: bool) {
+    /// Evaluation only (`shanjie-replay --no-reading-decode`): with `false` the decoder and the candidate window leave the reading term out
+    /// (docs/contracts/reading-decoder.md), the n-gram path of the version before it. The next decode uses it; the pending job is dropped like any
+    /// decoding change.
+    pub fn set_reading_decode(&mut self, on: bool) {
         self.invalidate();
-        self.reading_channel = on;
+        self.reading_decode = on;
+    }
+
+    /// The scoring the decoder uses now: the profile's, with the reading term as `set_reading_decode` says.
+    fn scoring(&self, st: &LmState) -> Scoring {
+        Scoring { rd: self.reading_decode, ..st.lm.scoring(self.profile) }
+    }
+
+    /// The lexicon's entries of the one-syllable reading `key` as the candidate window lists them (docs/contracts/reading-decoder.md section 1):
+    /// ordered by raw score plus the reading term (`Lexicon::entries_by_reading`, the one ordering of the window's l = 1 segment, the English
+    /// window's Chinese item and the digit layer's second reading), or as the lexicon has them when the reading term is off.
+    fn window_entries(&self, key: &[String]) -> Vec<(&str, f64)> {
+        if self.reading_decode { self.lex.entries_by_reading(key) } else { self.lex.entries(key) }
     }
 
     /// How many stretches the learning guard kept out of the current job: stretches that would have gone to the small model
@@ -1655,7 +1667,7 @@ impl Engine {
     fn open_english(&mut self) -> Result<Output, EngineError> {
         let word: String = self.shadow.iter().collect();
         let mut list: Vec<(String, usize)> = Self::english_writings(&word).into_iter().map(|w| (w, 0)).collect();
-        if let Some((zh, _)) = self.lex.entries(&[self.pending()]).first() {
+        if let Some((zh, _)) = self.window_entries(&[self.pending()]).first() {
             list.push((zh.to_string(), 1));
         }
         let mut c = Cands::new(list, self.cand_vertical);
@@ -1931,7 +1943,7 @@ impl Engine {
     /// with the bigram: its `eos`, or the transition into the next fixed word, takes u as unknown (`close_u`), as `decode_segment_learned` does.
     pub fn total_score(&self) -> Option<f64> {
         let st = self.lm.as_ref()?;
-        let cfg = st.lm.scoring(self.profile);
+        let cfg = self.scoring(st);
         let mut memo = TriMemo::default();
         let cut = self.run_cut().filter(|_| cfg.tri);
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
@@ -2417,7 +2429,7 @@ impl Engine {
     /// its left (`<s>` if none); it closes with the transition into the fixed word on its right, or with
     /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
     fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
-        let cfg = st.lm.scoring(self.profile);
+        let cfg = self.scoring(st);
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
         // New-word B §2.4: a fixed word the lexicon lacks is a new word picked in the window; once its record is
@@ -2450,11 +2462,6 @@ impl Engine {
         let (mut out, mut path) = (String::new(), Vec::new());
         // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
         let jobs = self.jobs_on();
-        // Whether the job will read the reading-channel term (the same decision as `colloquial` and `channel_lex` at the end of this function): only
-        // then do the stretches keep their syllables, so formal, the other strengths, no table and the channel off allocate nothing for it.
-        let channel = self.reading_channel
-            && self.colloquial.is_some()
-            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -2513,7 +2520,6 @@ impl Engine {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
                         gap: gap_text,
                     });
                 }
@@ -2541,8 +2547,7 @@ impl Engine {
             // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
-            let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, left, stretches });
         }
         Ok(())
     }
@@ -3186,7 +3191,7 @@ impl Engine {
                 let f = self.fixed.iter().find(|f| f.start == touching);
                 let mut list: Vec<(String, usize)> = Self::english_writings(f.map_or(word, |f| f.word.as_str())).into_iter().map(|w| (w, 1)).collect();
                 let zh = f.and_then(|f| f.zh.clone());
-                let zh = zh.and_then(|syl| self.lex.entries(std::slice::from_ref(&syl)).first().map(|(w, _)| (w.to_string(), syl)));
+                let zh = zh.and_then(|syl| self.window_entries(std::slice::from_ref(&syl)).first().map(|(w, _)| (w.to_string(), syl)));
                 let mut c = Cands::new(Vec::new(), self.cand_vertical);
                 if let Some((word, syl)) = zh {
                     list.push((word, 1));
@@ -3248,7 +3253,8 @@ impl Engine {
         let today = if self.learner.has_new_words() { self.today() } else { 0 };
         for l in (1..=self.lex.max_len.max(NEWWORD_MAX).min(self.avail())).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
-            let lexicon = self.lex.entries(key);
+            // l = 1 is the segment of the syllable before the cursor: its entries go by the reading term (docs/contracts/reading-decoder.md).
+            let lexicon = if l == 1 { self.window_entries(key) } else { self.lex.entries(key) };
             // New-word B §2.4: new words first among the same length, so ⌘⌫ reaches them (any weight: a record
             // under ACTIVE is still on disk); one the lexicon has is listed where the lexicon puts it.
             let new = if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) { self.learner.new_words_all(key, today) } else { Vec::new() };

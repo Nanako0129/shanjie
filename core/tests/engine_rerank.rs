@@ -393,7 +393,7 @@ fn apply_does_not_bring_back_a_cleared_prediction_row() {
 
     // Repick-freeze, a pick that still leaves a free stretch: row 27 with 以 picked at syllable 2 (everything else fixed as
     // shown), then a new syllable typed there is free; End moves the cursor to the end, where the row stays empty. The job
-    // for that free stretch changes the text (measured: the 的 becomes 地), and the apply leaves the row cleared.
+    // for that free stretch changes the text (measured: the 的 becomes 得; 地 before the reading term, docs/contracts/reading-decoder.md), and the apply leaves the row cleared.
     let mut e = engine();
     let syls = row(27);
     type_syls(&mut e, &syls);
@@ -409,7 +409,7 @@ fn apply_does_not_bring_back_a_cleared_prediction_row() {
     assert!(o.candidates.is_empty(), "premise: the row is cleared");
     let r = e.take_rerank_job().expect("premise: the free syllable makes a job").run();
     let a = e.apply_rerank(r).unwrap().expect("a change");
-    assert_eq!(a.preedit, "我以地經回復你的郵件了");
+    assert_eq!(a.preedit, "我以得經回復你的郵件了");
     assert!(a.candidates.is_empty(), "the row stays cleared after the apply");
     assert!(!e.set_prediction(true).unwrap().candidates.is_empty(), "premise: a recompute would show a row");
 }

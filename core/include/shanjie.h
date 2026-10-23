@@ -45,6 +45,11 @@
  *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
  *    sandhi-add.tsv: shanjie_engine_new / _new_packs read it into the lexicon and shanjie_engine_load_lm reads it again to cap
  *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.
+ *  - The reading term (docs/contracts/reading-decoder.md): the n-gram decoder adds 2.0 * max(t, -4) to the path score of every single-character
+ *    word, t being how far its reading's lexicon score is below that character's most common reading (0 for the sandhi readings of 一 and 不), in every
+ *    profile and at every rerank strength, with the small model off too; the candidate window lists the entries of a one-syllable reading in the same
+ *    order (raw lexicon score plus the term, stable), also without a language model. The table is built when the lexicon is loaded (shanjie_engine_new
+ *    and _new_packs); there is no setting, file or call for it.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
@@ -315,9 +320,8 @@ int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 //   from the lexicon folder it was created with (mcbpmf-data.txt, overlay-add.tsv) and from the pack rows it was created with. May be
 //   called before or after load_lm and load_tinylm (the table does not depend on them). The term applies per job, only with the chat
 //   profile, at any of the three rerank strengths (each with its own alpha, tau and delta: docs/contracts/colloquial-levels.md) and a small
-//   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. Where the term applies the fusion also gets the reading-channel term (docs/contracts/reading-channel.md:
-//   each single-character word's reading against that word's most common reading in the lexicon, a rare reading costs up to 4 per character); it has no
-//   switch, file or setting of its own and changes nothing where the colloquial term does not apply. 3 when a file cannot be read or is malformed (the engine keeps its previous table,
+//   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. The fusion has no reading term (the reading-channel term of docs/contracts/reading-channel.md is gone from it): the reading term is in the
+//   n-gram decoder, for every profile, strength and rerank setting (docs/contracts/reading-decoder.md; see shanjie_engine_load_lm). 3 when a file cannot be read or is malformed (the engine keeps its previous table,
 //   or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.
 int32_t shanjie_engine_load_colloquial(ShanjieEngine *engine, const char *path);
 // set_rerank 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation (S7c-2c), like set_demote in its codes and its

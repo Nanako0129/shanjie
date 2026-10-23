@@ -39,6 +39,9 @@ fn engine(capped: &Arc<CappedLexicon>, profile: Profile) -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), capped.clone());
+    // This slice measures the demotion table alone: the reading term (docs/contracts/reading-decoder.md) is left out. With it the chat display of
+    // REPORT is 搞完這播 (波 read ㄅㄛ is its second reading in the lexicon, so the term charges it), still 睪丸 without the table and 搞完 with it.
+    e.set_reading_decode(false);
     e.set_profile(profile).unwrap();
     e
 }

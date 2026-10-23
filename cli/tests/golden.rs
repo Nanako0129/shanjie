@@ -53,6 +53,10 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
+/// The numbers pinned below are those of the Python reference (reference/proto/lm_eval.py), which has no reading term
+/// (docs/contracts/reading-decoder.md): these runs leave it out. The default run's picks are checked in cli/tests/reading_decode.rs.
+const NORD: &str = "--no-reading-decode";
+
 const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
 
 const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
@@ -74,8 +78,8 @@ fn lm_mode_matches_golden_byte_for_byte() {
     let typing = format!("{root}/eval/dev/user-typing.txt");
     let mut got = String::new();
     for p in ["chat", "formal"] {
-        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302"]);
-        got += &run(&["--lm", &lm, "--profile", p, "--rows", &typing, "--name", "typing76"]);
+        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302", NORD]);
+        got += &run(&["--lm", &lm, "--profile", p, "--rows", &typing, "--name", "typing76", NORD]);
     }
     assert_eq!(got, golden("s2-lm.txt"));
 }
@@ -86,9 +90,9 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut got = String::new();
     for p in ["chat", "formal"] {
-        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302", "--context"]);
+        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302", "--context", NORD]);
         for (f, name) in [("user-typing", "typing76"), ("user-reported", "user-reported")] {
-            got += &run(&["--lm", &lm, "--profile", p, "--rows", &format!("{root}/eval/dev/{f}.txt"), "--name", name, "--context"]);
+            got += &run(&["--lm", &lm, "--profile", p, "--rows", &format!("{root}/eval/dev/{f}.txt"), "--name", name, "--context", NORD]);
         }
     }
     assert_eq!(got, golden("s2h-lm-context.txt"));
@@ -195,7 +199,7 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
         for p in ["chat", "formal"] {
             for d in ["on", "off"] {
                 let name = format!("sw-probe-{d}");
-                let mut args = vec!["--lm", &lm, "--profile", p, "--rows", &probe, "--name", &name, "--dump", dump.to_str().unwrap()];
+                let mut args = vec!["--lm", &lm, "--profile", p, "--rows", &probe, "--name", &name, "--dump", dump.to_str().unwrap(), NORD];
                 args.extend(ctx);
                 if d == "off" {
                     args.push("--no-demote");
@@ -219,7 +223,7 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 #[test]
 fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
-    let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
+    let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context", NORD]);
     assert_eq!(
         line("chat"),
         "## dev302  lm-chat+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'f061b257afcd622c8eb7375ac143f026a31cd6a062c685603ba63ff7366da4ca'}\n"
@@ -317,7 +321,7 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     let (lm, rows) = (format!("{root}/eval/golden/kn-tiny/bigram.sjlm"), std::env::temp_dir().join(format!("shanjie-kn-rows-{}.txt", std::process::id())));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let args = |extra: &[&'static str]| {
-        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t"];
+        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t", NORD];
         a.extend(extra);
         run(&a)
     };
@@ -423,7 +427,7 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
     let lm = lm_path();
     let first = |extra_args: &[&str]| {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
-            .args(["--lm", &lm, "--profile", "chat", "--no-names", "--rows", rows.to_str().unwrap(), "--dump", dump.to_str().unwrap()])
+            .args(["--lm", &lm, "--profile", "chat", "--no-names", "--rows", rows.to_str().unwrap(), "--dump", dump.to_str().unwrap(), NORD])
             .args(extra_args)
             .output()
             .unwrap();
