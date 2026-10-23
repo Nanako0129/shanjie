@@ -58,14 +58,14 @@
 
 ### 3.1 Rust 與研究一致
 
-- **模糊音**（兩邊同一個演算法）：`export_rows.py` 產生 dev299＋typing76、p＝0.1 的注入列，188 上 `shanjie-eval --lm data/lm/bigram.sjlm --profile <chat|formal> --fuzzy 15 --rows <檔>`（不加 `--context`、`--packs`、`--tinylm`；和研究的 `Ctx` 一樣：句首、沒有詞包、沒有小模型、降權表開著）。合法讀音那一類第一名救回的列數和 `8007b25c…` 那次 Python 的 G2 相差不超過 3 列；超過就停、查原因。
+- **模糊音**（兩邊同一個演算法）：`export_rows.py` 產生 dev299＋typing76、p＝0.1 的注入列，188 上 `shanjie-eval --lm data/lm/bigram.sjlm --profile <chat|formal> --fuzzy 15 --fuzzy-delta-sound 1 --rows <檔>`（研究的 Python 只有 δ＝1，所以 Rust 這邊明確給 1；預設自 §3.5 起是 2.5，不給就不是同一個演算法；不加 `--context`、`--packs`、`--tinylm`；和研究的 `Ctx` 一樣：句首、沒有詞包、沒有小模型、降權表開著）。合法讀音那一類第一名救回的列數和 `8007b25c…` 那次 Python 的 G2 相差不超過 3 列；超過就停、查原因。
 - **鄰鍵**：不和研究比（研究的 G0 比這一片寬，§0）；改用 Rust 測試直接驗逐音節的規則（§3.4），並在研究紀錄報 Rust 在同樣注入列（p＝0.05、0.1，不合法那一類）的救回數，和 Python 的上限並列。
 
 ### 3.2 乾淨輸入（決定性）
 
 - 指令一律是出貨設定：`shanjie-eval --lm data/lm/bigram.sjlm --profile <chat|formal> --context --packs acg --tinylm data/lm/tinylm.sjtl [--fuzzy <flags>] --set|--rows … --rowstats <檔>`，基準不給 `--fuzzy`。
 - **鄰鍵開、模糊音關**（`--fuzzy 16`）：dev302、typing76、錯字回報、cvtune、wikitune × 聊天、書面，`top1_sha256` 和全關**逐字相同**（打對的音節都在詞庫裡，不走鄰鍵；不同就停）。
-- **模糊音四對全開**（`--fuzzy 15`）：同樣的集合 `tools/evalstats.py compare --net` 對全關；dev302、typing76、錯字回報改壞 0；cvtune、wikitune 改壞率 ≤ 0.5%（兩種設定）。
+- **模糊音四對全開**（`--fuzzy 15`；第一次的那張表是 δ＝1，即 `--fuzzy 15 --fuzzy-delta-sound 1`，之後的預設是 δ＝2.5 加 §3.6 的過濾池，同一個標記 `+fz:15` 指的是不同設定，見研究紀錄 2026-10-23）：同樣的集合 `tools/evalstats.py compare --net` 對全關；dev302、typing76、錯字回報改壞 0；cvtune、wikitune 改壞率 ≤ 0.5%（兩種設定）。
 - 保留集：這一片不用（維護者後來的規則：保留集只在推 `v*` tag 前由 fresh verifier 跑一次，`CLAUDE.md`「評測與資料」）；發版前的跨版本基準測試（`docs/verification.md`）才跑，同一條出貨設定指令、全關對 `--fuzzy 31`、兩種設定，淨值 < 0 就停下來問。（原本寫「收尾時 fresh verifier 跑一次」，2026-10-23 改。）
 
 ### 3.3 延遲與記憶體
@@ -80,7 +80,7 @@
   - δ＝1 是 10-14 研究在「句首、沒有詞包、沒有小模型、沒有 KN」下選的（fuzzy-research §2）。維護者 2026-10-23 選「用出貨設定重選 δ」。
 - **只重選模糊音的 δ**（`fuzzy::DELTA_SOUND`）；鄰鍵的 δ 2 不動（§3.2 的 `--fuzzy 16` 已逐字相同）。
 - **格點**（事先固定，5 格）：δ ∈ {1, 1.5, 2, 2.5, 3}（詞庫分數是 log10）。
-- **工具**：CLI 加只給評測用的 `--fuzzy-delta-sound D`（不給時是 1，輸出逐位元組不變，測試斷言）。
+- **工具**：CLI 加只給評測用的 `--fuzzy-delta-sound D`（寫這一節時，不給是 1，輸出逐位元組不變，測試斷言。**2026-10-23 更正**：§3.6 的實作起預設是 `fuzzy::DELTA_SOUND`＝2.5，不給＝2.5，摘要行的標記也只有不等於預設時才加 `:dD`；要舊值就給 `--fuzzy-delta-sound 1`，該行標記變成 `+fz:15:d1`）。
 - **設定**：一律出貨設定（§3.2 那條指令；聊天加 `--colloquial-core`），聊天與書面都量。
 - **選格**（調參層 cvtune-clean、wikitune-clean，私人集合在 GCP）：
   1. 乾淨輸入：每一格 `--fuzzy 15` 對全關的改壞率，四組（兩個集合 × 兩種設定）都要 ≤ 0.5%。
@@ -103,6 +103,7 @@
   - **過濾用的清單**：解碼器回傳的 n-best（每個字面一條路徑）。不重新解碼，也不替同一個字面另找一條不是容錯的路徑。
   - **n-gram 第一名是容錯路徑**（救回）：那一段不送語意校正，組字區照 n-gram 第一名；`guard_skips` 之外另記一個計數 `fuzzy_skips`。
   - **n-gram 第一名不是容錯路徑**：送語意校正的候選＝n-best 依原本順序、跳過容錯路徑之後的前 8 條；不足 8 條就全部（照 n-best 順序）。錨點仍是 n-gram 第一名（`Choice.expect` 不變）。
+  - **池子少於 2 條**（扣掉容錯路徑後只剩 n-gram 第一名）：沒有可選的，不做那一段的重排工作；這不是學習守門擋掉的，`guard_skips` 不計（`guard_skips` 只數守門真的擋掉的工作）。
   - **引擎與 CLI 用同一個核心函式**決定「這段跳不跳過」與「候選池」。`shanjie-eval` 在 `--fuzzy` 含模糊音位元時照同一條規則：第一名是容錯路徑就不重排；否則對池子重排，選中的候選對應回原本 n-best 的索引，`ok`、`--tinylm-scores` 的 `c` 欄、`--dump` 都用原本的索引。`--tinylm-scores` 的 `ng`／`ok`／`ed`／`ll` 欄列的是池子（照池子的順序），另加 `idx` 欄寫池子各條在原本 n-best 的索引。
   - δ 固定 2.5（§3.5 選出的值），寫進 `fuzzy::DELTA_SOUND`。
   - 學習照 §2.1 不變。
