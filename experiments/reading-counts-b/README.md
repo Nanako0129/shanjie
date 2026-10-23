@@ -115,3 +115,4 @@
 - 送去標注的句子在目標字前後各最多 60 個字，句子裡原有的【】先換成「」，再把目標字標成【】。
 - 送出批次前先估價：`label_llm.py price` 用 `count_tokens` 量 200 個固定種子抽出的請求、放大到整批，輸出以 `max_tokens` 當上限，按該模型的 Batch 價算；`submit` 要 `--max-usd`，而且價格檔必須是這一份批次檔的，估價超過就不送。
 - `build_t2.py` 只收語料位置的標注（id 以 `wiki-`／`text-` 開頭），校準用的標注（錯字回報、打字測驗、dev302）一律拒收，不進 n_r。
+- **送出方式與預算（2026-10-23，在任何第二步的數字之前）**：Opus 5.5 不接受 `temperature`（第一次的校準批次 152 題全部以 `temperature is deprecated for this model` 退回，沒有計費），請求改成不帶 `temperature`。第二次的校準批次排隊 48 分鐘一題都沒處理，取消（沒有計費）。維護者：「不走 batch，預算 50 USD」：校準與語料標注都改用一般 Messages API 逐題送（`label_llm.py direct`，8 個並行、遇到 429／529 退避重試、可續跑），API 預算從 US$30 改成 US$50；估價照舊用 `price`（token 計數），一般價格是 Batch 的 2 倍。模型、提示、選項都不變。

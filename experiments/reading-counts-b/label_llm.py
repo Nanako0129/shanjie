@@ -23,7 +23,7 @@ words of >= 2 characters that read it that way (highest score first, ties by the
 empty for an answer that is not exactly one valid option letter after stripping whitespace (also for an errored, expired or missing result), prints the
 counts, and exits 3 when more than 5% are invalid (the registration's stop). Exit 0 done, 1 stop or API error.
 """
-import argparse, collections, hashlib, json, os, random, re, ssl, sys, urllib.error, urllib.request
+import argparse, collections, concurrent.futures, hashlib, json, os, random, re, ssl, sys, threading, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -157,6 +157,50 @@ def check_price(path, max_usd):
     return est
 
 
+DIRECT_FACTOR = 2      # standard (non-Batch) price = 2 x the Batch price in PRICES (platform.claude.com pricing, 2026-10-23)
+RETRY_STATUS = (408, 429, 500, 502, 503, 529)
+
+
+def send(params, tries=6):
+    """POST /v1/messages once (retrying overload and rate limits with backoff) -> a batch-style result {"type": "succeeded", "message": ...} or
+    {"type": "errored", "error": {"status": code}}. The key handling is api()'s; an error records the status code only."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        S.B1.stop("ANTHROPIC_API_KEY is not set")
+    body = json.dumps(params).encode()
+    for i in range(tries):
+        req = urllib.request.Request(API + "/v1/messages", method="POST", data=body,
+                                     headers={"x-api-key": key, "anthropic-version": VERSION, "content-type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=120, context=ssl_context()) as r:
+                return {"type": "succeeded", "message": json.loads(r.read())}
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRY_STATUS or i == tries - 1:
+                return {"type": "errored", "error": {"status": e.code}}
+        except urllib.error.URLError:
+            if i == tries - 1:
+                return {"type": "errored", "error": {"status": "network"}}
+        time.sleep(2 ** i)
+
+
+def direct(path, out, workers, sender=send):
+    """Every request of BATCH.jsonl through the plain Messages API, results appended to OUT as batch-style lines {custom_id, result}; ids already in
+    OUT are skipped, so a stopped run resumes. -> (sent, errored)."""
+    done = set()
+    if os.path.exists(out):
+        done = {json.loads(l)["custom_id"] for l in open(out, encoding="utf-8") if l.strip()}
+    todo = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    todo = [q for q in todo if q["custom_id"] not in done]
+    lock, err = threading.Lock(), 0
+    with open(out, "a", encoding="utf-8", newline="\n") as f, concurrent.futures.ThreadPoolExecutor(workers) as ex:
+        for q, res in zip(todo, ex.map(lambda q: sender(q["params"]), todo)):
+            err += res["type"] != "succeeded"
+            with lock:
+                f.write(json.dumps({"custom_id": q["custom_id"], "result": res}, ensure_ascii=False) + "\n")
+                f.flush()
+    return len(todo), err
+
+
 def answer_letter(result, options):
     """-> the option letter of one batch result line, or None when it is not exactly one valid letter."""
     r = result.get("result") or {}
@@ -197,9 +241,15 @@ def main(argv=None):
     sb = sub.add_parser("submit")
     sb.add_argument("batch")
     sb.add_argument("--max-usd", type=float, required=True)
+    dr = sub.add_parser("direct")
+    dr.add_argument("batch")
+    dr.add_argument("--max-usd", type=float, required=True)
+    dr.add_argument("--out", required=True)
+    dr.add_argument("--workers", type=int, default=8)
     sub.add_parser("status").add_argument("batch_id")
     c = sub.add_parser("collect")
-    c.add_argument("batch_id")
+    c.add_argument("batch_id", nargs="?")
+    c.add_argument("--results", help="a `direct` results file instead of a batch id")
     c.add_argument("--map", required=True)
     c.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -224,15 +274,23 @@ def main(argv=None):
         reqs = [json.loads(l) for l in open(a.batch, encoding="utf-8")]
         j = json.loads(api("POST", API + "/v1/messages/batches", {"requests": reqs}))
         print("batch", j["id"], j["processing_status"], "requests", len(reqs), f"estimated US${est['usd']}")
+    elif a.cmd == "direct":
+        est = check_price(a.batch, a.max_usd / DIRECT_FACTOR)
+        n, err = direct(a.batch, a.out, a.workers)
+        print(f"sent {n}; errored {err}; estimated US${round(est['usd'] * DIRECT_FACTOR, 4)} at the standard price; results {a.out}")
     elif a.cmd == "status":
         j = json.loads(api("GET", f"{API}/v1/messages/batches/{a.batch_id}"))
         print(j["processing_status"], json.dumps(j.get("request_counts", {}), sort_keys=True))
     else:
-        j = json.loads(api("GET", f"{API}/v1/messages/batches/{a.batch_id}"))
-        if j["processing_status"] != "ended" or not j.get("results_url"):
-            S.B1.stop(f"the batch is {j['processing_status']}, not ended")
+        if a.results:
+            lines = open(a.results, encoding="utf-8").read().splitlines()
+        else:
+            j = json.loads(api("GET", f"{API}/v1/messages/batches/{a.batch_id}"))
+            if j["processing_status"] != "ended" or not j.get("results_url"):
+                S.B1.stop(f"the batch is {j['processing_status']}, not ended")
+            lines = api("GET", j["results_url"]).decode("utf-8").splitlines()
         side = json.load(open(a.map, encoding="utf-8"))
-        rows, bad = collect_labels(api("GET", j["results_url"]).decode("utf-8").splitlines(), side)
+        rows, bad = collect_labels(lines, side)
         with open(a.out, "x", encoding="utf-8", newline="\n") as f:
             f.writelines(f"{i}\t{ch}\t{rd}\n" for i, ch, rd in rows)
         per = collections.Counter(ch for _, ch, rd in rows if not rd)

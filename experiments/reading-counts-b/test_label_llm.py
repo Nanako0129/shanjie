@@ -255,5 +255,54 @@ class Api(unittest.TestCase):
             u.assert_not_called()
 
 
+class Direct(unittest.TestCase):
+    def test_direct_resumes_records_errors_and_collect_reads_the_file(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        batch, out = os.path.join(d, "b.jsonl"), os.path.join(d, "r.jsonl")
+        with open(batch, "w", encoding="utf-8") as f:
+            for i in ("x-1", "x-2", "x-3"):
+                f.write(json.dumps({"custom_id": i, "params": {"model": "claude-opus-5-5", "max_tokens": 8, "messages": []}}) + "\n")
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"custom_id": "x-1", "result": {"type": "succeeded", "message": {"content": [{"type": "text", "text": "A"}]}}}) + "\n")
+        seen = []
+        def sender(params):
+            seen.append(1)
+            return {"type": "succeeded", "message": {"content": [{"type": "text", "text": "B"}]}} if len(seen) == 1 else {"type": "errored", "error": {"status": 400}}
+        n, err = L.direct(batch, out, 2, sender=sender)
+        self.assertEqual((n, err, len(seen)), (2, 1, 2))                         # x-1 was already done: not sent again
+        lines = open(out, encoding="utf-8").read().splitlines()
+        self.assertEqual(sorted(json.loads(l)["custom_id"] for l in lines), ["x-1", "x-2", "x-3"])
+        side = {i: {"char": "個", "options": {"A": "ㄍㄜˋ", "B": "ㄍㄜ˙"}} for i in ("x-1", "x-2", "x-3")}
+        rows, bad = L.collect_labels(lines, side)
+        self.assertEqual(bad, 1)
+
+    def test_send_retries_overload_then_succeeds_and_gives_up_on_400(self):
+        calls = []
+        def opener(req, timeout=None, context=None):
+            calls.append(1)
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(req.full_url, 529, "overloaded", {}, None)
+            return Resp({"content": [{"type": "text", "text": "A"}]})
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": KEY}), mock.patch.object(L.urllib.request, "urlopen", opener), mock.patch.object(L.time, "sleep"):
+            self.assertEqual(L.send({"model": "m"})["type"], "succeeded")
+            self.assertEqual(len(calls), 3)
+            calls.clear()
+            def bad(req, timeout=None, context=None):
+                calls.append(1)
+                raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, None)
+            with mock.patch.object(L.urllib.request, "urlopen", bad):
+                self.assertEqual(L.send({"model": "m"}), {"type": "errored", "error": {"status": 400}})
+            self.assertEqual(len(calls), 1)
+
+    def test_direct_budget_is_twice_the_batch_estimate(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        batch = os.path.join(d, "b.jsonl")
+        open(batch, "w").write("{}\n")
+        json.dump({"usd": 10.0, "sha256": L.file_sha256(batch)}, open(batch + ".price.json", "w"))
+        with self.assertRaises(SystemExit):
+            L.check_price(batch, 19.0 / L.DIRECT_FACTOR)                      # 10 at Batch price = 20 direct > 19
+        self.assertEqual(L.check_price(batch, 21.0 / L.DIRECT_FACTOR)["usd"], 10.0)
+
+
 if __name__ == "__main__":
     unittest.main()
