@@ -8764,3 +8764,8 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - n-gram 單獨時的 +20 在標準檔剩 +8、不顯著；保守檔（重排改得最少）剩 +17、p 0.043。推論：會意的 α、τ 是在 KN 關的書面分數上調的，重排把一部分改對蓋掉了；沒有拆開量。
   - 書面的標準與積極兩檔，基準與比較的數字逐格相同（兩邊各自的第一名正確數也相同），原因沒查。
   - 錯字回報在三檔都是淨值負（−2 到 −6，都不顯著），和 n-gram 單獨時一致。
+- **維護者決定**（同日，看過診斷）：重調會意參數再確認。
+- **探索登記：書面 KN 的會意重調**（數字之前 commit）：
+  - 分數檔：GCP 上用這個分支的 CLI，書面 `--context --packs acg --tinylm data/lm/tinylm.sjtl --formal-kn --kn-beta 0.75 --tinylm-scores`（候選與 n-gram 分數帶 KN），集合 cvtune-clean、wikitune-clean（選值用）與 dev302、打字測驗、錯字回報（只報）；另跑一份不帶 `--formal-kn` 的出貨書面當對照。
+  - 選值照 `docs/contracts/rerank-strength.md` §1 的規則，只把集合換成兩個 clean 版：`experiments/e2-chateval/judge.py --setting formal --select STD --tuning cvtune-clean wikitune-clean --weight 10`、CONS `--weight 30`、AGGR `--weight 3`（`fusegrid` 的固定格點 8×6×8）。
+  - 報：三檔選出的 α、τ、δ，各集合對「出貨書面＋出貨參數」的改對／改壞。只出方向；確認片在看過這些數字後另外登記，用沒看過的維基判讀集。
