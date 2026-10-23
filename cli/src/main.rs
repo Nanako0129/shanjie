@@ -382,6 +382,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     // The built-in table written out (the T0 file of experiments/reading-counts-b), then nothing else runs.
     if let Some(f) = &dump_reading_table {
+        if Path::new(f).exists() {
+            return Err("--dump-reading-table: the file exists (not overwritten)".into());
+        }
         fs::write(f, capped.reading_table_text().unwrap_or_default()).map_err(|e| format!("cannot write the reading table ({:?})", e.kind()))?;
         return Ok(());
     }
@@ -390,9 +393,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => {
             let bytes = fs::read(f).map_err(|e| format!("--reading-table: cannot read the file ({:?})", e.kind()))?;
             let text = String::from_utf8(bytes.clone()).map_err(|_| "--reading-table: not UTF-8".to_string())?;
-            let (c, ignored) = capped.with_reading_table(&text).map_err(|e| format!("--reading-table: {e}"))?;
+            let (c, ignored, missing) = capped.with_reading_table(&text).map_err(|e| format!("--reading-table: {e}"))?;
             if ignored > 0 {
                 eprintln!("reading-table: {ignored} rows name a pair this lexicon lacks (ignored)");
+            }
+            eprintln!("reading-table: {missing} single-character pairs of the lexicon are absent from the table");
+            if missing > 0 {
+                return Err(format!("--reading-table: {missing} single-character pairs of the lexicon are absent from the table (they would read t = 0)"));
             }
             (c, format!("+rt:{}", &sha256_hex(&bytes)[..8]))
         }

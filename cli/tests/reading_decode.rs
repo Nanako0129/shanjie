@@ -182,4 +182,14 @@ fn a_reading_table_of_the_built_in_values_changes_nothing() {
         let o = run(&["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--rows", &rows, opt, &t0]);
         assert!(!o.status.success() && text(&o.stderr).contains("need --reading-decode"), "{opt}: {}", text(&o.stderr));
     }
+    // a table that lacks a pair of the lexicon stops the run (the pair would read t = 0 silently), and the count is reported
+    let partial = dir.0.join("partial.tsv");
+    std::fs::write(&partial, table.lines().skip(3).map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    let partial = partial.to_string_lossy().into_owned();
+    let o = run(&["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--packs", "acg", "--reading-decode", "--rows", &rows, "--reading-table", &partial]);
+    assert!(!o.status.success() && text(&o.stderr).contains("reading-table: 3 single-character pairs"), "{}", text(&o.stderr));
+    // --dump-reading-table does not overwrite
+    let before = std::fs::read(&t0).unwrap();
+    let o = run(&["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--packs", "acg", "--reading-decode", "--dump-reading-table", &t0, "--rows", &rows]);
+    assert!(!o.status.success() && text(&o.stderr).contains("the file exists") && std::fs::read(&t0).unwrap() == before, "{}", text(&o.stderr));
 }

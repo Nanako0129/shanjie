@@ -43,6 +43,27 @@ class Ignition(unittest.TestCase):
         with self.assertRaises(ValueError):
             D.ignition(ROWS, DUMP, WORDS.replace("甲 丁 丙", "甲 丁 乙"), TABLE, EXACT)
 
+    def test_gap_is_to_the_chosen_candidate(self):
+        out, _ = D.ignition(ROWS, DUMP, WORDS, TABLE, EXACT, chosen=[1, 0])   # row 1 chose candidate 2 (-1.5)
+        by = {p: (r, w, gr, gw) for p, r, w, gr, gw, _ in out}
+        self.assertEqual(by["甲", "a"], (1, 1, 0.0, -0.5))                                 # wrong cand 1 is 0.5 above the chosen: gap -0.5
+        self.assertEqual(D.read_chosen('{"i": 2, "c": 0}\n{"i": 1, "c": 1}\n', 2), [1, 0])
+        with self.assertRaises(ValueError):
+            D.read_chosen('{"i": 1, "c": 1}\n', 2)
+
+    def test_run_checks(self):
+        tb = b"table"
+        tag = "## x  lm-chat+ctx+acg+rd+rt:" + __import__("hashlib").sha256(tb).hexdigest()[:8] + "  {'n': 2}\n"
+        D.check_run(2, DUMP, WORDS, tag, tb)
+        for bad in (dict(dump=DUMP.split("2\t1")[0]), dict(words=WORDS.split("2\t0")[0]), dict(summary=tag.replace("+rt:", "+rt:0")), dict(tb=b"other"),
+                    dict(summary="## x  lm-chat+ctx+acg+rd  {'n': 2}\n")):
+            args = dict(dump=DUMP, words=WORDS, summary=tag, tb=tb)
+            args.update(bad)
+            with self.assertRaises(ValueError):
+                D.check_run(2, args["dump"], args["words"], args["summary"], args["tb"])
+        with self.assertRaises(ValueError):
+            D.check_run(3, DUMP, WORDS, tag, tb)   # the rows file has more rows than the run
+
     def test_uncovered_candidate_is_skipped(self):
         _, skipped = D.ignition(ROWS, DUMP.replace("丁己", "丁"), WORDS.replace("2\t2\t丁 己", "2\t2\t丁"), TABLE, EXACT)
         self.assertEqual(skipped, 1)
@@ -50,12 +71,14 @@ class Ignition(unittest.TestCase):
 
 class Exposure(unittest.TestCase):
     def test_gold_single_positions_with_negative_t(self):
-        out = D.exposure(ROWS, WORDS, TABLE)
+        out, skipped = D.exposure(ROWS, WORDS, TABLE)
+        self.assertEqual(skipped, 0)
         # row 1 gold 甲乙 丙: 甲乙 is one word, 丙 has t 0; row 2 gold 丁 乙: 丁 b? no, 丁 is read d: not in the table; 乙 b -0.5
         self.assertEqual(out, [(2, "乙", "b", -0.5)])
-        out = D.exposure(ROWS, WORDS.replace("1\t0\t甲乙 丙", "1\t0\t甲 乙 丙"), TABLE)
+        out, _ = D.exposure(ROWS, WORDS.replace("1\t0\t甲乙 丙", "1\t0\t甲 乙 丙"), TABLE)
         self.assertEqual(out, [(1, "甲", "a", -1.0), (1, "乙", "b", -0.5), (2, "乙", "b", -0.5)])
-        self.assertEqual(D.exposure(ROWS, WORDS.replace("1\t0\t甲乙 丙", "1\t0\t-"), TABLE), [(2, "乙", "b", -0.5)])   # no gold split
+        self.assertEqual(D.exposure(ROWS, WORDS.replace("1\t0\t甲乙 丙", "1\t0\t-"), TABLE), ([(2, "乙", "b", -0.5)], 1))   # no gold split
+        self.assertEqual(D.exposure(ROWS, WORDS.replace("1\t0\t甲乙 丙", "1\t0\t甲 乙"), TABLE)[1], 1)                    # split does not cover the row
 
 
 class Delta(unittest.TestCase):
@@ -76,7 +99,8 @@ class Main(unittest.TestCase):
                 return os.path.join(d, n)
             rows = w("rows", "|甲乙丙|a b c\n前|丁乙|d b\n")
             table = w("t", "".join(f"{c}\t{r}\t{t!r}\n" for (c, r), t in TABLE.items()))
-            args = {"ig": ["ignition", "--rows", rows, "--dump", w("d", DUMP), "--words", w("w", WORDS), "--table", table, "--exact"],
+            tag = "## x  lm-chat+ctx+acg+rd+rt:" + __import__("hashlib").sha256(open(table, "rb").read()).hexdigest()[:8] + "  {'n': 2}\n"
+            args = {"ig": ["ignition", "--rows", rows, "--dump", w("d", DUMP), "--words", w("w", WORDS), "--table", table, "--exact", "--summary", w("s", tag)],
                     "ex": ["exposure", "--rows", rows, "--words", os.path.join(d, "w"), "--table", table],
                     "de": ["delta", "--t0", table, "--t1", table]}
             for k, a in args.items():

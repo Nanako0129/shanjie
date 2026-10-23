@@ -785,12 +785,13 @@ impl CappedLexicon {
     }
 
     /// Evaluation only, after `with_reading_decode` (the CLI's `--reading-table`): the reading term takes its t from `text` instead of the
-    /// built-in table (`reading::ReadingDecode::with_table`); returns the number of rows naming a pair the lexicon lacks.
-    pub fn with_reading_table(mut self, text: &str) -> Result<(CappedLexicon, usize), String> {
+    /// built-in table (`reading::ReadingDecode::with_table`); returns the number of rows naming a pair the lexicon lacks and the number of the
+    /// lexicon's single-character pairs the table lacks.
+    pub fn with_reading_table(mut self, text: &str) -> Result<(CappedLexicon, usize, usize), String> {
         let rd = self.reading.take().ok_or("--reading-table needs --reading-decode")?;
-        let (rd, ignored) = rd.with_table(&self.base, text)?;
+        let (rd, ignored, missing) = rd.with_table(&self.base, text)?;
         self.reading = Some(rd);
-        Ok((self, ignored))
+        Ok((self, ignored, missing))
     }
 
     /// Evaluation only (the CLI's `--dump-reading-table`): the built-in reading table of this lexicon in the `--reading-table` format.

@@ -105,8 +105,9 @@ impl ReadingDecode {
 
     /// Replaces the built-in table by `text`: one `char TAB reading TAB t` row per line (the format of `dump_table`), t being the value before
     /// the `LAMBDA * max(t, -CAP)` step. A row with a pair the lexicon lacks is ignored (its term would be 0 anyway); the count is returned. A
-    /// malformed row, or a pair twice, is an error (the message carries the line number only).
-    pub fn with_table(mut self, lex: &Lexicon, text: &str) -> Result<(ReadingDecode, usize), String> {
+    /// malformed row, or a pair twice, is an error (the message carries the line number only). Also returns the number of single-character pairs
+    /// of the lexicon the table lacks (they would read t = 0 silently; the CLI stops when it is above 0).
+    pub fn with_table(mut self, lex: &Lexicon, text: &str) -> Result<(ReadingDecode, usize, usize), String> {
         let (mut table, mut ignored) = (HashMap::new(), 0);
         for (n, l) in text.lines().enumerate() {
             let bad = || format!("line {}: not `character TAB reading TAB value`", n + 1);
@@ -126,13 +127,19 @@ impl ReadingDecode {
                 _ => ignored += 1,
             }
         }
+        let missing = Self::single_pairs(lex).iter().filter(|(c, syl)| !lex.syl_ids.get(syl).is_some_and(|&id| table.contains_key(&(id, *c)))).count();
         self.table = Some(table);
-        Ok((self, ignored))
+        Ok((self, ignored, missing))
     }
 
     /// The built-in table in the format `with_table` reads: every single-character pair of the lexicon, sorted by character then reading, with
     /// the t `logp` gives it (Rust's shortest round-trip float text, so reading it back changes nothing).
     pub fn dump_table(&self, lex: &Lexicon) -> String {
+        Self::single_pairs(lex).iter().map(|(c, syl)| format!("{c}\t{syl}\t{:?}\n", self.builtin_logp(lex, syl, &c.to_string()).unwrap_or(0.0))).collect()
+    }
+
+    /// Every single-character (character, reading) pair of the lexicon, sorted and without repeats.
+    fn single_pairs(lex: &Lexicon) -> Vec<(char, String)> {
         let mut pairs: Vec<(char, String)> = Vec::new();
         for (r, rd) in lex.readings.iter().enumerate() {
             if rd.key_len != 1 {
@@ -148,8 +155,7 @@ impl ReadingDecode {
         }
         pairs.sort();
         pairs.dedup();
-        let builtin = ReadingDecode { floor_mc: self.floor_mc.clone(), table: None };
-        pairs.iter().map(|(c, syl)| format!("{c}\t{syl}\t{:?}\n", builtin.logp(lex, syl, &c.to_string()).unwrap_or(0.0))).collect()
+        pairs
     }
 
     /// log10 P(reading | word) of the single-character word `word` read `syl`, relative to the word's best reading (<= 0): the lexicon's score
@@ -164,6 +170,11 @@ impl ReadingDecode {
                 _ => 0.0,
             });
         }
+        self.builtin_logp(lex, syl, word)
+    }
+
+    /// `logp` without the table: the built-in values.
+    fn builtin_logp(&self, lex: &Lexicon, syl: &str, word: &str) -> Option<f64> {
         let (s, best) = (lex.syllable_score(syl, word)?, lex.best_word_score(word)?);
         let mut t = s - best;
         if SANDHI.contains(&(syl, word)) {
@@ -227,15 +238,15 @@ mod tests {
         let (lex, rd) = mk(base);
         let dump = rd.dump_table(&lex);
         assert_eq!(dump.lines().count(), 7);
-        let (rd2, ignored) = ReadingDecode::new(&lex, base).with_table(&lex, &dump).unwrap();
-        assert_eq!(ignored, 0);
+        let (rd2, ignored, missing) = ReadingDecode::new(&lex, base).with_table(&lex, &dump).unwrap();
+        assert_eq!((ignored, missing), (0, 0));
         for l in dump.lines() {
             let f: Vec<&str> = l.split('\t').collect();
             assert_eq!(rd.logp(&lex, f[1], f[0]).map(f64::to_bits), rd2.logp(&lex, f[1], f[0]).map(f64::to_bits), "{l}");
             assert_eq!(rd.term(&lex, f[1], f[0]).to_bits(), rd2.term(&lex, f[1], f[0]).to_bits(), "{l}");
         }
-        let (rd3, ignored) = ReadingDecode::new(&lex, base).with_table(&lex, "甲\tb\t-0.5\n甲\tz\t-1\n").unwrap();
-        assert_eq!(ignored, 1);
+        let (rd3, ignored, missing) = ReadingDecode::new(&lex, base).with_table(&lex, "甲\tb\t-0.5\n甲\tz\t-1\n").unwrap();
+        assert_eq!((ignored, missing), (1, 6)); // 7 pairs in the lexicon, one of them in the table
         close(rd3.logp(&lex, "b", "甲").unwrap(), -0.5);
         close(rd3.logp(&lex, "c", "甲").unwrap(), 0.0);
         close(rd3.logp(&lex, "ㄧˊ", "一").unwrap(), 0.0);

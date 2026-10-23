@@ -2,41 +2,33 @@
 """The three diagnostics of README.md in this directory (report only). Output is numbers and (character, reading) pairs, never a sentence, a
 context or a word of a row; row numbers are allowed.
 
-  diag.py ignition --rows R --dump D --words W --table TABLE.tsv [--top 100]
-      One CLI run with `--reading-decode [--reading-table TABLE]` and `--dump D --dump-words W` over rows R. For every (character, reading) pair
-      with t != 0 in TABLE that a single-character word of the first 64 candidates uses (the reading is the row's syllable at that position):
-      the number of correct and of wrong candidates it is in, and the mean score gap to the row's first candidate in each. Top `--top` by count.
+  diag.py ignition --rows R --dump D --words W --table TABLE.tsv --summary S [--scores SC] [--top 100]
+      One CLI run with `--reading-decode --reading-table TABLE` (T0 as well as T1: the run's stdout S must carry `+rt:<sha8 of TABLE>` in its tag)
+      and `--dump D --dump-words W` over rows R (their row counts must equal R's). For every (character, reading) pair with t != 0 in TABLE that a
+      single-character word of the first 64 candidates uses (the reading is the row's syllable at that position): the number of correct and of wrong
+      candidates it is in, and the mean score gap (dump scores) to the row's chosen candidate in each: the `c`-th of the scores file SC
+      (`--tinylm-scores`, rerank-on runs) when given, else the first candidate. Top `--top` by count; the candidates skipped (a split that does
+      not cover the syllables) are counted.
   diag.py exposure --rows R --words W --table TABLE.tsv
-      The gold split of each row (`--dump-words` row k = 0): every single-character word whose pair has t < 0, as `row, character, reading, t`.
+      The gold split of each row (`--dump-words` row k = 0): every single-character word whose pair has t < 0, as `row, character, reading, t`;
+      the rows skipped (no gold split, or one that does not cover the row's syllables) are counted.
   diag.py delta --t0 T0.tsv --t1 T1.tsv [--min 0.5]
       The pairs with |t1 - t0| >= --min (a pair in one table only counts as 0 in the other), their number first.
 
 A candidate is correct when its surface equals the row's sentence under the CLI's own comparison (`--lenient` is the default: eval/variants.tsv).
 """
-import argparse, collections, os, sys
+import argparse, collections, hashlib, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-
-
-def read_text(path):
-    with open(path, encoding="utf-8", newline="") as f:
-        return f.read()
-
-
-def lines_of(text):
-    out = [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
-    return out[:-1] if out and out[-1] == "" else out
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import triage  # noqa: E402
+from triage import read_text, lines_of  # noqa: E402
 
 
 def parse_rows(text):
-    """-> [(truth, syllables)] of the lines with exactly three `|` fields (the CLI's rows)."""
-    rows = []
-    for l in lines_of(text):
-        p = l.split("|")
-        if len(p) == 3:
-            rows.append((p[1], p[2].split()))
-    return rows
+    """-> [(truth, syllables)] of the CLI's rows (triage.parse_rows without the context)."""
+    return [(truth, syls) for _, truth, syls in triage.parse_rows(text)]
 
 
 def read_table(text):
@@ -81,12 +73,37 @@ def singles(words, syls):
     return out
 
 
-def ignition(rows, dump, words, table, same, top=100):
-    """-> (rows of (pair, right, wrong, mean gap right, mean gap wrong, t) best first, skipped candidates)."""
+def check_run(n, dump, words, summary, table_bytes):
+    """ValueError unless the dump and the dump-words hold exactly rows 1..n and the summary's tag carries `+rt:<sha8 of the table file>`."""
+    for name, text, col in (("dump", dump, 0), ("dump-words", words, 0)):
+        ids = {int(l.split("\t")[col]) for l in lines_of(text)}
+        if ids != set(range(1, n + 1)):
+            raise ValueError(f"the {name} has {len(ids)} rows (largest {max(ids, default=0)}), the rows file {n}")
+    m = re.search(r"^## .*?  (lm-\S+)  \{", summary, re.M)
+    want = "+rt:" + hashlib.sha256(table_bytes).hexdigest()[:8]
+    if not m or want not in m.group(1):
+        raise ValueError(f"the summary tag does not carry {want} (the run did not use this table)")
+
+
+def read_chosen(text, n):
+    """-> the `c` of each row of a `--tinylm-scores` file."""
+    c = {}
+    for l in lines_of(text):
+        j = json.loads(l)
+        c[j["i"]] = j["c"]
+    if set(c) != set(range(1, n + 1)):
+        raise ValueError(f"the scores file has {len(c)} rows, the rows file {n}")
+    return [c[i] for i in range(1, n + 1)]
+
+
+def ignition(rows, dump, words, table, same, top=100, chosen=None):
+    """-> (rows of (pair, right, wrong, mean gap right, mean gap wrong, t) best first, skipped candidates). The gap is to the row's candidate
+    `chosen[i]` (index in the dump's order; the first when `chosen` is None)."""
     cands = read_dump(dump, len(rows))
     _, cw = read_words(words, len(rows))
     acc, skipped = collections.defaultdict(lambda: [[], []]), 0
-    for (truth, syls), cs, ws in zip(rows, cands, cw):
+    for i, ((truth, syls), cs, ws) in enumerate(zip(rows, cands, cw)):
+        ref = cs[chosen[i] if chosen else 0][1] if cs else 0.0
         for (surface, score), w in zip(cs, ws):
             if "".join(w) != surface:
                 raise ValueError("dump-words does not match dump")
@@ -94,7 +111,7 @@ def ignition(rows, dump, words, table, same, top=100):
             if s is None:
                 skipped += 1
                 continue
-            gap = cs[0][1] - score
+            gap = ref - score
             for pair in {p for p in s if table.get(p, 0.0) != 0.0}:
                 acc[pair][0 if same(surface, truth) else 1].append(gap)
     mean = lambda v: sum(v) / len(v) if v else None
@@ -104,14 +121,17 @@ def ignition(rows, dump, words, table, same, top=100):
 
 
 def exposure(rows, words, table):
-    """-> [(row number, character, reading, t)] of the gold split's single-character words with t < 0."""
+    """-> ([(row number, character, reading, t)] of the gold split's single-character words with t < 0, rows skipped: no gold split or one that
+    does not cover the row's syllables)."""
     gold, _ = read_words(words, len(rows))
-    out = []
+    out, skipped = [], 0
     for i, ((_, syls), g) in enumerate(zip(rows, gold)):
-        for p in (singles(g, syls) or []) if g else []:
-            if table.get(p, 0.0) < 0:
-                out.append((i + 1, p[0], p[1], table[p]))
-    return out
+        s = singles(g, syls) if g else None
+        if s is None:
+            skipped += 1
+            continue
+        out.extend((i + 1, c, r, table[c, r]) for c, r in s if table.get((c, r), 0.0) < 0)
+    return out, skipped
 
 
 def delta(t0, t1, lo=0.5):
@@ -134,6 +154,8 @@ def main(argv=None):
         p.add_argument("--table", required=True)
         if name == "ignition":
             p.add_argument("--dump", required=True)
+            p.add_argument("--summary", required=True)
+            p.add_argument("--scores")
             p.add_argument("--top", type=int, default=100)
             p.add_argument("--exact", action="store_true", help="correct = identical surface (tests); default: the CLI's variant-tolerant comparison")
     d = sub.add_parser("delta")
@@ -149,19 +171,25 @@ def main(argv=None):
         return 0
     rows, table = parse_rows(read_text(a.rows)), read_table(read_text(a.table))
     if a.cmd == "exposure":
-        out = exposure(rows, read_text(a.words), table)
-        print("positions", len(out), "rows", len({o[0] for o in out}))
+        out, skipped = exposure(rows, read_text(a.words), table)
+        print("positions", len(out), "rows", len({o[0] for o in out}), "skipped rows", skipped)
         for i, c, r, t in out:
             print(f"{i}\t{c}\t{r}\t{t!r}")
         return 0
     if a.exact:
         same = lambda x, y: x == y
     else:
-        sys.path.insert(0, os.path.join(ROOT, "tools"))
-        import triage
         lenient = triage.load_lenient()
         same = lambda x, y: lenient(x) == lenient(y)
-    out, skipped = ignition(rows, read_text(a.dump), read_text(a.words), table, same, a.top)
+    dump, words = read_text(a.dump), read_text(a.words)
+    try:
+        with open(a.table, "rb") as f:
+            check_run(len(rows), dump, words, read_text(a.summary), f.read())
+        chosen = read_chosen(read_text(a.scores), len(rows)) if a.scores else None
+    except ValueError as e:
+        print("STOP:", e, file=sys.stderr)
+        return 1
+    out, skipped = ignition(rows, dump, words, table, same, a.top, chosen)
     print("pairs", len(out), "skipped candidates", skipped)
     print("char\treading\tt\tin_correct\tin_wrong\tmean_gap_correct\tmean_gap_wrong")
     for (c, r), nr, nw, gr, gw, t in out:

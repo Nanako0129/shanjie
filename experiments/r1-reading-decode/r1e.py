@@ -45,7 +45,7 @@ def judge_one(d, setting, name, sjtl_sha8, cand="e", tag_check=None):
             stop(f"{setting} {name} {k}: {n} summary rows, {len(rows[k])} rowstats, expected {R.ROW_COUNTS[name]} (or top1 mismatch)")
     (tag_check or check_tags)(setting, tags["base"], tags[cand], sjtl_sha8)
     if [r[2] for r in rows["base"]] != [r[2] for r in rows[cand]]:
-        stop(f"{setting} {name}: baseline and R1e rowstats differ in the gold lengths (not the same rows)")
+        stop(f"{setting} {name}: baseline and {'R1e' if cand == 'e' else 'candidate'} rowstats differ in the gold lengths (not the same rows)")
     base_ok, new_ok = [bool(r[0]) for r in rows["base"]], [bool(r[0]) for r in rows[cand]]
     s = p4c.stats(base_ok, new_ok)
     res = {"setting": setting, "name": name, "role": role, "n": len(base_ok), **p4c.jsonable(s),

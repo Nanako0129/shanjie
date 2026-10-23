@@ -84,14 +84,21 @@ def lex_logp(lex):
     return {(r, w): s - max(t for _, t in rs) for w, rs in by_word.items() for r, s in rs}
 
 
-def mc_logp(lex, mcb):
-    """{((r,), w): log10 P(r|w)} for single-character w: M(r,w) = 10^s(r,w) + the mass of the multi-character words of `mcb` (the
-    {(reading tuple, word): score} of mcbpmf-data.txt alone) that use w at a position read r, relative to w's best M over its readings in `lex`."""
+def mc_extra(mcb):
+    """{(syllable, character): mass} of the multi-character words of `mcb` (the {(reading tuple, word): score} of mcbpmf-data.txt alone): sum of 10^s
+    over every word of at least two characters, once per position that character is at, in the word's own reading."""
     extra = {}
     for (r, u), s in mcb.items():
         if len(u) >= 2:
             for k, ch in enumerate(u):
                 extra[(r[k], ch)] = extra.get((r[k], ch), 0.0) + 10.0 ** s
+    return extra
+
+
+def mc_logp(lex, mcb):
+    """{((r,), w): log10 P(r|w)} for single-character w: M(r,w) = 10^s(r,w) + the mass of the multi-character words of `mcb` (the
+    {(reading tuple, word): score} of mcbpmf-data.txt alone) that use w at a position read r, relative to w's best M over its readings in `lex`."""
+    extra = mc_extra(mcb)
     by_word = {}
     for (r, w), s in lex.items():
         if len(w) == 1:

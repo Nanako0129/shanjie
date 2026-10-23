@@ -20,6 +20,9 @@ import argparse, hashlib, math, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(ROOT, "experiments", "p5-reading-channel"))
+import p5  # noqa: E402  (puts tools, diag-near-miss (d23) and p4c on sys.path)
+P5_MC_EXTRA = p5.mc_extra
 EPS = 1e-9
 NEUTRAL_CAP = -1.0
 TAIL_PARTICLES = "嗎啦嘛吧啊呀"
@@ -62,38 +65,18 @@ def write_table(rows):
     return "".join(f"{c}\t{r}\t{t!r}\n" for c, r, t in rows)
 
 
-def parse_lexicon(base, overlays):
-    """-> ({(syllable, char): largest score}, {(syllable, char): mc mass}) of mcbpmf-data.txt `base` plus the overlay texts (four tab fields).
-    Mass as core/src/reading.rs `build_floor_mc` counts it: only `base`, words of two or more characters with one syllable per character, one row
-    per (reading, word) at its largest score, summed in first-occurrence order."""
-    scores, rows, at = {}, [], {}
-    for l in base.split("\n"):
-        if l.startswith(("#", "_")):
-            continue
-        f = l.split()
-        if len(f) != 3 or len(f[1]) != len(f[0].split("-")):
-            continue
-        s = float(f[2])
-        if len(f[1]) == 1:
-            scores[f[0], f[1]] = max(scores.get((f[0], f[1]), -math.inf), s)
-        else:
-            k = (f[0], f[1])
-            if k in at:
-                rows[at[k]][2] = max(rows[at[k]][2], s)
-            else:
-                at[k] = len(rows)
-                rows.append([f[0], f[1], s])
-    for text in overlays:
-        for l in text.split("\n"):
-            f = l.split("\t")
-            if len(f) == 4 and len(f[1]) == 1 and "-" not in f[0]:
-                s = float(f[2])
-                scores[f[0], f[1]] = max(scores.get((f[0], f[1]), -math.inf), s)
-    mass = {}
-    for reading, word, s in rows:
-        for c, syl in zip(word, reading.split("-")):
-            mass[syl, c] = mass.get((syl, c), 0.0) + 10.0 ** s
-    return scores, mass
+def load():
+    """-> ({(syllable, char): largest score}, {(syllable, char): mc mass}) of the repo's lexicon files, through d23 and p5 (not re-implemented here)."""
+    import d23 as D
+    lex, _ = D.load_lex_scores()
+    return {(r[0], w): sc for (r, w), sc in lex.items() if len(w) == 1 and len(r) == 1}, P5_MC_EXTRA(p5.load_mcbpmf())
+
+
+def check_exempt(scores):
+    """STOP unless every EXEMPT_PAIRS pair is a (character, reading) of the lexicon (a typo in the list would exempt nothing)."""
+    missing = sorted(p for p in EXEMPT_PAIRS if (p[1], p[0]) not in scores)
+    if missing:
+        stop(f"EXEMPT_PAIRS not in the lexicon: {missing}")
 
 
 def build(t0_rows, scores, mass):
@@ -134,18 +117,20 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--t0", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--lexicon", default=os.path.join(ROOT, "data/lexicon"))
-    ap.add_argument("--pack", default=os.path.join(ROOT, "data/packs/acg-add.tsv"))
     a = ap.parse_args(argv)
     if os.path.exists(a.out):
         stop("--out exists")
-    d = lambda n: read_text(os.path.join(a.lexicon, n))
-    scores, mass = parse_lexicon(d("mcbpmf-data.txt"), [d("overlay-add.tsv"), d("sandhi-add.tsv"), d("names-add.tsv"), read_text(a.pack)])
+    scores, mass = load()
+    check_exempt(scores)
     t0_text = read_text(a.t0)
-    rows, counts = build(read_table(t0_text), scores, mass)
+    t0_rows = read_table(t0_text)
+    rows, counts = build(t0_rows, scores, mass)
     out = write_table(rows)
-    with open(a.out, "w", encoding="utf-8", newline="") as f:
+    with open(a.out, "x", encoding="utf-8", newline="") as f:
         f.write(out)
+    t0, t1 = {(c, r): t for c, r, t in t0_rows}, {(c, r): t for c, r, t in rows}
+    for c, r in sorted(EXEMPT_PAIRS | {(c, r) for c, r in t0 if c in TAIL_PARTICLES and (first_tone(r) or neutral(r))}):
+        print("exempt", c, r, "t0", t0[c, r], "t1", t1[c, r], "hit" if t0[c, r] != t1[c, r] else "unchanged")
     for k, v in counts.items():
         print(k, v)
     print("T0 sha256", hashlib.sha256(t0_text.encode()).hexdigest())
