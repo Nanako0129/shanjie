@@ -284,7 +284,7 @@ class PackOovRegrade(unittest.TestCase):
     def test_the_committed_yield_list_names_pack_rows(self):
         pack = {(l.split("\t")[0].replace("-", " "), l.split("\t")[1]) for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8")}
         ys = B.read_tsv(os.path.join(B.PACKS, "acg-yield.tsv"))
-        self.assertEqual(len(ys), 7)                                                  # 維護者 2026-10-24 審 B=0 清單 6 個，加錯字回報第 88 列的佐拉
+        self.assertEqual(len(ys), 17)                                                 # 維護者 2026-10-24 審 B=0 清單 6 個，加錯字回報第 88 列的佐拉，加重驗未處置 (a)(b) 的 10 組讀音
         self.assertTrue(all((r, w) in pack for r, w, _ in ys), [(r, w) for r, w, _ in ys if (r, w) not in pack])
 
     def test_an_offset_outside_the_four_groups_stops(self):
