@@ -130,3 +130,56 @@ fn with_the_option_the_decoder_first_changes_and_ng_carries_the_term() {
         assert_eq!(off[1].0, on[1].0, "{profile}: row 2 keeps its first");
     }
 }
+
+/// `--reading-table` (experiments/reading-counts-b): the built-in table written by `--dump-reading-table` and read back by `--reading-table`
+/// changes nothing (summary line but for `+rt:<sha8>`, dump, rowstats; chat and formal, typing76), a table that zeroes every pair is a different
+/// run (row 10 of eval/dev/user-reported.txt, `版控`, loses its right first), and both options need `--reading-decode`.
+#[test]
+fn a_reading_table_of_the_built_in_values_changes_nothing() {
+    let dir = tmp("table");
+    let t0 = dir.0.join("t0.tsv").to_string_lossy().into_owned();
+    let o = run(&["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--packs", "acg", "--reading-decode", "--dump-reading-table", &t0, "--rows", "eval/bench/suite-v1/typing76.txt"]);
+    assert!(o.status.success() && o.stdout.is_empty(), "{}", text(&o.stderr));
+    let table = std::fs::read_to_string(&t0).unwrap();
+    assert!(table.lines().count() > 1000 && table.lines().all(|l| l.split('\t').count() == 3));
+    let sha8 = core::eval::sha256_hex(table.as_bytes())[..8].to_string();
+    for profile in ["chat", "formal"] {
+        let go = |rt: bool| {
+            let (d, r) = (dir.0.join(format!("{profile}-{rt}.dump")).to_string_lossy().into_owned(), dir.0.join(format!("{profile}-{rt}.r")).to_string_lossy().into_owned());
+            let mut a = args(profile, false, "eval/bench/suite-v1/typing76.txt");
+            a.extend(["--reading-decode", "--dump", &d, "--rowstats", &r]);
+            if rt {
+                a.extend(["--reading-table", &t0]);
+            }
+            let o = run(&a);
+            assert!(o.status.success(), "{}", text(&o.stderr));
+            (text(&o.stdout), std::fs::read(d).unwrap(), std::fs::read(r).unwrap())
+        };
+        let (off, on) = (go(false), go(true));
+        assert!(on.0.contains(&format!("+rd+rt:{sha8}  {{")), "{}", on.0);
+        assert_eq!(on.0.replace(&format!("+rt:{sha8}"), ""), off.0, "{profile}: summary");
+        assert!(on.1 == off.1 && on.2 == off.2, "{profile}: dump / rowstats");
+    }
+    let src = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+    let rows = dir.0.join("rows.txt");
+    std::fs::write(&rows, format!("{}\n", src.lines().nth(9).unwrap())).unwrap();
+    let rows = rows.to_string_lossy().into_owned();
+    let zero = dir.0.join("zero.tsv");
+    std::fs::write(&zero, table.lines().map(|l| format!("{}\t0.0\n", l.rsplit_once('\t').unwrap().0)).collect::<String>()).unwrap();
+    let first = |extra: &[&str]| {
+        let d = dir.0.join("one.dump").to_string_lossy().into_owned();
+        let mut a = args("chat", false, &rows);
+        a.extend(["--reading-decode", "--dump", &d]);
+        a.extend(extra);
+        let o = run(&a);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        std::fs::read_to_string(d).unwrap().lines().find(|l| l.split('\t').nth(1) == Some("1")).unwrap().split('\t').nth(2).unwrap().to_string()
+    };
+    let zero = zero.to_string_lossy().into_owned();
+    assert_eq!(first(&[]), "你有東西要先進版控嗎");
+    assert_eq!(first(&["--reading-table", &zero]), "你有東西要先進版空嗎");
+    for opt in ["--reading-table", "--dump-reading-table"] {
+        let o = run(&["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--rows", &rows, opt, &t0]);
+        assert!(!o.status.success() && text(&o.stderr).contains("need --reading-decode"), "{opt}: {}", text(&o.stderr));
+    }
+}

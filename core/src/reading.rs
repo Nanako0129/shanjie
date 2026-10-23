@@ -93,17 +93,77 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
 /// `mcbpmf-data.txt`, read-only afterwards.
 pub struct ReadingDecode {
     floor_mc: HashMap<(u32, char), f64>,
+    /// Evaluation only (`with_table`, the CLI's `--reading-table`): replaces the whole of `logp` for a single-character pair of the lexicon;
+    /// a pair the table lacks is 0. Keyed by (syllable id, character).
+    table: Option<HashMap<(u32, char), f64>>,
 }
 
 impl ReadingDecode {
     pub fn new(lex: &Lexicon, base_text: &str) -> ReadingDecode {
-        ReadingDecode { floor_mc: build_floor_mc(lex, base_text) }
+        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), table: None }
+    }
+
+    /// Replaces the built-in table by `text`: one `char TAB reading TAB t` row per line (the format of `dump_table`), t being the value before
+    /// the `LAMBDA * max(t, -CAP)` step. A row with a pair the lexicon lacks is ignored (its term would be 0 anyway); the count is returned. A
+    /// malformed row, or a pair twice, is an error (the message carries the line number only).
+    pub fn with_table(mut self, lex: &Lexicon, text: &str) -> Result<(ReadingDecode, usize), String> {
+        let (mut table, mut ignored) = (HashMap::new(), 0);
+        for (n, l) in text.lines().enumerate() {
+            let bad = || format!("line {}: not `character TAB reading TAB value`", n + 1);
+            let mut f = l.split('\t');
+            let (Some(w), Some(syl), Some(t), None) = (f.next(), f.next(), f.next(), f.next()) else { return Err(bad()) };
+            let (mut cs, t) = (w.chars(), t.parse::<f64>().map_err(|_| bad())?);
+            let (Some(c), None) = (cs.next(), cs.next()) else { return Err(bad()) };
+            if !t.is_finite() {
+                return Err(bad());
+            }
+            match (lex.syl_ids.get(syl), lex.syllable_score(syl, w)) {
+                (Some(&id), Some(_)) => {
+                    if table.insert((id, c), t).is_some() {
+                        return Err(format!("line {}: the pair is twice in the table", n + 1));
+                    }
+                }
+                _ => ignored += 1,
+            }
+        }
+        self.table = Some(table);
+        Ok((self, ignored))
+    }
+
+    /// The built-in table in the format `with_table` reads: every single-character pair of the lexicon, sorted by character then reading, with
+    /// the t `logp` gives it (Rust's shortest round-trip float text, so reading it back changes nothing).
+    pub fn dump_table(&self, lex: &Lexicon) -> String {
+        let mut pairs: Vec<(char, String)> = Vec::new();
+        for (r, rd) in lex.readings.iter().enumerate() {
+            if rd.key_len != 1 {
+                continue;
+            }
+            let syl = &lex.syl_names[lex.key_pool[rd.key_off as usize] as usize];
+            for p in lex.range(r) {
+                let mut cs = lex.word(p).chars();
+                if let (Some(c), None) = (cs.next(), cs.next()) {
+                    pairs.push((c, syl.clone()));
+                }
+            }
+        }
+        pairs.sort();
+        pairs.dedup();
+        let builtin = ReadingDecode { floor_mc: self.floor_mc.clone(), table: None };
+        pairs.iter().map(|(c, syl)| format!("{c}\t{syl}\t{:?}\n", builtin.logp(lex, syl, &c.to_string()).unwrap_or(0.0))).collect()
     }
 
     /// log10 P(reading | word) of the single-character word `word` read `syl`, relative to the word's best reading (<= 0): the lexicon's score
     /// minus the word's best score (p5.py `lex_logp`), 0 for a `SANDHI` reading, the mc value for a pair at `LEX_FLOOR`. `None` when the
     /// lexicon has no such pair. The scores are the raw lexicon's (largest over duplicate rows), before capping, demotion and learning.
     pub fn logp(&self, lex: &Lexicon, syl: &str, word: &str) -> Option<f64> {
+        if let Some(tb) = &self.table {
+            lex.syllable_score(syl, word)?;
+            let mut cs = word.chars();
+            return Some(match (cs.next(), cs.next(), lex.syl_ids.get(syl)) {
+                (Some(c), None, Some(&id)) => tb.get(&(id, c)).copied().unwrap_or(0.0),
+                _ => 0.0,
+            });
+        }
         let (s, best) = (lex.syllable_score(syl, word)?, lex.best_word_score(word)?);
         let mut t = s - best;
         if SANDHI.contains(&(syl, word)) {
@@ -157,6 +217,32 @@ mod tests {
         close(rd.term(&lex, "b", "甲"), LAMBDA * -2.0);
         close(rd.term(&lex, "z", "甲"), 0.0);
         close(rd.term(&lex, "a", "甲"), 0.0);
+    }
+
+    /// A table file replaces the built-in values: the dump of the built-in table read back gives the same `logp` for every pair, a changed row
+    /// changes that pair only, a pair the table lacks is 0, an unknown pair is ignored and counted, a bad or repeated row is an error.
+    #[test]
+    fn a_table_replaces_the_built_in_values() {
+        let base = "a 長 -1.0\nb 長 -6.8\nb-a 長長 -2.0\na 甲 -1.0\nb 甲 -3.0\nc 甲 -9.0\nㄧˊ 一 -5.0\nㄧ 一 -1.0\n";
+        let (lex, rd) = mk(base);
+        let dump = rd.dump_table(&lex);
+        assert_eq!(dump.lines().count(), 7);
+        let (rd2, ignored) = ReadingDecode::new(&lex, base).with_table(&lex, &dump).unwrap();
+        assert_eq!(ignored, 0);
+        for l in dump.lines() {
+            let f: Vec<&str> = l.split('\t').collect();
+            assert_eq!(rd.logp(&lex, f[1], f[0]).map(f64::to_bits), rd2.logp(&lex, f[1], f[0]).map(f64::to_bits), "{l}");
+            assert_eq!(rd.term(&lex, f[1], f[0]).to_bits(), rd2.term(&lex, f[1], f[0]).to_bits(), "{l}");
+        }
+        let (rd3, ignored) = ReadingDecode::new(&lex, base).with_table(&lex, "甲\tb\t-0.5\n甲\tz\t-1\n").unwrap();
+        assert_eq!(ignored, 1);
+        close(rd3.logp(&lex, "b", "甲").unwrap(), -0.5);
+        close(rd3.logp(&lex, "c", "甲").unwrap(), 0.0);
+        close(rd3.logp(&lex, "ㄧˊ", "一").unwrap(), 0.0);
+        assert!(rd3.logp(&lex, "z", "甲").is_none());
+        for bad in ["甲\tb\n", "甲\tb\tx\n", "甲甲\tb\t0\n", "甲\tb\t0\textra\n", "甲\tb\tNaN\n", "甲\tb\t0\n甲\tb\t1\n"] {
+            assert!(ReadingDecode::new(&lex, base).with_table(&lex, bad).is_err(), "{bad:?}");
+        }
     }
 
     /// A one-syllable entry whose word has two characters is not a character's reading: the term is 0 whatever the lexicon scores it.

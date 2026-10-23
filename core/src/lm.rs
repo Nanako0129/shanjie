@@ -784,6 +784,20 @@ impl CappedLexicon {
         self
     }
 
+    /// Evaluation only, after `with_reading_decode` (the CLI's `--reading-table`): the reading term takes its t from `text` instead of the
+    /// built-in table (`reading::ReadingDecode::with_table`); returns the number of rows naming a pair the lexicon lacks.
+    pub fn with_reading_table(mut self, text: &str) -> Result<(CappedLexicon, usize), String> {
+        let rd = self.reading.take().ok_or("--reading-table needs --reading-decode")?;
+        let (rd, ignored) = rd.with_table(&self.base, text)?;
+        self.reading = Some(rd);
+        Ok((self, ignored))
+    }
+
+    /// Evaluation only (the CLI's `--dump-reading-table`): the built-in reading table of this lexicon in the `--reading-table` format.
+    pub fn reading_table_text(&self) -> Option<String> {
+        self.reading.as_ref().map(|rd| rd.dump_table(&self.base))
+    }
+
     /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB). Later
     /// calls must pass the same model (checked in debug builds by `Lm::identity`); the index holds its word ids.
     pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {

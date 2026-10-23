@@ -224,6 +224,11 @@ struct RowOut {
 /// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
 /// changes nothing.
 ///
+/// `--reading-table FILE` (evaluation only; experiments/reading-counts-b; needs `--reading-decode`): the reading term's t comes from the file's
+/// `character TAB reading TAB t` rows (t before the `lambda * max(t, -c)` step; a pair of the lexicon the file lacks is 0) instead of the built-in
+/// table; the tag gains `+rt:<sha8 of the file>` after `+rd`. `--dump-reading-table FILE` writes the built-in table of the loaded lexicon in
+/// that format and stops; a run with that file gives the outputs of a run without `--reading-table`, except the tag.
+///
 /// `--reading-decode` (evaluation only; experiments/r1-reading-decode, section R1d; not in the engine or the C ABI): the n-gram decoder adds
 /// `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the
 /// multi-character words: arm B-f) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
@@ -248,6 +253,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut colloquial_core = None::<String>;
     let mut reading_channel = true;
     let mut reading_decode = false;
+    let (mut reading_table, mut dump_reading_table) = (None::<String>, None::<String>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -296,6 +302,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--colloquial-core" => colloquial_core = Some(val()?),
             "--no-reading-channel" => reading_channel = false,
             "--reading-decode" => reading_decode = true,
+            "--reading-table" => reading_table = Some(val()?),
+            "--dump-reading-table" => dump_reading_table = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
@@ -313,6 +321,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
+    }
+    if (reading_table.is_some() || dump_reading_table.is_some()) && !reading_decode {
+        return Err("--reading-table and --dump-reading-table need --reading-decode".into());
+    }
+    if reading_table.is_some() && dump_reading_table.is_some() {
+        return Err("--reading-table and --dump-reading-table cannot be combined".into());
     }
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let extra_overlay = extra_overlay_checked(extra_overlay)?;
@@ -365,6 +379,24 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         capped.with_reading_decode(&base)
     } else {
         capped
+    };
+    // The built-in table written out (the T0 file of experiments/reading-counts-b), then nothing else runs.
+    if let Some(f) = &dump_reading_table {
+        fs::write(f, capped.reading_table_text().unwrap_or_default()).map_err(|e| format!("cannot write the reading table ({:?})", e.kind()))?;
+        return Ok(());
+    }
+    // `--reading-table`: the file's rows are the t of the reading term; the tag gets `+rt:<sha8 of the file>`.
+    let (capped, rt_tag) = match &reading_table {
+        Some(f) => {
+            let bytes = fs::read(f).map_err(|e| format!("--reading-table: cannot read the file ({:?})", e.kind()))?;
+            let text = String::from_utf8(bytes.clone()).map_err(|_| "--reading-table: not UTF-8".to_string())?;
+            let (c, ignored) = capped.with_reading_table(&text).map_err(|e| format!("--reading-table: {e}"))?;
+            if ignored > 0 {
+                eprintln!("reading-table: {ignored} rows name a pair this lexicon lacks (ignored)");
+            }
+            (c, format!("+rt:{}", &sha256_hex(&bytes)[..8]))
+        }
+        None => (capped, String::new()),
     };
 
     // (display name, [(truth, reading)])
@@ -628,7 +660,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{}{rt_tag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rows.len());
     Ok(())
 }
 
