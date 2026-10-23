@@ -22,6 +22,11 @@ public enum Selftest {
     /// profile spells it 定元堂 without the pack, so the sentence is the pack word only if the pack loaded.
     static let packWordStandard = "2u/4m06w;6"
     static let packWord = "碇源堂"
+    /// The bundled IT+AI pack (it-pack contract 3.2): 圖像生成 `ㄊㄨˊ ㄒㄧㄤˋ ㄕㄥ ㄔㄥˊ` on the standard layout, chat profile. It is in the pack's hand-written list, and
+    /// both profiles spell it 圖象生成 without the pack and 圖像生成 with it (measured with the CLI), so the sentence is the word only if the pack loaded. The pack is on in the
+    /// engine below, as the shell ships it.
+    static let itWordStandard = "wj6vu;4g/ t/6"
+    static let itWord = "圖像生成"
 
     /// classes-v5 (2026-10-16, docs/contracts/classes-v5.md): dev302 row 27 `ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙` on the
     /// standard layout, chat profile, no left context, the bundled pack loaded: the n-gram's first is 我已經回復你的郵件了 and
@@ -66,7 +71,8 @@ public enum Selftest {
         // The pack on, as the shell ships it (default on): a missing or corrupt bundled pack must fail here,
         // and the ordinary sentence must still come out the same.
         let (packed, packCode) = CoreEngine.make(dataDir: resources.path, layout: 0,
-                                                  packsDir: resources.appendingPathComponent("packs").path)
+                                                  packsDir: resources.appendingPathComponent("packs").path,
+                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT))
         guard let withPack = packed else { return fail("selftest: shanjie_engine_new_packs failed, code", packCode) }
         let packLM = withPack.loadLM(path: lmPath)
         guard packLM == 0 else { return fail("selftest: shanjie_engine_load_lm (pack) failed, code", packLM) }
@@ -75,6 +81,9 @@ public enum Selftest {
         let (word, c) = type(packWordStandard, withPack)
         guard c == 0 else { return fail("selftest: shanjie_engine_key (pack) failed, code", c) }
         guard word == packWord else { return fail("selftest: the bundled word pack is not in effect, code", 0) }
+        let (itShown, itCode) = type(itWordStandard, withPack)
+        guard itCode == 0 else { return fail("selftest: shanjie_engine_key (it pack) failed, code", itCode) }
+        guard itShown == itWord else { return fail("selftest: the bundled IT+AI word pack is not in effect, code", 0) }
         // The small model, as the shell loads it: a bundle without it (or with one for another n-gram model) fails here, so
         // 語意校正 cannot ship silently doing nothing.
         let tiny = withPack.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)

@@ -839,9 +839,10 @@ def grade_fn(counts, n, bonus):
     return lambda w, s_len: max(s_len, math.log10(counts[w] / n) + bonus) if w in counts else s_len
 
 
-def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, grade=None, yields=frozenset()):
+def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, grade=None, yields=frozenset(), tag=TAG):
     """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
     extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。
+    tag：來源標籤（IT 詞包用 `it`，tools/build_it_pack.py）。
     shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。
     grade（契約 pack-oov）：(詞, S_len) → 分級分數；給了就用它取代 S_len，而且同讀音內依 order 走：第 i 列 = min(g(w_i), 第 i−1 列 − TIE)，所以分級只會
     把整個讀音一起抬高或壓低、不改讀音內的先後；NEW_BEHIND_SHIPPED 在這之後才扣。沒給＝原本的 S_len 減 k × TIE。
@@ -850,7 +851,7 @@ def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, g
     rows, seen = [], collections.Counter()
     extra = extra or {}
     score_of = (lambda w: grade(w, sc[len(w)])) if grade else (lambda w: sc[len(w)])
-    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, score_of(w), TAG)]
+    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, score_of(w), tag)]
     prev = {}
     ship_keys = {f[0] for w in order if w in shipped for _, _, f in gen(w)}
     for w in order:

@@ -179,7 +179,7 @@
 
 `data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3（`load_lm` 重讀 `overlay-add.tsv` 與 `demote.tsv`，建構之後它們被移走也是碼 3）。
 
-詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::with_packs`。〔2026-10-24，`pack-oov.md`〕詞包的詞**不封頂**、用詞包檔的分數，而且解碼與 `total_score` 把詞包詞當成模型不認識的詞（`CappedLexicon::model_id` 回 `None`：詞項、句尾、前一詞、段開頭、`End::Next` 都一樣；`history()` 不變）；非詞包的疊加層照舊依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`、`PACK_IT` = 4 → `packs_dir/it-add.tsv`，依這個順序；it-pack 契約 §3.1）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::with_packs`。〔2026-10-24，`pack-oov.md`〕`PACK_OOV`（現在只有動漫詞包）的詞**不封頂**、用詞包檔的分數，而且解碼與 `total_score` 把詞包詞當成模型不認識的詞（`CappedLexicon::model_id` 回 `None`：詞項、句尾、前一詞、段開頭、`End::Next` 都一樣；`history()` 不變）；其他詞包（資訊詞包）與非詞包的疊加層照舊依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg|it|acg,it [--packs-dir DIR]`（可重複；要求的詞包檔不在就中止並報路徑，摘要行多 `+acg`、`+it`）走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
@@ -217,7 +217,8 @@ int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput
 // S2c 新增（docs/PLAN.md §S2c）
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
-// acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv）；
+// acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv；
+// 值 4 = 資訊＋AI 詞包 SHANJIE_PACK_IT，檔案 packs_dir/it-add.tsv，it-pack 契約 §3.1，接在動漫詞包的列後面，兩個位元可以一起；值 2 留給台詞詞包，目前未定義）；
 // 詞包的列在建立時併入詞庫，所以開關在引擎生命期內固定，殼要換就釋放再建一個（和換排列相同）。packs 為 0 時不看 packs_dir（可為 NULL），
 // 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
 // packs 非 0 而 packs_dir 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3。詞包的詞在 load_lm 時不封頂、用詞包檔的分數，解碼時當成語言模型不認識的詞（pack-oov）。
@@ -314,7 +315,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 - **S7c-2a**：子行程測試 `child_rerank`／`rerank_codes_through_the_c_abi` 用真的詞庫與 n-gram 模型、`eval/golden/tinylm-tiny/` 的玩具模型（執行時改寫 n-gram 雜湊與 alpha／tau），涵蓋 load_tinylm 的碼 1、2、3（沒有 n-gram、不存在、壞檔、別的模型的雜湊、資料夾）、set_rerank 的碼、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、run → apply → 同一個工作再 apply 回 5、游標移動後照樣套用、Backspace 刪音節後過期回 5、apply 注入 panic 回 4 之後組字為空、load_tinylm 不改開關、引擎釋放後工作仍可 run 與 free，並檢查子行程輸出不含暫存路徑。`child_rerank_panic`／`r2_rerank_run_panic_is_silent`：第一次 run 成功之後，第二次 run 在注入點 panic（payload 含候選文字）回 4，子行程的 stdout／stderr 不含該文字（預設 hook 的正向對照看得到），之後組字不變、apply 回 5（第一次的結果也不留）。
 - **語意校正強度**（`rerank-strength.md` §2.2、§9）：子行程測試 `child_rerank_level`／`rerank_level_through_the_c_abi` 用合成的 v3 小檔（`eval/golden/tinylm-tiny/tiny-int8-v3.sjtl`，執行時改寫 n-gram 雜湊與六組 α、τ、δ：只有一個等級會改字），涵蓋 set_rerank_level 的碼 1、2（`*out` 為 NULL）、4（注入 panic：組字清空、新等級保留）；rerank_levels 的碼 1 與遮罩 0（沒有小模型、load_lm 之後）、2（v1、v2 檔）、7（v3 檔）；沒有模型時記下的等級在載入後生效；碼 2 之後先前 run 好的工作照樣套用（世代號與等級都沒變）；改等級（即使同一個值）讓 run 好的工作過期回 5；兩種 profile 下三個等級各自只用自己那一組；load_lm 之後重新載入仍保留等級；v1、v2 檔每個等級都用標準那組，並檢查子行程輸出不含暫存路徑。格式測試在 `core/tests/tinylm_tiny.rs`（`v3_*`，含魔數與版本的交叉組合）。
 
-`core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。
+`core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。資訊詞包的位元另有 `the_it_pack_has_its_own_bit_and_file`：用「圖像生成」的讀音，位元 4 清掉但檔案在、位元 4 設了但檔案不在，都和沒有詞包的視窗第一候選相同；位元 4 設了且檔案在，聊天與書面的第一候選都是它，和動漫詞包同開時碇源堂照樣是第一候選；值 2 仍是 `LoadFailed`（`an_unknown_pack_bit_is_refused`）。
 
 ### 7.4 C 標頭冒煙測試（`core/tests/c/abi_smoke.c`）
 
