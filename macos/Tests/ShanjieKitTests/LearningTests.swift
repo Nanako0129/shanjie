@@ -149,7 +149,7 @@ final class LearningTests: XCTestCase {
         let dir = TestLearning.directory()
         let dialogs = FakeDialogs()
         let c = Controller(makeShell(learning: dir, dialogs: dialogs))
-        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertEqual(c.session.menu.first { $0.title == "清除選字記憶…" }?.action, .clear)
         c.session.activate()
         try repick(c)
@@ -164,7 +164,7 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(dialogs.asked, 2)
         XCTAssertTrue(TestLearning.records(in: dir).isEmpty, "清除 did not clear")
         XCTAssertEqual(dialogs.failures, 0)
-        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(c.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
     }
 
     /// The clear window's disclosure (new-word B section 2.7): the words learned from character re-picks are named

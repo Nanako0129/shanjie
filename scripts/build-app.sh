@@ -78,7 +78,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
 # The one list of bundled models and their About-page names (docs/contracts/about-models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -217,6 +217,8 @@ cp data/lexicon/digits.tsv "$RES/"
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
+# The IT+AI pack (docs/contracts/it-pack.md section 3.2), same arrangement (build inputs it-manual.tsv, it-collisions.tsv stay out).
+cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"
 cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
@@ -256,7 +258,7 @@ cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (colloquial-term.md section 2.1); no corpus text in it.
 cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, digits.tsv, bigram.sjlm,
+overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, demote.tsv, digits.tsv, bigram.sjlm,
 classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
@@ -267,6 +269,12 @@ packs/acg-add.tsv: the optional anime and game word pack, built from Chinese Wik
   conversion groups, anime article titles, character names in those articles). The page and revision
   every word comes from are listed in packs/acg-sources.tsv.
   Attribution: Wikipedia contributors.
+packs/it-add.tsv: the optional IT and AI word pack (words and readings only, no definitions). Sources, listed per word in
+  packs/it-sources.tsv: (1) the National Academy for Educational Research (國家教育研究院) 電子計算機學術名詞 and
+  兩岸對照名詞—計算機學術名詞 (data.gov.tw datasets 15416 and 15275), released under the Open Government Data License
+  (政府資料開放授權條款, https://data.gov.tw/license ); (2) Chinese Wikipedia conversion groups Module:CGroup/IT and
+  Module:CGroup/Electronics and the titles of articles in its AI categories (Wikipedia contributors, CC BY-SA 4.0);
+  (3) a hand-written list by the project (CC0).
 names-add.tsv: common proper nouns (brands, shops, companies, schools), always
   on. Built from three sources; the source of every word is listed in
   data/lexicon/names-sources.tsv of the project repository. Attribution, one

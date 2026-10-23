@@ -109,7 +109,7 @@ final class ProfileChoiceTests: XCTestCase {
         let textEdit = Controller(shell, bundle: Self.textEdit), discord = Controller(shell, bundle: Self.discord)
         let titles = textEdit.session.menu.map(\.title)
         let at = titles.firstIndex(of: "這個 App 用聊天設定")
-        XCTAssertEqual(at.map { titles[$0 - 1] }, "動漫與遊戲詞")
+        XCTAssertEqual(at.map { titles[$0 - 1] }, "語意校正", "no pack file in this fixture, so no pack line before it")
         XCTAssertEqual(at.map { titles[$0 + 1] }, "善解設定…")
         XCTAssertEqual(item(textEdit)?.checked, false)
         XCTAssertEqual(item(textEdit)?.enabled, true)

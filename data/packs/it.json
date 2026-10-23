@@ -1,0 +1,150 @@
+{
+ "bonus": 3.0,
+ "counts_file": {
+  "candidates_sha256": "f17ba0230de7515fb37d1a6feaba3f9fa2a6d8dc71ef892951131655b47a8dc1",
+  "dump_sha256": "5db9052efe9ca97aa3da05ffe5b2f12c8ffe5e040f0a9d1ced82ec2fda5d7e2f",
+  "sha256": "49c15ae4b7aafa746eefc4b295dd99e0cf56231ba850102d4b3d5fa53d8e857a",
+  "tool_commit": "d9a2a4228e4ecf967af3c3fd2aa17992dfc312c5"
+ },
+ "dropped_unreadable": 3,
+ "files": {
+  "it-add.tsv": {
+   "bytes": 54616,
+   "lines": 1021,
+   "sha256": "8777420b2d669e40f12ab4cf3ee719c317f51a0d43bad8a0ea294e07001815e4"
+  },
+  "it-sources.tsv": {
+   "bytes": 43556,
+   "lines": 1059,
+   "sha256": "215ee493c4a1570fcf5f0942b17b1b036f8ecf7e50bd1f571e37427b8b0399e5"
+  }
+ },
+ "manual_file": {
+  "sha256": "ac8ff397eb9df1a6f4a36da084ec30f788d2edbbb47d52aa599ff971c5de2bdf",
+  "words": 151
+ },
+ "markers": {
+  "信息": 48,
+  "內存": 5,
+  "兼容": 1,
+  "數據庫": 12,
+  "文件夾": 5,
+  "服務器": 1,
+  "激活": 6,
+  "硬件": 0,
+  "算法": 26,
+  "網絡": 28,
+  "緩存": 1,
+  "視頻": 10,
+  "軟件": 0,
+  "默認": 0,
+  "鼠標": 1
+ },
+ "min_count": 50,
+ "reference_strings": 124609,
+ "rows": 1021,
+ "rules": {
+  "claims_in": {
+   "ai": 903,
+   "cgroup": 1322,
+   "manual": 151,
+   "naer16": 122716,
+   "naer75": 2065
+  },
+  "frequency": {
+   "claims_dropped": {
+    "ai": 664,
+    "naer16": 109955
+   },
+   "words_dropped": 109760
+  },
+  "mainland": {
+   "claims_dropped": {
+    "ai": 11,
+    "cgroup": 0,
+    "manual": 0,
+    "naer16": 0,
+    "naer75": 0
+   },
+   "words_dropped": 11
+  },
+  "marker": {
+   "claims_dropped": {
+    "ai": 44,
+    "naer16": 99
+   },
+   "words_dropped": 140
+  },
+  "proper_noun": {
+   "claims_dropped": {
+    "ai": 34
+   },
+   "words_dropped": 34
+  },
+  "words_in": 124609
+ },
+ "source_files": {
+  "https://data.gov.tw/api/v2/rest/dataset/15275": {
+   "fetched": "2026-10-23",
+   "sha256": "6d6cf9e22cd62295fc9f6c0ec7e410133e20d3f48d003e907bca389deffbf3c0",
+   "size": 2148
+  },
+  "https://data.gov.tw/api/v2/rest/dataset/15416": {
+   "fetched": "2026-10-23",
+   "sha256": "8a2e6311e9ad5336e3f1c8539f53d50a2c3d35eb85d1530b485bbde6c113a84a",
+   "size": 2022
+  },
+  "https://opendata.naer.edu.tw/學術名詞/國家教育研究院-兩岸對照名詞-計算機學術名詞.csv": {
+   "fetched": "2026-10-23",
+   "sha256": "d8d65ba4097d45dd1c5d6b737fc942a1bd92d74d76ce6d6fb5348001b11b75bd",
+   "size": 115146
+  },
+  "https://opendata.naer.edu.tw/學術名詞/國家教育研究院-電子計算機學術名詞.csv": {
+   "fetched": "2026-10-23",
+   "sha256": "ed9a713cdbdbd67915796125a13c49875cf225b8f88c5a38ac7d58e2ca9a8360",
+   "size": 9656026
+  },
+  "https://zh.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&maxlag=5&prop=revisions&rvprop=content&rvslots=main&titles=Module:CGroup/Electronics": {
+   "fetched": "2026-10-23",
+   "sha256": "333137b16a8f0d4c93436b7295ff683760e9dfe707cb43d9936cdbcc519e8ecf",
+   "size": 14953
+  },
+  "https://zh.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&maxlag=5&prop=revisions&rvprop=content&rvslots=main&titles=Module:CGroup/IT": {
+   "fetched": "2026-10-23",
+   "sha256": "3bb353697907f32e3264d9a7f2796627fea76f0547a3bc3f07b63fa98709df77",
+   "size": 152992
+  },
+  "query.wikidata.org (api requests)": {
+   "bytes": 8980,
+   "fetched": "2026-10-23",
+   "requests": 4,
+   "sha256_of_sorted_sha256": "b9f49d6cff8dd23b04c76537315578bd199077ddf65d574aced351ef8bfaddf9"
+  },
+  "zh.wikipedia.org (api requests)": {
+   "bytes": 307259,
+   "fetched": "2026-10-23",
+   "requests": 392,
+   "sha256_of_sorted_sha256": "2ea2e1994f0ca9cba42b242ece791392fde358ec8fa66a4a9dc88500735d6675"
+  }
+ },
+ "sources": {
+  "ai": 8,
+  "cgroup": 123,
+  "manual": 15,
+  "naer16": 655,
+  "naer75": 257
+ },
+ "stages": {
+  "after_source_rules": 14664,
+  "already_right": 5892,
+  "dedupe_acg": 50,
+  "dedupe_lexicon": 7548,
+  "dropped_by_c_rule": 133,
+  "dropped_c_displacing_acg": 3,
+  "excluded_by_it_collisions_tsv": 21,
+  "unreadable": 3
+ },
+ "unresolved_collision_readings": 0,
+ "version": "20261023-8777420b",
+ "words": 1017
+}
