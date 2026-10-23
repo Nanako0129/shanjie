@@ -31,35 +31,37 @@ def check_tags(setting, base_tag, tag, sjtl_sha8):
         stop(f"{setting}: R1e tag {tag} is not the baseline tag {base_tag} with +rd ({want})")
 
 
-def judge_one(d, setting, name, sjtl_sha8):
+def judge_one(d, setting, name, sjtl_sha8, cand="e", tag_check=None):
     """Both rowstats files must be the same rows: same count and the same gold length per row (the rows-file hashes are checked by the run
-    script, not here)."""
+    script, not here). `cand` is the candidate run's file prefix and `tag_check(setting, base_tag, cand_tag, sjtl_sha8)` its tag test (default:
+    this tool's; experiments/reading-counts-b/judge_t1.py judges another candidate against the R1e run with the same code)."""
     role = ROLES[setting][name]
-    paths = {k: os.path.join(d, f"{k}.{setting}.{name}") for k in ("base", "e")}
+    paths = {k: os.path.join(d, f"{k}.{setting}.{name}") for k in ("base", cand)}
     tags, rows = {}, {}
     for k, p in paths.items():
         tags[k], n, top1 = R.read_summary(p + ".cli.txt")
         rows[k] = evalstats.read_rowstats(p + ".r")
         if not (n == len(rows[k]) == R.ROW_COUNTS[name]) or sum(r[0] for r in rows[k]) != top1:
             stop(f"{setting} {name} {k}: {n} summary rows, {len(rows[k])} rowstats, expected {R.ROW_COUNTS[name]} (or top1 mismatch)")
-    check_tags(setting, tags["base"], tags["e"], sjtl_sha8)
-    if [r[2] for r in rows["base"]] != [r[2] for r in rows["e"]]:
+    (tag_check or check_tags)(setting, tags["base"], tags[cand], sjtl_sha8)
+    if [r[2] for r in rows["base"]] != [r[2] for r in rows[cand]]:
         stop(f"{setting} {name}: baseline and R1e rowstats differ in the gold lengths (not the same rows)")
-    base_ok, new_ok = [bool(r[0]) for r in rows["base"]], [bool(r[0]) for r in rows["e"]]
+    base_ok, new_ok = [bool(r[0]) for r in rows["base"]], [bool(r[0]) for r in rows[cand]]
     s = p4c.stats(base_ok, new_ok)
     res = {"setting": setting, "name": name, "role": role, "n": len(base_ok), **p4c.jsonable(s),
            "top1_before": sum(base_ok), "top1_after": sum(new_ok),
+           "changed": sum(a[:2] != b[:2] for a, b in zip(rows["base"], rows[cand])),
            "base_ok": "".join(str(int(o)) for o in base_ok), "cell_ok": "".join(str(int(o)) for o in new_ok)}
     if role in ("1", "2a"):
         res["verdict"] = bool(Q.verdict(role, s))
     elif role == "2b":
-        (lo, _), _ = evalstats.paired_bootstrap(rows["base"], rows["e"], level=0.90)
+        (lo, _), _ = evalstats.paired_bootstrap(rows["base"], rows[cand], level=0.90)
         res.update({"bootstrap90_lower_pp": 100 * lo / len(base_ok), "verdict": 100 * lo / len(base_ok) >= -1.0})
     return res
 
 
-def judge(d, sjtl_sha8):
-    runs = {(s, n): judge_one(d, s, n, sjtl_sha8) for s, roles in ROLES.items() for n in roles}
+def judge(d, sjtl_sha8, **kw):
+    runs = {(s, n): judge_one(d, s, n, sjtl_sha8, **kw) for s, roles in ROLES.items() for n in roles}
     out = {"clauses": {"1": {}, "2a": {}, "2b": {}, "3": {}}, "runs": {f"{s}/{n}": r for (s, n), r in runs.items()}}
     for (s, n), r in sorted(runs.items()):
         if "verdict" in r:
