@@ -8,7 +8,7 @@
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
 //! after the small model), `--colloquial FILE` loads that table instead and `--no-colloquial` leaves it out. Loaded, the models line and the
 //! summary tag name it (`colloquial.sjlm:<sha8>`, `+colloq:<sha8>`). The reading term (docs/contracts/reading-decoder.md) is in the engine's decoder
-//! and its candidate window, as in the App, and the tag ends `+rd`; `--no-reading-decode` (research only) leaves it out of both and the tag has no `+rd`.
+//! as in the App, and the tag ends `+rd`; `--no-reading-decode` (research only) leaves it out and the tag has no `+rd`.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
 use core::eval::sha256_hex;

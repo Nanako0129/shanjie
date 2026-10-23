@@ -41,10 +41,9 @@ fn digit(c: char) -> Key {
 fn with_mod(kind: KeyKind, modifiers: u32) -> Key {
     Key { kind, ch: '\0', modifiers }
 }
-/// The whole list of the one-syllable window: every candidate of the syllable, in the reading term's order
-/// (docs/contracts/reading-decoder.md; the lexicon's own order where the lexicon has no reading terms).
+/// The whole list of the one-syllable window: every candidate of the syllable, in the lexicon's order.
 fn list_of(l: &Lexicon, syl: &str) -> Vec<String> {
-    l.entries_by_reading(&[syl.to_string()]).into_iter().map(|(w, _)| w.to_string()).collect()
+    l.entries(&[syl.to_string()]).into_iter().map(|(w, _)| w.to_string()).collect()
 }
 /// (engine, the window's first output, the whole list) with `vertical` set before the window opens. `n` = 0 uses the real
 /// lexicon's ㄕˋ (more than 27 homophones); otherwise `n` homophones of ㄋㄧˇ.

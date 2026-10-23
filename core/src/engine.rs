@@ -605,8 +605,8 @@ pub struct Engine {
     /// The colloquial table and the word sets of its k term (`load_colloquial`); independent of the n-gram and the small model.
     /// Whether a job uses it is decided per job in `refresh_lm`.
     colloquial: Option<Arc<Colloquial>>,
-    /// Whether the reading term (docs/contracts/reading-decoder.md) goes into the decoder's path scores and the candidate window's order of the
-    /// one-syllable entries (default on, the App's behavior). Off only from `set_reading_decode`, an evaluation switch for
+    /// Whether the reading term (docs/contracts/reading-decoder.md) goes into the decoder's path scores
+    /// (default on, the App's behavior). Off only from `set_reading_decode`, an evaluation switch for
     /// `shanjie-replay --no-reading-decode`; not in shanjie.h.
     reading_decode: bool,
     /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
@@ -739,7 +739,7 @@ pub const NAMES_FILE: &str = "names-add.tsv";
 /// `load_lexicon`. The engine and the evaluation CLI share this.
 ///
 /// Every lexicon this module loads carries the reading term of its one-syllable entries (`Lexicon::with_reading_terms`, built from
-/// `mcbpmf-data.txt` once, here: docs/contracts/reading-decoder.md section 1), for the decoder (`CappedLexicon::new` copies it) and the candidate window.
+/// `mcbpmf-data.txt` once, here: docs/contracts/reading-decoder.md section 1), which the decoder reads (`CappedLexicon::new` copies it).
 pub fn load_lexicon_packs(data_dir: &Path, packs: Option<(&Path, u32)>) -> Result<(Arc<Lexicon>, String), EngineError> {
     load_lexicon_packs_detailed(data_dir, packs).map_err(|_| EngineError::LoadFailed)
 }
@@ -969,7 +969,7 @@ impl Engine {
         self.learn_guard = on;
     }
 
-    /// Evaluation only (`shanjie-replay --no-reading-decode`): with `false` the decoder and the candidate window leave the reading term out
+    /// Evaluation only (`shanjie-replay --no-reading-decode`): with `false` the decoder leaves the reading term out
     /// (docs/contracts/reading-decoder.md), the n-gram path of the version before it. The next decode uses it; the pending job is dropped like any
     /// decoding change.
     pub fn set_reading_decode(&mut self, on: bool) {
@@ -982,12 +982,6 @@ impl Engine {
         Scoring { rd: self.reading_decode, ..st.lm.scoring(self.profile) }
     }
 
-    /// The lexicon's entries of the one-syllable reading `key` as the candidate window lists them (docs/contracts/reading-decoder.md section 1):
-    /// ordered by raw score plus the reading term (`Lexicon::entries_by_reading`, the one ordering of the window's l = 1 segment, the English
-    /// window's Chinese item and the digit layer's second reading), or as the lexicon has them when the reading term is off.
-    fn window_entries(&self, key: &[String]) -> Vec<(&str, f64)> {
-        if self.reading_decode { self.lex.entries_by_reading(key) } else { self.lex.entries(key) }
-    }
 
     /// How many stretches the learning guard kept out of the current job: stretches that would have gone to the small model
     /// (rerank on, model loaded, demotion table on, two candidates or more). Counted by each decode; 0 after any change that
@@ -1667,7 +1661,7 @@ impl Engine {
     fn open_english(&mut self) -> Result<Output, EngineError> {
         let word: String = self.shadow.iter().collect();
         let mut list: Vec<(String, usize)> = Self::english_writings(&word).into_iter().map(|w| (w, 0)).collect();
-        if let Some((zh, _)) = self.window_entries(&[self.pending()]).first() {
+        if let Some((zh, _)) = self.lex.entries(&[self.pending()]).first() {
             list.push((zh.to_string(), 1));
         }
         let mut c = Cands::new(list, self.cand_vertical);
@@ -3191,7 +3185,7 @@ impl Engine {
                 let f = self.fixed.iter().find(|f| f.start == touching);
                 let mut list: Vec<(String, usize)> = Self::english_writings(f.map_or(word, |f| f.word.as_str())).into_iter().map(|w| (w, 1)).collect();
                 let zh = f.and_then(|f| f.zh.clone());
-                let zh = zh.and_then(|syl| self.window_entries(std::slice::from_ref(&syl)).first().map(|(w, _)| (w.to_string(), syl)));
+                let zh = zh.and_then(|syl| self.lex.entries(std::slice::from_ref(&syl)).first().map(|(w, _)| (w.to_string(), syl)));
                 let mut c = Cands::new(Vec::new(), self.cand_vertical);
                 if let Some((word, syl)) = zh {
                     list.push((word, 1));
@@ -3254,7 +3248,7 @@ impl Engine {
         for l in (1..=self.lex.max_len.max(NEWWORD_MAX).min(self.avail())).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
             // l = 1 is the segment of the syllable before the cursor: its entries go by the reading term (docs/contracts/reading-decoder.md).
-            let lexicon = if l == 1 { self.window_entries(key) } else { self.lex.entries(key) };
+            let lexicon = self.lex.entries(key);
             // New-word B §2.4: new words first among the same length, so ⌘⌫ reaches them (any weight: a record
             // under ACTIVE is still on disk); one the lexicon has is listed where the lexicon puts it.
             let new = if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) { self.learner.new_words_all(key, today) } else { Vec::new() };

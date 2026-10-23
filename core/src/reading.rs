@@ -1,9 +1,9 @@
 //! The reading term of the decoder (docs/contracts/reading-decoder.md; exploration: experiments/r1-reading-decode/README.md, R1c to R1e): the
-//! n-gram decoder adds `LAMBDA * max(t(r, w), -CAP)` to the path score of every single-character word w read r, and the candidate window orders
-//! the one-syllable entries by it. t is P5's reading term (experiments/p5-reading-channel/p5.py `lex_logp`) with the two exceptions of r1.py
+//! n-gram decoder adds `LAMBDA * max(t(r, w), -CAP)` to the path score of every single-character word w read r. t is P5's reading term
+//! (experiments/p5-reading-channel/p5.py `lex_logp`) with the two exceptions of r1.py
 //! (`SANDHI`, `LEX_FLOOR` read as mc), the registered arm B-f of section R1c. The term is a function of the lexicon alone, so it is computed once
 //! when the lexicon is loaded (`Lexicon::with_reading_terms`, called by `load_lexicon_packs`) into an array aligned with the entries of the
-//! one-syllable readings, and the decoder and the window read it from there; nothing is looked up by string while decoding.
+//! one-syllable readings, and the decoder reads it from there; nothing is looked up by string while decoding.
 use crate::Lexicon;
 use std::collections::HashMap;
 
@@ -170,22 +170,6 @@ impl Lexicon {
     pub(crate) fn reading_terms(&self) -> &[f64] {
         self.rd.as_ref().map_or(&[], |t| &t.terms)
     }
-
-    /// The candidate window's one-syllable list (docs/contracts/reading-decoder.md section 1, "Candidate window"): `entries(key)` for a key of
-    /// one syllable with the entries ordered by raw score plus the reading term, best first, a stable sort (equal keys keep the lexicon's
-    /// order). A longer key, and a lexicon without the table, give `entries(key)` unchanged. The one ordering of the window's l = 1 segment,
-    /// of the English window's Chinese item and of the digit layer's second reading.
-    pub fn entries_by_reading(&self, key: &[String]) -> Vec<(&str, f64)> {
-        let Some(r) = self.find(&self.ids(key)) else { return Vec::new() };
-        let mut list: Vec<(&str, f64)> = self.reading_entries(r).collect();
-        if let Some(s) = self.reading_term_start(r) {
-            let terms = &self.reading_terms()[s..s + list.len()];
-            let mut keyed: Vec<(&str, f64, f64)> = list.iter().zip(terms).map(|(&(w, sc), t)| (w, sc, sc + t)).collect();
-            keyed.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-            list = keyed.into_iter().map(|(w, sc, _)| (w, sc)).collect();
-        }
-        list
-    }
 }
 
 #[cfg(test)]
@@ -304,30 +288,33 @@ mod tests {
         assert_eq!(rd.term(&lex, "ㄧˊ", "一"), 0.0);
         assert!(rd.term(&lex, "b", "長") < 0.0 && rd.term(&lex, "b", "長") > -LAMBDA * CAP);
         assert_eq!(rd.term(&lex, "b", "長乙"), 0.0);
-        // a lexicon parsed bare has no table: every entry is 0 and the window order is the lexicon's
+        // a lexicon parsed bare has no table: every entry is 0
         let bare = Lexicon::parse(base).unwrap();
         assert!(bare.reading_term_start(0).is_none() && bare.reading_terms().is_empty());
     }
 
-    /// The window's order (`Lexicon::entries_by_reading`): raw score plus the term, best first, stable (equal keys keep the lexicon's order), only a
-    /// single-character entry's key moves (the multi-character overlay word keeps its raw score), the scores returned are the raw ones, and a key of
-    /// more than one syllable, an unknown reading and a lexicon without the table give `entries`.
+    /// The real lexicon's table (built at load) against the lookup by string, for every entry of every one-syllable reading, in the lexicon's
+    /// order; readings of more than one syllable have none.
     #[test]
-    fn the_window_order_is_score_plus_term_and_stable() {
-        let base = "x a -0.5\ny a -0.6\nx b -0.1\ny b -0.55\ny c -0.55\ny d -0.55\nx-y ab -1.0\n";
-        let key = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
-        let lex = Lexicon::parse_with(base, Some("y\tbc\t-0.5\tx\n")).unwrap().with_reading_terms(base);
-        fn words(v: Vec<(&str, f64)>) -> Vec<&str> {
-            v.into_iter().map(|e| e.0).collect()
+    fn the_real_lexicons_table_equals_the_lookup_by_string() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let lex = crate::engine::load_lexicon(&root.join("data/lexicon")).unwrap();
+        let base = std::fs::read_to_string(root.join("data/lexicon/mcbpmf-data.txt")).unwrap();
+        let rd = ReadingDecode::new(&lex, &base);
+        let (mut entries, mut moved) = (0, 0);
+        for (r, reading) in lex.readings.iter().enumerate() {
+            let Some(at) = lex.reading_term_start(r) else {
+                assert!(reading.key_len != 1);
+                continue;
+            };
+            let syl = &lex.syl_names[lex.key_pool[reading.key_off as usize] as usize];
+            for (k, p) in lex.range(r).enumerate() {
+                let want = rd.term(&lex, syl, lex.word(p));
+                assert_eq!(lex.reading_terms()[at + k].to_bits(), want.to_bits(), "{syl} {}", lex.word(p));
+                entries += 1;
+                moved += (want != 0.0) as usize;
+            }
         }
-        // raw: bc -0.5, then b, c, d tied at -0.55 in file order, a -0.6. Terms under y: a -0.1 * 2, b -0.45 * 2, c and d (one reading) 0.
-        assert_eq!(words(lex.entries(&key("y"))), ["bc", "b", "c", "d", "a"]);
-        assert_eq!(words(lex.entries_by_reading(&key("y"))), ["bc", "c", "d", "a", "b"]);
-        let raw: HashMap<&str, f64> = lex.entries(&key("y")).into_iter().collect();
-        assert!(lex.entries_by_reading(&key("y")).iter().all(|&(w, sc)| raw[w] == sc), "the scores are the raw ones");
-        assert_eq!(lex.entries_by_reading(&key("x-y")), lex.entries(&key("x-y")));
-        assert!(lex.entries_by_reading(&key("zz")).is_empty());
-        let bare = Lexicon::parse_with(base, Some("y\tbc\t-0.5\tx\n")).unwrap();
-        assert_eq!(bare.entries_by_reading(&key("y")), bare.entries(&key("y")));
+        assert!(entries > 20_000 && moved > 500, "{entries} entries, {moved} with a term");
     }
 }

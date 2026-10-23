@@ -47,8 +47,7 @@
  *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.
  *  - The reading term (docs/contracts/reading-decoder.md): the n-gram decoder adds 2.0 * max(t, -4) to the path score of every single-character
  *    word, t being how far its reading's lexicon score is below that character's most common reading (0 for the sandhi readings of 一 and 不), in every
- *    profile and at every rerank strength, with the small model off too; the candidate window lists the entries of a one-syllable reading in the same
- *    order (raw lexicon score plus the term, stable), also without a language model. The table is built when the lexicon is loaded (shanjie_engine_new
+ *    profile and at every rerank strength, with the small model off too (the candidate window's order is not touched). The table is built when the lexicon is loaded (shanjie_engine_new
  *    and _new_packs); there is no setting, file or call for it.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
