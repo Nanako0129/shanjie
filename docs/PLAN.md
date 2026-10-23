@@ -146,6 +146,8 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 **v0.4.0 的動漫與遊戲詞包。** 契約 `docs/contracts/acg-pack.md`（A 片：詞包與引擎；A2 片：年度動畫清單、人名抽取、選單灰字日期）。約 3 萬個作品名與角色名，獨立成選用詞包 `Resources/packs/acg-add.tsv`，選單「動漫與遊戲詞」，預設開（使用者 2026-10-09）。來源是中文維基百科的公共轉換組、作品條目的人物與標題（作品清單來自 Wikidata 的前 400 部與維基百科最近 7 年的年度動畫清單），授權 CC BY-SA 4.0，署名 Wikipedia 貢獻者（`LICENSES/data.md`）。一般評測集合（dev302、打字測驗、錯字回報）開關前後改壞 0；建置時逐一解碼詞包詞的讀音，原本第一名是詞庫裡的詞、開詞包後換成詞包詞的，丟掉詞包詞（使用者 2026-10-10 決定；只檢查單獨的讀音，句子裡的影響看一般評測集合）。〔換成 model-v5 後，使用者決定讓這類詞包名字排第一（出貨的詞包裡是 178 個）（`docs/contracts/model-v5.md` §9）；下次重建詞包前要先改這條規則，否則會把它們丟掉。〕詞包自己的評測集合在 `eval/dev/acg/`。B（CI 排程與詞包 Release）、C（使用者端獨立更新）待補。
 
+**經典台詞詞包（quote-pack）。** 契約 `docs/contracts/quote-pack.md`（READY，2026-10-22）：維護者提議的華語、港片經典台詞，預設關，設定視窗「經典台詞」開關（偏好鍵 `quotePack`），引擎加 `PACK_QUOTES`＝2（C ABI 的 `SHANJIE_PACK_QUOTES`）、CLI 加 `--packs quotes`。建置工具 `tools/build_quote_pack.py` 讀 `data/packs/quotes-manual.tsv`，核對來源空白的台詞不收，分句 2–10 字，產生 `quotes-add.tsv`。狀態（2026-10-22）：程式、建置工具與測試已實作；清單只有維護者的兩句例句，核對來源都還空白，所以 `quotes-add.tsv` 目前是空檔，開關打開也沒有效果。下一步：維護者與 Discord 補充並核對台詞，重建詞包，再跑契約 §3 開著時的評測與實機。
+
 **v0.3.0 時的規劃（保留作紀錄；排入前各自寫契約、過 plan-verifier）。**
 - **發版**：推 tag 前寫好 `docs/releases/v0.3.0.md`（中文、手寫）並合併；發版後確認 Release 說明等於這個檔、v0.3.0 標成 Latest（`docs/contracts/release-notes.md` §4 第 5 項，`release.yml` 的 publish 路徑第一次真的跑）。
 - **S2w：維基改用 MediaWiki 的台灣正體轉換**（使用者 2026-10-05 選為下一片語料）。

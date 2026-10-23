@@ -40,14 +40,19 @@ final class CoreEngine {
 
     private init(handle: OpaquePointer) { self.handle = handle }
 
+    /// The bits of the packs mask (`SHANJIE_PACK_*` in shanjie.h).
+    static let packACG = UInt32(SHANJIE_PACK_ACG)
+    static let packQuotes = UInt32(SHANJIE_PACK_QUOTES)
+
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
-    /// `packsDir` is the directory of the word pack files and turns the ACG pack on (acg-pack contract A.2); nil is
-    /// `shanjie_engine_new`, so the engine is the one the app had before the pack existed.
-    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil) -> (CoreEngine?, Int32) {
+    /// `packsDir` is the directory of the word pack files and `packs` the bit mask of the packs to turn on (acg-pack contract A.2,
+    /// quote-pack contract section 2; the default is the ACG pack alone); a nil `packsDir` is `shanjie_engine_new`, so the engine is the
+    /// one the app had before the packs existed.
+    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, packs: UInt32 = packACG) -> (CoreEngine?, Int32) {
         var out: OpaquePointer?
         let code: Int32
         if let packsDir {
-            code = shanjie_engine_new_packs(dataDir, layout, packsDir, UInt32(SHANJIE_PACK_ACG), &out)
+            code = shanjie_engine_new_packs(dataDir, layout, packsDir, packs, &out)
         } else {
             code = shanjie_engine_new(dataDir, layout, &out)
         }

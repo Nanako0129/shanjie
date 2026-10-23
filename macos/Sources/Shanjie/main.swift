@@ -101,6 +101,15 @@ final class DefaultsAcgPackStore: AcgPackStore {
     }
 }
 
+/// The "經典台詞" switch (docs/contracts/quote-pack.md section 2), key `quotePack` in the same domain; absent means **off**.
+@MainActor
+final class DefaultsQuotePackStore: QuotePackStore {
+    var quotePack: Bool? {
+        get { UserDefaults.standard.object(forKey: "quotePack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "quotePack") }
+    }
+}
+
 /// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
 @MainActor
 final class DefaultsGlassTintStore: GlassTintStore {
@@ -197,7 +206,7 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(),
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(), quotePackStore: DefaultsQuotePackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
         profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(),

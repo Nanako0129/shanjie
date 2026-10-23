@@ -329,6 +329,8 @@ struct SettingsPageForm: View {
                     if let line = model.acgDataLine {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
+                    // Next to the other word pack; off until chosen (quote-pack contract section 2).
+                    Toggle(MenuEntry.Text.quotePack, isOn: Binding(get: { model.quotePack }, set: { model.setQuotePack($0) }))
                 }
             case .appearance:
                 Section("外觀") {

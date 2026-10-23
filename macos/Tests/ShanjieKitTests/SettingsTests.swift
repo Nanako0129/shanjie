@@ -18,19 +18,19 @@ final class SettingsTests: XCTestCase {
         var model: SettingsModel
         var controller: Controller
         var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore, english: MemoryEnglishStore
-        var acg: MemoryAcgPackStore, tint: MemoryGlassTintStore
+        var acg: MemoryAcgPackStore, quote: MemoryQuotePackStore, tint: MemoryGlassTintStore
         var dialogs: FakeDialogs
     }
 
-    private func rig(secure: Bool = false, learning: URL? = nil) -> Rig {
+    private func rig(secure: Bool = false, learning: URL? = nil, savedQuote: Bool? = nil) -> Rig {
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
-        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
+        let acg = MemoryAcgPackStore(), quote = MemoryQuotePackStore(savedQuote), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
-                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          acgPackStore: acg, quotePackStore: quote, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
-                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, tint: tint, dialogs: dialogs)
+                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, quote: quote, tint: tint, dialogs: dialogs)
     }
 
     private func item(_ r: Rig, _ a: MenuEntry.Action) -> MenuEntry? { r.controller.session.menu.first { $0.action == a } }
@@ -73,7 +73,7 @@ final class SettingsTests: XCTestCase {
     func testEnglishMixingDefaultsOnAndTheNoteIsTheContractsLine() throws {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(),
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertTrue(SettingsModel(shell: shell).english, "nothing saved is on")
         XCTAssertFalse(rig().model.english, "a saved off stays off")
         XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。")
@@ -97,7 +97,7 @@ final class SettingsTests: XCTestCase {
         let english = MemoryEnglishStore(true)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         XCTAssertFalse(model.englishEnabled)
         XCTAssertTrue(model.english, "greyed, still showing the setting")
@@ -149,7 +149,7 @@ final class SettingsTests: XCTestCase {
         let english = MemoryEnglishStore(true, inline: false)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
-                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         XCTAssertFalse(model.englishInlineEnabled)
         XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
@@ -203,6 +203,53 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.shell.engine !== before, "no rebuild")
         r.controller.session.perform(.toggleAcgPack)
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
+    }
+
+    /// quote-pack section 2 and 4: an unset `quotePack` is off, so the mask handed to `shanjie_engine_new_packs` is the ACG bit alone (bit0, 1);
+    /// the toggle stores `true`, rebuilds the engine, and adds bit1 (3). The two switches are independent bits of one mask.
+    func testQuotePackIsOffUntilChosenAndTheMaskFollowsTheSwitches() {
+        let r = rig()
+        XCTAssertNil(r.quote.quotePack)
+        XCTAssertFalse(r.model.quotePack)
+        XCTAssertEqual(r.shell.packMask, 1, "an unset quotePack must leave the mask at the ACG bit alone")
+        let before = r.shell.engine
+        r.model.setQuotePack(true)
+        XCTAssertEqual(r.quote.quotePack, true)
+        XCTAssertTrue(r.model.quotePack)
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        XCTAssertEqual(r.shell.packMask, 3)
+        r.model.setAcgPack(false)
+        XCTAssertEqual(r.shell.packMask, 2, "the ACG switch must not take the quote bit with it")
+        let again = r.shell.engine
+        r.model.setQuotePack(true)
+        XCTAssertTrue(r.shell.engine === again, "the same value must not rebuild")
+        r.model.setQuotePack(false)
+        XCTAssertEqual(r.quote.quotePack, false)
+        XCTAssertEqual(r.shell.packMask, 0)
+    }
+
+    /// quote-pack section 4, through the shipping path (Shell, then `shanjie_engine_new_packs`): a clause in `packs/quotes-add.tsv` that the
+    /// n-gram spells 不要迷戀歌 without it (measured with shanjie-eval, 2026-10-22; a synthetic fixture row) is the decode only while the switch is on, and a stored `true` is read at startup.
+    func testQuotePackSwitchChangesTheTypedResult() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄅㄨˊ-ㄧㄠˋ-ㄇㄧˊ-ㄌㄧㄢˋ-ㄍㄜ\t不要迷戀哥\t-6.17843815\tquotes\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
+        let typed = { (r: Rig) -> String in
+            r.controller.session.activate()
+            r.controller.type("1j6ul4au6xu04ek ")
+            let marked = r.controller.client.marked
+            r.controller.press(Keys.esc)
+            return marked
+        }
+        let r = rig()
+        XCTAssertEqual(typed(r), "不要迷戀歌", "off: the n-gram alone")
+        r.model.setQuotePack(true)
+        XCTAssertEqual(typed(r), "不要迷戀哥", "on: the rebuilt engine got the pack")
+        r.model.setQuotePack(false)
+        XCTAssertEqual(typed(r), "不要迷戀歌", "off again")
+        let saved = rig(savedQuote: true)
+        XCTAssertTrue(saved.model.quotePack)
+        XCTAssertEqual(typed(saved), "不要迷戀哥", "a saved true is in effect at startup")
     }
 
     /// acg-pack A2.4: the window shows the same grey data-date line as the menu, from the same Shell value, also with the pack off.
@@ -332,7 +379,7 @@ final class SettingsTests: XCTestCase {
         let tint = MemoryGlassTintStore(0.4)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertEqual(shell.glassTint, 0.4)
         tint.glassTint = 0.9
         XCTAssertEqual(shell.glassTint, 0.4, "the Shell reads the store only at start and on set")
@@ -343,7 +390,7 @@ final class SettingsTests: XCTestCase {
         var secure = false
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         secure = true
         shell.changed()

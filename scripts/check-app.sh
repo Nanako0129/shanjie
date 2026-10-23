@@ -76,7 +76,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
-         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
@@ -89,19 +89,22 @@ cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Res
 # The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
 for f in Assets.car AppIcon.icns; do [ -s "$R/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
 for k in CFBundleIconName CFBundleIconFile; do [ "$(pb "$k")" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done
-# The word pack manifest (docs/contracts/acg-pack.md A.2): every file it lists is there with the SHA-256 it records,
-# and the attribution file names the pack.
-python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack files"
+# The word pack manifests (docs/contracts/acg-pack.md A.2, quote-pack.md section 2): every file one lists is there with the SHA-256 it
+# records, and the attribution file names the ACG pack. quotes-add.tsv is a file of its own (it is empty until a quote has been checked,
+# so the non-empty test above skips it) and the manifest must name it.
+[ -f "$R/packs/quotes-add.tsv" ] || fail "Resources/packs/quotes-add.tsv is missing"
+python3 - "$R/packs" <<'PY' || fail "packs/acg.json or packs/quotes.json does not match the pack files"
 import hashlib, json, os, sys
 d = sys.argv[1]
-files = json.load(open(os.path.join(d, "acg.json"), encoding="utf-8"))["files"]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-if "acg-add.tsv" not in files:
-    sys.exit("acg-add.tsv is not in the manifest")
-for name, meta in files.items():
-    data = open(os.path.join(d, name), "rb").read()
-    if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
-        sys.exit(name + " does not match the manifest")
+for manifest, pack in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv")):
+    files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
+    if pack not in files:
+        sys.exit(pack + " is not in " + manifest)
+    for name, meta in files.items():
+        data = open(os.path.join(d, name), "rb").read()
+        if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
+            sys.exit(name + " does not match " + manifest)
 PY
 grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
 # The names layer (model-v6 section 7 P3-7): the bundled file is the committed one, and the attribution file names it with its three
