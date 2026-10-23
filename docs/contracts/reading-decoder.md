@@ -126,3 +126,11 @@
   - **沒有語言模型時的解碼**（`decode_beam`）：不加讀音項，沒有量過；出貨的 App 一定載入語言模型。
   - **常談該不該移出融合**（分級原則）：R1d 量到直接移出會退步，另外處理。
   - 模糊音的 δ 與它和語意校正的關係：`fuzzy-input.md` 那一片。
+
+## 5. 實作補記（2026-10-23，只補契約沒寫的選擇，規則與數字沒動）
+
+- **表放在哪**：`Lexicon` 的 `rd` 欄位（`core/src/reading.rs` 的 `Lexicon::with_reading_terms`），由 `load_lexicon_extra_detailed`（`load_lexicon_packs` 的共用路徑）建；只含單音節讀音的詞條，和詞庫的詞條同順序。`CappedLexicon::new` 複製一份，依封頂分數重排單音節讀音時，把 (詞條, 項) 成對排，所以項跟著詞條走。`Scoring` 加 `rd` 欄位當開關（`Engine::set_reading_decode`、CLI 的 `--no-reading-decode`）；CLI 因此改呼叫 `lm::decode_from_scoring`。
+- **候選窗的函式**：`Lexicon::entries_by_reading(key)`：一個音節的 key 用「原始分數＋項」穩定排序，其他 key 與沒有表的詞庫回 `entries(key)`。引擎的 `window_entries` 在讀音項關著時回 `entries`。
+- **載入時的記憶體**：多字詞列只留「有一個位置會加到底分字的質量」的那些（求和結果相同；單音節詞條的項對探索的逐字查法位元相同）。全部留著的初版，CLI 的最大常駐記憶體比 main 多 17.5～19.6 MiB。
+- **§2.6 的工具**：`cli/examples/window_rank.rs`，指令 `cargo run --release --locked -p cli --example window_rank -- --rows 列檔 --name 集合名 --packs acg [--detail 檔]`；「漢字數不等於音節數」用句子的字元數對音節數，整列跳過；`--detail` 只寫數字（列、位置、前後名次）。
+- **golden**：`cli/tests/golden.rs` 釘的是 Python 參考實作的數字，那些跑加 `--no-reading-decode`，golden 檔不動；預設的跑和 golden 相比的差異寫在研究紀錄。

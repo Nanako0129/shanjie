@@ -1,6 +1,6 @@
 # 契約：讀音通道項進核心（reading-channel）
 
-狀態：READY（2026-10-21，plan-verifier 第二輪；第一輪的三項見修訂一 `09f70dcf`）。疊在常談（`docs/contracts/colloquial-term.md`）上面，和常談同一版出貨。〔修訂（2026-10-22）：保守、積極也生效，通道項跟著常談走、用那一檔自己的 α（係數 ν／α），見 `docs/contracts/colloquial-levels.md`；下文原本寫「標準強度」的條件以那份契約為準，這裡逐處改成三檔。〕
+狀態：**融合層的讀音通道項已由 `docs/contracts/reading-decoder.md` 取代（2026-10-23）**：讀音項進了 n-gram 解碼器，聊天、書面、三種強度、語意校正開或關都生效，融合裡沒有 ν 項（`NU`、`channel_of`、`ReadingChannel`、`RerankJob` 的 `channel_lex` 都拿掉），CLI 的 `--no-reading-channel`、`Engine::set_reading_channel` 與設定標記的 `+rc` 也拿掉（換成 `--no-reading-decode`、`Engine::set_reading_decode` 與標記的 `+rd`）。以下是 v0.5.0 出貨的設計，只留作歷史，不再照它實作。原本的狀態：READY（2026-10-21，plan-verifier 第二輪；第一輪的三項見修訂一 `09f70dcf`）。疊在常談（`docs/contracts/colloquial-term.md`）上面，和常談同一版出貨。〔修訂（2026-10-22）：保守、積極也生效，通道項跟著常談走、用那一檔自己的 α（係數 ν／α），見 `docs/contracts/colloquial-levels.md`；下文原本寫「標準強度」的條件以那份契約為準，這裡逐處改成三檔。〕
 
 ## 0. 起因、要做到什麼、怎麼看到
 

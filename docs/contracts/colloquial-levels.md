@@ -1,6 +1,6 @@
 # 契約：常談與讀音通道項在保守、積極也生效（colloquial-levels）
 
-狀態：READY（2026-10-22；plan-verifier REVISE 五項照改後，收尾審查 READY）。
+狀態：READY（2026-10-22；plan-verifier REVISE 五項照改後，收尾審查 READY）。〔修訂（2026-10-23）：融合裡的讀音通道項（`NU`、`CAP`、`channel_of`、`ReadingChannel`、設定標記的 `+rc`）已由 `docs/contracts/reading-decoder.md` 拿掉，讀音項進了 n-gram 解碼器；本片的常談、三檔的 (α, τ, δ)、口語項係數 `MU / α` 都不變。下文凡寫讀音通道項、`NU / α`、`+rc` 的地方是拿掉之前的設計，標記現在是 `+colloq:<sha8>+rd`。〕
 
 ## 0. 起因、要做到什麼、怎麼看到
 
@@ -9,7 +9,7 @@
   - 積極 (α 0.5, τ 2, δ 0.1)：四條出貨標準與順序門檻全過；對現行積極的 discordtune 108／42。
   - 保守 R2 (1.0, 2, 3.0)：四條與門檻全過；discordtune 17／4。
   - 維護者決定兩檔都「探索過了就出貨」，對這一片的例外，記在維護者的 decisions。
-- **要做到**：聊天設定、語意校正開著、載入的 `.sjtl` 就是配對的那一份（`PAIRED_TINYLM_SHA256`）、常談表已載入時，**三種強度**都加口語項與讀音通道項，各用自己的 (α, τ, δ)。逐列和探索片離線選中的格相同：
+- **要做到**：聊天設定、語意校正開著、載入的 `.sjtl` 就是配對的那一份（`PAIRED_TINYLM_SHA256`）、常談表已載入時，**三種強度**都加口語項（當時還有讀音通道項，2026-10-23 拿掉），各用自己的 (α, τ, δ)。逐列和探索片離線選中的格相同：
   - 標準：(0.5, 2, 0.25)，不變；
   - 保守：(1.0, 2, 3.0)；
   - 積極：(0.5, 2, 0.1)。
@@ -26,12 +26,12 @@
   - `STANDARD` (0.5, 2.0, 0.25)：現在的 `ALPHA`、`TAU`、`DELTA`；
   - `CONSERVATIVE` (1.0, 2.0, 3.0)；
   - `AGGRESSIVE` (0.5, 2.0, 0.1)。
-- `fuse` 與 `fused_pick` 收那一檔的 α，口語項係數是 `MU / α`，讀音項係數是 `NU / α`。
-  - 口語項與讀音項在融合分數裡的權重和 α 無關：s_i = ng_i + α·ll_i + g_i·μ·Δcol + ν·Δch。
+- `fuse` 與 `fused_pick` 收那一檔的 α，口語項係數是 `MU / α`（當時讀音項係數是 `NU / α`，隨通道項拿掉）。
+  - 口語項在融合分數裡的權重和 α 無關：s_i = ng_i + α·ll_i + g_i·μ·Δcol（當時還有 + ν·Δch，已拿掉）。
   - 每一檔的 `pick` 用那一檔的 α、τ、δ。
 - `guarded_pick` 的退路（任何一個 col 不是有限值）：用**那一檔**的 `.sjtl` 檔頭三個值做原本的 `pick`（探索片的工具也是用各檔自己的）。
 - `TinyLm::rerank_colloquial`（`core/src/tinylm.rs` 511–526）收 level：融合用那一檔的常數三個值，退路的 `plain` 改成 `self.params(Profile::Chat, level)`（現在寫死 `RerankLevel::Standard`，524 行）。`RerankJob` 記下建工作時的 level（現在只記 `params` 與 `colloquial`），`RerankJob::run` 把它傳給 `rerank_colloquial`。
-- MU、GATE_T、GAMMA_PER_MU、NU、CAP、`PAIRED_TINYLM_SHA256` 不變。**不重匯出 `.sjtl`**：換檔頭會改掉雜湊，`applies` 就會失效。
+- MU、GATE_T、GAMMA_PER_MU、`PAIRED_TINYLM_SHA256` 不變（NU、CAP 隨通道項拿掉）。**不重匯出 `.sjtl`**：換檔頭會改掉雜湊，`applies` 就會失效。
 - `engine.rs` 建工作時傳 `self.rerank_level` 進來（現在只用來判斷 `applies`）；CLI `--colloquial-core` 用同一個函式，不另寫判斷。
 
 ## 2. 驗收
@@ -47,7 +47,7 @@
    - **跑法**：用本分支的 commit、同一份模型（雜湊照 `data/*.sha256`），對六個集合各跑三次 CLI。
      - 聊天標準的出貨設定：`--profile chat --context --packs acg --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm --dump --dump-words --rowstats --tinylm-scores`。
      - 同樣的旗標加 `--rerank-level conservative`，再跑一次 `--rerank-level aggressive`；這兩次只要 `--tinylm-scores --rowstats`。
-     - 三次摘要行的設定標記都要以 `+rc` 結尾。
+     - 三次摘要行的設定標記都要以 `+rc` 結尾（當時；現在的 CLI 是 `+rd`）。
      - 集合：錯字回報是 `eval/dev/user-reported.txt` 的前 157 列（`5659f5f6…`），其他照探索片登記的列檔與雜湊。
    - **離線那一邊**：用聊天標準那一次的前 8 名，算 `sc.py` 的 `cell_pick(r, 選中格, hdr[那一檔])`。
    - **比的欄位**：每一列 `--tinylm-scores` 的 `c` 與對錯（ok）。
@@ -86,6 +86,6 @@
 - **回滾**：revert 本片的 merge commit。只撤一檔時，那一檔的常數改回「不套用」（`applies` 對那一檔回 false），不動 `.sjtl`。
 - **範圍外**：
   - 書面設定加常談；
-  - R1 讀音解碼。它的產品片會拿掉融合層的讀音通道項，並在這一片之後重跑三檔的傾印。
+  - R1 讀音解碼（已由 `reading-decoder.md` 做完：拿掉融合層的讀音通道項，讀音項進解碼器）。
   - 設定頁的文字；
   - App 計數器。
