@@ -354,6 +354,15 @@ class PackOovGrading(unittest.TestCase):
         self.assertAlmostEqual(got["新詞"], -3.0 - B.TIE - B.NEW_BEHIND_SHIPPED, places=8)    # chain first, the penalty after
         self.assertAlmostEqual(got["新乙"], -3.0 - 2 * B.TIE - B.NEW_BEHIND_SHIPPED, places=8)   # the penalty does not stack down the chain
 
+    def test_a_yield_row_is_lowered_by_new_behind_shipped_after_the_grade_like_regrade_rows(self):
+        reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"]}
+        g = B.grade_fn({"甲甲": 10 ** 6, "乙乙": 10 ** 6}, self.N, 0.0)
+        score = lambda rows: {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        base = score(B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0}, grade=g))
+        got = score(B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0}, grade=g, yields={("ㄅ ㄅ", "甲甲")}))
+        self.assertAlmostEqual(got["甲甲"], base["甲甲"] - B.NEW_BEHIND_SHIPPED, places=8)
+        self.assertAlmostEqual(got["乙乙"], base["乙乙"], places=8)    # the chain was built before the subtraction
+
     def test_no_grade_is_the_old_s_len_rows(self):
         reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"]}
         rows = B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0})
