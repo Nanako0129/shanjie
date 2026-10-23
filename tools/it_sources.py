@@ -64,7 +64,9 @@ class Fetcher:
 
     @staticmethod
     def _urlopen(url):
-        return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=300).read()
+        # Non-ASCII paths (the NAER CSV names are Chinese) must be percent-encoded on the wire; existing escapes are kept (`%` is safe).
+        wire = urllib.parse.quote(url, safe=":/?=&%#+,;@!$'()*[]~")
+        return urllib.request.urlopen(urllib.request.Request(wire, headers={"User-Agent": UA}), timeout=300).read()
 
     def get(self, url):
         key = hashlib.sha256(url.encode()).hexdigest()
