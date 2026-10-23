@@ -31,8 +31,9 @@ import it_sources as S  # noqa: E402
 
 PACKS = B.PACKS
 TAG = "it"
-MIN_COUNT = 20                      # 契約 §2「頻率門檻」：至少 20 次（19 次不收）
-SEED, CHECK_N = 20261023, 60        # 契約 §3.5：檢查集的固定種子與抽樣數
+MIN_COUNT = 50                      # 契約 §2「頻率門檻」：至少 50 次（49 次不收）
+BONUS = 3.0                         # 契約 §2「分數」：每列的 log10 分數加 3
+SEED, CHECK_N = 20261024, 60        # 契約 §3.5：檢查集的固定種子與抽樣數（20261023 那一份在探索門檻與加分時看過了）
 # 契約 §2「大陸寫法」：子字串標記（事先固定，只用在 15416 與維基 AI 標題）。比對前先遮掉台灣寫法的「演算法」。
 MARKERS = ("網絡", "信息", "算法", "軟件", "硬件", "數據庫", "默認", "視頻", "鼠標", "內存", "緩存", "服務器", "文件夾", "激活", "兼容")
 MASKED = "演算法"
@@ -383,8 +384,8 @@ def main():
     ap.add_argument("--manual", default=os.path.join(PACKS, "it-manual.tsv"))
     ap.add_argument("--collisions", default=os.path.join(PACKS, "it-collisions.tsv"))
     ap.add_argument("--acg-pack", default=ACG_PACK)
-    ap.add_argument("--min-count", type=int, default=MIN_COUNT, help="frequency floor (exploration; the registered value is MIN_COUNT)")
-    ap.add_argument("--bonus", type=float, default=0.0, help="added to every pack row's log10 score (exploration)")
+    ap.add_argument("--min-count", type=int, default=MIN_COUNT, help="frequency floor (exploration; the contract value is MIN_COUNT)")
+    ap.add_argument("--bonus", type=float, default=BONUS, help="added to every pack row's log10 score (exploration; the contract value is BONUS)")
     a = ap.parse_args()
     if a.cmd == "build" and not a.offline:
         sys.exit("build runs --offline only (contract section 2a); run `fetch` online first")

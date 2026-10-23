@@ -67,10 +67,10 @@ class SourceRules(unittest.TestCase):
         s = src(names75={"信息理論"}, cg_tw={"網絡位址": {"Module:CGroup/IT"}}, manual={"軟件工程": ("開發", None)})
         self.assertEqual(sorted(self.alive(s, {})), ["信息理論", "網絡位址", "軟件工程"])
 
-    def test_frequency_floor_is_20_and_only_for_15416_and_ai_titles(self):
-        s = src(names16={"十九次詞", "二十次詞"}, ai={"十九次標題", "二十次標題"}, names75={"零次詞"}, cg_tw={"零次組": {"m"}}, manual={"零次手寫": ("AI", None)})
-        counts = {"十九次詞": 19, "二十次詞": 20, "十九次標題": 19, "二十次標題": 20}
-        self.assertEqual(sorted(self.alive(s, counts)), ["二十次標題", "二十次詞", "零次手寫", "零次組", "零次詞"])
+    def test_frequency_floor_is_50_and_only_for_15416_and_ai_titles(self):
+        s = src(names16={"四九次詞", "五十次詞"}, ai={"四九次標題", "五十次標題"}, names75={"零次詞"}, cg_tw={"零次組": {"m"}}, manual={"零次手寫": ("AI", None)})
+        counts = {"四九次詞": 49, "五十次詞": 50, "四九次標題": 49, "五十次標題": 50}
+        self.assertEqual(sorted(self.alive(s, counts)), ["五十次標題", "五十次詞", "零次手寫", "零次組", "零次詞"])
 
     def test_a_string_missing_from_the_counts_file_stops_the_build(self):
         with self.assertRaises(SystemExit):
@@ -202,10 +202,10 @@ class Pipeline(unittest.TestCase):
 
     def test_sources_file_lists_every_kind_with_the_wiki_count(self):
         s = src(names16={"負載平衡"}, names75={"負載平衡"}, cg_tw={"負載平衡": {"Module:CGroup/IT"}}, cg_hant={"負載平衡"})
-        files, *_ = build(s, {"負載平衡": 42})
+        files, *_ = build(s, {"負載平衡": 72})
         lines = files["it-sources.tsv"].splitlines()[1:]
         self.assertEqual([l.split("\t")[1] for l in lines], ["cgroup", "naer75", "naer16"])
-        self.assertTrue(lines[0].endswith("zh-hant") and lines[2].endswith("wiki=42"))
+        self.assertTrue(lines[0].endswith("zh-hant") and lines[2].endswith("wiki=72"))
 
     def test_check_set_is_proportional_seeded_and_skips_check_readings(self):
         words = [f"{c}字詞" for c in "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉"]
