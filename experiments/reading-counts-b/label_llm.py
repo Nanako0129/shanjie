@@ -3,14 +3,14 @@
 merged lexicon's single-character readings. Standard library only (urllib; every call uses ssl_context(): the default CAs plus the file named by NODE_EXTRA_CA_CERTS or SSL_CERT_FILE); the key is read from the environment variable ANTHROPIC_API_KEY, sent
 only as the `x-api-key` header to api.anthropic.com, and never printed, logged or written.
 
-  label_llm.py requests POSITIONS.tsv --out batch.jsonl [--map SIDECAR.json] [--model claude-opus-5-5] [--no-temperature] [--chars step2-chars.txt]
+  label_llm.py requests POSITIONS.tsv --out batch.jsonl [--map SIDECAR.json] [--model claude-opus-5-5] [--chars step2-chars.txt]
   label_llm.py price batch.jsonl [--sample 200] [--seed 20261023]   POST /v1/messages/count_tokens on a fixed-seed sample, writes batch.jsonl.price.json
   label_llm.py submit batch.jsonl --max-usd X        POST /v1/messages/batches, prints the batch id; needs the price file of this very batch
   label_llm.py status BATCH_ID                       GET /v1/messages/batches/{id}, prints the status and the request counts
   label_llm.py collect BATCH_ID --map SIDECAR.json --out labels.tsv
 
 POSITIONS.tsv: `id, source, sentence, pos, char` (sample_single.py `sample` or `human`; more columns are ignored). `requests` writes one JSONL line
-per position (custom_id = the id, max_tokens 8, temperature 0 unless --no-temperature, no thinking) and the sidecar {id: {char, options: {letter:
+per position (custom_id = the id, max_tokens 1024, no temperature, adaptive thinking at low effort: Opus 5.5 cannot turn it off) and the sidecar {id: {char, options: {letter:
 reading}}} (default <out>.map.json), and prints the request count and a ROUGH input-token estimate (characters, not a tokenizer: 1.5 per non-ASCII
 character and 0.3 per ASCII one; get the exact count from the count_tokens endpoint before submitting if the budget is tight).
 The sentence is cut to at most 60 characters on each side of the target (pos stays right) and any 【 】 already in it become 「 」 before the target is marked.
@@ -64,7 +64,7 @@ def option_lines(char, readings, examples):
     return opts, "\n".join(lines)
 
 
-def build_requests(positions, readings, examples, model=MODEL, temperature=False):
+def build_requests(positions, readings, examples, model=MODEL):
     """-> ([request dict], sidecar, estimated input tokens). A position whose character is not in `readings` stops the build."""
     reqs, side, est = [], {}, 0.0
     for id_, _, sentence, pos, char, *_ in positions:
@@ -75,8 +75,6 @@ def build_requests(positions, readings, examples, model=MODEL, temperature=False
         opts, text = option_lines(char, readings, examples)
         prompt = PROMPT.format(sentence=mark(sentence, pos, char), options=text, letters="、".join(l for l, _ in opts))
         params = {"model": model, "max_tokens": MAX_TOKENS, "messages": [{"role": "user", "content": prompt}], **THINKING}
-        if temperature:
-            params["temperature"] = 0
         reqs.append({"custom_id": id_, "params": params})
         side[id_] = {"char": char, "options": dict(opts)}
         est += sum(1.5 if ord(c) > 127 else 0.3 for c in prompt)
@@ -248,7 +246,6 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     r.add_argument("--map")
     r.add_argument("--model", default=MODEL)
-    r.add_argument("--no-temperature", action="store_true")
     r.add_argument("--chars", default=S.DEFAULT_CHARS)
     pr = sub.add_parser("price")
     pr.add_argument("batch")
@@ -276,7 +273,7 @@ def main(argv=None):
             S.B1.stop("--out or the sidecar exists")
         positions = S.read_positions(a.positions)
         readings, examples = S.load_merged(S.load_chars(a.chars))
-        reqs, side, est = build_requests(positions, readings, examples, a.model, not a.no_temperature)
+        reqs, side, est = build_requests(positions, readings, examples, a.model)
         with open(a.out, "x", encoding="utf-8", newline="\n") as f:
             f.writelines(json.dumps(q, ensure_ascii=False) + "\n" for q in reqs)
         with open(side_path, "x", encoding="utf-8", newline="\n") as f:

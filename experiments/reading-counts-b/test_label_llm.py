@@ -43,7 +43,6 @@ class Requests(unittest.TestCase):
         self.assertNotIn("C. ㄉㄟˇ（", reqs[1]["params"]["messages"][0]["content"])
         self.assertEqual(side["a-2"], {"char": "得", "options": {"A": "ㄉㄜ˙", "B": "ㄉㄜˊ", "C": "ㄉㄟˇ"}})
         self.assertGreater(est, 50)
-        self.assertNotIn("temperature", L.build_requests(POS, READINGS, EXAMPLES, temperature=False)[0][0]["params"])
 
     def test_long_and_pre_marked_sentences(self):
         sentence = "甲" * 100 + "【乙】" + "丙" * 20 + "個" + "丁" * 100 + "】"
@@ -70,7 +69,7 @@ class Requests(unittest.TestCase):
                 f.writelines("\t".join(map(str, p)) + "\n" for p in POS)
             with mock.patch.object(L.S, "load_merged", return_value=(READINGS, EXAMPLES)), mock.patch.object(L.S, "load_chars", return_value=["個", "得"]), \
                     contextlib.redirect_stdout(io.StringIO()) as buf:
-                self.assertEqual(L.main(["requests", pos, "--out", out, "--no-temperature", "--model", "m-x"]), 0)
+                self.assertEqual(L.main(["requests", pos, "--out", out, "--model", "m-x"]), 0)
             self.assertRegex(buf.getvalue(), r"requests 2; ESTIMATED input tokens \d+")
             lines = [json.loads(l) for l in open(out, encoding="utf-8")]
             self.assertEqual([x["custom_id"] for x in lines], ["a-1", "a-2"])
