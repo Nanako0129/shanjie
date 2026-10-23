@@ -51,7 +51,8 @@ SHIPPING_LM = {n: open(os.path.join(ROOT, "data", n + ".sha256")).read().split()
                for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3")}
 SHIP_ARGS = []        # 出貨設定在評測 CLI 上的額外選項（見 decoder()）
 # 解碼 CLI 的執行緒數：CLI 保證任何 N 的輸出檔都和 N = 1 逐位元組相同（cli/src/main.rs `--threads`），只影響速度。
-THREADS = int(os.environ.get("SHANJIE_THREADS") or os.cpu_count() or 1)
+# Mac 上預設 1（「Mac 不跑重運算」：make test-python 在 Mac 跑），其他機器（GCP、188）預設用滿核心；SHANJIE_THREADS 可改，至少 1。
+THREADS = max(1, int(os.environ.get("SHANJIE_THREADS") or (1 if sys.platform == "darwin" else os.cpu_count() or 1)))
 ACG_PACK = os.path.join(PACKS, "acg-add.tsv")
 
 

@@ -325,6 +325,9 @@ struct SettingsPageForm: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!model.rerankLevelEnabled)
+                }
+                // it-pack contract 3.2: every pack switch lives here (the input menu only names the loaded packs); new packs join this section.
+                Section("詞包") {
                     Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                     if let line = model.acgDataLine {
                         Text(line).font(.caption).foregroundStyle(.secondary)

@@ -876,15 +876,15 @@ final class ShellTests: XCTestCase {
         let name = "2u/4m06w;6"  // ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ; the chat profile spells it 定元堂 without the pack (formal already gets it right)
         let c = Controller(make(), bundle: "com.hnc.Discord")
         c.session.activate()
-        let item = { c.session.menu.first { $0.action == .toggleAcgPack } }
-        XCTAssertEqual(item()?.title, "動漫與遊戲詞")
-        XCTAssertEqual(item()?.checked, true, "default on")
+        let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertNil(c.session.menu.first { $0.action == .toggleAcgPack }, "it-pack 3.2: no switch in the menu")
+        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "default on (the IT bit loads nothing here: no it-add.tsv in the fixture)")
         c.type(name)
         XCTAssertEqual(c.client.marked, "碇源堂")
         c.press(Keys.esc)
         c.session.perform(.toggleAcgPack)
         XCTAssertEqual(store.acgPack, false)
-        XCTAssertEqual(item()?.checked, false)
+        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞")
         c.type(name)
         XCTAssertNotEqual(c.client.marked, "碇源堂")
         c.press(Keys.esc)
@@ -914,15 +914,15 @@ final class ShellTests: XCTestCase {
         let name = "wj6vu;4g/ t/6"  // ㄊㄨˊ ㄒㄧㄤˋ ㄕㄥ ㄔㄥˊ (a space is the first tone)
         let c = Controller(make(), bundle: "com.hnc.Discord")
         c.session.activate()
-        let item = { c.session.menu.first { $0.action == .toggleItPack } }
-        XCTAssertEqual(item()?.title, "資訊與 AI 詞")
-        XCTAssertEqual(item()?.checked, true, "default on")
+        let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertNil(c.session.menu.first { $0.action == .toggleItPack }, "it-pack 3.2: no switch in the menu")
+        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "default on")
         c.type(name)
         XCTAssertEqual(c.client.marked, "圖像生成")
         c.press(Keys.esc)
         c.session.perform(.toggleItPack)
         XCTAssertEqual(store.itPack, false)
-        XCTAssertEqual(item()?.checked, false)
+        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞")
         c.type(name)
         XCTAssertNotEqual(c.client.marked, "圖像生成")
         c.press(Keys.esc)
@@ -949,17 +949,19 @@ final class ShellTests: XCTestCase {
                              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore()))
         }
         let titles = { (c: Controller) in c.session.menu.map(\.title) }
-        XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "no manifest, no line")
+        XCTAssertNil(make(MemoryAcgPackStore()).session.shell.acgDataDate, "no manifest, no line")
         try #"{"latest_source_revision": "2026-10-06T23:59:59Z", "version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
         let on = make(MemoryAcgPackStore())
         let line = "資料更新至 2026-10-06（維基百科）"
-        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", line, "資訊與 AI 詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
-        XCTAssertNil(on.session.menu.first { $0.title == line }?.action, "not clickable")
-        XCTAssertTrue(titles(make(MemoryAcgPackStore(false))).contains(line), "shown with the pack off too")
+        // it-pack 3.2: the date line moved to Settings (SettingsTests); the menu has one non-clickable pack line instead.
+        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertNil(on.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.action, "not clickable")
+        XCTAssertFalse(titles(on).contains(line), "the date is not in the menu")
+        XCTAssertEqual(on.session.shell.acgDataDate.map(MenuEntry.Text.acgDataDate), line, "the date Settings shows")
         try #"{"version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
-        XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "no field, no line")
+        XCTAssertNil(make(MemoryAcgPackStore()).session.shell.acgDataDate, "no field, no line")
         try "not json".write(to: manifest, atomically: true, encoding: .utf8)
-        XCTAssertFalse(titles(make(MemoryAcgPackStore())).contains { $0.hasPrefix("資料更新至") }, "unreadable, no line")
+        XCTAssertNil(make(MemoryAcgPackStore()).session.shell.acgDataDate, "unreadable, no line")
     }
 
     /// A pack that fails to load (default on) must not leave the user with no engine: the shell falls back to
@@ -976,8 +978,44 @@ final class ShellTests: XCTestCase {
         XCTAssertNil(store.acgPack, "the preference is left as it was")
         let c = Controller(shell)
         c.session.activate()
+        XCTAssertNil(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }, "it-pack 3.2: the fall-back engine has no pack, so the menu names none")
         XCTAssertEqual(c.type("su3cl3"), Array(repeating: true, count: 6))
         XCTAssertEqual(c.client.marked, "你好")
+    }
+
+    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore) -> Shell {
+        Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: acg, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it)
+    }
+
+    /// it-pack contract 3.2: the menu has one non-clickable line naming the packs the engine loaded, in the settings order; none loaded, no line.
+    func testPackLineNamesTheLoadedPacks() {
+        let line = { (acg: Bool, it: Bool) -> MenuEntry? in
+            let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it)))
+            return c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }
+        }
+        XCTAssertEqual(line(true, true)?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
+        XCTAssertEqual(line(true, false)?.title, "已開啟的詞包：動漫與遊戲詞")
+        XCTAssertEqual(line(false, true)?.title, "已開啟的詞包：資訊與 AI 詞")
+        XCTAssertNil(line(false, false), "no pack, no line")
+        XCTAssertNil(line(true, true)?.action, "not clickable")
+    }
+
+    /// it-pack contract 3.2: a broken it-add.tsv fails the pack build, the retry uses mask 0, so neither pack is loaded and the menu names none,
+    /// while both stored choices (what Settings shows) stay on and are not rewritten. Fails if the line reads acgPackOn / itPackOn.
+    func testBrokenItPackDropsBothPacksFromTheMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        let acg = MemoryAcgPackStore(true), it = MemoryItPackStore(true)
+        let shell = packShell(acg: acg, it: it)
+        XCTAssertNotNil(shell.engine, "the pack-less retry built an engine")
+        XCTAssertEqual(shell.loadedPackMask, 0)
+        let c = Controller(shell)
+        XCTAssertNil(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") })
+        XCTAssertTrue(shell.acgPackOn && shell.itPackOn, "Settings keeps showing the stored choices")
+        XCTAssertEqual(acg.acgPack, true)
+        XCTAssertEqual(it.itPack, true)
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {

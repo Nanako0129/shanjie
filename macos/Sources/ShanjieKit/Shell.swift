@@ -406,6 +406,13 @@ public final class Shell {
     private let itPackStore: ItPackStore
     /// The IT+AI word pack (default on, it-pack contract 3.2): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
     private(set) var itPackOn = true
+    /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, 0 after the
+    /// pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
+    private(set) var loadedPackMask: UInt32 = 0
+    /// The names of the loaded packs in the settings order, for the menu line.
+    var loadedPackTitles: [String] {
+        [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
+    }
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -843,7 +850,7 @@ public final class Shell {
         session.applyRerankJob(job, on: engine)
     }
 
-    /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
+    /// The settings switch (acg-pack contract A.2; it-pack 3.2 moved it out of the menu): the pack is part of the lexicon, so like a layout change the
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
         guard on != acgPackOn else { return }
@@ -855,7 +862,7 @@ public final class Shell {
         Log.shell.debug("word pack switched")
     }
 
-    /// The menu's choice (it-pack contract 3.2): the same as `setAcgPack` for the IT+AI pack.
+    /// The settings switch (it-pack contract 3.2): the same as `setAcgPack` for the IT+AI pack.
     func setItPack(_ on: Bool) {
         guard on != itPackOn else { return }
         commitThenRebuild {
@@ -877,14 +884,17 @@ public final class Shell {
         rerankLevels = 0
         englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
+        loadedPackMask = 0
         let packsDir = resources.appendingPathComponent("packs").path
         let mask = packMask
+        var built = mask
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
             // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
             // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
             // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
             let packCode = code
+            built = 0
             (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
             if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
         }
@@ -892,6 +902,7 @@ public final class Shell {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
+        loadedPackMask = built
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
         // s7c2b section 2.3: after load_lm (which drops a small model). Missing or failed: the n-gram alone, no rerank.

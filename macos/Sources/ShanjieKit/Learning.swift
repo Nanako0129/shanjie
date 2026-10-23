@@ -55,6 +55,7 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleEnglish
         case toggleAbbreviation
         case toggleRerank
+        // No menu item carries these since it-pack contract 3.2 (the switches are in Settings); `perform` keeps them for programmatic use.
         case toggleAcgPack
         case toggleItPack
         case toggleAppChat
@@ -90,6 +91,8 @@ public struct MenuEntry: Equatable, Sendable {
         public static let acgPack = "動漫與遊戲詞"
         public static let itPack = "資訊與 AI 詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
+        /// The menu's non-clickable pack line (it-pack contract 3.2).
+        public static func packsOn(_ names: [String]) -> String { "已開啟的詞包：" + names.joined(separator: "、") }
         /// No app name in the title (profile-choice section 2.3).
         public static let appChat = "這個 App 用聊天設定"
         public static let settings = "善解設定…"
@@ -232,9 +235,10 @@ extension Session {
         // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.
         items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
-        items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
-        if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
-        items.append(MenuEntry(title: T.itPack, action: .toggleItPack, checked: shell.itPackOn))   // it-pack contract 3.2
+        // it-pack contract 3.2: the pack switches live in Settings; the menu only names the packs the engine loaded, not clickable,
+        // and has no line when none is loaded (the ACG data date is shown under its switch in Settings).
+        let packs = shell.loadedPackTitles
+        if !packs.isEmpty { items.append(MenuEntry(title: T.packsOn(packs))) }
         // profile-choice section 2.3: absent without a bundle ID (nothing to store); greyed outside auto, checked as forced.
         if let bundle, !bundle.isEmpty {
             items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,

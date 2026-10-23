@@ -234,7 +234,7 @@ class DecodeThreads(unittest.TestCase):
                 T.decoder(os.devnull)([("詞", ["ㄘˊ"])], "chat")
         self.assertEqual(seen[0][seen[0].index("--threads") + 1], str(T.THREADS))
         if not os.environ.get("SHANJIE_THREADS"):
-            self.assertEqual(T.THREADS, os.cpu_count())
+            self.assertEqual(T.THREADS, 1 if sys.platform == "darwin" else os.cpu_count())
 
 
 class FakeWeb:
