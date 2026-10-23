@@ -224,7 +224,7 @@ jobs:
       # docs/contracts/it-pack.md section 4: the IT+AI pack builder against a fake web and fake decoders (source rules, dedupe, collisions,
       # offline determinism). No network, no evaluation CLI.
       - name: IT pack builder (Python)
-        run: python3 -W ignore -m unittest tools.test_build_it_pack
+        run: python3 -W ignore -m unittest tools.test_build_it_pack tools.test_it_sources tools.test_it_wiki_counts
 
       # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
       # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.

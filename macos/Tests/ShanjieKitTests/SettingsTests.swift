@@ -205,13 +205,18 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
     }
 
-    func testItPackSwitchFromTheWindowReachesStoreAndMenuLine() {
+    func testItPackSwitchFromTheWindowReachesStoreAndMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
         let r = rig()
         let before = r.shell.engine
+        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
         XCTAssertTrue(r.model.itPack, "default on")
+        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞")
         r.model.setItPack(false)
         XCTAssertFalse(r.model.itPack)
-        XCTAssertEqual(r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title, "已開啟的詞包：動漫與遊戲詞", "the menu line follows the switch")
+        XCTAssertNil(line(), "the menu line follows the switch")
         XCTAssertTrue(r.shell.engine !== before, "no rebuild")
         r.controller.session.perform(.toggleItPack)
         XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
@@ -248,7 +253,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)

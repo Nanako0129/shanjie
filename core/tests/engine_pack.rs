@@ -108,7 +108,7 @@ fn the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file() {
 /// it-pack contract section 3.1: the IT+AI pack is bit 2 (`PACK_IT`) and reads `it-add.tsv`, appended after the anime pack. Its own switch
 /// through the shipping constructor, alone and with the anime pack; off (the bit clear, or no file) is the engine without it.
 /// 圖像生成 is one of the hand-written words the shipping decoder does not already type right (chat and formal both spell 圖象生成; measured with the CLI)
-/// and that the pack does win back in the sentence decode, with the score build_it_pack.py gives 4-character words.
+/// and that the pack does win back in the sentence decode, at the 4-character length score before BONUS (the shipped row is 3 higher, which only widens the margin).
 const IT_PACK: &str = "ㄊㄨˊ-ㄒㄧㄤˋ-ㄕㄥ-ㄔㄥˊ\t圖像生成\t-6.60980192\tit\n";
 
 /// The first candidate of the window after typing `syls`, per profile.

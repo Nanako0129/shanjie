@@ -277,8 +277,8 @@ def build(src, counts, decode, readings=B.make_readings, have=None, acg_words=fr
     stage["excluded_by_it_collisions_tsv"] = len([w for w in words if w in excluded])
     words = [w for w in words if w not in excluded]
     rd = readings(words)
-    for w, r in read_fixed(readings_tsv).items():      # 維護者確認過的讀音：取代讀音工具的結果，也不再是 CHECK
-        if w in rd:
+    for w, r in read_fixed(readings_tsv).items():      # 維護者確認過的讀音：取代讀音工具的結果（工具讀不出來的詞也收），也不再是 CHECK
+        if w in words:
             if len(r) != len(w):
                 raise SystemExit(f"{readings_tsv}: {w} has {len(r)} syllables")
             rd[w] = (r, False)
@@ -410,7 +410,7 @@ def main():
     acg_words = read_acg_words(a.acg_pack)
     info = {}
     MIN_COUNT = a.min_count
-    sc = {k: v + a.bonus for k, v in B.scores(B.base_lexicon()).items()}
+    sc = {k: round(v + a.bonus, 8) for k, v in B.scores(B.base_lexicon()).items()}   # 8 decimals like every other overlay file
     files, manifest, col, unread, ref, ldrop = build(src, counts, decoder(a.acg_pack), acg_words=acg_words, collisions_tsv=a.collisions, sc=sc, info=info)
     manifest.update(min_count=a.min_count, bonus=a.bonus)
     meta = source_meta(f)

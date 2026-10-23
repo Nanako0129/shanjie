@@ -878,13 +878,13 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
         XCTAssertNil(c.session.menu.first { $0.action == .toggleAcgPack }, "it-pack 3.2: no switch in the menu")
-        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "default on (the IT bit loads nothing here: no it-add.tsv in the fixture)")
+        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞", "default on; the IT switch is on too but this fixture has no it-add.tsv, so it is not loaded")
         c.type(name)
         XCTAssertEqual(c.client.marked, "碇源堂")
         c.press(Keys.esc)
         c.session.perform(.toggleAcgPack)
         XCTAssertEqual(store.acgPack, false)
-        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞")
+        XCTAssertNil(line(), "no pack loaded, no line")
         c.type(name)
         XCTAssertNotEqual(c.client.marked, "碇源堂")
         c.press(Keys.esc)
@@ -916,13 +916,13 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
         XCTAssertNil(c.session.menu.first { $0.action == .toggleItPack }, "it-pack 3.2: no switch in the menu")
-        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "default on")
+        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞", "default on; this fixture has no acg-add.tsv")
         c.type(name)
         XCTAssertEqual(c.client.marked, "圖像生成")
         c.press(Keys.esc)
         c.session.perform(.toggleItPack)
         XCTAssertEqual(store.itPack, false)
-        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞")
+        XCTAssertNil(line(), "no pack loaded, no line")
         c.type(name)
         XCTAssertNotEqual(c.client.marked, "圖像生成")
         c.press(Keys.esc)
@@ -954,8 +954,8 @@ final class ShellTests: XCTestCase {
         let on = make(MemoryAcgPackStore())
         let line = "資料更新至 2026-10-06（維基百科）"
         // it-pack 3.2: the date line moved to Settings (SettingsTests); the menu has one non-clickable pack line instead.
-        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
-        XCTAssertNil(on.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.action, "not clickable")
+        // No pack file in this fixture, so no 已開啟的詞包 line either (testPackLineNamesTheLoadedPacks covers it).
+        XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertFalse(titles(on).contains(line), "the date is not in the menu")
         XCTAssertEqual(on.session.shell.acgDataDate.map(MenuEntry.Text.acgDataDate), line, "the date Settings shows")
         try #"{"version": "x"}"#.write(to: manifest, atomically: true, encoding: .utf8)
@@ -989,7 +989,11 @@ final class ShellTests: XCTestCase {
     }
 
     /// it-pack contract 3.2: the menu has one non-clickable line naming the packs the engine loaded, in the settings order; none loaded, no line.
-    func testPackLineNamesTheLoadedPacks() {
+    func testPackLineNamesTheLoadedPacks() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
         let line = { (acg: Bool, it: Bool) -> MenuEntry? in
             let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it)))
             return c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }

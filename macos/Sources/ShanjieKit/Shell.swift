@@ -406,8 +406,8 @@ public final class Shell {
     private let itPackStore: ItPackStore
     /// The IT+AI word pack (default on, it-pack contract 3.2): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
     private(set) var itPackOn = true
-    /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, 0 after the
-    /// pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
+    /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, less the bits
+    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
     /// The names of the loaded packs in the settings order, for the menu line.
     var loadedPackTitles: [String] {
@@ -887,7 +887,10 @@ public final class Shell {
         loadedPackMask = 0
         let packsDir = resources.appendingPathComponent("packs").path
         let mask = packMask
-        var built = mask
+        // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
+        let present = [(UInt32(SHANJIE_PACK_ACG), "acg-add.tsv"), (UInt32(SHANJIE_PACK_IT), "it-add.tsv")]
+            .reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.1) ? $0 | $1.0 : $0 }
+        var built = mask & present
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
             // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
