@@ -499,6 +499,41 @@ class SuiteV2(Tmp):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a colloquial version without data/colloquial.sjlm.sha256 stops
 
+    def test_a_reading_term_version_ends_every_tag_in_rd(self):
+        """A version after v0.5.0 (`"rd": True`, docs/contracts/reading-decoder.md): the chat tag has +colloq:<sha8> and no +rc, and every CLI cell ends in +rd
+        (both profiles, the anchor run, the replay-setting cell); the CLI of v0.5.0 and before, and a --no-reading-decode run, are not its shipping setting."""
+        spec = {"release": "vR", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "rd": True, "tag": "+ctx+tl:{tl8}+acg"}
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        with mock.patch.dict(bench.VERSIONS2, {"vR": spec}):
+            v = self.stage_models("vR", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+tl:7e73ef67+acg+rd")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+tl:7e73ef67+rd")      # the anchor cell
+            self.assertEqual(bench.expected_tag(v, "formal", True), "lm-formal+ctx+tl:7e73ef67+rd")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat+rd")                              # the replay-setting cell
+            self.assertEqual(bench.replay_tag(v, "formal"), "lm-formal+rd")
+            self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd")
+            for tag in ("lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc",          # v0.5.0's CLI: the reading-channel term, no reading term in the decoder
+                        "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5",              # --no-reading-decode
+                        "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc+rd"):
+                self.fake_cli(tag, [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+            self.fake_cli("lm-formal+ctx+tl:7e73ef67+acg", [True, True], ("你好", "世界"))   # formal without +rd
+            with self.assertRaises(RuntimeError):
+                bench.run_cell2(self.ctx, v, "pub", "formal", False)
+        # v0.5.0 and before are unchanged: +rc, no +rd
+        v5 = fake_ver("v0.5.0", self.td)
+        v5.co8 = "2984eeb5"
+        self.assertTrue(bench.expected_tag(v5, "chat", False).endswith("+acg+colloq:2984eeb5+rc"), bench.expected_tag(v5, "chat", False))
+        self.assertNotIn("+rd", bench.expected_tag(v5, "chat", False) + bench.replay_tag(v5, "chat"))
+
     def test_a_version_without_the_key_never_gets_the_table(self):
         """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""
         HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56

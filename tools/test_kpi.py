@@ -319,7 +319,7 @@ open(opt("--rowstats"), "w").write("".join(f"{{i}}\\t{{int(i > bad)}}\\t0\\t3\\n
 sys.stderr.write(os.environ.get("FAKE_MODELS", {models!r}) + "\\n")
 if ("--no-colloquial" in a) != (not {co8!r}):  # the replay is told to leave the table out exactly when the version does not ship it
     sys.exit(3)
-tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + "+rc" if {co8!r} else "")
+tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + (("+colloq:" + {co8!r} + ("" if {rd!r} else "+rc")) if {co8!r} else "") + ("+rd" if {rd!r} else "")
 if os.environ.get("FAKE_TAG"): tag = os.environ["FAKE_TAG"]
 print("## " + os.path.basename(opt("--rows")) + "  " + tag + "  {{'n': %d, 'top1': %d, 'final_ok': %d, 'unfixable': 0, 'autocommits': 0, 'kyss': 0.9123, 'picks_per100': 1.5, 'rewrites': 3, 'top1_sha256': 'aa'}}" % (n, n - bad, n - bad))
 """
@@ -339,7 +339,7 @@ class ReplayRun(Tmp):
             self.rows[name] = (p, bench.sha_file(p))
         self.fake = os.path.join(self.td, "fake-replay")
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models.get("colloquial.sjlm", "")[:8]
-        open(self.fake, "w").write(FAKE.format(py=sys.executable, models=kpi.models_line(self.models), lm8=lm8, tl8=tl8, co8=co8))
+        open(self.fake, "w").write(FAKE.format(py=sys.executable, models=kpi.models_line(self.models), lm8=lm8, tl8=tl8, co8=co8, rd=bool(self.SPEC.get("rd"))))
         os.chmod(self.fake, 0o755)
 
     def replay(self, **env):
@@ -393,6 +393,24 @@ class ReplayRunWithTheColloquialTable(ReplayRun):
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}")
+
+
+class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
+    """A version after v0.5.0 (`"rd": True`, docs/contracts/reading-decoder.md): the replay's tag ends in `+rd`, and the table's `+colloq:<sha8>` has no `+rc`."""
+    SPEC = dict(ReplayRunWithTheColloquialTable.SPEC, rd=True)
+
+    def test_the_tag_of_v050_is_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        for tag in (f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+rc",   # the reading-channel term, no reading term in the decoder
+                    f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}",          # neither (--no-reading-decode)
+                    f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+rc+rd"):   # the two together
+            with self.assertRaises(SystemExit):
+                self.replay(FAKE_TAG=tag)
+
+    def test_the_tag_ends_in_rd(self):
+        co8 = self.models["colloquial.sjlm"][:8]
+        r = self.replay()["replay"]["user-reported"]
+        self.assertTrue(r["off"]["tag"].endswith("+correct+colloq:" + co8 + "+rd") and r["on"]["tag"].endswith("+learn+correct+colloq:" + co8 + "+rd"), r)
 
 
 # ---------- run ----------

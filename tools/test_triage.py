@@ -122,10 +122,11 @@ class SettingTag(unittest.TestCase):
     def test_formal_with_the_table_has_tri_and_no_kn_chat_keeps_kn(self):
         """The tag the CLI prints (cli/src/main.rs): trigram.sjt3 beside the model turns KN off for formal and appends +tri: after +acg."""
         kn, tri = "+kn:cbefbced:θ1:β1", "+tri:fdd3b05d"
-        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, tri), "lm-formal+ctx+tl:abcd1234+acg+tri:fdd3b05d")
-        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn, tri), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d")
-        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn, tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
-        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, ""), "lm-formal+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, tri), "lm-formal+ctx+tl:abcd1234+acg+tri:fdd3b05d+rd")   # +rd: the reading term is in the decoder
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn, tri), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+rd")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn, tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg+rd")
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, ""), "lm-formal+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg+rd")
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, tri, rd=False), "lm-formal+ctx+tl:abcd1234+acg+tri:fdd3b05d")   # the CLI of v0.5.0 and before
 
     def test_tri_tag_is_the_sha8_of_the_file_or_empty(self):
         with tempfile.TemporaryDirectory() as td:
@@ -559,14 +560,18 @@ class Colloquial(unittest.TestCase):
         self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, []), base)   # without the table: the command of before
         self.assertEqual(T.cli_cmd("cli", "lm", "tl", "chat", "r", True, ["--rowstats", "x"], 3, "co.sjlm"),
                          base + ["--colloquial-core", "co.sjlm", "--threads", "3", "--rowstats", "x"])
-        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", ""), "lm-chat+ctx+tl:abcd1234+acg")
-        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5"), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5+rc")   # chat: the reading-channel term rides on it
-        self.assertEqual(T.expected_tag("formal", "", "abcd1234", "", "+tri:fdd3b05d", "2984eeb5"), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+colloq:2984eeb5")
+        # docs/contracts/reading-decoder.md: the reading term is in the decoder, every tag of the current CLI ends in +rd, and the table's has no +rc
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", ""), "lm-chat+ctx+tl:abcd1234+acg+rd")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5"), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5+rd")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", "", "+tri:fdd3b05d", "2984eeb5"), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+colloq:2984eeb5+rd")
+        # the CLI of v0.5.0 and before (rd False): the reading-channel term rode on the table in chat, and nothing ends in +rd
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", "", "", "2984eeb5", rd=False), "lm-chat+ctx+tl:abcd1234+acg+colloq:2984eeb5+rc")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", "", "+tri:fdd3b05d", "2984eeb5", rd=False), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d+colloq:2984eeb5")
 
     def test_run_cell_passes_the_table_and_checks_its_tag(self):
         from unittest import mock
         calls = []
-        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh+rc  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh+rd  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
 
         def fake_sh(cmd, **kw):
             calls.append(cmd)
@@ -585,16 +590,29 @@ class Colloquial(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, "setting tag"):   # the CLI printed +colloq: but the run has no table: not the shipping setting
                 T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "")
 
-    def test_a_run_without_the_reading_channel_is_not_the_shipping_setting(self):
+    def test_a_run_without_the_reading_term_in_the_decoder_is_not_the_shipping_setting(self):
         from unittest import mock
-        line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"   # no +rc
+        # --no-reading-decode (no +rd), and the CLI of v0.5.0 and before (+rc, no +rd), and both together
+        for end in ("", "+rc", "+rc+rd"):
+            line = "## r.txt  lm-chat%s+tl:hhhhhhhh+acg+colloq:hhhhhhhh" + end + "  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"
+            with tempfile.TemporaryDirectory() as td:
+                rows = os.path.join(td, "r.txt")
+                with open(rows, "w", encoding="utf-8") as f:
+                    f.write("|你|ni\n")
+                with mock.patch.object(T.bench, "sh", lambda cmd, line=line, **kw: line % ("+ctx" if "--context" in cmd else "")), \
+                        mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), self.assertRaisesRegex(RuntimeError, "setting tag"):
+                    T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "co.sjlm")
+
+    def test_a_formal_run_without_the_reading_term_is_refused_too(self):
+        from unittest import mock
+        line = "## r.txt  lm-formal%s+tl:hhhhhhhh+acg  {'n': 1, 'top1': 0, 'oracle@64': 0, 'top1_sha256': '" + "0" * 64 + "'}\n"   # no +rd
         with tempfile.TemporaryDirectory() as td:
             rows = os.path.join(td, "r.txt")
             with open(rows, "w", encoding="utf-8") as f:
                 f.write("|你|ni\n")
             with mock.patch.object(T.bench, "sh", lambda cmd, **kw: line % ("+ctx" if "--context" in cmd else "")), \
                     mock.patch.object(T.bench, "sha_file", lambda p: "h" * 64), self.assertRaisesRegex(RuntimeError, "setting tag"):
-                T.run_cell("cli", "lm", "tl", "chat", rows, None, PAR, LEN, False, td, "", "", 1, "co.sjlm")
+                T.run_cell("cli", "lm", "tl", "formal", rows, None, PAR, LEN, False, td, "", "", 1, "")
 
     def test_the_plain_pick_check_is_skipped_only_in_chat_with_the_table(self):
         # code review on the reading-channel slice: with the table the core's chat pick differs from Python's plain pick on purpose

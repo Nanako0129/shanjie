@@ -149,10 +149,12 @@ def build_replay(root):
     die("cargo reported no shanjie-replay executable")
 
 
-def replay_cell(binary, root, rows, models, learn, rowstats):
+def replay_cell(binary, root, rows, models, learn, rowstats, rd=False):
     """One shanjie-replay run (chat, --correct); checks its models line, setting tag and row count. -> the summary dict.
     The replay loads data/lm/colloquial.sjlm by default, as the App does: a version that ships the table (it is in `models`) runs as is and its tag
-    ends in +colloq:<sha8>+rc (the reading-channel term rides on the colloquial term, chat); one that does not ships no data/lm/colloquial.sjlm, and `--no-colloquial` keeps the replay from loading another."""
+    ends in +colloq:<sha8>+rc (the reading-channel term rides on the colloquial term, chat); one that does not ships no data/lm/colloquial.sjlm, and `--no-colloquial` keeps the replay from loading another.
+    `rd` (the VERSIONS2 row has `"rd": True`: a version after v0.5.0 with the reading term in the decoder, docs/contracts/reading-decoder.md): the tag is
+    `+colloq:<sha8>` without `+rc` and ends in `+rd` (with or without the table)."""
     cmd = [binary, "--rows", rows, "--profile", "chat", "--correct", "--learn", "on" if learn else "off", "--rowstats", rowstats]
     if "tinylm.sjtl" not in models:
         cmd.append("--no-tinylm")
@@ -170,7 +172,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats):
     s = {**ast.literal_eval(d), "tag": tag}
     lm8, tl8 = models["bigram.sjlm"][:8], models.get("tinylm.sjtl", "")[:8]
     want = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
-        + (f"+colloq:{models['colloquial.sjlm'][:8]}+rc" if "colloquial.sjlm" in models else "")
+        + (f"+colloq:{models['colloquial.sjlm'][:8]}" + ("" if rd else "+rc") if "colloquial.sjlm" in models else "") + ("+rd" if rd else "")
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")
     n = len(bench.truths(rows))
@@ -204,7 +206,7 @@ def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
         def cell(name, learn):
             rs = os.path.join(td, f"{name}.{'on' if learn else 'off'}.rs")
             try:
-                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs), rs
+                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs, bench.VERSIONS2[label].get("rd", False)), rs
             except RuntimeError as e:
                 die(f"{name}: {e}")
         for name in ("user-reported", "dev302"):

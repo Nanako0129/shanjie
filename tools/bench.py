@@ -712,6 +712,9 @@ PROFILES2 = ["chat", "formal"]
 # check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
 # `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
 # of the table) at the end. Formal cells and the anchor run are as without it; a version without the key is unchanged.
+# A version after v0.5.0 that ships the reading term in the decoder (docs/contracts/reading-decoder.md) has `"rd": True`: the reading-channel term is gone from
+# the fusion, so the chat tag has `+colloq:{co8}` and no `+rc`, and every CLI cell of the version (both profiles, the anchor run, the replay-setting cell)
+# ends its tag in `+rd`. A version without the key (v0.5.0 and before) is unchanged.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -796,13 +799,18 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", "")) + colloq_tag(ver, prof)
+    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", "")) + colloq_tag(ver, prof) + rd_tag(ver)
+
+
+def rd_tag(ver):
+    """`+rd`, the last part of every CLI tag of a version that ships the reading term in the decoder (`"rd": True`), else ""."""
+    return "+rd" if ver.spec.get("rd") else ""
 
 
 def colloq_tag(ver, prof):
-    """`+colloq:<sha8>+rc` for the chat cells of a version that ships the colloquial table (the reading-channel term ships with it and is on by
-    default, so the CLI's tag carries `+rc`), else ""."""
-    return f"+colloq:{ver.co8}+rc" if getattr(ver, "co8", "") and prof == "chat" else ""
+    """`+colloq:<sha8>` for the chat cells of a version that ships the colloquial table, with `+rc` after it for a version before the reading term
+    moved into the decoder (the reading-channel term rode on the table and was on by default, so the CLI's tag carried `+rc`), else ""."""
+    return f"+colloq:{ver.co8}" + ("" if ver.spec.get("rd") else "+rc") if getattr(ver, "co8", "") and prof == "chat" else ""
 
 
 def expected_tag(ver, prof, anchor):
@@ -816,7 +824,7 @@ def replay_tag(ver, prof="chat"):
     for the formal profile of a version with a table its `+tri:...` part instead (the table turns KN off)."""
     tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof)) if prof == "formal" and ver.spec.get("tri") else None
     kn = re.search(r"\+kn:[^+]*", spec_tag(ver, prof)) if ver.spec.get("kn") else None
-    return f"lm-{prof}" + (tri.group() if tri else kn.group() if kn else "")
+    return f"lm-{prof}" + (tri.group() if tri else kn.group() if kn else "") + rd_tag(ver)
 
 
 def cli_env(anchor):
