@@ -32,7 +32,8 @@ import sample_single as S  # noqa: E402
 API = "https://api.anthropic.com"
 VERSION = "2023-06-01"
 MODEL = "claude-opus-5-5"
-MAX_TOKENS = 8
+MAX_TOKENS = 1024      # Opus 5.5 cannot turn thinking off: adaptive thinking at low effort, room for the thought and the letter (2026-10-23)
+THINKING = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}}
 INVALID_STOP = 0.05
 CONTEXT = 60   # characters kept on each side of the target
 # Batch price, USD per million tokens (input, output), by model
@@ -63,7 +64,7 @@ def option_lines(char, readings, examples):
     return opts, "\n".join(lines)
 
 
-def build_requests(positions, readings, examples, model=MODEL, temperature=True):
+def build_requests(positions, readings, examples, model=MODEL, temperature=False):
     """-> ([request dict], sidecar, estimated input tokens). A position whose character is not in `readings` stops the build."""
     reqs, side, est = [], {}, 0.0
     for id_, _, sentence, pos, char, *_ in positions:
@@ -73,7 +74,7 @@ def build_requests(positions, readings, examples, model=MODEL, temperature=True)
             S.B1.stop(f"{id_}: the character is not at pos, or not in the lexicon list")
         opts, text = option_lines(char, readings, examples)
         prompt = PROMPT.format(sentence=mark(sentence, pos, char), options=text, letters="、".join(l for l, _ in opts))
-        params = {"model": model, "max_tokens": MAX_TOKENS, "messages": [{"role": "user", "content": prompt}]}
+        params = {"model": model, "max_tokens": MAX_TOKENS, "messages": [{"role": "user", "content": prompt}], **THINKING}
         if temperature:
             params["temperature"] = 0
         reqs.append({"custom_id": id_, "params": params})
@@ -115,19 +116,19 @@ def file_sha256(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def estimate(reqs, sampled_tokens, n_sampled):
+def estimate(reqs, sampled_tokens, n_sampled, output_tokens=None):
     """-> {model, requests, input_tokens, output_tokens_upper, usd}: the sample's mean input tokens times the batch size; output = max_tokens each."""
     models = {q["params"]["model"] for q in reqs}
     if len(models) != 1 or not models <= set(PRICES):
         S.B1.stop(f"models {sorted(models)}: one model with a price in PRICES is needed")
     (model,) = models
     tin = sampled_tokens / n_sampled * len(reqs)
-    tout = sum(q["params"]["max_tokens"] for q in reqs)
+    tout = sum(q["params"]["max_tokens"] for q in reqs) if output_tokens is None else output_tokens * len(reqs)
     usd = (tin * PRICES[model][0] + tout * PRICES[model][1]) / 1e6
     return {"model": model, "requests": len(reqs), "input_tokens": round(tin), "output_tokens_upper": tout, "usd": round(usd, 4)}
 
 
-def price(path, sample, seed):
+def price(path, sample, seed, output_tokens=None):
     with open(path, encoding="utf-8") as f:
         reqs = [json.loads(l) for l in f]
     if not reqs:
@@ -137,7 +138,7 @@ def price(path, sample, seed):
     for i in idx:
         p = reqs[i]["params"]
         tokens += json.loads(api("POST", API + "/v1/messages/count_tokens", {"model": p["model"], "messages": p["messages"]}))["input_tokens"]
-    est = dict(estimate(reqs, tokens, len(idx)), sampled=len(idx), sha256=file_sha256(path))
+    est = dict(estimate(reqs, tokens, len(idx), output_tokens), sampled=len(idx), sha256=file_sha256(path))
     with open(path + ".price.json", "w", encoding="utf-8") as f:
         json.dump(est, f)
     return est
@@ -183,7 +184,13 @@ def send(params, tries=6):
         time.sleep(2 ** i)
 
 
-def direct(path, out, workers, sender=send):
+def spent_usd(result, model):
+    u = (result.get("message") or {}).get("usage") or {}
+    pin, pout = PRICES[model]
+    return DIRECT_FACTOR * (u.get("input_tokens", 0) * pin + u.get("output_tokens", 0) * pout) / 1e6
+
+
+def direct(path, out, workers, sender=send, max_usd=None):
     """Every request of BATCH.jsonl through the plain Messages API, results appended to OUT as batch-style lines {custom_id, result}; ids already in
     OUT are skipped, so a stopped run resumes. -> (sent, errored)."""
     done = set()
@@ -191,14 +198,23 @@ def direct(path, out, workers, sender=send):
         done = {json.loads(l)["custom_id"] for l in open(out, encoding="utf-8") if l.strip()}
     todo = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
     todo = [q for q in todo if q["custom_id"] not in done]
-    lock, err = threading.Lock(), 0
+    lock, err, spent, sent = threading.Lock(), 0, [0.0], 0
+    def one(q):
+        if max_usd is not None and spent[0] >= max_usd:
+            return None                                  # over the running budget: not sent, not written, a later run resumes here
+        res = sender(q["params"])
+        with lock:
+            spent[0] += spent_usd(res, q["params"]["model"])
+        return res
     with open(out, "a", encoding="utf-8", newline="\n") as f, concurrent.futures.ThreadPoolExecutor(workers) as ex:
-        for q, res in zip(todo, ex.map(lambda q: sender(q["params"]), todo)):
+        for q, res in zip(todo, ex.map(one, todo)):
+            if res is None:
+                continue
+            sent += 1
             err += res["type"] != "succeeded"
-            with lock:
-                f.write(json.dumps({"custom_id": q["custom_id"], "result": res}, ensure_ascii=False) + "\n")
-                f.flush()
-    return len(todo), err
+            f.write(json.dumps({"custom_id": q["custom_id"], "result": res}, ensure_ascii=False) + "\n")
+            f.flush()
+    return sent, err, round(spent[0], 4)
 
 
 def answer_letter(result, options):
@@ -238,6 +254,7 @@ def main(argv=None):
     pr.add_argument("batch")
     pr.add_argument("--sample", type=int, default=200)
     pr.add_argument("--seed", type=int, default=S.SEED)
+    pr.add_argument("--output-tokens", type=int, help="expected output tokens per request (default: max_tokens, the upper bound)")
     sb = sub.add_parser("submit")
     sb.add_argument("batch")
     sb.add_argument("--max-usd", type=float, required=True)
@@ -266,7 +283,7 @@ def main(argv=None):
             json.dump(side, f, ensure_ascii=False)
         print(f"requests {len(reqs)}; ESTIMATED input tokens {est} (characters-based, not a tokenizer count); sidecar {side_path}")
     elif a.cmd == "price":
-        e = price(a.batch, a.sample, a.seed)
+        e = price(a.batch, a.sample, a.seed, a.output_tokens)
         print(f"requests {e['requests']}; sampled {e['sampled']}; estimated input tokens {e['input_tokens']}; output tokens (upper bound) "
               f"{e['output_tokens_upper']}; estimated US${e['usd']} at the Batch price of {e['model']}")
     elif a.cmd == "submit":
@@ -276,8 +293,8 @@ def main(argv=None):
         print("batch", j["id"], j["processing_status"], "requests", len(reqs), f"estimated US${est['usd']}")
     elif a.cmd == "direct":
         est = check_price(a.batch, a.max_usd / DIRECT_FACTOR)
-        n, err = direct(a.batch, a.out, a.workers)
-        print(f"sent {n}; errored {err}; estimated US${round(est['usd'] * DIRECT_FACTOR, 4)} at the standard price; results {a.out}")
+        n, err, usd = direct(a.batch, a.out, a.workers, max_usd=a.max_usd)
+        print(f"sent {n}; errored {err}; spent US${usd} by the responses' usage (estimate US${round(est['usd'] * DIRECT_FACTOR, 4)}); results {a.out}")
     elif a.cmd == "status":
         j = json.loads(api("GET", f"{API}/v1/messages/batches/{a.batch_id}"))
         print(j["processing_status"], json.dumps(j.get("request_counts", {}), sort_keys=True))
