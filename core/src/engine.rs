@@ -1379,7 +1379,8 @@ impl Engine {
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
+        let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, self.pack_text.as_deref().unwrap_or(""), &lm, Some(&demote))
+            .ok_or(EngineError::LoadFailed)?;
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
@@ -1933,6 +1934,8 @@ impl Engine {
         let st = self.lm.as_ref()?;
         let cfg = st.lm.scoring(self.profile);
         let mut memo = TriMemo::default();
+        // An optional-pack word is unknown to the model here as in the decoder (docs/contracts/pack-oov.md); `history()` itself is unchanged.
+        let id = |s: &str| st.capped.model_id(&st.lm, s);
         let cut = self.run_cut().filter(|_| cfg.tri);
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
         // the current sentence has a word (the history word is not one, and its own eos is not scored).
@@ -1952,14 +1955,14 @@ impl Engine {
         for PathWord { word: w, lp, is_punct, delta, syllables: n } in &self.path {
             if cut == Some(at) {
                 if open {
-                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev));
                 }
                 (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
             }
             if *is_punct {
                 at += 1;
                 if open {
-                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev));
                 }
                 (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
                 continue;
@@ -1972,14 +1975,18 @@ impl Engine {
             // A fixed word is the right neighbour that closes the stretch before it (`End::Next`), so (b') applies to its term.
             let fixed_here = self.fixed.iter().any(|f| f.start == at);
             let u = if fixed_here { close_u(before, unknown, count) } else { before };
-            total += if learned { st.lm.word_learned(cfg.lam, prev, w, *lp) } else { st.lm.word3_in(&mut memo, cfg, u, prev, w, *lp) } - delta;
+            total += if learned {
+                st.lm.word_learned_by_id(cfg.lam, id(prev), id(w), *lp)
+            } else {
+                st.lm.word3_in(&mut memo, cfg, u.and_then(id), id(prev), id(w), *lp)
+            } - delta;
             // The stretch after a fixed word starts from (unknown, that word); inside a stretch the history is the last two words.
             before = if fixed_here { None } else { Some(prev) };
             (unknown, count) = if fixed_here { (true, 0) } else { (unknown, count + 1) };
             at += n;
             (prev, any, open) = (w, true, true);
         }
-        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev) } else { total })
+        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev)) } else { total })
     }
 
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending

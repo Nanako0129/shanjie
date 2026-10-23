@@ -574,7 +574,12 @@ impl Lm {
     /// `word` for a word the learner boosted (model-v6 section 2.8 rule 1): no Kneser-Ney substitution. `Engine::total_score` uses it
     /// for the path words `decode_segment_learned` scored that way, so the total still equals the top decode score.
     pub fn word_learned(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
-        word_term(lam, self.prob_learned(self.ctx_of(self.word_id(v)), self.word_id(w), pow10(lp)), lp)
+        self.word_learned_by_id(lam, self.word_id(v), self.word_id(w), lp)
+    }
+
+    /// `word_learned` for ids the caller resolved (`CappedLexicon::model_id`: an optional-pack word is `None`).
+    pub(crate) fn word_learned_by_id(&self, lam: f64, v: Option<u32>, w: Option<u32>, lp: f64) -> f64 {
+        word_term(lam, self.prob_learned(self.ctx_of(v), w, pow10(lp)), lp)
     }
 
     /// The stored trigram context (u, v), if `cfg` scores with the table. `u` `None` is unknown (a left context supplies one word).
@@ -599,25 +604,26 @@ impl Lm {
     /// `word` under `cfg` with two history words (`u` first, `None` unknown): trimodel.py `_word`. With `cfg` from a plain lambda
     /// it is `word`.
     pub fn word3(&self, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
-        self.word3_in(&mut TriMemo::default(), cfg, u, v, w, lp)
+        let id = |s: &str| self.word_id(s);
+        self.word3_in(&mut TriMemo::default(), cfg, u.and_then(id), id(v), id(w), lp)
     }
 
     /// `eos` under `cfg` with two history words: trimodel.py `eos`.
     pub fn eos3(&self, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
-        self.eos3_in(&mut TriMemo::default(), cfg, u, v)
+        let id = |s: &str| self.word_id(s);
+        self.eos3_in(&mut TriMemo::default(), cfg, u.and_then(id), id(v))
     }
 
-    /// `word3` sharing `memo` with the other terms of one pass (`Engine::total_score`).
-    pub(crate) fn word3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
-        let (vid, wid) = (self.word_id(v), self.word_id(w));
-        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+    /// `word3` sharing `memo` with the other terms of one pass (`Engine::total_score`). The words come as ids so the caller can
+    /// pass `None` for a word the model must not know (`CappedLexicon::model_id`: an optional-pack word).
+    pub(crate) fn word3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<u32>, vid: Option<u32>, wid: Option<u32>, lp: f64) -> f64 {
+        let tri = self.tri_of(cfg, u, vid, memo);
         word_term(cfg.lam, self.prob_tri(tri, self.ctx_of(vid), wid, pow10(lp), cfg.kn), lp)
     }
 
-    /// `eos3` sharing `memo`.
-    pub(crate) fn eos3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
-        let vid = self.word_id(v);
-        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+    /// `eos3` sharing `memo`, with ids like `word3_in`.
+    pub(crate) fn eos3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<u32>, vid: Option<u32>) -> f64 {
+        let tri = self.tri_of(cfg, u, vid, memo);
         cfg.lam * self.prob_tri(tri, self.ctx_of(vid), Some(1), self.p_eos, cfg.kn).log10()
     }
 
@@ -771,9 +777,24 @@ pub struct CappedLexicon {
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
     deltas: Vec<(usize, f64)>,
+    /// The optional-pack words (docs/contracts/pack-oov.md): `(off, len)` into `base.words`, one per distinct string, sorted by the
+    /// string's bytes. Empty without a pack (the lexicon then behaves exactly as before).
+    packs: Vec<(u32, u32)>,
 }
 
 impl CappedLexicon {
+    /// Whether `word` is an optional-pack word.
+    pub fn is_pack(&self, word: &str) -> bool {
+        let at = |&(off, len): &(u32, u32)| &self.base.words[off as usize..(off + len) as usize];
+        self.packs.binary_search_by(|e| at(e).cmp(word)).is_ok()
+    }
+
+    /// The model id the decoder scores `word` with: `None` (unknown) for an optional-pack word, whose score then comes from the
+    /// pack alone; `Lm::word_id` for every other word. Every `word_id` of a lexicon word string goes through here.
+    pub fn model_id(&self, lm: &Lm, word: &str) -> Option<u32> {
+        if self.is_pack(word) { None } else { lm.word_id(word) }
+    }
+
     /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB). Later
     /// calls must pass the same model (checked in debug builds by `Lm::identity`); the index holds its word ids.
     pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {
@@ -789,16 +810,27 @@ impl CappedLexicon {
         idx
     }
 
-    /// The single constructor. `overlay` is the text of overlay-add.tsv; every word in its second
+    /// The constructor without packs (`with_packs` is the one with them). `overlay` is the text of overlay-add.tsv; every word in its second
     /// column (whether the entry came from the base or the overlay) is capped at its corpus frequency.
     pub fn new(base: Arc<Lexicon>, overlay: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
+        Self::with_packs(base, overlay, "", lm, demote)
+    }
+
+    /// `new` with the rows of the enabled optional packs (`pack_text`, the same rows `overlay` also holds, `--extra-overlay` rows
+    /// not among them): their words keep the pack's score (no cap, no unseen penalty) and score as unknown to the model
+    /// (`model_id`). An empty `pack_text` is `new`.
+    pub fn with_packs(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
+        let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
+        let mut packs: Vec<(u32, u32)> = Vec::new();
         let mut ents = base.ents.clone();
         for i in 0..base.readings.len() {
             let range = base.range(i);
             for e in &mut ents[range.clone()] {
                 let w = &base.words[e.off as usize..(e.off + e.len) as usize];
-                if words.contains(w) {
+                if pack.contains(w) {
+                    packs.push((e.off, e.len));
+                } else if words.contains(w) {
                     let c = lm.count(w);
                     e.score = if c != 0 {
                         e.score.min((c as f64 / lm.n as f64).log10())
@@ -813,7 +845,9 @@ impl CappedLexicon {
             Some(d) => d.resolve(&base, &ents)?,
             None => Vec::new(),
         };
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas })
+        packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
+        packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -985,7 +1019,7 @@ pub fn decode_segment_learned<'a>(
     let mut memo = TriMemo::default();
     let n = syls.len();
     let ids = base.ids(syls);
-    let start_id = lm.word_id(start);
+    let start_id = lex.model_id(lm, start);
     let start_prev = if start == "<s>" { start_id } else { None };
     let before_tail: String = {
         let t: Vec<char> = learn.map_or("", |l| l.before).chars().rev().take(crate::learn::MAX_CONTEXT).collect();
@@ -1068,7 +1102,7 @@ pub fn decode_segment_learned<'a>(
             // Lexicon entries (`Some(position)`), then the new words (`None`: no learned boost, no demotion).
             let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
             for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
-                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                let (wid, pb0) = (lex.model_id(lm, word), pow10(lp0));
                 let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1);
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
@@ -1131,7 +1165,7 @@ pub fn decode_segment_learned<'a>(
     let last = std::mem::take(&mut hyps[n]);
     let closing = match end {
         End::Eos => None,
-        End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
+        End::Next { word, lp, delta } => Some((lex.model_id(lm, word), pow10(lp), lp, delta)),
     };
     let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize)>, String)> = last
         .into_iter()

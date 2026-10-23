@@ -332,7 +332,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    // The packs' own rows (not `--extra-overlay`): their words are unknown to the model and keep the pack's score (pack-oov contract).
+    let pack_rows = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
@@ -642,7 +644,8 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
+    let pack_rows = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
     let (rss0, t_idx) = (rss_kb(), Instant::now());
     let idx = Index::new(&capped, &lm);

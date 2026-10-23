@@ -182,15 +182,18 @@ def unigram_back(lm, w, lp):
 DEMOTE_TSV = os.path.join(ime._LEXDIR, "demote.tsv")
 
 
-def cap_overlay(lex, overlay_words, lm, demote_path=DEMOTE_TSV):
+def cap_overlay(lex, overlay_words, lm, demote_path=DEMOTE_TSV, pack_words=frozenset()):
     """疊加層詞的分數取 min(lp, log10(c/N))；語料沒見過的扣 UNSEEN_OVERLAY_PENALTY。回傳新的 Lexicon。
     回傳的詞庫帶著降權表 `demote`（預設從 data/lexicon/demote.tsv 載入並對照詞庫，decode 預設套用；
-    demote_path=None 是沒有表，只給用自訂小詞庫的測試）。"""
+    demote_path=None 是沒有表，只給用自訂小詞庫的測試）。
+    pack_words：選用詞包的詞（docs/contracts/pack-oov.md）：不封頂、不扣罰分，分數就是詞包給的；decode 把它們當模型不認識的詞。
+    集合只給 decode 查（`out.pack`），這裡不載入詞包檔。"""
     out = ime.Lexicon.__new__(ime.Lexicon)
     out.by_reading, out.by_word, out.max_len = collections.defaultdict(list), {}, lex.max_len
+    out.pack = frozenset(pack_words)
     for key, entries in lex.by_reading.items():
         for w, lp in entries:
-            if w in overlay_words:
+            if w in overlay_words and w not in out.pack:
                 c = lm.count(w)
                 lp = min(lp, math.log10(c / lm.N)) if c else lp - UNSEEN_OVERLAY_PENALTY
             out.by_reading[key].append((w, lp))
@@ -280,11 +283,18 @@ def demote_delta(demote, reading, word):
     return d if d is not None else demote.get(("*", word), 0.0)
 
 
+_NO_ID = "\x00"  # in no vocabulary: `Lm.prob` and `unigram_back` see id -1
+
+
 def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=True):
     """demote：是否套用 lex.demote（cap_overlay 從 data/lexicon/demote.tsv 載入，預設開，和核心的 decode 一樣）；
     False 就逐位元等於沒有這張表。詞項分數 = lm.word(...) − δ；要試哪些詞條仍依原本的分數。"""
     table = getattr(lex, "demote", None) if demote else None
     lam = PROFILES[profile]
+    # pack-oov: an optional-pack word is unknown to the model (the Rust CappedLexicon::model_id); a string no vocabulary holds is unknown.
+    pack = getattr(lex, "pack", ())
+    m = lambda w: _NO_ID if w in pack else w
+    start = m(start)
     syls = tuple(syls); n = len(syls)
     hyps = [[] for _ in range(n + 1)]; hyps[0] = [(0.0, ())]
     for i in range(1, n + 1):
@@ -298,12 +308,12 @@ def decode(lex, syls, lm, profile, beam=64, start="<s>", demote=True):
             for word, lp in entries[:ime.PER_KEY]:
                 d = demote_delta(table, reading, word)
                 for s, ws in hyps[i - L]:
-                    sc = s + (lm.word(lam, ws[-1] if ws else start, word, lp) - d)
+                    sc = s + (lm.word(lam, m(ws[-1]) if ws else start, m(word), lp) - d)
                     ck = ("".join(ws) + word, word)  # one path per (surface, last word): the next score depends on the last word
                     if ck not in cand or sc > cand[ck][0]:
                         cand[ck] = (sc, ws + (word,))
         hyps[i] = sorted(cand.values(), key=lambda x: -x[0])[:beam]
-    out = [(s + lm.eos(lam, ws[-1] if ws else start), ws) for s, ws in hyps[n]]
+    out = [(s + lm.eos(lam, m(ws[-1]) if ws else start), ws) for s, ws in hyps[n]]
     best, seen = [], set()  # the n-best the callers get has distinct surfaces: keep each surface's best path
     for x in sorted(out, key=lambda x: -x[0]):
         surface = "".join(x[1])
