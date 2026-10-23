@@ -13,7 +13,7 @@
  *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
- * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range), 3 data load failed
+ * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range, fuzzy flags with an undefined bit), 3 data load failed
  * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
  * it), 4 internal error (caught panic or decode/encode
  * error; the engine has already been reset in discard mode; exception: shanjie_rerank_run has no engine and
@@ -205,6 +205,17 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
 //   after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// fuzzy input (docs/contracts/fuzzy-input.md): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
+//   and bit 4 the adjacent-key slips; any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
+//   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
+//   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score); the
+//   rerank never chooses such a word: a stretch whose n-gram first has one is not reranked, the others offer the model only paths without one.
+//   Bit 4, with a loaded model and the standard layout (it does nothing with the ETen layout), makes a tone key accept a syllable the
+//   lexicon lacks when a key typed as a left or right neighbour in its keyboard row would give a syllable it has; the composition
+//   then shows the word read through that syllable. A syllable already accepted keeps decoding when bit 4 is turned off. The
+//   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
+//   every engine creation, like set_english.
+int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

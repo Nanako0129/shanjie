@@ -24,6 +24,11 @@ public final class SettingsModel: ObservableObject {
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
+    /// The 模糊輸入 flags (fuzzy-input section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key slips, as
+    /// `shanjie_engine_set_fuzzy`. `fuzzyAdjacentEnabled` is false in the Eten layout, which greys the adjacent-key checkbox (the
+    /// value is kept).
+    @Published public private(set) var fuzzyFlags: UInt32 = 0
+    @Published public private(set) var fuzzyAdjacentEnabled = true
     /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
     /// enabled and on.
     @Published public private(set) var englishInline = true
@@ -84,6 +89,8 @@ public final class SettingsModel: ObservableObject {
         spacing = shell.spacingOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
+        fuzzyFlags = shell.fuzzyFlags
+        fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
         englishInline = shell.englishInlineOn
         englishInlineEnabled = shell.englishInlineEnabled
         demote = shell.demoteOn
@@ -111,6 +118,11 @@ public final class SettingsModel: ObservableObject {
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
     public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
+    /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips).
+    public func setFuzzy(bit: Int, _ on: Bool) {
+        precondition((0..<5).contains(bit))
+        shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
+    }
     public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }

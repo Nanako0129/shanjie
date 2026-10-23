@@ -882,14 +882,37 @@ pub enum End<'a> {
     Next { word: &'a str, lp: f64, delta: f64 },
 }
 
-/// A path: total score and its words with the lp each was scored with and its demotion delta.
-/// The last number of a word is the count of syllables it covers.
-pub type Scored<'a> = (f64, Vec<(&'a str, f64, f64, usize)>);
+/// A word of a decoded path: the text, the lp it was scored with, its demotion delta, the count of syllables it covers (`.3`), and the
+/// fuzzy-sound marker (`.4`, docs/contracts/fuzzy-input.md section 3.6): the word was read through the fuzzy-sound alternative of a span
+/// with no unknown syllable. The decoder sets the marker from the word's `Source`, never from the delta or the scores, and a learning
+/// boost does not take it off.
+pub type DecodedWord<'a> = (&'a str, f64, f64, usize, bool);
+
+/// A path: total score and its words.
+pub type Scored<'a> = (f64, Vec<DecodedWord<'a>>);
+
+/// A path with a fuzzy word is a fuzzy path.
+fn fuzzy_path(ws: &[DecodedWord]) -> bool {
+    ws.iter().any(|w| w.4)
+}
+
+/// The fuzzy-sound rule of the semantic correction (docs/contracts/fuzzy-input.md section 3.6), the one function the engine's rerank job
+/// and the evaluation CLI both use. From the decoder's n-best (one path per surface): `None` when the n-gram first path is a fuzzy path
+/// (a rescue: no rerank, the segment shows the n-gram first) or `topk` is 0 (nothing to rerank), otherwise the indices into the n-best of
+/// the first `topk` paths that are not fuzzy paths, in n-best order (all of them if fewer; the n-gram first is the first). Without a
+/// fuzzy-sound bit no word is a fuzzy word, so this is the first `topk` indices, as before.
+pub fn rerank_pool(best: &[Scored<'_>], topk: usize) -> Option<Vec<usize>> {
+    if fuzzy_path(&best.first()?.1) {
+        return None;
+    }
+    let pool: Vec<usize> = best.iter().enumerate().filter(|(_, (_, ws))| !fuzzy_path(ws)).map(|(i, _)| i).take(topk).collect();
+    (!pool.is_empty()).then_some(pool)
+}
 
 struct Hyp<'a> {
     score: f64,
     surface: String,
-    words: Vec<(&'a str, f64, f64, usize)>,
+    words: Vec<DecodedWord<'a>>,
     /// The two history words (docs/contracts/trigram-core.md): `prev` the one before `last`, `None` when unknown.
     prev: Option<u32>,
     last: Option<u32>,
@@ -975,6 +998,108 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0)
+}
+
+/// One reading a span's words are looked up under (fuzzy input, docs/contracts/fuzzy-input.md section 2.1).
+struct Source {
+    /// Index of the reading in the lexicon (`None`: the typed reading is no lexicon reading).
+    r: Option<usize>,
+    /// Taken off the score of every word of this source (`fuzzy::DELTA_*`; 0 for the exact reading).
+    pen: f64,
+    /// The reading's syllables when it is a tolerant one (what learning is looked up under); `None` for the typed one.
+    names: Option<Vec<String>>,
+    /// The fuzzy-word marker (fuzzy-input section 3.6): a tolerant source of a span with no unknown syllable, i.e. a fuzzy-sound
+    /// alternative. An adjacent-key source (a span with an unknown syllable) and the typed reading are not.
+    sound: bool,
+    /// A tolerant source's words (entry positions), already chosen; unused for the exact one.
+    picked: Vec<usize>,
+}
+
+impl CappedLexicon {
+    /// The readings the words of one span are looked up under: the typed reading, then (a span with an unknown syllable, or the
+    /// sound pairs in `fuzzy` on) the tolerant ones: words of a reading with one syllable replaced, not already words of the typed
+    /// reading, each word at its best score, the best `PER_KEY` over all of them (the research's `tolerant_entries`).
+    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64) -> Vec<Source> {
+        let base = &*self.base;
+        let exact = base.find(ids);
+        let mut out = vec![Source { r: exact, pen: 0.0, names: None, sound: false, picked: Vec::new() }];
+        if fuzzy & crate::fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
+            return out;
+        }
+        let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
+        let readings: Vec<(usize, Vec<u32>)> =
+            base.tolerant_readings(ids, span, fuzzy).into_iter().filter_map(|k| base.find(&k).map(|r| (r, k))).collect();
+        let exact_words: HashSet<&str> = exact.into_iter().flat_map(|r| base.range(r)).map(|p| self.word_of(&self.ents[p])).collect();
+        // word -> (score, entry position, which reading), the best of its readings
+        let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
+        let mut order: Vec<&str> = Vec::new();
+        for (a, (r, _)) in readings.iter().enumerate() {
+            for p in base.range(*r).filter(|&p| !exact_words.contains(self.word_of(&self.ents[p]))).take(PER_KEY) {
+                let (w, sc) = (self.word_of(&self.ents[p]), self.ents[p].score);
+                match best.get(w) {
+                    Some(&(b, _, _)) if b >= sc => {}
+                    Some(_) => {
+                        best.insert(w, (sc, p, a));
+                    }
+                    None => {
+                        best.insert(w, (sc, p, a));
+                        order.push(w);
+                    }
+                }
+            }
+        }
+        let mut words: Vec<(f64, usize, usize)> = order.iter().map(|w| best[w]).collect();
+        words.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        words.truncate(PER_KEY);
+        for (a, (r, k)) in readings.iter().enumerate() {
+            let picked: Vec<usize> = words.iter().filter(|w| w.2 == a).map(|w| w.1).collect();
+            if !picked.is_empty() {
+                let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
+                out.push(Source { r: Some(*r), pen, names: Some(names), sound: !ids.contains(&u32::MAX), picked });
+            }
+        }
+        out
+    }
+}
+
+/// `decode_segment_learned` with fuzzy input (docs/contracts/fuzzy-input.md section 2.1). `fuzzy` holds the sound-pair bits 0-3: a
+/// word may also be read through one syllable replaced by its fuzzy-sound alternative, scored `fuzzy::DELTA_SOUND` lower. A
+/// syllable the lexicon does not have is always read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower),
+/// whatever `fuzzy` says: the switch only decides whether such a syllable is accepted when typed. With `fuzzy` 0 and only known
+/// syllables the arithmetic is exactly that of `decode_segment_learned` before this existed.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_segment_fuzzy<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    scoring: impl Into<Scoring>,
+    start: &str,
+    end: End<'_>,
+    beam: usize,
+    learn: Option<&Learn<'a>>,
+    demote: bool,
+    fuzzy: u32,
+) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_fuzzy_delta(lex, syls, lm, scoring, start, end, beam, learn, demote, fuzzy, crate::fuzzy::DELTA_SOUND)
+}
+
+/// `decode_segment_fuzzy` with the fuzzy-sound penalty `delta_sound` in place of `fuzzy::DELTA_SOUND` (evaluation only: the
+/// engine and the app always use the default; docs/contracts/fuzzy-input.md section 3.5). The adjacent-key penalty is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_segment_fuzzy_delta<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    scoring: impl Into<Scoring>,
+    start: &str,
+    end: End<'_>,
+    beam: usize,
+    learn: Option<&Learn<'a>>,
+    demote: bool,
+    fuzzy: u32,
+    delta_sound: f64,
+) -> Result<Vec<Scored<'a>>, Error> {
     let base = &*lex.base;
     // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
     let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
@@ -1011,109 +1136,118 @@ pub fn decode_segment_learned<'a>(
             if hyps[i - l].is_empty() {
                 continue;
             }
-            let span = &syls[i - l..i];
-            let found = base.find(&ids[i - l..i]);
-            // New words of this span the lexicon lacks under it (new-word B §2.4), tried after the lexicon's entries.
-            let fresh: Vec<(&'a str, f64)> = match fresh_on {
-                Some(ln) if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) => ln
-                    .learner
-                    .new_words(span, ln.today)
-                    .into_iter()
-                    .filter(|(w, _)| found.is_none() || !base.has(span, w))
-                    .map(|(w, wt)| (w, newword_score(wt)))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            if found.is_none() && fresh.is_empty() {
-                continue;
-            }
-            let learned = learn.filter(|ln| found.is_some() && ln.learner.has_reading(span));
-            let range = found.map_or(0..0, |r| base.range(r));
-            let best = lex.ents.get(range.start).map_or(0.0, |e| e.score);
-            let dl = if demote { lex.deltas_in(&range) } else { &[] };
-            // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
-            // usable on a path whose context has a learned record for them).
-            let mut entries: Vec<(usize, bool)> = range.clone().take(PER_KEY).map(|p| (p, false)).collect();
-            if let Some(ln) = learned {
-                let words = ln.learner.words_of(span);
-                let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
-                for p in range.clone().skip(PER_KEY) {
-                    let w = lex.word_of(&lex.ents[p]);
-                    if words.binary_search(&w).is_ok() && seen.insert(w) {
-                        entries.push((p, true));
-                    }
+            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound) {
+                let found = src.r;
+                // A tolerant source is learned under its lexicon reading (fuzzy-input section 2.1): a pick of its word was recorded there.
+                let span = src.names.as_deref().unwrap_or(&syls[i - l..i]);
+                // New words of this span the lexicon lacks under it (new-word B §2.4), tried after the lexicon's entries.
+                let fresh: Vec<(&'a str, f64)> = match fresh_on {
+                    Some(ln) if src.names.is_none() && (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) => ln
+                        .learner
+                        .new_words(span, ln.today)
+                        .into_iter()
+                        .filter(|(w, _)| found.is_none() || !base.has(span, w))
+                        .map(|(w, wt)| (w, newword_score(wt)))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                if found.is_none() && fresh.is_empty() {
+                    continue;
                 }
-            }
-            // Each hypothesis's learned hits depend only on its context key, not on the entry: look
-            // them up once per hypothesis (shared by key) before trying the entries.
-            let hits_of: Vec<usize>;
-            let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
-            if let Some(ln) = learned {
-                let mut by_ctx: HashMap<String, usize> = HashMap::new();
-                // Rule 8: at sentence start the key also holds the syllable after the word.
-                let next = syls.get(i).map(String::as_str).or(ln.after);
-                hits_of = hyps[i - l]
-                    .iter()
-                    .map(|h| {
-                        let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
-                        *by_ctx.entry(key).or_insert_with_key(|k| {
-                            hits.push(ln.learner.lookup(k, span, ln.today));
-                            hits.len() - 1
-                        })
-                    })
-                    .collect();
-            } else {
-                hits_of = Vec::new();
-            }
-            // Lexicon entries (`Some(position)`), then the new words (`None`: no learned boost, no demotion).
-            let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
-            for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
-                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
-                let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1);
-                for (hi, h) in hyps[i - l].iter().enumerate() {
-                    let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
-                    if let Some(ln) = learned.filter(|_| p.is_some()) {
-                        let (lv, ws) = &hits[hits_of[hi]];
-                        let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
-                        // eps 0 switches the level off, for `extra` entries too: `best + 0` would
-                        // still lift a word to a tie with the top.
-                        match ws.iter().find(|(w, _)| *w == word) {
-                            Some(&(_, w)) if eps > 0.0 => {
-                                let boosted = best + eps * (w / (w + 1.0));
-                                if boosted > lp {
-                                    lp = boosted;
-                                    pb = pow10(lp);
-                                    was_boosted = true;
-                                }
-                            }
-                            _ if extra => continue,
-                            _ => {}
+                let learned = learn.filter(|ln| found.is_some() && ln.learner.has_reading(span));
+                let range = found.map_or(0..0, |r| base.range(r));
+                let best = lex.ents.get(range.start).map_or(0.0, |e| e.score);
+                let dl = if demote { lex.deltas_in(&range) } else { &[] };
+                // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only
+                // usable on a path whose context has a learned record for them). A tolerant source has its chosen words and no
+                // extras (ponytail: a learned word ranked below its top PER_KEY is not reached through a tolerant reading).
+                let mut entries: Vec<(usize, bool)> = match src.names {
+                    None => range.clone().take(PER_KEY).map(|p| (p, false)).collect(),
+                    Some(_) => src.picked.iter().map(|&p| (p, false)).collect(),
+                };
+                if let (Some(ln), None) = (learned, &src.names) {
+                    let words = ln.learner.words_of(span);
+                    let mut seen: HashSet<&str> = entries.iter().map(|&(p, _)| lex.word_of(&lex.ents[p])).collect();
+                    for p in range.clone().skip(PER_KEY) {
+                        let w = lex.word_of(&lex.ents[p]);
+                        if words.binary_search(&w).is_ok() && seen.insert(w) {
+                            entries.push((p, true));
                         }
                     }
-                    // model-v6 section 2.8 rule 1: a boosted entry skips the Kneser-Ney substitution (its boosted pb would be replaced
-                    // by N'/sum(N') and the boost would shrink to the (1 - lam) * lp part); every other entry is scored as before.
-                    let prob = if was_boosted { lm.prob_learned(h.ctx, wid, pb) } else { lm.prob_tri(h.tri, h.ctx, wid, pb, cfg.kn) };
-                    let sc = h.score + (word_term(lam, prob, lp) - delta);
-                    let before = if tri_on { h.words.last().map_or(start, |w| w.0) } else { "" };
-                    let key = (format!("{}{word}", h.surface), before, word);
-                    match idx.get(&key).copied() {
-                        Some(q) if !(sc > cand[q].score) => {}
-                        found => {
-                            let mut words = h.words.clone();
-                            words.push((word, lp, delta, l));
-                            // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
-                            let surface = match found {
-                                Some(_) => key.0,
-                                None => {
-                                    let s = key.0.clone();
-                                    idx.insert(key, cand.len());
-                                    s
+                }
+                // Each hypothesis's learned hits depend only on its context key, not on the entry: look
+                // them up once per hypothesis (shared by key) before trying the entries.
+                let hits_of: Vec<usize>;
+                let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
+                if let Some(ln) = learned {
+                    let mut by_ctx: HashMap<String, usize> = HashMap::new();
+                    // Rule 8: at sentence start the key also holds the syllable after the word.
+                    let next = syls.get(i).map(String::as_str).or(ln.after);
+                    hits_of = hyps[i - l]
+                        .iter()
+                        .map(|h| {
+                            let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
+                            *by_ctx.entry(key).or_insert_with_key(|k| {
+                                hits.push(ln.learner.lookup(k, span, ln.today));
+                                hits.len() - 1
+                            })
+                        })
+                        .collect();
+                } else {
+                    hits_of = Vec::new();
+                }
+                // Lexicon entries (`Some(position)`), then the new words (`None`: no learned boost, no demotion).
+                let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
+                for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
+                    let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                    // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
+                    // `Engine::total_score` and the rerank job see the score the decoder used.
+                    let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1) + src.pen;
+                    for (hi, h) in hyps[i - l].iter().enumerate() {
+                        let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
+                        if let Some(ln) = learned.filter(|_| p.is_some()) {
+                            let (lv, ws) = &hits[hits_of[hi]];
+                            let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                            // eps 0 switches the level off, for `extra` entries too: `best + 0` would
+                            // still lift a word to a tie with the top.
+                            match ws.iter().find(|(w, _)| *w == word) {
+                                Some(&(_, w)) if eps > 0.0 => {
+                                    let boosted = best + eps * (w / (w + 1.0));
+                                    if boosted > lp {
+                                        lp = boosted;
+                                        pb = pow10(lp);
+                                        was_boosted = true;
+                                    }
                                 }
-                            };
-                            let nh = Hyp { score: sc, surface, words, prev: h.last, last: wid, ctx: lm.ctx_of(None), tri: None };
-                            match found {
-                                Some(q) => cand[q] = nh,
-                                None => cand.push(nh),
+                                _ if extra => continue,
+                                _ => {}
+                            }
+                        }
+                        // model-v6 section 2.8 rule 1: a boosted entry skips the Kneser-Ney substitution (its boosted pb would be replaced
+                        // by N'/sum(N') and the boost would shrink to the (1 - lam) * lp part); every other entry is scored as before.
+                        let prob = if was_boosted { lm.prob_learned(h.ctx, wid, pb) } else { lm.prob_tri(h.tri, h.ctx, wid, pb, cfg.kn) };
+                        let sc = h.score + (word_term(lam, prob, lp) - delta);
+                        let before = if tri_on { h.words.last().map_or(start, |w| w.0) } else { "" };
+                        let key = (format!("{}{word}", h.surface), before, word);
+                        match idx.get(&key).copied() {
+                            Some(q) if !(sc > cand[q].score) => {}
+                            found => {
+                                let mut words = h.words.clone();
+                                words.push((word, lp, delta, l, src.sound));
+                                // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
+                                let surface = match found {
+                                    Some(_) => key.0,
+                                    None => {
+                                        let s = key.0.clone();
+                                        idx.insert(key, cand.len());
+                                        s
+                                    }
+                                };
+                                let nh = Hyp { score: sc, surface, words, prev: h.last, last: wid, ctx: lm.ctx_of(None), tri: None };
+                                match found {
+                                    Some(q) => cand[q] = nh,
+                                    None => cand.push(nh),
+                                }
                             }
                         }
                     }
@@ -1133,7 +1267,7 @@ pub fn decode_segment_learned<'a>(
         End::Eos => None,
         End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
     };
-    let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize)>, String)> = last
+    let mut out: Vec<(f64, Vec<DecodedWord<'a>>, String)> = last
         .into_iter()
         .map(|h| {
             // (b') a one-word segment from an unknown start closes without the table.
@@ -1189,10 +1323,43 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_segment_learned(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote)?
+    decode_from_fuzzy(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND)
+}
+
+/// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`) and the fuzzy-sound penalty
+/// `delta_sound` of `decode_segment_fuzzy_delta` (the CLI's evaluation-only `--fuzzy-delta-sound`; `fuzzy::DELTA_SOUND` by default).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_from_fuzzy(
+    lex: &CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    profile: Profile,
+    beam: usize,
+    start: &str,
+    demote: bool,
+    fuzzy: u32,
+    delta_sound: f64,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, fuzzy, delta_sound)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
+}
+
+/// `decode_from_fuzzy` with the paths as the decoder has them, fuzzy-word markers included (what `rerank_pool` reads).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_from_fuzzy_scored<'a>(
+    lex: &'a CappedLexicon,
+    syls: &[String],
+    lm: &Lm,
+    profile: Profile,
+    beam: usize,
+    start: &str,
+    demote: bool,
+    fuzzy: u32,
+    delta_sound: f64,
+) -> Result<Vec<Scored<'a>>, Error> {
+    decode_segment_fuzzy_delta(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)
 }
 
 #[cfg(test)]
@@ -1749,5 +1916,52 @@ mod tests {
         std::fs::create_dir(&t).unwrap();
         assert_eq!(Lm::load_opts(&m, false, true, true).err(), Some(LmError::TriTable), "directory");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The words of the n-best of one typed syllable with their fuzzy markers: (word, delta, fuzzy), best path first.
+    fn marked(lex_text: &str, demote: &str, syl: &str, flags: u32) -> Vec<(String, f64, bool)> {
+        let lm = Lm::parse(&tiny()).unwrap();
+        let lex = Arc::new(Lexicon::parse(lex_text).unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse(demote).unwrap())).unwrap();
+        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND)
+            .unwrap()
+            .into_iter()
+            .map(|(_, ws)| (ws[0].0.to_string(), ws[0].2, ws[0].4))
+            .collect()
+    }
+
+    /// Fuzzy-input section 3.6, the marker. (a) A word of the typed reading is no fuzzy word whatever its demotion: here the demotion is
+    /// exactly the sound penalty (2.5), so a marker inferred from the delta would take it for one. (c) The same word under the fuzzy-sound
+    /// alternative reading is one (and carries that same delta).
+    #[test]
+    fn marker_a_typed_reading_word_with_the_sound_penalty_as_its_demotion_is_not_fuzzy_and_a_sound_alternative_is() {
+        assert_eq!(crate::fuzzy::DELTA_SOUND, 2.5, "premise: the demotion below equals the sound penalty");
+        let v = marked("ㄓ a -1.0\nㄗ b -1.0\n", "ㄓ\ta\t2.5\treading\tt\n", "ㄓ", 0b0010);
+        let get = |w: &str| v.iter().find(|x| x.0 == w).unwrap_or_else(|| panic!("no path {w}: {v:?}")).clone();
+        assert_eq!(get("a"), ("a".to_string(), 2.5, false), "(a) demoted, typed reading");
+        assert_eq!(get("b"), ("b".to_string(), 2.5, true), "(c) the sound alternative");
+    }
+
+    /// Section 3.6 (b): a word read through the adjacent-key alternative of a syllable the lexicon lacks (it too carries a penalty, 2) is
+    /// no fuzzy word, with the sound pairs on or off.
+    #[test]
+    fn marker_an_adjacent_key_word_is_not_fuzzy() {
+        for flags in [0b10000, 0b11111] {
+            let v = marked("ㄉ b -1.0\n", "", "ㄅ", flags);
+            assert_eq!(v, [("b".to_string(), crate::fuzzy::DELTA_ADJACENT, false)], "flags {flags}");
+        }
+    }
+
+    /// The pool rule on hand-made n-bests: a fuzzy first path is a skip; otherwise the first `topk` paths without a fuzzy word, in order.
+    #[test]
+    fn rerank_pool_takes_the_first_non_fuzzy_paths_and_skips_a_fuzzy_first() {
+        let path = |f: bool| (0.0, vec![("x", 0.0, 0.0, 1, false), ("y", 0.0, 0.0, 1, f)]);
+        let nb = |fz: &[bool]| fz.iter().map(|&f| path(f)).collect::<Vec<Scored>>();
+        assert_eq!(rerank_pool(&nb(&[false, true, false, false, true, false]), 3), Some(vec![0, 2, 3]));
+        assert_eq!(rerank_pool(&nb(&[false, true, false]), 8), Some(vec![0, 2]), "fewer than topk: all of them");
+        assert_eq!(rerank_pool(&nb(&[true, false, false]), 8), None, "fuzzy first: no rerank");
+        assert_eq!(rerank_pool(&nb(&[false, false, false, false]), 2), Some(vec![0, 1]));
+        assert_eq!(rerank_pool(&[], 8), None);
+        assert_eq!(rerank_pool(&nb(&[false, false]), 0), None, "topk 0: no rerank, not an empty pool");
     }
 }
