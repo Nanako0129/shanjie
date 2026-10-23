@@ -8769,3 +8769,8 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - 分數檔：GCP 上用這個分支的 CLI，書面 `--context --packs acg --tinylm data/lm/tinylm.sjtl --formal-kn --kn-beta 0.75 --tinylm-scores`（候選與 n-gram 分數帶 KN），集合 cvtune-clean、wikitune-clean（選值用）與 dev302、打字測驗、錯字回報（只報）；另跑一份不帶 `--formal-kn` 的出貨書面當對照。
   - 選值照 `docs/contracts/rerank-strength.md` §1 的規則，只把集合換成兩個 clean 版：`experiments/e2-chateval/judge.py --setting formal --select STD --tuning cvtune-clean wikitune-clean --weight 10`、CONS `--weight 30`、AGGR `--weight 3`（`fusegrid` 的固定格點 8×6×8）。
   - 報：三檔選出的 α、τ、δ，各集合對「出貨書面＋出貨參數」的改對／改壞。只出方向；確認片在看過這些數字後另外登記，用沒看過的維基判讀集。
+- **重調結果**（照登記，GCP c4d 429 秒；選值集 cvtune-clean＋wikitune-clean 5,467 列；比較＝KN 開的分數＋重選的值，基準＝出貨書面 CLI 的同一檔）：
+  - 標準（weight 10）選出 α 0.7、τ 2、δ 1，和現在出貨的書面標準選字逐列相同：wikitune-clean 30／22（+8，p 0.33）、cvtune-clean 18／18、dev302 2／2、打字測驗 0／0、錯字回報 2／4（−2）——和診斷那一行一樣。
+  - 保守（weight 30）選出 0.1、0.5、0.25：wikitune-clean 39／28（+11，0.22）、cvtune-clean 29／25、dev302 6／3、打字測驗 1／0、錯字回報 1／7（−6，0.070）。
+  - 積極（weight 3）選出 0.5、2、0.5：wikitune-clean 37／20（+17，p 0.033）、cvtune-clean 24／17（+7）、dev302 3／2、打字測驗 0／0、錯字回報 4／5（−1）。（出貨的書面積極＝標準，`docs/contracts/rerank-formal.md`。）
+  - 方向：預設的標準檔重選後值不變，KN 在 n-gram 單獨時的 +20 只剩 +8、不顯著；積極檔重選後 +17 顯著。錯字回報三檔都不是正的。
