@@ -541,6 +541,8 @@ pub struct Engine {
     /// The enabled packs' rows `new` read (acg-pack contract A.2), appended to `overlay-add.tsv` when
     /// `load_lm` caps; `None` with no pack, so a pack-off engine holds nothing extra.
     pack_text: Option<String>,
+    /// The rows of the enabled `PACK_OOV` packs among `pack_text`, which `load_lm` exempts from the cap; `None` with none.
+    pack_oov_text: Option<String>,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -689,6 +691,9 @@ pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
 /// Pack bits of `Engine::new_with_packs` and `shanjie_engine_new_packs` (docs/contracts/acg-pack.md A.2).
 pub const PACK_ACG: u32 = 1;
 pub const PACK_ALL: u32 = PACK_ACG;
+/// The packs whose words are pack-oov (docs/contracts/pack-oov.md): unknown to the model, scored by the pack alone, not capped. Only
+/// the anime pack for now; a pack added later stays capped until it is added here.
+pub const PACK_OOV: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
 const PACK_FILES: [(u32, &str); 1] = [(PACK_ACG, "acg-add.tsv")];
 
@@ -778,8 +783,9 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
     Ok((Arc::new(lex), extra))
 }
 
-/// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
-/// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
+/// The text `CappedLexicon::with_packs` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
+/// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows). Its words are capped at their corpus
+/// frequency, except those of the `PACK_OOV` packs, which `with_packs` takes again as its `pack_text` and leaves uncapped.
 pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
     capping_overlay_detailed(data_dir, pack_text).map_err(|_| EngineError::LoadFailed)
 }
@@ -820,6 +826,9 @@ impl Engine {
         let (lex, pack_text) = load_lexicon_packs(data_dir, packs)?;
         let mut e = Engine::with_lexicon(lex, layout);
         e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
+        if let Some((dir, mask)) = packs {
+            e.pack_oov_text = Some(read_packs_detailed(dir, mask & PACK_OOV).map_err(|_| EngineError::LoadFailed)?).filter(|t| !t.is_empty());
+        }
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -838,6 +847,7 @@ impl Engine {
             lex,
             data_dir: None,
             pack_text: None,
+            pack_oov_text: None,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -1379,7 +1389,7 @@ impl Engine {
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, self.pack_text.as_deref().unwrap_or(""), &lm, Some(&demote))
+        let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, self.pack_oov_text.as_deref().unwrap_or(""), &lm, Some(&demote))
             .ok_or(EngineError::LoadFailed)?;
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);

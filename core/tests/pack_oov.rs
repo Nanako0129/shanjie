@@ -152,6 +152,11 @@ fn total_score_treats_a_pack_word_as_unknown_in_every_place() {
 /// history word of a left context that ends with a pack word), both profiles, with and without the side file.
 #[test]
 fn pack_oov_decode_matches_python_golden() {
+    // The golden's f64 bits come from a Mac Python run; Linux's libm differs in the last bit of log10 (as for engine_digits.rs's goldens).
+    // CI's core job runs on macOS, so this is checked there.
+    if cfg!(target_os = "linux") {
+        return;
+    }
     let want = String::from_utf8(std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov/decode.tsv")).unwrap()).unwrap();
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov");
     let lex = Arc::new(Lexicon::parse(&std::fs::read_to_string(golden.join("lexicon.txt")).unwrap()).unwrap());
@@ -200,4 +205,19 @@ fn total_score_equals_the_top_decode_with_a_learned_pack_word() {
     let nb = decode_segment_learned(&cap, &syls("ㄓㄢˋ"), &lm, Profile::Chat.lambda(), history(left, &lm), End::Eos, 64, Some(&learn), true).unwrap();
     assert!(nb[0].1[0].1 > -3.5, "premise: boosted");
     close(e.total_score().unwrap(), nb[0].0);
+}
+
+/// Prediction and the digits layer read `readings()`: with the pack on they see what they saw before the pack was exempt from the cap
+/// (the pack text as plain overlay), while the decoder's `entries` keep the pack's uncapped score. Only rows of `pack_text` are exempt;
+/// an overlay row that is not among them (another pack, `--extra-overlay`) stays capped for the decoder too.
+#[test]
+fn prediction_and_digits_see_the_capped_score_and_only_pack_rows_are_exempt() {
+    let lm = lm_with(true);
+    let lex = Arc::new(Lexicon::parse_with(LEX, None).unwrap());
+    let plain = CappedLexicon::new(lex.clone(), &rows(&["占", "站"]), &lm, None).unwrap();
+    let packed = CappedLexicon::with_packs(lex.clone(), &rows(&["占", "站"]), &rows(&["占"]), &lm, None).unwrap();
+    assert_eq!(packed.readings().collect::<Vec<_>>(), plain.readings().collect::<Vec<_>>(), "readings() (prediction index, digits layer) is the capped list");
+    assert_eq!(packed.best_lp(&syls("ㄓㄢˋ"), "占"), Some(-0.05), "decoder: the pack row keeps its score");
+    assert!(plain.best_lp(&syls("ㄓㄢˋ"), "占").unwrap() < -0.05, "premise: capped without the exemption");
+    assert_eq!(packed.best_lp(&syls("ㄓㄢˋ"), "站"), Some(-4.0), "decoder: an overlay row outside pack_text is capped (unseen penalty)");
 }
