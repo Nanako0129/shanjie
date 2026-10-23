@@ -33,6 +33,9 @@ PACKS = B.PACKS
 TAG = "it"
 MIN_COUNT = 50                      # 契約 §2「頻率門檻」：至少 50 次（49 次不收）
 BONUS = 3.0                         # 契約 §2「分數」：每列的 log10 分數加 3
+# 專有名詞查詢（ai_proper）挑標題用的門檻：快取是門檻 20 時抓的，查詢分批的網址跟著名單變。門檻 ≥ 20 時要過濾的標題都在這份名單裡，
+# 結果與用 MIN_COUNT 挑相同；門檻要低於 20 就得重抓。
+PROPER_LOOKUP_MIN = 20
 SEED, CHECK_N = 20261024, 60        # 契約 §3.5：檢查集的固定種子與抽樣數（20261023 那一份在探索門檻與加分時看過了）
 # 契約 §2「大陸寫法」：子字串標記（事先固定，只用在 15416 與維基 AI 標題）。比對前先遮掉台灣寫法的「演算法」。
 MARKERS = ("網絡", "信息", "算法", "軟件", "硬件", "數據庫", "默認", "視頻", "鼠標", "內存", "緩存", "服務器", "文件夾", "激活", "兼容")
@@ -118,9 +121,9 @@ def read_manual(path):
 
 
 def ai_proper(f, titles, counts):
-    """AI 標題（原標題, zh-tw 標題）裡過頻率門檻的那些，Wikidata P31（含 P279*）屬於 PROPER_CLASSES 的 zh-tw 標題。
+    """AI 標題（原標題, zh-tw 標題）裡至少 PROPER_LOOKUP_MIN 次的那些，Wikidata P31（含 P279*）屬於 PROPER_CLASSES 的 zh-tw 標題。
     先用維基 API 把標題換成 Wikidata 項目（pageprops），再每 100 個項目一個 SPARQL 查詢。查詢的名單只取決於計數檔，不取決於詞庫。"""
-    pick = sorted({(o, t) for o, t in titles if counts.get(t, 0) >= MIN_COUNT and S.HAN.fullmatch(t)})
+    pick = sorted({(o, t) for o, t in titles if counts.get(t, 0) >= PROPER_LOOKUP_MIN and S.HAN.fullmatch(t)})
     qid = {}
     for i in range(0, len(pick), 50):
         b = [o for o, _ in pick[i:i + 50]]
@@ -387,6 +390,8 @@ def main():
     ap.add_argument("--min-count", type=int, default=MIN_COUNT, help="frequency floor (exploration; the contract value is MIN_COUNT)")
     ap.add_argument("--bonus", type=float, default=BONUS, help="added to every pack row's log10 score (exploration; the contract value is BONUS)")
     a = ap.parse_args()
+    if a.min_count < PROPER_LOOKUP_MIN:
+        sys.exit(f"--min-count below {PROPER_LOOKUP_MIN} needs a new proper-noun fetch (PROPER_LOOKUP_MIN)")
     if a.cmd == "build" and not a.offline:
         sys.exit("build runs --offline only (contract section 2a); run `fetch` online first")
     head, counts = read_counts(a.counts)
