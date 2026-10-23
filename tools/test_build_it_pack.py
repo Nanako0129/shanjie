@@ -119,6 +119,18 @@ class Pipeline(unittest.TestCase):
         self.assertEqual((m["stages"]["dedupe_lexicon"], m["stages"]["dedupe_acg"]), (1, 1))
         self.assertTrue(all(l.endswith("\tit") for l in files["it-add.tsv"].splitlines()))
 
+    def test_fixed_readings_replace_the_tool_reading_and_clear_check(self):
+        s = src(names75={"重定義", "其他詞"})
+        flagged = lambda ws: {w: ([f"s{ord(c)}" for c in w], True) for w in ws}
+        with tempfile.TemporaryDirectory() as d:
+            fixed = os.path.join(d, "it-readings.tsv")
+            put(fixed, "# 註解\n重定義\tㄔㄨㄥˊ ㄉㄧㄥˋ ㄧˋ\n")
+            info = {}
+            files, *_ = T.build(s, {}, fake_decoder(), flagged, frozenset(), frozenset(), os.path.join(d, "none.tsv"), SC, info, readings_tsv=fixed)
+        keys = {l.split("\t")[1]: l.split("\t")[0] for l in files["it-add.tsv"].splitlines()}
+        self.assertEqual(keys["重定義"], "ㄔㄨㄥˊ-ㄉㄧㄥˋ-ㄧˋ")
+        self.assertEqual((info["check"]["重定義"], info["check"]["其他詞"]), (False, True))
+
     def test_a_word_the_shipping_decoder_already_gets_right_in_both_profiles_is_dropped(self):
         both = lambda pairs, prof, packs=None: [w if (w == "打對詞" or (w == "只聊天對" and prof == "chat")) else "？" + w for w, _ in pairs] if not packs else [w for w, _ in pairs]
         s = src(names75={"打對詞", "只聊天對", "沒打對"})

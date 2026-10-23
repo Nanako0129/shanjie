@@ -249,7 +249,13 @@ def decoder(acg_tsv=ACG_PACK):
 
 # ---------------------------------------------------------------- 主流程
 
-def build(src, counts, decode, readings=B.make_readings, have=None, acg_words=frozenset(), collisions_tsv=os.path.join(PACKS, "it-collisions.tsv"), sc=None, info=None):
+def read_fixed(path):
+    """data/packs/it-readings.tsv：詞<TAB>讀音（空白分隔），維護者確認過的讀音（契約 §1 讀音）。"""
+    return {r[0]: r[1].split() for r in B.read_tsv(path)} if os.path.exists(path) else {}
+
+
+def build(src, counts, decode, readings=B.make_readings, have=None, acg_words=frozenset(), collisions_tsv=os.path.join(PACKS, "it-collisions.tsv"), sc=None, info=None,
+          readings_tsv=os.path.join(PACKS, "it-readings.tsv")):
     """src：gather() 的結果。decode、readings 可換（測試用假的）。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 無法讀音的詞, 參考名單, 被 (c) 丟掉的詞)。"""
     have = B.lexicon_words() if have is None else have
     alive, stats, marker_counts, kinds = filter_claims(src, counts)
@@ -264,6 +270,11 @@ def build(src, counts, decode, readings=B.make_readings, have=None, acg_words=fr
     stage["excluded_by_it_collisions_tsv"] = len([w for w in words if w in excluded])
     words = [w for w in words if w not in excluded]
     rd = readings(words)
+    for w, r in read_fixed(readings_tsv).items():      # 維護者確認過的讀音：取代讀音工具的結果，也不再是 CHECK
+        if w in rd:
+            if len(r) != len(w):
+                raise SystemExit(f"{readings_tsv}: {w} has {len(r)} syllables")
+            rd[w] = (r, False)
     unread = sorted(set(words) - set(rd))
     words = [w for w in words if w in rd]
     reading = {w: rd[w][0] for w in words}
