@@ -246,7 +246,7 @@ def manual_words(path=MANUAL):
 def reading_picker(base, syllables, moe):
     """--moedict-readings：詞 → (讀音 list, 依據)。萌典有收（音節數等於字數、每個音節基底都有）用萌典第一讀音，其餘用 readings.Reader；
     兩者都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 (None, None)。"""
-    reader = readings.make_reader(base)
+    reader = readings.make_reader(base, rule_3b=True)    # the SJ-LM-7 lexicon steps use rule 3b (contract 2.3)
 
     def pick(w):
         m = moe.get(w)

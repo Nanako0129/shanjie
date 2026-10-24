@@ -1,6 +1,6 @@
 """片 E：替評測句產生「使用者實際會打的」讀音，只把真正有歧義的列交給人確認。
 
-用法：python3 tools/readings.py [--unihan Unihan_Readings.txt] <in.txt> <out.txt>
+用法：python3 tools/readings.py [--rule-3b [--unihan Unihan_Readings.txt]] <in.txt> <out.txt>
   python3 tools/readings.py --report-inverted [--unihan Unihan_Readings.txt]   （不寫任何檔：印出 9 個倒掛字的現行與建議分數，見下面）
   in.txt ：前文|句子          （也接受已有第三欄的列，原樣保留）
   out.txt：前文|句子|讀音      （讀音以空白分隔音節）
@@ -13,9 +13,9 @@
   2. 多字詞在萌典：取萌典第一個讀音（不取「又音」），而且必須是詞庫裡這個詞的讀音之一；
      （單字不套用：萌典把「的」的第一個讀音排成 ㄉㄧˋ）
   3. 單字在小麥注音 heterophony1.list（破音字主要讀音，反映台灣打字習慣）：用它；
-  3b.單字的第一名讀音不只一個（分數相同，原本取檔案順序）：用詞庫多字詞裡這個字各讀音出現的分數加權次數（Σ 10^分數）決定，
+  3b.（只在 --rule-3b／Reader(rule_3b=True) 時啟用；預設關，其他建置工具的輸出和以前逐位元組相同）單字的第一名讀音不只一個（分數相同，原本取檔案順序）：用詞庫多字詞裡這個字各讀音出現的分數加權次數（Σ 10^分數）決定，
      要有一個讀音嚴格最多；沒有多字詞證據或平手，就用 Unihan kMandarin 的台灣值（兩個值時取第二個；檔案路徑由 --unihan 或
-     SHANJIE_UNIHAN 給，沒給就跳過、不下載），而且那個值要在平手的讀音裡；還是決定不了就走規則 5（CHECK）。
+     SHANJIE_UNIHAN 給（只在啟用時讀），沒給就跳過、不下載），而且那個值要在平手的讀音裡；還是決定不了就走規則 5（CHECK）。
      （SJ-LM-7 契約 §2.3）
   4. 詞庫裡這個詞只有一個讀音，或第一名分數明顯較高（差 ≥ 0.5）：用詞庫第一名；
   5. 其他：用詞庫第一名但標 CHECK。
@@ -156,9 +156,10 @@ def inverted_report(lex, unihan=None, chars=INVERTED):
 class Reader:
     """規則 0–5 套在一個句子（或一個詞）上。main() 與 build_overlay.py 共用。read() 回傳 (音節 list 或 None＝讀不出, CHECK 備註, GAP 的詞)。"""
 
-    def __init__(self, lex, moe, hetero, overrides, evidence=None, unihan=None):
-        self.lex, self.moe, self.hetero, self.overrides = lex, moe, hetero, overrides
-        self.evidence, self.unihan = evidence if evidence is not None else char_evidence(lex), unihan or {}
+    def __init__(self, lex, moe, hetero, overrides, evidence=None, unihan=None, rule_3b=False):
+        self.lex, self.moe, self.hetero, self.overrides, self.rule_3b = lex, moe, hetero, overrides, rule_3b
+        self.evidence = (evidence if evidence is not None else char_evidence(lex)) if rule_3b else {}
+        self.unihan = unihan or {}
         self.alts = {}
         for syls, entries in lex.by_reading.items():
             for w, s in entries:
@@ -187,7 +188,7 @@ class Reader:
                 pick = moe[w]
             elif len(w) == 1 and w in hetero and (hetero[w],) in cands:
                 pick = (hetero[w],)
-            elif len(w) == 1 and len(cands) > 1 and alts[w][0][0] - alts[w][1][0] < TIE_EPS and (
+            elif self.rule_3b and len(w) == 1 and len(cands) > 1 and alts[w][0][0] - alts[w][1][0] < TIE_EPS and (
                     t := decide_reading(w, [c[0] for s_, c in alts[w] if alts[w][0][0] - s_ < TIE_EPS], self.evidence, self.unihan)[0]):
                 pick = (t,)
             elif len(cands) == 1 or alts[w][0][0] - alts[w][1][0] >= 0.5:
@@ -200,17 +201,17 @@ class Reader:
         return out, notes, gaps
 
 
-def make_reader(lex, unihan_path=UNIHAN):
-    """Reader over the files MOEDICT, HETERO, OVERRIDES (and the Unihan file, if any)."""
+def make_reader(lex, unihan_path=UNIHAN, rule_3b=False):
+    """Reader over the files MOEDICT, HETERO, OVERRIDES (and, with rule_3b, the Unihan file if there is one)."""
     hetero = dict(l.split() for l in open(HETERO, encoding="utf-8") if len(l.split()) == 2)
     overrides = {w: tuple(r.split()) for w, r in
                  (l.rstrip("\n").split("\t") for l in open(OVERRIDES, encoding="utf-8") if not l.startswith("#"))}
-    return Reader(lex, moe_primary(), hetero, overrides, unihan=load_unihan(unihan_path) if unihan_path else None)
+    return Reader(lex, moe_primary(), hetero, overrides, unihan=load_unihan(unihan_path) if (rule_3b and unihan_path) else None, rule_3b=rule_3b)
 
 
-def main(src, dst, unihan_path=UNIHAN):
+def main(src, dst, unihan_path=UNIHAN, rule_3b=False):
     lex = ime.Lexicon(os.path.join(REPO, "data", "lexicon", "mcbpmf-data.txt"))
-    reader = make_reader(lex, unihan_path)
+    reader = make_reader(lex, unihan_path, rule_3b)
     checks = 0
     with open(dst, "w", encoding="utf-8", newline="\n") as f:
         for line in open(src, encoding="utf-8"):
@@ -236,7 +237,8 @@ def main(src, dst, unihan_path=UNIHAN):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    unihan_path = UNIHAN
+    unihan_path, rule_3b = UNIHAN, "--rule-3b" in args
+    args = [x for x in args if x != "--rule-3b"]
     if "--unihan" in args:
         i = args.index("--unihan")
         unihan_path = args[i + 1]
@@ -247,4 +249,4 @@ if __name__ == "__main__":
         for ch, r, cur, new, role, how in inverted_report(lex, load_unihan(unihan_path) if unihan_path else None):
             print(f"{ch}\t{r}\t{cur}\t{new}\t{role}\t{how}")
     else:
-        main(*args[:2], unihan_path=unihan_path)
+        main(*args[:2], unihan_path=unihan_path, rule_3b=rule_3b)

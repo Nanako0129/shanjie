@@ -121,7 +121,7 @@ class BuildFlags(unittest.TestCase):
         stub = mock.Mock(); stub.read = lambda w: (list(self.base.to_syllables(w)), [], [])
         patches = [mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), mock.patch.object(bc, "load_conv", lambda: None),
                    mock.patch.object(B, "moe_titles", lambda: set()), mock.patch.object(readings, "moe_primary", lambda: moe),
-                   mock.patch.object(readings, "make_reader", lambda lex: stub)]
+                   mock.patch.object(readings, "make_reader", lambda lex, **kw: stub)]
         with contextlib.ExitStack() as st, contextlib.redirect_stdout(io.StringIO()):
             for p in patches:
                 st.enter_context(p)

@@ -85,7 +85,7 @@ class Rule3b(unittest.TestCase):
         self.assertEqual(d("己", ["ㄅㄚ", "ㄆㄚ"], self.ev), (None, None))                                  # evidence tied exactly: undecided
         self.assertEqual(d("己", ["ㄅㄚ", "ㄆㄚ"], self.ev, {"己": "ㄅㄚ"}), ("ㄅㄚ", "unihan"))
 
-    def run_tool(self, sents, unihan=None, hetero=""):
+    def run_tool(self, sents, unihan=None, hetero="", rule_3b=True):
         """readings.main on the synthetic lexicon; returns (out rows, stderr)."""
         d = self.d.name
         src = write(d, "in.txt", "".join(f"|{s}\n" for s in sents))
@@ -95,13 +95,22 @@ class Rule3b(unittest.TestCase):
         with mock.patch.object(R.ime, "Lexicon", lambda path: self.lex), mock.patch.object(R, "MOEDICT", moe), \
              mock.patch.object(R, "HETERO", write(d, "hetero.list", hetero)), mock.patch.object(R, "OVERRIDES", write(d, "ov.tsv", "# none\n")), \
              contextlib.redirect_stderr(err):
-            R.main(src, dst, unihan)
+            R.main(src, dst, unihan, rule_3b)
         return open(dst, encoding="utf-8").read().splitlines(), err.getvalue()
 
     def test_main_breaks_a_single_character_tie(self):
         out, err = self.run_tool(["甲"])
         self.assertEqual(out, ["|甲|ㄆㄚ"])               # file order would give ㄅㄚ
         self.assertNotIn("CHECK\t", err)
+
+    def test_rule_3b_is_off_by_default(self):
+        out, err = self.run_tool(["甲"], rule_3b=False)    # the old behaviour: file order, flagged CHECK
+        self.assertEqual(out, ["|甲|ㄅㄚ"])
+        self.assertEqual(err.count("CHECK\t"), 1)
+        u = write(self.d.name, "u.txt", UNIHAN)
+        out, _ = self.run_tool(["丙", "戊"], unihan=u, rule_3b=False)   # a Unihan file alone changes nothing
+        self.assertEqual(out, ["|丙|ㄅㄚ", "|戊|ㄅㄚ"])
+        self.assertFalse(R.Reader(self.lex, {}, {}, {}).rule_3b)
 
     def test_main_falls_back_to_unihan_then_to_check(self):
         u = write(self.d.name, "u.txt", UNIHAN)
