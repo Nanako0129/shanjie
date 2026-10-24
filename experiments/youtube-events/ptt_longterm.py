@@ -18,6 +18,7 @@ MIN_BOARD_SPAN_DAYS = 180
 MIN_SPAN_DAYS, MIN_BOARDS, MIN_ARTICLES = 180, 5, 20
 NAME = re.compile(r"^M\.(\d+)\.A\.[0-9A-Fa-f]+\.html$")
 _strings = None
+_index = None       # first two characters -> strings, so a page is checked only for strings whose opening occurs in it
 
 
 def board_hits(board_dir):
@@ -25,15 +26,12 @@ def board_hits(board_dir):
     files = [(int(m.group(1)), f) for f in os.listdir(board_dir) if (m := NAME.match(f))]
     if not files or max(t for t, _ in files) - min(t for t, _ in files) < MIN_BOARD_SPAN_DAYS * DAY:
         return False, {}
-    index = collections.defaultdict(list)       # first two characters -> strings, so a page is checked only for strings whose opening occurs in it
-    for s in _strings:
-        index[s[:2]].append(s)
     hits = {}
     for ts, f in files:
         with open(os.path.join(board_dir, f), encoding="utf-8", errors="replace") as fh:
             text = html.unescape(re.sub(r"<[^>]+>", "", fh.read()))
-        for bg in {text[i:i + 2] for i in range(len(text) - 1)} & index.keys():
-            for s in index[bg]:
+        for bg in {text[i:i + 2] for i in range(len(text) - 1)} & _index.keys():
+            for s in _index[bg]:
                 if s in text:
                     h = hits.setdefault(s, [0, ts, ts])
                     h[0], h[1], h[2] = h[0] + 1, min(h[1], ts), max(h[2], ts)
@@ -41,8 +39,11 @@ def board_hits(board_dir):
 
 
 def _init(strings):
-    global _strings
+    global _strings, _index
     _strings = strings
+    _index = collections.defaultdict(list)
+    for s in strings:
+        _index[s[:2]].append(s)
 
 
 def scan(root, strings, jobs=1):

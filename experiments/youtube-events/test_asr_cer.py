@@ -38,9 +38,9 @@ class Cer(unittest.TestCase):
         self.assertEqual(A.normalise("你好, abc 123 简单！", conv), "妳好簡單")
 
     def test_edit_distance(self):
-        self.assertEqual(A.edit_distance("", "abc"), 3)
-        self.assertEqual(A.edit_distance("kitten", "sitting"), 3)
-        self.assertEqual(A.edit_distance("你好嗎", "你好嗎"), 0)
+        self.assertEqual(A.levenshtein("", "abc"), 3)
+        self.assertEqual(A.levenshtein("kitten", "sitting"), 3)
+        self.assertEqual(A.levenshtein("你好嗎", "你好嗎"), 0)
 
     def test_trad_share(self):
         self.assertEqual(A.trad_counts("你好 简单 abc", conv), (4, 1))   # 你, 简, 单 changed

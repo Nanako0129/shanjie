@@ -45,13 +45,13 @@ def url(string, win, operators=True):
     return RSS + urllib.parse.urlencode({"q": q, "hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"})
 
 
-def fetch(u, cache_dir, get=common.http_get):
+def fetch(u, cache_dir, get=None):
     """Raw response bytes, from the cache directory if present."""
     path = os.path.join(cache_dir, hashlib.sha1(u.encode()).hexdigest() + ".xml")
     if os.path.exists(path):
         with open(path, "rb") as f:
             return f.read()
-    data = get(u)
+    data = (get or common.http_get)(u)
     os.makedirs(cache_dir, exist_ok=True)
     with open(path + ".part", "wb") as f:
         f.write(data)
@@ -74,7 +74,7 @@ def count(xml, string, win):
     return n, len(outlets - {""})
 
 
-def verify(string, date, cache_dir, operators=True, get=common.http_get):
+def verify(string, date, cache_dir, operators=True, get=None):
     win = window(date)
     if not win:
         return {"headlines": "", "outlets": "", "pass": "nodate"}

@@ -17,14 +17,18 @@ NOT_ARTICLE = re.compile(r"^(?:File|Image|Category|檔案|文件|分類|分类|�
 SEP = r"\s*[，,：:、\-–—]?\s*"
 
 
-def fetch_wikitext(year, get=common.http_get):
+def fetch_wikitext(year, get=None):
     q = urllib.parse.urlencode({"action": "parse", "page": f"{year}年臺灣", "prop": "wikitext", "redirects": "1", "format": "json", "formatversion": "2"})
-    return json.loads(get(API + "?" + q))["parse"]["wikitext"]
+    return json.loads((get or common.http_get)(API + "?" + q))["parse"]["wikitext"]
+
+
+# zh-wiki templates that only wrap a link to a foreign article: {{link-en|中文|English}}, {{tsl|en|Foreign|中文}}. The display name is kept as a link.
+LINK_TEMPLATE = re.compile(r"\{\{\s*(?:link-[a-z-]+|le)\s*\|\s*([^{}|=]+?)\s*(?:\|[^{}]*)?\}\}|\{\{\s*(?:tsl|translink)\s*\|[^{}|]*\|\s*([^{}|=]+?)\s*(?:\|\s*([^{}|=]+?)\s*)?(?:\|[^{}]*)?\}\}", re.I)
 
 
 def drop_noise(s):
     s = re.sub(r"<!--.*?-->|<ref[^>/]*/>|<ref[^>]*>.*?</ref>", "", s, flags=re.S)
-    return s
+    return LINK_TEMPLATE.sub(lambda m: f"[[{m.group(1) or m.group(3) or m.group(2)}]]", s)
 
 
 def clean(s):
@@ -73,7 +77,7 @@ def parse(wikitext, year):
             date, text = f"{year}-{month:02d}-{int(m.group(1)):02d}", m.group(2)
         if date is None:
             date = parent if depth > 1 and parent else (f"{year}-{month:02d}" if month else str(year))
-        elif depth == 1:
+        if depth == 1:
             parent = date
         if len(text) >= 4:
             events.append({"date": date, "text": text, "links": links(raw)})

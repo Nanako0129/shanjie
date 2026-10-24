@@ -17,6 +17,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
+from evalstats import levenshtein  # noqa: E402
+
 SEGMENT = 600
 HAN = re.compile(r"[一-鿿㐀-䶿]")
 CHUNK = re.compile(r"[^。！？；，、,.!?;\n]+")   # conversion decides simplified/traditional per sentence, so feed it pieces, not 10 minutes at once
@@ -64,21 +67,11 @@ def trad_counts(text, conv):
     return n, same
 
 
-def edit_distance(a, b):
-    prev = list(range(len(b) + 1))
-    for i, x in enumerate(a, 1):
-        cur = [i]
-        for j, y in enumerate(b, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
-        prev = cur
-    return prev[-1]
-
-
 def score(ref_raw, asr, conv):
     """One video and model -> dict of the counts the TSV and the totals need."""
     ref, hyp = normalise(ref_raw, conv), normalise(asr["text"], conv)
     n, same = trad_counts(asr["text"], conv)
-    return {"edits": edit_distance(ref, hyp), "ref": len(ref), "hyp": len(hyp), "han": n, "same": same,
+    return {"edits": levenshtein(ref, hyp), "ref": len(ref), "hyp": len(hyp), "han": n, "same": same,
             "wall": asr["wall_s"], "audio": asr["audio_s"]}
 
 

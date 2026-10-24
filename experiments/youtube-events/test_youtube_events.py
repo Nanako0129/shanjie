@@ -31,9 +31,10 @@ class Chapters(unittest.TestCase):
 class Extract(unittest.TestCase):
     def test_quotes_runs_and_stop_phrases(self):
         self.assertEqual(E.quoted("【峰哥】他說「高歌離席」《某某事件》 “不是這樣” 『abc』"), ["高歌離席", "某某事件", "不是這樣"])
-        self.assertEqual(E.han_runs("峰哥 中秋烤肉｜為什麼大家都愛看颱風假嗎"), ["大家", "愛看颱風假"])      # series suffix and the question word are cut out
+        self.assertEqual(E.han_runs("峰哥 中秋烤肉｜為什麼大家都愛看颱風假嗎"), ["大家都愛看颱風假"])      # series suffix and the question word are cut out; 都 stays
         self.assertEqual(E.han_runs("一二三四五六七八九"), [])                                              # a 9-character run is too long
         self.assertEqual(E.han_runs("好"), [])
+        self.assertEqual(E.han_runs("最高法院判決，和平協議，現在罷免"), ["最高法院判決", "和平協議", "現在罷免"])   # single-character function words do not split
 
     def test_tags_and_wiki_titles(self):
         self.assertEqual([E.tag_string(t) for t in ("罷免", "峰哥", "Taiwan", "颱風 假")], ["罷免", None, None, "颱風假"])
@@ -61,6 +62,15 @@ class Wiki(unittest.TestCase):
         self.assertEqual([(e["date"], e["text"], e["links"]) for e in ev], [
             ("2024-01-03", "某人宣布參選。", ["某人"]), ("2024-01-03", "後續：某黨回應", ["某黨"]),
             ("2024-01-05", "發生大停電", []), ("2024-02", "發生颱風", ["颱風"])])
+
+    def test_undated_depth1_bullet_does_not_leak_previous_date(self):
+        ev = FW.parse("=== 1月 ===\n* 3日，甲事件發生\n* 乙事件沒有日期\n** 乙的後續報導\n", 2024)
+        self.assertEqual([e["date"] for e in ev], ["2024-01-03", "2024-01", "2024-01"])
+
+    def test_link_templates_keep_display_name(self):
+        raw = "{{link-en|中文名|English}}與{{tsl|en|Foreign|譯名}}、{{tsl|en|OnlyForeign}}和{{Cite web|x}}結束"
+        self.assertEqual(FW.clean(raw), "中文名與譯名、OnlyForeign和結束")
+        self.assertEqual(FW.links(raw), ["中文名", "譯名", "OnlyForeign"])
 
     def test_fetch_uses_one_stubbed_request(self):
         got = []
@@ -125,8 +135,11 @@ class News(unittest.TestCase):
         items = [(f"某詞{i}報導", "Mon, 20 May 2024 08:00:00 GMT", "A報") for i in range(4)]
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(V.verify("某詞", "2024-05-20", d, get=lambda u: rss(items))["pass"], 0)
-            with mock.patch.object(common, "http_get", side_effect=AssertionError("network")):
+            with mock.patch.object(common, "http_get", side_effect=AssertionError("network")) as g:
                 self.assertEqual(V.verify("某詞", "", d)["pass"], "nodate")
+                self.assertEqual(g.call_count, 0)
+                with self.assertRaises(AssertionError):                     # the default really resolves common.http_get at call time
+                    V.verify("某詞", "2024-05-21", d)
 
 
 def make_ptt(root, board, stamps, text="這個「高歌離席」好笑"):

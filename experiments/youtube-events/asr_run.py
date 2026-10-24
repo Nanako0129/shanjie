@@ -3,7 +3,7 @@
 Usage:  python3 asr_run.py WAV_DIR OUT_DIR [--models tea,breeze,whisper]
   WAV_DIR/<video id>.wav   16 kHz mono, one 10-minute segment per video
   OUT_DIR/<model>/<video id>.json   {"text", "segments": [{"start","end","text"}] (may be empty), "wall_s", "audio_s"}
-Existing outputs are skipped (resumable). Prints counts and timings only. Model load time is not in wall_s.
+Existing outputs are skipped (resumable). Prints counts and timings only. Model load time is not in wall_s, and neither is the first-call warm-up: after loading, each model transcribes 1 s of silence once before the timed files.
 
 Requirements (pip lines for the VM; nothing is installed by this repo):
   pip install -U transformers accelerate torch soundfile
@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 import wave
 
@@ -79,6 +80,14 @@ def main():
         if not todo:
             continue
         transcribe = MODELS[m]()
+        with tempfile.TemporaryDirectory() as tmp:     # warm-up: the first call pays CUDA/kernel setup, which must not land in the first file's wall_s
+            silence = os.path.join(tmp, "silence.wav")
+            with wave.open(silence, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(bytes(32000))
+            transcribe(silence)
         for i in todo:
             path = os.path.join(a.wav_dir, i + ".wav")
             t0 = time.time()

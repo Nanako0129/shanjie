@@ -16,10 +16,8 @@ MIN_LEN, MAX_LEN = 2, 8
 STOP_PHRASES = ("峰哥 中秋烤肉", "峰哥中秋烤肉", "峰哥Fege", "峰哥 Fege", "峰哥", "Fege", "FEGE")
 # Chapter boilerplate that is never an event word (exact match).
 GENERIC = frozenset(("開場", "開頭", "結尾", "片頭", "片尾", "閒聊", "廣告", "贊助", "訂閱", "感謝", "預告", "總結", "結語"))
-# Han runs are cut at these (question words, particles, conjunctions); a name that contains one is still found through its quotes, tags or wiki links.
-SPLIT_WORDS = ("為什麼", "為甚麼", "是不是", "有沒有", "怎麼", "怎樣", "什麼", "甚麼", "如何", "到底", "竟然", "居然", "原來", "難道", "嗎", "呢", "吧", "啊", "呀",
-               "的", "了", "是", "在", "和", "與", "跟", "被", "把", "就", "都", "也", "還", "又", "很", "最")
-QUOTES = "「」『』《》“”【】"
+# Han runs are cut at these multi-character words and sentence particles; single-character function words (的 了 是 在 和 都 ...) are NOT split on, they sit inside names (最高法院, 和平協議); a name that contains one is still found through its quotes, tags or wiki links.
+SPLIT_WORDS = ("為什麼", "為甚麼", "是不是", "有沒有", "怎麼", "怎樣", "什麼", "甚麼", "如何", "到底", "竟然", "居然", "原來", "難道", "嗎", "呢", "吧", "啊", "呀")
 QUOTED = re.compile("「([^」]*)」|『([^』]*)』|《([^》]*)》|“([^”]*)”|【([^】]*)】")
 HAN = r"[一-鿿㐀-䶿]"
 HAN_RUN = re.compile(HAN + "+")
