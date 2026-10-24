@@ -15,11 +15,11 @@ fn root() -> PathBuf {
 
 /// 是要對決 is not in the shipped lexicon until the names-creators contract lands, so the test brings it as an evaluation-only extra
 /// overlay row (`load_lexicon_extra_detailed`, the same path as the CLI's `--extra-overlay`).
-const EXTRA: &str = "ㄕˋ-ㄧㄠˋ-ㄉㄨㄟˋ-ㄐㄩㄝˊ\t是要對決\t-6.60980192\ttest\n";
+const EXTRA: &str = "ㄕˋ-ㄧㄠˋ-ㄉㄨㄟˋ-ㄐㄩㄝˊ\t是要對決\t-6.60980192\ttest\nㄨㄛˇ-ㄛ-ㄎㄜ\t我OK\t-4.0\ttest\n";
 
 /// joe: 是要對決 40, 說 30, 水 10 and 不在詞庫的詞 90 (a table word the lexicon does not have: it must never show).
 /// N(joe) 200 is larger than the sum of the rows, as in a real table (the rest followed with a word below the cut).
-const TABLE: &str = "# test table\nE\tabc\t10\nE\tjoe\t200\nW\tabc\t水\t7\nW\tjoe\t不在詞庫的詞\t90\nW\tjoe\t是要對決\t40\nW\tjoe\t水\t10\nW\tjoe\t說\t30\n";
+const TABLE: &str = "# test table\nE\tabc\t10\nE\tjoe\t200\nW\tabc\t水\t7\nW\tjoe\t不在詞庫的詞\t90\nW\tjoe\t是要對決\t40\nW\tjoe\t水\t10\nW\tjoe\t說\t30\nE\tok\t50\nW\tok\t水\t40\n";
 
 struct Shared {
     lex: Arc<Lexicon>,
@@ -137,10 +137,71 @@ fn no_table_or_no_row_for_the_word_is_today() {
         run(&mut b, "Esc");
     }
     // A table that does not parse leaves the feature off.
-    assert!(EnglishTable::parse("E\tjoe\n").is_none());
-    assert!(EnglishTable::parse("E\tjoe\t0\n").is_none());
-    assert!(EnglishTable::parse("W\tjoe\tx\t1\n").is_none());
-    assert!(EnglishTable::parse("# nothing\n").is_none());
+}
+
+#[test]
+fn a_table_that_does_not_parse_is_an_error() {
+    use core::english_next::ParseError::*;
+    let bad = |t: &str| EnglishTable::parse(t).err();
+    assert_eq!(bad("E\tjoe\n"), Some(BadRow(1)));
+    assert_eq!(bad("# h\nE\tjoe\t0\n"), Some(BadRow(2)));
+    assert_eq!(bad("E\tjoe\t5\nE\tjoe\t6\n"), Some(BadRow(2)));
+    assert_eq!(bad("W\tjoe\tx\t1\n"), Some(BadRow(1)));                  // a W row needs its E row first
+    assert_eq!(bad("E\tjoe\t5\nW\tjoe\tx\t0\n"), Some(BadRow(2)));        // a zero count
+    assert_eq!(bad("E\tjoe\t5\nX\tjoe\n"), Some(BadRow(2)));
+    assert_eq!(bad("E\tjoe\t5\nW\tjoe\tx\t3\nW\tjoe\ty\t3\n"), Some(TooSmall(1)));   // 6 > 5
+    assert_eq!(bad("# nothing\n"), Some(Empty));
+    // CRLF is read; a sum equal to N(e) is fine.
+    let t = EnglishTable::parse("E\tjoe\t6\r\nW\tjoe\tx\t3\r\nW\tjoe\ty\t3\r\n").unwrap();
+    assert!(t.get("joe").is_some() && t.get("jo").is_none());
+    // An engine hook says why; a data directory with an invalid file does not build an engine (a missing file is fine).
+    let dir = std::env::temp_dir().join(format!("shanjie-english-next-bad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("english-next.tsv");
+    std::fs::write(&f, "E\tjoe\t5\nW\tjoe\tx\t0\n").unwrap();
+    let mut e = make(false, false);
+    assert!(e.load_english_next(&f).unwrap_err().contains("line 2"));
+    assert!(e.load_english_next(&dir.join("missing.tsv")).unwrap_err().contains("cannot read"));
+    let tmp = std::env::temp_dir().join(format!("shanjie-english-next-data-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    for name in std::fs::read_dir(root().join("data/lexicon")).unwrap().map(|e| e.unwrap().file_name()) {
+        std::os::unix::fs::symlink(root().join("data/lexicon").join(&name), tmp.join(&name)).unwrap();
+    }
+    assert!(Engine::new(&tmp, Layout::Standard).is_ok());
+    std::fs::copy(&f, tmp.join("english-next.tsv")).unwrap();
+    assert!(Engine::new(&tmp, Layout::Standard).is_err());
+    std::fs::write(tmp.join("english-next.tsv"), TABLE).unwrap();
+    assert!(Engine::new(&tmp, Layout::Standard).is_ok());
+    std::fs::remove_dir_all(&tmp).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_cache_follows_the_table() {
+    // Table A, no table, table B with another follower: the empty-unit row shows B's word, never A's.
+    let table = |w: &str| Arc::new(EnglishTable::parse(&format!("E\tjoe\t100\nW\tjoe\t{w}\t50\n")).unwrap());
+    let mut e = make(false, false);
+    e.set_english_next(Some(table("水")));
+    assert_eq!(row(&run(&mut e, JOE)), ["水"]);
+    e.set_english_next(None);
+    e.reset(ResetMode::Discard);
+    assert!(row(&run(&mut e, JOE)).is_empty());
+    e.set_english_next(Some(table("說")));
+    e.reset(ResetMode::Discard);
+    assert_eq!(row(&run(&mut e, JOE)), ["說"]);
+}
+
+#[test]
+fn a_lexicon_word_that_ends_in_letters_is_no_english_token() {
+    // 我OK (the extra row) is a word of the lexicon; the table has "ok", but the unit before ㄕ is a syllable, not an English token.
+    let script = "j i 3 i _ d k _ g";
+    let (mut a, mut b) = (make(true, false), make(false, false));
+    let (x, y) = (run(&mut a, script), run(&mut b, script));
+    assert!(x[x.len() - 2].preedit.ends_with("OK"), "the word is on screen: {}", x[x.len() - 2].preedit);
+    assert_eq!(row(&x), row(&y));
+    assert_eq!(a.digits_syls(), b.digits_syls());
+    // The same letters typed as an English token do use the table.
+    assert_eq!(row(&run(&mut make(true, false), "S-o k _")), ["水"]);
 }
 
 #[test]

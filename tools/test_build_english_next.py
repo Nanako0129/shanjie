@@ -233,6 +233,24 @@ class Build(unittest.TestCase):
         self.assertEqual({k[1] for k in w}, {words[25]} | set(words[:19]))              # the count wins, then bytes cut the rest
         self.assertEqual(w[("joe", words[25])], 3 * 5)
 
+    def test_an_e_with_no_surviving_w_has_no_rows(self):
+        g = self.text_file("g.txt", ["Joe好"] * 3 + ["Amy好"] * 2 + ["Zed囧"] * 3)       # amy: w below the cut; zed: no lexicon word at all
+        out, rep = self.build(g0v=g, kw=dict(min_w=3))
+        self.assertEqual(es(out), {"joe": 15})
+        self.assertEqual((rep["e"], rep["e_written"]), (3, 1))
+        out, rep = self.build(g0v=g, kw=dict(min_w=2))
+        self.assertEqual(set(es(out)), {"joe", "amy"})
+
+    def test_a_lone_carriage_return_is_not_a_line_break(self):
+        g = os.path.join(self.dir, "g.txt")
+        with open(g, "wb") as f:
+            f.write("Amy好\rAmy好\nAmy好\r\n".encode())
+        self.assertEqual(list(B.lines_of(g)), ["Amy好\rAmy好", "Amy好"])
+        out, rep = self.build(g0v=g, kw=dict(min_units=3))
+        self.assertEqual(es(out), {})                                              # 2 messages, 3 events: the \r\n line is one message, the lone \r joins
+        out, rep = self.build(g0v=g, kw=dict(min_units=2))
+        self.assertEqual(es(out), {"amy": 15})
+
     def test_size_fallback_raises_the_w_cut_and_stops_when_nothing_fits(self):
         g = self.text_file("g.txt", ["Joe好"] * 20 + ["Joe要"] * 6 + ["Joe對"] * 3)
         out, rep = self.build(g0v=g)

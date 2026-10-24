@@ -16,7 +16,7 @@ Quoted PTT lines and signatures go in ptt_clean.body; URLs are cut out of every 
 An English word e: 2-32 ASCII letters, not touching a letter or digit, lower-cased. A Han run after it (at most one half-width space) is one
 "e before Chinese" event; w is the first word of the run by longest match in the lexicon files. All thresholds count UNWEIGHTED events.
 
-Rows (tab separated, byte-sorted under `#` header lines with every input's SHA-256, the lexicon files' and the tool version):
+Rows (tab separated, an e with no w row left gets no E row either; byte-sorted under `#` header lines with every input's SHA-256, the lexicon files' and the tool version):
   E  e  N(e)          weighted events
   W  e  w  N(e->w)    weighted events
 Admission: events(e) >= 20, and (PTT boards with an event >= 5, or units of the other sources with an event >= 20). An e that passes through
@@ -197,9 +197,9 @@ def sha256_file(path):
 
 def lines_of(path):
     opener = gzip.open if path.endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8", errors="replace", newline="") as f:
+    with opener(path, "rt", encoding="utf-8", errors="replace", newline="\n") as f:   # a line ends at "\n" only, a lone "\r" is not a break
         for line in f:
-            yield line.rstrip("\n")
+            yield line.rstrip("\n").removesuffix("\r")
 
 
 def films_of(path):
@@ -270,14 +270,16 @@ def build(lexicon, src, jobs=1, min_events=MIN_EVENTS, min_boards=MIN_BOARDS, mi
     steps = [min_w] + [s for s in W_STEPS[1:] if s > min_w]
     report = {"e": len(keep), "blocked_by_account": blocked, "events_by_source": dict(total.by_source), "films": total.films}
     for k in steps:
-        rows = []
+        rows, n_e = [], 0
         for e in keep:
-            rows.append(f"E\t{e}\t{total.wt_e[e]}\n")
             top = sorted(((w, wt) for w, n, wt in by_e[e] if n >= k), key=lambda x: (-x[1], x[0].encode()))[:MAX_W]
-            rows += [f"W\t{e}\t{w}\t{wt}\n" for w, wt in top]
+            if top:                                        # an e with no surviving w has nothing to predict: no E row, no bytes
+                rows.append(f"E\t{e}\t{total.wt_e[e]}\n")
+                rows += [f"W\t{e}\t{w}\t{wt}\n" for w, wt in top]
+                n_e += 1
         text = "".join(f"{h}\n" for h in head) + f"# min_w {k}\n" + "".join(sorted(rows, key=lambda r: r.encode()))
         if len(text.encode()) <= max_bytes:
-            return text, {**report, "min_w": k, "bytes": len(text.encode()), "rows_w": sum(r.startswith("W") for r in rows)}
+            return text, {**report, "e_written": n_e, "min_w": k, "bytes": len(text.encode()), "rows_w": sum(r.startswith("W") for r in rows)}
     return None, {**report, "min_w": steps[-1]}
 
 

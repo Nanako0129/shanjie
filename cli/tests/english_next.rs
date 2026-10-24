@@ -2,8 +2,8 @@
 //! base-arm numbers are the models' ranks; a model change moves them). Each engine is about 700 MB (the two profiles are built one after the other).
 use std::process::Command;
 
-fn files() -> (String, String, String) {
-    let dir = std::env::temp_dir().join(format!("shanjie-english-next-cli-{}", std::process::id()));
+fn files(name: &str) -> (String, String, String) {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-next-cli-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let (rows, table, words) = (dir.join("rows.txt"), dir.join("table.tsv"), dir.join("words.txt"));
     // joe is followed by 水 (30) and 說 (20); the second line of rows is not a row and is skipped.
@@ -15,7 +15,7 @@ fn files() -> (String, String, String) {
 
 #[test]
 fn counts_of_a_tiny_table() {
-    let (rows, table, words) = files();
+    let (rows, table, words) = files("counts");
     let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table, "--words", &words]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains("skipped 1 rows"));
@@ -36,4 +36,15 @@ fn counts_of_a_tiny_table() {
         assert_eq!(&l[2..16], nums, "{profile}");
         assert!(l[16].parse::<f64>().is_ok() && l[17].parse::<f64>().is_ok());
     }
+    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
+}
+
+#[test]
+fn an_invalid_table_is_an_error_not_a_silent_off() {
+    let (rows, table, words) = files("invalid");
+    std::fs::write(&table, "E\tjoe\t100\nW\tjoe\t水\t0\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table, "--words", &words]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("bad row at line 2"), "{}", String::from_utf8_lossy(&out.stderr));
+    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
 }

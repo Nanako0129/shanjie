@@ -3,7 +3,7 @@
 //! Shift+(first letter of e), the other letters, Space, and reads the prediction row (i); then the first Zhuyin key of w's first syllable
 //! (standard layout) and reads it again (ii, iii). Standard layout, English mixing on, prediction on, the rest as `replay::build_engine`
 //! makes the App's engine (acg pack, bigram, small model and colloquial table when the files exist, demotion and rerank on, no learning).
-//! Both arms are the same engine, one pass each, the table only loaded for the second (`Engine::load_english_next`).
+//! Both arms are the same engine built without the data directory's table; an untimed warm-up pass, then one timed pass without the table, then the table is loaded (`Engine::load_english_next`, an invalid table is an error) and one timed pass with it.
 //!
 //! Output, no row text (R2), one TSV line per profile (chat, formal), then the memory line:
 //!   english-next  profile  rows  no_token  base_i base_ii base_iii  table_i table_ii table_iii  imp_i wor_i  imp_ii wor_ii  imp_iii wor_iii  p95_base_ms p95_table_ms
@@ -89,21 +89,19 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (tl, co) = (root.join("data/lm/tinylm.sjtl"), root.join("data/lm/colloquial.sjlm"));
     let mut rss = None;
     for (name, profile) in [("chat", Profile::Chat), ("formal", Profile::Formal)] {
-        let mut e = cli::replay::build_engine(root, &lm, tl.is_file().then_some(tl.as_path()), co.is_file().then_some(co.as_path()), profile, false)?;
+        let mut e = cli::replay::build_engine_opts(root, &lm, tl.is_file().then_some(tl.as_path()), co.is_file().then_some(co.as_path()), profile, false, true)?;
         e.load_english(&words).map_err(|_| "cannot load the word list".to_string())?;
         e.set_english(true).map_err(|_| "cannot switch English mixing on".to_string())?;
         e.set_prediction(true).map_err(|_| "cannot switch the prediction row on".to_string())?;
-        e.set_english_next(None); // the arm without the table, whatever the data directory holds
         let pass = |e: &mut Engine| -> Result<(Vec<Option<[bool; 3]>>, f64), String> {
             let mut times = Vec::new();
             let hits = rows.iter().map(|r| one_row(e, r, &mut times)).collect::<Result<Vec<_>, _>>()?;
             Ok((hits, p95(times)))
         };
+        pass(&mut e)?; // untimed warm-up, so neither arm pays for cold caches
         let (base, p_base) = pass(&mut e)?;
         let before = crate::rss_kb();
-        if !e.load_english_next(&table) {
-            return Err("cannot read the table".into());
-        }
+        e.load_english_next(&table)?;
         let (with, p_table) = pass(&mut e)?;
         rss = rss.or(before.zip(crate::rss_kb()));
         if base.iter().map(Option::is_some).ne(with.iter().map(Option::is_some)) {
