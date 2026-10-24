@@ -186,10 +186,10 @@ def clean(lines, ctx, guard):
             if key in seen:
                 dropped["dedupe"]["duplicate"] += 1
                 continue
-            seen.add(key)
             labels, short = guard.hits(s)
             labels = labels | short               # short entries drop the line too (none are left at 4-character containment)
             if labels:
+                seen.add(key)                     # a guard hit stays a guard hit wherever it recurs
                 dropped["guard"][",".join(sorted(labels))] += 1
                 for lab in labels:
                     guard_sets[lab] += 1
@@ -201,8 +201,9 @@ def clean(lines, ctx, guard):
                     guard_rows[lab].add(row)
                 continue
             if film_kept >= FILM_CAP:
-                dropped["unit_cap"]["film cap"] += 1
+                dropped["unit_cap"]["film cap"] += 1     # not remembered in `seen`: the same sentence can still be kept in another film
                 continue
+            seen.add(key)
             film_kept += 1
             kept.append((f"{n}" if k == 0 else f"{n}:{k}", s))
     left = funnel["split"]

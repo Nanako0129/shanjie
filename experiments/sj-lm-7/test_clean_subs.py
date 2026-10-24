@@ -210,6 +210,14 @@ class FilmCap(unittest.TestCase):
         self.assertEqual(man["remaining_after_step"]["unit_cap"], 57)
         self.assertEqual(man["remaining_after_step"]["guard"], 67)
 
+    def test_a_sentence_the_cap_dropped_is_not_a_duplicate_in_the_next_film(self):
+        a = self.film("好", 51)
+        kept, man = self.kept(a + [""] + [a[50]])                      # film 1's 51st sentence is capped; film 2 has the same sentence
+        self.assertEqual(kept, a[:50] + [a[50]])
+        self.assertEqual((man["dropped"]["unit_cap"]["sentences"], man["dropped"]["dedupe"]["sentences"]), (1, 0))
+        kept, man = self.kept(a[:50] + [a[0], "", a[0]])               # a real repeat inside film 1 and again in film 2 is still a duplicate
+        self.assertEqual((len(kept), man["dropped"]["dedupe"]["sentences"]), (50, 2))
+
     def test_several_blank_lines_are_one_boundary_and_exactly_fifty_is_not_capped(self):
         kept, man = self.kept(self.film("好", 50) + ["", "", ""] + self.film("玩", 3))
         self.assertEqual((len(kept), man["films"]["count"], man["dropped"]["unit_cap"]["sentences"]), (53, 2, 0))

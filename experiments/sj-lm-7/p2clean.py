@@ -1,25 +1,12 @@
-#!/usr/bin/env python3
-"""Copied from experiments/p2-data/clean.py of the local, unmerged branch exp/p2-data at commit 4f7504bf; only this note differs.
-SJ-LM-7 (docs/contracts/sj-lm-7.md sections 2.4 and 2.7) reuses its sentence split, filters, dedupe key and Guard: ptt_clean.py and
-clean_subs.py import this file. The readers and run() below are the original P2 pool builder and are not used here.
+"""Copied from experiments/p2-data/clean.py of the local, unmerged branch exp/p2-data at commit 4f7504bf, with the P2 pool builder removed
+(the source readers, run() and main()); what is left is what ptt_clean.py and clean_subs.py import: the sentence split, the filters (reject),
+the dedupe key and the evaluation Guard (docs/contracts/sj-lm-7.md sections 2.4 and 2.7).
 
-P2 candidate pool, step 2: raw downloads (fetch.py) -> ~/.cache/shanjie/p2-public/pool.tsv (`source<TAB>source_id<TAB>sentence`).
-
-Per source: units -> sentences -> filters, in this order (every step is counted in manifest.json):
-  split      sentence-final punctuation (。！？!?) and line breaks; whitespace stripped; empty pieces dropped
-  han_len    4..40 Han characters
-  han_ratio  Han characters >= 70% of the non-space characters
-  url        URL, bare domain, e-mail address or @handle
-  digits     a run of >= 7 digits (full-width folded), or a phone-number-like string with >= 8 digits
-  code       code-like text (braces, backslash, backtick, pipe, arrows, ==, call syntax)
-  simplified a character the project treats as Simplified-only in Traditional text (build_counts.TRAD_SIMP_ONLY, from STCharacters.txt)
-  dedupe     exact duplicate after NFKC + whitespace removal + case folding, across all sources (first source in the run order wins)
-  guard      the sentence contains (or, for word lists, equals) an evaluation sentence
-Sentences containing a TWPhrases key whose Taiwan form differs are only flagged (flags.tsv), never dropped.
-
-  clean.py [--raw DIR] [--out DIR] [--repo DIR] [--contain-min N]
+Filters, in this order: split (sentence-final punctuation 。！？!? and line breaks), han_len (4..40 Han characters), han_ratio (Han >= 70% of the
+non-space characters), url (URL, bare domain, e-mail, @handle), digits (a run of >= 7 digits, or a phone-like string with >= 8), code (braces,
+backslash, backtick, pipe, arrows, ==, call syntax), simplified (a character in build_counts.TRAD_SIMP_ONLY). Dedupe is NFKC + whitespace removed +
+case folded. The Guard drops a sentence that contains an evaluation sentence (or, for word lists, equals one).
 """
-import argparse
 import collections
 import glob
 import hashlib
@@ -38,16 +25,9 @@ import holdout_guard as hg  # noqa: E402  tools/holdout_guard.py; it puts experi
 s7f = hg.clean   # experiments/s7f-corpus/clean.py (Matcher). This file has the same name: never `import clean` here, load it by path (test_p2.py does)
 
 CACHE = os.path.expanduser("~/.cache/shanjie")
-RAW = os.path.join(CACHE, "p2-public", "raw")
-OUT = os.path.join(CACHE, "p2-public")
 MIN_HAN, MAX_HAN, MIN_RATIO = 4, 40, 0.7
 CONTAIN_MIN = 8      # guard: an evaluation entry of >= this many Han characters removes every pool sentence that contains it; shorter ones only
                      # remove a pool sentence they equal (see Guard). The holdout always uses holdout_guard's containment from 4 characters.
-YODAS_GAP = 50       # 10 ms units: a pause of >= 0.5 s between two subtitle fragments ends the sentence (about the 80th percentile of gaps)
-YODAS_VID = 11       # a YouTube id is 11 characters and may contain '-', so the utterance id is cut by position
-ORDER = ["wildchat", "yodas", "tatoeba", "massive"]
-LICENCE = {"wildchat": "ODC-BY 1.0 (allenai/WildChat-1M)", "yodas": "CC BY 3.0 (espnet/yodas, CC-BY YouTube videos)",
-           "tatoeba": "CC BY 2.0 FR (Tatoeba)", "massive": "CC BY 4.0 (AmazonScience/massive)"}
 
 HANC = re.compile(r"[一-鿿]")
 CJK = "⺀-鿿　-〿＀-￯"
@@ -60,7 +40,6 @@ DIGITS = re.compile(r"\d{7,}")
 PHONE = re.compile(r"(?:\+\d|(?<![\d.])[(]?0)[\d\s\-()]{6,}\d[)]?")   # same shape as experiments/s7f-corpus/clean.py PHONE_CAND, on NFKC text
 PHONE_MIN_DIGITS = 8
 CODE = re.compile(r"[{}<>\\`|$^]|==|!=|=>|->|::|\(\)|\w\.\w+\(|;\s*$")
-STEPS = ["split", "han_len", "han_ratio", "url", "digits", "code", "simplified", "dedupe", "guard"]
 
 
 # ------------------------------------------------------------------ text helpers (pure)
@@ -107,135 +86,6 @@ def reject(s, simp):
 def dedupe_key(s):
     """NFKC (full-width -> half-width, compatibility forms), all whitespace removed, case folded."""
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", s)).casefold()
-
-
-class TwFlag:
-    """Sentences containing a TWPhrases key (a mainland-style term) that OpenCC would change to a different Taiwan form."""
-
-    def __init__(self, phrases):
-        self.map = {k: v for k, v in phrases.items() if k != v}
-        self.rx = re.compile("|".join(sorted(map(re.escape, self.map), key=len, reverse=True))) if self.map else None
-
-    def hits(self, s):
-        return sorted({m.group(0) for m in self.rx.finditer(s)}) if self.rx else []
-
-
-# ------------------------------------------------------------------ YODAS fragments -> sentences
-YODAS_LINE = re.compile(r"^(.{%d})-(\d{5})-(\d{8})-(\d{8})(?: (.*))?$" % YODAS_VID)
-
-
-def yodas_units(lines):
-    """Merges consecutive subtitle fragments of one video into units: yields (source_id, text).
-    A unit ends at: another video / a skipped segment number / a pause >= YODAS_GAP between fragments / a fragment that ends with
-    sentence-final punctuation / adding the next fragment would exceed MAX_HAN Han characters. Fragments are joined without a space except
-    between two ASCII alphanumerics. A line that does not parse is counted by the caller (returned as source_id None)."""
-    buf, vid, first, last_seg, last_end = [], None, None, None, None
-
-    def flush():
-        nonlocal buf
-        if buf:
-            u = (f"{vid}:{first}", "".join(buf))
-            buf = []
-            return u
-        return None
-    for line in lines:
-        m = YODAS_LINE.match(line.rstrip("\n"))
-        if not m:
-            yield None, line
-            continue
-        v, seg, start, end, text = m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)), (m.group(5) or "").strip()
-        if buf and (v != vid or seg != last_seg + 1 or start - last_end >= YODAS_GAP
-                    or han_count("".join(buf)) + han_count(text) > MAX_HAN):
-            u = flush()
-            if u:
-                yield u
-        if not buf:
-            vid, first = v, seg
-        if buf and re.match(r"[A-Za-z0-9]", text) and re.search(r"[A-Za-z0-9]$", buf[-1]):
-            buf.append(" ")
-        buf.append(text)
-        last_seg, last_end = seg, end
-        if SPLIT.search(text[-1:]):
-            u = flush()
-            if u:
-                yield u
-    u = flush()
-    if u:
-        yield u
-
-
-# ------------------------------------------------------------------ source readers
-def read_wildchat(raw, stats):
-    d = os.path.join(raw, "wildchat")
-    stats.update(conversations=0, user_turns=0, dropped_toxic=0, dropped_redacted=0)
-    for p in sorted(glob.glob(os.path.join(d, "page-*.jsonl"))):
-        for line in open(p, encoding="utf-8"):
-            r = json.loads(line)
-            stats["conversations"] += 1
-            for t in r["turns"]:
-                stats["user_turns"] += 1
-                if t["toxic"]:
-                    stats["dropped_toxic"] += 1
-                elif t["redacted"]:
-                    stats["dropped_redacted"] += 1
-                else:
-                    yield f"{r['hash']}:{t['i']}", t["text"], {}
-
-
-def read_yodas(raw, stats):
-    stats.update(files=0, lines=0, unparsed=0, units=0)
-    vids = set()
-    for p in sorted(glob.glob(os.path.join(raw, "yodas", "*.txt"))):
-        stats["files"] += 1
-        lines = list(open(p, encoding="utf-8"))
-        stats["lines"] += len(lines)
-        for sid, text in yodas_units(lines):
-            if sid is None:
-                stats["unparsed"] += 1
-                continue
-            stats["units"] += 1
-            vids.add(sid.split(":")[0])
-            yield sid, text, {}
-    stats["videos"] = len(vids)
-
-
-def tatoeba_native(raw):
-    """-> ({id: (text, username)}, counts). Native Traditional = the sentence has a Hans transcription (Tatoeba stores one script and
-    generates the other as a transcription); native Simplified has a Hant transcription."""
-    sents = {}
-    for l in open(os.path.join(raw, "tatoeba", "cmn_sentences_detailed.tsv"), encoding="utf-8"):
-        f = l.rstrip("\n").split("\t")
-        sents[f[0]] = (f[2], "" if f[3] == "\\N" else f[3])
-    scripts = collections.defaultdict(set)
-    for l in open(os.path.join(raw, "tatoeba", "cmn_transcriptions.tsv"), encoding="utf-8"):
-        f = l.rstrip("\n").split("\t")
-        if f[1] == "cmn" and f[2] in ("Hans", "Hant"):
-            scripts[f[0]].add(f[2])
-    native_t = {i for i, s in scripts.items() if s == {"Hans"} and i in sents}
-    c = {"sentences": len(sents), "with_hans_transcription": sum("Hans" in s for i, s in scripts.items() if i in sents),
-         "with_hant_transcription": sum("Hant" in s for i, s in scripts.items() if i in sents),
-         "with_both": sum(len(s) == 2 for i, s in scripts.items() if i in sents),
-         "no_hans_hant_transcription": sum(1 for i in sents if i not in scripts), "native_traditional": len(native_t)}
-    return {i: sents[i] for i in sorted(native_t, key=int)}, c
-
-
-def read_tatoeba(raw, stats):
-    native, c = tatoeba_native(raw)
-    stats.update(c)
-    for i, (text, user) in native.items():
-        yield i, text, {"author": user}
-
-
-def read_massive(raw, stats):
-    stats.update(utterances=0, partitions={})
-    for line in open(os.path.join(raw, "massive", "zh-TW.jsonl"), encoding="utf-8"):
-        r = json.loads(line)
-        stats["utterances"] += 1
-        stats["partitions"][r["partition"]] = stats["partitions"].get(r["partition"], 0) + 1
-        yield f"{r['partition']}-{r['id']}", r["utt"], {}
-
-
-READERS = {"wildchat": read_wildchat, "yodas": read_yodas, "tatoeba": read_tatoeba, "massive": read_massive}
 
 
 # ------------------------------------------------------------------ leakage guard
@@ -393,116 +243,3 @@ def build_guard(repo, conv, contain_min):
 
 def shown(p, repo):
     return os.path.relpath(p, repo) if p.startswith(repo) else p.replace(os.path.expanduser("~"), "~")
-
-
-# ------------------------------------------------------------------ main
-def run(raw, out, repo, contain_min=CONTAIN_MIN):
-    conv = bc.load_conv()
-    simp, simp_full, tw = bc.TRAD_SIMP_ONLY, bc.SIMP_ONLY, TwFlag(bc.TW_PHRASE)
-    guard, guard_dups = build_guard(repo, conv, contain_min)
-    seen = set()
-    pool, flags = [], []
-    man = {"sources": {}, "step_order": STEPS}
-    guard_order = ["holdout", "dev", "bench", "eval-other", "tune", "e2"]
-    guard_hits = collections.Counter()
-    guard_first = collections.Counter()
-    short_hits = collections.Counter()
-    for src in ORDER:
-        stats, funnel, extra = {}, collections.OrderedDict((s, 0) for s in STEPS), collections.Counter()
-        authors, vids, kept_n = set(), set(), 0
-        for sid, text, meta in READERS[src](raw, stats):
-            for k, s in enumerate(split_sentences(text)):
-                funnel["split"] += 1
-                why = reject(s, simp)
-                for step in STEPS[1:STEPS.index(why) if why else 7]:
-                    funnel[step] += 1
-                if why:
-                    extra["dropped_" + why] += 1
-                    continue
-                if not simp_full.isdisjoint(s):
-                    extra["kept_but_full_simp_only_would_drop"] += 1
-                key = dedupe_key(s)
-                if key in seen:
-                    extra["dropped_dedupe"] += 1
-                    continue
-                seen.add(key)
-                funnel["dedupe"] += 1
-                labels, short = guard.hits(s)
-                for l in short:
-                    short_hits[(src, l)] += 1
-                if labels:
-                    extra["dropped_guard"] += 1
-                    for l in labels:
-                        guard_hits[(src, l)] += 1
-                    guard_first[(src, next(l for l in guard_order if l in labels))] += 1
-                    continue
-                funnel["guard"] += 1
-                new_id = sid if k == 0 else f"{sid}:{k}"
-                pool.append((src, new_id, s))
-                if meta.get("author"):
-                    authors.add(meta["author"])
-                if src == "yodas":
-                    vids.add(sid.split(":")[0])
-                th = tw.hits(s)
-                if th:
-                    flags.append((src, new_id, ",".join(th)))
-        man["sources"][src] = {"licence": LICENCE[src], "raw": stats, "kept_after_step": dict(funnel), "dropped": dict(extra),
-                               "kept": funnel["guard"]}
-        if src == "tatoeba":
-            man["sources"][src]["attribution"] = {"authors_in_pool": len(authors)}
-        if src == "yodas":
-            man["sources"][src]["attribution"] = {"videos_in_pool": len(vids), "channel": "not in the text files (only the video id is)"}
-    os.makedirs(out, exist_ok=True)
-    with open(os.path.join(out, "pool.tsv"), "w", encoding="utf-8", newline="\n") as f:
-        for r in pool:
-            f.write("\t".join(r) + "\n")
-    with open(os.path.join(out, "flags.tsv"), "w", encoding="utf-8", newline="\n") as f:
-        for r in flags:
-            f.write("\t".join(r) + "\n")
-    # attribution: Tatoeba sentence id -> author (the id is the pool's source_id)
-    native, _ = tatoeba_native(raw)
-    with open(os.path.join(out, "attribution.tsv"), "w", encoding="utf-8", newline="\n") as f:
-        for src, sid, _s in pool:
-            if src == "tatoeba":
-                f.write(f"tatoeba\t{sid}\t{native[sid.split(':')[0]][1]}\n")
-            elif src == "yodas":
-                f.write(f"yodas\t{sid}\thttps://www.youtube.com/watch?v={sid.split(':')[0]}\n")
-    man["pool"] = {"path": "pool.tsv", "rows": len(pool), "sha256": sha256_file(os.path.join(out, "pool.tsv")),
-                   "han_chars": sum(han_count(s) for _, _, s in pool)}
-    man["flags"] = {"path": "flags.tsv", "tw_phrase_flagged": len(flags), "by_source": dict(collections.Counter(s for s, _, _ in flags))}
-    man["guard"] = {"dropped_by_first_label": {f"{s}/{l}": n for (s, l), n in sorted(guard_first.items())},
-                    "hits_by_label_nonexclusive": {f"{s}/{l}": n for (s, l), n in sorted(guard_hits.items())},
-                    "contain_min": contain_min,
-                    "kept_but_contain_a_short_eval_sentence": {f"{s}/{l}": n for (s, l), n in sorted(short_hits.items())},
-                    "files": guard.files, "byte_identical_copies_skipped": guard_dups,
-                    "label_order_for_first": guard_order}
-    man["opencc"] = {n: sha256_file(os.path.join(CACHE, "sources", "opencc", n)) for n in ("STCharacters.txt", "TWPhrases.txt", "TWVariants.txt")}
-    man["simplified_set"] = {"used": "build_counts.TRAD_SIMP_ONLY", "size": len(simp), "full_SIMP_ONLY_size": len(simp_full),
-                             "carved_out": "".join(sorted(simp_full - simp))}
-    fetched = []
-    if os.path.exists(os.path.join(raw, "fetched.jsonl")):
-        fetched = [json.loads(l) for l in open(os.path.join(raw, "fetched.jsonl"), encoding="utf-8")]
-    for src in ORDER:
-        man["sources"][src]["fetched"] = [{k: v for k, v in x.items() if k != "source"} for x in fetched if x["source"] == src]
-    with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as f:
-        json.dump(man, f, ensure_ascii=False, indent=1)
-        f.write("\n")
-    return man
-
-
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--raw", default=RAW)
-    ap.add_argument("--out", default=OUT)
-    ap.add_argument("--repo", default=ROOT)
-    ap.add_argument("--contain-min", type=int, default=CONTAIN_MIN, help="Han characters from which an evaluation entry removes sentences containing it")
-    a = ap.parse_args()
-    man = run(a.raw, a.out, a.repo, a.contain_min)
-    for s, d in man["sources"].items():
-        print(s, d["kept_after_step"])
-    print("pool", man["pool"]["rows"], "flagged", man["flags"]["tw_phrase_flagged"])
-    print("guard", man["guard"]["dropped_by_first_label"])
-
-
-if __name__ == "__main__":
-    main()
