@@ -231,6 +231,11 @@ jobs:
       - name: IT pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_it_pack tools.test_it_sources tools.test_it_wiki_counts
 
+      # docs/contracts/meme-pack.md section 4: the meme pack builder against fixtures and a fake decoder (thresholds, dedupe, the
+      # first-place rule, count-file provenance, determinism). No network, no evaluation CLI.
+      - name: Meme pack builder (Python)
+        run: python3 -W ignore -m unittest tools.test_build_meme_pack
+
       # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
       # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
       - name: Names lexicon builder (Python)

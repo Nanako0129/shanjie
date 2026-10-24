@@ -15,7 +15,7 @@ fn root() -> PathBuf {
 
 /// 是要對決 is not in the shipped lexicon until the names-creators contract lands, so the test brings it as an evaluation-only extra
 /// overlay row (`load_lexicon_extra_detailed`, the same path as the CLI's `--extra-overlay`).
-const EXTRA: &str = "ㄕˋ-ㄧㄠˋ-ㄉㄨㄟˋ-ㄐㄩㄝˊ\t是要對決\t-6.60980192\ttest\nㄨㄛˇ-ㄛ-ㄎㄜ\t我OK\t-4.0\ttest\n";
+const EXTRA: &str = "ㄨㄛˇ-ㄛ-ㄎㄜ\t我OK\t-4.0\ttest\n";
 
 /// joe: 是要對決 40, 說 30, 水 10 and 不在詞庫的詞 90 (a table word the lexicon does not have: it must never show).
 /// N(joe) 200 is larger than the sum of the rows, as in a real table (the rest followed with a word below the cut).

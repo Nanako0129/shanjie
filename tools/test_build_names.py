@@ -598,6 +598,16 @@ class AppendCreators(unittest.TestCase):
         self.assertEqual(got, {"鬼鬼": -5.0, "詭詭": -5.0 - B.SLANG_BEHIND, "神神": -5.0, "鬼詭": -5.0 - 2 * B.SLANG_BEHIND})
         self.assertEqual(B.SLANG_BEHIND, B.bo.SLANG_BEHIND)
 
+    def test_the_same_word_may_have_a_second_row_with_another_reading_and_a_neutral_tone_is_accepted(self):
+        n = self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n國動\tㄍㄨㄛˊ ㄉㄨㄥ˙\tb\n")     # 動 is in the base as ㄉㄨㄥˋ only: ㄉㄨㄥ˙ is the same syllable, neutral tone
+        self.assertEqual(n, 1, "one word, two rows")
+        self.assertEqual([(r[0], r[1], r[2]) for r in self.rows()[2:]], [("ㄍㄨㄛˊ-ㄉㄨㄥˋ", "國動", "-5.0"), ("ㄍㄨㄛˊ-ㄉㄨㄥ˙", "國動", "-5.0")], "deduction is per reading")
+        srcs = get(os.path.join(self.d, "names-sources.tsv")).decode()
+        self.assertEqual(srcs[len(self.SRCS):], "國動\tcreator\ta\t\t\n", "one provenance row per word")
+        self.assertEqual(json.loads(get(os.path.join(self.d, "names.json")))["words"], 3)
+        with self.assertRaises(SystemExit):     # a neutral tone does not rescue a syllable the base lacks for that character
+            self.run_append("國動\tㄍㄨㄛˊ ㄍㄨㄛ˙\tx\n")
+
     def test_rerunning_replaces_the_creator_rows_instead_of_duplicating_them(self):
         text = "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n"
         self.run_append(text)

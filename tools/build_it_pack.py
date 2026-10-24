@@ -352,11 +352,12 @@ def check_rows(info, seed=SEED, n=CHECK_N):
     return [f"|{w}|{' '.join(info['reading'][w])}\n" for w in picked], quota
 
 
-def write_all(files, manifest, out_dir):
-    """三個檔寫進 out_dir（先寫 .tmp 再改名）；it.json 記每個檔的 SHA-256。不經過 build_acg_pack.write_all：那個會寫 acg.json。"""
+def write_all(files, manifest, out_dir, manifest_name="it.json"):
+    """三個檔寫進 out_dir（先寫 .tmp 再改名）；it.json 記每個檔的 SHA-256。不經過 build_acg_pack.write_all：那個會寫 acg.json。
+    manifest_name：tools/build_meme_pack.py 共用這個函式，寫 meme.json。"""
     os.makedirs(out_dir, exist_ok=True)
     manifest = dict(manifest, files={n: {"sha256": sha256_text(t), "bytes": len(t.encode()), "lines": t.count("\n")} for n, t in sorted(files.items())})
-    files = dict(files, **{"it.json": json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"})
+    files = dict(files, **{manifest_name: json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"})
     for n, t in files.items():
         with open(os.path.join(out_dir, n) + ".tmp", "w", encoding="utf-8", newline="\n") as o:
             o.write(t)
