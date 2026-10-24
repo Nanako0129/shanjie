@@ -1,16 +1,74 @@
 {
+ "bonus": 3.0,
+ "candidate_files": {
+  "candidates-2026-10-25.tsv": "1d2e357d2f52e321ca0d8ba321fad6f29829430b70c66cd4a2dc8fc287a8e777"
+ },
+ "candidate_stats": {
+  "candidates": 2131,
+  "lines": 2131
+ },
+ "counts_candidates": {
+  "input_sha256": "e505e5b29045f7651aa735330aab1024a655371269816c28f4b71063e48e6dd2",
+  "ptt_tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f",
+  "sha256": "135746df9b076bcc22f678be362c32386a5d06e54742c982bdf0c5ffe7f5897a",
+  "tool_commit": "unknown"
+ },
+ "counts_x": {
+  "input_sha256": "8c3e91ef7cd0ffebe600f7386a0c81f7d52bf61791d39d8ab956e35d3f6c653f",
+  "ptt_tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f",
+  "sha256": "1f1eef64993fe17b4db38cb63fb9e6d8a65f3c0e5184c505ddb3267f3db82c0e",
+  "tool_commit": "unknown"
+ },
+ "dropped_unreadable": 1,
  "files": {
   "meme-add.tsv": {
-   "bytes": 67,
-   "lines": 1,
-   "sha256": "21da773cd3d8b71cecb4dcd749a6dff76cc69aaa6fb89856722c266cbcccf235"
+   "bytes": 7272,
+   "lines": 120,
+   "sha256": "233be6ee28cf152c293a00b6f25e773c6cdb66ce357356649c4d542c031b52ee"
   },
   "meme-sources.tsv": {
-   "bytes": 144,
-   "lines": 2,
-   "sha256": "1e3d077eb6ddfad8de3908442770d05dbde224132aeceec182d0c1afcea035d2"
+   "bytes": 3284,
+   "lines": 112,
+   "sha256": "522e880fc8776776994d28668f273cd0068cc51206ecf59c70edcdef83f6521a"
   }
  },
- "note": "one-row stand-in so build-app.sh, check-app.sh and the selftest work before the data PR (docs/contracts/meme-pack.md); the data PR replaces all three files",
- "placeholder": true
+ "meme_x": {
+  "meme-x-strings.txt": "8c3e91ef7cd0ffebe600f7386a0c81f7d52bf61791d39d8ab956e35d3f6c653f",
+  "meme-x.tsv": "740e664162b3152218b3735d93b5d625fd3afbc8e8aa80ead22a0ba11d1f77d0"
+ },
+ "rows": 120,
+ "sources": {
+  "fandom": 4,
+  "fandom,mined": 1,
+  "fandom,pttpedia,streetdict": 1,
+  "fandom,streetdict": 1,
+  "mined": 19,
+  "mined,streetdict": 1,
+  "muse": 3,
+  "pttpedia": 28,
+  "pttpedia,streetdict": 1,
+  "streetdict": 52
+ },
+ "stages": {
+  "admitted": 709,
+  "below_threshold": 559,
+  "candidates": 2131,
+  "dedupe_lexicon": 825,
+  "dedupe_packs": 37,
+  "dropped_already_right": 441,
+  "dropped_by_c_rule": 8,
+  "dropped_same_reading": 5,
+  "dropped_x_not_fewer": 57,
+  "dropped_x_other_pack": 4,
+  "excluded_by_meme_collisions_tsv": 83,
+  "no_count": 0,
+  "unreadable": 1
+ },
+ "thresholds": {
+  "min_articles": 10,
+  "min_boards": 3
+ },
+ "unresolved_collision_readings": 0,
+ "version": "233be6ee",
+ "words": 111
 }
