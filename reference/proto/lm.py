@@ -182,12 +182,13 @@ def unigram_back(lm, w, lp):
 DEMOTE_TSV = os.path.join(ime._LEXDIR, "demote.tsv")
 
 
-def cap_overlay(lex, overlay_words, lm, demote_path=DEMOTE_TSV, pack_words=frozenset()):
+def cap_overlay(lex, overlay_words, lm, demote_path=DEMOTE_TSV, pack_words=frozenset(), unseen_pack_words=frozenset()):
     """疊加層詞的分數取 min(lp, log10(c/N))；語料沒見過的扣 UNSEEN_OVERLAY_PENALTY。回傳新的 Lexicon。
     回傳的詞庫帶著降權表 `demote`（預設從 data/lexicon/demote.tsv 載入並對照詞庫，decode 預設套用；
     demote_path=None 是沒有表，只給用自訂小詞庫的測試）。
-    pack_words：選用詞包的詞（docs/contracts/pack-oov.md）：不封頂、不扣罰分，分數就是詞包給的；decode 把它們當模型不認識的詞。
-    集合只給 decode 查（`out.pack`），這裡不載入詞包檔。"""
+    pack_words：選用詞包裡標 `acg-oov` 的強制詞（docs/contracts/pack-oov.md 第 1b 節）：不封頂、不扣罰分，分數就是詞包給的；
+    decode 把它們當模型不認識的詞。集合只給 decode 查（`out.pack`），這裡不載入詞包檔。
+    unseen_pack_words：其他詞包詞（第 1b 節：照 main 封頂）；其中語料沒見過的不扣 UNSEEN_OVERLAY_PENALTY（core 的 `with_packs` 同一條）。"""
     out = ime.Lexicon.__new__(ime.Lexicon)
     out.by_reading, out.by_word, out.max_len = collections.defaultdict(list), {}, lex.max_len
     out.pack = frozenset(pack_words)
@@ -195,7 +196,7 @@ def cap_overlay(lex, overlay_words, lm, demote_path=DEMOTE_TSV, pack_words=froze
         for w, lp in entries:
             if w in overlay_words and w not in out.pack:
                 c = lm.count(w)
-                lp = min(lp, math.log10(c / lm.N)) if c else lp - UNSEEN_OVERLAY_PENALTY
+                lp = min(lp, math.log10(c / lm.N)) if c else lp if w in unseen_pack_words else lp - UNSEEN_OVERLAY_PENALTY
             out.by_reading[key].append((w, lp))
             if w not in out.by_word or lp > out.by_word[w][1]:
                 out.by_word[w] = (key, lp)

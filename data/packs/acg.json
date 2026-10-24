@@ -229,14 +229,14 @@
  "excluded_by_exclude_tsv": 2,
  "files": {
   "acg-add.tsv": {
-   "bytes": 2741045,
+   "bytes": 2742994,
    "lines": 45016,
-   "sha256": "42740d71a2a042d9a7ee8b50ddd12529b2d560389a6818b26553aec3f4b65584"
+   "sha256": "5bafc823d66bac3a836c9e241962d33349c6a86c021539d0f03e731dec7e64c4"
   },
   "acg-sources.tsv": {
-   "bytes": 3145136,
+   "bytes": 3145163,
    "lines": 46313,
-   "sha256": "d4225fc455690c96b155258341f7b636c6cdb5581c6ee3fcde7351522d96aa02"
+   "sha256": "c392f738d4431d136045612b7cfca5a033388f240b2dc640758c16acde899f94"
   }
  },
  "groups": {
@@ -261,7 +261,7 @@
  "unclassified_groups": [],
  "unreadable_dropped": 62,
  "unresolved_collision_readings": 0,
- "version": "20261022-42740d71",
+ "version": "20261022-5bafc823",
  "words": 44552,
  "yearly_lists": {
   "2020": {

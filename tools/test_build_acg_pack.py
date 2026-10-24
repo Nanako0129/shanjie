@@ -313,8 +313,102 @@ class PackOovRegrade(unittest.TestCase):
         a4 = {"ㄧ-ㄌㄧˋ-ㄙ", "ㄎㄜˋ-ㄌㄚ-ㄌㄧˋ-ㄙ", "ㄅㄨˋ-ㄌㄧˋ-ㄊㄚˇ", "ㄅㄨˋ-ㄌㄧˋ-ㄐㄧ-ㄊㄜˋ", "ㄞˋ-ㄌㄧˋ-ㄎㄚˇ", "ㄇㄟˊ-ㄌㄧˋ", "ㄇㄧˇ-ㄙㄚˋ-ㄌㄧˋ",
               "ㄒㄧㄝˋ-ㄌㄧˋ-ㄦˇ", "ㄉㄨㄛ-ㄌㄧˋ-ㄙ", "ㄋㄚˋ-ㄒㄧㄡ",
               "ㄞˋ-ㄌㄧˋ-ㄕㄚ"}                                                   # pack-oov 把這組也改成研究順序（艾莉莎第一）
+        col = open(os.path.join(B.PACKS, "acg-collisions.tsv"), encoding="utf-8").read()
+        a4 |= {l.split("\t")[0].replace(" ", "-") for l in col[col.index("# pack-oov V1c 的 51 組"):].splitlines()[1:]}   # 維護者 2026-10-24 的 51 組處置
         self.assertEqual({k for k in a if a[k] != b[k]} - a4, set(), "regrade changed the order or an offset group outside the A4 readings and ㄞˋ ㄌㄧˋ ㄕㄚ")
         self.assertEqual([l.split("\t")[:2] for l in lines], [l.split("\t")[:2] for l in out])
+
+
+class PackOovV1(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1b: only the dispositioned readings' pack words are forced (column 4 OOV_TAG), closed over
+    the string; every other row equals the source."""
+    ROWS = ["a-b\t甲甲\t-7.0\tacg\n", "a-b\t乙乙\t-7.0\tacg\n", "c-d\t丙丙\t-7.0\tacg\n", "e-f\t甲甲\t-7.0\tacg\n", "g-h\t丁丁\t-7.0\tacg\n"]
+
+    N, SC = 10 ** 9, {2: -7.0}
+
+    def forced(self, rows, rank, yields, counts):
+        return B.forced_words(rows, rank, yields, counts, self.N, self.SC)
+
+    def test_keep_stats_strings_are_never_forced_in_the_committed_pack(self):
+        # 維護者 2026-10-24（51 組第 17 列）：多利斯保留通語統計，詞包裡它的列沒有 OOV_TAG
+        rows = [l.rstrip("\n").split("\t") for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8") if l.strip()]
+        mine = [r for r in rows if r[1] in B.KEEP_STATS]
+        self.assertEqual({r[1] for r in mine}, B.KEEP_STATS)
+        self.assertEqual([r for r in mine if r[3] == B.OOV_TAG], [])
+
+    def test_source_fixes_replace_only_the_source_column(self):
+        text = "一之瀨\tchar\t舊來源@1\t\n一之瀨帆波\tchar\t別的@2\t\n"
+        self.assertEqual(B.fix_sources(text), f"一之瀨\tchar\t{B.SOURCE_FIXES['一之瀨']}\t\n一之瀨帆波\tchar\t別的@2\t\n")
+
+    def test_keep_stats_are_removed_from_the_forced_set(self):
+        rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
+        rows = self.ROWS + ["a-b\t多利斯\t-7.0\tacg\n"]
+        self.assertNotIn("多利斯", self.forced(rows, rank, set(), {}))
+
+    def test_forced_words_are_the_dispositioned_readings_closed_over_the_string(self):
+        rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
+        self.assertEqual(self.forced(self.ROWS, rank, {("c d", "丙丙")}, {}), {"甲甲", "乙乙", "丙丙"})
+        self.assertEqual(self.forced(self.ROWS, rank, set(), {}), {"甲甲", "乙乙"}, "a yield reading is a dispositioned reading")
+        self.assertEqual(self.forced(self.ROWS, {}, set(), {}), set())
+        # V1c: the first-named word the model knows, capped no lower than S_len - KEEP_MARGIN, keeps its statistics
+        self.assertEqual(self.forced(self.ROWS, rank, set(), {"乙乙": 10 ** 3, "甲甲": 7}), {"甲甲"})
+        # ... but not one the cap would push far below the pack score (5 counts: log10 = -8.3 < -7.0 - 0.5)
+        self.assertEqual(self.forced(self.ROWS, rank, set(), {"乙乙": 5}), {"甲甲", "乙乙"})
+        # a kept first-named word that is behind on another dispositioned reading stays forced there and so everywhere
+        rows = self.ROWS + ["e-f\t乙乙\t-7.0\tacg\n", "e-f\t丁丁\t-7.0\tacg\n"]
+        self.assertEqual(self.forced(rows, {**rank, ("e f", "丁丁"): 0, ("e f", "乙乙"): 1}, set(), {"乙乙": 10 ** 3, "丁丁": 10 ** 3}), {"甲甲", "乙乙"})
+
+    def test_v1_rows_keep_unforced_rows_and_tag_the_forced_ones(self):
+        graded = [l.replace("-7.0", "-6.5") for l in self.ROWS]
+        out = B.v1_rows(self.ROWS, graded, {"甲甲"})
+        self.assertEqual([out[i] for i in (1, 2, 4)], [self.ROWS[i] for i in (1, 2, 4)], "unforced rows are the source rows")
+        self.assertEqual([out[i] for i in (0, 3)], [f"a-b\t甲甲\t-6.5\t{B.OOV_TAG}\n", f"e-f\t甲甲\t-6.5\t{B.OOV_TAG}\n"], "every row of a forced string")
+        self.assertEqual(B.v1_rows(self.ROWS[:2] + ["\n"] + self.ROWS[2:], graded, {"甲甲"}), out, "a blank source line does not shift the rows")
+
+    def test_forced_rows_sit_below_the_kept_first_words_capped_score(self):
+        # 乙乙 is first and kept; its core score is min(-7.0, log10(10^3 / 10^9) = -6) = -7.0 here, so the forced 甲甲 behind it, graded to
+        # -6.5, is pushed to -7.0 - TIE
+        rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
+        counts = {"乙乙": 10 ** 3}
+        forced = self.forced(self.ROWS, rank, set(), counts)
+        caps = B.kept_caps(self.ROWS, rank, forced, counts, self.N)
+        self.assertEqual(caps, {"a-b": -7.0})
+        graded = [l.replace("-7.0", "-6.5") if "甲甲" in l else l for l in self.ROWS]
+        out = B.v1_rows(self.ROWS, graded, forced, caps)
+        self.assertEqual(out[0], f"a-b\t甲甲\t{round(-7.0 - B.TIE, 8)!r}\t{B.OOV_TAG}\n")
+        self.assertEqual(out[3], f"e-f\t甲甲\t-6.5\t{B.OOV_TAG}\n", "only the reading with the kept word is pushed down")
+
+    def test_the_committed_pack_is_the_v1_output_of_the_a4_source(self):
+        src = PackOovRegrade.a4_pack()
+        if src is None:
+            self.skipTest("the A4 commit is not in this clone")
+        lines = src.splitlines(keepends=True)
+        ys = {(r[0], r[1]) for r in B.read_tsv(os.path.join(B.PACKS, "acg-yield.tsv"))}
+        counts, n = B.load_counts()
+        rank = B.collision_rank(B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")))
+        now = open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8").read()
+        self.assertEqual(now, B.v1_pack(lines, rank, ys, counts, n, B.scores(B.base_lexicon())), "regrade --bonus 0 of the A4 source")
+        forced = {l.split("\t")[1] for l in now.splitlines() if l.endswith("\t" + B.OOV_TAG)}
+        self.assertEqual([a for a, b in zip(lines, now.splitlines(keepends=True)) if a.split("\t")[1] not in forced],
+                         [b for b in now.splitlines(keepends=True) if b.split("\t")[1] not in forced], "unforced rows equal the source")
+        self.assertEqual((len(forced), sum(1 for l in now.splitlines() if l.endswith(B.OOV_TAG))), (302, 306))   # 契約修訂四 V1c：處置讀音（含 51 組新加的 23 個）上的字串，減去排第一、通語認得而且封頂不壓過詞包分數 0.5 以上的，再減 KEEP_STATS
+
+
+class RecheckBaseDecoder(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1b item 5: the shipped-words comparison decodes its base column with the base decoder (main's
+    CLI) and its candidate column with the candidate decoder; with no base decoder both columns use the candidate one."""
+    def run_recheck(self, **kw):
+        same = lambda pairs, prof, d=None: [w for w, _ in pairs]       # every decode returns the word itself
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "reference.txt"), "w").close()
+            return B.recheck(B.PACKS, d, decode=same, base_dir=B.PACKS, **kw)
+
+    def test_the_base_column_comes_from_the_base_decoder(self):
+        base = lambda pairs, prof, d=None: ["BASE"] * len(pairs)
+        text = self.run_recheck(base_decode=base)
+        shipped = [l.split("\t") for l in text.split("shipped (word, reading) pairs")[1].splitlines()[1:] if l.count("\t") == 4]
+        self.assertTrue(shipped and all(f[3] == "BASE" and f[4] == f[0].strip() for f in shipped), shipped[:3])
+        self.assertNotIn("BASE", self.run_recheck(), "without a base decoder both columns come from the candidate decoder")
 
 
 class PackOovGrading(unittest.TestCase):
@@ -784,7 +878,7 @@ class Build(unittest.TestCase):
         pairs = [(k, r.split()) for r, k in first.items()]
         for prof in ("chat", "formal"):
             on, off = B.top1(pairs, prof, B.PACKS), B.top1(pairs, prof)
-            bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
+            bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o and (k, prof) not in B.FIRST_NAMED_EXCEPTIONS]
             self.assertEqual(bad, [], prof)
 
 

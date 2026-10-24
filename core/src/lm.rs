@@ -777,16 +777,21 @@ pub struct CappedLexicon {
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
     deltas: Vec<(usize, f64)>,
-    /// The optional-pack words (docs/contracts/pack-oov.md): `(off, len)` into `base.words`, one per distinct string, sorted by the
-    /// string's bytes. Empty without a pack (the lexicon then behaves exactly as before).
+    /// The forced pack words (docs/contracts/pack-oov.md section 1b: pack rows tagged `PACK_OOV_TAG`): `(off, len)` into
+    /// `base.words`, one per distinct string, sorted by the string's bytes. Empty without a pack (the lexicon then behaves exactly as before).
     packs: Vec<(u32, u32)>,
-    /// One bit per entry position whose word is in the overlay (`overlay_bits`) or an optional-pack word (`pack_bits`), so
-    /// `readings` can redo the capping without the pack's exemption; both empty without a pack.
+    /// One bit per entry position whose word is in the overlay (`overlay_bits`), or whose score is not main's capped score
+    /// (`pack_bits`: a forced pack word, or a pack word the model never saw), so `readings` can redo main's capping; both empty
+    /// without a pack.
     overlay_bits: Vec<u64>,
     pack_bits: Vec<u64>,
     /// `Lm::identity` of the model the lexicon was capped with: `readings` must get the same one.
     built_for: (u64, usize, usize),
 }
+
+/// Column 4 of a pack row that the pack builder marks as forced (docs/contracts/pack-oov.md section 1b): the word is unknown to the
+/// model when decoding and keeps the pack's score. Other pack rows are capped as in main.
+pub const PACK_OOV_TAG: &str = "acg-oov";
 
 /// An overlay word's score capped at its corpus frequency, or lowered by the unseen penalty when the model never saw it.
 fn capped_score(lm: &Lm, score: f64, w: &str) -> f64 {
@@ -804,14 +809,14 @@ fn bit(bits: &[u64], p: usize) -> bool {
 }
 
 impl CappedLexicon {
-    /// Whether `word` is an optional-pack word.
+    /// Whether `word` is a forced pack word (a pack row tagged `PACK_OOV_TAG`, docs/contracts/pack-oov.md section 1b).
     pub fn is_pack(&self, word: &str) -> bool {
         let at = |&(off, len): &(u32, u32)| &self.base.words[off as usize..(off + len) as usize];
         self.packs.binary_search_by(|e| at(e).cmp(word)).is_ok()
     }
 
-    /// The model id the decoder scores `word` with: `None` (unknown) for an optional-pack word, whose score then comes from the
-    /// pack alone; `Lm::word_id` for every other word. The decoder (`decode*`, the start word) and `total_score` resolve their word ids
+    /// The model id the decoder scores `word` with: `None` (unknown) for a forced pack word, whose score then comes from the
+    /// pack alone; `Lm::word_id` for every other word, unforced pack words included. The decoder (`decode*`, the start word) and `total_score` resolve their word ids
     /// here; prediction, `history()`, the digits layer and 常談 still use the string, unchanged by design (docs/contracts/pack-oov.md).
     pub fn model_id(&self, lm: &Lm, word: &str) -> Option<u32> {
         if self.is_pack(word) { None } else { lm.word_id(word) }
@@ -839,11 +844,13 @@ impl CappedLexicon {
     }
 
     /// `new` with the rows of the enabled optional packs (`pack_text`, the same rows `overlay` also holds, `--extra-overlay` rows
-    /// not among them): their words keep the pack's score (no cap, no unseen penalty) and score as unknown to the model
-    /// (`model_id`). An empty `pack_text` is `new`.
+    /// not among them; docs/contracts/pack-oov.md section 1b): the words of rows tagged `PACK_OOV_TAG` keep the pack's score (no cap,
+    /// no unseen penalty) and score as unknown to the model (`model_id`); the other pack words are capped as in main, except that a word
+    /// the model never saw keeps the pack's score instead of losing `UNSEEN_OVERLAY_PENALTY`. An empty `pack_text` is `new`.
     pub fn with_packs(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
+        let forced: HashSet<&str> = pack_text.lines().filter(|l| l.split('\t').nth(3) == Some(PACK_OOV_TAG)).filter_map(|l| l.split('\t').nth(1)).collect();
         let mut packs: Vec<(u32, u32)> = Vec::new();
         let mut ents = base.ents.clone();
         let bits = if pack.is_empty() { 0 } else { ents.len().div_ceil(64) };
@@ -852,14 +859,15 @@ impl CappedLexicon {
             let range = base.range(i);
             for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
                 let w = &base.words[e.off as usize..(e.off + e.len) as usize];
-                let (in_overlay, in_pack) = (words.contains(w), pack.contains(w));
+                let (in_overlay, in_forced) = (words.contains(w), forced.contains(w));
+                let unseen_pack = !in_forced && in_overlay && pack.contains(w) && lm.count(w) == 0;
                 if bits != 0 {
                     overlay_bits[p / 64] |= (in_overlay as u64) << (p % 64);
-                    pack_bits[p / 64] |= (in_pack as u64) << (p % 64);
+                    pack_bits[p / 64] |= ((in_forced || unseen_pack) as u64) << (p % 64);
                 }
-                if in_pack {
+                if in_forced {
                     packs.push((e.off, e.len));
-                } else if in_overlay {
+                } else if in_overlay && !unseen_pack {
                     e.score = capped_score(lm, e.score, w);
                 }
             }

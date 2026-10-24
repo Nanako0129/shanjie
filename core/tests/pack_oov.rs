@@ -2,7 +2,7 @@
 //! pack's score. The model is the Kneser-Ney toy of eval/golden/kn-tiny (他, 佔, 占, 起床, 起牀; bigram 他→占 kept; side file; classes),
 //! whose vocabulary holds the pack words used here, with kept bigrams.
 use core::engine::{Engine, Key, KeyKind, Layout};
-use core::lm::{decode, decode_from, decode_segment_learned, history, CappedLexicon, End, Lm, Profile};
+use core::lm::{decode, decode_from, decode_segment_learned, history, CappedLexicon, End, Lm, Profile, PACK_OOV_TAG};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,9 +27,13 @@ fn close(a: f64, b: f64) {
 const UNKNOWN: &str = "\u{0}no-such-word";
 /// 占 scores -0.05, above any corpus frequency, so the cap would bite.
 const LEX: &str = "ㄓㄢˋ 占 -0.05\nㄓㄢˋ 佔 -3.5\nㄊㄚ 他 -2.0\nㄑㄧˇ-ㄔㄨㄤˊ 起床 -4.9\nㄓㄢˋ 站 -3.0\n";
-/// Pack rows: reading, word, score (only the second column matters to the constructor).
+/// Pack rows: reading, word, score, tag. The constructor reads the word and the tag: these rows are forced (`PACK_OOV_TAG`).
 fn rows(words: &[&str]) -> String {
-    words.iter().map(|w| format!("x\t{w}\t-1.0\n")).collect()
+    words.iter().map(|w| format!("x\t{w}\t-1.0\t{PACK_OOV_TAG}\n")).collect()
+}
+/// Pack rows the builder leaves unforced (docs/contracts/pack-oov.md section 1b): capped as in main.
+fn plain_rows(words: &[&str]) -> String {
+    words.iter().map(|w| format!("x\t{w}\t-1.0\tacg\n")).collect()
 }
 fn capped(lex: &Arc<Lexicon>, lm: &Lm, pack: &[&str]) -> CappedLexicon {
     let text = rows(pack);
@@ -160,13 +164,16 @@ fn pack_oov_decode_matches_python_golden() {
     let want = String::from_utf8(std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov/decode.tsv")).unwrap()).unwrap();
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov");
     let lex = Arc::new(Lexicon::parse(&std::fs::read_to_string(golden.join("lexicon.txt")).unwrap()).unwrap());
-    let sentences = ["ㄊㄚ ㄑㄧˇ ㄔㄨㄤˊ", "ㄊㄚ ㄓㄢˋ", "ㄑㄧˇ ㄔㄨㄤˊ", "ㄓㄢˋ ㄊㄚ", "ㄊㄚ ㄓㄢ", "ㄊㄚ ㄓㄢˋ ㄑㄧˇ ㄔㄨㄤˊ"];
-    let sets: [(&str, &[&str]); 3] = [("none", &[]), ("A", &["占", "起床"]), ("B", &["他"])];
+    let sentences = ["ㄊㄚ ㄑㄧˇ ㄔㄨㄤˊ", "ㄊㄚ ㄓㄢˋ", "ㄑㄧˇ ㄔㄨㄤˊ", "ㄓㄢˋ ㄊㄚ", "ㄊㄚ ㄓㄢ", "ㄊㄚ ㄓㄢˋ ㄑㄧˇ ㄔㄨㄤˊ", "ㄊㄚ ㄕˋ ㄐㄧㄝˋ ㄒㄧㄢˋ"];
+    // (name, forced rows, unforced rows, overlay-only words): tools/gen_pack_oov.py's PACKS, UNFORCED and OVERLAY_ONLY.
+    let sets: [(&str, &[&str], &[&str], &[&str]); 5] =
+        [("none", &[], &[], &[]), ("A", &["占", "起床"], &[], &[]), ("B", &["他"], &[], &[]), ("C", &[], &["世界線", "占"], &[]), ("D", &[], &[], &["世界線"])];
     let mut got = String::new();
     for (side, on) in [("plain", false), ("beta1", true)] {
         let lm = lm_with(on);
-        for (pack, words) in sets {
-            let c = capped(&lex, &lm, words);
+        for (pack, forced, unforced, overlay_only) in sets {
+            let pack_text = rows(forced) + &plain_rows(unforced);
+            let c = CappedLexicon::with_packs(lex.clone(), &(pack_text.clone() + &plain_rows(overlay_only)), &pack_text, &lm, None).unwrap();
             for start in ["<s>", history("占他", &lm)] {
                 for (profile, name) in [(Profile::Chat, "chat"), (Profile::Formal, "formal")] {
                     for (i, s) in sentences.iter().enumerate() {
@@ -224,4 +231,27 @@ fn prediction_and_digits_see_the_capped_score_and_only_pack_rows_are_exempt() {
     let plain = CappedLexicon::new(lex.clone(), &rows(&["占"]), &lm, None).unwrap();
     let packed = CappedLexicon::with_packs(lex.clone(), &rows(&["占"]), &rows(&["占"]), &lm, None).unwrap();
     assert_eq!(packed.readings(&lm).collect::<Vec<_>>(), plain.readings(&lm).collect::<Vec<_>>(), "a non-overlay word next to a pack word");
+}
+
+/// docs/contracts/pack-oov.md section 1b: a pack row the builder did not force (`acg`) is capped as in main. A word the model knows
+/// keeps its model id and its capped score; a word the model never saw keeps the pack's score instead of losing the unseen penalty
+/// (its id is unknown either way). `readings()` (prediction, digits) still sees main's capped list for both.
+#[test]
+fn unforced_pack_words_are_capped_as_in_main_except_the_unseen_penalty() {
+    let lm = lm_with(true);
+    let lex = Arc::new(Lexicon::parse_with(&format!("{LEX}ㄒㄧㄣ 鑫 -2.0\n"), None).unwrap());
+    assert!(lm.count("占") > 0 && lm.count("鑫") == 0, "premise: 占 is known to the model, 鑫 is not");
+    let overlay = plain_rows(&["占", "鑫"]);
+    let plain = CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap();
+    let packed = CappedLexicon::with_packs(lex.clone(), &overlay, &overlay, &lm, None).unwrap();
+    assert_eq!(packed.best_lp(&syls("ㄓㄢˋ"), "占"), plain.best_lp(&syls("ㄓㄢˋ"), "占"), "a known unforced word is capped as in main");
+    assert_eq!(packed.model_id(&lm, "占"), lm.word_id("占"), "a known unforced word keeps its model id");
+    assert!(packed.model_id(&lm, "占").is_some());
+    assert_eq!(packed.best_lp(&syls("ㄒㄧㄣ"), "鑫"), Some(-2.0), "an unseen unforced pack word keeps the pack score");
+    assert_eq!(plain.best_lp(&syls("ㄒㄧㄣ"), "鑫"), Some(-3.0), "premise: main takes the unseen penalty");
+    assert_eq!(packed.readings(&lm).collect::<Vec<_>>(), plain.readings(&lm).collect::<Vec<_>>(), "readings() is main's capped list");
+    // The same word tagged as forced is unknown to the model and uncapped.
+    let forced = CappedLexicon::with_packs(lex.clone(), &overlay, &rows(&["占"]), &lm, None).unwrap();
+    assert_eq!(forced.model_id(&lm, "占"), None);
+    assert_eq!(forced.best_lp(&syls("ㄓㄢˋ"), "占"), Some(-0.05));
 }

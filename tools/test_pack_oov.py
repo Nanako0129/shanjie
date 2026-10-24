@@ -27,5 +27,21 @@ class PackOov(unittest.TestCase):
         self.assertNotEqual(top[("plain", "B", "<s>", "chat", "2")], top[("plain", "B", "他", "chat", "2")])   # the start word 他 is a pack word: unknown
 
 
+    def test_unforced_unseen_pack_words_skip_the_unseen_penalty(self):
+        """Section 1b: an unforced pack word the model never saw keeps its score; other overlay words still lose the penalty."""
+        import ime, lm as L
+        lm = L.BigramLM(os.path.join(gen_pack_oov.KN, "bigram.sjlm"))
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "lexicon.txt")
+            open(p, "w", encoding="utf-8").write(gen_pack_oov.lexicon_text() + "ㄒㄧㄣ 鑫 -2.0\n")
+            self.assertEqual(lm.count("鑫"), 0)
+            base = ime.Lexicon(p)
+            plain = L.cap_overlay(base, {"鑫"}, lm, demote_path=None)
+            exempt = L.cap_overlay(base, {"鑫"}, lm, demote_path=None, unseen_pack_words={"鑫"})
+        self.assertEqual(plain.by_word["鑫"][1], -3.0)
+        self.assertEqual(exempt.by_word["鑫"][1], -2.0)
+        self.assertNotIn("鑫", exempt.pack, "unforced: not unknown-by-force, the model just never saw it")
+
 if __name__ == "__main__":
     unittest.main()

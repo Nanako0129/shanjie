@@ -695,8 +695,9 @@ pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
 pub const PACK_ACG: u32 = 1;
 pub const PACK_IT: u32 = 4;
 pub const PACK_ALL: u32 = PACK_ACG | PACK_IT;
-/// The packs whose words are pack-oov (docs/contracts/pack-oov.md): unknown to the model, scored by the pack alone, not capped. Only
-/// the anime pack for now; the IT pack and a pack added later stay capped until added here.
+/// The packs whose rows `CappedLexicon::with_packs` reads (docs/contracts/pack-oov.md section 1b): rows tagged `lm::PACK_OOV_TAG` are
+/// unknown to the model, scored by the pack alone, not capped; the other rows are capped as overlay words, except that a word the model
+/// never saw keeps its pack score. Only the anime pack for now; the IT pack and a pack added later are capped like any overlay.
 pub const PACK_OOV: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
 const PACK_FILES: [(u32, &str); 2] = [(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv")];
@@ -805,7 +806,7 @@ fn load_lexicon_split(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: 
 
 /// The text `CappedLexicon::with_packs` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
 /// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows). Its words are capped at their corpus
-/// frequency, except those of the `PACK_OOV` packs, which `with_packs` takes again as its `pack_text` and leaves uncapped.
+/// frequency, except the rows of the `PACK_OOV` packs that `with_packs` takes again as its `pack_text` and treats by their tag.
 pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
     capping_overlay_detailed(data_dir, pack_text).map_err(|_| EngineError::LoadFailed)
 }
