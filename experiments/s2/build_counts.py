@@ -201,7 +201,7 @@ def fold(text):
 def text_runs(line, conv, trad_tw_phrases=True):
     """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple.
     trad_tw_phrases: see convert()."""
-    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases))
+    return HAN.findall(convert(line, *conv, **({} if trad_tw_phrases else {"trad_tw_phrases": False})))   # default: the call exactly as before
 
 
 def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
@@ -222,7 +222,7 @@ def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
     for pat, rep in MARKUP:
         t = pat.sub(rep, t)
     for s in SENT.findall(t):
-        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases)
+        yield s if mw else convert(s, *conv, **({} if trad_tw_phrases else {"trad_tw_phrases": False}))
 
 
 def articles(limit, dump=None):
