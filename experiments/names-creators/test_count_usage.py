@@ -38,10 +38,25 @@ class CountUsage(unittest.TestCase):
         put(os.path.join(root, "data", "packs", "it-add.tsv"), "")
         cands, out = os.path.join(self.d.name, "c.txt"), os.path.join(self.d.name, "out.tsv")
         put(cands, "# creators\n鬼鬼\n統神神\n統神\n國動\n統神\n\n")
-        sys.argv = ["count_usage.py", cands, root, self.ptt, out]
-        C.main()
+        C.main([cands, root, self.ptt, out])
         with open(out, encoding="utf-8") as f:
-            self.assertEqual(f.read(), "統神\t3\t2\n統神神\t1\t1\n")
+            lines = f.read().splitlines()
+        self.assertEqual([l.split()[1] for l in lines[:3]], ["ptt_tree_sha256", "input_sha256", "tool_commit"])
+        self.assertEqual(lines[1], f"# input_sha256 {C.sha256_file(cands)}")
+        self.assertEqual(lines[3:], ["統神\t3\t2", "統神神\t1\t1"])
+        C.main(["--include-known", cands, root, self.ptt, out])          # the lexicon names are counted too
+        with open(out, encoding="utf-8") as f:
+            self.assertEqual(f.read().splitlines()[3:], ["統神\t3\t2", "國動\t1\t1", "統神神\t1\t1", "鬼鬼\t1\t1"])
+
+    def test_jobs_and_the_tree_hash(self):
+        names = ["統神", "統神神", "國動", "鬼鬼"]
+        one, tree = C.count(names, self.ptt, 1, with_tree=True)
+        self.assertEqual(C.count(names, self.ptt, 2, with_tree=True), (one, tree))
+        lines = sorted(f"{b}/{n}\0{C.sha256_file(os.path.join(self.ptt, b, n))}\n" for b in ("Gossiping", "Stock")
+                       for n in os.listdir(os.path.join(self.ptt, b)) if n.endswith(".html"))
+        self.assertEqual(tree, C.hashlib.sha256("".join(lines).encode()).hexdigest())
+        put(os.path.join(self.ptt, "Stock", "4.html"), "改了")
+        self.assertNotEqual(C.count(names, self.ptt, 1, with_tree=True)[1], tree)
 
 
 if __name__ == "__main__":
