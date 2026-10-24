@@ -75,7 +75,7 @@ def width(line):
 
 
 def paragraphs(body_text):
-    """PTT's web view wraps a long line at the 80-column screen: a line WRAP_MIN..WRAP_MAX columns wide (full-width characters count 2)
+    """PTT's web view wraps a long line at the 80-column screen: a line WRAP_MIN..WRAP_MAX columns wide (East Asian W, F and ambiguous A characters count 2)
     goes on in the next line and is joined to it; any other line break is the author's own and ends the piece (one per output line).
     Quoted reply lines are dropped (they are someone else's sentences, repeated) and end the piece like a blank line."""
     out, cur = [], []
