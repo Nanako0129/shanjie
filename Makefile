@@ -49,6 +49,7 @@ test-python:
 	python3 -W ignore -m unittest tools/test_kpi.py
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
+	python3 -W ignore -m unittest tools/test_readings.py
 	python3 -W ignore -m unittest tools/test_oc_ref.py
 	python3 -W ignore -m unittest tools/test_holdout_guard.py
 	python3 -W ignore -m unittest tools/test_build_attribution.py
