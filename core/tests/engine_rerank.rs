@@ -551,6 +551,46 @@ fn a_cut_english_word_does_not_count() {
     }
 }
 
+/// Review of PR #294: `left_full` is cut for the model loaded when `set_left_context` ran, so a model change drops it (the next
+/// composition start sets it again), in either order: set then load, load then set then another load, and `set_lm` (no model).
+#[test]
+fn a_model_change_drops_the_left_text() {
+    let (v1, text) = (rerank_model(), "我們去看了Joe");
+    let v5 = upgraded(&v1, Some(8));
+    let mut e = engine_with(None);
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 3, "no model: the English word");
+    e.load_tinylm(&v5).unwrap();
+    assert_eq!(e.left_full_chars(), 0, "set, then load");
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 8, "the declared length");
+    e.load_tinylm(&v1).unwrap();
+    assert_eq!(e.left_full_chars(), 0, "load another model");
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 3, "no declared length: the English word");
+    assert!(e.load_tinylm(Path::new("/nonexistent/x.sjtl")).is_err());
+    assert_eq!(e.left_full_chars(), 3, "a failed load keeps the model, and the text cut for it");
+    e.load_tinylm(&v5).unwrap();
+    e.set_left_context(text);
+    let s = shared();
+    e.set_lm(s.lm.clone(), s.capped.clone());
+    assert_eq!(e.left_full_chars(), 0, "set_lm drops the small model");
+}
+
+/// Review of PR #294: with a declared length the key is the raw text, so a left text "^" is the key "^" (the model's UNK), not the
+/// empty k that `context_key`'s SENTINEL stands for.
+#[test]
+fn a_declared_key_of_a_caret_is_kept() {
+    let v5 = upgraded(&rerank_model(), Some(8));
+    let syls = row(12);
+    let want = expect_key(&v5, &syls, "<s>", End::Eos, "^");
+    let mut e = engine_with(Some(&v5));
+    e.set_left_context("^");
+    type_syls(&mut e, &syls);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!((r.keys(), r.picks()), (vec!["^".to_string()], vec![want.pick]));
+}
+
 /// Generations come from one process-wide counter: a result never applies to another engine.
 #[test]
 fn two_engines_do_not_share_generations() {

@@ -587,3 +587,38 @@ fn v5_declares_the_left_context_length() {
     assert!(is_format(&relabel(&good, b'5', 4)), "SJTL0005 + 4");
     assert!(is_format(&relabel(&good, b'4', 5)), "SJTL0004 + 5");
 }
+
+/// `key_for` is the one keying rule (engine and CLI): `context_key` for versions 1 to 4, the last L characters as they are for version 5.
+/// A declared key of "^" is the text "^" (UNK here), never the empty k that `context_key`'s SENTINEL stands for (review of PR #294).
+#[test]
+fn v5_keys_with_the_raw_last_l_characters() {
+    let (v4, m) = (TinyLm::parse(&bytes(V4)).unwrap(), TinyLm::parse(&v5(8)).unwrap());
+    let text = "我們說了一些話Joe的表演，";
+    assert_eq!((v4.key_for(text), m.key_for(text)), ("^".to_string(), "話Joe的表演，".to_string()));
+    assert_eq!((v4.key_for("你好嗎"), m.key_for("你好嗎")), ("好嗎".to_string(), "你好嗎".to_string()));
+    let cands = ["你好", "我們"];
+    let ll = |model: &TinyLm, key: &str| model.rerank(&[-1.0, -1.5], &cands, key, (1.0, f64::INFINITY, 0.0)).unwrap().1.unwrap();
+    let many = |model: &TinyLm, k: &str| model.ll_many(&cands.map(|c| (k, c))).unwrap();
+    assert_ne!(many(&m, "^"), many(&m, ""), "premise: \"^\" is a character of the key");
+    assert_eq!(ll(&m, "^"), many(&m, "^"), "declared: \"^\" as it is");
+    assert_eq!(ll(&v4, "^"), many(&v4, ""), "versions 1 to 4: SENTINEL is the empty k");
+}
+
+/// context-return section 2: of a declared key the model sees min(L, ctx - 1 - |c|) characters (`ll_many`'s window). With L 8 and ctx
+/// 64, a 60-character candidate leaves room for exactly the last 3 characters of the key.
+#[test]
+fn a_long_candidate_sees_only_the_tail_of_a_declared_key() {
+    let m = TinyLm::parse(&v5(8)).unwrap();
+    let key = m.key_for("這個人都說要來我你他好嗎");
+    assert_eq!(key, "說要來我你他好嗎");
+    let long: Vec<String> = ["我們", "你們"].iter().map(|p| format!("{p}{}", "的是不了在有".repeat(10).chars().take(58).collect::<String>())).collect();
+    assert!(long.iter().all(|c| c.chars().count() == 60));
+    let cands: Vec<&str> = long.iter().map(String::as_str).collect();
+    let got = m.rerank(&[-1.0, -1.5], &cands, &key, (1.0, f64::INFINITY, 0.0)).unwrap().1.unwrap();
+    let with = |k: &str| m.ll_many(&cands.iter().map(|&c| (k, c)).collect::<Vec<_>>()).unwrap();
+    let ranked = |k: &str| m.rerank(&[-1.0, -1.5], &cands, k, (1.0, f64::INFINITY, 0.0)).unwrap().1.unwrap();
+    assert_eq!(got, with("他好嗎"), "the last 3 characters");
+    assert_eq!(got, ranked("說要來我我他好嗎"), "the 4th character from the end is not seen");
+    assert_ne!(got, ranked("說要來我你你好嗎"), "the 3rd is");
+    assert_ne!(got, with("好嗎"), "not only 2");
+}

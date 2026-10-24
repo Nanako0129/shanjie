@@ -2,7 +2,7 @@
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
 use crate::colloquial::{self, Colloquial, ReadingChannel};
-use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
+use crate::learn::{context_key, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
@@ -89,7 +89,7 @@ impl RerankJob {
     /// Revision 1: a stretch's context key is `context_key` of the left context and the text before it as it will be shown,
     /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before). A model declaring a
     /// left-context length L (SJTL0005) gets the last L characters of that same text instead, not through `context_key`
-    /// (context-return section 2).
+    /// (`TinyLm::key_for`, context-return section 2).
     pub fn run(&self) -> RerankResult {
         let mut before = self.left.clone();
         let choices = self
@@ -97,10 +97,7 @@ impl RerankJob {
             .iter()
             .map(|s| {
                 before.push_str(&s.gap);
-                let key = match self.model.left_len() {
-                    Some(l) => last_chars(&before, l),
-                    None => context_key(&before),
-                };
+                let key = self.model.key_for(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
                 let pick = match &self.colloquial {
@@ -239,11 +236,6 @@ const DEFAULT_PUNCT: [(char, &[&str]); 10] = [
 /// s3e §3 limits on a table passed to `set_punctuation`.
 const PUNCT_TABLE_MAX_BYTES: usize = 64 * 1024;
 const PUNCT_TABLE_MAX_LINES: usize = 1000;
-
-/// The last `n` characters of `s` (by `chars()`, never a byte slice: context-return section 2, P3-5).
-fn last_chars(s: &str, n: usize) -> String {
-    s.chars().skip(s.chars().count().saturating_sub(n)).collect()
-}
 
 /// context-return section 2: `text` ends, after at most one ASCII space, with 2-32 ASCII letters not preceded by an ASCII letter or
 /// digit. Returns the character index where the word starts and the text from there (the word and that space). Only ASCII decides.
@@ -1011,8 +1003,16 @@ impl Engine {
         self.invalidate();
         let st = self.lm.as_ref().ok_or(EngineError::LoadFailed)?;
         let model = TinyLm::load_paired(path, &st.lm).map_err(|_| EngineError::LoadFailed)?;
-        self.tinylm = Some(Arc::new(model));
+        self.set_tinylm(Some(Arc::new(model)));
         Ok(())
+    }
+
+    /// Every change of the small model: `left_full` was cut for the model loaded at `set_left_context` (its L, or the English word without
+    /// one), so it goes with it; the next composition start sets it again (context-return section 2).
+    fn set_tinylm(&mut self, model: Option<Arc<TinyLm>>) {
+        self.tinylm = model;
+        self.left_full.clear();
+        self.left_cut = false;
     }
 
     /// The colloquial table at `path` (docs/contracts/colloquial-term.md section 2.2), with the word sets of its k term read from the
@@ -1477,7 +1477,7 @@ impl Engine {
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
-        self.tinylm = None; // S7c-2a section 2.3: tuned for the previous model
+        self.set_tinylm(None); // S7c-2a section 2.3: tuned for the previous model
         self.digit_cache = None;
         self.en_words = None;
         self.en_cache();
@@ -1524,7 +1524,7 @@ impl Engine {
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
         self.invalidate();
         self.lm = Some(LmState { lm, capped });
-        self.tinylm = None;
+        self.set_tinylm(None);
     }
 
     /// Whether the demotion table applies (default on, remembered even before a model is loaded);
@@ -2694,10 +2694,8 @@ impl Engine {
         self.display = out;
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
-            let left = match model.left_len() {
-                Some(l) => last_chars(&self.left_full, l),
-                None => self.left.clone(),
-            };
+            // `left_full` holds at most this model's L characters: it is cleared whenever the model changes (`set_tinylm`).
+            let left = if model.left_len().is_some() { self.left_full.clone() } else { self.left.clone() };
             let params = model.params(self.profile, self.rerank_level);
             // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).

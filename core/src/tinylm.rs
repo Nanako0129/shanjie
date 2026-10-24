@@ -14,7 +14,7 @@
 //! R2: errors carry a kind only, never text.
 
 use crate::colloquial::{self, Colloquial, ReadingChannel};
-use crate::learn::SENTINEL;
+use crate::learn::{context_key, last_chars, SENTINEL};
 use crate::lm::{Lm, Profile};
 use std::collections::HashMap;
 use std::fmt;
@@ -494,6 +494,17 @@ impl TinyLm {
         self.left_len
     }
 
+    /// The key a stretch is scored with, `before` being the text in front of it (the left context, then the display before the
+    /// stretch): for a model declaring L (SJTL0005) its last L characters as they are; for versions 1 to 4 `learn::context_key` of it.
+    /// The one rule of the engine's rerank jobs and the evaluation CLI (docs/contracts/context-return.md section 2). Of a declared key
+    /// the model sees at most ctx - 1 - |candidate| characters (`ll_many`'s window), i.e. min(L, ctx - 1 - |c|).
+    pub fn key_for(&self, before: &str) -> String {
+        match self.left_len {
+            Some(l) => last_chars(before, l),
+            None => context_key(before),
+        }
+    }
+
     /// SHA-256 (hex) of the `.sjtl` bytes `load_paired` parsed (empty for `parse` and `load`).
     pub fn file_sha256(&self) -> &str {
         &self.file_sha
@@ -505,9 +516,9 @@ impl TinyLm {
     }
 
     /// The S7a rerank of one n-best list, the one rule the CLI measures and the engine will use: the first `TOPK` candidates,
-    /// k = the engine's context key (`learn::context_key`; its `SENTINEL`, no Han character before the cursor, is the empty k as
-    /// in tinylm.row_key; for a model declaring `left_len`, the last L characters of the text before the stretch, context-return
-    /// section 2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
+    /// k = `key_for` of the text before the stretch: for versions 1 to 4 the engine's context key (`learn::context_key`; its
+    /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
+    /// L characters as they are ("^" included; context-return section 2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
     pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64)) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
@@ -520,13 +531,14 @@ impl TinyLm {
         Ok((pick(&ng[..n], &ll, alpha, tau, delta), Some(ll)))
     }
 
-    /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the context key (`learn::context_key`;
-    /// its `SENTINEL` is the empty k, as in tinylm.row_key), or `None` when there are fewer than two and the model does not run.
+    /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the key (`key_for`; for versions
+    /// 1 to 4 its `SENTINEL` is the empty k, as in tinylm.row_key, while a declared-length key is used as it is), or `None` when there are
+    /// fewer than two and the model does not run.
     fn rerank_ll(&self, cands: &[&str], key: &str) -> Result<Option<Vec<f64>>, TinyLmError> {
         if cands.len() < 2 {
             return Ok(None);
         }
-        let k = if key == SENTINEL { "" } else { key };
+        let k = if key == SENTINEL && self.left_len.is_none() { "" } else { key };
         let items: Vec<(&str, &str)> = cands.iter().map(|c| (k, *c)).collect();
         self.ll_many(&items).map(Some)
     }
@@ -550,7 +562,8 @@ impl TinyLm {
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
-    /// (characters outside the table are UNK; the oldest characters of k are dropped when [BOS] + k + c exceeds the context;
+    /// (characters outside the table are UNK; the oldest characters of k are dropped when [BOS] + k + c exceeds the context, so the
+    /// model sees the last min(|k|, ctx - 1 - |c|) characters of k;
     /// a c longer than ctx - 1 characters is an error; an empty c is 0).
     pub fn ll_many(&self, items: &[(&str, &str)]) -> Result<Vec<f64>, TinyLmError> {
         self.ll_many_with(Backend::DEFAULT, items)
