@@ -679,14 +679,14 @@ class AppendCreators(unittest.TestCase):
 class MainRebuild(unittest.TestCase):
     """A full rebuild is rebuild + append: the creator rows must not vanish."""
 
-    def run_main(self, creators_text):
+    def run_main(self, creators_text, out_is_lex=True):
         d = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, d, True)
         creators = os.path.join(d, "names-creators.tsv")
         if creators_text is not None:
             put(creators, creators_text)
         argv = ["build_names.py", "--nsi-commit", "a" * 40, "--out", d, "--report", d]
-        with mock.patch.object(B, "CREATORS", creators), mock.patch.object(B, "NamesApi"), mock.patch.object(B.urllib.request, "install_opener"), \
+        with mock.patch.object(B, "LEX", d if out_is_lex else os.path.join(d, "lexicon")), mock.patch.object(B, "CREATORS", creators), mock.patch.object(B, "NamesApi"), mock.patch.object(B.urllib.request, "install_opener"), \
                 mock.patch.object(B, "build", return_value=({}, {}, [], [], [], [])), mock.patch.object(B, "write_all"), \
                 mock.patch.object(B, "append_creators", return_value=0) as app, mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
             B.main()
@@ -694,6 +694,7 @@ class MainRebuild(unittest.TestCase):
 
     def test_appends_when_the_creators_file_has_rows_and_not_otherwise(self):
         self.run_main("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n").assert_called_once()
+        self.run_main("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n", out_is_lex=False).assert_not_called()   # another --out: a NOTE, no append
         for text in (None, "", "# only a header\n"):
             self.run_main(text).assert_not_called()
 
