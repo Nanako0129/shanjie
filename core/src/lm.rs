@@ -574,7 +574,12 @@ impl Lm {
     /// `word` for a word the learner boosted (model-v6 section 2.8 rule 1): no Kneser-Ney substitution. `Engine::total_score` uses it
     /// for the path words `decode_segment_learned` scored that way, so the total still equals the top decode score.
     pub fn word_learned(&self, lam: f64, v: &str, w: &str, lp: f64) -> f64 {
-        word_term(lam, self.prob_learned(self.ctx_of(self.word_id(v)), self.word_id(w), pow10(lp)), lp)
+        self.word_learned_by_id(lam, self.word_id(v), self.word_id(w), lp)
+    }
+
+    /// `word_learned` for ids the caller resolved (`CappedLexicon::model_id`: an optional-pack word is `None`).
+    pub(crate) fn word_learned_by_id(&self, lam: f64, v: Option<u32>, w: Option<u32>, lp: f64) -> f64 {
+        word_term(lam, self.prob_learned(self.ctx_of(v), w, pow10(lp)), lp)
     }
 
     /// The stored trigram context (u, v), if `cfg` scores with the table. `u` `None` is unknown (a left context supplies one word).
@@ -599,25 +604,26 @@ impl Lm {
     /// `word` under `cfg` with two history words (`u` first, `None` unknown): trimodel.py `_word`. With `cfg` from a plain lambda
     /// it is `word`.
     pub fn word3(&self, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
-        self.word3_in(&mut TriMemo::default(), cfg, u, v, w, lp)
+        let id = |s: &str| self.word_id(s);
+        self.word3_in(&mut TriMemo::default(), cfg, u.and_then(id), id(v), id(w), lp)
     }
 
     /// `eos` under `cfg` with two history words: trimodel.py `eos`.
     pub fn eos3(&self, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
-        self.eos3_in(&mut TriMemo::default(), cfg, u, v)
+        let id = |s: &str| self.word_id(s);
+        self.eos3_in(&mut TriMemo::default(), cfg, u.and_then(id), id(v))
     }
 
-    /// `word3` sharing `memo` with the other terms of one pass (`Engine::total_score`).
-    pub(crate) fn word3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str, w: &str, lp: f64) -> f64 {
-        let (vid, wid) = (self.word_id(v), self.word_id(w));
-        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+    /// `word3` sharing `memo` with the other terms of one pass (`Engine::total_score`). The words come as ids so the caller can
+    /// pass `None` for a word the model must not know (`CappedLexicon::model_id`: an optional-pack word).
+    pub(crate) fn word3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<u32>, vid: Option<u32>, wid: Option<u32>, lp: f64) -> f64 {
+        let tri = self.tri_of(cfg, u, vid, memo);
         word_term(cfg.lam, self.prob_tri(tri, self.ctx_of(vid), wid, pow10(lp), cfg.kn), lp)
     }
 
-    /// `eos3` sharing `memo`.
-    pub(crate) fn eos3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<&str>, v: &str) -> f64 {
-        let vid = self.word_id(v);
-        let tri = self.tri_of(cfg, u.and_then(|u| self.word_id(u)), vid, memo);
+    /// `eos3` sharing `memo`, with ids like `word3_in`.
+    pub(crate) fn eos3_in(&self, memo: &mut TriMemo, cfg: Scoring, u: Option<u32>, vid: Option<u32>) -> f64 {
+        let tri = self.tri_of(cfg, u, vid, memo);
         cfg.lam * self.prob_tri(tri, self.ctx_of(vid), Some(1), self.p_eos, cfg.kn).log10()
     }
 
@@ -771,9 +777,51 @@ pub struct CappedLexicon {
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
     deltas: Vec<(usize, f64)>,
+    /// The forced pack words (docs/contracts/pack-oov.md section 1b: pack rows tagged `PACK_OOV_TAG`): `(off, len)` into
+    /// `base.words`, one per distinct string, sorted by the string's bytes. Empty without a pack (the lexicon then behaves exactly as before).
+    packs: Vec<(u32, u32)>,
+    /// One bit per entry position whose word is in the overlay (`overlay_bits`), or whose score is not main's capped score
+    /// (`pack_bits`: a forced pack word, or a pack word the model never saw), so `readings` can redo main's capping; both empty
+    /// without a pack.
+    overlay_bits: Vec<u64>,
+    pack_bits: Vec<u64>,
+    /// `Lm::identity` of the model the lexicon was capped with: `readings` must get the same one.
+    built_for: (u64, usize, usize),
+}
+
+/// Column 4 of a pack row that the pack builder marks as forced (docs/contracts/pack-oov.md section 1b): the word is unknown to the
+/// model when decoding and keeps the pack's score. Other pack rows are capped as in main.
+pub const PACK_OOV_TAG: &str = "acg-oov";
+
+/// An overlay word's score capped at its corpus frequency, or lowered by the unseen penalty when the model never saw it.
+fn capped_score(lm: &Lm, score: f64, w: &str) -> f64 {
+    let c = lm.count(w);
+    if c != 0 { score.min((c as f64 / lm.n as f64).log10()) } else { score - UNSEEN_OVERLAY_PENALTY }
+}
+
+/// Best first, the one order both the decoder's entries and `readings` sort by (stable, NaN as equal).
+fn desc(a: f64, b: f64) -> std::cmp::Ordering {
+    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn bit(bits: &[u64], p: usize) -> bool {
+    bits[p / 64] >> (p % 64) & 1 == 1
 }
 
 impl CappedLexicon {
+    /// Whether `word` is a forced pack word (a pack row tagged `PACK_OOV_TAG`, docs/contracts/pack-oov.md section 1b).
+    pub fn is_pack(&self, word: &str) -> bool {
+        let at = |&(off, len): &(u32, u32)| &self.base.words[off as usize..(off + len) as usize];
+        self.packs.binary_search_by(|e| at(e).cmp(word)).is_ok()
+    }
+
+    /// The model id the decoder scores `word` with: `None` (unknown) for a forced pack word, whose score then comes from the
+    /// pack alone; `Lm::word_id` for every other word, unforced pack words included. The decoder (`decode*`, the start word) and `total_score` resolve their word ids
+    /// here; prediction, `history()`, the digits layer and 常談 still use the string, unchanged by design (docs/contracts/pack-oov.md).
+    pub fn model_id(&self, lm: &Lm, word: &str) -> Option<u32> {
+        if self.is_pack(word) { None } else { lm.word_id(word) }
+    }
+
     /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB). Later
     /// calls must pass the same model (checked in debug builds by `Lm::identity`); the index holds its word ids.
     pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {
@@ -789,31 +837,49 @@ impl CappedLexicon {
         idx
     }
 
-    /// The single constructor. `overlay` is the text of overlay-add.tsv; every word in its second
+    /// The constructor without packs (`with_packs` is the one with them). `overlay` is the text of overlay-add.tsv; every word in its second
     /// column (whether the entry came from the base or the overlay) is capped at its corpus frequency.
     pub fn new(base: Arc<Lexicon>, overlay: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
+        Self::with_packs(base, overlay, "", lm, demote)
+    }
+
+    /// `new` with the rows of the enabled optional packs (`pack_text`, the same rows `overlay` also holds, `--extra-overlay` rows
+    /// not among them; docs/contracts/pack-oov.md section 1b): the words of rows tagged `PACK_OOV_TAG` keep the pack's score (no cap,
+    /// no unseen penalty) and score as unknown to the model (`model_id`); the other pack words are capped as in main, except that a word
+    /// the model never saw keeps the pack's score instead of losing `UNSEEN_OVERLAY_PENALTY`. An empty `pack_text` is `new`.
+    pub fn with_packs(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
+        let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
+        let forced: HashSet<&str> = pack_text.lines().filter(|l| l.split('\t').nth(3) == Some(PACK_OOV_TAG)).filter_map(|l| l.split('\t').nth(1)).collect();
+        let mut packs: Vec<(u32, u32)> = Vec::new();
         let mut ents = base.ents.clone();
+        let bits = if pack.is_empty() { 0 } else { ents.len().div_ceil(64) };
+        let (mut overlay_bits, mut pack_bits) = (vec![0u64; bits], vec![0u64; bits]);
         for i in 0..base.readings.len() {
             let range = base.range(i);
-            for e in &mut ents[range.clone()] {
+            for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
                 let w = &base.words[e.off as usize..(e.off + e.len) as usize];
-                if words.contains(w) {
-                    let c = lm.count(w);
-                    e.score = if c != 0 {
-                        e.score.min((c as f64 / lm.n as f64).log10())
-                    } else {
-                        e.score - UNSEEN_OVERLAY_PENALTY
-                    };
+                let (in_overlay, in_forced) = (words.contains(w), forced.contains(w));
+                let unseen_pack = !in_forced && in_overlay && pack.contains(w) && lm.count(w) == 0;
+                if bits != 0 {
+                    overlay_bits[p / 64] |= (in_overlay as u64) << (p % 64);
+                    pack_bits[p / 64] |= ((in_forced || unseen_pack) as u64) << (p % 64);
+                }
+                if in_forced {
+                    packs.push((e.off, e.len));
+                } else if in_overlay && !unseen_pack {
+                    e.score = capped_score(lm, e.score, w);
                 }
             }
-            ents[range].sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            ents[range].sort_by(|a, b| desc(a.score, b.score));
         }
         let deltas = match demote {
             Some(d) => d.resolve(&base, &ents)?,
             None => Vec::new(),
         };
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas })
+        packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
+        packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, built_for: lm.identity() })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -855,11 +921,29 @@ impl CappedLexicon {
         }
     }
 
-    /// Every reading with its capped (word, score) list, best first (build-time use, allocates).
-    pub fn readings(&self) -> impl Iterator<Item = (Vec<&str>, Vec<(&str, f64)>)> + '_ {
-        (0..self.base.readings.len()).map(|r| {
+    /// Every reading with its capped (word, score) list, best first (build-time use, allocates). Pack words are capped here like any
+    /// overlay word: the prediction index and the digits layer read this, and they are unchanged by the pack. A reading that holds a
+    /// pack word is rebuilt here the way `new` without the exemption orders it (base order, pack words capped with `lm`, the model the
+    /// lexicon was built with, then a stable sort), so the engine keeps no second copy of those lists.
+    pub fn readings<'s, 'm>(&'s self, lm: &'m Lm) -> impl Iterator<Item = (Vec<&'s str>, Vec<(&'s str, f64)>)> + use<'s, 'm> {
+        debug_assert!(self.built_for == lm.identity(), "readings() needs the model the lexicon was capped with");
+        (0..self.base.readings.len()).map(move |r| {
             let key = self.base.key_of(&self.base.readings[r]).iter().map(|&i| self.base.syl_names[i as usize].as_str());
-            (key.collect(), self.base.range(r).map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect())
+            let range = self.base.range(r);
+            // `pack_bits` is set per position; `ents` permutes positions only within a reading, so `range` covers the same bits.
+            let list = if !self.pack_bits.is_empty() && range.clone().any(|p| bit(&self.pack_bits, p)) {
+                let mut l: Vec<(&str, f64)> = range
+                    .map(|p| {
+                        let (b, w) = (&self.base.ents[p], self.word_of(&self.base.ents[p]));
+                        (w, if bit(&self.overlay_bits, p) { capped_score(lm, b.score, w) } else { b.score })
+                    })
+                    .collect();
+                l.sort_by(|a, b| desc(a.1, b.1));
+                l
+            } else {
+                range.map(|p| (self.word_of(&self.ents[p]), self.ents[p].score)).collect()
+            };
+            (key.collect(), list)
         })
     }
 
@@ -985,7 +1069,7 @@ pub fn decode_segment_learned<'a>(
     let mut memo = TriMemo::default();
     let n = syls.len();
     let ids = base.ids(syls);
-    let start_id = lm.word_id(start);
+    let start_id = lex.model_id(lm, start);
     let start_prev = if start == "<s>" { start_id } else { None };
     let before_tail: String = {
         let t: Vec<char> = learn.map_or("", |l| l.before).chars().rev().take(crate::learn::MAX_CONTEXT).collect();
@@ -1068,7 +1152,7 @@ pub fn decode_segment_learned<'a>(
             // Lexicon entries (`Some(position)`), then the new words (`None`: no learned boost, no demotion).
             let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
             for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
-                let (wid, pb0) = (lm.word_id(word), pow10(lp0));
+                let (wid, pb0) = (lex.model_id(lm, word), pow10(lp0));
                 let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1);
                 for (hi, h) in hyps[i - l].iter().enumerate() {
                     let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
@@ -1131,7 +1215,7 @@ pub fn decode_segment_learned<'a>(
     let last = std::mem::take(&mut hyps[n]);
     let closing = match end {
         End::Eos => None,
-        End::Next { word, lp, delta } => Some((lm.word_id(word), pow10(lp), lp, delta)),
+        End::Next { word, lp, delta } => Some((lex.model_id(lm, word), pow10(lp), lp, delta)),
     };
     let mut out: Vec<(f64, Vec<(&'a str, f64, f64, usize)>, String)> = last
         .into_iter()
