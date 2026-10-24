@@ -38,6 +38,7 @@ test-python:
 	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
 	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
+	python3 -W ignore -m unittest tools/test_build_meme_pack.py
 	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py experiments/names-creators/test_count_usage.py
 	python3 experiments/s2-classes/test_cluster.py
 	python3 -m unittest discover -s experiments/s7a-tinylm -p test_export_sjtl.py
@@ -58,6 +59,7 @@ test-python:
 	python3 -W ignore -m unittest tools/test_triage.py
 	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
+	python3 -W ignore -m unittest tools/test_build_english_next.py
 	cd experiments/digits && python3 -W ignore -m unittest test_digits
 	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py experiments/s2/test_build_tune.py experiments/s2/test_trad_phrases.py
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
