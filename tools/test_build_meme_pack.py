@@ -430,6 +430,18 @@ class Collisions(unittest.TestCase):
         self.assertEqual(self.pack_words(files), {"同音少"})          # the excluded higher word does not block the lower one
         self.assertEqual((dropped, m["stages"]["excluded_by_meme_collisions_tsv"]), ([], 1))
 
+    def test_row_order_pack_needed_first_chat_right_next_same_reading_pairs_last(self):
+        rd = lambda ws: {"甲詞": (["a", "b", "c"], False), "乙詞": (["d", "e", "f"], False), "丙詞": (["g", "h", "i"], False)}
+        counts = {"甲詞": (50, 5), "乙詞": (30, 5), "丙詞": (20, 5)}        # 甲詞 has the most articles, so it would be the first row without the rule
+        kw = dict(words=("甲詞", "乙詞", "丙詞"), readings=rd, counts=counts)
+        files, *_ = self.run_build(fake_decoder(), collisions=[("a b c", "甲詞", "+舊詞", "理由")], **kw)
+        self.assertEqual([l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()], ["乙詞", "丙詞", "甲詞"])
+        files, *_ = self.run_build(fake_decoder(), **kw)                      # no pair row: the usual order, by articles
+        self.assertEqual([l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()], ["甲詞", "乙詞", "丙詞"])
+        # a word the chat decode already types right (X is the word) goes behind the words the pack must win in chat
+        files, *_ = self.run_build(fake_decoder(), x={"甲詞": ("甲詞", "？甲詞")}, **kw)
+        self.assertEqual([l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()], ["乙詞", "丙詞", "甲詞"])
+
     def test_check_set_is_seeded_capped_and_skips_check_readings(self):
         info = {"order": [f"{c}字詞" for c in "甲乙丙丁戊己庚辛壬癸"], "reading": {}, "check": {}}
         info["reading"] = {w: ["a", "b", "c"] for w in info["order"]}

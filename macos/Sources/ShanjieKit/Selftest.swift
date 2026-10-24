@@ -112,8 +112,6 @@ public enum Selftest {
         let (itShown, itCode) = type(itWordStandard, withPack)
         guard itCode == 0 else { return fail("selftest: shanjie_engine_key (it pack) failed, code", itCode) }
         guard itShown == itWord else { return fail("selftest: the bundled IT+AI word pack is not in effect, code", 0) }
-        // A fresh composition first, so the commits above cannot affect this decode.
-        if case .failed(let c) = withPack.reset(mode: 1) { return fail("selftest: shanjie_engine_reset (meme pack) failed, code", c) }
         guard let meme = memeSample(resources) else { return fail("selftest: the bundled meme pack has no usable first row, code", 0) }
         let (memeShown, memeCode) = type(meme.keys, withPack)
         guard memeCode == 0 else { return fail("selftest: shanjie_engine_key (meme pack) failed, code", memeCode) }

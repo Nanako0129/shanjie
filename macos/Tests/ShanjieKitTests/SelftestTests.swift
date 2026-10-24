@@ -48,10 +48,20 @@ final class SelftestTests: XCTestCase {
         // The core's pack parser takes no comment lines, so this is the sampler alone: it would skip them (and blank lines) anyway.
         try ("# a comment line\n\n" + TestData.memePackRow).write(to: file, atomically: true, encoding: .utf8)
         XCTAssertEqual(Selftest.memeSample(res)?.word, "佛心來的")
-        XCTAssertEqual(Selftest.memeSample(res)?.keys, "zj6vup x962k7", "the keys derived from the reading are the ones typed by hand before")
+        XCTAssertEqual(Selftest.memeSample(res)?.keys, Layouts.keys("ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙", eten: false), "the keys derived from the reading are the independently transcribed layout's")
         try "ㄅㄚ-ㄅㄚ\t巴巴\t-6.0\tmeme\n".write(to: file, atomically: true, encoding: .utf8)
         XCTAssertEqual(Selftest.memeSample(res)?.word, "巴巴")
-        XCTAssertEqual(Selftest.memeSample(res)?.keys, "18 18 ", "a toneless syllable ends with a space")
+        XCTAssertEqual(Selftest.memeSample(res)?.keys, Layouts.keys("ㄅㄚ ㄅㄚ", eten: false), "a toneless syllable ends with a space")
+    }
+
+    /// The committed data/packs/meme-add.tsv (not a fixture row): its first data row is what the shipped App's selftest types, so it must come out as that word.
+    func testPassesWithTheCommittedMemePack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        let file = res.appendingPathComponent("packs/meme-add.tsv")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.copyItem(at: TestData.repo.appendingPathComponent("data/packs/meme-add.tsv"), to: file)
+        XCTAssertEqual(Selftest.run(resources: res), 0)
     }
 
     func testFailsWithACorruptBundledMemePack() throws {

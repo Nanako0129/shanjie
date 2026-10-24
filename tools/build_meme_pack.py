@@ -277,6 +277,11 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         words = [w for w in words if w not in hit]
     else:
         raise SystemExit(f"type (c) collisions not settled after {B.LEXICON_RULE_ROUNDS} rounds")
+    # 列的先後不影響分數（分數在 pack_rows 已經定了），只決定 App selftest 打哪一列（它打檔案的第一個資料列，要求送出的就是那個詞）：
+    # 先放聊天沒有詞包時打不對的詞（selftest 才看得出詞包有沒有生效），再放聊天本來就對的，最後放同讀音留兩個詞的列（處置檔 `+` 的那幾列，讀音上有同音競爭）。
+    pairs = {r[0] for r in (B.read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else []) if r[2].startswith("+")}
+    rank_of = lambda row: 2 if row.split("\t")[0].replace("-", " ") in pairs else int(xs[row.split("\t")[1]] == row.split("\t")[1])
+    rows = sorted(rows, key=rank_of)
     keep_now = B.first_named(rank, set(words))
     col = B.open_collisions(found, decided, keep_now, set(), frozenset(), {(r.split("\t")[0].replace("-", " "), r.split("\t")[1]) for r in rows})
     srcs = ["word\tsources\tptt_articles\tptt_boards\tnote\n"]

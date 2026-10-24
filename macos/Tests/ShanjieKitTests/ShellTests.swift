@@ -1045,7 +1045,7 @@ final class ShellTests: XCTestCase {
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
         try TestData.memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
         let store = MemoryMemePackStore()
-        let name = "zj6vup x962k7"  // ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙ (a space is the first tone)
+        let name = Layouts.keys("ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙", eten: false)
         let make = { Controller(self.packShell(acg: MemoryAcgPackStore(), it: MemoryItPackStore(), meme: store), bundle: "com.hnc.Discord") }
         let c = make()
         c.session.activate()
