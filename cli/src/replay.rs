@@ -75,11 +75,20 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
 /// by default and None for `--no-colloquial`. `learn` turns learning on once, in memory only (no learning file is opened here; the bin's
 /// `--learn-file` opens a copy).
 pub fn build_engine(root: &Path, lm: &Path, tinylm: Option<&Path>, colloquial: Option<&Path>, profile: Profile, learn: bool) -> Result<Engine, String> {
+    build_engine_opts(root, lm, tinylm, colloquial, profile, learn, false)
+}
+
+/// `build_engine`; `no_english_next` drops the data directory's `english-next.tsv` before the model loads, so the engine has neither the table
+/// nor the word cache built from it (`--english-next` measures the cost of loading it).
+pub fn build_engine_opts(root: &Path, lm: &Path, tinylm: Option<&Path>, colloquial: Option<&Path>, profile: Profile, learn: bool, no_english_next: bool) -> Result<Engine, String> {
     fn fail<T>(what: &'static str) -> impl Fn(T) -> String {
         move |_| format!("{what} failed")
     }
     let packs = root.join("data/packs");
     let mut e = Engine::new_with_packs(&root.join("data/lexicon"), Layout::Standard, Some((&packs, PACK_ACG))).map_err(fail("engine build"))?;
+    if no_english_next {
+        e.set_english_next(None);
+    }
     e.load_lm(lm).map_err(fail("load_lm"))?;
     if let Some(t) = tinylm {
         e.load_tinylm(t).map_err(fail("load_tinylm"))?;

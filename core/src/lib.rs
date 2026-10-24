@@ -4,6 +4,7 @@
 pub mod colloquial;
 pub mod digits;
 pub mod engine;
+pub mod english_next;
 pub mod eval;
 pub mod ffi;
 pub mod learn;

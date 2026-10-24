@@ -17,6 +17,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
+mod english_next;
 
 /// (display name, rows). Messages never include row text (R2).
 fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), String> {
@@ -703,6 +704,10 @@ fn run() -> Result<(), String> {
     // zhen-mixed section 4: a subcommand of its own, before anything the evaluation modes read.
     if all.first().map(String::as_str) == Some("english-sim") {
         return english::run(&all[1..], &root());
+    }
+    // english-next.md section 3.2: drives the engine with and without the table; reads no lenient table.
+    if all.iter().any(|a| a == "--english-next") {
+        return english_next::run(&all, &root());
     }
     let len = load_lenient()?;
     if all.iter().any(|a| a == "--predict") {
