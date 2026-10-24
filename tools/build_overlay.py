@@ -6,10 +6,13 @@
 來源下載到 ~/.cache/shanjie/sources/，SHA-256 不符就中止。
 
 SJ-LM-7 契約 §2.1a、§2.3（都預設關，不加旗標時輸出和原來逐位元組相同）：
-      --moedict-readings          萌典有收的詞用萌典第一讀音，沒收的用 tools/readings.py 的規則（Reader）；萌典路徑見 readings.MOEDICT（SHANJIE_MOEDICT）
-      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞寫到 PATH：詞、原讀音、新讀音、依據
+      --moedict-readings          萌典有收的詞用萌典第一讀音，沒收的用 tools/readings.py 的規則（Reader，規則 3b 開）；萌典路徑見 readings.MOEDICT（SHANJIE_MOEDICT）。
+                                  readings.py 判 CHECK（有歧義）或 GAP 的詞不寫進疊加層，印出個數
+      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞，以及被擱下的 CHECK／GAP 詞寫到 PATH：詞、原讀音、新讀音、依據
       --moedict-supplement FILE…  來源「萌典補詞」：萌典有收、不在基底、疊加層、名單、任何詞包，而且在這些純文字檔（一行一段，.gz／.bz2 照副檔名）裡
-                                  子字串出現 ≥ 2 次的詞；讀音＝萌典第一讀音，分數＝同字數的 length_scores（不加手動詞的加分）
+                                  子字串出現 ≥ 2 次的詞；讀音＝萌典第一讀音，分數＝同字數的 length_scores（不加手動詞的加分）。
+                                  先過和維基標題候選相同的過濾（每個字是基底單字詞、不含簡體專用字），再和它們一起走異體判斷（臺／台 這類
+                                  同讀音異體寫法拿掉，記進 overlay-variant-removed.tsv）
       --jobs N                    萌典補詞數子字串用幾個程序
 """
 import argparse
@@ -163,16 +166,27 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
             w2 = bc.convert(w, *conv)
             if w2 != w:
                 target[w] = w2
-    info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)
     moe_first = moe_primary_first() if (moedict_readings or supplement) else None
+    sup_cand = set()
+    if supplement:                                  # 萌典補詞：先挑出來，再和維基標題一起走下面的異體／重複判斷（契約 §2.1a）
+        sup_cand = supplement_words(moe_first, words | cand | other_layers() | manual_words(), supplement, length_scores(base), base_syllables(base), jobs,
+                                    chars=chars, simp_only=simp_only)
+        cand |= sup_cand
+    info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)
     pick = reading_picker(base, base_syllables(base), moe_first) if moedict_readings else None
-    changed = []
+    changed, left_out = [], set()
     for w in sorted(cand):
         syls = base.to_syllables(w)
         if syls is not None:
             syls = normalize(w, syls)
-            if pick:
+            if w in sup_cand:
+                syls = normalize(w, moe_first[w])   # 萌典補詞的讀音＝萌典第一讀音
+            elif pick:
                 new, how = pick(w)
+                if how in ("CHECK", "GAP"):          # readings.py is not sure (CHECK) or the confirmed reading is not in the lexicon (GAP): not written
+                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
+                    left_out.add(w)
+                    continue
                 if new and new != syls:
                     changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
                 syls = new or syls
@@ -205,6 +219,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         memo[x] = to
         return to
 
+    sup_rows, sup_scores = [], length_scores(base) if sup_cand else None
     for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
         if w not in info:
             continue
@@ -217,19 +232,22 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         if y:                                       # S2f §2.5 與修訂二的延伸：只是基底詞或留下的疊加層詞的異體寫法，就拿掉
             variant_removed.append(f"{w}\t{to}\t{'-'.join(syls)}\n")
             continue
+        if w in sup_cand:                           # 分數＝同字數的 length_scores，沒有手動詞的加分；列接在產生的列後面、手動列前面
+            sup_rows += overlay_rows(w, syls, sup_scores[len(w)], SUPPLEMENT_SRC)
+            continue
         src = "wikt" if w in wikt else "zhwiki"
         rows += overlay_rows(w, syls, SCORE[len(w)], src)
+    rows += sup_rows
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
-    if supplement:
-        sup = supplement_rows(moe_first, words | overlay_words | other_layers() | manual_words(), supplement, length_scores(base), base_syllables(base), jobs)
-        rows += sup
-        overlay_words |= {r.split("\t")[1] for r in sup}
     rows += manual_rows(words | overlay_words | pack_words(), length_scores(base), base_syllables(base))
+    if pick:
+        print(f"--moedict-readings: {len(left_out)} words left out of the overlay because readings.py marks them CHECK or GAP"
+              + (f" (listed in {reading_report})" if reading_report else " (give --reading-report to list them)"))
     if reading_report:
         with open(reading_report, "w", encoding="utf-8", newline="\n") as f:
             f.write("詞\t原讀音\t新讀音\t依據\n" + "".join(changed))
-        print(f"reading report: {len(changed)} words whose reading changes, {reading_report}")
+        print(f"reading report: {len(changed)} rows (readings that change; CHECK and GAP words are left out), {reading_report}")
     return rows, removed, variant_removed
 
 
@@ -245,15 +263,18 @@ def manual_words(path=MANUAL):
 
 def reading_picker(base, syllables, moe):
     """--moedict-readings：詞 → (讀音 list, 依據)。萌典有收（音節數等於字數、每個音節基底都有）用萌典第一讀音，其餘用 readings.Reader；
-    兩者都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 (None, None)。"""
+    兩者都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 (None, None)。
+    readings.py 判成 CHECK（有歧義）或 GAP 的詞回 (它的暫用讀音, "CHECK" 或 "GAP")，build() 不把它寫進疊加層。"""
     reader = readings.make_reader(base, rule_3b=True)    # the SJ-LM-7 lexicon steps use rule 3b (contract 2.3)
 
     def pick(w):
         m = moe.get(w)
         if m and len(m) == len(w) and all(s in syllables for s in m):
             return normalize(w, m), "moedict"
-        out, _notes, _gaps = reader.read(w)
-        return (normalize(w, out), "readings.py") if out else (None, None)
+        out, notes, gaps = reader.read(w)
+        if not out:
+            return None, None
+        return normalize(w, out), "GAP" if gaps else "CHECK" if notes else "readings.py"
     return pick
 
 
@@ -317,13 +338,20 @@ def count_substrings(paths, candidates, jobs=1):
     return total
 
 
-def supplement_rows(moe, taken, corpus_paths, scores, syllables, jobs=1):
-    """來源「萌典補詞」的列（契約 §2.1a）：moe（詞 → 第一讀音）裡純漢字、字數在 scores 裡、不在 taken、音節數等於字數、音節基底都有的詞，
-    在 corpus_paths 裡子字串出現 >= SUPPLEMENT_MIN 次者；讀音＝萌典第一讀音（normalize），分數＝scores[字數]，沒有手動詞的加分。
-    詞的 code point 排序；含「一」「不」的詞照 overlay_rows 附變調列。"""
-    cand = {w for w, m in moe.items() if MANUAL_WORD.match(w) and len(w) in scores and w not in taken and len(m) == len(w) and all(s in syllables for s in m)}
+def supplement_words(moe, taken, corpus_paths, scores, syllables, jobs=1, chars=None, simp_only=()):
+    """來源「萌典補詞」的詞（契約 §2.1a）：moe（詞 → 第一讀音）裡純漢字、字數在 scores 裡、不在 taken、音節數等於字數、音節基底都有的詞，
+    在 corpus_paths 裡子字串出現 >= SUPPLEMENT_MIN 次者。和其他疊加層候選同一組過濾：chars 不是 None 時每個字都要是基底的單字詞，
+    不含 simp_only 的字（build() 傳進來；之後的異體／重複判斷由 build() 對它們一起做）。"""
+    cand = {w for w, m in moe.items() if MANUAL_WORD.match(w) and len(w) in scores and w not in taken and len(m) == len(w) and all(s in syllables for s in m)
+            and (chars is None or all(c in chars for c in w)) and not any(c in simp_only for c in w)}
     counts = count_substrings(corpus_paths, cand, jobs)
-    return [r for w in sorted(w for w in cand if counts[w] >= SUPPLEMENT_MIN)
+    return {w for w in cand if counts[w] >= SUPPLEMENT_MIN}
+
+
+def supplement_rows(moe, taken, corpus_paths, scores, syllables, jobs=1, **filters):
+    """supplement_words 的列：讀音＝萌典第一讀音（normalize），分數＝scores[字數]，沒有手動詞的加分；詞的 code point 排序，
+    含「一」「不」的詞照 overlay_rows 附變調列。build() 另外讓這些詞走異體判斷，所以實際寫檔的列由 build() 產生。"""
+    return [r for w in sorted(supplement_words(moe, taken, corpus_paths, scores, syllables, jobs, **filters))
             for r in overlay_rows(w, normalize(w, moe[w]), scores[len(w)], SUPPLEMENT_SRC)]
 
 

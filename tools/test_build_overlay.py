@@ -108,7 +108,9 @@ class BuildFlags(unittest.TestCase):
         picked = [w for w in itertools.islice(pairs, 200) if len(set(cls.base.to_syllables(w))) == 2]
         cls.title, cls.other, cls.sup = picked[0], picked[1], picked[2]
 
-    def build(self, *args, **kw):
+    check, gap = (), ()
+
+    def build(self, *args, extra_moe=None, extra_corpus=(), simp=(), **kw):
         d = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, d)
         wikt = os.path.join(d, "t.gz")
         with gzip.open(wikt, "wt", encoding="utf-8") as f:
@@ -116,12 +118,12 @@ class BuildFlags(unittest.TestCase):
         empty = os.path.join(d, "e.gz")
         gzip.open(empty, "wt").close()
         corpus = os.path.join(d, "c.txt")
-        open(corpus, "w", encoding="utf-8").write(f"{self.sup}和{self.sup}\n{self.other}\n")
-        moe = {self.title: tuple(reversed(self.base.to_syllables(self.title))), self.sup: tuple(self.base.to_syllables(self.sup))}
-        stub = mock.Mock(); stub.read = lambda w: (list(self.base.to_syllables(w)), [], [])
+        open(corpus, "w", encoding="utf-8").write(f"{self.sup}和{self.sup}\n{self.other}\n" + "".join(f"{w}和{w}\n" for w in extra_corpus))
+        moe = {self.title: tuple(reversed(self.base.to_syllables(self.title))), self.sup: tuple(self.base.to_syllables(self.sup)), **(extra_moe or {})}
+        stub = mock.Mock(); stub.read = lambda w: (list(self.base.to_syllables(w)), ["unsure"] if w in self.check else [], ["gap"] if w in self.gap else [])
         patches = [mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), mock.patch.object(bc, "load_conv", lambda: None),
                    mock.patch.object(B, "moe_titles", lambda: set()), mock.patch.object(readings, "moe_primary", lambda: moe),
-                   mock.patch.object(readings, "make_reader", lambda lex, **kw: stub)]
+                   mock.patch.object(readings, "make_reader", lambda lex, **kw: stub), mock.patch.object(bc, "TRAD_SIMP_ONLY", set(simp))]
         with contextlib.ExitStack() as st, contextlib.redirect_stdout(io.StringIO()):
             for p in patches:
                 st.enter_context(p)
@@ -145,6 +147,37 @@ class BuildFlags(unittest.TestCase):
         self.assertEqual(self.row(rows, self.other)[0].split("\t")[0], "-".join(B.normalize(self.other, self.base.to_syllables(self.other))))   # not in Moedict: readings.py
         report = open(os.path.join(d, "r.tsv"), encoding="utf-8").read().splitlines()
         self.assertEqual(report[1:], [f"{self.title}\t{' '.join(old)}\t{' '.join(new)}\tmoedict"])
+
+    def test_check_and_gap_words_from_readings_py_are_left_out_and_listed(self):
+        for kind in ("CHECK", "GAP"):
+            self.check, self.gap = ({self.other}, ()) if kind == "CHECK" else ((), {self.other})
+            (rows, _, _), d = self.build(True, report=True)
+            self.assertNotIn(self.other, {r.split("\t")[1] for r in rows})           # not written, whatever its reading
+            self.assertIn(self.title, {r.split("\t")[1] for r in rows})              # a Moedict word never goes through readings.py
+            report = open(os.path.join(d, "r.tsv"), encoding="utf-8").read().splitlines()
+            self.assertIn(kind, {l.split("\t")[3] for l in report[1:] if l.split("\t")[0] == self.other})
+        self.check = self.gap = ()
+        (rows, _, _), _ = self.build()                                              # without the flag nothing is left out
+        self.assertIn(self.other, {r.split("\t")[1] for r in rows})
+
+    def test_supplement_words_pass_the_same_filters_as_every_other_candidate(self):
+        base = self.base
+        tai = next(w for w in sorted(base.by_word) if len(w) == 2 and "台" in w and B.MANUAL_WORD.match(w) and w.replace("台", "臺") not in base.by_word)
+        variant = tai.replace("台", "臺")                                       # 臺/台 variant of a base word with the same reading: the twin rule drops it
+        syls = base.by_word[tai][0]
+        unknown = next(chr(c) for c in range(0x4E00, 0xA000) if chr(c) not in base.by_word)    # a Han character that is not a base character
+        offbase = unknown + self.sup[1]
+        bad = self.sup[0]                                                      # declared simplified-only below; the supplement word itself is the trap
+        extra = {variant: syls, offbase: syls}
+        corpus = [variant, offbase]
+        (rows, _removed, variant_removed), _ = self.build(sup=True, extra_moe=extra, extra_corpus=corpus)
+        words = {r.split("\t")[1] for r in rows}
+        self.assertIn(self.sup, words)                                           # the control: an ordinary supplement word is written
+        self.assertNotIn(variant, words)
+        self.assertEqual([l.split("\t")[:2] for l in variant_removed if l.startswith(variant)], [[variant, tai]])    # recorded like any removed variant
+        self.assertNotIn(offbase, words)
+        (rows, _, _), _ = self.build(sup=True, simp={bad})
+        self.assertNotIn(self.sup, {r.split("\t")[1] for r in rows})            # a simplified-only character keeps a Moedict word out too
 
     def test_supplement_rows_sit_between_the_generated_rows_and_the_manual_tail(self):
         (rows, _, _), _ = self.build(sup=True)
