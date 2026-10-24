@@ -8,14 +8,13 @@
 |---|---|---|
 | `ptt_clean.py` | PTT 網頁 → `body.tsv`、`push.tsv`（單位 `看板/文章`，一個單位最多 50 句）。同一篇、同一帳號、相鄰、時間差 ≤ 3 分鐘的推文先接起來再切句 | §2.4 |
 | `p2clean.py` | 切句與過濾規則（4–40 漢字、漢字比例、網址與帳號、數字、程式碼、簡體專用字）、去重鍵、`Guard`。從 `exp/p2-data` 複製，`ptt_clean.py` 與 `clean_subs.py` 共用 | §2.4 |
-| `clean_subs.py` | OPUS OpenSubtitles `zh_tw` → `subs.tsv`、`subs-half.tsv`（`SHA-256(句子)` 第一個位元組 < 128 的一半）。含假名、亂碼（詞庫外字）、中英並列三道過濾；每部片最多 50 句（片與片之間用空行分，見下面「未驗證」） | §2.7 |
+| `clean_subs.py` | OPUS OpenSubtitles `zh_tw` → `subs.tsv`、`subs-half.tsv`（`SHA-256(句子)` 第一個位元組 < 128 的一半）。含假名、亂碼（詞庫外字）、中英並列三道過濾；輸入是 OPUS `raw/zh_tw.zip`（逐片原文，片＝片號資料夾，每部片後面插一個空行），只數片數、不設每片上限 | §2.7 |
 | `dedupe_eval.py` | 用 `tools/holdout_guard.py` 的比對器，把新來源句子對各評測集去重；只印每個來源、每個集合的命中數 | §2.4 |
 | `moore_lewis.py` | `score`：字元 4-gram Kneser–Ney，打分集合一個、候選池兩折交叉（池依句子的 SHA-256 分兩半，各用另一半同字數的固定種子樣本訓練去打分，沒有句子被看過它的模型打分），每個來源留交叉熵差最好的 50%。`split`：訊息 ID 的 SHA-256 第一個位元組 < 32 的 1/8 進保留桶 | §2.4 |
 | `test_*.py` | 合成輸入的單元測試，`make test-python` 會跑 | |
 
 未驗證（要在真檔上看一眼，測試沒有真檔）：
 
-- OPUS `mono/zh_tw.txt.gz` 是否用空行分隔字幕檔。`clean_subs.py` 假設是；整個輸入只看到一部片、而且 50 句上限丟了句子時，腳本以 `STOP` 結束（結束碼 1）。
 - `ptt_clean.py` 的 `body()` 逐行拿掉 `article-metaline` 與 `article-metaline-right`（作者、看板、標題、時間）。
 
 ## 指令（之後由 main 執行；`<…>` 是路徑）
@@ -35,7 +34,7 @@ python3 experiments/sj-lm-7/ptt_clean.py <PTT_DIR> <OUT_DIR>      # 寫 body.tsv
 字幕清理（`--invade` 是 invade 清單的 clone，`--invade-sha256` 是凍結的雜湊；`--extra-rows LABEL=FILE` 把私人評測列加進守門，必須涵蓋 `REQUIRED_LABELS`）：
 
 ```sh
-python3 experiments/sj-lm-7/clean_subs.py --raw <zh_tw.txt.gz> --out <OUT_DIR> --invade <INVADE_CLONE> --invade-sha256 <HEX> \
+python3 experiments/sj-lm-7/clean_subs.py --raw <raw/zh_tw.zip> --out <OUT_DIR> --invade <INVADE_CLONE> --invade-sha256 <HEX> \
     [--extra-rows holdout=<f> ...] [--sample 300 --seed <S>]   # --sample 只印公開字幕的句子，供校對 300 句
 ```
 
