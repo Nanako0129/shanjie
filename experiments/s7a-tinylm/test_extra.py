@@ -94,7 +94,7 @@ class TestPrepText(unittest.TestCase):
             src = os.path.join(work, "chat.txt")
             with open(src, "w", encoding="utf-8", newline="\n") as f:
                 f.write("我們去吃飯，好嗎\n好\nok 我們\n")
-            with mock.patch.object(prep.bc, "convert", lambda text, *conv: text):     # no OpenCC tables here
+            with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):     # no OpenCC tables here
                 rep = prep.encode_extra(src, work, "chat", ())
             runs = open(os.path.join(work, "runs-chat.txt"), encoding="utf-8").read()
             self.assertEqual(runs, "我們去吃飯\n好嗎\n我們\n")                       # Han runs of length >= 2, as the colloquial text

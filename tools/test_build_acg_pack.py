@@ -3,6 +3,8 @@ No network: the build runs against a fake API. It needs the repo's data (data/le
 (built on demand with cargo) for the collision detection; it fails loudly without them, never skips."""
 import atexit
 import collections
+import contextlib
+import io
 import hashlib
 import json
 import os
@@ -497,6 +499,13 @@ class PackOovGrading(unittest.TestCase):
             words = dict(l.split("\t") for l in lines[2:])
             self.assertIn("他", words)
             self.assertNotIn("沒見過", words)                                        # count 0: left out, so it falls back to S_len
+
+    def test_freeze_counts_command_line_takes_the_expected_model(self):
+        for argv, want in ([], B.MODEL_V6_SHA), (["--expected-model", "ab" * 32], "ab" * 32):
+            with mock.patch.object(sys, "argv", ["build_acg_pack.py", "freeze-counts"] + argv), \
+                 mock.patch.object(B, "freeze_counts", return_value=1) as fc, mock.patch.object(B, "sha256_file", return_value="x"), contextlib.redirect_stdout(io.StringIO()):
+                B.main()
+            fc.assert_called_once_with(model_sha=want)
 
     def test_the_committed_pack_shares_no_string_with_lexicon_words(self):
         pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
