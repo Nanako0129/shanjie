@@ -1,4 +1,4 @@
-import collections, contextlib, hashlib, io, json, os, sys, tempfile, unittest
+import collections, contextlib, hashlib, io, json, os, sys, tempfile, unittest, zipfile
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -185,8 +185,8 @@ class TwoSpeakers(unittest.TestCase):
         self.assertEqual(C.sentences("你好嗎啊"), ["你好嗎啊"])
 
 
-class FilmCap(unittest.TestCase):
-    """Contract 2.7: at most FILM_CAP kept sentences per film; a film is the run of non-empty lines between blank lines."""
+class Films(unittest.TestCase):
+    """Contract 2.7: films are counted (a film is a run of non-empty lines between blank lines), never capped (maintainer 2026-10-25)."""
 
     @staticmethod
     def film(tag, n):
@@ -200,38 +200,29 @@ class FilmCap(unittest.TestCase):
             kept, man = C.clean(lines, ctx, FakeGuard())
         return [s for _, s in kept], man
 
-    def test_cap_is_fifty_and_applies_per_film(self):
-        self.assertEqual(C.FILM_CAP, 50)
+    def test_no_cap_and_films_are_counted(self):
         a, b = self.film("好", 60), self.film("玩", 7)
-        kept, man = self.kept(a + [""] + b)
-        self.assertEqual(kept, a[:50] + b)                                  # the first 50 of film one, all of film two
-        self.assertEqual(man["films"], {"count": 2, "cap": 50})
-        self.assertEqual(man["dropped"]["unit_cap"]["sentences"], 10)
-        self.assertEqual(man["remaining_after_step"]["unit_cap"], 57)
-        self.assertEqual(man["remaining_after_step"]["guard"], 67)
+        kept, man = self.kept(a + ["", "", ""] + b)                  # several blank lines are one boundary
+        self.assertEqual(kept, a + b)
+        self.assertEqual(man["films"], {"count": 2})
+        self.assertNotIn("unit_cap", man["dropped"])
 
-    def test_a_sentence_the_cap_dropped_is_not_a_duplicate_in_the_next_film(self):
-        a = self.film("好", 51)
-        kept, man = self.kept(a + [""] + [a[50]])                      # film 1's 51st sentence is capped; film 2 has the same sentence
-        self.assertEqual(kept, a[:50] + [a[50]])
-        self.assertEqual((man["dropped"]["unit_cap"]["sentences"], man["dropped"]["dedupe"]["sentences"]), (1, 0))
-        kept, man = self.kept(a[:50] + [a[0], "", a[0]])               # a real repeat inside film 1 and again in film 2 is still a duplicate
-        self.assertEqual((len(kept), man["dropped"]["dedupe"]["sentences"]), (50, 2))
+    def test_a_repeat_in_another_film_is_still_a_duplicate(self):
+        a = self.film("好", 3)
+        kept, man = self.kept(a + [""] + [a[0]])
+        self.assertEqual((kept, man["dropped"]["dedupe"]["sentences"]), (a, 1))
 
-    def test_several_blank_lines_are_one_boundary_and_exactly_fifty_is_not_capped(self):
-        kept, man = self.kept(self.film("好", 50) + ["", "", ""] + self.film("玩", 3))
-        self.assertEqual((len(kept), man["films"]["count"], man["dropped"]["unit_cap"]["sentences"]), (53, 2, 0))
-
-    def test_one_film_only_and_a_cap_drop_is_a_stop(self):
-        raw = self.film("好", 60)
+    def test_the_raw_zip_reads_each_s_and_puts_a_blank_line_after_each_film(self):
+        doc = '<?xml version="1.0"?>\n<document id="{i}">\n{body}</document>\n'
+        s = lambda k, t: f'  <s id="{k}">\n    <time id="T{k}S" value="00:00:01,000" />\n{t}\n    <time id="T{k}E" value="00:00:02,000" />\n  </s>\n'
         with tempfile.TemporaryDirectory() as d:
-            rc, text, _ = EndToEnd().run_with(d, raw, min_han="1")
-        self.assertEqual(rc, 1)
-        self.assertIn("one film only", text)
-        with tempfile.TemporaryDirectory() as d:
-            rc, text, _ = EndToEnd().run_with(d, raw[:30] + [""] + raw[30:], min_han="1")
-        self.assertEqual(rc, 0, text)
-
+            z = os.path.join(d, "zh_tw.zip")
+            with zipfile.ZipFile(z, "w") as f:
+                f.writestr("OpenSubtitles/raw/zh_tw/2001/22/9.xml", doc.format(i=9, body=s(1, "第二部片")))
+                f.writestr("OpenSubtitles/raw/zh_tw/1999/11/5.xml", doc.format(i=5, body=s(1, "你好 嗎") + s(2, "A &amp; B")))
+                f.writestr("OpenSubtitles/raw/zh_tw/1999/11/6.xml", doc.format(i=6, body=s(1, "同一部片的另一個檔")))
+                f.writestr("OpenSubtitles/raw/zh_tw/1999/11/", "")
+            self.assertEqual(list(C.read_lines(z)), ["你好 嗎", "A & B", "同一部片的另一個檔", "", "第二部片", ""])
 
 class EndToEnd(unittest.TestCase):
     LINES = ["- " + KEEP, "「" + KEEP + "」", KEEP + "。" + "你好嗎真的是這樣啊太棒了", "看電影很好玩啊真的是這樣", KEEP + "あ", "好的", "龘龘龘龘龘龘龘" + KEEP,

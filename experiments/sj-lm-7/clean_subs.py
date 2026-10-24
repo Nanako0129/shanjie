@@ -2,7 +2,7 @@
 """OPUS OpenSubtitles zh_tw lines -> sentences for the colloquial counts and the tinylm corpus (docs/contracts/sj-lm-7.md section 2.7).
 Brought from the SUB-0 branch (origin/exp/sub0-subtitles, experiments/sub0-subtitles/clean_subs.py); the one addition is the film cap below.
 
-  clean_subs.py --raw zh_tw.txt.gz --out DIR --lexicon data/lexicon/mcbpmf-data.txt --invade INVADE_CLONE
+  clean_subs.py --raw raw/zh_tw.zip --out DIR --lexicon data/lexicon/mcbpmf-data.txt --invade INVADE_CLONE
                 --invade-sha256 HEX [--repo DIR] [--cache DIR] [--extra-rows LABEL=FILE ...] [--min-han 4000000] [--sample N --seed S]
 
 Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f7504bf):
@@ -15,9 +15,10 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
   invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any)
   dedupe        NFKC + whitespace removed + case folded
   guard         p2clean.Guard over the evaluation / tuning / judging sets and the holdout (4-character containment for the holdout)
-  unit_cap      at most FILM_CAP (50) kept sentences per film (contract 2.7), the first ones in file order. A film is the run of non-empty lines between
-                blank lines: the OPUS mono file is assumed to separate subtitle files by a blank line (UNVERIFIED here, no real file is read in the
-                tests). The run STOPs when the input shows only one film and the cap dropped something, i.e. the assumption does not hold.
+Films are counted, not capped (contract 2.7, maintainer 2026-10-25: no per-film cap). A film is a run of non-empty lines between blank lines; the
+input is OPUS raw/zh_tw.zip (one XML file per subtitle, OpenSubtitles/raw/zh_tw/<year>/<film id>/<file>.xml), read as the text of every <s> with its
+<time> tags removed, files in path order, one blank line after each film id. The mono file (mono/zh_tw.txt.gz) has no blank line at all (measured
+2026-10-25: 1,456,479 lines), so it reads as one film; plain-text input is still accepted (tests).
 Writes OUT/subs.tsv (all kept) and OUT/subs-half.tsv (the kept sentences whose SHA-256(UTF-8) first byte is < 128), both `source<TAB>id<TAB>
 sentence` like p2-public/pool.tsv, plus OUT/manifest.json. Prints counts only: per step the sentences dropped and the 20 most frequent triggers,
 where a trigger is a member of a closed set (a rule, a bucket, a kana / simplified-only / non-lexicon character, a list term, a label), never
@@ -52,11 +53,10 @@ ENGLISH_WORD = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)*")
 MIN_ENGLISH_WORDS = 2
 MAX_NON_LEXICON = 0.30     # a sentence with this share or more of its Han characters outside the lexicon is dropped
 MIN_KEPT_HAN = 4_000_000   # contract 2.7: subtitles >= 4,000,000 Han characters
-FILM_CAP = 50              # contract 2.7: at most 50 sentences per film
 TOP = 20
 REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chatjudge2")   # the sets the guard must cover
 CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
-STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "invade", "dedupe", "guard", "unit_cap"]
+STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "invade", "dedupe", "guard"]
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
@@ -148,11 +148,35 @@ def reject(s, ctx):
     return None
 
 
+RAW_S = re.compile(r'<s id="[^"]*">(.*?)</s>', re.S)
+RAW_TIME = re.compile(r"<time[^>]*/>")
+
+
 def read_lines(path):
+    if path.endswith(".zip"):
+        yield from read_raw_zip(path)
+        return
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8", errors="replace", newline="") as f:
         for line in f:
             yield line.rstrip("\n")
+
+
+def read_raw_zip(path):
+    """OPUS raw/zh_tw.zip -> the text of each <s> (time tags removed, stripped, XML entities unescaped), one blank line after each film id."""
+    import html
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        films = collections.defaultdict(list)
+        for name in sorted(n for n in z.namelist() if n.endswith(".xml")):
+            films[name.split("/")[-2]].append(name)
+        for film in sorted(films, key=lambda f: films[f][0]):
+            for name in films[film]:
+                for s in RAW_S.findall(z.read(name).decode("utf-8", errors="replace")):
+                    s = html.unescape(RAW_TIME.sub("", s)).strip()
+                    if s:
+                        yield s
+            yield ""
 
 
 def sha256_file(path):
@@ -166,13 +190,13 @@ def clean(lines, ctx, guard):
     missing = collections.Counter()                        # Han characters outside the lexicon in the lexicon-dropped sentences
     guard_sets, guard_patterns, guard_rows = collections.Counter(), collections.defaultdict(set), collections.defaultdict(set)
     seen, kept = set(), []
-    films, film_kept, in_film = 0, 0, False
+    films, in_film = 0, False
     for n, line in enumerate(lines, 1):
         if not line.strip():
             in_film = False
             continue
         if not in_film:
-            films, film_kept, in_film = films + 1, 0, True
+            films, in_film = films + 1, True
         for k, s in enumerate(sentences(line)):
             s = strip_cue(s)
             funnel["split"] += 1
@@ -200,17 +224,13 @@ def clean(lines, ctx, guard):
                 for lab, row in guard.hit_rows(s):
                     guard_rows[lab].add(row)
                 continue
-            if film_kept >= FILM_CAP:
-                dropped["unit_cap"]["film cap"] += 1     # not remembered in `seen`: the same sentence can still be kept in another film
-                continue
             seen.add(key)
-            film_kept += 1
             kept.append((f"{n}" if k == 0 else f"{n}:{k}", s))
     left = funnel["split"]
     for step in STEPS:
         left -= sum(dropped[step].values())
         funnel[step] = left
-    man = {"step_order": ["split"] + STEPS, "remaining_after_step": dict(funnel), "films": {"count": films, "cap": FILM_CAP},
+    man = {"step_order": ["split"] + STEPS, "remaining_after_step": dict(funnel), "films": {"count": films},
            "dropped": {s: {"sentences": sum(c.values()), "top_triggers": c.most_common(TOP)} for s, c in dropped.items()},
            "lexicon_missing_characters_top": missing.most_common(TOP),
            "guard": {"dropped_sentences_by_label_nonexclusive": dict(sorted(guard_sets.items())),
@@ -379,9 +399,6 @@ def main(argv=None):
     print("lexicon-missing characters (top):", man["lexicon_missing_characters_top"])
     print("guard:", man["guard"])
     print("kept", man["kept"], "half", man["outputs"]["subs-half.tsv"]["rows"])
-    if man["films"]["count"] < 2 and man["dropped"]["unit_cap"]["sentences"]:
-        print("STOP: the input shows one film only (no blank-line separators?) and the film cap dropped sentences; check the file's film boundaries")
-        return 1
     if man["kept"]["han_chars"] < a.min_han:
         print(f"STOP: {man['kept']['han_chars']} Han characters kept, fewer than {a.min_han}")
         return 1
