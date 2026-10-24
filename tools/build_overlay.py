@@ -4,11 +4,22 @@
 用法：python3 tools/build_overlay.py          產生並寫入
       python3 tools/build_overlay.py --check  重新產生並和 repo 裡的檔案比對，不同就 exit 1
 來源下載到 ~/.cache/shanjie/sources/，SHA-256 不符就中止。
+
+SJ-LM-7 契約 §2.1a、§2.3（都預設關，不加旗標時輸出和原來逐位元組相同）：
+      --moedict-readings          萌典有收的詞用萌典第一讀音，沒收的用 tools/readings.py 的規則（Reader）；萌典路徑見 readings.MOEDICT（SHANJIE_MOEDICT）
+      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞寫到 PATH：詞、原讀音、新讀音、依據
+      --moedict-supplement FILE…  來源「萌典補詞」：萌典有收、不在基底、疊加層、名單、任何詞包，而且在這些純文字檔（一行一段，.gz／.bz2 照副檔名）裡
+                                  子字串出現 ≥ 2 次的詞；讀音＝萌典第一讀音，分數＝同字數的 length_scores（不加手動詞的加分）
+      --jobs N                    萌典補詞數子字串用幾個程序
 """
 import argparse
+import bz2
+import collections
+import glob
 import gzip
 import hashlib
 import os
+import multiprocessing
 import re
 import sys
 import urllib.request
@@ -25,6 +36,10 @@ import readings  # noqa: E402  萌典路徑
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 維護者手動加的詞，接在產生的列後面（來源 manual）
+PACKS = os.path.join(ROOT, "data", "packs")
+NAMES = os.path.join(ROOT, "data", "lexicon", "names-add.tsv")
+SUPPLEMENT_SRC = "萌典補詞"
+SUPPLEMENT_MIN = 2   # 契約 §2.1a：語料裡子字串出現的次數下限
 PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
 # 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
 # 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
@@ -113,7 +128,8 @@ def overlay_rows(w, syls, score, src):
     return rows
 
 
-def build():
+def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
+    """supplement：None，或萌典補詞要數的純文字檔路徑清單。其他參數見模組說明；預設值＝原本的輸出。"""
     base = ime.Lexicon(BASE)
     words = set(base.by_word)                       # 基底詞表＝解析後（套用 S0 的行過濾）的詞，不分讀音
     chars = {w for w in words if len(w) == 1}
@@ -148,10 +164,18 @@ def build():
             if w2 != w:
                 target[w] = w2
     info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)
+    moe_first = moe_primary_first() if (moedict_readings or supplement) else None
+    pick = reading_picker(base, base_syllables(base), moe_first) if moedict_readings else None
+    changed = []
     for w in sorted(cand):
         syls = base.to_syllables(w)
         if syls is not None:
             syls = normalize(w, syls)
+            if pick:
+                new, how = pick(w)
+                if new and new != syls:
+                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
+                syls = new or syls
             info[w] = (syls, next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None))
     # S2f 修訂二 7.2.3／7.2.4，分兩階段（S2n 與延伸規則可能方向相反：占中 經簡體句轉換是 佔中，佔中 的 fold 是 占中，
     # 互相指向會繞圈）：第一階段只用 S2n 與原 §2.5 決定拿掉誰；第二階段對留下的詞套延伸規則；落點最後照完整的規則算。
@@ -197,8 +221,110 @@ def build():
         rows += overlay_rows(w, syls, SCORE[len(w)], src)
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
+    if supplement:
+        sup = supplement_rows(moe_first, words | overlay_words | other_layers() | manual_words(), supplement, length_scores(base), base_syllables(base), jobs)
+        rows += sup
+        overlay_words |= {r.split("\t")[1] for r in sup}
     rows += manual_rows(words | overlay_words | pack_words(), length_scores(base), base_syllables(base))
+    if reading_report:
+        with open(reading_report, "w", encoding="utf-8", newline="\n") as f:
+            f.write("詞\t原讀音\t新讀音\t依據\n" + "".join(changed))
+        print(f"reading report: {len(changed)} words whose reading changes, {reading_report}")
     return rows, removed, variant_removed
+
+
+def moe_primary_first():
+    return readings.moe_primary()
+
+
+def manual_words(path=MANUAL):
+    """overlay-manual.tsv 的詞（手動詞接在萌典補詞後面，兩者不能同詞）。"""
+    with open(path, encoding="utf-8-sig") as f:
+        return {l.split("\t")[0] for l in f.read().splitlines() if l.strip() and not l.startswith("#")}
+
+
+def reading_picker(base, syllables, moe):
+    """--moedict-readings：詞 → (讀音 list, 依據)。萌典有收（音節數等於字數、每個音節基底都有）用萌典第一讀音，其餘用 readings.Reader；
+    兩者都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 (None, None)。"""
+    reader = readings.make_reader(base)
+
+    def pick(w):
+        m = moe.get(w)
+        if m and len(m) == len(w) and all(s in syllables for s in m):
+            return normalize(w, m), "moedict"
+        out, _notes, _gaps = reader.read(w)
+        return (normalize(w, out), "readings.py") if out else (None, None)
+    return pick
+
+
+def other_layers():
+    """名單與所有詞包的字串：萌典補詞不能和它們相交（pack-oov：詞包字串和各層沒有交集）。"""
+    out = set()
+    for p in [NAMES, *sorted(glob.glob(os.path.join(PACKS, "*-add.tsv")))]:
+        out |= pack_words(p)
+    return out
+
+
+def _open_text(path):
+    return (bz2.open(path, "rt", encoding="utf-8", errors="replace") if path.endswith(".bz2") else
+            gzip.open(path, "rt", encoding="utf-8", errors="replace") if path.endswith(".gz") else open(path, encoding="utf-8", errors="replace"))
+
+
+_CAND, _LENS, _FIRST = frozenset(), (), frozenset()
+
+
+def _count_chunk(lines):
+    n = collections.Counter()
+    for line in lines:
+        for i, c in enumerate(line):
+            if c in _FIRST:
+                for L in _LENS:
+                    if line[i:i + L] in _CAND:
+                        n[line[i:i + L]] += 1
+    return n
+
+
+def _init_count(cand, lens):
+    global _CAND, _LENS, _FIRST
+    _CAND, _LENS, _FIRST = cand, lens, frozenset(c[0] for c in cand)
+
+
+def _chunks(paths, size=5000):
+    buf = []
+    for p in paths:
+        with _open_text(p) as f:
+            for line in f:
+                buf.append(line.rstrip("\n"))
+                if len(buf) == size:
+                    yield buf
+                    buf = []
+    if buf:
+        yield buf
+
+
+def count_substrings(paths, candidates, jobs=1):
+    """candidates 在 paths（一行一段文字）裡的子字串出現次數（重疊也算，跨行不算）。"""
+    cand, lens = frozenset(candidates), tuple(sorted({len(c) for c in candidates}))
+    total = collections.Counter()
+    if jobs <= 1:
+        _init_count(cand, lens)
+        for c in _chunks(paths):
+            total.update(_count_chunk(c))
+        return total
+    with multiprocessing.Pool(jobs, initializer=_init_count, initargs=(cand, lens)) as pool:
+        for n in pool.imap_unordered(_count_chunk, _chunks(paths)):
+            total.update(n)
+    return total
+
+
+def supplement_rows(moe, taken, corpus_paths, scores, syllables, jobs=1):
+    """來源「萌典補詞」的列（契約 §2.1a）：moe（詞 → 第一讀音）裡純漢字、字數在 scores 裡、不在 taken、音節數等於字數、音節基底都有的詞，
+    在 corpus_paths 裡子字串出現 >= SUPPLEMENT_MIN 次者；讀音＝萌典第一讀音（normalize），分數＝scores[字數]，沒有手動詞的加分。
+    詞的 code point 排序；含「一」「不」的詞照 overlay_rows 附變調列。"""
+    cand = {w for w, m in moe.items() if MANUAL_WORD.match(w) and len(w) in scores and w not in taken and len(m) == len(w) and all(s in syllables for s in m)}
+    counts = count_substrings(corpus_paths, cand, jobs)
+    return [r for w in sorted(w for w in cand if counts[w] >= SUPPLEMENT_MIN)
+            for r in overlay_rows(w, normalize(w, moe[w]), scores[len(w)], SUPPLEMENT_SRC)]
 
 
 def cantonese(w, headwords):
@@ -255,8 +381,15 @@ def manual_rows(taken, scores, syllables, path=MANUAL):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
-    rows, removed, variant_removed = build()
-    if ap.parse_args().check:
+    ap.add_argument("--moedict-readings", action="store_true")
+    ap.add_argument("--reading-report", metavar="PATH")
+    ap.add_argument("--moedict-supplement", nargs="+", metavar="FILE")
+    ap.add_argument("--jobs", type=int, default=1)
+    a = ap.parse_args()
+    if a.reading_report and not a.moedict_readings:
+        ap.error("--reading-report needs --moedict-readings")
+    rows, removed, variant_removed = build(a.moedict_readings, a.reading_report, a.moedict_supplement, a.jobs)
+    if a.check:
         same = (open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
                 and open(VARIANT_REMOVED, encoding="utf-8").readlines() == variant_removed)
         print(f"{len(rows)} rows, {len(removed)} removed, {len(variant_removed)} variant-removed; {'matches' if same else 'DIFFERS FROM'} the files in the repo")

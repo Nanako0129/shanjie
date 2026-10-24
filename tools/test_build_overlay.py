@@ -1,11 +1,14 @@
 """Tests for tools/build_overlay.py manual words (data/lexicon/overlay-manual.tsv) and their tail of overlay-add.tsv.
 Synthetic files except the last test, which reads the committed lexicon files; no dumps, no network.
 Run: python3 -m unittest tools/test_build_overlay.py   (from the repo root)."""
-import os, sys, tempfile, unittest
+import contextlib, gzip, io, itertools, os, sys, tempfile, unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_overlay as B  # noqa: E402
 import ime  # noqa: E402
+import readings  # noqa: E402
+import build_counts as bc  # noqa: E402
 
 SCORES = {2: -7.0, 3: -7.04116568, 4: -6.6, 5: -6.17843815}
 SYLLABLES = {"ㄐㄧㄚˇ", "ㄧˇ", "ㄅㄧㄥˇ", "ㄉㄧㄥ", "ㄨˋ", "ㄧ", "ㄧˋ", "ㄒㄧㄡ", "ㄍㄜ"}
@@ -43,6 +46,112 @@ class ManualRows(unittest.TestCase):
         for why, (text, taken) in bad.items():
             with self.assertRaises(SystemExit, msg=why):
                 manual(text, taken)
+
+
+class MoedictSupplement(unittest.TestCase):
+    """SJ-LM-7 contract section 2.1a: the source 萌典補詞."""
+    MOE = {"甲乙": ("ㄐㄧㄚˇ", "ㄧˇ"), "丙丁": ("ㄅㄧㄥˇ", "ㄉㄧㄥ"), "戊己": ("ㄨˋ", "ㄍㄜ"), "庚辛": ("jia3", "ㄧˇ"), "壬癸": ("ㄨˋ", "ㄍㄜ")}
+
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory(); self.addCleanup(self.d.cleanup)
+
+    def corpus(self, lines_a, lines_b=()):
+        a, b = os.path.join(self.d.name, "a.txt"), os.path.join(self.d.name, "b.txt.gz")
+        open(a, "w", encoding="utf-8").write("".join(l + "\n" for l in lines_a))
+        with gzip.open(b, "wt", encoding="utf-8") as f:
+            f.write("".join(l + "\n" for l in lines_b))
+        return [a, b]
+
+    def rows(self, corpus, taken=(), jobs=1):
+        return B.supplement_rows(self.MOE, set(taken), corpus, SCORES, SYLLABLES, jobs)
+
+    def test_two_occurrences_in_one_out_a_pack_string_out_and_the_score_is_length_scores(self):
+        corpus = self.corpus(["甲乙在這裡", "丙丁只有一次", "戊己戊己", "庚辛庚辛", "壬癸壬癸"], ["另一個檔案裡的甲乙"])
+        rows = self.rows(corpus, taken={"壬癸"})      # 壬癸 is a pack string
+        # 甲乙: once in each file = 2 (in); 丙丁: once (out); 戊己: twice, overlapping counts are fine (in); 庚辛: unknown syllable (out)
+        self.assertEqual(rows, [f"ㄨˋ-ㄍㄜ\t戊己\t{SCORES[2]!r}\t萌典補詞\n", f"ㄐㄧㄚˇ-ㄧˇ\t甲乙\t{SCORES[2]!r}\t萌典補詞\n"])
+        self.assertTrue(all(r.split("\t")[2] == repr(SCORES[2]) for r in rows))    # no manual-word bonus
+        self.assertNotIn(B.MANUAL_BONUS, [SCORES[2] - float(r.split("\t")[2]) for r in rows])
+
+    def test_words_already_in_a_layer_or_too_long_for_the_scores_never_enter(self):
+        corpus = self.corpus(["甲乙甲乙"])
+        self.assertEqual(self.rows(corpus, taken={"甲乙"}), [])
+        self.assertEqual(B.supplement_rows({"甲乙": ("ㄐㄧㄚˇ", "ㄧˇ")}, set(), corpus, {3: -7.0}, SYLLABLES), [])
+
+    def test_the_count_is_the_same_with_several_processes(self):
+        lines = ["甲乙丙丁戊己" * 3] * 30
+        corpus = self.corpus(lines, lines)
+        cand = {"甲乙", "丙丁", "乙丙", "己甲"}
+        self.assertEqual(B.count_substrings(corpus, cand, 1), B.count_substrings(corpus, cand, 2))
+        self.assertEqual(B.count_substrings(corpus, cand)["甲乙"], 180)
+        self.assertEqual(B.count_substrings(corpus, cand)["己甲"], 120)      # across a repeat inside the line, not across lines
+
+    def test_names_and_every_pack_are_taken_layers(self):
+        packs = os.path.join(self.d.name, "packs"); os.makedirs(packs)
+        for n, w in (("acg-add.tsv", "甲乙"), ("it-add.tsv", "丙丁"), ("notes.tsv", "戊己")):
+            open(os.path.join(packs, n), "w", encoding="utf-8").write(f"ㄅ\t{w}\t-7.0\tx\n")
+        names = os.path.join(self.d.name, "names-add.tsv")
+        open(names, "w", encoding="utf-8").write("ㄅ\t庚辛\t-7.0\tnames\n")
+        with mock.patch.object(B, "PACKS", packs), mock.patch.object(B, "NAMES", names):
+            self.assertEqual(B.other_layers(), {"甲乙", "丙丁", "庚辛"})                # *-add.tsv only, as the engine loads them
+
+
+class BuildFlags(unittest.TestCase):
+    """build() on synthetic dumps over the committed base: the default output is the old method's, the new flags change only what they say."""
+    @classmethod
+    def setUpClass(cls):
+        cls.base = ime.Lexicon(B.BASE)
+        chars = sorted(w for w in cls.base.by_word if B.MANUAL_WORD.match(w) and len(w) == 1 and w not in "一不和")[:300]
+        taken = B.other_layers() | B.manual_words()
+        pairs = (a + b for a, b in itertools.product(chars, chars) if a + b not in cls.base.by_word and a + b not in taken)
+        # two wiktionary titles (their syllables differ pairwise so a reversed reading is a different reading) and one supplement word
+        picked = [w for w in itertools.islice(pairs, 200) if len(set(cls.base.to_syllables(w))) == 2]
+        cls.title, cls.other, cls.sup = picked[0], picked[1], picked[2]
+
+    def build(self, *args, **kw):
+        d = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, d)
+        wikt = os.path.join(d, "t.gz")
+        with gzip.open(wikt, "wt", encoding="utf-8") as f:
+            f.write(f"{self.title}\n{self.other}\n")
+        empty = os.path.join(d, "e.gz")
+        gzip.open(empty, "wt").close()
+        corpus = os.path.join(d, "c.txt")
+        open(corpus, "w", encoding="utf-8").write(f"{self.sup}和{self.sup}\n{self.other}\n")
+        moe = {self.title: tuple(reversed(self.base.to_syllables(self.title))), self.sup: tuple(self.base.to_syllables(self.sup))}
+        stub = mock.Mock(); stub.read = lambda w: (list(self.base.to_syllables(w)), [], [])
+        patches = [mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), mock.patch.object(bc, "load_conv", lambda: None),
+                   mock.patch.object(B, "moe_titles", lambda: set()), mock.patch.object(readings, "moe_primary", lambda: moe),
+                   mock.patch.object(readings, "make_reader", lambda lex: stub)]
+        with contextlib.ExitStack() as st, contextlib.redirect_stdout(io.StringIO()):
+            for p in patches:
+                st.enter_context(p)
+            return B.build(*args, supplement=[corpus] if kw.get("sup") else None, reading_report=kw.get("report") and os.path.join(d, "r.tsv")), d
+
+    def row(self, rows, w):
+        return [r for r in rows if r.split("\t")[1] == w]
+
+    def test_default_is_the_old_method(self):
+        (rows, _, _), _ = self.build()
+        want = B.normalize(self.title, self.base.to_syllables(self.title))
+        self.assertEqual(self.row(rows, self.title), [f"{'-'.join(want)}\t{self.title}\t{B.SCORE[2]!r}\twikt\n"])
+        self.assertFalse([r for r in rows if r.endswith("萌典補詞\n")])
+        self.assertEqual(rows[-len(B.manual_rows(set(), B.length_scores(self.base), B.base_syllables(self.base))):][0].split("\t")[3], "manual\n")   # manual rows stay the tail
+
+    def test_moedict_readings_and_report(self):
+        (rows, _, _), d = self.build(True, report=True)
+        old = B.normalize(self.title, self.base.to_syllables(self.title))
+        new = B.normalize(self.title, tuple(reversed(self.base.to_syllables(self.title))))
+        self.assertEqual(self.row(rows, self.title)[0].split("\t")[0], "-".join(new))
+        self.assertEqual(self.row(rows, self.other)[0].split("\t")[0], "-".join(B.normalize(self.other, self.base.to_syllables(self.other))))   # not in Moedict: readings.py
+        report = open(os.path.join(d, "r.tsv"), encoding="utf-8").read().splitlines()
+        self.assertEqual(report[1:], [f"{self.title}\t{' '.join(old)}\t{' '.join(new)}\tmoedict"])
+
+    def test_supplement_rows_sit_between_the_generated_rows_and_the_manual_tail(self):
+        (rows, _, _), _ = self.build(sup=True)
+        sup = [i for i, r in enumerate(rows) if r.endswith("萌典補詞\n")]
+        self.assertEqual([rows[i].split("\t")[1] for i in sup], [self.sup])
+        tags = [r.rstrip("\n").split("\t")[3] for r in rows]
+        self.assertTrue(tags.index("萌典補詞") > max(i for i, t in enumerate(tags) if t == "wikt") and tags.index("萌典補詞") < tags.index("manual"))
 
 
 class Cantonese(unittest.TestCase):
