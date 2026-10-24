@@ -153,19 +153,64 @@ def inverted_report(lex, unihan=None, chars=INVERTED):
     return rows
 
 
-def main(src, dst, unihan_path=UNIHAN):
-    lex = ime.Lexicon(os.path.join(REPO, "data", "lexicon", "mcbpmf-data.txt"))
-    alts = {}
-    for syls, entries in lex.by_reading.items():
-        for w, s in entries:
-            alts.setdefault(w, []).append((s, syls))
-    for v in alts.values():
-        v.sort(key=lambda x: -x[0])
-    evidence, unihan = char_evidence(lex), load_unihan(unihan_path) if unihan_path else {}
-    moe = moe_primary()
+class Reader:
+    """規則 0–5 套在一個句子（或一個詞）上。main() 與 build_overlay.py 共用。read() 回傳 (音節 list 或 None＝讀不出, CHECK 備註, GAP 的詞)。"""
+
+    def __init__(self, lex, moe, hetero, overrides, evidence=None, unihan=None):
+        self.lex, self.moe, self.hetero, self.overrides = lex, moe, hetero, overrides
+        self.evidence, self.unihan = evidence if evidence is not None else char_evidence(lex), unihan or {}
+        self.alts = {}
+        for syls, entries in lex.by_reading.items():
+            for w, s in entries:
+                self.alts.setdefault(w, []).append((s, syls))
+        for v in self.alts.values():
+            v.sort(key=lambda x: -x[0])
+
+    def read(self, sent):
+        alts, moe, hetero, overrides = self.alts, self.moe, self.hetero, self.overrides
+        words = ime.segment_words(self.lex, sent)
+        if words is None:
+            return None, [], []
+        out, notes, gaps = [], [], []
+        for w, auto in words:
+            cands = [syls for _, syls in alts.get(w, [])]
+            if w in overrides:
+                if overrides[w] not in cands:
+                    gaps.append(w)
+                out.extend(overrides[w])
+                continue
+            citation = [c for c in cands
+                        if all(r == {"一": "ㄧ", "不": "ㄅㄨˋ"}.get(ch, r) for ch, r in zip(w, c))]
+            if len(citation) == 1 and len(citation) < len(cands) and any(ch in "一不" for ch in w):
+                pick = citation[0]
+            elif len(w) > 1 and w in moe and moe[w] in cands:
+                pick = moe[w]
+            elif len(w) == 1 and w in hetero and (hetero[w],) in cands:
+                pick = (hetero[w],)
+            elif len(w) == 1 and len(cands) > 1 and alts[w][0][0] - alts[w][1][0] < TIE_EPS and (
+                    t := decide_reading(w, [c[0] for s_, c in alts[w] if alts[w][0][0] - s_ < TIE_EPS], self.evidence, self.unihan)[0]):
+                pick = (t,)
+            elif len(cands) == 1 or alts[w][0][0] - alts[w][1][0] >= 0.5:
+                pick = cands[0]
+            else:
+                pick = cands[0]
+                notes.append(f"{w}: 暫用 {' '.join(pick)}；其他 " +
+                             "、".join(" ".join(c) for c in cands[1:]))
+            out.extend(pick)
+        return out, notes, gaps
+
+
+def make_reader(lex, unihan_path=UNIHAN):
+    """Reader over the files MOEDICT, HETERO, OVERRIDES (and the Unihan file, if any)."""
     hetero = dict(l.split() for l in open(HETERO, encoding="utf-8") if len(l.split()) == 2)
     overrides = {w: tuple(r.split()) for w, r in
                  (l.rstrip("\n").split("\t") for l in open(OVERRIDES, encoding="utf-8") if not l.startswith("#"))}
+    return Reader(lex, moe_primary(), hetero, overrides, unihan=load_unihan(unihan_path) if unihan_path else None)
+
+
+def main(src, dst, unihan_path=UNIHAN):
+    lex = ime.Lexicon(os.path.join(REPO, "data", "lexicon", "mcbpmf-data.txt"))
+    reader = make_reader(lex, unihan_path)
     checks = 0
     with open(dst, "w", encoding="utf-8", newline="\n") as f:
         for line in open(src, encoding="utf-8"):
@@ -174,38 +219,13 @@ def main(src, dst, unihan_path=UNIHAN):
                 f.write(line + "\n")
                 continue
             ctx, sent = line.split("|", 1)
-            words = ime.segment_words(lex, sent)
-            if words is None:
+            out, notes, gaps = reader.read(sent)
+            if out is None:
                 print(f"UNREADABLE\t{sent}", file=sys.stderr)
                 continue
-            out, notes, gap = [], [], False
-            for w, auto in words:
-                cands = [syls for _, syls in alts.get(w, [])]
-                if w in overrides:
-                    if overrides[w] not in cands:
-                        print(f"GAP\t{sent}\t{w} 的確認讀音不在詞庫", file=sys.stderr)
-                        gap = True
-                    out.extend(overrides[w])
-                    continue
-                citation = [c for c in cands
-                            if all(r == {"一": "ㄧ", "不": "ㄅㄨˋ"}.get(ch, r) for ch, r in zip(w, c))]
-                if len(citation) == 1 and len(citation) < len(cands) and any(ch in "一不" for ch in w):
-                    pick = citation[0]
-                elif len(w) > 1 and w in moe and moe[w] in cands:
-                    pick = moe[w]
-                elif len(w) == 1 and w in hetero and (hetero[w],) in cands:
-                    pick = (hetero[w],)
-                elif len(w) == 1 and len(cands) > 1 and alts[w][0][0] - alts[w][1][0] < TIE_EPS and (
-                        t := decide_reading(w, [c[0] for s_, c in alts[w] if alts[w][0][0] - s_ < TIE_EPS], evidence, unihan)[0]):
-                    pick = (t,)
-                elif len(cands) == 1 or alts[w][0][0] - alts[w][1][0] >= 0.5:
-                    pick = cands[0]
-                else:
-                    pick = cands[0]
-                    notes.append(f"{w}: 暫用 {' '.join(pick)}；其他 " +
-                                 "、".join(" ".join(c) for c in cands[1:]))
-                out.extend(pick)
-            if gap:
+            for w in gaps:
+                print(f"GAP\t{sent}\t{w} 的確認讀音不在詞庫", file=sys.stderr)
+            if gaps:
                 continue
             if notes:
                 checks += 1
