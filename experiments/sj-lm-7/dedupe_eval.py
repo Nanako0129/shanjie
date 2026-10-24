@@ -37,8 +37,12 @@ def _hits(chunk):
     out = []
     for line in chunk:
         runs = bc.text_runs(line.rstrip("\n").split("\t")[-1], _W["conv"])
-        out.append(tuple(label for label, m in _W["m"].items() if any(next(m.find(bc.fold(r)), None) is not None for r in runs)))
+        out.append(tuple(label for label, m in _W["m"].items() if any(m.any(bc.fold(r)) for r in runs)))
     return out
+
+
+def _tag(chunk):
+    return chunk, _hits(chunk)
 
 
 def chunks(path, size=20000):
@@ -65,9 +69,8 @@ def dedupe(sets, sources, out, conv, jobs=1):
         for name, path in sources.items():
             per, total, removed = collections.Counter({label: 0 for label in sets}), 0, 0
             dst = os.path.join(out, name)
-            parts = list(chunks(path))
             with open(dst, "w", encoding="utf-8", newline="") as f:
-                for chunk, hits in zip(parts, pool.imap(_hits, parts) if pool else map(_hits, parts)):
+                for chunk, hits in (pool.imap(_tag, chunks(path)) if pool else map(_tag, chunks(path))):
                     for line, h in zip(chunk, hits):
                         total += 1
                         per.update(h)
