@@ -3,8 +3,9 @@
 
   moore_lewis.py score --in-domain FILE --source NAME=FILE [--source NAME=FILE ...] --out DIR --seed N [--keep 0.5]
       Two character 4-gram interpolated Kneser-Ney models (discount 0.75): the in-domain one trained on FILE (one sentence per line, the last
-      tab field if the line has tabs), the out-of-domain one on a fixed-seed sample of the pooled --source sentences with the same number of
-      characters (or the whole pool when it is not larger). A sentence's score is H_in - H_out, the per-character cross-entropy difference in
+      tab field if the line has tabs), the out-of-domain ones on fixed-seed samples of the pooled --source sentences with the same number of
+      characters (or the whole pool when it is not larger). The pool is split in two halves by SHA-256 of the sentence and each half is scored by the model
+      trained on the other (two-fold cross-fitting), so no sentence is scored by a model that saw it. A sentence's score is H_in - H_out, the per-character cross-entropy difference in
       bits (EOS counted); lower is more in-domain. Each source keeps its best KEEP share (ties broken by line order), written to OUT/NAME with
       the lines unchanged and in the original order. Deterministic: the sample is random.Random(seed) over the pool's line order.
       Prints counts, the score cut and SHA-256 of every output, never a sentence (the in-domain file may be private).
@@ -100,14 +101,29 @@ def sample_chars(sentences, n_chars, seed):
     return out
 
 
+def in_half_a(s):
+    return hashlib.sha256(s.encode("utf-8")).digest()[0] < 128
+
+
+def cross_fit(pool, n_chars, seed, order=4):
+    """-> entropy(s) of the out-of-domain model, which never saw s. The pool splits into halves A and B by SHA-256 of the sentence (so equal
+    sentences share a half); the model trained on a same-size seeded sample of half A scores half B and the other way round. One model trained
+    on a sample of the whole pool would score its own training sentences better than the rest, which is not a difference of domains."""
+    halves = ([], [])
+    for s in pool:
+        halves[0 if in_half_a(s) else 1].append(s)
+    models = [CharKN(sample_chars(h, n_chars, seed), order) for h in halves]
+    return lambda s: models[1 if in_half_a(s) else 0].entropy(s)
+
+
 def select(sources, in_domain, seed, keep=KEEP, order=4):
     """sources: {name: [(line, sentence)]}, in_domain: [sentence]. -> ({name: [kept (line, sentence) in file order]}, {name: score cut})."""
     pool = [s for rows in sources.values() for _, s in rows]
     ind = CharKN(in_domain, order)
-    outd = CharKN(sample_chars(pool, sum(map(len, in_domain)), seed), order)
+    out_entropy = cross_fit(pool, sum(map(len, in_domain)), seed, order)
     kept, cut = {}, {}
     for name, rows in sources.items():
-        scores = [(ind.entropy(s) - outd.entropy(s), i) for i, (_, s) in enumerate(rows)]
+        scores = [(ind.entropy(s) - out_entropy(s), i) for i, (_, s) in enumerate(rows)]
         n = math.ceil(len(rows) * keep)
         best = sorted(scores)[:n]
         cut[name] = best[-1][0] if best else None

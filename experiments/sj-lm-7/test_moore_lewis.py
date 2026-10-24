@@ -63,6 +63,45 @@ class Select(unittest.TestCase):
         self.assertEqual(M.sample_chars(pool, 10 ** 9, seed=1), pool)                # a pool not larger than the target is used whole
 
 
+class CrossFit(unittest.TestCase):
+    def test_no_sentence_is_scored_by_a_model_trained_on_it(self):
+        pool = [s + c for s in TECH + CHAT + CANDIDATES for c in "甲乙丙丁"]
+        trained = []
+        real = M.CharKN
+
+        class Spy(real):
+            def __init__(self, sentences, order=4, discount=0.75):
+                trained.append(set(sentences))
+                super().__init__(sentences, order, discount)
+                self.id = len(trained) - 1
+        scored_by = {}
+        real_entropy = Spy.entropy
+        Spy.entropy = lambda self, s: scored_by.setdefault(s, set()).add(self.id) or real_entropy(self, s)
+        M.CharKN = Spy
+        try:
+            ent = M.cross_fit(pool, 400, 3)
+            for s in pool:
+                ent(s)
+        finally:
+            M.CharKN = real
+        self.assertEqual(len(trained), 2)
+        self.assertTrue(all(len(ids) == 1 for ids in scored_by.values()))
+        for s, ids in scored_by.items():
+            self.assertNotIn(s, trained[next(iter(ids))], s)                          # the model that scored s did not train on s
+        self.assertTrue(trained[0] and trained[1] and not trained[0] & trained[1])    # the halves are disjoint
+
+    def test_a_sentence_score_does_not_depend_on_whether_it_was_sampled(self):
+        pool = list(dict.fromkeys(s + c for s in TECH + CHAT + CANDIDATES for c in "甲乙丙丁戊己庚辛"))
+        in_a = [s for s in pool if M.in_half_a(s)]
+        extra = [s for s in (f"資料庫第{i}個封包" for i in range(400)) if M.in_half_a(s)][:40]     # more half-A sentences: half A's sample changes
+        base, more = M.cross_fit(pool, 300, 5), M.cross_fit(pool + extra, 300, 5)
+        self.assertTrue(len(in_a) > 20)
+        for s in in_a:
+            self.assertEqual(base(s), more(s), s)                                          # A sentences are scored by the model trained on half B only
+        in_b = [s for s in pool if not M.in_half_a(s)]
+        self.assertTrue(any(base(s) != more(s) for s in in_b))                             # the other half is scored by the model that did change
+
+
 class Cli(unittest.TestCase):
     def test_score_prints_counts_and_hashes_only_and_is_reproducible(self):
         with tempfile.TemporaryDirectory() as d:
