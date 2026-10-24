@@ -60,7 +60,7 @@ class Cantonese(unittest.TestCase):
         non-manual words with a CANTO_CHARS character are exactly these dictionary headwords. Regenerating with another rule or
         dictionary changes this set and has to update it here on purpose."""
         with open(B.OUT, encoding="utf-8") as f:
-            words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] != "manual"}
+            words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")}
         self.assertEqual({w for w in words if not B.CANTO_CHARS.isdisjoint(w)},
                          {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇"})
 
@@ -84,7 +84,7 @@ class ShippedOverlay(unittest.TestCase):
         args = (set(base.by_word), B.length_scores(base), B.base_syllables(base))
         with tempfile.TemporaryDirectory() as d:
             without = B.tail_rows(*args, slang=os.path.join(d, "absent.tsv"))
-        self.assertEqual(without, B.manual_rows(args[0] | B.pack_words(), *args[1:]))
+        self.assertEqual(without, B.manual_rows(args[0] | B.pack_words() | B.pack_words(B.IT_PACK) | B.names_words(), *args[1:]))
         self.assertNotIn("slang", {r.rstrip("\n").split("\t")[3] for r in without})
 
 

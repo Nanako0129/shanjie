@@ -213,9 +213,10 @@ def rebuild_tails(out=OUT):
 
 def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG):
     """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、兩個詞包或手動詞的詞。"""
-    rows = manual_rows(taken | pack_words(), scores, syllables, manual)
+    taken = taken | pack_words() | pack_words(IT_PACK) | names_words()   # 同詞同讀音和詞包、名單層重複，引擎整個載入失敗
+    rows = manual_rows(taken, scores, syllables, manual)
     if os.path.exists(slang):
-        rows += slang_behind(manual_rows(taken | pack_words() | pack_words(IT_PACK) | names_words() | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"))
+        rows += slang_behind(manual_rows(taken | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"))
     return rows
 
 
@@ -297,8 +298,9 @@ def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--check", action="store_true")
-    ap.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
     a = ap.parse_args()
     if a.tails_only:
         rows = rebuild_tails()
