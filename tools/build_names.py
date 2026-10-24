@@ -374,11 +374,16 @@ def base_char_readings(base):
     return {(w, syls[0]) for syls, ws in base.by_reading.items() if len(syls) == 1 for w, _ in ws}
 
 
+def _toneless(syl):
+    return re.sub("[ˊˇˋ˙]", "", syl)
+
+
 def creator_rows(path, taken, scores, chars, names_readings=frozenset()):
     """names-creators.tsv（詞、讀音（音節以空白分隔）、備註；# 開頭與空行略過）→ (names-add.tsv 的列, names-sources.tsv 的列)，照檔案順序。
     每列：三欄；詞是 2–10 個漢字、字數在 scores 裡、不在 taken（基底、疊加層、名單其他列、兩個詞包、前面的列）；讀音的音節數等於字數、每個音節都是基底裡那個字（chars）的讀音；讀音不等於名字層既有列（names_readings，讀音以 - 連接）的讀音，
     同讀音的撞車一次全部列出並中止（要在資料裡照契約的同讀音規則處理）。不符就中止並指出行號。分數＝scores[字數]（已含 NAMES_BONUS），同讀音第 k 個（k 從 0 起）再扣 k × SLANG_BEHIND。"""
     rows, srcs, seen, taken = [], [], {}, set(taken)
+    pairs, toneless = set(), {(c, _toneless(s)) for c, s in chars}     # 同一個詞可以有好幾列（不同讀音）；(詞, 讀音) 重複才是錯
     clash = []
     for n, line in creator_lines(path):
         fields = line.split("\t")
@@ -386,17 +391,21 @@ def creator_rows(path, taken, scores, chars, names_readings=frozenset()):
         if ok:
             w, reading, note = fields
             syls = reading.split(" ")
-            ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and all((c, s) in chars for c, s in zip(w, syls)) and w not in taken
+            ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and (w, reading) not in pairs and (w not in taken or any(p[0] == w for p in pairs)) \
+                and all((c, s) in chars or (s.endswith("˙") and (c, _toneless(s)) in toneless) for c, s in zip(w, syls))     # 輕聲：基底有這個字的同音節（任何聲調）就算
         if not ok:
-            raise SystemExit(f"{path}:{n}: bad creator row (need word, reading, note; Han word not already in a lexicon layer; one syllable that is a reading of its character): {line!r}")
+            raise SystemExit(f"{path}:{n}: bad creator row (need word, reading, note; Han word not already in a lexicon layer, same word only with a different reading; one syllable that is a reading of its character): {line!r}")
+        first = w not in taken
         taken.add(w)
+        pairs.add((w, reading))
         if "-".join(syls) in names_readings:
             clash.append(f"{path}:{n}: {w} {reading}")
         k = seen.setdefault("-".join(syls), [])
         k.append(w)
         score = round(scores[len(w)] - (len(k) - 1) * SLANG_BEHIND, 8)
         rows += bo.overlay_rows(w, syls, score, CREATOR)
-        srcs.append(f"{w}\t{CREATOR}\t{note}\t\t\n")
+        if first:
+            srcs.append(f"{w}\t{CREATOR}\t{note}\t\t\n")
     if clash:
         raise SystemExit("creator readings equal to a names-layer row's reading (resolve in the data by the contract's same-reading rule):\n" + "\n".join(clash))
     return rows, srcs
