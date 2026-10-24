@@ -95,7 +95,7 @@ python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack file
 import hashlib, json, os, sys
 d = sys.argv[1]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-for manifest, required in (("acg.json", "acg-add.tsv"), ("it.json", "it-add.tsv"), ("meme.json", "meme-add.tsv")):     # the IT+AI pack: docs/contracts/it-pack.md section 3.2; the meme pack: docs/contracts/meme-pack.md section 4
+for manifest, required in (("acg.json", "acg-add.tsv"), ("it.json", "it-add.tsv"), ("meme.json", "meme-add.tsv")):     # the IT+AI pack: docs/contracts/it-pack.md section 3.2; the meme pack: docs/contracts/meme-pack.md section 3.2
     files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
     if required not in files:
         sys.exit(required + " is not in " + manifest)

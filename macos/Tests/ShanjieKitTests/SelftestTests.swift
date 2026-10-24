@@ -39,6 +39,21 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// The word comes from the file's first data row (comment lines skipped), not from a constant: a bundle whose first row is another word still passes.
+    func testReadsTheMemeWordFromTheFirstDataRow() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        let file = res.appendingPathComponent("packs/meme-add.tsv")
+        XCTAssertEqual(Selftest.run(resources: res), 0)
+        // The core's pack parser takes no comment lines, so this is the sampler alone: it would skip them (and blank lines) anyway.
+        try ("# a comment line\n\n" + TestData.memePackRow).write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(Selftest.memeSample(res)?.word, "佛心來的")
+        XCTAssertEqual(Selftest.memeSample(res)?.keys, "zj6vup x962k7", "the keys derived from the reading are the ones typed by hand before")
+        try "ㄅㄚ-ㄅㄚ\t巴巴\t-6.0\tmeme\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(Selftest.memeSample(res)?.word, "巴巴")
+        XCTAssertEqual(Selftest.memeSample(res)?.keys, "18 18 ", "a toneless syllable ends with a space")
+    }
+
     func testFailsWithACorruptBundledMemePack() throws {
         let res = try XCTUnwrap(TestData.resources())
         try TestData.addBundledPack(to: res)

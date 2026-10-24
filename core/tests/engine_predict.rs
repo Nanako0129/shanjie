@@ -43,12 +43,7 @@ fn shared() -> &'static Shared {
 /// The `PACKS` environment variable (`acg`, `it`, `meme`, a comma list) as a directory and a mask; `None` when unset.
 fn packs_from_env() -> Option<(PathBuf, u32)> {
     let v = std::env::var("PACKS").ok()?;
-    let mask = v.split(',').fold(0, |m, n| m | match n {
-        "acg" => PACK_ACG,
-        "it" => PACK_IT,
-        "meme" => PACK_MEME,
-        _ => panic!("PACKS takes acg, it, meme or a comma list of them"),
-    });
+    let mask = v.split(',').fold(0, |m, n| m | PACK_FILES.iter().find(|p| p.1 == n).unwrap_or_else(|| panic!("PACKS takes a comma list of acg, it, meme")).0);
     Some((std::env::var("PACKS_DIR").map_or_else(|_| root().join("data/packs"), PathBuf::from), mask))
 }
 /// The distinct readings of the base lexicon, the three always-on overlay files and the enabled pack files, counted from the files, not from the
@@ -64,7 +59,7 @@ fn expected_readings(packs: Option<(PathBuf, u32)>) -> usize {
     }
     let mut overlays: Vec<PathBuf> = ["overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"].iter().map(|f| dir.join(f)).collect();
     if let Some((pdir, mask)) = packs {
-        overlays.extend([(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv"), (PACK_MEME, "meme-add.tsv")].iter().filter(|(b, _)| mask & b != 0).map(|(_, f)| pdir.join(f)));
+        overlays.extend(PACK_FILES.iter().filter(|p| mask & p.0 != 0).map(|p| pdir.join(p.2)));
     }
     for f in overlays {
         seen.extend(std::fs::read_to_string(f).unwrap().lines().map(|l| l.split('\t').next().unwrap().to_string()));

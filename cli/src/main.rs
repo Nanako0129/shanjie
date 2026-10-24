@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_IT, PACK_MEME, PACK_OOV};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_FILES, PACK_OOV};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -69,11 +69,9 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
 
 /// `--packs acg`, `--packs it`, `--packs meme`, `--packs acg,it,meme`: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
-    v.split(',').try_fold(0, |bits, name| match name {
-        "acg" => Ok(bits | PACK_ACG),
-        "it" => Ok(bits | PACK_IT),
-        "meme" => Ok(bits | PACK_MEME),
-        _ => Err("--packs takes acg, it, meme or a comma list of them".to_string()),
+    v.split(',').try_fold(0, |bits, name| match PACK_FILES.iter().find(|p| p.1 == name) {
+        Some(p) => Ok(bits | p.0),
+        None => Err(format!("--packs takes {} or a comma list of them", PACK_FILES.map(|p| p.1).join(", "))),
     })
 }
 
@@ -81,8 +79,8 @@ fn pack_flag(v: &str) -> Result<u32, String> {
 /// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
 fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
     let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
-    for (bit, name) in [(PACK_ACG, "acg"), (PACK_IT, "it"), (PACK_MEME, "meme")] {
-        let file = pdir.join(format!("{name}-add.tsv"));
+    for (bit, name, file) in PACK_FILES {
+        let file = pdir.join(file);
         if packs & bit != 0 && !file.is_file() {
             return Err(format!("--packs {name}: pack file not found: {}", file.display()));
         }
@@ -567,7 +565,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if packs & PACK_MEME != 0 { "+meme" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, PACK_FILES.iter().filter(|p| packs & p.0 != 0).map(|p| format!("+{}", p.1)).collect::<String>(), if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -857,6 +855,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::engine::{PACK_ACG, PACK_IT, PACK_MEME};
 
     #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {

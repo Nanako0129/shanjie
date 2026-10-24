@@ -427,8 +427,15 @@ public final class Shell {
     private(set) var loadedPackMask: UInt32 = 0
     /// The names of the loaded packs in the settings order, for the menu line.
     var loadedPackTitles: [String] {
-        [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack), (UInt32(SHANJIE_PACK_MEME), MenuEntry.Text.memePack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
+        Shell.packs.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
     }
+    /// The one table of word packs in the settings order: the core's bit, the file in `Resources/packs`, the name in the menu line. A new pack is one row here
+    /// (plus its switch); `build()` (which files exist) and `loadedPackTitles` both read it.
+    static let packs: [(bit: UInt32, file: String, title: String)] = [
+        (UInt32(SHANJIE_PACK_ACG), "acg-add.tsv", MenuEntry.Text.acgPack),
+        (UInt32(SHANJIE_PACK_IT), "it-add.tsv", MenuEntry.Text.itPack),
+        (UInt32(SHANJIE_PACK_MEME), "meme-add.tsv", MenuEntry.Text.memePack),
+    ]
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -921,8 +928,7 @@ public final class Shell {
         let packsDir = resources.appendingPathComponent("packs").path
         let mask = packMask
         // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
-        let present = [(UInt32(SHANJIE_PACK_ACG), "acg-add.tsv"), (UInt32(SHANJIE_PACK_IT), "it-add.tsv"), (UInt32(SHANJIE_PACK_MEME), "meme-add.tsv")]
-            .reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.1) ? $0 | $1.0 : $0 }
+        let present = Shell.packs.reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.file) ? $0 | $1.bit : $0 }
         var built = mask & present
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {

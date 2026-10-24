@@ -27,11 +27,34 @@ public enum Selftest {
     /// engine below, as the shell ships it.
     static let itWordStandard = "wj6vu;4g/ t/6"
     static let itWord = "圖像生成"
-    /// The bundled meme pack (meme-pack contract 3.2): 佛心來的 `ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙` on the standard layout, chat profile. Both profiles spell it 福新來的 without the
-    /// pack and 佛心來的 with it (measured with the CLI, 2026-10-25). The shipped meme-add.tsv must keep this row (or this word and key string change with it): the
-    /// current file is a one-row placeholder that the data PR replaces.
-    static let memeWordStandard = "zj6vup x962k7"
-    static let memeWord = "佛心來的"
+    /// The bundled meme pack (meme-pack contract 3.2): the word is not fixed here. The selftest reads the first data row of the bundled
+    /// `packs/meme-add.tsv` (comment and blank lines skipped) and requires the standard-layout keys of its reading to commit exactly that word
+    /// (chat profile, a fresh composition), so a rebuilt pack does not break it; a missing, empty or unreadable file fails too. The data
+    /// PR's first row therefore has to be a word the pack really makes the sentence decode type (the meme-pack check set's rule).
+    /// The Dachen keys of the 41 symbols (37 zhuyin and 4 tones), the standard layout of s3a section 1; a space is the first tone.
+    static let standardKeys: [Character: Character] = {
+        let pairs = zip("ㄅㄉˇˋㄓˊ˙ㄚㄞㄢㄦㄆㄊㄍㄐㄔㄗㄧㄛㄟㄣㄇㄋㄎㄑㄕㄘㄨㄜㄠㄤㄈㄌㄏㄒㄖㄙㄩㄝㄡㄥ", "1234567890-qwertyuiopasdfghjkl;zxcvbnm,./")
+        return Dictionary(uniqueKeysWithValues: pairs.map { ($0, $1) })
+    }()
+
+    /// The first data row of the bundled meme pack as (word, standard-layout keys); nil when the file is missing or has no usable row.
+    static func memeSample(_ resources: URL) -> (word: String, keys: String)? {
+        guard let text = try? String(contentsOf: resources.appendingPathComponent("packs/meme-add.tsv"), encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n") where !line.hasPrefix("#") && !line.allSatisfy(\.isWhitespace) {
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard f.count >= 2, !f[1].isEmpty else { return nil }
+            var keys = ""
+            for syllable in f[0].split(separator: "-") {
+                for ch in syllable {
+                    guard let k = standardKeys[ch] else { return nil }
+                    keys.append(k)
+                }
+                if let last = syllable.last, !"ˊˇˋ˙".contains(last) { keys.append(" ") }
+            }
+            return (String(f[1]), keys)
+        }
+        return nil
+    }
 
     /// classes-v5 (2026-10-16, docs/contracts/classes-v5.md): dev302 row 27 `ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙` on the
     /// standard layout, chat profile, no left context, the bundled pack loaded: the n-gram's first is 我已經回復你的郵件了 and
@@ -89,9 +112,12 @@ public enum Selftest {
         let (itShown, itCode) = type(itWordStandard, withPack)
         guard itCode == 0 else { return fail("selftest: shanjie_engine_key (it pack) failed, code", itCode) }
         guard itShown == itWord else { return fail("selftest: the bundled IT+AI word pack is not in effect, code", 0) }
-        let (memeShown, memeCode) = type(memeWordStandard, withPack)
+        // A fresh composition first, so the commits above cannot affect this decode.
+        if case .failed(let c) = withPack.reset(mode: 1) { return fail("selftest: shanjie_engine_reset (meme pack) failed, code", c) }
+        guard let meme = memeSample(resources) else { return fail("selftest: the bundled meme pack has no usable first row, code", 0) }
+        let (memeShown, memeCode) = type(meme.keys, withPack)
         guard memeCode == 0 else { return fail("selftest: shanjie_engine_key (meme pack) failed, code", memeCode) }
-        guard memeShown == memeWord else { return fail("selftest: the bundled meme word pack is not in effect, code", 0) }
+        guard memeShown == meme.word else { return fail("selftest: the bundled meme word pack is not in effect, code", 0) }
         // The small model, as the shell loads it: a bundle without it (or with one for another n-gram model) fails here, so
         // 語意校正 cannot ship silently doing nothing.
         let tiny = withPack.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)

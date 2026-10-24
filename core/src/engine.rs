@@ -701,8 +701,9 @@ pub const PACK_ALL: u32 = PACK_ACG | PACK_IT | PACK_MEME;
 /// unknown to the model, scored by the pack alone, not capped; the other rows are capped as overlay words, except that a word the model
 /// never saw keeps its pack score. Only the anime pack for now; the IT pack and a pack added later are capped like any overlay.
 pub const PACK_OOV: u32 = PACK_ACG;
-/// A pack's overlay file inside the packs directory, in the order the packs are appended.
-const PACK_FILES: [(u32, &str); 3] = [(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv"), (PACK_MEME, "meme-add.tsv")];
+/// The one pack table: bit, the name `--packs` takes, and the overlay file inside the packs directory, in the order the packs are appended.
+/// The CLI's flag parsing and file check and the tests' pack helpers read this table instead of keeping their own copy.
+pub const PACK_FILES: [(u32, &str, &str); 3] = [(PACK_ACG, "acg", "acg-add.tsv"), (PACK_IT, "it", "it-add.tsv"), (PACK_MEME, "meme", "meme-add.tsv")];
 
 /// Why a lexicon load failed, for messages: the file that could not be read and its `ErrorKind`, or the lexicon text
 /// that did not parse (`path` is the data directory the files came from, `detail` the `Lexicon` parse error). The C ABI
@@ -737,7 +738,7 @@ pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
 fn read_packs_split(dir: &Path, mask: u32) -> Result<(String, usize), LoadError> {
     let (mut text, mut oov_len) = (String::new(), 0);
     for oov in [true, false] {
-        for (bit, name) in PACK_FILES {
+        for (bit, _, name) in PACK_FILES {
             if mask & bit == 0 || (bit & PACK_OOV != 0) != oov {
                 continue;
             }
