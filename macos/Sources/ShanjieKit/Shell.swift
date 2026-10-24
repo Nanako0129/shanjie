@@ -1285,7 +1285,7 @@ public final class Session {
             if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
                 let read = paused ? nil : leftContext()
                 spacingPrev = read?.last
-                let code = engine.setLeftContext(read?.han)
+                let code = engine.setLeftContext(read?.text)
                 if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
             }
         }

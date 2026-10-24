@@ -92,6 +92,8 @@ final class FakeClient: TextClient {
     /// Overrides for the left-context tests: no insertion point, or marked text left over.
     var selectedOverride: NSRange?
     var markedOverride: NSRange?
+    /// context-return section 1 (P3-2): an app that answers attributedSubstring with this, whatever range was asked for.
+    var replyOverride: String?
     /// s3b2: the line rectangle this client reports.
     var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
     private(set) var lineCursor: Int?
@@ -124,6 +126,7 @@ final class FakeClient: TextClient {
     func attributedSubstring(from range: NSRange) -> NSAttributedString? {
         reads += 1
         requested.append(range)
+        if let replyOverride { return NSAttributedString(string: replyOverride) }
         guard range.location != NSNotFound, NSMaxRange(range) <= document.length else { return nil }
         return NSAttributedString(string: document.substring(with: range))
     }

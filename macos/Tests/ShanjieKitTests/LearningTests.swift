@@ -39,25 +39,115 @@ final class LearningTests: XCTestCase {
         }
     }
 
-    func testRangeIsAtMost32UnitsBeforeTheInsertion() {
+    func testRangeIsAtMost256UnitsBeforeTheInsertion() {
         let c = Controller(makeShell())
         c.client.before = String(repeating: "中", count: 10_000)
         XCTAssertEqual(c.session.leftContext().han, "中中")
-        XCTAssertEqual(c.client.requested, [NSRange(location: 10_000 - 32, length: 32)])
+        XCTAssertEqual(LeftContext.maxUTF16, 256)
+        XCTAssertEqual(c.client.requested, [NSRange(location: 10_000 - 256, length: 256)])
         c.client.before = "ab中"
         XCTAssertEqual(c.session.leftContext().han, "中")
         XCTAssertEqual(c.client.requested.last, NSRange(location: 0, length: 3))
         XCTAssertTrue(c.client.requested.allSatisfy { $0.length <= LeftContext.maxUTF16 })
     }
 
+    // MARK: context-return section 1: the raw text of the same message, at most 64 graphemes
+
+    /// What the session passes to the core for `before` (TextEdit, not a terminal).
+    private func passer() -> (String) -> String? {
+        let c = Controller(makeShell())
+        return { before in
+            c.client.before = before
+            return c.session.leftContext().text
+        }
+    }
+
+    func testTheLastLineBreakEndsTheContext() {
+        let passed = passer()
+        for br in ["\n", "\r\n", "\r", "\u{2028}", "\u{2029}", "\u{0B}", "\u{0C}", "\u{85}"] {
+            XCTAssertEqual(passed("第一行，有 English\(br)你好 Joe"), "你好 Joe", "\(br.unicodeScalars.map { $0.value })")
+        }
+        XCTAssertEqual(passed("中\0文"), "文", "NUL is a break, not deleted")
+        XCTAssertEqual(passed("我說：「Joe 😀」，"), "我說：「Joe 😀」，", "punctuation, spaces, English and emoji stay")
+        XCTAssertNil(passed("第一行\n"), "nothing after the break")
+    }
+
+    func testSixtyFourGraphemesAreKept() {
+        let passed = passer()
+        XCTAssertEqual(passed(String(repeating: "中", count: 65)), String(repeating: "中", count: 64))
+        // A ZWJ sequence, a skin-tone modifier and a combining mark count one grapheme each.
+        let wide = "👨‍👩‍👧" + "👍🏽" + "e\u{301}"
+        XCTAssertEqual(passed("x" + wide + String(repeating: "中", count: 61)), wide + String(repeating: "中", count: 61))
+        // A 4-byte character right at the 64th grapheme from the end is kept whole; one more and it goes.
+        XCTAssertEqual(passed("a𠮷" + String(repeating: "中", count: 63)), "𠮷" + String(repeating: "中", count: 63))
+        XCTAssertEqual(passed("𠮷" + String(repeating: "中", count: 64)), String(repeating: "中", count: 64))
+    }
+
+    /// A read that starts inside the text drops its first grapheme (it may be cut): 100 four-unit emoji, the last 256 units read.
+    func testATruncatedReadDropsItsFirstGrapheme() {
+        let c = Controller(makeShell())
+        c.client.before = String(repeating: "👍🏽", count: 100)
+        let read = c.session.leftContext()
+        XCTAssertEqual(c.client.requested.last, NSRange(location: 400 - 256, length: 256))
+        XCTAssertEqual(read.text, String(repeating: "👍🏽", count: 63))
+        // Cut inside a surrogate pair: nothing of the half character reaches the core.
+        c.client.before = String(repeating: "𠮷", count: 200) + "中"
+        XCTAssertEqual(c.session.leftContext().text, String(repeating: "𠮷", count: 63) + "中")
+    }
+
+    /// P3-2: an app that answers with more than was asked for is cut to the last `maxUTF16` units and treated as truncated.
+    func testAnOverlongReplyIsClampedFirst() {
+        let c = Controller(makeShell())
+        c.client.before = "你好"
+        for br in ["\n", "\0"] {
+            c.client.replyOverride = String(repeating: "中", count: 1_000) + br + "你好"
+            let read = c.session.leftContext()
+            XCTAssertEqual(read.text, "你好", "\(br.unicodeScalars.map { $0.value })")
+            XCTAssertEqual(read.han, "你好")
+        }
+        // The clamped reply counts as truncated: of 100 four-unit emoji the last 256 units hold 64, and the first of them goes.
+        c.client.replyOverride = "\n" + String(repeating: "👍🏽", count: 100)
+        XCTAssertEqual(c.session.leftContext().text, String(repeating: "👍🏽", count: 63))
+        // 1 MB without a line break: only the last maxUTF16 units are looked at.
+        let big = String(repeating: "a", count: 1 << 20)
+        XCTAssertLessThanOrEqual(LeftContext.clamp(big).text.utf16.count, LeftContext.maxUTF16)
+        XCTAssertTrue(LeftContext.clamp(big).truncated)
+        c.client.replyOverride = big
+        let start = ContinuousClock.now
+        let read = c.session.leftContext()
+        let took = ContinuousClock.now - start
+        XCTAssertEqual(read.text, String(repeating: "a", count: 64))
+        print("context-return: leftContext() on a 1 MB reply took \(took)")
+    }
+
+    func testTerminalAppsGetOnlyTheHanTail() {
+        XCTAssertEqual(LeftContext.terminals, [
+            "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.github.wez.wezterm",
+            "io.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
+        ])
+        let shell = makeShell()
+        for bundle in LeftContext.terminals {
+            let c = Controller(shell, bundle: bundle)
+            c.client.before = "$ ls secret.txt 我們今天"
+            let read = c.session.leftContext()
+            XCTAssertEqual(read.text, "今天", bundle)
+            XCTAssertEqual(read.text, read.han, bundle)
+            c.client.before = "$ ls secret.txt"
+            XCTAssertNil(c.session.leftContext().text, bundle)
+        }
+        let c = Controller(shell, bundle: "com.apple.TextEdit")
+        c.client.before = "$ ls secret.txt 我們今天"
+        XCTAssertEqual(c.session.leftContext().text, "$ ls secret.txt 我們今天")
+    }
+
     func testNoInsertionPointOrLeftoverMarkedTextMeansNoContext() {
         let c = Controller(makeShell())
         c.client.before = "ab\t中"
         c.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
-        XCTAssertNil(c.session.leftContext().han)
+        XCTAssertNil(c.session.leftContext().text)
         c.client.selectedOverride = nil
         c.client.markedOverride = NSRange(location: 3, length: 1)
-        XCTAssertNil(c.session.leftContext().han)
+        XCTAssertNil(c.session.leftContext().text)
         XCTAssertEqual(c.client.requested, [], "nothing read in either case")
     }
 

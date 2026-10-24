@@ -13,15 +13,46 @@ public enum LearningPause: Equatable, Sendable {
     case app
 }
 
-/// Section 2: the left context the shell may pass to the core.
+/// Section 2: the left context the shell may pass to the core (docs/contracts/context-return.md section 1: the raw text of the
+/// same message, at most `maxGraphemes`; terminal apps only the Han tail).
 enum LeftContext {
-    /// UTF-16 units requested before the insertion point.
-    static let maxUTF16 = 32
+    /// UTF-16 units requested before the insertion point, and the most of a reply that is looked at: 64 graphemes are at most about
+    /// 128 units, the rest is room for combining marks and emoji (context-return section 1).
+    static let maxUTF16 = 256
+    /// Graphemes passed to the core.
+    static let maxGraphemes = 64
+
+    /// Terminal apps get only `han`, as before (context-return section 1; user decision 2026-10-25, security review P2-1): a terminal
+    /// line holds commands and their output. com.apple.Terminal and com.googlecode.iterm2 were read from the apps' Info.plist
+    /// (CFBundleIdentifier) on the maintainer's Mac on 2026-10-25; the others are the IDs the contract lists, not checked on a machine.
+    /// An editor with a built-in terminal is not here: the panel has the editor's bundle ID (a known limit, out of scope).
+    static let terminals: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.github.wez.wezterm",
+        "io.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
+    ]
 
     /// The range to request: at most `maxUTF16` units ending at `insertion`.
     static func range(insertion: Int) -> NSRange {
         let start = max(0, insertion - maxUTF16)
         return NSRange(location: start, length: insertion - start)
+    }
+
+    /// Step 1 (P3-2): a reply longer than `maxUTF16` units (an app may return more than was asked) is cut to its last `maxUTF16`
+    /// units and counts as truncated. A surrogate pair cut in half decodes to U+FFFD, which the truncated drop removes.
+    static func clamp(_ text: String) -> (text: String, truncated: Bool) {
+        let units = text.utf16
+        guard units.count > maxUTF16 else { return (text, false) }
+        return (String(decoding: units.suffix(maxUTF16), as: UTF16.self), true)
+    }
+
+    /// Steps 2-5: drop the first grapheme of a truncated read, start after the last line break (`Character.isNewline`) or NUL (a
+    /// NUL is a break, not deleted: deleting it would join 中\0文 into 中文), keep the last `maxGraphemes` graphemes as they are
+    /// (punctuation, spaces, English and emoji included). `nil` when nothing is left.
+    static func raw(_ text: String, truncated: Bool) -> String? {
+        let line = truncated ? Substring(text.dropFirst()) : Substring(text)
+        let start = line.lastIndex { $0.isNewline || $0 == "\0" }.map(line.index(after:)) ?? line.startIndex
+        let kept = line[start...].suffix(maxGraphemes)
+        return kept.isEmpty ? nil : String(kept)
     }
 
     /// The trailing ≤ 2 consecutive Han characters of `text`, `nil` when there are none; the same
@@ -196,19 +227,24 @@ extension Session {
     }
 
     /// Section 2: read once at composition start. No context when there is no insertion point or
-    /// the client still holds marked text; at most `LeftContext.maxUTF16` units are requested.
+    /// the client still holds marked text; at most `LeftContext.maxUTF16` units are requested, and no more of the reply is read.
     /// "No marked text" is an empty marked range at any location: on 2026-10-06 VS Code, Chrome,
     /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
     /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
     ///
-    /// Returns the trailing Han characters for the core and, from the same read, the raw last character for cjk-spacing section 1.
+    /// Returns what goes to the core (context-return section 1: `LeftContext.raw`, or `han` for a terminal app), the trailing Han
+    /// characters, and, from the same read, the raw last character for cjk-spacing section 1. Only in memory: never stored or logged.
     /// Changes no state.
-    func leftContext() -> (han: String?, last: Character?) {
+    func leftContext() -> (text: String?, han: String?, last: Character?) {
         let selected = client.selectedRange(), marked = client.markedRange()
-        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
+        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil, nil) }
         let range = LeftContext.range(insertion: selected.location)
-        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
-        return (LeftContext.han(text, truncated: range.location > 0), text.last)
+        guard range.length > 0, let reply = client.attributedSubstring(from: range)?.string else { return (nil, nil, nil) }
+        let (text, clamped) = LeftContext.clamp(reply)
+        let truncated = clamped || range.location > 0
+        let han = LeftContext.han(text, truncated: truncated)
+        let terminal = client.bundleIdentifier.map(LeftContext.terminals.contains) ?? false
+        return (terminal ? han : LeftContext.raw(text, truncated: truncated), han, text.last)
     }
 
     /// The menu (s3b section 13.2, sw section 3 and S4 sections 3-4), in order.
