@@ -4,10 +4,11 @@
 use crate::colloquial::{self, Colloquial, ReadingChannel};
 use crate::learn::{context_key, digit_of, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, predict_digits, reading_matches_in, unit_of_syllable, Mode, Unit};
+use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
 use crate::lm::{decode_segment_learned, history, CappedLexicon, Demote, End, Learn, Lm, Profile};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
+use crate::english_next::EnglishTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{RerankLevel, TinyLm, TOPK};
@@ -370,6 +371,12 @@ pub struct Output {
     pub english_run_utf16_len: u32,
 }
 
+/// What `Engine::en_cache` builds: the best entry of every word of the English table, for one (lexicon, model, table).
+struct EnWords {
+    key: (usize, (u64, usize, usize), usize),
+    words: DigitWords,
+}
+
 /// One word of the displayed best path.
 struct PathWord {
     word: String,
@@ -664,6 +671,10 @@ pub struct Engine {
     /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
     digit_table: Option<Arc<DigitTable>>,
     digit_cache: Option<Arc<DigitCache>>,
+    /// English before Chinese (docs/contracts/english-next.md): the count table (`english-next.tsv`, optional) and the best entry of every
+    /// word it names, built once per (lexicon, model). Only the prediction row reads them.
+    en_table: Option<Arc<EnglishTable>>,
+    en_words: Option<Arc<EnWords>>,
     drun: Option<DRun>,
     last_digits: Option<String>,
     ld_now: Option<String>,
@@ -857,6 +868,8 @@ impl Engine {
         e.data_dir = Some(data_dir.to_path_buf());
         // Optional (digits.md A.3.2): a missing or malformed table leaves the digit feature off and says nothing.
         e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
+        // Optional (english-next.md 2.3): the same.
+        e.en_table = std::fs::read_to_string(data_dir.join("english-next.tsv")).ok().and_then(|t| EnglishTable::parse(&t)).map(Arc::new);
         Ok(e)
     }
 
@@ -922,6 +935,8 @@ impl Engine {
             autokept: false,
             digit_table: None,
             digit_cache: None,
+            en_table: None,
+            en_words: None,
             drun: None,
             last_digits: None,
             ld_now: None,
@@ -1415,6 +1430,8 @@ impl Engine {
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
         self.tinylm = None; // S7c-2a section 2.3: tuned for the previous model
         self.digit_cache = None;
+        self.en_words = None;
+        self.en_cache();
         self.digit_env(); // built now, not at the first digit key (a table loaded and a model: the legal tails and the word readings)
         Ok(())
     }
@@ -2182,6 +2199,35 @@ impl Engine {
         (self.pred.iter().map(|p| p.word.clone()).collect(), self.pred_sel, self.pred.len() as u32)
     }
 
+    /// Test and tool hook (english-next.md 2.3): the table (shared across engines), or none.
+    #[doc(hidden)]
+    pub fn set_english_next(&mut self, table: Option<Arc<EnglishTable>>) {
+        self.en_table = table;
+        self.en_cache(); // built now, not at the first key (a table and a model)
+        self.clear_pred();
+        self.pred_dirty = true;
+    }
+
+    /// Test and tool hook: read `english-next.tsv` at `path`; false (nothing changes) when it is missing or malformed.
+    #[doc(hidden)]
+    pub fn load_english_next(&mut self, path: &Path) -> bool {
+        let Some(t) = std::fs::read_to_string(path).ok().and_then(|t| EnglishTable::parse(&t)) else { return false };
+        self.set_english_next(Some(Arc::new(t)));
+        true
+    }
+
+    /// The best entry of every word the table names, built once per (lexicon, model); `None` without a table or a model.
+    fn en_cache(&mut self) -> Option<Arc<EnWords>> {
+        let (st, table) = (self.lm.clone()?, self.en_table.clone()?);
+        let key = (Arc::as_ptr(&st.capped) as usize, st.lm.identity(), Arc::as_ptr(&table) as usize);
+        if let Some(c) = self.en_words.clone().filter(|c| c.key == key) {
+            return Some(c);
+        }
+        let c = Arc::new(EnWords { key, words: st.capped.predict_index(&st.lm).digit_words(&table.all_words()) });
+        self.en_words = Some(c.clone());
+        Some(c)
+    }
+
     /// V3 engine contract sections 1.2, 10.2 and 11: one `predict` per start (decoded word starts, positions inside words,
     /// the cursor), merged and reordered by what was learned.
     /// Empty while off, without a model, when the cursor is not at the end, the candidate window is open or an English run is
@@ -2199,6 +2245,8 @@ impl Engine {
             None => (None, None),
         };
         let dtable = self.digit_table.clone();
+        // English before Chinese (english-next.md 2.1): the table and the word cache, only with both, a model, and the prediction on.
+        let (etable, ecache) = (self.en_table.clone(), self.en_cache());
         let isolated = self.drun.as_ref().is_some_and(|r| r.m >= 1);
         // The unfinished units in order (one without the abbreviation composer); two or more can only read as an abbreviation.
         let pending: Vec<Vec<char>> =
@@ -2231,11 +2279,14 @@ impl Engine {
             }
             units.extend(pending.iter().map(|chars| Unit { chars: chars.clone(), done: false, tone: None }));
             let digits_here = s == n && dv.is_some() && dcache.is_some() && dtable.is_some();
-            if units.is_empty() && !digits_here {
+            let before: String = disp[..off(s)].iter().collect();
+            let text = format!("{}{before}", self.left);
+            // The digit context goes first (english-next.md 2.1).
+            let english = etable.as_deref().zip(ecache.as_deref()).filter(|_| !digits_here).and_then(|(t, c)| Some((t.lookup(&text)?, &c.words)));
+            if units.is_empty() && !digits_here && english.is_none() {
                 return Vec::new();
             }
-            let before: String = disp[..off(s)].iter().collect();
-            let key = context_key(&format!("{}{before}", self.left));
+            let key = context_key(&text);
             let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
             let shown: String = disp[off(s)..off(n)].iter().collect();
             // A start no record can match scans 9 and weighs nothing: its row is the slice-1 one, cheaper.
@@ -2244,10 +2295,11 @@ impl Engine {
                 && (!self.scan_gate
                     || self.learner.records().iter().any(|r| r.context != NEWWORD && reading_matches_in(&units, &r.reading, mode)));
             let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
-            let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable) {
-                (Some(dv), Some(c), Some(t)) if digits_here => {
+            let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable, english) {
+                (Some(dv), Some(c), Some(t), _) if digits_here => {
                     predict_digits(idx, &st.lm, t, &c.words, lam, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
                 }
+                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, lam, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
                 _ => predict(idx, &st.lm, lam, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
             };
             hits.into_iter()
@@ -2275,7 +2327,11 @@ impl Engine {
         // stable sort below puts the learned ones first, so a partition gives the same row as "learned, then L[0..3]".
         let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
         let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
-        let cursor_items = if pending.is_empty() && dv.is_none() { Vec::new() } else { query(n) };
+        let english_here = etable.as_deref().zip(ecache.as_ref()).is_some_and(|(t, _)| {
+            let upto: String = disp[..off(n)].iter().collect();
+            t.lookup(&format!("{}{upto}", self.left)).is_some()
+        });
+        let cursor_items = if pending.is_empty() && dv.is_none() && !english_here { Vec::new() } else { query(n) };
         // Section 11: the positions inside words come last, far to near.
         let mid_items = mid.into_iter().flat_map(&query);
         let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).chain(mid_items).collect();
@@ -2852,6 +2908,7 @@ impl Engine {
         match k.kind {
             // Zhen-inline section 1.3e (English mixing on): Space right after an English token or a space unit types a space.
             KeyKind::Space if self.cursor > 0 && self.breaks_with_space(self.cursor - 1) => {
+                self.pred_dirty = true; // english-next.md 2.1: the row behind English reaches the space unit (empty without the table, as before)
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.

@@ -89,3 +89,22 @@ python3 tools/build_acg_pack.py freeze-counts --expected-model <SHA-256>
 | `mcbpmf-data.txt`、`overlay-add.tsv` | |
 | 臂 A、臂 B 各自的計數詞表 | |
 | OpenCC 表 | |
+
+## 英文前文表（`docs/contracts/english-next.md` §1，修訂三）
+
+建表（讀各來源的原始輸入，在清理丟掉英文之前計數；要用滿核心，`--jobs`）：
+
+```sh
+python3 tools/build_english_next.py --lexicon data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv \
+    --wiki <維基 dump> --colloquial <colloquial-train.txt> --g0v <g0v 檔，一行一則訊息> --ptt <PTT 原始目錄> --subs <zh_tw.txt.gz> \
+    --out data/lexicon/english-next.tsv --jobs <N>
+```
+
+| 輸入 | SHA-256（凍結時填；PTT 是「`相對路徑\0內容雜湊\n` 逐行排序串起來」的雜湊，工具也寫在表的檔頭） |
+|---|---|
+| 維基 dump（前 200,000 篇） | |
+| `colloquial-train.txt` | |
+| g0v `#rand0m` 來源檔 | |
+| PTT 原始 `<看板>/<文章>.html` 目錄 | |
+| OPUS `mono/zh_tw.txt.gz` | |
+| 詞庫（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`） | |
