@@ -11,7 +11,7 @@
       --recheck-rule                                  --recheck 改用規則模型（--rule-lm）
       --base DIR                                      --recheck 時另外比 v0.4.0 詞包（DIR/acg-add.tsv）每一列的第一名有沒有變
       --bonus B                                       分級分數的加分 B（契約 pack-oov 第 1 節第 3 項：g(w) = max(S_len, log10(c/N) + B)，預設 0）
-      freeze-counts                                   子命令：從 data/lm 的 model-v6 凍結詞包詞的次數，寫 data/packs/acg-counts.tsv；一般建置只讀這份表
+      freeze-counts [--expected-model SHA]            子命令：從 data/lm 的模型（預設 model-v6，--expected-model 換成別的 SHA-256）凍結詞包詞的次數，寫 data/packs/acg-counts.tsv；一般建置只讀這份表
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
@@ -1468,7 +1468,9 @@ def regrade(src, out=PACKS, bonus=0.0, empty_counts=False):
 
 def main():
     if sys.argv[1:2] == ["freeze-counts"]:
-        print(f"{COUNTS}: {freeze_counts()} words; pin its SHA-256 ({sha256_file(COUNTS)}) in COUNTS_SHA")
+        fp = argparse.ArgumentParser(prog="build_acg_pack.py freeze-counts")
+        fp.add_argument("--expected-model", default=MODEL_V6_SHA, help="SHA-256 of the model in data/lm whose counts are frozen (default: model-v6)")
+        print(f"{COUNTS}: {freeze_counts(model_sha=fp.parse_args(sys.argv[2:]).expected_model)} words; pin its SHA-256 ({sha256_file(COUNTS)}) in COUNTS_SHA")
         return
     if sys.argv[1:2] == ["regrade"]:
         rp = argparse.ArgumentParser(prog="build_acg_pack.py regrade")
