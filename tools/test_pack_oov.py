@@ -12,6 +12,9 @@ import gen_pack_oov  # noqa: E402
 
 
 class PackOov(unittest.TestCase):
+    # Same rule as core/tests/pack_oov.rs: the golden's scores are byte-compared only on macOS, where they were generated;
+    # Linux's libm differs in the last digits (seen in CI 2026-10-24). The other tests here compare first places and run everywhere.
+    @unittest.skipIf(sys.platform.startswith("linux"), "scores are byte-compared on macOS only (libm last digits)")
     def test_golden_is_current(self):
         for name, b in gen_pack_oov.generate().items():
             self.assertEqual(open(os.path.join(gen_pack_oov.OUT, name), "rb").read(), b, name)
