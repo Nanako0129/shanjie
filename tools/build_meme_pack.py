@@ -71,7 +71,8 @@ def read_candidates(paths):
                 s, *rest = l.split("\t")
                 src = rest[0].strip() if rest and rest[0].strip() else default
                 st["lines"] += 1
-                if ASCII_ALNUM.search(unicodedata.normalize("NFKC", s)):
+                s = unicodedata.normalize("NFKC", s)            # 全形英數、康熙部首、相容表意字都先正規化，再判斷與切段
+                if ASCII_ALNUM.search(s):
                     st["dropped_ascii"] += 1
                     continue
                 for piece in (x for x in NON_HAN.split(s) if x):
@@ -201,6 +202,8 @@ def read_x(work):
     def text(n):
         with open(os.path.join(work, n), encoding="utf-8") as f:
             return f.read()
+    if not os.path.exists(os.path.join(work, "meme-x.json")):
+        raise SystemExit(f"{work}/meme-x.json is missing: run --emit-x first (with the same --work)")
     meta = json.loads(text("meme-x.json"))
     for n, sha in meta.items():
         if IT.sha256_text(text(n)) != sha:
@@ -210,11 +213,11 @@ def read_x(work):
 
 # ---------------------------------------------------------------- 第二段：讓不讓第一名
 
-def judge(admitted, reading, xs, fs, counts2):
+def judge(admitted, reading, xs, fs, counts2, packwords=frozenset()):
     """契約 §2「讓不讓第一名」。xs：{候選: 聊天的 X}；fs：{候選: 書面的第一名}；counts2：第二次計數 {X 字串: (文章, 看板)}。
     回傳 (留下的詞, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)])。
     同讀音的兩個以上候選只讓文章數最多的（同數照字串）去判，其餘丟掉；已經打得對（it-pack §2：聊天與書面的第一名都是候選）就不收；
-    其餘看聊天的 X：X 的文章 ≥ 候選的不收，少於才收。聊天已經對、書面沒對的候選：沒有 X 要讓位，詞包只幫書面，收。"""
+    X 是別的詞包的詞：先出貨的詞包勝，不收（契約 §2 衝突）；其餘看聊天的 X：X 的文章 ≥ 候選的不收，少於才收。聊天已經對、書面沒對的候選：沒有 X 要讓位，詞包只幫書面，收。"""
     best = {}
     for w in sorted(reading, key=lambda w: (-admitted[w][0], w.encode())):
         best.setdefault(tuple(reading[w]), w)
@@ -228,6 +231,8 @@ def judge(admitted, reading, xs, fs, counts2):
             dropped.append((w, "already_right", x, a, a))
         elif x == w:
             kept.append(w)
+        elif x in packwords:
+            dropped.append((w, "x_other_pack", x, a, counts2.get(x, (0, 0))[0]))
         elif x not in counts2:
             raise SystemExit(f"{x!r} (first place of {w!r}) is not in the second counts file: the counts file does not match meme-x-strings.txt")
         elif counts2[x][0] >= a:
@@ -248,7 +253,7 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
     excluded, decided = B.read_collisions(collisions_tsv)       # 處置檔排除的詞先拿掉，再選同讀音的贏家（被排除的不能擋住同音的詞）
     st["excluded_by_meme_collisions_tsv"] = sum(w in excluded for w in reading)
     admitted, reading = ({w: v for w, v in d.items() if w not in excluded} for d in (admitted, reading))
-    words, dropped = judge(admitted, reading, xs, fs, counts2)
+    words, dropped = judge(admitted, reading, xs, fs, counts2, packwords)
     reasons = collections.Counter(d[1] for d in dropped)
     ref = set(cands)                    # 參考名單：所有候選（切段後）。(b)：迷因詞搶走參考名單裡別的字串的第一名
     rank = B.collision_rank(B.read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else [])
@@ -280,7 +285,7 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
     manifest = {
         "words": len(words), "rows": len(rows), "bonus": BONUS, "thresholds": {"min_boards": MIN_BOARDS, "min_articles": MIN_ARTICLES},
         "sources": dict(sorted(collections.Counter(s for w in words for s in cands[w]).items())),
-        "stages": dict(st, **{"dropped_" + k: reasons.get(k, 0) for k in ("same_reading", "already_right", "x_not_fewer")},
+        "stages": dict(st, **{"dropped_" + k: reasons.get(k, 0) for k in ("same_reading", "already_right", "x_other_pack", "x_not_fewer")},
                        dropped_by_c_rule=len(ldrop)),
         "unresolved_collision_readings": len(col),
     }

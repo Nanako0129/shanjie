@@ -142,9 +142,27 @@ class Prepare(unittest.TestCase):
 
 
 class Judge(unittest.TestCase):
-    def run_judge(self, admitted, xs, counts2, reading=None, fs=None):
+    def run_judge(self, admitted, xs, counts2, reading=None, fs=None, packwords=frozenset()):
         reading = reading or {w: [f"s{ord(c)}" for c in w] for w in admitted}
-        return T.judge(admitted, reading, xs, fs or {w: "書面" + w for w in admitted}, counts2)
+        return T.judge(admitted, reading, xs, fs or {w: "書面" + w for w in admitted}, counts2, packwords)
+
+    def test_x_from_another_pack_wins_whatever_the_counts(self):
+        kept, dropped = self.run_judge({"資料圓": (50, 5)}, {"資料圓": "資料源"}, {"資料源": (0, 0)}, packwords=frozenset({"資料源"}))
+        self.assertEqual((kept, [d[1] for d in dropped]), ([], ["x_other_pack"]))
+
+    def test_nfkc_before_splitting(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "c.tsv")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("\u2f00切都是\tx\n我就爛\uf900\tx\n")      # Kangxi radical one; a compatibility ideograph
+            cands, _, _ = T.read_candidates([p])
+        self.assertIn("一切都是", cands)
+        self.assertIn("我就爛" + __import__("unicodedata").normalize("NFKC", "\uf900"), cands)
+
+    def test_missing_x_manifest_is_a_clear_stop(self):
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(SystemExit) as e:
+            T.read_x(d)
+        self.assertIn("run --emit-x first", str(e.exception))
 
     def test_fewer_than_x_is_dropped_more_than_x_is_kept(self):
         kept, dropped = self.run_judge({"少於者": (20, 5), "多於者": (60, 5), "同數者": (30, 5)}, {"少於者": "它拼的詞甲", "多於者": "它拼的詞乙", "同數者": "它拼的詞丙"},
@@ -367,8 +385,9 @@ class Collisions(unittest.TestCase):
             return [w for w, _ in pairs] if meme else ["動漫詞" if w == "擠人詞" and prof == "chat" else "？" + w for w, _ in pairs]
         files, m, col, dropped, unread, ldrop = self.run_build(decode, packwords=frozenset({"動漫詞"}), x={"擠人詞": ("動漫詞", "？擠人詞")})
         self.assertEqual(self.pack_words(files), {"安分詞"})
-        self.assertEqual([(w, o) for _, w, o, _ in ldrop], [("擠人詞", "動漫詞")])      # even where the first-place rule would have let X go: the earlier pack wins
-        self.assertEqual(m["stages"]["dropped_by_c_rule"], 1)
+        # X is another pack's word: the earlier pack wins at the first-place rule already, before the (c) check
+        self.assertEqual([(d[0], d[1]) for d in dropped], [("擠人詞", "x_other_pack")])
+        self.assertEqual((m["stages"]["dropped_x_other_pack"], ldrop), (1, []))
 
     def test_displacing_a_lexicon_word_that_is_x_in_the_chat_main_reading_is_the_first_place_rules_call(self):
         decode = lambda pairs, prof, meme=None: [w for w, _ in pairs] if meme else ["舊詞庫詞" if w == "擠人詞" and prof == "chat" else "？" + w for w, _ in pairs]
