@@ -60,8 +60,14 @@ class Pages(unittest.TestCase):
         page = '<div id="main-content" class="bbs-screen bbs-content">' + self.META.format(extra="") + "\n\n" + text + "\n--\n" + "</div>"
         self.assertEqual(P.body(page).split("\n"), [wrapped + "一下。", "第二段只有一行。", "今天好累", "明天再說"])
 
+    def test_ambiguous_width_counts_two_and_a_quote_ends_the_piece(self):
+        line = "…" * 39 + "a"                              # 39 ambiguous-width ellipses (2 columns each on PTT) + 1 = 79 columns
+        self.assertEqual(P.width(line), 79)
+        self.assertEqual(P.paragraphs(line + "\n好"), line + "好")
+        wrapped = "好" * 39                                 # 78 columns: would continue, but the quote line between ends it
+        self.assertEqual(P.paragraphs(wrapped + "\n: 被引用的話\n另一個回應。"), wrapped + "\n另一個回應。")
+
     def test_wrap_width_bounds(self):
-        self.assertEqual((P.WRAP_MIN, P.WRAP_MAX), (77, 80))
         for n, joined in ((76, False), (77, True), (80, True), (81, False)):
             line = "a" * n
             self.assertEqual(P.paragraphs(line + "\n好"), line + ("好" if joined else "\n好"), n)
