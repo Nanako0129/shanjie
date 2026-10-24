@@ -24,7 +24,8 @@ OUT = os.path.join(ROOT, "eval", "golden", "pack-oov")
 SENTENCES = ["ㄊㄚ ㄑㄧˇ ㄔㄨㄤˊ", "ㄊㄚ ㄓㄢˋ", "ㄑㄧˇ ㄔㄨㄤˊ", "ㄓㄢˋ ㄊㄚ", "ㄊㄚ ㄓㄢ", "ㄊㄚ ㄓㄢˋ ㄑㄧˇ ㄔㄨㄤˊ", "ㄊㄚ ㄕˋ ㄐㄧㄝˋ ㄒㄧㄢˋ"]
 PACKS = {"none": frozenset(), "A": frozenset({"占", "起床"}), "B": frozenset({"他"}), "C": frozenset(), "D": frozenset()}
 # pack-oov section 1b: unforced pack words (column 4 `acg`); C holds 世界線 (the model never saw it: keeps the pack score) and 占 (known:
-# capped as in main). D puts 世界線 in the overlay without any pack, so it loses UNSEEN_OVERLAY_PENALTY: C and D differ only there.
+# capped as in main). D puts only 世界線 in the overlay, without any pack, so it loses UNSEEN_OVERLAY_PENALTY. C and D also differ
+# wherever 占 is used (capped in C, not in the overlay in D); the penalty alone is tested in core/tests/pack_oov.rs with 鑫.
 UNFORCED = {"C": frozenset({"世界線", "占"})}
 OVERLAY_ONLY = {"D": frozenset({"世界線"})}
 LEFT = "占他"

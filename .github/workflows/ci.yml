@@ -221,6 +221,11 @@ jobs:
       - name: ACG pack builder (Python)
         run: python3 -m unittest tools.test_build_acg_pack
 
+      # docs/contracts/pack-oov.md section 2 item 5: the Python half of the cross-language golden (eval/golden/pack-oov/decode.tsv);
+      # the Rust half is core/tests/pack_oov.rs.
+      - name: pack-oov golden (Python)
+        run: python3 -B -m unittest tools/test_pack_oov.py
+
       # docs/contracts/it-pack.md section 4: the IT+AI pack builder against a fake web and fake decoders (source rules, dedupe, collisions,
       # offline determinism). No network, no evaluation CLI.
       - name: IT pack builder (Python)
