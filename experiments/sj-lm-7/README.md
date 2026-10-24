@@ -95,7 +95,7 @@ python3 tools/build_acg_pack.py freeze-counts --expected-model <SHA-256>
 
 ```sh
 python3 tools/build_english_next.py --lexicon data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv \
-    --wiki <維基 dump> --colloquial <colloquial-train.txt> --g0v <g0v 檔，一行一則訊息> --ptt <PTT 原始目錄> --subs <zh_tw.txt.gz> \
+    --wiki <維基 dump> --colloquial <colloquial-train.txt> --g0v <g0v 檔，一行一則訊息> --ptt <PTT 原始目錄> --subs <raw/zh_tw.zip> \
     --out data/lexicon/english-next.tsv --jobs <N>
 ```
 
@@ -104,6 +104,6 @@ python3 tools/build_english_next.py --lexicon data/lexicon/mcbpmf-data.txt data/
 | 維基 dump（前 200,000 篇） | |
 | `colloquial-train.txt` | |
 | g0v `#rand0m` 來源檔 | |
-| PTT 原始 `<看板>/<文章>.html` 目錄 | |
-| OPUS `mono/zh_tw.txt.gz` | |
+| PTT 原始 `<看板>/<文章>.html` 目錄（2026-10-25 抓完，110 看板、593,546 頁） | 快照 `ptt-snapshot-2026-10-25.tar.zst` `174e972c30b63f0439efff729014c378d4009490cc558139048ceb8b4c090fdc`；目錄雜湊見計數檔頭 |
+| OPUS `raw/zh_tw.zip`（逐片原文） | `bb1fc2d942103be2e681916dd5c915d144b07b4167e92f8abac13ad3d312a5fc` |
 | 詞庫（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`） | |
