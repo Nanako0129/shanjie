@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """OPUS OpenSubtitles zh_tw lines -> sentences for the colloquial counts and the tinylm corpus (docs/contracts/sj-lm-7.md section 2.7).
-Brought from the SUB-0 branch (origin/exp/sub0-subtitles, experiments/sub0-subtitles/clean_subs.py); the one addition is the film cap below.
+Brought from the SUB-0 branch (origin/exp/sub0-subtitles, experiments/sub0-subtitles/clean_subs.py); the additions are the raw zip reader and the film count (no cap) below.
 
   clean_subs.py --raw raw/zh_tw.zip --out DIR --lexicon data/lexicon/mcbpmf-data.txt --invade INVADE_CLONE
                 --invade-sha256 HEX [--repo DIR] [--cache DIR] [--extra-rows LABEL=FILE ...] [--min-han 4000000] [--sample N --seed S]
@@ -18,7 +18,8 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
 Films are counted, not capped (contract 2.7, maintainer 2026-10-25: no per-film cap). A film is a run of non-empty lines between blank lines; the
 input is OPUS raw/zh_tw.zip (one XML file per subtitle, OpenSubtitles/raw/zh_tw/<year>/<film id>/<file>.xml), read as the text of every <s> with its
 <time> tags removed, files in path order, one blank line after each film id. The mono file (mono/zh_tw.txt.gz) has no blank line at all (measured
-2026-10-25: 1,456,479 lines), so it reads as one film; plain-text input is still accepted (tests).
+2026-10-25: 1,456,479 lines), so it reads as one film: the run STOPs when the input shows fewer than two films. Plain-text input with blank lines
+between films is still accepted (tests).
 Writes OUT/subs.tsv (all kept) and OUT/subs-half.tsv (the kept sentences whose SHA-256(UTF-8) first byte is < 128), both `source<TAB>id<TAB>
 sentence` like p2-public/pool.tsv, plus OUT/manifest.json. Prints counts only: per step the sentences dropped and the 20 most frequent triggers,
 where a trigger is a member of a closed set (a rule, a bucket, a kana / simplified-only / non-lexicon character, a list term, a label), never
@@ -170,8 +171,8 @@ def read_raw_zip(path):
         films = collections.defaultdict(list)
         for name in sorted(n for n in z.namelist() if n.endswith(".xml")):
             films[name.split("/")[-2]].append(name)
-        for film in sorted(films, key=lambda f: films[f][0]):
-            for name in films[film]:
+        for names_of_film in films.values():              # names are sorted, so films come in the order of their first path
+            for name in names_of_film:
                 for s in RAW_S.findall(z.read(name).decode("utf-8", errors="replace")):
                     s = html.unescape(RAW_TIME.sub("", s)).strip()
                     if s:
@@ -399,6 +400,9 @@ def main(argv=None):
     print("lexicon-missing characters (top):", man["lexicon_missing_characters_top"])
     print("guard:", man["guard"])
     print("kept", man["kept"], "half", man["outputs"]["subs-half.tsv"]["rows"])
+    if man["films"]["count"] < 2:
+        print("STOP: the input shows fewer than two films (no blank line between films: the mono file? use raw/zh_tw.zip)")
+        return 1
     if man["kept"]["han_chars"] < a.min_han:
         print(f"STOP: {man['kept']['han_chars']} Han characters kept, fewer than {a.min_han}")
         return 1

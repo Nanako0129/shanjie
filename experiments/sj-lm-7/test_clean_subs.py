@@ -229,7 +229,13 @@ class EndToEnd(unittest.TestCase):
              KEEP + " ok go", KEEP + SIMP, KEEP + "視頻", "看電影很好玩啊真的是這樣", "我們一起去吃飯喔太棒了"]
 
     def run_main(self, d, extra=(), min_han="1"):
-        return self.run_with(d, self.LINES, extra, min_han)
+        return self.run_with(d, self.LINES[:1] + [""] + self.LINES[1:], extra, min_han)   # two films (one is a STOP); no cap, so the split changes no count
+
+    def test_one_film_only_is_a_stop(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, text, _ = self.run_with(d, self.LINES)
+        self.assertEqual(rc, 1)
+        self.assertIn("fewer than two films", text)
 
     def run_with(self, d, lines, extra=(), min_han="1"):
         raw = write(d, "zh_tw.txt", "\n".join(lines) + "\n")
