@@ -22,32 +22,32 @@
  "dropped_unreadable": 1,
  "files": {
   "meme-add.tsv": {
-   "bytes": 7230,
-   "lines": 119,
-   "sha256": "b842c690ab19f1135d80db1bc145b55edfa4a2cc57f81ee3da6c8ebc8bf37093"
+   "bytes": 6376,
+   "lines": 102,
+   "sha256": "a9ee4508de50b68281db2e8ca2a2b0dc24818ee8df20a462d0c80b87fbc98313"
   },
   "meme-sources.tsv": {
-   "bytes": 3263,
-   "lines": 111,
-   "sha256": "d03a2f6dff2fc39d2dfbf640287de796ddb8ec8f1ea6b67461d2d7dfc4112d6e"
+   "bytes": 2779,
+   "lines": 94,
+   "sha256": "b546f32142dca6268896f49e6697a152a5660a5656c2bcdd8178b0c7adade8b9"
   }
  },
  "meme_x": {
   "meme-x-strings.txt": "8c3e91ef7cd0ffebe600f7386a0c81f7d52bf61791d39d8ab956e35d3f6c653f",
   "meme-x.tsv": "740e664162b3152218b3735d93b5d625fd3afbc8e8aa80ead22a0ba11d1f77d0"
  },
- "rows": 119,
+ "rows": 102,
  "sources": {
   "fandom": 4,
   "fandom,mined": 1,
   "fandom,pttpedia,streetdict": 1,
   "fandom,streetdict": 1,
-  "mined": 19,
+  "mined": 18,
   "mined,streetdict": 1,
   "muse": 2,
-  "pttpedia": 28,
+  "pttpedia": 23,
   "pttpedia,streetdict": 1,
-  "streetdict": 52
+  "streetdict": 41
  },
  "stages": {
   "admitted": 709,
@@ -60,7 +60,7 @@
   "dropped_same_reading": 5,
   "dropped_x_not_fewer": 57,
   "dropped_x_other_pack": 4,
-  "excluded_by_meme_collisions_tsv": 84,
+  "excluded_by_meme_collisions_tsv": 101,
   "no_count": 0,
   "unreadable": 1
  },
@@ -69,6 +69,6 @@
   "min_boards": 3
  },
  "unresolved_collision_readings": 0,
- "version": "b842c690",
- "words": 110
+ "version": "a9ee4508",
+ "words": 93
 }
