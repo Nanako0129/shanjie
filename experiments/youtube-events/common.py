@@ -21,7 +21,7 @@ def http_get(url, interval=1.0):
 def read_tsv(path):
     """Tab-separated file with a header line -> list of dicts (comment lines starting with # are skipped)."""
     with open(path, encoding="utf-8", newline="") as f:
-        return list(csv.DictReader((l for l in f if not l.startswith("#")), delimiter="\t"))
+        return list(csv.DictReader((l for l in f if not l.startswith("#")), delimiter="\t", quoting=csv.QUOTE_NONE))   # write_tsv never quotes
 
 
 def write_tsv(path, fields, rows):
