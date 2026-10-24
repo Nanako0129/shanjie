@@ -5,6 +5,7 @@ The simplified-character sets are patched to tiny stand-ins so the tests do not 
 a fake API, a fake reading tool and a fake decoder; one test runs the real evaluation CLI (built on demand with cargo, needs data/lm)."""
 import contextlib
 import hashlib
+import io
 import json
 import math
 import os
@@ -546,10 +547,13 @@ class Build(unittest.TestCase):
         self.assertEqual(m["unresolved_collision_readings"], 0)
 
 
+PRE_APPEND_NAMES_ADD_SHA256 = "77f70524fd1ddd62a29e63103439cde3c3b25f3d40d0b3a6b0300de955e1f010"   # names-add.tsv before any creator row (contract section 2)
+
+
 class AppendCreators(unittest.TestCase):
     """docs/contracts/names-creators.md section 2: --append-creators on synthetic small files (scores are injected; the base only supplies syllables),
     and on copies of the committed files (the committed ones are never touched)."""
-    BASE = "ㄊㄨㄥˇ 統 -1.0\nㄕㄣˊ 神 -1.0\nㄍㄨㄟˇ 鬼 -1.0\nㄍㄨㄛˊ 國 -1.0\nㄉㄨㄥˋ 動 -1.0\nㄉㄨㄥˋ 洞 -1.0\nㄍㄨㄟˇ 詭 -1.0\nㄅㄚ 八 -1.0\n"
+    BASE = "ㄊㄨㄥˇ 統 -1.0\nㄕㄣˊ 神 -1.0\nㄍㄨㄟˇ 鬼 -1.0\nㄍㄨㄛˊ 國 -1.0\nㄉㄨㄥˋ 動 -1.0\nㄉㄨㄥˋ 洞 -1.0\nㄍㄨㄟˇ 詭 -1.0\nㄅㄚ 八 -1.0\nㄅㄚ 巴 -1.0\nㄊㄨㄥˇ-ㄕㄣˊ 統神 -2.0\n"
     ADD = "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-5.0\tnames\nㄅㄚ-ㄅㄚ\t爸爸\t-5.5\tnames\n"
     SRCS = "word\tsource_kind\tsources\tqid\tnote\n酷澎\tcategory\tx\t\t\n爸爸\tmanual\ty\t\tPOLY\n"
     SCORES = {2: -5.0, 3: -6.0}
@@ -603,16 +607,10 @@ class AppendCreators(unittest.TestCase):
         self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\ta\n")
         self.assertEqual([r[1] for r in self.rows()], ["酷澎", "爸爸", "鬼鬼"], "a changed input replaces the old creator rows")
         self.assertEqual(json.loads(get(os.path.join(self.d, "names.json")))["words"], 3)
-        self.run_append("# nothing left\n")
-        self.assertEqual(get(os.path.join(self.d, "names-add.tsv")).decode(), self.ADD)
-        self.assertEqual(get(os.path.join(self.d, "names-sources.tsv")).decode(), self.SRCS)
-        m = json.loads(get(os.path.join(self.d, "names.json")))
-        self.assertEqual((m["words"], m["rows"], m["sources"]), (2, 2, {"category": 1, "manual": 1}))
 
     def test_each_invalid_row_stops_the_run_with_its_line_number_and_writes_nothing(self):
         bad = {
-            "in the base": "統\tㄊㄨㄥˇ ㄕㄣˊ\tx\n",
-            "in the base as a word": "八八\tㄅㄚ ㄅㄚ\tx\n",
+            "a multi-character base word": "統神\tㄊㄨㄥˇ ㄕㄣˊ\tx\n",
             "in overlay-add.tsv": "八八\tㄅㄚ ㄅㄚ\tx\n",
             "a slang row": "國洞\tㄍㄨㄛˊ ㄉㄨㄥˋ\tx\n",
             "in names-add.tsv": "酷澎\tㄎㄨˋ ㄆㄥˊ\tx\n",
@@ -623,6 +621,9 @@ class AppendCreators(unittest.TestCase):
             "reading too short": "統神神\tㄊㄨㄥˇ ㄕㄣˊ\tx\n",
             "reading too long": "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ ㄉㄨㄥˋ\tx\n",
             "syllable not in the base": "國動\tㄍㄨㄛˊ ㄌㄧㄥˊ\tx\n",
+            "a dropped tone": "國動\tㄍㄨㄛ ㄉㄨㄥˋ\tx\n",
+            "a swapped syllable": "國動\tㄉㄨㄥˋ ㄍㄨㄛˊ\tx\n",
+            "a syllable that is another character's": "國動\tㄍㄨㄟˇ ㄉㄨㄥˋ\tx\n",
             "a missing column": "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\n",
             "a repeated word": "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\tb\n",
         }
@@ -634,8 +635,23 @@ class AppendCreators(unittest.TestCase):
                 self.assertRegex(str(cm.exception), r"names-creators\.tsv:[23]:")
                 self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
 
-    def test_without_a_creators_file_or_with_an_empty_one_nothing_changes(self):
+    def test_a_creator_reading_equal_to_a_names_layer_row_is_an_error_listing_every_collision(self):
         before = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}
+        with self.assertRaises(SystemExit) as cm:
+            self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n巴巴\tㄅㄚ ㄅㄚ\tb\n")
+        self.assertIn("巴巴", str(cm.exception))
+        self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
+
+    def test_crlf_creator_files_are_read_like_lf_ones(self):
+        self.assertEqual(self.run_append("# h\r\n國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\tPTT 1\r\n"), 1)
+        self.assertEqual(get(os.path.join(self.d, "names-sources.tsv")).decode()[len(self.SRCS):], "國動\tcreator\tPTT 1\t\t\n")
+
+    def test_a_creators_file_without_rows_or_absent_touches_nothing_even_old_creator_rows(self):
+        self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
+        before = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}
+        for text in ("", "# nothing left\n\n"):
+            self.assertEqual(self.run_append(text), 0)
+            self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
         B.append_creators(self.d, os.path.join(self.d, "absent.tsv"), os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES)
         self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
 
@@ -652,9 +668,34 @@ class AppendCreators(unittest.TestCase):
             B.append_creators(d, creators, B.ACG_ADD)
             self.assertEqual(before, {n: get(os.path.join(d, n)) for n in names}, creators)
         self.assertEqual(hashlib.sha256(before["names-add.tsv"]).hexdigest(), json.loads(before["names.json"])["files"]["names-add.tsv"]["sha256"])
+        with open(os.path.join(B.LEX, "names-add.tsv"), encoding="utf-8", newline="") as f:
+            kept = "".join(l for l in B._lines(f.read()) if l.split("\t")[3].rstrip("\n") != "creator")
+        self.assertEqual(hashlib.sha256(kept.encode()).hexdigest(), PRE_APPEND_NAMES_ADD_SHA256, "the non-creator rows are the pre-append file, byte for byte")
         if os.path.exists(B.CREATORS):      # once the real file exists, the committed names-add.tsv must carry exactly its words, creator rows last
             tags = [l.split("\t")[3].rstrip("\n") for l in get(os.path.join(B.LEX, "names-add.tsv")).decode().splitlines()]
             self.assertEqual(tags, sorted(tags, key=("names", "creator").index))
+
+
+class MainRebuild(unittest.TestCase):
+    """A full rebuild is rebuild + append: the creator rows must not vanish."""
+
+    def run_main(self, creators_text):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        creators = os.path.join(d, "names-creators.tsv")
+        if creators_text is not None:
+            put(creators, creators_text)
+        argv = ["build_names.py", "--nsi-commit", "a" * 40, "--out", d, "--report", d]
+        with mock.patch.object(B, "CREATORS", creators), mock.patch.object(B, "NamesApi"), mock.patch.object(B.urllib.request, "install_opener"), \
+                mock.patch.object(B, "build", return_value=({}, {}, [], [], [], [])), mock.patch.object(B, "write_all"), \
+                mock.patch.object(B, "append_creators", return_value=0) as app, mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+            B.main()
+        return app
+
+    def test_appends_when_the_creators_file_has_rows_and_not_otherwise(self):
+        self.run_main("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n").assert_called_once()
+        for text in (None, "", "# only a header\n"):
+            self.run_main(text).assert_not_called()
 
 
 class TwTitle(unittest.TestCase):

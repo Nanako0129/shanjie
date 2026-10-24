@@ -31,6 +31,16 @@ class CountUsage(unittest.TestCase):
         self.assertEqual(got, {"統神": (3, 2), "統神神": (1, 1), "國動": (1, 1), "鬼鬼": (1, 1), "沒人": (0, 0)})
         self.assertEqual(C.count([], self.ptt), {})
 
+    def test_no_pages_stops_with_a_message(self):
+        with self.assertRaises(SystemExit) as cm:
+            C.count(["統神"], os.path.join(self.d.name, "nowhere"))
+        self.assertIn("no ", str(cm.exception))
+
+    def test_tool_commit_marks_a_dirty_tree(self):
+        self.assertEqual(C.tool_commit("abc", ""), "abc")
+        self.assertEqual(C.tool_commit("abc", "\n"), "abc")
+        self.assertEqual(C.tool_commit("abc", " M tools/x.py\n"), "abc-dirty")
+
     def test_main_skips_names_already_in_the_lexicon_and_sorts_by_articles(self):
         root = os.path.join(self.d.name, "root")
         put(os.path.join(root, "data", "lexicon", "mcbpmf-data.txt"), "ㄍㄨㄟˇ 鬼 -1.0\nㄍㄨㄟˇ-ㄍㄨㄟˇ 鬼鬼 -2.0\n")

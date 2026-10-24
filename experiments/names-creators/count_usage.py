@@ -9,7 +9,7 @@ Usage: python3 experiments/names-creators/count_usage.py [--include-known] [--jo
   --include-known  count names already in the lexicon too (docs/contracts/meme-pack.md section 2: the second count, of the current first places)
   --jobs N      split the pages over N processes; the output is byte-identical to one process
 The tree hash is the english-next section 1 method: SHA-256 over the sorted lines "<board>/<file>\0<sha256 of the file>\n" of every .html page.
-One process, one regex pass per page. A name that is a prefix of a longer candidate is still counted: the longer match credits the shorter names it contains.
+One regex pass per page. A name that is a prefix of a longer candidate is still counted: the longer match credits the shorter names it contains.
 Tests: test_count_usage.py."""
 import argparse
 import collections
@@ -74,6 +74,8 @@ def _pages(paths):
 def count(names, ptt_dir, jobs=1, with_tree=False):
     """{name: (articles, boards)} for every name; with `with_tree`, also the tree hash of the pages."""
     paths = sorted(glob.glob(os.path.join(ptt_dir, "*", "*.html")))
+    if not paths:
+        raise SystemExit(f"no {os.path.join(ptt_dir, '*', '*.html')} pages: wrong PTT_DIR?")
     chunks = [paths[i:i + 500] for i in range(0, len(paths), 500)]
     if jobs > 1:
         with mp.Pool(jobs, _init, (names,)) as pool:
@@ -99,9 +101,15 @@ def sha256_file(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
+def tool_commit(head, porcelain):
+    """HEAD，工作樹有未提交改動（git status --porcelain 非空）時加 -dirty。"""
+    return head + ("-dirty" if porcelain.strip() else "")
+
+
 def commit():
+    git = lambda *a: subprocess.run(["git", "-C", ROOT, *a], capture_output=True, text=True, check=True).stdout
     try:
-        return subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        return tool_commit(git("rev-parse", "HEAD").strip(), git("status", "--porcelain"))
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
 

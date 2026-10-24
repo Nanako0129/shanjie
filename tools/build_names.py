@@ -360,36 +360,53 @@ def _lines(text):
     return re.findall(r"[^\n]*\n|[^\n]+", text)
 
 
-def creator_rows(path, taken, scores, syllables):
-    """names-creators.tsv（詞、讀音（音節以空白分隔）、備註；# 開頭與空行略過）→ (names-add.tsv 的列, names-sources.tsv 的列)，照檔案順序。
-    每列：三欄；詞是 2–10 個漢字、字數在 scores 裡、不在 taken（基底、疊加層、名單其他列、兩個詞包、前面的列）；讀音的音節數等於字數、每個音節都在基底裡。
-    不符就中止並指出行號。分數＝scores[字數]（已含 NAMES_BONUS），同讀音第 k 個（k 從 0 起）再扣 k × SLANG_BEHIND。"""
-    rows, srcs, seen, taken = [], [], {}, set(taken)
+def creator_lines(path):
+    """names-creators.tsv 的資料行（略過 # 開頭與空行；CRLF 的行尾 \r 去掉）→ [(行號, 行)]；檔案不存在時是空的。"""
+    if not os.path.exists(path):
+        return []
     with open(path, encoding="utf-8-sig") as f:
-        lines = f.read().split("\n")
-    for n, line in enumerate(lines, 1):
-        if line.startswith("#") or not line.strip():
-            continue
+        lines = [l.rstrip("\r") for l in f.read().split("\n")]
+    return [(n, l) for n, l in enumerate(lines, 1) if not l.startswith("#") and l.strip()]
+
+
+def base_char_readings(base):
+    """{(單字, 音節)}：基底裡單字詞的讀音。"""
+    return {(w, syls[0]) for syls, ws in base.by_reading.items() if len(syls) == 1 for w, _ in ws}
+
+
+def creator_rows(path, taken, scores, chars, names_readings=frozenset()):
+    """names-creators.tsv（詞、讀音（音節以空白分隔）、備註；# 開頭與空行略過）→ (names-add.tsv 的列, names-sources.tsv 的列)，照檔案順序。
+    每列：三欄；詞是 2–10 個漢字、字數在 scores 裡、不在 taken（基底、疊加層、名單其他列、兩個詞包、前面的列）；讀音的音節數等於字數、每個音節都是基底裡那個字（chars）的讀音；讀音不等於名字層既有列（names_readings，讀音以 - 連接）的讀音，
+    同讀音的撞車一次全部列出並中止（要在資料裡照契約的同讀音規則處理）。不符就中止並指出行號。分數＝scores[字數]（已含 NAMES_BONUS），同讀音第 k 個（k 從 0 起）再扣 k × SLANG_BEHIND。"""
+    rows, srcs, seen, taken = [], [], {}, set(taken)
+    clash = []
+    for n, line in creator_lines(path):
         fields = line.split("\t")
         ok = len(fields) == 3
         if ok:
             w, reading, note = fields
             syls = reading.split(" ")
-            ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and all(s in syllables for s in syls) and w not in taken
+            ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and all((c, s) in chars for c, s in zip(w, syls)) and w not in taken
         if not ok:
-            raise SystemExit(f"{path}:{n}: bad creator row (need word, reading, note; Han word not already in a lexicon layer; one known syllable per character): {line!r}")
+            raise SystemExit(f"{path}:{n}: bad creator row (need word, reading, note; Han word not already in a lexicon layer; one syllable that is a reading of its character): {line!r}")
         taken.add(w)
+        if "-".join(syls) in names_readings:
+            clash.append(f"{path}:{n}: {w} {reading}")
         k = seen.setdefault("-".join(syls), [])
         k.append(w)
         score = round(scores[len(w)] - (len(k) - 1) * SLANG_BEHIND, 8)
         rows += bo.overlay_rows(w, syls, score, CREATOR)
         srcs.append(f"{w}\t{CREATOR}\t{note}\t\t\n")
+    if clash:
+        raise SystemExit("creator readings equal to a names-layer row's reading (resolve in the data by the contract's same-reading rule):\n" + "\n".join(clash))
     return rows, srcs
 
 
 def append_creators(lex_dir=LEX, creators=CREATORS, acg_add=ACG_ADD, it_add=bo.IT_PACK, base=None, scores=None):
     """契約 §2 的追加模式：lex_dir 裡的 names-add.tsv／names-sources.tsv 去掉 creator 列後逐位元組保留，檔尾接 creators 的列，names.json 跟著改；
-    重跑是換掉舊的 creator 列。creators 不存在或沒有列時，三個檔不動。"""
+    重跑是換掉舊的 creator 列。creators 不存在或沒有列時，什麼都不碰（舊的 creator 列也留著）。"""
+    if not creator_lines(creators):
+        return 0
     path = lambda n: os.path.join(lex_dir, n)
 
     def read(n):
@@ -401,10 +418,8 @@ def append_creators(lex_dir=LEX, creators=CREATORS, acg_add=ACG_ADD, it_add=bo.I
     base = base or (bap.base_lexicon() if lex_dir == LEX else ime.Lexicon(path("mcbpmf-data.txt")))
     if scores is None:
         scores = {n: round(v + NAMES_BONUS, 8) for n, v in bap.scores(base).items()}
-    new_add, new_srcs = [], []
-    if os.path.exists(creators):
-        taken = known_words(lex_dir, acg_add) | bo.pack_words(it_add) | {l.split("\t")[1] for l in add}
-        new_add, new_srcs = creator_rows(creators, taken, scores, bo.base_syllables(base))
+    taken = known_words(lex_dir, acg_add) | bo.pack_words(it_add) | {l.split("\t")[1] for l in add}
+    new_add, new_srcs = creator_rows(creators, taken, scores, base_char_readings(base), {l.split("\t")[0] for l in add})
     out = {"names-add.tsv": "".join(add + new_add), "names-sources.tsv": "".join(srcs + new_srcs)}
     n = len({r.split("\t")[1] for r in new_add})
     manifest = json.loads(read("names.json"))
@@ -648,6 +663,8 @@ def main():
     urllib.request.install_opener(urllib.request.build_opener(_Redirect(a.nsi_commit)))
     files, manifest, col, unread, ldrop, check = build(NamesApi(a.cache, a.offline, a.nsi_commit), a.nsi_commit)
     write_all(files, manifest, a.out)
+    if creator_lines(CREATORS):         # 重建 = 重建 + 追加：不讓 creator 列在重建時消失
+        print(f"{append_creators(a.out)} creator words appended")
     os.makedirs(a.report, exist_ok=True)
     for name, text in (("collisions.txt", collisions_text(col, ldrop)), ("unreadable.txt", "".join(w + "\n" for w in unread)), ("check-readings.txt", "".join(check))):
         with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:
