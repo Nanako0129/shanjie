@@ -68,6 +68,21 @@ class Candidates(unittest.TestCase):
         self.assertEqual(cands, {"我就爛": {"統神"}, "你能拿我怎樣": {"統神"}, "不錯喔": {"統神"}})
         self.assertEqual(st["dropped_length"], 4)       # 好、啦、嗎 and the 11-character piece
 
+    def test_full_width_letters_and_digits_count_as_english_and_digits(self):
+        cands, st, _ = self.read("三小４\n\uff2a\uff4f\uff2a\uff4f立\n三小4\n正常詞\n")
+        self.assertEqual((cands, st["dropped_ascii"]), ({"正常詞": {"ptt"}}, 3))
+
+    def test_provenance_is_keyed_by_the_path_given_so_same_named_files_do_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for sub, text in (("a", "有人氣\n"), ("b", "好笑啦\n")):
+                os.makedirs(os.path.join(d, sub))
+                paths.append(os.path.join(d, sub, "cand.tsv"))
+                put(paths[-1], text)
+            cands, _, files = T.read_candidates(paths)
+        self.assertEqual(files, {paths[0]: IT.sha256_text("有人氣\n"), paths[1]: IT.sha256_text("好笑啦\n")})
+        self.assertEqual(cands, {"有人氣": {"cand"}, "好笑啦": {"cand"}})
+
     def test_a_string_with_two_sources_keeps_both(self):
         with tempfile.TemporaryDirectory() as d:
             a, b = os.path.join(d, "a.tsv"), os.path.join(d, "b.tsv")
@@ -106,6 +121,10 @@ class Prepare(unittest.TestCase):
         self.assertEqual(sorted(admitted), ["新詞新"])
         self.assertEqual((st["dedupe_lexicon"], st["dedupe_packs"]), (1, 1))
 
+    def test_a_net_slang_word_is_deduped_through_the_overlay_layer(self):
+        slang = next(r[0] for r in B.read_tsv(os.path.join(B.LEX, "slang-add.tsv")))      # its rows are in overlay-add.tsv (tag slang)
+        self.assertIn(slang, T.have_words())
+
     def test_pack_words_reads_every_pack_file_but_its_own(self):
         with tempfile.TemporaryDirectory() as d:
             put(os.path.join(d, "acg-add.tsv"), "a\t動漫詞\t-1\tacg\n")
@@ -123,9 +142,9 @@ class Prepare(unittest.TestCase):
 
 
 class Judge(unittest.TestCase):
-    def run_judge(self, admitted, xs, counts2, reading=None):
+    def run_judge(self, admitted, xs, counts2, reading=None, fs=None):
         reading = reading or {w: [f"s{ord(c)}" for c in w] for w in admitted}
-        return T.judge(admitted, reading, xs, counts2)
+        return T.judge(admitted, reading, xs, fs or {w: "書面" + w for w in admitted}, counts2)
 
     def test_fewer_than_x_is_dropped_more_than_x_is_kept(self):
         kept, dropped = self.run_judge({"少於者": (20, 5), "多於者": (60, 5), "同數者": (30, 5)}, {"少於者": "它拼的詞甲", "多於者": "它拼的詞乙", "同數者": "它拼的詞丙"},
@@ -144,13 +163,18 @@ class Judge(unittest.TestCase):
         kept, dropped = self.run_judge(adm, {"同音多": "拼詞", "同音少": "別的拼詞"}, {"拼詞": (90, 5)}, rd)
         self.assertEqual((kept, sorted((d[0], d[1]) for d in dropped)), ([], [("同音多", "x_not_fewer"), ("同音少", "same_reading")]))
 
-    def test_x_equal_to_the_candidate_is_already_right(self):
-        kept, dropped = self.run_judge({"打對詞": (50, 5)}, {"打對詞": "打對詞"}, {})
+    def test_first_in_both_profiles_is_already_right(self):
+        kept, dropped = self.run_judge({"打對詞": (50, 5)}, {"打對詞": "打對詞"}, {}, fs={"打對詞": "打對詞"})
         self.assertEqual((kept, [d[1] for d in dropped]), ([], ["already_right"]))
 
-    def test_x_missing_from_the_second_counts_stops(self):
-        with self.assertRaises(SystemExit):
+    def test_first_in_chat_but_not_in_formal_is_not_dropped_as_already_right(self):
+        kept, dropped = self.run_judge({"只聊天對": (50, 5)}, {"只聊天對": "只聊天對"}, {}, fs={"只聊天對": "書面的別字"})
+        self.assertEqual((kept, dropped), (["只聊天對"], []))        # no X to give way (counts2 is not even consulted), the pack helps the formal profile
+
+    def test_x_missing_from_the_second_counts_stops_with_a_mismatch_message(self):
+        with self.assertRaises(SystemExit) as e:
             self.run_judge({"詞詞": (50, 5)}, {"詞詞": "沒算到"}, {})
+        self.assertIn("does not match meme-x-strings.txt", str(e.exception))
 
 
 def run_main(*argv):
@@ -162,10 +186,11 @@ class Pipeline(unittest.TestCase):
     """The three stages through main(): candidates → counts → --emit-x → counts → final."""
 
     CAND = ("有人氣\t統神\n甘我屁事\t統神\n我就爛，你能拿我怎樣\t統神\n街頭字典詞\t街頭\n看板二詞\tptt\nJoJo立\t迷因Wiki\n已有詞\tptt\n同音多\tptt\n同音少\tptt\n"
-            "已打對\tptt\n")
+            "已打對\tptt\n只聊天對\tptt\n")
     C1 = {"有人氣": (30, 5), "甘我屁事": (12, 3), "我就爛": (40, 6), "你能拿我怎樣": (15, 4), "看板二詞": (99, 2), "已有詞": (99, 9), "同音多": (50, 5),
-          "同音少": (20, 5), "已打對": (60, 5)}
-    X = {"有人氣": "有人氣", "甘我屁事": "拼出詞乙", "我就爛": "拼出詞甲", "你能拿我怎樣": "拼出詞丙", "同音多": "拼出詞丁", "同音少": "拼出詞戊", "已打對": "已打對"}
+          "同音少": (20, 5), "已打對": (60, 5), "只聊天對": (45, 5)}
+    X = {"有人氣": "有人氣", "甘我屁事": "拼出詞乙", "我就爛": "拼出詞甲", "你能拿我怎樣": "拼出詞丙", "同音多": "拼出詞丁", "同音少": "拼出詞戊", "已打對": "已打對", "只聊天對": "只聊天對"}
+    FORMAL = {"有人氣": "有人氣", "已打對": "已打對"}      # first place in the formal profile: only these two are right in both profiles
     # X articles: 甲 < 40 keeps 我就爛; 乙 = 12 ties 甘我屁事 (12) and drops it; 丙 > 15 drops 你能拿我怎樣; 丁 < 50 keeps 同音多
     C2 = {"拼出詞甲": (5, 3), "拼出詞乙": (12, 3), "拼出詞丙": (80, 6), "拼出詞丁": (7, 3), "拼出詞戊": (1, 1), "有人氣": (30, 5), "已打對": (60, 5)}
 
@@ -179,7 +204,8 @@ class Pipeline(unittest.TestCase):
         for patch in (mock.patch.object(IT, "check_shipping_lm"), mock.patch.object(T, "have_words", lambda: frozenset({"已有詞"})),
                       mock.patch.object(T, "pack_words", lambda: frozenset()), mock.patch.object(B, "make_readings", fake_readings),
                       mock.patch.object(B, "scores", lambda base: dict(SC)), mock.patch.object(B, "base_lexicon", lambda: None),
-                      mock.patch.object(T, "decoder", lambda: fake_decoder(chat=self.X, formal={w: "書面不同" for w in self.X}))):
+                      mock.patch.object(T, "decoder", lambda: fake_decoder(chat=self.X, formal=self.FORMAL)),
+                      mock.patch.object(T, "MIN_WORDS", 1)):
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -213,6 +239,7 @@ class Pipeline(unittest.TestCase):
         self.stage2()
         rows = [l.split("\t") for l in get(os.path.join(self.work, "meme-x.tsv")).splitlines()]
         self.assertEqual({r[0]: r[2] for r in rows}, self.X)                    # chat X of every admitted candidate
+        self.assertEqual({r[0]: r[3] for r in rows}, {w: self.FORMAL.get(w, "？" + w) for w in self.X})
         self.assertNotIn("看板二詞", {r[0] for r in rows})                      # below the threshold: not decoded
         self.assertNotIn("已有詞", {r[0] for r in rows})                        # in the lexicon
         self.assertNotIn("街頭字典詞", {r[0] for r in rows})                    # no PTT count
@@ -222,20 +249,22 @@ class Pipeline(unittest.TestCase):
         meta = json.loads(get(os.path.join(self.work, "meme-x.json")))
         self.assertEqual(meta["meme-x.tsv"], IT.sha256_text(get(os.path.join(self.work, "meme-x.tsv"))))
 
-    def test_emit_x_decodes_in_the_chat_profile_only_so_a_different_formal_x_does_not_matter(self):
+    def test_x_is_the_chat_first_place_and_the_formal_one_is_only_a_fourth_column(self):
         seen = []
         self.stage1()
         with mock.patch.object(T, "decoder", lambda: fake_decoder(chat=self.X, formal={w: "書面不同" for w in self.X}, seen=seen)):
             run_main(*self.args("--emit-x", "--counts", self.c1))
-        self.assertEqual(set(seen), {("chat", False)})
-        self.assertNotIn("書面不同", get(os.path.join(self.work, "meme-x.tsv")))
+        self.assertEqual(set(seen), {("chat", False), ("formal", False)})
+        rows = [l.split("\t") for l in get(os.path.join(self.work, "meme-x.tsv")).splitlines()]
+        self.assertEqual({r[0]: (r[2], r[3]) for r in rows}, {w: (x, "書面不同") for w, x in self.X.items()})
+        self.assertNotIn("書面不同", get(os.path.join(self.work, "meme-x-strings.txt")))        # the second count is of the chat X strings only
 
     def test_final_stage_applies_the_first_place_rule(self):
         self.stage1()
         self.stage2()
         self.final()
         words = {l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()}
-        self.assertEqual(words, {"我就爛", "同音多"})
+        self.assertEqual(words, {"我就爛", "同音多", "只聊天對"})
         self.assertTrue(all(l.endswith("\tmeme") for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()))
         self.assertEqual(float(get(os.path.join(self.out, "meme-add.tsv")).splitlines()[0].split("\t")[2]), -4.0)       # the base score -7 plus BONUS 3
         dropped = {l.split("\t")[0]: l.split("\t")[1] for l in get(os.path.join(self.work, "dropped.tsv")).splitlines()[1:]}
@@ -255,7 +284,8 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(m["meme_x"], json.loads(get(os.path.join(self.work, "meme-x.json"))))
         self.assertEqual(m["candidate_stats"]["dropped_ascii"], 1)
         self.assertEqual(m["files"]["meme-add.tsv"]["sha256"], B.sha256_file(os.path.join(self.out, "meme-add.tsv")))
-        self.assertEqual(m["sources"], {"統神": 1, "ptt": 1})
+        self.assertEqual(m["sources"], {"統神": 1, "ptt": 2})
+        self.assertEqual(m["candidate_files"], {self.cand: B.sha256_file(self.cand)})
 
     def test_the_x_article_count_is_that_of_the_x_string_not_the_row(self):
         # 拼出詞甲 is counted as a string in the second file: 39 articles (< 40) keeps 我就爛, 40 drops it. The row 我就爛 itself has 40 in the first file.
@@ -290,6 +320,16 @@ class Pipeline(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.final()
 
+    def test_fewer_than_30_words_stops_before_anything_is_written_to_the_pack_dir(self):
+        self.stage1()
+        self.stage2()
+        with mock.patch.object(T, "MIN_WORDS", 30), self.assertRaises(SystemExit) as e:
+            self.final()
+        self.assertIsInstance(e.exception.code, str)                                            # a message, so the exit status is non-zero
+        self.assertIn("STOP", e.exception.code)
+        self.assertFalse(os.path.exists(self.out))
+        self.assertTrue(os.path.exists(os.path.join(self.work, "report.txt")))                 # the per-source numbers are still reported
+
     def test_rebuild_from_the_same_inputs_is_byte_identical(self):
         self.stage1()
         self.stage2()
@@ -303,40 +343,73 @@ class Pipeline(unittest.TestCase):
 
 
 class Collisions(unittest.TestCase):
-    """The (c) rule only protects acg/it pack words; a lexicon word it displaces is the first-place rule's business."""
+    """The (c) rule: a meme row that pushes an existing word (lexicon layer, anime or it pack) off first place on any emitted reading, in either profile, is dropped."""
 
-    def run_build(self, decode, packwords=frozenset(), have=frozenset(), words=("擠人詞", "安分詞")):
+    def run_build(self, decode, packwords=frozenset(), have=frozenset(), words=("擠人詞", "安分詞"), x=None, readings=fake_readings, collisions=(), counts=None):
+        """x: {word: (chat X, formal first place)}, default ('？'+word, '？'+word); every X is counted once in the second file."""
         cands = {w: {"s"} for w in words}
-        c1 = {w: (30, 5) for w in words}
-        _, reading, _, _, _ = T.prepare(cands, c1, have, packwords, fake_readings)
-        x = [(w, " ".join(r), "？" + w) for w, r in reading.items()]
-        c2 = {"？" + w: (1, 1) for w in words}
+        c1 = counts or {w: (30, 5) for w in words}
+        _, reading, _, _, _ = T.prepare(cands, c1, have, packwords, readings)
+        x = {w: (x or {}).get(w, ("？" + w, "？" + w)) for w in reading}
+        table = [(w, " ".join(r), *x[w]) for w, r in reading.items()]
+        c2 = {xc: (1, 1) for xc, _ in x.values()}
         with tempfile.TemporaryDirectory() as d:
-            return T.build(cands, c1, x, c2, decode, fake_readings, have, packwords, os.path.join(d, "none.tsv"), None, SC)
+            coll = os.path.join(d, "meme-collisions.tsv")
+            put(coll, "".join("\t".join(r) + "\n" for r in collisions))
+            return T.build(cands, c1, table, c2, decode, readings, have, packwords, coll, None, SC)
+
+    @staticmethod
+    def pack_words(files):
+        return {l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()}
 
     def test_a_meme_word_that_displaces_an_anime_or_it_pack_word_is_dropped(self):
         def decode(pairs, prof, meme=None):
-            return [w for w, _ in pairs] if meme else ["動漫詞" if w == "擠人詞" else "？" + w for w, _ in pairs]
-        files, m, col, dropped, unread, ldrop = self.run_build(decode, packwords=frozenset({"動漫詞"}))
-        self.assertEqual({l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()}, {"安分詞"})
-        self.assertEqual([(w, o) for _, w, o, _ in ldrop], [("擠人詞", "動漫詞")])
+            return [w for w, _ in pairs] if meme else ["動漫詞" if w == "擠人詞" and prof == "chat" else "？" + w for w, _ in pairs]
+        files, m, col, dropped, unread, ldrop = self.run_build(decode, packwords=frozenset({"動漫詞"}), x={"擠人詞": ("動漫詞", "？擠人詞")})
+        self.assertEqual(self.pack_words(files), {"安分詞"})
+        self.assertEqual([(w, o) for _, w, o, _ in ldrop], [("擠人詞", "動漫詞")])      # even where the first-place rule would have let X go: the earlier pack wins
         self.assertEqual(m["stages"]["dropped_by_c_rule"], 1)
 
-    def test_displacing_a_plain_lexicon_word_is_not_a_c_drop(self):
-        decode = lambda pairs, prof, meme=None: [("舊詞庫詞" if not meme else w) if w == "擠人詞" else ("？" + w if not meme else w) for w, _ in pairs]
-        files, m, col, dropped, unread, ldrop = self.run_build(decode, have=frozenset({"舊詞庫詞"}))
-        self.assertEqual({l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()}, {"擠人詞", "安分詞"})
+    def test_displacing_a_lexicon_word_that_is_x_in_the_chat_main_reading_is_the_first_place_rules_call(self):
+        decode = lambda pairs, prof, meme=None: [w for w, _ in pairs] if meme else ["舊詞庫詞" if w == "擠人詞" and prof == "chat" else "？" + w for w, _ in pairs]
+        files, m, col, dropped, unread, ldrop = self.run_build(decode, have=frozenset({"舊詞庫詞"}), x={"擠人詞": ("舊詞庫詞", "？擠人詞")})
+        self.assertEqual(self.pack_words(files), {"擠人詞", "安分詞"})
         self.assertEqual(ldrop, [])
 
+    def test_displacing_a_lexicon_word_in_the_formal_profile_is_dropped(self):
+        decode = lambda pairs, prof, meme=None: [w for w, _ in pairs] if meme else ["舊詞庫詞" if w == "擠人詞" and prof == "formal" else "？" + w for w, _ in pairs]
+        files, m, col, dropped, unread, ldrop = self.run_build(decode, have=frozenset({"舊詞庫詞"}), x={"擠人詞": ("？擠人詞", "舊詞庫詞")})
+        self.assertEqual(self.pack_words(files), {"安分詞"})
+        self.assertEqual([(w, o, p) for _, w, o, p in ldrop], [("擠人詞", "舊詞庫詞", "formal")])
+
+    def test_displacing_a_lexicon_word_that_is_not_the_chat_x_is_dropped(self):
+        # the existing word is first place in chat too, but it is not the X the first-place rule judged (X is a decoder-made string): not exempt
+        decode = lambda pairs, prof, meme=None: [w for w, _ in pairs] if meme else ["舊詞庫詞" if w == "擠人詞" and prof == "chat" else "？" + w for w, _ in pairs]
+        files, *_ = self.run_build(decode, have=frozenset({"舊詞庫詞"}), x={"擠人詞": ("？擠人詞", "？擠人詞")})
+        self.assertEqual(self.pack_words(files), {"安分詞"})
+
+    def test_a_sandhi_variant_row_that_displaces_a_lexicon_word_drops_the_word(self):
+        rd = lambda ws: {w: (["ㄅㄨˋ", "ㄉㄢˋ"], False) for w in ws}
+
+        def decode(pairs, prof, meme=None):
+            return [w for w, _ in pairs] if meme else ["舊詞庫詞" if syls[0] == "ㄅㄨˊ" else "？" + w for w, syls in pairs]
+        files, m, col, dropped, unread, ldrop = self.run_build(decode, have=frozenset({"舊詞庫詞"}), words=("不但",), readings=rd)
+        self.assertEqual(files["meme-add.tsv"], "")
+        self.assertEqual([(r, w, o) for r, w, o, _ in ldrop], [("ㄅㄨˊ ㄉㄢˋ", "不但", "舊詞庫詞")])
+
     def test_sandhi_rows_and_the_bonus_scores_come_from_the_shared_pack_rows(self):
-        cands, c1 = {"不但": {"s"}}, {"不但": (30, 5)}
         rd = lambda ws: {"不但": (["ㄅㄨˋ", "ㄉㄢˋ"], False)}
-        with tempfile.TemporaryDirectory() as d:
-            files, *_ = T.build(cands, c1, [("不但", "ㄅㄨˋ ㄉㄢˋ", "？不但")], {"？不但": (1, 1)}, fake_decoder(), rd, frozenset(), frozenset(),
-                               os.path.join(d, "none.tsv"), None, SC)
+        files, *_ = self.run_build(fake_decoder(), words=("不但",), readings=rd)
         rows = [l.split("\t") for l in files["meme-add.tsv"].splitlines()]
         self.assertEqual([r[0] for r in rows], ["ㄅㄨˋ-ㄉㄢˋ", "ㄅㄨˊ-ㄉㄢˋ"])
         self.assertEqual(float(rows[1][2]), -7.5)
+
+    def test_collisions_tsv_exclusions_are_applied_before_the_same_reading_winner_is_chosen(self):
+        rd = lambda ws: {w: (["a", "b", "c"], False) for w in ws}
+        files, m, col, dropped, *_ = self.run_build(fake_decoder(), words=("同音多", "同音少"), readings=rd, counts={"同音多": (50, 5), "同音少": (20, 5)},
+                                                    collisions=[("a b c", "同音少", "同音多", "理由")])
+        self.assertEqual(self.pack_words(files), {"同音少"})          # the excluded higher word does not block the lower one
+        self.assertEqual((dropped, m["stages"]["excluded_by_meme_collisions_tsv"]), ([], 1))
 
     def test_check_set_is_seeded_capped_and_skips_check_readings(self):
         info = {"order": [f"{c}字詞" for c in "甲乙丙丁戊己庚辛壬癸"], "reading": {}, "check": {}}
@@ -354,17 +427,27 @@ class DecodeCommand(unittest.TestCase):
             put(os.path.join(packs, "acg-add.tsv"), "k\t動漫詞\t-1\tacg\n")
             put(os.path.join(packs, "it-add.tsv"), "k\t資訊詞\t-1\tit\n")
             put(os.path.join(meme, "acg-add.tsv"), "k\t迷因詞\t-1\tmeme\n")
-            seen = {}
+            seen = []
 
-            def top1(pairs, prof, d, packs=None):
-                seen.update(packs=packs, prof=prof, it=get(os.path.join(d, "it-add.tsv")), acg=get(os.path.join(d, "acg-add.tsv")))
-                return ["x"]
-            with mock.patch.object(B, "top1", top1):
-                T.decoder(packs)([("詞", ["a"])], "chat", meme)
-            self.assertEqual(seen, {"packs": "acg,it", "prof": "chat", "it": "k\t資訊詞\t-1\tit\nk\t迷因詞\t-1\tmeme\n", "acg": "k\t動漫詞\t-1\tacg\n"})
-            os.remove(os.path.join(packs, "it-add.tsv"))
-            with self.assertRaises(SystemExit):
+            def run(cmd, **_):
+                d = cmd[cmd.index("--packs-dir") + 1]
+                seen.append((cmd, get(os.path.join(d, "it-add.tsv")), get(os.path.join(d, "acg-add.tsv"))))
+                put(cmd[cmd.index("--dump") + 1], "1\t1\t答案\t0\n")
+
+            with mock.patch.object(T.subprocess, "run", run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"), mock.patch.object(IT, "SHIP_ARGS", ["--ship-flag"]):
+                self.assertEqual(T.decoder(packs)([("詞", ["a"])], "formal", meme), ["答案"])
                 T.decoder(packs)([("詞", ["a"])], "chat")
+            cmd, it, acg = seen[0]
+            self.assertEqual((cmd[cmd.index("--packs") + 1], cmd[cmd.index("--profile") + 1], it, acg), ("acg,it", "formal", "k\t資訊詞\t-1\tit\nk\t迷因詞\t-1\tmeme\n", "k\t動漫詞\t-1\tacg\n"))
+            self.assertIn("--ship-flag", cmd)                                                    # the same shipping flags as the it pack's decoder
+            self.assertEqual(cmd[cmd.index("--threads") + 1], str(B.THREADS))
+            self.assertEqual(seen[1][1], "k\t資訊詞\t-1\tit\n")                                 # no meme rows when decoding the baseline
+
+    def test_a_missing_pack_file_stops_when_the_decoder_is_made(self):
+        with tempfile.TemporaryDirectory() as packs:
+            put(os.path.join(packs, "acg-add.tsv"), "")
+            with self.assertRaises(SystemExit):
+                T.decoder(packs)
 
 
 if __name__ == "__main__":
