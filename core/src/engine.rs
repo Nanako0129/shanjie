@@ -870,8 +870,10 @@ impl Engine {
         e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
         // Optional (english-next.md 2.3): absent leaves the feature off; a file that is there and does not parse is a load failure (a shipping error
         // must not switch the feature off unseen).
-        if let Ok(t) = std::fs::read_to_string(data_dir.join("english-next.tsv")) {
-            e.en_table = Some(Arc::new(EnglishTable::parse(&t).map_err(|_| EngineError::LoadFailed)?));
+        match std::fs::read_to_string(data_dir.join("english-next.tsv")) {
+            Ok(t) => e.en_table = Some(Arc::new(EnglishTable::parse(&t).map_err(|_| EngineError::LoadFailed)?)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(EngineError::LoadFailed), // there but unreadable (not UTF-8, permissions)
         }
         Ok(e)
     }
@@ -2224,7 +2226,8 @@ impl Engine {
     /// display: a lexicon word that ends in letters (卡拉OK) is no English token.
     fn english_before(&self, s: usize) -> Option<String> {
         let i = if s > 0 && is_space_unit(&self.syls[s - 1]) { s.checked_sub(2)? } else { s.checked_sub(1)? };
-        english_of(&self.syls[i]).map(str::to_ascii_lowercase)
+        // Contract 2.1: 2-32 letters (a Shift+letter, Space run makes a one-letter token; the table has none).
+        english_of(&self.syls[i]).filter(|w| (2..=32).contains(&w.len())).map(str::to_ascii_lowercase)
     }
 
     /// The best entry of every word the table names, built once per (lexicon, model); `None` without a table or a model.

@@ -98,6 +98,16 @@ fn the_key_sequence_makes_an_english_token() {
 }
 
 #[test]
+fn a_one_letter_token_is_no_english_word() {
+    // Shift+J, Space makes the token `_punct_J`; contract 2.1 takes 2-32 letters only, so even a table row for `j` stays unused.
+    let mut e = make(false, false);
+    e.set_english_next(Some(Arc::new(EnglishTable::parse("E\tj\t100\nW\tj\t水\t50\n").unwrap())));
+    let outs = run(&mut e, "S-j _");
+    assert_eq!(e.digits_syls(), ["_punct_J"]);
+    assert!(row(&outs).is_empty());
+}
+
+#[test]
 fn the_row_behind_joe() {
     let mut e = make(true, false);
     // After the Space, before any Zhuyin: the table's words the lexicon has, best P(w | e) first; the word the lexicon lacks is skipped.
@@ -169,6 +179,9 @@ fn a_table_that_does_not_parse_is_an_error() {
     }
     assert!(Engine::new(&tmp, Layout::Standard).is_ok());
     std::fs::copy(&f, tmp.join("english-next.tsv")).unwrap();
+    assert!(Engine::new(&tmp, Layout::Standard).is_err());
+    // Not UTF-8: there but unreadable, also a load failure (not a silent off).
+    std::fs::write(tmp.join("english-next.tsv"), b"E\tjoe\t5\n\xff\xfe\n").unwrap();
     assert!(Engine::new(&tmp, Layout::Standard).is_err());
     std::fs::write(tmp.join("english-next.tsv"), TABLE).unwrap();
     assert!(Engine::new(&tmp, Layout::Standard).is_ok());
