@@ -1274,7 +1274,8 @@ public final class Session {
     /// The single place a key reaches the core.
     func send(_ key: ShanjieKey) -> Bool {
         guard let engine = shell.engine else { return false }
-        let paused = applyLearningGate(engine)
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once, for the gate and the left context's terminal check
+        let paused = applyLearningGate(engine, bundle: bundle)
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
@@ -1283,7 +1284,7 @@ public final class Session {
         if !shell.composing {
             spacingPrev = nil
             if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
-                let read = paused ? nil : leftContext()
+                let read = paused ? nil : leftContext(bundle: bundle)
                 spacingPrev = read?.last
                 let code = engine.setLeftContext(read?.text)
                 if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }

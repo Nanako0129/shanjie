@@ -16,19 +16,21 @@ public enum LearningPause: Equatable, Sendable {
 /// Section 2: the left context the shell may pass to the core (docs/contracts/context-return.md section 1: the raw text of the
 /// same message, at most `maxGraphemes`; terminal apps only the Han tail).
 enum LeftContext {
-    /// UTF-16 units requested before the insertion point, and the most of a reply that is looked at: 64 graphemes are at most about
-    /// 128 units, the rest is room for combining marks and emoji (context-return section 1).
+    /// UTF-16 units requested before the insertion point, and the most of a reply that is looked at (context-return section 1). A CJK
+    /// or ASCII character is one unit (𠮷 two), so 256 units hold more than 64 of them; emoji are longer and fewer fit: 256 units hold
+    /// 64 of 👍🏽 (four units) and 32 of the ZWJ family 👨‍👩‍👧 (eight units), as LearningTests measures.
     static let maxUTF16 = 256
     /// Graphemes passed to the core.
     static let maxGraphemes = 64
 
     /// Terminal apps get only `han`, as before (context-return section 1; user decision 2026-10-25, security review P2-1): a terminal
     /// line holds commands and their output. com.apple.Terminal and com.googlecode.iterm2 were read from the apps' Info.plist
-    /// (CFBundleIdentifier) on the maintainer's Mac on 2026-10-25; the others are the IDs the contract lists, not checked on a machine.
+    /// (CFBundleIdentifier) on the maintainer's Mac on 2026-10-25; org.alacritty was corrected in review (PR #294); the other five are
+    /// the IDs the contract lists, not checked against an installed app or a published Info.plist.
     /// An editor with a built-in terminal is not here: the panel has the editor's bundle ID (a known limit, out of scope).
     static let terminals: Set<String> = [
         "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.github.wez.wezterm",
-        "io.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
+        "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
     ]
 
     /// The range to request: at most `maxUTF16` units ending at `insertion`.
@@ -220,7 +222,13 @@ extension Session {
     /// engine starts disabled). Returns whether learning is paused.
     @discardableResult
     func applyLearningGate(_ engine: CoreEngine) -> Bool {
-        let paused = learningPause != nil
+        applyLearningGate(engine, bundle: client.bundleIdentifier)
+    }
+
+    /// The gate for `bundle`, this client's bundle ID as the caller read it (a synchronous IPC, read once per key by `send`).
+    @discardableResult
+    func applyLearningGate(_ engine: CoreEngine, bundle: String?) -> Bool {
+        let paused = shell.learningPause(bundle: bundle) != nil
         let code = engine.setLearning(!paused)
         if code != 0 { Log.shell.error("shanjie_engine_set_learning failed, code \(code)") }
         return paused
@@ -232,19 +240,18 @@ extension Session {
     /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
     /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
     ///
-    /// Returns what goes to the core (context-return section 1: `LeftContext.raw`, or `han` for a terminal app), the trailing Han
-    /// characters, and, from the same read, the raw last character for cjk-spacing section 1. Only in memory: never stored or logged.
-    /// Changes no state.
-    func leftContext() -> (text: String?, han: String?, last: Character?) {
+    /// Returns what goes to the core (context-return section 1: `LeftContext.raw`, or `LeftContext.han` for a terminal app; `bundle` is
+    /// this client's bundle ID as the gate read it, no second IPC) and, from the same read, the raw last character for cjk-spacing
+    /// section 1. Only in memory: never stored or logged. Changes no state.
+    func leftContext(bundle: String?) -> (text: String?, last: Character?) {
         let selected = client.selectedRange(), marked = client.markedRange()
-        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil, nil) }
+        guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
         let range = LeftContext.range(insertion: selected.location)
-        guard range.length > 0, let reply = client.attributedSubstring(from: range)?.string else { return (nil, nil, nil) }
+        guard range.length > 0, let reply = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
         let (text, clamped) = LeftContext.clamp(reply)
         let truncated = clamped || range.location > 0
-        let han = LeftContext.han(text, truncated: truncated)
-        let terminal = client.bundleIdentifier.map(LeftContext.terminals.contains) ?? false
-        return (terminal ? han : LeftContext.raw(text, truncated: truncated), han, text.last)
+        let terminal = bundle.map(LeftContext.terminals.contains) ?? false
+        return (terminal ? LeftContext.han(text, truncated: truncated) : LeftContext.raw(text, truncated: truncated), text.last)
     }
 
     /// The menu (s3b section 13.2, sw section 3 and S4 sections 3-4), in order.

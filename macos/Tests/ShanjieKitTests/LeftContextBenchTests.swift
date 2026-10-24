@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/contracts/context-return.md section 4, the latency stop condition: the first key of a composition, which reads the left
-/// context, passes it to the core and sends the key (`Session.send`: the learning gate, `leftContext()`, `setLeftContext`, the first
+/// context, passes it to the core and sends the key (`Session.send`: the learning gate, the left-context read, `setLeftContext`, the first
 /// `engine.key`, and applying its output to the fake client), 1,000 times with a 64-character mixed Chinese and English text before
 /// the insertion point; prints p50 / p95 / max and the load. A measurement, not a check, so it runs only with
 /// `SHANJIE_BENCH=1 swift test -c release --package-path macos --filter testBenchmarkLeftContext`. The file uses only what main
