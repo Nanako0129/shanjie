@@ -38,6 +38,7 @@ test-python:
 	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
 	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
+	python3 -W ignore -m unittest tools/test_build_meme_pack.py
 	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
 	python3 experiments/s2-classes/test_cluster.py
 	python3 -m unittest discover -s experiments/s7a-tinylm -p test_export_sjtl.py
