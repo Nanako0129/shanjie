@@ -7,6 +7,8 @@ Wikidata、中文維基與教育部學校名錄，產生一般詞庫層 data/lex
       python3 tools/build_names.py --nsi-commit SHA --offline   只用快取，缺了就中止
       --cache DIR  --out DIR  --report DIR   快取（預設 ~/.cache/shanjie/sources/names）、輸出、報告（預設 build/names）
       python3 tools/build_names.py --check    只檢查已提交的 names-add.tsv 和詞庫其他四份檔沒有交集（make test 也跑）
+      python3 tools/build_names.py --append-creators   讀 names-creators.tsv，在 names-add.tsv／names-sources.tsv 檔尾追加（或換掉）creator 列、更新 names.json
+                                                       （docs/contracts/names-creators.md §2；不連網、不讀快取、不動既有列）
 
 網路只連 zh.wikipedia.org／www.wikidata.org 的 /w/api.php、raw.githubusercontent.com（只限 NSI 那個 commit）、
 data.gov.tw 與 stats.moe.gov.tw 的名錄 CSV；限速、User-Agent、maxlag 沿用 build_acg_pack.Api。請求 3,000 個、快取 500 MB 為上限。
@@ -345,6 +347,99 @@ def below_pack(rows, rank, inpack, pack):
     return out
 
 
+# ---------------------------------------------------------------- 創作者名字：只在檔尾追加（docs/contracts/names-creators.md §2）
+
+CREATORS = os.path.join(LEX, "names-creators.tsv")
+CREATOR = "creator"
+# 同一個讀音有好幾個創作者名字時，檔案裡排前面的（PTT 文章數多的）留第一，後面的扣 k × SLANG_BEHIND 只當候選；和網路用語同一個值（匯入，不重複定義）。
+SLANG_BEHIND = bo.SLANG_BEHIND
+
+
+def _lines(text):
+    """保留每一行的原始位元組（含行尾）；不用 splitlines（它也在 U+2028 等字元上斷行）。"""
+    return re.findall(r"[^\n]*\n|[^\n]+", text)
+
+
+def creator_lines(path):
+    """names-creators.tsv 的資料行（略過 # 開頭與空行；CRLF 的行尾 \r 去掉）→ [(行號, 行)]；檔案不存在時是空的。"""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8-sig") as f:
+        lines = [l.rstrip("\r") for l in f.read().split("\n")]
+    return [(n, l) for n, l in enumerate(lines, 1) if not l.startswith("#") and l.strip()]
+
+
+def base_char_readings(base):
+    """{(單字, 音節)}：基底裡單字詞的讀音。"""
+    return {(w, syls[0]) for syls, ws in base.by_reading.items() if len(syls) == 1 for w, _ in ws}
+
+
+def creator_rows(path, taken, scores, chars, names_readings=frozenset()):
+    """names-creators.tsv（詞、讀音（音節以空白分隔）、備註；# 開頭與空行略過）→ (names-add.tsv 的列, names-sources.tsv 的列)，照檔案順序。
+    每列：三欄；詞是 2–10 個漢字、字數在 scores 裡、不在 taken（基底、疊加層、名單其他列、兩個詞包、前面的列）；讀音的音節數等於字數、每個音節都是基底裡那個字（chars）的讀音；讀音不等於名字層既有列（names_readings，讀音以 - 連接）的讀音，
+    同讀音的撞車一次全部列出並中止（要在資料裡照契約的同讀音規則處理）。不符就中止並指出行號。分數＝scores[字數]（已含 NAMES_BONUS），同讀音第 k 個（k 從 0 起）再扣 k × SLANG_BEHIND。"""
+    rows, srcs, seen, taken = [], [], {}, set(taken)
+    clash = []
+    for n, line in creator_lines(path):
+        fields = line.split("\t")
+        ok = len(fields) == 3
+        if ok:
+            w, reading, note = fields
+            syls = reading.split(" ")
+            ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and all((c, s) in chars for c, s in zip(w, syls)) and w not in taken
+        if not ok:
+            raise SystemExit(f"{path}:{n}: bad creator row (need word, reading, note; Han word not already in a lexicon layer; one syllable that is a reading of its character): {line!r}")
+        taken.add(w)
+        if "-".join(syls) in names_readings:
+            clash.append(f"{path}:{n}: {w} {reading}")
+        k = seen.setdefault("-".join(syls), [])
+        k.append(w)
+        score = round(scores[len(w)] - (len(k) - 1) * SLANG_BEHIND, 8)
+        rows += bo.overlay_rows(w, syls, score, CREATOR)
+        srcs.append(f"{w}\t{CREATOR}\t{note}\t\t\n")
+    if clash:
+        raise SystemExit("creator readings equal to a names-layer row's reading (resolve in the data by the contract's same-reading rule):\n" + "\n".join(clash))
+    return rows, srcs
+
+
+def append_creators(lex_dir=LEX, creators=CREATORS, acg_add=ACG_ADD, it_add=bo.IT_PACK, base=None, scores=None):
+    """契約 §2 的追加模式：lex_dir 裡的 names-add.tsv／names-sources.tsv 去掉 creator 列後逐位元組保留，檔尾接 creators 的列，names.json 跟著改；
+    重跑是換掉舊的 creator 列。creators 不存在或沒有列時，什麼都不碰（舊的 creator 列也留著）。"""
+    if not creator_lines(creators):
+        return 0
+    path = lambda n: os.path.join(lex_dir, n)
+
+    def read(n):
+        with open(path(n), encoding="utf-8", newline="") as f:
+            return f.read()
+    add, srcs = _lines(read("names-add.tsv")), _lines(read("names-sources.tsv"))
+    add = [l for l in add if l.split("\t")[3].rstrip("\n") != CREATOR]
+    srcs = [l for l in srcs if l.split("\t")[1] != CREATOR]
+    base = base or (bap.base_lexicon() if lex_dir == LEX else ime.Lexicon(path("mcbpmf-data.txt")))
+    if scores is None:
+        scores = {n: round(v + NAMES_BONUS, 8) for n, v in bap.scores(base).items()}
+    taken = known_words(lex_dir, acg_add) | bo.pack_words(it_add) | {l.split("\t")[1] for l in add}
+    new_add, new_srcs = creator_rows(creators, taken, scores, base_char_readings(base), {l.split("\t")[0] for l in add})
+    out = {"names-add.tsv": "".join(add + new_add), "names-sources.tsv": "".join(srcs + new_srcs)}
+    n = len({r.split("\t")[1] for r in new_add})
+    manifest = json.loads(read("names.json"))
+    old = manifest["sources"].pop(CREATOR, 0)
+    if old or n:                        # 追加前後都沒有 creator 列時 names.json 原樣不動
+        if n:
+            manifest["sources"][CREATOR] = n
+        manifest["words"] += n - old
+        manifest["rows"] = out["names-add.tsv"].count("\n")
+        manifest["files"] = dict(manifest["files"], **{k: {"sha256": hashlib.sha256(t.encode()).hexdigest(), "bytes": len(t.encode()), "lines": t.count("\n")} for k, t in out.items()})
+        manifest["version"] = manifest["version"].rsplit("-", 1)[0] + "-" + manifest["files"]["names-add.tsv"]["sha256"][:8]
+        out["names.json"] = json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+    for name, text in out.items():
+        if text != read(name):          # 沒有變的檔不碰
+            with open(path(name) + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            os.replace(path(name) + ".tmp", path(name))
+    return n
+
+
 # ---------------------------------------------------------------- 主流程
 
 def build(api, nsi_commit, manual_tsv=MANUAL, readings_tsv=READINGS_TSV, collisions_tsv=COLLISIONS_TSV, have=None, decode=decode, decode_acg=decode_acg, acg_add=ACG_ADD, readings=bap.make_readings,
@@ -554,7 +649,11 @@ def main():
     ap.add_argument("--offline", action="store_true")
     ap.add_argument("--nsi-commit", default=NSI_COMMIT)
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--append-creators", action="store_true")
     a = ap.parse_args()
+    if a.append_creators:
+        print(f"{append_creators()} creator words in names-add.tsv")
+        return
     if a.check:
         check_committed()
         print("names-add.tsv shares no word with the other four lexicon files")
@@ -564,6 +663,11 @@ def main():
     urllib.request.install_opener(urllib.request.build_opener(_Redirect(a.nsi_commit)))
     files, manifest, col, unread, ldrop, check = build(NamesApi(a.cache, a.offline, a.nsi_commit), a.nsi_commit)
     write_all(files, manifest, a.out)
+    if creator_lines(CREATORS):         # 重建 = 重建 + 追加：不讓 creator 列在重建時消失
+        if os.path.abspath(a.out) == os.path.abspath(LEX):
+            print(f"{append_creators(a.out)} creator words appended")
+        else:                           # append_creators reads the base and layers from its lex_dir: another --out has none of them
+            print(f"NOTE: --out {a.out} is not {LEX}: creator rows NOT appended; run --append-creators on the real lexicon directory")
     os.makedirs(a.report, exist_ok=True)
     for name, text in (("collisions.txt", collisions_text(col, ldrop)), ("unreadable.txt", "".join(w + "\n" for w in unread)), ("check-readings.txt", "".join(check))):
         with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:
