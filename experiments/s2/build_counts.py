@@ -201,12 +201,13 @@ def fold(text):
 def text_runs(line, conv, trad_tw_phrases=True):
     """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple.
     trad_tw_phrases: see convert()."""
-    return HAN.findall(convert(line, *conv, **({} if trad_tw_phrases else {"trad_tw_phrases": False})))   # default: the call exactly as before
+    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases))
 
 
 def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
-    The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8)."""
+    The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8).
+    trad_tw_phrases: see convert(); a counting run and the guard that scans it must pass the same value."""
     for s in article_sentences(raw, conv, mw, mwconv, trad_tw_phrases):
         yield from HAN.findall(s)
 
@@ -222,7 +223,7 @@ def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
     for pat, rep in MARKUP:
         t = pat.sub(rep, t)
     for s in SENT.findall(t):
-        yield s if mw else convert(s, *conv, **({} if trad_tw_phrases else {"trad_tw_phrases": False}))
+        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases)
 
 
 def articles(limit, dump=None):
@@ -328,23 +329,24 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def guard_matcher(rows):
+def guard_matcher(rows, trad_tw_phrases=True):
     """--holdout-guard (docs/contracts/holdout-refresh.md section 8), called once in main() before any Pool exists: None when off, else the
     Matcher over the held-out rows (`rows` = row files; empty = every .txt under eval/holdout/). Prints how many rows were loaded and skipped.
+    trad_tw_phrases must be the counter's own setting, so the patterns cover the text that is actually counted.
     A bad rows file stops here (SystemExit, message = path, line, field count only), never inside a worker initializer."""
     if rows is None:
         return None
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import holdout_guard
     try:
-        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv())
+        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv(), trad_tw_phrases)
     except (holdout_guard.GuardError, OSError) as e:
         sys.exit(f"holdout-guard: {e}")
     print(f"holdout-guard: {loaded} rows loaded, {skipped} skipped as shorter than {holdout_guard.MIN_LEN} characters", flush=True)
     return matcher
 
 
-def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None):
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None, trad_tw_phrases=True):
     """holdout_guard: None, or the Matcher guard_matcher() built in main (already validated)."""
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
@@ -366,6 +368,7 @@ def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_gu
         _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
     _W["guard"] = holdout_guard
+    _W["trad_tw"] = trad_tw_phrases
 
 
 def run_expected(run):
@@ -403,7 +406,7 @@ def _count(texts):
     guard, skipped = _W.get("guard"), 0
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
-        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv"), trad_tw_phrases=False):   # SJ-LM-7 §2.2：繁體句不套 TWPhrases
+        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv"), trad_tw_phrases=_W.get("trad_tw", True)):
             if len(run) < 2:
                 continue
             if guard is not None and guard.any(fold(run)):
@@ -452,6 +455,7 @@ def main():
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
+    ap.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 契約 §2.2：繁體句不套 OpenCC TWPhrases（「插件」不換成「外掛」）；預設關＝model-v6 的行為。--holdout-guard 的比對也跟著這個設定")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
     ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數（契約 holdout-refresh §8）；不給檔＝eval/holdout/ 底下全部 .txt")
     a = ap.parse_args()
@@ -459,12 +463,12 @@ def main():
         ap.error("--expected 不算 trigram")
     if a.extra_lexicon and not a.expected:
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
-    guard = guard_matcher(a.holdout_guard)
+    guard = guard_matcher(a.holdout_guard, not a.no_trad_tw_phrases)
     load_conv()   # in the parent first: a missing or wrong OpenCC file stops here, not in every Pool worker's initializer (which respawns forever)
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = skipped = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard, not a.no_trad_tw_phrases)) as pool:
         for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(articles(a.articles))):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200
             if arts % 10000 == 0:

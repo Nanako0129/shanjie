@@ -56,7 +56,7 @@ python3 experiments/sj-lm-7/moore_lewis.py score --in-domain <打分集合.txt> 
 計數（繁體句不套 `TWPhrases`）：
 
 ```sh
-S2_WORK=<WORK> python3 experiments/s2/build_counts.py --articles 200000 --procs <N> --expected --extra-lexicon <計數詞表>   # 維基：已固定不套
+S2_WORK=<WORK> python3 experiments/s2/build_counts.py --no-trad-tw-phrases --articles 200000 --procs <N> --expected --extra-lexicon <計數詞表>   # 不帶旗標＝model-v6 的行為
 S2_WORK=<WORK> python3 experiments/s2/build_counts_text.py --no-trad-tw-phrases --expected --extra-lexicon <計數詞表> <OUT.pkl> <口語檔>…
 python3 experiments/s2/build_tune.py --train-only-new-conv       # 只重寫 colloquial-train.txt；cvtune 的抽樣與參考句不動；印出 SHA-256
 ```
