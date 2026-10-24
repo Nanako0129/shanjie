@@ -259,9 +259,10 @@ jobs:
       - name: English word list builder (Python)
         run: python3 -m unittest tools/test_build_english_words.py
 
-      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps).
-      - name: Overlay manual words (Python)
-        run: python3 -m unittest tools/test_build_overlay.py
+      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps); the
+      # Moedict readings and supplement source (SJ-LM-7 contract 2.1a, 2.3) and tools/readings.py rule 3b on synthetic input.
+      - name: Overlay manual words and readings (Python)
+        run: python3 -W ignore -m unittest tools/test_build_overlay.py tools/test_readings.py
 
       # docs/contracts/colloquial-term.md section 3.6: the attribution list builder (per-source sums, the stop conditions), synthetic input.
       - name: Colloquial attribution list (Python)
