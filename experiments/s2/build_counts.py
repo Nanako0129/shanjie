@@ -164,14 +164,16 @@ def is_simplified(text):
     return (m > 0 and t == 0) or sum(c in SIMP_ONLY for c in text) > t
 
 
-def convert(text, phrase, char, maxp):
+def convert(text, phrase, char, maxp, trad_tw_phrases=True):
     """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照。
     其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞（TWPhrases），
-    最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。"""
+    最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。
+    trad_tw_phrases=False（SJ-LM-7 契約 §2.2，計數用）：繁體句不套 TWPhrases，只剩字形層（簡體專用字、POST_TRAD 的 VARIANTS 與台灣字形），
+    「插件」不會被換成「外掛」；簡體句不變。預設 True＝原行為，holdout_guard.py、build_digits.py 與其他呼叫者不傳。"""
     simp = is_simplified(text)
     # S2f 修訂一 6.2.2：TWPhrases 之前不套台灣字形或 VARIANTS（OpenCC 的順序），鍵寫成 OpenCC 字形的台灣用詞才對得到
     text = _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR) if simp else _longest(text, phrase, maxp, char)
-    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
+    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE and (simp or trad_tw_phrases) else text
     table = POST_SIMP if simp else POST_TRAD   # 喫→吃 也在 TW_VARIANTS 裡，S2n 的「輸入有喫就保留」規則拿掉
     return _longest(text, PROTECT if simp else PROTECT_TRAD, PROTECT_MAXP[0], table)   # 保護詞原樣保留，其餘逐字套表
 
@@ -196,19 +198,20 @@ def fold(text):
     return "".join(MERGE.get(c, c) for c in text)
 
 
-def text_runs(line, conv):
-    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple."""
-    return HAN.findall(convert(line, *conv))
+def text_runs(line, conv, trad_tw_phrases=True):
+    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple.
+    trad_tw_phrases: see convert()."""
+    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases))
 
 
-def article_runs(raw, conv, mw=None, mwconv=None):
+def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
     The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8)."""
-    for s in article_sentences(raw, conv, mw, mwconv):
+    for s in article_sentences(raw, conv, mw, mwconv, trad_tw_phrases):
         yield from HAN.findall(s)
 
 
-def article_sentences(raw, conv, mw=None, mwconv=None):
+def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
     """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
     HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
     t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
@@ -219,7 +222,7 @@ def article_sentences(raw, conv, mw=None, mwconv=None):
     for pat, rep in MARKUP:
         t = pat.sub(rep, t)
     for s in SENT.findall(t):
-        yield s if mw else convert(s, *conv)
+        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases)
 
 
 def articles(limit, dump=None):
@@ -400,7 +403,7 @@ def _count(texts):
     guard, skipped = _W.get("guard"), 0
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
-        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv")):
+        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv"), trad_tw_phrases=False):   # SJ-LM-7 §2.2：繁體句不套 TWPhrases
             if len(run) < 2:
                 continue
             if guard is not None and guard.any(fold(run)):

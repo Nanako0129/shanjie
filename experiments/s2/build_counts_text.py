@@ -27,6 +27,7 @@ def main(argv=None):
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2）；不算 trigram")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式的檔加進斷詞詞庫，可給多次")
     ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數；不給檔＝eval/holdout/ 底下全部 .txt。放在位置參數之後（或用 -- 隔開）")
+    ap.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 契約 §2.2：繁體句不套 OpenCC TWPhrases（「插件」不換成「外掛」）；預設關＝和 model-v6 相同。build_counts.py 的維基計數已固定這樣做")
     ap.add_argument("out")
     ap.add_argument("paths", nargs="+")
     a = ap.parse_args(argv)
@@ -39,7 +40,7 @@ def main(argv=None):
     uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for p in paths:
         for s in lines(p):
-            for run in bc.text_runs(s, conv):
+            for run in bc.text_runs(s, conv, trad_tw_phrases=not a.no_trad_tw_phrases):
                 if len(run) < 2:
                     continue
                 if guard is not None and guard.any(bc.fold(run)):

@@ -57,7 +57,7 @@ test-python:
 	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
 	cd experiments/digits && python3 -W ignore -m unittest test_digits
-	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py experiments/s2/test_build_tune.py
+	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py experiments/s2/test_build_tune.py experiments/s2/test_trad_phrases.py
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
