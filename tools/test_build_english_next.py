@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -164,10 +165,17 @@ class Build(unittest.TestCase):
         self.assertEqual(es(out), {"amy": 1, "joe": 1})
         self.assertEqual(rep["films"], 2)
 
-    def test_a_single_subtitle_segment_counts_but_gives_no_spread_unit(self):
+    def test_a_single_subtitle_segment_is_a_stop_and_a_raw_zip_reads_as_films(self):
         s = self.text_file("s.txt.gz", ["Joe好", "Joe好", "Joe好"])
-        out, rep = self.build(subs=s)
-        self.assertEqual((rep["films"], rep["e"], rep["events_by_source"]), (1, 0, {"subs": 3}))   # three events, but no unit: not admitted
+        with self.assertRaises(SystemExit):
+            self.build(subs=s)
+        z = os.path.join(self.dir, "zh_tw.zip")
+        doc = '<?xml version="1.0"?>\n<document id="1">\n  <s id="1">\n    <time id="T1S" value="00:00:01,000" />\nJoe好\n  </s>\n</document>\n'
+        with zipfile.ZipFile(z, "w") as f:
+            for i in (1, 2, 3):
+                f.writestr(f"OpenSubtitles/raw/zh_tw/2000/{i}/{i}.xml", doc)
+        out, rep = self.build(subs=z, kw=dict(min_units=3))
+        self.assertEqual((rep["films"], es(out)), (3, {"joe": 3}))
         s2 = self.text_file("s2.txt.gz", ["Joe好", "", "Joe好", "", "Joe好"])
         out, rep = self.build(subs=s2, kw=dict(min_units=3))
         self.assertEqual(es(out), {"joe": 3})                                        # three films, three units

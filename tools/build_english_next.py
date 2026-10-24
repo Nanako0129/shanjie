@@ -8,9 +8,10 @@ Sources (each an optional path; the raw input, read BEFORE the cleaning that dro
   --g0v FILE             the g0v #rand0m source file as UTF-8 text, one message per line, x5, message.
   --ptt DIR              <board>/<article>.html as ptt_clean parses it (body, merged pushes; no p2clean). Pushes x5, bodies x1, unit = board.
                          Only articles with sha256(id)[0] % 8 != 0 (7/8) count; the rest is the measurement bucket of section 3.
-  --subs FILE.gz         OPUS mono zh_tw.txt.gz, x1, film = clean_subs.clean's blank-line segment. Only clean_subs.sentences, strip_cue,
-                         URL removal, and dropping sentences with >= MIN_ENGLISH_WORDS English words (a parallel line is a translation). A
-                         file with a single segment counts but gives no spread unit.
+  --subs FILE           OPUS raw/zh_tw.zip (read by clean_subs.read_lines: one blank line after each film id; plain text with blank lines
+                         between films also works), x1, film = blank-line segment. Only clean_subs.sentences, strip_cue, URL removal, and
+                         dropping sentences with >= MIN_ENGLISH_WORDS English words (a parallel line is a translation). Fewer than two films
+                         is a STOP (the mono file has no blank line).
 Quoted PTT lines and signatures go in ptt_clean.body; URLs are cut out of every source and act as a boundary.
 
 An English word e: 2-32 ASCII letters, not touching a letter or digit, lower-cased. A Han run after it (at most one half-width space) is one
@@ -203,9 +204,10 @@ def lines_of(path):
 
 
 def films_of(path):
-    """Subtitle lines grouped into films: the runs of non-empty lines between blank lines (clean_subs.clean)."""
+    """Subtitle lines grouped into films: the runs of non-empty lines between blank lines (clean_subs.clean). clean_subs.read_lines reads the
+    OPUS raw zip (one blank line after each film id) as well as plain text."""
     film = []
-    for line in lines_of(path):
+    for line in CS.read_lines(path):
         if line.strip():
             film.append(line)
         elif film:
@@ -244,8 +246,8 @@ def build(lexicon, src, jobs=1, min_events=MIN_EVENTS, min_boards=MIN_BOARDS, mi
         _init(lexicon)
         for b in batches(src):
             total.merge(work(b))
-    if total.films == 1:
-        total.units.pop("subs", None)        # one segment: counted, but it gives no spread unit
+    if src.get("subs") and total.films < 2:   # contract 1: fewer than two films means the wrong input (the mono file has no blank line)
+        raise SystemExit("STOP: the subtitle input shows fewer than two films (use the OPUS raw/zh_tw.zip)")
     keep, blocked = [], 0
     for e, n in total.ev.items():
         boards, units = len(total.boards.get(e, ())), sum(c[e] for c in total.units.values())
