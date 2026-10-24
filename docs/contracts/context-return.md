@@ -1,6 +1,6 @@
 # 契約：前文回傳（context-return）＋英文前文第二段
 
-狀態：**過審**（2026-10-25 收尾審查 READY）。修訂三（第二次 REVISE 一項處置：先去掉被切斷的第一個 grapheme，再找換行與 NUL，和今天的 `han` 同順序；之後收尾審查）。修訂二（plan-verifier 第一次 REVISE 五項：宣告 L 時模型實際收到的前文、英文情境的比對基準、english-next 核心是前提、延遲的量法、PLAN 第 37 行）。修訂一（security-reviewer 實作前審查：沒有 P0／P1，P2 四項、P3 六項全部採納，處置在 §6；P2-1 由維護者選擇題決定「終端機只收漢字」）。下一步 plan-verifier。
+狀態：**過審**（2026-10-25 收尾審查 READY；實作時補記兩條：Esc 只清未完成符號時的殘留、空組字區不出英文預測列）。修訂三（第二次 REVISE 一項處置：先去掉被切斷的第一個 grapheme，再找換行與 NUL，和今天的 `han` 同順序；之後收尾審查）。修訂二（plan-verifier 第一次 REVISE 五項：宣告 L 時模型實際收到的前文、英文情境的比對基準、english-next 核心是前提、延遲的量法、PLAN 第 37 行）。修訂一（security-reviewer 實作前審查：沒有 P0／P1，P2 四項、P3 六項全部採納，處置在 §6；P2-1 由維護者選擇題決定「終端機只收漢字」）。下一步 plan-verifier。
 
 ## 0. 起因、已定的事、要做到什麼
 
@@ -35,7 +35,8 @@
   - 不是 UTF-8 時照今天回 2 並清空（`self.left` 與 `self.left_full` 都清）。
   - **清除**：`clear_all`（送出、Esc、`reset`、回傳碼 4、`MAX_SYLLABLES` 自動送出都經過它）清 `self.left` 與 `self.left_full`；第 22 條的直通（空組字區上沒處理的字元鍵）之後組字區是空的，也清（P3-4）。
   - **不外流**（P2-3）：`left_full` 不經 C ABI 回傳給殼、不進 `ShanjieOutput`、不寫學習檔、不跨程序、不給任何網路功能；`RerankJob` 只帶最後 L 個字元（沒有宣告 L 時照今天帶 `self.left`）。
-  - **接受的殘留**（寫明）：已經排進佇列的 RerankJob 複本活到那次執行結束（殼最多一個在跑、一個在等）；Rust `String` 與 Swift 字串釋放時不清零。
+  - **接受的殘留**（寫明）：已經排進佇列的 RerankJob 複本活到那次執行結束（殼最多一個在跑、一個在等）；Rust `String` 與 Swift 字串釋放時不清零。另外，只有未完成符號時按 Esc 走 `clear_pend`、不經過 `clear_all`，`self.left` 與 `left_full` 留到下一次組字開始的 `set_left_context`（今天的 `self.left` 也是這樣；實作時記下）。
+  - 起點 0、組字區完全空（沒有音節也沒有未完成單位）時不出英文前文的預測列（Backspace 刪光之後不在空組字區冒出一列；今天這個起點本來就是空的）。
 - **會意（tinylm）的前文**：
   - `.sjtl` 新版本 SJTL0005＝SJTL0004 加一個 u32 欄位「前文長度 L」（字元數，1 ≤ L ≤ ctx − 2；越界載入失敗）；舊版本（≤ 0004）當作沒有宣告。
   - 有宣告：每個重排段送給模型的前文（`RerankJob::run` 算的 key、`Choice.key`）＝`left_full`＋組字區在這一段之前的顯示（含前面各段已選的字）接起來之後的最後 L 個字元（`chars()`），**不經過 `context_key`**；詞表外的字照模型的 UNK 規則。
