@@ -546,6 +546,117 @@ class Build(unittest.TestCase):
         self.assertEqual(m["unresolved_collision_readings"], 0)
 
 
+class AppendCreators(unittest.TestCase):
+    """docs/contracts/names-creators.md section 2: --append-creators on synthetic small files (scores are injected; the base only supplies syllables),
+    and on copies of the committed files (the committed ones are never touched)."""
+    BASE = "ㄊㄨㄥˇ 統 -1.0\nㄕㄣˊ 神 -1.0\nㄍㄨㄟˇ 鬼 -1.0\nㄍㄨㄛˊ 國 -1.0\nㄉㄨㄥˋ 動 -1.0\nㄉㄨㄥˋ 洞 -1.0\nㄍㄨㄟˇ 詭 -1.0\nㄅㄚ 八 -1.0\n"
+    ADD = "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-5.0\tnames\nㄅㄚ-ㄅㄚ\t爸爸\t-5.5\tnames\n"
+    SRCS = "word\tsource_kind\tsources\tqid\tnote\n酷澎\tcategory\tx\t\t\n爸爸\tmanual\ty\t\tPOLY\n"
+    SCORES = {2: -5.0, 3: -6.0}
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.d, True)
+        for n, t in (("mcbpmf-data.txt", self.BASE), ("overlay-add.tsv", "ㄅㄚ-ㄅㄚ\t八八\t-5.0\toverlay\nㄍㄨㄛˊ-ㄉㄨㄥˋ\t國洞\t-5.0\tslang\n"), ("sandhi-add.tsv", ""),
+                     ("names-add.tsv", self.ADD), ("names-sources.tsv", self.SRCS), ("acg.tsv", "ㄕㄣˊ-ㄍㄨㄟˇ\t神鬼\t-5.0\tacg\n"), ("it.tsv", "ㄊㄨㄥˇ-ㄕㄣˊ\t統神神\t-5.0\tit\n")):
+            put(os.path.join(self.d, n), t)
+        self.manifest = {"files": {}, "rows": 2, "words": 2, "sources": {"category": 1, "manual": 1}, "version": "nsiabc-moe115-00000000", "dropped": {"a": 1}}
+        put(os.path.join(self.d, "names.json"), json.dumps(self.manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+        self.creators = os.path.join(self.d, "names-creators.tsv")
+
+    def run_append(self, text):
+        put(self.creators, text)
+        return B.append_creators(self.d, self.creators, os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES)
+
+    def rows(self):
+        return [l.split("\t") for l in get(os.path.join(self.d, "names-add.tsv")).decode().splitlines()]
+
+    def test_appends_tagged_rows_after_the_untouched_old_ones_and_updates_the_manifest(self):
+        n = self.run_append("# note\n國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\tPTT 222\n鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 143\n")
+        self.assertEqual(n, 2)
+        raw = get(os.path.join(self.d, "names-add.tsv")).decode()
+        self.assertTrue(raw.startswith(self.ADD), "existing rows are kept byte for byte, in place")
+        self.assertEqual(raw[len(self.ADD):], "ㄍㄨㄛˊ-ㄉㄨㄥˋ\t國動\t-5.0\tcreator\nㄍㄨㄟˇ-ㄍㄨㄟˇ\t鬼鬼\t-5.0\tcreator\n")
+        srcs = get(os.path.join(self.d, "names-sources.tsv")).decode()
+        self.assertTrue(srcs.startswith(self.SRCS))
+        self.assertEqual(srcs[len(self.SRCS):], "國動\tcreator\tPTT 222\t\t\n鬼鬼\tcreator\tPTT 143\t\t\n")
+        m = json.loads(get(os.path.join(self.d, "names.json")))
+        self.assertEqual((m["words"], m["rows"], m["sources"]["creator"], m["dropped"]), (4, 4, 2, {"a": 1}))
+        self.assertEqual(m["files"]["names-add.tsv"], {"sha256": hashlib.sha256(raw.encode()).hexdigest(), "bytes": len(raw.encode()), "lines": 4})
+        self.assertTrue(m["version"].startswith("nsiabc-moe115-") and m["version"].endswith(m["files"]["names-add.tsv"]["sha256"][:8]))
+
+    def test_the_second_word_of_a_reading_is_demoted_by_slang_behind_and_a_third_by_two(self):
+        self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n國洞洞\tㄍㄨㄛˊ ㄉㄨㄥˋ ㄉㄨㄥˋ\tb\n")   # different reading: no demotion
+        self.assertEqual([r[2] for r in self.rows()[2:]], ["-5.0", "-6.0"])
+        put(os.path.join(self.d, "names.json"), json.dumps(self.manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+        self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\ta\n詭詭\tㄍㄨㄟˇ ㄍㄨㄟˇ\tb\n神神\tㄕㄣˊ ㄕㄣˊ\tc\n鬼詭\tㄍㄨㄟˇ ㄍㄨㄟˇ\td\n")
+        got = {r[1]: float(r[2]) for r in self.rows()[2:]}
+        self.assertEqual(got, {"鬼鬼": -5.0, "詭詭": -5.0 - B.SLANG_BEHIND, "神神": -5.0, "鬼詭": -5.0 - 2 * B.SLANG_BEHIND})
+        self.assertEqual(B.SLANG_BEHIND, B.bo.SLANG_BEHIND)
+
+    def test_rerunning_replaces_the_creator_rows_instead_of_duplicating_them(self):
+        text = "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n"
+        self.run_append(text)
+        first = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}
+        self.run_append(text)
+        self.assertEqual(first, {n: get(os.path.join(self.d, n)) for n in first})
+        self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\ta\n")
+        self.assertEqual([r[1] for r in self.rows()], ["酷澎", "爸爸", "鬼鬼"], "a changed input replaces the old creator rows")
+        self.assertEqual(json.loads(get(os.path.join(self.d, "names.json")))["words"], 3)
+        self.run_append("# nothing left\n")
+        self.assertEqual(get(os.path.join(self.d, "names-add.tsv")).decode(), self.ADD)
+        self.assertEqual(get(os.path.join(self.d, "names-sources.tsv")).decode(), self.SRCS)
+        m = json.loads(get(os.path.join(self.d, "names.json")))
+        self.assertEqual((m["words"], m["rows"], m["sources"]), (2, 2, {"category": 1, "manual": 1}))
+
+    def test_each_invalid_row_stops_the_run_with_its_line_number_and_writes_nothing(self):
+        bad = {
+            "in the base": "統\tㄊㄨㄥˇ ㄕㄣˊ\tx\n",
+            "in the base as a word": "八八\tㄅㄚ ㄅㄚ\tx\n",
+            "in overlay-add.tsv": "八八\tㄅㄚ ㄅㄚ\tx\n",
+            "a slang row": "國洞\tㄍㄨㄛˊ ㄉㄨㄥˋ\tx\n",
+            "in names-add.tsv": "酷澎\tㄎㄨˋ ㄆㄥˊ\tx\n",
+            "in the acg pack": "神鬼\tㄕㄣˊ ㄍㄨㄟˇ\tx\n",
+            "in the it pack": "統神神\tㄊㄨㄥˇ ㄕㄣˊ ㄕㄣˊ\tx\n",
+            "not Han": "Andy哥\tㄍㄨㄛˊ ㄉㄨㄥˋ ㄍㄨㄛˊ ㄉㄨㄥˋ\tx\n",
+            "single character": "統\tㄊㄨㄥˇ\tx\n",
+            "reading too short": "統神神\tㄊㄨㄥˇ ㄕㄣˊ\tx\n",
+            "reading too long": "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ ㄉㄨㄥˋ\tx\n",
+            "syllable not in the base": "國動\tㄍㄨㄛˊ ㄌㄧㄥˊ\tx\n",
+            "a missing column": "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\n",
+            "a repeated word": "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\tb\n",
+        }
+        before = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}
+        for what, text in bad.items():
+            with self.subTest(what):
+                with self.assertRaises(SystemExit) as cm:
+                    self.run_append("# header\n" + text)
+                self.assertRegex(str(cm.exception), r"names-creators\.tsv:[23]:")
+                self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
+
+    def test_without_a_creators_file_or_with_an_empty_one_nothing_changes(self):
+        before = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}
+        B.append_creators(self.d, os.path.join(self.d, "absent.tsv"), os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES)
+        self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
+
+    def test_on_copies_of_the_committed_files_an_absent_or_empty_creators_file_changes_nothing(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        names = ("names-add.tsv", "names-sources.tsv", "names.json")
+        for f in names + ("mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv"):
+            __import__("shutil").copy(os.path.join(B.LEX, f), d)
+        before = {n: get(os.path.join(d, n)) for n in names}
+        self.assertEqual(before, {n: get(os.path.join(B.LEX, n)) for n in names})
+        for creators in (os.path.join(d, "absent.tsv"), os.path.join(d, "empty.tsv")):
+            put(os.path.join(d, "empty.tsv"), "")
+            B.append_creators(d, creators, B.ACG_ADD)
+            self.assertEqual(before, {n: get(os.path.join(d, n)) for n in names}, creators)
+        self.assertEqual(hashlib.sha256(before["names-add.tsv"]).hexdigest(), json.loads(before["names.json"])["files"]["names-add.tsv"]["sha256"])
+        if os.path.exists(B.CREATORS):      # once the real file exists, the committed names-add.tsv must carry exactly its words, creator rows last
+            tags = [l.split("\t")[3].rstrip("\n") for l in get(os.path.join(B.LEX, "names-add.tsv")).decode().splitlines()]
+            self.assertEqual(tags, sorted(tags, key=("names", "creator").index))
+
+
 class TwTitle(unittest.TestCase):
     def test_only_a_dict_missingtitle_means_no_article_anything_else_is_raised_as_it_was(self):
         class Raises:
