@@ -664,7 +664,10 @@ def main():
     files, manifest, col, unread, ldrop, check = build(NamesApi(a.cache, a.offline, a.nsi_commit), a.nsi_commit)
     write_all(files, manifest, a.out)
     if creator_lines(CREATORS):         # 重建 = 重建 + 追加：不讓 creator 列在重建時消失
-        print(f"{append_creators(a.out)} creator words appended")
+        if os.path.abspath(a.out) == os.path.abspath(LEX):
+            print(f"{append_creators(a.out)} creator words appended")
+        else:                           # append_creators reads the base and layers from its lex_dir: another --out has none of them
+            print(f"NOTE: --out {a.out} is not {LEX}: creator rows NOT appended; run --append-creators on the real lexicon directory")
     os.makedirs(a.report, exist_ok=True)
     for name, text in (("collisions.txt", collisions_text(col, ldrop)), ("unreadable.txt", "".join(w + "\n" for w in unread)), ("check-readings.txt", "".join(check))):
         with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:
