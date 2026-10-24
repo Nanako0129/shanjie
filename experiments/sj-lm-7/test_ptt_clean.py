@@ -52,6 +52,17 @@ class Pages(unittest.TestCase):
             b = P.body('<div id="main-content" class="bbs-screen bbs-content">' + self.META.format(extra=extra) + self.TAIL)
             self.assertEqual(b.strip(), "今天去看電影，很好看。", extra)
 
+    def test_hard_wrapped_lines_are_joined_inside_a_paragraph_and_blank_lines_separate(self):
+        text = "今天去看了一部電影，\n劇情真的很好看，\n推薦給大家。\n\n第二段只有一行。\niPhone\n15 很好用"
+        self.assertEqual(P.paragraphs(text), "今天去看了一部電影，劇情真的很好看，推薦給大家。\n第二段只有一行。iPhone 15 很好用")
+        page = '<div id="main-content" class="bbs-screen bbs-content">' + self.META.format(extra="") + "\n\n" + text + "\n--\n" + "</div>"
+        self.assertEqual(P.body(page).split("\n"), ["今天去看了一部電影，劇情真的很好看，推薦給大家。", "第二段只有一行。iPhone 15 很好用"])
+
+    def test_quoted_reply_lines_are_dropped(self):
+        text = "※ 引述《aaa (bbb)》之銘言：\n: 這是被引用的一句話。\n: 第二行引文\n我的回應在這裡，\n接著說下去。\n\n: 另一段引文\n結尾。"
+        self.assertEqual(P.paragraphs(text), "我的回應在這裡，接著說下去。\n結尾。")
+        self.assertEqual(P.paragraphs(":沒有空格的冒號開頭不算引文"), ":沒有空格的冒號開頭不算引文")
+
     def test_a_page_without_main_content_is_empty(self):
         self.assertEqual(P.body("<html></html>"), "")
 

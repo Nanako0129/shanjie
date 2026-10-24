@@ -5,6 +5,7 @@ pushes: adjacent pushes by the same account within MERGE_MINUTES are joined befo
 Usage: python3 experiments/sj-lm-7/ptt_clean.py PTT_DIR OUT_DIR   (PTT_DIR/<board>/<article>.html; writes OUT_DIR/body.tsv and push.tsv:
 unit<TAB>sentence, deduplicated; prints counts only). The tests are test_ptt_clean.py."""
 import collections
+import functools
 import glob
 import html
 import json
@@ -59,7 +60,29 @@ def body(page):
     x = re.split(r'<div class="push">', m.group(1))[0]
     x = re.sub(r'<div class="article-metaline(-right)?">.*?</div>', "", x, flags=re.S)   # author, board, title, time; a stray extra </div> is only a tag
     x = re.split(r'<span class="f2">※ 發信站', x)[0]
-    return text(x).split("\n--\n")[0]
+    return paragraphs(text(x).split("\n--\n")[0])
+
+
+QUOTE = (": ", "※ 引述")   # a quoted reply line (": " is how PTT prefixes the text being answered) or the line that names whom it quotes
+
+
+def paragraphs(body_text):
+    """PTT bodies are hard-wrapped at the screen width: lines of one paragraph are joined, blank lines separate paragraphs (one per output line),
+    and quoted reply lines are dropped (they are someone else's sentences, repeated)."""
+    out, cur = [], []
+    for line in body_text.split("\n"):
+        line = line.rstrip()
+        if line.startswith(QUOTE):
+            continue
+        if not line.strip():
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append(line.strip())
+    if cur:
+        out.append(cur)
+    return "\n".join(functools.reduce(join, p) for p in out)
 
 
 def load_p2clean():
