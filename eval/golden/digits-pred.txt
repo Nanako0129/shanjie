@@ -1,7 +1,7 @@
 # digits-pred golden (experiments/digits/golden_digits.py --pred; digits.md A.3.5). Python is the baseline; Rust must match words and score bits.
 # digits.tsv sha256=a75a328ba4e30d13d5773cdc6f4c5e61a606bfc35e7459d16114c288dc6a6800
 # models: bigram.sjlm sha256=fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42 classes.sjc sha256=9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262 kn.sjkn sha256=cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e
-# lexicon: mcbpmf-data.txt sha256=0deae7b7c1dcde1d7a30d139e7068543e0c0e7112e944b63eb52947bca1db7ac overlay-add.tsv sha256=947a115b1604e27fa58d586248923711767c25eeb736000efc493173d9d590db sandhi-add.tsv sha256=b7a464022e97ad0356f7cd72287ca284b5bb652b5c11488aaa21fe12eda83597 names-add.tsv sha256=77f70524fd1ddd62a29e63103439cde3c3b25f3d40d0b3a6b0300de955e1f010 demote.tsv sha256=baf1dac3ab4f71ac1957802b5c885eee72c33a34e5ac447ecc98773c09d7766b
+# lexicon: mcbpmf-data.txt sha256=0deae7b7c1dcde1d7a30d139e7068543e0c0e7112e944b63eb52947bca1db7ac overlay-add.tsv sha256=6d67a0b6b3e1d3351494e6f2025f897c1617314f400c3dd3372e1f7aa4c98528 sandhi-add.tsv sha256=b7a464022e97ad0356f7cd72287ca284b5bb652b5c11488aaa21fe12eda83597 names-add.tsv sha256=77f70524fd1ddd62a29e63103439cde3c3b25f3d40d0b3a6b0300de955e1f010 demote.tsv sha256=baf1dac3ab4f71ac1957802b5c885eee72c33a34e5ac447ecc98773c09d7766b
 # profile=chat lambda=0.5 limit=9 gamma=1.0
 # generated on Darwin arm64, python 3.14.7
 # format: `## <n>\tleft=\tdigits=\tsyms=\tv=`, then `<rank>\t<word>\t<score repr>` per item; syms are the unfinished symbols (none: the row of a finished digit run)
