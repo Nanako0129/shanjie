@@ -23,14 +23,29 @@ import time
 import wave
 
 
+TEA_CHUNK_S = 30   # seconds per TEA call (the model card is for short clips; see run() below)
+
+
 def tea():
     import torch
     from qwen_asr import Qwen3ASRModel
     m = Qwen3ASRModel.from_pretrained("JacobLinCool/TEA-ASR-1.1", dtype=torch.bfloat16, device_map="cuda:0")
 
     def run(path):
-        r = m.transcribe(audio=path, language="Chinese")[0]
-        return r.text, []   # no timestamps asked for
+        # One call on a 10-minute file returned only the first few hundred characters (2026-10-25 pilot: 6,460 Han for 30,082
+        # in the references), so the audio goes in TEA_CHUNK_S pieces, each transcribed on its own, with times per piece.
+        import os, tempfile
+        import soundfile as sf
+        audio, rate = sf.read(path)
+        step, texts, segs = TEA_CHUNK_S * rate, [], []
+        with tempfile.TemporaryDirectory() as d:
+            for i in range(0, len(audio), step):
+                piece = os.path.join(d, "piece.wav")
+                sf.write(piece, audio[i:i + step], rate)
+                t = m.transcribe(audio=piece, language="Chinese")[0].text
+                texts.append(t)
+                segs.append({"start": i / rate, "end": min(i + step, len(audio)) / rate, "text": t})
+        return "".join(texts), segs
     return run
 
 
