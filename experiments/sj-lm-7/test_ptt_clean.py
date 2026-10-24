@@ -125,6 +125,30 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(body_rows), 1)
         self.assertIn('"units": 2', buf.getvalue())
 
+    def test_jobs_give_byte_identical_files_and_counts(self):
+        stub = SimpleNamespace(**vars(Cap.P2), dedupe_key=lambda s: s, han_count=len)
+        with tempfile.TemporaryDirectory() as d:
+            for b in ("C_Chat", "Gossiping", "Stock"):
+                os.makedirs(os.path.join(d, "in", b))
+                for i in range(40):        # repeats across pages and boards exercise the dedupe order; 推文N (3 chars) is rejected
+                    open(os.path.join(d, "in", b, f"M.{i}.html"), "w", encoding="utf-8").write(
+                        f'<div id="main-content">第{i % 7}句正文。</div>' + push("a", f"推文{i % 5}", "10/24 12:00") + push("b", f"另一句話{i}", "10/24 12:09"))
+            got = {}
+            orig, P.load_p2clean = P.load_p2clean, lambda: stub
+            try:
+                import contextlib, io
+                for jobs in (1, 3):
+                    out = os.path.join(d, f"out{jobs}")
+                    with contextlib.redirect_stdout(io.StringIO()) as buf:
+                        P.main(os.path.join(d, "in"), out, jobs)
+                    got[jobs] = [open(os.path.join(out, k + ".tsv"), "rb").read() for k in ("body", "push")] + [buf.getvalue()]
+            finally:
+                P.load_p2clean = orig
+        self.assertEqual(got[1], got[3])
+        self.assertIn('"units": 120', got[1][2])
+        self.assertIn('"han_len": 120', got[1][2])          # the per-page rejection counts add up across processes
+        self.assertEqual(got[1][0].count(b"\n"), 7)         # 第0..6句正文, first occurrence only
+
 
 if __name__ == "__main__":
     unittest.main()
