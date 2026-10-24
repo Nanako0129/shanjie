@@ -222,6 +222,24 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
     }
 
+    func testMemePackSwitchFromTheWindowReachesStoreAndMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let r = rig()
+        let before = r.shell.engine
+        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertTrue(r.model.memePack, "default on")
+        XCTAssertEqual(line(), "已開啟的詞包：迷因與實況用語")
+        r.model.setMemePack(false)
+        XCTAssertFalse(r.model.memePack)
+        XCTAssertNil(line(), "the menu line follows the switch")
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        r.model.setMemePack(true)
+        XCTAssertTrue(r.model.memePack)
+        XCTAssertEqual(line(), "已開啟的詞包：迷因與實況用語")
+    }
+
     /// acg-pack A2.4 (moved here by it-pack 3.2): the window shows the grey data-date line under the switch, also with the pack off; the menu does not.
     func testAcgDataDateLineIsTheMenusLine() throws {
         let packs = resources.appendingPathComponent("packs")

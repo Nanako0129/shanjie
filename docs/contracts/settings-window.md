@@ -74,7 +74,7 @@
 
 1. **殼層測試**（`ShanjieKitTests`；設定視窗的 view model `SettingsModel` 放在 `ShanjieKit/Settings.swift`，SwiftUI 畫面在 App target 只綁定它）：
    - 每個控制項改的是和選單同一個 store 與 setter：視窗切換「即時預測」後，`Session.menu` 的勾選跟著變；選單切換後，view model 收到通知、值跟著變。
-   - 排列選擇器呼叫 `selectLayout`；詞包開關（動漫與遊戲詞、資訊與 AI 詞）會重建引擎；〔2026-10-23，`it-pack.md` §3.2〕詞包的開關只在這裡，選單只有不能點的「已開啟的詞包：…」。
+   - 排列選擇器呼叫 `selectLayout`；詞包開關（動漫與遊戲詞、資訊與 AI 詞、迷因與實況用語）會重建引擎；〔2026-10-23，`it-pack.md` §3.2〕詞包的開關只在這裡，選單只有不能點的「已開啟的詞包：…」。
    - `MemoryGlassTintStore` 沒設過時 `Shell` 讀到 0；`GlassTint.tint`：NaN、負數、大於 1 都會 clamp；值 0 回 nil；值 1 回不透明度 0.5；深色外觀黑、淺色白；同一個呼叫序列從 0.6 改回 0，第二次回 nil。
    - 狀態列：安全輸入與無法存檔照規則出現；「此 App」那一列在視窗裡不出現，這是結構上的：`SettingsModel` 沒有對應的屬性、`SettingsForm` 也沒有對應的元件，所以不寫測試（沒有東西可以斷言）。
    - 選單多一項「善解設定…」，其餘項目與順序不變（既有的選單測試只加這一項）。

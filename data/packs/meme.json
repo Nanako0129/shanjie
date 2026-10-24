@@ -1,0 +1,16 @@
+{
+ "files": {
+  "meme-add.tsv": {
+   "bytes": 67,
+   "lines": 1,
+   "sha256": "21da773cd3d8b71cecb4dcd749a6dff76cc69aaa6fb89856722c266cbcccf235"
+  },
+  "meme-sources.tsv": {
+   "bytes": 144,
+   "lines": 2,
+   "sha256": "1e3d077eb6ddfad8de3908442770d05dbde224132aeceec182d0c1afcea035d2"
+  }
+ },
+ "note": "one-row stand-in so build-app.sh, check-app.sh and the selftest work before the data PR (docs/contracts/meme-pack.md); the data PR replaces all three files",
+ "placeholder": true
+}

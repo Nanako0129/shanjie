@@ -31,6 +31,21 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// meme-pack contract 3.2: the meme pack ships on by default too (and the selftest types one of its words), so a bundle without meme-add.tsv,
+    /// or with a broken one, fails. The IT pack is present in both, so only the meme file can be the cause.
+    func testFailsWithoutTheBundledMemePack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res, memePack: false)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithACorruptBundledMemePack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "not a row\n".write(to: res.appendingPathComponent("packs/meme-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithACorruptBundledPack() throws {
         let res = try XCTUnwrap(TestData.resources())
         let packs = res.appendingPathComponent("packs")

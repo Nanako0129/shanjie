@@ -27,6 +27,11 @@ public enum Selftest {
     /// engine below, as the shell ships it.
     static let itWordStandard = "wj6vu;4g/ t/6"
     static let itWord = "圖像生成"
+    /// The bundled meme pack (meme-pack contract 3.2): 佛心來的 `ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙` on the standard layout, chat profile. Both profiles spell it 福新來的 without the
+    /// pack and 佛心來的 with it (measured with the CLI, 2026-10-25). The shipped meme-add.tsv must keep this row (or this word and key string change with it): the
+    /// current file is a one-row placeholder that the data PR replaces.
+    static let memeWordStandard = "zj6vup x962k7"
+    static let memeWord = "佛心來的"
 
     /// classes-v5 (2026-10-16, docs/contracts/classes-v5.md): dev302 row 27 `ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙` on the
     /// standard layout, chat profile, no left context, the bundled pack loaded: the n-gram's first is 我已經回復你的郵件了 and
@@ -72,7 +77,7 @@ public enum Selftest {
         // and the ordinary sentence must still come out the same.
         let (packed, packCode) = CoreEngine.make(dataDir: resources.path, layout: 0,
                                                   packsDir: resources.appendingPathComponent("packs").path,
-                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT))
+                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT) | UInt32(SHANJIE_PACK_MEME))
         guard let withPack = packed else { return fail("selftest: shanjie_engine_new_packs failed, code", packCode) }
         let packLM = withPack.loadLM(path: lmPath)
         guard packLM == 0 else { return fail("selftest: shanjie_engine_load_lm (pack) failed, code", packLM) }
@@ -84,6 +89,9 @@ public enum Selftest {
         let (itShown, itCode) = type(itWordStandard, withPack)
         guard itCode == 0 else { return fail("selftest: shanjie_engine_key (it pack) failed, code", itCode) }
         guard itShown == itWord else { return fail("selftest: the bundled IT+AI word pack is not in effect, code", 0) }
+        let (memeShown, memeCode) = type(memeWordStandard, withPack)
+        guard memeCode == 0 else { return fail("selftest: shanjie_engine_key (meme pack) failed, code", memeCode) }
+        guard memeShown == memeWord else { return fail("selftest: the bundled meme word pack is not in effect, code", 0) }
         // The small model, as the shell loads it: a bundle without it (or with one for another n-gram model) fails here, so
         // 語意校正 cannot ship silently doing nothing.
         let tiny = withPack.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)

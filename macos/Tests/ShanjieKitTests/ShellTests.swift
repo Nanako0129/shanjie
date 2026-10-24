@@ -983,9 +983,9 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "你好")
     }
 
-    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore) -> Shell {
+    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore, meme: MemoryMemePackStore = MemoryMemePackStore()) -> Shell {
         Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: acg, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it)
+              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: acg, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it, memePackStore: meme)
     }
 
     /// it-pack contract 3.2: the menu has one non-clickable line naming the packs the engine loaded, in the settings order; none loaded, no line.
@@ -1020,6 +1020,69 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(shell.acgPackOn && shell.itPackOn, "Settings keeps showing the stored choices")
         XCTAssertEqual(acg.acgPack, true)
         XCTAssertEqual(it.itPack, true)
+    }
+
+    /// meme-pack contract 3.2: the menu line names the meme pack last, after the other two; the switch is its own bit (off, the pack is not loaded).
+    func testPackLineNamesTheMemePackLast() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let line = { (meme: Bool?) -> String? in
+            let c = Controller(self.packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true), meme: MemoryMemePackStore(meme)))
+            return c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title
+        }
+        XCTAssertEqual(line(nil), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞、迷因與實況用語", "memePack never set is on")
+        XCTAssertEqual(line(true), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞、迷因與實況用語")
+        XCTAssertEqual(line(false), "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
+    }
+
+    /// meme-pack contract 3.2: `memePack` never set is on, the switch rebuilds the engine without the pack, the choice is stored under `memePack`,
+    /// and a new shell reads it. 佛心來的 is a word the base lexicon cannot type (福新來的; core/tests/engine_pack.rs and the CLI).
+    func testMemePackSwitchStoresAndSurvivesRestart() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let store = MemoryMemePackStore()
+        let name = "zj6vup x962k7"  // ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙ (a space is the first tone)
+        let make = { Controller(self.packShell(acg: MemoryAcgPackStore(), it: MemoryItPackStore(), meme: store), bundle: "com.hnc.Discord") }
+        let c = make()
+        c.session.activate()
+        XCTAssertNil(store.memePack, "reading the default writes nothing")
+        c.type(name)
+        XCTAssertEqual(c.client.marked, "佛心來的")
+        c.press(Keys.esc)
+        c.session.shell.setMemePack(false)
+        XCTAssertEqual(store.memePack, false)
+        XCTAssertNil(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }, "no pack loaded, no line")
+        c.type(name)
+        XCTAssertNotEqual(c.client.marked, "佛心來的")
+        c.press(Keys.esc)
+        let again = make()
+        again.session.activate()
+        again.type(name)
+        XCTAssertNotEqual(again.client.marked, "佛心來的", "a new shell reads the stored off")
+        again.press(Keys.esc)
+        again.session.shell.setMemePack(true)
+        XCTAssertEqual(store.memePack, true)
+        again.type(name)
+        XCTAssertEqual(again.client.marked, "佛心來的")
+    }
+
+    /// meme-pack contract 3.2: a broken meme-add.tsv fails the pack build, the retry uses mask 0 (no pack is loaded, the menu names none), and the stored
+    /// choice stays on and is not rewritten.
+    func testBrokenMemePackDropsEveryPackFromTheMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let meme = MemoryMemePackStore(true)
+        let shell = packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true), meme: meme)
+        XCTAssertNotNil(shell.engine, "the pack-less retry built an engine")
+        XCTAssertEqual(shell.loadedPackMask, 0)
+        XCTAssertNil(Controller(shell).session.menu.first { $0.title.hasPrefix("已開啟的詞包") })
+        XCTAssertTrue(shell.memePackOn)
+        XCTAssertEqual(meme.memePack, true)
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {

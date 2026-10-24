@@ -76,7 +76,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
-         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/meme-add.tsv packs/meme-sources.tsv packs/meme.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
@@ -95,7 +95,7 @@ python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack file
 import hashlib, json, os, sys
 d = sys.argv[1]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-for manifest, required in (("acg.json", "acg-add.tsv"), ("it.json", "it-add.tsv")):     # the IT+AI pack: docs/contracts/it-pack.md section 3.2
+for manifest, required in (("acg.json", "acg-add.tsv"), ("it.json", "it-add.tsv"), ("meme.json", "meme-add.tsv")):     # the IT+AI pack: docs/contracts/it-pack.md section 3.2; the meme pack: docs/contracts/meme-pack.md section 4
     files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
     if required not in files:
         sys.exit(required + " is not in " + manifest)
@@ -106,6 +106,7 @@ for manifest, required in (("acg.json", "acg-add.tsv"), ("it.json", "it-add.tsv"
 PY
 grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
 grep -q 'packs/it-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/it-add.tsv"
+grep -q 'packs/meme-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/meme-add.tsv"
 grep -q '政府資料開放授權條款' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not carry the Open Government Data License notice for the IT+AI pack"
 # The names layer (model-v6 section 7 P3-7): the bundled file is the committed one, and the attribution file names it with its three
 # sources, the name-suggestion-index notice in full among them.

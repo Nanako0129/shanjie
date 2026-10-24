@@ -8929,3 +8929,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 粗估漢字量（只套 4–40 個漢字、漢字 ≥ 70%、整句去重，還沒套假名、詞庫字、簡體、混入、守門）：每片上限 50 句 29.1 萬句、284 萬字；100 句 556 萬；200 句 1,085 萬；400 句 2,056 萬；不設上限 525 萬句、5,125 萬字。50 句過不了會意 SJ-SR-7（規模待定）第一階段（SJ-LM-7 契約 §2.7）的「字幕 ≥ 400 萬」。
 - 選擇題：維護者選「不設上限」。`clean_subs.py` 改讀 raw zip（每個 `<s>` 的文字去掉時間標記、解 XML 實體，檔案照路徑排序，每部片後面插一個空行），只數片數、拿掉每片上限與它的 STOP；契約 §2.7、`experiments/sj-lm-7/README.md`、`docs/contracts/english-next.md` 的字幕列一起改。正式清理要帶私人評測列守門，在 188 上跑（照 §2.4），那時再報真正的漢字數。
 - 真檔的格式（`/code-review` 問的，Mac 全檔掃過）：1,073 萬個 `<s>` 全是 `<s id="…">` 一種寫法，裡面除了 `<time/>` 沒有別的標籤，沒有跨行的 `<s>`，沒有 U+FFFD（UTF-8 解碼沒有失敗）。輸入分出的片少於兩部時腳本 STOP（防止誤用 mono 檔）。取樣校對印的編號是讀入串流的位置，對不回原檔（延後）。
+
+## 2026-10-25：迷因詞包的引擎與 App（契約 `docs/contracts/meme-pack.md` §3.1–§3.2，資料另一片）
+
+- 做了什麼：`PACK_MEME = 8`（位元 3，檔案 `meme-add.tsv`，接在資訊詞包後面）、`PACK_ALL` 含它、`shanjie.h`、`s3a.md`、CLI `--packs meme`（摘要行多 `+meme`）、設定「詞包」區塊的「迷因與實況用語」開關（偏好鍵 `memePack`，沒設過當成開）、選單「已開啟的詞包：」照 `loadedPackMask` 多列它、`build-app.sh`／`check-app.sh`／署名檔、selftest。照資訊詞包（PR #275）的做法，唯一的不同：沒有 `toggleMemePack` 選單動作（選單本來就沒有詞包開關，那個動作只剩測試在用），測試直接呼叫 `Shell.setMemePack`。
+- 關掉時不變（動漫詞包 A.2）：`core/tests/engine_pack.rs` 的 `the_meme_pack_has_its_own_bit_and_file` 在位元清掉但檔案在（單獨與和動漫、資訊同開）、位元設了但檔案不在三種情形，比對聊天與書面每一個 `Output`（解碼、候選窗、預測列）都和沒有這個詞包的引擎逐位元相同；開著時第一候選是檔案裡的詞。
+- 替身資料：真的詞表還沒有，但 CI 會建 App 並跑 `check-app.sh` 與 selftest，三個檔都必須在，所以 `data/packs/meme-add.tsv`、`meme-sources.tsv`、`meme.json` 先放一列的替身（`佛心來的`，聊天與書面都原本打成「福新來的」，量法：評測 CLI 單獨解碼，不帶與帶 `--packs meme`；分數用 4 字詞的 -6.60980192）。`meme.json` 有 `placeholder: true`。selftest 打這一個詞，所以**資料 PR 的 `meme-add.tsv` 要留著這一列，或同一個 PR 換掉 `Selftest.memeWord`／`memeWordStandard`**。
+- 延遲：`PACKS=meme` 配一列的夾具資料夾跑 `timing_typing76_keys`，76 句 2,483 鍵 p95 2.2 ms（一列的詞包，不代表真資料；契約 §3.7 的 `PACKS=acg,it,meme` 要等真資料）。
+- 未做：§3.4–§3.7（評測、檢查集、實機、記憶體）等真資料；`make test-rust` 完整套件交 CI／188。

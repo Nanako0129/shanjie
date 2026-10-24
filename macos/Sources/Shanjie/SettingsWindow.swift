@@ -333,6 +333,7 @@ struct SettingsPageForm: View {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
+                    Toggle(MenuEntry.Text.memePack, isOn: Binding(get: { model.memePack }, set: { model.setMemePack($0) }))
                 }
             case .appearance:
                 Section("外觀") {

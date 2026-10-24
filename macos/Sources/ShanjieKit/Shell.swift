@@ -185,6 +185,19 @@ public final class MemoryItPackStore: ItPackStore {
     public init(_ itPack: Bool? = nil) { self.itPack = itPack }
 }
 
+/// Where the "迷因與實況用語" switch is kept (docs/contracts/meme-pack.md section 3.2): `nil` means never chosen, which is on. Same arrangement as `ItPackStore`.
+@MainActor
+public protocol MemePackStore: AnyObject {
+    var memePack: Bool? { get set }
+}
+
+/// The in-memory MemePackStore.
+@MainActor
+public final class MemoryMemePackStore: MemePackStore {
+    public var memePack: Bool?
+    public init(_ memePack: Bool? = nil) { self.memePack = memePack }
+}
+
 /// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
 /// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
 @MainActor
@@ -406,12 +419,15 @@ public final class Shell {
     private let itPackStore: ItPackStore
     /// The IT+AI word pack (default on, it-pack contract 3.2): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
     private(set) var itPackOn = true
+    private let memePackStore: MemePackStore
+    /// The meme and streamer-phrase word pack (default on, meme-pack contract 3.2): same arrangement as the IT+AI pack.
+    private(set) var memePackOn = true
     /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, less the bits
     /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
     /// The names of the loaded packs in the settings order, for the menu line.
     var loadedPackTitles: [String] {
-        [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
+        [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack), (UInt32(SHANJIE_PACK_MEME), MenuEntry.Text.memePack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
     }
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
@@ -547,6 +563,7 @@ public final class Shell {
     /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `itPackStore`: the IT+AI word pack switch (it-pack contract 3.2). Defaults to an in-memory store so the many test rigs need not name it; the app passes its own.
+    /// `memePackStore`: the meme word pack switch (meme-pack contract 3.2). Defaults to an in-memory store like `itPackStore`.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
     /// `rerankStore`: the 語意校正 switch (s7c2b section 2.2). Required, like `predictionStore`.
@@ -569,7 +586,8 @@ public final class Shell {
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
                 spacingStore: SpacingStore,
-                itPackStore: ItPackStore = MemoryItPackStore()) {
+                itPackStore: ItPackStore = MemoryItPackStore(),
+                memePackStore: MemePackStore = MemoryMemePackStore()) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -615,6 +633,8 @@ public final class Shell {
         acgPackOn = acgPackStore.acgPack ?? true
         self.itPackStore = itPackStore
         itPackOn = itPackStore.itPack ?? true
+        self.memePackStore = memePackStore
+        memePackOn = memePackStore.memePack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -873,8 +893,21 @@ public final class Shell {
         Log.shell.debug("it pack switched")
     }
 
-    /// The pack bits the engine is built with: the ACG and IT+AI switches.
-    private var packMask: UInt32 { (acgPackOn ? UInt32(SHANJIE_PACK_ACG) : 0) | (itPackOn ? UInt32(SHANJIE_PACK_IT) : 0) }
+    /// The settings switch (meme-pack contract 3.2): the same as `setItPack` for the meme pack.
+    func setMemePack(_ on: Bool) {
+        guard on != memePackOn else { return }
+        commitThenRebuild {
+            memePackOn = on
+            memePackStore.memePack = on
+        }
+        changed()
+        Log.shell.debug("meme pack switched")
+    }
+
+    /// The pack bits the engine is built with: the ACG, IT+AI and meme switches.
+    private var packMask: UInt32 {
+        (acgPackOn ? UInt32(SHANJIE_PACK_ACG) : 0) | (itPackOn ? UInt32(SHANJIE_PACK_IT) : 0) | (memePackOn ? UInt32(SHANJIE_PACK_MEME) : 0)
+    }
 
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
@@ -888,7 +921,7 @@ public final class Shell {
         let packsDir = resources.appendingPathComponent("packs").path
         let mask = packMask
         // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
-        let present = [(UInt32(SHANJIE_PACK_ACG), "acg-add.tsv"), (UInt32(SHANJIE_PACK_IT), "it-add.tsv")]
+        let present = [(UInt32(SHANJIE_PACK_ACG), "acg-add.tsv"), (UInt32(SHANJIE_PACK_IT), "it-add.tsv"), (UInt32(SHANJIE_PACK_MEME), "meme-add.tsv")]
             .reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.1) ? $0 | $1.0 : $0 }
         var built = mask & present
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)

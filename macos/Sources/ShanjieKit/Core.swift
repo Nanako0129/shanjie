@@ -42,7 +42,7 @@ final class CoreEngine {
 
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
     /// `packsDir` is the directory of the word pack files and `packs` the bits to turn on (default the ACG pack, acg-pack contract A.2;
-    /// `SHANJIE_PACK_IT` is the IT+AI pack, it-pack contract 3.1); nil `packsDir` is `shanjie_engine_new`, so the engine is the one the app had
+    /// `SHANJIE_PACK_IT` is the IT+AI pack, it-pack contract 3.1; `SHANJIE_PACK_MEME` the meme pack, meme-pack contract 3.1); nil `packsDir` is `shanjie_engine_new`, so the engine is the one the app had
     /// before the packs existed.
     static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, packs: UInt32 = UInt32(SHANJIE_PACK_ACG)) -> (CoreEngine?, Int32) {
         var out: OpaquePointer?

@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_IT, PACK_OOV};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_IT, PACK_MEME, PACK_OOV};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
@@ -67,12 +67,13 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
     Ok(())
 }
 
-/// `--packs acg`, `--packs it`, `--packs acg,it`: sets the pack bits; anything else is refused.
+/// `--packs acg`, `--packs it`, `--packs meme`, `--packs acg,it,meme`: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
     v.split(',').try_fold(0, |bits, name| match name {
         "acg" => Ok(bits | PACK_ACG),
         "it" => Ok(bits | PACK_IT),
-        _ => Err("--packs takes acg, it or acg,it".to_string()),
+        "meme" => Ok(bits | PACK_MEME),
+        _ => Err("--packs takes acg, it, meme or a comma list of them".to_string()),
     })
 }
 
@@ -80,7 +81,7 @@ fn pack_flag(v: &str) -> Result<u32, String> {
 /// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
 fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
     let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
-    for (bit, name) in [(PACK_ACG, "acg"), (PACK_IT, "it")] {
+    for (bit, name) in [(PACK_ACG, "acg"), (PACK_IT, "it"), (PACK_MEME, "meme")] {
         let file = pdir.join(format!("{name}-add.tsv"));
         if packs & bit != 0 && !file.is_file() {
             return Err(format!("--packs {name}: pack file not found: {}", file.display()));
@@ -566,7 +567,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if packs & PACK_MEME != 0 { "+meme" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -874,6 +875,8 @@ mod tests {
         assert_eq!(pack_flag("it"), Ok(PACK_IT));
         assert_eq!(pack_flag("acg,it"), Ok(PACK_ACG | PACK_IT));
         assert_eq!(pack_flag("it,acg"), Ok(PACK_ACG | PACK_IT));
+        assert_eq!(pack_flag("meme"), Ok(PACK_MEME));
+        assert_eq!(pack_flag("acg,it,meme"), Ok(PACK_ACG | PACK_IT | PACK_MEME));
         assert!(pack_flag("").is_err() && pack_flag("quotes").is_err() && pack_flag("acg,").is_err());
         let dir = std::env::temp_dir().join(format!("shanjie-packs-flag-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -882,6 +885,8 @@ mod tests {
         assert!(packs_dir_checked(PACK_ACG, d()).is_ok());
         let e = packs_dir_checked(PACK_ACG | PACK_IT, d()).unwrap_err();
         assert!(e.contains("--packs it") && e.contains("it-add.tsv"), "{e}");
+        let e = packs_dir_checked(PACK_ACG | PACK_MEME, d()).unwrap_err();
+        assert!(e.contains("--packs meme") && e.contains("meme-add.tsv"), "{e}");
         fs::remove_dir_all(&dir).unwrap();
     }
 
