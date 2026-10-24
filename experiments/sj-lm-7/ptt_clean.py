@@ -12,11 +12,15 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 MERGE_MINUTES = 3   # same account, adjacent, within this gap: one remark split by the push length limit
 UNIT_CAP = 50       # sentences per unit (contract section 2.4)
+# Display widths of a wrapped body line (W, F and ambiguous A count 2): in 3,000 crawled articles (2026-10-25) the 77-80 column lines number
+# 9,752 and 5-7% of them end in sentence-final punctuation; 66-76 columns 31-51%, narrower 24%, so those breaks are the author's (research log).
+WRAP_MIN, WRAP_MAX = 77, 80
 
 PUSH = re.compile(r'<div class="push">.*?<span class="f3 hl push-userid">([^<]*)</span>\s*'
                   r'<span class="f3 push-content">(.*?)</span>\s*<span class="push-ipdatetime">([^<]*)</span>', re.S)
@@ -66,20 +70,26 @@ def body(page):
 QUOTE = (": ", "※ 引述")   # a quoted reply line (": " is how PTT prefixes the text being answered) or the line that names whom it quotes
 
 
+def width(line):
+    return sum(2 if unicodedata.east_asian_width(c) in "WFA" else 1 for c in line)   # PTT is a Big5 terminal: ambiguous (… ※ “ ”) is 2 too
+
+
 def paragraphs(body_text):
-    """PTT bodies are hard-wrapped at the screen width: lines of one paragraph are joined, blank lines separate paragraphs (one per output line),
-    and quoted reply lines are dropped (they are someone else's sentences, repeated)."""
+    """PTT's web view wraps a long line at the 80-column screen: a line WRAP_MIN..WRAP_MAX columns wide (East Asian W, F and ambiguous A characters count 2)
+    goes on in the next line and is joined to it; any other line break is the author's own and ends the piece (one per output line).
+    Quoted reply lines are dropped (they are someone else's sentences, repeated) and end the piece like a blank line."""
     out, cur = [], []
     for line in body_text.split("\n"):
         line = line.rstrip()
         if line.startswith(QUOTE):
-            continue
-        if not line.strip():
-            if cur:
-                out.append(cur)
-            cur = []
-        else:
+            line = ""                                     # a quote ends the piece: a wrap cannot continue across it
+        if line.strip():
             cur.append(line.strip())
+            if WRAP_MIN <= width(line) <= WRAP_MAX:
+                continue
+        if cur:
+            out.append(cur)
+        cur = []
     if cur:
         out.append(cur)
     return "\n".join(functools.reduce(join, p) for p in out)

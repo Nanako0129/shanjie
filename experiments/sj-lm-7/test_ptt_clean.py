@@ -52,15 +52,29 @@ class Pages(unittest.TestCase):
             b = P.body('<div id="main-content" class="bbs-screen bbs-content">' + self.META.format(extra=extra) + self.TAIL)
             self.assertEqual(b.strip(), "今天去看電影，很好看。", extra)
 
-    def test_hard_wrapped_lines_are_joined_inside_a_paragraph_and_blank_lines_separate(self):
-        text = "今天去看了一部電影，\n劇情真的很好看，\n推薦給大家。\n\n第二段只有一行。\niPhone\n15 很好用"
-        self.assertEqual(P.paragraphs(text), "今天去看了一部電影，劇情真的很好看，推薦給大家。\n第二段只有一行。iPhone 15 很好用")
+    def test_only_lines_at_the_wrap_width_are_joined(self):
+        wrapped = "今天去看了一部電影，劇情真的很好看，演員也都很到位，整體來說非常推薦給大家去看"   # 39 full-width + 1 = 78 columns
+        self.assertEqual(P.width(wrapped), 78)
+        text = wrapped + "\n一下。\n\n第二段只有一行。\n今天好累\n明天再說"
+        self.assertEqual(P.paragraphs(text), wrapped + "一下。\n第二段只有一行。\n今天好累\n明天再說")
         page = '<div id="main-content" class="bbs-screen bbs-content">' + self.META.format(extra="") + "\n\n" + text + "\n--\n" + "</div>"
-        self.assertEqual(P.body(page).split("\n"), ["今天去看了一部電影，劇情真的很好看，推薦給大家。", "第二段只有一行。iPhone 15 很好用"])
+        self.assertEqual(P.body(page).split("\n"), [wrapped + "一下。", "第二段只有一行。", "今天好累", "明天再說"])
+
+    def test_ambiguous_width_counts_two_and_a_quote_ends_the_piece(self):
+        line = "…" * 39 + "a"                              # 39 ambiguous-width ellipses (2 columns each on PTT) + 1 = 79 columns
+        self.assertEqual(P.width(line), 79)
+        self.assertEqual(P.paragraphs(line + "\n好"), line + "好")
+        wrapped = "好" * 39                                 # 78 columns: would continue, but the quote line between ends it
+        self.assertEqual(P.paragraphs(wrapped + "\n: 被引用的話\n另一個回應。"), wrapped + "\n另一個回應。")
+
+    def test_wrap_width_bounds(self):
+        for n, joined in ((76, False), (77, True), (80, True), (81, False)):
+            line = "a" * n
+            self.assertEqual(P.paragraphs(line + "\n好"), line + ("好" if joined else "\n好"), n)
 
     def test_quoted_reply_lines_are_dropped(self):
         text = "※ 引述《aaa (bbb)》之銘言：\n: 這是被引用的一句話。\n: 第二行引文\n我的回應在這裡，\n接著說下去。\n\n: 另一段引文\n結尾。"
-        self.assertEqual(P.paragraphs(text), "我的回應在這裡，接著說下去。\n結尾。")
+        self.assertEqual(P.paragraphs(text), "我的回應在這裡，\n接著說下去。\n結尾。")
         self.assertEqual(P.paragraphs(":沒有空格的冒號開頭不算引文"), ":沒有空格的冒號開頭不算引文")
 
     def test_a_page_without_main_content_is_empty(self):
