@@ -14,9 +14,9 @@
   "tool_commit": "unknown"
  },
  "counts_x": {
-  "input_sha256": "8c3e91ef7cd0ffebe600f7386a0c81f7d52bf61791d39d8ab956e35d3f6c653f",
+  "input_sha256": "584db407e909eed9b4aeb1482eacf8116186478d7349b80f7214a6919050fd86",
   "ptt_tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f",
-  "sha256": "1f1eef64993fe17b4db38cb63fb9e6d8a65f3c0e5184c505ddb3267f3db82c0e",
+  "sha256": "34eca77ceae5bc34df5691cdffde77063d565c2774a2bf4da2748b0743693939",
   "tool_commit": "unknown"
  },
  "dropped_unreadable": 1,
@@ -33,8 +33,8 @@
   }
  },
  "meme_x": {
-  "meme-x-strings.txt": "8c3e91ef7cd0ffebe600f7386a0c81f7d52bf61791d39d8ab956e35d3f6c653f",
-  "meme-x.tsv": "740e664162b3152218b3735d93b5d625fd3afbc8e8aa80ead22a0ba11d1f77d0"
+  "meme-x-strings.txt": "584db407e909eed9b4aeb1482eacf8116186478d7349b80f7214a6919050fd86",
+  "meme-x.tsv": "08694138cfbc61b7589fb2c74cfadc533bcc61e987599191a61aa9f33c570b38"
  },
  "rows": 22,
  "sources": {
@@ -44,17 +44,17 @@
   "streetdict": 11
  },
  "stages": {
-  "admitted": 709,
+  "admitted": 684,
   "below_threshold": 559,
   "candidates": 2131,
-  "dedupe_lexicon": 825,
+  "dedupe_lexicon": 850,
   "dedupe_packs": 37,
-  "dropped_already_right": 442,
+  "dropped_already_right": 428,
   "dropped_by_c_rule": 8,
   "dropped_same_reading": 4,
-  "dropped_x_not_fewer": 57,
+  "dropped_x_not_fewer": 56,
   "dropped_x_other_pack": 4,
-  "excluded_by_meme_collisions_tsv": 173,
+  "excluded_by_meme_collisions_tsv": 163,
   "no_count": 0,
   "unreadable": 1
  },
