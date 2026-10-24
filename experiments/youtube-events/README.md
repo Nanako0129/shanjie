@@ -21,3 +21,12 @@
 - 步驟 6：`--names-hint` 是每行一個字串的名單；`--readings` 是 `字串<TAB>讀音（音節以空白分隔）`、`--counts` 是 `詞<TAB>PTT 文章數`，兩個都給才會在 `same_reading` 列出詞庫裡同讀音的詞與文章數（net-slang 的同讀音規則由 main 審查時套用）。已在詞庫各層（基底、`overlay-add.tsv`、`names-add.tsv`、`slang-add.tsv`、兩個詞包）的字串不輸出。
 - 分流優先序：`names`（在名單提示裡）＞ `net-slang`（長期在用）＞ `hot-word`（新聞過關、不長期）＞ `drop`。
 - 常數都在檔案開頭，可調：`extract_candidates.py` 的 `STOP_PHRASES`（頻道名與固定系列後綴）、`GENERIC`（章節套話）、`SPLIT_WORDS`；`verify_news.py` 與 `ptt_longterm.py` 的門檻。
+
+## C：語音辨識比較（契約 §3）
+
+| 步驟 | 指令 | 輸出 |
+|---|---|---|
+| 轉寫（Colab GPU，需求寫在檔頭） | `python3 asr_run.py WAV_DIR OUT_DIR --models tea,breeze,whisper` | `OUT_DIR/<模型>/<影片>.json`（文字、時間、牆鐘秒、音訊秒）；已有的跳過 |
+| 字錯率（Mac） | `python3 asr_cer.py picks.json SUB_DIR OUT_DIR [--sources DIR]` | TSV：每部每模型一列加 TOTAL；不印逐字稿 |
+
+`asr_cer.py` 用 `experiments/s2/build_counts.py` 的 OpenCC 表（`--sources` 指到放 `opencc/` 的資料夾）。
