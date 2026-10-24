@@ -123,43 +123,50 @@ _P = None   # p2clean, set by main; forked workers inherit it
 
 
 def _page(f):
-    """One page: (unit, {kind: (kept sentences, rejection counts)}). Pure, so pages can be cleaned in any process."""
+    """One page: (unit, {kind: ([(sentence, dedupe key, han count)], rejection counts)}). Pure, so pages can be cleaned in any
+    process; the key and the count are computed here so the parent only looks keys up."""
     page = open(f, encoding="utf-8", errors="replace").read()
     unit = os.path.basename(os.path.dirname(f)) + "/" + os.path.basename(f)[:-5]
     res = {}
     for kind in ("body", "push"):
         why = collections.Counter()
-        res[kind] = (unit_sentences(_P, [body(page)] if kind == "body" else merged_pushes(page), why), why)
+        kept = unit_sentences(_P, [body(page)] if kind == "body" else merged_pushes(page), why)
+        res[kind] = ([(s, _P.dedupe_key(s), _P.han_count(s)) for s in kept], why)
     return unit, res
 
 
-def main(src, out, jobs=1):
+def _pages(files, jobs, chunksize):
+    """_page over files, in their order. jobs > 1: a forked pool (the workers inherit _P); leaving early (an error, Ctrl-C) terminates it."""
+    if jobs == 1:
+        yield from map(_page, files)
+        return
+    with multiprocessing.get_context("fork").Pool(jobs) as pool:
+        yield from pool.imap(_page, files, chunksize)     # imap returns results in the order of files
+
+
+def main(src, out, jobs=1, chunksize=256):
     global _P
-    P = _P = load_p2clean()
+    if jobs < 1:
+        raise ValueError(f"jobs must be at least 1, not {jobs}")
+    _P = load_p2clean()
     os.makedirs(out, exist_ok=True)
     files = sorted(glob.glob(os.path.join(src, "*", "*.html")))
-    acc = {kind: (set(), collections.Counter(), []) for kind in ("body", "push")}
-    pool = multiprocessing.get_context("fork").Pool(jobs) if jobs > 1 else None     # fork: the workers inherit _P
-    try:
-        for unit, res in (pool.imap(_page, files, chunksize=256) if pool else map(_page, files)):   # imap keeps the sorted order
-            for kind, (sents, why) in res.items():
-                seen, w, rows = acc[kind]
-                w.update(why)
-                for s in sents:
-                    k = P.dedupe_key(s)
-                    if k not in seen:
-                        seen.add(k)
-                        rows.append(f"{unit}\t{s}\n")
-    finally:
-        if pool:
-            pool.close()
-            pool.join()
+    # ponytail: both kinds' rows and keys stay in memory together (one read per page); fine on the 64 GB VM, split by kind if it is not.
+    acc = {kind: (set(), collections.Counter(), [], [0]) for kind in ("body", "push")}
+    for unit, res in _pages(files, jobs, chunksize):
+        for kind, (sents, why) in res.items():
+            seen, w, rows, han = acc[kind]
+            w.update(why)
+            for s, k, n in sents:
+                if k not in seen:
+                    seen.add(k)
+                    rows.append(f"{unit}\t{s}\n")
+                    han[0] += n
     stats = {}
-    for kind, (_, why, rows) in acc.items():
+    for kind, (_, why, rows, han) in acc.items():
         with open(os.path.join(out, f"{kind}.tsv"), "w", encoding="utf-8") as fh:
             fh.writelines(rows)
-        stats[kind] = {"units": len(files), "sentences": len(rows), "han": sum(P.han_count(r.split("\t", 1)[1]) for r in rows),
-                       "dropped_by": dict(why.most_common())}
+        stats[kind] = {"units": len(files), "sentences": len(rows), "han": han[0], "dropped_by": dict(why.most_common())}
     print(json.dumps(stats, ensure_ascii=False))
 
 
@@ -169,4 +176,6 @@ if __name__ == "__main__":
     ap.add_argument("out")
     ap.add_argument("--jobs", type=int, default=1)
     a = ap.parse_args()
+    if a.jobs < 1:
+        ap.error("--jobs must be at least 1")
     main(a.src, a.out, a.jobs)

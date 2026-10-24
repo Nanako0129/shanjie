@@ -140,14 +140,18 @@ class EndToEnd(unittest.TestCase):
                 for jobs in (1, 3):
                     out = os.path.join(d, f"out{jobs}")
                     with contextlib.redirect_stdout(io.StringIO()) as buf:
-                        P.main(os.path.join(d, "in"), out, jobs)
+                        P.main(os.path.join(d, "in"), out, jobs, chunksize=1)    # one page per task, so three workers really interleave
                     got[jobs] = [open(os.path.join(out, k + ".tsv"), "rb").read() for k in ("body", "push")] + [buf.getvalue()]
             finally:
                 P.load_p2clean = orig
         self.assertEqual(got[1], got[3])
-        self.assertIn('"units": 120', got[1][2])
+        self.assertIn('"units": 120,', got[1][2])
         self.assertIn('"han_len": 120', got[1][2])          # the per-page rejection counts add up across processes
         self.assertEqual(got[1][0].count(b"\n"), 7)         # 第0..6句正文, first occurrence only
+
+    def test_jobs_below_one_is_an_error(self):
+        with self.assertRaises(ValueError):
+            P.main("unused", "unused", 0)
 
 
 if __name__ == "__main__":
