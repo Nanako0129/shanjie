@@ -1243,6 +1243,8 @@ def collisions_text(col, manifest, ldrop=()):
 
 def write_all(files, manifest, out_dir):
     os.makedirs(out_dir, exist_ok=True)
+    if "acg-sources.tsv" in files:
+        files = dict(files, **{"acg-sources.tsv": fix_sources(files["acg-sources.tsv"])})
     manifest = dict(manifest, files={n: {"sha256": hashlib.sha256(t.encode()).hexdigest(), "bytes": len(t.encode()), "lines": t.count("\n")} for n, t in sorted(files.items())})
     files = dict(files, **{"acg.json": json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"})
     for n, t in files.items():
@@ -1317,14 +1319,15 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None, base_d
     out = [f"words {len(words)} rows {len(rows)}; (a) readings {len({r for r, v in found.items() if any(e[1] == 'a' for e in v)})}, (b) {len({r for r, v in found.items() if any(e[1] == 'b' for e in v)})}, (c) words {len(c)}"]
     out.append(f"kept-c {len(kept_c)}: (c) not in kept-c {sorted(set(c) - set(kept_c))}; kept-c no longer (c) {sorted(set(kept_c) - set(c))}")
     out.append(f"unresolved (a)(b) readings {len(ab)} (outside keep-both and dispositions); reading, word, cond, profile, off-first, on-first:")
-    out += [f"  {r}\t{w}\t{cond}\t{prof}\t{o}\t{n}" for r, v in sorted(ab.items()) for w, cond, prof, o, n in sorted(v)]
+    out += [f"  {r}\t{w}\t{cond}\t{prof}\t{o}\t{n}" + ("\t(known first_named exception)" if (keep_now.get(r), prof) in FIRST_NAMED_EXCEPTIONS else "") for r, v in sorted(ab.items()) for w, cond, prof, o, n in sorted(v)]
     first = first_named(rank, inpack)       # 已處置的讀音：詞包改變了第一名，新的第一名就必須是 first_named
     pairs = [(k, r.split()) for r, k in first.items()]
     bad = []
     for prof in ("chat", "formal"):
         on, off = on_decode(pairs, prof, out_dir), decode(pairs, prof)
         bad += [(prof, k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
-    out.append(f"first_named readings {len(first)}, not first after the pack changed the top1: {bad}")
+    known = [b for b in bad if (b[1], b[0]) in FIRST_NAMED_EXCEPTIONS]
+    out.append(f"first_named readings {len(first)}, not first after the pack changed the top1: {[b for b in bad if b not in known]}; known exceptions (FIRST_NAMED_EXCEPTIONS): {known}")
     kb_pairs = sorted((r, w) for r, w in keep_both)
     out.append("keep-both readings, first place with the pack on (reading, word, chat, formal):")
     on = {prof: on_decode([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
@@ -1369,11 +1372,9 @@ def regrade_rows(lines, sc, grade, rank, yields=frozenset()):
     return [f"{key}\t{w}\t{new[(key, w)]!r}\t{tag}\n" for key, w, _, tag in rows]
 
 
-# 契約 pack-oov 第 1b 節的已知例外（詞, 設定）：開詞包後不必是第一名的 first_named。多力斯：main 也沒打出，維護者 2026-10-24 列為已知例外。
-FIRST_NAMED_EXCEPTIONS = {("多力斯", "chat"), ("多力斯", "formal")}
-# 不強制、保留通語統計的字串（維護者 2026-10-24，51 組第 17 列）：多利斯強制後失去統計，聊天輸給解碼器用通語認得的「麗絲」拼出的「多麗絲」
-# （不在詞庫與詞包裡）；留著統計就回到 main 的多利斯。第 45 列（伊麗絲）維護者選照 V1c 強制：聊天打出伊莉絲，書面是解碼器拼的伊利斯。
-KEEP_STATS = {"多利斯"}
+# 契約 pack-oov 第 1b 節的已知例外（first_named, 設定）：開詞包後不必是第一名。書面的 ㄉㄨㄛ ㄌㄧˋ ㄙ 是解碼器用通語 SJ-LM-6-9.1M 認得的「麗絲」
+# 拼出的「多麗絲」，main 也一樣（維護者 2026-10-24 列為已知例外）。
+FIRST_NAMED_EXCEPTIONS = {("多利斯", "formal")}
 OOV_TAG = "acg-oov"      # 契約 pack-oov 第 1b 節：核心把第 4 欄是這個的列當成通語不認得的詞（不封頂、不扣罰分）
 
 
@@ -1390,7 +1391,7 @@ def forced_words(lines, rank, yields, counts, n, sc, margin=KEEP_MARGIN):
     on = {(key.replace("-", " "), w) for key, w, _, _ in rows if key.replace("-", " ") in decided}
     behind = {w for r, w in on if first.get(r) != w}
     keeps = lambda w: counts.get(w, 0) > 0 and math.log10(counts[w] / n) >= sc[len(w)] - margin
-    return {w for r, w in on if w in behind or not keeps(w)} - KEEP_STATS
+    return {w for r, w in on if w in behind or not keeps(w)}
 
 
 def kept_caps(lines, rank, forced, counts, n):
@@ -1432,22 +1433,23 @@ REGRADE_SRC_SHA = "24b303ec1093498724583dbdfcc8cd339d414f85d58a7a5ad7d5eb7b3f17c
 assert bo.VARIANT_PENALTY == VARIANT_STEP
 
 
-# regrade 複製 acg-sources.tsv 時換掉的來源（詞: 新的來源欄）。一之瀨唯一的來源頁是成人向作品，換成同名角色的作品（維護者 2026-10-24，51 組第 46 列）。
+# 寫出 acg-sources.tsv 時換掉的來源（詞: 新的來源欄；`write_all` 套用，一般建置與 regrade 都一樣）。一之瀨唯一的來源頁是成人向作品，換成同名角色的作品（維護者 2026-10-24，51 組第 46 列）。
 SOURCE_FIXES = {"一之瀨": "歡迎來到實力至上主義的教室@93288183"}
 
 
 def fix_sources(text):
     out = []
     for line in text.splitlines(keepends=True):
-        f = line.split("\t")
-        if f[0] in SOURCE_FIXES:
+        body, nl = line.rstrip("\n"), line[len(line.rstrip("\n")):]
+        f = body.split("\t")
+        if len(f) >= 3 and f[0] in SOURCE_FIXES:
             f[2] = SOURCE_FIXES[f[0]]
-        out.append("\t".join(f))
+        out.append("\t".join(f) + nl)
     return "".join(out)
 
 
 def regrade(src, out=PACKS, bonus=0.0, empty_counts=False):
-    """子命令 regrade：src 的 acg-add.tsv 只重算強制詞（第 1b 節）的分數寫到 out，其他列照抄；acg-sources.tsv 照 SOURCE_FIXES 換掉少數來源後複製；acg.json 換檔案雜湊與 version，加 regrade_bonus。"""
+    """子命令 regrade：src 的 acg-add.tsv 只重算強制詞（第 1b 節）的分數寫到 out，其他列照抄；acg-sources.tsv 複製（`write_all` 套 SOURCE_FIXES）；acg.json 換檔案雜湊與 version，加 regrade_bonus。"""
     counts, n = ({}, 1) if empty_counts else load_counts()
     rank = collision_rank(read_tsv(os.path.join(PACKS, "acg-collisions.tsv")))
     if sha256_file(os.path.join(src, "acg-add.tsv")) != REGRADE_SRC_SHA:
@@ -1457,9 +1459,10 @@ def regrade(src, out=PACKS, bonus=0.0, empty_counts=False):
     yp = os.path.join(PACKS, "acg-yield.tsv")
     yields = {(r[0], r[1]) for r in read_tsv(yp)} if os.path.exists(yp) else set()
     add = v1_pack(lines, rank, yields, counts, n, scores(base_lexicon()), bonus)
-    manifest = {k: v for k, v in json.load(open(os.path.join(src, "acg.json"), encoding="utf-8")).items() if k != "files"}
+    # 未處置的衝突數要解碼才知道，regrade 算不出來：不照抄來源的值，以 --recheck 的報告為準
+    manifest = {k: v for k, v in json.load(open(os.path.join(src, "acg.json"), encoding="utf-8")).items() if k not in ("files", "unresolved_collision_readings")}
     manifest.update(version=manifest["version"].split("-")[0] + "-" + hashlib.sha256(add.encode()).hexdigest()[:8], regrade_bonus=None if empty_counts else bonus)
-    write_all({"acg-add.tsv": add, "acg-sources.tsv": fix_sources(open(os.path.join(src, "acg-sources.tsv"), encoding="utf-8").read())}, manifest, out)
+    write_all({"acg-add.tsv": add, "acg-sources.tsv": open(os.path.join(src, "acg-sources.tsv"), encoding="utf-8").read()}, manifest, out)
     return len(lines)
 
 
@@ -1494,7 +1497,8 @@ def main():
         on = functools.partial(top1, packs=a.recheck_packs)
         base = functools.partial(top1, packs=a.recheck_packs, eval_path=a.base_eval) if a.base_eval else on
         cand = f"rule decoder {a.rule_lm}" if a.recheck_rule else f"CLI {eval_bin()} packs {a.recheck_packs}"
-        print(f"recheck: candidate {cand} dir {a.out}; base CLI {a.base_eval or eval_bin()} packs {a.recheck_packs} dir {a.base} "
+        basis = f"rule decoder {a.rule_lm} (--base-eval and --recheck-packs unused)" if a.recheck_rule else f"CLI {a.base_eval or eval_bin()} packs {a.recheck_packs}"
+        print(f"recheck: candidate {cand} dir {a.out}; base {basis} dir {a.base} "
               f"(the GCP script prints both commits on the line above)")
         text = recheck(a.out, a.report, decode=rule_decoder(check_rule_lm(a.rule_lm)) if a.recheck_rule else top1, base_dir=a.base,
                        base_decode=None if a.recheck_rule else base, on_decode=None if a.recheck_rule else on)

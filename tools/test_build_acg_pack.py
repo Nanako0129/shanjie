@@ -329,21 +329,18 @@ class PackOovV1(unittest.TestCase):
     def forced(self, rows, rank, yields, counts):
         return B.forced_words(rows, rank, yields, counts, self.N, self.SC)
 
-    def test_keep_stats_strings_are_never_forced_in_the_committed_pack(self):
-        # 維護者 2026-10-24（51 組第 17 列）：多利斯保留通語統計，詞包裡它的列沒有 OOV_TAG
-        rows = [l.rstrip("\n").split("\t") for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8") if l.strip()]
-        mine = [r for r in rows if r[1] in B.KEEP_STATS]
-        self.assertEqual({r[1] for r in mine}, B.KEEP_STATS)
-        self.assertEqual([r for r in mine if r[3] == B.OOV_TAG], [])
+    def test_dolisi_is_first_and_keeps_its_statistics_in_the_committed_pack(self):
+        # 維護者 2026-10-24（51 組第 17 列）：ㄉㄨㄛ ㄌㄧˋ ㄙ 的多利斯排第一、通語認得（82 次）所以不強制；多力斯強制、排在它封頂後的分數之下
+        rows = {r[1]: r for r in (l.rstrip("\n").split("\t") for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8") if l.strip())
+                if r[0] == "ㄉㄨㄛ-ㄌㄧˋ-ㄙ"}
+        self.assertEqual((rows["多利斯"][3], rows["多力斯"][3]), ("acg", B.OOV_TAG))
+        self.assertLess(float(rows["多力斯"][2]), float(rows["多利斯"][2]))
 
     def test_source_fixes_replace_only_the_source_column(self):
-        text = "一之瀨\tchar\t舊來源@1\t\n一之瀨帆波\tchar\t別的@2\t\n"
-        self.assertEqual(B.fix_sources(text), f"一之瀨\tchar\t{B.SOURCE_FIXES['一之瀨']}\t\n一之瀨帆波\tchar\t別的@2\t\n")
-
-    def test_keep_stats_are_removed_from_the_forced_set(self):
-        rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
-        rows = self.ROWS + ["a-b\t多利斯\t-7.0\tacg\n"]
-        self.assertNotIn("多利斯", self.forced(rows, rank, set(), {}))
+        new = B.SOURCE_FIXES["一之瀨"]
+        self.assertEqual(B.fix_sources("一之瀨\tchar\t舊來源@1\t\n一之瀨帆波\tchar\t別的@2\t\n"), f"一之瀨\tchar\t{new}\t\n一之瀨帆波\tchar\t別的@2\t\n")
+        self.assertEqual(B.fix_sources("一之瀨\tchar\t舊來源@1\n下一列\n"), f"一之瀨\tchar\t{new}\n下一列\n")   # three columns: the newline stays
+        self.assertEqual(B.fix_sources("一之瀨\n"), "一之瀨\n")
 
     def test_forced_words_are_the_dispositioned_readings_closed_over_the_string(self):
         rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
@@ -391,7 +388,7 @@ class PackOovV1(unittest.TestCase):
         forced = {l.split("\t")[1] for l in now.splitlines() if l.endswith("\t" + B.OOV_TAG)}
         self.assertEqual([a for a, b in zip(lines, now.splitlines(keepends=True)) if a.split("\t")[1] not in forced],
                          [b for b in now.splitlines(keepends=True) if b.split("\t")[1] not in forced], "unforced rows equal the source")
-        self.assertEqual((len(forced), sum(1 for l in now.splitlines() if l.endswith(B.OOV_TAG))), (302, 306))   # 契約修訂四 V1c：處置讀音（含 51 組新加的 23 個）上的字串，減去排第一、通語認得而且封頂不壓過詞包分數 0.5 以上的，再減 KEEP_STATS
+        self.assertEqual((len(forced), sum(1 for l in now.splitlines() if l.endswith(B.OOV_TAG))), (302, 306))   # 契約修訂四 V1c：處置讀音（含 51 組新加的 23 個）上的字串，減去排第一、通語認得而且封頂不壓過詞包分數 0.5 以上的
 
 
 class RecheckBaseDecoder(unittest.TestCase):

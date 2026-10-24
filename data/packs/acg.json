@@ -231,7 +231,7 @@
   "acg-add.tsv": {
    "bytes": 2742994,
    "lines": 45016,
-   "sha256": "5bafc823d66bac3a836c9e241962d33349c6a86c021539d0f03e731dec7e64c4"
+   "sha256": "d482bc9541c90d686e8e99677a2194c04fdb84c9f5454124bc56254d4edef13f"
   },
   "acg-sources.tsv": {
    "bytes": 3145163,
@@ -260,8 +260,7 @@
  },
  "unclassified_groups": [],
  "unreadable_dropped": 62,
- "unresolved_collision_readings": 0,
- "version": "20261022-5bafc823",
+ "version": "20261022-d482bc95",
  "words": 44552,
  "yearly_lists": {
   "2020": {
