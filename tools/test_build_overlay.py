@@ -66,18 +66,33 @@ class Cantonese(unittest.TestCase):
 
 
 class ShippedOverlay(unittest.TestCase):
-    def test_the_manual_tail_is_what_manual_rows_makes_today(self):
-        """Without the dumps: the `manual` rows of overlay-add.tsv are its last rows and equal manual_rows() over the committed
-        overlay-manual.tsv, so editing one file without regenerating the other fails here."""
+    def test_the_tails_are_what_tail_rows_makes_today(self):
+        """Without the dumps: overlay-add.tsv ends with the `manual` rows, then the `slang` rows (docs/contracts/net-slang.md), and the
+        tail equals tail_rows() over the committed overlay-manual.tsv and slang-add.tsv, so editing one file without regenerating fails here."""
         with open(B.OUT, encoding="utf-8") as f:
             lines = f.readlines()
         tags = [l.rstrip("\n").split("\t")[3] for l in lines]
-        tail = tags.index("manual") if "manual" in tags else len(lines)
-        self.assertTrue(all(t == "manual" for t in tags[tail:]), "manual rows are the tail")
+        tail = next((i for i, t in enumerate(tags) if t in ("manual", "slang")), len(lines))
+        self.assertEqual(tags[tail:], sorted(tags[tail:], key=("manual", "slang").index), "manual rows, then slang rows, are the tail")
         base = ime.Lexicon(B.BASE)
-        taken = set(base.by_word) | {l.split("\t")[1] for l in lines[:tail]} | B.pack_words()
-        self.assertEqual(lines[tail:], B.manual_rows(taken, B.length_scores(base), B.base_syllables(base)))
+        taken = set(base.by_word) | {l.split("\t")[1] for l in lines[:tail]}
+        self.assertEqual(lines[tail:], B.tail_rows(taken, B.length_scores(base), B.base_syllables(base)))
+        self.assertEqual(lines, B.rebuild_tails())
 
+    def test_no_slang_file_leaves_the_manual_tail_alone(self):
+        base = ime.Lexicon(B.BASE)
+        args = (set(base.by_word), B.length_scores(base), B.base_syllables(base))
+        with tempfile.TemporaryDirectory() as d:
+            without = B.tail_rows(*args, slang=os.path.join(d, "absent.tsv"))
+        self.assertEqual(without, B.manual_rows(args[0] | B.pack_words(), *args[1:]))
+        self.assertNotIn("slang", {r.rstrip("\n").split("\t")[3] for r in without})
+
+
+class SlangBehind(unittest.TestCase):
+    def test_later_words_on_a_reading_drop_by_their_rank(self):
+        rows = ["a\t甲\t-5.0\tslang\n", "a\t乙\t-5.0\tslang\n", "b\t丙\t-5.0\tslang\n", "a\t丁\t-5.0\tslang\n"]
+        got = [float(r.split("\t")[2]) for r in B.slang_behind(rows)]
+        self.assertEqual(got, [-5.0, -5.0 - B.SLANG_BEHIND, -5.0, -5.0 - 2 * B.SLANG_BEHIND])
 
 if __name__ == "__main__":
     unittest.main()

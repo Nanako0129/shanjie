@@ -25,7 +25,10 @@ import readings  # noqa: E402  萌典路徑
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 維護者手動加的詞，接在產生的列後面（來源 manual）
-PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
+SLANG = os.path.join(ROOT, "data", "lexicon", "slang-add.tsv")   # 網路用語（docs/contracts/net-slang.md），接在手動詞後面（來源 slang）；沒有這個檔時輸出和以前相同
+NAMES = os.path.join(ROOT, "data", "lexicon", "names-add.tsv")
+PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")
+IT_PACK = os.path.join(ROOT, "data", "packs", "it-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
 # 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
 # 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
 # model-v6 §2.8 規則 2（維護者 2026-10-14）：0.5 是 model-v5 上剛好過關的最小值；開 KN 的 model-v6 書面「米雅歌唱得很好」輸，改 0.75。
@@ -197,8 +200,43 @@ def build():
         rows += overlay_rows(w, syls, SCORE[len(w)], src)
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
-    rows += manual_rows(words | overlay_words | pack_words(), length_scores(base), base_syllables(base))
-    return rows, removed, variant_removed
+    return rows + tail_rows(words | overlay_words, length_scores(base), base_syllables(base)), removed, variant_removed
+
+
+def rebuild_tails(out=OUT):
+    """overlay-add.tsv 產生的列（標籤不是 manual、slang）照舊，檔尾照 tail_rows 重算；給只改了手動詞或網路用語的時候用，不必有 dump。"""
+    with open(out, encoding="utf-8") as f:
+        kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")]
+    base = ime.Lexicon(BASE)
+    return kept + tail_rows(set(base.by_word) | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base))
+
+
+def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG):
+    """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、兩個詞包或手動詞的詞。"""
+    rows = manual_rows(taken | pack_words(), scores, syllables, manual)
+    if os.path.exists(slang):
+        rows += slang_behind(manual_rows(taken | pack_words() | pack_words(IT_PACK) | names_words() | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"))
+    return rows
+
+
+# docs/contracts/net-slang.md §2（維護者 2026-10-24「用量多的留第一」）：同一個讀音有好幾個網路用語時，檔案裡排在前面的（PTT 用量多的）留第一，
+# 後面的寫法分數再扣這個值、只當候選。1.0 是取整的保守值，和手動詞加分 0.75 同一個量級：兩個都加過分，扣 1.0 後一定排在後面。
+SLANG_BEHIND = 1.0
+
+
+def slang_behind(rows):
+    """網路用語的列照檔案順序：一個讀音上第 k 個網路用語（k 從 0 起）的列，分數扣 k × SLANG_BEHIND。"""
+    seen, out = {}, []
+    for r in rows:
+        key, w, score, tag = r.rstrip("\n").split("\t")
+        words = seen.setdefault(key, [])
+        if w not in words:
+            words.append(w)
+        k = words.index(w)          # 這個讀音上第 k 個網路用語（0 是第一名）：扣 k 倍，後面的寫法彼此也不同分
+        if k:
+            r = f"{key}\t{w}\t{round(float(score) - k * SLANG_BEHIND, 8)!r}\t{tag}\n"
+        out.append(r)
+    return out
 
 
 def cantonese(w, headwords):
@@ -225,7 +263,12 @@ def pack_words(path=PACK):
         return {l.split("\t")[1] for l in f}
 
 
-def manual_rows(taken, scores, syllables, path=MANUAL):
+def names_words(path=NAMES):
+    with open(path, encoding="utf-8") as f:
+        return {l.split("\t")[1] for l in f if "\t" in l}
+
+
+def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
     """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。每列都要：三欄；詞是純漢字、字數在 scores 裡（2 字以上）、
     不在 taken（基底、疊加層、詞包）；讀音的音節數等於字數，每個音節都是基底有的音節。產生的列（含 overlay_rows 自動加的變調列）
     同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS。"""
@@ -243,7 +286,7 @@ def manual_rows(taken, scores, syllables, path=MANUAL):
             ok = bool(MANUAL_WORD.match(w)) and len(w) in scores and len(syls) == len(w) and all(s in syllables for s in syls) and w not in taken
         if not ok:
             raise SystemExit(f"{path}:{n}: bad manual row")
-        for r in overlay_rows(w, syls, round(scores[len(w)] + MANUAL_BONUS, 8), "manual"):
+        for r in overlay_rows(w, syls, round(scores[len(w)] + MANUAL_BONUS, 8), tag):
             key = tuple(r.split("\t")[:2])
             if key in seen:
                 raise SystemExit(f"{path}:{n}: {w!r} repeats a reading already listed (sandhi rows count)")
@@ -255,8 +298,17 @@ def manual_rows(taken, scores, syllables, path=MANUAL):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
+    a = ap.parse_args()
+    if a.tails_only:
+        rows = rebuild_tails()
+        with open(OUT + ".tmp", "w", encoding="utf-8") as f:
+            f.writelines(rows)
+        os.replace(OUT + ".tmp", OUT)
+        print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)} (tails only)")
+        return
     rows, removed, variant_removed = build()
-    if ap.parse_args().check:
+    if a.check:
         same = (open(OUT, encoding="utf-8").readlines() == rows and open(REMOVED, encoding="utf-8").readlines() == removed
                 and open(VARIANT_REMOVED, encoding="utf-8").readlines() == variant_removed)
         print(f"{len(rows)} rows, {len(removed)} removed, {len(variant_removed)} variant-removed; {'matches' if same else 'DIFFERS FROM'} the files in the repo")
