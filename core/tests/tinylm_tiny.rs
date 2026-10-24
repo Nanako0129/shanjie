@@ -116,7 +116,8 @@ fn bad_files_are_format_errors() {
             ("SJTL0003 + 1", at(7, b"3")),
             ("SJTL0003 + 2", relabel(&good, b'3', 2)),
             ("SJTL0002 + 3", relabel(&good, b'2', 3)),
-            ("unknown version SJTL0005 + 5", relabel(&good, b'5', 5)),
+            ("unknown version SJTL0006 + 6", relabel(&good, b'6', 6)),
+            ("a version 1 body under a version 5 header", relabel(&good, b'5', 5)),
             ("SJTL0004 + 1", at(7, b"4")),
             ("weight type", at(12, &2u32.to_le_bytes())),
             ("n_layer 0", at(16, &0u32.to_le_bytes())),
@@ -541,4 +542,48 @@ fn load_paired_binds_the_kn_side_file() {
         [KnPairing::TunedWithout, KnPairing::OtherSideFile, KnPairing::TunedWith].map(|e| TinyLmError::KneserNey(e).to_string()).to_vec();
     assert!(msgs.iter().all(|m| m.contains(".sjtl") && m.contains("kn.sjkn")), "{msgs:?}");
     assert!(msgs[0].contains("tuned without") && msgs[1].contains("another") && msgs[2].contains("none is loaded"), "{msgs:?}");
+}
+
+
+// ---------- context-return: SJTL0005 and the declared left-context length (docs/contracts/context-return.md section 2) ----------
+
+/// The version 4 file as version 5: its 244 header bytes relabelled, then L (u32) at 244, then the rest.
+fn v5(l: u32) -> Vec<u8> {
+    let b = bytes(V4);
+    relabel(&[&b[..244], &l.to_le_bytes(), &b[244..]].concat(), b'5', 5)
+}
+
+/// L is read from 244 and nothing else moves: the same parameters, hashes and LLs as the version 4 file; versions 1 to 4 declare
+/// none. 1 <= L <= ctx - 2 (the toy's ctx is 64): 0 and 63 are refused, as are a version 5 header on a version 4 body and the
+/// crosses of magic and version field, and every prefix of the header.
+#[test]
+fn v5_declares_the_left_context_length() {
+    let (v4, m) = (TinyLm::parse(&bytes(V4)).unwrap(), TinyLm::parse(&v5(8)).unwrap());
+    assert_eq!((m.left_len(), m.ctx()), (Some(8), 64));
+    for p in [Profile::Chat, Profile::Formal] {
+        for level in [RerankLevel::Conservative, RerankLevel::Standard, RerankLevel::Aggressive] {
+            assert_eq!(m.params(p, level), v4.params(p, level));
+        }
+    }
+    assert_eq!((m.ngram_sha256(), m.kn_sha256(), m.has_levels()), (v4.ngram_sha256(), v4.kn_sha256(), true));
+    let its = items();
+    let pairs: Vec<(&str, &str)> = its.iter().map(|(k, c, ..)| (k.as_str(), c.as_str())).collect();
+    let (x, y) = (v4.ll_many(&pairs).unwrap(), m.ll_many(&pairs).unwrap());
+    assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()), "LLs differ");
+    for f in ["tiny-int8.sjtl", "tiny-int8-v2.sjtl", V3, V4] {
+        assert_eq!(TinyLm::parse(&bytes(f)).unwrap().left_len(), None, "{f}");
+    }
+    assert_eq!(TinyLm::parse(&v5(1)).unwrap().left_len(), Some(1));
+    assert_eq!(TinyLm::parse(&v5(62)).unwrap().left_len(), Some(62), "ctx - 2");
+    for l in [0, 63, 64, u32::MAX] {
+        assert!(is_format(&v5(l)), "L {l}");
+    }
+    let good = v5(8);
+    for n in 0..=248 {
+        assert!(is_format(&good[..n]), "prefix of {n} bytes");
+    }
+    assert!(is_format(&relabel(&bytes(V4), b'5', 5)), "a version 4 body under a version 5 header");
+    assert!(is_format(&relabel(&good, b'4', 4)), "a version 5 body under a version 4 header");
+    assert!(is_format(&relabel(&good, b'5', 4)), "SJTL0005 + 4");
+    assert!(is_format(&relabel(&good, b'4', 5)), "SJTL0004 + 5");
 }

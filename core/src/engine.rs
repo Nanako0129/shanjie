@@ -61,7 +61,8 @@ pub struct RerankJob {
     /// The engine's lexicon, `Some` only where the reading-channel term applies (docs/contracts/reading-channel.md): when `colloquial` is
     /// `Some` and the engine's reading channel is on (the default; `Engine::set_reading_channel`).
     channel_lex: Option<Arc<Lexicon>>,
-    /// The engine's left context when the job was made.
+    /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
+    /// the last L characters of `Engine::left_full` (context-return section 2; nothing longer is copied into a job).
     left: String,
     stretches: Vec<Stretch>,
 }
@@ -86,7 +87,9 @@ pub struct RerankResult {
 impl RerankJob {
     /// Section 2.4: `TinyLm::rerank` on every stretch in order; a candidate longer than the model's context keeps the first.
     /// Revision 1: a stretch's context key is `context_key` of the left context and the text before it as it will be shown,
-    /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before).
+    /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before). A model declaring a
+    /// left-context length L (SJTL0005) gets the last L characters of that same text instead, not through `context_key`
+    /// (context-return section 2).
     pub fn run(&self) -> RerankResult {
         let mut before = self.left.clone();
         let choices = self
@@ -94,7 +97,10 @@ impl RerankJob {
             .iter()
             .map(|s| {
                 before.push_str(&s.gap);
-                let key = context_key(&before);
+                let key = match self.model.left_len() {
+                    Some(l) => last_chars(&before, l),
+                    None => context_key(&before),
+                };
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
                 let pick = match &self.colloquial {
@@ -121,10 +127,11 @@ impl RerankJob {
         self.stretches.iter().flat_map(|s| &s.paths).map(|p| p.iter().map(|w| w.0.chars().count()).sum()).max().unwrap_or(0)
     }
 
-    /// Test hook (the FFI panic test): every candidate's text, so an injected panic payload carries input text.
+    /// Test hook (the FFI panic test): the job's left context and every candidate's text, so an injected panic payload carries input text.
     #[cfg(test)]
     pub(crate) fn texts(&self) -> String {
-        self.stretches.iter().flat_map(|s| s.paths.iter().flatten().map(|w| w.0.as_str())).collect()
+        let cands: String = self.stretches.iter().flat_map(|s| s.paths.iter().flatten().map(|w| w.0.as_str())).collect();
+        format!("{}{cands}", self.left)
     }
 }
 
@@ -232,6 +239,23 @@ const DEFAULT_PUNCT: [(char, &[&str]); 10] = [
 /// s3e §3 limits on a table passed to `set_punctuation`.
 const PUNCT_TABLE_MAX_BYTES: usize = 64 * 1024;
 const PUNCT_TABLE_MAX_LINES: usize = 1000;
+
+/// The last `n` characters of `s` (by `chars()`, never a byte slice: context-return section 2, P3-5).
+fn last_chars(s: &str, n: usize) -> String {
+    s.chars().skip(s.chars().count().saturating_sub(n)).collect()
+}
+
+/// context-return section 2: `text` ends, after at most one ASCII space, with 2-32 ASCII letters not preceded by an ASCII letter or
+/// digit. Returns the character index where the word starts and the text from there (the word and that space). Only ASCII decides.
+fn english_tail(text: &str) -> Option<(usize, String)> {
+    let body = text.strip_suffix(' ').unwrap_or(text);
+    let n = body.chars().rev().take_while(char::is_ascii_alphabetic).count();
+    if !(2..=32).contains(&n) || body.chars().rev().nth(n).is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let at = body.chars().count() - n;
+    Some((at, text.chars().skip(at).collect()))
+}
 
 fn default_punct() -> HashMap<char, Vec<String>> {
     DEFAULT_PUNCT.iter().map(|(k, v)| (*k, v.iter().map(|s| s.to_string()).collect())).collect()
@@ -586,6 +610,13 @@ pub struct Engine {
     pred_dirty: bool,
     /// S4: the Han tail (≤ 2 chars) of the text before the insertion point, from `set_left_context`.
     left: String,
+    /// context-return section 2: only what the small model or the English table can use, from the same text: its last L characters
+    /// when the loaded small model declares L, else its trailing English word (and one space after it), else empty. Never returned over
+    /// the C ABI, written, logged or sent anywhere; cleared with `left` (`clear_all`) and after a rule 22 pass-through.
+    left_full: String,
+    /// `left_full` holds the last L characters of a longer text (it was cut), so a word starting at its first character may be half
+    /// of one (P3-6).
+    left_cut: bool,
     learning: bool,
     /// New-word B §2.1: learning was off at some point of this composition, so its commit learns no new word. Set by
     /// `set_learning(false)` while composing and by any key handled with learning off; cleared by `clear_all` and by
@@ -906,6 +937,8 @@ impl Engine {
             scan_gate: true,
             pred_dirty: false,
             left: String::new(),
+            left_full: String::new(),
+            left_cut: false,
             learning: false,
             paused: false,
             newword: true,
@@ -1100,10 +1133,21 @@ impl Engine {
 
     // ---- S4 learning (docs/contracts/s4-learning.md) ----
 
-    /// §2: keep only the last ≤ 2 consecutive Han characters of `text` (none: empty).
+    /// §2: keep only the last ≤ 2 consecutive Han characters of `text` (none: empty) for decoding, learning and the prediction row's
+    /// key. context-return section 2: `left_full` keeps only what the small model or the English table can use (see the field).
     pub fn set_left_context(&mut self, text: &str) {
         let k = context_key(text);
         self.left = if k == crate::learn::SENTINEL { String::new() } else { k };
+        (self.left_full, self.left_cut) = match self.tinylm.as_ref().and_then(|m| m.left_len()) {
+            Some(l) => (last_chars(text, l), text.chars().nth(l).is_some()),
+            None => (english_tail(text).map_or_else(String::new, |(_, kept)| kept), false),
+        };
+    }
+
+    /// Test hook: how many characters `left_full` holds (context-return section 4; the text itself is never handed out).
+    #[doc(hidden)]
+    pub fn left_full_chars(&self) -> usize {
+        self.left_full.chars().count()
     }
 
     /// §3: off by default. Turning it off drops pending learns; a span is learned only if the flag was
@@ -2225,6 +2269,11 @@ impl Engine {
     /// english-next.md 2.1: the English token the start `s` follows (one space unit may sit between), lower-cased. The units decide, not the
     /// display: a lexicon word that ends in letters (卡拉OK) is no English token.
     fn english_before(&self, s: usize) -> Option<String> {
+        // context-return section 2: at the composition's start, the English word the text before it ends with (not one that may be
+        // cut, starting at the first character of a cut `left_full`).
+        if s == 0 {
+            return english_tail(&self.left_full).filter(|&(at, _)| !(self.left_cut && at == 0)).map(|(_, kept)| kept.trim_end().to_ascii_lowercase());
+        }
         let i = if s > 0 && is_space_unit(&self.syls[s - 1]) { s.checked_sub(2)? } else { s.checked_sub(1)? };
         // Contract 2.1: 2-32 letters (a Shift+letter, Space run makes a one-letter token; the table has none).
         english_of(&self.syls[i]).filter(|w| (2..=32).contains(&w.len())).map(str::to_ascii_lowercase)
@@ -2293,6 +2342,11 @@ impl Engine {
             }
             units.extend(pending.iter().map(|chars| Unit { chars: chars.clone(), done: false, tone: None }));
             let digits_here = s == n && dv.is_some() && dcache.is_some() && dtable.is_some();
+            // context-return section 2: the English word before the composition gives no row of its own on an empty composition
+            // (today the same start returns nothing below: no units and no English token).
+            if s == 0 && units.is_empty() && !digits_here {
+                return Vec::new();
+            }
             // The digit context goes first (english-next.md 2.1).
             let english = etable.as_deref().zip(ecache.as_deref()).filter(|_| !digits_here).and_then(|(t, c)| Some((t.get(&self.english_before(s)?)?, &c.words)));
             if units.is_empty() && !digits_here && english.is_none() {
@@ -2406,6 +2460,8 @@ impl Engine {
     fn clear_all(&mut self) {
         self.invalidate();
         self.left.clear();
+        self.left_full.clear();
+        self.left_cut = false;
         self.syls.clear();
         self.cursor = 0;
         self.clear_pend();
@@ -2638,7 +2694,11 @@ impl Engine {
         self.display = out;
         self.path = path;
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
-            let (params, left) = (model.params(self.profile, self.rerank_level), self.left.clone());
+            let left = match model.left_len() {
+                Some(l) => last_chars(&self.left_full, l),
+                None => self.left.clone(),
+            };
+            let params = model.params(self.profile, self.rerank_level);
             // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
@@ -2911,6 +2971,10 @@ impl Engine {
                 let mark = TONE_MARKS[t];
                 return self.insert_token(format!("{PUNCT_PREFIX}{mark}"), Some(mark.to_string()), None);
             }
+            // context-return section 2 (P3-4): the composition stays empty, and the app's text changes under the cursor.
+            self.left.clear();
+            self.left_full.clear();
+            self.left_cut = false;
             return self.passthrough(String::new()); // 22
         }
         let n = self.syls.len();
