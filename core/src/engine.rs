@@ -541,6 +541,10 @@ pub struct Engine {
     /// The enabled packs' rows `new` read (acg-pack contract A.2), appended to `overlay-add.tsv` when
     /// `load_lm` caps; `None` with no pack, so a pack-off engine holds nothing extra.
     pack_text: Option<String>,
+    /// How many leading bytes of `pack_text` are the rows of the enabled `PACK_OOV` packs, which `load_lm` exempts from the cap.
+    /// They are a prefix because `read_packs_split` reads the `PACK_OOV` packs first; a length, not a copy, so the engine holds the
+    /// rows once.
+    pack_oov_len: usize,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -691,6 +695,10 @@ pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
 pub const PACK_ACG: u32 = 1;
 pub const PACK_IT: u32 = 4;
 pub const PACK_ALL: u32 = PACK_ACG | PACK_IT;
+/// The packs whose rows `CappedLexicon::with_packs` reads (docs/contracts/pack-oov.md section 1b): rows tagged `lm::PACK_OOV_TAG` are
+/// unknown to the model, scored by the pack alone, not capped; the other rows are capped as overlay words, except that a word the model
+/// never saw keeps its pack score. Only the anime pack for now; the IT pack and a pack added later are capped like any overlay.
+pub const PACK_OOV: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
 const PACK_FILES: [(u32, &str); 2] = [(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv")];
 
@@ -719,23 +727,34 @@ fn read_file(p: PathBuf) -> Result<String, LoadError> {
 /// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
 /// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
 pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
-    let mut text = String::new();
-    for (bit, name) in PACK_FILES {
-        if mask & bit == 0 {
-            continue;
-        }
-        match read_file(dir.join(name)) {
-            Ok(t) => {
-                if !text.is_empty() && !text.ends_with('\n') {
-                    text.push('\n');
-                }
-                text.push_str(&t);
+    read_packs_split(dir, mask).map(|(text, _)| text)
+}
+
+/// `read_packs_detailed` and the length of its `PACK_OOV` prefix: the `PACK_OOV` packs are read first, so their rows are
+/// `text[..len]`, exactly what `read_packs_detailed(dir, mask & PACK_OOV)` returns.
+fn read_packs_split(dir: &Path, mask: u32) -> Result<(String, usize), LoadError> {
+    let (mut text, mut oov_len) = (String::new(), 0);
+    for oov in [true, false] {
+        for (bit, name) in PACK_FILES {
+            if mask & bit == 0 || (bit & PACK_OOV != 0) != oov {
+                continue;
             }
-            Err(LoadError::Read { kind: std::io::ErrorKind::NotFound, .. }) => {}
-            Err(e) => return Err(e),
+            match read_file(dir.join(name)) {
+                Ok(t) => {
+                    if !text.is_empty() && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    text.push_str(&t);
+                }
+                Err(LoadError::Read { kind: std::io::ErrorKind::NotFound, .. }) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        if oov {
+            oov_len = text.len();
         }
     }
-    Ok(text)
+    Ok((text, oov_len))
 }
 
 /// The always-on names layer (docs/contracts/names-lexicon.md, model-v6 section 2.5): read after `sandhi-add.tsv` into the lexicon
@@ -759,6 +778,11 @@ pub fn load_lexicon_packs_detailed(data_dir: &Path, packs: Option<(&Path, u32)>)
 /// the same way. `None`: exactly `load_lexicon_packs_detailed`. A missing or unreadable file is a load failure naming it.
 /// `names` false (the CLI's evaluation-only `--no-names`) leaves `names-add.tsv` out of the lexicon; the engine always passes true.
 pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String), LoadError> {
+    load_lexicon_split(data_dir, packs, extra_file, names).map(|(lex, text, _)| (lex, text))
+}
+
+/// `load_lexicon_extra_detailed` and the length of the `PACK_OOV` prefix of the returned text (`read_packs_split`).
+fn load_lexicon_split(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String, usize), LoadError> {
     let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
     let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
     let sandhi = read_file(data_dir.join("sandhi-add.tsv"))?;
@@ -766,9 +790,9 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
     if names {
         text = join_overlays(text, &read_file(data_dir.join(NAMES_FILE))?);
     }
-    let mut extra = match packs {
-        Some((dir, mask)) => read_packs_detailed(dir, mask)?,
-        None => String::new(),
+    let (mut extra, oov_len) = match packs {
+        Some((dir, mask)) => read_packs_split(dir, mask)?,
+        None => (String::new(), 0),
     };
     if let Some(f) = extra_file {
         extra = join_overlays(extra, &read_file(f.to_path_buf())?);
@@ -777,11 +801,12 @@ pub fn load_lexicon_extra_detailed(data_dir: &Path, packs: Option<(&Path, u32)>,
         text = join_overlays(text, &extra);
     }
     let lex = Lexicon::parse_with(&base, Some(&text)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
-    Ok((Arc::new(lex), extra))
+    Ok((Arc::new(lex), extra, oov_len))
 }
 
-/// The text `CappedLexicon::new` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
-/// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows).
+/// The text `CappedLexicon::with_packs` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
+/// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows). Its words are capped at their corpus
+/// frequency, except the rows of the `PACK_OOV` packs that `with_packs` takes again as its `pack_text` and treats by their tag.
 pub fn capping_overlay(data_dir: &Path, pack_text: &str) -> Result<String, EngineError> {
     capping_overlay_detailed(data_dir, pack_text).map_err(|_| EngineError::LoadFailed)
 }
@@ -819,9 +844,10 @@ impl Engine {
             return Err(EngineError::LoadFailed);
         }
         let packs = packs.filter(|&(_, m)| m != 0);
-        let (lex, pack_text) = load_lexicon_packs(data_dir, packs)?;
+        let (lex, pack_text, oov_len) = load_lexicon_split(data_dir, packs, None, true).map_err(|_| EngineError::LoadFailed)?;
         let mut e = Engine::with_lexicon(lex, layout);
         e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
+        e.pack_oov_len = oov_len;
         // Required like the other data files, and every row must name an entry of the lexicon (contract
         // sw-sensitive-demote section 2); `load_lm` reads it again to resolve it against the capped lexicon.
         let demote = std::fs::read_to_string(data_dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
@@ -840,6 +866,7 @@ impl Engine {
             lex,
             data_dir: None,
             pack_text: None,
+            pack_oov_len: 0,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -1381,7 +1408,8 @@ impl Engine {
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
-        let capped = CappedLexicon::new(self.lex.clone(), &overlay, &lm, Some(&demote)).ok_or(EngineError::LoadFailed)?;
+        let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, &self.pack_text.as_deref().unwrap_or("")[..self.pack_oov_len], &lm, Some(&demote))
+            .ok_or(EngineError::LoadFailed)?;
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
@@ -1935,6 +1963,8 @@ impl Engine {
         let st = self.lm.as_ref()?;
         let cfg = st.lm.scoring(self.profile);
         let mut memo = TriMemo::default();
+        // An optional-pack word is unknown to the model here as in the decoder (docs/contracts/pack-oov.md); `history()` itself is unchanged.
+        let id = |s: &str| st.capped.model_id(&st.lm, s);
         let cut = self.run_cut().filter(|_| cfg.tri);
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
         // the current sentence has a word (the history word is not one, and its own eos is not scored).
@@ -1954,14 +1984,14 @@ impl Engine {
         for PathWord { word: w, lp, is_punct, delta, syllables: n } in &self.path {
             if cut == Some(at) {
                 if open {
-                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev));
                 }
                 (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
             }
             if *is_punct {
                 at += 1;
                 if open {
-                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev);
+                    total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev));
                 }
                 (before, prev, open, unknown, count) = (Some("<s>"), "<s>", false, false, 0);
                 continue;
@@ -1974,14 +2004,18 @@ impl Engine {
             // A fixed word is the right neighbour that closes the stretch before it (`End::Next`), so (b') applies to its term.
             let fixed_here = self.fixed.iter().any(|f| f.start == at);
             let u = if fixed_here { close_u(before, unknown, count) } else { before };
-            total += if learned { st.lm.word_learned(cfg.lam, prev, w, *lp) } else { st.lm.word3_in(&mut memo, cfg, u, prev, w, *lp) } - delta;
+            total += if learned {
+                st.lm.word_learned_by_id(cfg.lam, id(prev), id(w), *lp)
+            } else {
+                st.lm.word3_in(&mut memo, cfg, u.and_then(id), id(prev), id(w), *lp)
+            } - delta;
             // The stretch after a fixed word starts from (unknown, that word); inside a stretch the history is the last two words.
             before = if fixed_here { None } else { Some(prev) };
             (unknown, count) = if fixed_here { (true, 0) } else { (unknown, count + 1) };
             at += n;
             (prev, any, open) = (w, true, true);
         }
-        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count), prev) } else { total })
+        any.then(|| if open { total + st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev)) } else { total })
     }
 
     /// §6 reset: Commit returns the composition as shown, unfinished symbols included, like Enter (enter-pending

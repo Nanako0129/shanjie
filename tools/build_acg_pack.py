@@ -10,6 +10,8 @@
       --recheck                                       不重建：用 data/lm 的出貨模型重驗 --out 裡的詞包（契約 A3.5 第 6 項）
       --recheck-rule                                  --recheck 改用規則模型（--rule-lm）
       --base DIR                                      --recheck 時另外比 v0.4.0 詞包（DIR/acg-add.tsv）每一列的第一名有沒有變
+      --bonus B                                       分級分數的加分 B（契約 pack-oov 第 1 節第 3 項：g(w) = max(S_len, log10(c/N) + B)，預設 0）
+      freeze-counts                                   子命令：從 data/lm 的 model-v6 凍結詞包詞的次數，寫 data/packs/acg-counts.tsv；一般建置只讀這份表
 
 只連 zh.wikipedia.org/w/api.php 與 query.wikidata.org，依序送出、每秒不超過 1 個、帶 User-Agent 與 maxlag=5。
 讀音靠 tools/readings.py（需要萌典與小麥的破音字表，路徑見該檔），同音衝突靠評測 CLI（target/release/shanjie-eval，
@@ -20,6 +22,7 @@ import collections
 import functools
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -39,6 +42,11 @@ import ime  # noqa: E402
 PACKS = os.path.join(ROOT, "data", "packs")
 LEX = os.path.join(ROOT, "data", "lexicon")
 LM = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
+COUNTS = os.path.join(PACKS, "acg-counts.tsv")
+# docs/contracts/pack-oov.md 第 1 節第 3 項：凍結的次數表（只有 `freeze-counts` 會寫），一般建置只讀它，不看 data/lm 是哪一版。
+# 表檔的 SHA-256 釘在這裡；空字串＝還沒釘（freeze-counts 之後由人填），一般建置遇到就中止。
+COUNTS_SHA = "2ad50f02953ead839aef985be872941d987742197ecd34a9bb34532c6b8174ec"
+MODEL_V6_SHA = "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42"
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/acg")
 UA = "shanjie-acg-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"
 WORKS = 400                       # 契約 A.1：sitelink 數最多的作品數
@@ -792,15 +800,59 @@ NEW_BEHIND_SHIPPED = 3.0
 TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE：解碼器遇到同分時的先後與檔案順序無關（2026-10-10 實測），要讓「來源數多的在前」成立只能靠分數
 
 
-def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, tag=TAG):
+def freeze_counts(lm_path=LM, out=COUNTS, add=os.path.join(PACKS, "acg-add.tsv"), model_sha=MODEL_V6_SHA):
+    """子命令 freeze-counts：data/lm 的模型雜湊要等於 model_sha（model-v6）才寫；寫出 add 裡每個詞在模型裡的次數（次數 0 的不寫，查不到就是 S_len）。
+    檔頭兩行記模型雜湊與 N。"""
+    if sha256_file(lm_path) != model_sha:
+        raise SystemExit(f"{lm_path}: not the model whose counts are frozen (SHA-256 {model_sha})")
+    sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+    import lm as L          # 延後載入：只有這個子命令要讀模型
+    lm = L.BigramLM(lm_path, classes=False)
+    words = sorted({l.split("\t")[1] for l in open(add, encoding="utf-8") if l.strip()})
+    lines = [f"#model_sha256\t{model_sha}\n", f"#N\t{lm.N}\n"] + [f"{w}\t{c}\n" for w in words for c in [lm.count(w)] if c]
+    with open(out, "w", encoding="utf-8", newline="") as f:
+        f.writelines(lines)
+    return len(lines) - 2
+
+
+def load_counts(path=COUNTS, sha=None):
+    """凍結的次數表 → ({詞: 次數}, N)。表不存在、或檔的 SHA-256 不等於釘住的常數（COUNTS_SHA）就中止；不讀 data/lm。"""
+    sha = COUNTS_SHA if sha is None else sha
+    if not os.path.exists(path):
+        raise SystemExit(f"{path}: missing; run `build_acg_pack.py freeze-counts` first")
+    if not sha or sha256_file(path) != sha:
+        raise SystemExit(f"{path}: SHA-256 is not the pinned {sha or '(unset)'}")
+    counts, n = {}, None
+    for l in open(path, encoding="utf-8"):
+        f = l.rstrip("\n").split("\t")
+        if f[0] == "#N":
+            n = int(f[1])
+        elif not f[0].startswith("#"):
+            counts[f[0]] = int(f[1])
+    if not n:
+        raise SystemExit(f"{path}: no #N header")
+    return counts, n
+
+
+def grade_fn(counts, n, bonus):
+    """分級分數 g(w) = max(S_len, log10(c/N) + B)；不在表裡的詞一律 S_len。回傳 (詞, S_len) → 分數。"""
+    return lambda w, s_len: max(s_len, math.log10(counts[w] / n) + bonus) if w in counts else s_len
+
+
+def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, grade=None, yields=frozenset(), tag=TAG):
     """每個詞的列，格式和 build_overlay 共用同一個函式；同讀音的列依 order 的先後各減 k × TIE，讓同分的詞有固定的第一名。
     extra：{詞: [另外的讀音]}（手動詞第四欄），這些讀音也各有一列（含變調列），和主要讀音同分數。
     tag：來源標籤（IT 詞包用 `it`，tools/build_it_pack.py）。
     shipped（契約 A3 使用者決定）：已出貨的詞的讀音上，新詞的列另外減 NEW_BEHIND_SHIPPED，新詞只是候選、不搶已出貨的選字；order 裡已出貨的詞要排在前面，它們的 k 才和 v0.4.0 一樣。
+    grade（契約 pack-oov）：(詞, S_len) → 分級分數；給了就用它取代 S_len，而且同讀音內依 order 走：第 i 列 = min(g(w_i), 第 i−1 列 − TIE)，所以分級只會
+    把整個讀音一起抬高或壓低、不改讀音內的先後；NEW_BEHIND_SHIPPED 在這之後才扣。沒給＝原本的 S_len 減 k × TIE。
+    yields：{(讀音（空白分隔）, 詞)}，acg-yield.tsv；這些列在分級之後再扣 NEW_BEHIND_SHIPPED，和 regrade_rows 一樣。
     first（契約 A4，維護者 2026-10-23）：{讀音（空白分隔）: 處置列要它排第一的詞}；這個詞在那個讀音上不減 NEW_BEHIND_SHIPPED，處置列的順序勝過「已出貨優先」。"""
     rows, seen = [], collections.Counter()
     extra = extra or {}
-    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, sc[len(w)], tag)]
+    score_of = (lambda w: grade(w, sc[len(w)])) if grade else (lambda w: sc[len(w)])
+    gen = lambda w: [(w, syls, r.rstrip("\n").split("\t")) for syls in [reading[w]] + list(extra.get(w, [])) for r in bo.overlay_rows(w, syls, score_of(w), tag)]
+    prev = {}
     ship_keys = {f[0] for w in order if w in shipped for _, _, f in gen(w)}
     for w in order:
         for _, _, (key, word, score, tag) in gen(w):
@@ -809,6 +861,13 @@ def pack_rows(order, reading, sc, extra=None, shipped=frozenset(), first=None, t
             # ponytail: the exemption matches the disposition's reading only; a first-named word's sandhi or extra-reading rows on a
             # shipped key are still penalized (A4: 0 of 145 first-named words have such a row). Match the word's derived keys if one appears.
             pen = NEW_BEHIND_SHIPPED if w not in shipped and key in ship_keys and (first or {}).get(key.replace("-", " ")) != w else 0
+            if (key.replace("-", " "), w) in yields:
+                pen += NEW_BEHIND_SHIPPED
+            if grade:
+                s = min(float(score), prev[key] - TIE) if key in prev else float(score)
+                prev[key] = s
+                rows.append(f"{key}\t{word}\t{round(s - pen, 8)!r}\t{tag}\n")
+                continue
             rows.append(f"{key}\t{word}\t{score}\t{tag}\n" if not (k or pen) else f"{key}\t{word}\t{round(float(score) - k * TIE - pen, 8)!r}\t{tag}\n")
     return rows
 
@@ -829,17 +888,17 @@ def eval_bin():
     return os.path.join(ROOT, "target", "release", "shanjie-eval")
 
 
-def top1(pairs, profile, packs_dir=None, lm=LM):
-    """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就開詞包（`--packs acg`）；lm 預設是出貨的 data/lm（契約 A3.3：建置用的解碼經 `--rule-lm` 改傳規則模型）。"""
+def top1(pairs, profile, packs_dir=None, lm=LM, eval_path=None, packs="acg"):
+    """評測 CLI 解碼每個 (詞, 讀音音節串)，回傳第一名。packs_dir 給了就開詞包（`--packs <packs>`，預設 acg）；eval_path 是要用的評測 CLI（預設 `eval_bin()`）；lm 預設是出貨的 data/lm（契約 A3.3：建置用的解碼經 `--rule-lm` 改傳規則模型）。"""
     with tempfile.TemporaryDirectory() as d:
         rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
         with open(rows, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-        cmd = [eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump, "--threads", str(THREADS)]
+        cmd = [eval_path or eval_bin(), "--lm", lm, "--profile", profile, "--rows", rows, "--dump", dump, "--threads", str(THREADS)]
         if lm != LM:   # 釘住的規則模型不含 KN 側檔、名單層也不在它的詞庫裡，加 --no-kn --no-names 固定結果；出貨的 data/lm（--recheck）照出貨設定：旁邊有 kn.sjkn 就開、名單層常開（model-v6 §3.3）
             cmd += ["--no-kn", "--no-names"]
         if packs_dir:
-            cmd += ["--packs", "acg", "--packs-dir", packs_dir]
+            cmd += ["--packs", packs, "--packs-dir", packs_dir]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
         first = {}
         for l in open(dump, encoding="utf-8"):
@@ -983,7 +1042,7 @@ def open_collisions(found, decided, keep_now, keep_both, shipped=frozenset(), pa
 
 # ---------------------------------------------------------------- 主流程
 
-def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS, a3=True, v040_words=V040_WORDS, v040_sha=V040_SHA, keep_both_tsv=os.path.join(PACKS, "acg-keep-both.tsv"), info=None):
+def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=os.path.join(PACKS, "acg-collisions.tsv"), manual_tsv=os.path.join(PACKS, "acg-manual.tsv"), decode=top1, readings=make_readings, exclude_tsv=os.path.join(PACKS, "acg-exclude.tsv"), years=range(LAST_YEAR - YEARS + 1, LAST_YEAR + 1), min_year_works=MIN_YEAR_WORKS, a3=True, v040_words=V040_WORDS, v040_sha=V040_SHA, keep_both_tsv=os.path.join(PACKS, "acg-keep-both.tsv"), info=None, counts=None, bonus=0.0):
     """a3：關掉就是 v0.4.0 的抽取（A3.1、A3.2、A3.4 不做）。info：給了就把報告要用的中間結果放進去（詞的來源、讀音）。"""
     log = lambda *a: print(*a, file=sys.stderr)
     v040 = load_v040(v040_words, v040_sha)
@@ -1114,9 +1173,11 @@ def build(api, groups_tsv=os.path.join(PACKS, "acg-groups.tsv"), collisions_tsv=
         if w not in shipped:      # 「全名@條目@revid」：同一條目的不同全名算一個出處（PR #111 /code-review）
             return sum(len({x.rsplit("@", 2)[-2] for x in s}) if k == "char" else len(s) for k, s in src[w].items())
         return sum(len(s) for k, s in src[w].items() if k != "char") + len(name_base[w]) - (w in A3_MANUAL and "manual" in src[w])
+    yp = os.path.join(PACKS, "acg-yield.tsv")
+    yields = {(r[0], r[1]) for r in read_tsv(yp)} if os.path.exists(yp) else set()
     for _ in range(LEXICON_RULE_ROUNDS):
         order = ordered(words, nsrc, rank, reading, extra, shipped)
-        rows = pack_rows(order, reading, sc, extra, shipped, first_named(rank, set(words)))
+        rows = pack_rows(order, reading, sc, extra, shipped, first_named(rank, set(words)), grade_fn(*counts, bonus) if counts else None, yields)
         found = detect_collisions(words, reading, rows, ref, decode, extra=extra)
         hit = {e[0]: (r, e) for r, v in sorted(found.items()) for e in v if e[1] == "c"}
         if not hit:
@@ -1233,9 +1294,13 @@ def load_pack(path):
     return sorted(rs), reading, extra, rows
 
 
-def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
+def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None, base_decode=None, on_decode=None):
     """契約 A3.5 第 6 項：不重建，用 decode 的模型（預設 `top1` 的出貨 data/lm；`rule_decoder` 換成規則模型）重驗 out_dir 裡的詞包。
-    base_dir（v0.4.0 詞包所在的資料夾）給了就多比一項：已出貨的詞與讀音，新舊詞包的第一名有沒有變。回傳報告文字。"""
+    base_dir（v0.4.0 詞包所在的資料夾）給了就多比一項：已出貨的詞與讀音，新舊詞包的第一名有沒有變。回傳報告文字。
+    契約 pack-oov 第 1b 節第 5 項：on_decode 是開詞包、詞包資料夾是真的資料夾時用的解碼（first_named、keep-both、已出貨比對的候選欄；
+    例如兩個詞包都開），base_decode 是已出貨比對的基準欄（main 的 CLI）；不給時都用 decode。"""
+    on_decode = on_decode or decode
+    base_decode = base_decode or on_decode
     words, reading, extra, rows = load_pack(os.path.join(out_dir, "acg-add.tsv"))
     ref = {l.rstrip("\n") for l in open(os.path.join(report_dir, "reference.txt"), encoding="utf-8")}
     coll = os.path.join(packs, "acg-collisions.tsv")
@@ -1257,12 +1322,12 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
     pairs = [(k, r.split()) for r, k in first.items()]
     bad = []
     for prof in ("chat", "formal"):
-        on, off = decode(pairs, prof, out_dir), decode(pairs, prof)
+        on, off = on_decode(pairs, prof, out_dir), decode(pairs, prof)
         bad += [(prof, k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
     out.append(f"first_named readings {len(first)}, not first after the pack changed the top1: {bad}")
     kb_pairs = sorted((r, w) for r, w in keep_both)
     out.append("keep-both readings, first place with the pack on (reading, word, chat, formal):")
-    on = {prof: decode([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
+    on = {prof: on_decode([(w, r.split()) for r, w in kb_pairs], prof, out_dir) for prof in ("chat", "formal")}
     out += [f"  {r}\t{w}\t{on['chat'][i]}\t{on['formal'][i]}" for i, (r, w) in enumerate(kb_pairs)]
     if base_dir:
         brows = load_pack(os.path.join(base_dir, "acg-add.tsv"))[3]       # 每一列都比，含「一」「不」的變調列（PR #111 /code-review）
@@ -1270,7 +1335,7 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
         out.append("shipped (word, reading) pairs whose first place differs between the v0.4.0 pack and this pack (word, reading, profile, v0.4.0, new):")
         n = 0
         for prof in ("chat", "formal"):
-            a, b = decode(bpairs, prof, base_dir), decode(bpairs, prof, out_dir)
+            a, b = base_decode(bpairs, prof, base_dir), on_decode(bpairs, prof, out_dir)
             diff = [(w, " ".join(r), prof, x, y) for (w, r), x, y in zip(bpairs, a, b) if x != y]
             n += len(diff)
             out += ["  " + "\t".join(d) for d in diff]
@@ -1278,7 +1343,139 @@ def recheck(out_dir, report_dir, packs=PACKS, decode=top1, base_dir=None):
     return "\n".join(out) + "\n"
 
 
+def regrade_rows(lines, sc, grade, rank, yields=frozenset()):
+    """契約 pack-oov 第 1 節第 3a 項：已提交的詞包列 → 只換分數的列（順序、讀音、詞、來源標籤都不動）。
+    每個鍵（讀音）內：處置列有名次的詞照 collision_rank 在前，其餘照原分數由高到低；每列原本相對 S_len 的差距
+    round((S_len − 分數) / 0.5) × 0.5 只會是 0、0.5（「一」「不」變調列）、3.0（NEW_BEHIND_SHIPPED）、3.5；
+    分級值 = g(w) − 變調差距，第 i 列 = min(分級值, 第 i−1 列 − TIE)，原本扣過 3.0 的列再扣 3.0（first_named 不扣）。
+    yields：{(讀音（空白分隔）, 詞)}，acg-yield.tsv（維護者審過的讓位）；這些列再扣 NEW_BEHIND_SHIPPED，讓詞庫的詞排第一、詞包詞還在候選。"""
+    rows = [l.rstrip("\n").split("\t") for l in lines if l.strip()]
+    first = first_named(rank, {w for _, w, _, _ in rows})
+    by_key = collections.defaultdict(list)
+    for key, w, s, tag in rows:
+        off = round((sc[len(w)] - float(s)) / VARIANT_STEP) * VARIANT_STEP
+        if off not in (0.0, 0.5, 3.0, 3.5):
+            raise SystemExit(f"regrade: {key} {w} {s} is {off} below S_len, not one of 0, 0.5, 3.0, 3.5")
+        by_key[key].append((w, float(s), off))
+    new = {}
+    for key, items in by_key.items():
+        r = key.replace("-", " ")
+        prev = None
+        for w, s, off in sorted(items, key=lambda x: (rank.get((r, x[0]), len(rank)), -x[1])):
+            v = grade(w, sc[len(w)]) - (off % NEW_BEHIND_SHIPPED)
+            prev = v if prev is None else min(v, prev - TIE)
+            pen = NEW_BEHIND_SHIPPED if off >= NEW_BEHIND_SHIPPED and first.get(r) != w else 0
+            new[(key, w)] = round(prev - pen - (NEW_BEHIND_SHIPPED if (r, w) in yields else 0), 8)
+    return [f"{key}\t{w}\t{new[(key, w)]!r}\t{tag}\n" for key, w, _, tag in rows]
+
+
+# 契約 pack-oov 第 1b 節的已知例外（詞, 設定）：開詞包後不必是第一名的 first_named。多力斯：main 也沒打出，維護者 2026-10-24 列為已知例外。
+FIRST_NAMED_EXCEPTIONS = {("多力斯", "chat"), ("多力斯", "formal")}
+# 不強制、保留通語統計的字串（維護者 2026-10-24，51 組第 17 列）：多利斯強制後失去統計，聊天輸給解碼器用通語認得的「麗絲」拼出的「多麗絲」
+# （不在詞庫與詞包裡）；留著統計就回到 main 的多利斯。第 45 列（伊麗絲）維護者選照 V1c 強制：聊天打出伊莉絲，書面是解碼器拼的伊利斯。
+KEEP_STATS = {"多利斯"}
+OOV_TAG = "acg-oov"      # 契約 pack-oov 第 1b 節：核心把第 4 欄是這個的列當成通語不認得的詞（不封頂、不扣罰分）
+
+
+KEEP_MARGIN = 0.5   # V1c：排第一的詞，通語封頂後的分數 log10(c/N) 不低於 S_len − KEEP_MARGIN 才保留統計（0 讓修奈達、艾莉嘉在書面掉下第一名，GCP 2026-10-24）
+
+
+def forced_words(lines, rank, yields, counts, n, sc, margin=KEEP_MARGIN):
+    """契約 pack-oov 第 1b 節第 1 項：處置讀音（`first_named` 的讀音 ∪ 讓位清單的讀音）上的詞包字串。V1b／V1c（維護者 2026-10-24）：
+    排第一（`first_named`）、通語認得（counts 裡次數 > 0），而且封頂不會把它壓到詞包分數之下 margin 以上（log10(c/N) ≥ S_len − margin）
+    的字串不強制，保留通語的統計；它若在別的處置讀音上排在後面，照樣強制。counts、n 是凍結次數表，sc 是依字數的 S_len（`scores`）。"""
+    rows = [l.rstrip("\n").split("\t") for l in lines if l.strip()]
+    first = first_named(rank, {w for _, w, _, _ in rows})
+    decided = set(first) | {r for r, _ in yields}
+    on = {(key.replace("-", " "), w) for key, w, _, _ in rows if key.replace("-", " ") in decided}
+    behind = {w for r, w in on if first.get(r) != w}
+    keeps = lambda w: counts.get(w, 0) > 0 and math.log10(counts[w] / n) >= sc[len(w)] - margin
+    return {w for r, w in on if w in behind or not keeps(w)} - KEEP_STATS
+
+
+def kept_caps(lines, rank, forced, counts, n):
+    """處置讀音上排第一、沒有強制的詞，核心封頂後的分數 min(列分數, log10(c/N))：{鍵: 分數}。強制列要排在它之下（`v1_rows`）。"""
+    rows = [l.rstrip("\n").split("\t") for l in lines if l.strip()]
+    first = first_named(rank, {w for _, w, _, _ in rows})
+    return {key: min(float(s), math.log10(counts[w] / n)) for key, w, s, _ in rows
+            if first.get(key.replace("-", " ")) == w and w not in forced and counts.get(w, 0) > 0}
+
+
+def v1_rows(lines, graded, forced, caps=None):
+    """第 1b 節第 3 項：強制詞取 `regrade_rows` 的列、第 4 欄改成 OOV_TAG（以字串封閉）；其他列和來源逐位元組相同。
+    caps（`kept_caps`）裡的讀音，強制列再壓到沒強制的第一名封頂後的分數之下：照分數由高到低，第 i 列 ≤ 上一列 − TIE。"""
+    src = [l for l in lines if l.strip()]          # regrade_rows drops blank lines: keep the two lists aligned
+    assert len(src) == len(graded), (len(src), len(graded))
+    caps = caps or {}
+    rows = [g.rstrip("\n").split("\t") for g in graded]
+    score = {i: float(f[2]) for i, f in enumerate(rows)}
+    for key, cap in caps.items():
+        prev = cap
+        for i in sorted((i for i, f in enumerate(rows) if f[0] == key and f[1] in forced), key=lambda i: -score[i]):
+            prev = min(score[i], prev - TIE)
+            score[i] = round(prev, 8)
+    return [f"{f[0]}\t{f[1]}\t{score[i]!r}\t{OOV_TAG}\n" if f[1] in forced else src[i] for i, f in enumerate(rows)]
+
+
+def v1_pack(lines, rank, yields, counts, n, sc, bonus=0.0):
+    """regrade 的輸出文字：分級（`regrade_rows`）→ 強制集合（`forced_words`）→ 第 4 欄與排序（`v1_rows`）。"""
+    graded = regrade_rows(lines, sc, grade_fn(counts, n, bonus), rank, yields)
+    forced = forced_words(lines, rank, yields, counts, n, sc)
+    return "".join(v1_rows(lines, graded, forced, kept_caps(lines, rank, forced, counts, n)))
+
+
+VARIANT_STEP = 0.5      # the offsets regrade recovers are multiples of bo.VARIANT_PENALTY
+# regrade's only input (contract pack-oov 3a): the ungraded A4 pack main shipped (PR #274, c0a9c6bf). Its rows carry the offsets regrade
+# recovers; a graded pack does not, so regrading regrade's own output is refused.
+REGRADE_SRC_COMMIT = "c0a9c6bfff676a7cff378065298865f16f3ed673"
+REGRADE_SRC_SHA = "24b303ec1093498724583dbdfcc8cd339d414f85d58a7a5ad7d5eb7b3f17c59c"
+assert bo.VARIANT_PENALTY == VARIANT_STEP
+
+
+# regrade 複製 acg-sources.tsv 時換掉的來源（詞: 新的來源欄）。一之瀨唯一的來源頁是成人向作品，換成同名角色的作品（維護者 2026-10-24，51 組第 46 列）。
+SOURCE_FIXES = {"一之瀨": "歡迎來到實力至上主義的教室@93288183"}
+
+
+def fix_sources(text):
+    out = []
+    for line in text.splitlines(keepends=True):
+        f = line.split("\t")
+        if f[0] in SOURCE_FIXES:
+            f[2] = SOURCE_FIXES[f[0]]
+        out.append("\t".join(f))
+    return "".join(out)
+
+
+def regrade(src, out=PACKS, bonus=0.0, empty_counts=False):
+    """子命令 regrade：src 的 acg-add.tsv 只重算強制詞（第 1b 節）的分數寫到 out，其他列照抄；acg-sources.tsv 照 SOURCE_FIXES 換掉少數來源後複製；acg.json 換檔案雜湊與 version，加 regrade_bonus。"""
+    counts, n = ({}, 1) if empty_counts else load_counts()
+    rank = collision_rank(read_tsv(os.path.join(PACKS, "acg-collisions.tsv")))
+    if sha256_file(os.path.join(src, "acg-add.tsv")) != REGRADE_SRC_SHA:
+        raise SystemExit(f"{src}/acg-add.tsv is not the ungraded A4 pack (SHA-256 {REGRADE_SRC_SHA}); get it with "
+                         f"`git show {REGRADE_SRC_COMMIT[:8]}:data/packs/acg-add.tsv` (and acg-sources.tsv, acg.json)")
+    lines = open(os.path.join(src, "acg-add.tsv"), encoding="utf-8").readlines()
+    yp = os.path.join(PACKS, "acg-yield.tsv")
+    yields = {(r[0], r[1]) for r in read_tsv(yp)} if os.path.exists(yp) else set()
+    add = v1_pack(lines, rank, yields, counts, n, scores(base_lexicon()), bonus)
+    manifest = {k: v for k, v in json.load(open(os.path.join(src, "acg.json"), encoding="utf-8")).items() if k != "files"}
+    manifest.update(version=manifest["version"].split("-")[0] + "-" + hashlib.sha256(add.encode()).hexdigest()[:8], regrade_bonus=None if empty_counts else bonus)
+    write_all({"acg-add.tsv": add, "acg-sources.tsv": fix_sources(open(os.path.join(src, "acg-sources.tsv"), encoding="utf-8").read())}, manifest, out)
+    return len(lines)
+
+
 def main():
+    if sys.argv[1:2] == ["freeze-counts"]:
+        print(f"{COUNTS}: {freeze_counts()} words; pin its SHA-256 ({sha256_file(COUNTS)}) in COUNTS_SHA")
+        return
+    if sys.argv[1:2] == ["regrade"]:
+        rp = argparse.ArgumentParser(prog="build_acg_pack.py regrade")
+        rp.add_argument("--bonus", type=float, default=0.0)
+        rp.add_argument("--empty-counts", action="store_true", help="every word g = S_len (the gate baseline)")
+        rp.add_argument("--src", required=True, help="folder with the ungraded A4 pack (REGRADE_SRC_SHA)")
+        rp.add_argument("--out", required=True)
+        r = rp.parse_args(sys.argv[2:])
+        print(f"regrade: {regrade(r.src, r.out, r.bonus, r.empty_counts)} rows written to {r.out}")
+        return
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", default=CACHE)
     ap.add_argument("--out", default=PACKS)
@@ -1288,10 +1485,19 @@ def main():
     ap.add_argument("--a3", choices=("on", "off"), default="on")
     ap.add_argument("--recheck", action="store_true")
     ap.add_argument("--recheck-rule", action="store_true", help="--recheck 用規則模型（--rule-lm）而不是出貨的 data/lm")
+    ap.add_argument("--bonus", type=float, default=0.0, help="分級分數的加分 B（契約 pack-oov 第 1 節第 3 項）")
     ap.add_argument("--base", help="--recheck：v0.4.0 詞包所在的資料夾，多比已出貨的詞的第一名有沒有變")
+    ap.add_argument("--base-eval", help="--recheck --base：基準欄用的評測 CLI（main 的；契約 pack-oov 第 1b 節第 5 項），不給就和候選欄同一支")
+    ap.add_argument("--recheck-packs", default="acg", help="--recheck 開詞包解碼時的 --packs（例 acg,it；詞包資料夾要有這些詞包檔）")
     a = ap.parse_args()
     if a.recheck:
-        text = recheck(a.out, a.report, decode=rule_decoder(check_rule_lm(a.rule_lm)) if a.recheck_rule else top1, base_dir=a.base)
+        on = functools.partial(top1, packs=a.recheck_packs)
+        base = functools.partial(top1, packs=a.recheck_packs, eval_path=a.base_eval) if a.base_eval else on
+        cand = f"rule decoder {a.rule_lm}" if a.recheck_rule else f"CLI {eval_bin()} packs {a.recheck_packs}"
+        print(f"recheck: candidate {cand} dir {a.out}; base CLI {a.base_eval or eval_bin()} packs {a.recheck_packs} dir {a.base} "
+              f"(the GCP script prints both commits on the line above)")
+        text = recheck(a.out, a.report, decode=rule_decoder(check_rule_lm(a.rule_lm)) if a.recheck_rule else top1, base_dir=a.base,
+                       base_decode=None if a.recheck_rule else base, on_decode=None if a.recheck_rule else on)
         os.makedirs(a.report, exist_ok=True)
         open(os.path.join(a.report, "recheck-rule.txt" if a.recheck_rule else "recheck.txt"), "w", encoding="utf-8").write(text)
         print(text, end="")
@@ -1299,7 +1505,8 @@ def main():
     rule = check_rule_lm(a.rule_lm)
     decode = rule_decoder(rule)       # 契約 A3.3：(c) 規則與衝突偵測都用規則模型
     info = {}
-    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info)
+    counts = load_counts()          # 先於抓取：表有問題就不浪費一輪網路
+    files, manifest, col, unread, ref, ldrop = build(Api(a.cache, a.offline), decode=decode, a3=a.a3 == "on", info=info, counts=counts, bonus=a.bonus)
     lost = sorted(info["v040"] - set(info["words"]) - model_v6_dropped() - approved_removed())
     if lost:        # 契約 A3.5 第 3 項 (ii)：v0.4.0 的詞少了就停，不寫檔（model-v6 §3.3 照 A2 規則排除的、A4 維護者核准拿掉的不算）
         raise SystemExit(f"v0.4.0 words missing from the new pack ({len(lost)}), nothing written: {lost}")

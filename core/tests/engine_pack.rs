@@ -186,3 +186,26 @@ fn the_names_layer_is_capped_on_the_engine_path() {
     assert!((got - total(-1.5)).abs() < 1e-12, "names row not capped: {got} vs {} (uncapped {})", total(-1.5), total(-0.5));
     let _ = std::fs::remove_dir_all(d);
 }
+
+/// docs/contracts/pack-oov.md: on the shipping path (`Engine::new_with_packs`, then `load_lm`) an anime-pack word keeps its pack
+/// score: no unseen penalty, unlike the names row above. A word the corpus never saw, at -0.5 in a fixture pack: `total_score`
+/// uses -0.5, not -1.5, which also checks the engine hands the pack rows to the lexicon as exempt (`pack_oov_len`).
+#[test]
+fn an_anime_pack_word_keeps_its_score_on_the_engine_path() {
+    let d = tempdir("oov", Some("ㄒㄧㄣ-ㄅㄣ\t鑫犇\t-0.5\tacg\n"));
+    let mut e = Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, PACK_ACG))).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    e.set_profile(Profile::Chat).unwrap();
+    let mut out = None;
+    for k in ["ㄒㄧㄣ", "ㄅㄣ"].iter().flat_map(|s| syl_keys(s)) {
+        out = Some(e.key(k).unwrap());
+    }
+    assert_eq!(out.unwrap().preedit, "鑫犇", "the pack word must be the decode");
+    let lm = core::lm::Lm::load(&lm_path()).unwrap();
+    assert_eq!(lm.count("鑫犇"), 0, "the fixture word must be one the corpus never saw");
+    let lam = Profile::Chat.lambda();
+    let total = |lp: f64| lm.word(lam, "<s>", "鑫犇", lp) + lm.eos(lam, "鑫犇");
+    let got = e.total_score().unwrap();
+    assert!((got - total(-0.5)).abs() < 1e-12, "pack row capped: {got} vs {} (capped {})", total(-0.5), total(-1.5));
+    let _ = std::fs::remove_dir_all(d);
+}

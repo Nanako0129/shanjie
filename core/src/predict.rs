@@ -150,7 +150,7 @@ impl<'a> Index<'a> {
         // syllable sequence because `-` sorts below every syllable character.
         let (mut names, mut seen, mut parsed): (Vec<&str>, HashMap<&str, u32>, Vec<Option<Syl>>) = Default::default();
         let (mut pool, mut off, mut ents) = (Vec::new(), vec![0u32], Vec::new());
-        for (key, words) in lex.readings() {
+        for (key, words) in lex.readings(lm) {
             let ids: Vec<u32> = key
                 .iter()
                 .map(|&s| {
