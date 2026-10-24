@@ -17,7 +17,7 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
   guard         p2clean.Guard over the evaluation / tuning / judging sets and the holdout (4-character containment for the holdout)
 Films are counted, not capped (contract 2.7, maintainer 2026-10-25: no per-film cap). A film is a run of non-empty lines between blank lines; the
 input is OPUS raw/zh_tw.zip (one XML file per subtitle, OpenSubtitles/raw/zh_tw/<year>/<film id>/<file>.xml), read as the text of every <s> with its
-<time> tags removed, files in path order, one blank line after each film id. The mono file (mono/zh_tw.txt.gz) has no blank line at all (measured
+<time> tags removed, grouped by film id (films in the order of their first path, a film's files in path order), one blank line after each film. The mono file (mono/zh_tw.txt.gz) has no blank line at all (measured
 2026-10-25: 1,456,479 lines), so it reads as one film: the run STOPs when the input shows fewer than two films. Plain-text input with blank lines
 between films is still accepted (tests).
 Writes OUT/subs.tsv (all kept) and OUT/subs-half.tsv (the kept sentences whose SHA-256(UTF-8) first byte is < 128), both `source<TAB>id<TAB>
