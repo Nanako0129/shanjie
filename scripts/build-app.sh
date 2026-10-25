@@ -264,8 +264,9 @@ classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm are licensed
 https://creativecommons.org/licenses/by-sa/4.0/
 
 overlay-add.tsv: built from Wikipedia and Wiktionary page titles; its `slang` rows (internet set phrases) also from
-  PTT 鄉民百科 (Fandom) category titles, whose CC BY-SA 3.0 text is used under CC BY-SA 4.0 by the 3.0 later-version clause.
-  Attribution: Wikipedia contributors, Wiktionary contributors, PTT 鄉民百科 contributors.
+  PTT 鄉民百科 (Fandom) category titles and Fandom 迷因 Wiki page titles, whose CC BY-SA 3.0 text is used under
+  CC BY-SA 4.0 by the 3.0 later-version clause.
+  Attribution: Wikipedia contributors, Wiktionary contributors, PTT 鄉民百科 contributors, 迷因 Wiki contributors (Fandom).
 packs/acg-add.tsv: the optional anime and game word pack, built from Chinese Wikipedia (common
   conversion groups, anime article titles, character names in those articles). The page and revision
   every word comes from are listed in packs/acg-sources.tsv.
