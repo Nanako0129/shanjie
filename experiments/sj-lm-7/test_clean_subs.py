@@ -9,6 +9,9 @@ import clean_subs as C  # noqa: E402
 LEXICON = "我們今天一起去吃飯喔你好嗎真的是這樣啊太棒了看電影很好玩視頻"
 KEEP = "我們今天一起去吃飯喔"           # 10 Han characters
 SIMP = "这"
+# lexicon words that decide where a MAINLAND match is the traditional reading: guard words (shared character, no phrase inside), a phrase
+# that is itself a word (水里), and a longer word holding a phrase (二里頭文化)
+BOUNDARY_WORDS = ("皇后", "里程", "若干", "系統", "水里", "二里頭文化")
 
 
 def write(d, name, text):
@@ -35,7 +38,8 @@ class FakeGuard:
 
 
 def make_ctx(d, simp=SIMP):
-    lex = write(d, "lex.txt", "# format\n_ctrl_x ！ 0.0\n" + "".join(f"ㄅ {c} -1.0\n" for c in LEXICON) + "bad line\n")
+    words = "".join(f"ㄅ {w} -1.0\n" for w in BOUNDARY_WORDS)
+    lex = write(d, "lex.txt", "# format\n_ctrl_x ！ 0.0\n" + "".join(f"ㄅ {c} -1.0\n" for c in LEXICON) + words + "bad line\n")
     repo = os.path.join(d, "invade", "database", "vocabs")
     os.makedirs(repo, exist_ok=True)
     write(repo, "a.yml", "word: 視頻\n")
@@ -98,6 +102,10 @@ class Reject(unittest.TestCase):
             self.assertEqual(self.why(KEEP + s), "mainland", s)
         for s in ("五公里路", "皇后陛下", "他姓于", "不能干涉", "下里巴人"):     # the shared characters in their traditional use stay
             self.assertNotEqual(self.why(KEEP + s), "mainland", s)
+        for s in ("皇后來了", "汽車里程", "若干活動", "海關系統", "去水里玩", "二里頭文化"):   # lexicon words decide the boundary
+            self.assertNotEqual(self.why(KEEP + s), "mainland", s)
+        self.assertEqual(self.why(KEEP + "什 么"), "mainland")                         # whitespace inside a phrase does not hide it
+        self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
         self.assertIsNone(self.why(KEEP + "好"))                                       # a single-character invade term is not a term
 

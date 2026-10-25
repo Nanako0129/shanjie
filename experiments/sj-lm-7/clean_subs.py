@@ -12,8 +12,10 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
   lexicon       >= 30% of the Han characters are not a character of --lexicon's words
   english       >= 2 English words
   simplified    p2clean's TRAD_SIMP_ONLY character
-  mainland      a mainland phrase written with a character traditional Chinese also has (什么, 這里, 最后, 對于, 愿意: MAINLAND); the
-                simplified step lets these characters through on purpose (公里, 皇后), so only whole phrases are caught here
+  mainland      a mainland phrase written with a character traditional Chinese also has (什么, 這里, 最后, 對于, 愿意: MAINLAND), found on
+                the NFKC text with whitespace removed; the simplified step lets these characters through on purpose (公里, 皇后). A phrase
+                that is a word of --lexicon is not used (水里, 村里); a match is not a hit when a longer lexicon word holds it (二里頭文化)
+                or a lexicon word with a shared character and no phrase in it crosses it (皇后來了, 汽車里程, 若干活動, 海關系統)
   invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any)
   dedupe        NFKC + whitespace removed + case folded
   guard         p2clean.Guard over the evaluation / tuning / judging sets and the holdout (4-character containment for the holdout)
@@ -60,14 +62,15 @@ TOP = 20
 REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chatjudge2")   # the sets the guard must cover
 CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
 STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "invade", "dedupe", "guard"]
-# Contract 2.7 (maintainer 2026-10-25): the 300-sentence proofread found 18 of 300 machine-converted lines with these shared characters (么 里
-# 后 于 愿) in their mainland use. Phrases, not characters, so 公里, 皇后, 姓于 and 干涉 stay; 能干 and 下里 are left out (不能干涉, 下里巴人).
+# Contract 2.7 (maintainer 2026-10-25): the first 300-sentence proofread (seed 20261025) had 20 residues (6.7%): 18 machine-converted lines
+# with these shared characters (么 里 后 于 愿) in their mainland use, a lyric marker and an English word. Phrases, not characters, so 公里, 皇后,
+# 姓于 stay; the lexicon decides word boundaries (mainland_hit), and 能干 and 下里 are left out (不能干涉, 下里巴人).
 MAINLAND = tuple("""什么 怎么 那么 這么 多么 要么 甚么 這里 那里 哪里 屋里 家里 心里 手里 眼里 夜里 城里 村里 店里 房里 包里 車里 袋里 子里 水里
     室里 院里 樓里 獄里 營里 洞里 宮里 廳里 間里 私下里 里面 里頭 里邊 最后 然后 以后 之后 后來 后面 后悔 隨后 背后 前后 后天 后果 后退 落后
     稍后 今后 此后 事后 后頭 后邊 對于 由于 關于 于是 終于 等于 至于 屬于 位于 善于 在于 過于 敢于 基于 用于 處于 向于 便于 樂于 歸于 急于
     忙于 免于 出于 鑒于 限于 勇于 愿意 心愿 愿望 自愿 情愿 寧愿 但愿 志愿 祝愿 如愿 干嘛 干活 干淨 干杯 干脆 干掉 實干 准備 標准 准確 准時
     關系 聯系 范圍 戰斗 奮斗 斗爭 放松 輕松 采取 采訪""".split())
-MAINLAND_RE = re.compile("|".join(map(re.escape, sorted(MAINLAND, key=len, reverse=True))))
+SHARED = frozenset("么里后于愿干准系范斗松采")   # the shared characters of MAINLAND
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
@@ -104,6 +107,37 @@ def lexicon_chars(path):
     return out
 
 
+def lexicon_words(path):
+    """The all-Han words of two characters or more of a McBopomofo-format lexicon file (same lines as lexicon_chars)."""
+    out = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            p = line.split()
+            if line[:1] not in ("#", "_") and len(p) == 3 and len(p[1]) >= 2 and len(P2.HANC.findall(p[1])) == len(p[1]):
+                out.add(p[1])
+    return out
+
+
+def mainland_rules(words):
+    """-> (regex of the MAINLAND phrases that are not lexicon words, guard words, longest word length). Guard words are lexicon words with a
+    shared character and no MAINLAND phrase inside (皇后, 里程, 若干, 系統): where one crosses a match, the match is the traditional reading."""
+    rx = re.compile("|".join(map(re.escape, sorted((m for m in MAINLAND if m not in words), key=len, reverse=True))))
+    guard = frozenset(w for w in words if not SHARED.isdisjoint(w) and not any(m in w for m in MAINLAND))
+    return rx, guard, max(map(len, words), default=2)
+
+
+def mainland_hit(s, ctx):
+    """-> the first MAINLAND phrase used the mainland way in s, or None (rules in the docstring at the top)."""
+    t = re.sub(r"\s", "", unicodedata.normalize("NFKC", s))
+    for m in ctx.mainland_rx.finditer(t):
+        i, j = m.span()
+        spans = ((a, b) for a in range(max(0, j - ctx.longest), j) for b in range(max(a + 2, i + 1), min(len(t), a + ctx.longest) + 1))
+        if not any((a <= i and b >= j and b - a > j - i and t[a:b] in ctx.words) or ((a < i or b > j) and t[a:b] in ctx.mainland_guard)
+                   for a, b in spans):
+            return m.group(0)
+    return None
+
+
 def decile(x):
     return f"{int(x * 10) / 10:.1f}"
 
@@ -136,7 +170,7 @@ def trigger(step, s, ctx):
     if step == "simplified":
         return next(c for c in s if c in ctx.simp)
     if step == "mainland":
-        return MAINLAND_RE.search(s).group(0)
+        return mainland_hit(s, ctx)
     if step == "invade":
         return next(ctx.invade_matcher.find(s))
     return step
@@ -156,7 +190,7 @@ def reject(s, ctx):
         return "english"
     if not ctx.simp.isdisjoint(s):
         return "simplified"
-    if MAINLAND_RE.search(s):
+    if mainland_hit(s, ctx):
         return "mainland"
     if ctx.invade_matcher.any(s):
         return "invade"
@@ -351,8 +385,10 @@ def build_ctx(a):
     terms, info = invade.load(a.invade)
     if a.invade_sha256 and info["sha256"] != a.invade_sha256:
         raise SystemExit(f"STOP: invade list SHA-256 {info['sha256']} is not the frozen {a.invade_sha256}")
+    words = lexicon_words(a.lexicon)
+    rx, guard, longest = mainland_rules(words)
     ctx = argparse.Namespace(lex=lexicon_chars(a.lexicon), simp=bc.TRAD_SIMP_ONLY, invade_terms=terms, invade_info=info,
-                             invade_matcher=P2.s7f.Matcher(terms))
+                             invade_matcher=P2.s7f.Matcher(terms), words=words, mainland_rx=rx, mainland_guard=guard, longest=longest)
     if not ctx.lex:
         raise SystemExit(f"STOP: no characters read from the lexicon {a.lexicon}")
     return ctx
