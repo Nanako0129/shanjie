@@ -26,7 +26,7 @@
 
 ## 3. 量測、選法與驗收
 
-- **輕聲檢查集** `eval/dev/neutral/words.txt`：從那 3,220 個只有輕聲讀音的詞依文章用量取前 300 個（PTT 2026-10-25 快照，目錄雜湊 `1f1ac2c0…`；`count_usage.py --include-known`；文章數由多到少，同數照詞的 code point 排），讀音照 §1 換成本調（同分有好幾個本調時取 code point 最小的讀音），一列一詞、沒有前文；只用來回報，不調參。詞表、建置指令與輸入雜湊在第一次格點量測**之前** commit。
+- **輕聲檢查集** `eval/dev/neutral/words.txt`：從那 3,220 個只有輕聲讀音的詞依文章用量取前 300 個（PTT 2026-10-25 快照，目錄雜湊 `1f1ac2c0…`；`count_usage.py --include-known`；文章數由多到少，同數照詞的 code point 排），讀音用這個詞的 `neutral` 列；一個詞有好幾列時（基底本身就收好幾種讀音，例：什麼 有 ㄕㄜˊ／ㄕㄣˊ × ㄇㄛ˙／ㄇㄜ˙ 四種）取最接近台灣打法的：先比簡編本這個詞的讀音（韻相同的音節數），再比每個字在簡編本詞條裡最常用的韻，再比基底單字讀音分數，最後 code point（修訂，2026-10-26，建檢查集時發現原本「code point 最小」會選到 ㄕㄜˊ ㄇㄛˊ 這種沒人打的讀音；改在任何量測之前）。一列一詞、沒有前文；只用來回報，不調參。建置：`python3 experiments/neutral/build_checkset.py`；輸入 `nt-counts.tsv` `e785cfb97f8decc1559b43dd6cde9d89baf13fac0f153886e430242fa84ea526`（PTT 快照 `1f1ac2c0…`）、`sandhi-add.tsv` `dd69f3560340a3250f354859fea3c400f41b46d1d1928e4c7eda024d5dde0d58`、簡編本讀音表 `03a4936b05c85821b8bcc2332b68e15a594234548e00bb2368d5b2caea3ca2be`；輸出 `words.txt` `9ab13c2d6226bc64046ee6fb3d547eb6b1aaa7464f240eb004a5811dc823742b`。詞表、建置指令與輸入雜湊在第一次格點量測**之前** commit。
 - **δ 格點**（事先固定）：{0.5, 1.0, 2.0}。每格量 cvtune-clean、wikitune-clean（調參集）與輕聲檢查集；選法：調參集兩個都不退步（改壞 ≤ 改對）的格子裡，輕聲檢查集第一名最多的；同分取較大的 δ。
 - **異體類別不變**：基底＋疊加層＋新的 `sandhi-add.tsv`＋名單，`build_lm.variant_classes` 的類別數與內容要和現在完全相同（同 2026-10-14「修訂一的疊加層」的核對），`reference/proto/lm_eval.py` 載入出貨的 `kn.sjkn` 不出 ValueError。
 - **出貨標準**（CLAUDE.md 四條，對現行出貨，兩個詞包都開，GCP 每一步用滿核心）＋動漫五集、名單、店家、網路用語兩輪檢查集改壞 ≤ 改對。
