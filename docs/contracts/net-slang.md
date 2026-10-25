@@ -44,7 +44,7 @@
 - **讀音**：`tools/readings.py`；破音字逐條看（例如「北七」的七、台語借字），讀不出或有疑義的進 CHECK、不收。
 - **分數**：照手動詞（同字數 `length_scores` ＋ `MANUAL_BONUS` 0.75）。
 - **同音衝突**：每個詞的讀音用出貨 CLI 解碼（聊天、書面，兩個詞包都開），收錄後的第一名若從原本的寫法換成這個網路用語，而原本的寫法在 PTT 語料的文章數 ≥ 網路用語，這個詞不搶第一（維護者 2026-10-24「用量多的留第一」，取代原本的 3 倍；原本的寫法也是網路用語、還不在詞庫時，把它加進詞表排在前面）。同一個讀音有好幾個網路用語時，詞表裡照 PTT 文章數排，後面的寫法分數扣 `SLANG_BEHIND`（第 k 個扣 k 倍），只當候選。
-- **工具**：`tools/build_overlay.py` 的 `manual_rows` 加來源標籤參數，另讀 `slang-add.tsv`（同樣三欄：詞、讀音、來源），標籤 `slang`；`overlay-manual.tsv` 與它都要檢查不和既有層重複、彼此不重複。沒有 `slang-add.tsv` 時輸出和現在逐位元組相同（測試斷言）。`build_overlay.py --check` 照舊。
+- **工具**：`tools/build_overlay.py` 的 `manual_rows` 加來源標籤參數，另讀 `slang-add.tsv`（同樣三欄：詞、讀音、來源；第二輪起可有第四欄加分，見 `net-slang-2.md` §3），標籤 `slang`；`overlay-manual.tsv` 與它都要檢查不和既有層重複、彼此不重複。沒有 `slang-add.tsv` 時輸出和現在逐位元組相同（測試斷言）。`build_overlay.py --check` 照舊。
 
 ## 3. 驗收
 
