@@ -10,7 +10,7 @@ Wikidata、中文維基與教育部學校名錄，產生一般詞庫層 data/lex
       python3 tools/build_names.py --append-creators   讀 names-creators.tsv（標籤 creator）與 names-stores.tsv（標籤 store），在 names-add.tsv／names-sources.tsv
                                                        檔尾追加（或換掉）這兩種標籤的列（順序：names → creator → store）、更新 names.json
                                                        （docs/contracts/names-creators.md §2、names-stores.md §2；不連網、不讀快取、不動既有列）
-      來源檔欄位：詞、讀音（音節以空白分隔）、備註。同讀音的先後就是檔案裡的先後：建置資料的人照 PTT 文章數由多到少排好（要人工調整就改檔案順序，例如 峰哥 排在 風哥 前面）。
+      來源檔欄位：詞、讀音（音節以空白分隔）、備註，可選的第四欄是加分（有限、≥ 0，只能放在同讀音的第一列；docs/contracts/names-stores.md §2）。同讀音的先後就是檔案裡的先後：建置資料的人照 PTT 文章數由多到少排好（要人工調整就改檔案順序，例如 峰哥 排在 風哥 前面）。
 
 網路只連 zh.wikipedia.org／www.wikidata.org 的 /w/api.php、raw.githubusercontent.com（只限 NSI 那個 commit）、
 data.gov.tw 與 stats.moe.gov.tw 的名錄 CSV；限速、User-Agent、maxlag 沿用 build_acg_pack.Api。請求 3,000 個、快取 500 MB 為上限。
@@ -23,6 +23,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import re
 import subprocess
@@ -274,10 +275,10 @@ def known_words(lex_dir=LEX, acg_add=ACG_ADD, meme_add=MEME_ADD):
 
 
 def check_disjoint(words, have, what="names-add.tsv"):
-    """契約 §2：輸出和那四份檔的詞集合交集必須為空（核心依字串封頂所有讀音，同一個（讀音, 詞）重複還會讓載入失敗）。"""
+    """契約 §2：輸出和 known_words 那五份檔的詞集合交集必須為空（核心依字串封頂所有讀音，同一個（讀音, 詞）重複還會讓載入失敗）。"""
     bad = sorted(set(words) & set(have))
     if bad:
-        raise SystemExit(f"{what} shares {len(bad)} words with the base, overlay-add.tsv, sandhi-add.tsv or acg-add.tsv: {bad[:5]}")
+        raise SystemExit(f"{what} shares {len(bad)} words with the base, overlay-add.tsv, sandhi-add.tsv, acg-add.tsv or meme-add.tsv: {bad[:5]}")
 
 
 def check_committed(lex_dir=LEX, acg_add=ACG_ADD):
@@ -397,6 +398,8 @@ def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip
     toneless = {(c, _toneless(s)) for c, s in chars}
     blocked = []
     creator_readings = {}                                   # 讀音鍵 → 第一個留下的 creator 詞
+    words_by_tag = {}
+    other_tag = {STORE: words_by_tag.setdefault(CREATOR, set()), CREATOR: words_by_tag.setdefault(STORE, set())}   # 同一個詞不跨標籤（只有同標籤可換讀音）
     for path, tag in sources:
         cand = []
         for n, line in creator_lines(path):
@@ -408,14 +411,16 @@ def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip
                     boost = float(fields[3])
                 except ValueError:
                     ok = False
+                ok = ok and math.isfinite(boost) and boost >= 0
             if ok:
                 w, reading, note = fields[:3]
                 syls = reading.split(" ")
-                ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and (w, reading) not in pairs and (w not in taken or any(p[0] == w for p in pairs)) \
+                ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and (w, reading) not in pairs and (w not in taken or any(p[0] == w for p in pairs) and w not in other_tag.get(tag, ())) \
                     and all((c, s) in chars or (s.endswith("˙") and (c, _toneless(s)) in toneless) for c, s in zip(w, syls))     # 輕聲：基底有這個字的同音節（任何聲調）就算
             if not ok:
-                raise SystemExit(f"{path}:{n}: bad {tag} row (need word, reading, note[, boost]; Han word not already in a lexicon layer, same word only with a different reading; one syllable that is a reading of its character): {line!r}")
+                raise SystemExit(f"{path}:{n}: bad {tag} row (need word, reading, note[, finite boost >= 0]; Han word not already in a lexicon layer, same word only with a different reading; one syllable that is a reading of its character): {line!r}")
             pairs.add((w, reading))
+            words_by_tag.setdefault(tag, set()).add(w)
             key = "-".join(syls)
             if w in skip:
                 blocked.append((w, reading, "meme-add.tsv", "already in the meme pack"))
@@ -428,6 +433,8 @@ def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip
         count = {}
         for w, key, syls, note, boost in cand:
             rank = count[key] = count.get(key, -1) + 1
+            if boost and rank:
+                raise SystemExit(f"{path}: {w!r} has a boost but is behind another row of the same reading (rank {rank}); a boost only goes on the first")
             if tag == CREATOR and rank == 0:
                 creator_readings[key] = w
             rows.append((tag, w, syls, note, round(scores[len(w)] + boost - rank * SLANG_BEHIND, 8), w not in taken))

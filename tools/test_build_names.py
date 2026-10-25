@@ -733,6 +733,16 @@ class AppendCreators(unittest.TestCase):
         self.assertEqual([round(float(b.split("\t")[2]) - float(p.split("\t")[2]), 6) for p, b in zip(plain, boosted)], [1.0] * len(plain))
         with self.assertRaises(SystemExit):
             self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\tmore\n")
+        for bad in ("nan", "inf", "-0.5"):                                      # finite and >= 0
+            with self.assertRaises(SystemExit, msg=bad):
+                self.run_append("", f"國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\t{bad}\n")
+        with self.assertRaises(SystemExit):                                     # a boost behind a same-reading row would tie or beat it
+            self.run_append("", "詭神\tㄍㄨㄟˇ ㄕㄣˊ\ta\n鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tb\t0.5\n")
+        self.run_append("", "詭神\tㄍㄨㄟˇ ㄕㄣˊ\ta\t0.5\n鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tb\n")       # on the first row it is fine
+
+    def test_a_store_cannot_reuse_a_creator_word_under_another_reading(self):
+        with self.assertRaises(SystemExit):
+            self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n", "國動\tㄍㄨㄛˊ ㄉㄨㄥ\tb\n")
 
     def test_a_creators_file_without_rows_or_absent_touches_nothing_even_old_creator_rows(self):
         self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
