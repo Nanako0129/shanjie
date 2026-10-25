@@ -18,7 +18,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 
 ### 2.2 產生工作（`refresh_lm` 結尾，模型已載入且 `rerank_on`）
 
-- 每一段自由段（兩個固定詞之間，`refresh_lm` 的 gap 迴圈）若 n-best 有 ≥ 2 條：取前 `TOPK` 條路徑（保留 `(詞, lp, delta)`，套用時要重建 `path`）、各條的字串（`cands`）、分數（`ng`）、前文鍵 `context_key(before)`（`before` 就是那一段左邊已顯示的文字加左文；哨兵 → 空的 k 由 `TinyLm::rerank` 處理）、設定、這一段在 `path` 裡的範圍。
+- 每一段自由段（兩個固定詞之間，`refresh_lm` 的 gap 迴圈）若 n-best 有 ≥ 2 條：取前 `TOPK` 條路徑（保留 `(詞, lp, delta)`，套用時要重建 `path`）、各條的字串（`cands`）、分數（`ng`）、前文鍵 `context_key(before)`（`before` 就是那一段左邊已顯示的文字加左文；哨兵 → 空的 k 由 `TinyLm::rerank` 處理；SJTL0005 宣告前文長度 L 的模型改用前文的最後 L 個原文字元，不經過 `context_key`，「^」也照原文送進模型（`docs/contracts/context-return.md` §2，`TinyLm::key_for`）；`context_key` 只用在 SJTL0001～0004）、設定、這一段在 `path` 裡的範圍。
 - **選字記憶的保護**：某段 n-gram 第一條路徑裡有任何一個詞被學習加分（`lp` 大於該詞在該讀音下不加分時的 `best_lp`），這一段不放進工作（使用者教過的選擇不被重排改掉）。〔2026-10-20 補：只給評測用的 `set_learn_guard(false)`（`shanjie-replay --learn-guard off`，`engine-replay.md` §2）可以關掉這條；App 不呼叫，預設照舊。〕
 - 沒有任何一段可以重排時，不產生工作。
 - **降權表關掉時不產生工作**（`set_demote(false)`）：α、τ 只對降權表開著的分數成立，和 CLI 拒絕 `--no-demote` 同理。
@@ -35,7 +35,7 @@ S7c-2 分兩片：這一片（2a）只做核心與 FFI，用同步的測試驅�
 ### 2.4 計算與套用
 
 - `RerankJob::run(&self) -> RerankResult`：只用工作裡的 `Arc<TinyLm>` 與資料（不碰引擎），對每一段呼叫 `TinyLm::rerank`；`TooLong` 記為選 0。`RerankJob`、`RerankResult` 是 `Send`。
-- **修正一**：`RerankJob::run` 依序處理各段，後一段的前文鍵用前面各段**選定後**的字（加上中間的固定詞與左文）重算 `context_key`，不用 n-gram 第一名的字；只有一段時和原本相同（CLI 的一致性不變）。套用時：**候選窗開著 → `None`**；**預測列只在套用當下非空時才重算**（V3 規則清掉的列不會因為套用又出現）。
+- **修正一**：`RerankJob::run` 依序處理各段，後一段的前文鍵用前面各段**選定後**的字（加上中間的固定詞與左文）重算前文鍵（`TinyLm::key_for`，宣告 L 的模型見 `context-return.md` §2），不用 n-gram 第一名的字；只有一段時和原本相同（CLI 的一致性不變）。套用時：**候選窗開著 → `None`**；**預測列只在套用當下非空時才重算**（V3 規則清掉的列不會因為套用又出現）。
 - `Engine::apply_rerank(result) -> Result<Option<Output>, EngineError>`：世代號不同 → `None`；**預測列已進入（`pred_sel` 有值）→ `None`**（不把使用者在列裡的選取踢掉）；每一段都選 0 → `None`（不輸出，不閃）；工作記的範圍超出現在的 `path` → `None`（防呆，正常不會發生）；否則把選到的路徑換進 `path` 的那一段、重建 `display`、重算預測列，回傳新的輸出。不動 `syls`、游標、固定詞、候選窗。
 - **送出**：Enter、128 個字元自動送出、`reset` 等，一律送出畫面上的內容（標點不是送出：它進組字區、重新解碼、產生新工作）；還沒套用的工作因為換了世代號而作廢（不等待）。
 

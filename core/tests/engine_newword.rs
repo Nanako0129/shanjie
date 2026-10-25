@@ -980,6 +980,8 @@ fn clear_removes_new_words() {
 /// PLAN §7 R2 (new-word B wording): re-pick one character in the middle of a marker string the lexicon has no word
 /// for and commit; the file holds marker characters only inside the ≤ 4 run holding the re-picked one and the ≤ 2
 /// characters before it. Typing the same marker again without a re-pick adds no line holding any of them.
+/// context-return section 4 (P3-6): the left text ends with an ASCII marker word, which the engine holds (`left_full`) for the
+/// English table; it is nowhere in the file. The text has no Han tail, so decoding starts as without one.
 #[test]
 fn r2_marker_characters_on_disk() {
     r2_marker(false);
@@ -996,6 +998,9 @@ fn r2_marker(subspans: bool) {
     let mut e = tiny(marker);
     e.set_newword_subspans(subspans);
     e.learning_open(&dir).unwrap();
+    let left_marker = "Zqxjvk";
+    e.set_left_context(&format!("我說 {left_marker} "));
+    assert_eq!(e.left_full_chars(), left_marker.len() + 1, "premise: the marker word is held");
     type_syls(&mut e, reading);
     let at = 4;
     repick_char(&mut e, 9, at);
@@ -1006,6 +1011,7 @@ fn r2_marker(subspans: bool) {
     // the run holding the re-pick: 3..6 (的 at 2 and 了 at 6 split it); the context: 2..4
     let allowed: Vec<char> = c[2..6].to_vec();
     let text = raw(&dir);
+    assert!(!text.to_ascii_lowercase().contains(&left_marker.to_ascii_lowercase()), "the left text's marker is on disk");
     for line in text.lines().skip(1) {
         let f: Vec<&str> = line.split('\t').collect();
         assert_eq!(f.len(), 5);

@@ -215,9 +215,13 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // S4 (docs/contracts/s4-learning.md): learning from candidate-window re-picks. Every function returns 1
 // when engine (or a required pointer) is NULL. None of them changes the current display, except that
 // learning_clear and a forget may re-decode on the next key.
-// set_left_context: copies the text before the insertion point; only its last <= 2 consecutive Han
-//   characters are kept (S4 section 1.1). NULL or "" means none. Not UTF-8: returns 2 and clears.
-//   Cleared by the core after every commit, reset and code 4; call it at every composition start.
+// set_left_context: copies the text before the insertion point: the raw text of the same message, at most
+//   64 graphemes (docs/contracts/context-return.md; terminal apps: only the trailing Han characters). The
+//   core uses only its last <= 2 consecutive Han characters for decoding and learning (S4 section 1.1);
+//   besides them it keeps only the declared left-context length of the small model (SJTL0005), or else the
+//   trailing English word, for the small model and the English table, never returned or written. NULL
+//   or "" means none. Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
+//   code 4 and rule 22 pass-through; call it at every composition start.
 //   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);

@@ -82,7 +82,10 @@ final class FakeClient: TextClient {
     }
     private(set) var underlineRuns: [UnderlineRun] = []
 
-    let bundleIdentifier: String?
+    private let bundle: String?
+    /// Every read of `bundleIdentifier` (a synchronous IPC in the app).
+    private(set) var bundleReads = 0
+    var bundleIdentifier: String? { bundleReads += 1; return bundle }
     private(set) var calls: [Call] = []
     private(set) var text = ""   // committed text
     private(set) var marked = ""
@@ -92,6 +95,8 @@ final class FakeClient: TextClient {
     /// Overrides for the left-context tests: no insertion point, or marked text left over.
     var selectedOverride: NSRange?
     var markedOverride: NSRange?
+    /// context-return section 1 (P3-2): an app that answers attributedSubstring with this, whatever range was asked for.
+    var replyOverride: String?
     /// s3b2: the line rectangle this client reports.
     var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
     private(set) var lineCursor: Int?
@@ -104,7 +109,7 @@ final class FakeClient: TextClient {
     private(set) var reads = 0
     private(set) var requested: [NSRange] = []
 
-    init(bundle: String? = "com.apple.TextEdit") { bundleIdentifier = bundle }
+    init(bundle: String? = "com.apple.TextEdit") { self.bundle = bundle }
 
     private var document: NSString { (before + text + marked) as NSString }
 
@@ -124,6 +129,7 @@ final class FakeClient: TextClient {
     func attributedSubstring(from range: NSRange) -> NSAttributedString? {
         reads += 1
         requested.append(range)
+        if let replyOverride { return NSAttributedString(string: replyOverride) }
         guard range.location != NSNotFound, NSMaxRange(range) <= document.length else { return nil }
         return NSAttributedString(string: document.substring(with: range))
     }
@@ -227,6 +233,11 @@ final class Controller {
     init(_ shell: Shell, bundle: String? = "com.apple.TextEdit") {
         client = FakeClient(bundle: bundle)
         session = Session(shell: shell, client: client)
+    }
+
+    /// The session's left-context read with this client's bundle ID, as `send` passes it.
+    func readLeft() -> (text: String?, last: Character?) {
+        session.leftContext(bundle: client.bundleIdentifier)
     }
 
     /// Presses each ASCII key of `keys` (a space is the space bar); returns the handled flags.

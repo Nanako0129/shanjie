@@ -1137,6 +1137,8 @@ mod tests {
         }
         let dir = tiny_dir("panic", "ㄒㄧㄣ 鑫 -1.0\nㄅㄣ 犇 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
+        // context-return section 2: the English word of the left text is held until the reset after code 4.
+        assert!(set_left(e, "Joe") == 0 && unsafe { &(*e).0 }.left_full_chars() == 3, "left text held");
         for c in ['v', 'u', 'p'] {
             assert!(send(e, key(CHAR, c)).0 == 0, "typing");
         }
@@ -1150,6 +1152,7 @@ mod tests {
         assert!(rc == 4, "panic maps to code 4");
         assert!(o.is_null(), "out is NULL after a panic");
         assert!(PAYLOAD.with(|p| p.borrow().contains(MARKER)), "payload carries the marker");
+        assert!(unsafe { &(*e).0 }.left_full_chars() == 0, "the left text went with the reset after code 4");
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit.is_empty(), "engine was reset after code 4");
         unsafe { shanjie_engine_free(e) };
@@ -2022,6 +2025,26 @@ mod tests {
     /// dev302 row 12 (as engine_lm.rs counts it): the n-gram shows RERANK_NGRAM, and the toy model below changes it.
     const RERANK_ROW: usize = 12;
     const RERANK_NGRAM: &str = "我在家";
+    /// context-return section 4: an ASCII marker in the left text that reaches a job (the last L = 8 characters of "我說zqxjvk ";
+    /// no Han tail, so the n-gram decodes as without a left text).
+    const LEFT_MARKER: &str = "zqxjvk";
+
+    fn set_left(e: *mut ShanjieEngine, text: &str) -> i32 {
+        let c = CString::new(text).unwrap();
+        unsafe { shanjie_engine_set_left_context(e, c.as_ptr()) }
+    }
+
+    /// The version 1 file at `p` rewritten as version 5 declaring the left-context length `l` (docs/contracts/context-return.md
+    /// section 2): both deltas 0, the standard triples for every level, an all-zero side file hash, then L.
+    fn as_v5(p: &Path, l: u32) {
+        let b = std::fs::read(p).unwrap();
+        let triple = |at: usize| [&b[at..at + 16], &0f64.to_le_bytes()[..]].concat();
+        let (chat, formal) = (triple(36), triple(52));
+        let mut h = [&b[..100], &[0; 16][..], &chat, &chat, &formal, &formal, &[0; 32][..], &l.to_le_bytes()[..]].concat();
+        h[7] = b'5';
+        h[8..12].copy_from_slice(&5u32.to_le_bytes());
+        std::fs::write(p, [h.as_slice(), &b[100..]].concat()).unwrap();
+    }
 
     /// data/lm/bigram.sjlm and classes.sjc symlinked into `dir` without the kn.sjkn model-v6 puts beside them: the toy `.sjtl`
     /// files here (versions 1 and 3) were tuned without a side file and pair only with the model loaded without KN (model-v6
@@ -2418,10 +2441,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank-panic", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let good = toy_sjtl(&dir, "good.sjtl", true);
+        as_v5(&good, 8);
         let (e, keys) = rerank_engine();
         let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && load_tinylm(e, &good) == 0, "loads");
         assert!(set_rerank(e, 1).0 == 0, "on (off by default since S7c-2c)");
+        assert!(set_left(e, &format!("我說{LEFT_MARKER} ")) == 0, "left text");
         for &k in &keys {
             send(e, k);
         }
@@ -2432,6 +2457,7 @@ mod tests {
         ARMED.with(|a| a.set(true));
         assert!(unsafe { shanjie_rerank_run(j) } == 4, "run panic maps to 4");
         assert!(PAYLOAD.with(|p| p.borrow().contains(RERANK_NGRAM)), "payload carries the candidate text");
+        assert!(PAYLOAD.with(|p| p.borrow().contains(LEFT_MARKER)), "payload carries the job's left text");
         // run has no engine: the composition is unchanged, and no result was stored.
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit == RERANK_NGRAM, "composition unchanged after run's 4");
@@ -2445,11 +2471,13 @@ mod tests {
     fn r2_rerank_run_panic_is_silent() {
         let (ok, out, err) = run_child("child_rerank_panic", false);
         assert!(ok, "quiet child failed");
-        assert!(!out.contains(RERANK_NGRAM) && !err.contains(RERANK_NGRAM), "candidate text leaked with the silent hook");
+        for marker in [RERANK_NGRAM, LEFT_MARKER] {
+            assert!(!out.contains(marker) && !err.contains(marker), "input text leaked with the silent hook");
+        }
         assert!(out.contains("1 passed"), "child test actually ran");
         // Positive control: the same child with the default hook must show the text.
         let (ok, out, err) = run_child("child_rerank_panic", true);
         assert!(ok && out.contains("1 passed"), "default-hook child failed");
-        assert!(err.contains(RERANK_NGRAM), "positive control: default hook did not print the text");
+        assert!(err.contains(RERANK_NGRAM) && err.contains(LEFT_MARKER), "positive control: default hook did not print the text");
     }
 }

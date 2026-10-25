@@ -35,7 +35,7 @@ S7c 分兩片。這一片（S7c-1）只做**核心的前向、模型檔、`pick`
 
 ### 2.3 評測 CLI `cli/`
 
-- `--tinylm FILE`（LM 路徑，`--rows`／`--dev`／`--set holdout` 都可用）：載入失敗就結束並報錯。**模型配對**：載入的 n-gram 模型（`Lm` 解析時算的 SHA-256）和 `.sjtl` 記的不同，或 Kneser–Ney 側檔是開著的（S7a 調 α、τ 時沒有開），就結束並報錯（訊息點名 `.sjtl`），不重排、不輸出結果。前 8 名取自 `decode_from(... BEAM_S1 ...)` 的結果（和 `--dump` 寫的同一份 n-best）；`k` 用 `context_key(前文)`（`--context` 時；不加 `--context` 時 k 為空）；**`context_key` 回哨兵 `SENTINEL`（`"^"`，前文沒有漢字結尾）時 k 為空字串**，和 S7a 打分用的 `tinylm.row_key`／`reference/proto/lm.py` 的 `context_key` 相同（Rust 的哨兵是 `"^"`，Python 的是 `""`）；`"^"` 不可以當成前文字送進字元模型（會變成 UNK）；α、τ 取自檔案、依 `--profile`。
+- `--tinylm FILE`（LM 路徑，`--rows`／`--dev`／`--set holdout` 都可用）：載入失敗就結束並報錯。**模型配對**：載入的 n-gram 模型（`Lm` 解析時算的 SHA-256）和 `.sjtl` 記的不同，或 Kneser–Ney 側檔是開著的（S7a 調 α、τ 時沒有開），就結束並報錯（訊息點名 `.sjtl`），不重排、不輸出結果。前 8 名取自 `decode_from(... BEAM_S1 ...)` 的結果（和 `--dump` 寫的同一份 n-best）；`k` 用 `context_key(前文)`（`--context` 時；不加 `--context` 時 k 為空；SJTL0005 宣告前文長度 L 的模型改用前文的最後 L 個原文字元，不經過 `context_key`，「^」也照原文送進模型（`docs/contracts/context-return.md` §2，`TinyLm::key_for`）；`context_key` 只用在 SJTL0001～0004，CLI 與引擎共用這個函式）；**`context_key` 回哨兵 `SENTINEL`（`"^"`，前文沒有漢字結尾）時 k 為空字串**，和 S7a 打分用的 `tinylm.row_key`／`reference/proto/lm.py` 的 `context_key` 相同（Rust 的哨兵是 `"^"`，Python 的是 `""`）；`"^"` 不可以當成前文字送進字元模型（會變成 UNK）；α、τ 取自檔案、依 `--profile`。
 - 摘要行加 `+tl:<.sjtl 的 sha8>`（接在 `+kn` 的位置之後）；沒有 `--tinylm` 時輸出逐位元組不變。
 - `--tinylm-scores OUT`：每列一行 JSON，欄位定義和 `score.py` 相同：`i`、`n`、`ng`、`ok`、`ed`（候選對正解的 Levenshtein，`ok` 時為 0）、`glen`、`ll`（`n` ≥ 2 的列才有）。`parity.py` 與 `fusegrid.pick`／`fusegrid.rowstats` 讀得了；`fusegrid.select`／`report` 要的 `key`、`ll0`、`ll16` 不寫（這一片不重選 α、τ）。只有數字，沒有文字。
 - 不改 `--dump` 的格式。
