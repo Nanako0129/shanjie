@@ -117,8 +117,11 @@ pub struct Lm {
     /// Kneser-Ney side file (`kn.sjkn` beside the model, docs/contracts/kn-core.md); `None` is off.
     kn: Option<Kn>,
     /// Trigram table (`trigram.sjt3` beside the model, docs/contracts/trigram-core.md); `None` is off. Only the formal profile
-    /// scores with it (`Lm::scoring`).
+    /// scores with it (`Lm::scoring`), unless the experiment switch `chat_tri` is set.
     tri: Option<Tri>,
+    /// Experiment switch, default off (`None`): `Some(kn)` makes the chat profile score with the trigram table too (when one is loaded),
+    /// Kneser-Ney on (`true`) or off (`false`). Only the evaluation CLI's `--chat-tri` sets it; the App and the FFI never do.
+    chat_tri: Option<bool>,
 }
 
 /// kn.sjkn (SJKN0002, written by tools/kn_cont.py), indexed by model word id. `total` (sum of N') is computed
@@ -352,11 +355,20 @@ impl Lm {
     }
 
     /// How `profile` scores a decoded word (docs/contracts/trigram-core.md): formal with a table is trigram on, Kneser-Ney off;
-    /// everything else is the bigram with the side file as loaded (chat never uses the table). Only decoding and
+    /// everything else is the bigram with the side file as loaded (chat never uses the table unless `set_chat_tri` was called). Only decoding and
     /// `Engine::total_score` take this; the prediction row scores with `word_by_id` and keeps the side file whatever the profile.
     pub fn scoring(&self, profile: Profile) -> Scoring {
+        if let (Profile::Chat, Some(kn), true) = (profile, self.chat_tri, self.tri.is_some()) {
+            return Scoring { lam: profile.lambda(), kn, tri: true };
+        }
         let tri = profile == Profile::Formal && self.tri.is_some();
         Scoring { lam: profile.lambda(), kn: !tri, tri }
+    }
+
+    /// Experiment switch (trigram-explore registration), default `None` = chat never uses the table. `Some(kn)`: chat scores with the
+    /// table (needs one loaded; without it nothing changes), Kneser-Ney on or off. Nothing in the App or the FFI calls this.
+    pub fn set_chat_tri(&mut self, chat_tri: Option<bool>) {
+        self.chat_tri = chat_tri;
     }
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
@@ -466,6 +478,7 @@ impl Lm {
             sha: crate::eval::sha256_hex(bytes),
             kn: None,
             tri: None,
+            chat_tri: None,
         })
     }
 
@@ -1743,6 +1756,17 @@ mod tests {
         lm.add_tri(tiny_tri(&model)).unwrap();
         assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: false, tri: true });
         assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false }, "chat ignores the table");
+        // the experiment switch: None is today's value, Some(kn) turns the table on for chat only
+        lm.set_chat_tri(None);
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false });
+        lm.set_chat_tri(Some(true));
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: true });
+        lm.set_chat_tri(Some(false));
+        assert_eq!(lm.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: false, tri: true });
+        assert_eq!(lm.scoring(Profile::Formal), Scoring { lam: LAMBDA_FORMAL, kn: false, tri: true }, "formal unchanged");
+        let mut bare = Lm::parse(&model).unwrap();
+        bare.set_chat_tri(Some(false));
+        assert_eq!(bare.scoring(Profile::Chat), Scoring { lam: LAMBDA_CHAT, kn: true, tri: false }, "no table: switch does nothing");
         assert!(lm.tri_tag().unwrap().starts_with("+tri:") && lm.tri_tag().unwrap().len() == 13);
     }
 

@@ -21,9 +21,15 @@ Outputs, under --out:
 
   python3 count.py wiki --out DIR --articles 200000 --procs 40 --extra-lexicon FILE... [--overlay-add FILE] [--tri-min 0.01]
   python3 count.py text --out DIR --tag colloquial3 --extra-lexicon FILE... [--overlay-add FILE] FILE...
+  python3 count.py wiki ... --shard K/N          only articles i with i % N == K (build_counts.py --shard's rule); the tag becomes
+                                                 <articles>-shard<K>of<N>; the N processes run side by side, each with its own --procs
+  python3 count.py merge --out DIR --tag T SHARD_TAG...   sums the unmapped / mapped / tri pickles of the shard tags (wiki shards, or the
+                                                 `text` runs of the TSV shards of one source) into tag T, deletes nothing
+`text` reads a path the way build_counts_text.lines() does: .bz2 is decompressed, a path with ".tsv" in it contributes its last tab field.
 """
 import argparse
 import collections
+import json
 import math
 import os
 import pickle
@@ -138,7 +144,7 @@ def wiki_sentences(raw):
     for pat, rep in bc.MARKUP:
         t = pat.sub(rep, t)
     for s in bc.SENT.findall(t):
-        yield bc.convert(s, phrase, char, maxp)
+        yield bc.convert(s, phrase, char, maxp, trad_tw_phrases=bc._W.get("trad_tw", True))
 
 
 def count_batch3(texts):
@@ -160,9 +166,9 @@ def _reload_lexicons(overlay_add, extra):
         bc._W["pack_lens"] = sorted({len(w) for w in bc._W["pack"]})
 
 
-def init3(extra_lexicons=(), overlay_add=None, tri_min=bc.EXPECTED_MIN):
+def init3(extra_lexicons=(), overlay_add=None, tri_min=bc.EXPECTED_MIN, trad_tw_phrases=True):
     extra = tuple(dict.fromkeys(os.path.abspath(f) for f in extra_lexicons))
-    bc._init(False, True, False, extra)
+    bc._init(False, True, False, extra, trad_tw_phrases=trad_tw_phrases)
     if overlay_add:
         _reload_lexicons(os.path.abspath(overlay_add), extra)
     bc._W["tri_min"] = tri_min
@@ -192,29 +198,66 @@ def _inputs(a, files):
                         os.path.join(bc.ROOT, "data", "lexicon", "overlay-add.tsv")] if p]
 
 
+def shard_of(spec):
+    """"K/N" -> (K, N); (0, 1) when not given. Same rule as experiments/s2/build_counts.py --shard."""
+    k, n = map(int, spec.split("/")) if spec else (0, 1)
+    if not 0 <= k < n:
+        raise ValueError(f"--shard {spec}: need 0 <= K < N")
+    return k, n
+
+
+def shard_filter(it, k, n):
+    return (x for i, x in enumerate(it) if i % n == k)
+
+
 def cmd_wiki(a):
     import multiprocessing as mp
     uni, bi, tri, dbi = (collections.Counter() for _ in range(4))
     nx = runs = arts = 0
-    init3(tuple(a.extra_lexicon), a.overlay_add, a.tri_min)   # in the parent first (OpenCC tables, lexicon): a failure stops here, not in every Pool worker's initializer (which respawns forever)
-    with mp.Pool(a.procs, initializer=init3, initargs=(tuple(a.extra_lexicon), a.overlay_add, a.tri_min)) as pool:
-        for u, b, t, d, x, s_ in pool.imap_unordered(count_batch3, bc.batches(bc.articles(a.articles))):
+    init3(tuple(a.extra_lexicon), a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)   # in the parent first (OpenCC tables, lexicon): a failure stops here, not in every Pool worker's initializer (which respawns forever)
+    k, n = shard_of(a.shard)
+    mine = shard_filter(bc.articles(a.articles), k, n)
+    with mp.Pool(a.procs, initializer=init3, initargs=(tuple(a.extra_lexicon), a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)) as pool:
+        for u, b, t, d, x, s_ in pool.imap_unordered(count_batch3, bc.batches(mine)):
             uni.update(u); bi.update(b); tri.update(t); dbi.update(d); nx += x; runs += s_; arts += 200
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {runs} runs, {len(uni)} words, {len(bi)} bigrams, {len(tri)} trigrams", flush=True)
-    arts = min(arts, a.articles)
-    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min})
-    write_outputs(a.out, str(arts), uni, bi, tri, dbi, nx, runs, arts, meta)
+    if a.shard:
+        arts = len(range(k, a.articles, n))   # what the shard was asked to count (the dump may hold fewer: then every shard's slice is shorter by the same rule)
+        tag = f"{a.articles}-shard{k}of{n}"
+    else:
+        arts = min(arts, a.articles)
+        tag = str(arts)
+    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard, "no_trad_tw_phrases": a.no_trad_tw_phrases})
+    write_outputs(a.out, tag, uni, bi, tri, dbi, nx, runs, arts, meta)
 
 
 def cmd_text(a):
-    init3(a.extra_lexicon, a.overlay_add, a.tri_min)
+    init3(a.extra_lexicon, a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)
     acc = Acc()
     for p in a.paths:
         for s in bct.lines(p):
-            acc.add_text(bc.convert(s, *bc._W["conv"]), a.tri_min)
-    meta = common.provenance(_inputs(a, a.paths), {"tri_min": a.tri_min})
+            acc.add_text(bc.convert(s, *bc._W["conv"], trad_tw_phrases=not a.no_trad_tw_phrases), a.tri_min)
+    meta = common.provenance(_inputs(a, a.paths), {"tri_min": a.tri_min, "no_trad_tw_phrases": a.no_trad_tw_phrases})
     write_outputs(a.out, a.tag, acc.uni, acc.bi, acc.tri, acc.dbi, acc.nx, acc.runs, 0, meta)
+
+
+def cmd_merge(a):
+    """Sum the shards' pickles into one tag, one file at a time (the counts are additive: Counter sums, `articles` and `runs` add up)."""
+    for d, name, keys in (("unmapped", "counts", ("uni", "bi")), ("unmapped", "tri", ("tri",)), ("mapped", "counts", ("uni", "bi"))):
+        total = {k: collections.Counter() for k in keys}
+        head = {"articles": 0, "runs": 0} if name == "counts" else {}
+        for t in a.shards:
+            part = pickle.load(open(os.path.join(a.out, d, f"{name}-{t}.pkl"), "rb"))
+            for k in keys:
+                total[k].update(part[k])
+            for k in head:
+                head[k] += part[k]
+        os.makedirs(os.path.join(a.out, d), exist_ok=True)
+        pickle.dump({**total, **head}, open(os.path.join(a.out, d, f"{name}-{a.tag}.pkl"), "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"{d}/{name}-{a.tag}.pkl: " + ", ".join(f"{len(v)} {k}" for k, v in total.items()), flush=True)
+    metas = [json.load(open(os.path.join(a.out, f"meta-{t}.json"))) for t in a.shards]
+    common.write_json(os.path.join(a.out, f"meta-{a.tag}.json"), {"tag": a.tag, "merged_from": a.shards, "shard_meta": metas})
 
 
 def main(argv=None):
@@ -225,13 +268,19 @@ def main(argv=None):
         p.add_argument("--out", required=True)
         p.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE")
         p.add_argument("--overlay-add", help="overlay-add.tsv to count with instead of the checkout's (model-v6 used commit 4d47a50's file)")
+        p.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 contract 2.2, same as build_counts.py: traditional sentences skip OpenCC TWPhrases (use it whenever the bigram counts did)")
         p.add_argument("--tri-min", type=float, default=bc.EXPECTED_MIN, help="a trigram path below this posterior inside one run is not recorded (default = the bigram's 0.01)")
     sub.choices["wiki"].add_argument("--articles", type=int, default=200000)
     sub.choices["wiki"].add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
     sub.choices["text"].add_argument("--tag", required=True)
     sub.choices["text"].add_argument("paths", nargs="+")
+    sub.choices["wiki"].add_argument("--shard", metavar="K/N", help="only articles i with i %% N == K; output tag <articles>-shard<K>of<N>; merge the N shards with `merge`")
+    p = sub.add_parser("merge")
+    p.add_argument("--out", required=True)
+    p.add_argument("--tag", required=True)
+    p.add_argument("shards", nargs="+", metavar="SHARD_TAG")
     a = ap.parse_args(argv)
-    (cmd_wiki if a.cmd == "wiki" else cmd_text)(a)
+    {"wiki": cmd_wiki, "text": cmd_text, "merge": cmd_merge}[a.cmd](a)
 
 
 if __name__ == "__main__":

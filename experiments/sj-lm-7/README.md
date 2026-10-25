@@ -82,6 +82,43 @@ python3 tools/build_acg_pack.py freeze-counts --expected-model <SHA-256>
 
 維基文字檔（萌典補詞要數子字串的語料）要自己先備好：一行一段漢字，用 `build_counts.article_runs(raw, conv, trad_tw_phrases=False)` 從 dump 產生；腳本沒有包這一步。
 
+## 連文表重數與剪成四個大小（探索 `trigram-explore.md`；之後由 main 在 GCP 執行）
+
+連文表由 `experiments/derisk-1015/e1/` 的管線出：`count.py`（uni／bi／tri 期望次數，和 bigram 的 `build_counts.py` 同一套詞庫、轉換、切句）→ `build_models.py tri`（加權、四捨五入、異體合併、建不剪的表）→ `entropy_prune.py`（相對熵剪枝）。這條管線的 uni／bi 不拿去建 bigram（bigram 照上面 `build_counts.py` 與 `tools/build_lm.py`）；它的 uni／bi 只是順便算出的同一份次數。`<C>` 是計數輸出資料夾，`<詞表>` 是 bigram 計數用的同一份計數詞表。
+
+```sh
+# 1. 維基切 32 份平行（每份 1 個工作程序；i % 32 == K 的篇；輸出名帶 200000-shardKof32）。--no-trad-tw-phrases 要和 bigram 計數一致（契約 §2.2）
+for K in $(seq 0 31); do
+  python3 experiments/derisk-1015/e1/count.py wiki --out <C> --articles 200000 --procs 1 --shard $K/32 --no-trad-tw-phrases --extra-lexicon <詞表> --tri-min 0.01 &
+done; wait
+python3 experiments/derisk-1015/e1/count.py merge --out <C> --tag 200000 $(for K in $(seq 0 31); do printf '200000-shard%sof32 ' $K; done)
+
+# 2. 口語各來源：一個 TSV 一個程序（路徑含 .tsv 取最後一欄，.bz2 自動解壓），再按來源合併。<來源> 是 bigram 用的那個計數檔名（counts-<來源>.pkl）
+for F in <來源>_1.tsv <來源>_2.tsv …; do
+  python3 experiments/derisk-1015/e1/count.py text --out <C> --tag <來源>-$(basename $F .tsv) --no-trad-tw-phrases --extra-lexicon <詞表> --tri-min 0.01 $F &
+done; wait
+python3 experiments/derisk-1015/e1/count.py merge --out <C> --tag <來源> <來源>-<檔1> <來源>-<檔2> …     # 每個來源一次：口語池、g0v、PTT 推文、PTT 內文
+
+# 3. 建不剪的表（門檻 1）。--lm 是該臂的通語 bigram.sjlm（表綁它的雜湊）；--corpora 的檔名和權重照 bigram 的 --corpora，每個檔讀它的 tri-*.pkl
+python3 experiments/derisk-1015/e1/build_models.py tri --counts <C>/unmapped --lm <臂>/bigram.sjlm --out <T> --thresholds 1 \
+    --corpora counts-200000.pkl:1 counts-<口語池>.pkl:5 counts-<g0v>.pkl:5 counts-<ptt-push>.pkl:<W> counts-<ptt-body>.pkl:1      # 寫 <T>/tri-t1.sjt3、tri-sizes.json
+
+# 4. 剪成四個大小（一次評分、四個 K 從同一個排名取；--kn 是該臂的 kn.sjkn，β 必須是 1）。7700964 ＝ 出貨 H3 的條目數
+python3 experiments/derisk-1015/e1/entropy_prune.py --tri <T>/tri-t1.sjt3 --lm <臂>/bigram.sjlm --kn <臂>/kn.sjkn \
+    --keep 7700964,3850000,1900000,950000 --labels K7.7M,K3.85M,K1.9M,K0.95M --out-dir <P>                                  # 寫 <P>/tri-<標籤>.sjt3 與 .json
+```
+
+量測：把 `<P>/tri-<標籤>.sjt3` 複製成一個資料夾裡的 `trigram.sjt3`，旁邊放該臂的 `bigram.sjlm`、`classes.sjc`、`kn.sjkn`，`shanjie-eval --lm <資料夾>/bigram.sjlm …`：
+
+```sh
+shanjie-eval --lm <資料夾>/bigram.sjlm --profile formal …                      # 書面：有表就用（KN 關）
+shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat …                        # 聊天：和以前一樣不讀表
+shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat --chat-tri on-kn …       # 實驗：聊天也用表，KN 開（摘要行有 +kn 與 +tri）
+shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat --chat-tri off-kn …      # 實驗：聊天也用表，KN 關
+```
+
+`--chat-tri` 只接受 `--profile chat`、不能和 `--no-tri` 並用、資料夾裡沒有 `trigram.sjt3` 時報錯（否則會靜默量到 bigram）。核心的開關是 `Lm::set_chat_tri(Some(kn))`，預設關，App 與 FFI 不呼叫。注意：維基切片的記憶體是 32 份各自的 tri 計數表，先用 `--articles 2000 --shard 0/32` 量一份的尖峰再決定同時跑幾份；`count.py` 沒有 `--holdout-guard`（`build_counts.py` 有），若 bigram 計數開了守門，連文要先確認輸入已經濾過。
+
 ## 輸入表（契約 §2.4；每一列的 SHA-256 在輸入凍結時填）
 
 | 輸入 | SHA-256 |

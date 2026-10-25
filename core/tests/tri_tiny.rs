@@ -85,6 +85,36 @@ fn chat_ignores_the_table_and_formal_does_not() {
     assert!(formal_differs);
 }
 
+/// The experiment switch `set_chat_tri`: None (and Some without a table) is today's chat bit for bit; Some(kn) changes chat scores, and
+/// the two Kneser-Ney settings differ from each other. Formal is untouched by it.
+#[test]
+fn chat_tri_switch_off_is_today_and_on_changes_chat() {
+    let lexicon = bytes("tri-tiny", "lexicon.txt");
+    let (mut with, mut bare, base) = (lm_of(true, true, true), lm_of(true, true, false), lm_of(true, true, true));
+    let capped = capped_of(&with, &lexicon);
+    let run = |lm: &Lm, p, s: &str, start| decode_from(&capped, &syls(s), lm, p, core::BEAM_S1, start, true).unwrap().into_iter().map(|(sc, ws)| (sc.to_bits(), ws)).collect::<Vec<_>>();
+    with.set_chat_tri(None);
+    bare.set_chat_tri(Some(false));
+    let (mut on_differs, mut kn_differs) = (false, false);
+    for start in STARTS {
+        for s in SENTENCES {
+            let today = run(&base, Profile::Chat, s, start);
+            assert_eq!(run(&with, Profile::Chat, s, start), today, "None {start} {s}");
+            assert_eq!(run(&bare, Profile::Chat, s, start), today, "no table {start} {s}");
+            let formal = run(&base, Profile::Formal, s, start);
+            with.set_chat_tri(Some(true));
+            let on = run(&with, Profile::Chat, s, start);
+            assert_eq!(run(&with, Profile::Formal, s, start), formal, "formal {start} {s}");
+            with.set_chat_tri(Some(false));
+            let off = run(&with, Profile::Chat, s, start);
+            with.set_chat_tri(None);
+            on_differs |= on != today || off != today;
+            kn_differs |= on != off;
+        }
+    }
+    assert!(on_differs && kn_differs);
+}
+
 // ---------- Lm::load ----------
 
 fn table_bytes() -> Vec<u8> {

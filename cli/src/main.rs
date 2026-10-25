@@ -223,6 +223,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut dump_words = None::<String>;
     let (mut classes, mut kn, mut tri) = (true, true, true);
+    // `--chat-tri on-kn|off-kn` (trigram-explore experiment, default off): the chat profile also scores with trigram.sjt3, Kneser-Ney on or off.
+    let mut chat_tri = None::<bool>;
     // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
@@ -271,6 +273,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-classes" => classes = false,
             "--no-kn" => kn = false,
             "--no-tri" => tri = false,
+            "--chat-tri" => {
+                chat_tri = Some(match val()?.as_str() {
+                    "on-kn" => true,
+                    "off-kn" => false,
+                    _ => return Err("--chat-tri must be on-kn or off-kn".into()),
+                })
+            }
             "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
@@ -307,11 +316,18 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
+    if chat_tri.is_some() && (!tri || prof != Profile::Chat) {
+        return Err("--chat-tri needs --profile chat and cannot be combined with --no-tri".into());
+    }
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
     // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
-    // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
+    // (docs/contracts/trigram-core.md) is read only for --profile formal (or chat with the experiment flag --chat-tri) and without --no-tri (otherwise chat never uses it, so it is not read
     // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
-    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
+    let mut lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && (prof == Profile::Formal || chat_tri.is_some())).map_err(|e| e.to_string())?;
+    lm.set_chat_tri(chat_tri);
+    if chat_tri.is_some() && lm.tri_tag().is_none() {
+        return Err("--chat-tri: no trigram.sjt3 beside the model".into());
+    }
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;

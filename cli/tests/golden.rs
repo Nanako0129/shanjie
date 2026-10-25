@@ -356,6 +356,12 @@ fn trigram_table_is_read_for_formal_only() {
     assert!(ok && !no_tri.contains("+tri:") && no_tri.contains("+kn:"), "{no_tri}");
     let (ok, chat) = go(&["--profile", "chat"]);
     assert!(ok && !chat.contains("+tri:") && chat.contains("+kn:"), "{chat}");
+    // the experiment flag: chat reads the table too, Kneser-Ney as asked; it is refused where it would silently measure the bigram
+    let (ok, on_kn) = go(&["--profile", "chat", "--chat-tri", "on-kn"]);
+    assert!(ok && on_kn.contains(&want) && on_kn.contains("+kn:"), "{on_kn}");
+    let (ok, off_kn) = go(&["--profile", "chat", "--chat-tri", "off-kn"]);
+    assert!(ok && off_kn.contains(&want) && !off_kn.contains("+kn:"), "{off_kn}");
+    assert!(!go(&["--profile", "chat", "--chat-tri", "off-kn", "--no-tri"]).0 && !go(&["--profile", "formal", "--chat-tri", "on-kn"]).0 && !go(&["--profile", "chat", "--chat-tri", "maybe"]).0);
     // a bad table: formal refuses it, everything that does not read it still runs
     let table = dir.join("trigram.sjt3");
     std::fs::write(&table, b"junk").unwrap();
