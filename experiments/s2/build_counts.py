@@ -457,6 +457,7 @@ def main():
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
     ap.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 契約 §2.2：繁體句不套 OpenCC TWPhrases（「插件」不換成「外掛」）；預設關＝model-v6 的行為。--holdout-guard 的比對也跟著這個設定")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("--shard", metavar="K/N", help="只數第 i 篇（i %% N == K）、寫 counts-<篇數>-shard<K>of<N>.pkl；N 個程序各給一個 K 平行跑，計數相加就是全部（SJ-LM-7：主程序合併是單核瓶頸）。預設關")
     ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數（契約 holdout-refresh §8）；不給檔＝eval/holdout/ 底下全部 .txt")
     a = ap.parse_args()
     if a.expected and a.trigram:
@@ -469,15 +470,18 @@ def main():
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = skipped = 0
     with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard, not a.no_trad_tw_phrases)) as pool:
-        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(articles(a.articles))):
+        k, n = map(int, a.shard.split("/")) if a.shard else (0, 1)
+        mine = (x for i, x in enumerate(articles(a.articles)) if i % n == k)
+        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(mine)):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {sents} runs, {len(uni)} words, {len(bi)} bigrams", flush=True)
-    arts = min(arts, a.articles)
+    arts = min(arts, a.articles) if not a.shard else len(range(k, a.articles, n))
     out = {"uni": uni, "bi": bi, "articles": arts, "runs": sents}
     if a.trigram:
         out["tri"] = tri
-    pickle.dump(out, open(os.path.join(OUT, f"counts-{arts}{'-tri' if a.trigram else ''}.pkl"), "wb"))
+    name = f"counts-{a.articles}-shard{k}of{n}" if a.shard else f"counts-{arts}"
+    pickle.dump(out, open(os.path.join(OUT, f"{name}{'-tri' if a.trigram else ''}.pkl"), "wb"))
     print(f"done: {arts} articles, {sents} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
     if a.holdout_guard is not None:
         print(f"holdout-guard: skipped {skipped} runs")
