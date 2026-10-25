@@ -9117,7 +9117,7 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 
 ## 2026-10-26：通語 SJ-LM-7（規模待定）的 9 個倒掛字套用工具（契約 §2.3）
 
-- `tools/readings.py --apply-inverted OUT`：把 `--report-inverted` 的建議分數寫進 `mcbpmf-data.txt` 的複本，只改主讀音那幾列的分數欄，其他列逐位元組照抄。誒 四個讀音同分、證據決定不了，用維護者的決定（`INVERTED_DECIDED`：「ㄝˋ應該比較多」，國文導師同判）。
+- `tools/readings.py --apply-inverted OUT`：把 `--report-inverted` 的建議分數寫進 OUT（可以就是 `mcbpmf-data.txt` 本身，先整檔讀進記憶體、寫暫存檔再改名），只改主讀音那幾列的分數欄，並把它們所在讀音的列照分數重排（基底同讀音的列由高到低，套用後 0 對逆序），其他列不動。還有 CHECK 字（例如沒給 Unihan 時的 跩）就中止、不寫檔。誒 的 ㄝˋ、ㄞ、ㄞˋ 三個 −6.8 同分、證據決定不了，用維護者的決定（`INVERTED_DECIDED`：「ㄝˋ應該比較多」，國文導師同判；決定的讀音不在基底就中止）。
 - 真資料（Unihan 18.0 後備）：改 9 列，主讀音都變成 −6.3（又讀 −6.8 不動）：鈸 ㄅㄚˊ、乜 ㄇㄧㄝ、掇 ㄉㄨㄛˊ、鉈 ㄊㄨㄛˊ、癘 ㄌㄧˋ、嘁 ㄑㄧ、溴 ㄒㄧㄡˋ、跩 ㄓㄨㄞˇ、誒 ㄝˋ；沒有 CHECK 字。
-- 這一片只合併工具；repo 的 `mcbpmf-data.txt` 不改，照契約 §4 跟 PR 2 一起換。階段 0 的詞庫用工具寫出的複本。
+- 這一片只合併工具；repo 的 `mcbpmf-data.txt` 不改，照契約 §4 跟 PR 2 一起換。`build_overlay.py`、`build_sandhi.py` 讀的是 checkout 裡的 `mcbpmf-data.txt`（輕聲本調、規則 4 都看基底分數），所以階段 0 在實驗 checkout 裡**先就地套用**，再重建疊加層與變調列，兩者用同一份基底（`/code-review` 指出用複本會讓疊加層建在舊分數上）。
 

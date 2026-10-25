@@ -2,7 +2,7 @@
 
 用法：python3 tools/readings.py [--rule-3b [--unihan Unihan_Readings.txt]] <in.txt> <out.txt>
   python3 tools/readings.py --report-inverted [--unihan Unihan_Readings.txt]   （不寫任何檔：印出 9 個倒掛字的現行與建議分數，見下面）
-  python3 tools/readings.py --apply-inverted OUT [--unihan Unihan_Readings.txt]  （把建議分數寫進 mcbpmf-data.txt 的複本 OUT；其他列逐位元組不變）
+  python3 tools/readings.py --apply-inverted OUT [--unihan Unihan_Readings.txt]  （把建議分數寫進 OUT，可以就是 mcbpmf-data.txt 本身；只動那 9 列與它們所在讀音的列序；還有 CHECK 字就中止、不寫檔）
   in.txt ：前文|句子          （也接受已有第三欄的列，原樣保留）
   out.txt：前文|句子|讀音      （讀音以空白分隔音節）
   stderr ：CHECK 列（需要人確認）與 UNREADABLE 列（詞庫拼不出，未寫入 out）
@@ -41,7 +41,7 @@ TIE_EPS = 1e-9
 INVERTED = "鈸乜掇鉈癘嘁誒溴跩"   # 契約 §0：小麥基底裡又讀（−6.8 底分）高於主讀音的 9 個字
 # 建議分數：主讀音 = 最高的其他讀音 + 這個差。取 0.5＝規則 4 的「明顯較高」門檻，改完之後 readings.py 規則 4 直接當作已決定
 INVERTED_LEAD = 0.5
-# 證據決定不了、由維護者定的主讀音（誒：四個讀音同分；國文導師判 ㄝˋ，維護者 2026-10-26「ㄝˋ應該比較多」）
+# 證據決定不了、由維護者定的主讀音（誒：ㄝˋ、ㄞ、ㄞˋ 三個 −6.8 同分；國文導師判 ㄝˋ，維護者 2026-10-26「ㄝˋ應該比較多」）
 INVERTED_DECIDED = {"誒": "ㄝˋ"}
 
 
@@ -144,7 +144,9 @@ def inverted_report(lex, unihan=None, chars=INVERTED):
                     readings[w][syls[0]] = s
     for ch in chars:
         cur = readings[ch]
-        main, how = (INVERTED_DECIDED[ch], "maintainer") if INVERTED_DECIDED.get(ch) in cur else decide_reading(ch, list(cur), ev, unihan)
+        if ch in INVERTED_DECIDED and INVERTED_DECIDED[ch] not in cur:
+            raise SystemExit(f"INVERTED_DECIDED: {ch} {INVERTED_DECIDED[ch]} is not a reading of {ch} in the base")
+        main, how = (INVERTED_DECIDED[ch], "maintainer") if ch in INVERTED_DECIDED else decide_reading(ch, list(cur), ev, unihan)
         for r, s in sorted(cur.items(), key=lambda x: -x[1]):
             if main is None:
                 rows.append((ch, r, s, s, "CHECK", ""))
@@ -157,19 +159,32 @@ def inverted_report(lex, unihan=None, chars=INVERTED):
 
 
 def apply_inverted(src, out, rows):
-    """把 rows（inverted_report 的結果）裡主讀音的建議分數寫進 src 的複本 out：只改那幾列的分數欄（%.6f，和基底的 -6.800000 同格式），
-    其他列逐位元組照抄。回傳改了幾列。"""
+    """把 rows（inverted_report 的結果）裡主讀音的建議分數寫進 out（可以等於 src：整檔先讀進記憶體，寫暫存檔再改名）。只改那幾列的分數欄
+    （%.6f，和基底的 -6.800000 同格式），再把它們所在讀音的列照分數由高到低重排（同分維持檔案順序），其他列逐位元組照抄。
+    還有 CHECK 字、或改到的列數和建議不同就中止，不寫檔。回傳改了幾列。"""
+    check = sorted({r[0] for r in rows if r[4] == "CHECK"})
+    if check:
+        raise SystemExit(f"apply-inverted: undecided characters {''.join(check)} (give --unihan, or add them to INVERTED_DECIDED)")
     new = {(ch, r): n for ch, r, cur, n, role, _ in rows if role == "main" and n != cur}
-    done = 0
-    with open(src, encoding="utf-8", newline="") as f, open(out, "w", encoding="utf-8", newline="") as g:
-        for line in f:
-            p = line.rstrip("\n").split(" ")
-            if len(p) == 3 and (p[1], p[0]) in new:
-                line = f"{p[0]} {p[1]} {new[(p[1], p[0])]:.6f}\n"
-                done += 1
-            g.write(line)
+    with open(src, encoding="utf-8", newline="") as f:
+        lines = f.readlines()
+    done, touched = 0, set()
+    for i, line in enumerate(lines):
+        p = line.rstrip("\n").split(" ")
+        if len(p) == 3 and (p[1], p[0]) in new:
+            lines[i] = f"{p[0]} {p[1]} {new[(p[1], p[0])]:.6f}\n"
+            done += 1
+            touched.add(p[0])
     if done != len(new):
         raise SystemExit(f"apply-inverted: {done} rows changed, expected {len(new)}")
+    key = lambda l: l.split(" ")[0] if len(l.split(" ")) == 3 else None
+    for reading in touched:
+        idx = [i for i, l in enumerate(lines) if key(l) == reading]   # 基底裡同讀音的列是連續的；不連續也只在這些位置之間換
+        for i, l in zip(idx, sorted((lines[i] for i in idx), key=lambda l: -float(l.split(" ")[2]))):
+            lines[i] = l
+    with open(out + ".tmp", "w", encoding="utf-8", newline="") as g:
+        g.writelines(lines)
+    os.replace(out + ".tmp", out)
     return done
 
 
@@ -263,10 +278,12 @@ if __name__ == "__main__":
         i = args.index("--unihan")
         unihan_path = args[i + 1]
         del args[i:i + 2]
-    if len(args) == 2 and args[0] == "--apply-inverted":
+    if "--apply-inverted" in args and (len(args) != 2 or args[0] != "--apply-inverted"):
+        raise SystemExit("usage: readings.py --apply-inverted OUT [--unihan Unihan_Readings.txt]")
+    if args[:1] == ["--apply-inverted"]:
         src = os.path.join(REPO, "data", "lexicon", "mcbpmf-data.txt")
         rows = inverted_report(ime.Lexicon(src), load_unihan(unihan_path) if unihan_path else None)
-        print(f"{apply_inverted(src, args[1], rows)} rows changed; CHECK chars: {''.join(sorted({r[0] for r in rows if r[4] == 'CHECK'})) or 'none'}")
+        print(f"{apply_inverted(src, args[1], rows)} rows changed in {args[1]}")
     elif args == ["--report-inverted"]:
         lex = ime.Lexicon(os.path.join(REPO, "data", "lexicon", "mcbpmf-data.txt"))
         print("字\t讀音\t現行分數\t建議分數\t角色\t依據")
