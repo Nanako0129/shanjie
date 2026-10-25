@@ -105,7 +105,7 @@ python3 tools/build_english_next.py --lexicon data/lexicon/mcbpmf-data.txt data/
 |---|---|
 | 維基 dump（前 200,000 篇） | |
 | `colloquial-train.txt` | |
-| g0v `#rand0m` 封存的每月頁（92 個 `<YYYY-MM>.html`，算法同 PTT） | `a4aefc14eefac7dd38fc219ecd1ad21e8634c1004302e6f9ad0fe99615ae5fe4` |
+| g0v `#rand0m` 來源檔 | |
 | PTT 原始 `<看板>/<文章>.html` 目錄 | |
 | OPUS `mono/zh_tw.txt.gz` | |
 | 詞庫（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`） | |

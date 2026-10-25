@@ -42,7 +42,7 @@ def messages(page, seen):
 def plain(text):
     """Slack markup -> text: quoted lines dropped (someone else's words, not released by this author), mentions and emoji codes removed,
     a link keeps its label (a bare URL stays, for the url filter)."""
-    text = "\n".join(line for line in text.split("\n") if not line.startswith("&gt;"))
+    text = "\n".join(line for line in text.split("\n") if not line.lstrip().startswith(("&gt;", ">")))   # Slack escapes > in most messages, not all
     text = LINK.sub(r"\2", MENTION.sub("", text))
     return html.unescape(EMOJI.sub("", BARE.sub(r"\1", text)))
 
