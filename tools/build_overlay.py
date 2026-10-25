@@ -302,7 +302,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
             f.write("詞\t原讀音\t新讀音\t依據\n" + "".join(changed))
         print(f"reading report: {len(changed)} rows (readings that change, the CHECK and GAP words that keep theirs, the second rows and the base-tone rows), {reading_report}")
     if pick:
-        print(f"--moedict-readings: {sum(fell_same.values())} words fell back from the concised dictionary and end on today's reading (not in the report): "
+        print(f"--moedict-readings: {sum(fell_same.values())} words fell back to a later source (concised -> Moedict -> rules) and end on today's reading (not in the report): "
               + "; ".join(f"{k} {n}" for k, n in fell_same.most_common()))
         print(f"--moedict-readings: {len(jp_removed)} words with a Japanese-form character are not written (listed in {os.path.relpath(JP_REMOVED, ROOT)})")
     return rows, removed, variant_removed, jp_removed
