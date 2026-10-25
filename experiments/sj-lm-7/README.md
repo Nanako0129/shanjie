@@ -30,7 +30,7 @@ PTT 清理（輸入是抓好的 `<看板>/<文章>.html`）：
 
 ```sh
 python3 experiments/sj-lm-7/ptt_clean.py <PTT_DIR> <OUT_DIR> --jobs <N>   # 寫 body.tsv、push.tsv，印每個來源的計數；--jobs 用滿核心，輸出和單程序逐位元組相同
-python3 experiments/sj-lm-7/g0v_clean.py <g0v 檔，一行一則訊息> <OUT.tsv>   # 規則同 ptt_clean（單位＝一則訊息、每單位最多 50 句、去重）；印計數
+python3 experiments/sj-lm-7/g0v_clean.py <封存目錄，<YYYY-MM>.html> <OUT.tsv> --exclude <cc0-sentences> --exclude <口語池各檔>…   # 規則同 ptt_clean（單位＝一則訊息、每則最多 50 句、去重）；跳過 (no CC0) 與引用行，只留不在 --exclude 裡的句子；印計數
 ```
 
 字幕清理（`--invade` 是 invade 清單的 clone，`--invade-sha256` 是凍結的雜湊；`--extra-rows LABEL=FILE` 把私人評測列加進守門，必須涵蓋 `REQUIRED_LABELS`）：
@@ -105,7 +105,7 @@ python3 tools/build_english_next.py --lexicon data/lexicon/mcbpmf-data.txt data/
 |---|---|
 | 維基 dump（前 200,000 篇） | |
 | `colloquial-train.txt` | |
-| g0v `#rand0m` 來源檔 | `85cdf6e1611aa0ff43dcd188bc6b566ecc4d92437c06cf5d577b4dc528852260` |
+| g0v `#rand0m` 封存的每月頁（92 個 `<YYYY-MM>.html`，算法同 PTT） | `a4aefc14eefac7dd38fc219ecd1ad21e8634c1004302e6f9ad0fe99615ae5fe4` |
 | PTT 原始 `<看板>/<文章>.html` 目錄 | |
 | OPUS `mono/zh_tw.txt.gz` | |
 | 詞庫（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`） | |
