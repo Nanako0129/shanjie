@@ -1,16 +1,18 @@
 """S2r：依教育部規範補齊「一」「不」的本調／變調讀音與「法」的 ㄈㄚˇ（docs/contracts/s2r-sandhi-variants.md §1），
-以及「紮」的口語讀音 ㄓㄚ（R6，docs/contracts/zha-reading.md）。
+以及「紮」的口語讀音 ㄓㄚ（R6，docs/contracts/zha-reading.md），
+再加輕聲詞的本調讀音（標籤 neutral，docs/contracts/neutral-tolerance.md §1）。
 
 輸入 data/lexicon/mcbpmf-data.txt（小麥基底，MIT）；讀 data/lexicon/overlay-add.tsv 只為了去重。
-輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\tsandhi」，依（讀音, 詞）的 UTF-8 位元組序排序。
+輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\t標籤」（sandhi 或 neutral），依（讀音, 詞）的 UTF-8 位元組序排序。
 
 R1–R5 的規則依據：《國語辭典簡編本》〈單一音讀〉（https://dict.concised.moe.edu.tw/page.jsp?ID=55&la=0&powerMode=0 ）、
 88 年《國語一字多音審訂表》；R6 的 ㄓㄚ 是口語讀音，不是審訂音（維護者逐字同意，zha-reading.md）。規則本身是事實，這個檔案不含任何教育部資料。
 
-用法：python3 tools/build_sandhi.py [--check]
+用法：python3 tools/build_sandhi.py [--check] [--neutral-penalty δ]
 """
 import argparse
 import collections
+import itertools
 import os
 import sys
 
@@ -18,6 +20,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OVERLAY = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 OUT = os.path.join(ROOT, "data", "lexicon", "sandhi-add.tsv")
+
+# neutral 列的分數 = 原列分數 − δ。契約 §3 的格點 {0.5, 1.0, 2.0} 裡只有 2.0 讓調參集都不退步（wikitune 0.5、1.0 各改壞 1 列，2026-10-26 GCP）；
+# --neutral-penalty 可蓋過（量格點用）。
+NEUTRAL_PENALTY = 2.0
+TONE_MARKS = "ˊˇˋ˙"
 
 # 「一」只讀本調的上下文（§1 排除）：前一字是「第」或數字字、後一字是數字字或「月」、詞尾、疊字動詞中間、
 # 詞中的詞尾（final_words）、序詞與專名（LISTED）。
@@ -187,16 +194,42 @@ def base_rows(path=BASE):
             yield word, syls, float(score), parts[2]
 
 
-def build():
+def neutral_variants(word, syls, singles):
+    """neutral：每個輕聲位置換成那個字的本調（單字詞裡韻相同的非輕聲讀音中分數最高的；同分每個都寫）。沒有同韻非輕聲讀音的位置
+    保留輕聲（核心不收不帶聲調的 ㄉㄜ、ㄌㄜ 這類音節，打了組不出字；main 2026-10-26 實測）；沒有任何位置能換就不產生。
+    所有輕聲位置一起換，同分的位置展開成組合。回傳新讀音的 list。"""
+    pos = [i for i, s in enumerate(syls) if s[-1] == "˙"]
+    if not pos:
+        return []
+    choices = []
+    for i in pos:
+        rime = syls[i][:-1]
+        cand = {r: sc for r, sc in singles.get(word[i], {}).items() if r[-1] != "˙" and r.rstrip(TONE_MARKS) == rime}
+        top = max(cand.values()) if cand else None
+        choices.append(sorted(r for r, sc in cand.items() if sc == top) or [syls[i]])
+    out = []
+    for combo in itertools.product(*choices):
+        new = list(syls)
+        for i, r in zip(pos, combo):
+            new[i] = r
+        if new != syls:
+            out.append(new)
+    return out
+
+
+def build(base=BASE, overlay=OVERLAY, penalty=NEUTRAL_PENALTY):
     existing = set()
-    rows = list(base_rows())
-    for word, syls, _, _ in rows:
+    rows = list(base_rows(base))
+    singles = collections.defaultdict(dict)   # 字 -> {單字詞的讀音: 分數}（neutral 找本調用）
+    for word, syls, score, _ in rows:
         existing.add(("-".join(syls), word))
-    for line in open(OVERLAY, encoding="utf-8"):
+        if len(word) == 1:
+            singles[word][syls[0]] = max(score, singles[word].get(syls[0], score))
+    for line in open(overlay, encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
         if len(p) >= 2:
             existing.add((p[0], p[1]))
-    best = {}          # (reading, word) -> (score float, score text)
+    best = {}          # (reading, word) -> (score float, score text, tag)
     per_rule = collections.Counter()
     for word, syls, score, text in rows:
         for name, rule in RULES:
@@ -211,18 +244,28 @@ def build():
             if key not in best or score > best[key][0]:
                 if key not in best:
                     per_rule[name] += 1
-                best[key] = (score, text)
-    lines = [f"{r}\t{w}\t{t}\tsandhi\n" for (r, w), (_, t) in sorted(best.items(), key=lambda kv: (kv[0][0].encode(), kv[0][1].encode()))]
+                best[key] = (score, text, "sandhi")
+    for word, syls, score, _ in rows:   # neutral 最後做：已被 sandhi 列或任何一層有的（讀音, 詞）不寫
+        for new in neutral_variants(word, syls, singles) if len(word) > 1 else ():
+            key = ("-".join(new), word)
+            if key in existing or (key in best and best[key][2] == "sandhi"):
+                continue
+            if key not in best or score - penalty > best[key][0]:
+                if key not in best:
+                    per_rule["neutral"] += 1
+                best[key] = (score - penalty, f"{score - penalty:.8f}", "neutral")
+    lines = [f"{r}\t{w}\t{t}\t{tag}\n" for (r, w), (_, t, tag) in sorted(best.items(), key=lambda kv: (kv[0][0].encode(), kv[0][1].encode()))]
     return "".join(lines), per_rule
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="重產並和現有檔逐位元組比對，不寫檔")
+    ap.add_argument("--neutral-penalty", type=float, default=NEUTRAL_PENALTY, help="neutral 列的分數 = 原列 − 這個值")
     a = ap.parse_args()
     if a.check:
         self_check()
-    text, per_rule = build()
+    text, per_rule = build(penalty=a.neutral_penalty)
     print("rows per rule (first rule to produce each row):", dict(sorted(per_rule.items())), "total", text.count("\n"), file=sys.stderr)
     if a.check:
         cur = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else None

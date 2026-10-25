@@ -146,6 +146,7 @@
 - 跨語言：Rust 與 Python 在出貨集合上的摘要行逐字相同（照 model-v6 §2.3）。
 - 常談在新配對下生效：`applies` 對新 `.sjtl` 為真（Rust 測試），CLI 聊天三檔摘要行有 `+colloq:`。
 - 保留集：問 Release 之前由 fresh verifier 跑一次。
+- **重量輕聲容錯**（維護者 2026-10-26）：輕聲容錯（`docs/contracts/neutral-tolerance.md`，δ 2.0）合併時錯字回報書面第 51 列改壞 1 列，當例外；定案組合（新通語、新會意）上重量輕聲檢查集 `eval/dev/neutral/words.txt` 與錯字回報第 51 列，數字進研究紀錄，第 51 列仍錯時給維護者看。
 
 ## 4. 順序、PR 與回退（照 model-v6 §2.6）
 
