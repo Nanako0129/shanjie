@@ -9,6 +9,7 @@
 | `ptt_clean.py` | PTT 網頁 → `body.tsv`、`push.tsv`（單位 `看板/文章`，一個單位最多 50 句）。同一篇、同一帳號、相鄰、時間差 ≤ 3 分鐘的推文先接起來再切句 | §2.4 |
 | `p2clean.py` | 切句與過濾規則（4–40 漢字、漢字比例、網址與帳號、數字、程式碼、簡體專用字）、去重鍵、`Guard`。從 `exp/p2-data` 複製，`ptt_clean.py` 與 `clean_subs.py` 共用 | §2.4 |
 | `clean_subs.py` | OPUS OpenSubtitles `zh_tw` → `subs.tsv`、`subs-half.tsv`（`SHA-256(句子)` 第一個位元組 < 128 的一半）。含假名、亂碼（詞庫外字）、中英並列三道過濾，另外擋繁簡共用字的大陸詞組（什么、這里、最后、對于、愿意⋯，`MAINLAND`）；輸入是 OPUS `raw/zh_tw.zip`（逐片原文，片＝片號資料夾，每部片後面插一個空行），只數片數、不設每片上限 | §2.7 |
+| `review_subs.py` | 字幕逐句審查（§2.7）：`prefilter` 把含繁簡共用字（大陸用法不同）、英文字母或記號的句子切成每份 2,000 句（附行號）給 Sonnet subagent 審；`apply` 拿掉審查回報的行號，重寫 `subs.tsv`、`subs-half.tsv` | §2.7 |
 | `dedupe_eval.py` | 用 `tools/holdout_guard.py` 的比對器，把新來源句子對各評測集去重；只印每個來源、每個集合的命中數 | §2.4 |
 | `moore_lewis.py` | `score`：字元 4-gram Kneser–Ney，打分集合一個、候選池兩折交叉（池依句子的 SHA-256 分兩半，各用另一半同字數的固定種子樣本訓練去打分，沒有句子被看過它的模型打分），每個來源留交叉熵差最好的 50%。`split`：訊息 ID 的 SHA-256 第一個位元組 < 32 的 1/8 進保留桶 | §2.4 |
 | `test_*.py` | 合成輸入的單元測試，`make test-python` 會跑 | |

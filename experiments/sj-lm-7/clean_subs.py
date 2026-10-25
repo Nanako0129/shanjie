@@ -17,7 +17,8 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
                 the NFKC text with whitespace removed; the simplified step lets these characters through on purpose (公里, 皇后). A phrase
                 that is a word of --lexicon is not used (水里, 村里); a match is not a hit when a longer lexicon word holds it (二里頭文化)
                 or a lexicon word with a shared character and no phrase in it crosses it (皇后來了, 汽車里程, 若干活動, 海關系統)
-  invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any)
+  invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any), plus the
+                terms of --mainland-terms (mainland wording in traditional characters, e.g. OpenCC TWPhrases keys PTT seldom uses)
   dedupe        NFKC + whitespace removed + case folded
   guard         p2clean.Guard over the evaluation / tuning / judging sets and the holdout (4-character containment for the holdout)
 Films are counted, not capped (contract 2.7, maintainer 2026-10-25: no per-film cap). A film is a run of non-empty lines between blank lines; the
@@ -390,6 +391,14 @@ def build_ctx(a):
     terms, info = invade.load(a.invade)
     if a.invade_sha256 and info["sha256"] != a.invade_sha256:
         raise SystemExit(f"STOP: invade list SHA-256 {info['sha256']} is not the frozen {a.invade_sha256}")
+    if a.mainland_terms:          # one term per line, two characters or more; '#' lines are comments
+        extra = {l.strip() for l in open(a.mainland_terms, encoding="utf-8") if l.strip() and not l.startswith("#")}
+        short = sorted(t for t in extra if len(t) < 2)
+        if short:
+            raise SystemExit(f"STOP: {a.mainland_terms}: terms shorter than two characters: {short[:5]}")
+        info = dict(info, mainland_terms={"basename": os.path.basename(a.mainland_terms), "sha256": sha256_file(a.mainland_terms),
+                                          "terms": len(extra - set(terms))})
+        terms = set(terms) | extra
     words = lexicon_words(a.lexicon)
     rx, guard, longest = mainland_rules(words)
     ctx = argparse.Namespace(lex=lexicon_chars(a.lexicon), simp=bc.TRAD_SIMP_ONLY, invade_terms=terms, invade_info=info,
@@ -424,6 +433,7 @@ def main(argv=None):
     ap.add_argument("--lexicon", default=os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"))
     ap.add_argument("--invade", required=True)
     ap.add_argument("--invade-sha256", required=True)
+    ap.add_argument("--mainland-terms", help="extra invade terms, one per line (mainland wording in traditional characters)")
     ap.add_argument("--repo", default=ROOT)
     ap.add_argument("--cache")
     ap.add_argument("--extra-rows", action="append", default=[])
@@ -442,7 +452,7 @@ def main(argv=None):
     write_tsv(os.path.join(a.out, "subs-half.tsv"), halves)
     man.update({"input": {"sha256": sha256_file(a.raw), "path_basename": os.path.basename(a.raw)},
                 "lexicon": {"basename": os.path.basename(a.lexicon), "sha256": sha256_file(a.lexicon), "characters": len(ctx.lex)},
-                "invade": {k: ctx.invade_info[k] for k in ("commit", "sha256", "terms")},
+                "invade": {k: ctx.invade_info[k] for k in ("commit", "sha256", "terms", "mainland_terms") if k in ctx.invade_info},
                 "outputs": {n: {"rows": len(r), "han_chars": sum(P2.han_count(s) for _, s in r), "sha256": sha256_file(os.path.join(a.out, n))}
                             for n, r in (("subs.tsv", kept), ("subs-half.tsv", halves))},
                 "guard_files": guard.files, "guard_labels": sorted({f["label"] for f in guard.files}), "guard_byte_identical_copies_skipped": dups})

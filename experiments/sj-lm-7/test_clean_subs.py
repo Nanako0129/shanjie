@@ -45,7 +45,8 @@ def make_ctx(d, simp=SIMP):
     write(repo, "a.yml", "word: 視頻\n")
     write(repo, "b.yml", "word: 好\n")                              # single character: dropped by invade.load
     with mock.patch.object(C.bc, "TRAD_SIMP_ONLY", {simp}):
-        ns = C.argparse.Namespace(invade=os.path.join(d, "invade"), invade_sha256="", lexicon=lex)
+        mt = write(d, "mainland-terms.txt", "# comment\n軟件\n")
+        ns = C.argparse.Namespace(invade=os.path.join(d, "invade"), invade_sha256="", lexicon=lex, mainland_terms=mt)
         with mock.patch.object(C.bc, "load_conv", return_value=None):
             return C.build_ctx(ns), lex
 
@@ -112,6 +113,7 @@ class Reject(unittest.TestCase):
             self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
+        self.assertEqual(self.why(KEEP + "軟件"), "invade")                           # a --mainland-terms term joins the invade list
         self.assertIsNone(self.why(KEEP + "好"))                                       # a single-character invade term is not a term
 
     def test_order_is_the_registered_one(self):
