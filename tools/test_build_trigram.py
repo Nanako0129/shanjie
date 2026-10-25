@@ -94,6 +94,19 @@ class Remap(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(tmp, "out")))
 
 
+class DropMissing(unittest.TestCase):
+    def test_words_missing_from_dst_are_dropped_with_their_contexts_and_entries(self):
+        src = mk_sjlm(WORDS)
+        tri = build_trigram.from_counts(TRI, totals_of(TRI), src)
+        dv = [w for w in WORDS if w != "吃"]
+        out, _, _ = build_trigram.remap(src, tri, mk_sjlm(dv), drop_missing=True)
+        got = triples(trigram.read_tri(out), dv)
+        want = {k: c for k, c in TRI.items() if "吃" not in k}        # 去吃飯 (context with 吃) and 我去→吃 (next word 吃) go
+        tot = {k: t for k, t in totals_of(TRI).items() if k in {(u, v) for u, v, _ in want}}   # totals unchanged; 去吃 is gone
+        self.assertEqual(got, (want, tot))
+        self.assertEqual(tot[("我", "去")], totals_of(TRI)[("我", "去")])   # the total still counts the dropped 我去吃
+
+
 class Scoring(unittest.TestCase):
     """Hand values on the kn-tiny model (no classes) and the committed table."""
 
