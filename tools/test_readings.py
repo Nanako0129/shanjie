@@ -149,6 +149,20 @@ class InvertedReport(unittest.TestCase):
         self.assertEqual({rows[("癸", r)][2:] for r in ("ㄧˇ", "ㄧˋ")}, {("CHECK", "")})
         self.assertEqual(rows[("癸", "ㄧˋ")][:2], (-6.8, -6.8))
 
+    def test_maintainer_decision_wins(self):
+        with mock.patch.dict(R.INVERTED_DECIDED, {"癸": "ㄧˇ"}):   # 癸 has no evidence (CHECK without the decision)
+            rows = self.rows("癸")
+        self.assertEqual(rows[("癸", "ㄧˇ")], (-7.0, -6.8 + R.INVERTED_LEAD, "main", "maintainer"))
+        self.assertEqual(rows[("癸", "ㄧˋ")][2], "alt")
+
+    def test_apply_changes_only_the_main_scores(self):
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        src, out = write(d.name, "src.txt", LEXICON), os.path.join(d.name, "out.txt")
+        self.assertEqual(R.apply_inverted(src, out, R.inverted_report(R.ime.Lexicon(src), None, "乙辛癸")), 1)   # 辛 already on top, 癸 CHECK
+        a, b = open(src, encoding="utf-8").read().splitlines(), open(out, encoding="utf-8").read().splitlines()
+        self.assertEqual([(x, y) for x, y in zip(a, b) if x != y], [(next(l for l in a if l.startswith("ㄧˇ 乙 ")), "ㄧˇ 乙 -6.300000")])
+        self.assertEqual(len(a), len(b))
+
     def test_report_does_not_write_the_lexicon(self):
         before = os.path.getmtime(os.path.join(R.REPO, "data", "lexicon", "mcbpmf-data.txt"))
         self.rows("乙")
