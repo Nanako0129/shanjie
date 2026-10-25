@@ -147,6 +147,29 @@ struct Sim {
 }
 
 impl Sim {
+    /// A simulator with every counter at zero; `inline` and `digits` are off (set them after).
+    fn new(engine: Engine, p: f64, repair: Repair, seed: u64) -> Sim {
+        Sim {
+            engine,
+            keys: 0,
+            triggers: 0,
+            two: vec![0; TWO_LETTER.len()],
+            inline: false,
+            d_held: false,
+            autokeeps: 0,
+            want: Vec::new(),
+            digits: false,
+            last_preedit: String::new(),
+            base_preedit: String::new(),
+            extra_bs: 0,
+            final_digits: 0,
+            shown_keys: 0,
+            p,
+            repair,
+            rng: Rng(seed),
+        }
+    }
+
     /// One key to the engine, counted. Whether the key made an auto-keep (counted too): asked of the engine after every key,
     /// before the symbols are compared, and never worked out here.
     fn raw(&mut self, k: Key) -> Result<bool, String> {
@@ -399,7 +422,8 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
     for i in 0..repeat {
         let engine = if digits { engine_digits(root, &lm, &words, key_order)? } else { engine_with(&lex, &words, key_order)? };
-        let mut sim = Sim { last_preedit: String::new(), base_preedit: String::new(), extra_bs: 0, engine, keys: 0, triggers: 0, two: vec![0; TWO_LETTER.len()], inline, d_held: false, autokeeps: 0, want: Vec::new(), digits, final_digits: 0, shown_keys: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let mut sim = Sim::new(engine, p, repair, seed.wrapping_add(i));
+        (sim.inline, sim.digits) = (inline, digits);
         let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
@@ -529,24 +553,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("words.txt"), "ewuk\n").unwrap();
         let (syms, tone) = parse_syllable("ㄊㄧㄠ").unwrap();
-        let mk = |p: f64| Sim {
-            engine: engine_with(&lex, &dir.join("words.txt"), false).unwrap(),
-            keys: 0,
-            triggers: 0,
-            two: vec![0; TWO_LETTER.len()],
-            inline: true,
-            d_held: false,
-            autokeeps: 0,
-            want: Vec::new(),
-            last_preedit: String::new(),
-            base_preedit: String::new(),
-            extra_bs: 0,
-            digits: false,
-            final_digits: 0,
-            shown_keys: 0,
-            p,
-            repair: Repair::Overwrite,
-            rng: Rng(20261014),
+        let mk = |p: f64| {
+            let mut sim = Sim::new(engine_with(&lex, &dir.join("words.txt"), false).unwrap(), p, Repair::Overwrite, 20261014);
+            sim.inline = true;
+            sim
         };
         let row = |sim: &mut Sim| {
             sim.engine.reset(ResetMode::Discard);
@@ -569,25 +579,7 @@ mod tests {
     fn two_letter_windows_are_counted_by_word() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let mk = |key_order: bool| Sim {
-            engine: engine_with(&lex, &root.join("eval/golden/english-tiny.txt"), key_order).unwrap(),
-            keys: 0,
-            triggers: 0,
-            two: vec![0; TWO_LETTER.len()],
-            inline: false,
-            d_held: false,
-            autokeeps: 0,
-            want: Vec::new(),
-            last_preedit: String::new(),
-            base_preedit: String::new(),
-            extra_bs: 0,
-            digits: false,
-            final_digits: 0,
-            shown_keys: 0,
-            p: 0.0,
-            repair: Repair::Overwrite,
-            rng: Rng(1),
-        };
+        let mk = |key_order: bool| Sim::new(engine_with(&lex, &root.join("eval/golden/english-tiny.txt"), key_order).unwrap(), 0.0, Repair::Overwrite, 1);
         for key_order in [true, false] {
             let mut sim = mk(key_order);
             sim.raw(Key::ch('l', 0)).unwrap();
@@ -611,25 +603,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let words: String = ('a'..='z').flat_map(|a| ('a'..='z').flat_map(move |b| ('a'..='z').map(move |c| format!("{a}{b}{c}\n")))).collect();
         std::fs::write(dir.join("words.txt"), words).unwrap();
-        let mut sim = Sim {
-            engine: engine_with(&lex, &dir.join("words.txt"), false).unwrap(),
-            keys: 0,
-            triggers: 0,
-            two: vec![0; TWO_LETTER.len()],
-            inline: true,
-            d_held: false,
-            autokeeps: 0,
-            want: Vec::new(),
-            last_preedit: String::new(),
-            base_preedit: String::new(),
-            extra_bs: 0,
-            digits: false,
-            final_digits: 0,
-            shown_keys: 0,
-            p: 0.0,
-            repair: Repair::Backspace,
-            rng: Rng(20261014),
-        };
+        let mut sim = Sim::new(engine_with(&lex, &dir.join("words.txt"), false).unwrap(), 0.0, Repair::Backspace, 20261014);
+        sim.inline = true;
         // Medial then final (`ㄍㄨㄛ`): the final's neighbour on the keyboard row is a medial, so a slip lands in the occupied medial column
         // (one overwrite, not the wanted column): the repair is Backspace, and the letters are on screen.
         for syl in ["ㄍㄨㄛ", "ㄏㄨㄛ", "ㄌㄨㄛ", "ㄕㄨㄛ"] {
@@ -656,25 +631,13 @@ mod tests {
     #[test]
     fn backspace_repair_ends_when_the_last_unit_sent_the_composition() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let mut sim = Sim {
-            engine: engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt"), false).unwrap(),
-            keys: 0,
-            triggers: 0,
-            two: vec![0; TWO_LETTER.len()],
-            inline: false,
-            d_held: false,
-            autokeeps: 0,
-            want: Vec::new(),
-            last_preedit: String::new(),
-            base_preedit: String::new(),
-            extra_bs: 0,
-            digits: true,
-            final_digits: 0,
-            shown_keys: 0,
-            p: 1.0,
-            repair: Repair::Backspace,
-            rng: Rng(20261014),
-        };
+        let mut sim = Sim::new(
+            engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt"), false).unwrap(),
+            1.0,
+            Repair::Backspace,
+            20261014,
+        );
+        sim.digits = true;
         let (syms, tone) = parse_syllable("ㄅㄨˋ").unwrap();
         for _ in 0..20 {
             sim.engine.reset(ResetMode::Discard);

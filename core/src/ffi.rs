@@ -733,7 +733,7 @@ pub unsafe extern "C" fn shanjie_engine_set_english_inline(
 
 /// zhen-keyorder section 3. `enabled` 0 or 1 (default 0): whether keys out of Zhuyin's column order count as evidence of English
 /// (as a replaced symbol does), and a listed word or a two-letter word then opens the window on Space with less of it. Returns the
-/// snapshot like `set_english_inline`; turning it off closes an open English window and clears the shadow; any other value changes
+/// snapshot like `set_english_inline`; turning it off closes an open English window (which clears the shadow) and otherwise changes nothing; any other value changes
 /// nothing and returns 2. Only matters with `set_english(1)`.
 ///
 /// # Safety

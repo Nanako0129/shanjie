@@ -1993,7 +1993,27 @@ fn backspace_after_an_auto_keep_opens_the_word_again() {
 // Keys of the words below, standard layout, column 0 initial / 1 medial / 2 final:
 //   l s   ㄠ(2) ㄋ(0): out of order, E 1.           o k   ㄟ(2) ㄜ(2): a replacement, E 1.
 //   c d   ㄏ(0) ㄎ(0): a replacement, E 1.          c u p ㄏ ㄧ ㄣ: in order, E 0, the syllable ㄏㄧㄣ does not exist.
-//   u i   ㄧ(1) ㄛ(2): in order, E 0 (a `TWO_LETTER` word without evidence).   z z   ㄈ ㄈ: a replacement, not in `TWO_LETTER`.
+//   u i   ㄧ(1) ㄛ(2): in order, E 0 (so not a `TWO_LETTER` word).   z z   ㄈ ㄈ: a replacement, not in `TWO_LETTER`.
+
+/// The keys of one syllable ("ㄋㄧˇ": Zhuyin keys, then the tone key; Space when it has no tone mark), standard layout.
+fn keys_of(syl: &str) -> Vec<Key> {
+    let layout = Layout::Standard;
+    let mut v = Vec::new();
+    let mut toned = false;
+    for c in syl.chars() {
+        match layout.key_of_tone(c) {
+            Some(tk) => {
+                v.push(Key::ch(tk, 0));
+                toned = true;
+            }
+            None => v.push(Key::ch(layout.key_of_symbol(c).expect("a symbol with a key"), 0)),
+        }
+    }
+    if !toned {
+        v.push(Key::new(KeyKind::Space));
+    }
+    v
+}
 
 /// `eng_inline()` with the key-order switch on.
 fn ko() -> Engine {
@@ -2070,32 +2090,43 @@ fn key_order_evidence_counts() {
     assert!(ev(true, "l s s") == 2, "the replacing key counts as a replacement only");
     // Off: the replacements only, today's number.
     assert!(ev(false, "l s") == 0 && ev(false, "c d") == 1 && ev(false, "l s s") == 1);
-    // Backspace drops the last key's column and leaves the count: ㄍ(0) ㄠ(2), Backspace takes ㄠ, ㄨ(1) is in order again.
-    assert!(ev(true, "e l BS u") == 0, "the dropped key's column is forgotten");
+    // Out of order is against the symbols the columns hold now, not against the keys typed: ㄍ(0) ㄠ(2), Backspace takes ㄠ, ㄨ(1) is in order.
+    assert!(ev(true, "e l BS u") == 0, "the column of the symbol that went is not remembered");
     assert!(ev(true, "l s BS") == 1, "the count stays");
     // The syllable that is finished starts again.
     assert!(ev(true, "l s 3 c u p") == 0);
 }
 
 #[test]
+fn key_order_is_against_the_symbols_the_columns_hold() {
+    // `l s` (ㄠ then ㄋ: E 1), Backspace takes the final ㄠ (rule 11 takes the last symbol in display order, whichever key it was), and
+    // the syllable goes on in order: ㄧ, ㄠ. The keys typed were l s u l, but the columns now hold ㄋ, then ㄋㄧ, then ㄋㄧㄠ: no second
+    // count. (Against the history of keys the `u` would count: ㄠ was typed before it, and the shadow still holds that `l`.)
+    let mut e = ko();
+    let o = run(&mut e, "l s BS u l");
+    assert!(e.english_evidence() == 1, "one count");
+    assert!(e.english_columns() == [Some('ㄋ'), Some('ㄧ'), Some('ㄠ')], "the syllable ㄋㄧㄠ: {}", o.preedit);
+}
+
+#[test]
+fn key_order_turned_off_with_no_window_changes_nothing() {
+    // `r u` is not yet a word; the switch goes off, and `s t` makes `rust` (two replacements) exactly as on an engine that never had
+    // the switch on: the shadow was not cleared, so rule D shows the letters.
+    let mut e = ko();
+    run(&mut e, "r u");
+    e.set_english_key_order(false).unwrap();
+    assert!(e.english_shadow_len() == 2, "the shadow stays");
+    let o = run(&mut e, "s t");
+    let mut never = eng_inline();
+    let n = run(&mut never, "r u s t");
+    assert!(o.preedit == "rust" && o == n && e.english_inline_shown(), "{}", o.preedit);
+}
+
+#[test]
 fn key_order_clean_typing_is_not_evidence() {
     for syl in ["ㄋㄧˇ", "ㄓㄨㄛ", "ㄏㄠˇ", "ㄕ", "ㄩㄥˊ"] {
         let mut e = ko();
-        let layout = Layout::Standard;
-        let mut toned = false;
-        let mut keys: Vec<Key> = syl
-            .chars()
-            .map(|c| match layout.key_of_tone(c) {
-                Some(tk) => {
-                    toned = true;
-                    Key::ch(tk, 0)
-                }
-                None => Key::ch(layout.key_of_symbol(c).unwrap(), 0),
-            })
-            .collect();
-        if !toned {
-            keys.push(Key::new(KeyKind::Space));
-        }
+        let keys = keys_of(syl);
         for k in keys {
             e.key(k).unwrap();
             assert!(!e.english_open() && !e.english_inline_shown() && !e.english_autokept() && e.english_evidence() == 0, "{syl}");
@@ -2135,7 +2166,13 @@ fn key_order_two_letters_need_the_list_and_a_piece_of_evidence() {
     assert!(o.candidates.is_empty());
     let mut e = ko();
     run(&mut e, "u i _");
-    assert!(!e.english_open(), "ui is in TWO_LETTER but typed in order: no evidence");
+    assert!(!e.english_open(), "ui is typed in order and is not in TWO_LETTER");
+    // Every word of TWO_LETTER can have evidence: some key replaces a symbol or comes below one already there.
+    let layout = Layout::Standard;
+    for w in TWO_LETTER {
+        let cols: Vec<usize> = w.chars().map(|c| layout.symbol_of(c).expect("a Zhuyin key").0).collect();
+        assert!(cols[1] <= cols[0], "{w}: typed in column order with no replacement, it could never have evidence");
+    }
     // Three letters (not a listed word, not a two-letter word) with evidence: nothing.
     let mut e = ko();
     run(&mut e, "l s a _");
@@ -2207,24 +2244,6 @@ fn key_order_clean_typing_of_every_reading_is_never_english() {
     e.load_english(&dir.join("words.txt")).unwrap();
     e.set_english(true).unwrap();
     e.set_english_key_order(true).unwrap();
-    let layout = Layout::Standard;
-    let keys_of = |syl: &str| -> Vec<Key> {
-        let mut v = Vec::new();
-        let mut toned = false;
-        for c in syl.chars() {
-            match layout.key_of_tone(c) {
-                Some(tk) => {
-                    v.push(Key::ch(tk, 0));
-                    toned = true;
-                }
-                None => v.push(Key::ch(layout.key_of_symbol(c).expect("a symbol with a key"), 0)),
-            }
-        }
-        if !toned {
-            v.push(Key::new(KeyKind::Space));
-        }
-        v
-    };
     let type_one = |e: &mut Engine, syls: &[&str]| {
         e.reset(ResetMode::Discard);
         for syl in syls {

@@ -799,7 +799,8 @@ public final class Shell {
     }
 
     /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
-    /// caller to show (turning it off closes an English window the new evidence opened).
+    /// caller to show. The core closes an open English window when the choice goes off, whatever evidence opened it; otherwise nothing
+    /// on screen changes.
     func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
         englishKeyOrderOn = on
         englishStore.englishKeyOrder = on
@@ -1209,8 +1210,8 @@ public final class Session {
         }
     }
 
-    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (an English window
-    /// the new evidence opened closes).
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (turning it off
+    /// closes an open English window, whatever opened it; otherwise the snapshot is what was on screen).
     func applyEnglishKeyOrder(_ on: Bool) {
         switch shell.setEnglishKeyOrder(on) {
         case .ok(let o)? where shell.owner === self: apply(o)

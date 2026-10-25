@@ -176,7 +176,6 @@ fn key_order_typing_prints_every_two_letter_word() {
             let f: Vec<&str> = line.split('\t').collect();
             assert_eq!((f.len(), f[0], f[1]), (4, "two", *word), "{line}");
             let (mean, max): (f64, f64) = (f[2].parse().unwrap(), f[3].parse().unwrap());
-            assert!(0.0 <= mean && mean <= max, "{line}");
             assert_eq!((mean, max), (0.0, 0.0), "{line}");
         }
         if args.len() == 2 {
@@ -189,12 +188,12 @@ fn key_order_typing_prints_every_two_letter_word() {
 /// Zhen-keyorder section 4, recall mode with the switch on: only `opened` and `top1`, for the list and for `TWO_LETTER`, and the six
 /// probes; the tool does not stop for a disagreement with the recount of the switch-off rules (it makes none). On
 /// eval/golden/english-tiny.txt all six words open, with the word first (law and hello have evidence by key order; cup opens
-/// with none, on Space, because ㄏㄧㄣ is not a syllable). Of the 24 two-letter words five are typed in column order (rm cp ui go ci), so
+/// with none, on Space, because ㄏㄧㄣ is not a syllable). All 19 two-letter words can have evidence (a replacement or a key out of order), so
 /// 19 open. `npm` is not in that list: 0.
 #[test]
 fn key_order_recall_reports_what_the_engine_does() {
     let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
-    let want = "recall\twords\t6\t6\t6\nrecall\ttwo\t24\t19\t19\nprobe\tok\t1\nprobe\tls\t1\nprobe\tcd\t1\nprobe\tmv\t1\nprobe\tcup\t1\nprobe\tnpm\t0\n";
+    let want = "recall\twords\t6\t6\t6\nrecall\ttwo\t19\t19\t19\nprobe\tok\t1\nprobe\tls\t1\nprobe\tcd\t1\nprobe\tmv\t1\nprobe\tcup\t1\nprobe\tnpm\t0\n";
     assert_eq!(run(&["--words", list, "--recall", "--key-order"]), want);
     // Without the flag: the line of before (a different engine, a different report).
     assert_eq!(run(&["--words", list, "--recall"]).lines().count(), 1);
