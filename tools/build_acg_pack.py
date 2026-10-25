@@ -37,6 +37,7 @@ from html.parser import HTMLParser
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import build_overlay as bo  # noqa: E402  分數規則、變調列、基底與疊加層的路徑
+sha256_file = bo.sha256_file   # build_it_pack.py、build_meme_pack.py 與它們的測試呼叫 build_acg_pack.sha256_file
 import ime  # noqa: E402
 
 PACKS = os.path.join(ROOT, "data", "packs")
