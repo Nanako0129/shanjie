@@ -178,23 +178,23 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         cand |= sup_cand
     info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)
     pick = reading_picker(base, base_syllables(base), moe_first) if moedict_readings else None
-    changed, left_out = [], set()
+    changed, kept_old = [], set()
     for w in sorted(cand):
         syls = base.to_syllables(w)
         if syls is not None:
             syls = normalize(w, syls)
+            old = syls                              # the variant rules below use this reading, so --moedict-readings removes the same variants
             if w in sup_cand:
                 syls = normalize(w, moe_first[w])   # 萌典補詞的讀音＝萌典第一讀音
             elif pick:
                 new, how = pick(w)
-                if how in ("CHECK", "GAP"):          # readings.py is not sure (CHECK) or the confirmed reading is not in the lexicon (GAP): not written
+                if how in ("CHECK", "GAP"):          # readings.py is not sure (CHECK) or its reading is not in the lexicon (GAP): the word keeps its reading
+                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how} (kept)\n")
+                    kept_old.add(w)
+                elif new and new != syls:
                     changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
-                    left_out.add(w)
-                    continue
-                if new and new != syls:
-                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
-                syls = new or syls
-            info[w] = (syls, next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None))
+                    syls = new
+            info[w] = (syls, next((b for b, _ in base.by_reading[tuple(old)] if fold_w(b) == fold_w(w)), None), old)
     # S2f 修訂二 7.2.3／7.2.4，分兩階段（S2n 與延伸規則可能方向相反：占中 經簡體句轉換是 佔中，佔中 的 fold 是 占中，
     # 互相指向會繞圈）：第一階段只用 S2n 與原 §2.5 決定拿掉誰；第二階段對留下的詞套延伸規則；落點最後照完整的規則算。
     def first(x):
@@ -207,7 +207,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     kept1 = {x for x, y in why.items() if y is None}
     for x in sorted(kept1):
         f = fold_w(x)
-        if f != x and (any(b == f for b, _ in base.by_reading[tuple(info[x][0])]) or (f in kept1 and info[f][0] == info[x][0])):
+        if f != x and (any(b == f for b, _ in base.by_reading[tuple(info[x][2])]) or (f in kept1 and info[f][2] == info[x][2])):
             why[x] = "fold"
     memo = {}
 
@@ -246,12 +246,12 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
     rows += tail_rows(words | overlay_words, length_scores(base), base_syllables(base))
     if pick:
-        print(f"--moedict-readings: {len(left_out)} words left out of the overlay because readings.py marks them CHECK or GAP"
+        print(f"--moedict-readings: {len(kept_old)} words keep their reading because readings.py marks them CHECK or GAP"
               + (f" (listed in {reading_report})" if reading_report else " (give --reading-report to list them)"))
     if reading_report:
         with open(reading_report, "w", encoding="utf-8", newline="\n") as f:
             f.write("詞\t原讀音\t新讀音\t依據\n" + "".join(changed))
-        print(f"reading report: {len(changed)} rows (readings that change; CHECK and GAP words are left out), {reading_report}")
+        print(f"reading report: {len(changed)} rows (readings that change, and the CHECK and GAP words that keep theirs), {reading_report}")
     return rows, removed, variant_removed
 
 
@@ -318,7 +318,7 @@ def manual_words(path=MANUAL):
 def reading_picker(base, syllables, moe):
     """--moedict-readings：詞 → (讀音 list, 依據)。萌典有收（音節數等於字數、每個音節基底都有）用萌典第一讀音，其餘用 readings.Reader；
     兩者都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 (None, None)。
-    readings.py 判成 CHECK（有歧義）或 GAP 的詞回 (它的暫用讀音, "CHECK" 或 "GAP")，build() 不把它寫進疊加層。"""
+    readings.py 判成 CHECK（有歧義）或 GAP 的詞回 (它的暫用讀音, "CHECK" 或 "GAP")，build() 讓它保留原本的讀音（只列進報告）。"""
     reader = readings.make_reader(base, rule_3b=True)    # the SJ-LM-7 lexicon steps use rule 3b (contract 2.3)
 
     def pick(w):
