@@ -21,8 +21,9 @@ BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OVERLAY = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 OUT = os.path.join(ROOT, "data", "lexicon", "sandhi-add.tsv")
 
-# neutral 列的分數 = 原列分數 − δ。暫定 1.0：契約 §3 的格點 {0.5, 1.0, 2.0} 還沒量，量完再定；--neutral-penalty 可蓋過。
-NEUTRAL_PENALTY = 1.0
+# neutral 列的分數 = 原列分數 − δ。契約 §3 的格點 {0.5, 1.0, 2.0} 裡只有 2.0 讓調參集都不退步（wikitune 0.5、1.0 各改壞 1 列，2026-10-26 GCP）；
+# --neutral-penalty 可蓋過（量格點用）。
+NEUTRAL_PENALTY = 2.0
 TONE_MARKS = "ˊˇˋ˙"
 
 # 「一」只讀本調的上下文（§1 排除）：前一字是「第」或數字字、後一字是數字字或「月」、詞尾、疊字動詞中間、
