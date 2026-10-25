@@ -17,6 +17,7 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
                 the NFKC text with whitespace removed; the simplified step lets these characters through on purpose (公里, 皇后). A phrase
                 that is a word of --lexicon is not used (MAINLAND leaves out the ones the shipped lexicon has: 村里, 水里, 聯系, 市里, 伙計); a match is not a hit when a longer lexicon word holds it (二里頭文化)
                 or a lexicon word with a shared character and no phrase in it crosses it (皇后來了, 汽車里程, 若干活動, 海關系統)
+  residue       a bracket ( ()（）[]【】 ), a "︰" speaker label, a Cantonese-only character (喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰㗎, or 唔 before a Han character) or the OCR split 黑占
   invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any), plus the
                 terms of --mainland-terms (mainland wording in traditional characters, e.g. OpenCC TWPhrases keys PTT seldom uses)
   dedupe        NFKC + whitespace removed + case folded
@@ -63,7 +64,7 @@ MIN_KEPT_HAN = 4_000_000   # contract 2.7: subtitles >= 4,000,000 Han characters
 TOP = 20
 REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chatjudge2")   # the sets the guard must cover
 CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
-STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "invade", "dedupe", "guard"]
+STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "residue", "invade", "dedupe", "guard"]
 # Contract 2.7 (maintainer 2026-10-25): the first 300-sentence proofread (seed 20261025) had 20 residues (6.7%): 18 machine-converted lines
 # with these shared characters (么 里 后 于 愿) in their mainland use, a lyric marker and an English word. Phrases, not characters (except 万 and a lone 么, added after the second proofread), so 公里, 皇后,
 # 姓于 stay; the lexicon decides word boundaries (mainland_hit), and 能干 and 下里 are left out (不能干涉, 下里巴人). Known limit (code review
@@ -78,6 +79,13 @@ SHARED = frozenset("么里后于愿干准系范斗松采伙万")   # the shared 
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 MARKS = re.compile("[*#♪♫§]")                  # subtitle marks (lyrics, notes) seen in the second proofread; never part of the text
 LONE_LETTER = re.compile(r"(?<![A-Za-z])[a-z](?![A-Za-z])")   # lowercase: OCR noise (拼寫n); uppercase stays (T恤, X光, B型, 維他命C)
+# Contract 2.7 (maintainer 2026-10-25): from the residues of the fifth proofread (seeds 20261030, 20261031): a bracket anywhere (sound notes,
+# translator notes), a "︰" speaker label, Cantonese-only characters, and the OCR split 黑占 (點). No quote-pairing rule: strip_cue drops a
+# leading 「 and split_sentences cuts inside quotes, so a count of 「 and 」 here flags ordinary dialogue (code review of #304). 唔 counts only
+# right before a Han character (唔好, 唔知, 唔想): Mandarin subtitles use it alone as an interjection (唔，好吧); a sample of 100 sentences the
+# looser rule let back had 9 Cantonese lines, mostly 唔 + verb, and the sentence particle 㗎.
+RESIDUE = (("bracket", re.compile(r"[()（）\[\]【】]")), ("speaker label", re.compile("︰")),
+           ("cantonese", re.compile("[喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰㗎]|唔(?=[一-鿿])")), ("ocr 黑占", re.compile("黑占")))
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
 
@@ -144,6 +152,11 @@ def mainland_hit(s, ctx):
     return None
 
 
+def residue_hit(s):
+    """-> the RESIDUE rule that drops s, or None."""
+    return next((name for name, rx in RESIDUE if rx.search(s)), None)
+
+
 def decile(x):
     return f"{int(x * 10) / 10:.1f}"
 
@@ -179,6 +192,8 @@ def trigger(step, s, ctx):
         return next(c for c in s if c in ctx.simp)
     if step == "mainland":
         return mainland_hit(s, ctx)
+    if step == "residue":
+        return residue_hit(s)
     if step == "invade":
         return next(ctx.invade_matcher.find(s))
     return step
@@ -200,6 +215,8 @@ def reject(s, ctx):
         return "simplified"
     if mainland_hit(s, ctx):
         return "mainland"
+    if residue_hit(s):
+        return "residue"
     if ctx.invade_matcher.any(s):
         return "invade"
     return None
