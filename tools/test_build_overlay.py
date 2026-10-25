@@ -402,6 +402,21 @@ class ConcisedSources(unittest.TestCase):
                 self.assertEqual(B.jp_drop_set({"体"}, path), {"両", "万"})        # 台 maps to itself too; 体 is in a dictionary headword
 
 
+class RuleKeepChars(unittest.TestCase):
+    """契約 §2.3 修訂四驗收：規則（readings.py）改音時，為、町、蛤、吧、萎、凊 這幾個字保留原讀音，其他字照規則。"""
+    def test_a_kept_character_stays_and_the_others_change(self):
+        base = ime.Lexicon(B.BASE)
+        w = next(x for x in ("頗為", "因為", "作為") if base.to_syllables(x) is not None)
+        today = B.normalize(w, base.to_syllables(w))
+        other = "ㄅㄚ" if today[0] != "ㄅㄚ" else "ㄅㄚˇ"           # the rule's reading differs at both positions
+        wei = "ㄨㄟˋ" if today[1] != "ㄨㄟˋ" else "ㄨㄟˊ"
+        stub = mock.Mock(); stub.read = lambda x: ([other, wei], [], [])
+        with mock.patch.object(readings, "make_reader", lambda lex, **kw: stub):
+            pick = B.reading_picker(base, B.base_syllables(base), {}, {}, lambda t: t)
+            got = pick(w)
+        self.assertEqual((got.syls, got.how), ([other, today[1]], "readings.py"))
+
+
 class Cantonese(unittest.TestCase):
     def test_rule(self):
         headwords = {"凝睇"}

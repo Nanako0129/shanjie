@@ -504,6 +504,11 @@ def word_rows(w, readings, score, src):
     return out
 
 
+# 契約 §2.3 修訂四驗收（2026-10-26，維護者選「修幾個字再抽一次」）：國文導師判讀規則類 34 個，錯的 10 個集中在這幾個字——
+# 為（作為、頗為 讀 ㄨㄟˊ）、町（台灣的町名讀 ㄉㄧㄥ）、蛤（貝類 ㄍㄜˊ）、吧（迪吧 是 bar）、萎、凊（規則選到大陸音）。規則改音時這幾個字保留原讀音。
+RULE_KEEP_CHARS = frozenset("為町蛤吧萎凊")
+
+
 def reading_picker(base, syllables, moe, concised, fold_w):
     """--moedict-readings：詞 → Pick。字典（簡編本，再萌典第一讀音）有收且合 unusable 的條件就用字典；其餘用 readings.Reader；
     都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 Pick(None, …)。
@@ -518,7 +523,12 @@ def reading_picker(base, syllables, moe, concised, fold_w):
         out, notes, gaps = reader.read(w)
         if not out:
             return p
-        return p._replace(syls=normalize(w, out), how="GAP" if gaps else "CHECK" if notes else "readings.py")
+        out = normalize(w, out)
+        today = base.to_syllables(w)
+        if today is not None:                       # 規則不改這幾個字的讀音（那個位置保留原讀音）
+            today = normalize(w, today)
+            out = [t if c in RULE_KEEP_CHARS else o for c, o, t in zip(w, out, today)]
+        return p._replace(syls=out, how="GAP" if gaps else "CHECK" if notes else "readings.py")
     return pick
 
 
