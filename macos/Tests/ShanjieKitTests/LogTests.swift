@@ -40,6 +40,8 @@ final class LogTests: XCTestCase {
 
     /// Han text before the insertion point (S4 section 2); its last two characters reach the core.
     static let contextMarker = "鑑識前文"
+    /// An English word in the left context (context-return section 4, P2-4): the shell passes the raw text now.
+    static let englishMarker = "Quixotry"
 
     func testShellLogsNothingButStaticTextAndCodes() throws {
         let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -47,6 +49,10 @@ final class LogTests: XCTestCase {
         let end = "shanjie-logtest-end-\(nonce)"
         let bundleMarker = "com.marker.\(nonce)"
         let pathMarker = "pathmarker-\(nonce)"
+        // context-return section 4 (P2-4): an ASCII random marker, a space, an English word and Han characters, longer than two Han
+        // characters, so the whole raw text goes from the shell to the core.
+        let asciiMarker = "ctx\(nonce)"
+        let leftText = "\(asciiMarker) \(Self.englishMarker)\(Self.contextMarker)"
 
         // Everything this process logs, through any API or subsystem (NSLog, another Logger, ...);
         // the subsystem is used only for the `<private>` assertion below.
@@ -82,7 +88,7 @@ final class LogTests: XCTestCase {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: learning, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(true), rerankRunner: runner, profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let c = Controller(shell, bundle: bundleMarker)
-        c.client.before = "ab\t\(Self.contextMarker)"
+        c.client.before = leftText
         c.session.activate()                            // profile from a marked bundle ID
         c.type(Row284.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
@@ -96,6 +102,15 @@ final class LogTests: XCTestCase {
         runner.drain()
         XCTAssertEqual(chat.client.marked, RerankRow.reranked, "the rerank result was not applied")
         chat.press(Keys.esc)
+        // The same round with the marked left context (context-return section 4): a job is made and run with it.
+        let jobs = runner.received
+        let chatContext = Controller(shell, bundle: RerankTests.chatApp)
+        chatContext.client.before = leftText
+        chatContext.session.activate()
+        chatContext.type(RerankRow.standardKeys)
+        runner.drain()
+        XCTAssertGreaterThan(runner.received, jobs, "no rerank job ran with the left context")
+        chatContext.press(Keys.esc)
         c.session.activate()
         c.type("su3 ")
         let first = c.panel.items.first                 // optional, not XCTUnwrap: no throw while captured
@@ -154,7 +169,7 @@ final class LogTests: XCTestCase {
         let negatives = [
             Row284.formal, Row284.chat, "你好", Row284.zhuyin, "ㄑㄧ", "ㄋㄧ",
             Row284.standardKeys, String(Row284.standardKeys.prefix(6)), "su3cl3",
-            bundleMarker, pathMarker, Self.contextMarker,
+            bundleMarker, pathMarker, Self.contextMarker, asciiMarker, Self.englishMarker, leftText,
             RerankRow.ngram, RerankRow.reranked, RerankRow.zhuyin, RerankRow.standardKeys, "回復你", "回覆你",
         ]
         for marker in negatives {
