@@ -35,6 +35,7 @@ class Messages(unittest.TestCase):
     def test_plain_drops_quotes_mentions_and_emoji_and_keeps_link_labels(self):
         self.assertEqual(G.plain("&gt; 別人的話\n<@U123> 你好 :smile: 看<https://x.tw|這篇>&amp;那篇"), " 你好  看這篇&那篇")
         self.assertEqual(G.plain("網址 <https://x.tw>"), "網址 https://x.tw")
+        self.assertEqual(G.plain("全食是 7:11-7:25，記者會 16:15:30 :100:"), "全食是 7:11-7:25，記者會 16:15:30 ")
 
 
 class Clean(unittest.TestCase):

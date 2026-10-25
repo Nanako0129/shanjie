@@ -21,7 +21,7 @@ NO_CC0 = re.compile(r"[(（]\s*no\s*cc0\s*[)）]", re.I)
 MENTION = re.compile(r"<[@#!][^>]*>")
 LINK = re.compile(r"<([^>|]+)\|([^>]*)>")    # <url|label>
 BARE = re.compile(r"<([^>]+)>")             # <url>
-EMOJI = re.compile(r":[a-z0-9_+\-']+:")
+EMOJI = re.compile(r"(?<![0-9]):[a-z0-9_+\-']+:")   # not after a digit: 7:11-7:25 and 16:15:30 are times
 
 
 KEEP_SUBTYPES = (None, "thread_broadcast")   # a thread reply also sent to the channel is a person's message too
