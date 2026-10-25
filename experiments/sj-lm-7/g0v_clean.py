@@ -43,12 +43,12 @@ def messages(page, seen):
 
 
 def plain(text):
-    """Slack markup -> text: quoted lines and ``` blocks dropped (someone else's words, not released by this author), mentions and emoji codes removed,
+    """Slack markup -> text: quoted lines and ``` blocks dropped (someone else's words, not released by this author), mentions and emoji codes become a sentence break,
     bold marks removed, a link keeps its label (a bare URL stays, for the url filter)."""
     text = CODE_BLOCK.sub("\n", text)
     text = "\n".join(line for line in text.split("\n") if not line.lstrip().startswith(("&gt;", ">")))   # Slack escapes > in most messages, not all
-    text = LINK.sub(r"\2", MENTION.sub("", text))
-    return html.unescape(STYLE.sub("", EMOJI.sub("", BARE.sub(r"\1", text))))
+    text = LINK.sub(r"\2", MENTION.sub("\n", text))   # a removed mention or emoji ends the sentence there: deleting it would join the Han on
+    return html.unescape(STYLE.sub("", EMOJI.sub("\n", BARE.sub(r"\1", text))))   # both sides (好棒:pleading_face:忘記), and p2clean drops spaces next to Han
 
 
 def clean(P, msgs, exclude=frozenset()):
