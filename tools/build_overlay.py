@@ -7,8 +7,8 @@
 
 SJ-LM-7 契約 §2.1a、§2.3（都預設關，不加旗標時輸出和原來逐位元組相同）：
       --moedict-readings          萌典有收的詞用萌典第一讀音，沒收的用 tools/readings.py 的規則（Reader，規則 3b 開）；萌典路徑見 readings.MOEDICT（SHANJIE_MOEDICT）。
-                                  readings.py 判 CHECK（有歧義）或 GAP 的詞不寫進疊加層，印出個數
-      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞，以及被擱下的 CHECK／GAP 詞寫到 PATH：詞、原讀音、新讀音、依據
+                                  readings.py 判 CHECK（有歧義）或 GAP 的詞保留原本的讀音，印出個數；異體判斷用原讀音與新讀音兩個（任一個撞到就算）
+      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞，以及 CHECK／GAP 而保留原讀音、暫定讀音不同的詞寫到 PATH：詞、原讀音、新讀音、依據
       --moedict-supplement FILE…  來源「萌典補詞」：萌典有收、不在基底、疊加層、名單、任何詞包，而且在這些純文字檔（一行一段，.gz／.bz2 照副檔名）裡
                                   子字串出現 ≥ 2 次的詞；讀音＝萌典第一讀音，分數＝同字數的 length_scores（不加手動詞的加分）。
                                   先過和維基標題候選相同的過濾（每個字是基底單字詞、不含簡體專用字），再和它們一起走異體判斷（臺／台 這類
@@ -135,6 +135,9 @@ def overlay_rows(w, syls, score, src):
     return rows
 
 
+Info = collections.namedtuple("Info", "syls twin twin_reading tries")
+
+
 def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     """supplement：None，或萌典補詞要數的純文字檔路徑清單。其他參數見模組說明；預設值＝原本的輸出。"""
     base = ime.Lexicon(BASE)
@@ -176,38 +179,41 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         sup_cand = supplement_words(moe_first, words | cand | other_layers() | manual_words(), supplement, length_scores(base), base_syllables(base), jobs,
                                     chars=chars, simp_only=simp_only)
         cand |= sup_cand
-    info = {}                                       # 詞 → (讀音, 同讀音的基底異體詞)
+    info = {}                                       # 詞 → Info(寫出的讀音, 同讀音的基底異體詞, 那個讀音, 異體判斷用的讀音們)
     pick = reading_picker(base, base_syllables(base), moe_first) if moedict_readings else None
-    changed, left_out = [], set()
+    changed, kept_old = [], set()
     for w in sorted(cand):
         syls = base.to_syllables(w)
         if syls is not None:
             syls = normalize(w, syls)
+            old = syls                              # today's reading: the variant rules check it as well as the new one
             if w in sup_cand:
-                syls = normalize(w, moe_first[w])   # 萌典補詞的讀音＝萌典第一讀音
+                syls = old = normalize(w, moe_first[w])   # 萌典補詞的讀音＝萌典第一讀音（它沒有「現在的讀音」）
             elif pick:
                 new, how = pick(w)
-                if how in ("CHECK", "GAP"):          # readings.py is not sure (CHECK) or the confirmed reading is not in the lexicon (GAP): not written
+                if how in ("CHECK", "GAP"):          # readings.py is not sure (CHECK) or its reading is not in the lexicon (GAP): the word keeps its reading
+                    if new and new != syls:
+                        changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how} (kept)\n")
+                        kept_old.add(w)
+                elif new and new != syls:
                     changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
-                    left_out.add(w)
-                    continue
-                if new and new != syls:
-                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{how}\n")
-                syls = new or syls
-            info[w] = (syls, next((b for b, _ in base.by_reading[tuple(syls)] if fold_w(b) == fold_w(w)), None))
+                    syls = new
+            tries = [tuple(syls)] + ([tuple(old)] if old != syls else [])   # the written reading first, then today's
+            twin = next(((b, r) for r in tries for b, _ in base.by_reading[r] if fold_w(b) == fold_w(w)), (None, None))
+            info[w] = Info(syls, twin[0], twin[1], tries)
     # S2f 修訂二 7.2.3／7.2.4，分兩階段（S2n 與延伸規則可能方向相反：占中 經簡體句轉換是 佔中，佔中 的 fold 是 占中，
     # 互相指向會繞圈）：第一階段只用 S2n 與原 §2.5 決定拿掉誰；第二階段對留下的詞套延伸規則；落點最後照完整的規則算。
     def first(x):
         """第一階段：('s2n'|'twin'|None)。S2n 在目標有落點時成立：目標在基底，或有讀音（有讀音的詞不論留下或被拿掉都有落點）。"""
         if x in target and (target[x] in words or target[x] in info):
             return "s2n"
-        return "twin" if info[x][1] else None
+        return "twin" if info[x].twin else None
 
     why = {x: first(x) for x in info}
     kept1 = {x for x, y in why.items() if y is None}
     for x in sorted(kept1):
         f = fold_w(x)
-        if f != x and (any(b == f for b, _ in base.by_reading[tuple(info[x][0])]) or (f in kept1 and info[f][0] == info[x][0])):
+        if f != x and (any(b == f for r in info[x].tries for b, _ in base.by_reading[r]) or (f in kept1 and set(info[f].tries) & set(info[x].tries))):
             why[x] = "fold"
     memo = {}
 
@@ -219,7 +225,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
             return memo[x]
         assert x not in busy, x                     # 落點不能繞圈
         y = why[x]
-        to = info[x][1] if y == "twin" else landing(target[x] if y == "s2n" else fold_w(x), busy | {x})
+        to = info[x].twin if y == "twin" else landing(target[x] if y == "s2n" else fold_w(x), busy | {x})
         memo[x] = to
         return to
 
@@ -227,8 +233,10 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     for w in sorted(cand):                          # 依詞的 code point 排序；核心照檔案順序接在基底後面
         if w not in info:
             continue
-        syls = info[w][0]
+        syls = info[w].syls
         y, to = why[w], landing(w)
+        if y == "twin":                             # the removed-variant row records the reading the twin was found at
+            syls = list(info[w].twin_reading)
         # S2n §2.2：簡體寫法拿掉（簡體句轉換會變成另一個寫法、本身不在基底也不是萌典詞目），替代寫法記目標的落點
         if y == "s2n":
             removed.append(f"{w}\t{to}\t{'-'.join(syls)}\n")
@@ -246,12 +254,12 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
     rows += tail_rows(words | overlay_words, length_scores(base), base_syllables(base))
     if pick:
-        print(f"--moedict-readings: {len(left_out)} words left out of the overlay because readings.py marks them CHECK or GAP"
+        print(f"--moedict-readings: {len(kept_old)} words keep their reading because readings.py marks them CHECK or GAP"
               + (f" (listed in {reading_report})" if reading_report else " (give --reading-report to list them)"))
     if reading_report:
         with open(reading_report, "w", encoding="utf-8", newline="\n") as f:
             f.write("詞\t原讀音\t新讀音\t依據\n" + "".join(changed))
-        print(f"reading report: {len(changed)} rows (readings that change; CHECK and GAP words are left out), {reading_report}")
+        print(f"reading report: {len(changed)} rows (readings that change, and the CHECK and GAP words that keep theirs), {reading_report}")
     return rows, removed, variant_removed
 
 
@@ -318,7 +326,7 @@ def manual_words(path=MANUAL):
 def reading_picker(base, syllables, moe):
     """--moedict-readings：詞 → (讀音 list, 依據)。萌典有收（音節數等於字數、每個音節基底都有）用萌典第一讀音，其餘用 readings.Reader；
     兩者都套 normalize（一、不、法、和 回到審訂表的本調，變調列由 overlay_rows 加）。讀不出回 (None, None)。
-    readings.py 判成 CHECK（有歧義）或 GAP 的詞回 (它的暫用讀音, "CHECK" 或 "GAP")，build() 不把它寫進疊加層。"""
+    readings.py 判成 CHECK（有歧義）或 GAP 的詞回 (它的暫用讀音, "CHECK" 或 "GAP")，build() 讓它保留原本的讀音（只列進報告）。"""
     reader = readings.make_reader(base, rule_3b=True)    # the SJ-LM-7 lexicon steps use rule 3b (contract 2.3)
 
     def pick(w):

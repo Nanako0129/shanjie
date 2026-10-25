@@ -135,7 +135,9 @@ class BuildFlags(unittest.TestCase):
         corpus = os.path.join(d, "c.txt")
         open(corpus, "w", encoding="utf-8").write(f"{self.sup}和{self.sup}\n{self.other}\n" + "".join(f"{w}和{w}\n" for w in extra_corpus))
         moe = {self.title: tuple(reversed(self.base.to_syllables(self.title))), self.sup: tuple(self.base.to_syllables(self.sup)), **(extra_moe or {})}
-        stub = mock.Mock(); stub.read = lambda w: (list(self.base.to_syllables(w)), ["unsure"] if w in self.check else [], ["gap"] if w in self.gap else [])
+        unsure = lambda w: w in self.check or w in self.gap                       # an unsure word gets a different tentative reading (reversed)
+        stub = mock.Mock(); stub.read = lambda w: ((list(reversed(self.base.to_syllables(w))) if unsure(w) else list(self.base.to_syllables(w))),
+                                                   ["unsure"] if w in self.check else [], ["gap"] if w in self.gap else [])
         patches = [mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), mock.patch.object(bc, "load_conv", lambda: None),
                    mock.patch.object(B, "moe_titles", lambda: set()), mock.patch.object(readings, "moe_primary", lambda: moe),
                    mock.patch.object(readings, "make_reader", lambda lex, **kw: stub), mock.patch.object(bc, "TRAD_SIMP_ONLY", set(simp))]
@@ -152,6 +154,7 @@ class BuildFlags(unittest.TestCase):
         want = B.normalize(self.title, self.base.to_syllables(self.title))
         self.assertEqual(self.row(rows, self.title), [f"{'-'.join(want)}\t{self.title}\t{B.SCORE[2]!r}\twikt\n"])
         self.assertFalse([r for r in rows if r.endswith("萌典補詞\n")])
+        self.assertTrue(self.row(rows, self.other))                              # a word outside Moedict is written too
         tags = [r.rstrip("\n").split("\t")[3] for r in rows]
         tail = tags[tags.index("manual"):]
         self.assertEqual(tail, sorted(tail, key=("manual", "slang").index))   # the tail is the manual rows, then the slang rows (docs/contracts/net-slang.md)
@@ -165,17 +168,29 @@ class BuildFlags(unittest.TestCase):
         report = open(os.path.join(d, "r.tsv"), encoding="utf-8").read().splitlines()
         self.assertEqual(report[1:], [f"{self.title}\t{' '.join(old)}\t{' '.join(new)}\tmoedict"])
 
-    def test_check_and_gap_words_from_readings_py_are_left_out_and_listed(self):
+    def test_check_and_gap_words_from_readings_py_keep_their_reading_and_are_listed(self):
+        old = "-".join(B.normalize(self.other, self.base.to_syllables(self.other)))
         for kind in ("CHECK", "GAP"):
             self.check, self.gap = ({self.other}, ()) if kind == "CHECK" else ((), {self.other})
             (rows, _, _), d = self.build(True, report=True)
-            self.assertNotIn(self.other, {r.split("\t")[1] for r in rows})           # not written, whatever its reading
+            self.assertEqual([r.split("\t")[0] for r in self.row(rows, self.other)], [old])   # still written, with the reading it has today
             self.assertIn(self.title, {r.split("\t")[1] for r in rows})              # a Moedict word never goes through readings.py
             report = open(os.path.join(d, "r.tsv"), encoding="utf-8").read().splitlines()
-            self.assertIn(kind, {l.split("\t")[3] for l in report[1:] if l.split("\t")[0] == self.other})
+            self.assertIn(f"{kind} (kept)", {l.split("\t")[3] for l in report[1:] if l.split("\t")[0] == self.other})
         self.check = self.gap = ()
-        (rows, _, _), _ = self.build()                                              # without the flag nothing is left out
-        self.assertIn(self.other, {r.split("\t")[1] for r in rows})
+
+    def test_a_variant_is_removed_by_its_old_reading_even_when_moedict_gives_another(self):
+        base = self.base
+        tai = next(w for w in sorted(base.by_word) if len(w) == 2 and "台" in w and B.MANUAL_WORD.match(w) and w.replace("台", "臺") not in base.by_word
+                   and len(set(base.to_syllables(w))) == 2)
+        variant = tai.replace("台", "臺")
+        self.title, saved = variant, self.title                                 # the wiktionary title is the variant; Moedict reverses its reading
+        try:
+            (rows, _, vrem), _ = self.build(True)
+        finally:
+            self.title = saved
+        self.assertNotIn(variant, {r.split("\t")[1] for r in rows})
+        self.assertIn(variant, {l.split("\t")[0] for l in vrem})
 
     def test_supplement_words_pass_the_same_filters_as_every_other_candidate(self):
         base = self.base
