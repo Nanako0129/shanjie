@@ -47,6 +47,7 @@ class Dedupe(unittest.TestCase):
         self.assertEqual(open(os.path.join(self.d.name, "out", "plain.txt"), encoding="utf-8").read().splitlines(), SOURCE[1:3])
 
     def test_min_len_drops_the_short_rows_of_one_set_only(self):
+        self.assertEqual(self.run_main(["--min-len", "dev=7"]).splitlines()[0], "pool.tsv\tdev\t2")   # exactly N characters stays a pattern
         lines = self.run_main(["--min-len", "dev=8"]).splitlines()      # 我們一起去吃飯 (7) is no longer a dev pattern; the 9-character row is
         self.assertEqual(lines[:2], ["pool.tsv\tdev\t1", "pool.tsv\tholdout\t1"])
         self.assertIn("u3\t我們一起去吃飯", open(os.path.join(self.d.name, "out", "pool.tsv"), encoding="utf-8").read())
