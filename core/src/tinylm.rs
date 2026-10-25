@@ -1,8 +1,9 @@
-//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 / SJTL0003 / SJTL0004 loader, the forward
+//! S7c-1: the small character language model (S7a) in Rust: the SJTL0001 / SJTL0002 / SJTL0003 / SJTL0004 / SJTL0005 loader, the forward
 //! pass, LL and `pick` (docs/contracts/s7c-core-tinylm.md section 2; SJTL0002, the per-profile delta, is
 //! docs/contracts/s7c2c-delta.md section 2.1; SJTL0003, a conservative and an aggressive (alpha, tau, delta) per profile beside
 //! the standard one, is docs/contracts/rerank-strength.md section 2.1; SJTL0004, the SHA-256 of the Kneser-Ney side file the
-//! parameters were tuned with, is docs/contracts/model-v6.md section 2.7).
+//! parameters were tuned with, is docs/contracts/model-v6.md section 2.7; SJTL0005, the declared left-context length, is
+//! docs/contracts/context-return.md section 2).
 //! S7c-2a (docs/contracts/s7c2a-core-rerank.md) reaches it from the engine's rerank
 //! jobs and the C ABI, so the loader is hardened for in-process use (section 2.6): a size cap, a regular-file check, header
 //! bounds and finite restored weights.
@@ -13,7 +14,7 @@
 //! R2: errors carry a kind only, never text.
 
 use crate::colloquial::{self, Colloquial, ReadingChannel};
-use crate::learn::SENTINEL;
+use crate::learn::{context_key, last_chars, SENTINEL};
 use crate::lm::{Lm, Profile};
 use std::collections::HashMap;
 use std::fmt;
@@ -37,6 +38,12 @@ const VERSION_V3: u32 = 3;
 const MAGIC_V4: &[u8; 8] = b"SJTL0004";
 const HEADER_V4: usize = 244;
 const VERSION_V4: u32 = 4;
+/// context-return section 2: version 5 is version 4's 244 header bytes (magic and version field changed) plus, at 244, a u32: the
+/// left-context length L in characters the model was trained to read, 1 <= L <= ctx - 2 (out of range: the file is refused).
+/// Versions 1 to 4 declare none.
+const MAGIC_V5: &[u8; 8] = b"SJTL0005";
+const HEADER_V5: usize = 248;
+const VERSION_V5: u32 = 5;
 /// S7c-2c section 2.1: a guard on delta, far above the S7e grid (at most 4).
 const MAX_DELTA: f64 = 1000.0;
 const PAD: u32 = 0;
@@ -236,6 +243,8 @@ pub struct TinyLm {
     file_sha: String,
     /// Version 4: the SHA-256 of the side file it was tuned with; `None` for all zero and for versions 1 to 3.
     kn_sha: Option<[u8; 32]>,
+    /// Version 5: the declared left-context length L (characters); `None` for versions 1 to 4.
+    left_len: Option<usize>,
     ids: HashMap<char, u32>,
     emb: Vec<f32>,
     pos: Vec<f32>,
@@ -357,6 +366,7 @@ impl TinyLm {
             (m, VERSION_V2) if m == MAGIC_V2 => (HEADER_V2, true, false, false),
             (m, VERSION_V3) if m == MAGIC_V3 => (HEADER_V3, true, true, false),
             (m, VERSION_V4) if m == MAGIC_V4 => (HEADER_V4, true, true, true),
+            (m, VERSION_V5) if m == MAGIC_V5 => (HEADER_V5, true, true, true),
             _ => return Err(bad),
         };
         if bytes.len() < header {
@@ -384,6 +394,11 @@ impl TinyLm {
         // Bounds of the shipped model's order of magnitude (also keep the length arithmetic far from overflow); the exact file
         // length is checked next.
         if n_layer > MAX_LAYERS || d > MAX_D || ctx > MAX_CTX || v > MAX_V {
+            return Err(bad);
+        }
+        // context-return section 2: 1 <= L <= ctx - 2 (ctx >= 2 was checked above).
+        let left_len = (header == HEADER_V5).then(|| u32_at(HEADER_V4) as usize);
+        if left_len.is_some_and(|l| l == 0 || l > ctx - 2) {
             return Err(bad);
         }
         let int8 = wtype == 1;
@@ -433,6 +448,7 @@ impl TinyLm {
             ng_sha: bytes[68..100].try_into().unwrap(),
             file_sha: String::new(),
             kn_sha,
+            left_len,
             ids,
             emb,
             pos,
@@ -472,6 +488,23 @@ impl TinyLm {
         self.kn_sha
     }
 
+    /// The left-context length the file declares (version 5, context-return section 2); `None` for versions 1 to 4, which the
+    /// engine keys with `learn::context_key` as before.
+    pub fn left_len(&self) -> Option<usize> {
+        self.left_len
+    }
+
+    /// The key a stretch is scored with, `before` being the text in front of it (the left context, then the display before the
+    /// stretch): for a model declaring L (SJTL0005) its last L characters as they are; for versions 1 to 4 `learn::context_key` of it.
+    /// The one rule of the engine's rerank jobs and the evaluation CLI (docs/contracts/context-return.md section 2). Of a declared key
+    /// the model sees at most ctx - 1 - |candidate| characters (`ll_many`'s window), i.e. min(L, ctx - 1 - |c|).
+    pub fn key_for(&self, before: &str) -> String {
+        match self.left_len {
+            Some(l) => last_chars(before, l),
+            None => context_key(before),
+        }
+    }
+
     /// SHA-256 (hex) of the `.sjtl` bytes `load_paired` parsed (empty for `parse` and `load`).
     pub fn file_sha256(&self) -> &str {
         &self.file_sha
@@ -483,8 +516,9 @@ impl TinyLm {
     }
 
     /// The S7a rerank of one n-best list, the one rule the CLI measures and the engine will use: the first `TOPK` candidates,
-    /// k = the engine's context key (`learn::context_key`; its `SENTINEL`, no Han character before the cursor, is the empty k as
-    /// in tinylm.row_key), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
+    /// k = `key_for` of the text before the stretch: for versions 1 to 4 the engine's context key (`learn::context_key`; its
+    /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
+    /// L characters as they are ("^" included; context-return section 2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
     pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64)) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
@@ -497,13 +531,14 @@ impl TinyLm {
         Ok((pick(&ng[..n], &ll, alpha, tau, delta), Some(ll)))
     }
 
-    /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the context key (`learn::context_key`;
-    /// its `SENTINEL` is the empty k, as in tinylm.row_key), or `None` when there are fewer than two and the model does not run.
+    /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the key (`key_for`; for versions
+    /// 1 to 4 its `SENTINEL` is the empty k, as in tinylm.row_key, while a declared-length key is used as it is), or `None` when there are
+    /// fewer than two and the model does not run.
     fn rerank_ll(&self, cands: &[&str], key: &str) -> Result<Option<Vec<f64>>, TinyLmError> {
         if cands.len() < 2 {
             return Ok(None);
         }
-        let k = if key == SENTINEL { "" } else { key };
+        let k = if key == SENTINEL && self.left_len.is_none() { "" } else { key };
         let items: Vec<(&str, &str)> = cands.iter().map(|c| (k, *c)).collect();
         self.ll_many(&items).map(Some)
     }
@@ -527,7 +562,8 @@ impl TinyLm {
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
-    /// (characters outside the table are UNK; the oldest characters of k are dropped when [BOS] + k + c exceeds the context;
+    /// (characters outside the table are UNK; the oldest characters of k are dropped when [BOS] + k + c exceeds the context, so the
+    /// model sees the last min(|k|, ctx - 1 - |c|) characters of k;
     /// a c longer than ctx - 1 characters is an error; an empty c is 0).
     pub fn ll_many(&self, items: &[(&str, &str)]) -> Result<Vec<f64>, TinyLmError> {
         self.ll_many_with(Backend::DEFAULT, items)

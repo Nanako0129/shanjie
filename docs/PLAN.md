@@ -34,7 +34,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 
 - Rust 核心（lattice、n-gram、使用者模型、驗證協調）＋ Swift InputMethodKit 殼，介面為 C ABI；FFI 邊界一律 `catch_unwind`，panic 訊息不含輸入內容。
 - 神經模型（S5）放在沙盒化的 XPC helper（無網路權限）裡載入與推論，不在看得到所有按鍵的主 process 裡解析外部權重；其餘核心先 in-process。**例外（使用者 2026-10-11，`docs/contracts/s7c2a-core-rerank.md` §2.6）**：自己訓練、自寫格式（SJTL）、雜湊進版控並在建置時核對、隨簽章的 App 打包、路徑不可設定的 S7 字元模型，和 `bigram.sjlm` 同等對待，在主程序以嚴格讀檔器載入；只能在 n-gram 前 8 名之間重排、不能產生任意文字。下載的、第三方的或使用者指定的權重仍照 R8 放在 XPC helper。其中「自寫格式、嚴格讀檔器、失敗時關閉重排不讓程序當掉、只在前 8 名重排」在 S7c-2a 成立；「隨 App 打包、路徑寫死、雜湊進版控並在建置時核對」是 S7c-2b 的出貨前提。
-- 左右文：`client.string(from:actualRange:)`，在最後一個換行處截斷，以 grapheme 計數，左側上限 64 字；只存在這一次轉換的記憶體裡。
+- 左文：`attributedSubstring(from:)` 讀游標前最多 256 個 UTF-16 單位，在最後一個換行（含 NUL）處截斷，以 grapheme 計數，上限 64 字（同一則訊息、跨標點的原文；終端機類 App 只收結尾 ≤ 2 個漢字）；核心只留用得到的長度（解碼與學習只用結尾 ≤ 2 個漢字，另外只留會意模型宣告的前文長度或結尾的英文詞，`docs/contracts/context-return.md`）；只存在這一次轉換的記憶體裡。
 - 不連結 LGPL 元件（KenLM 是 LGPL）；n-gram 格式自寫。
 - 程式碼授權：Apache-2.0（使用者 2026-10-03 確認）。
 - 簽章：使用者有 Apple Developer Program（Team `2LJ882GPY8`）。正式版由 GitHub Actions 在 repo 的 `release` environment 用 Developer ID Application 簽章並公證（S3b §3）；agent 不使用本機鑰匙圈裡的任何憑證，本機與 CI 的一般建置一律 ad-hoc（2026-10-03 改走 GitHub CI/CD）。ad-hoc 的簽章身分每次建置都不同：S5（XPC helper 的沙盒權限）與 S6（Keychain ACL 不要每次重建都跳授權）需要穩定身分時，用 CI 的 Developer ID 版本實測，或屆時另議。
@@ -54,7 +54,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
 - Mac（M5、MLX 4-bit，2026-10-03）：Qwen M1 p50 487–893 ms，量的時候電腦有其他負載，只能當上限；Gemma 未量。
 - 結論：本機層要先在使用者沒在用電腦時重量，並且要做到 A7（不拖慢電腦）。
 
-**雲端（選用、預設關）。** OpenAI 相容的 chat completions 端點，供應商可在設定裡切換，key 存 Keychain（R6）。結構化輸出**只回本機 N-best 的索引**（R1）；raw HTTPS；只在送出、驗證或一鍵校正時送，不逐鍵送；送出內容只有本機 N-best 與截斷後的同一行左文。逾時、拒答、網路錯誤、索引越界一律退回本機結果。N1 實測（2026-10-03，開發集 302 句，k=16，`experiments/providers/`）：
+**雲端（選用、預設關）。** OpenAI 相容的 chat completions 端點，供應商可在設定裡切換，key 存 Keychain（R6）。結構化輸出**只回本機 N-best 的索引**（R1）；raw HTTPS；只在送出、驗證或一鍵校正時送，不逐鍵送；送出內容只有本機 N-best 與截斷後的同一行左文（上限由 S6 雲端自訂，重新過 security-reviewer；R4 的 64 字只適用程序內，`docs/contracts/context-return.md`）。逾時、拒答、網路錯誤、索引越界一律退回本機結果。N1 實測（2026-10-03，開發集 302 句，k=16，`experiments/providers/`）：
 - 最準：OpenRouter gpt-6-luna（effort low）92.7%，p95 3146 ms。
 - 1 秒內最準：Cerebras gpt-oss-120b（medium）92.4%，p95 740 ms。
 - 最快且約 90%：Cerebras qwen-3.8-27b（none）90.4%，p95 438 ms。
@@ -719,7 +719,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 - **從 S3b 移來（2026-10-04）**：secure input 生效時，非按鍵的送出（deactivate、commitComposition、換擁有者、切換排列）要不要丟棄組字。S3b 只在 deactivate 丟棄，但 `IsSecureEventInputEnabled()` 是全系統旗標：任何 App 開著 secure input 時，deactivate 這條也會悄悄丟字。要先實機確認焦點移到密碼欄時組字送到哪個 client，再決定每條路徑的做法（CodeRabbit PR #3 的 Medium 之一）。
 - **從 S3b 移來（2026-10-03）**：`privacyGate`（R3：`IsSecureEventInputEnabled()` 或 denylist 時停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態）、gate 單元測試、gate 轉為生效時 `reset`；左文讀取與 R4。
 
-- 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。
+- 左文由殼讀取、經 C ABI 傳入，R4（最後換行截斷、計數單位與上限、只活在記憶體、多行與 emoji 邊界測試）在這片實作。長度在前文回傳（`docs/contracts/context-return.md`）改成同一則訊息最多 64 個 grapheme（終端機類照舊只收漢字），核心只留用得到的長度。
 - 前文 key 用字（≤ 2 字，不用切詞結果）、天級衰減、2 字以上的詞跨 ≥ 2 種前文才全域化（單字不全域化，也只在剛好兩個漢字的完整前文相同時學與加分；契約 §12、§14；句首「^」學到的詞帶下一個音）、`max(系統分, 混合分)`、只有打開候選窗改選才學（V3 修訂一起，從預測列選取的詞也學）、候選窗與預測列都能一鍵忘記、改選走時舊紀錄減半；儲存依 R5。
 - 驗收：A2；gate 生效時 0 筆學習；R5 的清除測試；重播標記字串後學習檔不含該標記（R2）。
 - 擁有者：`pilotfish:executor`；儲存與清除由 `pilotfish:security-executor`。
@@ -740,7 +740,7 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 
 ### S6：雲端（選用、預設關；路線 2 在這裡）
 
-- `pilotfish:security-executor` 實作 R1、R6、R7；左文截斷沿用 R4 的既有實作，不重做；供應商可切換（OpenAI 相容端點）。
+- `pilotfish:security-executor` 實作 R1、R6、R7；左文沿用 R4 的讀取與截斷，送出的上限由 S6 雲端自訂、重新過 security-reviewer（R4 的 64 字只適用程序內）；供應商可切換（OpenAI 相容端點）。
 - 兩種模式：
   - **一鍵校正。** 給 H 用，延遲不受限。N1 預設最準的 gpt-6-luna（OpenRouter，effort low）。
   - **雲端主力模式（路線 2）。** 每次送出前把 N-best 送雲端判斷，等待硬逾時就送本機結果。預設 Cerebras gpt-oss-120b（effort medium），92.4%，p95 740 ms；要更快可換 Cerebras qwen-3.8-27b（effort none），p95 438 ms。
@@ -917,8 +917,8 @@ S3a 不需要外觀參考，可以先做；S3b 等使用者提供 macOS 內建�
 |---|---|---|---|---|
 | R1 | P1 | 雲端與端上重排都只回本機 N-best 的索引（v5：S5 改回 N-best 重排，字級規則不再需要）；其他一律丟棄；回應綁定組字 session ID，client 或 bundle 換了就丟；mock 測試：含 `\n`、索引越界、遲到回應 → 只送本機結果 | 採納；自由文字列為非目標 | S5、S6 |
 | R2 | P1 | 組字、候選、前文、payload 不進任何 log／panic／fatalError；Swift 用 `Logger`，只記靜態字串與 C ABI 回傳碼，不內插任何其他值、不用 `.public`（2026-10-03 S3b 審查後收緊，見 s3b §9）；FFI `catch_unwind`；行為測試：重播標記字串 → `log stream --level debug` 擷取與學習檔都找不到；標記字串中間逐字改選一字並送出：學習檔裡標記的字只出現在含改選字的 ≤ 4 字段與它前面 ≤ 2 字；沒有改選的送出，不新增任何含標記的列；學習檔除了 ≤ 2 字的漢字前文與句首紀錄的下一個音節讀音（S4 §14 規則 8，維護者 2026-10-14 放寬），不含沒被改選、也沒從預測列選過的內容；例外是逐字改選學到的新詞，也就是送出文字裡含改選字的一段 2–4 個連續漢字（遇標點、非漢字、功能字切開；其中最多 3 字沒被改選），所以每次逐字改選，檔案裡最多出現改選處附近連續 6 個漢字。沒有改選的送出不新增任何字，只更新既有新詞的權重與日期。 | 採納 | S0（核心錯誤訊息規則＋測試，驗收 5）、S3（`catch_unwind`、FFI panic 測試、日誌行為測試）、S4（學習檔不含標記）、新詞 B（標記測試，`docs/contracts/newword-b.md`） |
-| R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納（S4：前文只收漢字）：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下在候選窗改選、或從預測列選取的中文詞」（預測列的部分自 V3 修訂一），以及逐字改選處所在的 2–4 個連續漢字（新詞 B；使用者 2026-10-10 確認終端機照樣學），英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S4、S6（S3b 沒有學習、雲端、左文，延到 S4） |
-| R4 | P2 | 左文在最後換行截斷、grapheme 計數、只活在記憶體；多行與 emoji 邊界測試 | 採納 | 第一個讀左文的切片（目前是 S4；2026-10-03 從 S3 移出）；S6 只沿用 |
+| R3 | P1 | `privacyGate(bundleID)`：`IsSecureEventInputEnabled()` 或 denylist 就停學習、停雲端、不讀左文；判斷不了就擋；選單顯示暫停狀態；使用者實測 Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo` | 部分採納（終端機類 App 的前文只收漢字，`docs/contracts/context-return.md`；S4 時所有 App 都只收漢字）：終端機與密碼管理器預設在**雲端** denylist；**學習**在終端機預設開。理由：使用者大量在終端機打中文；只學「注音模式下在候選窗改選、或從預測列選取的中文詞」（預測列的部分自 V3 修訂一），以及逐字改選處所在的 2–4 個連續漢字（新詞 B；使用者 2026-10-10 確認終端機照樣學），英數直通（密碼、sudo）不暫存也不學。使用者可改（§4.4） | S4、S6（S3b 沒有學習、雲端、左文，延到 S4） |
+| R4 | P2 | 左文在最後換行截斷、grapheme 計數、同一則訊息最多 64 個 grapheme（終端機類照舊只收漢字）、核心只留用得到的長度、只活在記憶體；多行與 emoji 邊界測試；排除 marked range | 採納（長度：前文回傳，`docs/contracts/context-return.md`） | 第一個讀左文的切片（目前是 S4；2026-10-03 從 S3 移出）；R4 的 64 字只適用程序內，S6 雲端自訂上限，重新過 security-reviewer |
 | R5 | P2 | 學習檔放 `~/Library/Application Support/shanjie/`，權限 0600，只存「前文（≤ 2 個漢字，或句首的 `^>` ＋下一個音節的讀音，S4 §14，或新詞的 `#`）、讀音、詞、權重、日期」；一鍵清除含記憶體與附屬檔（暫存檔、`.corrupt`；S4 不用 SQLite）；靠 FileVault 不另加密；設定頁揭露 Time Machine 並提供排除備份 | 採納 | S4 |
 | R6 | P2 | Keychain：service＝bundle ID、`SecItemUpdate` 並檢查狀態、key 不進 URL／log／錯誤訊息；agent 測試用記憶體 store；真 Keychain 交給使用者實測；預告 ad-hoc 簽章可能跳授權提示 | 採納 | S6 |
 | R7 | P2 | `URLSessionConfiguration.ephemeral`、系統 ATS／TLS、硬逾時 2 秒、只在送出或驗證時送；opt-in 對話框列出送出內容範例與所選供應商現行的資料保留政策（v5：供應商可切換；S6 時逐家核對最新條款） | 採納 | S6 |

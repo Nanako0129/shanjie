@@ -35,14 +35,14 @@
  },
  "files": {
   "names-add.tsv": {
-   "bytes": 138774,
-   "lines": 1739,
-   "sha256": "40be51061592885ae8309e52bc7c311c6b55b528c916d5ea70b6a35cfd456a2a"
+   "bytes": 152651,
+   "lines": 2000,
+   "sha256": "22fcf5206b2afc935df5cb7d75bde8f015692ef270b64c3545bd2ecd1bcdbab0"
   },
   "names-sources.tsv": {
-   "bytes": 125334,
-   "lines": 1847,
-   "sha256": "9d34c5b0a88665aa3a045f14451dca19fb8f3ac053474e40e6d346b0830250df"
+   "bytes": 137299,
+   "lines": 2105,
+   "sha256": "d456ce1fa920b446d268140eee53e42ed07a545908dfd182d423f2b2a8f547b1"
   }
  },
  "moe": {
@@ -77,22 +77,23 @@
   "shop/supermarket": 11,
   "shop/tea": 0
  },
- "rows": 1739,
+ "rows": 2000,
  "sources": {
   "category": 649,
-  "creator": 119,
+  "creator": 152,
   "manual": 1,
   "nsi": 140,
   "nsi-wikipedia": 86,
   "school": 596,
-  "school-abbr": 255
+  "school-abbr": 255,
+  "store": 225
  },
  "unresolved_collision_readings": 0,
- "version": "nsiac22bfd4-moe115.115-40be5106",
+ "version": "nsiac22bfd4-moe115.115-22fcf520",
  "wiki_revisions": {
   "max": 94910703,
   "min": 700780,
   "pages": 1304
  },
- "words": 1725
+ "words": 1983
 }
