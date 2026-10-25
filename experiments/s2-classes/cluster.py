@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import pickle
+import sys
 import time
 
 import numpy as np
@@ -222,7 +223,12 @@ def main():
     # model-v5 契約 §9：舊分群的詞沿用它的類別（不跑交換），只替新詞找類別。重新分群會讓一般詞的詞類整體漂移
     # （s2r 探針書面 69→66 句，只差在詞類），計數沒變的詞就不該換類別。
     ap.add_argument("--keep-from", help="另一次分群的輸出資料夾（edges.npz、cls-N-K.npz）")
+    ap.add_argument("--corpora", nargs="+", metavar="FILE:WEIGHT", help="和 tools/build_lm.py 的同名選項相同（同一串）；預設 CORPORA")
     a = ap.parse_args()
+    if a.corpora:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools"))
+        import build_lm
+        CORPORA[:] = build_lm.parse_corpora(a.corpora)
     t0 = time.time()
     trace = []
     def log(m):

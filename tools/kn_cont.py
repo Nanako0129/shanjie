@@ -53,11 +53,12 @@ def main():
     ap.add_argument("--beta", type=float, required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），影響異體類與 ΣN′")
+    ap.add_argument("--corpora", nargs="+", metavar="FILE:WEIGHT", help="和 build_lm.py 的同名選項相同（建模型時給了就要給同一串）；預設 build_lm.CORPORA")
     a = ap.parse_args()
     if not 0.0 <= a.beta <= 1.0:
         ap.error("--beta must be in [0, 1]")
     vocab = L.BigramLM(a.lm, classes=False).vocab
-    _, bi, cls = build_lm.merged_counts(extra_overlay=a.extra_overlay)
+    _, bi, cls = build_lm.merged_counts(extra_overlay=a.extra_overlay, corpora=build_lm.parse_corpora(a.corpora) if a.corpora else None)
     data = side_bytes(a.lm, continuation(bi, cls, a.theta, vocab), cls, a.theta, a.beta)
     V = len(vocab)
     np1 = [x + 1 for x in struct.unpack_from(f"<{V}I", data, 64)]
