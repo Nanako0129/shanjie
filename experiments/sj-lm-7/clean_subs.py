@@ -17,7 +17,7 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
                 the NFKC text with whitespace removed; the simplified step lets these characters through on purpose (公里, 皇后). A phrase
                 that is a word of --lexicon is not used (MAINLAND leaves out the ones the shipped lexicon has: 村里, 水里, 聯系, 市里, 伙計); a match is not a hit when a longer lexicon word holds it (二里頭文化)
                 or a lexicon word with a shared character and no phrase in it crosses it (皇后來了, 汽車里程, 若干活動, 海關系統)
-  residue       a bracket ( ()（）[]【】 ), a "︰" speaker label, a Cantonese-only character (喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰) or the OCR split 黑占
+  residue       a bracket ( ()（）[]【】 ), a "︰" speaker label, a Cantonese-only character (喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰㗎, or 唔 before a Han character) or the OCR split 黑占
   invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any), plus the
                 terms of --mainland-terms (mainland wording in traditional characters, e.g. OpenCC TWPhrases keys PTT seldom uses)
   dedupe        NFKC + whitespace removed + case folded
@@ -81,10 +81,11 @@ MARKS = re.compile("[*#♪♫§]")                  # subtitle marks (lyrics, no
 LONE_LETTER = re.compile(r"(?<![A-Za-z])[a-z](?![A-Za-z])")   # lowercase: OCR noise (拼寫n); uppercase stays (T恤, X光, B型, 維他命C)
 # Contract 2.7 (maintainer 2026-10-25): from the residues of the fifth proofread (seeds 20261030, 20261031): a bracket anywhere (sound notes,
 # translator notes), a "︰" speaker label, Cantonese-only characters, and the OCR split 黑占 (點). No quote-pairing rule: strip_cue drops a
-# leading 「 and split_sentences cuts inside quotes, so a count of 「 and 」 here flags ordinary dialogue (code review of #304). 唔 is not in
-# the Cantonese set: Mandarin subtitles use it as an interjection (唔，好吧).
+# leading 「 and split_sentences cuts inside quotes, so a count of 「 and 」 here flags ordinary dialogue (code review of #304). 唔 counts only
+# right before a Han character (唔好, 唔知, 唔想): Mandarin subtitles use it alone as an interjection (唔，好吧); a sample of 100 sentences the
+# looser rule let back had 9 Cantonese lines, mostly 唔 + verb, and the sentence particle 㗎.
 RESIDUE = (("bracket", re.compile(r"[()（）\[\]【】]")), ("speaker label", re.compile("︰")),
-           ("cantonese", re.compile("[喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰]")), ("ocr 黑占", re.compile("黑占")))
+           ("cantonese", re.compile("[喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰㗎]|唔(?=[一-鿿])")), ("ocr 黑占", re.compile("黑占")))
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
 

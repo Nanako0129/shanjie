@@ -8,7 +8,7 @@
 |---|---|---|
 | `ptt_clean.py` | PTT 網頁 → `body.tsv`、`push.tsv`（單位 `看板/文章`，一個單位最多 50 句）。同一篇、同一帳號、相鄰、時間差 ≤ 3 分鐘的推文先接起來再切句 | §2.4 |
 | `p2clean.py` | 切句與過濾規則（4–40 漢字、漢字比例、網址與帳號、數字、程式碼、簡體專用字）、去重鍵、`Guard`。從 `exp/p2-data` 複製，`ptt_clean.py` 與 `clean_subs.py` 共用 | §2.4 |
-| `clean_subs.py` | OPUS OpenSubtitles `zh_tw` → `subs.tsv`、`subs-half.tsv`（`SHA-256(句子)` 第一個位元組 < 128 的一半）。含假名、亂碼（詞庫外字）、中英並列三道過濾，另外擋繁簡共用字的大陸詞組（什么、這里、最后、對于、愿意⋯，`MAINLAND`）；輸入是 OPUS `raw/zh_tw.zip`（逐片原文，片＝片號資料夾，每部片後面插一個空行），只數片數、不設每片上限 | §2.7 |
+| `clean_subs.py` | OPUS OpenSubtitles `zh_tw` → `subs.tsv`、`subs-half.tsv`（`SHA-256(句子)` 第一個位元組 < 128 的一半）。含假名、亂碼（詞庫外字）、中英並列三道過濾，另外擋繁簡共用字的大陸詞組（什么、這里、最后、對于、愿意⋯，`MAINLAND`）與殘留記號（括號、「︰」標籤、粵語專用字與「唔＋漢字」、OCR 的「黑占」，`RESIDUE`）；輸入是 OPUS `raw/zh_tw.zip`（逐片原文，片＝片號資料夾，每部片後面插一個空行），只數片數、不設每片上限 | §2.7 |
 | `review_subs.py` | 字幕逐句審查（§2.7）：`prefilter` 把含繁簡共用字（大陸用法不同）、英文字母或記號的句子切成每份 1,000 句（只放句子，不放編號）給 Sonnet subagent 審；審查者回報「行數、類別、原句」，`apply` 用原句（清理時的去重鍵）比對拿掉，重寫 `subs.tsv`、`subs-half.tsv` 並寫 `manifest.json` | §2.7 |
 | `dedupe_eval.py` | 用 `tools/holdout_guard.py` 的比對器，把新來源句子對各評測集去重；只印每個來源、每個集合的命中數 | §2.4 |
 | `moore_lewis.py` | `score`：字元 4-gram Kneser–Ney，打分集合一個、候選池兩折交叉（池依句子的 SHA-256 分兩半，各用另一半同字數的固定種子樣本訓練去打分，沒有句子被看過它的模型打分），每個來源留交叉熵差最好的 50%。`split`：訊息 ID 的 SHA-256 第一個位元組 < 32 的 1/8 進保留桶 | §2.4 |
@@ -44,7 +44,8 @@ python3 experiments/sj-lm-7/clean_subs.py --raw <raw/zh_tw.zip> --out <OUT_DIR> 
 
 ```sh
 python3 experiments/sj-lm-7/dedupe_eval.py --set holdout=<eval/holdout/…> --set dev302=<…> --set <LABEL>=<…> \
-    --source ptt-body=<body.tsv> --source ptt-push=<push.tsv> --source g0v=<…> --source subs=<subs.tsv> --out <OUT_DIR> --jobs <N>
+    --source ptt-body=<body.tsv> --source ptt-push=<push.tsv> --source g0v=<…> --source subs=<subs.tsv> --out <OUT_DIR> --jobs <N> \
+    --min-len discordtune=6 --min-len reserve=6     # 契約 §2.4：私人兩份只拿 6 個字以上的列
 ```
 
 Moore–Lewis（只在 188 算，同一份輸入、同一個種子獨立再算一次，兩次的輸出雜湊要相同）：
@@ -86,7 +87,7 @@ python3 tools/build_acg_pack.py freeze-counts --expected-model <SHA-256>
 | 維基 dump | |
 | `colloquial-train.txt`（`--train-only-new-conv` 重產） | |
 | g0v `#rand0m` 增量、PTT 內文、PTT 推文（和評測集去重後） | g0v `cedad812b4cd71964be00a13c3c64dad87d8295e44667ebac363feeb224389e4`（15,207 句）、PTT 內文 `f42d5c8b04dcbb8759b932975121e3a9745c0392bc804bdca734d0b781da1928`（5,343,729 句）、PTT 推文 `6568bc6696cd99b4bc0139f6cf9d8fa3608fa6ac02c41ee342d3355519cdd115`（8,665,059 句） |
-| 字幕（§2.7，審查與去重後；會意用） | `dd9951ce3d1547de5824a09553db032539d22936ba201a9cf47abf1d4d1b7f58`（4,430,085 句；`SHA-256(句子)` 第一個位元組 < 128 的一半 `c2412e3dccade9fd5535dc5db3aa16b8d08ebec5c32f43322850bde93d11ea8c`） |
+| 字幕（§2.7，審查與去重後；會意用） | `e005cf44544909a0b6f0696e7b97a6a089b24755eadde142f00a3c0b4074cc1b`（4,432,866 句；`SHA-256(句子)` 第一個位元組 < 128 的一半 `9ee7cfb3296c66f23cbf57a68d34c9886de8c13d6ed67f98b80bc977d06afbf4`） |
 | `synth.txt` | |
 | `mcbpmf-data.txt`、`overlay-add.tsv` | |
 | 臂 A、臂 B 各自的計數詞表 | |

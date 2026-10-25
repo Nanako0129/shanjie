@@ -116,9 +116,9 @@ class Reject(unittest.TestCase):
         for s in ("萬事", "万事", "會緊張么", "干了三年"):
             self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
-        for s in ("（笑）", "(門鈴響)", "【旁白】", "[音樂]", "阿明︰", "喺邊度", "差一黑占"):
+        for s in ("（笑）", "(門鈴響)", "【旁白】", "[音樂]", "阿明︰", "喺邊度", "差一黑占", "我唔知道", "講大話㗎"):
             self.assertEqual(self.why(KEEP + s), "residue", s)
-        for s in ("他說「走吧」", "他說「走吧", "走吧」他說", "一點點", "黑色的", "唔，好吧"):     # quotes are not counted (strip_cue, split); 唔 is Mandarin too
+        for s in ("他說「走吧」", "他說「走吧", "走吧」他說", "一點點", "黑色的", "唔，好吧", "好吧唔"):     # quotes are not counted (strip_cue, split); 唔 is Mandarin too
             self.assertIsNone(self.why(KEEP + s), s)
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
         self.assertEqual(self.why(KEEP + "軟件"), "invade")                           # a --mainland-terms term joins the invade list
