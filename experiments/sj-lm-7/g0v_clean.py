@@ -21,6 +21,7 @@ NO_CC0 = re.compile(r"[(（]\s*no\s*cc0\s*[)）]", re.I)
 MENTION = re.compile(r"<[@#!][^>]*>")
 LINK = re.compile(r"<([^>|]+)\|([^>]*)>")    # <url|label>
 BARE = re.compile(r"<([^>]+)>")             # <url>
+STYLE = re.compile(r"[*~_]")   # bold, strike, italic marks (駕駛動力交通工具*肇*事); only Han runs are counted, so dropping every one is safe
 EMOJI = re.compile(r"(?<![0-9]):[a-z0-9_+\-']+:")   # not after a digit: 7:11-7:25 and 16:15:30 are times
 
 
@@ -41,10 +42,10 @@ def messages(page, seen):
 
 def plain(text):
     """Slack markup -> text: quoted lines dropped (someone else's words, not released by this author), mentions and emoji codes removed,
-    a link keeps its label (a bare URL stays, for the url filter)."""
+    bold/strike/italic marks removed, a link keeps its label (a bare URL stays, for the url filter)."""
     text = "\n".join(line for line in text.split("\n") if not line.lstrip().startswith(("&gt;", ">")))   # Slack escapes > in most messages, not all
     text = LINK.sub(r"\2", MENTION.sub("", text))
-    return html.unescape(EMOJI.sub("", BARE.sub(r"\1", text)))
+    return html.unescape(STYLE.sub("", EMOJI.sub("", BARE.sub(r"\1", text))))
 
 
 def clean(P, msgs, exclude=frozenset()):
