@@ -8,7 +8,7 @@
 SJ-LM-7 契約 §2.1a、§2.3（都預設關，不加旗標時輸出和原來逐位元組相同）：
       --moedict-readings          萌典有收的詞用萌典第一讀音，沒收的用 tools/readings.py 的規則（Reader，規則 3b 開）；萌典路徑見 readings.MOEDICT（SHANJIE_MOEDICT）。
                                   readings.py 判 CHECK（有歧義）或 GAP 的詞保留原本的讀音，印出個數；異體判斷用原讀音與新讀音兩個（任一個撞到就算）
-      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞，以及 CHECK／GAP 而保留原讀音的詞寫到 PATH：詞、原讀音、新讀音、依據
+      --reading-report PATH       （搭配上一個）把讀音和原本方法（基底最佳讀音＋normalize）不同的詞，以及 CHECK／GAP 而保留原讀音、暫定讀音不同的詞寫到 PATH：詞、原讀音、新讀音、依據
       --moedict-supplement FILE…  來源「萌典補詞」：萌典有收、不在基底、疊加層、名單、任何詞包，而且在這些純文字檔（一行一段，.gz／.bz2 照副檔名）裡
                                   子字串出現 ≥ 2 次的詞；讀音＝萌典第一讀音，分數＝同字數的 length_scores（不加手動詞的加分）。
                                   先過和維基標題候選相同的過濾（每個字是基底單字詞、不含簡體專用字），再和它們一起走異體判斷（臺／台 這類
