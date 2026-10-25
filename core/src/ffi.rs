@@ -731,6 +731,42 @@ pub unsafe extern "C" fn shanjie_engine_set_english_inline(
     rc
 }
 
+/// zhen-keyorder section 3. `enabled` 0 or 1 (default 0): whether keys out of Zhuyin's column order count as evidence of English
+/// (as a replaced symbol does), and a listed word or a two-letter word then opens the window on Space with less of it. Returns the
+/// snapshot like `set_english_inline`; turning it off closes an open English window and clears the shadow; any other value changes
+/// nothing and returns 2. Only matters with `set_english(1)`.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_key_order(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_key_order(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -1844,6 +1880,18 @@ mod tests {
         rc
     }
 
+    /// set_english_key_order; returns the code and frees the output.
+    fn set_key_order(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_key_order(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
     /// Types `keys` (Space for `_`); the last output's (candidates, commit, preedit), freed.
     fn type_out(e: *mut ShanjieEngine, keys: &str) -> (Vec<String>, String, String) {
         let mut last = (Vec::new(), String::new(), String::new());
@@ -1986,6 +2034,27 @@ mod tests {
         unsafe { shanjie_output_free(o) };
         assert!(send(e, key(ESC, '\0')).0 == 0);
         assert!(set_inline(e, 1) == 0);
+        // set_english_key_order (zhen-keyorder section 3): the codes of set_english_inline, then the switch through the C ABI. Off (the
+        // default), `l s` Space is rule 10 (nothing opens); on, it opens the window of the two-letter word `ls`; off again closes it,
+        // and the unfinished syllable stays.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_key_order(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "key order engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_key_order(e, 1, ptr::null_mut()) } == 1, "key order out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_key_order(e, v) == 2, "key order out of range");
+        }
+        let (cands, _, _) = type_out(e, "ls_");
+        assert!(cands.is_empty(), "off by default: no window");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_key_order(e, 1) == 0);
+        let (cands, commit, preedit) = type_out(e, "ls_");
+        assert!(cands == ["ls", "Ls", "LS"] && commit.is_empty() && preedit == "ㄋㄠ", "key order: the window of ls");
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_english_key_order(e, 0, &mut o) } == 0 && unsafe { (*o).handled } == 1);
+        assert!(unsafe { (*o).candidate_count } == 0, "turning it off closes the window");
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄠ", "the unfinished syllable stays");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
         // The last two fields (zhen-inline section 1.3f): an open English run, in UTF-16 units of `preedit`; 0 and 0 otherwise.
         let fields = |k: ShanjieKey| {
             let mut o = ptr::null_mut();

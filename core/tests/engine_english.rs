@@ -1987,3 +1987,268 @@ fn backspace_after_an_auto_keep_opens_the_word_again() {
     run(&mut e, "g o o g l e j BS BS e _");
     assert!(!run(&mut e, "Down").candidates.contains(&zh), "letters changed: a run's token, writings only");
 }
+
+// ---- zhen-keyorder (docs/contracts/zhen-keyorder.md section 5.1): the key-order switch ----
+//
+// Keys of the words below, standard layout, column 0 initial / 1 medial / 2 final:
+//   l s   ㄠ(2) ㄋ(0): out of order, E 1.           o k   ㄟ(2) ㄜ(2): a replacement, E 1.
+//   c d   ㄏ(0) ㄎ(0): a replacement, E 1.          c u p ㄏ ㄧ ㄣ: in order, E 0, the syllable ㄏㄧㄣ does not exist.
+//   u i   ㄧ(1) ㄛ(2): in order, E 0 (a `TWO_LETTER` word without evidence).   z z   ㄈ ㄈ: a replacement, not in `TWO_LETTER`.
+
+/// `eng_inline()` with the key-order switch on.
+fn ko() -> Engine {
+    let mut e = eng_inline();
+    e.set_english_key_order(true).unwrap();
+    e
+}
+
+#[test]
+fn key_order_opens_the_two_letter_words_on_space() {
+    let mut e = ko();
+    let o = run(&mut e, "l s _");
+    assert!(e.english_open() && o.candidates[..3] == ["ls", "Ls", "LS"], "ls: {:?}", o.candidates);
+    assert!(o.preedit == "ㄋㄠ", "the unfinished syllable stays: {}", o.preedit);
+    let mut e = ko();
+    let o = run(&mut e, "o k _");
+    assert!(e.english_open() && o.candidates[..3] == ["ok", "Ok", "OK"], "ok: {:?}", o.candidates);
+    // ㄜ is a syllable of the lexicon, so the window has its first entry as the fourth item.
+    assert!(o.candidates.len() == 4 && o.candidates[3] == first_entry("ㄜ"), "ok: the Chinese item");
+    // 1 keeps the word in the composition, as every English item.
+    assert!(run(&mut e, "1").preedit == "ok" && !e.english_open());
+}
+
+#[test]
+fn key_order_opens_a_listed_word_without_evidence_when_the_syllable_does_not_exist() {
+    let mut e = ko();
+    let o = run(&mut e, "c u p _");
+    assert!(e.english_open() && o.candidates == ["cup", "Cup", "CUP"] && e.english_evidence() == 0, "{:?}", o.candidates);
+    assert!(o.preedit == "ㄏㄧㄣ");
+    // Space only: the letters are not shown while typing (rule D is not relaxed), and no auto-keep.
+    let mut e = ko();
+    for k in ["c", "u", "p"] {
+        let o = run(&mut e, k);
+        assert!(!e.english_inline_shown() && !e.english_autokept(), "after {k}");
+        assert!(o.preedit.chars().all(|c| !c.is_ascii_alphabetic()), "Zhuyin after {k}: {}", o.preedit);
+    }
+    // And a tone key closes the syllable as it always did.
+    let mut e = ko();
+    let o = run(&mut e, "c u p 3");
+    assert!(!e.english_open() && o.candidates.is_empty() && o.preedit == shows("ㄏㄧㄣˇ"));
+}
+
+#[test]
+fn key_order_off_is_today() {
+    // The same keys with the switch off (the default), after it was on, and on an engine that never heard of it: identical outputs.
+    for script in ["l s _", "o k _", "c u p _", "l s s _", "r u s t _", "d i p _", "l a w _", "u i _", "z z _"] {
+        let (mut never, mut off, mut again) = (eng_inline(), eng_inline(), ko());
+        again.set_english_key_order(false).unwrap();
+        off.set_english_key_order(false).unwrap();
+        let (a, b, c) = (run_all(&mut never, script), run_all(&mut off, script), run_all(&mut again, script));
+        assert!(a == b && a == c, "{script}");
+        assert!(never.english_open() == again.english_open() && never.english_evidence() == again.english_evidence(), "{script}");
+    }
+    // The documented case: today `l s` Space is rule 10 (the syllable ㄋㄠ is taken) and `c u p` Space does nothing.
+    let mut e = eng_inline();
+    let o = run(&mut e, "l s _");
+    assert!(!e.english_open() && o.preedit == shows("ㄋㄠ"));
+    let mut e = eng_inline();
+    assert_pend_only(&run(&mut e, "c u p _"), "ㄏㄧㄣ");
+}
+
+#[test]
+fn key_order_evidence_counts() {
+    let ev = |on: bool, keys: &str| {
+        let mut e = if on { ko() } else { eng_inline() };
+        run(&mut e, keys);
+        e.english_evidence()
+    };
+    assert!(ev(true, "l s") == 1, "out of order");
+    assert!(ev(true, "c d") == 1, "a replacement");
+    assert!(ev(true, "o k") == 1);
+    assert!(ev(true, "c u p") == 0 && ev(true, "u i") == 0, "in order");
+    // A key that replaces and is out of order at once counts once: ㄠ(2), ㄋ(0) out of order, ㄋ again replaces (and is below ㄠ).
+    assert!(ev(true, "l s s") == 2, "the replacing key counts as a replacement only");
+    // Off: the replacements only, today's number.
+    assert!(ev(false, "l s") == 0 && ev(false, "c d") == 1 && ev(false, "l s s") == 1);
+    // Backspace drops the last key's column and leaves the count: ㄍ(0) ㄠ(2), Backspace takes ㄠ, ㄨ(1) is in order again.
+    assert!(ev(true, "e l BS u") == 0, "the dropped key's column is forgotten");
+    assert!(ev(true, "l s BS") == 1, "the count stays");
+    // The syllable that is finished starts again.
+    assert!(ev(true, "l s 3 c u p") == 0);
+}
+
+#[test]
+fn key_order_clean_typing_is_not_evidence() {
+    for syl in ["ㄋㄧˇ", "ㄓㄨㄛ", "ㄏㄠˇ", "ㄕ", "ㄩㄥˊ"] {
+        let mut e = ko();
+        let layout = Layout::Standard;
+        let mut toned = false;
+        let mut keys: Vec<Key> = syl
+            .chars()
+            .map(|c| match layout.key_of_tone(c) {
+                Some(tk) => {
+                    toned = true;
+                    Key::ch(tk, 0)
+                }
+                None => Key::ch(layout.key_of_symbol(c).unwrap(), 0),
+            })
+            .collect();
+        if !toned {
+            keys.push(Key::new(KeyKind::Space));
+        }
+        for k in keys {
+            e.key(k).unwrap();
+            assert!(!e.english_open() && !e.english_inline_shown() && !e.english_autokept() && e.english_evidence() == 0, "{syl}");
+        }
+        assert!(e.english_shadow_len() == 0, "{syl}: finished");
+    }
+}
+
+#[test]
+fn key_order_two_letters_do_not_show_or_keep() {
+    let mut e = ko();
+    for k in ["l", "s"] {
+        let o = run(&mut e, k);
+        assert!(!e.english_inline_shown(), "two letters never show");
+        assert!(o.preedit.chars().all(|c| !c.is_ascii_alphabetic()), "{}", o.preedit);
+    }
+    // A third key: no auto-keep of `ls`, the key goes into the syllable as ever (ㄇ replaces ㄋ).
+    let o = run(&mut e, "a");
+    assert!(!e.english_autokept() && o.commit.is_empty() && !o.preedit.chars().any(|c| c.is_ascii_alphabetic()), "{}", o.preedit);
+}
+
+#[test]
+fn key_order_two_letters_need_the_list_and_a_piece_of_evidence() {
+    let mut e = ko();
+    let o = run(&mut e, "z z _");
+    assert!(!e.english_open(), "zz is not in TWO_LETTER");
+    assert!(o.candidates.is_empty());
+    let mut e = ko();
+    run(&mut e, "u i _");
+    assert!(!e.english_open(), "ui is in TWO_LETTER but typed in order: no evidence");
+    // Three letters (not a listed word, not a two-letter word) with evidence: nothing.
+    let mut e = ko();
+    run(&mut e, "l s a _");
+    assert!(!e.english_open());
+    assert!(TWO_LETTER.iter().all(|w| w.len() == 2 && w.bytes().all(|b| b.is_ascii_lowercase())));
+    assert!(TWO_LETTER.contains(&"ok") && TWO_LETTER.contains(&"ls"));
+}
+
+#[test]
+fn key_order_turned_off_closes_the_window() {
+    let mut e = ko();
+    run(&mut e, "l s _");
+    assert!(e.english_open());
+    let o = e.set_english_key_order(false).unwrap();
+    assert!(!e.english_open() && o.candidates.is_empty() && o.selected.is_none(), "closed");
+    assert!(e.english_shadow_len() == 0, "the shadow is cleared");
+    assert!(o.preedit == "ㄋㄠ", "the unfinished syllable stays: {}", o.preedit);
+    // So Space is rule 10 now.
+    assert!(run(&mut e, "_").preedit == shows("ㄋㄠ") && !e.english_open());
+    // A window the switch did not open stays when the switch is set to off again.
+    let mut e = eng_inline();
+    run(&mut e, "r u s t _");
+    e.set_english_key_order(false).unwrap();
+    assert!(e.english_open());
+}
+
+#[test]
+fn key_order_has_no_effect_where_the_shadow_is_not_recorded() {
+    let build = |kind: &str, ko: bool| {
+        let layout = if kind == "eten" { Layout::Eten } else { Layout::Standard };
+        let mut e = Engine::with_lexicon(real(), layout);
+        if kind != "nolist" {
+            e.load_english(&tiny_list()).unwrap();
+        }
+        e.set_english(kind != "english-off").unwrap();
+        if kind == "abbr" {
+            e.set_abbreviation(true).unwrap();
+        }
+        e.set_english_key_order(ko).unwrap();
+        e
+    };
+    for kind in ["eten", "abbr", "english-off", "nolist"] {
+        for script in ["l s _", "o k _", "c u p _", "l s s _"] {
+            let (mut a, mut b) = (build(kind, false), build(kind, true));
+            assert!(run_all(&mut a, script) == run_all(&mut b, script), "{kind} {script}");
+            assert!(!b.english_open(), "{kind} {script}");
+        }
+    }
+}
+
+/// zhen-keyorder section 4, the exhaustive clean typing (the Izanami test of vChewing): readings of the lexicon typed in column order
+/// with the switch on and a word list of every three-letter word (so any three keys that are evidence could open a window), each
+/// syllable ended by its tone key or Space. Never an English window, never the letters (rule D), never an auto-keep, never a piece
+/// of evidence (E stays 0 after every key).
+///
+/// Every distinct syllable of every reading is typed alone (the whole syllable table, 1,417 at the time of writing). The readings
+/// themselves are a sample: the full set is 416,227 readings and one pass took about 75 s in a release build on the maintainer's Mac
+/// (measured 2026-10-26), over the 60 s the contract allows, so `SAMPLE` readings are typed (splitmix64 shuffle from `SEED`: the same
+/// readings on every run; the contract asks for at least 20,000).
+#[test]
+fn key_order_clean_typing_of_every_reading_is_never_english() {
+    const SEED: u64 = 20261026;
+    const SAMPLE: usize = 40_000;
+    let lex = real();
+    let dir = tmp_dir("keyorder-exhaustive");
+    let list: String = ('a'..='z').flat_map(|a| ('a'..='z').flat_map(move |b| ('a'..='z').map(move |c| format!("{a}{b}{c}\n")))).collect();
+    std::fs::write(dir.join("words.txt"), list).unwrap();
+    let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
+    e.load_english(&dir.join("words.txt")).unwrap();
+    e.set_english(true).unwrap();
+    e.set_english_key_order(true).unwrap();
+    let layout = Layout::Standard;
+    let keys_of = |syl: &str| -> Vec<Key> {
+        let mut v = Vec::new();
+        let mut toned = false;
+        for c in syl.chars() {
+            match layout.key_of_tone(c) {
+                Some(tk) => {
+                    v.push(Key::ch(tk, 0));
+                    toned = true;
+                }
+                None => v.push(Key::ch(layout.key_of_symbol(c).expect("a symbol with a key"), 0)),
+            }
+        }
+        if !toned {
+            v.push(Key::new(KeyKind::Space));
+        }
+        v
+    };
+    let type_one = |e: &mut Engine, syls: &[&str]| {
+        e.reset(ResetMode::Discard);
+        for syl in syls {
+            for k in keys_of(syl) {
+                e.key(k).unwrap();
+                assert!(
+                    !e.english_open() && !e.english_inline_shown() && !e.english_autokept() && e.english_evidence() == 0,
+                    "clean typing looked like English"
+                );
+            }
+        }
+    };
+    let n = lex.reading_count();
+    let seen: std::collections::BTreeSet<&str> = (0..n).flat_map(|r| lex.reading_syllables(r)).collect();
+    for s in &seen {
+        type_one(&mut e, &[s]);
+    }
+    let mut chosen: Vec<usize> = (0..n).collect();
+    let mut state = SEED;
+    let mut next = || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    for i in (1..n).rev() {
+        chosen.swap(i, (next() % (i as u64 + 1)) as usize);
+    }
+    chosen.truncate(SAMPLE);
+    for &r in &chosen {
+        type_one(&mut e, &lex.reading_syllables(r));
+    }
+    println!("typed {} of {n} readings and {} distinct syllables", chosen.len(), seen.len());
+    assert!(n >= 20_000 && seen.len() > 1000 && chosen.len() >= 20_000, "the test saw enough");
+    let _ = std::fs::remove_dir_all(&dir);
+}

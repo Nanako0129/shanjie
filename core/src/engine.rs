@@ -189,6 +189,11 @@ pub const PREDICT_MAX: usize = PAGE_SIZE;
 pub const PREDICT_SCAN: usize = 27;
 /// zhen-mixed section 2.2: the shadow holds at most this many keys; the next one empties it.
 pub const SHADOW_MAX: usize = 32;
+/// zhen-keyorder section 2.2: the two-letter words the key-order switch can open the English window for (the word list holds
+/// three letters and more). Each is `[a-z]{2}`. A removal needs the measurement of section 4; an addition is a new slice.
+pub const TWO_LETTER: &[&str] = &[
+    "ok", "ls", "cd", "mv", "rm", "cp", "ip", "id", "ui", "ux", "js", "ts", "py", "go", "vs", "pr", "ci", "os", "tv", "pc", "db", "qa", "pm", "hr",
+];
 /// zhen-mixed section 2.6: the word list's limits (bytes, lines) and its word length range.
 const ENGLISH_MAX_BYTES: u64 = 4 << 20;
 const ENGLISH_MAX_LINES: usize = 200_000;
@@ -677,6 +682,12 @@ pub struct Engine {
     /// replaced a symbol in an occupied column (rule 9). Empty unless `shadow_on`; cleared with `clear_pend`.
     shadow: Vec<char>,
     shadow_over: u32,
+    /// zhen-keyorder: the switch (default off; `set_english_key_order`), the column (0 initial, 1 medial, 2 final) of each key of
+    /// `shadow`, and how many keys came in a column below an earlier key's (not counting a replacing key). Recorded whenever the
+    /// shadow is; only read with the switch on.
+    english_key_order: bool,
+    shadow_cols: Vec<u8>,
+    shadow_inv: u32,
     /// Set by `choose_english` when the token it inserted was the unit that reaches `MAX_SYLLABLES` and sent everything: the committed text, for the
     /// output of the key or pick that made it. Choosing an English item sends nothing otherwise (zhen-inline section 1.0).
     commit_out: Option<String>,
@@ -959,6 +970,9 @@ impl Engine {
             english_inline: true,
             shadow: Vec::new(),
             shadow_over: 0,
+            english_key_order: false,
+            shadow_cols: Vec::new(),
+            shadow_inv: 0,
             commit_out: None,
             run: String::new(),
             run_zh: None,
@@ -1614,6 +1628,29 @@ impl Engine {
         self.handled()
     }
 
+    /// zhen-keyorder section 3: the key-order switch, default off, remembered even without a list. Takes effect only where
+    /// `shadow_on`. Turning it off closes an open English window and clears the shadow (whichever evidence opened it); the
+    /// unfinished syllable stays. Returns the snapshot.
+    pub fn set_english_key_order(&mut self, on: bool) -> Result<Output, EngineError> {
+        let was = std::mem::replace(&mut self.english_key_order, on);
+        if was && !on {
+            self.close_english();
+        }
+        self.handled()
+    }
+
+    /// The shadow when the English window is open, else None (tool hook of zhen-keyorder section 4: the word the window is for).
+    #[doc(hidden)]
+    pub fn english_window_shadow(&self) -> Option<String> {
+        self.english_open().then(|| self.shadow.iter().collect())
+    }
+
+    /// The English evidence E of zhen-keyorder section 1 (test and tool hook).
+    #[doc(hidden)]
+    pub fn english_evidence(&self) -> u32 {
+        self.evidence()
+    }
+
     /// Whether the English window is open (test and tool hook).
     #[doc(hidden)]
     pub fn english_open(&self) -> bool {
@@ -1673,6 +1710,8 @@ impl Engine {
     fn clear_shadow(&mut self) {
         self.shadow.clear();
         self.shadow_over = 0;
+        self.shadow_cols.clear();
+        self.shadow_inv = 0;
     }
 
     /// Closes the English window if it is open, and clears the shadow either way; the unfinished syllable stays.
@@ -1690,8 +1729,8 @@ impl Engine {
         }
     }
 
-    /// Section 2.2: one Zhuyin key of the unfinished syllable; `over` is whether it replaced a symbol (rule 9).
-    fn shadow_push(&mut self, ch: char, over: bool) {
+    /// Section 2.2: one Zhuyin key of the unfinished syllable, in column `col`; `over` is whether it replaced a symbol (rule 9).
+    fn shadow_push(&mut self, ch: char, col: usize, over: bool) {
         if !self.shadow_on() {
             return;
         }
@@ -1699,30 +1738,58 @@ impl Engine {
             self.clear_shadow(); // the 33rd key: start again
             return;
         }
+        // zhen-keyorder section 1: a replacing key counts once, as a replacement; any other key in a column below an earlier one's is out of order.
+        self.shadow_inv += (!over && self.shadow_cols.iter().any(|&c| c as usize > col)) as u32;
         self.shadow.push(ch);
+        self.shadow_cols.push(col as u8);
         self.shadow_over += over as u32;
+    }
+
+    /// The English evidence E (zhen-keyorder section 1): the replacements, and with the switch on the out-of-order keys as well.
+    fn evidence(&self) -> u32 {
+        self.shadow_over + if self.english_key_order { self.shadow_inv } else { 0 }
+    }
+
+    /// The unfinished syllable (tone 1) is in no lexicon entry.
+    fn syllable_missing(&self) -> bool {
+        self.lex.entries(&[self.pending()]).is_empty()
     }
 
     /// The overwrite condition of the trigger (zhen-mixed section 2.2) and of the display rule D (zhen-inline section 1.1
     /// item 4): a key replaced a symbol at least once, and when the leftover syllable (tone 1) is itself in the lexicon at
     /// least twice.
     fn overwrite_enough(&self) -> bool {
-        self.shadow_over >= 2 || (self.shadow_over == 1 && self.lex.entries(&[self.pending()]).is_empty())
+        let e = self.evidence();
+        e >= 2 || (e == 1 && self.syllable_missing())
     }
 
     /// The shadow as a candidate for an English word, and the list to look it up in: the shadow is recorded (`shadow_on`), the
     /// cursor is at the end with one unit, and `overwrite_enough`. The one place both the trigger and the display rule D ask.
     fn eligible_shadow(&self) -> Option<(&[Box<str>], String)> {
+        self.shadow_candidate().filter(|_| self.overwrite_enough())
+    }
+
+    /// `eligible_shadow` without the evidence: the shadow is recorded, the cursor is at the end with one unit.
+    fn shadow_candidate(&self) -> Option<(&[Box<str>], String)> {
         let words = self.english_words.as_deref().filter(|_| self.shadow_on())?;
-        if self.cursor != self.syls.len() || !self.pend_prev.is_empty() || !self.overwrite_enough() {
+        if self.cursor != self.syls.len() || !self.pend_prev.is_empty() {
             return None;
         }
         Some((words, self.shadow.iter().collect()))
     }
 
-    /// Section 2.2, the trigger (Space before rule 10): the eligible shadow is a whole listed word.
+    /// Section 2.2, the trigger (Space before rule 10): the eligible shadow is a whole listed word. With the key-order switch
+    /// (zhen-keyorder section 2) two more cases, for Space only: a whole listed word whose syllable does not exist, with or
+    /// without evidence (rule 10 would ignore that Space), and a `TWO_LETTER` word with E at least 1 whatever the syllable.
     fn english_trigger(&self) -> bool {
-        self.eligible_shadow().is_some_and(|(words, word)| Self::is_word(words, &word))
+        if self.eligible_shadow().is_some_and(|(words, word)| Self::is_word(words, &word)) {
+            return true;
+        }
+        if !self.english_key_order {
+            return false;
+        }
+        let Some((words, word)) = self.shadow_candidate() else { return false };
+        (Self::is_word(words, &word) && self.syllable_missing()) || (self.evidence() >= 1 && TWO_LETTER.contains(&word.as_str()))
     }
 
     /// The unfinished syllable's columns, for the typing simulator (tool hook; no letters, no tone).
@@ -1833,7 +1900,7 @@ impl Engine {
 
     /// The first key of a new syllable after an auto-keep or a kept window: rule 14.
     fn start_syllable(&mut self, ch: char, col: usize, sym: char) {
-        self.shadow_push(ch, false);
+        self.shadow_push(ch, col, false);
         self.pend[col] = Some(sym);
         self.pred_dirty = true;
     }
@@ -2901,7 +2968,7 @@ impl Engine {
                 if self.pend[col].is_some() && self.abbr_active() {
                     self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
                 }
-                self.shadow_push(k.ch, self.pend[col].is_some());
+                self.shadow_push(k.ch, col, self.pend[col].is_some());
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
@@ -2925,6 +2992,7 @@ impl Engine {
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
                     self.shadow.pop(); // zhen-mixed section 2.2: the last key; the replacement count stays
+                    self.shadow_cols.pop(); // zhen-keyorder section 2.1: its column goes too; the out-of-order count stays
                 }
                 if self.pend.iter().all(Option::is_none) {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes

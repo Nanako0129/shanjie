@@ -282,6 +282,11 @@ impl Lexicon {
     pub fn reading_count(&self) -> usize {
         self.readings.len()
     }
+    /// The syllables of reading `r` (`0..reading_count()`), for the exhaustive clean-typing test of zhen-keyorder section 4.
+    #[doc(hidden)]
+    pub fn reading_syllables(&self, r: usize) -> Vec<&str> {
+        self.key_of(&self.readings[r]).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
     /// Sorted (word, score) list of one reading; empty when the reading is unknown.
     pub fn entries(&self, key: &[String]) -> Vec<(&str, f64)> {
         self.find(&self.ids(key)).map(|r| self.reading_entries(r).collect()).unwrap_or_default()
