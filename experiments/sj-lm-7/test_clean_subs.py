@@ -57,6 +57,8 @@ class Pieces(unittest.TestCase):
         self.assertEqual(C.strip_cue("好的啊」"), "好的啊")                  # opener missing: the closer goes
         self.assertEqual(C.strip_cue("他說「好」"), "他說「好」")            # a balanced quote stays
         self.assertEqual(C.strip_cue('好的啊"'), "好的啊")
+        self.assertEqual(C.strip_cue("如悲鳴*"), "如悲鳴")
+        self.assertEqual(C.strip_cue("♪我將會是你身旁的人§"), "我將會是你身旁的人")
 
     def test_half_is_the_first_byte_of_the_sha256_below_128(self):
         for s in ("我們去吃飯", "你好嗎", "太棒了啊", "看電影吧", "真的是這樣"):
@@ -97,6 +99,7 @@ class Reject(unittest.TestCase):
         self.assertIsNone(self.why("龘龘龘" + KEEP))                                  # 3 of 13: 23% stays
         self.assertEqual(self.why(KEEP + " ok go"), "english")
         self.assertIsNone(self.why(KEEP + " ok"))                                      # one English word stays
+        self.assertEqual(self.why(KEEP + "拼寫n"), "english")                          # a lone Latin letter goes
         self.assertEqual(self.why(KEEP + SIMP), "simplified")
         for s in ("你為什么", "這里很好玩", "我們最后去", "對于你啊", "你愿意嗎", "我在包里"):
             self.assertEqual(self.why(KEEP + s), "mainland", s)
@@ -104,7 +107,9 @@ class Reject(unittest.TestCase):
             self.assertNotEqual(self.why(KEEP + s), "mainland", s)
         for s in ("皇后來了", "汽車里程", "若干活動", "海關系統", "去水里玩", "二里頭文化"):   # lexicon words decide the boundary
             self.assertNotEqual(self.why(KEEP + s), "mainland", s)
-        self.assertEqual(self.why(KEEP + "什 么"), "mainland")                         # whitespace inside a phrase does not hide it
+        self.assertEqual(self.why(KEEP + "什 么"), "mainland")
+        for s in ("萬事", "万事", "會緊張么", "去市里", "干了三年", "那伙計"):
+            self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
         self.assertIsNone(self.why(KEEP + "好"))                                       # a single-character invade term is not a term

@@ -6,11 +6,12 @@ Brought from the SUB-0 branch (origin/exp/sub0-subtitles, experiments/sub0-subti
                 --invade-sha256 HEX [--repo DIR] [--cache DIR] [--extra-rows LABEL=FILE ...] [--min-han 4000000] [--sample N --seed S]
 
 Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f7504bf):
-  split, cue    p2clean.split_sentences (。！？!? and line breaks, not commas), then a leading '-' / opening quote is stripped
+  split, cue    p2clean.split_sentences (。！？!? and line breaks, not commas), then a leading '-' / opening quote and the subtitle marks
+                * # ♪ ♫ § are stripped
   han_len, han_ratio, url, digits, code   p2clean.reject (4..40 Han characters, >= 70% Han, URL / e-mail / handle, digit runs and phones, code)
   kana          a kana character (hiragana, katakana, phonetic extensions, half-width katakana)
   lexicon       >= 30% of the Han characters are not a character of --lexicon's words
-  english       >= 2 English words
+  english       >= 2 English words, or a single Latin letter standing alone (法式拼寫n; "OK" has two letters and stays)
   simplified    p2clean's TRAD_SIMP_ONLY character
   mainland      a mainland phrase written with a character traditional Chinese also has (什么, 這里, 最后, 對于, 愿意: MAINLAND), found on
                 the NFKC text with whitespace removed; the simplified step lets these characters through on purpose (公里, 皇后). A phrase
@@ -69,9 +70,11 @@ MAINLAND = tuple("""什么 怎么 那么 這么 多么 要么 甚么 這里 那�
     室里 院里 樓里 獄里 營里 洞里 宮里 廳里 間里 私下里 里面 里頭 里邊 最后 然后 以后 之后 后來 后面 后悔 隨后 背后 前后 后天 后果 后退 落后
     稍后 今后 此后 事后 后頭 后邊 對于 由于 關于 于是 終于 等于 至于 屬于 位于 善于 在于 過于 敢于 基于 用于 處于 向于 便于 樂于 歸于 急于
     忙于 免于 出于 鑒于 限于 勇于 愿意 心愿 愿望 自愿 情愿 寧愿 但愿 志愿 祝愿 如愿 干嘛 干活 干淨 干杯 干脆 干掉 實干 准備 標准 准確 准時
-    關系 聯系 范圍 戰斗 奮斗 斗爭 放松 輕松 采取 采訪""".split())
-SHARED = frozenset("么里后于愿干准系范斗松采")   # the shared characters of MAINLAND
+    關系 聯系 范圍 戰斗 奮斗 斗爭 放松 輕松 采取 采訪 干了 市里 伙計 万 么""".split())   # 干了 .. 么: the second proofread (seed 20261026)
+SHARED = frozenset("么里后于愿干准系范斗松采伙万")   # the shared characters of MAINLAND
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
+MARKS = re.compile("[*#♪♫§]")                  # subtitle marks (lyrics, notes) seen in the second proofread; never part of the text
+LONE_LETTER = re.compile(r"(?<![A-Za-z])[A-Za-z](?![A-Za-z])")
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
 
@@ -83,7 +86,7 @@ def sentences(line):
 
 def strip_cue(s):
     """A subtitle cue starts with '-' (dialogue dash) and may open a quote; a closing quote is dropped only when its opener is not in the sentence."""
-    s = CUE_LEAD.sub("", s)
+    s = CUE_LEAD.sub("", MARKS.sub("", s))
     for o, c in QUOTE_PAIRS:
         if s.endswith(c) and (o not in s[:-1] or o == c and s.count(c) % 2 == 1):
             s = s[:-1].rstrip()
@@ -165,6 +168,8 @@ def trigger(step, s, ctx):
     if step == "lexicon":
         han = P2.HANC.findall(s)
         return "outside the lexicon " + decile(sum(c not in ctx.lex for c in han) / len(han))
+    if step == "english" and len(ENGLISH_WORD.findall(s)) < MIN_ENGLISH_WORDS:
+        return "a lone Latin letter"
     if step == "english":
         return f"{min(len(ENGLISH_WORD.findall(s)), 5)}{'+' if len(ENGLISH_WORD.findall(s)) >= 5 else ''} English words"
     if step == "simplified":
@@ -186,7 +191,7 @@ def reject(s, ctx):
     han = P2.HANC.findall(s)
     if sum(c not in ctx.lex for c in han) >= MAX_NON_LEXICON * len(han):
         return "lexicon"
-    if len(ENGLISH_WORD.findall(s)) >= MIN_ENGLISH_WORDS:
+    if len(ENGLISH_WORD.findall(s)) >= MIN_ENGLISH_WORDS or LONE_LETTER.search(s):
         return "english"
     if not ctx.simp.isdisjoint(s):
         return "simplified"
