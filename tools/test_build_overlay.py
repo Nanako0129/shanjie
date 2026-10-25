@@ -14,12 +14,12 @@ SCORES = {2: -7.0, 3: -7.04116568, 4: -6.6, 5: -6.17843815}
 SYLLABLES = {"ㄐㄧㄚˇ", "ㄧˇ", "ㄅㄧㄥˇ", "ㄉㄧㄥ", "ㄨˋ", "ㄧ", "ㄧˋ", "ㄒㄧㄡ", "ㄍㄜ"}
 
 
-def manual(text, taken=frozenset(), encoding="utf-8"):
+def manual(text, taken=frozenset(), encoding="utf-8", tag="manual"):
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "m.tsv")
         with open(p, "w", encoding=encoding) as f:
             f.write(text)
-        return B.manual_rows(set(taken), SCORES, SYLLABLES, p)
+        return B.manual_rows(set(taken), SCORES, SYLLABLES, p, tag)
 
 
 class ManualRows(unittest.TestCase):
@@ -28,10 +28,20 @@ class ManualRows(unittest.TestCase):
         self.assertEqual(rows, [f"ㄐㄧㄚˇ-ㄧˇ-ㄅㄧㄥˇ\t甲乙丙\t{round(SCORES[3] + B.MANUAL_BONUS, 8)!r}\tmanual\n",
                                 f"ㄐㄧㄚˇ-ㄧˇ-ㄅㄧㄥˇ-ㄉㄧㄥ-ㄨˋ\t甲乙丙丁戊\t{round(SCORES[5] + B.MANUAL_BONUS, 8)!r}\tmanual\n"])
 
-    def test_a_fourth_column_adds_to_the_score(self):
-        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\t1.5\n"), [f"ㄐㄧㄚˇ-ㄧˇ\t甲乙\t{round(SCORES[2] + B.MANUAL_BONUS + 1.5, 8)!r}\tmanual\n"])
+    def test_a_fourth_column_adds_to_the_score_of_slang_rows_only(self):
+        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\t1.5\n", tag="slang"), [f"ㄐㄧㄚˇ-ㄧˇ\t甲乙\t{round(SCORES[2] + B.MANUAL_BONUS + 1.5, 8)!r}\tslang\n"])
+        for bad in ("more", "nan", "inf", "-0.5", "0", "0.3", "3.5", "15"):        # 0.5 steps, 0 < boost <= 3
+            with self.assertRaises(SystemExit, msg=bad):
+                manual(f"甲乙\tㄐㄧㄚˇ ㄧˇ\tx\t{bad}\n", tag="slang")
+        with self.assertRaises(SystemExit):                                   # manual words take no boost
+            manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\t1.5\n")
+
+    def test_a_boost_only_goes_on_the_first_slang_word_of_a_reading(self):
+        rows = manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\n假以\tㄐㄧㄚˇ ㄧˇ\ty\t1.0\n", tag="slang")
         with self.assertRaises(SystemExit):
-            manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\tmore\n")
+            B.slang_behind(rows, {"假以"})
+        first = B.slang_behind(manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\t1.0\n假以\tㄐㄧㄚˇ ㄧˇ\ty\n", tag="slang"), {"甲乙"})
+        self.assertGreater(float(first[0].split("\t")[2]), float(first[1].split("\t")[2]))   # the first stays first
 
     def test_a_bom_is_not_part_of_the_first_line(self):
         self.assertEqual(len(manual("# comment\n甲乙\tㄐㄧㄚˇ ㄧˇ\tx\n", encoding="utf-8-sig")), 1)

@@ -21,6 +21,7 @@ import collections
 import glob
 import gzip
 import hashlib
+import math
 import os
 import multiprocessing
 import re
@@ -46,6 +47,7 @@ SUPPLEMENT_SRC = "萌典補詞"
 SUPPLEMENT_MIN = 2   # 契約 §2.1a：語料裡子字串出現的次數下限
 PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
 IT_PACK = os.path.join(ROOT, "data", "packs", "it-add.tsv")
+MEME_PACK = os.path.join(ROOT, "data", "packs", "meme-add.tsv")   # 迷因詞包（#293）；沒有這個檔時是空集合
 # 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。2026-10-14 量的：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
 # 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名；研究紀錄同日）。手動加的是維護者明確要的詞，所以比一般疊加層詞高一點。
 # model-v6 §2.8 規則 2（維護者 2026-10-14）：0.5 是 model-v5 上剛好過關的最小值；開 KN 的 model-v6 書面「米雅歌唱得很好」輸，改 0.75。
@@ -264,20 +266,29 @@ def rebuild_tails(out=OUT):
 
 def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG):
     """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、兩個詞包或手動詞的詞。"""
-    taken = taken | pack_words() | pack_words(IT_PACK) | names_words()   # 同詞同讀音和詞包、名單層重複，引擎整個載入失敗
+    meme = pack_words(MEME_PACK) if os.path.exists(MEME_PACK) else set()
+    taken = taken | pack_words() | pack_words(IT_PACK) | meme | names_words()   # 同詞同讀音和詞包、名單層重複，引擎整個載入失敗
     rows = manual_rows(taken, scores, syllables, manual)
     if os.path.exists(slang):
-        rows += slang_behind(manual_rows(taken | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"))
+        rows += slang_behind(manual_rows(taken | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"), boosted_words(slang))
     return rows
 
 
 # docs/contracts/net-slang.md §2（維護者 2026-10-24「用量多的留第一」）：同一個讀音有好幾個網路用語時，檔案裡排在前面的（PTT 用量多的）留第一，
 # 後面的寫法分數再扣這個值、只當候選。1.0 是取整的保守值，和手動詞加分 0.75 同一個量級：兩個都加過分，扣 1.0 後一定排在後面。
 SLANG_BEHIND = 1.0
+BOOST_MAX = 3.0   # net-slang-2.md §3：加分 min(3, ceil((gap + 0.25) * 2) / 2)
 
 
-def slang_behind(rows):
-    """網路用語的列照檔案順序：一個讀音上第 k 個網路用語（k 從 0 起）的列，分數扣 k × SLANG_BEHIND。"""
+def boosted_words(path):
+    """有第四欄加分的詞（網路用語）。"""
+    with open(path, encoding="utf-8-sig") as f:
+        return {l.split("\t")[0] for l in f if not l.startswith("#") and len(l.rstrip("\n").split("\t")) == 4}
+
+
+def slang_behind(rows, boosted=frozenset()):
+    """網路用語的列照檔案順序：一個讀音上第 k 個網路用語（k 從 0 起）的列，分數扣 k × SLANG_BEHIND。加分只能放在第一名（k = 0）：
+    放在後面的列，加分 ≥ SLANG_BEHIND 時會和第一名打平或超過，違反「用量多的留第一」，所以中止。"""
     seen, out = {}, []
     for r in rows:
         key, w, score, tag = r.rstrip("\n").split("\t")
@@ -285,6 +296,8 @@ def slang_behind(rows):
         if w not in words:
             words.append(w)
         k = words.index(w)          # 這個讀音上第 k 個網路用語（0 是第一名）：扣 k 倍，後面的寫法彼此也不同分
+        if k and w in boosted:
+            raise SystemExit(f"slang-add.tsv: {w!r} has a boost but is behind another word on {key} (rank {k}); a boost only goes on the first")
         if k:
             r = f"{key}\t{w}\t{round(float(score) - k * SLANG_BEHIND, 8)!r}\t{tag}\n"
         out.append(r)
@@ -426,10 +439,10 @@ def names_words(path=NAMES):
 
 
 def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
-    """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。每列都要：三欄；詞是純漢字、字數在 scores 裡（2 字以上）、
+    """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。每列都要：三欄（網路用語可以有第四欄，見最後）；詞是純漢字、字數在 scores 裡（2 字以上）、
     不在 taken（基底、疊加層、詞包）；讀音的音節數等於字數，每個音節都是基底有的音節。產生的列（含 overlay_rows 自動加的變調列）
-    同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS＋可選的第四欄「加分」（一個數字；維護者 2026-10-25：
-    網路用語輸給沒人這樣講的組合時加分，見 net-slang-2.md §3）。"""
+    同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS＋可選的第四欄「加分」（只有網路用語，tag="slang"；
+    0.5 的倍數、0 < 加分 ≤ BOOST_MAX；維護者 2026-10-25：網路用語輸給沒人這樣講的組合時加分，見 net-slang-2.md §3）。"""
     rows, seen = [], set()
     with open(path, encoding="utf-8-sig") as f:
         lines = f.read().splitlines()
@@ -444,6 +457,7 @@ def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
                 boost = float(fields[3])
             except ValueError:
                 ok = False
+            ok = ok and tag == "slang" and math.isfinite(boost) and 0 < boost <= BOOST_MAX and (boost * 2).is_integer()
         if ok:
             w, reading = fields[:2]
             syls = reading.split(" ")
