@@ -241,6 +241,10 @@ jobs:
       - name: Names lexicon builder (Python)
         run: python3 -m unittest tools.test_build_names
 
+      # docs/contracts/neutral-tolerance.md section 2: the neutral-tone rows of tools/build_sandhi.py against synthetic fixtures.
+      - name: Sandhi builder (Python)
+        run: python3 -m unittest tools.test_build_sandhi
+
       # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
       # Stdlib only; experiments/s2-classes/test_cluster.py needs numpy and runs in `make test`.

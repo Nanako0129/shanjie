@@ -224,7 +224,7 @@ def build(base=BASE, overlay=OVERLAY, penalty=NEUTRAL_PENALTY):
     for word, syls, score, _ in rows:
         existing.add(("-".join(syls), word))
         if len(word) == 1:
-            singles[word][syls[0]] = score
+            singles[word][syls[0]] = max(score, singles[word].get(syls[0], score))
     for line in open(overlay, encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
         if len(p) >= 2:

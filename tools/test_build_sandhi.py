@@ -35,6 +35,11 @@ class Neutral(unittest.TestCase):
         got = run("ㄓㄨㄛ-ㄗ˙ 桌子 -5.0\nㄗˇ 子 -4.0\n", penalty=0.5)
         self.assertEqual(got, {("ㄓㄨㄛ-ㄗˇ", "桌子"): "-5.50000000"})
 
+    def test_duplicate_single_reading_keeps_the_highest(self):
+        # 子 ㄗˇ 出現兩次：取高的 -4.0，不是後面的 -9.0（ㄗˋ -6.0 因此不是最高）
+        got = run("ㄓㄨㄛ-ㄗ˙ 桌子 -5.0\nㄗˇ 子 -4.0\nㄗˋ 子 -6.0\nㄗˇ 子 -9.0\n")
+        self.assertEqual(set(got), {("ㄓㄨㄛ-ㄗˇ", "桌子")})
+
     def test_ties_one_row_each(self):
         got = run("ㄓㄨㄛ-ㄗ˙ 桌子 -5.0\nㄗˇ 子 -4.0\nㄗˋ 子 -4.0\nㄗˊ 子 -9.0\n")
         self.assertEqual(set(got), {("ㄓㄨㄛ-ㄗˇ", "桌子"), ("ㄓㄨㄛ-ㄗˋ", "桌子")})
