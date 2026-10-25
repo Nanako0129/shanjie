@@ -10,8 +10,8 @@ LEXICON = "我們今天一起去吃飯喔你好嗎真的是這樣啊太棒了看
 KEEP = "我們今天一起去吃飯喔"           # 10 Han characters
 SIMP = "这"
 # lexicon words that decide where a MAINLAND match is the traditional reading: guard words (shared character, no phrase inside), a phrase
-# that is itself a word (水里), and a longer word holding a phrase (二里頭文化)
-BOUNDARY_WORDS = ("皇后", "里程", "若干", "系統", "水里", "二里頭文化")
+# that is itself a word (屋里, a MAINLAND phrase: rule 1), and a longer word holding a phrase (二里頭文化)
+BOUNDARY_WORDS = ("皇后", "里程", "若干", "系統", "屋里", "二里頭文化")
 
 
 def write(d, name, text):
@@ -108,9 +108,11 @@ class Reject(unittest.TestCase):
             self.assertEqual(self.why(KEEP + s), "mainland", s)
         for s in ("五公里路", "皇后陛下", "他姓于", "不能干涉", "下里巴人"):     # the shared characters in their traditional use stay
             self.assertNotEqual(self.why(KEEP + s), "mainland", s)
-        for s in ("皇后來了", "汽車里程", "若干活動", "海關系統", "去水里玩", "二里頭文化"):   # lexicon words decide the boundary
+        for s in ("皇后來了", "汽車里程", "若干活動", "海關系統", "去屋里玩", "二里頭文化"):   # lexicon words decide the boundary
             self.assertNotEqual(self.why(KEEP + s), "mainland", s)
         self.assertEqual(self.why(KEEP + "什 么"), "mainland")
+        for s in ("這 里很好", "這\u3000里很好"):                                     # a phrase without a one-character entry
+            self.assertEqual(self.why(KEEP + s), "mainland", s)
         for s in ("萬事", "万事", "會緊張么", "干了三年"):
             self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts

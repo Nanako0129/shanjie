@@ -65,7 +65,7 @@ REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chat
 CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
 STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "invade", "dedupe", "guard"]
 # Contract 2.7 (maintainer 2026-10-25): the first 300-sentence proofread (seed 20261025) had 20 residues (6.7%): 18 machine-converted lines
-# with these shared characters (么 里 后 于 愿) in their mainland use, a lyric marker and an English word. Phrases, not characters, so 公里, 皇后,
+# with these shared characters (么 里 后 于 愿) in their mainland use, a lyric marker and an English word. Phrases, not characters (except 万 and a lone 么, added after the second proofread), so 公里, 皇后,
 # 姓于 stay; the lexicon decides word boundaries (mainland_hit), and 能干 and 下里 are left out (不能干涉, 下里巴人). Known limit (code review
 # of #299): a guard word that starts or ends with the shared character also covers a real mainland use (家里人 through 里人, 最后座 through
 # 后座); structurally it is the same as 皇后來了, so the lexicon cannot tell them apart. The review step (review_subs.py) sees these lines.
