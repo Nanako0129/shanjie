@@ -1,7 +1,7 @@
 """experiments/neutral/build_checkset.py: builds eval/dev/neutral/words.txt (docs/contracts/neutral-tolerance.md §3). Run from the repo root.
 Input: ~/.cache/shanjie/neutral/nt-counts.tsv (count_usage.py --include-known on the 2026-10-25 PTT snapshot),
 data/lexicon/sandhi-add.tsv (neutral rows), data/lexicon/mcbpmf-data.txt, ~/.cache/shanjie/sources/concised/concised-readings.tsv.
-Top 300 by articles (ties: code point). When a word has several neutral rows, the reading is the one closest to how Taiwan types it:
+Top 300 by articles (ties: code point) among the words that have a neutral row. When a word has several neutral rows, the reading is the one closest to how Taiwan types it:
 (1) most syllables whose rime matches the concised dictionary's reading of the word; (2) most syllables whose rime matches each
 character's majority rime across concised headwords; (3) highest sum of the base's single-character scores for those rimes; (4) code point."""
 import collections, os
@@ -46,7 +46,7 @@ for l in open("data/lexicon/sandhi-add.tsv", encoding="utf-8"):
     if t == "neutral":
         neu[w].append(r)
 cnt.sort(key=lambda t: (-t[1], t[0]))
-rows = [(w, sorted(neu[w], key=lambda r: key(w, r))[0]) for w, _ in cnt[:300]]
+rows = [(w, sorted(neu[w], key=lambda r: key(w, r))[0]) for w, _ in cnt if neu[w]][:300]   # words with no neutral row (的、了 only) are skipped
 os.makedirs("eval/dev/neutral", exist_ok=True)
 with open("eval/dev/neutral/words.txt", "w", encoding="utf-8", newline="\n") as f:
     f.writelines(f"|{w}|{r.replace('-', ' ')}\n" for w, r in rows)

@@ -39,9 +39,11 @@ class Neutral(unittest.TestCase):
         got = run("ㄓㄨㄛ-ㄗ˙ 桌子 -5.0\nㄗˇ 子 -4.0\nㄗˋ 子 -4.0\nㄗˊ 子 -9.0\n")
         self.assertEqual(set(got), {("ㄓㄨㄛ-ㄗˇ", "桌子"), ("ㄓㄨㄛ-ㄗˋ", "桌子")})
 
-    def test_no_same_rime_uses_first_tone(self):
-        got = run("ㄅㄞˊ-ㄙㄜˋ-ㄉㄜ˙ 白色的 -5.0\nㄉㄜ˙ 的 -2.0\nㄉㄧˊ 的 -3.0\n")
-        self.assertEqual(set(got), {("ㄅㄞˊ-ㄙㄜˋ-ㄉㄜ", "白色的")})
+    def test_no_same_rime_keeps_the_neutral_and_no_change_writes_nothing(self):
+        # 的 has no same-rime non-neutral reading: the core rejects a toneless ㄉㄜ, so that position stays neutral
+        self.assertFalse(run("ㄅㄞˊ-ㄙㄜˋ-ㄉㄜ˙ 白色的 -5.0\nㄉㄜ˙ 的 -2.0\nㄉㄧˊ 的 -3.0\n"))
+        got = run("ㄓㄨㄛ-ㄗ˙-ㄉㄜ˙ 桌子的 -5.0\nㄗˇ 子 -4.0\nㄉㄜ˙ 的 -2.0\n")
+        self.assertEqual(set(got), {("ㄓㄨㄛ-ㄗˇ-ㄉㄜ˙", "桌子的")})
 
     def test_several_neutral_positions_replaced_together(self):
         got = run("ㄇㄚ-ㄇㄚ˙-ㄗ˙ 媽媽子 -5.0\nㄇㄚˇ 媽 -3.0\nㄗˇ 子 -4.0\n")

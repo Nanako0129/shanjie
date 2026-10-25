@@ -194,8 +194,9 @@ def base_rows(path=BASE):
 
 
 def neutral_variants(word, syls, singles):
-    """neutral：每個輕聲位置換成那個字的本調（單字詞裡韻相同的非輕聲讀音中分數最高的；同分每個都寫；沒有就一聲）。
-    所有輕聲位置一起換，同分的位置展開成組合。回傳新讀音的 list（沒有輕聲位置時為空）。"""
+    """neutral：每個輕聲位置換成那個字的本調（單字詞裡韻相同的非輕聲讀音中分數最高的；同分每個都寫）。沒有同韻非輕聲讀音的位置
+    保留輕聲（核心不收不帶聲調的 ㄉㄜ、ㄌㄜ 這類音節，打了組不出字；main 2026-10-26 實測）；沒有任何位置能換就不產生。
+    所有輕聲位置一起換，同分的位置展開成組合。回傳新讀音的 list。"""
     pos = [i for i, s in enumerate(syls) if s[-1] == "˙"]
     if not pos:
         return []
@@ -204,13 +205,14 @@ def neutral_variants(word, syls, singles):
         rime = syls[i][:-1]
         cand = {r: sc for r, sc in singles.get(word[i], {}).items() if r[-1] != "˙" and r.rstrip(TONE_MARKS) == rime}
         top = max(cand.values()) if cand else None
-        choices.append(sorted(r for r, sc in cand.items() if sc == top) or [rime])
+        choices.append(sorted(r for r, sc in cand.items() if sc == top) or [syls[i]])
     out = []
     for combo in itertools.product(*choices):
         new = list(syls)
         for i, r in zip(pos, combo):
             new[i] = r
-        out.append(new)
+        if new != syls:
+            out.append(new)
     return out
 
 
