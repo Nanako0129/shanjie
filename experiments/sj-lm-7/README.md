@@ -85,7 +85,7 @@ python3 tools/build_acg_pack.py freeze-counts --expected-model <SHA-256>
 |---|---|
 | 維基 dump | |
 | `colloquial-train.txt`（`--train-only-new-conv` 重產） | |
-| g0v `#rand0m` 增量、PTT 內文、PTT 推文 | |
+| g0v `#rand0m` 增量、PTT 內文、PTT 推文（和評測集去重後） | g0v `cedad812b4cd71964be00a13c3c64dad87d8295e44667ebac363feeb224389e4`（15,207 句）、PTT 內文 `f42d5c8b04dcbb8759b932975121e3a9745c0392bc804bdca734d0b781da1928`（5,343,729 句）、PTT 推文 `6568bc6696cd99b4bc0139f6cf9d8fa3608fa6ac02c41ee342d3355519cdd115`（8,665,059 句） |
 | `synth.txt` | |
 | `mcbpmf-data.txt`、`overlay-add.tsv` | |
 | 臂 A、臂 B 各自的計數詞表 | |
