@@ -725,6 +725,15 @@ class AppendCreators(unittest.TestCase):
         self.assertEqual(self.run_append("# h\r\n國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\tPTT 1\r\n"), 1)
         self.assertEqual(get(os.path.join(self.d, "names-sources.tsv")).decode()[len(self.SRCS):], "國動\tcreator\tPTT 1\t\t\n")
 
+    def test_a_fourth_column_adds_to_the_row_score(self):
+        self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
+        plain = [l for l in get(os.path.join(self.d, "names-add.tsv")).decode().splitlines() if l.endswith("\tstore")]
+        self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\t1.0\n")
+        boosted = [l for l in get(os.path.join(self.d, "names-add.tsv")).decode().splitlines() if l.endswith("\tstore")]
+        self.assertEqual([round(float(b.split("\t")[2]) - float(p.split("\t")[2]), 6) for p, b in zip(plain, boosted)], [1.0] * len(plain))
+        with self.assertRaises(SystemExit):
+            self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\tmore\n")
+
     def test_a_creators_file_without_rows_or_absent_touches_nothing_even_old_creator_rows(self):
         self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
         before = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}

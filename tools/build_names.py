@@ -386,7 +386,8 @@ def _toneless(syl):
 
 
 def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip=frozenset()):
-    """sources：[(來源檔路徑, 標籤)]，依序 creator、store。每個檔：詞、讀音（音節以空白分隔）、備註；# 開頭與空行略過 → (names-add.tsv 的列, names-sources.tsv 的列, 被擋的列)，
+    """sources：[(來源檔路徑, 標籤)]，依序 creator、store。每個檔：詞、讀音（音節以空白分隔）、備註，可選第四欄「加分」（一個數字，加到這一列的分數；
+    維護者 2026-10-25：店名輸給沒人這樣講的組合時提高名單加分，見 names-stores.md §2）；# 開頭與空行略過 → (names-add.tsv 的列, names-sources.tsv 的列, 被擋的列)，
     列的順序是檔案順序（先 creator 檔再 store 檔）。每列：三欄；詞是 2–10 個漢字、字數在 scores 裡、不在 taken（基底、疊加層、名單其他列、詞包、前面的列）；
     讀音的音節數等於字數、每個音節都是基底裡那個字（chars）的讀音。不符就中止並指出行號；(詞, 讀音) 重複也中止；同一個詞可以有不同讀音的好幾列。
     被擋（印出、不中止）：詞在 skip（迷因詞包）；讀音等於名字層既有列（names_readings，讀音以 - 連接）的讀音；store 的讀音等於 creator 列的讀音（creator 已出貨）。
@@ -400,14 +401,20 @@ def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip
         cand = []
         for n, line in creator_lines(path):
             fields = line.split("\t")
-            ok = len(fields) == 3
+            ok = len(fields) in (3, 4)
+            boost = 0.0
+            if ok and len(fields) == 4:
+                try:
+                    boost = float(fields[3])
+                except ValueError:
+                    ok = False
             if ok:
-                w, reading, note = fields
+                w, reading, note = fields[:3]
                 syls = reading.split(" ")
                 ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and (w, reading) not in pairs and (w not in taken or any(p[0] == w for p in pairs)) \
                     and all((c, s) in chars or (s.endswith("˙") and (c, _toneless(s)) in toneless) for c, s in zip(w, syls))     # 輕聲：基底有這個字的同音節（任何聲調）就算
             if not ok:
-                raise SystemExit(f"{path}:{n}: bad {tag} row (need word, reading, note; Han word not already in a lexicon layer, same word only with a different reading; one syllable that is a reading of its character): {line!r}")
+                raise SystemExit(f"{path}:{n}: bad {tag} row (need word, reading, note[, boost]; Han word not already in a lexicon layer, same word only with a different reading; one syllable that is a reading of its character): {line!r}")
             pairs.add((w, reading))
             key = "-".join(syls)
             if w in skip:
@@ -417,13 +424,13 @@ def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip
             elif tag == STORE and key in creator_readings:
                 blocked.append((w, reading, creator_readings[key], "same reading as a creator row"))
             else:
-                cand.append((w, key, syls, note))
+                cand.append((w, key, syls, note, boost))
         count = {}
-        for w, key, syls, note in cand:
+        for w, key, syls, note, boost in cand:
             rank = count[key] = count.get(key, -1) + 1
             if tag == CREATOR and rank == 0:
                 creator_readings[key] = w
-            rows.append((tag, w, syls, note, round(scores[len(w)] - rank * SLANG_BEHIND, 8), w not in taken))
+            rows.append((tag, w, syls, note, round(scores[len(w)] + boost - rank * SLANG_BEHIND, 8), w not in taken))
             taken.add(w)
     add, srcs = [], []
     for tag, w, syls, note, score, first in rows:
