@@ -70,6 +70,7 @@ python3 tools/readings.py --report-inverted [--unihan <Unihan_Readings.txt>]    
 python3 tools/readings.py --apply-inverted data/lexicon/mcbpmf-data.txt --unihan <Unihan_Readings.txt>   # 就地套用；要在重建疊加層、變調列之前（它們讀這份基底）
 # readings.py 的規則 3b 預設關（其他建置工具的輸出不變）；要用就加 --rule-3b（--unihan 才有作用），build_overlay 的 --moedict-readings 路徑自己開
 python3 tools/build_overlay.py --moedict-readings --reading-report <report.tsv>   # 讀音：萌典第一讀音優先，其次 readings.py；列出讀音改變的詞
+python3 experiments/sj-lm-7/wiki_text.py <維基文字> --articles 200000 --procs <N> --no-trad-tw-phrases   # <維基文字>：和計數同一批篇、同一條管線的漢字段，一行一段
 python3 tools/build_overlay.py --moedict-readings --moedict-supplement <維基文字> <口語檔>… --jobs <N>   # 加「萌典補詞」來源
 ```
 
