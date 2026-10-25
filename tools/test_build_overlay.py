@@ -135,7 +135,9 @@ class BuildFlags(unittest.TestCase):
         corpus = os.path.join(d, "c.txt")
         open(corpus, "w", encoding="utf-8").write(f"{self.sup}和{self.sup}\n{self.other}\n" + "".join(f"{w}和{w}\n" for w in extra_corpus))
         moe = {self.title: tuple(reversed(self.base.to_syllables(self.title))), self.sup: tuple(self.base.to_syllables(self.sup)), **(extra_moe or {})}
-        stub = mock.Mock(); stub.read = lambda w: (list(self.base.to_syllables(w)), ["unsure"] if w in self.check else [], ["gap"] if w in self.gap else [])
+        unsure = lambda w: w in self.check or w in self.gap                       # an unsure word gets a different tentative reading (reversed)
+        stub = mock.Mock(); stub.read = lambda w: ((list(reversed(self.base.to_syllables(w))) if unsure(w) else list(self.base.to_syllables(w))),
+                                                   ["unsure"] if w in self.check else [], ["gap"] if w in self.gap else [])
         patches = [mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), mock.patch.object(bc, "load_conv", lambda: None),
                    mock.patch.object(B, "moe_titles", lambda: set()), mock.patch.object(readings, "moe_primary", lambda: moe),
                    mock.patch.object(readings, "make_reader", lambda lex, **kw: stub), mock.patch.object(bc, "TRAD_SIMP_ONLY", set(simp))]
@@ -152,6 +154,7 @@ class BuildFlags(unittest.TestCase):
         want = B.normalize(self.title, self.base.to_syllables(self.title))
         self.assertEqual(self.row(rows, self.title), [f"{'-'.join(want)}\t{self.title}\t{B.SCORE[2]!r}\twikt\n"])
         self.assertFalse([r for r in rows if r.endswith("萌典補詞\n")])
+        self.assertTrue(self.row(rows, self.other))                              # a word outside Moedict is written too
         tags = [r.rstrip("\n").split("\t")[3] for r in rows]
         tail = tags[tags.index("manual"):]
         self.assertEqual(tail, sorted(tail, key=("manual", "slang").index))   # the tail is the manual rows, then the slang rows (docs/contracts/net-slang.md)
