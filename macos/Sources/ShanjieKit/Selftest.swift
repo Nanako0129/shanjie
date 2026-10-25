@@ -29,8 +29,8 @@ public enum Selftest {
     static let itWord = "圖像生成"
     /// The bundled meme pack (meme-pack contract 3.2): the word is not fixed here. The selftest reads the first data row of the bundled
     /// `packs/meme-add.tsv` (comment and blank lines skipped) and requires the standard-layout keys of its reading to commit exactly that word
-    /// (chat profile, a fresh composition), so a rebuilt pack does not break it; a missing, empty or unreadable file fails too. The data
-    /// PR's first row therefore has to be a word the pack really makes the sentence decode type (the meme-pack check set's rule).
+    /// (chat profile, a fresh composition), so a rebuilt pack does not break it; a missing, empty or unreadable file fails too. The pack's
+    /// first row therefore has to be a word the pack really makes the sentence decode type (the meme-pack check set's rule).
     /// The Dachen keys of the 41 symbols (37 zhuyin and 4 tones), the standard layout of s3a section 1; a space is the first tone.
     static let standardKeys: [Character: Character] = {
         let pairs = zip("ㄅㄉˇˋㄓˊ˙ㄚㄞㄢㄦㄆㄊㄍㄐㄔㄗㄧㄛㄟㄣㄇㄋㄎㄑㄕㄘㄨㄜㄠㄤㄈㄌㄏㄒㄖㄙㄩㄝㄡㄥ", "1234567890-qwertyuiopasdfghjkl;zxcvbnm,./")

@@ -72,16 +72,17 @@ class Candidates(unittest.TestCase):
         cands, st, _ = self.read("三小４\n\uff2a\uff4f\uff2a\uff4f立\n三小4\n正常詞\n")
         self.assertEqual((cands, st["dropped_ascii"]), ({"正常詞": {"ptt"}}, 3))
 
-    def test_provenance_is_keyed_by_the_path_given_so_same_named_files_do_not_overwrite(self):
+    def test_provenance_is_keyed_by_file_name_and_same_named_files_stop(self):
         with tempfile.TemporaryDirectory() as d:
             paths = []
             for sub, text in (("a", "有人氣\n"), ("b", "好笑啦\n")):
                 os.makedirs(os.path.join(d, sub))
                 paths.append(os.path.join(d, sub, "cand.tsv"))
                 put(paths[-1], text)
-            cands, _, files = T.read_candidates(paths)
-        self.assertEqual(files, {paths[0]: IT.sha256_text("有人氣\n"), paths[1]: IT.sha256_text("好笑啦\n")})
-        self.assertEqual(cands, {"有人氣": {"cand"}, "好笑啦": {"cand"}})
+            _, _, files = T.read_candidates(paths[:1])
+            with self.assertRaises(SystemExit):      # two files named cand.tsv would share one key
+                T.read_candidates(paths)
+        self.assertEqual(files, {"cand.tsv": IT.sha256_text("有人氣\n")})      # no directory: meme.json is tracked and ships
 
     def test_a_string_with_two_sources_keeps_both(self):
         with tempfile.TemporaryDirectory() as d:
@@ -303,7 +304,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(m["candidate_stats"]["dropped_ascii"], 1)
         self.assertEqual(m["files"]["meme-add.tsv"]["sha256"], B.sha256_file(os.path.join(self.out, "meme-add.tsv")))
         self.assertEqual(m["sources"], {"統神": 1, "ptt": 2})
-        self.assertEqual(m["candidate_files"], {self.cand: B.sha256_file(self.cand)})
+        self.assertEqual(m["candidate_files"], {os.path.basename(self.cand): B.sha256_file(self.cand)})   # no directory: the manifest ships
 
     def test_the_x_article_count_is_that_of_the_x_string_not_the_row(self):
         # 拼出詞甲 is counted as a string in the second file: 39 articles (< 40) keeps 我就爛, 40 drops it. The row 我就爛 itself has 40 in the first file.

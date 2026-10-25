@@ -152,7 +152,7 @@ fn the_it_pack_has_its_own_bit_and_file() {
 }
 
 /// meme-pack contract section 3.1: the meme pack is bit 3 (`PACK_MEME`) and reads `meme-add.tsv`, appended after the IT pack. The row is a fixture
-/// (the shipped data is a separate PR; the score is the fixture's, not a shipped one); 我就爛 is a joke spelling the shipping decoder does not type as such (the test asserts that first).
+/// (not a shipped row; the score is the fixture's); 我就爛 is a joke spelling the shipping decoder does not type as such (the test asserts that first).
 /// Off (the bit clear, or no file) is acg-pack A.2: every Output of the sequences below is byte-identical to the engine without the pack.
 const MEME_PACK: &str = "ㄨㄛˇ-ㄐㄧㄡˋ-ㄌㄢˋ\t我就爛\t-3.0\tmeme\n";
 

@@ -279,11 +279,11 @@ packs/it-add.tsv: the optional IT and AI word pack (words and readings only, no 
   Module:CGroup/Electronics and the titles of articles in its AI categories (Wikipedia contributors, CC BY-SA 4.0);
   (3) a hand-written list by the project (CC0).
 packs/meme-add.tsv: the optional meme and streamer-phrase word pack (words and readings only, no definitions). The source of every word is
-  listed in packs/meme-sources.tsv: titles of the 迷因 Wiki (Fandom, zh-tw) and the 鄉民百科 (PTT, Fandom); terms mined from PTT posts; a
-  list of streamer and YouTuber lines compiled with Muse (Meta); and headwords of the 街頭字典 (memes.tw), taken only as strings (no definitions
-  or text) and only as candidates. A word is included only when it shows up in PTT posts (usage counts) and nothing but the string is kept.
-  The wiki titles are CC BY-SA 3.0 and are used under CC BY-SA 4.0 by the 3.0 later-version clause.
-  Attribution: 迷因 Wiki (Fandom) contributors, PTT 鄉民百科 contributors.
+  listed in packs/meme-sources.tsv: titles of the 鄉民百科 (PTT, Fandom); terms mined from PTT posts; and headwords of the 街頭字典
+  (memes.tw), taken only as strings (no definitions or text) and only as candidates. A word is included only when it shows up in PTT posts
+  (usage counts) and nothing but the string is kept. The wiki titles are CC BY-SA 3.0 and are used under CC BY-SA 4.0 by the 3.0
+  later-version clause.
+  Attribution: PTT 鄉民百科 contributors.
 names-add.tsv: common proper nouns (brands, shops, companies, schools), always
   on. Built from three sources; the source of every word is listed in
   data/lexicon/names-sources.tsv of the project repository. Attribution, one

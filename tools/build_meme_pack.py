@@ -56,12 +56,14 @@ def lines_text(items):
 # ---------------------------------------------------------------- 輸入
 
 def read_candidates(paths):
-    """候選檔 → ({候選: {來源}}, 統計, {給的路徑: 檔案雜湊})。整串含英數的不收（NFKC 之後比，全形英數也算）；其餘照標點切段，段落要 2–10 個漢字。
-    來源欄省略時用檔名去掉副檔名；雜湊記在給的路徑下，不同資料夾的同名檔不會互相蓋掉。"""
+    """候選檔 → ({候選: {來源}}, 統計, {檔名: 檔案雜湊})。整串含英數的不收（NFKC 之後比，全形英數也算）；其餘照標點切段，段落要 2–10 個漢字。
+    來源欄省略時用檔名去掉副檔名。雜湊只記檔名（meme.json 進版控、也隨 App 內附，不放私人路徑）；兩個候選檔同名就停，免得互相蓋掉。"""
     cands, files = collections.defaultdict(set), {}
     st = collections.Counter()
     for p in paths:
-        files[p] = B.sha256_file(p)
+        if os.path.basename(p) in files:
+            raise SystemExit(f"two candidate files are named {os.path.basename(p)}: rename one (meme.json keys them by file name)")
+        files[os.path.basename(p)] = B.sha256_file(p)
         default = os.path.splitext(os.path.basename(p))[0]
         with open(p, encoding="utf-8") as f:
             for l in f:

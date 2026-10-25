@@ -430,7 +430,7 @@ public final class Shell {
         Shell.packs.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
     }
     /// The one table of word packs in the settings order: the core's bit, the file in `Resources/packs`, the name in the menu line. A new pack is one row here
-    /// (plus its switch); `build()` (which files exist) and `loadedPackTitles` both read it.
+    /// plus its switch (store, settings field and setter) and a term in `packMask`; `build()` (which files exist) and `loadedPackTitles` read it.
     static let packs: [(bit: UInt32, file: String, title: String)] = [
         (UInt32(SHANJIE_PACK_ACG), "acg-add.tsv", MenuEntry.Text.acgPack),
         (UInt32(SHANJIE_PACK_IT), "it-add.tsv", MenuEntry.Text.itPack),
