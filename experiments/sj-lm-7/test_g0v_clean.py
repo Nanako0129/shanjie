@@ -36,7 +36,8 @@ class Messages(unittest.TestCase):
         self.assertEqual(G.plain("&gt; 別人的話\n<@U123> 你好 :smile: 看<https://x.tw|這篇>&amp;那篇"), " 你好  看這篇&那篇")
         self.assertEqual(G.plain("網址 <https://x.tw>"), "網址 https://x.tw")
         self.assertEqual(G.plain("我說\n> 新聞原文\n &gt; 另一段引文\n好"), "我說\n好")
-        self.assertEqual(G.plain("交通工具*肇*事 ~喊話~ _XREX_ :smile_cat:"), "交通工具肇事 喊話 XREX ")
+        self.assertEqual(G.plain("交通工具*肇*事 公休呀~~~這樣 _XREX_ :smile_cat:"), "交通工具肇事 公休呀~~~這樣 _XREX_ ")
+        self.assertEqual(G.plain("我寫的\n```貼來的\n客服回覆```\n也是我寫的"), "我寫的\n\n\n也是我寫的")
         self.assertEqual(G.plain("全食是 7:11-7:25，記者會 16:15:30 :100:"), "全食是 7:11-7:25，記者會 16:15:30 ")
 
 
