@@ -116,6 +116,10 @@ class Reject(unittest.TestCase):
         for s in ("萬事", "万事", "會緊張么", "干了三年"):
             self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
+        for s in ("（笑）", "(門鈴響)", "【旁白】", "[音樂]", "阿明︰", "他說「走吧", "走吧」", "喺邊度", "差一黑占"):
+            self.assertEqual(self.why(KEEP + s), "residue", s)
+        for s in ("他說「走吧」", "他說「走」「停」", "一點點", "黑色的"):
+            self.assertIsNone(self.why(KEEP + s), s)
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
         self.assertEqual(self.why(KEEP + "軟件"), "invade")                           # a --mainland-terms term joins the invade list
         self.assertIsNone(self.why(KEEP + "好"))                                       # a single-character invade term is not a term
@@ -128,6 +132,8 @@ class Reject(unittest.TestCase):
         self.assertEqual(self.why(KEEP + SIMP + "視頻"), "simplified")
         self.assertEqual(self.why(KEEP + SIMP + "什么"), "simplified")
         self.assertEqual(self.why(KEEP + "什么視頻"), "mainland")
+        self.assertEqual(self.why(KEEP + "什么（笑）"), "mainland")
+        self.assertEqual(self.why(KEEP + "（笑）視頻"), "residue")
 
     def test_triggers_are_closed_set_labels_not_text(self):
         t = lambda step, s: C.trigger(step, s, self.ctx)
@@ -142,6 +148,9 @@ class Reject(unittest.TestCase):
         self.assertEqual(t("simplified", KEEP + SIMP), SIMP)
         self.assertEqual(t("mainland", KEEP + "我在包里"), "包里")             # a member of MAINLAND, a closed set
         self.assertEqual(t("invade", KEEP + "視頻"), "視頻")
+        self.assertEqual(t("residue", KEEP + "（笑）"), "bracket")
+        self.assertEqual(t("residue", KEEP + "他說「走吧"), "unpaired 「」")
+        self.assertEqual(t("residue", KEEP + "喺邊度"), "cantonese")
 
 
 class ShippedLexicon(unittest.TestCase):

@@ -63,7 +63,7 @@ MIN_KEPT_HAN = 4_000_000   # contract 2.7: subtitles >= 4,000,000 Han characters
 TOP = 20
 REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chatjudge2")   # the sets the guard must cover
 CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
-STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "invade", "dedupe", "guard"]
+STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "residue", "invade", "dedupe", "guard"]
 # Contract 2.7 (maintainer 2026-10-25): the first 300-sentence proofread (seed 20261025) had 20 residues (6.7%): 18 machine-converted lines
 # with these shared characters (么 里 后 于 愿) in their mainland use, a lyric marker and an English word. Phrases, not characters (except 万 and a lone 么, added after the second proofread), so 公里, 皇后,
 # 姓于 stay; the lexicon decides word boundaries (mainland_hit), and 能干 and 下里 are left out (不能干涉, 下里巴人). Known limit (code review
@@ -78,6 +78,11 @@ SHARED = frozenset("么里后于愿干准系范斗松采伙万")   # the shared 
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 MARKS = re.compile("[*#♪♫§]")                  # subtitle marks (lyrics, notes) seen in the second proofread; never part of the text
 LONE_LETTER = re.compile(r"(?<![A-Za-z])[a-z](?![A-Za-z])")   # lowercase: OCR noise (拼寫n); uppercase stays (T恤, X光, B型, 維他命C)
+# Contract 2.7 (maintainer 2026-10-25): the fifth proofread (seeds 20261030, 20261031) left 15/600; these five rules cover 7 of them and drop
+# 0.43% of the reviewed subtitles: a bracket anywhere (sound notes, translator notes), a "︰" speaker label, 「 and 」 not paired, Cantonese-only
+# characters, and the OCR split 黑占 (點).
+RESIDUE = (("bracket", re.compile(r"[()（）\[\]【】]")), ("speaker label", re.compile("︰")),
+           ("cantonese", re.compile("[喺搵咗嘅冇佢啲嚟咁乜嘢唔哋嗰]")), ("ocr 黑占", re.compile("黑占")))
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
 
@@ -144,6 +149,13 @@ def mainland_hit(s, ctx):
     return None
 
 
+def residue_hit(s):
+    """-> the RESIDUE rule (or "unpaired 「」") that drops s, or None."""
+    if s.count("「") != s.count("」"):
+        return "unpaired 「」"
+    return next((name for name, rx in RESIDUE if rx.search(s)), None)
+
+
 def decile(x):
     return f"{int(x * 10) / 10:.1f}"
 
@@ -179,6 +191,8 @@ def trigger(step, s, ctx):
         return next(c for c in s if c in ctx.simp)
     if step == "mainland":
         return mainland_hit(s, ctx)
+    if step == "residue":
+        return residue_hit(s)
     if step == "invade":
         return next(ctx.invade_matcher.find(s))
     return step
@@ -200,6 +214,8 @@ def reject(s, ctx):
         return "simplified"
     if mainland_hit(s, ctx):
         return "mainland"
+    if residue_hit(s):
+        return "residue"
     if ctx.invade_matcher.any(s):
         return "invade"
     return None
