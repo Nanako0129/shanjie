@@ -567,10 +567,21 @@ class AppendCreators(unittest.TestCase):
         self.manifest = {"files": {}, "rows": 2, "words": 2, "sources": {"category": 1, "manual": 1}, "version": "nsiabc-moe115-00000000", "dropped": {"a": 1}}
         put(os.path.join(self.d, "names.json"), json.dumps(self.manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
         self.creators = os.path.join(self.d, "names-creators.tsv")
+        self.stores = os.path.join(self.d, "names-stores.tsv")
+        self.meme = os.path.join(self.d, "meme.tsv")
 
-    def run_append(self, text):
-        put(self.creators, text)
-        return B.append_creators(self.d, self.creators, os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES)
+    def run_append(self, text, stores=None):
+        """text／stores 是 None 就沒有那個來源檔（刪掉舊的）。"""
+        for path, t in ((self.creators, text), (self.stores, stores)):
+            if t is None:
+                if os.path.exists(path):
+                    os.remove(path)
+            else:
+                put(path, t)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            n = B.append_creators(self.d, self.creators, os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES, stores=self.stores, meme_add=self.meme)
+        self.err = err.getvalue()
+        return n
 
     def rows(self):
         return [l.split("\t") for l in get(os.path.join(self.d, "names-add.tsv")).decode().splitlines()]
@@ -645,16 +656,94 @@ class AppendCreators(unittest.TestCase):
                 self.assertRegex(str(cm.exception), r"names-creators\.tsv:[23]:")
                 self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
 
-    def test_a_creator_reading_equal_to_a_names_layer_row_is_an_error_listing_every_collision(self):
+    def test_a_creator_reading_equal_to_a_names_layer_row_is_blocked_and_printed_not_fatal(self):
+        n = self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n巴巴\tㄅㄚ ㄅㄚ\tb\n")
+        self.assertEqual((n, [r[1] for r in self.rows()]), (1, ["酷澎", "爸爸", "國動"]))
+        self.assertIn("blocked (string, reading, rival, reason): 巴巴\tㄅㄚ ㄅㄚ\t爸爸\tsame reading as a names-layer row", self.err)
+
+    def test_stores_follow_creators_and_the_non_appended_rows_stay_byte_identical(self):
+        n = self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 5\n", "動國\tㄉㄨㄥˋ ㄍㄨㄛˊ\tPTT 9\n")
+        raw = get(os.path.join(self.d, "names-add.tsv")).decode()
+        self.assertEqual((n, raw[len(self.ADD):]), (2, "ㄍㄨㄟˇ-ㄍㄨㄟˇ\t鬼鬼\t-5.0\tcreator\nㄉㄨㄥˋ-ㄍㄨㄛˊ\t動國\t-5.0\tstore\n"))
+        self.assertEqual(get(os.path.join(self.d, "names-sources.tsv")).decode()[len(self.SRCS):], "鬼鬼\tcreator\tPTT 5\t\t\n動國\tstore\tPTT 9\t\t\n")
+        m = json.loads(get(os.path.join(self.d, "names.json")))
+        self.assertEqual((m["words"], m["rows"], m["sources"]["creator"], m["sources"]["store"]), (4, 4, 1, 1))
+        self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 5\n", "動國\tㄉㄨㄥˋ ㄍㄨㄛˊ\tPTT 9\n")
+        self.assertEqual(raw, get(os.path.join(self.d, "names-add.tsv")).decode(), "a rerun replaces both tags instead of duplicating")
+        kept = "".join(l for l in B._lines(raw) if l.split("\t")[3].rstrip("\n") not in ("creator", "store"))
+        self.assertEqual(kept, self.ADD)
+
+    def test_only_a_store_file_or_only_a_creator_file(self):
+        self.assertEqual(self.run_append(None, "動國\tㄉㄨㄥˋ ㄍㄨㄛˊ\tPTT 9\n"), 1)
+        self.assertEqual([r[3] for r in self.rows()], ["names", "names", "store"])
+        m = json.loads(get(os.path.join(self.d, "names.json")))
+        self.assertEqual(m["sources"], {"category": 1, "manual": 1, "store": 1})
+        self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 5\n", None)
+        self.assertEqual([r[3] for r in self.rows()], ["names", "names", "creator"], "the missing store file produces no store rows")
+        self.assertEqual(json.loads(get(os.path.join(self.d, "names.json")))["sources"], {"category": 1, "manual": 1, "creator": 1})
+
+    def test_same_reading_combinations(self):
+        # 1. new creator vs a names-layer row: blocked (爸爸 is names)
+        # 2. new store vs a names-layer row: blocked
+        # 3. store vs a creator: blocked (the creator is shipped)
+        # 4. creator vs creator: the earlier row (the file is sorted by PTT articles) keeps the place, the other is demoted
+        # 5. store vs store: same
+        # 6. a creator and a store with the same reading never both rank: the creator keeps the first place
+        self.run_append("八巴\tㄅㄚ ㄅㄚ\tPTT 1\n詭詭\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 20\n鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 10\n",
+                        "巴巴\tㄅㄚ ㄅㄚ\tPTT 50\n鬼詭\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 99\n詭神\tㄍㄨㄟˇ ㄕㄣˊ\tPTT 50\n鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tPTT 5\n")
+        got = {r[1]: (r[3], float(r[2])) for r in self.rows()[2:]}
+        self.assertEqual(got, {"鬼鬼": ("creator", -5.0 - B.SLANG_BEHIND), "詭詭": ("creator", -5.0), "詭神": ("store", -5.0), "鬼神": ("store", -5.0 - B.SLANG_BEHIND)})
+        self.assertEqual(self.err.count("blocked"), 3)
+        for w, rival, why in (("八巴", "爸爸", "names-layer"), ("巴巴", "爸爸", "names-layer"), ("鬼詭", "詭詭", "creator")):
+            self.assertRegex(self.err, rf"{w}\t[^\t]+\t{rival}\tsame reading as a {why}")
+        # the rival of the blocked store is the creator that holds the reading (詭詭, the first row)
+        self.assertEqual([r[1] for r in self.rows()[:2]], ["酷澎", "爸爸"])
+
+    def test_a_string_in_the_meme_pack_is_not_taken_and_the_rest_still_is(self):
+        put(self.meme, "ㄍㄨㄟˇ-ㄕㄣˊ\t鬼神\t-5.0\tmeme\n")
+        n = self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 5\n", "鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tPTT 5\n動國\tㄉㄨㄥˋ ㄍㄨㄛˊ\tPTT 9\n")
+        self.assertEqual((n, [r[1] for r in self.rows()[2:]]), (2, ["鬼鬼", "動國"]))
+        self.assertIn("鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tmeme-add.tsv\talready in the meme pack", self.err)
+        taken = B.known_words(self.d, os.path.join(self.d, "acg.tsv"), self.meme)
+        self.assertIn("鬼神", taken)
+
+    def test_the_new_rows_share_no_string_with_any_layer(self):
+        put(self.meme, "ㄉㄨㄥˋ-ㄍㄨㄛˊ\t動國\t-5.0\tmeme\n")
+        self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 5\n", "詭詭\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 1\n詭神\tㄍㄨㄟˇ ㄕㄣˊ\tPTT 1\n動國\tㄉㄨㄥˋ ㄍㄨㄛˊ\tPTT 9\n")
+        added = {r[1] for r in self.rows() if r[3] in ("creator", "store")}
+        others = B.known_words(self.d, os.path.join(self.d, "acg.tsv"), self.meme) | B.bo.pack_words(os.path.join(self.d, "it.tsv")) | {r[1] for r in self.rows() if r[3] == "names"}
+        self.assertEqual((added & others, len(added)), (set(), 2), "鬼鬼 and 詭神 in; the meme string is out; 詭詭 is behind the creator's reading")
+
+    def test_a_bad_store_row_stops_the_run_with_its_path_and_line(self):
         before = {n: get(os.path.join(self.d, n)) for n in ("names-add.tsv", "names-sources.tsv", "names.json")}
         with self.assertRaises(SystemExit) as cm:
-            self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n巴巴\tㄅㄚ ㄅㄚ\tb\n")
-        self.assertIn("巴巴", str(cm.exception))
+            self.run_append("鬼鬼\tㄍㄨㄟˇ ㄍㄨㄟˇ\tPTT 5\n", "# h\n酷澎\tㄎㄨˋ ㄆㄥˊ\tPTT 1\n")
+        self.assertRegex(str(cm.exception), r"names-stores\.tsv:2: bad store row")
         self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
 
     def test_crlf_creator_files_are_read_like_lf_ones(self):
         self.assertEqual(self.run_append("# h\r\n國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\tPTT 1\r\n"), 1)
         self.assertEqual(get(os.path.join(self.d, "names-sources.tsv")).decode()[len(self.SRCS):], "國動\tcreator\tPTT 1\t\t\n")
+
+    def test_a_fourth_column_adds_to_the_row_score(self):
+        self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
+        plain = [l for l in get(os.path.join(self.d, "names-add.tsv")).decode().splitlines() if l.endswith("\tstore")]
+        self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\t1.0\n")
+        boosted = [l for l in get(os.path.join(self.d, "names-add.tsv")).decode().splitlines() if l.endswith("\tstore")]
+        self.assertEqual([round(float(b.split("\t")[2]) - float(p.split("\t")[2]), 6) for p, b in zip(plain, boosted)], [1.0] * len(plain))
+        with self.assertRaises(SystemExit):
+            self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\tmore\n")
+        for bad in ("nan", "inf", "-0.5"):                                      # finite and >= 0
+            with self.assertRaises(SystemExit, msg=bad):
+                self.run_append("", f"國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\t{bad}\n")
+        with self.assertRaises(SystemExit):                                     # a boost behind a same-reading row would tie or beat it
+            self.run_append("", "詭神\tㄍㄨㄟˇ ㄕㄣˊ\ta\n鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tb\t0.5\n")
+        self.run_append("", "詭神\tㄍㄨㄟˇ ㄕㄣˊ\ta\t0.5\n鬼神\tㄍㄨㄟˇ ㄕㄣˊ\tb\n")       # on the first row it is fine
+
+    def test_a_store_cannot_reuse_a_creator_word_under_another_reading(self):
+        with self.assertRaises(SystemExit):
+            self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n", "國動\tㄍㄨㄛˊ ㄉㄨㄥ˙\tb\n")   # a valid reading alone (the neutral tone)
+        self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥ˙\tb\n")                               # the same store row passes without the creator
 
     def test_a_creators_file_without_rows_or_absent_touches_nothing_even_old_creator_rows(self):
         self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
@@ -662,7 +751,8 @@ class AppendCreators(unittest.TestCase):
         for text in ("", "# nothing left\n\n"):
             self.assertEqual(self.run_append(text), 0)
             self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
-        B.append_creators(self.d, os.path.join(self.d, "absent.tsv"), os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES)
+        B.append_creators(self.d, os.path.join(self.d, "absent.tsv"), os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES,
+                          stores=os.path.join(self.d, "absent-stores.tsv"))        # not the repository's names-stores.tsv
         self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
 
     def test_on_copies_of_the_committed_files_an_absent_or_empty_creators_file_changes_nothing(self):
@@ -675,28 +765,31 @@ class AppendCreators(unittest.TestCase):
         self.assertEqual(before, {n: get(os.path.join(B.LEX, n)) for n in names})
         for creators in (os.path.join(d, "absent.tsv"), os.path.join(d, "empty.tsv")):
             put(os.path.join(d, "empty.tsv"), "")
-            B.append_creators(d, creators, B.ACG_ADD)
+            B.append_creators(d, creators, B.ACG_ADD, stores=os.path.join(d, "absent-stores.tsv"))   # both sources absent or empty
             self.assertEqual(before, {n: get(os.path.join(d, n)) for n in names}, creators)
         self.assertEqual(hashlib.sha256(before["names-add.tsv"]).hexdigest(), json.loads(before["names.json"])["files"]["names-add.tsv"]["sha256"])
         with open(os.path.join(B.LEX, "names-add.tsv"), encoding="utf-8", newline="") as f:
-            kept = "".join(l for l in B._lines(f.read()) if l.split("\t")[3].rstrip("\n") != "creator")
-        self.assertEqual(hashlib.sha256(kept.encode()).hexdigest(), PRE_APPEND_NAMES_ADD_SHA256, "the non-creator rows are the pre-append file, byte for byte")
+            kept = "".join(l for l in B._lines(f.read()) if l.split("\t")[3].rstrip("\n") not in ("creator", "store"))
+        self.assertEqual(hashlib.sha256(kept.encode()).hexdigest(), PRE_APPEND_NAMES_ADD_SHA256, "the rows other than creator and store are the pre-append file, byte for byte")
         if os.path.exists(B.CREATORS):      # once the real file exists, the committed names-add.tsv must carry exactly its words, creator rows last
             tags = [l.split("\t")[3].rstrip("\n") for l in get(os.path.join(B.LEX, "names-add.tsv")).decode().splitlines()]
-            self.assertEqual(tags, sorted(tags, key=("names", "creator").index))
+            self.assertEqual(tags, sorted(tags, key=B.TAGS.index))
 
 
 class MainRebuild(unittest.TestCase):
     """A full rebuild is rebuild + append: the creator rows must not vanish."""
 
-    def run_main(self, creators_text, out_is_lex=True):
+    def run_main(self, creators_text, out_is_lex=True, stores_text=None):
         d = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, d, True)
         creators = os.path.join(d, "names-creators.tsv")
         if creators_text is not None:
             put(creators, creators_text)
+        stores = os.path.join(d, "names-stores.tsv")
+        if stores_text is not None:
+            put(stores, stores_text)
         argv = ["build_names.py", "--nsi-commit", "a" * 40, "--out", d, "--report", d]
-        with mock.patch.object(B, "LEX", d if out_is_lex else os.path.join(d, "lexicon")), mock.patch.object(B, "CREATORS", creators), mock.patch.object(B, "NamesApi"), mock.patch.object(B.urllib.request, "install_opener"), \
+        with mock.patch.object(B, "LEX", d if out_is_lex else os.path.join(d, "lexicon")), mock.patch.object(B, "CREATORS", creators), mock.patch.object(B, "STORES", stores), mock.patch.object(B, "NamesApi"), mock.patch.object(B.urllib.request, "install_opener"), \
                 mock.patch.object(B, "build", return_value=({}, {}, [], [], [], [])), mock.patch.object(B, "write_all"), \
                 mock.patch.object(B, "append_creators", return_value=0) as app, mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
             B.main()
@@ -707,6 +800,7 @@ class MainRebuild(unittest.TestCase):
         self.run_main("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n", out_is_lex=False).assert_not_called()   # another --out: a NOTE, no append
         for text in (None, "", "# only a header\n"):
             self.run_main(text).assert_not_called()
+        self.run_main(None, stores_text="動國\tㄉㄨㄥˋ ㄍㄨㄛˊ\ta\n").assert_called_once()     # a store file alone is enough
 
 
 class TwTitle(unittest.TestCase):
