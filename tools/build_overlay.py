@@ -428,7 +428,8 @@ def names_words(path=NAMES):
 def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
     """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。每列都要：三欄；詞是純漢字、字數在 scores 裡（2 字以上）、
     不在 taken（基底、疊加層、詞包）；讀音的音節數等於字數，每個音節都是基底有的音節。產生的列（含 overlay_rows 自動加的變調列）
-    同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS。"""
+    同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS＋可選的第四欄「加分」（一個數字；維護者 2026-10-25：
+    網路用語輸給沒人這樣講的組合時加分，見 net-slang-2.md §3）。"""
     rows, seen = [], set()
     with open(path, encoding="utf-8-sig") as f:
         lines = f.read().splitlines()
@@ -436,14 +437,20 @@ def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
         if line.startswith("#") or not line.strip():
             continue
         fields = line.split("\t")
-        ok = len(fields) == 3
+        ok = len(fields) in (3, 4)
+        boost = 0.0
+        if ok and len(fields) == 4:
+            try:
+                boost = float(fields[3])
+            except ValueError:
+                ok = False
         if ok:
-            w, reading, _note = fields
+            w, reading = fields[:2]
             syls = reading.split(" ")
             ok = bool(MANUAL_WORD.match(w)) and len(w) in scores and len(syls) == len(w) and all(s in syllables for s in syls) and w not in taken
         if not ok:
             raise SystemExit(f"{path}:{n}: bad manual row")
-        for r in overlay_rows(w, syls, round(scores[len(w)] + MANUAL_BONUS, 8), tag):
+        for r in overlay_rows(w, syls, round(scores[len(w)] + MANUAL_BONUS + boost, 8), tag):
             key = tuple(r.split("\t")[:2])
             if key in seen:
                 raise SystemExit(f"{path}:{n}: {w!r} repeats a reading already listed (sandhi rows count)")

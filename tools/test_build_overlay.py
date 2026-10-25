@@ -28,6 +28,11 @@ class ManualRows(unittest.TestCase):
         self.assertEqual(rows, [f"ㄐㄧㄚˇ-ㄧˇ-ㄅㄧㄥˇ\t甲乙丙\t{round(SCORES[3] + B.MANUAL_BONUS, 8)!r}\tmanual\n",
                                 f"ㄐㄧㄚˇ-ㄧˇ-ㄅㄧㄥˇ-ㄉㄧㄥ-ㄨˋ\t甲乙丙丁戊\t{round(SCORES[5] + B.MANUAL_BONUS, 8)!r}\tmanual\n"])
 
+    def test_a_fourth_column_adds_to_the_score(self):
+        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\t1.5\n"), [f"ㄐㄧㄚˇ-ㄧˇ\t甲乙\t{round(SCORES[2] + B.MANUAL_BONUS + 1.5, 8)!r}\tmanual\n"])
+        with self.assertRaises(SystemExit):
+            manual("甲乙\tㄐㄧㄚˇ ㄧˇ\tx\tmore\n")
+
     def test_a_bom_is_not_part_of_the_first_line(self):
         self.assertEqual(len(manual("# comment\n甲乙\tㄐㄧㄚˇ ㄧˇ\tx\n", encoding="utf-8-sig")), 1)
 
