@@ -4,6 +4,7 @@
 //!
 //!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--inline]
 //!   english-sim --words FILE --recall
+//!   either of them with --key-order (docs/contracts/zhen-keyorder.md section 4)
 //!
 //! Output is one TSV line and no content text (R2). Typing mode:
 //!   rows_sha256  rows  syllables  keys  triggers  per_1000_mean  per_1000_max
@@ -19,6 +20,16 @@
 //!   words_sha256  words  opened  top1  overwrite0  overwrite1_leftover_valid  overwrite2plus_leftover_valid  leftover_invalid
 //! (`opened` and `top1`: the window opened / its first item is the word; the four classes partition the words, the last two
 //! open it, the first two never do; the tool stops if the engine and this recount disagree.)
+//!
+//! With `--key-order` the engine has the key-order switch on (`Engine::set_english_key_order`) and the output grows; without it the
+//! output is byte for byte the one described above. Typing mode: after the line above, one line per word of `TWO_LETTER`,
+//!   two  <word>  per_1000_mean  per_1000_max
+//! the same figure (per 1000 syllables of one seed, mean and max over the seeds) for the windows that opened for that word: the
+//! engine's shadow (`Engine::english_window_shadow`) at the moment the window is open after Space is that two-letter word. Recall mode
+//! prints only what the engine did, no recount (the four classes are the rules of the switch-off engine):
+//!   recall  words  n  opened  top1      (the list)
+//!   recall  two    n  opened  top1      (`TWO_LETTER`)
+//!   probe   <word> 0|1                   (ok ls cd mv cup npm: whether the window opened)
 //!
 //! With `--digits` (docs/contracts/digits.md A.4.2) the engine is `Engine::new` on data/lexicon (digits.tsv read) with the model
 //! (`--lm`, default data/lm/bigram.sjlm), and six columns follow (mean and max over the seeds, per 1000 syllables of one seed):
@@ -51,7 +62,7 @@
 //!   an overwrite; after three tries the run stops instead of looping).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
-use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, MAX_SYLLABLES};
+use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, MAX_SYLLABLES, TWO_LETTER};
 use core::eval::{parse_rows, row_syllables, sha256_hex, usable};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
@@ -112,6 +123,8 @@ struct Sim {
     engine: Engine,
     keys: u64,
     triggers: u64,
+    /// Windows opened at the Space that ends a syllable, by `TWO_LETTER` word (the engine's shadow was that word).
+    two: Vec<u64>,
     /// `--inline`: ask the engine for rule D after every key; `d_held` is whether it held after any key of this syllable.
     inline: bool,
     d_held: bool,
@@ -262,32 +275,40 @@ impl Sim {
         }
         match tone {
             Some(mark) => self.send(Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0)).map(|_| ()),
-            None => {
-                self.send(Key::new(KeyKind::Space))?;
-                if self.engine.english_open() {
-                    self.triggers += 1;
-                    self.send(Key::new(KeyKind::Esc))?;
-                    self.send(Key::new(KeyKind::Space))?;
-                }
-                Ok(())
-            }
+            None => self.space_end(),
         }
+    }
+
+    /// Space, which ends a syllable of tone 1; a window it opens is counted (and, for a `TWO_LETTER` word, by word), then Esc and Space.
+    fn space_end(&mut self) -> Result<(), String> {
+        self.send(Key::new(KeyKind::Space))?;
+        if self.engine.english_open() {
+            self.triggers += 1;
+            if let Some(i) = self.engine.english_window_shadow().and_then(|w| TWO_LETTER.iter().position(|t| *t == w)) {
+                self.two[i] += 1;
+            }
+            self.send(Key::new(KeyKind::Esc))?;
+            self.send(Key::new(KeyKind::Space))?;
+        }
+        Ok(())
     }
 }
 
 /// `--digits`: the whole engine as the shell builds it (the table is read from the data directory), with the model.
-fn engine_digits(root: &Path, lm: &Path, words: &Path) -> Result<Engine, String> {
+fn engine_digits(root: &Path, lm: &Path, words: &Path, key_order: bool) -> Result<Engine, String> {
     let mut e = Engine::new(&root.join("data/lexicon"), LAYOUT).map_err(|_| "cannot build the engine")?;
     e.load_lm(lm).map_err(|_| "cannot load the model")?;
     e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
     e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
+    e.set_english_key_order(key_order).map_err(|_| "cannot set the key-order switch".to_string())?;
     Ok(e)
 }
 
-fn engine_with(lex: &Arc<Lexicon>, words: &Path) -> Result<Engine, String> {
+fn engine_with(lex: &Arc<Lexicon>, words: &Path, key_order: bool) -> Result<Engine, String> {
     let mut e = Engine::with_lexicon(lex.clone(), LAYOUT);
     e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
     e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
+    e.set_english_key_order(key_order).map_err(|_| "cannot set the key-order switch".to_string())?;
     Ok(e)
 }
 
@@ -302,7 +323,7 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut words, mut rows, mut recall, mut inline) = (None::<PathBuf>, None::<PathBuf>, false, false);
-    let (mut digits, mut lm) = (false, None::<PathBuf>);
+    let (mut digits, mut lm, mut key_order) = (false, None::<PathBuf>, false);
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -313,6 +334,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--recall" => recall = true,
             "--inline" => inline = true,
             "--digits" => digits = true,
+            "--key-order" => key_order = true,
             "--lm" => lm = Some(val()?.into()),
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
             "--repair" => {
@@ -345,7 +367,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     }
     let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
     if recall {
-        return run_recall(&lex, &words);
+        return if key_order { run_recall_key_order(&lex, &words) } else { run_recall(&lex, &words) };
     }
 
     let rows_bytes = read(&rows.unwrap())?;
@@ -371,12 +393,13 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if syllables == 0 {
         return Err("no row to simulate".into());
     }
+    let mut two_1000: Vec<Vec<f64>> = vec![Vec::new(); TWO_LETTER.len()];
     let (mut per_1000, mut inline_1000, mut autokeep_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), Vec::new(), 0u64, 0u64);
     let (mut final_1000, mut shown_1000, mut extra_1000) = (Vec::new(), Vec::new(), Vec::new());
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
     for i in 0..repeat {
-        let engine = if digits { engine_digits(root, &lm, &words)? } else { engine_with(&lex, &words)? };
-        let mut sim = Sim { last_preedit: String::new(), base_preedit: String::new(), extra_bs: 0, engine, keys: 0, triggers: 0, inline, d_held: false, autokeeps: 0, want: Vec::new(), digits, final_digits: 0, shown_keys: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
+        let engine = if digits { engine_digits(root, &lm, &words, key_order)? } else { engine_with(&lex, &words, key_order)? };
+        let mut sim = Sim { last_preedit: String::new(), base_preedit: String::new(), extra_bs: 0, engine, keys: 0, triggers: 0, two: vec![0; TWO_LETTER.len()], inline, d_held: false, autokeeps: 0, want: Vec::new(), digits, final_digits: 0, shown_keys: 0, p, repair, rng: Rng(seed.wrapping_add(i)) };
         let mut shown_syllables = 0u64;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
@@ -394,6 +417,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         final_1000.push(sim.final_digits as f64 * 1000.0 / syllables as f64);
         shown_1000.push(sim.shown_keys as f64 * 1000.0 / syllables as f64);
         extra_1000.push(sim.extra_bs as f64 * 1000.0 / syllables as f64);
+        for (v, n) in two_1000.iter_mut().zip(&sim.two) {
+            v.push(*n as f64 * 1000.0 / syllables as f64);
+        }
         keys += sim.keys;
         triggers += sim.triggers;
     }
@@ -409,6 +435,43 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         extra += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}\t{emean:.3}\t{emax:.3}");
     }
     println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}{extra}", parsed.len());
+    if key_order {
+        for (w, v) in TWO_LETTER.iter().zip(&two_1000) {
+            let (mean, max) = mean_max(v);
+            println!("two\t{w}\t{mean:.3}\t{max:.3}");
+        }
+    }
+    Ok(())
+}
+
+/// Types `word` letter by letter and Space; whether the window opened and its first item is the word.
+fn type_word(e: &mut Engine, word: &str) -> Result<(bool, bool), String> {
+    e.reset(ResetMode::Discard);
+    for c in word.chars() {
+        e.key(Key::ch(c, 0)).map_err(|_| "the engine failed on a key")?;
+    }
+    let o = e.key(Key::new(KeyKind::Space)).map_err(|_| "the engine failed on a key")?;
+    let open = e.english_open();
+    Ok((open, open && o.candidates.first().is_some_and(|c| c == word)))
+}
+
+/// Zhen-keyorder section 4, recall with the switch on: what the engine does with the list, with `TWO_LETTER` and with six probes.
+/// No recount: the classes of `run_recall` are the rules of the engine without the switch.
+fn run_recall_key_order(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
+    let list: Vec<String> = String::from_utf8(read(words)?).map_err(|_| "the list is not UTF-8")?.lines().map(String::from).collect();
+    let mut e = engine_with(lex, words, true)?;
+    for (name, set) in [("words", list.iter().map(String::as_str).collect::<Vec<_>>()), ("two", TWO_LETTER.to_vec())] {
+        let (mut opened, mut top1) = (0usize, 0usize);
+        for w in &set {
+            let (o, t) = type_word(&mut e, w)?;
+            opened += o as usize;
+            top1 += t as usize;
+        }
+        println!("recall\t{name}\t{}\t{opened}\t{top1}", set.len());
+    }
+    for w in ["ok", "ls", "cd", "mv", "cup", "npm"] {
+        println!("probe\t{w}\t{}", type_word(&mut e, w)?.0 as u8);
+    }
     Ok(())
 }
 
@@ -417,7 +480,7 @@ fn run_recall(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
     let bytes = read(words)?;
     let sha = sha256_hex(&bytes);
     let list: Vec<String> = String::from_utf8(bytes).map_err(|_| "the list is not UTF-8")?.lines().map(String::from).collect();
-    let mut e = engine_with(lex, words)?;
+    let mut e = engine_with(lex, words, false)?;
     let (mut opened, mut top1, mut classes) = (0usize, 0usize, [0usize; 4]);
     for w in &list {
         e.reset(ResetMode::Discard);
@@ -467,9 +530,10 @@ mod tests {
         std::fs::write(dir.join("words.txt"), "ewuk\n").unwrap();
         let (syms, tone) = parse_syllable("ㄊㄧㄠ").unwrap();
         let mk = |p: f64| Sim {
-            engine: engine_with(&lex, &dir.join("words.txt")).unwrap(),
+            engine: engine_with(&lex, &dir.join("words.txt"), false).unwrap(),
             keys: 0,
             triggers: 0,
+            two: vec![0; TWO_LETTER.len()],
             inline: true,
             d_held: false,
             autokeeps: 0,
@@ -499,6 +563,43 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Zhen-keyorder section 4, simulator: the window of a two-letter word is counted under that word (the engine's shadow, not a rule
+    /// of this file). `l` then `s` is out of order (ㄠ in the final column, then ㄋ in the initial one), and Space opens `ls`.
+    #[test]
+    fn two_letter_windows_are_counted_by_word() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
+        let mk = |key_order: bool| Sim {
+            engine: engine_with(&lex, &root.join("eval/golden/english-tiny.txt"), key_order).unwrap(),
+            keys: 0,
+            triggers: 0,
+            two: vec![0; TWO_LETTER.len()],
+            inline: false,
+            d_held: false,
+            autokeeps: 0,
+            want: Vec::new(),
+            last_preedit: String::new(),
+            base_preedit: String::new(),
+            extra_bs: 0,
+            digits: false,
+            final_digits: 0,
+            shown_keys: 0,
+            p: 0.0,
+            repair: Repair::Overwrite,
+            rng: Rng(1),
+        };
+        for key_order in [true, false] {
+            let mut sim = mk(key_order);
+            sim.raw(Key::ch('l', 0)).unwrap();
+            sim.raw(Key::ch('s', 0)).unwrap();
+            sim.space_end().unwrap();
+            let ls = TWO_LETTER.iter().position(|w| *w == "ls").unwrap();
+            let want = if key_order { (1, 1) } else { (0, 0) };
+            assert_eq!((sim.triggers, sim.two[ls]), want, "key_order {key_order}");
+            assert_eq!(sim.two.iter().sum::<u64>(), want.1);
+        }
+    }
+
     /// Zhen-inline section 1.3g, simulator: while letters show (rule D) the engine's Backspace opens an English run instead of taking
     /// a symbol, so the Backspace repair must take the run with Esc and type the symbols again; every row still ends as if typed
     /// clean. The list holds every three-letter word, so a wrong key often makes D hold (the mutation without that Esc fails here).
@@ -511,9 +612,10 @@ mod tests {
         let words: String = ('a'..='z').flat_map(|a| ('a'..='z').flat_map(move |b| ('a'..='z').map(move |c| format!("{a}{b}{c}\n")))).collect();
         std::fs::write(dir.join("words.txt"), words).unwrap();
         let mut sim = Sim {
-            engine: engine_with(&lex, &dir.join("words.txt")).unwrap(),
+            engine: engine_with(&lex, &dir.join("words.txt"), false).unwrap(),
             keys: 0,
             triggers: 0,
+            two: vec![0; TWO_LETTER.len()],
             inline: true,
             d_held: false,
             autokeeps: 0,
@@ -555,9 +657,10 @@ mod tests {
     fn backspace_repair_ends_when_the_last_unit_sent_the_composition() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let mut sim = Sim {
-            engine: engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt")).unwrap(),
+            engine: engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt"), false).unwrap(),
             keys: 0,
             triggers: 0,
+            two: vec![0; TWO_LETTER.len()],
             inline: false,
             d_held: false,
             autokeeps: 0,
