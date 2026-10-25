@@ -37,7 +37,7 @@
   "names-add.tsv": {
    "bytes": 152651,
    "lines": 2000,
-   "sha256": "7f14dd8844ba2c28c2c0b9aff1d36b0fb3908245c9650f17c5e76bdfb7e5285c"
+   "sha256": "d8c62ef0f747a7baf959f986fc1a7ba898d7cf12633dc33f8db383af0750b825"
   },
   "names-sources.tsv": {
    "bytes": 137299,
@@ -89,7 +89,7 @@
   "store": 225
  },
  "unresolved_collision_readings": 0,
- "version": "nsiac22bfd4-moe115.115-7f14dd88",
+ "version": "nsiac22bfd4-moe115.115-d8c62ef0",
  "wiki_revisions": {
   "max": 94910703,
   "min": 700780,
