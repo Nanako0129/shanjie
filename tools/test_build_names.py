@@ -742,7 +742,8 @@ class AppendCreators(unittest.TestCase):
 
     def test_a_store_cannot_reuse_a_creator_word_under_another_reading(self):
         with self.assertRaises(SystemExit):
-            self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n", "國動\tㄍㄨㄛˊ ㄉㄨㄥ\tb\n")
+            self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n", "國動\tㄍㄨㄛˊ ㄉㄨㄥ˙\tb\n")   # a valid reading alone (the neutral tone)
+        self.run_append("", "國動\tㄍㄨㄛˊ ㄉㄨㄥ˙\tb\n")                               # the same store row passes without the creator
 
     def test_a_creators_file_without_rows_or_absent_touches_nothing_even_old_creator_rows(self):
         self.run_append("國動\tㄍㄨㄛˊ ㄉㄨㄥˋ\ta\n")
