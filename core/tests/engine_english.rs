@@ -2106,15 +2106,25 @@ fn key_order_clean_typing_is_not_evidence() {
 
 #[test]
 fn key_order_two_letters_do_not_show_or_keep() {
-    let mut e = ko();
-    for k in ["l", "s"] {
+    // A list with a word that starts with `cd`: `c d` is a replacement (E 1) and ㄎ is not a syllable, so everything but the length of
+    // the shadow lets rule D show the letters; two letters never show (D needs 3), and the third key is no auto-keep.
+    let dir = tmp_dir("keyorder-two");
+    std::fs::write(dir.join("words.txt"), "cdrom\nlsof\n").unwrap();
+    let mut e = Engine::with_lexicon(real(), Layout::Standard);
+    e.load_english(&dir.join("words.txt")).unwrap();
+    e.set_english(true).unwrap();
+    e.set_english_key_order(true).unwrap();
+    for k in ["c", "d"] {
         let o = run(&mut e, k);
         assert!(!e.english_inline_shown(), "two letters never show");
         assert!(o.preedit.chars().all(|c| !c.is_ascii_alphabetic()), "{}", o.preedit);
     }
-    // A third key: no auto-keep of `ls`, the key goes into the syllable as ever (ㄇ replaces ㄋ).
-    let o = run(&mut e, "a");
-    assert!(!e.english_autokept() && o.commit.is_empty() && !o.preedit.chars().any(|c| c.is_ascii_alphabetic()), "{}", o.preedit);
+    assert!(e.english_evidence() == 1 && e.english_shadow_len() == 2, "premise: one piece of evidence, two letters");
+    let o = run(&mut e, "r");
+    assert!(e.english_inline_shown() && o.preedit == "cdr", "premise: the third letter shows, the list has cdrom: {}", o.preedit);
+    // And no auto-keep for two letters: the keep needs rule D on screen and a whole listed word, and the list has no two-letter word.
+    assert!(!e.english_autokept());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
