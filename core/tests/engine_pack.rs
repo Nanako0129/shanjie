@@ -132,7 +132,7 @@ fn window_first(packs: Option<(&Path, u32)>, syls: &[&str]) -> Vec<String> {
 #[test]
 fn the_it_pack_has_its_own_bit_and_file() {
     assert_eq!(PACK_IT, 4);
-    assert_eq!(PACK_ALL, PACK_ACG | PACK_IT);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_IT | PACK_MEME);
     let syls = ["ㄊㄨˊ", "ㄒㄧㄤˋ", "ㄕㄥ", "ㄔㄥˊ"];
     let (both, none) = (tempdir("it-both", Some(PACK)), tempdir("it-none", None));
     std::fs::write(both.join("it-add.tsv"), IT_PACK).unwrap();
@@ -147,6 +147,41 @@ fn the_it_pack_has_its_own_bit_and_file() {
     let acg = window_first(Some((&both, PACK_ACG | PACK_IT)), &["ㄉㄧㄥˋ", "ㄩㄢˊ", "ㄊㄤˊ"]);
     assert_eq!(acg, vec!["碇源堂"; 2]);
     for d in [both, none] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+/// meme-pack contract section 3.1: the meme pack is bit 3 (`PACK_MEME`) and reads `meme-add.tsv`, appended after the IT pack. The row is a fixture
+/// (not a shipped row; the score is the fixture's); 我就爛 is a joke spelling the shipping decoder does not type as such (the test asserts that first).
+/// Off (the bit clear, or no file) is acg-pack A.2: every Output of the sequences below is byte-identical to the engine without the pack.
+const MEME_PACK: &str = "ㄨㄛˇ-ㄐㄧㄡˋ-ㄌㄢˋ\t我就爛\t-3.0\tmeme\n";
+
+#[test]
+fn the_meme_pack_has_its_own_bit_and_file() {
+    assert_eq!(PACK_MEME, 8);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_IT | PACK_MEME);
+    let syls = ["ㄨㄛˇ", "ㄐㄧㄡˋ", "ㄌㄢˋ"];
+    let (both, none) = (tempdir("meme-both", Some(PACK)), tempdir("meme-none", None));
+    std::fs::write(both.join("it-add.tsv"), IT_PACK).unwrap();
+    std::fs::write(both.join("meme-add.tsv"), MEME_PACK).unwrap();
+    let plain = window_first(None, &syls);
+    assert!(plain.iter().all(|w| w != "我就爛"), "the word is already the first candidate without the pack: {plain:?}");
+    let plain_outs = run(None);
+    // Bit clear with the file present (alone and with the other packs on), and the bit set with no file: all are the engine without the pack.
+    // The other packs' files are present, so the byte comparison also shows meme-add.tsv is not read through their bits.
+    let no_meme = tempdir("meme-nomeme", Some(PACK));
+    std::fs::write(no_meme.join("it-add.tsv"), IT_PACK).unwrap();
+    assert!(run(Some((&both, 0))) == plain_outs, "mask 0 with meme-add.tsv present differs from no pack");
+    assert!(run(Some((&both, PACK_ACG | PACK_IT))) == run(Some((&no_meme, PACK_ACG | PACK_IT))), "meme-add.tsv was read without the meme bit");
+    assert!(run(Some((&none, PACK_MEME))) == plain_outs, "a missing meme-add.tsv changes the engine");
+    assert_eq!(window_first(Some((&both, PACK_ACG | PACK_IT)), &syls), plain, "meme-add.tsv was read without the meme bit");
+    assert_eq!(window_first(Some((&none, PACK_MEME)), &syls), plain);
+    assert_eq!(window_first(Some((&both, PACK_MEME)), &syls), vec!["我就爛"; 2]);
+    assert_eq!(window_first(Some((&both, PACK_ALL)), &syls), vec!["我就爛"; 2]);
+    // The other packs' words still work beside it.
+    assert_eq!(window_first(Some((&both, PACK_ALL)), &["ㄊㄨˊ", "ㄒㄧㄤˋ", "ㄕㄥ", "ㄔㄥˊ"]), vec!["圖像生成"; 2]);
+    assert_eq!(window_first(Some((&both, PACK_ALL)), &["ㄉㄧㄥˋ", "ㄩㄢˊ", "ㄊㄤˊ"]), vec!["碇源堂"; 2]);
+    for d in [both, none, no_meme] {
         let _ = std::fs::remove_dir_all(d);
     }
 }

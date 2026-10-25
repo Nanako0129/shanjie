@@ -32,11 +32,15 @@ enum TestData {
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
     /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
-    static func addBundledPack(to dir: URL, itPack: Bool = true) throws {
+    /// The meme pack's one row (the selftest word, meme-pack contract 3.2; measured with the CLI: both profiles spell it 福新來的 without the pack): a real file, like `itPackRow`.
+    static let memePackRow = "ㄈㄨˊ-ㄒㄧㄣ-ㄌㄞˊ-ㄉㄜ˙\t佛心來的\t-6.60980192\tmeme\n"
+
+    static func addBundledPack(to dir: URL, itPack: Bool = true, memePack: Bool = true) throws {
         let packs = dir.appendingPathComponent("packs", isDirectory: true)
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
         // The IT+AI pack's one row (the selftest word, core/tests/engine_pack.rs): a real file, so the test does not depend on the generated data/packs/it-add.tsv.
         if itPack { try itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8) }
+        if memePack { try memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8) }
         try FileManager.default.createSymbolicLink(at: packs.appendingPathComponent("acg-add.tsv"),
                                                    withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
     }

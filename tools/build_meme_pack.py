@@ -37,7 +37,7 @@ B = IT.B
 PACKS = B.PACKS
 TAG = "meme"
 MIN_BOARDS, MIN_ARTICLES = 3, 10    # 契約 §2「用量」：事先固定，量之前 commit
-MIN_WORDS = 30                      # 契約 §5 停止：收錄後不到 30 個詞就停
+MIN_WORDS = 10                      # 契約 §5 停止：收錄後不到 10 個詞就停（原本 30；維護者把不冒犯的迷因移到主詞庫後詞包只剩約 20 個，2026-10-25 放寬）
 BONUS = 3.0                         # 契約 §2「分數」：同資訊詞包，每列的 log10 分數加 3
 SEED, CHECK_N = 20261025, 60        # 契約 §3.5：檢查集的固定種子與抽樣數
 HEAD_FIELDS = ("ptt_tree_sha256", "input_sha256", "tool_commit")
@@ -56,12 +56,14 @@ def lines_text(items):
 # ---------------------------------------------------------------- 輸入
 
 def read_candidates(paths):
-    """候選檔 → ({候選: {來源}}, 統計, {給的路徑: 檔案雜湊})。整串含英數的不收（NFKC 之後比，全形英數也算）；其餘照標點切段，段落要 2–10 個漢字。
-    來源欄省略時用檔名去掉副檔名；雜湊記在給的路徑下，不同資料夾的同名檔不會互相蓋掉。"""
+    """候選檔 → ({候選: {來源}}, 統計, {檔名: 檔案雜湊})。整串含英數的不收（NFKC 之後比，全形英數也算）；其餘照標點切段，段落要 2–10 個漢字。
+    來源欄省略時用檔名去掉副檔名。雜湊只記檔名（meme.json 進版控、也隨 App 內附，不放私人路徑）；兩個候選檔同名就停，免得互相蓋掉。"""
     cands, files = collections.defaultdict(set), {}
     st = collections.Counter()
     for p in paths:
-        files[p] = B.sha256_file(p)
+        if os.path.basename(p) in files:
+            raise SystemExit(f"two candidate files are named {os.path.basename(p)}: rename one (meme.json keys them by file name)")
+        files[os.path.basename(p)] = B.sha256_file(p)
         default = os.path.splitext(os.path.basename(p))[0]
         with open(p, encoding="utf-8") as f:
             for l in f:
@@ -277,6 +279,11 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         words = [w for w in words if w not in hit]
     else:
         raise SystemExit(f"type (c) collisions not settled after {B.LEXICON_RULE_ROUNDS} rounds")
+    # 列的先後不影響分數（分數在 pack_rows 已經定了），只決定 App selftest 打哪一列（它打檔案的第一個資料列，要求送出的就是那個詞）：
+    # 先放聊天沒有詞包時打不對的詞（selftest 才看得出詞包有沒有生效），再放聊天本來就對的，最後放同讀音留兩個詞的列（處置檔 `+` 的那幾列，讀音上有同音競爭）。
+    pairs = {r[0] for r in (B.read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else []) if r[2].startswith("+")}
+    rank_of = lambda row: 2 if row.split("\t")[0].replace("-", " ") in pairs else int(xs[row.split("\t")[1]] == row.split("\t")[1])
+    rows = sorted(rows, key=rank_of)
     keep_now = B.first_named(rank, set(words))
     col = B.open_collisions(found, decided, keep_now, set(), frozenset(), {(r.split("\t")[0].replace("-", " "), r.split("\t")[1]) for r in rows})
     srcs = ["word\tsources\tptt_articles\tptt_boards\tnote\n"]

@@ -32,7 +32,7 @@ fn shared() -> &'static Shared {
         // `ACG_PACK` (only for `measure_start_range_acg`) is the word pack's acg-add.tsv; its directory is the packs dir.
         let pack = std::env::var("ACG_PACK").ok().map(PathBuf::from);
         let packs = pack.as_deref().map(|f| (f.parent().unwrap(), PACK_ACG));
-        // `PACKS=acg,it` (it-pack contract section 3.7; `PACKS_DIR` defaults to data/packs): the shipping masks for the latency run.
+        // `PACKS=acg,it,meme` (it-pack contract section 3.7, meme-pack contract section 3.7; `PACKS_DIR` defaults to data/packs): the shipping masks for the latency run.
         let packs = packs.or_else(|| packs_from_env().map(|(d, m)| (&*Box::leak(d.into_boxed_path()), m)));
         let (lex, pack_text) = load_lexicon_packs(&dir, packs).unwrap();
         let overlay = capping_overlay(&dir, &pack_text).unwrap();
@@ -40,14 +40,10 @@ fn shared() -> &'static Shared {
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
-/// The `PACKS` environment variable (`acg`, `it`, `acg,it`) as a directory and a mask; `None` when unset.
+/// The `PACKS` environment variable (`acg`, `it`, `meme`, a comma list) as a directory and a mask; `None` when unset.
 fn packs_from_env() -> Option<(PathBuf, u32)> {
     let v = std::env::var("PACKS").ok()?;
-    let mask = v.split(',').fold(0, |m, n| m | match n {
-        "acg" => PACK_ACG,
-        "it" => PACK_IT,
-        _ => panic!("PACKS takes acg, it or acg,it"),
-    });
+    let mask = v.split(',').fold(0, |m, n| m | PACK_FILES.iter().find(|p| p.1 == n).unwrap_or_else(|| panic!("PACKS takes a comma list of acg, it, meme")).0);
     Some((std::env::var("PACKS_DIR").map_or_else(|_| root().join("data/packs"), PathBuf::from), mask))
 }
 /// The distinct readings of the base lexicon, the three always-on overlay files and the enabled pack files, counted from the files, not from the
@@ -63,7 +59,7 @@ fn expected_readings(packs: Option<(PathBuf, u32)>) -> usize {
     }
     let mut overlays: Vec<PathBuf> = ["overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"].iter().map(|f| dir.join(f)).collect();
     if let Some((pdir, mask)) = packs {
-        overlays.extend([(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv")].iter().filter(|(b, _)| mask & b != 0).map(|(_, f)| pdir.join(f)));
+        overlays.extend(PACK_FILES.iter().filter(|p| mask & p.0 != 0).map(|p| pdir.join(p.2)));
     }
     for f in overlays {
         seen.extend(std::fs::read_to_string(f).unwrap().lines().map(|l| l.split('\t').next().unwrap().to_string()));
@@ -759,9 +755,9 @@ fn rss_kb() -> u64 {
     String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
 }
 
-/// Every key of every typing76 sample (chat profile, with its left context), through `Engine::key`. `PACKS=acg` or `PACKS=acg,it`
+/// Every key of every typing76 sample (chat profile, with its left context), through `Engine::key`. `PACKS=acg`, `PACKS=acg,it` or `PACKS=acg,it,meme`
 /// (`PACKS_DIR`, default data/packs) loads the word packs first and asserts the lexicon size (it-pack contract section 3.7):
-/// `PACKS=acg,it cargo test --release -p core --test engine_predict timing_typing76_keys -- --ignored --nocapture --exact`.
+/// `PACKS=acg,it,meme cargo test --release -p core --test engine_predict timing_typing76_keys -- --ignored --nocapture --exact`.
 #[test]
 #[ignore]
 fn timing_typing76_keys() {

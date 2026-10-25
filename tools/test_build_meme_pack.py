@@ -72,16 +72,17 @@ class Candidates(unittest.TestCase):
         cands, st, _ = self.read("三小４\n\uff2a\uff4f\uff2a\uff4f立\n三小4\n正常詞\n")
         self.assertEqual((cands, st["dropped_ascii"]), ({"正常詞": {"ptt"}}, 3))
 
-    def test_provenance_is_keyed_by_the_path_given_so_same_named_files_do_not_overwrite(self):
+    def test_provenance_is_keyed_by_file_name_and_same_named_files_stop(self):
         with tempfile.TemporaryDirectory() as d:
             paths = []
             for sub, text in (("a", "有人氣\n"), ("b", "好笑啦\n")):
                 os.makedirs(os.path.join(d, sub))
                 paths.append(os.path.join(d, sub, "cand.tsv"))
                 put(paths[-1], text)
-            cands, _, files = T.read_candidates(paths)
-        self.assertEqual(files, {paths[0]: IT.sha256_text("有人氣\n"), paths[1]: IT.sha256_text("好笑啦\n")})
-        self.assertEqual(cands, {"有人氣": {"cand"}, "好笑啦": {"cand"}})
+            _, _, files = T.read_candidates(paths[:1])
+            with self.assertRaises(SystemExit):      # two files named cand.tsv would share one key
+                T.read_candidates(paths)
+        self.assertEqual(files, {"cand.tsv": IT.sha256_text("有人氣\n")})      # no directory: meme.json is tracked and ships
 
     def test_a_string_with_two_sources_keeps_both(self):
         with tempfile.TemporaryDirectory() as d:
@@ -303,7 +304,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(m["candidate_stats"]["dropped_ascii"], 1)
         self.assertEqual(m["files"]["meme-add.tsv"]["sha256"], B.sha256_file(os.path.join(self.out, "meme-add.tsv")))
         self.assertEqual(m["sources"], {"統神": 1, "ptt": 2})
-        self.assertEqual(m["candidate_files"], {self.cand: B.sha256_file(self.cand)})
+        self.assertEqual(m["candidate_files"], {os.path.basename(self.cand): B.sha256_file(self.cand)})   # no directory: the manifest ships
 
     def test_the_x_article_count_is_that_of_the_x_string_not_the_row(self):
         # 拼出詞甲 is counted as a string in the second file: 39 articles (< 40) keeps 我就爛, 40 drops it. The row 我就爛 itself has 40 in the first file.
@@ -429,6 +430,18 @@ class Collisions(unittest.TestCase):
                                                     collisions=[("a b c", "同音少", "同音多", "理由")])
         self.assertEqual(self.pack_words(files), {"同音少"})          # the excluded higher word does not block the lower one
         self.assertEqual((dropped, m["stages"]["excluded_by_meme_collisions_tsv"]), ([], 1))
+
+    def test_row_order_pack_needed_first_chat_right_next_same_reading_pairs_last(self):
+        rd = lambda ws: {"甲詞": (["a", "b", "c"], False), "乙詞": (["d", "e", "f"], False), "丙詞": (["g", "h", "i"], False)}
+        counts = {"甲詞": (50, 5), "乙詞": (30, 5), "丙詞": (20, 5)}        # 甲詞 has the most articles, so it would be the first row without the rule
+        kw = dict(words=("甲詞", "乙詞", "丙詞"), readings=rd, counts=counts)
+        files, *_ = self.run_build(fake_decoder(), collisions=[("a b c", "甲詞", "+舊詞", "理由")], **kw)
+        self.assertEqual([l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()], ["乙詞", "丙詞", "甲詞"])
+        files, *_ = self.run_build(fake_decoder(), **kw)                      # no pair row: the usual order, by articles
+        self.assertEqual([l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()], ["甲詞", "乙詞", "丙詞"])
+        # a word the chat decode already types right (X is the word) goes behind the words the pack must win in chat
+        files, *_ = self.run_build(fake_decoder(), x={"甲詞": ("甲詞", "？甲詞")}, **kw)
+        self.assertEqual([l.split("\t")[1] for l in files["meme-add.tsv"].splitlines()], ["乙詞", "丙詞", "甲詞"])
 
     def test_check_set_is_seeded_capped_and_skips_check_readings(self):
         info = {"order": [f"{c}字詞" for c in "甲乙丙丁戊己庚辛壬癸"], "reading": {}, "check": {}}

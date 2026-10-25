@@ -18,19 +18,19 @@ final class SettingsTests: XCTestCase {
         var model: SettingsModel
         var controller: Controller
         var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore, english: MemoryEnglishStore
-        var acg: MemoryAcgPackStore, tint: MemoryGlassTintStore
+        var acg: MemoryAcgPackStore, meme: MemoryMemePackStore, tint: MemoryGlassTintStore
         var dialogs: FakeDialogs
     }
 
     private func rig(secure: Bool = false, learning: URL? = nil) -> Rig {
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
-        let acg = MemoryAcgPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
+        let acg = MemoryAcgPackStore(), meme = MemoryMemePackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (digits.md A.3.7), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
-                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          acgPackStore: acg, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), memePackStore: meme)
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
-                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, tint: tint, dialogs: dialogs)
+                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, meme: meme, tint: tint, dialogs: dialogs)
     }
 
     private func item(_ r: Rig, _ a: MenuEntry.Action) -> MenuEntry? { r.controller.session.menu.first { $0.action == a } }
@@ -220,6 +220,27 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.shell.engine !== before, "no rebuild")
         r.controller.session.perform(.toggleItPack)
         XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
+    }
+
+    func testMemePackSwitchFromTheWindowReachesStoreAndMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let r = rig()
+        let before = r.shell.engine
+        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertTrue(r.model.memePack, "default on")
+        XCTAssertEqual(line(), "已開啟的詞包：迷因與實況用語")
+        XCTAssertNil(r.meme.memePack, "never set")
+        r.model.setMemePack(false)
+        XCTAssertEqual(r.meme.memePack, false)
+        XCTAssertFalse(r.model.memePack)
+        XCTAssertNil(line(), "the menu line follows the switch")
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        r.model.setMemePack(true)
+        XCTAssertEqual(r.meme.memePack, true)
+        XCTAssertTrue(r.model.memePack)
+        XCTAssertEqual(line(), "已開啟的詞包：迷因與實況用語")
     }
 
     /// acg-pack A2.4 (moved here by it-pack 3.2): the window shows the grey data-date line under the switch, also with the pack off; the menu does not.

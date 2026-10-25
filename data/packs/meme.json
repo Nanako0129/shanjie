@@ -1,0 +1,68 @@
+{
+ "bonus": 3.0,
+ "candidate_files": {
+  "candidates-2026-10-25.tsv": "1d2e357d2f52e321ca0d8ba321fad6f29829430b70c66cd4a2dc8fc287a8e777"
+ },
+ "candidate_stats": {
+  "candidates": 2131,
+  "lines": 2131
+ },
+ "counts_candidates": {
+  "input_sha256": "e505e5b29045f7651aa735330aab1024a655371269816c28f4b71063e48e6dd2",
+  "ptt_tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f",
+  "sha256": "135746df9b076bcc22f678be362c32386a5d06e54742c982bdf0c5ffe7f5897a",
+  "tool_commit": "unknown"
+ },
+ "counts_x": {
+  "input_sha256": "584db407e909eed9b4aeb1482eacf8116186478d7349b80f7214a6919050fd86",
+  "ptt_tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f",
+  "sha256": "34eca77ceae5bc34df5691cdffde77063d565c2774a2bf4da2748b0743693939",
+  "tool_commit": "unknown"
+ },
+ "dropped_unreadable": 1,
+ "files": {
+  "meme-add.tsv": {
+   "bytes": 1205,
+   "lines": 22,
+   "sha256": "897a28716b8ec2cec8bae3532cae792ec0ddada48975db6a46fc3c99ed19428c"
+  },
+  "meme-sources.tsv": {
+   "bytes": 628,
+   "lines": 22,
+   "sha256": "151bded87cee7d754481b238a0117801ecfeb4fe84d3c7a162516887a6d3e800"
+  }
+ },
+ "meme_x": {
+  "meme-x-strings.txt": "584db407e909eed9b4aeb1482eacf8116186478d7349b80f7214a6919050fd86",
+  "meme-x.tsv": "08694138cfbc61b7589fb2c74cfadc533bcc61e987599191a61aa9f33c570b38"
+ },
+ "rows": 22,
+ "sources": {
+  "mined": 2,
+  "mined,streetdict": 1,
+  "pttpedia": 7,
+  "streetdict": 11
+ },
+ "stages": {
+  "admitted": 684,
+  "below_threshold": 559,
+  "candidates": 2131,
+  "dedupe_lexicon": 850,
+  "dedupe_packs": 37,
+  "dropped_already_right": 428,
+  "dropped_by_c_rule": 8,
+  "dropped_same_reading": 4,
+  "dropped_x_not_fewer": 56,
+  "dropped_x_other_pack": 4,
+  "excluded_by_meme_collisions_tsv": 163,
+  "no_count": 0,
+  "unreadable": 1
+ },
+ "thresholds": {
+  "min_articles": 10,
+  "min_boards": 3
+ },
+ "unresolved_collision_readings": 0,
+ "version": "897a2871",
+ "words": 21
+}

@@ -31,6 +31,46 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// meme-pack contract 3.2: the meme pack ships on by default too (and the selftest types one of its words), so a bundle without meme-add.tsv,
+    /// or with a broken one, fails. The IT pack is present in both, so only the meme file can be the cause.
+    func testFailsWithoutTheBundledMemePack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res, memePack: false)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    /// The word comes from the file's first data row (comment lines skipped), not from a constant: a bundle whose first row is another word still passes.
+    func testReadsTheMemeWordFromTheFirstDataRow() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        let file = res.appendingPathComponent("packs/meme-add.tsv")
+        XCTAssertEqual(Selftest.run(resources: res), 0)
+        // The core's pack parser takes no comment lines, so this is the sampler alone: it would skip them (and blank lines) anyway.
+        try ("# a comment line\n\n" + TestData.memePackRow).write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(Selftest.memeSample(res)?.word, "佛心來的")
+        XCTAssertEqual(Selftest.memeSample(res)?.keys, Layouts.keys("ㄈㄨˊ ㄒㄧㄣ ㄌㄞˊ ㄉㄜ˙", eten: false), "the keys derived from the reading are the independently transcribed layout's")
+        try "ㄅㄚ-ㄅㄚ\t巴巴\t-6.0\tmeme\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(Selftest.memeSample(res)?.word, "巴巴")
+        XCTAssertEqual(Selftest.memeSample(res)?.keys, Layouts.keys("ㄅㄚ ㄅㄚ", eten: false), "a toneless syllable ends with a space")
+    }
+
+    /// The committed data/packs/meme-add.tsv (not a fixture row): its first data row is what the shipped App's selftest types, so it must come out as that word.
+    func testPassesWithTheCommittedMemePack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        let file = res.appendingPathComponent("packs/meme-add.tsv")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.copyItem(at: TestData.repo.appendingPathComponent("data/packs/meme-add.tsv"), to: file)
+        XCTAssertEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithACorruptBundledMemePack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "not a row\n".write(to: res.appendingPathComponent("packs/meme-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithACorruptBundledPack() throws {
         let res = try XCTUnwrap(TestData.resources())
         let packs = res.appendingPathComponent("packs")

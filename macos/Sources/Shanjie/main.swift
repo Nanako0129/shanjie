@@ -110,6 +110,15 @@ final class DefaultsItPackStore: ItPackStore {
     }
 }
 
+/// The "迷因與實況用語" switch (docs/contracts/meme-pack.md section 3.2), key `memePack` in the same domain; absent means on.
+@MainActor
+final class DefaultsMemePackStore: MemePackStore {
+    var memePack: Bool? {
+        get { UserDefaults.standard.object(forKey: "memePack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "memePack") }
+    }
+}
+
 /// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
 @MainActor
 final class DefaultsGlassTintStore: GlassTintStore {
@@ -213,7 +222,7 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore())
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), memePackStore: DefaultsMemePackStore())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)

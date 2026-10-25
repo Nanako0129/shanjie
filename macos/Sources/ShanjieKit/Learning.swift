@@ -90,6 +90,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static let itPack = "資訊與 AI 詞"
+        public static let memePack = "迷因與實況用語"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         /// The menu's non-clickable pack line (it-pack contract 3.2).
         public static func packsOn(_ names: [String]) -> String { "已開啟的詞包：" + names.joined(separator: "、") }
