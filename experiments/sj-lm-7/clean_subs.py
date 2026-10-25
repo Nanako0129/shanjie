@@ -17,6 +17,7 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
                 the NFKC text with whitespace removed; the simplified step lets these characters through on purpose (公里, 皇后). A phrase
                 that is a word of --lexicon is not used (MAINLAND leaves out the ones the shipped lexicon has: 村里, 水里, 聯系, 市里, 伙計); a match is not a hit when a longer lexicon word holds it (二里頭文化)
                 or a lexicon word with a shared character and no phrase in it crosses it (皇后來了, 汽車里程, 若干活動, 海關系統)
+  residue       a bracket ( ()（）[]【】 ), a "︰" speaker label, a Cantonese-only character (喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰) or the OCR split 黑占
   invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any), plus the
                 terms of --mainland-terms (mainland wording in traditional characters, e.g. OpenCC TWPhrases keys PTT seldom uses)
   dedupe        NFKC + whitespace removed + case folded
@@ -78,11 +79,12 @@ SHARED = frozenset("么里后于愿干准系范斗松采伙万")   # the shared 
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 MARKS = re.compile("[*#♪♫§]")                  # subtitle marks (lyrics, notes) seen in the second proofread; never part of the text
 LONE_LETTER = re.compile(r"(?<![A-Za-z])[a-z](?![A-Za-z])")   # lowercase: OCR noise (拼寫n); uppercase stays (T恤, X光, B型, 維他命C)
-# Contract 2.7 (maintainer 2026-10-25): the fifth proofread (seeds 20261030, 20261031) left 15/600; these five rules cover 7 of them and drop
-# 0.43% of the reviewed subtitles: a bracket anywhere (sound notes, translator notes), a "︰" speaker label, 「 and 」 not paired, Cantonese-only
-# characters, and the OCR split 黑占 (點).
+# Contract 2.7 (maintainer 2026-10-25): from the residues of the fifth proofread (seeds 20261030, 20261031): a bracket anywhere (sound notes,
+# translator notes), a "︰" speaker label, Cantonese-only characters, and the OCR split 黑占 (點). No quote-pairing rule: strip_cue drops a
+# leading 「 and split_sentences cuts inside quotes, so a count of 「 and 」 here flags ordinary dialogue (code review of #304). 唔 is not in
+# the Cantonese set: Mandarin subtitles use it as an interjection (唔，好吧).
 RESIDUE = (("bracket", re.compile(r"[()（）\[\]【】]")), ("speaker label", re.compile("︰")),
-           ("cantonese", re.compile("[喺搵咗嘅冇佢啲嚟咁乜嘢唔哋嗰]")), ("ocr 黑占", re.compile("黑占")))
+           ("cantonese", re.compile("[喺搵咗嘅冇佢啲嚟咁乜嘢哋嗰]")), ("ocr 黑占", re.compile("黑占")))
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
 
@@ -150,9 +152,7 @@ def mainland_hit(s, ctx):
 
 
 def residue_hit(s):
-    """-> the RESIDUE rule (or "unpaired 「」") that drops s, or None."""
-    if s.count("「") != s.count("」"):
-        return "unpaired 「」"
+    """-> the RESIDUE rule that drops s, or None."""
     return next((name for name, rx in RESIDUE if rx.search(s)), None)
 
 

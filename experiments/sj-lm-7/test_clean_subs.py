@@ -116,9 +116,9 @@ class Reject(unittest.TestCase):
         for s in ("萬事", "万事", "會緊張么", "干了三年"):
             self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
-        for s in ("（笑）", "(門鈴響)", "【旁白】", "[音樂]", "阿明︰", "他說「走吧", "走吧」", "喺邊度", "差一黑占"):
+        for s in ("（笑）", "(門鈴響)", "【旁白】", "[音樂]", "阿明︰", "喺邊度", "差一黑占"):
             self.assertEqual(self.why(KEEP + s), "residue", s)
-        for s in ("他說「走吧」", "他說「走」「停」", "一點點", "黑色的"):
+        for s in ("他說「走吧」", "他說「走吧", "走吧」他說", "一點點", "黑色的", "唔，好吧"):     # quotes are not counted (strip_cue, split); 唔 is Mandarin too
             self.assertIsNone(self.why(KEEP + s), s)
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
         self.assertEqual(self.why(KEEP + "軟件"), "invade")                           # a --mainland-terms term joins the invade list
@@ -149,7 +149,6 @@ class Reject(unittest.TestCase):
         self.assertEqual(t("mainland", KEEP + "我在包里"), "包里")             # a member of MAINLAND, a closed set
         self.assertEqual(t("invade", KEEP + "視頻"), "視頻")
         self.assertEqual(t("residue", KEEP + "（笑）"), "bracket")
-        self.assertEqual(t("residue", KEEP + "他說「走吧"), "unpaired 「」")
         self.assertEqual(t("residue", KEEP + "喺邊度"), "cantonese")
 
 
