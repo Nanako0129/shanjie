@@ -17,9 +17,9 @@
 
 ## 2. 資料與隱私
 
-- 殼讀什麼、讀多少、什麼時候讀，全部照 S4 §2（R4）：組字開始讀一次，最多 2 個漢字，只在記憶體；`privacyGate` 擋的時候傳 NULL，歷史詞就是 `<s>`。
+- 殼讀什麼、讀多少、什麼時候讀，全部照 S4 §2（R4）：組字開始讀一次，最多 2 個漢字，只在記憶體；`privacyGate` 擋的時候傳 NULL，歷史詞就是 `<s>`。（前文回傳起殼傳同一則訊息最多 64 個 grapheme，終端機類 App 除外；核心在 n-gram 與學習只用結尾 ≤ 2 個漢字，所以歷史詞不變，`docs/contracts/context-return.md`。）
 - C ABI 不變。`core/include/shanjie.h` 只改 `set_left_context` 的註解，補一句「也當第一個詞的 bigram 條件」。
-- 不另做 security-reviewer：沒有新讀取、新儲存或新傳送，只是把已經在記憶體的 2 個字多用在計分。
+- 不另做 security-reviewer：沒有新讀取、新儲存或新傳送，只是把已經在記憶體的 2 個字多用在計分。（讀取範圍在前文回傳變大，那一片另過 security-reviewer；這裡用的仍是結尾 ≤ 2 個漢字。）
 
 ## 3. 參考實作與評測 CLI
 

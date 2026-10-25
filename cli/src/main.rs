@@ -400,9 +400,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         if let Some((tl, _, _)) = &tl {
             let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
             let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
-            // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
+            // The key is the engine's (`TinyLm::key_for` of the row's context, the display before the one stretch being empty): the
+            // context key for versions 1 to 4 (its SENTINEL is the empty k, in TinyLm::rerank), the last L characters as they are for
+            // a model declaring L (docs/contracts/context-return.md section 2); without --context, no key.
             let t0 = Instant::now();
-            let key = left.as_deref().unwrap_or("");
+            let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
+            let key = key.as_str();
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
