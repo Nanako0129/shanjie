@@ -362,10 +362,14 @@ def moe_primary_first():
     return readings.moe_primary()
 
 
-def manual_words(path=MANUAL):
-    """overlay-manual.tsv 的詞（手動詞接在萌典補詞後面，兩者不能同詞）。"""
-    with open(path, encoding="utf-8-sig") as f:
-        return {l.split("\t")[0] for l in f.read().splitlines() if l.strip() and not l.startswith("#")}
+def manual_words(paths=None):
+    """overlay-manual.tsv 與 slang-add.tsv 的詞（手動詞、網路用語都接在萌典補詞後面，不能同詞）。沒有網路用語檔時只讀手動詞。"""
+    out = set()
+    for path in paths or (MANUAL, SLANG):
+        if os.path.exists(path):
+            with open(path, encoding="utf-8-sig") as f:
+                out |= {l.split("\t")[0] for l in f.read().splitlines() if l.strip() and not l.startswith("#")}
+    return out
 
 
 Concised = collections.namedtuple("Concised", "syls variants")   # 簡編本一個詞名取的那一列：注音一式（音節 list）、[(變體類型, 變體注音 list)]

@@ -222,6 +222,14 @@ class BuildFlags(unittest.TestCase):
         (rows, _, _, _), _ = self.build(sup=True, simp={bad})
         self.assertNotIn(self.sup, {r.split("\t")[1] for r in rows})            # a simplified-only character keeps a Moedict word out too
 
+    def test_supplement_skips_a_net_slang_word(self):
+        d = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, d)
+        slang = os.path.join(d, "slang-add.tsv")
+        open(slang, "w", encoding="utf-8").write(f"{self.sup}\t{' '.join(B.normalize(self.sup, self.base.to_syllables(self.sup)))}\ttest\n")
+        with mock.patch.object(B, "SLANG", slang):
+            (rows, _, _, _), _ = self.build(sup=True)
+        self.assertEqual(self.row(rows, self.sup), [])   # not a supplement word (the slang tail itself reads the committed file); before, it was, and the slang tail then aborted
+
     def test_supplement_rows_sit_between_the_generated_rows_and_the_manual_tail(self):
         (rows, _, _, _), _ = self.build(sup=True)
         sup = [i for i, r in enumerate(rows) if r.endswith("萌典補詞\n")]
@@ -580,7 +588,7 @@ class Cantonese(unittest.TestCase):
         with open(B.OUT, encoding="utf-8") as f:
             words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")}
         self.assertEqual({w for w in words if not B.CANTO_CHARS.isdisjoint(w)},
-                         {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇"})
+                         {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇", "從諗"})   # 從諗: a Moedict headword the SJ-LM-7 supplement brings in
 
 
 class ShippedOverlay(unittest.TestCase):
