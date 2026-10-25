@@ -40,7 +40,7 @@
 
 - **核心**：`Engine::set_english_key_order(bool) -> Result<Output, EngineError>`；預設 false（`Engine::new` 時）。C ABI `shanjie_engine_set_english_key_order(engine, uint32_t enabled, ShanjieOutput **out)`，回傳碼與快照照 `shanjie_engine_set_english_inline`（0；NULL 回 1；0、1 以外回 2、狀態不變）。關掉（true→false）時：英文窗開著就關窗（不追蹤是哪種證據開的），關窗照今天的做法清影子；沒有英文窗就什麼都不動（影子和未完成音節都保留），狀態和從來沒開過這個開關的引擎相同。未完成音節一律保留。`core/include/shanjie.h` 與 `docs/contracts/s3a.md` 的 ABI 一節同步。
 - **殼**：UserDefaults 鍵 `englishKeyOrder`，沒有值時當 false。每次建引擎都送（放在 `setEnglishInline` 旁邊）。設定視窗在「中英混打（實驗）」底下、「英文的顯示」之後加一個勾選「依按鍵順序判斷英文」，下面一行說明：「`ok`、`ls`、`cup` 這類短詞不用按 Shift。開了之後，用重打同一個位置來改錯的注音，比較容易被當成英文。」中英混打關著、反灰或倚天時，這個勾選也反灰。選單不加項目。
-- **預設**：關（契約草稿的建議；維護者在 §6 的選擇題決定）。
+- **預設**：關（維護者 2026-10-26 選擇題「預設關」；§4 量測開與關的誤觸相同，選擇題推薦的是預設開）。
 - 文件同 PR 改：`docs/contracts/s3a.md`（第 10e 條與 D 的註腳：開關開著時證據含逆序、兩字母清單、音節不存在可以不要證據）、`docs/contracts/settings-window.md`（新的勾選）、`docs/contracts/zhen-mixed.md` 與 `zhen-inline.md` 的狀態列指到這份、`docs/PLAN.md` 的中英混打一項。
 
 ## 4. 量測（main，在 Mac 以外的機器）
@@ -81,7 +81,7 @@
 ## 6. 停止條件與要問維護者的事
 
 - 停止條件：§4 門檻 1 或 2 不過；開關關著時任何 golden 或重播改變；p95 ≥ 16 ms。
-- **預設值**：實作與量測完、合併前，用選擇題問維護者「預設關（推薦）／預設開」。
+- **預設值**：已問（2026-10-26）：維護者選預設關。
 
 ## 7. 範圍外
 
