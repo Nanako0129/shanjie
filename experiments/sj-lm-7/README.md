@@ -67,6 +67,7 @@ python3 experiments/s2/build_tune.py --train-only-new-conv       # 只重寫 col
 
 ```sh
 python3 tools/readings.py --report-inverted [--unihan <Unihan_Readings.txt>]      # 9 個倒掛字的現行與建議分數，不寫詞庫
+python3 tools/readings.py --apply-inverted data/lexicon/mcbpmf-data.txt --unihan <Unihan_Readings.txt>   # 就地套用；要在重建疊加層、變調列之前（它們讀這份基底）
 # readings.py 的規則 3b 預設關（其他建置工具的輸出不變）；要用就加 --rule-3b（--unihan 才有作用），build_overlay 的 --moedict-readings 路徑自己開
 python3 tools/build_overlay.py --moedict-readings --reading-report <report.tsv>   # 讀音：萌典第一讀音優先，其次 readings.py；列出讀音改變的詞
 python3 tools/build_overlay.py --moedict-readings --moedict-supplement <維基文字> <口語檔>… --jobs <N>   # 加「萌典補詞」來源
