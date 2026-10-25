@@ -731,7 +731,8 @@ class AppendCreators(unittest.TestCase):
         for text in ("", "# nothing left\n\n"):
             self.assertEqual(self.run_append(text), 0)
             self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
-        B.append_creators(self.d, os.path.join(self.d, "absent.tsv"), os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES)
+        B.append_creators(self.d, os.path.join(self.d, "absent.tsv"), os.path.join(self.d, "acg.tsv"), os.path.join(self.d, "it.tsv"), scores=self.SCORES,
+                          stores=os.path.join(self.d, "absent-stores.tsv"))        # not the repository's names-stores.tsv
         self.assertEqual(before, {n: get(os.path.join(self.d, n)) for n in before})
 
     def test_on_copies_of_the_committed_files_an_absent_or_empty_creators_file_changes_nothing(self):
@@ -744,12 +745,12 @@ class AppendCreators(unittest.TestCase):
         self.assertEqual(before, {n: get(os.path.join(B.LEX, n)) for n in names})
         for creators in (os.path.join(d, "absent.tsv"), os.path.join(d, "empty.tsv")):
             put(os.path.join(d, "empty.tsv"), "")
-            B.append_creators(d, creators, B.ACG_ADD)
+            B.append_creators(d, creators, B.ACG_ADD, stores=os.path.join(d, "absent-stores.tsv"))   # both sources absent or empty
             self.assertEqual(before, {n: get(os.path.join(d, n)) for n in names}, creators)
         self.assertEqual(hashlib.sha256(before["names-add.tsv"]).hexdigest(), json.loads(before["names.json"])["files"]["names-add.tsv"]["sha256"])
         with open(os.path.join(B.LEX, "names-add.tsv"), encoding="utf-8", newline="") as f:
-            kept = "".join(l for l in B._lines(f.read()) if l.split("\t")[3].rstrip("\n") != "creator")
-        self.assertEqual(hashlib.sha256(kept.encode()).hexdigest(), PRE_APPEND_NAMES_ADD_SHA256, "the non-creator rows are the pre-append file, byte for byte")
+            kept = "".join(l for l in B._lines(f.read()) if l.split("\t")[3].rstrip("\n") not in ("creator", "store"))
+        self.assertEqual(hashlib.sha256(kept.encode()).hexdigest(), PRE_APPEND_NAMES_ADD_SHA256, "the rows other than creator and store are the pre-append file, byte for byte")
         if os.path.exists(B.CREATORS):      # once the real file exists, the committed names-add.tsv must carry exactly its words, creator rows last
             tags = [l.split("\t")[3].rstrip("\n") for l in get(os.path.join(B.LEX, "names-add.tsv")).decode().splitlines()]
             self.assertEqual(tags, sorted(tags, key=B.TAGS.index))

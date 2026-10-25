@@ -32,8 +32,8 @@
 - **名單層內的同讀音**（`build_names.py` 現在遇到和非 creator 列同讀音就中止，要照下面改）：
   - 新名字（人名或店家）和名單層既有列（標籤 `names`）同讀音：不收（既有列不能移動，兩邊加分相同、先後不可靠）。
   - 店家和 creator 列同讀音：不收（creator 已出貨）。
-  - 新的人名和新的人名、新的店家和新的店家同讀音：照 PTT 文章數排，後面的扣 `SLANG_BEHIND`（第 k 個扣 k 倍），只當候選（同 `names-creators.md`）。
-  - 新的人名和新的店家同讀音：照文章數排，後面的扣分。
+  - 同一個標籤裡同讀音的新列：照來源檔裡的順序，後面的扣 `SLANG_BEHIND`（第 k 個扣 k 倍），只當候選；產生來源檔時依 PTT 文章數由多到少排（工具不依備註的數字重排，因為 `names-creators.tsv` 有人工排在前面的 峰哥，重排會改到已出貨的列）。
+  - 店家和任何 creator 列同讀音（新舊都算）一律不收店家（工具分不出哪個 creator 已經出貨；實作時的判斷，和上面「店家和 creator 列同讀音不收」一致）。
   - 每一種組合在測試裡各有一個例子；被擋的名字與原因記進研究紀錄。
 - **建置（只在檔尾追加）**：照 `names-creators.md` §2；店家放新的來源檔 `data/lexicon/names-stores.tsv`（欄位同 `names-creators.tsv`），標籤 `store`；人名照舊放 `names-creators.tsv`（標籤 `creator`）。`tools/build_names.py --append-creators` 改成：
   - 檔尾順序固定為 既有列（`names`）→ `creator` → `store`；
