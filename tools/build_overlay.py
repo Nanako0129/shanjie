@@ -191,7 +191,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     moe_first = moe_primary_first() if (moedict_readings or supplement) else None
     concised = load_concised() if (moedict_readings or supplement) else None
     syllables = base_syllables(base)
-    tones = base_tones(base) if concised is not None else None
+    tones = base_tones() if concised is not None else None
     jp_drop = jp_drop_set({c for t in [*concised, *moe] for c in t}) if moedict_readings else frozenset()   # 日文新字體：字不在簡編本與萌典的任何詞條
     sup_cand = set()
     if supplement:                                  # 萌典補詞：先挑出來，再和維基標題一起走下面的異體／重複判斷（契約 §2.1a）
@@ -202,7 +202,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         cand |= sup_cand
     info = {}                                       # 詞 → Info(寫出的讀音, 同讀音的基底異體詞, 那個讀音, 異體判斷用的讀音們)
     pick = reading_picker(base, syllables, moe_first, concised, fold_w) if moedict_readings else None
-    changed, kept_old = [], set()
+    changed, kept_old, fell_same = [], set(), collections.Counter()
     for w in sorted(cand):
         syls = base.to_syllables(w)
         if syls is not None:
@@ -224,18 +224,20 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
                         changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{p.how} (kept)\n")
                         kept_old.add(w)
                 elif new:
-                    if new != syls or p.fell:
+                    if new != syls:                  # 只列寫出的讀音和現在不同的；退下來卻停在現在讀音的只計數
                         changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(new)}\t{p.how}{f' ({p.fell})' if p.fell else ''}\n")
+                    elif p.fell:
+                        fell_same[p.fell] += 1
                     syls, extras = new, p.extras
             tone = None
             if pick or w in sup_cand:               # 第二列與輕聲的本調列（契約 §2.3 修訂四）；只有新讀音的來源才有，單獨開萌典補詞時維基標題照舊
                 changed += [f"{w}\t{' '.join(syls)}\t{' '.join(v)}\t{tag}\n" for v, tag in p.listed]
                 changed += [f"{w}\t{' '.join(syls)}\t{' '.join(e)}\t第二列（簡編本變／語音）\n" for e in extras]
-                tone = tone_row(w, syls, tones)
+                tone, how = tone_row(w, syls, tones, p.tone)
                 if tone:
-                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(tone)}\t輕聲本調列（排在前）\n")
-                elif any(x.endswith("˙") for x in syls):
-                    changed.append(f"{w}\t{' '.join(syls)}\t\t輕聲無本調（不寫第二列）\n")
+                    changed.append(f"{w}\t{' '.join(syls)}\t{' '.join(tone)}\t輕聲本調列（排在前；{how}）\n")
+                elif how:
+                    changed.append(f"{w}\t{' '.join(syls)}\t\t輕聲無本調（{how}，不寫第二列）\n")
             allr = ([tone] if tone else []) + [syls, *extras]
             tries = list(dict.fromkeys([*map(tuple, allr), tuple(old)]))   # the written readings first, then today's
             twin = next(((b, r) for r in tries for b, _ in base.by_reading[r] if fold_w(b) == fold_w(w)), (None, None))
@@ -298,8 +300,10 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     if reading_report:
         with open(reading_report, "w", encoding="utf-8", newline="\n") as f:
             f.write("詞\t原讀音\t新讀音\t依據\n" + "".join(changed))
-        print(f"reading report: {len(changed)} rows (readings that change, the CHECK and GAP words that keep theirs, and the second rows), {reading_report}")
+        print(f"reading report: {len(changed)} rows (readings that change, the CHECK and GAP words that keep theirs, the second rows and the base-tone rows), {reading_report}")
     if pick:
+        print(f"--moedict-readings: {sum(fell_same.values())} words fell back from the concised dictionary and end on today's reading (not in the report): "
+              + "; ".join(f"{k} {n}" for k, n in fell_same.most_common()))
         print(f"--moedict-readings: {len(jp_removed)} words with a Japanese-form character are not written (listed in {os.path.relpath(JP_REMOVED, ROOT)})")
     return rows, removed, variant_removed, jp_removed
 
@@ -365,7 +369,7 @@ def manual_words(path=MANUAL):
 
 
 Concised = collections.namedtuple("Concised", "syls variants")   # 簡編本一個詞名取的那一列：注音一式（音節 list）、[(變體類型, 變體注音 list)]
-Pick = collections.namedtuple("Pick", "syls how extras fell listed")   # 讀音、依據、第二列們、退下來的原因（報告用）、字典有但不寫的變體 [(讀音, 標籤)]
+Pick = collections.namedtuple("Pick", "syls how extras fell listed tone", defaults=(None,))   # 讀音、依據、第二列們、退下來的原因（報告用）、字典有但不寫的變體 [(讀音, 標籤)]、簡編本給的本調列（沒有是 None）
 
 
 def check_sha(path, sha, name):
@@ -381,7 +385,7 @@ def concised_syls(s):
 def load_concised(path=None):
     """教育部《國語辭典簡編本》xlsx（在 zip 裡）→ {詞名: Concised}。先核對 zip 的 SHA-256；只用標準庫。欄位照表頭找：字詞名、多音排序、注音一式、
     變體類型（表頭以此開頭；值 變／又音／語音／讀音）、變體注音。一個詞名有好幾列取多音排序最小的一列（同序取檔案順序在前）；
-    變體只取這一列自己的。契約 §2.3 修訂四。"""
+    變體只取這一列自己的。多音排序空白排最後。契約 §2.3 修訂四。"""
     path = path or CONCISED
     check_sha(path, CONCISED_SHA256, "the concised dictionary")
     ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -400,10 +404,12 @@ def load_concised(path=None):
         el.clear()
         if not head:                                # 第一列是表頭
             head = {name: col for col, name in cells.items()}
-            col = {k: next(c for n, c in head.items() if n.startswith(k)) for k in ("字詞名", "多音排序", "注音一式", "變體類型", "變體注音")}
+            col = {k: next((c for n, c in head.items() if n.startswith(k)), None) for k in ("字詞名", "多音排序", "注音一式", "變體類型", "變體注音")}
+            if missing := [k for k, c in col.items() if c is None]:
+                sys.exit(f"the concised dictionary has no column {'、'.join(missing)} in its header; the file is not the one the contract pins")
             continue
         w, syls = cells.get(col["字詞名"], "").strip(), concised_syls(cells.get(col["注音一式"], ""))
-        order = int(cells.get(col["多音排序"]) or 0)
+        order = float(cells.get(col["多音排序"]) or math.inf)   # 空白排在所有有編號的列後面；float 容許 "1.0"
         if w and syls and (w not in best or order < best[w][0]):
             kind, var = cells.get(col["變體類型"], "").strip(), concised_syls(cells.get(col["變體注音"], ""))
             best[w] = (order, Concised(syls, [(kind, var)] if kind and var else []))
@@ -432,19 +438,33 @@ def unusable(w, syls, syllables):
     return None if all(s in syllables for s in syls) else "有基底沒有的音節"
 
 
+def concised_tone(w, c, syllables):
+    """簡編本那一列的主讀音有輕聲，而某個「變」正是它的本調（只有主讀音輕聲的位置換成非輕聲，其餘音節相同、合 unusable 的條件）→ 那個變體；沒有回 None。"""
+    neu = lambda s: s.endswith("˙")
+    for kind, v in c.variants:
+        if kind == "變" and len(v) == len(c.syls) and v != c.syls and all(a == b or (neu(a) and not neu(b)) for a, b in zip(c.syls, v)) \
+                and not unusable(w, v, syllables):
+            return v
+    return None
+
+
 def concised_variants(w, c, syllables):
-    """簡編本那一列的變體 → (寫成第二列的讀音們, [(讀音, 標籤)] 不寫的)。變：只差 一／不 的不寫（overlay_rows 補變調列）；把音節變輕聲的寫成第二列；其他不寫。
-    語音：第二列。又音、讀音：不寫。要寫的都得合 unusable 的條件，不合就不寫、記原因。"""
+    """簡編本那一列的變體 → (寫成第二列的讀音們, [(讀音, 標籤)] 不寫的)。變：只差 一／不 的不寫（overlay_rows 補變調列）；本調（concised_tone）不在這裡，當本調列；
+    變體的輕聲位置以外每個音節都和主讀音相同、而且有音節變輕聲的，寫成第二列；其他不寫。語音：第二列。又音、讀音：不寫。要寫的都得合 unusable 的條件，不合就不寫、記原因。"""
     extra, listed = [], []
+    tone = concised_tone(w, c, syllables)
     for kind, v in c.variants:
         if kind in ("又音", "讀音"):
             listed.append((v, f"簡編本{kind}（不寫）"))
             continue
         if kind == "變":
+            if v == tone:
+                continue
             same = len(v) == len(c.syls)
             if same and all(a == b or (i < len(w) and w[i] in "一不") for i, (a, b) in enumerate(zip(c.syls, v))):
                 continue
-            if not (same and any(b.endswith("˙") and not a.endswith("˙") for a, b in zip(c.syls, v))):
+            neu = lambda s: s.endswith("˙")
+            if not (same and all(a == b or (neu(b) and not neu(a)) for a, b in zip(c.syls, v)) and any(neu(b) and not neu(a) for a, b in zip(c.syls, v))):
                 listed.append((v, "簡編本變（不是輕聲也不是 一／不 變調，不寫）"))
                 continue
         why = unusable(w, v, syllables)
@@ -470,27 +490,51 @@ def dict_pick(w, concised, moe, syllables, fold_w):
                 fell.append(f"{name}不合：{why}")
                 continue
             extras, listed = concised_variants(w, e, syllables) if tag == "concised" else ([], [])
-            return Pick(main, tag, extras, "；".join(fell) or None, listed)
+            return Pick(main, tag, extras, "；".join(fell) or None, listed, concised_tone(w, e, syllables) if tag == "concised" else None)
     return Pick(None, None, [], "；".join(fell) or None, [])
 
 
-def base_tones(base):
-    """字 → 基底裡這個字當單字詞、分數最高的非輕聲讀音（同分取檔案順序在前）。輕聲換本調用。"""
-    best = {}
-    for syls, ents in base.by_reading.items():
-        if len(syls) == 1 and not syls[0].endswith("˙"):
-            for ch, s in ents:
-                if len(ch) == 1 and (ch not in best or s > best[ch][1]):
-                    best[ch] = (syls[0], s)
-    return {ch: r for ch, (r, _) in best.items()}
+TONE_MARKS = "ˊˇˋ˙"
 
 
-def tone_row(w, syls, tones):
-    """syls 有輕聲時，同一個位置換成那個字的本調的讀音 list；沒有輕聲或某個字沒有非輕聲讀音回 None。"""
+def rime(syl):
+    """音節去掉聲調符號（一聲沒有符號）。"""
+    return syl.rstrip(TONE_MARKS)
+
+
+def base_tones(path=BASE):
+    """字 → [(讀音, 分數)]：基底裡這個字當單字詞的非輕聲讀音，照這個字自己的列在 mcbpmf-data.txt 裡的順序。輕聲換本調用（tone_row）。"""
+    out = collections.defaultdict(list)
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            parts = line.split()
+            if line[0] in "#_" or len(parts) != 3 or len(parts[1]) != 1 or "-" in parts[0] or parts[0].endswith("˙"):
+                continue
+            out[parts[1]].append((parts[0], float(parts[2])))
+    return out
+
+
+def tone_row(w, syls, tones, given=None):
+    """syls 有輕聲時回 (換成本調的讀音 list 或 None, 依據)，沒有輕聲回 (None, None)。依據：簡編本變（given，簡編本自己給的本調，直接用它）／同韻最高分
+    （有的位置沒有同韻讀音，那個位置保留輕聲，依據另註）／沒有同韻的非輕聲讀音（沒有任何位置能換：回 None，不寫第二列）。
+    本調的規則和 docs/contracts/neutral-tolerance.md §1 相同：輕聲音節的本調＝這個字的非輕聲單字讀音裡同韻（去掉聲調符號後相同）分數最高的；
+    平手取這個字自己的列在 mcbpmf-data.txt 裡最前面的（tones 的串列順序，max 取第一個）；沒有同韻的非輕聲讀音時那個位置保留輕聲
+    （核心不收沒有聲調的 ㄉㄜ、ㄌㄜ，一聲的後備寫了也打不到）。結果過 normalize。"""
     pos = [i for i, s in enumerate(syls) if s.endswith("˙")]
-    if not pos or any(w[i] not in tones for i in pos):
-        return None
-    return [tones[w[i]] if i in pos else s for i, s in enumerate(syls)]
+    if not pos:
+        return None, None
+    if given:
+        return normalize(w, given), "簡編本變"
+    out, kept = list(syls), False
+    for i in pos:
+        same = [x for x in tones.get(w[i], ()) if rime(x[0]) == rime(syls[i])]
+        if same:
+            out[i] = max(same, key=lambda x: x[1])[0]
+        else:
+            kept = True
+    if out == list(syls):
+        return None, "沒有同韻的非輕聲讀音"
+    return normalize(w, out), "同韻最高分，其他輕聲位置保留輕聲" if kept else "同韻最高分"
 
 
 def word_rows(w, readings, score, src):
@@ -695,11 +739,13 @@ def main():
     rows, removed, variant_removed, jp_removed = build(a.moedict_readings, a.reading_report, a.moedict_supplement, a.jobs)
     outputs = [(OUT, rows), (REMOVED, removed), (VARIANT_REMOVED, variant_removed)] + ([(JP_REMOVED, jp_removed)] if a.moedict_readings else [])   # 日文寫法檔只有 --moedict-readings 才有
     if a.check:
-        same = all(open(path, encoding="utf-8").readlines() == lines for path, lines in outputs)
+        same = all(os.path.exists(path) and open(path, encoding="utf-8").readlines() == lines for path, lines in outputs)   # 檔案不在＝不同
         print(f"{len(rows)} rows, {len(removed)} removed, {len(variant_removed)} variant-removed"
               + (f", {len(jp_removed)} jp-removed" if a.moedict_readings else "") + f"; {'matches' if same else 'DIFFERS FROM'} the files in the repo")
         sys.exit(0 if same else 1)
     os.makedirs(os.path.dirname(VARIANT_REMOVED), exist_ok=True)
+    if not a.moedict_readings and os.path.exists(JP_REMOVED):   # 預設的疊加層不拿掉日文寫法：舊檔會寫著已經回到疊加層的詞
+        os.remove(JP_REMOVED)
     for path, lines in outputs:
         with open(path + ".tmp", "w", encoding="utf-8") as f:
             f.writelines(lines)

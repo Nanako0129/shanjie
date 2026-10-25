@@ -150,7 +150,7 @@ class BuildFlags(unittest.TestCase):
                    mock.patch.object(readings, "make_reader", lambda lex, **kw: stub), mock.patch.object(bc, "TRAD_SIMP_ONLY", set(simp)),
                    mock.patch.object(B, "load_concised", lambda: concised or {}), mock.patch.object(B, "jp_drop_set", lambda chars, path=None: set(jp))]
         if tones is not None:
-            patches.append(mock.patch.object(B, "base_tones", lambda base: tones))
+            patches.append(mock.patch.object(B, "base_tones", lambda *a: tones))
         with contextlib.ExitStack() as st, contextlib.redirect_stdout(io.StringIO()):
             for p in patches:
                 st.enter_context(p)
@@ -291,10 +291,18 @@ class BuildFlags(unittest.TestCase):
             self.assertEqual(self.written(rows, w), [("-".join(self.syls(w)[::-1]), B.SCORE[2])])
             self.assertIn(f"{w}\t{' '.join(self.syls(w))}\t{' '.join(self.syls(w)[::-1])}\tmoedict (簡編本不合：{why})", self.report(d))
 
-    def test_base_tones_takes_the_highest_scoring_non_neutral_single_character_reading(self):
-        tones = B.base_tones(self.base)
-        self.assertEqual((tones["罷"], tones["把"]), ("ㄅㄚˋ", "ㄅㄚˇ"))          # 罷 also has ㄆㄧˊ (-6.8) and the neutral ㄅㄚ˙ (-6.8); 把 has ㄅㄚˇ (-3.4) and ㄅㄚˋ (-6.8)
-        self.assertFalse([r for r in tones.values() if r.endswith("˙")])
+    def test_the_real_base_gives_the_same_rime_base_tone_and_a_neutral_without_one_stays_neutral(self):
+        tones = B.base_tones()
+        row = lambda w, s: B.tone_row(w, s, tones)[0]
+        self.assertEqual(row("桌子", ["ㄓㄨㄛ", "ㄗ˙"]), ["ㄓㄨㄛ", "ㄗˇ"])                  # neutral-tolerance.md section 1 examples
+        self.assertEqual(row("石頭", ["ㄕˊ", "ㄊㄡ˙"]), ["ㄕˊ", "ㄊㄡˊ"])
+        self.assertEqual(row("我們", ["ㄨㄛˇ", "ㄇㄣ˙"]), ["ㄨㄛˇ", "ㄇㄣˊ"])
+        self.assertEqual(row("你和", ["ㄋㄧˇ", "ㄏㄜ˙"]), ["ㄋㄧˇ", "ㄏㄜˊ"])                # 和 has ㄏㄢˋ (-3.0) too, but that is another rime
+        self.assertEqual(row("丁罷", ["ㄉㄧㄥ", "ㄅㄚ˙"]), ["ㄉㄧㄥ", "ㄅㄚˋ"])
+        self.assertEqual(row("桌子的", ["ㄓㄨㄛ", "ㄗ˙", "ㄉㄜ˙"]), ["ㄓㄨㄛ", "ㄗˇ", "ㄉㄜ˙"])      # mixed: 子 changes, 的 (only ㄉㄧˊ ㄉㄧˋ, another rime) keeps its neutral syllable
+        for w, s, why in (("一定的", ["ㄧ", "ㄉㄧㄥˋ", "ㄉㄜ˙"], "沒有同韻的非輕聲讀音"), ("好了", ["ㄏㄠˇ", "ㄌㄜ˙"], "沒有同韻的非輕聲讀音"),
+                          ("對著", ["ㄉㄨㄟˋ", "ㄓㄜ˙"], "沒有同韻的非輕聲讀音"), ("怎麼樣", ["ㄗㄣˇ", "ㄇㄜ˙", "ㄧㄤˋ"], "沒有同韻的非輕聲讀音")):
+            self.assertEqual(B.tone_row(w, s, tones), (None, why), w)                         # nothing to change: no base-tone row, and no toneless ㄉㄜ ㄌㄜ ㄓㄜ ㄇㄜ
 
     def test_a_neutral_reading_also_gets_its_base_tone_row_first_whatever_the_source(self):
         w = self.ba
@@ -303,15 +311,38 @@ class BuildFlags(unittest.TestCase):
         for kw in ({"extra_moe": {w: tuple(neutral)}}, {"concised": {w: B.Concised(neutral, [])}}):
             (rows, _, _, _), d = self.build(True, report=True, titles=[w], **kw)
             self.assertEqual(self.written(rows, w), [(f"{a}-ㄅㄚˋ", B.SCORE[2]), (f"{a}-ㄅㄚ˙", B.SCORE[2])])
-            self.assertIn(f"{w}\t{a} ㄅㄚ˙\t{a} ㄅㄚˋ\t輕聲本調列（排在前）", self.report(d))
+            self.assertIn(f"{w}\t{a} ㄅㄚ˙\t{a} ㄅㄚˋ\t輕聲本調列（排在前；同韻最高分）", self.report(d))
 
-    def test_a_neutral_character_without_a_non_neutral_reading_gets_no_second_row_and_is_listed(self):
+    def test_a_neutral_character_without_a_same_rime_reading_gets_no_second_row_and_the_report_says_so(self):
         w = self.ba
         a = self.syls(w)[0]
-        tones = {c: r for c, r in B.base_tones(self.base).items() if c != "罷"}
-        (rows, _, _, _), d = self.build(True, report=True, titles=[w], extra_moe={w: (a, "ㄅㄚ˙")}, tones=tones)
+        (rows, _, _, _), d = self.build(True, report=True, titles=[w], extra_moe={w: (a, "ㄅㄚ˙")}, tones={})
         self.assertEqual(self.written(rows, w), [(f"{a}-ㄅㄚ˙", B.SCORE[2])])
-        self.assertIn(f"{w}\t{a} ㄅㄚ˙\t\t輕聲無本調（不寫第二列）", self.report(d))
+        self.assertIn(f"{w}\t{a} ㄅㄚ˙\t\t輕聲無本調（沒有同韻的非輕聲讀音，不寫第二列）", self.report(d))
+
+    def test_the_concised_variant_that_is_the_base_tone_of_a_neutral_main_reading_is_the_base_tone_row(self):
+        w = self.ba
+        a = self.syls(w)[0]
+        c = {w: B.Concised([a, "ㄅㄚ˙"], [("變", [a, "ㄅㄚˇ"])])}                  # the dictionary says ㄅㄚˇ although the guess would be ㄅㄚˋ
+        (rows, _, _, _), d = self.build(True, report=True, titles=[w], concised=c)
+        self.assertEqual(self.written(rows, w), [(f"{a}-ㄅㄚˇ", B.SCORE[2]), (f"{a}-ㄅㄚ˙", B.SCORE[2])])
+        rep = self.report(d)
+        self.assertIn(f"{w}\t{a} ㄅㄚ˙\t{a} ㄅㄚˇ\t輕聲本調列（排在前；簡編本變）", rep)
+        self.assertFalse([l for l in rep if l.startswith(w + "\t") and "不寫" in l])   # it is the base-tone row, not a variant that is left out
+        c = {w: B.Concised([a, "ㄅㄚ˙"], [("變", ["ㄅㄚˇ", "ㄅㄚˇ"])])}              # it also changes a syllable that is not neutral: not the pair, the guess stays
+        (rows, _, _, _), d = self.build(True, report=True, titles=[w], concised=c)
+        self.assertEqual(self.written(rows, w), [(f"{a}-ㄅㄚˋ", B.SCORE[2]), (f"{a}-ㄅㄚ˙", B.SCORE[2])])
+        self.assertTrue([l for l in self.report(d) if l.startswith(w + "\t") and "不寫" in l])
+
+    def test_a_neutral_variant_must_keep_every_non_neutral_syllable_of_the_main_reading(self):
+        ok, bad = self.words[8:10]
+        main = {w: self.syls(w) for w in (ok, bad)}
+        c = {ok: B.Concised(main[ok], [("變", [main[ok][0], self.NEUTRAL])]),
+             bad: B.Concised(main[bad], [("變", [main[bad][1], self.NEUTRAL])])}    # the first syllable differs as well
+        (rows, _, _, _), d = self.build(True, report=True, titles=[ok, bad], concised=c)
+        self.assertEqual(len(self.written(rows, ok)), 2)
+        self.assertEqual(len(self.written(rows, bad)), 1)
+        self.assertTrue([l for l in self.report(d) if l.startswith(bad + "\t") and "簡編本變（不是輕聲也不是" in l])
 
     def test_a_word_with_a_dropped_japanese_form_is_not_written_and_is_recorded(self):
         w = self.other
@@ -384,6 +415,29 @@ class ConcisedSources(unittest.TestCase):
         self.assertEqual(got, {"甲乙": B.Concised(["ㄅㄧㄥˇ", "ㄉㄧㄥ˙"], [("語音", ["ㄅㄧㄥˇ", "ㄉㄧㄥ"])]),
                                "戊己": B.Concised(["ㄨˋ", "ㄍㄜ"], [("又音", ["ㄨˋ", "ㄍㄜ˙"])])})
 
+    def load(self, rows):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.zip_with(d, rows)
+            with mock.patch.object(B, "CONCISED_SHA256", B.sha256_file(path)):
+                return B.load_concised(path)
+
+    def test_a_blank_order_sorts_after_every_number_and_a_float_order_is_read(self):
+        header = ["字詞名", "多音排序", "注音一式", "變體類型", "變體注音"]
+        got = self.load([header,
+                         ["甲乙", None, "ㄅㄧㄥˇ ㄉㄧㄥ", None, None],              # blank: last, although first in the file
+                         ["甲乙", 7, "ㄐㄧㄚˇ ㄧˇ", None, None],
+                         ["丙丁", None, "ㄨˋ ㄍㄜ", None, None],                    # a blank order alone still gives the word
+                         ["戊己", "2.0", "ㄒㄧㄡ ㄍㄜ", None, None],                # "2.0" as text: float() reads it
+                         ["戊己", "10", "ㄨˋ ㄧ", None, None]])                      # 10 > 2.0 numerically (not as strings)
+        self.assertEqual(got["甲乙"].syls, ["ㄐㄧㄚˇ", "ㄧˇ"])
+        self.assertEqual(got["丙丁"].syls, ["ㄨˋ", "ㄍㄜ"])
+        self.assertEqual(got["戊己"].syls, ["ㄒㄧㄡ", "ㄍㄜ"])
+
+    def test_a_missing_header_column_stops_the_build_and_names_it(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.load([["字詞名", "多音排序", "注音一式", "變體類型"], ["甲乙", 1, "ㄐㄧㄚˇ ㄧˇ", None]])
+        self.assertIn("變體注音", str(cm.exception))
+
     def test_a_file_with_the_wrong_hash_stops_the_build(self):
         with tempfile.TemporaryDirectory() as d:
             path = self.zip_with(d, [["字詞名", "多音排序", "注音一式", "變體類型", "變體注音"]])
@@ -415,6 +469,98 @@ class RuleKeepChars(unittest.TestCase):
             pick = B.reading_picker(base, B.base_syllables(base), {}, {}, lambda t: t)
             got = pick(w)
         self.assertEqual((got.syls, got.how), ([other, today[1]], "readings.py"))
+
+
+class ToneRow(unittest.TestCase):
+    """契約 §2.3 修訂四「輕聲」（和 neutral-tolerance.md §1 同一條規則）：本調＝同韻（去掉聲調後相同）的非輕聲單字讀音裡分數最高的；
+    平手取這個字自己的列在檔案裡最前面的；沒有同韻的非輕聲讀音時那個位置保留輕聲，整個詞沒有任何位置能換就不寫（回 None）。合成的基底檔。"""
+    BASE_TEXT = """# format
+_ctrl_x ! 0.0
+ㄗ˙ 子 -5
+ㄗ 子 -3
+ㄗˇ 子 -3
+ㄗㄜˇ 子 -1
+ㄊㄡˊ 頭 -3
+ㄊㄡ 頭 -3
+ㄊㄡ˙ 頭 -2
+ㄉㄜ˙ 的 -1
+ㄉㄧˊ 的 -3
+ㄉㄧˋ 的 -4
+ㄅㄨ˙ 不 -1
+ㄅㄨˊ 不 -2
+ㄅㄨˋ 不 -3
+ㄗˋ 子子 -1
+ㄗˋ-ㄗˋ 子 -1
+"""
+
+    @classmethod
+    def setUpClass(cls):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "b.txt")
+            open(p, "w", encoding="utf-8").write(cls.BASE_TEXT)
+            cls.tones = B.base_tones(p)
+
+    def test_base_tones_keeps_the_non_neutral_single_character_readings_in_the_characters_own_file_order(self):
+        self.assertEqual(self.tones["子"], [("ㄗ", -3.0), ("ㄗˇ", -3.0), ("ㄗㄜˇ", -1.0)])    # the neutral row, the multi-character word and the dash reading are out
+        self.assertEqual(self.tones["頭"], [("ㄊㄡˊ", -3.0), ("ㄊㄡ", -3.0)])
+
+    def test_the_highest_scoring_same_rime_reading_wins_and_a_tie_goes_to_the_earlier_row_of_that_character(self):
+        self.assertEqual(B.tone_row("桌子", ["ㄓㄨㄛ", "ㄗ˙"], self.tones), (["ㄓㄨㄛ", "ㄗ"], "同韻最高分"))     # ㄗ and ㄗˇ tie at -3; ㄗ is the earlier row; ㄗㄜˇ (-1) is another rime
+        self.assertEqual(B.tone_row("石頭", ["ㄕˊ", "ㄊㄡ˙"], self.tones)[0], ["ㄕˊ", "ㄊㄡˊ"])                  # the other character: ㄊㄡˊ is earlier than ㄊㄡ
+        flipped = {"子": [("ㄗˇ", -3.0), ("ㄗ", -3.0)]}
+        self.assertEqual(B.tone_row("桌子", ["ㄓㄨㄛ", "ㄗ˙"], flipped)[0], ["ㄓㄨㄛ", "ㄗˇ"])                  # same scores, the order of the character's rows decides, not the dict
+        better = {"子": [("ㄗ", -4.0), ("ㄗˇ", -3.0)]}
+        self.assertEqual(B.tone_row("桌子", ["ㄓㄨㄛ", "ㄗ˙"], better)[0], ["ㄓㄨㄛ", "ㄗˇ"])                   # a higher score beats an earlier row
+
+    def test_a_position_without_a_same_rime_reading_keeps_its_neutral_syllable_and_a_word_with_nothing_to_change_gets_no_row(self):
+        self.assertEqual(B.tone_row("的的", ["ㄉㄜ˙", "ㄉㄜ˙"], self.tones), (None, "沒有同韻的非輕聲讀音"))   # 的 has ㄉㄧˊ ㄉㄧˋ only: not the same rime
+        self.assertEqual(B.tone_row("了了", ["ㄌㄜ˙", "ㄌㄜ˙"], self.tones), (None, "沒有同韻的非輕聲讀音"))   # 了 is not in the table at all
+        self.assertEqual(B.tone_row("了子", ["ㄌㄜ˙", "ㄗ˙"], self.tones), (["ㄌㄜ˙", "ㄗ"], "同韻最高分，其他輕聲位置保留輕聲"))   # mixed: only 子 changes
+        self.assertEqual(B.tone_row("桌子的", ["ㄓㄨㄛ", "ㄗ˙", "ㄉㄜ˙"], self.tones)[0], ["ㄓㄨㄛ", "ㄗ", "ㄉㄜ˙"])
+        self.assertEqual(B.tone_row("子頭", ["ㄗˇ", "ㄊㄡ˙"], self.tones)[0], ["ㄗˇ", "ㄊㄡˊ"])                  # only the neutral position changes
+
+    def test_the_result_goes_through_normalize_and_a_given_base_tone_is_used_as_it_is(self):
+        self.assertEqual(B.tone_row("對不", ["ㄉㄨㄟˋ", "ㄅㄨ˙"], self.tones)[0], ["ㄉㄨㄟˋ", "ㄅㄨˋ"])           # 不: the highest same-rime row is ㄅㄨˊ (-2), normalize makes it ㄅㄨˋ
+        self.assertEqual(B.tone_row("桌子", ["ㄓㄨㄛ", "ㄗ˙"], self.tones, ["ㄓㄨㄛ", "ㄗˇ"]), (["ㄓㄨㄛ", "ㄗˇ"], "簡編本變"))
+        self.assertEqual(B.tone_row("對不", ["ㄉㄨㄟˋ", "ㄅㄨ˙"], self.tones, ["ㄉㄨㄟˋ", "ㄅㄨˊ"])[0], ["ㄉㄨㄟˋ", "ㄅㄨˋ"])   # a given row is normalized too
+        self.assertEqual(B.tone_row("甲乙", ["ㄐㄧㄚˇ", "ㄧˇ"], self.tones), (None, None))                          # no neutral syllable: no base-tone row
+
+
+class MainFiles(unittest.TestCase):
+    """main() with build() replaced: --check treats a missing file as different, and the default write removes a stale overlay-jp-removed.tsv."""
+    def run_main(self, d, *argv):
+        paths = {n: os.path.join(d, n) for n in ("OUT", "REMOVED", "VARIANT_REMOVED", "JP_REMOVED")}
+        built = (["a\n"], ["b\n"], ["c\n"], ["d\n"])
+        with contextlib.ExitStack() as st, contextlib.redirect_stdout(io.StringIO()):
+            for n, p in paths.items():
+                st.enter_context(mock.patch.object(B, n, p))
+            st.enter_context(mock.patch.object(B, "build", lambda *a, **k: built))
+            st.enter_context(mock.patch.object(sys, "argv", ["build_overlay.py", *argv]))
+            try:
+                B.main()
+            except SystemExit as e:
+                return e.code, paths
+        return 0, paths
+
+    def test_check_with_moedict_readings_and_no_jp_file_says_differs_instead_of_crashing(self):
+        with tempfile.TemporaryDirectory() as d:
+            for n, text in (("OUT", "a\n"), ("REMOVED", "b\n"), ("VARIANT_REMOVED", "c\n")):
+                open(os.path.join(d, n), "w", encoding="utf-8").write(text)
+            code, paths = self.run_main(d, "--check", "--moedict-readings")
+            self.assertEqual(code, 1)
+            self.assertFalse(os.path.exists(paths["JP_REMOVED"]))
+            open(paths["JP_REMOVED"], "w", encoding="utf-8").write("d\n")
+            self.assertEqual(self.run_main(d, "--check", "--moedict-readings")[0], 0)
+            self.assertEqual(self.run_main(d, "--check")[0], 0)                     # the default does not look at that file
+
+    def test_a_default_write_removes_a_stale_jp_file_and_the_flag_writes_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "JP_REMOVED"), "w", encoding="utf-8").write("stale\n")
+            _, paths = self.run_main(d)
+            self.assertFalse(os.path.exists(paths["JP_REMOVED"]))
+            self.assertEqual(open(paths["OUT"], encoding="utf-8").read(), "a\n")
+            self.run_main(d, "--moedict-readings")
+            self.assertEqual(open(paths["JP_REMOVED"], encoding="utf-8").read(), "d\n")
 
 
 class Cantonese(unittest.TestCase):

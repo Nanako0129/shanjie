@@ -465,7 +465,7 @@ class PackOovGrading(unittest.TestCase):
     def test_counts_table_missing_or_changed_stops_and_the_model_file_is_not_looked_at(self):
         with tempfile.TemporaryDirectory() as d:
             path = self.table(d, "a\t5\nb\t7\n")
-            sha = B.sha256_file(path)
+            sha = B.bo.sha256_file(path)
             with self.assertRaises(SystemExit):
                 B.load_counts(os.path.join(d, "nope.tsv"), sha)                  # missing
             with self.assertRaises(SystemExit):
@@ -492,9 +492,9 @@ class PackOovGrading(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 B.freeze_counts(model, out, add, model_sha="0" * 64)               # not the pinned model: nothing written
             self.assertFalse(os.path.exists(out))
-            self.assertGreater(B.freeze_counts(model, out, add, model_sha=B.sha256_file(model)), 0)
+            self.assertGreater(B.freeze_counts(model, out, add, model_sha=B.bo.sha256_file(model)), 0)
             lines = open(out, encoding="utf-8").read().splitlines()
-            self.assertEqual(lines[0], f"#model_sha256\t{B.sha256_file(model)}")
+            self.assertEqual(lines[0], f"#model_sha256\t{B.bo.sha256_file(model)}")
             self.assertTrue(lines[1].startswith("#N\t"))
             words = dict(l.split("\t") for l in lines[2:])
             self.assertIn("他", words)
@@ -503,7 +503,7 @@ class PackOovGrading(unittest.TestCase):
     def test_freeze_counts_command_line_takes_the_expected_model(self):
         for argv, want in ([], B.MODEL_V6_SHA), (["--expected-model", "ab" * 32], "ab" * 32):
             with mock.patch.object(sys, "argv", ["build_acg_pack.py", "freeze-counts"] + argv), \
-                 mock.patch.object(B, "freeze_counts", return_value=1) as fc, mock.patch.object(B, "sha256_file", return_value="x"), contextlib.redirect_stdout(io.StringIO()):
+                 mock.patch.object(B, "freeze_counts", return_value=1) as fc, mock.patch.object(B.bo, "sha256_file", return_value="x"), contextlib.redirect_stdout(io.StringIO()):
                 B.main()
             fc.assert_called_once_with(model_sha=want)
 

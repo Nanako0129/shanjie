@@ -803,7 +803,7 @@ TIE = 1e-6      # 同讀音的詞包詞，排在第 k 位的分數減 k × TIE�
 def freeze_counts(lm_path=LM, out=COUNTS, add=os.path.join(PACKS, "acg-add.tsv"), model_sha=MODEL_V6_SHA):
     """子命令 freeze-counts：data/lm 的模型雜湊要等於 model_sha（model-v6）才寫；寫出 add 裡每個詞在模型裡的次數（次數 0 的不寫，查不到就是 S_len）。
     檔頭兩行記模型雜湊與 N。"""
-    if sha256_file(lm_path) != model_sha:
+    if bo.sha256_file(lm_path) != model_sha:
         raise SystemExit(f"{lm_path}: not the model whose counts are frozen (SHA-256 {model_sha})")
     sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
     import lm as L          # 延後載入：只有這個子命令要讀模型
@@ -820,7 +820,7 @@ def load_counts(path=COUNTS, sha=None):
     sha = COUNTS_SHA if sha is None else sha
     if not os.path.exists(path):
         raise SystemExit(f"{path}: missing; run `build_acg_pack.py freeze-counts` first")
-    if not sha or sha256_file(path) != sha:
+    if not sha or bo.sha256_file(path) != sha:
         raise SystemExit(f"{path}: SHA-256 is not the pinned {sha or '(unset)'}")
     counts, n = {}, None
     for l in open(path, encoding="utf-8"):
@@ -986,14 +986,9 @@ def read_exclude(path):
     return out
 
 
-def sha256_file(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
 def load_v040(path=V040_WORDS, sha=V040_SHA):
     """v0.4.0 詞包的詞（契約 A3.2）；缺檔或雜湊不符就中止。"""
-    if not os.path.exists(path) or sha256_file(path) != sha:
+    if not os.path.exists(path) or bo.sha256_file(path) != sha:
         raise SystemExit(f"{path}: missing or not the v0.4.0 word list (SHA-256 {sha})")
     with open(path, encoding="utf-8") as f:
         return frozenset(l.rstrip("\n") for l in f if l.strip())
@@ -1003,7 +998,7 @@ def check_rule_lm(directory=RULE_LM_DIR):
     """契約 A3.3：規則模型的兩個檔都在而且雜湊相符，回傳 bigram.sjlm 的路徑（classes.sjc 由評測 CLI 從同一個資料夾載入）；否則中止並附下載指令。"""
     for name, sha in RULE_LM_SHA.items():
         path = os.path.join(directory, name)
-        if not os.path.exists(path) or sha256_file(path) != sha:
+        if not os.path.exists(path) or bo.sha256_file(path) != sha:
             raise SystemExit(f"rule model: {path} is missing or its SHA-256 is not {sha}; download it: {RULE_LM_HELP}")
     return os.path.join(directory, "bigram.sjlm")
 
@@ -1452,7 +1447,7 @@ def regrade(src, out=PACKS, bonus=0.0, empty_counts=False):
     """子命令 regrade：src 的 acg-add.tsv 只重算強制詞（第 1b 節）的分數寫到 out，其他列照抄；acg-sources.tsv 複製（`write_all` 套 SOURCE_FIXES）；acg.json 換檔案雜湊與 version，加 regrade_bonus。"""
     counts, n = ({}, 1) if empty_counts else load_counts()
     rank = collision_rank(read_tsv(os.path.join(PACKS, "acg-collisions.tsv")))
-    if sha256_file(os.path.join(src, "acg-add.tsv")) != REGRADE_SRC_SHA:
+    if bo.sha256_file(os.path.join(src, "acg-add.tsv")) != REGRADE_SRC_SHA:
         raise SystemExit(f"{src}/acg-add.tsv is not the ungraded A4 pack (SHA-256 {REGRADE_SRC_SHA}); get it with "
                          f"`git show {REGRADE_SRC_COMMIT[:8]}:data/packs/acg-add.tsv` (and acg-sources.tsv, acg.json)")
     lines = open(os.path.join(src, "acg-add.tsv"), encoding="utf-8").readlines()
@@ -1470,7 +1465,7 @@ def main():
     if sys.argv[1:2] == ["freeze-counts"]:
         fp = argparse.ArgumentParser(prog="build_acg_pack.py freeze-counts")
         fp.add_argument("--expected-model", default=MODEL_V6_SHA, help="SHA-256 of the model in data/lm whose counts are frozen (default: model-v6)")
-        print(f"{COUNTS}: {freeze_counts(model_sha=fp.parse_args(sys.argv[2:]).expected_model)} words; pin its SHA-256 ({sha256_file(COUNTS)}) in COUNTS_SHA")
+        print(f"{COUNTS}: {freeze_counts(model_sha=fp.parse_args(sys.argv[2:]).expected_model)} words; pin its SHA-256 ({bo.sha256_file(COUNTS)}) in COUNTS_SHA")
         return
     if sys.argv[1:2] == ["regrade"]:
         rp = argparse.ArgumentParser(prog="build_acg_pack.py regrade")
