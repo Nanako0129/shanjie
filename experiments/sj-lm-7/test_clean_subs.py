@@ -94,6 +94,10 @@ class Reject(unittest.TestCase):
         self.assertEqual(self.why(KEEP + " ok go"), "english")
         self.assertIsNone(self.why(KEEP + " ok"))                                      # one English word stays
         self.assertEqual(self.why(KEEP + SIMP), "simplified")
+        for s in ("你為什么", "這里很好玩", "我們最后去", "對于你啊", "你愿意嗎", "我在包里"):
+            self.assertEqual(self.why(KEEP + s), "mainland", s)
+        for s in ("五公里路", "皇后陛下", "他姓于", "不能干涉", "下里巴人"):     # the shared characters in their traditional use stay
+            self.assertNotEqual(self.why(KEEP + s), "mainland", s)
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
         self.assertIsNone(self.why(KEEP + "好"))                                       # a single-character invade term is not a term
 
@@ -103,6 +107,8 @@ class Reject(unittest.TestCase):
         self.assertEqual(self.why("龘龘龘龘龘龘龘" + KEEP + " ok go"), "lexicon")
         self.assertEqual(self.why(KEEP + " ok go" + SIMP), "english")
         self.assertEqual(self.why(KEEP + SIMP + "視頻"), "simplified")
+        self.assertEqual(self.why(KEEP + SIMP + "什么"), "simplified")
+        self.assertEqual(self.why(KEEP + "什么視頻"), "mainland")
 
     def test_triggers_are_closed_set_labels_not_text(self):
         t = lambda step, s: C.trigger(step, s, self.ctx)
@@ -115,6 +121,7 @@ class Reject(unittest.TestCase):
         self.assertEqual(t("lexicon", "龘龘龘龘龘龘龘" + KEEP), "outside the lexicon 0.4")
         self.assertEqual(t("english", KEEP + " ok go"), "2 English words")
         self.assertEqual(t("simplified", KEEP + SIMP), SIMP)
+        self.assertEqual(t("mainland", KEEP + "我在包里"), "包里")             # a member of MAINLAND, a closed set
         self.assertEqual(t("invade", KEEP + "視頻"), "視頻")
 
 

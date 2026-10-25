@@ -12,6 +12,8 @@ Order, after p2clean.py's split / filters / Guard (copied from exp/p2-data 4f750
   lexicon       >= 30% of the Han characters are not a character of --lexicon's words
   english       >= 2 English words
   simplified    p2clean's TRAD_SIMP_ONLY character
+  mainland      a mainland phrase written with a character traditional Chinese also has (什么, 這里, 最后, 對于, 愿意: MAINLAND); the
+                simplified step lets these characters through on purpose (公里, 皇后), so only whole phrases are caught here
   invade        a term (two characters or more) of the invade list, the S7f generated-sentence rule (invade.load + Matcher.any)
   dedupe        NFKC + whitespace removed + case folded
   guard         p2clean.Guard over the evaluation / tuning / judging sets and the holdout (4-character containment for the holdout)
@@ -57,7 +59,15 @@ MIN_KEPT_HAN = 4_000_000   # contract 2.7: subtitles >= 4,000,000 Han characters
 TOP = 20
 REQUIRED_LABELS = ("holdout", "chatclause", "discordtune", "cvtune-clean", "chatjudge2")   # the sets the guard must cover
 CUE_SPLIT = re.compile(r"\s+[-–—－]+\s*")      # a second speaker's dash inside a line ("- A - B"); a hyphen with no space before it is not one
-STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "invade", "dedupe", "guard"]
+STEPS = ["han_len", "han_ratio", "url", "digits", "code", "kana", "lexicon", "english", "simplified", "mainland", "invade", "dedupe", "guard"]
+# Contract 2.7 (maintainer 2026-10-25): the 300-sentence proofread found 18 of 300 machine-converted lines with these shared characters (么 里
+# 后 于 愿) in their mainland use. Phrases, not characters, so 公里, 皇后, 姓于 and 干涉 stay; 能干 and 下里 are left out (不能干涉, 下里巴人).
+MAINLAND = tuple("""什么 怎么 那么 這么 多么 要么 甚么 這里 那里 哪里 屋里 家里 心里 手里 眼里 夜里 城里 村里 店里 房里 包里 車里 袋里 子里 水里
+    室里 院里 樓里 獄里 營里 洞里 宮里 廳里 間里 私下里 里面 里頭 里邊 最后 然后 以后 之后 后來 后面 后悔 隨后 背后 前后 后天 后果 后退 落后
+    稍后 今后 此后 事后 后頭 后邊 對于 由于 關于 于是 終于 等于 至于 屬于 位于 善于 在于 過于 敢于 基于 用于 處于 向于 便于 樂于 歸于 急于
+    忙于 免于 出于 鑒于 限于 勇于 愿意 心愿 愿望 自愿 情愿 寧愿 但愿 志愿 祝愿 如愿 干嘛 干活 干淨 干杯 干脆 干掉 實干 准備 標准 准確 准時
+    關系 聯系 范圍 戰斗 奮斗 斗爭 放松 輕松 采取 采訪""".split())
+MAINLAND_RE = re.compile("|".join(map(re.escape, sorted(MAINLAND, key=len, reverse=True))))
 CUE_LEAD = re.compile(r"^(?:[-–—－\s]|[「『“\"])+")
 QUOTE_PAIRS = (("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'))
 
@@ -125,6 +135,8 @@ def trigger(step, s, ctx):
         return f"{min(len(ENGLISH_WORD.findall(s)), 5)}{'+' if len(ENGLISH_WORD.findall(s)) >= 5 else ''} English words"
     if step == "simplified":
         return next(c for c in s if c in ctx.simp)
+    if step == "mainland":
+        return MAINLAND_RE.search(s).group(0)
     if step == "invade":
         return next(ctx.invade_matcher.find(s))
     return step
@@ -144,6 +156,8 @@ def reject(s, ctx):
         return "english"
     if not ctx.simp.isdisjoint(s):
         return "simplified"
+    if MAINLAND_RE.search(s):
+        return "mainland"
     if ctx.invade_matcher.any(s):
         return "invade"
     return None
