@@ -27,10 +27,11 @@ class Review(unittest.TestCase):
     def test_apply_drops_the_flagged_sentences_and_keeps_the_order(self):
         flags = os.path.join(self.d, "flags")
         os.makedirs(flags)
-        open(os.path.join(flags, "flags-0000.txt"), "w", encoding="utf-8").write("1\t1\t那里有魚\n2\t4\t拼寫n\n9\t1\t抄錯的句子\n")
+        open(os.path.join(flags, "flags-0000.txt"), "w", encoding="utf-8").write("1\t1\t那里 有魚\n2\t4\t拼寫n\n9\t1\t抄錯的句子\n")   # an extra space still matches
         open(os.path.join(flags, "flags-0001.txt"), "w", encoding="utf-8").write("無\n")   # a reviewer's "none" line is not a flag
         st = self.run_quiet(R.apply, self.subs, flags, os.path.join(self.d, "out"))
-        self.assertEqual((st["lines"], st["flagged"], st["unmatched"], st["kept"]), (5, 2, 1, 3))
+        self.assertEqual((st["lines"], st["flagged_distinct"], st["unmatched_distinct"], st["kept"]), (5, 2, 1, 3))
+        self.assertEqual(len(json.load(open(os.path.join(self.d, "out", "manifest.json")))["flags"]), 2)
         kept = open(os.path.join(self.d, "out", "subs.tsv"), encoding="utf-8").read().splitlines()
         self.assertEqual(kept, [self.ROWS[0], self.ROWS[2], self.ROWS[4]])
 

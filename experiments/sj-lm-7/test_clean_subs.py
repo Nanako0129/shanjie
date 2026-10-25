@@ -100,7 +100,9 @@ class Reject(unittest.TestCase):
         self.assertIsNone(self.why("龘龘龘" + KEEP))                                  # 3 of 13: 23% stays
         self.assertEqual(self.why(KEEP + " ok go"), "english")
         self.assertIsNone(self.why(KEEP + " ok"))                                      # one English word stays
-        self.assertEqual(self.why(KEEP + "拼寫n"), "english")                          # a lone Latin letter goes
+        self.assertEqual(self.why(KEEP + "拼寫n"), "english")                          # a lone lowercase letter goes
+        for s in ("一件T恤", "去照X光", "他是B型"):                                     # uppercase stays
+            self.assertIsNone(self.why(KEEP[:6] + s), s)
         self.assertEqual(self.why(KEEP + SIMP), "simplified")
         for s in ("你為什么", "這里很好玩", "我們最后去", "對于你啊", "你愿意嗎", "我在包里"):
             self.assertEqual(self.why(KEEP + s), "mainland", s)
@@ -109,7 +111,7 @@ class Reject(unittest.TestCase):
         for s in ("皇后來了", "汽車里程", "若干活動", "海關系統", "去水里玩", "二里頭文化"):   # lexicon words decide the boundary
             self.assertNotEqual(self.why(KEEP + s), "mainland", s)
         self.assertEqual(self.why(KEEP + "什 么"), "mainland")
-        for s in ("萬事", "万事", "會緊張么", "去市里", "干了三年", "那伙計"):
+        for s in ("萬事", "万事", "會緊張么", "干了三年"):
             self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
         self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
@@ -138,6 +140,13 @@ class Reject(unittest.TestCase):
         self.assertEqual(t("simplified", KEEP + SIMP), SIMP)
         self.assertEqual(t("mainland", KEEP + "我在包里"), "包里")             # a member of MAINLAND, a closed set
         self.assertEqual(t("invade", KEEP + "視頻"), "視頻")
+
+
+class ShippedLexicon(unittest.TestCase):
+    def test_no_mainland_phrase_is_a_word_of_the_shipped_lexicon(self):
+        """A MAINLAND phrase that the shipped lexicon has as a word is dropped by mainland_rules, so it would never act (code review of #299)."""
+        words = C.lexicon_words(os.path.join(C.ROOT, "data", "lexicon", "mcbpmf-data.txt"))
+        self.assertEqual(sorted(m for m in C.MAINLAND if m in words), [])
 
 
 class Guarding(unittest.TestCase):

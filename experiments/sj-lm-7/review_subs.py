@@ -8,12 +8,11 @@ A suspect line holds a character traditional Chinese shares with a different mai
 rest is kept without review (900 hand-checked lines: all 41 residues were suspects, 6.9% of the lines were). A chunk holds sentences only:
 in the pilot, reviewers asked for an ID column wrote the Read tool's line positions instead, so the chunk carries no IDs. Reviewers (Sonnet
 subagents) write `position<TAB>category<TAB>sentence` per flagged sentence to FLAGS_DIR/flags-*.txt; `apply` drops by the sentence text (the
-third field), so the flags still apply after a re-clean renumbers the lines, and counts flag lines whose text is not a chunk sentence of
-SUBS_TSV as `unmatched` (a miscopy). Prints counts only, never sentence text.
+third field, compared on clean_subs' dedupe key), so the flags still apply after a re-clean renumbers the lines; distinct flagged texts that
+are not in SUBS_TSV are counted as `unmatched_distinct` (a miscopy, or a line a re-clean already dropped). Prints counts only.
 """
 import argparse
 import glob
-import hashlib
 import json
 import os
 import re
@@ -23,7 +22,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import clean_subs as C  # noqa: E402
 
-SUSPECT = re.compile("[里么后于游制余尸伙系干万愿癥硅准征杰壹范采松斗冲着元]|[A-Za-z*#♪♫§]")
+# clean_subs.SHARED plus characters the proofreads found outside it (游 制 余 尸 癥 硅 征 杰 壹 冲 着 元), Latin letters and subtitle marks
+SUSPECT = re.compile("[" + "".join(sorted(C.SHARED | set("游制余尸癥硅征杰壹冲着元"))) + "]|[A-Za-z*#♪♫§]")
 
 
 def read_tsv(path):
@@ -42,25 +42,28 @@ def prefilter(subs, out, chunk):
 
 
 def apply(subs, flags_dir, out):
+    """Flags are matched on clean_subs' dedupe key (NFKC, whitespace removed, case folded): subs.tsv is unique under it, and a reviewer's copy
+    with an extra space or a full-width letter still finds its sentence. Writes OUT/manifest.json with the input and every flags file."""
     rows = read_tsv(subs)
-    flagged = set()
+    flagged, files = set(), []
     for p in sorted(glob.glob(os.path.join(flags_dir, "*.txt"))):
+        files.append({"name": os.path.basename(p), "sha256": C.sha256_file(p)})
         for l in open(p, encoding="utf-8"):
-            f = l.rstrip("\n").split("\t")
+            f = l.rstrip("\r\n").split("\t")
             if len(f) >= 3 and f[0].strip().isdigit():
-                flagged.add(f[2])
-    present = {r[-1] for r in rows}
-    unmatched = len(flagged - present)
-    kept = [r for r in rows if r[-1] not in flagged]
+                flagged.add(C.P2.dedupe_key(f[2]))
+    present = {C.P2.dedupe_key(r[-1]) for r in rows}
+    kept = [r for r in rows if C.P2.dedupe_key(r[-1]) not in flagged]
     os.makedirs(out, exist_ok=True)
     halves = [r for r in kept if C.half(r[-1])]
-    stats = {"lines": len(rows), "flagged": len(flagged & present), "unmatched": unmatched, "kept": len(kept)}
+    stats = {"lines": len(rows), "flagged_distinct": len(flagged & present), "unmatched_distinct": len(flagged - present), "kept": len(kept)}
     for name, part in (("subs.tsv", kept), ("subs-half.tsv", halves)):
         p = os.path.join(out, name)
-        with open(p, "w", encoding="utf-8") as f:
-            f.writelines("\t".join(r) + "\n" for r in part)
-        stats[name] = {"rows": len(part), "han_chars": sum(C.P2.han_count(r[-1]) for r in part),
-                       "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()}
+        C.write_tsv(p, [(r[1], r[-1]) for r in part])
+        stats[name] = {"rows": len(part), "han_chars": sum(C.P2.han_count(r[-1]) for r in part), "sha256": C.sha256_file(p)}
+    with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump({"input": {"basename": os.path.basename(subs), "sha256": C.sha256_file(subs)}, "flags": files, "stats": stats}, f,
+                  ensure_ascii=False, indent=1)
     print(json.dumps(stats, ensure_ascii=False))
 
 
