@@ -90,6 +90,11 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
     }
+    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means false.
+    var englishKeyOrder: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishKeyOrder") }
+    }
 }
 
 /// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).

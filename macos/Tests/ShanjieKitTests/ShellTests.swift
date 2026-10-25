@@ -817,6 +817,51 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(third.client.marked, "rus", "and the stored true")
     }
 
+    /// zhen-keyorder section 3 / 5.3: the key-order choice defaults to false (a store with no value), is stored, takes effect (`c u p` and
+    /// Space opens the English window only with it, `ㄏㄧㄣ` is not a syllable), is sent again to every engine a rebuild makes (the core's
+    /// default is false, so a rebuilt engine would lose it if the shell did not send true), and closes an English window it opened when
+    /// it is turned off.
+    func testEnglishKeyOrderDefaultStoredAndSentToEveryEngine() {
+        let store = MemoryEnglishStore(true)
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        }
+        let window = { (c: Controller) -> [String] in c.type("cup "); return c.panel.items }
+        XCTAssertNil(store.englishKeyOrder, "never chosen")
+        let shell = make()
+        XCTAssertFalse(shell.englishKeyOrderOn, "no value is false")
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertEqual(window(c), [], "off: Space does nothing, as before")
+        c.press(Keys.esc)
+        shell.applyEnglishKeyOrder(true)
+        XCTAssertEqual(store.englishKeyOrder, true)
+        XCTAssertEqual(window(c), ["cup", "Cup", "CUP"], "on: the window opens without an overwrite")
+        shell.applyEnglishKeyOrder(false)
+        XCTAssertEqual(c.panel.items, [], "turning it off closes the window")
+        XCTAssertEqual(c.client.marked, "ㄏㄧㄣ", "the unfinished syllable stays")
+        c.press(Keys.esc)
+        shell.applyEnglishKeyOrder(true)
+        c.session.perform(.toggleAcgPack)  // rebuilds the engine
+        c.session.perform(.toggleAcgPack)
+        XCTAssertEqual(window(c), ["cup", "Cup", "CUP"], "the rebuilt engine got the choice")
+        c.press(Keys.esc)
+        c.session.perform(.layout(.eten))
+        c.session.perform(.layout(.standard))
+        XCTAssertEqual(window(c), ["cup", "Cup", "CUP"], "and the one rebuilt by a layout switch")
+        c.press(Keys.esc)
+        // A new shell reads the stored choice; with the stored false it does not open.
+        let again = Controller(make())
+        again.session.activate()
+        XCTAssertEqual(window(again), ["cup", "Cup", "CUP"], "a new shell reads the stored true")
+        again.press(Keys.esc)
+        store.englishKeyOrder = false
+        let third = Controller(make())
+        third.session.activate()
+        XCTAssertEqual(window(third), [], "and the stored false")
+    }
+
     /// zhen-inline section 2: the 英文的顯示 choice goes through the session that owns the composition, like the other apply*, and the
     /// snapshot redraws what is on screen: letters typed, the choice turned to "on Space", the marked text is the Zhuyin at once, and
     /// back.

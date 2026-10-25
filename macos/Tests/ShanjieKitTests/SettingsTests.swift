@@ -155,6 +155,37 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
     }
 
+    /// zhen-keyorder section 3 / 5.3: the window's 依按鍵順序判斷英文 choice has no value false (the store stays nil until chosen), goes to the
+    /// store, and is greyed on the display choice's conditions: the 中英混打 switch off, the Eten layout, no word list; the setting is kept.
+    func testEnglishKeyOrderChoiceStoresAndFollowsTheSwitch() throws {
+        let r = rig()
+        XCTAssertFalse(r.model.englishKeyOrder, "default false")
+        XCTAssertNil(r.english.englishKeyOrder, "never chosen")
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "the switch is off")
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.model.englishKeyOrderEnabled)
+        r.model.setEnglishKeyOrder(true)
+        XCTAssertEqual(r.english.englishKeyOrder, true)
+        XCTAssertTrue(r.model.englishKeyOrder)
+        XCTAssertTrue(r.model.englishKeyOrderEnabled, "the choice itself does not grey it")
+        r.model.selectLayout(.eten)
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "Eten greys it")
+        XCTAssertTrue(r.model.englishKeyOrder, "the setting is kept")
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertTrue(r.model.englishKeyOrderEnabled)
+        r.controller.session.perform(.toggleEnglish)
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "the menu's switch off greys it too")
+        // No word list: greyed, the stored choice still shows.
+        let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        let english = MemoryEnglishStore(true, keyOrder: true)
+        let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        let model = SettingsModel(shell: shell)
+        XCTAssertFalse(model.englishKeyOrderEnabled)
+        XCTAssertTrue(model.englishKeyOrder, "greyed, still showing the setting")
+    }
+
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the
     /// demotion table off the menu item is greyed (checkmark kept), which the window's toggle follows through `demote` (F11).
     func testRerankFromTheWindowReachesMenuAndFollowsDemote() {
