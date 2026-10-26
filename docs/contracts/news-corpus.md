@@ -1,6 +1,6 @@
 # 契約：新聞語料——能訓練的拿去訓練，不能訓練的拿來驗證
 
-狀態：草稿（2026-10-26）。
+狀態：草稿修訂一（2026-10-26）：處理 plan-verifier 第一次 REVISE 的七項（整數權重、書面來源 B 補進比對與防護、程式改動的範圍、步驟順序與同一份 dump、`sources.tsv` 不動、`--rows` 的旗標禁令、newstune 當判讀集的依據）。
 
 ## 0. 依據（維護者的決定與查過的事）
 
@@ -15,6 +15,8 @@
   - 驗證用的新聞改從**一家報社（下稱報社 A）＋中文維基新聞**抽。報社 A 的風險維護者接受：只放在本機與評測機器，不進 repo、不訓練、不散布。
   - 維護者同日決定：沒有授權、也就不必標出處的來源，公開的地方（repo、commit、PR、Release、App、Discord）一律不寫名字。報社 A 與 §3.1 的書面來源 B 的名稱、網址與抓取細節只記在維護者本機的 `.agent-local/news-sources.md`。
   - 中文維基新聞也**加進書面訓練**。
+  - 書面來源 B（一個中文網站的自產文章）也收進訓練：維護者決定收、承擔風險。
+  - `newstune` **當書面判讀集之一**（選擇題）。研究規則「書面判讀只用維基判讀集與保留集新聞半邊」改成也含 newstune，維護者本機的規則已經跟著改。
   - main 定的做法：維基新聞依文章切成兩邊，驗證用的那份文章不進訓練（§3.2）。
 - 現況：
   - 保留集的新聞半邊（現役 shard-1，以及 `next/` 裡的 shard-2、3）約八成是機關新聞稿，其餘是維基新聞與 PeoPo（`docs/contracts/holdout-refresh.md` §2）。新聞稿一旦進訓練，這些就不再是沒看過的文字。
@@ -27,10 +29,15 @@
   - 舊的新聞半邊與 294 句退役。
   - 看得到的地方：`eval/README.md` 有新集的雜湊與使用紀錄（只有雜湊與列數，沒有文字）；`--set holdout` 只讀口語半邊（n 150）；新聞半邊由 fresh verifier 用 `--rows` 量（§2.4）。
 - **訓練側（§3）**：
-  - 政府新聞稿與維基新聞（訓練那一份）當成通語 SJ-LM-7（規模待定）的書面語料。
+  - 政府新聞稿、維基新聞（訓練那一份）與書面來源 B，當成通語 SJ-LM-7（規模待定）的書面語料。
   - 量法：在 SJ-LM-7 的階段 3 之後加一段「階段 3b」，格點事先固定（§3.3）。
   - 看得到的地方：研究紀錄有格點每一格對 B6 與 main 的數字，選定的那一格進 SJ-LM-7 定案。
-- 順序：驗證側先做完，訓練側才能開始，因為訓練語料要先排除所有驗證列（§3.4）。
+- **順序**（每一步的輸入都在前一步產生）：
+  1. 程式改動（§3.6）合併。
+  2. 抓取並凍結 §3.1 的三個訓練來源，以及一份 `zhwikinews` dump（記日期與 SHA-256；驗證側與訓練側都用這一份）。
+  3. 驗證側 §2.1–§2.3：抓報社 A、產生池、對訓練文字比對、抽樣。
+  4. §2.4 換手。
+  5. 訓練側 §3.3–§3.5 的計數、建置與量測（計數時開 `--holdout-guard`，比對對象包含步驟 3 的全部私人新聞列）。
 
 ## 2. 驗證側
 
@@ -46,8 +53,8 @@
   - 只讀文章頁，不碰 robots.txt 禁止的路徑；每 2 秒最多一個請求；User-Agent 寫明是個人研究用途。
   - 不收評論、專欄、轉載外電，也不收該社記者以外署名的文章（例如讀者投書）。
 - **維基新聞**：
-  - 用 dump `zhwikinews` 最新一份。
-  - 驗證那一份文章：條目名 UTF-8 的 SHA-256 第一個位元組 < 32（1/8，§3.2）。
+  - 用 §1 步驟 2 凍結的那一份 `zhwikinews` dump。
+  - 驗證那一份文章：`wikinews.py` 的 `is_validation`（§3.2），由 `wikinews.py export --split val` 匯出。
   - 只收主題在台灣、原本就用繁體寫的條目（同 holdout-refresh §2）。
 - **每單位上限**：一篇文章 ≤ 2 個子句。
 - **互斥**：同一篇文章只會進一個集合。三份保留集與 `newstune` 互斥，固定種子 20261026。
@@ -75,7 +82,7 @@
     - 所有公開評測集；
     - 現役與 `next/` 的保留集口語半邊；
     - SJ-LM-7 的全部訓練文字（維基、口語池、`synth.txt`、PTT、g0v、字幕）；
-    - §3.1 的新聞稿與維基新聞訓練那一份。
+    - §3.1 的三個訓練來源：新聞稿、`wikinews.py export --split train` 匯出的維基新聞訓練那一份、書面來源 B。三份都是純文字，走 `--text`；維基新聞**不走** `--wiki`（整份 dump 含驗證那一份，會讓池裡每一列維基新聞都命中）。
   - 比對在 Mac 以外的機器上做，main 只看命中的列號與計數。
 - **mech-executor**：
   - 丟掉命中的列，回報「重疊丟掉 N 句」，這一行出現在抽樣之前。
@@ -88,23 +95,24 @@
 
 ### 2.4 保留集的換手（只動 `eval/`、`docs/`、`LICENSES/`、`tools/kpi.py` 與它的測試）
 
-- 刪掉的檔（`git rm`）：
+- 刪掉的檔（`git rm`，main 不打開檔案內容）：
   - `eval/holdout/news.txt`；
-  - `eval/holdout/next/shard-{2,3}/news.txt`；
-  - `eval/holdout/next/sources.tsv` 裡新聞的列。
+  - `eval/holdout/next/shard-{2,3}/news.txt`。
+- `eval/holdout/next/sources.tsv` 原封不動：新聞那幾列留著當退役紀錄，雜湊不變。`eval/README.md` 的出處說明加一句「新聞的列已退役」。
 - 退役：行政院 294 句的新聞稿驗證集。檔案在 repo 外，研究紀錄寫明它從這天起是訓練語料。
 - `--set holdout` 從此只讀 `talk.txt`（n 150）。`load_set` 本來就讀 `eval/holdout/` 頂層所有的 `.txt`，不必改程式。
 - **新聞半邊**：
   - 照保留集規則，只在推 `v*` tag 前量一次。
   - 由 fresh verifier 在評測機器上用 `--rows ~/.cache/shanjie/news-eval/holdout-news-1.txt --profile formal --rowstats` 量基準與新版。檔案用前核對雜湊，量完刪掉 rowstats 與那台機器上的副本。
+  - **旗標禁令（流程規則，不是技術防護）**：`--rows` 不像 `--set holdout` 會拒絕逐列輸出。量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（檔內只有 `[0-9\t\n]`），照 holdout-refresh §6 的做法。`docs/verification.md` 與 `eval/README.md` 的新聞半邊段落寫同一句。
 - **改的文件**：
   - `docs/contracts/kpi.md` §3：口語半邊＝`--set holdout` 全集（聊天設定）；新聞半邊＝私人檔（書面設定）。全集合那兩行不再存在，v2 JSON 的 `holdout.*` 從這一版起是口語半邊。
   - `tools/kpi.py` 的表：`rows_sha256` 換了就分欄（現有行為），測試補一條私人檔的情況。
   - `docs/verification.md` 與 `eval/README.md` 的保留集段落。
   - `LICENSES/data.md` 的新聞列拿掉。
-  - 維護者本機 `CLAUDE.md` 的「評測與資料」，由 main 改。
+  - 維護者本機 `CLAUDE.md` 的「評測與資料」與「研究」的書面判讀規則，由 main 改（後者已改）。
 - 使用次數：新的新聞半邊從 0 開始，口語半邊照舊累計。換份前後的數字不跨份比，表依 `rows_sha256` 分欄。
-- `newstune` 是開發層：可以用來調參與選臂；只報數字，不讀列的內容。
+- `newstune` 是開發層，也是書面判讀集之一（§0）：可以用來調參與選臂；只報數字，不讀列的內容。
 
 ## 3. 訓練側（通語 SJ-LM-7 的階段 3b）
 
@@ -125,7 +133,7 @@
 ### 3.2 維基新聞的切法
 
 - 用條目名 UTF-8 的 SHA-256 第一個位元組切：< 32 是驗證那一份，其餘是訓練那一份。
-- 這個切法在抓任何資料之前 commit，§2 與 §3 共用同一個函式。
+- 這個切法在抓任何資料之前 commit，§2 與 §3 共用同一個函式（§3.6）。
 
 ### 3.3 格點（事先固定，6 格）
 
@@ -133,10 +141,13 @@
 |---|---|---|
 | N00 | WC（現行選定） | B6 |
 | N10 | WC＋新聞 ×1 | B6 |
-| N01 | WC | B6＋新聞 ×0.5 |
-| N11 | WC＋新聞 ×1 | B6＋新聞 ×0.5 |
-| N02 | WC | B6＋新聞 ×1 |
-| N12 | WC＋新聞 ×1 | B6＋新聞 ×1 |
+| N01 | WC | B6＋新聞 ×1 |
+| N11 | WC＋新聞 ×1 | B6＋新聞 ×1 |
+| N02 | WC | B6＋新聞 ×2 |
+| N12 | WC＋新聞 ×1 | B6＋新聞 ×2 |
+
+- 「新聞」＝§3.1 的三個來源（新聞稿、維基新聞訓練那一份、書面來源 B），每一格三個都在、權重相同。每個來源各一個計數檔，`build_lm.py --corpora` 各給一個整數權重（例如 N01：`counts-200000.pkl:1 counts-colloquial3.pkl:5 counts-g0v.pkl:5 counts-ptt-push.pkl:5 counts-ptt-body.pkl:1 counts-press.pkl:1 counts-wikinews.pkl:1 counts-srcb.pkl:1 --prune 6`）。
+- 權重是乘在期望計數上，剪枝門檻 6 也是對加權後的計數判：×1 的新聞詞對要在新聞裡出現 ≥ 6 次才留，×2 的要 ≥ 3 次。折扣 D 0.75 不變。
 
 - 加了新聞的連文表，照 WC 的剪枝方法剪到同樣的條目數（7,700,964）。
 - 加進 bigram 的臂要重建辨類與承接，並把會意的 `.sjtl` 重新匯出、綁定新的 bigram（照 sj-lm-7 §2.6 的量測做法）。
@@ -144,7 +155,7 @@
 
 ### 3.4 洩漏防護
 
-- 新聞稿與維基新聞計數時打開 `--holdout-guard`，比對對象是：
+- 三個訓練來源（新聞稿、維基新聞訓練那一份、書面來源 B）計數時都打開 `--holdout-guard`（`build_counts_text.py` 的既有開關），比對對象是：
   - 公開保留集（口語半邊）；
   - §2 的全部私人新聞列：`newstune` 與三份新聞半邊。
 - 跳過的段數在任何分數之前記進研究紀錄。
@@ -161,6 +172,18 @@
   - 對 N00：wikitune-clean 不顯著變差（精確 McNemar p ≥ 0.05 或淨值 ≥ 0）；
   - 有改到 bigram 的臂，對 N00 的 discordtune 也不顯著變差。
 - 選法：能選的臂裡推薦 `newstune` 淨值最大的那一臂，數字給維護者選。沒有能選的臂，就是照登記不過：沿用 N00，報給維護者。
+
+### 3.6 程式改動（executor；走程式改動的關卡：`/code-review` ＋ fresh verifier；`experiments/` 的測試只在本機跑）
+
+- `experiments/sj-lm-7/wikinews.py`：
+  - `is_validation(title)`：條目名 UTF-8 的 SHA-256 第一個位元組 < 32。
+  - `export --dump D --split train|val --out F`：條目處理呼叫 `build_counts` 既有的那一份（`TEMPLATE`、`MARKUP`、`SENT`、轉換、漢字段），不另抄；一段一行輸出給 `build_counts_text.py` 與 `holdout_guard.py --text`。
+  - 單元測試（合成的小 dump）：同一個條目名兩次判定相同；train 與 val 互斥、聯集是全部條目；固定門檻（一個已知雜湊第一個位元組 < 32 與一個 ≥ 32 的條目名）；`--split train` 的輸出不含任何 val 條目的文字。
+- `experiments/sj-lm-7/news_fetch.py`：
+  - 新聞稿：行政院「本院新聞」與 holdout-refresh §2 的 23 個 data.gov.tw 資料集，用官方下載點，不刮網頁。
+  - 一般文章頁：網址清單或 sitemap 由參數給（報社 A 與書面來源 B 的網址只放 `.agent-local`），每 2 秒最多一個請求，抓之前讀 robots.txt、被禁止的路徑不抓。
+  - 輸出 `單位\t段落` 的 TSV；排除規則（欄位行、樣板句 ≥ 5 次只算一次、文章層的排除標記）各有單元測試。
+- 計數用既有的 `build_counts_text.py --no-trad-tw-phrases --expected`（B 臂的三份計數詞表）加 `--holdout-guard`，不改。
 
 ## 4. 授權
 
