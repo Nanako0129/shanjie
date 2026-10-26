@@ -124,6 +124,62 @@ class Cli(unittest.TestCase):
             self.assertEqual(outs[0][1].decode().count("\n"), 3)
 
 
+class Jobs(unittest.TestCase):
+    def test_jobs_3_is_byte_identical_to_jobs_1(self):
+        pool = [f"{a}{b}{c}" for a in ("我們", "資料", "你好") for b in ("一起", "庫的", "嗎晚") for c in ("去吃飯", "封包", "看電影", "設定")] * 2   # duplicates: ties
+        old, M.CHUNK = M.CHUNK, 5                                  # many chunks, so every worker gets some
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                ind = os.path.join(d, "in.txt")
+                open(ind, "w", encoding="utf-8").write("".join(s + "\n" for s in CHAT))
+                a, b = os.path.join(d, "a.tsv"), os.path.join(d, "b.txt")
+                open(a, "w", encoding="utf-8").write("".join(f"u{i}\t{s}\n" for i, s in enumerate(pool)))
+                open(b, "w", encoding="utf-8").write("".join(s + "\n" for s in pool[::2] + TECH))
+                res = []
+                for jobs in (1, 3):
+                    buf = io.StringIO()
+                    with contextlib.redirect_stdout(buf):
+                        M.main(["score", "--in-domain", ind, "--source", f"a.tsv={a}", "--source", f"b.txt={b}", "--out", os.path.join(d, f"o{jobs}"),
+                                "--seed", "5", "--jobs", str(jobs)])
+                    res.append((buf.getvalue(), [open(os.path.join(d, f"o{jobs}", n), "rb").read() for n in ("a.tsv", "b.txt")]))
+                self.assertEqual(res[0], res[1])
+                self.assertIn("cut\t", res[0][0])
+                self.assertTrue(0 < res[0][1][0].count(b"\n") < len(pool))
+        finally:
+            M.CHUNK = old
+
+
+class Inset(unittest.TestCase):
+    CONV = ({}, {"网": "網", "络": "路"}, 1)           # stand-in for the OpenCC tables, as in test_dedupe_eval
+    MSGS = [("1", "我們一起去吃飯吧"), ("2", "今天天氣真的很好啊"), ("3", "前面說了\t上網路看影片喔"), ("4", "吃飯喔"), ("5", "完全不相干的一句話"), ("6", "太短了")]
+
+    def run_inset(self, d, min_len, rows):
+        msgs, out = os.path.join(d, "m.tsv"), os.path.join(d, "o.txt")
+        open(msgs, "w", encoding="utf-8").write("".join(f"{i}\t{t}\n" for i, t in self.MSGS))
+        args = ["inset", "--messages", msgs, "--min-len", str(min_len), "--out", out]
+        for label, text in rows.items():
+            p = os.path.join(d, label + ".txt")
+            open(p, "w", encoding="utf-8").write(text)
+            args += ["--exclude", f"{label}={p}"]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            M.main(args, conv=self.CONV)
+        return buf.getvalue(), open(out, "rb").read()
+
+    def test_long_eval_sentences_drop_short_ones_do_not_order_kept_nothing_leaks(self):
+        rows = {"disc": "前文|我們一起去吃飯|ㄅ\n|吃飯|ㄅ\n|上網路看影片|ㄅ\n", "res": "|今天天氣真的很好|ㄅ\n|太短了|ㄅ\n"}
+        with tempfile.TemporaryDirectory() as d:
+            text, out = self.run_inset(d, 6, rows)
+            self.assertEqual(out.decode(), "吃飯喔\n完全不相干的一句話\n太短了\n")       # 1 (long hit), 2, 3 (hit across a tab) dropped; 4: "吃飯" is 2 characters
+            self.assertEqual(text, f"messages\tin\t6\ndropped\tdisc\t2\ndropped\tres\t1\nkept\t3\tdropped\t3\tsha256\t{hashlib.sha256(out).hexdigest()}\n")
+            for _, t in self.MSGS:
+                self.assertNotIn(t, text)
+            for s in ("我們一起去吃飯", "今天天氣真的很好", "吃飯"):
+                self.assertNotIn(s, text)
+            text2, out2 = self.run_inset(d, 2, {"disc": rows["disc"]})        # MIN_LEN of holdout_guard (4) still floors it: "吃飯" stays no pattern
+            self.assertEqual(out2.decode(), "今天天氣真的很好啊\n吃飯喔\n完全不相干的一句話\n太短了\n")
+
+
 class Reserve(unittest.TestCase):
     def test_first_byte_below_32(self):
         for mid in ("1", "123456789012345678", "abc", "x" * 30):

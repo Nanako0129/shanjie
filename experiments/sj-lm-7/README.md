@@ -11,7 +11,7 @@
 | `clean_subs.py` | OPUS OpenSubtitles `zh_tw` → `subs.tsv`、`subs-half.tsv`（`SHA-256(句子)` 第一個位元組 < 128 的一半）。含假名、亂碼（詞庫外字）、中英並列三道過濾，另外擋繁簡共用字的大陸詞組（什么、這里、最后、對于、愿意⋯，`MAINLAND`）與殘留記號（括號、「︰」標籤、粵語專用字與「唔＋漢字」、OCR 的「黑占」，`RESIDUE`）；輸入是 OPUS `raw/zh_tw.zip`（逐片原文，片＝片號資料夾，每部片後面插一個空行），只數片數、不設每片上限 | §2.7 |
 | `review_subs.py` | 字幕逐句審查（§2.7）：`prefilter` 把含繁簡共用字（大陸用法不同）、英文字母或記號的句子切成每份 1,000 句（只放句子，不放編號）給 Sonnet subagent 審；審查者回報「行數、類別、原句」，`apply` 用原句（清理時的去重鍵）比對拿掉，重寫 `subs.tsv`、`subs-half.tsv` 並寫 `manifest.json` | §2.7 |
 | `dedupe_eval.py` | 用 `tools/holdout_guard.py` 的比對器，把新來源句子對各評測集去重；只印每個來源、每個集合的命中數 | §2.4 |
-| `moore_lewis.py` | `score`：字元 4-gram Kneser–Ney，打分集合一個、候選池兩折交叉（池依句子的 SHA-256 分兩半，各用另一半同字數的固定種子樣本訓練去打分，沒有句子被看過它的模型打分），每個來源留交叉熵差最好的 50%。`split`：訊息 ID 的 SHA-256 第一個位元組 < 32 的 1/8 進保留桶 | §2.4 |
+| `moore_lewis.py` | `score`：字元 4-gram Kneser–Ney，打分集合一個、候選池兩折交叉（池依句子的 SHA-256 分兩半，各用另一半同字數的固定種子樣本訓練去打分，沒有句子被看過它的模型打分），每個來源留交叉熵差最好的 50%；`--jobs N` 訓練一次後用 N 個 fork 的程序打分，輸出、計數、門檻與雜湊和 `--jobs 1` 逐位元組相同。`inset`：打分集合（Moore–Lewis 的 in-domain）：訊息檔去掉含有評測句子（列檔第二欄、`--min-len` 字以上，比對器同 `dedupe_eval.py`）的訊息，只輸出內容、保持順序，只印計數與雜湊。`split`：訊息 ID 的 SHA-256 第一個位元組 < 32 的 1/8 進保留桶 | §2.4 |
 | `test_*.py` | 合成輸入的單元測試，`make test-python` 會跑 | |
 
 未驗證（要在真檔上看一眼，測試沒有真檔）：
@@ -48,11 +48,18 @@ python3 experiments/sj-lm-7/dedupe_eval.py --set holdout=<eval/holdout/…> --se
     --min-len discordtune=6 --min-len reserve=6     # 契約 §2.4：私人兩份只拿 6 個字以上的列
 ```
 
+打分集合（私人訊息只在 188 與 Mac；`--exclude` 的 LABEL 同 `dedupe_eval.py`，列檔是 `前文|句子|讀音`；輸入是切完的 7/8 `rest.tsv`；只印計數與輸出雜湊）：
+
+```sh
+python3 experiments/sj-lm-7/moore_lewis.py inset --messages <rest.tsv> --exclude discordtune=<…> --exclude reserve=<…> --exclude <LABEL>=<…> \
+    --min-len 6 --out <打分集合.txt>                              # 少於 --min-len 個字的評測句不當比對樣板（holdout_guard 本身的下限是 4）
+```
+
 Moore–Lewis（只在 188 算，同一份輸入、同一個種子獨立再算一次，兩次的輸出雜湊要相同）：
 
 ```sh
 python3 experiments/sj-lm-7/moore_lewis.py score --in-domain <打分集合.txt> --source ptt-body=<…> --source ptt-push=<…> --source g0v=<…> \
-    --out <OUT_DIR> --seed <N>                                   # 每個來源留 50%（預設 --keep 0.5）
+    --out <OUT_DIR> --seed <N> --jobs <N>                        # 每個來源留 50%（預設 --keep 0.5）；--jobs 預設 1，用滿核心，輸出和 --jobs 1 逐位元組相同
 ```
 
 計數（繁體句不套 `TWPhrases`）：

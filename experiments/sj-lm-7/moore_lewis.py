@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Moore-Lewis selection and the chat reserve bucket (docs/contracts/sj-lm-7.md section 2.4).
 
-  moore_lewis.py score --in-domain FILE --source NAME=FILE [--source NAME=FILE ...] --out DIR --seed N [--keep 0.5]
+  moore_lewis.py score --in-domain FILE --source NAME=FILE [--source NAME=FILE ...] --out DIR --seed N [--keep 0.5] [--jobs N]
       Two character 4-gram interpolated Kneser-Ney models (discount 0.75): the in-domain one trained on FILE (one sentence per line, the last
       tab field if the line has tabs), the out-of-domain ones on fixed-seed samples of the pooled --source sentences with the same number of
       characters (or the whole pool when it is not larger). The pool is split in two halves by SHA-256 of the sentence and each half is scored by the model
@@ -9,8 +9,16 @@
       bits (EOS counted); lower is more in-domain. Each source keeps its best KEEP share (ties broken by line order), written to OUT/NAME with
       the lines unchanged and in the original order. Deterministic: the sample is random.Random(seed) over the pool's line order.
       Prints counts, the score cut and SHA-256 of every output, never a sentence (the in-domain file may be private).
+      --jobs N: the models are trained once, then the pool is scored by N forked workers that share them copy-on-write (chunks come back in
+      order, each score is the same float computation), so every output, count, cut and SHA-256 equals --jobs 1 (the default).
   moore_lewis.py split --messages FILE --reserve OUT --rest OUT
       FILE lines are `message id<TAB>text`. A message is in the reserve bucket iff the first byte of SHA-256(message id) < 32 (1/8). Prints counts.
+
+  moore_lewis.py inset --messages FILE --exclude LABEL=ROWS [--exclude LABEL=ROWS ...] --min-len N --out FILE
+      The in-domain (scoring) set. FILE lines are `message id<TAB>text`; ROWS are eval rows `context|sentence|reading`. A message is dropped
+      when its text contains an eval sentence (field 2) of at least N characters, by dedupe_eval's matcher (holdout_guard.build_matcher, the
+      same fold and containment; a sentence under holdout_guard's 4 characters is never a pattern). OUT holds the text of the kept messages,
+      one per line, in input order. Prints counts (in, dropped per label, kept) and the SHA-256 of OUT, never a message or a sentence.
 
 Pure Python: memory is a few tens of bytes per distinct n-gram, so a scoring file of tens of millions of characters needs several GB.
 """
@@ -18,9 +26,11 @@ import argparse
 import collections
 import hashlib
 import math
+import multiprocessing as mp
 import os
 import random
 import sys
+import tempfile
 
 BOS, EOS = "\x02", "\x03"
 RESERVE_BELOW = 32     # first byte of SHA-256(message id) < 32: 32/256 = 1/8 of the messages
@@ -116,14 +126,36 @@ def cross_fit(pool, n_chars, seed, order=4):
     return lambda s: models[1 if in_half_a(s) else 0].entropy(s)
 
 
-def select(sources, in_domain, seed, keep=KEEP, order=4):
+_G = {}
+CHUNK = 2000     # sentences per task of a scoring worker
+
+
+def _score_span(span):
+    ind, out_entropy, sents = _G["ind"], _G["out"], _G["sents"]
+    return [ind.entropy(s) - out_entropy(s) for s in sents[span[0]:span[1]]]
+
+
+def score_all(ind, out_entropy, sentences, jobs=1):
+    """-> [H_in - H_out] per sentence, in order. jobs > 1: forked workers inherit the trained models (nothing is retrained or pickled)."""
+    if jobs <= 1:
+        return [ind.entropy(s) - out_entropy(s) for s in sentences]
+    _G.update(ind=ind, out=out_entropy, sents=sentences)
+    spans = [(i, min(i + CHUNK, len(sentences))) for i in range(0, len(sentences), CHUNK)]
+    try:
+        with mp.get_context("fork").Pool(jobs) as pool:
+            return [x for part in pool.imap(_score_span, spans) for x in part]
+    finally:
+        _G.clear()
+
+
+def select(sources, in_domain, seed, keep=KEEP, order=4, jobs=1):
     """sources: {name: [(line, sentence)]}, in_domain: [sentence]. -> ({name: [kept (line, sentence) in file order]}, {name: score cut})."""
     pool = [s for rows in sources.values() for _, s in rows]
     ind = CharKN(in_domain, order)
     out_entropy = cross_fit(pool, sum(map(len, in_domain)), seed, order)
     kept, cut = {}, {}
     for name, rows in sources.items():
-        scores = [(ind.entropy(s) - out_entropy(s), i) for i, (_, s) in enumerate(rows)]
+        scores = [(x, i) for i, x in enumerate(score_all(ind, out_entropy, [s for _, s in rows], jobs))]
         n = math.ceil(len(rows) * keep)
         best = sorted(scores)[:n]
         cut[name] = best[-1][0] if best else None
@@ -141,7 +173,7 @@ def cmd_score(a):
         sys.exit("--source wants distinct NAME=FILE values")
     sources = {n: read_sentences(f) for n, _, f in (x.partition("=") for x in a.source)}
     in_domain = [s for _, s in read_sentences(a.in_domain) if s.strip()]
-    kept, cut = select(sources, in_domain, a.seed, a.keep)
+    kept, cut = select(sources, in_domain, a.seed, a.keep, jobs=a.jobs)
     os.makedirs(a.out, exist_ok=True)
     print(f"in-domain\tsentences\t{len(in_domain)}\tchars\t{sum(map(len, in_domain))}")
     for n, rows in kept.items():
@@ -163,7 +195,43 @@ def cmd_split(a):
     print(f"reserve\t{n[1]}\trest\t{n[0]}")
 
 
-def main(argv=None):
+def cmd_inset(a):
+    import dedupe_eval as de          # puts tools/ and the experiment dirs on sys.path; only this subcommand needs holdout_guard
+    conv = a.conv or de.bc.load_conv()
+    sets = collections.OrderedDict()
+    for x in a.exclude:
+        label, _, path = x.partition("=")
+        if not label or not path:
+            sys.exit("--exclude wants LABEL=ROWS")
+        sets.setdefault(label, []).append(path)
+    with tempfile.TemporaryDirectory() as tmp:     # the shortened private rows live only here
+        paths = {label: [de.shorter_rows_dropped(p, a.min_len, os.path.join(tmp, f"{label}-{i}.txt")) for i, p in enumerate(ps)]
+                 for label, ps in sets.items()}
+        try:
+            matchers = {label: de.hg.build_matcher(ps, conv)[0] for label, ps in paths.items()}
+        except de.hg.GuardError as e:
+            sys.exit(f"inset: {e}")
+    de._init(matchers, conv)
+    per, n_in, kept = collections.Counter({label: 0 for label in sets}), 0, []
+    with open(a.messages, encoding="utf-8", errors="replace", newline="\n") as f:
+        for n, line in enumerate(f, 1):
+            if "\t" not in line:
+                sys.exit(f"inset: {a.messages} line {n}: no tab")
+            text = line.rstrip("\n").split("\t", 1)[1]
+            n_in += 1
+            hits = de._hits([text.replace("\t", " ")])[0]     # dedupe_eval matches the last tab field; a tab only separates Han runs
+            per.update(hits)
+            if not hits:
+                kept.append(text + "\n")
+    with open(a.out, "w", encoding="utf-8", newline="") as f:
+        f.writelines(kept)
+    print(f"messages\tin\t{n_in}")
+    for label in sets:
+        print(f"dropped\t{label}\t{per[label]}")
+    print(f"kept\t{len(kept)}\tdropped\t{n_in - len(kept)}\tsha256\t{sha256_file(a.out)}")
+
+
+def main(argv=None, conv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("score")
@@ -172,13 +240,21 @@ def main(argv=None):
     s.add_argument("--out", required=True)
     s.add_argument("--seed", type=int, required=True)
     s.add_argument("--keep", type=float, default=KEEP)
+    s.add_argument("--jobs", type=int, default=1)
     s.set_defaults(fn=cmd_score)
+    i = sub.add_parser("inset")
+    i.add_argument("--messages", required=True)
+    i.add_argument("--exclude", action="append", required=True, metavar="LABEL=ROWS")
+    i.add_argument("--min-len", type=int, required=True)
+    i.add_argument("--out", required=True)
+    i.set_defaults(fn=cmd_inset)
     p = sub.add_parser("split")
     p.add_argument("--messages", required=True)
     p.add_argument("--reserve", required=True)
     p.add_argument("--rest", required=True)
     p.set_defaults(fn=cmd_split)
     a = ap.parse_args(argv)
+    a.conv = conv         # tests pass a stand-in for the OpenCC tables
     a.fn(a)
 
 
