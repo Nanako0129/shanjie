@@ -1,6 +1,8 @@
 """news_fetch.py on local fixtures only: robots handling, the rate limiter (fake clock), extraction, each cleaning rule, exclusion markers.
 No network: every request goes through a fake opener."""
 import contextlib
+import hashlib
+import http.client
 import io
 import json
 import os
@@ -28,7 +30,11 @@ class Net:
         self.calls.append((self.t, url, headers))
         self.t += 0.3     # a request takes time
         r = self.pages.get(url, (404, b""))
-        return r if isinstance(r, tuple) else (200, r)
+        if isinstance(r, Exception):
+            raise r
+        if not isinstance(r, tuple):
+            r = (200, r)
+        return r + ("",) * (3 - len(r))
 
     def fetcher(self, **kw):
         return N.Fetcher(opener=self.opener, clock=self.clock, sleep=self.sleep, **kw)
@@ -52,13 +58,24 @@ class Robots(unittest.TestCase):
         net.fetcher().get("https://x.test/a")
         self.assertEqual([c[1] for c in net.calls], ["https://x.test/robots.txt", "https://x.test/a"])
 
-    def test_missing_robots_allows_and_server_error_blocks(self):
+    def test_robots_status_rules(self):
         net = Net({"https://x.test/a": b"ok"})
         self.assertEqual(net.fetcher().get("https://x.test/a"), b"ok")      # 404 robots.txt: no restriction
-        net = Net({"https://x.test/robots.txt": (503, b""), "https://x.test/a": b"ok"})
+        net = Net({"https://x.test/robots.txt": (410, b""), "https://x.test/a": b"ok"})
+        self.assertEqual(net.fetcher().get("https://x.test/a"), b"ok")      # any other 4xx too
+        for status in (401, 403, 503):                                       # access denied: disallow all (as RobotFileParser); 5xx: skip the origin
+            net = Net({"https://x.test/robots.txt": (status, b""), "https://x.test/a": b"ok"})
+            with self.assertRaises(N.Blocked, msg=status):
+                net.fetcher().get("https://x.test/a")
+            self.assertEqual(len(net.calls), 1, status)                      # only the robots request went out
+
+    def test_unreachable_robots_skips_the_origin(self):
+        net = Net({"https://x.test/robots.txt": ConnectionResetError("boom"), "https://x.test/a": b"ok"})
         with self.assertRaises(N.Blocked):
             net.fetcher().get("https://x.test/a")
-        self.assertEqual(len(net.calls), 1)                                  # only the robots request went out
+        net = Net({"https://x.test/robots.txt": http.client.IncompleteRead(b"x"), "https://x.test/a": b"ok"})
+        with self.assertRaises(N.Blocked):
+            net.fetcher().get("https://x.test/a")
 
     def test_official_endpoints_skip_robots(self):
         net = Net({"https://api.test/d": b"[]"})
@@ -108,6 +125,12 @@ class RateLimit(unittest.TestCase):
 
 
 class Extraction(unittest.TestCase):
+    def test_unclosed_p_is_closed_by_the_next_p_or_a_block_tag(self):
+        h = "<p>第一段<p>第二段<div class=nav>導覽列首頁</div><footer>版權所有</footer>"
+        self.assertEqual(N.html_paragraphs(h), ["第一段", "第二段"])
+        self.assertEqual(N.html_paragraphs("<article><p>甲<br>乙<ul><li>清單</li></ul><p>丙</article><p>外面</p>"), ["甲", "乙", "丙"])   # <br> still ends a block; the list and the unclosed second <p> do not leak
+        self.assertEqual(N.html_paragraphs("<p>甲<b>粗</b>乙<span>丙</span></p>"), ["甲粗乙丙"])
+
     def test_p_inside_article_wins_and_script_nav_are_dropped(self):
         h = "<html><nav><p>導覽列</p></nav><script>var a='腳本';</script><article><h1>標題</h1><p>第一段，很長。</p><p>第二&amp;段</p></article><p>頁尾</p></html>"
         self.assertEqual(N.html_paragraphs(h), ["第一段，很長。", "第二&段"])
@@ -135,9 +158,19 @@ class Extraction(unittest.TestCase):
         xml = b"<rss><channel><item><guid>g1</guid><description>d1</description></item><item><guid>g2</guid><description>d2</description></item></channel></rss>"
         self.assertEqual(N.records_from(xml), [{"guid": "g1", "description": "d1"}, {"guid": "g2", "description": "d2"}])
 
-    def test_record_units_pick_the_text_and_id_fields(self):
-        recs = [{"id": 7, "title": "t", "內容": "<p>甲甲</p><p>乙乙</p>"}, {"id": 8, "title": "no text"}, {"title": "T", "content": "丙丙"}]
-        self.assertEqual(N.record_units(recs, "d1"), [("d1:7", ["甲甲", "乙乙"]), ("d1:T", ["丙丙"])])
+    def test_record_units_pick_the_text_and_id_fields_and_never_use_a_title(self):
+        third = {"title": "標題文字", "content": "丙丙"}
+        recs = [{"id": 7, "title": "t", "內容": "<p>甲甲</p><p>乙乙</p>"}, {"id": 8, "title": "no text"}, third]
+        got = N.record_units(recs, "d1")
+        h = hashlib.sha256(json.dumps(third, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+        self.assertEqual(got, [("d1:7", ["甲甲", "乙乙"]), (f"d1:h{h}", ["丙丙"])])    # no id field: a stable hash of the record
+        self.assertNotIn("標題", got[1][0])
+
+    def test_no_text_field_is_a_failure_not_zero_units(self):
+        with self.assertRaises(N.NoTextField):
+            N.record_units([{"id": 1, "x": "y"}], "d")
+        with self.assertRaises(N.NoTextField):
+            N.record_units([], "d")
 
     def test_dataset_downloads(self):
         meta = json.dumps({"result": {"distribution": [{"resourceDownloadUrl": "https://d.test/a.csv", "resourceFormat": "CSV"},
@@ -190,6 +223,42 @@ class Cleaning(unittest.TestCase):
         self.assertEqual(out, [("u", ["正文一。", "正文二。"])])
 
 
+class Decoding(unittest.TestCase):
+    def test_header_then_bom_then_utf8_then_big5(self):
+        big5 = "臺灣新聞稿".encode("cp950")
+        self.assertEqual(N.decode_body(big5, "text/html; charset=Big5"), "臺灣新聞稿")
+        self.assertEqual(N.decode_body(big5), "臺灣新聞稿")                                  # not UTF-8: cp950 fallback
+        self.assertEqual(N.decode_body("甲乙".encode("utf-8")), "甲乙")
+        self.assertEqual(N.decode_body("\ufeff甲乙".encode("utf-8")), "甲乙")                  # BOM stripped
+        self.assertEqual(N.decode_body("甲乙".encode("utf-16"), "text/plain"), "甲乙")           # BOM-marked UTF-16
+        self.assertEqual(N.decode_body("甲乙".encode("utf-8"), "text/html; charset=nonsense"), "甲乙")   # unknown label: fall through
+        self.assertEqual(N.decode_body("甲乙".encode("utf-8"), "text/html; charset=big5"), "甲乙")        # header that cannot decode: fall through
+        with self.assertRaises(UnicodeDecodeError):
+            N.decode_body(b"<p>\x81</p>")                                                  # no silent errors=replace
+
+    def test_big5_csv_download(self):
+        body = "id,內容\n1,第一則新聞稿內文\n".encode("cp950")
+        self.assertEqual(N.records_from(body), [{"id": "1", "內容": "第一則新聞稿內文"}])
+        self.assertEqual(N.records_from(body, "text/csv; charset=big5")[0]["內容"], "第一則新聞稿內文")
+        self.assertEqual(N.records_from('[{"id":1,"content":"臺"}]'.encode("cp950")), [{"id": 1, "content": "臺"}])
+
+
+class PublishDate(unittest.TestCase):
+    def test_meta_then_jsonld_then_time(self):
+        self.assertEqual(N.publish_date('<meta property="article:published_time" content="2026-09-14T08:30:00+08:00"><time datetime="2026-01-01">x</time>'), "2026-09-14")
+        ld = '<script type="application/ld+json">{"@graph":[{"@type":"Person"},{"@type":"NewsArticle","datePublished":"2026-10-02T01:00:00Z"}]}</script>'
+        self.assertEqual(N.publish_date(ld + '<time datetime="2026-01-01">x</time>'), "2026-10-02")
+        self.assertEqual(N.publish_date('<p>x</p><time datetime="2026-09-30 12:00">y</time>'), "2026-09-30")
+        self.assertIsNone(N.publish_date('<p>沒有日期</p><script type="application/ld+json">{broken</script><meta property="og:title" content="x">'))
+
+    def test_window(self):
+        self.assertTrue(N.in_window("2026-09-01T00:00:00", "2026-09-01", "2026-10-25"))
+        self.assertTrue(N.in_window("2026-10-25", "2026-09-01", "2026-10-25"))
+        self.assertFalse(N.in_window("2026-10-26", "2026-09-01", "2026-10-25"))
+        self.assertFalse(N.in_window("2026-08-31", "2026-09-01", None))
+        self.assertTrue(N.in_window("1999-01-01", None, None))
+
+
 class EndToEnd(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
@@ -214,7 +283,7 @@ class EndToEnd(unittest.TestCase):
         so = self.run_main(net, ["pages", "--sitemap", "https://x.test/sitemap.xml", "--exclude-marker", "⟦贊助⟧", "--out", out])
         self.assertEqual(open(out, encoding="utf-8").read(), "https://x.test/n/1\t第一篇的正文。\n")
         self.assertNotIn("/private/3", [c[1] for c in net.calls])
-        for k in ("blocked_by_robots=1", "fetch_failed=1", "articles_excluded=1", "articles_kept=1"):
+        for k in ("blocked_by_robots=1", "failed_http_status=1", "articles_excluded=1", "articles_kept=1"):
             self.assertIn(k, so)
         self.assertNotIn("正文", so)                                        # numbers only
         starts = [c[0] for c in net.calls]
@@ -241,6 +310,67 @@ class EndToEnd(unittest.TestCase):
                          ["d8372:1\t第一則新聞稿的內文。", "d8372:1\t第二段內文。", "u0:9\t另一則新聞稿"])
         self.assertIn("downloads=2", so)
         self.assertNotIn("robots.txt", " ".join(c[1] for c in net.calls))   # official endpoints: no page crawl, no robots
+
+    def sitemap(self, *locs):
+        return ('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f"<url><loc>{l}</loc>{m}</url>" for l, m in locs) + "</urlset>").encode()
+
+    def test_failures_are_counted_by_kind_and_the_run_goes_on(self):
+        art = lambda t: f"<article><p>{t}</p></article>".encode()
+        net = Net({
+            "https://x.test/sitemap.xml": self.sitemap(("/ok1", ""), ("/read", ""), ("http://[bad", ""), ("javascript:void(0)", ""), ("/gone", ""),
+                                                        ("/garbled", ""), ("/net", ""), ("/ok2", "")),
+            "https://x.test/ok1": art("第一篇。"), "https://x.test/ok2": art("第二篇。"),
+            "https://x.test/read": http.client.IncompleteRead(b"par"), "https://x.test/gone": (404, b""),
+            "https://x.test/garbled": b"<p>\x81</p>", "https://x.test/net": ConnectionResetError("reset"),
+        })
+        out = os.path.join(self.d.name, "o.tsv")
+        so = self.run_main(net, ["pages", "--sitemap", "https://x.test/sitemap.xml", "--out", out])
+        self.assertEqual(open(out, encoding="utf-8").read().splitlines(), ["https://x.test/ok1\t第一篇。", "https://x.test/ok2\t第二篇。"])
+        for k in ("failed_protocol=1", "failed_bad_url=2", "failed_http_status=1", "failed_decode=1", "failed_network=1", "articles_kept=2"):
+            self.assertIn(k, so)
+        self.assertFalse(os.path.exists(out + ".partial"))
+
+    def test_a_crash_keeps_what_was_already_fetched(self):
+        art = lambda t: f"<p>{t}</p>".encode()
+        net = Net({"https://x.test/a": art("甲文章。"), "https://x.test/b": art("乙文章。"), "https://x.test/c": RuntimeError("unexpected")})
+        urls = os.path.join(self.d.name, "u.txt")
+        open(urls, "w").write("https://x.test/a\nhttps://x.test/b\nhttps://x.test/c\n")
+        out = os.path.join(self.d.name, "o.tsv")
+        with self.assertRaises(RuntimeError):
+            self.run_main(net, ["pages", "--urls", urls, "--out", out])
+        self.assertEqual(open(out + ".partial", encoding="utf-8").read().splitlines(), ["https://x.test/a\t甲文章。", "https://x.test/b\t乙文章。"])
+        self.assertFalse(os.path.exists(out))
+
+    def test_page_date_window(self):
+        page = lambda d: (f'<meta property="article:published_time" content="{d}"><article><p>文章{d[5:7]}。</p></article>' if d else "<p>無日期。</p>").encode()
+        net = Net({
+            "https://x.test/sitemap.xml": self.sitemap(("/in", "<lastmod>2026-09-10</lastmod>"), ("/old-lastmod", "<lastmod>2026-08-01</lastmod>"),
+                                                        ("/edited-later", "<lastmod>2026-11-30</lastmod>"), ("/nolastmod-out", ""),
+                                                        ("/nodate", "<lastmod>2026-10-01</lastmod>")),
+            "https://x.test/in": page("2026-09-10T08:00:00+08:00"), "https://x.test/old-lastmod": page("2026-08-01"),
+            "https://x.test/edited-later": page("2026-10-20"), "https://x.test/nolastmod-out": page("2026-08-15"), "https://x.test/nodate": page(None),
+        })
+        out = os.path.join(self.d.name, "o.tsv")
+        so = self.run_main(net, ["pages", "--sitemap", "https://x.test/sitemap.xml", "--lastmod-from", "2026-09-01", "--lastmod-to", "2026-10-25", "--out", out])
+        self.assertEqual([l.split("\t")[0] for l in open(out, encoding="utf-8").read().splitlines()], ["https://x.test/in", "https://x.test/edited-later"])
+        for k in ("out_of_window=1", "no_date=1", "articles_kept=2"):    # old-lastmod was never fetched; no-lastmod is judged by its page date
+            self.assertIn(k, so)
+        self.assertNotIn("https://x.test/old-lastmod", [c[1] for c in net.calls])
+
+    def test_out_must_be_a_tsv(self):
+        for argv in (["pages", "--urls", "u", "--out", os.path.join(self.d.name, "o.txt")], ["press", "--dataset-url", "https://d.test/a", "--out", "o"]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                N.main(argv, opener=Net({}).opener)
+
+    def test_press_big5_csv_and_a_download_without_text_fields(self):
+        big5 = "id,內容\n5,另一則新聞稿的內文\n".encode("cp950")
+        net = Net({"https://d.test/b5.csv": big5, "https://d.test/none.json": b'[{"id": 1, "x": "y"}]', "https://d.test/bad.json": b"[{"})
+        out = os.path.join(self.d.name, "o.tsv")
+        so = self.run_main(net, ["press", "--dataset-url", "https://d.test/b5.csv", "--dataset-url", "https://d.test/none.json",
+                                 "--dataset-url", "https://d.test/bad.json", "--out", out])
+        self.assertEqual(open(out, encoding="utf-8").read(), "u0:5\t另一則新聞稿的內文\n")
+        self.assertIn("failed_no_text_field=1", so)
+        self.assertIn("failed_parse=1", so)
 
     def test_all_datasets_lists_the_23_ids(self):
         self.assertEqual((len(N.DATASET_IDS), len(set(N.DATASET_IDS))), (23, 23))

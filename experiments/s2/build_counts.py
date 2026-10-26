@@ -8,6 +8,7 @@ import argparse
 import bz2
 import collections
 import hashlib
+import html
 import math
 import os
 import pickle
@@ -212,9 +213,9 @@ def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
         yield from HAN.findall(s)
 
 
-def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
-    """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
-    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
+def article_text(raw, mw=None, mwconv=None):
+    """The article body before the SENT split and before convert(): entity unescape, [mw conversion], TEMPLATE x3, MARKUP. Paragraphs are its
+    lines. experiments/sj-lm-7/wikinews.py exports this layer so a reader (build_counts_text, holdout_guard --text) converts exactly once."""
     t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
     if mw:   # S2w：整篇先交給 MediaWiki 的 zh-tw 轉換（站上轉換表、NoteTA 群組、條目規則），之後的句子不再呼叫 convert()
         t = mwconv.convert(t, mw)
@@ -222,12 +223,21 @@ def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
         t = TEMPLATE.sub("", t)
     for pat, rep in MARKUP:
         t = pat.sub(rep, t)
-    for s in SENT.findall(t):
+    return t
+
+
+def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
+    """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
+    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
+    for s in SENT.findall(article_text(raw, mw, mwconv)):
         yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases)
 
 
-def articles(limit, dump=None):
+def articles(limit, dump=None, meta=False):
+    """Main-namespace non-redirect pages in dump order: the wikitext, or with meta=True (title, revid, wikitext) (XML-unescaped title; revid
+    is the first <revision><id>, "" when absent). Default: exactly the old output."""
     text_re = re.compile(r"<text[^>]*>(.*?)</text>", re.S)
+    title_re, rev_re = re.compile(r"<title>(.*?)</title>", re.S), re.compile(r"<revision>\s*<id>(\d+)</id>")
     buf, n = "", 0
     with bz2.open(dump or DUMP, "rt", encoding="utf-8") as f:
         for line in f:
@@ -236,7 +246,11 @@ def articles(limit, dump=None):
                 if "<ns>0</ns>" in buf and "#REDIRECT" not in buf.upper() and "#重定向" not in buf:
                     m = text_re.search(buf)
                     if m:
-                        yield m.group(1)
+                        if meta:
+                            t, r = title_re.search(buf), rev_re.search(buf)
+                            yield html.unescape(t.group(1)).strip() if t else "", r.group(1) if r else "", m.group(1)
+                        else:
+                            yield m.group(1)
                         n += 1
                         if n >= limit:
                             return
