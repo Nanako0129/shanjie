@@ -11,11 +11,17 @@
       was modified); every fetched page is then judged by its own publish date (meta article:published_time, JSON-LD datePublished, or
       <time datetime>), and a page with no date or outside the window is dropped (no_date, out_of_window).
 
-  news_fetch.py wp --base-url URL [--exclude-author ID ...] [--date-from D] [--date-to D] [--config FILE] --out FILE.tsv
-      A WordPress site's public REST API (BASE/wp-json/wp/v2/posts, 100 per page) through the same polite Fetcher: robots.txt applies
-      to the API path too. Paragraphs come from content.rendered only (sidebars and other page furniture never enter); exclusion markers and
-      boilerplate apply to those paragraphs only. The unit is the post id. Paging stops at an empty page, at X-WP-TotalPages, or at
-      the HTTP 400 WordPress answers past the last page. A page that fails stops paging unless the total is already known.
+  news_fetch.py wp --base-url URL [--exclude-author ID ...] [--exclude-category ID ...] [--date-from D] [--date-to D] [--config FILE]
+                   --out FILE.tsv
+      A WordPress site's public REST API (BASE/wp-json/wp/v2/posts, 100 per page, newest first; _fields=id,date,author,categories,content)
+      through the same polite Fetcher: robots.txt applies to the API path too. Paragraphs come from content.rendered only (sidebars and
+      other page furniture never enter); exclusion markers and boilerplate apply to those paragraphs only. The unit is the post id.
+      --exclude-author / --exclude-category drop posts by id; a post without the field is dropped and counted (no_author, no_categories),
+      and if no post on page 1 has the field the run stops with an error. --date-from / --date-to are sent as `after` / `before` and
+      checked again on each post's date; paging also stops after a page whose posts are all older than --date-from.
+      Paging stops at: an empty page, X-WP-TotalPages, a page with no new post id (duplicates are skipped and counted), an old page, a
+      robots.txt block, or an HTTP 400 when the total is unknown (WordPress's answer for a page past the end). Any other failed page is
+      counted by kind; paging then goes on only if the total is known. pages_seen and total_pages are in the counts, so a truncated crawl shows.
 
 --out must end in .tsv: build_counts_text.py strips the unit column only for a .tsv name. The unit is a URL, a record id field, or a hash of
 the record, never a title.
@@ -30,6 +36,7 @@ import argparse
 import codecs
 import collections
 import csv
+import datetime
 import hashlib
 import html
 import http.client
@@ -37,6 +44,7 @@ import io
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -141,7 +149,7 @@ class Fetcher:
     def raw(self, url):
         self._wait()
         try:
-            r = self.opener(url, {"User-Agent": self.ua}, TIMEOUT)
+            r = tuple(self.opener(url, {"User-Agent": self.ua}, TIMEOUT))[:4]
             return r + ({},) * (4 - len(r))      # (status, body, content type, headers)
         finally:
             self.last = self.clock()   # measured from the end of the previous request
@@ -549,46 +557,70 @@ def gen_pages(a, f, stats):
         yield u, paras
 
 
-WP_FIELDS = "id,date,link,author,categories,content,title"
+WP_FIELDS = "id,date,author,categories,content"
+
+
+def wp_url(base, page, date_from, date_to):
+    """One page of posts, newest first. The window goes to the server too: `after` / `before` are exclusive, so they are set one second
+    outside the first and last day; the local date check below stays."""
+    url = f"{base}/wp-json/wp/v2/posts?per_page=100&page={page}&_fields={WP_FIELDS}"
+    if date_from:
+        url += f"&after={datetime.date.fromisoformat(date_from) - datetime.timedelta(days=1)}T23:59:59"
+    if date_to:
+        url += f"&before={datetime.date.fromisoformat(date_to) + datetime.timedelta(days=1)}T00:00:00"
+    return url
 
 
 def gen_wp(a, f, stats):
-    base, page, total = a.base_url.rstrip("/"), 1, None
-    excluded = set(a.exclude_author)
+    base, page, total, seen = a.base_url.rstrip("/"), 1, None, set()
+    ex_author, ex_cat = set(a.exclude_author), set(a.exclude_category)
     while total is None or page <= total:
-        url = f"{base}/wp-json/wp/v2/posts?per_page=100&page={page}&_fields={WP_FIELDS}"
         try:
-            body, ctype, headers = f.fetch_h(url)
-            posts = json.loads(decode_body(body, ctype))
+            body, ctype, headers = f.fetch_h(wp_url(base, page, a.date_from, a.date_to))
+            posts = json.loads(decode_body(body, ctype).lstrip("\ufeff"))
             if not isinstance(posts, list):
                 raise json.JSONDecodeError("not a list of posts", "", 0)
             if headers.get("x-wp-totalpages", "").isdigit():
                 total = int(headers["x-wp-totalpages"])
+                stats["total_pages"] = total
         except Blocked:
             stats["blocked_by_robots"] += 1
             return
-        except StatusError as e:
-            if e.status == 400 and page > 1:       # WordPress: page number beyond the last page
-                return
-            stats["failed_http_status"] += 1
-            if total is None:
-                return
-            page += 1
-            continue
         except FETCH_ERRORS as e:
+            if isinstance(e, StatusError) and e.status == 400 and page > 1 and total is None:
+                return      # WordPress answers 400 for a page past the last one; with the total known that would be a real failure
             stats["failed_" + kind_of(e)] += 1
             if total is None:
                 return
             page += 1
             continue
+        posts = [p for p in posts if isinstance(p, dict)]
         if not posts:
             return
-        stats["pages"] += 1
+        stats["pages_seen"] += 1
+        if page == 1:
+            for flag, field, wanted in (("--exclude-author", "author", ex_author), ("--exclude-category", "categories", ex_cat)):
+                if wanted and not any(field in p for p in posts):
+                    sys.exit(f"wp: page 1 has no '{field}' field on any post, so {flag} cannot work")
+        if all(p.get("id") in seen for p in posts):
+            stats["stopped_no_new_ids"] += 1     # a cache that ignores `page`, or a repeated page
+            return
         for post in posts:
-            if not isinstance(post, dict):
+            if post.get("id") in seen:
+                stats["duplicate_ids"] += 1
                 continue
-            if post.get("author") in excluded:
+            seen.add(post.get("id"))
+            if ex_author and "author" not in post:
+                stats["no_author"] += 1
+                continue
+            if post.get("author") in ex_author:
                 stats["authors_excluded"] += 1
+                continue
+            if ex_cat and "categories" not in post:
+                stats["no_categories"] += 1
+                continue
+            if ex_cat & set(post.get("categories") or ()):
+                stats["categories_excluded"] += 1
                 continue
             if a.date_from or a.date_to:
                 d = str(post.get("date") or "")
@@ -598,11 +630,16 @@ def gen_wp(a, f, stats):
                 if not in_window(d, a.date_from, a.date_to):
                     stats["out_of_window"] += 1
                     continue
-            content = (post.get("content") or {}).get("rendered") if isinstance(post.get("content"), dict) else None
+            c = post.get("content")
+            content = c.get("rendered") if isinstance(c, dict) else None
             if not content or post.get("id") is None:
                 stats["failed_no_text_field"] += 1
                 continue
             yield str(post["id"]), html_paragraphs(content)
+        dates = [str(p.get("date") or "")[:10] for p in posts]
+        if a.date_from and all(dates) and all(d < a.date_from for d in dates):
+            stats["stopped_old_page"] += 1       # newest first: nothing on a later page can be inside the window
+            return
         page += 1
 
 
@@ -631,6 +668,7 @@ def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     w = sub.add_parser("wp", parents=[common])
     w.add_argument("--base-url", required=True)
     w.add_argument("--exclude-author", type=int, action="append", default=[], metavar="ID")
+    w.add_argument("--exclude-category", type=int, action="append", default=[], metavar="ID")
     w.add_argument("--date-from")
     w.add_argument("--date-to")
     a = ap.parse_args(argv)

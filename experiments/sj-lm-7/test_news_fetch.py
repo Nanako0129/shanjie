@@ -384,12 +384,13 @@ class WordPress(unittest.TestCase):
         self.addCleanup(self.d.cleanup)
         self.out = os.path.join(self.d.name, "o.tsv")
 
-    def url(self, n):
-        return f"{self.BASE}/wp-json/wp/v2/posts?per_page=100&page={n}&_fields=id,date,link,author,categories,content,title"
+    def url(self, n, window=""):
+        return f"{self.BASE}/wp-json/wp/v2/posts?per_page=100&page={n}&_fields=id,date,author,categories,content{window}"
 
     @staticmethod
-    def post(i, text, author=1, date="2026-09-10T08:00:00", title="標題", link="https://blog.test/p"):
-        return {"id": i, "date": date, "author": author, "link": link, "title": {"rendered": title}, "content": {"rendered": text}}
+    def post(i, text, author=1, date="2026-09-10T08:00:00", title="標題", link="https://blog.test/p", categories=(1,)):
+        """title and link are not requested from the API; they are here to show that nothing reads them."""
+        return {"id": i, "date": date, "author": author, "categories": list(categories), "link": link, "title": {"rendered": title}, "content": {"rendered": text}}
 
     @staticmethod
     def api(posts, total=None):
@@ -459,7 +460,7 @@ class WordPress(unittest.TestCase):
     def test_date_filter(self):
         posts = [self.post(1, "<p>早。</p>", date="2026-08-31T23:59:59"), self.post(2, "<p>起。</p>", date="2026-09-01T00:00:00"),
                  self.post(3, "<p>末。</p>", date="2026-10-25T23:00:00"), self.post(4, "<p>晚。</p>", date="2026-10-26T00:00:01")]
-        net = Net({self.url(1): self.api(posts, total=1)})
+        net = Net({self.url(1, self.WINDOW): self.api(posts, total=1)})
         so = self.run_wp(net, "--date-from", "2026-09-01", "--date-to", "2026-10-25")
         self.assertEqual(self.rows(), ["2\t起。", "3\t末。"])
         self.assertIn("out_of_window=2", so)
@@ -497,6 +498,80 @@ class WordPress(unittest.TestCase):
         net = Net({self.url(1): self.api(posts, total=1)})
         self.run_wp(net)
         self.assertEqual(sum(boiler in r for r in self.rows()), 1)
+
+    WINDOW = "&after=2026-08-31T23:59:59&before=2026-10-26T00:00:00"
+
+    def test_window_is_sent_to_the_server_and_checked_again(self):
+        posts = [self.post(1, "<p>在內。</p>", date="2026-10-01T00:00:00"), self.post(2, "<p>伺服器漏掉的。</p>", date="2026-11-01T00:00:00")]
+        net = Net({self.url(1, self.WINDOW): self.api(posts, total=1)})
+        so = self.run_wp(net, "--date-from", "2026-09-01", "--date-to", "2026-10-25")
+        self.assertEqual(self.pages_requested(net), [self.url(1, self.WINDOW)])
+        self.assertEqual(self.rows(), ["1\t在內。"])
+        self.assertIn("out_of_window=1", so)
+        net = Net({self.url(1, "&after=2026-08-31T23:59:59"): self.api([self.post(1, "<p>只有起日。</p>")], total=1)})
+        self.run_wp(net, "--date-from", "2026-09-01")
+        self.assertEqual(self.rows(), ["1\t只有起日。"])
+
+    def test_a_page_of_only_old_posts_stops_paging(self):
+        old = lambda i: self.post(i, f"<p>舊文{i}。</p>", date="2026-08-15T00:00:00")
+        net = Net({self.url(1, self.WINDOW): self.api([self.post(1, "<p>新文。</p>"), self.post(2, "<p>新文二。</p>")], total=5),
+                   self.url(2, self.WINDOW): self.api([old(3), old(4)], total=5), self.url(3, self.WINDOW): self.api([old(5)], total=5)})
+        so = self.run_wp(net, "--date-from", "2026-09-01", "--date-to", "2026-10-25")
+        self.assertEqual(self.rows(), ["1\t新文。", "2\t新文二。"])
+        self.assertEqual(self.pages_requested(net), [self.url(1, self.WINDOW), self.url(2, self.WINDOW)])   # page 3 never requested
+        self.assertIn("stopped_old_page=1", so)
+        self.assertIn("pages_seen=2", so)
+        self.assertIn("total_pages=5", so)                                                  # the truncation is visible
+
+    def test_duplicate_ids_are_skipped_and_a_page_without_new_ids_stops_paging(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>"), self.post(2, "<p>乙文章。</p>")]),
+                   self.url(2): self.api([self.post(2, "<p>乙文章。</p>"), self.post(3, "<p>丙文章。</p>")]),
+                   self.url(3): self.api([self.post(1, "<p>甲文章。</p>"), self.post(3, "<p>丙文章。</p>")]),   # a cache that ignores `page`
+                   self.url(4): self.api([self.post(9, "<p>不該讀。</p>")])})
+        so = self.run_wp(net)
+        self.assertEqual(self.rows(), ["1\t甲文章。", "2\t乙文章。", "3\t丙文章。"])
+        self.assertIn("duplicate_ids=1", so)
+        self.assertIn("stopped_no_new_ids=1", so)
+        self.assertNotIn(self.url(4), self.pages_requested(net))
+
+    def test_400_on_a_later_page_is_a_failure_when_the_total_is_known(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>")], total=3), self.url(2): (400, b"{}"),
+                   self.url(3): self.api([self.post(3, "<p>丙文章。</p>")], total=3)})
+        so = self.run_wp(net)
+        self.assertEqual(self.rows(), ["1\t甲文章。", "3\t丙文章。"])
+        self.assertIn("failed_http_status=1", so)
+        self.assertIn("pages_seen=2", so)
+        self.assertIn("total_pages=3", so)
+
+    def test_a_bom_before_the_json_still_parses(self):
+        body = ("\ufeff" + json.dumps([self.post(1, "<p>甲文章。</p>")], ensure_ascii=False)).encode()
+        for ctype in ("application/json; charset=UTF-8", ""):
+            net = Net({self.url(1): (200, body, ctype, {"x-wp-totalpages": "1"})})
+            self.run_wp(net)
+            self.assertEqual(self.rows(), ["1\t甲文章。"], ctype)
+
+    def test_exclusion_without_the_field_counts_no_author_and_page_one_without_it_is_an_error(self):
+        noauthor = self.post(2, "<p>乙文章。</p>")
+        del noauthor["author"]
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>", author=5), noauthor, self.post(3, "<p>丙文章。</p>", author=6)], total=1)})
+        so = self.run_wp(net, "--exclude-author", "5")
+        self.assertEqual(self.rows(), ["3\t丙文章。"])
+        self.assertIn("no_author=1", so)
+        self.assertIn("authors_excluded=1", so)
+        bare = [self.post(i, "<p>文章。</p>") for i in (1, 2)]
+        for p in bare:
+            del p["author"]
+        net = Net({self.url(1): self.api(bare, total=1)})
+        with self.assertRaises(SystemExit) as cm:
+            self.run_wp(net, "--exclude-author", "5")
+        self.assertIn("author", str(cm.exception.code))
+
+    def test_category_exclusion(self):
+        posts = [self.post(1, "<p>甲文章。</p>", categories=(3, 8)), self.post(2, "<p>乙文章。</p>", categories=(4,)), self.post(3, "<p>丙文章。</p>", categories=())]
+        net = Net({self.url(1): self.api(posts, total=1)})
+        so = self.run_wp(net, "--exclude-category", "8", "--exclude-category", "9")
+        self.assertEqual(self.rows(), ["2\t乙文章。", "3\t丙文章。"])
+        self.assertIn("categories_excluded=1", so)
 
     def test_out_must_be_a_tsv(self):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
