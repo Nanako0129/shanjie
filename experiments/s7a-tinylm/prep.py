@@ -245,7 +245,8 @@ def cmd_encode(a):
     count = collections.Counter(cc["charcount"])
     for name in a.extra:                                   # each extra file once, not by its epoch weight
         with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
-            count.update(f.read().replace("\n", ""))      # one C-level count over the file, the same counts as line by line
+            for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
+                count.update(block.replace("\n", ""))
     chars = make_vocab(count, a.min_count)
     open(os.path.join(a.work, "vocab.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(chars) + "\n")
     lut = make_lut(chars)
