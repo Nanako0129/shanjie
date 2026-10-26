@@ -7,9 +7,9 @@
 | 檔 | 做什麼 | 需要 torch |
 |---|---|---|
 | `tinylm.py` | numpy 核心：字表（PAD 0、UNK 1、BOS 2）、`row_key`（`context_key`；16 字版）、`.npz` 格式（`save_params`）、numpy 前向（`NumpyLM`）、**唯一的 `LL`**（`ll_many`，序列 `[BOS] + k + c`） | 否 |
-| `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy`；`text`（S7f）：另一個文字檔照口語的切法、用**現有**字表轉成 `ids-<name>.npy`；SJ-SR-7 加 `text --half`（只留 SHA-256 第一個位元組 < 128 的漢字段，單位是寫進 `runs-<name>.txt` 的一行）、`text --runs-only`、`encode --extra NAME…`（字表把各檔 `runs-<NAME>.txt` 各算一次，不乘權重；不給 `--extra` 時輸出與以前逐位元相同） | 否 |
+| `prep.py` | `runs`：核對輸入雜湊，產生訓練文字（維基＋口語，與 n-gram 同一組函式）；`encode`：字表（≥ 5 次）與 `ids-*.npy`；`text`（S7f）：另一個文字檔照口語的切法、用**現有**字表轉成 `ids-<name>.npy`；SJ-SR-7 加 `text --half`（只留 SHA-256(UTF-8) 第一個位元組 < 128 的句子；句子＝輸入檔的一行，去掉結尾換行、轉換之前，`.tsv` 只取最後一欄；整行的漢字段一起留或一起丟）、`text --runs-only`、`encode --extra NAME…`（字表把各檔 `runs-<NAME>.txt` 各算一次，不乘權重；不給 `--extra` 時 `vocab.txt`、`ids-wiki/coll.npy`、`encode-report.json` 與以前逐位元相同；另寫 `ids-vocab.json` 記字表與 ids 雜湊、extra 集合，`train.py` 開訓前核對；字表來自不同 extra 集合的目錄 `encode` 拒絕，除非 `--force`） | 否 |
 | `buildcheck.py` | `construction`：對原始來源的建構檢查；`substr`：調參集正解句出現在訓練文字裡的比例（只記錄）；`--flags` 另寫逐列 0／1（S7d） | 否 |
-| `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個）；`build_epoch`／`plan`：`train.py` 的 epoch 與批次順序（S7f 起放這裡，沒有 torch 也能測；`--extra PATH[:WEIGHT]` 可重複，每段重複 WEIGHT 次、不寫權重＝1、依序接在最後；訓練一個 epoch，步數 ＝ 加權後總 token ÷ 每批 token，自然隨語料等比例） | 否 |
+| `batching.py` | 訓練批次（一段一個序列、同長度成批、超過 65 個 token 的切片重疊 1 個）；`build_epoch`／`plan`：`train.py` 的 epoch 與批次順序（S7f 起放這裡，沒有 torch 也能測；`--extra PATH[:WEIGHT]` 可重複，每段重複 WEIGHT 次、不寫權重＝1、依序接在最後；訓練一個 epoch、一批一步；每種長度的最後一批不滿，所以步數隨加權後總 token 增加但不嚴格成比例，接近程度沒量過） | 否 |
 | `torch_model.py`、`train.py` | 模型、`export_npz`、torch 打分後端、訓練 | 是 |
 | `score.py` | 候選（`--dump` 前 8 名）× `LL` → 只有數字的分數檔；`--ppl-out` 正解句困惑度 | 否（`--backend torch` 才要） |
 | `run_sets.py` | 每個集合各跑一次 `lm_eval.py --dump` 與 `score.py`（一行命令跑完全部集合） | 否 |

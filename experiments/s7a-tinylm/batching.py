@@ -48,12 +48,17 @@ def make_batches(lengths, tokens_per_batch, rng):
 
 
 def parse_extra(arg):
-    """'PATH' -> (PATH, 1); 'PATH:5' -> (PATH, 5). A last ':' followed by anything but digits belongs to the path."""
+    """'PATH' -> (PATH, 1); 'PATH:5' -> (PATH, 5). The weight is ASCII digits and >= 1; anything else after the last ':' is a ValueError
+    (a path that itself ends in ':something' is not supported)."""
     path, sep, w = arg.rpartition(":")
-    return (path, int(w)) if sep and w.isdigit() else (arg, 1)
+    if not sep:
+        return arg, 1
+    if not (path and w.isascii() and w.isdigit() and int(w) >= 1):
+        raise ValueError(f"--extra {arg!r}: expected PATH or PATH:WEIGHT with WEIGHT an integer >= 1 (a path ending in ':something' is not supported)")
+    return path, int(w)
 
 
-def build_epoch(work, extra=()):
+def build_epoch(work, extra=None):
     """ids-wiki.npy once, ids-coll.npy prep.COLL_WEIGHT times, then each (path, weight) of `extra` (ids files from prep.py text,
     weight = integer copies of every piece per epoch, the way the colloquial x5 is done) appended after them in the order given.
     Without `extra` the arrays are exactly the S7a epoch. Returns (ids, starts, lengths)."""
@@ -64,7 +69,7 @@ def build_epoch(work, extra=()):
     starts = [ws] + [cs + len(wiki)] * prep.COLL_WEIGHT
     lengths = [wl] + [cl] * prep.COLL_WEIGHT
     base = len(wiki) + len(coll)
-    for path, weight in extra:
+    for path, weight in extra or ():
         if not isinstance(weight, int) or weight < 1:
             raise ValueError(f"{path}: weight must be an integer >= 1, got {weight!r}")
         ex = np.load(path)
@@ -78,8 +83,8 @@ def build_epoch(work, extra=()):
 
 def plan(work, extra, tokens_per_batch, seed, max_steps=0):
     """train.py's data: the epoch, its shuffled batches (rng = default_rng(seed), as S7a), cut to max_steps when given.
-    The number of steps is len(batches): one epoch, so it follows from the total (weighted) token count (see train.py). Returns (ids, starts, lengths, batches)."""
+    The number of steps is len(batches) (see train.py). Returns (ids, starts, lengths, batches)."""
     rng = np.random.default_rng(seed)
-    ids, starts, lengths = build_epoch(work, extra)
+    ids, starts, lengths = build_epoch(work, extra)   # extra: None/empty = none
     batches = make_batches(lengths, tokens_per_batch, rng)
     return ids, starts, lengths, batches[:max_steps] if max_steps else batches

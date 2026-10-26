@@ -164,6 +164,19 @@ class TestWeightedExtra(unittest.TestCase):
         with self.assertRaises(ValueError):
             batching.build_epoch(self.work, [(self.a, 0)])
 
+    def test_none_means_no_extras(self):                  # experiments/derisk-1015/e2/train_r.py passes None
+        none, empty = batching.plan(self.work, None, 512, 3), batching.plan(self.work, [], 512, 3)
+        for x, y in zip(none[:3], empty[:3]):
+            self.assertEqual(x.tobytes(), y.tobytes())
+        self.assertEqual([x.tobytes() for x in none[3]], [x.tobytes() for x in empty[3]])
+
+    def test_parse_extra_accepts_only_ascii_digit_weights_of_one_or_more(self):
+        for bad in ("p.npy:", "p.npy:0", "p.npy:00", "p.npy:x", "p.npy:-1", "p.npy:1.5", "p.npy:\u0665", "p.npy:\u00b2", ":5", "p.npy: 5"):
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                batching.parse_extra(bad)
+            self.assertIn("--extra", str(cm.exception))
+        self.assertEqual(batching.parse_extra("p.npy:007"), ("p.npy", 7))
+
 
 class TestPrepVocabAndHalf(unittest.TestCase):
     def write(self, work, name, text):
@@ -179,7 +192,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             for n in ("wiki", "coll"):
                 cc.update(open(os.path.join(work, f"runs-{n}.txt"), encoding="utf-8").read().replace("\n", ""))
             json.dump({"charcount": dict(cc)}, open(os.path.join(work, "charcount.json"), "w"))
-            prep.cmd_encode(type("A", (), {"work": work, "min_count": 2, "extra": []})())
+            prep.cmd_encode(type("A", (), {"work": work, "min_count": 2, "extra": [], "force": False})())
             got = {f: hashlib.sha256(open(os.path.join(work, f), "rb").read()).hexdigest() for f in ("vocab.txt", "ids-wiki.npy", "ids-coll.npy", "encode-report.json")}
         self.assertEqual(got, {
             "vocab.txt": "97fe9df891e7ac0fe12f08fb9a41b04c912be588c8d75960ab736f358b2c0f4d",
@@ -194,7 +207,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             json.dump({"charcount": {"我": 6, "你": 6}}, open(os.path.join(work, "charcount.json"), "w"))
             self.write(work, "runs-a.txt", "好好好好\n去去\n")      # 好 x4 alone: < 5, would be 20 if multiplied by a weight of 5
             self.write(work, "runs-b.txt", "去去去吃\n")            # 去 2 + 3 = 5 over the two files: in; 吃 x1: out
-            prep.cmd_encode(type("A", (), {"work": work, "min_count": 5, "extra": ["a", "b"]})())
+            prep.cmd_encode(type("A", (), {"work": work, "min_count": 5, "extra": ["a", "b"], "force": False})())
             self.assertEqual(prep.load_vocab(work), ["你", "我", "去"])
             ids = np.load(os.path.join(work, "ids-a.npy")).tolist()
             self.assertEqual(ids, [BOS, UNK, UNK, UNK, UNK, BOS, 5, 5])
@@ -203,21 +216,137 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             self.assertEqual(rep["extra"]["a"]["tokens"], 8)
             self.assertEqual(rep["vocab_size"], 6)
 
-    def test_half_keeps_first_hash_byte_below_128(self):
-        # SHA-256 first bytes by hand (python hashlib, checked once): 你好嗎 7d=125, 我是你 4e=78, 吃飯了沒 5c=92 keep;
-        # 我們去吃飯 a5=165, 好嗎 82=130, 今天天氣真好 a3=163, 他不是我 f0=240, 天氣好嗎 d1=209 drop
-        keep, drop = ["你好嗎", "我是你", "吃飯了沒"], ["我們去吃飯", "好嗎", "今天天氣真好", "他不是我", "天氣好嗎"]
-        self.assertTrue(all(prep.half_keep(s) for s in keep))
-        self.assertFalse(any(prep.half_keep(s) for s in drop))
+    def test_half_keeps_whole_input_lines_by_the_hash_of_the_line(self):
+        # SHA-256 first byte of the whole input line (hashlib, checked once). keep: 吃飯了沒 92, 好嗎，你好 52, 我是你 78;
+        # drop: 天氣好嗎 209, 你好嗎，我是你 186, 我們去吃飯，好嗎 218.
+        # 好嗎，你好 is kept although its first run 好嗎 alone would hash to 130 (drop); 你好嗎，我是你 is dropped although both of its
+        # runs alone (你好嗎 125, 我是你 78) would be kept: the line is judged, not its runs.
+        lines = ["天氣好嗎", "吃飯了沒", "好嗎，你好", "你好嗎，我是你", "我們去吃飯，好嗎", "我是你"]
+        self.assertEqual([prep.half_keep(x) for x in lines], [False, True, True, False, False, True])
         with tempfile.TemporaryDirectory() as work:
-            src = os.path.join(work, "in.txt")
-            self.write(work, "in.txt", "\n".join(drop[:2] + keep[:1] + drop[2:] + keep[1:]) + "\n")
+            self.write(work, "in.txt", "\n".join(lines) + "\n")
             with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):
-                rep = prep.write_runs(src, work, "g", (), half=True)
-                prep.write_runs(src, work, "all", ())
-            self.assertEqual(open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read().split("\n")[:-1], keep)       # input order kept
-            self.assertEqual(len(open(os.path.join(work, "runs-all.txt"), encoding="utf-8").read().split("\n")) - 1, 8)  # no --half: all
-            self.assertEqual((rep["lines"], rep["half_dropped_runs"]), (8, 5))
+                rep = prep.write_runs(os.path.join(work, "in.txt"), work, "g", (), half=True)
+                prep.write_runs(os.path.join(work, "in.txt"), work, "all", ())
+            self.assertEqual(open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read(), "吃飯了沒\n好嗎\n你好\n我是你\n")   # input order kept
+            self.assertEqual(len(open(os.path.join(work, "runs-all.txt"), encoding="utf-8").read().split("\n")) - 1, 9)           # no --half: all
+            self.assertEqual((rep["lines"], rep["half_dropped_runs"]), (6, 5))                                                      # 1 + 2 + 2 runs
+
+    def test_half_on_tsv_hashes_the_sentence_field_without_the_unit_column(self):
+        # whole line a1\t吃飯了沒 hashes to 212 (drop) but the sentence 吃飯了沒 to 92 (keep); 7\t天氣好嗎 to 42 (keep) but 天氣好嗎 to 209 (drop)
+        with tempfile.TemporaryDirectory() as work:
+            self.write(work, "in.tsv", "a1\t吃飯了沒\n7\t天氣好嗎\n")
+            with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):
+                prep.write_runs(os.path.join(work, "in.tsv"), work, "g", (), half=True)
+            self.assertEqual(open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read(), "吃飯了沒\n")
+
+    def test_text_json_and_report_keep_the_old_bytes_on_the_default_path(self):
+        # sha256 of text-chat.json written by the code before SJ-SR-7 (092042ee) for this input; run in a temp cwd so "input" is the relative path
+        with tempfile.TemporaryDirectory() as work:
+            self.write(work, "vocab.txt", "我\n們\n去\n吃\n飯\n好\n")
+            self.write(work, "chat.txt", "我們去吃飯，好嗎\n好\nok 我們\n")
+            cwd = os.getcwd()
+            os.chdir(work)
+            try:
+                with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):
+                    rep = prep.encode_extra("chat.txt", ".", "chat", ())
+            finally:
+                os.chdir(cwd)
+            raw = open(os.path.join(work, "text-chat.json"), "rb").read()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), "497524447723d0dc5f3f668084bf33f8af64cf79837f0ec1a6646e2922374748")
+            self.assertEqual(json.dumps(rep, indent=1), raw.decode())                  # what `prep.py text` prints is the file
+            self.assertEqual(list(rep)[-1], "ids_sha256")
+            with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):    # guard / half keys come after the old ones
+                class G:
+                    def any(self, run):
+                        return False
+                os.chdir(work)
+                try:
+                    rep = prep.encode_extra("chat.txt", ".", "chat", (), guard=G(), half=True)
+                finally:
+                    os.chdir(cwd)
+            self.assertEqual(list(rep)[-2:], ["holdout_guard_skipped_runs", "half_dropped_runs"])
+            self.assertEqual(list(rep).index("ids_sha256"), list(rep).index("holdout_guard_skipped_runs") - 1)
+
+
+class TestEncodeGuards(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.work = self.tmp.name
+        for n, t in (("wiki", "我我我我我我\n"), ("coll", "你你你你你你\n"), ("a", "好好好好好\n"), ("b", "去去去去去\n")):
+            with open(os.path.join(self.work, f"runs-{n}.txt"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(t)
+        json.dump({"charcount": {"我": 6, "你": 6}}, open(os.path.join(self.work, "charcount.json"), "w"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def encode(self, *extra, force=False):
+        with mock.patch("sys.stdout", new=open(os.devnull, "w")):
+            prep.cmd_encode(type("A", (), {"work": self.work, "min_count": 5, "extra": list(extra), "force": force})())
+
+    def test_rejects_reserved_duplicate_and_missing_names(self):
+        for bad in (("wiki",), ("coll",), ("a", "a"), ("nope",)):
+            with self.assertRaises(SystemExit):
+                self.encode(*bad)
+        self.assertFalse(os.path.exists(os.path.join(self.work, "vocab.txt")))                  # refused before writing anything
+
+    def test_refuses_a_vocab_from_another_extra_set_unless_forced(self):
+        self.encode()                                                                              # R0-like: no extras
+        keep = open(os.path.join(self.work, "vocab.txt"), "rb").read()
+        with self.assertRaises(SystemExit):
+            self.encode("a")
+        self.assertEqual(open(os.path.join(self.work, "vocab.txt"), "rb").read(), keep)            # untouched
+        self.encode()                                                                              # same set again is fine
+        self.encode("a", force=True)
+        self.assertEqual(json.load(open(os.path.join(self.work, "ids-vocab.json")))["extra"], ["a"])
+        self.encode("a")                                                                           # now "a" is the recorded set
+        with self.assertRaises(SystemExit):
+            self.encode("a", "b")
+        self.assertEqual(list(json.load(open(os.path.join(self.work, "encode-report.json")))["extra"]), ["a"])    # the set is in the report
+
+    def test_a_work_dir_from_before_the_record_counts_as_no_extras(self):
+        self.encode()
+        os.remove(os.path.join(self.work, "ids-vocab.json"))
+        self.encode()
+        os.remove(os.path.join(self.work, "ids-vocab.json"))
+        with self.assertRaises(SystemExit):
+            self.encode("a")
+
+    def test_check_vocab(self):
+        self.encode("a", "b")
+        w = self.work
+        ids_a = os.path.join(w, "ids-a.npy")
+        prep.check_vocab(w, [ids_a, os.path.join(w, "ids-b.npy")])                                # consistent
+        prep.check_vocab(w, [])                                                                    # extras are optional at train time
+        with open(os.path.join(w, "ids-a.npy"), "ab") as f:                                       # tampered extra ids
+            f.write(b"\0\0")
+        with self.assertRaises(SystemExit):
+            prep.check_vocab(w, [ids_a])
+        self.encode("a", "b")
+        tj = os.path.join(w, "text-a.json")
+        good = open(tj).read()
+        open(tj, "w").write(good.replace('"vocab_sha256": "', '"vocab_sha256": "0'))              # encoded with another vocab
+        with self.assertRaises(SystemExit):
+            prep.check_vocab(w, [ids_a])
+        os.remove(tj)                                                                              # no json
+        with self.assertRaises(SystemExit):
+            prep.check_vocab(w, [ids_a])
+        open(tj, "w").write(good)
+        with open(os.path.join(w, "vocab.txt"), "a", encoding="utf-8") as f:                       # vocab.txt changed after encode
+            f.write("x\n")
+        with self.assertRaises(SystemExit):
+            prep.check_vocab(w, [])
+        self.encode("a", "b")
+        with open(os.path.join(w, "ids-wiki.npy"), "ab") as f:                                    # ids-wiki replaced
+            f.write(b"\0\0")
+        with self.assertRaises(SystemExit):
+            prep.check_vocab(w, [])
+        self.encode("a", "b")
+        os.remove(os.path.join(w, "ids-vocab.json"))                                              # old work dir: fine alone, not with extras
+        prep.check_vocab(w, [])
+        with self.assertRaises(SystemExit):
+            prep.check_vocab(w, [ids_a])
 
 
 if __name__ == "__main__":
