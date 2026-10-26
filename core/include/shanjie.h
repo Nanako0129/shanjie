@@ -208,6 +208,14 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
 //   after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_english_inline in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) the
+//   evidence for English counts a Zhuyin key typed in a column below one that holds a symbol of the unfinished syllable (not a replacing key,
+//   which already counts) as well as a replaced symbol; and a Space can open the English window for a listed word whose syllable
+//   does not exist, and for one of the two-letter words of the core's TWO_LETTER (ok, ls, cd ...; each can have evidence) with one piece of evidence. With 0
+//   the engine is the one without this function, bit for bit. Turning it off closes an open English window, whatever opened it, which clears the shadow
+//   (the unfinished syllable stays); with no window open nothing changes. Call it after every engine creation, like set_english_inline.
+int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

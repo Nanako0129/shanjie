@@ -28,6 +28,9 @@ public final class SettingsModel: ObservableObject {
     /// enabled and on.
     @Published public private(set) var englishInline = true
     @Published public private(set) var englishInlineEnabled = false
+    /// The 依按鍵順序判斷英文 choice under them (zhen-keyorder section 3), default false; enabled on the display choice's condition.
+    @Published public private(set) var englishKeyOrder = false
+    @Published public private(set) var englishKeyOrderEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).
     @Published public private(set) var spacing = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
@@ -87,6 +90,8 @@ public final class SettingsModel: ObservableObject {
         englishEnabled = shell.englishEnabled
         englishInline = shell.englishInlineOn
         englishInlineEnabled = shell.englishInlineEnabled
+        englishKeyOrder = shell.englishKeyOrderOn
+        englishKeyOrderEnabled = shell.englishKeyOrderEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
@@ -114,6 +119,7 @@ public final class SettingsModel: ObservableObject {
     public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
     public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
+    public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }

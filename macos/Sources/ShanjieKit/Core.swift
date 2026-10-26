@@ -158,6 +158,13 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
     }
 
+    /// zhen-keyorder: whether keys out of Zhuyin's column order count as evidence of English (the core's default is false); returns the
+    /// snapshot (turning it off closes an open English window). Sent to every engine `Shell.build()` makes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
+    }
+
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
 
     func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }

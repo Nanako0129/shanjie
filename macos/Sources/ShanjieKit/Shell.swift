@@ -145,6 +145,9 @@ public protocol EnglishStore: AnyObject {
     /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
     /// when Space opens the window. `nil` means never chosen, which is true.
     var englishInline: Bool? { get set }
+    /// The choice under that (docs/contracts/zhen-keyorder.md section 3): keys out of Zhuyin's column order count as evidence of English.
+    /// `nil` means never chosen, which is false.
+    var englishKeyOrder: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
@@ -152,9 +155,11 @@ public protocol EnglishStore: AnyObject {
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
     public var englishInline: Bool?
-    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+    public var englishKeyOrder: Bool?
+    public init(_ english: Bool? = nil, inline: Bool? = nil, keyOrder: Bool? = nil) {
         self.english = english
         self.englishInline = inline
+        self.englishKeyOrder = keyOrder
     }
 }
 
@@ -394,6 +399,9 @@ public final class Shell {
     /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
     /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
     private(set) var englishInlineOn = true
+    /// zhen-keyorder section 3: whether keys out of Zhuyin's column order count as evidence of English (default false: `UserDefaults`
+    /// key `englishKeyOrder`, absent is false); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishKeyOrderOn = false
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
@@ -467,6 +475,8 @@ public final class Shell {
     var englishEnabled: Bool { englishAvailable && mode == .standard }
     /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
     var englishInlineEnabled: Bool { englishEnabled && englishOn }
+    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the display choice.
+    var englishKeyOrderEnabled: Bool { englishInlineEnabled }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -598,6 +608,7 @@ public final class Shell {
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
         englishInlineOn = englishStore.englishInline ?? true
+        englishKeyOrderOn = englishStore.englishKeyOrder ?? false
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
@@ -664,6 +675,10 @@ public final class Shell {
 
     func applyEnglishInline(_ on: Bool) {
         if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    }
+
+    func applyEnglishKeyOrder(_ on: Bool) {
+        if let o = owner { o.applyEnglishKeyOrder(on) } else { dropOnFailure(setEnglishKeyOrder(on)) }
     }
 
     func applyRerank(_ on: Bool) {
@@ -781,6 +796,16 @@ public final class Shell {
         englishStore.englishInline = on
         defer { changed() }
         return engine?.setEnglishInline(on)
+    }
+
+    /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
+    /// caller to show. The core closes an open English window when the choice goes off, whatever evidence opened it; otherwise nothing
+    /// on screen changes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
+        englishKeyOrderOn = on
+        englishStore.englishKeyOrder = on
+        defer { changed() }
+        return engine?.setEnglishKeyOrder(on)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -942,6 +967,10 @@ public final class Shell {
         // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
         if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
             Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        }
+        // And the key-order evidence (zhen-keyorder section 3), every time: the core's default is false.
+        if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
+            Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
         }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -1175,6 +1204,16 @@ public final class Session {
     /// Zhuyin or back on screen).
     func applyEnglishInline(_ on: Bool) {
         switch shell.setEnglishInline(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (turning it off
+    /// closes an open English window, whatever opened it; otherwise the snapshot is what was on screen).
+    func applyEnglishKeyOrder(_ on: Bool) {
+        switch shell.setEnglishKeyOrder(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
