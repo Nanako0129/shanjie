@@ -1,6 +1,6 @@
 # 契約：新聞語料——能訓練的拿去訓練，不能訓練的拿來驗證
 
-狀態：草稿修訂一（2026-10-26）：處理 plan-verifier 第一次 REVISE 的七項（整數權重、書面來源 B 補進比對與防護、程式改動的範圍、步驟順序與同一份 dump、`sources.tsv` 不動、`--rows` 的旗標禁令、newstune 當判讀集的依據）。
+狀態：草稿修訂二（2026-10-26）：第二次 REVISE 的兩項（防護的比對對象照 sj-lm-7 §2.4 全列、連文三元組的計數與建置指令）已改。修訂一：處理 plan-verifier 第一次 REVISE 的七項（整數權重、書面來源 B 補進比對與防護、程式改動的範圍、步驟順序與同一份 dump、`sources.tsv` 不動、`--rows` 的旗標禁令、newstune 當判讀集的依據）。
 
 ## 0. 依據（維護者的決定與查過的事）
 
@@ -155,10 +155,13 @@
 
 ### 3.4 洩漏防護
 
-- 三個訓練來源（新聞稿、維基新聞訓練那一份、書面來源 B）計數時都打開 `--holdout-guard`（`build_counts_text.py` 的既有開關），比對對象是：
-  - 公開保留集（口語半邊）；
-  - §2 的全部私人新聞列：`newstune` 與三份新聞半邊。
-- 跳過的段數在任何分數之前記進研究紀錄。
+- 三個訓練來源（新聞稿、維基新聞訓練那一份、書面來源 B）在**每一次計數**時都打開 `--holdout-guard`：bigram 的期望計數（`build_counts_text.py`）與連文的三元組計數（`count.py text`，§3.6）都要。
+- 比對對象和 sj-lm-7 §2.4 相同，再加上本片的私人新聞列，每一份都在指令裡明列，不靠預設：
+  - 保留集口語半邊：現役 `eval/holdout/talk.txt` 與 `next/shard-{2,3}/talk.txt`；
+  - 公開評測與調參集：dev302、打字測驗（聊天、書面）、錯字回報、cvtune-clean、wikitune-clean、動漫五集、名單檢查集、資訊詞包檢查集、網路用語三集、輕聲檢查集；
+  - 私人新聞列：`newstune` 與 `holdout-news-{1,2,3}`；
+  - 私人的 discordtune：在評測機器上用同一個比對器、`dedupe_eval.py --min-len 6`，照 sj-lm-7 §2.4，只回命中數。
+- 每個來源、每個集合的命中數（跳過的段數）在階段 3b 的任何分數之前記進研究紀錄。
 
 ### 3.5 量法與選法
 
@@ -183,7 +186,14 @@
   - 新聞稿：行政院「本院新聞」與 holdout-refresh §2 的 23 個 data.gov.tw 資料集，用官方下載點，不刮網頁。
   - 一般文章頁：網址清單或 sitemap 由參數給（報社 A 與書面來源 B 的網址只放 `.agent-local`），每 2 秒最多一個請求，抓之前讀 robots.txt、被禁止的路徑不抓。
   - 輸出 `單位\t段落` 的 TSV；排除規則（欄位行、樣板句 ≥ 5 次只算一次、文章層的排除標記）各有單元測試。
-- 計數用既有的 `build_counts_text.py --no-trad-tw-phrases --expected`（B 臂的三份計數詞表）加 `--holdout-guard`，不改。
+- **bigram 的計數**：用既有的 `build_counts_text.py --no-trad-tw-phrases --expected`（B 臂的三份計數詞表）加 `--holdout-guard`，不改程式。每個來源一個計數檔。
+- **連文的三元組計數**（N10、N11、N12 用）：
+  - 用 `experiments/derisk-1015/e1/count.py text --tag <來源> --no-trad-tw-phrases --tri-min 0.01`，計數詞表同上，和 WC 表的三元組計數同一套設定（研究紀錄 2026-10-26 階段 1 的 trigram 一節）。
+  - executor 替 `count.py text` 加 `--holdout-guard [ROWS…]`，重用 `holdout_guard` 的比對器：預設關，關著時輸出逐位元組不變；開著時命中的漢字段不計數，回報跳過幾段。單元測試照 holdout-refresh §8 的計數開關那幾條。
+- **連文表的建置**：
+  - `build_models.py tri --counts <unmapped 計數> --lm <該格的 bigram> --thresholds 1 --corpora counts-200000.pkl:1 counts-colloquial3.pkl:5 counts-press.pkl:1 counts-wikinews.pkl:1 counts-srcb.pkl:1`；
+  - 接著 `entropy_prune.py --keep 7700964`，和 WC 表一樣。
+  - 兩支都是既有工具（`b6a3c8c8` 起有 `--corpora`），不改。
 
 ## 4. 授權
 
