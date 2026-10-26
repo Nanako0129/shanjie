@@ -334,6 +334,53 @@ class TestCounting(unittest.TestCase):
                 count.main(["text", "--out", d, "--tag", "y", "--no-trad-tw-phrases", plain])
             self.assertEqual((set(seen[:2]), set(seen[2:])), ({True}, {False}))   # --no-trad-tw-phrases reaches the conversion, as in build_counts.py
 
+    GUARD_LINES = ["我說今天天氣很好吧", "「今天天氣很好」，他說再見", "你好嗎", "再見"]   # hit inside a longer run; hit wrapped in quotes; two clean lines
+
+    def _text_run(self, d, tag, *flag):
+        src = os.path.join(d, "g.txt")
+        open(src, "w", encoding="utf-8").write("\n".join(self.GUARD_LINES) + "\n")
+        out = io.StringIO()
+        with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), contextlib.redirect_stdout(out):
+            count.main(["text", "--out", d, "--tag", tag, src, *flag])
+        return out.getvalue()
+
+    def test_text_holdout_guard_off_is_identical_and_on_skips_the_hit_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = os.path.join(d, "rows.txt")
+            open(rows, "w", encoding="utf-8").write("|今天天氣很好|ㄐㄧㄣ ㄊㄧㄢ ㄊㄧㄢ ㄑㄧˋ ㄏㄣˇ ㄏㄠˇ\n|短句|ㄉㄨㄢˇ ㄐㄩˋ\n")
+            other = os.path.join(d, "other.txt")
+            open(other, "w", encoding="utf-8").write("|完全不相干的句子|x\n")
+            off = self._text_run(d, "off")
+            miss = self._text_run(d, "miss", "--holdout-guard", other)
+            on = self._text_run(d, "on", "--holdout-guard", rows)
+            self.assertNotIn("holdout-guard", off)
+            self.assertIn("holdout-guard: skipped 0 runs", miss)
+            self.assertIn("holdout-guard: skipped 2 runs", on)                              # the long run and the quoted one
+            for sub, name in (("unmapped", "counts"), ("unmapped", "tri"), ("mapped", "counts")):
+                a, b = (slurp(os.path.join(d, sub, f"{name}-{t}.pkl"), "rb") for t in ("off", "miss"))
+                self.assertEqual(a, b)                                                       # a guard that hits nothing changes no byte
+            self.assertNotIn("holdout_guard", json.loads(slurp(os.path.join(d, "meta-off.json"))))
+            self.assertEqual(json.loads(slurp(os.path.join(d, "meta-on.json")))["guard_skipped_runs"], 2)
+            u_off, u_on = (unpickle(os.path.join(d, "unmapped", f"counts-{t}.pkl")) for t in ("off", "on"))
+            self.assertEqual((u_off["runs"], u_on["runs"]), (5, 3))                          # runs: long, quoted, 他說再見, 你好嗎, 再見; the first two are skipped
+            self.assertEqual(u_on["uni"].get("今天", 0), 0)
+            self.assertGreater(u_off["uni"]["今天"], 0)
+            self.assertGreater(sum(u_on["uni"].values()), 0)                                 # the clean lines are still counted
+
+    def test_text_holdout_guard_errors_carry_no_row_text(self):
+        marker = "秘密標記字串"
+        with tempfile.TemporaryDirectory() as d:
+            bad = os.path.join(d, "bad.txt")
+            open(bad, "w", encoding="utf-8").write(f"{marker}|{marker}\n")
+            err, out = io.StringIO(), io.StringIO()
+            with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                with self.assertRaises(SystemExit) as cm:
+                    count.main(["text", "--out", d, "--tag", "x", os.path.join(d, "none.txt"), "--holdout-guard", bad])
+            msg = str(cm.exception.code)
+            self.assertIn("bad.txt:1", msg)
+            self.assertNotIn(marker, msg + err.getvalue() + out.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(d, "unmapped")))                   # stopped before counting
+
     def test_pack_words_add_trigrams_like_the_additive_scheme(self):
         """With a pack word (model-v5 §8) the trigram table is lex0's plus the trigrams that contain the pack word."""
         lex0 = fake_lexicon(**{"哈": -2.0, "囉": -2.0, "喵": -2.0})

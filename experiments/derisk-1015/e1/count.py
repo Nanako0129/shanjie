@@ -20,7 +20,7 @@ Outputs, under --out:
   meta-<tag>.json             commit, argv, SHA-256 of every input, counts
 
   python3 count.py wiki --out DIR --articles 200000 --procs 40 --extra-lexicon FILE... [--overlay-add FILE] [--tri-min 0.01]
-  python3 count.py text --out DIR --tag colloquial3 --extra-lexicon FILE... [--overlay-add FILE] FILE...
+  python3 count.py text --out DIR --tag colloquial3 --extra-lexicon FILE... [--overlay-add FILE] [--holdout-guard [ROWS...]] FILE...
   python3 count.py wiki ... --shard K/N          only articles i with i % N == K (build_counts.py --shard's rule); the tag becomes
                                                  <articles>-shard<K>of<N>; the N processes run side by side, each with its own --procs
   python3 count.py merge --out DIR --tag T SHARD_TAG...   sums the unmapped / mapped / tri pickles of the shard tags (wiki shards, or the
@@ -107,6 +107,7 @@ class Acc:
         self.dbi = collections.Counter()   # mapped minus unmapped, bigram part (only keys that move)
         self.nx = 0                        # runs that start after an <X>
         self.runs = 0
+        self.skipped = 0                   # runs left out by the holdout guard
 
     def add_run(self, run, left_x, tri_min):
         r = run_expected3(run, tri_min)
@@ -125,10 +126,15 @@ class Acc:
             self.tri[k] += e
         self.nx += left_x
 
-    def add_text(self, converted, tri_min):
-        """A converted text (one sentence or one line): every Han run of >= 2 characters, like the original loops."""
+    def add_text(self, converted, tri_min, guard=None):
+        """A converted text (one sentence or one line): every Han run of >= 2 characters, like the original loops.
+        guard: None, or the holdout_guard Matcher; a run that contains a guarded sentence is not counted (self.skipped), same test as
+        build_counts_text.main (after the length filter, on the folded run)."""
         for run, left_x in mapping.han_runs_with_left(converted):
             if len(run) >= 2:
+                if guard is not None and guard.any(bc.fold(run)):
+                    self.skipped += 1
+                    continue
                 self.add_run(run, left_x, tri_min)
 
     def result(self):
@@ -233,13 +239,19 @@ def cmd_wiki(a):
 
 
 def cmd_text(a):
+    guard = bc.guard_matcher(a.holdout_guard, not a.no_trad_tw_phrases)   # first: a bad rows file stops here, before the lexicon loads
     init3(a.extra_lexicon, a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)
     acc = Acc()
     for p in a.paths:
         for s in bct.lines(p):
-            acc.add_text(bc.convert(s, *bc._W["conv"], trad_tw_phrases=not a.no_trad_tw_phrases), a.tri_min)
-    meta = common.provenance(_inputs(a, a.paths), {"tri_min": a.tri_min, "no_trad_tw_phrases": a.no_trad_tw_phrases})
+            acc.add_text(bc.convert(s, *bc._W["conv"], trad_tw_phrases=not a.no_trad_tw_phrases), a.tri_min, guard)
+    extra = {"tri_min": a.tri_min, "no_trad_tw_phrases": a.no_trad_tw_phrases}
+    if guard is not None:
+        extra.update(holdout_guard=a.holdout_guard, guard_skipped_runs=acc.skipped)   # only when on: off keeps the meta keys as before
+    meta = common.provenance(_inputs(a, a.paths), extra)
     write_outputs(a.out, a.tag, acc.uni, acc.bi, acc.tri, acc.dbi, acc.nx, acc.runs, 0, meta)
+    if guard is not None:
+        print(f"holdout-guard: skipped {acc.skipped} runs")
 
 
 def cmd_merge(a):
@@ -273,6 +285,7 @@ def main(argv=None):
     sub.choices["wiki"].add_argument("--articles", type=int, default=200000)
     sub.choices["wiki"].add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
     sub.choices["text"].add_argument("--tag", required=True)
+    sub.choices["text"].add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="default off. A Han run that contains a guarded sentence is not counted; the skipped count is printed. Same matcher as build_counts_text.py --holdout-guard (no files = every .txt under eval/holdout/). Put it after the positional paths or separate with --")
     sub.choices["text"].add_argument("paths", nargs="+")
     sub.choices["wiki"].add_argument("--shard", metavar="K/N", help="only articles i with i %% N == K; output tag <articles>-shard<K>of<N>; merge the N shards with `merge`")
     p = sub.add_parser("merge")
