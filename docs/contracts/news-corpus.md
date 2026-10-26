@@ -1,6 +1,6 @@
 # 契約：新聞語料——能訓練的拿去訓練，不能訓練的拿來驗證
 
-狀態：草稿修訂二（2026-10-26）：第二次 REVISE 的兩項（防護的比對對象照 sj-lm-7 §2.4 全列、連文三元組的計數與建置指令）已改。修訂一：處理 plan-verifier 第一次 REVISE 的七項（整數權重、書面來源 B 補進比對與防護、程式改動的範圍、步驟順序與同一份 dump、`sources.tsv` 不動、`--rows` 的旗標禁令、newstune 當判讀集的依據）。
+狀態：**過審**（2026-10-26）。收尾審查 REVISE 三項都是少寫的規格（防護漏了聊天保留桶、私人命中拿掉後計數讀哪個檔、N01／N02 的連文表要用該格的 bigram 重建），照維護者對同類情況的決定（derisk-1015：收尾只差規格就直接進實作）補上，進實作。修訂二：第二次 REVISE 的兩項（防護的比對對象照 sj-lm-7 §2.4 全列、連文三元組的計數與建置指令）已改。修訂一：處理 plan-verifier 第一次 REVISE 的七項（整數權重、書面來源 B 補進比對與防護、程式改動的範圍、步驟順序與同一份 dump、`sources.tsv` 不動、`--rows` 的旗標禁令、newstune 當判讀集的依據）。
 
 ## 0. 依據（維護者的決定與查過的事）
 
@@ -149,7 +149,11 @@
 - 「新聞」＝§3.1 的三個來源（新聞稿、維基新聞訓練那一份、書面來源 B），每一格三個都在、權重相同。每個來源各一個計數檔，`build_lm.py --corpora` 各給一個整數權重（例如 N01：`counts-200000.pkl:1 counts-colloquial3.pkl:5 counts-g0v.pkl:5 counts-ptt-push.pkl:5 counts-ptt-body.pkl:1 counts-press.pkl:1 counts-wikinews.pkl:1 counts-srcb.pkl:1 --prune 6`）。
 - 權重是乘在期望計數上，剪枝門檻 6 也是對加權後的計數判：×1 的新聞詞對要在新聞裡出現 ≥ 6 次才留，×2 的要 ≥ 3 次。折扣 D 0.75 不變。
 
-- 加了新聞的連文表，照 WC 的剪枝方法剪到同樣的條目數（7,700,964）。
+- **每一格的連文表都用該格自己的 bigram 建**（連文表綁 bigram 的詞 id 與雜湊）：
+  - N00：沿用現行的 WC 表（建在 B6 上）。
+  - N01、N02：WC 的配方（`--corpora counts-200000.pkl:1 counts-colloquial3.pkl:5`）用 `--lm <該格的 bigram> --thresholds 1` 重建，再 `entropy_prune.py --keep 7700964`。
+  - N10、N11、N12：WC＋新聞的配方（§3.6）用 `--lm <該格的 bigram>` 建，同樣剪到 7,700,964 條。
+  - 驗收：每一格 `.sjt3` 檔頭記的 bigram SHA-256 等於該格的 `bigram.sjlm`。
 - 加進 bigram 的臂要重建辨類與承接，並把會意的 `.sjtl` 重新匯出、綁定新的 bigram（照 sj-lm-7 §2.6 的量測做法）。
 - 書面 KN 的設定照階段 3 選定的那一臂。
 
@@ -160,7 +164,8 @@
   - 保留集口語半邊：現役 `eval/holdout/talk.txt` 與 `next/shard-{2,3}/talk.txt`；
   - 公開評測與調參集：dev302、打字測驗（聊天、書面）、錯字回報、cvtune-clean、wikitune-clean、動漫五集、名單檢查集、資訊詞包檢查集、網路用語三集、輕聲檢查集；
   - 私人新聞列：`newstune` 與 `holdout-news-{1,2,3}`；
-  - 私人的 discordtune：在評測機器上用同一個比對器、`dedupe_eval.py --min-len 6`，照 sj-lm-7 §2.4，只回命中數。
+  - 私人的 discordtune 與聊天保留桶：照 sj-lm-7 §2.4，在評測機器上用同一個比對器（`dedupe_eval.py --min-len 6`，只比句子 6 字以上的列）**拿掉命中的句子**，只回命中數。
+- **計數讀的檔**：每個訓練來源先在評測機器上跑 `dedupe_eval.py --min-len 6`（對 discordtune 與聊天保留桶），輸出 `<來源>.dedup.tsv`；之後所有 `build_counts_text.py` 與 `count.py text` 都只讀 `.dedup.tsv`，再加上面公開集合與私人新聞列的 `--holdout-guard`。記下的命中數＝`.dedup.tsv` 比原檔少的行數。
 - 每個來源、每個集合的命中數（跳過的段數）在階段 3b 的任何分數之前記進研究紀錄。
 
 ### 3.5 量法與選法
