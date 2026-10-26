@@ -83,7 +83,7 @@ class Robots(unittest.TestCase):
         self.assertEqual([c[1] for c in net.calls], ["https://api.test/d"])
 
     def test_user_agent_is_sent_and_its_token_is_what_robots_sees(self):
-        net = Net({"https://x.test/robots.txt": b"User-agent: shanjie-research-fetcher\nDisallow: /\n", "https://x.test/a": b"ok"})
+        net = Net({"https://x.test/robots.txt": b"User-agent: research-fetcher\nDisallow: /\n", "https://x.test/a": b"ok"})
         with self.assertRaises(N.Blocked):
             net.fetcher().get("https://x.test/a")
         self.assertTrue(all(c[2]["User-Agent"] == N.USER_AGENT for c in net.calls))

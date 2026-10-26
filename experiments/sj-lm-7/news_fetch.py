@@ -53,7 +53,7 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 from urllib.robotparser import RobotFileParser
 
-USER_AGENT = "shanjie-research-fetcher/1.0 (personal non-commercial research; text is used to count words, not redistributed)"
+USER_AGENT = "research-fetcher/1.0 (personal non-commercial research; text is used to count words, not redistributed)"
 MIN_INTERVAL = 2.0
 TIMEOUT = 30
 
