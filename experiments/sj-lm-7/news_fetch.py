@@ -11,6 +11,12 @@
       was modified); every fetched page is then judged by its own publish date (meta article:published_time, JSON-LD datePublished, or
       <time datetime>), and a page with no date or outside the window is dropped (no_date, out_of_window).
 
+  news_fetch.py wp --base-url URL [--exclude-author ID ...] [--date-from D] [--date-to D] [--config FILE] --out FILE.tsv
+      A WordPress site's public REST API (BASE/wp-json/wp/v2/posts, 100 per page) through the same polite Fetcher: robots.txt applies
+      to the API path too. Paragraphs come from content.rendered only (sidebars and other page furniture never enter); exclusion markers and
+      boilerplate apply to those paragraphs only. The unit is the post id. Paging stops at an empty page, at X-WP-TotalPages, or at
+      the HTTP 400 WordPress answers past the last page. A page that fails stops paging unless the total is already known.
+
 --out must end in .tsv: build_counts_text.py strips the unit column only for a .tsv name. The unit is a URL, a record id field, or a hash of
 the record, never a title.
 Common: one connection, at least 2 s between requests (more if robots.txt asks), a descriptive User-Agent (--user-agent). A failed URL is
@@ -64,6 +70,10 @@ class Blocked(Exception):
 class StatusError(OSError):
     """A non-200 answer."""
 
+    def __init__(self, status):
+        super().__init__(f"HTTP {status}")
+        self.status = status
+
 
 class NoTextField(ValueError):
     """A downloaded record set with no record that has a text field."""
@@ -112,8 +122,8 @@ def decode_body(body, content_type=""):
 
 
 class Fetcher:
-    """One connection, polite. opener(url, headers, timeout) -> (status, bytes, content_type) never raises on an HTTP status;
-    clock/sleep are injectable."""
+    """One connection, polite. opener(url, headers, timeout) -> (status, bytes, content_type[, response headers with lower-case keys]) never
+    raises on an HTTP status; clock/sleep are injectable."""
 
     def __init__(self, user_agent=USER_AGENT, interval=MIN_INTERVAL, opener=None, clock=time.monotonic, sleep=time.sleep):
         self.ua, self.interval, self.clock, self.sleep = user_agent, interval, clock, sleep
@@ -131,7 +141,8 @@ class Fetcher:
     def raw(self, url):
         self._wait()
         try:
-            return self.opener(url, {"User-Agent": self.ua}, TIMEOUT)
+            r = self.opener(url, {"User-Agent": self.ua}, TIMEOUT)
+            return r + ({},) * (4 - len(r))      # (status, body, content type, headers)
         finally:
             self.last = self.clock()   # measured from the end of the previous request
             self.requests += 1
@@ -142,7 +153,7 @@ class Fetcher:
         if origin not in self.robots:
             rp = RobotFileParser()
             try:
-                status, body, _ = self.raw(origin + "/robots.txt")
+                status, body, _, _ = self.raw(origin + "/robots.txt")
             except (OSError, http.client.HTTPException):
                 status, body = 599, b""
             if status == 200:
@@ -165,16 +176,20 @@ class Fetcher:
         return rp is not None and rp.can_fetch(self.ua.split("/")[0], url)
 
     def fetch(self, url, check_robots=True):
-        """(body bytes, content type). Raises Blocked, BadURL, StatusError (non-200), or the opener's own errors."""
+        """(body bytes, content type)."""
+        return self.fetch_h(url, check_robots)[:2]
+
+    def fetch_h(self, url, check_robots=True):
+        """(body bytes, content type, response headers). Raises Blocked, BadURL, StatusError (non-200), or the opener's own errors."""
         s = urlsplit(url)
         if s.scheme not in ("http", "https") or not s.netloc:
             raise BadURL("not an http(s) URL")
         if check_robots and not self.allowed(url):
             raise Blocked(url)
-        status, body, ctype = self.raw(url)
+        status, body, ctype, headers = self.raw(url)
         if status != 200:
-            raise StatusError(f"HTTP {status}")
-        return body, ctype
+            raise StatusError(status)
+        return body, ctype, headers
 
     def get(self, url, check_robots=True):
         return self.fetch(url, check_robots)[0]
@@ -187,9 +202,9 @@ class Fetcher:
 def _urlopen(url, headers, timeout):
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
-            return r.status, r.read(), r.headers.get("Content-Type", "")
+            return r.status, r.read(), r.headers.get("Content-Type", ""), {k.lower(): v for k, v in r.headers.items()}
     except urllib.error.HTTPError as e:
-        return e.code, b"", ""
+        return e.code, b"", "", {}
 
 
 # ---------- text extraction ----------
@@ -534,6 +549,63 @@ def gen_pages(a, f, stats):
         yield u, paras
 
 
+WP_FIELDS = "id,date,link,author,categories,content,title"
+
+
+def gen_wp(a, f, stats):
+    base, page, total = a.base_url.rstrip("/"), 1, None
+    excluded = set(a.exclude_author)
+    while total is None or page <= total:
+        url = f"{base}/wp-json/wp/v2/posts?per_page=100&page={page}&_fields={WP_FIELDS}"
+        try:
+            body, ctype, headers = f.fetch_h(url)
+            posts = json.loads(decode_body(body, ctype))
+            if not isinstance(posts, list):
+                raise json.JSONDecodeError("not a list of posts", "", 0)
+            if headers.get("x-wp-totalpages", "").isdigit():
+                total = int(headers["x-wp-totalpages"])
+        except Blocked:
+            stats["blocked_by_robots"] += 1
+            return
+        except StatusError as e:
+            if e.status == 400 and page > 1:       # WordPress: page number beyond the last page
+                return
+            stats["failed_http_status"] += 1
+            if total is None:
+                return
+            page += 1
+            continue
+        except FETCH_ERRORS as e:
+            stats["failed_" + kind_of(e)] += 1
+            if total is None:
+                return
+            page += 1
+            continue
+        if not posts:
+            return
+        stats["pages"] += 1
+        for post in posts:
+            if not isinstance(post, dict):
+                continue
+            if post.get("author") in excluded:
+                stats["authors_excluded"] += 1
+                continue
+            if a.date_from or a.date_to:
+                d = str(post.get("date") or "")
+                if not d:
+                    stats["no_date"] += 1
+                    continue
+                if not in_window(d, a.date_from, a.date_to):
+                    stats["out_of_window"] += 1
+                    continue
+            content = (post.get("content") or {}).get("rendered") if isinstance(post.get("content"), dict) else None
+            if not content or post.get("id") is None:
+                stats["failed_no_text_field"] += 1
+                continue
+            yield str(post["id"]), html_paragraphs(content)
+        page += 1
+
+
 def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common = argparse.ArgumentParser(add_help=False)
@@ -556,6 +628,11 @@ def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     g.add_argument("--sitemap", action="append", default=[])
     g.add_argument("--lastmod-from")
     g.add_argument("--lastmod-to")
+    w = sub.add_parser("wp", parents=[common])
+    w.add_argument("--base-url", required=True)
+    w.add_argument("--exclude-author", type=int, action="append", default=[], metavar="ID")
+    w.add_argument("--date-from")
+    w.add_argument("--date-to")
     a = ap.parse_args(argv)
     if not a.out.endswith(".tsv"):
         ap.error("--out must end in .tsv (build_counts_text.py strips the unit column only for a .tsv name)")
@@ -565,7 +642,7 @@ def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     markers, boiler = load_config(a)
     pats, stats, kept = [re.compile(b) for b in boiler], collections.Counter(), []
     with open(a.out + ".partial", "w", encoding="utf-8") as part:
-        for uid, paras in (gen_press if a.cmd == "press" else gen_pages)(a, f, stats):
+        for uid, paras in {"press": gen_press, "pages": gen_pages, "wp": gen_wp}[a.cmd](a, f, stats):
             u = clean_unit(uid, paras, markers, pats, stats)
             if u:
                 kept.append(u)

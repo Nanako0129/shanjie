@@ -376,5 +376,132 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual((len(N.DATASET_IDS), len(set(N.DATASET_IDS))), (23, 23))
 
 
+class WordPress(unittest.TestCase):
+    BASE = "https://blog.test"
+
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.out = os.path.join(self.d.name, "o.tsv")
+
+    def url(self, n):
+        return f"{self.BASE}/wp-json/wp/v2/posts?per_page=100&page={n}&_fields=id,date,link,author,categories,content,title"
+
+    @staticmethod
+    def post(i, text, author=1, date="2026-09-10T08:00:00", title="標題", link="https://blog.test/p"):
+        return {"id": i, "date": date, "author": author, "link": link, "title": {"rendered": title}, "content": {"rendered": text}}
+
+    @staticmethod
+    def api(posts, total=None):
+        body = json.dumps(posts, ensure_ascii=False).encode()
+        return (200, body, "application/json; charset=UTF-8", {"x-wp-totalpages": str(total)} if total else {})
+
+    def run_wp(self, net, *extra):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            N.main(["wp", "--base-url", self.BASE + "/", "--out", self.out, *extra], opener=net.opener, clock=net.clock, sleep=net.sleep)
+        return buf.getvalue()
+
+    def rows(self):
+        return open(self.out, encoding="utf-8").read().splitlines()
+
+    def pages_requested(self, net):
+        return [c[1] for c in net.calls if "/wp-json/" in c[1]]
+
+    def test_unit_is_the_post_id_and_text_comes_from_content_only_with_unclosed_p(self):
+        net = Net({self.url(1): self.api([self.post(11, "<p>第一段<p>第二段<div class=nav>側欄首頁</div><footer>版權所有</footer>", title="標題文字")]), self.url(2): self.api([])})
+        so = self.run_wp(net)
+        self.assertEqual(self.rows(), ["11\t第一段", "11\t第二段"])
+        self.assertIn("articles_kept=1", so)
+        self.assertFalse(os.path.exists(self.out + ".partial"))
+        self.assertIn("user-agent", {k.lower() for k in net.calls[-1][2]})
+
+    def test_paging_stops_at_an_empty_page(self):
+        net = Net({"https://blog.test/robots.txt": b"", self.url(1): self.api([self.post(1, "<p>甲文章。</p>")]), self.url(2): self.api([self.post(2, "<p>乙文章。</p>")]),
+                   self.url(3): self.api([]), self.url(4): self.api([self.post(4, "<p>不該讀。</p>")])})
+        self.run_wp(net)
+        self.assertEqual(self.rows(), ["1\t甲文章。", "2\t乙文章。"])
+        self.assertEqual(self.pages_requested(net), [self.url(1), self.url(2), self.url(3)])
+
+    def test_paging_stops_at_the_total_pages_header(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>")], total=2), self.url(2): self.api([self.post(2, "<p>乙文章。</p>")], total=2),
+                   self.url(3): self.api([self.post(3, "<p>不該讀。</p>")], total=2)})
+        self.run_wp(net)
+        self.assertEqual(self.rows(), ["1\t甲文章。", "2\t乙文章。"])
+        self.assertEqual(self.pages_requested(net), [self.url(1), self.url(2)])           # no request for a page past the header
+
+    def test_http_400_past_the_last_page_ends_paging_quietly(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>")]), self.url(2): (400, b'{"code":"rest_post_invalid_page_number"}')})
+        so = self.run_wp(net)
+        self.assertEqual(self.rows(), ["1\t甲文章。"])
+        self.assertNotIn("failed_", so)
+
+    def test_author_exclusion(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>", author=5), self.post(2, "<p>乙文章。</p>", author=6), self.post(3, "<p>丙文章。</p>", author=7)], total=1)})
+        so = self.run_wp(net, "--exclude-author", "5", "--exclude-author", "7")
+        self.assertEqual(self.rows(), ["2\t乙文章。"])
+        self.assertIn("authors_excluded=2", so)
+
+    def test_a_marker_outside_content_does_not_exclude_but_one_inside_does(self):
+        posts = [self.post(1, "<p>正文沒有標記。</p>", title="作者甲的標題", link="https://blog.test/作者甲"),
+                 self.post(2, "<p>正文。</p><p>本文轉載自別處</p>"),
+                 self.post(3, "<p>另一篇正文。</p>", title="作者甲")]
+        net = Net({self.url(1): self.api(posts, total=1)})
+        so = self.run_wp(net, "--exclude-marker", "作者甲", "--exclude-marker", "本文轉載自")
+        self.assertEqual(self.rows(), ["1\t正文沒有標記。", "3\t另一篇正文。"])
+        self.assertIn("articles_excluded=1", so)
+
+    def test_boilerplate_applies_to_body_paragraphs(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>正文一。</p><p>－－廣告－－</p><p>聯絡人：王小明</p>")], total=1)})
+        self.run_wp(net, "--boilerplate", "^－+廣告－+$")
+        self.assertEqual(self.rows(), ["1\t正文一。"])
+
+    def test_date_filter(self):
+        posts = [self.post(1, "<p>早。</p>", date="2026-08-31T23:59:59"), self.post(2, "<p>起。</p>", date="2026-09-01T00:00:00"),
+                 self.post(3, "<p>末。</p>", date="2026-10-25T23:00:00"), self.post(4, "<p>晚。</p>", date="2026-10-26T00:00:01")]
+        net = Net({self.url(1): self.api(posts, total=1)})
+        so = self.run_wp(net, "--date-from", "2026-09-01", "--date-to", "2026-10-25")
+        self.assertEqual(self.rows(), ["2\t起。", "3\t末。"])
+        self.assertIn("out_of_window=2", so)
+
+    def test_robots_disallowing_wp_json_means_no_api_request(self):
+        net = Net({"https://blog.test/robots.txt": b"User-agent: *\nDisallow: /wp-json/\n", self.url(1): self.api([self.post(1, "<p>不該讀。</p>")])})
+        so = self.run_wp(net)
+        self.assertEqual([c[1] for c in net.calls], ["https://blog.test/robots.txt"])
+        self.assertIn("blocked_by_robots=1", so)
+        self.assertEqual(open(self.out, encoding="utf-8").read(), "")
+
+    def test_two_second_gap_between_api_requests(self):
+        net = Net({self.url(i): self.api([self.post(i, f"<p>文章{'甲乙丙'[i - 1]}。</p>")], total=3) for i in (1, 2, 3)})
+        self.run_wp(net)
+        starts = [c[0] for c in net.calls]
+        self.assertEqual(len(starts), 4)                                                  # robots.txt + three pages
+        self.assertTrue(all(b - (a + 0.3) >= 2.0 - 1e-9 for a, b in zip(starts, starts[1:])))
+
+    def test_failed_page_is_counted_and_paging_goes_on_when_the_total_is_known(self):
+        net = Net({self.url(1): self.api([self.post(1, "<p>甲文章。</p>")], total=3), self.url(2): http.client.IncompleteRead(b"x"),
+                   self.url(3): self.api([self.post(3, "<p>丙文章。</p>")], total=3)})
+        so = self.run_wp(net)
+        self.assertEqual(self.rows(), ["1\t甲文章。", "3\t丙文章。"])
+        self.assertIn("failed_protocol=1", so)
+
+    def test_failed_first_page_stops_paging_and_bad_json_is_a_parse_failure(self):
+        net = Net({self.url(1): (200, b"<html>not json</html>", "text/html")})
+        so = self.run_wp(net)
+        self.assertIn("failed_parse=1", so)
+        self.assertEqual(self.pages_requested(net), [self.url(1)])
+
+    def test_pool_wide_repeated_clause_pass_applies(self):
+        boiler = "歡迎民眾踴躍參加"
+        posts = [self.post(i, f"<p>第{'甲乙丙丁戊'[i]}場活動，{boiler}。</p>") for i in range(5)]
+        net = Net({self.url(1): self.api(posts, total=1)})
+        self.run_wp(net)
+        self.assertEqual(sum(boiler in r for r in self.rows()), 1)
+
+    def test_out_must_be_a_tsv(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            N.main(["wp", "--base-url", self.BASE, "--out", os.path.join(self.d.name, "o.txt")], opener=Net({}).opener)
+
+
 if __name__ == "__main__":
     unittest.main()
