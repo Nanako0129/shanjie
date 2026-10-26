@@ -77,7 +77,7 @@ class TestTorch(unittest.TestCase):
                     cc[c] = cc.get(c, 0) + 100
             with open(os.path.join(td, "charcount.json"), "w", encoding="utf-8") as f:
                 json.dump({"charcount": cc}, f)
-            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5})())
+            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5, "extra": []})())
             out = os.path.join(td, "out")
             train.main(["--size", "T", "--work", td, "--out", out, "--tokens-per-batch", "64", "--max-steps", "150", "--warmup", "10", "--device", "cpu"])
             info = json.load(open(os.path.join(out, "train-T.json")))

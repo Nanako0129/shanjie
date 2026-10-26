@@ -103,7 +103,7 @@ class TestVocabAndIds(unittest.TestCase):
             open(os.path.join(td, "runs-wiki.txt"), "w", encoding="utf-8", newline="\n").write("你好\n好你好\n")
             open(os.path.join(td, "runs-coll.txt"), "w", encoding="utf-8", newline="\n").write("你丙\n")
             json.dump({"charcount": {"你": 5, "好": 5, "丙": 1}}, open(os.path.join(td, "charcount.json"), "w", encoding="utf-8"))
-            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5})())
+            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5, "extra": []})())
             self.assertEqual(np.load(os.path.join(td, "ids-wiki.npy")).tolist(), [BOS, 3, 4, BOS, 4, 3, 4])
             self.assertEqual(np.load(os.path.join(td, "ids-coll.npy")).tolist(), [BOS, 3, UNK])
             self.assertEqual(prep.load_vocab(td), ["你", "好"])
