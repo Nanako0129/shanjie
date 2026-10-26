@@ -3,8 +3,14 @@
   python train.py --size S --work DIR --out DIR      # DIR has vocab.txt, ids-wiki.npy, ids-coll.npy from prep.py
   python train.py --size T --work DIR --out DIR --max-steps 20   # smoke test (tiny model)
 
-Epoch = every wiki piece once + every colloquial piece COLL_WEIGHT (5) times (+ every --extra piece once, S7f), shuffled; batches
-hold one sequence length each (batching.build_epoch / plan). Writes DIR/tinylm-<size>.npz (the only artefact the scoring code reads) and DIR/train-<size>.json.
+Epoch = every wiki piece once + every colloquial piece COLL_WEIGHT (5) times (+ every --extra PATH[:WEIGHT] piece WEIGHT times, default 1;
+SJ-SR-7: --extra ids-g0v.npy:5 --extra ids-pttbody.npy:1 ...), shuffled; batches hold one sequence length each (batching.build_epoch / plan).
+Training is ONE epoch with one step per batch (batching.make_batches: pieces of each exact length are packed into batches of
+max(1, tokens_per_batch // length) pieces, so each length ends in a partial batch). The step count therefore grows with the total
+(weighted) token count but is not exactly proportional to it; how close it is has not been measured. --max-steps only cuts the batch list
+(smoke tests, S7f's fixed budget). Every --extra ids file and ids-wiki/coll must have been encoded with the vocab.txt in --work
+(prep.check_vocab, checked before training).
+Writes DIR/tinylm-<size>.npz (the only artefact the scoring code reads) and DIR/train-<size>.json.
 Exit code 2 = diverged (nan, or loss above its starting level after warm-up): the contract's stop condition.
 """
 import argparse
@@ -34,6 +40,13 @@ def lr_at(step, total, peak=PEAK_LR, warmup=WARMUP):
     return peak * 0.5 * (1 + math.cos(math.pi * (step - warmup) / max(1, total - warmup)))
 
 
+def extra_arg(arg):
+    try:
+        return batching.parse_extra(arg)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", choices=sorted(CONFIGS), required=True)
@@ -44,14 +57,19 @@ def main(argv=None):
     ap.add_argument("--max-steps", type=int, default=0,
                     help="use only the first N shuffled batches (the cosine schedule ends there): smoke tests, and S7f's fixed training "
                          "budget (A0', A1, A2 all run --max-steps 8836)")
-    ap.add_argument("--extra", help="S7f: an ids-<name>.npy (prep.py text) added to the epoch once (weight 1); without it the epoch is S7a's")
+    ap.add_argument("--extra", action="append", default=[], metavar="PATH[:WEIGHT]", type=extra_arg,
+                    help="an ids-<name>.npy (prep.py encode --extra) added to the epoch WEIGHT times (ASCII integer >= 1, bare PATH = 1, S7f); "
+                         "repeatable; without it the epoch is S7a's. The weight is whatever follows the last ':', so a path that itself "
+                         "ends in ':something' is not supported")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
 
     torch.manual_seed(a.seed)
     chars = prep.load_vocab(a.work)
-    ids, starts, lengths, batches = batching.plan(a.work, a.extra, a.tokens_per_batch, a.seed, a.max_steps)
+    extra = a.extra
+    prep.check_vocab(a.work, [p for p, _ in extra])
+    ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps)
     total = len(batches)
     cfg = CONFIGS[a.size]
     model = GPT(len(chars) + 3, **cfg).to(a.device)
@@ -93,7 +111,7 @@ def main(argv=None):
     export_npz(model, chars, os.path.join(a.out, f"tinylm-{a.size}.npz"))
     json.dump({"size": a.size, "config": cfg, "vocab": len(chars) + 3, "params": n_params, "pieces": int(len(lengths)), "steps": total,
                "tokens": tokens, "final_loss_nats_per_token": final, "seed": a.seed,
-               "extra": a.extra and {"path": a.extra, "sha256": prep.sha256_file(a.extra)}, "tokens_per_batch": a.tokens_per_batch,
+               "extra": [{"path": p, "weight": w, "sha256": prep.sha256_file(p)} for p, w in extra] or None, "tokens_per_batch": a.tokens_per_batch,
                "peak_lr": PEAK_LR, "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
               open(os.path.join(a.out, f"train-{a.size}.json"), "w"), indent=1)
     print(f"done: final loss {final:.4f} nats/token, {n_params} params")

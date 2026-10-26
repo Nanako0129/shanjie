@@ -47,8 +47,20 @@ def make_batches(lengths, tokens_per_batch, rng):
     return [out[i] for i in rng.permutation(len(out))]
 
 
+def parse_extra(arg):
+    """'PATH' -> (PATH, 1); 'PATH:5' -> (PATH, 5). The weight is ASCII digits and >= 1; anything else after the last ':' is a ValueError
+    (a path that itself ends in ':something' is not supported)."""
+    path, sep, w = arg.rpartition(":")
+    if not sep:
+        return arg, 1
+    if not (path and w.isascii() and w.isdigit() and int(w) >= 1):
+        raise ValueError(f"--extra {arg!r}: expected PATH or PATH:WEIGHT with WEIGHT an integer >= 1 (a path ending in ':something' is not supported)")
+    return path, int(w)
+
+
 def build_epoch(work, extra=None):
-    """ids-wiki.npy once, ids-coll.npy prep.COLL_WEIGHT times, and (S7f) the `extra` ids file once, appended after them.
+    """ids-wiki.npy once, ids-coll.npy prep.COLL_WEIGHT times, then each (path, weight) of `extra` (ids files from prep.py text,
+    weight = integer copies of every piece per epoch, the way the colloquial x5 is done) appended after them in the order given.
     Without `extra` the arrays are exactly the S7a epoch. Returns (ids, starts, lengths)."""
     wiki, coll = np.load(os.path.join(work, "ids-wiki.npy")), np.load(os.path.join(work, "ids-coll.npy"))
     parts = [wiki, coll]
@@ -56,19 +68,23 @@ def build_epoch(work, extra=None):
     cs, cl = pieces(coll)
     starts = [ws] + [cs + len(wiki)] * prep.COLL_WEIGHT
     lengths = [wl] + [cl] * prep.COLL_WEIGHT
-    if extra:
-        ex = np.load(extra)
+    base = len(wiki) + len(coll)
+    for path, weight in extra or ():
+        if not isinstance(weight, int) or weight < 1:
+            raise ValueError(f"{path}: weight must be an integer >= 1, got {weight!r}")
+        ex = np.load(path)
         if ex.dtype != wiki.dtype or not len(ex) or ex[0] != BOS:
-            raise ValueError(f"{extra}: expected {wiki.dtype} ids starting with BOS (prep.py text)")
+            raise ValueError(f"{path}: expected {wiki.dtype} ids starting with BOS (prep.py text)")
         es, el = pieces(ex)
-        parts.append(ex); starts.append(es + len(wiki) + len(coll)); lengths.append(el)
+        parts.append(ex); starts += [es + base] * weight; lengths += [el] * weight
+        base += len(ex)
     return np.concatenate(parts), np.concatenate(starts), np.concatenate(lengths)
 
 
 def plan(work, extra, tokens_per_batch, seed, max_steps=0):
     """train.py's data: the epoch, its shuffled batches (rng = default_rng(seed), as S7a), cut to max_steps when given.
-    Returns (ids, starts, lengths, batches)."""
+    The number of steps is len(batches) (see train.py). Returns (ids, starts, lengths, batches)."""
     rng = np.random.default_rng(seed)
-    ids, starts, lengths = build_epoch(work, extra)
+    ids, starts, lengths = build_epoch(work, extra)   # extra: None/empty = none
     batches = make_batches(lengths, tokens_per_batch, rng)
     return ids, starts, lengths, batches[:max_steps] if max_steps else batches

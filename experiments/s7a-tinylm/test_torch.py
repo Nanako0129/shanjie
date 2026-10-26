@@ -77,11 +77,12 @@ class TestTorch(unittest.TestCase):
                     cc[c] = cc.get(c, 0) + 100
             with open(os.path.join(td, "charcount.json"), "w", encoding="utf-8") as f:
                 json.dump({"charcount": cc}, f)
-            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5})())
+            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5, "extra": [], "force": False})())
             out = os.path.join(td, "out")
             train.main(["--size", "T", "--work", td, "--out", out, "--tokens-per-batch", "64", "--max-steps", "150", "--warmup", "10", "--device", "cpu"])
             info = json.load(open(os.path.join(out, "train-T.json")))
             self.assertEqual(info["steps"], 150)
+            self.assertIsNone(info["extra"])                                                      # no --extra: null, as before SJ-SR-7
             self.assertLess(info["final_loss_nats_per_token"], np.log(info["vocab"]) - 0.5)       # it learned something
             m = NumpyLM(os.path.join(out, "tinylm-T.npz"))                                         # numpy reads what train.py exported
             good, bad = tinylm.ll(m, "", "今天天氣真好"), tinylm.ll(m, "", "好真氣天天今")
