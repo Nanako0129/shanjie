@@ -240,6 +240,24 @@ class TestPrepVocabAndHalf(unittest.TestCase):
                 prep.write_runs(os.path.join(work, "in.tsv"), work, "g", (), half=True)
             self.assertEqual(open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read(), "吃飯了沒\n")
 
+    def test_procs_gives_the_same_files_as_one_process(self):
+        # the Pool path loads the real conversion tables in each worker, so this needs the OpenCC files (skipped without them)
+        if not os.path.isdir(os.path.join(prep.bc.SRC, "opencc")):
+            self.skipTest("no OpenCC files")
+        # 3 batches of 2,000; the simplified 这/话 are there on purpose: they must come out as 這/話, so the workers really converted
+        lines = [f"{i}\t这是第{i}句话，我們去吃飯好嗎" if i % 3 else f"{i}\tok 天氣真好" for i in range(4500)]
+        conv = prep.bc.load_conv()
+        with tempfile.TemporaryDirectory() as work:
+            self.write(work, "in.tsv", "\n".join(lines) + "\n")
+            for half in (False, True):
+                reps = [prep.write_runs(os.path.join(work, "in.tsv"), work, f"p{p}", conv, half=half, procs=p) for p in (1, 2)]
+                self.assertEqual(open(os.path.join(work, "runs-p1.txt"), "rb").read(), open(os.path.join(work, "runs-p2.txt"), "rb").read())
+                self.assertEqual(reps[0], reps[1])
+                self.assertEqual(reps[0]["lines"], 4500)
+                out = open(os.path.join(work, "runs-p2.txt"), encoding="utf-8").read()
+                self.assertIn("這是第", out)
+                self.assertNotIn("这", out)
+
     def test_text_json_and_report_keep_the_old_bytes_on_the_default_path(self):
         # sha256 of text-chat.json written by the code before SJ-SR-7 (092042ee) for this input; run in a temp cwd so "input" is the relative path
         with tempfile.TemporaryDirectory() as work:

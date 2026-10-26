@@ -26,6 +26,7 @@
 """
 import argparse
 import collections
+import contextlib
 import hashlib
 import json
 import multiprocessing as mp
@@ -244,8 +245,7 @@ def cmd_encode(a):
     count = collections.Counter(cc["charcount"])
     for name in a.extra:                                   # each extra file once, not by its epoch weight
         with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
-            for line in f:
-                count.update(line.rstrip("\n"))
+            count.update(f.read().replace("\n", ""))      # one C-level count over the file, the same counts as line by line
     chars = make_vocab(count, a.min_count)
     open(os.path.join(a.work, "vocab.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(chars) + "\n")
     lut = make_lut(chars)
@@ -281,27 +281,42 @@ def dump_text_report(path, rep):
     return rep
 
 
-def write_runs(src, work, name, conv, guard=None, half=False):
+def _text_batch(lines, conv, guard, half, tsv):
+    """write_runs on one batch of input lines (trailing newline removed): (the kept runs, each + "\\n"; lines; guard-skipped runs; half-dropped runs)."""
+    out, skipped, dropped = [], 0, 0
+    for line in lines:
+        if half and not half_keep(line.split("\t")[-1] if tsv else line):
+            dropped += sum(1 for _ in text_runs(line, conv))
+            continue
+        for run in text_runs(line, conv):
+            if guard is not None and guard.any(bc.fold(run)):
+                skipped += 1
+                continue
+            out.append(run + "\n")
+    return "".join(out), len(lines), skipped, dropped
+
+
+def _text_work(args):
+    return _text_batch(args[0], _CONV, _GUARD, *args[1:])
+
+
+def write_runs(src, work, name, conv, guard=None, half=False, procs=1):
     """src -> DIR/runs-<name>.txt (one Han run per line) and DIR/text-<name>.json. Returns the report dict.
     half: keep a whole input line (all its runs) iff half_keep(its sentence); the sentence is the line without the trailing newline,
-    before conversion, and for a ".tsv" path only the last tab-separated field. One line is never split."""
+    before conversion, and for a ".tsv" path only the last tab-separated field. One line is never split.
+    procs > 1: batches of 2,000 lines in a Pool whose workers load bc.load_conv() (as `runs` does; `conv` is then unused); imap keeps the
+    order, so the files are the same as with procs=1."""
     if name in ("wiki", "coll"):
         die(f"--name {name} would overwrite the S7a training ids")
     runs_path = os.path.join(work, f"runs-{name}.txt")
     tsv = ".tsv" in src
     n_lines = skipped = dropped = 0
-    with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out:
-        for line in f:
-            n_lines += 1
-            line = line.rstrip("\n")
-            if half and not half_keep(line.split("\t")[-1] if tsv else line):
-                dropped += sum(1 for _ in text_runs(line, conv))
-                continue
-            for run in text_runs(line, conv):
-                if guard is not None and guard.any(bc.fold(run)):
-                    skipped += 1
-                    continue
-                out.write(run + "\n")
+    with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out, \
+            (mp.Pool(procs, initializer=_init, initargs=(guard,)) if procs > 1 else contextlib.nullcontext()) as pool:
+        jobs = ((b, half, tsv) for b in bc.batches((line.rstrip("\n") for line in f), 2000))
+        for text, n, sk, dr in (pool.imap(_text_work, jobs) if pool else (_text_batch(b, conv, guard, h, t) for b, h, t in jobs)):
+            out.write(text)
+            n_lines += n; skipped += sk; dropped += dr
     rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "runs_sha256": sha256_file(runs_path)}
     if guard is not None:
         rep["holdout_guard_skipped_runs"] = skipped
@@ -323,16 +338,16 @@ def write_ids(work, name, lut):
     return dump_text_report(rj, rep)
 
 
-def encode_extra(src, work, name, conv, guard=None, half=False):
+def encode_extra(src, work, name, conv, guard=None, half=False, procs=1):
     """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with the existing DIR/vocab.txt. Returns the report dict."""
-    write_runs(src, work, name, conv, guard, half)
+    write_runs(src, work, name, conv, guard, half, procs)
     return write_ids(work, name, make_lut(load_vocab(work)))
 
 
 def cmd_text(a):
     conv, guard = bc.load_conv(), bc.guard_matcher(a.holdout_guard)
-    print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half) if a.runs_only
-                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half), indent=1))
+    print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half, a.procs) if a.runs_only
+                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs), indent=1))
 
 
 def load_vocab(work):
@@ -353,6 +368,7 @@ def main(argv=None):
     t.add_argument("--work", required=True); t.add_argument("--in", dest="input", required=True); t.add_argument("--name", required=True)
     t.add_argument("--half", action="store_true", help="keep only runs whose SHA-256 first byte is < 128 (SJ-SR-7 arm R-half)")
     t.add_argument("--runs-only", action="store_true", help="write runs-<name>.txt only; encode later with `encode --extra`")
+    t.add_argument("--procs", type=int, default=1, help="worker processes for the conversion (the output is the same for any value)")
     t.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="default off: runs containing a held-out sentence are not written (docs/contracts/holdout-refresh.md section 8)")
     a = ap.parse_args(argv)
     {"runs": cmd_runs, "encode": cmd_encode, "text": cmd_text}[a.cmd](a)
