@@ -225,6 +225,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut classes, mut kn, mut tri) = (true, true, true);
     // `--chat-tri on-kn|off-kn` (trigram-explore experiment, default off): the chat profile also scores with trigram.sjt3, Kneser-Ney on or off.
     let mut chat_tri = None::<bool>;
+    let (mut formal_kn, mut kn_beta) = (false, None::<f64>);
     // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
@@ -280,6 +281,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                     _ => return Err("--chat-tri must be on-kn or off-kn".into()),
                 })
             }
+            "--formal-kn" => formal_kn = true,
+            "--kn-beta" => kn_beta = Some(val()?.parse::<f64>().map_err(|_| "--kn-beta takes a number")?),
             "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
@@ -328,6 +331,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if chat_tri.is_some() && lm.tri_tag().is_none() {
         return Err("--chat-tri: no trigram.sjt3 beside the model".into());
     }
+    if let Some(b) = kn_beta {
+        lm.research_set_kn_beta(b)?;
+    }
+    core::lm::RESEARCH_FORMAL_KN.store(formal_kn, std::sync::atomic::Ordering::Relaxed);
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
