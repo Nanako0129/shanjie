@@ -11,6 +11,18 @@
       was modified); every fetched page is then judged by its own publish date (meta article:published_time, JSON-LD datePublished, or
       <time datetime>), and a page with no date or outside the window is dropped (no_date, out_of_window).
 
+  news_fetch.py wp --base-url URL [--exclude-author ID ...] [--exclude-category ID ...] [--date-from D] [--date-to D] [--config FILE]
+                   --out FILE.tsv
+      A WordPress site's public REST API (BASE/wp-json/wp/v2/posts, 100 per page, newest first; _fields=id,date,author,categories,content)
+      through the same polite Fetcher: robots.txt applies to the API path too. Paragraphs come from content.rendered only (sidebars and
+      other page furniture never enter); exclusion markers and boilerplate apply to those paragraphs only. The unit is the post id.
+      --exclude-author / --exclude-category drop posts by id; a post without the field is dropped and counted (no_author, no_categories),
+      and if no post on page 1 has the field the run stops with an error. --date-from / --date-to are sent as `after` / `before` and
+      checked again on each post's date; paging also stops after a page whose posts are all older than --date-from.
+      Paging stops at: an empty page, X-WP-TotalPages, a page with no new post id (duplicates are skipped and counted), an old page, a
+      robots.txt block, or an HTTP 400 when the total is unknown (WordPress's answer for a page past the end). Any other failed page is
+      counted by kind; paging then goes on only if the total is known. pages_seen and total_pages are in the counts, so a truncated crawl shows.
+
 --out must end in .tsv: build_counts_text.py strips the unit column only for a .tsv name. The unit is a URL, a record id field, or a hash of
 the record, never a title.
 Common: one connection, at least 2 s between requests (more if robots.txt asks), a descriptive User-Agent (--user-agent). A failed URL is
@@ -24,6 +36,7 @@ import argparse
 import codecs
 import collections
 import csv
+import datetime
 import hashlib
 import html
 import http.client
@@ -31,6 +44,7 @@ import io
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -63,6 +77,10 @@ class Blocked(Exception):
 
 class StatusError(OSError):
     """A non-200 answer."""
+
+    def __init__(self, status):
+        super().__init__(f"HTTP {status}")
+        self.status = status
 
 
 class NoTextField(ValueError):
@@ -112,8 +130,8 @@ def decode_body(body, content_type=""):
 
 
 class Fetcher:
-    """One connection, polite. opener(url, headers, timeout) -> (status, bytes, content_type) never raises on an HTTP status;
-    clock/sleep are injectable."""
+    """One connection, polite. opener(url, headers, timeout) -> (status, bytes, content_type[, response headers with lower-case keys]) never
+    raises on an HTTP status; clock/sleep are injectable."""
 
     def __init__(self, user_agent=USER_AGENT, interval=MIN_INTERVAL, opener=None, clock=time.monotonic, sleep=time.sleep):
         self.ua, self.interval, self.clock, self.sleep = user_agent, interval, clock, sleep
@@ -131,7 +149,8 @@ class Fetcher:
     def raw(self, url):
         self._wait()
         try:
-            return self.opener(url, {"User-Agent": self.ua}, TIMEOUT)
+            r = tuple(self.opener(url, {"User-Agent": self.ua}, TIMEOUT))[:4]
+            return r + ({},) * (4 - len(r))      # (status, body, content type, headers)
         finally:
             self.last = self.clock()   # measured from the end of the previous request
             self.requests += 1
@@ -142,7 +161,7 @@ class Fetcher:
         if origin not in self.robots:
             rp = RobotFileParser()
             try:
-                status, body, _ = self.raw(origin + "/robots.txt")
+                status, body, _, _ = self.raw(origin + "/robots.txt")
             except (OSError, http.client.HTTPException):
                 status, body = 599, b""
             if status == 200:
@@ -165,16 +184,20 @@ class Fetcher:
         return rp is not None and rp.can_fetch(self.ua.split("/")[0], url)
 
     def fetch(self, url, check_robots=True):
-        """(body bytes, content type). Raises Blocked, BadURL, StatusError (non-200), or the opener's own errors."""
+        """(body bytes, content type)."""
+        return self.fetch_h(url, check_robots)[:2]
+
+    def fetch_h(self, url, check_robots=True):
+        """(body bytes, content type, response headers). Raises Blocked, BadURL, StatusError (non-200), or the opener's own errors."""
         s = urlsplit(url)
         if s.scheme not in ("http", "https") or not s.netloc:
             raise BadURL("not an http(s) URL")
         if check_robots and not self.allowed(url):
             raise Blocked(url)
-        status, body, ctype = self.raw(url)
+        status, body, ctype, headers = self.raw(url)
         if status != 200:
-            raise StatusError(f"HTTP {status}")
-        return body, ctype
+            raise StatusError(status)
+        return body, ctype, headers
 
     def get(self, url, check_robots=True):
         return self.fetch(url, check_robots)[0]
@@ -187,9 +210,9 @@ class Fetcher:
 def _urlopen(url, headers, timeout):
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
-            return r.status, r.read(), r.headers.get("Content-Type", "")
+            return r.status, r.read(), r.headers.get("Content-Type", ""), {k.lower(): v for k, v in r.headers.items()}
     except urllib.error.HTTPError as e:
-        return e.code, b"", ""
+        return e.code, b"", "", {}
 
 
 # ---------- text extraction ----------
@@ -534,6 +557,92 @@ def gen_pages(a, f, stats):
         yield u, paras
 
 
+WP_FIELDS = "id,date,author,categories,content"
+
+
+def wp_url(base, page, date_from, date_to):
+    """One page of posts, newest first. The window goes to the server too: `after` / `before` are exclusive, so they are set one second
+    outside the first and last day; the local date check below stays."""
+    url = f"{base}/wp-json/wp/v2/posts?per_page=100&page={page}&_fields={WP_FIELDS}"
+    if date_from:
+        url += f"&after={datetime.date.fromisoformat(date_from) - datetime.timedelta(days=1)}T23:59:59"
+    if date_to:
+        url += f"&before={datetime.date.fromisoformat(date_to) + datetime.timedelta(days=1)}T00:00:00"
+    return url
+
+
+def gen_wp(a, f, stats):
+    base, page, total, seen = a.base_url.rstrip("/"), 1, None, set()
+    ex_author, ex_cat = set(a.exclude_author), set(a.exclude_category)
+    while total is None or page <= total:
+        try:
+            body, ctype, headers = f.fetch_h(wp_url(base, page, a.date_from, a.date_to))
+            posts = json.loads(decode_body(body, ctype).lstrip("\ufeff"))
+            if not isinstance(posts, list):
+                raise json.JSONDecodeError("not a list of posts", "", 0)
+            if headers.get("x-wp-totalpages", "").isdigit():
+                total = int(headers["x-wp-totalpages"])
+                stats["total_pages"] = total
+        except Blocked:
+            stats["blocked_by_robots"] += 1
+            return
+        except FETCH_ERRORS as e:
+            if isinstance(e, StatusError) and e.status == 400 and page > 1 and total is None:
+                return      # WordPress answers 400 for a page past the last one; with the total known that would be a real failure
+            stats["failed_" + kind_of(e)] += 1
+            if total is None:
+                return
+            page += 1
+            continue
+        posts = [p for p in posts if isinstance(p, dict)]
+        if not posts:
+            return
+        stats["pages_seen"] += 1
+        if page == 1:
+            for flag, field, wanted in (("--exclude-author", "author", ex_author), ("--exclude-category", "categories", ex_cat)):
+                if wanted and not any(field in p for p in posts):
+                    sys.exit(f"wp: page 1 has no '{field}' field on any post, so {flag} cannot work")
+        if all(p.get("id") in seen for p in posts):
+            stats["stopped_no_new_ids"] += 1     # a cache that ignores `page`, or a repeated page
+            return
+        for post in posts:
+            if post.get("id") in seen:
+                stats["duplicate_ids"] += 1
+                continue
+            seen.add(post.get("id"))
+            if ex_author and "author" not in post:
+                stats["no_author"] += 1
+                continue
+            if post.get("author") in ex_author:
+                stats["authors_excluded"] += 1
+                continue
+            if ex_cat and "categories" not in post:
+                stats["no_categories"] += 1
+                continue
+            if ex_cat & set(post.get("categories") or ()):
+                stats["categories_excluded"] += 1
+                continue
+            if a.date_from or a.date_to:
+                d = str(post.get("date") or "")
+                if not d:
+                    stats["no_date"] += 1
+                    continue
+                if not in_window(d, a.date_from, a.date_to):
+                    stats["out_of_window"] += 1
+                    continue
+            c = post.get("content")
+            content = c.get("rendered") if isinstance(c, dict) else None
+            if not content or post.get("id") is None:
+                stats["failed_no_text_field"] += 1
+                continue
+            yield str(post["id"]), html_paragraphs(content)
+        dates = [str(p.get("date") or "")[:10] for p in posts]
+        if a.date_from and all(dates) and all(d < a.date_from for d in dates):
+            stats["stopped_old_page"] += 1       # newest first: nothing on a later page can be inside the window
+            return
+        page += 1
+
+
 def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common = argparse.ArgumentParser(add_help=False)
@@ -556,6 +665,12 @@ def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     g.add_argument("--sitemap", action="append", default=[])
     g.add_argument("--lastmod-from")
     g.add_argument("--lastmod-to")
+    w = sub.add_parser("wp", parents=[common])
+    w.add_argument("--base-url", required=True)
+    w.add_argument("--exclude-author", type=int, action="append", default=[], metavar="ID")
+    w.add_argument("--exclude-category", type=int, action="append", default=[], metavar="ID")
+    w.add_argument("--date-from")
+    w.add_argument("--date-to")
     a = ap.parse_args(argv)
     if not a.out.endswith(".tsv"):
         ap.error("--out must end in .tsv (build_counts_text.py strips the unit column only for a .tsv name)")
@@ -565,7 +680,7 @@ def main(argv=None, opener=None, clock=time.monotonic, sleep=time.sleep):
     markers, boiler = load_config(a)
     pats, stats, kept = [re.compile(b) for b in boiler], collections.Counter(), []
     with open(a.out + ".partial", "w", encoding="utf-8") as part:
-        for uid, paras in (gen_press if a.cmd == "press" else gen_pages)(a, f, stats):
+        for uid, paras in {"press": gen_press, "pages": gen_pages, "wp": gen_wp}[a.cmd](a, f, stats):
             u = clean_unit(uid, paras, markers, pats, stats)
             if u:
                 kept.append(u)
