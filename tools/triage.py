@@ -14,7 +14,7 @@ The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so the
 rides on it. The D2b / D2c sub-diagnosis does not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model
 rule, so in a run with the table a row whose pick either term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, concurrent.futures, importlib.util, json, os, struct, subprocess, sys, tempfile, threading
+import argparse, collections, concurrent.futures, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -427,10 +427,16 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
     return cn, per
 
 
+CE3_SET = re.compile(r"(ctune|cdev|cmicro|cjudge-[1-9]\d*)\Z")
+
+
 def set_file(name, private_root):
     if name in OWN_SETS:
         return OWN_SETS[name], False
-    f, want, private = bench.SETS2[name]
+    if CE3_SET.match(name):     # chat-eval-3 section 5: private row files under --private-root, hash recorded in the JSON, not pinned
+        f, want, private = f"{name}-rows.txt", None, True
+    else:
+        f, want, private = bench.SETS2[name]
     if private:
         f = os.path.join(os.path.abspath(os.path.expanduser(private_root)), f)
     if not os.path.isfile(f):

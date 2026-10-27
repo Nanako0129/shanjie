@@ -16,9 +16,15 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import build_chatclause as bc  # noqa: E402
+import build_ptt_chat as bp  # noqa: E402
 import build_lytune as bl  # noqa: E402
 import build_wikitypo as bw  # noqa: E402
 import e2common as c  # noqa: E402
+
+
+def old_prepare(*a, **k):
+    """The periods frozen before CE3: no window, no per-source duplicate rule."""
+    return bc.prepare(*a, legacy=True, **k)
 
 
 def fake_readings(sentences):
@@ -30,7 +36,7 @@ def ts(day, hm, month="2026-03"):
     return f"{month}-{day:02d} {hm}:00.000000+00:00"
 
 
-def package(td, channels, types=None):
+def package(td, channels, types=None, guilds=None):
     """channels: {folder: [(id, timestamp, contents)]} -> a Discord messages folder (JSON for c-folders, CSV for the others)."""
     root = os.path.join(td, "Messages")
     os.makedirs(root)
@@ -39,7 +45,10 @@ def package(td, channels, types=None):
         d = os.path.join(root, ch)
         os.makedirs(d)
         if (types or {}).get(ch, "GUILD_TEXT") is not None:
-            json.dump({"id": ch, "type": (types or {}).get(ch, "GUILD_TEXT")}, open(os.path.join(d, "channel.json"), "w"))
+            info = {"id": ch, "type": (types or {}).get(ch, "GUILD_TEXT")}
+            if (guilds or {}).get(ch):
+                info["guild"] = {"id": guilds[ch], "name": "synthetic"}
+            json.dump(info, open(os.path.join(d, "channel.json"), "w"))
         if ch.startswith("c"):
             json.dump([{"ID": i, "Timestamp": t, "Contents": x, "Attachments": ""} for i, t, x in msgs], open(os.path.join(d, "messages.json"), "w", encoding="utf-8"))
         else:
@@ -60,7 +69,7 @@ class Context(unittest.TestCase):
     def prepare(self, channels, **kw):
         td = tempfile.mkdtemp()
         root = package(td, channels)
-        counts = bc.prepare(root, None, None, kw.get("exclude", []), os.path.join(td, "w"))
+        counts = old_prepare(root, None, None, kw.get("exclude", []), os.path.join(td, "w"))
         return os.path.join(td, "w"), counts
 
     def test_three_segment_message_with_a_previous_message_5_and_15_minutes_earlier(self):
@@ -131,7 +140,7 @@ class Context(unittest.TestCase):
                 opened.append(os.path.relpath(os.fspath(f), root))
             return real_open(f, *a, **k)
         with mock.patch("builtins.open", spy):
-            counts = bc.prepare(None, root, me, [], os.path.join(td, "w"))
+            counts = old_prepare(None, root, me, [], os.path.join(td, "w"))
         self.assertEqual(sorted(opened), sorted(["threads/threads_and_replies.json", "facebook/your_posts__check_ins__photos_and_videos_1.json",
                                                  "facebook/your_posts__check_ins__photos_and_videos_2.json",
                                                  "facebook/posts_on_other_pages_and_profiles.json", "facebook/comments.json"]))
@@ -208,7 +217,7 @@ class Privacy(unittest.TestCase):
         json.dump({"comments_v2": [{"timestamp": t0, "data": [{"comment": {"timestamp": t0, "comment": "留言裡有 a@b.co 信箱", "author": "我"}},
                                                                 {"comment": {"timestamp": t0, "comment": "乾淨的留言內容", "author": "我"}}]}]},
                   open(os.path.join(exp, "facebook", "comments.json"), "w", encoding="utf-8"))
-        counts = bc.prepare(root, exp, "我", [], os.path.join(td, "w"))
+        counts = old_prepare(root, exp, "我", [], os.path.join(td, "w"))
         self.assertEqual(counts["discord"]["_dropped_private_by_rule"], {"email": 1, "tw_id": 1, "phone": 2, "digits6": 1, "token": 12})
         self.assertEqual(counts["facebook_comments"]["_dropped_private_by_rule"], {"email": 1})
         rows = [s for _m, _src, _x, s in clauses_of(os.path.join(td, "w"))]
@@ -226,7 +235,7 @@ class Privacy(unittest.TestCase):
                  ("22", ts(5, "12:32"), "看這個 https://example.com/abcdefghij1234567890klmnop 很好玩"),   # URL first: counted as url, not token
                  ("23", ts(5, "12:33"), f"<@{sf}> 金鑰 abcd1234efgh5678ijkl9012 不要貼")]            # markup stripped, the token stays
         td = tempfile.mkdtemp()
-        counts = bc.prepare(package(td, {"c1": msgs}), None, None, [], os.path.join(td, "w"))["discord"]
+        counts = old_prepare(package(td, {"c1": msgs}), None, None, [], os.path.join(td, "w"))["discord"]
         rows = [s for _m, _src, _x, s in clauses_of(os.path.join(td, "w"))]
         for i in range(len(markup)):
             self.assertIn(f"這句話{'甲乙丙丁戊己庚辛壬癸'[i]}沒問題", rows)             # kept, Han text segmented as usual
@@ -238,7 +247,7 @@ class Privacy(unittest.TestCase):
     def test_markup_becomes_a_space_and_a_segment_boundary_never_a_drop(self):
         td = tempfile.mkdtemp()
         root = package(td, {"c1": [("1", ts(5, "12:00"), "我跟<@123456789012345678>說好了"), ("2", ts(5, "12:30"), "<t:1700000000:R>")]})
-        counts = bc.prepare(root, None, None, [], os.path.join(td, "w"))["discord"]
+        counts = old_prepare(root, None, None, [], os.path.join(td, "w"))["discord"]
         self.assertEqual(sorted((s, x) for _m, _src, x, s in clauses_of(os.path.join(td, "w"))), sorted([("我跟", ""), ("說好了", "我跟")]))
         self.assertEqual(counts["_dropped_private_by_rule"], {})
         self.assertEqual({k: counts["2026-03"][k] for k in ("messages", "segments", "no_segment", "mechanical")},
@@ -259,7 +268,7 @@ class Privacy(unittest.TestCase):
                 opened.append(os.path.relpath(os.fspath(f), root))
             return real_open(f, *a, **k)
         with mock.patch("builtins.open", spy):
-            counts = bc.prepare(root, None, None, [], os.path.join(td, "w"))
+            counts = old_prepare(root, None, None, [], os.path.join(td, "w"))
         for ch in ("c2", "c3", "c4", "c7", "c8"):
             self.assertNotIn(os.path.join(ch, "messages.json"), opened, ch)
         self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(os.path.join(td, "w"))),
@@ -282,7 +291,7 @@ class Exclusions(unittest.TestCase):
             ("7", "2026-09-02 10:04:00.000000+00:00", "重複的句子，別的集合的句子"),
             ("8", "2026-09-03 10:05:00.000000+00:00", "重複的句子"),
             ("9", "2026-10-03 10:06:00.000000+00:00", "重複的句子")]})   # another month: not a duplicate
-        counts = bc.prepare(root, None, None, [ex], os.path.join(td, "w"))["discord"]
+        counts = old_prepare(root, None, None, [ex], os.path.join(td, "w"))["discord"]
         self.assertEqual(sorted(m for m in counts if not m.startswith("_")), ["2026-08", "2026-09", "2026-10"])
         s = counts["2026-09"]
         self.assertEqual({k: s[k] for k in ("messages", "url", "code", "no_segment", "segments", "overlap", "duplicate", "mechanical")},
@@ -355,7 +364,7 @@ class Freeze(unittest.TestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        bc.prepare(self.root, None, None, [], self.work)
+        old_prepare(self.root, None, None, [], self.work)
         with contextlib.redirect_stdout(io.StringIO()):
             bc.main(["split", "--work", self.work])
 
@@ -371,7 +380,7 @@ class Freeze(unittest.TestCase):
 
     def test_split_judge_start_option(self):
         w2 = os.path.join(self.td, "w2")
-        bc.prepare(self.root, None, None, [], w2)
+        old_prepare(self.root, None, None, [], w2)
         with contextlib.redirect_stdout(io.StringIO()):
             bc.main(["split", "--work", w2, "--judge-start", "2026-07"])
         sp = json.load(open(os.path.join(w2, "split.json")))
@@ -412,7 +421,7 @@ class Freeze(unittest.TestCase):
         texts = {"2026-05": "甲乙丙", "2026-06": "甲乙丙", "2026-07": "丁戊己", "2026-08": "庚辛壬", "2026-09": "子丑寅"}
         msgs = [(f"{i}{j}", f"{mon}-10 {10 + j}:00:00.000000+00:00", ch + "字") for i, (mon, t) in enumerate(texts.items()) for j, ch in enumerate(t)]
         work = os.path.join(td, "w")
-        bc.prepare(package(td, {"c1": msgs}), None, None, [], work)
+        old_prepare(package(td, {"c1": msgs}), None, None, [], work)
         with contextlib.redirect_stdout(io.StringIO()):
             bc.main(["split", "--work", work])
         pool = [(x, s) for m, _src, x, s in bc.read_clauses(work) if m in ("2026-05", "2026-06", "2026-07")]
@@ -476,7 +485,7 @@ class Freeze(unittest.TestCase):
         texts = {"2026-05": "甲乙丙丁", "2026-06": "甲乙丙丁", "2026-07": "戊己庚辛", "2026-08": "壬癸子丑", "2026-09": "寅卯辰巳"}
         msgs = [(f"{i}{j}", f"{mon}-10 {10 + j}:00:00.000000+00:00", ch + "字") for i, (mon, t) in enumerate(texts.items()) for j, ch in enumerate(t)]
         work = os.path.join(td, "w")
-        bc.prepare(package(td, {"c1": msgs}), None, None, [], work)
+        old_prepare(package(td, {"c1": msgs}), None, None, [], work)
         with contextlib.redirect_stdout(io.StringIO()):
             bc.main(["split", "--work", work])
         pool = [(x, s) for m, _src, x, s in bc.read_clauses(work) if m in ("2026-05", "2026-06", "2026-07")]
@@ -597,6 +606,533 @@ class Freeze(unittest.TestCase):
         frozen, draft, st = bc.build_period(rows, corr, readings)
         self.assertEqual(frozen, [("", "甲乙丁", "ㄅ"), ("", "庚辛壬", "ㄅ ㄆ ㄇ")])            # the confirmed reading keeps a CHECK row
         self.assertEqual((st["corrected"], st["dropped_by_correction"], st["dropped_check"], st["dropped_unreadable"], st["rows"]), (1, 1, 0, 1, 2))
+
+
+def many(n, month="2026-05", prefix="", segs=3, salt="字"):
+    """n distinct messages [(id, timestamp, text)]: `segs` segments each, every segment distinct across messages."""
+    chars = "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉"
+    word = lambda i, j: chars[i % 20] + chars[(i // 20) % 20] + chars[(i // 400) % 20] + chars[j] + salt
+    return [(f"{prefix}{i}", f"{month}-{1 + i % 27:02d} {10 + i % 10}:00:00.000000+00:00", "，".join(word(i, j) for j in range(segs))) for i in range(n)]
+
+
+def ids_in(name, n, source="discord", start=100000):
+    """n message ids (strings) whose bucket is `name`."""
+    out, i = [], start
+    while len(out) < n:
+        if c.bucket_set(source, str(i)) == name:
+            out.append(str(i))
+        i += 1
+    return out
+
+
+def freeze_raw(*a, **k):
+    """bc.freeze with the S1 cdev minimum off (cdev_min=N to set it) and the fake reading tool; a stop raises SystemExit."""
+    readings, cdev_min = k.pop("readings", fake_readings), k.pop("cdev_min", 0)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), mock.patch.object(bc, "CDEV_MIN_S1", cdev_min):
+        return bc.freeze(*a, readings=readings, **k)
+
+
+def freeze_quiet(*a, **k):
+    """freeze_raw for a freeze that must go through: any stop (a second guard included) fails the test as an assertion."""
+    try:
+        return freeze_raw(*a, **k)
+    except SystemExit as e:
+        raise AssertionError(f"the freeze stopped: {e}")
+
+
+def han_msgs(ids, month, per=3, salt="甲", day=3):
+    """Messages [(id, timestamp, text)] of `per` distinct 4-character clauses each; the salt keeps sets of messages apart."""
+    h = "一二三四五六七八九十"
+    return [(mid, ts(day, "10:00", month), "，".join(f"句{h[i // 10]}{h[i % 10]}{salt}{h[j]}"[:5] for j in range(per))) for i, mid in enumerate(ids)]
+
+
+def write_clauses(work, rows):
+    """A clauses.tsv by hand: rows (month, source, sentence, message id)."""
+    os.makedirs(work, exist_ok=True)
+    open(os.path.join(work, "clauses.tsv"), "w", encoding="utf-8").write("".join(f"{m}\t{src}\t\t{sent}\t{mid}\t{mid}\n" for m, src, sent, mid in rows))
+    return work
+
+
+def rows_of(work, period):
+    return [l.split("|") for l in open(os.path.join(work, f"{period}.rows.txt"), encoding="utf-8").read().splitlines()]
+
+
+class CE3Discord(unittest.TestCase):
+    """docs/contracts/chat-eval-3.md sections 2.1, 3, 4, 5: the server filter, the time window, buckets, sets."""
+
+    def prepared(self, msgs, extra=(), legacy=False, guild=None, td=None):
+        td = td or tempfile.mkdtemp()
+        root = package(td, {"c1": list(extra) + msgs})
+        work = os.path.join(td, "w")
+        bc.prepare(root, None, None, [], work, guild=guild, legacy=legacy)
+        return work
+
+    def test_only_the_given_server_is_read_and_the_other_channels_are_never_opened(self):
+        td = tempfile.mkdtemp()
+        types = {"c1": "GUILD_TEXT", "c2": "GUILD_TEXT", "c3": "GUILD_TEXT", "c4": "DM", "c5": "GUILD_TEXT"}
+        guilds = {"c1": "111", "c2": "222", "c3": None, "c4": "111", "c5": "111"}     # c3: no guild; c4: a DM of that guild id
+        root = package(td, {ch: [("1", ts(5, "12:00"), f"頻道{'一二三四五'[int(ch[1]) - 1]}乙乙的話語")] for ch in types}, types, guilds)
+        real_open, opened = open, []
+
+        def spy(f, *a, **k):
+            if isinstance(f, (str, os.PathLike)) and os.fspath(f).startswith(root):
+                opened.append(os.path.relpath(os.fspath(f), root))
+            return real_open(f, *a, **k)
+        with mock.patch("builtins.open", spy):
+            counts = bc.prepare(root, None, None, [], os.path.join(td, "w"), guild="111")
+        for ch in ("c2", "c3", "c4"):
+            self.assertNotIn(os.path.join(ch, "messages.json"), opened, ch)
+        self.assertIn(os.path.join("c1", "messages.json"), opened)
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(os.path.join(td, "w"))), sorted(f"頻道{n}乙乙的話語" for n in "一五"))
+        self.assertEqual(counts["discord"]["_skipped_channels_by_type"], {"GUILD_OTHER": 1, "GUILD_NONE": 1, "DM": 1})
+
+    def test_no_channel_of_the_guild_stops(self):
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": [("1", ts(5, "12:00"), "甲乙丙丁")]}, guilds={"c1": "222"})
+        with self.assertRaises(SystemExit):
+            bc.prepare(root, None, None, [], os.path.join(td, "w"), guild="111")
+
+    def test_the_cli_needs_a_guild_with_discord(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            bc.main(["prepare", "--work", tempfile.mkdtemp(), "--discord", tempfile.mkdtemp()])
+
+    def test_the_window_is_the_default_and_only_the_legacy_opt_out_reads_other_months(self):
+        msgs = [("1", ts(5, "12:00", "2026-09"), "九月的話語"), ("2", ts(5, "12:00", "2026-05"), "五月的話語")]
+        self.assertEqual([s for _m, _s, _x, s in clauses_of(self.prepared(msgs))], ["五月的話語"])
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(self.prepared(msgs, legacy=True))), ["九月的話語", "五月的話語"])
+
+    def test_a_message_outside_the_window_is_dropped_before_any_text_function_sees_it(self):
+        """Through main(), the path the CLI takes. Discord and Meta, with spies on every function that reads text, hashing included."""
+        S_SEP, S_OLD, S_OK = "哨兵九月專用", "哨兵舊時專用", "哨兵窗內專用"
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": [("1", ts(5, "12:00", "2026-09"), S_SEP), ("2", ts(5, "12:00", "2015-06"), S_OLD),
+                                   ("3", ts(5, "12:00", "2026-10"), S_SEP + "十月"), ("4", "壞的時間", S_SEP + "無時間"),
+                                   ("5", ts(5, "12:00", "2026-08"), S_OK)]}, guilds={"c1": "111"})
+        seen = []
+
+        class Spy:     # records the text it is asked about, then behaves as the wrapped regex
+            def __init__(self, inner):
+                self.inner = inner
+
+            def search(self, t):
+                seen.append(t)
+                return self.inner.search(t)
+
+            def sub(self, r, t):
+                seen.append(t)
+                return self.inner.sub(r, t)
+
+        def record(f):
+            def w(t, *a, **k):
+                seen.append(t if isinstance(t, str) else t.decode("utf-8"))
+                return f(t, *a, **k)
+            return w
+        meta = os.path.join(td, "meta")
+        os.makedirs(os.path.join(meta, "threads"))
+        stamp = lambda y, m: dt.datetime(y, m, 3, 4, tzinfo=dt.timezone.utc).timestamp()
+        json.dump({"text_post_app_text_posts": [{"title": S_SEP + "串", "creation_timestamp": stamp(2026, 9)}, {"title": "", "creation_timestamp": stamp(2026, 10)},
+                                                {"title": S_OLD + "串", "creation_timestamp": stamp(2015, 5)}, {"title": S_OK + "串", "creation_timestamp": stamp(2026, 8)}]},
+                  open(os.path.join(meta, "threads", "threads_and_replies.json"), "w"))
+        work = os.path.join(td, "w")
+        with mock.patch.object(bc, "URL", Spy(bc.URL)), mock.patch.object(bc, "DISCORD_MARKUP", Spy(bc.DISCORD_MARKUP)), \
+                mock.patch.object(bc, "private_rule", record(bc.private_rule)), mock.patch.object(c, "segments", record(c.segments)), \
+                mock.patch.object(bc.hashlib, "sha256", record(bc.hashlib.sha256)), contextlib.redirect_stdout(io.StringIO()):
+            bc.main(["prepare", "--work", work, "--discord", root, "--guild", "111", "--meta", meta, "--self-name", "me"])
+        self.assertTrue(any(S_OK + "串" in t for t in seen), "the spies are wired: an in-window Meta post is hashed")
+        self.assertTrue(any(S_OK == t for t in seen))
+        self.assertFalse([t for t in seen if "哨兵九月" in t or "哨兵舊時" in t or "無時間" in t], "no text function saw it")
+        for dirpath, _d, files in os.walk(work):
+            for f in files:
+                data = open(os.path.join(dirpath, f), encoding="utf-8").read()
+                for bad in ("哨兵九月", "哨兵舊時", "無時間"):
+                    self.assertNotIn(bad, data)
+        counts = json.load(open(os.path.join(work, "counts.json"), encoding="utf-8"))
+        self.assertEqual(counts["discord"]["_dropped_out_of_window"], {"2015-06": 1, "2026-09": 1, "2026-10": 1})
+        self.assertEqual(counts["discord"]["_dropped_no_timestamp"], 1)
+        self.assertEqual(counts["threads"]["_dropped_out_of_window"], {"2015-05": 1, "2026-09": 1, "2026-10": 1})    # the empty one is out of window, not no-text
+        self.assertNotIn("_dropped_no_text", counts["threads"])
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(work)), sorted([S_OK, S_OK + "串"]))
+
+    def test_buckets_keep_the_clauses_of_a_message_together_and_use_all_three_sets(self):
+        work = self.prepared(many(90, "2026-05"))
+        full = bc.read_clauses(work, full=True)
+        self.assertEqual(len(full), 270)
+        sets = {}
+        for _m, src, _x, sent, _ch, mid in full:
+            sets.setdefault(mid, set()).add(c.bucket_set(src, mid))
+        self.assertTrue(all(len(v) == 1 for v in sets.values()))
+        self.assertEqual({next(iter(v)) for v in sets.values()}, {"ctune", "cdev", "cjudge"})
+
+    def test_buckets_do_not_move_when_the_export_gains_an_earlier_and_a_later_message(self):
+        base = many(40, "2026-05")
+        early = [("0", ts(1, "01:00", "2019-01"), "最早的新增訊息")]
+        late = [("999999", ts(1, "01:00", "2026-08"), "最晚的新增訊息")]
+        a = bc.read_clauses(self.prepared(base), full=True)
+        b = bc.read_clauses(self.prepared(base, early + late), full=True)
+        bucket = lambda rows: {(mid, sent): c.bucket_set(src, mid) for _m, src, _x, sent, _ch, mid in rows}
+        ba, bb = bucket(a), bucket(b)
+        self.assertEqual({k: v for k, v in bb.items() if k in ba}, ba)
+        self.assertEqual(len(bb) - len(ba), 2)
+        td = tempfile.mkdtemp()      # Meta ids hold no position either: a post added in front keeps the ids of the others
+        os.makedirs(os.path.join(td, "threads"))
+        post = lambda t, n: {"title": n, "creation_timestamp": t}
+        write = lambda posts: json.dump({"text_post_app_text_posts": posts}, open(os.path.join(td, "threads", "threads_and_replies.json"), "w"))
+        write([post(1700000100, "甲乙丙丁"), post(1700000200, "戊己庚辛")])
+        ids1 = [m[1] for m in bc.meta_messages(td, "me")["threads"][0]]
+        write([post(1600000000, "新的最前面")] + [post(1700000100, "甲乙丙丁"), post(1700000200, "戊己庚辛")] + [post(1800000000, "新的最後面")])
+        ids2 = [m[1] for m in bc.meta_messages(td, "me")["threads"][0]]
+        self.assertEqual(ids2[1:3], ids1)
+
+    def test_a_clause_repeated_in_two_months_of_one_source_keeps_its_first_copy(self):
+        a, b = ids_in("cdev", 2)
+        msgs = [(a, ts(3, "10:00", "2026-05"), "重複的子句，甲獨有"), (b, ts(3, "10:00", "2026-06"), "重複的子句，乙獨有")]
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(self.prepared(msgs))), ["乙獨有", "甲獨有", "重複的子句"])
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(self.prepared(msgs, legacy=True))), ["乙獨有", "甲獨有", "重複的子句", "重複的子句"])
+
+    def test_freeze_the_three_sets_disjoint_cjudge_without_2026_08(self):
+        td = tempfile.mkdtemp()
+        msgs = many(150, "2026-05") + many(150, "2026-07", "j", salt="丑") + many(150, "2026-08", "k", salt="寅")
+        work = self.prepared(msgs, td=td)
+        out = {}
+        for period in ("ctune", "cdev", "cjudge-1"):
+            st = freeze_quiet(work, period)
+            out[period] = [r[1] for r in rows_of(work, period)]
+            self.assertEqual(len(open(os.path.join(work, f"{period}.sources.txt")).read().splitlines()), len(out[period]))
+            self.assertEqual(st["rows_by_source"], {"discord": len(out[period])})
+        self.assertTrue(all(out.values()))
+        names = sorted(out)
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                self.assertFalse(set(out[a]) & set(out[b]), (a, b))
+        month_of = {s: m for m, _src, _x, s in bc.read_clauses(work)}
+        self.assertTrue(all(month_of[s] <= "2026-07" for s in out["cjudge-1"]))
+        self.assertGreater(st["not_used_cjudge_bucket_after_2026_07_messages"], 0)
+        with self.assertRaises(SystemExit):
+            freeze_raw(work, "cjudge-3")       # cjudge-2 is not frozen yet
+
+    def test_a_correction_that_changes_or_drops_a_sentence_keeps_the_source_tags_aligned(self):
+        """Discord and Threads rows mixed in one set: each frozen row's source is the source of the clause it was drawn from."""
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": many(60, "2026-05")})
+        meta = os.path.join(td, "meta")
+        os.makedirs(os.path.join(meta, "threads"))
+        posts = [{"title": t, "creation_timestamp": dt.datetime(2026, 5, 1 + i % 27, 4, tzinfo=dt.timezone.utc).timestamp()}
+                 for i, (_i, _t, t) in enumerate(many(60, "2026-05", "m", salt="丑"))]
+        json.dump({"text_post_app_text_posts": posts}, open(os.path.join(meta, "threads", "threads_and_replies.json"), "w"))
+        work = os.path.join(td, "w")
+        bc.prepare(root, meta, "me", [], work)
+        source_of = {s: src for _m, src, _x, s in bc.read_clauses(work)}
+        sample = bc.ce3_rows(work, "ctune")[0]
+        self.assertEqual({src for _x, _s, src, _m in sample}, {"discord", "threads"})
+        change, drop = sample[0][1], sample[1][1]
+        corr = os.path.join(td, "corr.tsv")
+        open(corr, "w", encoding="utf-8").write(f"{drop}\t\n{change}\t{change}改\t{' '.join('ㄅ' * (len(change) + 1))}\n")
+        st = freeze_quiet(work, "ctune", corr)
+        rows = [r[1] for r in rows_of(work, "ctune")]
+        sources = open(os.path.join(work, "ctune.sources.txt")).read().split()
+        self.assertEqual(len(rows), len(sample) - 1)
+        self.assertNotIn(drop, rows)
+        self.assertEqual(sources, [source_of[s[:-1] if s == change + "改" else s] for s in rows])      # row by row, not only in total
+        self.assertEqual(st["rows_by_source"], {k: sources.count(k) for k in ("discord", "threads")})
+        # and build_period alone: the tags of the kept rows, whatever sits before them
+        _f, _d, _st, tags = bc.build_period([("", "甲乙"), ("", "丙丁"), ("", "戊己")], {"甲乙": (None, None)}, fake_readings, ["a", "b", "c"])
+        self.assertEqual(tags, ["b", "c"])
+
+    def test_a_later_cjudge_never_takes_back_a_corrected_dropped_or_check_row(self):
+        work = self.prepared(han_msgs(ids_in("cjudge", 6), "2026-06"))
+        with mock.patch.object(bc, "CJUDGE_HALF", 12):
+            first = bc.ce3_rows(work, "cjudge")[0]
+            self.assertEqual(len(first), 12)
+            changed, dropped, checked = first[0][1], first[1][1], first[5][1]
+            corr = os.path.join(os.path.dirname(work), "corr.tsv")
+            open(corr, "w", encoding="utf-8").write(f"{changed}\t{changed}改\t{' '.join('ㄅ' * (len(changed) + 1))}\n{dropped}\t\n")
+            check = lambda ss: {s: (("check", "") if s == checked else ("ok", "ㄅ")) for s in set(ss)}
+            freeze_quiet(work, "cjudge-1", corr, readings=check)
+        self.assertNotIn(checked, {r[1] for r in rows_of(work, "cjudge-1")})
+        with mock.patch.object(bc, "CJUDGE_HALF", 100):                  # the pool is small enough for cjudge-2 to take everything left
+            second = bc.ce3_rows(work, "cjudge", 2)[0]
+            freeze_quiet(work, "cjudge-2")
+        everything = {s for _m, _src, _x, s in bc.read_clauses(work)}
+        self.assertEqual(len(everything), 18)
+        self.assertEqual({s for _x, s, _src, _m in second}, everything - {s for _x, s, _src, _m in first})       # exactly the two messages left
+        self.assertFalse({changed, dropped, checked} & {r[1] for r in rows_of(work, "cjudge-2")})
+
+    def test_a_correction_into_a_row_of_the_other_side_or_another_frozen_set_stops(self):
+        work = self.prepared(many(80, "2026-06"))
+        freeze_quiet(work, "cdev")
+        other = rows_of(work, "cdev")[0][1]
+        victim = bc.ce3_rows(work, "ctune")[0][0][1]
+        corr = os.path.join(os.path.dirname(work), "corr.tsv")
+        open(corr, "w", encoding="utf-8").write(f"{victim}\t{other}\t{' '.join('ㄅ' * len(other))}\n")
+        with self.assertRaises(SystemExit):
+            freeze_raw(work, "ctune", corr)                               # into a frozen set of the folder
+        self.assertFalse(os.path.isfile(os.path.join(work, "ctune.rows.txt")))
+        theirs = os.path.join(os.path.dirname(work), "ptt.rows.txt")      # into a row of the other side's --exclude file
+        open(theirs, "w", encoding="utf-8").write("|外來的句子|ㄅ\n")
+        open(corr, "w", encoding="utf-8").write(f"{victim}\t外來的句子\t{' '.join('ㄅ' * 5)}\n")
+        with self.assertRaises(SystemExit):
+            freeze_raw(work, "ctune", corr, others=[theirs])
+        self.assertFalse(os.path.isfile(os.path.join(work, "ctune.rows.txt")))
+        freeze_quiet(work, "ctune", corr)                                 # without that file the same correction goes through
+        self.assertIn("外來的句子", [r[1] for r in rows_of(work, "ctune")])
+
+    def test_a_message_drawn_with_other_exclusions_is_not_drawn_again(self):
+        (mid,) = ids_in("cjudge", 1)
+        work = self.prepared([(mid, ts(4, "10:00", "2026-07"), "句乙甲，句乙乙，句乙丙")])
+        x = os.path.join(os.path.dirname(work), "x.rows.txt")
+        open(x, "w", encoding="utf-8").write("|句乙乙|ㄅ\n")
+        with mock.patch.object(bc, "CJUDGE_HALF", 100):
+            self.assertEqual({s for _x, s, _src, _m in bc.ce3_rows(work, "cjudge", 1, {"句乙乙"})[0]}, {"句乙甲", "句乙丙"})
+            freeze_quiet(work, "cjudge-1", others=[x])
+            self.assertEqual({r[1] for r in rows_of(work, "cjudge-1")}, {"句乙甲", "句乙丙"})
+            self.assertEqual(len(open(os.path.join(work, "cjudge-1.origin.tsv")).read().splitlines()), 3)    # the filtered clause is recorded too
+            self.assertEqual(bc.ce3_rows(work, "cjudge", 2)[0], [])      # another --exclude: the message still is cjudge-1's
+            freeze_quiet(work, "cjudge-2")
+        self.assertEqual(rows_of(work, "cjudge-2"), [])
+
+    def test_the_first_month_that_does_not_fit_ends_the_cjudge_draw(self):
+        ids = ids_in("cjudge", 7)
+        work = self.prepared(han_msgs(ids[:3], "2026-07") + han_msgs(ids[3:], "2026-06", per=1, salt="乙"))
+        with mock.patch.object(bc, "CJUDGE_HALF", 7):
+            sample, pool, _x, _d = bc.ce3_rows(work, "cjudge")
+        self.assertEqual(len(sample), 6)                  # two 3-clause messages of 2026-07; one row is left over ...
+        self.assertTrue(all(m in ids[:3] for _x, _s, _src, m in sample))        # ... and a 1-clause message of 2026-06 does not take it
+
+    def test_the_same_sentence_from_two_sources_is_in_a_set_once_and_not_in_two_judge_sets(self):
+        d1, d2 = ids_in("cdev", 1)[0], ids_in("cdev", 1, "threads")[0]
+        work = write_clauses(os.path.join(tempfile.mkdtemp(), "w"), [("2026-05", "discord", "共同句子", d1), ("2026-05", "discord", "甲獨有句", d1),
+                                                                     ("2026-06", "threads", "共同句子", d2), ("2026-06", "threads", "乙獨有句", d2)])
+        sample = bc.ce3_rows(work, "cdev")[0]
+        self.assertEqual(sorted(s for _x, s, _src, _m in sample), ["乙獨有句", "共同句子", "甲獨有句"])
+        self.assertEqual([src for _x, s, src, _m in sample if s == "共同句子"], ["discord"])        # the first by time keeps it
+        a, b = ids_in("cjudge", 1)[0], ids_in("cjudge", 1, "threads")[0]
+        work = write_clauses(os.path.join(tempfile.mkdtemp(), "w"), [("2026-07", "discord", "共同句子", a), ("2026-06", "threads", "共同句子", b),
+                                                                     ("2026-06", "threads", "丙獨有句", b)])
+        with mock.patch.object(bc, "CJUDGE_HALF", 1):
+            freeze_quiet(work, "cjudge-1")
+            self.assertEqual(sorted(s for _x, s, _src, _m in bc.ce3_rows(work, "cjudge", 2)[0]), ["丙獨有句"])     # a message not drawn: its clause stays
+            freeze_quiet(work, "cjudge-2")
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-1")], ["共同句子"])
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-2")], ["丙獨有句"])
+
+    def test_a_frozen_set_is_compared_file_by_file_and_never_rewritten(self):
+        work = self.prepared(many(60, "2026-05"))
+        freeze_quiet(work, "ctune")
+        names = [f"ctune.{x}" for x in ("rows.txt", "sha256", "sources.txt", "origin.tsv", "manifest.json")]
+        same = {n: open(os.path.join(work, n), encoding="utf-8").read() for n in names}
+        freeze_quiet(work, "ctune")
+        self.assertEqual(same, {n: open(os.path.join(work, n), encoding="utf-8").read() for n in names})
+        for n in ("ctune.sources.txt", "ctune.origin.tsv", "ctune.manifest.json"):
+            with open(os.path.join(work, n), "a", encoding="utf-8") as f:
+                f.write("tampered\n")
+            with self.assertRaises(SystemExit):
+                freeze_raw(work, "ctune")
+            self.assertTrue(open(os.path.join(work, n), encoding="utf-8").read().endswith("tampered\n"), n)    # not repaired by the rerun
+            open(os.path.join(work, n), "w", encoding="utf-8").write(same[n])
+
+    def test_cdev_stops_when_the_s1_bucket_holds_under_1000_rows(self):
+        work = self.prepared(many(300, "2026-05"))
+        n = bc.ce3_rows(work, "cdev")[1]
+        self.assertTrue(0 < n < bc.CDEV_MIN_S1)
+        with self.assertRaises(SystemExit) as e:
+            freeze_raw(work, "cdev", cdev_min=bc.CDEV_MIN_S1)
+        self.assertIn(str(n), str(e.exception.code))
+        self.assertFalse(os.path.isfile(os.path.join(work, "cdev.rows.txt")))
+        with self.assertRaises(SystemExit):
+            freeze_raw(work, "cdev", cdev_min=n + 1)
+        freeze_quiet(work, "cdev", cdev_min=n)                         # exactly the minimum goes through
+
+    def test_shared_sentences_are_left_out_and_cjudge_sets_never_repeat(self):
+        ct, cd = ids_in("ctune", 1)[0], ids_in("cdev", 1)[0]
+        m1, m2 = ids_in("cjudge", 2)
+        msgs = [(ct, ts(3, "10:00", "2026-05"), "跨桶共用句，獨有句甲"), (cd, ts(3, "10:00", "2026-06"), "跨桶共用句，獨有句乙"),
+                (m1, ts(4, "10:00", "2026-07"), "獨有句丙，並列共用句"), (m2, ts(5, "10:00", "2026-06"), "獨有句丁，並列共用句")]
+        work = self.prepared(msgs, legacy=True)          # the per-month duplicate rule lets the same clause sit in two months
+        self.assertEqual([s for _x, s, _src, _m in bc.ce3_rows(work, "ctune")[0]], ["獨有句甲"])          # before any freeze
+        freeze_quiet(work, "ctune")
+        freeze_quiet(work, "cdev")
+        self.assertEqual([r[1] for r in rows_of(work, "ctune")], ["獨有句甲"])      # 跨桶共用句 sits in two sets' buckets: in neither
+        self.assertEqual([r[1] for r in rows_of(work, "cdev")], ["獨有句乙"])
+        with mock.patch.object(bc, "CJUDGE_HALF", 2):
+            freeze_quiet(work, "cjudge-1")
+            freeze_quiet(work, "cjudge-2")
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-1")], ["獨有句丙"])      # 並列共用句: the first copy by time is m2's ...
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-2")], ["獨有句丁"])     # ... but m1 drew it, so cjudge-2 does not hold it either; m1 is not drawn again
+
+    def test_the_other_sides_rows_are_taken_out_of_the_s1_set(self):
+        a, b = ids_in("ctune", 2)
+        work = self.prepared([(a, ts(3, "10:00"), "同一句話，甲獨有"), (b, ts(4, "10:00"), "乙獨有")])
+        other = os.path.join(os.path.dirname(work), "ptt.rows.txt")
+        open(other, "w", encoding="utf-8").write("|同一句話|ㄅ\n")
+        self.assertEqual(sorted(s for _x, s, _src, _m in bc.ce3_rows(work, "ctune", 1, {"同一句話"})[0]), ["乙獨有", "甲獨有"])
+        freeze_quiet(work, "ctune", others=[other])
+        self.assertEqual(sorted(r[1] for r in rows_of(work, "ctune")), ["乙獨有", "甲獨有"])
+
+    def test_clauses_of_a_message_are_drawn_together(self):
+        work = self.prepared(many(120, "2026-05") + many(120, "2026-06", "q", salt="丑"))
+        with mock.patch.object(bc, "CE3_CAPS", {"ctune": 10, "cdev": 10}), mock.patch.object(bc, "CJUDGE_HALF", 7):
+            for name in ("ctune", "cdev", "cjudge"):
+                sample = bc.ce3_rows(work, name)[0]
+                per = {}
+                for _x, s, src, mid in sample:
+                    per.setdefault(mid, []).append(s)
+                self.assertTrue(per and all(len(v) == 3 for v in per.values()), name)       # each drawn message has all its three clauses
+                self.assertLessEqual(len(sample), 10 if name != "cjudge" else 7)
+                self.assertEqual(len(sample), 9 if name != "cjudge" else 6)
+            freeze_quiet(work, "cjudge-1")
+            freeze_quiet(work, "cjudge-2")
+        mids = [{l.split("\t")[1] for l in open(os.path.join(work, f"cjudge-{k}.origin.tsv"), encoding="utf-8")} for k in (1, 2)]
+        self.assertFalse(mids[0] & mids[1])
+        for k in (1, 2):      # a second clause's context is the first clause of the same set, never a sentence of the other judge set
+            rows = rows_of(work, f"cjudge-{k}")
+            sents = {r[1] for r in rows}
+            self.assertTrue(all(r[0] == "" or r[0] in sents for r in rows if r[0] and r[0].endswith(("字", "丑"))))
+
+
+class CE3Ptt(unittest.TestCase):
+    def page(self, month_line, pushes):
+        meta = f'<div class="article-metaline"><span class="article-meta-tag">時間</span><span class="article-meta-value">{month_line}</span></div>'
+        body = "".join(f'<div class="push"><span class="hl push-tag">推 </span><span class="f3 hl push-userid">{u}</span>'
+                       f'<span class="f3 push-content">: {t}</span><span class="push-ipdatetime"> 10/24 12:{i % 60:02d}\n</span></div>' for i, (u, t) in enumerate(pushes))
+        return f'<div id="main-content" class="bbs-screen bbs-content">{meta}\n正文\n--\n{body}</div>'
+
+    def snapshot(self, td, articles, month="Mon May 11 12:00:00 2026", name="src"):
+        """articles: [(file stem, month line, [(account, text)])] -> the snapshot folder."""
+        os.makedirs(os.path.join(td, name, "Gossiping"), exist_ok=True)
+        for stem, mline, pushes in articles:
+            open(os.path.join(td, name, "Gossiping", f"{stem}.html"), "w", encoding="utf-8").write(self.page(mline or month, pushes))
+        return os.path.join(td, name)
+
+    def words(self, n, start=0):
+        chars = "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉"
+        return [chars[i % 20] + chars[(i // 20) % 20] + chars[(i // 400) % 20] + "話" for i in range(start, start + n)]
+
+    def distinct_accounts(self, n, start=0):
+        w = self.words(2 * n, 2 * start)
+        return [(f"M.{start + i}", None, [(f"acct{start + i}", f"{w[2 * i]}，{w[2 * i + 1]}")]) for i in range(n)]
+
+    def test_draw_takes_whole_messages_and_respects_the_account_limit(self):
+        items = [(f"m{i}", [("", f"句{i}a"), ("", f"句{i}b")], "a" if i < 8 else "b") for i in range(10)]
+        got = c.draw_messages(items, 100, random.Random(1), 6)
+        self.assertEqual(sum(1 for _k, _r, a in got if a == "a"), 3)          # 3 messages x 2 rows = 6 for account a
+        self.assertEqual(sum(1 for _k, _r, a in got if a == "b"), 2)
+        self.assertTrue(all(len(r) == 2 for _k, r, _a in got))
+        self.assertEqual(got, c.draw_messages(items, 100, random.Random(1), 6))
+        self.assertEqual(len(c.draw_messages(items, 5, random.Random(1))), 2)   # whole messages only: 5 rows fit two of two rows
+
+    def test_build_window_cap_and_one_set_per_sentence(self):
+        td = tempfile.mkdtemp()
+        w = self.words(400)
+        arts, n = [], 0
+        for a in range(60):
+            pushes = []
+            for j in range(3):
+                pushes += [("spam", f"{w[n]}，{w[n + 1]}"), ("other%d" % a, "同意同意")]
+                n += 2
+            arts.append((f"M.{a}", "Mon May 11 12:00:00 2026" if a % 3 else "Sat Aug 08 12:00:00 2026", pushes))
+        arts += [("M.sep", "Tue Sep 01 12:00:00 2026", [("x", "哨兵九月專用推文")]), ("M.old", "Tue Jun 02 12:00:00 2015", [("x", "哨兵舊時專用推文")])]
+        src = self.snapshot(td, arts)
+        out = os.path.join(td, "out")
+        rep = bp.build(src, out, ["ctune", "cdev", "cjudge-1"], readings=fake_readings)
+        self.assertEqual(rep["counts"]["articles_out_of_window"], 2)
+        sets = {}
+        for name in ("ctune", "cdev", "cjudge-1"):
+            rows = rows_of(out, name)
+            sets[name] = [r[1] for r in rows]
+            self.assertEqual(len(open(os.path.join(out, f"{name}.sources.txt")).read().splitlines()), len(rows))
+            self.assertLessEqual(len([r for r in rows if "同意" not in r[1]]), 20, name)
+            self.assertFalse([r for r in rows if "哨兵" in r[1]])
+        self.assertTrue(any(len([s for s in v if "同意" not in s]) == 20 for v in sets.values()), "the cap was reached")
+        self.assertEqual(sum(s.count("同意同意") for s in sets.values()), 1)
+        names = sorted(sets)
+        self.assertFalse(set(sets[names[0]]) & set(sets[names[1]]) | set(sets[names[1]]) & set(sets[names[2]]) | set(sets[names[0]]) & set(sets[names[2]]))
+
+    def test_a_frozen_set_is_never_rewritten_and_later_sets_leave_the_earlier_ones_alone(self):
+        td = tempfile.mkdtemp()
+        src = self.snapshot(td, self.distinct_accounts(150))
+        sha = lambda d, n: c.sha256_file(os.path.join(d, f"{n}.rows.txt"))
+        with mock.patch.object(bp, "CJUDGE_SIZE", 6):
+            one, two = os.path.join(td, "one"), os.path.join(td, "two")
+            bp.build(src, one, ["ctune", "cdev", "cjudge-1"], readings=fake_readings)
+            bp.build(src, two, ["ctune", "cdev", "cjudge-1", "cjudge-2"], readings=fake_readings)
+            before = {n: sha(one, n) for n in ("ctune", "cdev", "cjudge-1")}
+            self.assertEqual(before, {n: sha(two, n) for n in before})
+            bp.build(src, one, ["cjudge-2"], readings=fake_readings)                                   # drawn later, from the files on disk
+            self.assertEqual(before, {n: sha(one, n) for n in before})
+            self.assertEqual(sha(one, "cjudge-2"), sha(two, "cjudge-2"))
+            mids = [{l.split("\t")[1] for l in open(os.path.join(one, f"cjudge-{k}.origin.tsv"), encoding="utf-8")} for k in (1, 2)]
+            self.assertTrue(mids[0] and mids[1] and not mids[0] & mids[1])
+            with self.assertRaises(SystemExit):
+                bp.build(src, os.path.join(td, "fresh"), ["cjudge-2"], readings=fake_readings)          # cjudge-1 is not there
+            # another snapshot (the pool changes): the frozen ctune is not rewritten
+            src2 = self.snapshot(td, self.distinct_accounts(150) + self.distinct_accounts(40, 500), name="src2")
+            with self.assertRaises(SystemExit):
+                bp.build(src2, one, ["ctune", "cdev", "cjudge-1"], readings=fake_readings)
+            self.assertEqual(before, {n: sha(one, n) for n in before})
+
+    def test_a_ptt_message_drawn_with_other_exclusions_is_not_drawn_again(self):
+        td = tempfile.mkdtemp()
+        src = self.snapshot(td, self.distinct_accounts(150))
+        pool = bp.collect(src)[0]["cjudge"]
+        mid = sorted(pool)[0]
+        x = pool[mid][2][1][1]                          # the second clause of that message
+        out = os.path.join(td, "out")
+        with mock.patch.object(bp, "CJUDGE_SIZE", 1000):
+            bp.build(src, out, ["cjudge-1"], exclude={x}, readings=fake_readings)
+            self.assertNotIn(x, [r[1] for r in rows_of(out, "cjudge-1")])
+            bp.build(src, out, ["cjudge-2"], readings=fake_readings)          # no exclusion now: x is back in the pool, its message is cjudge-1's
+        self.assertEqual(rows_of(out, "cjudge-2"), [])
+
+    def test_sets_are_built_in_the_documented_order_and_a_stop_leaves_the_earlier_ones_frozen(self):
+        td = tempfile.mkdtemp()
+        src = self.snapshot(td, self.distinct_accounts(150))
+        calls, real = [], bc.freeze_ce3
+
+        def rec(work, period, *a, **k):
+            calls.append(period)
+            return real(work, period, *a, **k)
+        with mock.patch.object(bc, "freeze_ce3", rec), mock.patch.object(bp, "CJUDGE_SIZE", 6):
+            bp.build(src, os.path.join(td, "all"), ["cjudge-2", "cdev", "cjudge-1", "ctune"], readings=fake_readings)
+        self.assertEqual(calls, ["ctune", "cdev", "cjudge-1", "cjudge-2"])
+        n = [0]
+
+        def second_call_all_check(ss):
+            n[0] += 1
+            return fake_readings(ss) if n[0] == 1 else {s: ("check", "") for s in set(ss)}
+        out = os.path.join(td, "stopped")
+        with self.assertRaises(SystemExit):
+            bp.build(src, out, ["cjudge-1", "cdev", "ctune"], readings=second_call_all_check)
+        self.assertEqual(sorted(f for f in os.listdir(out) if f.endswith(".rows.txt")), ["ctune.rows.txt"])
+
+    def test_more_than_ten_percent_check_stops_the_ptt_freeze(self):
+        td = tempfile.mkdtemp()
+        src = self.snapshot(td, self.distinct_accounts(40))
+        with self.assertRaises(SystemExit):
+            bp.build(src, os.path.join(td, "out"), ["ctune"], readings=lambda ss: {s: ("check", "") for s in set(ss)})
+        self.assertFalse(os.path.isfile(os.path.join(td, "out", "ctune.rows.txt")))
+
+    def test_sentences_of_the_other_side_are_taken_out_in_both_directions(self):
+        td = tempfile.mkdtemp()
+        w = self.words(30)
+        # S1 side first: its ctune rows go to the PTT build as --exclude
+        work = CE3Discord.prepared(self, many(150, "2026-05"), td=td)
+        freeze_quiet(work, "ctune")
+        s1_rows = os.path.join(work, "ctune.rows.txt")
+        s1_sent = rows_of(work, "ctune")[0][1]
+        src = self.snapshot(td, [(f"M.{i}", None, [(f"a{i}", f"{s1_sent if i == 0 else w[i]}，{w[i + 10]}")]) for i in range(20)])
+        pools, counts = bp.collect(src)
+        self.assertIn(s1_sent, {r[1] for name in pools for v in pools[name].values() for r in v[2]})
+        pools, counts = bp.collect(src, bc.load_exclude([s1_rows]))
+        self.assertNotIn(s1_sent, {r[1] for name in pools for v in pools[name].values() for r in v[2]})
+        self.assertEqual(counts["overlap"], 1)
+        # PTT side first: its frozen rows go to the S1 freeze as --exclude
+        out = os.path.join(td, "out")
+        bp.build(src, out, ["ctune", "cdev"], readings=fake_readings)
+        ptt_sent = (rows_of(out, "ctune") + rows_of(out, "cdev"))[0][1]
+        a = ids_in("ctune", 1)[0]
+        work2 = CE3Discord.prepared(self, [(a, ts(3, "10:00"), f"{ptt_sent}，另一句獨有")], td=tempfile.mkdtemp())
+        freeze_quiet(work2, "ctune", others=[os.path.join(out, "ctune.rows.txt"), os.path.join(out, "cdev.rows.txt")])
+        self.assertEqual([r[1] for r in rows_of(work2, "ctune")], ["另一句獨有"])
 
 
 class PublicBuilders(unittest.TestCase):
