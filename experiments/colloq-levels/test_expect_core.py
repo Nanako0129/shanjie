@@ -1,23 +1,32 @@
-"""expect_core.py: the offline arithmetic gives the same three picks as the core's unit test `each_level_picks_with_its_own_cell`
-(standard 0, conservative 2, aggressive 1 on one list); the real header triples (0.3/2/0.25, 1/2/3, 0.3/2/0.25) are the fallback, and `compare` flags a level run whose pick is not the level's cell."""
+"""expect_core.py: the offline arithmetic gives the same picks as the core's unit tests `each_level_picks_with_its_own_cell` (three lists, standard [0, 1, 1],
+conservative [0, 0, 1], aggressive [1, 1, 1]) and `the_terms_weigh_the_same_at_every_alpha` (the thresholds 2 + 4 * delta and 0.5 + delta of each cell); the
+real header triples (0.3/2/0.25, 1/2/3, 0.3/2/0.25) are the fallback, and `compare` flags a level run whose pick is not the level's cell."""
 import math, os, sys, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import expect_core as E  # noqa: E402
 
+LISTS = [([0.0, -1.0], [0.0, 1.2]), ([0.0, -0.4], [0.0, 1.2]), ([0.0, -1.9], [0.0, 5.0])]
 ROW = {"sc": {"ng": [0.0, -0.4, -4.0], "ll": [0.0, 1.2, 8.0], "ok": [0, 0, 1], "ed": [1, 1, 0], "glen": 3, "n": 3, "c": 0}, "col": [0.0] * 3, "ch": [0.0] * 3}
 HDR = {lv: E.HEADER[lv] for lv in E.HEADER}
 
 
+def row(ng, ll, col=None, ch=None):
+    return {"sc": {"ng": ng, "ll": ll}, "col": col or [0.0] * len(ng), "ch": ch or [0.0] * len(ng)}
+
+
 class T(unittest.TestCase):
     def test_each_level_picks_its_own_cell(self):
-        self.assertEqual([E.cell_pick(ROW, E.CELL[lv], HDR[lv]) for lv in ("standard", "conservative", "aggressive")], [0, 2, 1])
+        got = {lv: [E.cell_pick(row(ng, ll), E.CELL[lv], HDR[lv]) for ng, ll in LISTS] for lv in ("standard", "conservative", "aggressive")}
+        self.assertEqual(got, {"standard": [0, 1, 1], "conservative": [0, 0, 1], "aggressive": [1, 1, 1]})
+        self.assertEqual(E.CELL, {"standard": (0.7, 2.0, 0.0), "conservative": (0.7, 2.0, 1.0), "aggressive": (1.0, 2.0, 0.1)})
 
     def test_terms_weigh_the_same_at_every_alpha(self):
-        r = {"sc": {"ng": [0.0, -0.5], "ll": [-5.0, -5.0]}, "col": [0.0, 10.0], "ch": [0.0, 0.0]}
-        self.assertEqual(E.cell_pick(r, E.CELL["conservative"], HDR["conservative"]), 0)       # 2 < delta 3 (a doubled term: 4.5)
-        r["col"] = [0.0, 16.0]
-        self.assertEqual(E.cell_pick(r, E.CELL["conservative"], HDR["conservative"]), 1)       # 3.5
+        for lv, cell in E.CELL.items():
+            col_at, ch_at = 2.0 + 4.0 * cell[2], 0.5 + cell[2]
+            pick = lambda col, ch: E.cell_pick(row([0.0, -0.5], [-5.0, -5.0], [0.0, col], [0.0, ch]), cell, HDR[lv])
+            self.assertEqual([pick(col_at - 0.2, 0.0), pick(col_at + 0.2, 0.0)], [0, 1], lv)
+            self.assertEqual([pick(0.0, ch_at - 0.05), pick(0.0, ch_at + 0.05)], [0, 1], lv)
 
     def test_non_finite_col_takes_the_levels_header_triple(self):
         r = {"sc": {"ng": [-10.0, -11.0], "ll": [-5.0, -1.0]}, "col": [0.0, -math.inf], "ch": [0.0, 0.0]}

@@ -10,7 +10,8 @@ arithmetic of experiments/strength-colloq (sc.py `cell_pick`, copied below; that
 Three CLI runs of one set, all with `--colloquial-core` (so every summary tag must end in `+rc`): standard with `--dump --dump-words --rowstats
 --tinylm-scores`, conservative and aggressive (`--rerank-level`) with `--tinylm-scores --rowstats`. Offline side: the standard run's first 8
 candidates (ng, ll, col, ch) and `cell_pick(r, cell, header[level])` with the level's cell, restated here from the README, not read from core:
-  standard (0.5, 2, 0.25), conservative (1.0, 2, 3.0), aggressive (0.5, 2, 0.1); the fallback of a non-finite col is the level's .sjtl header triple.
+  standard (0.7, 2, 0), conservative (0.7, 2, 1), aggressive (1.0, 2, 0.1) (the cells SJ-LM-7 selected, core/src/colloquial.rs); the fallback of a non-finite
+col is the level's .sjtl header triple.
 Compared per row: the scores record's `c` and its right/wrong (`ok[c]`), and the level run's rowstats ok. Standard is compared too (anchor 1).
 Prints counts and row numbers only; never a sentence, context, word or character of a row (so it can run on private sets). Exit 0: 0 differing
 rows at both levels; 1: STOP (a hash, a count, a tag, a candidate/ll mismatch, or any differing row).
@@ -32,9 +33,10 @@ import triage as T  # noqa: E402
 P = Q.P
 TOP_K = 8
 MU, GATE, NU, CAP = P.CONFIRM_CELL[0], P.CONFIRM_CELL[2], 1.0, 4        # mu 0.5, gate T 1.0 (P4d), nu 1.0, c 4 (P5 lex,1.0,4): fixed
-PAIRED_SJTL_SHA256 = "e7c179d85405ec42a40bb22adb58a7485c58f77aed89dfc2ca76a0d89568ed5e"
-# The three cells (strength-colloq README: the standard cell; the R2 registration; the cell R1 selected and R2 repeated).
-CELL = {"standard": (0.5, 2.0, 0.25), "conservative": (1.0, 2.0, 3.0), "aggressive": (0.5, 2.0, 0.1)}
+PAIRED_SJTL_SHA256 = "bbb387d06625d50de24cb1ed4bfc819bc312dbe68dc5d38b2451eed4d44861a8"      # core/src/colloquial.rs PAIRED_TINYLM_SHA256
+# The three cells core/src/colloquial.rs STANDARD / CONSERVATIVE / AGGRESSIVE carry (docs/contracts/sj-lm-7.md section 2.9, research log 2026-10-26); before
+# SJ-LM-7 they were (0.5, 2, 0.25), (1, 2, 3) and (0.5, 2, 0.1).
+CELL = {"standard": (0.7, 2.0, 0.0), "conservative": (0.7, 2.0, 1.0), "aggressive": (1.0, 2.0, 0.1)}
 # The .sjtl header's chat triples (the fallback of a non-finite col); read from the file and checked against these.
 HEADER = {"standard": (0.3, 2.0, 0.25), "conservative": (1.0, 2.0, 3.0), "aggressive": (0.3, 2.0, 0.25)}
 LEVELS = ("conservative", "aggressive")
