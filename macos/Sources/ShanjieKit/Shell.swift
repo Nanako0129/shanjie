@@ -448,9 +448,6 @@ public final class Shell {
     /// syllable the lexicon lacks, are English (default true: `UserDefaults` key `englishKeyOrder`, absent is true, a saved false stays
     /// false); sent to every engine `build()` makes. Only matters while `englishOn`.
     private(set) var englishKeyOrderOn = true
-    /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
-    /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
-    private(set) var englishAvailable = false
     private let fuzzyStore: FuzzyStore
     /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
     /// `build()` makes. Only the bits the core knows are kept.
@@ -512,8 +509,6 @@ public final class Shell {
     static let tinyLMFile = "tinylm.sjtl"
     /// colloquial-term.md section 2.3: the colloquial table (常談 SJ-CL), in Resources next to the other model files.
     static let colloquialFile = "colloquial.sjlm"
-    /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
-    static let englishFile = "english-words.txt"
     private let rerankRunner: RerankRunner
     /// A job is with the runner (section 2.1: one at a time).
     private var rerankRunning = false
@@ -544,9 +539,9 @@ public final class Shell {
     /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
     /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
     var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
-    /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
+    /// The 中英混打（實驗） menu item and settings toggle, likewise: the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
-    var englishEnabled: Bool { englishAvailable && mode == .standard }
+    var englishEnabled: Bool { mode == .standard }
     /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
     /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
     var fuzzyAdjacentEnabled: Bool { mode == .standard }
@@ -879,7 +874,7 @@ public final class Shell {
         englishOn = on
         englishStore.english = on
         defer { changed() }
-        return engine?.setEnglish(on && englishAvailable) // the engine no longer reads the list; until PR 2 retires it a missing list still means "does nothing"
+        return engine?.setEnglish(on)
     }
 
     /// The settings window's 模糊輸入 flags (fuzzy-input section 2.2): stored, and sent to the engine, which recomputes the composition
@@ -1001,7 +996,7 @@ public final class Shell {
 
     /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the
     /// standard layout and the abbreviation composer off. Without it a switch to English first sends the composition (section 2).
-    var shadowOn: Bool { englishOn && englishAvailable && mode == .standard && !abbreviationOn }
+    var shadowOn: Bool { englishOn && mode == .standard && !abbreviationOn }
 
     /// The settings window's 單按 Shift 切換中英: stored; off clears every app's state and the core's (section 1). The snapshot is shown by the owner.
     func applyShiftToggle(_ on: Bool) {
@@ -1027,7 +1022,6 @@ public final class Shell {
         engine = nil  // free the old engine first: only one exists at a time
         rerankAvailable = false
         rerankLevels = 0
-        englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         loadedPackMask = 0
         let packsDir = resources.appendingPathComponent("packs").path
@@ -1065,11 +1059,6 @@ public final class Shell {
                 if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
             }
         }
-        // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
-        // item; only the code is logged.
-        let english = e.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
-        if english != 0 { Log.shell.error("shanjie_engine_load_english failed, code \(english)") }
-        englishAvailable = english == 0
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
@@ -1080,10 +1069,8 @@ public final class Shell {
         if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
             Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
         }
-        // And the English mixing switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off. The engine
-        // no longer reads the word list (zhen-revert section 2.8), but until PR 2 retires the list a bundle without a good one still means
-        // that the switch is greyed and does nothing (`englishAvailable`).
-        if case .failed(let c) = e.setEnglish(englishOn && englishAvailable) {
+        // And the English mixing switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
+        if case .failed(let c) = e.setEnglish(englishOn) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
         // And the overwrite choice (zhen-revert section 3), every time for the same reason.

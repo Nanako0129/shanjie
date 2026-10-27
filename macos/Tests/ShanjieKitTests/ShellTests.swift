@@ -719,7 +719,7 @@ final class ShellTests: XCTestCase {
     }
 
     /// zhen-mixed section 3.2 / 5.3: "中英混打（實驗）" sits after "即時預測" and before "語意校正", is unchecked by default, is stored,
-    /// makes `rust` and Space one English token (zhen-revert; the word list is not read), is sent again to every engine a
+    /// makes `rust` and Space one English token (zhen-revert), is sent again to every engine a
     /// rebuild makes (the word pack switch and a layout switch rebuild it), and a new shell reads the stored on.
     func testEnglishMenuItemTogglesStoresRebuildsAndSurvivesRestart() {
         let store = MemoryEnglishStore(false)  // saved off; the default is on since digits.md A.3.7
@@ -736,8 +736,8 @@ final class ShellTests: XCTestCase {
         XCTAssertGreaterThan(at, try! XCTUnwrap(titles.firstIndex(of: "即時預測")))
         XCTAssertEqual(titles.firstIndex(of: "語意校正"), at + 1)
         XCTAssertEqual(item()?.checked, false, "saved off")
-        XCTAssertEqual(item()?.enabled, true, "the list loaded")
-        // zhen-revert section 2.3: `rust` and Space is one English token in the composition (no window; the word list is not read).
+        XCTAssertEqual(item()?.enabled, true, "standard layout: the item is enabled")
+        // zhen-revert section 2.3: `rust` and Space is one English token in the composition (no window).
         let token = { (c: Controller) -> String in c.type("rust "); XCTAssertEqual(c.panel.items, []); return c.client.marked }
         XCTAssertEqual(token(c), "ㄔㄧ", "off: Space is rule 10, and ㄔㄧ is not a syllable")
         c.press(Keys.esc)
@@ -853,33 +853,6 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "ㄟ", "nothing on screen changes")
         c.type("k")
         XCTAssertEqual(c.client.marked, "ㄜ")
-    }
-
-    /// zhen-mixed section 3.2 / 5.3: a word list that is missing or refused (non-zero from `load_english`) makes `englishAvailable`
-    /// false and greys the item; the stored choice still shows, and the switch does nothing.
-    func testEnglishListThatDoesNotLoadGreysTheItem() throws {
-        let others = Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])
-        let make = { (dir: URL) -> Shell in
-            Shell(resources: dir, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
-        }
-        let missing = try XCTUnwrap(TestData.resources(only: others))
-        let refused = try XCTUnwrap(TestData.resources(only: others))
-        try "AB\n".write(to: refused.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
-        for dir in [missing, refused] {
-            let shell = make(dir)
-            XCTAssertNotNil(shell.engine, "the engine itself is fine")
-            XCTAssertFalse(shell.englishAvailable)
-            let c = Controller(shell)
-            c.session.activate()
-            let entry = c.session.menu.first { $0.action == .toggleEnglish }
-            XCTAssertEqual(entry?.enabled, false)
-            XCTAssertEqual(entry?.checked, true, "greyed, still showing the setting")
-            c.type("rust ")
-            XCTAssertFalse(c.panel.visible, "the switch is on but there is no list")
-            XCTAssertEqual(c.client.marked, "ㄔㄧ")
-        }
-        XCTAssertTrue(make(try XCTUnwrap(TestData.resources())).englishAvailable)
     }
 
     /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" switch is on by default (user decision 2026-10-09), a toggle rebuilds the engine

@@ -1,6 +1,5 @@
 //! English before Chinese (docs/contracts/english-next.md 2 and 3.4): the engine on the real lexicon and model with a small test table.
-//! The key sequence is the contract's: Shift+J, o, e, Space (the run ends and the Space is eaten), g (ㄕ). The word list is the synthetic
-//! eval/golden/english-tiny.txt, as in the other English engine tests. Key script: whitespace separated, `_` Space, `S-x` Shift+x, a
+//! The key sequence is the contract's: Shift+J, o, e, Space (the run ends and the Space is eaten), g (ㄕ). Key script: whitespace separated, `_` Space, `S-x` Shift+x, a
 //! single character is that keycap.
 use core::engine::*;
 use core::english_next::EnglishTable;
@@ -47,12 +46,11 @@ fn shared() -> &'static Shared {
     })
 }
 
-/// Standard layout, the model, the word list and the switch on; the table (`with_table`) and the digit table (`with_digits`).
+/// Standard layout, the model and the switch on; the table (`with_table`) and the digit table (`with_digits`).
 fn make(with_table: bool, with_digits: bool) -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
-    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     if with_table {
         e.set_english_next(Some(s.table.clone()));
@@ -250,7 +248,7 @@ fn decoding_is_the_same_with_and_without_the_table() {
 }
 
 /// zhen-revert section 2.3: typed in lower case, j o e is not Chinese either: `e` (ㄍ) is in a column before the one `o` (ㄟ) holds, so it
-/// reverts (b) to the raw keys, and Space makes the token `joe` (no word list is read). Zhen-inline 1.3 kept it as Zhuyin, and the
+/// reverts (b) to the raw keys, and Space makes the token `joe`. Zhen-inline 1.3 kept it as Zhuyin, and the
 /// first test's token needed Shift.
 #[test]
 fn lower_case_joe_reverts_to_the_keys() {

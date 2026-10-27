@@ -1,7 +1,7 @@
 //! zhen-revert engine tests (docs/contracts/zhen-revert.md section 5.1): the direct revert to the raw keys (an overwrite, a key
 //! out of column order, a syllable the lexicon lacks), the English run and its keys, the tone-key split, Esc back to the Zhuyin, the
 //! short-word items at the end of the candidate list, the two switches, and the English token itself (zhen-inline sections 1.0-1.3h,
-//! which this contract keeps), on the real lexicon. The English word list is loaded in `eng()` and never read (zhen-revert section 2.8).
+//! which this contract keeps), on the real lexicon.
 //!
 //! Key script, whitespace separated: a single character is that keycap, `_` Space, `Enter`, `Esc`, `BS` Backspace, `Left`,
 //! `Right`, `Down`, `S-Enter` and `S-,` with Shift, `Cmd-BS` with Command.
@@ -18,18 +18,13 @@ use std::sync::{Arc, OnceLock};
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
-fn tiny_list() -> PathBuf {
-    root().join("eval/golden/english-tiny.txt")
-}
 fn real() -> Arc<Lexicon> {
     static L: OnceLock<Arc<Lexicon>> = OnceLock::new();
     L.get_or_init(|| load_lexicon(&root().join("data/lexicon")).unwrap()).clone()
 }
-/// Standard layout, English mixing on, the three switches at their defaults. The synthetic word list is loaded all the same: the
-/// engine does not read it (zhen-revert section 2.8), and a test that passes with it passes without.
+/// Standard layout, English mixing on, the three switches at their defaults.
 fn eng() -> Engine {
     let mut e = Engine::with_lexicon(real(), Layout::Standard);
-    e.load_english(&tiny_list()).unwrap();
     e.set_english(true).unwrap();
     e
 }
@@ -1455,7 +1450,6 @@ fn eten_abbreviation_and_off_are_bitwise_today() {
     let build = |kind: &str, on: bool| {
         let layout = if kind == "eten" { Layout::Eten } else { Layout::Standard };
         let mut e = Engine::with_lexicon(real(), layout);
-        e.load_english(&tiny_list()).unwrap();
         if kind == "abbr" {
             e.set_abbreviation(true).unwrap();
         }
