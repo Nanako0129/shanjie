@@ -5,7 +5,9 @@ Sources (each an optional path; the raw input, read BEFORE the cleaning that dro
   --wiki DUMP.bz2        first --wiki-limit (200,000) articles, x1, article. build_counts.article_sentences (entity unescape, templates, markup,
                          sentence split, convert without TWPhrases as SJ-LM-7 counts), so the Han-only step of article_runs is skipped.
   --colloquial FILE      colloquial-train.txt (build_tune.py), one sentence per line, x5, sentence.
-  --g0v FILE             the g0v #rand0m source file as UTF-8 text, one message per line, x5, message.
+  --g0v FILE             the g0v #rand0m source file as UTF-8 text, x5, message. Either one message per line, or (when the first non-empty line
+                         has a tab) g0v_clean.py's `ts<TAB>sentence` lines, where consecutive lines with the same ts are one message (one
+                         unit, one spread count) and the ts column is not text.
   --ptt DIR              <board>/<article>.html as ptt_clean parses it (body, merged pushes; no p2clean). Pushes x5, bodies x1, unit = board.
                          Only articles with sha256(id)[0] % 8 != 0 (7/8) count; the rest is the measurement bucket of section 3.
   --subs FILE           OPUS raw/zh_tw.zip (read by clean_subs.read_lines: one blank line after each film id; plain text with blank lines
@@ -25,6 +27,10 @@ PTT boards alone, is the account of any push in the snapshot (lower-cased) and h
 top 20 per e by weighted count then bytes. Over 2,000,000 bytes the w cut goes 5, 10, 20 and the first size that fits is written.
 
   python3 tools/build_english_next.py --lexicon FILE... --out FILE [--wiki DUMP] [--colloquial FILE] [--g0v FILE] [--ptt DIR] [--subs FILE] [--jobs N]
+                                      [--report-e WORD[:W]]...
+--report-e WORD (repeatable) prints after counting, whether or not WORD is in the table: its unweighted events, weighted N(e), PTT boards,
+units per other source, blocked by the account rule or not, in the table or not, and its top w by weighted count with unweighted and weighted
+counts (WORD:W adds W to the list). Subtitle zips are parsed in the workers (each opens the zip and reads its films' members), not by the feeder.
 """
 import argparse
 import collections
@@ -34,8 +40,10 @@ import hashlib
 import itertools
 import multiprocessing as mp
 import os
+import html
 import re
 import sys
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for _p in ("experiments/sj-lm-7", "experiments/s2", "tools", "reference/proto"):
@@ -168,9 +176,20 @@ def work(batch):
     if kind == "wiki":
         for raw in items:
             a.unit("wiki", _G.get("sentences", wiki_sentences)(raw), words, maxlen)
-    elif kind in ("colloquial", "g0v"):
+    elif kind == "colloquial":
         for line in items:
             a.unit(kind, [line], words, maxlen)
+    elif kind == "g0v":
+        for msg in items:
+            a.unit(kind, msg, words, maxlen)
+    elif kind == "subzip":
+        path, films = items
+        z = _G.setdefault("zips", {}).get(path) or _G["zips"].setdefault(path, zipfile.ZipFile(path))
+        for names in films:
+            film = [s for s in raw_film_lines(z, names) if s.strip()]
+            if film:
+                a.unit("subs", [s for line in film for s in sub_sentences(line)], words, maxlen)
+                a.films += 1
     elif kind == "subs":
         for film in items:
             a.unit("subs", [s for line in film for s in sub_sentences(line)], words, maxlen)
@@ -203,6 +222,39 @@ def lines_of(path):
             yield line.rstrip("\n").removesuffix("\r")
 
 
+def raw_film_lines(z, names):
+    """The lines of one film of the OPUS raw zip, as clean_subs.read_raw_zip yields them (without the blank line after the film)."""
+    for name in names:
+        for s in CS.RAW_S.findall(z.read(name).decode("utf-8", errors="replace")):
+            s = html.unescape(CS.RAW_TIME.sub("", s)).strip()
+            if s:
+                yield s
+
+
+def raw_zip_films(path):
+    """[[member names]] per film id, in the order clean_subs.read_raw_zip reads them."""
+    with zipfile.ZipFile(path) as z:
+        films = collections.defaultdict(list)
+        for name in sorted(n for n in z.namelist() if n.endswith(".xml")):
+            films[name.split("/")[-2]].append(name)
+    return list(films.values())
+
+
+def g0v_messages(path):
+    """Messages of a g0v file as lists of texts: one per line, or by `ts<TAB>sentence` with the consecutive lines of one ts as one message."""
+    lines = (l for l in lines_of(path) if l.strip())
+    first = next(lines, None)
+    if first is None:
+        return
+    lines = itertools.chain([first], lines)
+    if "\t" not in first:
+        for l in lines:
+            yield [l]
+        return
+    for _, grp in itertools.groupby((l.split("\t", 1) for l in lines), key=lambda p: p[0]):
+        yield [p[1] for p in grp if len(p) > 1]
+
+
 def films_of(path):
     """Subtitle lines grouped into films: the runs of non-empty lines between blank lines (clean_subs.clean). clean_subs.read_lines reads the
     OPUS raw zip (one blank line after each film id) as well as plain text."""
@@ -226,16 +278,21 @@ def batches(src, size=BATCH):
     if src.get("wiki"):
         import build_counts as bc
         yield from chunks("wiki", bc.articles(src.get("wiki_limit", WIKI_LIMIT), src["wiki"]), 64)
-    for kind in ("colloquial", "g0v"):
-        if src.get(kind):
-            yield from chunks(kind, (l for l in lines_of(src[kind]) if l.strip()), 2000)
+    if src.get("colloquial"):
+        yield from chunks("colloquial", (l for l in lines_of(src["colloquial"]) if l.strip()), 2000)
+    if src.get("g0v"):
+        yield from chunks("g0v", g0v_messages(src["g0v"]), 2000)
     if src.get("ptt"):
         yield from chunks("ptt", sorted(glob.glob(os.path.join(src["ptt"], "*", "*.html"))), 64)
-    if src.get("subs"):
+    if src.get("subs") and src["subs"].endswith(".zip"):
+        films = raw_zip_films(src["subs"])
+        for i in range(0, len(films), 16):
+            yield "subzip", (src["subs"], films[i:i + 16])
+    elif src.get("subs"):
         yield from chunks("subs", films_of(src["subs"]), 16)
 
 
-def build(lexicon, src, jobs=1, min_events=MIN_EVENTS, min_boards=MIN_BOARDS, min_units=MIN_UNITS, min_w=MIN_W, account_n=ACCOUNT_N, max_bytes=MAX_BYTES):
+def build(lexicon, src, jobs=1, min_events=MIN_EVENTS, min_boards=MIN_BOARDS, min_units=MIN_UNITS, min_w=MIN_W, account_n=ACCOUNT_N, max_bytes=MAX_BYTES, report_e=()):
     """(text, report). The size fallback raises the e->w cut along W_STEPS from `min_w` on; None as the text when no step fits."""
     total = Acc()
     if jobs > 1:
@@ -248,13 +305,14 @@ def build(lexicon, src, jobs=1, min_events=MIN_EVENTS, min_boards=MIN_BOARDS, mi
             total.merge(work(b))
     if src.get("subs") and total.films < 2:   # contract 1: fewer than two films means the wrong input (the mono file has no blank line)
         raise SystemExit("STOP: the subtitle input shows fewer than two films (use the OPUS raw/zh_tw.zip)")
-    keep, blocked = [], 0
+    keep, blocked, why = [], 0, set()
     for e, n in total.ev.items():
         boards, units = len(total.boards.get(e, ())), sum(c[e] for c in total.units.values())
         if n < min_events or not (boards >= min_boards or units >= min_units):
             continue
         if units < min_units and e in total.accounts and n < account_n:
             blocked += 1
+            why.add(e)
             continue
         keep.append(e)
     keep.sort()
@@ -270,7 +328,16 @@ def build(lexicon, src, jobs=1, min_events=MIN_EVENTS, min_boards=MIN_BOARDS, mi
         head.append(f"# source ptt sha256 {hashlib.sha256(snap.encode()).hexdigest()} articles {len(total.snap)}")
     head += [f"# lexicon {os.path.basename(f)} sha256 {sha256_file(f)}" for f in lexicon]
     steps = [min_w] + [s for s in W_STEPS[1:] if s > min_w]
-    report = {"e": len(keep), "blocked_by_account": blocked, "events_by_source": dict(total.by_source), "films": total.films}
+    kept, lines = set(keep), []
+    for spec in report_e:
+        e, _, force = spec.partition(":")
+        e = e.lower()
+        tops = sorted(((w, total.wev[(e, w)], total.wt_w[(e, w)]) for (ee, w) in total.wev if ee == e), key=lambda x: (-x[2], x[0].encode()))
+        shown = tops[:MAX_W] + [t for t in tops[MAX_W:] if t[0] == force]
+        lines.append(f"{e}\tevents {total.ev[e]}\tN {total.wt_e[e]}\tptt_boards {len(total.boards.get(e, ()))}"
+                     f"\tunits {dict((k, c[e]) for k, c in total.units.items())}\tblocked_by_account {int(e in why)}\tin_table {int(e in kept)}")
+        lines += [f"{e}\t{w}\tevents {n}\tN {wt}" for w, n, wt in shown]
+    report = {"report_e": lines, "e": len(keep), "blocked_by_account": blocked, "events_by_source": dict(total.by_source), "films": total.films}
     for k in steps:
         rows, n_e = [], 0
         for e in keep:
@@ -295,13 +362,15 @@ def main():
     ap.add_argument("--g0v")
     ap.add_argument("--ptt")
     ap.add_argument("--subs")
+    ap.add_argument("--report-e", action="append", default=[])
     ap.add_argument("--jobs", type=int, default=os.cpu_count())
     a = ap.parse_args()
     src = {k: getattr(a, k) for k in ("wiki", "colloquial", "g0v", "ptt", "subs")}
     if not any(src.values()):
         sys.exit("error: give at least one source")
     src["wiki_limit"] = a.wiki_limit
-    text, report = build(a.lexicon, src, a.jobs)
+    text, report = build(a.lexicon, src, a.jobs, report_e=a.report_e)
+    print("\n".join(report.pop("report_e")))
     print(report)
     if text is None:
         sys.exit("error: the table is over 2 MB at every e->w cut; stop and report")

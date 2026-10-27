@@ -289,6 +289,42 @@ class Build(unittest.TestCase):
         out2, _ = B.build([self.lex], {"ptt": self.ptt, "g0v": g, "subs": s}, jobs=2, **LOOSE)
         self.assertEqual(out2, out)
 
+    def test_g0v_ts_format_is_one_message_per_ts_and_a_plain_file_still_works(self):
+        g = self.text_file("g.txt", ["1\tAmy好", "1\tAmy好", "2\tAmy要", "2\t沒有", "3\tZed好"])
+        out, rep = B.build([self.lex], {"g0v": g}, **{**LOOSE, "min_boards": 99, "min_units": 2})
+        self.assertEqual(set(es(out)), {"amy"})                                      # amy: 2 messages (ts 1 and 2), not 3 lines; zed: 1
+        self.assertEqual(rep["events_by_source"], {"g0v": 4})
+        self.assertEqual(es(out), {"amy": 15})
+        g2 = self.text_file("g2.txt", ["Amy好", "Amy好", "Zed好"])                    # no tab: one message per line, as before
+        out, _ = B.build([self.lex], {"g0v": g2}, **{**LOOSE, "min_boards": 99, "min_units": 2})
+        self.assertEqual(set(es(out)), {"amy"})
+
+    def test_a_raw_zip_gives_the_same_table_through_the_workers_as_through_the_feeder(self):
+        z = os.path.join(self.dir, "zh_tw.zip")
+        doc = '<?xml version="1.0"?>\n<document id="1">\n<s id="1"><time id="T1S" value="00:00:01,000" />Joe好 &amp; Amy要</s>\n<s id="2">Joe是要對決</s>\n</document>\n'
+        with zipfile.ZipFile(z, "w") as f:
+            for i in range(1, 40):
+                f.writestr(f"OpenSubtitles/raw/zh_tw/2000/{i}/{i}a.xml", doc)
+                f.writestr(f"OpenSubtitles/raw/zh_tw/2000/{i}/{i}b.xml", doc.replace("Amy", "Zed"))
+            f.writestr("OpenSubtitles/raw/zh_tw/2000/99/99.xml", "<document></document>")      # a film with no sentence
+        import clean_subs as CS
+        flat = os.path.join(self.dir, "flat.txt")
+        open(flat, "w", encoding="utf-8").write("\n".join(CS.read_lines(z)) + "\n")
+        src = lambda p: B.build([self.lex], {"subs": p}, jobs=2, **LOOSE)
+        (a, ra), (b, rb) = src(z), src(flat)
+        drop = lambda t: "".join(l for l in t.splitlines(True) if not l.startswith("# source subs"))
+        self.assertEqual(drop(a), drop(b))
+        self.assertEqual((ra["films"], rb["films"], ra["events_by_source"]), (39, 39, rb["events_by_source"]))
+        self.assertGreater(es(a)["joe"], 39)
+
+    def test_report_e_names_an_e_that_is_not_in_the_table(self):
+        g = self.text_file("g.txt", ["Joe是要對決", "Joe好", "Joe好"])
+        _, rep = B.build([self.lex], {"g0v": g}, **{**LOOSE, "min_events": 99}, report_e=["Joe:是要對決", "nobody"])
+        l = rep["report_e"]
+        self.assertEqual(l[0], "joe\tevents 3\tN 15\tptt_boards 0\tunits {'g0v': 3}\tblocked_by_account 0\tin_table 0")
+        self.assertEqual(l[1:3], ["joe\t好\tevents 2\tN 10", "joe\t是要對決\tevents 1\tN 5"])
+        self.assertTrue(l[3].startswith("nobody\tevents 0\tN 0"))
+
 
 class Words(unittest.TestCase):
     def test_load_words_reads_both_formats_and_skips_comments_and_control_rows(self):
