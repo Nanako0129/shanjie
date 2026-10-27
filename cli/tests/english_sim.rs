@@ -141,3 +141,44 @@ fn digits_backspace_repair_reads_the_screen() {
     assert_eq!(c[19..], ["535.000", "570.000"], "{c:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Section 4.1: a row whose retyping keeps reverting is stopped, not the run. The real lexicon has no syllable that reverts when typed clean,
+/// so the row is made to keep reverting with `--retries 0` (a revert is stopped at once): with p 0.5 and the overwrite repair about half
+/// of 60 identical rows revert. The run exits 0, every row is still in the figures, and stderr names each stopped row (number, seed and
+/// kind, no text) and gives the total; the stdout columns are the same 15 as ever.
+#[test]
+fn a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-stuck", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|挑|ㄊㄧㄠ\n".repeat(60)).unwrap();
+    let rows = rows.to_str().unwrap();
+    let go = |retries: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+            .arg("english-sim")
+            .args(["--words", LIST, "--rows", rows, "--p", "0.5", "--repair", "overwrite", "--seed", "1", "--repeat", "1", "--retries", retries])
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+    let (ok, stdout, stderr) = go("0");
+    assert!(ok, "the run exits 0: {stderr}");
+    let cols: Vec<&str> = stdout.trim_end().split('\t').collect();
+    assert_eq!(cols.len(), 15, "{stdout}");
+    assert_eq!(cols[1..3], ["60", "60"], "every row is in the figures");
+    let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with("row ")).collect();
+    let summary: Vec<&str> = stderr.lines().filter(|l| l.starts_with("stopped ")).collect();
+    assert!(!lines.is_empty() && lines.len() < 60, "premise: some rows stop and some do not: {stderr}");
+    assert!(lines.iter().all(|l| l.contains("of seed 1") && l.contains("(a)") && l.contains("was stopped") && !l.contains('挑')), "{stderr}");
+    assert_eq!(summary, [format!("stopped {} rows over 1 seeds (their counts so far stay in the figures, their English left is not counted)", lines.len())]);
+    // The rows after a stopped one are typed: some row numbered after the first stopped row did not stop.
+    let stopped: Vec<usize> = lines.iter().map(|l| l.split_whitespace().nth(1).unwrap().parse().unwrap()).collect();
+    assert!((stopped[0] + 1..=60).any(|n| !stopped.contains(&n)), "{stopped:?}");
+    // Each stopped row reverted once (a): the figure is exactly the number of stopped rows per 1000 syllables.
+    let a: f64 = cols[5].parse().unwrap();
+    assert!((a - lines.len() as f64 * 1000.0 / 60.0).abs() < 0.01, "{a} vs {}", lines.len());
+    // The same run with the default retries stops nothing and writes nothing about rows.
+    let (ok, stdout, stderr) = go("3");
+    assert!(ok && !stderr.contains("stopped") && stdout.split('\t').count() == 15, "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

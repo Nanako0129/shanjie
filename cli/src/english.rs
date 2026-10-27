@@ -3,7 +3,7 @@
 //! `set_english_key_order`) and asks it what it did after every key (`Engine::english_reverted`, `Engine::english_split`): the rules
 //! are the engine's, never repeated here.
 //!
-//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5]
+//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--retries 3]
 //!               [--overwrite on|off] [--key-order on|off] [--digits [--lm FILE]]
 //!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off]
 //!
@@ -53,7 +53,10 @@
 //!   token at once, Backspace and then Esc (the token becomes a run, the run goes) - except that a one-letter token is taken whole by the
 //!   Backspace, so no Esc follows (it would clear the earlier syllables too: the simulator reads the output's run length). The syllable is then typed again from the start without a
 //!   mistake, so the row goes on as if the mistake had been caught in time. A retyping that reverts again is counted and undone again
-//!   (it cannot happen without a wrong key; after three tries the run stops instead of looping). The model repairs a wrong key at once, so a
+//!   (it cannot happen without a wrong key; after `--retries` tries (default 3) the ROW is stopped, section 4.1: it is counted, one stderr
+//!   line names its number, seed and kind of revert (no text), a summary line gives the total, and the run goes on with the next row; the
+//!   stdout columns do not change, and the stopped row's counts so far stay in them. `--retries 0` stops a row at its first revert, which
+//!   is how the tests make a row that keeps reverting). The model repairs a wrong key at once, so a
 //!   revert at a tone key or Space (c) is not expected: the tone-key cost of (c) is not measured here (zhen-revert section 4.1).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
@@ -69,8 +72,10 @@ const LAYOUT: Layout = Layout::Standard;
 /// The most Backspaces one repair presses (a composition holds `MAX_SYLLABLES` units at most, and each press takes one symbol or one unit; the
 /// 24 over it are the margin the bound had at 40 units: 64).
 const MAX_REPAIR_BACKSPACES: u32 = MAX_SYLLABLES as u32 + 24;
-/// The most times one syllable is typed again after a revert before the run stops (a clean typing cannot revert).
+/// The most times one syllable is typed again after a revert before the row is stopped (a clean typing cannot revert; `--retries`).
 const MAX_RETRIES: usize = 3;
+/// The error a stopped row carries (`Sim::stuck` says which kind kept coming back); the run catches it, counts the row, and goes on.
+const STUCK: &str = "a revert kept coming back on a typing without mistakes";
 /// The words `probe` lines are printed for (a fixed public list, zhen-revert section 4.1).
 const PROBES: [&str; 18] = ["ok", "ls", "cd", "mv", "pr", "ai", "ui", "go", "cp", "cup", "npm", "gta6", "rdr2", "poe2", "mp3", "a4", "i7", "s7"];
 
@@ -130,6 +135,9 @@ struct Sim {
     english_final: u64,
     /// The symbols of the syllable being typed up to the key in progress: what a retyping types again.
     want: Vec<char>,
+    /// How many times a syllable is typed again before the row is stopped, and the kind of revert that stopped it (`STUCK`).
+    max_retries: usize,
+    stuck: Option<Revert>,
     /// `--digits`: the engine is the digit-feature one; the counters below are read after every key.
     digits: bool,
     /// `--digits` (digits.md A.10): the preedit after the latest key, and the preedit when the syllable began; the Backspace repair reads
@@ -158,6 +166,8 @@ impl Sim {
             splits: 0,
             english_final: 0,
             want: Vec::new(),
+            max_retries: MAX_RETRIES,
+            stuck: None,
             digits: false,
             last_preedit: String::new(),
             base_preedit: String::new(),
@@ -196,7 +206,7 @@ impl Sim {
     /// are typed again without a mistake (a retyping that reverts again is undone again, three times at most). `space`: the key was the
     /// Space that made the token at once.
     fn recover(&mut self, mut kind: Revert, mut space: bool) -> Result<(), String> {
-        for _ in 0..MAX_RETRIES {
+        for _ in 0..self.max_retries {
             if kind == Revert::Missing && space {
                 self.raw(Key::new(KeyKind::Backspace))?; // the token becomes a run of one letter less
                 if self.last_run > 0 {
@@ -218,7 +228,8 @@ impl Sim {
                 Some(k) => (kind, space) = (k, false),
             }
         }
-        Err("a revert kept coming back on a typing without mistakes".into())
+        self.stuck = Some(kind);
+        Err(STUCK.into())
     }
 
     /// One key of the typing. `Ok(true)` when it reverted and the recovery has run: the syllable then stands as typed without a mistake
@@ -313,13 +324,31 @@ impl Sim {
             Some(mark) => Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0),
             None => Key::new(KeyKind::Space),
         };
-        for _ in 0..MAX_RETRIES {
+        let mut last = None;
+        for _ in 0..self.max_retries.max(1) {
             match self.raw(end)? {
                 None => return Ok(()),
-                Some(kind) => self.recover(kind, tone.is_none())?,
+                Some(kind) => {
+                    last = Some(kind);
+                    self.recover(kind, tone.is_none())?;
+                }
             }
         }
-        Err("a revert kept coming back on the end of a syllable typed without mistakes".into())
+        self.stuck = last;
+        Err(STUCK.into())
+    }
+
+    /// One row of the rows file: its syllables, then Enter. A row whose typing keeps reverting returns `STUCK`.
+    fn row(&mut self, row: &[(Vec<(usize, char)>, Option<char>)]) -> Result<(), String> {
+        self.engine.reset(ResetMode::Discard);
+        self.last_preedit.clear();
+        self.stuck = None;
+        for (syms, tone) in row {
+            self.syllable(syms, *tone)?;
+        }
+        self.raw(Key::new(KeyKind::Enter))?;
+        self.english_final += self.last_commit.chars().any(|c| c.is_ascii_alphabetic()) as u64;
+        Ok(())
     }
 }
 
@@ -377,6 +406,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut digits, mut lm) = (false, None::<PathBuf>);
     let mut switches = Switches { overwrite: true, key_order: true };
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
+    let mut retries = MAX_RETRIES;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -398,6 +428,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             }
             "--seed" => seed = val()?.parse().map_err(|_| "bad --seed")?,
             "--repeat" => repeat = val()?.parse().map_err(|_| "bad --repeat")?,
+            "--retries" => retries = val()?.parse().map_err(|_| "bad --retries")?,
             _ => return Err("unknown argument".into()),
         }
     }
@@ -442,7 +473,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if syllables == 0 {
         return Err("no row to simulate".into());
     }
-    let (mut keys, mut typos) = (0u64, 0u64);
+    let (mut keys, mut typos, mut stopped) = (0u64, 0u64, 0u64);
     let mut per_1000: [Vec<f64>; 5] = Default::default(); // a, b, c, split, english_final
     let (mut final_1000, mut shown_1000, mut extra_1000) = (Vec::new(), Vec::new(), Vec::new());
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
@@ -450,14 +481,18 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         let engine = if digits { engine_digits(root, &lm, &words, switches)? } else { engine_with(&lex, &words, switches)? };
         let mut sim = Sim::new(engine, p, repair, seed.wrapping_add(i));
         sim.digits = digits;
-        for row in &parsed {
-            sim.engine.reset(ResetMode::Discard);
-            sim.last_preedit.clear();
-            for (syms, tone) in row {
-                sim.syllable(syms, *tone)?;
+        sim.max_retries = retries;
+        for (n, row) in parsed.iter().enumerate() {
+            match sim.row(row) {
+                Ok(()) => {}
+                // Section 4.1: three retypings that revert again stop that row and go on with the next. Row number and kind only, no text (R2).
+                Err(e) if e == STUCK => {
+                    stopped += 1;
+                    let kind = sim.stuck.map_or("?", |k| ["a", "b", "c"][k as usize]);
+                    eprintln!("row {} of seed {}: a revert ({kind}) kept coming back; the row was stopped", n + 1, seed.wrapping_add(i));
+                }
+                Err(e) => return Err(e),
             }
-            sim.raw(Key::new(KeyKind::Enter))?;
-            sim.english_final += sim.last_commit.chars().any(|c| c.is_ascii_alphabetic()) as u64;
         }
         let per = |n: u64| n as f64 * 1000.0 / syllables as f64;
         for (v, n) in per_1000.iter_mut().zip([sim.reverts[0], sim.reverts[1], sim.reverts[2], sim.splits, sim.english_final]) {
@@ -477,6 +512,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if digits {
         let ((fmean, fmax), (smean, smax), (emean, emax)) = (mean_max(&final_1000), mean_max(&shown_1000), mean_max(&extra_1000));
         cols += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}\t{emean:.3}\t{emax:.3}");
+    }
+    if stopped > 0 {
+        eprintln!("stopped {stopped} rows over {repeat} seeds (their counts so far stay in the figures, their English left is not counted)");
     }
     println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{typos}{cols}", parsed.len());
     Ok(())
