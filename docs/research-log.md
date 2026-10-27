@@ -9524,3 +9524,10 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **實作**：`ManualSet` 在 `Lexicon::parse_with` 讀疊加層時收成（第 4 欄 `manual`，鍵是詞與讀音），引擎與 CLI 共用；`tinylm::manual_mask` 是唯一決定哪些候選被遮掉的函式；`TinyLm::rerank`、`TinyLm::rerank_colloquial`（含 `guarded_pick` 的退回路徑）都收 `&ManualSet`；兩種設定的 `RerankJob` 都帶 `Arc<ManualSet>`；`--tinylm-scores` 每列多一個 `masked` 欄位（被遮掉的索引，沒有就是空）；`tools/triage.py` 的選字一致性檢查與 D2 細分套用同樣的遮罩。
 - **`manual-words-rows.txt` 在最終檔上**（15 列，`--context --packs acg --tinylm`，量於 2026-10-27）：書面第 4 列在標準與積極檔由 米亞哥 變回 米雅歌（保守檔本來就對）；聊天（不論有沒有 `--colloquial-core`）沒有這一類的缺；剩下的缺都不是重排造成的（`--tinylm-scores` 的 `c` 是 0）：書面第 8 列 `米雅歌唱得很好` 三檔都缺（n-gram 第一名已經是 米亞歌唱得很好），聊天第 8 列在保守檔、不帶常談表時缺（n-gram 第一名含 米雅歌，但讀成「唱的」；遮罩把另外六個候選擋掉）。`cli/tests/golden.rs::manual_words_come_first_in_the_shipping_setting` 照這個寫死。
 - **對基準 CLI（量測用 CLI，帶研究旗標）的差異，Mac，公開集合**：dev302、打字測驗、錯字回報、動漫五集、名單三集，聊天三檔＋書面三檔共 66 個組合，`--rowstats`、`--dump` 與整行摘要逐位元組相同（66／66），沒有一列有變：這些集合的 n-gram 第一名都不含 `manual` 詞。`manual-words-rows.txt`（`--packs acg,it`，聊天帶 `--colloquial-core`）有變的列：書面標準與積極第 4 列（變對）；聊天保守、標準、積極第 8 列（基準 CLI 在這一列答錯、現在答對）；書面保守沒有差異。
+
+## 2026-10-27：通語 SJ-LM-7（規模待定）PR 2 修訂一的量測結果（重排不換掉手動加的詞；登記 `1493153f`）
+
+- GCP 同一台 VM。基準 `353c3dd9…` 與修訂一 `4432e942…` 都從 `feat/sj7-pr2` 建，讀同一個模型資料夾（B6、聊天連文 `03891d5a`、書面連文 `7ec1869b`、書面 KN β 0.75）、會意 `bbb387d0`、聊天加常談 C1；出貨旗標 `--context --packs acg,it`。MAIN（現行出貨）同一輪一起跑，有變的列才需要用它。每次執行核對摘要行的標記（`+tl:bbb387d0`、聊天 `+colloq:81c2470d+rc`、`+tri:03891d5a`、沒有 β0.75；書面 `+tri:7ec1869b`、KN β0.75、沒有常談）。
+- **正向對照**（先跑）：manual-words 第 4 列書面標準檔，基準錯（0）、修訂一對（1），遮罩在量的那一版確實有作用。
+- **結果**：六個單位（聊天、書面 × 保守、標準、積極）、18 個聊天集合與 17 個書面集合（discordtune、cvtune-clean、wikitune-clean、dev302、打字測驗、錯字回報、動漫五集、名單三集、網路用語三集、資訊詞包、輕聲），**修訂一對基準逐列相同，0 組有差異**。照登記，§2.9 與 §2.10 的判讀照舊成立。
+- 有變的只在 manual-words 集合本身（Mac 上量的，見上一節）：書面第 4 列在標準、積極檔變對；聊天第 8 列三檔變對。書面第 8 列「米雅歌唱得很好」三檔仍錯，那一列 n-gram 第一名就是「米亞歌…」，不是重排換掉的。
