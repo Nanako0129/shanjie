@@ -115,16 +115,16 @@ python3 experiments/derisk-1015/e1/entropy_prune.py --tri <T>/tri-t1.sjt3 --lm <
     --keep 7700964,3850000,1900000,950000 --labels K7.7M,K3.85M,K1.9M,K0.95M --out-dir <P>                                  # 寫 <P>/tri-<標籤>.sjt3 與 .json
 ```
 
-量測：把 `<P>/tri-<標籤>.sjt3` 複製成一個資料夾裡的 `trigram.sjt3`，旁邊放該臂的 `bigram.sjlm`、`classes.sjc`、`kn.sjkn`，`shanjie-eval --lm <資料夾>/bigram.sjlm …`：
+量測：把 `<P>/tri-<標籤>.sjt3` 複製成一個資料夾裡的表，旁邊放該臂的 `bigram.sjlm`、`classes.sjc`、`kn.sjkn`，`shanjie-eval --lm <資料夾>/bigram.sjlm …`。每個設定只讀自己的表（`docs/contracts/sj-lm-7-pr2.md`），兩種設定都開 KN，書面的 β 固定 0.75：
 
 ```sh
-shanjie-eval --lm <資料夾>/bigram.sjlm --profile formal …                      # 書面：有表就用（KN 關）
-shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat …                        # 聊天：和以前一樣不讀表
-shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat --chat-tri on-kn …       # 實驗：聊天也用表，KN 開（摘要行有 +kn 與 +tri）
-shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat --chat-tri off-kn …      # 實驗：聊天也用表，KN 關
+shanjie-eval --lm <資料夾>/bigram.sjlm --profile formal …   # 資料夾裡的 trigram.sjt3；摘要行有 +kn:…:β0.75 與 +tri
+shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat …     # 資料夾裡的 trigram-chat.sjt3；摘要行有 +kn:…:β1 與 +tri
 ```
 
-`--chat-tri` 只接受 `--profile chat`、不能和 `--no-tri` 並用、資料夾裡沒有 `trigram.sjt3` 時報錯（否則會靜默量到 bigram）。核心的開關是 `Lm::set_chat_tri(Some(kn))`，預設關，App 與 FFI 不呼叫。注意：維基切片的記憶體是 32 份各自的 tri 計數表，先用 `--articles 2000 --shard 0/32` 量一份的尖峰再決定同時跑幾份；`count.py` 沒有 `--holdout-guard`（`build_counts.py` 有），若 bigram 計數開了守門，連文要先確認輸入已經濾過。
+（SJ-LM-7 的選擇階段用過研究旗標：聊天 `--chat-tri on-kn｜off-kn`，書面 `--formal-kn --kn-beta 0.75`，在分支 `exp/sj7-trigram` 的 `7808c7b4`；PR 2 把它們的效果變成出貨行為並拿掉旗標，要重現那些量測得用那個 commit 建的 CLI。）
+
+注意：維基切片的記憶體是 32 份各自的 tri 計數表，先用 `--articles 2000 --shard 0/32` 量一份的尖峰再決定同時跑幾份；`count.py` 沒有 `--holdout-guard`（`build_counts.py` 有），若 bigram 計數開了守門，連文要先確認輸入已經濾過。
 
 ## 輸入表（契約 §2.4；每一列的 SHA-256 在輸入凍結時填）
 

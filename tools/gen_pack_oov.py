@@ -62,7 +62,7 @@ def decode_lines(lex_path):
             for start in ("<s>", L.history(LEFT, lm)):
                 for profile in ("chat", "formal"):
                     for i, s in enumerate(SENTENCES, 1):
-                        for r, (sc, ws) in enumerate(L.decode(lex, s.split(), lm, profile, start=start), 1):
+                        for r, (sc, ws) in enumerate(L.decode(lex, s.split(), L.profile_lm(lm, profile), profile, start=start), 1):
                             lines.append(f"{side}\t{pack}\t{start}\t{profile}\t{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")
     return lines
 
