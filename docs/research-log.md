@@ -9471,3 +9471,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **六個單位的最後結果**：聊天標準 (0.7, 2, 0)、保守 (0.7, 2, 1)、積極 (1.0, 2, 0.1)（`colloquial.rs` 的 cell 常數）；書面標準 (0.5, 2, 0.5)、保守 (0.5, 2, 1)、積極＝標準（`.sjtl` 檔頭）。六個都過出貨標準（dev302 書面照 §2.8 只報）。
 - 還沒做：延遲與記憶體（閒置窗）、chatjudge-3 確認一發（最早 2026-11）、fresh verifier 抽查與保留集、PR 2。
 
+
+## 2026-10-27：通語 SJ-LM-7（規模待定）PR 2 的延遲與記憶體量法（契約 `sj-lm-7-pr2.md` §4；登記，在任何數字之前）
+
+- **兩邊看得到的輸入**：main（量的當下的 `origin/main`，`data/lm` 是現行出貨檔）與 `feat/sj7-pr2`（最終檔：B6、聊天連文 `03891d5a`、書面連文 `7ec1869b`、書面 KN β 0.75、會意 `bbb387d0`、常談 C1 `81c2470d`），兩邊都 `cargo build --release -p cli`。同一台 Mac、同一個閒置窗：開始與結束的 1 分鐘負載都 ≤ 2.0，超過就整輪作廢重量。集合 dev302（`eval/bench/suite-v1/dev302.txt`）。
+- **按鍵延遲**：`shanjie-replay`（它自己的設定：模型資料夾的 bigram、辨類與側檔，不開詞包、前文、重排），聊天與書面各一格。3 輪交錯（每輪 main 聊天、main 書面、分支聊天、分支書面）；p95 取三輪中位數，max 取三輪最大，RSS 取 `ru_maxrss` 三輪最大。每格先用 CLI 以同樣設定跑一次 `--dump`，replay 的送出要和它逐列相同，不同就那格作廢。分支 replay 印出的模型列要有 `trigram-chat.sjt3:03891d5a`。
+- **重排延遲**：`shanjie-eval --threads 1`，出貨設定 `--context --packs acg,it --tinylm <各自的 .sjtl> --rerank-level standard`，聊天加 `--colloquial-core`；讀 stderr 的 `tinylm: rerank n=… p50=… p95=…`。在三輪 replay 之後另跑 3 輪交錯（main 聊天、main 書面、分支聊天、分支書面），p95 取中位數；這一格的 RSS 用 `/usr/bin/time -l` 取三輪最大。摘要行的標記照契約 §3 第 1 條核對。
+- **門檻**（分支，兩種設定分開看）：按鍵 p95 ≤ 16 ms；重排 p95 ≤ 300 ms；replay 與重排兩格的 RSS 都不超過 main 同一格 ＋40 MiB。不過就停下來，把數字給維護者。
+- 常談 C1 和 SJ-CL-1-68K 用同一個口語池（`pool.tsv` `19fdc474…`），`colloquial-attribution.tsv` 只從池產生，所以沿用 `eb6fb69a…`，不重建。
