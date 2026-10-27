@@ -82,7 +82,7 @@ final class SettingsTests: XCTestCase {
     /// zhen-mixed section 3.2 / 5.3: the window's 中英混打（實驗） goes through the same setter and store as the menu item, the two stay in
     /// sync, and its enabled state is the menu item's. The toggle's
     /// place in the window (right after 即時預測, as in the menu) is in the app target's form, which has no tests.
-    func testEnglishFromTheWindowReachesStoreAndMenuAndFollowsAvailability() throws {
+    func testEnglishFromTheWindowReachesStoreAndMenu() {
         let r = rig()
         XCTAssertFalse(r.model.english, "saved off")
         XCTAssertTrue(r.model.englishEnabled)
@@ -115,7 +115,7 @@ final class SettingsTests: XCTestCase {
     /// zhen-revert section 3 / 5.2: the window's 重打同一個位置算英文 choice has no value true (the store stays nil until chosen), goes to the
     /// store, and is greyed with the 中英混打 switch off, and with the switch greyed (Eten); the setting is kept. The
     /// notes under the two choices are the contract's lines, and the "英文的顯示" choice is gone.
-    func testEnglishOverwriteChoiceStoresAndFollowsTheSwitch() throws {
+    func testEnglishOverwriteChoiceStoresAndFollowsTheSwitch() {
         let r = rig()
         XCTAssertTrue(r.model.englishOverwrite, "default true")
         XCTAssertNil(r.english.englishOverwrite, "never chosen")
@@ -141,7 +141,7 @@ final class SettingsTests: XCTestCase {
     /// zhen-keyorder section 3 / 5.3 with zhen-revert's default: the window's 依按鍵順序判斷英文 choice has no value true (the store stays nil
     /// until chosen; a saved false stays false), goes to the store, and is greyed on the overwrite choice's conditions: the 中英混打 switch
     /// off, the Eten layout; the setting is kept.
-    func testEnglishKeyOrderChoiceStoresAndFollowsTheSwitch() throws {
+    func testEnglishKeyOrderChoiceStoresAndFollowsTheSwitch() {
         let r = rig()
         XCTAssertTrue(r.model.englishKeyOrder, "default true")
         XCTAssertNil(r.english.englishKeyOrder, "never chosen")

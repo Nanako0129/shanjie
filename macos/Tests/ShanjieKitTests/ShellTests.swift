@@ -736,7 +736,7 @@ final class ShellTests: XCTestCase {
         XCTAssertGreaterThan(at, try! XCTUnwrap(titles.firstIndex(of: "即時預測")))
         XCTAssertEqual(titles.firstIndex(of: "語意校正"), at + 1)
         XCTAssertEqual(item()?.checked, false, "saved off")
-        XCTAssertEqual(item()?.enabled, true, "the list loaded")
+        XCTAssertEqual(item()?.enabled, true, "standard layout: the item is enabled")
         // zhen-revert section 2.3: `rust` and Space is one English token in the composition (no window).
         let token = { (c: Controller) -> String in c.type("rust "); XCTAssertEqual(c.panel.items, []); return c.client.marked }
         XCTAssertEqual(token(c), "ㄔㄧ", "off: Space is rule 10, and ㄔㄧ is not a syllable")

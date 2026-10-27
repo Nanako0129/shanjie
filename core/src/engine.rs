@@ -1734,7 +1734,7 @@ impl Engine {
     }
 
     /// Section 2.1: where the shadow is recorded and the reverts can happen: English mixing on, the standard layout and the
-    /// abbreviation composer off. The word list is not asked (zhen-revert section 2.8).
+    /// abbreviation composer off.
     fn shadow_on(&self) -> bool {
         self.english && !self.abbr && self.layout == Layout::Standard
     }
@@ -3424,7 +3424,7 @@ impl Engine {
     }
 
     /// Zhen-inline section 1.3e: whether unit `i` is an English token or a space unit, the two a Space after it types a space for.
-    /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on, without needing the word list.
+    /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on.
     fn breaks_with_space(&self, i: usize) -> bool {
         (self.shadow_on() && english_or_space(&self.syls[i])) || (self.digits_active() && (digit_of(&self.syls[i]).is_some() || is_space_unit(&self.syls[i])))
     }

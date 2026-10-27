@@ -9571,6 +9571,7 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 ## 2026-10-28：中英混打第四片 PR 2：單字表退場（`zhen-revert.md` §2.8）
 
 - 照契約的表做純刪除，行為不變（PR 1 之後引擎就不讀單字表）：核心的 `Engine::load_english`、`english_words`、`ENGLISH_MAX_*`，C ABI 的 `shanjie_engine_load_english`（`shanjie.h`、`ffi.rs` 與它的子行程測試、`abi_smoke.c` 三條檢查）；殼的 `loadEnglish`、`englishAvailable`、`englishFile`（中英混打的選單項與設定開關只看排列，`englishEnabled` ＝ 標準排列）；`Selftest` 不再載入單字表，仍要求 `rust` 加空白鍵得到英文 token `rust`；`build-app.sh` 的下載、產生、雜湊核對、複製與兩份授權檔、署名檔；`check-app.sh` 的檔案與格式檢查；`ci.yml`／`release.yml` 的快取段；`data/english-words.txt.sha256`、`LICENSES/SCOWL.txt`、`LICENSES/SymSpell-MIT.txt`、`LICENSES/data.md` 與 `docs/data-files.md` 的列；網站的授權一句（部署另問）。
-- 測試端：八個核心測試檔不再載入 `english-tiny.txt`（結果不變，證明引擎沒讀它）；殼的「缺表／拒絕時反灰」測試與 `TestData.files` 的那一列刪掉；`test-sandbox-mutations.sh` 的第 18、21 案改用 `Contents/Resources/digits.tsv`。
+- 測試端：八個核心測試檔不再載入 `english-tiny.txt`，刪掉之後這八個檔、`ffi::` 的測試、`abi_smoke.c`、`make test-golden`、`make test-swift`、`make test-python` 在 Mac 上都過（沒有測試因此改變，這是 PR 1 之後引擎不讀單字表的旁證，不是 §2.8 的驗收）；殼的「缺表／拒絕時反灰」測試與 `TestData.files` 的那一列刪掉；`test-sandbox-mutations.sh` 的第 18、21 案改用 `Contents/Resources/digits.tsv`。
 - `english-sim`：打字模式不再帶單字表，`--words FILE` 只給 `--recall`，和 `--rows` 一起給會被拒絕（新的一條測試）；`--english-next` 的 `--words` 選項一起拿掉（它只餵被刪掉的載入）。`tools/build_english_words.py`、`eval/golden/english-tiny.txt` 留著當召回輸入。
 - 契約的驗收 grep 會命中 `load_english_next`（英文前文表的載入，另一個函式，不是單字表），那些命中是對的、不是漏改。
+- **尚未驗收**：§2.8 的驗收（`scripts/build-app.sh` 建出的 App 跑 `scripts/check-app.sh`、`scripts/test-sandbox-mutations.sh` 24 案）在 Mac 上沒有跑：CI 驗收，結果之後補記。

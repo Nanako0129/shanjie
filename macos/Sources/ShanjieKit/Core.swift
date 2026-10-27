@@ -138,9 +138,9 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)
     }
 
-    /// zhen-mixed: whether Space after an English word typed into one unfinished syllable opens the English window (the core's
-    /// default is off; it needs the standard layout); returns the snapshot. Sent to every engine
-    /// `Shell.build()` makes.
+    /// zhen-mixed: the English mixing switch (the core's default is off): keys that cannot be a Zhuyin syllable revert
+    /// directly to the raw keys as an English run in the composition. It takes effect only with the standard layout and 可省略韻母 off;
+    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
     func setEnglish(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)

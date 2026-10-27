@@ -656,7 +656,6 @@ mod tests {
     /// has every single symbol as a syllable, so a one-letter token needs a lexicon without ㄋ: a one-word one.
     #[test]
     fn undoing_a_one_letter_space_token_keeps_the_earlier_syllables() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap());
         let mut sim = Sim::new(engine_with(&lex, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
         let (syms, tone) = parse_syllable("ㄅㄚ").unwrap();
