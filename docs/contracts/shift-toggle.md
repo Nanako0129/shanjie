@@ -69,7 +69,7 @@
   - 倚天排列（或可省略韻母、或混打關）組字區有字時切英數 → 組字區先送出；
   - 設定關掉 → `flagsChanged` 不處理；App A 原本是英數，關掉後 A 的字母鍵照注音送進核心；預設是開。
 - **回歸**：`make test-golden`、`make test-rust`（188）、`make test-swift`、dev302／打字測驗／錯字回報 `evalstats compare` 逐列相同（選字不動）。
-- **VM 實機**（main，tart 繁中 VM，`imeshot` 每次 ≤ 15 秒）：剛打開的 App（至少 TextEdit）、組字區空時單按 Shift，「英」出現在文字游標那一行的上方、打 `hello` 直通；再按出現「中」；「我要」＋單按 Shift＋`ok`＋Enter 送出「我要ok」；候選窗開著時單按 Shift，兩個視窗都看得到；Shift＋點擊不切換；兩個 App 各自記。
+- **VM 實機**（main，tart 繁中 VM，`imeshot` 每次 ≤ 15 秒）：剛打開的 App（至少 TextEdit）、組字區空時單按 Shift，「英」出現在文字游標那一行的上方、打 `hello` 直通；再按出現「中」；「我要」＋單按 Shift＋`ok`＋Enter 送出「我要ok」；候選窗開著時單按 Shift，提示出現、候選窗照 §4 第 1 步關掉（2026-10-28 更正：原本寫「兩個視窗都看得到」，和 §4 矛盾）；Shift＋點擊不切換；兩個 App 各自記。
 - **合併關卡**：程式改動（`/code-review`＋fresh verifier＋CI＋188 完整 Rust 測試）。
 - **維護者實機**：合併、裝好之後照 §0「怎麼看到」打一次；提示的外觀照回饋一輪一輪調。看到之前不寫「完成」。
 

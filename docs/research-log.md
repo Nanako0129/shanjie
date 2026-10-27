@@ -9582,3 +9582,15 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 核心：`Engine::set_ascii`、`shanjie_engine_set_ascii`（照 `set_english` 的回傳慣例）；ASCII 狀態的字元分支緊接在規則 1 之後，字元原樣接進英文段（不轉小寫、不走聲調鍵、不回退、不切分）。〔解讀〕契約 §4 步驟 4「開一段（空的）」：核心沒有空的英文段，第一個字元進來時才開段，所以這一步沒有可見的動作。
 - 殼：`ShiftTap` 純狀態機（`SHIFT_TAP_MAX` 0.5 秒為推論值，沒有實測）、每個 App（bundle ID）各自的英數狀態、組字區空時直通、組字區有字時以 `event.characters` 送字元、沒有英文段可用時先送出組字區、設定 `shiftToggle`（預設開）、自己一個視窗的 英／中 提示（`SHIFT_HINT_SECONDS` 1.0 秒）。
 - 驗證：核心測試（`engine_english.rs`）、FFI 單元測試、`ShiftTapTests`、`ShiftToggleSessionTests`；VM 實機（`flagsChanged` 是否每個 App 都收得到、組字區空時 index 0 的游標矩形）尚未做，看到之前不寫完成。
+
+## 2026-10-28：單按 Shift 切換中英的虛擬機實機確認（`shift-toggle.md` §5）
+
+- 繁中 tart 虛擬機（`shanjie-cap1`），裝本分支 `make bundle` 的開發版（`812d08bd` 的程式），設定全用預設（中英混打預設開、單按 Shift 預設開）；按鍵與單按 Shift 由送 HID 事件的小工具送進前景 App，截圖只留在 session 暫存區。
+- TextEdit、組字區空時單按 Shift：「英」出現在游標那一行的上方；`hello` 直接打進文件；再按出現「中」，打 `ji3` 是「我」。
+- 「我要」還在組字區時單按 Shift：「我要」留在組字區，`ok` 接成英文段，Enter 送出「我要ok」。
+- Shift＋滑鼠點擊：沒有提示，之後打注音照常是中文。
+- 候選窗開著時單按 Shift：提示出現，候選窗照契約 §4 第 1 步關掉（契約 §5 原本寫兩個都看得到，和 §4 矛盾，已更正）。
+- 提示淡出中再按一次 Shift：第二次的提示正常出現（舊淡出的收尾沒有把它蓋掉）。
+- 兩個 App 各自記：TextEdit 切成英文後，便條紙打 `ji3` 仍是「我」；回到 TextEdit 打 `ji3` 是 `ji3`。
+- 188 完整 Rust 測試（`812d08bd`）：通過 798、失敗 0。
+
