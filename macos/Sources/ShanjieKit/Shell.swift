@@ -24,9 +24,40 @@ public protocol TextClient: AnyObject {
     /// client reports none.
     /// `cursor`: the composition cursor in UTF-16 units within the marked text.
     func lineRect(cursor: Int) -> NSRect?
+    /// shift-toggle section 3: the insertion point's line rectangle when nothing is marked (`attributes(forCharacterIndex: 0,
+    /// lineHeightRectangle:)` in the app), `nil` if the client reports none.
+    func caretRect() -> NSRect?
     /// s3b2 section 10: the light or dark appearance of the view being typed into, `nil` if unknown.
     var appearance: NSAppearance? { get }
 }
+
+extension TextClient {
+    /// A client that cannot tell shows no hint.
+    public func caretRect() -> NSRect? { nil }
+}
+
+/// The 英/中 hint of the Shift toggle (shift-toggle section 3): its own small window, display only, never key.
+@MainActor
+public protocol ShiftHintPanel: AnyObject {
+    /// Shows `text` above `lineRect` (screen coordinates), left edges aligned, for `SHIFT_HINT_SECONDS`, then fades it away.
+    func show(_ text: String, lineRect: NSRect, appearance: NSAppearance?, glassTint: Double)
+}
+
+/// Where the 單按 Shift 切換中英 switch is kept (shift-toggle section 1): `nil` means never chosen, which is on.
+@MainActor
+public protocol ShiftToggleStore: AnyObject {
+    var shiftToggle: Bool? { get set }
+}
+
+/// The in-memory ShiftToggleStore.
+@MainActor
+public final class MemoryShiftToggleStore: ShiftToggleStore {
+    public var shiftToggle: Bool?
+    public init(_ shiftToggle: Bool? = nil) { self.shiftToggle = shiftToggle }
+}
+
+/// SHIFT_HINT_SECONDS (shift-toggle section 3): how long the 英/中 hint stays before it fades.
+public let SHIFT_HINT_SECONDS: TimeInterval = 1.0
 
 /// A display-only candidate list (an NSPanel in the app). It never receives keys.
 @MainActor
@@ -442,6 +473,22 @@ public final class Shell {
     var loadedPackTitles: [String] {
         [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
     }
+    private let shiftToggleStore: ShiftToggleStore
+    /// shift-toggle section 1: a lone Shift tap switches between Chinese and English (default on). Off: `flagsChanged` is not handled,
+    /// the states below are cleared and the core is back to `set_ascii(0)`.
+    private(set) var shiftToggleOn = true
+    let shiftHint: ShiftHintPanel?
+    var shiftTap = ShiftTap()
+    /// Seconds since the latest mouse-button press (left, right, other) in this login session; a test replaces it. No permission needed.
+    var mouseAgo: () -> TimeInterval = {
+        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
+    }
+    /// shift-toggle section 2: the apps (bundle ID, `""` for a client with none) whose state is English. In memory only: a restart
+    /// of the input method puts every app back to Chinese.
+    var asciiApps: Set<String> = []
+    /// What the current engine was last told by `set_ascii` (the engine is the owner's; `build()` sends it again to a new one).
+    var engineAscii = false
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -593,6 +640,8 @@ public final class Shell {
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
+    /// `shiftToggleStore`, `shiftHint`: the 單按 Shift 切換中英 switch and its 英/中 hint window (shift-toggle section 1, 3). The defaults (in
+    /// memory, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
@@ -606,8 +655,13 @@ public final class Shell {
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
                 spacingStore: SpacingStore,
-                itPackStore: ItPackStore = MemoryItPackStore()) {
+                itPackStore: ItPackStore = MemoryItPackStore(),
+                shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
+                shiftHint: ShiftHintPanel? = nil) {
         self.resources = resources
+        self.shiftToggleStore = shiftToggleStore
+        shiftToggleOn = shiftToggleStore.shiftToggle ?? true
+        self.shiftHint = shiftHint
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
         // Read once: the converted table never changes while the process runs, and the layout
@@ -939,6 +993,25 @@ public final class Shell {
         Log.shell.debug("it pack switched")
     }
 
+    /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the
+    /// standard layout and the abbreviation composer off. Without it a switch to English first sends the composition (section 2).
+    var shadowOn: Bool { englishOn && englishAvailable && mode == .standard && !abbreviationOn }
+
+    /// The settings window's 單按 Shift 切換中英: stored; off clears every app's state and the core's (section 1). The snapshot is shown by the owner.
+    func applyShiftToggle(_ on: Bool) {
+        shiftToggleOn = on
+        shiftToggleStore.shiftToggle = on
+        if !on {
+            asciiApps.removeAll()
+            shiftTap = ShiftTap()
+            if let o = owner { o.syncAscii() } else if engineAscii {
+                engineAscii = false
+                dropOnFailure(engine?.setAscii(false))
+            }
+        }
+        changed()
+    }
+
     /// The pack bits the engine is built with: the ACG and IT+AI switches.
     private var packMask: UInt32 { (acgPackOn ? UInt32(SHANJIE_PACK_ACG) : 0) | (itPackOn ? UInt32(SHANJIE_PACK_IT) : 0) }
 
@@ -1010,6 +1083,10 @@ public final class Shell {
         // And the overwrite choice (zhen-revert section 3), every time for the same reason.
         if case .failed(let c) = e.setEnglishOverwrite(englishOverwriteOn) {
             Log.shell.error("shanjie_engine_set_english_overwrite failed, code \(c)")
+        }
+        // And the ASCII state of the app being served (shift-toggle section 2): a rebuilt engine starts with it off.
+        if case .failed(let c) = e.setAscii(engineAscii) {
+            Log.shell.error("shanjie_engine_set_ascii failed, code \(c)")
         }
         // And the key-order choice (zhen-keyorder section 3), every time.
         if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
@@ -1144,15 +1221,22 @@ public final class Session {
     /// Returns whether the key was consumed. `event` is nil when IMK passes nil.
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
+        if let event, event.type == .flagsChanged { return handleFlags(event) }
         guard event == nil || event?.type == .keyDown else { return false }
-        if claim() { applyProfile(bundle: client.bundleIdentifier) }
+        shell.shiftTap.keyDown()  // shift-toggle section 1: a key between Shift's press and release spoils the tap
+        if claim() {
+            applyProfile(bundle: client.bundleIdentifier)
+            syncAscii()
+        }
+        // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
+        if shell.engineAscii && !shell.composing { return false }
         // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
             return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
         }
         guard let event,
-              let key = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
+              let key = (shell.engineAscii ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
             // nil, or a key outside the tables: never sent to the core.
             if shell.composing { finish(mode: 0) }
@@ -1161,10 +1245,69 @@ public final class Session {
         return send(key)
     }
 
+    /// Shift-toggle section 2: with a composition open in the English state, a printable key is sent as the character the keyboard
+    /// layout made of it (`event.characters`: Shift+1 is `!`), with no modifier bits. `nil` for anything else (Control, Option,
+    /// Command and Caps Lock keys, a non-ASCII or multi-character result, the space bar): those take the usual table.
+    static func asciiKey(_ event: NSEvent) -> ShanjieKey? {
+        let flags = event.modifierFlags
+        guard flags.isDisjoint(with: [.control, .option, .command, .capsLock]),
+              let chars = event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
+              (0x21...0x7E).contains(c.value) else { return nil }
+        return ShanjieKey(kind: KeyMap.char, ch: c.value, modifiers: 0)
+    }
+
+    /// Shift-toggle section 1: a `flagsChanged` event is never consumed (the app sees Shift as always); a lone tap switches.
+    private func handleFlags(_ event: NSEvent) -> Bool {
+        guard shell.shiftToggleOn else { return false }
+        let flags = event.modifierFlags
+        let others = !flags.isDisjoint(with: [.control, .option, .command, .function])
+        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, others: others, capsLock: flags.contains(.capsLock),
+                                       now: event.timestamp, mouseAgo: shell.mouseAgo) {
+            toggleAscii()
+        }
+        return false
+    }
+
+    /// Section 2: this app goes to English or back to Chinese. A composition the core cannot keep as an English run (`shadowOn` false)
+    /// is sent first. The hint shows which one (section 3).
+    private func toggleAscii() {
+        if claim() { applyProfile(bundle: client.bundleIdentifier) }
+        let app = client.bundleIdentifier ?? ""  // a synchronous IPC: read once
+        let on = !shell.asciiApps.contains(app)
+        if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
+        if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
+        pushAscii(on)
+        showShiftHint(on ? "英" : "中")
+    }
+
+    /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
+    func syncAscii() {
+        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(client.bundleIdentifier ?? ""))
+    }
+
+    private func pushAscii(_ on: Bool) {
+        guard on != shell.engineAscii, let engine = shell.engine else { return }
+        shell.engineAscii = on
+        switch engine.setAscii(on) {
+        case .ok(let o): apply(o)
+        case .failed(let c): _ = fail(c)
+        }
+    }
+
+    /// Section 3: the hint above the cursor line: the marked text's rectangle while composing, the insertion point's otherwise. No
+    /// rectangle, no hint (not the screen corner, not the last place).
+    private func showShiftHint(_ text: String) {
+        guard let panel = shell.shiftHint else { return }
+        let rect = shell.composing ? client.lineRect(cursor: Int.max) : client.caretRect()
+        guard let rect else { return }
+        panel.show(text, lineRect: rect, appearance: client.appearance, glassTint: shell.glassTint)
+    }
+
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
         applyProfile(bundle: client.bundleIdentifier)
+        syncAscii()
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.

@@ -9567,3 +9567,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   4. 切分、殘留英文、被中止的列：所有執行都是 0。過。
 - **各開關的貢獻**：臂 B（依按鍵順序）在兩種改錯方式下都是 0，回退全部來自臂 C（重打同一個位置）；臂 C 與 D 的數字相同。〔推論〕模擬器照欄位順序打、錯鍵當場修正，所以量不到「依按鍵順序」與聲調鍵 (c) 的代價（契約 §4.1 已寫明這一塊量不到）。
 - **召回**（英文詞表 82,730 詞）：臂 D 有 82,729 詞打成一個英文 token；臂 A 18、B 20,370、C 62,377。固定清單裡臂 D 只有 ai、ui、mp3 仍是中文（照設計走候選清單最後的英文項目），其他 15 個（ok、ls、cd、mv、pr、go、cp、cup、npm、gta6、rdr2、poe2、a4、i7、s7）都是 token。
+
+## 2026-10-28：單按 Shift 切換中英（`shift-toggle.md`）實作
+
+- 核心：`Engine::set_ascii`、`shanjie_engine_set_ascii`（照 `set_english` 的回傳慣例）；ASCII 狀態的字元分支緊接在規則 1 之後，字元原樣接進英文段（不轉小寫、不走聲調鍵、不回退、不切分）。〔解讀〕契約 §4 步驟 4「開一段（空的）」：核心沒有空的英文段，第一個字元進來時才開段，所以這一步沒有可見的動作。
+- 殼：`ShiftTap` 純狀態機（`SHIFT_TAP_MAX` 0.5 秒為推論值，沒有實測）、每個 App（bundle ID）各自的英數狀態、組字區空時直通、組字區有字時以 `event.characters` 送字元、沒有英文段可用時先送出組字區、設定 `shiftToggle`（預設開）、自己一個視窗的 英／中 提示（`SHIFT_HINT_SECONDS` 1.0 秒）。
+- 驗證：核心測試（`engine_english.rs`）、FFI 單元測試、`ShiftTapTests`、`ShiftToggleSessionTests`；VM 實機（`flagsChanged` 是否每個 App 都收得到、組字區空時 index 0 的游標矩形）尚未做，看到之前不寫完成。
