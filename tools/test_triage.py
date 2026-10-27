@@ -57,6 +57,18 @@ def scores(ng, ok, ll=None, c=0):
     return d
 
 
+class Ce3SetNames(unittest.TestCase):
+    def test_ce3_sets_are_private_files_under_the_private_root_and_unknown_names_still_fail(self):
+        with tempfile.TemporaryDirectory() as td:
+            for name in ("ctune", "cdev", "cmicro", "cjudge-1"):
+                open(os.path.join(td, f"{name}-rows.txt"), "w").write("|甲乙|ㄅ ㄆ\n")
+                self.assertEqual(T.set_file(name, td), (os.path.join(td, f"{name}-rows.txt"), True))
+            with self.assertRaises(SystemExit):
+                T.set_file("cjudge-2", td)          # no such file
+            with self.assertRaises(KeyError):
+                T.set_file("cjudge", td)            # not a set name (needs -K)
+
+
 class Lexicon(unittest.TestCase):
     def test_four_files_and_their_filters(self):
         l = lex()
