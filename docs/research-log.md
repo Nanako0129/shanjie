@@ -9511,3 +9511,10 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **新發現（給維護者看）**：書面手動詞釘選 `manual_words_come_first_in_the_shipping_setting` 現在書面錯第 4、8 列（第 4 列「米雅歌」被標準與積極強度的會意改成「米亞哥」，保守不動；聊天不錯），之前只錯第 8 列。
 - **還沒過（不是這片的 commit 造成，是換模型後釘著 model-v6 句子的測試）**：`core/tests/engine_repick.rs` 12 個測試（版控／板控、他是／她世界的 fixture，要逐個重找例子）、`tools/test_build_overlay.py` 的 `test_the_tails_are_what_tail_rows_makes_today`（`overlay-add.tsv` 沒有 `slang-add.tsv` 自 `ecd0bc44` 起多的兩列，要重建疊加層）。
 - **沒做**：詞庫衍生檔（`digits.tsv` 等）和階段 1 在 GCP 重建的版本逐檔比對（這裡拿不到那台機器）；§4 的延遲與記憶體量測；App 打包與 `scripts/check-models.sh bundle`（main 做）。
+
+## 2026-10-27：通語 SJ-LM-7（規模待定）PR 2 修訂一的量法（重排不換掉手動加的詞；契約 `sj-lm-7-pr2.md` §2.7；登記，在任何數字之前）
+
+- **起因**：PR 2 的 `/code-review` 發現，最終組合在書面標準檔與積極檔把手動加的詞「米雅歌」（`eval/golden/manual-words-rows.txt` 第 4 列，n-gram 第一名對）重排成「米亞哥」。維護者選「PR 2 裡直接修」。
+- **規則**：這一段的 n-gram 第一名含有 `overlay-add.tsv` 標成 `manual` 的詞時，重排只能在同樣音節上保有它的候選之間選（不保有的候選在選擇時遮掉，τ 門檻與分數仍用完整清單）。
+- **基準**：修訂一之前的最後一個 commit `353c3dd9e17d06f4bfcbc83f03b804ab8ff77b9a`（審查修正 A–E 之後；契約 §3 第 1 條在它上面逐位元相同，66／66）。
+- **量法**：GCP 同一台 VM，定案的六個單位與 §2.9 的集合（discordtune、cvtune-clean、打字測驗、dev302、錯字回報、wikitune-clean、動漫五集、名單三集、網路用語三集、資訊詞包），修訂一之後的 CLI 對基準 CLI 逐列比 rowstats。逐列相同的集合，§2.9 與 §2.10 的判讀照舊；有變的列列出列號、對 MAIN 重算出貨標準四條與共同關卡，任何一條由過變不過就停，數字給維護者。
