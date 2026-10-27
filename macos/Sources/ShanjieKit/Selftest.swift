@@ -52,10 +52,10 @@ public enum Selftest {
     static let colloquialContext = "桌子一直在搖"
     static let colloquialText = "桌腳的螺絲鬆掉了"
 
-    /// zhen-revert: `rust` then Space on the standard layout reverts to the raw keys at the third key (`s` over `r`'s column) and Space
-    /// ends the run as one English token: the preedit is the word, no candidate window, no run left open. The word list is not read.
+    /// zhen-mixed: `rust` then Space on the standard layout opens the English window (the shipped list and the tests' synthetic list
+    /// both have the word; its leftover ㄔㄧ is not in the lexicon, so these are the window's only items).
     static let englishKeys = "rust "
-    static let englishToken = "rust"
+    static let englishWindow = ["rust", "Rust", "RUST"]
 
     public static func run(resources: URL) -> Int32 {
         let lmPath = resources.appendingPathComponent("bigram.sjlm").path
@@ -111,18 +111,16 @@ public enum Selftest {
         let english = withPack.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
         guard english == 0 else { return fail("selftest: shanjie_engine_load_english failed, code", english) }
         if case .failed(let c) = withPack.setEnglish(true) { return fail("selftest: shanjie_engine_set_english failed, code", c) }
-        var token: CoreOutput?
+        var window: [String] = []
         for k in keyEvents(englishKeys) {
             switch withPack.key(k) {
-            case .ok(let o): token = o
+            case .ok(let o): window = o.candidates
             case .failed(let c): return fail("selftest: English typing failed, code", c)
             }
         }
         if case .failed(let c) = withPack.reset(mode: 1) { return fail("selftest: shanjie_engine_reset failed, code", c) }
         if case .failed(let c) = withPack.setEnglish(false) { return fail("selftest: shanjie_engine_set_english (off) failed, code", c) }
-        guard let token, token.preedit == englishToken, token.candidates.isEmpty, token.englishRunLength == 0 else {
-            return fail("selftest: the English token did not come out of the raw keys, code", 0)
-        }
+        guard window == englishWindow else { return fail("selftest: the English window did not open, code", 0) }
         return 0
     }
 

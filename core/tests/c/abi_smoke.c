@@ -339,9 +339,8 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
-/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english, set_english_overwrite and set_english_key_order
- * through the header, and a revert through the C ABI (docs/contracts/zhen-revert.md section 5.2). The behaviour itself is covered by
- * core/tests/engine_english.rs and the child-process test in ffi.rs. */
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english, set_english_inline and set_english_key_order through the header. The window
+ * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
 static int run_english(const char *dir, const char *missing) {
   static ShanjieOutput dummy;
   ShanjieEngine *e = 0;
@@ -359,18 +358,17 @@ static int run_english(const char *dir, const char *missing) {
   o = 0;
   CHECK(1009, shanjie_engine_set_english(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
-  /* zhen-revert: set_english_overwrite 0 and 1 give a snapshot (codes like set_english), 2 is 2, NULL engine or out is 1. */
-  o = 0;
-  CHECK(1010, shanjie_engine_set_english_overwrite(0, 1, &o) == 1 && o == 0);
-  CHECK(1011, shanjie_engine_set_english_overwrite(e, 1, 0) == 1);
+  /* zhen-inline: set_english_inline 0 and 1 give a snapshot (codes like set_english), 2 is 2, NULL engine or out is 1. */
+  CHECK(1010, shanjie_engine_set_english_inline(0, 1, &o) == 1 && o == 0);
+  CHECK(1011, shanjie_engine_set_english_inline(e, 1, 0) == 1);
   o = &dummy;
-  CHECK(1012, shanjie_engine_set_english_overwrite(e, 2, &o) == 2 && o == 0);
-  CHECK(1013, shanjie_engine_set_english_overwrite(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  CHECK(1012, shanjie_engine_set_english_inline(e, 2, &o) == 2 && o == 0);
+  CHECK(1013, shanjie_engine_set_english_inline(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
   o = 0;
-  CHECK(1014, shanjie_engine_set_english_overwrite(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  CHECK(1014, shanjie_engine_set_english_inline(e, 1, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
-  /* zhen-keyorder: set_english_key_order has the codes of set_english_overwrite. */
+  /* zhen-keyorder: set_english_key_order has the codes of set_english_inline. */
   o = 0;
   CHECK(1015, shanjie_engine_set_english_key_order(0, 1, &o) == 1 && o == 0);
   CHECK(1016, shanjie_engine_set_english_key_order(e, 1, 0) == 1);
@@ -380,19 +378,6 @@ static int run_english(const char *dir, const char *missing) {
   shanjie_output_free(o);
   o = 0;
   CHECK(1019, shanjie_engine_set_english_key_order(e, 0, &o) == 0 && o != 0 && o->handled == 1);
-  shanjie_output_free(o);
-  o = 0;
-  CHECK(1020, shanjie_engine_set_english_key_order(e, 1, &o) == 0 && o != 0);
-  shanjie_output_free(o);
-  /* A revert through the C ABI: with English mixing on, `o k` (the same column) is the run `ok`, and Space makes the one token. */
-  o = 0;
-  CHECK(1021, shanjie_engine_set_english(e, 1, &o) == 0 && o != 0);
-  shanjie_output_free(o);
-  o = type_last(e, "ok");
-  CHECK(1022, o != 0 && str_eq(o->preedit, "ok") && o->english_run_utf16_start == 0 && o->english_run_utf16_len == 2);
-  shanjie_output_free(o);
-  o = 0;
-  CHECK(1023, shanjie_engine_key(e, kind_key(2), &o) == 0 && o != 0 && str_eq(o->preedit, "ok") && o->candidate_count == 0 && o->english_run_utf16_len == 0);
   shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;

@@ -10,7 +10,7 @@ final class HiddenAbbreviationTests: XCTestCase {
         let store = MemoryAbbreviationStore(true)
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(),
-                          predictionStore: MemoryPredictionStore(), abbreviationStore: store, englishStore: MemoryEnglishStore(false), acgPackStore: MemoryAcgPackStore(),
+                          predictionStore: MemoryPredictionStore(), abbreviationStore: store, englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(),
                           glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
                           showsAbbreviation: false, spacingStore: MemorySpacingStore())
         let c = Controller(shell)
@@ -22,7 +22,7 @@ final class HiddenAbbreviationTests: XCTestCase {
         XCTAssertEqual(titles.firstIndex(of: "中英混打（實驗）"), titles.firstIndex(of: "即時預測").map { $0 + 1 })
         XCTAssertEqual(titles.firstIndex(of: "語意校正"), titles.firstIndex(of: "即時預測").map { $0 + 2 })
         XCTAssertFalse(SettingsModel(shell: shell).showsAbbreviation)
-        c.type("st")  // ㄋ, ㄔ (English mixing is off here: with it on, a key over a symbol is English, zhen-revert)
+        c.type("st")  // ㄋ, ㄔ
         XCTAssertEqual(c.client.marked, "ㄔ", "off: the second key replaces the first instead of opening a unit")
         c.press(Keys.esc)
         c.session.perform(.toggleAbbreviation)

@@ -303,18 +303,16 @@ fn row26_english_then_a_syllable() {
     assert_eq!(typed(&script("r26")), "ATM轉");
 }
 
-/// #27: from zhen-revert section 2.4 an English run takes the Zhuyin keys that are not letters, so `1 2 5 8 9 0 ...` after `S-A` stay on the run
-/// (the digit layer does not step in while a run is open) and the commit is the same `A1258901258`: the units of the composition stay at none
-/// until the run ends. (Before, each digit key ended the run and the buffer flushed its oldest key as a token from the fifth key on.)
+/// #27: the buffer is four keys: from the fifth key on the oldest leaves it as a token, key by key. (The contract's 123456789 is
+/// scored like the baseline: 1234, the syllable ㄓˊ for 56, then 789; so the row uses a string without a tone key.)
 #[test]
 fn row27_the_fifth_key_flushes_the_oldest() {
     let mut e = eng();
     let keys = "1 2 5 8 9 0 1 2 5 8";
     run(&mut e, "S-A");
     for (n, k) in keys.split(' ').enumerate() {
-        let o = e.key(key_of(k)).unwrap();
-        assert_eq!(syls(&e).len(), 0, "key {}: the run holds the keys, no token yet", n + 1);
-        assert_eq!(o.english_run_utf16_len as usize, n + 2, "key {}: the run grows", n + 1);
+        e.key(key_of(k)).unwrap();
+        assert_eq!(syls(&e).len(), 1 + (n + 1).saturating_sub(4), "key {}: tokens in the composition", n + 1);
     }
     assert_eq!(run(&mut e, "Enter").commit, "A1258901258");
 }

@@ -596,8 +596,8 @@ final class ShellTests: XCTestCase {
         let store = MemoryAbbreviationStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: store, englishStore: MemoryEnglishStore(false), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
-        }  // English mixing off: with it on, a key over a symbol of its column is English (zhen-revert), not the replacement this tests
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: store, englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        }
         let c = Controller(make())
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleAbbreviation } }
@@ -719,7 +719,7 @@ final class ShellTests: XCTestCase {
     }
 
     /// zhen-mixed section 3.2 / 5.3: "中英混打（實驗）" sits after "即時預測" and before "語意校正", is unchecked by default, is stored,
-    /// makes `rust` and Space one English token (zhen-revert; the word list is not read), is sent again to every engine a
+    /// makes `rust` and Space open the English window (the list is eval/golden/english-tiny.txt), is sent again to every engine a
     /// rebuild makes (the word pack switch and a layout switch rebuild it), and a new shell reads the stored on.
     func testEnglishMenuItemTogglesStoresRebuildsAndSurvivesRestart() {
         let store = MemoryEnglishStore(false)  // saved off; the default is on since digits.md A.3.7
@@ -737,122 +737,146 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(titles.firstIndex(of: "語意校正"), at + 1)
         XCTAssertEqual(item()?.checked, false, "saved off")
         XCTAssertEqual(item()?.enabled, true, "the list loaded")
-        // zhen-revert section 2.3: `rust` and Space is one English token in the composition (no window; the word list is not read).
-        let token = { (c: Controller) -> String in c.type("rust "); XCTAssertEqual(c.panel.items, []); return c.client.marked }
-        XCTAssertEqual(token(c), "ㄔㄧ", "off: Space is rule 10, and ㄔㄧ is not a syllable")
+        let window = { (c: Controller) -> [String] in c.type("rust "); return c.panel.items }
+        XCTAssertEqual(window(c), [], "off: Space is rule 10, and ㄔㄧ is not a syllable")
+        XCTAssertEqual(c.client.marked, "ㄔㄧ")
         c.press(Keys.esc)
         c.session.perform(.toggleEnglish)
         XCTAssertEqual(store.english, true)
         XCTAssertEqual(item()?.checked, true)
-        XCTAssertEqual(token(c), "rust", "on: the raw keys, one token")
-        XCTAssertEqual(c.client.text, "", "nothing is sent")
+        XCTAssertEqual(window(c), ["rust", "Rust", "RUST"], "on: the English window")
+        c.type("1")
+        XCTAssertEqual(c.client.text, "", "choosing the English item sends nothing (zhen-inline section 1.0)")
+        XCTAssertEqual(c.client.marked, "rust", "the word stays in the composition")
         c.press(Keys.enter)
         XCTAssertEqual(c.client.text, "rust", "Enter sends it, no space")
         XCTAssertEqual(c.client.marked, "")
         c.session.perform(.toggleAcgPack)  // rebuilds the engine, whose default is off
         c.session.perform(.toggleAcgPack)
-        XCTAssertEqual(token(c), "rust", "the rebuilt engine got the setting")
+        XCTAssertEqual(window(c), ["rust", "Rust", "RUST"], "the rebuilt engine got the setting")
+        c.press(Keys.esc)
         c.press(Keys.esc)
         c.session.perform(.layout(.eten))  // a layout switch rebuilds it too
         c.session.perform(.layout(.standard))
-        XCTAssertEqual(token(c), "rust", "the engine rebuilt by a layout switch got the setting")
+        XCTAssertEqual(window(c), ["rust", "Rust", "RUST"], "the engine rebuilt by a layout switch got the setting")
         c.press(Keys.esc)
-        c.session.perform(.toggleEnglish)  // off: nothing reverts
-        XCTAssertEqual(token(c), "ㄔㄧ")
+        c.press(Keys.esc)
+        c.session.perform(.toggleEnglish)  // off while a window could be open: nothing opens
+        XCTAssertEqual(window(c), [])
         c.press(Keys.esc)
         let again = Controller(make())
         again.session.activate()
         XCTAssertEqual(store.english, false)
         store.english = true
-        XCTAssertEqual(token(Controller(make())), "rust", "a new shell reads the stored on")
+        XCTAssertEqual(window(Controller(make())), ["rust", "Rust", "RUST"], "a new shell reads the stored on")
         _ = again
     }
 
-    /// zhen-revert section 3 / 5.2: the overwrite choice defaults to true (a store with no value), is stored, takes effect (`o k` is the
-    /// English `ok` with it and the syllable ㄜ without), is sent again to every engine a rebuild makes (the core's default is true, so
-    /// a rebuilt engine would lose a saved false if the shell did not send it), and a new shell reads the stored value.
-    func testEnglishOverwriteDefaultStoredAndSentToEveryEngine() {
+    /// zhen-inline section 2 / 4.3: the display choice defaults to "as typed" (a store with no value is true), shows the letters while
+    /// the English is typed and the Zhuyin when it is "on Space", is stored, and is sent again to every engine a rebuild makes (the
+    /// core's own default is true, so the rebuilt engine would show letters if the shell did not send false).
+    func testEnglishInlineDefaultStoredAndSentToEveryEngine() {
         let store = MemoryEnglishStore(true)
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         }
-        // Esc brings the Zhuyin back after a revert and the second one clears it (zhen-revert section 2.4).
-        let ok = { (c: Controller) -> String in c.type("ok"); let m = c.client.marked; c.press(Keys.esc); c.press(Keys.esc); return m }
-        XCTAssertNil(store.englishOverwrite, "never chosen")
+        XCTAssertNil(store.englishInline, "never chosen")
         let shell = make()
-        XCTAssertTrue(shell.englishOverwriteOn, "no value is true")
+        XCTAssertTrue(shell.englishInlineOn, "no value is true")
         let c = Controller(shell)
         c.session.activate()
-        XCTAssertEqual(ok(c), "ok", "on: the raw keys")
-        shell.applyEnglishOverwrite(false)
-        XCTAssertEqual(store.englishOverwrite, false)
-        XCTAssertEqual(ok(c), "ㄜ", "off: the second key replaces the first")
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "rus", "as typed")
+        c.press(Keys.esc)
+        shell.applyEnglishInline(false)
+        XCTAssertEqual(store.englishInline, false)
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "on Space: the Zhuyin")
+        c.press(Keys.esc)
         c.session.perform(.toggleAcgPack)  // rebuilds the engine
         c.session.perform(.toggleAcgPack)
-        XCTAssertEqual(ok(c), "ㄜ", "the rebuilt engine got the choice")
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "the rebuilt engine got the choice")
+        c.press(Keys.esc)
         c.session.perform(.layout(.eten))
         c.session.perform(.layout(.standard))
-        XCTAssertEqual(ok(c), "ㄜ", "and the one rebuilt by a layout switch")
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "and the one rebuilt by a layout switch")
+        c.press(Keys.esc)
         // A new shell reads the stored choice.
         let again = Controller(make())
         again.session.activate()
-        XCTAssertEqual(ok(again), "ㄜ", "a new shell reads the stored false")
-        store.englishOverwrite = true
+        again.type("rus")
+        XCTAssertEqual(again.client.marked, "ㄋㄧ", "a new shell reads the stored false")
+        again.press(Keys.esc)
+        store.englishInline = true
         let third = Controller(make())
         third.session.activate()
-        XCTAssertEqual(ok(third), "ok", "and the stored true")
+        third.type("rus")
+        XCTAssertEqual(third.client.marked, "rus", "and the stored true")
     }
 
-    /// zhen-keyorder section 3 / 5.3 with zhen-revert's default: the key-order choice defaults to true (a store with no value; a saved false
-    /// stays false), is stored, takes effect (`l s` is the English `ls` with it and the syllable ㄋㄠ without), and is sent again to every
-    /// engine a rebuild makes.
+    /// zhen-keyorder section 3 / 5.3: the key-order choice defaults to false (a store with no value), is stored, takes effect (`c u p` and
+    /// Space opens the English window only with it, `ㄏㄧㄣ` is not a syllable), is sent again to every engine a rebuild makes (the core's
+    /// default is false, so a rebuilt engine would lose it if the shell did not send true), and closes an English window it opened when
+    /// it is turned off.
     func testEnglishKeyOrderDefaultStoredAndSentToEveryEngine() {
         let store = MemoryEnglishStore(true)
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         }
-        let ls = { (c: Controller) -> String in c.type("ls"); let m = c.client.marked; c.press(Keys.esc); c.press(Keys.esc); return m }
+        let window = { (c: Controller) -> [String] in c.type("cup "); return c.panel.items }
         XCTAssertNil(store.englishKeyOrder, "never chosen")
         let shell = make()
-        XCTAssertTrue(shell.englishKeyOrderOn, "no value is true")
+        XCTAssertFalse(shell.englishKeyOrderOn, "no value is false")
         let c = Controller(shell)
         c.session.activate()
-        XCTAssertEqual(ls(c), "ls", "on: out of column order is English")
+        XCTAssertEqual(window(c), [], "off: Space does nothing, as before")
+        c.press(Keys.esc)
+        shell.applyEnglishKeyOrder(true)
+        XCTAssertEqual(store.englishKeyOrder, true)
+        XCTAssertEqual(window(c), ["cup", "Cup", "CUP"], "on: the window opens without an overwrite")
         shell.applyEnglishKeyOrder(false)
-        XCTAssertEqual(store.englishKeyOrder, false)
-        XCTAssertEqual(ls(c), "ㄋㄠ", "off: the symbol goes into its column")
+        XCTAssertEqual(c.panel.items, [], "turning it off closes the window")
+        XCTAssertEqual(c.client.marked, "ㄏㄧㄣ", "the unfinished syllable stays")
+        c.press(Keys.esc)
+        shell.applyEnglishKeyOrder(true)
         c.session.perform(.toggleAcgPack)  // rebuilds the engine
         c.session.perform(.toggleAcgPack)
-        XCTAssertEqual(ls(c), "ㄋㄠ", "the rebuilt engine got the choice")
+        XCTAssertEqual(window(c), ["cup", "Cup", "CUP"], "the rebuilt engine got the choice")
+        c.press(Keys.esc)
         c.session.perform(.layout(.eten))
         c.session.perform(.layout(.standard))
-        XCTAssertEqual(ls(c), "ㄋㄠ", "and the one rebuilt by a layout switch")
-        // A new shell reads the stored choice: the stored false stays false, the stored true is true.
+        XCTAssertEqual(window(c), ["cup", "Cup", "CUP"], "and the one rebuilt by a layout switch")
+        c.press(Keys.esc)
+        // A new shell reads the stored choice; with the stored false it does not open.
         let again = Controller(make())
         again.session.activate()
-        XCTAssertEqual(ls(again), "ㄋㄠ", "a new shell reads the stored false")
-        store.englishKeyOrder = true
+        XCTAssertEqual(window(again), ["cup", "Cup", "CUP"], "a new shell reads the stored true")
+        again.press(Keys.esc)
+        store.englishKeyOrder = false
         let third = Controller(make())
         third.session.activate()
-        XCTAssertEqual(ls(third), "ls", "and the stored true")
+        XCTAssertEqual(window(third), [], "and the stored false")
     }
 
-    /// zhen-revert section 3: the overwrite choice goes through the session that owns the composition, like the other apply*: a syllable
-    /// half typed, the choice turned off, and the next key replaces instead of reverting.
-    func testEnglishOverwriteChoiceGoesThroughTheOwningSession() {
+    /// zhen-inline section 2: the 英文的顯示 choice goes through the session that owns the composition, like the other apply*, and the
+    /// snapshot redraws what is on screen: letters typed, the choice turned to "on Space", the marked text is the Zhuyin at once, and
+    /// back.
+    func testEnglishInlineChoiceRedrawsAComposition() {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let c = Controller(shell)
         c.session.activate()
-        c.type("o")
-        XCTAssertEqual(c.client.marked, "ㄟ")
+        c.type("rus")
+        XCTAssertEqual(c.client.marked, "rus")
         XCTAssertTrue(shell.owner === c.session, "premise: the session owns the composition")
-        shell.applyEnglishOverwrite(false)
-        XCTAssertEqual(c.client.marked, "ㄟ", "nothing on screen changes")
-        c.type("k")
-        XCTAssertEqual(c.client.marked, "ㄜ")
+        shell.applyEnglishInline(false)
+        XCTAssertEqual(c.client.marked, "ㄋㄧ", "the composition on screen is drawn again from the snapshot")
+        shell.applyEnglishInline(true)
+        XCTAssertEqual(c.client.marked, "rus")
     }
 
     /// zhen-mixed section 3.2 / 5.3: a word list that is missing or refused (non-zero from `load_english`) makes `englishAvailable`

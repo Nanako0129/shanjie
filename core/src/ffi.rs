@@ -661,9 +661,8 @@ pub unsafe extern "C" fn shanjie_engine_load_english(engine: *mut ShanjieEngine,
     })
 }
 
-/// zhen-mixed section 3.1, as zhen-revert changes it. `enabled` 0 or 1 (default 0): English mixing. On, keys that cannot be a Zhuyin
-/// syllable revert to the raw keys as an English run in the composition (s3a rules 9 and 10; switches `set_english_overwrite` and
-/// `set_english_key_order`); only with the standard layout and the abbreviation composer off, and the word list is not read.
+/// zhen-mixed section 3.1. `enabled` 0 or 1 (default 0): whether Space after an English word typed into one unfinished syllable
+/// opens the English window (s3a rule 10e); only with a loaded list, the standard layout and the abbreviation composer off.
 /// Returns the snapshot like `set_abbreviation`; any other value changes nothing and returns 2.
 ///
 /// # Safety
@@ -697,14 +696,14 @@ pub unsafe extern "C" fn shanjie_engine_set_english(
     rc
 }
 
-/// zhen-revert section 3. `enabled` 0 or 1 (default 1): whether a Zhuyin key over a symbol already in its column reverts the
-/// unfinished syllable to its raw keys as English (`o k` is `ok`). Returns the snapshot like `set_english`; any other value changes
-/// nothing and returns 2. Only matters with `set_english(1)`.
+/// zhen-inline section 2. `enabled` 0 or 1 (default 1): whether the English typed into the unfinished syllable shows as its letters
+/// while it can still become a listed word (the display rule D). Returns the snapshot like `set_english`, so a composition on screen
+/// is drawn again; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
 ///
 /// # Safety
 /// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
 #[no_mangle]
-pub unsafe extern "C" fn shanjie_engine_set_english_overwrite(
+pub unsafe extern "C" fn shanjie_engine_set_english_inline(
     engine: *mut ShanjieEngine,
     enabled: u32,
     out: *mut *mut ShanjieOutput,
@@ -719,7 +718,7 @@ pub unsafe extern "C" fn shanjie_engine_set_english_overwrite(
         }
         // SAFETY: live handle, single-threaded use (§6).
         let e = unsafe { &mut (*engine).0 };
-        match e.set_english_overwrite(enabled == 1) {
+        match e.set_english_inline(enabled == 1) {
             // SAFETY: `out` checked non-NULL above.
             Ok(o) => unsafe { emit(o, out) },
             Err(_) => SHANJIE_ERR_INTERNAL,
@@ -766,9 +765,10 @@ pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
     rc
 }
 
-/// zhen-keyorder section 3 as zhen-revert changes it. `enabled` 0 or 1 (default 1): whether a Zhuyin key out of column order, and a
-/// tone key that completes a syllable the lexicon lacks, revert to the raw keys as English (`ls` is `ls`, `s 7` is `s7`). Returns the
-/// snapshot like `set_english_overwrite`; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
+/// zhen-keyorder section 3. `enabled` 0 or 1 (default 0): whether keys out of Zhuyin's column order count as evidence of English
+/// (as a replaced symbol does), and a listed word or a two-letter word then opens the window on Space with less of it. Returns the
+/// snapshot like `set_english_inline`; turning it off closes an open English window (which clears the shadow) and otherwise changes nothing; any other value changes
+/// nothing and returns 2. Only matters with `set_english(1)`.
 ///
 /// # Safety
 /// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
@@ -1902,10 +1902,10 @@ mod tests {
         rc
     }
 
-    /// set_english_overwrite; returns the code and frees the output.
-    fn set_overwrite(e: *mut ShanjieEngine, on: u32) -> i32 {
+    /// set_english_inline; returns the code and frees the output.
+    fn set_inline(e: *mut ShanjieEngine, on: u32) -> i32 {
         let mut o: *mut ShanjieOutput = sentinel();
-        let rc = unsafe { shanjie_engine_set_english_overwrite(e, on, &mut o) };
+        let rc = unsafe { shanjie_engine_set_english_inline(e, on, &mut o) };
         if rc == 0 {
             unsafe { shanjie_output_free(o) };
         } else {
@@ -1973,10 +1973,10 @@ mod tests {
         for v in [2, u32::MAX] {
             assert!(set_english(e, v) == 2, "set_english out of range");
         }
-        // On without a list: the list is not read (zhen-revert section 2.8), so `rust` reverts all the same and no window opens.
+        // On without a list: only remembered, no window.
         assert!(set_english(e, 1) == 0);
-        let (cands, _, preedit) = type_out(e, "rust_");
-        assert!(cands.is_empty() && preedit == "rust", "no list needed, no window");
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "no list, no window");
         assert!(send(e, key(ESC, '\0')).0 == 0);
 
         // 3 for every file the loader refuses; each leaves no list (none was loaded yet).
@@ -2020,7 +2020,7 @@ mod tests {
         assert!(got.expect("load_english blocked on a FIFO") == 3, "a FIFO");
         std::fs::remove_file(fifo).unwrap();
         let (cands, _, _) = type_out(e, "rust_");
-        assert!(cands.is_empty(), "failed loads open no window");
+        assert!(cands.is_empty(), "failed loads left no list");
         assert!(send(e, key(ESC, '\0')).0 == 0);
         // The limits themselves are fine: 200,000 lines.
         assert!(load_english(e, &list("max.txt", &words(200_000, 6))) == 0, "200,000 lines");
@@ -2031,52 +2031,64 @@ mod tests {
             let p = list("refused.txt", bytes);
             assert!(load_english(e, &p) == 3, "{what}");
         }
-        // set_english_overwrite (zhen-revert section 3): the codes of set_english.
+        // set_english_inline (zhen-inline section 2): the codes of set_english.
         let mut o: *mut ShanjieOutput = sentinel();
-        assert!(unsafe { shanjie_engine_set_english_overwrite(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "overwrite engine NULL");
-        assert!(unsafe { shanjie_engine_set_english_overwrite(e, 1, ptr::null_mut()) } == 1, "overwrite out NULL");
+        assert!(unsafe { shanjie_engine_set_english_inline(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "inline engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, ptr::null_mut()) } == 1, "inline out NULL");
         for v in [2, u32::MAX] {
-            assert!(set_overwrite(e, v) == 2, "overwrite out of range");
+            assert!(set_inline(e, v) == 2, "inline out of range");
         }
-        // Through the C ABI, on by default: `o k` reverts to the raw keys, Space makes the one English token; nothing is committed
-        // and no candidate window opens (zhen-revert section 5.2). The word list is loaded and not read.
-        let (cands, commit, preedit) = type_out(e, "ok");
-        assert!(cands.is_empty() && commit.is_empty() && preedit == "ok", "the raw keys are the preedit");
+        // Through the C ABI, "show as typed" (the default): rust shows as the letters, Space opens the window, 1 keeps the word
+        // in the composition (nothing is committed), Enter sends it.
+        let (cands, commit, preedit) = type_out(e, "rust");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "inline display");
         let (cands, commit, preedit) = type_out(e, "_");
-        assert!(cands.is_empty() && commit.is_empty() && preedit == "ok", "the token stays in the composition");
+        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && preedit == "rust", "window");
+        let (cands, commit, preedit) = type_out(e, "1");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
         let (_, preedit, commit) = send(e, key(ENTER, '\0'));
-        assert!(preedit.is_empty() && commit == "ok", "Enter sends it");
-        let (cands, commit, preedit) = type_out(e, "gta6_");
-        assert!(cands.is_empty() && commit.is_empty() && preedit == "gta6", "letters and a digit in one token");
+        assert!(preedit.is_empty() && commit == "rust", "Enter sends it");
+        // "Show on Space": the Zhuyin shows until the window opens.
+        assert!(set_inline(e, 0) == 0);
+        let (_, commit, preedit) = type_out(e, "rust");
+        assert!(commit.is_empty() && preedit == "ㄔㄧ", "Zhuyin display");
+        let (cands, commit, preedit) = type_out(e, "_");
+        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && preedit == "ㄔㄧ", "window");
+        let (cands, commit, preedit) = type_out(e, "1");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
+        assert!(send(e, key(ENTER, '\0')).2 == "rust");
+        // The snapshot redraws a composition on screen: letters typed, switch to "on Space", the Zhuyin shows, and back.
+        type_out(e, "rus");
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, &mut o) } == 0);
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "rus", "snapshot, letters");
+        unsafe { shanjie_output_free(o) };
+        assert!(unsafe { shanjie_engine_set_english_inline(e, 0, &mut o) } == 0);
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄧ", "snapshot, Zhuyin");
+        unsafe { shanjie_output_free(o) };
         assert!(send(e, key(ESC, '\0')).0 == 0);
-        // Off: a fourth key over the same column replaces, as it always did; on again, it reverts.
-        assert!(set_overwrite(e, 0) == 0);
-        let (_, _, preedit) = type_out(e, "vupp");
-        assert!(preedit == "ㄒㄧㄣ", "off: the key replaces");
-        assert!(send(e, key(ESC, '\0')).0 == 0);
-        assert!(set_overwrite(e, 1) == 0);
-        let (_, _, preedit) = type_out(e, "vupp");
-        assert!(preedit == "vupp", "on: the raw keys");
-        // Esc right after a revert brings the Zhuyin back; the second one clears it (zhen-revert section 2.4).
-        assert!(send(e, key(ESC, '\0')).1 == "ㄒㄧㄣ");
-        assert!(send(e, key(ESC, '\0')).1.is_empty());
-        // set_english_key_order (zhen-keyorder section 3): the codes of set_english_overwrite, then the switch through the C ABI. On
-        // (the default), `p v` is out of column order and reverts; off, the symbol goes into its column.
+        assert!(set_inline(e, 1) == 0);
+        // set_english_key_order (zhen-keyorder section 3): the codes of set_english_inline, then the switch through the C ABI. Off (the
+        // default), `l s` Space is rule 10 (nothing opens); on, it opens the window of the two-letter word `ls`; off again closes it,
+        // and the unfinished syllable stays.
         let mut o: *mut ShanjieOutput = sentinel();
         assert!(unsafe { shanjie_engine_set_english_key_order(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "key order engine NULL");
         assert!(unsafe { shanjie_engine_set_english_key_order(e, 1, ptr::null_mut()) } == 1, "key order out NULL");
         for v in [2, u32::MAX] {
             assert!(set_key_order(e, v) == 2, "key order out of range");
         }
-        let (_, _, preedit) = type_out(e, "pv");
-        assert!(preedit == "pv", "key order on by default");
-        assert!(send(e, key(ESC, '\0')).1 == "ㄒㄣ");
-        assert!(send(e, key(ESC, '\0')).1.is_empty());
-        assert!(set_key_order(e, 0) == 0);
-        let (_, _, preedit) = type_out(e, "pv");
-        assert!(preedit == "ㄒㄣ", "key order off: today");
+        let (cands, _, _) = type_out(e, "ls_");
+        assert!(cands.is_empty(), "off by default: no window");
         assert!(send(e, key(ESC, '\0')).0 == 0);
         assert!(set_key_order(e, 1) == 0);
+        let (cands, commit, preedit) = type_out(e, "ls_");
+        assert!(cands == ["ls", "Ls", "LS"] && commit.is_empty() && preedit == "ㄋㄠ", "key order: the window of ls");
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_english_key_order(e, 0, &mut o) } == 0 && unsafe { (*o).handled } == 1);
+        assert!(unsafe { (*o).candidate_count } == 0, "turning it off closes the window");
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄠ", "the unfinished syllable stays");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
         // The last two fields (zhen-inline section 1.3f): an open English run, in UTF-16 units of `preedit`; 0 and 0 otherwise.
         let fields = |k: ShanjieKey| {
             let mut o = ptr::null_mut();
@@ -2094,10 +2106,10 @@ mod tests {
         let r = fields(key(SPACE, '\0'));
         assert!(r.1 == 0 && r.2 == 0, "the run ended: 0 and 0, {r:?}");
         assert!(send(e, key(ESC, '\0')).0 == 0);
-        // Off: the same keys no longer revert.
+        // Off: the same keys no longer open it.
         assert!(set_english(e, 0) == 0);
-        let (_, _, preedit) = type_out(e, "ok");
-        assert!(preedit == "ㄜ", "off");
+        let (cands, _, _) = type_out(e, "rust_");
+        assert!(cands.is_empty(), "off");
         unsafe { shanjie_engine_free(e) };
         std::fs::remove_dir_all(dir).unwrap();
     }
