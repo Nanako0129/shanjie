@@ -76,15 +76,16 @@ fn syls(s: &str) -> Syls {
     s.split(' ').map(str::to_string).collect()
 }
 
-const REPORT: &str = "ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ";
+const REPORT: &str = "ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙";
 
-/// Premise of the slice: the user report is 睪丸這波 without the table and 搞完這波 with it.
+/// Premise of the slice: the user report is 睪丸了 without the table and 搞完了 with it. (The report was 搞完這波; the SJ-LM-7 model gets that sentence
+/// right with or without the table, so the premise is row 2 of the frozen probe, measured 2026-10-27 with the CLI, both profiles.)
 #[test]
 fn user_report_flips_with_the_table() {
     let s = shared();
     for profile in [Profile::Chat, Profile::Formal] {
-        assert_eq!(type_syls(&mut engine(&s.off, profile), &syls(REPORT)).preedit, "睪丸這波");
-        assert_eq!(type_syls(&mut engine(&s.on, profile), &syls(REPORT)).preedit, "搞完這波");
+        assert_eq!(type_syls(&mut engine(&s.off, profile), &syls(REPORT)).preedit, "睪丸了");
+        assert_eq!(type_syls(&mut engine(&s.on, profile), &syls(REPORT)).preedit, "搞完了");
     }
 }
 
@@ -95,11 +96,11 @@ fn toggle_mid_composition_reranks() {
     let s = shared();
     for profile in [Profile::Chat, Profile::Formal] {
         let mut e = engine(&s.on, profile);
-        assert_eq!(type_syls(&mut e, &syls(REPORT)).preedit, "搞完這波");
+        assert_eq!(type_syls(&mut e, &syls(REPORT)).preedit, "搞完了");
         let o = e.set_demote(false).unwrap();
         assert!(o.handled && o.commit.is_empty());
-        assert_eq!(o.preedit, "睪丸這波");
-        assert_eq!(e.set_demote(true).unwrap().preedit, "搞完這波");
+        assert_eq!(o.preedit, "睪丸了");
+        assert_eq!(e.set_demote(true).unwrap().preedit, "搞完了");
     }
 }
 
@@ -128,21 +129,27 @@ fn set_demote_false_equals_no_table() {
     }
 }
 
-/// 4 (c): a demoted word fixed by the user. Row 切除睪丸 typed with the non-standard reading keeps the
-/// demoted word first even with the table (probe row 11), so the whole-sentence top-1 contains it. Fixing
-/// 睪丸 on the right (End::Next for the free 切除) makes the engine's total equal that top-1 score; a
+/// 4 (c): a demoted word fixed by the user. Row 雙側睪丸 typed with the non-standard reading keeps the
+/// demoted word first even with the table, so the whole-sentence top-1 contains it (the probe's row 切除睪丸, row 11, did until SJ-LM-7, whose
+/// model puts 切除搞完 first with the table; 雙側睪丸 found 2026-10-27 with the CLI, both profiles). Fixing
+/// 睪丸 on the right (End::Next for the free 雙側) makes the engine's total equal that top-1 score; a
 /// `total_score` that forgot the delta is off by exactly the delta.
 #[test]
 fn fixed_demoted_word_total_equals_top1() {
     let s = shared();
-    let r = syls("ㄑㄧㄝ ㄔㄨˊ ㄍㄠˇ ㄨㄢˊ");
+    // Without the trigram tables: with them (the chat profile has one too since SJ-LM-7) a path with a fixed word legitimately scores differently from the
+    // same string without one (trigram-core rule (a); see `fixed_word_total_equals_top1_on_first_rows` in engine_lm.rs).
+    let lm = Arc::new(Lm::load_opts(&root().join("data/lm/bigram.sjlm"), true, true, &[]).unwrap());
+    let r = syls("ㄕㄨㄤ ㄘㄜˋ ㄍㄠˇ ㄨㄢˊ");
     for profile in [Profile::Chat, Profile::Formal] {
-        let (score, words) = decode(&s.on, &r, &s.lm, profile, 64).unwrap().swap_remove(0);
-        assert_eq!(words.concat(), "切除睪丸");
+        let (score, words) = decode(&s.on, &r, &lm, profile, 64).unwrap().swap_remove(0);
+        assert_eq!(words.concat(), "雙側睪丸");
         // The premise: the delta really is charged in that score.
-        let plain = decode(&s.off, &r, &s.lm, profile, 64).unwrap().swap_remove(0).0;
+        let plain = decode(&s.off, &r, &lm, profile, 64).unwrap().swap_remove(0).0;
         assert!((plain - score - 2.0).abs() < 1e-9, "{plain} vs {score}");
-        let mut e = engine(&s.on, profile);
+        let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
+        e.set_lm(lm.clone(), s.on.clone());
+        e.set_profile(profile).unwrap();
         type_syls(&mut e, &r);
         let mut o = e.key(Key::new(KeyKind::Space)).unwrap();
         // The cursor is at the end: the candidates are the words ending there; walk to 睪丸.
@@ -156,7 +163,7 @@ fn fixed_demoted_word_total_equals_top1() {
         }
         assert!(found, "candidate 睪丸 exists");
         let o = e.key(Key::new(KeyKind::Enter)).unwrap();
-        assert_eq!(o.preedit, "切除睪丸");
+        assert_eq!(o.preedit, "雙側睪丸");
         let total = e.total_score().unwrap();
         assert!((total - score).abs() <= 1e-9, "total {total} vs top-1 {score}");
     }

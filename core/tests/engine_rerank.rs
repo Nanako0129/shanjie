@@ -794,7 +794,7 @@ fn entered_prediction_row_blocks_apply() {
 }
 
 /// Section 2.2, the learning guard: a stretch whose first path has a learned-boosted word is left out, the other stretch is still
-/// reranked. Taught here: 回覆 for ㄏㄨㄟˊ ㄈㄨˋ after 已經 (row 27 shows 回復 by the n-gram); the fixed 郵件 splits the row.
+/// reranked. Taught here: 回復 for ㄏㄨㄟˊ ㄈㄨˋ after 已經 (row 27 shows 回覆 by the n-gram after that context on the SJ-LM-7 files, 回復 on model-v6, and the pick has to be a teaching: it is not the first); the fixed 郵件 splits the row.
 #[test]
 fn learned_stretch_is_not_reranked() {
     let syls = row(27);
@@ -803,17 +803,17 @@ fn learned_stretch_is_not_reranked() {
     // The pick is made over its own syllables, after the text it follows on screen (the context its record is kept under).
     e.set_left_context("我已經");
     type_syls(&mut e, &syls[3..5]);
-    choose_at_cursor(&mut e, "回覆");
+    choose_at_cursor(&mut e, "回復");
     e.key(k(KeyKind::Enter)).unwrap();
     e.set_left_context("");
     assert!(!e.learner().is_empty(), "premise: taught");
     let o = fix_word(&mut e, &syls, 9, "郵件");
-    assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
+    assert!(o.preedit.starts_with("我已經回復你的郵件"), "premise: the learned word is in the first path");
     let job = e.take_rerank_job().unwrap();
     let picks = job.run().picks();
     assert!(picks.len() == 1 && picks[0] != 0, "only the right stretch, and it changes");
     let o = e.apply_rerank(job.run()).unwrap().unwrap();
-    assert!(o.preedit.starts_with("我已經回覆你的郵件"), "the taught stretch is untouched");
+    assert!(o.preedit.starts_with("我已經回復你的郵件"), "the taught stretch is untouched");
     // Control: without the teach the same fix reranks both stretches (fixed_word_between_two_stretches).
 }
 
@@ -829,11 +829,11 @@ fn learn_guard_off_reranks_the_learned_stretch() {
         e.set_learning(true);
         e.set_left_context("我已經");
         type_syls(&mut e, &syls[3..5]);
-        choose_at_cursor(&mut e, "回覆");
+        choose_at_cursor(&mut e, "回復");
         e.key(k(KeyKind::Enter)).unwrap();
         e.set_left_context("");
         let o = fix_word(&mut e, &syls, 9, "郵件");
-        assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
+        assert!(o.preedit.starts_with("我已經回復你的郵件"), "premise: the learned word is in the first path");
         e
     };
     for (guard, stretches, skips) in [(true, 1, 1), (false, 2, 0)] {
