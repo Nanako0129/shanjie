@@ -3,7 +3,7 @@
 //! `set_english_key_order`) and asks it what it did after every key (`Engine::english_reverted`, `Engine::english_split`): the rules
 //! are the engine's, never repeated here.
 //!
-//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--retries 3]
+//!   english-sim --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--retries 3]
 //!               [--overwrite on|off] [--key-order on|off] [--digits [--lm FILE]]
 //!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off]
 //!
@@ -353,17 +353,15 @@ impl Sim {
 }
 
 /// `--digits`: the whole engine as the shell builds it (the table is read from the data directory), with the model.
-fn engine_digits(root: &Path, lm: &Path, words: &Path, switches: Switches) -> Result<Engine, String> {
+fn engine_digits(root: &Path, lm: &Path, switches: Switches) -> Result<Engine, String> {
     let mut e = Engine::new(&root.join("data/lexicon"), LAYOUT).map_err(|_| "cannot build the engine")?;
     e.load_lm(lm).map_err(|_| "cannot load the model")?;
-    e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
     switches.apply(&mut e)?;
     Ok(e)
 }
 
-fn engine_with(lex: &Arc<Lexicon>, words: &Path, switches: Switches) -> Result<Engine, String> {
+fn engine_with(lex: &Arc<Lexicon>, switches: Switches) -> Result<Engine, String> {
     let mut e = Engine::with_lexicon(lex.clone(), LAYOUT);
-    e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
     switches.apply(&mut e)?;
     Ok(e)
 }
@@ -435,9 +433,11 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if !(0.0..=1.0).contains(&p) || repeat == 0 {
         return Err("--p must be in [0, 1] and --repeat at least 1".into());
     }
-    let words = words.ok_or("--words is required")?;
     if recall == rows.is_some() {
         return Err("give exactly one of --rows and --recall".into());
+    }
+    if words.is_some() != recall {
+        return Err("--words goes with --recall (and only with it)".into());
     }
     if (digits || lm.is_some()) && recall {
         return Err("--digits is for the typing mode".into());
@@ -447,7 +447,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     }
     let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
     if recall {
-        return run_recall(&lex, &words, switches);
+        return run_recall(&lex, &words.unwrap(), switches);
     }
 
     let rows_bytes = read(&rows.unwrap())?;
@@ -478,7 +478,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut final_1000, mut shown_1000, mut extra_1000) = (Vec::new(), Vec::new(), Vec::new());
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
     for i in 0..repeat {
-        let engine = if digits { engine_digits(root, &lm, &words, switches)? } else { engine_with(&lex, &words, switches)? };
+        let engine = if digits { engine_digits(root, &lm, switches)? } else { engine_with(&lex, switches)? };
         let mut sim = Sim::new(engine, p, repair, seed.wrapping_add(i));
         sim.digits = digits;
         sim.max_retries = retries;
@@ -537,7 +537,7 @@ fn run_recall(lex: &Arc<Lexicon>, words: &Path, switches: Switches) -> Result<()
     let bytes = read(words)?;
     let sha = sha256_hex(&bytes);
     let list: Vec<String> = String::from_utf8(bytes).map_err(|_| "the list is not UTF-8")?.lines().map(String::from).collect();
-    let mut e = engine_with(lex, words, switches)?;
+    let mut e = engine_with(lex, switches)?;
     let (mut opened, mut classes) = (0usize, [0usize; 4]);
     for w in &list {
         let (first, syls, preedit) = type_word(&mut e, w)?;
@@ -574,9 +574,8 @@ mod tests {
     fn revert_recovery_leaves_the_row_as_if_typed_clean() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let words = root.join("eval/golden/english-tiny.txt");
         let (syms, tone) = parse_syllable("ㄊㄧㄠ").unwrap();
-        let mk = |p: f64| Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), p, Repair::Overwrite, 20261014);
+        let mk = |p: f64| Sim::new(engine_with(&lex, ALL_ON).unwrap(), p, Repair::Overwrite, 20261014);
         let row = |sim: &mut Sim| {
             sim.engine.reset(ResetMode::Discard);
             sim.syllable(&syms, tone).unwrap();
@@ -591,7 +590,7 @@ mod tests {
         assert!(sim.reverts[Revert::Overwrite as usize] >= 1 && sim.typos >= 1, "premise: the rows revert");
         assert_eq!(sim.splits, 0);
         // Without the switch the same rows never revert (the key replaces), and come out the same.
-        let mut off = Sim::new(engine_with(&lex, &words, Switches { overwrite: false, key_order: false }).unwrap(), 0.5, Repair::Overwrite, 20261014);
+        let mut off = Sim::new(engine_with(&lex, Switches { overwrite: false, key_order: false }).unwrap(), 0.5, Repair::Overwrite, 20261014);
         for i in 0..400 {
             assert_eq!(row(&mut off), clean, "off, row {i}");
         }
@@ -604,8 +603,7 @@ mod tests {
     fn backspace_repair_leaves_the_row_as_if_typed_clean() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let words = root.join("eval/golden/english-tiny.txt");
-        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Backspace, 20261014);
+        let mut sim = Sim::new(engine_with(&lex, ALL_ON).unwrap(), 0.0, Repair::Backspace, 20261014);
         // Medial then final (`ㄍㄨㄛ`): the final's neighbour on the keyboard row is a medial, so a slip lands in the occupied medial column.
         for syl in ["ㄍㄨㄛ", "ㄏㄨㄛ", "ㄌㄨㄛ", "ㄕㄨㄛ"] {
             let (syms, tone) = parse_syllable(syl).unwrap();
@@ -631,8 +629,7 @@ mod tests {
     fn reverts_are_counted_by_kind() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let words = root.join("eval/golden/english-tiny.txt");
-        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
+        let mut sim = Sim::new(engine_with(&lex, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
         for (keys, kind) in [("l s", Revert::Order), ("o k", Revert::Overwrite), ("c u p _", Revert::Missing)] {
             sim.engine.reset(ResetMode::Discard);
             sim.reverts = [0; 3];
@@ -644,7 +641,7 @@ mod tests {
             assert_eq!(sim.reverts, want, "{keys:?}");
         }
         // Space made the token at once: the undo is Backspace and Esc, and the composition is empty again.
-        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
+        let mut sim = Sim::new(engine_with(&lex, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
         sim.want = vec![];
         for c in "cup".chars() {
             sim.raw(Key::ch(c, 0)).unwrap();
@@ -661,8 +658,7 @@ mod tests {
     fn undoing_a_one_letter_space_token_keeps_the_earlier_syllables() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap());
-        let words = root.join("eval/golden/english-tiny.txt");
-        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
+        let mut sim = Sim::new(engine_with(&lex, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
         let (syms, tone) = parse_syllable("ㄅㄚ").unwrap();
         sim.syllable(&syms, tone).unwrap();
         let before = sim.engine.syllables().to_vec();
@@ -691,7 +687,7 @@ mod tests {
     fn backspace_repair_ends_when_the_last_unit_sent_the_composition() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let mut sim = Sim::new(
-            engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt"), ALL_ON).unwrap(),
+            engine_digits(root, &root.join("data/lm/bigram.sjlm"), ALL_ON).unwrap(),
             1.0,
             Repair::Backspace,
             20261014,

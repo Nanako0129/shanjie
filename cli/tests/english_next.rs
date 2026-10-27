@@ -2,21 +2,20 @@
 //! base-arm numbers are the models' ranks; a model change moves them). Each engine is about 700 MB (the two profiles are built one after the other).
 use std::process::Command;
 
-fn files(name: &str) -> (String, String, String) {
+fn files(name: &str) -> (String, String) {
     let dir = std::env::temp_dir().join(format!("shanjie-english-next-cli-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let (rows, table, words) = (dir.join("rows.txt"), dir.join("table.tsv"), dir.join("words.txt"));
+    let (rows, table) = (dir.join("rows.txt"), dir.join("table.tsv"));
     // joe is followed by 水 (30) and 說 (20); the second line of rows is not a row and is skipped.
     std::fs::write(&rows, "joe|水|ㄕㄨㄟˇ\nnot a row\njoe|說|ㄕㄨㄛ\njoe|是|ㄕˋ\n").unwrap();
     std::fs::write(&table, "# test\nE\tjoe\t100\nW\tjoe\t水\t30\nW\tjoe\t說\t20\n").unwrap();
-    std::fs::write(&words, "hello\n").unwrap();
-    (rows.to_str().unwrap().into(), table.to_str().unwrap().into(), words.to_str().unwrap().into())
+    (rows.to_str().unwrap().into(), table.to_str().unwrap().into())
 }
 
 #[test]
 fn counts_of_a_tiny_table() {
-    let (rows, table, words) = files("counts");
-    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table, "--words", &words]).output().unwrap();
+    let (rows, table) = files("counts");
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains("skipped 1 rows"));
     let text = String::from_utf8(out.stdout).unwrap();
@@ -41,9 +40,9 @@ fn counts_of_a_tiny_table() {
 
 #[test]
 fn an_invalid_table_is_an_error_not_a_silent_off() {
-    let (rows, table, words) = files("invalid");
+    let (rows, table) = files("invalid");
     std::fs::write(&table, "E\tjoe\t100\nW\tjoe\t水\t0\n").unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table, "--words", &words]).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table]).output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("bad row at line 2"), "{}", String::from_utf8_lossy(&out.stderr));
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();

@@ -49,7 +49,6 @@ fn replay(layout: Layout, english: bool, switches: bool) {
 
     let mut e = Engine::with_lexicon(lex.clone(), layout);
     if english {
-        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
         e.set_english(true).unwrap();
         e.set_english_overwrite(switches).unwrap();
         e.set_english_key_order(switches).unwrap();
@@ -98,7 +97,7 @@ fn replay_with_english_on_and_the_revert_switches_off() {
     replay(Layout::Standard, true, false);
 }
 
-/// Digits.md A.4.1 #48 (C's R2 on the real engine): the 302 rows are Chinese typed right. With the English-mixing switch on, the word list
+/// Digits.md A.4.1 #48 (C's R2 on the real engine): the 302 rows are Chinese typed right. With the English-mixing switch on
 /// and the digit table loaded (and the model: the digit feature needs the scores), every row commits what the same engine commits with the
 /// switch off, no key puts a digit token into the composition, and the keys stay under 16 ms at p95 (release).
 #[test]
@@ -131,7 +130,6 @@ fn replay_with_english_and_digits_on() {
         let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
         e.set_lm(lm.clone(), capped.clone());
         e.set_digit_table(Some(table.clone()));
-        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
         e.set_english(on).unwrap();
         e
     };

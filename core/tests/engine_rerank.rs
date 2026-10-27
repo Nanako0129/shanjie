@@ -588,10 +588,8 @@ fn auto_commit_voids_the_job() {
 /// run (the revert at the end of the composition decodes nothing) change nothing, and the same job still applies.
 #[test]
 fn english_token_voids_the_job() {
-    let list = root().join("eval/golden/english-tiny.txt");
     let after = |end_with_space: bool| {
         let mut e = engine();
-        e.load_english(&list).unwrap();
         e.set_english(true).unwrap();
         type_syls(&mut e, &row(12));
         let result = e.take_rerank_job().expect("a job").run();

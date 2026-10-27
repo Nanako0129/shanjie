@@ -37,12 +37,11 @@ fn shared() -> &'static Shared {
     })
 }
 
-/// Standard layout, the model, the word list and the switch on, and the count table (`with_table`).
+/// Standard layout, the model and the switch on, and the count table (`with_table`).
 fn make(with_table: bool, english: bool) -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
-    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     if with_table {
         e.set_digit_table(Some(s.table.clone()));
     }
@@ -521,7 +520,6 @@ fn row42_eten_ignores_the_switch() {
         let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Eten);
         e.set_lm(s.lm.clone(), s.capped.clone());
         e.set_digit_table(Some(s.table.clone()));
-        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
         e.set_english(on).unwrap();
         e
     };
