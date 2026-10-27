@@ -2841,10 +2841,12 @@ impl Engine {
             let span = self.syls.get(at..at + n);
             at += n;
             // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.
-            // A word read through an adjacent-key syllable (fuzzy input) is not an entry of the typed reading: counted as boosted too. (A
-            // fuzzy-sound word never gets here: a first path with one is no rerank candidate at all, `rerank_pool`.)
+            // A word read through an adjacent-key syllable (fuzzy input) is not an entry of the typed reading either, but nothing taught
+            // it: not boosted, so a stretch with one is reranked whether or not the learner holds a record (the evaluation CLI, which has
+            // no learner, reranks it too). (A fuzzy-sound word never gets here: a first path with one is no rerank candidate at all,
+            // `rerank_pool`.)
             // A word the capped lexicon lacks under its reading is a learned new word (new-word B §2.4): taught, so boosted.
-            span.is_none_or(|s| st.capped.best_lp(s, w).is_none_or(|best| lp > best))
+            span.is_none_or(|s| !s.iter().any(|x| !self.lex.has_syllable(x)) && st.capped.best_lp(s, w).is_none_or(|best| lp > best))
         })
     }
 

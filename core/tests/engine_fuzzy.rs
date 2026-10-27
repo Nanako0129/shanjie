@@ -501,3 +501,47 @@ fn forgetting_a_new_word_keeps_the_tolerant_readings_in_step() {
     assert_eq!(o.preedit.chars().last().map(String::from).as_deref(), Some(slip.as_str()));
     assert_eq!(e.syllables(), ["ㄆㄞˋ", "ㄍㄨㄣ"], "the span is the word's lexicon reading, whichever item was forgotten before it");
 }
+
+/// Review item 3: the learning guard (`Engine::boosted`) returned false at once for an empty learner and judged an adjacent-key word
+/// "boosted" otherwise, so the same typing took a rerank job on a fresh profile and none (and a `guard_skips` count) once any record
+/// existed. A word read through an accepted adjacent-key syllable is no learned word: the stretch is reranked either way, as the
+/// evaluation CLI (which has no learner) reranks it.
+#[test]
+fn the_learning_guard_does_not_depend_on_whether_the_learner_has_records() {
+    let lm = |f: &str| root().join("data/lm").join(f);
+    let sentence = format!("ㄨㄛˇ {UNKNOWN} ㄉㄠˋ ㄋㄧˇ");
+    let run = |taught: bool| {
+        let mut e = Engine::new_with_packs(&root().join("data/lexicon"), Layout::Standard, Some((&root().join("data/packs"), 1))).unwrap();
+        e.load_lm(&lm("bigram.sjlm")).unwrap();
+        e.load_tinylm(&lm("tinylm.sjtl")).unwrap();
+        e.load_colloquial(&lm("colloquial.sjlm")).unwrap();
+        e.set_rerank(true).unwrap();
+        e.set_fuzzy(FUZZY_ALL).unwrap();
+        e.set_today(Some(DAY));
+        e.set_learning(true);
+        if taught {
+            // One re-pick on a reading the sentence does not use, committed: the learner now holds a record.
+            e.set_prediction(false).unwrap();
+            e.set_left_context("今天");
+            let shown = type_syls(&mut e, Layout::Standard, "ㄅㄞˊ ㄇㄚˇ").preedit;
+            let mut o = press(&mut e, KeyKind::Space);
+            for _ in 0..o.total {
+                let cur = &o.candidates[o.selected.unwrap()];
+                if cur.chars().count() == 2 && *cur != shown {
+                    break;
+                }
+                o = press(&mut e, KeyKind::Right);
+            }
+            press(&mut e, KeyKind::Enter);
+            press(&mut e, KeyKind::Enter);
+            assert!(!e.learner().records().is_empty(), "premise: the learner holds a record");
+            e.reset(ResetMode::Discard);
+        }
+        e.set_left_context("今天");
+        type_syls(&mut e, Layout::Standard, &sentence);
+        assert_eq!(e.syllables().len(), 4, "every syllable was accepted");
+        (e.take_rerank_job().is_some(), e.guard_skips())
+    };
+    assert_eq!(run(false), (true, 0), "premise: a fresh profile reranks the stretch");
+    assert_eq!(run(true), (true, 0), "a profile with a record reranks it too, and no guard skip is counted");
+}
