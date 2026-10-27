@@ -138,12 +138,8 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)
     }
 
-    /// zhen-mixed: the English word list, `[a-z]{3,32}` per line; 0 ok, 3 refused (the previous list, or none, stays). Call it once
-    /// after `make`, like `loadLM`.
-    func loadEnglish(path: String) -> Int32 { shanjie_engine_load_english(handle, path) }
-
     /// zhen-mixed: whether Space after an English word typed into one unfinished syllable opens the English window (the core's
-    /// default is off; it needs the loaded list and the standard layout); returns the snapshot. Sent to every engine
+    /// default is off; it needs the standard layout); returns the snapshot. Sent to every engine
     /// `Shell.build()` makes.
     func setEnglish(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
