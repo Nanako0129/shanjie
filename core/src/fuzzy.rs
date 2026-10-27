@@ -9,7 +9,7 @@
 //!   that shown reading to the lexicon syllables it may have come from.
 
 use crate::engine::Layout;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Bits of the fuzzy flags (`shanjie_engine_set_fuzzy`, `--fuzzy`): 0-3 the sound pairs, 4 adjacent-key slips.
 pub const FUZZY_PAIRS: [(char, char); 4] = [('ㄣ', 'ㄥ'), ('ㄓ', 'ㄗ'), ('ㄔ', 'ㄘ'), ('ㄕ', 'ㄙ')];
@@ -81,7 +81,8 @@ pub struct Tolerance {
 }
 
 impl Tolerance {
-    pub(crate) fn build(names: &[String]) -> Tolerance {
+    /// `single`: the ids of the syllables that have a one-syllable entry; only they are adjacent-key alternatives.
+    pub(crate) fn build(names: &[String], single: &HashSet<u32>) -> Tolerance {
         let by_name = |ids: BTreeSet<u32>| -> Box<[u32]> {
             let mut v: Vec<u32> = ids.into_iter().collect();
             v.sort_by(|&a, &b| names[a as usize].cmp(&names[b as usize]));
@@ -105,7 +106,7 @@ impl Tolerance {
         }
         let near = neighbours();
         let mut shown: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
-        for (id, n) in names.iter().enumerate() {
+        for (id, n) in names.iter().enumerate().filter(|(id, _)| single.contains(&(*id as u32))) {
             let (keys, tone) = split(n);
             for i in 0..keys.len() {
                 for &nb in near.get(&keys[i]).into_iter().flatten() {

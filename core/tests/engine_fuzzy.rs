@@ -4,7 +4,7 @@
 use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
-use core::lm::{decode_from, decode_from_fuzzy, CappedLexicon, Lm, Profile};
+use core::lm::{decode_from, decode_from_fuzzy_scored, CappedLexicon, Lm, Profile};
 use core::{Lexicon, Syls, BEAM_S1};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -49,6 +49,15 @@ fn engine(layout: Layout, flags: u32, learn: bool) -> Engine {
         e.set_learning(true);
     }
     e
+}
+
+/// The n-best of `decode_from_fuzzy_scored` as (score, words) with the words as strings.
+fn n_best(s: &Shared, syls: &[String], flags: u32) -> Vec<(f64, Vec<String>)> {
+    decode_from_fuzzy_scored(&s.capped, syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND)
+        .unwrap()
+        .into_iter()
+        .map(|(sc, ws)| (sc, ws.into_iter().map(|w| w.0.to_string()).collect()))
+        .collect()
 }
 
 /// Types the space-separated syllables; the last output. Every key must be accepted without an internal error.
@@ -285,7 +294,7 @@ fn only_the_unknown_syllable_uses_its_alternative() {
     let s = shared();
     let syls: Syls = vec![UNKNOWN.to_string(), "ㄒㄧㄣ".to_string()];
     let surfaces = |flags| -> Vec<String> {
-        decode_from_fuzzy(&s.capped, &syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND).unwrap().into_iter().map(|(_, w)| w.concat()).collect()
+        n_best(s, &syls, flags).into_iter().map(|(_, w)| w.concat()).collect()
     };
     assert!(s.lex.entries(&["ㄅㄧㄝ".to_string(), "ㄒㄧㄥ".to_string()]).iter().any(|e| e.0 == "鱉星"), "premise: 鱉星 is a word of the pair's reading");
     assert!(!surfaces(FUZZY_ADJACENT).iter().any(|w| w == "鱉星"), "bit 4 alone does not read ㄒㄧㄣ as ㄒㄧㄥ");
@@ -310,13 +319,13 @@ fn eten_does_not_accept() {
 fn word_score(syls: &[&str], flags: u32, word: &str) -> f64 {
     let s = shared();
     let v: Vec<String> = syls.iter().map(|x| x.to_string()).collect();
-    let nb = decode_from_fuzzy(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND).unwrap();
+    let nb = n_best(s, &v, flags);
     nb.iter().find(|(_, ws)| ws == &[word.to_string()]).unwrap_or_else(|| panic!("no path of the one word {word}")).0
 }
 
 /// Section 2.1: a word read through one syllable of a sound pair scores `DELTA_SOUND` (2.5, section 3.5) less than the same word read as
 /// the lexicon has it, and through the adjacent reading of a syllable the lexicon lacks, 2 less (log10); and with flags 0
-/// `decode_from_fuzzy` is `decode_from`.
+/// `decode_from_fuzzy_scored` is `decode_from`.
 #[test]
 fn a_sound_pair_costs_its_delta_and_an_adjacent_slip_two() {
     let exact = word_score(&["ㄓ", "ㄉㄠˋ"], 0, "知道");
@@ -327,7 +336,7 @@ fn a_sound_pair_costs_its_delta_and_an_adjacent_slip_two() {
     let s = shared();
     let v: Vec<String> = ["ㄓ", "ㄉㄠˋ"].iter().map(|x| x.to_string()).collect();
     let a = decode_from(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true).unwrap();
-    let b = decode_from_fuzzy(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, 0, core::fuzzy::DELTA_SOUND).unwrap();
+    let b = n_best(s, &v, 0);
     assert!(a == b, "flags 0 is the plain decoder");
 }
 
@@ -426,17 +435,6 @@ fn choosing_an_adjacent_word_rewrites_the_unknown_syllable() {
     let o = press(&mut e, KeyKind::Enter);
     assert_eq!(o.preedit, first);
     assert!(shared().lex.has_syllable(&e.syllables()[0]) && e.syllables()[0] != UNKNOWN);
-}
-
-/// Contract fuzzy-input.md 2.1b: an adjacent-key syllable is accepted without checking that an alternative reading has a
-/// one-syllable entry, because every syllable of the lexicon (base, overlay, sandhi, names and the word pack) has one. This is
-/// what makes an accepted syllable always decodable; if it fails, restore the check in `Engine::adjacent_accepts`.
-#[test]
-fn every_syllable_has_a_single_entry() {
-    let (lex, _) = load_lexicon_packs(&root().join("data/lexicon"), Some((&root().join("data/packs"), PACK_ALL))).unwrap();
-    assert!(lex.syllables().len() > 1000, "the lexicon did not load");
-    let missing: Vec<&String> = lex.syllables().iter().filter(|s| lex.entries(std::slice::from_ref(*s)).is_empty()).collect();
-    assert!(missing.is_empty(), "syllables without a one-syllable entry: {missing:?}");
 }
 
 // ---------- review fixes ----------
@@ -595,4 +593,29 @@ fn a_tolerant_pick_halves_the_new_words_it_displaces_under_their_own_reading() {
     assert!(after.is_some_and(|a| a < before), "premise: an exact pick halves the displaced new word: {before} -> {after:?}");
     let (before, after) = run(true);
     assert!(after.is_some_and(|a| a < before), "the tolerant pick halves it too: {before} -> {after:?}");
+}
+
+/// Review item 5: the tolerance tables list every interned syllable, the packs' included, but the decoder reads an unknown syllable
+/// through the one-syllable entries of its alternatives. ㄧㄟˊ is in a pack word only (ㄧㄟˊ-ㄅㄚ) and has no entry of its own; ㄧㄛˊ,
+/// the slip of ㄧㄟˊ (ㄛ for its neighbour ㄟ), is a syllable only ㄧㄟˊ can have been typed as. Accepting ㄧㄛˊ left a composition no
+/// path covers (`Internal` at the key). An alternative with no one-syllable entry is no alternative: ㄧㄛˊ is refused like any unknown
+/// syllable.
+#[test]
+fn a_pack_only_syllable_without_a_single_entry_is_not_an_alternative() {
+    const PACK_ONLY: &str = "ㄧㄟˊ";
+    const SLIP: &str = "ㄧㄛˊ";
+    let dir = std::env::temp_dir().join(format!("shanjie-fuzzy-pack-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("acg-add.tsv"), format!("{PACK_ONLY}-ㄅㄚ\t甲乙\t-7.0\tacg\n")).unwrap();
+    let (lex, _) = load_lexicon_packs(&root().join("data/lexicon"), Some((&dir, 1))).unwrap();
+    assert!(lex.has_syllable(PACK_ONLY) && lex.entries(&[PACK_ONLY.to_string()]).is_empty(), "premise: a pack-only syllable with no one-syllable entry");
+    assert!(!lex.has_syllable(SLIP), "premise: the slip is no lexicon syllable");
+
+    let mut e = Engine::new_with_packs(&root().join("data/lexicon"), Layout::Standard, Some((&dir, 1))).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    e.set_fuzzy(FUZZY_ADJACENT).unwrap();
+    let o = type_syls(&mut e, Layout::Standard, SLIP);
+    assert!(e.syllables().is_empty() && !o.preedit.chars().any(|c| c as u32 >= 0x3400), "refused: no syllable, no decoded character, got {}", o.preedit);
+    let _ = std::fs::remove_dir_all(&dir);
 }

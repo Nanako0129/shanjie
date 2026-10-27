@@ -1082,7 +1082,7 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0)
+    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND)
 }
 
 /// One reading a span's words are looked up under (fuzzy input, docs/contracts/fuzzy-input.md section 2.1).
@@ -1112,32 +1112,11 @@ impl CappedLexicon {
             return out;
         }
         let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
-        let readings: Vec<(usize, Vec<u32>)> =
-            base.tolerant_readings(ids, span, fuzzy).into_iter().filter_map(|k| base.find(&k).map(|r| (r, k))).collect();
-        let exact_words: HashSet<&str> = exact.into_iter().flat_map(|r| base.range(r)).map(|p| self.word_of(&self.ents[p])).collect();
-        // word -> (score, entry position, which reading), the best of its readings
-        let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
-        let mut order: Vec<&str> = Vec::new();
-        for (a, (r, _)) in readings.iter().enumerate() {
-            for p in base.range(*r).filter(|&p| !exact_words.contains(self.word_of(&self.ents[p]))).take(PER_KEY) {
-                let (w, sc) = (self.word_of(&self.ents[p]), self.ents[p].score);
-                match best.get(w) {
-                    Some(&(b, _, _)) if b >= sc => {}
-                    Some(_) => {
-                        best.insert(w, (sc, p, a));
-                    }
-                    None => {
-                        best.insert(w, (sc, p, a));
-                        order.push(w);
-                    }
-                }
-            }
-        }
-        let mut words: Vec<(f64, usize, usize)> = order.iter().map(|w| best[w]).collect();
-        words.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        words.truncate(PER_KEY);
+        // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
+        // capped scores and the cap per key.
+        let (readings, words) = base.tolerant_pick(ids, span, fuzzy, PER_KEY, PER_KEY, |p| (self.word_of(&self.ents[p]), self.ents[p].score));
         for (a, (r, k)) in readings.iter().enumerate() {
-            let picked: Vec<usize> = words.iter().filter(|w| w.2 == a).map(|w| w.1).collect();
+            let picked: Vec<usize> = words.iter().filter(|w| w.3 == a).map(|w| w.2).collect();
             if !picked.is_empty() {
                 let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
                 out.push(Source { r: Some(*r), pen, names: Some(names), sound: !ids.contains(&u32::MAX), picked });
@@ -1148,30 +1127,13 @@ impl CappedLexicon {
 }
 
 /// `decode_segment_learned` with fuzzy input (docs/contracts/fuzzy-input.md section 2.1). `fuzzy` holds the sound-pair bits 0-3: a
-/// word may also be read through one syllable replaced by its fuzzy-sound alternative, scored `fuzzy::DELTA_SOUND` lower. A
-/// syllable the lexicon does not have is always read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower),
-/// whatever `fuzzy` says: the switch only decides whether such a syllable is accepted when typed. With `fuzzy` 0 and only known
-/// syllables the arithmetic is exactly that of `decode_segment_learned` before this existed.
+/// word may also be read through one syllable replaced by its fuzzy-sound alternative, scored `delta_sound` lower (the engine and the app
+/// always pass `fuzzy::DELTA_SOUND`; another value is for the evaluation CLI, section 3.5). A syllable the lexicon does not have is
+/// always read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower), whatever `fuzzy` says: the switch only decides
+/// whether such a syllable is accepted when typed. With `fuzzy` 0 and only known syllables the arithmetic is exactly that of
+/// `decode_segment_learned` before this existed.
 #[allow(clippy::too_many_arguments)]
 pub fn decode_segment_fuzzy<'a>(
-    lex: &'a CappedLexicon,
-    syls: &[String],
-    lm: &Lm,
-    scoring: impl Into<Scoring>,
-    start: &str,
-    end: End<'_>,
-    beam: usize,
-    learn: Option<&Learn<'a>>,
-    demote: bool,
-    fuzzy: u32,
-) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy_delta(lex, syls, lm, scoring, start, end, beam, learn, demote, fuzzy, crate::fuzzy::DELTA_SOUND)
-}
-
-/// `decode_segment_fuzzy` with the fuzzy-sound penalty `delta_sound` in place of `fuzzy::DELTA_SOUND` (evaluation only: the
-/// engine and the app always use the default; docs/contracts/fuzzy-input.md section 3.5). The adjacent-key penalty is unchanged.
-#[allow(clippy::too_many_arguments)]
-pub fn decode_segment_fuzzy_delta<'a>(
     lex: &'a CappedLexicon,
     syls: &[String],
     lm: &Lm,
@@ -1407,30 +1369,15 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    decode_from_fuzzy(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND)
-}
-
-/// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`) and the fuzzy-sound penalty
-/// `delta_sound` of `decode_segment_fuzzy_delta` (the CLI's evaluation-only `--fuzzy-delta-sound`; `fuzzy::DELTA_SOUND` by default).
-#[allow(clippy::too_many_arguments)]
-pub fn decode_from_fuzzy(
-    lex: &CappedLexicon,
-    syls: &[String],
-    lm: &Lm,
-    profile: Profile,
-    beam: usize,
-    start: &str,
-    demote: bool,
-    fuzzy: u32,
-    delta_sound: f64,
-) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, fuzzy, delta_sound)?
+    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
 }
 
-/// `decode_from_fuzzy` with the paths as the decoder has them, fuzzy-word markers included (what `rerank_pool` reads).
+/// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`) and its fuzzy-sound penalty `delta_sound`
+/// (the CLI's evaluation-only `--fuzzy-delta-sound`; `fuzzy::DELTA_SOUND` by default), and the paths as the decoder has them, fuzzy-word
+/// markers included (what `rerank_pool` reads).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_from_fuzzy_scored<'a>(
     lex: &'a CappedLexicon,
@@ -1443,7 +1390,7 @@ pub fn decode_from_fuzzy_scored<'a>(
     fuzzy: u32,
     delta_sound: f64,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy_delta(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)
+    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)
 }
 
 #[cfg(test)]
@@ -2034,6 +1981,30 @@ mod tests {
             let v = marked("ㄉ b -1.0\n", "", "ㄅ", flags);
             assert_eq!(v, [("b".to_string(), crate::fuzzy::DELTA_ADJACENT, false)], "flags {flags}");
         }
+    }
+
+    /// Review item 6: the decoder's tolerant words (`CappedLexicon::sources`) and the candidate window's (`Lexicon::tolerant_words`) come
+    /// from one function. Here fourteen words stand under the alternative ㄓ of the typed ㄗ (and one, the typed reading's own, under ㄗ):
+    /// the window lists the fourteen, best first, and the decoder takes the same words in the same order up to its `PER_KEY` cap; the
+    /// typed reading's word is in neither.
+    #[test]
+    fn the_decoder_and_the_window_list_the_same_tolerant_words() {
+        let chars: Vec<char> = (0..14).map(|i| char::from_u32(0x4e00 + i).unwrap()).collect();
+        let mut text: String = chars.iter().enumerate().map(|(i, c)| format!("ㄓ {c} -{}\n", 1.0 + i as f64 / 10.0)).collect();
+        text.push_str("ㄗ 乙 -1.0\nㄓ 乙 -1.5\n");
+        let lm = Lm::parse(&tiny()).unwrap();
+        let lex = Arc::new(Lexicon::parse(&text).unwrap());
+        let capped = CappedLexicon::new(lex.clone(), "", &lm, None).unwrap();
+        let syls = vec!["ㄗ".to_string()];
+        let window: Vec<&str> = lex.tolerant_words(&syls, 0b0010).into_iter().map(|(w, _)| w).collect();
+        assert_eq!(window.len(), 14, "the window lists every tolerant word: {window:?}");
+        assert!(!window.contains(&"乙"), "a word of the typed reading is not a tolerant one");
+        let picked: Vec<&str> = capped
+            .sources(&lex.ids(&syls), &syls, 0b0010, crate::fuzzy::DELTA_SOUND)
+            .iter()
+            .flat_map(|src| src.picked.iter().map(|&p| capped.word_of(&capped.ents[p])))
+            .collect();
+        assert_eq!(picked, window[..PER_KEY], "the decoder takes the window's best PER_KEY, in the same order");
     }
 
     /// The pool rule on hand-made n-bests: a fuzzy first path is a skip; otherwise the first `topk` paths without a fuzzy word, in order.

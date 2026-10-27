@@ -2770,6 +2770,7 @@ impl Engine {
                 let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after, today, eps_global: self.eps_global });
                 let best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
+                    crate::fuzzy::DELTA_SOUND,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let first = &best.first().ok_or(EngineError::Internal)?.1;
@@ -3305,8 +3306,8 @@ impl Engine {
     /// syllable it may have been mistyped from. Needs a language model (the bigram decoder reads the alternatives; `decode_beam`
     /// does not) and the standard layout (the neighbour table is that layout's keyboard).
     fn adjacent_accepts(&self, syl: &str) -> bool {
-        // An accepted syllable always decodes: every lexicon syllable has a one-syllable entry (test every_syllable_has_a_single_entry,
-        // contract fuzzy-input.md 2.1b), so some adjacent alternative always does.
+        // An accepted syllable always decodes: the adjacent-key table lists only syllables with a one-syllable entry (`Lexicon::tol`),
+        // so a non-empty alternative list always has a reading the decoder can read the syllable alone through.
         self.fuzzy & FUZZY_ADJACENT != 0
             && self.lm.is_some()
             && self.layout == Layout::Standard
