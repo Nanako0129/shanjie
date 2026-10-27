@@ -53,17 +53,20 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing (the SJ-LM-7 model, data/bigram.sjlm.sha256)";
 
-const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)";
+const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing (data/classes.sjc.sha256)";
 
-const TRIGRAM_MISSING: &str = "data/lm/trigram.sjt3 is missing (the formal profile's trigram table): download it with `gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm`";
+const TRIGRAM_MISSING: &str = "data/lm/trigram.sjt3 is missing (the formal profile's trigram table, data/trigram.sjt3.sha256)";
+
+const TRIGRAM_CHAT_MISSING: &str = "data/lm/trigram-chat.sjt3 is missing (the chat profile's trigram table, data/trigram-chat.sjt3.sha256)";
 
 fn lm_path() -> String {
     let p = format!("{}/../data/lm/bigram.sjlm", env!("CARGO_MANIFEST_DIR"));
     assert!(std::path::Path::new(&p).exists(), "{LM_MISSING}");
     assert!(std::path::Path::new(&format!("{}/../data/lm/classes.sjc", env!("CARGO_MANIFEST_DIR"))).exists(), "{CLASSES_MISSING}");
     assert!(std::path::Path::new(&format!("{}/../data/lm/trigram.sjt3", env!("CARGO_MANIFEST_DIR"))).exists(), "{TRIGRAM_MISSING}");
+    assert!(std::path::Path::new(&format!("{}/../data/lm/trigram-chat.sjt3", env!("CARGO_MANIFEST_DIR"))).exists(), "{TRIGRAM_CHAT_MISSING}");
     p
 }
 
@@ -120,20 +123,20 @@ fn lm_file_is_the_released_model() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
-        "data/lm/bigram.sjlm differs from the model-v6 release; download it again (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
+        "69826c2f2b84431b0f5426f5057730913e0be508477b2fc681e5f50a3d18db5b",
+        "data/lm/bigram.sjlm differs from data/bigram.sjlm.sha256 (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
     );
 }
 
-/// S2k section 4.4: the class table is the classes-v5 release asset (data/classes.sjc.sha256).
+/// S2k section 4.4: the class table is the one data/classes.sjc.sha256 records.
 #[test]
 fn classes_file_is_the_released_build() {
     let p = std::path::Path::new(&lm_path()).with_file_name("classes.sjc");
-    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm", p.display()));
+    let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing", p.display()));
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
-        "data/lm/classes.sjc differs from the classes-v5 release; download it again or rebuild with tools/build_classes.py"
+        "4315f0ed90ab5512a50e2a529693d0f551f842484a97c8f82ddccfef302446ae",
+        "data/lm/classes.sjc differs from data/classes.sjc.sha256; rebuild it with tools/build_classes.py or fetch the recorded file"
     );
 }
 
@@ -213,20 +216,20 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 }
 
 /// S2k acceptance 3: `--no-classes` is the arithmetic without the word-class term. The two summary lines are what the Python
-/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-14 for model-v6: kn.sjkn beside the model is
-/// on in both, names layer on; the formal line regenerated again for trigram-core slice C3: with trigram.sjt3 beside the model the formal
-/// profile decodes with the table and KN is off there, hence `+tri:` instead of `+kn:`; before it for dec-recombine, and before that they were the ones main's s2h-lm-context.txt held before S2k).
+/// `lm_eval.py --no-classes --profile P --dev 302 --context` prints (regenerated 2026-10-27 for SJ-LM-7, sj-lm-7-pr2.md: kn.sjkn beside the model is
+/// on in both, names layer on, each profile with its own table: `+tri:` of trigram-chat.sjt3 for chat and of trigram.sjt3 for formal, whose `+kn:` is at
+/// beta 0.75; before it regenerated for model-v6, trigram-core slice C3 and dec-recombine, and before that they were the ones main's s2h-lm-context.txt held before S2k).
 #[test]
 fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
     let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(
         line("chat"),
-        "## dev302  lm-chat+ctx-noclasses+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'f061b257afcd622c8eb7375ac143f026a31cd6a062c685603ba63ff7366da4ca'}\n"
+        "## dev302  lm-chat+ctx-noclasses+kn:2b332df9:θ1:β1+tri:03891d5a  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c'}\n"
     );
     assert_eq!(
         line("formal"),
-        "## dev302  lm-formal+ctx-noclasses+tri:fdd3b05d  {'n': 302, 'top1': 252, 'oracle@64': 300, 'top1_sha256': '22ff9dc530e4b3dd098f824546784c47eafb775b92b0f9e20702d9c0ee33ab0c'}\n"
+        "## dev302  lm-formal+ctx-noclasses+kn:2b332df9:θ1:β0.75+tri:7ec1869b  {'n': 302, 'top1': 260, 'oracle@64': 300, 'top1_sha256': '3c6f177cdd786ae2b28c852a065e99318bc22693c1a87bbc8b7f6f1386dee66c'}\n"
     );
 }
 
@@ -329,15 +332,16 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     assert!(off.starts_with("## t  lm-chat  {'n': 1,"), "{off}");
 }
 
-/// trigram-core: the table beside the model is read only for `--profile formal` without `--no-tri` (chat and `--predict` never read it, so a bad one cannot
-/// break them); formal with a table prints `+tri:` and no `+kn:` but still reads and checks kn.sjkn; reference/proto/lm_eval.py mirrors every case
-/// (tools/test_build_trigram.py). The toy model of eval/golden/kn-tiny with the toy table of eval/golden/tri-tiny.
+/// sj-lm-7-pr2: each profile reads only its own trigram table beside the model, `trigram.sjt3` for formal and `trigram-chat.sjt3` for chat (the other one
+/// can be bad or missing without touching it, and `--predict` reads neither), unless `--no-tri`; both profiles keep Kneser-Ney, the formal one at beta 0.75
+/// (the tag shows it) and the chat one at the file's beta 1; a bad kn.sjkn fails both. reference/proto/lm_eval.py mirrors every case
+/// (tools/test_build_trigram.py). The toy model of eval/golden/kn-tiny with the two toy tables of eval/golden/tri-tiny.
 #[test]
-fn trigram_table_is_read_for_formal_only() {
+fn each_profile_reads_only_its_own_trigram_table() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
     let dir = std::env::temp_dir().join(format!("shanjie-tri-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for (src, f) in [("kn-tiny", "bigram.sjlm"), ("kn-tiny", "classes.sjc"), ("kn-tiny", "kn.sjkn"), ("tri-tiny", "trigram.sjt3")] {
+    for (src, f) in [("kn-tiny", "bigram.sjlm"), ("kn-tiny", "classes.sjc"), ("kn-tiny", "kn.sjkn"), ("tri-tiny", "trigram.sjt3"), ("tri-tiny", "trigram-chat.sjt3")] {
         std::fs::copy(format!("{root}/eval/golden/{src}/{f}"), dir.join(f)).unwrap();
     }
     let (lm, rows) = (dir.join("bigram.sjlm"), dir.join("rows.txt"));
@@ -348,34 +352,55 @@ fn trigram_table_is_read_for_formal_only() {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(&a).output().unwrap();
         (out.status.success(), String::from_utf8(out.stdout).unwrap())
     };
-    let tag = |f: &str| format!("+tri:{}", &core::eval::sha256_hex(&std::fs::read(dir.join(f)).unwrap())[..8]);
-    let want = tag("trigram.sjt3");
+    let sha8 = |f: &str| core::eval::sha256_hex(&std::fs::read(dir.join(f)).unwrap())[..8].to_string();
+    let (formal_tri, chat_tri, kn) = (format!("+tri:{}", sha8("trigram.sjt3")), format!("+tri:{}", sha8("trigram-chat.sjt3")), sha8("kn.sjkn"));
+    assert_ne!(formal_tri, chat_tri, "premise: the two toy tables differ");
     let (ok, formal) = go(&["--profile", "formal"]);
-    assert!(ok && formal.contains(&want) && !formal.contains("+kn:"), "{formal}");
-    let (ok, no_tri) = go(&["--profile", "formal", "--no-tri"]);
-    assert!(ok && !no_tri.contains("+tri:") && no_tri.contains("+kn:"), "{no_tri}");
+    assert!(ok && formal.starts_with(&format!("## t  lm-formal+kn:{kn}:θ1:β0.75{formal_tri}  ")), "formal: its table, KN at 0.75: {formal}");
     let (ok, chat) = go(&["--profile", "chat"]);
-    assert!(ok && !chat.contains("+tri:") && chat.contains("+kn:"), "{chat}");
-    // the experiment flag: chat reads the table too, Kneser-Ney as asked; it is refused where it would silently measure the bigram
-    let (ok, on_kn) = go(&["--profile", "chat", "--chat-tri", "on-kn"]);
-    assert!(ok && on_kn.contains(&want) && on_kn.contains("+kn:"), "{on_kn}");
-    let (ok, off_kn) = go(&["--profile", "chat", "--chat-tri", "off-kn"]);
-    assert!(ok && off_kn.contains(&want) && !off_kn.contains("+kn:"), "{off_kn}");
-    assert!(!go(&["--profile", "chat", "--chat-tri", "off-kn", "--no-tri"]).0 && !go(&["--profile", "formal", "--chat-tri", "on-kn"]).0 && !go(&["--profile", "chat", "--chat-tri", "maybe"]).0);
-    // a bad table: formal refuses it, everything that does not read it still runs
-    let table = dir.join("trigram.sjt3");
-    std::fs::write(&table, b"junk").unwrap();
+    assert!(ok && chat.starts_with(&format!("## t  lm-chat+kn:{kn}:θ1:β1{chat_tri}  ")), "chat: its table, KN at the file's beta: {chat}");
+    for p in ["formal", "chat"] {
+        let (ok, no_tri) = go(&["--profile", p, "--no-tri"]);
+        assert!(ok && !no_tri.contains("+tri:") && no_tri.contains("+kn:"), "{p} --no-tri: {no_tri}");
+        let (ok, no_kn) = go(&["--profile", p, "--no-kn"]);
+        assert!(ok && no_kn.contains("+tri:") && !no_kn.contains("+kn:"), "{p} --no-kn: {no_kn}");
+    }
+    // the options of the experiments are gone
+    for flag in [["--chat-tri", "on-kn"], ["--formal-kn", ""], ["--kn-beta", "0.75"]] {
+        let args: Vec<&str> = ["--profile", "chat"].into_iter().chain(flag).filter(|a| !a.is_empty()).collect();
+        assert!(!go(&args).0, "{flag:?} is not an option any more");
+    }
+    // a bad formal table: formal refuses it, chat (which does not read it), --no-tri and --predict still run
+    let (formal_file, chat_file) = (dir.join("trigram.sjt3"), dir.join("trigram-chat.sjt3"));
+    let (good_formal, good_chat) = (std::fs::read(&formal_file).unwrap(), std::fs::read(&chat_file).unwrap());
+    std::fs::write(&formal_file, b"junk").unwrap();
     assert!(!go(&["--profile", "formal"]).0, "a bad table is never ignored");
     assert!(go(&["--profile", "formal", "--no-tri"]).0);
-    assert!(go(&["--profile", "chat"]).0, "chat does not read the table");
+    assert!(go(&["--profile", "chat"]).0, "chat does not read the formal table");
     let predict = format!("{root}/eval/golden/sp-predict.txt");
     let predict_runs = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--predict", &predict, "--lm", lm.to_str().unwrap(), "--profile", "formal"]).output().unwrap();
-    assert!(predict_runs.status.success(), "--predict does not read the table: {}", String::from_utf8_lossy(&predict_runs.stderr));
-    // a bad kn.sjkn beside a good table still fails the formal run
-    std::fs::copy(format!("{root}/eval/golden/tri-tiny/trigram.sjt3"), &table).unwrap();
+    assert!(predict_runs.status.success(), "--predict does not read the tables: {}", String::from_utf8_lossy(&predict_runs.stderr));
+    // and the other way round
+    std::fs::write(&formal_file, &good_formal).unwrap();
+    std::fs::write(&chat_file, b"junk").unwrap();
+    assert!(!go(&["--profile", "chat"]).0, "a bad chat table is never ignored");
+    assert!(go(&["--profile", "chat", "--no-tri"]).0);
+    assert!(go(&["--profile", "formal"]).0, "formal does not read the chat table");
+    // a missing file turns off only that profile's table
+    std::fs::remove_file(&chat_file).unwrap();
+    let (ok, chat) = go(&["--profile", "chat"]);
+    assert!(ok && !chat.contains("+tri:") && chat.contains("+kn:"), "{chat}");
+    assert!(go(&["--profile", "formal"]).1.contains(&formal_tri));
+    std::fs::write(&chat_file, &good_chat).unwrap();
+    std::fs::remove_file(&formal_file).unwrap();
+    let (ok, formal) = go(&["--profile", "formal"]);
+    assert!(ok && !formal.contains("+tri:") && formal.contains("+kn:"), "{formal}");
+    assert!(go(&["--profile", "chat"]).1.contains(&chat_tri));
+    std::fs::write(&formal_file, &good_formal).unwrap();
+    // a bad kn.sjkn beside good tables still fails both profiles
     std::fs::write(dir.join("kn.sjkn"), b"junk").unwrap();
-    assert!(!go(&["--profile", "formal"]).0, "kn.sjkn is read and checked when the table is on");
-    assert!(go(&["--profile", "formal", "--no-kn"]).0);
+    assert!(!go(&["--profile", "formal"]).0 && !go(&["--profile", "chat"]).0, "kn.sjkn is read and checked whatever the tables");
+    assert!(go(&["--profile", "formal", "--no-kn"]).0 && go(&["--profile", "chat", "--no-kn"]).0);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -396,14 +421,16 @@ fn predict_no_kn_scores_differently_from_the_golden() {
 /// first even without the entry, so they only pin the behaviour). A retrained model or a new
 /// rerank that pushes another name below its homophones fails here instead of shipping silently; the one known miss is listed below.
 /// Known exception since classes-v5 (μ 0.8 → 0.2, docs/contracts/classes-v5.md): in formal, row 8 `米雅歌唱得很好` comes out as
-/// 米亞 after the rerank. The test pins exactly that miss (rowstats, i.e. after the rerank) so any other row dropping still fails.
+/// 米亞 after the rerank. Since SJ-LM-7 (measured 2026-10-27 on the final files, sj-lm-7-pr2.md section 3) a second one: in formal, row 4 `米雅歌`
+/// (n-gram first) comes out as 米亞哥 after the rerank at standard and aggressive strength (conservative keeps it); chat misses none. The test pins
+/// exactly those misses (rowstats, i.e. after the rerank) so any other row dropping still fails; row 4 is a new loss for the maintainer to look at.
 #[test]
 fn manual_words_come_first_in_the_shipping_setting() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
     let rows = format!("{root}/eval/golden/manual-words-rows.txt");
     let tl = format!("{root}/data/lm/tinylm.sjtl");
     let stats = std::env::temp_dir().join(format!("shanjie-manual-words-{}.rowstats", std::process::id()));
-    for (profile, misses) in [("chat", vec![]), ("formal", vec!["8"])] {
+    for (profile, misses) in [("chat", vec![]), ("formal", vec!["4", "8"])] {
         let _ = std::fs::remove_file(&stats);
         run(&["--lm", &lm_path(), "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rows", &rows, "--rowstats", stats.to_str().unwrap()]);
         let got = std::fs::read_to_string(&stats).unwrap();
@@ -416,16 +443,16 @@ fn manual_words_come_first_in_the_shipping_setting() {
 
 /// names-lexicon 3.5: `--extra-overlay FILE` makes the file's word the first candidate (and only then), and a
 /// missing file is a non-zero exit that names the path. (The contract says "appears among the candidates"; the string
-/// 酷澎 is also composable from two single-character words, so it appears in the list either way and only its rank tells.)
-/// 酷澎 is in the shipped names layer since model-v6, so every run here is `--no-names` (marked `-nonames`); the shipped layer
+/// 鮮爭 is also composable from two single-character words, so it appears in the list either way and only its rank tells.)
+/// 鮮爭 is a made-up name (in no lexicon file, count 0 in the model) and every run here is `--no-names` (marked `-nonames`); the shipped layer
 /// itself is `names_layer_is_on_by_default_and_no_names_turns_it_off`.
 #[test]
 fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
     let dir = std::env::temp_dir().join(format!("shanjie-extra-overlay-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let (rows, extra, dump) = (dir.join("rows.txt"), dir.join("names-add.tsv"), dir.join("dump.tsv"));
-    std::fs::write(&rows, "|酷澎|ㄎㄨˋ ㄆㄥˊ\n").unwrap();
-    std::fs::write(&extra, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-3.0\tnames\n").unwrap();
+    std::fs::write(&rows, "|鮮爭|ㄒㄧㄢ ㄓㄥ\n").unwrap();
+    std::fs::write(&extra, "ㄒㄧㄢ-ㄓㄥ\t鮮爭\t-3.0\tnames\n").unwrap();
     let lm = lm_path();
     let first = |extra_args: &[&str]| {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
@@ -440,15 +467,15 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
         let marked = extra_args.contains(&"--extra-overlay");
         assert_eq!(head.contains("+xo:"), marked, "{head}");
         if marked {
-            let h = head.split("+xo:").nth(1).unwrap();
+            let h = head.split("+xo:").nth(1).unwrap().split('+').next().unwrap(); // the `+tri:` of the profile's table may follow
             assert!(h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()), "{head}");
         }
         let dump = std::fs::read_to_string(&dump).unwrap();
         let top = dump.lines().find(|l| l.split('\t').nth(1) == Some("1")).unwrap();
         top.split('\t').nth(2).unwrap().to_string()
     };
-    assert_eq!(first(&["--extra-overlay", extra.to_str().unwrap()]), "酷澎");
-    assert_ne!(first(&[]), "酷澎");
+    assert_eq!(first(&["--extra-overlay", extra.to_str().unwrap()]), "鮮爭");
+    assert_ne!(first(&[]), "鮮爭");
     let missing = dir.join("no-such.tsv");
     let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
         .args(["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--extra-overlay", missing.to_str().unwrap()])
@@ -459,16 +486,16 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// model-v6 section 2.5: the names layer (data/lexicon/names-add.tsv) is loaded by default, so 酷澎 (a names-only word, in no other
-/// lexicon file) is the first candidate in both profiles with no option; `--no-names` leaves it out and marks the summary line.
+/// model-v6 section 2.5: the names layer (data/lexicon/names-add.tsv) is loaded by default, so 臻鼎 (a names-only word, in no other
+/// lexicon file; the test used 酷澎 before SJ-LM-7, whose counts made 酷澎 the first candidate without the layer too) is the first candidate in both profiles with no option; `--no-names` leaves it out and marks the summary line.
 #[test]
 fn names_layer_is_on_by_default_and_no_names_turns_it_off() {
     let dir = std::env::temp_dir().join(format!("shanjie-names-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let (rows, dump) = (dir.join("rows.txt"), dir.join("dump.tsv"));
-    std::fs::write(&rows, "|酷澎|ㄎㄨˋ ㄆㄥˊ\n").unwrap();
+    std::fs::write(&rows, "|臻鼎|ㄓㄣ ㄉㄧㄥˇ\n").unwrap();
     let names = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../data/lexicon/names-add.tsv")).unwrap();
-    assert!(names.lines().any(|l| l.split('\t').nth(1) == Some("酷澎")), "premise: 酷澎 is a names-layer word");
+    assert!(names.lines().any(|l| l.split('\t').nth(1) == Some("臻鼎")), "premise: 臻鼎 is a names-layer word");
     let lm = lm_path();
     for profile in ["chat", "formal"] {
         let first = |extra: &[&str]| {
@@ -477,8 +504,8 @@ fn names_layer_is_on_by_default_and_no_names_turns_it_off() {
             (head.split("  ").nth(1).unwrap().to_string(), top)
         };
         let ((on_tag, on), (off_tag, off)) = (first(&[]), first(&["--no-names"]));
-        assert_eq!(on, "酷澎", "{profile}");
-        assert_ne!(off, "酷澎", "{profile}");
+        assert_eq!(on, "臻鼎", "{profile}");
+        assert_ne!(off, "臻鼎", "{profile}");
         // `-nonames` goes after `-noclasses`, before the `+kn:` tag: lm-chat+kn:… becomes lm-chat-nonames+kn:…
         assert_eq!(off_tag, on_tag.replacen(&format!("lm-{profile}"), &format!("lm-{profile}-nonames"), 1), "{profile}");
         assert!(!on_tag.contains("nonames"), "{on_tag}");

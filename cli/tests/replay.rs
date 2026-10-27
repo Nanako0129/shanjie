@@ -32,9 +32,10 @@ fn row(line: &'static str) -> Row {
 fn zai() -> Row {
     row("我打錯了我看成號碼|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ")
 }
-/// 這加速度很快你看一下 is shown; the gold text has 家 at the second place. Fix: Home, Right, Right (3 keys, not 8 Lefts), Space, digit.
-fn jia() -> Row {
-    row("|這家速度很快你看一下|ㄓㄜˋ ㄐㄧㄚ ㄙㄨˋ ㄉㄨˋ ㄏㄣˇ ㄎㄨㄞˋ ㄋㄧˇ ㄎㄢˋ ㄧˊ ㄒㄧㄚˋ")
+/// 這隻乾脆留下來了 is shown; the gold text has 支 at the second place. Fix: Home, Right, Right (3 keys, not 6 Lefts), Space, digit. (This row replaced
+/// 這家速度很快你看一下, which the SJ-LM-7 model shows right.)
+fn zhi() -> Row {
+    row("所以雖然退了一支，|這支乾脆留下來了|ㄓㄜˋ ㄓ ㄍㄢ ㄘㄨㄟˋ ㄌㄧㄡˊ ㄒㄧㄚˋ ㄌㄞˊ ㄌㄜ˙")
 }
 /// The gold 奕 sits on the third page of the window for ㄧˋ (checked by hand in the test), so the re-pick pages twice.
 fn yi() -> Row {
@@ -86,7 +87,7 @@ fn cursor_move_cost_takes_the_shortest_route() {
 
 /// Rule (section 4): a wrong first display with the gold word in the window at the cursor is fixed by moving the cursor (the
 /// shortest way), Space to open, Space for each page before the item, and the item's digit; `actual` is the typed keys plus those plus
-/// Enter, and what is sent is the gold text. 我再重打: Left, Left, Space, digit = 4; the 這家 row: Home, Right, Right, Space, digit = 5;
+/// Enter, and what is sent is the gold text. 我再重打: Left, Left, Space, digit = 4; the 這支 row: Home, Right, Right, Space, digit = 5;
 /// 奕 on the third page: Space, Space, Space, digit = 4 (no move: the cursor is already at the end).
 #[test]
 fn a_repick_costs_the_moves_the_window_and_the_digit() {
@@ -101,7 +102,7 @@ fn a_repick_costs_the_moves_the_window_and_the_digit() {
     assert_eq!(third, Some((18, true)), "奕 is on the third page");
     e.key(Key::new(KeyKind::Esc)).unwrap();
     e.key(Key::new(KeyKind::Esc)).unwrap(); // clears the composition
-    for (r, extra) in [(zai(), 4), (jia(), 5), (yi(), 4)] {
+    for (r, extra) in [(zai(), 4), (zhi(), 5), (yi(), 4)] {
         let o = go(&mut e, &r, &len, FIX);
         assert!(!o.first_ok, "the model shows the wrong word first");
         assert!(o.final_ok && !o.unfixable && o.committed == r.gold, "sent text is the gold text");
@@ -288,7 +289,7 @@ fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// The App's engine loads the colloquial table (docs/contracts/colloquial-term.md section 2.3, item 4), so the replay does by default: on row 202
+/// The App's engine loads the colloquial table (docs/contracts/colloquial-term.md section 2.3, item 4), so the replay does by default: on row 25
 /// of dev302 and on the first rows of dev302 its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) and the summary is
 /// tagged; `--colloquial FILE` is the same; `--no-colloquial` (and `--no-tinylm`) is untagged with the shipping choice; the two options together
 /// are an error.
@@ -299,8 +300,8 @@ fn colloquial_replay_agrees_with_the_cli() {
     let rows = dir.join("rows.txt");
     let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
     let lines: Vec<&str> = dev.lines().collect();
-    assert!(lines[201].starts_with("桌子一直在搖|桌腳的螺絲鬆掉了|"));
-    std::fs::write(&rows, [&lines[..12], &lines[200..206]].concat().join("\n") + "\n").unwrap();
+    assert!(lines[24].starts_with("|執行這個程式|"));
+    std::fs::write(&rows, [&lines[..12], &lines[22..28]].concat().join("\n") + "\n").unwrap();
     let rows = rows.to_str().unwrap();
     let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
@@ -322,15 +323,15 @@ fn colloquial_replay_agrees_with_the_cli() {
     assert_ne!(sha_of(&plain), sha_of(&with), "premise: the term changes a choice among these rows");
     assert_eq!(sha_of(&plain), sha_of(&rep_plain));
     assert_eq!(sha_of(&with), sha_of(&rep_with));
-    assert!(rep_with.contains("+colloq:2984eeb5") && !rep_plain.contains("colloq"), "{rep_with}{rep_plain}");
+    assert!(rep_with.contains("+colloq:81c2470d") && !rep_plain.contains("colloq"), "{rep_with}{rep_plain}");
     let shown = std::fs::read_to_string(&firsts).unwrap();
-    assert_eq!(shown.lines().nth(13), Some("桌腳的螺絲鬆掉了"), "row 202 is the 14th row of the file: the term's choice is the first display");
+    assert_eq!(shown.lines().nth(14), Some("執行這個程式"), "row 25 is the 15th row of the file: the term's choice is the first display");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// docs/contracts/reading-channel.md section 2.2 and item 4: the replay's engine adds the reading-channel term to the colloquial term by default,
-/// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 10, 81 and 102 of the set, where the term moves the
-/// pick; `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
+/// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 81, 159 and 10 of the set, where the term moves the
+/// picks (rows 10, 81 and 102 until SJ-LM-7); `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
 #[test]
 fn reading_channel_replay_agrees_with_the_cli() {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-rc-{}", std::process::id()));
@@ -338,8 +339,8 @@ fn reading_channel_replay_agrees_with_the_cli() {
     let rows = dir.join("rows.txt");
     let all = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
     let lines: Vec<&str> = all.lines().collect();
-    assert!(lines[9].starts_with("|你有東西要先進版控嗎|") && lines[80].starts_with("|長歪了|") && lines[101].starts_with("幹opencc|是不是很雷啊|"));
-    std::fs::write(&rows, [lines[9], lines[80], lines[101]].join("\n") + "\n").unwrap();
+    assert!(lines[80].starts_with("|長歪了|") && lines[158].starts_with("|有點累贅|") && lines[9].starts_with("|你有東西要先進版控嗎|"));
+    std::fs::write(&rows, [lines[80], lines[158], lines[9]].join("\n") + "\n").unwrap();
     let rows = rows.to_str().unwrap();
     let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
@@ -354,7 +355,7 @@ fn reading_channel_replay_agrees_with_the_cli() {
     assert_ne!(sha_of(&with), sha_of(&alone), "premise: the channel moves a choice among these rows");
     assert_eq!(sha_of(&with), sha_of(&rep_with));
     assert_eq!(sha_of(&alone), sha_of(&rep_alone));
-    assert!(rep_with.contains("+colloq:2984eeb5+rc") && rep_alone.contains("+colloq:2984eeb5") && !rep_alone.contains("+rc"), "{rep_with}{rep_alone}");
+    assert!(rep_with.contains("+colloq:81c2470d+rc") && rep_alone.contains("+colloq:81c2470d") && !rep_alone.contains("+rc"), "{rep_with}{rep_alone}");
     // no table loaded: nothing to switch off, the summary is the one without the option
     assert_eq!(run(replay, &["--rows", rows, "--no-colloquial"]), run(replay, &["--rows", rows, "--no-colloquial", "--no-reading-channel"]));
     std::fs::remove_dir_all(&dir).unwrap();

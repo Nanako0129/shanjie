@@ -13,9 +13,10 @@ fn root() -> PathBuf {
 }
 fn lm_path() -> PathBuf {
     let p = root().join("data/lm/bigram.sjlm");
-    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing: download it with `gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm` (or build it with tools/build_classes.py)");
-    assert!(p.exists(), "data/lm/bigram.sjlm is missing: download it with `gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm`");
-    assert!(root().join("data/lm/trigram.sjt3").exists(), "data/lm/trigram.sjt3 is missing (the formal profile's trigram table): download it with `gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm`");
+    assert!(root().join("data/lm/classes.sjc").exists(), "data/lm/classes.sjc is missing (the files data/*.sha256 record; or build it with tools/build_classes.py)");
+    assert!(p.exists(), "data/lm/bigram.sjlm is missing (the files data/*.sha256 record)");
+    assert!(root().join("data/lm/trigram.sjt3").exists(), "data/lm/trigram.sjt3 is missing (the formal profile's trigram table, data/trigram.sjt3.sha256)");
+    assert!(root().join("data/lm/trigram-chat.sjt3").exists(), "data/lm/trigram-chat.sjt3 is missing (the chat profile's trigram table, data/trigram-chat.sjt3.sha256)");
     p
 }
 
@@ -205,17 +206,23 @@ fn row(n: usize) -> (String, Syls) {
 #[test]
 fn fixed_overlay_word_total_equals_whole_sentence_top1() {
     let s = shared();
-    // rows whose chat top-1 contains an overlay word: 洗衣球, 隔熱墊, 防滑墊, 空氣炸鍋 (手搖杯, row 290, left in model-v6: its corpus
-    // frequency is now within 0.1 of its overlay score, so the cap no longer moves it)
-    for (n, word) in [(276, "洗衣球"), (278, "隔熱墊"), (281, "防滑墊"), (292, "空氣炸鍋")] {
+    // rows whose chat top-1 contains an overlay word the corpus counts so low that the cap moves it by more than 0.1: 空氣炸鍋 (row 292). The other
+    // rows of model-v6 (洗衣球 276, 隔熱墊 278, 防滑墊 281; 手搖杯, row 290, left in model-v6) left it in SJ-LM-7: the counting vocabulary holds the
+    // overlay words now, so their corpus frequency is within 0.1 of the overlay score (a search over dev302, 2026-10-27, found only row 292)
+    // Both sides run on the model without the trigram tables, as in `fixed_word_total_equals_top1_on_first_rows` below: the chat profile has its own table
+    // since SJ-LM-7, and with it a path with a fixed word legitimately scores differently from the same string without one (trigram-core rule (a)).
+    let lm = Arc::new(Lm::load_opts(&lm_path(), true, true, &[]).unwrap());
+    for (n, word) in [(292, "空氣炸鍋")] {
         let (_, syls) = row(n);
-        let (surface, score, spans) = best_path(&syls, Profile::Chat);
+        let (surface, score, spans) = best_path_in(&lm, &syls, Profile::Chat);
         let &(_, a, b) = spans.iter().find(|(w, _, _)| w == word).expect("word is in the top-1 path");
         let key = &syls[a..b];
         let raw = s.lex.entries(key).iter().filter(|(w, _)| *w == word).map(|x| x.1).fold(f64::MIN, f64::max);
         let capped = s.capped.best_lp(key, word).unwrap();
         assert!(raw - capped > 0.1, "the cap must change this word's score (row {n})");
-        let mut e = engine(Layout::Standard, Profile::Chat);
+        let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
+        e.set_lm(lm.clone(), s.capped.clone());
+        e.set_profile(Profile::Chat).unwrap();
         let o = fix_word(&mut e, Layout::Standard, &syls, b, word);
         assert!(o.preedit == surface, "string differs at row {n}");
         let total = e.total_score().unwrap();
@@ -225,7 +232,7 @@ fn fixed_overlay_word_total_equals_whole_sentence_top1() {
 
 /// 5(a), breadth: every word of the top-1 path of the first rows, both profiles. A beam of 64 is an
 /// approximation, so a row may legitimately differ; at most 2 of the checked words may.
-/// Both sides run on the model without `trigram.sjt3` (`Lm::load_opts(.., tri: false)`). With the table the formal profile
+/// Both sides run on the model without `trigram.sjt3` (`Lm::load_opts(.., &[])`). With the table the formal profile
 /// legitimately scores a path with a fixed word differently from the same string without one: trigram-core rule (a) gives the
 /// first word after a fixed word an unknown u (bigram only), while the whole-sentence top-1 has the real u there (measured
 /// 2026-10-16: 39 of 97 checked words differ in the formal profile, all with the same surface and a score off by 0.02 to 1.4;
@@ -234,7 +241,7 @@ fn fixed_overlay_word_total_equals_whole_sentence_top1() {
 #[test]
 fn fixed_word_total_equals_top1_on_first_rows() {
     let s = shared();
-    let lm = Arc::new(Lm::load_opts(&lm_path(), true, true, false).unwrap());
+    let lm = Arc::new(Lm::load_opts(&lm_path(), true, true, &[]).unwrap());
     let (mut ok, mut bad) = (0, 0);
     for profile in [Profile::Chat, Profile::Formal] {
         for n in 1..=12 {
@@ -270,10 +277,10 @@ fn right_fixed_word_transition_changes_left_choice() {
         let (surface, _, spans) = best_path(&syls, profile);
         let &(_, a, b) = spans.iter().find(|(w, _, _)| w == word).unwrap();
         // The premise, computed straight from the decoder: the two endings disagree.
-        let lam = profile.lambda();
+        let scoring = s.lm.scoring(profile);
         let lp = s.capped.best_lp(&syls[a..b], word).unwrap();
         let top = |end| {
-            let r = decode_segment(&s.capped, &syls[..a], &s.lm, lam, "<s>", end, 64).unwrap();
+            let r = decode_segment(&s.capped, &syls[..a], &s.lm, scoring, "<s>", end, 64).unwrap();
             r[0].1.iter().map(|x| x.0).collect::<String>()
         };
         assert_eq!(top(End::Next { word, lp, delta: 0.0 }), with_t);
@@ -297,42 +304,41 @@ fn type_row(e: &mut Engine, layout: Layout, syls: &Syls) -> Output {
     last.unwrap()
 }
 
-/// Acceptance 6 sentence (dev302 row 127): unigram, chat and formal top-1 are pairwise different, the truth being the formal one.
-/// It was row 10 before the word-class term (S2k), then row 226, then row 284; each stopped telling the profiles apart (the class term made
+/// Acceptance 6 sentence (dev302 row 287): unigram, chat and formal top-1 are pairwise different, the truth being the formal one.
+/// It was row 10 before the word-class term (S2k), then row 226, then row 284, then row 127; each stopped telling the profiles apart (the class term made
 /// chat pick 期中報告 as formal does; the one-path-per-(surface, last word) decoder of dec-recombine made row 226 `及時趕到` in both; with
-/// trigram.sjt3 beside the model the formal profile gives 律水壺 on row 284, no longer the truth 濾水壺). Row 127 (道士在廟裡設壇作法) is the
-/// first dev302 row where the three differ and formal equals the truth: measured 2026-10-16 by typing all 302 rows through this engine setup
-/// (unigram engine, chat, formal) with trigram.sjt3 beside the model; the rows where all three differ are 118, 127, 183, 215, 284 and the
-/// formal one is the truth only on 127 and 215 (118, 183 and 284 have a formal top-1 that is not the truth). The chat and formal strings below
-/// are also the golden's (checked by the last assert), the unigram one is the decoder's.
+/// trigram.sjt3 beside the model the formal profile gave 律水壺 on row 284, no longer the truth 濾水壺; with the SJ-LM-7 files, whose chat profile has
+/// its own table too, the two profiles agree on 倒是在廟裡設壇作法 on row 127). Row 287 (可以墊一個散熱墊) is the only dev302 row where the three differ with
+/// both tables beside the model: measured 2026-10-27 by typing all 302 rows through this engine setup (unigram engine, chat, formal); the formal one is the truth.
+/// The chat and formal strings below are also the golden's (checked by the last assert), the unigram one is the decoder's.
 #[test]
 fn acceptance6_sentence_has_three_different_top1() {
-    let (truth, syls) = row(127);
+    let (truth, syls) = row(287);
     let uni = type_row(&mut Engine::with_lexicon(shared().lex.clone(), Layout::Standard), Layout::Standard, &syls).preedit;
     let chat = type_row(&mut engine(Layout::Standard, Profile::Chat), Layout::Standard, &syls).preedit;
     let formal = type_row(&mut engine(Layout::Standard, Profile::Formal), Layout::Standard, &syls).preedit;
-    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("到是在廟裡社談作法", "到是在廟裡設壇作法", "道士在廟裡設壇作法"));
+    assert_eq!((uni.as_str(), chat.as_str(), formal.as_str()), ("可以電一個散熱電", "可以電一個散熱墊", "可以墊一個散熱墊"));
     assert!(formal == truth);
-    assert!(chat == golden_top1(0)[126] && formal == golden_top1(1)[126]);
+    assert!(chat == golden_top1(0)[286] && formal == golden_top1(1)[286]);
 }
 
 /// set_profile recomputes the composition and returns the snapshot; reset keeps the model and the profile.
-/// Row 284: chat 率水壺, formal 律水壺 with trigram.sjt3 beside the model (濾水壺 without the table, which is the truth; the test only
-/// needs the two profiles to differ).
+/// Row 131: chat 本市下週三會有大雨 (the truth), formal 本是下週三會有大雨 with trigram.sjt3 beside the model (本市… without the table; the test only
+/// needs the two profiles to differ; row 284 until SJ-LM-7, whose two profiles agree on it).
 #[test]
 fn set_profile_snapshot_and_reset_keeps_lm_and_profile() {
-    let (_, syls) = row(284);
+    let (_, syls) = row(131);
     let mut e = engine(Layout::Standard, Profile::Chat);
-    assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "廚房新裝了一個率水壺");
+    assert!(type_row(&mut e, Layout::Standard, &syls).preedit == "本市下週三會有大雨");
     let o = e.set_profile(Profile::Formal).unwrap();
-    assert!(o.handled && o.commit.is_empty() && o.preedit == "廚房新裝了一個律水壺");
-    assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "廚房新裝了一個律水壺");
+    assert!(o.handled && o.commit.is_empty() && o.preedit == "本是下週三會有大雨");
+    assert!(e.key(Key::new(KeyKind::Enter)).unwrap().commit == "本是下週三會有大雨");
     for mode in [ResetMode::Commit, ResetMode::Discard] {
         type_row(&mut e, Layout::Standard, &syls);
         e.reset(mode);
         // Same output as a fresh engine with the same model and profile.
         let o = type_row(&mut e, Layout::Standard, &syls);
-        assert!(o.preedit == "廚房新裝了一個律水壺", "reset must keep the model and the profile");
+        assert!(o.preedit == "本是下週三會有大雨", "reset must keep the model and the profile");
         assert!(e.total_score().is_some());
         e.reset(ResetMode::Discard);
         assert!(e.total_score().is_none());
@@ -377,24 +383,24 @@ fn candidates_ignore_the_model() {
 }
 
 /// s3d acceptance 4: punctuation is a sentence boundary for the bigram model. Premises straight from
-/// the decoder (measured 2026-10-04 by a search over dev302): X = ㄊㄚ ㄔㄤˊ ends 他長 with the
-/// sentence end but 他常 with a transition into "，"; Y = ㄗㄞˋ ㄏㄨㄢˋ starts 在換 from <s> but 再換
-/// from "，". So the composition must read 他長，在換.
+/// the decoder (measured 2026-10-27 on the SJ-LM-7 files, with the profile's own scoring (`Lm::scoring`: the chat table is on), by a search over the adjacent
+/// syllable pairs of dev302; ㄊㄚ ㄔㄤˊ and ㄗㄞˋ ㄏㄨㄢˋ, the pairs of 2026-10-04, no longer differ): X = ㄅㄨˋ ㄐㄧㄚ ends 不佳 with the sentence end
+/// but 不加 with a transition into "，"; Y = ㄅㄣˇ ㄕˋ starts 本市 from <s> but 本是 from "，". So the composition must read 不佳，本市.
 #[test]
 fn punctuation_is_a_sentence_boundary() {
     let s = shared();
     let profile = Profile::Chat;
-    let lam = profile.lambda();
+    let scoring = s.lm.scoring(profile);
     let syls = |r: &[&str]| r.iter().map(|x| x.to_string()).collect::<Syls>();
-    let (x, y) = (syls(&["ㄊㄚ", "ㄔㄤˊ"]), syls(&["ㄗㄞˋ", "ㄏㄨㄢˋ"]));
+    let (x, y) = (syls(&["ㄅㄨˋ", "ㄐㄧㄚ"]), syls(&["ㄅㄣˇ", "ㄕˋ"]));
     let top = |r: &Syls, start: &str, end: End| {
-        let best = decode_segment(&s.capped, r, &s.lm, lam, start, end, 64).unwrap();
+        let best = decode_segment(&s.capped, r, &s.lm, scoring, start, end, 64).unwrap();
         best[0].1.iter().map(|w| w.0).collect::<String>()
     };
-    assert_eq!(top(&x, "<s>", End::Eos), "他長");
-    assert_eq!(top(&x, "<s>", End::Next { word: "，", lp: 0.0, delta: 0.0 }), "他常");
-    assert_eq!(top(&y, "<s>", End::Eos), "在換");
-    assert_eq!(top(&y, "，", End::Eos), "再換");
+    assert_eq!(top(&x, "<s>", End::Eos), "不佳");
+    assert_eq!(top(&x, "<s>", End::Next { word: "，", lp: 0.0, delta: 0.0 }), "不加");
+    assert_eq!(top(&y, "<s>", End::Eos), "本市");
+    assert_eq!(top(&y, "，", End::Eos), "本是");
 
     let alone = |r: &Syls| {
         let mut e = engine(Layout::Standard, profile);
@@ -404,7 +410,7 @@ fn punctuation_is_a_sentence_boundary() {
     type_row(&mut e, Layout::Standard, &x);
     e.key(Key::ch(',', MOD_SHIFT)).unwrap();
     let o = type_row(&mut e, Layout::Standard, &y);
-    assert_eq!(o.preedit, "他長，在換");
+    assert_eq!(o.preedit, "不佳，本市");
     assert_eq!(o.preedit, format!("{}，{}", alone(&x), alone(&y)));
     // The total is the sum of the two sentences' scores.
     let (_, tx, _) = best_path(&x, profile);
@@ -419,7 +425,7 @@ fn punctuation_is_a_sentence_boundary() {
     assert_eq!(o.candidates[2], "《");
     e2.key(Key::ch('3', 0)).unwrap();
     let o = type_row(&mut e2, Layout::Standard, &y);
-    assert_eq!(o.preedit, "他長《在換");
+    assert_eq!(o.preedit, "不佳《本市");
     assert!((e2.total_score().unwrap() - before).abs() < 1e-9);
     // Only punctuation: no words, no total (contract §4).
     let mut e = engine(Layout::Standard, profile);
@@ -568,15 +574,17 @@ fn replay_with_left_context_matches_cli_context() {
     }
 }
 
-/// S2h acceptance 7: after 好 a lone ㄅㄚ˙ is 吧; without a left context it stays 巴 (current behavior).
+/// S2h acceptance 7: after 你 a lone ㄉㄧ˙ is 弟; without a left context it stays 地 (current behavior). It was ㄅㄚ˙ after 好 (吧 against 巴) until
+/// SJ-LM-7, whose model already gives 吧 without a context; found 2026-10-27 by trying every neutral-tone syllable of dev302 after eight one-character contexts
+/// in both profiles (only ㄉㄧ˙ after 你 or 他 differs).
 #[test]
-fn left_context_turns_ba_into_the_particle() {
-    let ba: Syls = vec!["ㄅㄚ˙".to_string()];
+fn left_context_turns_di_into_the_younger_brother() {
+    let di: Syls = vec!["ㄉㄧ˙".to_string()];
     for profile in [Profile::Chat, Profile::Formal] {
         let mut e = engine(Layout::Standard, profile);
-        e.set_left_context("好");
-        assert_eq!(type_row(&mut e, Layout::Standard, &ba).preedit, "吧");
+        e.set_left_context("你");
+        assert_eq!(type_row(&mut e, Layout::Standard, &di).preedit, "弟");
         e.reset(ResetMode::Discard);
-        assert_eq!(type_row(&mut e, Layout::Standard, &ba).preedit, "巴");
+        assert_eq!(type_row(&mut e, Layout::Standard, &di).preedit, "地");
     }
 }

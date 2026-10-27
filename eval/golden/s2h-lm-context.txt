@@ -1,6 +1,6 @@
-## dev302  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 302, 'top1': 246, 'oracle@64': 300, 'top1_sha256': 'd8ac58795e5649a557bcd62e7639cee2a9bbdbbe13860f13794ff95092ce5be8'}
-## typing76  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 76, 'top1': 70, 'oracle@64': 76, 'top1_sha256': '192b2bf3c1d59ba9a35586cf21292ffee7c54590dba16ef0e246a45557bb292c'}
-## user-reported  lm-chat+ctx+kn:cbefbced:θ1:β1  {'n': 161, 'top1': 35, 'oracle@64': 158, 'top1_sha256': '67df80219ab4309ad3db4396408a48dc152ebbc628fb30392bd1b81925c20b01'}
-## dev302  lm-formal+ctx+tri:fdd3b05d  {'n': 302, 'top1': 253, 'oracle@64': 300, 'top1_sha256': 'f2fe56415ff1a62424487fd8cf8b61c0bf0e8f3cd59b5e9429e2aa1ef5559afd'}
-## typing76  lm-formal+ctx+tri:fdd3b05d  {'n': 76, 'top1': 68, 'oracle@64': 76, 'top1_sha256': '7d53f185972097902f0046f50cec94c5b9a3676a035fa2656e70cf76bdb65075'}
-## user-reported  lm-formal+ctx+tri:fdd3b05d  {'n': 161, 'top1': 45, 'oracle@64': 158, 'top1_sha256': 'b8eef838247bd7e66d0c946db300e41d19ad2f7c05273c4f4ea4718a994890fd'}
+## dev302  lm-chat+ctx+kn:2b332df9:θ1:β1+tri:03891d5a  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c'}
+## typing76  lm-chat+ctx+kn:2b332df9:θ1:β1+tri:03891d5a  {'n': 76, 'top1': 70, 'oracle@64': 75, 'top1_sha256': '0b9e970b7ed1c0897711257c45ceb0e6dc7c9d8458fc3747a46d96ee752deed9'}
+## user-reported  lm-chat+ctx+kn:2b332df9:θ1:β1+tri:03891d5a  {'n': 161, 'top1': 95, 'oracle@64': 158, 'top1_sha256': '675f52c66d7546a6c32b7e01f96510bca2c0742d424a53797d497bd174cd5f72'}
+## dev302  lm-formal+ctx+kn:2b332df9:θ1:β0.75+tri:7ec1869b  {'n': 302, 'top1': 260, 'oracle@64': 300, 'top1_sha256': '3c6f177cdd786ae2b28c852a065e99318bc22693c1a87bbc8b7f6f1386dee66c'}
+## typing76  lm-formal+ctx+kn:2b332df9:θ1:β0.75+tri:7ec1869b  {'n': 76, 'top1': 69, 'oracle@64': 75, 'top1_sha256': '0d5dbcbb7f2913a8f8a98c6cb30a7ad0d75791f9ac6966fa63c58d7828c306a9'}
+## user-reported  lm-formal+ctx+kn:2b332df9:θ1:β0.75+tri:7ec1869b  {'n': 161, 'top1': 101, 'oracle@64': 158, 'top1_sha256': 'eb875378613398089f583b4a5ffdfa705d72709acfc3ba48a2efc329f69df5de'}
