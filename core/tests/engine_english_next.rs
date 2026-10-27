@@ -15,7 +15,7 @@ fn root() -> PathBuf {
 
 /// 是要對決 is not in the shipped lexicon until the names-creators contract lands, so the test brings it as an evaluation-only extra
 /// overlay row (`load_lexicon_extra_detailed`, the same path as the CLI's `--extra-overlay`).
-const EXTRA: &str = "ㄕˋ-ㄧㄠˋ-ㄉㄨㄟˋ-ㄐㄩㄝˊ\t是要對決\t-6.60980192\ttest\nㄨㄛˇ-ㄛ-ㄎㄜ\t我OK\t-4.0\ttest\n";
+const EXTRA: &str = "ㄨㄛˇ-ㄛ-ㄎㄜ\t我OK\t-4.0\ttest\n";
 
 /// joe: 是要對決 40, 說 30, 水 10 and 不在詞庫的詞 90 (a table word the lexicon does not have: it must never show).
 /// N(joe) 200 is larger than the sum of the rows, as in a real table (the rest followed with a word below the cut).
@@ -263,4 +263,146 @@ fn lower_case_joe_is_not_kept() {
         assert!(!e.english_autokept());
     }
     assert!(!e.digits_syls().iter().any(|s| s.starts_with("_punct_")));
+}
+
+// ---------- context-return: the English word the app's text ends with (docs/contracts/context-return.md sections 2 and 4) ----------
+
+/// `set_left_context(text)`, then ㄕ on an empty composition: the row, and what decoding shows.
+fn after_left(text: &str) -> (Vec<String>, Vec<(String, String, u32)>) {
+    let mut e = make(true, false);
+    e.set_left_context(text);
+    let outs = run(&mut e, "g");
+    (row(&outs), shown(&outs))
+}
+
+/// Section 2: the shell now sends the app's text; an English word at its end (after at most one space, 2-32 ASCII letters, no
+/// letter or digit before it) starts the composition like a token inside it does. Decoding is the same as with "" (what the shell
+/// sent for this text before: `LeftContext.han("我說Joe")` is nil).
+#[test]
+fn the_row_behind_an_english_left_text() {
+    let (with, shown_with) = after_left("我說Joe");
+    let (base, shown_base) = after_left("");
+    assert_eq!(with, row(&run(&mut make(true, false), &format!("{JOE} g"))), "as behind the token inside the composition");
+    assert!(with.contains(&"是要對決".to_string()) && !base.contains(&"是要對決".to_string()));
+    assert_eq!(shown_with, shown_base);
+    for text in ["Joe ", "JOE", "我說 Joe", "（Joe"] {
+        assert_eq!(after_left(text).0, with, "{text:?}");
+    }
+    for text in ["Joe  ", "Joe1", "J", "1Joe", "我說Joe。", "abcdefghijklmnopqrstuvwxyzabcdefgJoe"] {
+        assert_eq!(after_left(text), (base.clone(), shown_base.clone()), "{text:?}");
+    }
+    // 32 letters count, 33 do not (each with a table row of its own).
+    for (n, counts) in [(32, true), (33, false)] {
+        let word = "a".repeat(n);
+        let mut e = make(false, false);
+        e.set_english_next(Some(Arc::new(EnglishTable::parse(&format!("E\t{word}\t100\nW\t{word}\t水\t50\n")).unwrap())));
+        e.set_left_context(&word);
+        assert_eq!(row(&run(&mut e, "g"))[0] == "水", counts, "{n} letters");
+    }
+    // The row comes with the first unit; an empty composition has none (Backspace takes the unit away).
+    let mut e = make(true, false);
+    e.set_left_context("Joe");
+    run(&mut e, "g");
+    let o = e.key(Key::new(KeyKind::Backspace)).unwrap();
+    assert!(o.preedit.is_empty() && o.candidates.is_empty());
+}
+
+/// Section 2: `left_full` keeps the English word and one space after it, nothing else (no declared length without a small model).
+#[test]
+fn only_the_english_word_is_kept() {
+    let mut e = make(true, false);
+    for (text, n) in [("我說Joe", 3), ("我說Joe ", 4), ("今天天氣很好", 0), ("我說Joe。", 0), ("", 0)] {
+        e.set_left_context(text);
+        assert_eq!(e.left_full_chars(), n, "{text:?}");
+    }
+}
+
+/// Section 2, clearing: a commit, Esc, either reset and a rule 22 pass-through (an unmapped character on an empty composition)
+/// leave `left_full` empty. Code 4 is core/src/ffi.rs `child_panic`.
+#[test]
+fn the_left_text_goes_with_the_composition() {
+    let set = || {
+        let mut e = make(true, false);
+        e.set_left_context("Joe");
+        assert_eq!(e.left_full_chars(), 3);
+        e
+    };
+    let mut e = set();
+    let outs = run(&mut e, "s u 3 Enter");
+    assert_eq!(outs.last().unwrap().commit, "你");
+    assert_eq!(e.left_full_chars(), 0, "commit");
+    let mut e = set();
+    run(&mut e, "s u 3 Esc");
+    assert_eq!(e.left_full_chars(), 0, "Esc");
+    for mode in [ResetMode::Commit, ResetMode::Discard] {
+        let mut e = set();
+        run(&mut e, "g");
+        e.reset(mode);
+        assert_eq!(e.left_full_chars(), 0, "reset");
+    }
+    let mut e = set();
+    let o = e.key(Key::ch('é', 0)).unwrap();
+    assert!(!o.handled && o.preedit.is_empty(), "rule 22");
+    assert_eq!(e.left_full_chars(), 0, "pass-through");
+    assert!(after_left("").0 == row(&run(&mut e, "g")), "the row after it is the one without a left text");
+}
+
+/// The learning file after a row pick of 使用 (a single character is not learned at sentence start) behind `left` (learning on, a fixed day), as text.
+fn learned_from_the_row(left: &str, tag: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-next-learn-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut e = make(true, false);
+    e.set_today(Some(20_000));
+    e.set_learning(true);
+    e.learning_open(&dir).unwrap();
+    e.set_left_context(left);
+    let r = row(&run(&mut e, "g"));
+    let i = r.iter().position(|w| w == "使用").unwrap_or_else(|| panic!("使用 is in the row behind {left:?}: {r:?}"));
+    for _ in 0..=i {
+        e.key(Key::new(KeyKind::Tab)).unwrap();
+    }
+    assert_eq!(e.key(Key::new(KeyKind::Enter)).unwrap().preedit, "使用");
+    assert_eq!(e.key(Key::new(KeyKind::Enter)).unwrap().commit, "使用");
+    let text = std::fs::read_to_string(dir.join(core::learn_store::FILE)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    text
+}
+
+/// Section 4 (P3-6): a row pick behind the English left text learns line for line what the same pick behind "" learns; the
+/// English word is nowhere in the file.
+#[test]
+fn the_english_left_text_never_reaches_the_learning_file() {
+    let (with, without) = (learned_from_the_row("我說Joe", "with"), learned_from_the_row("", "without"));
+    assert!(with.lines().count() > 1, "the pick was learned: {} lines", with.lines().count());
+    assert_eq!(with.lines().collect::<Vec<_>>(), without.lines().collect::<Vec<_>>());
+    assert!(!with.to_ascii_lowercase().contains("joe"));
+}
+
+/// Section 4: a left text ending in Han ("……好") decodes, shows, predicts and learns byte for byte as its Han tail alone ("好"):
+/// a re-pick in the candidate window, then Enter, with learning on.
+#[test]
+fn a_long_left_text_decodes_and_learns_as_its_han_tail() {
+    let session = |left: &str, tag: &str| {
+        let dir = std::env::temp_dir().join(format!("shanjie-english-next-tail-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut e = make(true, false);
+        e.set_today(Some(20_000));
+        e.set_learning(true);
+        e.learning_open(&dir).unwrap();
+        e.set_left_context(left);
+        let mut outs = run(&mut e, "g 4 c j 3 _");
+        outs.extend(run(&mut e, "_"));
+        outs.push(e.key(Key::new(KeyKind::Right)).unwrap());
+        outs.extend(run(&mut e, "Enter Enter"));
+        let all: Vec<_> = outs.iter().map(|o| (o.preedit.clone(), o.candidates.clone(), o.commit.clone(), o.selected)).collect();
+        let records = e.learner().records().to_vec();
+        let file = std::fs::read_to_string(dir.join(core::learn_store::FILE)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        (all, records, file)
+    };
+    let (a, b) = (session("……好", "long"), session("好", "short"));
+    assert!(!a.1.is_empty(), "the re-pick was learned");
+    assert!(a == b);
+    let (c, d) = (session("我說 Joe 覺得這樣很好", "long2"), session("很好", "short2"));
+    assert!(c == d);
 }

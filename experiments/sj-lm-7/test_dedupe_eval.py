@@ -46,6 +46,15 @@ class Dedupe(unittest.TestCase):
         self.assertEqual(kept, ["u1\t完全不相干的一句話", "u2\t一起去吃飯喔", "u5\t太短"])      # unchanged and in order
         self.assertEqual(open(os.path.join(self.d.name, "out", "plain.txt"), encoding="utf-8").read().splitlines(), SOURCE[1:3])
 
+    def test_min_len_drops_the_short_rows_of_one_set_only(self):
+        self.assertEqual(self.run_main(["--min-len", "dev=7"]).splitlines()[0], "pool.tsv\tdev\t2")   # exactly N characters stays a pattern
+        lines = self.run_main(["--min-len", "dev=8"]).splitlines()      # 我們一起去吃飯 (7) is no longer a dev pattern; the 9-character row is
+        self.assertEqual(lines[:2], ["pool.tsv\tdev\t1", "pool.tsv\tholdout\t1"])
+        self.assertIn("u3\t我們一起去吃飯", open(os.path.join(self.d.name, "out", "pool.tsv"), encoding="utf-8").read())
+        for bad in ("nope=6", "dev=x", "dev"):
+            with self.assertRaises(SystemExit, msg=bad), contextlib.redirect_stderr(io.StringIO()):
+                self.run_main(["--min-len", bad])
+
     def test_only_counts_and_hashes_are_printed(self):
         text = self.run_main()
         for s in SOURCE + ["今天天氣真的很好啊", "我們一起去吃飯"]:

@@ -1,6 +1,6 @@
 # 契約：前文回傳（context-return）＋英文前文第二段
 
-狀態：**過審**（2026-10-25 收尾審查 READY）。修訂三（第二次 REVISE 一項處置：先去掉被切斷的第一個 grapheme，再找換行與 NUL，和今天的 `han` 同順序；之後收尾審查）。修訂二（plan-verifier 第一次 REVISE 五項：宣告 L 時模型實際收到的前文、英文情境的比對基準、english-next 核心是前提、延遲的量法、PLAN 第 37 行）。修訂一（security-reviewer 實作前審查：沒有 P0／P1，P2 四項、P3 六項全部採納，處置在 §6；P2-1 由維護者選擇題決定「終端機只收漢字」）。下一步 plan-verifier。
+狀態：**過審**（2026-10-25 收尾審查 READY；實作時補記兩條：Esc 只清未完成符號時的殘留、空組字區不出英文預測列）。修訂三（第二次 REVISE 一項處置：先去掉被切斷的第一個 grapheme，再找換行與 NUL，和今天的 `han` 同順序；之後收尾審查）。修訂二（plan-verifier 第一次 REVISE 五項：宣告 L 時模型實際收到的前文、英文情境的比對基準、english-next 核心是前提、延遲的量法、PLAN 第 37 行）。修訂一（security-reviewer 實作前審查：沒有 P0／P1，P2 四項、P3 六項全部採納，處置在 §6；P2-1 由維護者選擇題決定「終端機只收漢字」）。下一步 plan-verifier。
 
 ## 0. 起因、已定的事、要做到什麼
 
@@ -13,7 +13,7 @@
 ## 1. 殼：讀什麼（取代 R4 的長度規則）
 
 - **讀取點與條件不變**：組字開始讀一次；`privacyGate`（安全輸入、denylist、取不到 bundle ID）擋的時候不讀、傳 NULL；有 marked range 時不讀（`leftContext()` 現有的判斷）。
-- **終端機類 App**：bundle ID 在一份具名清單裡（`com.apple.Terminal`、`com.googlecode.iterm2`、`dev.warp.Warp-Stable`、`net.kovidgoyal.kitty`、`com.github.wez.wezterm`、`io.alacritty`、`co.zeit.hyper`、`com.mitchellh.ghostty`；清單放在 `LeftContext` 旁、註解寫出處；編輯器整個 App 不算，因為它的終端機面板和編輯區是同一個 bundle ID〔已知限制，記進範圍外〕）：照今天只傳結尾 ≤ 2 個漢字（`LeftContext.han`）。
+- **終端機類 App**：bundle ID 在一份具名清單裡（`com.apple.Terminal`、`com.googlecode.iterm2`、`dev.warp.Warp-Stable`、`net.kovidgoyal.kitty`、`com.github.wez.wezterm`、`org.alacritty`、`co.zeit.hyper`、`com.mitchellh.ghostty`；清單放在 `LeftContext` 旁、註解寫出處；編輯器整個 App 不算，因為它的終端機面板和編輯區是同一個 bundle ID〔已知限制，記進範圍外〕）：照今天只傳結尾 ≤ 2 個漢字（`LeftContext.han`）。
 - **其他 App 讀多少**：`LeftContext.maxUTF16` 從 32 改成 256 UTF-16 單位（64 個 grapheme 最多約 128 個單位，留餘裕給組合字元與 emoji；`oc-experimental.md` 寫的 128 一併改成 256）。取回的字串：
   1. **先夾住**：App 回傳的字串比請求的長時，只取最後 `maxUTF16` 個 UTF-16 單位，並當作被截過（P3-2）。
   2. **被截過時，先**在整段（夾住之後的）讀取上去掉開頭可能被切斷的第一個 grapheme（照現有 `han(_, truncated:)` 的順序：先去掉、再往回找）。
@@ -35,10 +35,11 @@
   - 不是 UTF-8 時照今天回 2 並清空（`self.left` 與 `self.left_full` 都清）。
   - **清除**：`clear_all`（送出、Esc、`reset`、回傳碼 4、`MAX_SYLLABLES` 自動送出都經過它）清 `self.left` 與 `self.left_full`；第 22 條的直通（空組字區上沒處理的字元鍵）之後組字區是空的，也清（P3-4）。
   - **不外流**（P2-3）：`left_full` 不經 C ABI 回傳給殼、不進 `ShanjieOutput`、不寫學習檔、不跨程序、不給任何網路功能；`RerankJob` 只帶最後 L 個字元（沒有宣告 L 時照今天帶 `self.left`）。
-  - **接受的殘留**（寫明）：已經排進佇列的 RerankJob 複本活到那次執行結束（殼最多一個在跑、一個在等）；Rust `String` 與 Swift 字串釋放時不清零。
+  - **接受的殘留**（寫明）：已經排進佇列的 RerankJob 複本活到那次執行結束（殼最多一個在跑、一個在等）；Rust `String` 與 Swift 字串釋放時不清零。另外，只有未完成符號時按 Esc 走 `clear_pend`、不經過 `clear_all`，`self.left` 與 `left_full` 留到下一次組字開始的 `set_left_context`（今天的 `self.left` 也是這樣；實作時記下）。
+  - 起點 0、組字區完全空（沒有音節也沒有未完成單位）時不出英文前文的預測列（Backspace 刪光之後不在空組字區冒出一列；今天這個起點本來就是空的）。
 - **會意（tinylm）的前文**：
   - `.sjtl` 新版本 SJTL0005＝SJTL0004 加一個 u32 欄位「前文長度 L」（字元數，1 ≤ L ≤ ctx − 2；越界載入失敗）；舊版本（≤ 0004）當作沒有宣告。
-  - 有宣告：每個重排段送給模型的前文（`RerankJob::run` 算的 key、`Choice.key`）＝`left_full`＋組字區在這一段之前的顯示（含前面各段已選的字）接起來之後的最後 L 個字元（`chars()`），**不經過 `context_key`**；詞表外的字照模型的 UNK 規則。
+  - 有宣告：每個重排段送給模型的前文（`RerankJob::run` 算的 key、`Choice.key`）＝`left_full`＋組字區在這一段之前的顯示（含前面各段已選的字）接起來之後的最後 L 個字元（`chars()`），**不經過 `context_key`**；詞表外的字照模型的 UNK 規則；「^」也照原文（不當成 `context_key` 的哨兵，空的 k 只用在 ≤ 0004）。模型實際看到的是其中最後 min(L, ctx − 1 − 候選字數) 個字元：`[BOS]`＋前文＋候選放不下時，`ll_many` 先丟前文最舊的字（`core/tests/tinylm_tiny.rs` 的 `a_long_candidate_sees_only_the_tail_of_a_declared_key`）。評測 CLI 用同一個函式（`TinyLm::key_for`）。
   - 沒有宣告（現行出貨的 SJ-SR-6-14M）：照今天，`context_key(self.left + 組字區在這一段之前的顯示)`。
 - **英文前文第二段**（`english-next.md`）：`english_before(s)` 在 s 是 0 時看 `left_full` 是不是英文詞（上面第二種情形，或宣告 L 時 `left_full` 的結尾符合同一規則）；`left_full` 被截過、而且英文詞從截斷後的第 0 個字元開始時不算（可能是半個詞，P3-6）。組字區裡有單位時照第一段（看單位）。
 - C ABI：`shanjie_engine_set_left_context` 的簽名不變；`core/include/shanjie.h` 的註解改成「同一則訊息最多 64 個 grapheme 的原文；核心只把結尾 ≤ 2 個漢字用在解碼與學習，另外只留宣告的前文長度或結尾的英文詞給會意模型與英文前文表；不是 UTF-8 回 2 並清空」。`docs/contracts/s3a.md` 的前文說明跟著改。

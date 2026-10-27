@@ -242,6 +242,8 @@ struct SettingsPageForm: View {
     private static let tintIconSpacing: CGFloat = 8
     /// The app icons in the 個別設定的 App list: one line of body text; not measured against any reference.
     private static let appIconSize: CGFloat = 16
+    /// The four pair checkboxes, in the order of the bits of `shanjie_engine_set_fuzzy` (fuzzy-input section 2.1).
+    private static let fuzzyPairs = ["ㄣ／ㄥ", "ㄓ／ㄗ", "ㄔ／ㄘ", "ㄕ／ㄙ"]
     let page: SettingsPage
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
@@ -307,6 +309,11 @@ struct SettingsPageForm: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!model.englishInlineEnabled)
+                    // zhen-keyorder section 3: after the display choice, with a line of what it costs; greyed on the same condition.
+                    Toggle(MenuEntry.Text.englishKeyOrder, isOn: Binding(get: { model.englishKeyOrder }, set: { model.setEnglishKeyOrder($0) }))
+                        .disabled(!model.englishKeyOrderEnabled)
+                    Text(MenuEntry.Text.englishKeyOrderNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
                     Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
                     Text(MenuEntry.Text.spacingNote)
@@ -333,6 +340,17 @@ struct SettingsPageForm: View {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
+                }
+                // fuzzy-input section 2.2: all off by default. The adjacent-key checkbox is greyed (value kept) in the Eten layout, where
+                // the core does nothing with it.
+                Section("模糊輸入") {
+                    ForEach(0..<Self.fuzzyPairs.count, id: \.self) { bit in
+                        Toggle(Self.fuzzyPairs[bit], isOn: Binding(get: { model.fuzzyFlags >> UInt32(bit) & 1 == 1 }, set: { model.setFuzzy(bit: bit, $0) }))
+                    }
+                    Toggle("鄰鍵打錯", isOn: Binding(get: { model.fuzzyFlags >> 4 & 1 == 1 }, set: { model.setFuzzy(bit: 4, $0) }))
+                        .disabled(!model.fuzzyAdjacentEnabled)
+                    Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             case .appearance:
                 Section("外觀") {

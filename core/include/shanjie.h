@@ -13,7 +13,7 @@
  *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
- * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range), 3 data load failed
+ * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range, fuzzy flags with an undefined bit), 3 data load failed
  * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
  * it), 4 internal error (caught panic or decode/encode
  * error; the engine has already been reset in discard mode; exception: shanjie_rerank_run has no engine and
@@ -208,6 +208,25 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
 //   after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// fuzzy input (docs/contracts/fuzzy-input.md): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
+//   and bit 4 the adjacent-key slips; any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
+//   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
+//   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score); the
+//   rerank never chooses such a word: a stretch whose n-gram first has one is not reranked, the others offer the model only paths without one.
+//   Bit 4, with a loaded model and the standard layout (it does nothing with the ETen layout), makes a tone key accept a syllable the
+//   lexicon lacks when a key typed as a left or right neighbour in its keyboard row would give a syllable it has; the composition
+//   then shows the word read through that syllable. A syllable already accepted keeps decoding when bit 4 is turned off. The
+//   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
+//   every engine creation, like set_english.
+int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
+// set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_english_inline in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) the
+//   evidence for English counts a Zhuyin key typed in a column below one that holds a symbol of the unfinished syllable (not a replacing key,
+//   which already counts) as well as a replaced symbol; and a Space can open the English window for a listed word whose syllable
+//   does not exist, and for one of the two-letter words of the core's TWO_LETTER (ok, ls, cd ...; each can have evidence) with one piece of evidence. With 0
+//   the engine is the one without this function, bit for bit. Turning it off closes an open English window, whatever opened it, which clears the shadow
+//   (the unfinished syllable stays); with no window open nothing changes. Call it after every engine creation, like set_english_inline.
+int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
@@ -215,9 +234,13 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // S4 (docs/contracts/s4-learning.md): learning from candidate-window re-picks. Every function returns 1
 // when engine (or a required pointer) is NULL. None of them changes the current display, except that
 // learning_clear and a forget may re-decode on the next key.
-// set_left_context: copies the text before the insertion point; only its last <= 2 consecutive Han
-//   characters are kept (S4 section 1.1). NULL or "" means none. Not UTF-8: returns 2 and clears.
-//   Cleared by the core after every commit, reset and code 4; call it at every composition start.
+// set_left_context: copies the text before the insertion point: the raw text of the same message, at most
+//   64 graphemes (docs/contracts/context-return.md; terminal apps: only the trailing Han characters). The
+//   core uses only its last <= 2 consecutive Han characters for decoding and learning (S4 section 1.1);
+//   besides them it keeps only the declared left-context length of the small model (SJTL0005), or else the
+//   trailing English word, for the small model and the English table, never returned or written. NULL
+//   or "" means none. Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
+//   code 4 and rule 22 pass-through; call it at every composition start.
 //   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);

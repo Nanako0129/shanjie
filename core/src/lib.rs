@@ -7,6 +7,7 @@ pub mod engine;
 pub mod english_next;
 pub mod eval;
 pub mod ffi;
+pub mod fuzzy;
 pub mod learn;
 pub mod learn_store;
 pub mod lm;
@@ -15,7 +16,8 @@ pub mod predict;
 pub mod tinylm;
 mod trigram;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use std::fmt;
 
 pub const BEAM: usize = 32;
@@ -67,6 +69,9 @@ pub struct Lexicon {
     words: String,
     /// Entry positions of each distinct word's by_word winner, sorted by word bytes.
     by_word: Vec<u32>,
+    /// Fuzzy input tables (docs/contracts/fuzzy-input.md section 2.1), built once, at the first lookup that needs them (`tol`): a
+    /// lexicon that is only ever read without fuzzy input never builds them.
+    tol: OnceLock<fuzzy::Tolerance>,
 }
 
 #[derive(Clone, Copy)]
@@ -242,7 +247,7 @@ impl Builder {
         }
         let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
         let ents = order.iter().map(|&f| raw[f as usize].ent).collect();
-        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word };
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, tol: OnceLock::new() };
         lex.words.shrink_to_fit();
         Ok(lex)
     }
@@ -279,8 +284,119 @@ impl Lexicon {
         self.readings.partition_point(|r| r.start as usize <= p) - 1
     }
 
+    /// The tolerance tables, built on first use. An adjacent-key alternative must have a one-syllable entry (the interned syllables
+    /// include the packs', and a pack word may be the only place a syllable stands): the decoder reads an unknown syllable alone through
+    /// its alternatives' one-syllable entries, so an alternative without one could leave a composition no path covers.
+    fn tol(&self) -> &fuzzy::Tolerance {
+        self.tol.get_or_init(|| {
+            let single: HashSet<u32> = self.readings.iter().filter(|r| r.key_len == 1).map(|r| self.key_pool[r.key_off as usize]).collect();
+            fuzzy::Tolerance::build(&self.syl_names, &single)
+        })
+    }
+
+    /// Whether `syl` is a syllable of some reading (an interned one; `ids` maps any other to `u32::MAX`).
+    pub fn has_syllable(&self, syl: &str) -> bool {
+        self.syl_ids.contains_key(syl)
+    }
+
+    /// Every interned syllable (any reading of any entry).
+    pub fn syllables(&self) -> &[String] {
+        &self.syl_names
+    }
+
+    /// Fuzzy sound (bits 0-3 of `flags`): the other lexicon syllables that read as `syl` once the enabled pairs are merged,
+    /// sorted by name. Empty for a syllable the lexicon does not have.
+    pub fn sound_alts(&self, syl: &str, flags: u32) -> Vec<&str> {
+        let Some(&id) = self.syl_ids.get(syl) else { return Vec::new() };
+        self.tol().sound(id, flags).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// Adjacent key: the lexicon syllables that show as `shown` when one key of them is typed as a left/right neighbour in the
+    /// same keyboard row (standard layout, composer columns applied), sorted by name.
+    pub fn adjacent_alts(&self, shown: &str) -> Vec<&str> {
+        self.tol().adjacent(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// The readings (syllable ids) of the words a span may be tolerantly read as: exactly one syllable replaced. A span with an
+    /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
+    /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
+    /// Order: position, then alternative name. The exact reading itself is never among them.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32) -> Vec<Vec<u32>> {
+        let mut out = Vec::new();
+        let mut put = |j: usize, alts: &[u32]| {
+            for &a in alts {
+                let mut r = ids.to_vec();
+                r[j] = a;
+                out.push(r);
+            }
+        };
+        let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
+        match unknown[..] {
+            [j] => put(j, self.tol().adjacent(&syls[j])),
+            [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
+            _ => {}
+        }
+        out
+    }
+
+    /// The one place the words of a span's tolerant readings are chosen, for the decoder (`CappedLexicon::sources`) and the candidate
+    /// window (`tolerant_words`) alike. Returns the tolerant readings that are lexicon readings, as (reading index, syllable ids), and
+    /// the words found through them: not words of the typed reading, each at its best score over the readings (an earlier reading wins
+    /// a tie), best first, at most `per_reading` taken from each reading's entries (after the typed reading's words are left out) and
+    /// `total` kept. A word is (text, score, entry position, index into the readings). `entry` gives an entry position's word and score
+    /// (the decoder's capped ones, or the lexicon's own). Nothing is looked up when the flags and the span allow no tolerant reading.
+    pub(crate) fn tolerant_pick<'a>(
+        &self,
+        ids: &[u32],
+        syls: &[String],
+        flags: u32,
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
+            return (Vec::new(), Vec::new());
+        }
+        let readings: Vec<(usize, Vec<u32>)> = self.tolerant_readings(ids, syls, flags).into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
+        let exact: HashSet<&str> = self.find(ids).into_iter().flat_map(|r| self.range(r)).map(|p| entry(p).0).collect();
+        let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
+        let mut order: Vec<&str> = Vec::new();
+        for (a, (r, _)) in readings.iter().enumerate() {
+            for p in self.range(*r).filter(|&p| !exact.contains(entry(p).0)).take(per_reading) {
+                let (w, sc) = entry(p);
+                match best.get(w) {
+                    Some(&(b, _, _)) if b >= sc => {}
+                    Some(_) => {
+                        best.insert(w, (sc, p, a));
+                    }
+                    None => {
+                        best.insert(w, (sc, p, a));
+                        order.push(w);
+                    }
+                }
+            }
+        }
+        let mut words: Vec<(&str, f64, usize, usize)> = order.iter().map(|&w| (w, best[w].0, best[w].1, best[w].2)).collect();
+        words.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        words.truncate(total);
+        (readings, words)
+    }
+
+    /// Fuzzy input, candidate window: the words of the tolerant readings of `key` (see `tolerant_readings`) that are not words of
+    /// the typed reading, each at its best score, best first, with the lexicon reading each was found under. The same choice as the
+    /// decoder's (`tolerant_pick`), without the decoder's cap per reading: the window lists them all.
+    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32) -> Vec<(&str, Vec<String>)> {
+        let (readings, words) = self.tolerant_pick(&self.ids(key), key, flags, usize::MAX, usize::MAX, |p| (self.word(p), self.ents[p].score));
+        words.into_iter().map(|(w, _, _, a)| (w, readings[a].1.iter().map(|&i| self.syl_names[i as usize].clone()).collect())).collect()
+    }
+
     pub fn reading_count(&self) -> usize {
         self.readings.len()
+    }
+    /// The syllables of reading `r` (`0..reading_count()`), for the exhaustive clean-typing test of zhen-keyorder section 4.
+    #[doc(hidden)]
+    pub fn reading_syllables(&self, r: usize) -> Vec<&str> {
+        self.key_of(&self.readings[r]).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
     }
     /// Sorted (word, score) list of one reading; empty when the reading is unknown.
     pub fn entries(&self, key: &[String]) -> Vec<(&str, f64)> {

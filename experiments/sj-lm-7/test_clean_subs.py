@@ -9,6 +9,9 @@ import clean_subs as C  # noqa: E402
 LEXICON = "我們今天一起去吃飯喔你好嗎真的是這樣啊太棒了看電影很好玩視頻"
 KEEP = "我們今天一起去吃飯喔"           # 10 Han characters
 SIMP = "这"
+# lexicon words that decide where a MAINLAND match is the traditional reading: guard words (shared character, no phrase inside), a phrase
+# that is itself a word (屋里, a MAINLAND phrase: rule 1), and a longer word holding a phrase (二里頭文化)
+BOUNDARY_WORDS = ("皇后", "里程", "若干", "系統", "屋里", "二里頭文化")
 
 
 def write(d, name, text):
@@ -35,13 +38,15 @@ class FakeGuard:
 
 
 def make_ctx(d, simp=SIMP):
-    lex = write(d, "lex.txt", "# format\n_ctrl_x ！ 0.0\n" + "".join(f"ㄅ {c} -1.0\n" for c in LEXICON) + "bad line\n")
+    words = "".join(f"ㄅ {w} -1.0\n" for w in BOUNDARY_WORDS)
+    lex = write(d, "lex.txt", "# format\n_ctrl_x ！ 0.0\n" + "".join(f"ㄅ {c} -1.0\n" for c in LEXICON) + words + "bad line\n")
     repo = os.path.join(d, "invade", "database", "vocabs")
     os.makedirs(repo, exist_ok=True)
     write(repo, "a.yml", "word: 視頻\n")
     write(repo, "b.yml", "word: 好\n")                              # single character: dropped by invade.load
     with mock.patch.object(C.bc, "TRAD_SIMP_ONLY", {simp}):
-        ns = C.argparse.Namespace(invade=os.path.join(d, "invade"), invade_sha256="", lexicon=lex)
+        mt = write(d, "mainland-terms.txt", "# comment\n軟件\n")
+        ns = C.argparse.Namespace(invade=os.path.join(d, "invade"), invade_sha256="", lexicon=lex, mainland_terms=mt)
         with mock.patch.object(C.bc, "load_conv", return_value=None):
             return C.build_ctx(ns), lex
 
@@ -53,6 +58,8 @@ class Pieces(unittest.TestCase):
         self.assertEqual(C.strip_cue("好的啊」"), "好的啊")                  # opener missing: the closer goes
         self.assertEqual(C.strip_cue("他說「好」"), "他說「好」")            # a balanced quote stays
         self.assertEqual(C.strip_cue('好的啊"'), "好的啊")
+        self.assertEqual(C.strip_cue("如悲鳴*"), "如悲鳴")
+        self.assertEqual(C.strip_cue("♪我將會是你身旁的人§"), "我將會是你身旁的人")
 
     def test_half_is_the_first_byte_of_the_sha256_below_128(self):
         for s in ("我們去吃飯", "你好嗎", "太棒了啊", "看電影吧", "真的是這樣"):
@@ -93,8 +100,28 @@ class Reject(unittest.TestCase):
         self.assertIsNone(self.why("龘龘龘" + KEEP))                                  # 3 of 13: 23% stays
         self.assertEqual(self.why(KEEP + " ok go"), "english")
         self.assertIsNone(self.why(KEEP + " ok"))                                      # one English word stays
+        self.assertEqual(self.why(KEEP + "拼寫n"), "english")                          # a lone lowercase letter goes
+        for s in ("一件T恤", "去照X光", "他是B型"):                                     # uppercase stays
+            self.assertIsNone(self.why(KEEP[:6] + s), s)
         self.assertEqual(self.why(KEEP + SIMP), "simplified")
+        for s in ("你為什么", "這里很好玩", "我們最后去", "對于你啊", "你愿意嗎", "我在包里"):
+            self.assertEqual(self.why(KEEP + s), "mainland", s)
+        for s in ("五公里路", "皇后陛下", "他姓于", "不能干涉", "下里巴人"):     # the shared characters in their traditional use stay
+            self.assertNotEqual(self.why(KEEP + s), "mainland", s)
+        for s in ("皇后來了", "汽車里程", "若干活動", "海關系統", "去屋里玩", "二里頭文化"):   # lexicon words decide the boundary
+            self.assertNotEqual(self.why(KEEP + s), "mainland", s)
+        self.assertEqual(self.why(KEEP + "什 么"), "mainland")
+        for s in ("這 里很好", "這\u3000里很好"):                                     # a phrase without a one-character entry
+            self.assertEqual(self.why(KEEP + s), "mainland", s)
+        for s in ("萬事", "万事", "會緊張么", "干了三年"):
+            self.assertEqual(self.why(KEEP + s) == "mainland", s != "萬事", s)                         # whitespace inside a phrase does not hide it
+        self.assertEqual(self.why(KEEP + "皇后來了這里"), "mainland")                  # a later real match still counts
+        for s in ("（笑）", "(門鈴響)", "【旁白】", "[音樂]", "阿明︰", "喺邊度", "差一黑占", "我唔知道", "講大話㗎"):
+            self.assertEqual(self.why(KEEP + s), "residue", s)
+        for s in ("他說「走吧」", "他說「走吧", "走吧」他說", "一點點", "黑色的", "唔，好吧", "好吧唔"):     # quotes are not counted (strip_cue, split); 唔 is Mandarin too
+            self.assertIsNone(self.why(KEEP + s), s)
         self.assertEqual(self.why(KEEP + "視頻"), "invade")
+        self.assertEqual(self.why(KEEP + "軟件"), "invade")                           # a --mainland-terms term joins the invade list
         self.assertIsNone(self.why(KEEP + "好"))                                       # a single-character invade term is not a term
 
     def test_order_is_the_registered_one(self):
@@ -103,6 +130,10 @@ class Reject(unittest.TestCase):
         self.assertEqual(self.why("龘龘龘龘龘龘龘" + KEEP + " ok go"), "lexicon")
         self.assertEqual(self.why(KEEP + " ok go" + SIMP), "english")
         self.assertEqual(self.why(KEEP + SIMP + "視頻"), "simplified")
+        self.assertEqual(self.why(KEEP + SIMP + "什么"), "simplified")
+        self.assertEqual(self.why(KEEP + "什么視頻"), "mainland")
+        self.assertEqual(self.why(KEEP + "什么（笑）"), "mainland")
+        self.assertEqual(self.why(KEEP + "（笑）視頻"), "residue")
 
     def test_triggers_are_closed_set_labels_not_text(self):
         t = lambda step, s: C.trigger(step, s, self.ctx)
@@ -115,7 +146,17 @@ class Reject(unittest.TestCase):
         self.assertEqual(t("lexicon", "龘龘龘龘龘龘龘" + KEEP), "outside the lexicon 0.4")
         self.assertEqual(t("english", KEEP + " ok go"), "2 English words")
         self.assertEqual(t("simplified", KEEP + SIMP), SIMP)
+        self.assertEqual(t("mainland", KEEP + "我在包里"), "包里")             # a member of MAINLAND, a closed set
         self.assertEqual(t("invade", KEEP + "視頻"), "視頻")
+        self.assertEqual(t("residue", KEEP + "（笑）"), "bracket")
+        self.assertEqual(t("residue", KEEP + "喺邊度"), "cantonese")
+
+
+class ShippedLexicon(unittest.TestCase):
+    def test_no_mainland_phrase_is_a_word_of_the_shipped_lexicon(self):
+        """A MAINLAND phrase that the shipped lexicon has as a word is dropped by mainland_rules, so it would never act (code review of #299)."""
+        words = C.lexicon_words(os.path.join(C.ROOT, "data", "lexicon", "mcbpmf-data.txt"))
+        self.assertEqual(sorted(m for m in C.MAINLAND if m in words), [])
 
 
 class Guarding(unittest.TestCase):

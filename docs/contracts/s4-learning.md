@@ -88,11 +88,11 @@ context_key(prefix: &str) -> Key
 - **讀一次**：每次組字開始、第一次 `setMarkedText` 之前讀。這時 client 還沒有 marked text。組字期間與送出前不再讀。
 - **什麼時候算沒有前文**：`selectedRange` 是 `NSNotFound`；或 client 還有 marked text，也就是 `markedRange` 的**長度大於 0**（而且位置不是 `NSNotFound`），表示上一段組字還沒結束；或讀取回傳 nil。長度是 0 時不論位置都算沒有 marked text，照樣讀：NSTextInputClient 文件寫的是 `{NSNotFound, 0}`，但 2026-10-06 實機量到 VS Code、Chrome、Finder 搜尋框等回 `{插入點, 0}`、有一個回 `{NSNotFound, NSNotFound}`（原本只看位置，這些 App 都讀不到前文）。
 - **範圍有上限**：
-  - 只請求插入點前最多 32 個 UTF-16 單位（具名常數）：`NSRange(location: max(0, ins − 32), length: ins − max(0, ins − 32))`。
+  - 只請求插入點前最多 32 個 UTF-16 單位（具名常數）：`NSRange(location: max(0, ins − 32), length: ins − max(0, ins − 32))`。前文回傳（`docs/contracts/context-return.md` §1）起是 256 個單位，App 回傳更長的字串時先夾到最後 256 個單位。
   - 範圍被截過時，丟掉第一個 grapheme，避免切到代理對或 grapheme 中間。
-- **最小化**：殼在最後一個換行處截斷後，只取尾端連續的漢字，最多 2 字（同 §1.1 的規則），再傳給核心。PLAN R4 的 8 個 grapheme 是給 S6 雲端用的，這片不保留。殼不另外存放，每次組字結束就丟。
+- **最小化**：殼在最後一個換行處截斷後，只取尾端連續的漢字，最多 2 字（同 §1.1 的規則），再傳給核心。PLAN R4 的 8 個 grapheme 是給 S6 雲端用的，這片不保留。殼不另外存放，每次組字結束就丟。**註（前文回傳，`docs/contracts/context-return.md`）**：殼現在傳同一則訊息最多 64 個 grapheme 的原文（終端機類 App 照舊只傳結尾 ≤ 2 個漢字）；核心在學習與 n-gram 只用結尾 ≤ 2 個漢字，所以本節與 §1.1 的學習鍵不變。
 - 新的 C ABI：`shanjie_engine_set_left_context(engine, const char *utf8)`。
-  - 核心複製字串、不保留指標，只留最後 2 個漢字。
+  - 核心複製字串、不保留指標，只留最後 2 個漢字（前文回傳起另外只留會意模型宣告的前文長度或結尾的英文詞，不用在學習，`context-return.md` §2）。
   - NULL 或空字串表示沒有前文。不是 UTF-8 時回 2，並清空舊的前文。
   - 前文在每次 commit、reset、錯誤碼 4 之後由核心自動清掉。殼在每次組字開始都要呼叫一次，讀不到就傳 NULL。
 - `privacyGate` 擋的時候不讀前文，傳 NULL。
@@ -210,7 +210,7 @@ context_key(prefix: &str) -> Key
     - 標記字串中間逐字改選一字並送出：學習檔裡標記的字只出現在含改選字的 ≤ 4 字段與它前面 ≤ 2 字；沒有改選的送出，不新增任何含標記的列，而且每行只含五個欄位（新詞 B 起，`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk`）。
 11. **R4**：
     - 殼收到 client 前文是 `ab\t中`、`x\r國`、`"中"`、emoji、ZWJ 序列時，傳進核心的分別是 `中`、`國`、空、空、空；
-    - 假 client 記錄收到的 range，長度 ≤ 32；游標在 10,000 字時，殼收到的字串 ≤ 32；
+    - 假 client 記錄收到的 range，長度 ≤ 32；游標在 10,000 字時，殼收到的字串 ≤ 32（前文回傳起是 ≤ 256，傳給核心的是最多 64 個 grapheme；核心在學習與 n-gram 只用結尾 ≤ 2 個漢字，`context-return.md` §4）；
     - 組字期間不再呼叫讀取 API；
     - gate 擋時不讀；
     - 假 client 照 NSTextInputClient 的語意，沒有 marked text 時 `markedRange` 回 `{NSNotFound, 0}`：`ab\t中` 傳進核心的是 `中`；

@@ -82,9 +82,8 @@ def build_rows(rows_file, dump, words, rowstats, scores, lenient, par=SHIP):
     cands, gold0, recs = T.read_cli_files(dump, words, scores, n)
     out = []
     for i, (ctx, truth, syls) in enumerate(rows):
-        sc, c = recs[i], recs[i]["c"]
-        if int(lenient(cands[i][c][0]) == lenient(truth)) != ok[i] or ("ll" in sc and sc["n"] > 1 and c != T.pick(sc["ng"], sc["ll"], *par)):
-            raise RuntimeError(f"row {i + 1}: the chosen candidate disagrees with rowstats or with pick")
+        sc = recs[i]
+        c = T.check_choice(i + 1, sc, cands[i], truth, ok[i], lenient, par)
         out.append({"ctx": ctx, "truth": truth, "syls": syls, "cands": cands[i], "gold0": gold0[i], "c": c, "scores": sc})
     return out, ok
 
@@ -180,8 +179,11 @@ def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
         cn = [sum(1 for p, ch in enumerate(s) if ch == g and syls[p] == rd) if len(s) == len(syls) else 0 for s, _, _ in cands]
         if not any(cn):
             continue
-        ng = [sc["ng"][j] if j < len(sc["ng"]) else cands[j][1] for j in range(len(cands))]
-        ll, t = sc.get("ll"), lenient(row["truth"])
+        # The record's lists are by n-best index here (`by_nbest`: a record with idx lists its pool, which can reach past the first 8); a
+        # candidate it does not list takes the dump's score and, below, needs rescoring.
+        ngb = T.by_nbest(sc, "ng")
+        ng = [ngb.get(j, cands[j][1]) for j in range(len(cands))]
+        ll, t = (T.by_nbest(sc, "ll") if "ll" in sc else None), lenient(row["truth"])
         orig = sorted(range(len(cands)), key=lambda j: (-ng[j], j))[:T.TOPK]
         for b in bs:
             o = out[b]
@@ -192,7 +194,7 @@ def bias_cells(rows, ok, pair, lenient, bs=BS, par=SHIP):
             o["affected"] += 1
             if ll is None:
                 choice = order[0]
-            elif any(j >= len(ll) for j in order):
+            elif any(j not in ll for j in order):
                 o["rescoring"] += 1
                 continue
             else:

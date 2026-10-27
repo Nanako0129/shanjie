@@ -279,12 +279,13 @@ def classify(row, lex, par, lenient):
     sc = row["scores"]
     if gold_rank <= TOPK and sc is not None:
         alpha, tau, delta = par
-        if "ll" not in sc:
+        if "ll" not in sc or len(sc["ng"]) < 2:   # no rerank ran: a fuzzy first path, or a pool of one
             res["d2"] = "D2-none"
         elif sc["ng"][0] - sc["ng"][1] >= tau:
             res["d2"] = "D2a"
         else:
             # core pick with delta 0 is the plain argmax of ng + alpha * ll, ties to the better n-gram rank; here the margin is below tau already
+            # `pick` is a position in the record's lists, which `ok` shares: no mapping through idx here
             res["d2"] = "D2b" if sc["ok"][pick(sc["ng"], sc["ll"], alpha, tau, 0.0)] else "D2c"
     return res
 
@@ -361,6 +362,36 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
+def nbest_index(sc, j):
+    """The n-best index (the dump's order, what the record's `c` names) of entry j of the record's lists `ng`, `ll`, `ok`, `ed`. A record
+    made with a fuzzy-sound bit lists the pool of the semantic correction in pool order and says in `idx` which n-best path each entry is
+    (fuzzy-input contract section 3.6); without `idx` the lists are the first n paths and j is the index."""
+    return sc["idx"][j] if "idx" in sc else j
+
+
+def by_nbest(sc, key):
+    """The record's list `key` as {n-best index: value}."""
+    return dict(zip(sc.get("idx", range(len(sc[key]))), sc[key]))
+
+
+def refuse_pool(recs, who):
+    """For a tool that reads the record by n-best position (the first 8 candidates of the dump): a record with `idx` has a pool that
+    reaches beyond them and is in another order, so the tool stops instead of reading the wrong entries."""
+    if any(r is not None and "idx" in r for r in recs):
+        raise RuntimeError(f"{who}: the scores record has an idx column (a fuzzy-sound bit); this tool reads the first 8 candidates by position")
+
+
+def check_choice(i, sc, cands, truth, ok, lenient, par, plain=True):
+    """Row i's (1-based) chosen candidate against the rowstats ok and, when the plain pick applies, against `pick`; -> `c`, an n-best index.
+    `pick` returns a position in the record's lists, `c` an index into the dump's candidates: with `idx` the two are mapped before they are
+    compared, and the chosen candidate is read from the dump by `c`."""
+    c = sc["c"]
+    sel_ok = int(lenient(cands[c][0]) == lenient(truth))
+    if sel_ok != ok or (plain and sc["n"] > 1 and "ll" in sc and c != nbest_index(sc, pick(sc["ng"], sc["ll"], *par))):
+        raise RuntimeError(f"row {i}: the chosen candidate disagrees with rowstats or with pick")
+    return c
+
+
 def plain_pick_applies(prof, colloq):
     """Whether the CLI's chosen index must equal the plain `pick(ng, ll, *par)`: not in chat with the colloquial table, where the core
     adds the colloquial term (and the terms that ride on it) to the fusion on purpose, which this Python `pick` does not reproduce."""
@@ -389,10 +420,7 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
     recs_rows = []
     for i, (ctx, truth, syls) in enumerate(rows):
         sc = recs[i]
-        c = sc["c"]
-        sel_ok = int(lenient(cands[i][c][0]) == lenient(truth))
-        if sel_ok != ok[i] or (plain_pick_applies(prof, colloq) and sc["n"] > 1 and "ll" in sc and c != pick(sc["ng"], sc["ll"], *par)):
-            raise RuntimeError(f"row {i + 1}: the chosen candidate disagrees with rowstats or with pick")
+        c = check_choice(i + 1, sc, cands[i], truth, ok[i], lenient, par, plain_pick_applies(prof, colloq))
         recs_rows.append({"ctx": ctx, "truth": truth, "syls": syls, "cands": cands[i], "gold0": gold0[i], "c": c, "scores": sc})
     cn, per = triage_rows(recs_rows, [int(x) for x in ok], [int(x) for x in ok_nc], lex, par, lenient, report)
     cn["oracle64"], cn["top1_sha256"] = o64, sha

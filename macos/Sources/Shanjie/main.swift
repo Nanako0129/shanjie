@@ -90,6 +90,20 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
     }
+    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means false.
+    var englishKeyOrder: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishKeyOrder") }
+    }
+}
+
+/// The 模糊輸入 flags (docs/contracts/fuzzy-input.md section 2.2), key `fuzzyFlags` (an integer) in the same domain; absent means 0.
+@MainActor
+final class DefaultsFuzzyStore: FuzzyStore {
+    var fuzzyFlags: UInt32? {
+        get { (UserDefaults.standard.object(forKey: "fuzzyFlags") as? Int).flatMap { UInt32(exactly: $0) } }
+        set { UserDefaults.standard.set(newValue.map { Int($0) }, forKey: "fuzzyFlags") }
+    }
 }
 
 /// The "動漫與遊戲詞" switch (docs/contracts/acg-pack.md A.2), key `acgPack` in the same domain; absent means on (user decision 2026-10-09).
@@ -209,7 +223,7 @@ func runServer() -> Never {
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
-        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(),
+        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), fuzzyStore: DefaultsFuzzyStore(),
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.

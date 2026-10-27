@@ -149,6 +149,37 @@ class InvertedReport(unittest.TestCase):
         self.assertEqual({rows[("癸", r)][2:] for r in ("ㄧˇ", "ㄧˋ")}, {("CHECK", "")})
         self.assertEqual(rows[("癸", "ㄧˋ")][:2], (-6.8, -6.8))
 
+    def test_maintainer_decision_wins(self):
+        with mock.patch.dict(R.INVERTED_DECIDED, {"癸": "ㄧˇ"}):   # 癸 has no evidence (CHECK without the decision)
+            rows = self.rows("癸")
+        self.assertEqual(rows[("癸", "ㄧˇ")], (-7.0, -6.8 + R.INVERTED_LEAD, "main", "maintainer"))
+        self.assertEqual(rows[("癸", "ㄧˋ")][2], "alt")
+
+    def test_apply_lifts_the_main_row_and_keeps_the_reading_sorted(self):
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        lex = "ㄧˋ 乙 -6.8\nㄧˇ 甲 -5.0\nㄧˇ 丑 -7.0\nㄧˇ 乙 -7.3\nㄧˇ-ㄧˇ 乙乙 -4.0\n"
+        src, out = write(d.name, "src.txt", lex), os.path.join(d.name, "out.txt")
+        self.assertEqual(R.apply_inverted(src, out, R.inverted_report(R.ime.Lexicon(src), None, "乙")), 1)
+        self.assertEqual(open(out, encoding="utf-8").read(), "ㄧˋ 乙 -6.8\nㄧˇ 甲 -5.0\nㄧˇ 乙 -6.300000\nㄧˇ 丑 -7.0\nㄧˇ-ㄧˇ 乙乙 -4.0\n")
+
+    def test_apply_in_place_and_refuses_check(self):
+        d = tempfile.TemporaryDirectory(); self.addCleanup(d.cleanup)
+        src = write(d.name, "src.txt", LEXICON)
+        with self.assertRaises(SystemExit):   # 癸 has no evidence: CHECK, nothing written
+            R.apply_inverted(src, src, R.inverted_report(R.ime.Lexicon(src), None, "乙癸"))
+        self.assertEqual(open(src, encoding="utf-8").read(), LEXICON)
+        self.assertEqual(R.apply_inverted(src, src, R.inverted_report(R.ime.Lexicon(src), None, "乙")), 1)
+        self.assertIn("ㄧˇ 乙 -6.300000\n", open(src, encoding="utf-8").read())
+
+    def test_decided_reading_must_exist(self):
+        with mock.patch.dict(R.INVERTED_DECIDED, {"癸": "ㄧ"}), self.assertRaises(SystemExit):
+            self.rows("癸")
+
+    def test_shipped_decisions_are_base_readings(self):
+        base = R.ime.Lexicon(os.path.join(R.REPO, "data", "lexicon", "mcbpmf-data.txt"))
+        for ch, r in R.INVERTED_DECIDED.items():
+            self.assertIn((ch, r), {(w, syls[0]) for syls, es in base.by_reading.items() if len(syls) == 1 for w, _ in es})
+
     def test_report_does_not_write_the_lexicon(self):
         before = os.path.getmtime(os.path.join(R.REPO, "data", "lexicon", "mcbpmf-data.txt"))
         self.rows("乙")

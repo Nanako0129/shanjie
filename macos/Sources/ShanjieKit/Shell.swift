@@ -145,6 +145,9 @@ public protocol EnglishStore: AnyObject {
     /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
     /// when Space opens the window. `nil` means never chosen, which is true.
     var englishInline: Bool? { get set }
+    /// The choice under that (docs/contracts/zhen-keyorder.md section 3): keys out of Zhuyin's column order count as evidence of English.
+    /// `nil` means never chosen, which is false.
+    var englishKeyOrder: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
@@ -152,10 +155,26 @@ public protocol EnglishStore: AnyObject {
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
     public var englishInline: Bool?
-    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+    public var englishKeyOrder: Bool?
+    public init(_ english: Bool? = nil, inline: Bool? = nil, keyOrder: Bool? = nil) {
         self.english = english
         self.englishInline = inline
+        self.englishKeyOrder = keyOrder
     }
+}
+
+/// Where the 模糊輸入 flags are kept (docs/contracts/fuzzy-input.md section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key
+/// slips, as `shanjie_engine_set_fuzzy`; `nil` means never chosen, which is 0 (all off). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol FuzzyStore: AnyObject {
+    var fuzzyFlags: UInt32? { get set }
+}
+
+/// The in-memory FuzzyStore.
+@MainActor
+public final class MemoryFuzzyStore: FuzzyStore {
+    public var fuzzyFlags: UInt32?
+    public init(_ fuzzyFlags: UInt32? = nil) { self.fuzzyFlags = fuzzyFlags }
 }
 
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
@@ -394,9 +413,18 @@ public final class Shell {
     /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
     /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
     private(set) var englishInlineOn = true
+    /// zhen-keyorder section 3: whether keys out of Zhuyin's column order count as evidence of English (default false: `UserDefaults`
+    /// key `englishKeyOrder`, absent is false); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishKeyOrderOn = false
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
+    private let fuzzyStore: FuzzyStore
+    /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
+    /// `build()` makes. Only the bits the core knows are kept.
+    private(set) var fuzzyFlags: UInt32 = 0
+    /// What `build()` sent to each engine it made, in order (test hook, like `rerankSent`).
+    private(set) var fuzzySent: [UInt32] = []
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
@@ -465,8 +493,13 @@ public final class Shell {
     /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
     var englishEnabled: Bool { englishAvailable && mode == .standard }
+    /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
+    /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
+    var fuzzyAdjacentEnabled: Bool { mode == .standard }
     /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
     var englishInlineEnabled: Bool { englishEnabled && englishOn }
+    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the display choice.
+    var englishKeyOrderEnabled: Bool { englishInlineEnabled }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -554,6 +587,8 @@ public final class Shell {
     /// `QueueRerankRunner`, the tests a runner they complete by hand.
     /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
     /// Required, like `glassTintStore`.
+    /// `fuzzyStore`: the 模糊輸入 flags (fuzzy-input section 2.2). The default (in memory, all off) is for the tests; the app passes its
+    /// UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
@@ -565,6 +600,7 @@ public final class Shell {
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
+                fuzzyStore: FuzzyStore = MemoryFuzzyStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
@@ -598,6 +634,9 @@ public final class Shell {
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
         englishInlineOn = englishStore.englishInline ?? true
+        englishKeyOrderOn = englishStore.englishKeyOrder ?? false
+        self.fuzzyStore = fuzzyStore
+        fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.glassTintStore = glassTintStore
@@ -658,12 +697,20 @@ public final class Shell {
         if let o = owner { o.applyEnglish(on) } else { dropOnFailure(setEnglish(on)) }
     }
 
+    func applyFuzzy(_ flags: UInt32) {
+        if let o = owner { o.applyFuzzy(flags) } else { dropOnFailure(setFuzzy(flags)) }
+    }
+
     func applyCandidateVertical(_ on: Bool) {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
     func applyEnglishInline(_ on: Bool) {
         if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    }
+
+    func applyEnglishKeyOrder(_ on: Bool) {
+        if let o = owner { o.applyEnglishKeyOrder(on) } else { dropOnFailure(setEnglishKeyOrder(on)) }
     }
 
     func applyRerank(_ on: Bool) {
@@ -774,6 +821,15 @@ public final class Shell {
         return engine?.setEnglish(on)
     }
 
+    /// The settings window's 模糊輸入 flags (fuzzy-input section 2.2): stored, and sent to the engine, which recomputes the composition
+    /// (an accepted syllable keeps decoding whatever the flags are); the snapshot is for the caller to show.
+    func setFuzzy(_ flags: UInt32) -> CoreResult? {
+        fuzzyFlags = flags & 0b11111
+        fuzzyStore.fuzzyFlags = fuzzyFlags
+        defer { changed() }
+        return engine?.setFuzzy(fuzzyFlags)
+    }
+
     /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
     /// caller to show, so a composition on screen is drawn again in the new display.
     func setEnglishInline(_ on: Bool) -> CoreResult? {
@@ -781,6 +837,16 @@ public final class Shell {
         englishStore.englishInline = on
         defer { changed() }
         return engine?.setEnglishInline(on)
+    }
+
+    /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
+    /// caller to show. The core closes an open English window when the choice goes off, whatever evidence opened it; otherwise nothing
+    /// on screen changes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
+        englishKeyOrderOn = on
+        englishStore.englishKeyOrder = on
+        defer { changed() }
+        return engine?.setEnglishKeyOrder(on)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -942,6 +1008,15 @@ public final class Shell {
         // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
         if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
             Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        }
+        // And the key-order evidence (zhen-keyorder section 3), every time: the core's default is false.
+        if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
+            Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
+        }
+        // And the 模糊輸入 flags (fuzzy-input section 2.2), every time: the core's default is 0.
+        fuzzySent.append(fuzzyFlags)
+        if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
+            Log.shell.error("shanjie_engine_set_fuzzy failed, code \(c)")
         }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -1181,9 +1256,28 @@ public final class Session {
         }
     }
 
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (turning it off
+    /// closes an open English window, whatever opened it; otherwise the snapshot is what was on screen).
+    func applyEnglishKeyOrder(_ on: Bool) {
+        switch shell.setEnglishKeyOrder(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
     /// The menu's abbreviation switch: the snapshot is shown, if this session owns the composition.
     func applyAbbreviation(_ on: Bool) {
         switch shell.setAbbreviation(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 模糊輸入 flags: the snapshot is shown, if this session owns the composition.
+    func applyFuzzy(_ flags: UInt32) {
+        switch shell.setFuzzy(flags) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
@@ -1274,7 +1368,8 @@ public final class Session {
     /// The single place a key reaches the core.
     func send(_ key: ShanjieKey) -> Bool {
         guard let engine = shell.engine else { return false }
-        let paused = applyLearningGate(engine)
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once, for the gate and the left context's terminal check
+        let paused = applyLearningGate(engine, bundle: bundle)
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
@@ -1283,9 +1378,9 @@ public final class Session {
         if !shell.composing {
             spacingPrev = nil
             if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
-                let read = paused ? nil : leftContext()
+                let read = paused ? nil : leftContext(bundle: bundle)
                 spacingPrev = read?.last
-                let code = engine.setLeftContext(read?.han)
+                let code = engine.setLeftContext(read?.text)
                 if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
             }
         }

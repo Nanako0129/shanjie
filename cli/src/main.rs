@@ -3,7 +3,8 @@ use core::colloquial::{self, Colloquial, ReadingChannel};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_IT, PACK_OOV};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
-use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
+use core::fuzzy::FUZZY_ALL;
+use core::lm::{decode_from_fuzzy_scored, history, rerank_pool, CappedLexicon, Demote, Lm, Profile};
 use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -147,8 +148,9 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
 /// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
-/// Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+/// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed` and `ll` list the rerank pool in pool order, `c` is still an index
+/// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, idx: Option<&[usize]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
@@ -163,6 +165,9 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     );
     if let Some(ll) = ll {
         s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
+    }
+    if let Some(idx) = idx {
+        s += &format!(", \"idx\": {}", list(idx.iter().map(usize::to_string).collect()));
     }
     Ok(s + "}\n")
 }
@@ -233,6 +238,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
+    // docs/contracts/fuzzy-input.md section 2.3: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
+    // `+fz:FLAGS` and a row no reading covers counts as wrong instead of stopping the run.
+    let mut fuzzy = None::<u32>;
+    // `--fuzzy-delta-sound D` (section 3.5, evaluation only): the fuzzy-sound penalty of this run; the summary tag gets `:dD` when it is not the default.
+    let mut delta_sound = core::fuzzy::DELTA_SOUND;
+    let mut delta_given = false;
     let mut reading_channel = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -276,6 +287,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
+            "--fuzzy-delta-sound" => {
+                delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0).ok_or("--fuzzy-delta-sound takes a number above 0")?;
+                delta_given = true;
+            }
+            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-channel" => reading_channel = false,
             _ => return Err("unknown argument".into()),
         }
@@ -287,6 +303,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // Section 9 P3-8: without a small model a level (standard included) would silently measure the n-gram alone.
     if level.is_some() && tinylm.is_none() {
         return Err("--rerank-level needs --tinylm".into());
+    }
+    // The sound penalty only exists on a fuzzy-sound bit; without one the option would silently change nothing.
+    if delta_given && fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND == 0 {
+        return Err("--fuzzy-delta-sound needs --fuzzy with a sound bit (0-3)".into());
     }
     let level = level.unwrap_or(RerankLevel::Standard);
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
@@ -391,21 +411,38 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
-        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut out = RowOut::default();
-        let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
+        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
+            Ok(nb) => nb,
+            // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
+            Err(Error::NoPath { .. }) if fuzzy.is_some() => {
+                if want_words {
+                    let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+                    writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
+                }
+                return Ok(out);
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let mut surf: Vec<String> = scored.iter().map(|(_, ws)| ws.iter().map(|w| w.0).collect()).collect();
         let t = len.apply(truth);
-        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the decoder's order).
+        // The row's chosen candidate: the first, or the small model's pick among the pool (below; the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
-            let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
-            let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
-            // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
+            // The engine's rule (fuzzy-input section 3.6, `rerank_pool`): the pool is the first 8 paths with no fuzzy word, in n-best order; a
+            // fuzzy n-gram first path is not reranked (a pool of just that path: n 1, `c` 0, no `ll`). `pool` holds the paths' n-best indices.
+            let pool: Vec<usize> = rerank_pool(&scored, TOPK).unwrap_or_else(|| vec![0]);
+            let top: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
+            let ng: Vec<f64> = pool.iter().map(|&p| scored[p].0).collect();
+            // The key is the engine's (`TinyLm::key_for` of the row's context, the display before the one stretch being empty): the
+            // context key for versions 1 to 4 (its SENTINEL is the empty k, in TinyLm::rerank), the last L characters as they are for
+            // a model declaring L (docs/contracts/context-return.md section 2); without --context, no key.
             let t0 = Instant::now();
-            let key = left.as_deref().unwrap_or("");
+            let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
+            let key = key.as_str();
             let picked = match colloq_on {
                 Some(co) => {
-                    let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
+                    let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
                     tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
                 }
@@ -413,7 +450,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             };
             let ll = match picked {
                 Ok((c, ll)) => {
-                    chosen = c;
+                    chosen = pool[c];
                     ll
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
@@ -429,21 +466,23 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
+                // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
+                let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), idx)?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;
         out.in64 = surf.iter().any(|s| len.apply(s) == t);
         if want_dump {
-            for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
+            for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
                 writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
             }
         }
         if want_words {
             let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
             writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
-            for (r, (_, ws)) in nb.iter().enumerate() {
-                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).unwrap();
+            for (r, (_, ws)) in scored.iter().enumerate() {
+                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.iter().map(|w| w.0).collect::<Vec<_>>().join(" ")).unwrap();
             }
         }
         out.first = surf.swap_remove(chosen);
@@ -567,7 +606,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
