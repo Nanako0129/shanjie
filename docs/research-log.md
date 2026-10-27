@@ -9471,3 +9471,43 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **六個單位的最後結果**：聊天標準 (0.7, 2, 0)、保守 (0.7, 2, 1)、積極 (1.0, 2, 0.1)（`colloquial.rs` 的 cell 常數）；書面標準 (0.5, 2, 0.5)、保守 (0.5, 2, 1)、積極＝標準（`.sjtl` 檔頭）。六個都過出貨標準（dev302 書面照 §2.8 只報）。
 - 還沒做：延遲與記憶體（閒置窗）、chatjudge-3 確認一發（最早 2026-11）、fresh verifier 抽查與保留集、PR 2。
 
+
+## 2026-10-27：通語 SJ-LM-7（規模待定）PR 2 的核心：新 CLI 對量測用 CLI 逐位元組核對（`docs/contracts/sj-lm-7-pr2.md` §3 第 1 條）
+
+- **做什麼**：PR 2 的核心把量測時帶研究旗標的行為變成出貨行為（每個設定自己的連文表、書面 KN β 0.75、拿掉 `--chat-tri`、`--formal-kn`、`--kn-beta`）。這裡核對「新 CLI 不帶旗標」和「量測用的 CLI 帶旗標」在公開集合上逐位元組相同。
+- **兩個 CLI**：
+  - 量測用（參照）：分支 `exp/sj7-trigram` 的 `7808c7b4`，`PAIRED_TINYLM_SHA256` 換成 `bbb387d0…`、三個 cell 換成 §2.9 選中的值（standard (0.7, 2, 0)、conservative (0.7, 2, 1)、aggressive (1.0, 2, 0.1)），release 建置，執行檔 SHA-256 前綴 `1467d15a`；聊天帶 `--chat-tri on-kn`，書面帶 `--formal-kn --kn-beta 0.75`。
+  - 新的：`feat/sj7-pr2`，release 建置，執行檔 SHA-256 前綴 `c61cee41`，不帶任何研究旗標。
+  - 兩個 CLI 各自讀自己建置樹的 `data/lexicon`、`data/packs`（建置時寫死的 root）；兩棵樹的 `data/` 只差 `data/lexicon/slang-add.tsv` 的兩列（買家佛、賣家佛，`ecd0bc44`，新樹有、參照樹沒有），十一個集合裡沒有這兩個詞，所以不影響結果；`data/packs` 兩邊相同（階段 1 重評過的檔）。
+- **模型資料夾**（都是 `data/lm` 最終檔的符號連結）：參照聊天 = B6 `bigram.sjlm` `69826c2f`、`classes.sjc` `4315f0ed`、`kn.sjkn` `2b332df9`、`trigram.sjt3` ＝聊天表 `03891d5a`；參照書面 = 同樣三個檔、`trigram.sjt3` ＝書面表 `7ec1869b`；新 CLI 用一個資料夾，`trigram.sjt3` ＝書面表、`trigram-chat.sjt3` ＝聊天表。會意 `bbb387d0`（`tinylm.sjtl`），常談 C1 `81c2470d`（只在聊天帶 `--colloquial-core`）。
+- **指令**（每個集合、每個設定、每一檔各跑參照與新的各一次，兩邊旗標相同）：
+
+  ```sh
+  shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat|formal  <--dev 302 | --rows eval/dev/user-typing.txt | --rows eval/dev/user-reported.txt | --rows eval/dev/acg/<works|characters|character-parts|interpunct|recent>.txt | --rows eval/dev/names/<names|creators|stores>.txt> \
+      --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level conservative|standard|aggressive [--colloquial-core data/lm/colloquial.sjlm  # 只有聊天] \
+      --rowstats <檔> --dump <檔>
+  # 參照另加：聊天 --chat-tri on-kn；書面 --formal-kn --kn-beta 0.75
+  # 比對：cmp 兩邊的 rowstats、dump 與整行摘要（stdout 的 `## …` 行）
+  ```
+
+- **結果**：6 個設定 × 11 個集合 = 66 組，**66 組的 rowstats、dump、整行摘要都逐位元組相同，沒有例外**（第一次建好的 CLI 跑一次，所有最後的程式改完後用最終的 CLI 再跑一次，兩次都是 66／66）。摘要行的標記：聊天 `lm-chat+ctx+kn:2b332df9:θ1:β1+tl:bbb387d0+acg+it+tri:03891d5a+colloq:81c2470d+rc`（保守、積極在 `+tl:` 後多 `+rl:<檔>`），書面 `lm-formal+ctx+kn:2b332df9:θ1:β0.75+tl:bbb387d0+acg+it+tri:7ec1869b`。top1 數（兩邊相同）：
+
+| 集合 (n) | 聊天 保守 | 聊天 標準 | 聊天 積極 | 書面 保守 | 書面 標準 | 書面 積極 |
+|---|---|---|---|---|---|---|
+| dev302 (302) | 266 | 280 | 281 | 265 | 271 | 271 |
+| typing76 (76) | 74 | 74 | 74 | 72 | 74 | 74 |
+| user-reported (161) | 113 | 126 | 127 | 110 | 116 | 116 |
+| acg works (142) | 134 | 133 | 132 | 138 | 138 | 138 |
+| acg characters (227) | 190 | 195 | 195 | 195 | 196 | 196 |
+| acg character-parts (105) | 81 | 81 | 80 | 84 | 85 | 85 |
+| acg interpunct (45) | 40 | 40 | 39 | 39 | 38 | 38 |
+| acg recent (23) | 20 | 20 | 20 | 23 | 23 | 23 |
+| names names (61) | 59 | 58 | 57 | 57 | 57 | 57 |
+| names creators (170) | 161 | 163 | 163 | 157 | 156 | 156 |
+| names stores (225) | 198 | 197 | 195 | 180 | 180 | 180 |
+
+- **Python 參考 vs Rust（最終檔）**：`reference/proto/lm_eval.py`（聊天讀 `trigram-chat.sjt3`、書面讀 `trigram.sjt3`，兩邊 KN 開、書面 β 0.75）在 dev302 聊天的摘要行（`top1_sha256 3f8a405f…`）與 Rust 逐字相同；`eval/golden` 的 `s2-lm.txt`、`s2h-lm-context.txt`、`s2-lm-dev302-*`、`s2r-probe-top1.tsv`、`sw-probe.txt`、`sp-predict.txt`、`digits-score.txt`、`digits-pred.txt`、`pack-oov/decode.tsv` 都在最終檔上由 Python 重產，Rust 逐位元組比對全過（`cargo test --release -p cli --test golden` 25 個、`-p core --test engine_digits` 60 個、`--test pack_oov`）。S1 的單字表 golden（`s1-dev302.txt`、`s1-overlay-sets.txt`）隨階段 0 的詞庫變動（`reference/proto/check_unigram_overlay.py` 與 Rust 一致）。
+- **在最終檔上變成不過、已重釘的測試**（模型與詞庫換了，前提不成立的 fixture 用 CLI 或小搜尋重找，不放寬斷言）：自測句（第 284 列在新模型下兩種設定相同，換成第 131 列加第 10 列；詞包字換成榊遊矢、螢幕保護器）、`engine_lm`／`engine_cap`／`engine_colloquial`／`engine_demote`／`engine_pack`／`engine_rerank`／`engine_newword`／`engine_learn`／`engine_predict`、`cli/tests` 的 colloquial／replay／english_next／golden。逐項理由在各個 commit 訊息。
+- **新發現（給維護者看）**：書面手動詞釘選 `manual_words_come_first_in_the_shipping_setting` 現在書面錯第 4、8 列（第 4 列「米雅歌」被標準與積極強度的會意改成「米亞哥」，保守不動；聊天不錯），之前只錯第 8 列。
+- **還沒過（不是這片的 commit 造成，是換模型後釘著 model-v6 句子的測試）**：`core/tests/engine_repick.rs` 12 個測試（版控／板控、他是／她世界的 fixture，要逐個重找例子）、`tools/test_build_overlay.py` 的 `test_the_tails_are_what_tail_rows_makes_today`（`overlay-add.tsv` 沒有 `slang-add.tsv` 自 `ecd0bc44` 起多的兩列，要重建疊加層）。
+- **沒做**：詞庫衍生檔（`digits.tsv` 等）和階段 1 在 GCP 重建的版本逐檔比對（這裡拿不到那台機器）；§4 的延遲與記憶體量測；App 打包與 `scripts/check-models.sh bundle`（main 做）。
