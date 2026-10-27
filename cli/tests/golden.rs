@@ -416,27 +416,44 @@ fn predict_no_kn_scores_differently_from_the_golden() {
     assert!(a.iter().zip(&b).filter(|(x, y)| x != y).count() > a.len() / 2, "KN did not change most prediction scores");
 }
 
-/// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles
+/// data/lexicon/overlay-manual.tsv: every manual word comes first in the shipping setting, alone and in a sentence, in both profiles and at the three strengths
 /// (eval/golden/manual-words-rows.txt; MANUAL_BONUS in tools/build_overlay.py was chosen on its first 9 rows; the last 6 (喵菜子, 哈那口, and 菜菜子 which is a base word) are
-/// first even without the entry, so they only pin the behaviour). A retrained model or a new
-/// rerank that pushes another name below its homophones fails here instead of shipping silently; the one known miss is listed below.
-/// Known exception since classes-v5 (μ 0.8 → 0.2, docs/contracts/classes-v5.md): in formal, row 8 `米雅歌唱得很好` comes out as
-/// 米亞 after the rerank. Since SJ-LM-7 (measured 2026-10-27 on the final files, sj-lm-7-pr2.md section 3) a second one: in formal, row 4 `米雅歌`
-/// (n-gram first) comes out as 米亞哥 after the rerank at standard and aggressive strength (conservative keeps it); chat misses none. The test pins
-/// exactly those misses (rowstats, i.e. after the rerank) so any other row dropping still fails; row 4 is a new loss for the maintainer to look at.
+/// first even without the entry, so they only pin the behaviour). A retrained model or a new rerank that pushes another name below its homophones fails here
+/// instead of shipping silently. Since sj-lm-7-pr2.md section 2.7 the rerank never takes a `manual` word out of the n-gram's first choice (`tinylm::manual_mask`),
+/// which fixed row 4 `米雅歌` in formal at standard and aggressive strength (the rerank used to pick 米亞哥; measured 2026-10-27 on the final files).
+/// Measured 2026-10-27 on the final files (`rowstats`, i.e. after the rerank; chat is run without and with `--colloquial-core`, the two rerank paths) and pinned
+/// exactly, so any other row dropping, or a miss going away, fails here; the remaining misses are not the rerank's (their `--tinylm-scores` rows have `c` 0):
+/// formal row 8 `米雅歌唱得很好` at all three strengths (the n-gram's first is already 米亞歌唱得很好; known since classes-v5, μ 0.8 → 0.2, docs/contracts/classes-v5.md)
+/// and chat row 8 at conservative strength without the colloquial table (the n-gram's first holds 米雅歌 but reads 唱的, not 唱得; the mask removed the other six candidates).
 #[test]
 fn manual_words_come_first_in_the_shipping_setting() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
     let rows = format!("{root}/eval/golden/manual-words-rows.txt");
     let tl = format!("{root}/data/lm/tinylm.sjtl");
+    let colloquial = format!("{root}/data/lm/colloquial.sjlm");
     let stats = std::env::temp_dir().join(format!("shanjie-manual-words-{}.rowstats", std::process::id()));
-    for (profile, misses) in [("chat", vec![]), ("formal", vec!["4", "8"])] {
-        let _ = std::fs::remove_file(&stats);
-        run(&["--lm", &lm_path(), "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rows", &rows, "--rowstats", stats.to_str().unwrap()]);
-        let got = std::fs::read_to_string(&stats).unwrap();
-        assert_eq!(got.lines().count(), 15, "{profile}");
-        let got: Vec<&str> = got.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "0").map(|f| f[0]).collect();
-        assert_eq!(got, misses, "{profile}: rows whose manual word is not first");
+    let lm = lm_path();
+    let none: Vec<&str> = vec![];
+    // (profile, with the colloquial table, [conservative, standard, aggressive] misses)
+    let settings = [
+        ("chat", false, [vec!["8"], none.clone(), none.clone()]),
+        ("chat", true, [none.clone(), none.clone(), none.clone()]),
+        ("formal", false, [vec!["8"], vec!["8"], vec!["8"]]),
+    ];
+    for (profile, with_colloquial, per_level) in settings {
+        for (level, misses) in ["conservative", "standard", "aggressive"].into_iter().zip(per_level) {
+            let _ = std::fs::remove_file(&stats);
+            let mut args = vec!["--lm", &lm, "--profile", profile, "--context", "--packs", "acg", "--tinylm", &tl, "--rerank-level", level, "--rows", &rows];
+            if with_colloquial {
+                args.extend(["--colloquial-core", &colloquial]);
+            }
+            args.extend(["--rowstats", stats.to_str().unwrap()]);
+            run(&args);
+            let got = std::fs::read_to_string(&stats).unwrap();
+            assert_eq!(got.lines().count(), 15, "{profile} {level}");
+            let got: Vec<&str> = got.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "0").map(|f| f[0]).collect();
+            assert_eq!(got, misses, "{profile} colloquial {with_colloquial} {level}: rows whose manual word is not first");
+        }
     }
     std::fs::remove_file(&stats).unwrap();
 }

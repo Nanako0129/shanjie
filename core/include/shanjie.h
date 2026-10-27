@@ -308,7 +308,9 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   prediction row, pass-through keys) keep the job valid. A key or pick that decodes a free stretch longer than the window W (the small
 //   model's context minus 3 characters, 61 without a model; rerank on or off) first freezes its head down to W - 16 characters as
 //   frozen words (docs/contracts/composition-cap.md section 1.2), then decodes again: its output and its job are those after the freeze. Commits (ENTER, the auto-commit at 128 tokens, reset) send what is
-//   shown; a job not yet applied is dropped.
+//   shown; a job not yet applied is dropped. When the n-gram's first choice of a stretch holds a word the maintainer added by hand (a `manual`
+//   row of overlay-add.tsv) the rerank only changes it to a candidate that still holds that word on the same syllables
+//   (docs/contracts/sj-lm-7-pr2.md section 2.7).
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;

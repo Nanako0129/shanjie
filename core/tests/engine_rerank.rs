@@ -12,7 +12,7 @@ use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::learn::context_key;
 use core::lm::{decode_segment_learned, CappedLexicon, Demote, End, Lm, Profile};
-use core::tinylm::{TinyLm, TOPK};
+use core::tinylm::{RerankLevel, TinyLm, TOPK};
 use core::{Lexicon, Syls, BEAM_S1};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -223,7 +223,7 @@ fn expect_key(model: &Path, syls: &[String], start: &str, end: End<'_>, key: &st
     let ng: Vec<f64> = top.iter().map(|x| x.0).collect();
     let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
     let tl = TinyLm::load(model).unwrap();
-    let pick = tl.rerank(&ng, &cands, key, tl.alpha_tau_delta(Profile::Chat)).unwrap().0;
+    let pick = tl.rerank(&ng, &cands, key, tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap().0;
     Expect { surfaces, ng, pick }
 }
 
@@ -1044,7 +1044,7 @@ fn replay_dev302_parity_and_measurements() {
             let surf: Vec<String> = nb.iter().take(TOPK).map(|(_, ws)| ws.concat()).collect();
             let ng: Vec<f64> = nb.iter().take(TOPK).map(|x| x.0).collect();
             let top: Vec<&str> = surf.iter().map(String::as_str).collect();
-            let pick = tl.rerank(&ng, &top, "", tl.alpha_tau_delta(Profile::Chat)).map_or(0, |r| r.0);
+            let pick = tl.rerank(&ng, &top, "", tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).map_or(0, |r| r.0);
             surf[pick].clone()
         })
         .collect();
@@ -1095,4 +1095,66 @@ fn replay_dev302_parity_and_measurements() {
     assert_eq!(want.len(), 302, "302 CLI firsts");
     let diff: Vec<usize> = (0..302).filter(|&i| m.commits[i] != want[i]).map(|i| i + 1).collect();
     assert!(diff.is_empty() && diff_rule.is_empty(), "replay differs from the CLI at rows {diff:?} (rule: {diff_rule:?})");
+}
+
+// ---------- docs/contracts/sj-lm-7-pr2.md section 2.7, test 6: the rerank keeps the maintainer's manual words ----------
+
+/// An engine on the final files (the production path: `Engine::new`, `load_lm`, `load_tinylm` of data/lm/tinylm.sjtl) in the formal profile, the switch on
+/// at `level`, over the data folder `dir`.
+fn final_engine(dir: &Path, level: RerankLevel) -> Engine {
+    let lmdir = root().join("data/lm");
+    let mut e = Engine::new(dir, Layout::Standard).unwrap();
+    e.load_lm(&lmdir.join("bigram.sjlm")).unwrap();
+    e.load_tinylm(&lmdir.join("tinylm.sjtl")).unwrap();
+    e.set_profile(Profile::Formal).unwrap();
+    e.set_rerank(true).unwrap();
+    e.set_rerank_level(level).unwrap();
+    e
+}
+
+/// A copy of data/lexicon (symlinks) whose overlay-add.tsv has the tag `manual` replaced by `slang`: the same words and scores, but no `ManualSet`.
+fn lexicon_without_manual_tags() -> PathBuf {
+    let d = std::env::temp_dir().join(format!("shanjie-rerank-nomanual-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    for f in std::fs::read_dir(root().join("data/lexicon")).unwrap() {
+        let f = f.unwrap().path();
+        if f.file_name().unwrap() != "overlay-add.tsv" {
+            std::os::unix::fs::symlink(&f, d.join(f.file_name().unwrap())).unwrap();
+        }
+    }
+    let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+    assert!(overlay.contains("\tmanual\n"), "premise: the shipped overlay has manual rows");
+    std::fs::write(d.join("overlay-add.tsv"), overlay.replace("\tmanual\n", "\tslang\n")).unwrap();
+    d
+}
+
+/// Type `reading`, run the pending rerank job and apply it: the text shown afterwards (the n-gram's when the job changes nothing).
+fn shown_after_rerank(e: &mut Engine, reading: &[&str]) -> (String, String) {
+    let syls: Vec<String> = reading.iter().map(|s| s.to_string()).collect();
+    let ngram = type_syls(e, &syls).preedit;
+    let after = match e.take_rerank_job() {
+        Some(job) => e.apply_rerank(job.run()).unwrap().map_or(ngram.clone(), |o| o.preedit),
+        None => ngram.clone(),
+    };
+    (ngram, after)
+}
+
+/// Formal, standard and aggressive strength: 米雅歌 (dev manual-words row 4, the n-gram's first) stays 米雅歌 through the rerank. Before section 2.7 the
+/// rerank took it out for 米亞哥 at both strengths (measured 2026-10-27); conservative never did. The same engine on a copy of the lexicon whose manual
+/// rows are tagged `slang`, so the job carries no `ManualSet`, does take it out: that is the premise, and the check that fails without the set.
+#[test]
+fn a_manual_word_survives_the_formal_rerank_on_the_final_files() {
+    let reading = ["ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ"];
+    let plain = lexicon_without_manual_tags();
+    for level in [RerankLevel::Standard, RerankLevel::Aggressive, RerankLevel::Conservative] {
+        let (ngram, after) = shown_after_rerank(&mut final_engine(&root().join("data/lexicon"), level), &reading);
+        assert_eq!((ngram.as_str(), after.as_str()), ("米雅歌", "米雅歌"), "{level:?}");
+        let (ngram, after) = shown_after_rerank(&mut final_engine(&plain, level), &reading);
+        assert_eq!(ngram, "米雅歌", "{level:?}: premise: the n-gram's first is the manual word");
+        if level != RerankLevel::Conservative {
+            assert_eq!(after, "米亞哥", "{level:?}: without a ManualSet the rerank takes it out");
+        }
+    }
+    std::fs::remove_dir_all(&plain).unwrap();
 }

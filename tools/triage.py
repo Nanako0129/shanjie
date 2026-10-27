@@ -166,13 +166,16 @@ def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8=""):
     return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{tri}{colloq}"
 
 
-def pick(ng, ll, alpha, tau, delta):
-    """core/src/tinylm.rs pick, line for line."""
+def pick(ng, ll, alpha, tau, delta, masked=()):
+    """core/src/tinylm.rs pick_masked, line for line: `masked` are the indices tinylm::manual_mask kept the rerank from choosing (the CLI's
+    `--tinylm-scores` field of that name, docs/contracts/sj-lm-7-pr2.md section 2.7); the threshold and the scores use the whole list."""
     if len(ng) < 2 or ng[0] - ng[1] >= tau:
         return 0
     s0 = ng[0] + alpha * ll[0]
     best, best_s = 0, s0
     for i in range(1, len(ng)):
+        if i in masked:
+            continue
         s = ng[i] + alpha * ll[i]
         if s > best_s:
             best, best_s = i, s
@@ -285,7 +288,7 @@ def classify(row, lex, par, lenient):
             res["d2"] = "D2a"
         else:
             # core pick with delta 0 is the plain argmax of ng + alpha * ll, ties to the better n-gram rank; here the margin is below tau already
-            res["d2"] = "D2b" if sc["ok"][pick(sc["ng"], sc["ll"], alpha, tau, 0.0)] else "D2c"
+            res["d2"] = "D2b" if sc["ok"][pick(sc["ng"], sc["ll"], alpha, tau, 0.0, sc.get("masked", ()))] else "D2c"
     return res
 
 
@@ -361,6 +364,12 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
+def pick_agrees(sc, par):
+    """Whether the CLI's chosen index `c` of a scores record is `pick(ng, ll, *par)` with the record's masked candidates left out (a record without the
+    field, from an older CLI, has none masked)."""
+    return sc["c"] == pick(sc["ng"], sc["ll"], *par, masked=sc.get("masked", ()))
+
+
 def plain_pick_applies(prof, colloq):
     """Whether the CLI's chosen index must equal the plain `pick(ng, ll, *par)`: not in chat with the colloquial table, where the core
     adds the colloquial term (and the terms that ride on it) to the fusion on purpose, which this Python `pick` does not reproduce."""
@@ -391,7 +400,7 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
         sc = recs[i]
         c = sc["c"]
         sel_ok = int(lenient(cands[i][c][0]) == lenient(truth))
-        if sel_ok != ok[i] or (plain_pick_applies(prof, colloq) and sc["n"] > 1 and "ll" in sc and c != pick(sc["ng"], sc["ll"], *par)):
+        if sel_ok != ok[i] or (plain_pick_applies(prof, colloq) and sc["n"] > 1 and "ll" in sc and not pick_agrees(sc, par)):
             raise RuntimeError(f"row {i + 1}: the chosen candidate disagrees with rowstats or with pick")
         recs_rows.append({"ctx": ctx, "truth": truth, "syls": syls, "cands": cands[i], "gold0": gold0[i], "c": c, "scores": sc})
     cn, per = triage_rows(recs_rows, [int(x) for x in ok], [int(x) for x in ok_nc], lex, par, lenient, report)

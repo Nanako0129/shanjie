@@ -82,6 +82,20 @@ class Pick(unittest.TestCase):
         self.assertEqual(T.pick([0], [-1], 1.0, 2.0, 0.0), 0)
         self.assertEqual(T.pick([0, -1, -1], [-2, 0.0, 0.0], 1.0, 9.0, 0.0), 1, "ties go to the better n-gram rank")
 
+    def test_pick_applies_the_cli_mask(self):
+        """sj-lm-7-pr2.md section 2.7, test 8: a row whose n-gram first holds a manual word, where the CLI kept index 0 because index 1 was masked, is accepted
+        although the plain `pick` would take index 1; the same record without the mask, or with the index the mask does not explain, is still refused."""
+        par = (1.0, 2.0, 0.0)
+        rec = {"n": 3, "ng": [0.0, -0.5, -3.0], "ll": [-1.0, 0.0, -9.0], "c": 0, "masked": [1]}
+        self.assertEqual(T.pick(rec["ng"], rec["ll"], *par), 1, "premise: the plain pick takes index 1")
+        self.assertEqual(T.pick(rec["ng"], rec["ll"], *par, masked=[1]), 0)
+        self.assertTrue(T.pick_agrees(rec, par))
+        self.assertFalse(T.pick_agrees({k: v for k, v in rec.items() if k != "masked"}, par), "without the field the old rule: refused")
+        self.assertFalse(T.pick_agrees({**rec, "masked": []}, par), "an empty mask: refused")
+        self.assertFalse(T.pick_agrees({**rec, "c": 1}, par), "the CLI chose the masked index: inconsistent")
+        self.assertFalse(T.pick_agrees({**rec, "masked": [2]}, par), "another mask does not explain index 0")
+        self.assertTrue(T.pick_agrees({**rec, "ll": [-5.0, 0.0, -1.0], "masked": [1], "c": 2}, par), "the better unmasked candidate is the pick")
+
     def test_header_params(self):
         """Real tiny files from the exporter, one per format version (the version 3 one used to be refused: ValueError 'not a .sjtl file')."""
         sys.path.insert(0, os.path.join(T.ROOT, "experiments", "s7a-tinylm"))
@@ -273,6 +287,12 @@ class D2(unittest.TestCase):
         # fused scores of 1 and 2 are equal and better than the first: pick takes index 1, which is right
         res = cls(self.c_row("丙", scores([0, -0.2, -0.2], [0, 1, 0], [-1, -0.5, -0.5])))
         self.assertEqual(res["d2"], "D2b")
+
+    def test_d2_follows_the_masked_candidates(self):
+        # the fused argmax is index 1 (right) in the plain rule: D2b; with index 1 masked it is index 2 (wrong): D2c
+        sc = scores([0, -0.5, -0.6], [0, 1, 0], [-1, 0, -0.2])
+        self.assertEqual(cls(self.c_row("丙", sc))["d2"], "D2b")
+        self.assertEqual(cls(self.c_row("丙", {**sc, "masked": [1]}))["d2"], "D2c")
 
     def test_c_when_the_small_model_also_picks_a_wrong_candidate(self):
         res = cls(self.c_row("丙", scores([0, -0.5, -0.6], [0, 1, 0], [-1, -2, -0.2])))

@@ -17,6 +17,7 @@ mod trigram;
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 pub const BEAM: usize = 32;
 pub const PER_KEY: usize = 12;
@@ -67,6 +68,46 @@ pub struct Lexicon {
     words: String,
     /// Entry positions of each distinct word's by_word winner, sorted by word bytes.
     by_word: Vec<u32>,
+    /// The overlay rows tagged `manual` (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with every rerank job of an engine built on this lexicon.
+    manual: Arc<ManualSet>,
+}
+
+/// The words the maintainer added by hand (`manual` rows of overlay-add.tsv) as (word, reading): the small model's rerank must not take one out of the
+/// n-gram's first choice (`tinylm::manual_mask`). Built where the overlay is read (`Lexicon::parse_with`), so the engine and the evaluation CLI share it.
+/// A row whose word does not have one character per syllable is not kept (the lexicon guarantees it for the shipped rows).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ManualSet {
+    words: Vec<(Vec<char>, Vec<String>)>,
+}
+
+impl ManualSet {
+    /// A set of (word, reading with `-` between the syllables) pairs; for tests.
+    pub fn from_pairs<'a>(pairs: impl IntoIterator<Item = (&'a str, &'a str)>) -> ManualSet {
+        let mut set = ManualSet::default();
+        pairs.into_iter().for_each(|(w, r)| set.push(w, r));
+        set
+    }
+
+    fn push(&mut self, word: &str, reading: &str) {
+        let chars: Vec<char> = word.chars().collect();
+        let syls: Vec<String> = reading.split('-').map(String::from).collect();
+        if chars.len() == syls.len() {
+            self.words.push((chars, syls));
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.words.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.words.len()
+    }
+
+    /// The (word, syllables) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&[char], &[String])> {
+        self.words.iter().map(|(w, r)| (w.as_slice(), r.as_slice()))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -120,13 +161,17 @@ impl Builder {
     }
 }
 
-fn overlay_row(line: &str) -> Option<(&str, &str, f64)> {
+/// (reading, word, score, tag) of an overlay row.
+fn overlay_row(line: &str) -> Option<(&str, &str, f64, &str)> {
     let mut it = line.split('\t');
-    let (Some(r), Some(w), Some(s), Some(_), None) = (it.next(), it.next(), it.next(), it.next(), it.next()) else {
+    let (Some(r), Some(w), Some(s), Some(tag), None) = (it.next(), it.next(), it.next(), it.next(), it.next()) else {
         return None;
     };
-    Some((r, w, s.parse().ok()?))
+    Some((r, w, s.parse().ok()?, tag))
 }
+
+/// The tag of the rows `ManualSet` collects (tools/build_overlay.py puts overlay-manual.tsv in with it).
+const MANUAL_TAG: &str = "manual";
 
 impl Lexicon {
     pub fn parse(text: &str) -> Result<Lexicon, Error> {
@@ -153,21 +198,27 @@ impl Lexicon {
         let base_n = b.raw.len();
         // A bad overlay row stops parsing but is reported only if no earlier row is a duplicate.
         let mut bad_row = None;
+        let mut manual = ManualSet::default();
         for line in overlay.unwrap_or("").lines() {
             match overlay_row(line) {
-                Some((r, w, s)) => b.push(r, w, s),
+                Some((r, w, s, tag)) => {
+                    b.push(r, w, s);
+                    if tag == MANUAL_TAG {
+                        manual.push(w, r);
+                    }
+                }
                 None => {
                     bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() });
                     break;
                 }
             }
         }
-        b.finish(base_n, bad_row)
+        b.finish(base_n, bad_row, manual)
     }
 }
 
 impl Builder {
-    fn finish(self, base_n: usize, bad_row: Option<Error>) -> Result<Lexicon, Error> {
+    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet) -> Result<Lexicon, Error> {
         let Builder { syl_ids, syl_names, key_pool, raw, words } = self;
         let n = raw.len();
         let key = |f: u32| {
@@ -242,13 +293,18 @@ impl Builder {
         }
         let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
         let ents = order.iter().map(|&f| raw[f as usize].ent).collect();
-        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word };
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual) };
         lex.words.shrink_to_fit();
         Ok(lex)
     }
 }
 
 impl Lexicon {
+    /// The `manual` words of the overlay this lexicon was built with (empty without an overlay or without such rows).
+    pub fn manual(&self) -> &Arc<ManualSet> {
+        &self.manual
+    }
+
     fn word(&self, p: usize) -> &str {
         let e = &self.ents[p];
         &self.words[e.off as usize..(e.off + e.len) as usize]

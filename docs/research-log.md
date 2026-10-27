@@ -9518,3 +9518,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **規則**：這一段的 n-gram 第一名含有 `overlay-add.tsv` 標成 `manual` 的詞時，重排只能在同樣音節上保有它的候選之間選（不保有的候選在選擇時遮掉，τ 門檻與分數仍用完整清單）。
 - **基準**：修訂一之前的最後一個 commit `353c3dd9e17d06f4bfcbc83f03b804ab8ff77b9a`（審查修正 A–E 之後；契約 §3 第 1 條在它上面逐位元相同，66／66）。
 - **量法**：GCP 同一台 VM，定案的六個單位與 §2.9 的集合（discordtune、cvtune-clean、打字測驗、dev302、錯字回報、wikitune-clean、動漫五集、名單三集、網路用語三集、資訊詞包），修訂一之後的 CLI 對基準 CLI 逐列比 rowstats。逐列相同的集合，§2.9 與 §2.10 的判讀照舊；有變的列列出列號、對 MAIN 重算出貨標準四條與共同關卡，任何一條由過變不過就停，數字給維護者。
+
+### 修訂一的實作與 Mac 上的核對（2026-10-27，同一天；GCP 的量測不在這裡）
+
+- **實作**：`ManualSet` 在 `Lexicon::parse_with` 讀疊加層時收成（第 4 欄 `manual`，鍵是詞與讀音），引擎與 CLI 共用；`tinylm::manual_mask` 是唯一決定哪些候選被遮掉的函式；`TinyLm::rerank`、`TinyLm::rerank_colloquial`（含 `guarded_pick` 的退回路徑）都收 `&ManualSet`；兩種設定的 `RerankJob` 都帶 `Arc<ManualSet>`；`--tinylm-scores` 每列多一個 `masked` 欄位（被遮掉的索引，沒有就是空）；`tools/triage.py` 的選字一致性檢查與 D2 細分套用同樣的遮罩。
+- **`manual-words-rows.txt` 在最終檔上**（15 列，`--context --packs acg --tinylm`，量於 2026-10-27）：書面第 4 列在標準與積極檔由 米亞哥 變回 米雅歌（保守檔本來就對）；聊天（不論有沒有 `--colloquial-core`）沒有這一類的缺；剩下的缺都不是重排造成的（`--tinylm-scores` 的 `c` 是 0）：書面第 8 列 `米雅歌唱得很好` 三檔都缺（n-gram 第一名已經是 米亞歌唱得很好），聊天第 8 列在保守檔、不帶常談表時缺（n-gram 第一名含 米雅歌，但讀成「唱的」；遮罩把另外六個候選擋掉）。`cli/tests/golden.rs::manual_words_come_first_in_the_shipping_setting` 照這個寫死。
+- **對基準 CLI（量測用 CLI，帶研究旗標）的差異，Mac，公開集合**：dev302、打字測驗、錯字回報、動漫五集、名單三集，聊天三檔＋書面三檔共 66 個組合，`--rowstats`、`--dump` 與整行摘要逐位元組相同（66／66），沒有一列有變：這些集合的 n-gram 第一名都不含 `manual` 詞。`manual-words-rows.txt`（`--packs acg,it`，聊天帶 `--colloquial-core`）有變的列：書面標準與積極第 4 列（變對）；聊天保守、標準、積極第 8 列（基準 CLI 在這一列答錯、現在答對）；書面保守沒有差異。

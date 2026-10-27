@@ -108,7 +108,9 @@ fn no_option_is_byte_identical_to_before() {
     assert_eq!(h(&o.dump), "ea7dac7b34a98ba85be7cab65e0c67cc41331981c127af618a50b12b08b184c7");
     assert_eq!(h(&o.words), "5c8e89a037daa1056ac9295d95995c8504c70a529272621cc45dcaf312a26bc9");
     assert_eq!(h(&o.rs), "a795b9d2c943e64587906438de9439fc5302cff79341a63684328ba44f9b960b");
-    assert_eq!(h(&o.sc), "3762df4df12f06e84754f2d952dde28389a4e838821105db43a04d13fe9fe99e");
+    // The scores gained a `masked` field in sj-lm-7-pr2.md section 2.7 (empty on every one of these 16 rows); without it they are what they were.
+    assert_eq!(h(&o.sc), "066e26f8d1f6d1e900efa987dd524a005262da404d02d3c6b59ad1519e7b25c1");
+    assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "3762df4df12f06e84754f2d952dde28389a4e838821105db43a04d13fe9fe99e");
     assert_eq!(h(&o.stdout), "038760955ce42e17e36847954dbba24f0f7c4159e49b568d57ce066a1991d929");
 }
 

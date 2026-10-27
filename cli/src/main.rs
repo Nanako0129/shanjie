@@ -4,7 +4,7 @@ use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_l
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::collections::BTreeMap;
@@ -146,9 +146,10 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 }
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
-/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
+/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py), for n >= 2 `ll`, and `masked`, the
+/// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/contracts/sj-lm-7-pr2.md section 2.7; empty when none, always present).
 /// Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, masked: &[bool]) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
@@ -164,6 +165,7 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     if let Some(ll) = ll {
         s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
     }
+    s += &format!(", \"masked\": {}", list(masked.iter().enumerate().filter(|(_, &m)| m).map(|(k, _)| k.to_string()).collect()));
     Ok(s + "}\n")
 }
 
@@ -411,9 +413,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, syls, lex.manual())
                 }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level)),
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), syls, lex.manual()),
             };
             let ll = match picked {
                 Ok((c, ll)) => {
@@ -433,7 +435,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(syls, &top, lex.manual()))?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;

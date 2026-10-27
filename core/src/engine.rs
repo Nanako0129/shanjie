@@ -12,7 +12,7 @@ use crate::english_next::EnglishTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{RerankLevel, TinyLm, TOPK};
-use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
+use crate::{decode_beam, Lexicon, ManualSet, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -36,8 +36,8 @@ struct Stretch {
     paths: Vec<Vec<(String, f64, f64, usize)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
-    /// does not read the term.
+    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words, and what `manual_mask`
+    /// matches the manual words against); empty when the job reads neither (no channel term and no manual word in the lexicon).
     syls: Vec<String>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
     /// n-gram text of stretches left out of the job.
@@ -61,6 +61,9 @@ pub struct RerankJob {
     /// The engine's lexicon, `Some` only where the reading-channel term applies (docs/contracts/reading-channel.md): when `colloquial` is
     /// `Some` and the engine's reading channel is on (the default; `Engine::set_reading_channel`).
     channel_lex: Option<Arc<Lexicon>>,
+    /// The `manual` words of the engine's lexicon (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with the lexicon: the rerank of either profile
+    /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
+    manual: Arc<ManualSet>,
     /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
     /// the last L characters of `Engine::left_full` (context-return section 2; nothing longer is copied into a job).
     left: String,
@@ -104,9 +107,9 @@ impl RerankJob {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                         let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.syls, &self.manual)
                     }
-                    None => self.model.rerank(&s.ng, &cands, &key, self.params),
+                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.syls, &self.manual),
                 }
                 .map_or(0, |r| r.0);
                 let pick = if pick < s.paths.len() { pick } else { 0 };
@@ -2612,6 +2615,8 @@ impl Engine {
         let channel = self.reading_channel
             && self.colloquial.is_some()
             && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
+        // The stretches also keep their syllables when the lexicon has `manual` words, which the rerank matches against them.
+        let keep_syls = channel || !self.lex.manual().is_empty();
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -2670,7 +2675,7 @@ impl Engine {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
+                        syls: if keep_syls { self.syls[start..stop].to_vec() } else { Vec::new() },
                         gap: gap_text,
                     });
                 }
@@ -2701,7 +2706,7 @@ impl Engine {
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
             let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, manual: self.lex.manual().clone(), left, stretches });
         }
         Ok(())
     }

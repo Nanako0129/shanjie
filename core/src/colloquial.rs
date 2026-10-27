@@ -9,7 +9,7 @@
 //! three (alpha, tau, delta) cells, one per strength (docs/contracts/colloquial-levels.md), are the ones docs/contracts/sj-lm-7.md section 2.9
 //! selected for the SJ-LM-7 base; none of them comes from the `.sjtl` header.
 use crate::lm::{Lm, LmError, Profile};
-use crate::tinylm::{pick, RerankLevel, TinyLm};
+use crate::tinylm::{pick_masked, RerankLevel, TinyLm};
 use crate::Lexicon;
 use std::collections::HashSet;
 use std::fmt;
@@ -218,7 +218,7 @@ pub fn channel_of<S: AsRef<str>>(lex: &Lexicon, syls: &[String], words: &[S]) ->
 /// The index `rerank_colloquial` chooses: `pick` over the fused scores with `cell`, the level's (alpha, tau, delta) (never the `.sjtl`
 /// header's). `ng`, `ll`, `col` and `ch` (the reading-channel term, None for the colloquial term alone) are the first candidates of one
 /// n-best list, in the n-gram order: ll_eff_i = `fuse` + (NU / alpha) * (ch_i - ch_0).
-pub fn fused_pick(ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell: (f64, f64, f64)) -> usize {
+pub fn fused_pick(ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell: (f64, f64, f64), masked: &[bool]) -> usize {
     let (alpha, tau, delta) = cell;
     let mut eff = fuse(ll, col, alpha);
     if let Some(ch) = ch {
@@ -227,22 +227,25 @@ pub fn fused_pick(ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell:
             *e += (NU / alpha) * (c - ch[0]);
         }
     }
-    pick(ng, &eff, alpha, tau, delta)
+    pick_masked(ng, &eff, alpha, tau, delta, masked)
 }
 
 /// `fused_pick` with `cell`, unless a col is not finite (a word the table scores as log10 0, or a NaN): then no colloquial term at all and no
 /// reading-channel term, the plain `pick` with `plain` (the `.sjtl` header's alpha, tau, delta of the same level), so an infinity or NaN never decides.
-pub fn guarded_pick(ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell: (f64, f64, f64), plain: (f64, f64, f64)) -> usize {
+pub fn guarded_pick(
+    ng: &[f64], ll: &[f64], col: &[f64], ch: Option<&[f64]>, cell: (f64, f64, f64), plain: (f64, f64, f64), masked: &[bool],
+) -> usize {
     if col.iter().all(|c| c.is_finite()) {
-        return fused_pick(ng, ll, col, ch, cell);
+        return fused_pick(ng, ll, col, ch, cell, masked);
     }
     let (alpha, tau, delta) = plain;
-    pick(ng, ll, alpha, tau, delta)
+    pick_masked(ng, ll, alpha, tau, delta, masked)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tinylm::pick;
 
     fn close(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-12, "{a} vs {b}");
@@ -283,13 +286,13 @@ mod tests {
     /// standard alpha 0.7 (delta 0 takes it; the conservative delta 1 does not) but 0.3 * 1.2 - 0.3 = 0.06 at the header's alpha 0.3 (below its delta).
     #[test]
     fn fused_pick_uses_the_registered_cell() {
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], None, STANDARD), 1, "alpha 0.7: gain 0.54 >= delta 0");
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], None, CONSERVATIVE), 0, "gain 0.54 < delta 1");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], None, STANDARD, &[]), 1, "alpha 0.7: gain 0.54 >= delta 0");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], None, CONSERVATIVE, &[]), 0, "gain 0.54 < delta 1");
         assert_eq!(pick(&[-10.0, -10.3], &[-5.0, -3.8], HEADER_STANDARD.0, HEADER_STANDARD.1, HEADER_STANDARD.2), 0, "premise: the header triple keeps the first");
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.7], &[0.0, 0.0], None, STANDARD), 0, "gain 0.7 * 0.3 - 0.3 < delta 0");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.7], &[0.0, 0.0], None, STANDARD, &[]), 0, "gain 0.7 * 0.3 - 0.3 < delta 0");
         // tau: an n-gram margin of 2 or more keeps the first whatever the small model says
-        assert_eq!(fused_pick(&[-10.0, -12.0], &[-50.0, 0.0], &[0.0, 0.0], None, STANDARD), 0);
-        assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0], None, STANDARD), 1);
+        assert_eq!(fused_pick(&[-10.0, -12.0], &[-50.0, 0.0], &[0.0, 0.0], None, STANDARD, &[]), 0);
+        assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0], None, STANDARD, &[]), 1);
     }
 
     /// A col that is +inf, -inf or NaN (the anchor's or another candidate's) must not decide: the plain pick with the given triple is used.
@@ -298,11 +301,11 @@ mod tests {
     #[test]
     fn non_finite_col_falls_back_to_the_plain_pick() {
         let (ng, ll, plain) = ([-10.0, -10.3], [-5.0, -3.8], HEADER_STANDARD);
-        assert_eq!(fused_pick(&ng, &ll, &[0.0, f64::INFINITY], None, STANDARD), 1, "premise: unguarded, +inf decides");
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::INFINITY], None, STANDARD, plain), 0);
-        assert_eq!(guarded_pick(&ng, &ll, &[f64::NEG_INFINITY, 0.0], None, STANDARD, plain), 0, "-inf anchor");
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, STANDARD, plain), 0);
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], None, STANDARD, plain), fused_pick(&ng, &ll, &[0.0, 0.0], None, STANDARD), "finite cols: the term as before");
+        assert_eq!(fused_pick(&ng, &ll, &[0.0, f64::INFINITY], None, STANDARD, &[]), 1, "premise: unguarded, +inf decides");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::INFINITY], None, STANDARD, plain, &[]), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[f64::NEG_INFINITY, 0.0], None, STANDARD, plain, &[]), 0, "-inf anchor");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, STANDARD, plain, &[]), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], None, STANDARD, plain, &[]), fused_pick(&ng, &ll, &[0.0, 0.0], None, STANDARD, &[]), "finite cols: the term as before");
     }
 
     /// The reading channel's lexicon: 甲 has three readings (a -1.0 twice over, b -3.0, c -9.0: the duplicate row a -5.0 loses to a -1.0), 乙 ties
@@ -370,9 +373,9 @@ mod tests {
         let (ng, ll, col) = ([-10.0, -10.3], [-5.0, -5.0], [0.0, 0.0]);
         assert_eq!(NU, 1.0);
         for (cell, under, over) in [(STANDARD, 0.2, 0.4), (CONSERVATIVE, 1.2, 1.4), (AGGRESSIVE, 0.3, 0.5)] {
-            assert_eq!(fused_pick(&ng, &ll, &col, Some(&[0.0, under]), cell), 0, "{cell:?} under");
-            assert_eq!(fused_pick(&ng, &ll, &col, Some(&[0.0, over]), cell), 1, "{cell:?} over");
-            assert_eq!(fused_pick(&ng, &ll, &col, None, cell), 0, "premise: without the term candidate 1 loses");
+            assert_eq!(fused_pick(&ng, &ll, &col, Some(&[0.0, under]), cell, &[]), 0, "{cell:?} under");
+            assert_eq!(fused_pick(&ng, &ll, &col, Some(&[0.0, over]), cell, &[]), 1, "{cell:?} over");
+            assert_eq!(fused_pick(&ng, &ll, &col, None, cell, &[]), 0, "premise: without the term candidate 1 loses");
         }
     }
 
@@ -381,17 +384,17 @@ mod tests {
     #[test]
     fn channel_is_relative_to_the_anchor() {
         let (ng, ll, col) = ([-10.0, -10.3], [-5.0, -5.0], [0.0, 0.0]);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[-3.0, -2.4]), STANDARD), 1);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[97.0, 97.6]), STANDARD), 1);
-        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[-3.0, -3.0]), STANDARD), 0);
+        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[-3.0, -2.4]), STANDARD, &[]), 1);
+        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[97.0, 97.6]), STANDARD, &[]), 1);
+        assert_eq!(fused_pick(&ng, &ll, &col, Some(&[-3.0, -3.0]), STANDARD, &[]), 0);
     }
 
     /// A non-finite col drops the reading-channel term with the colloquial term: the plain pick, whatever ch says.
     #[test]
     fn non_finite_col_drops_the_channel_too() {
         let (ng, ll, plain) = ([-10.0, -10.3], [-5.0, -5.0], HEADER_STANDARD);
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], Some(&[0.0, 5.0]), STANDARD, plain), 1, "premise: finite cols, the term decides");
-        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], Some(&[0.0, 5.0]), STANDARD, plain), 0);
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, 0.0], Some(&[0.0, 5.0]), STANDARD, plain, &[]), 1, "premise: finite cols, the term decides");
+        assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], Some(&[0.0, 5.0]), STANDARD, plain, &[]), 0);
     }
 
     /// colloquial-levels section 2.1: each level's `fused_pick` uses its own (alpha, tau, delta). With no colloquial or channel term (equal col) a
@@ -401,7 +404,7 @@ mod tests {
     #[test]
     fn each_level_picks_with_its_own_cell() {
         let lists = [([0.0, -1.0], [0.0, 1.2]), ([0.0, -0.4], [0.0, 1.2]), ([0.0, -1.9], [0.0, 5.0])];
-        let by_level = |l| lists.map(|(ng, ll)| fused_pick(&ng, &ll, &[0.0; 2], None, cell(l)));
+        let by_level = |l| lists.map(|(ng, ll)| fused_pick(&ng, &ll, &[0.0; 2], None, cell(l), &[]));
         assert_eq!(by_level(RerankLevel::Standard), [0, 1, 1]);
         assert_eq!(by_level(RerankLevel::Conservative), [0, 0, 1]);
         assert_eq!(by_level(RerankLevel::Aggressive), [1, 1, 1]);
@@ -420,7 +423,7 @@ mod tests {
         let (ng, ll) = ([0.0, -0.5], [-5.0, -5.0]);
         for cell in [STANDARD, CONSERVATIVE, AGGRESSIVE] {
             let (col_at, ch_at) = (2.0 + 4.0 * cell.2, 0.5 + cell.2);
-            let c = |col: f64, ch: f64| fused_pick(&ng, &ll, &[0.0, col], Some(&[0.0, ch]), cell);
+            let c = |col: f64, ch: f64| fused_pick(&ng, &ll, &[0.0, col], Some(&[0.0, ch]), cell, &[]);
             assert_eq!([c(col_at - 0.2, 0.0), c(col_at + 0.2, 0.0)], [0, 1], "the colloquial term {cell:?}");
             assert_eq!([c(0.0, ch_at - 0.05), c(0.0, ch_at + 0.05)], [0, 1], "the reading-channel term {cell:?}");
         }
@@ -429,13 +432,28 @@ mod tests {
         close(eff[1], -5.0 + sigmoid(0.0) * (MU / 1.0) * 10.0);
     }
 
+    /// docs/contracts/sj-lm-7-pr2.md section 2.7, test 5: the mask holds in `guarded_pick`'s fallback too. A non-finite col makes the plain `pick` decide (here with
+    /// triple (1, 2, 0): candidate 1 scores -0.5 against -5 and wins, candidate 2 -4 would win without candidate 1); the fallback never goes to a masked candidate,
+    /// and the fused path (finite cols) masks the same way.
+    #[test]
+    fn the_fallback_does_not_fall_back_to_a_masked_candidate() {
+        let (ng, ll, plain) = ([0.0, -0.5, -3.0], [-5.0, 0.0, -1.0], (1.0, 2.0, 0.0));
+        let nan = [0.0, f64::NAN, 0.0];
+        assert_eq!(guarded_pick(&ng, &ll, &nan, None, STANDARD, plain, &[]), 1, "premise: unmasked, the fallback takes candidate 1");
+        assert_eq!(guarded_pick(&ng, &ll, &nan, None, STANDARD, plain, &[false, true, false]), 2);
+        assert_eq!(guarded_pick(&ng, &[-1.0, 0.0, -9.0], &nan, None, STANDARD, plain, &[false, true, false]), 0, "back to the first when it is the best left");
+        let (finite, ll) = ([0.0; 3], [-5.0, 0.0, -0.5]);
+        assert_eq!(fused_pick(&ng, &ll, &finite, None, STANDARD, &[]), 1, "premise: the fused path takes candidate 1 too");
+        assert_eq!(guarded_pick(&ng, &ll, &finite, None, STANDARD, plain, &[false, true, false]), 2, "the fused path masks as well");
+    }
+
     /// The level's header triple is the fallback of a non-finite col, whatever the level's cell is.
     #[test]
     fn the_fallback_is_the_plain_pick_whatever_the_cell() {
         let (ng, ll) = ([-10.0, -10.3], [-5.0, -3.8]);
         for cell in [STANDARD, CONSERVATIVE, AGGRESSIVE] {
-            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, cell, (0.3, 2.0, 0.25)), 0);
-            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, cell, (0.5, 2.0, 0.25)), 1, "the plain triple decides: gain 0.5 * 1.2 - 0.3 = 0.3");
+            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, cell, (0.3, 2.0, 0.25), &[]), 0);
+            assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], None, cell, (0.5, 2.0, 0.25), &[]), 1, "the plain triple decides: gain 0.5 * 1.2 - 0.3 = 0.3");
         }
     }
 }
