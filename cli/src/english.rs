@@ -1,67 +1,3 @@
-//! `english-sim` (docs/contracts/zhen-mixed.md section 4): how often the English window opens by mistake while typing Chinese,
-//! and how many words of a list open it at all. It drives the real engine (`Engine::load_english`, `set_english(true)`) and
-//! reads `Engine::english_open()` after every Space: the trigger rule is the engine's, never repeated here.
-//!
-//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--inline]
-//!   english-sim --words FILE --recall
-//!   either of them with --key-order (docs/contracts/zhen-keyorder.md section 4)
-//!
-//! Output is one TSV line and no content text (R2). Typing mode:
-//!   rows_sha256  rows  syllables  keys  triggers  per_1000_mean  per_1000_max
-//! `rows` and `syllables` are one pass over the rows; `keys` (every key event sent to the engine, repairs, Esc and Enter
-//! included) and `triggers` are summed over the seeds; `per_1000` is triggers x 1000 / syllables of one seed, mean and max
-//! over the seeds. With `--inline` (docs/contracts/zhen-inline.md section 3) two more columns follow,
-//!   inline_per_1000_mean  inline_per_1000_max  autokeep_per_1000_mean  autokeep_per_1000_max
-//! the same figure for the syllables after one of whose keys the engine's display rule D held (`Engine::english_inline_shown`,
-//! asked after every key; a syllable counts once): how often the Zhuyin of a Chinese syllable would show as letters. The last two
-//! count the auto-keeps (zhen-inline section 1.3, revision 2): the keys after which the engine reports that it turned the letters
-//! into an English token (`Engine::english_autokept`, asked after every key, before the symbols are compared), per 1000 syllables
-//! of one seed. Without `--inline` the line is the one above, unchanged. Recall mode:
-//!   words_sha256  words  opened  top1  overwrite0  overwrite1_leftover_valid  overwrite2plus_leftover_valid  leftover_invalid
-//! (`opened` and `top1`: the window opened / its first item is the word; the four classes partition the words, the last two
-//! open it, the first two never do; the tool stops if the engine and this recount disagree.)
-//!
-//! With `--key-order` the engine has the key-order switch on (`Engine::set_english_key_order`) and the output grows; without it the
-//! output is byte for byte the one described above. Typing mode: after the line above, one line per word of `TWO_LETTER`,
-//!   two  <word>  per_1000_mean  per_1000_max
-//! the same figure (per 1000 syllables of one seed, mean and max over the seeds) for the windows that opened for that word: the
-//! engine's shadow (`Engine::english_window_shadow`) at the moment the window is open after Space is that two-letter word. Recall mode
-//! prints only what the engine did, no recount (the four classes are the rules of the switch-off engine):
-//!   recall  words  n  opened  top1      (the list)
-//!   recall  two    n  opened  top1      (`TWO_LETTER`)
-//!   probe   <word> 0|1                   (ok ls cd mv cup npm: whether the window opened)
-//!
-//! With `--digits` (docs/contracts/digits.md A.4.2) the engine is `Engine::new` on data/lexicon (digits.tsv read) with the model
-//! (`--lm`, default data/lm/bigram.sjlm), and six columns follow (mean and max over the seeds, per 1000 syllables of one seed):
-//!   digits_final_mean  digits_final_max  digits_shown_mean  digits_shown_max  digits_extra_bs_mean  digits_extra_bs_max
-//! `final` counts the digit characters (0-9 . / -) in what the rows commit, which is the digit tokens left at the end (the rows are
-//! Chinese); `extra_bs` (report only) counts the Backspaces the repair pressed because the screen still showed something in front of
-//! the syllable (a digit token left by an illegal neighbour typo) when the symbol model of section 4.2 would have stopped; `shown` counts the keys after which `Engine::digits_shown()` was not 0, the keys that for a moment show a digit. The
-//! engine decides what is a digit; the simulator only reads `Engine::digits_typed()` (the buffered keys) where it reads the columns
-//! otherwise, and does not insist on its own plan for the symbols (a key may be a digit).
-//!
-//! With `--digits` the `backspace` repair reads the engine's preedit (digits.md A.10) instead of the model of section 4.2: it presses
-//! Backspace until the preedit minus what it was when the syllable began is a prefix of the wanted symbols (or empty), and goes on while
-//! the preedit no longer starts with that base. A person sees a digit token the engine made of a first key (ㄅ, ㄉ, ㄓ followed by a key that
-//! cannot continue it) and presses Backspace once more. Without `--digits` the repair is exactly section 4.2's; `overwrite` presses no Backspace.
-//!
-//! The typing model (fixed; change it and the number in cli/tests/english_sim.rs together):
-//! - Every Zhuyin key of a syllable is mistyped with probability `p`, but only when it has a neighbour: the keys left and right of
-//!   it on its keyboard row, kept only if they are Zhuyin keys of the standard layout. One neighbour or two, drawn uniformly.
-//!   Tone keys, Space, Backspace and the repair keys are never mistyped.
-//! - Repair: `overwrite` presses the right key at once when the wrong key was in the same column (one overwrite), else it
-//!   falls back to `backspace`: Backspace until the symbols (read from the engine, see `Sim::have`) are a prefix of the wanted
-//!   ones, then the missing symbols in column order. After a repair the symbols are the wanted ones.
-//! - A syllable ends with its tone key, or Space for tone 1. If the engine opened the window at that Space it is counted, then
-//!   Esc (closes it, clears the shadow) and Space again finish the syllable, so engine and simulator stay in step.
-//! - Auto-keep (`--inline` only counts it; the recovery happens either way, it can only occur with D): the key that made it
-//!   started a new syllable, so Esc clears that symbol, Backspace and Esc take the English token the engine made (Backspace turns
-//!   it into a run of one letter less, zhen-inline section 1.3g, Esc takes the run), and the interrupted
-//!   syllable (its symbols up to the one being typed) is typed again from the start without a mistake, so the row goes on as if
-//!   the mistake had been caught in time. A retyping that keeps again is counted and recovered again (it cannot happen without
-//!   an overwrite; after three tries the run stops instead of looping).
-//! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
-//! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
 //! `english-sim` (docs/contracts/zhen-revert.md section 4.1): how often the direct revert fires by mistake while typing Chinese, and what it
 //! does with a list of words. It drives the real engine (`set_english(true)`, the switches `set_english_overwrite` and
 //! `set_english_key_order`) and asks it what it did after every key (`Engine::english_reverted`, `Engine::english_split`): the rules
@@ -200,6 +136,8 @@ struct Sim {
     last_preedit: String,
     base_preedit: String,
     last_commit: String,
+    /// The length of the open English run after the latest key, in UTF-16 units (0: none).
+    last_run: u32,
     extra_bs: u64,
     final_digits: u64,
     shown_keys: u64,
@@ -223,6 +161,7 @@ impl Sim {
             last_preedit: String::new(),
             base_preedit: String::new(),
             last_commit: String::new(),
+            last_run: 0,
             extra_bs: 0,
             final_digits: 0,
             shown_keys: 0,
@@ -239,6 +178,7 @@ impl Sim {
         let o = self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
         self.last_preedit = o.preedit;
         self.last_commit = o.commit;
+        self.last_run = o.english_run_utf16_len;
         if self.digits {
             self.final_digits += self.last_commit.chars().filter(|c| core::digits::is_alphabet(*c)).count() as u64;
             self.shown_keys += (self.engine.digits_shown() > 0) as u64;
@@ -258,10 +198,13 @@ impl Sim {
         for _ in 0..MAX_RETRIES {
             if kind == Revert::Missing && space {
                 self.raw(Key::new(KeyKind::Backspace))?; // the token becomes a run of one letter less
+                if self.last_run > 0 {
+                    self.raw(Key::new(KeyKind::Esc))?; // and the run goes
+                } // else it was a one-letter token and the Backspace took it whole: an Esc now would clear the earlier syllables too
             } else {
                 self.raw(Key::new(KeyKind::Esc))?; // the Zhuyin comes back
+                self.raw(Key::new(KeyKind::Esc))?; // and goes: the unfinished syllable
             }
-            self.raw(Key::new(KeyKind::Esc))?; // and goes: the run, or the unfinished syllable
             let mut again = None;
             for sym in self.want.clone() {
                 if let Some(k) = self.raw(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))? {
@@ -670,6 +613,36 @@ mod tests {
         let kind = sim.raw(Key::new(KeyKind::Space)).unwrap().unwrap();
         sim.recover(kind, true).unwrap();
         assert!(sim.engine.syllables().is_empty() && sim.last_preedit.is_empty());
+    }
+
+    /// Review fix 7: the undo of a Space token must leave the earlier syllables alone. A one-letter token (one symbol whose syllable the
+    /// lexicon lacks, then Space) is taken whole by the Backspace; an Esc after it would clear the whole composition. The real lexicon
+    /// has every single symbol as a syllable, so a one-letter token needs a lexicon without ㄋ: a one-word one.
+    #[test]
+    fn undoing_a_one_letter_space_token_keeps_the_earlier_syllables() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let lex = Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap());
+        let words = root.join("eval/golden/english-tiny.txt");
+        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
+        let (syms, tone) = parse_syllable("ㄅㄚ").unwrap();
+        sim.syllable(&syms, tone).unwrap();
+        let before = sim.engine.syllables().to_vec();
+        assert_eq!(before, ["ㄅㄚ"]);
+        sim.raw(Key::ch('s', 0)).unwrap(); // ㄋ
+        let kind = sim.raw(Key::new(KeyKind::Space)).unwrap().expect("the Space reverts");
+        assert_eq!((kind, sim.engine.syllables().len()), (Revert::Missing, 2), "premise: a one-letter token after 爸");
+        sim.want = vec![]; // the keys of the token itself are not retyped
+        sim.recover(kind, true).unwrap();
+        assert_eq!(sim.engine.syllables(), before, "the earlier syllable is still there");
+        assert!(sim.engine.english_columns().iter().all(Option::is_none));
+        // A longer token (`su`: ㄋㄧ in order, also missing) is a one-letter run after the Backspace; Esc takes it: the same state.
+        sim.want = vec![];
+        for c in "su".chars() {
+            sim.raw(Key::ch(c, 0)).unwrap();
+        }
+        let kind = sim.raw(Key::new(KeyKind::Space)).unwrap().expect("the Space reverts");
+        sim.recover(kind, true).unwrap();
+        assert_eq!(sim.engine.syllables(), before);
     }
 
     /// Digits.md A.10, the Backspace repair when a slip makes the last unit: the slip after the ㄅ turns the `1` into a digit token, which is
