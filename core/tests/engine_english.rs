@@ -1708,3 +1708,146 @@ fn esc_after_a_space_token_is_esc_after_any_token() {
     assert!(run(&mut e, "Esc").preedit == format!("{before}ㄋ"));
     assert!(run(&mut e, "Esc").preedit == before);
 }
+
+// ---------- shift-toggle section 5: the ASCII state (`set_ascii`) ----------
+
+/// The engine with the model and the digit table, for the rows and the digit run (as `digits_layer_is_untouched` builds it).
+fn asc_eng() -> Engine {
+    use core::digits::DigitTable;
+    let lex = real();
+    let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).unwrap();
+    let overlay = capping_overlay(&root().join("data/lexicon"), "").unwrap();
+    let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, None).unwrap());
+    let table = Arc::new(DigitTable::parse(&std::fs::read_to_string(root().join("data/lexicon/digits.tsv")).unwrap()).unwrap());
+    let mut e = Engine::with_lexicon(lex, Layout::Standard);
+    e.set_lm(Arc::new(lm), capped);
+    e.set_digit_table(Some(table));
+    e.set_english(true).unwrap();
+    e
+}
+fn commits(os: &[Output]) -> String {
+    os.iter().map(|o| o.commit.as_str()).collect()
+}
+
+#[test]
+fn ascii_keeps_the_composition_and_the_letters_are_english() {
+    let mut e = eng();
+    run(&mut e, "j i 3 u l 4"); // 我要
+    e.set_ascii(true).unwrap();
+    let os = run_all(&mut e, "o k Enter");
+    assert!(commits(&os) == "我要ok", "{}", commits(&os));
+    assert!(e.english_reverted().is_none(), "no revert in the ASCII state");
+}
+
+#[test]
+fn ascii_off_returns_the_zhuyin_rules_and_ends_the_run_without_a_space() {
+    let mut e = eng();
+    run(&mut e, "j i 3 u l 4");
+    e.set_ascii(true).unwrap();
+    run(&mut e, "o k");
+    let o = e.set_ascii(false).unwrap();
+    assert!(fields(&o) == (0, 0) && o.preedit.ends_with("ok"), "{}", o.preedit);
+    let os = run_all(&mut e, "j i 3 Enter");
+    let c = commits(&os);
+    assert!(c.starts_with("我要ok") && c.chars().count() == 5 && c != "我要okji3", "ok then the decoded ㄨㄛˇ: {c}");
+}
+
+#[test]
+fn ascii_turns_the_unfinished_syllable_into_the_run() {
+    let mut e = eng();
+    run(&mut e, "c"); // ㄏ
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.handled && o.preedit == "c" && fields(&o) == (0, 1), "the snapshot shows the run: {} {:?}", o.preedit, fields(&o));
+    let o = run(&mut e, "o");
+    assert!(o.preedit == "co" && fields(&o) == (0, 2), "{} {:?}", o.preedit, fields(&o));
+}
+
+#[test]
+fn ascii_closes_the_window_without_choosing() {
+    let mut e = eng();
+    let before = syllable(&mut e, "ㄨㄛˇ").preedit;
+    let o = run(&mut e, "Down");
+    assert!(!o.candidates.is_empty(), "premise: the window is open");
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.candidates.is_empty() && o.selected.is_none() && o.preedit == before, "{} / {before}", o.preedit);
+}
+
+#[test]
+fn ascii_closes_the_prediction_row_and_one_is_a_character() {
+    let build = || {
+        let mut e = asc_eng();
+        e.set_left_context("我想喝一杯");
+        run(&mut e, "s"); // ㄋ: the row is passive
+        e
+    };
+    // Entered row, then ASCII: `1` does not pick.
+    let mut e = build();
+    let o = run(&mut e, "Tab");
+    assert!(o.selected == Some(0) && !o.candidates.is_empty(), "premise: the row is entered");
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.candidates.is_empty() && o.selected.is_none(), "the snapshot has no row");
+    let o = run(&mut e, "1");
+    assert!(o.commit.is_empty() && o.preedit == "s1" && o.candidates.is_empty(), "{} {}", o.commit, o.preedit);
+    // A row that comes back while ASCII is on (Backspace empties the run) and is entered: `1` is still a character, which is the
+    // order of the branch before the entered row.
+    let mut e = asc_eng();
+    e.set_left_context("我想喝一杯");
+    syllable(&mut e, "ㄋㄞˇ");
+    e.set_ascii(true).unwrap();
+    run(&mut e, "x BS");
+    let o = run(&mut e, "Tab");
+    assert!(o.selected == Some(0), "premise: the row is entered while ASCII is on");
+    let o = run(&mut e, "1");
+    assert!(o.commit.is_empty() && o.preedit.ends_with('1') && o.selected.is_none(), "{} {:?}", o.preedit, o.selected);
+}
+
+#[test]
+fn ascii_ends_the_digit_run_as_tokens() {
+    let mut e = asc_eng();
+    run(&mut e, "1 2");
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.preedit == "12" && fields(&o) == (0, 0), "{}", o.preedit);
+    let o = run(&mut e, "a");
+    assert!(o.preedit == "12a" && fields(&o) == (2, 1), "{} {:?}", o.preedit, fields(&o));
+    let o = run(&mut e, "3");
+    assert!(o.preedit == "12a3" && fields(&o) == (2, 2), "the digit goes on the run: {} {:?}", o.preedit, fields(&o));
+}
+
+#[test]
+fn ascii_characters_go_on_the_run_as_typed() {
+    let mut e = eng();
+    run(&mut e, "j i 3");
+    e.set_ascii(true).unwrap();
+    run(&mut e, "a");
+    let o = run(&mut e, "! 3 / O ,");
+    assert!(o.preedit.ends_with("a!3/O,"), "{}", o.preedit);
+    assert!(fields(&o).1 == 6 && e.english_reverted().is_none() && !e.english_split(), "{:?}", fields(&o));
+    let o = run(&mut e, "Enter");
+    assert!(o.commit.ends_with("a!3/O,"), "{}", o.commit);
+}
+
+#[test]
+fn ascii_run_is_limited_to_32_and_one_after_down_is_a_character() {
+    let mut e = eng();
+    run(&mut e, "j i 3");
+    e.set_ascii(true).unwrap();
+    let o = run(&mut e, &"a ".repeat(33));
+    assert!(fields(&o).1 == 1, "the 33rd starts a new run: {:?}", fields(&o));
+    // The run ends with Space, Down opens the writings list of the token, `1` closes it and opens a new run.
+    let mut e = eng();
+    run(&mut e, "j i 3");
+    e.set_ascii(true).unwrap();
+    run(&mut e, "o k _ Down");
+    let o = run(&mut e, "1");
+    assert!(o.candidates.is_empty() && o.commit.is_empty() && o.preedit.ends_with("ok1") && fields(&o).1 == 1, "{} {:?}", o.preedit, fields(&o));
+}
+
+#[test]
+fn ascii_on_an_empty_composition_changes_nothing() {
+    let mut e = eng();
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.handled && o.preedit.is_empty() && o.commit.is_empty() && fields(&o) == (0, 0));
+    let o = e.set_ascii(false).unwrap();
+    assert!(o.preedit.is_empty() && o.commit.is_empty());
+    assert!(is_empty(&mut e));
+}

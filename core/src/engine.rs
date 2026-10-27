@@ -712,6 +712,8 @@ pub struct Engine {
     /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on.
     english_overwrite: bool,
     english_key_order: bool,
+    /// shift-toggle section 4: the ASCII state (`set_ascii`), default off. A mode like a setting: `reset` and `clear_all` keep it.
+    ascii: bool,
     /// Set by a choice from the candidate window (a digit alternative, a row item, a short word's English token) whose unit reached
     /// `MAX_SYLLABLES` and sent everything: the committed text, for the output of the key or pick that made it.
     commit_out: Option<String>,
@@ -1012,6 +1014,7 @@ impl Engine {
             shadow_key: [None; 3],
             english_overwrite: true,
             english_key_order: true,
+            ascii: false,
             commit_out: None,
             reverted: None,
             split: false,
@@ -1736,6 +1739,38 @@ impl Engine {
         self.english_key_order = on;
         self.setting_changed();
         self.handled()
+    }
+
+    /// Shift-toggle section 4: the ASCII state of the shell's per-app Shift toggle. `on` ends what the composition has open, in
+    /// order: the window or the row (closed, nothing chosen), the digit run (flushed as `set_english(false)` does), the unfinished
+    /// syllable (its shadow keys open the English run, as Shift+letter does). Without a syllable the run opens with the first
+    /// character. `off` ends an open run as a token (no space) and the usual rules return. An empty composition only records the
+    /// state. Returns the snapshot (`commit` is what a unit that reaches `MAX_SYLLABLES` sent).
+    pub fn set_ascii(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
+        if self.ascii == on {
+            return self.handled();
+        }
+        self.ascii = on;
+        if !on {
+            return self.settle_run();
+        }
+        self.cands = None;
+        self.clear_pred();
+        let (commit, _) = self.digit_flush()?;
+        if self.pend.iter().any(Option::is_some) {
+            let keep = self.shadow_text();
+            self.clear_pend();
+            self.run = keep;
+            self.run_zh = None;
+            self.revert_point = None;
+            if self.cursor < self.syls.len() {
+                self.refresh()?;
+            }
+        }
+        let mut o = self.view(true, String::new());
+        o.commit = commit;
+        Ok(o)
     }
 
     /// The syllables of the composition (test and tool hook): what `finish_syllable` stored, or a choice rewrote.
@@ -2933,6 +2968,21 @@ impl Engine {
         // 1: pass through, no state change.
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
             return self.passthrough(String::new());
+        }
+        // Shift-toggle section 4: in the ASCII state a printable ASCII character goes on the English run as typed (no lower case, no
+        // tone key, no revert or split); an open window or row closes without choosing, so `1` is a character, never a pick.
+        if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) {
+            self.cands = None;
+            self.clear_pred();
+            if self.run.is_empty() {
+                self.run = self.shadow_text();
+                self.clear_pend();
+            }
+            let commit = self.run_push(k.ch)?;
+            if self.cursor < self.syls.len() {
+                self.refresh()?;
+            }
+            return Ok(self.view(true, commit));
         }
         // V3 section 3: the entered prediction row, between rules 1 and 2. Any other key leaves it and goes on.
         if let Some(sel) = self.pred_sel {
