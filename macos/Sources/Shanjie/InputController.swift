@@ -76,6 +76,7 @@ final class ShanjieInputController: IMKInputController {
         case .toggleAbbreviation: #selector(toggleAbbreviation(_:))
         case .toggleRerank: #selector(toggleRerank(_:))
         case .toggleAcgPack: #selector(toggleAcgPack(_:))
+        case .toggleItPack: #selector(toggleItPack(_:))
         case .toggleAppChat: #selector(toggleAppChat(_:))
         case .openSettings: #selector(openSettings(_:))
         case .installUpdate: #selector(installUpdate(_:))
@@ -96,6 +97,7 @@ final class ShanjieInputController: IMKInputController {
     @objc func toggleAbbreviation(_ sender: Any?) { perform(.toggleAbbreviation) }
     @objc func toggleRerank(_ sender: Any?) { perform(.toggleRerank) }
     @objc func toggleAcgPack(_ sender: Any?) { perform(.toggleAcgPack) }
+    @objc func toggleItPack(_ sender: Any?) { perform(.toggleItPack) }
     @objc func toggleAppChat(_ sender: Any?) { perform(.toggleAppChat) }
     @objc func openSettings(_ sender: Any?) { perform(.openSettings) }
     @objc func installUpdate(_ sender: Any?) { perform(.installUpdate) }

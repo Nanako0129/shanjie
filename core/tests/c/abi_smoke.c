@@ -339,7 +339,7 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
-/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english and set_english_inline through the header. The window
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english, set_english_inline and set_english_key_order through the header. The window
  * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
 static int run_english(const char *dir, const char *missing) {
   static ShanjieOutput dummy;
@@ -367,6 +367,17 @@ static int run_english(const char *dir, const char *missing) {
   shanjie_output_free(o);
   o = 0;
   CHECK(1014, shanjie_engine_set_english_inline(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  /* zhen-keyorder: set_english_key_order has the codes of set_english_inline. */
+  o = 0;
+  CHECK(1015, shanjie_engine_set_english_key_order(0, 1, &o) == 1 && o == 0);
+  CHECK(1016, shanjie_engine_set_english_key_order(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1017, shanjie_engine_set_english_key_order(e, 2, &o) == 2 && o == 0);
+  CHECK(1018, shanjie_engine_set_english_key_order(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1019, shanjie_engine_set_english_key_order(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;

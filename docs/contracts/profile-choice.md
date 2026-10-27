@@ -41,7 +41,7 @@
 
 ### 2.3 選單
 
-- 新項目「這個 App 用聊天設定」（`MenuEntry.Action.toggleAppChat`），放在「動漫與遊戲詞」與它的資料日期之後、「善解設定…」之前。其他項目與順序不變。標題是固定字串，**不含 App 名稱**（選單標題不放 bundle ID 或 App 名稱，`Learning.swift` 的選單規則）。
+- 新項目「這個 App 用聊天設定」（`MenuEntry.Action.toggleAppChat`），放在「動漫與遊戲詞」與它的資料日期之後、「善解設定…」之前（〔2026-10-23，`it-pack.md` §3.2〕詞包的開關移到設定之後，改成放在「已開啟的詞包」那一項之後；沒有那一項時在「語意校正」之後）。其他項目與順序不變。標題是固定字串，**不含 App 名稱**（選單標題不放 bundle ID 或 App 名稱，`Learning.swift` 的選單規則）。
 - 勾選狀態：這個 session 的 client 目前的設定（§2.2 的結果）是聊天就打勾。
 - 可不可以按：
   - client 的 bundle ID 是 nil 或空字串：**不顯示**這一項（沒有東西可以存）。

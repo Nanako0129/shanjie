@@ -142,7 +142,7 @@ impl Engine {
             return Some(DigitEnv { st, table, cache: c });
         }
         let idx = st.capped.predict_index(&st.lm);
-        let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings()), words: idx.digit_words(&table.all_words()) });
+        let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings(&st.lm)), words: idx.digit_words(&table.all_words()) });
         self.digit_cache = Some(cache.clone());
         Some(DigitEnv { st, table, cache })
     }
@@ -199,7 +199,7 @@ impl Engine {
         self.clear_pend();
         for &k in tail {
             if let Some((col, sym)) = Layout::Standard.symbol_of(k) {
-                self.shadow_push(k, false);
+                self.shadow_push(k, col, false);
                 self.pend[col] = Some(sym);
             }
         }

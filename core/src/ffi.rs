@@ -185,7 +185,7 @@ pub unsafe extern "C" fn shanjie_engine_new(
 }
 
 /// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
-/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG). Mask 0 ignores `packs_dir` (may be
+/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG, bit 2 IT). Mask 0 ignores `packs_dir` (may be
 /// NULL) and is exactly `shanjie_engine_new`. A pack whose file is missing contributes nothing. A bit outside
 /// the known ones returns 2.
 ///
@@ -765,6 +765,42 @@ pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
     rc
 }
 
+/// zhen-keyorder section 3. `enabled` 0 or 1 (default 0): whether keys out of Zhuyin's column order count as evidence of English
+/// (as a replaced symbol does), and a listed word or a two-letter word then opens the window on Space with less of it. Returns the
+/// snapshot like `set_english_inline`; turning it off closes an open English window (which clears the shadow) and otherwise changes nothing; any other value changes
+/// nothing and returns 2. Only matters with `set_english(1)`.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_key_order(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_key_order(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -1171,6 +1207,8 @@ mod tests {
         }
         let dir = tiny_dir("panic", "ㄒㄧㄣ 鑫 -1.0\nㄅㄣ 犇 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
+        // context-return section 2: the English word of the left text is held until the reset after code 4.
+        assert!(set_left(e, "Joe") == 0 && unsafe { &(*e).0 }.left_full_chars() == 3, "left text held");
         for c in ['v', 'u', 'p'] {
             assert!(send(e, key(CHAR, c)).0 == 0, "typing");
         }
@@ -1184,6 +1222,7 @@ mod tests {
         assert!(rc == 4, "panic maps to code 4");
         assert!(o.is_null(), "out is NULL after a panic");
         assert!(PAYLOAD.with(|p| p.borrow().contains(MARKER)), "payload carries the marker");
+        assert!(unsafe { &(*e).0 }.left_full_chars() == 0, "the left text went with the reset after code 4");
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit.is_empty(), "engine was reset after code 4");
         unsafe { shanjie_engine_free(e) };
@@ -1875,6 +1914,18 @@ mod tests {
         rc
     }
 
+    /// set_english_key_order; returns the code and frees the output.
+    fn set_key_order(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_key_order(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
     /// Types `keys` (Space for `_`); the last output's (candidates, commit, preedit), freed.
     fn type_out(e: *mut ShanjieEngine, keys: &str) -> (Vec<String>, String, String) {
         let mut last = (Vec::new(), String::new(), String::new());
@@ -2017,6 +2068,27 @@ mod tests {
         unsafe { shanjie_output_free(o) };
         assert!(send(e, key(ESC, '\0')).0 == 0);
         assert!(set_inline(e, 1) == 0);
+        // set_english_key_order (zhen-keyorder section 3): the codes of set_english_inline, then the switch through the C ABI. Off (the
+        // default), `l s` Space is rule 10 (nothing opens); on, it opens the window of the two-letter word `ls`; off again closes it,
+        // and the unfinished syllable stays.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_key_order(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "key order engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_key_order(e, 1, ptr::null_mut()) } == 1, "key order out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_key_order(e, v) == 2, "key order out of range");
+        }
+        let (cands, _, _) = type_out(e, "ls_");
+        assert!(cands.is_empty(), "off by default: no window");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_key_order(e, 1) == 0);
+        let (cands, commit, preedit) = type_out(e, "ls_");
+        assert!(cands == ["ls", "Ls", "LS"] && commit.is_empty() && preedit == "ㄋㄠ", "key order: the window of ls");
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_english_key_order(e, 0, &mut o) } == 0 && unsafe { (*o).handled } == 1);
+        assert!(unsafe { (*o).candidate_count } == 0, "turning it off closes the window");
+        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄠ", "the unfinished syllable stays");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(ESC, '\0')).0 == 0);
         // The last two fields (zhen-inline section 1.3f): an open English run, in UTF-16 units of `preedit`; 0 and 0 otherwise.
         let fields = |k: ShanjieKey| {
             let mut o = ptr::null_mut();
@@ -2129,6 +2201,26 @@ mod tests {
     /// dev302 row 12 (as engine_lm.rs counts it): the n-gram shows RERANK_NGRAM, and the toy model below changes it.
     const RERANK_ROW: usize = 12;
     const RERANK_NGRAM: &str = "我在家";
+    /// context-return section 4: an ASCII marker in the left text that reaches a job (the last L = 8 characters of "我說zqxjvk ";
+    /// no Han tail, so the n-gram decodes as without a left text).
+    const LEFT_MARKER: &str = "zqxjvk";
+
+    fn set_left(e: *mut ShanjieEngine, text: &str) -> i32 {
+        let c = CString::new(text).unwrap();
+        unsafe { shanjie_engine_set_left_context(e, c.as_ptr()) }
+    }
+
+    /// The version 1 file at `p` rewritten as version 5 declaring the left-context length `l` (docs/contracts/context-return.md
+    /// section 2): both deltas 0, the standard triples for every level, an all-zero side file hash, then L.
+    fn as_v5(p: &Path, l: u32) {
+        let b = std::fs::read(p).unwrap();
+        let triple = |at: usize| [&b[at..at + 16], &0f64.to_le_bytes()[..]].concat();
+        let (chat, formal) = (triple(36), triple(52));
+        let mut h = [&b[..100], &[0; 16][..], &chat, &chat, &formal, &formal, &[0; 32][..], &l.to_le_bytes()[..]].concat();
+        h[7] = b'5';
+        h[8..12].copy_from_slice(&5u32.to_le_bytes());
+        std::fs::write(p, [h.as_slice(), &b[100..]].concat()).unwrap();
+    }
 
     /// data/lm/bigram.sjlm and classes.sjc symlinked into `dir` without the kn.sjkn model-v6 puts beside them: the toy `.sjtl`
     /// files here (versions 1 and 3) were tuned without a side file and pair only with the model loaded without KN (model-v6
@@ -2525,10 +2617,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank-panic", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let good = toy_sjtl(&dir, "good.sjtl", true);
+        as_v5(&good, 8);
         let (e, keys) = rerank_engine();
         let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && load_tinylm(e, &good) == 0, "loads");
         assert!(set_rerank(e, 1).0 == 0, "on (off by default since S7c-2c)");
+        assert!(set_left(e, &format!("我說{LEFT_MARKER} ")) == 0, "left text");
         for &k in &keys {
             send(e, k);
         }
@@ -2539,6 +2633,7 @@ mod tests {
         ARMED.with(|a| a.set(true));
         assert!(unsafe { shanjie_rerank_run(j) } == 4, "run panic maps to 4");
         assert!(PAYLOAD.with(|p| p.borrow().contains(RERANK_NGRAM)), "payload carries the candidate text");
+        assert!(PAYLOAD.with(|p| p.borrow().contains(LEFT_MARKER)), "payload carries the job's left text");
         // run has no engine: the composition is unchanged, and no result was stored.
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit == RERANK_NGRAM, "composition unchanged after run's 4");
@@ -2552,11 +2647,13 @@ mod tests {
     fn r2_rerank_run_panic_is_silent() {
         let (ok, out, err) = run_child("child_rerank_panic", false);
         assert!(ok, "quiet child failed");
-        assert!(!out.contains(RERANK_NGRAM) && !err.contains(RERANK_NGRAM), "candidate text leaked with the silent hook");
+        for marker in [RERANK_NGRAM, LEFT_MARKER] {
+            assert!(!out.contains(marker) && !err.contains(marker), "input text leaked with the silent hook");
+        }
         assert!(out.contains("1 passed"), "child test actually ran");
         // Positive control: the same child with the default hook must show the text.
         let (ok, out, err) = run_child("child_rerank_panic", true);
         assert!(ok && out.contains("1 passed"), "default-hook child failed");
-        assert!(err.contains(RERANK_NGRAM), "positive control: default hook did not print the text");
+        assert!(err.contains(RERANK_NGRAM) && err.contains(LEFT_MARKER), "positive control: default hook did not print the text");
     }
 }

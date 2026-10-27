@@ -86,12 +86,15 @@ typedef struct ShanjieEngine ShanjieEngine;
 
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
 #define SHANJIE_PACK_ACG 1u   // bit0 of the packs mask below
-// acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv);
+#define SHANJIE_PACK_IT  4u   // bit2 (value 4; value 2 is reserved for the quotes pack): the IT+AI pack, docs/contracts/it-pack.md section 3.1
+// acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv;
+//   SHANJIE_PACK_IT = IT+AI, packs_dir/it-add.tsv, appended after the anime pack's rows; the bits combine);
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
 //   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
 //   2 for a bit outside the mask or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
-//   be read or parsed. The pack's words are capped like overlay-add.tsv's when the LM is loaded.
+//   be read or parsed. The anime pack's words keep the pack file's score (not capped) and are unknown to the LM when decoding (pack-oov);
+//   the IT+AI pack's words are capped at their corpus frequency like the overlay.
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
@@ -216,6 +219,14 @@ int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enable
 //   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
 //   every engine creation, like set_english.
 int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
+// set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_english_inline in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) the
+//   evidence for English counts a Zhuyin key typed in a column below one that holds a symbol of the unfinished syllable (not a replacing key,
+//   which already counts) as well as a replaced symbol; and a Space can open the English window for a listed word whose syllable
+//   does not exist, and for one of the two-letter words of the core's TWO_LETTER (ok, ls, cd ...; each can have evidence) with one piece of evidence. With 0
+//   the engine is the one without this function, bit for bit. Turning it off closes an open English window, whatever opened it, which clears the shadow
+//   (the unfinished syllable stays); with no window open nothing changes. Call it after every engine creation, like set_english_inline.
+int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
@@ -223,9 +234,13 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // S4 (docs/contracts/s4-learning.md): learning from candidate-window re-picks. Every function returns 1
 // when engine (or a required pointer) is NULL. None of them changes the current display, except that
 // learning_clear and a forget may re-decode on the next key.
-// set_left_context: copies the text before the insertion point; only its last <= 2 consecutive Han
-//   characters are kept (S4 section 1.1). NULL or "" means none. Not UTF-8: returns 2 and clears.
-//   Cleared by the core after every commit, reset and code 4; call it at every composition start.
+// set_left_context: copies the text before the insertion point: the raw text of the same message, at most
+//   64 graphemes (docs/contracts/context-return.md; terminal apps: only the trailing Han characters). The
+//   core uses only its last <= 2 consecutive Han characters for decoding and learning (S4 section 1.1);
+//   besides them it keeps only the declared left-context length of the small model (SJTL0005), or else the
+//   trailing English word, for the small model and the English table, never returned or written. NULL
+//   or "" means none. Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
+//   code 4 and rule 22 pass-through; call it at every composition start.
 //   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);

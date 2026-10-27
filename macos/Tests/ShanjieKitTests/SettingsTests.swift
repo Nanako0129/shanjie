@@ -155,6 +155,37 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
     }
 
+    /// zhen-keyorder section 3 / 5.3: the window's 依按鍵順序判斷英文 choice has no value false (the store stays nil until chosen), goes to the
+    /// store, and is greyed on the display choice's conditions: the 中英混打 switch off, the Eten layout, no word list; the setting is kept.
+    func testEnglishKeyOrderChoiceStoresAndFollowsTheSwitch() throws {
+        let r = rig()
+        XCTAssertFalse(r.model.englishKeyOrder, "default false")
+        XCTAssertNil(r.english.englishKeyOrder, "never chosen")
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "the switch is off")
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.model.englishKeyOrderEnabled)
+        r.model.setEnglishKeyOrder(true)
+        XCTAssertEqual(r.english.englishKeyOrder, true)
+        XCTAssertTrue(r.model.englishKeyOrder)
+        XCTAssertTrue(r.model.englishKeyOrderEnabled, "the choice itself does not grey it")
+        r.model.selectLayout(.eten)
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "Eten greys it")
+        XCTAssertTrue(r.model.englishKeyOrder, "the setting is kept")
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertTrue(r.model.englishKeyOrderEnabled)
+        r.controller.session.perform(.toggleEnglish)
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "the menu's switch off greys it too")
+        // No word list: greyed, the stored choice still shows.
+        let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        let english = MemoryEnglishStore(true, keyOrder: true)
+        let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
+                          acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        let model = SettingsModel(shell: shell)
+        XCTAssertFalse(model.englishKeyOrderEnabled)
+        XCTAssertTrue(model.englishKeyOrder, "greyed, still showing the setting")
+    }
+
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the
     /// demotion table off the menu item is greyed (checkmark kept), which the window's toggle follows through `demote` (F11).
     func testRerankFromTheWindowReachesMenuAndFollowsDemote() {
@@ -205,7 +236,24 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
     }
 
-    /// acg-pack A2.4: the window shows the same grey data-date line as the menu, from the same Shell value, also with the pack off.
+    func testItPackSwitchFromTheWindowReachesStoreAndMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        let r = rig()
+        let before = r.shell.engine
+        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertTrue(r.model.itPack, "default on")
+        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞")
+        r.model.setItPack(false)
+        XCTAssertFalse(r.model.itPack)
+        XCTAssertNil(line(), "the menu line follows the switch")
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        r.controller.session.perform(.toggleItPack)
+        XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
+    }
+
+    /// acg-pack A2.4 (moved here by it-pack 3.2): the window shows the grey data-date line under the switch, also with the pack off; the menu does not.
     func testAcgDataDateLineIsTheMenusLine() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
@@ -219,7 +267,7 @@ final class SettingsTests: XCTestCase {
         try #"{"latest_source_revision": "2026-10-06T23:59:59Z"}"#.write(to: manifest, atomically: true, encoding: .utf8)
         let on = make(nil)
         XCTAssertEqual(on.model.acgDataLine, "資料更新至 2026-10-06（維基百科）")
-        XCTAssertEqual(on.model.acgDataLine, on.controller.session.menu.first { $0.title.hasPrefix("資料更新至") }?.title)
+        XCTAssertFalse(on.controller.session.menu.contains { $0.title.hasPrefix("資料更新至") }, "it-pack 3.2: the date is shown here, not in the menu")
         XCTAssertEqual(make(false).model.acgDataLine, "資料更新至 2026-10-06（維基百科）", "shown with the pack off too")
     }
 
@@ -236,7 +284,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)

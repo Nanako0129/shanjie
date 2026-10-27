@@ -41,13 +41,14 @@ final class CoreEngine {
     private init(handle: OpaquePointer) { self.handle = handle }
 
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
-    /// `packsDir` is the directory of the word pack files and turns the ACG pack on (acg-pack contract A.2); nil is
-    /// `shanjie_engine_new`, so the engine is the one the app had before the pack existed.
-    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil) -> (CoreEngine?, Int32) {
+    /// `packsDir` is the directory of the word pack files and `packs` the bits to turn on (default the ACG pack, acg-pack contract A.2;
+    /// `SHANJIE_PACK_IT` is the IT+AI pack, it-pack contract 3.1); nil `packsDir` is `shanjie_engine_new`, so the engine is the one the app had
+    /// before the packs existed.
+    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, packs: UInt32 = UInt32(SHANJIE_PACK_ACG)) -> (CoreEngine?, Int32) {
         var out: OpaquePointer?
         let code: Int32
         if let packsDir {
-            code = shanjie_engine_new_packs(dataDir, layout, packsDir, UInt32(SHANJIE_PACK_ACG), &out)
+            code = shanjie_engine_new_packs(dataDir, layout, packsDir, packs, &out)
         } else {
             code = shanjie_engine_new(dataDir, layout, &out)
         }
@@ -163,6 +164,13 @@ final class CoreEngine {
     func setEnglishInline(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-keyorder: whether keys out of Zhuyin's column order count as evidence of English (the core's default is false); returns the
+    /// snapshot (turning it off closes an open English window). Sent to every engine `Shell.build()` makes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
     }
 
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }

@@ -309,6 +309,11 @@ struct SettingsPageForm: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!model.englishInlineEnabled)
+                    // zhen-keyorder section 3: after the display choice, with a line of what it costs; greyed on the same condition.
+                    Toggle(MenuEntry.Text.englishKeyOrder, isOn: Binding(get: { model.englishKeyOrder }, set: { model.setEnglishKeyOrder($0) }))
+                        .disabled(!model.englishKeyOrderEnabled)
+                    Text(MenuEntry.Text.englishKeyOrderNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
                     Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
                     Text(MenuEntry.Text.spacingNote)
@@ -327,10 +332,14 @@ struct SettingsPageForm: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!model.rerankLevelEnabled)
+                }
+                // it-pack contract 3.2: every pack switch lives here (the input menu only names the loaded packs); new packs join this section.
+                Section("詞包") {
                     Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                     if let line = model.acgDataLine {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
+                    Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
                 }
                 // fuzzy-input section 2.2: all off by default. The adjacent-key checkbox is greyed (value kept) in the Eten layout, where
                 // the core does nothing with it.

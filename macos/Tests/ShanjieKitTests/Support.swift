@@ -28,11 +28,15 @@ enum TestData {
         ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
+    static let itPackRow = "ㄊㄨˊ-ㄒㄧㄤˋ-ㄕㄥ-ㄔㄥˊ\t圖像生成\t-6.60980192\tit\n"
+
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
     /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
-    static func addBundledPack(to dir: URL) throws {
+    static func addBundledPack(to dir: URL, itPack: Bool = true) throws {
         let packs = dir.appendingPathComponent("packs", isDirectory: true)
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        // The IT+AI pack's one row (the selftest word, core/tests/engine_pack.rs): a real file, so the test does not depend on the generated data/packs/it-add.tsv.
+        if itPack { try itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8) }
         try FileManager.default.createSymbolicLink(at: packs.appendingPathComponent("acg-add.tsv"),
                                                    withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
     }
@@ -78,7 +82,10 @@ final class FakeClient: TextClient {
     }
     private(set) var underlineRuns: [UnderlineRun] = []
 
-    let bundleIdentifier: String?
+    private let bundle: String?
+    /// Every read of `bundleIdentifier` (a synchronous IPC in the app).
+    private(set) var bundleReads = 0
+    var bundleIdentifier: String? { bundleReads += 1; return bundle }
     private(set) var calls: [Call] = []
     private(set) var text = ""   // committed text
     private(set) var marked = ""
@@ -88,6 +95,8 @@ final class FakeClient: TextClient {
     /// Overrides for the left-context tests: no insertion point, or marked text left over.
     var selectedOverride: NSRange?
     var markedOverride: NSRange?
+    /// context-return section 1 (P3-2): an app that answers attributedSubstring with this, whatever range was asked for.
+    var replyOverride: String?
     /// s3b2: the line rectangle this client reports.
     var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
     private(set) var lineCursor: Int?
@@ -100,7 +109,7 @@ final class FakeClient: TextClient {
     private(set) var reads = 0
     private(set) var requested: [NSRange] = []
 
-    init(bundle: String? = "com.apple.TextEdit") { bundleIdentifier = bundle }
+    init(bundle: String? = "com.apple.TextEdit") { self.bundle = bundle }
 
     private var document: NSString { (before + text + marked) as NSString }
 
@@ -120,6 +129,7 @@ final class FakeClient: TextClient {
     func attributedSubstring(from range: NSRange) -> NSAttributedString? {
         reads += 1
         requested.append(range)
+        if let replyOverride { return NSAttributedString(string: replyOverride) }
         guard range.location != NSNotFound, NSMaxRange(range) <= document.length else { return nil }
         return NSAttributedString(string: document.substring(with: range))
     }
@@ -223,6 +233,11 @@ final class Controller {
     init(_ shell: Shell, bundle: String? = "com.apple.TextEdit") {
         client = FakeClient(bundle: bundle)
         session = Session(shell: shell, client: client)
+    }
+
+    /// The session's left-context read with this client's bundle ID, as `send` passes it.
+    func readLeft() -> (text: String?, last: Character?) {
+        session.leftContext(bundle: client.bundleIdentifier)
     }
 
     /// Presses each ASCII key of `keys` (a space is the space bar); returns the handled flags.

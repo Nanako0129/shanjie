@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_IT, PACK_OOV};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
@@ -18,6 +18,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
+mod english_next;
 
 /// (display name, rows). Messages never include row text (R2).
 fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), String> {
@@ -68,21 +69,24 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
     Ok(())
 }
 
-/// `--packs acg`: sets the pack bit; anything else is refused.
+/// `--packs acg`, `--packs it`, `--packs acg,it`: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
-    match v {
-        "acg" => Ok(PACK_ACG),
-        _ => Err("--packs takes acg".into()),
-    }
+    v.split(',').try_fold(0, |bits, name| match name {
+        "acg" => Ok(bits | PACK_ACG),
+        "it" => Ok(bits | PACK_IT),
+        _ => Err("--packs takes acg, it or acg,it".to_string()),
+    })
 }
 
 /// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
 /// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
 fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
     let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
-    let acg = pdir.join("acg-add.tsv");
-    if packs & PACK_ACG != 0 && !acg.is_file() {
-        return Err(format!("--packs acg: pack file not found: {}", acg.display()));
+    for (bit, name) in [(PACK_ACG, "acg"), (PACK_IT, "it")] {
+        let file = pdir.join(format!("{name}-add.tsv"));
+        if packs & bit != 0 && !file.is_file() {
+            return Err(format!("--packs {name}: pack file not found: {}", file.display()));
+        }
     }
     Ok(pdir)
 }
@@ -352,7 +356,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    // The rows of the pack-oov packs (not `--extra-overlay`, not other packs): their words are unknown to the model and keep the pack's score (pack-oov contract).
+    let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
@@ -428,9 +434,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let pool: Vec<usize> = rerank_pool(&scored, TOPK).unwrap_or_else(|| vec![0]);
             let top: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
             let ng: Vec<f64> = pool.iter().map(|&p| scored[p].0).collect();
-            // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
+            // The key is the engine's (`TinyLm::key_for` of the row's context, the display before the one stretch being empty): the
+            // context key for versions 1 to 4 (its SENTINEL is the empty k, in TinyLm::rerank), the last L characters as they are for
+            // a model declaring L (docs/contracts/context-return.md section 2); without --context, no key.
             let t0 = Instant::now();
-            let key = left.as_deref().unwrap_or("");
+            let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
+            let key = key.as_str();
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
@@ -598,7 +607,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -679,7 +688,8 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
+    let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
     let (rss0, t_idx) = (rss_kb(), Instant::now());
     let idx = Index::new(&capped, &lm);
@@ -734,6 +744,10 @@ fn run() -> Result<(), String> {
     // zhen-mixed section 4: a subcommand of its own, before anything the evaluation modes read.
     if all.first().map(String::as_str) == Some("english-sim") {
         return english::run(&all[1..], &root());
+    }
+    // english-next.md section 3.2: drives the engine with and without the table; reads no lenient table.
+    if all.iter().any(|a| a == "--english-next") {
+        return english_next::run(&all, &root());
     }
     let len = load_lenient()?;
     if all.iter().any(|a| a == "--predict") {
@@ -896,6 +910,24 @@ mod tests {
         assert!(check_lm_opts(None, true, 0, false).is_ok());
         assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
+    }
+
+    /// it-pack contract 3.1: `--packs` takes acg, it, acg,it (and the flag can repeat); anything else is refused; a requested pack's file must exist.
+    #[test]
+    fn packs_flag_takes_acg_it_and_both() {
+        assert_eq!(pack_flag("acg"), Ok(PACK_ACG));
+        assert_eq!(pack_flag("it"), Ok(PACK_IT));
+        assert_eq!(pack_flag("acg,it"), Ok(PACK_ACG | PACK_IT));
+        assert_eq!(pack_flag("it,acg"), Ok(PACK_ACG | PACK_IT));
+        assert!(pack_flag("").is_err() && pack_flag("quotes").is_err() && pack_flag("acg,").is_err());
+        let dir = std::env::temp_dir().join(format!("shanjie-packs-flag-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("acg-add.tsv"), "").unwrap();
+        let d = || Some(dir.to_string_lossy().to_string());
+        assert!(packs_dir_checked(PACK_ACG, d()).is_ok());
+        let e = packs_dir_checked(PACK_ACG | PACK_IT, d()).unwrap_err();
+        assert!(e.contains("--packs it") && e.contains("it-add.tsv"), "{e}");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path

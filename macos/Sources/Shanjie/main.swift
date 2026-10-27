@@ -90,6 +90,11 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
     }
+    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means false.
+    var englishKeyOrder: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishKeyOrder") }
+    }
 }
 
 /// The 模糊輸入 flags (docs/contracts/fuzzy-input.md section 2.2), key `fuzzyFlags` (an integer) in the same domain; absent means 0.
@@ -107,6 +112,15 @@ final class DefaultsAcgPackStore: AcgPackStore {
     var acgPack: Bool? {
         get { UserDefaults.standard.object(forKey: "acgPack") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "acgPack") }
+    }
+}
+
+/// The "資訊與 AI 詞" switch (docs/contracts/it-pack.md section 3.2), key `itPack` in the same domain; absent means on.
+@MainActor
+final class DefaultsItPackStore: ItPackStore {
+    var itPack: Bool? {
+        get { UserDefaults.standard.object(forKey: "itPack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "itPack") }
     }
 }
 
@@ -213,7 +227,7 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore())
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)

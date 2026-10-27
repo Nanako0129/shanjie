@@ -137,6 +137,7 @@
   "森林裡的熊先生，冬眠中。",
   "極限OL霧切限子",
   "樂天胖達！",
+  "歡迎光臨遊之家！from Yu-hachi",
   "正午的修卡先生",
   "正能量企鵝",
   "武士彌助",
@@ -218,25 +219,24 @@
   "鬼新娘渴望被吃掉",
   "魔法藥水救救我",
   "麵包寶寶",
-  "麵包小偷",
   "麵包超人：小水滴的英雄！",
   "麵包超人：潘坦與約定之星",
   "麵包超人：細菌人與繪本的露露",
   "鼠小弟的小背心"
  ],
- "dropped_by_lexicon_rule": 17,
- "excluded_by_collisions_tsv": 242,
+ "dropped_by_lexicon_rule": 9,
+ "excluded_by_collisions_tsv": 259,
  "excluded_by_exclude_tsv": 2,
  "files": {
   "acg-add.tsv": {
-   "bytes": 2734723,
-   "lines": 44911,
-   "sha256": "74ba461e71e8341eb7a571af859025e2c2e4941ad56addfe65f4d5252c21a8f6"
+   "bytes": 2742994,
+   "lines": 45016,
+   "sha256": "d482bc9541c90d686e8e99677a2194c04fdb84c9f5454124bc56254d4edef13f"
   },
   "acg-sources.tsv": {
-   "bytes": 3139842,
-   "lines": 46205,
-   "sha256": "8df2aa1772d884ca06233fc8a827b5d8d9291119698f301847ec99423dc94c1e"
+   "bytes": 3145163,
+   "lines": 46313,
+   "sha256": "c392f738d4431d136045612b7cfca5a033388f240b2dc640758c16acde899f94"
   }
  },
  "groups": {
@@ -244,30 +244,30 @@
   "listed": 192,
   "page_missing": []
  },
- "latest_source_revision": "2026-10-08T23:36:32Z",
+ "latest_source_revision": "2026-10-22T12:39:22Z",
+ "regrade_bonus": 0.0,
  "revision_ids": {
-  "max": 94888159,
+  "max": 95216792,
   "min": 22981265,
-  "pages": 2189
+  "pages": 2190
  },
- "rows": 44911,
+ "rows": 45016,
  "sources": {
-  "cgroup": 9872,
-  "char": 35618,
-  "manual": 44,
-  "title": 778
+  "cgroup": 9871,
+  "char": 35619,
+  "manual": 45,
+  "title": 777
  },
  "unclassified_groups": [],
  "unreadable_dropped": 62,
- "unresolved_collision_readings": 0,
- "version": "20261008-74ba461e",
- "words": 44448,
+ "version": "20261022-d482bc95",
+ "words": 44552,
  "yearly_lists": {
   "2020": {
-   "links": 200,
-   "revid": 89686434,
+   "links": 201,
+   "revid": 94938183,
    "title": "2020年日本動畫列表",
-   "ts": "2025-10-26T16:56:39Z"
+   "ts": "2026-10-11T08:33:35Z"
   },
   "2021": {
    "links": 309,
@@ -295,15 +295,15 @@
   },
   "2025": {
    "links": 354,
-   "revid": 94535252,
+   "revid": 94938062,
    "title": "2025年日本動畫列表",
-   "ts": "2026-09-24T12:31:20Z"
+   "ts": "2026-10-11T08:28:30Z"
   },
   "2026": {
-   "links": 355,
-   "revid": 94864520,
+   "links": 356,
+   "revid": 95212660,
    "title": "2026年日本動畫列表",
-   "ts": "2026-10-08T23:36:32Z"
+   "ts": "2026-10-22T12:39:22Z"
   }
  }
 }

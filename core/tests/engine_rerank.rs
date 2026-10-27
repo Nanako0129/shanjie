@@ -83,6 +83,10 @@ struct Expect {
     pick: usize,
 }
 fn expect(model: &Path, syls: &[String], start: &str, end: End<'_>, before: &str) -> Expect {
+    expect_key(model, syls, start, end, &context_key(before))
+}
+/// `expect` with the model given `key` as it is.
+fn expect_key(model: &Path, syls: &[String], start: &str, end: End<'_>, key: &str) -> Expect {
     let s = shared();
     let nb = decode_segment_learned(&s.capped, syls, &s.lm, Profile::Chat.lambda(), start, end, BEAM_S1, None, true).unwrap();
     let top = &nb[..nb.len().min(TOPK)];
@@ -90,7 +94,7 @@ fn expect(model: &Path, syls: &[String], start: &str, end: End<'_>, before: &str
     let ng: Vec<f64> = top.iter().map(|x| x.0).collect();
     let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
     let tl = TinyLm::load(model).unwrap();
-    let pick = tl.rerank(&ng, &cands, &context_key(before), tl.alpha_tau_delta(Profile::Chat)).unwrap().0;
+    let pick = tl.rerank(&ng, &cands, key, tl.alpha_tau_delta(Profile::Chat)).unwrap().0;
     Expect { surfaces, ng, pick }
 }
 
@@ -327,6 +331,135 @@ fn later_stretch_key_uses_the_earlier_choice() {
     let r = e.take_rerank_job().unwrap().run();
     assert_eq!(r.keys(), vec![context_key(""), context_key(&chosen)], "keys from the chosen text");
     assert_eq!(r.picks(), vec![left.pick, right.pick]);
+}
+
+/// context-return section 4, what the model is given: a version 5 model declaring L = 8, on the same two stretches (row 16 with 打
+/// fixed), is keyed with the last 8 characters of the left text plus the display before each stretch (the earlier stretch's choice
+/// included), never through `context_key`; the engine keeps only those 8 characters. The same model as version 4 (no length) is keyed
+/// as today and keeps nothing of a left text without an English word at its end. The left text has no Han tail, so the n-gram starts
+/// at <s> in both.
+#[test]
+fn a_declared_left_length_keys_with_the_last_l_characters() {
+    let text = "昨天我們去看了Joe的表演，";
+    let last8 = |t: &str| -> String { t.chars().skip(t.chars().count().saturating_sub(8)).collect() };
+    let s = shared();
+    let syls = row(16);
+    let (a, b, word) = (3, 4, "打");
+    let (lp, delta) = s.capped.best_lp_delta(&syls[a..b], word).unwrap();
+    let v1 = rerank_model();
+
+    let v5 = upgraded(&v1, Some(8));
+    let key0 = last8(text);
+    assert_eq!(key0, "了Joe的表演，");
+    let left = expect_key(&v5, &syls[..a], "<s>", End::Next { word, lp, delta }, &key0);
+    let key1 = last8(&format!("{key0}{}{word}", left.surfaces[left.pick]));
+    let right = expect_key(&v5, &syls[b..], word, End::Eos, &key1);
+    let mut e = engine_with(Some(&v5));
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 8, "only the declared length is kept");
+    fix_word(&mut e, &syls, b, word);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!(r.keys(), vec![key0, key1]);
+    assert_eq!(r.picks(), vec![left.pick, right.pick]);
+
+    let v4 = upgraded(&v1, None);
+    let left = expect(&v4, &syls[..a], "<s>", End::Next { word, lp, delta }, "");
+    let chosen = format!("{}{word}", left.surfaces[left.pick]);
+    let right = expect(&v4, &syls[b..], word, End::Eos, &chosen);
+    let mut e = engine_with(Some(&v4));
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 0);
+    fix_word(&mut e, &syls, b, word);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!(r.keys(), vec![context_key(""), context_key(&chosen)], "version 4: today's keys");
+    assert_eq!(r.picks(), vec![left.pick, right.pick]);
+}
+
+/// context-return section 4: with a model that declares no length, a left text ending in an English word ("我說Joe", whose Han
+/// tail the shell never sent: no Han character at its end) decodes, shows and reranks byte for byte as no left text ("").
+#[test]
+fn an_english_left_text_changes_no_decoding_or_rerank_input() {
+    let model = rerank_model();
+    let rows = dev302();
+    for n in [12, 16, 27] {
+        let run = |ctx: &str| {
+            let mut e = engine_with(Some(&model));
+            e.set_left_context(ctx);
+            let mut outs = Vec::new();
+            for syl in &rows[n - 1].1 {
+                for key in keys_of(Layout::Standard, syl) {
+                    let o = e.key(key).unwrap();
+                    outs.push((o.preedit, o.candidates, o.commit, o.selected));
+                }
+            }
+            let r = e.take_rerank_job().expect("a job").run();
+            (outs, r.keys(), r.picks(), e.key(k(KeyKind::Enter)).unwrap().commit)
+        };
+        assert!(run("我說Joe") == run(""), "row {n}");
+    }
+}
+
+/// context-return section 2 (P3-6): with a declared length the English word is read from the kept L characters. A word that starts
+/// at the first of them when the text was longer may be half of one ("afootball" keeps "football") and does not count; the same
+/// word as the whole text, or after a space inside the L characters, does.
+#[test]
+fn a_cut_english_word_does_not_count() {
+    let v5 = upgraded(&rerank_model(), Some(8));
+    let table = Arc::new(core::english_next::EnglishTable::parse("E\tfootball\t100\nW\tfootball\t水\t50\nE\tjoe\t100\nW\tjoe\t水\t50\n").unwrap());
+    let row_after = |text: &str| {
+        let mut e = engine_with(Some(&v5));
+        e.set_english_next(Some(table.clone()));
+        e.set_left_context(text);
+        e.key(Key::ch('g', 0)).unwrap().candidates
+    };
+    let base = row_after("");
+    assert_eq!(row_after("football")[0], "水", "the whole text: not cut");
+    assert_eq!(row_after("我們說了一些話 Joe")[0], "水", "cut, but the word starts inside the kept characters");
+    assert_ne!(base[0], "水");
+    // Cut at the word's first letter (9 and 10 characters, L 8); "Xjoe" is the word xjoe, which the table lacks.
+    for text in ["afootball", "我說football", "Xjoe"] {
+        assert_eq!(row_after(text), base, "{text:?}");
+    }
+}
+
+/// Review of PR #294: `left_full` is cut for the model loaded when `set_left_context` ran, so a model change drops it (the next
+/// composition start sets it again), in either order: set then load, load then set then another load, and `set_lm` (no model).
+#[test]
+fn a_model_change_drops_the_left_text() {
+    let (v1, text) = (rerank_model(), "我們去看了Joe");
+    let v5 = upgraded(&v1, Some(8));
+    let mut e = engine_with(None);
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 3, "no model: the English word");
+    e.load_tinylm(&v5).unwrap();
+    assert_eq!(e.left_full_chars(), 0, "set, then load");
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 8, "the declared length");
+    e.load_tinylm(&v1).unwrap();
+    assert_eq!(e.left_full_chars(), 0, "load another model");
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 3, "no declared length: the English word");
+    assert!(e.load_tinylm(Path::new("/nonexistent/x.sjtl")).is_err());
+    assert_eq!(e.left_full_chars(), 3, "a failed load keeps the model, and the text cut for it");
+    e.load_tinylm(&v5).unwrap();
+    e.set_left_context(text);
+    let s = shared();
+    e.set_lm(s.lm.clone(), s.capped.clone());
+    assert_eq!(e.left_full_chars(), 0, "set_lm drops the small model");
+}
+
+/// Review of PR #294: with a declared length the key is the raw text, so a left text "^" is the key "^" (the model's UNK), not the
+/// empty k that `context_key`'s SENTINEL stands for.
+#[test]
+fn a_declared_key_of_a_caret_is_kept() {
+    let v5 = upgraded(&rerank_model(), Some(8));
+    let syls = row(12);
+    let want = expect_key(&v5, &syls, "<s>", End::Eos, "^");
+    let mut e = engine_with(Some(&v5));
+    e.set_left_context("^");
+    type_syls(&mut e, &syls);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!((r.keys(), r.picks()), (vec!["^".to_string()], vec![want.pick]));
 }
 
 /// Generations come from one process-wide counter: a result never applies to another engine.

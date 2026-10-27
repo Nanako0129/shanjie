@@ -221,10 +221,29 @@ jobs:
       - name: ACG pack builder (Python)
         run: python3 -m unittest tools.test_build_acg_pack
 
+      # docs/contracts/pack-oov.md section 2 item 5: the Python half of the cross-language golden (eval/golden/pack-oov/decode.tsv);
+      # the Rust half is core/tests/pack_oov.rs.
+      - name: pack-oov golden (Python)
+        run: python3 -B -m unittest tools/test_pack_oov.py
+
+      # docs/contracts/it-pack.md section 4: the IT+AI pack builder against a fake web and fake decoders (source rules, dedupe, collisions,
+      # offline determinism). No network, no evaluation CLI.
+      - name: IT pack builder (Python)
+        run: python3 -W ignore -m unittest tools.test_build_it_pack tools.test_it_sources tools.test_it_wiki_counts
+
+      # docs/contracts/meme-pack.md section 4: the meme pack builder against fixtures and a fake decoder (thresholds, dedupe, the
+      # first-place rule, count-file provenance, determinism). No network, no evaluation CLI.
+      - name: Meme pack builder (Python)
+        run: python3 -W ignore -m unittest tools.test_build_meme_pack
+
       # docs/contracts/names-lexicon.md section 3 items 6 and 8: the common proper-noun builder against fixtures and a fake API, and the
       # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
       - name: Names lexicon builder (Python)
         run: python3 -m unittest tools.test_build_names
+
+      # docs/contracts/neutral-tolerance.md section 2: the neutral-tone rows of tools/build_sandhi.py against synthetic fixtures.
+      - name: Sandhi builder (Python)
+        run: python3 -m unittest tools.test_build_sandhi
 
       # docs/contracts/model-v5.md sections 8-9: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
@@ -249,9 +268,10 @@ jobs:
       - name: English word list builder (Python)
         run: python3 -m unittest tools/test_build_english_words.py
 
-      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps).
-      - name: Overlay manual words (Python)
-        run: python3 -m unittest tools/test_build_overlay.py
+      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps); the
+      # Moedict readings and supplement source (SJ-LM-7 contract 2.1a, 2.3) and tools/readings.py rule 3b on synthetic input.
+      - name: Overlay manual words and readings (Python)
+        run: python3 -W ignore -m unittest tools/test_build_overlay.py tools/test_readings.py
 
       # docs/contracts/colloquial-term.md section 3.6: the attribution list builder (per-source sums, the stop conditions), synthetic input.
       - name: Colloquial attribution list (Python)

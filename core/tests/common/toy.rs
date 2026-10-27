@@ -104,11 +104,33 @@ pub fn sjtl_with_vocab(alpha: f64, tau: f64, lm: Option<&Path>, chars: &str) -> 
         let at = 100 + 4 * (v - 1 - n);
         b[at..at + 4].copy_from_slice(&(*c as u32).to_le_bytes());
     }
-    // One file per call (tests run in parallel), removed when the guard drops.
+    temp(b)
+}
+/// `b` in its own temporary file (tests run in parallel), removed when the guard drops.
+pub fn temp(b: Vec<u8>) -> TempFile {
     static N: AtomicUsize = AtomicUsize::new(0);
     let p = std::env::temp_dir().join(format!("shanjie-rerank-{}-{}.sjtl", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
     std::fs::write(&p, b).unwrap();
     TempFile(p)
+}
+/// A version 1 toy file (`sjtl_for`) as version 4 (`left` None) or version 5 declaring the left-context length `left`
+/// (docs/contracts/context-return.md section 2): its 100 header bytes, both deltas 0, the standard triples for the conservative
+/// and aggressive levels too (so every level scores as before), an all-zero side file hash (tuned without KN, as the toy), then L.
+pub fn upgraded(v1: &Path, left: Option<u32>) -> TempFile {
+    let b = std::fs::read(v1).unwrap();
+    let triple = |at: usize| [&b[at..at + 16], &0f64.to_le_bytes()[..]].concat();
+    let (chat, formal) = (triple(36), triple(52));
+    let mut h = [&b[..100], &[0; 16][..], &chat, &chat, &formal, &formal, &[0; 32][..]].concat();
+    let version: u32 = match left {
+        Some(l) => {
+            h.extend_from_slice(&l.to_le_bytes());
+            5
+        }
+        None => 4,
+    };
+    h[7] = b'0' + version as u8;
+    h[8..12].copy_from_slice(&version.to_le_bytes());
+    temp([h.as_slice(), &b[100..]].concat())
 }
 
 /// The keys of one syllable: its symbols, then a tone key or Space.
