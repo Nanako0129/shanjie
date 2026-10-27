@@ -62,7 +62,65 @@
 //!   an overwrite; after three tries the run stops instead of looping).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
-use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, MAX_SYLLABLES, TWO_LETTER};
+//! `english-sim` (docs/contracts/zhen-revert.md section 4.1): how often the direct revert fires by mistake while typing Chinese, and what it
+//! does with a list of words. It drives the real engine (`set_english(true)`, the switches `set_english_overwrite` and
+//! `set_english_key_order`) and asks it what it did after every key (`Engine::english_reverted`, `Engine::english_split`): the rules
+//! are the engine's, never repeated here.
+//!
+//!   english-sim --words FILE --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5]
+//!               [--overwrite on|off] [--key-order on|off] [--digits [--lm FILE]]
+//!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off]
+//!
+//! `--overwrite` and `--key-order` (default on) are the engine's two switches; the third, the mixing switch, is on. With both off only
+//! the Space case (c) is left (a syllable the lexicon lacks, at Space).
+//!
+//! Output is one TSV line and no content text (R2). Typing mode:
+//!   rows_sha256  rows  syllables  keys  typos  revert_a_mean revert_a_max  revert_b_mean revert_b_max  revert_c_mean revert_c_max
+//!   split_mean split_max  english_final_mean english_final_max
+//! `rows` and `syllables` are one pass over the rows; `keys` (every key event sent to the engine, repairs, Esc and Enter included) and
+//! `typos` (the mistyped keys the model injected) are summed over the seeds; the rest are per 1000 syllables of one seed, mean and max over
+//! the seeds: `revert_a`, `revert_b`, `revert_c` the keys after which the engine reported a revert of that kind (an overwrite, a key out of
+//! column order, a syllable the lexicon lacks), `split` the keys after which it reported a tone-key split of an English run, `english_final`
+//! the rows whose committed text still holds an ASCII letter (an English token left at the end of a row that is Chinese).
+//!
+//! Recall mode: every word of the list typed letter by letter on an engine of its own, then Space:
+//!   words_sha256  words  opened  revert_a  revert_b  revert_c  none
+//! `opened`: the composition is exactly one English token equal to the word; the four classes partition the words by the first revert the
+//! engine reported (`none`: it never reverted, the keys became Chinese). Then one line `probe <word> token|中文|其他` for each of
+//! ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7 (a fixed public list): whether the keys ended as one English token, as
+//! Chinese syllables only, or as something else.
+//!
+//! With `--digits` (docs/contracts/digits.md A.4.2) the engine is `Engine::new` on data/lexicon (digits.tsv read) with the model
+//! (`--lm`, default data/lm/bigram.sjlm), and six columns follow (mean and max over the seeds, per 1000 syllables of one seed):
+//!   digits_final_mean  digits_final_max  digits_shown_mean  digits_shown_max  digits_extra_bs_mean  digits_extra_bs_max
+//! `final` counts the digit characters (0-9 . / -) in what the rows commit, which is the digit tokens left at the end (the rows are
+//! Chinese); `extra_bs` (report only) counts the Backspaces the repair pressed because the screen still showed something in front of
+//! the syllable (a digit token left by an illegal neighbour typo) when the symbol model of section 4.2 would have stopped; `shown` counts the keys after which `Engine::digits_shown()` was not 0, the keys that for a moment show a digit. The
+//! engine decides what is a digit; the simulator only reads `Engine::digits_typed()` (the buffered keys) where it reads the columns
+//! otherwise, and does not insist on its own plan for the symbols (a key may be a digit).
+//!
+//! With `--digits` the `backspace` repair reads the engine's preedit (digits.md A.10) instead of the model of section 4.2: it presses
+//! Backspace until the preedit minus what it was when the syllable began is a prefix of the wanted symbols (or empty), and goes on while
+//! the preedit no longer starts with that base. A person sees a digit token the engine made of a first key (ㄅ, ㄉ, ㄓ followed by a key that
+//! cannot continue it) and presses Backspace once more. Without `--digits` the repair is exactly section 4.2's; `overwrite` presses no Backspace.
+//!
+//! The typing model (fixed; change it and the number in cli/tests/english_sim.rs together):
+//! - Every Zhuyin key of a syllable is mistyped with probability `p`, but only when it has a neighbour: the keys left and right of
+//!   it on its keyboard row, kept only if they are Zhuyin keys of the standard layout. One neighbour or two, drawn uniformly.
+//!   Tone keys, Space, Backspace and the repair keys are never mistyped.
+//! - Repair: `overwrite` presses the right key at once when the wrong key was in the same column (one overwrite), else it
+//!   falls back to `backspace`: Backspace until the symbols (read from the engine, see `Sim::have`) are a prefix of the wanted
+//!   ones, then the missing symbols in column order. After a repair the symbols are the wanted ones.
+//! - A syllable ends with its tone key, or Space for tone 1.
+//! - A revert (zhen-revert section 4.1): the engine reports it after the key; it is counted by kind and undone: Esc (it brings the Zhuyin
+//!   back), Esc again (the unfinished syllable goes; the composition is as before the syllable), or, when the key was the Space that made a
+//!   token at once, Backspace and Esc (the token becomes a run, the run goes). The syllable is then typed again from the start without a
+//!   mistake, so the row goes on as if the mistake had been caught in time. A retyping that reverts again is counted and undone again
+//!   (it cannot happen without a wrong key; after three tries the run stops instead of looping). The model repairs a wrong key at once, so a
+//!   revert at a tone key or Space (c) is not expected: the tone-key cost of (c) is not measured here (zhen-revert section 4.1).
+//! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
+//! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
+use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, Revert, MAX_SYLLABLES};
 use core::eval::{parse_rows, row_syllables, sha256_hex, usable};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
@@ -74,6 +132,10 @@ const LAYOUT: Layout = Layout::Standard;
 /// The most Backspaces one repair presses (a composition holds `MAX_SYLLABLES` units at most, and each press takes one symbol or one unit; the
 /// 24 over it are the margin the bound had at 40 units: 64).
 const MAX_REPAIR_BACKSPACES: u32 = MAX_SYLLABLES as u32 + 24;
+/// The most times one syllable is typed again after a revert before the run stops (a clean typing cannot revert).
+const MAX_RETRIES: usize = 3;
+/// The words `probe` lines are printed for (a fixed public list, zhen-revert section 4.1).
+const PROBES: [&str; 18] = ["ok", "ls", "cd", "mv", "pr", "ai", "ui", "go", "cp", "cup", "npm", "gta6", "rdr2", "poe2", "mp3", "a4", "i7", "s7"];
 
 struct Rng(u64);
 
@@ -122,15 +184,14 @@ enum Repair {
 struct Sim {
     engine: Engine,
     keys: u64,
-    triggers: u64,
-    /// Windows opened at the Space that ends a syllable, by `TWO_LETTER` word (the engine's shadow was that word).
-    two: Vec<u64>,
-    /// `--inline`: ask the engine for rule D after every key; `d_held` is whether it held after any key of this syllable.
-    inline: bool,
-    d_held: bool,
-    /// Auto-keeps the engine reported (counted whether or not `--inline` prints them), and the symbols of the syllable being typed
-    /// up to the key in progress: what a recovery types again.
-    autokeeps: u64,
+    /// The mistyped keys injected.
+    typos: u64,
+    /// Reverts the engine reported, by kind (a, b, c), and tone-key splits it reported.
+    reverts: [u64; 3],
+    splits: u64,
+    /// Rows whose committed text still held an ASCII letter after the Enter that ended them.
+    english_final: u64,
+    /// The symbols of the syllable being typed up to the key in progress: what a retyping types again.
     want: Vec<char>,
     /// `--digits`: the engine is the digit-feature one; the counters below are read after every key.
     digits: bool,
@@ -138,6 +199,7 @@ struct Sim {
     /// what the person sees. `extra_bs` counts the Backspaces the engine's screen needed beyond the symbol model's (a digit token left in front).
     last_preedit: String,
     base_preedit: String,
+    last_commit: String,
     extra_bs: u64,
     final_digits: u64,
     shown_keys: u64,
@@ -147,20 +209,20 @@ struct Sim {
 }
 
 impl Sim {
-    /// A simulator with every counter at zero; `inline` and `digits` are off (set them after).
+    /// A simulator with every counter at zero; `digits` is off (set it after).
     fn new(engine: Engine, p: f64, repair: Repair, seed: u64) -> Sim {
         Sim {
             engine,
             keys: 0,
-            triggers: 0,
-            two: vec![0; TWO_LETTER.len()],
-            inline: false,
-            d_held: false,
-            autokeeps: 0,
+            typos: 0,
+            reverts: [0; 3],
+            splits: 0,
+            english_final: 0,
             want: Vec::new(),
             digits: false,
             last_preedit: String::new(),
             base_preedit: String::new(),
+            last_commit: String::new(),
             extra_bs: 0,
             final_digits: 0,
             shown_keys: 0,
@@ -170,47 +232,58 @@ impl Sim {
         }
     }
 
-    /// One key to the engine, counted. Whether the key made an auto-keep (counted too): asked of the engine after every key,
-    /// before the symbols are compared, and never worked out here.
-    fn raw(&mut self, k: Key) -> Result<bool, String> {
+    /// One key to the engine, counted. What the engine reports about it (a revert, a split) is asked after every key, and counted
+    /// here; the revert is returned for the caller to undo.
+    fn raw(&mut self, k: Key) -> Result<Option<Revert>, String> {
         self.keys += 1;
         let o = self.engine.key(k).map_err(|_| "the engine failed on a key".to_string())?;
         self.last_preedit = o.preedit;
+        self.last_commit = o.commit;
         if self.digits {
-            self.final_digits += o.commit.chars().filter(|c| core::digits::is_alphabet(*c)).count() as u64;
+            self.final_digits += self.last_commit.chars().filter(|c| core::digits::is_alphabet(*c)).count() as u64;
             self.shown_keys += (self.engine.digits_shown() > 0) as u64;
         }
-        // The rules are the engine's, never repeated here.
-        self.d_held |= self.inline && self.engine.english_inline_shown();
-        let kept = self.engine.english_autokept();
-        self.autokeeps += kept as u64;
-        Ok(kept)
+        self.splits += self.engine.english_split() as u64;
+        let reverted = self.engine.english_reverted();
+        if let Some(kind) = reverted {
+            self.reverts[kind as usize] += 1;
+        }
+        Ok(reverted)
     }
 
-    /// One key of the typing. `Ok(true)` when it made an auto-keep and the recovery has run: the syllable then stands as typed
-    /// without a mistake up to `self.want`, and the caller does not send what is left of this symbol.
-    fn send(&mut self, k: Key) -> Result<bool, String> {
-        if !self.raw(k)? {
-            return Ok(false);
-        }
-        for _ in 0..3 {
-            self.raw(Key::new(KeyKind::Esc))?;
-            self.raw(Key::new(KeyKind::Backspace))?;
-            // Backspace behind an English token now takes one letter and opens a run with the rest (zhen-inline section 1.3g;
-            // an auto-kept word has 3 letters at least, so the run is not empty): Esc takes the run, and the token is gone.
-            self.raw(Key::new(KeyKind::Esc))?;
-            let mut kept = false;
+    /// Takes the revert of a key back: the composition is as it was before the syllable began, and the syllable's symbols up to `self.want`
+    /// are typed again without a mistake (a retyping that reverts again is undone again, three times at most). `space`: the key was the
+    /// Space that made the token at once.
+    fn recover(&mut self, mut kind: Revert, mut space: bool) -> Result<(), String> {
+        for _ in 0..MAX_RETRIES {
+            if kind == Revert::Missing && space {
+                self.raw(Key::new(KeyKind::Backspace))?; // the token becomes a run of one letter less
+            } else {
+                self.raw(Key::new(KeyKind::Esc))?; // the Zhuyin comes back
+            }
+            self.raw(Key::new(KeyKind::Esc))?; // and goes: the run, or the unfinished syllable
+            let mut again = None;
             for sym in self.want.clone() {
-                if self.raw(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))? {
-                    kept = true;
+                if let Some(k) = self.raw(Key::ch(LAYOUT.key_of_symbol(sym).unwrap(), 0))? {
+                    again = Some(k);
                     break;
                 }
             }
-            if !kept {
-                return Ok(true);
+            match again {
+                None => return Ok(()),
+                Some(k) => (kind, space) = (k, false),
             }
         }
-        Err("an auto-keep kept coming back on a typing without mistakes".into())
+        Err("a revert kept coming back on a typing without mistakes".into())
+    }
+
+    /// One key of the typing. `Ok(true)` when it reverted and the recovery has run: the syllable then stands as typed without a mistake
+    /// up to `self.want`, and the caller does not send what is left of this symbol.
+    fn send(&mut self, k: Key) -> Result<bool, String> {
+        match self.raw(k)? {
+            None => Ok(false),
+            Some(kind) => self.recover(kind, false).map(|()| true),
+        }
     }
 
     fn zhuyin(&mut self, sym: char) -> Result<bool, String> {
@@ -235,7 +308,7 @@ impl Sim {
         self.last_preedit.strip_prefix(self.base_preedit.as_str()).map_or(vec!['\0'], |r| r.chars().collect())
     }
 
-    /// One syllable typed; whether rule D held after any of its keys is left in `self.d_held` (the caller counts and clears it).
+    /// One syllable typed.
     fn syllable(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Result<(), String> {
         self.base_preedit = self.last_preedit.clone();
         for (i, &(col, sym)) in syms.iter().enumerate() {
@@ -243,10 +316,11 @@ impl Sim {
             let near = neighbours(key);
             let want: Vec<char> = syms[..=i].iter().map(|s| s.1).collect();
             self.want = want.clone();
-            // A labeled block: an auto-keep and its recovery leave the syllable typed up to `want` already, so the rest of this
+            // A labeled block: a revert and its recovery leave the syllable typed up to `want` already, so the rest of this
             // symbol's keys are not sent.
             'symbol: {
                 if self.rng.unit() < self.p && !near.is_empty() {
+                    self.typos += 1;
                     let wrong = near[(self.rng.next() % near.len() as u64) as usize];
                     let (wcol, _) = LAYOUT.symbol_of(wrong).unwrap();
                     if self.send(Key::ch(wrong, 0))? {
@@ -256,10 +330,8 @@ impl Sim {
                         self.zhuyin(sym)?;
                     } else {
                         // Backspace until the symbols are a prefix of the wanted ones. Which symbol it takes is the engine's: the last
-                        // in display order (final, medial, initial) by rule 11. While letters show (rule D, asked of the engine) the
-                        // Backspace instead turns the letters left into an English run and the unfinished syllable is gone
-                        // (zhen-inline section 1.3g): Esc takes the run, and the symbols are typed again from the start below. Each
-                        // key is a step that shortens the symbols or empties them, so the loop ends with them empty at the latest.
+                        // in display order (final, medial, initial) by rule 11. Each key is a step that shortens the symbols or empties
+                        // them, so the loop ends with them empty at the latest.
                         // An empty preedit ends it as well: a slip that made the last unit sent the whole composition (A.10), so the preedit
                         // never starts with `base_preedit` again, and the syllable is typed again from its first symbol below.
                         let mut presses = 0;
@@ -271,11 +343,7 @@ impl Sim {
                             if self.digits && want.starts_with(&self.have()) {
                                 self.extra_bs += 1; // the symbol model would stop here; the screen still shows something before the syllable
                             }
-                            let letters = self.engine.english_inline_shown();
                             self.send(Key::new(KeyKind::Backspace))?;
-                            if letters {
-                                self.raw(Key::new(KeyKind::Esc))?;
-                            }
                         }
                         if self.last_preedit.is_empty() {
                             self.base_preedit.clear();
@@ -296,43 +364,51 @@ impl Sim {
                 return Err("the engine's symbols differ from the typing model's after a key".into());
             }
         }
-        match tone {
-            Some(mark) => self.send(Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0)).map(|_| ()),
-            None => self.space_end(),
-        }
-    }
-
-    /// Space, which ends a syllable of tone 1; a window it opens is counted (and, for a `TWO_LETTER` word, by word), then Esc and Space.
-    fn space_end(&mut self) -> Result<(), String> {
-        self.send(Key::new(KeyKind::Space))?;
-        if self.engine.english_open() {
-            self.triggers += 1;
-            if let Some(i) = self.engine.english_window_shadow().and_then(|w| TWO_LETTER.iter().position(|t| *t == w)) {
-                self.two[i] += 1;
+        self.want = syms.iter().map(|s| s.1).collect();
+        let end = match tone {
+            Some(mark) => Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0),
+            None => Key::new(KeyKind::Space),
+        };
+        for _ in 0..MAX_RETRIES {
+            match self.raw(end)? {
+                None => return Ok(()),
+                Some(kind) => self.recover(kind, tone.is_none())?,
             }
-            self.send(Key::new(KeyKind::Esc))?;
-            self.send(Key::new(KeyKind::Space))?;
         }
-        Ok(())
+        Err("a revert kept coming back on the end of a syllable typed without mistakes".into())
     }
 }
 
 /// `--digits`: the whole engine as the shell builds it (the table is read from the data directory), with the model.
-fn engine_digits(root: &Path, lm: &Path, words: &Path, key_order: bool) -> Result<Engine, String> {
+fn engine_digits(root: &Path, lm: &Path, words: &Path, switches: Switches) -> Result<Engine, String> {
     let mut e = Engine::new(&root.join("data/lexicon"), LAYOUT).map_err(|_| "cannot build the engine")?;
     e.load_lm(lm).map_err(|_| "cannot load the model")?;
     e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
-    e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
-    e.set_english_key_order(key_order).map_err(|_| "cannot set the key-order switch".to_string())?;
+    switches.apply(&mut e)?;
     Ok(e)
 }
 
-fn engine_with(lex: &Arc<Lexicon>, words: &Path, key_order: bool) -> Result<Engine, String> {
+fn engine_with(lex: &Arc<Lexicon>, words: &Path, switches: Switches) -> Result<Engine, String> {
     let mut e = Engine::with_lexicon(lex.clone(), LAYOUT);
     e.load_english(words).map_err(|_| "cannot load the word list".to_string())?;
-    e.set_english(true).map_err(|_| "cannot switch the English window on".to_string())?;
-    e.set_english_key_order(key_order).map_err(|_| "cannot set the key-order switch".to_string())?;
+    switches.apply(&mut e)?;
     Ok(e)
+}
+
+/// The engine's two revert switches (the mixing switch is always on here).
+#[derive(Clone, Copy)]
+struct Switches {
+    overwrite: bool,
+    key_order: bool,
+}
+
+impl Switches {
+    fn apply(self, e: &mut Engine) -> Result<(), String> {
+        e.set_english(true).map_err(|_| "cannot switch English mixing on".to_string())?;
+        e.set_english_overwrite(self.overwrite).map_err(|_| "cannot set the overwrite switch".to_string())?;
+        e.set_english_key_order(self.key_order).map_err(|_| "cannot set the key-order switch".to_string())?;
+        Ok(())
+    }
 }
 
 /// (mean, max) of per-seed values.
@@ -344,9 +420,18 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("cannot read file ({:?})", e.kind()))
 }
 
+fn on_off(v: String) -> Result<bool, String> {
+    match v.as_str() {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err("--overwrite and --key-order take on or off".into()),
+    }
+}
+
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
-    let (mut words, mut rows, mut recall, mut inline) = (None::<PathBuf>, None::<PathBuf>, false, false);
-    let (mut digits, mut lm, mut key_order) = (false, None::<PathBuf>, false);
+    let (mut words, mut rows, mut recall) = (None::<PathBuf>, None::<PathBuf>, false);
+    let (mut digits, mut lm) = (false, None::<PathBuf>);
+    let mut switches = Switches { overwrite: true, key_order: true };
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -355,9 +440,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--words" => words = Some(val()?.into()),
             "--rows" => rows = Some(val()?.into()),
             "--recall" => recall = true,
-            "--inline" => inline = true,
             "--digits" => digits = true,
-            "--key-order" => key_order = true,
+            "--overwrite" => switches.overwrite = on_off(val()?)?,
+            "--key-order" => switches.key_order = on_off(val()?)?,
             "--lm" => lm = Some(val()?.into()),
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
             "--repair" => {
@@ -385,12 +470,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if lm.is_some() && !digits {
         return Err("--lm goes with --digits".into());
     }
-    if recall && inline {
-        return Err("--inline is for the typing mode".into());
-    }
     let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
     if recall {
-        return if key_order { run_recall_key_order(&lex, &words) } else { run_recall(&lex, &words) };
+        return run_recall(&lex, &words, switches);
     }
 
     let rows_bytes = read(&rows.unwrap())?;
@@ -416,125 +498,83 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if syllables == 0 {
         return Err("no row to simulate".into());
     }
-    let mut two_1000: Vec<Vec<f64>> = vec![Vec::new(); TWO_LETTER.len()];
-    let (mut per_1000, mut inline_1000, mut autokeep_1000, mut keys, mut triggers) = (Vec::new(), Vec::new(), Vec::new(), 0u64, 0u64);
+    let (mut keys, mut typos) = (0u64, 0u64);
+    let mut per_1000: [Vec<f64>; 5] = Default::default(); // a, b, c, split, english_final
     let (mut final_1000, mut shown_1000, mut extra_1000) = (Vec::new(), Vec::new(), Vec::new());
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
     for i in 0..repeat {
-        let engine = if digits { engine_digits(root, &lm, &words, key_order)? } else { engine_with(&lex, &words, key_order)? };
+        let engine = if digits { engine_digits(root, &lm, &words, switches)? } else { engine_with(&lex, &words, switches)? };
         let mut sim = Sim::new(engine, p, repair, seed.wrapping_add(i));
-        (sim.inline, sim.digits) = (inline, digits);
-        let mut shown_syllables = 0u64;
+        sim.digits = digits;
         for row in &parsed {
             sim.engine.reset(ResetMode::Discard);
             sim.last_preedit.clear();
             for (syms, tone) in row {
-                sim.d_held = false;
                 sim.syllable(syms, *tone)?;
-                shown_syllables += sim.d_held as u64;
             }
-            sim.send(Key::new(KeyKind::Enter))?;
+            sim.raw(Key::new(KeyKind::Enter))?;
+            sim.english_final += sim.last_commit.chars().any(|c| c.is_ascii_alphabetic()) as u64;
         }
-        per_1000.push(sim.triggers as f64 * 1000.0 / syllables as f64);
-        inline_1000.push(shown_syllables as f64 * 1000.0 / syllables as f64);
-        autokeep_1000.push(sim.autokeeps as f64 * 1000.0 / syllables as f64);
-        final_1000.push(sim.final_digits as f64 * 1000.0 / syllables as f64);
-        shown_1000.push(sim.shown_keys as f64 * 1000.0 / syllables as f64);
-        extra_1000.push(sim.extra_bs as f64 * 1000.0 / syllables as f64);
-        for (v, n) in two_1000.iter_mut().zip(&sim.two) {
-            v.push(*n as f64 * 1000.0 / syllables as f64);
+        let per = |n: u64| n as f64 * 1000.0 / syllables as f64;
+        for (v, n) in per_1000.iter_mut().zip([sim.reverts[0], sim.reverts[1], sim.reverts[2], sim.splits, sim.english_final]) {
+            v.push(per(n));
         }
+        final_1000.push(per(sim.final_digits));
+        shown_1000.push(per(sim.shown_keys));
+        extra_1000.push(per(sim.extra_bs));
         keys += sim.keys;
-        triggers += sim.triggers;
+        typos += sim.typos;
     }
-    let (mean, max) = mean_max(&per_1000);
-    let mut extra = if inline {
-        let ((imean, imax), (amean, amax)) = (mean_max(&inline_1000), mean_max(&autokeep_1000));
-        format!("\t{imean:.3}\t{imax:.3}\t{amean:.3}\t{amax:.3}")
-    } else {
-        String::new()
-    };
+    let mut cols = String::new();
+    for v in &per_1000 {
+        let (mean, max) = mean_max(v);
+        cols += &format!("\t{mean:.3}\t{max:.3}");
+    }
     if digits {
         let ((fmean, fmax), (smean, smax), (emean, emax)) = (mean_max(&final_1000), mean_max(&shown_1000), mean_max(&extra_1000));
-        extra += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}\t{emean:.3}\t{emax:.3}");
+        cols += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}\t{emean:.3}\t{emax:.3}");
     }
-    println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{triggers}\t{mean:.3}\t{max:.3}{extra}", parsed.len());
-    if key_order {
-        for (w, v) in TWO_LETTER.iter().zip(&two_1000) {
-            let (mean, max) = mean_max(v);
-            println!("two\t{w}\t{mean:.3}\t{max:.3}");
-        }
-    }
+    println!("{rows_sha}\t{}\t{syllables}\t{keys}\t{typos}{cols}", parsed.len());
     Ok(())
 }
 
-/// Types `word` letter by letter and Space; whether the window opened and its first item is the word.
-fn type_word(e: &mut Engine, word: &str) -> Result<(bool, bool), String> {
+/// Types `word` letter by letter and Space on a fresh engine; the first revert the engine reported, and what the composition is then.
+fn type_word(e: &mut Engine, word: &str) -> Result<(Option<Revert>, Vec<String>, String), String> {
     e.reset(ResetMode::Discard);
-    for c in word.chars() {
-        e.key(Key::ch(c, 0)).map_err(|_| "the engine failed on a key")?;
+    let mut first = None;
+    let mut last = None;
+    for k in word.chars().map(|c| Key::ch(c, 0)).chain([Key::new(KeyKind::Space)]) {
+        last = Some(e.key(k).map_err(|_| "the engine failed on a key")?);
+        first = first.or(e.english_reverted());
     }
-    let o = e.key(Key::new(KeyKind::Space)).map_err(|_| "the engine failed on a key")?;
-    let open = e.english_open();
-    Ok((open, open && o.candidates.first().is_some_and(|c| c == word)))
+    Ok((first, e.syllables().to_vec(), last.map(|o| o.preedit).unwrap_or_default()))
 }
 
-/// Zhen-keyorder section 4, recall with the switch on: what the engine does with the list, with `TWO_LETTER` and with six probes.
-/// No recount: the classes of `run_recall` are the rules of the engine without the switch.
-fn run_recall_key_order(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
-    let list: Vec<String> = String::from_utf8(read(words)?).map_err(|_| "the list is not UTF-8")?.lines().map(String::from).collect();
-    let mut e = engine_with(lex, words, true)?;
-    for (name, set) in [("words", list.iter().map(String::as_str).collect::<Vec<_>>()), ("two", TWO_LETTER.to_vec())] {
-        let (mut opened, mut top1) = (0usize, 0usize);
-        for w in &set {
-            let (o, t) = type_word(&mut e, w)?;
-            opened += o as usize;
-            top1 += t as usize;
-        }
-        println!("recall\t{name}\t{}\t{opened}\t{top1}", set.len());
-    }
-    for w in ["ok", "ls", "cd", "mv", "cup", "npm"] {
-        println!("probe\t{w}\t{}", type_word(&mut e, w)?.0 as u8);
-    }
-    Ok(())
-}
-
-/// Section 4.5: every word of the list typed letter by letter, then Space.
-fn run_recall(lex: &Arc<Lexicon>, words: &Path) -> Result<(), String> {
+/// Section 4.1, recall: every word of the list typed letter by letter, then Space, and the probes.
+fn run_recall(lex: &Arc<Lexicon>, words: &Path, switches: Switches) -> Result<(), String> {
     let bytes = read(words)?;
     let sha = sha256_hex(&bytes);
     let list: Vec<String> = String::from_utf8(bytes).map_err(|_| "the list is not UTF-8")?.lines().map(String::from).collect();
-    let mut e = engine_with(lex, words, false)?;
-    let (mut opened, mut top1, mut classes) = (0usize, 0usize, [0usize; 4]);
+    let mut e = engine_with(lex, words, switches)?;
+    let (mut opened, mut classes) = (0usize, [0usize; 4]);
     for w in &list {
-        e.reset(ResetMode::Discard);
-        for c in w.chars() {
-            e.key(Key::ch(c, 0)).map_err(|_| "the engine failed on a key")?;
-        }
-        let o = e.key(Key::new(KeyKind::Space)).map_err(|_| "the engine failed on a key")?;
-        let open = e.english_open();
-        opened += open as usize;
-        top1 += (open && o.candidates.first() == Some(w)) as usize;
-        // The recount: overwrites by column, and whether the leftover syllable (tone 1) is in the lexicon.
-        let (mut col, mut over) = ([None::<char>; 3], 0usize);
-        for c in w.chars() {
-            let (i, sym) = LAYOUT.symbol_of(c).ok_or("a letter without a Zhuyin key")?;
-            over += col[i].is_some() as usize;
-            col[i] = Some(sym);
-        }
-        let leftover: String = col.iter().flatten().collect();
-        let valid = !lex.entries(&[leftover]).is_empty();
-        classes[match (over, valid) {
-            (0, _) => 0,
-            (1, true) => 1,
-            (_, true) => 2,
-            (_, false) => 3,
-        }] += 1;
+        let (first, syls, preedit) = type_word(&mut e, w)?;
+        opened += (syls == [format!("{}{w}", core::learn::PUNCT_PREFIX)] && preedit == *w) as usize;
+        classes[first.map_or(3, |k| k as usize)] += 1;
     }
-    if opened != classes[2] + classes[3] {
-        return Err("the engine and the recount disagree on which words open".into());
+    println!("{sha}\t{}\t{opened}\t{}\t{}\t{}\t{}", list.len(), classes[0], classes[1], classes[2], classes[3]);
+    for w in PROBES {
+        let (_, syls, _) = type_word(&mut e, w)?;
+        let token = format!("{}{w}", core::learn::PUNCT_PREFIX);
+        let what = if syls == [token] {
+            "token"
+        } else if !syls.is_empty() && syls.iter().all(|s| !s.starts_with(core::learn::PUNCT_PREFIX)) {
+            "中文"
+        } else {
+            "其他"
+        };
+        println!("probe\t{w}\t{what}");
     }
-    println!("{sha}\t{}\t{opened}\t{top1}\t{}\t{}\t{}\t{}", list.len(), classes[0], classes[1], classes[2], classes[3]);
     Ok(())
 }
 
@@ -543,21 +583,18 @@ mod tests {
     use super::*;
     use core::engine::MOD_SHIFT;
 
-    /// Zhen-inline section 4.1, simulator: a row that triggers auto-keeps ends with the same text as the same row typed without a
-    /// mistake (a text is checked here, in the module, because the tool's output never carries content, R2).
+    const ALL_ON: Switches = Switches { overwrite: true, key_order: true };
+
+    /// Zhen-revert section 4.1, simulator: a row with mistakes that revert ends with the same text as the same row typed without a
+    /// mistake (a text is checked here, in the module, because the tool's output never carries content, R2). With the overwrite repair a
+    /// wrong key `q` for `w` (the same column) is written over by `w`, which is a revert (a) the simulator undoes.
     #[test]
-    fn autokeep_recovery_leaves_the_row_as_if_typed_clean() {
+    fn revert_recovery_leaves_the_row_as_if_typed_clean() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let dir = std::env::temp_dir().join(format!("shanjie-english-sim-unit-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("words.txt"), "ewuk\n").unwrap();
+        let words = root.join("eval/golden/english-tiny.txt");
         let (syms, tone) = parse_syllable("ㄊㄧㄠ").unwrap();
-        let mk = |p: f64| {
-            let mut sim = Sim::new(engine_with(&lex, &dir.join("words.txt"), false).unwrap(), p, Repair::Overwrite, 20261014);
-            sim.inline = true;
-            sim
-        };
+        let mk = |p: f64| Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), p, Repair::Overwrite, 20261014);
         let row = |sim: &mut Sim| {
             sim.engine.reset(ResetMode::Discard);
             sim.syllable(&syms, tone).unwrap();
@@ -569,44 +606,25 @@ mod tests {
         for i in 0..400 {
             assert_eq!(row(&mut sim), clean, "row {i}");
         }
-        assert!(sim.autokeeps >= 1, "premise: the rows keep a word");
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    /// Zhen-keyorder section 4, simulator: the window of a two-letter word is counted under that word (the engine's shadow, not a rule
-    /// of this file). `l` then `s` is out of order (ㄠ in the final column, then ㄋ in the initial one), and Space opens `ls`.
-    #[test]
-    fn two_letter_windows_are_counted_by_word() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let mk = |key_order: bool| Sim::new(engine_with(&lex, &root.join("eval/golden/english-tiny.txt"), key_order).unwrap(), 0.0, Repair::Overwrite, 1);
-        for key_order in [true, false] {
-            let mut sim = mk(key_order);
-            sim.raw(Key::ch('l', 0)).unwrap();
-            sim.raw(Key::ch('s', 0)).unwrap();
-            sim.space_end().unwrap();
-            let ls = TWO_LETTER.iter().position(|w| *w == "ls").unwrap();
-            let want = if key_order { (1, 1) } else { (0, 0) };
-            assert_eq!((sim.triggers, sim.two[ls]), want, "key_order {key_order}");
-            assert_eq!(sim.two.iter().sum::<u64>(), want.1);
+        assert!(sim.reverts[Revert::Overwrite as usize] >= 1 && sim.typos >= 1, "premise: the rows revert");
+        assert_eq!(sim.splits, 0);
+        // Without the switch the same rows never revert (the key replaces), and come out the same.
+        let mut off = Sim::new(engine_with(&lex, &words, Switches { overwrite: false, key_order: false }).unwrap(), 0.5, Repair::Overwrite, 20261014);
+        for i in 0..400 {
+            assert_eq!(row(&mut off), clean, "off, row {i}");
         }
+        assert_eq!(off.reverts, [0; 3]);
     }
 
-    /// Zhen-inline section 1.3g, simulator: while letters show (rule D) the engine's Backspace opens an English run instead of taking
-    /// a symbol, so the Backspace repair must take the run with Esc and type the symbols again; every row still ends as if typed
-    /// clean. The list holds every three-letter word, so a wrong key often makes D hold (the mutation without that Esc fails here).
+    /// The Backspace repair under reverts: a final that lands in the occupied medial column is an overwrite (a): the simulator undoes the
+    /// revert and types the syllable again, so every row still ends as if typed clean.
     #[test]
-    fn backspace_repair_under_rule_d_leaves_the_row_as_if_typed_clean() {
+    fn backspace_repair_leaves_the_row_as_if_typed_clean() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
-        let dir = std::env::temp_dir().join(format!("shanjie-english-sim-unit-bs-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let words: String = ('a'..='z').flat_map(|a| ('a'..='z').flat_map(move |b| ('a'..='z').map(move |c| format!("{a}{b}{c}\n")))).collect();
-        std::fs::write(dir.join("words.txt"), words).unwrap();
-        let mut sim = Sim::new(engine_with(&lex, &dir.join("words.txt"), false).unwrap(), 0.0, Repair::Backspace, 20261014);
-        sim.inline = true;
-        // Medial then final (`ㄍㄨㄛ`): the final's neighbour on the keyboard row is a medial, so a slip lands in the occupied medial column
-        // (one overwrite, not the wanted column): the repair is Backspace, and the letters are on screen.
+        let words = root.join("eval/golden/english-tiny.txt");
+        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Backspace, 20261014);
+        // Medial then final (`ㄍㄨㄛ`): the final's neighbour on the keyboard row is a medial, so a slip lands in the occupied medial column.
         for syl in ["ㄍㄨㄛ", "ㄏㄨㄛ", "ㄌㄨㄛ", "ㄕㄨㄛ"] {
             let (syms, tone) = parse_syllable(syl).unwrap();
             let mut row = |sim: &mut Sim| {
@@ -622,7 +640,36 @@ mod tests {
                 assert_eq!(row(&mut sim), clean, "{syl} row {i}");
             }
         }
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(sim.reverts.iter().sum::<u64>() > 0, "premise: some slips reverted");
+    }
+
+    /// The counting itself: a revert is counted by the kind the engine reports, once per key, and nothing is counted for the keys that
+    /// follow. `l` then `s` is out of order (b); `o` then `k` is the same column (a); `c u p` Space is a syllable the lexicon lacks (c).
+    #[test]
+    fn reverts_are_counted_by_kind() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let lex = load_lexicon(&root.join("data/lexicon")).unwrap();
+        let words = root.join("eval/golden/english-tiny.txt");
+        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
+        for (keys, kind) in [("l s", Revert::Order), ("o k", Revert::Overwrite), ("c u p _", Revert::Missing)] {
+            sim.engine.reset(ResetMode::Discard);
+            sim.reverts = [0; 3];
+            for t in keys.split(' ') {
+                sim.raw(if t == "_" { Key::new(KeyKind::Space) } else { Key::ch(t.chars().next().unwrap(), 0) }).unwrap();
+            }
+            let mut want = [0; 3];
+            want[kind as usize] = 1;
+            assert_eq!(sim.reverts, want, "{keys:?}");
+        }
+        // Space made the token at once: the undo is Backspace and Esc, and the composition is empty again.
+        let mut sim = Sim::new(engine_with(&lex, &words, ALL_ON).unwrap(), 0.0, Repair::Overwrite, 1);
+        sim.want = vec![];
+        for c in "cup".chars() {
+            sim.raw(Key::ch(c, 0)).unwrap();
+        }
+        let kind = sim.raw(Key::new(KeyKind::Space)).unwrap().unwrap();
+        sim.recover(kind, true).unwrap();
+        assert!(sim.engine.syllables().is_empty() && sim.last_preedit.is_empty());
     }
 
     /// Digits.md A.10, the Backspace repair when a slip makes the last unit: the slip after the ㄅ turns the `1` into a digit token, which is
@@ -632,7 +679,7 @@ mod tests {
     fn backspace_repair_ends_when_the_last_unit_sent_the_composition() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let mut sim = Sim::new(
-            engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt"), false).unwrap(),
+            engine_digits(root, &root.join("data/lm/bigram.sjlm"), &root.join("eval/golden/english-tiny.txt"), ALL_ON).unwrap(),
             1.0,
             Repair::Backspace,
             20261014,

@@ -199,7 +199,7 @@ impl Engine {
         self.clear_pend();
         for &k in tail {
             if let Some((col, sym)) = Layout::Standard.symbol_of(k) {
-                self.shadow_push(k, col, false);
+                self.shadow_push(k, col);
                 self.pend[col] = Some(sym);
             }
         }
@@ -485,7 +485,7 @@ impl Engine {
                     self.cursor = self.cursor.saturating_sub(1);
                     self.remove_syllable(self.cursor)?;
                 }
-                // Like the Chinese item of the English window: the word is fixed, nothing is learned.
+                // Like the Chinese item of an English token's list: the word is fixed, nothing is learned.
                 Ok(self.insert_token(syl, Some(word), None)?.commit)
             }
         }
