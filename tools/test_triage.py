@@ -114,18 +114,24 @@ class KnTag(unittest.TestCase):
         for f, beta in (("kn.sjkn", "1"), ("kn-beta075.sjkn", "0.75")):
             b = open(os.path.join(kn, f), "rb").read()
             self.assertEqual(T.kn_tag(os.path.join(kn, f)), f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ1:β{beta}")
+        # the formal profile scores at lm.FORMAL_KN_BETA whatever the file records, and the tag spells it
+        b = open(os.path.join(kn, "kn.sjkn"), "rb").read()
+        self.assertEqual(T.kn_tag(os.path.join(kn, "kn.sjkn"), 0.75), f"+kn:{hashlib.sha256(b).hexdigest()[:8]}:θ1:β0.75")
+        self.assertEqual(T.kn_tag(os.path.join(kn, "no-such.sjkn"), 0.75), "")
         self.assertEqual(T.kn_tag(os.path.join(kn, "no-such.sjkn")), "")
         self.assertRaises(ValueError, T.kn_tag, os.path.join(kn, "bigram.sjlm"))
 
 
 class SettingTag(unittest.TestCase):
-    def test_formal_with_the_table_has_tri_and_no_kn_chat_keeps_kn(self):
-        """The tag the CLI prints (cli/src/main.rs): trigram.sjt3 beside the model turns KN off for formal and appends +tri: after +acg."""
-        kn, tri = "+kn:cbefbced:θ1:β1", "+tri:fdd3b05d"
-        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, tri), "lm-formal+ctx+tl:abcd1234+acg+tri:fdd3b05d")
-        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn, tri), "lm-formal+tl:abcd1234+acg+tri:fdd3b05d")
-        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn, tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
-        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn, ""), "lm-formal+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+    def test_each_profile_has_its_own_kn_and_tri_parts(self):
+        """The tag the CLI prints (cli/src/main.rs): both profiles keep KN (`+kn:` before `+tl:`, formal at beta 0.75) and read their own table (`+tri:` after
+        `+acg`), formal trigram.sjt3 and chat trigram-chat.sjt3; a part whose file is not beside the model is absent."""
+        kn1, kn75, chat_tri, formal_tri = "+kn:cbefbced:θ1:β1", "+kn:cbefbced:θ1:β0.75", "+tri:03891d5a", "+tri:7ec1869b"
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn75, formal_tri), "lm-formal+ctx+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg+tri:7ec1869b")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn75, formal_tri), "lm-formal+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg+tri:7ec1869b")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn1, chat_tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg+tri:03891d5a")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn1, ""), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn75, ""), "lm-formal+ctx+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg")
 
     def test_tri_tag_is_the_sha8_of_the_file_or_empty(self):
         with tempfile.TemporaryDirectory() as td:
@@ -370,13 +376,37 @@ def _patched(td, files, fake_cell, out=None):
     from unittest import mock
     import contextlib
     stack = contextlib.ExitStack()
-    stack.enter_context(mock.patch.multiple(T, OUT_DIR=out or os.path.join(td, "out"), load_lenient=lambda: None, kn_tag=lambda p: "",
+    stack.enter_context(mock.patch.multiple(T, OUT_DIR=out or os.path.join(td, "out"), load_lenient=lambda: None, kn_tag=lambda p, beta=None: "",
                                             tinylm_params=lambda p: {"chat": (0.3, 2.0, 0.25), "formal": (0.7, 2.0, 1.0)},
                                             tri_tag=lambda p: "", git_head=lambda: "abc", run_cell=fake_cell, set_file=lambda n, r: files[n]))
     stack.enter_context(mock.patch.object(T.Lex, "load", lambda: None))
     stack.enter_context(mock.patch.object(T.bench, "sha_file", lambda p: "h"))
     stack.enter_context(mock.patch("sys.stderr", io.StringIO()))
     return stack
+
+
+class PerProfileTags(unittest.TestCase):
+    def test_each_cell_gets_its_profiles_kn_beta_and_table(self):
+        """cmd_run hands run_cell the profile's own `+kn:` part (formal at lm.FORMAL_KN_BETA, chat the file's) and `+tri:` part (formal trigram.sjt3,
+        chat trigram-chat.sjt3), and lists both tables in the run's models."""
+        import argparse
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "s.txt")
+            open(p, "w", encoding="utf-8").write("x")
+            seen = {}
+
+            def fake_cell(cli, lm, tl, prof, f, lex, par, lenient, report, tdir, kn, tri, threads, colloq):
+                seen[prof] = (kn, tri)
+                return T.empty_counts(), []
+
+            with _patched(td, {"s": (p, False)}, fake_cell), \
+                    mock.patch.object(T, "kn_tag", lambda path, beta=None: f"+kn:{beta}"), \
+                    mock.patch.object(T, "tri_tag", lambda path: "+tri:" + os.path.basename(path)):
+                T.cmd_run(argparse.Namespace(label="L", set=["s"], private_root=td, cli="cli", rows_out=os.path.join(td, "rows"), jobs=1, cli_threads=1))
+            self.assertEqual(seen, {"chat": ("+kn:None", "+tri:trigram-chat.sjt3"), "formal": ("+kn:0.75", "+tri:trigram.sjt3")})
+            models = json.load(open(os.path.join(td, "out", "L.json"), encoding="utf-8"))["models"]
+            self.assertTrue({"kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3"} <= set(models), models)
 
 
 class Jobs(unittest.TestCase):

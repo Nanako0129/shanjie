@@ -706,8 +706,11 @@ PROFILES2 = ["chat", "formal"]
 # data/kn.sjkn.sha256) goes into the model folder, so the CLI turns KN on as the App does, and its tag spells `+kn:{kn8}:θ<θ>:β<β>`
 # (`{kn8}` = first 8 hex of the side file) before `+tl:`. A version without the key gets no kn.sjkn, so an auto-loaded one still fails.
 # A version that ships a trigram table (trigram.sjt3, trigram-core; hash from data/trigram.sjt3.sha256) has `"tri": True`: the table goes into the
-# model folder, the CLI loads it only for `--profile formal` (and then turns KN off), so the chat tag is unchanged and the formal cells need their own
+# model folder, the CLI loads it only for `--profile formal` (v0.4.7 to v0.5.0: and then turns KN off), so the chat tag is unchanged and the formal cells need their own
 # `"formal_tag"` (`{tri8}` = first 8 hex of the table), which spells `+tri:{tri8}` after `+acg` and has no `+kn:`. Without `formal_tag` both profiles share `tag`.
+# A version that also ships the chat profile's table (trigram-chat.sjt3, docs/contracts/sj-lm-7-pr2.md; hash from data/trigram-chat.sjt3.sha256) has `"tri_chat": True`:
+# the CLI loads each profile's own table beside the model and keeps KN on in both profiles (formal at beta 0.75, `+kn:{kn8}:θ1:β0.75`), so its `tag` (chat) ends in
+# `+tri:{trichat8}` and its `formal_tag` keeps `+kn:` and ends in `+tri:{tri8}`.
 # A version that ships the colloquial table (colloquial-term.md; hash from data/colloquial.sjlm.sha256) has `"colloquial": True` (the rule tools/kpi.py's
 # check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
 # `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
@@ -725,6 +728,9 @@ VERSIONS2 = {
                "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
     "v0.5.0": {"release": "v0.5.0", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "colloquial": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg", "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
+    # SJ-LM-7 (docs/contracts/sj-lm-7-pr2.md): measure the branch with `--as sj-lm-7`; the models are the branch's data/*.sha256 files.
+    "sj-lm-7": {"release": "sj-lm-7", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+tri:{tri8}"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
@@ -752,8 +758,8 @@ def version_labels(refs, as_):
 def resolve_models(ver, spec):
     """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
     out = {}
-    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) \
-            + (["colloquial.sjlm"] if spec.get("colloquial") else []):
+    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["trigram-chat.sjt3"] if spec.get("tri_chat") else []) \
+            + (["tinylm.sjtl"] if spec["tinylm"] else []) + (["colloquial.sjlm"] if spec.get("colloquial") else []):
         f = os.path.join(ver.dir, "data", n + ".sha256")
         if not os.path.isfile(f):
             die(f"{ver.label}: the export has no data/{n}.sha256")
@@ -768,19 +774,21 @@ def resolve_models(ver, spec):
 
 
 def setup_models(ver, spec, td):
-    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn and trigram.sjt3 for a version that ships them (the CLI loads
-    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads the table for the formal profile when it sees trigram.sjt3), and
+    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn, trigram.sjt3 and trigram-chat.sjt3 for a version that ships them (the CLI loads
+    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads each profile's own table when it sees trigram.sjt3 / trigram-chat.sjt3), and
     colloquial.sjlm for a version with `"colloquial"` (not read from the folder: the chat cells name it with --colloquial-core)."""
     ver.spec, ver.models = spec, resolve_models(ver, spec)
     d = os.path.join(td, ver.label)
     os.makedirs(d)
-    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()) + (("colloquial.sjlm",) if spec.get("colloquial") else ()):
+    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()) \
+            + (("trigram-chat.sjt3",) if spec.get("tri_chat") else ()) + (("colloquial.sjlm",) if spec.get("colloquial") else ()):
         os.symlink(ver.models[n][0], os.path.join(d, n))
     ver.lm = os.path.join(d, "bigram.sjlm")
     ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
     ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
     ver.kn8 = ver.models["kn.sjkn"][1][:8] if spec.get("kn") else ""
     ver.tri8 = ver.models["trigram.sjt3"][1][:8] if spec.get("tri") else ""
+    ver.trichat8 = ver.models["trigram-chat.sjt3"][1][:8] if spec.get("tri_chat") else ""
     ver.co = os.path.join(d, "colloquial.sjlm") if spec.get("colloquial") else None
     ver.co8 = ver.models["colloquial.sjlm"][1][:8] if spec.get("colloquial") else ""
 
@@ -796,7 +804,7 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", "")) + colloq_tag(ver, prof)
+    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", "")) + colloq_tag(ver, prof)
 
 
 def colloq_tag(ver, prof):
@@ -812,11 +820,12 @@ def expected_tag(ver, prof, anchor):
 
 def replay_tag(ver, prof="chat"):
     """Setting tag of the replay-setting CLI cell (version's bigram + classes, nothing else): `lm-<prof>`, plus the version's own `+kn:...` part
-    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells), or
-    for the formal profile of a version with a table its `+tri:...` part instead (the table turns KN off)."""
-    tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof)) if prof == "formal" and ver.spec.get("tri") else None
+    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells), then the
+    profile's `+tri:...` part when the setting tag has one (v0.4.7 to v0.5.0: formal only, and it replaces the `+kn:` part, which that tag lacks; the
+    `"tri_chat"` versions: both profiles, after the `+kn:` part)."""
+    tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof))
     kn = re.search(r"\+kn:[^+]*", spec_tag(ver, prof)) if ver.spec.get("kn") else None
-    return f"lm-{prof}" + (tri.group() if tri else kn.group() if kn else "")
+    return f"lm-{prof}" + (kn.group() if kn else "") + (tri.group() if tri else "")
 
 
 def cli_env(anchor):

@@ -140,14 +140,15 @@ def tinylm_params(path):
     return {p: (*head[p], head["delta"][i]) for i, p in enumerate(PROFILES)}
 
 
-def kn_tag(path):
+def kn_tag(path, beta=None):
     """The CLI's setting tag for the Kneser-Ney side file beside the model (`+kn:<sha8>:θ<θ>:β<β>`, cli/src/main.rs via Lm::kn_tag,
-    lm_eval.py kn_tag), or "" when there is none (the CLI then runs without KN). SJKN0002: θ u32 at byte 44, β f64 at 48."""
+    lm_eval.py kn_tag), or "" when there is none (the CLI then runs without KN). SJKN0002: θ u32 at byte 44, β f64 at 48. `beta` is the β the
+    profile scores with when it is not the file's (the formal profile's lm.FORMAL_KN_BETA; the tag shows it)."""
     if not os.path.lexists(path):
         return ""
     sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
     import lm_eval   # the one KN tag format (the Python reference's summary line)
-    return lm_eval.kn_tag(path)
+    return lm_eval.kn_tag(path, beta)
 
 
 def tri_tag(path):
@@ -156,14 +157,13 @@ def tri_tag(path):
 
 
 def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8=""):
-    """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). With a trigram table the formal profile reads it,
-    scores without Kneser-Ney (no `+kn:`) and ends the tag with `+tri:`; chat ignores the table and keeps `+kn:`. With `--colloquial-core`
+    """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). `kn` and `tri` are the profile's own parts: both profiles
+    keep Kneser-Ney (`+kn:` before `+tl:`, the formal one at beta 0.75) and read their own trigram table (`+tri:` after `+acg`), formal
+    `trigram.sjt3` and chat `trigram-chat.sjt3`; either part is "" when the file is not beside the model. With `--colloquial-core`
     the tag ends in `+colloq:<sha8 of the table>` in both profiles, and in chat (where the term applies, with the reading-channel term on by default)
     `+rc` after it: the CLI marks the shipping behavior, so a `--no-reading-channel` run is refused."""
     colloq = f"+colloq:{colloq8}" + ("+rc" if prof == "chat" else "") if colloq8 else ""
-    if prof == "formal" and tri:
-        return f"lm-{prof}{ctx_tag}+tl:{tl8}+acg{tri}{colloq}"
-    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{colloq}"
+    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{tri}{colloq}"
 
 
 def pick(ng, ll, alpha, tau, delta):
@@ -431,14 +431,19 @@ def cmd_run(a):
     cli = a.cli or os.path.join(ROOT, "target/release/shanjie-eval")
     lm, tl = os.path.join(ROOT, "data/lm/bigram.sjlm"), os.path.join(ROOT, "data/lm/tinylm.sjtl")
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
-    kn = kn_tag(os.path.join(ROOT, "data/lm/kn.sjkn"))   # the CLI turns KN on when the side file is beside the model
-    tri = tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))   # the CLI reads it for the formal profile only
+    sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+    import lm as L   # FORMAL_KN_BETA, the one constant the Rust core's Lm::scoring and the Python reference share
+    kn_file = os.path.join(ROOT, "data/lm/kn.sjkn")
+    # The CLI turns KN on when the side file is beside the model, and reads each profile's own table (docs/contracts/sj-lm-7-pr2.md):
+    # `kn` and `tri` are per profile (formal scores at beta 0.75; formal reads trigram.sjt3, chat trigram-chat.sjt3).
+    kn = {"chat": kn_tag(kn_file), "formal": kn_tag(kn_file, L.FORMAL_KN_BETA)}
+    tri = {"chat": tri_tag(os.path.join(ROOT, "data/lm/trigram-chat.sjt3")), "formal": tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))}
     colloq = os.path.join(ROOT, "data/lm/colloquial.sjlm")   # the App always loads it (Shell.build()); the CLI applies it in chat at every strength (the triage runs the standard)
     colloq = colloq if os.path.isfile(colloq) else ""
     path = os.path.join(OUT_DIR, a.label + ".json")
     doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {"label": a.label, "sets": {}}
     meta = {"commit": git_head(), "setting": "--context --packs acg --tinylm" + (" --colloquial-core" if colloq else ""), "cli_sha256": bench.sha_file(cli),
-            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri else ()) + (("colloquial.sjlm",) if colloq else ())},
+            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn["chat"] else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri["formal"] else ()) + (("trigram-chat.sjt3",) if tri["chat"] else ()) + (("colloquial.sjlm",) if colloq else ())},
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
@@ -456,7 +461,7 @@ def cmd_run(a):
         try:
             with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
                 try:
-                    cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads, colloq)
+                    cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn[prof], tri[prof], a.cli_threads, colloq)
                 except BaseException:
                     stop.set()   # before the temp dir is removed: a worker freed by this failure finds the event set
                     raise
