@@ -223,9 +223,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
     let mut dump_words = None::<String>;
     let (mut classes, mut kn, mut tri) = (true, true, true);
-    // `--chat-tri on-kn|off-kn` (trigram-explore experiment, default off): the chat profile also scores with trigram.sjt3, Kneser-Ney on or off.
-    let mut chat_tri = None::<bool>;
-    let (mut formal_kn, mut kn_beta) = (false, None::<f64>);
     // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
@@ -274,15 +271,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-classes" => classes = false,
             "--no-kn" => kn = false,
             "--no-tri" => tri = false,
-            "--chat-tri" => {
-                chat_tri = Some(match val()?.as_str() {
-                    "on-kn" => true,
-                    "off-kn" => false,
-                    _ => return Err("--chat-tri must be on-kn or off-kn".into()),
-                })
-            }
-            "--formal-kn" => formal_kn = true,
-            "--kn-beta" => kn_beta = Some(val()?.parse::<f64>().map_err(|_| "--kn-beta takes a number")?),
             "--no-names" => names = false,
             "--packs" => packs |= pack_flag(&val()?)?,
             "--packs-dir" => packs_dir = Some(val()?),
@@ -319,22 +307,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         _ => return Err("--profile must be chat or formal".into()),
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
-    if chat_tri.is_some() && (!tri || prof != Profile::Chat) {
-        return Err("--chat-tri needs --profile chat and cannot be combined with --no-tri".into());
-    }
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
-    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
-    // (docs/contracts/trigram-core.md) is read only for --profile formal (or chat with the experiment flag --chat-tri) and without --no-tri (otherwise chat never uses it, so it is not read
-    // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
-    let mut lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && (prof == Profile::Formal || chat_tri.is_some())).map_err(|e| e.to_string())?;
-    lm.set_chat_tri(chat_tri);
-    if chat_tri.is_some() && lm.tri_tag().is_none() {
-        return Err("--chat-tri: no trigram.sjt3 beside the model".into());
-    }
-    if let Some(b) = kn_beta {
-        lm.research_set_kn_beta(b)?;
-    }
-    core::lm::RESEARCH_FORMAL_KN.store(formal_kn, std::sync::atomic::Ordering::Relaxed);
+    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. The trigram table beside it
+    // (docs/contracts/sj-lm-7-pr2.md) is the profile's own, read unless --no-tri: `trigram.sjt3` for formal, `trigram-chat.sjt3` for chat
+    // (the other profile's file is not read, so a bad one does not matter here). Both profiles score with Kneser-Ney and their table.
+    let tri_profiles: &[Profile] = if tri { std::slice::from_ref(&prof) } else { &[] };
+    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri_profiles).map_err(|e| e.to_string())?;
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
@@ -593,7 +571,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -670,7 +648,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
     // (experiments/sp/predict.py) loads it the same way.
     // The trigram table is never read here: the prediction row scores with the bigram whatever the profile (trigram-core.md (d)).
-    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, false).map_err(|e| e.to_string())?;
+    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, &[]).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
@@ -918,19 +896,19 @@ mod tests {
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
     /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
-    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 酷澎 is in the shipped names layer
-    /// since model-v6, so both runs leave it out (`--no-names`); loading the same row twice is a parse error.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 鮮爭 is a made-up name (not in the lexicon, count 0: the names layer's
+    /// real words are counted into the model since SJ-LM-7, so none of them is a word the corpus never saw); loading the same row twice is a parse error.
     #[test]
     fn extra_overlay_rows_are_capped_like_pack_rows() {
         let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
-        assert_eq!(lm.count("酷澎"), 0, "the fixture word must be one the corpus never saw");
+        assert_eq!(lm.count("鮮爭"), 0, "the fixture word must be one the corpus never saw");
         let file = std::env::temp_dir().join(format!("shanjie-extra-overlay-{}.tsv", std::process::id()));
-        fs::write(&file, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-7.5\tnames\n").unwrap();
+        fs::write(&file, "ㄒㄧㄢ-ㄓㄥ\t鮮爭\t-7.5\tnames\n").unwrap();
         let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
-        let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
+        let key = ["ㄒㄧㄢ".to_string(), "ㄓㄥ".to_string()];
         let score = |extra: Option<&Path>| {
             let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra, false).unwrap();
-            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
+            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "鮮爭")
         };
         let (with, without) = (score(Some(&file)), score(None));
         fs::remove_file(&file).unwrap();

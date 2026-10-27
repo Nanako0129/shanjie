@@ -203,6 +203,21 @@ class FloorAndClosing(unittest.TestCase):
         self.assertNotEqual(t.eos(lam, "他", "起床"), t.eos(lam, None, "起床"))
 
 
+class ProfileLm(unittest.TestCase):
+    """lm.profile_lm is core `Lm::scoring`'s beta rule: formal takes FORMAL_KN_BETA 0.75, chat the side file's, a model without a side file is untouched."""
+
+    def test_formal_gets_beta_075_in_a_copy_and_chat_keeps_the_files(self):
+        path = os.path.join(gen_tri_tiny.KN_TINY, "bigram.sjlm")
+        lm = L.BigramLM(path, kn=os.path.join(gen_tri_tiny.KN_TINY, "kn.sjkn"))
+        self.assertEqual(lm.kn[0], 1.0)
+        formal = L.profile_lm(lm, "formal")
+        self.assertEqual((formal.kn[0], L.FORMAL_KN_BETA, formal.kn[1:]), (0.75, 0.75, lm.kn[1:]))
+        self.assertEqual(lm.kn[0], 1.0, "the loaded model is not changed: one model serves both profiles")
+        self.assertIs(L.profile_lm(lm, "chat"), lm)
+        plain = L.BigramLM(path)
+        self.assertIs(L.profile_lm(plain, "formal"), plain)
+
+
 class Table(unittest.TestCase):
     def test_python_reader_accepts_only_the_contracts_discount(self):
         good = open(os.path.join(gen_tri_tiny.OUT, "trigram.sjt3"), "rb").read()
@@ -213,15 +228,16 @@ class Table(unittest.TestCase):
 
 
 class LmEvalCli(unittest.TestCase):
-    """reference/proto/lm_eval.py mirrors the Rust CLI's loading rules (cli/src/main.rs `run_lm`): the table loads for formal only, kn.sjkn is read
-    and checked either way, formal with a table scores without Kneser-Ney."""
+    """reference/proto/lm_eval.py mirrors the Rust CLI's loading rules (cli/src/main.rs `run_lm`, docs/contracts/sj-lm-7-pr2.md): each profile reads only its own
+    table (formal trigram.sjt3, chat trigram-chat.sjt3), kn.sjkn is read and checked either way, and both profiles score with Kneser-Ney and their table,
+    formal at beta 0.75 (lm.FORMAL_KN_BETA) and chat at the file's."""
 
     def setUp(self):
         import lm_eval
         self.lm_eval = lm_eval
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
-        for src, name in (("kn-tiny", "bigram.sjlm"), ("kn-tiny", "classes.sjc"), ("kn-tiny", "kn.sjkn"), ("tri-tiny", "trigram.sjt3")):
+        for src, name in (("kn-tiny", "bigram.sjlm"), ("kn-tiny", "classes.sjc"), ("kn-tiny", "kn.sjkn"), ("tri-tiny", "trigram.sjt3"), ("tri-tiny", "trigram-chat.sjt3")):
             open(os.path.join(self.dir, name), "wb").write(open(os.path.join(ROOT, "eval", "golden", src, name), "rb").read())
         # The toy side file's ΣN' was counted with the toy lexicon's variant classes, not the real lexicon's that lm_eval derives.
         import build_lm
@@ -250,40 +266,60 @@ class LmEvalCli(unittest.TestCase):
             except Exception as e:  # noqa: BLE001
                 return type(e), out.getvalue()
 
-    def test_explicit_table_with_chat_is_an_error(self):
-        tri = os.path.join(self.dir, "trigram.sjt3")
-        self.assertEqual(self.run_main("--profile", "chat", "--tri", tri)[0], 2)
-        self.assertEqual(self.run_main("--profile", "formal", "--tri", tri)[0], 0)
+    def dump(self, name, *argv):
+        path = os.path.join(self.dir, name)
+        self.assertEqual(self.run_main("--dump", path, *argv)[0], 0)
+        return open(path, encoding="utf-8").read()
 
-    def test_chat_does_not_read_the_table_and_formal_does(self):
-        open(os.path.join(self.dir, "trigram.sjt3"), "wb").write(b"junk")
-        code, out = self.run_main("--profile", "chat")
-        self.assertEqual(code, 0)
-        self.assertTrue("+kn:" in out and "+tri:" not in out, out)
-        self.assertIsNot(self.run_main("--profile", "formal")[0], 0)           # a bad table is never ignored
-        self.assertEqual(self.run_main("--profile", "formal", "--no-tri")[0], 0)
+    def sha8(self, name):
+        return hashlib.sha256(open(os.path.join(self.dir, name), "rb").read()).hexdigest()[:8]
 
-    def test_formal_with_a_table_checks_the_side_file_but_scores_without_it(self):
+    def test_each_profile_reads_its_own_table_and_keeps_kn(self):
+        kn = self.sha8("kn.sjkn")
         code, out = self.run_main("--profile", "formal")
         self.assertEqual(code, 0)
-        self.assertTrue("+tri:" in out and "+kn:" not in out, out)
-        # the scores are those without the side file: the same dump with and without --no-kn (the toy KN does move the scores of the chat profile)
-        dumps = []
-        for extra in ([], ["--no-kn"]):
-            path = os.path.join(self.dir, f"dump{len(extra)}.tsv")
-            self.assertEqual(self.run_main("--profile", "formal", "--dump", path, *extra)[0], 0)
-            dumps.append(open(path, encoding="utf-8").read())
-        self.assertEqual(dumps[0], dumps[1])
-        chat = []
-        for extra in ([], ["--no-kn"]):
-            path = os.path.join(self.dir, f"chat{len(extra)}.tsv")
-            self.assertEqual(self.run_main("--profile", "chat", "--dump", path, *extra)[0], 0)
-            chat.append(open(path, encoding="utf-8").read())
-        self.assertNotEqual(chat[0], chat[1], "premise: the side file changes the toy scores")
-        open(os.path.join(self.dir, "kn.sjkn"), "wb").write(b"junk")
-        self.assertIsNot(self.run_main("--profile", "formal")[0], 0)           # the CLI fails on a bad kn.sjkn here too
+        self.assertIn(f"lm-formal+kn:{kn}:θ1:β0.75+tri:{self.sha8('trigram.sjt3')}  ", out)   # formal: beta 0.75 although the file records 1
+        code, out = self.run_main("--profile", "chat")
+        self.assertEqual(code, 0)
+        self.assertIn(f"lm-chat+kn:{kn}:θ1:β1+tri:{self.sha8('trigram-chat.sjt3')}  ", out)
+        for prof in ("chat", "formal"):
+            code, out = self.run_main("--profile", prof, "--no-tri")
+            self.assertTrue(code == 0 and "+tri:" not in out and "+kn:" in out, out)
+            code, out = self.run_main("--profile", prof, "--no-kn")
+            self.assertTrue(code == 0 and "+tri:" in out and "+kn:" not in out, out)
+
+    def test_an_explicit_table_is_allowed_for_either_profile(self):
+        for prof, name in (("chat", "trigram-chat.sjt3"), ("formal", "trigram.sjt3")):
+            self.assertEqual(self.run_main("--profile", prof, "--tri", os.path.join(self.dir, name))[0], 0)
+        # the chat profile given the formal table scores differently from its own (the toy tables differ)
+        other = os.path.join(self.dir, "trigram.sjt3")
+        self.assertNotEqual(self.dump("own.tsv", "--profile", "chat"), self.dump("other.tsv", "--profile", "chat", "--tri", other))
+
+    def test_a_profile_does_not_read_the_other_profiles_table(self):
+        open(os.path.join(self.dir, "trigram.sjt3"), "wb").write(b"junk")
+        self.assertEqual(self.run_main("--profile", "chat")[0], 0)
+        self.assertIsNot(self.run_main("--profile", "formal")[0], 0)           # a bad table is never ignored
+        self.assertEqual(self.run_main("--profile", "formal", "--no-tri")[0], 0)
+        open(os.path.join(self.dir, "trigram.sjt3"), "wb").write(open(os.path.join(ROOT, "eval", "golden", "tri-tiny", "trigram.sjt3"), "rb").read())
+        open(os.path.join(self.dir, "trigram-chat.sjt3"), "wb").write(b"junk")
+        self.assertEqual(self.run_main("--profile", "formal")[0], 0)
         self.assertIsNot(self.run_main("--profile", "chat")[0], 0)
-        self.assertEqual(self.run_main("--profile", "formal", "--no-kn")[0], 0)
+        self.assertEqual(self.run_main("--profile", "chat", "--no-tri")[0], 0)
+
+    def test_both_profiles_score_with_the_side_file_and_formal_at_beta_075(self):
+        # the toy KN moves the scores of both profiles' table decodes
+        for prof in ("chat", "formal"):
+            self.assertNotEqual(self.dump(f"{prof}-kn.tsv", "--profile", prof), self.dump(f"{prof}-nokn.tsv", "--profile", prof, "--no-kn"), prof)
+        # formal ignores the file's beta: the beta-1 file and the beta-0.75 file give the same formal scores, and different chat scores
+        b075 = os.path.join(ROOT, "eval", "golden", "kn-tiny", "kn-beta075.sjkn")
+        self.assertEqual(self.dump("f1.tsv", "--profile", "formal"), self.dump("f075.tsv", "--profile", "formal", "--kn", b075))
+        self.assertNotEqual(self.dump("c1.tsv", "--profile", "chat"), self.dump("c075.tsv", "--profile", "chat", "--kn", b075))
+
+    def test_a_bad_side_file_fails_either_profile(self):
+        open(os.path.join(self.dir, "kn.sjkn"), "wb").write(b"junk")
+        for prof in ("formal", "chat"):
+            self.assertIsNot(self.run_main("--profile", prof)[0], 0)           # the CLI fails on a bad kn.sjkn here too
+            self.assertEqual(self.run_main("--profile", prof, "--no-kn")[0], 0)
 
 
 class Golden(unittest.TestCase):

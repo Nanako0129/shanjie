@@ -917,7 +917,7 @@ fn kneser_ney_side_file_refuses_the_model() {
     let v4 = root().join("eval/golden/tinylm-tiny/tiny-int8-v4.sjtl");
     for (lm_dir, kn_off) in [(kn.clone(), false), (dir.clone(), true)] {
         let lm = Lm::load(&lm_dir.join("bigram.sjlm")).unwrap();
-        assert_eq!(lm.kn_tag().is_some(), !kn_off, "premise: the side file is loaded only from kn-tiny");
+        assert_eq!(lm.kn_tag(Profile::Chat).is_some(), !kn_off, "premise: the side file is loaded only from kn-tiny");
         let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &lm, None).unwrap());
         let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
         e.set_lm(Arc::new(lm), capped);

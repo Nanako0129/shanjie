@@ -3,7 +3,7 @@
 玩具語料沿用 tools/test_build_lm.py（和 test_kn_cont.py 同一組手算）。輸出到 eval/golden/kn-tiny/：
   bigram.sjlm、classes.sjc（手排的 K=3 詞類）、kn.sjkn（θ=1、β=1，出貨的設定）、kn-beta075.sjkn（β=0.75，檢查混合）、
   lexicon.txt（解碼用的玩具詞庫）、decode.tsv（Python 的解碼輸出：設定、profile、句、名次、surface、分數的 repr；
-  設定 plain＝不加側檔、beta1、beta075）。
+  設定 plain＝不加側檔、beta1、beta075；formal 一律用 lm.FORMAL_KN_BETA 0.75（lm.profile_lm），所以 beta1 與 beta075 的 formal 列相同，chat 用側檔的 β）。
 重產：python3 -B tools/gen_kn_tiny.py（test_kn_cont.py 會檢查入庫的檔案等於現在的輸出，所以改了任何一邊都會被抓到）。
 """
 import hashlib
@@ -71,7 +71,7 @@ def generate():
             lex = L.cap_overlay(ime.Lexicon(lex_path), set(), lm, demote_path=None)
             for profile in ("chat", "formal"):
                 for i, s in enumerate(SENTENCES, 1):
-                    for r, (sc, ws) in enumerate(L.decode(lex, s.split(), lm, profile), 1):
+                    for r, (sc, ws) in enumerate(L.decode(lex, s.split(), L.profile_lm(lm, profile), profile), 1):
                         lines.append(f"{config}\t{profile}\t{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")
         files["decode.tsv"] = "".join(lines).encode()
         return files

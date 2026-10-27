@@ -38,8 +38,11 @@
  *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
  *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
  *    docs/contracts/model-v6.md).
- *  - It reads an optional trigram.sjt3 (docs/contracts/trigram-core.md) the same way (a bad one fails the load with 3).
- *    A valid one is used by the formal profile only, which then scores without kn.sjkn.
+ *  - It reads two optional trigram tables (docs/contracts/trigram-core.md, docs/contracts/sj-lm-7-pr2.md) the same way:
+ *    trigram.sjt3 is the formal profile's and trigram-chat.sjt3 the chat profile's (a bad one of either fails the load with 3,
+ *    for both profiles; a missing one only turns that profile's trigram level off). Each profile scores with its own table
+ *    and with kn.sjkn: the chat profile with the side file's beta, the formal profile with beta 0.75 (FORMAL_KN_BETA in
+ *    core/src/lm.rs) whatever beta the file records. The prediction row keeps the side file's beta in both profiles.
  *    The file is memory-mapped (docs/contracts/trigram-mmap.md): while an engine has it loaded it must not be truncated or
  *    rewritten in place (a truncated page is a SIGBUS); replace it by rename, as the install paths do.
  *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
