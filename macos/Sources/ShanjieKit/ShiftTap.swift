@@ -15,7 +15,7 @@ public struct ShiftTap {
 
     /// The Shift key now down and the time it went down; `nil` when no tap is possible (nothing down, or the press is spoiled).
     private var candidate: (key: UInt16, at: TimeInterval)?
-    /// Shift keys that are down now. Two at once spoil the tap: the flags cannot say which one came up.
+    /// Shift keys that are down now, as the flags last said. Two at once spoil the tap: the flags cannot say which one came up.
     private var down: Set<UInt16> = []
 
     public init() {}
@@ -23,21 +23,26 @@ public struct ShiftTap {
     /// A `keyDown` anywhere: Shift+letter, Shift+arrow and the like are not a tap.
     public mutating func keyDown() { candidate = nil }
 
-    /// One `flagsChanged` event. `others`: Control, Option, Command or Fn is in the flags; `capsLock`: the light is on; `now`: the event's
-    /// time; `mouseAgo`: seconds since the latest mouse-button press, asked only when it can decide (a release). True: switch.
-    public mutating func flagsChanged(keyCode: UInt16, others: Bool, capsLock: Bool, now: TimeInterval, mouseAgo: () -> TimeInterval) -> Bool {
+    /// One `flagsChanged` event. `isDown`: whether the flags say this Shift key is down now (the state is read, never flipped, so a
+    /// missed event cannot invert later ones); `others`: Control, Option, Command or Fn is in the flags; `capsLock`: the light is on;
+    /// `now`: the event's time; `processedAt`: the time this event is handled, on the same clock as `now` (the system uptime); `mouseAgo`:
+    /// seconds since the latest mouse-button press, asked only when it can decide (a release). True: switch.
+    public mutating func flagsChanged(keyCode: UInt16, isDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
+                                      processedAt: TimeInterval, mouseAgo: () -> TimeInterval) -> Bool {
         guard Self.shiftKeys.contains(keyCode) else {
             candidate = nil  // another modifier moved while Shift may be down
             return false
         }
-        if down.remove(keyCode) == nil {  // pressed
+        if isDown {
             down.insert(keyCode)
             candidate = down.count == 1 && !others && !capsLock ? (keyCode, now) : nil
             return false
         }
+        down.remove(keyCode)
         defer { candidate = nil }
         guard let c = candidate, c.key == keyCode, !others, !capsLock else { return false }
-        let held = now - c.at
-        return held <= Self.SHIFT_TAP_MAX && mouseAgo() > held
+        // A click since the press is `mouseAgo` seconds old at most `processedAt - c.at`; the event's own timestamps would miss a click
+        // between a late-handled release and the release itself.
+        return now - c.at <= Self.SHIFT_TAP_MAX && mouseAgo() > processedAt - c.at
     }
 }

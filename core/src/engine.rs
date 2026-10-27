@@ -1755,6 +1755,12 @@ impl Engine {
         if !on {
             return self.settle_run();
         }
+        // Without a shadow (Eten, abbreviation composer, mixing off) there is no English run to keep a composition in: only the state
+        // is recorded, the composition stays as it is and the ASCII branch of `dispatch_key` does not apply (the shell sends the
+        // composition first, shift-toggle section 2).
+        if !self.shadow_on() {
+            return self.handled();
+        }
         self.cands = None;
         self.clear_pred();
         let (commit, _) = self.digit_flush()?;
@@ -2969,18 +2975,28 @@ impl Engine {
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
             return self.passthrough(String::new());
         }
-        // Shift-toggle section 4: in the ASCII state a printable ASCII character goes on the English run as typed (no lower case, no
-        // tone key, no revert or split); an open window or row closes without choosing, so `1` is a character, never a pick.
-        if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) {
+        // Shift-toggle section 4 (implementation revision 2026-10-28): in the ASCII state, with a shadow, a printable ASCII character
+        // closes an open window or row without choosing (so `1` is a character, never a pick) and then either goes on the English run as
+        // typed (the characters `english_of` accepts: no lower case, no tone key, no revert or split) or, being any other character,
+        // settles the open run as a token and goes in as its own half-width punctuation unit, so every English token keeps `english_of`'s
+        // invariants.
+        if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) && self.shadow_on() {
             self.cands = None;
             self.clear_pred();
-            if self.run.is_empty() {
+            let opened = self.run.is_empty();
+            if opened {
                 self.run = self.shadow_text();
                 self.clear_pend();
             }
+            if !(k.ch.is_ascii_alphanumeric() || ",.;/-".contains(k.ch)) {
+                let sent = if self.run.is_empty() { String::new() } else { self.end_run()? };
+                let mut o = self.insert_token(format!("{PUNCT_PREFIX}{}", k.ch), Some(k.ch.to_string()), None)?;
+                o.commit.insert_str(0, &sent);
+                return Ok(o);
+            }
             let commit = self.run_push(k.ch)?;
-            if self.cursor < self.syls.len() {
-                self.refresh()?;
+            if opened && self.cursor < self.syls.len() {
+                self.refresh()?; // the run opened in front of units: they decode apart from it (section 1.3h), as `start_run` does
             }
             return Ok(self.view(true, commit));
         }

@@ -204,6 +204,8 @@ final class ShiftHintAdapter: ShiftHintPanel {
     private let label = NSTextField(labelWithString: "")
     private var tintApplier = GlassTint.Applier()
     private var fade: DispatchWorkItem?
+    /// Numbers the shows: a fade that finishes after a newer show must not hide it.
+    private var shows = 0
 
     init() {
         window.isOpaque = false
@@ -220,6 +222,13 @@ final class ShiftHintAdapter: ShiftHintPanel {
 
     func show(_ text: String, lineRect: NSRect, appearance: NSAppearance?, glassTint: Double) {
         fade?.cancel()
+        shows += 1
+        let mine = shows
+        // A fade still running is replaced by a zero-duration change, so the new hint starts opaque.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            window.animator().alphaValue = 1
+        }
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         glass.apply(tintApplier.update(value: glassTint, dark: GlassTint.isDark(window.effectiveAppearance)))
         label.stringValue = text
@@ -241,8 +250,9 @@ final class ShiftHintAdapter: ShiftHintPanel {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                guard self.shows == mine else { return }
                 NSAnimationContext.runAnimationGroup({ _ in self.window.animator().alphaValue = 0 }, completionHandler: {
-                    MainActor.assumeIsolated { if self.window.alphaValue == 0 { self.window.orderOut(nil) } }
+                    MainActor.assumeIsolated { if self.shows == mine { self.window.orderOut(nil) } }
                 })
             }
         }

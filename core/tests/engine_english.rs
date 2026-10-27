@@ -1819,11 +1819,64 @@ fn ascii_characters_go_on_the_run_as_typed() {
     run(&mut e, "j i 3");
     e.set_ascii(true).unwrap();
     run(&mut e, "a");
-    let o = run(&mut e, "! 3 / O ,");
-    assert!(o.preedit.ends_with("a!3/O,"), "{}", o.preedit);
-    assert!(fields(&o).1 == 6 && e.english_reverted().is_none() && !e.english_split(), "{:?}", fields(&o));
+    let o = run(&mut e, "3 / O ,");
+    assert!(o.preedit.ends_with("a3/O,"), "{}", o.preedit);
+    assert!(fields(&o).1 == 5 && e.english_reverted().is_none() && !e.english_split(), "{:?}", fields(&o));
     let o = run(&mut e, "Enter");
-    assert!(o.commit.ends_with("a!3/O,"), "{}", o.commit);
+    assert!(o.commit.ends_with("a3/O,"), "{}", o.commit);
+}
+
+/// Implementation revision 2026-10-28: a character `english_of` does not accept settles the open run and is its own half-width unit.
+#[test]
+fn ascii_other_punctuation_settles_the_run_and_is_its_own_unit() {
+    let mut e = eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "w o w");
+    let o = run(&mut e, "!");
+    assert!(o.preedit == "wow!" && fields(&o) == (0, 0), "{} {:?}", o.preedit, fields(&o));
+    assert!(e.syllables() == ["_punct_wow", "_punct_!"], "{:?}", e.syllables());
+    // Space after it is a plain key (it opens the unit's candidates), nothing is added.
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "wow!", "{}", o.preedit);
+    run(&mut e, "Esc");
+    // Backspace removes the unit whole; the token before it stays, and one more Backspace reopens it minus its last letter.
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "wow" && e.syllables() == ["_punct_wow"], "{} {:?}", o.preedit, e.syllables());
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "wo" && fields(&o) == (0, 2), "{} {:?}", o.preedit, fields(&o));
+    // Every other printable character that is not in the English alphabet behaves the same.
+    for c in ['?', '@', '\'', '(', ':', '"', '_'] {
+        let mut e = eng();
+        e.set_ascii(true).unwrap();
+        run(&mut e, "a b");
+        let o = e.key(Key::ch(c, 0)).unwrap();
+        assert!(o.preedit == format!("ab{c}") && fields(&o) == (0, 0), "{c}: {}", o.preedit);
+        assert!(e.syllables() == ["_punct_ab".to_string(), format!("_punct_{c}")], "{c}: {:?}", e.syllables());
+    }
+}
+
+/// A one-character run `3` settles as the digit token `_punct_3` (what `english_of` leaves to `digit_of`); it shows `3`, as any run of
+/// that one character did before.
+#[test]
+fn ascii_lone_digit_run_settles_as_the_digit_token() {
+    let mut e = eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "3");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "3" && e.syllables() == ["_punct_3"], "{} {:?}", o.preedit, e.syllables());
+}
+
+#[test]
+fn ascii_without_a_shadow_leaves_the_composition_alone() {
+    let mut e = Engine::with_lexicon(real(), Layout::Eten);
+    e.set_english(true).unwrap();
+    let before = run(&mut e, "s e").preedit; // two Zhuyin keys pending in the Eten layout
+    assert!(!before.is_empty());
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.preedit == before && fields(&o) == (0, 0), "{} / {before}", o.preedit);
+    // The ASCII branch does not apply either: the key is a Zhuyin key as ever.
+    let o = run(&mut e, "a");
+    assert!(fields(&o) == (0, 0) && o.preedit != before, "{}", o.preedit);
 }
 
 #[test]

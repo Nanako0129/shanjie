@@ -14,6 +14,8 @@ final class ShiftToggleSessionTests: XCTestCase {
     private var resources: URL!
     private let leftShift: UInt16 = 56
     private var time: TimeInterval = 100
+    /// The clock the shell reads when it handles a Shift event (the system uptime in the app).
+    private var uptimeNow: TimeInterval = 0
 
     override func setUp() async throws {
         resources = try XCTUnwrap(TestData.resources())
@@ -29,17 +31,24 @@ final class ShiftToggleSessionTests: XCTestCase {
                           appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
                           shiftToggleStore: shift, shiftHint: hint)
         shell.mouseAgo = { 1000 }
+        shell.uptime = { [unowned self] in self.uptimeNow }
         XCTAssertNotNil(shell.engine)
         return shell
+    }
+
+    /// A Shift event as the system sends it: the generic bit and the left device bit while down (0x2), no bits when up.
+    @discardableResult
+    private func shift(_ c: Controller, down: Bool, at: TimeInterval) -> Bool {
+        uptimeNow = at
+        let flags: NSEvent.ModifierFlags = down ? NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x2) : []
+        return c.session.handle(Keys.event(leftShift, flags: flags, type: .flagsChanged, time: at))
     }
 
     /// A lone Shift tap: press, then release 0.1 s later.
     @discardableResult
     private func tap(_ c: Controller) -> [Bool] {
         time += 5
-        let down = c.session.handle(Keys.event(leftShift, flags: .shift, type: .flagsChanged, time: time))
-        let up = c.session.handle(Keys.event(leftShift, flags: [], type: .flagsChanged, time: time + 0.1))
-        return [down, up]
+        return [shift(c, down: true, at: time), shift(c, down: false, at: time + 0.1)]
     }
 
     func testTapSwitchesAndShowsTheHintAtTheInsertionPoint() {
@@ -174,13 +183,62 @@ final class ShiftToggleSessionTests: XCTestCase {
         let shell = makeShell(hint: hint)
         let c = Controller(shell)
         c.session.activate()
-        c.session.handle(Keys.event(leftShift, flags: .shift, type: .flagsChanged, time: 10))
+        shift(c, down: true, at: 10)
         c.press(Keys.code(for: "a"), flags: .shift)
-        c.session.handle(Keys.event(leftShift, flags: [], type: .flagsChanged, time: 10.1))
+        shift(c, down: false, at: 10.1)
         XCTAssertTrue(hint.shown.isEmpty, "Shift+letter")
         shell.mouseAgo = { 0.05 }
-        c.session.handle(Keys.event(leftShift, flags: .shift, type: .flagsChanged, time: 20))
-        c.session.handle(Keys.event(leftShift, flags: [], type: .flagsChanged, time: 20.1))
+        shift(c, down: true, at: 20)
+        shift(c, down: false, at: 20.1)
         XCTAssertTrue(hint.shown.isEmpty, "Shift+click")
+    }
+
+    /// A release with no press seen (a secure field, an app switch) is nothing, and the next tap still switches.
+    func testAnUnpairedReleaseDoesNotInvertLaterTaps() {
+        let hint = FakeShiftHint()
+        let c = Controller(makeShell(hint: hint))
+        c.session.activate()
+        shift(c, down: false, at: 50)
+        XCTAssertTrue(hint.shown.isEmpty)
+        tap(c)
+        XCTAssertEqual(hint.shown.map(\.text), ["英"])
+    }
+
+    /// The hint is anchored at the composition cursor (the rectangle the candidate window asks for), not at the end of the text.
+    func testTheHintAnchorsAtTheCompositionCursor() {
+        let c = Controller(makeShell(hint: FakeShiftHint()))
+        c.session.activate()
+        c.type("su3cl3")
+        c.press(123)  // Left: the cursor is after the first character
+        tap(c)
+        XCTAssertEqual(c.client.lineCursor, 1)
+    }
+
+    /// The bundle ID is a synchronous IPC: activate reads it once for the profile and the Shift state.
+    func testActivateReadsTheBundleIDOnce() {
+        let c = Controller(makeShell(hint: FakeShiftHint()))
+        c.session.activate()
+        XCTAssertEqual(c.client.bundleReads, 1)
+    }
+
+    /// An owner change by a key (no `activate`) hands the new app's state to the core: B is Chinese although A was English, and back.
+    func testAKeyThatClaimsOwnershipSyncsTheState() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let a = Controller(shell, bundle: "com.example.A"), b = Controller(shell, bundle: "com.example.B")
+        a.session.activate()
+        tap(a)
+        XCTAssertTrue(b.press(Keys.code(for: "h")), "B's key claims the shell: B is Chinese")
+        b.session.commitComposition()
+        XCTAssertFalse(a.press(Keys.code(for: "h")), "A's key claims it back: A is English")
+    }
+
+    /// A rebuilt engine (layout, word pack) starts with set_ascii off in the core: `build()` sends the state again.
+    func testRebuildSendsTheStateToTheNewEngine() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let c = Controller(shell)
+        c.session.activate()
+        tap(c)
+        shell.setAcgPack(false)
+        XCTAssertEqual(shell.asciiBuilt, [false, true])
     }
 }

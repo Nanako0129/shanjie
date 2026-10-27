@@ -484,6 +484,12 @@ public final class Shell {
         [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
             .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
     }
+    /// The system uptime, the clock `NSEvent.timestamp` uses; a test replaces it.
+    var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// What `build()` sent to each engine it made as `set_ascii` (test hook, like `fuzzySent`).
+    private(set) var asciiBuilt: [Bool] = []
+    /// The composition cursor (UTF-16) of the last snapshot applied: where the Shift hint anchors while composing.
+    var composingCursor = 0
     /// shift-toggle section 2: the apps (bundle ID, `""` for a client with none) whose state is English. In memory only: a restart
     /// of the input method puts every app back to Chinese.
     var asciiApps: Set<String> = []
@@ -1004,7 +1010,7 @@ public final class Shell {
         if !on {
             asciiApps.removeAll()
             shiftTap = ShiftTap()
-            if let o = owner { o.syncAscii() } else if engineAscii {
+            if let o = owner { o.syncAscii(bundle: o.client.bundleIdentifier) } else if engineAscii {
                 engineAscii = false
                 dropOnFailure(engine?.setAscii(false))
             }
@@ -1085,6 +1091,7 @@ public final class Shell {
             Log.shell.error("shanjie_engine_set_english_overwrite failed, code \(c)")
         }
         // And the ASCII state of the app being served (shift-toggle section 2): a rebuilt engine starts with it off.
+        asciiBuilt.append(engineAscii)
         if case .failed(let c) = e.setAscii(engineAscii) {
             Log.shell.error("shanjie_engine_set_ascii failed, code \(c)")
         }
@@ -1225,8 +1232,9 @@ public final class Session {
         guard event == nil || event?.type == .keyDown else { return false }
         shell.shiftTap.keyDown()  // shift-toggle section 1: a key between Shift's press and release spoils the tap
         if claim() {
-            applyProfile(bundle: client.bundleIdentifier)
-            syncAscii()
+            let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
+            applyProfile(bundle: bundle)
+            syncAscii(bundle: bundle)
         }
         // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
         if shell.engineAscii && !shell.composing { return false }
@@ -1261,8 +1269,12 @@ public final class Session {
         guard shell.shiftToggleOn else { return false }
         let flags = event.modifierFlags
         let others = !flags.isDisjoint(with: [.control, .option, .command, .function])
-        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, others: others, capsLock: flags.contains(.capsLock),
-                                       now: event.timestamp, mouseAgo: shell.mouseAgo) {
+        // The state of this Shift key from the flags: the device bits (NX_DEVICELSHIFTKEYMASK 0x2, NX_DEVICERSHIFTKEYMASK 0x4), or the
+        // generic bit for an event that carries none.
+        let device = flags.rawValue & (event.keyCode == 56 ? 0x2 : 0x4)
+        let isDown = flags.rawValue & 0x6 == 0 ? flags.contains(.shift) : device != 0
+        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, isDown: isDown, others: others, capsLock: flags.contains(.capsLock),
+                                       now: event.timestamp, processedAt: shell.uptime(), mouseAgo: shell.mouseAgo) {
             toggleAscii()
         }
         return false
@@ -1271,8 +1283,9 @@ public final class Session {
     /// Section 2: this app goes to English or back to Chinese. A composition the core cannot keep as an English run (`shadowOn` false)
     /// is sent first. The hint shows which one (section 3).
     private func toggleAscii() {
-        if claim() { applyProfile(bundle: client.bundleIdentifier) }
-        let app = client.bundleIdentifier ?? ""  // a synchronous IPC: read once
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once
+        if claim() { applyProfile(bundle: bundle) }
+        let app = bundle ?? ""
         let on = !shell.asciiApps.contains(app)
         if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
@@ -1281,8 +1294,8 @@ public final class Session {
     }
 
     /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
-    func syncAscii() {
-        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(client.bundleIdentifier ?? ""))
+    func syncAscii(bundle: String?) {
+        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(bundle ?? ""))
     }
 
     private func pushAscii(_ on: Bool) {
@@ -1298,7 +1311,7 @@ public final class Session {
     /// rectangle, no hint (not the screen corner, not the last place).
     private func showShiftHint(_ text: String) {
         guard let panel = shell.shiftHint else { return }
-        let rect = shell.composing ? client.lineRect(cursor: Int.max) : client.caretRect()
+        let rect = shell.composing ? client.lineRect(cursor: shell.composingCursor) : client.caretRect()
         guard let rect else { return }
         panel.show(text, lineRect: rect, appearance: client.appearance, glassTint: shell.glassTint)
     }
@@ -1306,8 +1319,9 @@ public final class Session {
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
-        applyProfile(bundle: client.bundleIdentifier)
-        syncAscii()
+        let bundle = client.bundleIdentifier
+        applyProfile(bundle: bundle)
+        syncAscii(bundle: bundle)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
@@ -1554,6 +1568,7 @@ public final class Session {
     /// Section 7: commit first, then the preedit (single underline with a thick one over the open English run, caret at
     /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
+        shell.composingCursor = Int(o.cursorUTF16)
         if !o.commit.isEmpty {
             var text = o.commit
             if shell.spacingOn {
