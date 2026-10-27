@@ -18,6 +18,19 @@ def segments(text):
     return HAN.findall(text)
 
 
+# CE3 (docs/contracts/chat-eval-3.md section 4): a message goes to a set by the first byte of sha256(source + message id), so all clauses
+# of one message share a bucket and the bucket does not depend on where the message sits in an export.
+BUCKETS = ((96, "ctune"), (160, "cdev"), (256, "cjudge"))    # first byte < bound -> set
+CE3_SEED = 20261027
+WINDOW = ("2015-07", "2026-08")      # contract section 2: the months any source may be read from
+CJUDGE_LAST = "2026-07"              # the judge pool stops one month earlier (maintainer's judge-set rule)
+
+
+def bucket_set(source, mid):
+    first = hashlib.sha256(f"{source}:{mid}".encode("utf-8")).digest()[0]
+    return next(name for bound, name in BUCKETS if first < bound)
+
+
 def sha256_bytes(b):
     return hashlib.sha256(b).hexdigest()
 

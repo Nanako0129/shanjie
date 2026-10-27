@@ -2,9 +2,17 @@
 
 Private data: run by main on the maintainer's machine with --work in the private folder; the row files never enter the repo.
 
-  prepare --work DIR [--discord MESSAGES_DIR] [--meta EXPORT_DIR --self-name NAME] [--exclude ROWFILE ...]
-      reads the sources, writes DIR/clauses.tsv (month, source, context, sentence; every clause that survives the mechanical
-      exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
+  prepare --work DIR [--discord MESSAGES_DIR --guild ID] [--meta EXPORT_DIR --self-name NAME] [--exclude ROWFILE ...]
+      reads the sources, writes DIR/clauses.tsv (month, source, context, sentence, channel id, message id; every clause that
+      survives the mechanical exclusions, in time order) and DIR/counts.json, prints the per-month counts table (numbers only).
+      CE3 (docs/contracts/chat-eval-3.md): --guild is required with --discord and skips every channel of another server (or of none)
+      without opening its messages file; a message outside 2015-07..2026-08 is dropped as soon as its timestamp is parsed, before any
+      text is looked at, and only the per-month count (`_dropped_out_of_window`) is kept. Message ids do not depend on the position
+      in the export (Discord: the snowflake; Meta: source, second, SHA-256 of the text). The two id columns stay in the private folder.
+  freeze --work DIR --set ctune|cdev|cjudge [--k K]    (or --period ctune|cdev|cjudge-K)
+      CE3 S1 side: the message's bucket is the first byte of sha256(source:id) (e2common.bucket_set: <96 ctune, <160 cdev, else the
+      cjudge pool); writes DIR/<set>.rows.txt (`context|sentence|reading`), .sources.txt (one source per row), .manifest.json, .sha256.
+      The PTT side is build_ptt_chat.py; main concatenates the two files of a set.
   split --work DIR
       fixes the judge months from the mechanical counts (DIR/split.json; written once, a later run must give the same file).
   freeze --work DIR --period tune|judge|chatjudge|chatjudge2 [--corrections FILE] [--draft]
@@ -44,6 +52,7 @@ Corrections file (optional, UTF-8, tab separated, applied before spelling; the p
 import argparse
 import csv
 import datetime as dt
+import hashlib
 import json
 import os
 import random
@@ -81,24 +90,36 @@ def parse_ts(s):
 KEEP_CHANNELS = ("GUILD_TEXT", "GUILD_ANNOUNCEMENT", "PUBLIC_THREAD", "ANNOUNCEMENT_THREAD", "GUILD_VOICE")
 
 
-def discord_messages(root, skipped=None):
+def discord_messages(root, skipped=None, guild=None):
     """[(channel, id, ts, text)] of the messages folder; channels in folder-name order. ts is None when it cannot be read.
     Privacy (maintainer, 2026-10-12): each folder's channel.json is read first and only the KEEP_CHANNELS types are used; a DM, group DM,
     private thread, a missing channel.json or an unknown type is skipped WITHOUT opening its messages file. `skipped` (a dict) gets
-    the number of skipped channels per type ('MISSING' for no channel.json)."""
-    out = []
+    the number of skipped channels per type ('MISSING' for no channel.json).
+    CE3 (docs/contracts/chat-eval-3.md section 2.1): with `guild` (an id string) a channel whose channel.json has another guild.id, or
+    none, is skipped as well, after the type filter and before its messages file is opened ('GUILD_OTHER', 'GUILD_NONE' in `skipped`);
+    no channel left that belongs to the guild stops the run."""
+    out, in_guild = [], 0
     for ch in sorted(os.listdir(root)):
         d = os.path.join(root, ch)
         if not os.path.isdir(d):
             continue
         try:
-            kind = str(json.load(open(os.path.join(d, "channel.json"), encoding="utf-8")).get("type"))
+            info = json.load(open(os.path.join(d, "channel.json"), encoding="utf-8"))
+            kind = str(info.get("type"))
+            g = info.get("guild")
+            gid = str(g["id"]) if isinstance(g, dict) and g.get("id") is not None else None
         except (OSError, ValueError, AttributeError):
-            kind = "MISSING"
+            kind, gid = "MISSING", None
         if kind not in KEEP_CHANNELS:
             if skipped is not None:
                 skipped[kind] = skipped.get(kind, 0) + 1
             continue
+        if guild is not None and gid != str(guild):
+            why = "GUILD_NONE" if gid is None else "GUILD_OTHER"
+            if skipped is not None:
+                skipped[why] = skipped.get(why, 0) + 1
+            continue
+        in_guild += 1
         j, cs = os.path.join(d, "messages.json"), os.path.join(d, "messages.csv")
         if os.path.isfile(j):
             recs = json.load(open(j, encoding="utf-8"))
@@ -113,6 +134,8 @@ def discord_messages(root, skipped=None):
             except ValueError:
                 ts = None
             out.append((ch, str(r.get("ID", "")), ts, r.get("Contents") or ""))
+    if guild is not None and not in_guild:
+        sys.exit("build_chatclause: STOP, no channel belongs to the given guild id (contract chat-eval-3 section 2.1)")
     return out
 
 
@@ -172,7 +195,10 @@ def meta_messages(root, self_name):
         if not (text or "").strip():
             dropped["_dropped_no_text"] = dropped.get("_dropped_no_text", 0) + 1
         else:
-            msgs.append((f"{rel}#{k}", f"{rel}#{k}", epoch(ts), text))
+            # id (CE3 section 4): source, second and a hash of the text; it does not move when the export gains posts before or after
+            t = epoch(ts)
+            mid = f"{src}:{int(t.timestamp()) if t else 0}:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}"
+            msgs.append((f"{rel}#{k}", mid, t, text))
 
     d = _load(root, THREADS_FILE)
     for k, post in enumerate((d or {}).get("text_post_app_text_posts", [])):
@@ -237,12 +263,12 @@ def private_rule(text):
 
 # ------------------------------------------------------------------ clauses
 def clauses(messages, cross_message):
-    """[(ts, channel, seq, context, sentence, flags)] for every segment of every message. messages: [(channel, id, ts, text)] with
+    """[(ts, channel, seq, context, sentence, flags, id)] for every segment of every message. messages: [(channel, id, ts, text)] with
     ts not None. Context (contract 2.1): the previous segment of the same message; for the first segment, when cross_message, the
     last segment of the same channel's previous message if it is at most GAP earlier; else ''. flags: 'url' / 'code' when the
     message has one (the caller drops those messages)."""
     out, prev = [], {}
-    for k, (ch, _id, ts, text) in enumerate(sorted(messages, key=lambda m: (m[0], m[2], m[1]))):
+    for k, (ch, mid, ts, text) in enumerate(sorted(messages, key=lambda m: (m[0], m[2], m[1]))):
         segs = c.segments(text)
         before = prev.get(ch)
         for i, s in enumerate(segs):
@@ -252,9 +278,9 @@ def clauses(messages, cross_message):
                 ctx = before[1]
             else:
                 ctx = ""
-            out.append((ts, ch, k, ctx, s, ("url" if URL.search(text) else "") + ("code" if FENCE in text else "")))
+            out.append((ts, ch, k, ctx, s, ("url" if URL.search(text) else "") + ("code" if FENCE in text else ""), mid))
         if not segs:
-            out.append((ts, ch, k, "", None, ("url" if URL.search(text) else "") + ("code" if FENCE in text else "")))
+            out.append((ts, ch, k, "", None, ("url" if URL.search(text) else "") + ("code" if FENCE in text else ""), mid))
         prev[ch] = (ts, segs[-1] if segs else "")
     return out
 
@@ -274,8 +300,11 @@ def load_exclude(paths):
     return s
 
 
-def prepare(discord_root, meta_root, self_name, exclude_files, work):
-    """Writes clauses.tsv and counts.json; returns the counts {source: {month: {step: n}, '_dropped_...': n}}."""
+def prepare(discord_root, meta_root, self_name, exclude_files, work, guild=None, window=None):
+    """Writes clauses.tsv (month, source, context, sentence, channel id, message id) and counts.json; returns the counts
+    {source: {month: {step: n}, '_dropped_...': n}}. guild: only the Discord channels of that guild (discord_messages). window
+    (first month, last month): a message outside it, or with no readable timestamp, is dropped right after its timestamp is
+    parsed, before any function looks at its text; only the count per month is kept (`_dropped_out_of_window`)."""
     exclude = load_exclude(exclude_files)
     counts = {}
 
@@ -285,7 +314,7 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
     sources = []                                # (name, messages, cross-message context)
     if discord_root:
         skipped = {}
-        sources.append(("discord", discord_messages(discord_root, skipped), True))
+        sources.append(("discord", discord_messages(discord_root, skipped, guild), True))
         counts["discord"] = {"_skipped_channels_by_type": skipped}
     if meta_root:
         for src, (msgs, dropped) in meta_messages(meta_root, self_name).items():
@@ -300,6 +329,13 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
         dated = [m for m in msgs if m[2] is not None]
         if len(dated) < len(msgs):
             counts.setdefault(src, {})["_dropped_no_timestamp"] = len(msgs) - len(dated)
+        if window:
+            outside = {}
+            for m in dated:
+                if not window[0] <= month(m[2]) <= window[1]:
+                    outside[month(m[2])] = outside.get(month(m[2]), 0) + 1
+            counts.setdefault(src, {})["_dropped_out_of_window"] = dict(sorted(outside.items()))
+            dated = [m for m in dated if window[0] <= month(m[2]) <= window[1]]
         hits, clean = {}, []
         for ch, mid, ts, text in dated:
             if URL.search(text):
@@ -316,10 +352,10 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
         dated = clean
         counts.setdefault(src, {})["_dropped_private_by_rule"] = hits
         by_msg = {}
-        for ts, ch, k, ctx, s, flags in clauses(dated, cross):
-            by_msg.setdefault((ch, k), []).append((ts, ctx, s, flags))
+        for ts, ch, k, ctx, s, flags, mid in clauses(dated, cross):
+            by_msg.setdefault((ch, k), []).append((ts, ctx, s, flags, ch, mid))
         for cl in by_msg.values():
-            ts, _ctx, first, flags = cl[0]
+            ts, _ctx, first, flags, _ch, _mid = cl[0]
             mon = month(ts)
             bump(src, mon, "messages")
             if "url" in flags:
@@ -329,19 +365,19 @@ def prepare(discord_root, meta_root, self_name, exclude_files, work):
             elif first is None:
                 bump(src, mon, "no_segment")
             else:
-                for ts, ctx, s, _f in cl:
+                for ts, ctx, s, _f, ch, mid in cl:
                     bump(src, mon, "segments")
-                    rows.append((ts, rank, mon, src, ctx, s))
+                    rows.append((ts, rank, mon, src, ctx, s, ch if src == "discord" else mid, mid))
     rows.sort(key=lambda r: (r[0], r[1]))
     seen, kept = set(), []
-    for _ts, _rank, mon, src, ctx, s in rows:
+    for _ts, _rank, mon, src, ctx, s, ch, mid in rows:
         if s in exclude:
             bump(src, mon, "overlap")
         elif (mon, s) in seen:
             bump(src, mon, "duplicate")
         else:
             seen.add((mon, s))
-            kept.append((mon, src, ctx, s))
+            kept.append((mon, src, ctx, s, ch, mid))
             bump(src, mon, "mechanical")
     os.makedirs(work, exist_ok=True)
     c.write_lf(os.path.join(work, "clauses.tsv"), "".join("\t".join(r) + "\n" for r in kept))
@@ -388,8 +424,12 @@ def choose_judge_months(by_month, pool_months=(), start=JUDGE_START):
 
 
 # ------------------------------------------------------------------ periods
-def read_clauses(work):
-    return [tuple(l.rstrip("\n").split("\t")) for l in open(os.path.join(work, "clauses.tsv"), encoding="utf-8")]
+def read_clauses(work, full=False):
+    """(month, source, context, sentence) per clause; full adds the channel id and message id columns (private intermediate file)."""
+    rows = [tuple(l.rstrip("\n").split("\t")) for l in open(os.path.join(work, "clauses.tsv"), encoding="utf-8")]
+    if full and any(len(r) != 6 for r in rows):
+        sys.exit("build_chatclause: STOP, clauses.tsv has no channel id and message id columns; run prepare again")
+    return rows if full else [r[:4] for r in rows]
 
 
 def frozen_sentences(work, period):
@@ -432,6 +472,57 @@ def period_rows(work, period):
             rest = [r for r in rest if r[1] not in seen]
             rows = random.Random(CHATJUDGE2_SEED).sample(rest, min(CHATJUDGE2_MAX, len(rest)))
     return rows, pool
+
+
+CE3_CAPS = {"ctune": 6000, "cdev": 5000}    # contract chat-eval-3 section 4: S1 rows per set
+CJUDGE_HALF = 3000                            # a cjudge-k holds at most 6,000 rows, S1 and the PTT side each half
+CE3_PERIOD = re.compile(r"(ctune|cdev|cjudge-([1-9]\d*))\Z")
+
+
+def ce3_name(period):
+    """('ctune' | 'cdev' | 'cjudge', k) for a CE3 set name, else None."""
+    m = CE3_PERIOD.match(period)
+    return (m.group(1).split("-")[0], int(m.group(2) or 0)) if m else None
+
+
+def ce3_rows(work, name, k=1):
+    """CE3 section 4, S1 side: the clauses whose message falls in the set's bucket (c.bucket_set), from the frozen clauses.tsv.
+    A sentence that the buckets hold in more than one set is left out of all of them (no overlap between sets, whatever the freeze
+    order). ctune / cdev: min(cap, pool) rows, seed c.CE3_SEED. cjudge-k: months from CJUDGE_LAST backwards, whole months until
+    CJUDGE_HALF rows (the last one sampled), minus the sentences of the frozen cjudge-1..k-1; the messages of the cjudge bucket
+    after CJUDGE_LAST are only counted. -> ([(context, sentence)], {sentence: source}, pool size, stats)."""
+    full, where, late = read_clauses(work, full=True), {}, set()
+    for mon, src, _x, sent, _ch, mid in full:
+        where.setdefault(sent, set()).add(c.bucket_set(src, mid))
+    prior = set()
+    for j in range(1, k):
+        if not os.path.isfile(os.path.join(work, f"cjudge-{j}.rows.txt")):
+            sys.exit(f"build_chatclause: STOP, freeze cjudge-{j} before cjudge-{k}")
+        prior |= frozen_sentences(work, f"cjudge-{j}")
+    pool = []
+    for mon, src, x, sent, _ch, mid in full:
+        if c.bucket_set(src, mid) != name or where[sent] != {name} or sent in prior:
+            continue
+        if name == "cjudge" and mon > c.CJUDGE_LAST:
+            late.add((src, mid))
+        else:
+            pool.append((mon, src, x, sent))
+    rng = random.Random(c.CE3_SEED)
+    if name == "cjudge":
+        take = []
+        for mon in sorted({r[0] for r in pool}, reverse=True):
+            rows = [r for r in pool if r[0] == mon]
+            need = CJUDGE_HALF - len(take)
+            if need <= 0:
+                break
+            take += rows if len(rows) <= need else rng.sample(rows, need)
+    else:
+        take = rng.sample(pool, min(CE3_CAPS[name], len(pool)))
+    src_of = {}
+    for _mon, src, _x, sent in take:
+        src_of.setdefault(sent, src)
+    return ([(x, sent) for _m, _s, x, sent in take], src_of, len(pool),
+            {"months": sorted({r[0] for r in take}), "not_used_cjudge_bucket_after_2026_07_messages": len(late)})
 
 
 def load_corrections(path):
@@ -478,7 +569,11 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
                      f"build_chatclause: STOP, freeze the {p} period before {period}")
         if period.startswith("chatjudge") and not os.path.isfile(os.path.join(work, f"{p}.rows.txt")):
             sys.exit(f"build_chatclause: STOP, {p}.rows.txt is missing; {period} is checked against it")
-    rows, pool_rows = period_rows(work, period)
+    ce3 = ce3_name(period)
+    if ce3:
+        rows, src_of, pool_rows, extra = ce3_rows(work, *ce3)
+    else:
+        rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
     check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
     if draft:
@@ -504,9 +599,14 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
         sys.exit(f"build_chatclause: STOP, the {period} period is frozen with another content; it is never rewritten")
     c.write_lf(os.path.join(work, f"{period}.rows.txt"), text)
     c.write_lf(sf, f"{sha}  {period}.rows.txt\n")
-    split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
-    st.update(period=period, clauses_before_sampling_or_corrections=pool_rows, sha256=sha,
-              months=split["judge_months"] if period == "judge" else split["pool_months"])
+    if ce3:     # the source of each frozen row, line for line (private; the rows file stays `context|sentence|reading` for lm_eval)
+        c.write_lf(os.path.join(work, f"{period}.sources.txt"), "".join(src_of[s] + "\n" for _x, s, _r in frozen))
+        st["rows_by_source"] = {k: sum(src_of[s] == k for _x, s, _r in frozen) for k in sorted(set(src_of.values()))}
+        st.update(extra)
+    else:
+        split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
+        extra = {"months": split["judge_months"] if period == "judge" else split["pool_months"]}
+    st.update(period=period, clauses_before_sampling_or_corrections=pool_rows, sha256=sha, months=extra["months"])
     c.write_lf(os.path.join(work, f"{period}.manifest.json"), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
     return st
 
@@ -538,9 +638,14 @@ def main(argv=None):
         p = sub.add_parser(name)
         p.add_argument("--work", required=True)
         if name == "prepare":
-            p.add_argument("--discord"); p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
-        if name in ("freeze", "emit"):
-            p.add_argument("--period", choices=["tune", "judge", "chatjudge", "chatjudge2"], required=True)
+            p.add_argument("--discord"); p.add_argument("--guild", help="Discord server id; required with --discord (CE3 section 2.1)")
+            p.add_argument("--meta"); p.add_argument("--self-name"); p.add_argument("--exclude", nargs="*", default=[])
+        if name == "emit":
+            p.add_argument("--period", required=True)
+        if name == "freeze":
+            p.add_argument("--period", help="tune|judge|chatjudge|chatjudge2, or a CE3 set name (ctune, cdev, cjudge-K)")
+            p.add_argument("--set", choices=["ctune", "cdev", "cjudge"], help="CE3 set; cjudge also needs --k")
+            p.add_argument("--k", type=int, default=1)
         if name == "split":
             # Maintainer 2026-10-13: 2026-09 is skipped (never read or used); the judge period starts at 2026-08. Months from the start
             # up to SHANJIE_FROM are in neither the judge period nor the pool.
@@ -555,7 +660,9 @@ def main(argv=None):
             ap.error("give --discord and/or --meta")
         if a.meta and not a.self_name:
             ap.error("--meta needs --self-name (the author name on your own Facebook comments)")
-        counts = prepare(a.discord, a.meta, a.self_name, a.exclude, a.work)
+        if a.discord and not a.guild:
+            ap.error("--discord needs --guild ID (only one server's channels are read)")
+        counts = prepare(a.discord, a.meta, a.self_name, a.exclude, a.work, a.guild, c.WINDOW)
         show_counts(counts)
     elif a.cmd == "split":
         by = mechanical_by_month(json.load(open(os.path.join(a.work, "counts.json"), encoding="utf-8")))
@@ -572,6 +679,9 @@ def main(argv=None):
         print(f"judge months {judge} ({sum(by.get(m, 0) for m in judge)} mechanical rows); pool {len(pool)} months, "
               f"{sum(by[m] for m in pool)} rows")
     elif a.cmd == "freeze":
+        a.period = a.period or (a.set if a.set in ("ctune", "cdev") else f"cjudge-{a.k}" if a.set else None)
+        if a.period not in ("tune", "judge", "chatjudge", "chatjudge2") and not ce3_name(a.period or ""):
+            ap.error("give --period (tune, judge, chatjudge, chatjudge2, ctune, cdev, cjudge-K) or --set")
         print(json.dumps(freeze(a.work, a.period, a.corrections, a.draft), ensure_ascii=False))
     else:
         emit(a.work, a.period, a.out)

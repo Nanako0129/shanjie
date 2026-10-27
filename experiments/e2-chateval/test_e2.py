@@ -16,6 +16,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import build_chatclause as bc  # noqa: E402
+import build_ptt_chat as bp  # noqa: E402
 import build_lytune as bl  # noqa: E402
 import build_wikitypo as bw  # noqa: E402
 import e2common as c  # noqa: E402
@@ -30,7 +31,7 @@ def ts(day, hm, month="2026-03"):
     return f"{month}-{day:02d} {hm}:00.000000+00:00"
 
 
-def package(td, channels, types=None):
+def package(td, channels, types=None, guilds=None):
     """channels: {folder: [(id, timestamp, contents)]} -> a Discord messages folder (JSON for c-folders, CSV for the others)."""
     root = os.path.join(td, "Messages")
     os.makedirs(root)
@@ -39,7 +40,10 @@ def package(td, channels, types=None):
         d = os.path.join(root, ch)
         os.makedirs(d)
         if (types or {}).get(ch, "GUILD_TEXT") is not None:
-            json.dump({"id": ch, "type": (types or {}).get(ch, "GUILD_TEXT")}, open(os.path.join(d, "channel.json"), "w"))
+            info = {"id": ch, "type": (types or {}).get(ch, "GUILD_TEXT")}
+            if (guilds or {}).get(ch):
+                info["guild"] = {"id": guilds[ch], "name": "synthetic"}
+            json.dump(info, open(os.path.join(d, "channel.json"), "w"))
         if ch.startswith("c"):
             json.dump([{"ID": i, "Timestamp": t, "Contents": x, "Attachments": ""} for i, t, x in msgs], open(os.path.join(d, "messages.json"), "w", encoding="utf-8"))
         else:
@@ -597,6 +601,206 @@ class Freeze(unittest.TestCase):
         frozen, draft, st = bc.build_period(rows, corr, readings)
         self.assertEqual(frozen, [("", "甲乙丁", "ㄅ"), ("", "庚辛壬", "ㄅ ㄆ ㄇ")])            # the confirmed reading keeps a CHECK row
         self.assertEqual((st["corrected"], st["dropped_by_correction"], st["dropped_check"], st["dropped_unreadable"], st["rows"]), (1, 1, 0, 1, 2))
+
+
+def many(n, month="2026-05", prefix="", segs=3, salt="字"):
+    """n distinct messages [(id, timestamp, text)]: `segs` segments each, every segment distinct across messages."""
+    chars = "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉"
+    word = lambda i, j: chars[i % 20] + chars[(i // 20) % 20] + chars[(i // 400) % 20] + chars[j] + salt
+    return [(f"{prefix}{i}", f"{month}-{1 + i % 27:02d} {10 + i % 10}:00:00.000000+00:00", "，".join(word(i, j) for j in range(segs))) for i in range(n)]
+
+
+class CE3Discord(unittest.TestCase):
+    """docs/contracts/chat-eval-3.md sections 2.1, 4, 5: the server filter, the time window, buckets, sets."""
+
+    def test_only_the_given_server_is_read_and_the_other_channels_are_never_opened(self):
+        td = tempfile.mkdtemp()
+        types = {"c1": "GUILD_TEXT", "c2": "GUILD_TEXT", "c3": "GUILD_TEXT", "c4": "DM", "c5": "GUILD_TEXT"}
+        guilds = {"c1": "111", "c2": "222", "c3": None, "c4": "111", "c5": "111"}     # c3: no guild; c4: a DM of that guild id
+        root = package(td, {ch: [("1", ts(5, "12:00"), f"頻道{'一二三四五'[int(ch[1]) - 1]}乙乙的話語")] for ch in types}, types, guilds)
+        real_open, opened = open, []
+
+        def spy(f, *a, **k):
+            if isinstance(f, (str, os.PathLike)) and os.fspath(f).startswith(root):
+                opened.append(os.path.relpath(os.fspath(f), root))
+            return real_open(f, *a, **k)
+        with mock.patch("builtins.open", spy):
+            counts = bc.prepare(root, None, None, [], os.path.join(td, "w"), guild="111")
+        for ch in ("c2", "c3", "c4"):
+            self.assertNotIn(os.path.join(ch, "messages.json"), opened, ch)
+        self.assertIn(os.path.join("c1", "messages.json"), opened)
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(os.path.join(td, "w"))), sorted(f"頻道{n}乙乙的話語" for n in "一五"))
+        self.assertEqual(counts["discord"]["_skipped_channels_by_type"], {"GUILD_OTHER": 1, "GUILD_NONE": 1, "DM": 1})
+
+    def test_no_channel_of_the_guild_stops(self):
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": [("1", ts(5, "12:00"), "甲乙丙丁")]}, guilds={"c1": "222"})
+        with self.assertRaises(SystemExit):
+            bc.prepare(root, None, None, [], os.path.join(td, "w"), guild="111")
+
+    def test_the_cli_needs_a_guild_with_discord(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            bc.main(["prepare", "--work", tempfile.mkdtemp(), "--discord", tempfile.mkdtemp()])
+
+    def test_a_message_outside_the_window_is_dropped_before_any_text_function_sees_it(self):
+        S_SEP, S_OLD, S_OK = "哨兵九月專用", "哨兵舊時專用", "哨兵窗內專用"
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": [("1", ts(5, "12:00", "2026-09"), S_SEP), ("2", ts(5, "12:00", "2015-06"), S_OLD),
+                                   ("3", ts(5, "12:00", "2026-10"), S_SEP + "十月"), ("4", "壞的時間", S_SEP + "無時間"),
+                                   ("5", ts(5, "12:00", "2026-08"), S_OK)]})
+        seen = []
+
+        class Spy:     # records the text it is asked about, then behaves as the wrapped regex
+            def __init__(self, inner):
+                self.inner = inner
+
+            def search(self, t):
+                seen.append(t)
+                return self.inner.search(t)
+
+            def sub(self, r, t):
+                seen.append(t)
+                return self.inner.sub(r, t)
+
+        def record(f):
+            def w(t, *a, **k):
+                seen.append(t)
+                return f(t, *a, **k)
+            return w
+        meta = os.path.join(td, "meta")
+        os.makedirs(os.path.join(meta, "threads"))
+        json.dump({"text_post_app_text_posts": [{"title": S_SEP + "串", "creation_timestamp": dt.datetime(2026, 9, 3, 4, tzinfo=dt.timezone.utc).timestamp()},
+                                                {"title": S_OK + "串", "creation_timestamp": dt.datetime(2026, 8, 3, 4, tzinfo=dt.timezone.utc).timestamp()}]},
+                  open(os.path.join(meta, "threads", "threads_and_replies.json"), "w"))
+        work = os.path.join(td, "w")
+        with mock.patch.object(bc, "URL", Spy(bc.URL)), mock.patch.object(bc, "DISCORD_MARKUP", Spy(bc.DISCORD_MARKUP)), \
+                mock.patch.object(bc, "private_rule", record(bc.private_rule)), mock.patch.object(c, "segments", record(c.segments)):
+            counts = bc.prepare(root, meta, "me", [], work, guild=None, window=c.WINDOW)
+        self.assertTrue(any(S_OK in t for t in seen), "the spies are wired: an in-window message is seen")
+        self.assertFalse([t for t in seen if "哨兵九月" in t or "哨兵舊時" in t or "哨兵九月專用十月" in t or "無時間" in t], "no text function saw it")
+        for dirpath, _d, files in os.walk(work):
+            for f in files:
+                data = open(os.path.join(dirpath, f), encoding="utf-8").read()
+                self.assertNotIn("哨兵九月", data)
+                self.assertNotIn("哨兵舊時", data)
+                self.assertNotIn("無時間", data)
+        self.assertEqual(counts["discord"]["_dropped_out_of_window"], {"2015-06": 1, "2026-09": 1, "2026-10": 1})
+        self.assertEqual(counts["discord"]["_dropped_no_timestamp"], 1)
+        self.assertEqual(counts["threads"]["_dropped_out_of_window"], {"2026-09": 1})
+        self.assertEqual(sorted(s for _m, _s, _x, s in clauses_of(work)), sorted([S_OK, S_OK + "串"]))
+
+    def prepared(self, msgs, extra=()):
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": list(extra) + msgs})
+        work = os.path.join(td, "w")
+        bc.prepare(root, None, None, [], work, guild=None, window=c.WINDOW)
+        return work
+
+    def test_buckets_keep_the_clauses_of_a_message_together_and_use_all_three_sets(self):
+        work = self.prepared(many(90, "2026-05"))
+        full = bc.read_clauses(work, full=True)
+        self.assertEqual(len(full), 270)
+        sets = {}
+        for _m, src, _x, sent, _ch, mid in full:
+            sets.setdefault(mid, set()).add(c.bucket_set(src, mid))
+        self.assertTrue(all(len(v) == 1 for v in sets.values()))
+        self.assertEqual({next(iter(v)) for v in sets.values()}, {"ctune", "cdev", "cjudge"})
+        for name in ("ctune", "cdev"):
+            rows, _src, _pool, _x = bc.ce3_rows(work, name)
+            mids = {mid for _m, src, _c, sent, _ch, mid in full if c.bucket_set(src, mid) == name}
+            self.assertEqual(len(rows), 3 * len(mids))       # every clause of every message of the bucket, none of any other
+
+    def test_buckets_do_not_move_when_the_export_gains_an_earlier_and_a_later_message(self):
+        base = many(40, "2026-05")
+        early = [("0", ts(1, "01:00", "2019-01"), "最早的新增訊息")]
+        late = [("999999", ts(1, "01:00", "2026-08"), "最晚的新增訊息")]
+        a = bc.read_clauses(self.prepared(base), full=True)
+        b = bc.read_clauses(self.prepared(base, early + late), full=True)
+        bucket = lambda rows: {(mid, sent): c.bucket_set(src, mid) for _m, src, _x, sent, _ch, mid in rows}
+        ba, bb = bucket(a), bucket(b)
+        self.assertEqual({k: v for k, v in bb.items() if k in ba}, ba)
+        self.assertEqual(len(bb) - len(ba), 2)
+        # Meta ids hold no position either: a post added in front keeps the ids of the others
+        td = tempfile.mkdtemp()
+        os.makedirs(os.path.join(td, "threads"))
+        post = lambda t, n: {"title": n, "creation_timestamp": t}
+        write = lambda posts: json.dump({"text_post_app_text_posts": posts}, open(os.path.join(td, "threads", "threads_and_replies.json"), "w"))
+        write([post(1700000100, "甲乙丙丁"), post(1700000200, "戊己庚辛")])
+        ids1 = [m[1] for m in bc.meta_messages(td, "me")["threads"][0]]
+        write([post(1600000000, "新的最前面")] + [post(1700000100, "甲乙丙丁"), post(1700000200, "戊己庚辛")] + [post(1800000000, "新的最後面")])
+        ids2 = [m[1] for m in bc.meta_messages(td, "me")["threads"][0]]
+        self.assertEqual(ids2[1:3], ids1)
+
+    def test_freeze_the_three_sets_disjoint_cjudge_without_2026_08(self):
+        td = tempfile.mkdtemp()
+        msgs = many(150, "2026-05") + many(150, "2026-07", "j", salt="丑") + many(150, "2026-08", "k", salt="寅")    # the salt keeps the sentences distinct
+        root = package(td, {"c1": msgs})
+        work = os.path.join(td, "w")
+        bc.prepare(root, None, None, [], work, guild=None, window=c.WINDOW)
+        out = {}
+        for argv in (["--set", "ctune"], ["--set", "cdev"], ["--set", "cjudge", "--k", "1"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                st = bc.freeze(work, "ctune" if argv[1] == "ctune" else "cdev" if argv[1] == "cdev" else "cjudge-1", readings=fake_readings)
+            name = st["period"]
+            out[name] = [l.split("|")[1] for l in open(os.path.join(work, f"{name}.rows.txt"), encoding="utf-8").read().splitlines()]
+            self.assertEqual(len(open(os.path.join(work, f"{name}.sources.txt")).read().splitlines()), len(out[name]))
+            self.assertEqual(st["rows_by_source"], {"discord": len(out[name])})
+        self.assertTrue(all(out.values()))
+        names = sorted(out)
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                self.assertFalse(set(out[a]) & set(out[b]), (a, b))
+        month_of = {s: m for m, _src, _x, s in bc.read_clauses(work)}
+        self.assertTrue(all(month_of[s] <= "2026-07" for s in out["cjudge-1"]))
+        self.assertGreater(st["not_used_cjudge_bucket_after_2026_07_messages"], 0)
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            bc.freeze(work, "cjudge-3", readings=fake_readings)       # cjudge-2 is not frozen yet
+
+
+class CE3Ptt(unittest.TestCase):
+    def page(self, month_line, pushes):
+        meta = f'<div class="article-metaline"><span class="article-meta-tag">時間</span><span class="article-meta-value">{month_line}</span></div>'
+        body = "".join(f'<div class="push"><span class="hl push-tag">推 </span><span class="f3 hl push-userid">{u}</span>'
+                       f'<span class="f3 push-content">: {t}</span><span class="push-ipdatetime"> 10/24 12:{i % 60:02d}\n</span></div>' for i, (u, t) in enumerate(pushes))
+        return f'<div id="main-content" class="bbs-screen bbs-content">{meta}\n正文\n--\n{body}</div>'
+
+    def test_account_cap_is_per_account_seeded_and_keeps_order(self):
+        rows = [("a", "2026-01", "", f"句{i}") for i in range(30)] + [("b", "2026-01", "", f"乙{i}") for i in range(5)]
+        got = bp.cap_accounts(rows, random.Random(1))
+        self.assertEqual((sum(r[0] == "a" for r in got), sum(r[0] == "b" for r in got)), (20, 5))
+        self.assertEqual(got, bp.cap_accounts(rows, random.Random(1)))
+        self.assertEqual(got, [r for r in rows if r in got])
+
+    def test_build_window_cap_buckets_and_one_set_per_sentence(self):
+        td = tempfile.mkdtemp()
+        os.makedirs(os.path.join(td, "src", "Gossiping"))
+        chars = "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉"
+        word = lambda i: chars[i % 20] + chars[(i // 20) % 20] + chars[(i // 400) % 20] + "話"
+        n = 0
+        for a in range(60):                     # 60 articles, one account pushes 3 distinct remarks (separate: other account between)
+            pushes = []
+            for j in range(3):
+                pushes += [("spam", f"{word(n)}，{word(n + 1)}"), ("other%d" % a, "同意同意")]
+                n += 2
+            open(os.path.join(td, "src", "Gossiping", f"M.{a}.html"), "w", encoding="utf-8").write(
+                self.page("Mon May 11 12:00:00 2026" if a % 3 else "Sat Aug 08 12:00:00 2026", pushes))
+        open(os.path.join(td, "src", "Gossiping", "M.sep.html"), "w", encoding="utf-8").write(self.page("Tue Sep 01 12:00:00 2026", [("x", "哨兵九月專用推文")]))
+        open(os.path.join(td, "src", "Gossiping", "M.old.html"), "w", encoding="utf-8").write(self.page("Tue Jun 02 12:00:00 2015", [("x", "哨兵舊時專用推文")]))
+        out = os.path.join(td, "out")
+        rep = bp.build(os.path.join(td, "src"), out, ["ctune", "cdev", "cjudge-1"], readings=fake_readings)
+        self.assertEqual(rep["counts"]["articles_out_of_window"], 2)
+        sets = {}
+        for name in ("ctune", "cdev", "cjudge-1"):
+            rows = [l.split("|") for l in open(os.path.join(out, f"{name}.rows.txt"), encoding="utf-8").read().splitlines()]
+            sets[name] = [r[1] for r in rows]
+            self.assertEqual(len(open(os.path.join(out, f"{name}.sources.txt")).read().splitlines()), len(rows))
+            self.assertLessEqual(len([r for r in rows if "同意" not in r[1]]), 20, name)      # the one busy account: the cap
+            self.assertFalse([r for r in rows if "哨兵" in r[1]])
+        # the "other" accounts say the same thing everywhere: one row survives the duplicate rule in all
+        self.assertEqual(sum(s.count("同意同意") for s in sets.values()), 1)
+        names = sorted(sets)
+        self.assertFalse(set(sets[names[0]]) & set(sets[names[1]]) | set(sets[names[1]]) & set(sets[names[2]]) | set(sets[names[0]]) & set(sets[names[2]]))
+        self.assertGreater(rep["counts"]["cjudge_bucket_after_2026_07"] + sum(len(v) for v in sets.values()), 0)
 
 
 class PublicBuilders(unittest.TestCase):
