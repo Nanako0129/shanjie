@@ -135,6 +135,10 @@ def load_standard(a, sjtl8):
     tag, n_sum, top1 = read_summary(a.summary)
     check_tag(tag, "standard", sjtl8)
     cands, _, recs = T.read_cli_files(a.dump, a.dump_words, a.tinylm_scores, len(rows_in))
+    try:
+        T.refuse_pool(recs, "expect_core")   # the terms are for the dump's first 8; a pool record (idx) reaches past them
+    except RuntimeError as e:
+        stop(str(e))
     for what, n in (("rows", len(rows_in)), ("rowstats", len(base)), ("summary", n_sum), ("scores", sum(r is not None for r in recs)),
                     ("dump", sum(bool(c) for c in cands))):
         check_count(f"{a.name} {what}", n, n_want)
@@ -162,6 +166,10 @@ def load_level(a, level, n_want, sjtl8):
     check_tag(tag, level, sjtl8)
     base = evalstats.read_rowstats(rs)
     recs = [json.loads(l) for l in T.lines_of(T.read_text(sc))]
+    try:
+        T.refuse_pool(recs, "expect_core")
+    except RuntimeError as e:
+        stop(str(e))
     for what, n in (("rowstats", len(base)), ("scores", len(recs)), ("summary", n_sum)):
         check_count(f"{level} {what}", n, n_want)
     if sum(b[0] for b in base) != top1:
