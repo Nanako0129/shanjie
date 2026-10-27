@@ -5,6 +5,10 @@
 //! makes the App's engine (acg pack, bigram, small model and colloquial table when the files exist, demotion and rerank on, no learning).
 //! Both arms are the same engine built without the data directory's table; an untimed warm-up pass, then one timed pass without the table, then the table is loaded (`Engine::load_english_next`, an invalid table is an error) and one timed pass with it.
 //!
+//! Optional `--rowstats FILE`: one line per input row (1-based line number in ROWS, rows that were skipped included) and profile,
+//! `profile row skipped_or_notoken base_i base_ii base_iii table_i table_ii table_iii`, flags 0/1, no row text; the column sums equal the summary
+//! line (skipped_or_notoken sums to no_token plus the skipped rows). Without it stdout is unchanged.
+//!
 //! Output, no row text (R2), one TSV line per profile (chat, formal), then the memory line:
 //!   english-next  profile  rows  no_token  base_i base_ii base_iii  table_i table_ii table_iii  imp_i wor_i  imp_ii wor_ii  imp_iii wor_iii  p95_base_ms p95_table_ms
 //!   rss_kib  before_table_load  after_table_load_and_one_pass
@@ -17,22 +21,23 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 struct Row {
+    line: usize,
     e: String,
     w: String,
     first: char,
 }
 
 /// The rows; ones that are not `e|w|reading`, whose e is not 2-32 ASCII letters or whose first syllable has no Zhuyin key are skipped (counted).
-fn parse(text: &str) -> (Vec<Row>, usize) {
-    let (mut rows, mut skipped) = (Vec::new(), 0);
-    for line in text.lines().filter(|l| !l.is_empty()) {
+fn parse(text: &str) -> (Vec<Row>, Vec<usize>) {
+    let (mut rows, mut skipped) = (Vec::new(), Vec::new());
+    for (n, line) in text.lines().enumerate().filter(|(_, l)| !l.is_empty()) {
         let f: Vec<&str> = line.split('|').collect();
         let first = f.get(2).and_then(|r| r.split_whitespace().next()).and_then(|s| s.chars().find_map(|c| core::engine::Layout::Standard.key_of_symbol(c)));
         match (f.as_slice(), first) {
             ([e, w, _], Some(first)) if (2..=32).contains(&e.len()) && e.bytes().all(|b| b.is_ascii_alphabetic()) && !w.is_empty() => {
-                rows.push(Row { e: e.to_ascii_lowercase(), w: w.to_string(), first })
+                rows.push(Row { line: n + 1, e: e.to_ascii_lowercase(), w: w.to_string(), first })
             }
-            _ => skipped += 1,
+            _ => skipped.push(n + 1),
         }
     }
     (rows, skipped)
@@ -65,7 +70,7 @@ fn p95(mut t: Vec<Duration>) -> f64 {
 }
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
-    let (mut rows_file, mut table, mut words, mut lm) = (None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, root.join("data/lm/bigram.sjlm"));
+    let (mut rows_file, mut table, mut words, mut rowstats, mut lm) = (None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, root.join("data/lm/bigram.sjlm"));
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().map(PathBuf::from).ok_or_else(|| "missing option value".to_string());
@@ -73,6 +78,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--english-next" => rows_file = Some(val()?),
             "--table" => table = Some(val()?),
             "--words" => words = Some(val()?),
+            "--rowstats" => rowstats = Some(val()?),
             "--lm" => lm = val()?,
             _ => return Err("unknown argument".into()),
         }
@@ -80,14 +86,15 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (rows_file, table, words) = (rows_file.ok_or("--english-next needs a rows file")?, table.ok_or("--table is required")?, words.ok_or("--words is required")?);
     let text = std::fs::read_to_string(&rows_file).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
     let (rows, skipped) = parse(&text);
-    if skipped > 0 {
-        eprintln!("skipped {skipped} rows");
+    if !skipped.is_empty() {
+        eprintln!("skipped {} rows", skipped.len());
     }
     if rows.is_empty() {
         return Err("no row to measure".into());
     }
     let (tl, co) = (root.join("data/lm/tinylm.sjtl"), root.join("data/lm/colloquial.sjlm"));
     let mut rss = None;
+    let mut stats = String::new();
     for (name, profile) in [("chat", Profile::Chat), ("formal", Profile::Formal)] {
         let mut e = cli::replay::build_engine_opts(root, &lm, tl.is_file().then_some(tl.as_path()), co.is_file().then_some(co.as_path()), profile, false, true)?;
         e.load_english(&words).map_err(|_| "cannot load the word list".to_string())?;
@@ -117,6 +124,18 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             line += &format!("\t{}\t{}", flip(k, true), flip(k, false));
         }
         println!("{line}\t{p_base:.3}\t{p_table:.3}");
+        if rowstats.is_some() {
+            let f = |h: Option<[bool; 3]>| h.unwrap_or_default().map(|b| u8::from(b).to_string()).join("\t");
+            let mut all: Vec<(usize, String)> = skipped.iter().map(|&n| (n, format!("1\t{0}\t{0}", "0\t0\t0"))).collect();
+            all.extend(rows.iter().zip(base.iter().zip(&with)).map(|(r, (b, w))| (r.line, format!("{}\t{}\t{}", u8::from(b.is_none()), f(*b), f(*w)))));
+            all.sort();
+            for (n, cols) in all {
+                stats += &format!("{name}\t{n}\t{cols}\n");
+            }
+        }
+    }
+    if let Some(p) = rowstats {
+        std::fs::write(p, stats).map_err(|e| format!("cannot write the rowstats file ({:?})", e.kind()))?;
     }
     if let Some((a, b)) = rss {
         println!("rss_kib\t{a}\t{b}");

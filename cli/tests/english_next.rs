@@ -48,3 +48,33 @@ fn an_invalid_table_is_an_error_not_a_silent_off() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("bad row at line 2"), "{}", String::from_utf8_lossy(&out.stderr));
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
 }
+
+#[test]
+fn rowstats_sum_to_the_summary_and_stdout_is_unchanged() {
+    let (rows, table, words) = files("rowstats");
+    let stats = std::path::Path::new(&rows).with_file_name("stats.tsv");
+    let run = |extra: &[&str]| {
+        let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table, "--words", &words]).args(extra).output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8(o.stdout).unwrap()
+    };
+    let (plain, with) = (run(&[]), run(&["--rowstats", stats.to_str().unwrap()]));
+    // stdout is identical but for the timings and the memory line
+    let cut = |t: &str| t.lines().take(2).map(|l| l.split('\t').take(16).collect::<Vec<_>>().join("\t")).collect::<Vec<_>>();
+    assert_eq!(cut(&plain), cut(&with));
+    assert_eq!(plain.lines().count(), with.lines().count());
+    let text = std::fs::read_to_string(&stats).unwrap();
+    for (l, profile) in with.lines().take(2).zip(["chat", "formal"]) {
+        let s: Vec<Vec<u32>> = text.lines().filter(|l| l.starts_with(profile)).map(|l| l.split('\t').skip(1).map(|c| c.parse().unwrap()).collect()).collect();
+        // lines 1, 3, 4 are rows, line 2 was skipped
+        assert_eq!(s.iter().map(|c| c[0]).collect::<Vec<_>>(), [1, 2, 3, 4]);
+        assert_eq!(s[1][1..], [1, 0, 0, 0, 0, 0, 0]);
+        let sum = |k: usize| s.iter().map(|c| c[k]).sum::<u32>().to_string();
+        let f: Vec<&str> = l.split('\t').collect();
+        assert_eq!(sum(1).parse::<u32>().unwrap(), f[3].parse::<u32>().unwrap() + 1, "skipped_or_notoken = no_token + 1 skipped");
+        for k in 0..6 {
+            assert_eq!(sum(2 + k), f[4 + k], "{profile} column {k}");
+        }
+    }
+    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
+}

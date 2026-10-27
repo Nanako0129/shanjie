@@ -80,6 +80,7 @@
 ### 3.2 量什麼（CLI 新增 `--english-next` 模式：建 `Engine`、送按鍵，讀引擎的預測列）
 
 - **每列的按鍵與設定**（基準與有表兩臂相同，只差有沒有讀表）：標準排列、中英混打開、其他設定照出貨預設、預測開；每列從空的組字區開始送 Shift＋（e 的第一個字母）、e 其餘的字母、Space，在這裡讀 (i)；再送 w 讀音第一個音節的第一個注音鍵（`tools/readings.py` 的讀音照標準排列轉成按鍵，同 `engine_replay.rs` 的 `keys_of`），在這裡讀 (ii)、(iii)。這是 §3.4 按鍵序列的一般形（`joe|是要對決` 就是 Shift＋J、o、e、Space、g），所以 executor 對 §3.4 序列的核對也適用這裡；核對後改了序列，兩處一起改。Space 之後如果沒有英文 token（例如被當成注音），那一列記成「沒有 token」、兩臂都算沒命中，列數另報。
+- **逐列檔**（選用 `--rowstats FILE`）：每個輸入列（含被跳過的）× 每種設定一行，`profile\trow\tskipped_or_notoken\tbase_i\tbase_ii\tbase_iii\ttable_i\ttable_ii\ttable_iii`，row 是 ROWS 的行號（從 1）、旗標 0/1、不含列文字（R2）；各欄總和等於摘要行（第三欄的和＝沒有 token 的列數加被跳過的列數），不給此選項時 stdout 不變。
 
 - (i) 沒打注音時，w 在前 9 名的比例（基準是 0：今天這裡沒有預測列）。
 - (ii) 打了 w 的第一個注音鍵時，w 在前 9 名的比例，對基準（今天的做法，歷史詞 `<s>`）。
