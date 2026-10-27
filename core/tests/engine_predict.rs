@@ -1011,7 +1011,7 @@ fn time_typing76_in(dir: Option<&Path>, abbr: bool) {
     time_typing76_with(dir, abbr, false);
 }
 
-/// The same pass with the English-mixing switch on and the digit table loaded (docs/contracts/digits.md A.4.4): the keys of
+/// The same pass with the English-mixing switch on, the word list and the digit table loaded (docs/contracts/digits.md A.4.4): the keys of
 /// Chinese typed right, every key through the digit layer's scoring.
 #[test]
 #[ignore]
@@ -1065,6 +1065,7 @@ fn digits_engine_load_cost() {
 fn timing_digit_keys() {
     let mut e = engine();
     e.set_digit_table(Some(digit_table()));
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     e.key(Key::ch('2', 0)).unwrap();
     e.reset(ResetMode::Discard);
@@ -1107,6 +1108,7 @@ fn time_typing76_with(dir: Option<&Path>, abbr: bool, digits: bool) {
         let mut e = engine();
         if digits {
             e.set_digit_table(Some(digit_table()));
+            e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
             e.set_english(true).unwrap();
             // The shell builds what the digit layer needs once, in `load_lm`; this engine got its model by `set_lm`, so it is built by the
             // first digit key. That key is pressed here, untimed, and the composition dropped (see `digits_engine_load_cost` for its time).

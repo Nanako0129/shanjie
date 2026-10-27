@@ -22,16 +22,17 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
 
-/// Recipe A: the real data directory (in the digits tree it holds digits.tsv, which `Engine::new` reads), the model,
+/// Recipe A: the real data directory (in the digits tree it holds digits.tsv, which `Engine::new` reads), the model, the word list,
 /// `set_english(false)`.
 fn engine_off() -> Engine {
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(false).unwrap();
     e
 }
 
-/// Recipe B: a data directory without digits.tsv (links to the other files), the model, `set_english(true)`.
+/// Recipe B: a data directory without digits.tsv (links to the other files), the model, the word list, `set_english(true)`.
 fn engine_no_table(tag: &str) -> Engine {
     let dir = std::env::temp_dir().join(format!("shanjie-digits-no-table-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -44,6 +45,7 @@ fn engine_no_table(tag: &str) -> Engine {
     let mut e = Engine::new(&dir, Layout::Standard).expect("an engine builds without digits.tsv");
     e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap(); // reads the overlay and demote files again
     std::fs::remove_dir_all(&dir).unwrap();
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     e
 }

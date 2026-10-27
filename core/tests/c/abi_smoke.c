@@ -339,14 +339,17 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
-/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of set_english, set_english_overwrite and set_english_key_order
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english, set_english_overwrite and set_english_key_order
  * through the header, and a revert through the C ABI (docs/contracts/zhen-revert.md section 5.2). The behaviour itself is covered by
  * core/tests/engine_english.rs and the child-process test in ffi.rs. */
-static int run_english(const char *dir) {
+static int run_english(const char *dir, const char *missing) {
   static ShanjieOutput dummy;
   ShanjieEngine *e = 0;
   ShanjieOutput *o = 0;
   CHECK(1001, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1002, shanjie_engine_load_english(0, missing) == 1);
+  CHECK(1003, shanjie_engine_load_english(e, 0) == 1);
+  CHECK(1004, shanjie_engine_load_english(e, missing) == 3);
   CHECK(1005, shanjie_engine_set_english(0, 1, &o) == 1 && o == 0);
   CHECK(1006, shanjie_engine_set_english(e, 1, 0) == 1);
   o = &dummy;
@@ -537,7 +540,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_packs(argv[1]);
   if (rc == 0) rc = run_rerank(argv[1], argv[2], "/nonexistent/shanjie-missing.sjtl");
   if (rc == 0) rc = run_rerank_level(argv[1], argv[2]);
-  if (rc == 0) rc = run_english(argv[1]);
+  if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
   if (rc == 0) rc = run_digits(argv[1], argv[2]);
   if (rc == 0) rc = run_fuzzy(argv[1]);
   shanjie_engine_free(0);

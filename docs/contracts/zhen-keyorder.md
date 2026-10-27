@@ -1,6 +1,6 @@
 # 中英混打第三片：依按鍵順序判斷英文（獨立開關）
 
-狀態：〔2026-10-27〕**第四片 `docs/contracts/zhen-revert.md`（直接回退）取代本份的證據計數（E）、`TWO_LETTER`、兩字母詞只在空白鍵開窗與「沒有證據也開」**；開關「依按鍵順序判斷英文」的預設改成開，意思改成「逆序的注音鍵、與完成詞庫沒有的音節的聲調鍵回退成英文」（zhen-revert §2.1）；窮舉測試擴充成 zhen-revert §4.3。以下是第三片的原文。單字表已退場（`zhen-revert.md` §2.8）。狀態：**READY**（2026-10-26，修訂一後第 2 次 plan-verifier READY；第 1 次 REVISE 的處置在 §9）。接在 `docs/contracts/zhen-mixed.md`（第一片）、`docs/contracts/zhen-inline.md`（第二片）之後；沒寫到的照那兩份。
+狀態：〔2026-10-27〕**第四片 `docs/contracts/zhen-revert.md`（直接回退）取代本份的證據計數（E）、`TWO_LETTER`、兩字母詞只在空白鍵開窗與「沒有證據也開」**；開關「依按鍵順序判斷英文」的預設改成開，意思改成「逆序的注音鍵、與完成詞庫沒有的音節的聲調鍵回退成英文」（zhen-revert §2.1）；窮舉測試擴充成 zhen-revert §4.3。以下是第三片的原文。狀態：**READY**（2026-10-26，修訂一後第 2 次 plan-verifier READY；第 1 次 REVISE 的處置在 §9）。接在 `docs/contracts/zhen-mixed.md`（第一片）、`docs/contracts/zhen-inline.md`（第二片）之後；沒寫到的照那兩份。
 
 ## 0. 起因
 

@@ -193,7 +193,7 @@
 
 ### 4.1 工具：`english-sim` 改版
 
-- 選項：`--overwrite on|off`（預設 on，對應 `set_english_overwrite`）、`--key-order on|off`（改成有值；預設 on）；`--inline` 刪掉；`--digits`、`--p`、`--repair`、`--seed`、`--repeat`、`--rows` 照舊。〔2026-10-28 PR 2：`--words FILE` 只給 `--recall`（§2.8），打字模式不收；和 `--rows` 一起給會被拒絕。〕
+- 選項：`--overwrite on|off`（預設 on，對應 `set_english_overwrite`）、`--key-order on|off`（改成有值；預設 on）；`--inline` 刪掉；`--digits`、`--p`、`--repair`、`--seed`、`--repeat`、`--rows`、`--words` 照舊。
 - 每個鍵之後問引擎 `english_reverted()`：有就依種類計一次，然後**復原**：Esc（還原成注音，§2.4）、再一次 Esc（第 12 條清掉未完成音節；組字區回到音節開始前的樣子），再把這個音節**不含錯打**地從頭重打；重打又回退就再計、再復原，三次後中止那一列並記到 stderr（和今天自動固定的復原同一套）。每個鍵之後也問 `english_split()`，中文列裡任何切分都算一次 `split`（只會在復原失敗時出現，預期 0）。列尾 Enter 之後，送出的文字裡若有 ASCII 字母或英文 token 殘留，計一次 `english_final`。
 - 輸出一行 TSV：`rows_sha256 rows syllables keys typos revert_a_mean revert_a_max revert_b_mean revert_b_max revert_c_mean revert_c_max split_mean split_max english_final_mean english_final_max`；`typos` 是 5 個種子注入的錯打總數（新欄，用來算比例）；`*_mean`／`*_max` 是每千音節、跨種子。`--digits` 的六欄接在後面不變。`cli/tests/english_sim.rs` 的固定種子數字跟著改；`inline_is_for_the_typing_mode`、`autokeep_columns`、`key_order_*` 兩條改寫成新欄位的測試。
 - **召回模式**（`--recall --words FILE`，只報）：每個詞新引擎、逐字母 `Key::ch`、空白；分類：回退 (a)／(b)／(c)、沒有回退（成為中文音節）；`opened` ＝ 組字區正好是一個英文 token 等於這個詞。另對 `ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7` 各印一行 `probe <詞> <結果：token／中文／其他>`（詞是公開的固定清單，可以印）。
