@@ -2,16 +2,19 @@
 
   python3 build_ptt_chat.py SRC OUT --sets ctune cdev cjudge-1 [cjudge-2 ...] [--exclude ROWFILE ...] [--corrections FILE]
       SRC/<board>/<article>.html -> OUT/<set>.rows.txt (`context|sentence|reading`, the format lm_eval reads), OUT/<set>.sources.txt
-      (`ptt` per row), OUT/<set>.sha256. Prints counts only.
+      (`ptt` per row), OUT/<set>.sha256. Prints counts only. --draft writes <set>.draft.txt instead of freezing.
 
 Only pushes are used (ptt_clean.merged_pushes_by: same account, adjacent, within 3 minutes, is one message). An article outside
 2015-07..2026-08 is dropped as soon as its time line is parsed, before any push text is looked at. A message is one `<board>/<article>#<n>`
 (n = its place among the merged pushes of the article); its set is the bucket of sha256(`ptt:` + that id) (e2common.bucket_set), so the
 clauses of one message stay together. Filters as the S1 side: a URL, a personal-data or secret pattern, a code fence drops the message;
 the rest is cut into 2-30 character Han segments, the context of the first is blank and of later ones the previous segment. A sentence
-already seen (or in an --exclude file) is dropped. Then per set at most ACCOUNT_CAP rows per account (a seeded sample), then
-min(size, pool) rows by one seeded shuffle: ctune 6,000, cdev 5,000, and cjudge-k the k-th slice of 3,000 of the judge pool (articles up
-to 2026-07), so the cjudge sets never repeat. Readings come from tools/readings.py; CHECK and unreadable rows are dropped (and counted)."""
+already seen (or in an --exclude file: the frozen rows of the S1 side and of the other chat sets) is dropped. Each set is then drawn
+from its own bucket, whole messages at a time (seed 20261027), at most ACCOUNT_CAP rows per account: ctune 6,000, cdev 5,000, cjudge-k
+3,000 from the judge pool (articles up to 2026-07) minus the sentences of the frozen cjudge-1..k-1 read back from OUT, so
+asking for cjudge-2 later changes nothing already frozen, and a set frozen with other content is never rewritten. Readings come from
+tools/readings.py; CHECK and unreadable rows are dropped and counted, and more than 10% CHECK stops the freeze. OUT also gets
+<set>.origin.tsv (the drawn messages, private) and <set>.manifest.json."""
 import argparse
 import glob
 import json
@@ -42,8 +45,8 @@ def article_month(page):
 
 
 def collect(src, exclude=frozenset()):
-    """-> ({set: [(account, month, context, sentence)]}, counts). Sets: ctune, cdev, cjudge (the pool, up to CJUDGE_LAST)."""
-    pools, n, seen = defaultdict(list), Counter(), set()
+    """-> ({set: {message id: (account, month, [(context, sentence)])}}, counts). Sets: ctune, cdev, cjudge (the pool, up to CJUDGE_LAST)."""
+    pools, n, seen = defaultdict(dict), Counter(), set()
     for f in sorted(glob.glob(os.path.join(src, "*", "*.html"))):
         page = open(f, encoding="utf-8", errors="replace").read()
         mon = article_month(page)
@@ -60,7 +63,8 @@ def collect(src, exclude=frozenset()):
             elif bc.FENCE in text:
                 n["code"] += 1
             else:
-                name = c.bucket_set("ptt", f"{unit}#{k}")
+                mid = f"{unit}#{k}"
+                name = c.bucket_set("ptt", mid)
                 if name == "cjudge" and mon > c.CJUDGE_LAST:
                     n["cjudge_bucket_after_2026_07"] += 1
                     continue
@@ -72,41 +76,32 @@ def collect(src, exclude=frozenset()):
                         n["duplicate"] += 1
                     else:
                         seen.add(s)
-                        pools[name].append((user, mon, segs[i - 1] if i else "", s))
+                        pools[name].setdefault(mid, (user, mon, []))[2].append((segs[i - 1] if i else "", s))
     return pools, n
 
 
-def cap_accounts(rows, rng):
-    """At most ACCOUNT_CAP rows per account, a seeded sample of the account's rows; the order of the rest is kept."""
-    by = defaultdict(list)
-    for i, r in enumerate(rows):
-        by[r[0]].append(i)
-    drop = set()
-    for idx in by.values():
-        if len(idx) > ACCOUNT_CAP:
-            drop |= set(idx) - set(rng.sample(idx, ACCOUNT_CAP))
-    return [r for i, r in enumerate(rows) if i not in drop]
-
-
-def build(src, out, sets, exclude=frozenset(), corrections=None, readings=c.readings):
+def build(src, out, sets, exclude=frozenset(), corrections=None, readings=c.readings, draft=False):
+    """Builds and freezes each set of `sets` (in the order ctune, cdev, cjudge-1, cjudge-2, ...) into `out`. A set is drawn from its own
+    bucket alone, so asking for cjudge-2 later leaves ctune, cdev and cjudge-1 as they were; cjudge-k is the pool minus the messages and
+    sentences of the frozen cjudge-1..k-1 read back from `out`. A set already frozen with other content stops the run (build_chatclause
+    freeze_ce3). `exclude`: sentences of the other side and of the other chat sets (contract section 3)."""
     pools, counts = collect(src, exclude)
-    rng = random.Random(c.CE3_SEED)
     os.makedirs(out, exist_ok=True)
     report = {"counts": dict(counts), "sets": {}}
-    capped = {name: cap_accounts(pools[name], rng) for name in ("ctune", "cdev", "cjudge")}
-    for name in sets:
-        ce = bc.ce3_name(name)
-        if not ce:
-            sys.exit(f"build_ptt_chat: unknown set {name}")
-        rows = list(capped[ce[0]])
-        random.Random(c.CE3_SEED).shuffle(rows)
-        rows = rows[(ce[1] - 1) * CJUDGE_SIZE: ce[1] * CJUDGE_SIZE] if ce[0] == "cjudge" else rows[:SIZES[ce[0]]]
-        frozen, _draft, st = bc.build_period([(x, s) for _u, _m, x, s in rows], bc.load_corrections(corrections), readings)
-        text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
-        c.write_lf(os.path.join(out, f"{name}.rows.txt"), text)
-        c.write_lf(os.path.join(out, f"{name}.sources.txt"), "ptt\n" * len(frozen))
-        c.write_lf(os.path.join(out, f"{name}.sha256"), f"{c.sha256_bytes(text.encode('utf-8'))}  {name}.rows.txt\n")
-        report["sets"][name] = dict(st, pool_after_account_cap=len(capped[ce[0]]), accounts=len({u for u, *_ in rows}))
+    for name in sorted(sets, key=lambda n: (bc.ce3_name(n) or sys.exit(f"build_ptt_chat: unknown set {n}"))):
+        kind, k = bc.ce3_name(name)
+        prior_sents = bc.prior_cjudge(out, k) if kind == "cjudge" else set()
+        items = []
+        for mid, (user, _mon, rows) in pools[kind].items():
+            rows = [r for r in rows if r[1] not in prior_sents]
+            if rows:
+                items.append((mid, rows, user))
+        cap = CJUDGE_SIZE if kind == "cjudge" else SIZES[kind]
+        take = c.draw_messages(items, cap, random.Random(c.CE3_SEED), ACCOUNT_CAP)
+        sample = [(x, s, "ptt", mid) for mid, rows, _u in take for x, s in rows]
+        st = bc.freeze_ce3(out, name, sample, sum(len(i[1]) for i in items), {"accounts": len({u for _m, _r, u in take})}, corrections, draft,
+                           readings, exclude)
+        report["sets"][name] = st
     return report
 
 
@@ -117,8 +112,9 @@ def main(argv=None):
     ap.add_argument("--sets", nargs="+", required=True)
     ap.add_argument("--exclude", nargs="*", default=[])
     ap.add_argument("--corrections")
+    ap.add_argument("--draft", action="store_true", help="write <set>.draft.txt (readings marked CHECK) for proofreading, freeze nothing")
     a = ap.parse_args(argv)
-    print(json.dumps(build(a.src, a.out, a.sets, bc.load_exclude(a.exclude), a.corrections), ensure_ascii=False, indent=1))
+    print(json.dumps(build(a.src, a.out, a.sets, bc.load_exclude(a.exclude), a.corrections, draft=a.draft), ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":
