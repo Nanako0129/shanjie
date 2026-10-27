@@ -311,10 +311,6 @@ struct SettingsPageForm: View {
                         .disabled(!model.englishOverwriteEnabled)
                     Text(MenuEntry.Text.englishOverwriteNote)
                         .font(.caption).foregroundStyle(.secondary)
-                    // shift-toggle section 1: always enabled (it works with the English mixing off too: then the composition is sent first).
-                    Toggle(MenuEntry.Text.shiftToggle, isOn: Binding(get: { model.shiftToggle }, set: { model.setShiftToggle($0) }))
-                    Text(MenuEntry.Text.shiftToggleNote)
-                        .font(.caption).foregroundStyle(.secondary)
                     // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
                     Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
                     Text(MenuEntry.Text.spacingNote)

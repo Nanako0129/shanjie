@@ -225,22 +225,6 @@ int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieO
 //   its column and the tone key does nothing for such a syllable, as it always did. An English run is text and stays, so the snapshot is the output
 //   before the call. Call it after every engine creation, like set_english_overwrite.
 int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
-// set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
-//   (docs/contracts/shift-toggle.md). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
-//   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes
-//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's keys (in column order)
-//   open the English run, as Shift+letter does (`c` stays `c`); with no syllable the run opens with the first character. Where the
-//   core has no English run to keep a composition in (the ETen layout, the abbreviation composer, set_english 0) 1 only records the
-//   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first). From then
-//   on a CHAR key without modifier bits whose ch is 0x21-0x7E is handled right after rule 1 (Caps Lock / Option / Command / Control
-//   pass through), before the prediction row, the digit run, the English run and the window: a letter, digit or one of `,.;/-` goes
-//   on the English run as it is (no lower case, no tone key, no punctuation or Zhuyin meaning, no revert or split, at most 32
-//   characters a run, `1` is a character, never a pick); any other character settles the open run as a token (no space) and goes in
-//   as its own half-width punctuation unit. Every other key keeps its rule (Space ends an open run as a token, and with no open run
-//   and the cursor right after a token unit types a space unit, so `Hi! there` works; Down opens the writings list, Enter sends,
-//   Backspace deletes). With 0 an open run ends as a token (no space) and the usual rules return. An empty
-//   composition only records the state. The state survives reset and commit. The shell calls it on activate, owner change and toggle.
-int32_t shanjie_engine_set_ascii(ShanjieEngine *engine, uint32_t on, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

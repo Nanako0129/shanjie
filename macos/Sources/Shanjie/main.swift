@@ -124,15 +124,6 @@ final class DefaultsItPackStore: ItPackStore {
     }
 }
 
-/// The 單按 Shift 切換中英 switch (docs/contracts/shift-toggle.md section 1), key `shiftToggle` in the same domain; absent means on.
-@MainActor
-final class DefaultsShiftToggleStore: ShiftToggleStore {
-    var shiftToggle: Bool? {
-        get { UserDefaults.standard.object(forKey: "shiftToggle") as? Bool }
-        set { UserDefaults.standard.set(newValue, forKey: "shiftToggle") }
-    }
-}
-
 /// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
 @MainActor
 final class DefaultsGlassTintStore: GlassTintStore {
@@ -236,8 +227,7 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(),
-        shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter())
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)
