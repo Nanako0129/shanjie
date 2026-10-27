@@ -63,11 +63,16 @@ shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
   gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
   || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-6-14m again"
-# The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to model-v6's hash; the core loads it from beside the model.
+# The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to the bigram model's hash; the core loads it from beside the model.
 [ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-1-7.7m release asset:
   gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
   || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
+# The trigram table of the chat profile (docs/contracts/sj-lm-7-pr2.md): bound to the same bigram.sjlm; the core loads it from beside the model too, and a
+# missing one would silently leave chat on the bigram.
+[ -f data/lm/trigram-chat.sjt3 ] || fail "data/lm/trigram-chat.sjt3 is missing (the trigram table of the chat profile, docs/contracts/sj-lm-7-pr2.md section 1)"
+shasum -a 256 -c data/trigram-chat.sjt3.sha256 >/dev/null \
+  || fail "data/lm/trigram-chat.sjt3 does not match data/trigram-chat.sjt3.sha256"
 # The colloquial table of the chat rerank (docs/contracts/colloquial-term.md section 2.3) and the list that attributes the public sentences
 # its counts come from (section 2.1): both are assets of the data release sj-cl-1-68k, and both must match the hashes recorded in git.
 [ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-1-68k release assets:
@@ -259,7 +264,7 @@ cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
 overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, demote.tsv, digits.tsv, bigram.sjlm,
-classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
+classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 
@@ -300,8 +305,8 @@ classes.sjc: word classes and class transition probabilities computed from
   the same counts as bigram.sjlm; same sources and attribution.
 kn.sjkn: Kneser-Ney continuation counts computed from the same counts as
   bigram.sjlm; same sources and attribution.
-trigram.sjt3: pruned trigram counts of the same corpus as bigram.sjlm, mapped to
-  its word ids; same sources and attribution.
+trigram.sjt3, trigram-chat.sjt3: pruned trigram counts of the same corpus as bigram.sjlm, mapped to
+  its word ids (the formal profile's and the chat profile's table); same sources and attribution.
 tinylm.sjtl: a small character model (the 語意校正 rerank) trained on text
   from the same sources as bigram.sjlm: Wikipedia articles, Mozilla Common
   Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic
