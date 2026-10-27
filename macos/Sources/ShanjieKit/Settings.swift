@@ -31,10 +31,10 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var fuzzyAdjacentEnabled = true
     /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
     /// enabled and on.
-    @Published public private(set) var englishInline = true
-    @Published public private(set) var englishInlineEnabled = false
+    @Published public private(set) var englishOverwrite = true
+    @Published public private(set) var englishOverwriteEnabled = false
     /// The 依按鍵順序判斷英文 choice under them (zhen-keyorder section 3), default false; enabled on the display choice's condition.
-    @Published public private(set) var englishKeyOrder = false
+    @Published public private(set) var englishKeyOrder = true
     @Published public private(set) var englishKeyOrderEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).
     @Published public private(set) var spacing = false
@@ -95,8 +95,8 @@ public final class SettingsModel: ObservableObject {
         englishEnabled = shell.englishEnabled
         fuzzyFlags = shell.fuzzyFlags
         fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
-        englishInline = shell.englishInlineOn
-        englishInlineEnabled = shell.englishInlineEnabled
+        englishOverwrite = shell.englishOverwriteOn
+        englishOverwriteEnabled = shell.englishOverwriteEnabled
         englishKeyOrder = shell.englishKeyOrderOn
         englishKeyOrderEnabled = shell.englishKeyOrderEnabled
         demote = shell.demoteOn
@@ -130,7 +130,7 @@ public final class SettingsModel: ObservableObject {
         precondition((0..<5).contains(bit))
         shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
     }
-    public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
+    public func setEnglishOverwrite(_ on: Bool) { shell.applyEnglishOverwrite(on) }
     public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
