@@ -625,9 +625,32 @@ def ids_in(name, n, source="discord", start=100000):
     return out
 
 
+def freeze_raw(*a, **k):
+    """bc.freeze with the S1 cdev minimum off (cdev_min=N to set it) and the fake reading tool; a stop raises SystemExit."""
+    readings, cdev_min = k.pop("readings", fake_readings), k.pop("cdev_min", 0)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), mock.patch.object(bc, "CDEV_MIN_S1", cdev_min):
+        return bc.freeze(*a, readings=readings, **k)
+
+
 def freeze_quiet(*a, **k):
-    with contextlib.redirect_stdout(io.StringIO()):
-        return bc.freeze(*a, readings=k.pop("readings", fake_readings), **k)
+    """freeze_raw for a freeze that must go through: any stop (a second guard included) fails the test as an assertion."""
+    try:
+        return freeze_raw(*a, **k)
+    except SystemExit as e:
+        raise AssertionError(f"the freeze stopped: {e}")
+
+
+def han_msgs(ids, month, per=3, salt="甲", day=3):
+    """Messages [(id, timestamp, text)] of `per` distinct 4-character clauses each; the salt keeps sets of messages apart."""
+    h = "一二三四五六七八九十"
+    return [(mid, ts(day, "10:00", month), "，".join(f"句{h[i // 10]}{h[i % 10]}{salt}{h[j]}"[:5] for j in range(per))) for i, mid in enumerate(ids)]
+
+
+def write_clauses(work, rows):
+    """A clauses.tsv by hand: rows (month, source, sentence, message id)."""
+    os.makedirs(work, exist_ok=True)
+    open(os.path.join(work, "clauses.tsv"), "w", encoding="utf-8").write("".join(f"{m}\t{src}\t\t{sent}\t{mid}\t{mid}\n" for m, src, sent, mid in rows))
+    return work
 
 
 def rows_of(work, period):
@@ -785,48 +808,139 @@ class CE3Discord(unittest.TestCase):
         self.assertTrue(all(month_of[s] <= "2026-07" for s in out["cjudge-1"]))
         self.assertGreater(st["not_used_cjudge_bucket_after_2026_07_messages"], 0)
         with self.assertRaises(SystemExit):
-            freeze_quiet(work, "cjudge-3")       # cjudge-2 is not frozen yet
+            freeze_raw(work, "cjudge-3")       # cjudge-2 is not frozen yet
 
     def test_a_correction_that_changes_or_drops_a_sentence_keeps_the_source_tags_aligned(self):
-        work = self.prepared(many(150, "2026-05"))
+        """Discord and Threads rows mixed in one set: each frozen row's source is the source of the clause it was drawn from."""
+        td = tempfile.mkdtemp()
+        root = package(td, {"c1": many(60, "2026-05")})
+        meta = os.path.join(td, "meta")
+        os.makedirs(os.path.join(meta, "threads"))
+        posts = [{"title": t, "creation_timestamp": dt.datetime(2026, 5, 1 + i % 27, 4, tzinfo=dt.timezone.utc).timestamp()}
+                 for i, (_i, _t, t) in enumerate(many(60, "2026-05", "m", salt="丑"))]
+        json.dump({"text_post_app_text_posts": posts}, open(os.path.join(meta, "threads", "threads_and_replies.json"), "w"))
+        work = os.path.join(td, "w")
+        bc.prepare(root, meta, "me", [], work)
+        source_of = {s: src for _m, src, _x, s in bc.read_clauses(work)}
         sample = bc.ce3_rows(work, "ctune")[0]
-        change, drop = sample[0][1], sample[4][1]
-        corr = os.path.join(os.path.dirname(work), "corr.tsv")
-        open(corr, "w", encoding="utf-8").write(f"{change}\t{change}改\t{' '.join('ㄅ' * (len(change) + 1))}\n{drop}\t\n")
+        self.assertEqual({src for _x, _s, src, _m in sample}, {"discord", "threads"})
+        change, drop = sample[0][1], sample[1][1]
+        corr = os.path.join(td, "corr.tsv")
+        open(corr, "w", encoding="utf-8").write(f"{drop}\t\n{change}\t{change}改\t{' '.join('ㄅ' * (len(change) + 1))}\n")
         st = freeze_quiet(work, "ctune", corr)
         rows = [r[1] for r in rows_of(work, "ctune")]
-        self.assertIn(change + "改", rows)
-        self.assertNotIn(change, rows)
+        sources = open(os.path.join(work, "ctune.sources.txt")).read().split()
+        self.assertEqual(len(rows), len(sample) - 1)
         self.assertNotIn(drop, rows)
-        self.assertEqual(len(open(os.path.join(work, "ctune.sources.txt")).read().splitlines()), len(rows))
-        self.assertEqual(st["rows_by_source"], {"discord": len(rows)})
+        self.assertEqual(sources, [source_of[s[:-1] if s == change + "改" else s] for s in rows])      # row by row, not only in total
+        self.assertEqual(st["rows_by_source"], {k: sources.count(k) for k in ("discord", "threads")})
+        # and build_period alone: the tags of the kept rows, whatever sits before them
+        _f, _d, _st, tags = bc.build_period([("", "甲乙"), ("", "丙丁"), ("", "戊己")], {"甲乙": (None, None)}, fake_readings, ["a", "b", "c"])
+        self.assertEqual(tags, ["b", "c"])
 
     def test_a_later_cjudge_never_takes_back_a_corrected_dropped_or_check_row(self):
-        work = self.prepared(many(80, "2026-06"))
+        work = self.prepared(han_msgs(ids_in("cjudge", 6), "2026-06"))
         with mock.patch.object(bc, "CJUDGE_HALF", 12):
             first = bc.ce3_rows(work, "cjudge")[0]
+            self.assertEqual(len(first), 12)
             changed, dropped, checked = first[0][1], first[1][1], first[5][1]
             corr = os.path.join(os.path.dirname(work), "corr.tsv")
             open(corr, "w", encoding="utf-8").write(f"{changed}\t{changed}改\t{' '.join('ㄅ' * (len(changed) + 1))}\n{dropped}\t\n")
             check = lambda ss: {s: (("check", "") if s == checked else ("ok", "ㄅ")) for s in set(ss)}
             freeze_quiet(work, "cjudge-1", corr, readings=check)
-            frozen1 = {r[1] for r in rows_of(work, "cjudge-1")}
-            self.assertNotIn(checked, frozen1)
+        self.assertNotIn(checked, {r[1] for r in rows_of(work, "cjudge-1")})
+        with mock.patch.object(bc, "CJUDGE_HALF", 100):                  # the pool is small enough for cjudge-2 to take everything left
+            second = bc.ce3_rows(work, "cjudge", 2)[0]
             freeze_quiet(work, "cjudge-2")
-            second = [r[1] for r in rows_of(work, "cjudge-2")]
-        self.assertTrue(second)
-        self.assertFalse({changed, dropped, checked, changed + "改"} & set(second))
-        self.assertFalse({s for _x, s, _a, _b in first} & set(second))
-        # a correction that makes a sentence equal to one of another frozen set stops
-        work2 = self.prepared(many(80, "2026-06"))
-        freeze_quiet(work2, "cdev")
-        other = rows_of(work2, "cdev")[0][1]
-        victim = bc.ce3_rows(work2, "ctune")[0][0][1]
-        corr2 = os.path.join(os.path.dirname(work2), "corr2.tsv")
-        open(corr2, "w", encoding="utf-8").write(f"{victim}\t{other}\t{' '.join('ㄅ' * len(other))}\n")
+        everything = {s for _m, _src, _x, s in bc.read_clauses(work)}
+        self.assertEqual(len(everything), 18)
+        self.assertEqual({s for _x, s, _src, _m in second}, everything - {s for _x, s, _src, _m in first})       # exactly the two messages left
+        self.assertFalse({changed, dropped, checked} & {r[1] for r in rows_of(work, "cjudge-2")})
+
+    def test_a_correction_into_a_row_of_the_other_side_or_another_frozen_set_stops(self):
+        work = self.prepared(many(80, "2026-06"))
+        freeze_quiet(work, "cdev")
+        other = rows_of(work, "cdev")[0][1]
+        victim = bc.ce3_rows(work, "ctune")[0][0][1]
+        corr = os.path.join(os.path.dirname(work), "corr.tsv")
+        open(corr, "w", encoding="utf-8").write(f"{victim}\t{other}\t{' '.join('ㄅ' * len(other))}\n")
         with self.assertRaises(SystemExit):
-            freeze_quiet(work2, "ctune", corr2)
-        self.assertFalse(os.path.isfile(os.path.join(work2, "ctune.rows.txt")))
+            freeze_raw(work, "ctune", corr)                               # into a frozen set of the folder
+        self.assertFalse(os.path.isfile(os.path.join(work, "ctune.rows.txt")))
+        theirs = os.path.join(os.path.dirname(work), "ptt.rows.txt")      # into a row of the other side's --exclude file
+        open(theirs, "w", encoding="utf-8").write("|外來的句子|ㄅ\n")
+        open(corr, "w", encoding="utf-8").write(f"{victim}\t外來的句子\t{' '.join('ㄅ' * 5)}\n")
+        with self.assertRaises(SystemExit):
+            freeze_raw(work, "ctune", corr, others=[theirs])
+        self.assertFalse(os.path.isfile(os.path.join(work, "ctune.rows.txt")))
+        freeze_quiet(work, "ctune", corr)                                 # without that file the same correction goes through
+        self.assertIn("外來的句子", [r[1] for r in rows_of(work, "ctune")])
+
+    def test_a_message_drawn_with_other_exclusions_is_not_drawn_again(self):
+        (mid,) = ids_in("cjudge", 1)
+        work = self.prepared([(mid, ts(4, "10:00", "2026-07"), "句乙甲，句乙乙，句乙丙")])
+        x = os.path.join(os.path.dirname(work), "x.rows.txt")
+        open(x, "w", encoding="utf-8").write("|句乙乙|ㄅ\n")
+        with mock.patch.object(bc, "CJUDGE_HALF", 100):
+            self.assertEqual({s for _x, s, _src, _m in bc.ce3_rows(work, "cjudge", 1, {"句乙乙"})[0]}, {"句乙甲", "句乙丙"})
+            freeze_quiet(work, "cjudge-1", others=[x])
+            self.assertEqual({r[1] for r in rows_of(work, "cjudge-1")}, {"句乙甲", "句乙丙"})
+            self.assertEqual(len(open(os.path.join(work, "cjudge-1.origin.tsv")).read().splitlines()), 3)    # the filtered clause is recorded too
+            self.assertEqual(bc.ce3_rows(work, "cjudge", 2)[0], [])      # another --exclude: the message still is cjudge-1's
+            freeze_quiet(work, "cjudge-2")
+        self.assertEqual(rows_of(work, "cjudge-2"), [])
+
+    def test_the_first_month_that_does_not_fit_ends_the_cjudge_draw(self):
+        ids = ids_in("cjudge", 7)
+        work = self.prepared(han_msgs(ids[:3], "2026-07") + han_msgs(ids[3:], "2026-06", per=1, salt="乙"))
+        with mock.patch.object(bc, "CJUDGE_HALF", 7):
+            sample, pool, _x, _d = bc.ce3_rows(work, "cjudge")
+        self.assertEqual(len(sample), 6)                  # two 3-clause messages of 2026-07; one row is left over ...
+        self.assertTrue(all(m in ids[:3] for _x, _s, _src, m in sample))        # ... and a 1-clause message of 2026-06 does not take it
+
+    def test_the_same_sentence_from_two_sources_is_in_a_set_once_and_not_in_two_judge_sets(self):
+        d1, d2 = ids_in("cdev", 1)[0], ids_in("cdev", 1, "threads")[0]
+        work = write_clauses(os.path.join(tempfile.mkdtemp(), "w"), [("2026-05", "discord", "共同句子", d1), ("2026-05", "discord", "甲獨有句", d1),
+                                                                     ("2026-06", "threads", "共同句子", d2), ("2026-06", "threads", "乙獨有句", d2)])
+        sample = bc.ce3_rows(work, "cdev")[0]
+        self.assertEqual(sorted(s for _x, s, _src, _m in sample), ["乙獨有句", "共同句子", "甲獨有句"])
+        self.assertEqual([src for _x, s, src, _m in sample if s == "共同句子"], ["discord"])        # the first by time keeps it
+        a, b = ids_in("cjudge", 1)[0], ids_in("cjudge", 1, "threads")[0]
+        work = write_clauses(os.path.join(tempfile.mkdtemp(), "w"), [("2026-07", "discord", "共同句子", a), ("2026-06", "threads", "共同句子", b),
+                                                                     ("2026-06", "threads", "丙獨有句", b)])
+        with mock.patch.object(bc, "CJUDGE_HALF", 1):
+            freeze_quiet(work, "cjudge-1")
+            self.assertEqual(sorted(s for _x, s, _src, _m in bc.ce3_rows(work, "cjudge", 2)[0]), ["丙獨有句"])     # a message not drawn: its clause stays
+            freeze_quiet(work, "cjudge-2")
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-1")], ["共同句子"])
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-2")], ["丙獨有句"])
+
+    def test_a_frozen_set_is_compared_file_by_file_and_never_rewritten(self):
+        work = self.prepared(many(60, "2026-05"))
+        freeze_quiet(work, "ctune")
+        names = [f"ctune.{x}" for x in ("rows.txt", "sha256", "sources.txt", "origin.tsv", "manifest.json")]
+        same = {n: open(os.path.join(work, n), encoding="utf-8").read() for n in names}
+        freeze_quiet(work, "ctune")
+        self.assertEqual(same, {n: open(os.path.join(work, n), encoding="utf-8").read() for n in names})
+        for n in ("ctune.sources.txt", "ctune.origin.tsv", "ctune.manifest.json"):
+            with open(os.path.join(work, n), "a", encoding="utf-8") as f:
+                f.write("tampered\n")
+            with self.assertRaises(SystemExit):
+                freeze_raw(work, "ctune")
+            self.assertTrue(open(os.path.join(work, n), encoding="utf-8").read().endswith("tampered\n"), n)    # not repaired by the rerun
+            open(os.path.join(work, n), "w", encoding="utf-8").write(same[n])
+
+    def test_cdev_stops_when_the_s1_bucket_holds_under_1000_rows(self):
+        work = self.prepared(many(300, "2026-05"))
+        n = bc.ce3_rows(work, "cdev")[1]
+        self.assertTrue(0 < n < bc.CDEV_MIN_S1)
+        with self.assertRaises(SystemExit) as e:
+            freeze_raw(work, "cdev", cdev_min=bc.CDEV_MIN_S1)
+        self.assertIn(str(n), str(e.exception.code))
+        self.assertFalse(os.path.isfile(os.path.join(work, "cdev.rows.txt")))
+        with self.assertRaises(SystemExit):
+            freeze_raw(work, "cdev", cdev_min=n + 1)
+        freeze_quiet(work, "cdev", cdev_min=n)                         # exactly the minimum goes through
 
     def test_shared_sentences_are_left_out_and_cjudge_sets_never_repeat(self):
         ct, cd = ids_in("ctune", 1)[0], ids_in("cdev", 1)[0]
@@ -834,6 +948,7 @@ class CE3Discord(unittest.TestCase):
         msgs = [(ct, ts(3, "10:00", "2026-05"), "跨桶共用句，獨有句甲"), (cd, ts(3, "10:00", "2026-06"), "跨桶共用句，獨有句乙"),
                 (m1, ts(4, "10:00", "2026-07"), "獨有句丙，並列共用句"), (m2, ts(5, "10:00", "2026-06"), "獨有句丁，並列共用句")]
         work = self.prepared(msgs, legacy=True)          # the per-month duplicate rule lets the same clause sit in two months
+        self.assertEqual([s for _x, s, _src, _m in bc.ce3_rows(work, "ctune")[0]], ["獨有句甲"])          # before any freeze
         freeze_quiet(work, "ctune")
         freeze_quiet(work, "cdev")
         self.assertEqual([r[1] for r in rows_of(work, "ctune")], ["獨有句甲"])      # 跨桶共用句 sits in two sets' buckets: in neither
@@ -841,14 +956,15 @@ class CE3Discord(unittest.TestCase):
         with mock.patch.object(bc, "CJUDGE_HALF", 2):
             freeze_quiet(work, "cjudge-1")
             freeze_quiet(work, "cjudge-2")
-        self.assertEqual({r[1] for r in rows_of(work, "cjudge-1")}, {"獨有句丙", "並列共用句"})
-        self.assertEqual([r[1] for r in rows_of(work, "cjudge-2")], ["獨有句丁"])     # 並列共用句 was cjudge-1's; the message m1 is not drawn again
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-1")], ["獨有句丙"])      # 並列共用句: the first copy by time is m2's ...
+        self.assertEqual([r[1] for r in rows_of(work, "cjudge-2")], ["獨有句丁"])     # ... but m1 drew it, so cjudge-2 does not hold it either; m1 is not drawn again
 
     def test_the_other_sides_rows_are_taken_out_of_the_s1_set(self):
         a, b = ids_in("ctune", 2)
         work = self.prepared([(a, ts(3, "10:00"), "同一句話，甲獨有"), (b, ts(4, "10:00"), "乙獨有")])
         other = os.path.join(os.path.dirname(work), "ptt.rows.txt")
         open(other, "w", encoding="utf-8").write("|同一句話|ㄅ\n")
+        self.assertEqual(sorted(s for _x, s, _src, _m in bc.ce3_rows(work, "ctune", 1, {"同一句話"})[0]), ["乙獨有", "甲獨有"])
         freeze_quiet(work, "ctune", others=[other])
         self.assertEqual(sorted(r[1] for r in rows_of(work, "ctune")), ["乙獨有", "甲獨有"])
 
@@ -953,6 +1069,40 @@ class CE3Ptt(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 bp.build(src2, one, ["ctune", "cdev", "cjudge-1"], readings=fake_readings)
             self.assertEqual(before, {n: sha(one, n) for n in before})
+
+    def test_a_ptt_message_drawn_with_other_exclusions_is_not_drawn_again(self):
+        td = tempfile.mkdtemp()
+        src = self.snapshot(td, self.distinct_accounts(150))
+        pool = bp.collect(src)[0]["cjudge"]
+        mid = sorted(pool)[0]
+        x = pool[mid][2][1][1]                          # the second clause of that message
+        out = os.path.join(td, "out")
+        with mock.patch.object(bp, "CJUDGE_SIZE", 1000):
+            bp.build(src, out, ["cjudge-1"], exclude={x}, readings=fake_readings)
+            self.assertNotIn(x, [r[1] for r in rows_of(out, "cjudge-1")])
+            bp.build(src, out, ["cjudge-2"], readings=fake_readings)          # no exclusion now: x is back in the pool, its message is cjudge-1's
+        self.assertEqual(rows_of(out, "cjudge-2"), [])
+
+    def test_sets_are_built_in_the_documented_order_and_a_stop_leaves_the_earlier_ones_frozen(self):
+        td = tempfile.mkdtemp()
+        src = self.snapshot(td, self.distinct_accounts(150))
+        calls, real = [], bc.freeze_ce3
+
+        def rec(work, period, *a, **k):
+            calls.append(period)
+            return real(work, period, *a, **k)
+        with mock.patch.object(bc, "freeze_ce3", rec), mock.patch.object(bp, "CJUDGE_SIZE", 6):
+            bp.build(src, os.path.join(td, "all"), ["cjudge-2", "cdev", "cjudge-1", "ctune"], readings=fake_readings)
+        self.assertEqual(calls, ["ctune", "cdev", "cjudge-1", "cjudge-2"])
+        n = [0]
+
+        def second_call_all_check(ss):
+            n[0] += 1
+            return fake_readings(ss) if n[0] == 1 else {s: ("check", "") for s in set(ss)}
+        out = os.path.join(td, "stopped")
+        with self.assertRaises(SystemExit):
+            bp.build(src, out, ["cjudge-1", "cdev", "ctune"], readings=second_call_all_check)
+        self.assertEqual(sorted(f for f in os.listdir(out) if f.endswith(".rows.txt")), ["ctune.rows.txt"])
 
     def test_more_than_ten_percent_check_stops_the_ptt_freeze(self):
         td = tempfile.mkdtemp()

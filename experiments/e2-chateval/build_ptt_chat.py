@@ -81,26 +81,31 @@ def collect(src, exclude=frozenset()):
 
 
 def build(src, out, sets, exclude=frozenset(), corrections=None, readings=c.readings, draft=False):
-    """Builds and freezes each set of `sets` (in the order ctune, cdev, cjudge-1, cjudge-2, ...) into `out`. A set is drawn from its own
+    """Builds and freezes each set of `sets` into `out`, one after the other in the order ctune, cdev, cjudge-1, cjudge-2, ...; a stop (CHECK
+    share, a clash, a set frozen with other content, a missing earlier cjudge) leaves the sets before it frozen and the rest unbuilt. A set is drawn from its own
     bucket alone, so asking for cjudge-2 later leaves ctune, cdev and cjudge-1 as they were; cjudge-k is the pool minus the messages and
     sentences of the frozen cjudge-1..k-1 read back from `out`. A set already frozen with other content stops the run (build_chatclause
     freeze_ce3). `exclude`: sentences of the other side and of the other chat sets (contract section 3)."""
     pools, counts = collect(src, exclude)
     os.makedirs(out, exist_ok=True)
     report = {"counts": dict(counts), "sets": {}}
-    for name in sorted(sets, key=lambda n: (bc.ce3_name(n) or sys.exit(f"build_ptt_chat: unknown set {n}"))):
+    def order(n):
+        ce = bc.ce3_name(n) or sys.exit(f"build_ptt_chat: unknown set {n}")
+        return ("ctune", "cdev", "cjudge").index(ce[0]), ce[1]
+    for name in sorted(set(sets), key=order):
         kind, k = bc.ce3_name(name)
-        prior_sents = bc.prior_cjudge(out, k) if kind == "cjudge" else set()
+        prior_msgs, prior_sents = bc.prior_cjudge(out, k) if kind == "cjudge" else (set(), set())
         items = []
         for mid, (user, _mon, rows) in pools[kind].items():
-            rows = [r for r in rows if r[1] not in prior_sents]
-            if rows:
-                items.append((mid, rows, user))
+            kept = [r for r in rows if r[1] not in prior_sents]
+            if kept and ("ptt", mid) not in prior_msgs:
+                items.append((mid, kept, user))
         cap = CJUDGE_SIZE if kind == "cjudge" else SIZES[kind]
         take = c.draw_messages(items, cap, random.Random(c.CE3_SEED), ACCOUNT_CAP)
         sample = [(x, s, "ptt", mid) for mid, rows, _u in take for x, s in rows]
+        drawn = [("ptt", mid, s) for mid, _rows, _u in take for _x, s in pools[kind][mid][2]]
         st = bc.freeze_ce3(out, name, sample, sum(len(i[1]) for i in items), {"accounts": len({u for _m, _r, u in take})}, corrections, draft,
-                           readings, exclude)
+                           readings, exclude, drawn)
         report["sets"][name] = st
     return report
 

@@ -503,42 +503,56 @@ def ce3_name(period):
     return (m.group(1).split("-")[0], int(m.group(2) or 0)) if m else None
 
 
+CDEV_MIN_S1 = 1000   # contract section 8: fewer rows than this in the S1 cdev bucket and cdev would be almost all PTT: stop and ask
+
+
 def prior_cjudge(work, k):
-    """The sentences of the frozen cjudge-1..k-1 of this folder, as they were drawn (<set>.origin.tsv, before corrections, drops and
-    CHECK; private) and as frozen: a later judge set subtracts both, so a corrected, dropped or CHECK row never comes back, and since
-    every clause of a drawn message is in that file, a drawn message has nothing left to be drawn again. Stops when one is missing."""
-    sents = set()
+    """({(source, message id)}, {sentence}) of the frozen cjudge-1..k-1 of this folder. <set>.origin.tsv lists every clause of every message
+    that was drawn, whatever the filters kept (private). Later judge sets subtract the sentences, and the frozen sentences too (a correction
+    may have changed them), so a corrected, dropped or CHECK row never comes back; the S1 side needs nothing more, since its clauses are
+    frozen and all of a drawn message's are listed, and the PTT side, whose pool changes with --exclude, also drops the messages.
+    Stops when one of the earlier sets is missing."""
+    msgs, sents = set(), set()
     for j in range(1, k):
         if not (os.path.isfile(os.path.join(work, f"cjudge-{j}.rows.txt")) and os.path.isfile(os.path.join(work, f"cjudge-{j}.origin.tsv"))):
             sys.exit(f"build_chatclause: STOP, freeze cjudge-{j} before cjudge-{k}")
-        sents |= {l.rstrip("\n").split("\t")[2] for l in open(os.path.join(work, f"cjudge-{j}.origin.tsv"), encoding="utf-8")}
+        for line in open(os.path.join(work, f"cjudge-{j}.origin.tsv"), encoding="utf-8"):
+            src, mid, sent = line.rstrip("\n").split("\t")
+            msgs.add((src, mid))
+            sents.add(sent)
         sents |= frozen_sentences(work, f"cjudge-{j}")
-    return sents
+    return msgs, sents
 
 
 def ce3_rows(work, name, k=1, others=frozenset()):
     """CE3 section 4, S1 side: the messages whose bucket (c.bucket_set) is `name`, from the frozen clauses.tsv, drawn WHOLE (all clauses
-    of a message go to the same set). A clause whose sentence the buckets hold in more than one set, or that is in `others` (the frozen
-    rows of the other side and of the other chat sets, section 3), or in an earlier frozen cjudge, is dropped. ctune / cdev: messages
-    drawn with seed c.CE3_SEED while the rows fit min(cap, pool). cjudge-k: months from CJUDGE_LAST backwards, whole months until
-    CJUDGE_HALF rows (the first month that does not fit entirely is drawn and ends it), minus the sentences of the frozen
-    cjudge-1..k-1; the messages of the cjudge bucket after CJUDGE_LAST are only counted.
-    -> ([(context, sentence, source, message id)], pool rows, stats)."""
+    of a message go to the same set). A clause is dropped when its sentence is in more than one bucket's set, in `others` (the frozen
+    rows of the other side and of the other chat sets, section 3), in an earlier frozen cjudge, or already taken from an earlier
+    message of this set (the first copy by time stays, whatever its source). ctune / cdev: messages drawn with seed c.CE3_SEED while the
+    rows fit min(cap, pool). cjudge-k: months from CJUDGE_LAST backwards; a month is taken whole when it fits the rows still needed,
+    otherwise it is drawn and the draw ends; the sentences of the frozen cjudge-1..k-1 are subtracted, and those files hold every clause of
+    every message they drew, so a drawn message has nothing left to draw (clauses.tsv is frozen); the messages of the cjudge bucket after
+    CJUDGE_LAST are only counted.
+    -> (sample [(context, sentence, source, message id)], pool rows, stats, drawn [(source, message id, sentence)] every clause of every
+    drawn message, filtered or not)."""
     full, where = read_clauses(work, full=True), {}
     for _mon, src, _x, sent, _ch, mid in full:
         where.setdefault(sent, set()).add(c.bucket_set(src, mid))
-    prior_sents = prior_cjudge(work, k) if name == "cjudge" else set()
-    msgs, late, overlap = {}, set(), 0
+    prior_sents = prior_cjudge(work, k)[1] if name == "cjudge" else set()
+    msgs, every, late, overlap, taken = {}, {}, set(), 0, set()
     for mon, src, x, sent, _ch, mid in full:
         if c.bucket_set(src, mid) != name:
             continue
         key = (src, mid)
         if name == "cjudge" and mon > c.CJUDGE_LAST:
             late.add(key)
-        elif where[sent] != {name} or sent in prior_sents or sent in others:
-            overlap += 1
         else:
-            msgs.setdefault(key, (mon, []))[1].append((x, sent))
+            every.setdefault(key, []).append(sent)
+            if where[sent] != {name} or sent in prior_sents or sent in others or sent in taken:
+                overlap += 1
+            else:
+                taken.add(sent)
+                msgs.setdefault(key, (mon, []))[1].append((x, sent))
     rng = random.Random(c.CE3_SEED)
     items = [(key, rows, mon) for key, (mon, rows) in msgs.items()]
     if name == "cjudge":
@@ -552,28 +566,61 @@ def ce3_rows(work, name, k=1, others=frozenset()):
     else:
         take = c.draw_messages(items, CE3_CAPS[name], rng)
     sample = [(x, sent, key[0], key[1]) for key, rows, _mon in take for x, sent in rows]
+    drawn = [(key[0], key[1], sent) for key, _rows, _mon in take for sent in every[key]]
     return (sample, sum(len(i[1]) for i in items),
-            {"months": sorted({i[2] for i in take}), "not_used_cjudge_bucket_after_2026_07_messages": len(late), "dropped_overlap_clauses": overlap})
+            {"months": sorted({i[2] for i in take}), "not_used_cjudge_bucket_after_2026_07_messages": len(late), "dropped_overlap_clauses": overlap}, drawn)
 
 
-def freeze_ce3(work, period, sample, pool_rows, extra, corrections_file=None, draft=False, readings=c.readings, others=frozenset()):
-    """Freezes a CE3 set (either side) in `work`. sample: [(context, sentence, source, message id)], the rows as drawn.
-    Writes <period>.rows.txt (`context|sentence|reading`), .sources.txt (the source of each row, line for line), .origin.tsv (the drawn
-    messages and original sentences, private), .manifest.json and .sha256. Stops when more than CHECK_MAX of the rows are CHECK, when a
-    corrected sentence is also in `others` or in another frozen CE3 set of the folder, or when the set is already frozen with other content."""
-    frozen, drafted, st, tags = build_period([(x, s) for x, s, _src, _mid in sample], load_corrections(corrections_file), readings,
-                                             [(src, mid) for _x, _s, src, mid in sample])
+def gate(work, period, drafted, st, draft):
+    """The first stops of a freeze, shared by every period. -> True when only the draft (<period>.draft.txt, readings marked CHECK) was
+    written; stops when more than CHECK_MAX of the rows are CHECK; warns about corrected rows that spell as CHECK."""
     check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
     if draft:
         if check_share > CHECK_MAX:
             print(f"build_chatclause: WARNING, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); a real freeze would stop", file=sys.stderr)
         c.write_lf(os.path.join(work, f"{period}.draft.txt"),
                    "".join(f"{x}|{s}|{r}{'|CHECK' if status != 'ok' else ''}\n" for x, s, r, status in drafted))
-        return st
+        return True
     if check_share > CHECK_MAX:
         sys.exit(f"build_chatclause: STOP, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); report to main (contract 2.1)")
     if st["corrected_then_check"]:
         print(f"build_chatclause: WARNING, {st['corrected_then_check']} corrected {period} rows spell as CHECK and are dropped; give READ", file=sys.stderr)
+    return False
+
+
+def write_frozen(work, period, frozen, st, extra=None, strict=False):
+    """Writes <period>.rows.txt, .sha256, .manifest.json (st plus the hash) and the `extra` {suffix: text} files. A period already frozen
+    with another hash stops. With `strict` (CE3) every other file must also equal what is on disk, or the run stops; equal files are
+    left alone. -> the SHA-256 of the rows."""
+    text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
+    sha = c.sha256_bytes(text.encode("utf-8"))
+    st["sha256"] = sha
+    files = {"rows.txt": text, "sha256": f"{sha}  {period}.rows.txt\n", **(extra or {}),
+             "manifest.json": json.dumps(st, ensure_ascii=False, indent=1) + "\n"}
+    sf = os.path.join(work, f"{period}.sha256")
+    if os.path.isfile(sf):
+        if open(sf).read().split()[0] != sha:
+            sys.exit(f"build_chatclause: STOP, the {period} period is frozen with another content; it is never rewritten")
+        if strict:
+            for suffix, body in files.items():
+                p = os.path.join(work, f"{period}.{suffix}")
+                if not os.path.isfile(p) or open(p, encoding="utf-8").read() != body:
+                    sys.exit(f"build_chatclause: STOP, the {period} period is frozen and {period}.{suffix} would differ; it is never rewritten")
+            return sha
+    for suffix, body in files.items():
+        c.write_lf(os.path.join(work, f"{period}.{suffix}"), body)
+    return sha
+
+
+def freeze_ce3(work, period, sample, pool_rows, extra, corrections_file=None, draft=False, readings=c.readings, others=frozenset(), drawn=None):
+    """Freezes a CE3 set (either side) in `work`. sample: [(context, sentence, source, message id)], the rows as drawn; drawn: every clause
+    of every drawn message [(source, message id, sentence)], default the sample's. Writes the files of write_frozen plus .sources.txt (the
+    source of each row, line for line) and .origin.tsv (drawn, private). Stops as gate and write_frozen do, and when a corrected sentence
+    is also in `others` or in another frozen CE3 set of the folder."""
+    frozen, drafted, st, tags = build_period([(x, s) for x, s, _src, _mid in sample], load_corrections(corrections_file), readings,
+                                             [(src, mid) for _x, _s, src, mid in sample])
+    if gate(work, period, drafted, st, draft):
+        return st
     held = set(others)
     for f in sorted(os.listdir(work)):
         if f.endswith(".rows.txt") and f[:-9] != period and ce3_name(f[:-9]):
@@ -581,18 +628,11 @@ def freeze_ce3(work, period, sample, pool_rows, extra, corrections_file=None, dr
     clash = {s for _x, s, _r in frozen} & held
     if clash:
         sys.exit(f"build_chatclause: STOP, {len(clash)} {period} sentences are also in another frozen chat set (section 3); report to main")
-    text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
-    sha = c.sha256_bytes(text.encode("utf-8"))
-    sf = os.path.join(work, f"{period}.sha256")
-    if os.path.isfile(sf) and open(sf).read().split()[0] != sha:
-        sys.exit(f"build_chatclause: STOP, the {period} period is frozen with another content; it is never rewritten")
-    c.write_lf(os.path.join(work, f"{period}.rows.txt"), text)
-    c.write_lf(sf, f"{sha}  {period}.rows.txt\n")
-    c.write_lf(os.path.join(work, f"{period}.sources.txt"), "".join(src + "\n" for src, _mid in tags))
-    c.write_lf(os.path.join(work, f"{period}.origin.tsv"), "".join(f"{src}\t{mid}\t{s}\n" for _x, s, src, mid in sample))
     st["rows_by_source"] = {k: sum(src == k for src, _mid in tags) for k in sorted({src for src, _mid in tags})}
-    st.update(extra, period=period, clauses_before_sampling_or_corrections=pool_rows, sha256=sha)
-    c.write_lf(os.path.join(work, f"{period}.manifest.json"), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
+    st.update(extra, period=period, clauses_before_sampling_or_corrections=pool_rows)
+    drawn = drawn if drawn is not None else [(src, mid, s) for _x, s, src, mid in sample]
+    write_frozen(work, period, frozen, st, {"sources.txt": "".join(src + "\n" for src, _mid in tags),
+                                           "origin.tsv": "".join(f"{src}\t{mid}\t{s}\n" for src, mid, s in drawn)}, strict=True)
     return st
 
 
@@ -639,8 +679,10 @@ def build_period(rows, corrections, readings=c.readings, tags=None):
 def freeze(work, period, corrections_file=None, draft=False, readings=c.readings, others=()):
     ce3 = ce3_name(period)
     if ce3:
-        sample, pool_rows, extra = ce3_rows(work, *ce3, others=load_exclude(others))
-        return freeze_ce3(work, period, sample, pool_rows, extra, corrections_file, draft, readings, load_exclude(others))
+        sample, pool_rows, extra, drawn = ce3_rows(work, *ce3, others=load_exclude(others))
+        if ce3[0] == "cdev" and pool_rows < CDEV_MIN_S1:
+            sys.exit(f"build_chatclause: STOP, the S1 cdev bucket holds {pool_rows} rows (< {CDEV_MIN_S1}); cdev would be almost all PTT, ask the maintainer (contract section 8)")
+        return freeze_ce3(work, period, sample, pool_rows, extra, corrections_file, draft, readings, load_exclude(others), drawn)
     for p in PRIOR.get(period, ()):
         if not os.path.isfile(os.path.join(work, f"{p}.sha256")):
             sys.exit("build_chatclause: STOP, freeze the tuning period first (contract 2.1 order (1) before (3))" if p == "tune" else
@@ -649,34 +691,17 @@ def freeze(work, period, corrections_file=None, draft=False, readings=c.readings
             sys.exit(f"build_chatclause: STOP, {p}.rows.txt is missing; {period} is checked against it")
     rows, pool_rows = period_rows(work, period)
     frozen, drafted, st = build_period(rows, load_corrections(corrections_file), readings)
-    check_share = st["dropped_check"] / st["rows_in"] if st["rows_in"] else 0
-    if draft:
-        if check_share > CHECK_MAX:
-            print(f"build_chatclause: WARNING, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); a real freeze would stop", file=sys.stderr)
-        c.write_lf(os.path.join(work, f"{period}.draft.txt"),
-                   "".join(f"{x}|{s}|{r}{'|CHECK' if status != 'ok' else ''}\n" for x, s, r, status in drafted))
+    if gate(work, period, drafted, st, draft):
         return st
-    if check_share > CHECK_MAX:
-        sys.exit(f"build_chatclause: STOP, {check_share:.1%} of the {period} rows are CHECK (> {CHECK_MAX:.0%}); report to main (contract 2.1)")
-    if st["corrected_then_check"]:
-        print(f"build_chatclause: WARNING, {st['corrected_then_check']} corrected {period} rows spell as CHECK and are dropped; give READ",
-              file=sys.stderr)
     for p in (PRIOR[period] if period.startswith("chatjudge") else ()):     # judge months never meet the pool
         seen = frozen_sentences(work, p)
         if any(s in seen for _x, s, _r in frozen):
             sys.exit(f"build_chatclause: STOP, a {period} sentence is also in the frozen {'chatclause' if p == 'tune' else p}; "
                      f"report to main ({'rerank-size 3.4' if period == 'chatjudge' else 'iteration plan Phase 0 item 7'})")
-    text = "".join(f"{x}|{s}|{r}\n" for x, s, r in frozen)
-    sha = c.sha256_bytes(text.encode("utf-8"))
-    sf = os.path.join(work, f"{period}.sha256")
-    if os.path.isfile(sf) and open(sf).read().split()[0] != sha:
-        sys.exit(f"build_chatclause: STOP, the {period} period is frozen with another content; it is never rewritten")
-    c.write_lf(os.path.join(work, f"{period}.rows.txt"), text)
-    c.write_lf(sf, f"{sha}  {period}.rows.txt\n")
     split = json.load(open(os.path.join(work, "split.json"), encoding="utf-8"))
-    st.update(period=period, clauses_before_sampling_or_corrections=pool_rows, sha256=sha,
+    st.update(period=period, clauses_before_sampling_or_corrections=pool_rows,
               months=split["judge_months"] if period == "judge" else split["pool_months"])
-    c.write_lf(os.path.join(work, f"{period}.manifest.json"), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
+    write_frozen(work, period, frozen, st)
     return st
 
 
