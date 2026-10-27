@@ -69,6 +69,28 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// zhen-mixed section 3.2: the word list ships in the bundle and the switch can be turned on, so a bundle without it, with a list
+    /// the core refuses, or with one where `rust` Space opens no English window must fail the selftest.
+    func testFailsWithoutTheEnglishList() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithARefusedEnglishList() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "AB\n".write(to: res.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWhenTheEnglishWindowDoesNotOpen() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "google\nhello\n".write(to: res.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithoutTheModel() throws {
         let res = try XCTUnwrap(TestData.resources(only: ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv"]))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)

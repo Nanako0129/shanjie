@@ -24,6 +24,8 @@ enum TestData {
         ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // colloquial-term.md: the colloquial table the selftest requires
+        // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
+        ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
     static let itPackRow = "ㄊㄨˊ-ㄒㄧㄤˋ-ㄕㄥ-ㄔㄥˊ\t圖像生成\t-6.60980192\tit\n"
@@ -102,9 +104,6 @@ final class FakeClient: TextClient {
     var appearance: NSAppearance?
 
     func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; lineAsks += 1; return line }
-    /// shift-toggle section 3: the insertion point's rectangle when nothing is marked.
-    var caret: NSRect? = NSRect(x: 300, y: 400, width: 2, height: 18)
-    func caretRect() -> NSRect? { caret }
 
     /// Every call of the three reading methods, and each range requested.
     private(set) var reads = 0
@@ -264,15 +263,14 @@ enum Keys {
         return code
     }
 
-    static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown, time: TimeInterval = 0,
-                      characters: String = "") -> NSEvent {
+    static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown) -> NSEvent {
         if type == .flagsChanged {
-            return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
+            return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
                                     context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
                                     keyCode: code) ?? event(code, flags: flags)
         }
-        return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
-                                context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+        return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                                context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
                                 keyCode: code)!
     }
 }

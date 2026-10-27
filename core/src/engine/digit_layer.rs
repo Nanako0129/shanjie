@@ -199,7 +199,7 @@ impl Engine {
         self.clear_pend();
         for &k in tail {
             if let Some((col, sym)) = Layout::Standard.symbol_of(k) {
-                self.shadow_push(k, col);
+                self.shadow_push(k, col, false);
                 self.pend[col] = Some(sym);
             }
         }
@@ -291,7 +291,6 @@ impl Engine {
             // Not in A.3.4's list of boundary keys, so as today: behind an unfinished syllable the key does nothing.
             (KeyKind::Up, _) => {
                 self.pred_dirty = true; // the row was taken at the top of `dispatch`
-                self.mark_noop(); // changes nothing: the short-word mark stays, by the same rule as every other arm that does nothing
                 self.handled()
             }
             (KeyKind::Esc, _) => {
@@ -486,7 +485,7 @@ impl Engine {
                     self.cursor = self.cursor.saturating_sub(1);
                     self.remove_syllable(self.cursor)?;
                 }
-                // Like the Chinese item of an English token's list: the word is fixed, nothing is learned.
+                // Like the Chinese item of the English window: the word is fixed, nothing is learned.
                 Ok(self.insert_token(syl, Some(word), None)?.commit)
             }
         }

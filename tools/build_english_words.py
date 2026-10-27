@@ -3,10 +3,11 @@
 輸入：SymSpell 的 frequency_dictionary_en_82_765.txt（每行「字 次數」，頻率遞減），釘在下面的 commit 與 SHA-256；
 輸入雜湊不符就失敗。過濾 `^[a-z]{3,32}$`（含撇號、數字、大寫或其他字元的字丟掉），依檔案順序取長度 3 的前 LEN3_CAP 個、
 長度 >= 4 的前 LEN4_CAP 個，重複的字只留第一個，輸出按位元組排序，一行一字、LF 結尾。
-輸出不進 App、也沒有記錄的雜湊（zhen-revert.md §2.8：單字表退場）；只當 `english-sim --recall --words` 的輸入清單。
+輸出的 SHA-256 記在 data/english-words.txt.sha256（scripts/build-app.sh 與 CI 核對）。
 
 用法：python3 tools/build_english_words.py --out FILE [--input FILE] [--len3 N] [--len4 N|all]
-印出行數與輸出的 SHA-256。--print-url、--print-commit、--print-input-sha256 只印釘住的下載網址、SymSpell commit 與輸入雜湊（下載與核對的常數只有這裡一份）。--len3、--len4 給 §4 的格點用；LEN3_CAP、LEN4_CAP 是出貨的值（起始值 3000 / 30000；§4.4 的格點 2026-10-14 量完：每格誤觸都是 0，照「可行格取詞數最多」
+印出行數與輸出的 SHA-256。--print-url、--print-commit、--print-input-sha256 只印釘住的下載網址、SymSpell commit 與輸入雜湊（scripts/build-app.sh 用，
+下載與核對的常數只有這裡一份）。--len3、--len4 給 §4 的格點用；LEN3_CAP、LEN4_CAP 是出貨的值（起始值 3000 / 30000；§4.4 的格點 2026-10-14 量完：每格誤觸都是 0，照「可行格取詞數最多」
 定為 3000 / 不設上限，82,730 詞，研究紀錄同日）。
 """
 import argparse

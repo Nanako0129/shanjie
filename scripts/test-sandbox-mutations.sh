@@ -147,7 +147,7 @@ A="$(copy 17)"; ditto "$A/$H" "$A/Contents/Helpers/Other.app"; resign_app "$A"
 app_fails 17 "$A" 3 "Contents/Helpers is not exactly"
 
 # Modes are not part of a code signature, so 18 to 23 need no re-signing.
-A="$(copy 18)"; chmod 700 "$A/Contents/Resources/digits.tsv"
+A="$(copy 18)"; chmod 700 "$A/Contents/Resources/english-words.txt"
 app_fails 18 "$A" 3 "a file in the bundle lacks o+r"
 
 A="$(copy 19)"; chmod o-x "$A/Contents/Resources/packs"
@@ -156,7 +156,7 @@ app_fails 19 "$A" 3 "a directory in the bundle lacks o+x"
 A="$(copy 20)"; chmod o-x "$A/$H/Contents/MacOS/shanjie-updater"
 app_fails 20 "$A" 3 "an executable in the bundle lacks o+x"
 
-A="$(copy 21)"; chmod g+w "$A/Contents/Resources/digits.tsv"
+A="$(copy 21)"; chmod g+w "$A/Contents/Resources/english-words.txt"
 app_fails 21 "$A" 3 "a file in the bundle is writable by group or others"
 
 A="$(copy 22)"; chmod u+s "$A/$H/Contents/MacOS/shanjie-updater"

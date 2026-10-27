@@ -115,8 +115,7 @@ final class CJKSpacingShellTests: XCTestCase {
         for _ in 0..<127 { c.type("su3") }
         c.type("c", flags: .shift)
         c.type("laude")
-        c.type(" ")  // Space closes the run (a Zhuyin key now goes on it, zhen-revert section 2.4): the token is unit 128, 127 x 你 + Claude is committed
-        c.type("2")  // and ㄉ starts a new syllable in the emptied composition
+        c.type("2")  // a Zhuyin key closes the run: the token is unit 128, 127 x 你 + Claude is committed, and ㄉ starts a new syllable
         let first = inserts(c)
         XCTAssertEqual(first.count, 1)
         XCTAssertEqual(first.first, String(repeating: "你", count: 127) + " Claude")
@@ -164,7 +163,6 @@ final class CJKSpacingShellTests: XCTestCase {
         for _ in 0..<127 { c.type("su3") }
         c.type("c", flags: .shift)
         c.type("laude")
-        c.type(" ")  // Space ends the run; a Zhuyin key would go on it (zhen-revert section 2.4)
         c.type("2")
         XCTAssertEqual(inserts(c), [String(repeating: "你", count: 127) + " Claude"])
         return c

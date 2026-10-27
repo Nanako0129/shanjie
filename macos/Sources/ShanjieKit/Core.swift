@@ -138,9 +138,13 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)
     }
 
-    /// zhen-mixed: the English mixing switch (the core's default is off): keys that cannot be a Zhuyin syllable revert
-    /// directly to the raw keys as an English run in the composition. It takes effect only with the standard layout and 可省略韻母 off;
-    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
+    /// zhen-mixed: the English word list, `[a-z]{3,32}` per line; 0 ok, 3 refused (the previous list, or none, stays). Call it once
+    /// after `make`, like `loadLM`.
+    func loadEnglish(path: String) -> Int32 { shanjie_engine_load_english(handle, path) }
+
+    /// zhen-mixed: whether Space after an English word typed into one unfinished syllable opens the English window (the core's
+    /// default is off; it needs the loaded list and the standard layout); returns the snapshot. Sent to every engine
+    /// `Shell.build()` makes.
     func setEnglish(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)
@@ -154,25 +158,19 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
     }
 
-    /// zhen-revert: whether a key typed over the symbol already in its column reverts the unfinished syllable to the raw keys as
-    /// English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
-    func setEnglishOverwrite(_ on: Bool) -> CoreResult {
+    /// zhen-inline: whether the English typed into the unfinished syllable shows as letters while it can still become a listed word
+    /// (the core's default is true); returns the snapshot, so a composition on screen is drawn again. Sent to every engine
+    /// `Shell.build()` makes.
+    func setEnglishInline(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
-        return Self.take(shanjie_engine_set_english_overwrite(handle, on ? 1 : 0, &out), out)
+        return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
     }
 
-    /// zhen-keyorder with zhen-revert: whether keys out of Zhuyin's column order, and a tone key that makes a syllable the lexicon lacks,
-    /// revert to the raw keys as English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    /// zhen-keyorder: whether keys out of Zhuyin's column order count as evidence of English (the core's default is false); returns the
+    /// snapshot (turning it off closes an open English window). Sent to every engine `Shell.build()` makes.
     func setEnglishKeyOrder(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
-    }
-
-    /// shift-toggle: the ASCII state of the app the shell is serving (the core's default is off). In it a printable character key goes on the
-    /// English run as typed; returns the snapshot (the unfinished syllable has become the run). Sent on activate, owner change and toggle.
-    func setAscii(_ on: Bool) -> CoreResult {
-        var out: UnsafeMutablePointer<ShanjieOutput>?
-        return Self.take(shanjie_engine_set_ascii(handle, on ? 1 : 0, &out), out)
     }
 
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }

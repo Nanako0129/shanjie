@@ -157,55 +157,57 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   (see set_english) as a token; if that is the 128th unit the snapshot carries the composition in `commit`.
 //   No effect without a loaded model.
 int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// zhen-mixed (docs/contracts/zhen-mixed.md): the English word list. 0 ok; 1 engine or path NULL; 2 path not UTF-8; 3 unreadable,
+//   not a regular file, over 4 MiB or 200,000 lines, a line outside [a-z]{3,32}, a duplicate line, a BOM. Failure keeps the
+//   previous list (or none). Does not change the switch or the current display. Call it once after shanjie_engine_new.
+int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 // set_english 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_abbreviation in its codes and its
-//   snapshot (handled 1; commit "" except as noted for turning it off, below); 1 when engine or out is NULL. With 1, and only with the
-//   standard layout and the abbreviation composer off, the engine reverts to the raw keys the moment the
-//   unfinished syllable cannot be what was meant (docs/contracts/zhen-revert.md): the unfinished Zhuyin goes and an English run (the
-//   run of docs/contracts/zhen-inline.md section 1.3b, underlined by the output's english_run_utf16_start / english_run_utf16_len)
-//   holds the keys as typed, in the composition at the cursor. Three triggers: (a) a Zhuyin key over the symbol already in its
-//   column (`o k` is `ok`; the switch set_english_overwrite), (b) a Zhuyin key in a column before one that is filled (`l s` is
-//   `ls`; the switch set_english_key_order), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
-//   `cup`, `s 7` is `s7`; Space under set_english alone, a tone key under set_english_key_order), except when the adjacent-key rule
-//   of set_fuzzy (bit 4) accepts the syllable. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
-//   never reverts: the candidate list opened right after it adds its lower and upper case as its last two items, and choosing one
-//   swaps that one syllable for an English token.
-//   Keys on the run: letters, and the Zhuyin keys that are not letters (1 2 5 8 9 0 , . ; / -), go on it; a tone key (3 4 6 7) splits it when
-//   the run ends in two or more symbols, in column order, that the tone makes a syllable the lexicon has (`o k j i 3` is the English
-//   `ok` and the syllable ㄨㄛˇ), else goes on it; Space ends it (the space is eaten) as one English token; Backspace takes one key; Esc
-//   right after a revert that nothing changed brings the Zhuyin back, else takes the whole run; every other key ends it first. A token
-//   that Space made at once (trigger (c) at Space: `c u p` Space) is a finished token with nothing to bring back: Esc then does what it
-//   does after any English token (clears the composition); Backspace takes one letter of it.
-//   An English token is one unit like a punctuation mark in the composition (the arrow keys take it whole, the next word starts a new
-//   sentence, it is learned under the neighbour key `^>_punct_en`); a token a revert made keeps, as the last item of its writings list
-//   (Down right after it), the Chinese item of the syllable the keys would have made when the lexicon has it. Other keys of
-//   docs/contracts/zhen-inline.md stand:
-//   - Backspace deletes English one letter at a time (section 1.3g): with the cursor right after an English token (no unfinished
-//     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes). Space
-//     units and punctuation tokens still go whole.
-//   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in column order, then the shifted letter); the output
-//     fields mark the run in preedit (0 and 0 otherwise). Without set_english the Shift rules (s3a rules 13, 21, 22) are unchanged.
+//   snapshot (handled 1; commit "" except as noted for turning it off, below); 1 when engine or out is NULL. With 1, and only with a loaded list, the standard layout and
+//   the abbreviation composer off, Space after an English word typed into one unfinished syllable (the keys typed are a listed
+//   word and at least one key replaced a symbol in an occupied column; two when the leftover syllable with tone 1 is itself in
+//   the lexicon) opens the English window (s3a rule 10e): the word, Capitalised, UPPER and, when the leftover syllable is in
+//   the lexicon, its first entry. 1-9, Enter or pick(index) on an English item does not commit (docs/contracts/zhen-inline.md):
+//   the item becomes an English token at the cursor that stays in the composition (one unit like a punctuation mark: the arrow
+//   keys take it whole, the next word starts a new sentence; Backspace takes one letter, see below), and it is sent with the rest. The Chinese item
+//   becomes a fixed word. No effect without a list. Call it after every engine creation, like set_abbreviation.
+//   Key handling that comes with it (docs/contracts/zhen-inline.md sections 1.3, 1.3b, 1.3c, 1.3e, 1.3f):
+//   - Auto-keep: a Zhuyin key that cannot continue the letters on screen (a whole listed word) keeps the word as an English
+//     token and starts the next syllable; a Zhuyin key with the English window open first keeps the selected item.
+//   - Backspace deletes English one letter at a time (section 1.3g): with the letters on screen it takes the last letter and the
+//     rest becomes an English run at the cursor (no replay, no Zhuyin); with the cursor right after an English token (no
+//     unfinished syllable, no window, no run) it removes the token and opens a run with its text less the last letter (a
+//     one-letter token just goes). Space units and punctuation tokens still go whole.
+//   - Shift+letter starts an English run (an English token in the making, not a unit until it ends): letters go on it as
+//     typed, shifted or not, and the run is never auto-kept; Space ends it (the space is eaten), Backspace and Esc take
+//     letters off, every other key ends it first. While a run is open the output's english_run_utf16_start and
+//     english_run_utf16_len mark it in preedit (0 and 0 otherwise). Without set_english the Shift rules (s3a rules 13, 21,
+//     22) are unchanged.
 //   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
 //     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
 //     With the cursor at 0 in front of one of them Space opens nothing; a space unit has no list at all (Down opens nothing).
-//   - An English token or space unit that makes the 128th unit sends the whole composition in `commit` of that call's output (the key
-//     that did it, the pick, or the settings call), never in a later one.
-//   Turning it off, like turning the abbreviation composer on, ends an open English run as a token (a run that makes the 128th unit sends
-//   the composition in the snapshot's `commit`).
+//     A space unit is learned under the same neighbour key as an English token (`^>_punct_en`).
+//   - With the cursor right after an English token and no unfinished syllable, only Down lists its writings (as typed, lower
+//     case, Capitalised, UPPER); a token made by an auto-keep adds a Chinese item, so a wrong keep can be undone.
+//   - An English token or space unit (from an item, an auto-keep, a run or Space) that makes the 128th unit sends the whole
+//     composition in `commit` of that call's output (the key that did it, the pick, or the settings call), never in a later one.
+//   Turning it off, like turning the abbreviation composer on, closes the window and ends an open English run as a token
+//   (a run that makes the 128th unit sends the composition in the snapshot's `commit`).
 //   Digits (docs/contracts/digits.md): with it on (standard layout, abbreviation composer off, a model and `digits.tsv` in the data
 //   directory; the table is optional, without it nothing below happens) the keys 0-9 . / - type half-width digit-string tokens
 //   into the composition: each key is scored as digit or Zhuyin from the text before it, a run keeps its last four keys unsettled,
 //   and a Zhuyin key outside the alphabet, a tone key or Space settles the syllable when it wins. DOWN, ENTER and SHIFT+ENTER end
 //   the run as the screen shows it (digits.md A.12: the keys shown as digits become tokens, the keys shown as Zhuyin stay an
-//   unfinished syllable); every other key first turns the unsettled keys into digits. While an English run is open the digit layer does
-//   not step in (the digit keys go on the run). Turning it off (or the abbreviation composer on) does that too; the snapshot's `commit` may carry
+//   unfinished syllable); every other key first turns the unsettled keys into digits. Turning it off (or the abbreviation composer on) does that too; the snapshot's `commit` may carry
 //   the 128-unit composition.
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
-// set_english_overwrite 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
-//   snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-revert.md). With 1 (and set_english(1)) a Zhuyin key
-//   over the symbol already in its column reverts the unfinished syllable to the raw keys as an English run (trigger (a), see
-//   set_english): `o k` is `ok`. With 0 the key replaces the symbol, as it always did. Nothing is open that the switch could close
-//   (an English run is text), so the snapshot is the output before the call. Call it after every engine creation, like set_english.
-int32_t shanjie_engine_set_english_overwrite(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_english_inline 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL. With 1 (and set_english(1)) the unfinished syllable shows as
+//   the letters typed instead of the Zhuyin while all of these hold: the cursor is at the end with one unfinished unit, at least
+//   3 letters, the overwrite condition of the English window's trigger, and a listed word starts with the letters. Enter (and
+//   reset with commit) then send the letters, and Backspace takes the last letter and makes the rest an English run (zhen-inline section 1.3g).
+//   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
+//   after every engine creation, like set_english.
+int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // fuzzy input (docs/contracts/fuzzy-input.md): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
 //   and bit 4 the adjacent-key slips; any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
 //   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
@@ -217,30 +219,14 @@ int32_t shanjie_engine_set_english_overwrite(ShanjieEngine *engine, uint32_t ena
 //   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
 //   every engine creation, like set_english.
 int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
-// set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation (0 before docs/contracts/zhen-revert.md), like
-//   set_english_overwrite in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL
-//   (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) a Zhuyin key in a column before one that holds a symbol of the
-//   unfinished syllable reverts it to the raw keys as an English run (trigger (b), see set_english): `l s` is `ls`; and a tone key
-//   that completes a syllable the lexicon lacks does the same (trigger (c) on a tone key): `s 7` is `s7`. With 0 the symbol goes into
-//   its column and the tone key does nothing for such a syllable, as it always did. An English run is text and stays, so the snapshot is the output
-//   before the call. Call it after every engine creation, like set_english_overwrite.
+// set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_english_inline in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) the
+//   evidence for English counts a Zhuyin key typed in a column below one that holds a symbol of the unfinished syllable (not a replacing key,
+//   which already counts) as well as a replaced symbol; and a Space can open the English window for a listed word whose syllable
+//   does not exist, and for one of the two-letter words of the core's TWO_LETTER (ok, ls, cd ...; each can have evidence) with one piece of evidence. With 0
+//   the engine is the one without this function, bit for bit. Turning it off closes an open English window, whatever opened it, which clears the shadow
+//   (the unfinished syllable stays); with no window open nothing changes. Call it after every engine creation, like set_english_inline.
 int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
-// set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
-//   (docs/contracts/shift-toggle.md). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
-//   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes
-//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's keys (in column order)
-//   open the English run, as Shift+letter does (`c` stays `c`); with no syllable the run opens with the first character. Where the
-//   core has no English run to keep a composition in (the ETen layout, the abbreviation composer, set_english 0) 1 only records the
-//   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first). From then
-//   on a CHAR key without modifier bits whose ch is 0x21-0x7E is handled right after rule 1 (Caps Lock / Option / Command / Control
-//   pass through), before the prediction row, the digit run, the English run and the window: a letter, digit or one of `,.;/-` goes
-//   on the English run as it is (no lower case, no tone key, no punctuation or Zhuyin meaning, no revert or split, at most 32
-//   characters a run, `1` is a character, never a pick); any other character settles the open run as a token (no space) and goes in
-//   as its own half-width punctuation unit. Every other key keeps its rule (Space ends an open run as a token, and with no open run
-//   and the cursor right after a token unit types a space unit, so `Hi! there` works; Down opens the writings list, Enter sends,
-//   Backspace deletes). With 0 an open run ends as a token (no space) and the usual rules return. An empty
-//   composition only records the state. The state survives reset and commit. The shell calls it on activate, owner change and toggle.
-int32_t shanjie_engine_set_ascii(ShanjieEngine *engine, uint32_t on, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).

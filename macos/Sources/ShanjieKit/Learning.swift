@@ -111,16 +111,14 @@ public struct MenuEntry: Equatable, Sendable {
         public static let prediction = "即時預測"
         public static let english = "中英混打（實驗）"
         /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
-        public static let englishDigitsNote = "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。"
-        /// The toggle under it and the line under that (docs/contracts/zhen-keyorder.md section 3, zhen-revert section 3).
+        public static let englishDigitsNote = "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。"
+        /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
+        public static let englishDisplay = "英文的顯示"
+        public static let englishDisplayTyped = "打字時就顯示"
+        public static let englishDisplaySpace = "按空白才顯示"
+        /// The toggle under the display choice and the line under it (docs/contracts/zhen-keyorder.md section 3).
         public static let englishKeyOrder = "依按鍵順序判斷英文"
-        public static let englishKeyOrderNote = "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。"
-        /// The toggle after it and its line (zhen-revert section 3).
-        public static let englishOverwrite = "重打同一個位置算英文"
-        public static let englishOverwriteNote = "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。"
-        /// The Shift-toggle switch in the settings window and the line under it (docs/contracts/shift-toggle.md section 1).
-        public static let shiftToggle = "單按 Shift 切換中英"
-        public static let shiftToggleNote = "單按一下左或右 Shift 在中文和英文之間切換，游標旁會短暫顯示「英」或「中」。每個 App 各自記住；組字區有字時，之後打的字母接在後面當英文。"
+        public static let englishKeyOrderNote = "ok、ls、cup 這類短詞不用按 Shift。開了之後，用重打同一個位置來改錯的注音，比較容易被當成英文。"
         /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
@@ -278,7 +276,7 @@ extension Session {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
         // zhen-mixed section 3.2: after 即時預測 and before 語意校正, where 可省略韻母 sits when it is shown (the app hides it, so there it
-        // follows 即時預測 directly); greyed (checkmark kept) when the layout is Eten.
+        // follows 即時預測 directly); greyed (checkmark kept) when this engine has no word list or the layout is Eten.
         items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishEnabled))
         // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.

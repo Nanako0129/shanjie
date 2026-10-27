@@ -1,13 +1,6 @@
 //! Digits.md A.4.1 #40 and #50: with the feature off, or without its table, the engine is the engine of the slice before, field for field.
-//! `digits-off.txt` (core/tests/fixtures) is the output of the base commit of the digits PR for the scripts of rows #1-#39
-//! (`common/digits_scripts.rs`); this file only uses what that commit has, so the same file generates it there.
-//!
-//! `digits-off-en.txt` (the switch on, no table) was that commit's output too until zhen-revert (docs/contracts/zhen-revert.md section 2.3):
-//! without the digit layer the digit keys are Zhuyin keys like any other, and with English mixing on a key over the symbol in its column
-//! (`1 2`: ㄅ then ㄉ) or in front of a filled column reverts to the raw keys, so these scripts now stay as the keys typed (an English run
-//! in the composition) where they used to make Zhuyin. It was regenerated with the command below by zhen-revert PR 1; 26 of the 39 rows
-//! differ, all of them rows of digit keys typed without the table. With the table (digits.md A.4.1 #1-#39 on the real layer) nothing
-//! changes: `engine_digits.rs`.
+//! The two fixtures (core/tests/fixtures/digits-off.txt and digits-off-en.txt) are the outputs of the base commit of the digits PR for the
+//! scripts of rows #1-#39 (`common/digits_scripts.rs`); this file only uses what that commit has, so the same file generates them there:
 //!
 //!   DIGITS_FIXTURE_DIR=<dir> cargo test --release --locked -p core --test engine_digits_off -- --test-threads=1
 //!
@@ -22,16 +15,17 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
 
-/// Recipe A: the real data directory (in the digits tree it holds digits.tsv, which `Engine::new` reads), the model,
+/// Recipe A: the real data directory (in the digits tree it holds digits.tsv, which `Engine::new` reads), the model, the word list,
 /// `set_english(false)`.
 fn engine_off() -> Engine {
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(false).unwrap();
     e
 }
 
-/// Recipe B: a data directory without digits.tsv (links to the other files), the model, `set_english(true)`.
+/// Recipe B: a data directory without digits.tsv (links to the other files), the model, the word list, `set_english(true)`.
 fn engine_no_table(tag: &str) -> Engine {
     let dir = std::env::temp_dir().join(format!("shanjie-digits-no-table-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -44,6 +38,7 @@ fn engine_no_table(tag: &str) -> Engine {
     let mut e = Engine::new(&dir, Layout::Standard).expect("an engine builds without digits.tsv");
     e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap(); // reads the overlay and demote files again
     std::fs::remove_dir_all(&dir).unwrap();
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     e
 }

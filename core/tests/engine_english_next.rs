@@ -1,5 +1,6 @@
 //! English before Chinese (docs/contracts/english-next.md 2 and 3.4): the engine on the real lexicon and model with a small test table.
-//! The key sequence is the contract's: Shift+J, o, e, Space (the run ends and the Space is eaten), g (ㄕ). Key script: whitespace separated, `_` Space, `S-x` Shift+x, a
+//! The key sequence is the contract's: Shift+J, o, e, Space (the run ends and the Space is eaten), g (ㄕ). The word list is the synthetic
+//! eval/golden/english-tiny.txt, as in the other English engine tests. Key script: whitespace separated, `_` Space, `S-x` Shift+x, a
 //! single character is that keycap.
 use core::engine::*;
 use core::english_next::EnglishTable;
@@ -46,11 +47,12 @@ fn shared() -> &'static Shared {
     })
 }
 
-/// Standard layout, the model and the switch on; the table (`with_table`) and the digit table (`with_digits`).
+/// Standard layout, the model, the word list and the switch on; the table (`with_table`) and the digit table (`with_digits`).
 fn make(with_table: bool, with_digits: bool) -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
+    e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     if with_table {
         e.set_english_next(Some(s.table.clone()));
@@ -247,18 +249,20 @@ fn decoding_is_the_same_with_and_without_the_table() {
     assert_ne!(with.iter().map(|o| o.candidates.clone()).collect::<Vec<_>>(), without.iter().map(|o| o.candidates.clone()).collect::<Vec<_>>());
 }
 
-/// zhen-revert section 2.3: typed in lower case, j o e is not Chinese either: `e` (ㄍ) is in a column before the one `o` (ㄟ) holds, so it
-/// reverts (b) to the raw keys, and Space makes the token `joe`. Zhen-inline 1.3 kept it as Zhuyin, and the
-/// first test's token needed Shift.
+/// zhen-inline 1.3: typed in lower case, j o e does not become a token, whatever the word list holds (no key overwrites a symbol, and
+/// ㄍㄨㄟ is a syllable), so the first test's token needs Shift.
 #[test]
-fn lower_case_joe_reverts_to_the_keys() {
+fn lower_case_joe_is_not_kept() {
+    let list = std::env::temp_dir().join(format!("shanjie-english-next-list-{}.txt", std::process::id()));
+    std::fs::write(&list, "joe\n").unwrap();
     let mut e = make(true, false);
-    for t in "j o e".split_whitespace() {
+    e.load_english(&list).unwrap();
+    std::fs::remove_file(&list).unwrap();
+    for t in "j o e _ g".split_whitespace() {
         e.key(key_of(t)).unwrap();
+        assert!(!e.english_autokept());
     }
-    assert_eq!(e.english_reverted(), Some(core::engine::Revert::Order));
-    e.key(key_of("_")).unwrap();
-    assert_eq!(e.digits_syls(), ["_punct_joe"]);
+    assert!(!e.digits_syls().iter().any(|s| s.starts_with("_punct_")));
 }
 
 // ---------- context-return: the English word the app's text ends with (docs/contracts/context-return.md sections 2 and 4) ----------

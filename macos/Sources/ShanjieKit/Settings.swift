@@ -20,7 +20,7 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
     @Published public private(set) var abbreviation = false
-    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the standard layout, like
+    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the word list loaded and the standard layout, like
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
@@ -29,13 +29,12 @@ public final class SettingsModel: ObservableObject {
     /// value is kept).
     @Published public private(set) var fuzzyFlags: UInt32 = 0
     @Published public private(set) var fuzzyAdjacentEnabled = true
-    /// The 重打同一個位置算英文 choice under the 中英混打 toggle (zhen-revert section 3): a key over the symbol already in its column reverts
-    /// to the raw keys as English. Default true. Enabled when the toggle is enabled and on.
-    @Published public private(set) var englishOverwrite = true
-    @Published public private(set) var englishOverwriteEnabled = false
-    /// The 依按鍵順序判斷英文 choice (zhen-keyorder section 3, default true since zhen-revert): a key out of column order, and a tone key
-    /// that makes a syllable the lexicon lacks, revert to English. Enabled on the overwrite choice's condition.
-    @Published public private(set) var englishKeyOrder = true
+    /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
+    /// enabled and on.
+    @Published public private(set) var englishInline = true
+    @Published public private(set) var englishInlineEnabled = false
+    /// The 依按鍵順序判斷英文 choice under them (zhen-keyorder section 3), default false; enabled on the display choice's condition.
+    @Published public private(set) var englishKeyOrder = false
     @Published public private(set) var englishKeyOrderEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).
     @Published public private(set) var spacing = false
@@ -53,8 +52,6 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var rerankLevelEnabled = false
     @Published public private(set) var acgPack = true
     @Published public private(set) var itPack = true
-    /// 單按 Shift 切換中英 (shift-toggle section 1).
-    @Published public private(set) var shiftToggle = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
@@ -98,8 +95,8 @@ public final class SettingsModel: ObservableObject {
         englishEnabled = shell.englishEnabled
         fuzzyFlags = shell.fuzzyFlags
         fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
-        englishOverwrite = shell.englishOverwriteOn
-        englishOverwriteEnabled = shell.englishOverwriteEnabled
+        englishInline = shell.englishInlineOn
+        englishInlineEnabled = shell.englishInlineEnabled
         englishKeyOrder = shell.englishKeyOrderOn
         englishKeyOrderEnabled = shell.englishKeyOrderEnabled
         demote = shell.demoteOn
@@ -109,7 +106,6 @@ public final class SettingsModel: ObservableObject {
         rerankLevelEnabled = shell.rerankLevelEnabled
         acgPack = shell.acgPackOn
         itPack = shell.itPackOn
-        shiftToggle = shell.shiftToggleOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
         profileMode = shell.profileMode
@@ -134,14 +130,13 @@ public final class SettingsModel: ObservableObject {
         precondition((0..<5).contains(bit))
         shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
     }
-    public func setEnglishOverwrite(_ on: Bool) { shell.applyEnglishOverwrite(on) }
+    public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
     public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
     public func setItPack(_ on: Bool) { shell.setItPack(on) }
-    public func setShiftToggle(_ on: Bool) { shell.applyShiftToggle(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
         refreshExternal()  // not read on the change notification

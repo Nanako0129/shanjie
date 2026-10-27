@@ -24,40 +24,9 @@ public protocol TextClient: AnyObject {
     /// client reports none.
     /// `cursor`: the composition cursor in UTF-16 units within the marked text.
     func lineRect(cursor: Int) -> NSRect?
-    /// shift-toggle section 3: the insertion point's line rectangle when nothing is marked (`attributes(forCharacterIndex: 0,
-    /// lineHeightRectangle:)` in the app), `nil` if the client reports none.
-    func caretRect() -> NSRect?
     /// s3b2 section 10: the light or dark appearance of the view being typed into, `nil` if unknown.
     var appearance: NSAppearance? { get }
 }
-
-extension TextClient {
-    /// A client that cannot tell shows no hint.
-    public func caretRect() -> NSRect? { nil }
-}
-
-/// The 英/中 hint of the Shift toggle (shift-toggle section 3): its own small window, display only, never key.
-@MainActor
-public protocol ShiftHintPanel: AnyObject {
-    /// Shows `text` above `lineRect` (screen coordinates), left edges aligned, for `SHIFT_HINT_SECONDS`, then fades it away.
-    func show(_ text: String, lineRect: NSRect, appearance: NSAppearance?, glassTint: Double)
-}
-
-/// Where the 單按 Shift 切換中英 switch is kept (shift-toggle section 1): `nil` means never chosen, which is on.
-@MainActor
-public protocol ShiftToggleStore: AnyObject {
-    var shiftToggle: Bool? { get set }
-}
-
-/// The in-memory ShiftToggleStore.
-@MainActor
-public final class MemoryShiftToggleStore: ShiftToggleStore {
-    public var shiftToggle: Bool?
-    public init(_ shiftToggle: Bool? = nil) { self.shiftToggle = shiftToggle }
-}
-
-/// SHIFT_HINT_SECONDS (shift-toggle section 3): how long the 英/中 hint stays before it fades.
-public let SHIFT_HINT_SECONDS: TimeInterval = 1.0
 
 /// A display-only candidate list (an NSPanel in the app). It never receives keys.
 @MainActor
@@ -173,11 +142,11 @@ public final class MemorySpacingStore: SpacingStore {
 @MainActor
 public protocol EnglishStore: AnyObject {
     var english: Bool? { get set }
-    /// The choice under it (docs/contracts/zhen-revert.md section 3): a key typed over the symbol already in its column is English
-    /// (`ok`, `rust`, `gta6`). `nil` means never chosen, which is true.
-    var englishOverwrite: Bool? { get set }
-    /// The choice next to it (docs/contracts/zhen-keyorder.md section 3, default changed by zhen-revert): keys out of Zhuyin's column order,
-    /// and a tone key that makes a syllable the lexicon lacks, are English. `nil` means never chosen, which is true.
+    /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
+    /// when Space opens the window. `nil` means never chosen, which is true.
+    var englishInline: Bool? { get set }
+    /// The choice under that (docs/contracts/zhen-keyorder.md section 3): keys out of Zhuyin's column order count as evidence of English.
+    /// `nil` means never chosen, which is false.
     var englishKeyOrder: Bool? { get set }
 }
 
@@ -185,11 +154,11 @@ public protocol EnglishStore: AnyObject {
 @MainActor
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
-    public var englishOverwrite: Bool?
+    public var englishInline: Bool?
     public var englishKeyOrder: Bool?
-    public init(_ english: Bool? = nil, overwrite: Bool? = nil, keyOrder: Bool? = nil) {
+    public init(_ english: Bool? = nil, inline: Bool? = nil, keyOrder: Bool? = nil) {
         self.english = english
-        self.englishOverwrite = overwrite
+        self.englishInline = inline
         self.englishKeyOrder = keyOrder
     }
 }
@@ -441,13 +410,15 @@ public final class Shell {
     /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
-    /// zhen-revert section 3: whether a key typed over the symbol already in its column is English (default true: `UserDefaults` key
-    /// `englishOverwrite`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
-    private(set) var englishOverwriteOn = true
-    /// zhen-keyorder section 3 with zhen-revert's default: whether keys out of Zhuyin's column order, and a tone key that makes a
-    /// syllable the lexicon lacks, are English (default true: `UserDefaults` key `englishKeyOrder`, absent is true, a saved false stays
-    /// false); sent to every engine `build()` makes. Only matters while `englishOn`.
-    private(set) var englishKeyOrderOn = true
+    /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
+    /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishInlineOn = true
+    /// zhen-keyorder section 3: whether keys out of Zhuyin's column order count as evidence of English (default false: `UserDefaults`
+    /// key `englishKeyOrder`, absent is false); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishKeyOrderOn = false
+    /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
+    /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
+    private(set) var englishAvailable = false
     private let fuzzyStore: FuzzyStore
     /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
     /// `build()` makes. Only the bits the core knows are kept.
@@ -470,28 +441,6 @@ public final class Shell {
     var loadedPackTitles: [String] {
         [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
     }
-    private let shiftToggleStore: ShiftToggleStore
-    /// shift-toggle section 1: a lone Shift tap switches between Chinese and English (default on). Off: `flagsChanged` is not handled,
-    /// the states below are cleared and the core is back to `set_ascii(0)`.
-    private(set) var shiftToggleOn = true
-    let shiftHint: ShiftHintPanel?
-    var shiftTap = ShiftTap()
-    /// Seconds since the latest mouse-button press (left, right, other) in this login session; a test replaces it. No permission needed.
-    var mouseAgo: () -> TimeInterval = {
-        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
-            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
-    }
-    /// The system uptime, the clock `NSEvent.timestamp` uses; a test replaces it.
-    var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
-    /// What the latest `build()` sent its engine as `set_ascii` (test hook); `nil` before the first build.
-    private(set) var lastBuiltAscii: Bool?
-    /// The composition cursor (UTF-16) of the last snapshot applied: where the Shift hint anchors while composing.
-    var composingCursor = 0
-    /// shift-toggle section 2: the apps (bundle ID, `""` for a client with none) whose state is English. In memory only: a restart
-    /// of the input method puts every app back to Chinese.
-    var asciiApps: Set<String> = []
-    /// What the current engine was last told by `set_ascii` (the engine is the owner's; `build()` sends it again to a new one).
-    var engineAscii = false
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -509,6 +458,8 @@ public final class Shell {
     static let tinyLMFile = "tinylm.sjtl"
     /// colloquial-term.md section 2.3: the colloquial table (常談 SJ-CL), in Resources next to the other model files.
     static let colloquialFile = "colloquial.sjlm"
+    /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
+    static let englishFile = "english-words.txt"
     private let rerankRunner: RerankRunner
     /// A job is with the runner (section 2.1: one at a time).
     private var rerankRunning = false
@@ -539,16 +490,16 @@ public final class Shell {
     /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
     /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
     var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
-    /// The 中英混打（實驗） menu item and settings toggle, likewise: the standard layout (the core records no
+    /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
-    var englishEnabled: Bool { mode == .standard }
+    var englishEnabled: Bool { englishAvailable && mode == .standard }
     /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
     /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
     var fuzzyAdjacentEnabled: Bool { mode == .standard }
-    /// The 重打同一個位置算英文 choice under it is enabled on the same condition and while the switch itself is on.
-    var englishOverwriteEnabled: Bool { englishEnabled && englishOn }
-    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the overwrite choice.
-    var englishKeyOrderEnabled: Bool { englishOverwriteEnabled }
+    /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
+    var englishInlineEnabled: Bool { englishEnabled && englishOn }
+    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the display choice.
+    var englishKeyOrderEnabled: Bool { englishInlineEnabled }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -641,8 +592,6 @@ public final class Shell {
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
-    /// `shiftToggleStore`, `shiftHint`: the 單按 Shift 切換中英 switch and its 英/中 hint window (shift-toggle section 1, 3). The defaults (in
-    /// memory, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
@@ -656,13 +605,8 @@ public final class Shell {
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
                 spacingStore: SpacingStore,
-                itPackStore: ItPackStore = MemoryItPackStore(),
-                shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
-                shiftHint: ShiftHintPanel? = nil) {
+                itPackStore: ItPackStore = MemoryItPackStore()) {
         self.resources = resources
-        self.shiftToggleStore = shiftToggleStore
-        shiftToggleOn = shiftToggleStore.shiftToggle ?? true
-        self.shiftHint = shiftHint
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
         // Read once: the converted table never changes while the process runs, and the layout
@@ -689,8 +633,8 @@ public final class Shell {
         spacingOn = spacingStore.spacing == true
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
-        englishOverwriteOn = englishStore.englishOverwrite ?? true
-        englishKeyOrderOn = englishStore.englishKeyOrder ?? true // zhen-revert: was false; a saved false stays false
+        englishInlineOn = englishStore.englishInline ?? true
+        englishKeyOrderOn = englishStore.englishKeyOrder ?? false
         self.fuzzyStore = fuzzyStore
         fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
@@ -761,8 +705,8 @@ public final class Shell {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
-    func applyEnglishOverwrite(_ on: Bool) {
-        if let o = owner { o.applyEnglishOverwrite(on) } else { dropOnFailure(setEnglishOverwrite(on)) }
+    func applyEnglishInline(_ on: Bool) {
+        if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
     }
 
     func applyEnglishKeyOrder(_ on: Bool) {
@@ -886,17 +830,18 @@ public final class Shell {
         return engine?.setFuzzy(fuzzyFlags)
     }
 
-    /// The settings window's 重打同一個位置算英文 choice (zhen-revert section 3): stored, and sent to the engine; the snapshot is for the
-    /// caller to show (nothing on screen changes: an English run is text).
-    func setEnglishOverwrite(_ on: Bool) -> CoreResult? {
-        englishOverwriteOn = on
-        englishStore.englishOverwrite = on
+    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
+    /// caller to show, so a composition on screen is drawn again in the new display.
+    func setEnglishInline(_ on: Bool) -> CoreResult? {
+        englishInlineOn = on
+        englishStore.englishInline = on
         defer { changed() }
-        return engine?.setEnglishOverwrite(on)
+        return engine?.setEnglishInline(on)
     }
 
     /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
-    /// caller to show (nothing on screen changes).
+    /// caller to show. The core closes an open English window when the choice goes off, whatever evidence opened it; otherwise nothing
+    /// on screen changes.
     func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
         englishKeyOrderOn = on
         englishStore.englishKeyOrder = on
@@ -994,25 +939,6 @@ public final class Shell {
         Log.shell.debug("it pack switched")
     }
 
-    /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the
-    /// standard layout and the abbreviation composer off. Without it a switch to English first sends the composition (section 2).
-    var shadowOn: Bool { englishOn && mode == .standard && !abbreviationOn }
-
-    /// The settings window's 單按 Shift 切換中英: stored; off clears every app's state and the core's (section 1). The snapshot is shown by the owner.
-    func applyShiftToggle(_ on: Bool) {
-        shiftToggleOn = on
-        shiftToggleStore.shiftToggle = on
-        if !on {
-            asciiApps.removeAll()
-            shiftTap = ShiftTap()
-            if let o = owner { o.pushAscii(false) } else if engineAscii {
-                engineAscii = false
-                dropOnFailure(engine?.setAscii(false))
-            }
-        }
-        changed()
-    }
-
     /// The pack bits the engine is built with: the ACG and IT+AI switches.
     private var packMask: UInt32 { (acgPackOn ? UInt32(SHANJIE_PACK_ACG) : 0) | (itPackOn ? UInt32(SHANJIE_PACK_IT) : 0) }
 
@@ -1022,6 +948,7 @@ public final class Shell {
         engine = nil  // free the old engine first: only one exists at a time
         rerankAvailable = false
         rerankLevels = 0
+        englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         loadedPackMask = 0
         let packsDir = resources.appendingPathComponent("packs").path
@@ -1059,6 +986,11 @@ public final class Shell {
                 if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
             }
         }
+        // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
+        // item; only the code is logged.
+        let english = e.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
+        if english != 0 { Log.shell.error("shanjie_engine_load_english failed, code \(english)") }
+        englishAvailable = english == 0
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
@@ -1069,20 +1001,15 @@ public final class Shell {
         if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
             Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
         }
-        // And the English mixing switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
+        // And the English window's switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
         if case .failed(let c) = e.setEnglish(englishOn) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
-        // And the overwrite choice (zhen-revert section 3), every time for the same reason.
-        if case .failed(let c) = e.setEnglishOverwrite(englishOverwriteOn) {
-            Log.shell.error("shanjie_engine_set_english_overwrite failed, code \(c)")
+        // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
+        if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
+            Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
         }
-        // And the ASCII state of the app being served (shift-toggle section 2): a rebuilt engine starts with it off.
-        lastBuiltAscii = engineAscii
-        if case .failed(let c) = e.setAscii(engineAscii) {
-            Log.shell.error("shanjie_engine_set_ascii failed, code \(c)")
-        }
-        // And the key-order choice (zhen-keyorder section 3), every time.
+        // And the key-order evidence (zhen-keyorder section 3), every time: the core's default is false.
         if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
             Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
         }
@@ -1215,23 +1142,15 @@ public final class Session {
     /// Returns whether the key was consumed. `event` is nil when IMK passes nil.
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
-        if let event, event.type == .flagsChanged { return handleFlags(event) }
         guard event == nil || event?.type == .keyDown else { return false }
-        shell.shiftTap.keyDown()  // shift-toggle section 1: a key between Shift's press and release spoils the tap
-        if claim() {
-            let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
-            applyProfile(bundle: bundle)
-            syncAscii(bundle: bundle)
-        }
-        // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
-        if shell.engineAscii && !shell.composing { return false }
+        if claim() { applyProfile(bundle: client.bundleIdentifier) }
         // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
             return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
         }
         guard let event,
-              let key = (shell.engineAscii && shell.shadowOn ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
+              let key = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
             // nil, or a key outside the tables: never sent to the core.
             if shell.composing { finish(mode: 0) }
@@ -1240,78 +1159,10 @@ public final class Session {
         return send(key)
     }
 
-    /// Shift-toggle section 2: with a composition open in the English state, a printable key is sent as the character the keyboard
-    /// layout made of it (`event.characters`: Shift+1 is `!`), with no modifier bits. `nil` for anything else (Control, Option,
-    /// Command and Caps Lock keys, a non-ASCII or multi-character result, the space bar): those take the usual table.
-    static func asciiKey(_ event: NSEvent) -> ShanjieKey? {
-        let flags = event.modifierFlags
-        guard flags.isDisjoint(with: [.control, .option, .command, .capsLock]),
-              let chars = event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
-              (0x21...0x7E).contains(c.value) else { return nil }
-        return ShanjieKey(kind: KeyMap.char, ch: c.value, modifiers: 0)
-    }
-
-    /// Shift-toggle section 1: a `flagsChanged` event is never consumed (the app sees Shift as always); a lone tap switches.
-    private func handleFlags(_ event: NSEvent) -> Bool {
-        guard shell.shiftToggleOn else { return false }
-        let flags = event.modifierFlags
-        let others = !flags.isDisjoint(with: [.control, .option, .command, .function])
-        // The state of this Shift key from the flags: the device bits (NX_DEVICELSHIFTKEYMASK 0x2, NX_DEVICERSHIFTKEYMASK 0x4), or the
-        // generic bit for an event that carries none.
-        let raw = flags.rawValue
-        let generic = flags.contains(.shift)
-        let hasDevice = raw & 0x6 != 0
-        let leftDown = hasDevice ? raw & 0x2 != 0 : generic && event.keyCode == 56
-        let rightDown = hasDevice ? raw & 0x4 != 0 : generic && event.keyCode == 60
-        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, leftDown: leftDown, rightDown: rightDown, others: others, capsLock: flags.contains(.capsLock),
-                                       now: event.timestamp, processedAt: shell.uptime(), mouseAgo: shell.mouseAgo) {
-            toggleAscii()
-        }
-        return false
-    }
-
-    /// Section 2: this app goes to English or back to Chinese. A composition the core cannot keep as an English run (`shadowOn` false)
-    /// is sent first. The hint shows which one (section 3).
-    private func toggleAscii() {
-        let bundle = client.bundleIdentifier  // a synchronous IPC: read once
-        if claim() { applyProfile(bundle: bundle) }
-        let app = bundle ?? ""
-        let on = !shell.asciiApps.contains(app)
-        if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
-        if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
-        pushAscii(on)
-        showShiftHint(on ? "英" : "中")
-    }
-
-    /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
-    func syncAscii(bundle: String?) {
-        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(bundle ?? ""))
-    }
-
-    func pushAscii(_ on: Bool) {
-        guard on != shell.engineAscii, let engine = shell.engine else { return }
-        shell.engineAscii = on
-        switch engine.setAscii(on) {
-        case .ok(let o): apply(o)
-        case .failed(let c): _ = fail(c)
-        }
-    }
-
-    /// Section 3: the hint above the cursor line: the marked text's rectangle while composing, the insertion point's otherwise. No
-    /// rectangle, no hint (not the screen corner, not the last place).
-    private func showShiftHint(_ text: String) {
-        guard let panel = shell.shiftHint else { return }
-        let rect = shell.composing ? client.lineRect(cursor: shell.composingCursor) : client.caretRect()
-        guard let rect else { return }
-        panel.show(text, lineRect: rect, appearance: client.appearance, glassTint: shell.glassTint)
-    }
-
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
-        let bundle = client.bundleIdentifier
-        applyProfile(bundle: bundle)
-        syncAscii(bundle: bundle)
+        applyProfile(bundle: client.bundleIdentifier)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
@@ -1395,16 +1246,18 @@ public final class Session {
         }
     }
 
-    /// The settings window's 重打同一個位置算英文 choice: the snapshot is shown, if this session owns the composition.
-    func applyEnglishOverwrite(_ on: Bool) {
-        switch shell.setEnglishOverwrite(on) {
+    /// The settings window's 英文的顯示 choice: the snapshot is shown, if this session owns the composition (letters turn into
+    /// Zhuyin or back on screen).
+    func applyEnglishInline(_ on: Bool) {
+        switch shell.setEnglishInline(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
         }
     }
 
-    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (it is what was on screen).
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (turning it off
+    /// closes an open English window, whatever opened it; otherwise the snapshot is what was on screen).
     func applyEnglishKeyOrder(_ on: Bool) {
         switch shell.setEnglishKeyOrder(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
@@ -1558,7 +1411,6 @@ public final class Session {
     /// Section 7: commit first, then the preedit (single underline with a thick one over the open English run, caret at
     /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
-        shell.composingCursor = Int(o.cursorUTF16)
         if !o.commit.isEmpty {
             var text = o.commit
             if shell.spacingOn {

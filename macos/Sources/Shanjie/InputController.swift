@@ -24,10 +24,8 @@ final class ShanjieInputController: IMKInputController {
         }
     }
 
-    /// flagsChanged: a lone Shift tap switches Chinese and English (docs/contracts/shift-toggle.md section 1); `Session.handle` never
-    /// consumes it. Whether every client delivers it is for the device check (section 7).
     override func recognizedEvents(_ sender: Any!) -> Int {
-        Int(NSEvent.EventTypeMask.keyDown.rawValue | NSEvent.EventTypeMask.flagsChanged.rawValue)
+        Int(NSEvent.EventTypeMask.keyDown.rawValue)
     }
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
@@ -152,15 +150,6 @@ final class ClientAdapter: TextClient {
         return rect.origin == .zero ? nil : rect
     }
 
-    /// Shift-toggle section 3: with nothing marked, most clients give the insertion point's rectangle for index 0 (not measured; the
-    /// device check decides). The zero origin they leave untouched when they have none is "no rectangle".
-    func caretRect() -> NSRect? {
-        guard let client else { return nil }
-        var rect = NSRect(x: 0, y: 0, width: 16, height: 16)
-        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
-        return rect.origin == .zero ? nil : rect
-    }
-
     /// s3b2 section 10: Apple Zhuyin's panel follows the light or dark appearance of the view being
     /// typed into. IMK has no public call for it; its client object has the private
     /// `viewEffectiveAppearance` and `windowEffectiveAppearance` (runtime scan of InputMethodKit,
@@ -187,75 +176,6 @@ final class ClientAdapter: TextClient {
 private final class PanelWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-}
-
-/// The 英/中 hint of the Shift toggle (docs/contracts/shift-toggle.md section 3): a small glass capsule of its own, above the cursor
-/// line, one character, shown `SHIFT_HINT_SECONDS` and then faded with the system's default animation. Display only; it logs nothing.
-@MainActor
-final class ShiftHintAdapter: ShiftHintPanel {
-    /// The three values copy the candidate window's (Metrics.barHeight; CellMetrics.candidateFont is 16 pt; CellMetrics.trailing 7
-    /// plus Metrics.barInset 3 on each side of the text), so the hint reads as the same material; they are first values for the
-    /// maintainer's rounds (the contract: change only what is pointed at).
-    private static let height = Metrics.barHeight
-    private static let fontSize: CGFloat = 16
-    private static let sidePadding: CGFloat = 10
-    private let window = PanelWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-    private let glass = NSGlassEffectView()
-    private let label = NSTextField(labelWithString: "")
-    private var tintApplier = GlassTint.Applier()
-    private var fade: DispatchWorkItem?
-    /// Numbers the shows: a fade that finishes after a newer show must not hide it.
-    private var shows = 0
-
-    init() {
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)  // the candidate window's
-        window.hidesOnDeactivate = false
-        window.isReleasedWhenClosed = false
-        label.font = NSFont.systemFont(ofSize: Self.fontSize)
-        label.alignment = .center
-        glass.contentView = label
-        window.contentView = glass
-    }
-
-    func show(_ text: String, lineRect: NSRect, appearance: NSAppearance?, glassTint: Double) {
-        fade?.cancel()
-        shows += 1
-        let mine = shows
-        if window.appearance?.name != appearance?.name { window.appearance = appearance }
-        glass.apply(tintApplier.update(value: glassTint, dark: GlassTint.isDark(window.effectiveAppearance)))
-        label.stringValue = text
-        let width = ceil(label.intrinsicContentSize.width) + 2 * Self.sidePadding
-        let size = NSSize(width: max(width, Self.height), height: Self.height)
-        glass.cornerRadius = size.height / 2
-        label.frame = NSRect(origin: NSPoint(x: 0, y: (size.height - label.intrinsicContentSize.height) / 2),
-                             size: NSSize(width: size.width, height: label.intrinsicContentSize.height))
-        // Above the line, left edges aligned, kept inside the screen that holds the line.
-        let visible = (NSScreen.screens.first { $0.frame.contains(lineRect.origin) } ?? NSScreen.main)?.visibleFrame
-        var origin = NSPoint(x: lineRect.minX, y: lineRect.maxY + PanelPlacement.gap)
-        if let visible {
-            origin.x = max(visible.minX, min(origin.x, visible.maxX - size.width))
-            origin.y = min(origin.y, visible.maxY - size.height)
-        }
-        window.setFrame(NSRect(origin: origin, size: size), display: true)
-        // Alpha is set to 1 directly. The generation counter keeps an older fade's completion from ordering this window out; whether the
-        // direct write also stops an older fade still running is not known from the code, the VM device check looks at it.
-        window.alphaValue = 1
-        window.orderFrontRegardless()
-        let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard self.shows == mine else { return }
-                NSAnimationContext.runAnimationGroup({ _ in self.window.animator().alphaValue = 0 }, completionHandler: {
-                    MainActor.assumeIsolated { if self.shows == mine { self.window.orderOut(nil) } }
-                })
-            }
-        }
-        fade = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + SHIFT_HINT_SECONDS, execute: work)
-    }
 }
 
 /// Layout values of the candidate bar (docs/contracts/s3b2-glass-panel.md section 3). The "Apple"
