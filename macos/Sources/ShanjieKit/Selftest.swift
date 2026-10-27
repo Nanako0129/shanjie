@@ -60,7 +60,12 @@ public enum Selftest {
     static let englishKeys = "rust "
     static let englishWindow = ["rust", "Rust", "RUST"]
 
+    /// The message and code of the last failure `run` returned, `nil` after a pass: the same text `run` writes to stderr, kept so the tests can tell
+    /// which check failed (a load refused with code 3 is not a wrong sentence).
+    public private(set) static var lastFailure: String?
+
     public static func run(resources: URL) -> Int32 {
+        lastFailure = nil
         let lmPath = resources.appendingPathComponent("bigram.sjlm").path
         // The pack off: the engine the app had before the pack existed. Scoped so it is freed before the
         // second engine exists (only one at a time, like the shell).
@@ -189,6 +194,7 @@ public enum Selftest {
 
     /// Only the fixed message and a number; never input or output text.
     private static func fail(_ message: StaticString, _ code: Int32) -> Int32 {
+        lastFailure = "\(message) \(code)"
         FileHandle.standardError.write(Data("\(message) \(code)\n".utf8))
         return 1
     }

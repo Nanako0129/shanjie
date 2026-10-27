@@ -1768,6 +1768,62 @@ mod tests {
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }
 
+    /// docs/contracts/sj-lm-7-pr2.md section 3 item 2 through the C ABI: a trigram table beside the model that is corrupt (flipped magic,
+    /// truncated) or a dangling symlink fails `shanjie_engine_load_lm` with 3, for either file (the engine reads both) and with the old
+    /// model kept; the same file good loads with 0, and a missing one only turns that profile's table off (0). The model, classes and
+    /// the other table are good in every case, so the 3 can only come from the file under test.
+    #[test]
+    fn load_lm_refuses_a_bad_trigram_table() {
+        let (ok, out, err) = run_child("child_lm_tables", false);
+        assert!(ok, "LM tables child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    #[test]
+    fn child_lm_tables() {
+        if !is_child("child_lm_tables") {
+            return;
+        }
+        let dir = tiny_dir("lmtables", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\n".as_bytes());
+        let tiny = tiny_lm();
+        std::fs::write(dir.join("tiny.sjlm"), &tiny).unwrap();
+        let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
+        std::fs::write(dir.join("classes.sjc"), crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
+        let lm_c = CString::new(dir.join("tiny.sjlm").to_str().unwrap()).unwrap();
+        let load = |e| unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) };
+        // (<s>, <s>) -> 心 4 of 4: a valid table for the toy model.
+        let good = crate::lm::test_tri(&tiny, 0.75, &[((0, 0), 4, &[(2, 4)])]);
+        for (name, other) in [("trigram.sjt3", "trigram-chat.sjt3"), ("trigram-chat.sjt3", "trigram.sjt3")] {
+            let (file, other_file) = (dir.join(name), dir.join(other));
+            std::fs::write(&other_file, &good).unwrap();
+            std::fs::write(&file, &good).unwrap();
+            let e = new_engine(&dir, 0);
+            assert!(load(e) == 0, "{name}: both tables good");
+            assert!(type_xin(e) == "鑫", "{name}: model loaded");
+            let mut flipped = good.clone();
+            flipped[0] ^= 1;
+            for (what, damage) in [("corrupt magic", 0), ("truncated", 1), ("dangling symlink", 2)] {
+                std::fs::remove_file(&file).ok();
+                match damage {
+                    0 => std::fs::write(&file, &flipped).unwrap(),
+                    1 => std::fs::write(&file, &good[..good.len() - 1]).unwrap(),
+                    _ => std::os::unix::fs::symlink(dir.join("missing.sjt3"), &file).unwrap(),
+                }
+                assert!(load(e) == 3, "{name}: {what} must fail the load");
+                assert!(profile(e, 1).3 == "心", "{name}: {what}: the loaded model is kept (formal reads 心, no model reads 鑫)");
+                assert!(profile(e, 0).0 == 0);
+                let fresh = new_engine(&dir, 0);
+                assert!(load(fresh) == 3 && type_xin(fresh) == "鑫" && profile(fresh, 1).3 == "鑫", "{name}: {what}: a fresh engine ends with no LM");
+                unsafe { shanjie_engine_free(fresh) };
+            }
+            std::fs::remove_file(&file).unwrap();
+            assert!(load(e) == 0, "{name}: a missing table is only that profile off");
+            unsafe { shanjie_engine_free(e) };
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Digits (docs/contracts/digits.md A.4.3) through the C ABI: a data directory with a tiny `digits.tsv`, the tiny model, `set_english(1)`:
     /// 2 0 2 6 Enter commits "2026"; with `set_english(0)` the same keys are the old Zhuyin keys.
     #[test]

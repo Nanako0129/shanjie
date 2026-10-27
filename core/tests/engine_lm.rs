@@ -368,6 +368,51 @@ fn profile_before_load_and_load_does_not_refresh() {
     assert!(e.total_score().is_some());
 }
 
+/// docs/contracts/sj-lm-7-pr2.md section 3 item 2: a trigram table beside the model that is corrupt or dangling makes `Engine::load_lm` fail
+/// (`LoadFailed`, never an engine that quietly decodes without the table), for either file and with the previous model kept; the same files
+/// good load, and a missing table only turns that profile's table off. The shipping files are linked into a temporary folder; the damaged table
+/// is the first 4 KiB of the real one (right magic and header, wrong length) or a dangling symlink, so nothing else in the folder differs.
+#[test]
+fn load_lm_refuses_a_bad_trigram_table() {
+    let dir = std::env::temp_dir().join(format!("shanjie-engine-lm-tri-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lm = lm_path();
+    let lmdir = lm.parent().unwrap().to_path_buf();
+    for f in ["bigram.sjlm", "classes.sjc", "kn.sjkn"] {
+        std::os::unix::fs::symlink(lmdir.join(f), dir.join(f)).unwrap();
+    }
+    let model = dir.join("bigram.sjlm");
+    let (_, syls) = row(10);
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    for (name, other) in [("trigram.sjt3", "trigram-chat.sjt3"), ("trigram-chat.sjt3", "trigram.sjt3")] {
+        let (file, other_file) = (dir.join(name), dir.join(other));
+        std::os::unix::fs::symlink(lmdir.join(other), &other_file).unwrap();
+        std::os::unix::fs::symlink(lmdir.join(name), &file).unwrap();
+        assert_eq!(e.load_lm(&model), Ok(()), "{name}: premise: the shipping files load from the temporary folder");
+        type_row(&mut e, Layout::Standard, &syls[..3].to_vec());
+        assert!(e.total_score().is_some(), "{name}: premise: a typed row scores with the model");
+        for what in ["truncated", "dangling symlink"] {
+            std::fs::remove_file(&file).unwrap();
+            if what == "truncated" {
+                std::fs::write(&file, &std::fs::read(lmdir.join(name)).unwrap()[..4096]).unwrap();
+            } else {
+                std::os::unix::fs::symlink(dir.join("missing.sjt3"), &file).unwrap();
+            }
+            assert_eq!(e.load_lm(&model), Err(EngineError::LoadFailed), "{name}: {what} must fail the load");
+            assert!(e.total_score().is_some(), "{name}: {what}: the previous model is kept");
+            let mut fresh = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+            assert_eq!(fresh.load_lm(&model), Err(EngineError::LoadFailed));
+            type_row(&mut fresh, Layout::Standard, &syls[..3].to_vec());
+            assert!(fresh.total_score().is_none(), "{name}: {what}: a fresh engine has no model");
+        }
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(e.load_lm(&model), Ok(()), "{name}: a missing table is only that profile's table off");
+        e.key(Key::new(KeyKind::Esc)).unwrap();
+        std::fs::remove_file(&other_file).unwrap();
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// Candidate lists keep the original lexicon order whatever the model says.
 #[test]
 fn candidates_ignore_the_model() {

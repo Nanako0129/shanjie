@@ -201,6 +201,28 @@ pub(crate) fn test_classes(model: &[u8], k: u32, mu: f64, cls: &[u16], emit: &[f
     b
 }
 
+/// SJT30001 bytes for `model` (tests only; V 4): contexts `((u, v), total before pruning, [(next id, count)])` sorted by (u, v).
+#[cfg(test)]
+pub(crate) fn test_tri(model: &[u8], d: f64, ctxs: &[((u32, u32), u64, &[(u32, u32)])]) -> Vec<u8> {
+    let mut b = b"SJT30001".to_vec();
+    b.extend(4u32.to_le_bytes());
+    b.extend(d.to_le_bytes());
+    b.extend(crate::eval::sha256(model));
+    b.extend((ctxs.len() as u32).to_le_bytes());
+    b.extend((ctxs.iter().map(|c| c.2.len()).sum::<usize>() as u32).to_le_bytes());
+    ctxs.iter().for_each(|c| b.extend((c.0 .0 as u64 * 4 + c.0 .1 as u64).to_le_bytes()));
+    ctxs.iter().for_each(|c| b.extend(c.1.to_le_bytes()));
+    let mut at = 0u32;
+    b.extend(0u32.to_le_bytes());
+    for c in ctxs {
+        at += c.2.len() as u32;
+        b.extend(at.to_le_bytes());
+    }
+    ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.0.to_le_bytes()));
+    ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.1.to_le_bytes()));
+    b
+}
+
 /// A previous word as the probability function needs it: its vocabulary id (for the class term) and its
 /// bigram context row, if it has one.
 #[derive(Clone, Copy)]
@@ -1338,6 +1360,7 @@ pub fn decode_from(
 
 #[cfg(test)]
 mod tests {
+    use super::test_tri as tri_bytes;
     use super::*;
     use crate::Lexicon;
 
@@ -1705,27 +1728,6 @@ mod tests {
         assert_eq!(out.len(), 1, "two paths, one surface");
         assert_eq!(out[0].0, split.max(joined));
     }
-    /// SJT30001 bytes for `model` (V 4): contexts `((u, v), total before pruning, [(next id, count)])` sorted by (u, v).
-    fn tri_bytes(model: &[u8], d: f64, ctxs: &[((u32, u32), u64, &[(u32, u32)])]) -> Vec<u8> {
-        let mut b = b"SJT30001".to_vec();
-        b.extend(4u32.to_le_bytes());
-        b.extend(d.to_le_bytes());
-        b.extend(crate::eval::sha256(model));
-        b.extend((ctxs.len() as u32).to_le_bytes());
-        b.extend((ctxs.iter().map(|c| c.2.len()).sum::<usize>() as u32).to_le_bytes());
-        ctxs.iter().for_each(|c| b.extend((c.0 .0 as u64 * 4 + c.0 .1 as u64).to_le_bytes()));
-        ctxs.iter().for_each(|c| b.extend(c.1.to_le_bytes()));
-        let mut at = 0u32;
-        b.extend(0u32.to_le_bytes());
-        for c in ctxs {
-            at += c.2.len() as u32;
-            b.extend(at.to_le_bytes());
-        }
-        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.0.to_le_bytes()));
-        ctxs.iter().flat_map(|c| c.2).for_each(|e| b.extend(e.1.to_le_bytes()));
-        b
-    }
-
     /// The tiny model's table: (<s>,<s>) -> a 3, b 1 (total 6, two counts pruned); (<s>,a) -> b 2 (total 4); (a,b) -> </s> 1 (total 2).
     fn tiny_tri(model: &[u8]) -> Vec<u8> {
         tri_bytes(model, 0.75, &[((0, 0), 6, &[(2, 3), (3, 1)]), ((0, 2), 4, &[(3, 2)]), ((2, 3), 2, &[(1, 1)])])
