@@ -5,7 +5,7 @@ import Foundation
 public struct ModelRow: Equatable {
     public let file: String
     public let name: String      // 中文名
-    public let code: String      // 對外名稱, e.g. SJ-LM-6-9.1M
+    public let code: String      // 對外名稱, e.g. SJ-LM-7-9.7M
 }
 
 public enum ModelList {

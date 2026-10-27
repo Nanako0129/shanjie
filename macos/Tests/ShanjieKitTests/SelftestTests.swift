@@ -102,11 +102,27 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
-    /// trigram-core: the formal profile's table is read from beside the model. Without it the model still loads and formal gives 濾水壺 on the
-    /// selftest sentence instead of the expected 律水壺, so a bundle without trigram.sjt3 must fail the selftest.
+    /// trigram-core: the formal profile's table is read from beside the model. Without it the model still loads and formal gives 本市… on the
+    /// selftest sentence instead of the expected 本是…, so a bundle without trigram.sjt3 must fail the selftest.
     func testFailsWithoutTheTrigramTable() throws {
         let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["trigram.sjt3"])))
         try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    /// sj-lm-7-pr2.md: the chat profile's table is read from beside the model too. Without it chat gives 期中報告明天要教 on the second selftest
+    /// sentence instead of 交, so a bundle without trigram-chat.sjt3 must fail the selftest (it would silently leave chat on the bigram).
+    func testFailsWithoutTheChatTrigramTable() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["trigram-chat.sjt3"])))
+        try TestData.addBundledPack(to: res)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    /// A chat table that is not the model's is refused by the load (the engine reads both tables, a bad one fails the whole load), so it fails too.
+    func testFailsWithACorruptChatTrigramTable() throws {
+        let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["trigram-chat.sjt3"])))
+        try TestData.addBundledPack(to: res)
+        try Data("not a table".utf8).write(to: res.appendingPathComponent("trigram-chat.sjt3"))
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 

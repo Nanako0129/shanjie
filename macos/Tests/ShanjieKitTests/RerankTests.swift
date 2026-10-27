@@ -3,7 +3,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/contracts/s7c2b-shell-rerank.md section 3 items 1-2: the shell's rerank queue with the real core, the real n-gram model
-/// and the real small model, in a chat app (the selftest's sentence, dev302 row 27 since classes-v5). The runner is held by the test, except in
+/// and the real small model, in a chat app (the selftest's sentence, dev302 row 65 since the SJ-LM-7 files). The runner is held by the test, except in
 /// the last test, which uses the app's queue runner.
 @MainActor
 final class RerankTests: XCTestCase {
@@ -102,7 +102,7 @@ final class RerankTests: XCTestCase {
     }
 
     /// A finished job that changes nothing (code 5): no extra client call. `NoChangeRow` keeps its n-gram first in the chat profile
-    /// (row 284 did until classes-v5, whose chat first 率 the small model now changes to 濾).
+    /// (row 65 did from classes-v5 to model-v6; the SJ-LM-7 n-gram gets it wrong again, so it is `RerankRow` now).
     func testNoChangeMakesNoCall() {
         let r = rig()
         r.c.type(NoChangeRow.standardKeys)
