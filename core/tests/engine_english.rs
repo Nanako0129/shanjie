@@ -10,7 +10,7 @@
 //!   ok    ㄟ(2) ㄜ(2): the same column, (a).        ls   ㄠ(2) ㄋ(0): ㄋ is in a column before ㄠ's, (b).
 //!   cup   ㄏㄧㄣ in order, and the syllable is missing: (c) at Space.      rust  ㄐㄧ then ㄋ over ㄐ: (a) at the third key.
 use core::engine::*;
-use core::lm::{CappedLexicon, Lm};
+use core::lm::{CappedLexicon, Lm, Profile};
 use core::Lexicon;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -49,6 +49,7 @@ fn key_of(tok: &str) -> Key {
         "Left" => Key::new(KeyKind::Left),
         "Right" => Key::new(KeyKind::Right),
         "Home" => Key::new(KeyKind::Home),
+        "End" => Key::new(KeyKind::End),
         "Down" => Key::new(KeyKind::Down),
         "Up" => Key::new(KeyKind::Up),
         "S-Enter" => with(KeyKind::Enter, MOD_SHIFT),
@@ -140,16 +141,18 @@ fn three(e: &mut Engine) -> String {
 
 /// The real lexicon with the real bigram model (the switch and learning on), a fixed clock; for the tests where the decoder's learned
 /// boost matters.
-fn lm_eng() -> Engine {
+fn lm_parts() -> (Arc<Lm>, Arc<CappedLexicon>) {
     static S: OnceLock<(Arc<Lm>, Arc<CappedLexicon>)> = OnceLock::new();
-    let (lm, capped) = S
-        .get_or_init(|| {
-            let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).unwrap();
-            let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
-            let capped = Arc::new(CappedLexicon::new(real(), &overlay, &lm, None).unwrap());
-            (Arc::new(lm), capped)
-        })
-        .clone();
+    S.get_or_init(|| {
+        let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).unwrap();
+        let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+        let capped = Arc::new(CappedLexicon::new(real(), &overlay, &lm, None).unwrap());
+        (Arc::new(lm), capped)
+    })
+    .clone()
+}
+fn lm_eng() -> Engine {
+    let (lm, capped) = lm_parts();
     let mut e = eng();
     e.set_lm(lm, capped);
     e.set_today(Some(20_000));
@@ -664,12 +667,17 @@ fn run_takes_the_shadow_letters_and_the_shift_letter() {
 }
 
 #[test]
-fn run_drops_an_unfinished_syllable_that_is_no_letters() {
-    // `1` is ㄅ, a key that is no letter: Shift+W throws the ㄅ away and starts a run with `W`.
-    let mut e = win();
-    assert!(run(&mut e, "1").preedit == "ㄅ");
-    let o = run(&mut e, "S-w");
-    assert!(o.preedit == "W" && e.english_shadow().is_empty(), "{}", o.preedit);
+fn run_keeps_every_unfinished_key_a_run_accepts() {
+    // A run takes the Zhuyin keys that are not letters (zhen-revert section 2.4), so the keys of the unfinished syllable all stay:
+    // `1` (ㄅ) then Shift+W is `1W`, `5` is `5W`, `1 u` is `1uW`, and `u .` is `u.W` (ㄧ, ㄡ).
+    for (keys, want) in [("1", "1W"), ("5", "5W"), ("1 u", "1uW"), ("u .", "u.W"), ("m ,", "m,W")] {
+        let mut e = win();
+        run(&mut e, keys);
+        let o = run(&mut e, "S-w");
+        assert!(o.preedit == want && fields(&o) == (0, want.len() as u32) && e.english_shadow().is_empty(), "{keys}: {}", o.preedit);
+        // And the run goes on as a run: the tail `W` then a tone key is no syllable, so the digit goes on the run.
+        assert!(run(&mut e, "3").preedit == format!("{want}3"), "{keys}");
+    }
     // The same through a Chinese candidate window: it closes.
     let mut e = win();
     let zh = three(&mut e);
@@ -1480,15 +1488,14 @@ fn digits_layer_is_untouched() {
 
 // ---------- zhen-revert section 4.3: the exhaustive clean typing ----------
 
-/// The Izanami test of vChewing (zhen-keyorder section 4, widened by zhen-revert section 4.3): readings of the lexicon typed in column
-/// order, each syllable ended by its tone key or Space, with the three switches on, the digit layer off (an engine without a model):
-/// never a revert, never a split, and the composition is the one the same keys make with English mixing off.
-///
-/// Every distinct syllable of every reading is typed alone (the whole syllable table). The readings themselves are a sample: the full set
+/// The Izanami test of vChewing (zhen-keyorder section 4, widened by zhen-revert section 4.3): every distinct syllable of the lexicon typed
+/// alone, and a fixed-seed sample of its readings typed whole, in column order, each syllable ended by its tone key or Space, with the
+/// three switches on, the digit layer off (an engine without a model): never a revert, never a split, and the composition is the one the
+/// same keys make with English mixing off. So this is NOT every reading: only the sample is. The sample: the full set
 /// is 416,227 readings, over the 60 s the contract allows, so `SAMPLE` readings are typed (splitmix64 shuffle from `SEED`: the same
 /// readings on every run; the contract asks for at least 20,000).
 #[test]
-fn clean_typing_of_every_reading_never_reverts() {
+fn every_syllable_alone_and_sampled_readings_never_revert() {
     const SEED: u64 = 20261026;
     const SAMPLE: usize = 40_000;
     let lex = real();
@@ -1572,4 +1579,96 @@ fn turning_mixing_on_mid_syllable_catches_the_shadow_up() {
     run(&mut e, "o");
     e.set_abbreviation(false).unwrap();
     assert!(e.english_shadow() == "o");
+}
+
+// ---------- review fixes: settings clear the short-word mark, no-op keys keep it ----------
+
+/// Zhen-revert section 2.6: every settings function clears the short-word mark. `a i ␣`, a setter, ↓: no `ai`/`AI` items, and the same
+/// setter on an engine with mixing off gives the same total. Without the setter the items are there (the premise).
+#[test]
+fn every_setting_clears_the_short_word_mark() {
+    use core::tinylm::RerankLevel;
+    let setters: Vec<(&str, Box<dyn Fn(&mut Engine)>)> = vec![
+        ("set_fuzzy", Box::new(|e| drop(e.set_fuzzy(0).unwrap()))),
+        ("set_profile", Box::new(|e| drop(e.set_profile(Profile::Formal).unwrap()))),
+        ("set_prediction", Box::new(|e| drop(e.set_prediction(false).unwrap()))),
+        ("set_demote", Box::new(|e| drop(e.set_demote(true).unwrap()))),
+        ("set_candidate_vertical", Box::new(|e| drop(e.set_candidate_vertical(true).unwrap()))),
+        ("set_rerank", Box::new(|e| drop(e.set_rerank(true).unwrap()))),
+        ("set_rerank_level", Box::new(|e| drop(e.set_rerank_level(RerankLevel::Standard).unwrap()))),
+        ("set_abbreviation", Box::new(|e| drop(e.set_abbreviation(false).unwrap()))),
+        ("set_english_overwrite", Box::new(|e| drop(e.set_english_overwrite(true).unwrap()))),
+        ("set_english_key_order", Box::new(|e| drop(e.set_english_key_order(true).unwrap()))),
+        ("set_english", Box::new(|e| drop(e.set_english(true).unwrap()))),
+        ("set_learn_guard", Box::new(|e| e.set_learn_guard(true))),
+        ("set_reading_channel", Box::new(|e| e.set_reading_channel(true))),
+        ("set_lm", Box::new(|e| {
+            let (lm, capped) = lm_parts();
+            e.set_lm(lm, capped);
+        })),
+    ];
+    let total = |english: bool, setter: Option<&dyn Fn(&mut Engine)>| {
+        let mut e = eng();
+        e.set_english(english).unwrap();
+        run(&mut e, "a i _");
+        if let Some(f) = setter {
+            f(&mut e);
+        }
+        run(&mut e, "Down").total
+    };
+    assert!(total(true, None) == total(false, None) + 2, "premise: the items are there");
+    for (name, f) in &setters {
+        // `set_english(true)` on the mixing-off engine would turn it on: that setter is judged against the same count with the
+        // engine's own switch.
+        let plain = if *name == "set_english" { total(true, Some(f.as_ref())) } else { total(false, Some(f.as_ref())) };
+        assert!(total(true, Some(f.as_ref())) == plain, "{name} left the short-word items");
+    }
+}
+
+/// Every arm of `dispatch` that changes nothing gives the mark back (one rule in `key()`, fed by `Engine::nothing`): Up, Right and End at
+/// the end, Delete at the end, a tone key with nothing unfinished, and a key passed on to the app (Cmd+C) all leave the two items.
+#[test]
+fn keys_that_change_nothing_keep_the_short_word_mark() {
+    let total_of = |english: bool, keys: &str| {
+        let mut e = eng();
+        e.set_english(english).unwrap();
+        run(&mut e, keys).total
+    };
+    for keys in ["a i _ Up Down", "a i _ Right Down", "a i _ Delete Down", "a i _ 3 Down", "a i _ End Down", "a i _ Up Up Down"] {
+        assert!(total_of(true, keys) == total_of(false, keys) + 2, "{keys}: the mark was lost");
+    }
+    // Cmd+C is passed on (handled false, nothing sent): the mark stays.
+    let mut e = eng();
+    run(&mut e, "a i _");
+    let o = e.key(Key::ch('c', MOD_COMMAND)).unwrap();
+    assert!(!o.handled && o.commit.is_empty());
+    let plain = total_of(false, "a i _ Down");
+    assert!(run(&mut e, "Down").total == plain + 2, "a passed-on key lost the mark");
+    // And keys that do change something still clear it: Left, Backspace, a Zhuyin key.
+    for keys in ["a i _ Left Down", "a i _ BS Down", "a i _ s Esc Down"] {
+        assert!(total_of(true, keys) == total_of(false, keys), "{keys}: the mark should be gone");
+    }
+}
+
+/// Review fix 1: a missing syllable at Space makes a finished token with no restore point (zhen-revert section 2.4: only an unedited run
+/// that a revert opened is restorable). Esc right after it is Esc after any English token: today that clears the whole composition, and
+/// this pins that it stays so (the settings notes no longer promise an Esc back for it). The tone-key case keeps its Esc back.
+#[test]
+fn esc_after_a_space_token_is_esc_after_any_token() {
+    let after = |keys: &str| {
+        let mut e = eng();
+        run(&mut e, "j i 3 u l 4"); // 我要
+        let o = run(&mut e, keys);
+        (o.preedit, is_empty(&mut e))
+    };
+    let (cup, cup_empty) = after("c u p _ Esc");
+    let (shift, shift_empty) = after("S-a b _ Esc");
+    assert!(cup.is_empty() && cup_empty && shift.is_empty() && shift_empty, "cup: {cup:?}, Shift run: {shift:?}");
+    // The tone key keeps the run open with a restore point: Esc brings the Zhuyin, the second clears the unfinished syllable, 我要 stays.
+    let mut e = eng();
+    run(&mut e, "j i 3 u l 4");
+    let before = run(&mut e, "Left Right").preedit;
+    run(&mut e, "s 7");
+    assert!(run(&mut e, "Esc").preedit == format!("{before}ㄋ"));
+    assert!(run(&mut e, "Esc").preedit == before);
 }

@@ -726,6 +726,9 @@ pub struct Engine {
     /// current key saw of it (`ls_now`, like `ld_now`). Taken at the start of every `key()`; a key that changes nothing puts it back.
     last_short: Option<(usize, String)>,
     ls_now: Option<(usize, String)>,
+    /// Set by the arms of `dispatch` that change nothing (`Engine::nothing`); `key()` reads it once, after the key, to give the
+    /// short-word mark back. The one place that rule lives (zhen-revert section 2.6).
+    noop: bool,
     /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips.
     fuzzy: u32,
     /// zhen-inline section 1.3b: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
@@ -1011,6 +1014,7 @@ impl Engine {
             revert_point: None,
             last_short: None,
             ls_now: None,
+            noop: false,
             fuzzy: 0,
             run: String::new(),
             run_zh: None,
@@ -1087,6 +1091,7 @@ impl Engine {
     /// Whether rerank jobs are made (default off, S7c-2c); recomputes the composition and returns the snapshot like `set_demote`,
     /// so turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
     pub fn set_rerank(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.rerank_on = on;
         self.clear_pred();
@@ -1100,6 +1105,7 @@ impl Engine {
     /// Evaluation only (engine-replay.md section 2, `--learn-guard`): turns the learning guard off so stretches with a learned
     /// boost still go to the small model. The next decode uses it; the pending job is dropped like any decoding change.
     pub fn set_learn_guard(&mut self, on: bool) {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.learn_guard = on;
     }
@@ -1107,6 +1113,7 @@ impl Engine {
     /// Evaluation only (`shanjie-replay --no-reading-channel`): with `false` the colloquial term stands alone, the P4d cell the reading-channel
     /// term was measured against. The next decode uses it; the pending job is dropped like any decoding change.
     pub fn set_reading_channel(&mut self, on: bool) {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.reading_channel = on;
     }
@@ -1129,6 +1136,7 @@ impl Engine {
     /// model and kept by `load_tinylm` / `load_lm`; with a version 1 or 2 file every level uses the standard triple. Recomputes the
     /// composition and returns the snapshot like `set_profile`; on a decode failure the engine resets itself.
     pub fn set_rerank_level(&mut self, level: RerankLevel) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.rerank_level = level;
         self.clear_pred();
@@ -1581,6 +1589,7 @@ impl Engine {
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
     /// (built by `CappedLexicon::new` from this engine's lexicon).
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.lm = Some(LmState { lm, capped });
         self.set_tinylm(None);
@@ -1590,6 +1599,7 @@ impl Engine {
     /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
     /// engine resets itself.
     pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.demote = on;
         self.clear_pred();
@@ -1603,6 +1613,7 @@ impl Engine {
     /// Whether the prediction row is computed (default on, V3 section 10.5). Off clears the row (an entered row is left);
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
@@ -1617,6 +1628,7 @@ impl Engine {
     /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
     /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
     pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.cand_vertical = on;
         self.handled()
     }
@@ -1624,6 +1636,7 @@ impl Engine {
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.abbr = on;
         if !on {
             self.drop_units();
@@ -1666,7 +1679,7 @@ impl Engine {
     /// keeps an open English run as a token. Returns the snapshot.
     pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english = on;
-        self.last_short = None;
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         if !on {
             let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
             self.clear_shadow();
@@ -1681,6 +1694,7 @@ impl Engine {
     /// lexicon lacks; a syllable already accepted is decoded whatever the flags say. Recomputes the composition and returns the
     /// snapshot, like `set_demote`; on a decode failure the engine resets itself. Bits above 4 are ignored here (the C ABI refuses them).
     pub fn set_fuzzy(&mut self, flags: u32) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.fuzzy = flags & FUZZY_ALL;
         self.clear_pred();
@@ -1931,11 +1945,10 @@ impl Engine {
         Ok(self.view(true, commit))
     }
 
-    /// Shift+letter with English mixing on: the shadow's letters (when it is all letters; else the unfinished syllable is dropped,
-    /// as Esc would) and `upper` open a run. An open window closes with it.
+    /// Shift+letter with English mixing on: the shadow's keys (every one is a Zhuyin key, and a run takes all of them, section 2.4) and
+    /// `upper` open a run. An open window closes with it.
     fn start_run(&mut self, upper: char) -> Result<Output, EngineError> {
-        let shadow = self.shadow_text();
-        let keep = if shadow.chars().all(|c| c.is_ascii_lowercase()) { shadow } else { String::new() };
+        let keep = self.shadow_text();
         self.cands = None;
         self.clear_pend();
         self.run = keep;
@@ -2055,6 +2068,7 @@ impl Engine {
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
+        self.last_short = None; // zhen-revert section 2.6: every settings function clears the short-word mark
         self.invalidate();
         self.profile = profile;
         self.clear_pred();
@@ -2183,6 +2197,7 @@ impl Engine {
         self.d_shown = self.drun.as_ref().map_or(0, |r| r.emitted.len() + r.m);
         self.reverted = None; // the one place the tool hooks are cleared; the key sets them again below
         self.split = false;
+        self.noop = false;
         let short = self.last_short.take();
         self.ls_now = short.clone();
         // New-word B §2.1: `paused` marks a composition with a key handled while learning was off. A key on an empty
@@ -2195,8 +2210,9 @@ impl Engine {
         }
         self.cap_snapshot();
         let mut r = self.dispatch(k).and_then(|mut o| self.cap_after(&mut o).map(|()| o));
-        // Zhen-revert section 2.6: a key that changes nothing (a key passed on, Up) leaves the short word's mark where it was.
-        if matches!(&r, Ok(o) if !o.handled && o.commit.is_empty()) || (k.kind == KeyKind::Up && self.last_short.is_none()) {
+        // Zhen-revert section 2.6: a key that changes nothing (a key passed on, or an arm that calls `nothing`) leaves the short word's
+        // mark where it was. The one place; a new arm that does nothing calls `nothing` and needs no other line.
+        if self.noop || matches!(&r, Ok(o) if !o.handled && o.commit.is_empty()) {
             self.last_short = self.last_short.take().or(short);
         }
         match &mut r {
@@ -2845,6 +2861,13 @@ impl Engine {
         Ok(self.view(m & MOD_SHIFT == 0, commit))
     }
 
+    /// The key changes nothing: the prediction row stays as it was (`old`, taken at the top of `dispatch`) and the short-word mark
+    /// (section 2.6) is given back by `key()`.
+    fn nothing(&mut self, old: Vec<Pred>) {
+        self.pred = old;
+        self.noop = true;
+    }
+
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
@@ -2983,7 +3006,7 @@ impl Engine {
                 if self.pend_prev.is_empty() {
                     return self.finish_syllable(t, old);
                 }
-                self.pred = old; // two or more units: tone and space do nothing (section 12.2)
+                self.nothing(old); // two or more units: tone and space do nothing (section 12.2)
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
@@ -3007,7 +3030,7 @@ impl Engine {
                 // (an empty row opens nothing, so the key is ignored as before).
                 self.open_with_rows(old);
             } else {
-                self.pred = old; // the key does nothing
+                self.nothing(old); // the key does nothing
             }
             return self.handled();
         }
@@ -3039,14 +3062,11 @@ impl Engine {
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
-            KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
+            KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.nothing(old),
             KeyKind::Space | KeyKind::Down => self.open_candidates(old),
-            KeyKind::Up => self.pred = old,
-            KeyKind::Char if tone.is_some() => {
-                self.pred = old; // the key does nothing, so the short word's mark stays (section 2.6)
-                self.last_short = self.ls_now.clone();
-            }
-            KeyKind::Right | KeyKind::End if self.cursor == n => self.pred = old, // nothing moves
+            KeyKind::Up => self.nothing(old),
+            KeyKind::Char if tone.is_some() => self.nothing(old),
+            KeyKind::Right | KeyKind::End if self.cursor == n => self.nothing(old), // nothing moves
             KeyKind::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyKind::Right => self.cursor = (self.cursor + 1).min(n),
             KeyKind::Home => self.cursor = 0,
@@ -3061,7 +3081,7 @@ impl Engine {
                 self.remove_syllable(self.cursor)?;
             }
             KeyKind::Delete if self.cursor < n => self.remove_syllable(self.cursor)?,
-            KeyKind::Backspace | KeyKind::Delete => self.pred = old,
+            KeyKind::Backspace | KeyKind::Delete => self.nothing(old),
             KeyKind::Enter => return self.commit_enter(m), // 19, 19a
             KeyKind::Esc => self.clear_all(),
             _ => {
@@ -3231,7 +3251,7 @@ impl Engine {
             if let Some(o) = self.revert_missing(tone)? {
                 return Ok(o);
             }
-            self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
+            self.nothing(old); // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
         // Section 2.6: the keys of a short word (in the lexicon, so no revert) that the candidate list adds the English of.
