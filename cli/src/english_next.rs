@@ -8,6 +8,9 @@
 //! Optional `--rowstats FILE`: one line per input row (1-based line number in ROWS, rows that were skipped included) and profile,
 //! `profile row skipped_or_notoken base_i base_ii base_iii table_i table_ii table_iii`, flags 0/1, no row text; the column sums equal the summary
 //! line (skipped_or_notoken sums to no_token plus the skipped rows). Without it stdout is unchanged.
+//! Optional `--ranks FILE`: one line per parsed row, profile and arm, `profile row arm rank_i rank_ii rank_iii`, digits only, no row text: arm is
+//! base or table, rank_i / rank_ii the 1-based position of w in the prediction row at (i) / (ii) (0 when absent or no token), rank_iii 1 when w is
+//! first at (ii), else 0. A rank above 0 is exactly the hit flag of the summary. Without it stdout is unchanged.
 //!
 //! Output, no row text (R2), one TSV line per profile (chat, formal), then the memory line:
 //!   english-next  profile  rows  no_token  base_i base_ii base_iii  table_i table_ii table_iii  imp_i wor_i  imp_ii wor_ii  imp_iii wor_iii  p95_base_ms p95_table_ms
@@ -43,8 +46,8 @@ fn parse(text: &str) -> (Vec<Row>, Vec<usize>) {
     (rows, skipped)
 }
 
-/// Hits (i, ii, iii) of one row, or `None` when the Space did not leave one English token.
-fn one_row(e: &mut Engine, r: &Row, times: &mut Vec<Duration>) -> Result<Option<[bool; 3]>, String> {
+/// Ranks (i, ii, iii: 1 when first) of one row, 0 for a miss; a rank above 0 is a hit,, or `None` when the Space did not leave one English token.
+fn one_row(e: &mut Engine, r: &Row, times: &mut Vec<Duration>) -> Result<Option<[usize; 3]>, String> {
     e.reset(ResetMode::Discard);
     let mut press = |e: &mut Engine, k: Key| -> Result<Vec<String>, String> {
         let t = Instant::now();
@@ -61,7 +64,8 @@ fn one_row(e: &mut Engine, r: &Row, times: &mut Vec<Duration>) -> Result<Option<
         return Ok(None);
     }
     let after = press(e, Key::ch(r.first, 0))?;
-    Ok(Some([row.contains(&r.w), after.contains(&r.w), after.first() == Some(&r.w)]))
+    let rank = |c: &[String]| c.iter().position(|x| *x == r.w).map_or(0, |i| i + 1);
+    Ok(Some([rank(&row), rank(&after), usize::from(after.first() == Some(&r.w))]))
 }
 
 fn p95(mut t: Vec<Duration>) -> f64 {
@@ -70,7 +74,7 @@ fn p95(mut t: Vec<Duration>) -> f64 {
 }
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
-    let (mut rows_file, mut table, mut words, mut rowstats, mut lm) = (None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, root.join("data/lm/bigram.sjlm"));
+    let (mut rows_file, mut table, mut words, mut rowstats, mut ranks, mut lm) = (None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, root.join("data/lm/bigram.sjlm"));
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().map(PathBuf::from).ok_or_else(|| "missing option value".to_string());
@@ -79,6 +83,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--table" => table = Some(val()?),
             "--words" => words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
+            "--ranks" => ranks = Some(val()?),
             "--lm" => lm = val()?,
             _ => return Err("unknown argument".into()),
         }
@@ -94,13 +99,13 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     }
     let (tl, co) = (root.join("data/lm/tinylm.sjtl"), root.join("data/lm/colloquial.sjlm"));
     let mut rss = None;
-    let mut stats = String::new();
+    let (mut stats, mut rank_lines) = (String::new(), String::new());
     for (name, profile) in [("chat", Profile::Chat), ("formal", Profile::Formal)] {
         let mut e = cli::replay::build_engine_opts(root, &lm, tl.is_file().then_some(tl.as_path()), co.is_file().then_some(co.as_path()), profile, false, true)?;
         e.load_english(&words).map_err(|_| "cannot load the word list".to_string())?;
         e.set_english(true).map_err(|_| "cannot switch English mixing on".to_string())?;
         e.set_prediction(true).map_err(|_| "cannot switch the prediction row on".to_string())?;
-        let pass = |e: &mut Engine| -> Result<(Vec<Option<[bool; 3]>>, f64), String> {
+        let pass = |e: &mut Engine| -> Result<(Vec<Option<[usize; 3]>>, f64), String> {
             let mut times = Vec::new();
             let hits = rows.iter().map(|r| one_row(e, r, &mut times)).collect::<Result<Vec<_>, _>>()?;
             Ok((hits, p95(times)))
@@ -114,8 +119,8 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         if base.iter().map(Option::is_some).ne(with.iter().map(Option::is_some)) {
             return Err("the arms disagree on which rows made an English token".into());
         }
-        let hit = |v: &[Option<[bool; 3]>], k: usize| v.iter().filter(|h| h.is_some_and(|h| h[k])).count();
-        let flip = |k: usize, up: bool| base.iter().zip(&with).filter(|(b, w)| b.is_some_and(|b| b[k]) != up && w.is_some_and(|w| w[k]) == up).count();
+        let hit = |v: &[Option<[usize; 3]>], k: usize| v.iter().filter(|h| h.is_some_and(|h| h[k] > 0)).count();
+        let flip = |k: usize, up: bool| base.iter().zip(&with).filter(|(b, w)| b.is_some_and(|b| b[k] > 0) != up && w.is_some_and(|w| w[k] > 0) == up).count();
         let mut line = format!("english-next\t{name}\t{}\t{}", rows.len(), base.iter().filter(|h| h.is_none()).count());
         for v in [&base, &with] {
             line += &format!("\t{}\t{}\t{}", hit(v, 0), hit(v, 1), hit(v, 2));
@@ -124,8 +129,16 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             line += &format!("\t{}\t{}", flip(k, true), flip(k, false));
         }
         println!("{line}\t{p_base:.3}\t{p_table:.3}");
+        if ranks.is_some() {
+            for (arm, v) in [("base", &base), ("table", &with)] {
+                for (r, h) in rows.iter().zip(v) {
+                    let h = h.unwrap_or_default();
+                    rank_lines += &format!("{name}\t{}\t{arm}\t{}\t{}\t{}\n", r.line, h[0], h[1], h[2]);
+                }
+            }
+        }
         if rowstats.is_some() {
-            let f = |h: Option<[bool; 3]>| h.unwrap_or_default().map(|b| u8::from(b).to_string()).join("\t");
+            let f = |h: Option<[usize; 3]>| h.unwrap_or_default().map(|b| u8::from(b > 0).to_string()).join("\t");
             let mut all: Vec<(usize, String)> = skipped.iter().map(|&n| (n, format!("1\t{0}\t{0}", "0\t0\t0"))).collect();
             all.extend(rows.iter().zip(base.iter().zip(&with)).map(|(r, (b, w))| (r.line, format!("{}\t{}\t{}", u8::from(b.is_none()), f(*b), f(*w)))));
             all.sort();
@@ -133,6 +146,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
                 stats += &format!("{name}\t{n}\t{cols}\n");
             }
         }
+    }
+    if let Some(p) = ranks {
+        std::fs::write(p, rank_lines).map_err(|e| format!("cannot write the ranks file ({:?})", e.kind()))?;
     }
     if let Some(p) = rowstats {
         std::fs::write(p, stats).map_err(|e| format!("cannot write the rowstats file ({:?})", e.kind()))?;

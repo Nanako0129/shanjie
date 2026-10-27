@@ -78,3 +78,31 @@ fn rowstats_sum_to_the_summary_and_stdout_is_unchanged() {
     }
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
 }
+
+#[test]
+fn ranks_agree_with_the_hit_flags() {
+    let (rows, table, words) = files("ranks");
+    let (rs, rk) = (std::path::Path::new(&rows).with_file_name("stats.tsv"), std::path::Path::new(&rows).with_file_name("ranks.tsv"));
+    let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(["--english-next", &rows, "--table", &table, "--words", &words, "--rowstats", rs.to_str().unwrap(), "--ranks", rk.to_str().unwrap()]).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let (stats, ranks) = (std::fs::read_to_string(&rs).unwrap(), std::fs::read_to_string(&rk).unwrap());
+    let n = |l: &str| -> Vec<String> { l.split('\t').map(String::from).collect() };
+    let ranks: Vec<Vec<String>> = ranks.lines().map(n).collect();
+    assert_eq!(ranks.len(), 2 * 3 * 2); // profiles x parsed rows x arms
+    for st in stats.lines().map(n).filter(|s| s[2] == "0") {
+        for (arm, off) in [("base", 3), ("table", 6)] {
+            let r = ranks.iter().find(|r| r[0] == st[0] && r[1] == st[1] && r[2] == arm).unwrap();
+            for k in 0..3 {
+                let rank: usize = r[3 + k].parse().unwrap();
+                assert_eq!(rank > 0, st[off + k] == "1", "{r:?} vs {st:?}");
+                assert!(rank <= 9);
+            }
+        }
+    }
+    // joe is followed by 水 (30) first: row 1 has w = 水, rank_i 1 with the table, 0 without
+    for profile in ["chat", "formal"] {
+        let r = |arm: &str| ranks.iter().find(|r| r[0] == profile && r[1] == "1" && r[2] == arm).unwrap()[3].clone();
+        assert_eq!((r("table"), r("base")), ("1".to_string(), "0".to_string()), "{profile}");
+    }
+    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
+}
