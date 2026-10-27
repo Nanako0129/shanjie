@@ -76,7 +76,7 @@ final class SettingsTests: XCTestCase {
                           acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertTrue(SettingsModel(shell: shell).english, "nothing saved is on")
         XCTAssertFalse(rig().model.english, "a saved off stays off")
-        XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。")
+        XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。")
     }
 
     /// zhen-mixed section 3.2 / 5.3: the window's 中英混打（實驗） goes through the same setter and store as the menu item, the two stay in
@@ -125,65 +125,71 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.englishEnabled, "the window followed the menu's layout change")
     }
 
-    /// zhen-inline section 2 / 4.3: the window's 英文的顯示 choice defaults to true, goes to the store, and is greyed with the 中英混打
-    /// switch off, with the switch greyed (Eten), and with no word list; the setting is kept while greyed.
-    func testEnglishInlineChoiceStoresAndFollowsTheSwitch() throws {
+    /// zhen-revert section 3 / 5.2: the window's 重打同一個位置算英文 choice has no value true (the store stays nil until chosen), goes to the
+    /// store, and is greyed with the 中英混打 switch off, with the switch greyed (Eten), and with no word list; the setting is kept. The
+    /// notes under the two choices are the contract's lines, and the "英文的顯示" choice is gone.
+    func testEnglishOverwriteChoiceStoresAndFollowsTheSwitch() throws {
         let r = rig()
-        XCTAssertTrue(r.model.englishInline, "default true")
-        XCTAssertFalse(r.model.englishInlineEnabled, "the switch is off")
+        XCTAssertTrue(r.model.englishOverwrite, "default true")
+        XCTAssertNil(r.english.englishOverwrite, "never chosen")
+        XCTAssertFalse(r.model.englishOverwriteEnabled, "the switch is off")
         r.model.setEnglish(true)
-        XCTAssertTrue(r.model.englishInlineEnabled)
-        r.model.setEnglishInline(false)
-        XCTAssertEqual(r.english.englishInline, false)
-        XCTAssertFalse(r.model.englishInline)
-        XCTAssertTrue(r.model.englishInlineEnabled, "the choice itself does not grey it")
+        XCTAssertTrue(r.model.englishOverwriteEnabled)
+        r.model.setEnglishOverwrite(false)
+        XCTAssertEqual(r.english.englishOverwrite, false)
+        XCTAssertFalse(r.model.englishOverwrite)
+        XCTAssertTrue(r.model.englishOverwriteEnabled, "the choice itself does not grey it")
         r.model.selectLayout(.eten)
-        XCTAssertFalse(r.model.englishInlineEnabled, "Eten greys the switch and so the choice")
-        XCTAssertFalse(r.model.englishInline, "the setting is kept")
+        XCTAssertFalse(r.model.englishOverwriteEnabled, "Eten greys the switch and so the choice")
+        XCTAssertFalse(r.model.englishOverwrite, "the setting is kept")
         r.controller.session.perform(.layout(.standard))
-        XCTAssertTrue(r.model.englishInlineEnabled)
+        XCTAssertTrue(r.model.englishOverwriteEnabled)
         r.controller.session.perform(.toggleEnglish)
-        XCTAssertFalse(r.model.englishInlineEnabled, "the menu's switch off greys it too")
+        XCTAssertFalse(r.model.englishOverwriteEnabled, "the menu's switch off greys it too")
         // No word list: greyed, the stored choice still shows.
         let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
-        let english = MemoryEnglishStore(true, inline: false)
+        let english = MemoryEnglishStore(true, overwrite: false)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
                           acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
-        XCTAssertFalse(model.englishInlineEnabled)
-        XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
+        XCTAssertFalse(model.englishOverwriteEnabled)
+        XCTAssertFalse(model.englishOverwrite, "greyed, still showing the setting")
+        XCTAssertEqual(MenuEntry.Text.englishOverwrite, "重打同一個位置算英文")
+        XCTAssertEqual(MenuEntry.Text.englishOverwriteNote, "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。")
+        XCTAssertEqual(MenuEntry.Text.englishKeyOrderNote, "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。")
     }
 
-    /// zhen-keyorder section 3 / 5.3: the window's 依按鍵順序判斷英文 choice has no value false (the store stays nil until chosen), goes to the
-    /// store, and is greyed on the display choice's conditions: the 中英混打 switch off, the Eten layout, no word list; the setting is kept.
+    /// zhen-keyorder section 3 / 5.3 with zhen-revert's default: the window's 依按鍵順序判斷英文 choice has no value true (the store stays nil
+    /// until chosen; a saved false stays false), goes to the store, and is greyed on the overwrite choice's conditions: the 中英混打 switch
+    /// off, the Eten layout, no word list; the setting is kept.
     func testEnglishKeyOrderChoiceStoresAndFollowsTheSwitch() throws {
         let r = rig()
-        XCTAssertFalse(r.model.englishKeyOrder, "default false")
+        XCTAssertTrue(r.model.englishKeyOrder, "default true")
         XCTAssertNil(r.english.englishKeyOrder, "never chosen")
         XCTAssertFalse(r.model.englishKeyOrderEnabled, "the switch is off")
         r.model.setEnglish(true)
         XCTAssertTrue(r.model.englishKeyOrderEnabled)
-        r.model.setEnglishKeyOrder(true)
-        XCTAssertEqual(r.english.englishKeyOrder, true)
-        XCTAssertTrue(r.model.englishKeyOrder)
+        r.model.setEnglishKeyOrder(false)
+        XCTAssertEqual(r.english.englishKeyOrder, false)
+        XCTAssertFalse(r.model.englishKeyOrder)
         XCTAssertTrue(r.model.englishKeyOrderEnabled, "the choice itself does not grey it")
         r.model.selectLayout(.eten)
         XCTAssertFalse(r.model.englishKeyOrderEnabled, "Eten greys it")
-        XCTAssertTrue(r.model.englishKeyOrder, "the setting is kept")
+        XCTAssertFalse(r.model.englishKeyOrder, "the setting is kept")
         r.controller.session.perform(.layout(.standard))
         XCTAssertTrue(r.model.englishKeyOrderEnabled)
         r.controller.session.perform(.toggleEnglish)
         XCTAssertFalse(r.model.englishKeyOrderEnabled, "the menu's switch off greys it too")
         // No word list: greyed, the stored choice still shows.
         let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
-        let english = MemoryEnglishStore(true, keyOrder: true)
+        let english = MemoryEnglishStore(true, keyOrder: false)
         let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
                           acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         let model = SettingsModel(shell: shell)
         XCTAssertFalse(model.englishKeyOrderEnabled)
-        XCTAssertTrue(model.englishKeyOrder, "greyed, still showing the setting")
+        XCTAssertFalse(model.englishKeyOrder, "greyed, still showing the setting")
     }
 
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the

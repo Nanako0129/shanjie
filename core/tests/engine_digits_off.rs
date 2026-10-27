@@ -1,6 +1,13 @@
 //! Digits.md A.4.1 #40 and #50: with the feature off, or without its table, the engine is the engine of the slice before, field for field.
-//! The two fixtures (core/tests/fixtures/digits-off.txt and digits-off-en.txt) are the outputs of the base commit of the digits PR for the
-//! scripts of rows #1-#39 (`common/digits_scripts.rs`); this file only uses what that commit has, so the same file generates them there:
+//! `digits-off.txt` (core/tests/fixtures) is the output of the base commit of the digits PR for the scripts of rows #1-#39
+//! (`common/digits_scripts.rs`); this file only uses what that commit has, so the same file generates it there.
+//!
+//! `digits-off-en.txt` (the switch on, no table) was that commit's output too until zhen-revert (docs/contracts/zhen-revert.md section 2.3):
+//! without the digit layer the digit keys are Zhuyin keys like any other, and with English mixing on a key over the symbol in its column
+//! (`1 2`: ㄅ then ㄉ) or in front of a filled column reverts to the raw keys, so these scripts now stay as the keys typed (an English run
+//! in the composition) where they used to make Zhuyin. It was regenerated with the command below by zhen-revert PR 1; 26 of the 39 rows
+//! differ, all of them rows of digit keys typed without the table. With the table (digits.md A.4.1 #1-#39 on the real layer) nothing
+//! changes: `engine_digits.rs`.
 //!
 //!   DIGITS_FIXTURE_DIR=<dir> cargo test --release --locked -p core --test engine_digits_off -- --test-threads=1
 //!

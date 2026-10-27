@@ -142,11 +142,11 @@ public final class MemorySpacingStore: SpacingStore {
 @MainActor
 public protocol EnglishStore: AnyObject {
     var english: Bool? { get set }
-    /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
-    /// when Space opens the window. `nil` means never chosen, which is true.
-    var englishInline: Bool? { get set }
-    /// The choice under that (docs/contracts/zhen-keyorder.md section 3): keys out of Zhuyin's column order count as evidence of English.
-    /// `nil` means never chosen, which is false.
+    /// The choice under it (docs/contracts/zhen-revert.md section 3): a key typed over the symbol already in its column is English
+    /// (`ok`, `rust`, `gta6`). `nil` means never chosen, which is true.
+    var englishOverwrite: Bool? { get set }
+    /// The choice next to it (docs/contracts/zhen-keyorder.md section 3, default changed by zhen-revert): keys out of Zhuyin's column order,
+    /// and a tone key that makes a syllable the lexicon lacks, are English. `nil` means never chosen, which is true.
     var englishKeyOrder: Bool? { get set }
 }
 
@@ -154,11 +154,11 @@ public protocol EnglishStore: AnyObject {
 @MainActor
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
-    public var englishInline: Bool?
+    public var englishOverwrite: Bool?
     public var englishKeyOrder: Bool?
-    public init(_ english: Bool? = nil, inline: Bool? = nil, keyOrder: Bool? = nil) {
+    public init(_ english: Bool? = nil, overwrite: Bool? = nil, keyOrder: Bool? = nil) {
         self.english = english
-        self.englishInline = inline
+        self.englishOverwrite = overwrite
         self.englishKeyOrder = keyOrder
     }
 }
@@ -410,12 +410,13 @@ public final class Shell {
     /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
-    /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
-    /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
-    private(set) var englishInlineOn = true
-    /// zhen-keyorder section 3: whether keys out of Zhuyin's column order count as evidence of English (default false: `UserDefaults`
-    /// key `englishKeyOrder`, absent is false); sent to every engine `build()` makes. Only matters while `englishOn`.
-    private(set) var englishKeyOrderOn = false
+    /// zhen-revert section 3: whether a key typed over the symbol already in its column is English (default true: `UserDefaults` key
+    /// `englishOverwrite`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishOverwriteOn = true
+    /// zhen-keyorder section 3 with zhen-revert's default: whether keys out of Zhuyin's column order, and a tone key that makes a
+    /// syllable the lexicon lacks, are English (default true: `UserDefaults` key `englishKeyOrder`, absent is true, a saved false stays
+    /// false); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishKeyOrderOn = true
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
@@ -496,10 +497,10 @@ public final class Shell {
     /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
     /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
     var fuzzyAdjacentEnabled: Bool { mode == .standard }
-    /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
-    var englishInlineEnabled: Bool { englishEnabled && englishOn }
-    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the display choice.
-    var englishKeyOrderEnabled: Bool { englishInlineEnabled }
+    /// The 重打同一個位置算英文 choice under it is enabled on the same condition and while the switch itself is on.
+    var englishOverwriteEnabled: Bool { englishEnabled && englishOn }
+    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the overwrite choice.
+    var englishKeyOrderEnabled: Bool { englishOverwriteEnabled }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -633,8 +634,8 @@ public final class Shell {
         spacingOn = spacingStore.spacing == true
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
-        englishInlineOn = englishStore.englishInline ?? true
-        englishKeyOrderOn = englishStore.englishKeyOrder ?? false
+        englishOverwriteOn = englishStore.englishOverwrite ?? true
+        englishKeyOrderOn = englishStore.englishKeyOrder ?? true // zhen-revert: was false; a saved false stays false
         self.fuzzyStore = fuzzyStore
         fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
@@ -705,8 +706,8 @@ public final class Shell {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
-    func applyEnglishInline(_ on: Bool) {
-        if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    func applyEnglishOverwrite(_ on: Bool) {
+        if let o = owner { o.applyEnglishOverwrite(on) } else { dropOnFailure(setEnglishOverwrite(on)) }
     }
 
     func applyEnglishKeyOrder(_ on: Bool) {
@@ -818,7 +819,7 @@ public final class Shell {
         englishOn = on
         englishStore.english = on
         defer { changed() }
-        return engine?.setEnglish(on)
+        return engine?.setEnglish(on && englishAvailable) // the engine no longer reads the list; until PR 2 retires it a missing list still means "does nothing"
     }
 
     /// The settings window's 模糊輸入 flags (fuzzy-input section 2.2): stored, and sent to the engine, which recomputes the composition
@@ -830,18 +831,17 @@ public final class Shell {
         return engine?.setFuzzy(fuzzyFlags)
     }
 
-    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
-    /// caller to show, so a composition on screen is drawn again in the new display.
-    func setEnglishInline(_ on: Bool) -> CoreResult? {
-        englishInlineOn = on
-        englishStore.englishInline = on
+    /// The settings window's 重打同一個位置算英文 choice (zhen-revert section 3): stored, and sent to the engine; the snapshot is for the
+    /// caller to show (nothing on screen changes: an English run is text).
+    func setEnglishOverwrite(_ on: Bool) -> CoreResult? {
+        englishOverwriteOn = on
+        englishStore.englishOverwrite = on
         defer { changed() }
-        return engine?.setEnglishInline(on)
+        return engine?.setEnglishOverwrite(on)
     }
 
     /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
-    /// caller to show. The core closes an open English window when the choice goes off, whatever evidence opened it; otherwise nothing
-    /// on screen changes.
+    /// caller to show (nothing on screen changes).
     func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
         englishKeyOrderOn = on
         englishStore.englishKeyOrder = on
@@ -1001,15 +1001,17 @@ public final class Shell {
         if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
             Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
         }
-        // And the English window's switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
-        if case .failed(let c) = e.setEnglish(englishOn) {
+        // And the English mixing switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off. The engine
+        // no longer reads the word list (zhen-revert section 2.8), but until PR 2 retires the list a bundle without a good one still means
+        // that the switch is greyed and does nothing (`englishAvailable`).
+        if case .failed(let c) = e.setEnglish(englishOn && englishAvailable) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
-        // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
-        if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
-            Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        // And the overwrite choice (zhen-revert section 3), every time for the same reason.
+        if case .failed(let c) = e.setEnglishOverwrite(englishOverwriteOn) {
+            Log.shell.error("shanjie_engine_set_english_overwrite failed, code \(c)")
         }
-        // And the key-order evidence (zhen-keyorder section 3), every time: the core's default is false.
+        // And the key-order choice (zhen-keyorder section 3), every time.
         if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
             Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
         }
@@ -1246,18 +1248,16 @@ public final class Session {
         }
     }
 
-    /// The settings window's 英文的顯示 choice: the snapshot is shown, if this session owns the composition (letters turn into
-    /// Zhuyin or back on screen).
-    func applyEnglishInline(_ on: Bool) {
-        switch shell.setEnglishInline(on) {
+    /// The settings window's 重打同一個位置算英文 choice: the snapshot is shown, if this session owns the composition.
+    func applyEnglishOverwrite(_ on: Bool) {
+        switch shell.setEnglishOverwrite(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
         }
     }
 
-    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (turning it off
-    /// closes an open English window, whatever opened it; otherwise the snapshot is what was on screen).
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (it is what was on screen).
     func applyEnglishKeyOrder(_ on: Bool) {
         switch shell.setEnglishKeyOrder(on) {
         case .ok(let o)? where shell.owner === self: apply(o)

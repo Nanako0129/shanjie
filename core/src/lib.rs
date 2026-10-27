@@ -393,7 +393,7 @@ impl Lexicon {
     pub fn reading_count(&self) -> usize {
         self.readings.len()
     }
-    /// The syllables of reading `r` (`0..reading_count()`), for the exhaustive clean-typing test of zhen-keyorder section 4.
+    /// The syllables of reading `r` (`0..reading_count()`), for the exhaustive clean-typing test of zhen-revert section 4.3.
     #[doc(hidden)]
     pub fn reading_syllables(&self, r: usize) -> Vec<&str> {
         self.key_of(&self.readings[r]).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()

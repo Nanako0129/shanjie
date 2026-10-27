@@ -1,6 +1,6 @@
-//! `english-sim` (docs/contracts/zhen-mixed.md section 4.1, `--inline`: zhen-inline.md section 3, with the auto-keep columns of
-//! revision 2): a fixed-seed run with the numbers written down. Change the typing
-//! model in cli/src/english.rs and these numbers change with it. Synthetic rows and words only.
+//! `english-sim` (docs/contracts/zhen-revert.md section 4.1; the typing model of docs/contracts/zhen-mixed.md section 4.2): a fixed-seed
+//! run with the numbers written down. Change the typing model in cli/src/english.rs and these numbers change with it. Synthetic rows and
+//! words only.
 use std::process::Command;
 
 fn run(args: &[&str]) -> String {
@@ -9,104 +9,93 @@ fn run(args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-/// 400 identical rows of one tone-1 syllable, ㄊㄧㄠ (keys w u l, all in the standard layout's letter keys), and the two words
-/// the mistakes `e`/`q` for w overwritten, `k` for l overwritten can type: ewukl, qwukl. Each needs two overwrites, which the
-/// leftover (a valid syllable) requires, so only a repair by overwriting reaches them.
-fn files(name: &str) -> (String, String) {
+fn fails(args: &[&str]) -> bool {
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).arg("english-sim").args(args).output().unwrap();
+    !out.status.success() && out.stdout.is_empty()
+}
+
+const LIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
+const ROWS_SHA: &str = "93556f9e41a4054454d89f223362857134a0250856928da60071d24eea7cef21";
+
+/// 400 identical rows of one tone-1 syllable, ㄊㄧㄠ (keys w u l, all in the standard layout's letter keys).
+fn rows(name: &str) -> String {
     let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let rows = dir.join("rows.txt");
-    let words = dir.join("words.txt");
     std::fs::write(&rows, "|挑|ㄊㄧㄠ\n".repeat(400)).unwrap();
-    std::fs::write(&words, "ewukl\nqwukl\n").unwrap();
-    // Longer words with the same starts and no word of their own: rule D holds on the way to them, the window never opens.
-    std::fs::write(dir.join("longer.txt"), "ewuklzz\nqwuklzz\n").unwrap();
-    (rows.to_str().unwrap().into(), words.to_str().unwrap().into())
+    rows.to_str().unwrap().into()
 }
-
-const ROWS_SHA: &str = "93556f9e41a4054454d89f223362857134a0250856928da60071d24eea7cef21";
 
 #[test]
 fn fixed_seed_numbers() {
-    let (rows, words) = files("fixed");
-    // rows syllables keys triggers per_1000_mean per_1000_max; five seeds from 20261014. per_1000 = triggers x 1000 / syllables
-    // of a seed: 214 triggers over five seeds of 400 syllables is a mean of 214 x 1000 / (400 x 5) = 107 (the max seed is 117.5).
-    let a = run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--repair", "overwrite"]);
-    assert_eq!(a, format!("{ROWS_SHA}\t400\t400\t14898\t214\t107.000\t117.500\n"));
+    let rows = rows("fixed");
+    // rows syllables keys typos, then (mean, max) per 1000 syllables of a seed for revert a, b, c, split and english_final; five seeds from
+    // 20261014. With the overwrite repair every wrong key in the occupied column of the right one is overwritten, which is a revert (a) the
+    // simulator undoes: 3,008 mistyped keys over five seeds of 400 syllables, and 1,263 reverts per 1000 syllables (the max seed 1,290).
+    let a = run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite"]);
+    assert_eq!(a, format!("{ROWS_SHA}\t400\t400\t23122\t3008\t1263.000\t1290.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
     // The same again (the output depends on nothing but the arguments).
-    assert_eq!(run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--repair", "overwrite"]), a);
-    // Backspace repair never reaches the two words (the wrong l is deleted, not overwritten).
-    assert_eq!(run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--repair", "backspace"]), format!("{ROWS_SHA}\t400\t400\t16506\t0\t0.000\t0.000\n"));
-    // Without mistakes nothing triggers: five keys a row (w u l, Space, Enter) times 400 rows times 5 seeds.
-    assert_eq!(run(&["--words", &words, "--rows", &rows, "--p", "0"]), format!("{ROWS_SHA}\t400\t400\t10000\t0\t0.000\t0.000\n"));
-    // One seed, one repeat: the first seed is the one the mean above starts from.
-    let one = run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--seed", "1", "--repeat", "1"]);
-    assert_eq!(one, format!("{ROWS_SHA}\t400\t400\t2964\t45\t112.500\t112.500\n"));
-    // `--inline` (docs/contracts/zhen-inline.md section 3) adds the two columns of the display rule D, asked of the engine after every
-    // key, and the two of the auto-keeps (revision 2, all 0 here: the words are only reached at their last key), and leaves the rest
-    // of the line as it is. Here D holds exactly in the syllables that trigger (the two words are the only
-    // ones, so no longer start exists): the same 214 over five seeds.
-    let inline = run(&["--words", &words, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--inline"]);
-    assert_eq!(inline, format!("{ROWS_SHA}\t400\t400\t14898\t214\t107.000\t117.500\t107.000\t117.500\t0.000\t0.000\n"));
-    // Words that are only longer than what is typed: D holds (the Zhuyin would show as letters), nothing triggers.
-    let longer = std::path::Path::new(&rows).parent().unwrap().join("longer.txt");
-    let longer = longer.to_str().unwrap();
+    assert_eq!(run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite"]), a);
+    // Backspace repair: the wrong key is taken out before the right one goes in, so only a wrong key that lands in an occupied column reverts.
     assert_eq!(
-        run(&["--words", longer, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--inline"]),
-        format!("{ROWS_SHA}\t400\t400\t14470\t0\t0.000\t0.000\t107.000\t117.500\t0.000\t0.000\n")
+        run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "backspace"]),
+        format!("{ROWS_SHA}\t400\t400\t16996\t3008\t245.000\t275.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
     );
-    // The backspace repair and no mistakes: zero, in both columns.
-    assert_eq!(run(&["--words", longer, "--rows", &rows, "--p", "0.5", "--repair", "backspace", "--inline"]), format!("{ROWS_SHA}\t400\t400\t16506\t0\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
-    assert_eq!(run(&["--words", longer, "--rows", &rows, "--p", "0", "--inline"]), format!("{ROWS_SHA}\t400\t400\t10000\t0\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
+    // Without mistakes nothing reverts (threshold 1 of section 4.2): five keys a row (w u l, Space, Enter) times 400 rows times 5 seeds.
+    assert_eq!(
+        run(&["--words", LIST, "--rows", &rows, "--p", "0"]),
+        format!("{ROWS_SHA}\t400\t400\t10000\t0\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
+    );
+    // One seed, one repeat: the first seed is the one the mean above starts from.
+    let one = run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--seed", "1", "--repeat", "1"]);
+    assert_eq!(one, format!("{ROWS_SHA}\t400\t400\t4602\t601\t1250.000\t1250.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
+    // The switches: with the overwrite switch off the right key replaces the wrong one and nothing reverts; with the key-order switch off
+    // alone the figures are those of both on (these rows have no key out of column order that the repair does not take out first).
+    assert_eq!(
+        run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--overwrite", "off"]),
+        format!("{ROWS_SHA}\t400\t400\t14470\t3008\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
+    );
+    assert_eq!(run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--key-order", "off"]), a);
+    assert_eq!(
+        run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "backspace", "--overwrite", "off", "--key-order", "off"]),
+        format!("{ROWS_SHA}\t400\t400\t16506\t3008\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
+    );
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
 }
 
 #[test]
-fn inline_is_for_the_typing_mode() {
-    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
-    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).arg("english-sim").args(["--words", list, "--recall", "--inline"]).output().unwrap();
-    assert!(!out.status.success() && out.stdout.is_empty());
+fn the_switches_take_on_or_off() {
+    let rows = rows("switches");
+    assert!(fails(&["--words", LIST, "--rows", &rows, "--overwrite", "yes"]));
+    assert!(fails(&["--words", LIST, "--rows", &rows, "--key-order", "1"]));
+    assert!(fails(&["--words", LIST, "--rows", &rows, "--inline"]), "the display option is gone");
+    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
 }
 
+/// Recall mode: every word of eval/golden/english-tiny.txt typed letter by letter on an engine of its own, then Space. The first revert of
+/// the six words is (a) four times (google, dip, hello, rust: a key over a symbol in its column), (b) once (law: `a`, the initial, after the
+/// final `l`) and (c) once (cup: typed in order, and the syllable ㄏㄧㄣ is missing at Space); every one ends as one English token equal
+/// to the word. With both switches off only (c) is left, and `cup` is the one word that ends as a token.
 #[test]
-fn recall_counts_the_classes_and_the_opening_words() {
-    // eval/golden/english-tiny.txt: cup (no overwrite), law (one, valid leftover), google (four, valid leftover), dip, hello and
-    // rust (a leftover that is not a syllable): four open, all with the word first.
-    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
+fn recall_counts_the_classes_and_the_probes() {
     let sha = "d4907dc4b4fffa8c0f450e3321b0837d90447af45747ef0cb49fee12fd9cbd80";
-    assert_eq!(run(&["--words", list, "--recall"]), format!("{sha}\t6\t4\t4\t1\t1\t1\t3\n"));
-}
-
-/// Revision 2 (zhen-inline section 3): the word `ewuk` is reached by the mistakes `e` for w and `k` for l (both overwritten), and the
-/// key that repairs the `k` (`l`) goes nowhere from a whole word: the engine keeps `ewuk` as an English token and begins a
-/// syllable. The simulator counts it, presses Esc and Backspace, types ㄊㄧㄠ again without a mistake and goes on.
-#[test]
-fn autokeep_columns() {
-    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-keep", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let (rows, words) = (dir.join("rows.txt"), dir.join("words.txt"));
-    std::fs::write(&rows, "|挑|ㄊㄧㄠ\n".repeat(400)).unwrap();
-    std::fs::write(&words, "ewuk\n").unwrap();
-    let (rows, words) = (rows.to_str().unwrap(), words.to_str().unwrap());
-    let cols = |args: &[&str]| -> Vec<String> {
-        let mut a = vec!["--words", words, "--rows", rows];
-        a.extend_from_slice(args);
-        run(&a).trim_end().split('\t').map(String::from).collect()
-    };
-    // With mistakes, overwritten: auto-keeps are counted. The 11 columns are the 7 of before, the 2 of rule D and the 2 new ones. Here
-    // every syllable that shows letters (the only word is `ewuk`) is one that is kept, so the D and auto-keep columns agree; the rate is
-    // about the chance of `e` for w (1/4) and `k` for l (1/4), 1/16 of the 400 syllables a seed, 55.5 per 1000 over five seeds.
-    let c = cols(&["--p", "0.5", "--repair", "overwrite", "--inline"]);
-    assert_eq!(c.len(), 11, "{c:?}");
-    let (mean, max): (f64, f64) = (c[9].parse().unwrap(), c[10].parse().unwrap());
-    assert!(mean > 0.0 && max >= mean, "{c:?}");
-    assert_eq!(c[7..], ["55.500", "70.000", "55.500", "70.000"], "{c:?}");
-    // Without mistakes nothing is kept; the Backspace repair never reaches a whole word followed by a key (it rebuilds the letters).
-    assert_eq!(cols(&["--p", "0", "--inline"])[9..], ["0.000", "0.000"]);
-    assert_eq!(cols(&["--p", "0.5", "--repair", "backspace", "--inline"])[9..], ["0.000", "0.000"]);
-    // Without `--inline` the line has no new column (and the recovery still runs: the keys are counted).
-    assert_eq!(cols(&["--p", "0.5", "--repair", "overwrite"]).len(), 7);
-    std::fs::remove_dir_all(&dir).unwrap();
+    let on = run(&["--words", LIST, "--recall"]);
+    let lines: Vec<&str> = on.lines().collect();
+    assert_eq!(lines[0], format!("{sha}\t6\t6\t4\t1\t1\t0"));
+    // The probes, a fixed public list in a fixed order: the words that revert, the short ones that never do (ai, ui, mp3), and the missing
+    // syllables (go, cp, cup).
+    let want = [
+        ("ok", "token"), ("ls", "token"), ("cd", "token"), ("mv", "token"), ("pr", "token"), ("ai", "中文"), ("ui", "中文"), ("go", "token"),
+        ("cp", "token"), ("cup", "token"), ("npm", "token"), ("gta6", "token"), ("rdr2", "token"), ("poe2", "token"), ("mp3", "中文"),
+        ("a4", "token"), ("i7", "token"), ("s7", "token"),
+    ];
+    assert_eq!(lines.len(), 1 + want.len(), "{on}");
+    for (line, (w, what)) in lines[1..].iter().zip(want) {
+        assert_eq!(*line, format!("probe\t{w}\t{what}"));
+    }
+    let off = run(&["--words", LIST, "--recall", "--overwrite", "off", "--key-order", "off"]);
+    assert_eq!(off.lines().next().unwrap(), format!("{sha}\t6\t1\t0\t0\t4\t2"));
+    assert!(off.contains("probe\tcup\ttoken\n") && off.contains("probe\tgo\ttoken\n") && off.contains("probe\tok\t中文\n"), "{off}");
 }
 
 /// `--digits` (docs/contracts/digits.md A.4.2): the engine with the digit table and the model; six more columns (three pairs), mean and max per 1000
@@ -120,18 +109,17 @@ fn digits_columns() {
     std::fs::create_dir_all(&dir).unwrap();
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|蛋|ㄉㄢˋ\n|八|ㄅㄚ\n|百|ㄅㄞˇ\n").unwrap();
-    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
     let rows = rows.to_str().unwrap();
-    let go = |p: &str, repair: &str| run(&["--words", list, "--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair]);
+    let go = |p: &str, repair: &str| run(&["--words", LIST, "--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair]);
     let sha = "1265d1e6ad6805a31af90872f00b75447742d3a261cdfab90a0073fd6d30d348";
-    assert_eq!(go("0", "overwrite"), format!("{sha}\t3\t3\t24\t0\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
-    assert_eq!(go("0.3", "backspace"), format!("{sha}\t3\t3\t34\t0\t0.000\t0.000\t0.000\t0.000\t333.333\t666.667\t0.000\t0.000\n"));
+    let zeros = "0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000";
+    assert_eq!(go("0", "overwrite"), format!("{sha}\t3\t3\t24\t0\t{zeros}\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
+    assert_eq!(go("0.3", "backspace"), format!("{sha}\t3\t3\t34\t5\t{zeros}\t0.000\t0.000\t333.333\t666.667\t0.000\t0.000\n"));
     let over = go("0.3", "overwrite");
-    assert_eq!(over, format!("{sha}\t3\t3\t29\t0\t0.000\t0.000\t2666.667\t4000.000\t2333.333\t3666.667\t0.000\t0.000\n"));
+    assert_eq!(over, format!("{sha}\t3\t3\t29\t5\t{zeros}\t2666.667\t4000.000\t2333.333\t3666.667\t0.000\t0.000\n"));
     assert_eq!(go("0.3", "overwrite"), over, "the output depends on nothing but the arguments");
     // `--digits` is for the typing mode, and `--lm` goes with it.
-    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).arg("english-sim").args(["--words", list, "--recall", "--digits"]).output().unwrap();
-    assert!(!out.status.success() && out.stdout.is_empty());
+    assert!(fails(&["--words", LIST, "--recall", "--digits"]));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -144,57 +132,53 @@ fn digits_backspace_repair_reads_the_screen() {
     std::fs::create_dir_all(&dir).unwrap();
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|不|ㄅㄨˋ\n".repeat(100)).unwrap();
-    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
-    let out = run(&["--words", list, "--rows", rows.to_str().unwrap(), "--digits", "--repeat", "2", "--p", "0.5", "--repair", "backspace"]);
+    let out = run(&["--words", LIST, "--rows", rows.to_str().unwrap(), "--digits", "--repeat", "2", "--p", "0.5", "--repair", "backspace"]);
     let c: Vec<&str> = out.trim_end().split('\t').collect();
-    assert_eq!(c.len(), 13, "{c:?}");
-    assert_eq!(c[7..9], ["0.000", "0.000"], "no digit left in what the rows commit: {c:?}");
-    let (shown, extra): (f64, f64) = (c[9].parse().unwrap(), c[11].parse().unwrap());
+    assert_eq!(c.len(), 21, "{c:?}");
+    assert_eq!(c[15..17], ["0.000", "0.000"], "no digit left in what the rows commit: {c:?}");
+    let (shown, extra): (f64, f64) = (c[17].parse().unwrap(), c[19].parse().unwrap());
     assert!(shown > 0.0 && extra > 0.0, "premise: slips made digit tokens that cost an extra Backspace: {c:?}");
-    assert_eq!(c[11..], ["535.000", "570.000"], "{c:?}");
+    assert_eq!(c[19..], ["535.000", "570.000"], "{c:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// Zhen-keyorder section 4, typing mode: the line of before, then one `two` line for every word of `TWO_LETTER` (the core's list, in its
-/// order) with the mean and max per 1000 syllables; without `--key-order` the output is the one line of before. Typed right (`--p 0`)
-/// the engine with the switch on opens nothing. These rows are one three-symbol syllable, so the shadow holds three keys at Space whatever the
-/// repair (it only loses a key with a symbol), and no figure leaves 0; the counting itself is pinned in the module test of
-/// cli/src/english.rs (`two_letter_windows_are_counted_by_word`).
+/// Section 4.1: a row whose retyping keeps reverting is stopped, not the run. The real lexicon has no syllable that reverts when typed clean,
+/// so the row is made to keep reverting with `--retries 0` (a revert is stopped at once): with p 0.5 and the overwrite repair about half
+/// of 60 identical rows revert. The run exits 0, every row is still in the figures, and stderr names each stopped row (number, seed and
+/// kind, no text) and gives the total; the stdout columns are the same 15 as ever.
 #[test]
-fn key_order_typing_prints_every_two_letter_word() {
-    let (rows, words) = files("keyorder");
-    for args in [&["--p", "0"][..], &["--p", "0.5", "--repair", "overwrite"], &["--p", "0.5", "--repair", "backspace"]] {
-        let mut a = vec!["--words", words.as_str(), "--rows", rows.as_str()];
-        a.extend_from_slice(args);
-        let plain = run(&a);
-        assert_eq!(plain.lines().count(), 1, "no flag, one line: {plain}");
-        a.push("--key-order");
-        let out = run(&a);
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines.len(), 1 + core::engine::TWO_LETTER.len(), "{out}");
-        for (line, word) in lines[1..].iter().zip(core::engine::TWO_LETTER) {
-            let f: Vec<&str> = line.split('\t').collect();
-            assert_eq!((f.len(), f[0], f[1]), (4, "two", *word), "{line}");
-            let (mean, max): (f64, f64) = (f[2].parse().unwrap(), f[3].parse().unwrap());
-            assert_eq!((mean, max), (0.0, 0.0), "{line}");
-        }
-        if args.len() == 2 {
-            assert_eq!(lines[0], plain.trim_end(), "clean typing: the first line is the old one");
-        }
-    }
-    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
-}
-
-/// Zhen-keyorder section 4, recall mode with the switch on: only `opened` and `top1`, for the list and for `TWO_LETTER`, and the six
-/// probes; the tool does not stop for a disagreement with the recount of the switch-off rules (it makes none). On
-/// eval/golden/english-tiny.txt all six words open, with the word first (law and hello have evidence by key order; cup opens
-/// with none, on Space, because ㄏㄧㄣ is not a syllable). All 19 two-letter words can have evidence (a replacement or a key out of order), so
-/// 19 open. `npm` is not in that list: 0.
-#[test]
-fn key_order_recall_reports_what_the_engine_does() {
-    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
-    let want = "recall\twords\t6\t6\t6\nrecall\ttwo\t19\t19\t19\nprobe\tok\t1\nprobe\tls\t1\nprobe\tcd\t1\nprobe\tmv\t1\nprobe\tcup\t1\nprobe\tnpm\t0\n";
-    assert_eq!(run(&["--words", list, "--recall", "--key-order"]), want);
-    // Without the flag: the line of before (a different engine, a different report).
-    assert_eq!(run(&["--words", list, "--recall"]).lines().count(), 1);
+fn a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-stuck", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|挑|ㄊㄧㄠ\n".repeat(60)).unwrap();
+    let rows = rows.to_str().unwrap();
+    let go = |retries: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+            .arg("english-sim")
+            .args(["--words", LIST, "--rows", rows, "--p", "0.5", "--repair", "overwrite", "--seed", "1", "--repeat", "1", "--retries", retries])
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+    let (ok, stdout, stderr) = go("0");
+    assert!(ok, "the run exits 0: {stderr}");
+    let cols: Vec<&str> = stdout.trim_end().split('\t').collect();
+    assert_eq!(cols.len(), 15, "{stdout}");
+    assert_eq!(cols[1..3], ["60", "60"], "every row is in the figures");
+    let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with("row ")).collect();
+    let summary: Vec<&str> = stderr.lines().filter(|l| l.starts_with("stopped ")).collect();
+    assert!(!lines.is_empty() && lines.len() < 60, "premise: some rows stop and some do not: {stderr}");
+    assert!(lines.iter().all(|l| l.contains("of seed 1") && l.contains("(a)") && l.contains("was stopped") && !l.contains('挑')), "{stderr}");
+    assert_eq!(summary, [format!("stopped {} rows over 1 seeds (their counts so far stay in the figures, their English left is not counted)", lines.len())]);
+    // The rows after a stopped one are typed: some row numbered after the first stopped row did not stop.
+    let stopped: Vec<usize> = lines.iter().map(|l| l.split_whitespace().nth(1).unwrap().parse().unwrap()).collect();
+    assert!((stopped[0] + 1..=60).any(|n| !stopped.contains(&n)), "{stopped:?}");
+    // Each stopped row reverted once (a): the figure is exactly the number of stopped rows per 1000 syllables.
+    let a: f64 = cols[5].parse().unwrap();
+    assert!((a - lines.len() as f64 * 1000.0 / 60.0).abs() < 0.01, "{a} vs {}", lines.len());
+    // The same run with the default retries stops nothing and writes nothing about rows.
+    let (ok, stdout, stderr) = go("3");
+    assert!(ok && !stderr.contains("stopped") && stdout.split('\t').count() == 15, "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
