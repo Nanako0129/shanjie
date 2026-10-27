@@ -230,6 +230,48 @@ fn fixed_overlay_word_total_equals_whole_sentence_top1() {
     }
 }
 
+/// Row `n` (1-based among the usable rows) of an eval/dev file.
+fn row_of(file: &str, n: usize) -> Syls {
+    let s = shared();
+    let rows = usable(&s.lex, parse_rows(&std::fs::read_to_string(root().join("eval/dev").join(file)).unwrap()).unwrap());
+    let r = &rows[n - 1];
+    r.reading.clone().unwrap_or_else(|| s.lex.to_syllables(&r.sent).expect("usable row"))
+}
+
+/// 5(a) on the shipping chat configuration: the same as above with the chat trigram table loaded (`shared()` holds both tables). With a table a path
+/// with a fixed word can score differently from the same string without one (trigram-core rule (a)): dev302 row 292 above does, by 9e-2, which is why it
+/// runs without the tables. These rows do not (measured 2026-10-27 on the SJ-LM-7 files: a search over every word of the top-1 path that the cap moves
+/// by more than 0.1 in eval/dev, acg and names found equal totals on many of them, among them the rows below, and differing ones such as row 292), spread over
+/// the sets and over the position of the word (it starts at syllable 0, 2 or 9). The premises are asserted: the chat profile has its
+/// table, the word is in the top-1 path, the cap moves it.
+#[test]
+fn fixed_overlay_word_total_equals_whole_sentence_top1_with_the_chat_table() {
+    let s = shared();
+    assert!(s.lm.uses_tri(s.lm.scoring(Profile::Chat)), "premise: the chat table is loaded");
+    let cases = [
+        ("acg/characters.txt", 207, "紗夜"),
+        ("acg/characters.txt", 211, "今井螢"),
+        ("acg/works.txt", 99, "歲月流逝"),
+        ("user-reported.txt", 15, "洛黨"),
+        ("user-reported.txt", 161, "馬辣"),
+        ("names/names.txt", 13, "大立光"),
+    ];
+    for (file, n, word) in cases {
+        let syls = row_of(file, n);
+        let (surface, score, spans) = best_path(&syls, Profile::Chat);
+        let &(_, a, b) = spans.iter().find(|(w, _, _)| w == word).unwrap_or_else(|| panic!("{word} is in the top-1 path of {file} row {n}"));
+        let key = &syls[a..b];
+        let raw = s.lex.entries(key).iter().filter(|(w, _)| *w == word).map(|x| x.1).fold(f64::MIN, f64::max);
+        let capped = s.capped.best_lp(key, word).unwrap();
+        assert!(raw - capped > 0.1, "the cap must change this word's score ({file} row {n})");
+        let mut e = engine(Layout::Standard, Profile::Chat);
+        let o = fix_word(&mut e, Layout::Standard, &syls, b, word);
+        assert!(o.preedit == surface, "string differs at {file} row {n}");
+        let total = e.total_score().unwrap();
+        assert!((total - score).abs() <= 1e-9, "total {total} vs top-1 {score} at {file} row {n}");
+    }
+}
+
 /// 5(a), breadth: every word of the top-1 path of the first rows, both profiles. A beam of 64 is an
 /// approximation, so a row may legitimately differ; at most 2 of the checked words may.
 /// Both sides run on the model without `trigram.sjt3` (`Lm::load_opts(.., &[])`). With the table the formal profile
