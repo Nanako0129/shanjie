@@ -9519,3 +9519,20 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - `fuzzyFlags` 18（ㄓ／ㄗ＋鄰鍵）：`ㄗ ㄉㄠˋ`＋Enter 送出「知道」；把「謝謝」第一個字的 ㄒ（v）按成鄰鍵 ㄏ（c），`ㄏㄧㄝˋ ㄒㄧㄝˋ`＋Enter 送出「謝謝」。
 - 對照 `fuzzyFlags` 0：同樣的按鍵送出「資到」與「謝」（ㄏㄧㄝˋ 照舊不收）。
 - 截圖只留在 session 暫存區。fresh verifier 另外記了一個 P4：ㄓ／ㄗ 開著時「ㄗ ㄉㄠˋ ㄌㄜ˙」仍是「資到了」（契約只保證兩個音節的例子）。
+
+## 2026-10-27：中英混打第四片「直接回退」PR 1（核心、FFI、殼）實作（契約 `docs/contracts/zhen-revert.md`）
+
+- 分支 `feat/zhen-revert`（從合併模糊輸入 #273 之後的 main）。行為照契約 §2：影子改成每欄一個鍵帽；三種回退 (a) 覆寫、(b) 逆序、(c) 完成詞庫沒有的音節（空白鍵一次成為一個英文 token；聲調鍵留著英文段）；鄰鍵先於 (c)（§2.9）；英文段多收不是字母的注音鍵與聲調鍵（尾音節至少 2 個符號且在詞庫才切分）；Esc 還原；`ENGLISH_SHORT` 短詞項目；新開關 `set_english_overwrite`，`set_english_key_order` 預設改開；`set_english_inline`、英文窗、顯示規則 D、自動固定、`TWO_LETTER` 與證據計數都刪了。`load_english` 與單字表的載入、打包留到 PR 2。
+- `ENGLISH_SHORT` 用 `lex.entries` 逐字核對（測試 `english_short_is_as_documented`）：契約列的 11 個字（ai ui up co hp jp mp mp3 np rm xl）全部成立，沒有刪；`go cp so to do hi am zi cup` 的音節確實不在詞庫。
+- 窮舉（`clean_typing_of_every_reading_never_reverts`）：全部 1,417 個音節加固定種子抽樣的 40,000 個讀音（共 416,227 個），三個開關全開、沒有模型，一次都沒有回退或切分，組字區和同一組鍵打進中英混打關著的引擎逐項相同。release 約 15 秒（兩個引擎）；全部 416,227 個估計超過 60 秒，所以抽樣（種子 20261026，不少於 20,000）。`ENGLISH_SHORT` 的窮舉另一個測試。
+- 突變（每項改一處，只跑對應的測試，結束碼 101、斷言訊息都記下；編譯錯誤不算殺死）：覆寫不回退、逆序不回退、(c) 空白不回退、(c) 聲調不回退、數字鍵結束英文段、空白鍵也切分、單一符號也切、切分不查詞庫（斷言是「切成詞庫沒有的音節時引擎出錯」）、(c) 排在鄰鍵之前、短詞項目對整個候選範圍、影子不跟 Backspace 清欄、兩個開關不生效（三處）、短詞項目加在前面、短詞標記不被改狀態的鍵清掉、英文 token 定義不含數字、倚天或可省略韻母也回退、回退沒有中文項、Esc 不還原、Esc 在改過之後還原、游標在中間不分開解碼、切分丟掉英文段頭、切分不設旗標、逆序標成覆寫：共 27 個，全部被殺死。
+- 契約有歧義或我多做的幾處（以最接近契約例子的讀法）：
+  - 還原點：(a)、(b) 是「這個鍵照今天放進欄位之後的三欄與影子」，Esc 之後再按同一個鍵會用還原後的影子判斷（`o k` Esc `k` 是 `kk`，影子裡留著第一個 `k`）。
+  - (c) 在空白鍵已經成為 token，模擬器的復原是 Backspace（token 變成少一個字母的英文段）再 Esc；模擬器預期 (c) 不會發生（錯鍵立刻被修正），這條路徑只由單元測試覆蓋。
+  - `last_short` 在每個 `key()` 開頭取走（同 `last_digits`），↑、直通的鍵、不起作用的聲調鍵再放回去；短詞項目不和數字讀法項目同時出現（前者要影子的鍵正好是短詞，兩者實際上不會重疊）。
+  - 中途打開中英混打或關掉可省略韻母時，影子由目前的欄位補齊（符號對應唯一的鍵），維持「影子永遠和欄位一致」。
+  - 殼：`build()` 與 `setEnglish` 送 `englishOn && englishAvailable`，單字表壞掉時開關仍是反灰且不作用（契約要 `englishAvailable` 的測試 PR 1 照舊通過）；PR 2 拿掉。
+  - 鄰鍵的設定說明加了一句「開著時 go、cp、cup 這類字會被收成中文」（契約 §2.9 要求）。
+- 重新釘住的既有測試（契約改了行為的地方）：`engine_digits.rs` 第 27 列（Shift+A 之後的數字鍵留在英文段上，送出文字不變，`syls` 在 Enter 之前是空的）；`core/tests/fixtures/digits-off-en.txt`（中英混打開著但沒有數字表：數字鍵不再做成注音，39 列裡 26 列的逐鍵輸出改變，都是打數字的列；沒有數字表時送出的文字也隨之改變，這是契約 §2.3 套用在數字鍵上的結果，有數字表的 A.4.1 各列的送出文字都沒變）；`engine_english_next.rs` 小寫 `joe`（現在 (b) 回退成 token）；`engine_rerank.rs` 英文 token 作廢重排工作（改成 Space 結束英文段）；`engine_replay.rs`（全程沒有回退或切分）；CJKSpacing 三個測試（用 Space 結束 Shift 英文段，數字鍵現在接在段上）；兩個可省略韻母的測試（關掉中英混打，否則同一欄的第二鍵是英文）。
+- `english-sim` 新版（只跑單元測試與合成資料，沒有在 Mac 跑真實集合）：`--overwrite`、`--key-order`、錯打總數、a/b/c 與切分與 `english_final` 各欄，召回模式與 18 個 probe 行。合成資料的固定種子數字在 `cli/tests/english_sim.rs`。
+- 測試結果（Mac 上只跑改到的檔）：`engine_english` 63（含窮舉）、`engine_digits` 60、`engine_digits_off` 2、`engine_english_next` 16、`engine_rerank` 28、`engine_replay` 5、`engine` 34（C 冒煙另外編譯執行 OK）、`core` 函式庫 94、`cli` 的 `english_sim` 5、`english_next` 2、`golden` 25、`swift test` 全過。完整的 `make test-rust`、真實集合的量測（§4）與保留集不在這裡跑。
