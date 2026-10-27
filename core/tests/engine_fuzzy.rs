@@ -545,3 +545,54 @@ fn the_learning_guard_does_not_depend_on_whether_the_learner_has_records() {
     assert_eq!(run(false), (true, 0), "premise: a fresh profile reranks the stretch");
     assert_eq!(run(true), (true, 0), "a profile with a record reranks it too, and no guard skip is counted");
 }
+
+/// Review item 4: `choose` spliced a tolerant word's lexicon reading into the typed syllables before it listed the new words the pick
+/// displaces, so the path's new words overlapping the span were looked up under the rewritten reading and 派工 (taught as ㄆㄞˋ ㄍㄨㄥ)
+/// was missed when 棍 (a word of ㄍㄨㄣ) was picked over the ㄍㄨㄥ. Picking any other word there halves 派工 at the commit (new-word B
+/// 2.5); the tolerant pick must too.
+#[test]
+fn a_tolerant_pick_halves_the_new_words_it_displaces_under_their_own_reading() {
+    let reading = ["ㄆㄞˋ".to_string(), "ㄍㄨㄥ".to_string()];
+    let pick_one_syllable = |e: &mut Engine, want: &dyn Fn(&str) -> bool| {
+        press(e, KeyKind::End);
+        let mut o = press(e, KeyKind::Space);
+        for _ in 0..o.total {
+            let w = o.candidates[o.selected.unwrap()].clone();
+            if w.chars().count() == 1 && want(&w) {
+                press(e, KeyKind::Enter);
+                return w;
+            }
+            o = press(e, KeyKind::Right);
+        }
+        panic!("no such candidate");
+    };
+    let run = |tolerant: bool| {
+        let lex = &shared().lex;
+        let mut e = engine(Layout::Standard, 0b0001, true);
+        e.set_prediction(false).unwrap();
+        e.set_left_context("要進");
+        type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ");
+        for (at, w) in [(0, "派"), (1, "工")] {
+            press(&mut e, KeyKind::End);
+            for _ in 0..1 - at {
+                press(&mut e, KeyKind::Left);
+            }
+            let o = press(&mut e, KeyKind::Space);
+            select(&mut e, o, w);
+            press(&mut e, KeyKind::Enter);
+        }
+        assert_eq!(press(&mut e, KeyKind::Enter).commit, "派工", "taught");
+        let before = e.learner().new_word_weight(&reading, "派工", DAY).expect("派工 is a new word");
+        e.set_left_context("加入");
+        assert_eq!(type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ").preedit, "派工");
+        let exact1: Vec<&str> = lex.entries(&["ㄍㄨㄥ".to_string()]).into_iter().map(|x| x.0).collect();
+        let w = pick_one_syllable(&mut e, &|w| if tolerant { !exact1.contains(&w) && lex.has(&["ㄍㄨㄣ".to_string()], w) } else { w != "工" && exact1.contains(&w) });
+        assert_eq!(e.syllables().last().map(String::as_str), Some(if tolerant { "ㄍㄨㄣ" } else { "ㄍㄨㄥ" }), "picked {w}");
+        press(&mut e, KeyKind::Enter);
+        (before, e.learner().new_word_weight(&reading, "派工", DAY))
+    };
+    let (before, after) = run(false);
+    assert!(after.is_some_and(|a| a < before), "premise: an exact pick halves the displaced new word: {before} -> {after:?}");
+    let (before, after) = run(true);
+    assert!(after.is_some_and(|a| a < before), "the tolerant pick halves it too: {before} -> {after:?}");
+}

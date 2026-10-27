@@ -3813,6 +3813,8 @@ impl Engine {
         }
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
+        // New words of the path as shown, under the readings of their records: read before the span is rewritten below (§2.5, bookkeeping).
+        let path_new = if self.learning { self.path_new_words() } else { Vec::new() };
         // A word found through a tolerant syllable: the span becomes its lexicon reading, as `choose_pred` replaces the span by the
         // item's reading, so refresh, `best_lp_delta` and learning read the lexicon reading (fuzzy input, section 2.1).
         if let Some(reading) = c.alt.get(&idx) {
@@ -3842,7 +3844,7 @@ impl Engine {
                 }
             }
             if self.span_text(start, end) != word {
-                for (s, e, r, w) in self.path_new_words() {
+                for (s, e, r, w) in path_new {
                     if s < end && start < e && !displaced_new.contains(&(r.clone(), w.clone())) {
                         displaced_new.push((r, w));
                     }
