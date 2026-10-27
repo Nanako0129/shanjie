@@ -76,7 +76,7 @@ final class SettingsTests: XCTestCase {
                           acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertTrue(SettingsModel(shell: shell).english, "nothing saved is on")
         XCTAssertFalse(rig().model.english, "a saved off stays off")
-        XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；數字列的鍵也會打出數字（例如 2026年、3.14）。")
+        XCTAssertEqual(MenuEntry.Text.englishDigitsNote, "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 cup）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。")
     }
 
     /// zhen-mixed section 3.2 / 5.3: the window's 中英混打（實驗） goes through the same setter and store as the menu item, the two stay in
@@ -157,7 +157,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(model.englishOverwrite, "greyed, still showing the setting")
         XCTAssertEqual(MenuEntry.Text.englishOverwrite, "重打同一個位置算英文")
         XCTAssertEqual(MenuEntry.Text.englishOverwriteNote, "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。")
-        XCTAssertEqual(MenuEntry.Text.englishKeyOrderNote, "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打出詞庫沒有的音節，整段會變成英文（馬上按 Esc 變回注音）。")
+        XCTAssertEqual(MenuEntry.Text.englishKeyOrderNote, "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。")
     }
 
     /// zhen-keyorder section 3 / 5.3 with zhen-revert's default: the window's 依按鍵順序判斷英文 choice has no value true (the store stays nil

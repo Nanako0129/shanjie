@@ -9524,7 +9524,7 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 
 - 分支 `feat/zhen-revert`（從合併模糊輸入 #273 之後的 main）。行為照契約 §2：影子改成每欄一個鍵帽；三種回退 (a) 覆寫、(b) 逆序、(c) 完成詞庫沒有的音節（空白鍵一次成為一個英文 token；聲調鍵留著英文段）；鄰鍵先於 (c)（§2.9）；英文段多收不是字母的注音鍵與聲調鍵（尾音節至少 2 個符號且在詞庫才切分）；Esc 還原；`ENGLISH_SHORT` 短詞項目；新開關 `set_english_overwrite`，`set_english_key_order` 預設改開；`set_english_inline`、英文窗、顯示規則 D、自動固定、`TWO_LETTER` 與證據計數都刪了。`load_english` 與單字表的載入、打包留到 PR 2。
 - `ENGLISH_SHORT` 用 `lex.entries` 逐字核對（測試 `english_short_is_as_documented`）：契約列的 11 個字（ai ui up co hp jp mp mp3 np rm xl）全部成立，沒有刪；`go cp so to do hi am zi cup` 的音節確實不在詞庫。
-- 窮舉（`clean_typing_of_every_reading_never_reverts`）：全部 1,417 個音節加固定種子抽樣的 40,000 個讀音（共 416,227 個），三個開關全開、沒有模型，一次都沒有回退或切分，組字區和同一組鍵打進中英混打關著的引擎逐項相同。release 約 15 秒（兩個引擎）；全部 416,227 個估計超過 60 秒，所以抽樣（種子 20261026，不少於 20,000）。`ENGLISH_SHORT` 的窮舉另一個測試。
+- 窮舉（`every_syllable_alone_and_sampled_readings_never_revert`，不是全部讀音，只有抽樣的）：全部 1,417 個音節單獨打，加固定種子抽樣的 40,000 個讀音（共 416,227 個），三個開關全開、沒有模型，一次都沒有回退或切分，組字區和同一組鍵打進中英混打關著的引擎逐項相同。release 約 15 秒（兩個引擎）；全部 416,227 個估計超過 60 秒，所以抽樣（種子 20261026，不少於 20,000）。`ENGLISH_SHORT` 的窮舉另一個測試。
 - 突變（每項改一處，只跑對應的測試，結束碼 101、斷言訊息都記下；編譯錯誤不算殺死）：覆寫不回退、逆序不回退、(c) 空白不回退、(c) 聲調不回退、數字鍵結束英文段、空白鍵也切分、單一符號也切、切分不查詞庫（斷言是「切成詞庫沒有的音節時引擎出錯」）、(c) 排在鄰鍵之前、短詞項目對整個候選範圍、影子不跟 Backspace 清欄、兩個開關不生效（三處）、短詞項目加在前面、短詞標記不被改狀態的鍵清掉、英文 token 定義不含數字、倚天或可省略韻母也回退、回退沒有中文項、Esc 不還原、Esc 在改過之後還原、游標在中間不分開解碼、切分丟掉英文段頭、切分不設旗標、逆序標成覆寫：共 27 個，全部被殺死。
 - 契約有歧義或我多做的幾處（以最接近契約例子的讀法）：
   - 還原點：(a)、(b) 是「這個鍵照今天放進欄位之後的三欄與影子」，Esc 之後再按同一個鍵會用還原後的影子判斷（`o k` Esc `k` 是 `kk`，影子裡留著第一個 `k`）。
@@ -9536,3 +9536,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 重新釘住的既有測試（契約改了行為的地方）：`engine_digits.rs` 第 27 列（Shift+A 之後的數字鍵留在英文段上，送出文字不變，`syls` 在 Enter 之前是空的）；`core/tests/fixtures/digits-off-en.txt`（中英混打開著但沒有數字表：數字鍵不再做成注音，39 列裡 26 列的逐鍵輸出改變，都是打數字的列；沒有數字表時送出的文字也隨之改變，這是契約 §2.3 套用在數字鍵上的結果，有數字表的 A.4.1 各列的送出文字都沒變）；`engine_english_next.rs` 小寫 `joe`（現在 (b) 回退成 token）；`engine_rerank.rs` 英文 token 作廢重排工作（改成 Space 結束英文段）；`engine_replay.rs`（全程沒有回退或切分）；CJKSpacing 三個測試（用 Space 結束 Shift 英文段，數字鍵現在接在段上）；兩個可省略韻母的測試（關掉中英混打，否則同一欄的第二鍵是英文）。
 - `english-sim` 新版（只跑單元測試與合成資料，沒有在 Mac 跑真實集合）：`--overwrite`、`--key-order`、錯打總數、a/b/c 與切分與 `english_final` 各欄，召回模式與 18 個 probe 行。合成資料的固定種子數字在 `cli/tests/english_sim.rs`。
 - 測試結果（Mac 上只跑改到的檔）：`engine_english` 63（含窮舉）、`engine_digits` 60、`engine_digits_off` 2、`engine_english_next` 16、`engine_rerank` 28、`engine_replay` 5、`engine` 34（C 冒煙另外編譯執行 OK）、`core` 函式庫 94、`cli` 的 `english_sim` 5、`english_next` 2、`golden` 25、`swift test` 全過。完整的 `make test-rust`、真實集合的量測（§4）與保留集不在這裡跑。
+
+## 2026-10-27：中英混打第四片 PR 1 的 /code-review 修正
+
+- 設定說明（`englishKeyOrderNote`、`englishDigitsNote`）原本承諾「整段變成英文，馬上按 Esc 變回注音」，但空白鍵的 (c) 做出來的是完成的 token、沒有還原點；Esc 在那之後和任何英文 token 之後一樣清掉整個組字區（今天就是這樣，沒有改，測試 `esc_after_a_space_token_is_esc_after_any_token` 釘住）。說明改成：順序與聲調鍵的 (c) 可以 Esc 變回，空白鍵的 (c)（例如 `cup`）要用 Backspace 修；(c) 在空白鍵屬於總開關、在聲調鍵屬於「依按鍵順序判斷英文」（契約 §2.1 的表）。`shanjie.h`、s3a、settings-window 同步。
+- Shift＋字母開英文段時，影子的鍵全部留下（影子裡都是注音鍵，英文段都收），不再只留小寫字母（`5`、`1 u` 之後 Shift+A 會丟鍵）。測試 `run_keeps_every_unfinished_key_a_run_accepts`，修正前失敗。
+- 短詞標記：所有設定函式（`set_lm`、`set_rerank`、`set_rerank_level`、`set_demote`、`set_prediction`、`set_candidate_vertical`、`set_abbreviation`、`set_fuzzy`、`set_profile`、`set_learn_guard`、`set_reading_channel` 加原有的三個英文開關）都清掉它；放在 `invalidate()` 不行，因為 `refresh()` 在同一個按鍵裡也會呼叫它。「什麼都不改的鍵不清」改成一個地方：`dispatch` 裡不做事的分支呼叫 `Engine::nothing(old)`，`key()` 讀一次旗標給標記放回去；本來只有 ↑ 和不起作用的聲調鍵會放回去，Right／End／Delete 等同樣不做事的分支沒有。測試 `every_setting_clears_the_short_word_mark`、`keys_that_change_nothing_keep_the_short_word_mark`，修正前失敗。
+- `english-sim` 的復原：空白鍵做出來的 token，Backspace 把一個字母的 token 整個拿掉時，不再接 Esc（否則清掉前面的音節）；看 Backspace 之後英文段還在不在。真詞庫的每個單一符號都是音節，所以單字母 token 只出現在測試用的小詞庫；測試 `undoing_a_one_letter_space_token_keeps_the_earlier_syllables`，修正前失敗。
+- 窮舉測試改名 `every_syllable_alone_and_sampled_readings_never_revert`（所有音節單獨打加抽樣的讀音，不是全部讀音）；`english-sim` 與 `Settings.swift` 過期的文件註解改寫。

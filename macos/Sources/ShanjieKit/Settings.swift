@@ -29,11 +29,12 @@ public final class SettingsModel: ObservableObject {
     /// value is kept).
     @Published public private(set) var fuzzyFlags: UInt32 = 0
     @Published public private(set) var fuzzyAdjacentEnabled = true
-    /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
-    /// enabled and on.
+    /// The 重打同一個位置算英文 choice under the 中英混打 toggle (zhen-revert section 3): a key over the symbol already in its column reverts
+    /// to the raw keys as English. Default true. Enabled when the toggle is enabled and on.
     @Published public private(set) var englishOverwrite = true
     @Published public private(set) var englishOverwriteEnabled = false
-    /// The 依按鍵順序判斷英文 choice under them (zhen-keyorder section 3), default false; enabled on the display choice's condition.
+    /// The 依按鍵順序判斷英文 choice (zhen-keyorder section 3, default true since zhen-revert): a key out of column order, and a tone key
+    /// that makes a syllable the lexicon lacks, revert to English. Enabled on the overwrite choice's condition.
     @Published public private(set) var englishKeyOrder = true
     @Published public private(set) var englishKeyOrderEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).

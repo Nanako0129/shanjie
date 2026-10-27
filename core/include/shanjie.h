@@ -177,7 +177,9 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   Keys on the run: letters, and the Zhuyin keys that are not letters (1 2 5 8 9 0 , . ; / -), go on it; a tone key (3 4 6 7) splits it when
 //   the run ends in two or more symbols, in column order, that the tone makes a syllable the lexicon has (`o k j i 3` is the English
 //   `ok` and the syllable ㄨㄛˇ), else goes on it; Space ends it (the space is eaten) as one English token; Backspace takes one key; Esc
-//   right after a revert that nothing changed brings the Zhuyin back, else takes the whole run; every other key ends it first.
+//   right after a revert that nothing changed brings the Zhuyin back, else takes the whole run; every other key ends it first. A token
+//   that Space made at once (trigger (c) at Space: `c u p` Space) is a finished token with nothing to bring back: Esc then does what it
+//   does after any English token (clears the composition); Backspace takes one letter of it.
 //   An English token is one unit like a punctuation mark in the composition (the arrow keys take it whole, the next word starts a new
 //   sentence, it is learned under the neighbour key `^>_punct_en`); a token a revert made keeps, as the last item of its writings list
 //   (Down right after it), the Chinese item of the syllable the keys would have made when the lexicon has it. Other keys of

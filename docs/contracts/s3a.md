@@ -221,7 +221,7 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 // 有一行不符 [a-z]{3,32}、有重複行、有 BOM。失敗時保留之前的單字表（或沒有）。不改開關、不改目前顯示。建立 engine 後呼叫一次。
 int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 // set_english：0 或 1（其他回 2、狀態不變），建立時預設 0，碼與快照同 set_abbreviation（handled 1；`commit` 空，除了下面「關掉」那一種）；engine 或 out 為 NULL 回 1。
-// 1 且標準排列、「可省略韻母」關時（不再要求單字表，`zhen-revert.md`），打的鍵不可能是注音時直接回退成原始按鍵、成為組字區裡的英文段：(a) 重打同一個位置（`set_english_overwrite`）、(b) 欄位逆序（`set_english_key_order`）、(c) 空白鍵，或「依按鍵順序判斷英文」開著時的聲調鍵，完成詞庫沒有的音節（鄰鍵打錯收下的除外）；空白鍵結束英文段成一個英文 token；Esc 立刻還原成注音。照欄位順序就是合法注音的短詞（ai ui up mp3 …）不回退，候選窗最後加小寫與全大寫兩項。英文段規則見 zhen-revert §2.4、zhen-inline §1.3b、§1.3c、§1.3e；英文段開著時輸出的 `english_run_utf16_start`／`len`（§1.3f）；英文 token 或空白單位成為第 128 個單位時，送出的整串放在做這件事的那一次輸出（那個鍵、`pick` 或設定函式的快照）的 `commit`。關掉時開著的英文段結束成 token（成為第 128 個單位時快照的 `commit` 非空）；`set_abbreviation(1)` 同樣如此。殼在每次建 engine 後都要呼叫。
+// 1 且標準排列、「可省略韻母」關時（不再要求單字表，`zhen-revert.md`），打的鍵不可能是注音時直接回退成原始按鍵、成為組字區裡的英文段：(a) 重打同一個位置（`set_english_overwrite`）、(b) 欄位逆序（`set_english_key_order`）、(c) 空白鍵，或「依按鍵順序判斷英文」開著時的聲調鍵，完成詞庫沒有的音節（鄰鍵打錯收下的除外）；空白鍵結束英文段成一個英文 token；Esc 立刻還原成注音（(a)、(b)，與聲調鍵的 (c)；空白鍵的 (c) 做出來的是完成的 token，Esc 和任何英文 token 之後一樣清掉組字區，要用 Backspace 修）。照欄位順序就是合法注音的短詞（ai ui up mp3 …）不回退，候選窗最後加小寫與全大寫兩項。英文段規則見 zhen-revert §2.4、zhen-inline §1.3b、§1.3c、§1.3e；英文段開著時輸出的 `english_run_utf16_start`／`len`（§1.3f）；英文 token 或空白單位成為第 128 個單位時，送出的整串放在做這件事的那一次輸出（那個鍵、`pick` 或設定函式的快照）的 `commit`。關掉時開著的英文段結束成 token（成為第 128 個單位時快照的 `commit` 非空）；`set_abbreviation(1)` 同樣如此。殼在每次建 engine 後都要呼叫。
 // 數字列（digits.md）：開著（標準排列、可省略韻母關、有模型與 digits.tsv）時 0-9 . / - 的鍵打出半形數字串 token，數字或注音由前文評分決定（§3.0）；關掉（或開可省略韻母）把緩衝的數字吐成 token，快照的 `commit` 可能是第 128 個單位送出的組字。
 int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 // zhen-revert 新增（docs/contracts/zhen-revert.md §3）：重打同一個位置算英文。enabled 1（預設）或 0，其他值回 2、狀態不變；engine 或 out 為 NULL 回 1；成功回 0 並回傳快照（handled 1、commit ""，沒有東西要關，畫面不變）。1 時未完成音節同一欄再打一個鍵就回退（`ok`）；0 時取代，和以前相同。只在 set_english(1) 時有作用；殼在每次建 engine 後都要呼叫。（取代原本的 set_english_inline，已刪除。）
@@ -290,7 +290,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 - 候選：範圍、排序、分頁、選字後固定、固定詞在插入與刪除時的平移與移除。
 - reset 後的輸出和新建的 engine 相同（兩種 mode）。
 - 組字區上限：第 128 個音節自動送出（原本 40，composition-cap）。
-- 中英混打（`core/tests/engine_english.rs`，`zhen-revert.md` §5.1）：三種回退、英文段的鍵（不是字母的注音鍵、聲調鍵切分、空白不切分）、Esc 還原、短詞項目、兩個開關關著等於今天，加上「詞庫每個讀音乾淨地打都不回退、不切分」的窮舉測試（抽樣 40,000 個讀音與全部 1,417 個音節）和 `ENGLISH_SHORT` 的窮舉。
+- 中英混打（`core/tests/engine_english.rs`，`zhen-revert.md` §5.1）：三種回退、英文段的鍵（不是字母的注音鍵、聲調鍵切分、空白不切分）、Esc 還原、短詞項目、兩個開關關著等於今天，加上「每個音節單獨打、加固定種子抽樣的 40,000 個讀音乾淨地打，都不回退、不切分」的窮舉測試（不是全部 416,227 個讀音）和 `ENGLISH_SHORT` 的窮舉。
 
 ### 7.2 重播整合測試
 
