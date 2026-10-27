@@ -302,17 +302,15 @@ struct SettingsPageForm: View {
                     // Digits.md A.3.7: one line under the toggle, as the 聊天／書面 note above is written.
                     Text(MenuEntry.Text.englishDigitsNote)
                         .font(.caption).foregroundStyle(.secondary)
-                    // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
-                    Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
-                        Text(MenuEntry.Text.englishDisplayTyped).tag(true)
-                        Text(MenuEntry.Text.englishDisplaySpace).tag(false)
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!model.englishInlineEnabled)
-                    // zhen-keyorder section 3: after the display choice, with a line of what it costs; greyed on the same condition.
+                    // zhen-keyorder section 3 with zhen-revert section 3: under the toggle, with a line of what it costs; greyed on the
+                    // toggle's condition and while the toggle is off.
                     Toggle(MenuEntry.Text.englishKeyOrder, isOn: Binding(get: { model.englishKeyOrder }, set: { model.setEnglishKeyOrder($0) }))
                         .disabled(!model.englishKeyOrderEnabled)
                     Text(MenuEntry.Text.englishKeyOrderNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle(MenuEntry.Text.englishOverwrite, isOn: Binding(get: { model.englishOverwrite }, set: { model.setEnglishOverwrite($0) }))
+                        .disabled(!model.englishOverwriteEnabled)
+                    Text(MenuEntry.Text.englishOverwriteNote)
                         .font(.caption).foregroundStyle(.secondary)
                     // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
                     Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
@@ -349,7 +347,7 @@ struct SettingsPageForm: View {
                     }
                     Toggle("鄰鍵打錯", isOn: Binding(get: { model.fuzzyFlags >> 4 & 1 == 1 }, set: { model.setFuzzy(bit: 4, $0) }))
                         .disabled(!model.fuzzyAdjacentEnabled)
-                    Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。")
+                    Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。開著時 go、cp、cup 這類字會被收成中文，不會變英文；要英文就按住 Shift 打，或把這個關掉。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             case .appearance:

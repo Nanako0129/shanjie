@@ -85,12 +85,12 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "english") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "english") }
     }
-    /// The 英文的顯示 choice (docs/contracts/zhen-inline.md section 2), key `englishInline`; absent means true.
-    var englishInline: Bool? {
-        get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
-        set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
+    /// The 重打同一個位置算英文 choice (docs/contracts/zhen-revert.md section 3), key `englishOverwrite`; absent means true.
+    var englishOverwrite: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishOverwrite") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishOverwrite") }
     }
-    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means false.
+    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means true (zhen-revert).
     var englishKeyOrder: Bool? {
         get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishKeyOrder") }
