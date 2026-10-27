@@ -777,6 +777,38 @@ pub unsafe extern "C" fn shanjie_engine_set_english_key_order(
     rc
 }
 
+/// shift-toggle section 4: the ASCII state of the shell's per-app Shift toggle. `on` 0 or 1 (2 otherwise, state unchanged). With 1 the
+/// open window or row closes, the digit run flushes and the unfinished syllable's keys open the English run; every printable ASCII
+/// character after it goes on the run as typed. With 0 the run ends as a token. Returns the snapshot like `set_english` (`commit` may
+/// be non-empty); 1 when `engine` or `out` is NULL.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_ascii(engine: *mut ShanjieEngine, on: u32, out: *mut *mut ShanjieOutput) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if on > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_ascii(on == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// # Safety
 /// `engine` is NULL or a live handle; `dir` is NULL or a NUL-terminated string.
 #[no_mangle]
@@ -1999,6 +2031,28 @@ mod tests {
         let r = fields(key(SPACE, '\0'));
         assert!(r.1 == 0 && r.2 == 0, "the run ended: 0 and 0, {r:?}");
         assert!(send(e, key(ESC, '\0')).0 == 0);
+        // set_ascii (shift-toggle section 4): the codes of set_english, then the state through the C ABI.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_ascii(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "ascii engine NULL");
+        assert!(unsafe { shanjie_engine_set_ascii(e, 1, ptr::null_mut()) } == 1, "ascii out NULL");
+        for v in [2, u32::MAX] {
+            let mut o: *mut ShanjieOutput = sentinel();
+            assert!(unsafe { shanjie_engine_set_ascii(e, v, &mut o) } == 2 && o.is_null(), "ascii out of range");
+        }
+        // ㄏ then ASCII: the snapshot is the run `c` (bold range), the next `1` is a character, Enter sends them.
+        type_out(e, "c");
+        let mut o = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_ascii(e, 1, &mut o) } == 0);
+        // SAFETY: test-only read of a live output.
+        let r = unsafe { (CStr::from_ptr((*o).preedit).to_str().unwrap().to_string(), (*o).handled, (*o).english_run_utf16_start, (*o).english_run_utf16_len) };
+        unsafe { shanjie_output_free(o) };
+        assert!(r == ("c".to_string(), 1, 0, 1), "{r:?}");
+        let r = fields(key(CHAR, '1'));
+        assert!(r.0 == "c1" && r.1 == 0 && r.2 == 2, "{r:?}");
+        assert!(send(e, key(ENTER, '\0')).2 == "c1");
+        let mut o = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_ascii(e, 0, &mut o) } == 0);
+        unsafe { shanjie_output_free(o) };
         // Off: the same keys no longer revert.
         assert!(set_english(e, 0) == 0);
         let (_, _, preedit) = type_out(e, "ok");

@@ -703,6 +703,8 @@ pub struct Engine {
     /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on.
     english_overwrite: bool,
     english_key_order: bool,
+    /// shift-toggle section 4: the ASCII state (`set_ascii`), default off. A mode like a setting: `reset` and `clear_all` keep it.
+    ascii: bool,
     /// Set by a choice from the candidate window (a digit alternative, a row item, a short word's English token) whose unit reached
     /// `MAX_SYLLABLES` and sent everything: the committed text, for the output of the key or pick that made it.
     commit_out: Option<String>,
@@ -1002,6 +1004,7 @@ impl Engine {
             shadow_key: [None; 3],
             english_overwrite: true,
             english_key_order: true,
+            ascii: false,
             commit_out: None,
             reverted: None,
             split: false,
@@ -1701,6 +1704,44 @@ impl Engine {
         self.english_key_order = on;
         self.setting_changed();
         self.handled()
+    }
+
+    /// Shift-toggle section 4: the ASCII state of the shell's per-app Shift toggle. `on` ends what the composition has open, in
+    /// order: the window or the row (closed, nothing chosen), the digit run (flushed as `set_english(false)` does), the unfinished
+    /// syllable (its shadow keys open the English run, as Shift+letter does). Without a syllable the run opens with the first
+    /// character. `off` ends an open run as a token (no space) and the usual rules return. An empty composition only records the
+    /// state. Returns the snapshot (`commit` is what a unit that reaches `MAX_SYLLABLES` sent).
+    pub fn set_ascii(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
+        if self.ascii == on {
+            return self.handled();
+        }
+        self.ascii = on;
+        if !on {
+            return self.settle_run();
+        }
+        // Without a shadow (Eten, abbreviation composer, mixing off) there is no English run to keep a composition in: only the state
+        // is recorded, the composition stays as it is and the ASCII branch of `dispatch_key` does not apply (the shell sends the
+        // composition first, shift-toggle section 2).
+        if !self.shadow_on() {
+            return self.handled();
+        }
+        self.cands = None;
+        self.clear_pred();
+        let (commit, _) = self.digit_flush()?;
+        if self.pend.iter().any(Option::is_some) {
+            let keep = self.shadow_text();
+            self.clear_pend();
+            self.run = keep;
+            self.run_zh = None;
+            self.revert_point = None;
+            if self.cursor < self.syls.len() {
+                self.refresh()?;
+            }
+        }
+        let mut o = self.view(true, String::new());
+        o.commit = commit;
+        Ok(o)
     }
 
     /// The syllables of the composition (test and tool hook): what `finish_syllable` stored, or a choice rewrote.
@@ -2899,6 +2940,41 @@ impl Engine {
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
             return self.passthrough(String::new());
         }
+        // Shift-toggle section 4 (implementation revision 2026-10-28): in the ASCII state, with a shadow, a printable ASCII character
+        // closes an open window or row without choosing (so `1` is a character, never a pick) and then either goes on the English run as
+        // typed (the characters `english_of` accepts: no lower case, no tone key, no revert or split) or, being any other character,
+        // settles the open run as a token and goes in as its own half-width punctuation unit, so every English token keeps `english_of`'s
+        // invariants.
+        // Space with no run open, right after a token unit (English token, space unit, digit token, or a half-width mark of this branch),
+        // types a space unit as rule 16a does after an English token; with a run open it ends the run (the next Space types the space).
+        if self.ascii && k.kind == KeyKind::Space && m == 0 && self.shadow_on() && self.run.is_empty() && self.cands.is_none()
+            && self.pred_sel.is_none() && self.drun.is_none() && self.cursor > 0 && self.is_ascii_token(self.cursor - 1)
+        {
+            self.clear_pred();
+            self.pred_dirty = true;
+            return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
+        }
+        if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) && self.shadow_on() {
+            self.cands = None;
+            self.clear_pred();
+            let opened = self.run.is_empty();
+            if opened {
+                self.run = self.shadow_text();
+                self.clear_pend();
+            }
+            if !(k.ch.is_ascii_alphanumeric() || ",.;/-".contains(k.ch)) {
+                let sent = if self.run.is_empty() { String::new() } else { self.end_run()? };
+                let mut o = self.insert_token(format!("{PUNCT_PREFIX}{}", k.ch), Some(k.ch.to_string()), None)?;
+                o.commit.insert_str(0, &sent);
+                return Ok(o);
+            }
+            let full = self.run.len() == ENGLISH_RUN_MAX;
+            let commit = self.run_push(k.ch)?;
+            if (opened || full) && self.cursor < self.syls.len() {
+                self.refresh()?; // a run opened in front of units: they decode apart from it (section 1.3h), as `start_run` does; so does the 33rd character's
+            }
+            return Ok(self.view(true, commit));
+        }
         // V3 section 3: the entered prediction row, between rules 1 and 2. Any other key leaves it and goes on.
         if let Some(sel) = self.pred_sel {
             let len = self.pred.len();
@@ -3427,6 +3503,13 @@ impl Engine {
     /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on.
     fn breaks_with_space(&self, i: usize) -> bool {
         (self.shadow_on() && english_or_space(&self.syls[i])) || (self.digits_active() && (digit_of(&self.syls[i]).is_some() || is_space_unit(&self.syls[i])))
+    }
+
+    /// Shift-toggle: whether unit `i` is one a Space types a space after in the ASCII state: an English token, a space unit, a digit
+    /// token, or a half-width ASCII mark that branch made (not the full-width marks of the Shift keys).
+    fn is_ascii_token(&self, i: usize) -> bool {
+        let r = &self.syls[i];
+        english_or_space(r) || digit_of(r).is_some() || r.strip_prefix(PUNCT_PREFIX).is_some_and(|t| t.len() == 1 && t.as_bytes()[0].is_ascii_graphic())
     }
 
     fn is_punct(&self, i: usize) -> bool {
