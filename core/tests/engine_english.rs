@@ -1123,7 +1123,13 @@ fn tone_split_needs_the_lexicon() {
     let lex = real();
     assert!(lex.entries(&["ㄕㄟˋ".to_string()]).is_empty() && lex.entries(&["ㄕㄟ".to_string()]).is_empty(), "premise: ㄕㄟˋ is not a syllable");
     let mut e = eng();
-    let o = run(&mut e, "o k g o 4");
+    let mut o = None;
+    for tok in "o k g o 4".split_whitespace() {
+        let r = e.key(key_of(tok));
+        assert!(r.is_ok(), "{tok}: the engine failed (a split made a syllable the lexicon lacks)");
+        o = r.ok();
+    }
+    let o = o.unwrap();
     assert!(o.preedit == "okgo4" && fields(&o) == (0, 5) && !e.english_split() && e.syllables().is_empty(), "{}", o.preedit);
 }
 
