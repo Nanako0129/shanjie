@@ -332,10 +332,12 @@ class PackOovV1(unittest.TestCase):
         return B.forced_words(rows, rank, yields, counts, self.N, self.SC)
 
     def test_dolisi_is_first_and_keeps_its_statistics_in_the_committed_pack(self):
-        # 維護者 2026-10-24（51 組第 17 列）：ㄉㄨㄛ ㄌㄧˋ ㄙ 的多利斯排第一、通語認得（82 次）所以不強制；多力斯強制、排在它封頂後的分數之下
+        # 維護者 2026-10-24（51 組第 17 列）：ㄉㄨㄛ ㄌㄧˋ ㄙ 的多利斯排第一、通語認得（model-v6：82 次）所以不強制；多力斯強制、排在它封頂後的分數之下。
+        # SJ-LM-7 臂 A（sj-lm-7.md §2.1）的計數詞表沒有動漫詞：多利斯、多力斯在凍結次數表裡都查不到（0 次），「通語認得就不強制」對它們不成立，
+        # 兩個都強制；多利斯仍排第一（差一個 TIE）。
         rows = {r[1]: r for r in (l.rstrip("\n").split("\t") for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8") if l.strip())
                 if r[0] == "ㄉㄨㄛ-ㄌㄧˋ-ㄙ"}
-        self.assertEqual((rows["多利斯"][3], rows["多力斯"][3]), ("acg", B.OOV_TAG))
+        self.assertEqual((rows["多利斯"][3], rows["多力斯"][3]), (B.OOV_TAG, B.OOV_TAG))
         self.assertLess(float(rows["多力斯"][2]), float(rows["多利斯"][2]))
 
     def test_source_fixes_replace_only_the_source_column(self):
@@ -390,7 +392,7 @@ class PackOovV1(unittest.TestCase):
         forced = {l.split("\t")[1] for l in now.splitlines() if l.endswith("\t" + B.OOV_TAG)}
         self.assertEqual([a for a, b in zip(lines, now.splitlines(keepends=True)) if a.split("\t")[1] not in forced],
                          [b for b in now.splitlines(keepends=True) if b.split("\t")[1] not in forced], "unforced rows equal the source")
-        self.assertEqual((len(forced), sum(1 for l in now.splitlines() if l.endswith(B.OOV_TAG))), (302, 306))   # 契約修訂四 V1c：處置讀音（含 51 組新加的 23 個）上的字串，減去排第一、通語認得而且封頂不壓過詞包分數 0.5 以上的
+        self.assertEqual((len(forced), sum(1 for l in now.splitlines() if l.endswith(B.OOV_TAG))), (328, 332))   # 契約修訂四 V1c：處置讀音（含 51 組新加的 23 個）上的字串，減去排第一、通語認得而且封頂不壓過詞包分數 0.5 以上的；SJ-LM-7 臂 A 的計數詞表沒有動漫詞，通語認得的詞包詞變少，所以 model-v6 的 302／306 變成 328／332
 
 
 class RecheckBaseDecoder(unittest.TestCase):
@@ -650,10 +652,11 @@ class Build(unittest.TestCase):
         cls.excl = os.path.join(cls.tmp, "collisions.tsv")
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
-    def build(self, collisions, exclude=None, real_decoder=False, years=()):
-        # 真的解碼器每次建置要跑 4 個 CLI 程序；只有斷言需要真實解碼結果的測試才開（real_decoder=True）。
+    def build(self, collisions, exclude=None, decode=None, years=()):
+        # 解碼器是假的（真的解碼器每次建置要跑 4 個 CLI 程序，結果還跟著出貨的模型變：SJ-LM-7 的通語自己就把 風之谷 排在 楓之谷 前面）；
+        # 預設每個詞都解成它自己，要測衝突的測試自己給會「換掉第一名」的解碼器。
         return build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years, min_year_works=1,
-                       **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
+                       decode=decode or (lambda pairs, prof, packs=None: [w for w, _ in pairs]))
 
     def test_pack_content_and_filters(self):
         files, manifest, col, unread, ref, _ = self.build(self.excl)
@@ -745,12 +748,13 @@ class Build(unittest.TestCase):
             self.assertEqual(hashlib.sha256(open(os.path.join(out[0], name), "rb").read()).hexdigest(), meta["sha256"])
 
     def test_collisions_are_listed_without_a_disposition(self):
-        _, manifest, col, _, _, _ = self.build(self.none, real_decoder=True)
-        # 夾具裡 風之谷（作品標題）與 楓之谷（轉換組）都在詞包、同讀音、來源數相同；同分時依字串排序，楓之谷排在前（pack_rows 的 TIE），
-        # 開了詞包第一名是 楓之谷，所以風之谷被換掉，列為未處置（正式資料由 acg-collisions.tsv 處置）。
+        # 夾具裡 風之谷（作品標題）與 楓之谷（轉換組）都在詞包、同讀音、來源數相同；開了詞包第一名是 楓之谷（假解碼器：不開是 風之谷），
+        # 所以風之谷被換掉，列為未處置（正式資料由 acg-collisions.tsv 處置）。其他詞開不開都解成自己。
+        displace = lambda pairs, prof, packs=None: [("楓之谷" if packs else "風之谷") if w in ("楓之谷", "風之谷") else w for w, _ in pairs]
+        _, manifest, col, _, _, _ = self.build(self.none, decode=displace)
         self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
-        self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：不開是 定元堂，不在參考名單
-        self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：不開是 螢火蟲之目
+        self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：開不開第一名都沒變
+        self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：同上
         self.assertEqual(manifest["unresolved_collision_readings"], 1)      # 楓之谷／風之谷 那一個，沒有處置檔
 
     def test_a_collision_counts_only_when_the_pack_changes_the_top1(self):
