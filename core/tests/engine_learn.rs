@@ -68,7 +68,7 @@ fn loaded_engine() -> Engine {
 fn shared_profile_check(e: &mut Engine) {
     use_test_profile(e);
     if std::env::var("SHANJIE_TEST_PROFILE").is_ok() {
-        assert!(shared().lm.scoring(lm::Profile::Formal).tri, "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+        assert!(shared().lm.uses_tri(shared().lm.scoring(lm::Profile::Formal)), "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
     }
 }
 /// Production lexicon + model, learning on, fixed clock (day 20000).

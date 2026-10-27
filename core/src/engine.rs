@@ -2031,7 +2031,7 @@ impl Engine {
         let mut memo = TriMemo::default();
         // An optional-pack word is unknown to the model here as in the decoder (docs/contracts/pack-oov.md); `history()` itself is unchanged.
         let id = |s: &str| st.capped.model_id(&st.lm, s);
-        let cut = self.run_cut().filter(|_| cfg.tri);
+        let cut = self.run_cut().filter(|_| st.lm.uses_tri(cfg));
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
         // the current sentence has a word (the history word is not one, and its own eos is not scored).
         let mut prev = history(&self.left, &st.lm);
@@ -2300,7 +2300,7 @@ impl Engine {
         let n = self.syls.len();
         let (Some(st), true) = (self.lm.clone(), self.predict_on && self.cursor == n && self.cands.is_none() && self.run.is_empty()) else { return };
         let idx = st.capped.predict_index(&st.lm);
-        let lam = self.profile.lambda();
+        let cfg = st.lm.scoring(self.profile);
         // Digits.md A.3.5: right behind digits (tokens, or buffered keys that show as digits) the cursor start is read in the digit
         // context (v, D); buffered digits are not syllables, so no start in front of them is queried (choosing one would splice over them).
         let (dv, dcache) = match self.digit_pred_v(&st) {
@@ -2364,10 +2364,10 @@ impl Engine {
             let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
             let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable, english) {
                 (Some(dv), Some(c), Some(t), _) if digits_here => {
-                    predict_digits(idx, &st.lm, t, &c.words, lam, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
+                    predict_digits(idx, &st.lm, t, &c.words, cfg, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
                 }
-                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, lam, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
-                _ => predict(idx, &st.lm, lam, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
+                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, cfg, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
+                _ => predict(idx, &st.lm, cfg, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
             };
             hits.into_iter()
                 .enumerate()

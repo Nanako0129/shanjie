@@ -23,7 +23,7 @@ fn lm_of(classes: bool, kn: bool, formal: bool, chat: bool) -> Lm {
         lm.add_kn(&bytes("kn-tiny", "kn.sjkn")).unwrap();
     }
     if formal {
-        lm.add_tri(bytes("tri-tiny", "trigram.sjt3")).unwrap();
+        lm.add_tri_for(Profile::Formal, bytes("tri-tiny", "trigram.sjt3")).unwrap();
     }
     if chat {
         lm.add_tri_for(Profile::Chat, bytes("tri-tiny", "trigram-chat.sjt3")).unwrap();
@@ -120,12 +120,12 @@ fn load_reads_each_profiles_table_beside_the_model() {
     std::fs::write(&formal, table_bytes()).unwrap();
     let only_formal = Lm::load(&m).unwrap();
     assert_eq!(tags(&only_formal), (None, Some(tag(&table_bytes()))));
-    assert!(only_formal.scoring(Profile::Formal).tri && !only_formal.scoring(Profile::Chat).tri);
+    assert!(only_formal.uses_tri(only_formal.scoring(Profile::Formal)) && !only_formal.uses_tri(only_formal.scoring(Profile::Chat)));
     std::fs::remove_file(&formal).unwrap();
     std::fs::write(&chat, chat_table_bytes()).unwrap();
     let only_chat = Lm::load(&m).unwrap();
     assert_eq!(tags(&only_chat), (Some(tag(&chat_table_bytes())), None));
-    assert!(only_chat.scoring(Profile::Chat).tri && !only_chat.scoring(Profile::Formal).tri);
+    assert!(only_chat.uses_tri(only_chat.scoring(Profile::Chat)) && !only_chat.uses_tri(only_chat.scoring(Profile::Formal)));
     // both files: the tag of each is its own file's sha8
     std::fs::write(&formal, table_bytes()).unwrap();
     let on = Lm::load(&m).unwrap();
@@ -519,7 +519,7 @@ fn chat_engine_scores_with_the_chat_table() {
     let mut changed = false;
     for s in ["ㄊㄚ ㄓㄢˋ", "ㄓㄢˋ ㄊㄚ ㄓㄢˋ"] {
         let cfg = with.lm.scoring(Profile::Chat);
-        assert!(cfg.tri, "premise: chat scores with the table");
+        assert!(with.lm.uses_tri(cfg), "premise: chat scores with the table");
         let top = decode_segment_learned(&with.capped, &syls(s), &with.lm, cfg, "<s>", End::Eos, core::BEAM_S1, None, true).unwrap()[0].0;
         close(total(&with, Profile::Chat, s), top);
         changed |= (total(&with, Profile::Chat, s) - total(&without, Profile::Chat, s)).abs() > 1e-3;
@@ -545,7 +545,7 @@ fn formal_prediction_row_ignores_the_table_and_keeps_kneser_ney() {
     // the reference: predict() with the side file, and without it (the premise: the two orders differ)
     let idx_of = |f: &Fx| {
         let units = units_of("ㄓ");
-        predict(f.capped.predict_index(&f.lm), &f.lm, Profile::Formal.lambda(), history("起牀", &f.lm), &units, Mode::P, 9)
+        predict(f.capped.predict_index(&f.lm), &f.lm, f.lm.scoring(Profile::Formal), history("起牀", &f.lm), &units, Mode::P, 9)
             .into_iter()
             .map(|x| x.0)
             .collect::<Vec<_>>()
@@ -555,7 +555,7 @@ fn formal_prediction_row_ignores_the_table_and_keeps_kneser_ney() {
         let lm = Arc::new(lm_of(false, false, false, false));
         let capped = Arc::new(CappedLexicon::new(Arc::new(Lexicon::parse_with(LEX, None).unwrap()), "", &lm, None).unwrap());
         let units = units_of("ㄓ");
-        predict(capped.predict_index(&lm), &lm, Profile::Formal.lambda(), "起牀", &units, Mode::P, 9).into_iter().map(|x| x.0).collect::<Vec<_>>()
+        predict(capped.predict_index(&lm), &lm, lm.scoring(Profile::Formal), "起牀", &units, Mode::P, 9).into_iter().map(|x| x.0).collect::<Vec<_>>()
     };
     assert_ne!(with_kn, no_kn, "premise: Kneser-Ney changes the order");
     assert_eq!(a, with_kn);

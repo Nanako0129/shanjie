@@ -76,6 +76,29 @@ fn formal_takes_beta_075_and_chat_the_files() {
     close(term(&plain, Profile::Formal), 0.7 * pb.log10() + 0.3 * lp);
 }
 
+/// Everything that blends the side file takes the profile's β, not only decoding: `unigram_back` (the digit scores) and `word_by_id` (the prediction
+/// row) of a formal scoring use FORMAL_KN_BETA 0.75 where the file records 1; chat and a bare lambda keep the file's. 他 has N' 1 of 7.
+#[test]
+fn unigram_back_and_the_prediction_row_take_the_profile_beta() {
+    let lp = -3.0;
+    let pb = 10f64.powf(lp);
+    let b1 = lm_with(Some(&bytes("kn.sjkn")), true).unwrap();
+    let (wid, ctx) = (b1.word_id("他"), b1.context_of("占"));
+    let (formal, chat) = (b1.scoring(Profile::Formal), b1.scoring(Profile::Chat));
+    close(b1.unigram_back(formal, wid, lp), 0.75 / 7.0 + 0.25 * pb);
+    close(b1.unigram_back(chat, wid, lp), 1.0 / 7.0);
+    close(b1.unigram_back(0.7, wid, lp), 1.0 / 7.0);
+    assert_ne!(b1.unigram_back(formal, wid, lp).to_bits(), b1.unigram_back(chat, wid, lp).to_bits());
+    // the prediction row's term is the decoder's: 占 has no entries and no class, so P is the blended back-off itself
+    assert_eq!(b1.word_by_id(formal, ctx, wid, lp).to_bits(), b1.word3(formal, None, "占", "他", lp).to_bits());
+    close(b1.word_by_id(formal, ctx, wid, lp), 0.7 * (0.75 / 7.0 + 0.25 * pb).log10() + 0.3 * lp);
+    close(b1.word_by_id(chat, ctx, wid, lp), 0.5 * (1.0f64 / 7.0).log10() + 0.5 * lp);
+    close(b1.word_by_id(0.7, ctx, wid, lp), 0.7 * (1.0f64 / 7.0).log10() + 0.3 * lp);
+    // a model without a side file has nothing to blend
+    let plain = lm_with(None, true).unwrap();
+    close(plain.unigram_back(plain.scoring(Profile::Formal), plain.word_id("他"), lp), pb);
+}
+
 #[test]
 fn beta_between_mixes_with_the_lexicon_score() {
     let lm = lm_with(Some(&bytes("kn-beta075.sjkn")), true).unwrap();

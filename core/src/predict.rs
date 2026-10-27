@@ -4,7 +4,7 @@
 
 use crate::digits::DigitTable;
 use crate::english_next::Followers;
-use crate::lm::{CappedLexicon, Lm};
+use crate::lm::{CappedLexicon, Lm, Scoring};
 use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
 
@@ -226,11 +226,12 @@ impl<'a> Index<'a> {
 /// (`lm::history`, maybe `<s>`). Tier one holds the words listed after `v`, tier two the rest; each tier is ordered by
 /// (-score, word length, reading, word), where the reading is the smallest compatible one reaching the word's best
 /// compatible score. That score (`lp_max`) is the first compatible entry of the word in bucket order.
-pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
+pub fn predict(idx: &Index, lm: &Lm, cfg: impl Into<Scoring>, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
+    let cfg = cfg.into();
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
     let classify = |e: &Ent| {
         let wid = (e.wid != u32::MAX).then_some(e.wid);
-        (!wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(lam, ctx, wid, e.lp))
+        (!wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
     };
     tiered(idx, units, mode, limit, classify).into_iter().map(|(e, s, t)| (e.word.to_string(), s, t == 0, reading_of(idx, e))).collect()
 }
@@ -314,20 +315,21 @@ impl Index<'_> {
 }
 
 /// The prediction row after digits (digits.md A.3.5): (word, score, reading), best first, at most `limit`. `v` is the run's history word,
-/// `lam` the profile's lambda. With units (an unfinished syllable): the candidates of `predict` (compatibility, buckets, dedupe, order),
+/// `cfg` the profile's scoring (`Lm::scoring`: its lambda and Kneser-Ney beta; a plain lambda keeps the side file's beta). With units (an unfinished syllable): the candidates of `predict` (compatibility, buckets, dedupe, order),
 /// scored `lam * log10 P(w | v, D) + (1 - lam) * lp`, the successor layer (N(v,D->w) > 0 or N(D->w) > 0) first. Without units: the words of
 /// the successor layer that the lexicon has, scored `log10 P(w | v, D)` alone, ordered the same way.
-pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWords, lam: f64, v: &str, units: &[Unit], limit: usize) -> Vec<(String, f64, Vec<String>)> {
+pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWords, cfg: impl Into<Scoring>, v: &str, units: &[Unit], limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    let cfg = cfg.into();
     if units.is_empty() {
         let rows = table.successors(v).filter_map(|w| {
             let info = words.0.get(w)?;
-            Some((table.p_w_given_vd(w, v, lm.unigram_back(info.wid, info.lp)).log10(), w, info))
+            Some((table.p_w_given_vd(w, v, lm.unigram_back(cfg, info.wid, info.lp)).log10(), w, info))
         });
         return known_row(rows, limit);
     }
     let classify = |e: &Ent| {
-        let p = table.p_w_given_vd(e.word, v, lm.unigram_back((e.wid != u32::MAX).then_some(e.wid), e.lp));
-        (!table.is_successor(v, e.word) as usize, if p > 0.0 { lam * p.log10() + (1.0 - lam) * e.lp } else { f64::NEG_INFINITY })
+        let p = table.p_w_given_vd(e.word, v, lm.unigram_back(cfg, (e.wid != u32::MAX).then_some(e.wid), e.lp));
+        (!table.is_successor(v, e.word) as usize, if p > 0.0 { cfg.lam * p.log10() + (1.0 - cfg.lam) * e.lp } else { f64::NEG_INFINITY })
     };
     tiered(idx, units, Mode::P, limit, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
 }
@@ -344,11 +346,12 @@ fn known_row<'a>(rows: impl Iterator<Item = (f64, &'a str, &'a DigitWord)>, limi
 /// word's row of the table, `v` the history word of the text before (`<s>` after English). With units: the words of `f` that are
 /// compatible come first, scored `lam * log10 P(w | e) + (1 - lam) * lp`; then the other compatible words as `predict` orders them
 /// (successors of `v` first). Without units: the words of `f` that the lexicon has, scored `log10 P(w | e)`.
-pub fn predict_english(idx: &Index, lm: &Lm, f: &Followers, words: &DigitWords, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, Vec<String>)> {
+pub fn predict_english(idx: &Index, lm: &Lm, f: &Followers, words: &DigitWords, cfg: impl Into<Scoring>, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    let cfg = cfg.into();
     if units.is_empty() {
         let rows = f.words().filter_map(|w| {
             let info = words.0.get(w)?;
-            Some((f.p_w_given_e(w, lm.unigram_back(info.wid, info.lp)).log10(), w, info))
+            Some((f.p_w_given_e(w, lm.unigram_back(cfg, info.wid, info.lp)).log10(), w, info))
         });
         return known_row(rows, limit);
     }
@@ -356,9 +359,9 @@ pub fn predict_english(idx: &Index, lm: &Lm, f: &Followers, words: &DigitWords, 
     let classify = |e: &Ent| {
         let wid = (e.wid != u32::MAX).then_some(e.wid);
         if f.contains(e.word) {
-            (0, lam * f.p_w_given_e(e.word, lm.unigram_back(wid, e.lp)).log10() + (1.0 - lam) * e.lp)
+            (0, cfg.lam * f.p_w_given_e(e.word, lm.unigram_back(cfg, wid, e.lp)).log10() + (1.0 - cfg.lam) * e.lp)
         } else {
-            (1 + !wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(lam, ctx, wid, e.lp))
+            (1 + !wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
         }
     };
     tiered(idx, units, mode, limit, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()

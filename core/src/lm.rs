@@ -42,21 +42,20 @@ impl Profile {
     }
 }
 
-/// What the decoder and `Engine::total_score` score a word with (docs/contracts/trigram-core.md, sj-lm-7-pr2.md): lambda, whether the
-/// trigram table of `profile` is used (when one is loaded), and that profile, which also picks the Kneser-Ney beta (`FORMAL_KN_BETA` for
+/// What the decoder and `Engine::total_score` score a word with (docs/contracts/trigram-core.md, sj-lm-7-pr2.md): lambda and the profile,
+/// which picks the trigram table (the profile's, when one is loaded: `Lm::uses_tri`) and the Kneser-Ney beta (`FORMAL_KN_BETA` for
 /// formal, the side file's for chat). The Kneser-Ney side file is applied whenever one is loaded. `Lm::scoring` derives it from the
 /// profile; a bare lambda (`From<f64>`) has no profile: the bigram with the side file as loaded, which is what every caller scored with
 /// before the trigram level existed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scoring {
     pub lam: f64,
-    pub tri: bool,
     pub profile: Option<Profile>,
 }
 
 impl From<f64> for Scoring {
     fn from(lam: f64) -> Scoring {
-        Scoring { lam, tri: false, profile: None }
+        Scoring { lam, profile: None }
     }
 }
 
@@ -354,12 +353,7 @@ impl Lm {
 
     /// SJT30001 bytes (docs/contracts/trigram-core.md; layout in core/src/trigram.rs), taken over without a copy (`load_opts` maps the file instead). Checked (all `TriTable`): magic,
     /// V, the hash of the model this `Lm` was parsed from, D, exact length, and the order and range of every key, offset and next id.
-    /// Turns the trigram level on for the formal profile (`add_tri_for` names the profile).
-    pub fn add_tri(&mut self, table: Vec<u8>) -> Result<(), LmError> {
-        self.add_tri_for(Profile::Formal, table)
-    }
-
-    /// `add_tri` for the table of `profile` (the chat table is `trigram-chat.sjt3`).
+    /// Turns the trigram level on for `profile` (the formal table is `trigram.sjt3`, the chat one `trigram-chat.sjt3`).
     pub fn add_tri_for(&mut self, profile: Profile, table: Vec<u8>) -> Result<(), LmError> {
         self.add_tri_bytes(profile, TriBytes::Mem(table))
     }
@@ -381,9 +375,14 @@ impl Lm {
         }
     }
 
-    /// The table `cfg` scores with: its profile's, when `cfg.tri` is on.
+    /// The table `cfg` scores with: its profile's, when one is loaded (a bare lambda has no profile and no table).
     fn tri_table(&self, cfg: Scoring) -> Option<&Tri> {
-        self.tri_of_profile(cfg.profile.filter(|_| cfg.tri)?)
+        self.tri_of_profile(cfg.profile?)
+    }
+
+    /// Whether `cfg` scores with a trigram table.
+    pub fn uses_tri(&self, cfg: Scoring) -> bool {
+        self.tri_table(cfg).is_some()
     }
 
     /// Whether the loaded trigram table of `profile` is a file mapping (`None`: no table). For the tests of `load_opts`.
@@ -393,16 +392,17 @@ impl Lm {
     }
 
     /// The summary-line suffix `+tri:<table sha8>` of `profile`'s table (same text as reference/proto/lm_eval.py); `None` without a
-    /// table. The file is hashed on the first call. Whether a profile scores with the table is `scoring(profile).tri`.
+    /// table. The file is hashed on the first call. Whether a profile scores with the table is `uses_tri(scoring(profile))`.
     pub fn tri_tag(&self, profile: Profile) -> Option<&str> {
         self.tri_of_profile(profile).map(Tri::tag)
     }
 
     /// How `profile` scores a decoded word (docs/contracts/trigram-core.md, sj-lm-7-pr2.md): the bigram with the side file (β by
     /// `kn_beta`: chat the file's, formal `FORMAL_KN_BETA`), and the trigram level on when the table of that profile is loaded. Only
-    /// decoding and `Engine::total_score` take this; the prediction row scores with `word_by_id` and keeps the side file whatever the profile.
+    /// decoding, `Engine::total_score`, the prediction row (`word_by_id`) and the digit scores (`unigram_back`) take this; the last two use
+    /// its lambda and beta, never the table.
     pub fn scoring(&self, profile: Profile) -> Scoring {
-        Scoring { lam: profile.lambda(), tri: self.tri_of_profile(profile).is_some(), profile: Some(profile) }
+        Scoring { lam: profile.lambda(), profile: Some(profile) }
     }
 
     /// The Kneser-Ney beta `cfg` applies; `None` without a side file.
@@ -606,10 +606,11 @@ impl Lm {
     /// lm.py `unigram_back`: the single-word back-off term of `word` for a word with model id `w` and score `lp`: 10^lp, blended with the
     /// Kneser-Ney side file's continuation probability when the model has one. For callers that need `pb` apart from `prob`
     /// (docs/contracts/digits.md A.3.2: the digit scores sum probabilities over many words, in an order Python fixes).
-    pub fn unigram_back(&self, w: Option<u32>, lp: f64) -> f64 {
+    /// `cfg` picks the Kneser-Ney beta (`kn_beta`: formal `FORMAL_KN_BETA`; chat and a bare lambda the side file's), as in decoding.
+    pub fn unigram_back(&self, cfg: impl Into<Scoring>, w: Option<u32>, lp: f64) -> f64 {
         let pb = pow10(lp);
-        match (&self.kn, w) {
-            (Some(kn), Some(w)) if w >= 2 => kn.beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - kn.beta) * pb,
+        match (&self.kn, self.kn_beta_of(cfg.into()), w) {
+            (Some(kn), Some(beta), Some(w)) if w >= 2 => beta * kn.np1(w as usize) as f64 / kn.total as f64 + (1.0 - beta) * pb,
             _ => pb,
         }
     }
@@ -701,9 +702,12 @@ impl Lm {
         &self.nxt[range]
     }
 
-    /// `word` for a caller that looked the ids up once: `ctx` from `context_of(v)`, `w` from `word_id`.
-    pub fn word_by_id(&self, lam: f64, ctx: Ctx, w: Option<u32>, lp: f64) -> f64 {
-        word_term(lam, self.prob_c(ctx, w, pow10(lp)), lp)
+    /// `word` for a caller that looked the ids up once: `ctx` from `context_of(v)`, `w` from `word_id`. `cfg` as in `unigram_back`: the
+    /// prediction row of a formal engine scores with `FORMAL_KN_BETA` like its decoding (research CLI `--kn-beta 0.75` and lm.profile_lm
+    /// did the same); only `cfg.lam` and its beta count, never its trigram table.
+    pub fn word_by_id(&self, cfg: impl Into<Scoring>, ctx: Ctx, w: Option<u32>, lp: f64) -> f64 {
+        let cfg = cfg.into();
+        word_term(cfg.lam, self.prob_c_kn(ctx, w, pow10(lp), self.kn_beta_of(cfg)), lp)
     }
 
     pub fn context_of(&self, v: &str) -> Ctx {
@@ -1093,7 +1097,7 @@ pub fn decode_segment<'a>(
 /// lexicon's demotion table on (a delta is subtracted from the word's term, after learning; lp, the
 /// backoff and the entries tried are unchanged) or off (bit-identical to a lexicon without the table).
 ///
-/// Trigram level (`scoring.tri` with a table loaded, docs/contracts/trigram-core.md): the state is the last two words, so paths
+/// Trigram level (a profile whose table is loaded, docs/contracts/trigram-core.md): the state is the last two words, so paths
 /// are recombined on (surface, previous word, last word). `start` is the history (u, v) of the first word: `<s>` is (`<s>`, `<s>`),
 /// any other word is (unknown, that word), so the first word is scored by the bigram alone. The closing term uses the table too:
 /// `Eos` and `End::Next` are scored from (second last word, last word); a segment of one word has the start word as the second last,
@@ -1733,8 +1737,8 @@ mod tests {
     fn trigram_terms_follow_the_formula() {
         let model = tiny();
         let mut lm = Lm::parse(&model).unwrap();
-        lm.add_tri(tiny_tri(&model)).unwrap();
-        let cfg = Scoring { lam: 0.5, tri: true, profile: Some(Profile::Formal) };
+        lm.add_tri_for(Profile::Formal, tiny_tri(&model)).unwrap();
+        let cfg = Scoring { lam: 0.5, profile: Some(Profile::Formal) };
         let (lp, d) = (-1.0, 0.75);
         let pb = pow10(lp);
         // kept entry: (<s>, <s>) -> a
@@ -1753,9 +1757,9 @@ mod tests {
         let back3 = 1.0 - (2.0 - d) / 4.0;
         assert_eq!(lm.eos3(cfg, Some("<s>"), "a"), 0.5 * (back3 * lm.prob("a", "</s>", lm.p_eos)).log10());
         assert_eq!(lm.eos3(cfg, None, "b"), lm.eos(0.5, "b"));
-        // a scoring without the table, or a bare lambda, is the bigram
-        let off = Scoring { tri: false, ..cfg };
-        assert_eq!(lm.word3(off, Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
+        // a model without the table, or a bare lambda, is the bigram
+        let off = Lm::parse(&model).unwrap();
+        assert_eq!(off.word3(cfg, Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
         assert_eq!(lm.word3(Scoring::from(0.5), Some("<s>"), "<s>", "a", lp), lm.word(0.5, "<s>", "a", lp));
         assert_eq!(lm.eos3(Scoring::from(0.5), Some("a"), "b"), lm.eos(0.5, "b"));
     }
@@ -1768,8 +1772,8 @@ mod tests {
     fn trigram_floor_lifts_only_what_falls_below_it() {
         let model = tiny();
         let mut lm = Lm::parse(&model).unwrap();
-        lm.add_tri(tri_bytes(&model, 0.75, &[((0, 0), 6, &[(2, 6)])])).unwrap();
-        let cfg = Scoring { lam: 0.5, tri: true, profile: Some(Profile::Formal) };
+        lm.add_tri_for(Profile::Formal, tri_bytes(&model, 0.75, &[((0, 0), 6, &[(2, 6)])])).unwrap();
+        let cfg = Scoring { lam: 0.5, profile: Some(Profile::Formal) };
         let (lp, d) = (-1.0, 0.75);
         let pb = pow10(lp);
         let back3 = 1.0 - (6.0 - d) / 6.0;
@@ -1786,28 +1790,28 @@ mod tests {
         assert_eq!(lm.word3(cfg, Some("a"), "<s>", "b", lp), lm.word(0.5, "<s>", "b", lp));
     }
 
-    /// The setting each profile scores with: its own table when it has one (formal `trigram.sjt3`, chat `trigram-chat.sjt3`), the profile's λ,
-    /// and the profile itself (which picks the Kneser-Ney β). One profile's table never switches the other on.
+    /// The setting each profile scores with: the profile's λ and the profile itself (which picks the Kneser-Ney β and the table), and its own
+    /// table when it has one (formal `trigram.sjt3`, chat `trigram-chat.sjt3`). One profile's table never switches the other on.
     #[test]
     fn scoring_follows_the_profile() {
         let model = tiny();
         let mut lm = Lm::parse(&model).unwrap();
-        let sc = |lam, tri, p| Scoring { lam, tri, profile: Some(p) };
-        assert_eq!(lm.scoring(Profile::Formal), sc(LAMBDA_FORMAL, false, Profile::Formal), "no table");
-        assert_eq!(lm.scoring(Profile::Chat), sc(LAMBDA_CHAT, false, Profile::Chat));
-        lm.add_tri(tiny_tri(&model)).unwrap();
-        assert_eq!(lm.scoring(Profile::Formal), sc(LAMBDA_FORMAL, true, Profile::Formal));
-        assert_eq!(lm.scoring(Profile::Chat), sc(LAMBDA_CHAT, false, Profile::Chat), "the formal table does not switch chat on");
+        let sc = |lam, p| Scoring { lam, profile: Some(p) };
+        let on = |lm: &Lm, p| lm.uses_tri(lm.scoring(p));
+        assert_eq!(lm.scoring(Profile::Formal), sc(LAMBDA_FORMAL, Profile::Formal));
+        assert_eq!(lm.scoring(Profile::Chat), sc(LAMBDA_CHAT, Profile::Chat));
+        assert!(!on(&lm, Profile::Formal) && !on(&lm, Profile::Chat), "no table");
+        lm.add_tri_for(Profile::Formal, tiny_tri(&model)).unwrap();
+        assert!(on(&lm, Profile::Formal) && !on(&lm, Profile::Chat), "the formal table does not switch chat on");
         lm.add_tri_for(Profile::Chat, tiny_tri(&model)).unwrap();
-        assert_eq!(lm.scoring(Profile::Chat), sc(LAMBDA_CHAT, true, Profile::Chat));
-        assert_eq!(lm.scoring(Profile::Formal), sc(LAMBDA_FORMAL, true, Profile::Formal));
+        assert!(on(&lm, Profile::Formal) && on(&lm, Profile::Chat));
         let mut chat_only = Lm::parse(&model).unwrap();
         chat_only.add_tri_for(Profile::Chat, tiny_tri(&model)).unwrap();
-        assert_eq!(chat_only.scoring(Profile::Formal), sc(LAMBDA_FORMAL, false, Profile::Formal), "the chat table does not switch formal on");
-        assert_eq!(chat_only.scoring(Profile::Chat), sc(LAMBDA_CHAT, true, Profile::Chat));
+        assert!(!on(&chat_only, Profile::Formal) && on(&chat_only, Profile::Chat), "the chat table does not switch formal on");
         assert!(lm.tri_tag(Profile::Formal).unwrap().starts_with("+tri:") && lm.tri_tag(Profile::Formal).unwrap().len() == 13);
         assert_eq!(chat_only.tri_tag(Profile::Formal), None);
-        assert_eq!(Scoring::from(0.5), Scoring { lam: 0.5, tri: false, profile: None }, "a bare lambda: the bigram with the side file as loaded");
+        assert_eq!(Scoring::from(0.5), Scoring { lam: 0.5, profile: None }, "a bare lambda: the bigram with the side file as loaded");
+        assert!(!lm.uses_tri(Scoring::from(0.5)), "a bare lambda has no table");
     }
 
     /// Each profile scores with its own table: chat with a table that keeps (<s>,<s>) -> a and formal with one that keeps (<s>,<s>) -> b get
@@ -1818,10 +1822,10 @@ mod tests {
         let (chat_t, formal_t) = (tri_bytes(&model, 0.75, &[((0, 0), 6, &[(2, 6)])]), tri_bytes(&model, 0.75, &[((0, 0), 6, &[(3, 6)])]));
         let mut both = Lm::parse(&model).unwrap();
         both.add_tri_for(Profile::Chat, chat_t.clone()).unwrap();
-        both.add_tri(formal_t.clone()).unwrap();
+        both.add_tri_for(Profile::Formal, formal_t.clone()).unwrap();
         let (mut chat_only, mut formal_only) = (Lm::parse(&model).unwrap(), Lm::parse(&model).unwrap());
         chat_only.add_tri_for(Profile::Chat, chat_t).unwrap();
-        formal_only.add_tri(formal_t).unwrap();
+        formal_only.add_tri_for(Profile::Formal, formal_t).unwrap();
         let (c, f) = (both.scoring(Profile::Chat), both.scoring(Profile::Formal));
         let term = |lm: &Lm, cfg, w| lm.word3(cfg, Some("<s>"), "<s>", w, -1.0).to_bits();
         for w in ["a", "b"] {
@@ -1837,7 +1841,7 @@ mod tests {
     fn bad_trigram_tables_are_refused() {
         let model = tiny();
         let good = tiny_tri(&model);
-        assert!(Lm::parse(&model).unwrap().add_tri(good.clone()).is_ok());
+        assert!(Lm::parse(&model).unwrap().add_tri_for(Profile::Formal, good.clone()).is_ok());
         let patch = |at: usize, with: &[u8]| {
             let mut b = good.clone();
             b[at..at + with.len()].copy_from_slice(with);
@@ -1868,12 +1872,12 @@ mod tests {
             ("next ids not ascending", patch(124, &3u32.to_le_bytes())),
         ];
         for (name, b) in cases {
-            assert_eq!(Lm::parse(&model).unwrap().add_tri(b).err(), Some(LmError::TriTable), "{name}");
+            assert_eq!(Lm::parse(&model).unwrap().add_tri_for(Profile::Formal, b).err(), Some(LmError::TriTable), "{name}");
         }
         // Another model with the same V.
         let mut other = model.clone();
         other[20] ^= 1;
-        assert_eq!(Lm::parse(&other).unwrap().add_tri(good).err(), Some(LmError::TriTable));
+        assert_eq!(Lm::parse(&other).unwrap().add_tri_for(Profile::Formal, good).err(), Some(LmError::TriTable));
     }
 
     /// docs/contracts/trigram-mmap.md section 3.2: `load_opts` maps `trigram.sjt3` (the source kind is checked, not only the result), the mapped
@@ -1900,10 +1904,10 @@ mod tests {
         drop(chat);
         std::fs::remove_file(&tc).unwrap();
         let mut mem = Lm::parse(&model).unwrap();
-        mem.add_tri(good.clone()).unwrap();
+        mem.add_tri_for(Profile::Formal, good.clone()).unwrap();
         assert_eq!(mem.tri_is_mapped(Profile::Formal), Some(false));
         assert_eq!(mapped.tri_tag(Profile::Formal), mem.tri_tag(Profile::Formal));
-        let cfg = Scoring { lam: 0.5, tri: true, profile: Some(Profile::Formal) };
+        let cfg = Scoring { lam: 0.5, profile: Some(Profile::Formal) };
         for u in [None, Some("<s>"), Some("a"), Some("b")] {
             for v in ["<s>", "a", "b"] {
                 for w in ["a", "b", "<s>"] {

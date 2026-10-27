@@ -571,7 +571,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -638,15 +638,14 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     }
     check_lm_opts(None, false, packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
-    let lam = match profile.ok_or("--profile is required")?.as_str() {
+    let profile = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
         "formal" => Profile::Formal,
         _ => return Err("--profile must be chat or formal".into()),
-    }
-    .lambda();
+    };
     // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
-    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
-    // (experiments/sp/predict.py) loads it the same way.
+    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id), at the profile's beta like decoding (formal 0.75,
+    // chat the file's), and the Python reference (experiments/sp/predict.py) loads it the same way for chat.
     // The trigram table is never read here: the prediction row scores with the bigram whatever the profile (trigram-core.md (d)).
     let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, &[]).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
@@ -672,7 +671,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             return Err("units_of differs from the query's unit sequence".into());
         }
         let t = Instant::now();
-        let cands = predict(&idx, &lm, lam, v, &u, mode, 9);
+        let cands = predict(&idx, &lm, lm.scoring(profile), v, &u, mode, 9);
         lat.push(t.elapsed());
         out += &format!("## {}\t{v}\t{keys}\t{units}\n", if mode == Mode::P { "P" } else { "PA" });
         for (w, s, succ, _) in cands {
