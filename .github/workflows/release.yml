@@ -113,14 +113,6 @@ jobs:
           gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
           shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 
-      # The input of the English word list (SymSpell, pinned commit; build-app.sh downloads it when missing and checks its SHA-256
-      # either way, so a bad cache is only a miss). The key follows tools/build_english_words.py, where the pins live.
-      - name: Cache the English word list input
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/shanjie/english
-          key: symspell-${{ hashFiles('tools/build_english_words.py') }}
-
       - name: Version
         id: version
         run: |

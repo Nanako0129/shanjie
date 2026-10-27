@@ -202,11 +202,6 @@ pub const ENGLISH_RUN_MAX: usize = 32;
 /// missing, so the space key reverts them.
 pub const ENGLISH_SHORT: &[&str] = &["ai", "ui", "up", "co", "hp", "jp", "mp", "mp3", "np", "rm", "xl"];
 
-/// zhen-mixed section 2.6: the word list's limits (bytes, lines) and its word length range.
-const ENGLISH_MAX_BYTES: u64 = 4 << 20;
-const ENGLISH_MAX_LINES: usize = 200_000;
-const ENGLISH_LEN: std::ops::RangeInclusive<usize> = 3..=32;
-
 /// Initial (21), medial (3), final (13) symbols in the contract's column order.
 const SYMBOLS: &str = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ";
 const KEYS_STANDARD: &str = "1qaz2wsxedcrfv5tgbyhnujm8ik,9ol.0p;/-";
@@ -701,10 +696,6 @@ pub struct Engine {
     rerank_job: Option<RerankJob>,
     /// zhen-mixed: the switch (default off; `set_english`).
     english: bool,
-    /// zhen-mixed section 3.1: the word list `load_english` validated. Nothing reads it since zhen-revert section 2.8 (PR 1); the
-    /// loader and the field stay until the retirement of the list (PR 2).
-    #[allow(dead_code)]
-    english_words: Option<Vec<Box<str>>>,
     /// zhen-revert section 1: the keycap that put the symbol now in each column of the unfinished syllable. Recorded only where
     /// `shadow_on`, so it always matches `pend`; empty (all `None`) otherwise. Cleared with `clear_pend`.
     shadow_key: [Option<char>; 3],
@@ -1008,7 +999,6 @@ impl Engine {
             generation: next_generation(),
             rerank_job: None,
             english: false,
-            english_words: None,
             shadow_key: [None; 3],
             english_overwrite: true,
             english_key_order: true,
@@ -1665,33 +1655,8 @@ impl Engine {
         self.handled()
     }
 
-    /// zhen-mixed section 3.1: the English word list at `path`: `[a-z]{3,32}` per line, LF, no duplicate, no BOM, at most
-    /// 4 MiB and 200,000 lines. Any other content, or an unreadable or non-regular file, fails and the previous list (or
-    /// none) stays; nothing is loaded in part. Does not touch the switch or the display. No path or word in any error (R2).
-    pub fn load_english(&mut self, path: &Path) -> Result<(), EngineError> {
-        // The tiny model's reader (S7c-2a F3): a FIFO is refused at once instead of blocking the shell that builds the engine.
-        let bytes = crate::tinylm::read_bounded(path, ENGLISH_MAX_BYTES).map_err(|_| EngineError::LoadFailed)?;
-        let text = String::from_utf8(bytes).map_err(|_| EngineError::LoadFailed)?;
-        let mut words: Vec<Box<str>> = Vec::new();
-        // The last line ends with a line break (stripped once); an empty file is an empty list, a blank line anywhere is bad.
-        let lines = if text.is_empty() { None } else { Some(text.strip_suffix('\n').unwrap_or(&text).split('\n')) };
-        for line in lines.into_iter().flatten() {
-            let ok = ENGLISH_LEN.contains(&line.len()) && line.bytes().all(|b| b.is_ascii_lowercase());
-            if !ok || words.len() >= ENGLISH_MAX_LINES {
-                return Err(EngineError::LoadFailed);
-            }
-            words.push(Box::from(line));
-        }
-        words.sort_unstable();
-        if words.windows(2).any(|w| w[0] == w[1]) {
-            return Err(EngineError::LoadFailed); // a duplicate line
-        }
-        self.english_words = Some(words);
-        Ok(())
-    }
-
     /// zhen-mixed (docs/contracts/zhen-mixed.md): the switch, default off. Takes effect only with the standard layout and the
-    /// abbreviation composer off (`shadow_on`); the word list is not asked since zhen-revert section 2.8. Off clears the shadow and
+    /// abbreviation composer off (`shadow_on`). Off clears the shadow and
     /// keeps an open English run as a token. Returns the snapshot.
     pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english = on;
@@ -1769,7 +1734,7 @@ impl Engine {
     }
 
     /// Section 2.1: where the shadow is recorded and the reverts can happen: English mixing on, the standard layout and the
-    /// abbreviation composer off. The word list is not asked (zhen-revert section 2.8).
+    /// abbreviation composer off.
     fn shadow_on(&self) -> bool {
         self.english && !self.abbr && self.layout == Layout::Standard
     }
@@ -3459,7 +3424,7 @@ impl Engine {
     }
 
     /// Zhen-inline section 1.3e: whether unit `i` is an English token or a space unit, the two a Space after it types a space for.
-    /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on, without needing the word list.
+    /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on.
     fn breaks_with_space(&self, i: usize) -> bool {
         (self.shadow_on() && english_or_space(&self.syls[i])) || (self.digits_active() && (digit_of(&self.syls[i]).is_some() || is_space_unit(&self.syls[i])))
     }

@@ -24,8 +24,6 @@ enum TestData {
         ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // colloquial-term.md: the colloquial table the selftest requires
-        // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
-        ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
     static let itPackRow = "ㄊㄨˊ-ㄒㄧㄤˋ-ㄕㄥ-ㄔㄥˊ\t圖像生成\t-6.60980192\tit\n"
