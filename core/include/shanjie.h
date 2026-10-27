@@ -187,7 +187,7 @@ int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 //   - Backspace deletes English one letter at a time (section 1.3g): with the cursor right after an English token (no unfinished
 //     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes). Space
 //     units and punctuation tokens still go whole.
-//   - Shift+letter starts a run too (the shadow's letters, if the unfinished syllable is all letters, and the shifted letter); the output
+//   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in column order, then the shifted letter); the output
 //     fields mark the run in preedit (0 and 0 otherwise). Without set_english the Shift rules (s3a rules 13, 21, 22) are unchanged.
 //   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
 //     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
