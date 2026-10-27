@@ -3737,8 +3737,8 @@ impl Engine {
         self.rewrite(true);
     }
 
-    /// repick-freeze: from the path displayed before a pick over `[start, end)`, the words outside it (whole ones, and
-    /// the outside syllables of a word the range cuts, when that syllable has the shown character as a single-character
+    /// repick-freeze: from the path displayed before a pick over `[start, end)`, the words outside it (whole ones that the typed
+    /// reading has, and the outside syllables of a word the range cuts, when that syllable has the shown character as a single-character
     /// entry) as frozen fixed words. Without a model there is no path and nothing freezes.
     fn freeze_outside(&self, start: usize, end: usize) -> Vec<Fixed> {
         let Some(st) = &self.lm else { return Vec::new() };
@@ -3750,7 +3750,11 @@ impl Engine {
         for PathWord { word, syllables: len, .. } in &self.path {
             let q = p + len;
             if q <= start || p >= end {
-                if !self.fixed.iter().any(|f| f.start == p && f.end == q) {
+                // A word the typed reading does not have (one read through a tolerant syllable: fuzzy input, section 2.1) cannot be
+                // fixed: `refresh_lm` scores a fixed word under the reading it stands over. As `pieces` and `cap_refreeze` do, it is
+                // left to the decoder. (A punctuation token, a learned new word and every lexicon word pass, as ever.)
+                let held = || self.is_punct(p) || st.capped.best_lp_delta(&self.syls[p..q], word).is_some() || self.learner.new_word_day(&self.syls[p..q], word).is_some();
+                if !self.fixed.iter().any(|f| f.start == p && f.end == q) && held() {
                     out.push(Fixed::frozen(p, q, word.clone()));
                 }
             } else if word.chars().count() == *len {

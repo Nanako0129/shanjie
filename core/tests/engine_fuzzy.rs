@@ -438,3 +438,21 @@ fn every_syllable_has_a_single_entry() {
     let missing: Vec<&String> = lex.syllables().iter().filter(|s| lex.entries(std::slice::from_ref(*s)).is_empty()).collect();
     assert!(missing.is_empty(), "syllables without a one-syllable entry: {missing:?}");
 }
+
+// ---------- review fixes ----------
+
+/// Review item 1: `freeze_outside` froze a whole path word outside the picked span without asking whether the typed reading has it.
+/// With ㄣ/ㄥ on, ㄅㄧㄣˇ ㄉㄠˋ decodes 丙到, 丙 a word of ㄅㄧㄥˇ; picking 道 over the second syllable froze 丙 under ㄅㄧㄣˇ, which has no
+/// such entry, and the refresh returned `Internal`. A tolerant word outside the pick is left to the decoder, as `pieces` and
+/// `cap_refreeze` do; the pick goes through.
+#[test]
+fn picking_beside_a_tolerant_word_does_not_freeze_it_under_the_typed_reading() {
+    let mut e = engine(Layout::Standard, 0b0001, false);
+    e.set_prediction(false).unwrap();
+    assert_eq!(type_syls(&mut e, Layout::Standard, "ㄅㄧㄣˇ ㄉㄠˋ").preedit, "丙到");
+    let o = press(&mut e, KeyKind::Space);
+    select(&mut e, o, "道");
+    let o = e.key(Key::new(KeyKind::Enter)).expect("picking beside a tolerant word is no internal error");
+    assert!(o.preedit.ends_with('道'), "the picked word is fixed, got {}", o.preedit);
+    assert_eq!(e.syllables(), ["ㄅㄧㄣˇ", "ㄉㄠˋ"], "the typed reading stays");
+}
