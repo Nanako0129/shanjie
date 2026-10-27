@@ -3695,7 +3695,19 @@ impl Engine {
             return Ok(());
         }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
-        c.list.retain(|(w, n)| !(*w == word && *n == l));
+        // `alt` is keyed by list position: the items behind a removed one move up, and so do their readings.
+        let mut alt = std::mem::take(&mut c.alt);
+        let mut shifted = HashMap::new();
+        let mut kept = 0;
+        for (i, (w, n)) in std::mem::take(&mut c.list).into_iter().enumerate() {
+            let reading = alt.remove(&i);
+            if !(w == word && n == l) {
+                shifted.extend(reading.map(|r| (kept, r)));
+                c.list.push((w, n));
+                kept += 1;
+            }
+        }
+        c.alt = shifted;
         if c.list.is_empty() {
             return Ok(()); // closed, as by Esc
         }

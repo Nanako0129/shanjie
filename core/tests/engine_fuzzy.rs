@@ -456,3 +456,48 @@ fn picking_beside_a_tolerant_word_does_not_freeze_it_under_the_typed_reading() {
     assert!(o.preedit.ends_with('道'), "the picked word is fixed, got {}", o.preedit);
     assert_eq!(e.syllables(), ["ㄅㄧㄣˇ", "ㄉㄠˋ"], "the typed reading stays");
 }
+
+/// Review item 2: ⌘⌫ on a learned new word drops its item from the open window; the window's map from list position to lexicon reading
+/// (`Cands::alt`) stayed as it was, so every tolerant word behind the forgotten one read its neighbour's reading when chosen.
+/// 派工 is taught with ㄣ/ㄥ on; typing it again lists 派工 first among the two-syllable items and the one-syllable words of ㄍㄨㄣ
+/// (read through the slip ㄍㄨㄥ) last. After forgetting 派工, choosing the first of those must rewrite ㄍㄨㄥ to ㄍㄨㄣ.
+#[test]
+fn forgetting_a_new_word_keeps_the_tolerant_readings_in_step() {
+    const FORGET: Key = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
+    let lex = &shared().lex;
+    let mut e = engine(Layout::Standard, 0b0001, true);
+    e.set_prediction(false).unwrap();
+    e.set_left_context("要進");
+    let pick = |e: &mut Engine, at: usize, word: &str| {
+        press(e, KeyKind::End);
+        for _ in 0..2 - (at + 1) {
+            press(e, KeyKind::Left);
+        }
+        let o = press(e, KeyKind::Space);
+        select(e, o, word);
+        press(e, KeyKind::Enter);
+        press(e, KeyKind::End);
+    };
+    type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ");
+    pick(&mut e, 0, "派");
+    pick(&mut e, 1, "工");
+    assert_eq!(press(&mut e, KeyKind::Enter).commit, "派工", "taught");
+    e.set_left_context("加入");
+    let shown = type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ").preedit;
+    let o = press(&mut e, KeyKind::Space);
+    let before = window_list(&mut e, o.clone());
+    assert!(before.iter().any(|w| w == "派工"), "the taught word is listed, shown {shown}");
+    // The one-syllable words found through ㄍㄨㄣ: not an entry of ㄍㄨㄥ, an entry of ㄍㄨㄣ.
+    let exact1: Vec<&str> = lex.entries(&["ㄍㄨㄥ".to_string()]).into_iter().map(|x| x.0).collect();
+    let slip = before.iter().find(|w| w.chars().count() == 1 && !exact1.contains(&w.as_str()) && lex.has(&["ㄍㄨㄣ".to_string()], w)).expect("a word through ㄍㄨㄣ").clone();
+    // Open the window anew on 派工 and forget it; the same window goes on.
+    press(&mut e, KeyKind::Esc);
+    let o = press(&mut e, KeyKind::Space);
+    select(&mut e, o, "派工");
+    let o = e.key(FORGET).unwrap();
+    assert!(o.total > 0 && !o.candidates.iter().any(|c| c == "派工"), "the window stays open without the forgotten word");
+    select(&mut e, o, &slip);
+    let o = e.key(Key::new(KeyKind::Enter)).expect("choosing a tolerant word after a forget is no internal error");
+    assert_eq!(o.preedit.chars().last().map(String::from).as_deref(), Some(slip.as_str()));
+    assert_eq!(e.syllables(), ["ㄆㄞˋ", "ㄍㄨㄣ"], "the span is the word's lexicon reading, whichever item was forgotten before it");
+}
