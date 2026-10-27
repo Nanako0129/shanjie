@@ -6,10 +6,13 @@ final class ShiftTapTests: XCTestCase {
     private let left: UInt16 = 56, right: UInt16 = 60, command: UInt16 = 55
     private let noMouse: () -> TimeInterval = { 1000 }
 
-    /// One event. `down`: the Shift bit of the flags for this key; `processed`: when it is handled (defaults to the event's time).
-    private func tap(_ t: inout ShiftTap, _ key: UInt16, down: Bool, at: TimeInterval, processed: TimeInterval? = nil, others: Bool = false,
-                     caps: Bool = false, mouse: @escaping () -> TimeInterval = { 1000 }) -> Bool {
-        t.flagsChanged(keyCode: key, isDown: down, others: others, capsLock: caps, now: at, processedAt: processed ?? at, mouseAgo: mouse)
+    /// One event. `down`: whether this key's Shift bit is set; `alsoHeld`: the other Shift key's bit; `processed`: when it is handled
+    /// (defaults to the event's time).
+    private func tap(_ t: inout ShiftTap, _ key: UInt16, down: Bool, at: TimeInterval, alsoHeld: Bool = false, processed: TimeInterval? = nil,
+                     others: Bool = false, caps: Bool = false, mouse: @escaping () -> TimeInterval = { 1000 }) -> Bool {
+        let leftDown = key == left ? down : alsoHeld, rightDown = key == right ? down : alsoHeld
+        return t.flagsChanged(keyCode: key, leftDown: leftDown, rightDown: rightDown, others: others, capsLock: caps, now: at,
+                              processedAt: processed ?? at, mouseAgo: mouse)
     }
 
     func testLoneTapSwitchesLeftAndRight() {
@@ -91,8 +94,16 @@ final class ShiftTapTests: XCTestCase {
     func testBothShiftKeysAreNotATap() {
         var t = ShiftTap()
         _ = tap(&t, left, down: true, at: 1.0)
-        _ = tap(&t, right, down: true, at: 1.05)
-        XCTAssertFalse(tap(&t, right, down: false, at: 1.1))
+        _ = tap(&t, right, down: true, at: 1.05, alsoHeld: true)
+        XCTAssertFalse(tap(&t, right, down: false, at: 1.1, alsoHeld: true))
         XCTAssertFalse(tap(&t, left, down: false, at: 1.15))
+    }
+
+    /// The left release was missed; the flags of the next events say only the right key is down, so a right tap still switches.
+    func testAMissedLeftReleaseDoesNotSpoilARightTap() {
+        var t = ShiftTap()
+        _ = tap(&t, left, down: true, at: 1.0)  // its release never arrives
+        XCTAssertFalse(tap(&t, right, down: true, at: 5.0))
+        XCTAssertTrue(tap(&t, right, down: false, at: 5.1))
     }
 }

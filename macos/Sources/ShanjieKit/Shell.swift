@@ -486,8 +486,8 @@ public final class Shell {
     }
     /// The system uptime, the clock `NSEvent.timestamp` uses; a test replaces it.
     var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
-    /// What `build()` sent to each engine it made as `set_ascii` (test hook, like `fuzzySent`).
-    private(set) var asciiBuilt: [Bool] = []
+    /// What the latest `build()` sent its engine as `set_ascii` (test hook); `nil` before the first build.
+    private(set) var lastBuiltAscii: Bool?
     /// The composition cursor (UTF-16) of the last snapshot applied: where the Shift hint anchors while composing.
     var composingCursor = 0
     /// shift-toggle section 2: the apps (bundle ID, `""` for a client with none) whose state is English. In memory only: a restart
@@ -1010,7 +1010,7 @@ public final class Shell {
         if !on {
             asciiApps.removeAll()
             shiftTap = ShiftTap()
-            if let o = owner { o.syncAscii(bundle: o.client.bundleIdentifier) } else if engineAscii {
+            if let o = owner { o.pushAscii(false) } else if engineAscii {
                 engineAscii = false
                 dropOnFailure(engine?.setAscii(false))
             }
@@ -1091,7 +1091,7 @@ public final class Shell {
             Log.shell.error("shanjie_engine_set_english_overwrite failed, code \(c)")
         }
         // And the ASCII state of the app being served (shift-toggle section 2): a rebuilt engine starts with it off.
-        asciiBuilt.append(engineAscii)
+        lastBuiltAscii = engineAscii
         if case .failed(let c) = e.setAscii(engineAscii) {
             Log.shell.error("shanjie_engine_set_ascii failed, code \(c)")
         }
@@ -1244,7 +1244,7 @@ public final class Session {
             return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
         }
         guard let event,
-              let key = (shell.engineAscii ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
+              let key = (shell.engineAscii && shell.shadowOn ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
             // nil, or a key outside the tables: never sent to the core.
             if shell.composing { finish(mode: 0) }
@@ -1271,9 +1271,12 @@ public final class Session {
         let others = !flags.isDisjoint(with: [.control, .option, .command, .function])
         // The state of this Shift key from the flags: the device bits (NX_DEVICELSHIFTKEYMASK 0x2, NX_DEVICERSHIFTKEYMASK 0x4), or the
         // generic bit for an event that carries none.
-        let device = flags.rawValue & (event.keyCode == 56 ? 0x2 : 0x4)
-        let isDown = flags.rawValue & 0x6 == 0 ? flags.contains(.shift) : device != 0
-        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, isDown: isDown, others: others, capsLock: flags.contains(.capsLock),
+        let raw = flags.rawValue
+        let generic = flags.contains(.shift)
+        let hasDevice = raw & 0x6 != 0
+        let leftDown = hasDevice ? raw & 0x2 != 0 : generic && event.keyCode == 56
+        let rightDown = hasDevice ? raw & 0x4 != 0 : generic && event.keyCode == 60
+        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, leftDown: leftDown, rightDown: rightDown, others: others, capsLock: flags.contains(.capsLock),
                                        now: event.timestamp, processedAt: shell.uptime(), mouseAgo: shell.mouseAgo) {
             toggleAscii()
         }
@@ -1298,7 +1301,7 @@ public final class Session {
         pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(bundle ?? ""))
     }
 
-    private func pushAscii(_ on: Bool) {
+    func pushAscii(_ on: Bool) {
         guard on != shell.engineAscii, let engine = shell.engine else { return }
         shell.engineAscii = on
         switch engine.setAscii(on) {

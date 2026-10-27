@@ -224,11 +224,6 @@ final class ShiftHintAdapter: ShiftHintPanel {
         fade?.cancel()
         shows += 1
         let mine = shows
-        // A fade still running is replaced by a zero-duration change, so the new hint starts opaque.
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0
-            window.animator().alphaValue = 1
-        }
         if window.appearance?.name != appearance?.name { window.appearance = appearance }
         glass.apply(tintApplier.update(value: glassTint, dark: GlassTint.isDark(window.effectiveAppearance)))
         label.stringValue = text
@@ -245,6 +240,8 @@ final class ShiftHintAdapter: ShiftHintPanel {
             origin.y = min(origin.y, visible.maxY - size.height)
         }
         window.setFrame(NSRect(origin: origin, size: size), display: true)
+        // Alpha is set to 1 directly. The generation counter keeps an older fade's completion from ordering this window out; whether the
+        // direct write also stops an older fade still running is not known from the code, the VM device check looks at it.
         window.alphaValue = 1
         window.orderFrontRegardless()
         let work = DispatchWorkItem { [weak self] in

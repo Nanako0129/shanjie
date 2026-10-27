@@ -239,6 +239,43 @@ final class ShiftToggleSessionTests: XCTestCase {
         c.session.activate()
         tap(c)
         shell.setAcgPack(false)
-        XCTAssertEqual(shell.asciiBuilt, [false, true])
+        XCTAssertEqual(shell.lastBuiltAscii, true)
+    }
+
+    /// The abbreviation composer takes the English run away (the core's `shadow_on()`); the shell then stops sending ASCII keys too, so
+    /// Shift+1 is the keycap path's full-width mark as it was before the toggle.
+    func testAsciiKeysAreNotSentWithoutAShadow() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let c = Controller(shell)
+        c.session.activate()
+        c.type("su3cl3")
+        tap(c)
+        shell.applyAbbreviation(true)
+        XCTAssertTrue(c.session.handle(Keys.event(Keys.code(for: "1"), flags: .shift, characters: "!")))
+        XCTAssertEqual(c.client.marked, "你好！")
+    }
+
+    func testARightShiftTapSwitchesToo() {
+        let hint = FakeShiftHint()
+        let c = Controller(makeShell(hint: hint))
+        c.session.activate()
+        time += 5
+        uptimeNow = time
+        c.session.handle(Keys.event(60, flags: NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x4), type: .flagsChanged, time: time))
+        uptimeNow = time + 0.1
+        c.session.handle(Keys.event(60, flags: [], type: .flagsChanged, time: time + 0.1))
+        XCTAssertEqual(hint.shown.map(\.text), ["英"])
+    }
+
+    /// Turning the setting off pushes English off without asking the client for its bundle ID.
+    func testSettingOffDoesNotReadTheBundleID() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let c = Controller(shell)
+        c.session.activate()
+        tap(c)
+        let reads = c.client.bundleReads
+        shell.applyShiftToggle(false)
+        XCTAssertEqual(c.client.bundleReads, reads)
+        XCTAssertFalse(shell.engineAscii)
     }
 }

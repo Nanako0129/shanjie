@@ -2980,6 +2980,15 @@ impl Engine {
         // typed (the characters `english_of` accepts: no lower case, no tone key, no revert or split) or, being any other character,
         // settles the open run as a token and goes in as its own half-width punctuation unit, so every English token keeps `english_of`'s
         // invariants.
+        // Space with no run open, right after a token unit (English token, space unit, digit token, or a half-width mark of this branch),
+        // types a space unit as rule 16a does after an English token; with a run open it ends the run (the next Space types the space).
+        if self.ascii && k.kind == KeyKind::Space && m == 0 && self.shadow_on() && self.run.is_empty() && self.cands.is_none()
+            && self.pred_sel.is_none() && self.drun.is_none() && self.cursor > 0 && self.is_ascii_token(self.cursor - 1)
+        {
+            self.clear_pred();
+            self.pred_dirty = true;
+            return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
+        }
         if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) && self.shadow_on() {
             self.cands = None;
             self.clear_pred();
@@ -2994,9 +3003,10 @@ impl Engine {
                 o.commit.insert_str(0, &sent);
                 return Ok(o);
             }
+            let full = self.run.len() == ENGLISH_RUN_MAX;
             let commit = self.run_push(k.ch)?;
-            if opened && self.cursor < self.syls.len() {
-                self.refresh()?; // the run opened in front of units: they decode apart from it (section 1.3h), as `start_run` does
+            if (opened || full) && self.cursor < self.syls.len() {
+                self.refresh()?; // a run opened in front of units: they decode apart from it (section 1.3h), as `start_run` does; so does the 33rd character's
             }
             return Ok(self.view(true, commit));
         }
@@ -3528,6 +3538,13 @@ impl Engine {
     /// Digits.md A.3.4 adds the digit-string token (and a space unit), when the digit feature is on, without needing the word list.
     fn breaks_with_space(&self, i: usize) -> bool {
         (self.shadow_on() && english_or_space(&self.syls[i])) || (self.digits_active() && (digit_of(&self.syls[i]).is_some() || is_space_unit(&self.syls[i])))
+    }
+
+    /// Shift-toggle: whether unit `i` is one a Space types a space after in the ASCII state: an English token, a space unit, a digit
+    /// token, or a half-width ASCII mark that branch made (not the full-width marks of the Shift keys).
+    fn is_ascii_token(&self, i: usize) -> bool {
+        let r = &self.syls[i];
+        english_or_space(r) || digit_of(r).is_some() || r.strip_prefix(PUNCT_PREFIX).is_some_and(|t| t.len() == 1 && t.as_bytes()[0].is_ascii_graphic())
     }
 
     fn is_punct(&self, i: usize) -> bool {

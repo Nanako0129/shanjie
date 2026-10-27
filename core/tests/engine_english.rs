@@ -1835,10 +1835,10 @@ fn ascii_other_punctuation_settles_the_run_and_is_its_own_unit() {
     let o = run(&mut e, "!");
     assert!(o.preedit == "wow!" && fields(&o) == (0, 0), "{} {:?}", o.preedit, fields(&o));
     assert!(e.syllables() == ["_punct_wow", "_punct_!"], "{:?}", e.syllables());
-    // Space after it is a plain key (it opens the unit's candidates), nothing is added.
+    // Space after it types a space unit (nothing is open), and Backspace takes that unit off first.
     let o = run(&mut e, "_");
-    assert!(o.preedit == "wow!", "{}", o.preedit);
-    run(&mut e, "Esc");
+    assert!(o.preedit == "wow! ", "{}", o.preedit);
+    run(&mut e, "BS");
     // Backspace removes the unit whole; the token before it stays, and one more Backspace reopens it minus its last letter.
     let o = run(&mut e, "BS");
     assert!(o.preedit == "wow" && e.syllables() == ["_punct_wow"], "{} {:?}", o.preedit, e.syllables());
@@ -1903,4 +1903,56 @@ fn ascii_on_an_empty_composition_changes_nothing() {
     let o = e.set_ascii(false).unwrap();
     assert!(o.preedit.is_empty() && o.commit.is_empty());
     assert!(is_empty(&mut e));
+}
+
+#[test]
+fn ascii_space_after_a_token_types_a_space() {
+    for (name, mut e) in [("no digit table", eng()), ("digit table", asc_eng())] {
+        e.set_ascii(true).unwrap();
+        run(&mut e, "H i ! _ t h e r e");
+        let o = run(&mut e, "Enter");
+        assert!(o.commit == "Hi! there", "{name}: {}", o.commit);
+    }
+    for (name, mut e) in [("no digit table", eng()), ("digit table", asc_eng())] {
+        e.set_ascii(true).unwrap();
+        run(&mut e, "3 _ _ a p p l e s");
+        let o = run(&mut e, "Enter");
+        assert!(o.commit == "3 apples", "{name}: {}", o.commit);
+    }
+    // With a run open Space only ends it: `ok` Space Enter is `ok`, not `ok `.
+    let mut e = eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "o k _");
+    assert!(run(&mut e, "Enter").commit == "ok");
+}
+
+/// A one-character run of `.`, `/` or `-` is in the digit alphabet, so it settles as a digit token (`digit_of`), as `3` does.
+#[test]
+fn ascii_lone_dot_run_settles_as_a_digit_token() {
+    let mut e = eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, ".");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == "." && e.syllables() == ["_punct_."], "{} {:?}", o.preedit, e.syllables());
+}
+
+/// The state is recorded without a shadow; when the shadow comes back the next character does the conversion itself.
+#[test]
+fn ascii_recorded_without_a_shadow_converts_when_the_shadow_returns() {
+    let mut e = eng();
+    e.set_abbreviation(true).unwrap();
+    run(&mut e, "c"); // ㄏ, no shadow recorded while the abbreviation composer is on
+    e.set_ascii(true).unwrap();
+    e.set_abbreviation(false).unwrap();
+    let o = run(&mut e, "o");
+    assert!(o.preedit == "co" && fields(&o) == (0, 2), "{} {:?}", o.preedit, fields(&o));
+}
+
+#[test]
+fn ascii_33rd_character_in_front_of_units_decodes_again() {
+    let mut e = eng();
+    run(&mut e, "j i 3 u l 4 Left Left");
+    e.set_ascii(true).unwrap();
+    let o = run(&mut e, &"a ".repeat(33));
+    assert!(o.preedit.starts_with(&"a".repeat(33)) && fields(&o) == (32, 1), "{} {:?}", o.preedit, fields(&o));
 }
