@@ -291,6 +291,7 @@ impl Engine {
             // Not in A.3.4's list of boundary keys, so as today: behind an unfinished syllable the key does nothing.
             (KeyKind::Up, _) => {
                 self.pred_dirty = true; // the row was taken at the top of `dispatch`
+                self.mark_noop(); // changes nothing: the short-word mark stays, by the same rule as every other arm that does nothing
                 self.handled()
             }
             (KeyKind::Esc, _) => {

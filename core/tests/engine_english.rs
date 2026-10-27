@@ -1149,6 +1149,16 @@ fn missing_syllable_defers_to_adjacent_key_fuzzy() {
     let o = run(&mut e, "g o _");
     assert!(e.syllables() == ["ㄕㄟ"] && fields(&o) == (0, 0) && e.english_reverted().is_none(), "{:?}", e.syllables());
     assert!(!o.preedit.contains("go"), "{}", o.preedit);
+    // The example of the settings note (`MenuEntry.Text.englishDigitsNote`) is a word the adjacent-key rule cannot rescue: with bit 4 on,
+    // `s o` Space (ㄋㄟ, no one-key neighbour is a syllable) is still the English token `so`, where `go` and `cup` become Chinese.
+    let mut e = lm_eng();
+    e.set_fuzzy(16).unwrap();
+    run(&mut e, "s o _");
+    assert!(e.syllables() == ["_punct_so"] && e.english_reverted() == Some(Revert::Missing), "{:?}", e.syllables());
+    let mut e = lm_eng();
+    e.set_fuzzy(16).unwrap();
+    run(&mut e, "c u p _");
+    assert!(e.syllables().len() == 1 && !e.syllables()[0].starts_with("_punct_"), "cup is Chinese with the neighbour keys on: {:?}", e.syllables());
     let mut e = lm_eng();
     e.set_fuzzy(0).unwrap();
     let o = run(&mut e, "g o _");
@@ -1618,10 +1628,36 @@ fn every_setting_clears_the_short_word_mark() {
     };
     assert!(total(true, None) == total(false, None) + 2, "premise: the items are there");
     for (name, f) in &setters {
-        // `set_english(true)` on the mixing-off engine would turn it on: that setter is judged against the same count with the
-        // engine's own switch.
-        let plain = if *name == "set_english" { total(true, Some(f.as_ref())) } else { total(false, Some(f.as_ref())) };
+        // The expected total is the one of an engine where the mark is gone and nothing else differs: the same setter on the mixing-off
+        // engine. `set_english(true)` would turn that engine on, so for it the baseline is the mixing-off engine as it is.
+        let plain = if *name == "set_english" { total(false, None) } else { total(false, Some(f.as_ref())) };
         assert!(total(true, Some(f.as_ref())) == plain, "{name} left the short-word items");
+    }
+}
+
+/// The exceptions to that rule (`Engine::setting_changed`'s comment): `set_learning` and `set_left_context` are called by the shell before
+/// every key, and the table and learning knobs change neither the composition nor the short word's items, so none of them clears the mark.
+#[test]
+fn the_calls_the_shell_makes_before_every_key_keep_the_short_word_mark() {
+    let total_with = |english: bool, call: Option<&dyn Fn(&mut Engine)>| {
+        let mut e = eng();
+        e.set_english(english).unwrap();
+        run(&mut e, "a i _");
+        if let Some(f) = call {
+            f(&mut e);
+        }
+        run(&mut e, "Down").total
+    };
+    let base = total_with(false, None);
+    let calls: Vec<(&str, Box<dyn Fn(&mut Engine)>)> = vec![
+        ("set_learning", Box::new(|e| e.set_learning(true))),
+        ("set_left_context", Box::new(|e| e.set_left_context(""))),
+        ("set_punctuation", Box::new(|e| drop(e.set_punctuation("")))),
+        ("set_newword", Box::new(|e| e.set_newword(true))),
+        ("set_today", Box::new(|e| e.set_today(Some(20_000)))),
+    ];
+    for (name, f) in &calls {
+        assert!(total_with(true, Some(f.as_ref())) == base + 2, "{name} cleared the mark");
     }
 }
 
