@@ -236,8 +236,9 @@ int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t ena
 //   pass through), before the prediction row, the digit run, the English run and the window: a letter, digit or one of `,.;/-` goes
 //   on the English run as it is (no lower case, no tone key, no punctuation or Zhuyin meaning, no revert or split, at most 32
 //   characters a run, `1` is a character, never a pick); any other character settles the open run as a token (no space) and goes in
-//   as its own half-width punctuation unit. Every other key keeps its rule (Space ends the run as a token, Down opens the writings
-//   list, Enter sends, Backspace deletes). With 0 an open run ends as a token (no space) and the usual rules return. An empty
+//   as its own half-width punctuation unit. Every other key keeps its rule (Space ends an open run as a token, and with no open run
+//   and the cursor right after a token unit types a space unit, so `Hi! there` works; Down opens the writings list, Enter sends,
+//   Backspace deletes). With 0 an open run ends as a token (no space) and the usual rules return. An empty
 //   composition only records the state. The state survives reset and commit. The shell calls it on activate, owner change and toggle.
 int32_t shanjie_engine_set_ascii(ShanjieEngine *engine, uint32_t on, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
