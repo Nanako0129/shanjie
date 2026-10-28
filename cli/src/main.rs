@@ -443,13 +443,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let t0 = Instant::now();
             let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
             let key = key.as_str();
+            // What `manual_mask` matches the manual words against: the readings the n-gram's first path used (the engine's `Stretch::used`).
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3))) };
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, syls, lex.manual())
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, &used, lex.manual())
                 }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level), syls, lex.manual()),
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual()),
             };
             let ll = match picked {
                 Ok((c, ll)) => {
@@ -472,7 +474,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
                 // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
                 let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(syls, &top, lex.manual()), idx)?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(&used, &top, lex.manual()), idx)?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;
@@ -936,7 +938,7 @@ mod tests {
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
     /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
     /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 鮮爭 is a made-up name (not in the lexicon, count 0: the names layer's
-    /// real words are counted into the model since SJ-LM-7, so none of them is a word the corpus never saw); loading the same row twice is a parse error.
+    /// real words are counted into the model since 通語 SJ-LM-7-9.7M, so none of them is a word the corpus never saw); loading the same row twice is a parse error.
     #[test]
     fn extra_overlay_rows_are_capped_like_pack_rows() {
         let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");

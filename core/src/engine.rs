@@ -37,9 +37,12 @@ struct Stretch {
     paths: Vec<Vec<(String, f64, f64, usize)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words, and what `manual_mask`
-    /// matches the manual words against); empty when the job reads neither (no channel term and no manual word in the lexicon).
+    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
+    /// has no channel term.
     syls: Vec<String>,
+    /// The readings the n-gram's first path used over those syllables (`Lexicon::path_readings`: a syllable typed with an adjacent key is the
+    /// lexicon syllable the word was read through), what `manual_mask` matches the manual words against; empty when the lexicon has no manual word.
+    used: Vec<String>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
     /// n-gram text of stretches left out of the job.
     gap: String,
@@ -108,9 +111,9 @@ impl RerankJob {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                         let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.syls, &self.manual)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.used, &self.manual)
                     }
-                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.syls, &self.manual),
+                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual),
                 }
                 .map_or(0, |r| r.0);
                 let pick = if pick < s.paths.len() { pick } else { 0 };
@@ -2732,8 +2735,8 @@ impl Engine {
         let channel = self.reading_channel
             && self.colloquial.is_some()
             && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
-        // The stretches also keep their syllables when the lexicon has `manual` words, which the rerank matches against them.
-        let keep_syls = channel || !self.lex.manual().is_empty();
+        // The stretches also keep the readings of their first path when the lexicon has `manual` words, which the rerank matches against them.
+        let keep_used = !self.lex.manual().is_empty();
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -2799,7 +2802,8 @@ impl Engine {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        syls: if keep_syls { self.syls[start..stop].to_vec() } else { Vec::new() },
+                        syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
+                        used: if keep_used { self.lex.path_readings(&self.syls[start..stop], first.iter().map(|w| (w.0, w.3))) } else { Vec::new() },
                         gap: gap_text,
                     });
                 }

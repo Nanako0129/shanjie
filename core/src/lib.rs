@@ -446,6 +446,23 @@ impl Lexicon {
         words.into_iter().map(|(w, _, _, a)| (w, readings[a].1.iter().map(|&i| self.syl_names[i as usize].clone()).collect())).collect()
     }
 
+    /// The readings a decoded path used over the typed syllables `syls`: `words` are its (word, syllable count) in order. A word read through an
+    /// adjacent-key alternative of an unknown syllable (`tolerant_words`) is given under the lexicon reading it was found under, every other word under
+    /// the typed syllables. What `tinylm::manual_mask` matches the manual words against, so a manual word the n-gram's first choice holds through a
+    /// tolerated reading is protected too (docs/contracts/sj-lm-7-pr2.md section 2.7). `syls` itself when the words do not cover it.
+    pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>) -> Vec<String> {
+        let mut out: Vec<String> = Vec::with_capacity(syls.len());
+        for (w, l) in words {
+            let Some(span) = syls.get(out.len()..out.len() + l) else { return syls.to_vec() };
+            let tolerated = self.ids(span).contains(&u32::MAX).then(|| self.tolerant_words(span, 0).into_iter().find(|(tw, _)| *tw == w)).flatten();
+            match tolerated {
+                Some((_, reading)) => out.extend(reading),
+                None => out.extend_from_slice(span),
+            }
+        }
+        if out.len() == syls.len() { out } else { syls.to_vec() }
+    }
+
     pub fn reading_count(&self) -> usize {
         self.readings.len()
     }

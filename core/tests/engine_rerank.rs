@@ -665,7 +665,7 @@ fn entered_prediction_row_blocks_apply() {
 }
 
 /// Section 2.2, the learning guard: a stretch whose first path has a learned-boosted word is left out, the other stretch is still
-/// reranked. Taught here: 回復 for ㄏㄨㄟˊ ㄈㄨˋ after 已經 (row 27 shows 回覆 by the n-gram after that context on the SJ-LM-7 files, 回復 on model-v6, and the pick has to be a teaching: it is not the first); the fixed 郵件 splits the row.
+/// reranked. Taught here: 回復 for ㄏㄨㄟˊ ㄈㄨˋ after 已經 (row 27 shows 回覆 by the n-gram after that context on the 通語 SJ-LM-7-9.7M files, 回復 on model-v6, and the pick has to be a teaching: it is not the first); the fixed 郵件 splits the row.
 #[test]
 fn learned_stretch_is_not_reranked() {
     let syls = row(27);
@@ -1028,4 +1028,49 @@ fn a_manual_word_survives_the_formal_rerank_on_the_final_files() {
         }
     }
     std::fs::remove_dir_all(&plain).unwrap();
+}
+
+/// The unknown syllables one zhuyin symbol away from `syl` whose adjacent-key alternatives (fuzzy-input section 2.1) include `syl`, in symbol order.
+fn slips_of(syl: &str) -> Vec<String> {
+    let lex = &shared().lex;
+    let tone: String = syl.chars().filter(|c| "ˊˇˋ˙".contains(*c)).collect();
+    let base: Vec<char> = syl.chars().filter(|c| !"ˊˇˋ˙".contains(*c)).collect();
+    let mut out = Vec::new();
+    for i in 0..base.len() {
+        for sym in "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ".chars().filter(|&c| c != base[i]) {
+            let mut b = base.clone();
+            b[i] = sym;
+            let u = format!("{}{tone}", b.iter().collect::<String>());
+            if !lex.has_syllable(&u) && lex.adjacent_alts(&u).contains(&syl) && !out.contains(&u) {
+                out.push(u);
+            }
+        }
+    }
+    out
+}
+
+/// Section 2.7 with adjacent-key input on: 米雅歌 typed with one syllable slipped to a neighbouring key (a syllable the lexicon lacks, decoded through its
+/// adjacent-key alternative ㄧㄚˇ or ㄍㄜ) is still the n-gram's first choice, and the manual word is protected because `manual_mask` matches it against the
+/// readings that path used (`Lexicon::path_readings`), not the typed syllables. Matching the typed syllables left it unprotected: the rerank took it out
+/// for 米亞哥 (measured 2026-10-28 at both strengths, every slip below).
+#[test]
+fn a_manual_word_typed_with_an_adjacent_key_slip_survives_the_rerank() {
+    let mut tried = 0;
+    for level in [RerankLevel::Standard, RerankLevel::Aggressive] {
+        for (pos, t) in [(1, "ㄧㄚˇ"), (2, "ㄍㄜ")] {
+            let slips = slips_of(t);
+            assert!(!slips.is_empty(), "premise: a slip of {t}");
+            for u in slips {
+                let mut reading = ["ㄇㄧˇ".to_string(), "ㄧㄚˇ".to_string(), "ㄍㄜ".to_string()];
+                reading[pos] = u.clone();
+                let mut e = final_engine(&root().join("data/lexicon"), level);
+                e.set_fuzzy(core::fuzzy::FUZZY_ADJACENT).unwrap();
+                let r: Vec<&str> = reading.iter().map(String::as_str).collect();
+                let (ngram, after) = shown_after_rerank(&mut e, &r);
+                assert_eq!((ngram.as_str(), after.as_str()), ("米雅歌", "米雅歌"), "{level:?}: {r:?}");
+                tried += 1;
+            }
+        }
+    }
+    assert!(tried >= 4, "{tried} slips tried");
 }

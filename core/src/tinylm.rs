@@ -521,7 +521,8 @@ impl TinyLm {
     /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
     /// L characters as they are ("^" included; context-return section 2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
-    /// `syl` are the stretch's syllables and `manual` the maintainer's own words (`manual_mask`): a candidate that takes out a manual word the
+    /// `syl` are the readings the n-gram's first candidate used over the stretch (`Lexicon::path_readings`; the typed syllables unless an adjacent-key
+    /// slip was read through another syllable) and `manual` the maintainer's own words (`manual_mask`): a candidate that takes out a manual word the
     /// n-gram's first choice holds there cannot be chosen (docs/contracts/sj-lm-7-pr2.md section 2.7); the threshold and the scores still use the whole list.
     pub fn rerank(
         &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), syl: &[String], manual: &ManualSet,
@@ -708,7 +709,7 @@ fn gelu(be: Backend, x: &mut [f32]) {
     x.iter_mut().zip(&t).for_each(|(v, t)| *v = 0.5 * *v * (1.0 + t));
 }
 
-/// Which of `cands` (the n-gram's first candidates of one stretch whose syllables are `syl`) the rerank must not choose (docs/contracts/sj-lm-7-pr2.md
+/// Which of `cands` (the n-gram's first candidates of one stretch; `syl` are the readings its first one used, `Lexicon::path_readings`) the rerank must not choose (docs/contracts/sj-lm-7-pr2.md
 /// section 2.7): the maintainer's own words (`ManualSet`) that the first candidate holds on their syllables are protected, and a candidate that does not hold
 /// every one of them at the same place is masked. A manual word on other syllables, or that the first candidate does not hold, protects nothing; with nothing
 /// protected no candidate is masked. The first candidate holds all it protects, so it is never masked. The one place this is decided: `rerank`,
