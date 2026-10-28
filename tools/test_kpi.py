@@ -163,6 +163,17 @@ class TableRules(Tmp):
             a, b = (next(h for h in cols if x in h) for x in ("#11111111", "#22222222"))
             self.assertEqual((rows["v0.4.7"][a] != "—", rows["v0.4.7"][b], rows["v0.4.8"][a], rows["v0.4.8"][b] != "—"), (True, "—", "—", True), p)
 
+    def test_news_half_from_a_private_file_gets_its_own_column(self):
+        # the news half moved from eval/holdout/news.txt to a private rows file (news-corpus.md 2.4): the talk half keeps its hash, the news half's changes
+        self.put(self.kp, "v0.5.0.json", {"holdout_talk_chat": {"n": 150, "top1": 120, "rows_sha256": H1}, "holdout_news_formal": {"n": 150, "top1": 135, "rows_sha256": H1}})
+        self.put(self.kp, "v0.6.0.json", {"holdout_talk_chat": {"n": 150, "top1": 121, "rows_sha256": H1}, "holdout_news_formal": {"n": 150, "top1": 130, "rows_sha256": H2}})
+        head, rows = self.table()
+        self.assertEqual(len([h for h in head if h.startswith("保留集口語半邊")]), 1, head)
+        cols = [h for h in head if h.startswith("保留集新聞半邊")]
+        self.assertEqual(len(cols), 2, head)
+        a, b = (next(h for h in cols if x in h) for x in ("#11111111", "#22222222"))
+        self.assertEqual((rows["v0.5.0"][a] != "—", rows["v0.5.0"][b], rows["v0.6.0"][a], rows["v0.6.0"][b] != "—"), (True, "—", "—", True))
+
     def test_table_is_byte_identical_across_runs(self):
         for i, h in enumerate((H1, H2, "3" * 64)):  # several column groups, so an unordered iteration would show
             self.put(self.res, f"v2-{i}.json", v2_file(f"2026-10-0{i + 1}", [v2_version(f"v0.4.{i}"), v2_version(f"v0.4.{i + 1}", 70, {"fixed": 2, "broken": 1}, SPEED)], h=h))

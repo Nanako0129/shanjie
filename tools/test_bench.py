@@ -619,13 +619,23 @@ class SuiteV2(Tmp):
         bench.cmd_table(None)  # deterministic
         self.assertEqual(open(out, encoding="utf-8").read(), after)
 
-    def test_holdout_columns_split_by_rows_sha256(self):
-        # a news half on a private file (new hash) must not share a column with the old shard's number
-        recs = [{"version": "v0.5.0", "ref": "v0.5.0", "sha": "a" * 40, "holdout": {"chat": {"n": 150, "top1": 120, "rows_sha256": "1" * 64}, "formal": {"n": 150, "top1": 130, "rows_sha256": "2" * 64}}},
-                {"version": "v0.6.0", "ref": "v0.6.0", "sha": "b" * 40, "holdout": {"chat": {"n": 150, "top1": 121, "rows_sha256": "1" * 64}, "formal": {"n": 150, "top1": 140, "rows_sha256": "3" * 64}}}]
-        cols = bench.holdout_cols([{"versions": recs}])
-        self.assertEqual(cols, [("chat", "1" * 64), ("formal", "2" * 64), ("formal", "3" * 64)])
-        self.assertEqual(len(bench.holdout_head(cols)), 3)
+    def test_holdout_numbers_stay_in_their_own_set_column(self):
+        # legacy n=227 (no hash), the talk half (hash T, kept) and two news halves (hashes N1, N2): a number shows only in its own column, in both renderers
+        env = {"machine": "M", "macos": "27", "load_avg_start": 1.0, "load_avg_end": 2.0}
+        T, N1, N2 = "1" * 64, "2" * 64, "3" * 64
+        hs = [{"chat": {"n": 227, "top1": 191}}, {"chat": {"n": 150, "top1": 120, "rows_sha256": T}, "formal": {"n": 150, "top1": 130, "rows_sha256": N1}},
+              {"chat": {"n": 150, "top1": 121, "rows_sha256": T}, "formal": {"n": 150, "top1": 140, "rows_sha256": N2}}]
+        recs = [{"ref": f"v{i}", "version": f"v{i}", "sha": str(i) * 40, "models": {}, "flags": [], "holdout": {p: dict(b, oracle64=9) for p, b in h.items()}} for i, h in enumerate(hs)]
+        for render in (lambda r: bench.render_table(r), bench.render_v2):
+            md = render([{"label": "L", "date": "2026-10-29", "env": env, "versions": recs}])
+            rows = {l.split("|")[1].split("<br>")[0].strip(): [c.strip() for c in l.split("|")[2:-1]] for l in md.splitlines() if l.startswith("| v") and "<br>" in l.split("|")[1] and "%" in l}
+            head = next(l for l in md.splitlines() if l.startswith("| 版本 | chat")).split("|")[2:-1]
+            self.assertEqual(len(head), 4, head)  # chat n227, chat T, formal N1, formal N2: first-appearance order
+            self.assertIn("n 227", head[0]); self.assertIn(f"#{T[:8]}", head[1]); self.assertIn(f"#{N1[:8]}", head[2]); self.assertIn(f"#{N2[:8]}", head[3])
+            miss = lambda c: c.startswith("—")
+            self.assertEqual([[not miss(c) for c in rows[v]] for v in ("v0", "v1", "v2")],
+                             [[True, False, False, False], [False, True, True, False], [False, True, False, True]])
+            self.assertIn("191/227", rows["v0"][0]); self.assertIn("130/150", rows["v1"][2]); self.assertIn("140/150", rows["v2"][3])
 
     def test_rerun_never_overwrites_holdout_numbers(self):
         bench.RESULTS = os.path.join(self.td, "results")
