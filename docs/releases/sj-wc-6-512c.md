@@ -9,7 +9,7 @@
 - 量測：研究紀錄沒有把詞類表單獨拆出來量；階段 1 到定案的所有量測都載入這一份（整組的結果見 [sj-sr-7-15m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-7-15m) 的說明）。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ），和 sj-lm-7-9.7m 相同：由同一批語料的詞頻計數而來（來源見 sj-lm-7-9.7m 的說明，含 g0v `#rand0m`〔CC0〕與 PTT 公開看板的文章與推文〔只用於詞頻計數，不含原文〕）。
 - 不含任何私人對話資料。
-- 〔TODO：`cluster.py` 的 `--N`、`--keep-from` 與是否帶 `--extra-overlay`，這一版的指令列沒有寫進研究紀錄；要寫進說明的話由跑它的人補。〕
+- 分群的完整參數見研究紀錄 2026-10-26「階段 1——兩臂重建與量測」（B 臂）。
 
 下載（一整組）：
 

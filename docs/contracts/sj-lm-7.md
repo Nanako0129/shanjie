@@ -247,6 +247,7 @@
 - 通語、辨類、承接、連文的 `data.md` 列與 Release 說明：照舊 CC BY-SA 4.0，來源加「g0v Slack `#rand0m` 頻道（CC0）」「PTT 批踢踢實業坊公開看板的文章與推文（只用於詞頻計數，不含原文）」。
 - 常談重算那一臂：`build_attribution.py` 把三個新來源各當一個來源單位（g0v＝頻道，PTT＝看板），每一列有來源與句數，總句數要對得上；`data.md` 與 App 署名照署名檔。
 - 字幕（OPUS OpenSubtitles v2018）：會意選到 R1 或 R½ 時，`data.md` 的會意列與 Release 說明加「OPUS OpenSubtitles v2018 繁體字幕（只用於訓練，不含原文）」，附 OPUS 的引用要求；研究語料列加一列。
+- 會意選到 R1 時，訓練文字還有新口語的 g0v 與 PTT，Release 說明與 `data.md` 的會意列照通語同一列的寫法一起列出（2026-10-28 補，起草 Release 說明時發現；OPUS 的引用照它網頁的要求：Lison and Tiedemann 2016，並附 http://www.opensubtitles.org/ 的連結）。
 - `check-app.sh` 通過；`data.md`、Release 說明、署名檔對每個新來源各有一條，和這一節一致。
 
 ## 6. 停止條件、預算、範圍外

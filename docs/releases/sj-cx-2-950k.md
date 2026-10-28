@@ -9,7 +9,7 @@
 - 量測（階段 1 追加，聊天開 trigram 且 KN 開，對不開；會意與常談照當時出貨；改對的句數）：discordtune 4,534 → 4,554、cvtune-clean 3,011 → 3,021、錯字回報聊天 95 → 99、動漫角色片段 79 → 82、dev302 聊天 268 → 269；網路用語第二輪 837 → 833、店家 197 → 192（兩個小退步）。CLI 最高 RSS（Linux，只拿來比大小）聊天 282 → 296 MiB。整組的結果見 [sj-sr-7-15m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-7-15m) 的說明。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ），和 sj-lm-7-9.7m 相同：由同一批語料的詞頻計數而來，來源有維基百科 20 萬篇條目（CC BY-SA 4.0，署名：Wikipedia contributors）、Mozilla Common Voice 繁體中文（CC0）、Tatoeba 中文句子（CC BY 2.0 FR，署名：Tatoeba contributors）、台灣口語合成句（gpt-oss-120b 的模型輸出；權重本身為 Apache-2.0）、g0v Slack `#rand0m` 頻道的公開訊息（CC0）、PTT 批踢踢實業坊公開看板的文章與推文（只用於詞頻計數，不含原文）。
 - 不含任何私人對話資料。
-- 〔TODO：這張表的口語池是 `eb905936…` 那份重產的，還是舊的 `3e833d06…`，研究紀錄寫「SJ-LM-7 全部語料與權重」，沒有分到這一層，建 Release 前由跑它的人確認。〕
+- 三元組計數的口語池是重產的 `colloquial-train.txt`（`eb905936…`）＋`synth.txt`（`bec7a6a2…`）＋`topup.txt`（`315939d7…`），計數照 B6 的設定不套 OpenCC `TWPhrases`（`--no-trad-tw-phrases`）。
 
 下載（一整組）：
 

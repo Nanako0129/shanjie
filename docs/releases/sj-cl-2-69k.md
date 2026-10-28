@@ -19,7 +19,7 @@
 - 量測（階段 4，聊天，改對／改壞）：C1 對沿用上一版的 C0，discordtune 標準 4／0、保守 0／0、積極 3／0，其他集合每格都 ≤ 3；C1 對 main 標準檔 discordtune 4,366 → 4,558（229／37）、錯字回報聊天 +40；CLI 最高 RSS（Linux，只拿來比大小）聊天 296 MiB（main 271）。維護者選 C1。整組的結果見 [sj-sr-7-15m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-7-15m) 的說明。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ），來源和上一版相同：(1) 口語計數（Mozilla Common Voice 繁體中文〔CC0〕、Tatoeba〔CC BY 2.0 FR，署名：Tatoeba contributors〕、為這個專案寫的合成句）；(2) 143,895 句的公開口語池，四個來源的授權都只要求署名，可以併進 BY-SA：WildChat-1M（ODC-BY 1.0）、YODAS（CC BY 3.0）、Tatoeba（CC BY 2.0 FR）、MASSIVE（CC BY 4.0）。YODAS 只給影片 id，所以照資料集提供的內容署名（id、網址、句數，見 `colloquial-attribution.tsv`）。完整署名在 NOTICE 與 App 的 `Resources/LICENSES/CC-BY-SA-4.0-attribution.txt`。
 - 不含任何私人對話資料；表裡只有詞與詞對的次數。三檔的值在維護者自己的訊息建的評測集上選，檔案裡沒有任何訊息的文字。
-- 〔TODO：C1 實際用的完整指令列與新的 `counts-colloquial3.pkl` SHA-256（上一版是 `1e7a15ef…`）研究紀錄沒有寫，上面的指令是照上一版與階段 4 登記的配方寫的骨架；重排延遲、記憶體（Mac 閒置窗）、chatjudge-3 確認一發、保留集也還沒有結果。〕
+- 配方與量測見研究紀錄 2026-10-26「階段 4 結果——常談 C0、C1、C2」。
 
 下載（一整組）：
 

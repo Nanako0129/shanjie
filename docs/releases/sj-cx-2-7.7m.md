@@ -10,8 +10,8 @@
 - 量測（階段 1 之後，書面標準檔，會意 SJ-SR-6-14M；wikitune、錯字回報是第一名對的句數）：wikitune-clean 現行 1,641 → 這張表 1,614（含 PTT 的新表 1,588，只數維基的 1,615）；dev302 書面改壞 6 列（只數維基 7 列；出貨標準第 2 條的例外，維護者 2026-10-26 同意）；錯字回報書面 97–99；書面 RSS 371 MiB（現行 376）。整組的結果見 [sj-sr-7-15m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-7-15m) 的說明。
 - 授權：**CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ），和 sj-cx-1-7.7m 相同：由維基百科（CC BY-SA 4.0，署名：Wikipedia contributors）與口語語料（Mozilla Common Voice 繁體中文〔CC0〕、Tatoeba 中文句子〔CC BY 2.0 FR，署名：Tatoeba contributors〕、gpt-oss-120b 產生的台灣口語合成句〔模型權重本身為 Apache-2.0〕）的詞頻計數而來。
 - 不含任何私人對話資料。
-- 〔TODO：「舊口語池」在研究紀錄只寫「舊表的配方、新詞彙」；它是 model-v6 當時的 `colloquial-train.txt`（`3e833d06…`）還是重產的 `eb905936…`、有沒有套 `TWPhrases`，紀錄沒有寫，建 Release 前由跑它的人確認。〕
-- 〔TODO：選 WC 而不是只數維基的 W，研究紀錄沒有寫明理由；上面兩個數字（wikitune 1,614 對 1,615、dev302 書面改壞 6 對 7）是能查到的差別。〕
+- 三元組計數的口語池是重產的 `colloquial-train.txt`（`eb905936…`）＋`synth.txt`（`bec7a6a2…`）＋`topup.txt`（`315939d7…`），計數照 B6 的設定不套 OpenCC `TWPhrases`（`--no-trad-tw-phrases`）。
+- 和只數維基的同規模表相比，研究紀錄記到的差別是 wikitune 1,614 對 1,615、dev302 書面改壞 6 對 7（研究紀錄 2026-10-26）。
 
 下載（一整組）：
 

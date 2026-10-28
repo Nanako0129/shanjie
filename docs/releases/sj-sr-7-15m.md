@@ -33,11 +33,10 @@
   - 台灣口語合成句（gpt-oss-120b 的模型輸出；模型權重本身為 Apache-2.0）
   - g0v Slack `#rand0m` 頻道的公開訊息（CC0）
   - PTT 批踢踢實業坊公開看板的文章與推文（只用於訓練，不含原文）
-  - OPUS OpenSubtitles v2018 繁體字幕（只用於訓練，不含原文；清理後 4,432,866 句、42,814,742 個漢字）。引用：P. Lison and J. Tiedemann, 2016, OpenSubtitles2016, LREC 2016；P. Lison, J. Tiedemann and M. Kouylekov, 2018, OpenSubtitles2018: Statistical Rescoring of Sentence Alignments in Large, Noisy Parallel Corpora, LREC 2018。
+  - OPUS OpenSubtitles v2018 繁體字幕（只用於訓練，不含原文；清理後 4,432,866 句、42,814,742 個漢字）。照 OPUS 的要求引用：P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles. In Proceedings of the 10th International Conference on Language Resources and Evaluation (LREC 2016)；字幕來自 http://www.opensubtitles.org/ 。
 - 不含任何私人對話資料；聊天的值在維護者自己的訊息建的評測集上選，檔案裡沒有任何訊息的文字。
-- 〔TODO：OPUS 引用的文字是照慣用格式寫的，repo 裡沒有 OPUS 要求的原文，建 Release 前對照 OPUS 頁面。〕
-- 〔TODO：R1 的 `tinylm-M.npz` SHA-256 研究紀錄沒有寫；重排延遲 p95（上限 300 ms）、記憶體（上限 250 MiB）、chatjudge-3 確認一發與保留集還沒有結果。〕
-- 〔TODO：契約 `sj-lm-7.md` §5 只寫會意要加字幕的署名；這個檔的訓練文字同時含 g0v 與 PTT（臂 R1 的定義），上面已列出，契約要不要補由維護者決定。〕
+- 權重來源：臂 R1 中位數的種子 20261018 的 `tinylm-M.npz`（SHA-256 `cb351ed7d210b61540ff0d629bdbd45882031ab6e8817e5670d9181c2a151c5c`，沒有另外發布）。
+- 延遲與記憶體（Mac 閒置窗，對 main，研究紀錄 2026-10-28）：按鍵 p95 聊天 2.10 ms、書面 2.11 ms；重排 p95 8.0／7.9 ms；記憶體比 main 多 34～38 MiB（重播）、3～28 MiB（重排），都在門檻內。
 
 下載（一整組）：
 
