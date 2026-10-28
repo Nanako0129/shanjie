@@ -604,7 +604,8 @@ def static_section(st):
 
 
 def holdout_key(h, p):
-    """Column key of one holdout block: (profile, rows_sha256 if present else n), the same key tools/kpi.py uses (kpi.md section 2)."""
+    """Column key of one holdout block: (profile, rows_sha256 if present else n). tools/kpi.py keys on rows_sha256 alone (no n fallback),
+    so a block without the hash splits by n here but shares kpi.py's one hashless column."""
     b = h[p]
     return (p, b.get("rows_sha256") or b.get("n"))
 
@@ -622,11 +623,10 @@ def holdout_cols(results):
 
 
 def holdout_head(results, cols):
-    name = {"chat": "chat", "formal": "formal"}
     out = []
     for p, k in cols:
         b = next((rec["holdout"][p] for res in results for rec in res["versions"] if p in rec.get("holdout", {}) and holdout_key(rec["holdout"], p) == (p, k)), {})
-        out.append(name[p] + (f"（n {b['n']}" + (f"，#{b['rows_sha256'][:8]}" if b.get("rows_sha256") else "，沒記 rows_sha256") + "）" if b else ""))
+        out.append(p + (f"（n {b['n']}" + (f"，#{b['rows_sha256'][:8]}" if b.get("rows_sha256") else "，沒記 rows_sha256") + "）" if b else ""))
     return out
 
 
