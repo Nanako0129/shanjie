@@ -1,6 +1,6 @@
 # digits-pred golden (experiments/digits/golden_digits.py --pred; digits.md A.3.5). Python is the baseline; Rust must match words and score bits.
 # digits.tsv sha256=a75a328ba4e30d13d5773cdc6f4c5e61a606bfc35e7459d16114c288dc6a6800
-# models: bigram.sjlm sha256=69826c2f2b84431b0f5426f5057730913e0be508477b2fc681e5f50a3d18db5b classes.sjc sha256=4315f0ed90ab5512a50e2a529693d0f551f842484a97c8f82ddccfef302446ae kn.sjkn sha256=2b332df9fb61b2659259f1e848992dcc20d2b6fcb682e5489ca779e7f0ba3537
+# models: bigram.sjlm sha256=e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a classes.sjc sha256=4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43 kn.sjkn sha256=880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a
 # lexicon: mcbpmf-data.txt sha256=25b3ecb0033c4177831480971fc26e8f2086ca02bce8615ff28e97ac59639553 overlay-add.tsv sha256=01b61bc59febca73a126aaa0a1d961c2c1e6c9de3ff1b87ae89ed4948250ef59 sandhi-add.tsv sha256=34622175389d5619dfc71925ac3d94ce7a117e3f1fb23653a7ae84d937df825a names-add.tsv sha256=e8597881fa7c03f6fff4ddb433674e095b10a2efc57a52cb18bfa5fc0901702d demote.tsv sha256=baf1dac3ab4f71ac1957802b5c885eee72c33a34e5ac447ecc98773c09d7766b
 # profile=chat lambda=0.5 limit=9 gamma=1.0
 # generated on Darwin arm64, python 3.14.7

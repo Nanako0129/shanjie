@@ -47,7 +47,7 @@ pub const NU: f64 = 1.0;
 pub const CAP: f64 = 4.0;
 
 /// SHA-256 of the `.sjtl` the cells were measured with (SJ-SR-7 R1 final file, data/tinylm.sjtl.sha256); the term applies to no other small model.
-pub const PAIRED_TINYLM_SHA256: &str = "bbb387d06625d50de24cb1ed4bfc819bc312dbe68dc5d38b2451eed4d44861a8";
+pub const PAIRED_TINYLM_SHA256: &str = "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColloquialError {

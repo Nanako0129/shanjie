@@ -2,9 +2,9 @@
 善解「語意校正」用的小型字元語言模型，會意（SJ-SR）第 7 版 **SJ-SR-7-15M**，接替 [sj-sr-6-14m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-6-14m)。和上一版不同的是**權重重新訓練過**（加了新的口語語料與字幕），不只是換融合參數。**這不是輸入法的發行版。**
 
 - 檔案：`tinylm.sjtl`，14,886,880 bytes
-- SHA-256：`bbb387d06625d50de24cb1ed4bfc819bc312dbe68dc5d38b2451eed4d44861a8`
+- SHA-256：`f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478`
 - 格式：SJTL0004（和上一版相同）。內容（讀檔頭）：6 層、寬 384、6 頭、前文 64、字表 10,351 個 id（上一版 9,717）；二維權重每列對稱 int8 加 float32 縮放。參數數 14,646,912，由檔頭與格式說明的張量清單算出（同一式子算出的檔案大小等於實際位元組數，上一版也是）。只在 n-gram 解碼出的前 8 名候選之間重排，不會產生新的文字。
-- **綁定**：檔頭記了 [sj-lm-7-9.7m](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m) `bigram.sjlm`（`69826c2f…3d18db5b`）與 [sj-kn-2-397k](https://github.com/Nanako0129/shanjie/releases/tag/sj-kn-2-397k) `kn.sjkn`（`2b332df9…f0ba3537`）的 SHA-256，不符就拒絕載入、只用 n-gram。常談 [sj-cl-2-69k](https://github.com/Nanako0129/shanjie/releases/tag/sj-cl-2-69k) 由核心的 `PAIRED_TINYLM_SHA256` 配對到這個檔，換了會意檔常談就不生效。
+- **綁定**：檔頭記了 [sj-lm-7-9.7m](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m) `bigram.sjlm`（`e3fb6056…3d18db5b`）與 [sj-kn-2-397k](https://github.com/Nanako0129/shanjie/releases/tag/sj-kn-2-397k) `kn.sjkn`（`880ee87c…f0ba3537`）的 SHA-256，不符就拒絕載入、只用 n-gram。常談 [sj-cl-2-69k](https://github.com/Nanako0129/shanjie/releases/tag/sj-cl-2-69k) 由核心的 `PAIRED_TINYLM_SHA256` 配對到這個檔，換了會意檔常談就不生效。
 - 融合參數（α、τ、δ；δ 是融合分數要比 n-gram 第一名高出多少才換）：書面三組在檔頭；聊天三組在核心 `core/src/colloquial.rs`（常談生效時用它；檔頭的聊天值只在口語項不是有限值時用）。
 
 | 設定 | 保守 | 標準 | 積極 |

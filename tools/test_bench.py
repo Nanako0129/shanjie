@@ -470,7 +470,7 @@ class SuiteV2(Tmp):
         trigram-chat.sjt3.sha256 stops."""
         spec = bench.VERSIONS2["sj-lm-7"]
         self.assertTrue(spec["tri"] and spec["tri_chat"])
-        HEX.update({"kn.sjkn": "2b332df9" + "e" * 56, "trigram.sjt3": "7ec1869b" + "f" * 56, "trigram-chat.sjt3": "03891d5a" + "9" * 56,
+        HEX.update({"kn.sjkn": "880ee87c" + "e" * 56, "trigram.sjt3": "34305a2d" + "f" * 56, "trigram-chat.sjt3": "24ee8645" + "9" * 56,
                     "colloquial.sjlm": "81c2470d" + "d" * 56})
         for n in ("kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "colloquial.sjlm"):
             self.addCleanup(HEX.pop, n)
@@ -481,10 +481,10 @@ class SuiteV2(Tmp):
         with mock_hash():
             bench.setup_models(v, spec, os.path.join(self.td, "mf"))
         self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "colloquial.sjlm", "kn.sjkn", "trigram-chat.sjt3", "trigram.sjt3"])
-        self.assertEqual((v.kn8, v.tri8, v.trichat8), ("2b332df9", "7ec1869b", "03891d5a"))
-        chat, formal = "lm-chat+ctx+kn:2b332df9:θ1:β1+tl:7e73ef67+acg+tri:03891d5a+colloq:81c2470d+rc", "lm-formal+ctx+kn:2b332df9:θ1:β0.75+tl:7e73ef67+acg+tri:7ec1869b"
+        self.assertEqual((v.kn8, v.tri8, v.trichat8), ("880ee87c", "34305a2d", "24ee8645"))
+        chat, formal = "lm-chat+ctx+kn:880ee87c:θ1:β1+tl:7e73ef67+acg+tri:24ee8645+colloq:81c2470d+rc", "lm-formal+ctx+kn:880ee87c:θ1:β0.75+tl:7e73ef67+acg+tri:34305a2d"
         self.assertEqual((bench.expected_tag(v, "chat", False), bench.expected_tag(v, "formal", False)), (chat, formal))
-        replay = ("lm-chat+kn:2b332df9:θ1:β1+tri:03891d5a", "lm-formal+kn:2b332df9:θ1:β0.75+tri:7ec1869b")
+        replay = ("lm-chat+kn:880ee87c:θ1:β1+tri:24ee8645", "lm-formal+kn:880ee87c:θ1:β0.75+tri:34305a2d")
         self.assertEqual((bench.replay_tag(v, "chat"), bench.replay_tag(v, "formal")), replay)
         # the replay-setting cells (no small model): a cell that lost one of the parts (formal at the file's beta 1, chat on the formal table, no table)
         # is not the shipping setting
@@ -496,8 +496,8 @@ class SuiteV2(Tmp):
             self.fake_cli({"chat": replay[0], "formal": replay[1]}, [True, True], ("你好", "世界"))
             s = bench.measure_speed2(self.ctx, [sv])[sv.sha]
             self.assertEqual((s["rows_match"], s["formal"]["rows_match"]), ("2/2", "2/2"))
-            for chat_tag, formal_tag, bad in ((replay[0], "lm-formal+kn:2b332df9:θ1:β1+tri:7ec1869b", "formal"), (replay[0], "lm-formal+tri:7ec1869b", "formal"),
-                                              ("lm-chat+kn:2b332df9:θ1:β1+tri:7ec1869b", replay[1], "chat"), ("lm-chat+kn:2b332df9:θ1:β1", replay[1], "chat")):
+            for chat_tag, formal_tag, bad in ((replay[0], "lm-formal+kn:880ee87c:θ1:β1+tri:34305a2d", "formal"), (replay[0], "lm-formal+tri:34305a2d", "formal"),
+                                              ("lm-chat+kn:880ee87c:θ1:β1+tri:34305a2d", replay[1], "chat"), ("lm-chat+kn:880ee87c:θ1:β1", replay[1], "chat")):
                 self.fake_cli({"chat": chat_tag, "formal": formal_tag}, [True, True], ("你好", "世界"))
                 r = bench.measure_speed2(self.ctx, [sv])[sv.sha]
                 self.assertIn("setting tag", r["error"] if bad == "chat" else r["formal"]["error"], (chat_tag, formal_tag))

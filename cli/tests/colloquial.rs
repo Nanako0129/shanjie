@@ -111,7 +111,9 @@ fn no_option_is_byte_identical_to_before() {
     // The scores gained a `masked` field in sj-lm-7-pr2.md section 2.7 (empty on every one of these 16 rows); without it they are what they were.
     assert_eq!(h(&o.sc), "066e26f8d1f6d1e900efa987dd524a005262da404d02d3c6b59ad1519e7b25c1");
     assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "3762df4df12f06e84754f2d952dde28389a4e838821105db43a04d13fe9fe99e");
-    assert_eq!(h(&o.stdout), "038760955ce42e17e36847954dbba24f0f7c4159e49b568d57ce066a1991d929");
+    // The summary line carries the model tags; with the fingerprint entries (new bigram, kn and tinylm hashes) only those 8-character tags changed
+    // (the old hash 03876095… is this line with the old tags put back).
+    assert_eq!(h(&o.stdout), "da55bd37457e24ef2f6c0bd2fe2334d45f84911a37cc30f8584e318b66f72642");
 }
 
 /// The acceptance row: the shipping rerank keeps `城市` (c 0; it was row 202, 羅斯松 against 螺絲鬆, until SJ-LM-7, whose n-gram gets that one right), the
@@ -211,7 +213,7 @@ fn the_term_applies_at_every_strength() {
         let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
         assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
         let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
-        assert!(new.stdout.contains(&format!("{rl}+acg+tri:03891d5a+colloq:81c2470d+rc  {{")), "{level}: {}", new.stdout);
+        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rc  {{")), "{level}: {}", new.stdout);
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");

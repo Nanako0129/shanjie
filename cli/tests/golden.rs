@@ -123,7 +123,7 @@ fn lm_file_is_the_released_model() {
     let bytes = std::fs::read(lm_path()).unwrap();
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "69826c2f2b84431b0f5426f5057730913e0be508477b2fc681e5f50a3d18db5b",
+        "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
         "data/lm/bigram.sjlm differs from data/bigram.sjlm.sha256 (a model rebuilt with tools/build_lm.py has no fingerprint entries and never matches)"
     );
 }
@@ -135,7 +135,7 @@ fn classes_file_is_the_released_build() {
     let bytes = std::fs::read(&p).unwrap_or_else(|_| panic!("{} is missing", p.display()));
     assert_eq!(
         core::eval::sha256_hex(&bytes),
-        "4315f0ed90ab5512a50e2a529693d0f551f842484a97c8f82ddccfef302446ae",
+        "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
         "data/lm/classes.sjc differs from data/classes.sjc.sha256; rebuild it with tools/build_classes.py or fetch the recorded file"
     );
 }
@@ -225,11 +225,11 @@ fn no_classes_flag_matches_its_pinned_numbers() {
     let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(
         line("chat"),
-        "## dev302  lm-chat+ctx-noclasses+kn:2b332df9:θ1:β1+tri:03891d5a  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c'}\n"
+        "## dev302  lm-chat+ctx-noclasses+kn:880ee87c:θ1:β1+tri:24ee8645  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c'}\n"
     );
     assert_eq!(
         line("formal"),
-        "## dev302  lm-formal+ctx-noclasses+kn:2b332df9:θ1:β0.75+tri:7ec1869b  {'n': 302, 'top1': 260, 'oracle@64': 300, 'top1_sha256': '3c6f177cdd786ae2b28c852a065e99318bc22693c1a87bbc8b7f6f1386dee66c'}\n"
+        "## dev302  lm-formal+ctx-noclasses+kn:880ee87c:θ1:β0.75+tri:34305a2d  {'n': 302, 'top1': 260, 'oracle@64': 300, 'top1_sha256': '3c6f177cdd786ae2b28c852a065e99318bc22693c1a87bbc8b7f6f1386dee66c'}\n"
     );
 }
 

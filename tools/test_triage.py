@@ -152,10 +152,10 @@ class SettingTag(unittest.TestCase):
     def test_each_profile_has_its_own_kn_and_tri_parts(self):
         """The tag the CLI prints (cli/src/main.rs): both profiles keep KN (`+kn:` before `+tl:`, formal at beta 0.75) and read their own table (`+tri:` after
         `+acg`), formal trigram.sjt3 and chat trigram-chat.sjt3; a part whose file is not beside the model is absent."""
-        kn1, kn75, chat_tri, formal_tri = "+kn:cbefbced:θ1:β1", "+kn:cbefbced:θ1:β0.75", "+tri:03891d5a", "+tri:7ec1869b"
-        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn75, formal_tri), "lm-formal+ctx+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg+tri:7ec1869b")
-        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn75, formal_tri), "lm-formal+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg+tri:7ec1869b")
-        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn1, chat_tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg+tri:03891d5a")
+        kn1, kn75, chat_tri, formal_tri = "+kn:cbefbced:θ1:β1", "+kn:cbefbced:θ1:β0.75", "+tri:24ee8645", "+tri:34305a2d"
+        self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn75, formal_tri), "lm-formal+ctx+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg+tri:34305a2d")
+        self.assertEqual(T.expected_tag("formal", "", "abcd1234", kn75, formal_tri), "lm-formal+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg+tri:34305a2d")
+        self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn1, chat_tri), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg+tri:24ee8645")
         self.assertEqual(T.expected_tag("chat", "+ctx", "abcd1234", kn1, ""), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:abcd1234+acg")
         self.assertEqual(T.expected_tag("formal", "+ctx", "abcd1234", kn75, ""), "lm-formal+ctx+kn:cbefbced:θ1:β0.75+tl:abcd1234+acg")
 

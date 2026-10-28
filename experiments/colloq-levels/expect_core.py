@@ -33,7 +33,7 @@ import triage as T  # noqa: E402
 P = Q.P
 TOP_K = 8
 MU, GATE, NU, CAP = P.CONFIRM_CELL[0], P.CONFIRM_CELL[2], 1.0, 4        # mu 0.5, gate T 1.0 (P4d), nu 1.0, c 4 (P5 lex,1.0,4): fixed
-PAIRED_SJTL_SHA256 = "bbb387d06625d50de24cb1ed4bfc819bc312dbe68dc5d38b2451eed4d44861a8"      # core/src/colloquial.rs PAIRED_TINYLM_SHA256
+PAIRED_SJTL_SHA256 = "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478"      # core/src/colloquial.rs PAIRED_TINYLM_SHA256
 # The three cells core/src/colloquial.rs STANDARD / CONSERVATIVE / AGGRESSIVE carry (docs/contracts/sj-lm-7.md section 2.9, research log 2026-10-26); before
 # SJ-LM-7 they were (0.5, 2, 0.25), (1, 2, 3) and (0.5, 2, 0.1).
 CELL = {"standard": (0.7, 2.0, 0.0), "conservative": (0.7, 2.0, 1.0), "aggressive": (1.0, 2.0, 0.1)}
