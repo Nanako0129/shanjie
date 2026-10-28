@@ -105,8 +105,8 @@ def git_clean_head(root, version):
 
 def check_models(root, spec):
     """-> {file name: sha256} of exactly the files the version ships (resolve_models' set), read from data/lm and matching data/*.sha256."""
-    names = ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) \
-        + (["colloquial.sjlm"] if spec.get("colloquial") else [])
+    names = ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) \
+        + (["trigram-chat.sjt3"] if spec.get("tri_chat") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) + (["colloquial.sjlm"] if spec.get("colloquial") else [])
     lm = os.path.join(root, "data/lm")
     extra = sorted(f for f in os.listdir(lm) if f not in names and not f.startswith("."))
     if extra:
@@ -127,8 +127,8 @@ def check_models(root, spec):
 
 
 def models_line(models):
-    """What shanjie-replay prints on stderr (cli/src/bin/replay.rs): bigram, then classes/kn/trigram that exist, then tinylm or none, then the colloquial table when loaded."""
-    s = " ".join(f"{n}:{models[n][:8]}" for n in ("classes.sjc", "kn.sjkn", "trigram.sjt3") if n in models)
+    """What shanjie-replay prints on stderr (cli/src/bin/replay.rs): bigram, then classes/kn/trigram/trigram-chat that exist, then tinylm or none, then the colloquial table when loaded."""
+    s = " ".join(f"{n}:{models[n][:8]}" for n in ("classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3") if n in models)
     co = f" colloquial.sjlm:{models['colloquial.sjlm'][:8]}" if "colloquial.sjlm" in models else ""
     return f"models: bigram.sjlm:{models['bigram.sjlm'][:8]} {s} tinylm.sjtl:{models['tinylm.sjtl'][:8] if 'tinylm.sjtl' in models else 'none'}{co}"
 

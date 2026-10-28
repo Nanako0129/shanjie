@@ -320,8 +320,8 @@ fn rerank_uses_the_files_delta() {
     // s1 - s0 = (ng1 - ng0) + 0.7 (ll1 - ll0) = 0.1; the n-gram margin ng0 - ng1 stays below tau 2
     let ng = [0.0, 0.1 - 0.7 * (ll[1] - ll[0])];
     assert!(ng[0] - ng[1] < 2.0, "premise: inside the tau gate");
-    let (c1, l1) = v1.rerank(&ng, &cands, "", v1.alpha_tau_delta(Profile::Chat)).unwrap();
-    let (c2, l2) = v2.rerank(&ng, &cands, "", v2.alpha_tau_delta(Profile::Chat)).unwrap();
+    let (c1, l1) = v1.rerank(&ng, &cands, "", v1.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap();
+    let (c2, l2) = v2.rerank(&ng, &cands, "", v2.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap();
     assert_eq!(l1, l2, "same LLs");
     assert_eq!((c1, c2), (1, 0), "delta 0.25 keeps the first, delta 0 moves");
     assert_eq!(c2, pick(&ng, &l2.unwrap(), 0.7, 2.0, 0.25));
@@ -597,7 +597,7 @@ fn v5_keys_with_the_raw_last_l_characters() {
     assert_eq!((v4.key_for(text), m.key_for(text)), ("^".to_string(), "話Joe的表演，".to_string()));
     assert_eq!((v4.key_for("你好嗎"), m.key_for("你好嗎")), ("好嗎".to_string(), "你好嗎".to_string()));
     let cands = ["你好", "我們"];
-    let ll = |model: &TinyLm, key: &str| model.rerank(&[-1.0, -1.5], &cands, key, (1.0, f64::INFINITY, 0.0)).unwrap().1.unwrap();
+    let ll = |model: &TinyLm, key: &str| model.rerank(&[-1.0, -1.5], &cands, key, (1.0, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.unwrap();
     let many = |model: &TinyLm, k: &str| model.ll_many(&cands.map(|c| (k, c))).unwrap();
     assert_ne!(many(&m, "^"), many(&m, ""), "premise: \"^\" is a character of the key");
     assert_eq!(ll(&m, "^"), many(&m, "^"), "declared: \"^\" as it is");
@@ -614,9 +614,9 @@ fn a_long_candidate_sees_only_the_tail_of_a_declared_key() {
     let long: Vec<String> = ["我們", "你們"].iter().map(|p| format!("{p}{}", "的是不了在有".repeat(10).chars().take(58).collect::<String>())).collect();
     assert!(long.iter().all(|c| c.chars().count() == 60));
     let cands: Vec<&str> = long.iter().map(String::as_str).collect();
-    let got = m.rerank(&[-1.0, -1.5], &cands, &key, (1.0, f64::INFINITY, 0.0)).unwrap().1.unwrap();
+    let got = m.rerank(&[-1.0, -1.5], &cands, &key, (1.0, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.unwrap();
     let with = |k: &str| m.ll_many(&cands.iter().map(|&c| (k, c)).collect::<Vec<_>>()).unwrap();
-    let ranked = |k: &str| m.rerank(&[-1.0, -1.5], &cands, k, (1.0, f64::INFINITY, 0.0)).unwrap().1.unwrap();
+    let ranked = |k: &str| m.rerank(&[-1.0, -1.5], &cands, k, (1.0, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.unwrap();
     assert_eq!(got, with("他好嗎"), "the last 3 characters");
     assert_eq!(got, ranked("說要來我我他好嗎"), "the 4th character from the end is not seen");
     assert_ne!(got, ranked("說要來我你你好嗎"), "the 3rd is");

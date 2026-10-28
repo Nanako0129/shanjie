@@ -167,7 +167,8 @@ fn sentinel_context_is_an_empty_k() {
     let model = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap();
     let want = model.ll_many(&cands.iter().map(|c| ("我們", c.as_str())).collect::<Vec<_>>()).unwrap();
     let l = &with_ctx[2];
-    let got: Vec<f64> = l[l.find("\"ll\": [").unwrap() + 7..l.rfind(']').unwrap()].split(", ").map(|x| x.parse().unwrap()).collect();
+    let from = l.find("\"ll\": [").unwrap() + 7;
+    let got: Vec<f64> = l[from..from + l[from..].find(']').unwrap()].split(", ").map(|x| x.parse().unwrap()).collect();
     assert_eq!(got, want, "a Han prefix is the model's context");
     // numbers only: no candidate text in the file
     assert!(plain.iter().all(|l| l.is_ascii()));

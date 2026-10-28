@@ -1225,8 +1225,9 @@ fn t1_the_written_milk_case() {
     let mut e = learner_engine(Profile::Formal, None);
     e.set_left_context("我想喝一杯");
     let base = row(&typ(&mut e, &[], "ㄋ"));
-    // On model-v6 the written row is [奶茶, 那, ...] (it was [奶茶, 牛奶, ...]): move to 牛奶 wherever it is.
-    assert_eq!(base[0], "奶茶", "precondition: {base:?}");
+    // On model-v6 the written row is [奶茶, 那, ...] (it was [奶茶, 牛奶, ...]), on the 通語 SJ-LM-7-9.7M files [你, 那, 拿, 牛奶, 奶茶, ...]: move to 牛奶
+    // wherever it is, as long as it is not the first item.
+    assert_ne!(base[0], "牛奶", "precondition: {base:?}");
     assert!(base.iter().skip(1).any(|w| w == "牛奶"), "precondition: 牛奶 in the row after the first item {base:?}");
     enter_on(&mut e, "牛奶");
     let o = e.key(kind(KeyKind::Enter)).unwrap();
@@ -1353,13 +1354,13 @@ fn reach(left: &str, pending: &str, word: &str) -> Option<usize> {
 
 #[test]
 fn t4_another_context_is_untouched() {
-    // 牛奶 taught after 喝熱. After 想買 neither character matches (no exact, no last-character level), yet 牛奶 is
-    // reachable there (index 14 of 27), so a lookup that ignored the key would move it.
-    let i = reach("我想買", "ㄋ", "牛奶").expect("reachable");
+    // 牛奶 taught after 喝熱. After 麵包配 neither character matches (no exact, no last-character level), yet 牛奶 is
+    // reachable there (index 13 of 27; after 想買 on model-v6, where it is out of reach now), so a lookup that ignored the key would move it.
+    let i = reach("麵包配", "ㄋ", "牛奶").expect("reachable");
     assert!(i >= 9, "precondition: 牛奶 is outside the first slice's nine at index {i}");
-    let other = fresh_row(Profile::Chat, "我想買", "ㄋ");
+    let other = fresh_row(Profile::Chat, "麵包配", "ㄋ");
     let (mut e, dir) = seeded("t4", &[rec("喝熱", &milk_reading(), "牛奶")]);
-    e.set_left_context("我想買");
+    e.set_left_context("麵包配");
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), other);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1380,14 +1381,14 @@ fn t4b_a_context_sharing_the_last_character_is_promoted() {
 
 #[test]
 fn t5_a_global_record_does_not_move_the_row() {
-    // 能夠 is in the row after 這杯, 學校 and 請問你, a third key with no last character in common.
-    let third = fresh_row(Profile::Chat, "請問你", "ㄋ");
+    // 能夠 is in the row after 你們, 大家 and 朋友 (這杯, 學校 and 請問你 on model-v6, whose rows lack it now), a third key with no last character in common.
+    let third = fresh_row(Profile::Chat, "朋友", "ㄋ");
     assert!(third.iter().any(|w| w == "能夠"), "precondition: {third:?}");
     let mut e = learner_engine(Profile::Chat, None);
-    teach(&mut e, "我想喝這杯", "ㄋ", "能夠");
-    teach(&mut e, "我想去學校", "ㄋ", "能夠");
+    teach(&mut e, "你們", "ㄋ", "能夠");
+    teach(&mut e, "大家", "ㄋ", "能夠");
     assert!(e.learner().records().iter().any(|r| r.context == "" && r.word == "能夠"), "precondition: the two keys made a global record");
-    e.set_left_context("請問你");
+    e.set_left_context("朋友");
     assert_eq!(row(&typ(&mut e, &[], "ㄋ")), third);
 }
 
@@ -1613,31 +1614,32 @@ fn t14_a_learned_item_among_the_first_three_keeps_the_others_in_place() {
 
 #[test]
 fn t15_a_word_found_from_two_starts_is_listed_once() {
-    // ㄋㄧㄡˊ typed, ㄋ pending: 牛奶 comes from the long start (ㄋㄧㄡˊ + ㄋ) and from the cursor start (ㄋ) alike. Taught
-    // under the cursor start's key it is first, and the long start's copy (weight 0, in L[0..3]) must not be listed again.
-    let st: (&str, &[Tok], &str) = ("我想喝一杯", &[Syl("ㄋㄧㄡˊ")], "ㄋ");
+    // ㄊㄚ ㄇㄢˋ typed, ㄇ pending: 慢慢 comes from the long start (ㄇㄢˋ + ㄇ) and from the cursor start (ㄇ) alike (ㄋㄧㄡˊ typed and ㄋ pending, 牛奶
+    // after 我想喝一杯, until 通語 SJ-LM-7-9.7M: its row lists 牛 alone from the cursor start now; found 2026-10-27 by trying the prefixes of the dev rows).
+    // Taught under the cursor start's key it is first, and the long start's copy (weight 0, in L[0..3]) must not be listed again.
+    let st: (&str, &[Tok], &str) = ("", &[Syl("ㄊㄚ"), Syl("ㄇㄢˋ")], "ㄇ");
     let want = oracle(st.0, st.1, st.2);
-    assert!(want.long.iter().take(3).any(|x| x.0 == "牛奶") && want.cursor.iter().any(|x| x.0 == "牛奶"), "precondition");
-    let (_, reading) = raw_at_cursor(st.0, st.1, st.2, 27).into_iter().find(|x| x.0 == "牛奶").unwrap();
-    let (e, dir) = seeded("t15", &[rec(&start_key(st.0, st.1, 1), &reading, "牛奶")]);
+    assert!(want.long.iter().take(3).any(|x| x.0 == "慢慢") && want.cursor.iter().any(|x| x.0 == "慢慢"), "precondition");
+    let (_, reading) = raw_at_cursor(st.0, st.1, st.2, 27).into_iter().find(|x| x.0 == "慢慢").unwrap();
+    let (e, dir) = seeded("t15", &[rec(&start_key(st.0, st.1, st.1.len()), &reading, "慢慢")]);
     let got = row_of(e, st);
-    assert_eq!(got[0], "牛奶");
-    assert_eq!(got.iter().filter(|w| *w == "牛奶").count(), 1, "{got:?}");
+    assert_eq!(got[0], "慢慢");
+    assert_eq!(got.iter().filter(|w| *w == "慢慢").count(), 1, "{got:?}");
     assert_eq!(got.iter().collect::<std::collections::HashSet<_>>().len(), got.len(), "{got:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn t16_a_prediction_pick_is_recorded_under_the_key_of_the_pick() {
-    // ㄧˇ ㄅㄟˋ decode to 以備; picking 時 for the pending ㄕ keeps 以備 (repick-freeze section 13; before it the free syllables
-    // re-decoded to 已被). The record carries the key the row was built with (以備), which is now also the text at the commit.
+    // ㄧˇ ㄅㄟˋ decode to 椅背 (以備 on model-v6); picking 時 for the pending ㄕ keeps 椅背 (repick-freeze section 13; before it the free syllables
+    // re-decoded to 已被). The record carries the key the row was built with (椅背), which is now also the text at the commit.
     let mut e = learner_engine(Profile::Chat, None);
     typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
     let o = pick_word(&mut e, "時");
-    assert_eq!(o.preedit, "以備時", "the words left of the pick stay as shown");
-    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "以備時");
+    assert_eq!(o.preedit, "椅背時", "the words left of the pick stay as shown");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "椅背時");
     let r = e.learner().records();
-    assert_eq!((r.len(), r[0].context.as_str(), r[0].word.as_str()), (1, "以備", "時"));
+    assert_eq!((r.len(), r[0].context.as_str(), r[0].word.as_str()), (1, "椅背", "時"));
     let o = typ(&mut e, &["ㄧˇ", "ㄅㄟˋ"], "ㄕ");
     assert_eq!(row(&o)[0], "時", "the taught item is first in the same situation: {:?}", row(&o));
 }
@@ -1810,9 +1812,8 @@ const G: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄐㄧ"), Syl("ㄙ")]
 const H: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄍㄢ"), Syl("ㄗ˙"), Syl("ㄉㄚˇ"), Syl("ㄅㄨˋ")], "ㄓ");
 /// typing76 「週末本來想在家耍廢」 up to 在: 在 sits inside the last decoded word.
 const I: (&str, &[Tok], &str) = ("", &[Syl("ㄓㄡ"), Syl("ㄇㄛˋ"), Syl("ㄅㄣˇ"), Syl("ㄌㄞˊ"), Syl("ㄒㄧㄤˇ"), Syl("ㄗㄞˋ")], "");
-/// typing76 「我們中午可以…」: a position inside 中午 has items, the cursor start has 可以.
-const J: (&str, &[Tok], &str) =
-    ("明天早上我要先去銀行辦事回來再順便買早餐你如果有空的話", &[Syl("ㄨㄛˇ"), Syl("ㄇㄣ˙"), Syl("ㄓㄨㄥ"), Syl("ㄨˇ")], "ㄎ");
+/// typing76 「明天早上我要先去銀行辦事」 up to 明天: a position inside 明天 has items, the cursor start has 再來 (「我們中午可以…」 and 可以 until 通語 SJ-LM-7-9.7M).
+const J: (&str, &[Tok], &str) = ("", &[Syl("ㄇㄧㄥˊ"), Syl("ㄊㄧㄢ")], "ㄗ");
 
 fn has(o: &Oracle, w: &str) -> bool {
     words(o).iter().any(|x| x == w)
@@ -1850,9 +1851,9 @@ fn a_position_inside_a_word_adds_its_items_after_the_others() {
 #[test]
 fn positions_inside_words_come_last_so_the_cursor_start_keeps_its_items() {
     let j = check_state("j", J);
-    assert!(has(&j, "可以"), "{:?}", words(&j));
+    assert!(has(&j, "再來"), "{:?}", words(&j));
     let merged = oracle_with(J.0, J.1, J.2, PREDICT_BACK, 1);
-    assert!(words(&merged) != words(&j) && !has(&merged, "可以"), "merged far to near: {:?}", words(&merged));
+    assert!(words(&merged) != words(&j) && !has(&merged, "再來"), "merged far to near: {:?}", words(&merged));
 }
 
 #[test]

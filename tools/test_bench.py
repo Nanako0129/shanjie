@@ -464,6 +464,47 @@ class SuiteV2(Tmp):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a table version without data/trigram.sjt3.sha256 stops
 
+    def test_sj_lm_7_version_has_both_tables_and_per_profile_tags(self):
+        """docs/contracts/sj-lm-7-pr2.md: the `"tri_chat"` row keeps KN in both profiles (formal at beta 0.75) and each profile reads its own table, so the
+        chat tag ends in the chat table's `+tri:` and the formal tag keeps `+kn:...β0.75` before its own; the model folder holds both tables and a missing
+        trigram-chat.sjt3.sha256 stops."""
+        spec = bench.VERSIONS2["sj-lm-7"]
+        self.assertTrue(spec["tri"] and spec["tri_chat"])
+        HEX.update({"kn.sjkn": "880ee87c" + "e" * 56, "trigram.sjt3": "34305a2d" + "f" * 56, "trigram-chat.sjt3": "24ee8645" + "9" * 56,
+                    "colloquial.sjlm": "81c2470d" + "d" * 56})
+        for n in ("kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "colloquial.sjlm"):
+            self.addCleanup(HEX.pop, n)
+        names = ["bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "tinylm.sjtl", "colloquial.sjlm"]
+        v = self.stage_models("sj-lm-7", names)
+        for n in names:
+            self.put_model(n)
+        with mock_hash():
+            bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+        self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "colloquial.sjlm", "kn.sjkn", "trigram-chat.sjt3", "trigram.sjt3"])
+        self.assertEqual((v.kn8, v.tri8, v.trichat8), ("880ee87c", "34305a2d", "24ee8645"))
+        chat, formal = "lm-chat+ctx+kn:880ee87c:θ1:β1+tl:7e73ef67+acg+tri:24ee8645+colloq:81c2470d+rc", "lm-formal+ctx+kn:880ee87c:θ1:β0.75+tl:7e73ef67+acg+tri:34305a2d"
+        self.assertEqual((bench.expected_tag(v, "chat", False), bench.expected_tag(v, "formal", False)), (chat, formal))
+        replay = ("lm-chat+kn:880ee87c:θ1:β1+tri:24ee8645", "lm-formal+kn:880ee87c:θ1:β0.75+tri:34305a2d")
+        self.assertEqual((bench.replay_tag(v, "chat"), bench.replay_tag(v, "formal")), replay)
+        # the replay-setting cells (no small model): a cell that lost one of the parts (formal at the file's beta 1, chat on the formal table, no table)
+        # is not the shipping setting
+        speed = {**spec, "tinylm": False, "colloquial": False, "tag": "+ctx+kn:{kn8}:θ1:β1+acg+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+acg+tri:{tri8}"}
+        with mock.patch.dict(bench.VERSIONS2, {"vS": speed}):
+            sv = fake_ver("vS", self.td)
+            sv.kn8, sv.tri8, sv.trichat8 = v.kn8, v.tri8, v.trichat8
+            sv.replay = self.replay_script("你好\n世界\n")
+            self.fake_cli({"chat": replay[0], "formal": replay[1]}, [True, True], ("你好", "世界"))
+            s = bench.measure_speed2(self.ctx, [sv])[sv.sha]
+            self.assertEqual((s["rows_match"], s["formal"]["rows_match"]), ("2/2", "2/2"))
+            for chat_tag, formal_tag, bad in ((replay[0], "lm-formal+kn:880ee87c:θ1:β1+tri:34305a2d", "formal"), (replay[0], "lm-formal+tri:34305a2d", "formal"),
+                                              ("lm-chat+kn:880ee87c:θ1:β1+tri:34305a2d", replay[1], "chat"), ("lm-chat+kn:880ee87c:θ1:β1", replay[1], "chat")):
+                self.fake_cli({"chat": chat_tag, "formal": formal_tag}, [True, True], ("你好", "世界"))
+                r = bench.measure_speed2(self.ctx, [sv])[sv.sha]
+                self.assertIn("setting tag", r["error"] if bad == "chat" else r["formal"]["error"], (chat_tag, formal_tag))
+        os.remove(os.path.join(v.dir, "data", "trigram-chat.sjt3.sha256"))
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            bench.setup_models(v, spec, os.path.join(self.td, "mf2"))
+
     def test_colloquial_version_gets_the_table_the_flag_and_the_chat_tag(self):
         """A version with `"colloquial": True` (the rule kpi.py uses too): its table goes into the model folder, only the chat cells pass
         --colloquial-core and their tag ends in +colloq:<sha8>+rc (the reading-channel term rides on the table); formal cells and the anchor run are as without it."""

@@ -16,6 +16,7 @@
 use crate::colloquial::{self, Colloquial, ReadingChannel};
 use crate::learn::{context_key, last_chars, SENTINEL};
 use crate::lm::{Lm, Profile};
+use crate::ManualSet;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -520,7 +521,12 @@ impl TinyLm {
     /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
     /// L characters as they are ("^" included; context-return section 2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
-    pub fn rerank(&self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64)) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+    /// `syl` are the readings the n-gram's first candidate used over the stretch (`Lexicon::path_readings`; the typed syllables unless an adjacent-key
+    /// slip was read through another syllable) and `manual` the maintainer's own words (`manual_mask`): a candidate that takes out a manual word the
+    /// n-gram's first choice holds there cannot be chosen (docs/contracts/sj-lm-7-pr2.md section 2.7); the threshold and the scores still use the whole list.
+    pub fn rerank(
+        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), syl: &[String], manual: &ManualSet,
+    ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
         if !valid_params(params) {
             return Err(TinyLmError::Format);
@@ -528,7 +534,8 @@ impl TinyLm {
         let n = cands.len().min(ng.len()).min(TOPK);
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let (alpha, tau, delta) = params;
-        Ok((pick(&ng[..n], &ll, alpha, tau, delta), Some(ll)))
+        let masked = manual_mask(syl, &cands[..n], manual);
+        Ok((pick_masked(&ng[..n], &ll, alpha, tau, delta, &masked), Some(ll)))
     }
 
     /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the key (`key_for`; for versions
@@ -548,17 +555,20 @@ impl TinyLm {
     /// `pick` with `colloquial::cell(level)`, the level's registered alpha, tau and delta, not the file's. With `rc`
     /// (docs/contracts/reading-channel.md) ll_eff also gains (NU / alpha) * (ch_i - ch_0), ch_i = `colloquial::channel_of` of the stretch's syllables
     /// over the candidate's words. A col that is not finite drops both terms for this call: the plain `pick` with the file's chat triple of the same
-    /// `level` (`colloquial::guarded_pick`). The engine and the evaluation CLI both call this one function. Returns the chosen index and the raw LLs,
-    /// as `rerank` does.
+    /// `level` (`colloquial::guarded_pick`). `syl` and `manual` mask the candidates as in `rerank`, in the fused pick and in its fallback. The engine
+    /// and the evaluation CLI both call this one function. Returns the chosen index and the raw LLs, as `rerank` does.
+    #[allow(clippy::too_many_arguments)]
     pub fn rerank_colloquial(
         &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, rc: Option<ReadingChannel>, level: RerankLevel,
+        syl: &[String], manual: &ManualSet,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         let n = cands.len().min(ng.len()).min(words.len()).min(TOPK);
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let col: Vec<f64> = words[..n].iter().map(|w| co.col(w)).collect();
         let ch: Option<Vec<f64>> = rc.map(|rc| words[..n].iter().map(|w| colloquial::channel_of(rc.lex, rc.syls, w)).collect());
         let plain = self.params(Profile::Chat, level);
-        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, ch.as_deref(), colloquial::cell(level), plain), Some(ll)))
+        let masked = manual_mask(syl, &cands[..n], manual);
+        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, ch.as_deref(), colloquial::cell(level), plain, &masked), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
@@ -699,17 +709,53 @@ fn gelu(be: Backend, x: &mut [f32]) {
     x.iter_mut().zip(&t).for_each(|(v, t)| *v = 0.5 * *v * (1.0 + t));
 }
 
+/// Which of `cands` (the n-gram's first candidates of one stretch; `syl` are the readings its first one used, `Lexicon::path_readings`) the rerank must not choose (docs/contracts/sj-lm-7-pr2.md
+/// section 2.7): the maintainer's own words (`ManualSet`) that the first candidate holds on their syllables are protected, and a candidate that does not hold
+/// every one of them at the same place is masked. A manual word on other syllables, or that the first candidate does not hold, protects nothing; with nothing
+/// protected no candidate is masked. The first candidate holds all it protects, so it is never masked. The one place this is decided: `rerank`,
+/// `rerank_colloquial` and the evaluation CLI's `--tinylm-scores` all call it.
+pub fn manual_mask(syl: &[String], cands: &[&str], manual: &ManualSet) -> Vec<bool> {
+    let mut masked = vec![false; cands.len()];
+    let Some(first) = cands.first().filter(|_| !manual.is_empty()) else { return masked };
+    let first: Vec<char> = first.chars().collect();
+    let mut protected: Vec<(usize, &[char])> = Vec::new();
+    for (w, r) in manual.iter() {
+        for i in 0..(syl.len() + 1).saturating_sub(r.len()) {
+            if syl[i..i + r.len()] == *r && first.get(i..i + w.len()) == Some(w) {
+                protected.push((i, w));
+            }
+        }
+    }
+    if protected.is_empty() {
+        return masked;
+    }
+    for (m, c) in masked.iter_mut().zip(cands) {
+        let c: Vec<char> = c.chars().collect();
+        *m = !protected.iter().all(|&(i, w)| c.get(i..i + w.len()) == Some(w));
+    }
+    masked
+}
+
 /// The S7a fusion with the S7e gate, experiments/s7a-tinylm/fusegrid.py `pick` with its `delta`: the index of the chosen
 /// candidate. Fewer than two candidates, or an n-gram margin (first minus second) of at least `tau`, keeps the first; otherwise
 /// j = the highest s = `ng + alpha * ll` (ties to the better n-gram rank), and j replaces the first only when `s[j] - s[0] >= delta`.
 /// Delta 0 is the S7a rule.
 pub fn pick(ng: &[f64], ll: &[f64], alpha: f64, tau: f64, delta: f64) -> usize {
+    pick_masked(ng, ll, alpha, tau, delta, &[])
+}
+
+/// `pick` where the candidates `masked` marks (`manual_mask`; a missing entry is false) cannot be chosen. The threshold `ng[0] - ng[1] >= tau`
+/// and every score are those of the whole list; the first candidate is never masked, so there is always one to choose.
+pub fn pick_masked(ng: &[f64], ll: &[f64], alpha: f64, tau: f64, delta: f64, masked: &[bool]) -> usize {
     if ng.len() < 2 || ng[0] - ng[1] >= tau {
         return 0;
     }
     let s0 = ng[0] + alpha * ll[0];
     let (mut best, mut best_s) = (0, s0);
     for i in 1..ng.len() {
+        if masked.get(i) == Some(&true) {
+            continue;
+        }
         let s = ng[i] + alpha * ll[i];
         if s > best_s {
             (best, best_s) = (i, s);
@@ -867,6 +913,79 @@ mod tests {
         assert_eq!(got.expect("load blocked on the FIFO"), Some(TinyLmError::Io), "not a regular file");
     }
 
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+    /// 米雅歌 as the maintainer's manual word.
+    fn mia() -> ManualSet {
+        ManualSet::from_pairs([("米雅歌", "ㄇㄧˇ-ㄧㄚˇ-ㄍㄜ")])
+    }
+    const MIA: [&str; 3] = ["ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ"];
+
+    /// docs/contracts/sj-lm-7-pr2.md section 2.7, test 1: when the first candidate holds a manual word on its syllables, the candidates that do not hold it
+    /// there are masked; a manual word the first candidate does not hold protects nothing; the word on other syllables of the stretch is not "held".
+    #[test]
+    fn manual_mask_masks_what_takes_the_word_out() {
+        let syl = strs(&MIA);
+        assert_eq!(manual_mask(&syl, &["米雅歌", "米亞哥", "米雅歌"], &mia()), [false, true, false]);
+        assert_eq!(manual_mask(&syl, &["米雅歌", "米亞哥"], &ManualSet::default()), [false, false], "no manual word, nothing masked");
+        assert_eq!(manual_mask(&syl, &["米亞哥", "米雅歌", "米亞歌"], &mia()), [false; 3], "the first does not hold it: nothing protected");
+        assert_eq!(manual_mask(&strs(&["ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ", "ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ"]), &["米雅歌米亞哥", "米亞哥米雅歌", "米雅歌米雅歌"], &mia()), [false, true, false],
+            "holding the word at the other place (the second candidate) is not holding it at the protected one");
+        assert_eq!(manual_mask(&strs(&["ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ"]), &["米雅歌"], &mia()), [false], "a single candidate");
+        assert_eq!(manual_mask(&[], &[], &mia()), Vec::<bool>::new());
+        // the same characters over other syllables are not the manual word
+        assert_eq!(manual_mask(&strs(&["ㄇㄧˇ", "ㄧㄚˋ", "ㄍㄜ"]), &["米雅歌", "米亞哥"], &mia()), [false, false]);
+    }
+
+    /// Test 2: ng [0, -0.5, -3] with tau 2: the gate (0.5 < 2) and every score are those of the whole list, candidate 1 would win (-0.5 against -5 and -4) and is
+    /// masked, so the better of candidates 0 and 2 is chosen (2: -4 against -5); without the mask candidate 1 is chosen.
+    #[test]
+    fn a_masked_candidate_cannot_win_but_still_counts_for_the_gate() {
+        let (ng, ll) = ([0.0, -0.5, -3.0], [-5.0, 0.0, -1.0]);
+        assert_eq!(pick(&ng, &ll, 1.0, 2.0, 0.0), 1, "premise: unmasked, candidate 1 is chosen");
+        assert_eq!(pick_masked(&ng, &ll, 1.0, 2.0, 0.0, &[false, true, false]), 2);
+        assert_eq!(pick_masked(&ng, &[-1.0, 0.0, -9.0], 1.0, 2.0, 0.0, &[false, true, false]), 0, "the better of 0 and 2");
+        assert_eq!(pick_masked(&ng, &ll, 1.0, 2.0, 0.0, &[false, false, false]), 1, "no mask is `pick`");
+        // the gate uses the unmasked second place: ng[0] - ng[1] = 3 >= tau keeps the first although candidate 1 is masked and candidate 2 would win
+        assert_eq!(pick_masked(&[0.0, -3.0, -3.5], &[-9.0, 0.0, 0.0], 1.0, 2.0, 0.0, &[false, true, false]), 0);
+        // delta still applies to the best unmasked candidate
+        assert_eq!(pick_masked(&ng, &ll, 1.0, 2.0, 1.5, &[false, true, false]), 0, "gain 1 below delta 1.5");
+        // the real rerank: the toy model scores, the mask follows `manual_mask`
+        let toy = TinyLm::parse(&std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap()).unwrap();
+        let cands = ["米雅歌", "米亞哥", "米雅歌"];
+        let (a, b) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &mia()).unwrap();
+        let (c, _) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &ManualSet::default()).unwrap();
+        let ll = b.unwrap();
+        assert_eq!(c, pick(&[0.0, -0.5, -3.0], &ll, 100.0, f64::INFINITY, 0.0));
+        assert_eq!(a, pick_masked(&[0.0, -0.5, -3.0], &ll, 100.0, f64::INFINITY, 0.0, &[false, true, false]));
+        assert_ne!(a, 1, "the masked candidate is never chosen");
+    }
+
+    /// Test 3: another candidate that holds the same manual word at the same place may be chosen, and can beat the first.
+    #[test]
+    fn another_candidate_holding_the_word_can_win() {
+        let syl = strs(&["ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ", "ㄏㄠˇ"]);
+        let mask = manual_mask(&syl, &["米雅歌好", "米亞哥好", "米雅歌號"], &mia());
+        assert_eq!(mask, [false, true, false]);
+        assert_eq!(pick_masked(&[0.0, -0.5, -1.0], &[-5.0, 0.0, -1.0], 1.0, 2.0, 0.0, &mask), 2, "candidate 2 holds the word and scores higher than 0");
+    }
+
+    /// Test 4: only `manual` rows make a `ManualSet`; a word of another tag (`names`) is not protected and the rerank may still replace it.
+    #[test]
+    fn only_manual_tagged_rows_are_protected() {
+        let base = "ㄇㄧˇ 米 -3.0\nㄧㄚˇ 雅 -3.0\nㄍㄜ 歌 -3.0\n";
+        let overlay = "ㄇㄧˇ-ㄧㄚˇ-ㄍㄜ\t米雅歌\t-5.0\tnames\nㄇㄧˇ-ㄧㄚˇ-ㄍㄜ\t咪雅歌\t-5.0\tmanual\n";
+        let lex = crate::Lexicon::parse_with(base, Some(overlay)).unwrap();
+        assert_eq!(lex.manual().len(), 1);
+        let set = lex.manual();
+        let syl = strs(&MIA);
+        assert_eq!(manual_mask(&syl, &["咪雅歌", "咪亞哥"], set), [false, true], "the manual row protects");
+        assert_eq!(manual_mask(&syl, &["米雅歌", "米亞哥"], set), [false, false], "the names row does not");
+        assert_eq!(pick_masked(&[0.0, -0.5], &[-5.0, 0.0], 1.0, 2.0, 0.0, &manual_mask(&syl, &["米雅歌", "米亞哥"], set)), 1, "so it is replaced");
+        assert!(crate::Lexicon::parse_with(base, Some("ㄇㄧˇ-ㄧㄚˇ-ㄍㄜ\t米雅\t-5.0\tmanual\n")).unwrap().manual().is_empty(), "a word that is not one character per syllable is not kept");
+    }
+
     /// `rerank` is the rule the CLI measured: the key reaches the model as k (a Han key changes the LLs, and they are exactly
     /// ll_many's with that k); the engine's SENTINEL is the empty k; fewer than two candidates run nothing; only the first TOPK
     /// are scored; the choice is `pick` with the profile's alpha, tau and delta (a nonzero delta: tests/tinylm_tiny.rs
@@ -880,20 +999,20 @@ mod tests {
         let with = |k: &str| m.ll_many(&cands[..TOPK].iter().map(|c| (k, *c)).collect::<Vec<_>>()).unwrap();
         let key = "\u{4e01}\u{4e02}";
         let chat = m.alpha_tau_delta(Profile::Chat);
-        let (chosen, ll) = m.rerank(&ng, &cands, key, chat).unwrap();
+        let (chosen, ll) = m.rerank(&ng, &cands, key, chat, &[], &Default::default()).unwrap();
         let ll = ll.unwrap();
         assert_eq!(ll, with(key));
         assert_ne!(ll, with(""), "the key is the model's context");
         assert_eq!(m.alpha_tau_delta(Profile::Chat), (0.7, 2.0, 0.0), "a version 1 file");
         assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0, 0.0));
-        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
-        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat).unwrap(), (0, None));
+        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat, &[], &Default::default()).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
+        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat, &[], &Default::default()).unwrap(), (0, None));
         // params the header check would refuse are refused here too, even when fewer than two candidates would run nothing
         for bad in [(f64::NAN, 2.0, 0.0), (f64::INFINITY, 2.0, 0.0), (0.7, f64::NAN, 0.0), (0.7, 2.0, -0.25), (0.7, 2.0, f64::NAN), (0.7, 2.0, MAX_DELTA + 1.0)] {
-            assert_eq!(m.rerank(&ng, &cands, key, bad).unwrap_err(), TinyLmError::Format, "{bad:?}");
-            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng, &cands, key, bad, &[], &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad, &[], &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
         }
-        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0)).is_ok(), "an infinite tau is allowed: no threshold");
+        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0), &[], &Default::default()).is_ok(), "an infinite tau is allowed: no threshold");
     }
 
     /// Contract 2.2: the Accelerate path (macOS) and the plain path agree to 1e-5 in LL on random weights; on other targets both

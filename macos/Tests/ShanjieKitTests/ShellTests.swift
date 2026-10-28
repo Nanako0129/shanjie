@@ -321,16 +321,16 @@ final class ShellTests: XCTestCase {
         let shell = makeShell()
         let discord = Controller(shell, bundle: "com.hnc.Discord")
         discord.session.activate()
-        discord.type(Row284.standardKeys)
+        discord.type(Row131.standardKeys)
         discord.press(Keys.enter)
         let textEdit = Controller(shell, bundle: "com.apple.TextEdit")
         textEdit.session.activate()
-        textEdit.type(Row284.standardKeys)
+        textEdit.type(Row131.standardKeys)
         textEdit.press(Keys.enter)
-        XCTAssertEqual(discord.client.text, Row284.chat)
-        XCTAssertEqual(textEdit.client.text, Row284.formal)
+        XCTAssertEqual(discord.client.text, Row131.chat)
+        XCTAssertEqual(textEdit.client.text, Row131.formal)
         XCTAssertNotEqual(discord.client.text, textEdit.client.text)
-        XCTAssertEqual(Row284.standardKeys, Selftest.row284Standard)
+        XCTAssertEqual(Row131.standardKeys, Selftest.row131Standard)
     }
 
     func testEveryChatAppGetsTheChatProfile() {
@@ -338,9 +338,9 @@ final class ShellTests: XCTestCase {
         for app in Shell.chatApps.sorted() + ["com.apple.TextEdit", "com.apple.Notes"] {
             let c = Controller(shell, bundle: app)
             c.session.activate()
-            c.type(Row284.standardKeys)
+            c.type(Row131.standardKeys)
             c.press(Keys.enter)
-            XCTAssertEqual(c.client.text, Shell.chatApps.contains(app) ? Row284.chat : Row284.formal)
+            XCTAssertEqual(c.client.text, Shell.chatApps.contains(app) ? Row131.chat : Row131.formal)
         }
     }
 
@@ -456,15 +456,15 @@ final class ShellTests: XCTestCase {
         let a = Controller(shell, bundle: "com.hnc.Discord"), b = Controller(shell, bundle: "com.apple.TextEdit")
         a.session.activate()
         a.type("su3")
-        b.type(Row284.standardKeys)
+        b.type(Row131.standardKeys)
         b.press(Keys.enter)
-        XCTAssertEqual(b.client.text, Row284.formal)
+        XCTAssertEqual(b.client.text, Row131.formal)
         XCTAssertEqual(a.client.text, "你")
         // S2h §11: without a left context, as before S2h; 你 as history would make chat pick 期中 like formal.
         a.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
-        a.type(Row284.standardKeys)  // and back: Discord's chat profile again
+        a.type(Row131.standardKeys)  // and back: Discord's chat profile again
         a.press(Keys.enter)
-        XCTAssertEqual(a.client.text, "你" + Row284.chat)
+        XCTAssertEqual(a.client.text, "你" + Row131.chat)
     }
 
     // MARK: keyboard layout (section 13.2)
@@ -512,10 +512,10 @@ final class ShellTests: XCTestCase {
     }
 
     /// sw (docs/contracts/sw-sensitive-demote.md section 3): the menu item is checked by default, flips the
-    /// core's setting (the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ), is stored, and a new shell reads the stored
+    /// core's setting (the frozen probe's row ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙; the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ is right on the 通語 SJ-LM-7-9.7M files with or without the table), is stored, and a new shell reads the stored
     /// choice (a stored off survives a restart and a layout switch rebuild).
     func testDemoteMenuItemTogglesStoresAndSurvivesRestart() {
-        let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ", eten: false)
+        let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙", eten: false)
         let store = MemoryDemoteStore()
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
@@ -525,34 +525,34 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(item()?.title, "避免把敏感字詞排在前面")
         XCTAssertEqual(item()?.checked, true, "default on")
         c.type(report)
-        XCTAssertEqual(c.client.marked, "搞完這波")
+        XCTAssertEqual(c.client.marked, "搞完了")
         c.session.perform(.toggleDemote)          // mid-composition: the snapshot is shown at once
         XCTAssertEqual(store.demote, false)
         XCTAssertEqual(item()?.checked, false)
-        XCTAssertEqual(c.client.marked, "睪丸這波")
+        XCTAssertEqual(c.client.marked, "睪丸了")
         c.session.perform(.toggleDemote)
-        XCTAssertEqual(c.client.marked, "搞完這波")
+        XCTAssertEqual(c.client.marked, "搞完了")
         c.session.perform(.toggleDemote)
-        XCTAssertEqual(c.client.marked, "睪丸這波")
+        XCTAssertEqual(c.client.marked, "睪丸了")
         c.press(Keys.esc)
         c.type(report)
-        XCTAssertEqual(c.client.marked, "睪丸這波")
+        XCTAssertEqual(c.client.marked, "睪丸了")
         c.press(Keys.esc)
         c.session.selectLayout(.eten)      // the rebuilt engine gets the stored setting too
         c.session.selectLayout(.standard)
         c.type(report)
-        XCTAssertEqual(c.client.marked, "睪丸這波")
+        XCTAssertEqual(c.client.marked, "睪丸了")
         c.press(Keys.esc)
         let again = Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                                      learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: store, predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore()))
         again.session.activate()
         again.type(report)
-        XCTAssertEqual(again.client.marked, "睪丸這波", "a new shell reads the stored off")
+        XCTAssertEqual(again.client.marked, "睪丸了", "a new shell reads the stored off")
         again.press(Keys.esc)
         again.session.perform(.toggleDemote)
         XCTAssertEqual(store.demote, true)
         again.type(report)
-        XCTAssertEqual(again.client.marked, "搞完這波")
+        XCTAssertEqual(again.client.marked, "搞完了")
     }
 
     /// V3 (docs/contracts/v3-engine.md section 10.5): the "即時預測" item is checked by default, switches the row off
@@ -907,46 +907,46 @@ final class ShellTests: XCTestCase {
     }
 
     /// acg-pack (docs/contracts/acg-pack.md A.2): the "動漫與遊戲詞" switch is on by default (user decision 2026-10-09), a toggle rebuilds the engine
-    /// without the pack (the fixture pack spells 碇源堂, which the base lexicon cannot), the choice is stored, and a new shell
+    /// without the pack (the fixture pack spells 榊遊矢, which the base lexicon cannot: it gives 神遊使), the choice is stored, and a new shell
     /// reads it. On again: back to the engine with the pack.
     func testAcgPackMenuItemTogglesStoresAndSurvivesRestart() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
-        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try "ㄕㄣˊ-ㄧㄡˊ-ㄕˇ\t榊遊矢\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
         let store = MemoryAcgPackStore()
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: store, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         }
-        let name = "2u/4m06w;6"  // ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ; the chat profile spells it 定元堂 without the pack (formal already gets it right)
+        let name = "gp6u.6g3"  // ㄕㄣˊ ㄧㄡˊ ㄕˇ; both profiles spell it 神遊使 without the pack (measured with the CLI, 2026-10-27)
         let c = Controller(make(), bundle: "com.hnc.Discord")
         c.session.activate()
         let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
         XCTAssertNil(c.session.menu.first { $0.action == .toggleAcgPack }, "it-pack 3.2: no switch in the menu")
         XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞", "default on; the IT switch is on too but this fixture has no it-add.tsv, so it is not loaded")
         c.type(name)
-        XCTAssertEqual(c.client.marked, "碇源堂")
+        XCTAssertEqual(c.client.marked, "榊遊矢")
         c.press(Keys.esc)
         c.session.perform(.toggleAcgPack)
         XCTAssertEqual(store.acgPack, false)
         XCTAssertNil(line(), "no pack loaded, no line")
         c.type(name)
-        XCTAssertNotEqual(c.client.marked, "碇源堂")
+        XCTAssertNotEqual(c.client.marked, "榊遊矢")
         c.press(Keys.esc)
         let again = Controller(make(), bundle: "com.hnc.Discord")
         again.session.activate()
         again.type(name)
-        XCTAssertNotEqual(again.client.marked, "碇源堂", "a new shell reads the stored off")
+        XCTAssertNotEqual(again.client.marked, "榊遊矢", "a new shell reads the stored off")
         again.press(Keys.esc)
         again.session.perform(.toggleAcgPack)
         XCTAssertEqual(store.acgPack, true)
         again.type(name)
-        XCTAssertEqual(again.client.marked, "碇源堂")
+        XCTAssertEqual(again.client.marked, "榊遊矢")
     }
 
     /// it-pack contract 3.2: the "資訊與 AI 詞" switch is on when `itPack` was never set (the maskless default is on), a toggle rebuilds the engine without
-    /// the pack, the choice is stored under `itPack`, and a new shell reads it. The ACG switch is independent. The fixture pack spells 圖像生成, which the
-    /// base lexicon cannot (the chat and formal first candidates differ from it without the pack: core/tests/engine_pack.rs).
+    /// the pack, the choice is stored under `itPack`, and a new shell reads it. The ACG switch is independent. The fixture pack spells 螢幕保護器, which the
+    /// base lexicon cannot (both profiles give 螢幕保護氣 without the pack, measured with the CLI 2026-10-27; `TestData.itPackRow`).
     func testItPackMenuItemTogglesStoresAndSurvivesRestart() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
@@ -956,30 +956,30 @@ final class ShellTests: XCTestCase {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: store)
         }
-        let name = "wj6vu;4g/ t/6"  // ㄊㄨˊ ㄒㄧㄤˋ ㄕㄥ ㄔㄥˊ (a space is the first tone)
+        let name = "u/6aj41l3cj4fu4"  // ㄧㄥˊ ㄇㄨˋ ㄅㄠˇ ㄏㄨˋ ㄑㄧˋ (a space is the first tone)
         let c = Controller(make(), bundle: "com.hnc.Discord")
         c.session.activate()
         let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
         XCTAssertNil(c.session.menu.first { $0.action == .toggleItPack }, "it-pack 3.2: no switch in the menu")
         XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞", "default on; this fixture has no acg-add.tsv")
         c.type(name)
-        XCTAssertEqual(c.client.marked, "圖像生成")
+        XCTAssertEqual(c.client.marked, "螢幕保護器")
         c.press(Keys.esc)
         c.session.perform(.toggleItPack)
         XCTAssertEqual(store.itPack, false)
         XCTAssertNil(line(), "no pack loaded, no line")
         c.type(name)
-        XCTAssertNotEqual(c.client.marked, "圖像生成")
+        XCTAssertNotEqual(c.client.marked, "螢幕保護器")
         c.press(Keys.esc)
         let again = Controller(make(), bundle: "com.hnc.Discord")
         again.session.activate()
         again.type(name)
-        XCTAssertNotEqual(again.client.marked, "圖像生成", "a new shell reads the stored off")
+        XCTAssertNotEqual(again.client.marked, "螢幕保護器", "a new shell reads the stored off")
         again.press(Keys.esc)
         again.session.perform(.toggleItPack)
         XCTAssertEqual(store.itPack, true)
         again.type(name)
-        XCTAssertEqual(again.client.marked, "圖像生成")
+        XCTAssertEqual(again.client.marked, "螢幕保護器")
     }
 
     /// acg-pack A2.4: the grey line under "動漫與遊戲詞" says how old the data is. The date is the manifest's `latest_source_revision` as a UTC date
@@ -1082,8 +1082,8 @@ final class ShellTests: XCTestCase {
         c.press(Keys.enter)
         XCTAssertEqual(c.client.text, "你你好你好")
         // The rebuilt engine keeps the profile (TextEdit: formal).
-        c.type(Row284.standardKeys)
+        c.type(Row131.standardKeys)
         c.press(Keys.enter)
-        XCTAssertTrue(c.client.text.hasSuffix(Row284.formal))
+        XCTAssertTrue(c.client.text.hasSuffix(Row131.formal))
     }
 }

@@ -8,12 +8,13 @@
 
   | 中文名 | 代號 | 舊代號 | 檔案 | 規模的單位 | 目前這一版 |
   |---|---|---|---|---|---|
-  | 通語（語言模型） | SJ-LM | `model-vN` | `bigram.sjlm` | 二元組合條數 | model-v6 ＝ SJ-LM-6-9.1M（9,101,437 條，詞彙 353,497） |
-  | 辨類（詞類） | SJ-WC | `classes-vN` | `classes.sjc` | 詞類數 | classes-v5 ＝ SJ-WC-5-512C |
-  | 承接（平滑） | SJ-KN | `kn-vN` | `kn.sjkn` | 詞彙數 | kn-v1 ＝ SJ-KN-1-353K |
-  | 連文（前兩個詞） | SJ-CX | （新） | `trigram.sjt3` | 三元組合條數 | `sj-cx-1-7.7m` ＝ SJ-CX-1-7.7M（7,700,964 條） |
-  | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | `sj-sr-6-14m` ＝ SJ-SR-6-14M（1,440 萬參數；tinylm-v5 ＝ SJ-SR-5-14M） |
-  | 常談（口語表） | SJ-CL | （新） | `colloquial.sjlm` | 詞彙數 | `sj-cl-1-68k` ＝ SJ-CL-1-68K（詞彙 68,055） |
+  | 通語（語言模型） | SJ-LM | `model-vN` | `bigram.sjlm` | 二元組合條數 | `sj-lm-7-9.7m` ＝ SJ-LM-7-9.7M（9,709,510 條，詞彙 396,927；舊：model-v6 ＝ SJ-LM-6-9.1M） |
+  | 辨類（詞類） | SJ-WC | `classes-vN` | `classes.sjc` | 詞類數 | `sj-wc-6-512c` ＝ SJ-WC-6-512C（舊：classes-v5 ＝ SJ-WC-5-512C） |
+  | 承接（平滑） | SJ-KN | `kn-vN` | `kn.sjkn` | 詞彙數 | `sj-kn-2-397k` ＝ SJ-KN-2-397K（詞彙 396,927；舊：kn-v1 ＝ SJ-KN-1-353K） |
+  | 連文（前兩個詞，書面） | SJ-CX | （新） | `trigram.sjt3` | 三元組合條數 | `sj-cx-2-7.7m` ＝ SJ-CX-2-7.7M（7,700,964 條；舊：`sj-cx-1-7.7m`） |
+  | 連文（前兩個詞，聊天） | SJ-CX | （新） | `trigram-chat.sjt3` | 三元組合條數 | `sj-cx-2-950k` ＝ SJ-CX-2-950K（950,000 條） |
+  | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | `sj-sr-7-15m` ＝ SJ-SR-7-15M（14,646,912 參數；舊：`sj-sr-6-14m` ＝ SJ-SR-6-14M，tinylm-v5 ＝ SJ-SR-5-14M） |
+  | 常談（口語表） | SJ-CL | （新） | `colloquial.sjlm` | 詞彙數 | `sj-cl-2-69k` ＝ SJ-CL-2-69K（詞彙 69,457；舊：`sj-cl-1-68k`） |
 
   連文的第一版原本以 `trigram-v1` 建立，還沒有任何地方下載就改成 `sj-cx-1-7.7m`（舊的 Release 刪除）。
 
@@ -26,7 +27,7 @@
     && (cd /tmp/check-<tag> && shasum -a 256 -c "$OLDPWD/data/<檔名>.sha256")   # 上傳後
   ```
 
-  **常談（`sj-cl-…`）有三個附件**：`colloquial.sjlm`、`colloquial-attribution.tsv`（口語池的署名清單，雜湊檔 `data/colloquial-attribution.tsv.sha256`）與 NOTICE（`docs/releases/<tag>.NOTICE.txt`，列四個來源的授權；CC BY-SA 4.0 的檔案要附署名）。建立與核對的指令寫在 `docs/releases/sj-cl-1-68k.md`；下載時兩個檔用 `-p colloquial.sjlm -p colloquial-attribution.tsv` 一起抓。
+  **常談（`sj-cl-…`）有三個附件**：`colloquial.sjlm`、`colloquial-attribution.tsv`（口語池的署名清單，雜湊檔 `data/colloquial-attribution.tsv.sha256`）與 NOTICE（`docs/releases/<tag>.NOTICE.txt`，列四個來源的授權；CC BY-SA 4.0 的檔案要附署名）。建立與核對的指令寫在 `docs/releases/sj-cl-2-69k.md`（`sj-cl-1-68k.md` 同）；下載時兩個檔用 `-p colloquial.sjlm -p colloquial-attribution.tsv` 一起抓。
 
   **雜湊檔什麼時候改**：換掉現有的檔（例如 model-v5 → model-v6）時，雜湊檔和 CI、`release.yml` 的下載在**同一個**切換的 PR 裡改（先把新雜湊合進 main，CI 會拿舊檔對新雜湊而失敗）。第一次加的新檔（例如 `tinylm-v1`）沒有人讀，雜湊檔可以和說明檔一起先進 main。
 

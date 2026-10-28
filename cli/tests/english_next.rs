@@ -27,7 +27,8 @@ fn counts_of_a_tiny_table() {
     // english-next profile rows no_token | base i ii iii | table i ii iii | imp wor (i) | (ii) | (iii) | p95 base, table (ms)
     let want = [
         ("chat", ["3", "0", "0", "2", "1", "2", "3", "1", "2", "0", "1", "0", "1", "1"]),
-        ("formal", ["3", "0", "0", "1", "1", "2", "3", "1", "2", "0", "2", "0", "1", "1"]),
+        // formal base arm i: 1 of 3 rows on the 通語 SJ-LM-6-9.1M models, 2 with the 通語 SJ-LM-7-9.7M ones (the table arm is the same: 2, 3, 1 in i, ii, iii)
+        ("formal", ["3", "0", "0", "2", "1", "2", "3", "1", "2", "0", "1", "0", "1", "1"]),
     ];
     for (l, (profile, nums)) in lines[..2].iter().zip(want) {
         assert_eq!(&l[..2], ["english-next", profile]);

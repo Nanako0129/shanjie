@@ -203,6 +203,20 @@ class ReplayModels(Tmp):
             kpi.check_models(root, SPEC)
         self.assertIn("colloquial.sjlm", err.getvalue())
 
+    def test_the_chat_trigram_table_is_a_model_only_for_a_version_that_ships_it(self):
+        """docs/contracts/sj-lm-7-pr2.md: `"tri_chat"` adds trigram-chat.sjt3 next to trigram.sjt3, and the replay's models line lists it right after trigram.sjt3."""
+        names = ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "tinylm.sjtl")
+        root = make_root(self.td, names)
+        spec = dict(SPEC, kn=True, tri=True, tri_chat=True)
+        models = kpi.check_models(root, spec)
+        self.assertEqual(set(models), set(names))
+        h = lambda n: hashlib.sha256(n.encode()).hexdigest()[:8]
+        self.assertEqual(kpi.models_line(models), f"models: bigram.sjlm:{h('bigram.sjlm')} classes.sjc:{h('classes.sjc')} kn.sjkn:{h('kn.sjkn')} "
+                         f"trigram.sjt3:{h('trigram.sjt3')} trigram-chat.sjt3:{h('trigram-chat.sjt3')} tinylm.sjtl:{h('tinylm.sjtl')}")
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, dict(spec, tri_chat=False))
+        self.assertIn("trigram-chat.sjt3", err.getvalue())
+
     def test_hash_mismatch_fails(self):
         root = make_root(self.td)
         open(os.path.join(root, "data/lm/classes.sjc"), "wb").write(b"changed")

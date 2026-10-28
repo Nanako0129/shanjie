@@ -46,7 +46,7 @@ LM = os.path.join(ROOT, "data", "lm", "bigram.sjlm")
 COUNTS = os.path.join(PACKS, "acg-counts.tsv")
 # docs/contracts/pack-oov.md 第 1 節第 3 項：凍結的次數表（只有 `freeze-counts` 會寫），一般建置只讀它，不看 data/lm 是哪一版。
 # 表檔的 SHA-256 釘在這裡；空字串＝還沒釘（freeze-counts 之後由人填），一般建置遇到就中止。
-COUNTS_SHA = "2ad50f02953ead839aef985be872941d987742197ecd34a9bb34532c6b8174ec"
+COUNTS_SHA = "f4f0a77d634755f2f33c9f17792c52ef473bfc17d9a3714547a2f4c71fd16a0e"
 MODEL_V6_SHA = "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42"
 CACHE = os.path.expanduser("~/.cache/shanjie/sources/acg")
 UA = "shanjie-acg-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"

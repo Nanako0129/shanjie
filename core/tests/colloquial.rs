@@ -173,25 +173,25 @@ fn rerank_colloquial_is_ll_then_fused_pick() {
     let cands = ["甲乙", "甲丙", "丁乙", "丁丙", "甲丁", "乙丙", "乙丁", "丙丁", "丙乙"];
     let words: Vec<Vec<&str>> = vec![vec!["a", "b"], vec!["x"], vec!["x", "x"], vec!["b"], vec!["a"], vec!["zzz"], vec!["a", "a"], vec!["b", "a"], vec!["x"]];
     let ng = [-10.0, -10.1, -10.2, -10.3, -10.4, -10.5, -10.6, -10.7, -10.8];
-    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, None, RerankLevel::Standard).unwrap();
+    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, None, RerankLevel::Standard, &[], &Default::default()).unwrap();
     let ll = ll.unwrap();
     let want_ll = tl.ll_many(&cands[..TOPK].iter().map(|c| ("你", *c)).collect::<Vec<_>>()).unwrap();
     assert_eq!(ll, want_ll);
     let col: Vec<f64> = words[..TOPK].iter().map(|w| co.col(w)).collect();
-    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD));
+    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD, &[]));
     // with the reading channel: the same LLs, the pick is `fused_pick` over each split's `channel_of` for the stretch's syllables
     let lex = Lexicon::parse("p a -1.0\nq a -6.0\np b -1.0\nq b -1.0\n").unwrap();
     let syls = strs(&["q", "p"]);
     let rc = Some(core::colloquial::ReadingChannel { lex: &lex, syls: &syls });
-    let (pick_rc, ll_rc) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, rc, RerankLevel::Standard).unwrap();
+    let (pick_rc, ll_rc) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, rc, RerankLevel::Standard, &[], &Default::default()).unwrap();
     assert_eq!(ll_rc.unwrap(), ll);
     let ch: Vec<f64> = words[..TOPK].iter().map(|w| channel_of(&lex, &syls, w)).collect();
     assert_eq!(ch[0], -4.0, "premise: the first split reads a under q, 5 below its best, clipped at 4");
-    assert_eq!(pick_rc, fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD));
+    assert_eq!(pick_rc, fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD, &[]));
     assert_ne!(pick_rc, pick, "premise: the channel changes the pick for this input, so a rerank_colloquial that ignores `rc` fails");
-    assert_ne!(fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD), fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD));
-    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, None, RerankLevel::Standard).unwrap(), (0, None));
-    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, None, RerankLevel::Standard).unwrap(), (0, None), "one split: fewer than two candidates");
+    assert_ne!(fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD, &[]), fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD, &[]));
+    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, None, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
+    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, None, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None), "one split: fewer than two candidates");
 }
 
 const LEVELS: [RerankLevel; 3] = [RerankLevel::Standard, RerankLevel::Conservative, RerankLevel::Aggressive];
@@ -202,26 +202,27 @@ fn toy_v3() -> TinyLm {
 
 /// Which candidate each level's `rerank_colloquial` picks: (standard, conservative, aggressive).
 fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], co: &Colloquial) -> [usize; 3] {
-    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, None, l).unwrap().0)
+    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, None, l, &[], &Default::default()).unwrap().0)
 }
 
-/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1), not the standard one. One list, equal col everywhere (so the
-/// colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's LLs: candidate 1 gains 0.5 * 3.9124 - 1.78 = 0.176
-/// at alpha 0.5, which delta 0.1 (aggressive) takes and delta 0.25 (standard) does not; candidate 2 gains 1.0 * 8.0212 - 4 = 4.02 at alpha 1.0,
-/// which delta 3 (conservative) takes, against 0.5 * 8.0212 - 4 = 0.011 at alpha 0.5. So standard keeps 0, conservative takes 2, aggressive 1.
+/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the 通語 SJ-LM-7-9.7M cells of sj-lm-7.md section 2.9), not the standard one. One
+/// list, equal col everywhere (so the colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's LLs (candidate 1 is
+/// 3.9124 above candidate 0, candidate 2 is 8.0212 above) and n-gram gaps of 1.99 and 5.3: candidate 1 gains 0.7 * 3.9124 - 1.99 = 0.75 and candidate 2
+/// 0.7 * 8.0212 - 5.3 = 0.31 at alpha 0.7, so standard (delta 0) takes 1 and conservative (delta 1) keeps 0; at the aggressive alpha 1.0 they gain
+/// 1.92 and 2.72, so aggressive (delta 0.1) takes 2. The three levels give three different picks.
 #[test]
 fn rerank_colloquial_fuses_with_the_levels_cell() {
     let (tl, co) = (toy_v3(), colloq("lv", &[], &["a"], None));
     let cands = ["你好你好你好", "龘龘", "好"];
     let words = vec![vec!["a"]; 3];
-    let ng = [-10.0, -11.78, -14.0];
+    let ng = [-10.0, -11.99, -15.3];
     let ll = tl.ll_many(&cands.iter().map(|c| ("", *c)).collect::<Vec<_>>()).unwrap();
     assert!((ll[1] - ll[0] - 3.9124).abs() < 1e-3 && (ll[2] - ll[0] - 8.0212).abs() < 1e-3, "premise: the toy model's LLs {ll:?}");
-    assert_eq!(picks_by_level(&tl, &ng, &cands, &words, &co), [0, 2, 1]);
+    assert_eq!(picks_by_level(&tl, &ng, &cands, &words, &co), [1, 0, 2]);
     // the cells themselves (the fusion with the level's alpha and delta decides, whatever the header says)
-    assert_eq!(colloquial::cell(RerankLevel::Standard), (0.5, 2.0, 0.25));
-    assert_eq!(colloquial::cell(RerankLevel::Conservative), (1.0, 2.0, 3.0));
-    assert_eq!(colloquial::cell(RerankLevel::Aggressive), (0.5, 2.0, 0.1));
+    assert_eq!(colloquial::cell(RerankLevel::Standard), (0.7, 2.0, 0.0));
+    assert_eq!(colloquial::cell(RerankLevel::Conservative), (0.7, 2.0, 1.0));
+    assert_eq!(colloquial::cell(RerankLevel::Aggressive), (1.0, 2.0, 0.1));
 }
 
 /// The fallback of a non-finite col is the plain pick with the header triple of the same level, tested at `rerank_colloquial`: the toy file's chat

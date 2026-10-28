@@ -13,7 +13,7 @@ use crate::english_next::EnglishTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{RerankLevel, TinyLm, TOPK};
-use crate::{decode_beam, Lexicon, NoLearning, BEAM_S1};
+use crate::{decode_beam, Lexicon, ManualSet, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -38,8 +38,11 @@ struct Stretch {
     /// Their n-gram scores.
     ng: Vec<f64>,
     /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
-    /// does not read the term.
+    /// has no channel term.
     syls: Vec<String>,
+    /// The readings the n-gram's first path used over those syllables (`Lexicon::path_readings`: a syllable typed with an adjacent key is the
+    /// lexicon syllable the word was read through), what `manual_mask` matches the manual words against; empty when the lexicon has no manual word.
+    used: Vec<String>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
     /// n-gram text of stretches left out of the job.
     gap: String,
@@ -62,6 +65,9 @@ pub struct RerankJob {
     /// The engine's lexicon, `Some` only where the reading-channel term applies (docs/contracts/reading-channel.md): when `colloquial` is
     /// `Some` and the engine's reading channel is on (the default; `Engine::set_reading_channel`).
     channel_lex: Option<Arc<Lexicon>>,
+    /// The `manual` words of the engine's lexicon (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with the lexicon: the rerank of either profile
+    /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
+    manual: Arc<ManualSet>,
     /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
     /// the last L characters of `Engine::left_full` (context-return section 2; nothing longer is copied into a job).
     left: String,
@@ -105,9 +111,9 @@ impl RerankJob {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                         let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.used, &self.manual)
                     }
-                    None => self.model.rerank(&s.ng, &cands, &key, self.params),
+                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual),
                 }
                 .map_or(0, |r| r.0);
                 let pick = if pick < s.paths.len() { pick } else { 0 };
@@ -2148,7 +2154,7 @@ impl Engine {
         let mut memo = TriMemo::default();
         // An optional-pack word is unknown to the model here as in the decoder (docs/contracts/pack-oov.md); `history()` itself is unchanged.
         let id = |s: &str| st.capped.model_id(&st.lm, s);
-        let cut = self.run_cut().filter(|_| cfg.tri);
+        let cut = self.run_cut().filter(|_| st.lm.uses_tri(cfg));
         // S2h §1: the first sentence starts from the history word of the left context; `open` is whether
         // the current sentence has a word (the history word is not one, and its own eos is not scored).
         let mut prev = history(&self.left, &st.lm);
@@ -2417,7 +2423,7 @@ impl Engine {
         let n = self.syls.len();
         let (Some(st), true) = (self.lm.clone(), self.predict_on && self.cursor == n && self.cands.is_none() && self.run.is_empty()) else { return };
         let idx = st.capped.predict_index(&st.lm);
-        let lam = self.profile.lambda();
+        let cfg = st.lm.scoring(self.profile);
         // Digits.md A.3.5: right behind digits (tokens, or buffered keys that show as digits) the cursor start is read in the digit
         // context (v, D); buffered digits are not syllables, so no start in front of them is queried (choosing one would splice over them).
         let (dv, dcache) = match self.digit_pred_v(&st) {
@@ -2481,10 +2487,10 @@ impl Engine {
             let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
             let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable, english) {
                 (Some(dv), Some(c), Some(t), _) if digits_here => {
-                    predict_digits(idx, &st.lm, t, &c.words, lam, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
+                    predict_digits(idx, &st.lm, t, &c.words, cfg, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
                 }
-                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, lam, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
-                _ => predict(idx, &st.lm, lam, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
+                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, cfg, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
+                _ => predict(idx, &st.lm, cfg, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
             };
             hits.into_iter()
                 .enumerate()
@@ -2729,6 +2735,8 @@ impl Engine {
         let channel = self.reading_channel
             && self.colloquial.is_some()
             && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
+        // The stretches also keep the readings of their first path when the lexicon has `manual` words, which the rerank matches against them.
+        let keep_used = !self.lex.manual().is_empty();
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -2795,6 +2803,7 @@ impl Engine {
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
                         syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
+                        used: if keep_used { self.lex.path_readings(&self.syls[start..stop], first.iter().map(|w| (w.0, w.3))) } else { Vec::new() },
                         gap: gap_text,
                     });
                 }
@@ -2825,7 +2834,7 @@ impl Engine {
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
             let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, manual: self.lex.manual().clone(), left, stretches });
         }
         Ok(())
     }

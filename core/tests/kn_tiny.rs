@@ -38,7 +38,7 @@ const D: f64 = 0.75;
 #[test]
 fn beta_one_three_branches_by_hand() {
     let lm = lm_with(Some(&bytes("kn.sjkn")), true).unwrap();
-    assert_eq!(lm.kn_tag(), Some(format!("+kn:{}:θ1:β1", &core::eval::sha256_hex(&bytes("kn.sjkn"))[..8]).as_str()));
+    assert_eq!(lm.kn_tag(Profile::Chat), Some(format!("+kn:{}:θ1:β1", &core::eval::sha256_hex(&bytes("kn.sjkn"))[..8])));
     let pb = 0.123; // ignored: beta = 1 replaces the backoff value of every vocabulary word
     // 他 has entries 佔 2, 占 5, 起床 4 (total 11).
     let back_ta = 1.0 - ((2.0 - D) + (5.0 - D) + (4.0 - D)) / 11.0;
@@ -51,6 +51,52 @@ fn beta_one_three_branches_by_hand() {
     close(lm.prob("<s>", "占", pb), back_s * (2.0 / 7.0));
     // no context at all and no class: back 1
     close(lm.prob("占", "他", pb), 1.0 / 7.0);
+}
+
+/// The formal profile scores with FORMAL_KN_BETA 0.75 whatever the side file records; chat keeps the file's β (docs/contracts/sj-lm-7-pr2.md §2 item 1).
+/// The word 占 after 他 has no bigram entry and no class, so its term is P = β / 7 + (1 - β) * pb (hand values below, λ 0.5 chat and 0.7 formal). The summary tags
+/// show the β each profile used. With the file at β 0.75 the formal term is the file-β one bit for bit; with the file at β 1 it is not the chat one.
+#[test]
+fn formal_takes_beta_075_and_chat_the_files() {
+    let lp = -3.0;
+    let pb = 10f64.powf(lp);
+    let (b1, b075) = (lm_with(Some(&bytes("kn.sjkn")), true).unwrap(), lm_with(Some(&bytes("kn-beta075.sjkn")), true).unwrap());
+    let term = |lm: &Lm, p: Profile| lm.word3(lm.scoring(p), None, "占", "他", lp);
+    close(term(&b1, Profile::Chat), 0.5 * (1.0f64 / 7.0).log10() + 0.5 * lp);
+    close(term(&b1, Profile::Formal), 0.7 * (0.75 / 7.0 + 0.25 * pb).log10() + 0.3 * lp);
+    close(term(&b075, Profile::Chat), 0.5 * (0.75 / 7.0 + 0.25 * pb).log10() + 0.5 * lp);
+    assert_eq!(term(&b075, Profile::Formal).to_bits(), term(&b1, Profile::Formal).to_bits(), "formal ignores the file's β");
+    let sha8 = |f: &str| core::eval::sha256_hex(&bytes(f))[..8].to_string();
+    assert_eq!(b1.kn_tag(Profile::Chat), Some(format!("+kn:{}:θ1:β1", sha8("kn.sjkn"))));
+    assert_eq!(b1.kn_tag(Profile::Formal), Some(format!("+kn:{}:θ1:β0.75", sha8("kn.sjkn"))));
+    assert_eq!(b075.kn_tag(Profile::Chat), Some(format!("+kn:{}:θ1:β0.75", sha8("kn-beta075.sjkn"))));
+    // no side file: no tag, and the formal term is the plain bigram one
+    let plain = lm_with(None, true).unwrap();
+    assert_eq!((plain.kn_tag(Profile::Formal), plain.kn_tag(Profile::Chat)), (None, None));
+    close(term(&plain, Profile::Formal), 0.7 * pb.log10() + 0.3 * lp);
+}
+
+/// Everything that blends the side file takes the profile's β, not only decoding: `unigram_back` (the digit scores) and `word_by_id` (the prediction
+/// row) of a formal scoring use FORMAL_KN_BETA 0.75 where the file records 1; chat and a bare lambda keep the file's. 他 has N' 1 of 7.
+#[test]
+fn unigram_back_and_the_prediction_row_take_the_profile_beta() {
+    let lp = -3.0;
+    let pb = 10f64.powf(lp);
+    let b1 = lm_with(Some(&bytes("kn.sjkn")), true).unwrap();
+    let (wid, ctx) = (b1.word_id("他"), b1.context_of("占"));
+    let (formal, chat) = (b1.scoring(Profile::Formal), b1.scoring(Profile::Chat));
+    close(b1.unigram_back(formal, wid, lp), 0.75 / 7.0 + 0.25 * pb);
+    close(b1.unigram_back(chat, wid, lp), 1.0 / 7.0);
+    close(b1.unigram_back(0.7, wid, lp), 1.0 / 7.0);
+    assert_ne!(b1.unigram_back(formal, wid, lp).to_bits(), b1.unigram_back(chat, wid, lp).to_bits());
+    // the prediction row's term is the decoder's: 占 has no entries and no class, so P is the blended back-off itself
+    assert_eq!(b1.word_by_id(formal, ctx, wid, lp).to_bits(), b1.word3(formal, None, "占", "他", lp).to_bits());
+    close(b1.word_by_id(formal, ctx, wid, lp), 0.7 * (0.75 / 7.0 + 0.25 * pb).log10() + 0.3 * lp);
+    close(b1.word_by_id(chat, ctx, wid, lp), 0.5 * (1.0f64 / 7.0).log10() + 0.5 * lp);
+    close(b1.word_by_id(0.7, ctx, wid, lp), 0.7 * (1.0f64 / 7.0).log10() + 0.3 * lp);
+    // a model without a side file has nothing to blend
+    let plain = lm_with(None, true).unwrap();
+    close(plain.unigram_back(plain.scoring(Profile::Formal), plain.word_id("他"), lp), pb);
 }
 
 #[test]
@@ -139,11 +185,11 @@ fn load_reads_the_side_file_beside_the_model() {
         std::fs::write(tmp.join(f), bytes(f)).unwrap();
     }
     let m = tmp.join("bigram.sjlm");
-    assert!(Lm::load(&m).unwrap().kn_tag().is_none(), "no kn.sjkn: off");
+    assert!(Lm::load(&m).unwrap().kn_tag(Profile::Chat).is_none(), "no kn.sjkn: off");
     std::fs::write(tmp.join("kn.sjkn"), bytes("kn.sjkn")).unwrap();
     let on = Lm::load(&m).unwrap();
-    assert!(on.kn_tag().unwrap().starts_with("+kn:") && Lm::load_without_classes(&m).unwrap().kn_tag().is_some());
-    assert!(Lm::load_with(&m, true, false).unwrap().kn_tag().is_none(), "--no-kn");
+    assert!(on.kn_tag(Profile::Chat).unwrap().starts_with("+kn:") && Lm::load_without_classes(&m).unwrap().kn_tag(Profile::Chat).is_some());
+    assert!(Lm::load_with(&m, true, false).unwrap().kn_tag(Profile::Chat).is_none(), "--no-kn");
     assert_eq!(on.prob("占", "他", 0.1), lm_with(Some(&bytes("kn.sjkn")), true).unwrap().prob("占", "他", 0.1));
     std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
     std::os::unix::fs::symlink(tmp.join("missing.sjkn"), tmp.join("kn.sjkn")).unwrap();

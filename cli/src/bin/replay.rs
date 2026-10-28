@@ -142,7 +142,7 @@ fn run() -> Result<(), String> {
         (None, false) => Some(root.join("data/lm/colloquial.sjlm")).filter(|p| tl && p.is_file()),
     };
     let co8 = colloquial.as_deref().map(sha8).transpose()?;
-    let others: Vec<String> = ["classes.sjc", "kn.sjkn", "trigram.sjt3"]
+    let others: Vec<String> = ["classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3"]
         .iter()
         .filter(|f| lm_path.with_file_name(f).is_file())
         .map(|f| Ok(format!("{f}:{}", sha8(&lm_path.with_file_name(f))?)))

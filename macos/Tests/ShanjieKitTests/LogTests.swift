@@ -90,9 +90,9 @@ final class LogTests: XCTestCase {
         let c = Controller(shell, bundle: bundleMarker)
         c.client.before = leftText
         c.session.activate()                            // profile from a marked bundle ID
-        c.type(Row284.standardKeys)
+        c.type(Row131.standardKeys)
         c.press(Keys.enter)                             // commits the marker sentence
-        XCTAssertEqual(c.client.text, Row284.formal, "the typing path did not commit row 284")
+        XCTAssertEqual(c.client.text, Row131.formal, "the typing path did not commit row 131")
         // s7c2b: the async rerank path (rerankFinished -> applyRerankJob -> apply) with the job's candidate text, in a chat app
         // and without left context, where the small model changes the sentence.
         let chat = Controller(shell, bundle: RerankTests.chatApp)
@@ -167,8 +167,8 @@ final class LogTests: XCTestCase {
                       "the punctuation fallback did not log its fixed line")
 
         let negatives = [
-            Row284.formal, Row284.chat, "你好", Row284.zhuyin, "ㄑㄧ", "ㄋㄧ",
-            Row284.standardKeys, String(Row284.standardKeys.prefix(6)), "su3cl3",
+            Row131.formal, Row131.chat, "你好", Row131.zhuyin, "ㄑㄧ", "ㄋㄧ",
+            Row131.standardKeys, String(Row131.standardKeys.prefix(6)), "su3cl3",
             bundleMarker, pathMarker, Self.contextMarker, asciiMarker, Self.englishMarker, leftText,
             RerankRow.ngram, RerankRow.reranked, RerankRow.zhuyin, RerankRow.standardKeys, "回復你", "回覆你",
         ]

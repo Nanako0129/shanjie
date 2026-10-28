@@ -5,7 +5,7 @@ use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
 use core::lm::{decode_from_fuzzy_scored, history, rerank_pool, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::collections::BTreeMap;
@@ -147,10 +147,11 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 }
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
-/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
-/// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed` and `ll` list the rerank pool in pool order, `c` is still an index
+/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py), for n >= 2 `ll`, and `masked`, the
+/// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/contracts/sj-lm-7-pr2.md section 2.7; empty when none, always present).
+/// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
 /// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, idx: Option<&[usize]>) -> Result<String, String> {
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, masked: &[bool], idx: Option<&[usize]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
@@ -166,6 +167,7 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     if let Some(ll) = ll {
         s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
     }
+    s += &format!(", \"masked\": {}", list(masked.iter().enumerate().filter(|(_, &m)| m).map(|(k, _)| k.to_string()).collect()));
     if let Some(idx) = idx {
         s += &format!(", \"idx\": {}", list(idx.iter().map(usize::to_string).collect()));
     }
@@ -328,10 +330,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
-    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
-    // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
-    // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
-    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. The trigram table beside it
+    // (docs/contracts/sj-lm-7-pr2.md) is the profile's own, read unless --no-tri: `trigram.sjt3` for formal, `trigram-chat.sjt3` for chat
+    // (the other profile's file is not read, so a bad one does not matter here). Both profiles score with Kneser-Ney and their table.
+    let tri_profiles: &[Profile] = if tri { std::slice::from_ref(&prof) } else { &[] };
+    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri_profiles).map_err(|e| e.to_string())?;
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
@@ -440,13 +443,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let t0 = Instant::now();
             let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
             let key = key.as_str();
+            // What `manual_mask` matches the manual words against: the readings the n-gram's first path used (the engine's `Stretch::used`).
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3))) };
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, &used, lex.manual())
                 }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level)),
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual()),
             };
             let ll = match picked {
                 Ok((c, ll)) => {
@@ -467,8 +472,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
                 // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
+                // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
                 let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), idx)?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(&used, &top, lex.manual()), idx)?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;
@@ -607,7 +613,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -674,17 +680,16 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     }
     check_lm_opts(None, false, packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
-    let lam = match profile.ok_or("--profile is required")?.as_str() {
+    let profile = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
         "formal" => Profile::Formal,
         _ => return Err("--profile must be chat or formal".into()),
-    }
-    .lambda();
+    };
     // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
-    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
-    // (experiments/sp/predict.py) loads it the same way.
+    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id), at the profile's beta like decoding (formal 0.75,
+    // chat the file's), and the Python reference (experiments/sp/predict.py) loads it the same way for chat.
     // The trigram table is never read here: the prediction row scores with the bigram whatever the profile (trigram-core.md (d)).
-    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, false).map_err(|e| e.to_string())?;
+    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, &[]).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
@@ -708,7 +713,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             return Err("units_of differs from the query's unit sequence".into());
         }
         let t = Instant::now();
-        let cands = predict(&idx, &lm, lam, v, &u, mode, 9);
+        let cands = predict(&idx, &lm, lm.scoring(profile), v, &u, mode, 9);
         lat.push(t.elapsed());
         out += &format!("## {}\t{v}\t{keys}\t{units}\n", if mode == Mode::P { "P" } else { "PA" });
         for (w, s, succ, _) in cands {
@@ -932,19 +937,19 @@ mod tests {
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
     /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
-    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 酷澎 is in the shipped names layer
-    /// since model-v6, so both runs leave it out (`--no-names`); loading the same row twice is a parse error.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 鮮爭 is a made-up name (not in the lexicon, count 0: the names layer's
+    /// real words are counted into the model since 通語 SJ-LM-7-9.7M, so none of them is a word the corpus never saw); loading the same row twice is a parse error.
     #[test]
     fn extra_overlay_rows_are_capped_like_pack_rows() {
         let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
-        assert_eq!(lm.count("酷澎"), 0, "the fixture word must be one the corpus never saw");
+        assert_eq!(lm.count("鮮爭"), 0, "the fixture word must be one the corpus never saw");
         let file = std::env::temp_dir().join(format!("shanjie-extra-overlay-{}.tsv", std::process::id()));
-        fs::write(&file, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-7.5\tnames\n").unwrap();
+        fs::write(&file, "ㄒㄧㄢ-ㄓㄥ\t鮮爭\t-7.5\tnames\n").unwrap();
         let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
-        let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
+        let key = ["ㄒㄧㄢ".to_string(), "ㄓㄥ".to_string()];
         let score = |extra: Option<&Path>| {
             let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra, false).unwrap();
-            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
+            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "鮮爭")
         };
         let (with, without) = (score(Some(&file)), score(None));
         fs::remove_file(&file).unwrap();

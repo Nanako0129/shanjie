@@ -38,8 +38,11 @@
  *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
  *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
  *    docs/contracts/model-v6.md).
- *  - It reads an optional trigram.sjt3 (docs/contracts/trigram-core.md) the same way (a bad one fails the load with 3).
- *    A valid one is used by the formal profile only, which then scores without kn.sjkn.
+ *  - It reads two optional trigram tables (docs/contracts/trigram-core.md, docs/contracts/sj-lm-7-pr2.md) the same way:
+ *    trigram.sjt3 is the formal profile's and trigram-chat.sjt3 the chat profile's (a bad one of either fails the load with 3,
+ *    for both profiles; a missing one only turns that profile's trigram level off). Each profile scores with its own table
+ *    and with kn.sjkn: the chat profile with the side file's beta, the formal profile with beta 0.75 (FORMAL_KN_BETA in
+ *    core/src/lm.rs) whatever beta the file records. The prediction row and the digit scores use the profile's beta too and never a trigram table.
  *    The file is memory-mapped (docs/contracts/trigram-mmap.md): while an engine has it loaded it must not be truncated or
  *    rewritten in place (a truncated page is a SIGBUS); replace it by rename, as the install paths do.
  *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
@@ -324,7 +327,9 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   prediction row, pass-through keys) keep the job valid. A key or pick that decodes a free stretch longer than the window W (the small
 //   model's context minus 3 characters, 61 without a model; rerank on or off) first freezes its head down to W - 16 characters as
 //   frozen words (docs/contracts/composition-cap.md section 1.2), then decodes again: its output and its job are those after the freeze. Commits (ENTER, the auto-commit at 128 tokens, reset) send what is
-//   shown; a job not yet applied is dropped.
+//   shown; a job not yet applied is dropped. When the n-gram's first choice of a stretch holds a word the maintainer added by hand (a `manual`
+//   row of overlay-add.tsv) the rerank only changes it to a candidate that still holds that word on the same syllables
+//   (docs/contracts/sj-lm-7-pr2.md section 2.7).
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;

@@ -167,8 +167,9 @@ sparkle_key SUEnableSystemProfiling bool false
 # Sparkle's licence (MIT, with the third-party notices its LICENSE carries): the bundled copy is the committed one.
 cmp -s "$R/LICENSES/Sparkle-MIT.txt" "$ROOT/LICENSES/Sparkle-MIT.txt" || fail "Resources/LICENSES/Sparkle-MIT.txt differs from LICENSES/Sparkle-MIT.txt"
 grep -q 'EXTERNAL LICENSES' "$R/LICENSES/Sparkle-MIT.txt" || fail "Sparkle-MIT.txt lacks the third-party notices"
-# The trigram table of the formal profile (trigram-core): against the hash recorded in git, like kn.sjkn.
+# The trigram tables (trigram-core; the formal profile's trigram.sjt3 and the chat profile's trigram-chat.sjt3): both listed in the attribution file.
 grep -q 'trigram.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram.sjt3"
+grep -q 'trigram-chat.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram-chat.sjt3"
 echo "check 2: ok"
 
 # --- 3: signature: valid, exactly the three App Sandbox entitlements on the app (app-sandbox.md section 2.1,

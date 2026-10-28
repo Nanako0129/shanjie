@@ -335,5 +335,19 @@ class Offline(unittest.TestCase):
             self.assertEqual(m["files"]["it-add.tsv"]["sha256"], hashlib.sha256(b"x\n").hexdigest())
 
 
+    def test_shipping_lm_check_covers_the_chat_trigram_table(self):
+        self.assertIn("trigram-chat.sjt3", T.SHIPPING_LM)
+        with tempfile.TemporaryDirectory() as d:
+            for n in T.SHIPPING_LM:
+                put(os.path.join(d, n), n)
+            good = lambda p: T.SHIPPING_LM[os.path.basename(p)]
+            with mock.patch.object(T.B, "sha256_file", good):
+                T.check_shipping_lm(d)
+            with mock.patch.object(T.B, "sha256_file", lambda p: "0" * 64 if p.endswith("trigram-chat.sjt3") else good(p)):
+                with self.assertRaises(SystemExit) as r:
+                    T.check_shipping_lm(d)
+            self.assertIn("trigram-chat.sjt3", str(r.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

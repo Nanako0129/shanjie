@@ -421,7 +421,7 @@ const EXPECT_TEST1: [(usize, usize, &str); 7] = [(0, 2, "執行"), (2, 4, "這�
 const HEAD18: [(usize, usize, &str); 9] = [
     (0, 2, "執行"),
     (2, 4, "這個"),
-    (4, 6, "城市"),
+    (4, 6, "程式"),
     (6, 8, "結果"),
     (8, 10, "不如"),
     (10, 12, "預期"),
@@ -447,7 +447,7 @@ fn a_frozen_word_that_merges_with_the_new_syllable_is_frozen_again() {
     assert!(job_max <= W, "{job_max} characters in a candidate: the stretch fits");
     assert_eq!(2 + 1 + TAIL_R, 63, "R = {TAIL_R} makes the released stretch longer than W");
     let shown = applied.map_or(raw.preedit, |o| o.preedit);
-    assert!(shown.starts_with("執行這個城市結果不如預期你的帳單已經"), "{shown}");
+    assert!(shown.starts_with("執行這個程式結果不如預期你的帳單已經"), "{shown}");
     assert_eq!(shown.chars().count(), 79);
     e.key(k(KeyKind::End)).unwrap();
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, shown);
@@ -470,7 +470,7 @@ fn a_piece_left_by_backspace_is_frozen_again_when_a_syllable_follows() {
     assert!(job_max <= W, "{job_max} characters in a candidate: the stretch fits");
     assert_eq!(1 + 1 + TAIL_R, 62, "R = {TAIL_R} makes the released stretch longer than W");
     let shown = applied.map_or(raw.preedit, |o| o.preedit);
-    assert!(shown.starts_with("執行這個城市結果不如預期你的帳單已"), "{shown}");
+    assert!(shown.starts_with("執行這個程式結果不如預期你的帳單已"), "{shown}");
     assert_eq!(shown.chars().count(), 78);
     e.key(k(KeyKind::End)).unwrap();
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, shown);

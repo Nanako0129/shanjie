@@ -72,19 +72,20 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
   return 0;
 }
 
-/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 284 (row 226 since S2k, whose chat and formal answers the
- * one-path-per-(surface, last word) decoder made equal; before that row 10, which the word-class term made equal), reading
- *   ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ
- * standard keys `tj6z;6vup_5j;_xk7u_ek7xm4gjo3cj6` (_ = space bar). Expected top-1:
- *   no LM (unigram)  廚房新莊了一個率水壺
- *   chat             廚房新裝了一個率水壺 (綠水壺 before classes-v5)
- *   formal           廚房新裝了一個律水壺 (with data/lm/trigram.sjt3, as CI and the App ship it; 濾水壺 without the table)
- * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 284, i.e. lm_eval.py --dump; unigram is what
+/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 287 (row 284 until 通語 SJ-LM-7-9.7M, whose chat and formal answers the new model made equal; row 226
+ * since S2k, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal; before that row 10, which the word-class term made
+ * equal), reading
+ *   ㄎㄜˇ ㄧˇ ㄉㄧㄢˋ ㄧ ㄍㄜ˙ ㄙㄢˋ ㄖㄜˋ ㄉㄧㄢˋ
+ * standard keys `dk3u32u04u_ek7n04bk42u04` (_ = space bar). Expected top-1:
+ *   no LM (unigram)  可以電一個散熱電
+ *   chat             可以電一個散熱墊 (with data/lm/trigram-chat.sjt3, as CI and the App ship it)
+ *   formal           可以墊一個散熱墊 (with data/lm/trigram.sjt3)
+ * (chat / formal from eval/golden/s2-lm-dev302-top1.tsv row 287, i.e. lm_eval.py --dump; unigram is what
  * an engine without LM commits, checked by 302 below.) */
-#define ROW284 "tj6z;6vup 5j; xk7u ek7xm4gjo3cj6"
-#define UNIGRAM "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\x8e\x8a\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
-#define CHAT "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe7\x8e\x87\xe6\xb0\xb4\xe5\xa3\xba"
-#define FORMAL "\xe5\xbb\x9a\xe6\x88\xbf\xe6\x96\xb0\xe8\xa3\x9d\xe4\xba\x86\xe4\xb8\x80\xe5\x80\x8b\xe5\xbe\x8b\xe6\xb0\xb4\xe5\xa3\xba"
+#define ROW287 "dk3u32u04u ek7n04bk42u04"
+#define UNIGRAM "\xe5\x8f\xaf\xe4\xbb\xa5\xe9\x9b\xbb\xe4\xb8\x80\xe5\x80\x8b\xe6\x95\xa3\xe7\x86\xb1\xe9\x9b\xbb"
+#define CHAT "\xe5\x8f\xaf\xe4\xbb\xa5\xe9\x9b\xbb\xe4\xb8\x80\xe5\x80\x8b\xe6\x95\xa3\xe7\x86\xb1\xe5\xa2\x8a"
+#define FORMAL "\xe5\x8f\xaf\xe4\xbb\xa5\xe5\xa2\x8a\xe4\xb8\x80\xe5\x80\x8b\xe6\x95\xa3\xe7\x86\xb1\xe5\xa2\x8a"
 
 /* Press Enter; 1 when it is handled and commits `want` with an empty preedit. */
 static int enter_commits(ShanjieEngine *e, const char *want) {
@@ -98,16 +99,16 @@ static int enter_commits(ShanjieEngine *e, const char *want) {
 
 /* Type the row; 1 when the preedit after the last key is `want`. */
 static int row_shows(ShanjieEngine *e, const char *want) {
-  ShanjieOutput *o = type_last(e, ROW284);
+  ShanjieOutput *o = type_last(e, ROW287);
   int ok = o != 0 && str_eq(o->preedit, want);
   shanjie_output_free(o);
   return ok;
 }
 
-/* The user report (sw contract): ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ, standard keys; its two possible top-1 strings. */
-#define REPORT_KEYS "el3j065k41i "
-#define REPORT_ON "\xe6\x90\x9e\xe5\xae\x8c\xe9\x80\x99\xe6\xb3\xa2"  /* 搞完這波 */
-#define REPORT_OFF "\xe7\x9d\xaa\xe4\xb8\xb8\xe9\x80\x99\xe6\xb3\xa2" /* 睪丸這波 */
+/* ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙ (a reading the sensitive-word table changes on the 通語 SJ-LM-7-9.7M files, as the report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ did before them), standard keys; its two possible top-1 strings. */
+#define REPORT_KEYS "el3j06xk7"
+#define REPORT_ON "\xe6\x90\x9e\xe5\xae\x8c\xe4\xba\x86"  /* 搞完了 */
+#define REPORT_OFF "\xe7\x9d\xaa\xe4\xb8\xb8\xe4\xba\x86" /* 睪丸了 */
 
 /* Type the report and leave it composing; 1 when the preedit after the last key is `want`. */
 static int report_shows(ShanjieEngine *e, const char *want) {
@@ -139,8 +140,8 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = &dummy;
   CHECK(311, shanjie_engine_set_profile(e, 7, &o) == 2 && o == 0);
   /* set_demote (docs/contracts/sw-sensitive-demote.md): 0 or 1, else 2; NULL engine or out 1; recomputes
-   * like set_profile. REPORT is the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ (standard keys): 搞完這波 with the
-   * table on (the default), 睪丸這波 with it off, so a set_demote that does nothing fails here. */
+   * like set_profile. REPORT is ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙ (standard keys): 搞完了 with the
+   * table on (the default), 睪丸了 with it off, so a set_demote that does nothing fails here. */
   CHECK(701, shanjie_engine_set_demote(0, 1, &o) == 1 && o == 0);
   CHECK(702, shanjie_engine_set_demote(e, 1, 0) == 1);
   o = &dummy;

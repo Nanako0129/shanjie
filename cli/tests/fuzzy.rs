@@ -92,7 +92,8 @@ fn fuzzy_delta_sound_default_is_identical_and_other_values_shift_fuzzy_candidate
     assert!(s0.contains("+fz:15  {"), "{s0}");
     let (s2, c2) = dump_298(&["--fuzzy-delta-sound", "1"]);
     assert!(s2.contains("+fz:15:d1  {"), "{s2}");
-    assert_ne!(s0.split("'top1_sha256'").nth(1), s2.split("'top1_sha256'").nth(1));
+    // The first choice of this row no longer changes with D on 通語 SJ-LM-7-9.7M (it did on SJ-LM-6-9.1M); the exact score shift below
+    // is what shows D is applied.
     let (shu, su) = ("這家店的排骨書很好吃", "這家店的排骨酥很好吃");
     assert!((score_of(&c2, shu) - score_of(&c0, shu) - 1.5).abs() < 1e-9, "{c0:?} {c2:?}");
     assert_eq!(score_of(&c0, su), score_of(&c2, su));

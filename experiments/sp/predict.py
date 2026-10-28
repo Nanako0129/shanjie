@@ -411,6 +411,7 @@ def main():
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args()
     lm, lex = build_lm_lex()
+    lm = L.profile_lm(lm, a.profile)   # 書面的 KN β 是核心的 FORMAL_KN_BETA 0.75，不是側檔的（Lm::scoring）；封頂只用計數，不受 β 影響
     lam = L.PROFILES[a.profile]
     idx = Index(lex)
     samples, drop = samples_of(lex, load_rows(a.rows, a.sample, a.seed))

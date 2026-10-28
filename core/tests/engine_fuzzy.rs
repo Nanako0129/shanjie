@@ -440,14 +440,14 @@ fn choosing_an_adjacent_word_rewrites_the_unknown_syllable() {
 // ---------- review fixes ----------
 
 /// Review item 1: `freeze_outside` froze a whole path word outside the picked span without asking whether the typed reading has it.
-/// With ㄣ/ㄥ on, ㄅㄧㄣˇ ㄉㄠˋ decodes 丙到, 丙 a word of ㄅㄧㄥˇ; picking 道 over the second syllable froze 丙 under ㄅㄧㄣˇ, which has no
+/// With ㄣ/ㄥ on, ㄅㄧㄣˇ ㄉㄠˋ decodes 餅到 (丙到 on model-v6), 餅 a word of ㄅㄧㄥˇ; picking 道 over the second syllable froze 餅 under ㄅㄧㄣˇ, which has no
 /// such entry, and the refresh returned `Internal`. A tolerant word outside the pick is left to the decoder, as `pieces` and
 /// `cap_refreeze` do; the pick goes through.
 #[test]
 fn picking_beside_a_tolerant_word_does_not_freeze_it_under_the_typed_reading() {
     let mut e = engine(Layout::Standard, 0b0001, false);
     e.set_prediction(false).unwrap();
-    assert_eq!(type_syls(&mut e, Layout::Standard, "ㄅㄧㄣˇ ㄉㄠˋ").preedit, "丙到");
+    assert_eq!(type_syls(&mut e, Layout::Standard, "ㄅㄧㄣˇ ㄉㄠˋ").preedit, "餅到");
     let o = press(&mut e, KeyKind::Space);
     select(&mut e, o, "道");
     let o = e.key(Key::new(KeyKind::Enter)).expect("picking beside a tolerant word is no internal error");
@@ -457,8 +457,8 @@ fn picking_beside_a_tolerant_word_does_not_freeze_it_under_the_typed_reading() {
 
 /// Review item 2: ⌘⌫ on a learned new word drops its item from the open window; the window's map from list position to lexicon reading
 /// (`Cands::alt`) stayed as it was, so every tolerant word behind the forgotten one read its neighbour's reading when chosen.
-/// 派工 is taught with ㄣ/ㄥ on; typing it again lists 派工 first among the two-syllable items and the one-syllable words of ㄍㄨㄣ
-/// (read through the slip ㄍㄨㄥ) last. After forgetting 派工, choosing the first of those must rewrite ㄍㄨㄥ to ㄍㄨㄣ.
+/// 派弓 (not 派工: on the 通語 SJ-LM-7-9.7M files 派工 is already the n-gram's first path, so picking it re-picks nothing and teaches no new word) is taught with ㄣ/ㄥ on; typing it again lists 派弓 first among the two-syllable items and the one-syllable words of ㄍㄨㄣ
+/// (read through the slip ㄍㄨㄥ) last. After forgetting 派弓, choosing the first of those must rewrite ㄍㄨㄥ to ㄍㄨㄣ.
 #[test]
 fn forgetting_a_new_word_keeps_the_tolerant_readings_in_step() {
     const FORGET: Key = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
@@ -478,22 +478,22 @@ fn forgetting_a_new_word_keeps_the_tolerant_readings_in_step() {
     };
     type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ");
     pick(&mut e, 0, "派");
-    pick(&mut e, 1, "工");
-    assert_eq!(press(&mut e, KeyKind::Enter).commit, "派工", "taught");
+    pick(&mut e, 1, "弓");
+    assert_eq!(press(&mut e, KeyKind::Enter).commit, "派弓", "taught");
     e.set_left_context("加入");
     let shown = type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ").preedit;
     let o = press(&mut e, KeyKind::Space);
     let before = window_list(&mut e, o.clone());
-    assert!(before.iter().any(|w| w == "派工"), "the taught word is listed, shown {shown}");
+    assert!(before.iter().any(|w| w == "派弓"), "the taught word is listed, shown {shown}");
     // The one-syllable words found through ㄍㄨㄣ: not an entry of ㄍㄨㄥ, an entry of ㄍㄨㄣ.
     let exact1: Vec<&str> = lex.entries(&["ㄍㄨㄥ".to_string()]).into_iter().map(|x| x.0).collect();
     let slip = before.iter().find(|w| w.chars().count() == 1 && !exact1.contains(&w.as_str()) && lex.has(&["ㄍㄨㄣ".to_string()], w)).expect("a word through ㄍㄨㄣ").clone();
-    // Open the window anew on 派工 and forget it; the same window goes on.
+    // Open the window anew on 派弓 and forget it; the same window goes on.
     press(&mut e, KeyKind::Esc);
     let o = press(&mut e, KeyKind::Space);
-    select(&mut e, o, "派工");
+    select(&mut e, o, "派弓");
     let o = e.key(FORGET).unwrap();
-    assert!(o.total > 0 && !o.candidates.iter().any(|c| c == "派工"), "the window stays open without the forgotten word");
+    assert!(o.total > 0 && !o.candidates.iter().any(|c| c == "派弓"), "the window stays open without the forgotten word");
     select(&mut e, o, &slip);
     let o = e.key(Key::new(KeyKind::Enter)).expect("choosing a tolerant word after a forget is no internal error");
     assert_eq!(o.preedit.chars().last().map(String::from).as_deref(), Some(slip.as_str()));
@@ -545,8 +545,8 @@ fn the_learning_guard_does_not_depend_on_whether_the_learner_has_records() {
 }
 
 /// Review item 4: `choose` spliced a tolerant word's lexicon reading into the typed syllables before it listed the new words the pick
-/// displaces, so the path's new words overlapping the span were looked up under the rewritten reading and 派工 (taught as ㄆㄞˋ ㄍㄨㄥ)
-/// was missed when 棍 (a word of ㄍㄨㄣ) was picked over the ㄍㄨㄥ. Picking any other word there halves 派工 at the commit (new-word B
+/// displaces, so the path's new words overlapping the span were looked up under the rewritten reading and 派弓 (taught as ㄆㄞˋ ㄍㄨㄥ)
+/// was missed when 棍 (a word of ㄍㄨㄣ) was picked over the ㄍㄨㄥ. Picking any other word there halves 派弓 at the commit (new-word B
 /// 2.5); the tolerant pick must too.
 #[test]
 fn a_tolerant_pick_halves_the_new_words_it_displaces_under_their_own_reading() {
@@ -570,7 +570,7 @@ fn a_tolerant_pick_halves_the_new_words_it_displaces_under_their_own_reading() {
         e.set_prediction(false).unwrap();
         e.set_left_context("要進");
         type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ");
-        for (at, w) in [(0, "派"), (1, "工")] {
+        for (at, w) in [(0, "派"), (1, "弓")] {
             press(&mut e, KeyKind::End);
             for _ in 0..1 - at {
                 press(&mut e, KeyKind::Left);
@@ -579,15 +579,15 @@ fn a_tolerant_pick_halves_the_new_words_it_displaces_under_their_own_reading() {
             select(&mut e, o, w);
             press(&mut e, KeyKind::Enter);
         }
-        assert_eq!(press(&mut e, KeyKind::Enter).commit, "派工", "taught");
-        let before = e.learner().new_word_weight(&reading, "派工", DAY).expect("派工 is a new word");
+        assert_eq!(press(&mut e, KeyKind::Enter).commit, "派弓", "taught");
+        let before = e.learner().new_word_weight(&reading, "派弓", DAY).expect("派弓 is a new word");
         e.set_left_context("加入");
-        assert_eq!(type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ").preedit, "派工");
+        assert_eq!(type_syls(&mut e, Layout::Standard, "ㄆㄞˋ ㄍㄨㄥ").preedit, "派弓");
         let exact1: Vec<&str> = lex.entries(&["ㄍㄨㄥ".to_string()]).into_iter().map(|x| x.0).collect();
-        let w = pick_one_syllable(&mut e, &|w| if tolerant { !exact1.contains(&w) && lex.has(&["ㄍㄨㄣ".to_string()], w) } else { w != "工" && exact1.contains(&w) });
+        let w = pick_one_syllable(&mut e, &|w| if tolerant { !exact1.contains(&w) && lex.has(&["ㄍㄨㄣ".to_string()], w) } else { w != "弓" && exact1.contains(&w) });
         assert_eq!(e.syllables().last().map(String::as_str), Some(if tolerant { "ㄍㄨㄣ" } else { "ㄍㄨㄥ" }), "picked {w}");
         press(&mut e, KeyKind::Enter);
-        (before, e.learner().new_word_weight(&reading, "派工", DAY))
+        (before, e.learner().new_word_weight(&reading, "派弓", DAY))
     };
     let (before, after) = run(false);
     assert!(after.is_some_and(|a| a < before), "premise: an exact pick halves the displaced new word: {before} -> {after:?}");

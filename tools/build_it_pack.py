@@ -48,7 +48,7 @@ TAIWAN_KINDS = ("manual", "cgroup", "naer75", "naer16")      # 台灣來源：�
 FREQ_KINDS = ("naer16", "ai")                                # 頻率門檻與子字串標記只用在這兩種
 # 契約 §2：解碼用的出貨 data/lm（照 data/*.sha256），開始前核對。
 SHIPPING_LM = {n: open(os.path.join(ROOT, "data", n + ".sha256")).read().split()[0]
-               for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3")}
+               for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3")}
 SHIP_ARGS = []        # 出貨設定在評測 CLI 上的額外選項（見 decoder()）
 # 解碼 CLI 的執行緒數：CLI 保證任何 N 的輸出檔都和 N = 1 逐位元組相同（cli/src/main.rs `--threads`），只影響速度。
 # Mac 上預設 1（「Mac 不跑重運算」：make test-python 在 Mac 跑），其他機器（GCP、188）預設用滿核心；SHANJIE_THREADS 可改，至少 1。

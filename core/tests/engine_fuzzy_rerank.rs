@@ -58,7 +58,7 @@ fn pooled(syls: &[&str], flags: u32, alpha: f64) -> Pooled {
     let model = sjtl_with_vocab(alpha, f64::INFINITY, Some(&lm_path()), &cands.concat());
     let tl = TinyLm::load(&model).unwrap();
     let ng: Vec<f64> = pool.iter().map(|&i| nb[i].2).collect();
-    let pick = tl.rerank(&ng, &cands, &context_key(""), tl.alpha_tau_delta(Profile::Chat)).unwrap().0;
+    let pick = tl.rerank(&ng, &cands, &context_key(""), tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap().0;
     Pooled { nb, pool, model, pick }
 }
 

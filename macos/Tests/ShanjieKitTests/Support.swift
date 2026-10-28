@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm. Missing files fail
 /// the test with instructions; nothing is skipped for a missing file (the one opt-in benchmark, CandidateCellTests.testBenchmark, is skipped without SHANJIE_BENCH=1).
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -22,13 +22,14 @@ enum TestData {
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
         ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
+        ("trigram-chat.sjt3", "data/lm/trigram-chat.sjt3"),  // sj-lm-7-pr2.md: the chat profile's table; the engine loads both, a missing one only turns that profile's level off
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // colloquial-term.md: the colloquial table the selftest requires
         // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
         ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
-    static let itPackRow = "ㄊㄨˊ-ㄒㄧㄤˋ-ㄕㄥ-ㄔㄥˊ\t圖像生成\t-6.60980192\tit\n"
+    static let itPackRow = "ㄧㄥˊ-ㄇㄨˋ-ㄅㄠˇ-ㄏㄨˋ-ㄑㄧˋ\t螢幕保護器\t-3.17843815\tit\n"
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
     /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
@@ -51,13 +52,8 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v6 release asset: \
-                    gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-                    kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-                    trigram.sjt3: gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
-                    tinylm.sjtl: gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
-                    colloquial.sjlm: gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the models are the files data/*.sha256 record \
+                    (bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl, colloquial.sjlm), put in data/lm.
                     """, file: file, line: line)
                 return nil
             }
@@ -302,14 +298,15 @@ enum Layouts {
     }
 }
 
-/// dev302 row 284 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, see Selftest.swift).
-enum Row284 {
-    static let zhuyin = "ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ"
+/// dev302 row 131 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, row 284 before 通語 SJ-LM-7-9.7M, see Selftest.swift).
+enum Row131 {
+    static let zhuyin = "ㄅㄣˇ ㄕˋ ㄒㄧㄚˋ ㄓㄡ ㄙㄢ ㄏㄨㄟˋ ㄧㄡˇ ㄉㄚˋ ㄩˇ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
-    static let chat = "廚房新裝了一個率水壺"
-    // With trigram.sjt3 beside the model the formal profile gives 律水壺; without the table it gives 濾水壺, so a test
-    // (and the App selftest) that expects 律水壺 also catches a missing table. Checked with the CLI `--profile formal --context`.
-    static let formal = "廚房新裝了一個律水壺"
+    static let chat = "本市下週三會有大雨"
+    // With trigram.sjt3 beside the model the formal profile gives 本是…; without the table it gives 本市…, so a test
+    // (and the App selftest) that expects 本是 also catches a missing table. Checked with the CLI `--profile formal --context`, 2026-10-27;
+    // the n-gram first and the shipping rerank (both packs, all three strengths) give the same sentence in both profiles.
+    static let formal = "本是下週三會有大雨"
 }
 
 /// A temporary learning directory (S4 section 4); never the real Application Support.
@@ -387,24 +384,25 @@ final class FreeCounter: @unchecked Sendable {
     }
 }
 
-/// dev302 row 27 since classes-v5 (2026-10-16; the selftest's sentence): in the chat profile the n-gram's first is 回復 and tinylm-v5
-/// picks 回覆, with and without the pack (CLI rowstats). Before: dev302 row 65 (s7c2b section 2.5, revised 2026-10-12): in the chat profile the n-gram's first is 在,
-/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14); under model-v6 + kn-v1 +
-/// tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式) was this
-/// sentence under tinylm-v1; v2's strict chat values did not change it, v3's do again (`DeviceRow` below).
-/// dev302 row 65: under classes-v5 the chat n-gram already gives 我等一下再過去 and the small model keeps it (CLI rowstats: right with
-/// and without `--tinylm`), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall).
+/// dev302 row 10 (期中報告明天要交): in the chat profile the n-gram's first is right and the small model keeps it, with and without the pack and the
+/// colloquial table (CLI, 2026-10-27), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall). Before 通語 SJ-LM-7-9.7M: dev302 row 65 (since
+/// classes-v5, whose chat n-gram gave 我等一下再過去 already; the sentence of the s7c2b section 2.5 selftest before that), which the 通語 SJ-LM-7-9.7M n-gram gets
+/// wrong again (`RerankRow`).
 enum NoChangeRow {
-    static let standardKeys = Layouts.keys("ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ", eten: false)
-    static let text = "我等一下再過去"
+    static let standardKeys = Layouts.keys("ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ", eten: false)
+    static let text = "期中報告明天要交"
 }
 
+/// dev302 row 65 (s7c2b section 2.5, the selftest's sentence since the 通語 SJ-LM-7-9.7M files; row 27 from classes-v5 to model-v6, whose rerank changed 回復 to 回覆): in the
+/// chat profile the n-gram's first is 我等一下在過去 and the small model picks 再 (CLI, 2026-10-27, chat standard, with and without the bundled packs, without
+/// the colloquial table; with it the pick is the same). The same happened under tinylm-v2 to v4 (RerankTests, 2026-10-13). Row 25 (執行這個城市 -> 程式) was this
+/// sentence under tinylm-v1 (`DeviceRow` below).
 enum RerankRow {
-    static let zhuyin = "ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙"
+    static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let etenKeys = Layouts.keys(zhuyin, eten: true)
-    static let ngram = "我已經回復你的郵件了"
-    static let reranked = "我已經回覆你的郵件了"
+    static let ngram = "我等一下在過去"
+    static let reranked = "我等一下再過去"
 }
 
 /// dev302 row 25, the device sentence of docs/contracts/s7h-tinylm-v3.md section 1: in the chat profile with no left context and

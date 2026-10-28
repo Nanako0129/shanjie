@@ -8,10 +8,11 @@
 --kn FILE [--kn-beta β]：Kneser-Ney 回退分布的側檔（tools/kn_cont.py）。沒給 --kn 時，--lm 同目錄有 kn.sjkn 就載入（和 Rust CLI、App 相同，
   model-v6 §2.5）；--no-kn 不載。SJKN0002 的 β 取自檔頭，--kn-beta 可不給（給了和檔頭不同就報錯）；
   舊的 SJKN0001 一定要給 --kn-beta。不論哪種格式都傳 kn_classes（build_lm.variant_classes），讓 lm.py 用 kn_total 重算 ΣN′ 和檔頭比對。
-  摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。
---tri FILE | --no-tri：trigram 表（SJT30001，docs/contracts/trigram-core.md，reference/proto/trigram.py）。沒給 --tri 時，--lm 同目錄有 trigram.sjt3 就載入（和 Rust CLI 相同）；
-  --no-tri 不載。只有 --profile formal 載入它（chat 不載、不讀檔、不加標籤，和 Rust CLI 相同；chat 給 --tri 是錯誤）：書面有表時 kn.sjkn 照 Rust 的規則仍然載入並驗證
-  （壞了就報錯，不能給 --kn），但計分時 KN 關，摘要行不加 +kn:；解碼用兩個歷史詞（trigram.decode3），摘要行的 profile 欄最後（+xo 之後）加 +tri:<表檔 SHA-256 前 8 碼>。
+  摘要行的 profile 欄最後加 +kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<β>（Rust CLI 同格式）。β：chat 取側檔的，formal 是 lm.FORMAL_KN_BETA 0.75（lm.profile_lm，
+  核心的 Lm::scoring；docs/contracts/sj-lm-7-pr2.md §2 第 1 條），所以書面的標籤是 β0.75，不論側檔記的是多少。
+--tri FILE | --no-tri：trigram 表（SJT30001，docs/contracts/trigram-core.md，reference/proto/trigram.py）。沒給 --tri 時，--lm 同目錄有該 profile 自己的表就載入
+  （書面 trigram.sjt3、聊天 trigram-chat.sjt3，和 Rust CLI 相同；只讀自己那一張）；--no-tri 不載。有表時解碼用兩個歷史詞（trigram.decode3），KN 照開
+  （兩種設定都是），摘要行的 profile 欄最後（+xo 之後）加 +tri:<表檔 SHA-256 前 8 碼>。
 --extra-overlay FILE：接在 ime.OVERLAYS 之後的疊加層檔，也併進封頂詞集合（預設關；Rust CLI 同名參數）；摘要行最後加 +xo:<檔案 SHA-256 前 8 碼>。
   名單層 data/lexicon/names-add.tsv 已在 ime.OVERLAYS 與封頂詞集合裡（model-v6 §2.5），不要再用這個參數給它（重複的列是錯誤）。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/contracts/eval-stats.md）。
@@ -78,9 +79,12 @@ def kn_side(lm_path, kn=None, no_kn=False):
     return kn or (side if not no_kn and os.path.lexists(side) else None)
 
 
-def tri_side(lm_path, tri=None, no_tri=False):
-    """trigram 表路徑或 None：tri 給了就用那個；否則模型旁邊的 trigram.sjt3，存在（含壞掉的符號連結）就載入，除非 no_tri。"""
-    side = os.path.join(os.path.dirname(os.path.abspath(lm_path)), "trigram.sjt3")
+TRI_FILE = {"chat": "trigram-chat.sjt3", "formal": "trigram.sjt3"}   # core/src/lm.rs tri_file
+
+
+def tri_side(lm_path, profile, tri=None, no_tri=False):
+    """trigram 表路徑或 None：tri 給了就用那個；否則模型旁邊該 profile 自己的表檔（TRI_FILE），存在（含壞掉的符號連結）就載入，除非 no_tri。"""
+    side = os.path.join(os.path.dirname(os.path.abspath(lm_path)), TRI_FILE[profile])
     return tri or (side if not no_tri and os.path.lexists(side) else None)
 
 
@@ -113,19 +117,14 @@ def main():
         ap.error("--kn and --no-kn")
     if a.tri and a.no_tri:
         ap.error("--tri and --no-tri")
-    if a.tri and a.profile != "formal":
-        ap.error("--tri needs --profile formal (chat never uses the table)")
-    tri = tri_side(a.lm, a.tri, a.no_tri) if a.profile == "formal" else None   # chat does not even read the table, like the CLI
-    if tri and a.kn:
-        ap.error("--kn with the formal profile's trigram table (it scores without Kneser-Ney)")
+    tri = tri_side(a.lm, a.profile, a.tri, a.no_tri)   # only this profile's own table, like the CLI
     kn = kn_side(a.lm, a.kn, a.no_kn)   # loaded and validated in every case the CLI loads it, the table or not
     if not kn and a.kn_beta is not None:   # 空字串（未設定的變數）也算沒給
         ap.error("--kn-beta needs --kn")
     base = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"),
                        overlay=ime.overlays(a.extra_overlay))
     lm = load_lm(a.lm, base, not a.no_classes, kn, a.kn_beta)
-    if tri:
-        lm.kn = None   # formal with a table scores without Kneser-Ney (Rust Lm::scoring); the side file was checked above
+    lm = L.profile_lm(lm, a.profile)   # formal's β is FORMAL_KN_BETA (Rust Lm::scoring)
     ov = ime.capping_words(a.extra_overlay)
     lex = L.cap_overlay(base, ov, lm)
     if tri:
@@ -151,7 +150,7 @@ def main():
         with rsf:
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
-    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn and not tri else ''}{xo_tag(a.extra_overlay)}{'+tri:' + sha8(tri) if tri else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
+    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn else ''}{xo_tag(a.extra_overlay)}{'+tri:' + sha8(tri) if tri else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 
 
 if __name__ == "__main__":

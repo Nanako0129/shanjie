@@ -449,6 +449,22 @@ class Prediction(unittest.TestCase):
         self.assertEqual((r["chat.new"], r["chat.base"], r["formal.new"], r["formal.base"]), (1, 1, 1, 1))
         self.assertEqual(M.pred_row(env, ("下午", "3", "沒有", ["ㄇㄟˊ", "ㄧㄡˇ"]), lams), {"dropped": 1})   # no lexicon entry with that reading
 
+    def test_pred_row_scores_formal_at_the_cores_kn_beta(self):
+        seen = []
+
+        class Spy(StubLM):
+            def word(self, lam, v, w, lp):
+                seen.append((lam, self.kn[0]))
+                return lp
+
+        lex, _, sc = world(lm=Spy(succ=["蛋"]))
+        lm = Spy(succ=["蛋"])
+        lm.kn = (1.0, [1] * 4, 10)                                                 # the side file's beta (chat keeps it)
+        env = type("E", (), {"history": staticmethod(identity_history), "lex": lex, "idx": sc.idx, "table": sc.tb, "lm": lm})()
+        M.pred_row(env, ("下午", "3", "點", ["ㄉㄧㄢˇ"]), (("chat", 0.5), ("formal", 0.3)))
+        self.assertEqual({lam: b for lam, b in seen if lam in (0.5, 0.3)}, {0.5: 1.0, 0.3: 0.75})
+        self.assertEqual(lm.kn[0], 1.0)                                       # the shared model is not changed
+
 
 class Verdicts(unittest.TestCase):
     def test_choose_theta(self):

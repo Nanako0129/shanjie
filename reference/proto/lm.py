@@ -13,6 +13,7 @@
 v 是前一個詞（句首為 "<s>"）；走完後每條路徑加句尾項再穩定排序一次。
 """
 import collections
+import copy
 import hashlib
 import math
 import os
@@ -22,6 +23,7 @@ import struct
 import ime
 
 PROFILES = {"chat": 0.5, "formal": 0.7}
+FORMAL_KN_BETA = 0.75   # core/src/lm.rs FORMAL_KN_BETA: the formal profile's Kneser-Ney β (docs/contracts/sj-lm-7-pr2.md §2 item 1); chat keeps the side file's
 UNSEEN_OVERLAY_PENALTY = 1.0
 
 
@@ -165,6 +167,16 @@ class BigramLM:
     def count(self, w):
         i = self.ids.get(w)
         return self.uni[i] if i is not None else 0
+
+
+def profile_lm(lm, profile):
+    """lm as `profile` scores with it (core `Lm::scoring`): formal takes FORMAL_KN_BETA instead of the side file's β, chat keeps the file's.
+    A shallow copy, so one loaded model serves both profiles; a model without a side file is returned as is."""
+    if profile != "formal" or lm.kn is None:
+        return lm
+    out = copy.copy(lm)
+    out.kn = (FORMAL_KN_BETA,) + lm.kn[1:]
+    return out
 
 
 def unigram_back(lm, w, lp):
