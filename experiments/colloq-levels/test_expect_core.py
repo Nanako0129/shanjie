@@ -32,6 +32,16 @@ class T(unittest.TestCase):
         r = {"sc": {"ng": [-10.0, -11.0], "ll": [-5.0, -1.0]}, "col": [0.0, -math.inf], "ch": [0.0, 0.0]}
         self.assertEqual([E.cell_pick(r, E.CELL[lv], E.HEADER[lv]) for lv in ("standard", "conservative", "aggressive")], [0, 1, 0])
 
+    def test_masked_candidates_are_never_picked(self):
+        r = row(*LISTS[2])                                                  # every level's cell picks 1 on this list
+        self.assertEqual([E.cell_pick(r, E.CELL[lv], HDR[lv]) for lv in E.CELL], [1, 1, 1])
+        r["sc"]["masked"] = [1]
+        self.assertEqual([E.cell_pick(r, E.CELL[lv], HDR[lv]) for lv in E.CELL], [0, 0, 0])
+        r = {"sc": {"ng": [-10.0, -11.0], "ll": [-5.0, -1.0]}, "col": [0.0, -math.inf], "ch": [0.0, 0.0]}   # the non-finite-col path: header triple
+        self.assertEqual(E.cell_pick(r, E.CELL["conservative"], E.HEADER["conservative"]), 1)
+        r["sc"]["masked"] = [1]
+        self.assertEqual(E.cell_pick(r, E.CELL["conservative"], E.HEADER["conservative"]), 0)
+
     def test_compare_flags_a_wrong_pick(self):
         rec = {"i": 1, "n": 3, "ng": ROW["sc"]["ng"], "ok": ROW["sc"]["ok"], "ed": ROW["sc"]["ed"], "glen": 3, "ll": ROW["sc"]["ll"], "c": 2}
         self.assertEqual(E.compare("conservative", [ROW], [rec], [(1,)], HDR), [])
