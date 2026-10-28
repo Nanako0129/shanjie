@@ -11,7 +11,7 @@
     "n": 302,
     "picks_per100": 1.13,
     "rewrites": 265,
-    "tag": "replay-chat+ctx+acg+nopred+noen+lm:e3fb6056+tl:f7d0ac63+correct+colloq:81c2470d+rc",
+    "tag": "replay-chat+ctx+acg+it+nopred+noen+lm:e3fb6056+tl:f7d0ac63+correct+colloq:81c2470d+rc",
     "top1": 280,
     "top1_sha256": "5d5d7eae03c066783a75a3dfb0721e284149bab68b117be97ad39aac145c3f1c",
     "unfixable": 0
@@ -27,7 +27,7 @@
    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
   },
-  "sha": "5964b9dbe78c6c42cad3354b8bbf0e228b507a83",
+  "sha": "4a6aabd377c442b742d9c3efae49924d3b156466",
   "user-reported": {
    "learn_broken": 0,
    "learn_fixed": 1,
@@ -41,7 +41,7 @@
     "n": 80,
     "picks_per100": 2.11,
     "rewrites": 78,
-    "tag": "replay-chat+ctx+acg+nopred+noen+lm:e3fb6056+tl:f7d0ac63+correct+colloq:81c2470d+rc",
+    "tag": "replay-chat+ctx+acg+it+nopred+noen+lm:e3fb6056+tl:f7d0ac63+correct+colloq:81c2470d+rc",
     "top1": 70,
     "top1_sha256": "5858915ebec08c5ca8bbc43dd9b7915e9652a4f59aa26b4f6ce540abdabbf8bc",
     "unfixable": 1
@@ -55,7 +55,7 @@
     "n": 80,
     "picks_per100": 1.94,
     "rewrites": 78,
-    "tag": "replay-chat+ctx+acg+nopred+noen+lm:e3fb6056+tl:f7d0ac63+learn+correct+colloq:81c2470d+rc",
+    "tag": "replay-chat+ctx+acg+it+nopred+noen+lm:e3fb6056+tl:f7d0ac63+learn+correct+colloq:81c2470d+rc",
     "top1": 71,
     "top1_sha256": "248b316f6a5475d9d0a55493a0958cfe286097e6d78841ae88a9bce2cd4ef0b8",
     "unfixable": 1
