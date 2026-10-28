@@ -1,0 +1,40 @@
+colloquial.sjlm (常談 SJ-CL-2-69K) - NOTICE
+============================================
+
+colloquial.sjlm is licensed under the Creative Commons Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+
+The file is a bigram table of word counts of colloquial text. It holds words and word-pair counts, no sentence text. It was counted from
+two groups of sources, each used under its own licence; every one of them only asks for attribution, which this notice and
+colloquial-attribution.tsv (attached to the same release) give.
+
+(1) The colloquial text that is also counted into the bigram model SJ-LM-7-9.7M (bigram.sjlm):
+    - Mozilla Common Voice sentences (CC0)
+    - Tatoeba sentences (CC BY 2.0 FR)
+    - synthetic sentences written for this project
+    Attribution: Tatoeba contributors.
+
+(2) A public pool of 143,895 colloquial sentences (counted, not copied) from four sources:
+    - WildChat-1M, Taiwan subset - Allen Institute for AI
+      https://huggingface.co/datasets/allenai/WildChat-1M
+      Open Data Commons Attribution License v1.0 (ODC-BY 1.0): https://opendatacommons.org/licenses/by/1-0/
+      3,491 sentences. The dataset-level row in colloquial-attribution.tsv covers them.
+    - YODAS zh000, Traditional-script subtitles - espnet/yodas
+      https://huggingface.co/datasets/espnet/yodas
+      The subtitles of YouTube videos published under the Creative Commons Attribution 3.0 licence (CC BY 3.0):
+      https://creativecommons.org/licenses/by/3.0/
+      90,080 sentences from 1,138 videos. The dataset supplies the video id only (no channel name or author), so each video is
+      attributed as the dataset supplies it: its id, its URL and the number of sentences, one row per video in colloquial-attribution.tsv.
+    - Tatoeba, Traditional-script Mandarin sentences - https://tatoeba.org
+      Creative Commons Attribution 2.0 France (CC BY 2.0 FR): https://creativecommons.org/licenses/by/2.0/fr/
+      36,839 sentences. Each sentence id is listed with its author in colloquial-attribution.tsv (208 authors).
+    - MASSIVE zh-TW - Amazon.com Inc. (AmazonScience/massive)
+      https://huggingface.co/datasets/AmazonScience/massive
+      Creative Commons Attribution 4.0 (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+      13,485 sentences. The dataset-level row in colloquial-attribution.tsv covers them.
+
+colloquial-attribution.tsv has one row per source unit (tab separated: source, unit_id, author, url, licence, sentences). The per-source
+sentence counts add up to 3,491 (WildChat), 90,080 (YODAS), 36,839 (Tatoeba) and 13,485 (MASSIVE), 143,895 in all. It contains no sentence
+text. It is built by tools/build_attribution.py from the pool and its attribution record.
+
+No private conversation data is in the file or the list.
