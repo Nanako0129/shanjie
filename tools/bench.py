@@ -603,6 +603,19 @@ def static_section(st):
     return L
 
 
+def holdout_cols(results):
+    """Columns of a holdout table: one per (profile, rows_sha256), so two different sets never share a column (kpi.md section 2).
+    From 2026-10-29 chat = the talk half (--set holdout, n 150), formal = the news half (a private rows file, news-corpus.md 2.4)."""
+    seen = {(p, rec.get("holdout", {})[p].get("rows_sha256")) for res in results for rec in res["versions"] for p in ("chat", "formal") if p in rec.get("holdout", {})}
+    cols = sorted(seen, key=lambda c: (c[0] != "chat", c[1] or ""))
+    return cols or [("chat", None), ("formal", None)]
+
+
+def holdout_head(cols):
+    name = {"chat": "chat（口語半邊）", "formal": "formal（新聞半邊）"}
+    return [name[p] + f" #{h[:8]}" if h else p + "（舊保留集，沒記 rows_sha256）" for p, h in cols]
+
+
 def render_table(results, ref=None, static=None):
     cells = [f"{n}/{p}" for n, (_, _, ps, _) in SETS.items() for p in ps]
     L = ["# 跨版本基準測試", "", "由 `tools/bench.py table` 從 `eval/bench/results/*.json` 產生，請勿手改。契約：`docs/contracts/sbench.md`。", "",
@@ -617,13 +630,14 @@ def render_table(results, ref=None, static=None):
                 L.append(f"| {row} | " + " | ".join([f"失敗：{rec.get('error', '')}".replace("|", "/").replace("\n", " ")[:300]] * len(cells)) + " |")
             else:
                 L.append(f"| {row} | " + " | ".join(cell_text(rec, c) for c in cells) + " |")
-    L += ["", "## 保留集", "", "由 fresh verifier 在該版 tag 的 worktree 跑 `--set holdout` 後，把摘要行填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, oracle64, top1_sha256}, \"formal\": ...}`）。", "",
-          "| 版本 | chat | formal |", "|---|---|---|"]
+    hcols = holdout_cols(results)
+    L += ["", "## 保留集", "", "由 fresh verifier 把摘要行填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, oracle64, top1_sha256, rows_sha256}, \"formal\": ...}`）。**2026-10-29 起 `chat` 是口語半邊（`--set holdout`，只讀 `talk.txt`，n 150），`formal` 是新聞半邊（私人檔，`--rows … --profile formal`，n 150）**；兩個半邊各自帶 `rows_sha256`，欄位依它分開，不同份的數字不會在同一欄。", "",
+          "| 版本 | " + " | ".join(holdout_head(hcols)) + " |", "|---|" + "---|" * len(hcols)]
     for res in results:
         for rec in res["versions"]:
             h = rec.get("holdout", {})
-            f = lambda p: f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}，oracle@64 {h[p]['oracle64']}" if p in h else "—（尚未量測）"
-            L.append(f"| {rec['ref']}<br>`{rec['sha'][:7]}` | {f('chat')} | {f('formal')} |")
+            f = lambda c: f"{100 * h[c[0]]['top1'] / h[c[0]]['n']:.2f}%<br>{h[c[0]]['top1']}/{h[c[0]]['n']}，oracle@64 {h[c[0]]['oracle64']}" if c[0] in h and h[c[0]].get("rows_sha256") == c[1] else "—（尚未量測）"
+            L.append(f"| {rec['ref']}<br>`{rec['sha'][:7]}` | " + " | ".join(f(c) for c in hcols) + " |")
     L += ["", "## 速度與記憶體（同場）", "", "每版 3 輪輪流跑，p95 取三輪中位數，max 取三輪最大，載入（`Engine::new` + `load_lm`）取中位數，RSS 取最大。標準排列、chat profile、dev302 重播。速度只在同一列「同場」裡比較。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI |", "|---|---|---|---|---|---|---|---|---|"]
     for res in results:
@@ -1097,14 +1111,15 @@ def render_v2(results):
         for c in cells:
             n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
             L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
+    hcols = holdout_cols(results)
     L += ["", "### 保留集", "",
-          "照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
-          "| 版本 | chat | formal |", "|---|---|---|"]
+          "照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）、`rows_sha256` 和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p, rows_sha256}, \"formal\": ...}`）。**2026-10-29 起 `chat` 是口語半邊（`--set holdout`，只讀 `talk.txt`，n 150），`formal` 是新聞半邊（私人檔 `--rows … --profile formal`）**，欄位依各自的 `rows_sha256` 分開。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
+          "| 版本 | " + " | ".join(holdout_head(hcols)) + " |", "|---|" + "---|" * len(hcols)]
     for res in results:
         for rec in res["versions"]:
             h = rec.get("holdout", {})
-            f = lambda p: "—（尚未量測）" if p not in h else f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}" + (f"<br>+{h[p]['fixed']} / −{h[p]['broken']}，p={h[p]['p']:.3g}" if "fixed" in h[p] else "")
-            L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | {f('chat')} | {f('formal')} |")
+            f = lambda c: "—（尚未量測）" if c[0] not in h or h[c[0]].get("rows_sha256") != c[1] else f"{100 * h[c[0]]['top1'] / h[c[0]]['n']:.2f}%<br>{h[c[0]]['top1']}/{h[c[0]]['n']}" + (f"<br>+{h[c[0]]['fixed']} / −{h[c[0]]['broken']}，p={h[c[0]]['p']:.3g}" if "fixed" in h[c[0]] else "")
+            L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | " + " | ".join(f(c) for c in hcols) + " |")
     L += ["", "### 速度與記憶體（同場）", "",
           "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、dev302，每版 3 輪輪流，p95 取中位數；每版兩列：聊天（版本名）與書面（版本名後加「書面」；重播程式的第五個參數 `formal`，舊的結果檔沒有這一列時顯示「—」）。有 trigram 表的版本，兩列都把表載進記憶體（只有書面用它）。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile` 同該列，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |", "|---|---|---|---|---|---|---|---|---|---|"]

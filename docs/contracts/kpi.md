@@ -37,9 +37,9 @@
 ## 3. 保留集兩個半邊（2026-10-29 修訂：新聞半邊改私人檔，`docs/contracts/news-corpus.md` §2.4）
 
 - 保留集規則不變：只在推 `v*` tag 前由 fresh verifier 跑一次。回報改成：
-  - **口語半邊**＝`--set holdout` 全集（`eval/holdout/` 只剩 `talk.txt`，n 150），聊天設定，存在 `holdout_talk_chat`；全集合那兩行不再存在，v2 JSON 的 `holdout.*` 從這一版起是口語半邊，不跨份比；
-  - **新聞半邊**＝私人檔（`--rows <holdout-news-1.txt> --profile formal --rowstats`，書面設定），存在 `holdout_news_formal`；
-  - 欄位同 v2 JSON 的 holdout：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`，表依它分欄，換份時不同份的數字不會在同一欄（`tools/kpi.py` 本來就如此，`tools/test_kpi.py` 有私人檔的案例）；
+  - **口語半邊**＝`--set holdout` 全集（`eval/holdout/` 只剩 `talk.txt`，n 150），聊天設定，存在 v2 JSON 的 `holdout.chat` 與 kpi JSON 的 `holdout_talk_chat`；全集合那兩行不再存在，不跨份比；
+  - **新聞半邊**＝私人檔（`--rows <holdout-news-1.txt> --profile formal --rowstats`，書面設定），存在 v2 JSON 的 `holdout.formal` 與 kpi JSON 的 `holdout_news_formal`；
+  - 欄位：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`；`tools/kpi.py` 與 `tools/bench.py` 的表都依它分欄，換份時不同份的數字不會在同一欄（`tools/test_kpi.py` 的 rows_sha256 分欄測試已涵蓋私人檔，`tools/test_bench.py` 有 bench 表的對應測試）；
   - 量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（流程規則，不是技術防護）；
   - 同一次發版前量的這兩行算一次「使用」。
 - `docs/verification.md` 與 `eval/README.md` 的保留集段落跟著改；`kpi.py table` 從 `kpi/<v>.json` 的這兩個欄位讀兩個半邊的 top1。

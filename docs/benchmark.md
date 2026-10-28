@@ -15,11 +15,9 @@
 
 ## 保留集
 
-（2026-10-29 起 `--set holdout` 只讀口語半邊 `talk.txt`，n 150；新聞半邊是私人檔，用 `--rows` 量，欄位 `holdout_news_formal`，見 `docs/verification.md`。下面的歷史表是舊的 n 300。）
+由 fresh verifier 把摘要行填進 results JSON 的 `holdout`（`{"chat": {n, top1, oracle64, top1_sha256, rows_sha256}, "formal": ...}`）。**2026-10-29 起 `chat` 是口語半邊（`--set holdout`，只讀 `talk.txt`，n 150），`formal` 是新聞半邊（私人檔，`--rows … --profile formal`，n 150）**；兩個半邊各自帶 `rows_sha256`，欄位依它分開，不同份的數字不會在同一欄。
 
-由 fresh verifier 在該版 tag 的 worktree 跑 `--set holdout` 後，把摘要行填進 results JSON 的 `holdout`（`{"chat": {n, top1, oracle64, top1_sha256}, "formal": ...}`）。
-
-| 版本 | chat | formal |
+| 版本 | chat（舊保留集，沒記 rows_sha256） | formal（舊保留集，沒記 rows_sha256） |
 |---|---|---|
 | v0.1.0<br>`b0d2871` | —（尚未量測） | —（尚未量測） |
 | v0.1.1<br>`1cc9b85` | —（尚未量測） | —（尚未量測） |
@@ -316,9 +314,9 @@
 
 ### 保留集
 
-照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p}, "formal": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。
+照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）、`rows_sha256` 和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p, rows_sha256}, "formal": ...}`）。**2026-10-29 起 `chat` 是口語半邊（`--set holdout`，只讀 `talk.txt`，n 150），`formal` 是新聞半邊（私人檔 `--rows … --profile formal`）**，欄位依各自的 `rows_sha256` 分開。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。
 
-| 版本 | chat | formal |
+| 版本 | chat（舊保留集，沒記 rows_sha256） | formal（舊保留集，沒記 rows_sha256） |
 |---|---|---|
 | v0.4.0<br>`729a858` | 79.30%<br>180/227 | 81.06%<br>184/227 |
 | v0.4.1<br>`a1c3174` | 84.14%<br>191/227<br>+11 / −0，p=0.000977 | 82.38%<br>187/227<br>+3 / −0，p=0.25 |

@@ -619,6 +619,14 @@ class SuiteV2(Tmp):
         bench.cmd_table(None)  # deterministic
         self.assertEqual(open(out, encoding="utf-8").read(), after)
 
+    def test_holdout_columns_split_by_rows_sha256(self):
+        # a news half on a private file (new hash) must not share a column with the old shard's number
+        recs = [{"version": "v0.5.0", "ref": "v0.5.0", "sha": "a" * 40, "holdout": {"chat": {"n": 150, "top1": 120, "rows_sha256": "1" * 64}, "formal": {"n": 150, "top1": 130, "rows_sha256": "2" * 64}}},
+                {"version": "v0.6.0", "ref": "v0.6.0", "sha": "b" * 40, "holdout": {"chat": {"n": 150, "top1": 121, "rows_sha256": "1" * 64}, "formal": {"n": 150, "top1": 140, "rows_sha256": "3" * 64}}}]
+        cols = bench.holdout_cols([{"versions": recs}])
+        self.assertEqual(cols, [("chat", "1" * 64), ("formal", "2" * 64), ("formal", "3" * 64)])
+        self.assertEqual(len(bench.holdout_head(cols)), 3)
+
     def test_rerun_never_overwrites_holdout_numbers(self):
         bench.RESULTS = os.path.join(self.td, "results")
         os.makedirs(bench.RESULTS)
