@@ -88,7 +88,7 @@ fn commit(e: &mut Engine) -> String {
 }
 
 /// Acceptance 1, the reported case in its first form. The reported 板控 (pick 版) no longer happens: since the merge with
-/// main (section 10) the free decode also gives 版控, and the SJ-LM-7 files read it that way with or without the left
+/// main (section 10) the free decode also gives 版控, and the 通語 SJ-LM-7-9.7M files read it that way with or without the left
 /// text 要進. The mechanism is the same the other way round: 版控 shown, 板 picked, 控 stays. So this no longer tells the
 /// freeze from its absence (checked: it passes with `freeze_outside` emptied); `freeze_row_133_six_steps` carries section 3
 /// item 1 (it fails without `freeze_outside`). Every example below that was 板控 and 版 is 版控 and 板 for the same reason;
@@ -108,7 +108,7 @@ fn freeze_reported_case_banhkong() {
 #[test]
 fn freeze_row_133_six_steps() {
     const ROW: &str = "ㄎㄜˇ ㄧˇ ㄗㄨㄛˋ ㄉㄧˋ ㄌㄧㄡˋ ㄅㄨˋ";
-    // Measured on the production lexicon and the SJ-LM-7 model files: formal shows 可以作第六部, chat 可以做第六部 (both
+    // Measured on the production lexicon and the 通語 SJ-LM-7-9.7M model files: formal shows 可以作第六部, chat 可以做第六部 (both
     // showed 可以做第六部 before them); the freeze keeps the left part as shown. The test fails with `freeze_outside` emptied.
     // Prediction on, the window lists the row's copy first (predict-down B.3.1, section 12); off, the lexicon entry.
     for (prof, pred, free) in [(Profile::Formal, true, "可以作第六部"), (Profile::Chat, true, "可以做第六部"), (Profile::Formal, false, "可以作第六部"), (Profile::Chat, false, "可以做第六部")] {
@@ -158,7 +158,7 @@ fn freeze_partial_overlap_keeps_the_second_character() {
 
 /// Acceptance 3: a pick in the middle leaves the words on both sides as they were. The free decode of 它是由於在野 changes
 /// 它 to 他 once 是 is pinned to 事, and 於 to 于 once 由 is pinned, so these two picks fail without the freeze (checked with
-/// `freeze_outside` emptied). The pick of 魷魚 changes neither side, as before the SJ-LM-7 files.
+/// `freeze_outside` emptied). The pick of 魷魚 changes neither side, as before the 通語 SJ-LM-7-9.7M files.
 #[test]
 fn freeze_words_outside_stay() {
     for (end, word, want) in [(2, "事", "它事由於在野"), (3, "由", "它是由於在野"), (4, "魷魚", "它是魷魚在野")] {
@@ -246,7 +246,7 @@ fn insert_that_does_not_merge_keeps_the_frozen_word() {
 }
 
 /// 它是由於在野, the last word re-picked to 再也: frozen 它, 是 and 由於 (3-4) on the left of the pick. (The test used 在也由於在野
-/// until the SJ-LM-7 files, which read ㄗㄞˋ ㄧㄝˇ as the one word 在野, so the left no longer held two separate words.)
+/// until the 通語 SJ-LM-7-9.7M files, which read ㄗㄞˋ ㄧㄝˇ as the one word 在野, so the left no longer held two separate words.)
 /// Inserting at 2 (between 是 and 由於): ㄈㄡˇ merges with 是 only (是否): 它 and 由於 stay (the free decode reads 他是否).
 /// ㄌㄧˇ merges with 由 of the two-syllable 由於 (the free decode reads 理由於), not with all of it: 由於 stays whole and the
 /// gap decodes as 裡. The premises of both are asserted on the free decode first.

@@ -33,7 +33,7 @@ fn zai() -> Row {
     row("我打錯了我看成號碼|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ")
 }
 /// 這隻乾脆留下來了 is shown; the gold text has 支 at the second place. Fix: Home, Right, Right (3 keys, not 6 Lefts), Space, digit. (This row replaced
-/// 這家速度很快你看一下, which the SJ-LM-7 model shows right.)
+/// 這家速度很快你看一下, which the 通語 SJ-LM-7-9.7M model shows right.)
 fn zhi() -> Row {
     row("所以雖然退了一支，|這支乾脆留下來了|ㄓㄜˋ ㄓ ㄍㄢ ㄘㄨㄟˋ ㄌㄧㄡˊ ㄒㄧㄚˋ ㄌㄞˊ ㄌㄜ˙")
 }
@@ -331,7 +331,7 @@ fn colloquial_replay_agrees_with_the_cli() {
 
 /// docs/contracts/reading-channel.md section 2.2 and item 4: the replay's engine adds the reading-channel term to the colloquial term by default,
 /// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 81, 159 and 10 of the set, where the term moves the
-/// picks (rows 10, 81 and 102 until SJ-LM-7); `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
+/// picks (rows 10, 81 and 102 until 通語 SJ-LM-7-9.7M); `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
 #[test]
 fn reading_channel_replay_agrees_with_the_cli() {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-rc-{}", std::process::id()));

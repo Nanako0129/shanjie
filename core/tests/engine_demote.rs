@@ -78,7 +78,7 @@ fn syls(s: &str) -> Syls {
 
 const REPORT: &str = "ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙";
 
-/// Premise of the slice: the user report is 睪丸了 without the table and 搞完了 with it. (The report was 搞完這波; the SJ-LM-7 model gets that sentence
+/// Premise of the slice: the user report is 睪丸了 without the table and 搞完了 with it. (The report was 搞完這波; the 通語 SJ-LM-7-9.7M model gets that sentence
 /// right with or without the table, so the premise is row 2 of the frozen probe, measured 2026-10-27 with the CLI, both profiles.)
 #[test]
 fn user_report_flips_with_the_table() {
@@ -130,14 +130,14 @@ fn set_demote_false_equals_no_table() {
 }
 
 /// 4 (c): a demoted word fixed by the user. Row 雙側睪丸 typed with the non-standard reading keeps the
-/// demoted word first even with the table, so the whole-sentence top-1 contains it (the probe's row 切除睪丸, row 11, did until SJ-LM-7, whose
+/// demoted word first even with the table, so the whole-sentence top-1 contains it (the probe's row 切除睪丸, row 11, did until 通語 SJ-LM-7-9.7M, whose
 /// model puts 切除搞完 first with the table; 雙側睪丸 found 2026-10-27 with the CLI, both profiles). Fixing
 /// 睪丸 on the right (End::Next for the free 雙側) makes the engine's total equal that top-1 score; a
 /// `total_score` that forgot the delta is off by exactly the delta.
 #[test]
 fn fixed_demoted_word_total_equals_top1() {
     let s = shared();
-    // Without the trigram tables: with them (the chat profile has one too since SJ-LM-7) a path with a fixed word legitimately scores differently from the
+    // Without the trigram tables: with them (the chat profile has one too since 通語 SJ-LM-7-9.7M) a path with a fixed word legitimately scores differently from the
     // same string without one (trigram-core rule (a); see `fixed_word_total_equals_top1_on_first_rows` in engine_lm.rs).
     let lm = Arc::new(Lm::load_opts(&root().join("data/lm/bigram.sjlm"), true, true, &[]).unwrap());
     let r = syls("ㄕㄨㄤ ㄘㄜˋ ㄍㄠˇ ㄨㄢˊ");

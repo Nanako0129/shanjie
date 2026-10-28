@@ -1225,7 +1225,7 @@ fn t1_the_written_milk_case() {
     let mut e = learner_engine(Profile::Formal, None);
     e.set_left_context("我想喝一杯");
     let base = row(&typ(&mut e, &[], "ㄋ"));
-    // On model-v6 the written row is [奶茶, 那, ...] (it was [奶茶, 牛奶, ...]), on the SJ-LM-7 files [你, 那, 拿, 牛奶, 奶茶, ...]: move to 牛奶
+    // On model-v6 the written row is [奶茶, 那, ...] (it was [奶茶, 牛奶, ...]), on the 通語 SJ-LM-7-9.7M files [你, 那, 拿, 牛奶, 奶茶, ...]: move to 牛奶
     // wherever it is, as long as it is not the first item.
     assert_ne!(base[0], "牛奶", "precondition: {base:?}");
     assert!(base.iter().skip(1).any(|w| w == "牛奶"), "precondition: 牛奶 in the row after the first item {base:?}");
@@ -1615,7 +1615,7 @@ fn t14_a_learned_item_among_the_first_three_keeps_the_others_in_place() {
 #[test]
 fn t15_a_word_found_from_two_starts_is_listed_once() {
     // ㄊㄚ ㄇㄢˋ typed, ㄇ pending: 慢慢 comes from the long start (ㄇㄢˋ + ㄇ) and from the cursor start (ㄇ) alike (ㄋㄧㄡˊ typed and ㄋ pending, 牛奶
-    // after 我想喝一杯, until SJ-LM-7: its row lists 牛 alone from the cursor start now; found 2026-10-27 by trying the prefixes of the dev rows).
+    // after 我想喝一杯, until 通語 SJ-LM-7-9.7M: its row lists 牛 alone from the cursor start now; found 2026-10-27 by trying the prefixes of the dev rows).
     // Taught under the cursor start's key it is first, and the long start's copy (weight 0, in L[0..3]) must not be listed again.
     let st: (&str, &[Tok], &str) = ("", &[Syl("ㄊㄚ"), Syl("ㄇㄢˋ")], "ㄇ");
     let want = oracle(st.0, st.1, st.2);
@@ -1812,7 +1812,7 @@ const G: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄐㄧ"), Syl("ㄙ")]
 const H: (&str, &[Tok], &str) = ("", &[Syl("ㄅㄚ"), Syl("ㄍㄢ"), Syl("ㄗ˙"), Syl("ㄉㄚˇ"), Syl("ㄅㄨˋ")], "ㄓ");
 /// typing76 「週末本來想在家耍廢」 up to 在: 在 sits inside the last decoded word.
 const I: (&str, &[Tok], &str) = ("", &[Syl("ㄓㄡ"), Syl("ㄇㄛˋ"), Syl("ㄅㄣˇ"), Syl("ㄌㄞˊ"), Syl("ㄒㄧㄤˇ"), Syl("ㄗㄞˋ")], "");
-/// typing76 「明天早上我要先去銀行辦事」 up to 明天: a position inside 明天 has items, the cursor start has 再來 (「我們中午可以…」 and 可以 until SJ-LM-7).
+/// typing76 「明天早上我要先去銀行辦事」 up to 明天: a position inside 明天 has items, the cursor start has 再來 (「我們中午可以…」 and 可以 until 通語 SJ-LM-7-9.7M).
 const J: (&str, &[Tok], &str) = ("", &[Syl("ㄇㄧㄥˊ"), Syl("ㄊㄧㄢ")], "ㄗ");
 
 fn has(o: &Oracle, w: &str) -> bool {

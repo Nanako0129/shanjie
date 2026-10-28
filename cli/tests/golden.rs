@@ -53,7 +53,7 @@ fn lenient_dump_uses_the_variant_table() {
     assert_ne!(lines[2], lines[3], "散佈 has no dictionary entry, so it is not a listed variant");
 }
 
-const LM_MISSING: &str = "data/lm/bigram.sjlm is missing (the SJ-LM-7 model, data/bigram.sjlm.sha256)";
+const LM_MISSING: &str = "data/lm/bigram.sjlm is missing (the 通語 SJ-LM-7-9.7M model, data/bigram.sjlm.sha256)";
 
 const CLASSES_MISSING: &str = "data/lm/classes.sjc is missing (data/classes.sjc.sha256)";
 
@@ -504,7 +504,7 @@ fn extra_overlay_adds_words_and_fails_loudly_when_missing() {
 }
 
 /// model-v6 section 2.5: the names layer (data/lexicon/names-add.tsv) is loaded by default, so 臻鼎 (a names-only word, in no other
-/// lexicon file; the test used 酷澎 before SJ-LM-7, whose counts made 酷澎 the first candidate without the layer too) is the first candidate in both profiles with no option; `--no-names` leaves it out and marks the summary line.
+/// lexicon file; the test used 酷澎 before 通語 SJ-LM-7-9.7M, whose counts made 酷澎 the first candidate without the layer too) is the first candidate in both profiles with no option; `--no-names` leaves it out and marks the summary line.
 #[test]
 fn names_layer_is_on_by_default_and_no_names_turns_it_off() {
     let dir = std::env::temp_dir().join(format!("shanjie-names-cli-{}", std::process::id()));

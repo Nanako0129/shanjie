@@ -207,10 +207,10 @@ fn row(n: usize) -> (String, Syls) {
 fn fixed_overlay_word_total_equals_whole_sentence_top1() {
     let s = shared();
     // rows whose chat top-1 contains an overlay word the corpus counts so low that the cap moves it by more than 0.1: 空氣炸鍋 (row 292). The other
-    // rows of model-v6 (洗衣球 276, 隔熱墊 278, 防滑墊 281; 手搖杯, row 290, left in model-v6) left it in SJ-LM-7: the counting vocabulary holds the
+    // rows of model-v6 (洗衣球 276, 隔熱墊 278, 防滑墊 281; 手搖杯, row 290, left in model-v6) left it in 通語 SJ-LM-7-9.7M: the counting vocabulary holds the
     // overlay words now, so their corpus frequency is within 0.1 of the overlay score (a search over dev302, 2026-10-27, found only row 292)
     // Both sides run on the model without the trigram tables, as in `fixed_word_total_equals_top1_on_first_rows` below: the chat profile has its own table
-    // since SJ-LM-7, and with it a path with a fixed word legitimately scores differently from the same string without one (trigram-core rule (a)).
+    // since 通語 SJ-LM-7-9.7M, and with it a path with a fixed word legitimately scores differently from the same string without one (trigram-core rule (a)).
     let lm = Arc::new(Lm::load_opts(&lm_path(), true, true, &[]).unwrap());
     for (n, word) in [(292, "空氣炸鍋")] {
         let (_, syls) = row(n);
@@ -240,7 +240,7 @@ fn row_of(file: &str, n: usize) -> Syls {
 
 /// 5(a) on the shipping chat configuration: the same as above with the chat trigram table loaded (`shared()` holds both tables). With a table a path
 /// with a fixed word can score differently from the same string without one (trigram-core rule (a)): dev302 row 292 above does, by 9e-2, which is why it
-/// runs without the tables. These rows do not (measured 2026-10-27 on the SJ-LM-7 files: a search over every word of the top-1 path that the cap moves
+/// runs without the tables. These rows do not (measured 2026-10-27 on the 通語 SJ-LM-7-9.7M files: a search over every word of the top-1 path that the cap moves
 /// by more than 0.1 in eval/dev, acg and names found equal totals on many of them, among them the rows below, and differing ones such as row 292), spread over
 /// the sets and over the position of the word (it starts at syllable 0, 2 or 9). The premises are asserted: the chat profile has its
 /// table, the word is in the top-1 path, the cap moves it.
@@ -349,7 +349,7 @@ fn type_row(e: &mut Engine, layout: Layout, syls: &Syls) -> Output {
 /// Acceptance 6 sentence (dev302 row 287): unigram, chat and formal top-1 are pairwise different, the truth being the formal one.
 /// It was row 10 before the word-class term (S2k), then row 226, then row 284, then row 127; each stopped telling the profiles apart (the class term made
 /// chat pick 期中報告 as formal does; the one-path-per-(surface, last word) decoder of dec-recombine made row 226 `及時趕到` in both; with
-/// trigram.sjt3 beside the model the formal profile gave 律水壺 on row 284, no longer the truth 濾水壺; with the SJ-LM-7 files, whose chat profile has
+/// trigram.sjt3 beside the model the formal profile gave 律水壺 on row 284, no longer the truth 濾水壺; with the 通語 SJ-LM-7-9.7M files, whose chat profile has
 /// its own table too, the two profiles agree on 倒是在廟裡設壇作法 on row 127). Row 287 (可以墊一個散熱墊) is the only dev302 row where the three differ with
 /// both tables beside the model: measured 2026-10-27 by typing all 302 rows through this engine setup (unigram engine, chat, formal); the formal one is the truth.
 /// The chat and formal strings below are also the golden's (checked by the last assert), the unigram one is the decoder's.
@@ -366,7 +366,7 @@ fn acceptance6_sentence_has_three_different_top1() {
 
 /// set_profile recomputes the composition and returns the snapshot; reset keeps the model and the profile.
 /// Row 131: chat 本市下週三會有大雨 (the truth), formal 本是下週三會有大雨 with trigram.sjt3 beside the model (本市… without the table; the test only
-/// needs the two profiles to differ; row 284 until SJ-LM-7, whose two profiles agree on it).
+/// needs the two profiles to differ; row 284 until 通語 SJ-LM-7-9.7M, whose two profiles agree on it).
 #[test]
 fn set_profile_snapshot_and_reset_keeps_lm_and_profile() {
     let (_, syls) = row(131);
@@ -470,7 +470,7 @@ fn candidates_ignore_the_model() {
 }
 
 /// s3d acceptance 4: punctuation is a sentence boundary for the bigram model. Premises straight from
-/// the decoder (measured 2026-10-27 on the SJ-LM-7 files, with the profile's own scoring (`Lm::scoring`: the chat table is on), by a search over the adjacent
+/// the decoder (measured 2026-10-27 on the 通語 SJ-LM-7-9.7M files, with the profile's own scoring (`Lm::scoring`: the chat table is on), by a search over the adjacent
 /// syllable pairs of dev302; ㄊㄚ ㄔㄤˊ and ㄗㄞˋ ㄏㄨㄢˋ, the pairs of 2026-10-04, no longer differ): X = ㄅㄨˋ ㄐㄧㄚ ends 不佳 with the sentence end
 /// but 不加 with a transition into "，"; Y = ㄅㄣˇ ㄕˋ starts 本市 from <s> but 本是 from "，". So the composition must read 不佳，本市.
 #[test]
@@ -662,7 +662,7 @@ fn replay_with_left_context_matches_cli_context() {
 }
 
 /// S2h acceptance 7: after 你 a lone ㄉㄧ˙ is 弟; without a left context it stays 地 (current behavior). It was ㄅㄚ˙ after 好 (吧 against 巴) until
-/// SJ-LM-7, whose model already gives 吧 without a context; found 2026-10-27 by trying every neutral-tone syllable of dev302 after eight one-character contexts
+/// 通語 SJ-LM-7-9.7M, whose model already gives 吧 without a context; found 2026-10-27 by trying every neutral-tone syllable of dev302 after eight one-character contexts
 /// in both profiles (only ㄉㄧ˙ after 你 or 他 differs).
 #[test]
 fn left_context_turns_di_into_the_younger_brother() {

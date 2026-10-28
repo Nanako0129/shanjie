@@ -1,6 +1,6 @@
 //! The colloquial term in the engine (docs/contracts/colloquial-term.md sections 2.2 and 3, item 1): on the real lexicon, n-gram model,
 //! small model and colloquial table (data/lm/, fail loudly without them). The sentence is row 25 of eval/bench/suite-v1/dev302.txt (row 202 until
-//! SJ-LM-7, whose n-gram gets it right): the shipping rerank keeps the n-gram first (candidate 0, `城市`), the term picks candidate 1 (`程式`).
+//! 通語 SJ-LM-7-9.7M, whose n-gram gets it right): the shipping rerank keeps the n-gram first (candidate 0, `城市`), the term picks candidate 1 (`程式`).
 use core::engine::*;
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
@@ -185,7 +185,7 @@ fn k_counts_the_pack_words_the_engine_was_built_with() {
 }
 
 /// Rows 81 and 159 of eval/dev/user-reported.txt (public), the two rows of that set (and of dev302, whose rows have none) where the reading-channel term
-/// (docs/contracts/reading-channel.md) changes the colloquial term's choice on the SJ-LM-7 files (rows 10, 81 and 102 on model-v6): (context, syllables, the
+/// (docs/contracts/reading-channel.md) changes the colloquial term's choice on the 通語 SJ-LM-7-9.7M files (rows 10, 81 and 102 on model-v6): (context, syllables, the
 /// pick with the colloquial term alone, the pick with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27).
 const CHANNEL_ROWS: [(&str, &str, usize, usize); 2] = [("", "ㄓㄤˇ ㄨㄞ ㄌㄜ˙", 0, 2), ("", "ㄧㄡˇ ㄉㄧㄢˇ ㄌㄟˇ ㄓㄨㄟˋ", 4, 0)];
 
@@ -243,7 +243,7 @@ fn each_stretch_is_cut_over_its_own_syllables() {
 
 /// Public rows where a level's own cell picks a candidate that the standard cell or the level's header triple (v0.5.0: the plain `rerank`) does not pick,
 /// with the picks of `--rerank-level L --colloquial-core` and the two it must differ from (the CLI's `--tinylm-scores` `c`, measured 2026-10-27 on the
-/// SJ-LM-7 files): (level, context, syllables, cell's pick, standard cell's pick, header triple's pick). Rows 25 and 27 of eval/bench/suite-v1/dev302.txt at the
+/// 通語 SJ-LM-7-9.7M files): (level, context, syllables, cell's pick, standard cell's pick, header triple's pick). Rows 25 and 27 of eval/bench/suite-v1/dev302.txt at the
 /// conservative strength (25: the conservative delta 1 keeps the n-gram first where the standard cell, delta 0, takes the term's pick; 27: the term's pick 回覆
 /// that the header triple alone does not make, which the standard cell makes too); row 22 at the aggressive one (the aggressive alpha 1.0 takes 2 where the
 /// standard cell and the header triple keep 0). Each row differs from at least one of the two; no public row differs from both at the conservative strength,

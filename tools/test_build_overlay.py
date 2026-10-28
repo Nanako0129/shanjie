@@ -588,7 +588,7 @@ class Cantonese(unittest.TestCase):
         with open(B.OUT, encoding="utf-8") as f:
             words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")}
         self.assertEqual({w for w in words if not B.CANTO_CHARS.isdisjoint(w)},
-                         {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇", "從諗"})   # 從諗: a Moedict headword the SJ-LM-7 supplement brings in
+                         {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇", "從諗"})   # 從諗: a Moedict headword the 通語 SJ-LM-7-9.7M supplement brings in
 
 
 class ShippedOverlay(unittest.TestCase):

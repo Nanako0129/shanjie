@@ -94,7 +94,7 @@ fn row25(dir: &Path) -> String {
 }
 
 /// Without `--colloquial-core` every output is what the CLI wrote before the option existed (hashes of `--dev 16 --context --packs acg --tinylm
-/// data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`; taken 2026-10-27 on the SJ-LM-7 files from the measurement CLI of the
+/// data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`; taken 2026-10-27 on the 通語 SJ-LM-7-9.7M files from the measurement CLI of the
 /// sj-lm-7 selection, which has no colloquial option in this path, run with its research flag `--chat-tri on-kn`, and equal to this binary's;
 /// before that, from the binary that had no option at all, on the model-v6 files).
 // macOS only: the dump and scores carry f64 values that the Linux libm rounds differently in the last bit (the WSL runner skips the existing
@@ -116,7 +116,7 @@ fn no_option_is_byte_identical_to_before() {
     assert_eq!(h(&o.stdout), "da55bd37457e24ef2f6c0bd2fe2334d45f84911a37cc30f8584e318b66f72642");
 }
 
-/// The acceptance row: the shipping rerank keeps `城市` (c 0; it was row 202, 羅斯松 against 螺絲鬆, until SJ-LM-7, whose n-gram gets that one right), the
+/// The acceptance row: the shipping rerank keeps `城市` (c 0; it was row 202, 羅斯松 against 螺絲鬆, until 通語 SJ-LM-7-9.7M, whose n-gram gets that one right), the
 /// term picks `程式` (c 1), and the summary line is tagged with the table's SHA-256 prefix (the files of the two runs are otherwise the same except the
 /// choice: the dump is the decoder's order in both).
 #[test]
@@ -135,8 +135,8 @@ fn the_term_changes_row_25() {
     assert_eq!(ll(&ship.sc), ll(&new.sc), "the small model's LLs are the same numbers");
 }
 
-/// The first 60 rows of dev302 and rows 196-230, which hold 202, 218 and 223: the three rows only the term fixed in dev302 under SJ-LM-6 (P4d). Rows 25, 36 and
-/// others the term fixes under SJ-LM-7 are in the first 60 too; it only has to be a set on which the term changes picks.
+/// The first 60 rows of dev302 and rows 196-230, which hold 202, 218 and 223: the three rows only the term fixed in dev302 under 通語 SJ-LM-6-9.1M (P4d). Rows 25, 36 and
+/// others the term fixes under 通語 SJ-LM-7-9.7M are in the first 60 too; it only has to be a set on which the term changes picks.
 fn rows_with_the_term_rows(dir: &Path) -> String {
     let all = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
     let lines: Vec<&str> = all.lines().collect();
@@ -191,7 +191,7 @@ fn level_rows(dir: &Path) -> String {
 }
 
 /// docs/contracts/colloquial-levels.md: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those the CLI gives on the final SJ-LM-7 files with the cells of sj-lm-7.md section 2.9
+/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those the CLI gives on the final 通語 SJ-LM-7-9.7M files with the cells of sj-lm-7.md section 2.9
 /// (measured 2026-10-27; the cell arithmetic itself is `core/src/colloquial.rs`'s unit tests): standard (0.7, 2, 0) [1, 0, 0, 3]; conservative (0.7, 2, 1) keeps the
 /// n-gram first on the three dev302 rows and picks 3 on the user-reported one, where the header triple without the term picks [0, 0, 0, 0]; aggressive (1.0, 2, 0.1)
 /// picks [1, 5, 2, 3], the header triple without the term [0, 0, 0, 0].
@@ -269,7 +269,7 @@ fn chosen(sc: &str) -> Vec<usize> {
 /// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (row 81 moves to the pick
 /// the channel gives, [2, 0, 0]; the cell `lex,1.0,4` of `p5.py`); `--no-reading-channel` is the colloquial term alone (the P4d picks; here [0, 4, 0], where
 /// row 159 is the one the colloquial term moves and the channel moves back) and its summary tag lacks the `+rc` of the default run; without `--colloquial-core`
-/// the option changes nothing at all. Picks measured with the CLI on the SJ-LM-7 files, 2026-10-27 (rows 10, 81 and 102, [2, 0, 0] and [0, 1, 1], until then).
+/// the option changes nothing at all. Picks measured with the CLI on the 通語 SJ-LM-7-9.7M files, 2026-10-27 (rows 10, 81 and 102, [2, 0, 0] and [0, 1, 1], until then).
 #[test]
 fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_alone() {
     let d = tmp("rc");

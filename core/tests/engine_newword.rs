@@ -141,7 +141,7 @@ fn spell(e: &mut Engine, target: &str) {
 }
 
 /// The user story of §1 with 夢依, a made-up name the lexicon lacks and the corpus never saw (the reported missing words, 版控 and
-/// then 派工, are decoded unaided by the models since model-v6 and SJ-LM-7, which count the vocabulary of the lexicon): 夢依 stays 夢一 in every
+/// then 派工, are decoded unaided by the models since model-v6 and 通語 SJ-LM-7-9.7M, which count the vocabulary of the lexicon): 夢依 stays 夢一 in every
 /// context. After 要進 was sent, type ㄇㄥˋ ㄧ, re-pick each wrong character one by one, Enter.
 fn teach_paigong(e: &mut Engine) {
     e.set_left_context("要進");
@@ -363,7 +363,7 @@ fn tiny(text: &str) -> Engine {
     e.set_learning(true);
     e
 }
-/// Syllables of T (each one character, two homophones apart from 的 and Ａ). The second homophone is at -4.0 (-1.5 before SJ-LM-7): with -1.5 the
+/// Syllables of T (each one character, two homophones apart from 的 and Ａ). The second homophone is at -4.0 (-1.5 before 通語 SJ-LM-7-9.7M): with -1.5 the
 /// new model, which counts 版控 and the like, decodes the run from the characters unaided and there is nothing to learn.
 const T: &str = "ㄅㄢˇ 板 -1.0\nㄅㄢˇ 版 -4.0\nㄎㄨㄥˋ 控 -1.0\nㄎㄨㄥˋ 空 -4.0\nㄕㄨ 書 -1.0\nㄕㄨ 舒 -4.0\nㄏㄨㄚ 花 -1.0\nㄏㄨㄚ 嘩 -4.0\nㄉㄜ˙ 的 -1.0\nㄟ Ａ -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\n";
 /// Type `reading` on a T engine, re-pick the character at `at`, Enter; the new words learned. Sub-spans (§2.2 item 5)

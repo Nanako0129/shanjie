@@ -653,7 +653,7 @@ class Build(unittest.TestCase):
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
     def build(self, collisions, exclude=None, decode=None, years=()):
-        # 解碼器是假的（真的解碼器每次建置要跑 4 個 CLI 程序，結果還跟著出貨的模型變：SJ-LM-7 的通語自己就把 風之谷 排在 楓之谷 前面）；
+        # 解碼器是假的（真的解碼器每次建置要跑 4 個 CLI 程序，結果還跟著出貨的模型變：通語 SJ-LM-7-9.7M 自己就把 風之谷 排在 楓之谷 前面）；
         # 預設每個詞都解成它自己，要測衝突的測試自己給會「換掉第一名」的解碼器。
         return build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years, min_year_works=1,
                        decode=decode or (lambda pairs, prof, packs=None: [w for w, _ in pairs]))

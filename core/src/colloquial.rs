@@ -7,7 +7,7 @@
 //!
 //! The constants MU, GATE_T and gamma = mu / 2 are the cell P4d registered and chatjudge-2 confirmed (experiments/p4d-colloquial/README.md). The
 //! three (alpha, tau, delta) cells, one per strength (docs/contracts/colloquial-levels.md), are the ones docs/contracts/sj-lm-7.md section 2.9
-//! selected for the SJ-LM-7 base; none of them comes from the `.sjtl` header.
+//! selected for the 通語 SJ-LM-7-9.7M base; none of them comes from the `.sjtl` header.
 use crate::lm::{Lm, LmError, Profile};
 use crate::tinylm::{pick_masked, RerankLevel, TinyLm};
 use crate::Lexicon;
@@ -23,7 +23,7 @@ pub const GATE_T: f64 = 1.0;
 /// gamma / mu: col = lc - GAMMA_PER_MU * k, i.e. gamma = mu / 2 (P4d: P4c's mu 0.5 cell).
 pub const GAMMA_PER_MU: f64 = 0.5;
 /// The fusion's (alpha, tau, delta) under the colloquial term at the standard strength: the cell docs/contracts/sj-lm-7.md section 2.9
-/// selected on chatclause (n 5,761; 24-cell grid fixed beforehand) for the SJ-LM-7 base, rule "F - 2B largest with F - 2B >= 0": F 167, B 44
+/// selected on chatclause (n 5,761; 24-cell grid fixed beforehand) for the 通語 SJ-LM-7-9.7M base, rule "F - 2B largest with F - 2B >= 0": F 167, B 44
 /// against the n-gram first choice (docs/research-log.md 2026-10-26, "定案的選值結果"). The three cells here are the chat fusion at each
 /// strength; the `.sjtl` header's chat triples only back a col that is not finite.
 pub const STANDARD: (f64, f64, f64) = (0.7, 2.0, 0.0);
@@ -46,7 +46,7 @@ pub const NU: f64 = 1.0;
 /// The reading-channel term's clip: each single-character word contributes at least -CAP (P5 registered cell `lex,1.0,4`).
 pub const CAP: f64 = 4.0;
 
-/// SHA-256 of the `.sjtl` the cells were measured with (SJ-SR-7 R1 final file, data/tinylm.sjtl.sha256); the term applies to no other small model.
+/// SHA-256 of the `.sjtl` the cells were measured with (會意 SJ-SR-7-15M R1 final file, data/tinylm.sjtl.sha256); the term applies to no other small model.
 pub const PAIRED_TINYLM_SHA256: &str = "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -251,7 +251,7 @@ mod tests {
         assert!((a - b).abs() < 1e-12, "{a} vs {b}");
     }
 
-    /// The `.sjtl` header's chat standard triple of the SJ-SR-6 files (the fallback of a col that is not finite): not one of the three cells.
+    /// The `.sjtl` header's chat standard triple of the 會意 SJ-SR-6-14M files (the fallback of a col that is not finite): not one of the three cells.
     const HEADER_STANDARD: (f64, f64, f64) = (0.3, 2.0, 0.25);
 
     #[test]

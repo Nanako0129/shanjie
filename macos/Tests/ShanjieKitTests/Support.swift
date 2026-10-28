@@ -298,7 +298,7 @@ enum Layouts {
     }
 }
 
-/// dev302 row 131 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, row 284 before SJ-LM-7, see Selftest.swift).
+/// dev302 row 131 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, row 284 before 通語 SJ-LM-7-9.7M, see Selftest.swift).
 enum Row131 {
     static let zhuyin = "ㄅㄣˇ ㄕˋ ㄒㄧㄚˋ ㄓㄡ ㄙㄢ ㄏㄨㄟˋ ㄧㄡˇ ㄉㄚˋ ㄩˇ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
@@ -385,15 +385,15 @@ final class FreeCounter: @unchecked Sendable {
 }
 
 /// dev302 row 10 (期中報告明天要交): in the chat profile the n-gram's first is right and the small model keeps it, with and without the pack and the
-/// colloquial table (CLI, 2026-10-27), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall). Before SJ-LM-7: dev302 row 65 (since
-/// classes-v5, whose chat n-gram gave 我等一下再過去 already; the sentence of the s7c2b section 2.5 selftest before that), which the SJ-LM-7 n-gram gets
+/// colloquial table (CLI, 2026-10-27), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall). Before 通語 SJ-LM-7-9.7M: dev302 row 65 (since
+/// classes-v5, whose chat n-gram gave 我等一下再過去 already; the sentence of the s7c2b section 2.5 selftest before that), which the 通語 SJ-LM-7-9.7M n-gram gets
 /// wrong again (`RerankRow`).
 enum NoChangeRow {
     static let standardKeys = Layouts.keys("ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ", eten: false)
     static let text = "期中報告明天要交"
 }
 
-/// dev302 row 65 (s7c2b section 2.5, the selftest's sentence since the SJ-LM-7 files; row 27 from classes-v5 to model-v6, whose rerank changed 回復 to 回覆): in the
+/// dev302 row 65 (s7c2b section 2.5, the selftest's sentence since the 通語 SJ-LM-7-9.7M files; row 27 from classes-v5 to model-v6, whose rerank changed 回復 to 回覆): in the
 /// chat profile the n-gram's first is 我等一下在過去 and the small model picks 再 (CLI, 2026-10-27, chat standard, with and without the bundled packs, without
 /// the colloquial table; with it the pick is the same). The same happened under tinylm-v2 to v4 (RerankTests, 2026-10-13). Row 25 (執行這個城市 -> 程式) was this
 /// sentence under tinylm-v1 (`DeviceRow` below).

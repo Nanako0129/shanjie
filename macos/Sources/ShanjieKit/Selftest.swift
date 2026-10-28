@@ -13,7 +13,7 @@ public enum Selftest {
     /// Row 131 `ㄅㄣˇ ㄕˋ ㄒㄧㄚˋ ㄓㄡ ㄙㄢ ㄏㄨㄟˋ ㄧㄡˇ ㄉㄚˋ ㄩˇ` on the standard layout (s3a section 1);
     /// it was row 10 before S2k, whose chat and formal answers the word-class term made equal, row 226
     /// before dec-recombine, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal, and row 284
-    /// until SJ-LM-7 (docs/contracts/sj-lm-7-pr2.md), whose chat and formal answers the new model made equal; a space is the first tone.
+    /// until 通語 SJ-LM-7-9.7M (docs/contracts/sj-lm-7-pr2.md), whose chat and formal answers the new model made equal; a space is the first tone.
     /// The tests derive the same keys from the zhuyin independently. Measured 2026-10-27 with the CLI on the final files
     /// (`--context`, with and without `--packs acg,it`, n-gram first and the shipping rerank both give these): chat is 本市下週三會有大雨, formal 本是下週三會有大雨
     /// with trigram.sjt3 beside the model and 本市下週三會有大雨 without it, so this also catches a missing formal table.
@@ -26,22 +26,22 @@ public enum Selftest {
     ]
 
     /// The bundled word pack (acg-pack contract A.2): 榊遊矢 `ㄕㄣˊ ㄧㄡˊ ㄕˇ` on the standard layout. The chat
-    /// profile spells it 神遊使 without the pack, so the sentence is the pack word only if the pack loaded. (碇源堂, the word until SJ-LM-7, is in the new
+    /// profile spells it 神遊使 without the pack, so the sentence is the pack word only if the pack loaded. (碇源堂, the word until 通語 SJ-LM-7-9.7M, is in the new
     /// model's vocabulary and comes out first without the pack; measured with the CLI 2026-10-27.)
     static let packWordStandard = "gp6u.6g3"
     static let packWord = "榊遊矢"
     /// The bundled IT+AI pack (it-pack contract 3.2): 螢幕保護器 `ㄧㄥˊ ㄇㄨˋ ㄅㄠˇ ㄏㄨˋ ㄑㄧˋ` on the standard layout, chat profile. It is a row of the pack, and
-    /// both profiles spell it 螢幕保護氣 without the pack and 螢幕保護器 with it (measured with the CLI, 2026-10-27; 圖像生成, the word until SJ-LM-7, comes out first
+    /// both profiles spell it 螢幕保護氣 without the pack and 螢幕保護器 with it (measured with the CLI, 2026-10-27; 圖像生成, the word until 通語 SJ-LM-7-9.7M, comes out first
     /// without the pack on the new model), so the sentence is the word only if the pack loaded. The pack is on in the
     /// engine below, as the shell ships it.
     static let itWordStandard = "u/6aj41l3cj4fu4"
     static let itWord = "螢幕保護器"
 
-    /// SJ-LM-7 (2026-10-27, docs/contracts/sj-lm-7-pr2.md): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat profile, no left context,
+    /// 通語 SJ-LM-7-9.7M (2026-10-27, docs/contracts/sj-lm-7-pr2.md): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat profile, no left context,
     /// the bundled packs loaded, the small model loaded and the colloquial table not yet: the n-gram's first is 我等一下在過去 and the rerank picks 我等一下再過去
     /// (measured with the CLI on the final files, chat standard, `--packs acg,it --tinylm`, without `--colloquial-core`; the CLI's plain dev302 row 65 is the
     /// same with `--context`). A space is the first tone. History: s7c2b section 2.5: this row since 2026-10-12 (tinylm-v2 to v4); classes-v5 (μ 0.2) made the n-gram
-    /// itself give 再過去 and the sentence moved to row 27 (我已經回復你的郵件了 -> 回覆), which on the SJ-LM-7 files the rerank alone no longer changes (only
+    /// itself give 再過去 and the sentence moved to row 27 (我已經回復你的郵件了 -> 回覆), which on the 通語 SJ-LM-7-9.7M files the rerank alone no longer changes (only
     /// the colloquial term does). Row 25 (執行這個城市 -> 程式) is the device sentence (s7h section 1, `DeviceRow` in the tests).
     /// The tests derive the same keys from the zhuyin independently.
     static let rerankRowStandard = "ji32/3u vu84y94eji4fm4"

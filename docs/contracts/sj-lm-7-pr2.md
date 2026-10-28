@@ -5,8 +5,8 @@
 ## 0. 要做到什麼、怎麼看到
 
 - **要做到**：真引擎（核心、FFI、App）照定案組合解碼：
-  - 聊天：bigram＋KN（β 照 `kn.sjkn` 檔頭）＋**聊天連文表**（0.95M 條）＋常談 C1＋會意 `f7d0ac63…`，三檔用 §2.9 選中的 cell。
-  - 書面：bigram＋KN（**β 0.75**）＋**書面連文表**（WC 7.7M 條）＋會意 `f7d0ac63…` 的檔頭值。
+  - 聊天：bigram＋KN（β 照 `kn.sjkn` 檔頭）＋**聊天連文表**（0.95M 條）＋常談 C1＋會意 SJ-SR-7-15M（`f7d0ac63…`），三檔用 §2.9 選中的 cell。
+  - 書面：bigram＋KN（**β 0.75**）＋**書面連文表**（WC 7.7M 條）＋會意 SJ-SR-7-15M（`f7d0ac63…`）的檔頭值。
 - **怎麼看到**：
   1. 新 CLI 不帶任何研究旗標，在公開集合上的逐列結果，和 §2.9／§2.10 量測用的 CLI 帶研究旗標（聊天 `--chat-tri on-kn`、書面 `--formal-kn --kn-beta 0.75`）逐位元組相同（§3 第 1 條）。
   2. 真引擎（bench 的 replay）在 Mac 閒置窗量到按鍵 p95、重排 p95 與 RSS，過 §4 的門檻。
@@ -21,13 +21,13 @@
 | `data/lm/trigram.sjt3` | 書面連文表 WC 7.7M（檔名不變） | `~/s1v-lm/WC-K7.7M/trigram.sjt3`（`34305a2d…`） |
 | `data/lm/trigram-chat.sjt3`（新） | 聊天連文表 0.95M | `~/s1u-lm/K0.95M/trigram.sjt3`（`24ee8645…`） |
 | `data/lm/colloquial.sjlm` | 常談 C1 | `~/s4/C1.sjlm`（`81c2470d…`） |
-| `data/lm/tinylm.sjtl` | 會意 SJ-SR-7 R1 定案檔 | `f7d0ac63…`（Mac `~/.cache/shanjie/sj7-final/`） |
+| `data/lm/tinylm.sjtl` | 會意 SJ-SR-7-15M R1 定案檔 | `f7d0ac63…`（維護者本機） |
 | 詞包、`digits.tsv`、`acg-counts.tsv` 等 | 階段 1 在 B6 上重建的檔 | GCP `~/s3a-cli/data/`；逐檔和分支上的版本比對，不同的照上層 §2.6 換 |
 
 - **這些是最終檔**：維護者在私人步驟把用來辨識來源的指紋條目加進 bigram，並重綁所有綁定它的檔（只改檔頭的雜湊位元組，其餘內容不變）；上表的雜湊是加指紋之後的值，`colloquial.sjlm` 不受影響。換檔前後在公開集合上的逐列結果逐位元組相同（`--rowstats`，dev302、打字測驗、錯字回報，聊天與書面）。
 - 兩張連文表都綁同一個 bigram（`Tri::parse` 檢查模型雜湊），不符就拒絕載入，照現行規則。
 - **雜湊與清單在這一片**：每個最終檔的 `data/*.sha256`（新增 `data/trigram-chat.sjt3.sha256`）與 `data/models.tsv` 的列（新增聊天連文表一列；名稱照模型命名規則，規模照檔的實際大小），讓 `scripts/build-app.sh`、`scripts/check-models.sh` 與 `tools/bench.py` 在本機檔上就能用。
-- 從 VM 帶回 Mac 的步驟寫成腳本、過 `/code-review` 才跑（GCP 規則）；帶回後逐檔核對 SHA-256。這些檔都是公開語料建的，可以放 hermit，不進 repo。
+- 從 VM 帶回 Mac 的步驟寫成腳本、過 `/code-review` 才跑（GCP 規則）；帶回後逐檔核對 SHA-256。這些檔都是公開語料建的，可以放維護者本機，不進 repo。
 
 ## 2. 核心、CLI、App
 
@@ -51,7 +51,7 @@
 - **手動詞集合**（資料來源與鍵）：
   - 來源：`data/lexicon/overlay-add.tsv` 第 4 欄是 `manual` 的列（`tools/build_overlay.py` 從 `overlay-manual.tsv` 接上去的）。`Lexicon` 讀疊加層時，除了照舊建詞條，另外把這些列收成一個集合 `ManualSet`；鍵是（詞的字串，讀音的音節序列），詞庫保證一個字一個音節。其他標籤（`slang`、`names`、詞包…）不收。
   - 建立的時機：引擎建立時（`Engine::new` 讀詞庫的同一處）與 CLI 讀詞庫時，兩者經過同一個 `Lexicon` 函式，不另寫一份。
-- **哪些地方受保護**（不需要候選的斷詞）：重排的一段（stretch）有音節序列 `syl[0..n]` 與 n-gram 前 8 名的字串 `cands[0..k]`。對 `ManualSet` 的每一個（詞 w，讀音 r），在 `syl` 裡找所有 `syl[i..i+|r|] == r` 而且 `cands[0]` 在第 i 字起的 `|w|` 個字等於 w 的位置 i；這些（i, w）就是受保護的段。候選 c「保有」全部受保護的段＝對每一個（i, w），c 在第 i 字起的 `|w|` 個字等於 w。
+- **哪些地方受保護**（不需要候選的斷詞）：重排的一段（stretch）有音節序列 `syl[0..n]` 與 n-gram 前 8 名的字串 `cands[0..k]`。對 `ManualSet` 的每一個（詞 w，讀音 r），在 `syl` 裡找所有 `syl[i..i+|r|] == r` 而且 `cands[0]` 在第 i 字起的 `|w|` 個字等於 w 的位置 i；這些（i, w）就是受保護的段。這裡的 `syl` 是 n-gram 第一名那條路徑實際用的讀音：一般輸入就是打的音節；鄰鍵輸入（`docs/contracts/fuzzy-input.md`）把詞庫沒有的音節讀成它的替代讀音時，用那個詞庫讀音（`Lexicon::path_readings`，引擎的工作與 CLI 同一個函式），所以手動詞經由容錯讀音成為第一名時也受保護。候選 c「保有」全部受保護的段＝對每一個（i, w），c 在第 i 字起的 `|w|` 個字等於 w。
 - **選擇規則**（遮罩，門檻照舊）：
   - 沒有受保護的段：完全照舊。
   - 有受保護的段：不保有的候選在**選擇時遮掉**（不能被選），但 τ 門檻與所有分數仍用完整的清單算（`pick` 的 `ng[0] − ng[1] ≥ τ` 照舊用原本的第二名）。例：`ng = [0, −0.5, −3]`、τ = 2、候選 1 不保有：門檻 0.5 < 2，重排照常比較，但只能在候選 0 與候選 2 之間選。
@@ -80,10 +80,10 @@
 ## 3. 驗收
 
 1. **逐位元組相同**（Mac，公開集合，聊天三檔＋書面三檔）：新 CLI 不帶研究旗標，對 §2.9／§2.10 量測用的 CLI（分支 `7808c7b4`＋配對 `f7d0ac63` 與三個 cell，帶研究旗標），在 dev302、typing76、user-reported、動漫五集、名單三集的 `--rowstats`、`--dump` 與**整行摘要**都逐位元組相同（沒有例外）。
-   - 參照的模型資料夾（舊 CLI 只認 `trigram.sjt3`，所以兩種設定各一個資料夾）：聊天＝B6 `bigram.sjlm` `e3fb6056`、`classes.sjc` `4c1071f2`、`kn.sjkn` `880ee87c`、`trigram.sjt3`＝聊天表 `24ee8645`；書面＝同樣三個檔、`trigram.sjt3`＝書面表 `34305a2d`。兩者都用會意 `f7d0ac63`、常談 C1 `81c2470d`（聊天）。
+   - 參照的模型資料夾（舊 CLI 只認 `trigram.sjt3`，所以兩種設定各一個資料夾）：聊天＝B6 `bigram.sjlm` `e3fb6056`、`classes.sjc` `4c1071f2`、`kn.sjkn` `880ee87c`、`trigram.sjt3`＝聊天表 `24ee8645`；書面＝同樣三個檔、`trigram.sjt3`＝書面表 `34305a2d`。兩者都用會意 SJ-SR-7-15M `f7d0ac63`、常談 C1 `81c2470d`（聊天）。
    - 新 CLI 用一個資料夾，兩張表各用自己的檔名；摘要行要含：聊天 `+kn:880ee87c:θ1:β1` 與 `+tri:24ee8645`，書面 `+kn:880ee87c:θ1:β0.75` 與 `+tri:34305a2d`。
 2. **測試**（含 §2 第 6 條的 Swift 測試；含壞檔：壞掉的 `trigram-chat.sjt3` 讓 CLI 聊天失敗、CLI 書面照常、`Engine::load_lm` 失敗；壞掉的 `trigram.sjt3` 反過來）：改寫釘住舊行為的測試（`core/src/lm.rs` 的 scoring 真值表、`core/tests/tri_tiny.rs`、`kn_tiny.rs`、`cli/tests/golden.rs` 的 `trigram_table_is_read_for_formal_only` 與 dev302 golden、`engine_lm.rs` 有連文表的列、`tinylm_tiny.rs`、`cli/tests/tinylm.rs`），每條新規則一個「規則壞了就失敗」的測試：聊天讀聊天表、書面讀書面表、各自缺檔時只影響自己、書面 β 0.75、`--no-tri`、`--no-kn`、配對雜湊與三個 cell。golden 在最終檔上重產。
-3. Mac 上跑改到的測試檔、`make test-python`、`make test-swift`。188 WSL 的完整 Rust 測試與 CI 會從 GitHub 下載 Release、核對模型雜湊，所以排在 §6 換完 Release 引用之後。
+3. Mac 上跑改到的測試檔、`make test-python`、`make test-swift`。評測機器上 WSL 的完整 Rust 測試與 CI 會從 GitHub 下載 Release、核對模型雜湊，所以排在 §6 換完 Release 引用之後。
 4. 用本機檔建出的 App：`Contents/Resources` 有 `trigram-chat.sjt3`（`24ee8645…`），`scripts/check-models.sh bundle` 通過，`Contents/MacOS/shanjie --selftest` 結束碼 0；`make test-swift` 在 `data/lm` 放最終檔時通過。
 
 ## 4. 量測（閒置窗；量法在數字之前寫進研究紀錄）
@@ -99,4 +99,4 @@
 
 ## 6. 範圍外（之後的 commit，同一個 PR）
 
-- Release（通語 `model-v7`、辨類、承接、連文兩張、會意、常談；每個 Release 建立前都問維護者）、`ci.yml`／`release.yml`／`scripts/fetch-models.sh` 與 `build-app.sh` 下載提示裡的 Release 名稱與網址、授權（上層 §5）、chatjudge-3 確認一發、保留集；之後才跑 §3 第 3 條的 188 與 CI。
+- Release（通語 `model-v7`、辨類、承接、連文兩張、會意、常談；每個 Release 建立前都問維護者）、`ci.yml`／`release.yml`／`scripts/fetch-models.sh` 與 `build-app.sh` 下載提示裡的 Release 名稱與網址、授權（上層 §5）、chatjudge-3 確認一發、保留集；之後才跑 §3 第 3 條在評測機器上的測試與 CI。

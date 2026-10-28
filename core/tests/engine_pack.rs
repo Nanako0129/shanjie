@@ -180,7 +180,7 @@ fn the_names_layer_is_capped_on_the_engine_path() {
     assert_eq!(out.unwrap().preedit, "鑫犇", "the synthetic name must be the decode");
     let lm = core::lm::Lm::load(&lm_path()).unwrap();
     assert_eq!(lm.count("鑫犇"), 0, "the fixture word must be one the corpus never saw");
-    // The chat profile scores with its own trigram table since SJ-LM-7: the first word starts from (<s>, <s>) and the floor of a context the table stores applies.
+    // The chat profile scores with its own trigram table since 通語 SJ-LM-7-9.7M: the first word starts from (<s>, <s>) and the floor of a context the table stores applies.
     let cfg = lm.scoring(Profile::Chat);
     let total = |lp: f64| lm.word3(cfg, Some("<s>"), "<s>", "鑫犇", lp) + lm.eos3(cfg, Some("<s>"), "鑫犇");
     let got = e.total_score().unwrap();
@@ -204,7 +204,7 @@ fn an_anime_pack_word_keeps_its_score_on_the_engine_path() {
     assert_eq!(out.unwrap().preedit, "鑫犇", "the pack word must be the decode");
     let lm = core::lm::Lm::load(&lm_path()).unwrap();
     assert_eq!(lm.count("鑫犇"), 0, "the fixture word must be one the corpus never saw");
-    // The chat profile scores with its own trigram table since SJ-LM-7: the first word starts from (<s>, <s>) and the floor of a context the table stores applies.
+    // The chat profile scores with its own trigram table since 通語 SJ-LM-7-9.7M: the first word starts from (<s>, <s>) and the floor of a context the table stores applies.
     let cfg = lm.scoring(Profile::Chat);
     let total = |lp: f64| lm.word3(cfg, Some("<s>"), "<s>", "鑫犇", lp) + lm.eos3(cfg, Some("<s>"), "鑫犇");
     let got = e.total_score().unwrap();

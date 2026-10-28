@@ -205,7 +205,7 @@ fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], 
     LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, None, l, &[], &Default::default()).unwrap().0)
 }
 
-/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the SJ-LM-7 cells of sj-lm-7.md section 2.9), not the standard one. One
+/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the 通語 SJ-LM-7-9.7M cells of sj-lm-7.md section 2.9), not the standard one. One
 /// list, equal col everywhere (so the colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's LLs (candidate 1 is
 /// 3.9124 above candidate 0, candidate 2 is 8.0212 above) and n-gram gaps of 1.99 and 5.3: candidate 1 gains 0.7 * 3.9124 - 1.99 = 0.75 and candidate 2
 /// 0.7 * 8.0212 - 5.3 = 0.31 at alpha 0.7, so standard (delta 0) takes 1 and conservative (delta 1) keeps 0; at the aggressive alpha 1.0 they gain

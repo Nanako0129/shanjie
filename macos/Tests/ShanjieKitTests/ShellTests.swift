@@ -512,7 +512,7 @@ final class ShellTests: XCTestCase {
     }
 
     /// sw (docs/contracts/sw-sensitive-demote.md section 3): the menu item is checked by default, flips the
-    /// core's setting (the frozen probe's row ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙; the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ is right on the SJ-LM-7 files with or without the table), is stored, and a new shell reads the stored
+    /// core's setting (the frozen probe's row ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙; the user report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ is right on the 通語 SJ-LM-7-9.7M files with or without the table), is stored, and a new shell reads the stored
     /// choice (a stored off survives a restart and a layout switch rebuild).
     func testDemoteMenuItemTogglesStoresAndSurvivesRestart() {
         let report = Layouts.keys("ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙", eten: false)

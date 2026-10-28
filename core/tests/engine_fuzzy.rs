@@ -457,7 +457,7 @@ fn picking_beside_a_tolerant_word_does_not_freeze_it_under_the_typed_reading() {
 
 /// Review item 2: ⌘⌫ on a learned new word drops its item from the open window; the window's map from list position to lexicon reading
 /// (`Cands::alt`) stayed as it was, so every tolerant word behind the forgotten one read its neighbour's reading when chosen.
-/// 派弓 (not 派工: on the SJ-LM-7 files 派工 is already the n-gram's first path, so picking it re-picks nothing and teaches no new word) is taught with ㄣ/ㄥ on; typing it again lists 派弓 first among the two-syllable items and the one-syllable words of ㄍㄨㄣ
+/// 派弓 (not 派工: on the 通語 SJ-LM-7-9.7M files 派工 is already the n-gram's first path, so picking it re-picks nothing and teaches no new word) is taught with ㄣ/ㄥ on; typing it again lists 派弓 first among the two-syllable items and the one-syllable words of ㄍㄨㄣ
 /// (read through the slip ㄍㄨㄥ) last. After forgetting 派弓, choosing the first of those must rewrite ㄍㄨㄥ to ㄍㄨㄣ.
 #[test]
 fn forgetting_a_new_word_keeps_the_tolerant_readings_in_step() {

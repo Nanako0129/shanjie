@@ -857,13 +857,13 @@ fn row_decode_failure_does_not_learn() {
     }
     assert!(failed, "decode failure reported");
     // The engine was reset: ㄅㄣ decodes as on an engine that never failed. Until model-v6 that was 犇; with model-v6 and its
-    // Kneser-Ney side file the unlearned decode was 奔 (model-v6 section 2.8 acceptance 5), with the SJ-LM-7 files it is 犇 again, so the
+    // Kneser-Ney side file the unlearned decode was 奔 (model-v6 section 2.8 acceptance 5), with the 通語 SJ-LM-7-9.7M files it is 犇 again, so the
     // expectation comes from a fresh engine.
     let fresh = {
         let mut f = tiny(&format!("{TINY}ㄆㄧㄥˊ 平 -1.0\n"), TINY);
         type_syls(&mut f, "ㄅㄣ").preedit
     };
-    assert_eq!(fresh, "犇", "premise: the unlearned decode of ㄅㄣ on the SJ-LM-7 files");
+    assert_eq!(fresh, "犇", "premise: the unlearned decode of ㄅㄣ on the 通語 SJ-LM-7-9.7M files");
     assert_eq!(type_syls(&mut e, "ㄅㄣ").preedit, fresh, "engine was reset");
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(n_records(&e), 0);
@@ -2128,7 +2128,7 @@ fn records_of(e: &Engine, word: &str) -> Vec<(String, f64)> {
 /// 輩份 there is `^>ㄗ` only if the engine passes the syllable right of the segment (B4 of the verifier's probes).
 #[test]
 fn rule8_after_is_the_first_syllable_of_a_fixed_word_to_the_right() {
-    const R: &str = "ㄅㄟˋ ㄈㄣˋ ㄗ"; // 我是買 / 我試 / ㄇㄞˇ until SJ-LM-7, whose model keeps 我是 against one teaching; found 2026-10-27 by trying the dev302 syllable triples
+    const R: &str = "ㄅㄟˋ ㄈㄣˋ ㄗ"; // 我是買 / 我試 / ㄇㄞˇ until 通語 SJ-LM-7-9.7M, whose model keeps 我是 against one teaching; found 2026-10-27 by trying the dev302 syllable triples
     assert_eq!(baseline(R), "備份資", "precondition");
     let mut e = engine();
     assert_eq!(repick_commit(&mut e, R, 2, "輩份"), "輩份資");

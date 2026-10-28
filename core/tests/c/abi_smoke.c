@@ -72,7 +72,7 @@ static int run(const char *dir, uint32_t layout, const char *nihao, const char *
   return 0;
 }
 
-/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 287 (row 284 until SJ-LM-7, whose chat and formal answers the new model made equal; row 226
+/* S2c (docs/PLAN.md S2c acceptance 6), on dev302 row 287 (row 284 until 通語 SJ-LM-7-9.7M, whose chat and formal answers the new model made equal; row 226
  * since S2k, whose chat and formal answers the one-path-per-(surface, last word) decoder made equal; before that row 10, which the word-class term made
  * equal), reading
  *   ㄎㄜˇ ㄧˇ ㄉㄧㄢˋ ㄧ ㄍㄜ˙ ㄙㄢˋ ㄖㄜˋ ㄉㄧㄢˋ
@@ -105,7 +105,7 @@ static int row_shows(ShanjieEngine *e, const char *want) {
   return ok;
 }
 
-/* ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙ (a reading the sensitive-word table changes on the SJ-LM-7 files, as the report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ did before them), standard keys; its two possible top-1 strings. */
+/* ㄍㄠˇ ㄨㄢˊ ㄌㄜ˙ (a reading the sensitive-word table changes on the 通語 SJ-LM-7-9.7M files, as the report ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ did before them), standard keys; its two possible top-1 strings. */
 #define REPORT_KEYS "el3j06xk7"
 #define REPORT_ON "\xe6\x90\x9e\xe5\xae\x8c\xe4\xba\x86"  /* 搞完了 */
 #define REPORT_OFF "\xe7\x9d\xaa\xe4\xb8\xb8\xe4\xba\x86" /* 睪丸了 */
