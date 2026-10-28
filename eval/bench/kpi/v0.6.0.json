@@ -1,4 +1,20 @@
 {
+ "holdout_news_formal": {
+  "broken": 0,
+  "fixed": 3,
+  "n": 150,
+  "p": 0.25,
+  "rows_sha256": "637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38",
+  "top1": 128
+ },
+ "holdout_talk_chat": {
+  "broken": 1,
+  "fixed": 10,
+  "n": 150,
+  "p": 0.0117,
+  "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+  "top1": 124
+ },
  "replay": {
   "dev302": {
    "n": 302,
