@@ -16,13 +16,13 @@
 
 | 檔 | 內容 | 來源 |
 |---|---|---|
-| `data/lm/bigram.sjlm` | B6（剪枝門檻 6） | GCP `~/s1u-lm/K0.95M/bigram.sjlm`（`e3fb6056…`） |
+| `data/lm/bigram.sjlm` | B6（剪枝門檻 6） | 評測機器上的定案建置（`69826c2f…`）；加指紋條目後 `e3fb6056…` |
 | `data/lm/classes.sjc`、`kn.sjkn` | B6 的分群與 KN 側檔（β 1） | 同一個資料夾 |
-| `data/lm/trigram.sjt3` | 書面連文表 WC 7.7M（檔名不變） | `~/s1v-lm/WC-K7.7M/trigram.sjt3`（`34305a2d…`） |
-| `data/lm/trigram-chat.sjt3`（新） | 聊天連文表 0.95M | `~/s1u-lm/K0.95M/trigram.sjt3`（`24ee8645…`） |
-| `data/lm/colloquial.sjlm` | 常談 C1 | `~/s4/C1.sjlm`（`81c2470d…`） |
+| `data/lm/trigram.sjt3` | 書面連文表 WC 7.7M（檔名不變） | 評測機器上的定案建置（`7ec1869b…`）；重綁到帶指紋的通語後 `34305a2d…` |
+| `data/lm/trigram-chat.sjt3`（新） | 聊天連文表 0.95M | 評測機器上的定案建置（`03891d5a…`）；重綁後 `24ee8645…` |
+| `data/lm/colloquial.sjlm` | 常談 C1 | 評測機器上的階段 4 建置（`81c2470d…`，不綁通語，不變） |
 | `data/lm/tinylm.sjtl` | 會意 SJ-SR-7-15M R1 定案檔 | `f7d0ac63…`（維護者本機） |
-| 詞包、`digits.tsv`、`acg-counts.tsv` 等 | 階段 1 在 B6 上重建的檔 | GCP `~/s3a-cli/data/`；逐檔和分支上的版本比對，不同的照上層 §2.6 換 |
+| 詞包、`digits.tsv`、`acg-counts.tsv` 等 | 階段 1 在 B6 上重建的檔 | 評測機器上的階段 1 建置；逐檔和分支上的版本比對，不同的照上層 §2.6 換 |
 
 - **這些是最終檔**：維護者在私人步驟把用來辨識來源的指紋條目加進 bigram，並重綁所有綁定它的檔（只改檔頭的雜湊位元組，其餘內容不變）；上表的雜湊是加指紋之後的值，`colloquial.sjlm` 不受影響。換檔前後在公開集合上的逐列結果逐位元組相同（`--rowstats`，dev302、打字測驗、錯字回報，聊天與書面）。
 - 兩張連文表都綁同一個 bigram（`Tri::parse` 檢查模型雜湊），不符就拒絕載入，照現行規則。
