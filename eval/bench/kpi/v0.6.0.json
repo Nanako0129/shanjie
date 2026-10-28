@@ -1,0 +1,76 @@
+{
+ "replay": {
+  "dev302": {
+   "n": 302,
+   "off": {
+    "autocommits": 0,
+    "final_ok": 302,
+    "guard_rows": 0,
+    "guard_skips": 0,
+    "kyss": 0.9852,
+    "n": 302,
+    "picks_per100": 1.13,
+    "rewrites": 265,
+    "tag": "replay-chat+ctx+acg+nopred+noen+lm:e3fb6056+tl:f7d0ac63+correct+colloq:81c2470d+rc",
+    "top1": 280,
+    "top1_sha256": "5d5d7eae03c066783a75a3dfb0721e284149bab68b117be97ad39aac145c3f1c",
+    "unfixable": 0
+   },
+   "rows_sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"
+  },
+  "models": {
+   "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+   "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+   "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
+   "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+   "tinylm.sjtl": "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478",
+   "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+   "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+  },
+  "sha": "5964b9dbe78c6c42cad3354b8bbf0e228b507a83",
+  "user-reported": {
+   "learn_broken": 0,
+   "learn_fixed": 1,
+   "n": 80,
+   "off": {
+    "autocommits": 0,
+    "final_ok": 79,
+    "guard_rows": 0,
+    "guard_skips": 0,
+    "kyss": 0.9722,
+    "n": 80,
+    "picks_per100": 2.11,
+    "rewrites": 78,
+    "tag": "replay-chat+ctx+acg+nopred+noen+lm:e3fb6056+tl:f7d0ac63+correct+colloq:81c2470d+rc",
+    "top1": 70,
+    "top1_sha256": "5858915ebec08c5ca8bbc43dd9b7915e9652a4f59aa26b4f6ce540abdabbf8bc",
+    "unfixable": 1
+   },
+   "on": {
+    "autocommits": 0,
+    "final_ok": 79,
+    "guard_rows": 1,
+    "guard_skips": 1,
+    "kyss": 0.9763,
+    "n": 80,
+    "picks_per100": 1.94,
+    "rewrites": 78,
+    "tag": "replay-chat+ctx+acg+nopred+noen+lm:e3fb6056+tl:f7d0ac63+learn+correct+colloq:81c2470d+rc",
+    "top1": 71,
+    "top1_sha256": "248b316f6a5475d9d0a55493a0958cfe286097e6d78841ae88a9bce2cd4ef0b8",
+    "unfixable": 1
+   },
+   "rows_sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a"
+  },
+  "variants_sha256": "50cb44bd0f1fa33c48624bc0185d03d4e87e99107bc15971d638528bcf69cdb3"
+ },
+ "sha": "ba8d38605b0f9a64847204ac75f5f6a515433717",
+ "version": "v0.6.0",
+ "wikitune_clean": {
+  "n": 2181,
+  "rows_sha256": "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92",
+  "tag": "lm-formal+ctx+kn:880ee87c:θ1:β0.75+tl:f7d0ac63+acg+it+tri:34305a2d",
+  "top1": 1625,
+  "top1_sha256": "fc2ccc679211b6b2a35bc1e3a01ec3ab5128e04dff97d4727032b98134a2ff71"
+ }
+}
