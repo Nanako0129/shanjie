@@ -6,7 +6,7 @@
 
 | 檔案 | Release | 內容 | 大小 | 雜湊檔 |
 |---|---|---|---|---|
-| `bigram.sjlm` | [`sj-lm-7-9.7m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m)（通語 SJ-LM-7-9.7M） | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目。詞彙 396,927、二元組合 9,709,510 條，剪枝門檻 6；口語語料加了 g0v 與 PTT，繁體句不再套 OpenCC `TWPhrases`（`docs/contracts/sj-lm-7.md` §2） | 88,467,426 bytes | `data/bigram.sjlm.sha256` |
+| `bigram.sjlm` | [`sj-lm-7-9.7m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m)（通語 SJ-LM-7-9.7M） | bigram 語言模型：詞與詞相鄰出現的機率；含少量用來辨識來源的指紋條目。詞彙 396,927、二元組合 9,709,510 條，剪枝門檻 6；口語語料加了 g0v 與 PTT，繁體句不再套 OpenCC `TWPhrases`（`docs/contracts/sj-lm-7.md` §2） | 88,467,490 bytes | `data/bigram.sjlm.sha256` |
 | `classes.sjc` | [`sj-wc-6-512c`](https://github.com/Nanako0129/shanjie/releases/tag/sj-wc-6-512c)（辨類 SJ-WC-6-512C） | 詞類表（S2k）：512 個詞類、每個詞屬於哪一類、「這類詞後面接那類詞」的機率。兩個詞沒在語料一起出現過時，用它補估計；μ 0.2（和 classes-v5 相同），詞彙 396,927，依這一版通語的計數重新分群 | 6,091,126 bytes | `data/classes.sjc.sha256` |
 | `kn.sjkn` | [`sj-kn-2-397k`](https://github.com/Nanako0129/shanjie/releases/tag/sj-kn-2-397k)（承接 SJ-KN-2-397K） | Kneser–Ney 側檔（SJKN0002，`docs/contracts/kn-core.md`）：每個詞的接續次數，θ 1、β 1，詞彙 396,927；放在模型旁邊時核心就開 KN 回退分布（聊天照檔頭的 β，書面用核心的 `FORMAL_KN_BETA` 0.75） | 1,587,772 bytes | `data/kn.sjkn.sha256` |
 | `trigram.sjt3` | [`sj-cx-2-7.7m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-cx-2-7.7m)（連文 SJ-CX-2-7.7M） | 書面設定用的 trigram 表（SJT30001，`docs/contracts/trigram-core.md`）：3,584,488 個兩詞前文、7,700,964 條剪枝後的次數，綁 `bigram.sjlm`（sj-lm-7-9.7m）；資料是維基與舊口語池，不含 g0v 與 PTT | 133,297,536 bytes | `data/trigram.sjt3.sha256` |

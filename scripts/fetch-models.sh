@@ -4,8 +4,8 @@
 #
 # The bigram model is not in git (docs/PLAN.md S2c); it is the sj-lm-7-9.7m release asset, its word-class table (S2k) is the
 # sj-wc-6-512c asset and its Kneser-Ney side file (kn-core) is the sj-kn-2-397k asset. The small model of 語意校正 (S7c-2b) is the
-# sj-sr-7-15m asset (會意 SJ-SR-6-14M, SJTL0004: it records sj-lm-7-9.7m's and sj-kn-2-397k's hashes). The trigram table of the formal
-# profile (trigram-core) is the sj-cx-2-7.7m asset (bound to sj-lm-7-9.7m's hash). The colloquial table (常談 SJ-CL-2-69K,
+# sj-sr-7-15m asset (會意 SJ-SR-7-15M, SJTL0004: it records sj-lm-7-9.7m's and sj-kn-2-397k's hashes). The trigram tables of the formal
+# and chat profiles (trigram-core) are the sj-cx-2-7.7m and sj-cx-2-950k assets (both bound to sj-lm-7-9.7m's hash). The colloquial table (常談 SJ-CL-2-69K,
 # colloquial-term.md) and its attribution list are the sj-cl-2-69k assets.
 # Checking them first fails a job in seconds with a clear message instead of after the build. The hash files are also
 # read by build-app.sh and release.yml; cli/tests/golden.rs repeats the first two, so a model switch updates both
