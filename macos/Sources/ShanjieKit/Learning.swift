@@ -116,6 +116,9 @@ public struct MenuEntry: Equatable, Sendable {
         public static let englishDisplay = "英文的顯示"
         public static let englishDisplayTyped = "打字時就顯示"
         public static let englishDisplaySpace = "按空白才顯示"
+        /// The toggle under the display choice and the line under it (docs/contracts/zhen-keyorder.md section 3).
+        public static let englishKeyOrder = "依按鍵順序判斷英文"
+        public static let englishKeyOrderNote = "ok、ls、cup 這類短詞不用按 Shift。開了之後，用重打同一個位置來改錯的注音，比較容易被當成英文。"
         /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"

@@ -57,6 +57,18 @@ def scores(ng, ok, ll=None, c=0):
     return d
 
 
+class Ce3SetNames(unittest.TestCase):
+    def test_ce3_sets_are_private_files_under_the_private_root_and_unknown_names_still_fail(self):
+        with tempfile.TemporaryDirectory() as td:
+            for name in ("ctune", "cdev", "cmicro", "cjudge-1"):
+                open(os.path.join(td, f"{name}-rows.txt"), "w").write("|甲乙|ㄅ ㄆ\n")
+                self.assertEqual(T.set_file(name, td), (os.path.join(td, f"{name}-rows.txt"), True))
+            with self.assertRaises(SystemExit):
+                T.set_file("cjudge-2", td)          # no such file
+            with self.assertRaises(KeyError):
+                T.set_file("cjudge", td)            # not a set name (needs -K)
+
+
 class Lexicon(unittest.TestCase):
     def test_four_files_and_their_filters(self):
         l = lex()
@@ -317,6 +329,48 @@ class D2(unittest.TestCase):
         cands = [("乙", -1 - i, "乙") for i in range(8)] + [("甲", -10, "甲")]
         self.assertIsNone(cls(row("甲", "a", cands, scores=scores([0] * 8, [0] * 8, [0] * 8)))["d2"])
         self.assertIsNone(cls(self.c_row("丙", None))["d2"])
+
+
+class PoolRecord(unittest.TestCase):
+    """A scores record made with a fuzzy-sound bit: `ng`, `ok`, `ed`, `ll` list the pool in pool order, `idx` names each entry's n-best index, `c` is
+    an n-best index (fuzzy-input contract section 3.6). Here the n-best is 甲(0) 丑(1, a fuzzy path, out of the pool) 乙(2) 丙(3); the pool is
+    0, 2, 3 and the small model's fused pick is the pool entry 2, which is the n-best index 3."""
+    CANDS = [("甲", -1.0, "甲"), ("丑", -1.1, "丑"), ("乙", -1.2, "乙"), ("丙", -1.3, "丙")]
+    REC = {"i": 1, "n": 3, "ng": [-1.0, -1.2, -1.3], "ok": [0, 0, 1], "ed": [1, 1, 0], "glen": 1, "c": 3, "ll": [-1.0, -2.0, 0.5], "idx": [0, 2, 3]}
+
+    def test_the_pool_pick_is_mapped_to_the_nbest_index_before_it_is_compared_with_c(self):
+        self.assertEqual(T.pick(self.REC["ng"], self.REC["ll"], *PAR), 2, "premise: pool position 2, and c is 3")
+        self.assertEqual(T.check_choice(1, self.REC, self.CANDS, "丙", 1, LEN, PAR), 3)
+        with self.assertRaises(RuntimeError):   # c does not follow the pick
+            T.check_choice(1, {**self.REC, "c": 2}, self.CANDS, "乙", 0, LEN, PAR)
+        with self.assertRaises(RuntimeError):   # rowstats disagrees with the dump's candidate c names
+            T.check_choice(1, self.REC, self.CANDS, "丙", 0, LEN, PAR)
+
+    def test_without_idx_the_pick_is_the_index(self):
+        rec = {k: v for k, v in self.REC.items() if k != "idx"}
+        rec["c"] = 2
+        self.assertEqual(T.check_choice(1, rec, self.CANDS, "乙", 1, LEN, PAR), 2)
+
+    def test_nbest_index_and_by_nbest(self):
+        self.assertEqual([T.nbest_index(self.REC, j) for j in range(3)], [0, 2, 3])
+        self.assertEqual(T.by_nbest(self.REC, "ng"), {0: -1.0, 2: -1.2, 3: -1.3})
+        plain = {"ng": [-1.0, -2.0]}
+        self.assertEqual((T.nbest_index(plain, 1), T.by_nbest(plain, "ng")), (1, {0: -1.0, 1: -2.0}))
+
+    def test_d2_reads_ok_by_pool_position(self):
+        # the row is wrong (c 0 was chosen), the gold 丙 is n-best 4; ok has 3 entries, so reading it at n-best index 3 would fail
+        rec = {**self.REC, "c": 0}
+        res = cls(row("丙", "c", self.CANDS, scores=rec))
+        self.assertEqual((res["bucket"], res["d2"]), ("C", "D2b"))
+
+    def test_a_pool_of_one_is_d2_none(self):
+        rec = {"i": 1, "n": 1, "ng": [-1.0], "ok": [0], "ed": [1], "glen": 1, "c": 0, "ll": [-1.0], "idx": [0]}
+        self.assertEqual(cls(row("丑", "d", self.CANDS, scores=rec))["d2"], "D2-none")
+
+    def test_refuse_pool_stops_a_tool_that_reads_by_position(self):
+        T.refuse_pool([None, {"i": 1, "ng": [0]}], "t")
+        with self.assertRaises(RuntimeError):
+            T.refuse_pool([None, self.REC], "t")
 
 
 class Counting(unittest.TestCase):

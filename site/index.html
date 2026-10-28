@@ -242,7 +242,7 @@
     <li><span class="tag done">已發佈</span><span>v0.5.0：數字列直接打數字（標準排列、中英混打開著時）；中英混打改成預設開；改選後其他字不動；預測列與 ↓ 一致；逐字改選也學成新詞；中英文之間自動加空格（預設關）。</span></li>
     <li><span class="tag done">已發佈</span><span>常談 SJ-CL-1-68K 發佈在 GitHub Releases。</span></li>
     <li><span class="tag wip">進行中</span><span>研究：解碼時看讀音，「否則變快」這類錯要在整句選字時就修，每個設定、每種強度都生效。</span></li>
-    <li><span class="tag">暫停</span><span>研究：電影字幕當口語資料。檢查程式寫好了，等讀音那片之後再跑。</span></li>
+    <li><span class="tag wip">進行中</span><span>研究：電影字幕當口語資料，放進下一版語意校正模型的訓練，正在訓練。</span></li>
   </ul>
   <p class="note"><a href="updates.html">完整更新紀錄 →</a></p>
 </section>
@@ -373,7 +373,7 @@
         <li><span class="mark"></span><span class="sr-only">暫停：</span><h3>預測可省略韻母</h3><p>每個字只打第一個注音也能找到詞。一次縮寫一個詞的版本做完了，但還不能整句縮寫，v0.4.0 先不放；做到整句縮寫再出；整句縮寫的試驗（2026-10-15）沒有通過，目前沒有在做。另外有使用者回報打了某些注音之後按鍵好像卡住；從設計推論，是有兩個以上縮寫單位時空白鍵與聲調鍵會被吃掉，沒有重現。</p></li>
         <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>在／再、作／做</h3><p>回報裡常見的一類同音錯。<b>結論：</b>第 1 階段只訓「ㄗㄞˋ」就觸發停止規則：「再＞在」11 → 10（要求減半），其他讀音沒做。要再試得另寫契約，並用聊天資料判斷。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語料很少出現的名字</h3><p>像「宿儺」這種語料裡幾乎沒出現的名字，v0.4.0 的新模型也沒有救起來；需要另外寫契約處理。</p></li>
-        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>口語與財經用語</h3><p>語料偏百科。口語的部分，v0.5.0 的「常談」出貨了；「零股」「月繳」這類財經日常用語仍太少，繼續找授權清楚的來源。電影字幕當口語資料的檢查暫停，排在讀音那片之後。</p></li>
+        <li class="research"><span class="mark"></span><span class="sr-only">規劃中：</span><h3><span class="kind">研究</span>口語與財經用語</h3><p>語料偏百科。口語的部分，v0.5.0 的「常談」出貨了；「零股」「月繳」這類財經日常用語仍太少，繼續找授權清楚的來源。電影字幕當口語資料放進下一版語意校正模型的訓練，正在訓練。</p></li>
         <li class="research done"><span class="mark"></span><span class="sr-only">完成：</span><h3><span class="kind">研究</span>貝氏選字記憶</h3><p>把改選記錄當成證據、以語言模型為先驗，取代固定的加分。2026-10-10 試過，40 組參數沒有一組符合條件。<b>結論：</b>保留現行規則；要再試得改設計。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞（例如口語縮寫）；也能手動加詞。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>破音字的搭配</h3><p>同一個字的不同讀音分開計算搭配，例如「空」唸 ㄎㄨㄥˋ 時，不再借用「空間」的搭配而搶走「控」。</p></li>

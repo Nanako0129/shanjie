@@ -340,7 +340,7 @@ static int run_learn(const char *dir, const char *learn_dir) {
   return 0;
 }
 
-/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english and set_english_inline through the header. The window
+/* zhen-mixed (docs/contracts/zhen-mixed.md section 5.2): the codes of load_english, set_english, set_english_inline and set_english_key_order through the header. The window
  * itself is covered by core/tests/engine_english.rs and the child-process test in ffi.rs. */
 static int run_english(const char *dir, const char *missing) {
   static ShanjieOutput dummy;
@@ -369,6 +369,17 @@ static int run_english(const char *dir, const char *missing) {
   o = 0;
   CHECK(1014, shanjie_engine_set_english_inline(e, 1, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
+  /* zhen-keyorder: set_english_key_order has the codes of set_english_inline. */
+  o = 0;
+  CHECK(1015, shanjie_engine_set_english_key_order(0, 1, &o) == 1 && o == 0);
+  CHECK(1016, shanjie_engine_set_english_key_order(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1017, shanjie_engine_set_english_key_order(e, 2, &o) == 2 && o == 0);
+  CHECK(1018, shanjie_engine_set_english_key_order(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1019, shanjie_engine_set_english_key_order(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;
 }
@@ -392,6 +403,28 @@ static int run_digits(const char *dir, const char *lm) {
   o = 0;
   o = type_last(e, "2");
   CHECK(1107, o != 0 && str_eq(o->preedit, "\xe3\x84\x89")); /* ㄉ */
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
+/* fuzzy input (docs/contracts/fuzzy-input.md section 2.1): the codes of set_fuzzy through the header; the behaviour is in
+ * core/tests/engine_fuzzy.rs. */
+static int run_fuzzy(const char *dir) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1101, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1102, shanjie_engine_set_fuzzy(0, 1, &o) == 1 && o == 0);
+  CHECK(1103, shanjie_engine_set_fuzzy(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1104, shanjie_engine_set_fuzzy(e, 32, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(1105, shanjie_engine_set_fuzzy(e, 0xffffffffu, &o) == 2 && o == 0);
+  CHECK(1106, shanjie_engine_set_fuzzy(e, 31, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1107, shanjie_engine_set_fuzzy(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
   shanjie_engine_free(e);
   return 0;
@@ -495,6 +528,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_rerank_level(argv[1], argv[2]);
   if (rc == 0) rc = run_english(argv[1], "/nonexistent/shanjie-missing-english.txt");
   if (rc == 0) rc = run_digits(argv[1], argv[2]);
+  if (rc == 0) rc = run_fuzzy(argv[1]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

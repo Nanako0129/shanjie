@@ -200,7 +200,7 @@ impl Engine {
         self.clear_pend();
         for &k in tail {
             if let Some((col, sym)) = Layout::Standard.symbol_of(k) {
-                self.shadow_push(k, false);
+                self.shadow_push(k, col, false);
                 self.pend[col] = Some(sym);
             }
         }

@@ -222,6 +222,38 @@ class Verdicts(unittest.TestCase):
         self.assertIn("結案", D.d3_verdict(9, 100))
 
 
+class Pool(unittest.TestCase):
+    """A record with idx (a fuzzy-sound bit): the lists are the pool in pool order. Ten candidates, the second a fuzzy path out of the pool;
+    the gold 甲再 is the third (n-best 2, pool entry 1)."""
+    def pool_row(self):
+        fill = [(c + "在", -1.3 - 0.1 * i, c + " 在") for i, c in enumerate("乙丙丁戊己庚辛壬")]
+        cands = [("甲在", -1.0, "甲 在"), ("甲乙", -1.05, "甲 乙"), ("甲再", -1.2, "甲 再")] + fill
+        idx = [0, 2, 3, 4, 5, 6, 7, 8]
+        rec = {"i": 1, "n": 8, "ng": [cands[j][1] for j in idx], "ok": [int(cands[j][0] == "甲再") for j in idx], "ed": [0] * 8, "c": 0, "idx": idx,
+               "ll": [0.0, 2.0] + [0.0] * 6, "glen": 2}
+        return {"ctx": "", "truth": "甲再", "syls": ["a", "zai"], "cands": [(s, sc, w.split()) for s, sc, w in cands], "gold0": None, "c": 0, "scores": rec}
+
+    def test_bias_reads_the_record_by_nbest_index_and_the_fuzzy_candidate_needs_rescoring(self):
+        r = self.pool_row()
+        c = D.bias_cells([r], [False], ("在", "再", "zai"), LEN)
+        # at b 1.0 the gold 甲再 leads, and the first 8 by the new scores hold the fuzzy 甲乙, which the record has no ll for
+        self.assertEqual((c[1.0]["affected"], c[1.0]["rescoring"], c[1.0]["fixes"]), (1, 1, 0))
+
+    def test_build_rows_accepts_a_pool_pick(self):
+        r = self.pool_row()
+        r["scores"]["c"] = 2   # the model picked pool entry 1 (ll 2.0 against 0.0, gain 0.3 * 2 - 0.2 >= delta 0.25), the third candidate of the dump
+        r["c"] = 2
+        with tempfile.TemporaryDirectory() as d:
+            w = lambda n, t: (open(os.path.join(d, n), "w", encoding="utf-8").write(t), os.path.join(d, n))[1]
+            rf = w("rows", "|甲再|a zai\n")
+            df = w("dump", "".join(f"1\t{k}\t{s}\t{sc}\n" for k, (s, sc, _) in enumerate(r["cands"], 1)))
+            wf = w("words", "1\t0\t-\n" + "".join(f"1\t{k}\t{' '.join(ws)}\n" for k, (_, _, ws) in enumerate(r["cands"], 1)))
+            rs = w("rs", "1\t1\t0\t2\n")
+            sf = w("sc", json.dumps(r["scores"]) + "\n")
+            got, ok = D.build_rows(rf, df, wf, rs, sf, LEN)
+            self.assertEqual((len(got), ok, got[0]["c"]), (1, [True], 2))
+
+
 class Files(unittest.TestCase):
     def test_files_to_json_without_sentences(self):
         rows = [c1("甲再", "甲在"), row("新詞", "x y", [("舊詞", -1.0, "舊詞"), ("新詞", -1.2, "新詞")], ll=[0.0, 0.0])]

@@ -154,3 +154,47 @@ fn digits_backspace_repair_reads_the_screen() {
     assert_eq!(c[11..], ["535.000", "570.000"], "{c:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Zhen-keyorder section 4, typing mode: the line of before, then one `two` line for every word of `TWO_LETTER` (the core's list, in its
+/// order) with the mean and max per 1000 syllables; without `--key-order` the output is the one line of before. Typed right (`--p 0`)
+/// the engine with the switch on opens nothing. These rows are one three-symbol syllable, so the shadow holds three keys at Space whatever the
+/// repair (it only loses a key with a symbol), and no figure leaves 0; the counting itself is pinned in the module test of
+/// cli/src/english.rs (`two_letter_windows_are_counted_by_word`).
+#[test]
+fn key_order_typing_prints_every_two_letter_word() {
+    let (rows, words) = files("keyorder");
+    for args in [&["--p", "0"][..], &["--p", "0.5", "--repair", "overwrite"], &["--p", "0.5", "--repair", "backspace"]] {
+        let mut a = vec!["--words", words.as_str(), "--rows", rows.as_str()];
+        a.extend_from_slice(args);
+        let plain = run(&a);
+        assert_eq!(plain.lines().count(), 1, "no flag, one line: {plain}");
+        a.push("--key-order");
+        let out = run(&a);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 1 + core::engine::TWO_LETTER.len(), "{out}");
+        for (line, word) in lines[1..].iter().zip(core::engine::TWO_LETTER) {
+            let f: Vec<&str> = line.split('\t').collect();
+            assert_eq!((f.len(), f[0], f[1]), (4, "two", *word), "{line}");
+            let (mean, max): (f64, f64) = (f[2].parse().unwrap(), f[3].parse().unwrap());
+            assert_eq!((mean, max), (0.0, 0.0), "{line}");
+        }
+        if args.len() == 2 {
+            assert_eq!(lines[0], plain.trim_end(), "clean typing: the first line is the old one");
+        }
+    }
+    std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
+}
+
+/// Zhen-keyorder section 4, recall mode with the switch on: only `opened` and `top1`, for the list and for `TWO_LETTER`, and the six
+/// probes; the tool does not stop for a disagreement with the recount of the switch-off rules (it makes none). On
+/// eval/golden/english-tiny.txt all six words open, with the word first (law and hello have evidence by key order; cup opens
+/// with none, on Space, because ㄏㄧㄣ is not a syllable). All 19 two-letter words can have evidence (a replacement or a key out of order), so
+/// 19 open. `npm` is not in that list: 0.
+#[test]
+fn key_order_recall_reports_what_the_engine_does() {
+    let list = concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/english-tiny.txt");
+    let want = "recall\twords\t6\t6\t6\nrecall\ttwo\t19\t19\t19\nprobe\tok\t1\nprobe\tls\t1\nprobe\tcd\t1\nprobe\tmv\t1\nprobe\tcup\t1\nprobe\tnpm\t0\n";
+    assert_eq!(run(&["--words", list, "--recall", "--key-order"]), want);
+    // Without the flag: the line of before (a different engine, a different report).
+    assert_eq!(run(&["--words", list, "--recall"]).lines().count(), 1);
+}

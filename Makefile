@@ -66,7 +66,7 @@ test-python:
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
-	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy
+	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy test_export_rows
 	python3 -m unittest reference/proto/test_recombine.py
 	python3 -W ignore -m unittest experiments/newword/test_hijack.py
 	python3 -W ignore experiments/diag-near-miss/test_d23.py

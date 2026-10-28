@@ -5,7 +5,7 @@
 ## 0. 起因、要做到什麼、怎麼看到
 
 - **起因**：維護者錄 v0.5.0 demo 時發現，強度不是「標準」就沒有常談：「保守或積極都不應該覆蓋常談」。
-- **探索片**（`experiments/strength-colloq/README.md`，分支 `exp/strength-colloq`）兩次都照登記過關：
+- **探索片**（`experiments/strength-colloq/README.md`，分支 `exp/strength-colloq`；全文已搬進研究紀錄 2026-10-26「補記二」）兩次都照登記過關：
   - 積極 (α 0.5, τ 2, δ 0.1)：四條出貨標準與順序門檻全過；對現行積極的 discordtune 108／42。
   - 保守 R2 (1.0, 2, 3.0)：四條與門檻全過；discordtune 17／4。
   - 維護者決定兩檔都「探索過了就出貨」，對這一片的例外，記在維護者的 decisions。

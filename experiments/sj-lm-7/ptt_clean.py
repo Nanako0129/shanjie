@@ -48,6 +48,11 @@ def join(a, b):
 
 def merged_pushes(page):
     """[(user, minute, content)] in page order -> remarks, adjacent same-account pushes joined."""
+    return [c for _, c in merged_pushes_by(page)]
+
+
+def merged_pushes_by(page):
+    """The same remarks as [(account, content)] (CE3 caps rows per account)."""
     out = []
     for user, content, stamp in PUSH.findall(page):
         user, c, t = user.strip(), text(content).lstrip(":").strip(), minutes(stamp)
@@ -57,7 +62,7 @@ def merged_pushes(page):
             out[-1] = (user, t, join(out[-1][2], c))
         else:
             out.append((user, t, c))
-    return [c for _, _, c in out]
+    return [(u, c) for u, _, c in out]
 
 
 def body(page):

@@ -150,12 +150,27 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)
     }
 
+    /// fuzzy-input (docs/contracts/fuzzy-input.md section 2.1): bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
+    /// adjacent-key slips (the core's default is 0, which changes nothing; bit 4 does nothing in the Eten layout); returns the
+    /// snapshot. Sent to every engine `Shell.build()` makes.
+    func setFuzzy(_ flags: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
+    }
+
     /// zhen-inline: whether the English typed into the unfinished syllable shows as letters while it can still become a listed word
     /// (the core's default is true); returns the snapshot, so a composition on screen is drawn again. Sent to every engine
     /// `Shell.build()` makes.
     func setEnglishInline(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-keyorder: whether keys out of Zhuyin's column order count as evidence of English (the core's default is false); returns the
+    /// snapshot (turning it off closes an open English window). Sent to every engine `Shell.build()` makes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
     }
 
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }

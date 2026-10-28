@@ -14,7 +14,7 @@ The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so the
 rides on it. The D2b / D2c sub-diagnosis does not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model
 rule, so in a run with the table a row whose pick either term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, concurrent.futures, importlib.util, json, os, struct, subprocess, sys, tempfile, threading
+import argparse, collections, concurrent.futures, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -282,12 +282,13 @@ def classify(row, lex, par, lenient):
     sc = row["scores"]
     if gold_rank <= TOPK and sc is not None:
         alpha, tau, delta = par
-        if "ll" not in sc:
+        if "ll" not in sc or len(sc["ng"]) < 2:   # no rerank ran: a fuzzy first path, or a pool of one
             res["d2"] = "D2-none"
         elif sc["ng"][0] - sc["ng"][1] >= tau:
             res["d2"] = "D2a"
         else:
             # core pick with delta 0 is the plain argmax of ng + alpha * ll, ties to the better n-gram rank; here the margin is below tau already
+            # `pick` is a position in the record's lists, which `ok` shares: no mapping through idx here
             res["d2"] = "D2b" if sc["ok"][pick(sc["ng"], sc["ll"], alpha, tau, 0.0, sc.get("masked", ()))] else "D2c"
     return res
 
@@ -364,10 +365,40 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
+def nbest_index(sc, j):
+    """The n-best index (the dump's order, what the record's `c` names) of entry j of the record's lists `ng`, `ll`, `ok`, `ed`. A record
+    made with a fuzzy-sound bit lists the pool of the semantic correction in pool order and says in `idx` which n-best path each entry is
+    (fuzzy-input contract section 3.6); without `idx` the lists are the first n paths and j is the index."""
+    return sc["idx"][j] if "idx" in sc else j
+
+
+def by_nbest(sc, key):
+    """The record's list `key` as {n-best index: value}."""
+    return dict(zip(sc.get("idx", range(len(sc[key]))), sc[key]))
+
+
+def refuse_pool(recs, who):
+    """For a tool that reads the record by n-best position (the first 8 candidates of the dump): a record with `idx` has a pool that
+    reaches beyond them and is in another order, so the tool stops instead of reading the wrong entries."""
+    if any(r is not None and "idx" in r for r in recs):
+        raise RuntimeError(f"{who}: the scores record has an idx column (a fuzzy-sound bit); this tool reads the first 8 candidates by position")
+
+
+def check_choice(i, sc, cands, truth, ok, lenient, par, plain=True):
+    """Row i's (1-based) chosen candidate against the rowstats ok and, when the plain pick applies, against `pick`; -> `c`, an n-best index.
+    `pick` returns a position in the record's lists, `c` an index into the dump's candidates: with `idx` the two are mapped before they are
+    compared, and the chosen candidate is read from the dump by `c`."""
+    c = sc["c"]
+    sel_ok = int(lenient(cands[c][0]) == lenient(truth))
+    if sel_ok != ok or (plain and sc["n"] > 1 and "ll" in sc and not pick_agrees(sc, par)):
+        raise RuntimeError(f"row {i}: the chosen candidate disagrees with rowstats or with pick")
+    return c
+
+
 def pick_agrees(sc, par):
-    """Whether the CLI's chosen index `c` of a scores record is `pick(ng, ll, *par)` with the record's masked candidates left out (a record without the
-    field, from an older CLI, has none masked)."""
-    return sc["c"] == pick(sc["ng"], sc["ll"], *par, masked=sc.get("masked", ()))
+    """Whether the CLI's chosen index `c` of a scores record (an n-best index) is `pick(ng, ll, *par)` with the record's masked candidates left out
+    (a record without the field, from an older CLI, has none masked), mapped through `idx` when the record lists a pool."""
+    return sc["c"] == nbest_index(sc, pick(sc["ng"], sc["ll"], *par, masked=sc.get("masked", ())))
 
 
 def plain_pick_applies(prof, colloq):
@@ -398,20 +429,23 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
     recs_rows = []
     for i, (ctx, truth, syls) in enumerate(rows):
         sc = recs[i]
-        c = sc["c"]
-        sel_ok = int(lenient(cands[i][c][0]) == lenient(truth))
-        if sel_ok != ok[i] or (plain_pick_applies(prof, colloq) and sc["n"] > 1 and "ll" in sc and not pick_agrees(sc, par)):
-            raise RuntimeError(f"row {i + 1}: the chosen candidate disagrees with rowstats or with pick")
+        c = check_choice(i + 1, sc, cands[i], truth, ok[i], lenient, par, plain_pick_applies(prof, colloq))
         recs_rows.append({"ctx": ctx, "truth": truth, "syls": syls, "cands": cands[i], "gold0": gold0[i], "c": c, "scores": sc})
     cn, per = triage_rows(recs_rows, [int(x) for x in ok], [int(x) for x in ok_nc], lex, par, lenient, report)
     cn["oracle64"], cn["top1_sha256"] = o64, sha
     return cn, per
 
 
+CE3_SET = re.compile(r"(ctune|cdev|cmicro|cjudge-[1-9]\d*)\Z")
+
+
 def set_file(name, private_root):
     if name in OWN_SETS:
         return OWN_SETS[name], False
-    f, want, private = bench.SETS2[name]
+    if CE3_SET.match(name):     # chat-eval-3 section 5: private row files under --private-root, hash recorded in the JSON, not pinned
+        f, want, private = f"{name}-rows.txt", None, True
+    else:
+        f, want, private = bench.SETS2[name]
     if private:
         f = os.path.join(os.path.abspath(os.path.expanduser(private_root)), f)
     if not os.path.isfile(f):

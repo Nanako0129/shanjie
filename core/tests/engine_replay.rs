@@ -28,10 +28,10 @@ fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
     v
 }
 
-/// `english`: the standard layout with the zhen-mixed switch on and the synthetic list loaded (docs/contracts/zhen-mixed.md
+/// `key_order`: also the zhen-keyorder switch. `english`: the standard layout with the zhen-mixed switch on and the synthetic list loaded (docs/contracts/zhen-mixed.md
 /// section 5.1) and the zhen-inline display on (its default): the same 302 rows, and neither the English window nor the letters
 /// (rule D) may ever show: the rows are Chinese typed right.
-fn replay(layout: Layout, english: bool) {
+fn replay(layout: Layout, english: bool, key_order: bool) {
     let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
     let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
         .unwrap()
@@ -51,6 +51,7 @@ fn replay(layout: Layout, english: bool) {
     if english {
         e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
         e.set_english(true).unwrap();
+        e.set_english_key_order(key_order).unwrap(); // zhen-keyorder section 5.4: the same rows, clean, with the switch on
     }
     let mut times = Vec::new();
     for (i, r) in rows.iter().enumerate() {
@@ -81,15 +82,19 @@ fn replay(layout: Layout, english: bool) {
 
 #[test]
 fn replay_standard_302_of_302() {
-    replay(Layout::Standard, false);
+    replay(Layout::Standard, false, false);
 }
 #[test]
 fn replay_eten_302_of_302() {
-    replay(Layout::Eten, false);
+    replay(Layout::Eten, false, false);
 }
 #[test]
 fn replay_with_english_on() {
-    replay(Layout::Standard, true);
+    replay(Layout::Standard, true, false);
+}
+#[test]
+fn replay_with_english_and_key_order_on() {
+    replay(Layout::Standard, true, true);
 }
 
 /// Digits.md A.4.1 #48 (C's R2 on the real engine): the 302 rows are Chinese typed right. With the English-mixing switch on, the word list
