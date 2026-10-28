@@ -96,7 +96,7 @@
   - 比對自檢：命中數等於列數。
 - main 不讀這些檔的內容。commit 只記 SHA-256 與列數。
 
-### 2.4 保留集的換手（只動 `eval/`、`docs/`、`LICENSES/`、`tools/kpi.py` 與它的測試）
+### 2.4 保留集的換手（只動 `eval/`、`docs/`、`LICENSES/`、`site/`、`tools/kpi.py`、`tools/bench.py` 與它們的測試）
 
 - 刪掉的檔（`git rm`，main 不打開檔案內容）：
   - `eval/holdout/news.txt`；
@@ -109,8 +109,8 @@
   - 由 fresh verifier 在評測機器上用 `--rows ~/.cache/shanjie/news-eval/holdout-news-1.txt --profile formal --rowstats` 量基準與新版。檔案用前核對雜湊，量完刪掉 rowstats 與那台機器上的副本。
   - **旗標禁令（流程規則，不是技術防護）**：`--rows` 不像 `--set holdout` 會拒絕逐列輸出。量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（檔內只有 `[0-9\t\n]`），照 holdout-refresh §6 的做法。`docs/verification.md` 與 `eval/README.md` 的新聞半邊段落寫同一句。
 - **改的文件**：
-  - `docs/contracts/kpi.md` §3：口語半邊＝`--set holdout` 全集（聊天設定）；新聞半邊＝私人檔（書面設定）。全集合那兩行不再存在，v2 JSON 的 `holdout.*` 從這一版起是口語半邊。
-  - `tools/kpi.py` 的表：`rows_sha256` 換了就分欄（現有行為），測試補一條私人檔的情況。
+  - `docs/contracts/kpi.md` §3：口語半邊＝`--set holdout` 全集（聊天設定）；新聞半邊＝私人檔（書面設定）。全集合那兩行不再存在；v2 JSON 的 `holdout.chat`＝口語半邊、`holdout.formal`＝新聞半邊（私人檔），各自帶 `rows_sha256`，同 kpi.md §3。
+  - `tools/kpi.py` 的表：`rows_sha256` 換了就分欄（現有行為）。測試：`tools/test_kpi.py` 現有的分欄測試涵蓋兩份新聞半邊換檔；補一條「口語半邊的雜湊不變、新聞半邊的雜湊換了」的案例。`tools/bench.py` 的保留集表原本只分 chat／formal 兩欄，也改成依 `rows_sha256`（沒記就依 n）分欄，欄位依第一次出現的順序，並補一條畫表層級的測試。
   - `docs/verification.md` 與 `eval/README.md` 的保留集段落。
   - `LICENSES/data.md` 的新聞列拿掉。
   - 維護者本機 `CLAUDE.md` 的「評測與資料」與「研究」的書面判讀規則，由 main 改（後者已改）。

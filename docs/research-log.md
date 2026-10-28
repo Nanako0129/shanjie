@@ -10137,3 +10137,11 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - main 照私有流程在定案的通語上加指紋條目，承接、辨類、兩張連文表與會意的檔頭重新綁到新的通語雜湊（只改綁定的雜湊位元組，內容不變）；常談不綁通語，不變。最終檔：通語 `e3fb6056…`、辨類 `4c1071f2…`、承接 `880ee87c…`、書面連文 `34305a2d…`、聊天連文 `24ee8645…`、會意 `f7d0ac63…`。
 - 核對：私有的指紋前文行為比對（解碼與預測）加之前、加之後完全相同；出貨設定（前文、動漫與資訊詞包、會意、聊天加常談）在 dev302、打字測驗、錯字回報兩種設定的 rowstats，加之前、加之後逐位元組相同。之前各階段的量測都在加指紋之前的同一份建置上做，選字不受影響。
 - R1 的權重來源（臂 R1 中位數的種子 20261018）：`tinylm-M.npz` SHA-256 `cb351ed7d210b61540ff0d629bdbd45882031ab6e8817e5670d9181c2a151c5c`（沒有另外發布）。
+
+## 2026-10-29：保留集新聞半邊換手（`docs/contracts/news-corpus.md` §2.4）
+
+- 刪掉 `eval/holdout/news.txt`、`eval/holdout/next/shard-2/news.txt`、`eval/holdout/next/shard-3/news.txt`（`git rm`，沒有打開）；`eval/holdout/next/sources.tsv` 原封不動，新聞的列留著當退役紀錄。`--set holdout` 從此只讀 `talk.txt`（n 150）。
+- 行政院 294 句的新聞稿驗證集退役，從今天起是訓練語料。
+- 新的私人新聞集（檔在 repo 外，來源是報社 A 加中文維基新聞驗證那一邊；只記雜湊與列數）：`newstune`（開發層，書面判讀集之一）2,000 列，`c69f8f0b5a4fefb9f07393964b1ecbac291ff0e2d9b22f567f168e5bf1c77d0a`；保留集新聞半邊三份各 150 列（各 30 列維基新聞加 120 列報社新聞）：`holdout-news-1`（現役）`637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38`、`holdout-news-2` `d0c0b82ea936349128117d69b2d89c54ffa527279d94787ee6d2e5ee1bf194d5`、`holdout-news-3` `344432589b80d168e297b6009e522b954b3e9b54615f023c9d128c065086a203`。使用次數都從 0 起算。
+- 建置的細節（抓取、比對、抽樣）在分支 `exp/sj-round2` 的研究紀錄（commit 38318f6a..9dcc144d）。
+- 新聞半邊由 fresh verifier 用 `--rows` 量，旗標禁令（禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`）寫進 `docs/verification.md`、`eval/README.md` 與 `docs/contracts/kpi.md` §3。`tools/kpi.py` 不必改，`tools/test_kpi.py` 補了一條「口語半邊雜湊不變、新聞半邊雜湊換了」的分欄案例；`tools/bench.py` 的保留集表原本只分 chat／formal，改成依 `rows_sha256`（沒記就依 n）分欄，並補一條畫表層級的測試（`holdout.chat` 是口語半邊、`holdout.formal` 是新聞半邊），`docs/benchmark.md` 由 `bench.py table` 重產。
