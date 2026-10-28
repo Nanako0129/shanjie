@@ -1,4 +1,3 @@
-〔草稿：待維護者確認後才建 Release〕
 善解的連文模型 **SJ-CX-2-950K**（聊天設定用的 trigram 表，檔案 `trigram-chat.sjt3`，SJT30001 格式；模型命名見 `docs/releases/README.md`）。這是新的一張表：之前聊天設定不用連文表，這一版起聊天也開 trigram（KN 開，β 1）。**要和 [sj-lm-7-9.7m](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m) 的 `bigram.sjlm` 一起用**，放在同一個資料夾，核心會自動載入；只有聊天設定用它，書面設定用 [sj-cx-2-7.7m](https://github.com/Nanako0129/shanjie/releases/tag/sj-cx-2-7.7m)。要讀它需要通語 SJ-LM-7 PR 2 之後的核心（舊核心只認 `trigram.sjt3`）。CI 與發布版從這裡下載。**這不是輸入法的發行版，也不含語言模型本身。**
 
 - 檔案：`trigram-chat.sjt3`，15,114,784 bytes

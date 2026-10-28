@@ -1,4 +1,3 @@
-〔草稿：待維護者確認後才建 Release〕
 善解的承接模型 **SJ-KN-2-397K**（Kneser–Ney 側檔，檔案 `kn.sjkn`，SJKN0002 格式；模型命名見 `docs/releases/README.md`），**要和 [sj-lm-7-9.7m](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m) 的 `bigram.sjlm` 一起用**，放在同一個資料夾，核心會自動載入。CI 與發布版從這裡下載。**這不是輸入法的發行版，也不含語言模型本身。**
 
 - 檔案：`kn.sjkn`，1,587,772 bytes

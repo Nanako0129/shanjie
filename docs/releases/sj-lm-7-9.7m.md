@@ -1,4 +1,3 @@
-〔草稿：待維護者確認後才建 Release〕
 善解的通語模型 **SJ-LM-7-9.7M**（bigram 語言模型，檔案 `bigram.sjlm`，SJLM0001 格式；模型命名見 `docs/releases/README.md`），接替 [model-v6](https://github.com/Nanako0129/shanjie/releases/tag/model-v6)（通語 SJ-LM-6-9.1M）。**要和同一組的另外六個檔一起用**（見最後的下載）：辨類、承接、兩張連文表、會意都記了這個檔的 SHA-256，配到別的版本會載入失敗；常談由會意的雜湊配對。要讀兩張連文表、照每個設定的 KN 解碼，需要通語 SJ-LM-7 PR 2 之後的核心（`docs/contracts/sj-lm-7-pr2.md`）。CI 與發布版從這裡下載。**這不是輸入法的發行版。**
 
 - 檔案：`bigram.sjlm`，88,467,426 bytes（比 model-v6 的 83,445,569 bytes 多 5,021,857）

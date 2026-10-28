@@ -1,4 +1,3 @@
-〔草稿：待維護者確認後才建 Release〕
 善解「語意校正」用的小型字元語言模型，會意（SJ-SR）第 7 版 **SJ-SR-7-15M**，接替 [sj-sr-6-14m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-6-14m)。和上一版不同的是**權重重新訓練過**（加了新的口語語料與字幕），不只是換融合參數。**這不是輸入法的發行版。**
 
 - 檔案：`tinylm.sjtl`，14,886,880 bytes

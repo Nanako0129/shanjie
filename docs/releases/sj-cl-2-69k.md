@@ -1,4 +1,3 @@
-〔草稿：待維護者確認後才建 Release〕
 善解的常談模型 **SJ-CL-2-69K**（口語詞頻表，檔案 `colloquial.sjlm`，SJLM0001 格式；模型命名見 `docs/releases/README.md`），接替 [sj-cl-1-68k](https://github.com/Nanako0129/shanjie/releases/tag/sj-cl-1-68k)：聊天設定的語意校正多參考一項「這個說法在口語裡常不常見」。只有聊天設定、搭配會意 [sj-sr-7-15m](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-7-15m)（`tinylm.sjtl`）時核心才會用它（核心的 `PAIRED_TINYLM_SHA256` 是 sj-sr-7-15m 的雜湊，換了會意檔就不生效）；保守、標準、積極三種強度都使用，各用自己的值（`docs/contracts/colloquial-levels.md`）。用 [sj-lm-7-9.7m](https://github.com/Nanako0129/shanjie/releases/tag/sj-lm-7-9.7m) 的計數詞表重算，詞彙和上一版不同。CI 與發布版從這裡下載。**這不是輸入法的發行版。**
 
 - 檔案：`colloquial.sjlm`，4,713,933 bytes（上一版 4,680,680）

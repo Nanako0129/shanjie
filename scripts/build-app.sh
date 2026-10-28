@@ -44,43 +44,44 @@ cd "$ROOT"
 fail() { echo "error: $*" >&2; exit 1; }
 
 # The model is not in git (docs/PLAN.md S2c); check it before spending time on the build.
-[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v6 release asset:
-  gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
+[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the sj-lm-7-9.7m release asset:
+  gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
 shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
-  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v6 again"
-[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v5 release asset:
-  gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
+  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download sj-lm-7-9.7m again"
+[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the sj-wc-6-512c release asset:
+  gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm"
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
-  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v5 again"
-# The Kneser-Ney side file (docs/contracts/kn-core.md, model-v6 section 2.3): bound to model-v6's hash; the core turns the term on
+  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download sj-wc-6-512c again"
+# The Kneser-Ney side file (docs/contracts/kn-core.md, sj-lm-7-9.7m section 2.3): bound to sj-lm-7-9.7m's hash; the core turns the term on
 # when it sits beside the model, and the small model below records its SHA-256.
-[ -f data/lm/kn.sjkn ] || fail "data/lm/kn.sjkn is missing (the Kneser-Ney side file of the model). Download the kn-v1 release asset:
-  gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm"
+[ -f data/lm/kn.sjkn ] || fail "data/lm/kn.sjkn is missing (the Kneser-Ney side file of the model). Download the sj-kn-2-397k release asset:
+  gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm"
 shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
-  || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download kn-v1 again"
-# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v6's and kn-v1's hashes (SJTL0004).
-[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-6-14m release asset:
-  gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+  || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download sj-kn-2-397k again"
+# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with sj-lm-7-9.7m's and sj-kn-2-397k's hashes (SJTL0004).
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-7-15m release asset:
+  gh release download sj-sr-7-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
-  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-6-14m again"
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-7-15m again"
 # The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to the bigram model's hash; the core loads it from beside the model.
-[ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-1-7.7m release asset:
-  gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
+[ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-2-7.7m release asset:
+  gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
-  || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
+  || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-2-7.7m again"
 # The trigram table of the chat profile (docs/contracts/sj-lm-7-pr2.md): bound to the same bigram.sjlm; the core loads it from beside the model too, and a
 # missing one would silently leave chat on the bigram.
-[ -f data/lm/trigram-chat.sjt3 ] || fail "data/lm/trigram-chat.sjt3 is missing (the trigram table of the chat profile, docs/contracts/sj-lm-7-pr2.md section 1)"
+[ -f data/lm/trigram-chat.sjt3 ] || fail "data/lm/trigram-chat.sjt3 is missing (the trigram table of the chat profile, docs/contracts/sj-lm-7-pr2.md section 1). Download the sj-cx-2-950k release asset:
+  gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram-chat.sjt3.sha256 >/dev/null \
-  || fail "data/lm/trigram-chat.sjt3 does not match data/trigram-chat.sjt3.sha256"
+  || fail "data/lm/trigram-chat.sjt3 does not match data/trigram-chat.sjt3.sha256; download sj-cx-2-950k again"
 # The colloquial table of the chat rerank (docs/contracts/colloquial-term.md section 2.3) and the list that attributes the public sentences
-# its counts come from (section 2.1): both are assets of the data release sj-cl-1-68k, and both must match the hashes recorded in git.
-[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-1-68k release assets:
-  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
-[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-1-68k release assets:
-  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+# its counts come from (section 2.1): both are assets of the data release sj-cl-2-69k, and both must match the hashes recorded in git.
+[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-2-69k release assets:
+  gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-2-69k release assets:
+  gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
 shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256 >/dev/null \
-  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
+  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/contracts/about-models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
 for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
@@ -297,7 +298,9 @@ names-add.tsv: common proper nouns (brands, shops, companies, schools), always
       得利用之（https://data.gov.tw/license ）。
 demote.tsv: written for this project; no third-party data.
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
-  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic sentences;
+  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic sentences,
+  public messages of the g0v Slack #rand0m channel (CC0) and articles and
+  replies of public PTT boards (counted only, no original text);
   the anime and game pack words (Chinese Wikipedia, and Wikidata, CC0) and
   the words of names-add.tsv (sources above) are also counted as words.
   Attribution: Wikipedia contributors, Tatoeba contributors.
@@ -309,12 +312,16 @@ trigram.sjt3, trigram-chat.sjt3: pruned trigram counts of the same corpus as big
   its word ids (the formal profile's and the chat profile's table); same sources and attribution.
 tinylm.sjtl: a small character model (the 語意校正 rerank) trained on text
   from the same sources as bigram.sjlm: Wikipedia articles, Mozilla Common
-  Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic
-  sentences. No private conversation data.
-  Attribution: Wikipedia contributors, Tatoeba contributors.
-colloquial.sjlm: the colloquial table (常談 SJ-CL-1-68K, the chat rerank's colloquial term): word counts of colloquial text only,
+  Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic
+  sentences, g0v Slack #rand0m messages (CC0), public PTT board articles and
+  replies (no original text), and OPUS OpenSubtitles v2018 Traditional-script
+  subtitles (training only, no original text). No private conversation data.
+  Attribution: Wikipedia contributors, Tatoeba contributors, OpenSubtitles
+  (P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large
+  Parallel Corpora from Movie and TV Subtitles, LREC 2016; http://www.opensubtitles.org/ ).
+colloquial.sjlm: the colloquial table (常談 SJ-CL-2-69K, the chat rerank's colloquial term): word counts of colloquial text only,
   from two groups of sources.
-  (1) The colloquial text counted into bigram.sjlm (model-v6): Mozilla Common Voice sentences (CC0), Tatoeba sentences
+  (1) The colloquial text counted under the SJ-LM-7 word list (no g0v or PTT): Mozilla Common Voice sentences (CC0), Tatoeba sentences
       (CC BY 2.0 FR) and synthetic sentences. Attribution: Tatoeba contributors.
   (2) A public pool of 143,895 colloquial sentences from four sources, each used under its own licence (all of them only ask for
       attribution, which this paragraph and colloquial-attribution.tsv give):
