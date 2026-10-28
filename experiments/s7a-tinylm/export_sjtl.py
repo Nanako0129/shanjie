@@ -60,6 +60,8 @@ KN_MAGIC = b"SJKN0002"            # tools/kn_cont.py: magic, u32 V, the model's 
 MAX_DELTA = 1000.0                # the range core/src/tinylm.rs accepts
 F32, INT8 = 0, 1
 HEADER = struct.Struct("<8s7I4d32s")
+HEADER_V4 = HEADER.size + DELTAS.size + LEVELS.size + 32   # 244, core/src/tinylm.rs HEADER_V4
+HEADER_V5 = HEADER_V4 + 4                                  # 248, core HEADER_V5: version 4 plus a u32, the declared left-context length (context-return.md); `export` writes none yet
 
 
 def tensor_shapes(n_layer, d, ctx, V):
@@ -72,9 +74,9 @@ def tensor_shapes(n_layer, d, ctx, V):
     return out
 
 
-def sjtl_size(n_layer, d, ctx, V, wtype="int8", header=HEADER.size + DELTAS.size + LEVELS.size + 32):
+def sjtl_size(n_layer, d, ctx, V, wtype="int8", header=HEADER_V4):
     """Bytes of the file `export` writes: header + 4 (V - 3) vocabulary + the tensors of `tensor_shapes` (a 2-D matrix is r*c bytes + 4r scale
-    bytes in int8, 4rc in f32; a vector 4n). The default header is version 4's 244 bytes; an SJTL0005 file (context-return) has 248.
+    bytes in int8, 4rc in f32; a vector 4n). The default header is version 4's HEADER_V4 (244 bytes); an SJTL0005 file (context-return) has HEADER_V5 (248).
     Core's MAX_FILE is 64 << 20 = 67,108,864 (core/src/tinylm.rs); it computes the same length (`want` in `parse`)."""
     n = header + 4 * (V - 3)
     for _, shape in tensor_shapes(n_layer, d, ctx, V):

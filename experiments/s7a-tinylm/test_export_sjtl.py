@@ -59,6 +59,9 @@ class TestExport(unittest.TestCase):
         for k, v in params.items():
             np.testing.assert_array_equal(v, z[k], err_msg=k)
 
+    def test_header_lengths_are_core_s(self):
+        self.assertEqual((ex.HEADER_V4, ex.HEADER_V5), (244, 248))      # core/src/tinylm.rs HEADER_V4 / HEADER_V5, the numbers sr8-colab.sh sizes the XW file with
+
     def test_sjtl_size_is_the_size_of_the_written_file(self):
         for wtype in ("f32", "int8"):
             out = self.export(wtype)                                         # version 1: the 100-byte header
@@ -71,6 +74,7 @@ class TestExport(unittest.TestCase):
         self.assertEqual(n, 65_202_784)
         self.assertLess(n, 64 << 20)
         self.assertEqual(ex.sjtl_size(8, 768, tinylm.CTX, 10352) - n, 776)
+        self.assertEqual(ex.sjtl_size(8, 768, tinylm.CTX, 10351, header=ex.HEADER_V5) - n, 4)
 
     def test_int8_restore_is_q_times_scale_of_the_shared_quantizer(self):
         out = self.export("int8")

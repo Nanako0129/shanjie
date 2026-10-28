@@ -118,7 +118,7 @@ rm $W/scores/*.discordtune.jsonl $W/dumps/discordtune.* $W/fusion/rowstats/*.dis
 
 契約 `docs/contracts/s7b-larger-lm.md`；結果在研究紀錄同日 S7b 一節。188 用 S7a 同一份訓練文字與 ids；Mac 的 `OUT`＝`$W/s7b`。
 
-`torch_model.py` 的 `CONFIGS` 還有 `XW`（8 層、d 768、12 頭，約 6,420 萬參數；第二輪契約 `sj-round2.md` §3.1 的「XL」）。S7b 的 `XL`（12 層、d 640）意思不變，所以另取一個鍵。`export_sjtl.py` 與核心的 `.sjtl` 載入器都由檔頭決定形狀（`d % n_head == 0`、`d` ≤ 2,048），XW 不需要改它們；`export_sjtl.sjtl_size(...)` 算匯出檔的位元組數（XW 的 int8 檔在 10,351 個字時是 65,202,784 位元組，低於核心 `MAX_FILE` 的 64 MiB＝67,108,864；每多一個字 +776 位元組）。
+`torch_model.py` 的 `CONFIGS` 還有 `XW`（8 層、d 768、12 頭，約 6,420 萬參數；第二輪契約 `sj-round2.md` §3.1 的「XL」）。S7b 的 `XL`（12 層、d 640）意思不變，所以另取一個鍵。`export_sjtl.py` 與核心的 `.sjtl` 載入器都由檔頭決定形狀（`d % n_head == 0`、`d` ≤ 2,048），XW 不需要改它們；`export_sjtl.sjtl_size(...)` 算匯出檔的位元組數（檔頭長度預設 `HEADER_V4`＝244，SJTL0005 用 `HEADER_V5`＝248，兩個數字和核心的 `HEADER_V4`／`HEADER_V5` 一致；XW 的 int8 檔在 10,351 個字時是 65,202,784 位元組，低於核心 `MAX_FILE` 的 64 MiB＝67,108,864；每多一個字 +776 位元組）。
 
 ```sh
 # 188：訓練與公開集合的 torch 打分（錯字回報固定 S7a 的前 66 列）
