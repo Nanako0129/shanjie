@@ -105,6 +105,8 @@
 | v0.4.7 | `af78ded` | bigram.sjlm `fc2bddd1`、classes.sjc `9e36fa1b`、kn.sjkn `cbefbced`、trigram.sjt3 `fdd3b05d`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
 | v0.4.7 | `207b4b4` | bigram.sjlm `fc2bddd1`、classes.sjc `9e36fa1b`、kn.sjkn `cbefbced`、trigram.sjt3 `fdd3b05d`、tinylm.sjtl `d07de71d` | `--context --packs acg --tinylm <file>` |
 | v0.5.0 | `299230a` | bigram.sjlm `fc2bddd1`、classes.sjc `9e36fa1b`、kn.sjkn `cbefbced`、trigram.sjt3 `fdd3b05d`、tinylm.sjtl `e7c179d8`、colloquial.sjlm `2984eeb5` | `--context --packs acg --tinylm <file> --colloquial-core <file>` |
+| v0.5.0 | `1c9e0a7` | bigram.sjlm `fc2bddd1`、classes.sjc `9e36fa1b`、kn.sjkn `cbefbced`、trigram.sjt3 `fdd3b05d`、tinylm.sjtl `e7c179d8`、colloquial.sjlm `2984eeb5` | `--context --packs acg --tinylm <file> --colloquial-core <file>` |
+| v0.6.0 | `ba8d386` | bigram.sjlm `e3fb6056`、classes.sjc `4c1071f2`、kn.sjkn `880ee87c`、trigram.sjt3 `34305a2d`、trigram-chat.sjt3 `24ee8645`、tinylm.sjtl `f7d0ac63`、colloquial.sjlm `81c2470d` | `--context --packs acg,it --tinylm <file> --colloquial-core <file>` |
 
 依據：App 預設開動漫詞包、組字用前文；語意校正從 v0.4.1 起預設開；降權表預設開。**CLI 沒有模擬的 App 行為**：本機學習（CLI 不學）；殼在每個鍵之後非同步重排、CLI 每列只排一次；殼的前文來自輸入框、CLI 用列檔的前文欄；聊天或書面由 App 決定，這裡兩種都量。所以這張表不是「和 App 完全相同」。推論（沒量過）：App 裡在重排結果回來之前就送出的列保留 n-gram 的第一名，所以開著語意校正的版本在 App 裡的改善可能比表上小；本機學習對各版的影響也沒量。
 
@@ -312,6 +314,31 @@
 | discordtune/chat | 4958 | 86.81%<br>4304/4958 | 87.90%<br>4358/4958<br>+88 / −34，p=1.08e-06 |
 | discordtune/formal | 4958 | 85.07%<br>4218/4958 | 86.06%<br>4267/4958<br>+69 / −20，p=1.78e-07 |
 
+#### v0.5.0+v0.6.0（2026-10-29）
+
+| 集合／設定 | 列數 | v0.5.0 | v0.6.0 |
+|---|---|---|---|
+| dev302/chat | 302 | 89.07%<br>269/302 | 92.72%<br>280/302<br>+14 / −3，p=0.0127 |
+| dev302/formal | 302 | 87.75%<br>265/302 | 89.74%<br>271/302<br>+15 / −9，p=0.307 |
+| typing76/chat | 76 | 94.74%<br>72/76 | 97.37%<br>74/76<br>+2 / −0，p=0.5 |
+| typing76/formal | 76 | 90.79%<br>69/76 | 97.37%<br>74/76<br>+5 / −0，p=0.0625 |
+| probe/chat | 83 | 86.75%<br>72/83 | 91.57%<br>76/83<br>+5 / −1，p=0.219 |
+| probe/formal | 83 | 86.75%<br>72/83 | 92.77%<br>77/83<br>+6 / −1，p=0.125 |
+| user-reported/chat | 80 | 41.25%<br>33/80 | 87.50%<br>70/80<br>+38 / −1，p=1.46e-10 |
+| user-reported/formal | 80 | 36.25%<br>29/80 | 76.25%<br>61/80<br>+34 / −2，p=1.94e-08 |
+| fw/chat | 186 | 87.63%<br>163/186 | 95.16%<br>177/186<br>+14 / −0，p=0.000122 |
+| fw/formal | 186 | 88.71%<br>165/186 | 91.94%<br>171/186<br>+9 / −3，p=0.146 |
+| cvtune/chat | 3791 | 91.93%<br>3485/3791 | 93.12%<br>3530/3791<br>+95 / −50，p=0.000232 |
+| cvtune/formal | 3791 | 91.80%<br>3480/3791 | 92.96%<br>3524/3791<br>+104 / −60，p=0.000736 |
+| wikitune/chat | 2827 | 77.26%<br>2184/2827 | 76.41%<br>2160/2827<br>+80 / −104，p=0.0897 |
+| wikitune/formal | 2827 | 80.16%<br>2266/2827 | 79.34%<br>2243/2827<br>+78 / −101，p=0.0998 |
+| lytune/chat | 4811 | 87.32%<br>4201/4811 | 92.08%<br>4430/4811<br>+295 / −66，p=1.11e-35 |
+| lytune/formal | 4811 | 85.68%<br>4122/4811 | 91.12%<br>4384/4811<br>+376 / −114，p=1.05e-33 |
+| wikitypo/chat | 155 | 87.74%<br>136/155 | 85.81%<br>133/155<br>+0 / −3，p=0.25 |
+| wikitypo/formal | 155 | 88.39%<br>137/155 | 88.39%<br>137/155<br>+1 / −1，p=1 |
+| discordtune/chat | 4958 | 87.90%<br>4358/4958 | 93.69%<br>4645/4958<br>+336 / −49，p=9.77e-54 |
+| discordtune/formal | 4958 | 86.06%<br>4267/4958 | 92.54%<br>4588/4958<br>+396 / −75，p=9.62e-54 |
+
 ### 保留集
 
 照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）、`rows_sha256`（口語半邊是 `talk.txt` 的 sha256，新聞半邊是那個私人檔的 sha256，**一定要填**，沒填的數字用 n 分欄）和實際量的 commit 填進 results JSON 的 `holdout`（`{"commit": …, "chat": {n, top1, fixed, broken, p, rows_sha256}, "formal": ...}`）。**2026-10-29 起 `chat` 是口語半邊（`--set holdout`，只讀 `talk.txt`，n 150），`formal` 是新聞半邊（私人檔 `--rows … --profile formal`）**，欄位依各自的 `rows_sha256` 分開。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。
@@ -334,6 +361,8 @@
 | v0.4.7<br>`af78ded` | —（尚未量測） | —（尚未量測） | 78.00%<br>234/300<br>+0 / −0，p=1 | 77.67%<br>233/300<br>+7 / −4，p=0.549 |
 | v0.4.7<br>`207b4b4` | —（尚未量測） | —（尚未量測） | 78.00%<br>234/300 | 77.67%<br>233/300 |
 | v0.5.0<br>`299230a` | —（尚未量測） | —（尚未量測） | 79.00%<br>237/300<br>+7 / −4，p=0.549 | 80.33%<br>241/300<br>+8 / −0，p=0.0078 |
+| v0.5.0<br>`1c9e0a7` | —（尚未量測） | —（尚未量測） | —（尚未量測） | —（尚未量測） |
+| v0.6.0<br>`ba8d386` | —（尚未量測） | —（尚未量測） | —（尚未量測） | —（尚未量測） |
 
 ### 速度與記憶體（同場）
 
@@ -373,6 +402,10 @@
 | v0.4.7 書面 | 2026-10-22 | 同上 | 2.062 ms | 6.85 ms | 727 ms | 429 MB | 8336 | 302/302 | —（重播不含語意校正） |
 | v0.5.0 | 2026-10-22 | Mac17,3 / 27.0.1 / 4.1→3.3 | 2.047 ms | 6.72 ms | 905 ms | 441 MB | 8336 | 302/302 | 6.35／8.22 ms |
 | v0.5.0 書面 | 2026-10-22 | 同上 | 2.019 ms | 7.44 ms | 889 ms | 441 MB | 8336 | 302/302 | —（重播不含語意校正） |
+| v0.5.0 | 2026-10-29 | Mac17,3 / 27.0.1 / 5.8→2.9 | 2.065 ms | 6.29 ms | 892 ms | 441 MB | 8336 | 302/302 | 6.51／8.25 ms |
+| v0.5.0 書面 | 2026-10-29 | 同上 | 2.089 ms | 7.04 ms | 892 ms | 441 MB | 8336 | 302/302 | —（重播不含語意校正） |
+| v0.6.0 | 2026-10-29 | Mac17,3 / 27.0.1 / 5.8→2.9 | 2.232 ms | 6.87 ms | 945 ms | 480 MB | 8336 | 302/302 | 6.68／8.58 ms |
+| v0.6.0 書面 | 2026-10-29 | 同上 | 2.261 ms | 7.60 ms | 964 ms | 480 MB | 8336 | 302/302 | —（重播不含語意校正） |
 
 ### 量測規則（套件 v2）
 
