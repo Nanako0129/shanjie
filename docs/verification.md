@@ -34,7 +34,7 @@
 | `tools/bench.py check-static` | 改動 `eval/bench/static/typing-test.json` 或 `docs/typing-test.md` 時 | 實打對照表逐格對照原文 |
 | `tools/bench.py table` | 上面任一個之後 | 重產 `docs/benchmark.md`，不手改 |
 
-**保留集的兩個半邊（從下一個發版起，`docs/contracts/kpi.md` §3）**：保留集規則不變（只在推 `v*` tag 前由 fresh verifier 跑一次，基準與新版各跑 `--set holdout --rowstats`，聊天、書面各一次）。全集合照舊每種設定一行，存在 v2 JSON 的 `holdout.chat`、`holdout.formal`。另加兩行：口語半邊用**聊天**設定、新聞半邊用**書面**設定。`--set holdout` 依檔名排序讀，`news.txt` 是第 1–150 列、`talk.txt` 是第 151–300 列；基準與新版的 rowstats 用同樣的方式切出那一段、列號從 1 重編（`evalstats` 要求列號從 1 連續），再跑 `evalstats compare --net`。兩個半邊存進 `eval/bench/kpi/<版本>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（欄位同 v2 JSON 的 `holdout`：`n`、`top1`、`fixed`、`broken`、`p`，另加那個半邊檔案的 `rows_sha256`，表依它分欄），`kpi.py table` 從這兩個欄位畫口語與新聞半邊的 top1。同一次發版前量的這四行算一次「使用」。
+**保留集的兩個半邊（`docs/contracts/kpi.md` §3；2026-10-29 換手，`docs/contracts/news-corpus.md` §2.4）**：保留集規則不變（只在推 `v*` tag 前由 fresh verifier 跑一次）。`eval/holdout/` 從此只有口語半邊 `talk.txt`（n 150）：`--set holdout --rowstats` 用聊天設定量，就是**口語半邊**，存在 v2 JSON 的 `holdout.chat`、kpi JSON 的 `holdout_talk_chat`；`holdout.formal` 不再有書面的保留集數字。**新聞半邊**是 repo 外的私人檔（行政院等新聞稿的舊新聞列已退役），verifier 在評測機器上對基準與新版各跑 `--rows <holdout-news-1.txt> --profile formal --rowstats`（檔用前核對 `eval/README.md` 的雜湊，量完刪掉 rowstats 與那台機器上的副本），再 `evalstats compare --net`，存進 `holdout_news_formal`（欄位同 `holdout_talk_chat`，另加 `rows_sha256`，表依它分欄）。**旗標禁令（流程規則，不是技術防護）**：`--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（檔內只有 `[0-9\t\n]`）。同一次發版前量的這兩行算一次「使用」。
 
 ## bundled selftest 的 bundle ID
 

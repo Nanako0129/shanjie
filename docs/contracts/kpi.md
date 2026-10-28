@@ -34,13 +34,14 @@
 - 表頭寫明每一欄的集合大小與雜湊（v2 JSON 的 `sets`，以及 `kpi/<v>.json` 記的 `rows_sha256`），換集合時欄位分開，不同集合的數字不放在同一欄；兩種來源都適用。
 - 表下方列出每一列的來源檔名。
 
-## 3. 保留集兩個半邊（從下一個發版起）
+## 3. 保留集兩個半邊（2026-10-29 修訂：新聞半邊改私人檔，`docs/contracts/news-corpus.md` §2.4）
 
-- 保留集規則不變：只在推 `v*` tag 前由 fresh verifier 跑一次，基準與新版各跑 `--set holdout --rowstats`（聊天、書面各一次）。改的只是回報：
-  - 全集合照舊每種設定一行（聊天、書面），存在 v2 JSON 的 `holdout.chat`／`holdout.formal`；
-  - 另加兩行：口語半邊用**聊天**設定、新聞半邊用**書面**設定。`--set holdout` 依檔名排序讀，`news.txt` 是第 1–150 列、`talk.txt` 是第 151–300 列；基準與新版的 rowstats 用同樣的方式切出那一段、列號從 1 重編，再跑 `evalstats compare --net`；
-  - 兩個半邊存在 `eval/bench/kpi/<version>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（欄位同 v2 JSON 的 holdout：`n`、`top1`、`fixed`、`broken`、`p`，另加那個半邊檔案的 `rows_sha256`，表依它分欄，換份時不同份的數字不會在同一欄）；
-  - 同一次發版前量的這四行算一次「使用」。
+- 保留集規則不變：只在推 `v*` tag 前由 fresh verifier 跑一次。回報改成：
+  - **口語半邊**＝`--set holdout` 全集（`eval/holdout/` 只剩 `talk.txt`，n 150），聊天設定，存在 `holdout_talk_chat`；全集合那兩行不再存在，v2 JSON 的 `holdout.*` 從這一版起是口語半邊，不跨份比；
+  - **新聞半邊**＝私人檔（`--rows <holdout-news-1.txt> --profile formal --rowstats`，書面設定），存在 `holdout_news_formal`；
+  - 欄位同 v2 JSON 的 holdout：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`，表依它分欄，換份時不同份的數字不會在同一欄（`tools/kpi.py` 本來就如此，`tools/test_kpi.py` 有私人檔的案例）；
+  - 量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（流程規則，不是技術防護）；
+  - 同一次發版前量的這兩行算一次「使用」。
 - `docs/verification.md` 與 `eval/README.md` 的保留集段落跟著改；`kpi.py table` 從 `kpi/<v>.json` 的這兩個欄位讀兩個半邊的 top1。
 
 ## 4. 驗收

@@ -15,6 +15,8 @@
 
 ## 保留集
 
+（2026-10-29 起 `--set holdout` 只讀口語半邊 `talk.txt`，n 150；新聞半邊是私人檔，用 `--rows` 量，欄位 `holdout_news_formal`，見 `docs/verification.md`。下面的歷史表是舊的 n 300。）
+
 由 fresh verifier 在該版 tag 的 worktree 跑 `--set holdout` 後，把摘要行填進 results JSON 的 `holdout`（`{"chat": {n, top1, oracle64, top1_sha256}, "formal": ...}`）。
 
 | 版本 | chat | formal |
