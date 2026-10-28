@@ -169,7 +169,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats):
     name, tag, d = found[0]
     s = {**ast.literal_eval(d), "tag": tag}
     lm8, tl8 = models["bigram.sjlm"][:8], models.get("tinylm.sjtl", "")[:8]
-    want = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
+    want = f"replay-chat+ctx+acg+it+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
         + (f"+colloq:{models['colloquial.sjlm'][:8]}+rc" if "colloquial.sjlm" in models else "")
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")

@@ -1,6 +1,6 @@
 //! E-E real-engine replay (docs/contracts/engine-replay.md): rows typed key by key through one `core::engine::Engine`
 //! built like the App's `Shell.build()`, with the user's re-picks simulated on request. Numbers only come out of here.
-use core::engine::{Engine, Key, KeyKind, Layout, Output, PACK_ACG, PAGE_SIZE};
+use core::engine::{Engine, Key, KeyKind, Layout, Output, PACK_ACG, PACK_IT, PAGE_SIZE};
 use core::eval::{pyround, sha256_hex, Lenient};
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
@@ -69,7 +69,7 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
     from.abs_diff(to).min(1 + to).min(1 + (n - to))
 }
 
-/// The engine as `Shell.build()` makes it (acg pack, bigram, small model, colloquial table, demotion on, rerank on at the standard level,
+/// The engine as `Shell.build()` makes it (the ACG and IT+AI packs, both on by default in Settings.swift; bigram, small model, colloquial table, demotion on, rerank on at the standard level,
 /// profile), except the two recorded deviations: prediction row off and English mixing off (the word list is never loaded). `tinylm` None is
 /// `--no-tinylm`. `colloquial` is the colloquial table, loaded after the small model as the App does; the bin passes `data/lm/colloquial.sjlm`
 /// by default and None for `--no-colloquial`. `learn` turns learning on once, in memory only (no learning file is opened here; the bin's
@@ -85,7 +85,7 @@ pub fn build_engine_opts(root: &Path, lm: &Path, tinylm: Option<&Path>, colloqui
         move |_| format!("{what} failed")
     }
     let packs = root.join("data/packs");
-    let mut e = Engine::new_with_packs(&root.join("data/lexicon"), Layout::Standard, Some((&packs, PACK_ACG))).map_err(fail("engine build"))?;
+    let mut e = Engine::new_with_packs(&root.join("data/lexicon"), Layout::Standard, Some((&packs, PACK_ACG | PACK_IT))).map_err(fail("engine build"))?;
     if no_english_next {
         e.set_english_next(None);
     }
