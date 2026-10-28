@@ -13,7 +13,8 @@ from tinylm import CTX, LAYER_KEYS, Vocab
 
 # contract section 2.2; "T" is a tiny config for smoke tests only
 CONFIGS = {"S": dict(n_layer=4, d=256, n_head=4), "M": dict(n_layer=6, d=384, n_head=6), "T": dict(n_layer=2, d=32, n_head=2),
-           "L": dict(n_layer=8, d=512, n_head=8), "XL": dict(n_layer=12, d=640, n_head=10)}   # S7b (docs/contracts/s7b-larger-lm.md §2.1)
+           "L": dict(n_layer=8, d=512, n_head=8), "XL": dict(n_layer=12, d=640, n_head=10),   # S7b (docs/contracts/s7b-larger-lm.md §2.1)
+           "XW": dict(n_layer=8, d=768, n_head=12)}   # sj-round2.md §3.1's "XL" (L widened); "XL" above is S7b's, so this one has its own key
 
 
 class Block(nn.Module):

@@ -72,6 +72,17 @@ def tensor_shapes(n_layer, d, ctx, V):
     return out
 
 
+def sjtl_size(n_layer, d, ctx, V, wtype="int8", header=HEADER.size + DELTAS.size + LEVELS.size + 32):
+    """Bytes of the file `export` writes: header + 4 (V - 3) vocabulary + the tensors of `tensor_shapes` (a 2-D matrix is r*c bytes + 4r scale
+    bytes in int8, 4rc in f32; a vector 4n). The default header is version 4's 244 bytes; an SJTL0005 file (context-return) has 248.
+    Core's MAX_FILE is 64 << 20 = 67,108,864 (core/src/tinylm.rs); it computes the same length (`want` in `parse`)."""
+    n = header + 4 * (V - 3)
+    for _, shape in tensor_shapes(n_layer, d, ctx, V):
+        r, c = shape if len(shape) == 2 else (None, None)
+        n += (r * c + 4 * r if wtype == "int8" else 4 * r * c) if r else 4 * shape[0]
+    return n
+
+
 def check_params(chat, formal, levels=None):
     """Raise ValueError unless the header's fusion floats are ones the Rust reader loads (core/src/tinylm.rs `valid_params`: alpha
     finite, tau not NaN, delta in [0, MAX_DELTA]), the same check for every set, the four of `levels` included; a file it refuses

@@ -59,6 +59,19 @@ class TestExport(unittest.TestCase):
         for k, v in params.items():
             np.testing.assert_array_equal(v, z[k], err_msg=k)
 
+    def test_sjtl_size_is_the_size_of_the_written_file(self):
+        for wtype in ("f32", "int8"):
+            out = self.export(wtype)                                         # version 1: the 100-byte header
+            self.assertEqual(os.path.getsize(out), ex.sjtl_size(2, 8, tinylm.CTX, len(CHARS) + 3, wtype, header=ex.HEADER.size))
+        out = os.path.join(self.td.name, "v4.sjtl")
+        ex.export(self.npz, out, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), SHA, levels=[0.3, 2, 0.25] * 4, kn_sha=ex.NO_KN)
+        self.assertEqual(os.path.getsize(out), ex.sjtl_size(2, 8, tinylm.CTX, len(CHARS) + 3))     # the default header is version 4's 244 bytes
+        # sj-round2.md section 3.1's XW (8 layers, d 768) at R1's 10,351 ids: under core's MAX_FILE (64 MiB), 776 bytes per extra id
+        n = ex.sjtl_size(8, 768, tinylm.CTX, 10351)
+        self.assertEqual(n, 65_202_784)
+        self.assertLess(n, 64 << 20)
+        self.assertEqual(ex.sjtl_size(8, 768, tinylm.CTX, 10352) - n, 776)
+
     def test_int8_restore_is_q_times_scale_of_the_shared_quantizer(self):
         out = self.export("int8")
         q = os.path.join(self.td.name, "q.npz")
