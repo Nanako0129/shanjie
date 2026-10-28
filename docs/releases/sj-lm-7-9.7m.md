@@ -1,14 +1,14 @@
 善解的通語模型 **SJ-LM-7-9.7M**（bigram 語言模型，檔案 `bigram.sjlm`，SJLM0001 格式；模型命名見 `docs/releases/README.md`），接替 [model-v6](https://github.com/Nanako0129/shanjie/releases/tag/model-v6)（通語 SJ-LM-6-9.1M）。**要和同一組的另外六個檔一起用**（見最後的下載）：辨類、承接、兩張連文表、會意都記了這個檔的 SHA-256，配到別的版本會載入失敗；常談由會意的雜湊配對。要讀兩張連文表、照每個設定的 KN 解碼，需要通語 SJ-LM-7 PR 2 之後的核心（`docs/contracts/sj-lm-7-pr2.md`）。CI 與發布版從這裡下載。**這不是輸入法的發行版。**
 
-- 檔案：`bigram.sjlm`，88,467,426 bytes（比 model-v6 的 83,445,569 bytes 多 5,021,857）
+- 檔案：`bigram.sjlm`，88,467,490 bytes（比 model-v6 的 83,445,569 bytes 多 5,021,921）
 - SHA-256：`e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a`
-- 內容（讀檔頭與表頭）：詞彙 396,927，二元組合 9,709,502 條，227,749 個前文，加權 unigram 總次數 617,862,688；折扣 D 0.75，剪枝門檻 6（加權次數 < 6 的二元組不留，前文總次數仍用剪枝前的）。
+- 內容（讀檔頭與表頭）：詞彙 396,927，二元組合 9,709,510 條，227,749 個前文，加權 unigram 總次數 617,862,688；折扣 D 0.75，剪枝門檻 6（加權次數 < 6 的二元組不留，前文總次數仍用剪枝前的）。
 - 和 model-v6 的差別（`docs/contracts/sj-lm-7.md` §2）：
   - 計數詞表只用常開詞庫（小麥基底、萌典補詞、疊加層、變調列、名單），動漫與資訊詞包詞照臂 B 的做法仍進計數（衝突讀音照 model-v6 的規則排除 655 詞）；詞庫的讀音修正（簡編本、萌典、倒掛字）與詞包處置跟著這一版，在同一個 PR 的 `data/lexicon`、`data/packs`。
   - 繁體句不再套 OpenCC `TWPhrases`（`build_counts.py --no-trad-tw-phrases`）。
   - 口語語料加量：g0v `#rand0m`（×5）、PTT 推文（×5）、PTT 內文（×1）；剪枝門檻從 2 改 6（門檻 2 時約 220 MB，超過記憶體預算）。
 - 產生：配方照 `experiments/model-v6/README.md`，新增來源的清理與計數指令在 `experiments/sj-lm-7/README.md`（分支 `exp/sj7-stage0c`、`exp/sj7-trigram`）。權重：維基 20 萬篇 ×1、口語池 ×5（輸入：`colloquial-train.txt` 用新轉換重產，`eb905936…`，86,802 句；合成句 `synth.txt`，`bec7a6a2…`；補次數檔，`315939d7…`）、g0v（`cedad812…`）×5、PTT 推文（`6568bc66…`）×5、PTT 內文（`f42d5c8b…`）×1。挑句用全收，沒有用 Moore–Lewis（那一臂 discordtune 沒有變好，維護者選全收）。
-- 量測（階段 1，臂 B 剪枝 6，會意 SJ-SR-6-14M 重新綁到這個檔；對 main 的現行出貨；改對／改壞；研究紀錄 2026-10-26）：
+- 量測（階段 1，臂 B 剪枝 6，會意 SJ-SR-6-14M 重新綁到這個模型加指紋條目之前的同一份建置；加指紋後選字在公開集合上逐列相同（研究紀錄 2026-10-28）；對 main 的現行出貨；改對／改壞；研究紀錄 2026-10-26）：
   - discordtune 4,366 → 4,534（201／33）；cvtune-clean 3,002 → 3,011；打字測驗聊天／書面 72／69 → 73／72；錯字回報聊天／書面 58／51 → 95／99；wikitune-clean 書面 1,641 → 1,610。
   - dev302 書面改壞 6 列（出貨標準第 2 條的例外，維護者 2026-10-26 同意，`docs/contracts/sj-lm-7.md` §2.8）。
   - CLI 載入全部模型的最高 RSS（Linux，只拿來比大小）：聊天 271 → 282 MiB、書面 376 → 380 MiB。

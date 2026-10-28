@@ -2,7 +2,7 @@
 
 - 檔案：`kn.sjkn`，1,587,772 bytes
 - SHA-256：`880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a`
-- 綁定的模型：sj-lm-7-9.7m（`bigram.sjlm`，SHA-256 `e3fb6056…3d18db5b`）。檔頭記了模型的 SHA-256，配到別的模型會載入失敗。
+- 綁定的模型：sj-lm-7-9.7m（`bigram.sjlm`，SHA-256 `e3fb6056…6148eb5a`）。檔頭記了模型的 SHA-256，配到別的模型會載入失敗。
 - 內容（讀檔頭）：詞彙 396,927 個；每個詞「前面接過幾種不同的詞」（接續次數，θ = 1）；β 1；接續次數的總和 ΣN′ = 46,087,912（model-v6 的 [kn-v1](https://github.com/Nanako0129/shanjie/releases/tag/kn-v1) 是 23,905,107）。
 - **兩種設定用的 β 不同**：聊天照檔頭的 β 1；書面用核心的常數 `FORMAL_KN_BETA` 0.75（`core/src/lm.rs`，研究紀錄 2026-10-26 階段 3），檔案本身不變。書面也開 KN 是這一版新增的（model-v6 的書面有連文表時不用 KN）。
 - 產生：`tools/kn_cont.py --theta 1 --beta 1`，用和通語同一批計數與最終模型（契約 `docs/contracts/sj-lm-7.md` §2.6），指令的骨架在 `experiments/model-v6/README.md`；格式與規格見 `docs/contracts/kn-core.md`。

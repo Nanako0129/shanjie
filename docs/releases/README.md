@@ -8,7 +8,7 @@
 
   | 中文名 | 代號 | 舊代號 | 檔案 | 規模的單位 | 目前這一版 |
   |---|---|---|---|---|---|
-  | 通語（語言模型） | SJ-LM | `model-vN` | `bigram.sjlm` | 二元組合條數 | `sj-lm-7-9.7m` ＝ SJ-LM-7-9.7M（9,709,502 條，詞彙 396,927；舊：model-v6 ＝ SJ-LM-6-9.1M） |
+  | 通語（語言模型） | SJ-LM | `model-vN` | `bigram.sjlm` | 二元組合條數 | `sj-lm-7-9.7m` ＝ SJ-LM-7-9.7M（9,709,510 條，詞彙 396,927；舊：model-v6 ＝ SJ-LM-6-9.1M） |
   | 辨類（詞類） | SJ-WC | `classes-vN` | `classes.sjc` | 詞類數 | `sj-wc-6-512c` ＝ SJ-WC-6-512C（舊：classes-v5 ＝ SJ-WC-5-512C） |
   | 承接（平滑） | SJ-KN | `kn-vN` | `kn.sjkn` | 詞彙數 | `sj-kn-2-397k` ＝ SJ-KN-2-397K（詞彙 396,927；舊：kn-v1 ＝ SJ-KN-1-353K） |
   | 連文（前兩個詞，書面） | SJ-CX | （新） | `trigram.sjt3` | 三元組合條數 | `sj-cx-2-7.7m` ＝ SJ-CX-2-7.7M（7,700,964 條；舊：`sj-cx-1-7.7m`） |
