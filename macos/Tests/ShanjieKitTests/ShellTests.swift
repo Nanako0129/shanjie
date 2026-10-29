@@ -1102,6 +1102,7 @@ final class ShellTests: XCTestCase {
         XCTAssertNotNil(shell.engine)
         XCTAssertEqual(shell.packMask, 7)
         XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
+        XCTAssertEqual(shell.engineBuilds, 4, "combined, no packs, drop ACG (still broken), drop quotes (works)")
         let c = Controller(shell)
         XCTAssertEqual(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
         XCTAssertTrue(shell.quotePackOn, "the stored choice is untouched")
@@ -1113,10 +1114,9 @@ final class ShellTests: XCTestCase {
         let overlay = resources.appendingPathComponent("overlay-add.tsv")
         try FileManager.default.removeItem(at: overlay)
         try "not a row\n".write(to: overlay, atomically: true, encoding: .utf8)
-        let before = CoreEngine.makeCalls
         let shell = packShell3(quote: true)
         XCTAssertNil(shell.engine)
-        XCTAssertEqual(CoreEngine.makeCalls - before, 2)
+        XCTAssertEqual(shell.engineBuilds, 2)
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {

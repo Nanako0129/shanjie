@@ -8,6 +8,7 @@
 同音衝突只有一種處理（契約 §2 衝突）：開詞包後某個讀音的第一名由既有詞庫的詞變成台詞分句，既有詞勝，那個分句不收。
 
 用法：python3 tools/build_quote_pack.py [--list FILE] [--out DIR] [--report DIR] [--acg-dir DIR]
+（--acg-dir 的資料夾要同時有 acg-add.tsv 與 it-add.tsv，解碼的「不開」「開」都帶它們）
 解碼靠評測 CLI（target/release/shanjie-eval）與出貨的 data/lm（雜湊見 SHIPPED_LM_SHA，開始前核對）；「不開」帶 ACG 與資訊詞包（--packs acg,it）、「開」再加台詞（acg,quotes,it），照出貨；
 quotes.json 記下解碼用的模型與 ACG、資訊詞包檔的雜湊。
 """
@@ -42,13 +43,14 @@ REBUILD = "python3 tools/build_quote_pack.py"
 
 
 def shipped_lm_sha():
-    """{檔名: 雜湊}，讀 data/*.sha256；缺檔就中止並說明（不在 import 時開檔）。"""
+    """{檔名: 雜湊}，讀 data/*.sha256（每個檔開一次）；缺檔就中止並說明（不在 import 時開檔）。"""
     out = {}
     for n in SHIPPED_LM_FILES:
         p = os.path.join(bap.ROOT, "data", n + ".sha256")
         if not os.path.exists(p):
             raise SystemExit(f"{p} is missing; the model hashes come from data/*.sha256 (fetch the models with scripts/fetch-models.sh)")
-        out[n] = open(p).read().split()[0]
+        with open(p) as fh:
+            out[n] = fh.read().split()[0]
     return out
 
 
@@ -63,8 +65,8 @@ def sha256_file(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def check_shipped_lm(directory=os.path.join(bap.ROOT, "data", "lm")):
-    for name, sha in shipped_lm_sha().items():
+def check_shipped_lm(directory=os.path.join(bap.ROOT, "data", "lm"), shas=None):
+    for name, sha in (shipped_lm_sha() if shas is None else shas).items():
         path = os.path.join(directory, name)
         if not os.path.exists(path) or sha256_file(path) != sha:
             raise SystemExit(f"{path} is missing or its SHA-256 is not {sha}; the build decodes with the shipped model")
@@ -107,9 +109,9 @@ def cli_decode(acg_dir, lm=bap.LM):
     """評測 CLI 的解碼器，簽名同 `bap.top1`：packs 是 None 就開 ACG 與資訊詞包（acg_dir 裡的 acg-add.tsv、it-add.tsv），給了就是放著 quotes-add.tsv 的資料夾，再加台詞詞包（照出貨）。"""
     def decode(pairs, profile, packs=None):
         with tempfile.TemporaryDirectory() as d:
-            pdir, names = acg_dir, "acg,it"
+            pdir, names = acg_dir, ",".join(f[:-len("-add.tsv")] for f in DECODE_PACKS)
             if packs:
-                pdir, names = os.path.join(d, "packs"), "acg,quotes,it"
+                pdir, names = os.path.join(d, "packs"), names + ",quotes"
                 os.mkdir(pdir)
                 shutil.copy(os.path.join(packs, PACK_FILE), pdir)
                 for f in DECODE_PACKS:
@@ -156,7 +158,7 @@ def first_places(words, reading, rows, decode):
     return out
 
 
-def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings, have=None, acg_words=None, it_words=None):
+def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings, have=None, acg_words=None, it_words=None, model_shas=None):
     """回傳 (files, manifest, report)。have：基底、overlay-add.tsv、sandhi-add.tsv、names-add.tsv 的詞（預設照 repo）；acg_words、it_words：ACG、資訊詞包的詞（預設讀 acg_dir 裡的檔）。"""
     decode = decode or cli_decode(acg_dir)
     have = bap.lexicon_words() if have is None else have
@@ -220,7 +222,7 @@ def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings
         "first_without_quote_pack": base_first,
         "list_sha256": sha256_file(list_path),
         # 解碼（衝突偵測、第一名報告）用的模型與詞包檔：之後換了模型或詞包，tools/test_build_quote_pack.py 比對這裡，不符就要重建
-        "decode_models_sha256": shipped_lm_sha(),
+        "decode_models_sha256": shipped_lm_sha() if model_shas is None else model_shas,
         "decode_packs_sha256": {f: sha256_file(os.path.join(acg_dir, f)) for f in DECODE_PACKS},
     }
     files = {PACK_FILE: text}
@@ -264,10 +266,11 @@ def main():
     ap.add_argument("--list", default=LIST)
     ap.add_argument("--out", default=PACKS)
     ap.add_argument("--report", default=os.path.join(ROOT, "build", "quote-pack"))
-    ap.add_argument("--acg-dir", default=PACKS, help="ACG 詞包所在的資料夾（解碼的「不開」「開」都帶它）")
+    ap.add_argument("--acg-dir", default=PACKS, help="放著 acg-add.tsv 與 it-add.tsv 的資料夾（兩個都要有；解碼的「不開」「開」都帶它們）")
     a = ap.parse_args()
-    check_shipped_lm()
-    files, manifest, report = build(a.list, a.acg_dir)
+    shas = shipped_lm_sha()
+    check_shipped_lm(shas=shas)
+    files, manifest, report = build(a.list, a.acg_dir, model_shas=shas)
     write_all(files, manifest, a.out)
     os.makedirs(a.report, exist_ok=True)
     with open(os.path.join(a.report, "report.txt"), "w", encoding="utf-8") as f:

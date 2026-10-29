@@ -501,6 +501,12 @@ public final class Shell {
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
     /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
+    /// How many engines `build()` has tried to make (test hook, like `rerankSent`): the fall-back order is asserted by counting them.
+    private(set) var engineBuilds = 0
+    private func makeEngine(packsDir: String?, packs: UInt32) -> (CoreEngine?, Int32) {
+        engineBuilds += 1
+        return CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, packs: packs)
+    }
     /// Rerank strength (section 3): the stored level, sent to every engine `build()` makes and on every change.
     private(set) var rerankLevel: RerankLevel
     /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
@@ -994,28 +1000,36 @@ public final class Shell {
         // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
         let present = Shell.packTable.reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.file) ? $0 | $1.bit : $0 }
         var built = mask & present
-        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
+        var (made, code) = makeEngine(packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
-            // The combined build failed, so the first code alone does not say whose fault it is. (a) Build with no packs: if that fails too the
-            // cause is not a pack, and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings
-            // order build with just that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop
-            // works (two broken files), the no-pack engine stays. The stored choices are untouched and nothing is shown; the next rebuild
-            // tries the packs again.
+            // The combined build failed, so the first code alone does not say whose fault it is. (a) Build with no packs, only to learn whether
+            // it works, and free it at once (build() keeps one engine at a time): if it fails too the cause is not a pack, both codes are logged
+            // and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings order build with just
+            // that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop works (two broken
+            // files), build the no-pack engine again. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
             let packCode = code
             built = 0
-            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-            if made != nil {
-                var kept = "0"
+            var noPackWorks = false
+            do {
+                let (probe, probeCode) = makeEngine(packsDir: nil, packs: 0)
+                noPackWorks = probe != nil
+                code = probeCode
+            }   // the probe engine is freed here
+            if noPackWorks {
+                var kept: UInt32 = 0
                 for bit in Shell.packTable.map(\.bit) where mask & bit != 0 && mask & ~bit != 0 {
-                    let (dropped, _) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, packs: mask & ~bit)
+                    let (dropped, _) = makeEngine(packsDir: packsDir, packs: mask & ~bit)
                     if let dropped {
                         made = dropped
                         built = mask & ~bit & present
-                        kept = String(mask & ~bit)
+                        kept = mask & ~bit
                         break
                     }
                 }
+                if made == nil { (made, code) = makeEngine(packsDir: nil, packs: 0) }
                 Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(kept)")
+            } else {
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); the build without packs failed too")
             }
         }
         guard let e = made else {

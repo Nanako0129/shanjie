@@ -57,7 +57,7 @@
   - `PACK_QUOTES = 2`，`PACK_FILES` 加 `quotes-add.tsv`，`PACK_ALL` 跟著更新（2026-10-29 合併 main：資訊詞包佔了位元 2，`PACK_ALL = PACK_ACG | PACK_QUOTES | PACK_IT`，`PACK_FILES` 依 ACG、台詞、IT 的順序）。
   - C ABI 的遮罩說明加 bit1，同時改 `core/include/shanjie.h` 與 `docs/contracts/s3a.md`。
   - 載入、封頂、檔案不存在時的行為，全部照 ACG 詞包 A.2。
-  - CLI 的 `--packs` 接受 `quotes`（也可以 `acg,quotes`）。
+  - CLI 的 `--packs` 接受 `acg`、`it`、`quotes` 的任意組合。
 - **App**：
   - 設定視窗「詞包」區塊加「經典台詞」開關，偏好鍵 `quotePack`。偏好鍵沒設過就當成**關**，打開後寫入 `true`。
   - 切換時照 ACG 詞包重建引擎。
@@ -68,7 +68,7 @@
 
 - **關掉時**：兩組都要和 main 逐位元組相同：沒有詞包一組、`--packs acg,it` 一組（出貨設定），各跑聊天與書面，比 dev302、打字測驗、錯字回報的 `top1_sha256`。golden 不變。
 - **開著時**：
-  - 對 main（不開台詞詞包；ACG 開著，照出貨）比較 dev302、打字測驗、錯字回報兩種設定，以及 discordtune、cvtune-clean 聊天（GCP）的選字。
+  - 對 main（不開台詞詞包；ACG 與資訊詞包開著，照出貨）比較 dev302、打字測驗、錯字回報兩種設定，以及 discordtune、cvtune-clean 聊天（GCP）的選字。
   - 每一列不同都列出來（公開集合可以寫句子，私人集合只寫數字）。
   - 照出貨標準的規則判：改壞 ≤ 2 且淨值 ≥ 0，或逐列相同。
   - 〔推論〕預期幾乎都逐列相同：台詞分句很少出現在一般句子裡。

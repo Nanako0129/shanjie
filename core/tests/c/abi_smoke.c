@@ -435,7 +435,7 @@ static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
   CHECK(701, shanjie_engine_new_packs(0, 0, 0, 0u, &e) == 1 && e == 0);
   CHECK(702, shanjie_engine_new_packs(dir, 0, 0, 1u, &e) == 1 && e == 0); /* a pack without a directory */
-  CHECK(703, shanjie_engine_new_packs(dir, 0, dir, 8u, &e) == 2 && e == 0); /* a bit outside the mask (bits 0-2 are ACG, quotes, IT) */
+  CHECK(703, shanjie_engine_new_packs(dir, 0, dir, (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT) << 1, &e) == 2 && e == 0); /* a bit outside the mask */
   CHECK(704, shanjie_engine_new_packs(dir, 2u, 0, 0u, &e) == 2 && e == 0);   /* layout out of range */
   CHECK(705, shanjie_engine_new_packs(dir, 0, 0, 0u, &e) == 0 && e != 0);    /* mask 0: packs_dir may be NULL */
   shanjie_engine_free(e);
