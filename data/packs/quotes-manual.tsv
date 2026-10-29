@@ -2,51 +2,212 @@
 # 欄位（tab 分隔）：台詞原文（含標點）、出處（電影或劇名）、年份、核對來源（網址、片段時間點，或「維護者核對」）、收錄人（維護者、Discord 暱稱，或「起始清單」）、選填的讀音（各分句的注音，分句之間以 ｜ 分隔，給讀音工具標錯的字用；某個分句留空就交給讀音工具）。
 # 核對來源空白（或寫「待核對」）的列，建置工具 tools/build_quote_pack.py 不收，列在報告裡。每一句都要由人對照原片用字核對過才填核對來源；不憑記憶補台詞。
 # 同一句有不同說法（電影原版、廣為流傳的版本）時，由維護者決定收哪一種或兩種都收，寫在備註。只收公開影視作品的台詞，不收私人訊息的句子。
-吃著火鍋，唱著歌	讓子彈飛	2010		維護者
-你開馬自達，難怪你遲到	黑金		待核對	維護者（出處由 charliie 更正）
-# 以下是 2026-10-22／23 的草稿：起始清單（憑記憶列）與 charliie 在 Discord 給的整理文章（PTT、MyVideo、風傳媒）。文章只是線索，全部待核對；年份核對時一起填。
-讓子彈飛一會兒	讓子彈飛		待核對	起始清單
-做人如果沒有夢想，跟鹹魚有什麼分別	少林足球		待核對	起始清單
-天下武功，無堅不破，唯快不破	功夫		待核對	起始清單
-曾經有一份真誠的愛情放在我面前，我沒有珍惜	大話西遊		待核對	起始清單
-我養你啊	喜劇之王		待核對	起始清單
-其實，我是一個演員	喜劇之王		待核對	起始清單
-對不起，我是警察	無間道		待核對	起始清單
-我等了三年，就是要等一個機會	英雄本色		待核對	起始清單
-留下來，或者我跟你走	海角七號		待核對	起始清單
-留下來，或者我跟妳走。	海角七號		待核對	charliie（線索：風傳媒）
-我想當一個好人	無間道		待核對	charliie（線索：PTT）
-巴拿馬總統跟我也有點交情	賭神		待核對	charliie（線索：PTT）
-巴拿馬總統跟我還算有些交情	賭神		待核對	charliie（線索：MyVideo）
-記住，人要比車兇啊！	烈火戰車2：極速傳說		待核對	charliie（線索：PTT）
-包皮，退下！	古惑仔		待核對	charliie（線索：PTT）
-人，一定要靠自己！	鼠膽龍威		待核對	charliie（線索：PTT）
-在座各位都是垃圾	破壞之王		待核對	charliie（線索：PTT）
-我相信正義，但是沒人相信我	喋血雙雄		待核對	charliie（線索：PTT）
-是爺們就放個響屁	投名狀		待核對	charliie（線索：PTT）
-來人，餵兩位公子吃餅	九品芝麻官		待核對	charliie（線索：MyVideo）
-我空虛、寂寞，我冷啊！	九品芝麻官		待核對	charliie（線索：MyVideo）
-關門，放狗！	九品芝麻官		待核對	charliie（線索：MyVideo）
-我又跳出來了，我又站回去了，打我呀笨蛋	九品芝麻官		待核對	charliie（線索：MyVideo）
-飛是小李飛刀的飛，刀是小李飛刀的刀。	國產凌凌漆		待核對	charliie（線索：MyVideo）
-像你這樣出色的男人，無論在什麼地方，都像漆黑中的螢火蟲一樣	國產凌凌漆		待核對	charliie（線索：MyVideo）
-是洋蔥，我加了洋蔥	食神		待核對	charliie（線索：MyVideo）
-只要有心，人人都是食神。	食神		待核對	charliie（線索：MyVideo）
-你的錢就是我的錢，我的錢就是你的錢	賭俠		待核對	charliie（線索：MyVideo）
-別人笑我太瘋癲，我笑他人看不穿	唐伯虎點秋香		待核對	charliie（線索：MyVideo）
-只准州官放屁，不准百姓拉屎	威龍闖天關		待核對	charliie（線索：MyVideo）
-誰要你的貞操，我要你的青春	逃學威龍		待核對	charliie（線索：MyVideo）
-看可以，千萬不要笑	逃學威龍		待核對	charliie（線索：MyVideo）
-啊，世界多麼美麗！啊，空氣多麼清新！	超級學校霸王		待核對	charliie（線索：MyVideo）
-如果說他會贏的話，我就把麥克風吃了	超級學校霸王		待核對	charliie（線索：MyVideo）
-怎麼？有人告訴你天字一號房在天字二號的隔壁嗎？	射鵰英雄傳之東成西就		待核對	charliie（線索：MyVideo）
-年輕人終究是年輕人！	賭神		待核對	charliie（線索：MyVideo）
-你自己看不到啊，我給你看啊。	一一		待核對	charliie（線索：風傳媒）
-如果我不讓他們騙我，我怎麼抱得到孫子。	囍宴		待核對	charliie（線索：風傳媒）
-把握時間，掌握方向	陽光普照		待核對	charliie（線索：風傳媒）
-我是昭和四年生	多桑		待核對	charliie（線索：風傳媒）
-你是忘記了，還是害怕想起來？	返校		待核對	charliie（線索：風傳媒）
-人生海海	無言的山丘		待核對	charliie（線索：風傳媒）
-有錢人的小孩，什麼都比較會。	魯冰花		待核對	charliie（線索：風傳媒）
-咱本島人最可憐，一下日本人，一下中國人，眾人吃、眾人騎，沒人疼。	悲情城市		待核對	charliie（線索：風傳媒）
-你怎麼就不明白呢？這個世界是不會為你而改變的	牯嶺街少年殺人事件		待核對	charliie（線索：風傳媒）
+# 2026-10-29：起始清單、charliie 給的文章與 Muse 搜尋到的 124 句合併去重成 163 句，逐句找文字來源核對（維基語錄、新聞與影評引文、劇本整理等）；查無來源與不是原片的 26 句不收。原片用字和網友常打的流傳版本不同時兩種都收（維護者 2026-10-29），流傳版本那一列的核對來源寫明原片用字；角色暱稱、招式、橋段這類詞也收（維護者 2026-10-29）。
+吃著火鍋，唱著歌	讓子彈飛	2010	https://www.sohu.com/a/148273206_662944	維護者	
+吃著火鍋唱著歌	讓子彈飛	2010	流傳版本，原片用字見「吃著火鍋，唱著歌」（https://www.sohu.com/a/148273206_662944）	維護者	
+你坐馬自達，怪不得你塞車	黑金	1997	https://cars.tvbs.com.tw/life/122480	維護者（出處由 charliie 更正）	
+你開馬自達，難怪你遲到	黑金	1997	流傳版本，原片用字見「你坐馬自達，怪不得你塞車」（https://cars.tvbs.com.tw/life/122480）	維護者（出處由 charliie 更正）	
+讓子彈飛一會兒	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	起始清單	
+做人如果沒有夢想，跟鹹魚有什麼分別？	少林足球	2001	https://www.nownews.com/news/6373912	起始清單	
+天下武功，無堅不破，唯快不破	功夫	2004	https://www.businesstoday.com.tw/article/category/183029/post/202601180013/	起始清單	
+天下武功，無堅不摧，唯快不破	功夫	2004	流傳版本，原片用字見「天下武功，無堅不破，唯快不破」（https://www.businesstoday.com.tw/article/category/183029/post/202601180013/）	起始清單	
+曾經有一份真摯的愛情放在我面前，我沒有珍惜	大話西遊之大聖娶親	1995	https://www.nownews.com/news/6373912	起始清單	
+曾經有一份真誠的愛情放在我面前，我沒有珍惜	大話西遊之大聖娶親	1995	流傳版本，原片用字見「曾經有一份真摯的愛情放在我面前，我沒有珍惜」（https://www.nownews.com/news/6373912）	起始清單	
+我養你啊！	喜劇之王	1999	https://www.nownews.com/news/6373912	起始清單	
+對不起，我是警察。	無間道	2002	https://zh.wikiquote.org/zh-tw/無間道	起始清單	
+我忍了三年，就是想等一個機會	英雄本色	1986	https://www.gcores.com/articles/177597	起始清單	
+我等了三年，就是要等一個機會	英雄本色	1986	流傳版本，原片用字見「我忍了三年，就是想等一個機會」（https://www.gcores.com/articles/177597）	起始清單	
+留下來，或者我跟妳走。	海角七號	2008	https://today.line.me/tw/v3/article/EXPnKYk	起始清單	
+留下來，或者我跟你走	海角七號	2008	流傳版本，原片用字見「留下來，或者我跟妳走。」（https://today.line.me/tw/v3/article/EXPnKYk）	起始清單	
+我想做個好人	無間道	2002	https://finance.ifeng.com/a/20171107/15773616_0.shtml	charliie（線索：PTT）	
+我想當一個好人	無間道	2002	流傳版本，原片用字見「我想做個好人」（https://finance.ifeng.com/a/20171107/15773616_0.shtml）	charliie（線索：PTT）	
+巴拿馬總統跟我還算有些交情	賭神	1989	https://disp.cc/b/163-a5ST	charliie（線索：PTT）	
+巴拿馬總統跟我也有點交情	賭神	1989	流傳版本，原片用字見「巴拿馬總統跟我還算有些交情」（https://disp.cc/b/163-a5ST）	charliie（線索：PTT）	
+人要比車兇啊！	烈火戰車2：極速傳說	1999	https://cars.tvbs.com.tw/life/157718	charliie（線索：PTT）	
+人要比車兇	烈火戰車2：極速傳說	1999	流傳版本，原片用字見「人要比車兇啊！」（https://cars.tvbs.com.tw/life/157718）	charliie（線索：PTT）	
+人一定要靠自己	鼠膽龍威	1995	https://www.setn.com/klist/457027	charliie（線索：PTT）	
+人，一定要靠自己！	鼠膽龍威	1995	流傳版本，原片用字見「人一定要靠自己」（https://www.setn.com/klist/457027）	charliie（線索：PTT）	
+我不是針對你，我是說在座各位都是垃圾	破壞之王	1994	https://www.digitaling.com/articles/29995.html	charliie（線索：PTT）	
+在座的各位都是垃圾	破壞之王	1994	流傳版本，原片用字見「我不是針對你，我是說在座各位都是垃圾」（https://www.digitaling.com/articles/29995.html）	charliie（線索：PTT）	
+來人！餵兩位公子吃餅！	九品芝麻官	1994	https://zh.wikiquote.org/zh-tw/九品芝麻官	charliie（線索：MyVideo）	
+你是不是曾幾何時覺得空虛寂寞覺得冷啊	大話西遊之月光寶盒	1995	https://www.nownews.com/news/2142765	charliie（線索：MyVideo）	
+我空虛、寂寞，我冷啊！	大話西遊之月光寶盒	1995	流傳版本，原片用字見「你是不是曾幾何時覺得空虛寂寞覺得冷啊」（https://www.nownews.com/news/2142765）	charliie（線索：MyVideo）	
+來人，關門，放狗！	九品芝麻官	1994	https://supertaste.tvbs.com.tw/hot/358853	charliie（線索：MyVideo）	
+關門，放狗！	九品芝麻官	1994	流傳版本，原片用字見「來人，關門，放狗！」（https://supertaste.tvbs.com.tw/hot/358853）	charliie（線索：MyVideo）	
+我跳出來，又站回去了！你打我啊，笨蛋！	九品芝麻官	1994	https://www.nownews.com/news/6373912	charliie（線索：MyVideo）	
+我又跳出來了，我又站回去了，打我呀笨蛋	九品芝麻官	1994	流傳版本，原片用字見「我跳出來，又站回去了！你打我啊，笨蛋！」（https://www.nownews.com/news/6373912）	charliie（線索：MyVideo）	
+是洋蔥！我加了洋蔥	食神	1996	https://today.line.me/tw/v2/article/5P382y	charliie（線索：MyVideo）	
+只要有心，人人都可以是食神！	食神	1996	https://zh.wikiquote.org/zh-tw/食神	charliie（線索：MyVideo）	
+只要有心，人人都是食神。	食神	1996	流傳版本，原片用字見「只要有心，人人都可以是食神！」（https://zh.wikiquote.org/zh-tw/食神）	charliie（線索：MyVideo）	
+世人笑我太瘋癲，我笑他人看不穿	唐伯虎點秋香	1993	https://www.ourchinastory.com/zh/amp/3021	charliie（線索：MyVideo）	
+別人笑我太瘋癲，我笑他人看不穿	唐伯虎點秋香	1993	流傳版本，原片用字見「世人笑我太瘋癲，我笑他人看不穿」（https://www.ourchinastory.com/zh/amp/3021）	charliie（線索：MyVideo）	
+只准州官放屁，不准百姓拉屎呀！	威龍闖天關	1994	https://supertaste.tvbs.com.tw/hot/358853	charliie（線索：MyVideo）	
+只准州官放屁，不准百姓拉屎	威龍闖天關	1994	流傳版本，原片用字見「只准州官放屁，不准百姓拉屎呀！」（https://supertaste.tvbs.com.tw/hot/358853）	charliie（線索：MyVideo）	
+年輕人終究是年輕人	賭神	1989	https://www.ourchinastory.com/zh/12749	charliie（線索：MyVideo）	
+你自己看不到啊，我給你看啊。	一一	2000	https://www.storm.mg/article/11151777	charliie（線索：風傳媒）	
+如果我不讓他們騙我，我怎麼抱得到孫子。	囍宴	1993	https://www.storm.mg/article/11151777	charliie（線索：風傳媒）	
+把握時間，掌握方向	陽光普照	2019	https://www.storm.mg/article/11151777	charliie（線索：風傳媒）	
+我是昭和四年生的。	多桑	1994	https://www.thenewslens.com/article/6515	charliie（線索：風傳媒）	
+我是昭和四年生	多桑	1994	流傳版本，原片用字見「我是昭和四年生的。」（https://www.thenewslens.com/article/6515）	charliie（線索：風傳媒）	
+你是忘記了，還是害怕想起來？	返校	2019	https://www.storm.mg/article/11151777	charliie（線索：風傳媒）	
+人生海海	無言的山丘	1992	https://www.storm.mg/article/11151777	charliie（線索：風傳媒）	
+有錢人的小孩，什麼都比較會。	魯冰花	1989	https://www.bella.tw/articles/movies&culture/58387/lupine-movie	charliie（線索：風傳媒）	
+咱本島人最可憐，一下日本人，一下中國人，眾人吃、眾人騎，沒人疼。	悲情城市	1989	https://www.nownews.com/news/6066453	charliie（線索：風傳媒）	
+你怎麼就不明白呢？這個世界是不會為你而改變的	牯嶺街少年殺人事件	1991	https://www.storm.mg/article/11151777	charliie（線索：風傳媒）	
+曾經有一份真摯的愛情擺在我的面前	大話西遊之大聖娶親	1995	https://supertaste.tvbs.com.tw/hot/358853	Muse（搜尋）	
+曾經有一段真摯的愛情擺在我的面前	大話西遊之大聖娶親	1995	流傳版本，原片用字見「曾經有一份真摯的愛情擺在我的面前」（https://supertaste.tvbs.com.tw/hot/358853）	Muse（搜尋）	
+如果非要在這份愛上加一個期限，我希望是一萬年。	大話西遊之大聖娶親	1995	https://zh.wikiquote.org/zh-tw/大話西遊	Muse（搜尋）	
+如果要在這份愛加上一個期限，我希望是一萬年	大話西遊之大聖娶親	1995	流傳版本，原片用字見「如果非要在這份愛上加一個期限，我希望是一萬年。」（https://zh.wikiquote.org/zh-tw/大話西遊）	Muse（搜尋）	
+公平！公平！還是他媽的公平！	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+公平、公平、再公平！	讓子彈飛	2010	流傳版本，原片用字見「公平！公平！還是他媽的公平！」（https://zh.wikiquote.org/zh-tw/讓子彈飛）	Muse（搜尋）	
+說好了三年，三年之後又三年，三年之後又三年，都快十年了	無間道	2002	https://www.ourchinastory.com/zh/5413	Muse（搜尋）	
+三年之後又三年，三年之後又三年，就快十年了，老大	無間道	2002	流傳版本，原片用字見「說好了三年，三年之後又三年，三年之後又三年，都快十年了」（https://www.ourchinastory.com/zh/5413）	Muse（搜尋）	
+含笑半步癲	唐伯虎點秋香	1993	https://www.setn.com/news/878777	Muse（搜尋）	
+你打我啊，笨蛋！	九品芝麻官	1994	https://www.nownews.com/news/6373912	Muse（搜尋）	
+打我呀，笨蛋！	九品芝麻官	1994	流傳版本，原片用字見「你打我啊，笨蛋！」（https://www.nownews.com/news/6373912）	Muse（搜尋）	
+我全都要	九品芝麻官	1994	https://zh.moegirl.org.cn/我全都要	Muse（搜尋）	
+我失去的東西，我一定要拿回來！	英雄本色	1986	https://www.gcores.com/articles/177597	Muse（搜尋）	
+我失去的，我自己會拿回來	英雄本色	1986	流傳版本，原片用字見「我失去的東西，我一定要拿回來！」（https://www.gcores.com/articles/177597）	Muse（搜尋）	
+阿Sir，我不當大哥好多年	英雄本色	1986	https://www.nbd.com.cn/articles/2017-10-29/1157150.html	Muse（搜尋）	
+我不做大哥好多年	英雄本色	1986	流傳版本，原片用字見「阿Sir，我不當大哥好多年」（https://www.nbd.com.cn/articles/2017-10-29/1157150.html）	Muse（搜尋）	
+一枝穿雲箭，千軍萬馬來相見	功夫	2004	https://zh.wikiquote.org/zh-tw/功夫_(電影)	Muse（搜尋）	
+一支穿雲箭，千軍萬馬來相見	功夫	2004	流傳版本，原片用字見「一枝穿雲箭，千軍萬馬來相見」（https://zh.wikiquote.org/zh-tw/功夫_(電影)）	Muse（搜尋）	
+爭什麼，摻在一起做成撒尿牛丸啊，笨蛋！	食神	1996	https://supertaste.tvbs.com.tw/food/339503	Muse（搜尋）	
+吵什麼吵，摻在一起做撒尿牛丸	食神	1996	流傳版本，原片用字見「爭什麼，摻在一起做成撒尿牛丸啊，笨蛋！」（https://supertaste.tvbs.com.tw/food/339503）	Muse（搜尋）	
+我隨風而來，隨風而去	食神	1996	https://zh.wikiquote.org/zh-tw/食神	Muse（搜尋）	
+臣妾做不到啊	後宮甄嬛傳	2011	https://www.nownews.com/news/6623043	Muse（搜尋）	
+我話講完，誰贊成？誰反對？	黑金	1997	https://crossing.cw.com.tw/article/20695	Muse（搜尋）	
+大哥你是了解我的	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+沒有你，對我很重要。	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+沒有你對我很重要	讓子彈飛	2010	流傳版本，原片用字見「沒有你，對我很重要。」（https://zh.wikiquote.org/zh-tw/讓子彈飛）	Muse（搜尋）	
+努力！奮鬥！	喜劇之王	1999	https://www.marieclaire.com.tw/entertainment/tvshow/94722	Muse（搜尋）	
+敝人，張麻子。	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+敝人張麻子	讓子彈飛	2010	流傳版本，原片用字見「敝人，張麻子。」（https://zh.wikiquote.org/zh-tw/讓子彈飛）	Muse（搜尋）	
+銅鑼灣只有一個浩南	古惑仔系列		https://www.setn.com/klist/456514	Muse（搜尋）	
+賤人就是矯情	後宮甄嬛傳	2011	https://www.tatlerasia.com/lifestyle/entertainment/empresses-in-the-palace-zh-hant	Muse（搜尋）	
+在座各位都是垃圾	破壞之王	1994	https://www.digitaling.com/articles/29995.html	Muse（搜尋）	
+我要打十個	葉問	2008	https://www.taiwannews.com.tw/zh/news/3828126	Muse（搜尋）	
+少林寺方丈，法號「夢遺」。	食神	1996	https://zh.wikiquote.org/zh-tw/食神	Muse（搜尋）	
+法號夢遺	食神	1996	流傳版本，原片用字見「少林寺方丈，法號「夢遺」。」（https://zh.wikiquote.org/zh-tw/食神）	Muse（搜尋）	
+如果你真的英明神武，使得國泰民安，鬼才願意當乞丐呢！	武狀元蘇乞兒	1992	https://www.nownews.com/news/6373912	Muse（搜尋）	
+鬼才願意當乞丐	武狀元蘇乞兒	1992	流傳版本，原片用字見「如果你真的英明神武，使得國泰民安，鬼才願意當乞丐呢！」（https://www.nownews.com/news/6373912）	Muse（搜尋）	
+蝶衣，你可真是不瘋魔不成活呀！	霸王別姬	1993	https://news.tvbs.com.tw/world/1047632	Muse（搜尋）	
+不瘋魔，不成活	霸王別姬	1993	流傳版本，原片用字見「蝶衣，你可真是不瘋魔不成活呀！」（https://news.tvbs.com.tw/world/1047632）	Muse（搜尋）	
+兄弟殺我兄弟者，視投名狀，必殺之	投名狀	2007	https://zh.wikiquote.org/zh-tw/投名狀	Muse（搜尋）	
+兄弟殺我兄弟者，必殺之	投名狀	2007	流傳版本，原片用字見「兄弟殺我兄弟者，視投名狀，必殺之」（https://zh.wikiquote.org/zh-tw/投名狀）	Muse（搜尋）	
+嚴肅點，嚴肅點，不許笑，我們這兒打劫呢！	天下無賊	2004	https://zh.wikiquote.org/zh-tw/天下無賊	Muse（搜尋）	
+別笑，打劫呢	天下無賊	2004	流傳版本，原片用字見「嚴肅點，嚴肅點，不許笑，我們這兒打劫呢！」（https://zh.wikiquote.org/zh-tw/天下無賊）	Muse（搜尋）	
+我要驗牌！	賭俠2之上海灘賭聖	1991	https://tech.china.com/articles/20260723/202607231924272.html	Muse（搜尋）	
+黯然銷魂飯	食神	1996	https://guide.michelin.com/tw/zh_TW/taipei-region/taipei/article/dining-out/trace-the-roots-char-siu-egg-rice	Muse（搜尋）	
+為什麼會突然沒水？	功夫	2004	https://lyndalee.pixnet.net/blog/post/54699668	Muse（搜尋）	
+包租婆，怎麼沒水了？	功夫	2004	流傳版本，原片用字見「為什麼會突然沒水？」（https://lyndalee.pixnet.net/blog/post/54699668）	Muse（搜尋）	
+你以為躲起來就找不到你了嗎？沒有用的！像你這樣出色的男人……	凌凌漆大戰金鎗客（港名國產凌凌漆）	1994	https://zh.wikiquote.org/zh-tw/國產凌凌漆	Muse（搜尋）	
+你以為你躲起來我就找不到你了嗎？沒有用的，你是那樣拉風的男人	凌凌漆大戰金鎗客（港名國產凌凌漆）	1994	流傳版本，原片用字見「你以為躲起來就找不到你了嗎？沒有用的！像你這樣出色的男人……」（https://zh.wikiquote.org/zh-tw/國產凌凌漆）	Muse（搜尋）	
+小強！小強你怎麼了小強？小強，你不能死啊！	唐伯虎點秋香	1993	https://www.popdaily.com.tw/life/1378567	Muse（搜尋）	
+小強，你怎麼了	唐伯虎點秋香	1993	流傳版本，原片用字見「小強！小強你怎麼了小強？小強，你不能死啊！」（https://www.popdaily.com.tw/life/1378567）	Muse（搜尋）	
+貪官要奸，清官要更奸	九品芝麻官	1994	https://tw.xiaoyakankan.tv/vod/lines/id/bezv1266.html	Muse（搜尋）	
+貪官要奸，清官更要奸	九品芝麻官	1994	流傳版本，原片用字見「貪官要奸，清官要更奸」（https://tw.xiaoyakankan.tv/vod/lines/id/bezv1266.html）	Muse（搜尋）	
+翻譯出來給我聽，什麼叫驚喜！什麼他媽的叫他媽的驚喜！	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+你給翻譯翻譯，什麼他媽的叫驚喜	讓子彈飛	2010	流傳版本，原片用字見「翻譯出來給我聽，什麼叫驚喜！什麼他媽的叫他媽的驚喜！」（https://zh.wikiquote.org/zh-tw/讓子彈飛）	Muse（搜尋）	
+我是想站著，還把錢掙了。	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+我的追求是，站著把錢掙了	讓子彈飛	2010	流傳版本，原片用字見「我是想站著，還把錢掙了。」（https://zh.wikiquote.org/zh-tw/讓子彈飛）	Muse（搜尋）	
+莫說漢軍旗，就是滿蒙八旗都放在一塊，都不及華妃娘娘鳳儀萬千	後宮甄嬛傳	2011	https://www.douban.com/group/topic/259817852/	Muse（搜尋）	
+滿蒙八旗都不及華妃娘娘鳳儀萬千	後宮甄嬛傳	2011	流傳版本，原片用字見「莫說漢軍旗，就是滿蒙八旗都放在一塊，都不及華妃娘娘鳳儀萬千」（https://www.douban.com/group/topic/259817852/）	Muse（搜尋）	
+人是人他媽生的，妖是妖他媽生的	大話西遊之大聖娶親（台灣片名《齊天大聖西遊記》）	1995	https://zh.wikiquote.org/zh-tw/大話西遊	Muse（搜尋）	
+還有球證、旁證加上主辦、協辦所有的單位，全部都是我的人，怎麼和我鬥？	少林足球	2001	https://zh.wikiquote.org/zh-tw/少林足球	Muse（搜尋）	
+旁證、球證都是我的人，你拿什麼和我鬥	少林足球	2001	流傳版本，原片用字見「還有球證、旁證加上主辦、協辦所有的單位，全部都是我的人，怎麼和我鬥？」（https://zh.wikiquote.org/zh-tw/少林足球）	Muse（搜尋）	
+給我擦皮鞋！	賭俠2之上海灘賭聖	1991	https://tech.china.com/articles/20260723/202607231924272.html	Muse（搜尋）	
+意義是三小？我只聽過義氣，沒聽過意義啦！	艋舺	2010	https://t24240lungh.pixnet.net/blog/posts/5054789438	Muse（搜尋）	
+稟夫人，小人本住在蘇州的城邊，家中有屋又有田，生活樂無邊。	唐伯虎點秋香	1993	https://zh.wikiquote.org/zh-tw/唐伯虎點秋香	Muse（搜尋）	
+稟夫人，小人本住在蘇州的城邊	唐伯虎點秋香	1993	流傳版本，原片用字見「稟夫人，小人本住在蘇州的城邊，家中有屋又有田，生活樂無邊。」（https://zh.wikiquote.org/zh-tw/唐伯虎點秋香）	Muse（搜尋）	
+Only you，能伴我取西經	大話西遊之大聖娶親（台灣片名《齊天大聖西遊記》）	1995	https://sex.ncu.edu.tw/intermargins/intermargins/TCulturalWorkshop/chineseodyssey/text/t1.htm	Muse（搜尋）	
+無敵風火輪	破壞之王	1994	https://zh.wikipedia.org/zh-tw/破壞之王	Muse（搜尋）	
+那就賞夏常在一丈紅吧	後宮甄嬛傳	2011	https://tw.taicike.com/taici/179.html	Muse（搜尋）	
+賞一丈紅	後宮甄嬛傳	2011	流傳版本，原片用字見「那就賞夏常在一丈紅吧」（https://tw.taicike.com/taici/179.html）	Muse（搜尋）	
+今晚打老虎	賭俠2之上海灘賭聖	1991	https://newtalk.tw/news/view/2026-01-05/1013291	Muse（搜尋）	
+大威天龍	青蛇	1993	https://www.yystv.cn/p/6621	Muse（搜尋）	
+皇后……殺了……皇后	後宮甄嬛傳	2011	https://bj.bendibao.com/live/20121219/90968.shtm	Muse（搜尋）	
+皇后殺了皇后	後宮甄嬛傳	2011	流傳版本，原片用字見「皇后……殺了……皇后」（https://bj.bendibao.com/live/20121219/90968.shtm）	Muse（搜尋）	
+大爺，樓上322住的是馬冬梅家吧？／馬都什麼？／馬冬梅。／什麼都沒啊？／馬冬梅啊。／馬什麼沒？	夏洛特煩惱	2015	https://k.sina.cn/article_6426176362_17f07ab6a00100dqg7.html	Muse（搜尋）	
+馬冬什麼？馬冬梅！什麼冬梅？馬冬梅！馬什麼梅？馬冬梅！	夏洛特煩惱	2015	流傳版本，原片用字見「大爺，樓上322住的是馬冬梅家吧？／馬都什麼？／馬冬梅。／什麼都沒啊？／馬冬梅啊。／馬什麼沒？」（https://k.sina.cn/article_6426176362_17f07ab6a00100dqg7.html）	Muse（搜尋）	
+道路千萬條，安全第一條，行車不規範，親人兩行淚。	流浪地球	2019	https://zh.moegirl.org.cn/两行泪	Muse（搜尋）	
+道路千萬條，安全第一條	流浪地球	2019	流傳版本，原片用字見「道路千萬條，安全第一條，行車不規範，親人兩行淚。」（https://zh.moegirl.org.cn/两行泪）	Muse（搜尋）	
+今天你要是不弄死他們，有一天你就會被他們弄死。	艋舺	2010	https://www.ptt.cc/man/MarkChao/D797/D55/M.1266823933.A.609.html	Muse（搜尋）	
+今天你不弄死他，明天他就會弄死你	艋舺	2010	流傳版本，原片用字見「今天你要是不弄死他們，有一天你就會被他們弄死。」（https://www.ptt.cc/man/MarkChao/D797/D55/M.1266823933.A.609.html）	Muse（搜尋）	
+翻牌子	後宮甄嬛傳	2011	https://www.setn.com/klist/160555	Muse（搜尋）	
+愛一個人需要理由嗎？	大話西遊	1995	https://zh.wikiquote.org/zh-tw/大話西遊	Muse（搜尋）	
+真不愧為七種武器之首！	食神	1996	https://zh.wikiquote.org/zh-tw/食神	Muse（搜尋）	
+七種武器之首	食神	1996	流傳版本，原片用字見「真不愧為七種武器之首！」（https://zh.wikiquote.org/zh-tw/食神）	Muse（搜尋）	
+我一秒鐘幾十萬上下，你竟然要我……！	少林足球	2001	https://zh.wikiquote.org/zh-tw/少林足球	Muse（搜尋）	
+我一秒鐘幾十萬上下	少林足球	2001	流傳版本，原片用字見「我一秒鐘幾十萬上下，你竟然要我……！」（https://zh.wikiquote.org/zh-tw/少林足球）	Muse（搜尋）	
+少林功夫好耶，真的好！	少林足球	2001	https://www.163.com/dy/article/D7A8Q7UM0517EM8A.html	Muse（搜尋）	
+少林功夫好耶	少林足球	2001	流傳版本，原片用字見「少林功夫好耶，真的好！」（https://www.163.com/dy/article/D7A8Q7UM0517EM8A.html）	Muse（搜尋）	
+我操！我操你媽的台北！	海角七號	2008	https://zh.wikiquote.org/zh-tw/海角七號	Muse（搜尋）	
+我操你媽的台北	海角七號	2008	流傳版本，原片用字見「我操！我操你媽的台北！」（https://zh.wikiquote.org/zh-tw/海角七號）	Muse（搜尋）	
+火佛修一，心薩嘸哞	咒	2022	https://zh.wikipedia.org/zh-tw/咒_(電影)	Muse（搜尋）	
+火佛修一	咒	2022	流傳版本，原片用字見「火佛修一，心薩嘸哞」（https://zh.wikipedia.org/zh-tw/咒_(電影)）	Muse（搜尋）	
+蛤蟆功	功夫	2004	https://www.toy-people.com/?p=39880	Muse（搜尋）	
+我左青龍，右白虎，老牛在腰間，龍頭在胸口，人擋殺人，佛擋殺佛！	唐伯虎點秋香	1993	https://winggundam.666forum.com/t80-topic	Muse（搜尋）	
+我左青龍，右白虎，老牛在腰間，龍頭在胸口！	唐伯虎點秋香	1993	流傳版本，原片用字見「我左青龍，右白虎，老牛在腰間，龍頭在胸口，人擋殺人，佛擋殺佛！」（https://winggundam.666forum.com/t80-topic）	Muse（搜尋）	
+去你娘的狗命！我命由我不由天！	哪吒之魔童降世	2019	https://www.thepaper.cn/newsDetail_forward_4111217	Muse（搜尋）	
+我命由我不由天	哪吒之魔童降世	2019	流傳版本，原片用字見「去你娘的狗命！我命由我不由天！」（https://www.thepaper.cn/newsDetail_forward_4111217）	Muse（搜尋）	
+誰敢比我慘啊？！	唐伯虎點秋香	1993	https://winggundam.666forum.com/t80-topic	Muse（搜尋）	
+誰能比我慘呀	唐伯虎點秋香	1993	流傳版本，原片用字見「誰敢比我慘啊？！」（https://winggundam.666forum.com/t80-topic）	Muse（搜尋）	
+出來混，遲早要還的！	無間道II	2003	https://zh.wikiquote.org/zh-tw/无间道	Muse（搜尋）	
+出來混就是要還	無間道II	2003	流傳版本，原片用字見「出來混，遲早要還的！」（https://zh.wikiquote.org/zh-tw/无间道）	Muse（搜尋）	
+睡夢羅漢拳	武狀元蘇乞兒	1992	https://www.hk01.com/電影/948493/周星馳電影藏真實歷史故事-蘇乞兒-真有其人但唔係個-乞兒	Muse（搜尋）	
+大力金剛腿	少林足球	2001	https://zh.wikipedia.org/wiki/少林足球	Muse（搜尋）	
+天亮後會很美的。	喜劇之王	1999	https://inmywordz.com/archives/9459	Muse（搜尋）	
+天亮之後會很漂亮的	喜劇之王	1999	流傳版本，原片用字見「天亮後會很美的。」（https://inmywordz.com/archives/9459）	Muse（搜尋）	
+別以為你長得帥我就不打你。	功夫	2004	https://lyndalee.pixnet.net/blog/post/54699668	Muse（搜尋）	
+別以為你長得帥，我就不打你	功夫	2004	流傳版本，原片用字見「別以為你長得帥我就不打你。」（https://lyndalee.pixnet.net/blog/post/54699668）	Muse（搜尋）	
+獅吼功	功夫	2004	https://lyndalee.pixnet.net/blog/post/54699668	Muse（搜尋）	
+容嬤嬤	還珠格格	1998	https://zh.wikipedia.org/zh-tw/還珠格格	Muse（搜尋）	
+四郎	後宮甄嬛傳	2011	https://star.ettoday.net/news/2415056	Muse（搜尋）	
+皇上！駕～崩～！	後宮甄嬛傳	2011	https://www.mirrormedia.mg/external/setn_1571632	Muse（搜尋）	
+皇上駕崩	後宮甄嬛傳	2011	流傳版本，原片用字見「皇上！駕～崩～！」（https://www.mirrormedia.mg/external/setn_1571632）	Muse（搜尋）	
+所謂風吹雞蛋殼，財去人安樂，此乃祝兄你的座右銘不是嗎？	唐伯虎點秋香	1993	https://winggundam.666forum.com/t80-topic	Muse（搜尋）	
+風吹雞蛋殼，財散人安樂	唐伯虎點秋香	1993	流傳版本，原片用字見「所謂風吹雞蛋殼，財去人安樂，此乃祝兄你的座右銘不是嗎？」（https://winggundam.666forum.com/t80-topic）	Muse（搜尋）	
+斧頭幫	功夫	2004	https://www.marieclaire.com.tw/entertainment/movie/40724	Muse（搜尋）	
+平生不見陳近南，便稱英雄也枉然	鹿鼎記	1992	https://incubator.wikimedia.org/wiki/Wq/yue/鹿鼎記_(1992年電影)	Muse（搜尋）	
+反清復明	鹿鼎記	1992	https://kknews.cc/zh-tw/entertainment/39v3v83.html	Muse（搜尋）	
+皇阿瑪	還珠格格	1998	https://zh.wikipedia.org/zh-tw/還珠格格	Muse（搜尋）	
+斧頭舞	功夫	2004	https://uptogo.com.tw/娛樂/電影/斧頭幫是真的嗎？/	Muse（搜尋）	
+滴血驗親	後宮甄嬛傳	2011	https://www.setn.com/klist/425971	Muse（搜尋）	
+皇上，您還記得十八年前大明湖畔的夏雨荷麼？	還珠格格	1998	https://baike.baidu.com/item/皇上，您還記得十八年前大明湖畔的夏雨荷么/15218572	Muse（搜尋）	
+皇上，你還記得大明湖畔的夏雨荷嗎	還珠格格	1998	流傳版本，原片用字見「皇上，您還記得十八年前大明湖畔的夏雨荷麼？」（https://baike.baidu.com/item/皇上，您還記得十八年前大明湖畔的夏雨荷么/15218572）	Muse（搜尋）	
+21世紀什麼最貴？人才！	天下無賊	2004	https://zh.wikiquote.org/zh-tw/天下無賊	Muse（搜尋）	
+我的意中人是一個蓋世英雄，有一天他會穿著金甲聖衣，腳踏七色彩雲前來娶我	大話西遊之大聖娶親（台灣片名《齊天大聖西遊記》）	1995	https://zh.wikiquote.org/zh-tw/大話西遊	Muse（搜尋）	
+我的意中人是個蓋世英雄，有一天他會踩著七色雲彩來娶我	大話西遊之大聖娶親（台灣片名《齊天大聖西遊記》）	1995	流傳版本，原片用字見「我的意中人是一個蓋世英雄，有一天他會穿著金甲聖衣，腳踏七色彩雲前來娶我」（https://zh.wikiquote.org/zh-tw/大話西遊）	Muse（搜尋）	
+涼風有信，秋月無邊	客途秋恨（南音、粵曲）；影視中以《小寶與康熙》的韋小寶最常引		https://www.juduo.cc/club/5759733.html	Muse（搜尋）	
+還我漂漂拳	唐伯虎點秋香	1993	https://winggundam.666forum.com/t80-topic	Muse（搜尋）	
+人生大起大落得太快，實在是太刺激了	唐伯虎點秋香	1993	https://winggundam.666forum.com/t80-topic	Muse（搜尋）	
+人生大起大落得太快，實在太刺激了	唐伯虎點秋香	1993	流傳版本，原片用字見「人生大起大落得太快，實在是太刺激了」（https://winggundam.666forum.com/t80-topic）	Muse（搜尋）	
+你快點回去火星吧，地球是很危險的！	少林足球	2001	https://zh.wikiquote.org/zh-tw/少林足球	Muse（搜尋）	
+地球是很危險的，你快點回火星吧	少林足球	2001	流傳版本，原片用字見「你快點回去火星吧，地球是很危險的！」（https://zh.wikiquote.org/zh-tw/少林足球）	Muse（搜尋）	
+縱得莞莞，莞莞類卿，暫排苦思，亦除卻巫山非雲也	後宮甄嬛傳	2011	https://star.ettoday.net/news/2415056	Muse（搜尋）	
+菀菀類卿	後宮甄嬛傳	2011	流傳版本，原片用字見「縱得莞莞，莞莞類卿，暫排苦思，亦除卻巫山非雲也」（https://star.ettoday.net/news/2415056）	Muse（搜尋）	
+重案組之虎曹達華	逃學威龍2	1992	https://zh.wikipedia.org/zh-tw/逃學威龍2	Muse（搜尋）	
+豪紳的錢如數奉還，百姓的錢，三七分成。	讓子彈飛	2010	https://zh.wikiquote.org/zh-tw/讓子彈飛	Muse（搜尋）	
+豪紳的錢如數奉還，百姓的錢三七分賬	讓子彈飛	2010	流傳版本，原片用字見「豪紳的錢如數奉還，百姓的錢，三七分成。」（https://zh.wikiquote.org/zh-tw/讓子彈飛）	Muse（搜尋）	
+吃了兩碗粉，只給一碗的錢	讓子彈飛	2010	https://vocus.cc/article/67243012fd897800018435a0	Muse（搜尋）	
+六子吃了兩碗粉，只給了一碗的錢	讓子彈飛	2010	流傳版本，原片用字見「吃了兩碗粉，只給一碗的錢」（https://vocus.cc/article/67243012fd897800018435a0）	Muse（搜尋）	
+面目全非腳	唐伯虎點秋香	1993	https://winggundam.666forum.com/t80-topic	Muse（搜尋）	
+風往哪個方向吹，草就要往哪個方向倒	艋舺	2010	https://www.ptt.cc/man/MarkChao/D797/D55/M.1266823933.A.609.html	Muse（搜尋）	
+風往哪裡吹，草就往哪裡倒	艋舺	2010	流傳版本，原片用字見「風往哪個方向吹，草就要往哪個方向倒」（https://www.ptt.cc/man/MarkChao/D797/D55/M.1266823933.A.609.html）	Muse（搜尋）	
+最煩你們這些打劫的了，一點技術含量都沒有。	天下無賊	2004	https://zh.wikiquote.org/zh-tw/天下無賊	Muse（搜尋）	
+我最煩你們這些打劫的，一點技術含量都沒有	天下無賊	2004	流傳版本，原片用字見「最煩你們這些打劫的了，一點技術含量都沒有。」（https://zh.wikiquote.org/zh-tw/天下無賊）	Muse（搜尋）	
+年紀輕輕就有一身橫練的筋骨……簡直是百年難得一見的練武奇材！	功夫	2004	https://zh.wikiquote.org/zh-tw/功夫_(電影)	Muse（搜尋）	
+我看你骨骼精奇，是萬中無一的武學奇才	功夫	2004	流傳版本，原片用字見「年紀輕輕就有一身橫練的筋骨……簡直是百年難得一見的練武奇材！」（https://zh.wikiquote.org/zh-tw/功夫_(電影)）	Muse（搜尋）	
+搶錢！搶糧！搶娘們！	投名狀	2007	https://jun0817.pixnet.net/blog/post/13102855	Muse（搜尋）	
+皇上，你害得世蘭好苦啊！	後宮甄嬛傳	2011	https://www.mirrormedia.mg/external/setn_1571632	Muse（搜尋）	
+皇上，你害得世蘭好苦	後宮甄嬛傳	2011	流傳版本，原片用字見「皇上，你害得世蘭好苦啊！」（https://www.mirrormedia.mg/external/setn_1571632）	Muse（搜尋）	
+臣妾要告發熹貴妃私通，穢亂後宮，罪不容誅！	後宮甄嬛傳	2011	https://zh.wikiquote.org/wiki/甄嬛传	Muse（搜尋）	
+臣妾要告發熹貴妃私通，穢亂後宮	後宮甄嬛傳	2011	流傳版本，原片用字見「臣妾要告發熹貴妃私通，穢亂後宮，罪不容誅！」（https://zh.wikiquote.org/wiki/甄嬛传）	Muse（搜尋）	
+翠果，打爛她的嘴！	後宮甄嬛傳	2011	https://www.zhihu.com/question/541443527	Muse（搜尋）	
+儆惡懲奸，維護世界和平這任務就交給你了……好不好！	功夫	2004	https://zh.wikiquote.org/zh-tw/功夫_(電影)	Muse（搜尋）	
+維護世界和平的重任就交給你了	功夫	2004	流傳版本，原片用字見「儆惡懲奸，維護世界和平這任務就交給你了……好不好！」（https://zh.wikiquote.org/zh-tw/功夫_(電影)）	Muse（搜尋）	
+柯景騰，你特地辦一個比賽，把自己搞受傷，你怎麼會這麼幼稚啊？	那些年，我們一起追的女孩	2011	https://zh.wikiquote.org/zh-tw/那些年，我們一起追的女孩	Muse（搜尋）	
+柯景騰，你真的很幼稚	那些年，我們一起追的女孩	2011	流傳版本，原片用字見「柯景騰，你特地辦一個比賽，把自己搞受傷，你怎麼會這麼幼稚啊？」（https://zh.wikiquote.org/zh-tw/那些年，我們一起追的女孩）	Muse（搜尋）	
+成長，最殘酷的部分就是，女孩永遠比同年齡的男孩成熟；女孩的成熟，沒一個男孩招架得住。	那些年，我們一起追的女孩	2011	https://zh.wikiquote.org/zh-tw/那些年，我們一起追的女孩	Muse（搜尋）	
+成長，最殘酷的部分就是，女孩永遠比同年齡的男孩成熟	那些年，我們一起追的女孩	2011	流傳版本，原片用字見「成長，最殘酷的部分就是，女孩永遠比同年齡的男孩成熟；女孩的成熟，沒一個男孩招架得住。」（https://zh.wikiquote.org/zh-tw/那些年，我們一起追的女孩）	Muse（搜尋）	

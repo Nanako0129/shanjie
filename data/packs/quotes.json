@@ -1,29 +1,29 @@
 {
- "clauses": 0,
+ "clauses": 278,
  "dropped_by_lexicon_rule": 0,
  "files": {
   "quotes-add.tsv": {
-   "bytes": 0,
-   "lines": 0,
-   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   "bytes": 28026,
+   "lines": 311,
+   "sha256": "c5584db7aae445ffe925e9b3dbdd3b34a12bcebc1c3cc970b1ea7bf8a4bea848"
   }
  },
  "first_without_quote_pack": {
-  "chat": 0,
-  "formal": 0
+  "chat": 254,
+  "formal": 253
  },
- "list_sha256": "acca4bfb359a15c1fb824b7a107f97bb78b19de2a6eb150e3cc87926571bf2a5",
- "not_first_with_pack": 0,
- "quotes_checked": 0,
- "quotes_listed": 47,
- "quotes_unchecked": 47,
- "rows": 0,
+ "list_sha256": "6ff0919b1be73547c55f8be3dff811028e089395b9eed885dde20dce88af1180",
+ "not_first_with_pack": 12,
+ "quotes_checked": 208,
+ "quotes_listed": 208,
+ "quotes_unchecked": 0,
+ "rows": 311,
  "skipped": {
-  "in the lexicon": 0,
-  "not Han": 0,
-  "too long": 0,
-  "too short": 0
+  "in the lexicon": 52,
+  "not Han": 5,
+  "too long": 34,
+  "too short": 3
  },
  "unreadable": 0,
- "version": "e3b0c442"
+ "version": "c5584db7"
 }
