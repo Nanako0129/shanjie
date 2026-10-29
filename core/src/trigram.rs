@@ -44,7 +44,7 @@ unsafe impl Sync for Mapped {}
 impl Mapped {
     /// Maps the regular file at `path`. A file that cannot be opened, is not a regular file (a FIFO or a directory: opened with
     /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `Err(())`; each caller names it (the trigram
-    /// table's `LmError::TriTable`, what a failed read is today; 0c's `OcError::Io`).
+    /// table's `LmError::TriTable`, what a failed read is today).
     ///
     /// # Safety
     /// The file must not be truncated or rewritten in place while the mapping is alive: a page past a new end is a SIGBUS, and
