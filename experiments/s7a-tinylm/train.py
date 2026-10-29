@@ -26,7 +26,7 @@ import torch.nn.functional as F
 
 import batching
 import prep
-from torch_model import CONFIGS, GPT, export_npz
+from torch_model import CONFIGS, GPT, export_npz, from_npz
 
 PEAK_LR = 1e-3
 WARMUP = 200          # linear warm-up steps before the cosine decay (to 0). The contract names AdamW + cosine only; this warm-up is a deviation chosen without a run showing it is needed (not measured)
@@ -63,6 +63,8 @@ def main(argv=None):
                          "ends in ':something' is not supported")
     ap.add_argument("--bos-every-piece", action="store_true",
                     help="CTX64: a sequence longer than 65 tokens is cut into pieces that each start with BOS (default: only the first does)")
+    ap.add_argument("--init", metavar="NPZ", help="CTX64-B: start from this tinylm npz (its vocabulary must be a prefix of vocab.txt; appended rows = mean of its character rows + noise); the cosine schedule is --max-steps long as always")
+    ap.add_argument("--peak-lr", type=float, default=PEAK_LR, help="peak learning rate (default 1e-3)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
@@ -74,12 +76,26 @@ def main(argv=None):
     ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps, a.bos_every_piece)
     total = len(batches)
     cfg = CONFIGS[a.size]
-    model = GPT(len(chars) + 3, **cfg).to(a.device)
+    model = GPT(len(chars) + 3, **cfg)
+    n_appended = 0
+    if a.init:
+        old, old_vocab = from_npz(a.init)
+        try:
+            prep.check_prefix(old_vocab.chars, chars)
+        except ValueError as e:
+            sys.exit(f"--init {a.init}: {e}")
+        if {k: v for k, v in old.cfg.items() if k != "V"} != {k: v for k, v in model.cfg.items() if k != "V"}:
+            sys.exit(f"--init {a.init}: its config {old.cfg} differs from --size {a.size} {cfg}")
+        n_appended = len(chars) - len(old_vocab.chars)
+        sd = old.state_dict()
+        sd["emb.weight"] = torch.from_numpy(prep.extend_emb(sd["emb.weight"].numpy(), n_appended, a.seed))
+        model.load_state_dict(sd)
+    model = model.to(a.device)
     n_params = sum(p.numel() for p in model.parameters())
     decay = [p for p in model.parameters() if p.ndim >= 2]
     plain = [p for p in model.parameters() if p.ndim < 2]
     opt = torch.optim.AdamW([{"params": decay, "weight_decay": WEIGHT_DECAY}, {"params": plain, "weight_decay": 0.0}],
-                            lr=PEAK_LR, betas=(0.9, 0.95), fused=a.device.startswith("cuda"))
+                            lr=a.peak_lr, betas=(0.9, 0.95), fused=a.device.startswith("cuda"))
     cuda = a.device.startswith("cuda")
     print(f"size {a.size} {cfg} V={len(chars) + 3} params={n_params} pieces={len(lengths)} steps={total} device={a.device}", flush=True)
 
@@ -90,7 +106,7 @@ def main(argv=None):
         l = int(lengths[idx[0]])
         x = torch.from_numpy(ids[starts[idx][:, None] + np.arange(l)].astype(np.int64)).to(a.device)
         for g in opt.param_groups:
-            g["lr"] = lr_at(step, total, warmup=a.warmup)
+            g["lr"] = lr_at(step, total, a.peak_lr, a.warmup)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=cuda):
             logits = model(x[:, :-1])
         loss = F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), x[:, 1:].reshape(-1))
@@ -105,7 +121,7 @@ def main(argv=None):
             m = float(acc) / n
             acc.zero_()
             curve.append((step + 1, m))
-            print(f"step {step + 1}/{total} loss {m:.4f} lr {lr_at(step, total, warmup=a.warmup):.2e} tokens {tokens} {time.time() - t0:.0f}s", flush=True)
+            print(f"step {step + 1}/{total} loss {m:.4f} lr {lr_at(step, total, a.peak_lr, a.warmup):.2e} tokens {tokens} {time.time() - t0:.0f}s", flush=True)
             if not math.isfinite(m) or (step + 1 >= 3 * LOG_EVERY and m > ln_v + 1.0):
                 print("DIVERGED", flush=True)
                 sys.exit(2)
@@ -115,7 +131,7 @@ def main(argv=None):
                "tokens": tokens, "final_loss_nats_per_token": final, "seed": a.seed,
                "extra": [{"path": p, "weight": w, "sha256": prep.sha256_file(p)} for p, w in extra] or None, "tokens_per_batch": a.tokens_per_batch,
                **({"bos_every_piece": True} if a.bos_every_piece else {}),
-               "peak_lr": PEAK_LR, "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
+               "peak_lr": a.peak_lr, **({"init_npz_sha256": prep.sha256_file(a.init), "appended_rows": n_appended} if a.init else {}), "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
               open(os.path.join(a.out, f"train-{a.size}.json"), "w"), indent=1)
     print(f"done: final loss {final:.4f} nats/token, {n_params} params")
 

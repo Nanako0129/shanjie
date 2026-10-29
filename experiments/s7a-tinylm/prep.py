@@ -213,6 +213,30 @@ def make_vocab(charcount, min_count=MIN_COUNT):
     return [c for c, n in sorted(charcount.items(), key=lambda x: (-x[1], x[0])) if n >= min_count and ord(c) < 0xFFFF]
 
 
+def merge_vocab(normal, base):
+    """CTX64-B `--base-vocab`: the base file's characters in its order (kept even if rare), then the characters of the normal vocabulary
+    that are not in the base, in the normal order. Returns (merged, number appended)."""
+    if len(set(base)) != len(base) or any(len(c) != 1 or ord(c) >= 0xFFFF for c in base):
+        raise ValueError("the base vocabulary has a duplicate, a non-single character or one at or above U+FFFF")
+    have = set(base)
+    new = [c for c in normal if c not in have]
+    return list(base) + new, len(new)
+
+
+def extend_emb(emb, n_new, seed):
+    """CTX64-B `train.py --init`: n_new rows for appended characters = mean of the existing character rows (ids >= 3) + Gaussian noise,
+    std 0.02 x the std of the whole matrix, from default_rng(seed). Returns the (V + n_new, d) matrix; the first V rows are `emb` itself."""
+    rng = np.random.default_rng(seed)
+    rows = emb[3:].mean(axis=0) + rng.normal(0.0, 0.02 * emb.std(), (n_new, emb.shape[1])).astype(emb.dtype)
+    return np.concatenate([emb, rows.astype(emb.dtype)], axis=0)
+
+
+def check_prefix(old_chars, chars):
+    """The vocabulary of an --init npz must be a prefix of the work dir's vocab.txt; raises ValueError otherwise."""
+    if list(chars[:len(old_chars)]) != list(old_chars):
+        raise ValueError(f"the --init vocabulary ({len(old_chars)} characters) is not a prefix of vocab.txt ({len(chars)} characters)")
+
+
 def encode_text(text, lut):
     """text: runs joined by "\\n", NO trailing newline. Returns uint16 ids with a BOS in front of every run (the newline becomes BOS)."""
     cp = np.frombuffer(("\n" + text).encode("utf-32-le"), dtype="<u4")
@@ -302,9 +326,16 @@ def cmd_encode(a):
             for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
                 count.update(block.replace("\n", ""))
     chars = make_vocab(count, a.min_count)
+    base_rec = None
+    if getattr(a, "base_vocab", None):
+        try:
+            chars, n_new = merge_vocab(chars, open(a.base_vocab, encoding="utf-8", newline="\n").read().split("\n")[:-1])
+        except ValueError as e:
+            die(f"--base-vocab {a.base_vocab}: {e}")
+        base_rec = {"sha256": sha256_file(a.base_vocab), "size": len(chars) - n_new, "appended": n_new}
     open(os.path.join(a.work, "vocab.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(chars) + "\n")
     lut = make_lut(chars)
-    rep = {"vocab_size": len(chars) + 3, "min_count": a.min_count}
+    rep = {"vocab_size": len(chars) + 3, "min_count": a.min_count, **({"base_vocab": base_rec} if base_rec else {})}
     for name in ("wiki", "coll"):
         ids = encode_file(os.path.join(a.work, f"runs-{name}.txt"), lut)
         np.save(os.path.join(a.work, f"ids-{name}.npy"), ids)
@@ -315,7 +346,7 @@ def cmd_encode(a):
             r = write_ids(a.work, name, lut)
             rep["extra"][name] = {k: r[k] for k in ("tokens", "runs", "unk_fraction")}
     json.dump(rep, open(os.path.join(a.work, "encode-report.json"), "w"), indent=1)
-    json.dump({"vocab_sha256": sha256_file(os.path.join(a.work, "vocab.txt")), "extra": sorted(names),
+    json.dump({"vocab_sha256": sha256_file(os.path.join(a.work, "vocab.txt")), "extra": sorted(names), **({"base_vocab": base_rec} if base_rec else {}),
                "ids_sha256": {n: sha256_file(os.path.join(a.work, f"ids-{n}.npy")) for n in ("wiki", "coll")}},
               open(os.path.join(a.work, VOCAB_RECORD), "w"), indent=1)
     print(json.dumps(rep, indent=1))
@@ -436,6 +467,7 @@ def main(argv=None):
     r.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS"); r.add_argument("--raw", action="store_true", help="CTX64: wiki (bc.article_sentences), colloquial and synth lines are kept whole (punctuation, ASCII, digits) instead of as Han runs"); r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     e = sub.add_parser("encode")
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
+    e.add_argument("--base-vocab", metavar="FILE", help="CTX64-B: a vocab.txt whose characters come first in its order (kept even if rare); the characters the normal rule admits and FILE lacks follow")
     e.add_argument("--force", action="store_true", help="encode over a vocab.txt made from a different --extra set (overwrites that arm's vocabulary and ids)")
     e.add_argument("--extra", nargs="*", default=[], metavar="NAME", help="NAMEs of DIR/runs-<NAME>.txt (prep.py text --runs-only) counted into the vocabulary once each and encoded")
     t = sub.add_parser("text")

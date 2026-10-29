@@ -89,6 +89,36 @@ class TestTorch(unittest.TestCase):
             self.assertGreater(good, bad)
             self.assertEqual(m.vocab.chars, prep.load_vocab(td))
 
+    def test_init_from_npz_with_appended_vocab(self):
+        import prep
+        import train
+        runs = ["你好嗎", "今天天氣真好", "我是你", "他不是我", "天氣好嗎"]
+
+        def encode(td, extra_runs, base):
+            for n, k in (("wiki", 400), ("coll", 20)):
+                with open(os.path.join(td, f"runs-{n}.txt"), "w", encoding="utf-8", newline="\n") as f:
+                    f.write("\n".join((runs + extra_runs) * k) + "\n")
+            cc = {c: 100 for r in runs + extra_runs for c in r}
+            json.dump({"charcount": cc}, open(os.path.join(td, "charcount.json"), "w", encoding="utf-8"))
+            prep.cmd_encode(type("A", (), {"work": td, "min_count": 5, "extra": [], "force": False, "base_vocab": base})())
+
+        with tempfile.TemporaryDirectory() as t1, tempfile.TemporaryDirectory() as t2:
+            encode(t1, [], None)
+            o1, o2 = os.path.join(t1, "out"), os.path.join(t2, "out")
+            argv = ["--tokens-per-batch", "64", "--max-steps", "20", "--warmup", "5", "--device", "cpu"]
+            train.main(["--size", "T", "--work", t1, "--out", o1, *argv])
+            base_npz = os.path.join(o1, "tinylm-T.npz")
+            encode(t2, ["龍龍龍"], os.path.join(t1, "vocab.txt"))
+            train.main(["--size", "T", "--work", t2, "--out", o2, "--init", base_npz, "--peak-lr", "3e-4", *argv])
+            info = json.load(open(os.path.join(o2, "train-T.json")))
+            self.assertEqual((info["appended_rows"], info["peak_lr"], info["init_npz_sha256"]), (1, 3e-4, prep.sha256_file(base_npz)))
+            self.assertEqual(info["steps"], 20)
+            self.assertNotIn("init_npz_sha256", json.load(open(os.path.join(o1, "train-T.json"))))
+            with self.assertRaises(SystemExit):                 # a different config than the npz
+                train.main(["--size", "S", "--work", t2, "--out", o2, "--init", base_npz, *argv])
+            with self.assertRaises(SystemExit):                 # the npz vocabulary is not a prefix of t1's (t2 has one more character, t1 does not extend t2)
+                train.main(["--size", "T", "--work", t1, "--out", o1, "--init", os.path.join(o2, "tinylm-T.npz"), *argv])
+
     def test_lr_schedule(self):
         import train
         self.assertAlmostEqual(train.lr_at(0, 1000), 1e-3 / train.WARMUP)

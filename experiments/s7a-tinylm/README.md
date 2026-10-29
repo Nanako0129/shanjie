@@ -257,3 +257,14 @@ App 送給會意 SJ-SR-7-15M 的前文是最多 64 字的原文（含標點、�
 | `export_sjtl.py --left-len L` | ctx 64 時 L 最多 62。App 送最多 64 字，核心取最後 L 個字元（`core/src/tinylm.rs` `TinyLm::key_for`，`docs/contracts/context-return.md` 第 2 節）。需要 `--levels`（版本 4 的基底）。寫 SJTL0005：版本 4 的 244 位元組表頭（魔數 `SJTL0005`、版本 5）＋ 偏移 244 的 u32 L ＋ 其餘；`1 ≤ L ≤ ctx − 2`，否則在寫檔前報錯。沒給時輸出仍是版本 1 到 4。`read_sjtl` 讀得回 `left_len` |
 
 測試：`test_extra.py` 的 `TestRawMode`（raw、守門、整行 half、字表、`rebos`、預設逐位元不變）與 `test_export_sjtl.py` 的 `--left-len` 兩個測試（位元組逐一對照 `core/tests/tinylm_tiny.rs` 的 `v5` 組法）。
+
+
+## CTX64-B 的續訓選項（探索片；全部預設關，不給時輸出與以前逐位元相同）
+
+| 選項 | 做什麼 |
+|---|---|
+| `prep.py encode --base-vocab FILE` | 字表 = FILE（一份 vocab.txt）的字、照 FILE 的順序（再罕見也留），後面接「一般規則會收（同樣輸入下次數 ≥ min-count、同樣排除 U+FFFF 以上）而 FILE 沒有」的字，順序照一般規則。`ids-vocab.json` 與 `encode-report.json` 多 `base_vocab`：`sha256`（FILE 的）、`size`、`appended`。NUL（U+0000）照樣保留 |
+| `train.py --init NPZ` | 從 tinylm npz 開始訓練（`torch_model.from_npz` 載入）。npz 的 `chars` 必須是 work dir 的 vocab.txt 的前綴，且層數、寬度、ctx、頭數要和 `--size` 相同，否則訓練前就報錯。所有權重照抄；新增字的 `emb` 列 = npz 全部字（id ≥ 3）列的平均 + 高斯雜訊（std = 0.02 × 整個 `emb` 的 std，`default_rng(--seed)`）。`--max-steps` 本來就把餘弦排程縮到那一步結束（`total = len(batches)`），續訓不用另外處理 |
+| `train.py --peak-lr X` | 峰值學習率，預設 1e-3。`train-<size>.json` 的 `peak_lr` 一律記實際值；用了 `--init` 才多 `init_npz_sha256`、`appended_rows` |
+
+測試：`test_extra.py` 的 `TestBaseVocab`（合併順序、預設不變、列初始化、非前綴被拒，純 numpy）；`test_torch.py` 的 `test_init_from_npz_with_appended_vocab`（需要 torch，這台 Mac 沒有，會被跳過）。

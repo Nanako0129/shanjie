@@ -483,6 +483,50 @@ class TestRawMode(unittest.TestCase):
             self.assertFalse((off[0][off[1]] == BOS).all())
 
 
+class TestBaseVocab(unittest.TestCase):
+    COUNT = {"我": 5, "好": 5, "你": 6, "\x00": 5, "稀": 1}
+
+    def encode(self, work, base):
+        for n, s in (("wiki", "我我我我我好好好好好\n"), ("coll", "你你你你你你\x00\x00\x00\x00\x00稀\n")):
+            open(os.path.join(work, f"runs-{n}.txt"), "w", encoding="utf-8", newline="\n").write(s)
+        json.dump({"charcount": self.COUNT}, open(os.path.join(work, "charcount.json"), "w"))
+        prep.cmd_encode(type("A", (), {"work": work, "min_count": 5, "extra": [], "force": False, "base_vocab": base})())
+
+    def test_merge_keeps_base_order_and_appends_in_normal_order(self):
+        self.assertEqual(prep.merge_vocab(["我", "好", "你"], ["稀", "好"]), (["稀", "好", "我", "你"], 2))
+        with self.assertRaises(ValueError):
+            prep.merge_vocab(["我"], ["好", "好"])
+
+    def test_encode_base_vocab_records_and_default_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as work, tempfile.TemporaryDirectory() as w2:
+            base = os.path.join(work, "base.txt")
+            open(base, "w", encoding="utf-8", newline="\n").write("稀\n好\n")
+            self.encode(work, base)
+            normal = prep.make_vocab(collections.Counter(self.COUNT), 5)          # 你 (6) first, then ties by code point
+            self.assertEqual(normal, ["你", "\x00", "好", "我"])
+            self.assertEqual(prep.load_vocab(work), ["稀", "好", "你", "\x00", "我"])    # 稀 stays though rare
+            rec = json.load(open(os.path.join(work, "ids-vocab.json")))["base_vocab"]
+            self.assertEqual((rec["size"], rec["appended"], rec["sha256"]), (2, 3, prep.sha256_file(base)))
+            self.encode(w2, None)
+            self.assertNotIn("base_vocab", json.load(open(os.path.join(w2, "ids-vocab.json"))))
+            self.assertEqual(prep.load_vocab(w2), normal)
+
+    def test_extend_emb_copies_prefix_and_fills_new_rows(self):
+        emb = np.random.default_rng(1).normal(size=(7, 4)).astype(np.float32)
+        out = prep.extend_emb(emb, 3, 5)
+        self.assertEqual(out.shape, (10, 4))
+        np.testing.assert_array_equal(out[:7], emb)
+        self.assertTrue((np.abs(out[7:] - emb[3:].mean(axis=0)) < 0.2 * emb.std()).all())
+        self.assertFalse((out[7] == out[8]).all())
+        np.testing.assert_array_equal(out, prep.extend_emb(emb, 3, 5))      # same seed, same rows
+
+    def test_non_prefix_vocab_is_refused(self):
+        prep.check_prefix(["a", "b"], ["a", "b", "c"])
+        for old in (["b", "a"], ["a", "c"], ["a", "b", "c", "d"]):
+            with self.assertRaises(ValueError):
+                prep.check_prefix(old, ["a", "b", "c"])
+
+
 class TestEncodeGuards(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
