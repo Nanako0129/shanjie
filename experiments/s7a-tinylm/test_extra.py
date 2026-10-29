@@ -364,6 +364,15 @@ class TestRawMode(unittest.TestCase):
         self.assertEqual(dw[0], "第一句\n有逗號\n第二句天氣真好")                           # default: Han runs, unchanged
         self.assertEqual((dc[0], dc[3], dc[4]), ("我們去吃飯\n天氣真好\n哈哈", 0, 0))
 
+    def test_raw_wiki_drops_namespace_prefixes_after_the_guard(self):
+        class G:
+            def any(self, s):
+                return "秘密句子" in s
+        raw = "Category:臺灣城市。File:地圖圖片。分類:台灣。秘密句子|表格。正常的一句。"
+        with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+            got = list(prep.raw_wiki_lines(raw, (), G()))
+        self.assertEqual(got, [(None, prep.MARKUP_JUNK)] * 3 + [(None, prep.GUARDED), ("正常的一句", None)])   # guarded counts as guard, not markup
+
     def test_raw_wiki_drops_markup_residue_and_list_marks(self):
         raw = "* 項目一二三。:: 縮排的句子。有 == 標題 ==。表格|欄位。留下[[連結。結束}}了。{{模板。一般的句子。"
         with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):

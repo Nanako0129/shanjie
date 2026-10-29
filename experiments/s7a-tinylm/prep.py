@@ -101,7 +101,8 @@ def text_runs(line, conv):
 
 
 GUARDED, NO_HAN, MARKUP_JUNK = "guard", "no_han", "markup"
-WIKI_JUNK = re.compile(r"==|\||\[\[|\]\]|\{\{|\}\}")    # wiki markup that article_text left in a sentence (raw path only)
+WIKI_JUNK = re.compile(r"==|\||\[\[|\]\]|\{\{|\}\}|\b(?:Category|File|Image|Template|Wikipedia|Portal|Help|分類|分类|檔案|文件|圖像|模板):", re.I)
+# wiki markup that article_text left in a sentence (raw path only); the namespace prefixes are what MARKUP's link rule leaves of [[Category:X]] or [[File:X]]
 LIST_LEAD = re.compile(r"^[*#:;]+\s*")
 
 
@@ -122,9 +123,10 @@ def raw_line(text, guard=None):
 
 def raw_wiki_lines(raw, conv, guard=None):
     """One wiki article's raw lines (`runs --raw`): (line or None, why not) per bc.article_sentences sentence. A sentence holding markup
-    residue (== | [[ ]] {{ }}) is dropped (MARKUP_JUNK); a leading list mark (* # : ;) and the blanks after it are removed."""
+    residue (== | [[ ]] {{ }} or a namespace prefix such as Category:) that the guard let through is dropped (MARKUP_JUNK); a leading list mark (* # : ;) and the blanks after it are removed."""
     for sent in bc.article_sentences(raw, conv):
-        yield (None, MARKUP_JUNK) if WIKI_JUNK.search(sent) else raw_line(LIST_LEAD.sub("", sent.strip()), guard)
+        t, why = raw_line(LIST_LEAD.sub("", sent.strip()), guard)   # the guard first, so its count does not depend on the markup filter
+        yield (None, MARKUP_JUNK) if t is not None and WIKI_JUNK.search(t) else (t, why)
 
 
 _CONV = _GUARD = None
@@ -406,9 +408,10 @@ def write_ids(work, name, lut):
     return dump_text_report(rj, rep)
 
 
-def encode_extra(src, work, name, conv, guard=None, half=False, procs=1, raw=False):
-    """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with the existing DIR/vocab.txt. Returns the report dict."""
-    write_runs(src, work, name, conv, guard, half, procs, raw)
+def encode_extra(src, work, name, conv, guard=None, half=False, procs=1):
+    """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with the existing DIR/vocab.txt. Returns the report dict. Never raw: raw text
+    needs its own vocabulary (`text --raw --runs-only`, then `encode --extra`), the existing one would turn its punctuation into UNK."""
+    write_runs(src, work, name, conv, guard, half, procs)
     return write_ids(work, name, make_lut(load_vocab(work)))
 
 
@@ -418,7 +421,7 @@ def cmd_text(a):
             "would silently become UNK; write runs-<name>.txt with --runs-only and let `encode --extra <name>` build the vocabulary and ids")
     conv, guard = bc.load_conv(), bc.guard_matcher(a.holdout_guard)
     print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half, a.procs, a.raw) if a.runs_only
-                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs, a.raw), indent=1))
+                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs), indent=1))
 
 
 def load_vocab(work):
