@@ -10145,3 +10145,13 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 新的私人新聞集（檔在 repo 外，來源是報社 A 加中文維基新聞驗證那一邊；只記雜湊與列數）：`newstune`（開發層，書面判讀集之一）2,000 列，`c69f8f0b5a4fefb9f07393964b1ecbac291ff0e2d9b22f567f168e5bf1c77d0a`；保留集新聞半邊三份各 150 列（各 30 列維基新聞加 120 列報社新聞）：`holdout-news-1`（現役）`637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38`、`holdout-news-2` `d0c0b82ea936349128117d69b2d89c54ffa527279d94787ee6d2e5ee1bf194d5`、`holdout-news-3` `344432589b80d168e297b6009e522b954b3e9b54615f023c9d128c065086a203`。使用次數都從 0 起算。
 - 建置的細節（抓取、比對、抽樣）在分支 `exp/sj-round2` 的研究紀錄（commit 38318f6a..9dcc144d）。
 - 新聞半邊由 fresh verifier 用 `--rows` 量，旗標禁令（禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`）寫進 `docs/verification.md`、`eval/README.md` 與 `docs/contracts/kpi.md` §3。`tools/kpi.py` 不必改，`tools/test_kpi.py` 補了一條「口語半邊雜湊不變、新聞半邊雜湊換了」的分欄案例；`tools/bench.py` 的保留集表原本只分 chat／formal，改成依 `rows_sha256`（沒記就依 n）分欄，並補一條畫表層級的測試（`holdout.chat` 是口語半邊、`holdout.formal` 是新聞半邊），`docs/benchmark.md` 由 `bench.py table` 重產。
+
+## 2026-10-29：v0.6.0 推 tag 前的核對（`docs/contracts/sbench-v2.md` 的例外程序）
+
+- 被量的 commit `ba8d3860`（套件 v2、保留集）對要打 tag 的 `a03e8bf1`：`git diff -- Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 不是空的，差 4 個檔，都在 `cli`：
+  - `cli/src/replay.rs`、`cli/src/bin/replay.rs`：研究工具 `shanjie-replay`，不出貨。詞包遮罩寫成常數 `PACKS`，設定標記改從遮罩組出，行為不變。
+  - `cli/tests/replay.rs`：測試。
+  - `cli/src/english_next.rs`：一行註解。
+- 照契約修訂（2026-10-14）的例外程序：兩個 commit 各自從乾淨的樹編 `shanjie-eval`，在出貨設定下（`--context --packs acg,it --tinylm`，聊天加 `--colloquial-core`）跑 dev302、打字測驗、錯字回報兩種設定。六組 rowstats 逐位元組相同（`cmp` 結束碼 0），沿用套件 v2 與保留集的數字。
+- KPI 的重播是在 `fea1259d` 量的，已經是兩個詞包；之後只改寫成常數，行為相同。
+- 這次先問了維護者（選「這次例外」）才補量；之後照程序先量（發版清單已改）。
