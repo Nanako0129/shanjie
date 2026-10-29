@@ -43,7 +43,7 @@ unsafe impl Sync for Mapped {}
 
 impl Mapped {
     /// Maps the regular file at `path`. A file that cannot be opened, is not a regular file (a FIFO or a directory: opened with
-    /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `Err(())`; each caller names it (the trigram
+    /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `Err(())`; the caller names it (the trigram
     /// table's `LmError::TriTable`, what a failed read is today).
     ///
     /// # Safety

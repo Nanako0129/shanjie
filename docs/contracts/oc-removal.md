@@ -27,7 +27,7 @@
 
 ## 2. 驗收
 
-1. `cargo build --release` 全部目標、`cargo clippy`（照 CI 的設定）不出新的警告；`make test-python`、`make test-swift` 通過；完整 Rust 測試在 188 的 WSL 通過；CI 全綠（含 C ABI smoke）。
+1. `cargo build --release` 全部目標不出新的警告（CI 沒有跑 clippy，這片不加）；`make test-python`、`make test-swift` 通過；完整 Rust 測試在 188 的 WSL 通過；CI 全綠（含 C ABI smoke）。
 2. 行為不變：拿掉前後的評測 CLI 在出貨設定（聊天與書面，`--context --packs acg,it --tinylm`，聊天加 `--colloquial-core`）跑 dev302、打字測驗、錯字回報，rowstats 與摘要行的 `top1_sha256` 逐位元組相同（Mac 上的少量量測，公開集合）。
 3. 程式改動的關卡：`/code-review` 沒有未處置的問題、fresh verifier CONFIRMED、CI 全綠，merge commit。
 
