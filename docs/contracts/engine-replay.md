@@ -24,7 +24,7 @@
 
 ## 2. 引擎的設定（照 App）
 
-- 建立順序與預設值照 `macos/Sources/ShanjieKit/Shell.swift` 的 `build()`：帶詞包建引擎（`acg`）、`load_lm`（bigram，連帶的 classes／kn／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表，見下）、降權開、語意校正開、強度照 App 預設、`set_profile`。
+- 建立順序與預設值照 `macos/Sources/ShanjieKit/Shell.swift` 的 `build()`：帶詞包建引擎（`acg` 與 `it`，App 的預設兩個都開；2026-10-29 起，之前只有 `acg`）、`load_lm`（bigram，連帶的 classes／kn／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表，見下）、降權開、語意校正開、強度照 App 預設、`set_profile`。
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（不載英文詞表、`set_english(false)`）。App 預設兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 §4 定義。兩者都不影響 n-gram 與語意校正的選字。縮寫、直式候選窗照 App 預設（橫式，一頁 9 項）。
 - `--profile chat|formal`（預設 chat）。`--no-tinylm` 關掉語意校正（對照用）。
 - 口語表（colloquial-term.md §2.3）：App 的 `build()` 在小模型載入後一定載入 `colloquial.sjlm`，所以重播預設在小模型開著且 `data/lm/colloquial.sjlm` 存在時載入它（`--no-tinylm` 時不載，App 小模型沒載入也不載）。`--colloquial FILE` 改載另一份表，`--no-colloquial` 不載（對照用；兩者併用是錯誤）。載入時 stderr 的 `models:` 行最後多一欄 `colloquial.sjlm:<sha8>`，設定標記最後加 `+colloq:<sha8>`；是否真的用到口語項仍由核心照條件決定（聊天、配對的小模型、表已載入；任何強度，各用自己的 α、τ、δ，colloquial-levels.md；重播只有 App 預設的強度）。沒有 `data/lm/colloquial.sjlm` 時輸出和以前逐位元組相同。口語項生效時，讀音通道項（reading-channel.md）跟著它，重播預設和 App 一樣；`--no-reading-channel`（研究用）只留口語項（P4d 那一格），設定標記：聊天、載入了口語表、小模型是配對的那一份（`--no-tinylm` 時沒有）時是 `+colloq:<sha8>+rc`，加 `--no-reading-channel` 就沒有 `+rc`（沒載入口語表時這個旗標什麼都不改）。
@@ -60,7 +60,7 @@
 
 ## 6. 驗收
 
-1. **一致性**：`--learn off --rerank each`、不改選時，第一次顯示的文字和 CLI 出貨設定（`--lm data/lm/bigram.sjlm --profile P --context --packs acg --tinylm data/lm/tinylm.sjtl`）每一列的選字相同。在 dev302、typing76、錯字回報（全部列）兩種設定上比：
+1. **一致性**：`--learn off --rerank each`、不改選時，第一次顯示的文字和 CLI 出貨設定（`--lm data/lm/bigram.sjlm --profile P --context --packs acg,it --tinylm data/lm/tinylm.sjtl`；2026-10-29 之前是 `--packs acg`）每一列的選字相同。在 dev302、typing76、錯字回報（全部列）兩種設定上比：
    - 先比摘要行的 `top1_sha256`，相同就通過；
    - 不同時，用重播的 `--firsts` 對 CLI 每列的選字（由 CLI 的 `--dump` 加 `--tinylm-scores` 的 `"c"` 欄還原，做法同研究紀錄 2026-10-17「rerank-size」一節的重播一致性比對）逐列比，列出差異列號並歸因：重播工具的錯就修；引擎和 CLI 真的不同就寫進研究紀錄（這正是「錯字回報離線是對的那一桶」要拆的東西），不改引擎。
 2. 單元測試（合成的小詞庫或真詞庫的短句皆可）：
