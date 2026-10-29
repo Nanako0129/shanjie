@@ -1,6 +1,6 @@
 """X0C-6 readout (README registration): 0c fused with the n-gram score against v0.6.0 shipping and the n-gram first. Numbers only.
 
-  python3 experiments/x0c6/x0c6ana.py DIR
+  python3 experiments/x0c6/x0c6ana.py DIR [EMIT_DIR]
   DIR/X0C.<set>.jsonl   score_0c.py records per set (prep.py split)
   DIR/ship.<set>.r      the shipping CLI's rowstats       DIR/ng.<set>.r   the same rows without --tinylm (the n-gram first)
 """
@@ -48,7 +48,14 @@ def load(d, s):
     return x, a, b
 
 
-def main(d):
+def emit_arms(emit, s, arms):
+    """EMIT/arm.<set>.<arm>.txt, `row<TAB>0/1` per row: all that leaves the VM for a private set (no scores, no text)."""
+    for name, v in arms.items():
+        with open(os.path.join(emit, f"arm.{s}.{name}.txt"), "w") as f:
+            f.writelines(f"{i}\t{int(o)}\n" for i, o in enumerate(v, 1))
+
+
+def main(d, emit=None):
     cell = None
     try:
         x, a, b = load(d, TUNE)
@@ -58,6 +65,9 @@ def main(d):
         cell, sel = (0.0, 0, 0, 0, 0), "no cell within the cap; keeps the n-gram first"
     n = len(x)
     out = {"cell": cell}
+    if emit:
+        os.makedirs(emit, exist_ok=True)
+        emit_arms(emit, TUNE, {"ship": a, "ng": b, "fused": [bool(r["ok"][fg.pick(r, cell[0], cell[1], "ll", cell[2])]) for r in x]})
     f, bk = fb(a, b)
     print(f"## tuning: {TUNE} (n = {n}), cap_ub {CAP_UB:.1%}\n")
     print(f"- 0c fused: {sel}; +{cell[3]} / -{cell[4]}, net {cell[3] - cell[4]:+d}, UB / n {ev.poisson_upper95(cell[4]) / n:.2%}; {alone(x)}; "
@@ -71,6 +81,8 @@ def main(d):
         n = len(x)
         c = [bool(r["ok"][fg.pick(r, cell[0], cell[1], "ll", cell[2])]) for r in x]
         skip = sum(r["skip"] for r in x)
+        if emit:
+            emit_arms(emit, s, {"ship": a, "ng": b, "fused": c})
         print(f"\n## {s} (n = {n}{', judged' if s == JUDGE else ', picture only'})\n")
         print(f"top1: n-gram first {sum(b)}, shipping {sum(a)}, 0c fused {sum(c)}; rows 0c cannot read (keep the n-gram first) {skip}\n")
         print("| pair | fixed | broken | net | error ratio | UB(broken) / n | McNemar p |")
@@ -85,4 +97,4 @@ def main(d):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)

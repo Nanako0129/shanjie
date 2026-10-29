@@ -26,10 +26,12 @@
 - **只報、不判**：沒有門檻。方向的讀法由維護者決定；「0c 對 (a) 的淨值」和「(c) 對 n-gram 的改壞數上界」是兩個最先看的數。不做出貨主張；之後要不要把 0c 的 App 開關退場，由維護者在看過數字後決定。
 - **隔離與核對**（同 P1）：
   - 0c 打分的程序放在沒有網路的 namespace（`unshare -n`），跑之前先確認連不出去；模型三個檔照 `score_0c.py` 的 `PINNED` 核對雜湊，不符就停；onnxruntime 1.31.0（`experiments/x0c/requirements.txt` 的版本）。
-  - 私人列和 CLI 的 dump（含句子）只在 VM 上，每種結束狀態都刪；回到 Mac 的只有數字：每列 `ok`、`ng`、`ll` 等的 JSON 欄位（`prep.py check` 驗證沒有文字欄）與 CLI 的 rowstats（列號與數字）。
+  - 私人列、CLI 的 dump、私人集合的 `ng`／`ll` 分數檔都只在 VM 上，每種結束狀態都刪。選值與融合也在 VM 上跑（`x0c6ana.py`）。
+  - 回到 Mac 的：私人集合（chatclause、discordtune）只有每個臂的「列號 TAB 0/1」檔（`arm.<集合>.<臂>.txt`，臂為 ship、ng、fused；`prep.py digits` 驗證只有數字、tab、換行）加 `x0c6ana` 印出的純統計表（驗證為 ASCII）；公開集合另帶分數檔（JSON 數字欄，`prep.py check` 驗證）與 CLI rowstats。
+  - 不在 VM 上安裝任何東西：`~/venv` 不能 `import onnxruntime` 就停，訊息寫明缺什麼，由維護者同意後才裝。
 - **平台**：GCP 評測 VM，全部步驟用滿核心（CLI 以 `--threads` 同時跑；0c 以 `--workers` 等於核心數，五個集合合成一批打分）。
 - **工具**：
-  - `prep.py`：`build` 把五個集合的列、dump、n-gram-only rowstats 合成一份輸入（並做上面的逐列核對），`split` 把打分結果切回各集合，`check` 驗證只有數字。
-  - `x0c6ana.py DIR`：讀回傳的檔案，印出上面登記的數字。
+  - `prep.py`：`build` 把五個集合的列、dump、n-gram-only rowstats 合成一份輸入（並做上面的逐列核對），`split` 把打分結果切回各集合，`check` 驗證公開集合的分數檔只有數字、`digits` 驗證只有數字與 tab／換行。
+  - `x0c6ana.py DIR [EMIT_DIR]`：在 VM 上讀分數檔與 rowstats，印出上面登記的數字，並寫各臂的「列號 TAB 0/1」檔。
   - `test_x0c6.py`：合成檔案的 smoke test（`python3 -m unittest experiments/x0c6/test_x0c6.py`）。
 - **之後怎麼走**：結果寫進研究紀錄，只寫方向；不開子片補救同一次量測。

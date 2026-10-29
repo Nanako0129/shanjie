@@ -49,7 +49,16 @@ class Readout(unittest.TestCase):
     def test_numbers(self):
         with tempfile.TemporaryDirectory() as d:
             self.synth(d, 1000)
-            out = ana.main(d)
+            em = os.path.join(d, "em")
+            out = ana.main(d, em)
+            fused = open(os.path.join(em, f"arm.{ana.JUDGE}.fused.txt")).read().splitlines()
+            self.assertEqual(len(fused), 40)
+            self.assertEqual(sum(int(l.split("\t")[1]) for l in fused), 30)
+            prep.main(["digits"] + [os.path.join(em, f) for f in os.listdir(em)])
+            self.assertEqual(len(os.listdir(em)), 15)
+            open(os.path.join(em, "bad.txt"), "w").write("1\tx\n")
+            with self.assertRaises(SystemExit):
+                prep.main(["digits", os.path.join(em, "bad.txt")])
             self.assertEqual(out[ana.JUDGE]["skip"], 10)
             self.assertEqual(out[ana.JUDGE]["0c fused vs n-gram first"], (10, 0))   # 10 of 40 rows are fixable, none broken
             self.assertEqual(out[ana.JUDGE]["shipping vs n-gram first"], (5, 0))

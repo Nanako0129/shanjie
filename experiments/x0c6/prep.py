@@ -2,7 +2,8 @@
 
   prep.py build --out DIR --set NAME ROWS DUMP NGSTATS [--set ...]   several sets -> one rows / dump / v3 file, so 0c scores them in one wave
   prep.py split --dir DIR --scores ALL.jsonl --out OUT               score_0c.py's output -> OUT/X0C.<set>.jsonl, rows numbered 1..n again
-  prep.py check FILE...                                              score files hold numbers only (no text leaves the VM)
+  prep.py check FILE...                                              score files hold numbers only (public sets: they may leave the VM)
+  prep.py digits FILE...                                             only [0-9 tab newline] (what leaves the VM for the private sets)
 
 NGSTATS is the rowstats of the same rows run without --tinylm (the n-gram first); `build` stops when its ok column differs from the
 dump's rank 1, which is what the readout calls "n-gram first".
@@ -10,6 +11,7 @@ dump's rank 1, which is what the readout calls "n-gram first".
 import argparse
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -95,6 +97,13 @@ def check(files):
                 sys.exit(f"prep: STOP, {p} line {k} holds more than numbers under the known keys")
 
 
+def check_digits(files):
+    """The files that leave the VM for the private sets: only digits, tabs and newlines."""
+    for p in files:
+        if not re.fullmatch(rb"[0-9\t\n]*", open(p, "rb").read()):
+            sys.exit(f"prep: STOP, {p} holds more than digits, tabs and newlines")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -102,11 +111,14 @@ def main(argv=None):
     b.add_argument("--set", nargs=4, action="append", metavar=("NAME", "ROWS", "DUMP", "NGSTATS"), required=True)
     s = sub.add_parser("split"); s.add_argument("--dir", required=True); s.add_argument("--scores", required=True); s.add_argument("--out", required=True)
     c = sub.add_parser("check"); c.add_argument("files", nargs="+")
+    g = sub.add_parser("digits"); g.add_argument("files", nargs="+")
     a = ap.parse_args(argv)
     if a.cmd == "build":
         build(a.out, a.set)
     elif a.cmd == "split":
         split(a.dir, a.scores, a.out)
+    elif a.cmd == "digits":
+        check_digits(a.files)
     else:
         check(a.files)
 
