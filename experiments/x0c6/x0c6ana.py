@@ -56,9 +56,8 @@ def emit_arms(emit, s, arms):
 
 
 def main(d, emit=None):
-    cell = None
+    x, a, b = load(d, TUNE)   # a missing or inconsistent file stops here with its own error
     try:
-        x, a, b = load(d, TUNE)
         cell = fg.select_weighted({TUNE: x}, WEIGHT, col="ll", names=(TUNE,), cap_ub=CAP_UB)
         sel = f"alpha {cell[0]}, tau {cell[1]}, delta {cell[2]}"
     except ValueError:   # no cell within the cap: 0c never replaces the n-gram first (tau 0 never reranks)

@@ -97,15 +97,23 @@ class Plumbing(unittest.TestCase):
             out = os.path.join(d, "o")
             prep.main(["build", "--out", out] + sum([["--set", s, names[s], os.path.join(d, s + ".dump"), os.path.join(d, s + ".ng")] for s in "ab"], []))
             dump = open(os.path.join(out, "all.dump")).read().splitlines()
-            self.assertEqual([l.split("\t")[0] for l in dump], ["1", "1", "2", "2"])
+            self.assertEqual(sorted(l.split("\t")[0] for l in dump), ["1", "1", "2", "2"])
+            meta = json.load(open(os.path.join(out, "sets.json")))
+            self.assertEqual(sorted(meta["perm"]), [0, 1])
             self.assertEqual(len(open(os.path.join(out, "all.rows.txt")).read().splitlines()), 2)
             v3 = [json.loads(l) for l in open(os.path.join(out, "all.v3.jsonl"))]
             self.assertEqual([r["i"] for r in v3], [1, 2])
             self.assertEqual(v3[0]["ok"], [1, 0])
+            self.assertEqual(prep.permutation(50), prep.permutation(50))
+            self.assertNotEqual(prep.permutation(50), list(range(50)))
             allscores = os.path.join(d, "all.jsonl")
             open(allscores, "w").write("".join(json.dumps({**r, "skip": 0, "ll": [0.0, 0.0]}) + "\n" for r in v3))
             prep.main(["split", "--dir", out, "--scores", allscores, "--out", os.path.join(d, "s")])
             self.assertEqual(json.loads(open(os.path.join(d, "s", "X0C.b.jsonl")).read())["i"], 1)
+            # the combined order is the permutation: score rows carry their combined i; split puts each back in its set
+            rr = open(os.path.join(out, "all.rows.txt")).read().splitlines()
+            orig = [l.rstrip("\n") for s in "ab" for l in open(names[s]) if l.count("|") == 2]
+            self.assertEqual(rr, [orig[g] for g in meta["perm"]])
             prep.main(["check", os.path.join(d, "s", "X0C.a.jsonl")])
             open(allscores, "w").write(json.dumps({"i": 1, "text": "我們"}) + "\n")
             with self.assertRaises(SystemExit):
