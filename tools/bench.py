@@ -768,7 +768,7 @@ VERSIONS2 = {
     # SJ-LM-7 (docs/contracts/sj-lm-7-pr2.md): measure the branch with `--as sj-lm-7`; the models are the branch's data/*.sha256 files.
     "sj-lm-7": {"release": "sj-lm-7", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                 "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+tri:{tri8}"},
-    # v0.6.0: SJ-LM-7's models (PR #324) and the IT+AI pack, on by default like the ACG pack (Settings.swift itPack = true).
+    # v0.6.0: SJ-LM-7's models (PR #324) and the IT+AI pack, on by default like the ACG pack (Shell.swift itPackOn = true; Settings.swift only mirrors it).
     "v0.6.0": {"release": "v0.6.0", "flags": ["--context", "--packs", "acg,it"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+tri:{tri8}"},
 }
@@ -808,7 +808,8 @@ def resolve_models(ver, spec):
         local = os.path.join(ROOT, "data", "lm", n)   # the checkout's own copy (scripts/fetch-models.sh) when it is the same file
         if not os.path.isfile(p) and os.path.isfile(local) and sha_file(local) == want:
             os.makedirs(os.path.dirname(p), exist_ok=True)
-            shutil.copy2(local, p)
+            shutil.copy2(local, p + ".tmp")   # through a temp name: an interrupted copy never sits at p, where the next run would trust it
+            os.replace(p + ".tmp", p)
             print(f"  {ver.label}: {n} copied from data/lm (sha256 {want[:16]}…)")
         if not os.path.isfile(p):
             die(f"{ver.label}: model file missing: {p}, and {local} is not that file either; for the version being released run "

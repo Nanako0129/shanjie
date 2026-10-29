@@ -243,6 +243,19 @@
     },
     "rerank_p50_ms": 6.513,
     "rerank_p95_ms": 8.253
+   },
+   "holdout": {
+    "commit": "1c9e0a7d858d3f8de51819ac4f460f3664f9f0ae",
+    "chat": {
+     "n": 150,
+     "top1": 115,
+     "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d"
+    },
+    "formal": {
+     "n": 150,
+     "top1": 125,
+     "rows_sha256": "637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38"
+    }
    }
   },
   {
