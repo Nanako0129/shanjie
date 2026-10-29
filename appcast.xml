@@ -6,6 +6,50 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>善解輸入法</title>
         <item>
+            <title>0.6.0</title>
+            <pubDate>Thu, 29 Oct 2026 01:12:22 +0000</pubDate>
+            <sparkle:version>0.6.0</sparkle:version>
+            <sparkle:shortVersionString>0.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[換上一整組新模型，聊天設定的錯字少了很多；多了資訊與 AI 詞包、模糊輸入、輕聲容錯，網路用語、實況主與店家名字也補進詞庫。
+
+- **新模型**：通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K；連文分成兩張，書面 SJ-CX-2-7.7M、聊天 SJ-CX-2-950K（聊天設定第一次用到前兩個詞）。設定的「關於」頁列出這七個模型。
+  - 錯字回報（出貨設定，`docs/benchmark.md` 的前 80 句）：聊天 33 → 70 句、書面 29 → 61 句。
+  - 語意校正不會再把你手動加進詞庫的詞換掉，例如書面設定的「米雅歌」不再被改成「米亞哥」。
+  - 已知的退步：資訊與 AI 詞的檢查集，聊天 46 → 36、書面 39 → 27；維基段落（wikitune）兩種設定各少約 24 句（不顯著，見下）。
+- **資訊與 AI 詞包**（預設開）：1,016 個詞，例如「圖像生成」（關掉詞包時是「圖象生成」）。
+  - 詞包的開關搬到設定 → 選字 →「詞包」，裡面是「動漫與遊戲詞」「資訊與 AI 詞」兩個開關；輸入選單只留一行不能點的「已開啟的詞包：…」，都沒開時不顯示。
+  - 詞包裡的名字比較不會被拆成別的字，例如 ㄧ ㄌㄧˋ ㄙ 打出「伊莉絲」。
+- **動漫詞包更新**到 2026-10-22 的來源，共 44,552 詞。
+- **網路用語**：507 條常用說法與第二輪 910 個詞直接收進詞庫（不是詞包，沒有開關），例如「腦羞」。同讀音時用量少的那一個不收（「業配」不會變成「葉配」）。
+- **名字**：補了 119 個實況主、YouTuber、節目與頻道名（例如「是要對決」「木曜四超玩」）、店家餐廳飯店企業 225 個（例如「馬辣」）、台灣以外的中文圈人名 14 個（例如「劉畊宏」「陳奕迅」）。
+- **模糊輸入**（設定 → 選字 →「模糊輸入」，預設全關）：
+  - 四組模糊音：ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ。
+  - 「鄰鍵打錯」：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜，每個詞最多猜一個音節；只適用標準排列。例如開著 ㄓ／ㄗ 與鄰鍵時，`ㄗ ㄉㄠˋ` 送出「知道」、`ㄏㄧㄝˋ ㄒㄧㄝˋ` 送出「謝謝」。
+  - 已知：開著 ㄓ／ㄗ 時「ㄗ ㄉㄠˋ ㄌㄜ˙」仍是「資到了」。
+- **輕聲容錯**：只有輕聲讀音的詞，打成本調也打得出來，例如「桌子」「杯子」的「子」打 ㄗˇ。
+- **「紮」**：ㄐㄧㄝˊ ㄓㄚ 打得出「結紮」；「紮實」「包紮」改選「紮」。
+- **組字區更長**：組字區最多留 128 個單位才把前段送出（之前 40），51 字的長句整句留在組字區。太前面的字（超過模型看得到的範圍）會固定、不再改字。
+- **常談在三種強度都生效**：聊天設定的保守、積極兩檔也用上口語表與讀音項（上一版只有標準檔）。
+- **依按鍵順序判斷英文**（設定 → 選字，預設關）：開了之後 ok、ls、cup 這類短詞不用按 Shift。快打時同一個音節的鍵如果先後顛倒，可能被當成英文，這種情況還沒量過，所以預設關。
+- **前文**：輸入法讀取同一行、游標前最多 64 個字當前文；這一版的會意仍只用最後 2 個字。
+- **更新的密碼框**：關於頁與安裝程式改成描述密碼框的用途，不再逐字引用；框裡固定是英文的那一行另外標出來。
+- **已知問題**：聊天設定「長歪了」仍選成「掌歪了」（書面設定是對的）。原因是讀音通道項對「長」讀ㄓㄤˇ扣了分，「長這樣」也一樣；下一版修。
+- **跨版本比較**（v0.5.0 → v0.6.0，出貨設定，`docs/benchmark.md`）：
+  - 聊天：Discord 聊天評測集（4,958 句）87.90% → 93.69%（改對 336／改壞 49）、cvtune（3,791 句）91.93% → 93.12%（95／50）、dev302 89.07% → 92.72%（14／3，p 0.013）、錯字回報（80 句）33 → 70 句（38／1）。wikitune（2,827 句）77.26% → 76.41%（80／104，p 0.09，不顯著）。
+  - 書面：Discord 聊天評測集 86.06% → 92.54%（396／75）、cvtune 91.80% → 92.96%（104／60）、dev302 87.75% → 89.74%（15／9，p 0.31，不顯著）、錯字回報 29 → 61 句（34／2）。wikitune 80.16% → 79.34%（78／101，p 0.10，不顯著）。
+  - 打字測驗（76 句）：聊天 72 → 74（2／0）、書面 69 → 74（5／0）。
+  - 保留集（發版前量一次）：口語半邊（聊天，150 句）115 → 124（10／1，p 0.012）、新聞半邊（書面，150 句）125 → 128（3／0，p 0.25，不顯著）。
+  - 速度與記憶體（同一場輪流跑，開跑時 load avg 5.8，不是閒置窗，只能看兩版的差距）：每鍵 p95 2.06 → 2.23 ms，引擎載入 892 → 945 ms，記憶體（RSS）441 → 480 MB，語意校正 p95 8.3 → 8.6 ms。
+- **更新後如果某個 App 打不出字**：請把那個 App 完全結束（⌘Q）再打開。
+- 其餘是研究紀錄、契約、評測工具、測試與 CI 的更新。
+
+完整變更：https://github.com/Nanako0129/shanjie/compare/v0.5.0...v0.6.0
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/shanjie/releases/download/v0.6.0/shanjie-0.6.0.zip" length="111871124" type="application/octet-stream" sparkle:edSignature="FjN3hCuXxhIODujwLDAPUlzlx2Xwj9sTYguK6grVoX1Xat7J+TSXPVc5ePiQ1Om/M4CNd4nV1ka2BD8Kt4yGBg=="/>
+        </item>
+        <item>
             <title>0.5.0</title>
             <pubDate>Wed, 21 Oct 2026 19:15:57 +0000</pubDate>
             <sparkle:version>0.5.0</sparkle:version>
@@ -89,6 +133,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 1LG7/aWW1+YsdzhW2zdfZjeM4nBOuAubt1KTIx8WE6yIAdW6DWJeioruMbfNjJZzc5pMxMR2HvxYgG5yKEIDAQ==
-length: 11727
+edSignature: JYmZlXvsrqUH1qWAvV3XHxU83FjsRINWFnl4nEyMHuIvYmTJc00T1sHrKCuxvRFGmNRQs+KR2sWf76SIboScCw==
+length: 17717
 -->

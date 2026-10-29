@@ -149,7 +149,14 @@ def build_replay(root):
     die("cargo reported no shanjie-replay executable")
 
 
-def replay_cell(binary, root, rows, models, learn, rowstats):
+def pack_tag(spec):
+    """The packs part of the replay tag the version ships, from its VERSIONS2 flags (`--packs acg,it` -> `+acg+it`). The replay binary formats its
+    own tag from the pack mask it builds the engine with (cli/src/replay.rs PACKS), so a binary whose packs differ from the version's is refused."""
+    f = spec["flags"]
+    return "".join("+" + p for p in f[f.index("--packs") + 1].split(",")) if "--packs" in f else ""
+
+
+def replay_cell(binary, root, rows, models, learn, rowstats, packs):
     """One shanjie-replay run (chat, --correct); checks its models line, setting tag and row count. -> the summary dict.
     The replay loads data/lm/colloquial.sjlm by default, as the App does: a version that ships the table (it is in `models`) runs as is and its tag
     ends in +colloq:<sha8>+rc (the reading-channel term rides on the colloquial term, chat); one that does not ships no data/lm/colloquial.sjlm, and `--no-colloquial` keeps the replay from loading another."""
@@ -169,7 +176,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats):
     name, tag, d = found[0]
     s = {**ast.literal_eval(d), "tag": tag}
     lm8, tl8 = models["bigram.sjlm"][:8], models.get("tinylm.sjtl", "")[:8]
-    want = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
+    want = f"replay-chat+ctx{packs}+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
         + (f"+colloq:{models['colloquial.sjlm'][:8]}+rc" if "colloquial.sjlm" in models else "")
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")
@@ -204,7 +211,7 @@ def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
         def cell(name, learn):
             rs = os.path.join(td, f"{name}.{'on' if learn else 'off'}.rs")
             try:
-                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs), rs
+                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs, pack_tag(bench.VERSIONS2[label])), rs
             except RuntimeError as e:
                 die(f"{name}: {e}")
         for name in ("user-reported", "dev302"):

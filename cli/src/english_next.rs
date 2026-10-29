@@ -2,7 +2,7 @@
 //! table, on rows `e|w|reading` (reading: space-separated syllables, tools/readings.py). Each row starts from an empty composition and sends
 //! Shift+(first letter of e), the other letters, Space, and reads the prediction row (i); then the first Zhuyin key of w's first syllable
 //! (standard layout) and reads it again (ii, iii). Standard layout, English mixing on, prediction on, the rest as `replay::build_engine`
-//! makes the App's engine (acg pack, bigram, small model and colloquial table when the files exist, demotion and rerank on, no learning).
+//! makes the App's engine (ACG and IT+AI packs, bigram, small model and colloquial table when the files exist, demotion and rerank on, no learning).
 //! Both arms are the same engine built without the data directory's table; an untimed warm-up pass, then one timed pass without the table, then the table is loaded (`Engine::load_english_next`, an invalid table is an error) and one timed pass with it.
 //!
 //! Output, no row text (R2), one TSV line per profile (chat, formal), then the memory line:
