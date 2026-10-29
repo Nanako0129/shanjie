@@ -414,6 +414,11 @@ class ReplayRunWithTheColloquialTable(ReplayRun):
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct")
 
+    def test_the_pack_part_follows_each_versions_flags(self):
+        # derived, not hard-coded: an ACG-only version expects +acg, the two-pack release +acg+it
+        self.assertEqual(kpi.pack_tag(bench.VERSIONS2["v0.4.3"]), "+acg")
+        self.assertEqual(kpi.pack_tag(bench.VERSIONS2["v0.6.0"]), "+acg+it")
+
     def test_a_binary_with_other_packs_than_the_version_is_refused(self):
         # v0.4.3 ships the ACG pack only (VERSIONS2 flags); a replay built with ACG and IT+AI is not that version's engine
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
