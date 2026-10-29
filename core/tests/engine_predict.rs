@@ -40,13 +40,11 @@ fn shared() -> &'static Shared {
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
-/// The `PACKS` environment variable (`acg`, `it`, `acg,it`) as a directory and a mask; `None` when unset.
+/// The `PACKS` environment variable (any comma list of `acg`, `quotes`, `it`, the pack files' names without `-add.tsv`) as a directory and a mask; `None` when unset.
 fn packs_from_env() -> Option<(PathBuf, u32)> {
     let v = std::env::var("PACKS").ok()?;
-    let mask = v.split(',').fold(0, |m, n| m | match n {
-        "acg" => PACK_ACG,
-        "it" => PACK_IT,
-        _ => panic!("PACKS takes acg, it or acg,it"),
+    let mask = v.split(',').fold(0, |m, n| {
+        m | PACK_FILES.iter().find(|(_, f)| f.strip_suffix("-add.tsv") == Some(n)).unwrap_or_else(|| panic!("PACKS takes acg, quotes, it or a comma list of them, not {n:?}")).0
     });
     Some((std::env::var("PACKS_DIR").map_or_else(|_| root().join("data/packs"), PathBuf::from), mask))
 }
@@ -63,7 +61,7 @@ fn expected_readings(packs: Option<(PathBuf, u32)>) -> usize {
     }
     let mut overlays: Vec<PathBuf> = ["overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"].iter().map(|f| dir.join(f)).collect();
     if let Some((pdir, mask)) = packs {
-        overlays.extend([(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv")].iter().filter(|(b, _)| mask & b != 0).map(|(_, f)| pdir.join(f)));
+        overlays.extend(PACK_FILES.iter().filter(|(b, _)| mask & b != 0).map(|(_, f)| pdir.join(f)));
     }
     for f in overlays {
         seen.extend(std::fs::read_to_string(f).unwrap().lines().map(|l| l.split('\t').next().unwrap().to_string()));

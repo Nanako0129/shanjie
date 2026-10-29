@@ -1068,8 +1068,8 @@ final class ShellTests: XCTestCase {
         XCTAssertNil(line(true, true)?.action, "not clickable")
     }
 
-    /// it-pack contract 3.2: a broken it-add.tsv fails the pack build, the retry uses mask 0, so neither pack is loaded and the menu names none,
-    /// while both stored choices (what Settings shows) stay on and are not rewritten. Fails if the line reads acgPackOn / itPackOn.
+    /// it-pack contract 3.2: a broken it-add.tsv fails the pack build; the retry drops that pack, and this fixture has no acg-add.tsv either, so
+    /// neither pack is loaded and the menu names none, while both stored choices (what Settings shows) stay on and are not rewritten. Fails if the line reads acgPackOn / itPackOn.
     func testBrokenItPackDropsBothPacksFromTheMenuLine() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
@@ -1083,6 +1083,40 @@ final class ShellTests: XCTestCase {
         XCTAssertTrue(shell.acgPackOn && shell.itPackOn, "Settings keeps showing the stored choices")
         XCTAssertEqual(acg.acgPack, true)
         XCTAssertEqual(it.itPack, true)
+    }
+
+    private func packShell3(quote: Bool) -> Shell {
+        Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(true), quotePackStore: MemoryQuotePackStore(quote), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: MemoryItPackStore(true))
+    }
+
+    /// Fall-back order when the combined build fails: with all three packs on (mask 7) and only quotes-add.tsv broken, the no-pack build works
+    /// (so a pack is at fault), then dropping one pack at a time keeps the healthy ones: ACG and IT stay loaded (mask 5), the menu names both.
+    func testBrokenQuotesFileKeepsAcgAndIt() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        try "not a row\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
+        let shell = packShell3(quote: true)
+        XCTAssertNotNil(shell.engine)
+        XCTAssertEqual(shell.packMask, 7)
+        XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
+        let c = Controller(shell)
+        XCTAssertEqual(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
+        XCTAssertTrue(shell.quotePackOn, "the stored choice is untouched")
+    }
+
+    /// A build failure that is not a pack's (a broken overlay-add.tsv in the data directory): the combined build and the no-pack build both
+    /// fail, and the shell gives up after exactly those two builds, with no engine.
+    func testBrokenNonPackFileStopsAfterTwoBuilds() throws {
+        let overlay = resources.appendingPathComponent("overlay-add.tsv")
+        try FileManager.default.removeItem(at: overlay)
+        try "not a row\n".write(to: overlay, atomically: true, encoding: .utf8)
+        let before = CoreEngine.makeCalls
+        let shell = packShell3(quote: true)
+        XCTAssertNil(shell.engine)
+        XCTAssertEqual(CoreEngine.makeCalls - before, 2)
     }
 
     func testSwitchingLayoutCommitsThenUsesTheNewLayout() {

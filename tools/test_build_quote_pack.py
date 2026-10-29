@@ -2,6 +2,7 @@
 The quote lists here are synthetic fixtures: no real quote is claimed to be checked. The rule tests fake the readings tool and the decoder;
 `RealCli` runs the evaluation CLI on the shipped model. Needs the repo's data (data/lexicon, data/lm) and the CLI (built on demand
 with cargo); it fails loudly without them, never skips."""
+import json
 import os
 import shutil
 import sys
@@ -36,6 +37,8 @@ class Fixture(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp()
         cls.addClassCleanup(shutil.rmtree, cls.tmp, True)
+        for n in Q.DECODE_PACKS:        # build() reads (and hashes) the ACG and IT pack files in acg_dir; the fixtures have none of their own
+            open(os.path.join(cls.tmp, n), "w").close()
 
     def build(self, lines, decode=same, have=NONE, acg_words=NONE, readings=fake_readings):
         path = os.path.join(self.tmp, "list.tsv")
@@ -203,6 +206,29 @@ class RealCli(unittest.TestCase):
         self.assertEqual(manifest["not_first_with_pack"], 0, report)
         self.assertEqual(manifest["first_without_quote_pack"], {"chat": 0, "formal": 0}, "the fixture clause must be one the pack changes")
         self.assertEqual(manifest["dropped_by_lexicon_rule"], 0)
+
+
+class Stale(unittest.TestCase):
+    """The committed pack was decoded with the models and the ACG and IT pack files recorded in quotes.json; a model swap or a pack rebuild
+    since then leaves the collision rule and the first-place report stale, so the pack must be rebuilt."""
+
+    def test_quotes_json_matches_the_shipped_models_and_packs(self):
+        rec = json.load(open(os.path.join(Q.PACKS, "quotes.json"), encoding="utf-8"))
+        fix = f"rebuild with `{Q.REBUILD}`"
+        self.assertEqual(rec["decode_models_sha256"], Q.shipped_lm_sha(), f"quotes.json was built with other models than data/*.sha256: {fix}")
+        self.assertEqual(rec["decode_packs_sha256"], {n: Q.sha256_file(os.path.join(Q.PACKS, n)) for n in Q.DECODE_PACKS},
+                         f"the ACG or IT pack changed since quotes.json was built: {fix}")
+
+    def test_a_missing_hash_file_is_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            real = Q.bap.ROOT
+            Q.bap.ROOT = d
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    Q.shipped_lm_sha()
+            finally:
+                Q.bap.ROOT = real
+        self.assertIn("is missing", str(cm.exception))
 
 
 if __name__ == "__main__":

@@ -90,9 +90,9 @@ cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Res
 for f in Assets.car AppIcon.icns; do [ -s "$R/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
 for k in CFBundleIconName CFBundleIconFile; do [ "$(pb "$k")" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done
 # The word pack manifests (docs/contracts/acg-pack.md A.2, quote-pack.md section 2): every file one lists is there with the SHA-256 it
-# records, and the attribution file names the ACG pack. quotes-add.tsv is a file of its own (it is empty until a quote has been checked,
-# so the non-empty test above skips it) and the manifest must name it.
-[ -f "$R/packs/quotes-add.tsv" ] || fail "Resources/packs/quotes-add.tsv is missing"
+# records, and the attribution file names the ACG pack. quotes-add.tsv holds the checked quotes, so it must be non-empty,
+# and the manifest must name it.
+[ -s "$R/packs/quotes-add.tsv" ] || fail "Resources/packs/quotes-add.tsv is missing or empty"
 python3 - "$R/packs" <<'PY' || fail "packs/acg.json or packs/quotes.json does not match the pack files"
 import hashlib, json, os, sys
 d = sys.argv[1]

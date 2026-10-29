@@ -996,17 +996,26 @@ public final class Shell {
         var built = mask & present
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
-            // Any build failure retries with fewer packs, so the first code alone does not say whose fault it is: with several packs on, try
-            // each pack alone (a broken file must not take the others with it; the settings order, ACG first), then none. Blame the
-            // packs only if a retry works; otherwise the last code is the real cause. The stored choices are untouched and nothing is
-            // shown; the next rebuild tries the packs again.
+            // The combined build failed, so the first code alone does not say whose fault it is. (a) Build with no packs: if that fails too the
+            // cause is not a pack, and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings
+            // order build with just that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop
+            // works (two broken files), the no-pack engine stays. The stored choices are untouched and nothing is shown; the next rebuild
+            // tries the packs again.
             let packCode = code
-            let alone = Shell.packTable.map(\.bit).filter { mask & $0 != 0 }
-            let retries: [UInt32] = (alone.count > 1 ? alone : []) + [0]
-            for retry in retries where made == nil {
-                (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: retry != 0 ? packsDir : nil, packs: retry)
-                built = retry & present
-                if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(retry)") }
+            built = 0
+            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
+            if made != nil {
+                var kept = "0"
+                for bit in Shell.packTable.map(\.bit) where mask & bit != 0 && mask & ~bit != 0 {
+                    let (dropped, _) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, packs: mask & ~bit)
+                    if let dropped {
+                        made = dropped
+                        built = mask & ~bit & present
+                        kept = String(mask & ~bit)
+                        break
+                    }
+                }
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(kept)")
             }
         }
         guard let e = made else {

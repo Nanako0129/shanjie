@@ -8,7 +8,8 @@
 同音衝突只有一種處理（契約 §2 衝突）：開詞包後某個讀音的第一名由既有詞庫的詞變成台詞分句，既有詞勝，那個分句不收。
 
 用法：python3 tools/build_quote_pack.py [--list FILE] [--out DIR] [--report DIR] [--acg-dir DIR]
-解碼靠評測 CLI（target/release/shanjie-eval）與出貨的 data/lm（雜湊見 SHIPPED_LM_SHA，開始前核對）；「不開」與「開」兩次都帶 ACG 詞包（照出貨）。
+解碼靠評測 CLI（target/release/shanjie-eval）與出貨的 data/lm（雜湊見 SHIPPED_LM_SHA，開始前核對）；「不開」帶 ACG 與資訊詞包（--packs acg,it）、「開」再加台詞（acg,quotes,it），照出貨；
+quotes.json 記下解碼用的模型與 ACG、資訊詞包檔的雜湊。
 """
 import argparse
 import collections
@@ -35,8 +36,22 @@ UNCHECKED = frozenset({"", "待核對"})   # 核對來源欄：空白或起始�
 LEXICON_RULE_ROUNDS = 5           # 丟一個分句只會讓少數鄰居改變，實測幾輪就穩（和 ACG 詞包相同）
 # 契約 §2 解碼設定：出貨的 data/lm，雜湊照 data/*.sha256（換模型時不必改這裡），開始前核對；
 # 聊天讀 bigram、classes、kn 與 trigram-chat.sjt3，書面讀 trigram.sjt3，這五個檔決定出貨設定下的第一名。
-SHIPPED_LM_SHA = {n: open(os.path.join(bap.ROOT, "data", n + ".sha256")).read().split()[0]
-                  for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3")}
+SHIPPED_LM_FILES = ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3")
+DECODE_PACKS = ("acg-add.tsv", "it-add.tsv")     # 「不開」「開」兩次解碼都帶的出貨詞包（預設開的兩個）
+REBUILD = "python3 tools/build_quote_pack.py"
+
+
+def shipped_lm_sha():
+    """{檔名: 雜湊}，讀 data/*.sha256；缺檔就中止並說明（不在 import 時開檔）。"""
+    out = {}
+    for n in SHIPPED_LM_FILES:
+        p = os.path.join(bap.ROOT, "data", n + ".sha256")
+        if not os.path.exists(p):
+            raise SystemExit(f"{p} is missing; the model hashes come from data/*.sha256 (fetch the models with scripts/fetch-models.sh)")
+        out[n] = open(p).read().split()[0]
+    return out
+
+
 # 漢字：基本區、擴充 A、相容區、〇，以及擴充 B 以後（讀音工具讀不出的字照樣進「讀音拼不出」的報告，不當成非漢字）。
 HAN = re.compile(r"^[〇㐀-䶿一-鿿豈-\uFAFF\U00020000-\U0003FFFF]+$")
 # 標點與空白（含全形與半形的引號、刪節號、破折號）。不在這裡也不是漢字的字元（英文、數字、符號）留在分句裡，讓那個分句被擋下。
@@ -49,7 +64,7 @@ def sha256_file(path):
 
 
 def check_shipped_lm(directory=os.path.join(bap.ROOT, "data", "lm")):
-    for name, sha in SHIPPED_LM_SHA.items():
+    for name, sha in shipped_lm_sha().items():
         path = os.path.join(directory, name)
         if not os.path.exists(path) or sha256_file(path) != sha:
             raise SystemExit(f"{path} is missing or its SHA-256 is not {sha}; the build decodes with the shipped model")
@@ -89,15 +104,16 @@ def file_words(path):
 
 
 def cli_decode(acg_dir, lm=bap.LM):
-    """評測 CLI 的解碼器，簽名同 `bap.top1`：packs 是 None 就只開 ACG 詞包（acg_dir），給了就是放著 quotes-add.tsv 的資料夾，ACG 與台詞兩包都開。"""
+    """評測 CLI 的解碼器，簽名同 `bap.top1`：packs 是 None 就開 ACG 與資訊詞包（acg_dir 裡的 acg-add.tsv、it-add.tsv），給了就是放著 quotes-add.tsv 的資料夾，再加台詞詞包（照出貨）。"""
     def decode(pairs, profile, packs=None):
         with tempfile.TemporaryDirectory() as d:
-            pdir, names = acg_dir, "acg"
+            pdir, names = acg_dir, "acg,it"
             if packs:
-                pdir, names = os.path.join(d, "packs"), "acg,quotes"
+                pdir, names = os.path.join(d, "packs"), "acg,quotes,it"
                 os.mkdir(pdir)
                 shutil.copy(os.path.join(packs, PACK_FILE), pdir)
-                os.symlink(os.path.abspath(os.path.join(acg_dir, "acg-add.tsv")), os.path.join(pdir, "acg-add.tsv"))
+                for f in DECODE_PACKS:
+                    os.symlink(os.path.abspath(os.path.join(acg_dir, f)), os.path.join(pdir, f))
             rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
             with open(rows, "w", encoding="utf-8") as f:
                 f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
@@ -140,12 +156,13 @@ def first_places(words, reading, rows, decode):
     return out
 
 
-def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings, have=None, acg_words=None):
-    """回傳 (files, manifest, report)。have：基底、overlay-add.tsv、sandhi-add.tsv、names-add.tsv 的詞（預設照 repo）；acg_words：ACG 詞包的詞。"""
+def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings, have=None, acg_words=None, it_words=None):
+    """回傳 (files, manifest, report)。have：基底、overlay-add.tsv、sandhi-add.tsv、names-add.tsv 的詞（預設照 repo）；acg_words、it_words：ACG、資訊詞包的詞（預設讀 acg_dir 裡的檔）。"""
     decode = decode or cli_decode(acg_dir)
     have = bap.lexicon_words() if have is None else have
     acg_words = file_words(os.path.join(acg_dir, "acg-add.tsv")) if acg_words is None else acg_words
-    existing = frozenset(have) | frozenset(acg_words)           # 契約 §2「既有詞」：基底、overlay、sandhi、names、ACG 詞包
+    it_words = file_words(os.path.join(acg_dir, "it-add.tsv")) if it_words is None else it_words
+    existing = frozenset(have) | frozenset(acg_words) | frozenset(it_words)     # 契約 §2「既有詞」：基底、overlay、sandhi、names、ACG 詞包、資訊詞包
     quotes = read_list(list_path)
     checked = [q for q in quotes if q[4] not in UNCHECKED]
     src, override = collections.defaultdict(set), {}          # 分句 → 出處（行號）；分句 → 清單給的讀音
@@ -202,6 +219,9 @@ def build(list_path=LIST, acg_dir=PACKS, decode=None, readings=bap.make_readings
         "not_first_with_pack": len({w for w, *_ in missed}),
         "first_without_quote_pack": base_first,
         "list_sha256": sha256_file(list_path),
+        # 解碼（衝突偵測、第一名報告）用的模型與詞包檔：之後換了模型或詞包，tools/test_build_quote_pack.py 比對這裡，不符就要重建
+        "decode_models_sha256": shipped_lm_sha(),
+        "decode_packs_sha256": {f: sha256_file(os.path.join(acg_dir, f)) for f in DECODE_PACKS},
     }
     files = {PACK_FILE: text}
     return files, manifest, report_text(manifest, quotes, checked, skipped, unread, check, dropped, same, missed, len(firsts))

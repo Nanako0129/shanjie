@@ -45,11 +45,15 @@ final class CoreEngine {
     static let packQuotes = UInt32(SHANJIE_PACK_QUOTES)
     static let packIT = UInt32(SHANJIE_PACK_IT)
 
+    /// How many times `make` ran (the shell's fall-back order is asserted by counting builds in the tests).
+    static var makeCalls = 0
+
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
     /// `packsDir` is the directory of the word pack files and `packs` the bit mask of the packs to turn on (acg-pack contract A.2,
     /// quote-pack contract section 2, it-pack contract 3.1; the default is the ACG pack alone); a nil `packsDir` is `shanjie_engine_new`,
     /// so the engine is the one the app had before the packs existed.
     static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, packs: UInt32 = packACG) -> (CoreEngine?, Int32) {
+        makeCalls += 1
         var out: OpaquePointer?
         let code: Int32
         if let packsDir {
