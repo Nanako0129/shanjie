@@ -83,6 +83,16 @@ class TestExport(unittest.TestCase):
         self.assertEqual(names[4:16], [f"l0.{k}" for k in tinylm.LAYER_KEYS])
         self.assertEqual(names[16:], [f"l1.{k}" for k in tinylm.LAYER_KEYS])
 
+    def test_a_nul_in_the_vocabulary_keeps_its_id(self):
+        # numpy's <U1 reads a saved U+0000 back as "": the export restores it instead of refusing the vocabulary (CTX64's raw text)
+        chars = "甲\x00丙丁戊己庚辛"
+        npz = os.path.join(self.td.name, "nul.npz")
+        tinylm.save_params(npz, tinylm.random_params(list(chars), n_layer=2, d=8, n_head=2, seed=3), chars, n_layer=2, n_head=2)
+        self.assertEqual(str(np.load(npz)["chars"][1]), "")
+        out = os.path.join(self.td.name, "nul.sjtl")
+        ex.export(npz, out, "f32", (0.7, 2.0), (0.5, 1.0), SHA)
+        self.assertEqual("".join(ex.read_sjtl(out)[1]), chars)
+
     def test_wrong_shapes_and_keys_are_refused(self):
         z = dict(np.load(self.npz))
         z["emb"] = z["emb"][:-1]
