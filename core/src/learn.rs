@@ -93,6 +93,11 @@ pub fn context_key(prefix: &str) -> String {
     }
 }
 
+/// The last `n` characters of `s` (by `chars()`, never a byte slice: context-return section 2, P3-5).
+pub fn last_chars(s: &str, n: usize) -> String {
+    s.chars().skip(s.chars().count().saturating_sub(n)).collect()
+}
+
 /// zhen-inline §1.0: the English word of a token reading (`_punct_rust` -> `rust`): the text after `PUNCT_PREFIX`, when it is
 /// non-empty ASCII letters only (no punctuation mark is).
 pub fn english_of(reading: &str) -> Option<&str> {

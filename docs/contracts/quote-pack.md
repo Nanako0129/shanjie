@@ -54,7 +54,7 @@
     - 同一份輸入建置兩次，輸出逐位元組相同。
   - **報告**：每個分句開了詞包時，在聊天與書面各自的第一名是不是它自己。不是的列出來，不默默丟掉。
 - **引擎**：
-  - `PACK_QUOTES = 2`，`PACK_FILES` 加 `quotes-add.tsv`，`PACK_ALL` 跟著更新。
+  - `PACK_QUOTES = 2`，`PACK_FILES` 加 `quotes-add.tsv`，`PACK_ALL` 跟著更新（2026-10-29 合併 main：資訊詞包佔了位元 2，`PACK_ALL = PACK_ACG | PACK_QUOTES | PACK_IT`，`PACK_FILES` 依 ACG、台詞、IT 的順序）。
   - C ABI 的遮罩說明加 bit1，同時改 `core/include/shanjie.h` 與 `docs/contracts/s3a.md`。
   - 載入、封頂、檔案不存在時的行為，全部照 ACG 詞包 A.2。
   - CLI 的 `--packs` 接受 `quotes`（也可以 `acg,quotes`）。
@@ -78,7 +78,7 @@
 
 - **驗收**：
   - 建置工具與測試（`make test-python`）；
-  - 引擎與 App 的測試（`make test-rust`、`make test-swift`）：詞包關掉時逐位元組相同，開著時能載入，遮罩與偏好鍵正確；`quotePack` 沒設過時，傳給 `shanjie_engine_new_packs` 的遮罩只有 `SHANJIE_PACK_ACG` 那一位（Swift 測試斷言）；建置工具的測試涵蓋 11 字分句進報告不崩潰、和 `names-add.tsv` 同字串的分句不收、含「不」的分句有變調列；
+  - 引擎與 App 的測試（`make test-rust`、`make test-swift`）：詞包關掉時逐位元組相同，開著時能載入，遮罩與偏好鍵正確；`quotePack` 沒設過時，傳給 `shanjie_engine_new_packs` 的遮罩沒有 `SHANJIE_PACK_QUOTES` 那一位（2026-10-29 合併 main 後，資訊詞包預設開，遮罩是 ACG 與 IT 兩位，值 5；Swift 測試斷言）；建置工具的測試涵蓋 11 字分句進報告不崩潰、和 `names-add.tsv` 同字串的分句不收、含「不」的分句有變調列；
   - §3 的評測；
   - 實機（維護者）。
 - **停止條件**：

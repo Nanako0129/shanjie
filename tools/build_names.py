@@ -7,6 +7,10 @@ Wikidata、中文維基與教育部學校名錄，產生一般詞庫層 data/lex
       python3 tools/build_names.py --nsi-commit SHA --offline   只用快取，缺了就中止
       --cache DIR  --out DIR  --report DIR   快取（預設 ~/.cache/shanjie/sources/names）、輸出、報告（預設 build/names）
       python3 tools/build_names.py --check    只檢查已提交的 names-add.tsv 和詞庫其他四份檔沒有交集（make test 也跑）
+      python3 tools/build_names.py --append-creators   讀 names-creators.tsv（標籤 creator）與 names-stores.tsv（標籤 store），在 names-add.tsv／names-sources.tsv
+                                                       檔尾追加（或換掉）這兩種標籤的列（順序：names → creator → store）、更新 names.json
+                                                       （docs/contracts/names-creators.md §2、names-stores.md §2；不連網、不讀快取、不動既有列）
+      來源檔欄位：詞、讀音（音節以空白分隔）、備註，可選的第四欄是加分（有限、≥ 0，只能放在同讀音的第一列；docs/contracts/names-stores.md §2）。同讀音的先後就是檔案裡的先後：建置資料的人照 PTT 文章數由多到少排好（要人工調整就改檔案順序，例如 峰哥 排在 風哥 前面）。
 
 網路只連 zh.wikipedia.org／www.wikidata.org 的 /w/api.php、raw.githubusercontent.com（只限 NSI 那個 commit）、
 data.gov.tw 與 stats.moe.gov.tw 的名錄 CSV；限速、User-Agent、maxlag 沿用 build_acg_pack.Api。請求 3,000 個、快取 500 MB 為上限。
@@ -19,6 +23,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import re
 import subprocess
@@ -260,17 +265,20 @@ def file_words(path):
         return {l.split("\t")[1] for l in f}
 
 
-def known_words(lex_dir=LEX, acg_add=ACG_ADD):
-    """基底詞庫、overlay-add.tsv、sandhi-add.tsv、acg-add.tsv 的詞（任何讀音下）。"""
+MEME_ADD = os.path.join(bap.PACKS, "meme-add.tsv")
+
+
+def known_words(lex_dir=LEX, acg_add=ACG_ADD, meme_add=MEME_ADD):
+    """基底詞庫、overlay-add.tsv、sandhi-add.tsv、acg-add.tsv、meme-add.tsv（迷因詞包，沒有檔就是空）的詞（任何讀音下）。"""
     base = bap.base_lexicon() if lex_dir == LEX else ime.Lexicon(os.path.join(lex_dir, "mcbpmf-data.txt"))
-    return set(base.by_word) | file_words(os.path.join(lex_dir, "overlay-add.tsv")) | file_words(os.path.join(lex_dir, "sandhi-add.tsv")) | file_words(acg_add)
+    return set(base.by_word) | file_words(os.path.join(lex_dir, "overlay-add.tsv")) | file_words(os.path.join(lex_dir, "sandhi-add.tsv")) | file_words(acg_add) | file_words(meme_add)
 
 
 def check_disjoint(words, have, what="names-add.tsv"):
-    """契約 §2：輸出和那四份檔的詞集合交集必須為空（核心依字串封頂所有讀音，同一個（讀音, 詞）重複還會讓載入失敗）。"""
+    """契約 §2：輸出和 known_words 那五份檔的詞集合交集必須為空（核心依字串封頂所有讀音，同一個（讀音, 詞）重複還會讓載入失敗）。"""
     bad = sorted(set(words) & set(have))
     if bad:
-        raise SystemExit(f"{what} shares {len(bad)} words with the base, overlay-add.tsv, sandhi-add.tsv or acg-add.tsv: {bad[:5]}")
+        raise SystemExit(f"{what} shares {len(bad)} words with the base, overlay-add.tsv, sandhi-add.tsv, acg-add.tsv or meme-add.tsv: {bad[:5]}")
 
 
 def check_committed(lex_dir=LEX, acg_add=ACG_ADD):
@@ -343,6 +351,145 @@ def below_pack(rows, rank, inpack, pack):
                 row = f"{key}\t{word}\t{limit!r}\t{tag}\n"
         out.append(row)
     return out
+
+
+# ---------------------------------------------------------------- 創作者與店家名字：只在檔尾追加（docs/contracts/names-creators.md §2、names-stores.md §2）
+
+CREATORS = os.path.join(LEX, "names-creators.tsv")
+STORES = os.path.join(LEX, "names-stores.tsv")
+CREATOR, STORE = "creator", "store"
+TAGS = (TAG, CREATOR, STORE)            # 檔尾順序：既有列 → creator → store
+# 同一個讀音有好幾個新名字時，PTT 文章數多的留第一，後面的扣 k × SLANG_BEHIND 只當候選；和網路用語同一個值（匯入，不重複定義）。
+SLANG_BEHIND = bo.SLANG_BEHIND
+
+
+def _lines(text):
+    """保留每一行的原始位元組（含行尾）；不用 splitlines（它也在 U+2028 等字元上斷行）。"""
+    return re.findall(r"[^\n]*\n|[^\n]+", text)
+
+
+def creator_lines(path):
+    """來源檔（names-creators.tsv／names-stores.tsv）的資料行（略過 # 開頭與空行；CRLF 的行尾 \r 去掉）→ [(行號, 行)]；檔案不存在時是空的。"""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8-sig") as f:
+        lines = [l.rstrip("\r") for l in f.read().split("\n")]
+    return [(n, l) for n, l in enumerate(lines, 1) if not l.startswith("#") and l.strip()]
+
+
+def base_char_readings(base):
+    """{(單字, 音節)}：基底裡單字詞的讀音。"""
+    return {(w, syls[0]) for syls, ws in base.by_reading.items() if len(syls) == 1 for w, _ in ws}
+
+
+def _toneless(syl):
+    return re.sub("[ˊˇˋ˙]", "", syl)
+
+
+def creator_rows(sources, taken, scores, chars, names_readings=frozenset(), skip=frozenset()):
+    """sources：[(來源檔路徑, 標籤)]，依序 creator、store。每個檔：詞、讀音（音節以空白分隔）、備註，可選第四欄「加分」（一個數字，加到這一列的分數；
+    維護者 2026-10-25：店名輸給沒人這樣講的組合時提高名單加分，見 names-stores.md §2）；# 開頭與空行略過 → (names-add.tsv 的列, names-sources.tsv 的列, 被擋的列)，
+    列的順序是檔案順序（先 creator 檔再 store 檔）。每列：三欄；詞是 2–10 個漢字、字數在 scores 裡、不在 taken（基底、疊加層、名單其他列、詞包、前面的列）；
+    讀音的音節數等於字數、每個音節都是基底裡那個字（chars）的讀音。不符就中止並指出行號；(詞, 讀音) 重複也中止；同一個詞可以有不同讀音的好幾列。
+    被擋（印出、不中止）：詞在 skip（迷因詞包）；讀音等於名字層既有列（names_readings，讀音以 - 連接）的讀音；store 的讀音等於 creator 列的讀音（creator 已出貨）。
+    同標籤內、同讀音的名字照檔案順序排（檔案已照 PTT 文章數排好；names-creators.tsv 的峰哥／風哥是人工調過的，不能改成依數字重排），分數＝scores[字數]，第 k 個（k 從 0 起）再扣 k × SLANG_BEHIND。
+    被擋列是 (字串, 讀音, 對手, 原因)。"""
+    rows, taken, pairs = [], set(taken), set()
+    toneless = {(c, _toneless(s)) for c, s in chars}
+    blocked = []
+    creator_readings = {}                                   # 讀音鍵 → 第一個留下的 creator 詞
+    words_by_tag = {}
+    other_tag = {STORE: words_by_tag.setdefault(CREATOR, set()), CREATOR: words_by_tag.setdefault(STORE, set())}   # 同一個詞不跨標籤（只有同標籤可換讀音）
+    for path, tag in sources:
+        cand = []
+        for n, line in creator_lines(path):
+            fields = line.split("\t")
+            ok = len(fields) in (3, 4)
+            boost = 0.0
+            if ok and len(fields) == 4:
+                try:
+                    boost = float(fields[3])
+                except ValueError:
+                    ok = False
+                ok = ok and math.isfinite(boost) and boost >= 0
+            if ok:
+                w, reading, note = fields[:3]
+                syls = reading.split(" ")
+                ok = bool(bap.HAN.fullmatch(w)) and len(w) in scores and len(syls) == len(w) and (w, reading) not in pairs and (w not in taken or any(p[0] == w for p in pairs) and w not in other_tag.get(tag, ())) \
+                    and all((c, s) in chars or (s.endswith("˙") and (c, _toneless(s)) in toneless) for c, s in zip(w, syls))     # 輕聲：基底有這個字的同音節（任何聲調）就算
+            if not ok:
+                raise SystemExit(f"{path}:{n}: bad {tag} row (need word, reading, note[, finite boost >= 0]; Han word not already in a lexicon layer, same word only with a different reading; one syllable that is a reading of its character): {line!r}")
+            pairs.add((w, reading))
+            words_by_tag.setdefault(tag, set()).add(w)
+            key = "-".join(syls)
+            if w in skip:
+                blocked.append((w, reading, "meme-add.tsv", "already in the meme pack"))
+            elif key in names_readings:
+                blocked.append((w, reading, names_readings[key], "same reading as a names-layer row"))
+            elif tag == STORE and key in creator_readings:
+                blocked.append((w, reading, creator_readings[key], "same reading as a creator row"))
+            else:
+                cand.append((w, key, syls, note, boost))
+        count = {}
+        for w, key, syls, note, boost in cand:
+            rank = count[key] = count.get(key, -1) + 1
+            if boost and rank:
+                raise SystemExit(f"{path}: {w!r} has a boost but is behind another row of the same reading (rank {rank}); a boost only goes on the first")
+            if tag == CREATOR and rank == 0:
+                creator_readings[key] = w
+            rows.append((tag, w, syls, note, round(scores[len(w)] + boost - rank * SLANG_BEHIND, 8), w not in taken))
+            taken.add(w)
+    add, srcs = [], []
+    for tag, w, syls, note, score, first in rows:
+        add += bo.overlay_rows(w, syls, score, tag)
+        if first:
+            srcs.append(f"{w}\t{tag}\t{note}\t\t\n")
+    return add, srcs, blocked
+
+
+def append_creators(lex_dir=LEX, creators=CREATORS, acg_add=ACG_ADD, it_add=bo.IT_PACK, base=None, scores=None, stores=STORES, meme_add=MEME_ADD):
+    """契約 §2 的追加模式：lex_dir 裡的 names-add.tsv／names-sources.tsv 去掉 creator 與 store 列後逐位元組保留，檔尾接 creators（標籤 creator）再接 stores（標籤 store）的列，
+    names.json 跟著改（sources 分別計兩種標籤）；重跑是換掉舊的這兩種列。某一個來源檔不存在或沒有列，就不產生那種標籤的列；兩個都沒有時什麼都不碰（舊的列也留著）。
+    被擋的列（見 creator_rows）印到 stderr。"""
+    if not (creator_lines(creators) or creator_lines(stores)):
+        return 0
+    path = lambda n: os.path.join(lex_dir, n)
+
+    def read(n):
+        with open(path(n), encoding="utf-8", newline="") as f:
+            return f.read()
+    mine = (CREATOR, STORE)
+    add, srcs = _lines(read("names-add.tsv")), _lines(read("names-sources.tsv"))
+    add = [l for l in add if l.split("\t")[3].rstrip("\n") not in mine]
+    srcs = [l for l in srcs if l.split("\t")[1] not in mine]
+    base = base or (bap.base_lexicon() if lex_dir == LEX else ime.Lexicon(path("mcbpmf-data.txt")))
+    if scores is None:
+        scores = {n: round(v + NAMES_BONUS, 8) for n, v in bap.scores(base).items()}
+    meme = file_words(meme_add)
+    taken = known_words(lex_dir, acg_add, meme_add) - meme | bo.pack_words(it_add) | {l.split("\t")[1] for l in add}
+    names_readings = {}
+    for l in add:
+        names_readings.setdefault(l.split("\t")[0], l.split("\t")[1])
+    new_add, new_srcs, blocked = creator_rows([(creators, CREATOR), (stores, STORE)], taken, scores, base_char_readings(base), names_readings, meme)
+    for b in blocked:
+        print("blocked (string, reading, rival, reason): " + "\t".join(b), file=sys.stderr)
+    out = {"names-add.tsv": "".join(add + new_add), "names-sources.tsv": "".join(srcs + new_srcs)}
+    got = {t: len({r.split("\t")[1] for r in new_add if r.split("\t")[3].rstrip("\n") == t}) for t in mine}
+    manifest = json.loads(read("names.json"))
+    old = {t: manifest["sources"].pop(t, 0) for t in mine}
+    if sum(old.values()) or sum(got.values()):      # 追加前後都沒有這兩種列時 names.json 原樣不動
+        manifest["sources"].update({t: n for t, n in got.items() if n})
+        manifest["words"] += sum(got.values()) - sum(old.values())
+        manifest["rows"] = out["names-add.tsv"].count("\n")
+        manifest["files"] = dict(manifest["files"], **{k: {"sha256": hashlib.sha256(t.encode()).hexdigest(), "bytes": len(t.encode()), "lines": t.count("\n")} for k, t in out.items()})
+        manifest["version"] = manifest["version"].rsplit("-", 1)[0] + "-" + manifest["files"]["names-add.tsv"]["sha256"][:8]
+        out["names.json"] = json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+    for name, text in out.items():
+        if text != read(name):          # 沒有變的檔不碰
+            with open(path(name) + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            os.replace(path(name) + ".tmp", path(name))
+    return sum(got.values())
 
 
 # ---------------------------------------------------------------- 主流程
@@ -554,7 +701,11 @@ def main():
     ap.add_argument("--offline", action="store_true")
     ap.add_argument("--nsi-commit", default=NSI_COMMIT)
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--append-creators", action="store_true")
     a = ap.parse_args()
+    if a.append_creators:
+        print(f"{append_creators()} creator and store words in names-add.tsv")
+        return
     if a.check:
         check_committed()
         print("names-add.tsv shares no word with the other four lexicon files")
@@ -564,6 +715,11 @@ def main():
     urllib.request.install_opener(urllib.request.build_opener(_Redirect(a.nsi_commit)))
     files, manifest, col, unread, ldrop, check = build(NamesApi(a.cache, a.offline, a.nsi_commit), a.nsi_commit)
     write_all(files, manifest, a.out)
+    if creator_lines(CREATORS) or creator_lines(STORES):         # 重建 = 重建 + 追加：不讓 creator、store 列在重建時消失
+        if os.path.abspath(a.out) == os.path.abspath(LEX):
+            print(f"{append_creators(a.out)} creator and store words appended")
+        else:                           # append_creators reads the base and layers from its lex_dir: another --out has none of them
+            print(f"NOTE: --out {a.out} is not {LEX}: creator and store rows NOT appended; run --append-creators on the real lexicon directory")
     os.makedirs(a.report, exist_ok=True)
     for name, text in (("collisions.txt", collisions_text(col, ldrop)), ("unreadable.txt", "".join(w + "\n" for w in unread)), ("check-readings.txt", "".join(check))):
         with open(os.path.join(a.report, name), "w", encoding="utf-8") as f:

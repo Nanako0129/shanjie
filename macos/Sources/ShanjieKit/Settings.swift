@@ -24,10 +24,18 @@ public final class SettingsModel: ObservableObject {
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
+    /// The 模糊輸入 flags (fuzzy-input section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key slips, as
+    /// `shanjie_engine_set_fuzzy`. `fuzzyAdjacentEnabled` is false in the Eten layout, which greys the adjacent-key checkbox (the
+    /// value is kept).
+    @Published public private(set) var fuzzyFlags: UInt32 = 0
+    @Published public private(set) var fuzzyAdjacentEnabled = true
     /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
     /// enabled and on.
     @Published public private(set) var englishInline = true
     @Published public private(set) var englishInlineEnabled = false
+    /// The 依按鍵順序判斷英文 choice under them (zhen-keyorder section 3), default false; enabled on the display choice's condition.
+    @Published public private(set) var englishKeyOrder = false
+    @Published public private(set) var englishKeyOrderEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).
     @Published public private(set) var spacing = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
@@ -45,6 +53,7 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var acgPack = true
     /// 經典台詞 (quote-pack contract section 2): off until chosen.
     @Published public private(set) var quotePack = false
+    @Published public private(set) var itPack = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
@@ -86,8 +95,12 @@ public final class SettingsModel: ObservableObject {
         spacing = shell.spacingOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
+        fuzzyFlags = shell.fuzzyFlags
+        fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
         englishInline = shell.englishInlineOn
         englishInlineEnabled = shell.englishInlineEnabled
+        englishKeyOrder = shell.englishKeyOrderOn
+        englishKeyOrderEnabled = shell.englishKeyOrderEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
@@ -95,6 +108,7 @@ public final class SettingsModel: ObservableObject {
         rerankLevelEnabled = shell.rerankLevelEnabled
         acgPack = shell.acgPackOn
         quotePack = shell.quotePackOn
+        itPack = shell.itPackOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
         profileMode = shell.profileMode
@@ -114,12 +128,19 @@ public final class SettingsModel: ObservableObject {
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
     public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
+    /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips).
+    public func setFuzzy(bit: Int, _ on: Bool) {
+        precondition((0..<5).contains(bit))
+        shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
+    }
     public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
+    public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
     public func setQuotePack(_ on: Bool) { shell.setQuotePack(on) }
+    public func setItPack(_ on: Bool) { shell.setItPack(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
         refreshExternal()  // not read on the change notification

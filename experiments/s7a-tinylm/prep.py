@@ -8,12 +8,25 @@
           Colloquial: build_counts_text.lines() of colloquial-train.txt then synth.txt, convert, HAN, length >= 2.
 `encode`: vocabulary (characters seen >= min-count times in the training text; other characters are UNK), DIR/vocab.txt, and
           DIR/ids-{wiki,coll}.npy: uint16, every run preceded by BOS.
-`text`  : (S7f) python prep.py text --work DIR --in FILE --name chat
+`text`  : (S7f) python prep.py text --work DIR --in FILE --name chat [--half] [--runs-only]
           one more text file through the colloquial path (text_runs: convert, HAN, length >= 2) into DIR/runs-<name>.txt and
           DIR/ids-<name>.npy with the EXISTING DIR/vocab.txt (no vocabulary rebuild); DIR/text-<name>.json has the counts and hashes.
+          --half (SJ-SR-7 arm R-half, contract sj-lm-7 section 2.7): keep only the sentences whose SHA-256(UTF-8) first byte is < 128. The
+          sentence is the INPUT LINE as read: without its trailing newline, before any conversion, and for a path containing ".tsv" only its
+          last tab-separated field (the unit column is dropped, the same rule as build_counts_text.lines). All Han runs of a kept line
+          are written, all runs of a dropped line are dropped, so one line is never split between the halves. Deterministic, no seed.
+          (The Han runs themselves are still taken from the whole line, as without --half.)
+          --runs-only: write runs-<name>.txt and text-<name>.json only (no vocab.txt needed), for the new-corpus vocabulary below.
+`encode --extra NAME ...` (SJ-SR-7, section 2.7): the vocabulary is counted over runs-wiki + runs-coll + each DIR/runs-<NAME>.txt (from
+          `text --runs-only`), every file ONCE (never multiplied by its epoch weight, as the x5 colloquial pool is not), then each
+          DIR/ids-<NAME>.npy is encoded with that vocabulary. Without --extra the vocab.txt, ids-wiki/coll.npy and encode-report.json are
+          byte-identical to before. encode also writes DIR/ids-vocab.json (vocab and ids hashes, the extra set); it refuses to run over a
+          vocab.txt made from a different extra set (a work dir without that file counts as "no extras") unless --force, and rejects the
+          names wiki, coll and duplicates. train.py checks these hashes (check_vocab) before it trains.
 """
 import argparse
 import collections
+import contextlib
 import hashlib
 import json
 import multiprocessing as mp
@@ -172,9 +185,69 @@ def encode_file(path, lut, block=1 << 26):
     return np.concatenate(parts) if parts else np.zeros(0, dtype=np.uint16)
 
 
+VOCAB_RECORD = "ids-vocab.json"
+
+
+def recorded_extra(work):
+    """The extra set the vocab.txt in `work` was made from: the list in ids-vocab.json; [] when only vocab.txt exists (made before the record
+    existed, so without extras); None when there is no vocab.txt at all."""
+    rec = os.path.join(work, VOCAB_RECORD)
+    if os.path.isfile(rec):
+        return json.load(open(rec, encoding="utf-8"))["extra"]
+    return [] if os.path.isfile(os.path.join(work, "vocab.txt")) else None
+
+
+def check_vocab(work, extra_paths):
+    """train.py's guard: every ids file it will read was encoded with the vocab.txt in `work`. Stops (SystemExit) otherwise.
+    ids-wiki/coll: the hashes ids-vocab.json recorded at encode time (a work dir made before that file existed is accepted only
+    without extras). Each extra ids-<name>.npy: the vocab_sha256 and ids_sha256 in its text-<name>.json (prep.py encode --extra / text)."""
+    vh = sha256_file(os.path.join(work, "vocab.txt"))
+    rec = os.path.join(work, VOCAB_RECORD)
+    if os.path.isfile(rec):
+        r = json.load(open(rec, encoding="utf-8"))
+        if r["vocab_sha256"] != vh:
+            die(f"{work}/vocab.txt changed after prep.py encode (hash {vh}, recorded {r['vocab_sha256']}); run encode again")
+        for n in ("wiki", "coll"):
+            if sha256_file(os.path.join(work, f"ids-{n}.npy")) != r["ids_sha256"][n]:
+                die(f"{work}/ids-{n}.npy is not the file prep.py encode wrote with this vocab.txt; run encode again")
+    elif extra_paths:
+        die(f"{rec} is missing: ids-wiki/coll cannot be tied to vocab.txt; run prep.py encode --extra ... in this work dir")
+    for p in extra_paths:
+        d, base = os.path.split(p)
+        if not (base.startswith("ids-") and base.endswith(".npy")):
+            die(f"--extra {p}: expected a file named ids-<name>.npy")
+        tj = os.path.join(d, f"text-{base[4:-4]}.json")
+        if not os.path.isfile(tj):
+            die(f"--extra {p}: {tj} is missing (made by prep.py text / encode --extra), cannot check its vocabulary")
+        t = json.load(open(tj, encoding="utf-8"))
+        if t.get("vocab_sha256") != vh:
+            die(f"--extra {p} was encoded with a different vocab.txt (recorded {t.get('vocab_sha256')}, {work}/vocab.txt is {vh})")
+        if t.get("ids_sha256") != sha256_file(p):
+            die(f"--extra {p} does not match the ids_sha256 in {tj}")
+
+
 def cmd_encode(a):
+    names = list(a.extra)
+    for n in names:
+        if n in ("wiki", "coll"):
+            die(f"--extra {n}: would overwrite the S7a training ids")
+        if not os.path.isfile(os.path.join(a.work, f"runs-{n}.txt")):
+            die(f"--extra {n}: {a.work}/runs-{n}.txt is missing (prep.py text --runs-only --name {n})")
+    if len(set(names)) != len(names):
+        die(f"--extra has a duplicate name: {names}")
+    prev = recorded_extra(a.work)
+    if prev is not None and sorted(prev) != sorted(names) and not a.force:
+        die(f"{a.work}/vocab.txt was made with extras {sorted(prev)}, this run has {sorted(names)}: it would overwrite that vocabulary and "
+            f"ids (another arm's files); use a separate work dir, or --force")
+    if os.path.isfile(os.path.join(a.work, VOCAB_RECORD)):
+        os.remove(os.path.join(a.work, VOCAB_RECORD))     # re-written last: a crash in between leaves no record that looks valid
     cc = json.load(open(os.path.join(a.work, "charcount.json"), encoding="utf-8"))
-    chars = make_vocab(cc["charcount"], a.min_count)
+    count = collections.Counter(cc["charcount"])
+    for name in a.extra:                                   # each extra file once, not by its epoch weight
+        with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
+            for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
+                count.update(block.replace("\n", ""))
+    chars = make_vocab(count, a.min_count)
     open(os.path.join(a.work, "vocab.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(chars) + "\n")
     lut = make_lut(chars)
     rep = {"vocab_size": len(chars) + 3, "min_count": a.min_count}
@@ -182,38 +255,100 @@ def cmd_encode(a):
         ids = encode_file(os.path.join(a.work, f"runs-{name}.txt"), lut)
         np.save(os.path.join(a.work, f"ids-{name}.npy"), ids)
         rep[name] = {"tokens": int(len(ids)), "runs": int((ids == BOS).sum()), "unk_fraction": float((ids == UNK).sum() / max(1, len(ids) - (ids == BOS).sum()))}
+    if a.extra:
+        rep["extra"] = {}
+        for name in a.extra:
+            r = write_ids(a.work, name, lut)
+            rep["extra"][name] = {k: r[k] for k in ("tokens", "runs", "unk_fraction")}
     json.dump(rep, open(os.path.join(a.work, "encode-report.json"), "w"), indent=1)
+    json.dump({"vocab_sha256": sha256_file(os.path.join(a.work, "vocab.txt")), "extra": sorted(names),
+               "ids_sha256": {n: sha256_file(os.path.join(a.work, f"ids-{n}.npy")) for n in ("wiki", "coll")}},
+              open(os.path.join(a.work, VOCAB_RECORD), "w"), indent=1)
     print(json.dumps(rep, indent=1))
 
 
-def encode_extra(src, work, name, conv, guard=None):
-    """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with DIR/vocab.txt. Returns the report dict."""
-    if name in ("wiki", "coll"):
-        die(f"--name {name} would overwrite the S7a training ids")
-    lut = make_lut(load_vocab(work))
-    runs_path, ids_path = os.path.join(work, f"runs-{name}.txt"), os.path.join(work, f"ids-{name}.npy")
-    n_lines = skipped = 0
-    with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out:
-        for line in f:
-            n_lines += 1
-            for run in text_runs(line.rstrip("\n"), conv):
-                if guard is not None and guard.any(bc.fold(run)):
-                    skipped += 1
-                    continue
-                out.write(run + "\n")
-    ids = encode_file(runs_path, lut)
-    np.save(ids_path, ids)
-    rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "tokens": int(len(ids)), "runs": int((ids == BOS).sum()),
-           "unk_fraction": float((ids == UNK).sum() / max(1, len(ids) - (ids == BOS).sum())),
-           "vocab_sha256": sha256_file(os.path.join(work, "vocab.txt")), "runs_sha256": sha256_file(runs_path), "ids_sha256": sha256_file(ids_path)}
-    if guard is not None:
-        rep["holdout_guard_skipped_runs"] = skipped
-    json.dump(rep, open(os.path.join(work, f"text-{name}.json"), "w"), indent=1)
+def half_keep(sentence):
+    """The R-half rule: SHA-256 of the sentence's UTF-8, first byte < 128 (about half of all sentences)."""
+    return hashlib.sha256(sentence.encode("utf-8")).digest()[0] < 128
+
+
+TEXT_KEYS = ["input", "input_sha256", "lines", "tokens", "runs", "unk_fraction", "vocab_sha256", "runs_sha256", "ids_sha256",
+             "holdout_guard_skipped_runs", "half_dropped_runs"]   # text-<name>.json key order; the first ten are the pre-SJ-SR-7 order
+
+
+def dump_text_report(path, rep):
+    rep = {k: rep[k] for k in TEXT_KEYS if k in rep}
+    json.dump(rep, open(path, "w"), indent=1)
     return rep
 
 
+def _text_batch(lines, conv, guard, half, tsv):
+    """write_runs on one batch of input lines (trailing newline removed): (the kept runs, each + "\\n"; lines; guard-skipped runs; half-dropped runs)."""
+    out, skipped, dropped = [], 0, 0
+    for line in lines:
+        if half and not half_keep(line.split("\t")[-1] if tsv else line):
+            dropped += sum(1 for _ in text_runs(line, conv))
+            continue
+        for run in text_runs(line, conv):
+            if guard is not None and guard.any(bc.fold(run)):
+                skipped += 1
+                continue
+            out.append(run + "\n")
+    return "".join(out), len(lines), skipped, dropped
+
+
+def _text_work(args):
+    return _text_batch(args[0], _CONV, _GUARD, *args[1:])
+
+
+def write_runs(src, work, name, conv, guard=None, half=False, procs=1):
+    """src -> DIR/runs-<name>.txt (one Han run per line) and DIR/text-<name>.json. Returns the report dict.
+    half: keep a whole input line (all its runs) iff half_keep(its sentence); the sentence is the line without the trailing newline,
+    before conversion, and for a ".tsv" path only the last tab-separated field. One line is never split.
+    procs > 1: batches of 2,000 lines in a Pool whose workers load bc.load_conv() (as `runs` does; `conv` is then unused); imap keeps the
+    order, so the files are the same as with procs=1."""
+    if name in ("wiki", "coll"):
+        die(f"--name {name} would overwrite the S7a training ids")
+    runs_path = os.path.join(work, f"runs-{name}.txt")
+    tsv = ".tsv" in src
+    n_lines = skipped = dropped = 0
+    with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out, \
+            (mp.Pool(procs, initializer=_init, initargs=(guard,)) if procs > 1 else contextlib.nullcontext()) as pool:
+        jobs = ((b, half, tsv) for b in bc.batches((line.rstrip("\n") for line in f), 2000))
+        for text, n, sk, dr in (pool.imap(_text_work, jobs) if pool else (_text_batch(b, conv, guard, h, t) for b, h, t in jobs)):
+            out.write(text)
+            n_lines += n; skipped += sk; dropped += dr
+    rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "runs_sha256": sha256_file(runs_path)}
+    if guard is not None:
+        rep["holdout_guard_skipped_runs"] = skipped
+    if half:
+        rep["half_dropped_runs"] = dropped    # Han runs of the dropped lines
+    return dump_text_report(os.path.join(work, f"text-{name}.json"), rep)
+
+
+def write_ids(work, name, lut):
+    """DIR/runs-<name>.txt -> DIR/ids-<name>.npy with DIR/vocab.txt; adds the token counts and hashes to DIR/text-<name>.json. Returns that report."""
+    runs_path, ids_path = os.path.join(work, f"runs-{name}.txt"), os.path.join(work, f"ids-{name}.npy")
+    ids = encode_file(runs_path, lut)
+    np.save(ids_path, ids)
+    rj = os.path.join(work, f"text-{name}.json")
+    rep = json.load(open(rj)) if os.path.isfile(rj) else {}
+    rep.update({"tokens": int(len(ids)), "runs": int((ids == BOS).sum()),
+                "unk_fraction": float((ids == UNK).sum() / max(1, len(ids) - (ids == BOS).sum())),
+                "vocab_sha256": sha256_file(os.path.join(work, "vocab.txt")), "runs_sha256": sha256_file(runs_path), "ids_sha256": sha256_file(ids_path)})
+    return dump_text_report(rj, rep)
+
+
+def encode_extra(src, work, name, conv, guard=None, half=False, procs=1):
+    """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with the existing DIR/vocab.txt. Returns the report dict."""
+    write_runs(src, work, name, conv, guard, half, procs)
+    return write_ids(work, name, make_lut(load_vocab(work)))
+
+
 def cmd_text(a):
-    print(json.dumps(encode_extra(a.input, a.work, a.name, bc.load_conv(), bc.guard_matcher(a.holdout_guard)), indent=1))
+    conv, guard = bc.load_conv(), bc.guard_matcher(a.holdout_guard)
+    print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half, a.procs) if a.runs_only
+                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs), indent=1))
 
 
 def load_vocab(work):
@@ -228,8 +363,13 @@ def main(argv=None):
     r.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS"); r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     e = sub.add_parser("encode")
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
+    e.add_argument("--force", action="store_true", help="encode over a vocab.txt made from a different --extra set (overwrites that arm's vocabulary and ids)")
+    e.add_argument("--extra", nargs="*", default=[], metavar="NAME", help="NAMEs of DIR/runs-<NAME>.txt (prep.py text --runs-only) counted into the vocabulary once each and encoded")
     t = sub.add_parser("text")
     t.add_argument("--work", required=True); t.add_argument("--in", dest="input", required=True); t.add_argument("--name", required=True)
+    t.add_argument("--half", action="store_true", help="keep only runs whose SHA-256 first byte is < 128 (SJ-SR-7 arm R-half)")
+    t.add_argument("--runs-only", action="store_true", help="write runs-<name>.txt only; encode later with `encode --extra`")
+    t.add_argument("--procs", type=int, default=1, help="worker processes for the conversion (the output is the same for any value)")
     t.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="default off: runs containing a held-out sentence are not written (docs/contracts/holdout-refresh.md section 8)")
     a = ap.parse_args(argv)
     {"runs": cmd_runs, "encode": cmd_encode, "text": cmd_text}[a.cmd](a)

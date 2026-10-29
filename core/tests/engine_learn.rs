@@ -68,7 +68,7 @@ fn loaded_engine() -> Engine {
 fn shared_profile_check(e: &mut Engine) {
     use_test_profile(e);
     if std::env::var("SHANJIE_TEST_PROFILE").is_ok() {
-        assert!(shared().lm.scoring(lm::Profile::Formal).tri, "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
+        assert!(shared().lm.uses_tri(shared().lm.scoring(lm::Profile::Formal)), "SHANJIE_TEST_PROFILE=formal needs data/lm/trigram.sjt3 (trigram table missing)");
     }
 }
 /// Production lexicon + model, learning on, fixed clock (day 20000).
@@ -857,12 +857,13 @@ fn row_decode_failure_does_not_learn() {
     }
     assert!(failed, "decode failure reported");
     // The engine was reset: ㄅㄣ decodes as on an engine that never failed. Until model-v6 that was 犇; with model-v6 and its
-    // Kneser-Ney side file the unlearned decode is 奔 (model-v6 section 2.8 acceptance 5), so the expectation comes from a fresh engine.
+    // Kneser-Ney side file the unlearned decode was 奔 (model-v6 section 2.8 acceptance 5), with the 通語 SJ-LM-7-9.7M files it is 犇 again, so the
+    // expectation comes from a fresh engine.
     let fresh = {
         let mut f = tiny(&format!("{TINY}ㄆㄧㄥˊ 平 -1.0\n"), TINY);
         type_syls(&mut f, "ㄅㄣ").preedit
     };
-    assert_eq!(fresh, "奔", "premise: the unlearned decode of ㄅㄣ on model-v6 with KN");
+    assert_eq!(fresh, "犇", "premise: the unlearned decode of ㄅㄣ on the 通語 SJ-LM-7-9.7M files");
     assert_eq!(type_syls(&mut e, "ㄅㄣ").preedit, fresh, "engine was reset");
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(n_records(&e), 0);
@@ -1132,7 +1133,7 @@ fn store_failed_rewrite_then_forget_never_brings_the_word_back() {
     assert_eq!(e.learning_status(), 1, "the forget's rewrite failed");
     // 2. another learning Enter: no append, the file is unchanged byte for byte, bit0 stays
     let before = std::fs::read(file_of(&dir)).unwrap();
-    assert_eq!(repick(&mut e, "ㄅㄣ"), "奔");
+    assert_eq!(repick(&mut e, "ㄅㄣ"), "犇");
     assert_eq!(std::fs::read(file_of(&dir)).unwrap(), before, "nothing appended while a rewrite is owed");
     assert_eq!(e.learning_status(), 1);
     // 3. the obstacle goes; a learning Enter (not a forget) rewrites and clears bit0
@@ -1245,15 +1246,15 @@ fn store_torn_tail_is_skipped_and_never_glued() {
     let mut e = tiny(TINY, TINY);
     e.learning_open(&dir).unwrap();
     assert_eq!(repick(&mut e, "ㄒㄧㄣ"), "欣");
-    assert_eq!(repick(&mut e, "ㄅㄣ"), "奔"); // appended: the last line is ^ ㄅㄣ 奔 ...
+    assert_eq!(repick(&mut e, "ㄅㄣ"), "犇"); // appended: the last line is ^ ㄅㄣ 犇 ...
     let text = raw(&dir);
     let last = text.trim_end_matches('\n').rfind('\n').unwrap() + 1;
     let word_at = last + text[last..].match_indices('\t').nth(1).unwrap().0 + 1;
-    assert!(text[word_at..].starts_with("奔"));
-    std::fs::write(file_of(&dir), &text.as_bytes()[..word_at + 1]).unwrap(); // half of 奔's bytes
+    assert!(text[word_at..].starts_with("犇"));
+    std::fs::write(file_of(&dir), &text.as_bytes()[..word_at + 1]).unwrap(); // half of 犇's bytes
     let (mut e2, opened) = reopen(&dir);
     assert_eq!(opened, Opened::Loaded { skipped: 1 });
-    assert!(e2.learner().records().iter().all(|r| r.word != "奔") && n_records(&e2) == 1);
+    assert!(e2.learner().records().iter().all(|r| r.word != "犇") && n_records(&e2) == 1);
     repick(&mut e2, "ㄅㄣ");
     let (e3, opened) = reopen(&dir);
     assert_eq!(opened, Opened::Loaded { skipped: 0 }, "no glued or broken line");
@@ -2123,20 +2124,20 @@ fn records_of(e: &Engine, word: &str) -> Vec<(String, f64)> {
     e.learner().records().iter().filter(|r| r.word == word).map(|r| (r.context.clone(), r.weight)).collect()
 }
 
-/// Learn.after, the right neighbour is a fixed word: the segment 0..2 ends where the fixed 買 starts, so the key of
-/// 我試 there is `^>ㄇㄞˇ` only if the engine passes the syllable right of the segment (B4 of the verifier's probes).
+/// Learn.after, the right neighbour is a fixed word: the segment 0..2 ends where the fixed 資 starts, so the key of
+/// 輩份 there is `^>ㄗ` only if the engine passes the syllable right of the segment (B4 of the verifier's probes).
 #[test]
 fn rule8_after_is_the_first_syllable_of_a_fixed_word_to_the_right() {
-    const R: &str = "ㄨㄛˇ ㄕˋ ㄇㄞˇ";
-    assert_eq!(baseline(R), "我是買", "precondition");
+    const R: &str = "ㄅㄟˋ ㄈㄣˋ ㄗ"; // 我是買 / 我試 / ㄇㄞˇ until 通語 SJ-LM-7-9.7M, whose model keeps 我是 against one teaching; found 2026-10-27 by trying the dev302 syllable triples
+    assert_eq!(baseline(R), "備份資", "precondition");
     let mut e = engine();
-    assert_eq!(repick_commit(&mut e, R, 2, "我試"), "我試買");
-    assert_eq!(records_of(&e, "我試"), [("^>ㄇㄞˇ".to_string(), 1.0)], "precondition: taught under the next syllable");
-    // the free syllables 0..2 now end at a fixed 買: the only way to reach ^>ㄇㄞˇ is `after`
+    assert_eq!(repick_commit(&mut e, R, 2, "輩份"), "輩份資");
+    assert_eq!(records_of(&e, "輩份"), [("^>ㄗ".to_string(), 1.0)], "precondition: taught under the next syllable");
+    // the free syllables 0..2 now end at a fixed 資: the only way to reach ^>ㄗ is `after`
     type_syls(&mut e, R);
-    pick(&mut e, 3, 3, "買");
+    pick(&mut e, 3, 3, "資");
     let o = e.key(k(KeyKind::End)).unwrap();
-    assert_eq!(o.preedit, "我試買", "the word before a fixed 買 uses the key ^>ㄇㄞˇ");
+    assert_eq!(o.preedit, "輩份資", "the word before a fixed 資 uses the key ^>ㄗ");
 }
 
 /// Learn.after, the right neighbour is punctuation: the record is under `^>_punct_...` and a fixed punctuation token

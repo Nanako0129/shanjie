@@ -13,7 +13,7 @@
  *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
  *
  * Return codes: 0 success, 1 a required pointer is NULL, 2 invalid input (data_dir or LM path not
- * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range), 3 data load failed
+ * UTF-8, ch not a Unicode scalar, kind / layout / mode / profile / rerank level out of range, fuzzy flags with an undefined bit), 3 data load failed
  * (including an unreadable or malformed LM file, and since S2k a missing or mismatching classes.sjc beside
  * it), 4 internal error (caught panic or decode/encode
  * error; the engine has already been reset in discard mode; exception: shanjie_rerank_run has no engine and
@@ -38,8 +38,11 @@
  *    match the model (magic, size, SHA-256, header values), fails the load with 3, never silently ignored.
  *    When it is present and valid it changes the scoring of every vocabulary word. The shipped app has one (kn-v1,
  *    docs/contracts/model-v6.md).
- *  - It reads an optional trigram.sjt3 (docs/contracts/trigram-core.md) the same way (a bad one fails the load with 3).
- *    A valid one is used by the formal profile only, which then scores without kn.sjkn.
+ *  - It reads two optional trigram tables (docs/contracts/trigram-core.md, docs/contracts/sj-lm-7-pr2.md) the same way:
+ *    trigram.sjt3 is the formal profile's and trigram-chat.sjt3 the chat profile's (a bad one of either fails the load with 3,
+ *    for both profiles; a missing one only turns that profile's trigram level off). Each profile scores with its own table
+ *    and with kn.sjkn: the chat profile with the side file's beta, the formal profile with beta 0.75 (FORMAL_KN_BETA in
+ *    core/src/lm.rs) whatever beta the file records. The prediction row and the digit scores use the profile's beta too and never a trigram table.
  *    The file is memory-mapped (docs/contracts/trigram-mmap.md): while an engine has it loaded it must not be truncated or
  *    rewritten in place (a truncated page is a SIGBUS); replace it by rename, as the install paths do.
  *  - data_dir must hold names-add.tsv (the always-on common proper nouns, model-v6 section 2.5) next to overlay-add.tsv and
@@ -87,13 +90,16 @@ typedef struct ShanjieEngine ShanjieEngine;
 int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine **out); // layout 0 standard, 1 ETen
 #define SHANJIE_PACK_ACG 1u     // bit0 of the packs mask below
 #define SHANJIE_PACK_QUOTES 2u  // bit1: the classic quote pack (docs/contracts/quote-pack.md section 2)
+#define SHANJIE_PACK_IT  4u     // bit2: the IT+AI pack, docs/contracts/it-pack.md section 3.1
 // acg-pack (docs/contracts/acg-pack.md A.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv;
-//   SHANJIE_PACK_QUOTES = classic quotes, packs_dir/quotes-add.tsv; the files are read in that order, the same rules for both);
+//   SHANJIE_PACK_QUOTES = classic quotes, packs_dir/quotes-add.tsv; SHANJIE_PACK_IT = IT+AI, packs_dir/it-add.tsv; the files are read
+//   in that order (ACG, quotes, IT), the bits combine);
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
 //   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
-//   2 for a bit outside the mask (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES) or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
-//   be read or parsed. The pack's words are capped like overlay-add.tsv's when the LM is loaded.
+//   2 for a bit outside the mask (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT) or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
+//   be read or parsed. The anime pack's words keep the pack file's score (not capped) and are unknown to the LM when decoding (pack-oov);
+//   the quote pack's and the IT+AI pack's words are capped at their corpus frequency like the overlay.
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);
@@ -207,6 +213,25 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   0 shows the Zhuyin until the English window opens. The snapshot shows a composition on screen in the new display. Call it
 //   after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// fuzzy input (docs/contracts/fuzzy-input.md): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
+//   and bit 4 the adjacent-key slips; any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
+//   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
+//   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score); the
+//   rerank never chooses such a word: a stretch whose n-gram first has one is not reranked, the others offer the model only paths without one.
+//   Bit 4, with a loaded model and the standard layout (it does nothing with the ETen layout), makes a tone key accept a syllable the
+//   lexicon lacks when a key typed as a left or right neighbour in its keyboard row would give a syllable it has; the composition
+//   then shows the word read through that syllable. A syllable already accepted keeps decoding when bit 4 is turned off. The
+//   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
+//   every engine creation, like set_english.
+int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
+// set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_english_inline in its codes and its
+//   snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) the
+//   evidence for English counts a Zhuyin key typed in a column below one that holds a symbol of the unfinished syllable (not a replacing key,
+//   which already counts) as well as a replaced symbol; and a Space can open the English window for a listed word whose syllable
+//   does not exist, and for one of the two-letter words of the core's TWO_LETTER (ok, ls, cd ...; each can have evidence) with one piece of evidence. With 0
+//   the engine is the one without this function, bit for bit. Turning it off closes an open English window, whatever opened it, which clears the shadow
+//   (the unfinished syllable stays); with no window open nothing changes. Call it after every engine creation, like set_english_inline.
+int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // s3e (docs/contracts/s3e-punctuation-candidates.md): punctuation alternatives, UTF-8 lines
 // "mark\talt\talt...", blank lines ignored, a repeated mark overrides; at most 64 KB / 1,000 lines.
 // 2 on any invalid input, keeping the previous table (a built-in default until the first success).
@@ -214,9 +239,13 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // S4 (docs/contracts/s4-learning.md): learning from candidate-window re-picks. Every function returns 1
 // when engine (or a required pointer) is NULL. None of them changes the current display, except that
 // learning_clear and a forget may re-decode on the next key.
-// set_left_context: copies the text before the insertion point; only its last <= 2 consecutive Han
-//   characters are kept (S4 section 1.1). NULL or "" means none. Not UTF-8: returns 2 and clears.
-//   Cleared by the core after every commit, reset and code 4; call it at every composition start.
+// set_left_context: copies the text before the insertion point: the raw text of the same message, at most
+//   64 graphemes (docs/contracts/context-return.md; terminal apps: only the trailing Han characters). The
+//   core uses only its last <= 2 consecutive Han characters for decoding and learning (S4 section 1.1);
+//   besides them it keeps only the declared left-context length of the small model (SJTL0005), or else the
+//   trailing English word, for the small model and the English table, never returned or written. NULL
+//   or "" means none. Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
+//   code 4 and rule 22 pass-through; call it at every composition start.
 //   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);
@@ -300,7 +329,9 @@ int32_t shanjie_engine_learning_status(ShanjieEngine *engine, uint32_t *flags);
 //   prediction row, pass-through keys) keep the job valid. A key or pick that decodes a free stretch longer than the window W (the small
 //   model's context minus 3 characters, 61 without a model; rerank on or off) first freezes its head down to W - 16 characters as
 //   frozen words (docs/contracts/composition-cap.md section 1.2), then decodes again: its output and its job are those after the freeze. Commits (ENTER, the auto-commit at 128 tokens, reset) send what is
-//   shown; a job not yet applied is dropped.
+//   shown; a job not yet applied is dropped. When the n-gram's first choice of a stretch holds a word the maintainer added by hand (a `manual`
+//   row of overlay-add.tsv) the rerank only changes it to a candidate that still holds that word on the same syllables
+//   (docs/contracts/sj-lm-7-pr2.md section 2.7).
 // Logging: a job and its result hold candidate text. Never log them, their pointers, or the .sjtl path (the rules at the top).
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;

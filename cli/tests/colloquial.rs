@@ -1,6 +1,6 @@
 //! `--colloquial-core` (docs/contracts/colloquial-term.md sections 2.3 and 3): the CLI applies the term under the engine's four
-//! conditions with the one `TinyLm::rerank_colloquial`, and changes nothing anywhere else. The sentence is row 202 of
-//! eval/bench/suite-v1/dev302.txt, with its context; the real table is data/lm/colloquial.sjlm (fails loudly without it).
+//! conditions with the one `TinyLm::rerank_colloquial`, and changes nothing anywhere else. The sentence is row 25 of
+//! eval/bench/suite-v1/dev302.txt; the real table is data/lm/colloquial.sjlm (fails loudly without it).
 use core::eval::sha256_hex;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -85,16 +85,18 @@ fn same_outputs(a: &Out, b: &Out, what: &str) {
     assert_eq!(untagged(&a.stdout), b.stdout, "{what}: summary line");
 }
 
-fn row202(dir: &Path) -> String {
-    let p = dir.join("row202.txt");
-    let line = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap().lines().nth(201).unwrap().to_string();
-    assert!(line.starts_with("桌子一直在搖|桌腳的螺絲鬆掉了|"), "row 202 of dev302");
+fn row25(dir: &Path) -> String {
+    let p = dir.join("row25.txt");
+    let line = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap().lines().nth(24).unwrap().to_string();
+    assert!(line.starts_with("|執行這個程式|"), "row 25 of dev302");
     std::fs::write(&p, line + "\n").unwrap();
     p.to_string_lossy().into_owned()
 }
 
-/// Without `--colloquial-core` every output is what the CLI wrote before the option existed (hashes taken from the binary before this change:
-/// `--dev 16 --context --packs acg --tinylm data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`, model-v6 files).
+/// Without `--colloquial-core` every output is what the CLI wrote before the option existed (hashes of `--dev 16 --context --packs acg --tinylm
+/// data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`; taken 2026-10-27 on the 通語 SJ-LM-7-9.7M files from the measurement CLI of the
+/// sj-lm-7 selection, which has no colloquial option in this path, run with its research flag `--chat-tri on-kn`, and equal to this binary's;
+/// before that, from the binary that had no option at all, on the model-v6 files).
 // macOS only: the dump and scores carry f64 values that the Linux libm rounds differently in the last bit (the WSL runner skips the existing
 // tests of that kind too); this is the one check against the binary from before the option existed.
 #[cfg(target_os = "macos")]
@@ -103,32 +105,38 @@ fn no_option_is_byte_identical_to_before() {
     let d = tmp("golden");
     let o = full_run(&d, &BASE, &["16"], &[]);
     let h = |s: &str| sha256_hex(s.as_bytes());
-    assert_eq!(h(&o.dump), "7cd2988473895b8df271d8276489349809d2d6f50f761c56f3c96424b298c95a");
-    assert_eq!(h(&o.words), "42152c06fa5c3b55a2e765ed9103128d4c780bfed4ff35e9f192220e3dce2a72");
+    assert_eq!(h(&o.dump), "ea7dac7b34a98ba85be7cab65e0c67cc41331981c127af618a50b12b08b184c7");
+    assert_eq!(h(&o.words), "5c8e89a037daa1056ac9295d95995c8504c70a529272621cc45dcaf312a26bc9");
     assert_eq!(h(&o.rs), "a795b9d2c943e64587906438de9439fc5302cff79341a63684328ba44f9b960b");
-    assert_eq!(h(&o.sc), "b83921b3fdc3b8ea61a4b8f669383901d4308e1b02cb7c0e5d0153da43c50d3a");
-    assert_eq!(h(&o.stdout), "c22805512788cbc3ad46acce4975f9f0202561aa1f5e6a3053c3dd32eadc67a5");
+    // The scores gained a `masked` field in sj-lm-7-pr2.md section 2.7 (empty on every one of these 16 rows); without it they are what they were.
+    assert_eq!(h(&o.sc), "066e26f8d1f6d1e900efa987dd524a005262da404d02d3c6b59ad1519e7b25c1");
+    assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "3762df4df12f06e84754f2d952dde28389a4e838821105db43a04d13fe9fe99e");
+    // The summary line carries the model tags; with the fingerprint entries (new bigram, kn and tinylm hashes) only those 8-character tags changed
+    // (the old hash 03876095… is this line with the old tags put back).
+    assert_eq!(h(&o.stdout), "da55bd37457e24ef2f6c0bd2fe2334d45f84911a37cc30f8584e318b66f72642");
 }
 
-/// The acceptance row: the shipping rerank keeps `羅斯松` (c 0), the term picks `螺絲鬆` (c 4), and the summary line is tagged with the
-/// table's SHA-256 prefix (the files of the two runs are otherwise the same except the choice: the dump is the decoder's order in both).
+/// The acceptance row: the shipping rerank keeps `城市` (c 0; it was row 202, 羅斯松 against 螺絲鬆, until 通語 SJ-LM-7-9.7M, whose n-gram gets that one right), the
+/// term picks `程式` (c 1), and the summary line is tagged with the table's SHA-256 prefix (the files of the two runs are otherwise the same except the
+/// choice: the dump is the decoder's order in both).
 #[test]
-fn the_term_changes_row_202() {
-    let d = tmp("r202");
-    let rows = row202(&d);
-    let (a, b) = (tmp("r202a"), tmp("r202b"));
+fn the_term_changes_row_25() {
+    let d = tmp("r25");
+    let rows = row25(&d);
+    let (a, b) = (tmp("r25a"), tmp("r25b"));
     let ship = full_run(&a, &BASE[..9], &["--rows", &rows], &[]);
     let new = full_run(&b, &BASE[..9], &["--rows", &rows], &["--colloquial-core", TABLE]);
     assert!(ship.sc.contains("\"c\": 0,") && ship.stdout.contains("'top1': 0,"), "{}", ship.sc);
-    assert!(new.sc.contains("\"c\": 4,") && new.stdout.contains("'top1': 1,"), "{}", new.sc);
-    assert!(new.stdout.contains("+colloq:2984eeb5"), "{}", new.stdout);
+    assert!(new.sc.contains("\"c\": 1,") && new.stdout.contains("'top1': 1,"), "{}", new.sc);
+    assert!(new.stdout.contains("+colloq:81c2470d"), "{}", new.stdout);
     assert_eq!(ship.dump, new.dump, "the dump keeps the decoder's order");
     assert_eq!(ship.words, new.words);
     let ll = |s: &str| s[s.find("\"ll\":").unwrap()..].to_string();
     assert_eq!(ll(&ship.sc), ll(&new.sc), "the small model's LLs are the same numbers");
 }
 
-/// The first 60 rows of dev302 and rows 196-230, which hold 202, 218 and 223: the three rows only the term fixes in dev302 (P4d).
+/// The first 60 rows of dev302 and rows 196-230, which hold 202, 218 and 223: the three rows only the term fixed in dev302 under 通語 SJ-LM-6-9.1M (P4d). Rows 25, 36 and
+/// others the term fixes under 通語 SJ-LM-7-9.7M are in the first 60 too; it only has to be a set on which the term changes picks.
 fn rows_with_the_term_rows(dir: &Path) -> String {
     let all = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
     let lines: Vec<&str> = all.lines().collect();
@@ -170,31 +178,32 @@ fn nothing_changes_elsewhere() {
     }
 }
 
-/// Four public rows: 127 and 202 of eval/bench/suite-v1/dev302.txt, 54 and 132 of eval/dev/user-reported.txt.
+/// Four public rows: 25, 119 and 22 of eval/bench/suite-v1/dev302.txt, 19 of eval/dev/user-reported.txt.
 fn level_rows(dir: &Path) -> String {
     let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
     let user = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
     let (dev, user): (Vec<&str>, Vec<&str>) = (dev.lines().collect(), user.lines().collect());
-    let rows = [dev[126], dev[201], user[53], user[131]];
-    assert!(rows[0].starts_with("廟裡有場法會|道士在廟裡設壇作法|") && rows[2].starts_with("|可以準備做|") && rows[3].starts_with("|那要遍歷所有端點的分類"));
+    let rows = [dev[24], dev[118], dev[21], user[18]];
+    assert!(rows[0].starts_with("|執行這個程式|") && rows[1].starts_with("|政府決定廢止這項舊規定|") && rows[2].starts_with("|台北是一個很大的城市|") && rows[3].starts_with("|打開診斷頁閃退|"));
     let p = dir.join("level-rows.txt");
     std::fs::write(&p, rows.join("\n") + "\n").unwrap();
     p.to_string_lossy().into_owned()
 }
 
 /// docs/contracts/colloquial-levels.md: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those of the offline arithmetic (experiments/strength-colloq `cell_pick`, checked
-/// row by row on the whole public sets by experiments/colloq-levels): standard [5, 4, 0, 3]; conservative (1.0, 2, 3.0) keeps the n-gram first on all four,
-/// where the header triple without the term picks [1, 0, 0, 7]; aggressive (0.5, 2, 0.1) picks [5, 4, 1, 3], the header triple (0.3, 2, 0.25) [1, 0, 0, 7].
+/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those the CLI gives on the final 通語 SJ-LM-7-9.7M files with the cells of sj-lm-7.md section 2.9
+/// (measured 2026-10-27; the cell arithmetic itself is `core/src/colloquial.rs`'s unit tests): standard (0.7, 2, 0) [1, 0, 0, 3]; conservative (0.7, 2, 1) keeps the
+/// n-gram first on the three dev302 rows and picks 3 on the user-reported one, where the header triple without the term picks [0, 0, 0, 0]; aggressive (1.0, 2, 0.1)
+/// picks [1, 5, 2, 3], the header triple without the term [0, 0, 0, 0].
 #[test]
 fn the_term_applies_at_every_strength() {
     let d = tmp("lvrows");
     let rows = level_rows(&d);
     let set = ["--rows", rows.as_str()];
     for (i, (level, with, without)) in [
-        ("standard", vec![5, 4, 0, 3], None),
-        ("conservative", vec![0, 0, 0, 0], Some(vec![1, 0, 0, 7])),
-        ("aggressive", vec![5, 4, 1, 3], Some(vec![1, 0, 0, 7])),
+        ("standard", vec![1, 0, 0, 3], None),
+        ("conservative", vec![0, 0, 0, 3], Some(vec![0, 0, 0, 0])),
+        ("aggressive", vec![1, 5, 2, 3], Some(vec![0, 0, 0, 0])),
     ]
     .into_iter()
     .enumerate()
@@ -204,7 +213,7 @@ fn the_term_applies_at_every_strength() {
         let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
         assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
         let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
-        assert!(new.stdout.contains(&format!("{rl}+acg+colloq:2984eeb5+rc  {{")), "{level}: {}", new.stdout);
+        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rc  {{")), "{level}: {}", new.stdout);
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
@@ -242,13 +251,13 @@ fn options_are_checked() {
     assert!(run(&args(&["--colloquial-core", TABLE])).status.success());
 }
 
-/// Rows 10, 81 and 102 of eval/dev/user-reported.txt (public): written to a rows file.
+/// Rows 81, 159 and 10 of eval/dev/user-reported.txt (public): written to a rows file.
 fn channel_rows(dir: &Path) -> String {
     let all = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
     let lines: Vec<&str> = all.lines().collect();
-    assert!(lines[9].starts_with("|你有東西要先進版控嗎|") && lines[80].starts_with("|長歪了|") && lines[101].starts_with("幹opencc|是不是很雷啊|"));
+    assert!(lines[80].starts_with("|長歪了|") && lines[158].starts_with("|有點累贅|") && lines[9].starts_with("|你有東西要先進版控嗎|"));
     let p = dir.join("channel-rows.txt");
-    std::fs::write(&p, [lines[9], lines[80], lines[101]].join("\n") + "\n").unwrap();
+    std::fs::write(&p, [lines[80], lines[158], lines[9]].join("\n") + "\n").unwrap();
     p.to_string_lossy().into_owned()
 }
 
@@ -257,9 +266,10 @@ fn chosen(sc: &str) -> Vec<usize> {
     sc.lines().map(|l| l.split("\"c\": ").nth(1).unwrap().split(',').next().unwrap().parse().unwrap()).collect()
 }
 
-/// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (the three rows
-/// of the set where it matters move to the picks `p5.py --cell lex,1.0,4` gives, [2, 0, 0]); `--no-reading-channel` is the colloquial term alone
-/// (the P4d picks, [0, 1, 1]) and its summary tag lacks the `+rc` of the default run; without `--colloquial-core` the option changes nothing at all.
+/// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (row 81 moves to the pick
+/// the channel gives, [2, 0, 0]; the cell `lex,1.0,4` of `p5.py`); `--no-reading-channel` is the colloquial term alone (the P4d picks; here [0, 4, 0], where
+/// row 159 is the one the colloquial term moves and the channel moves back) and its summary tag lacks the `+rc` of the default run; without `--colloquial-core`
+/// the option changes nothing at all. Picks measured with the CLI on the 通語 SJ-LM-7-9.7M files, 2026-10-27 (rows 10, 81 and 102, [2, 0, 0] and [0, 1, 1], until then).
 #[test]
 fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_alone() {
     let d = tmp("rc");
@@ -269,8 +279,8 @@ fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_
     let with = full_run(&a, &BASE[..9], &set, &["--colloquial-core", TABLE]);
     let alone = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, "--no-reading-channel"]);
     assert_eq!(chosen(&with.sc), vec![2, 0, 0], "the channel's picks");
-    assert_eq!(chosen(&alone.sc), vec![0, 1, 1], "the colloquial term alone");
-    assert!(with.stdout.contains("+colloq:2984eeb5+rc  {") && alone.stdout.contains("+colloq:2984eeb5  {"), "{}{}", with.stdout, alone.stdout);
+    assert_eq!(chosen(&alone.sc), vec![0, 4, 0], "the colloquial term alone");
+    assert!(with.stdout.contains("+colloq:81c2470d+rc  {") && alone.stdout.contains("+colloq:81c2470d  {"), "{}{}", with.stdout, alone.stdout);
     assert_eq!((&with.dump, &with.words), (&alone.dump, &alone.words), "the decoder's order is the same");
     // without the table the option has nothing to switch: every output, the summary line included, is the plain run's
     let plain = full_run(&c, &BASE[..9], &set, &[]);

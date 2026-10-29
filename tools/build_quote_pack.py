@@ -33,12 +33,10 @@ PACK_FILE = "quotes-add.tsv"
 MIN_LEN, MAX_LEN = 2, 10          # 契約 §2：分數規則（length_scores）只涵蓋 2–10 字，引擎每個位置試的詞長也由詞庫最長的詞決定
 UNCHECKED = frozenset({"", "待核對"})   # 核對來源欄：空白或起始清單的「待核對」都是還沒核對（契約 §1）
 LEXICON_RULE_ROUNDS = 5           # 丟一個分句只會讓少數鄰居改變，實測幾輪就穩（和 ACG 詞包相同）
-# 契約 §2 解碼設定：出貨的 data/lm（model-v6 的 bigram.sjlm、classes-v5 的 classes.sjc、kn.sjkn，書面另讀 trigram.sjt3），開始前核對；
-# 這四個檔決定出貨設定下的第一名（評測 CLI 只在 --profile formal 讀 trigram.sjt3）。雜湊同 data/*.sha256。
-SHIPPED_LM_SHA = {"bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
-                  "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
-                  "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
-                  "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"}
+# 契約 §2 解碼設定：出貨的 data/lm，雜湊照 data/*.sha256（換模型時不必改這裡），開始前核對；
+# 聊天讀 bigram、classes、kn 與 trigram-chat.sjt3，書面讀 trigram.sjt3，這五個檔決定出貨設定下的第一名。
+SHIPPED_LM_SHA = {n: open(os.path.join(bap.ROOT, "data", n + ".sha256")).read().split()[0]
+                  for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3")}
 # 漢字：基本區、擴充 A、相容區、〇，以及擴充 B 以後（讀音工具讀不出的字照樣進「讀音拼不出」的報告，不當成非漢字）。
 HAN = re.compile(r"^[〇㐀-䶿一-鿿豈-\uFAFF\U00020000-\U0003FFFF]+$")
 # 標點與空白（含全形與半形的引號、刪節號、破折號）。不在這裡也不是漢字的字元（英文、數字、符號）留在分句裡，讓那個分句被擋下。

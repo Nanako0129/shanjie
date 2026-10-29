@@ -166,6 +166,7 @@ def load_full(a):
     lenient = D.T.load_lenient()
     try:
         rows, ok = D.build_rows(a.rows, a.dump, a.dump_words, a.rowstats, a.tinylm_scores, lenient)
+        triage.refuse_pool([r["scores"] for r in rows], "p4d")   # lc and k are for the dump's first 8; a pool record (idx) reaches past them
         _, ovl = D.load_lex_scores()
         lex = D.T.Lex.load()
         # only the first 8 candidates carry ll, so only they need lc and k

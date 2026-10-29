@@ -11,96 +11,17 @@
 use core::engine::*;
 use core::eval::{parse_rows, usable};
 use core::learn::context_key;
-use core::lm::{decode_segment_learned, CappedLexicon, Demote, End, Lm, Profile};
-use core::tinylm::{TinyLm, TOPK};
+use core::lm::{decode_segment_learned, CappedLexicon, End, Lm, Profile};
+use core::tinylm::{RerankLevel, TinyLm, TOPK};
 use core::{Lexicon, Syls, BEAM_S1};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
-}
-/// The shipped model as data/lm holds it (with kn.sjkn since model-v6).
-fn real_lm_path() -> PathBuf {
-    let p = root().join("data/lm/bigram.sjlm");
-    assert!(p.exists() && root().join("data/lm/classes.sjc").exists(), "data/lm/bigram.sjlm and classes.sjc are needed: see engine_lm.rs");
-    p
-}
-/// data/lm/bigram.sjlm and classes.sjc symlinked into a temporary directory without kn.sjkn, for the version 1 toy.
-// ponytail: the directory (two symlinks) is left in the temp dir; a OnceLock never drops.
-fn lm_path() -> PathBuf {
-    static P: OnceLock<PathBuf> = OnceLock::new();
-    P.get_or_init(|| {
-        let real = real_lm_path();
-        let d = std::env::temp_dir().join(format!("shanjie-rerank-nokn-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        for f in ["bigram.sjlm", "classes.sjc"] {
-            let _ = std::fs::remove_file(d.join(f));
-            std::os::unix::fs::symlink(real.with_file_name(f), d.join(f)).unwrap();
-        }
-        d.join("bigram.sjlm")
-    })
-    .clone()
-}
+#[path = "common/toy.rs"]
+mod toy;
+use toy::*;
 
-struct Shared {
-    lex: Arc<Lexicon>,
-    lm: Arc<Lm>,
-    capped: Arc<CappedLexicon>,
-}
-/// The capped lexicon has the demotion table, as `Engine::load_lm` builds it.
-fn shared_for(lm_file: &Path) -> Shared {
-    let dir = root().join("data/lexicon");
-    let lex = load_lexicon(&dir).unwrap();
-    let lm = Lm::load(lm_file).unwrap();
-    let overlay = capping_overlay(&dir, "").unwrap(); // as Engine::load_lm: overlay-add.tsv + names-add.tsv
-    let demote = Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
-    let capped = Arc::new(CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&demote)).unwrap());
-    Shared { lex, lm: Arc::new(lm), capped }
-}
-/// Loaded once per test binary, without the Kneser-Ney side file (`lm_path`).
-fn shared() -> &'static Shared {
-    static S: OnceLock<Shared> = OnceLock::new();
-    S.get_or_init(|| shared_for(&lm_path()))
-}
-
-fn sha_bytes(file: &Path) -> Vec<u8> {
-    let h = core::eval::sha256_hex(&std::fs::read(file).unwrap());
-    (0..32).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect()
-}
-
-/// The toy model with `alpha` / `tau` for both profiles and the n-gram hash of `lm` (None: left as recorded, i.e. kn-tiny's).
-fn sjtl_for(alpha: f64, tau: f64, lm: Option<&Path>) -> TempFile {
-    let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap();
-    if let Some(lm) = lm {
-        b[68..100].copy_from_slice(&sha_bytes(lm));
-    }
-    for at in [36, 52] {
-        b[at..at + 8].copy_from_slice(&alpha.to_le_bytes());
-        b[at + 8..at + 16].copy_from_slice(&tau.to_le_bytes());
-    }
-    // One file per call (tests run in parallel), removed when the guard drops.
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let n = N.fetch_add(1, Ordering::Relaxed);
-    let p = std::env::temp_dir().join(format!("shanjie-rerank-{}-{n}.sjtl", std::process::id()));
-    std::fs::write(&p, b).unwrap();
-    TempFile(p)
-}
-/// A temporary file, deleted on drop; derefs to its path.
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-impl std::ops::Deref for TempFile {
-    type Target = Path;
-    fn deref(&self) -> &Path {
-        &self.0
-    }
-}
 /// Lets the toy model's LLs decide.
 fn rerank_model() -> TempFile {
     sjtl_for(100.0, f64::INFINITY, Some(&lm_path()))
@@ -124,36 +45,8 @@ fn engine() -> Engine {
     engine_with(Some(&rerank_model()))
 }
 
-fn keys_of(syl: &str) -> Vec<Key> {
-    let layout = Layout::Standard;
-    let mut v = Vec::new();
-    let mut toned = false;
-    for c in syl.chars() {
-        match layout.key_of_tone(c) {
-            Some(tk) => {
-                v.push(Key::ch(tk, 0));
-                toned = true;
-            }
-            None => v.push(Key::ch(layout.key_of_symbol(c).expect("symbol has a key"), 0)),
-        }
-    }
-    if !toned {
-        v.push(Key::new(KeyKind::Space));
-    }
-    v
-}
 fn k(kind: KeyKind) -> Key {
     Key::new(kind)
-}
-
-fn type_syls(e: &mut Engine, syls: &[String]) -> Output {
-    let mut last = None;
-    for syl in syls {
-        for key in keys_of(syl) {
-            last = Some(e.key(key).unwrap());
-        }
-    }
-    last.unwrap()
 }
 
 /// The 302 rows of `--set dev --limit 302` as (sentence, reading), as engine_lm.rs reads them.
@@ -190,6 +83,10 @@ struct Expect {
     pick: usize,
 }
 fn expect(model: &Path, syls: &[String], start: &str, end: End<'_>, before: &str) -> Expect {
+    expect_key(model, syls, start, end, &context_key(before))
+}
+/// `expect` with the model given `key` as it is.
+fn expect_key(model: &Path, syls: &[String], start: &str, end: End<'_>, key: &str) -> Expect {
     let s = shared();
     let nb = decode_segment_learned(&s.capped, syls, &s.lm, Profile::Chat.lambda(), start, end, BEAM_S1, None, true).unwrap();
     let top = &nb[..nb.len().min(TOPK)];
@@ -197,7 +94,7 @@ fn expect(model: &Path, syls: &[String], start: &str, end: End<'_>, before: &str
     let ng: Vec<f64> = top.iter().map(|x| x.0).collect();
     let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
     let tl = TinyLm::load(model).unwrap();
-    let pick = tl.rerank(&ng, &cands, &context_key(before), tl.alpha_tau_delta(Profile::Chat)).unwrap().0;
+    let pick = tl.rerank(&ng, &cands, key, tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap().0;
     Expect { surfaces, ng, pick }
 }
 
@@ -245,7 +142,7 @@ fn no_model_or_switch_off_makes_no_job_and_keys_are_unchanged() {
     plain.set_rerank(true).unwrap(); // the switch on, so only the missing model keeps jobs away
     let mut jobs = 0;
     for syl in &syls {
-        for key in keys_of(syl) {
+        for key in keys_of(Layout::Standard, syl) {
             assert!(plain.key(key).unwrap() == with.key(key).unwrap(), "a loaded model changed a key's output");
             assert!(plain.take_rerank_job().is_none(), "a job without a model");
             jobs += with.take_rerank_job().is_some() as usize;
@@ -295,7 +192,7 @@ fn stale_results_are_dropped() {
     let r = e.take_rerank_job().unwrap().run();
     assert!(e.key(k(KeyKind::Backspace)).unwrap().preedit != shown, "premise: Backspace deleted a syllable");
     assert!(e.apply_rerank(r).unwrap().is_none(), "a re-decoding key after the take");
-    for key in keys_of(syls.last().unwrap()) {
+    for key in keys_of(Layout::Standard, syls.last().unwrap()) {
         e.key(key).unwrap();
     }
     for change in 0..2 {
@@ -436,6 +333,135 @@ fn later_stretch_key_uses_the_earlier_choice() {
     assert_eq!(r.picks(), vec![left.pick, right.pick]);
 }
 
+/// context-return section 4, what the model is given: a version 5 model declaring L = 8, on the same two stretches (row 16 with 打
+/// fixed), is keyed with the last 8 characters of the left text plus the display before each stretch (the earlier stretch's choice
+/// included), never through `context_key`; the engine keeps only those 8 characters. The same model as version 4 (no length) is keyed
+/// as today and keeps nothing of a left text without an English word at its end. The left text has no Han tail, so the n-gram starts
+/// at <s> in both.
+#[test]
+fn a_declared_left_length_keys_with_the_last_l_characters() {
+    let text = "昨天我們去看了Joe的表演，";
+    let last8 = |t: &str| -> String { t.chars().skip(t.chars().count().saturating_sub(8)).collect() };
+    let s = shared();
+    let syls = row(16);
+    let (a, b, word) = (3, 4, "打");
+    let (lp, delta) = s.capped.best_lp_delta(&syls[a..b], word).unwrap();
+    let v1 = rerank_model();
+
+    let v5 = upgraded(&v1, Some(8));
+    let key0 = last8(text);
+    assert_eq!(key0, "了Joe的表演，");
+    let left = expect_key(&v5, &syls[..a], "<s>", End::Next { word, lp, delta }, &key0);
+    let key1 = last8(&format!("{key0}{}{word}", left.surfaces[left.pick]));
+    let right = expect_key(&v5, &syls[b..], word, End::Eos, &key1);
+    let mut e = engine_with(Some(&v5));
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 8, "only the declared length is kept");
+    fix_word(&mut e, &syls, b, word);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!(r.keys(), vec![key0, key1]);
+    assert_eq!(r.picks(), vec![left.pick, right.pick]);
+
+    let v4 = upgraded(&v1, None);
+    let left = expect(&v4, &syls[..a], "<s>", End::Next { word, lp, delta }, "");
+    let chosen = format!("{}{word}", left.surfaces[left.pick]);
+    let right = expect(&v4, &syls[b..], word, End::Eos, &chosen);
+    let mut e = engine_with(Some(&v4));
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 0);
+    fix_word(&mut e, &syls, b, word);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!(r.keys(), vec![context_key(""), context_key(&chosen)], "version 4: today's keys");
+    assert_eq!(r.picks(), vec![left.pick, right.pick]);
+}
+
+/// context-return section 4: with a model that declares no length, a left text ending in an English word ("我說Joe", whose Han
+/// tail the shell never sent: no Han character at its end) decodes, shows and reranks byte for byte as no left text ("").
+#[test]
+fn an_english_left_text_changes_no_decoding_or_rerank_input() {
+    let model = rerank_model();
+    let rows = dev302();
+    for n in [12, 16, 27] {
+        let run = |ctx: &str| {
+            let mut e = engine_with(Some(&model));
+            e.set_left_context(ctx);
+            let mut outs = Vec::new();
+            for syl in &rows[n - 1].1 {
+                for key in keys_of(Layout::Standard, syl) {
+                    let o = e.key(key).unwrap();
+                    outs.push((o.preedit, o.candidates, o.commit, o.selected));
+                }
+            }
+            let r = e.take_rerank_job().expect("a job").run();
+            (outs, r.keys(), r.picks(), e.key(k(KeyKind::Enter)).unwrap().commit)
+        };
+        assert!(run("我說Joe") == run(""), "row {n}");
+    }
+}
+
+/// context-return section 2 (P3-6): with a declared length the English word is read from the kept L characters. A word that starts
+/// at the first of them when the text was longer may be half of one ("afootball" keeps "football") and does not count; the same
+/// word as the whole text, or after a space inside the L characters, does.
+#[test]
+fn a_cut_english_word_does_not_count() {
+    let v5 = upgraded(&rerank_model(), Some(8));
+    let table = Arc::new(core::english_next::EnglishTable::parse("E\tfootball\t100\nW\tfootball\t水\t50\nE\tjoe\t100\nW\tjoe\t水\t50\n").unwrap());
+    let row_after = |text: &str| {
+        let mut e = engine_with(Some(&v5));
+        e.set_english_next(Some(table.clone()));
+        e.set_left_context(text);
+        e.key(Key::ch('g', 0)).unwrap().candidates
+    };
+    let base = row_after("");
+    assert_eq!(row_after("football")[0], "水", "the whole text: not cut");
+    assert_eq!(row_after("我們說了一些話 Joe")[0], "水", "cut, but the word starts inside the kept characters");
+    assert_ne!(base[0], "水");
+    // Cut at the word's first letter (9 and 10 characters, L 8); "Xjoe" is the word xjoe, which the table lacks.
+    for text in ["afootball", "我說football", "Xjoe"] {
+        assert_eq!(row_after(text), base, "{text:?}");
+    }
+}
+
+/// Review of PR #294: `left_full` is cut for the model loaded when `set_left_context` ran, so a model change drops it (the next
+/// composition start sets it again), in either order: set then load, load then set then another load, and `set_lm` (no model).
+#[test]
+fn a_model_change_drops_the_left_text() {
+    let (v1, text) = (rerank_model(), "我們去看了Joe");
+    let v5 = upgraded(&v1, Some(8));
+    let mut e = engine_with(None);
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 3, "no model: the English word");
+    e.load_tinylm(&v5).unwrap();
+    assert_eq!(e.left_full_chars(), 0, "set, then load");
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 8, "the declared length");
+    e.load_tinylm(&v1).unwrap();
+    assert_eq!(e.left_full_chars(), 0, "load another model");
+    e.set_left_context(text);
+    assert_eq!(e.left_full_chars(), 3, "no declared length: the English word");
+    assert!(e.load_tinylm(Path::new("/nonexistent/x.sjtl")).is_err());
+    assert_eq!(e.left_full_chars(), 3, "a failed load keeps the model, and the text cut for it");
+    e.load_tinylm(&v5).unwrap();
+    e.set_left_context(text);
+    let s = shared();
+    e.set_lm(s.lm.clone(), s.capped.clone());
+    assert_eq!(e.left_full_chars(), 0, "set_lm drops the small model");
+}
+
+/// Review of PR #294: with a declared length the key is the raw text, so a left text "^" is the key "^" (the model's UNK), not the
+/// empty k that `context_key`'s SENTINEL stands for.
+#[test]
+fn a_declared_key_of_a_caret_is_kept() {
+    let v5 = upgraded(&rerank_model(), Some(8));
+    let syls = row(12);
+    let want = expect_key(&v5, &syls, "<s>", End::Eos, "^");
+    let mut e = engine_with(Some(&v5));
+    e.set_left_context("^");
+    type_syls(&mut e, &syls);
+    let r = e.take_rerank_job().unwrap().run();
+    assert_eq!((r.keys(), r.picks()), (vec!["^".to_string()], vec![want.pick]));
+}
+
 /// Generations come from one process-wide counter: a result never applies to another engine.
 #[test]
 fn two_engines_do_not_share_generations() {
@@ -542,7 +568,7 @@ fn auto_commit_voids_the_job() {
     type_syls(&mut e, &ni);
     let r = e.take_rerank_job().expect("a job at 127").run();
     let mut o = None;
-    for key in keys_of("ㄋㄧˇ") {
+    for key in keys_of(Layout::Standard, "ㄋㄧˇ") {
         o = Some(e.key(key).unwrap());
     }
     assert!(!o.unwrap().commit.is_empty(), "premise: the 128th syllable commits");
@@ -639,7 +665,7 @@ fn entered_prediction_row_blocks_apply() {
 }
 
 /// Section 2.2, the learning guard: a stretch whose first path has a learned-boosted word is left out, the other stretch is still
-/// reranked. Taught here: 回覆 for ㄏㄨㄟˊ ㄈㄨˋ after 已經 (row 27 shows 回復 by the n-gram); the fixed 郵件 splits the row.
+/// reranked. Taught here: 回復 for ㄏㄨㄟˊ ㄈㄨˋ after 已經 (row 27 shows 回覆 by the n-gram after that context on the 通語 SJ-LM-7-9.7M files, 回復 on model-v6, and the pick has to be a teaching: it is not the first); the fixed 郵件 splits the row.
 #[test]
 fn learned_stretch_is_not_reranked() {
     let syls = row(27);
@@ -648,17 +674,17 @@ fn learned_stretch_is_not_reranked() {
     // The pick is made over its own syllables, after the text it follows on screen (the context its record is kept under).
     e.set_left_context("我已經");
     type_syls(&mut e, &syls[3..5]);
-    choose_at_cursor(&mut e, "回覆");
+    choose_at_cursor(&mut e, "回復");
     e.key(k(KeyKind::Enter)).unwrap();
     e.set_left_context("");
     assert!(!e.learner().is_empty(), "premise: taught");
     let o = fix_word(&mut e, &syls, 9, "郵件");
-    assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
+    assert!(o.preedit.starts_with("我已經回復你的郵件"), "premise: the learned word is in the first path");
     let job = e.take_rerank_job().unwrap();
     let picks = job.run().picks();
     assert!(picks.len() == 1 && picks[0] != 0, "only the right stretch, and it changes");
     let o = e.apply_rerank(job.run()).unwrap().unwrap();
-    assert!(o.preedit.starts_with("我已經回覆你的郵件"), "the taught stretch is untouched");
+    assert!(o.preedit.starts_with("我已經回復你的郵件"), "the taught stretch is untouched");
     // Control: without the teach the same fix reranks both stretches (fixed_word_between_two_stretches).
 }
 
@@ -674,11 +700,11 @@ fn learn_guard_off_reranks_the_learned_stretch() {
         e.set_learning(true);
         e.set_left_context("我已經");
         type_syls(&mut e, &syls[3..5]);
-        choose_at_cursor(&mut e, "回覆");
+        choose_at_cursor(&mut e, "回復");
         e.key(k(KeyKind::Enter)).unwrap();
         e.set_left_context("");
         let o = fix_word(&mut e, &syls, 9, "郵件");
-        assert!(o.preedit.starts_with("我已經回覆你的郵件"), "premise: the learned word is in the first path");
+        assert!(o.preedit.starts_with("我已經回復你的郵件"), "premise: the learned word is in the first path");
         e
     };
     for (guard, stretches, skips) in [(true, 1, 1), (false, 2, 0)] {
@@ -705,7 +731,7 @@ fn rerank_is_off_until_set_rerank() {
     e.load_lm(&lm_path()).unwrap();
     e.load_tinylm(&rerank_model()).unwrap();
     for syl in &syls {
-        for key in keys_of(syl) {
+        for key in keys_of(Layout::Standard, syl) {
             e.key(key).unwrap();
             assert!(e.take_rerank_job().is_none(), "a job without set_rerank(true)");
         }
@@ -762,7 +788,7 @@ fn kneser_ney_side_file_refuses_the_model() {
     let v4 = root().join("eval/golden/tinylm-tiny/tiny-int8-v4.sjtl");
     for (lm_dir, kn_off) in [(kn.clone(), false), (dir.clone(), true)] {
         let lm = Lm::load(&lm_dir.join("bigram.sjlm")).unwrap();
-        assert_eq!(lm.kn_tag().is_some(), !kn_off, "premise: the side file is loaded only from kn-tiny");
+        assert_eq!(lm.kn_tag(Profile::Chat).is_some(), !kn_off, "premise: the side file is loaded only from kn-tiny");
         let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &lm, None).unwrap());
         let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
         e.set_lm(Arc::new(lm), capped);
@@ -819,7 +845,7 @@ fn replay(e: &mut Engine, rows: &[(String, Syls)]) -> Replay {
     for (_, syls) in rows {
         let mut commit = String::new();
         let (mut prev_ng, mut prev_shown): (Vec<char>, Vec<char>) = (Vec::new(), Vec::new());
-        for key in syls.iter().flat_map(|s| keys_of(s)).chain([k(KeyKind::Enter)]) {
+        for key in syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).chain([k(KeyKind::Enter)]) {
             let t = Instant::now();
             let o = e.key(key).unwrap();
             let job = e.take_rerank_job();
@@ -889,7 +915,7 @@ fn replay_dev302_parity_and_measurements() {
             let surf: Vec<String> = nb.iter().take(TOPK).map(|(_, ws)| ws.concat()).collect();
             let ng: Vec<f64> = nb.iter().take(TOPK).map(|x| x.0).collect();
             let top: Vec<&str> = surf.iter().map(String::as_str).collect();
-            let pick = tl.rerank(&ng, &top, "", tl.alpha_tau_delta(Profile::Chat)).map_or(0, |r| r.0);
+            let pick = tl.rerank(&ng, &top, "", tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).map_or(0, |r| r.0);
             surf[pick].clone()
         })
         .collect();
@@ -940,4 +966,111 @@ fn replay_dev302_parity_and_measurements() {
     assert_eq!(want.len(), 302, "302 CLI firsts");
     let diff: Vec<usize> = (0..302).filter(|&i| m.commits[i] != want[i]).map(|i| i + 1).collect();
     assert!(diff.is_empty() && diff_rule.is_empty(), "replay differs from the CLI at rows {diff:?} (rule: {diff_rule:?})");
+}
+
+// ---------- docs/contracts/sj-lm-7-pr2.md section 2.7, test 6: the rerank keeps the maintainer's manual words ----------
+
+/// An engine on the final files (the production path: `Engine::new`, `load_lm`, `load_tinylm` of data/lm/tinylm.sjtl) in the formal profile, the switch on
+/// at `level`, over the data folder `dir`.
+fn final_engine(dir: &Path, level: RerankLevel) -> Engine {
+    let lmdir = root().join("data/lm");
+    let mut e = Engine::new(dir, Layout::Standard).unwrap();
+    e.load_lm(&lmdir.join("bigram.sjlm")).unwrap();
+    e.load_tinylm(&lmdir.join("tinylm.sjtl")).unwrap();
+    e.set_profile(Profile::Formal).unwrap();
+    e.set_rerank(true).unwrap();
+    e.set_rerank_level(level).unwrap();
+    e
+}
+
+/// A copy of data/lexicon (symlinks) whose overlay-add.tsv has the tag `manual` replaced by `slang`: the same words and scores, but no `ManualSet`.
+fn lexicon_without_manual_tags() -> PathBuf {
+    let d = std::env::temp_dir().join(format!("shanjie-rerank-nomanual-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    for f in std::fs::read_dir(root().join("data/lexicon")).unwrap() {
+        let f = f.unwrap().path();
+        if f.file_name().unwrap() != "overlay-add.tsv" {
+            std::os::unix::fs::symlink(&f, d.join(f.file_name().unwrap())).unwrap();
+        }
+    }
+    let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();
+    assert!(overlay.contains("\tmanual\n"), "premise: the shipped overlay has manual rows");
+    std::fs::write(d.join("overlay-add.tsv"), overlay.replace("\tmanual\n", "\tslang\n")).unwrap();
+    d
+}
+
+/// Type `reading`, run the pending rerank job and apply it: the text shown afterwards (the n-gram's when the job changes nothing).
+fn shown_after_rerank(e: &mut Engine, reading: &[&str]) -> (String, String) {
+    let syls: Vec<String> = reading.iter().map(|s| s.to_string()).collect();
+    let ngram = type_syls(e, &syls).preedit;
+    let after = match e.take_rerank_job() {
+        Some(job) => e.apply_rerank(job.run()).unwrap().map_or(ngram.clone(), |o| o.preedit),
+        None => ngram.clone(),
+    };
+    (ngram, after)
+}
+
+/// Formal, standard and aggressive strength: 米雅歌 (dev manual-words row 4, the n-gram's first) stays 米雅歌 through the rerank. Before section 2.7 the
+/// rerank took it out for 米亞哥 at both strengths (measured 2026-10-27); conservative never did. The same engine on a copy of the lexicon whose manual
+/// rows are tagged `slang`, so the job carries no `ManualSet`, does take it out: that is the premise, and the check that fails without the set.
+#[test]
+fn a_manual_word_survives_the_formal_rerank_on_the_final_files() {
+    let reading = ["ㄇㄧˇ", "ㄧㄚˇ", "ㄍㄜ"];
+    let plain = lexicon_without_manual_tags();
+    for level in [RerankLevel::Standard, RerankLevel::Aggressive, RerankLevel::Conservative] {
+        let (ngram, after) = shown_after_rerank(&mut final_engine(&root().join("data/lexicon"), level), &reading);
+        assert_eq!((ngram.as_str(), after.as_str()), ("米雅歌", "米雅歌"), "{level:?}");
+        let (ngram, after) = shown_after_rerank(&mut final_engine(&plain, level), &reading);
+        assert_eq!(ngram, "米雅歌", "{level:?}: premise: the n-gram's first is the manual word");
+        if level != RerankLevel::Conservative {
+            assert_eq!(after, "米亞哥", "{level:?}: without a ManualSet the rerank takes it out");
+        }
+    }
+    std::fs::remove_dir_all(&plain).unwrap();
+}
+
+/// The unknown syllables one zhuyin symbol away from `syl` whose adjacent-key alternatives (fuzzy-input section 2.1) include `syl`, in symbol order.
+fn slips_of(syl: &str) -> Vec<String> {
+    let lex = &shared().lex;
+    let tone: String = syl.chars().filter(|c| "ˊˇˋ˙".contains(*c)).collect();
+    let base: Vec<char> = syl.chars().filter(|c| !"ˊˇˋ˙".contains(*c)).collect();
+    let mut out = Vec::new();
+    for i in 0..base.len() {
+        for sym in "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ".chars().filter(|&c| c != base[i]) {
+            let mut b = base.clone();
+            b[i] = sym;
+            let u = format!("{}{tone}", b.iter().collect::<String>());
+            if !lex.has_syllable(&u) && lex.adjacent_alts(&u).contains(&syl) && !out.contains(&u) {
+                out.push(u);
+            }
+        }
+    }
+    out
+}
+
+/// Section 2.7 with adjacent-key input on: 米雅歌 typed with one syllable slipped to a neighbouring key (a syllable the lexicon lacks, decoded through its
+/// adjacent-key alternative ㄧㄚˇ or ㄍㄜ) is still the n-gram's first choice, and the manual word is protected because `manual_mask` matches it against the
+/// readings that path used (`Lexicon::path_readings`), not the typed syllables. Matching the typed syllables left it unprotected: the rerank took it out
+/// for 米亞哥 (measured 2026-10-28 at both strengths, every slip below).
+#[test]
+fn a_manual_word_typed_with_an_adjacent_key_slip_survives_the_rerank() {
+    let mut tried = 0;
+    for level in [RerankLevel::Standard, RerankLevel::Aggressive] {
+        for (pos, t) in [(1, "ㄧㄚˇ"), (2, "ㄍㄜ")] {
+            let slips = slips_of(t);
+            assert!(!slips.is_empty(), "premise: a slip of {t}");
+            for u in slips {
+                let mut reading = ["ㄇㄧˇ".to_string(), "ㄧㄚˇ".to_string(), "ㄍㄜ".to_string()];
+                reading[pos] = u.clone();
+                let mut e = final_engine(&root().join("data/lexicon"), level);
+                e.set_fuzzy(core::fuzzy::FUZZY_ADJACENT).unwrap();
+                let r: Vec<&str> = reading.iter().map(String::as_str).collect();
+                let (ngram, after) = shown_after_rerank(&mut e, &r);
+                assert_eq!((ngram.as_str(), after.as_str()), ("米雅歌", "米雅歌"), "{level:?}: {r:?}");
+                tried += 1;
+            }
+        }
+    }
+    assert!(tried >= 4, "{tried} slips tried");
 }

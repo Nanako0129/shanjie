@@ -42,10 +42,11 @@
 - 未完成音節有聲母、介音、韻母三欄，各放一個符號；同一欄再按就**取代**原本的符號。
 - 按聲調鍵（含空白鍵）完成音節。音節字串的格式和詞庫、評測檔相同：聲母＋介音＋韻母＋調號，一聲不加調號，˙ 放最後（例：`ㄇㄚ˙`、`ㄕˋ`、`ㄧ`）。
 - **詞庫沒有的音節不收**：完成時若 `lex.entries(&[音節])` 是空的，這個聲調鍵回報「已處理」，未完成音節保持原狀，組字區不變（使用者可用 Backspace 修正）。實測詞庫的 1,417 個音節都有單音節詞條，所以收進來的音節一定解得出來；`decode_beam` 若仍回錯，視為內部錯誤（§6 的回傳碼 4）。
+  - **例外（模糊輸入，`docs/contracts/fuzzy-input.md` §1、§2.1）**：`shanjie_engine_set_fuzzy` 的位元 4 開著、語言模型已載入、標準排列（倚天排列下位元 4 沒有作用）時，詞庫沒有、但有鄰鍵替代讀音（同一個鍵盤列左右各一鍵，欄位規則）的音節時，**收下**這個音節（存打的讀音，組字區照常顯示解碼出的字）；沒有替代讀音、沒有語言模型、位元 4 關著或倚天排列時照舊不收。收下之後把位元 4 關掉，已收下的音節照樣解碼（詞庫沒有的音節一律用鄰鍵替代讀音解碼，分數減 2），不會進內部錯誤。按鍵規則表不變。
 - 新音節插在游標處，游標移到它右邊。
 - **串、緩衝、切分（數字列的鍵，`docs/contracts/digits.md`；中英混打開著、不是可省略韻母、標準排列、有模型和 `digits.tsv` 時才存在，否則逐位元同沒有這一段）**：沒有未完成音節時，字母表 `{0-9 . / -}` 的鍵開一個**串**；串裡還沒變成 token 的鍵放在**緩衝**（最多 4 個，第 5 個鍵進來時最舊的先吐成數字串 token）。緩衝的 n 個鍵每一鍵都分成「前 m 個是數字、後 t 個是音節尾段」（尾段要合法：是詞庫某個音節的前綴；以聲調鍵或空白結尾時要是詞庫裡含漢字詞條的完整音節），由 `digits::Scorer` 照 `digit-context.md` 的表打分選一個（θ＝3 保護整串都當注音的讀法；修訂三起不在字母表的注音鍵也算；`digits.md` A.3.3、A.9）。畫面上數字顯示成半形、尾段顯示成注音；尾段同時放進未完成音節（`pend`），所以預測列、Esc、Backspace 照未完成音節的規則看它。數字串 token 的讀音是 `_punct_` 加那個字元，固定詞是那個字元，像標點一樣只佔一格。其他鍵的規則在 §3.2。
-- **影子（中英混打，`docs/contracts/zhen-mixed.md` §2.2）**：`set_english(1)`、`set_abbreviation(0)`、標準排列、單字表已載入，四個都成立時，未完成音節從第一個注音鍵起另外記下每個**注音鍵**（第 9、14 條處理的鍵）的鍵帽字元（不含 Shift，最多 32 個）和「覆寫次數」（第 9 條裡那一欄已有符號、被取代的次數）；否則影子一律是空的、不記。聲調鍵與空白鍵不記。第 33 個注音鍵把影子清空（長度 0、覆寫 0），之後的鍵重新開始記。影子跟著 `clear_pend` 一起清（完成音節、Esc、標點、送出、reset、回傳碼 4、第 11 條刪到未完成音節消失）。倚天排列不記影子。**影子現在決定顯示與送出的內容**：顯示規則 D（下一條）成立時，組字區顯示、Enter 與 `reset(commit)` 送出的是影子的字母，不是注音。所以 D 成立（字母在畫面上）時的 Backspace 不照第 11 條（修訂四，`zhen-inline.md` §1.3g）：影子的字母去掉最後一個，剩下的在游標處變成英文段（未完成音節的符號與影子清掉），不重放、不回到注音。D 不成立（畫面上是注音，或「按空白才顯示」）時第 11 條照舊：刪顯示位置最後的符號，影子丟掉最後一個記下的鍵、覆寫次數不變。
-- **英文 token 與顯示規則 D（中英混打第二片，`docs/contracts/zhen-inline.md`）**：選了英文窗的英文項，英文不送出，而是在游標處插入一個**英文 token**（讀音 `_punct_` ＋ 那一項，固定詞就是那一項，和第 2 條的標點 token 一樣只佔一格：切開解碼的段落、後面的字以「前面不是漢字」處理、Backspace 與方向鍵整個一次、Enter 時照順序送出、算進 128 個單位的上限、英文本身不學；修訂四起中英混打開著時 Backspace 對英文 token 逐字母刪，見第 18 條）。兩個和標點不同的地方：緊接在它後面按 ↓（修訂三起空白不再開清單，見第 16a 條）列出這個字的寫法：照打的原樣（token 目前的文字）在前，再接小寫、首字大寫、全大寫，去掉重複的（選了就換掉，不查標點替代表；修訂二起，細節見下方「英文 token 改選」）；句首的詞後面緊接它時，第 8 條的鍵（`learn::next_key`）用 `^>_punct_en`，不含英文字（空白單位同樣用這個鍵）。**D**（`set_english_inline` 預設 1）：影子在記錄、游標在尾端且只有一個未完成單位、影子至少 3 個字母、覆寫條件和觸發相同（覆寫 ≥ 2，或 ≥ 1 而且殘餘音節不在詞庫）、單字表裡有字以影子開頭，五個都成立時，組字區把未完成音節的注音換成影子的字母（`shown()`；候選窗、預測列不變）。每個按鍵處理完重新判斷，不記狀態。
+- **影子（中英混打，`docs/contracts/zhen-mixed.md` §2.2）**：`set_english(1)`、`set_abbreviation(0)`、標準排列、單字表已載入，四個都成立時，未完成音節從第一個注音鍵起另外記下每個**注音鍵**（第 9、14 條處理的鍵）的鍵帽字元（不含 Shift，最多 32 個）和「覆寫次數」（第 9 條裡那一欄已有符號、被取代的次數）；否則影子一律是空的、不記。聲調鍵與空白鍵不記。第 33 個注音鍵把影子清空（長度 0、覆寫 0），之後的鍵重新開始記。影子跟著 `clear_pend` 一起清（完成音節、Esc、標點、送出、reset、回傳碼 4、第 11 條刪到未完成音節消失）。倚天排列不記影子。**〔第三片，`zhen-keyorder.md` §2.1〕** 影子另外記「逆序次數」（不是覆寫、而且這個鍵的欄位小於未完成音節目前已有符號的某一欄的鍵數，欄位 0 聲母、1 介音、2 韻母，看目前三欄、不看打過的鍵）；逆序次數只在 `set_english_key_order(1)` 時用，次數只增不減（第 11 條不減，影子清掉時一起清）。**影子現在決定顯示與送出的內容**：顯示規則 D（下一條）成立時，組字區顯示、Enter 與 `reset(commit)` 送出的是影子的字母，不是注音。所以 D 成立（字母在畫面上）時的 Backspace 不照第 11 條（修訂四，`zhen-inline.md` §1.3g）：影子的字母去掉最後一個，剩下的在游標處變成英文段（未完成音節的符號與影子清掉），不重放、不回到注音。D 不成立（畫面上是注音，或「按空白才顯示」）時第 11 條照舊：刪顯示位置最後的符號，影子丟掉最後一個記下的鍵、覆寫次數不變。
+- **英文 token 與顯示規則 D（中英混打第二片，`docs/contracts/zhen-inline.md`）**：選了英文窗的英文項，英文不送出，而是在游標處插入一個**英文 token**（讀音 `_punct_` ＋ 那一項，固定詞就是那一項，和第 2 條的標點 token 一樣只佔一格：切開解碼的段落、後面的字以「前面不是漢字」處理、Backspace 與方向鍵整個一次、Enter 時照順序送出、算進 128 個單位的上限、英文本身不學；修訂四起中英混打開著時 Backspace 對英文 token 逐字母刪，見第 18 條）。兩個和標點不同的地方：緊接在它後面按 ↓（修訂三起空白不再開清單，見第 16a 條）列出這個字的寫法：照打的原樣（token 目前的文字）在前，再接小寫、首字大寫、全大寫，去掉重複的（選了就換掉，不查標點替代表；修訂二起，細節見下方「英文 token 改選」）；句首的詞後面緊接它時，第 8 條的鍵（`learn::next_key`）用 `^>_punct_en`，不含英文字（空白單位同樣用這個鍵）。**D**（`set_english_inline` 預設 1）：影子在記錄、游標在尾端且只有一個未完成單位、影子至少 3 個字母、覆寫條件和觸發相同（覆寫 ≥ 2，或 ≥ 1 而且殘餘音節不在詞庫；`set_english_key_order(1)` 時「覆寫」換成 E，見第 10e 條。「殘餘音節不存在可以不要證據」與兩字母詞只在空白鍵，D 與自動固定不放寬，兩字母詞也不在打字時顯示或自動固定）、單字表裡有字以影子開頭，五個都成立時，組字區把未完成音節的注音換成影子的字母（`shown()`；候選窗、預測列不變）。每個按鍵處理完重新判斷，不記狀態。
 
 ## 3. 按鍵行為（暫定，S3b 會對照使用者的截圖與實機修正）
 
@@ -76,7 +77,7 @@
 | 8a | 預測列未進入且不是空的（候選窗關閉） | Tab（無修飾鍵） | 進入預測列，選取第 0 個（插在第 9 條之前）；預測列是空的時照第 13、21 條 |
 | 9 | 有未完成音節 | 注音鍵 | 放進對應欄位（同一欄再按一次是取代）。**例外（V3 第二片，`v3-engine.md` §12）**：「可省略韻母」開、預測列開、游標在組字區尾端時，那一欄已有符號就**開新的未完成單位**（最後一個單位的那一欄是空的就放進去）；有兩個以上單位時，聲調鍵與空白鍵見 9a。要有語言模型；單位上限 `ABBR_MAX_UNITS` = 10，到了上限已有符號的那一欄照取代。**例外（中英混打修訂二，`zhen-inline.md` §1.3「自動固定」）**：顯示規則 D 成立（字母在畫面上）、影子本身是單字表的完整單字、影子加上這個鍵不是任何單字的前綴時，這個鍵不放進欄位：先把影子的字母變成英文 token（和英文窗選第一項、小寫原樣相同，另外記下當時欄位上的未完成音節，見英文 token 改選），清掉未完成音節與影子，再把這個鍵當新音節的第一個鍵（第 14 條）。聲調鍵、空白鍵不觸發；「按空白才顯示」時 D 不成立，不觸發。自動固定讓組字區到 128 個單位而送出時，送出的文字在**這個鍵的這一次輸出**的 `commit` 裡，這個鍵同一次輸出已在清空的組字區開始新音節 |
 | 9a | 有兩個以上未完成單位 | 聲調鍵、空白鍵 | 吃掉、不動作（單位只靠預測列選取、Backspace、Esc 解決；最多 10 個單位，見第 9 條）；只有一個單位時照第 10 條 |
-| 10e | 有未完成音節（一個單位），影子是單字表裡的字、覆寫次數 ≥ 1（殘餘音節——目前三欄的符號加一聲——在詞庫裡時要 ≥ 2），游標在組字區尾端（`zhen-mixed.md` §2.2） | 空白鍵 | 不當一聲，開英文窗（見下）。其他情況照第 10 條 |
+| 10e | 有未完成音節（一個單位），影子是單字表裡的字、覆寫次數 ≥ 1（殘餘音節——目前三欄的符號加一聲——在詞庫裡時要 ≥ 2），游標在組字區尾端（`zhen-mixed.md` §2.2）。**〔第三片，`zhen-keyorder.md` §2〕`set_english_key_order(1)` 時**：「覆寫次數」換成英文證據 E ＝ 覆寫次數 ＋ 逆序次數（一個鍵同時是覆寫又是逆序只算覆寫）；另外兩種情況也算：影子是單字表裡的字而殘餘音節不存在（不要證據，第 10 條對這個空白本來什麼都不做），和影子正好是 `TWO_LETTER`（核心常數：ok ls cd mv ip id ux js ts py vs pr os tv pc db qa pm hr）裡的一個字而且 E ≥ 1（不論殘餘音節存不存在） | 空白鍵 | 不當一聲，開英文窗（見下）。其他情況照第 10 條 |
 | 10 | 有未完成音節 | 聲調鍵、空白鍵 | 完成音節（§2） |
 | 11 | 有未完成音節 | Backspace | 刪掉顯示位置最後的符號（韻母→介音→聲母；2026-10-06 實測蘋果注音與小麥注音）。多個單位時刪最後一個單位的最後一個符號，空了的單位拿掉。「打字時就顯示」、中英混打開著、未完成音節刪到消失、游標左邊緊接自動固定做出來的英文 token 時，那個 token 以全部文字變回英文段（修訂六，`zhen-inline.md` §1.3i）。**例外**：中英混打的顯示規則 D 成立（畫面上是影子的字母）時（修訂四，`zhen-inline.md` §1.3g），刪最後一個字母，剩下的字母變成英文段（見 §2 影子） |
 | 12 | 有未完成音節 | Esc | 清掉未完成音節（多個單位時是全部單位；組字區的字、固定詞、游標不動） |
@@ -94,7 +95,7 @@
 | 20 | 組字區有字 | Esc | 清空組字區 |
 | 21 | 組字區有字 | 其他鍵（含 Shift＋非標點、Tab） | 送出組字區，然後直通這個鍵（`handled = 0`、`commit` 非空）。**例外（中英混打修訂二，`zhen-inline.md` §1.3b）**：中英混打開著時 Shift＋英文字母開始或延續英文段，不送出、不直通；中英混打關著或倚天排列時照舊 |
 | 22a | 組字區空 | 聲調鍵（空白鍵以外） | 把該聲調符號（ˊ ˇ ˋ ˙）放進組字區，和第 2 條的標點相同（2026-10-05 起；蘋果注音實測按 3 打出「ˇ」但立刻送出，使用者選擇留在組字區，Backspace 可刪、Enter 才送出；原本直通成數字） |
-| 22 | 組字區空 | 其他鍵 | 不處理（直通）。**例外（中英混打修訂二）**：中英混打開著時 Shift＋英文字母在游標處開一個英文段（組字區因此有字） |
+| 22 | 組字區空 | 其他鍵 | 不處理（直通），並清掉 `set_left_context` 存的前文（漢字結尾與 `left_full`，`context-return.md` §2）。**例外（中英混打修訂二）**：中英混打開著時 Shift＋英文字母在游標處開一個英文段（組字區因此有字） |
 
 **英文窗（中英混打，`docs/contracts/zhen-mixed.md` §2.3）**：第 10e 條開的候選窗，`Cands.english`。清單依序是影子的小寫字 `w`、首字大寫、全大寫（影子是小寫，所以「照打的原樣在前」就是 `w`；寫法清單的一般順序見下方英文 token 改選），殘餘音節在詞庫裡時第四項是詞庫對那個一聲音節的第一個詞條（`lex.entries(&[音節])[0]`）；方向照 `set_candidate_vertical`，開窗時固定。開窗時預測列清掉，preedit 照現行顯示（顯示規則 D 成立時是影子的字母，否則是未完成音節的注音）。第 3–8、3v–5p 條的其餘行為不變，英文窗開著時：
 
@@ -108,6 +109,7 @@
 | 其他鍵（含聲調鍵、Tab、Delete、Home、End；聲調鍵 6 3 4 7 在標準排列是 1–9 的數字，仍是選項目鍵） | 第 8 條：關窗、清影子，再從第 9 條起處理這個鍵 |
 | Shift＋英文字母（修訂二，§1.3b） | 關窗，影子的字母變成英文段的開頭，再接上大寫字母（見英文段） |
 | 標點（第 2 條） | 第 2 條在第 3–8 條之前：丟掉未完成音節（影子跟著清）、關窗、插入標點 |
+| 語意校正（重排）套用（`apply_rerank`；不是按鍵，修訂一 `sj-lm-7-pr2.md` §2.7） | 一段（兩個固定詞或標點之間）的 n-gram 第一名含有疊加層標 `manual` 的詞（`overlay-add.tsv` 第 4 欄；手動加的詞）時，重排只會換成在同樣音節上仍保有這些詞的候選：不保有的候選在選擇時被遮掉（`tinylm::manual_mask`），門檻（τ）與分數照舊用完整的清單算；書面與聊天、三檔、有沒有常談都一樣（含常談退回路徑）。沒有這樣的詞的段落不變。`names` 與詞包的詞不在此列 |
 
 選了英文項之後：`handled` 1、`commit` 空、`preedit` 是組字區（含那個英文）、沒有候選（插入第 128 個單位時照第 2 條送出整串）。游標不在尾端、倚天排列、`set_english(0)`、沒有單字表、`set_abbreviation(1)` 時不記影子（或不觸發）、不開窗，和沒有這個功能時逐位元相同。
 
@@ -120,6 +122,7 @@
 **直排候選窗與直排預測列**（`docs/contracts/candidate-vertical.md`，放在表外：夾在表中間會讓後面的列不再顯示成表格）：方向由 `shanjie_engine_set_candidate_vertical` 設定（預設橫排）。**候選窗在開啟時固定方向**（第 15 條與 s3e 的標點候選開窗時讀；設定只影響下一次開窗，開著的窗，含展開的網格，照開啟時的方向）。**預測列沒有開窗的時間點**，每個輸出都照 engine 當下的設定，所以設定的回傳快照裡正在顯示的預測列就換成新的方向。直排候選窗的狀態是「整份清單、可見範圍的第一個、選取」，可見範圍固定 9 個（不足 9 個就是全部）；開窗時從 0 開始、選取 0。輸出：`candidates` 是可見範圍、`candidate_selected` 是在可見範圍裡的位置、`candidate_first`／`candidate_total` 照現有意義、`candidate_columns` 一律 0。`candidate_vertical` 是 0（橫排，或沒有候選）、1（直排候選窗）、2（直排預測列，進入或未進入；其他欄位的意義不變）。第 3v–5p 條取代直排候選窗的第 3–5 條，第 6–8 條、⌘⌫ 遺忘與其他條不變；直排預測列進入後的 ↑↓ 見第 1b 條，未進入時 ↓ 照第 15 條、↑ 照第 16 條，與橫排相同。
 
 - **預測列（V3，`docs/contracts/v3-engine.md`）**：有載入語言模型、游標在組字區尾端、候選窗關閉時，第 9、10、11、14 條處理完之後重算（第 10 條遇到詞庫沒有的音節而不完成時不變）；其他所有狀態變化都清掉（標點、22a、開候選窗與候選窗內的鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`／`set_demote`／`set_rerank`／`set_rerank_level`／`set_prediction`（關閉時；開啟時重算）、`pick`、選了預測、回傳碼 4）；英文段（Shift＋英文字母，`zhen-inline.md` §1.3b）開著時不產生預測列（Backspace 把段刪光才重算，Tab 先結束段）；什麼都沒改的鍵（↑、不起作用的聲調鍵、游標在邊界的 Backspace／Delete、有未完成音節時的其他鍵、第 1 條的直通）保留預測列。預測列透過候選欄位輸出（§6）。「可省略韻母」（`shanjie_engine_set_abbreviation`，預設關）見第 9、9a、11、12 條與 `v3-engine.md` §12：兩個以上的未完成單位在關掉縮寫或關掉預測列時一併清掉（等於 Esc），一個單位時不動。
+- **預測列在英文詞後面（`docs/contracts/english-next.md`）**：資料夾有 `english-next.tsv`（選用，沒有就逐位元同沒有這一段）、有語言模型、預測開著時，預測列起點前面的那一個單位是英文 token（或是一個空白單位、它前面是英文 token；看單位不看顯示，以字母結尾的詞庫詞不算）、而且表裡有那個英文詞（小寫）時，先列表裡這個詞後面常接的中文詞（有未完成單位時只列相容的，其餘相容的詞照原本的順序接在後面），游標在英文 token 或它後面的空白單位後面、沒有未完成單位時也列（只列表裡、詞庫有的詞）。Space 結束英文段後與接著插入空白單位的 Space 之後都重算預測列（所以這時 Tab 照既有規則進預測列，不再把英文送出）。數字語境優先；解碼、候選窗、學習、詞包、語意校正都不經過這張表；FFI 不變。**組字區的起點（`context-return.md` §2）**：起點前面沒有單位時，看 `set_left_context` 的前文結尾（去掉最多一個半形空白後）是不是 2–32 個 ASCII 字母、前一個字元不是 ASCII 字母或數字；宣告了前文長度 L 的會意模型下看保留的 L 個字元，前文比 L 長而這個英文詞從保留的第 0 個字元開始時不算（可能是半個詞）。組字區空著（沒有音節也沒有未完成單位）時沒有預測列。
 - 「注音鍵」與「聲調鍵」指 §1 表中的鍵、且沒按 Shift。
 - 第 1 條的直通不改任何狀態：一段組字中間插入任意個第 1 條的鍵，之後的輸出必須和沒按過時逐欄位相同。
 - 中英切換：用系統的「使用大寫鎖定鍵切換輸入方式」（使用者 2026-10-03 選 Caps Lock），切換時系統停用本輸入法；殼不保留中英狀態，原本寫的 Shift 單按切換不做（見 `docs/contracts/s3b.md` §6）。
@@ -179,7 +182,7 @@
 
 `data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3（`load_lm` 重讀 `overlay-add.tsv` 與 `demote.tsv`，建構之後它們被移走也是碼 3）。
 
-詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`，`PACK_QUOTES`＝2 → `packs_dir/quotes-add.tsv`，依這個順序；quote-pack 契約 §2）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::new`，所以詞包的詞也依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg [--packs-dir DIR]` 走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`、`PACK_QUOTES`＝2 → `packs_dir/quotes-add.tsv`（quote-pack 契約 §2）、`PACK_IT` = 4 → `packs_dir/it-add.tsv`，依這個順序；it-pack 契約 §3.1）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::with_packs`。〔2026-10-24，`pack-oov.md`〕`PACK_OOV`（現在只有動漫詞包）的詞**不封頂**、用詞包檔的分數，而且解碼與 `total_score` 把詞包詞當成模型不認識的詞（`CappedLexicon::model_id` 回 `None`：詞項、句尾、前一詞、段開頭、`End::Next` 都一樣；`history()` 不變）；其他詞包（經典台詞詞包、資訊詞包）與非詞包的疊加層照舊依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg|it|quotes 的組合（如 acg,quotes,it） [--packs-dir DIR]`（可重複；要求的詞包檔不在就中止並報路徑，摘要行多 `+acg`、`+quotes`、`+it`）走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
@@ -217,10 +220,11 @@ int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput
 // S2c 新增（docs/PLAN.md §S2c）
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
-// acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv；bit1 = 經典台詞，檔案 packs_dir/quotes-add.tsv，quote-pack 契約 §2）；
+// acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv；
+// bit1（值 2）= 經典台詞 SHANJIE_PACK_QUOTES，檔案 packs_dir/quotes-add.tsv，quote-pack 契約 §2；值 4 = 資訊＋AI 詞包 SHANJIE_PACK_IT，檔案 packs_dir/it-add.tsv，it-pack 契約 §3.1；三個位元可以一起，檔案依 ACG、台詞、IT 的順序讀）；
 // 詞包的列在建立時併入詞庫，所以開關在引擎生命期內固定，殼要換就釋放再建一個（和換排列相同）。packs 為 0 時不看 packs_dir（可為 NULL），
-// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元（bit0、bit1 以外）或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
-// packs 非 0 而 packs_dir 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3。詞包的詞在 load_lm 時和 overlay-add.tsv 的詞一樣依語料頻率封頂。
+// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元（bit0、bit1、bit2 以外）或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
+// packs 非 0 而 packs_dir 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3。詞包的詞在 load_lm 時不封頂、用詞包檔的分數，解碼時當成語言模型不認識的詞（pack-oov）。
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 // s3e 新增（docs/contracts/s3e-punctuation-candidates.md）
 int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table); // 標點候選表；不合法回 2 並保留原表；不改目前顯示
@@ -237,6 +241,12 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 // zhen-inline 新增（docs/contracts/zhen-inline.md §2）：英文的顯示方式。enabled 1（預設）＝打字時就顯示（顯示規則 D，§2）、0＝按空白才顯示；其他值回 2、狀態不變；
 // engine 或 out 為 NULL 回 1；成功回 0 並回傳快照（handled 1、commit ""），正在顯示的組字區照新的顯示重畫。只在 set_english(1) 時有作用。殼在每次建 engine 後都要呼叫。
 int32_t shanjie_engine_set_english_inline(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
+// fuzzy-input 新增（docs/contracts/fuzzy-input.md §2.1）：set_fuzzy 的 flags 位元 0–3 是四對模糊音（ㄣ/ㄥ、ㄓ/ㄗ、ㄔ/ㄘ、ㄕ/ㄙ，依此順序），位元 4 是鄰鍵打錯；其他位元非 0 回 2、狀態不變。
+// 建立時預設 0，0 什麼都不改。回傳碼與快照同 set_english（handled 1、commit ""；engine 或 out 為 NULL 回 1；組字區照新設定重算，快照顯示結果；解碼失敗回 4 並丟棄組字）。
+// 模糊音：每個詞可以有一個音節換成同一對的另一個（讀音替代），分數減 2.5（`fuzzy::DELTA_SOUND`）；語意校正不選這樣得到的詞：第一名有這樣的詞的段不送語意校正，否則候選只取沒有這樣的詞的路徑（fuzzy-input §3.6）。位元 4：見 §2 的例外；候選窗在完全吻合的詞之後列出容錯得到的詞，選了以後那一段換成詞的詞庫讀音。殼在每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out);
+// zhen-keyorder（docs/contracts/zhen-keyorder.md §3）：依按鍵順序判斷英文。enabled 0（預設）或 1，其他值回 2、狀態不變；engine 或 out 為 NULL 回 1；成功回 0 並回傳快照（handled 1、commit ""）。關掉（1→0）時開著的英文窗跟著關（不管窗是哪種證據開的）、影子照關窗的做法清掉，未完成音節保留；沒有英文窗時什麼都不動。只在 set_english(1) 時有作用；殼在每次建 engine 後都要呼叫。
+int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out);
 // S7c-2a 新增（docs/contracts/s7c2a-core-rerank.md §2.5）：小模型重排的兩段式 API。每次組字改變可能留下一個重排工作；殼取走、在別的執行緒 run、回到引擎的執行緒 apply。
 #define SHANJIE_NO_CHANGE 5
 typedef struct ShanjieRerankJob ShanjieRerankJob;
@@ -267,7 +277,7 @@ int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job
 void    shanjie_rerank_free(ShanjieRerankJob *job);
 ```
 
-- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode、profile 或語意校正強度超出範圍、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）、5 沒有改變（只有 `rerank_apply`，S7c-2a）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字（`rerank_run` 例外，見下）。
+- **回傳碼**：0 成功、1 必要的指標是 NULL、2 輸入不合法（data_dir、LM 路徑或標點表不是 UTF-8、`ch` 不是合法的 Unicode scalar、layout、mode、profile 或語意校正強度超出範圍、fuzzy 旗標有未定義的位元、標點表格式不合法或超過上限，見 s3e §3）、3 資料載入失敗（含 LM 檔讀取或格式錯誤、引擎沒有 data_dir）、4 內部錯誤（攔下的 panic 或解碼錯誤）、5 沒有改變（只有 `rerank_apply`，S7c-2a）。`load_lm` 失敗時 LM 維持原狀；碼 4 時任何函式都照下面的規則丟棄組字（`rerank_run` 例外，見下）。
 - **reset**：mode 0 時 `commit` 是目前組字區的顯示字串（未完成音節丟掉）；mode 1 時 `commit` 為空。兩者都清掉所有組字狀態，之後的輸出必須和新建的 engine 相同；S2c 起是「新建、載入相同 LM、使用相同設定的 engine」，reset 不清 LM 與設定。殼在 `commitComposition:`、`deactivateServer`、組字擁有者改變時呼叫（mode 與時機見 `docs/contracts/s3b.md` §5）。Caps Lock 由系統切換輸入方式，會觸發 `deactivateServer`；「privacyGate 轉為生效時」延到 S4。
 - **記憶體與生命週期**：
   - 回傳非 0 時，`*out` 一律設成 NULL，而且不配置任何記憶體。
@@ -314,7 +324,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 - **S7c-2a**：子行程測試 `child_rerank`／`rerank_codes_through_the_c_abi` 用真的詞庫與 n-gram 模型、`eval/golden/tinylm-tiny/` 的玩具模型（執行時改寫 n-gram 雜湊與 alpha／tau），涵蓋 load_tinylm 的碼 1、2、3（沒有 n-gram、不存在、壞檔、別的模型的雜湊、資料夾）、set_rerank 的碼、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、run → apply → 同一個工作再 apply 回 5、游標移動後照樣套用、Backspace 刪音節後過期回 5、apply 注入 panic 回 4 之後組字為空、load_tinylm 不改開關、引擎釋放後工作仍可 run 與 free，並檢查子行程輸出不含暫存路徑。`child_rerank_panic`／`r2_rerank_run_panic_is_silent`：第一次 run 成功之後，第二次 run 在注入點 panic（payload 含候選文字）回 4，子行程的 stdout／stderr 不含該文字（預設 hook 的正向對照看得到），之後組字不變、apply 回 5（第一次的結果也不留）。
 - **語意校正強度**（`rerank-strength.md` §2.2、§9）：子行程測試 `child_rerank_level`／`rerank_level_through_the_c_abi` 用合成的 v3 小檔（`eval/golden/tinylm-tiny/tiny-int8-v3.sjtl`，執行時改寫 n-gram 雜湊與六組 α、τ、δ：只有一個等級會改字），涵蓋 set_rerank_level 的碼 1、2（`*out` 為 NULL）、4（注入 panic：組字清空、新等級保留）；rerank_levels 的碼 1 與遮罩 0（沒有小模型、load_lm 之後）、2（v1、v2 檔）、7（v3 檔）；沒有模型時記下的等級在載入後生效；碼 2 之後先前 run 好的工作照樣套用（世代號與等級都沒變）；改等級（即使同一個值）讓 run 好的工作過期回 5；兩種 profile 下三個等級各自只用自己那一組；load_lm 之後重新載入仍保留等級；v1、v2 檔每個等級都用標準那組，並檢查子行程輸出不含暫存路徑。格式測試在 `core/tests/tinylm_tiny.rs`（`v3_*`，含魔數與版本的交叉組合）。
 
-`core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。
+`core/tests/engine_pack.rs`（acg-pack 契約 A.5）：走出貨的建構子 `new_with_packs`，用會變的輸入（碇源堂、螢火蟲之墓的讀音，聊天與書面）。遮罩 0 且檔案存在、遮罩 1 且檔案不存在，兩者的每一個 `Output`（解碼、候選窗、預測列）都和 `Engine::new` 逐位元相同；遮罩 1 且檔案存在時，兩個名字是第一個候選。把遮罩改成什麼都不做會讓 `on != plain` 的斷言失敗（2026-10-09 實測，exit 101）。資訊詞包的位元另有 `the_it_pack_has_its_own_bit_and_file`：用「圖像生成」的讀音，位元 4 清掉但檔案在、位元 4 設了但檔案不在，都和沒有詞包的視窗第一候選相同；位元 4 設了且檔案在，聊天與書面的第一候選都是它，和動漫詞包同開時碇源堂照樣是第一候選；值 2 仍是 `LoadFailed`（`an_unknown_pack_bit_is_refused`）。
 
 ### 7.4 C 標頭冒煙測試（`core/tests/c/abi_smoke.c`）
 
@@ -328,6 +338,7 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
   - S7c-2a（檢查 901–918）：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`set_rerank` 的碼；沒有小模型時打字後 `rerank_take` 回 0 且 `*job` 為 NULL；take、run、apply 的 NULL 組合；`rerank_free(NULL)`。冒煙測試沒有 `.sjtl`，成功的 run／apply 由 §7.3 的子行程測試負責。
   - 語意校正強度（檢查 951–960）：沒有小模型時 `rerank_levels` 回 0、遮罩 0，NULL 回 1；`set_rerank_level` 的碼 1、2（`*out` 為 NULL）與沒有模型時回 0 和快照；`load_lm` 之後遮罩仍是 0。
   - 口語表（檢查 961–963）：`load_colloquial` 的 NULL 引擎、NULL 路徑回 1，不存在的檔案回 3；成功載入與口語項本身由 `core/tests/engine_colloquial.rs` 負責。
+  - fuzzy-input（檢查 1101–1107）：`set_fuzzy` 的 NULL 組合、位元超出（32、全 1）回 2 且 `*out` 為 NULL、31 與 0 回 0 與快照。
   - 全部通過時 exit 0，任何一項不符時印出項目編號（不印任何字串內容）並 exit 1。
 - 指令（在 repo 根目錄，`$T` 是暫存目錄）：
 
@@ -373,13 +384,13 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 - **查表**：詞彙用位元組二分搜尋（id 0、1 是 `<s>`、`</s>`），前文與下一詞用二分搜尋，沒有雜湊表。
 - **`pow(10, lp)` 的坑**：Rust 的 `10f64.powf(lp)` 在底數是常數時，LLVM 會改寫成 `exp10`，末位和 Python 的 `10 ** lp`（libm `pow`）差 1 ulp（formal 的 dump 有 2 列的分數差約 3.6e-15）。`lm.rs` 的 `pow10` 用 `black_box` 藏起底數，改後 chat、formal 的 `--dump` 與 Python 逐位元組相同。
 - **上限後詞庫（`CappedLexicon::new(Arc<Lexicon>, overlay 文字, &Lm)`）**：與原詞庫共用字串池與讀音表（只多一份 `ents` 陣列，每筆 16 bytes），每個讀音的詞條範圍不變、只在範圍內重排。疊加層詞集是 `overlay-add.tsv` 每行第二欄，與 `lm_eval.py` 相同。CLI 與 `Engine::load_lm` 都呼叫它。
-- **解碼**：`decode_segment(lex, 音節, lm, λ, 前文詞, End, beam)` 是唯一的實作；`decode` 是前文 `<s>`、`End::Eos` 的特例。組字區第一段（左邊沒有固定詞的那段）的前文詞是 `lm::history(前文, lm)`：`set_left_context` 存的前文（最多 2 個漢字）整段或最後 1 個字，取第一個在模型裡有 bigram 歷史紀錄的，都沒有就是 `<s>`（S2h §1）。其他段照舊：左邊是固定詞就用那個詞，是標點就用 `<s>`。每個候選的 `pb` 與詞 id 在迴圈外算一次，只是提出共同項，沒有改運算順序。路徑同時帶著每個詞實際用的 lp，供 `total_score` 使用。
-  **trigram 層**（`docs/contracts/trigram-core.md`，第 A 片）：解碼傳的是 `Scoring`（λ、KN 開關、trigram 開關，`Lm::scoring(profile)`；裸 λ 等於舊行為）。書面且模型旁有 `trigram.sjt3` 時是 trigram 開、KN 關，其餘（聊天、沒有表）不變；預測列（V3）不經過它，兩種設定都照 KN 側檔、不用 trigram。狀態是最後兩個詞，重組鍵是（表面字串, 前一詞, 最後一詞）（沒表時仍是舊的兩元鍵）。每段的起始歷史 (u, v)：前文詞是 `<s>`（句首、標點之後、英文段之後、前文給 `<s>`）→ (`<s>`, `<s>`)；其他詞（固定的字、輸入框前文）→ (未知, 該詞)，第一個詞只用 bigram。收尾項（`Eos`、`End::Next`）用 (倒數第二詞, 最後一詞)；段內只有一個詞時，倒數第二詞是起始的 v。起始的 u 未知（固定的字、輸入框前文）而且段內只有一個詞時，收尾項的 u 也當作未知，用 bigram（第 A2 片 (b′)）；起始是 (`<s>`, `<s>`) 的段不變。經過 trigram 的每一項取 `max(P3, 0.5·P2)`（第 A2 片 (e)，`TRI_FLOOR`）。被學習加分的詞條（`was_boosted`）不經過 trigram，也不經過 KN（`prob_learned`）。
+- **解碼**：`decode_segment(lex, 音節, lm, λ, 前文詞, End, beam)` 是唯一的實作；`decode` 是前文 `<s>`、`End::Eos` 的特例。組字區第一段（左邊沒有固定詞的那段）的前文詞是 `lm::history(前文, lm)`：`set_left_context` 存的前文（最多 2 個漢字）整段或最後 1 個字，取第一個在模型裡有 bigram 歷史紀錄的，都沒有就是 `<s>`（S2h §1）。殼傳的是同一則訊息最多 64 個 grapheme 的原文（`context-return.md`），核心在解碼、學習、預測列的 `key` 與數字層只用它結尾 ≤ 2 個漢字；另外只留 `left_full`：載入的會意模型宣告了前文長度 L（SJTL0005）時是原文的最後 L 個字元，否則是結尾的英文詞（和它後面的一個空白），都不是時是空的；`left_full` 不經 C ABI 回傳、不寫檔、不記 log。宣告 L 的模型，每個重排段的前文是 `left_full`＋組字區在這一段之前的顯示的最後 L 個字元（不經過 `context_key`）；沒有宣告的照舊。其他段照舊：左邊是固定詞就用那個詞，是標點就用 `<s>`。每個候選的 `pb` 與詞 id 在迴圈外算一次，只是提出共同項，沒有改運算順序。路徑同時帶著每個詞實際用的 lp，供 `total_score` 使用。
+  **trigram 層**（`docs/contracts/trigram-core.md`，第 A 片）：解碼傳的是 `Scoring`（λ、profile，`Lm::scoring(profile)`；profile 決定用哪張 trigram 表與 KN 的 β，表有沒有載入看 `Lm::uses_tri`；裸 λ 沒有 profile，等於舊行為）。**每個設定用自己的表**（`docs/contracts/sj-lm-7-pr2.md`）：書面用 `trigram.sjt3`、聊天用 `trigram-chat.sjt3`，模型旁有該設定的表時 trigram 開，沒有就是 bigram；兩個設定都開 KN（有 `kn.sjkn` 時），聊天用側檔記的 β，**書面用 `FORMAL_KN_BETA` 0.75**（`core/src/lm.rs`，不論側檔記多少）；一個設定的表不影響另一個設定。載入（`Lm::load`，引擎的 `load_lm`）兩張都 mmap，任何一張壞掉整個載入失敗（回傳 3，兩個設定都受影響），缺哪張只關哪個設定的 trigram；評測 CLI 只讀該設定自己的表。預測列（V3）和數字判斷（`Lm::word_by_id`、`Lm::unigram_back`）用該設定的 λ 與 KN β（書面 0.75、聊天照側檔），不用 trigram。狀態是最後兩個詞，重組鍵是（表面字串, 前一詞, 最後一詞）（沒表時仍是舊的兩元鍵）。每段的起始歷史 (u, v)：前文詞是 `<s>`（句首、標點之後、英文段之後、前文給 `<s>`）→ (`<s>`, `<s>`)；其他詞（固定的字、輸入框前文）→ (未知, 該詞)，第一個詞只用 bigram。收尾項（`Eos`、`End::Next`）用 (倒數第二詞, 最後一詞)；段內只有一個詞時，倒數第二詞是起始的 v。起始的 u 未知（固定的字、輸入框前文）而且段內只有一個詞時，收尾項的 u 也當作未知，用 bigram（第 A2 片 (b′)）；起始是 (`<s>`, `<s>`) 的段不變。經過 trigram 的每一項取 `max(P3, 0.5·P2)`（第 A2 片 (e)，`TRI_FLOOR`）。被學習加分的詞條（`was_boosted`）不經過 trigram，也不經過 KN（`prob_learned`）。
 
   **載入方式**（`docs/contracts/trigram-mmap.md`）：`Lm::load_opts` 以唯讀 `mmap` 載入 `trigram.sjt3`（`core/src/trigram.rs` 的 `Mapped`），不整檔讀進記憶體；檔案在映射期間被原地截短或改寫會讓讀到的頁面收到 SIGBUS，所以安裝流程（`scripts/install-ime.sh`、安裝程式、Homebrew cask）都只能整個 bundle 以 rename 換掉，不可原地改寫這個檔。
 - **引擎**：`Engine::new` 記住 `data_dir`；`load_lm(path)` 失敗時（含沒有 `data_dir`）維持原狀並回 `LoadFailed`，成功時不重算顯示。`set_lm(Arc<Lm>, Arc<CappedLexicon>)` 是 `with_lexicon` 引擎專用的注入（測試用）。`set_profile(Profile)` 先記住再重算，解碼失敗時引擎自行清空並回 `Internal`；沒載入 LM 時顯示不變。`Profile::from_code` 供 step 2 的 ABI 使用（0 chat、1 formal）。
 - **`lp_F`**：`CappedLexicon::best_lp(讀音, 詞)`，同讀音下同字串取最大值；找不到（不會發生，候選就來自這個讀音）視為內部錯誤。固定詞之間沒有空白區間時，不需要特別處理：兩個固定詞各自以「前一詞」計分，這件事只出現在 `total_score`（沿路徑逐詞累加）。
-- **`total_score()`**：從第一段的前文詞（同上，S2h §1）開始，沿目前最佳路徑（`refresh_lm` 同時存下的 `(詞, lp)`）依序加 `word(λ, 前一詞, 詞, lp)`，最後加 `eos`；前文本身不計分；沒有 LM 或組字區空時回 `None`。例外（model-v6 §2.8 規則 1）：路徑上被學習加分的詞（`lp > best_lp(讀音, 詞)`，和 `Engine::boosted` 同一個判斷）用 `word_learned`（不經過 KN 替換），和解碼時的算法相同，所以總分仍等於解碼第一名的分數。書面有 trigram 表時逐詞帶兩個歷史詞，和解碼的段交界一致：標點之後是 (`<s>`, `<s>`)，固定的字之後的第一個詞是 (未知, 固定的字)，其他詞是 (前前詞, 前詞)；`eos` 與到固定詞的轉移項同樣用 trigram（`Lm::word3`／`eos3`），只有一個詞、起始的 u 未知的段落例外：這兩項的 u 當作未知，用 bigram（第 A2 片 (b′)，`total_score` 從段落開頭數詞數）。被學習加分的詞（上面的例外）不經過表也不經過 KN，但仍是下一個詞的歷史詞。開著的英文段（`run_cut`，游標處）在有表時照 `refresh_lm` 切開：左半以 `eos` 收尾，右半從 (`<s>`, `<s>`) 重起，和標點一樣，所以英文段落在一段組字的中間時總分仍等於解碼第一名的分數（`core/tests/tri_tiny.rs`，突變「不切英文段」以斷言失敗）。**已知例外**（PR #175 verifier 量到）：英文段緊貼在固定的字旁邊時（固定的字因此成了段的邊緣），`total_score` 會多算固定的字的句尾項（英文段在它後面）或它的詞項（英文段在它前面），解碼器不算這兩項；和沒有英文段、固定的字在組字區最後時 main 上本來就有的差異是同一類（有表、沒表都一樣）。`total_score` 目前只有測試在用，App 沒有呼叫，選字不受影響；要讓它在這些情況也相等，改成由 `refresh_lm` 存下每段的解碼分數再相加，另開一片。沒有表時英文段仍不是這個總分的邊界（bigram 的總分從來沒有在那裡切，不改，聊天設定逐位元組不變）。
+- **`total_score()`**：從第一段的前文詞（同上，S2h §1）開始，沿目前最佳路徑（`refresh_lm` 同時存下的 `(詞, lp)`）依序加 `word(λ, 前一詞, 詞, lp)`，最後加 `eos`；前文本身不計分；沒有 LM 或組字區空時回 `None`。例外（model-v6 §2.8 規則 1）：路徑上被學習加分的詞（`lp > best_lp(讀音, 詞)`，和 `Engine::boosted` 同一個判斷）用 `word_learned`（不經過 KN 替換），和解碼時的算法相同，所以總分仍等於解碼第一名的分數。該設定有 trigram 表時（書面 `trigram.sjt3`、聊天 `trigram-chat.sjt3`）逐詞帶兩個歷史詞，和解碼的段交界一致：標點之後是 (`<s>`, `<s>`)，固定的字之後的第一個詞是 (未知, 固定的字)，其他詞是 (前前詞, 前詞)；`eos` 與到固定詞的轉移項同樣用 trigram（`Lm::word3`／`eos3`），只有一個詞、起始的 u 未知的段落例外：這兩項的 u 當作未知，用 bigram（第 A2 片 (b′)，`total_score` 從段落開頭數詞數）。被學習加分的詞（上面的例外）不經過表也不經過 KN，但仍是下一個詞的歷史詞。開著的英文段（`run_cut`，游標處）在有表時照 `refresh_lm` 切開：左半以 `eos` 收尾，右半從 (`<s>`, `<s>`) 重起，和標點一樣，所以英文段落在一段組字的中間時總分仍等於解碼第一名的分數（`core/tests/tri_tiny.rs`，突變「不切英文段」以斷言失敗）。**已知例外**（PR #175 verifier 量到）：英文段緊貼在固定的字旁邊時（固定的字因此成了段的邊緣），`total_score` 會多算固定的字的句尾項（英文段在它後面）或它的詞項（英文段在它前面），解碼器不算這兩項；和沒有英文段、固定的字在組字區最後時 main 上本來就有的差異是同一類（有表、沒表都一樣）。`total_score` 目前只有測試在用，App 沒有呼叫，選字不受影響；要讓它在這些情況也相等，改成由 `refresh_lm` 存下每段的解碼分數再相加，另開一片。沒有表時英文段仍不是這個總分的邊界（bigram 的總分從來沒有在那裡切，不改，沒有表的設定逐位元組不變）。
 - **reset**：`clear_all` 只清組字狀態（含路徑），不碰 `lm`、`profile`、`data_dir`。
 - **評測 CLI 的資料來源**：`--dev N` 與 `--rows` 照 `lm_eval.py` 的 `rows_of`，只收恰好三欄的列，不套 `usable`（dev 的 390 列都是三欄，與 S3a 的 302 列相同）；`--set holdout` 走既有的 `load_set`（`usable` 加 `row_syllables`）。`--name` 缺省時 `--rows` 用檔名。`top1_sha256` 用 `core::eval::sha256_hex`（專案沒有雜湊 crate，自寫 FIPS 180-4，附已知向量測試）。
 - **逐分數對照（驗收 3）的指令**：`python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat --dev 302 --dump $T/chat.dump`，對 `shanjie-eval --lm … --profile chat --dev 302 --dump $T/r-chat.dump`，formal 同理；`cmp` 兩邊檔案（結果是位元組相同）。這個比對需要 Python，所以沒放進 `cargo test`；`cargo test` 涵蓋的是 4 組參數的摘要行（含 `top1_sha256`）與 `s2-lm-dev302-top1.tsv`。

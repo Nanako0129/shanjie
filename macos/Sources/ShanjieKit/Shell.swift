@@ -145,6 +145,9 @@ public protocol EnglishStore: AnyObject {
     /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
     /// when Space opens the window. `nil` means never chosen, which is true.
     var englishInline: Bool? { get set }
+    /// The choice under that (docs/contracts/zhen-keyorder.md section 3): keys out of Zhuyin's column order count as evidence of English.
+    /// `nil` means never chosen, which is false.
+    var englishKeyOrder: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
@@ -152,10 +155,26 @@ public protocol EnglishStore: AnyObject {
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
     public var englishInline: Bool?
-    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+    public var englishKeyOrder: Bool?
+    public init(_ english: Bool? = nil, inline: Bool? = nil, keyOrder: Bool? = nil) {
         self.english = english
         self.englishInline = inline
+        self.englishKeyOrder = keyOrder
     }
+}
+
+/// Where the 模糊輸入 flags are kept (docs/contracts/fuzzy-input.md section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key
+/// slips, as `shanjie_engine_set_fuzzy`; `nil` means never chosen, which is 0 (all off). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol FuzzyStore: AnyObject {
+    var fuzzyFlags: UInt32? { get set }
+}
+
+/// The in-memory FuzzyStore.
+@MainActor
+public final class MemoryFuzzyStore: FuzzyStore {
+    public var fuzzyFlags: UInt32?
+    public init(_ fuzzyFlags: UInt32? = nil) { self.fuzzyFlags = fuzzyFlags }
 }
 
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
@@ -184,6 +203,19 @@ public protocol QuotePackStore: AnyObject {
 public final class MemoryQuotePackStore: QuotePackStore {
     public var quotePack: Bool?
     public init(_ quotePack: Bool? = nil) { self.quotePack = quotePack }
+}
+
+/// Where the "資訊與 AI 詞" switch is kept (docs/contracts/it-pack.md section 3.2): `nil` means never chosen, which is on. Same arrangement as `AcgPackStore`.
+@MainActor
+public protocol ItPackStore: AnyObject {
+    var itPack: Bool? { get set }
+}
+
+/// The in-memory ItPackStore.
+@MainActor
+public final class MemoryItPackStore: ItPackStore {
+    public var itPack: Bool?
+    public init(_ itPack: Bool? = nil) { self.itPack = itPack }
 }
 
 /// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
@@ -395,9 +427,18 @@ public final class Shell {
     /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
     /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
     private(set) var englishInlineOn = true
+    /// zhen-keyorder section 3: whether keys out of Zhuyin's column order count as evidence of English (default false: `UserDefaults`
+    /// key `englishKeyOrder`, absent is false); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishKeyOrderOn = false
     /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
     /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
     private(set) var englishAvailable = false
+    private let fuzzyStore: FuzzyStore
+    /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
+    /// `build()` makes. Only the bits the core knows are kept.
+    private(set) var fuzzyFlags: UInt32 = 0
+    /// What `build()` sent to each engine it made, in order (test hook, like `rerankSent`).
+    private(set) var fuzzySent: [UInt32] = []
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
@@ -407,9 +448,25 @@ public final class Shell {
     private let quotePackStore: QuotePackStore
     /// The classic quote pack (default off, quote-pack contract section 2): a bit of the same packs mask as the ACG pack, so a change rebuilds the engine too.
     private(set) var quotePackOn = false
-    /// The mask `build()` passes to `shanjie_engine_new_packs`: the ACG bit while that switch is on, the quote bit while that one is.
-    /// A quote switch never chosen is off, so the mask of an app that never touched it is the ACG bit alone, as before the quote pack existed.
-    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) }
+    private let itPackStore: ItPackStore
+    /// The IT+AI word pack (default on, it-pack contract 3.2): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
+    private(set) var itPackOn = true
+    /// The packs in the settings order: mask bit, file in the packs directory, menu title. `packMask`, the missing-file check and the menu line all read this.
+    private static let packTable: [(bit: UInt32, file: String, title: String)] = [
+        (CoreEngine.packACG, "acg-add.tsv", MenuEntry.Text.acgPack),
+        (CoreEngine.packQuotes, "quotes-add.tsv", MenuEntry.Text.quotePack),
+        (CoreEngine.packIT, "it-add.tsv", MenuEntry.Text.itPack),
+    ]
+    /// The mask `build()` passes to `shanjie_engine_new_packs`: one bit per switch that is on. The quote switch never chosen is off and the
+    /// IT switch never chosen is on, so an app that never touched either builds with the ACG and IT bits, as before the quote pack existed.
+    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) }
+    /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, less the bits
+    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
+    private(set) var loadedPackMask: UInt32 = 0
+    /// The names of the loaded packs in the settings order, for the menu line.
+    var loadedPackTitles: [String] {
+        Shell.packTable.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
+    }
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -462,8 +519,13 @@ public final class Shell {
     /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
     var englishEnabled: Bool { englishAvailable && mode == .standard }
+    /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
+    /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
+    var fuzzyAdjacentEnabled: Bool { mode == .standard }
     /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
     var englishInlineEnabled: Bool { englishEnabled && englishOn }
+    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the display choice.
+    var englishKeyOrderEnabled: Bool { englishInlineEnabled }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -544,6 +606,7 @@ public final class Shell {
     /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
     /// `quotePackStore`: the classic quote pack switch (quote-pack contract section 2). Required, like `acgPackStore`.
+    /// `itPackStore`: the IT+AI word pack switch (it-pack contract 3.2). Defaults to an in-memory store so the many test rigs need not name it; the app passes its own.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
     /// `rerankStore`: the 語意校正 switch (s7c2b section 2.2). Required, like `predictionStore`.
@@ -551,6 +614,8 @@ public final class Shell {
     /// `QueueRerankRunner`, the tests a runner they complete by hand.
     /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
     /// Required, like `glassTintStore`.
+    /// `fuzzyStore`: the 模糊輸入 flags (fuzzy-input section 2.2). The default (in memory, all off) is for the tests; the app passes its
+    /// UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
@@ -562,10 +627,12 @@ public final class Shell {
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
+                fuzzyStore: FuzzyStore = MemoryFuzzyStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
-                spacingStore: SpacingStore) {
+                spacingStore: SpacingStore,
+                itPackStore: ItPackStore = MemoryItPackStore()) {
         self.resources = resources
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
@@ -594,6 +661,9 @@ public final class Shell {
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
         englishInlineOn = englishStore.englishInline ?? true
+        englishKeyOrderOn = englishStore.englishKeyOrder ?? false
+        self.fuzzyStore = fuzzyStore
+        fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.quotePackStore = quotePackStore
@@ -611,6 +681,8 @@ public final class Shell {
         appProfiles = AppProfiles.parse(appProfileStore.appProfiles)
         acgPackOn = acgPackStore.acgPack ?? true
         quotePackOn = quotePackStore.quotePack ?? false
+        self.itPackStore = itPackStore
+        itPackOn = itPackStore.itPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -654,12 +726,20 @@ public final class Shell {
         if let o = owner { o.applyEnglish(on) } else { dropOnFailure(setEnglish(on)) }
     }
 
+    func applyFuzzy(_ flags: UInt32) {
+        if let o = owner { o.applyFuzzy(flags) } else { dropOnFailure(setFuzzy(flags)) }
+    }
+
     func applyCandidateVertical(_ on: Bool) {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
     func applyEnglishInline(_ on: Bool) {
         if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    }
+
+    func applyEnglishKeyOrder(_ on: Bool) {
+        if let o = owner { o.applyEnglishKeyOrder(on) } else { dropOnFailure(setEnglishKeyOrder(on)) }
     }
 
     func applyRerank(_ on: Bool) {
@@ -770,6 +850,15 @@ public final class Shell {
         return engine?.setEnglish(on)
     }
 
+    /// The settings window's 模糊輸入 flags (fuzzy-input section 2.2): stored, and sent to the engine, which recomputes the composition
+    /// (an accepted syllable keeps decoding whatever the flags are); the snapshot is for the caller to show.
+    func setFuzzy(_ flags: UInt32) -> CoreResult? {
+        fuzzyFlags = flags & 0b11111
+        fuzzyStore.fuzzyFlags = fuzzyFlags
+        defer { changed() }
+        return engine?.setFuzzy(fuzzyFlags)
+    }
+
     /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
     /// caller to show, so a composition on screen is drawn again in the new display.
     func setEnglishInline(_ on: Bool) -> CoreResult? {
@@ -777,6 +866,16 @@ public final class Shell {
         englishStore.englishInline = on
         defer { changed() }
         return engine?.setEnglishInline(on)
+    }
+
+    /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
+    /// caller to show. The core closes an open English window when the choice goes off, whatever evidence opened it; otherwise nothing
+    /// on screen changes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
+        englishKeyOrderOn = on
+        englishStore.englishKeyOrder = on
+        defer { changed() }
+        return engine?.setEnglishKeyOrder(on)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -846,7 +945,7 @@ public final class Shell {
         session.applyRerankJob(job, on: engine)
     }
 
-    /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
+    /// The settings switch (acg-pack contract A.2; it-pack 3.2 moved it out of the menu): the pack is part of the lexicon, so like a layout change the
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
         guard on != acgPackOn else { return }
@@ -870,6 +969,17 @@ public final class Shell {
         Log.shell.debug("quote pack switched")
     }
 
+    /// The settings switch (it-pack contract 3.2): the same as `setAcgPack` for the IT+AI pack.
+    func setItPack(_ on: Bool) {
+        guard on != itPackOn else { return }
+        commitThenRebuild {
+            itPackOn = on
+            itPackStore.itPack = on
+        }
+        changed()
+        Log.shell.debug("it pack switched")
+    }
+
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
@@ -878,18 +988,24 @@ public final class Shell {
         rerankLevels = 0
         englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
+        loadedPackMask = 0
         let packsDir = resources.appendingPathComponent("packs").path
         let mask = packMask
+        // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
+        let present = Shell.packTable.reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.file) ? $0 | $1.bit : $0 }
+        var built = mask & present
         var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
-            // Any build failure retries with fewer packs, so the first code alone does not say whose fault it is: with both packs on, try
-            // each pack alone (a broken file must not take the other pack with it; the default-on ACG pack first), then none. Blame the
+            // Any build failure retries with fewer packs, so the first code alone does not say whose fault it is: with several packs on, try
+            // each pack alone (a broken file must not take the others with it; the settings order, ACG first), then none. Blame the
             // packs only if a retry works; otherwise the last code is the real cause. The stored choices are untouched and nothing is
             // shown; the next rebuild tries the packs again.
             let packCode = code
-            let retries: [UInt32] = mask == CoreEngine.packACG | CoreEngine.packQuotes ? [CoreEngine.packACG, CoreEngine.packQuotes, 0] : [0]
+            let alone = Shell.packTable.map(\.bit).filter { mask & $0 != 0 }
+            let retries: [UInt32] = (alone.count > 1 ? alone : []) + [0]
             for retry in retries where made == nil {
                 (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: retry != 0 ? packsDir : nil, packs: retry)
+                built = retry & present
                 if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(retry)") }
             }
         }
@@ -897,6 +1013,7 @@ public final class Shell {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
+        loadedPackMask = built
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
         // s7c2b section 2.3: after load_lm (which drops a small model). Missing or failed: the n-gram alone, no rerank.
@@ -933,6 +1050,15 @@ public final class Shell {
         // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
         if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
             Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        }
+        // And the key-order evidence (zhen-keyorder section 3), every time: the core's default is false.
+        if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
+            Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
+        }
+        // And the 模糊輸入 flags (fuzzy-input section 2.2), every time: the core's default is 0.
+        fuzzySent.append(fuzzyFlags)
+        if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
+            Log.shell.error("shanjie_engine_set_fuzzy failed, code \(c)")
         }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -1172,9 +1298,28 @@ public final class Session {
         }
     }
 
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (turning it off
+    /// closes an open English window, whatever opened it; otherwise the snapshot is what was on screen).
+    func applyEnglishKeyOrder(_ on: Bool) {
+        switch shell.setEnglishKeyOrder(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
     /// The menu's abbreviation switch: the snapshot is shown, if this session owns the composition.
     func applyAbbreviation(_ on: Bool) {
         switch shell.setAbbreviation(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 模糊輸入 flags: the snapshot is shown, if this session owns the composition.
+    func applyFuzzy(_ flags: UInt32) {
+        switch shell.setFuzzy(flags) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
@@ -1265,7 +1410,8 @@ public final class Session {
     /// The single place a key reaches the core.
     func send(_ key: ShanjieKey) -> Bool {
         guard let engine = shell.engine else { return false }
-        let paused = applyLearningGate(engine)
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once, for the gate and the left context's terminal check
+        let paused = applyLearningGate(engine, bundle: bundle)
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
@@ -1274,9 +1420,9 @@ public final class Session {
         if !shell.composing {
             spacingPrev = nil
             if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
-                let read = paused ? nil : leftContext()
+                let read = paused ? nil : leftContext(bundle: bundle)
                 spacingPrev = read?.last
-                let code = engine.setLeftContext(read?.han)
+                let code = engine.setLeftContext(read?.text)
                 if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
             }
         }

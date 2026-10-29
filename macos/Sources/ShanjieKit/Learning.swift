@@ -13,15 +13,48 @@ public enum LearningPause: Equatable, Sendable {
     case app
 }
 
-/// Section 2: the left context the shell may pass to the core.
+/// Section 2: the left context the shell may pass to the core (docs/contracts/context-return.md section 1: the raw text of the
+/// same message, at most `maxGraphemes`; terminal apps only the Han tail).
 enum LeftContext {
-    /// UTF-16 units requested before the insertion point.
-    static let maxUTF16 = 32
+    /// UTF-16 units requested before the insertion point, and the most of a reply that is looked at (context-return section 1). A CJK
+    /// or ASCII character is one unit (𠮷 two), so 256 units hold more than 64 of them; emoji are longer and fewer fit: 256 units hold
+    /// 64 of 👍🏽 (four units) and 32 of the ZWJ family 👨‍👩‍👧 (eight units), as LearningTests measures.
+    static let maxUTF16 = 256
+    /// Graphemes passed to the core.
+    static let maxGraphemes = 64
+
+    /// Terminal apps get only `han`, as before (context-return section 1; user decision 2026-10-25, security review P2-1): a terminal
+    /// line holds commands and their output. com.apple.Terminal and com.googlecode.iterm2 were read from the apps' Info.plist
+    /// (CFBundleIdentifier) on the maintainer's Mac on 2026-10-25; org.alacritty was corrected in review (PR #294); the other five are
+    /// the IDs the contract lists, not checked against an installed app or a published Info.plist.
+    /// An editor with a built-in terminal is not here: the panel has the editor's bundle ID (a known limit, out of scope).
+    static let terminals: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.github.wez.wezterm",
+        "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
+    ]
 
     /// The range to request: at most `maxUTF16` units ending at `insertion`.
     static func range(insertion: Int) -> NSRange {
         let start = max(0, insertion - maxUTF16)
         return NSRange(location: start, length: insertion - start)
+    }
+
+    /// Step 1 (P3-2): a reply longer than `maxUTF16` units (an app may return more than was asked) is cut to its last `maxUTF16`
+    /// units and counts as truncated. A surrogate pair cut in half decodes to U+FFFD, which the truncated drop removes.
+    static func clamp(_ text: String) -> (text: String, truncated: Bool) {
+        let units = text.utf16
+        guard units.count > maxUTF16 else { return (text, false) }
+        return (String(decoding: units.suffix(maxUTF16), as: UTF16.self), true)
+    }
+
+    /// Steps 2-5: drop the first grapheme of a truncated read, start after the last line break (`Character.isNewline`) or NUL (a
+    /// NUL is a break, not deleted: deleting it would join 中\0文 into 中文), keep the last `maxGraphemes` graphemes as they are
+    /// (punctuation, spaces, English and emoji included). `nil` when nothing is left.
+    static func raw(_ text: String, truncated: Bool) -> String? {
+        let line = truncated ? Substring(text.dropFirst()) : Substring(text)
+        let start = line.lastIndex { $0.isNewline || $0 == "\0" }.map(line.index(after:)) ?? line.startIndex
+        let kept = line[start...].suffix(maxGraphemes)
+        return kept.isEmpty ? nil : String(kept)
     }
 
     /// The trailing ≤ 2 consecutive Han characters of `text`, `nil` when there are none; the same
@@ -55,7 +88,9 @@ public struct MenuEntry: Equatable, Sendable {
         case toggleEnglish
         case toggleAbbreviation
         case toggleRerank
+        // No menu item carries these since it-pack contract 3.2 (the switches are in Settings); `perform` keeps them for programmatic use.
         case toggleAcgPack
+        case toggleItPack
         case toggleAppChat
         case openSettings
         /// docs/contracts/about-update.md section 1: a silent check, then 善解更新 (standalone-updater.md) if it confirms one.
@@ -81,6 +116,9 @@ public struct MenuEntry: Equatable, Sendable {
         public static let englishDisplay = "英文的顯示"
         public static let englishDisplayTyped = "打字時就顯示"
         public static let englishDisplaySpace = "按空白才顯示"
+        /// The toggle under the display choice and the line under it (docs/contracts/zhen-keyorder.md section 3).
+        public static let englishKeyOrder = "依按鍵順序判斷英文"
+        public static let englishKeyOrderNote = "ok、ls、cup 這類短詞不用按 Shift。開了之後，用重打同一個位置來改錯的注音，比較容易被當成英文。"
         /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
@@ -88,7 +126,10 @@ public struct MenuEntry: Equatable, Sendable {
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static let quotePack = "經典台詞"
+        public static let itPack = "資訊與 AI 詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
+        /// The menu's non-clickable pack line (it-pack contract 3.2).
+        public static func packsOn(_ names: [String]) -> String { "已開啟的詞包：" + names.joined(separator: "、") }
         /// No app name in the title (profile-choice section 2.3).
         public static let appChat = "這個 App 用聊天設定"
         public static let settings = "善解設定…"
@@ -185,26 +226,36 @@ extension Session {
     /// engine starts disabled). Returns whether learning is paused.
     @discardableResult
     func applyLearningGate(_ engine: CoreEngine) -> Bool {
-        let paused = learningPause != nil
+        applyLearningGate(engine, bundle: client.bundleIdentifier)
+    }
+
+    /// The gate for `bundle`, this client's bundle ID as the caller read it (a synchronous IPC, read once per key by `send`).
+    @discardableResult
+    func applyLearningGate(_ engine: CoreEngine, bundle: String?) -> Bool {
+        let paused = shell.learningPause(bundle: bundle) != nil
         let code = engine.setLearning(!paused)
         if code != 0 { Log.shell.error("shanjie_engine_set_learning failed, code \(code)") }
         return paused
     }
 
     /// Section 2: read once at composition start. No context when there is no insertion point or
-    /// the client still holds marked text; at most `LeftContext.maxUTF16` units are requested.
+    /// the client still holds marked text; at most `LeftContext.maxUTF16` units are requested, and no more of the reply is read.
     /// "No marked text" is an empty marked range at any location: on 2026-10-06 VS Code, Chrome,
     /// Finder's search field and others reported {insertion, 0} rather than NSTextInputClient's
     /// {NSNotFound, 0}, and one reported {NSNotFound, NSNotFound} (numbers-only log on device).
     ///
-    /// Returns the trailing Han characters for the core and, from the same read, the raw last character for cjk-spacing section 1.
-    /// Changes no state.
-    func leftContext() -> (han: String?, last: Character?) {
+    /// Returns what goes to the core (context-return section 1: `LeftContext.raw`, or `LeftContext.han` for a terminal app; `bundle` is
+    /// this client's bundle ID as the gate read it, no second IPC) and, from the same read, the raw last character for cjk-spacing
+    /// section 1. Only in memory: never stored or logged. Changes no state.
+    func leftContext(bundle: String?) -> (text: String?, last: Character?) {
         let selected = client.selectedRange(), marked = client.markedRange()
         guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
         let range = LeftContext.range(insertion: selected.location)
-        guard range.length > 0, let text = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
-        return (LeftContext.han(text, truncated: range.location > 0), text.last)
+        guard range.length > 0, let reply = client.attributedSubstring(from: range)?.string else { return (nil, nil) }
+        let (text, clamped) = LeftContext.clamp(reply)
+        let truncated = clamped || range.location > 0
+        let terminal = bundle.map(LeftContext.terminals.contains) ?? false
+        return (terminal ? LeftContext.han(text, truncated: truncated) : LeftContext.raw(text, truncated: truncated), text.last)
     }
 
     /// The menu (s3b section 13.2, sw section 3 and S4 sections 3-4), in order.
@@ -231,8 +282,10 @@ extension Session {
         // s7c2b section 2.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.
         items.append(MenuEntry(title: T.rerank, action: .toggleRerank, checked: shell.rerankOn, enabled: shell.rerankEnabled))
-        items.append(MenuEntry(title: T.acgPack, action: .toggleAcgPack, checked: shell.acgPackOn))
-        if let date = shell.acgDataDate { items.append(MenuEntry(title: T.acgDataDate(date))) }   // about the data, so shown with the pack off too
+        // it-pack contract 3.2: the pack switches live in Settings; the menu only names the packs the engine loaded, not clickable,
+        // and has no line when none is loaded (the ACG data date is shown under its switch in Settings).
+        let packs = shell.loadedPackTitles
+        if !packs.isEmpty { items.append(MenuEntry(title: T.packsOn(packs))) }
         // profile-choice section 2.3: absent without a bundle ID (nothing to store); greyed outside auto, checked as forced.
         if let bundle, !bundle.isEmpty {
             items.append(MenuEntry(title: T.appChat, action: .toggleAppChat, checked: profile(for: bundle) == Shell.chat,
@@ -272,6 +325,8 @@ extension Session {
             shell.applyRerank(!shell.rerankOn)
         case .toggleAcgPack:
             shell.setAcgPack(!shell.acgPackOn)
+        case .toggleItPack:
+            shell.setItPack(!shell.itPackOn)
         case .toggleAppChat:
             toggleAppChat()
         case .openSettings:

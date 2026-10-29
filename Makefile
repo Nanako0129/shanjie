@@ -36,8 +36,12 @@ test-golden:
 test-python:
 	python3 -m unittest tools/test_build_acg_pack.py
 	python3 -m unittest tools/test_build_quote_pack.py
+	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
-	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py
+	python3 -m unittest tools/test_build_sandhi.py
+	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
+	python3 -W ignore -m unittest tools/test_build_meme_pack.py
+	python3 -W ignore -m unittest tools/test_build_lm.py experiments/s2/test_extra_lexicon.py experiments/model-v5/test_compare_counts.py experiments/model-v5/test_count_lexicon.py experiments/names-creators/test_count_usage.py
 	python3 experiments/s2-classes/test_cluster.py
 	python3 -m unittest discover -s experiments/s7a-tinylm -p test_export_sjtl.py
 	python3 -W ignore -m unittest tools/test_kn_cont.py tools/test_extra_overlay.py
@@ -48,6 +52,8 @@ test-python:
 	python3 -W ignore -m unittest tools/test_kpi.py
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
+	python3 -W ignore -m unittest tools/test_readings.py
+	python3 -W ignore -m unittest experiments/sj-lm-7/test_ptt_clean.py experiments/sj-lm-7/test_g0v_clean.py experiments/sj-lm-7/test_clean_subs.py experiments/sj-lm-7/test_review_subs.py experiments/sj-lm-7/test_dedupe_eval.py experiments/sj-lm-7/test_moore_lewis.py experiments/sj-lm-7/test_wikinews.py experiments/sj-lm-7/test_news_fetch.py
 	python3 -W ignore -m unittest tools/test_oc_ref.py
 	python3 -W ignore -m unittest tools/test_holdout_guard.py
 	python3 -W ignore -m unittest tools/test_build_attribution.py
@@ -55,12 +61,13 @@ test-python:
 	python3 -W ignore -m unittest tools/test_triage.py
 	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
+	python3 -W ignore -m unittest tools/test_build_english_next.py
 	cd experiments/digits && python3 -W ignore -m unittest test_digits
-	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py experiments/s2/test_build_tune.py
+	python3 -W ignore -m unittest tools/test_build_classes.py experiments/s2/test_expected.py experiments/s2/test_build_tune.py experiments/s2/test_trad_phrases.py
 	cd experiments/sp && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	cd experiments/s7a-tinylm && python3 -W ignore -m unittest test_fusegrid test_runsets
 	python3 -W ignore -m unittest experiments/x0c/test_x0c.py
-	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy
+	cd experiments/fuzzy && python3 -W ignore -m unittest test_fuzzy test_export_rows
 	python3 -m unittest reference/proto/test_recombine.py
 	python3 -W ignore -m unittest experiments/newword/test_hijack.py
 	python3 -W ignore experiments/diag-near-miss/test_d23.py

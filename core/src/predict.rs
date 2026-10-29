@@ -3,7 +3,8 @@
 //! the Python code is ground truth, scores come from `Lm::word` unchanged.
 
 use crate::digits::DigitTable;
-use crate::lm::{CappedLexicon, Lm};
+use crate::english_next::Followers;
+use crate::lm::{CappedLexicon, Lm, Scoring};
 use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
 
@@ -150,7 +151,7 @@ impl<'a> Index<'a> {
         // syllable sequence because `-` sorts below every syllable character.
         let (mut names, mut seen, mut parsed): (Vec<&str>, HashMap<&str, u32>, Vec<Option<Syl>>) = Default::default();
         let (mut pool, mut off, mut ents) = (Vec::new(), vec![0u32], Vec::new());
-        for (key, words) in lex.readings() {
+        for (key, words) in lex.readings(lm) {
             let ids: Vec<u32> = key
                 .iter()
                 .map(|&s| {
@@ -225,20 +226,36 @@ impl<'a> Index<'a> {
 /// (`lm::history`, maybe `<s>`). Tier one holds the words listed after `v`, tier two the rest; each tier is ordered by
 /// (-score, word length, reading, word), where the reading is the smallest compatible one reaching the word's best
 /// compatible score. That score (`lp_max`) is the first compatible entry of the word in bucket order.
-pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
-    let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
+pub fn predict(idx: &Index, lm: &Lm, cfg: impl Into<Scoring>, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
+    let cfg = cfg.into();
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
+    let classify = |e: &Ent| {
+        let wid = (e.wid != u32::MAX).then_some(e.wid);
+        (!wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
+    };
+    tiered(idx, units, mode, limit, classify).into_iter().map(|(e, s, t)| (e.word.to_string(), s, t == 0, reading_of(idx, e))).collect()
+}
+
+fn reading_of(idx: &Index, e: &Ent) -> Vec<String> {
+    idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize].iter().map(|&i| idx.names[i as usize].to_string()).collect()
+}
+
+/// The words compatible with `units` (prefix reading, or also the abbreviation reading in `Mode::PA`), one entry per word in bucket order,
+/// split into tiers by `classify` (tier, score), each tier ordered by (-score, word length, reading, word) and cut to `limit`, the tiers
+/// in order, at most `limit` in all: (entry, score, tier). Shared by `predict`, `predict_digits` and `predict_english`.
+fn tiered<'i>(idx: &'i Index, units: &[Unit], mode: Mode, limit: usize, mut classify: impl FnMut(&'i Ent) -> (usize, f64)) -> Vec<(&'i Ent<'i>, f64, usize)> {
+    let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
     let mut seen = HashSet::new();
-    let mut tiers: [Vec<(f64, &Ent)>; 2] = Default::default();
+    let mut tiers: [Vec<(f64, &Ent)>; 3] = Default::default();
     for &i in bucket {
         let e = &idx.ents[i as usize];
         let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
         if (compat_prefix(units, syls, &idx.syls) || (mode == Mode::PA && compat_abbr(units, syls, &idx.syls))) && seen.insert(e.wix) {
-            let wid = (e.wid != u32::MAX).then_some(e.wid);
-            tiers[if wid.is_some_and(|w| succ.binary_search(&w).is_ok()) { 0 } else { 1 }].push((lm.word_by_id(lam, ctx, wid, e.lp), e));
+            let (t, s) = classify(e);
+            tiers[t].push((s, e));
         }
     }
-    let mut out: Vec<(&Ent, f64, bool)> = Vec::new();
+    let mut out: Vec<(&Ent, f64, usize)> = Vec::new();
     for (t, tier) in tiers.iter_mut().enumerate() {
         let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
             b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
@@ -248,15 +265,10 @@ pub fn predict(idx: &Index, lm: &Lm, lam: f64, v: &str, units: &[Unit], mode: Mo
             tier.truncate(limit);
         }
         tier.sort_by(order);
-        out.extend(tier.iter().map(|&(s, e)| (e, s, t == 0)));
+        out.extend(tier.iter().map(|&(s, e)| (e, s, t)));
     }
     out.truncate(limit);
-    out.into_iter()
-        .map(|(e, s, succ)| {
-            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
-            (e.word.to_string(), s, succ, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
-        })
-        .collect()
+    out
 }
 
 /// The words compatible (prefix reading) with `units`, one entry per word in bucket order: (word, score, model id). The first compatible
@@ -303,51 +315,54 @@ impl Index<'_> {
 }
 
 /// The prediction row after digits (digits.md A.3.5): (word, score, reading), best first, at most `limit`. `v` is the run's history word,
-/// `lam` the profile's lambda. With units (an unfinished syllable): the candidates of `predict` (compatibility, buckets, dedupe, order),
+/// `cfg` the profile's scoring (`Lm::scoring`: its lambda and Kneser-Ney beta; a plain lambda keeps the side file's beta). With units (an unfinished syllable): the candidates of `predict` (compatibility, buckets, dedupe, order),
 /// scored `lam * log10 P(w | v, D) + (1 - lam) * lp`, the successor layer (N(v,D->w) > 0 or N(D->w) > 0) first. Without units: the words of
 /// the successor layer that the lexicon has, scored `log10 P(w | v, D)` alone, ordered the same way.
-pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWords, lam: f64, v: &str, units: &[Unit], limit: usize) -> Vec<(String, f64, Vec<String>)> {
+pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWords, cfg: impl Into<Scoring>, v: &str, units: &[Unit], limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    let cfg = cfg.into();
     if units.is_empty() {
-        let mut rows: Vec<(f64, &str, &DigitWord)> = table
-            .successors(v)
-            .filter_map(|w| {
-                let info = words.0.get(w)?;
-                Some((table.p_w_given_vd(w, v, lm.unigram_back(info.wid, info.lp)).log10(), w, info))
-            })
-            .collect();
-        rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.2.wlen.cmp(&b.2.wlen)).then(a.2.rd.cmp(&b.2.rd)).then(a.1.cmp(b.1)));
-        rows.truncate(limit);
-        return rows.into_iter().map(|(s, w, info)| (w.to_string(), s, info.reading.clone())).collect();
+        let rows = table.successors(v).filter_map(|w| {
+            let info = words.0.get(w)?;
+            Some((table.p_w_given_vd(w, v, lm.unigram_back(cfg, info.wid, info.lp)).log10(), w, info))
+        });
+        return known_row(rows, limit);
     }
-    let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
-    let mut seen = HashSet::new();
-    let mut tiers: [Vec<(f64, &Ent)>; 2] = Default::default();
-    for &i in bucket {
-        let e = &idx.ents[i as usize];
-        let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
-        if compat_prefix(units, syls, &idx.syls) && seen.insert(e.wix) {
-            let p = table.p_w_given_vd(e.word, v, lm.unigram_back((e.wid != u32::MAX).then_some(e.wid), e.lp));
-            let s = if p > 0.0 { lam * p.log10() + (1.0 - lam) * e.lp } else { f64::NEG_INFINITY };
-            tiers[if table.is_successor(v, e.word) { 0 } else { 1 }].push((s, e));
+    let classify = |e: &Ent| {
+        let p = table.p_w_given_vd(e.word, v, lm.unigram_back(cfg, (e.wid != u32::MAX).then_some(e.wid), e.lp));
+        (!table.is_successor(v, e.word) as usize, if p > 0.0 { cfg.lam * p.log10() + (1.0 - cfg.lam) * e.lp } else { f64::NEG_INFINITY })
+    };
+    tiered(idx, units, Mode::P, limit, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
+}
+
+/// The words of a set that the lexicon has, ordered by (-score, word length, reading, word), at most `limit`: (word, score, reading).
+fn known_row<'a>(rows: impl Iterator<Item = (f64, &'a str, &'a DigitWord)>, limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    let mut rows: Vec<_> = rows.collect();
+    rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.2.wlen.cmp(&b.2.wlen)).then(a.2.rd.cmp(&b.2.rd)).then(a.1.cmp(b.1)));
+    rows.truncate(limit);
+    rows.into_iter().map(|(s, w, info)| (w.to_string(), s, info.reading.clone())).collect()
+}
+
+/// The prediction row behind an English word (english-next.md 2.2): (word, score, reading), best first, at most `limit`. `f` is the
+/// word's row of the table, `v` the history word of the text before (`<s>` after English). With units: the words of `f` that are
+/// compatible come first, scored `lam * log10 P(w | e) + (1 - lam) * lp`; then the other compatible words as `predict` orders them
+/// (successors of `v` first). Without units: the words of `f` that the lexicon has, scored `log10 P(w | e)`.
+pub fn predict_english(idx: &Index, lm: &Lm, f: &Followers, words: &DigitWords, cfg: impl Into<Scoring>, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    let cfg = cfg.into();
+    if units.is_empty() {
+        let rows = f.words().filter_map(|w| {
+            let info = words.0.get(w)?;
+            Some((f.p_w_given_e(w, lm.unigram_back(cfg, info.wid, info.lp)).log10(), w, info))
+        });
+        return known_row(rows, limit);
+    }
+    let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
+    let classify = |e: &Ent| {
+        let wid = (e.wid != u32::MAX).then_some(e.wid);
+        if f.contains(e.word) {
+            (0, cfg.lam * f.p_w_given_e(e.word, lm.unigram_back(cfg, wid, e.lp)).log10() + (1.0 - cfg.lam) * e.lp)
+        } else {
+            (1 + !wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
         }
-    }
-    let mut out: Vec<(&Ent, f64)> = Vec::new();
-    for tier in tiers.iter_mut() {
-        let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
-            b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
-        };
-        if tier.len() > limit && limit > 0 {
-            tier.select_nth_unstable_by(limit - 1, order);
-            tier.truncate(limit);
-        }
-        tier.sort_by(order);
-        out.extend(tier.iter().map(|&(s, e)| (e, s)));
-    }
-    out.truncate(limit);
-    out.into_iter()
-        .map(|(e, s)| {
-            let r = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
-            (e.word.to_string(), s, r.iter().map(|&i| idx.names[i as usize].to_string()).collect())
-        })
-        .collect()
+    };
+    tiered(idx, units, mode, limit, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
 }

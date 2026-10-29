@@ -25,8 +25,25 @@ def vocab_of(b):
     return L.read_header(b)[4]
 
 
-def remap(src_lm, tri, dst_lm):
-    """bytes of the SRC .sjlm, the SRC-bound .sjt3 and the DST .sjlm -> (bytes of the DST-bound .sjt3, V_src, V_dst)."""
+def drop_words(t, keep):
+    """The table `t` (read_tri dict) without the context words and next words whose SRC id is False in `keep` (bool array over SRC ids): a context
+    with a dropped word goes, an entry with a dropped next word goes, a context left with no entry goes. Pre-prune totals stay (they are still no
+    smaller than the kept counts)."""
+    Vs = np.uint64(t["V"])
+    n_ent = np.diff(t["off"].astype(np.int64))
+    ctx_ok = keep[(t["key"] // Vs).astype(np.int64)] & keep[(t["key"] % Vs).astype(np.int64)]
+    ent_ok = np.repeat(ctx_ok, n_ent) & keep[t["nxt"].astype(np.int64)]
+    ctx_id = np.repeat(np.arange(len(n_ent)), n_ent)
+    left = np.bincount(ctx_id[ent_ok], minlength=len(n_ent))
+    ctx_ok &= left > 0
+    off = np.concatenate(([0], np.cumsum(left[ctx_ok]))).astype(np.uint32)
+    return {**t, "key": t["key"][ctx_ok], "tot": t["tot"][ctx_ok], "off": off, "nxt": t["nxt"][ent_ok], "cnt": t["cnt"][ent_ok]}
+
+
+def remap(src_lm, tri, dst_lm, drop_missing=False):
+    """bytes of the SRC .sjlm, the SRC-bound .sjt3 and the DST .sjlm -> (bytes of the DST-bound .sjt3, V_src, V_dst).
+    drop_missing: SRC words absent from DST are dropped with drop_words (SJ-LM-7 stage measurements: an old table on a new vocabulary)
+    instead of stopping."""
     t = trigram.read_tri(tri)
     sv, dv = vocab_of(src_lm), vocab_of(dst_lm)
     if t["V"] != len(sv) or t["model_sha"] != hashlib.sha256(src_lm).digest():
@@ -35,9 +52,14 @@ def remap(src_lm, tri, dst_lm):
         raise ValueError("duplicate word in a vocabulary")
     dids = {w: i for i, w in enumerate(dv)}
     missing = [i for i, w in enumerate(sv) if w not in dids]
-    if missing:
+    if missing and drop_missing:
+        keep = np.ones(len(sv), bool); keep[missing] = False
+        t = drop_words(t, keep)
+        print(f"dropped {len(missing)} SRC words absent from DST", file=sys.stderr)
+        sv = [w if k else None for w, k in zip(sv, keep)]
+    elif missing:
         raise ValueError(f"{len(missing)} SRC words missing from DST, first SRC id {missing[0]} ({sv[missing[0]]!r})")
-    m = np.array([dids[w] for w in sv], dtype=np.uint64)
+    m = np.array([dids.get(w, 0) for w in sv], dtype=np.uint64)   # dropped words (None) are never looked up
     Vs, Vd = np.uint64(len(sv)), np.uint64(len(dv))
     C = len(t["key"])
     ctx_u, ctx_v = t["key"] // Vs, t["key"] % Vs
@@ -83,10 +105,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     for a in ("src-lm", "tri", "dst-lm", "out"):
         ap.add_argument("--" + a, required=True)
+    ap.add_argument("--drop-missing", action="store_true", help="drop SRC words absent from DST (and their contexts and entries) instead of stopping")
     a = ap.parse_args(argv)
     rd = lambda p: open(p, "rb").read()
     try:
-        out, vs, vd = remap(rd(a.src_lm), rd(a.tri), rd(a.dst_lm))
+        out, vs, vd = remap(rd(a.src_lm), rd(a.tri), rd(a.dst_lm), a.drop_missing)
     except (ValueError, AssertionError) as e:
         sys.exit(f"error: {e}")
     # Temp file + rename: a core process may have the old table mapped, and rewriting it in place would corrupt or SIGBUS that mapping.

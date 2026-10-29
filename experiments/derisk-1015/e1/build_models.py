@@ -4,7 +4,7 @@
                                       Writes DIR2/bigram.sjlm (tools/build_lm.py's build(), PRUNE=2, D=0.75, nothing added) and
                                       DIR2/kn.sjkn (kn-v1: tools/kn_cont.py, theta=1, beta=1, from the same counts) and DIR2/build.json.
                                       No private entries: that step belongs to main and is skipped on both sides of every comparison.
-  tri     --counts DIR --lm B0 --out DIR2 [--targets-mb 100,200,400 | --thresholds 1,3,8,20]
+  tri     --counts DIR --lm B0 --out DIR2 [--targets-mb 100,200,400 | --thresholds 1,3,8,20] [--corpora FILE:WEIGHT ...]
                                       Reads DIR/tri-*.pkl (weighted x1 wiki + x5 colloquial through experiments/s2/iter2.merged, rounded like
                                       build_lm, variant-merged like build_lm.merge_variants), writes DIR2/tri-t<thr>.sjt3 for each prune threshold
                                       (a trigram is kept when its weighted count >= thr; context totals are the pre-prune ones) and DIR2/tri-sizes.json.
@@ -28,8 +28,14 @@ import kn_cont  # noqa: E402
 import lm as L  # noqa: E402
 
 
-def counts_inputs(counts, prefix="counts-"):
-    return [os.path.join(counts, n.replace("counts-", prefix)) for n, _ in build_lm.CORPORA]
+def tri_name(name):
+    """The count file's name as build_lm takes it (counts-200000.pkl, or a path) -> its trigram file (tri-200000.pkl), in the same directory."""
+    d, b = os.path.split(name)
+    return os.path.join(d, b.replace("counts-", "tri-", 1))
+
+
+def counts_inputs(counts, prefix="counts-", corpora=None):
+    return [os.path.join(counts, n.replace("counts-", prefix)) for n, _ in corpora or build_lm.CORPORA]
 
 
 def cmd_bigram(a):
@@ -76,7 +82,8 @@ def cmd_tri(a):
     lm = L.BigramLM(model, classes=False)
     ids = lm.ids
     sha = bytes.fromhex(common.sha256_file(model))
-    tri_corpora = [(n.replace("counts-", "tri-"), w) for n, w in build_lm.CORPORA]
+    corpora = build_lm.parse_corpora(a.corpora) if a.corpora else build_lm.CORPORA
+    tri_corpora = [(tri_name(n), w) for n, w in corpora]
     _, _, tri = iter2.merged([], tri_corpora)
     iter2._counts.clear()
     tri = {k: r for k, v in tri.items() if (r := round(v))}   # build_lm: weighted, rounded to integers, zeros dropped
@@ -99,7 +106,7 @@ def cmd_tri(a):
         assert nbytes == len(data), (nbytes, len(data))
         rows.append({"threshold": t, "contexts": C, "entries": E, "tri_bytes": nbytes, "total_bytes": b0 + nbytes, "sha256": common.sha256_file(path)})
         print(f"t{t}: contexts={C} entries={E} tri_bytes={nbytes} total_MB={(b0 + nbytes) / 1e6:.1f}", flush=True)
-    info = common.provenance(counts_inputs(a.counts, "tri-") + [model], {
+    info = common.provenance(counts_inputs(a.counts, "tri-", corpora) + [model], {
         "trigram_types_all": int(len(c)), "bigram_bytes": b0, "tables": rows, "D_tri": tb.D,
         "curve": {str(t): list(s) for t, s in sizes.items() if t <= 32 or t % 16 == 0}})
     common.write_json(os.path.join(a.out, "tri-sizes.json"), info)
@@ -116,6 +123,7 @@ def main(argv=None):
     sub.choices["tri"].add_argument("--lm", required=True)
     sub.choices["tri"].add_argument("--targets-mb", default="100,200,400")
     sub.choices["tri"].add_argument("--thresholds")
+    sub.choices["tri"].add_argument("--corpora", nargs="+", metavar="FILE:WEIGHT", help="the count files (as tools/build_lm.py --corpora names them, relative to --counts or absolute) and their integer weights; default the two of build_lm.CORPORA. Each is read as its tri-*.pkl")
     a = ap.parse_args(argv)
     (cmd_bigram if a.cmd == "bigram" else cmd_tri)(a)
 

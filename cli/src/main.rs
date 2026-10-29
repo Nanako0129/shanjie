@@ -1,10 +1,11 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_QUOTES};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
-use core::lm::{decode_from, history, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::fuzzy::FUZZY_ALL;
+use core::lm::{decode_from_fuzzy_scored, history, rerank_pool, CappedLexicon, Demote, Lm, Profile};
+use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::collections::BTreeMap;
@@ -17,6 +18,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod english;
+mod english_next;
 
 /// (display name, rows). Messages never include row text (R2).
 fn load_set(lex: &Lexicon, name: &str) -> Result<(&'static str, Vec<Row>), String> {
@@ -67,18 +69,19 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
     Ok(())
 }
 
-/// `--packs acg`, `--packs quotes` or `--packs acg,quotes`: sets the pack bits; anything else is refused.
+/// `--packs acg|quotes|it` or a comma list of them: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
     v.split(',').try_fold(0, |bits, name| match name {
         "acg" => Ok(bits | PACK_ACG),
         "quotes" => Ok(bits | PACK_QUOTES),
-        _ => Err("--packs takes acg, quotes or acg,quotes".to_string()),
+        "it" => Ok(bits | PACK_IT),
+        _ => Err("--packs takes acg, quotes, it or a comma list of them".to_string()),
     })
 }
 
-/// The summary line's pack marker: `+acg`, `+quotes` or `+acg+quotes`; nothing with no pack (the existing golden lines are untouched).
+/// The summary line's pack marker: `+acg`, `+quotes`, `+it` in that order; nothing with no pack (the existing golden lines are untouched).
 fn pack_tag(packs: u32) -> String {
-    format!("{}{}", if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_QUOTES != 0 { "+quotes" } else { "" })
+    format!("{}{}{}", if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_QUOTES != 0 { "+quotes" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" })
 }
 
 /// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
@@ -150,9 +153,11 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 }
 
 /// One `--tinylm-scores` line, the record of experiments/s7a-tinylm/score.py without the key columns and the two other LLs:
-/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py) and, for n >= 2, `ll`.
-/// Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>) -> Result<String, String> {
+/// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run; tools/triage.py), for n >= 2 `ll`, and `masked`, the
+/// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/contracts/sj-lm-7-pr2.md section 2.7; empty when none, always present).
+/// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
+/// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, masked: &[bool], idx: Option<&[usize]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
@@ -167,6 +172,10 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     );
     if let Some(ll) = ll {
         s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
+    }
+    s += &format!(", \"masked\": {}", list(masked.iter().enumerate().filter(|(_, &m)| m).map(|(k, _)| k.to_string()).collect()));
+    if let Some(idx) = idx {
+        s += &format!(", \"idx\": {}", list(idx.iter().map(usize::to_string).collect()));
     }
     Ok(s + "}\n")
 }
@@ -237,6 +246,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
+    // docs/contracts/fuzzy-input.md section 2.3: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
+    // `+fz:FLAGS` and a row no reading covers counts as wrong instead of stopping the run.
+    let mut fuzzy = None::<u32>;
+    // `--fuzzy-delta-sound D` (section 3.5, evaluation only): the fuzzy-sound penalty of this run; the summary tag gets `:dD` when it is not the default.
+    let mut delta_sound = core::fuzzy::DELTA_SOUND;
+    let mut delta_given = false;
     let mut reading_channel = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -280,6 +295,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
+            "--fuzzy-delta-sound" => {
+                delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0).ok_or("--fuzzy-delta-sound takes a number above 0")?;
+                delta_given = true;
+            }
+            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-channel" => reading_channel = false,
             _ => return Err("unknown argument".into()),
         }
@@ -291,6 +311,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // Section 9 P3-8: without a small model a level (standard included) would silently measure the n-gram alone.
     if level.is_some() && tinylm.is_none() {
         return Err("--rerank-level needs --tinylm".into());
+    }
+    // The sound penalty only exists on a fuzzy-sound bit; without one the option would silently change nothing.
+    if delta_given && fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND == 0 {
+        return Err("--fuzzy-delta-sound needs --fuzzy with a sound bit (0-3)".into());
     }
     let level = level.unwrap_or(RerankLevel::Standard);
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
@@ -312,10 +336,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let lm_path = lm_path.ok_or("--lm is required")?;
     // S2k: the class term is part of the model; classes.sjc beside it is required unless --no-classes.
-    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. A trigram.sjt3 beside it
-    // (docs/contracts/trigram-core.md) is read only for --profile formal and without --no-tri (chat never uses it, so it is not read
-    // at all); the formal profile then scores with it and without Kneser-Ney. The kn.sjkn is read and checked either way.
-    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri && prof == Profile::Formal).map_err(|e| e.to_string())?;
+    // A kn.sjkn beside the model (docs/contracts/kn-core.md) turns the Kneser-Ney term on unless --no-kn. The trigram table beside it
+    // (docs/contracts/sj-lm-7-pr2.md) is the profile's own, read unless --no-tri: `trigram.sjt3` for formal, `trigram-chat.sjt3` for chat
+    // (the other profile's file is not read, so a bad one does not matter here). Both profiles score with Kneser-Ney and their table.
+    let tri_profiles: &[Profile] = if tri { std::slice::from_ref(&prof) } else { &[] };
+    let lm = Lm::load_opts(std::path::Path::new(&lm_path), classes, kn, tri_profiles).map_err(|e| e.to_string())?;
     let scoring = lm.scoring(prof);
     let rss_before = tinylm.is_some().then(rss_kb).flatten();
     let tl = tinylm.as_deref().map(|p| load_tinylm(p, &lm, classes, demote)).transpose()?;
@@ -340,7 +365,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    // The rows of the pack-oov packs (not `--extra-overlay`, not other packs): their words are unknown to the model and keep the pack's score (pack-oov contract).
+    let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
 
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
@@ -393,29 +420,48 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
-        let nb = decode_from(&capped, syls, &lm, prof, BEAM_S1, start, demote).map_err(|e| e.to_string())?;
         let mut out = RowOut::default();
-        let mut surf: Vec<String> = nb.iter().map(|(_, ws)| ws.concat()).collect();
+        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
+            Ok(nb) => nb,
+            // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
+            Err(Error::NoPath { .. }) if fuzzy.is_some() => {
+                if want_words {
+                    let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
+                    writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
+                }
+                return Ok(out);
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let mut surf: Vec<String> = scored.iter().map(|(_, ws)| ws.iter().map(|w| w.0).collect()).collect();
         let t = len.apply(truth);
-        // The row's chosen candidate: the first, or the small model's pick among the first 8 (the dump keeps the decoder's order).
+        // The row's chosen candidate: the first, or the small model's pick among the pool (below; the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
-            let top: Vec<&str> = surf.iter().take(TOPK).map(String::as_str).collect();
-            let ng: Vec<f64> = nb.iter().take(TOPK).map(|(sc, _)| *sc).collect();
-            // The key is the context key (its SENTINEL is the empty k, in TinyLm::rerank); without --context, no key.
+            // The engine's rule (fuzzy-input section 3.6, `rerank_pool`): the pool is the first 8 paths with no fuzzy word, in n-best order; a
+            // fuzzy n-gram first path is not reranked (a pool of just that path: n 1, `c` 0, no `ll`). `pool` holds the paths' n-best indices.
+            let pool: Vec<usize> = rerank_pool(&scored, TOPK).unwrap_or_else(|| vec![0]);
+            let top: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
+            let ng: Vec<f64> = pool.iter().map(|&p| scored[p].0).collect();
+            // The key is the engine's (`TinyLm::key_for` of the row's context, the display before the one stretch being empty): the
+            // context key for versions 1 to 4 (its SENTINEL is the empty k, in TinyLm::rerank), the last L characters as they are for
+            // a model declaring L (docs/contracts/context-return.md section 2); without --context, no key.
             let t0 = Instant::now();
-            let key = left.as_deref().unwrap_or("");
+            let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
+            let key = key.as_str();
+            // What `manual_mask` matches the manual words against: the readings the n-gram's first path used (the engine's `Stretch::used`).
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3))) };
             let picked = match colloq_on {
                 Some(co) => {
-                    let words: Vec<Vec<&str>> = nb.iter().take(TOPK).map(|(_, ws)| ws.iter().map(String::as_str).collect()).collect();
+                    let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level)
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, &used, lex.manual())
                 }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level)),
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual()),
             };
             let ll = match picked {
                 Ok((c, ll)) => {
-                    chosen = c;
+                    chosen = pool[c];
                     ll
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
@@ -431,21 +477,24 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref())?;
+                // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
+                // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
+                let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(&used, &top, lex.manual()), idx)?;
             }
         }
         out.ok = len.apply(&surf[chosen]) == t;
         out.in64 = surf.iter().any(|s| len.apply(s) == t);
         if want_dump {
-            for (r, ((sc, _), s)) in nb.iter().zip(&surf).enumerate() {
+            for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
                 writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
             }
         }
         if want_words {
             let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
             writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
-            for (r, (_, ws)) in nb.iter().enumerate() {
-                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.join(" ")).unwrap();
+            for (r, (_, ws)) in scored.iter().enumerate() {
+                writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.iter().map(|w| w.0).collect::<Vec<_>>().join(" ")).unwrap();
             }
         }
         out.first = surf.swap_remove(chosen);
@@ -569,7 +618,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, if scoring.kn { lm.kn_tag().unwrap_or("") } else { "" }, tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if scoring.tri { lm.tri_tag().unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -636,21 +686,21 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     }
     check_lm_opts(None, false, packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
-    let lam = match profile.ok_or("--profile is required")?.as_str() {
+    let profile = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
         "formal" => Profile::Formal,
         _ => return Err("--profile must be chat or formal".into()),
-    }
-    .lambda();
+    };
     // A kn.sjkn beside the model turns the Kneser-Ney term on unless --no-kn, as in the other modes: the App's prediction row
-    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id -> prob_c), and the Python reference
-    // (experiments/sp/predict.py) loads it the same way.
+    // scores with it (Engine::recompute_pred -> predict -> Lm::word_by_id), at the profile's beta like decoding (formal 0.75,
+    // chat the file's), and the Python reference (experiments/sp/predict.py) loads it the same way for chat.
     // The trigram table is never read here: the prediction row scores with the bigram whatever the profile (trigram-core.md (d)).
-    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, false).map_err(|e| e.to_string())?;
+    let lm = Lm::load_opts(Path::new(&lm_path.ok_or("--lm is required")?), true, kn, &[]).map_err(|e| e.to_string())?;
     let dir = root().join("data/lexicon");
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, None, true)?;
     // Prediction scores use the capped lp only; demotion applies to decoding (sw §3).
-    let capped = CappedLexicon::new(lex.clone(), &overlay, &lm, None).ok_or("cannot build the capped lexicon")?;
+    let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, None).ok_or("cannot build the capped lexicon")?;
     let text = fs::read_to_string(file.ok_or("--predict is required")?).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
     let (rss0, t_idx) = (rss_kb(), Instant::now());
     let idx = Index::new(&capped, &lm);
@@ -669,7 +719,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             return Err("units_of differs from the query's unit sequence".into());
         }
         let t = Instant::now();
-        let cands = predict(&idx, &lm, lam, v, &u, mode, 9);
+        let cands = predict(&idx, &lm, lm.scoring(profile), v, &u, mode, 9);
         lat.push(t.elapsed());
         out += &format!("## {}\t{v}\t{keys}\t{units}\n", if mode == Mode::P { "P" } else { "PA" });
         for (w, s, succ, _) in cands {
@@ -705,6 +755,10 @@ fn run() -> Result<(), String> {
     // zhen-mixed section 4: a subcommand of its own, before anything the evaluation modes read.
     if all.first().map(String::as_str) == Some("english-sim") {
         return english::run(&all[1..], &root());
+    }
+    // english-next.md section 3.2: drives the engine with and without the table; reads no lenient table.
+    if all.iter().any(|a| a == "--english-next") {
+        return english_next::run(&all, &root());
     }
     let len = load_lenient()?;
     if all.iter().any(|a| a == "--predict") {
@@ -869,31 +923,43 @@ mod tests {
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
     }
 
-    /// quote-pack section 2: `--packs` takes acg, quotes and the comma list, and the summary marker follows the bits.
+    /// `--packs` takes acg, quotes, it and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.
     #[test]
-    fn packs_flag_takes_quotes_and_the_list() {
+    fn packs_flag_takes_acg_quotes_it_and_lists() {
         assert_eq!(pack_flag("acg"), Ok(PACK_ACG));
         assert_eq!(pack_flag("quotes"), Ok(PACK_QUOTES));
-        assert_eq!(pack_flag("acg,quotes"), Ok(PACK_ACG | PACK_QUOTES));
-        assert!(pack_flag("quote").is_err() && pack_flag("acg,").is_err() && pack_flag("").is_err());
-        assert_eq!((pack_tag(0), pack_tag(PACK_QUOTES), pack_tag(PACK_ACG | PACK_QUOTES)), (String::new(), "+quotes".to_string(), "+acg+quotes".to_string()));
+        assert_eq!(pack_flag("it"), Ok(PACK_IT));
+        assert_eq!(pack_flag("acg,it"), Ok(PACK_ACG | PACK_IT));
+        assert_eq!(pack_flag("it,quotes,acg"), Ok(PACK_ACG | PACK_QUOTES | PACK_IT));
+        assert!(pack_flag("").is_err() && pack_flag("quote").is_err() && pack_flag("acg,").is_err());
+        assert_eq!((pack_tag(0), pack_tag(PACK_QUOTES), pack_tag(PACK_ACG | PACK_QUOTES | PACK_IT)), (String::new(), "+quotes".to_string(), "+acg+quotes+it".to_string()));
+        let dir = std::env::temp_dir().join(format!("shanjie-packs-flag-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("acg-add.tsv"), "").unwrap();
+        let d = || Some(dir.to_string_lossy().to_string());
+        assert!(packs_dir_checked(PACK_ACG, d()).is_ok());
+        let e = packs_dir_checked(PACK_ACG | PACK_IT, d()).unwrap_err();
+        assert!(e.contains("--packs it") && e.contains("it-add.tsv"), "{e}");
+        let e = packs_dir_checked(PACK_QUOTES, d()).unwrap_err();
+        assert!(e.contains("--packs quotes") && e.contains("quotes-add.tsv"), "{e}");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// names-lexicon 3.5: `--extra-overlay` rows are capped like pack rows. Goes through the CLI's own load path
     /// (`load_with_packs`, then `CappedLexicon::new`); a word the corpus never saw is scored fixture score minus 1.0.
-    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 酷澎 is in the shipped names layer
-    /// since model-v6, so both runs leave it out (`--no-names`); loading the same row twice is a parse error.
+    /// If the rows reached only the lexicon and not the capping text, the score would stay -7.5. 鮮爭 is a made-up name (not in the lexicon, count 0: the names layer's
+    /// real words are counted into the model since 通語 SJ-LM-7-9.7M, so none of them is a word the corpus never saw); loading the same row twice is a parse error.
     #[test]
     fn extra_overlay_rows_are_capped_like_pack_rows() {
         let lm = Lm::load(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
-        assert_eq!(lm.count("酷澎"), 0, "the fixture word must be one the corpus never saw");
+        assert_eq!(lm.count("鮮爭"), 0, "the fixture word must be one the corpus never saw");
         let file = std::env::temp_dir().join(format!("shanjie-extra-overlay-{}.tsv", std::process::id()));
-        fs::write(&file, "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-7.5\tnames\n").unwrap();
+        fs::write(&file, "ㄒㄧㄢ-ㄓㄥ\t鮮爭\t-7.5\tnames\n").unwrap();
         let (dir, pdir) = (root().join("data/lexicon"), root().join("data/packs"));
-        let key = ["ㄎㄨˋ".to_string(), "ㄆㄥˊ".to_string()];
+        let key = ["ㄒㄧㄢ".to_string(), "ㄓㄥ".to_string()];
         let score = |extra: Option<&Path>| {
             let (lex, overlay) = load_with_packs(&dir, 0, &pdir, extra, false).unwrap();
-            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "酷澎")
+            CappedLexicon::new(lex, &overlay, &lm, None).unwrap().best_lp(&key, "鮮爭")
         };
         let (with, without) = (score(Some(&file)), score(None));
         fs::remove_file(&file).unwrap();

@@ -155,6 +155,37 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(model.englishInline, "greyed, still showing the setting")
     }
 
+    /// zhen-keyorder section 3 / 5.3: the window's 依按鍵順序判斷英文 choice has no value false (the store stays nil until chosen), goes to the
+    /// store, and is greyed on the display choice's conditions: the 中英混打 switch off, the Eten layout, no word list; the setting is kept.
+    func testEnglishKeyOrderChoiceStoresAndFollowsTheSwitch() throws {
+        let r = rig()
+        XCTAssertFalse(r.model.englishKeyOrder, "default false")
+        XCTAssertNil(r.english.englishKeyOrder, "never chosen")
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "the switch is off")
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.model.englishKeyOrderEnabled)
+        r.model.setEnglishKeyOrder(true)
+        XCTAssertEqual(r.english.englishKeyOrder, true)
+        XCTAssertTrue(r.model.englishKeyOrder)
+        XCTAssertTrue(r.model.englishKeyOrderEnabled, "the choice itself does not grey it")
+        r.model.selectLayout(.eten)
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "Eten greys it")
+        XCTAssertTrue(r.model.englishKeyOrder, "the setting is kept")
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertTrue(r.model.englishKeyOrderEnabled)
+        r.controller.session.perform(.toggleEnglish)
+        XCTAssertFalse(r.model.englishKeyOrderEnabled, "the menu's switch off greys it too")
+        // No word list: greyed, the stored choice still shows.
+        let bare = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
+        let english = MemoryEnglishStore(true, keyOrder: true)
+        let shell = Shell(resources: bare, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: english,
+                          acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        let model = SettingsModel(shell: shell)
+        XCTAssertFalse(model.englishKeyOrderEnabled)
+        XCTAssertTrue(model.englishKeyOrder, "greyed, still showing the setting")
+    }
+
     /// s7c2b section 2.2: the window's 語意校正 goes through the same setter as the menu item, the two stay in sync, and with the
     /// demotion table off the menu item is greyed (checkmark kept), which the window's toggle follows through `demote` (F11).
     func testRerankFromTheWindowReachesMenuAndFollowsDemote() {
@@ -205,54 +236,71 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
     }
 
-    /// quote-pack section 2 and 4: an unset `quotePack` is off, so the mask handed to `shanjie_engine_new_packs` is the ACG bit alone (bit0, 1);
-    /// the toggle stores `true`, rebuilds the engine, and adds bit1 (3). The two switches are independent bits of one mask.
+    /// quote-pack section 2 and 4: an unset `quotePack` is off, so the mask handed to `shanjie_engine_new_packs` is the ACG and IT bits (1 | 4 = 5);
+    /// the toggle stores `true`, rebuilds the engine, and adds bit1 (7). The three switches are independent bits of one mask.
     func testQuotePackIsOffUntilChosenAndTheMaskFollowsTheSwitches() {
         let r = rig()
         XCTAssertNil(r.quote.quotePack)
         XCTAssertFalse(r.model.quotePack)
-        XCTAssertEqual(r.shell.packMask, 1, "an unset quotePack must leave the mask at the ACG bit alone")
+        XCTAssertEqual(r.shell.packMask, 5, "an unset quotePack must leave the mask at the ACG and IT bits")
         let before = r.shell.engine
         r.model.setQuotePack(true)
         XCTAssertEqual(r.quote.quotePack, true)
         XCTAssertTrue(r.model.quotePack)
         XCTAssertTrue(r.shell.engine !== before, "no rebuild")
-        XCTAssertEqual(r.shell.packMask, 3)
+        XCTAssertEqual(r.shell.packMask, 7)
         r.model.setAcgPack(false)
-        XCTAssertEqual(r.shell.packMask, 2, "the ACG switch must not take the quote bit with it")
+        XCTAssertEqual(r.shell.packMask, 6, "the ACG switch must not take the quote bit with it")
         let again = r.shell.engine
         r.model.setQuotePack(true)
         XCTAssertTrue(r.shell.engine === again, "the same value must not rebuild")
         r.model.setQuotePack(false)
         XCTAssertEqual(r.quote.quotePack, false)
-        XCTAssertEqual(r.shell.packMask, 0)
+        XCTAssertEqual(r.shell.packMask, 4, "the IT bit stays")
     }
 
-    /// quote-pack section 4, through the shipping path (Shell, then `shanjie_engine_new_packs`): a clause in `packs/quotes-add.tsv` that the
-    /// n-gram spells 不要迷戀歌 without it (measured with shanjie-eval, 2026-10-22; a synthetic fixture row) is the decode only while the switch is on, and a stored `true` is read at startup.
+    /// quote-pack section 4, through the shipping path (Shell, then `shanjie_engine_new_packs`): a synthetic row in `packs/quotes-add.tsv`
+    /// (擬好 at score 0.0, which beats the n-gram's 你好 for ㄋㄧˇ ㄏㄠˇ; the 通語 SJ-LM-7 files already spell the original fixture 不要迷戀哥 without the pack) is the decode only while the switch is on, and a stored `true` is read at startup.
     func testQuotePackSwitchChangesTheTypedResult() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
-        try "ㄅㄨˊ-ㄧㄠˋ-ㄇㄧˊ-ㄌㄧㄢˋ-ㄍㄜ\t不要迷戀哥\t-6.17843815\tquotes\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
+        try "ㄋㄧˇ-ㄏㄠˇ\t擬好\t0.0\tquotes\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
         let typed = { (r: Rig) -> String in
             r.controller.session.activate()
-            r.controller.type("1j6ul4au6xu04ek ")
+            r.controller.type("su3cl3")
             let marked = r.controller.client.marked
             r.controller.press(Keys.esc)
             return marked
         }
         let r = rig()
-        XCTAssertEqual(typed(r), "不要迷戀歌", "off: the n-gram alone")
+        XCTAssertEqual(typed(r), "你好", "off: the n-gram alone")
         r.model.setQuotePack(true)
-        XCTAssertEqual(typed(r), "不要迷戀哥", "on: the rebuilt engine got the pack")
+        XCTAssertEqual(typed(r), "擬好", "on: the rebuilt engine got the pack")
         r.model.setQuotePack(false)
-        XCTAssertEqual(typed(r), "不要迷戀歌", "off again")
+        XCTAssertEqual(typed(r), "你好", "off again")
         let saved = rig(savedQuote: true)
         XCTAssertTrue(saved.model.quotePack)
-        XCTAssertEqual(typed(saved), "不要迷戀哥", "a saved true is in effect at startup")
+        XCTAssertEqual(typed(saved), "擬好", "a saved true is in effect at startup")
     }
 
-    /// acg-pack A2.4: the window shows the same grey data-date line as the menu, from the same Shell value, also with the pack off.
+    func testItPackSwitchFromTheWindowReachesStoreAndMenuLine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        let r = rig()
+        let before = r.shell.engine
+        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertTrue(r.model.itPack, "default on")
+        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞")
+        r.model.setItPack(false)
+        XCTAssertFalse(r.model.itPack)
+        XCTAssertNil(line(), "the menu line follows the switch")
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        r.controller.session.perform(.toggleItPack)
+        XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
+    }
+
+    /// acg-pack A2.4 (moved here by it-pack 3.2): the window shows the grey data-date line under the switch, also with the pack off; the menu does not.
     func testAcgDataDateLineIsTheMenusLine() throws {
         let packs = resources.appendingPathComponent("packs")
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
@@ -266,7 +314,7 @@ final class SettingsTests: XCTestCase {
         try #"{"latest_source_revision": "2026-10-06T23:59:59Z"}"#.write(to: manifest, atomically: true, encoding: .utf8)
         let on = make(nil)
         XCTAssertEqual(on.model.acgDataLine, "資料更新至 2026-10-06（維基百科）")
-        XCTAssertEqual(on.model.acgDataLine, on.controller.session.menu.first { $0.title.hasPrefix("資料更新至") }?.title)
+        XCTAssertFalse(on.controller.session.menu.contains { $0.title.hasPrefix("資料更新至") }, "it-pack 3.2: the date is shown here, not in the menu")
         XCTAssertEqual(make(false).model.acgDataLine, "資料更新至 2026-10-06（維基百科）", "shown with the pack off too")
     }
 
@@ -283,7 +331,7 @@ final class SettingsTests: XCTestCase {
 
     func testMenuHasTheSettingsItemBeforeClear() {
         let r = rig()
-        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "動漫與遊戲詞", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
+        XCTAssertEqual(r.controller.session.menu.map(\.title), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         var opened = 0
         r.shell.onOpenSettings = { opened += 1 }
         r.controller.session.perform(.openSettings)

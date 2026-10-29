@@ -124,7 +124,7 @@ class TestRunSets(unittest.TestCase):
             for name in run_sets.EXTRA_SETS:
                 files[name] = os.path.join(td, f"{name}.txt")
                 open(files[name], "w", encoding="utf-8").write("|你好|ㄋㄧˇ ㄏㄠˇ\n")
-            ns = argparse.Namespace(tune=None, discord=None, reported_rows=None, **files)
+            ns = argparse.Namespace(tune=None, discord=None, reported_rows=None, **{n.replace("-", "_"): f for n, f in files.items()})
             for name in run_sets.EXTRA_SETS:
                 self.assertEqual(run_sets.rows_args(name, ns), ["--rows", files[name]])
             calls = []
@@ -137,7 +137,7 @@ class TestRunSets(unittest.TestCase):
             opts = [x for n in run_sets.EXTRA_SETS for x in (f"--{n}", files[n])]
             with mock.patch.object(run_sets.subprocess, "run", fake_run), mock.patch.object(run_sets, "check_model"), contextlib.redirect_stdout(io.StringIO()):
                 run_sets.main(["dumps", "--work", td, "--sets", *run_sets.EXTRA_SETS, *opts])
-            self.assertEqual(len(calls), 6)
+            self.assertEqual(len(calls), 2 * len(run_sets.EXTRA_SETS))
             self.assertEqual([c[c.index("--name") + 1] for c in calls[::2]], list(run_sets.EXTRA_SETS))
             self.assertEqual(calls[0][calls[0].index("--rows") + 1], files["chatclause"])
             for name in run_sets.EXTRA_SETS:

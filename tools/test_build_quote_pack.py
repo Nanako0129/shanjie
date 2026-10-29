@@ -190,14 +190,14 @@ class Rules(Fixture):
 
 class RealCli(unittest.TestCase):
     """The shipped model through the evaluation CLI: a clause the n-gram spells wrong without the pack is first with it (chat and formal),
-    and the build tool's check says so. 不要迷戀哥 is spelled 不要迷戀歌 without the pack (measured 2026-10-22). The list gives the reading, so the readings tool is not needed."""
+    and the build tool's check says so. 安全第一條 is spelled 安全第一調 without the pack (measured 2026-10-29 on the 通語 SJ-LM-7 files; 不要迷戀哥, the fixture before the model change, is spelled right without it now). The list gives the reading, so the readings tool is not needed."""
 
     def test_the_pack_makes_the_clause_first_through_the_cli(self):
         Q.check_shipped_lm()
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "list.tsv")
             with open(path, "w", encoding="utf-8") as f:
-                f.write(row("不要迷戀哥", reading="ㄅㄨˊ ㄧㄠˋ ㄇㄧˊ ㄌㄧㄢˋ ㄍㄜ") + "\n")
+                f.write(row("安全第一條", reading="ㄢ ㄑㄩㄢˊ ㄉㄧˋ ㄧ ㄊㄧㄠˊ") + "\n")
             files, manifest, report = Q.build(path)
         self.assertEqual(manifest["clauses"], 1)
         self.assertEqual(manifest["not_first_with_pack"], 0, report)

@@ -76,7 +76,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
-         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
@@ -97,16 +97,18 @@ python3 - "$R/packs" <<'PY' || fail "packs/acg.json or packs/quotes.json does no
 import hashlib, json, os, sys
 d = sys.argv[1]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-for manifest, pack in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv")):
+for manifest, required in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv"), ("it.json", "it-add.tsv")):     # quotes: docs/contracts/quote-pack.md section 2; IT+AI: docs/contracts/it-pack.md section 3.2
     files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
-    if pack not in files:
-        sys.exit(pack + " is not in " + manifest)
+    if required not in files:
+        sys.exit(required + " is not in " + manifest)
     for name, meta in files.items():
         data = open(os.path.join(d, name), "rb").read()
         if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
             sys.exit(name + " does not match " + manifest)
 PY
 grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
+grep -q 'packs/it-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/it-add.tsv"
+grep -q '政府資料開放授權條款' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not carry the Open Government Data License notice for the IT+AI pack"
 # The names layer (model-v6 section 7 P3-7): the bundled file is the committed one, and the attribution file names it with its three
 # sources, the name-suggestion-index notice in full among them.
 cmp -s "$R/names-add.tsv" "$ROOT/data/lexicon/names-add.tsv" || fail "Resources/names-add.tsv differs from data/lexicon/names-add.tsv"
@@ -167,8 +169,9 @@ sparkle_key SUEnableSystemProfiling bool false
 # Sparkle's licence (MIT, with the third-party notices its LICENSE carries): the bundled copy is the committed one.
 cmp -s "$R/LICENSES/Sparkle-MIT.txt" "$ROOT/LICENSES/Sparkle-MIT.txt" || fail "Resources/LICENSES/Sparkle-MIT.txt differs from LICENSES/Sparkle-MIT.txt"
 grep -q 'EXTERNAL LICENSES' "$R/LICENSES/Sparkle-MIT.txt" || fail "Sparkle-MIT.txt lacks the third-party notices"
-# The trigram table of the formal profile (trigram-core): against the hash recorded in git, like kn.sjkn.
+# The trigram tables (trigram-core; the formal profile's trigram.sjt3 and the chat profile's trigram-chat.sjt3): both listed in the attribution file.
 grep -q 'trigram.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram.sjt3"
+grep -q 'trigram-chat.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram-chat.sjt3"
 echo "check 2: ok"
 
 # --- 3: signature: valid, exactly the three App Sandbox entitlements on the app (app-sandbox.md section 2.1,

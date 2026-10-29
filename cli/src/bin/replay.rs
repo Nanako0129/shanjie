@@ -142,7 +142,7 @@ fn run() -> Result<(), String> {
         (None, false) => Some(root.join("data/lm/colloquial.sjlm")).filter(|p| tl && p.is_file()),
     };
     let co8 = colloquial.as_deref().map(sha8).transpose()?;
-    let others: Vec<String> = ["classes.sjc", "kn.sjkn", "trigram.sjt3"]
+    let others: Vec<String> = ["classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3"]
         .iter()
         .filter(|f| lm_path.with_file_name(f).is_file())
         .map(|f| Ok(format!("{f}:{}", sha8(&lm_path.with_file_name(f))?)))
@@ -155,8 +155,13 @@ fn run() -> Result<(), String> {
     );
     // `+rc` only where the channel is read: the colloquial term applies (chat here, any rerank level, the paired small model).
     let rc_model = tl8.as_deref() == Some(&core::colloquial::PAIRED_TINYLM_SHA256[..8]);
+    let packs = format!(
+        "{}{}",
+        if cli::replay::PACKS & core::engine::PACK_ACG != 0 { "+acg" } else { "" },
+        if cli::replay::PACKS & core::engine::PACK_IT != 0 { "+it" } else { "" }
+    );
     let tag = format!(
-        "replay-{profile_name}+ctx+acg+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
+        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },

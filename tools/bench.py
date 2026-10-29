@@ -603,6 +603,43 @@ def static_section(st):
     return L
 
 
+def holdout_key(h, p):
+    """Column key of one holdout block: (profile, rows_sha256 if present else n). tools/kpi.py keys on rows_sha256 alone (no n fallback),
+    so a block without the hash splits by n here but shares kpi.py's one hashless column."""
+    b = h[p]
+    return (p, b.get("rows_sha256") or b.get("n"))
+
+
+def holdout_cols(results):
+    """Holdout columns in order of first appearance (version order of the results); two different sets never share one.
+    From 2026-10-29 chat = the talk half (--set holdout, n 150), formal = the news half (a private rows file, news-corpus.md 2.4)."""
+    cols = []
+    for res in results:
+        for rec in res["versions"]:
+            for p in ("chat", "formal"):
+                if p in rec.get("holdout", {}) and holdout_key(rec["holdout"], p) not in cols:
+                    cols.append(holdout_key(rec["holdout"], p))
+    return cols or [("chat", None), ("formal", None)]
+
+
+def holdout_head(results, cols):
+    out = []
+    for p, k in cols:
+        b = next((rec["holdout"][p] for res in results for rec in res["versions"] if p in rec.get("holdout", {}) and holdout_key(rec["holdout"], p) == (p, k)), {})
+        out.append(p + (f"（n {b['n']}" + (f"，#{b['rows_sha256'][:8]}" if b.get("rows_sha256") else "，沒記 rows_sha256") + "）" if b else ""))
+    return out
+
+
+def holdout_cell(h, c, oracle=True):
+    if c[0] not in h or holdout_key(h, c[0]) != c:
+        return "—（尚未量測）"
+    b = h[c[0]]
+    t = f"{100 * b['top1'] / b['n']:.2f}%<br>{b['top1']}/{b['n']}"
+    if oracle:
+        return t + f"，oracle@64 {b['oracle64']}"
+    return t + (f"<br>+{b['fixed']} / −{b['broken']}，p={b['p']:.3g}" if "fixed" in b else "")
+
+
 def render_table(results, ref=None, static=None):
     cells = [f"{n}/{p}" for n, (_, _, ps, _) in SETS.items() for p in ps]
     L = ["# 跨版本基準測試", "", "由 `tools/bench.py table` 從 `eval/bench/results/*.json` 產生，請勿手改。契約：`docs/contracts/sbench.md`。", "",
@@ -617,13 +654,13 @@ def render_table(results, ref=None, static=None):
                 L.append(f"| {row} | " + " | ".join([f"失敗：{rec.get('error', '')}".replace("|", "/").replace("\n", " ")[:300]] * len(cells)) + " |")
             else:
                 L.append(f"| {row} | " + " | ".join(cell_text(rec, c) for c in cells) + " |")
-    L += ["", "## 保留集", "", "由 fresh verifier 在該版 tag 的 worktree 跑 `--set holdout` 後，把摘要行填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, oracle64, top1_sha256}, \"formal\": ...}`）。", "",
-          "| 版本 | chat | formal |", "|---|---|---|"]
+    hcols = holdout_cols(results)
+    L += ["", "## 保留集", "", "由 fresh verifier 在該版 tag 的 worktree 跑 `--set holdout` 後，把摘要行填進 results JSON 的 `holdout`（`{\"chat\": {n, top1, oracle64, top1_sha256}, \"formal\": ...}`）。2026-10-29 起的填法見下面「套件 v2」的「保留集」。", "",
+          "| 版本 | " + " | ".join(holdout_head(results, hcols)) + " |", "|---|" + "---|" * len(hcols)]
     for res in results:
         for rec in res["versions"]:
             h = rec.get("holdout", {})
-            f = lambda p: f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}，oracle@64 {h[p]['oracle64']}" if p in h else "—（尚未量測）"
-            L.append(f"| {rec['ref']}<br>`{rec['sha'][:7]}` | {f('chat')} | {f('formal')} |")
+            L.append(f"| {rec['ref']}<br>`{rec['sha'][:7]}` | " + " | ".join(holdout_cell(h, c) for c in hcols) + " |")
     L += ["", "## 速度與記憶體（同場）", "", "每版 3 輪輪流跑，p95 取三輪中位數，max 取三輪最大，載入（`Engine::new` + `load_lm`）取中位數，RSS 取最大。標準排列、chat profile、dev302 重播。速度只在同一列「同場」裡比較。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI |", "|---|---|---|---|---|---|---|---|---|"]
     for res in results:
@@ -706,8 +743,11 @@ PROFILES2 = ["chat", "formal"]
 # data/kn.sjkn.sha256) goes into the model folder, so the CLI turns KN on as the App does, and its tag spells `+kn:{kn8}:θ<θ>:β<β>`
 # (`{kn8}` = first 8 hex of the side file) before `+tl:`. A version without the key gets no kn.sjkn, so an auto-loaded one still fails.
 # A version that ships a trigram table (trigram.sjt3, trigram-core; hash from data/trigram.sjt3.sha256) has `"tri": True`: the table goes into the
-# model folder, the CLI loads it only for `--profile formal` (and then turns KN off), so the chat tag is unchanged and the formal cells need their own
+# model folder, the CLI loads it only for `--profile formal` (v0.4.7 to v0.5.0: and then turns KN off), so the chat tag is unchanged and the formal cells need their own
 # `"formal_tag"` (`{tri8}` = first 8 hex of the table), which spells `+tri:{tri8}` after `+acg` and has no `+kn:`. Without `formal_tag` both profiles share `tag`.
+# A version that also ships the chat profile's table (trigram-chat.sjt3, docs/contracts/sj-lm-7-pr2.md; hash from data/trigram-chat.sjt3.sha256) has `"tri_chat": True`:
+# the CLI loads each profile's own table beside the model and keeps KN on in both profiles (formal at beta 0.75, `+kn:{kn8}:θ1:β0.75`), so its `tag` (chat) ends in
+# `+tri:{trichat8}` and its `formal_tag` keeps `+kn:` and ends in `+tri:{tri8}`.
 # A version that ships the colloquial table (colloquial-term.md; hash from data/colloquial.sjlm.sha256) has `"colloquial": True` (the rule tools/kpi.py's
 # check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
 # `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
@@ -725,6 +765,12 @@ VERSIONS2 = {
                "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
     "v0.5.0": {"release": "v0.5.0", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "colloquial": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg", "formal_tag": "+ctx+tl:{tl8}+acg+tri:{tri8}"},
+    # SJ-LM-7 (docs/contracts/sj-lm-7-pr2.md): measure the branch with `--as sj-lm-7`; the models are the branch's data/*.sha256 files.
+    "sj-lm-7": {"release": "sj-lm-7", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+tri:{tri8}"},
+    # v0.6.0: SJ-LM-7's models (PR #324) and the IT+AI pack, on by default like the ACG pack (Shell.swift itPackOn = true; Settings.swift only mirrors it).
+    "v0.6.0": {"release": "v0.6.0", "flags": ["--context", "--packs", "acg,it"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+tri:{tri8}"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
@@ -752,15 +798,23 @@ def version_labels(refs, as_):
 def resolve_models(ver, spec):
     """-> {file name: (path, sha256)}: hashes come from the exported version's data/*.sha256, files from MODELS/<sha256>/<name>."""
     out = {}
-    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) \
-            + (["colloquial.sjlm"] if spec.get("colloquial") else []):
+    for n in ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) + (["trigram-chat.sjt3"] if spec.get("tri_chat") else []) \
+            + (["tinylm.sjtl"] if spec["tinylm"] else []) + (["colloquial.sjlm"] if spec.get("colloquial") else []):
         f = os.path.join(ver.dir, "data", n + ".sha256")
         if not os.path.isfile(f):
             die(f"{ver.label}: the export has no data/{n}.sha256")
         want = open(f).read().split()[0]
         p = os.path.join(MODELS, want, n)
+        local = os.path.join(ROOT, "data", "lm", n)   # the checkout's own copy (scripts/fetch-models.sh) when it is the same file
+        if not os.path.isfile(p) and os.path.isfile(local) and sha_file(local) == want:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            shutil.copy2(local, p + ".tmp")   # through a temp name: an interrupted copy never sits at p, where the next run would trust it
+            os.replace(p + ".tmp", p)
+            print(f"  {ver.label}: {n} copied from data/lm (sha256 {want[:16]}…)")
         if not os.path.isfile(p):
-            die(f"{ver.label}: model file missing: {p}; download {n} from its own Release (docs/data-files.md names it; {spec['release']} is the app release, which carries no model files), check its SHA-256 is {want}, and put it there")
+            die(f"{ver.label}: model file missing: {p}, and {local} is not that file either; for the version being released run "
+                f"scripts/fetch-models.sh in this checkout (it fills data/lm and checks every hash), otherwise download {n} from its own Release "
+                f"(docs/data-files.md names it; {spec['release']} is the app release, which carries no model files), check its SHA-256 is {want}, and put it at {p}")
         if sha_file(p) != want:
             die(f"{ver.label}: {p} does not match data/{n}.sha256 ({want})")
         out[n] = (p, want)
@@ -768,19 +822,21 @@ def resolve_models(ver, spec):
 
 
 def setup_models(ver, spec, td):
-    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn and trigram.sjt3 for a version that ships them (the CLI loads
-    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads the table for the formal profile when it sees trigram.sjt3), and
+    """A model folder with only bigram.sjlm and classes.sjc, plus kn.sjkn, trigram.sjt3 and trigram-chat.sjt3 for a version that ships them (the CLI loads
+    classes.sjc beside --lm, turns KN on when it sees kn.sjkn and reads each profile's own table when it sees trigram.sjt3 / trigram-chat.sjt3), and
     colloquial.sjlm for a version with `"colloquial"` (not read from the folder: the chat cells name it with --colloquial-core)."""
     ver.spec, ver.models = spec, resolve_models(ver, spec)
     d = os.path.join(td, ver.label)
     os.makedirs(d)
-    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()) + (("colloquial.sjlm",) if spec.get("colloquial") else ()):
+    for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if spec.get("kn") else ()) + (("trigram.sjt3",) if spec.get("tri") else ()) \
+            + (("trigram-chat.sjt3",) if spec.get("tri_chat") else ()) + (("colloquial.sjlm",) if spec.get("colloquial") else ()):
         os.symlink(ver.models[n][0], os.path.join(d, n))
     ver.lm = os.path.join(d, "bigram.sjlm")
     ver.tl = ver.models["tinylm.sjtl"][0] if spec["tinylm"] else None
     ver.tl8 = ver.models["tinylm.sjtl"][1][:8] if spec["tinylm"] else ""
     ver.kn8 = ver.models["kn.sjkn"][1][:8] if spec.get("kn") else ""
     ver.tri8 = ver.models["trigram.sjt3"][1][:8] if spec.get("tri") else ""
+    ver.trichat8 = ver.models["trigram-chat.sjt3"][1][:8] if spec.get("tri_chat") else ""
     ver.co = os.path.join(d, "colloquial.sjlm") if spec.get("colloquial") else None
     ver.co8 = ver.models["colloquial.sjlm"][1][:8] if spec.get("colloquial") else ""
 
@@ -796,7 +852,7 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", "")) + colloq_tag(ver, prof)
+    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", "")) + colloq_tag(ver, prof)
 
 
 def colloq_tag(ver, prof):
@@ -812,11 +868,12 @@ def expected_tag(ver, prof, anchor):
 
 def replay_tag(ver, prof="chat"):
     """Setting tag of the replay-setting CLI cell (version's bigram + classes, nothing else): `lm-<prof>`, plus the version's own `+kn:...` part
-    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells), or
-    for the formal profile of a version with a table its `+tri:...` part instead (the table turns KN off)."""
-    tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof)) if prof == "formal" and ver.spec.get("tri") else None
+    when its model folder holds kn.sjkn (the CLI turns KN on beside the model, so the cell carries the same KN tag as the shipping cells), then the
+    profile's `+tri:...` part when the setting tag has one (v0.4.7 to v0.5.0: formal only, and it replaces the `+kn:` part, which that tag lacks; the
+    `"tri_chat"` versions: both profiles, after the `+kn:` part)."""
+    tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof))
     kn = re.search(r"\+kn:[^+]*", spec_tag(ver, prof)) if ver.spec.get("kn") else None
-    return f"lm-{prof}" + (tri.group() if tri else kn.group() if kn else "")
+    return f"lm-{prof}" + (kn.group() if kn else "") + (tri.group() if tri else "")
 
 
 def cli_env(anchor):
@@ -1088,14 +1145,14 @@ def render_v2(results):
         for c in cells:
             n = next((r["accuracy"][c]["n"] for r in vs if "n" in r.get("accuracy", {}).get(c, {})), "—")
             L.append(f"| {c} | {n} | " + " | ".join(cell_text(r, c) if "accuracy" in r else "失敗" for r in vs) + " |")
+    hcols = holdout_cols(results)
     L += ["", "### 保留集", "",
-          "照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p}, \"formal\": ...}`）。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
-          "| 版本 | chat | formal |", "|---|---|---|"]
+          "照 `CLAUDE.md`，只在推 `v*` tag 前跑一次（2026-10-18 起；之前是一片一次）：由 fresh verifier 以 `evalstats compare --net` 比上一版與新版，main 把 n 與兩版的 top1（可再加 `fixed`、`broken`、`p`）、`rows_sha256`（口語半邊是 `talk.txt` 的 sha256，新聞半邊是那個私人檔的 sha256，**一定要填**，沒填的數字用 n 分欄）和實際量的 commit 填進 results JSON 的 `holdout`（`{\"commit\": …, \"chat\": {n, top1, fixed, broken, p, rows_sha256}, \"formal\": ...}`）。**2026-10-29 起 `chat` 是口語半邊（`--set holdout`，只讀 `talk.txt`，n 150），`formal` 是新聞半邊（私人檔 `--rows … --profile formal`）**，欄位依各自的 `rows_sha256` 分開。下表版本下面的 commit 是保留集實際量的那一個；它和上面「出貨設定」表被量的 commit 在 `docs/verification.md` 列的路徑上必須沒有差異，或差異不改輸出（出貨設定的 rowstats 逐位元組相同，記在研究紀錄；契約 §2.3、§5）。", "",
+          "| 版本 | " + " | ".join(holdout_head(results, hcols)) + " |", "|---|" + "---|" * len(hcols)]
     for res in results:
         for rec in res["versions"]:
             h = rec.get("holdout", {})
-            f = lambda p: "—（尚未量測）" if p not in h else f"{100 * h[p]['top1'] / h[p]['n']:.2f}%<br>{h[p]['top1']}/{h[p]['n']}" + (f"<br>+{h[p]['fixed']} / −{h[p]['broken']}，p={h[p]['p']:.3g}" if "fixed" in h[p] else "")
-            L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | {f('chat')} | {f('formal')} |")
+            L.append(f"| {rec['version']}<br>`{h.get('commit', rec['sha'])[:7]}` | " + " | ".join(holdout_cell(h, c, oracle=False) for c in hcols) + " |")
     L += ["", "### 速度與記憶體（同場）", "",
           "重播程式用該版的 `bigram.sjlm` 與 `classes.sjc`，**不載詞包、沒有前文、沒有語意校正**（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）；標準排列、dev302，每版 3 輪輪流，p95 取中位數；每版兩列：聊天（版本名）與書面（版本名後加「書面」；重播程式的第五個參數 `formal`，舊的結果檔沒有這一列時顯示「—」）。有 trigram 表的版本，兩列都把表載進記憶體（只有書面用它）。「重播＝CLI」是和另跑的一格同設定 CLI（`--profile` 同該列，不帶 `--context`、`--packs`、`--tinylm`）逐列比。重排是 CLI 在 stderr 印的語意校正每列耗時（p50／p95：三輪重播都跑完之後再跑三次、取中位數，不和其他格同時跑）。", "",
           "| 版本 | 日期 | 機型／macOS／load avg | p95 | max | 載入 | RSS | 按鍵數 | 重播＝CLI | 重排 p50／p95 |", "|---|---|---|---|---|---|---|---|---|---|"]
