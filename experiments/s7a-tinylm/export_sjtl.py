@@ -1,4 +1,4 @@
-"""S7c-1: tinylm .npz (`tinylm.save_params`) -> SJTL0001 / 0002 / 0003 / 0004, the model file core/src/tinylm.rs reads. Written only
+"""S7c-1: tinylm .npz (`tinylm.save_params`) -> SJTL0001 / 0002 / 0003 / 0004 / 0005, the model file core/src/tinylm.rs reads. Written only
 here, read only there.
 
   python export_sjtl.py --npz tinylm-M.npz --out tinylm-M8.sjtl --type int8 --ngram-model data/lm/bigram.sjlm \
@@ -7,6 +7,7 @@ here, read only there.
                         --chat 0.3 2 0.25 --formal 0.7 1 2 \
                         --levels 1 2 3  0.3 2 0.25  0.5 1 1.5  0.5 1 0.25 \
                         [--kn-side data/lm/kn.sjkn]                 # version 4 (rerank strength, Kneser-Ney side file hash)
+                        [--left-len L]                              # version 5 (needs --levels): declared left-context length
 
 Both DELTAs or neither (one alone is an error: it would silently be 0); a delta must lie in [0, 1000]. --levels takes four
 ALPHA TAU DELTA sets in this order: chat conservative, chat aggressive, formal conservative, formal aggressive; it needs both DELTAs.
@@ -28,6 +29,8 @@ Layout (little-endian; docs/contracts/s7c-core-tinylm.md section 2.1, version 2 
   version 4 (244)     the same 212 bytes with magic "SJTL0004" and version 4, then the 32-byte SHA-256 of the whole kn.sjkn the
                       parameters were tuned with, all zero = tuned without one (offset 212; docs/contracts/model-v6.md section 2.7);
                       versions 1 to 3 count as all zero
+  version 5 (248)     the same 244 bytes with magic "SJTL0005" and version 5, then a u32 left-context length L (offset 244), 1 <= L <= ctx - 2
+                      (docs/contracts/context-return.md section 2; core/src/tinylm.rs). Written only with --left-len, on top of version 4
   vocab               (V - 3) x u32 code points, ids 3 on (ids 0 / 1 / 2 are PAD / UNK / BOS, as in tinylm.Vocab)
   tensors, in this order (no per-tensor header; the shapes come from the header; keep this list identical to core/src/tinylm.rs):
                       emb (V, d), pos (ctx, d), lnf_w (d), lnf_b (d), then for each layer 0 .. n_layer - 1, tinylm.LAYER_KEYS:
@@ -55,6 +58,7 @@ DELTAS = struct.Struct("<2d")     # version 2: chat delta, formal delta, right a
 MAGIC_V3, VERSION_V3 = b"SJTL0003", 3
 LEVELS = struct.Struct("<12d")    # version 3: four (alpha, tau, delta), right after DELTAS
 MAGIC_V4, VERSION_V4 = b"SJTL0004", 4
+MAGIC_V5, VERSION_V5 = b"SJTL0005", 5
 NO_KN = bytes(32)                 # version 4: the side file hash right after LEVELS; all zero = tuned without Kneser-Ney
 KN_MAGIC = b"SJKN0002"            # tools/kn_cont.py: magic, u32 V, the model's SHA-256 (offset 12), ...
 MAX_DELTA = 1000.0                # the range core/src/tinylm.rs accepts
@@ -98,16 +102,20 @@ def check_kn_side(side, ngram_sha):
     return hashlib.sha256(side).digest()
 
 
-def export(npz, out, wtype, chat, formal, ngram_sha, levels=None, kn_sha=None):
+def export(npz, out, wtype, chat, formal, ngram_sha, levels=None, kn_sha=None, left_len=None):
     """Write `out` from the .npz at `npz`. wtype "f32" | "int8"; chat / formal = (alpha, tau) for version 1, or both
     (alpha, tau, delta) for version 2; with `levels` (12 floats: chat conservative, chat aggressive, formal conservative, formal
     aggressive, each alpha, tau, delta) version 3, or version 4 when `kn_sha` (32 bytes, NO_KN for tuned without Kneser-Ney) is
-    given too; ngram_sha = 32 bytes. Returns the version written. Bad parameters raise before anything is written."""
+    given too; with `left_len` (needs `kn_sha`; 1 <= left_len <= ctx - 2) version 5; ngram_sha = 32 bytes. Returns the version written. Bad parameters raise before anything is written."""
     check_params(chat, formal, levels)
     if kn_sha is not None and (levels is None or len(kn_sha) != 32):
         raise ValueError("a side file hash needs levels (version 4) and 32 bytes")
+    if left_len is not None and kn_sha is None:
+        raise ValueError("a left-context length (version 5) needs levels and the side file hash (version 4)")
     v2 = len(chat) == 3
-    if kn_sha is not None:
+    if left_len is not None:
+        version, magic = VERSION_V5, MAGIC_V5
+    elif kn_sha is not None:
         version, magic = VERSION_V4, MAGIC_V4
     else:
         version, magic = (VERSION_V3, MAGIC_V3) if levels is not None else (VERSION_V2, MAGIC_V2) if v2 else (VERSION, MAGIC)
@@ -120,6 +128,8 @@ def export(npz, out, wtype, chat, formal, ngram_sha, levels=None, kn_sha=None):
     V = len(chars) + 3
     if d % n_head or len(ngram_sha) != 32 or wtype not in ("f32", "int8"):
         raise ValueError(f"bad arguments or config: d {d}, n_head {n_head}, sha {len(ngram_sha)} bytes, type {wtype}")
+    if left_len is not None and not 1 <= left_len <= ctx - 2:
+        raise ValueError(f"left length must lie in [1, ctx - 2 = {ctx - 2}]: {left_len}")
     shapes = tensor_shapes(n_layer, d, ctx, V)
     if sorted(n for n, _ in shapes) != sorted(k for k in z.files if k not in ("cfg", "chars")):
         raise ValueError("npz keys differ from the model layout")
@@ -135,6 +145,8 @@ def export(npz, out, wtype, chat, formal, ngram_sha, levels=None, kn_sha=None):
         parts.append(LEVELS.pack(*levels))
     if kn_sha is not None:
         parts.append(bytes(kn_sha))
+    if left_len is not None:
+        parts.append(struct.pack("<I", left_len))
     parts.append(struct.pack(f"<{V - 3}I", *(ord(c) for c in chars)))
     for name, shape in shapes:
         # ValueError, not assert: under python -O a transposed tensor of the right size would export silently wrong weights
@@ -154,23 +166,26 @@ def export(npz, out, wtype, chat, formal, ngram_sha, levels=None, kn_sha=None):
 def read_sjtl(path):
     """The reader the tests and the golden generator use: (header dict, chars, params) with params as float32 arrays, int8 matrices
     restored as q.astype(float32) * scale; head["delta"] is (chat, formal), (0, 0) in version 1; head["levels"] is the 12 floats of
-    versions 3 and 4, None before; head["kn_sha"] is version 4's 32 bytes, NO_KN before. Python only; the Rust loader is
+    versions 3 to 5, None before; head["kn_sha"] is the 32 bytes of versions 4 and 5, NO_KN before; head["left_len"] is version 5's L, None before. Python only; the Rust loader is
     core/src/tinylm.rs."""
     b = open(path, "rb").read()
     magic, version, wt, n_layer, n_head, d, ctx, V, ca, ct, fa, ft, sha = HEADER.unpack_from(b, 0)
-    known = ((MAGIC, VERSION), (MAGIC_V2, VERSION_V2), (MAGIC_V3, VERSION_V3), (MAGIC_V4, VERSION_V4))
+    known = ((MAGIC, VERSION), (MAGIC_V2, VERSION_V2), (MAGIC_V3, VERSION_V3), (MAGIC_V4, VERSION_V4), (MAGIC_V5, VERSION_V5))
     assert (magic, version) in known and wt in (F32, INT8)
     at = HEADER.size
-    delta, levels, kn_sha = (0.0, 0.0), None, NO_KN
+    delta, levels, kn_sha, left_len = (0.0, 0.0), None, NO_KN, None
     if version >= VERSION_V2:
         delta = DELTAS.unpack_from(b, at)
         at += DELTAS.size
     if version >= VERSION_V3:
         levels = LEVELS.unpack_from(b, at)
         at += LEVELS.size
-    if version == VERSION_V4:
+    if version >= VERSION_V4:
         kn_sha = b[at:at + 32]
         at += 32
+    if version == VERSION_V5:
+        left_len = struct.unpack_from("<I", b, at)[0]
+        at += 4
     chars = [chr(c) for c in struct.unpack_from(f"<{V - 3}I", b, at)]
     at += 4 * (V - 3)
     params = {}
@@ -187,7 +202,7 @@ def read_sjtl(path):
             at += 4 * n
     assert at == len(b), "trailing bytes"
     head = dict(version=version, wtype=wt, n_layer=n_layer, n_head=n_head, d=d, ctx=ctx, V=V, chat=(ca, ct), formal=(fa, ft), delta=delta,
-                levels=levels, ngram_sha=sha, kn_sha=kn_sha)
+                levels=levels, ngram_sha=sha, kn_sha=kn_sha, left_len=left_len)
     return head, chars, params
 
 
@@ -202,7 +217,12 @@ def main(argv=None):
                     help="version 4: ALPHA TAU DELTA of chat conservative, chat aggressive, formal conservative, formal aggressive")
     ap.add_argument("--kn-side", metavar="KN.SJKN",
                     help="with --levels: the Kneser-Ney side file the parameters were tuned with; its SHA-256 goes into the header")
+    ap.add_argument("--left-len", type=int, metavar="L",
+                    help="with --levels: write version 5, declaring that the model was trained on (and is sent) the last L characters of "
+                         "the text before the cursor as raw text; 1 <= L <= ctx - 2. Without it the output is version 1 to 4 as before")
     a = ap.parse_args(argv)
+    if a.left_len is not None and a.levels is None:
+        ap.error("--left-len needs --levels (version 5 is version 4 plus L)")
     if a.kn_side is not None and a.levels is None:
         ap.error("--kn-side needs --levels (only version 4 records the side file)")
     try:
@@ -221,12 +241,14 @@ def main(argv=None):
                 kn_sha = check_kn_side(side, sha)
             except ValueError as e:
                 ap.error(str(e))
-    version = export(a.npz, a.out, a.type, a.chat, a.formal, sha, a.levels, kn_sha)
+    version = export(a.npz, a.out, a.type, a.chat, a.formal, sha, a.levels, kn_sha, a.left_len)
     deltas = f"delta chat {a.chat[2]!r} formal {a.formal[2]!r}" if version >= VERSION_V2 else "no delta"
     if version >= VERSION_V3:
         deltas += f", levels {' '.join(repr(x) for x in a.levels)}"
-    if version == VERSION_V4:
+    if version >= VERSION_V4:
         deltas += f", kn.sjkn sha256 {kn_sha.hex() if kn_sha != NO_KN else 'none (tuned without Kneser-Ney)'}"
+    if version == VERSION_V5:
+        deltas += f", left length {a.left_len}"
     print(f"wrote {a.out} ({os.path.getsize(a.out)} bytes, {a.type}, version {version}, {deltas}); "
           f"sjtl sha256 {hashlib.sha256(open(a.out, 'rb').read()).hexdigest()}")
 

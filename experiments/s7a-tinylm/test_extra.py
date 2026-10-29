@@ -295,6 +295,104 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             self.assertEqual(list(rep).index("ids_sha256"), list(rep).index("holdout_guard_skipped_runs") - 1)
 
 
+class TestRawMode(unittest.TestCase):
+    """CTX64: `text --raw`, `runs --raw-wiki`, the vocabulary over every character, and BOS at every piece."""
+
+    class Guard:
+        """Stands in for holdout_guard's Matcher: .any(folded run) is true for a run containing a guarded sentence."""
+        def any(self, run):
+            return "天氣真好" in run
+
+    def write(self, work, name, text):
+        with open(os.path.join(work, name), "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def runs(self, work, text, **kw):
+        self.write(work, "in.txt", text)
+        with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+            rep = prep.write_runs(os.path.join(work, "in.txt"), work, "g", (), **kw)
+        return open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read(), rep
+
+    def test_raw_keeps_punctuation_ascii_digits_and_strips_the_edges(self):
+        with tempfile.TemporaryDirectory() as work:
+            out, rep = self.runs(work, "  我們去吃飯，OK 123！ \n\n   \nfull ＡＢ，好嗎？\n", raw=True)
+            self.assertEqual(out, "我們去吃飯，OK 123！\nfull ＡＢ，好嗎？\n")      # empty lines dropped, no Han split
+            self.assertEqual((rep["lines"], rep["raw"]), (4, True))
+
+    def test_default_mode_is_unchanged_on_the_same_fixture(self):
+        with tempfile.TemporaryDirectory() as work:
+            out, rep = self.runs(work, "  我們去吃飯，OK 123！ \n\n好\nfull ＡＢ，好嗎？\n")
+            self.assertEqual(out, "我們去吃飯\n好嗎\n")                          # Han runs of length >= 2 only, as before
+            self.assertNotIn("raw", rep)
+            out2, rep2 = self.runs(work, "  我們去吃飯，OK 123！ \n\n好\nfull ＡＢ，好嗎？\n", raw=False)
+            self.assertEqual((out2, rep2), (out, rep))
+
+    def test_raw_guard_drops_the_whole_line_when_any_han_run_is_guarded(self):
+        with tempfile.TemporaryDirectory() as work:
+            text = "你好嗎，今天天氣真好，我們去吃飯\n你好嗎，我們去吃飯\n天，氣\n"
+            out, rep = self.runs(work, text, raw=True, guard=self.Guard())
+            self.assertEqual(out, "你好嗎，我們去吃飯\n天，氣\n")                 # a one-character run is not a guard unit (length >= 2)
+            self.assertEqual(rep["holdout_guard_skipped_runs"], 1)
+            out, _ = self.runs(work, text, guard=self.Guard())                      # the default path drops only the run
+            self.assertEqual(out, "你好嗎\n我們去吃飯\n你好嗎\n我們去吃飯\n")
+
+    def test_raw_half_and_tsv(self):
+        lines = ["天氣好嗎", "吃飯了沒，OK", "好嗎，你好", "我們去吃飯，好嗎"]           # the line is judged whole, as in the default path
+        keep = [x for x in lines if prep.half_keep(x)]
+        self.assertTrue(keep and len(keep) < len(lines))
+        with tempfile.TemporaryDirectory() as work:
+            out, rep = self.runs(work, "\n".join(lines) + "\n", raw=True, half=True)
+            self.assertEqual((out, rep["half_dropped_runs"]), ("".join(x + "\n" for x in keep), len(lines) - len(keep)))
+            self.write(work, "in.tsv", "a1\t吃飯了沒，OK\n")
+            with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+                prep.write_runs(os.path.join(work, "in.tsv"), work, "t", (), raw=True)
+            self.assertEqual(open(os.path.join(work, "runs-t.txt"), encoding="utf-8").read(), "吃飯了沒，OK\n")   # unit column dropped
+
+    def test_vocabulary_counts_every_character_of_a_raw_file(self):
+        with tempfile.TemporaryDirectory() as work:
+            self.write(work, "runs-wiki.txt", "我我我我我\n")
+            self.write(work, "runs-coll.txt", "你你你你你\n")
+            json.dump({"charcount": {"我": 5, "你": 5}}, open(os.path.join(work, "charcount.json"), "w"))
+            self.write(work, "runs-r.txt", "好，好，好，好，好，a1\nA😀😀😀😀😀\n")
+            prep.cmd_encode(type("A", (), {"work": work, "min_count": 5, "extra": ["r"], "force": False})())
+            self.assertEqual(prep.load_vocab(work), ["你", "好", "我", "，"])       # 5 x ， and 好 (ties by code point); a, 1, A: too rare; 😀 (> U+FFFF) never
+            self.assertEqual(np.load(os.path.join(work, "ids-r.npy")).tolist(),
+                             [BOS, 4, 6, 4, 6, 4, 6, 4, 6, 4, 6, UNK, UNK, BOS, UNK, UNK, UNK, UNK, UNK, UNK])
+
+    def test_raw_wiki_lines_are_sentences_with_their_punctuation(self):
+        raw = "第一句，有逗號、and ASCII 12。第二句天氣真好！\n\n第三句？"
+        with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+            self.assertEqual(list(prep.raw_wiki_lines(raw, ())), [("第一句，有逗號、and ASCII 12", False), ("第二句天氣真好", False), ("第三句", False)])
+            self.assertEqual(list(prep.raw_wiki_lines(raw, (), self.Guard()))[1], (None, True))
+            self.assertEqual([r for r in prep.wiki_runs(raw, ())], ["第一句", "有逗號", "第二句天氣真好", "第三句"])    # the default: Han runs
+
+    def test_rebos_puts_bos_at_every_piece_and_covers_every_target_once(self):
+        run = list(range(3, 3 + 130))
+        ids = np.array([BOS] + run + [BOS, 5, 6], dtype=np.uint16)
+        new = batching.rebos(ids)
+        st, ln = batching.pieces(new)
+        self.assertTrue((new[st] == BOS).all())
+        self.assertTrue((ln <= batching.PIECE).all())
+        self.assertEqual(len(st), 4)                                                  # 64 + 64 + 2 characters, plus the short run
+        targets = np.concatenate([new[s + 1:s + l] for s, l in zip(np.sort(st), ln[np.argsort(st)])])
+        self.assertEqual(sorted(targets.tolist()), sorted(run + [5, 6]))
+        old_st, _ = batching.pieces(ids)
+        self.assertNotEqual(int(ids[np.sort(old_st)[1]]), BOS)                        # the default still has none there
+
+    def test_rebos_without_a_long_run_and_the_default_plan_are_byte_identical(self):
+        short = np.array([BOS, 3, 4, BOS] + [3] * 64, dtype=np.uint16)                # 65 tokens: exactly one piece
+        self.assertEqual(batching.rebos(short).tobytes(), short.tobytes())
+        rng = np.random.default_rng(5)
+        with tempfile.TemporaryDirectory() as work:
+            for n in ("wiki", "coll"):
+                np.save(os.path.join(work, f"ids-{n}.npy"), fake_ids(rng, 40))
+            off = batching.plan(work, [], 512, 1)
+            self.assertEqual([x.tobytes() for x in off[:3]], [x.tobytes() for x in batching.plan(work, [], 512, 1, 0, False)[:3]])
+            on = batching.plan(work, [], 512, 1, 0, True)
+            self.assertTrue((on[0][on[1]] == BOS).all())
+            self.assertFalse((off[0][off[1]] == BOS).all())
+
+
 class TestEncodeGuards(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

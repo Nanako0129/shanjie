@@ -243,3 +243,17 @@ cd experiments/s7a-tinylm
 S7c-1 的 Rust 測試（`cargo test --release`）與突變檢查見契約的結果一節；Python 這一側的 `test_export_sjtl.py` 檢查檔頭、字表、張量與 int8 還原（`q.astype(float32) * scale`）。
 
 沒有 torch 就無法在這台 Mac 驗證的部分：`torch_model.py`、`train.py` 只做過語法檢查（`py_compile`）與逐行對照，`test_torch.py` 的 6 項要在 188 上第一次跑；其中 numpy／torch 的 `LL` 差 < 1e-4（經過 `export_npz`）是契約的單元測試項目。
+
+## CTX64 的訓練工具選項（探索片；全部預設關，不給時輸出與以前逐位元相同）
+
+App 送給會意的前文是最多 64 字的原文（含標點、英數；`core/src/tinylm.rs` 的 `key_for`、SJTL0005），所以訓練也要看過這樣的文字。以下四個選項只改工具，沒有跑任何訓練或語料處理。
+
+| 選項 | 做什麼 |
+|---|---|
+| `prep.py text --raw` | 每個輸入行變成一行訓練文字：OpenCC 轉換後的**原文**（標點、ASCII、數字、全形都留，只去頭尾空白，空行丟掉；`.tsv` 取最後一欄）。不再切成 2 字以上的漢字段。holdout guard 照舊：行內**任何**一個 2 字以上的漢字段中了守門，整行丟（沿用 `bc.guard_matcher` 與 `bc.fold`，沒有新守門）。`--half` 照整行判。報告多一個 `raw: true`，`holdout_guard_skipped_runs`／`half_dropped_runs` 在這個模式算「行」 |
+| `prep.py runs --raw-wiki` | 維基部分改用 `bc.article_sentences`（照 。！？； 斷句、句內標點保留），其他步驟不變；`runs-wiki.txt` 的一行是一句。口語部分不受影響（用 `text --raw` 另外加） |
+| `encode --extra NAME` | 本來就把 `runs-NAME.txt` 的每個字元各算一次，所以 raw 檔裡出現 ≥ 5 次的標點與 ASCII 會進字表。例外：U+FFFF 以上的字元（emoji 等）不進字表（`make_lut` 只有 BMP 表），一律 UNK；漢字段沒有這種字，舊輸出不變 |
+| `train.py --bos-every-piece`（`batching.rebos`／`plan(…, bos_every_piece=True)`） | 超過 65 個 token 的序列切段時，**每一段**都以 BOS 開頭（每段 = BOS + 64 字，每個字仍剛好當一次目標）；預設只有第一段有 BOS。核心推論永遠送 `[BOS] + 最後 L 字 + 候選`，BOS 就是截斷點。沒有長序列時回傳原陣列的相同位元 |
+| `export_sjtl.py --left-len L` | 需要 `--levels`（版本 4 的基底）。寫 SJTL0005：版本 4 的 244 位元組表頭（魔數 `SJTL0005`、版本 5）＋ 偏移 244 的 u32 L ＋ 其餘；`1 ≤ L ≤ ctx − 2`，否則在寫檔前報錯。沒給時輸出仍是版本 1 到 4。`read_sjtl` 讀得回 `left_len` |
+
+測試：`test_extra.py` 的 `TestRawMode`（raw、守門、整行 half、字表、`rebos`、預設逐位元不變）與 `test_export_sjtl.py` 的 `--left-len` 兩個測試（位元組逐一對照 `core/tests/tinylm_tiny.rs` 的 `v5` 組法）。

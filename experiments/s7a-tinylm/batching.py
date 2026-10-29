@@ -2,7 +2,7 @@
 the model never sees another run as context (at scoring time it sees only [BOS] + k + c).
 
 A sequence longer than CTX + 1 tokens is cut into pieces of CTX + 1 tokens that overlap by one token, so every character is a target
-exactly once; only the first piece starts with BOS. Batches hold sequences of exactly one length (no padding).
+exactly once; only the first piece starts with BOS (`bos_every_piece`, CTX64: every piece does; see `rebos`). Batches hold sequences of exactly one length (no padding).
 The epoch and its batch order (build_epoch, plan) live here, not in train.py, so they are tested without torch.
 """
 import os
@@ -33,6 +33,24 @@ def pieces(ids):
     return np.concatenate(S), np.concatenate(L)
 
 
+def rebos(ids):
+    """CTX64 `--bos-every-piece`: the same ids with every run longer than PIECE tokens cut into runs of BOS + PIECE - 1 characters (the last
+    one shorter), so `pieces` then starts every piece at a BOS and each character is still a target exactly once. At inference the core always
+    sends [BOS] + (the last L characters) + candidate, so BOS marks a truncation point there; a piece that began mid-run without BOS never
+    showed the model that. Runs of at most PIECE tokens, and so every array without a long run, come back unchanged (same bytes)."""
+    st = np.flatnonzero(ids == BOS)
+    ln = np.diff(np.append(st, len(ids)))
+    parts, at = [], 0
+    for s, l in zip(st[ln > PIECE].tolist(), ln[ln > PIECE].tolist()):
+        parts.append(ids[at:s])
+        chars = ids[s + 1:s + l]
+        for i in range(0, len(chars), PIECE - 1):
+            parts += [ids[s:s + 1], chars[i:i + PIECE - 1]]
+        at = s + l
+    parts.append(ids[at:])
+    return np.concatenate(parts)
+
+
 def make_batches(lengths, tokens_per_batch, rng):
     """Returns [(index array into the piece list)] covering every piece once: random order inside each exact length,
     batches of max(1, tokens_per_batch // length) pieces, the batch list shuffled."""
@@ -58,11 +76,14 @@ def parse_extra(arg):
     return path, int(w)
 
 
-def build_epoch(work, extra=None):
+def build_epoch(work, extra=None, bos_every_piece=False):
     """ids-wiki.npy once, ids-coll.npy prep.COLL_WEIGHT times, then each (path, weight) of `extra` (ids files from prep.py text,
     weight = integer copies of every piece per epoch, the way the colloquial x5 is done) appended after them in the order given.
-    Without `extra` the arrays are exactly the S7a epoch. Returns (ids, starts, lengths)."""
+    Without `extra` the arrays are exactly the S7a epoch. bos_every_piece (default off): every ids array goes through `rebos` first.
+    Returns (ids, starts, lengths)."""
     wiki, coll = np.load(os.path.join(work, "ids-wiki.npy")), np.load(os.path.join(work, "ids-coll.npy"))
+    if bos_every_piece:
+        wiki, coll = rebos(wiki), rebos(coll)
     parts = [wiki, coll]
     ws, wl = pieces(wiki)
     cs, cl = pieces(coll)
@@ -75,16 +96,18 @@ def build_epoch(work, extra=None):
         ex = np.load(path)
         if ex.dtype != wiki.dtype or not len(ex) or ex[0] != BOS:
             raise ValueError(f"{path}: expected {wiki.dtype} ids starting with BOS (prep.py text)")
+        if bos_every_piece:
+            ex = rebos(ex)
         es, el = pieces(ex)
         parts.append(ex); starts += [es + base] * weight; lengths += [el] * weight
         base += len(ex)
     return np.concatenate(parts), np.concatenate(starts), np.concatenate(lengths)
 
 
-def plan(work, extra, tokens_per_batch, seed, max_steps=0):
+def plan(work, extra, tokens_per_batch, seed, max_steps=0, bos_every_piece=False):
     """train.py's data: the epoch, its shuffled batches (rng = default_rng(seed), as S7a), cut to max_steps when given.
     The number of steps is len(batches) (see train.py). Returns (ids, starts, lengths, batches)."""
     rng = np.random.default_rng(seed)
-    ids, starts, lengths = build_epoch(work, extra)   # extra: None/empty = none
+    ids, starts, lengths = build_epoch(work, extra, bos_every_piece)   # extra: None/empty = none
     batches = make_batches(lengths, tokens_per_batch, rng)
     return ids, starts, lengths, batches[:max_steps] if max_steps else batches

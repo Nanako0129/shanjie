@@ -61,6 +61,8 @@ def main(argv=None):
                     help="an ids-<name>.npy (prep.py encode --extra) added to the epoch WEIGHT times (ASCII integer >= 1, bare PATH = 1, S7f); "
                          "repeatable; without it the epoch is S7a's. The weight is whatever follows the last ':', so a path that itself "
                          "ends in ':something' is not supported")
+    ap.add_argument("--bos-every-piece", action="store_true",
+                    help="CTX64: a sequence longer than 65 tokens is cut into pieces that each start with BOS (default: only the first does)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
@@ -69,7 +71,7 @@ def main(argv=None):
     chars = prep.load_vocab(a.work)
     extra = a.extra
     prep.check_vocab(a.work, [p for p, _ in extra])
-    ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps)
+    ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps, a.bos_every_piece)
     total = len(batches)
     cfg = CONFIGS[a.size]
     model = GPT(len(chars) + 3, **cfg).to(a.device)

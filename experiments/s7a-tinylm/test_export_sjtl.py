@@ -296,6 +296,39 @@ class TestExport(unittest.TestCase):
         self.assertEqual(raw[212:244], hashlib.sha256(side).digest())
         self.assertEqual(ex.read_sjtl(os.path.join(g, "tinylm-tiny", "tiny-int8-v4.sjtl"))[0]["kn_sha"], hashlib.sha256(side).digest())
 
+    def test_left_len_writes_version_5_like_the_rust_reader_expects(self):
+        """core/tests/tinylm_tiny.rs `v5`: the version 4 file with magic SJTL0005 and version 5, then L (u32) at 244, then the rest."""
+        v4, v5 = os.path.join(self.td.name, "v4.sjtl"), os.path.join(self.td.name, "v5.sjtl")
+        self.cli(v4)
+        so = self.cli(v5, "--left-len", "8")
+        b4, b5 = open(v4, "rb").read(), open(v5, "rb").read()
+        self.assertEqual(b5, b"SJTL0005" + struct.pack("<I", 5) + b4[12:244] + struct.pack("<I", 8) + b4[244:])
+        self.assertEqual(struct.unpack_from("<I", b5, 244)[0], 8)
+        self.assertIn("version 5", so)
+        self.assertIn("left length 8", so)
+        head, chars, params = ex.read_sjtl(v5)
+        self.assertEqual((head["version"], head["left_len"], head["levels"]), (5, 8, self.LEVELS))
+        self.assertIsNone(ex.read_sjtl(v4)[0]["left_len"])
+        for k, v in ex.read_sjtl(v4)[2].items():
+            np.testing.assert_array_equal(params[k], v, err_msg=k)
+
+    def test_left_len_bounds_and_requirements_write_nothing(self):
+        out = os.path.join(self.td.name, "bad.sjtl")
+        ctx = tinylm.CTX
+        for l in (1, ctx - 2):
+            self.cli(out, "--left-len", str(l))
+            self.assertEqual(ex.read_sjtl(out)[0]["left_len"], l)
+            os.remove(out)
+        for l in (0, ctx - 1, ctx, -1):                 # the Rust reader refuses L == 0 and L > ctx - 2
+            with self.assertRaises(ValueError, msg=l):
+                self.cli(out, "--left-len", str(l))
+            self.assertFalse(os.path.exists(out), l)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):       # needs --levels
+            self.cli(out, "--left-len", "8", levels=False)
+        with self.assertRaises(ValueError):            # the library: needs the version 4 hash too
+            ex.export(self.npz, out, "int8", (0.3, 2.0, 0.25), (0.7, 1.0, 2.0), SHA, self.LEVELS, None, 8)
+        self.assertFalse(os.path.exists(out))
+
 
 if __name__ == "__main__":
     unittest.main()
