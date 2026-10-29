@@ -190,7 +190,7 @@
     <div class="layer"><div><h3>本機重排</h3><p>小型語言模型看你前面寫的內容，從候選中挑出最合理的一句；在背景執行，不拖慢打字。</p><div class="when">停頓或送出前・本機</div></div></div>
     <div class="layer"><div><h3>雲端校正（選用）</h3><p>打完按一下快速鍵，請雲端模型再看一次。預設關閉；雲端只能回傳候選的編號，不能自己寫字。</p><div class="when">你按下快速鍵時・雲端</div></div></div>
   </div>
-  <p class="note">第 2 層從 v0.4.1 起出貨：約 1,460 萬參數的小模型（會意，v0.6.0 是 SJ-SR-7-15M）重排前 8 名，輸入法的「語意校正」沒設過時是開的。v0.5.0 起，聊天設定的這一層另外參考口語詞頻表「常談」與單字的讀音：v0.5.0 只在強度「標準」生效，v0.6.0 起保守與積極也生效，各用自己量過的值。現成的本機大模型研究結論是暫不進輸入法。第 3 層還沒做，排在路線圖的「未排定」。</p>
+  <p class="note">第 2 層從 v0.4.1 起出貨：約 1,465 萬參數的小模型（會意，v0.6.0 是 SJ-SR-7-15M）重排前 8 名，輸入法的「語意校正」沒設過時是開的。v0.5.0 起，聊天設定的這一層另外參考口語詞頻表「常談」與單字的讀音：v0.5.0 只在強度「標準」生效，v0.6.0 起保守與積極也生效，各用自己量過的值。現成的本機大模型研究結論是暫不進輸入法。第 3 層還沒做，排在路線圖的「未排定」。</p>
 </section>
 
 <section>
@@ -234,17 +234,13 @@
 
 <section>
   <h2>這週</h2>
-  <p class="sub">2026-10-19～10-29</p>
+  <p class="sub">2026-10-23～10-29</p>
   <ul class="week">
     <li><span class="tag done">已發佈</span><span>v0.6.0：換上一整組新模型（通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、連文 SJ-CX-2-7.7M 與 SJ-CX-2-950K、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K），錯字回報（80 句）聊天 33 → 70 句、書面 29 → 61 句。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.6.0：資訊與 AI 詞包（1,016 個詞，預設開）、動漫詞包更新（44,552 詞）；網路用語 507 條與第二輪 910 個詞、實況主與店家名字進詞庫。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.6.0：模糊輸入（ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ 與鄰鍵打錯，預設全關）、輕聲容錯、「結紮」打得出來。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.6.0：組字區最多留 128 個單位（51 字的長句整句留在組字區）；常談在保守、標準、積極三種強度都生效；輸入法讀同一行游標前最多 64 字當前文；依按鍵順序判斷英文（預設關）。</span></li>
-    <li><span class="tag done">已發佈</span><span>v0.5.0：聊天更懂口語（口語詞頻表「常談」＋讀音通道項），「螺絲鬆」「很雷」「變快」選對了。</span></li>
-    <li><span class="tag done">已發佈</span><span>v0.5.0：安裝程式可以裝給「這台 Mac」；裝在這台 Mac 時，有程式開著安全輸入善解也照常能用（學習暫停）。只裝在自己帳號的照舊會暫時停用。</span></li>
-    <li><span class="tag done">已發佈</span><span>v0.5.0：輸入法改在 App 沙盒裡執行，更新交給另一個小程式「善解更新」。</span></li>
-    <li><span class="tag done">已發佈</span><span>v0.5.0：數字列直接打數字（標準排列、中英混打開著時）；中英混打改成預設開；改選後其他字不動；預測列與 ↓ 一致；逐字改選也學成新詞；中英文之間自動加空格（預設關）。</span></li>
-    <li><span class="tag done">已發佈</span><span>常談 SJ-CL-1-68K 發佈在 GitHub Releases。</span></li>
+    <li><span class="tag done">已發佈</span><span>模型的 GitHub Release：通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、連文 SJ-CX-2-7.7M 與 SJ-CX-2-950K、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K。</span></li>
     <li><span class="tag wip">進行中</span><span>研究：解碼時看讀音，「否則變快」這類錯要在整句選字時就修，每個設定、每種強度都生效。</span></li>
   </ul>
   <p class="note"><a href="updates.html">完整更新紀錄 →</a></p>
@@ -438,13 +434,13 @@
       <li>程式碼：Apache-2.0。</li>
       <li>基礎詞庫：小麥注音（MIT；片語源自 libtabe，BSD）。</li>
       <li>補充詞表：由維基百科與維基詞典的條目標題產生，CC BY-SA 4.0，署名維基百科與維基詞典貢獻者。</li>
-      <li>動漫與遊戲詞包：約 4.4 萬個作品名與角色名（v0.6.0 是 44,552 個詞），隨 App 內附，設定裡可關。來源是中文維基百科的公共轉換組、動畫作品條目的標題、條目與角色列表頁裡的登場人物，另有維護者手動加的詞（維護者自己的條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。作品清單取自 Wikidata（CC0）。</li>
-      <li>資訊與 AI 詞包（v0.6.0 起，1,016 個詞，預設開，隨 App 內附，設定裡可關）：只收詞與讀音。來源是國家教育研究院的資訊名詞（政府資料開放授權條款）、中文維基百科的 CGroup 轉換表與 AI 相關分類的條目標題，另有手寫清單（CC0）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。</li>
+      <li>動漫與遊戲詞包：約 4.5 萬個作品名與角色名（v0.6.0 是 44,552 個詞），隨 App 內附，設定裡可關。來源是中文維基百科的公共轉換組、動畫作品條目的標題、條目與角色列表頁裡的登場人物，另有維護者手動加的詞（維護者自己的條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。作品清單取自 Wikidata（CC0）。</li>
+      <li>資訊與 AI 詞包（v0.6.0 起，1,016 個詞，預設開，隨 App 內附，設定裡可關）：只收詞與讀音。來源是國家教育研究院「電子計算機學術名詞」（政府資料開放平臺資料集 15416）與「兩岸對照名詞—計算機學術名詞」（資料集 15275）的中文名稱，依政府資料開放授權條款（Open Government Data License，<a href="https://data.gov.tw/license">https://data.gov.tw/license</a> ），提供機關：國家教育研究院；另有中文維基百科的 CGroup 轉換表與 AI 相關分類的條目標題，另有手寫清單（CC0）；整份詞包以 CC BY-SA 4.0 散布，署名維基百科貢獻者。</li>
       <li>降權表（<code>demote.tsv</code>）：專案自寫，隨 App 內附，CC BY-SA 4.0，不含第三方資料。</li>
       <li>標準讀音變體：依教育部《國語辭典簡編本》〈單一音讀〉與《國語一字多音審訂表》的規則，從小麥注音詞庫產生，MIT。規則是事實，檔案不含教育部資料。</li>
       <li>常見專有名詞層（v0.4.4 起，約 1,600 詞，隨 App 內附）：台灣品牌名取自 name-suggestion-index（BSD-3-Clause），另有中文維基百科的條目標題與教育部統計處的學校名錄（政府資料開放授權條款第 1 版）；整份以 CC BY-SA 4.0 散布，三方的署名隨 App 內附。</li>
       <li>語言模型（通語 SJ-LM-7-9.7M，詞的兩兩搭配頻率）、詞類表（辨類 SJ-WC-6-512C）、Kneser–Ney 接續次數（承接 SJ-KN-2-397K）與連文（書面設定用 SJ-CX-2-7.7M、聊天設定用 SJ-CX-2-950K，前兩個詞接下一個詞）：由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子（CC0）、Tatoeba 中文句子（CC BY 2.0 FR）、gpt-oss-120b 產生的台灣口語合成句，加上 v0.6.0 新增的 g0v Slack <code>#rand0m</code> 頻道的公開訊息（CC0）與 PTT 批踢踢實業坊公開看板的文章與推文（只用於詞頻計數，不含原文）計算；書面設定的連文 SJ-CX-2-7.7M 不含 g0v 與 PTT。CC BY-SA 4.0，署名維基百科與 Tatoeba 貢獻者。斷詞用的詞包詞來自中文維基百科與 Wikidata，專有名詞層的詞見上一項。不含任何私人對話。發佈的模型另含少量用來辨識來源的指紋條目。</li>
-      <li>語意校正模型（會意 SJ-SR-7-15M，<code>tinylm.sjtl</code>；隨 App 內附、預設開）：約 1,460 萬參數的字元語言模型，權重在 v0.6.0 重新訓練。訓練文字和語言模型同源（維基百科 2026-10-01 的前 20 萬篇條目、Mozilla Common Voice、Tatoeba、gpt-oss-120b 產生的台灣口語合成句），另加 g0v <code>#rand0m</code> 的公開訊息、PTT 公開看板的文章與推文，以及 OPUS OpenSubtitles v2018 的繁體字幕（清理後 4,432,866 句；都只用於訓練，字幕文字不在檔案內）。CC BY-SA 4.0，署名維基百科、Tatoeba 貢獻者與 OpenSubtitles（P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles, LREC 2016；字幕來自 <a href="http://www.opensubtitles.org/">opensubtitles.org</a>）。聊天設定的融合參數用維護者自己的訊息選，檔案裡沒有任何訊息的文字。</li>
+      <li>語意校正模型（會意 SJ-SR-7-15M，<code>tinylm.sjtl</code>；隨 App 內附、預設開）：約 1,465 萬參數的字元語言模型，權重在 v0.6.0 重新訓練。訓練文字和語言模型同源（維基百科 2026-10-01 的前 20 萬篇條目、Mozilla Common Voice、Tatoeba、gpt-oss-120b 產生的台灣口語合成句），另加 g0v <code>#rand0m</code> 的公開訊息、PTT 公開看板的文章與推文，以及 OPUS OpenSubtitles v2018 的繁體字幕（清理後 4,432,866 句；都只用於訓練，字幕文字不在檔案內）。CC BY-SA 4.0，署名維基百科、Tatoeba 貢獻者與 OpenSubtitles（P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles, LREC 2016；字幕來自 <a href="http://www.opensubtitles.org/">opensubtitles.org</a>）。聊天設定的融合參數用維護者自己的訊息選，檔案裡沒有任何訊息的文字。</li>
       <li>口語詞頻表（常談 SJ-CL-2-69K，<code>colloquial.sjlm</code>，v0.5.0 起隨 App 內附）：只有詞與詞對的次數，沒有句子。來源是語言模型的口語計數（Common Voice、Tatoeba、合成句，不含 g0v 與 PTT），加上一份公開口語池：WildChat-1M 台灣子集（ODC-BY 1.0）、YODAS 繁體字幕（1,138 支 CC BY 的 YouTube 影片，CC BY 3.0）、Tatoeba（CC BY 2.0 FR）、MASSIVE zh-TW（CC BY 4.0）。整份以 CC BY-SA 4.0 散布；逐支影片、逐句的署名清單隨 App 內附。</li>
       <li>數字語境的計數表（<code>digits.tsv</code>，v0.5.0 起）：從中文維基百科與 Common Voice、Tatoeba 的句子數出詞與數字前後相接的次數，CC BY-SA 4.0。</li>
       <li>中英混打的英文單字表（v0.4.4 起，建置時產生、隨 App 內附）：取自 SymSpell 的詞頻表（MIT），它是 Google Books Ngram（CC BY 3.0）與 SCOWL 的交集；三方的署名隨 App 內附。</li>
