@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import batching  # noqa: E402
 import prep  # noqa: E402
+import tinylm  # noqa: E402
 from tinylm import BOS, UNK  # noqa: E402
 
 
@@ -510,6 +511,22 @@ class TestBaseVocab(unittest.TestCase):
             self.encode(w2, None)
             self.assertNotIn("base_vocab", json.load(open(os.path.join(w2, "ids-vocab.json"))))
             self.assertEqual(prep.load_vocab(w2), normal)
+
+    def test_base_vocab_without_final_newline_is_refused(self):
+        with tempfile.TemporaryDirectory() as work:
+            base = os.path.join(work, "base.txt")
+            open(base, "w", encoding="utf-8", newline="\n").write("稀\n好")
+            with self.assertRaisesRegex(ValueError, "does not end with a newline"):
+                prep.read_vocab(base)
+            with self.assertRaises(SystemExit):
+                self.encode(work, base)
+
+    def test_numpylm_loads_a_vocabulary_with_nul(self):
+        chars = ["你", "\x00", "好"]
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "m.npz")
+            tinylm.save_params(path, tinylm.random_params(chars, 1, 8, 2), chars, 1, 2)
+            self.assertEqual(tinylm.NumpyLM(path).vocab.chars, chars)
 
     def test_extend_emb_copies_prefix_and_fills_new_rows(self):
         emb = np.random.default_rng(1).normal(size=(7, 4)).astype(np.float32)

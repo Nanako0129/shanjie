@@ -79,7 +79,7 @@ def from_npz(path, device="cpu"):
     """The exported weights loaded back into a torch GPT (so the torch scoring backend scores exactly what the .npz holds)."""
     z = np.load(path, allow_pickle=False)
     n_layer, n_head, ctx = (int(x) for x in z["cfg"])
-    chars = [str(c) or "\x00" for c in z["chars"]]   # numpy drops a NUL (see export_sjtl)
+    chars = tinylm.npz_chars(z)
     d = z["emb"].shape[1]
     m = GPT(len(chars) + 3, n_layer, d, n_head, ctx)
 

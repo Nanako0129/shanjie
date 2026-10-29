@@ -121,9 +121,9 @@ def export(npz, out, wtype, chat, formal, ngram_sha, levels=None, kn_sha=None, l
         version, magic = (VERSION_V3, MAGIC_V3) if levels is not None else (VERSION_V2, MAGIC_V2) if v2 else (VERSION, MAGIC)
     z = np.load(npz, allow_pickle=False)
     n_layer, n_head, ctx = (int(x) for x in z["cfg"])
-    # numpy's <U1 drops a trailing NUL, so a U+0000 in the vocabulary (raw-text training, CTX64: one in 13,406) reads back as "":
-    # restore it so every id keeps its character (the core reads the table as u32 code points and accepts 0)
-    chars = [str(c) or "\x00" for c in z["chars"]]
+    # a U+0000 in the vocabulary (raw-text training, CTX64: one in 13,406) is restored by npz_chars; the core reads the table as u32
+    # code points and accepts 0
+    chars = tinylm.npz_chars(z)
     if len(set(chars)) != len(chars) or any(len(c) != 1 for c in chars):
         raise ValueError("vocabulary: duplicate or multi-character entries")
     d = z["emb"].shape[1]

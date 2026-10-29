@@ -329,7 +329,7 @@ def cmd_encode(a):
     base_rec = None
     if getattr(a, "base_vocab", None):
         try:
-            chars, n_new = merge_vocab(chars, open(a.base_vocab, encoding="utf-8", newline="\n").read().split("\n")[:-1])
+            chars, n_new = merge_vocab(chars, read_vocab(a.base_vocab))
         except ValueError as e:
             die(f"--base-vocab {a.base_vocab}: {e}")
         base_rec = {"sha256": sha256_file(a.base_vocab), "size": len(chars) - n_new, "appended": n_new}
@@ -455,8 +455,17 @@ def cmd_text(a):
                      else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs), indent=1))
 
 
+def read_vocab(path):
+    """A vocab.txt: one character per line, every line (the last too) ends in LF. Raises ValueError when the last LF is missing: split would drop
+    the last character without a sound."""
+    text = open(path, encoding="utf-8", newline="\n").read()
+    if text and not text.endswith("\n"):
+        raise ValueError(f"{path} does not end with a newline, so its last character would be dropped; every line must end with LF")
+    return text.split("\n")[:-1]
+
+
 def load_vocab(work):
-    return open(os.path.join(work, "vocab.txt"), encoding="utf-8", newline="\n").read().split("\n")[:-1]
+    return read_vocab(os.path.join(work, "vocab.txt"))
 
 
 def main(argv=None):

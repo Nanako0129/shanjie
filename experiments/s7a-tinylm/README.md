@@ -265,6 +265,8 @@ App 送給會意 SJ-SR-7-15M 的前文是最多 64 字的原文（含標點、�
 |---|---|
 | `prep.py encode --base-vocab FILE` | 字表 = FILE（一份 vocab.txt）的字、照 FILE 的順序（再罕見也留），後面接「一般規則會收（同樣輸入下次數 ≥ min-count、同樣排除 U+FFFF 以上）而 FILE 沒有」的字，順序照一般規則。`ids-vocab.json` 與 `encode-report.json` 多 `base_vocab`：`sha256`（FILE 的）、`size`、`appended`。NUL（U+0000）照樣保留 |
 | `train.py --init NPZ` | 從 tinylm npz 開始訓練（`torch_model.from_npz` 載入）。npz 的 `chars` 必須是 work dir 的 vocab.txt 的前綴，且層數、寬度、ctx、頭數要和 `--size` 相同，否則訓練前就報錯。所有權重照抄；新增字的 `emb` 列 = npz 全部字（id ≥ 3）列的平均 + 高斯雜訊（std = 0.02 × 整個 `emb` 的 std，`default_rng(--seed)`）。`--max-steps` 本來就把餘弦排程縮到那一步結束（`total = len(batches)`），續訓不用另外處理 |
-| `train.py --peak-lr X` | 峰值學習率，預設 1e-3。`train-<size>.json` 的 `peak_lr` 一律記實際值；用了 `--init` 才多 `init_npz_sha256`、`appended_rows` |
+| `train.py --peak-lr X` | 峰值學習率，預設 1e-3；不是有限正數在解析參數時就拒絕。`train-<size>.json` 的 `peak_lr` 一律記實際值；用了 `--init` 才多 `init_npz_sha256`、`appended_rows` |
+
+限制：新增字的 `emb` 列用「舊字列的平均加雜訊」當初始值，是設計選擇，沒有量過比別的初始化好。罕見、或沒出現在新語料裡的 base 字，它們的列拿不到梯度，只會受 weight decay 影響（逐步縮小）。`--base-vocab` 的檔案最後一行也要以換行結尾，否則拒絕（不然最後一個字會被悄悄丟掉）。`--init` 的檢查（前綴、設定）都在載入語料前做。
 
 測試：`test_extra.py` 的 `TestBaseVocab`（合併順序、預設不變、列初始化、非前綴被拒，純 numpy）；`test_torch.py` 的 `test_init_from_npz_with_appended_vocab`（需要 torch，這台 Mac 沒有，會被跳過）。

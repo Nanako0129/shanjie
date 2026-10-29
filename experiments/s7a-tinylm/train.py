@@ -47,6 +47,13 @@ def extra_arg(arg):
         raise argparse.ArgumentTypeError(str(e))
 
 
+def peak_lr_arg(s):
+    v = float(s)
+    if not (math.isfinite(v) and v > 0):
+        raise argparse.ArgumentTypeError(f"{s}: must be a finite positive number")
+    return v
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", choices=sorted(CONFIGS), required=True)
@@ -64,7 +71,7 @@ def main(argv=None):
     ap.add_argument("--bos-every-piece", action="store_true",
                     help="CTX64: a sequence longer than 65 tokens is cut into pieces that each start with BOS (default: only the first does)")
     ap.add_argument("--init", metavar="NPZ", help="CTX64-B: start from this tinylm npz (its vocabulary must be a prefix of vocab.txt; appended rows = mean of its character rows + noise); the cosine schedule is --max-steps long as always")
-    ap.add_argument("--peak-lr", type=float, default=PEAK_LR, help="peak learning rate (default 1e-3)")
+    ap.add_argument("--peak-lr", type=peak_lr_arg, default=PEAK_LR, help="peak learning rate (default 1e-3)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
@@ -73,11 +80,9 @@ def main(argv=None):
     chars = prep.load_vocab(a.work)
     extra = a.extra
     prep.check_vocab(a.work, [p for p, _ in extra])
-    ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps, a.bos_every_piece)
-    total = len(batches)
     cfg = CONFIGS[a.size]
     model = GPT(len(chars) + 3, **cfg)
-    n_appended = 0
+    n_appended = init_sha = 0
     if a.init:
         old, old_vocab = from_npz(a.init)
         try:
@@ -86,11 +91,14 @@ def main(argv=None):
             sys.exit(f"--init {a.init}: {e}")
         if {k: v for k, v in old.cfg.items() if k != "V"} != {k: v for k, v in model.cfg.items() if k != "V"}:
             sys.exit(f"--init {a.init}: its config {old.cfg} differs from --size {a.size} {cfg}")
+        init_sha = prep.sha256_file(a.init)
         n_appended = len(chars) - len(old_vocab.chars)
         sd = old.state_dict()
         sd["emb.weight"] = torch.from_numpy(prep.extend_emb(sd["emb.weight"].numpy(), n_appended, a.seed))
         model.load_state_dict(sd)
     model = model.to(a.device)
+    ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps, a.bos_every_piece)
+    total = len(batches)
     n_params = sum(p.numel() for p in model.parameters())
     decay = [p for p in model.parameters() if p.ndim >= 2]
     plain = [p for p in model.parameters() if p.ndim < 2]
@@ -131,7 +139,7 @@ def main(argv=None):
                "tokens": tokens, "final_loss_nats_per_token": final, "seed": a.seed,
                "extra": [{"path": p, "weight": w, "sha256": prep.sha256_file(p)} for p, w in extra] or None, "tokens_per_batch": a.tokens_per_batch,
                **({"bos_every_piece": True} if a.bos_every_piece else {}),
-               "peak_lr": a.peak_lr, **({"init_npz_sha256": prep.sha256_file(a.init), "appended_rows": n_appended} if a.init else {}), "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
+               "peak_lr": a.peak_lr, **({"init_npz_sha256": init_sha, "appended_rows": n_appended} if a.init else {}), "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
               open(os.path.join(a.out, f"train-{a.size}.json"), "w"), indent=1)
     print(f"done: final loss {final:.4f} nats/token, {n_params} params")
 

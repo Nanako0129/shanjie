@@ -54,6 +54,11 @@ class Vocab:
 
 
 # ------------------------------------------------------------------ the .npz format (the only definition of it)
+def npz_chars(z):
+    """The vocabulary stored in a tinylm npz. numpy's <U1 drops a trailing NUL, so a U+0000 reads back as "": restore it."""
+    return [str(c) or "\x00" for c in z["chars"]]
+
+
 def save_params(path, params, chars, n_layer, n_head, ctx=CTX):
     """params: dict of float arrays with keys emb, pos, lnf_w, lnf_b and l{i}.{LAYER_KEYS}; weights are (in, out) so y = x @ W + b."""
     d = {k: np.asarray(v, dtype=np.float32) for k, v in params.items()}
@@ -98,7 +103,7 @@ class NumpyLM:
         # from the parity gate (torch's own float32 rounding is what remains); latency.py also measures float32.
         z = np.load(path, allow_pickle=False)
         self.n_layer, self.n_head, self.ctx = (int(x) for x in z["cfg"])
-        self.vocab = Vocab([str(c) for c in z["chars"]])
+        self.vocab = Vocab(npz_chars(z))
         self.dtype = dtype
         self.p = {k: z[k].astype(dtype) for k in z.files if k not in ("cfg", "chars")}
         assert self.p["emb"].shape[0] == self.vocab.size, "emb rows != vocabulary size"
