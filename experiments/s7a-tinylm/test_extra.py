@@ -5,7 +5,9 @@ S7f changes to S7a, numpy only (no torch, no OpenCC files): train.py's epoch and
 Run: python3 -W ignore -m unittest experiments/s7a-tinylm/test_extra.py -v   (from the repo root)
 """
 import collections
+import contextlib
 import hashlib
+import io
 import json
 import os
 import sys
@@ -351,9 +353,9 @@ class TestRawMode(unittest.TestCase):
         sents = ["我們去吃飯，OK！", "ok 123", "天氣真好，哈哈", "  "]
         with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
             try:
-                prep._init(self.Guard(), True)
-                w, c = prep._work(("wiki", [art])), prep._work(("text", sents))
-                prep._init(None, False)
+                prep._init(self.Guard())
+                w, c = prep._work(("wiki", [art], True)), prep._work(("text", sents, True))
+                prep._init(None)
                 dw, dc = prep._work(("wiki", [art])), prep._work(("text", sents))
             finally:
                 prep._init()
@@ -361,6 +363,31 @@ class TestRawMode(unittest.TestCase):
         self.assertEqual((c[0], c[2], c[3], c[4]), ("我們去吃飯，OK！", 1, 1, 1))             # blank: counted nowhere
         self.assertEqual(dw[0], "第一句\n有逗號\n第二句天氣真好")                           # default: Han runs, unchanged
         self.assertEqual((dc[0], dc[3], dc[4]), ("我們去吃飯\n天氣真好\n哈哈", 0, 0))
+
+    def test_raw_wiki_drops_markup_residue_and_list_marks(self):
+        raw = "* 項目一二三。:: 縮排的句子。有 == 標題 ==。表格|欄位。留下[[連結。結束}}了。{{模板。一般的句子。"
+        with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+            got = list(prep.raw_wiki_lines(raw, ()))
+            self.assertEqual(got, [("項目一二三", None), ("縮排的句子", None)] + [(None, prep.MARKUP_JUNK)] * 5 + [("一般的句子", None)])
+            try:
+                prep._init()
+                w = prep._work(("wiki", [raw], True))
+                d = prep._work(("wiki", [raw]))
+            finally:
+                prep._init()
+        self.assertEqual((w[2], w[5]), (3, 5))                                         # kept lines, markup lines
+        self.assertEqual(w[0].split("\n"), ["項目一二三", "縮排的句子", "一般的句子"])
+        self.assertEqual(d[5], 0)                                                       # the default path is untouched
+        self.assertIn("標題", d[0].split("\n"))                                           # default: Han runs of the same sentences
+
+    def test_text_raw_needs_runs_only(self):
+        with tempfile.TemporaryDirectory() as work:
+            self.write(work, "in.txt", "我們去吃飯，OK\n")
+            args = ["text", "--work", work, "--in", os.path.join(work, "in.txt"), "--name", "g"]
+            with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(io.StringIO()):
+                prep.main(args + ["--raw"])
+            self.assertIn("--runs-only", str(cm.exception))
+            self.assertFalse(os.path.exists(os.path.join(work, "runs-g.txt")))
 
     def test_raw_half_skips_blank_lines_before_the_half_judgement(self):
         with tempfile.TemporaryDirectory() as work:

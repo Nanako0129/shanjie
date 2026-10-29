@@ -37,6 +37,7 @@ import hashlib
 import json
 import multiprocessing as mp
 import os
+import re
 import sys
 
 import numpy as np
@@ -99,7 +100,9 @@ def text_runs(line, conv):
             yield run
 
 
-NO_LINE, GUARDED, NO_HAN = None, "guard", "no_han"
+GUARDED, NO_HAN, MARKUP_JUNK = "guard", "no_han", "markup"
+WIKI_JUNK = re.compile(r"==|\||\[\[|\]\]|\{\{|\}\}")    # wiki markup that article_text left in a sentence (raw path only)
+LIST_LEAD = re.compile(r"^[*#:;]+\s*")
 
 
 def raw_line(text, guard=None):
@@ -118,29 +121,31 @@ def raw_line(text, guard=None):
 
 
 def raw_wiki_lines(raw, conv, guard=None):
-    """One wiki article's raw lines (`runs --raw`): (line or None, why not) per bc.article_sentences sentence."""
+    """One wiki article's raw lines (`runs --raw`): (line or None, why not) per bc.article_sentences sentence. A sentence holding markup
+    residue (== | [[ ]] {{ }}) is dropped (MARKUP_JUNK); a leading list mark (* # : ;) and the blanks after it are removed."""
     for sent in bc.article_sentences(raw, conv):
-        yield raw_line(sent, guard)
+        yield (None, MARKUP_JUNK) if WIKI_JUNK.search(sent) else raw_line(LIST_LEAD.sub("", sent.strip()), guard)
 
 
 _CONV = _GUARD = None
-_RAW = False
 
 
-def _init(guard=None, raw=False):
-    global _CONV, _GUARD, _RAW
-    _CONV, _GUARD, _RAW = bc.load_conv(), guard, raw
+def _init(guard=None):
+    global _CONV, _GUARD
+    _CONV, _GUARD = bc.load_conv(), guard
 
 
 def _work(args):
-    """(the kept lines joined by "\\n", their character counts, how many, guard-skipped, raw lines without a Han run of length >= 2)."""
-    kind, items = args
-    runs, skipped, no_han = [], 0, 0
-    if _RAW:    # `runs --raw`: wiki sentences, and the colloquial / synth lines as bct.lines gave them (the default path's unit), whole
+    """args = (kind, items[, raw]). Returns (the kept lines joined by "\\n", their character counts, how many, guard-skipped, raw lines
+    without a Han run of length >= 2, raw wiki sentences with markup residue)."""
+    kind, items, *flag = args
+    runs, skipped, no_han, markup = [], 0, 0, 0
+    if flag and flag[0]:    # `runs --raw`: wiki sentences, and the colloquial / synth lines as bct.lines gave them (the default path's unit), whole
         for x in items:
             for line, why in (raw_wiki_lines(x, _CONV, _GUARD) if kind == "wiki" else [raw_line(bc.convert(x, *_CONV), _GUARD)]):
                 skipped += why == GUARDED
                 no_han += why == NO_HAN
+                markup += why == MARKUP_JUNK
                 if line is not None:
                     runs.append(line)
     else:
@@ -152,7 +157,7 @@ def _work(args):
                     continue
                 runs.append(r)
     text = "\n".join(runs)
-    return text, collections.Counter(text.replace("\n", "")), len(runs), skipped, no_han
+    return text, collections.Counter(text.replace("\n", "")), len(runs), skipped, no_han, markup
 
 
 def cmd_runs(a):
@@ -165,24 +170,24 @@ def cmd_runs(a):
     total, report = collections.Counter(), {"input_sha256": hashes, "articles": a.articles}
     if a.raw:
         report["raw"] = True
-    with mp.Pool(a.procs, initializer=_init, initargs=(guard, a.raw)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(guard,)) as pool:
         # wiki: imap (ordered), so the training text is the same on every run
-        n_runs = n_chars = skip_src = nh_src = 0
+        n_runs = n_chars = skip_src = nh_src = mk_src = 0
         with open(os.path.join(a.work, "runs-wiki.txt"), "w", encoding="utf-8", newline="\n") as out:
-            for i, (text, cnt, n, sk, nh) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
+            for i, (text, cnt, n, sk, nh, mk) in enumerate(pool.imap(_work, (("wiki", b, a.raw) for b in bc.batches(bc.articles(a.articles)))), 1):
                 if n:
                     out.write(text + "\n")
-                total.update(cnt); n_runs += n; n_chars += sum(cnt.values()); skipped_runs += sk; skip_src += sk; nh_src += nh
+                total.update(cnt); n_runs += n; n_chars += sum(cnt.values()); skipped_runs += sk; skip_src += sk; nh_src += nh; mk_src += mk
                 if i % 50 == 0:
                     print(f"~{i * 200} articles, {n_runs} runs, {n_chars} chars", flush=True)
         report["wiki"] = {"runs": n_runs, "chars": n_chars}
         if a.raw:     # raw: "runs" are lines; the counts of each source apart (the Han-run counts of the default path stay as they were)
-            report["wiki"].update(guard_skipped_lines=skip_src, no_han_lines=nh_src)
+            report["wiki"].update(guard_skipped_lines=skip_src, no_han_lines=nh_src, markup_lines=mk_src)
         n_runs = n_chars = 0
         with open(os.path.join(a.work, "runs-coll.txt"), "w", encoding="utf-8", newline="\n") as out:
             for name, p in (("colloquial-train.txt", a.coll), ("synth.txt", a.synth)):
                 r = c = skip_src = nh_src = 0
-                for text, cnt, n, sk, nh in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
+                for text, cnt, n, sk, nh, _mk in pool.imap(_work, (("text", b, a.raw) for b in bc.batches(bct.lines(p), 2000))):
                     if n:
                         out.write(text + "\n")
                     total.update(cnt); r += n; c += sum(cnt.values()); skipped_runs += sk; skip_src += sk; nh_src += nh
@@ -408,6 +413,9 @@ def encode_extra(src, work, name, conv, guard=None, half=False, procs=1, raw=Fal
 
 
 def cmd_text(a):
+    if a.raw and not a.runs_only:
+        die("--raw needs --runs-only: without it the lines would be encoded with the existing vocab.txt (Han only), so punctuation and ASCII "
+            "would silently become UNK; write runs-<name>.txt with --runs-only and let `encode --extra <name>` build the vocabulary and ids")
     conv, guard = bc.load_conv(), bc.guard_matcher(a.holdout_guard)
     print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half, a.procs, a.raw) if a.runs_only
                      else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs, a.raw), indent=1))

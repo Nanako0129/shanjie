@@ -185,6 +185,8 @@ def read_sjtl(path):
         at += 32
     if version == VERSION_V5:
         left_len = struct.unpack_from("<I", b, at)[0]
+        if not 1 <= left_len <= ctx - 2:      # core/src/tinylm.rs refuses it too
+            raise ValueError(f"left length {left_len} outside [1, ctx - 2 = {ctx - 2}]")
         at += 4
     chars = [chr(c) for c in struct.unpack_from(f"<{V - 3}I", b, at)]
     at += 4 * (V - 3)

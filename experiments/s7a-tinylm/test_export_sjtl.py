@@ -323,6 +323,14 @@ class TestExport(unittest.TestCase):
             with self.assertRaises(ValueError, msg=l):
                 self.cli(out, "--left-len", str(l))
             self.assertFalse(os.path.exists(out), l)
+        self.cli(out, "--left-len", "8")                  # read_sjtl refuses what the Rust reader refuses
+        good = open(out, "rb").read()
+        os.remove(out)
+        for l in (0, ctx - 1, 2 ** 32 - 1):
+            open(out, "wb").write(good[:244] + struct.pack("<I", l) + good[248:])
+            with self.assertRaises(ValueError, msg=l):
+                ex.read_sjtl(out)
+        os.remove(out)
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):       # needs --levels
             self.cli(out, "--left-len", "8", levels=False)
         with self.assertRaises(ValueError):            # the library: needs the version 4 hash too
