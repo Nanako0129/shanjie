@@ -114,6 +114,7 @@ def main(argv=None):
     json.dump({"size": a.size, "config": cfg, "vocab": len(chars) + 3, "params": n_params, "pieces": int(len(lengths)), "steps": total,
                "tokens": tokens, "final_loss_nats_per_token": final, "seed": a.seed,
                "extra": [{"path": p, "weight": w, "sha256": prep.sha256_file(p)} for p, w in extra] or None, "tokens_per_batch": a.tokens_per_batch,
+               **({"bos_every_piece": True} if a.bos_every_piece else {}),
                "peak_lr": PEAK_LR, "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
               open(os.path.join(a.out, f"train-{a.size}.json"), "w"), indent=1)
     print(f"done: final loss {final:.4f} nats/token, {n_params} params")

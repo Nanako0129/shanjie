@@ -21,7 +21,7 @@
           kept; only leading / trailing whitespace stripped; empty lines dropped; a ".tsv" path uses its last field). The holdout guard drops
           the whole line when ANY of its Han runs (length >= 2, as in the default path) hits it. `encode --extra` counts every character
           of such a file into the vocabulary (only characters above U+FFFF are never in the vocabulary: they stay UNK). `--half` applies
-          to the line as before. `runs --raw-wiki` does the same for the wiki part (build_counts.article_sentences, i.e. sentences split
+          to the line as before. `runs --raw` does the same for the wiki part (build_counts.article_sentences, i.e. sentences split
           at 。！？； with their in-sentence punctuation). Both default off: every default output is byte-identical to before.
 `encode --extra NAME ...` (SJ-SR-7, section 2.7): the vocabulary is counted over runs-wiki + runs-coll + each DIR/runs-<NAME>.txt (from
           `text --runs-only`), every file ONCE (never multiplied by its epoch weight, as the x5 colloquial pool is not), then each
@@ -99,52 +99,60 @@ def text_runs(line, conv):
             yield run
 
 
+NO_LINE, GUARDED, NO_HAN = None, "guard", "no_han"
+
+
 def raw_line(text, guard=None):
-    """CTX64: (the line to train on, skipped). `text` is already OpenCC-converted. Stripped; None for an empty line; skipped when ANY of its
-    Han runs of length >= 2 hits the guard (the same test, on the same runs, as the default path applies to each run)."""
+    """CTX64: (the line to train on, why not). `text` is already OpenCC-converted. Stripped. Not kept: an empty line (None, None); a line with
+    no Han run of length >= 2 (None, NO_HAN: ASCII debris and one-character fragments, the default path keeps only such runs too); a line
+    where ANY Han run of length >= 2 hits the guard (None, GUARDED; the same test, on the same runs, as the default path applies per run)."""
     t = text.strip()
     if not t:
-        return None, False
-    if guard is not None and any(guard.any(bc.fold(r)) for r in bc.HAN.findall(t) if len(r) >= 2):
-        return None, True
-    return t, False
+        return None, None
+    han = [r for r in bc.HAN.findall(t) if len(r) >= 2]
+    if not han:
+        return None, NO_HAN
+    if guard is not None and any(guard.any(bc.fold(r)) for r in han):
+        return None, GUARDED
+    return t, None
 
 
 def raw_wiki_lines(raw, conv, guard=None):
-    """One wiki article's raw lines (`runs --raw-wiki`): (line or None, skipped) per bc.article_sentences sentence."""
+    """One wiki article's raw lines (`runs --raw`): (line or None, why not) per bc.article_sentences sentence."""
     for sent in bc.article_sentences(raw, conv):
         yield raw_line(sent, guard)
 
 
 _CONV = _GUARD = None
-_RAW_WIKI = False
+_RAW = False
 
 
-def _init(guard=None, raw_wiki=False):
-    global _CONV, _GUARD, _RAW_WIKI
-    _CONV, _GUARD, _RAW_WIKI = bc.load_conv(), guard, raw_wiki
+def _init(guard=None, raw=False):
+    global _CONV, _GUARD, _RAW
+    _CONV, _GUARD, _RAW = bc.load_conv(), guard, raw
 
 
 def _work(args):
+    """(the kept lines joined by "\\n", their character counts, how many, guard-skipped, raw lines without a Han run of length >= 2)."""
     kind, items = args
-    f = wiki_runs if kind == "wiki" else text_runs
-    runs, skipped = [], 0
-    if kind == "wiki" and _RAW_WIKI:
+    runs, skipped, no_han = [], 0, 0
+    if _RAW:    # `runs --raw`: wiki sentences, and the colloquial / synth lines as bct.lines gave them (the default path's unit), whole
         for x in items:
-            for line, sk in raw_wiki_lines(x, _CONV, _GUARD):
-                skipped += sk
+            for line, why in (raw_wiki_lines(x, _CONV, _GUARD) if kind == "wiki" else [raw_line(bc.convert(x, *_CONV), _GUARD)]):
+                skipped += why == GUARDED
+                no_han += why == NO_HAN
                 if line is not None:
                     runs.append(line)
-        text = "\n".join(runs)
-        return text, collections.Counter(text.replace("\n", "")), len(runs), skipped
-    for x in items:
-        for r in f(x, _CONV):
-            if _GUARD is not None and _GUARD.any(bc.fold(r)):   # --holdout-guard: held-out sentence inside the run, not part of the training text
-                skipped += 1
-                continue
-            runs.append(r)
+    else:
+        f = wiki_runs if kind == "wiki" else text_runs
+        for x in items:
+            for r in f(x, _CONV):
+                if _GUARD is not None and _GUARD.any(bc.fold(r)):   # --holdout-guard: held-out sentence inside the run, not part of the training text
+                    skipped += 1
+                    continue
+                runs.append(r)
     text = "\n".join(runs)
-    return text, collections.Counter(text.replace("\n", "")), len(runs), skipped
+    return text, collections.Counter(text.replace("\n", "")), len(runs), skipped, no_han
 
 
 def cmd_runs(a):
@@ -155,32 +163,36 @@ def cmd_runs(a):
     os.makedirs(a.work, exist_ok=True)
     skipped_runs = 0
     total, report = collections.Counter(), {"input_sha256": hashes, "articles": a.articles}
-    if a.raw_wiki:
-        report["raw_wiki"] = True
-    with mp.Pool(a.procs, initializer=_init, initargs=(guard, a.raw_wiki)) as pool:
+    if a.raw:
+        report["raw"] = True
+    with mp.Pool(a.procs, initializer=_init, initargs=(guard, a.raw)) as pool:
         # wiki: imap (ordered), so the training text is the same on every run
-        n_runs = n_chars = 0
+        n_runs = n_chars = skip_src = nh_src = 0
         with open(os.path.join(a.work, "runs-wiki.txt"), "w", encoding="utf-8", newline="\n") as out:
-            for i, (text, cnt, n, sk) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
+            for i, (text, cnt, n, sk, nh) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
                 if n:
                     out.write(text + "\n")
-                total.update(cnt); n_runs += n; n_chars += sum(cnt.values()); skipped_runs += sk
+                total.update(cnt); n_runs += n; n_chars += sum(cnt.values()); skipped_runs += sk; skip_src += sk; nh_src += nh
                 if i % 50 == 0:
                     print(f"~{i * 200} articles, {n_runs} runs, {n_chars} chars", flush=True)
         report["wiki"] = {"runs": n_runs, "chars": n_chars}
+        if a.raw:     # raw: "runs" are lines; the counts of each source apart (the Han-run counts of the default path stay as they were)
+            report["wiki"].update(guard_skipped_lines=skip_src, no_han_lines=nh_src)
         n_runs = n_chars = 0
         with open(os.path.join(a.work, "runs-coll.txt"), "w", encoding="utf-8", newline="\n") as out:
             for name, p in (("colloquial-train.txt", a.coll), ("synth.txt", a.synth)):
-                r = c = 0
-                for text, cnt, n, sk in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
+                r = c = skip_src = nh_src = 0
+                for text, cnt, n, sk, nh in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
                     if n:
                         out.write(text + "\n")
-                    total.update(cnt); r += n; c += sum(cnt.values()); skipped_runs += sk
+                    total.update(cnt); r += n; c += sum(cnt.values()); skipped_runs += sk; skip_src += sk; nh_src += nh
                 report[name] = {"runs": r, "chars": c}
+                if a.raw:
+                    report[name].update(guard_skipped_lines=skip_src, no_han_lines=nh_src)
                 n_runs += r; n_chars += c
         report["coll"] = {"runs": n_runs, "chars": n_chars}
     if guard is not None:
-        report["holdout_guard_skipped_runs"] = skipped_runs
+        report["holdout_guard_skipped_runs" if not a.raw else "holdout_guard_skipped_lines"] = skipped_runs
     report["train_chars_once"] = report["wiki"]["chars"] + report["coll"]["chars"]
     report["train_chars_weighted"] = WIKI_WEIGHT * report["wiki"]["chars"] + COLL_WEIGHT * report["coll"]["chars"]
     json.dump({"report": report, "charcount": dict(total)}, open(os.path.join(a.work, "charcount.json"), "w", encoding="utf-8"), ensure_ascii=False)
@@ -308,7 +320,7 @@ def half_keep(sentence):
 
 
 TEXT_KEYS = ["input", "input_sha256", "lines", "tokens", "runs", "unk_fraction", "vocab_sha256", "runs_sha256", "ids_sha256",
-             "holdout_guard_skipped_runs", "half_dropped_runs", "raw"]   # text-<name>.json key order; the first ten are the pre-SJ-SR-7 order
+             "holdout_guard_skipped_runs", "half_dropped_runs", "raw", "raw_no_han_lines"]   # text-<name>.json key order; the first ten are the pre-SJ-SR-7 order
 
 
 def dump_text_report(path, rep):
@@ -318,16 +330,21 @@ def dump_text_report(path, rep):
 
 
 def _text_batch(lines, conv, guard, half, tsv, raw=False):
-    """write_runs on one batch of input lines (trailing newline removed): (the kept runs, each + "\\n"; lines; guard-skipped runs; half-dropped runs).
-    raw: the kept "runs" are the converted lines (raw_line); the skipped / dropped counts are then lines."""
-    out, skipped, dropped = [], 0, 0
+    """write_runs on one batch of input lines (trailing newline removed): (the kept runs, each + "\\n"; lines; guard-skipped runs; half-dropped runs;
+    raw lines without a Han run of length >= 2). raw: the kept "runs" are the converted lines (raw_line); the skipped / dropped counts
+    are then lines, and a blank line is skipped before the half judgement (it counts in neither)."""
+    out, skipped, dropped, no_han = [], 0, 0, 0
     for line in lines:
-        if half and not half_keep(line.split("\t")[-1] if tsv else line):
+        sent = line.split("\t")[-1] if tsv else line     # the sentence: the last field of a .tsv line
+        if raw and not sent.strip():
+            continue
+        if half and not half_keep(sent):
             dropped += 1 if raw else sum(1 for _ in text_runs(line, conv))
             continue
         if raw:
-            t, sk = raw_line(bc.convert(line.split("\t")[-1] if tsv else line, *conv), guard)
-            skipped += sk
+            t, why = raw_line(bc.convert(sent, *conv), guard)
+            skipped += why == GUARDED
+            no_han += why == NO_HAN
             if t is not None:
                 out.append(t + "\n")
             continue
@@ -336,7 +353,7 @@ def _text_batch(lines, conv, guard, half, tsv, raw=False):
                 skipped += 1
                 continue
             out.append(run + "\n")
-    return "".join(out), len(lines), skipped, dropped
+    return "".join(out), len(lines), skipped, dropped, no_han
 
 
 def _text_work(args):
@@ -353,13 +370,13 @@ def write_runs(src, work, name, conv, guard=None, half=False, procs=1, raw=False
         die(f"--name {name} would overwrite the S7a training ids")
     runs_path = os.path.join(work, f"runs-{name}.txt")
     tsv = ".tsv" in src
-    n_lines = skipped = dropped = 0
+    n_lines = skipped = dropped = no_han = 0
     with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out, \
             (mp.Pool(procs, initializer=_init, initargs=(guard,)) if procs > 1 else contextlib.nullcontext()) as pool:
         jobs = ((b, half, tsv, raw) for b in bc.batches((line.rstrip("\n") for line in f), 2000))
-        for text, n, sk, dr in (pool.imap(_text_work, jobs) if pool else (_text_batch(b, conv, guard, h, t, r) for b, h, t, r in jobs)):
+        for text, n, sk, dr, nh in (pool.imap(_text_work, jobs) if pool else (_text_batch(b, conv, guard, h, t, r) for b, h, t, r in jobs)):
             out.write(text)
-            n_lines += n; skipped += sk; dropped += dr
+            n_lines += n; skipped += sk; dropped += dr; no_han += nh
     rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "runs_sha256": sha256_file(runs_path)}
     if guard is not None:
         rep["holdout_guard_skipped_runs"] = skipped
@@ -367,6 +384,7 @@ def write_runs(src, work, name, conv, guard=None, half=False, procs=1, raw=False
         rep["half_dropped_runs"] = dropped    # Han runs of the dropped lines (raw: the dropped lines)
     if raw:
         rep["raw"] = True
+        rep["raw_no_han_lines"] = no_han
     return dump_text_report(os.path.join(work, f"text-{name}.json"), rep)
 
 
@@ -404,7 +422,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("runs")
     r.add_argument("--work", required=True); r.add_argument("--coll", required=True); r.add_argument("--synth", required=True)
-    r.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS"); r.add_argument("--raw-wiki", action="store_true", help="CTX64: wiki lines are bc.article_sentences (punctuation, ASCII, digits kept) instead of Han runs"); r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
+    r.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS"); r.add_argument("--raw", action="store_true", help="CTX64: wiki (bc.article_sentences), colloquial and synth lines are kept whole (punctuation, ASCII, digits) instead of as Han runs"); r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     e = sub.add_parser("encode")
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
     e.add_argument("--force", action="store_true", help="encode over a vocab.txt made from a different --extra set (overwrites that arm's vocabulary and ids)")

@@ -296,7 +296,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
 
 
 class TestRawMode(unittest.TestCase):
-    """CTX64: `text --raw`, `runs --raw-wiki`, the vocabulary over every character, and BOS at every piece."""
+    """CTX64: `text --raw`, `runs --raw`, the vocabulary over every character, and BOS at every piece."""
 
     class Guard:
         """Stands in for holdout_guard's Matcher: .any(folded run) is true for a run containing a guarded sentence."""
@@ -329,12 +329,43 @@ class TestRawMode(unittest.TestCase):
 
     def test_raw_guard_drops_the_whole_line_when_any_han_run_is_guarded(self):
         with tempfile.TemporaryDirectory() as work:
-            text = "你好嗎，今天天氣真好，我們去吃飯\n你好嗎，我們去吃飯\n天，氣\n"
+            text = "你好嗎，今天天氣真好，我們去吃飯\n你好嗎，我們去吃飯\n"
             out, rep = self.runs(work, text, raw=True, guard=self.Guard())
-            self.assertEqual(out, "你好嗎，我們去吃飯\n天，氣\n")                 # a one-character run is not a guard unit (length >= 2)
+            self.assertEqual(out, "你好嗎，我們去吃飯\n")
             self.assertEqual(rep["holdout_guard_skipped_runs"], 1)
             out, _ = self.runs(work, text, guard=self.Guard())                      # the default path drops only the run
             self.assertEqual(out, "你好嗎\n我們去吃飯\n你好嗎\n我們去吃飯\n")
+
+    def test_raw_keeps_only_lines_with_a_han_run_of_two_or_more(self):
+        with tempfile.TemporaryDirectory() as work:
+            out, rep = self.runs(work, "ok 123!\n天，氣\n好 ok\n我們，ok\n  \n", raw=True)
+            self.assertEqual(out, "我們，ok\n")                                   # ASCII debris and one-character fragments are out
+            self.assertEqual((rep["lines"], rep["raw_no_han_lines"]), (5, 3))        # the blank line is neither kept nor counted
+        raw = "ASCII 12。天，氣。第二句天氣真好！"
+        with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+            self.assertEqual(list(prep.raw_wiki_lines(raw, ())), [(None, prep.NO_HAN), (None, prep.NO_HAN), ("第二句天氣真好", None)])
+
+    def test_runs_raw_applies_to_wiki_and_colloquial_items_with_the_same_filters(self):
+        # `runs --raw` goes through _work: kind "wiki" = an article, kind "text" = one sentence as bct.lines yields it (synthetic fixture only)
+        art = "第一句，有逗號and 12。ok。第二句天氣真好！"
+        sents = ["我們去吃飯，OK！", "ok 123", "天氣真好，哈哈", "  "]
+        with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
+            try:
+                prep._init(self.Guard(), True)
+                w, c = prep._work(("wiki", [art])), prep._work(("text", sents))
+                prep._init(None, False)
+                dw, dc = prep._work(("wiki", [art])), prep._work(("text", sents))
+            finally:
+                prep._init()
+        self.assertEqual((w[0], w[2], w[3], w[4]), ("第一句，有逗號and 12", 1, 1, 1))        # kept / guarded / no Han run (ok)
+        self.assertEqual((c[0], c[2], c[3], c[4]), ("我們去吃飯，OK！", 1, 1, 1))             # blank: counted nowhere
+        self.assertEqual(dw[0], "第一句\n有逗號\n第二句天氣真好")                           # default: Han runs, unchanged
+        self.assertEqual((dc[0], dc[3], dc[4]), ("我們去吃飯\n天氣真好\n哈哈", 0, 0))
+
+    def test_raw_half_skips_blank_lines_before_the_half_judgement(self):
+        with tempfile.TemporaryDirectory() as work:
+            _, rep = self.runs(work, "\n   \n\n", raw=True, half=True)
+            self.assertEqual((rep["lines"], rep["half_dropped_runs"]), (3, 0))
 
     def test_raw_half_and_tsv(self):
         lines = ["天氣好嗎", "吃飯了沒，OK", "好嗎，你好", "我們去吃飯，好嗎"]           # the line is judged whole, as in the default path
@@ -362,8 +393,8 @@ class TestRawMode(unittest.TestCase):
     def test_raw_wiki_lines_are_sentences_with_their_punctuation(self):
         raw = "第一句，有逗號、and ASCII 12。第二句天氣真好！\n\n第三句？"
         with mock.patch.object(prep.bc, "convert", lambda t, *conv, **k: t):
-            self.assertEqual(list(prep.raw_wiki_lines(raw, ())), [("第一句，有逗號、and ASCII 12", False), ("第二句天氣真好", False), ("第三句", False)])
-            self.assertEqual(list(prep.raw_wiki_lines(raw, (), self.Guard()))[1], (None, True))
+            self.assertEqual(list(prep.raw_wiki_lines(raw, ())), [("第一句，有逗號、and ASCII 12", None), ("第二句天氣真好", None), ("第三句", None)])
+            self.assertEqual(list(prep.raw_wiki_lines(raw, (), self.Guard()))[1], (None, prep.GUARDED))
             self.assertEqual([r for r in prep.wiki_runs(raw, ())], ["第一句", "有逗號", "第二句天氣真好", "第三句"])    # the default: Han runs
 
     def test_rebos_puts_bos_at_every_piece_and_covers_every_target_once(self):
@@ -378,6 +409,29 @@ class TestRawMode(unittest.TestCase):
         self.assertEqual(sorted(targets.tolist()), sorted(run + [5, 6]))
         old_st, _ = batching.pieces(ids)
         self.assertNotEqual(int(ids[np.sort(old_st)[1]]), BOS)                        # the default still has none there
+
+    def test_rebos_equals_the_loop_it_replaced_on_random_data(self):
+        def loop(ids):                                   # the first version, one Python step per 64 characters
+            st = np.flatnonzero(ids == BOS)
+            ln = np.diff(np.append(st, len(ids)))
+            parts, at = [], 0
+            for s, l in zip(st[ln > batching.PIECE].tolist(), ln[ln > batching.PIECE].tolist()):
+                parts.append(ids[at:s])
+                chars = ids[s + 1:s + l]
+                for i in range(0, len(chars), batching.PIECE - 1):
+                    parts += [ids[s:s + 1], chars[i:i + batching.PIECE - 1]]
+                at = s + l
+            parts.append(ids[at:])
+            return np.concatenate(parts)
+        rng = np.random.default_rng(11)
+        for _ in range(20):
+            parts = []
+            for _ in range(60):
+                n = int(rng.choice([1, 2, 63, 64, 65, 66, 127, 128, 129, 130, 193, 500, 1000]))
+                parts += [BOS] + list(rng.integers(3, 50, n))
+            ids = np.array(parts, dtype=np.uint16)
+            got = batching.rebos(ids)
+            self.assertEqual((got.dtype, got.tobytes()), (ids.dtype, loop(ids).tobytes()))
 
     def test_rebos_without_a_long_run_and_the_default_plan_are_byte_identical(self):
         short = np.array([BOS, 3, 4, BOS] + [3] * 64, dtype=np.uint16)                # 65 tokens: exactly one piece

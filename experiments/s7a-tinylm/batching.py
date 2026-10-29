@@ -40,15 +40,11 @@ def rebos(ids):
     showed the model that. Runs of at most PIECE tokens, and so every array without a long run, come back unchanged (same bytes)."""
     st = np.flatnonzero(ids == BOS)
     ln = np.diff(np.append(st, len(ids)))
-    parts, at = [], 0
-    for s, l in zip(st[ln > PIECE].tolist(), ln[ln > PIECE].tolist()):
-        parts.append(ids[at:s])
-        chars = ids[s + 1:s + l]
-        for i in range(0, len(chars), PIECE - 1):
-            parts += [ids[s:s + 1], chars[i:i + PIECE - 1]]
-        at = s + l
-    parts.append(ids[at:])
-    return np.concatenate(parts)
+    long = ln > PIECE
+    m = -(-(ln[long] - 1) // (PIECE - 1)) - 1                       # BOS to insert into each long run: its pieces after the first
+    first = np.repeat(st[long] + 1, m)                              # index of the first character of each run, once per insertion
+    k = np.arange(int(m.sum())) - np.repeat(np.cumsum(m) - m, m) + 1   # 1, 2, ... within each run
+    return np.insert(ids, first + (PIECE - 1) * k, BOS)             # one call: before the 64k-th character of the run
 
 
 def make_batches(lengths, tokens_per_batch, rng):
