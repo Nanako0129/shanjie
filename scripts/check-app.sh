@@ -76,7 +76,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
-         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/quotes-add.tsv packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
@@ -89,13 +89,14 @@ cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Res
 # The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
 for f in Assets.car AppIcon.icns; do [ -s "$R/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
 for k in CFBundleIconName CFBundleIconFile; do [ "$(pb "$k")" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done
-# The word pack manifest (docs/contracts/acg-pack.md A.2): every file it lists is there with the SHA-256 it records,
-# and the attribution file names the pack.
-python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack files"
+# The word pack manifests (docs/contracts/acg-pack.md A.2, quote-pack.md section 2): every file one lists is there with the SHA-256 it
+# records, and the attribution file names the ACG pack. quotes-add.tsv holds the checked quotes, so the
+# non-empty test above covers it, and the manifest must name it.
+python3 - "$R/packs" <<'PY' || fail "packs/acg.json or packs/quotes.json does not match the pack files"
 import hashlib, json, os, sys
 d = sys.argv[1]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-for manifest, required in (("acg.json", "acg-add.tsv"), ("it.json", "it-add.tsv")):     # the IT+AI pack: docs/contracts/it-pack.md section 3.2
+for manifest, required in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv"), ("it.json", "it-add.tsv")):     # quotes: docs/contracts/quote-pack.md section 2; IT+AI: docs/contracts/it-pack.md section 3.2
     files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
     if required not in files:
         sys.exit(required + " is not in " + manifest)

@@ -435,12 +435,15 @@ static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
   CHECK(701, shanjie_engine_new_packs(0, 0, 0, 0u, &e) == 1 && e == 0);
   CHECK(702, shanjie_engine_new_packs(dir, 0, 0, 1u, &e) == 1 && e == 0); /* a pack without a directory */
-  CHECK(703, shanjie_engine_new_packs(dir, 0, dir, 2u, &e) == 2 && e == 0); /* a bit outside the mask */
+  CHECK(703, shanjie_engine_new_packs(dir, 0, dir, (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT) << 1, &e) == 2 && e == 0); /* a bit outside the mask */
   CHECK(704, shanjie_engine_new_packs(dir, 2u, 0, 0u, &e) == 2 && e == 0);   /* layout out of range */
   CHECK(705, shanjie_engine_new_packs(dir, 0, 0, 0u, &e) == 0 && e != 0);    /* mask 0: packs_dir may be NULL */
   shanjie_engine_free(e);
   e = 0;
   CHECK(706, shanjie_engine_new_packs(dir, 0, "/nonexistent/shanjie-packs", 1u, &e) == 0 && e != 0); /* a missing pack file adds nothing */
+  shanjie_engine_free(e);
+  e = 0;
+  CHECK(707, shanjie_engine_new_packs(dir, 0, "/nonexistent/shanjie-packs", SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT, &e) == 0 && e != 0); /* all three bits, no files */
   shanjie_engine_free(e);
   return 0;
 }

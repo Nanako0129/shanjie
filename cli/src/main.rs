@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_IT, PACK_OOV};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
@@ -69,23 +69,29 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
     Ok(())
 }
 
-/// `--packs acg`, `--packs it`, `--packs acg,it`: sets the pack bits; anything else is refused.
+/// `--packs acg|quotes|it` or a comma list of them: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
     v.split(',').try_fold(0, |bits, name| match name {
         "acg" => Ok(bits | PACK_ACG),
+        "quotes" => Ok(bits | PACK_QUOTES),
         "it" => Ok(bits | PACK_IT),
-        _ => Err("--packs takes acg, it or acg,it".to_string()),
+        _ => Err("--packs takes acg, quotes, it or a comma list of them".to_string()),
     })
+}
+
+/// The summary line's pack marker: `+acg`, `+quotes`, `+it` in that order; nothing with no pack (the existing golden lines are untouched).
+fn pack_tag(packs: u32) -> String {
+    format!("{}{}{}", if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_QUOTES != 0 { "+quotes" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" })
 }
 
 /// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
 /// missing (the engine tolerates it), so this is checked with the other options, before the model is read.
 fn packs_dir_checked(packs: u32, packs_dir: Option<String>) -> Result<PathBuf, String> {
     let pdir = packs_dir.map_or_else(|| root().join("data/packs"), PathBuf::from);
-    for (bit, name) in [(PACK_ACG, "acg"), (PACK_IT, "it")] {
-        let file = pdir.join(format!("{name}-add.tsv"));
-        if packs & bit != 0 && !file.is_file() {
-            return Err(format!("--packs {name}: pack file not found: {}", file.display()));
+    for (bit, file) in PACK_FILES {
+        let path = pdir.join(file);
+        if packs & bit != 0 && !path.is_file() {
+            return Err(format!("--packs {}: pack file not found: {}", file.trim_end_matches("-add.tsv"), path.display()));
         }
     }
     Ok(pdir)
@@ -613,7 +619,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" }, if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
     Ok(())
 }
 
@@ -917,14 +923,16 @@ mod tests {
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
     }
 
-    /// it-pack contract 3.1: `--packs` takes acg, it, acg,it (and the flag can repeat); anything else is refused; a requested pack's file must exist.
+    /// `--packs` takes acg, quotes, it and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.
     #[test]
-    fn packs_flag_takes_acg_it_and_both() {
+    fn packs_flag_takes_acg_quotes_it_and_lists() {
         assert_eq!(pack_flag("acg"), Ok(PACK_ACG));
+        assert_eq!(pack_flag("quotes"), Ok(PACK_QUOTES));
         assert_eq!(pack_flag("it"), Ok(PACK_IT));
         assert_eq!(pack_flag("acg,it"), Ok(PACK_ACG | PACK_IT));
-        assert_eq!(pack_flag("it,acg"), Ok(PACK_ACG | PACK_IT));
-        assert!(pack_flag("").is_err() && pack_flag("quotes").is_err() && pack_flag("acg,").is_err());
+        assert_eq!(pack_flag("it,quotes,acg"), Ok(PACK_ACG | PACK_QUOTES | PACK_IT));
+        assert!(pack_flag("").is_err() && pack_flag("quote").is_err() && pack_flag("acg,").is_err());
+        assert_eq!((pack_tag(0), pack_tag(PACK_QUOTES), pack_tag(PACK_ACG | PACK_QUOTES | PACK_IT)), (String::new(), "+quotes".to_string(), "+acg+quotes+it".to_string()));
         let dir = std::env::temp_dir().join(format!("shanjie-packs-flag-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("acg-add.tsv"), "").unwrap();
@@ -932,6 +940,8 @@ mod tests {
         assert!(packs_dir_checked(PACK_ACG, d()).is_ok());
         let e = packs_dir_checked(PACK_ACG | PACK_IT, d()).unwrap_err();
         assert!(e.contains("--packs it") && e.contains("it-add.tsv"), "{e}");
+        let e = packs_dir_checked(PACK_QUOTES, d()).unwrap_err();
+        assert!(e.contains("--packs quotes") && e.contains("quotes-add.tsv"), "{e}");
         fs::remove_dir_all(&dir).unwrap();
     }
 

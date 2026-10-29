@@ -51,6 +51,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var rerankLevel = RerankLevel.standard
     @Published public private(set) var rerankLevelEnabled = false
     @Published public private(set) var acgPack = true
+    /// 經典台詞 (quote-pack contract section 2): off until chosen.
+    @Published public private(set) var quotePack = false
     @Published public private(set) var itPack = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
@@ -105,6 +107,7 @@ public final class SettingsModel: ObservableObject {
         rerankLevel = shell.rerankLevel
         rerankLevelEnabled = shell.rerankLevelEnabled
         acgPack = shell.acgPackOn
+        quotePack = shell.quotePackOn
         itPack = shell.itPackOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
@@ -136,6 +139,7 @@ public final class SettingsModel: ObservableObject {
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
+    public func setQuotePack(_ on: Bool) { shell.setQuotePack(on) }
     public func setItPack(_ on: Bool) { shell.setItPack(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)

@@ -191,6 +191,20 @@ public final class MemoryAcgPackStore: AcgPackStore {
     public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
 }
 
+/// Where the "經典台詞" switch is kept (docs/contracts/quote-pack.md section 2): `nil` means never chosen, which is **off**
+/// (the opposite of `AcgPackStore`: the maintainer's decision 2026-10-22 is that the quote pack ships off).
+@MainActor
+public protocol QuotePackStore: AnyObject {
+    var quotePack: Bool? { get set }
+}
+
+/// The in-memory QuotePackStore.
+@MainActor
+public final class MemoryQuotePackStore: QuotePackStore {
+    public var quotePack: Bool?
+    public init(_ quotePack: Bool? = nil) { self.quotePack = quotePack }
+}
+
 /// Where the "資訊與 AI 詞" switch is kept (docs/contracts/it-pack.md section 3.2): `nil` means never chosen, which is on. Same arrangement as `AcgPackStore`.
 @MainActor
 public protocol ItPackStore: AnyObject {
@@ -431,15 +445,27 @@ public final class Shell {
     /// The pack's source date for the grey menu line (acg-pack contract A2.4): `latest_source_revision` of `Resources/packs/acg.json`
     /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
     let acgDataDate: String?
+    private let quotePackStore: QuotePackStore
+    /// The classic quote pack (default off, quote-pack contract section 2): a bit of the same packs mask as the ACG pack, so a change rebuilds the engine too.
+    private(set) var quotePackOn = false
     private let itPackStore: ItPackStore
     /// The IT+AI word pack (default on, it-pack contract 3.2): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
     private(set) var itPackOn = true
+    /// The packs in the settings order: mask bit, file in the packs directory, menu title. `packMask`, the missing-file check and the menu line all read this.
+    private static let packTable: [(bit: UInt32, file: String, title: String)] = [
+        (CoreEngine.packACG, "acg-add.tsv", MenuEntry.Text.acgPack),
+        (CoreEngine.packQuotes, "quotes-add.tsv", MenuEntry.Text.quotePack),
+        (CoreEngine.packIT, "it-add.tsv", MenuEntry.Text.itPack),
+    ]
+    /// The mask `build()` passes to `shanjie_engine_new_packs`: one bit per switch that is on. The quote switch never chosen is off and the
+    /// IT switch never chosen is on, so an app that never touched either builds with the ACG and IT bits, as before the quote pack existed.
+    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) }
     /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, less the bits
     /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
     /// The names of the loaded packs in the settings order, for the menu line.
     var loadedPackTitles: [String] {
-        [(UInt32(SHANJIE_PACK_ACG), MenuEntry.Text.acgPack), (UInt32(SHANJIE_PACK_IT), MenuEntry.Text.itPack)].compactMap { loadedPackMask & $0.0 != 0 ? $0.1 : nil }
+        Shell.packTable.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
     }
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
@@ -475,6 +501,12 @@ public final class Shell {
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
     /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
+    /// How many engines `build()` has tried to make (test hook, like `rerankSent`): the fall-back order is asserted by counting them.
+    private(set) var engineBuilds = 0
+    private func makeEngine(packsDir: String?, packs: UInt32) -> (CoreEngine?, Int32) {
+        engineBuilds += 1
+        return CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, packs: packs)
+    }
     /// Rerank strength (section 3): the stored level, sent to every engine `build()` makes and on every change.
     private(set) var rerankLevel: RerankLevel
     /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
@@ -579,6 +611,7 @@ public final class Shell {
     /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
     /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
+    /// `quotePackStore`: the classic quote pack switch (quote-pack contract section 2). Required, like `acgPackStore`.
     /// `itPackStore`: the IT+AI word pack switch (it-pack contract 3.2). Defaults to an in-memory store so the many test rigs need not name it; the app passes its own.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
@@ -596,7 +629,7 @@ public final class Shell {
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore, quotePackStore: QuotePackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
@@ -639,6 +672,7 @@ public final class Shell {
         fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
+        self.quotePackStore = quotePackStore
         self.glassTintStore = glassTintStore
         glassTint = glassTintStore.glassTint ?? 0
         self.candidateOrientationStore = candidateOrientationStore
@@ -652,6 +686,7 @@ public final class Shell {
         self.appProfileStore = appProfileStore
         appProfiles = AppProfiles.parse(appProfileStore.appProfiles)
         acgPackOn = acgPackStore.acgPack ?? true
+        quotePackOn = quotePackStore.quotePack ?? false
         self.itPackStore = itPackStore
         itPackOn = itPackStore.itPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
@@ -928,6 +963,18 @@ public final class Shell {
         Log.shell.debug("word pack switched")
     }
 
+    /// The 經典台詞 switch (quote-pack contract section 2): like `setAcgPack`, the pack is part of the lexicon, so the composition
+    /// is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    func setQuotePack(_ on: Bool) {
+        guard on != quotePackOn else { return }
+        commitThenRebuild {
+            quotePackOn = on
+            quotePackStore.quotePack = on
+        }
+        changed()
+        Log.shell.debug("quote pack switched")
+    }
+
     /// The settings switch (it-pack contract 3.2): the same as `setAcgPack` for the IT+AI pack.
     func setItPack(_ on: Bool) {
         guard on != itPackOn else { return }
@@ -938,9 +985,6 @@ public final class Shell {
         changed()
         Log.shell.debug("it pack switched")
     }
-
-    /// The pack bits the engine is built with: the ACG and IT+AI switches.
-    private var packMask: UInt32 { (acgPackOn ? UInt32(SHANJIE_PACK_ACG) : 0) | (itPackOn ? UInt32(SHANJIE_PACK_IT) : 0) }
 
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
@@ -954,18 +998,39 @@ public final class Shell {
         let packsDir = resources.appendingPathComponent("packs").path
         let mask = packMask
         // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
-        let present = [(UInt32(SHANJIE_PACK_ACG), "acg-add.tsv"), (UInt32(SHANJIE_PACK_IT), "it-add.tsv")]
-            .reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.1) ? $0 | $1.0 : $0 }
+        let present = Shell.packTable.reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.file) ? $0 | $1.bit : $0 }
         var built = mask & present
-        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: mask != 0 ? packsDir : nil, packs: mask)
+        var (made, code) = makeEngine(packsDir: mask != 0 ? packsDir : nil, packs: mask)
         if made == nil && mask != 0 {
-            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
-            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
-            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+            // The combined build failed, so the first code alone does not say whose fault it is. (a) Build with no packs, only to learn whether
+            // it works, and free it at once (build() keeps one engine at a time): if it fails too the cause is not a pack, both codes are logged
+            // and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings order build with just
+            // that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop works (two broken
+            // files), build the no-pack engine again. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
             let packCode = code
             built = 0
-            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
+            var noPackWorks = false
+            do {
+                let (probe, probeCode) = makeEngine(packsDir: nil, packs: 0)
+                noPackWorks = probe != nil
+                code = probeCode
+            }   // the probe engine is freed here
+            if noPackWorks {
+                var kept: UInt32 = 0
+                for bit in Shell.packTable.map(\.bit) where mask & bit != 0 && mask & ~bit != 0 {
+                    let (dropped, _) = makeEngine(packsDir: packsDir, packs: mask & ~bit)
+                    if let dropped {
+                        made = dropped
+                        built = mask & ~bit & present
+                        kept = mask & ~bit
+                        break
+                    }
+                }
+                if made == nil { (made, code) = makeEngine(packsDir: nil, packs: 0) }
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(kept)")
+            } else {
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); the build without packs failed too")
+            }
         }
         guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")

@@ -757,17 +757,18 @@ pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
     load_lexicon_packs(data_dir, None).map(|(lex, _)| lex)
 }
 
-/// Pack bits of `Engine::new_with_packs` and `shanjie_engine_new_packs` (docs/contracts/acg-pack.md A.2). Bit 1 (value 2) is
-/// taken by the quotes pack of its own PR, so the IT+AI pack (docs/contracts/it-pack.md section 3.1) is bit 2.
+/// Pack bits of `Engine::new_with_packs` and `shanjie_engine_new_packs` (docs/contracts/acg-pack.md A.2; `PACK_QUOTES`:
+/// docs/contracts/quote-pack.md section 2; `PACK_IT`: docs/contracts/it-pack.md section 3.1).
 pub const PACK_ACG: u32 = 1;
+pub const PACK_QUOTES: u32 = 2;
 pub const PACK_IT: u32 = 4;
-pub const PACK_ALL: u32 = PACK_ACG | PACK_IT;
+pub const PACK_ALL: u32 = PACK_ACG | PACK_QUOTES | PACK_IT;
 /// The packs whose rows `CappedLexicon::with_packs` reads (docs/contracts/pack-oov.md section 1b): rows tagged `lm::PACK_OOV_TAG` are
 /// unknown to the model, scored by the pack alone, not capped; the other rows are capped as overlay words, except that a word the model
-/// never saw keeps its pack score. Only the anime pack for now; the IT pack and a pack added later are capped like any overlay.
+/// never saw keeps its pack score. Only the anime pack for now; the quotes pack, the IT pack and a pack added later are capped like any overlay.
 pub const PACK_OOV: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
-const PACK_FILES: [(u32, &str); 2] = [(PACK_ACG, "acg-add.tsv"), (PACK_IT, "it-add.tsv")];
+pub const PACK_FILES: [(u32, &str); 3] = [(PACK_ACG, "acg-add.tsv"), (PACK_QUOTES, "quotes-add.tsv"), (PACK_IT, "it-add.tsv")];
 
 /// Why a lexicon load failed, for messages: the file that could not be read and its `ErrorKind`, or the lexicon text
 /// that did not parse (`path` is the data directory the files came from, `detail` the `Lexicon` parse error). The C ABI

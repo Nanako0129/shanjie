@@ -182,7 +182,7 @@
 
 `data_dir` 裡必須有 `mcbpmf-data.txt`、`overlay-add.tsv` 與 `sandhi-add.tsv`（S2r 加入），用 `Lexicon::parse_with(基底, Some(疊加層))` 載入，疊加層是 `overlay-add.tsv` 接著 `sandhi-add.tsv`（`engine::join_overlays`，前一份沒有結尾換行就補一個），和評測 CLI 預設相同。任一個不存在或解析失敗，回傳碼 3（`load_lm` 重讀 `overlay-add.tsv` 與 `demote.tsv`，建構之後它們被移走也是碼 3）。
 
-詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`、`PACK_IT` = 4 → `packs_dir/it-add.tsv`，依這個順序；it-pack 契約 §3.1）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::with_packs`。〔2026-10-24，`pack-oov.md`〕`PACK_OOV`（現在只有動漫詞包）的詞**不封頂**、用詞包檔的分數，而且解碼與 `total_score` 把詞包詞當成模型不認識的詞（`CappedLexicon::model_id` 回 `None`：詞項、句尾、前一詞、段開頭、`End::Next` 都一樣；`history()` 不變）；其他詞包（資訊詞包）與非詞包的疊加層照舊依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg|it|acg,it [--packs-dir DIR]`（可重複；要求的詞包檔不在就中止並報路徑，摘要行多 `+acg`、`+it`）走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
+詞包（acg-pack 契約 A.2）：`Engine::new_with_packs(data_dir, layout, Some((packs_dir, mask)))` 把啟用的詞包檔（`PACK_ACG` → `packs_dir/acg-add.tsv`、`PACK_QUOTES`＝2 → `packs_dir/quotes-add.tsv`（quote-pack 契約 §2）、`PACK_IT` = 4 → `packs_dir/it-add.tsv`，依這個順序；it-pack 契約 §3.1）接在 `sandhi-add.tsv` 後面一起解析；`load_lm` 重新讀 `data_dir/overlay-add.tsv`（`engine::capping_overlay`；引擎不為此留一份約 17 MB 的副本），後面接建構時 `load_lexicon_packs` 給出的啟用詞包列（詞包檔不重讀；沒有啟用就沒有），交給 `CappedLexicon::with_packs`。〔2026-10-24，`pack-oov.md`〕`PACK_OOV`（現在只有動漫詞包）的詞**不封頂**、用詞包檔的分數，而且解碼與 `total_score` 把詞包詞當成模型不認識的詞（`CappedLexicon::model_id` 回 `None`：詞項、句尾、前一詞、段開頭、`End::Next` 都一樣；`history()` 不變）；其他詞包（經典台詞詞包、資訊詞包）與非詞包的疊加層照舊依語料頻率封頂（沒看過的減 1.0）。沒有啟用的位元、或檔案不存在，就不讀任何詞包，引擎和 `Engine::new` 完全相同（`core/tests/engine_pack.rs` 逐位元比對解碼、候選清單與 V3 預測列）。未定義的位元是 `LoadFailed`。評測 CLI 的 `--packs acg|it|quotes 的組合（如 acg,quotes,it） [--packs-dir DIR]`（可重複；要求的詞包檔不在就中止並報路徑，摘要行多 `+acg`、`+quotes`、`+it`）走同一組函式（`load_lexicon_packs_detailed`、`capping_overlay_detailed`，讀取失敗帶出錯的檔案與 `ErrorKind`；解析失敗帶資料夾與解析器的 `detail`（指不出是哪個檔，見 acg-pack 契約 A2.7 的延後項）；`load_lexicon_packs` 與 `capping_overlay` 是把它們的錯誤對應成 `LoadFailed` 的包裝）。
 
 ## 6. C ABI（`core/include/shanjie.h`）
 
@@ -221,9 +221,9 @@ int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // 不改目前的組字區顯示
 int32_t shanjie_engine_set_profile(ShanjieEngine *engine, uint32_t profile, ShanjieOutput **out); // 0 chat（預設）、1 formal；重算組字區並回傳快照
 // acg-pack 新增（docs/contracts/acg-pack.md A.2）：詞包。packs 是位元遮罩（bit0 = ACG，檔案 packs_dir/acg-add.tsv；
-// 值 4 = 資訊＋AI 詞包 SHANJIE_PACK_IT，檔案 packs_dir/it-add.tsv，it-pack 契約 §3.1，接在動漫詞包的列後面，兩個位元可以一起；值 2 留給台詞詞包，目前未定義）；
+// bit1（值 2）= 經典台詞 SHANJIE_PACK_QUOTES，檔案 packs_dir/quotes-add.tsv，quote-pack 契約 §2；值 4 = 資訊＋AI 詞包 SHANJIE_PACK_IT，檔案 packs_dir/it-add.tsv，it-pack 契約 §3.1；三個位元可以一起，檔案依 ACG、台詞、IT 的順序讀）；
 // 詞包的列在建立時併入詞庫，所以開關在引擎生命期內固定，殼要換就釋放再建一個（和換排列相同）。packs 為 0 時不看 packs_dir（可為 NULL），
-// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
+// 等同 shanjie_engine_new；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。遮罩有未定義的位元（bit0、bit1、bit2 以外）或 layout 超出範圍或 data_dir、packs_dir 不是 UTF-8 回 2；
 // packs 非 0 而 packs_dir 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3。詞包的詞在 load_lm 時不封頂、用詞包檔的分數，解碼時當成語言模型不認識的詞（pack-oov）。
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 // s3e 新增（docs/contracts/s3e-punctuation-candidates.md）

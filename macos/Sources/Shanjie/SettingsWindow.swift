@@ -339,6 +339,8 @@ struct SettingsPageForm: View {
                     if let line = model.acgDataLine {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
+                    // Next to the other word pack; off until chosen (quote-pack contract section 2).
+                    Toggle(MenuEntry.Text.quotePack, isOn: Binding(get: { model.quotePack }, set: { model.setQuotePack($0) }))
                     Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
                 }
                 // fuzzy-input section 2.2: all off by default. The adjacent-key checkbox is greyed (value kept) in the Eten layout, where

@@ -35,6 +35,7 @@ test-golden:
 
 test-python:
 	python3 -m unittest tools/test_build_acg_pack.py
+	python3 -m unittest tools/test_build_quote_pack.py
 	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
 	python3 -m unittest tools/test_build_sandhi.py

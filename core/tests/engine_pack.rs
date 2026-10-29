@@ -1,4 +1,4 @@
-//! acg-pack engine tests (docs/contracts/acg-pack.md A.2 and A.5): the shipping toggle path (`Engine::new_with_packs`, the
+//! acg-pack engine tests (docs/contracts/acg-pack.md A.2 and A.5; the quote pack bit: docs/contracts/quote-pack.md section 2 and 4): the shipping toggle path (`Engine::new_with_packs`, the
 //! same constructor `shanjie_engine_new_packs` calls) with a pack that changes the result. Real lexicon and model
 //! (data/lm/bigram.sjlm); fails loudly without them, never skips. The pack is a fixture written here, so the test does not
 //! depend on the generated data/packs/acg-add.tsv.
@@ -20,11 +20,15 @@ fn lm_path() -> PathBuf {
 const PACK: &str = "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\nㄧㄥˊ-ㄏㄨㄛˇ-ㄔㄨㄥˊ-ㄓ-ㄇㄨˋ\t螢火蟲之墓\t-6.17843815\tacg\n";
 
 fn tempdir(name: &str, pack: Option<&str>) -> PathBuf {
+    tempdir_files(name, &pack.map(|p| ("acg-add.tsv", p)).into_iter().collect::<Vec<_>>())
+}
+
+fn tempdir_files(name: &str, files: &[(&str, &str)]) -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-pack-test-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    if let Some(p) = pack {
-        std::fs::write(d.join("acg-add.tsv"), p).unwrap();
+    for (f, text) in files {
+        std::fs::write(d.join(f), text).unwrap();
     }
     d
 }
@@ -132,7 +136,7 @@ fn window_first(packs: Option<(&Path, u32)>, syls: &[&str]) -> Vec<String> {
 #[test]
 fn the_it_pack_has_its_own_bit_and_file() {
     assert_eq!(PACK_IT, 4);
-    assert_eq!(PACK_ALL, PACK_ACG | PACK_IT);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT);
     let syls = ["ㄊㄨˊ", "ㄒㄧㄤˋ", "ㄕㄥ", "ㄔㄥˊ"];
     let (both, none) = (tempdir("it-both", Some(PACK)), tempdir("it-none", None));
     std::fs::write(both.join("it-add.tsv"), IT_PACK).unwrap();
@@ -154,8 +158,38 @@ fn the_it_pack_has_its_own_bit_and_file() {
 #[test]
 fn an_unknown_pack_bit_is_refused() {
     let d = tempdir("bit", None);
-    assert!(matches!(Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, 2))), Err(EngineError::LoadFailed)));
+    assert!(matches!(Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, 8))), Err(EngineError::LoadFailed)));
+    assert!(matches!(Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, PACK_ALL << 1))), Err(EngineError::LoadFailed)));
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT);
     let _ = std::fs::remove_dir_all(d);
+}
+
+/// quote-pack section 2 and 4: `PACK_QUOTES` is its own bit and file. One word per file (the same two fixture rows, split), so
+/// each bit shows which file it read. Off is the engine without the pack, whatever the other files hold; each bit reads only its
+/// own file; both bits together give both words. The quote rows go through the same loader as the ACG rows
+/// (`read_packs_detailed`); the fixture files have no trailing newline, and the second file still joins the first.
+#[test]
+fn the_quote_bit_reads_quotes_add_tsv_only() {
+    let (acg_row, quote_row) = (PACK.lines().next().unwrap(), PACK.lines().nth(1).unwrap()); // 碇源堂 acg, 螢火蟲之墓 as the quote
+    let quote_row = quote_row.replace("\tacg", "\tquotes"); // no trailing newline
+    let d = tempdir_files("quotes", &[("acg-add.tsv", acg_row), ("quotes-add.tsv", &quote_row)]);
+    let only_acg = tempdir_files("only-acg", &[("acg-add.tsv", acg_row)]);
+    let only_quotes = tempdir_files("only-quotes", &[("quotes-add.tsv", &quote_row)]);
+    let plain = run(None);
+    let firsts = |outs: &[Output], word: &str| outs.iter().filter(|o| o.selected == Some(0) && o.candidates.first().map(String::as_str) == Some(word)).count();
+    assert!(run(Some((&d, 0))) == plain, "mask 0 with both files present differs from no pack");
+    assert!(run(Some((&only_acg, PACK_QUOTES))) == plain, "the quote bit with no quotes file changes the engine");
+    assert!(run(Some((&only_quotes, PACK_ACG))) == plain, "the ACG bit read quotes-add.tsv");
+    let acg = run(Some((&d, PACK_ACG)));
+    assert_eq!((firsts(&acg, "碇源堂"), firsts(&acg, "螢火蟲之墓")), (2, 0), "the ACG bit must give its word only");
+    let quotes = run(Some((&d, PACK_QUOTES)));
+    assert_eq!((firsts(&quotes, "碇源堂"), firsts(&quotes, "螢火蟲之墓")), (0, 2), "the quote bit must give its word only");
+    let both = run(Some((&d, PACK_ALL)));
+    assert_eq!((firsts(&both, "碇源堂"), firsts(&both, "螢火蟲之墓")), (2, 2), "both bits must give both words");
+    assert!(run(Some((&only_acg, PACK_ALL))) == acg, "a missing quotes file next to the ACG bit changes the engine");
+    for d in [d, only_acg, only_quotes] {
+        let _ = std::fs::remove_dir_all(d);
+    }
 }
 
 /// model-v6 section 7 P2-3: the always-on names layer reaches the engine's capping text, not only the CLI's. Through the
