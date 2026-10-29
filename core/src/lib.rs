@@ -11,7 +11,6 @@ pub mod fuzzy;
 pub mod learn;
 pub mod learn_store;
 pub mod lm;
-pub mod oc;
 pub mod predict;
 pub mod tinylm;
 mod trigram;

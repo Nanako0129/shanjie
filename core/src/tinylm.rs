@@ -158,7 +158,7 @@ extern "C" {
 }
 
 /// c (m x n) += a (m x k) . b, with b (k x n), or b (n x k) transposed when `trans_b`. All row-major.
-pub(crate) fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
     // Checked in release too (F6): the Accelerate call reads and writes through raw pointers with these lengths.
     assert!(a.len() == m * k && b.len() == k * n && c.len() == m * n, "gemm: matrix lengths do not match");
     match be {
@@ -204,7 +204,7 @@ fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
 }
 
 /// y = exp(x), elementwise, out of place.
-pub(crate) fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
+fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
     assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "exp: lengths do not match");
     match be {
         #[cfg(target_os = "macos")]
@@ -644,7 +644,7 @@ impl TinyLm {
         let mut s = vec![0f32; t];
         for l in &self.layers {
             let mut qkv = bias_rows(&l.qkv_b, rows);
-            gemm(be, &layer_norm(&x, &l.ln1_w, Some(&l.ln1_b)), &l.qkv_w, &mut qkv, (rows, d, 3 * d), false);
+            gemm(be, &layer_norm(&x, &l.ln1_w, &l.ln1_b), &l.qkv_w, &mut qkv, (rows, d, 3 * d), false);
             let mut att = vec![0f32; rows * d];
             for (b, &len) in lens.iter().enumerate() {
                 for hd in 0..h {
@@ -670,13 +670,13 @@ impl TinyLm {
             gemm(be, &att, &l.proj_w, &mut proj, (rows, d, d), false);
             x.iter_mut().zip(&proj).for_each(|(a, b)| *a += b);
             let mut f = bias_rows(&l.fc1_b, rows);
-            gemm(be, &layer_norm(&x, &l.ln2_w, Some(&l.ln2_b)), &l.fc1_w, &mut f, (rows, d, 4 * d), false);
+            gemm(be, &layer_norm(&x, &l.ln2_w, &l.ln2_b), &l.fc1_w, &mut f, (rows, d, 4 * d), false);
             gelu(be, &mut f);
             let mut o = bias_rows(&l.fc2_b, rows);
             gemm(be, &f, &l.fc2_w, &mut o, (rows, 4 * d, d), false);
             x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
         }
-        layer_norm(&x, &self.lnf_w, Some(&self.lnf_b))
+        layer_norm(&x, &self.lnf_w, &self.lnf_b)
     }
 }
 
@@ -685,18 +685,15 @@ fn bias_rows(b: &[f32], rows: usize) -> Vec<f32> {
     b.iter().cloned().cycle().take(rows * b.len()).collect()
 }
 
-/// LayerNorm over the last axis, eps 1e-5, as numpy: (x - mean) / sqrt(var + eps) * w + b (no `+ b` when `b` is `None`; oc.rs).
-pub(crate) fn layer_norm(x: &[f32], w: &[f32], b: Option<&[f32]>) -> Vec<f32> {
+/// LayerNorm over the last axis, eps 1e-5, as numpy: (x - mean) / sqrt(var + eps) * w + b.
+fn layer_norm(x: &[f32], w: &[f32], b: &[f32]) -> Vec<f32> {
     let d = w.len();
     let mut out = Vec::with_capacity(x.len());
     for row in x.chunks_exact(d) {
         let mu = row.iter().map(|&v| v as f64).sum::<f64>() / d as f64;
         let var = row.iter().map(|&v| (v as f64 - mu).powi(2)).sum::<f64>() / d as f64;
         let inv = 1.0 / (var + 1e-5).sqrt();
-        out.extend(row.iter().enumerate().map(|(j, &v)| {
-            let y = ((v as f64 - mu) * inv) as f32 * w[j];
-            b.map_or(y, |b| y + b[j])
-        }));
+        out.extend(row.iter().zip(w.iter().zip(b)).map(|(&v, (&w, &b))| ((v as f64 - mu) * inv) as f32 * w + b));
     }
     out
 }

@@ -10565,3 +10565,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **方向**：v0.6.0 出貨已經明顯好過 0c 融合（discordtune 淨值 −71，p 5.0e-09）。P1（2026-10-18）時 0c 對當時的出貨值還有淨值 +105；之後換了通語 SJ-LM-7、會意 SJ-SR-7 與常談，0c 的這個優勢已經不在。這次量的是「0c 加 n-gram」一種融合，沒有量「0c 加出貨重排」的組合。App 的 0c 實驗開關怎麼處理見下一行。
 - **模型檔大小**（磁碟上讀的）：0c 的 `model.onnx` 130,723,134 bytes（約 131 MB），會意 SJ-SR-7-15M 的 `tinylm.sjtl` 14,886,880 bytes（約 15 MB）。
 - **維護者決定**（2026-10-29）：0c 實驗開關退場，B 片（App 端）不做；核心裡沒人用的 0c 推論程式另開一片拿掉。0c 仍留在 `experiments/` 當量尺與教師。
+
+## 2026-10-29：拿掉核心裡的 0c 推論程式（契約 `docs/contracts/oc-removal.md`）
+
+- 起因：X0C-6 之後維護者決定 0c 實驗開關退場、核心程式也拿掉。
+- 拿掉：`core/src/oc.rs`、`core/tests/oc_tiny.rs`、`core/examples/oc_score.rs`、`eval/golden/oc-tiny/`、`tools/convert_oc.py`、`gen_oc_tiny.py`、`oc_ref.py`、`test_oc_ref.py` 與 Makefile 那一行；`tinylm.rs` 的 `gemm`、`exp_into`、`layer_norm` 改回私有。`experiments/x0c/` 與它的 CI 步驟、`eval/bench/external/x0c.json` 不動。
+- 行為不變（Mac，出貨設定，`--packs acg,it`）：拿掉前後聊天、書面 × dev302、打字測驗、錯字回報 6 格的 rowstats 與摘要行（含 `top1_sha256`）逐位元組相同。`cargo build --release --all-targets` 只有兩個 main 上本來就有的警告（`cli/src/english.rs`、`core/tests/engine_vertical.rs`）；`make test-python` 通過。
