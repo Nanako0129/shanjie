@@ -202,6 +202,20 @@ def make_root(td, names=("bigram.sjlm", "classes.sjc", "tinylm.sjtl")):  # (a ve
     return root
 
 
+class WikituneThreads(unittest.TestCase):
+    def test_the_cell_decodes_on_every_usable_core(self):
+        """kpi run is sent to remote machines that must be filled: the wikitune-clean cell passes --threads <usable cores>."""
+        seen = []
+        v = types.SimpleNamespace(dir="/x")
+        cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+        with mock.patch.object(bench, "cell_cmd", return_value=["cli"]), \
+             mock.patch.object(bench, "sh", side_effect=lambda cmd, **kw: seen.append(cmd) or ""), \
+             mock.patch.object(bench, "parse_summary", side_effect=RuntimeError("stop after the command")):
+            with self.assertRaises(RuntimeError):
+                kpi.wikitune_cell(v, "rows", "rowstats")
+        self.assertEqual(seen, [["cli", "--threads", str(cores)]])
+
+
 class ReplayModels(Tmp):
     def test_matching_models_pass(self):
         root = make_root(self.td)

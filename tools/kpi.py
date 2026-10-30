@@ -49,8 +49,12 @@ def write_kpi(kpi_dir, version, update):
 # ---------- run: wikitune-clean, shipped flags, formal profile ----------
 def wikitune_cell(v, rows, rowstats):
     """The checks of bench.run_cell2 (setting tag, row count, rowstats top1 == summary top1) for a set SETS2 does not know. Not
-    run_cell2's dump cross-check (the CLI is run without --dump)."""
-    m = bench.parse_summary(bench.sh(bench.cell_cmd(v, "formal", rows, None, rowstats, False), cwd=v.dir, env=bench.cli_env(False)))
+    run_cell2's dump cross-check (the CLI is run without --dump). Decodes on every core this process may use (`--threads`), because the
+    remote machines it runs on must be filled; cli/src/main.rs documents the files and summary line as byte for byte those of one
+    thread."""
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    cmd = bench.cell_cmd(v, "formal", rows, None, rowstats, False) + ["--threads", str(cores)]
+    m = bench.parse_summary(bench.sh(cmd, cwd=v.dir, env=bench.cli_env(False)))
     want = bench.expected_tag(v, "formal", False)
     if m["tag"] != want:
         raise RuntimeError(f"wikitune-clean/formal: CLI setting tag {m['tag']} != {want} from the settings table")
