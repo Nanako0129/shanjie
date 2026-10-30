@@ -57,6 +57,8 @@ public final class SettingsModel: ObservableObject {
     /// 經典台詞 (quote-pack contract section 2): off until chosen.
     @Published public private(set) var quotePack = false
     @Published public private(set) var itPack = true
+    /// 單按 Shift 切換中英 (shift-toggle section 1).
+    @Published public private(set) var shiftToggle = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
@@ -113,6 +115,7 @@ public final class SettingsModel: ObservableObject {
         acgPack = shell.acgPackOn
         quotePack = shell.quotePackOn
         itPack = shell.itPackOn
+        shiftToggle = shell.shiftToggleOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
         profileMode = shell.profileMode
@@ -146,6 +149,7 @@ public final class SettingsModel: ObservableObject {
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
     public func setQuotePack(_ on: Bool) { shell.setQuotePack(on) }
     public func setItPack(_ on: Bool) { shell.setItPack(on) }
+    public func setShiftToggle(_ on: Bool) { shell.applyShiftToggle(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
         refreshExternal()  // not read on the change notification
