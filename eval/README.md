@@ -33,7 +33,7 @@
 
 | 檔案 | SHA-256 |
 |---|---|
-| `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；只在 `--forms-rowstats` 時讀，`docs/contracts/forms-score.md`） | `95b72d3ebbe78840ef3b941902e5db4442c0217c84ca591a05b2a464e5735dd3` |
+| `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；只在 `--forms-rowstats` 時讀，`docs/contracts/forms-score.md`） | `e7ca5d8b455fc14371bed08e46a68868ef73bca5296fc78f22024f44613fb579` |
 
 ## 保留集雜湊（變動就代表被改過）
 

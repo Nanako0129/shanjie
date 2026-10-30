@@ -34,7 +34,7 @@ test-golden:
 	cargo test --release --locked -p cli --test golden
 
 test-python:
-	python3 -W ignore -m unittest tools/test_build_forms.py
+	python3 -m unittest tools/test_build_forms.py
 	python3 -m unittest tools/test_build_acg_pack.py
 	python3 -m unittest tools/test_build_quote_pack.py
 	python3 -B -m unittest tools/test_pack_oov.py

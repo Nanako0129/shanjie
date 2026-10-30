@@ -42,7 +42,8 @@ def to_row_form(reading):
 
 
 def load_entries():
-    raw = open(MOEDICT, "rb").read()
+    with open(MOEDICT, "rb") as f:
+        raw = f.read()
     if hashlib.sha256(raw).hexdigest() != MOEDICT_SHA256:
         sys.exit("moedict dump SHA-256 mismatch")
     return json.loads(raw)
@@ -50,11 +51,12 @@ def load_entries():
 
 def derive(entries):
     """回傳 (詞對來源, 單字來源)：詞對 {(T, Y): def}，單字 {X: (Y, rule, def, 條件)}，都還沒正規化。"""
-    readings = {}
+    readings, first = {}, {}
     for e in entries:
         s = readings.setdefault(e.get("title", ""), set())
         for h in e.get("heteronyms", []):
             s |= readings_of(h)
+        first.setdefault(e.get("title", ""), readings_of(e["heteronyms"][0]) if e.get("heteronyms") else set())
     words = {}
     for e in entries:
         t = e.get("title", "")
@@ -78,14 +80,14 @@ def derive(entries):
         if not m or x in chars:
             continue
         y = m.group(1)
-        rd = readings_of(hs[0]) or readings.get(y)
+        rd = readings_of(hs[0]) or first.get(y)  # (a) has no reading of its own: the target's first heteronym
         if y in readings and rd:
             chars[x] = (y, rule, d.get("def") or d["link"][0], rd)
-    return words, chars
+    return words, chars, readings
 
 
 def build(entries):
-    words, chars = derive(entries)
+    words, chars, readings = derive(entries)
     # 詞對：先套現行寬鬆對照，套完相同的丟掉，聯集分組，標準形取 min()。
     parent = {}
 
@@ -102,11 +104,19 @@ def build(entries):
     groups = {}
     for w in parent:
         groups.setdefault(find(w), []).append(w)
-    wcanon = {}
+    # 同一組的詞要有至少一個共同讀音（成員的讀音：映到同一個寫法的詞條的聯集）；沒有就整組不收。
+    wread = {}
+    for t, y in words:
+        for w in (t, y):
+            wread.setdefault(E.lenient(w), set()).update(readings[w])
+    wcanon, dropped = {}, 0
     for ws in groups.values():
+        if not set.intersection(*(wread[w] for w in ws)):
+            dropped += 1
+            continue
         c = min(ws)
         wcanon.update({w: c for w in ws if w != c})
-    # 單字：X 被現行單字對照換掉的不收；Y 先套現行單字對照；套完相同的丟掉；鏈解到底，條件用第一段的。
+    # 單字：X 被現行單字對照換掉的不收；Y 先套現行單字對照；套完相同的丟掉；鏈解到底，條件是每一段條件的交集，交集空就不接。
     step = {}
     for x, (y, rule, src, rd) in chars.items():
         y = y.translate(CHARMAP)
@@ -119,7 +129,10 @@ def build(entries):
             if y in seen:
                 sys.exit(f"char pair cycle at {x}")
             seen.append(y)
-            y = step[y][0]
+            both = sorted(set(rd) & set(step[y][1]))
+            if not both:
+                break
+            y, rd = step[y][0], both
         ccanon[x] = (y, rd)
     wl = [f"word\t{w}\t{wcanon[w]}" for w in sorted(wcanon)]
     cl = [f"char\t{x}\t{ccanon[x][0]}\t{','.join(ccanon[x][1])}" for x in sorted(ccanon)]
@@ -127,7 +140,7 @@ def build(entries):
         f"# 合法寫法分數用的表（docs/contracts/forms-score.md，規則版本 {VERSION}）。由 tools/build_forms.py 產生，請勿手改。",
         f"# 來源：教育部《重編國語辭典修訂本》，經 g0v/moedict-data dict-revised_bkup.json（commit {MOEDICT_COMMIT}，SHA-256 {MOEDICT_SHA256}）。CC BY-ND 3.0 TW，只用於評測。",
         "# 格式：word<TAB>寫法<TAB>標準形；char<TAB>X<TAB>Y<TAB>讀音1,讀音2…（只在該位置的讀音符合時才換）。先套現行寬鬆對照，再套本表。",
-        f"# 詞對 {len(wl)} 個、單字對 {len(cl)} 個",
+        f"# 詞對 {len(wl)} 個、單字對 {len(cl)} 個、丟掉的組 {dropped} 組",
     ]
     return "\n".join(head + wl + cl) + "\n", (words, chars, wcanon, ccanon)
 
@@ -136,13 +149,14 @@ def check_invariants(text):
     lines = text.splitlines()
     data = [l.split("\t") for l in lines if not l.startswith("#")]
     nw, nc = (sum(1 for r in data if r[0] == k) for k in ("word", "char"))
-    m = re.fullmatch(r"# 詞對 (\d+) 個、單字對 (\d+) 個", lines[3])
+    m = re.fullmatch(r"# 詞對 (\d+) 個、單字對 (\d+) 個、丟掉的組 \d+ 組", lines[3])
     if not m or (int(m[1]), int(m[2])) != (nw, nc):
         return f"header counts differ from lines ({nw}, {nc})"
-    xs = {r[1] for r in data if r[0] == "char"}
+    conds = {r[1]: set(r[3].split(",")) for r in data if r[0] == "char"}
     for r in data:
         if r[0] == "char":
-            if r[2] in xs:
+            # a chain cut because the conditions do not meet leaves Y as another X, but then the two never apply to one syllable
+            if r[2] in conds and conds[r[2]] & conds[r[1]]:
                 return f"char {r[1]}->{r[2]} is not resolved to the end"
             if any(s.startswith("˙") for c in r[3].split(",") for s in c.split(" ")):
                 return f"leading ˙ in the reading condition of {r[1]}"
@@ -180,10 +194,14 @@ def main():
         return
     if a.check:
         bad = check_invariants(text)
-        same = os.path.exists(OUT) and open(OUT, encoding="utf-8").read() == text
+        same = False
+        if os.path.exists(OUT):
+            with open(OUT, encoding="utf-8") as f:
+                same = f.read() == text
         print("forms.tsv " + ("matches" if same else "DIFFERS") + (f"; {bad}" if bad else ""))
         sys.exit(0 if same and not bad else 1)
-    open(OUT, "w", encoding="utf-8").write(text)
+    with open(OUT, "w", encoding="utf-8") as f:
+        f.write(text)
     print(text.splitlines()[3])
 
 

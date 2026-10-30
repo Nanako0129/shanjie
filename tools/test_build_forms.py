@@ -91,6 +91,30 @@ class Forms(unittest.TestCase):
         self.assertEqual(c["甲"][2], "丙")
         self.assertEqual(c["乙"][2], "丙")
 
+    def test_char_chain_conditions_intersect_and_a_cut_chain_stops_at_the_first_step(self):
+        es = [entry("甲", ("ㄧ", [d("", ["同「乙」。"])])), entry("乙", ("ㄦ", [d("", ["同「丙」。"])])), entry("丙", ("ㄦ", [d("字")]))]
+        _, _, _, c = table(es)
+        self.assertEqual(c["甲"][2:], ["乙", "ㄧ"])  # the readings never meet: 甲 is not carried on to 丙
+        self.assertEqual(c["乙"][2:], ["丙", "ㄦ"])
+        self.assertIsNone(B.check_invariants(B.build(es)[0]))
+        es = [entry("甲", ("ㄧ（又音）ㄦ", [d("", ["同「乙」。"])])), entry("乙", ("ㄦ", [d("", ["同「丙」。"])])), entry("丙", ("ㄦ", [d("字")]))]
+        _, _, _, c = table(es)
+        self.assertEqual(c["甲"][2:], ["丙", "ㄦ"])  # a shared reading carries on, with only the shared one
+
+    def test_variant_entry_takes_the_first_heteronym_of_the_target(self):
+        es = [entry("机", (None, [d("「几」的異體字。")])), entry("几", (None, [d("")]), ("ㄐㄧˇ", [d("小桌子")]))]
+        _, _, _, c = table(es)
+        self.assertNotIn("机", c)  # the first heteronym of 几 has no reading; its second one is another meaning
+        es[1] = entry("几", ("ㄐㄧ", [d("")]), ("ㄐㄧˇ", [d("小桌子")]))
+        self.assertEqual(table(es)[3]["机"][3], "ㄐㄧ")
+
+    def test_word_group_needs_one_reading_common_to_all_members(self):
+        es = [entry("沒的", ("ㄇㄟˊ ㄉㄧˋ", [d("也作「沒地」。")])), entry("沒地", ("ㄇㄟˊ ㄉㄧˋ（又音）ㄇㄛˋ ㄉㄧˋ", [d("也作「歿地」。")])),
+              entry("歿地", ("ㄇㄛˋ ㄉㄧˋ", [d("")]))]
+        text, _, w, _ = table(es)
+        self.assertEqual(w, {})  # pairwise each shares a reading, the group of three has none
+        self.assertIn("丟掉的組 1 組", text)
+
     def test_char_cycle_fails_the_build(self):
         es = [entry(x, ("ㄧ", [d("", [f"同「{y}」。"])])) for x, y in ("甲乙", "乙甲")]
         with self.assertRaises(SystemExit):

@@ -28,15 +28,16 @@ _table = None
 def load_variants(path):
     """異體表：# 開頭是說明行，其餘每行剛好「異體<TAB>標準形」；欄數不對或異體重複就報錯。不做任何轉換。"""
     table = {}
-    for line in open(path, encoding="utf-8"):
-        if line.startswith("#"):
-            continue
-        p = line.rstrip("\n").split("\t")
-        if len(p) != 2 or not p[0] or not p[1]:
-            raise ValueError("variants.tsv: bad line")
-        if p[0] in table:
-            raise ValueError("variants.tsv: duplicate variant")
-        table[p[0]] = p[1]
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            p = line.rstrip("\n").split("\t")
+            if len(p) != 2 or not p[0] or not p[1]:
+                raise ValueError("variants.tsv: bad line")
+            if p[0] in table:
+                raise ValueError("variants.tsv: duplicate variant")
+            table[p[0]] = p[1]
     return table
 
 
