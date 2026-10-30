@@ -32,32 +32,32 @@ fn fixed_seed_numbers() {
     // rows syllables keys typos, then (mean, max) per 1000 syllables of a seed for revert a, b, c, split and english_final; five seeds from
     // 20261014. With the overwrite repair every wrong key in the occupied column of the right one is overwritten, which is a revert (a) the
     // simulator undoes: 3,008 mistyped keys over five seeds of 400 syllables, and 1,263 reverts per 1000 syllables (the max seed 1,290).
-    let a = run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite"]);
+    let a = run(&["--rows", &rows, "--p", "0.5", "--repair", "overwrite"]);
     assert_eq!(a, format!("{ROWS_SHA}\t400\t400\t23122\t3008\t1263.000\t1290.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
     // The same again (the output depends on nothing but the arguments).
-    assert_eq!(run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite"]), a);
+    assert_eq!(run(&["--rows", &rows, "--p", "0.5", "--repair", "overwrite"]), a);
     // Backspace repair: the wrong key is taken out before the right one goes in, so only a wrong key that lands in an occupied column reverts.
     assert_eq!(
-        run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "backspace"]),
+        run(&["--rows", &rows, "--p", "0.5", "--repair", "backspace"]),
         format!("{ROWS_SHA}\t400\t400\t16996\t3008\t245.000\t275.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
     );
     // Without mistakes nothing reverts (threshold 1 of section 4.2): five keys a row (w u l, Space, Enter) times 400 rows times 5 seeds.
     assert_eq!(
-        run(&["--words", LIST, "--rows", &rows, "--p", "0"]),
+        run(&["--rows", &rows, "--p", "0"]),
         format!("{ROWS_SHA}\t400\t400\t10000\t0\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
     );
     // One seed, one repeat: the first seed is the one the mean above starts from.
-    let one = run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--seed", "1", "--repeat", "1"]);
+    let one = run(&["--rows", &rows, "--p", "0.5", "--seed", "1", "--repeat", "1"]);
     assert_eq!(one, format!("{ROWS_SHA}\t400\t400\t4602\t601\t1250.000\t1250.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
     // The switches: with the overwrite switch off the right key replaces the wrong one and nothing reverts; with the key-order switch off
     // alone the figures are those of both on (these rows have no key out of column order that the repair does not take out first).
     assert_eq!(
-        run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--overwrite", "off"]),
+        run(&["--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--overwrite", "off"]),
         format!("{ROWS_SHA}\t400\t400\t14470\t3008\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
     );
-    assert_eq!(run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--key-order", "off"]), a);
+    assert_eq!(run(&["--rows", &rows, "--p", "0.5", "--repair", "overwrite", "--key-order", "off"]), a);
     assert_eq!(
-        run(&["--words", LIST, "--rows", &rows, "--p", "0.5", "--repair", "backspace", "--overwrite", "off", "--key-order", "off"]),
+        run(&["--rows", &rows, "--p", "0.5", "--repair", "backspace", "--overwrite", "off", "--key-order", "off"]),
         format!("{ROWS_SHA}\t400\t400\t16506\t3008\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n")
     );
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
@@ -66,9 +66,10 @@ fn fixed_seed_numbers() {
 #[test]
 fn the_switches_take_on_or_off() {
     let rows = rows("switches");
-    assert!(fails(&["--words", LIST, "--rows", &rows, "--overwrite", "yes"]));
-    assert!(fails(&["--words", LIST, "--rows", &rows, "--key-order", "1"]));
-    assert!(fails(&["--words", LIST, "--rows", &rows, "--inline"]), "the display option is gone");
+    assert!(fails(&["--rows", &rows, "--overwrite", "yes"]));
+    assert!(fails(&["--rows", &rows, "--key-order", "1"]));
+    assert!(fails(&["--rows", &rows, "--inline"]), "the display option is gone");
+    assert!(fails(&["--words", LIST, "--rows", &rows]), "--words is the recall mode's list; the engine reads no list");
     std::fs::remove_dir_all(std::path::Path::new(&rows).parent().unwrap()).unwrap();
 }
 
@@ -110,7 +111,7 @@ fn digits_columns() {
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|蛋|ㄉㄢˋ\n|八|ㄅㄚ\n|百|ㄅㄞˇ\n").unwrap();
     let rows = rows.to_str().unwrap();
-    let go = |p: &str, repair: &str| run(&["--words", LIST, "--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair]);
+    let go = |p: &str, repair: &str| run(&["--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair]);
     let sha = "1265d1e6ad6805a31af90872f00b75447742d3a261cdfab90a0073fd6d30d348";
     let zeros = "0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000";
     assert_eq!(go("0", "overwrite"), format!("{sha}\t3\t3\t24\t0\t{zeros}\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
@@ -132,7 +133,7 @@ fn digits_backspace_repair_reads_the_screen() {
     std::fs::create_dir_all(&dir).unwrap();
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|不|ㄅㄨˋ\n".repeat(100)).unwrap();
-    let out = run(&["--words", LIST, "--rows", rows.to_str().unwrap(), "--digits", "--repeat", "2", "--p", "0.5", "--repair", "backspace"]);
+    let out = run(&["--rows", rows.to_str().unwrap(), "--digits", "--repeat", "2", "--p", "0.5", "--repair", "backspace"]);
     let c: Vec<&str> = out.trim_end().split('\t').collect();
     assert_eq!(c.len(), 21, "{c:?}");
     assert_eq!(c[15..17], ["0.000", "0.000"], "no digit left in what the rows commit: {c:?}");
@@ -156,7 +157,7 @@ fn a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on() {
     let go = |retries: &str| {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
             .arg("english-sim")
-            .args(["--words", LIST, "--rows", rows, "--p", "0.5", "--repair", "overwrite", "--seed", "1", "--repeat", "1", "--retries", retries])
+            .args(["--rows", rows, "--p", "0.5", "--repair", "overwrite", "--seed", "1", "--repeat", "1", "--retries", retries])
             .output()
             .unwrap();
         (out.status.success(), String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())

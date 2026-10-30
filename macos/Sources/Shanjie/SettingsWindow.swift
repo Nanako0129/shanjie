@@ -301,8 +301,7 @@ struct SettingsPageForm: View {
                         Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                             .disabled(!model.prediction)
                     }
-                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
-                    // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
+                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the layout is Eten, like the menu item (zhen-mixed section 3.2).
                     Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
                         .disabled(!model.englishEnabled)
                     // Digits.md A.3.7: one line under the toggle, as the 聊天／書面 note above is written.

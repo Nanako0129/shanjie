@@ -22,7 +22,7 @@ public final class SettingsModel: ObservableObject {
     /// 在瀏覽器裡，第一個字不顯示預測 (browser-first-syllable section 3), greyed while the prediction row is off.
     @Published public private(set) var browserFirstSyllable = true
     @Published public private(set) var abbreviation = false
-    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the word list loaded and the standard layout, like
+    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the standard layout, like
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true

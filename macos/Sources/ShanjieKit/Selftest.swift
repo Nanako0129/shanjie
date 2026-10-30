@@ -5,8 +5,8 @@ import Foundation
 /// the LM, type dev302 row 131 with the standard layout and require the chat and formal top-1
 /// sentences and dev302 row 10 for the chat one, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word, then load the
 /// small model (Resources/tinylm.sjtl) and require the rerank to change a chat sentence, and the switch off not to (s7c2b section
-/// 2.5), then load the word list (Resources/english-words.txt) and require `rust` Space to open the English window with `rust`
-/// first (zhen-mixed section 3.2), and the colloquial table (Resources/colloquial.sjlm): with the rerank on and the context
+/// 2.5), then switch English mixing on and require `rust` Space to revert to the English token `rust`
+/// (zhen-revert section 5.2), and the colloquial table (Resources/colloquial.sjlm): with the rerank on and the context
 /// 這間店的蛋糕很好吃 the chat sentence for dev302 row 108 must be 你要不要嚐嚐看 (colloquial-term.md section 2.3). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
@@ -56,7 +56,7 @@ public enum Selftest {
     static let colloquialText = "你要不要嚐嚐看"
 
     /// zhen-revert: `rust` then Space on the standard layout reverts to the raw keys at the third key (`s` over `r`'s column) and Space
-    /// ends the run as one English token: the preedit is the word, no candidate window, no run left open. The word list is not read.
+    /// ends the run as one English token: the preedit is the word, no candidate window, no run left open.
     static let englishKeys = "rust "
     static let englishToken = "rust"
 
@@ -114,10 +114,8 @@ public enum Selftest {
         guard colloquialShown == colloquialText else { return fail("selftest: the colloquial term is not in effect, code", 0) }
         _ = withPack.setLeftContext(nil)
         if case .failed(let c) = withPack.setRerank(false) { return fail("selftest: shanjie_engine_set_rerank (off) failed, code", c) }
-        // The word list, as the shell loads it: a bundle without it, or with a list the core refuses, fails here, so 中英混打 cannot
-        // ship greyed out or silently doing nothing. The switch goes back off afterwards, as it starts.
-        let english = withPack.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
-        guard english == 0 else { return fail("selftest: shanjie_engine_load_english failed, code", english) }
+        // English mixing: a core that does not revert the raw keys fails here, so 中英混打 cannot ship silently doing nothing. The switch
+        // goes back off afterwards, as it starts.
         if case .failed(let c) = withPack.setEnglish(true) { return fail("selftest: shanjie_engine_set_english failed, code", c) }
         var token: CoreOutput?
         for k in keyEvents(englishKeys) {

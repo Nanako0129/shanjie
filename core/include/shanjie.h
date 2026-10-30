@@ -162,14 +162,9 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   (see set_english) as a token; if that is the 128th unit the snapshot carries the composition in `commit`.
 //   No effect without a loaded model.
 int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
-// zhen-mixed (docs/contracts/zhen-mixed.md): the English word list. 0 ok; 1 engine or path NULL; 2 path not UTF-8; 3 unreadable,
-//   not a regular file, over 4 MiB or 200,000 lines, a line outside [a-z]{3,32}, a duplicate line, a BOM. Failure keeps the
-//   previous list (or none). Does not change the switch or the current display. Call it once after shanjie_engine_new. Since
-//   docs/contracts/zhen-revert.md the engine does not read the list (it still validates and keeps it until the list is retired).
-int32_t shanjie_engine_load_english(ShanjieEngine *engine, const char *path);
 // set_english 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_abbreviation in its codes and its
 //   snapshot (handled 1; commit "" except as noted for turning it off, below); 1 when engine or out is NULL. With 1, and only with the
-//   standard layout and the abbreviation composer off (no word list is needed), the engine reverts to the raw keys the moment the
+//   standard layout and the abbreviation composer off, the engine reverts to the raw keys the moment the
 //   unfinished syllable cannot be what was meant (docs/contracts/zhen-revert.md): the unfinished Zhuyin goes and an English run (the
 //   run of docs/contracts/zhen-inline.md section 1.3b, underlined by the output's english_run_utf16_start / english_run_utf16_len)
 //   holds the keys as typed, in the composition at the cursor. Three triggers: (a) a Zhuyin key over the symbol already in its

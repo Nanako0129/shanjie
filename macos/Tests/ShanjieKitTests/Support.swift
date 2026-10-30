@@ -25,8 +25,6 @@ enum TestData {
         ("trigram-chat.sjt3", "data/lm/trigram-chat.sjt3"),  // sj-lm-7-pr2.md: the chat profile's table; the engine loads both, a missing one only turns that profile's level off
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // colloquial-term.md: the colloquial table the selftest requires
-        // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
-        ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
 
     static let itPackRow = "ㄧㄥˊ-ㄇㄨˋ-ㄅㄠˇ-ㄏㄨˋ-ㄑㄧˋ\t螢幕保護器\t-3.17843815\tit\n"

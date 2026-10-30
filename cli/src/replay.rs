@@ -74,7 +74,7 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
 pub const PACKS: u32 = PACK_ACG | PACK_IT;
 
 /// The engine as `Shell.build()` makes it (the packs of `PACKS`; bigram, small model, colloquial table, demotion on, rerank on at the standard level,
-/// profile), except the two recorded deviations: prediction row off and English mixing off (the word list is never loaded). `tinylm` None is
+/// profile), except the two recorded deviations: prediction row off and English mixing off. `tinylm` None is
 /// `--no-tinylm`. `colloquial` is the colloquial table, loaded after the small model as the App does; the bin passes `data/lm/colloquial.sjlm`
 /// by default and None for `--no-colloquial`. `learn` turns learning on once, in memory only (no learning file is opened here; the bin's
 /// `--learn-file` opens a copy).
