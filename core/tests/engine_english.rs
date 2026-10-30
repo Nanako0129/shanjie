@@ -1604,6 +1604,45 @@ fn reversal_guard_chinese_in_a_hurry_english_words_still_come() {
     assert!(e.english_reverted().is_none() && o.preedit != "ls" && !e.syllables()[0].starts_with("_punct_"), "guard on: {}", o.preedit);
 }
 
+/// zhen-reapply: with the reversal guard on (default) a key can sit in a column before a filled one, so the shadow is read in the order
+/// TYPED, not the column order. Every way a run is made from the shadow (a revert (a) or (c), Shift+letter, the ASCII state) must give the
+/// letters as typed: `time`, never `tmie`.
+#[test]
+fn reversal_guard_keeps_the_typed_order_in_every_run() {
+    for word in ["time", "home", "make", "user", "law"] {
+        let keys = format!("{} _", word.chars().map(String::from).collect::<Vec<_>>().join(" "));
+        let mut e = eng();
+        let o = run(&mut e, &keys);
+        assert!(o.preedit == word && e.syllables() == [format!("_punct_{word}")], "{word}: {} {:?}", o.preedit, e.syllables());
+    }
+    // (c) on Space: neither `m e` nor `i t` is a syllable of the lexicon, so each is one token, in the order typed.
+    for (keys, word) in [("m e _", "me"), ("i t _", "it")] {
+        let mut e = eng();
+        let o = run(&mut e, keys);
+        assert!(o.preedit == word && e.english_reverted() == Some(Revert::Missing), "{keys}: {}", o.preedit);
+    }
+    // Shift+letter and the ASCII state take the shadow in typed order too.
+    let mut e = eng();
+    let o = run(&mut e, "m e S-x");
+    assert!(o.preedit == "meX", "{}", o.preedit);
+    let mut e = eng();
+    run(&mut e, "m e");
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.preedit == "me", "{}", o.preedit);
+    let mut e = eng();
+    run(&mut e, "m e");
+    e.set_ascii(true).unwrap();
+    let o = run(&mut e, "1");
+    assert!(o.preedit == "me1", "ASCII branch: {}", o.preedit);
+    // The short-word list reads the typed order as well: `i a` Space is the Chinese ㄇㄛ typed back to front, and the keys typed are `ia`,
+    // not the short word `ai`, so the candidate list has no `ai`/`AI` item (column order would have made it).
+    let mut e = eng();
+    run(&mut e, "i a _");
+    assert!(e.english_reverted().is_none());
+    let o = run(&mut e, "Down");
+    assert!(!o.candidates.iter().any(|c| c.eq_ignore_ascii_case("ai")), "{:?}", o.candidates);
+}
+
 /// Section 4.3, the second exhaustive test: every word of `ENGLISH_SHORT` typed key by key and ended (`mp3` by its tone key, the rest by
 /// Space) never reverts, makes the one syllable, and the candidate list ends with the lower and upper case of the word.
 #[test]

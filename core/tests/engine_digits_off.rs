@@ -9,6 +9,9 @@
 //! differ, all of them rows of digit keys typed without the table. With the table (digits.md A.4.1 #1-#39 on the real layer) nothing
 //! changes: `engine_digits.rs`.
 //!
+//! Regenerated again by zhen-reapply (docs/contracts/zhen-reapply.md section 1.2): the shipping defaults now have the reversal guard on, so a
+//! key in front of a filled column is no longer English; rows r06 (`ˇ.1` now `ˇㄅㄡ`) and r33 (`2 0 u` now `ㄉㄧㄢ` with its candidates) changed, no other.
+//!
 //!   DIGITS_FIXTURE_DIR=<dir> cargo test --release --locked -p core --test engine_digits_off -- --test-threads=1
 //!
 //! writes `digits-off.txt` and `digits-off-en.txt` into <dir> (the tests then pass trivially); without the variable they compare.

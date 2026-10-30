@@ -587,6 +587,9 @@ struct LmState {
     capped: Arc<CappedLexicon>,
 }
 
+/// A shadow entry: the keycap and its arrival rank (see `Engine::shadow_key`).
+type Shadow = (char, u8);
+
 pub struct Engine {
     lex: Arc<Lexicon>,
     /// Where `new` read the data from; `None` for `with_lexicon` engines (they cannot `load_lm`).
@@ -702,11 +705,14 @@ pub struct Engine {
     rerank_job: Option<RerankJob>,
     /// zhen-mixed: the switch (default off; `set_english`).
     english: bool,
-    /// zhen-revert section 1: the keycap that put the symbol now in each column of the unfinished syllable. Recorded only where
-    /// `shadow_on`, so it always matches `pend`; empty (all `None`) otherwise. Cleared with `clear_pend`.
-    shadow_key: [Option<char>; 3],
+    /// zhen-revert section 1: the keycap that put the symbol now in each column of the unfinished syllable, with its arrival rank
+    /// (zhen-reapply: with the reversal guard on a key can go into a column before a filled one, so every English text reads the keys in
+    /// the order typed, not the column order; a key that replaces a column's key takes its rank). Recorded only where `shadow_on`, so it
+    /// always matches `pend`; empty (all `None`) otherwise. Cleared with `clear_pend`.
+    shadow_key: [Option<Shadow>; 3],
     /// zhen-revert section 2.1: the triggers of the direct revert (a key over the same column: `set_english_overwrite`; a key out of
-    /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on.
+    /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on. The
+    /// out-of-order trigger (b) fires only while `english_key_order` is on and `english_reversal_guard` is off.
     english_overwrite: bool,
     english_key_order: bool,
     /// zhen-reapply section 1.2: while on (default), a key in a column before a filled one is never English (trigger (b) does not fire,
@@ -723,7 +729,7 @@ pub struct Engine {
     split: bool,
     /// zhen-revert section 2.3: what the unfinished syllable was before the revert that opened the English run (columns and
     /// shadow), for Esc; dropped by anything that changes the run.
-    revert_point: Option<([Option<char>; 3], [Option<char>; 3])>,
+    revert_point: Option<([Option<char>; 3], [Option<Shadow>; 3])>,
     /// zhen-revert section 2.6: the position and text of the syllable that was just made from a short word's keys, and what the
     /// current key saw of it (`ls_now`, like `ld_now`). Taken at the start of every `key()`; a key that changes nothing puts it back.
     last_short: Option<(usize, String)>,
@@ -1781,7 +1787,7 @@ impl Engine {
         self.split
     }
 
-    /// The shadow in column order (test and tool hook): the keycaps of the unfinished syllable's symbols.
+    /// The shadow in typed order (test and tool hook): the keycaps of the unfinished syllable's symbols.
     #[doc(hidden)]
     pub fn english_shadow(&self) -> String {
         self.shadow_text()
@@ -1808,19 +1814,27 @@ impl Engine {
     fn sync_shadow(&mut self) {
         if self.shadow_on() && self.pend_prev.is_empty() {
             for col in 0..3 {
-                self.shadow_key[col] = self.pend[col].and_then(|sym| self.layout.key_of_symbol(sym));
+                self.shadow_key[col] = self.pend[col].and_then(|sym| self.layout.key_of_symbol(sym)).map(|k| (k, col as u8));
             }
         }
     }
 
+    /// The keys of the unfinished syllable in the order typed (zhen-reapply).
     fn shadow_text(&self) -> String {
-        self.shadow_key.iter().flatten().collect()
+        let mut keys: Vec<Shadow> = self.shadow_key.iter().flatten().copied().collect();
+        keys.sort_by_key(|&(_, rank)| rank);
+        keys.into_iter().map(|(c, _)| c).collect()
+    }
+
+    /// `ch` as the entry of column `col`: the rank of the key it replaces, else one after the latest.
+    fn shadow_entry(shadow: &[Option<Shadow>; 3], ch: char, col: usize) -> Shadow {
+        (ch, shadow[col].map_or_else(|| shadow.iter().flatten().map(|&(_, r)| r + 1).max().unwrap_or(0), |(_, r)| r))
     }
 
     /// Section 2.2: one Zhuyin key of the unfinished syllable now sits in column `col`.
     fn shadow_push(&mut self, ch: char, col: usize) {
         if self.shadow_on() {
-            self.shadow_key[col] = Some(ch);
+            self.shadow_key[col] = Some(Self::shadow_entry(&self.shadow_key, ch, col));
         }
     }
 
@@ -1881,7 +1895,7 @@ impl Engine {
 
     /// The unfinished syllable goes and an English run holding `text` opens at the cursor (the output shows it with the run's
     /// underline). `point`: the columns and shadow Esc brings back; `zh`: the Chinese syllable the keys made, when the lexicon has it.
-    fn revert_to(&mut self, kind: Revert, text: String, point: ([Option<char>; 3], [Option<char>; 3]), zh: Option<String>) -> Result<Output, EngineError> {
+    fn revert_to(&mut self, kind: Revert, text: String, point: ([Option<char>; 3], [Option<Shadow>; 3]), zh: Option<String>) -> Result<Output, EngineError> {
         self.clear_pend();
         self.run_zh = zh.map(|zh| (text.clone(), zh, format!("{PUNCT_PREFIX}{text}")));
         self.run = text;
@@ -1895,12 +1909,12 @@ impl Engine {
     }
 
     /// Rule 9 with a trigger (a) or (b): the Zhuyin key `ch` (symbol `sym` for column `col`) does not go into the columns; the
-    /// run is the shadow in column order and this key. The Chinese item is the syllable the key would have made (section 2.3).
+    /// run is the shadow in typed order and this key. The Chinese item is the syllable the key would have made (section 2.3).
     fn revert_keys(&mut self, kind: Revert, ch: char, col: usize, sym: char) -> Result<Output, EngineError> {
         let text = format!("{}{ch}", self.shadow_text());
         let (mut pend, mut shadow) = (self.pend, self.shadow_key);
         pend[col] = Some(sym);
-        shadow[col] = Some(ch);
+        shadow[col] = Some(Self::shadow_entry(&shadow, ch, col));
         let syl: String = pend.iter().flatten().collect();
         let zh = (!self.lex.entries(std::slice::from_ref(&syl)).is_empty()).then_some(syl);
         self.revert_to(kind, text, (pend, shadow), zh)

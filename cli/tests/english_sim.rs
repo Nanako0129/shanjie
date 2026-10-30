@@ -108,6 +108,16 @@ fn reversal_guard_stops_trigger_b() {
     assert_eq!(head[4], "0", "no (b) revert: {on}");
     assert!(on.contains("probe\tls\t中文\n") && on.contains("probe\tok\ttoken\n"), "{on}");
     assert!(fails(&["--words", LIST, "--recall", "--reversal-guard", "1"]));
+    // Words with a key in front of a filled column (`t i m e`: ㄔ ㄛ then ㄩ): with the guard on the keys are kept in the order typed, so each
+    // ends as one English token equal to the word (`opened` counts them), never `tmie`.
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-typed", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let list = dir.join("words.txt");
+    std::fs::write(&list, "time\nuser\nlaw\nhome\nmake\n").unwrap();
+    let typed = run(&["--words", list.to_str().unwrap(), "--recall", "--reversal-guard", "on"]);
+    let head: Vec<&str> = typed.lines().next().unwrap().split('\t').collect();
+    assert_eq!((head[1], head[2]), ("5", "5"), "{typed}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// `--digits` (docs/contracts/digits.md A.4.2): the engine with the digit table and the model; six more columns (three pairs), mean and max per 1000
