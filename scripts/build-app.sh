@@ -84,31 +84,9 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/contracts/about-models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
-
-# The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): not in git. Downloaded from the pinned SymSpell commit
-# into the cache (the URL, the commit and the input hash live only in tools/build_english_words.py), checked, generated, and the
-# output checked against data/english-words.txt.sha256. A download failure or either hash mismatch fails the build.
-EN_URL="$(python3 tools/build_english_words.py --print-url)"
-EN_COMMIT="$(python3 tools/build_english_words.py --print-commit)"
-EN_IN_SHA="$(python3 tools/build_english_words.py --print-input-sha256)"
-EN_IN="${SHANJIE_ENGLISH_CACHE:-$HOME/.cache/shanjie/english}/frequency_dictionary_en_82_765.txt"
-en_input_ok() { [ -f "$EN_IN" ] && [ "$(shasum -a 256 "$EN_IN" | awk '{ print $1 }')" = "$EN_IN_SHA" ]; }
-if ! en_input_ok; then
-  mkdir -p "$(dirname "$EN_IN")"
-  rm -f "$EN_IN"
-  curl -fsSL --retry 3 -o "$EN_IN.part" "$EN_URL" || fail "cannot download the English word list input from $EN_URL"
-  mv "$EN_IN.part" "$EN_IN"
-  en_input_ok || { rm -f "$EN_IN"; fail "the downloaded English word list input does not match SHA-256 $EN_IN_SHA"; }
-fi
-EN_TMP="$(mktemp -d)"
-trap 'rm -rf "$EN_TMP"' EXIT
-python3 tools/build_english_words.py --input "$EN_IN" --out "$EN_TMP/english-words.txt" >/dev/null || fail "tools/build_english_words.py failed"
-EN_OUT_SHA="$(shasum -a 256 "$EN_TMP/english-words.txt" | awk '{ print $1 }')"
-EN_RECORDED="$(awk 'NR == 1 { print $1 }' data/english-words.txt.sha256)"
-[ "$EN_OUT_SHA" = "$EN_RECORDED" ] || fail "the generated english-words.txt (SHA-256 $EN_OUT_SHA) does not match data/english-words.txt.sha256"
 
 SHIPPING_ID=com.nyanako.inputmethod.shanjie
 BUNDLE_ID="${BUNDLE_ID:-$SHIPPING_ID.dev}"
@@ -227,7 +205,6 @@ cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/pa
 cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"
-cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
 cp "$RES/AppIcon.icns" "$HELPER/Contents/Resources/"   # the helper's Dock icon while it runs
@@ -258,7 +235,7 @@ EOF
 plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
 cp LICENSE "$RES/LICENSES/LICENSE"
-cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
+cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
 # Sparkle.framework ships in Contents/Frameworks/Updater: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (colloquial-term.md section 2.1); no corpus text in it.
@@ -346,22 +323,6 @@ The name-suggestion-index notice (names-add.tsv, source 1), in full:
 
 EOF
 cat LICENSES/name-suggestion-index-BSD-3-Clause.txt >> "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt"
-
-# english-words.txt is not CC BY-SA: its own attribution, not folded into the file above (docs/contracts/zhen-mixed.md section 3.4).
-cat > "$RES/LICENSES/english-words-attribution.txt" <<EOF
-english-words.txt is generated at build time from frequency_dictionary_en_82_765.txt of SymSpell
-(https://github.com/wolfgarbe/SymSpell, commit $EN_COMMIT): all of its words of 3 to 32 lowercase ASCII letters
-(words with an apostrophe, a digit or a capital letter dropped), sorted. SymSpell's list is the intersection of two sources (1 and 2), and the list
-itself is SymSpell's (3):
-
-1. Word frequencies: Google Books Ngram Viewer data, Creative Commons Attribution 3.0 Unported (CC BY 3.0),
-   https://creativecommons.org/licenses/by/3.0/ . The data was filtered as described above.
-2. Words: SCOWL (Spell Checker Oriented Word Lists), Copyright 2000-2026 by Kevin Atkinson. Its notice is
-   LICENSES/SCOWL.txt. SymSpell does not say which SCOWL version it used; the notice included is the current release's.
-3. The list itself: SymSpell, MIT License, Copyright (c) 2018 Wolf Garbe. Its text is LICENSES/SymSpell-MIT.txt.
-
-The program is Apache-2.0 (LICENSE). Details: data.md.
-EOF
 
 # One input mode (section 13.2); the keyboard layout is chosen in its menu, not by mode.
 MODE="$BUNDLE_ID.zhuyin"

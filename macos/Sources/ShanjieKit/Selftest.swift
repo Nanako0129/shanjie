@@ -5,8 +5,8 @@ import Foundation
 /// the LM, type dev302 row 131 with the standard layout and require the chat and formal top-1
 /// sentences and dev302 row 10 for the chat one, then build with the bundled ACG pack (Resources/packs), require the same sentences and one pack word, then load the
 /// small model (Resources/tinylm.sjtl) and require the rerank to change a chat sentence, and the switch off not to (s7c2b section
-/// 2.5), then load the word list (Resources/english-words.txt) and require `rust` Space to open the English window with `rust`
-/// first (zhen-mixed section 3.2), and the colloquial table (Resources/colloquial.sjlm): with the rerank on and the context
+/// 2.5), then switch English mixing on and require `rust` Space to revert to the English token `rust`
+/// (zhen-revert section 5.2), and the colloquial table (Resources/colloquial.sjlm): with the rerank on and the context
 /// 這間店的蛋糕很好吃 the chat sentence for dev302 row 108 must be 你要不要嚐嚐看 (colloquial-term.md section 2.3). Returns the exit status. Writes nothing but a fixed message and a return code to stderr; touches no file, UserDefaults, TIS, NSApplication or IMK server.
 @MainActor
 public enum Selftest {
@@ -55,10 +55,10 @@ public enum Selftest {
     static let colloquialContext = "這間店的蛋糕很好吃"
     static let colloquialText = "你要不要嚐嚐看"
 
-    /// zhen-mixed: `rust` then Space on the standard layout opens the English window (the shipped list and the tests' synthetic list
-    /// both have the word; its leftover ㄔㄧ is not in the lexicon, so these are the window's only items).
+    /// zhen-revert: `rust` then Space on the standard layout reverts to the raw keys at the third key (`s` over `r`'s column) and Space
+    /// ends the run as one English token: the preedit is the word, no candidate window, no run left open.
     static let englishKeys = "rust "
-    static let englishWindow = ["rust", "Rust", "RUST"]
+    static let englishToken = "rust"
 
     /// The message and code of the last failure `run` returned, `nil` after a pass: the same text `run` writes to stderr, kept so the tests can tell
     /// which check failed (a load refused with code 3 is not a wrong sentence).
@@ -114,21 +114,21 @@ public enum Selftest {
         guard colloquialShown == colloquialText else { return fail("selftest: the colloquial term is not in effect, code", 0) }
         _ = withPack.setLeftContext(nil)
         if case .failed(let c) = withPack.setRerank(false) { return fail("selftest: shanjie_engine_set_rerank (off) failed, code", c) }
-        // The word list, as the shell loads it: a bundle without it, or with a list the core refuses, fails here, so 中英混打 cannot
-        // ship greyed out or silently doing nothing. The switch goes back off afterwards, as it starts.
-        let english = withPack.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
-        guard english == 0 else { return fail("selftest: shanjie_engine_load_english failed, code", english) }
+        // English mixing: a core that does not revert the raw keys fails here, so 中英混打 cannot ship silently doing nothing. The switch
+        // goes back off afterwards, as it starts.
         if case .failed(let c) = withPack.setEnglish(true) { return fail("selftest: shanjie_engine_set_english failed, code", c) }
-        var window: [String] = []
+        var token: CoreOutput?
         for k in keyEvents(englishKeys) {
             switch withPack.key(k) {
-            case .ok(let o): window = o.candidates
+            case .ok(let o): token = o
             case .failed(let c): return fail("selftest: English typing failed, code", c)
             }
         }
         if case .failed(let c) = withPack.reset(mode: 1) { return fail("selftest: shanjie_engine_reset failed, code", c) }
         if case .failed(let c) = withPack.setEnglish(false) { return fail("selftest: shanjie_engine_set_english (off) failed, code", c) }
-        guard window == englishWindow else { return fail("selftest: the English window did not open, code", 0) }
+        guard let token, token.preedit == englishToken, token.candidates.isEmpty, token.englishRunLength == 0 else {
+            return fail("selftest: the English token did not come out of the raw keys, code", 0)
+        }
         return 0
     }
 

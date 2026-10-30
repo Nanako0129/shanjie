@@ -77,7 +77,6 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/quotes-add.tsv packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
-         english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
@@ -123,16 +122,6 @@ for pair in "colloquial-attribution.tsv:$R/LICENSES/colloquial-attribution.tsv";
   [[ "$recorded" =~ ^[0-9a-f]{64}$ ]] || fail "data/${pair%%:*}.sha256 holds no SHA-256"
   [ "$(shasum -a 256 "${pair#*:}" | awk '{ print $1 }')" = "$recorded" ] || fail "${pair#*:} does not match data/${pair%%:*}.sha256"
 done
-# The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): every line a word the core's loader accepts (the
-# loader's own limits are tested in core), the three attributions present, and the bundled file against the hash recorded in git
-# (a record that is not a SHA-256 fails, like tinylm.sjtl's above).
-! grep -Eqv '^[a-z]{3,32}$' "$R/english-words.txt" || fail "english-words.txt has a line outside [a-z]{3,32}"
-grep -q 'SymSpell' "$R/LICENSES/english-words-attribution.txt" && grep -q 'Google Books Ngram' "$R/LICENSES/english-words-attribution.txt" \
-  && grep -q 'SCOWL' "$R/LICENSES/english-words-attribution.txt" || fail "the English attribution file does not name its three sources"
-EN_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/english-words.txt.sha256")"
-[[ "$EN_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/english-words.txt.sha256 holds no SHA-256"
-[ "$(shasum -a 256 "$R/english-words.txt" | awk '{ print $1 }')" = "$EN_RECORDED" ] \
-  || fail "Resources/english-words.txt does not match data/english-words.txt.sha256"
 # The Kneser-Ney side file (model-v6 section 7 P3-7): against the hash recorded in git, like tinylm.sjtl; the bundled selftest then
 # shows the small model paired with it (a mismatch would leave 語意校正 off).
 grep -q 'kn.sjkn' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list kn.sjkn"

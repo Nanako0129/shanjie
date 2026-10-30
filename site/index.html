@@ -443,7 +443,6 @@
       <li>語意校正模型（會意 SJ-SR-7-15M，<code>tinylm.sjtl</code>；隨 App 內附、預設開）：約 1,465 萬參數的字元語言模型，權重在 v0.6.0 重新訓練。訓練文字和語言模型同源（維基百科 2026-10-01 的前 20 萬篇條目、Mozilla Common Voice、Tatoeba、gpt-oss-120b 產生的台灣口語合成句），另加 g0v <code>#rand0m</code> 的公開訊息、PTT 公開看板的文章與推文，以及 OPUS OpenSubtitles v2018 的繁體字幕（清理後 4,432,866 句；都只用於訓練，字幕文字不在檔案內）。CC BY-SA 4.0，署名維基百科、Tatoeba 貢獻者與 OpenSubtitles（P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles, LREC 2016；字幕來自 <a href="http://www.opensubtitles.org/">opensubtitles.org</a>）。聊天設定的融合參數用維護者自己的訊息選，檔案裡沒有任何訊息的文字。</li>
       <li>口語詞頻表（常談 SJ-CL-2-69K，<code>colloquial.sjlm</code>，v0.5.0 起隨 App 內附）：只有詞與詞對的次數，沒有句子。來源是語言模型的口語計數（Common Voice、Tatoeba、合成句，不含 g0v 與 PTT），加上一份公開口語池：WildChat-1M 台灣子集（ODC-BY 1.0）、YODAS 繁體字幕（1,138 支 CC BY 的 YouTube 影片，CC BY 3.0）、Tatoeba（CC BY 2.0 FR）、MASSIVE zh-TW（CC BY 4.0）。整份以 CC BY-SA 4.0 散布；逐支影片、逐句的署名清單隨 App 內附。</li>
       <li>數字語境的計數表（<code>digits.tsv</code>，v0.5.0 起）：從中文維基百科與 Common Voice、Tatoeba 的句子數出詞與數字前後相接的次數，CC BY-SA 4.0。</li>
-      <li>中英混打的英文單字表（v0.4.4 起，建置時產生、隨 App 內附）：取自 SymSpell 的詞頻表（MIT），它是 Google Books Ngram（CC BY 3.0）與 SCOWL 的交集；三方的署名隨 App 內附。</li>
       <li>評測句（不隨 App 內附，只用來量測）：
         <ul>
           <li>專案自寫或使用者回報的句子（開發集、舊保留集、學習測試、陷阱句、日常句等）：CC0。</li>

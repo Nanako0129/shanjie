@@ -28,10 +28,10 @@ fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
     v
 }
 
-/// `key_order`: also the zhen-keyorder switch. `english`: the standard layout with the zhen-mixed switch on and the synthetic list loaded (docs/contracts/zhen-mixed.md
-/// section 5.1) and the zhen-inline display on (its default): the same 302 rows, and neither the English window nor the letters
-/// (rule D) may ever show: the rows are Chinese typed right.
-fn replay(layout: Layout, english: bool, key_order: bool) {
+/// `english`: the standard layout with the zhen-mixed switch on and the synthetic list loaded (docs/contracts/zhen-mixed.md section 5.1);
+/// `switches`: the two zhen-revert switches (`set_english_overwrite`, `set_english_key_order`) as well. The same 302 rows, and no key may
+/// ever revert or split (zhen-revert section 5.1): the rows are Chinese typed right.
+fn replay(layout: Layout, english: bool, switches: bool) {
     let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
     let mut files: Vec<PathBuf> = std::fs::read_dir(root().join("eval/dev"))
         .unwrap()
@@ -49,9 +49,9 @@ fn replay(layout: Layout, english: bool, key_order: bool) {
 
     let mut e = Engine::with_lexicon(lex.clone(), layout);
     if english {
-        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
         e.set_english(true).unwrap();
-        e.set_english_key_order(key_order).unwrap(); // zhen-keyorder section 5.4: the same rows, clean, with the switch on
+        e.set_english_overwrite(switches).unwrap();
+        e.set_english_key_order(switches).unwrap();
     }
     let mut times = Vec::new();
     for (i, r) in rows.iter().enumerate() {
@@ -67,8 +67,8 @@ fn replay(layout: Layout, english: bool, key_order: bool) {
             let t = Instant::now();
             let o = e.key(key).unwrap();
             times.push(t.elapsed());
-            assert!(!e.english_open(), "the English window opened at row {}", i + 1);
-            assert!(!e.english_inline_shown(), "letters showed instead of Zhuyin at row {}", i + 1);
+            assert!(e.english_reverted().is_none(), "a key reverted to English at row {}", i + 1);
+            assert!(!e.english_split(), "a tone key split an English run at row {}", i + 1);
             got.push_str(&o.commit);
         }
         assert!(got == want, "replay mismatch at row {}", i + 1);
@@ -90,14 +90,14 @@ fn replay_eten_302_of_302() {
 }
 #[test]
 fn replay_with_english_on() {
-    replay(Layout::Standard, true, false);
-}
-#[test]
-fn replay_with_english_and_key_order_on() {
     replay(Layout::Standard, true, true);
 }
+#[test]
+fn replay_with_english_on_and_the_revert_switches_off() {
+    replay(Layout::Standard, true, false);
+}
 
-/// Digits.md A.4.1 #48 (C's R2 on the real engine): the 302 rows are Chinese typed right. With the English-mixing switch on, the word list
+/// Digits.md A.4.1 #48 (C's R2 on the real engine): the 302 rows are Chinese typed right. With the English-mixing switch on
 /// and the digit table loaded (and the model: the digit feature needs the scores), every row commits what the same engine commits with the
 /// switch off, no key puts a digit token into the composition, and the keys stay under 16 ms at p95 (release).
 #[test]
@@ -130,7 +130,6 @@ fn replay_with_english_and_digits_on() {
         let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
         e.set_lm(lm.clone(), capped.clone());
         e.set_digit_table(Some(table.clone()));
-        e.load_english(&root().join("eval/golden/english-tiny.txt")).unwrap();
         e.set_english(on).unwrap();
         e
     };
@@ -150,6 +149,7 @@ fn replay_with_english_and_digits_on() {
             let o = on.key(key).unwrap();
             times.push(t.elapsed());
             tokens += on.digits_emitted();
+            assert!(on.english_reverted().is_none() && !on.english_split(), "a revert while typing Chinese at row {}", i + 1);
             got.push_str(&o.commit);
         }
         assert!(got == want, "replay mismatch at row {}", i + 1);

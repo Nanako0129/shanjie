@@ -1,4 +1,4 @@
-//! `--english-next ROWS --table FILE --words FILE [--lm FILE]` (docs/contracts/english-next.md section 3.2): the engine, with and without the
+//! `--english-next ROWS --table FILE [--lm FILE]` (docs/contracts/english-next.md section 3.2): the engine, with and without the
 //! table, on rows `e|w|reading` (reading: space-separated syllables, tools/readings.py). Each row starts from an empty composition and sends
 //! Shift+(first letter of e), the other letters, Space, and reads the prediction row (i); then the first Zhuyin key of w's first syllable
 //! (standard layout) and reads it again (ii, iii). Standard layout, English mixing on, prediction on, the rest as `replay::build_engine`
@@ -65,19 +65,18 @@ fn p95(mut t: Vec<Duration>) -> f64 {
 }
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
-    let (mut rows_file, mut table, mut words, mut lm) = (None::<PathBuf>, None::<PathBuf>, None::<PathBuf>, root.join("data/lm/bigram.sjlm"));
+    let (mut rows_file, mut table, mut lm) = (None::<PathBuf>, None::<PathBuf>, root.join("data/lm/bigram.sjlm"));
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().map(PathBuf::from).ok_or_else(|| "missing option value".to_string());
         match a.as_str() {
             "--english-next" => rows_file = Some(val()?),
             "--table" => table = Some(val()?),
-            "--words" => words = Some(val()?),
             "--lm" => lm = val()?,
             _ => return Err("unknown argument".into()),
         }
     }
-    let (rows_file, table, words) = (rows_file.ok_or("--english-next needs a rows file")?, table.ok_or("--table is required")?, words.ok_or("--words is required")?);
+    let (rows_file, table) = (rows_file.ok_or("--english-next needs a rows file")?, table.ok_or("--table is required")?);
     let text = std::fs::read_to_string(&rows_file).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
     let (rows, skipped) = parse(&text);
     if skipped > 0 {
@@ -90,7 +89,6 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let mut rss = None;
     for (name, profile) in [("chat", Profile::Chat), ("formal", Profile::Formal)] {
         let mut e = cli::replay::build_engine_opts(root, &lm, tl.is_file().then_some(tl.as_path()), co.is_file().then_some(co.as_path()), profile, false, true)?;
-        e.load_english(&words).map_err(|_| "cannot load the word list".to_string())?;
         e.set_english(true).map_err(|_| "cannot switch English mixing on".to_string())?;
         e.set_prediction(true).map_err(|_| "cannot switch the prediction row on".to_string())?;
         let pass = |e: &mut Engine| -> Result<(Vec<Option<[bool; 3]>>, f64), String> {
