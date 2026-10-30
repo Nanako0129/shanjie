@@ -25,7 +25,7 @@ final class ShiftToggleSessionTests: XCTestCase {
                            layout: LayoutStore = MemoryLayoutStore(), hint: FakeShiftHint) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: layout, learningDirectory: nil,
                           dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
-                          abbreviationStore: MemoryAbbreviationStore(), englishStore: english, acgPackStore: MemoryAcgPackStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: english, acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(),
                           glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
                           rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
                           appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),

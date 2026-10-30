@@ -135,7 +135,31 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(r.model.englishOverwriteEnabled, "the menu's switch off greys it too")
         XCTAssertEqual(MenuEntry.Text.englishOverwrite, "重打同一個位置算英文")
         XCTAssertEqual(MenuEntry.Text.englishOverwriteNote, "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。")
-        XCTAssertEqual(MenuEntry.Text.englishKeyOrderNote, "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。")
+        XCTAssertEqual(MenuEntry.Text.englishKeyOrderNote, "打了聲調鍵才發現音節不存在時，整段變成英文（馬上按 Esc 變回注音）。")
+        XCTAssertEqual(MenuEntry.Text.englishReversalGuard, "快打時鍵序顛倒不當英文")
+        XCTAssertEqual(MenuEntry.Text.englishReversalGuardNote, "快打時，同一個字的注音鍵先後顛倒（例如 ㄍㄜˋ 打成 ㄜㄍˋ）照注音處理，不會變成英文。關掉之後 ls、mv 這類字不用按 Shift，但快打容易誤觸。")
+    }
+
+    /// zhen-reapply section 1.2 / 3.4: the window's 快打時鍵序顛倒不當英文 choice has no value true (the store stays nil until chosen), goes to
+    /// the store as false when turned off, and is greyed on the key-order choice's conditions (switch off, Eten); the setting is kept.
+    func testEnglishReversalGuardChoiceStoresAndFollowsTheSwitch() {
+        let r = rig()
+        XCTAssertTrue(r.model.englishReversalGuard, "default true")
+        XCTAssertNil(r.english.englishReversalGuard, "never chosen")
+        XCTAssertFalse(r.model.englishReversalGuardEnabled, "the switch is off")
+        r.model.setEnglish(true)
+        XCTAssertTrue(r.model.englishReversalGuardEnabled)
+        r.model.setEnglishReversalGuard(false)
+        XCTAssertEqual(r.english.englishReversalGuard, false)
+        XCTAssertFalse(r.model.englishReversalGuard)
+        XCTAssertTrue(r.model.englishReversalGuardEnabled, "the choice itself does not grey it")
+        r.model.selectLayout(.eten)
+        XCTAssertFalse(r.model.englishReversalGuardEnabled, "Eten greys it")
+        XCTAssertFalse(r.model.englishReversalGuard, "the setting is kept")
+        r.controller.session.perform(.layout(.standard))
+        XCTAssertTrue(r.model.englishReversalGuardEnabled)
+        r.controller.session.perform(.toggleEnglish)
+        XCTAssertFalse(r.model.englishReversalGuardEnabled, "the menu's switch off greys it too")
     }
 
     /// zhen-keyorder section 3 / 5.3 with zhen-revert's default: the window's 依按鍵順序判斷英文 choice has no value true (the store stays nil

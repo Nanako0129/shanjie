@@ -808,7 +808,7 @@ final class ShellTests: XCTestCase {
     /// stays false), is stored, takes effect (`l s` is the English `ls` with it and the syllable ㄋㄠ without), and is sent again to every
     /// engine a rebuild makes.
     func testEnglishKeyOrderDefaultStoredAndSentToEveryEngine() {
-        let store = MemoryEnglishStore(true)
+        let store = MemoryEnglishStore(true, reversalGuard: false)  // trigger (b) is held back by the reversal guard (default on): turn it off
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
@@ -837,6 +837,41 @@ final class ShellTests: XCTestCase {
         let third = Controller(make())
         third.session.activate()
         XCTAssertEqual(ls(third), "ls", "and the stored true")
+    }
+
+    /// zhen-reapply section 1.2: the reversal guard defaults to true (a store with no value; a saved false stays false), is stored, takes
+    /// effect (`l s` stays Zhuyin with it although the key-order choice is on, and is the English `ls` without), and is sent again to
+    /// every engine a rebuild makes.
+    func testEnglishReversalGuardDefaultStoredAndSentToEveryEngine() {
+        let store = MemoryEnglishStore(true)
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        }
+        let ls = { (c: Controller) -> String in c.type("ls"); let m = c.client.marked; c.press(Keys.esc); c.press(Keys.esc); return m }
+        XCTAssertNil(store.englishReversalGuard, "never chosen")
+        let shell = make()
+        XCTAssertTrue(shell.englishReversalGuardOn, "no value is true")
+        XCTAssertTrue(shell.englishKeyOrderOn, "the key-order choice is on too")
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertEqual(ls(c), "ㄋㄠ", "on: a reversal stays Zhuyin")
+        shell.applyEnglishReversalGuard(false)
+        XCTAssertEqual(store.englishReversalGuard, false)
+        XCTAssertEqual(ls(c), "ls", "off: out of column order is English")
+        c.session.perform(.toggleAcgPack)  // rebuilds the engine
+        c.session.perform(.toggleAcgPack)
+        XCTAssertEqual(ls(c), "ls", "the rebuilt engine got the choice")
+        c.session.perform(.layout(.eten))
+        c.session.perform(.layout(.standard))
+        XCTAssertEqual(ls(c), "ls", "and the one rebuilt by a layout switch")
+        let again = Controller(make())
+        again.session.activate()
+        XCTAssertEqual(ls(again), "ls", "a new shell reads the stored false")
+        store.englishReversalGuard = true
+        let third = Controller(make())
+        third.session.activate()
+        XCTAssertEqual(ls(third), "ㄋㄠ", "and the stored true")
     }
 
     /// zhen-revert section 3: the overwrite choice goes through the session that owns the composition, like the other apply*: a syllable

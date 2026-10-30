@@ -116,8 +116,10 @@ public struct MenuEntry: Equatable, Sendable {
         /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
         public static let englishDigitsNote = "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。"
         /// The toggle under it and the line under that (docs/contracts/zhen-keyorder.md section 3, zhen-revert section 3).
+        public static let englishReversalGuard = "快打時鍵序顛倒不當英文"
+        public static let englishReversalGuardNote = "快打時，同一個字的注音鍵先後顛倒（例如 ㄍㄜˋ 打成 ㄜㄍˋ）照注音處理，不會變成英文。關掉之後 ls、mv 這類字不用按 Shift，但快打容易誤觸。"
         public static let englishKeyOrder = "依按鍵順序判斷英文"
-        public static let englishKeyOrderNote = "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。"
+        public static let englishKeyOrderNote = "打了聲調鍵才發現音節不存在時，整段變成英文（馬上按 Esc 變回注音）。"
         /// The toggle after it and its line (zhen-revert section 3).
         public static let englishOverwrite = "重打同一個位置算英文"
         public static let englishOverwriteNote = "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。"

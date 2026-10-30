@@ -39,6 +39,9 @@ public final class SettingsModel: ObservableObject {
     /// that makes a syllable the lexicon lacks, revert to English. Enabled on the overwrite choice's condition.
     @Published public private(set) var englishKeyOrder = true
     @Published public private(set) var englishKeyOrderEnabled = false
+    /// The 快打時鍵序顛倒不當英文 choice (zhen-reapply section 1.2, default true): while on, a key out of column order is never English.
+    @Published public private(set) var englishReversalGuard = true
+    @Published public private(set) var englishReversalGuardEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).
     @Published public private(set) var spacing = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
@@ -107,6 +110,8 @@ public final class SettingsModel: ObservableObject {
         englishOverwriteEnabled = shell.englishOverwriteEnabled
         englishKeyOrder = shell.englishKeyOrderOn
         englishKeyOrderEnabled = shell.englishKeyOrderEnabled
+        englishReversalGuard = shell.englishReversalGuardOn
+        englishReversalGuardEnabled = shell.englishReversalGuardEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
@@ -143,6 +148,7 @@ public final class SettingsModel: ObservableObject {
     }
     public func setEnglishOverwrite(_ on: Bool) { shell.applyEnglishOverwrite(on) }
     public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
+    public func setEnglishReversalGuard(_ on: Bool) { shell.applyEnglishReversalGuard(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }

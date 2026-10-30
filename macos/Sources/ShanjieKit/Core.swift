@@ -173,6 +173,13 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
     }
 
+    /// zhen-reapply: whether a Zhuyin key in a column before a filled one is never English (trigger (b) off; the core's default is true);
+    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishReversalGuard(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_reversal_guard(handle, on ? 1 : 0, &out), out)
+    }
+
     /// shift-toggle: the ASCII state of the app the shell is serving (the core's default is off). In it a printable character key goes on the
     /// English run as typed; returns the snapshot (the unfinished syllable has become the run). Sent on activate, owner change and toggle.
     func setAscii(_ on: Bool) -> CoreResult {

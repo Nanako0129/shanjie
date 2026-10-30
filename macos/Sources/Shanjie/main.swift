@@ -95,6 +95,11 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "englishOverwrite") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishOverwrite") }
     }
+    /// The 快打時鍵序顛倒不當英文 choice (docs/contracts/zhen-reapply.md section 1.2), key `englishReversalGuard`; absent means true.
+    var englishReversalGuard: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishReversalGuard") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishReversalGuard") }
+    }
     /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means true (zhen-revert).
     var englishKeyOrder: Bool? {
         get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }

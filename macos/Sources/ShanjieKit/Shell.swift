@@ -185,6 +185,9 @@ public protocol EnglishStore: AnyObject {
     /// The choice next to it (docs/contracts/zhen-keyorder.md section 3, default changed by zhen-revert): keys out of Zhuyin's column order,
     /// and a tone key that makes a syllable the lexicon lacks, are English. `nil` means never chosen, which is true.
     var englishKeyOrder: Bool? { get set }
+    /// The choice before it (docs/contracts/zhen-reapply.md section 1.2): a key in a column before a filled one is never English, so a
+    /// hurried reversal stays Zhuyin. `nil` means never chosen, which is true.
+    var englishReversalGuard: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
@@ -193,10 +196,12 @@ public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
     public var englishOverwrite: Bool?
     public var englishKeyOrder: Bool?
-    public init(_ english: Bool? = nil, overwrite: Bool? = nil, keyOrder: Bool? = nil) {
+    public var englishReversalGuard: Bool?
+    public init(_ english: Bool? = nil, overwrite: Bool? = nil, keyOrder: Bool? = nil, reversalGuard: Bool? = nil) {
         self.english = english
         self.englishOverwrite = overwrite
         self.englishKeyOrder = keyOrder
+        self.englishReversalGuard = reversalGuard
     }
 }
 
@@ -499,6 +504,9 @@ public final class Shell {
     /// syllable the lexicon lacks, are English (default true: `UserDefaults` key `englishKeyOrder`, absent is true, a saved false stays
     /// false); sent to every engine `build()` makes. Only matters while `englishOn`.
     private(set) var englishKeyOrderOn = true
+    /// zhen-reapply section 1.2: whether a key in a column before a filled one is never English (default true: `UserDefaults` key
+    /// `englishReversalGuard`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishReversalGuardOn = true
     private let fuzzyStore: FuzzyStore
     /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
     /// `build()` makes. Only the bits the core knows are kept.
@@ -618,6 +626,8 @@ public final class Shell {
     var englishOverwriteEnabled: Bool { englishEnabled && englishOn }
     /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the overwrite choice.
     var englishKeyOrderEnabled: Bool { englishOverwriteEnabled }
+    /// The 快打時鍵序顛倒不當英文 choice is greyed on the same condition.
+    var englishReversalGuardEnabled: Bool { englishOverwriteEnabled }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -762,6 +772,7 @@ public final class Shell {
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
         englishOverwriteOn = englishStore.englishOverwrite ?? true
         englishKeyOrderOn = englishStore.englishKeyOrder ?? true // zhen-revert: was false; a saved false stays false
+        englishReversalGuardOn = englishStore.englishReversalGuard ?? true
         self.fuzzyStore = fuzzyStore
         fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
@@ -840,6 +851,10 @@ public final class Shell {
 
     func applyEnglishKeyOrder(_ on: Bool) {
         if let o = owner { o.applyEnglishKeyOrder(on) } else { dropOnFailure(setEnglishKeyOrder(on)) }
+    }
+
+    func applyEnglishReversalGuard(_ on: Bool) {
+        if let o = owner { o.applyEnglishReversalGuard(on) } else { dropOnFailure(setEnglishReversalGuard(on)) }
     }
 
     func applyRerank(_ on: Bool) {
@@ -982,6 +997,15 @@ public final class Shell {
         englishStore.englishKeyOrder = on
         defer { changed() }
         return engine?.setEnglishKeyOrder(on)
+    }
+
+    /// The settings window's 快打時鍵序顛倒不當英文 choice (zhen-reapply section 1.2): stored, and sent to the engine; the snapshot is for
+    /// the caller to show (nothing on screen changes).
+    func setEnglishReversalGuard(_ on: Bool) -> CoreResult? {
+        englishReversalGuardOn = on
+        englishStore.englishReversalGuard = on
+        defer { changed() }
+        return engine?.setEnglishReversalGuard(on)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -1195,6 +1219,10 @@ public final class Shell {
         // And the key-order choice (zhen-keyorder section 3), every time.
         if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
             Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
+        }
+        // And the reversal guard (zhen-reapply section 1.2), every time.
+        if case .failed(let c) = e.setEnglishReversalGuard(englishReversalGuardOn) {
+            Log.shell.error("shanjie_engine_set_english_reversal_guard failed, code \(c)")
         }
         // And the 模糊輸入 flags (fuzzy-input section 2.2), every time: the core's default is 0.
         fuzzySent.append(fuzzyFlags)
@@ -1520,6 +1548,15 @@ public final class Session {
     /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (it is what was on screen).
     func applyEnglishKeyOrder(_ on: Bool) {
         switch shell.setEnglishKeyOrder(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 快打時鍵序顛倒不當英文 choice: the snapshot is shown, if this session owns the composition.
+    func applyEnglishReversalGuard(_ on: Bool) {
+        switch shell.setEnglishReversalGuard(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
