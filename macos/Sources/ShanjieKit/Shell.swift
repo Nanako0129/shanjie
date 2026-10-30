@@ -408,11 +408,16 @@ public final class Shell {
         var count = 0
         var inZhuyin = false
         for u in preedit.unicodeScalars {
-            let zhuyin = (0x3105...0x3129).contains(u.value) || [0x02CA, 0x02C7, 0x02CB, 0x02D9].contains(u.value)
+            let zhuyin: Bool
+            switch u.value {
+            case 0x3105...0x3129, 0x02CA, 0x02C7, 0x02CB, 0x02D9: zhuyin = true
+            default: zhuyin = false
+            }
             if !zhuyin || !inZhuyin { count += 1 }
+            if count > 1 { return false }
             inZhuyin = zhuyin
         }
-        return count <= 1
+        return true
     }
 
     /// The one place the profile is decided (profile-choice section 2.2). `auto`: no bundle ID is formal, as before; then the
@@ -1571,7 +1576,7 @@ public final class Session {
     /// browser-first-syllable sections 1 and 4: a passive prediction row for the first syllable, in a browser, is not shown.
     private func hidesFirstSyllableRow(_ o: CoreOutput) -> Bool {
         o.selected == -1 && !o.candidates.isEmpty && shell.browserFirstSyllableOn && !shell.abbreviationOn
-            && Shell.singleSyllable(o.preedit) && bundle.map(Shell.browserApps.contains) == true
+            && bundle.map(Shell.browserApps.contains) == true && Shell.singleSyllable(o.preedit)
     }
 
     /// Section 7 and zhen-inline section 1.3f: the preedit with a single underline, and a thick one over the open English run

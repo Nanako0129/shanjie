@@ -111,7 +111,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let prediction = "即時預測"
         /// The browser toggle under 即時預測 in the settings window and the line under it (browser-first-syllable section 3).
         public static let browserFirstSyllable = "在瀏覽器裡，第一個字不顯示預測"
-        public static let browserFirstSyllableNote = "Google 文件等網頁在打第一個字時，Chrome、Edge 等瀏覽器回給輸入法的位置是錯的，預測列會跑到視窗左上角。"
+        public static let browserFirstSyllableNote = "在 Chrome 編輯 Google 文件時，第一個字回給輸入法的位置是錯的，預測列會跑到視窗左上角。Edge、Brave 等 Chromium 瀏覽器也一起套用。"
         public static let english = "中英混打（實驗）"
         /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
         public static let englishDigitsNote = "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。"

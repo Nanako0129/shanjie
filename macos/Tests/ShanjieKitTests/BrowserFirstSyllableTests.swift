@@ -36,8 +36,7 @@ final class BrowserFirstSyllableTests: XCTestCase {
     /// (b) Outside the list nothing changes; (c) the switch off is the same.
     func testOtherAppsAndTheSwitchOffKeepTheRow() {
         let textEdit = visibility(bundle: "com.apple.TextEdit")
-        XCTAssertEqual(textEdit[0], true, "ㄋ alone has a row in a text view")
-        XCTAssertEqual(textEdit[3], true)
+        XCTAssertEqual(textEdit, [true, true, true, true], "every key has a row in a text view")
         XCTAssertEqual(visibility(bundle: chrome, shell: makeShell(MemoryPredictionStore(browserFirstSyllable: false))), textEdit)
     }
 
