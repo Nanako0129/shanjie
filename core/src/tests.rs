@@ -118,8 +118,10 @@ fn forms_apply_order_and_reading_condition() {
     assert_eq!(f.apply("濕", &v(&["ㄕ˙"])), "溼");
     assert_eq!(f.apply("濕a", &v(&["ㄕ"])), "濕a");
     assert_eq!(f.apply("溼地a", &v(&["ㄕ"])), "濕地a");
+    // the skip is reported by `apply_checked`, which is where the CLI's count comes from
+    assert!(f.apply_checked("濕", &v(&["ㄕ"])).1 && !f.apply_checked("濕a", &v(&["ㄕ"])).1);
     // malformed, duplicate or multi-character `char` lines are errors carrying only the line number
-    for bad in ["word\t甲\n", "char\t濕\t溼\n", "char\t濕濕\t溼\tㄕ\n", "char\t濕\t溼\t\n", "other\ta\tb\n", "word\ta\tb\nword\ta\tc\n", "char\t濕\t溼\tㄕ\nchar\t濕\t沉\tㄕ\n"] {
+    for bad in ["word\t甲\n", "char\t濕\t溼\n", "char\t濕濕\t溼\tㄕ\n", "char\t濕\t溼\t\n", "other\ta\tb\n", "word\ta\tb\nword\ta\tc\n", "word\t甲乙\t丙\n", "char\t濕\t溼\tㄕ\nchar\t濕\t沉\tㄕ\n"] {
         assert!(matches!(Forms::parse(bad), Err(Error::BadForms { .. })), "{bad:?}");
     }
 }

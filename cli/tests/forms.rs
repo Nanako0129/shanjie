@@ -7,6 +7,26 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// A scratch directory removed on drop, so a failed assert leaves nothing behind either.
+struct Tmp(PathBuf);
+
+impl Tmp {
+    fn new(name: &str) -> Tmp {
+        let d = std::env::temp_dir().join(format!("shanjie-cli-forms-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        Tmp(d)
+    }
+    fn file(&self, f: &str) -> String {
+        self.0.join(f).to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for Tmp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn run(args: &[&str], env: &[(&str, &str)]) -> Output {
     let lm = root().join("data/lm/bigram.sjlm");
     assert!(lm.exists(), "data/lm/bigram.sjlm is needed: see tests/golden.rs");
@@ -18,37 +38,53 @@ fn run(args: &[&str], env: &[(&str, &str)]) -> Output {
         .unwrap()
 }
 
-fn oks(file: &Path) -> Vec<u8> {
+fn oks(file: &str) -> Vec<u8> {
     std::fs::read_to_string(file).unwrap().lines().map(|l| l.split('\t').nth(1).unwrap().parse().unwrap()).collect()
+}
+
+fn stderr(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stderr).into_owned()
 }
 
 /// 潮濕 and 潮溼 read the same; the decoder gives one spelling, so with both as gold exactly one row is a miss for the current
 /// score, and the forms score takes both (the single-character pair 濕→溼 at the syllable ㄕ).
 #[test]
 fn forms_score_accepts_the_other_spelling_and_the_current_score_does_not() {
-    let dir = std::env::temp_dir().join(format!("shanjie-cli-forms-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let (rows, rs, frs) = (dir.join("rows.txt"), dir.join("rs.tsv"), dir.join("frs.tsv"));
+    let t = Tmp::new("score");
+    let (rows, rs, frs) = (t.file("rows.txt"), t.file("rs.tsv"), t.file("frs.tsv"));
     std::fs::write(&rows, "|潮濕|ㄔㄠˊ ㄕ\n|潮溼|ㄔㄠˊ ㄕ\n").unwrap();
-    let o = run(&["--rows", rows.to_str().unwrap(), "--rowstats", rs.to_str().unwrap(), "--forms-rowstats", frs.to_str().unwrap()], &[]);
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let o = run(&["--rows", &rows, "--rowstats", &rs, "--forms-rowstats", &frs], &[]);
+    assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(oks(&rs).iter().map(|&x| x as u32).sum::<u32>(), 1, "current score: one of the two spellings");
     assert_eq!(oks(&frs), vec![1, 1], "forms score: both");
-    assert!(String::from_utf8_lossy(&o.stderr).contains("forms: 0 rows"));
-    std::fs::remove_dir_all(dir).unwrap();
+    assert!(stderr(&o).contains("forms: 0 rows"));
 }
 
-/// Without the flag the table is neither read nor checked; with it a missing table is an error and nothing is written to stdout.
+/// The stderr count is the rows whose single-character step was skipped: here the gold has 2 characters for 1 syllable.
 #[test]
-fn forms_table_is_read_only_with_the_flag() {
-    let rows = std::env::temp_dir().join(format!("shanjie-cli-forms-rows-{}.txt", std::process::id()));
+fn rows_without_the_single_character_step_are_counted() {
+    let t = Tmp::new("count");
+    let (rows, frs) = (t.file("rows.txt"), t.file("frs.tsv"));
+    std::fs::write(&rows, "|A好|ㄏㄠˇ\n|好|ㄏㄠˇ\n").unwrap();
+    let o = run(&["--rows", &rows, "--forms-rowstats", &frs], &[]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("forms: 1 rows"), "{}", stderr(&o));
+}
+
+/// Without the flag the table is neither read nor checked; with it a missing table is an error, nothing is written to stdout,
+/// and an existing --rowstats file is left as it was (the table is loaded before any output file is created).
+#[test]
+fn forms_table_is_read_only_with_the_flag_and_before_any_output_file() {
+    let t = Tmp::new("flag");
+    let (rows, rs, frs) = (t.file("rows.txt"), t.file("rs.tsv"), t.file("frs.tsv"));
     std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n").unwrap();
+    std::fs::write(&rs, "keep\n").unwrap();
     let missing = [("SHANJIE_FORMS", "/nonexistent/forms.tsv")];
-    let ok = run(&["--rows", rows.to_str().unwrap()], &missing);
-    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
-    let out = std::env::temp_dir().join(format!("shanjie-cli-forms-out-{}.tsv", std::process::id()));
-    let bad = run(&["--rows", rows.to_str().unwrap(), "--forms-rowstats", out.to_str().unwrap()], &missing);
+    let ok = run(&["--rows", &rows], &missing);
+    assert!(ok.status.success(), "{}", stderr(&ok));
+    let bad = run(&["--rows", &rows, "--rowstats", &rs, "--forms-rowstats", &frs], &missing);
     assert!(!bad.status.success() && bad.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&bad.stderr).contains("forms table"));
-    std::fs::remove_file(rows).unwrap();
+    assert!(stderr(&bad).contains("forms table"));
+    assert_eq!(std::fs::read_to_string(&rs).unwrap(), "keep\n");
+    assert!(!Path::new(&frs).exists());
 }

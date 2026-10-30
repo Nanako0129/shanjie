@@ -198,6 +198,9 @@ struct RowOut {
     rerank: Option<Duration>,
     /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
     first: String,
+    /// `--forms-rowstats`: the forms verdict of the row, and whether the single-character step was skipped on either side.
+    forms_ok: bool,
+    forms_no_char_step: bool,
     scores: String,
     dump: String,
     words: String,
@@ -393,6 +396,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         _ => return Err("need exactly one of --dev, --rows, --set holdout".into()),
     };
     let name = name.unwrap_or(default_name);
+    // docs/contracts/forms-score.md: the table is read only when the flag is given, and before any output file is created, so
+    // a bad table never empties an existing --rowstats or other file.
+    let forms = match &forms_rowstats {
+        Some(_) => Some(load_forms()?),
+        None => None,
+    };
     let mut dump = match dump {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
@@ -404,11 +413,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // Opened before decoding, like the dump: an unwritable path fails now, not after a whole (holdout) run.
     let rowstats = match rowstats {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
-        None => None,
-    };
-    // docs/contracts/forms-score.md: the table is read, and the file opened, only when the flag is given.
-    let forms = match &forms_rowstats {
-        Some(_) => Some(load_forms()?),
         None => None,
     };
     let forms_rowstats = match forms_rowstats {
@@ -494,7 +498,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(&used, &top, lex.manual()), idx)?;
             }
         }
-        out.ok = len.apply(&surf[chosen]) == t;
+        let pick = len.apply(&surf[chosen]);
+        out.ok = pick == t;
+        if let Some(fm) = &forms {
+            // Lenient first, then the forms table (the contract's fixed order); both sides use the row's own reading.
+            let ((p, p_ran), (g, g_ran)) = (fm.apply_checked(&pick, syls), fm.apply_checked(&t, syls));
+            out.forms_ok = p == g;
+            out.forms_no_char_step = !(p_ran && g_ran);
+        }
         out.in64 = surf.iter().any(|s| len.apply(s) == t);
         if want_dump {
             for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
@@ -528,11 +539,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         if let Some(d) = dump_words.as_mut() {
             d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
         }
-        if let Some(fm) = &forms {
-            // Same row, same reading for both sides; Lenient first, then the forms table (the contract's fixed order).
-            let (gold, syls) = (&rows[i].0, &rows[i].1);
-            no_char_step += (gold.chars().count() != syls.len()) as usize;
-            frs.push((fm.apply(&len.apply(&out.first), syls) == fm.apply(&len.apply(gold), syls), out.first.clone(), gold.clone()));
+        if forms.is_some() {
+            no_char_step += out.forms_no_char_step as usize;
+            frs.push((out.forms_ok, out.first.clone(), rows[i].0.clone()));
         }
         rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
         firsts.push(out.first);

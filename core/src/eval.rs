@@ -77,21 +77,27 @@ impl Lenient {
 
     pub fn apply(&self, s: &str) -> String {
         let cs: Vec<char> = char_map(s).chars().collect();
-        let (mut out, mut i) = (String::new(), 0);
-        'outer: while i < cs.len() {
-            for n in (1..=self.longest.min(cs.len() - i)).rev() {
-                let key: String = cs[i..i + n].iter().collect();
-                if let Some(c) = self.table.get(&key) {
-                    out.push_str(c);
-                    i += n;
-                    continue 'outer;
-                }
-            }
-            out.push(cs[i]);
-            i += 1;
-        }
-        out
+        replace_longest(&self.table, self.longest, &cs).into_iter().collect()
     }
+}
+
+/// Greedy left-to-right longest match over `table` (keys up to `longest` chars), replacing each match with its value; the one
+/// routine of `Lenient::apply` and `Forms::apply_checked`.
+fn replace_longest(table: &HashMap<String, String>, longest: usize, cs: &[char]) -> Vec<char> {
+    let (mut out, mut i) = (Vec::new(), 0);
+    'outer: while i < cs.len() {
+        for n in (1..=longest.min(cs.len() - i)).rev() {
+            let key: String = cs[i..i + n].iter().collect();
+            if let Some(c) = table.get(&key) {
+                out.extend(c.chars());
+                i += n;
+                continue 'outer;
+            }
+        }
+        out.push(cs[i]);
+        i += 1;
+    }
+    out
 }
 
 /// The forms score's table (docs/contracts/forms-score.md): dictionary-attested spellings, loaded only for `--forms-rowstats`
@@ -114,7 +120,7 @@ impl Forms {
             let bad = Error::BadForms { line: i + 1 };
             let f: Vec<&str> = line.split('\t').collect();
             match f.as_slice() {
-                ["word", v, c] if !v.is_empty() && !c.is_empty() => {
+                ["word", v, c] if !v.is_empty() && v.chars().count() == c.chars().count() => {
                     if words.insert(v.to_string(), c.to_string()).is_some() {
                         return Err(bad);
                     }
@@ -134,23 +140,6 @@ impl Forms {
         Ok(Forms { words, longest, chars })
     }
 
-    fn apply_words(&self, cs: &[char]) -> Vec<char> {
-        let (mut out, mut i) = (Vec::new(), 0);
-        'outer: while i < cs.len() {
-            for n in (1..=self.longest.min(cs.len() - i)).rev() {
-                let key: String = cs[i..i + n].iter().collect();
-                if let Some(c) = self.words.get(&key) {
-                    out.extend(c.chars());
-                    i += n;
-                    continue 'outer;
-                }
-            }
-            out.push(cs[i]);
-            i += 1;
-        }
-        out
-    }
-
     fn apply_chars(&self, cs: &[char], syls: &[String]) -> Vec<char> {
         cs.iter()
             .zip(syls)
@@ -164,9 +153,15 @@ impl Forms {
     /// `s` is already `Lenient::apply`'d. `syls` is the row's reading; when its length differs from `s`'s the single-character
     /// step is skipped (the word pairs still apply).
     pub fn apply(&self, s: &str, syls: &[String]) -> String {
-        let cs = self.apply_words(&s.chars().collect::<Vec<_>>());
-        let cs = if cs.len() == syls.len() { self.apply_chars(&cs, syls) } else { cs };
-        cs.into_iter().collect()
+        self.apply_checked(s, syls).0
+    }
+
+    /// `apply`, and whether the single-character step ran (it is skipped when the syllable count differs from the length).
+    pub fn apply_checked(&self, s: &str, syls: &[String]) -> (String, bool) {
+        let cs = replace_longest(&self.words, self.longest, &s.chars().collect::<Vec<_>>());
+        let ran = cs.len() == syls.len();
+        let cs = if ran { self.apply_chars(&cs, syls) } else { cs };
+        (cs.into_iter().collect(), ran)
     }
 }
 
