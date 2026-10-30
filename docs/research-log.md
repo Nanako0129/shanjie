@@ -10606,3 +10606,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 
 - 維護者截圖「另外修正一個問題，設定頁不要隨著內容漲高」，「長高」出成「漲高」。加成 `另外修正一個問題，|設定頁不要隨著內容長高|…`；讀音由 `tools/readings.py` 產生（沒有 CHECK），「長」照維護者的打法改用 ㄓㄤˇ（工具給 ㄔㄤˊ；和第 166、168 列同樣處理）。
 - golden 兩行重產：n 170；n-gram 第一名聊天 98 → 98（這一列在聊天設定錯）、書面 106 → 107（書面設定對）。
+
+## 2026-10-30：設定視窗固定大小
+
+- 維護者要求設定頁不要隨著內容長高、固定在舒適的大小、但不寫死以免小解析度超出邊界。契約 `docs/contracts/settings-fixed-size.md`（plan-verifier READY）。
+- 改了：視窗 frame 高度＝ min(`SettingsLayout.preferredHeight` 620 pt, 螢幕 `visibleFrame` 高度)，純函式在 `macos/Sources/ShanjieKit/SettingsLayout.swift`；`SettingsWindow.swift` 的 `fit()` 不再用隱藏的 `NSHostingView` 量各頁，拿掉 `measureSlack` 與 `onRowCountChange`；螢幕參數改變時的重算與夾回、打開時置中不變。`settings-sidebar.md` §2.2、§3、`profile-choice.md` §2.4、`docs/PLAN.md` 已加〔2026-10-30〕註記。
+- 測試：新增 `SettingsLayoutTests`（900 → 620、500 → 500、620 → 620）。620 是挑的值、不是量的，維護者實機確認尚未做（契約預算最多調 3 輪）。

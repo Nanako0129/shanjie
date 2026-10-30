@@ -55,37 +55,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.close()
     }
 
-    /// Measured page heights come out this much short of what the window draws: a 10-toggle grouped form measured 435 pt
-    /// in a window and was drawn 438 pt tall (/code-review probe, 2026-10-15). Without it the tallest page would scroll.
-    private static let measureSlack: CGFloat = 4
-
-    /// Sizes the window (settings-sidebar section 2.2): the tallest page plus the title bar, at most the usable height of
-    /// `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Each page is measured
-    /// with a vertical fixedSize in a hidden hosting view attached to the window: the window shows only the selected page, the
-    /// on-screen form has no fixedSize so it can scroll when the cap bites, and a hosting view outside any window measured
-    /// about 4.5 pt per row too tall (/code-review probe). Every page is rebuilt on every fit; that happens only on
-    /// show, an app-list change and a screen change, so it is not cached. With `.fullSizeContentView` the content rect is the
-    /// whole frame, so this height is the frame's.
+    /// Sizes the window (settings-fixed-size.md): one fixed height, `SettingsLayout.frameHeight`, clamped to the usable
+    /// height of `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Nothing
+    /// is measured: pages taller than the window scroll. With `.fullSizeContentView` the content rect is the whole frame,
+    /// so this height is the frame's.
     private func fit(_ w: NSWindow, on screen: NSScreen?) {
-        guard let model, let container = w.contentView else { return }
-        let tallest = SettingsPage.allCases.map { page in
-            let probe = NSHostingView(rootView: SettingsPageForm(page: page, model: model, appLabels: appLabels)
-                .fixedSize(horizontal: false, vertical: true))
-            probe.isHidden = true
-            container.addSubview(probe)
-            defer { probe.removeFromSuperview() }
-            return probe.fittingSize.height
-        }.max() ?? 0
-        let cap = screen?.visibleFrame.height ?? .greatestFiniteMagnitude
         let top = w.frame.maxY
-        w.setContentSize(NSSize(width: SettingsForm.width, height: min(tallest + Self.measureSlack + Self.titleBarHeight, cap)))
+        let visible = screen?.visibleFrame.height ?? .greatestFiniteMagnitude
+        w.setContentSize(NSSize(width: SettingsForm.width, height: SettingsLayout.frameHeight(visibleHeight: visible)))
         w.setFrameTopLeftPoint(NSPoint(x: w.frame.minX, y: top))
     }
 
-    /// The 個別設定的 App list changed length (profile-choice section 2.4) or the screen changed, while the window is open.
-    /// The app-list call comes one main-actor turn after SwiftUI's onChange, so the window is not resized in the middle of
-    /// SwiftUI's update. The window grows downward from its top edge, so it is clamped back into its screen's usable area
-    /// (settings-sidebar section 2.2): a window dragged down to the Dock moves up instead of growing under it.
+    /// The screen changed (Dock, resolution, text size, display removed) while the window is open: recompute the height,
+    /// then clamp the frame back into the screen's usable area (settings-sidebar section 2.2), so a window dragged down
+    /// to the Dock moves up instead of sitting under it.
     private func refit() {
         guard let window, window.isVisible else { return }
         let screen = window.screen ?? NSScreen.main
@@ -119,11 +102,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         glass.material = Self.backgroundMaterial
         glass.blendingMode = .behindWindow
         glass.state = .active
-        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels, onRowCountChange: { [weak self] in
-            Task { @MainActor in self?.refit() }
-        }))
+        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels))
         host.safeAreaRegions = []  // placed below the title bar by its top constraint, so no second inset
-        host.sizingOptions = []  // the window's size comes from fit() alone (settings-sidebar section 2.2), not the content's
+        host.sizingOptions = []  // the window's size comes from fit() alone (settings-fixed-size.md), not the content's
         let container = NSView()
         let layers: [(NSView, CGFloat)] = [(glass, 0), (host, Self.titleBarHeight)]
         for (v, top) in layers {
@@ -209,8 +190,6 @@ struct SettingsForm: View {
     static var width: CGFloat { sidebarWidth + SettingsPageForm.formWidth }
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
-    /// The 個別設定的 App list changed length: the window refits its height.
-    let onRowCountChange: () -> Void
     @State private var page: SettingsPage = .general
 
     var body: some View {
@@ -229,12 +208,11 @@ struct SettingsForm: View {
             SettingsPageForm(page: page, model: model, appLabels: appLabels)
                 .id(page)
         }
-        .onChange(of: model.appProfiles.count) { onRowCountChange() }
     }
 }
 
 /// One page's controls, system controls only; each control writes through `SettingsModel`. The sections are the single
-/// form's (settings-window section 2.2), grouped by page; `fit()` measures each page on its own.
+/// form's (settings-window section 2.2), grouped by page.
 struct SettingsPageForm: View {
     /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
     static let formWidth: CGFloat = 420
