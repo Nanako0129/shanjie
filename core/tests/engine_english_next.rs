@@ -249,20 +249,18 @@ fn decoding_is_the_same_with_and_without_the_table() {
     assert_ne!(with.iter().map(|o| o.candidates.clone()).collect::<Vec<_>>(), without.iter().map(|o| o.candidates.clone()).collect::<Vec<_>>());
 }
 
-/// zhen-inline 1.3: typed in lower case, j o e does not become a token, whatever the word list holds (no key overwrites a symbol, and
-/// ㄍㄨㄟ is a syllable), so the first test's token needs Shift.
+/// zhen-revert section 2.3: typed in lower case, j o e is not Chinese either: `e` (ㄍ) is in a column before the one `o` (ㄟ) holds, so it
+/// reverts (b) to the raw keys, and Space makes the token `joe` (no word list is read). Zhen-inline 1.3 kept it as Zhuyin, and the
+/// first test's token needed Shift.
 #[test]
-fn lower_case_joe_is_not_kept() {
-    let list = std::env::temp_dir().join(format!("shanjie-english-next-list-{}.txt", std::process::id()));
-    std::fs::write(&list, "joe\n").unwrap();
+fn lower_case_joe_reverts_to_the_keys() {
     let mut e = make(true, false);
-    e.load_english(&list).unwrap();
-    std::fs::remove_file(&list).unwrap();
-    for t in "j o e _ g".split_whitespace() {
+    for t in "j o e".split_whitespace() {
         e.key(key_of(t)).unwrap();
-        assert!(!e.english_autokept());
     }
-    assert!(!e.digits_syls().iter().any(|s| s.starts_with("_punct_")));
+    assert_eq!(e.english_reverted(), Some(core::engine::Revert::Order));
+    e.key(key_of("_")).unwrap();
+    assert_eq!(e.digits_syls(), ["_punct_joe"]);
 }
 
 // ---------- context-return: the English word the app's text ends with (docs/contracts/context-return.md sections 2 and 4) ----------

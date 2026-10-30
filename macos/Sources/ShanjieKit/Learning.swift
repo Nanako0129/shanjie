@@ -114,14 +114,13 @@ public struct MenuEntry: Equatable, Sendable {
         public static let browserFirstSyllableNote = "在 Chrome 編輯 Google 文件時，第一個字回給輸入法的位置是錯的，預測列會跑到視窗左上角。Edge、Brave 等 Chromium 瀏覽器也一起套用。"
         public static let english = "中英混打（實驗）"
         /// The line under that toggle in the settings window (docs/contracts/digits.md A.3.7).
-        public static let englishDigitsNote = "打英文不用切換輸入法；數字列的鍵也會打出數字（例如 2026年、3.14），由前文判斷是數字還是注音。"
-        /// The choice under it in the settings window (zhen-inline section 2): the label and its two values.
-        public static let englishDisplay = "英文的顯示"
-        public static let englishDisplayTyped = "打字時就顯示"
-        public static let englishDisplaySpace = "按空白才顯示"
-        /// The toggle under the display choice and the line under it (docs/contracts/zhen-keyorder.md section 3).
+        public static let englishDigitsNote = "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。"
+        /// The toggle under it and the line under that (docs/contracts/zhen-keyorder.md section 3, zhen-revert section 3).
         public static let englishKeyOrder = "依按鍵順序判斷英文"
-        public static let englishKeyOrderNote = "ok、ls、cup 這類短詞不用按 Shift。開了之後，用重打同一個位置來改錯的注音，比較容易被當成英文。"
+        public static let englishKeyOrderNote = "ls、pr、a4 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。"
+        /// The toggle after it and its line (zhen-revert section 3).
+        public static let englishOverwrite = "重打同一個位置算英文"
+        public static let englishOverwriteNote = "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。"
         /// The spacing toggle in the settings window and the line under it (docs/contracts/cjk-spacing.md section 2).
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"

@@ -71,7 +71,7 @@ final class SelftestTests: XCTestCase {
     }
 
     /// zhen-mixed section 3.2: the word list ships in the bundle and the switch can be turned on, so a bundle without it, with a list
-    /// the core refuses, or with one where `rust` Space opens no English window must fail the selftest.
+    /// the core refuses must fail the selftest (the engine no longer reads the list: zhen-revert section 2.8, PR 1; the list goes in PR 2).
     func testFailsWithoutTheEnglishList() throws {
         let res = try XCTUnwrap(TestData.resources(only: Set(TestData.files.map(\.name)).subtracting(["english-words.txt"])))
         try TestData.addBundledPack(to: res)
@@ -82,13 +82,6 @@ final class SelftestTests: XCTestCase {
         let res = try XCTUnwrap(TestData.resources())
         try TestData.addBundledPack(to: res)
         try "AB\n".write(to: res.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
-        XCTAssertNotEqual(Selftest.run(resources: res), 0)
-    }
-
-    func testFailsWhenTheEnglishWindowDoesNotOpen() throws {
-        let res = try XCTUnwrap(TestData.resources())
-        try TestData.addBundledPack(to: res)
-        try "google\nhello\n".write(to: res.appendingPathComponent("english-words.txt"), atomically: true, encoding: .utf8)
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 

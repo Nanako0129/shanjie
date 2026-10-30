@@ -583,30 +583,32 @@ fn auto_commit_voids_the_job() {
     assert!(e.take_rerank_job().is_none(), "no job after the prediction pick's commit");
 }
 
-/// zhen-inline section 1.0: choosing an English item inserts a token, and every insertion is a new decode (`refresh` renews the
-/// generation), so a job taken before it applies to nothing; closing the window with Esc changes nothing, and the same job still
-/// applies.
+/// zhen-inline section 1.0 as zhen-revert section 2.5 keeps it: the space that ends an English run inserts a token, and every insertion
+/// is a new decode (`refresh` renews the generation), so a job taken before it applies to nothing; the keys that only open and fill the
+/// run (the revert at the end of the composition decodes nothing) change nothing, and the same job still applies.
 #[test]
 fn english_token_voids_the_job() {
     let list = root().join("eval/golden/english-tiny.txt");
-    let after = |last: &str| {
+    let after = |end_with_space: bool| {
         let mut e = engine();
         e.load_english(&list).unwrap();
         e.set_english(true).unwrap();
         type_syls(&mut e, &row(12));
         let result = e.take_rerank_job().expect("a job").run();
+        let mut o = None;
         for c in ['r', 'u', 's', 't'] {
-            e.key(Key::ch(c, 0)).unwrap();
+            o = Some(e.key(Key::ch(c, 0)).unwrap());
         }
-        e.key(k(KeyKind::Space)).unwrap();
-        assert!(e.english_open(), "premise: the window is open");
-        let key = if last == "1" { Key::ch('1', 0) } else { k(KeyKind::Esc) };
-        let o = e.key(key).unwrap();
+        let mut o = o.unwrap();
+        assert!(o.english_run_utf16_len == 4, "premise: the run `rust` is open and no token yet");
+        if end_with_space {
+            o = e.key(k(KeyKind::Space)).unwrap();
+        }
         assert!(o.commit.is_empty(), "nothing is sent either way");
         (e.apply_rerank(result).unwrap().is_some(), o.preedit.ends_with("rust"))
     };
-    assert!(after("1") == (false, true), "the token voided the job");
-    assert!(after("Esc") == (true, false), "control: Esc keeps the job");
+    assert!(after(true) == (false, true), "the token voided the job");
+    assert!(after(false) == (true, true), "control: the open run decodes nothing, the same job still applies");
 }
 
 /// Section 2.2: with the demotion table off there are no jobs (alpha and tau hold only with it on).

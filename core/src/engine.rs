@@ -200,15 +200,14 @@ pub const PREDICT_MAX: usize = PAGE_SIZE;
 /// `PREDICT_MAX` only, so with an empty learner the row is the slice-1 row bit for bit. The added time of 27 over 9
 /// is only measured as part of the whole row with a 50,000-record store (research log 2026-10-08), not by itself.
 pub const PREDICT_SCAN: usize = 27;
-/// zhen-mixed section 2.2: the shadow holds at most this many keys; the next one empties it.
-pub const SHADOW_MAX: usize = 32;
-/// zhen-keyorder section 2.2: the two-letter words the key-order switch can open the English window for (the word list holds
-/// three letters and more). Each is `[a-z]{2}`, and each can be typed with a replacement or out of column order (a word typed in
-/// order with no replacement, like `rm`, `cp`, `ui`, `go`, `ci`, can never have evidence, so it is not here). A removal needs the
-/// measurement of section 4; an addition is a new slice.
-pub const TWO_LETTER: &[&str] = &[
-    "ok", "ls", "cd", "mv", "ip", "id", "ux", "js", "ts", "py", "vs", "pr", "os", "tv", "pc", "db", "qa", "pm", "hr",
-];
+/// Most characters an English run holds (zhen-inline section 1.3b); the next one ends the run and starts another.
+pub const ENGLISH_RUN_MAX: usize = 32;
+/// zhen-revert section 2.6: the short words that can be typed in column order and whose one-tone syllable is in the lexicon, so no
+/// trigger ever reverts them; the candidate list adds their lower and upper case at its end. Each was checked with `Lexicon::entries`
+/// (test `english_short_is_as_documented`). `go`, `cp`, `so`, `to`, `do`, `hi`, `am`, `zi` and `cup` are not here: their syllable is
+/// missing, so the space key reverts them.
+pub const ENGLISH_SHORT: &[&str] = &["ai", "ui", "up", "co", "hp", "jp", "mp", "mp3", "np", "rm", "xl"];
+
 /// zhen-mixed section 2.6: the word list's limits (bytes, lines) and its word length range.
 const ENGLISH_MAX_BYTES: u64 = 4 << 20;
 const ENGLISH_MAX_LINES: usize = 200_000;
@@ -316,6 +315,17 @@ impl Layout {
         let i = TONE_MARKS[1..].iter().position(|m| m.chars().next() == Some(mark))?;
         Some(self.tone_keys()[i])
     }
+}
+
+/// Which trigger of the direct revert fired (zhen-revert section 2.3; tool hook `Engine::english_reverted`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Revert {
+    /// (a) a key over the symbol already in its column.
+    Overwrite,
+    /// (b) a key in a column before one that is filled.
+    Order,
+    /// (c) a space or tone key that completes a syllable the lexicon lacks.
+    Missing,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -472,8 +482,8 @@ struct Fixed {
     /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
     /// at the commit differs (the user may have typed on after the pick). `None` otherwise.
     pick_key: Option<String>,
-    /// zhen-inline section 1.3c: for an English token made by an auto-keep, the unfinished syllable (tone 1) that was on the
-    /// columns when it was made, so the token can be turned back into that Chinese syllable. `None` for every other fixed word.
+    /// zhen-revert section 2.3 (zhen-inline section 1.3c): for an English token a revert made, the unfinished syllable (tone 1) the
+    /// keys would have made when the lexicon has it, so the token can be turned back into that Chinese syllable. `None` for every other fixed word.
     zh: Option<String>,
     /// New-word B §2.5: the new words (reading, word) of the path this pick displaced, chosen while learning was on;
     /// each is halved at a commit with learning on.
@@ -512,16 +522,18 @@ struct Cands {
     /// never expands; `first` is the list position of its first visible row.
     vertical: bool,
     first: usize,
-    /// zhen-mixed section 2.3: the English window (items have syllable length 0, except an optional Chinese last item of 1).
-    english: bool,
+    /// zhen-revert section 2.6: the last two items are the lower and upper case of a short word (`ENGLISH_SHORT`) the syllable at
+    /// this position was typed as; choosing one swaps that one syllable for an English token. Judged by the item's index, never by
+    /// a length field.
+    short: Option<(usize, String)>,
     /// Fuzzy input (docs/contracts/fuzzy-input.md section 2.1): list position -> the lexicon reading of a word that was found
     /// through a tolerant reading. Choosing such a word rewrites the span to that reading. Empty without fuzzy input.
     alt: HashMap<usize, Vec<String>>,
-    /// zhen-inline section 1.3c: the window of an English token that an auto-keep made; its last item is the Chinese
-    /// syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
+    /// zhen-inline section 1.3c: the window of an English token that a revert made (zhen-revert section 2.3); its last item is the
+    /// Chinese syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
     zh: Option<String>,
     /// Predict-down contract B.3.1: the prediction row's items the window opened with. They are the first `rows.len()`
-    /// entries of `list` (the length field of a list entry cannot mark them: the English window uses 0). Choosing one whose
+    /// entries of `list` (the length field of a list entry cannot mark them). Choosing one whose
     /// reading is longer than or differs from the typed syllables is choosing it from the row; one over exactly those
     /// syllables is a re-pick (`choose`). They go with the window when it closes.
     rows: Vec<Pred>,
@@ -532,7 +544,7 @@ struct Cands {
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, english: false, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
     }
 
     fn scroll(&mut self) {
@@ -693,24 +705,40 @@ pub struct Engine {
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
-    /// zhen-mixed: the switch (default off; `set_english`) and the word list (`load_english`).
+    /// zhen-mixed: the switch (default off; `set_english`).
     english: bool,
-    /// Sorted by bytes, no duplicate: the full-word and the prefix lookups are binary searches (zhen-inline §1.5).
+    /// zhen-mixed section 3.1: the word list `load_english` validated. Nothing reads it since zhen-revert section 2.8 (PR 1); the
+    /// loader and the field stay until the retirement of the list (PR 2).
+    #[allow(dead_code)]
     english_words: Option<Vec<Box<str>>>,
-    /// zhen-inline: whether the unfinished syllable shows as the shadow's letters when `inline_shown` holds (default on).
-    english_inline: bool,
-    /// Section 2.2: the keycaps of the unfinished syllable's Zhuyin keys (at most `SHADOW_MAX`), and how many times a key
-    /// replaced a symbol in an occupied column (rule 9). Empty unless `shadow_on`; cleared with `clear_pend`.
-    shadow: Vec<char>,
-    shadow_over: u32,
-    /// zhen-keyorder: the switch (default off; `set_english_key_order`), and how many keys came in a column below a column that
-    /// already held a symbol (not counting a replacing key; the count never goes down). Recorded whenever the shadow is; only
-    /// read with the switch on.
+    /// zhen-revert section 1: the keycap that put the symbol now in each column of the unfinished syllable. Recorded only where
+    /// `shadow_on`, so it always matches `pend`; empty (all `None`) otherwise. Cleared with `clear_pend`.
+    shadow_key: [Option<char>; 3],
+    /// zhen-revert section 2.1: the triggers of the direct revert (a key over the same column: `set_english_overwrite`; a key out of
+    /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on.
+    english_overwrite: bool,
     english_key_order: bool,
-    shadow_inv: u32,
-    /// Set by `choose_english` when the token it inserted was the unit that reaches `MAX_SYLLABLES` and sent everything: the committed text, for the
-    /// output of the key or pick that made it. Choosing an English item sends nothing otherwise (zhen-inline section 1.0).
+    /// Set by a choice from the candidate window (a digit alternative, a row item, a short word's English token) whose unit reached
+    /// `MAX_SYLLABLES` and sent everything: the committed text, for the output of the key or pick that made it.
     commit_out: Option<String>,
+    /// Whether and how the latest `key()` reverted to the raw keys, and whether it split an English run at a tone key (tool hooks
+    /// `english_reverted`, `english_split`); cleared at the start of `key()` and nowhere else.
+    reverted: Option<Revert>,
+    split: bool,
+    /// zhen-revert section 2.3: what the unfinished syllable was before the revert that opened the English run (columns and
+    /// shadow), for Esc; dropped by anything that changes the run.
+    revert_point: Option<([Option<char>; 3], [Option<char>; 3])>,
+    /// zhen-revert section 2.6: the position and text of the syllable that was just made from a short word's keys, and what the
+    /// current key saw of it (`ls_now`, like `ld_now`). Taken at the start of every `key()`; a key that changes nothing puts it back.
+    last_short: Option<(usize, String)>,
+    ls_now: Option<(usize, String)>,
+    /// Set by the arms of `dispatch` that change nothing (`Engine::nothing`, `mark_noop`), only when the arm runs in the outermost
+    /// `dispatch` of the key (`depth` 1); `key()` reads it once, after the key, to give the short-word mark back. The one place that
+    /// rule lives (zhen-revert section 2.6).
+    noop: bool,
+    /// How many `dispatch` calls the running key is inside: a key that ends a run or a digit buffer first and then dispatches itself again
+    /// calls `dispatch` a second time, and whatever the inner call does nothing about, the key as a whole changed something.
+    depth: u32,
     /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips.
     fuzzy: u32,
     /// zhen-inline section 1.3b: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
@@ -719,9 +747,6 @@ pub struct Engine {
     /// Zhen-inline section 1.3i: a token reopened as the run, with the Chinese item it had; it comes back when the run ends with
     /// the same letters.
     run_zh: Option<(String, String, String)>,
-    /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3; tool hook `english_autokept`). Cleared at the start
-    /// of `key()` and nowhere else; no other entry point (a pick, a reset, a setting) touches it, so none can leave it stale.
-    autokept: bool,
     /// Digits (docs/contracts/digits.md): the count table (`digits.tsv`, optional), what is built from it and the model once, the run
     /// of digit-alphabet keys being typed, the keys of the syllable that just closed (A.3.6; `ld_now` is what the current key saw), and
     /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
@@ -991,16 +1016,20 @@ impl Engine {
             rerank_job: None,
             english: false,
             english_words: None,
-            english_inline: true,
-            shadow: Vec::new(),
-            shadow_over: 0,
-            english_key_order: false,
-            shadow_inv: 0,
+            shadow_key: [None; 3],
+            english_overwrite: true,
+            english_key_order: true,
             commit_out: None,
+            reverted: None,
+            split: false,
+            revert_point: None,
+            last_short: None,
+            ls_now: None,
+            noop: false,
+            depth: 0,
             fuzzy: 0,
             run: String::new(),
             run_zh: None,
-            autokept: false,
             digit_table: None,
             digit_cache: None,
             en_table: None,
@@ -1024,6 +1053,17 @@ impl Engine {
     /// `set_learning` is not among them: the flag only decides whether picks are recorded (`pre`), never how the composition
     /// decodes (decoding reads the learner whenever it is non-empty).
     /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
+    /// A setting that changes how the composition decodes, what the keys do or what the candidate window lists was set (zhen-revert section
+    /// 2.6): the short-word mark goes. Every such setter calls this; the ones that do NOT, on purpose, are: `set_learning` and
+    /// `set_left_context` (the shell calls them before every key, so they would clear the mark of the key before), `set_punctuation`,
+    /// `set_newword`, `set_newword_subspans`, `set_scan_gate`, `set_eps_global`, `set_today` and `set_english_next` (they change a table or
+    /// a learning knob, not the composition or the short word's items), and the `load_*` functions and `learning_open`/`learning_clear`
+    /// (they run when the engine is built, before the first key, and do not recompute the composition). Not `invalidate()` itself:
+    /// `refresh()` calls that inside a key.
+    fn setting_changed(&mut self) {
+        self.last_short = None;
+    }
+
     fn invalidate(&mut self) {
         self.generation = next_generation();
         self.rerank_job = None;
@@ -1074,6 +1114,7 @@ impl Engine {
     /// Whether rerank jobs are made (default off, S7c-2c); recomputes the composition and returns the snapshot like `set_demote`,
     /// so turning it off shows the n-gram result at once. On a decode failure the engine resets itself.
     pub fn set_rerank(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.invalidate();
         self.rerank_on = on;
         self.clear_pred();
@@ -1087,6 +1128,7 @@ impl Engine {
     /// Evaluation only (engine-replay.md section 2, `--learn-guard`): turns the learning guard off so stretches with a learned
     /// boost still go to the small model. The next decode uses it; the pending job is dropped like any decoding change.
     pub fn set_learn_guard(&mut self, on: bool) {
+        self.setting_changed();
         self.invalidate();
         self.learn_guard = on;
     }
@@ -1094,6 +1136,7 @@ impl Engine {
     /// Evaluation only (`shanjie-replay --no-reading-channel`): with `false` the colloquial term stands alone, the P4d cell the reading-channel
     /// term was measured against. The next decode uses it; the pending job is dropped like any decoding change.
     pub fn set_reading_channel(&mut self, on: bool) {
+        self.setting_changed();
         self.invalidate();
         self.reading_channel = on;
     }
@@ -1116,6 +1159,7 @@ impl Engine {
     /// model and kept by `load_tinylm` / `load_lm`; with a version 1 or 2 file every level uses the standard triple. Recomputes the
     /// composition and returns the snapshot like `set_profile`; on a decode failure the engine resets itself.
     pub fn set_rerank_level(&mut self, level: RerankLevel) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.invalidate();
         self.rerank_level = level;
         self.clear_pred();
@@ -1568,6 +1612,7 @@ impl Engine {
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
     /// (built by `CappedLexicon::new` from this engine's lexicon).
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
+        self.setting_changed();
         self.invalidate();
         self.lm = Some(LmState { lm, capped });
         self.set_tinylm(None);
@@ -1577,6 +1622,7 @@ impl Engine {
     /// recomputes the composition and returns the snapshot, like `set_profile`. On a decode failure the
     /// engine resets itself.
     pub fn set_demote(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.invalidate();
         self.demote = on;
         self.clear_pred();
@@ -1590,6 +1636,7 @@ impl Engine {
     /// Whether the prediction row is computed (default on, V3 section 10.5). Off clears the row (an entered row is left);
     /// on recomputes it, so a row that fits section 1.1 shows at once. Returns the snapshot.
     pub fn set_prediction(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.predict_on = on;
         if !on {
             self.drop_units(); // the units' only way out is the row (section 12.1)
@@ -1604,6 +1651,7 @@ impl Engine {
     /// and follows the setting on every output (section 2.4), so a row on screen is re-rendered in the new orientation in
     /// the returned snapshot; with a candidate window open or nothing shown the snapshot equals the output before the call.
     pub fn set_candidate_vertical(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.cand_vertical = on;
         self.handled()
     }
@@ -1611,12 +1659,14 @@ impl Engine {
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, V3 engine contract section 12).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.abbr = on;
         if !on {
             self.drop_units();
+            self.sync_shadow();
         } else {
             let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
-            self.close_english(); // zhen-mixed section 2.1: the two are exclusive
+            self.clear_shadow(); // zhen-mixed section 2.1: the two are exclusive
             return self.settle_with(flushed);
         }
         self.handled()
@@ -1647,16 +1697,18 @@ impl Engine {
         Ok(())
     }
 
-    /// zhen-mixed (docs/contracts/zhen-mixed.md): the switch, default off, remembered even without a list. Takes effect only
-    /// with a loaded list, the standard layout and the abbreviation composer off (`shadow_on`). Off closes an open English
-    /// window and clears the shadow. Returns the snapshot.
+    /// zhen-mixed (docs/contracts/zhen-mixed.md): the switch, default off. Takes effect only with the standard layout and the
+    /// abbreviation composer off (`shadow_on`); the word list is not asked since zhen-revert section 2.8. Off clears the shadow and
+    /// keeps an open English run as a token. Returns the snapshot.
     pub fn set_english(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english = on;
+        self.setting_changed();
         if !on {
             let flushed = self.digit_flush()?; // digits.md A.3.7: the buffered digits become tokens
-            self.close_english();
+            self.clear_shadow();
             return self.settle_with(flushed);
         }
+        self.sync_shadow();
         self.handled()
     }
 
@@ -1665,6 +1717,7 @@ impl Engine {
     /// lexicon lacks; a syllable already accepted is decoded whatever the flags say. Recomputes the composition and returns the
     /// snapshot, like `set_demote`; on a decode failure the engine resets itself. Bits above 4 are ignored here (the C ABI refuses them).
     pub fn set_fuzzy(&mut self, flags: u32) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.invalidate();
         self.fuzzy = flags & FUZZY_ALL;
         self.clear_pred();
@@ -1675,15 +1728,20 @@ impl Engine {
         self.handled()
     }
 
-    /// zhen-keyorder section 3: the key-order switch, default off, remembered even without a list. Takes effect only where
-    /// `shadow_on`. Turning it off closes an English window if one is open (whichever evidence opened it), which clears the
-    /// shadow as every close of that window does; the unfinished syllable stays. With no window open nothing else changes, so the
-    /// engine is the one that never had the switch on. Returns the snapshot.
+    /// zhen-revert section 2.1: the switch "a key over a symbol already in its column is English" (rule 9; default on). Only where
+    /// `shadow_on`. Nothing is open that the switch could close: an English run is text and stays. Returns the snapshot.
+    pub fn set_english_overwrite(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.english_overwrite = on;
+        self.setting_changed();
+        self.handled()
+    }
+
+    /// zhen-keyorder section 3 as zhen-revert section 2.1 changes it: the key-order switch (default on) covers the keys out of
+    /// column order (rule 9) and the tone key that makes a syllable the lexicon lacks (rule 10). Only where `shadow_on`; an English
+    /// run is text and stays. Returns the snapshot.
     pub fn set_english_key_order(&mut self, on: bool) -> Result<Output, EngineError> {
-        let was = std::mem::replace(&mut self.english_key_order, on);
-        if was && !on && self.english_open() {
-            self.close_english();
-        }
+        self.english_key_order = on;
+        self.setting_changed();
         self.handled()
     }
 
@@ -1692,161 +1750,23 @@ impl Engine {
         &self.syls
     }
 
-    /// The shadow when the English window is open, else None (tool hook of zhen-keyorder section 4: the word the window is for).
+    /// Whether the latest `key()` reverted the unfinished syllable to its raw keys, and which trigger did (tool hook of zhen-revert
+    /// section 4.1; the simulator asks after each key and never repeats the rule).
     #[doc(hidden)]
-    pub fn english_window_shadow(&self) -> Option<String> {
-        self.english_open().then(|| self.shadow.iter().collect())
+    pub fn english_reverted(&self) -> Option<Revert> {
+        self.reverted
     }
 
-    /// The English evidence E of zhen-keyorder section 1 (test and tool hook).
+    /// Whether the latest `key()` was a tone key that split an English run into an English token and a syllable (tool hook).
     #[doc(hidden)]
-    pub fn english_evidence(&self) -> u32 {
-        self.evidence()
+    pub fn english_split(&self) -> bool {
+        self.split
     }
 
-    /// Whether the English window is open (test and tool hook).
+    /// The shadow in column order (test and tool hook): the keycaps of the unfinished syllable's symbols.
     #[doc(hidden)]
-    pub fn english_open(&self) -> bool {
-        self.cands.as_ref().is_some_and(|c| c.english)
-    }
-
-    /// zhen-inline: the display option "show the English as it is typed" (default on). No effect without `set_english(true)`.
-    /// Returns the snapshot, so a composition on screen is drawn again in the new display.
-    pub fn set_english_inline(&mut self, on: bool) -> Result<Output, EngineError> {
-        self.english_inline = on;
-        self.handled()
-    }
-
-    /// zhen-inline section 1.1, the display rule D: whether the unfinished syllable shows as the shadow's letters (test and
-    /// tool hook; `shown` is the one consumer). All of: the option and the shadow on, the cursor at the end with one unit, at
-    /// least 3 letters, the trigger's overwrite condition, and a listed word that starts with the letters.
-    #[doc(hidden)]
-    pub fn english_inline_shown(&self) -> bool {
-        if !self.english_inline || self.shadow.len() < 3 {
-            return false;
-        }
-        let Some((words, prefix)) = self.eligible_shadow() else { return false };
-        Self::has_prefix(words, &prefix)
-    }
-
-    /// Whether `w` is a listed word.
-    fn is_word(words: &[Box<str>], w: &str) -> bool {
-        words.binary_search_by(|x| (**x).cmp(w)).is_ok()
-    }
-
-    /// Whether a listed word starts with `prefix` (the whole word included). Section 1.5: one binary search for the first word
-    /// not below the prefix; the words that start with it are contiguous.
-    fn has_prefix(words: &[Box<str>], prefix: &str) -> bool {
-        let i = words.partition_point(|w| **w < *prefix);
-        words.get(i).is_some_and(|w| w.starts_with(prefix))
-    }
-
-    /// Whether the latest `key()` made an auto-keep (zhen-inline section 1.3: the rule D table row, an English window kept by a
-    /// Zhuyin or punctuation key, letters kept by punctuation, section 1.3h). Only `key()` sets and clears it. Test and tool
-    /// hook; the simulator asks right after each key and never repeats the rule.
-    #[doc(hidden)]
-    pub fn english_autokept(&self) -> bool {
-        self.autokept
-    }
-
-    /// The shadow's length (test and tool hook).
-    #[doc(hidden)]
-    pub fn english_shadow_len(&self) -> usize {
-        self.shadow.len()
-    }
-
-    /// Section 2.1: the four conditions under which the shadow is recorded at all.
-    fn shadow_on(&self) -> bool {
-        self.english && self.english_words.is_some() && !self.abbr && self.layout == Layout::Standard
-    }
-
-    fn clear_shadow(&mut self) {
-        self.shadow.clear();
-        self.shadow_over = 0;
-        self.shadow_inv = 0;
-    }
-
-    /// Closes the English window if it is open, and clears the shadow either way; the unfinished syllable stays.
-    fn close_english(&mut self) {
-        if self.english_open() {
-            self.cands = None;
-        }
-        self.clear_shadow();
-    }
-
-    /// Closes the candidate window (rules 7 and 8); an English window takes the shadow with it (section 2.3).
-    fn close_cands(&mut self) {
-        if self.cands.take().is_some_and(|c| c.english) {
-            self.clear_shadow();
-        }
-    }
-
-    /// Section 2.2: one Zhuyin key of the unfinished syllable, in column `col`; `over` is whether it replaced a symbol (rule 9).
-    fn shadow_push(&mut self, ch: char, col: usize, over: bool) {
-        if !self.shadow_on() {
-            return;
-        }
-        if self.shadow.len() == SHADOW_MAX {
-            self.clear_shadow(); // the 33rd key: start again
-            return;
-        }
-        // zhen-keyorder section 1: a replacing key counts once, as a replacement; any other key in a column below one that holds a
-        // symbol now (`pend`, not yet changed by this key) is out of order.
-        self.shadow_inv += (!over && self.pend[col + 1..].iter().any(Option::is_some)) as u32;
-        self.shadow.push(ch);
-        self.shadow_over += over as u32;
-    }
-
-    /// The English evidence E (zhen-keyorder section 1): the replacements, and with the switch on the out-of-order keys as well.
-    fn evidence(&self) -> u32 {
-        self.shadow_over + if self.english_key_order { self.shadow_inv } else { 0 }
-    }
-
-    /// The unfinished syllable (tone 1) is in no lexicon entry.
-    fn syllable_missing(&self) -> bool {
-        self.lex.entries(&[self.pending()]).is_empty()
-    }
-
-    /// The overwrite condition of the trigger (zhen-mixed section 2.2) and of the display rule D (zhen-inline section 1.1
-    /// item 4): a key replaced a symbol at least once, and when the leftover syllable (tone 1) is itself in the lexicon at
-    /// least twice.
-    fn overwrite_enough(&self) -> bool {
-        let e = self.evidence();
-        Self::evidence_enough(e, e == 1 && self.syllable_missing())
-    }
-
-    /// E at least 2, or 1 with the syllable missing (`missing` only matters when E is 1).
-    fn evidence_enough(e: u32, missing: bool) -> bool {
-        e >= 2 || (e == 1 && missing)
-    }
-
-    /// The shadow as a candidate for an English word, and the list to look it up in: the shadow is recorded (`shadow_on`), the
-    /// cursor is at the end with one unit, and `overwrite_enough`. The one place both the trigger and the display rule D ask.
-    fn eligible_shadow(&self) -> Option<(&[Box<str>], String)> {
-        self.shadow_candidate().filter(|_| self.overwrite_enough())
-    }
-
-    /// `eligible_shadow` without the evidence: the shadow is recorded, the cursor is at the end with one unit.
-    fn shadow_candidate(&self) -> Option<(&[Box<str>], String)> {
-        let words = self.english_words.as_deref().filter(|_| self.shadow_on())?;
-        if self.cursor != self.syls.len() || !self.pend_prev.is_empty() {
-            return None;
-        }
-        Some((words, self.shadow.iter().collect()))
-    }
-
-    /// Section 2.2, the trigger (Space before rule 10): the eligible shadow is a whole listed word. With the key-order switch
-    /// (zhen-keyorder section 2) two more cases, for Space only: a whole listed word whose syllable does not exist, with or
-    /// without evidence (rule 10 would ignore that Space), and a `TWO_LETTER` word with E at least 1 whatever the syllable.
-    fn english_trigger(&self) -> bool {
-        let Some((words, word)) = self.shadow_candidate() else { return false };
-        let listed = Self::is_word(words, &word);
-        let two = self.english_key_order && TWO_LETTER.contains(&word.as_str());
-        if !listed && !two {
-            return false;
-        }
-        let (e, missing) = (self.evidence(), self.syllable_missing());
-        (listed && (Self::evidence_enough(e, missing) || (self.english_key_order && missing))) || (two && e >= 1)
+    pub fn english_shadow(&self) -> String {
+        self.shadow_text()
     }
 
     /// The unfinished syllable's columns, for the typing simulator (tool hook; no letters, no tone).
@@ -1855,8 +1775,39 @@ impl Engine {
         self.pend
     }
 
+    /// Section 2.1: where the shadow is recorded and the reverts can happen: English mixing on, the standard layout and the
+    /// abbreviation composer off. The word list is not asked (zhen-revert section 2.8).
+    fn shadow_on(&self) -> bool {
+        self.english && !self.abbr && self.layout == Layout::Standard
+    }
+
+    fn clear_shadow(&mut self) {
+        self.shadow_key = [None; 3];
+    }
+
+    /// Where the reverts become possible with a syllable half typed (the switch turned on, the abbreviation composer off), the shadow
+    /// catches up with the columns, so that it always matches them (zhen-revert section 1): the keycap of a symbol is the one key.
+    fn sync_shadow(&mut self) {
+        if self.shadow_on() && self.pend_prev.is_empty() {
+            for col in 0..3 {
+                self.shadow_key[col] = self.pend[col].and_then(|sym| self.layout.key_of_symbol(sym));
+            }
+        }
+    }
+
+    fn shadow_text(&self) -> String {
+        self.shadow_key.iter().flatten().collect()
+    }
+
+    /// Section 2.2: one Zhuyin key of the unfinished syllable now sits in column `col`.
+    fn shadow_push(&mut self, ch: char, col: usize) {
+        if self.shadow_on() {
+            self.shadow_key[col] = Some(ch);
+        }
+    }
+
     /// The writings of an English word, in the order of the window (zhen-inline section 1.0): as it stands, then lower case,
-    /// Capitalised, UPPER (no repeat). The window of the shadow's word is lower case, so it lists three.
+    /// Capitalised, UPPER (no repeat).
     fn english_writings(word: &str) -> Vec<String> {
         let lower = word.to_ascii_lowercase();
         let mut title = lower.clone();
@@ -1870,115 +1821,144 @@ impl Engine {
         list
     }
 
-    /// Section 2.3: the window of the shadow's word (as typed, capitalised, upper case) and, when the leftover syllable is in
-    /// the lexicon, its first entry. The unfinished syllable stays in the preedit.
-    fn open_english(&mut self) -> Result<Output, EngineError> {
-        let word: String = self.shadow.iter().collect();
-        let mut list: Vec<(String, usize)> = Self::english_writings(&word).into_iter().map(|w| (w, 0)).collect();
-        if let Some((zh, _)) = self.lex.entries(&[self.pending()]).first() {
-            list.push((zh.to_string(), 1));
-        }
-        let mut c = Cands::new(list, self.cand_vertical);
-        c.english = true;
-        self.cands = Some(c);
-        self.handled()
+    /// Letters become an English token at the cursor (reading `PUNCT_PREFIX` + the word, the word as its fixed word). Returns what the
+    /// unit that reaches `MAX_SYLLABLES` sent, if it did (zhen-inline section 1.3b: it goes in this key's output).
+    fn insert_english(&mut self, word: String) -> Result<String, EngineError> {
+        self.put_english(format!("{PUNCT_PREFIX}{word}"), word, None)
     }
 
-    /// Section 2.3 and zhen-inline section 1.0: item `idx` of the English window. The unfinished syllable and the shadow go;
-    /// an English item becomes an English token at the cursor (`insert_english`), a Chinese item the leftover syllable with the
-    /// item fixed over it. Neither is learned, and nothing is committed here (the commit of a unit that reaches `MAX_SYLLABLES` waits in `commit_out`).
-    ///
-    /// `keep`: the window was closed by a Zhuyin key (section 1.3), so an English token is an auto-keep.
-    fn choose_english(&mut self, idx: usize, keep: bool) -> Result<(), EngineError> {
-        let Some(c) = self.cands.take() else { return Ok(()) };
-        let Some((word, len)) = c.list.get(idx).cloned() else { return Ok(()) };
-        let commit = if len == 0 {
-            self.insert_english(word, keep)?
-        } else {
-            let reading = self.pending();
-            self.clear_pend();
-            self.pred_dirty = true;
-            self.insert_token(reading, Some(word), None)?.commit
-        };
-        if !commit.is_empty() {
-            self.commit_out = Some(commit); // the syllable that reached `MAX_SYLLABLES` committed everything (section 2.1 of s3d)
-        }
-        Ok(())
-    }
-
-    /// Letters become an English token at the cursor (reading `PUNCT_PREFIX` + the word, the word as its fixed word). `auto`: an
-    /// auto-keep (section 1.3), which is reported by `english_autokept` and remembers the unfinished syllable (what the window's
-    /// Chinese item would be) for section 1.3c. Returns what the unit that reaches `MAX_SYLLABLES` sent, if it did (section 1.3: it goes in this key's output).
-    fn insert_english(&mut self, word: String, auto: bool) -> Result<String, EngineError> {
-        let zh = auto.then(|| self.pending());
-        self.autokept |= auto;
-        self.put_english(format!("{PUNCT_PREFIX}{word}"), word, zh)
-    }
-
-    /// The one place an English token goes in at the cursor: the unfinished syllable and the shadow go.
+    /// The one place an English token goes in at the cursor: the unfinished syllable and the shadow go. `zh`: the Chinese syllable a
+    /// revert remembers (zhen-revert section 2.3), the last item of the token's writings.
     fn put_english(&mut self, reading: String, word: String, zh: Option<String>) -> Result<String, EngineError> {
         self.clear_pend();
         self.pred_dirty = true;
         Ok(self.insert_token(reading, Some(word), zh)?.commit)
     }
 
-    /// Sections 1.3g and 1.3i: the English token at `at` goes and an English run opens there (before the removal, so the decode
-    /// splits at the run, section 1.3h). `whole`: with all its letters, and an auto-keep's Chinese item and reading kept for
-    /// `end_run`; else without the last letter (a one-letter token just goes). A token without its fixed word falls back to the
-    /// text of its reading.
-    fn reopen_token(&mut self, at: usize, whole: bool) -> Result<(), EngineError> {
-        let (word, zh) = match self.fixed.iter().find(|f| f.start == at) {
-            Some(f) => (f.word.clone(), f.zh.clone()),
-            None => (english_of(&self.syls[at]).unwrap_or_default().to_string(), None),
+    /// Section 1.3g: the English token at `at` goes and an English run opens there, holding its text without the last letter (a
+    /// one-letter token just goes). The run opens before the removal, so the decode splits at it (section 1.3h).
+    fn reopen_token(&mut self, at: usize) -> Result<(), EngineError> {
+        let mut letters = match self.fixed.iter().find(|f| f.start == at) {
+            Some(f) => f.word.clone(),
+            None => english_of(&self.syls[at]).unwrap_or_default().to_string(),
         };
-        if whole {
-            self.run_zh = zh.map(|zh| (word.clone(), zh, self.syls[at].clone()));
-            self.run = word;
-        } else {
-            let mut letters = word;
-            letters.pop();
-            self.run = letters;
-        }
+        letters.pop();
+        self.run = letters;
+        self.run_zh = None;
+        self.revert_point = None;
         self.cursor = at;
         self.remove_syllable(at)?;
         self.pred_dirty = true;
         Ok(())
     }
 
-    /// Zhen-inline section 1.3, the auto-keep: when the letters on screen (rule D) are a whole listed word and the Zhuyin key
-    /// `ch` would make something that starts no listed word, that word.
-    fn autokeep_word(&self, ch: char) -> Option<String> {
-        if !self.english_inline_shown() {
-            return None; // the letters must be on screen: the rule D, asked of its one function
-        }
-        let (words, word) = self.eligible_shadow()?;
-        (Self::is_word(words, &word) && !Self::has_prefix(words, &format!("{word}{ch}"))).then_some(word)
-    }
-
-    /// The first key of a new syllable after an auto-keep or a kept window: rule 14.
+    /// The first key of a new syllable: rule 14.
     fn start_syllable(&mut self, ch: char, col: usize, sym: char) {
-        self.shadow_push(ch, col, false);
+        self.shadow_push(ch, col);
         self.pend[col] = Some(sym);
         self.pred_dirty = true;
     }
 
-    // ---- zhen-inline section 1.3b: the English run ----
+    // ---- zhen-revert section 2.3: the reverts ----
 
-    /// Ends the run: its letters become an English token at the cursor (reading `PUNCT_PREFIX` + the letters as typed). Returns
-    /// what the unit that reaches `MAX_SYLLABLES` sent, if it did.
-    fn end_run(&mut self) -> Result<String, EngineError> {
-        let word = std::mem::take(&mut self.run);
-        if let Some((_, zh, reading)) = self.run_zh.take().filter(|(w, _, _)| *w == word) {
-            return self.put_english(reading, word, Some(zh)); // section 1.3i: the auto-keep's token as it was
+    /// The unfinished syllable goes and an English run holding `text` opens at the cursor (the output shows it with the run's
+    /// underline). `point`: the columns and shadow Esc brings back; `zh`: the Chinese syllable the keys made, when the lexicon has it.
+    fn revert_to(&mut self, kind: Revert, text: String, point: ([Option<char>; 3], [Option<char>; 3]), zh: Option<String>) -> Result<Output, EngineError> {
+        self.clear_pend();
+        self.run_zh = zh.map(|zh| (text.clone(), zh, format!("{PUNCT_PREFIX}{text}")));
+        self.run = text;
+        self.revert_point = Some(point);
+        self.reverted = Some(kind);
+        self.pred_dirty = true;
+        if self.cursor < self.syls.len() {
+            self.refresh()?; // the run opened in front of units: they decode apart from it (section 1.3h)
         }
-        self.insert_english(word, false)
+        Ok(self.view(true, String::new()))
     }
 
-    /// A letter on the run; the 33rd ends it and starts the next one. Returns what ending sent, if it sent anything.
+    /// Rule 9 with a trigger (a) or (b): the Zhuyin key `ch` (symbol `sym` for column `col`) does not go into the columns; the
+    /// run is the shadow in column order and this key. The Chinese item is the syllable the key would have made (section 2.3).
+    fn revert_keys(&mut self, kind: Revert, ch: char, col: usize, sym: char) -> Result<Output, EngineError> {
+        let text = format!("{}{ch}", self.shadow_text());
+        let (mut pend, mut shadow) = (self.pend, self.shadow_key);
+        pend[col] = Some(sym);
+        shadow[col] = Some(ch);
+        let syl: String = pend.iter().flatten().collect();
+        let zh = (!self.lex.entries(std::slice::from_ref(&syl)).is_empty()).then_some(syl);
+        self.revert_to(kind, text, (pend, shadow), zh)
+    }
+
+    /// Rule 10 with trigger (c): the syllable the lexicon lacks (and no adjacent key rescued it) reverts. Space (`tone` 0) needs only
+    /// the mixing switch and ends the run at once, so one token comes out; a tone key needs the key-order switch and leaves the run open
+    /// with the digit on it. `None`: not reverted, rule 10 ignores the key as it always did.
+    fn revert_missing(&mut self, tone: usize) -> Result<Option<Output>, EngineError> {
+        if !self.shadow_on() || (tone > 0 && !self.english_key_order) {
+            return Ok(None);
+        }
+        let mut text = self.shadow_text();
+        let point = (self.pend, self.shadow_key);
+        if tone == 0 {
+            self.clear_pend();
+            self.run = text;
+            self.reverted = Some(Revert::Missing);
+            let commit = self.end_run()?;
+            return Ok(Some(self.view(true, commit)));
+        }
+        text.push(TONE_KEYS_STANDARD[tone - 1]);
+        self.revert_to(Revert::Missing, text, point, None).map(Some)
+    }
+
+    /// Zhen-revert section 2.4: a tone key on the open run. The tail syllable (section 1) of two or more symbols that the tone makes a
+    /// lexicon syllable splits the run: the text before it becomes an English token and the tail a syllable. Anything else puts the
+    /// digit on the run.
+    fn run_tone(&mut self, c: char, tone: usize) -> Result<Output, EngineError> {
+        let chars: Vec<char> = self.run.chars().collect();
+        let mut tail: Vec<(usize, char)> = Vec::new();
+        let mut above = 3;
+        for ch in chars.iter().rev() {
+            match Layout::Standard.symbol_of(*ch) {
+                Some((col, sym)) if col < above && tail.len() < 3 => {
+                    tail.push((col, sym));
+                    above = col;
+                }
+                _ => break,
+            }
+        }
+        let syl: String = tail.iter().rev().map(|&(_, sym)| sym).chain(TONE_MARKS[tone].chars()).collect();
+        if tail.len() < 2 || self.lex.entries(std::slice::from_ref(&syl)).is_empty() {
+            let commit = self.run_push(c)?;
+            return Ok(self.view(true, commit));
+        }
+        let head: String = chars[..chars.len() - tail.len()].iter().collect();
+        self.run.clear();
+        self.run_zh = None;
+        self.revert_point = None;
+        self.split = true;
+        let mut commit = if head.is_empty() { String::new() } else { self.insert_english(head)? };
+        self.pred_dirty = true;
+        commit.push_str(&self.insert_token(syl, None, None)?.commit);
+        Ok(self.view(true, commit))
+    }
+
+    // ---- zhen-inline section 1.3b: the English run ----
+
+    /// Ends the run: its text becomes an English token at the cursor (reading `PUNCT_PREFIX` + the text as typed). Returns what the unit
+    /// that reaches `MAX_SYLLABLES` sent, if it did. A run a revert opened and nobody changed keeps its Chinese item (section 2.3).
+    fn end_run(&mut self) -> Result<String, EngineError> {
+        let word = std::mem::take(&mut self.run);
+        self.revert_point = None;
+        if let Some((_, zh, reading)) = self.run_zh.take().filter(|(w, _, _)| *w == word) {
+            return self.put_english(reading, word, Some(zh));
+        }
+        self.insert_english(word)
+    }
+
+    /// A character on the run; the 33rd ends it and starts the next one. Returns what ending sent, if it sent anything.
     fn run_push(&mut self, c: char) -> Result<String, EngineError> {
-        let commit = if self.run.len() == SHADOW_MAX { self.end_run()? } else { String::new() };
+        let commit = if self.run.len() == ENGLISH_RUN_MAX { self.end_run()? } else { String::new() };
         self.run.push(c);
-        self.run_zh = None; // section 1.3i: other letters, a run's token
+        self.run_zh = None; // the run was changed: no Chinese item, no Esc back to the Zhuyin
+        self.revert_point = None;
         Ok(commit)
     }
 
@@ -1988,10 +1968,10 @@ impl Engine {
         Ok(self.view(true, commit))
     }
 
-    /// Shift+letter with English mixing on: the shadow's letters (when it is all letters; else the unfinished syllable is dropped,
-    /// as Esc would) and `upper` open a run. An open window closes with it.
+    /// Shift+letter with English mixing on: the shadow's keys (every one is a Zhuyin key, and a run takes all of them, section 2.4) and
+    /// `upper` open a run. An open window closes with it.
     fn start_run(&mut self, upper: char) -> Result<Output, EngineError> {
-        let keep: String = if self.shadow.iter().all(char::is_ascii_lowercase) { self.shadow.iter().collect() } else { String::new() };
+        let keep = self.shadow_text();
         self.cands = None;
         self.clear_pend();
         self.run = keep;
@@ -2011,8 +1991,9 @@ impl Engine {
         Ok(())
     }
 
-    /// A key while the run is open (section 1.3b): letters go on it (no auto-keep, amendment three), Backspace and Esc take
-    /// letters off, Space ends it and is eaten, every other key ends it and is then handled as it would be.
+    /// A key while the run is open (zhen-inline section 1.3b, zhen-revert section 2.4): letters and the Zhuyin keys that are not letters
+    /// go on it, a tone key goes on it or splits it, Backspace and Esc take it off, Space ends it and is eaten, every other key ends it
+    /// and is then handled as it would be. Esc on a run a revert opened, not changed since, brings the Zhuyin back instead.
     fn run_key(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         if k.kind == KeyKind::Char && (m == 0 || m == MOD_SHIFT) && k.ch.is_ascii_alphabetic() {
@@ -2020,10 +2001,20 @@ impl Engine {
             let commit = self.run_push(c)?;
             return Ok(self.view(true, commit));
         }
+        if k.kind == KeyKind::Char && m == 0 {
+            if Layout::Standard.symbol_of(k.ch).is_some() {
+                let commit = self.run_push(k.ch)?;
+                return Ok(self.view(true, commit));
+            }
+            if let Some(tone) = Layout::Standard.tone_of(k.ch) {
+                return self.run_tone(k.ch, tone);
+            }
+        }
         match k.kind {
             KeyKind::Backspace => {
                 self.run.pop();
                 self.run_zh = None;
+                self.revert_point = None;
                 self.pred_dirty = true;
                 self.run_closed()?;
                 self.handled()
@@ -2031,6 +2022,9 @@ impl Engine {
             KeyKind::Esc => {
                 self.run.clear();
                 self.run_zh = None;
+                if let Some((pend, shadow)) = self.revert_point.take() {
+                    (self.pend, self.shadow_key) = (pend, shadow); // section 2.4: back to the Zhuyin the key would have made
+                }
                 self.pred_dirty = true;
                 self.run_closed()?;
                 self.handled()
@@ -2058,7 +2052,7 @@ impl Engine {
         Ok(o)
     }
 
-    /// The output of a key or pick that chose a candidate: the commit of the unit that reaches `MAX_SYLLABLES` (an item of the English window), or the
+    /// The output of a key or pick that chose a candidate: the commit of the unit that reaches `MAX_SYLLABLES` (a digit alternative, a row item, a short word), or the
     /// plain snapshot.
     fn chosen(&mut self) -> Result<Output, EngineError> {
         match self.commit_out.take() {
@@ -2097,6 +2091,7 @@ impl Engine {
     /// Switch the profile (default chat; remembered even before a model is loaded), recompute the
     /// composition and return the snapshot. On a decode failure the engine resets itself.
     pub fn set_profile(&mut self, profile: Profile) -> Result<Output, EngineError> {
+        self.setting_changed();
         self.invalidate();
         self.profile = profile;
         self.clear_pred();
@@ -2223,7 +2218,12 @@ impl Engine {
         self.ld_now = self.last_digits.take();
         self.d_emitted = 0;
         self.d_shown = self.drun.as_ref().map_or(0, |r| r.emitted.len() + r.m);
-        self.autokept = false; // the one place it is cleared; `insert_english` may set it again below
+        self.reverted = None; // the one place the tool hooks are cleared; the key sets them again below
+        self.split = false;
+        self.noop = false;
+        self.depth = 0;
+        let short = self.last_short.take();
+        self.ls_now = short.clone();
         // New-word B §2.1: `paused` marks a composition with a key handled while learning was off. A key on an empty
         // composition starts a new one (however the last one emptied: commit, Esc, Backspace), so the mark goes first.
         if self.syls.is_empty() && self.run.is_empty() && self.pending().is_empty() {
@@ -2234,6 +2234,11 @@ impl Engine {
         }
         self.cap_snapshot();
         let mut r = self.dispatch(k).and_then(|mut o| self.cap_after(&mut o).map(|()| o));
+        // Zhen-revert section 2.6: a key that changes nothing (a key passed on, or an arm that calls `nothing`) leaves the short word's
+        // mark where it was. The one place; a new arm that does nothing calls `nothing` and needs no other line.
+        if matches!(&r, Ok(o) if o.commit.is_empty() && (self.noop || !o.handled)) {
+            self.last_short = self.last_short.take().or(short);
+        }
         match &mut r {
             Err(_) => self.clear_all(),
             Ok(o) if std::mem::take(&mut self.pred_dirty) => {
@@ -2595,6 +2600,8 @@ impl Engine {
         self.cands = None;
         self.run.clear();
         self.run_zh = None;
+        self.revert_point = None;
+        self.last_short = None;
         self.drun = None;
         self.last_digits = None;
         self.clear_pred();
@@ -2609,12 +2616,9 @@ impl Engine {
     /// them in UTF-16 code units, and the open English run's (start, length) in UTF-16 code units (0, 0 without a run).
     fn shown(&self) -> (String, u32, (u32, u32)) {
         let chars: Vec<char> = self.display.chars().collect();
-        // Zhen-inline section 1.2: with D, the unfinished syllable shows as the shadow's letters. Every path that sends what
-        // is shown (Enter, `reset(Commit)`, the token that reaches `MAX_SYLLABLES`) comes through here.
+        // Every path that sends what is shown (Enter, `reset(Commit)`, the token that reaches `MAX_SYLLABLES`) comes through here.
         let unfinished: String = if !self.run.is_empty() {
             self.run.clone() // section 1.3b: the English run sits at the cursor
-        } else if self.english_inline_shown() {
-            self.shadow.iter().collect()
         } else {
             self.pending()
         };
@@ -2884,7 +2888,29 @@ impl Engine {
         Ok(self.view(m & MOD_SHIFT == 0, commit))
     }
 
+    /// The key changes nothing: the prediction row stays as it was (`old`, taken at the top of `dispatch`) and the short-word mark
+    /// (section 2.6) is given back by `key()`.
+    fn nothing(&mut self, old: Vec<Pred>) {
+        self.pred = old;
+        self.mark_noop();
+    }
+
+    /// The key as a whole changed nothing, if this is the outermost `dispatch` of the key. In an inner one (a run or a digit buffer was
+    /// ended first, which is a change) the mark is not given back.
+    fn mark_noop(&mut self) {
+        if self.depth == 1 {
+            self.noop = true;
+        }
+    }
+
     fn dispatch(&mut self, k: Key) -> Result<Output, EngineError> {
+        self.depth += 1;
+        let r = self.dispatch_key(k);
+        self.depth -= 1;
+        r
+    }
+
+    fn dispatch_key(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
         // Candidate-vertical contract section 2.2: Page Up / Down mean something only in an open vertical window, without
@@ -2972,24 +2998,10 @@ impl Engine {
             None
         };
         if let Some(p) = punct {
-            // Zhen-inline section 1.3h: English on screen (rule D) or selected in an open English window is kept as a token first,
-            // as an auto-keep; what the unit that reaches `MAX_SYLLABLES` sent goes first in this output. Anything else unfinished is dropped.
-            let kept = if self.english_open() {
-                let sel = self.cands.as_ref().map_or(0, |c| c.sel);
-                self.choose_english(sel, true)?;
-                self.commit_out.take().unwrap_or_default()
-            } else if self.english_inline_shown() {
-                let letters = self.shadow.iter().collect();
-                self.insert_english(letters, true)?
-            } else {
-                String::new()
-            };
-            // s3d §1: into the composition at the cursor, not committed.
+            // s3d §1: into the composition at the cursor, not committed. Anything unfinished is dropped.
             self.clear_pend();
             self.cands = None;
-            let mut o = self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None)?;
-            o.commit.insert_str(0, &kept);
-            return Ok(o);
+            return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None);
         }
         let plain = m == 0;
         // Zhen-inline section 1.3b: Shift+letter starts an English run (the letter in upper case, from the keycap and Shift).
@@ -2997,21 +3009,6 @@ impl Engine {
             return self.start_run(k.ch.to_ascii_uppercase());
         }
         let zy = if is_char && plain { self.layout.symbol_of(k.ch) } else { None };
-        // Section 1.3: a Zhuyin key that is not an item's digit, with the English window open, keeps the selected item first
-        // and then starts the next syllable.
-        if let (Some((col, sym)), true) = (zy, self.english_open() && !('1'..='9').contains(&k.ch)) {
-            let sel = self.cands.as_ref().map_or(0, |c| c.sel);
-            self.choose_english(sel, true)?;
-            let commit = self.commit_out.take().unwrap_or_default();
-            self.start_syllable(k.ch, col, sym);
-            return Ok(self.view(true, commit));
-        }
-        // Zhen-inline section 1.3h: Backspace with the English window open (letters shown as typed) only closes the window; the
-        // shadow stays, so rule D shows the letters again and the next Backspace is section 1.3g's.
-        if k.kind == KeyKind::Backspace && self.english_inline && self.english_open() {
-            self.cands = None;
-            return self.handled();
-        }
         // 3-8: candidates open.
         if self.cands.is_some() && self.candidate_key(k)? {
             return self.chosen();
@@ -3029,54 +3026,40 @@ impl Engine {
         if has_pending {
             // 9-13
             if let Some((col, sym)) = zy {
-                // Zhen-inline section 1.3: letters on screen that are a whole word, and a key that cannot go on: keep the word.
-                if let Some(word) = self.autokeep_word(k.ch) {
-                    let commit = self.insert_english(word, true)?;
-                    self.start_syllable(k.ch, col, sym);
-                    return Ok(self.view(true, commit));
+                // Zhen-revert section 2.3: a key over a symbol of its column (a), or in a column before one that is filled (b), is English.
+                if self.shadow_on() {
+                    let occupied = self.pend[col].is_some();
+                    let later = self.pend[col + 1..].iter().any(Option::is_some);
+                    if occupied && self.english_overwrite {
+                        return self.revert_keys(Revert::Overwrite, k.ch, col, sym);
+                    }
+                    if !occupied && later && self.english_key_order {
+                        return self.revert_keys(Revert::Order, k.ch, col, sym);
+                    }
                 }
                 // Section 12: an occupied column opens the next unit instead of being replaced.
                 if self.pend[col].is_some() && self.abbr_active() {
                     self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
                 }
-                self.shadow_push(k.ch, col, self.pend[col].is_some());
+                self.shadow_push(k.ch, col);
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
-                if t == 0 && self.english_trigger() {
-                    return self.open_english(); // 10e
-                }
                 if self.pend_prev.is_empty() {
                     return self.finish_syllable(t, old);
                 }
-                self.pred = old; // two or more units: tone and space do nothing (section 12.2)
-            } else if k.kind == KeyKind::Backspace && self.english_inline_shown() {
-                // Zhen-inline section 1.3g: letters are on screen; the last one goes and the rest become an English run.
-                let mut letters: String = self.shadow.iter().collect();
-                letters.pop();
-                self.clear_pend();
-                self.run = letters;
-                self.pred_dirty = true;
+                self.nothing(old); // two or more units: tone and space do nothing (section 12.2)
             } else if k.kind == KeyKind::Backspace {
                 // Row 11: the last symbol in display order (final, then medial, then initial), as Apple Zhuyin and
                 // McBopomofo do (measured 2026-10-06: ㄉㄨㄟ, ㄅ replaces ㄉ, then Backspace gives ㄅㄨ, then ㄅ).
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
-                    self.shadow.pop(); // zhen-mixed section 2.2: the last key; the replacement count stays
+                    self.shadow_key[col] = None; // zhen-revert section 2.2: the column's key goes with its symbol
                 }
                 if self.pend.iter().all(Option::is_none) {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
                     if self.pend.iter().all(Option::is_none) {
                         self.clear_shadow(); // the syllable is gone
-                        // Zhen-inline section 1.3i ("show as typed" only): right behind the token an auto-keep made, the token opens
-                        // again as a run with all its letters, so `r u s r` + Backspace + `t` is `rust`, not `rus` + ㄔ. A token
-                        // chosen on purpose stays (the Backspace fixed a Zhuyin key typed after it).
-                        let at = self.cursor.wrapping_sub(1);
-                        if self.english_inline && self.shadow_on() && self.cursor > 0
-                            && self.fixed.iter().any(|f| f.start == at && f.zh.is_some())
-                        {
-                            self.reopen_token(at, true)?;
-                        }
                     }
                 }
                 self.pred_dirty = true;
@@ -3089,7 +3072,7 @@ impl Engine {
                 // (an empty row opens nothing, so the key is ignored as before).
                 self.open_with_rows(old);
             } else {
-                self.pred = old; // the key does nothing
+                self.nothing(old); // the key does nothing
             }
             return self.handled();
         }
@@ -3121,11 +3104,11 @@ impl Engine {
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
-            KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.pred = old,
+            KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.nothing(old),
             KeyKind::Space | KeyKind::Down => self.open_candidates(old),
-            KeyKind::Up => self.pred = old,
-            KeyKind::Char if tone.is_some() => self.pred = old,
-            KeyKind::Right | KeyKind::End if self.cursor == n => self.pred = old, // nothing moves
+            KeyKind::Up => self.nothing(old),
+            KeyKind::Char if tone.is_some() => self.nothing(old),
+            KeyKind::Right | KeyKind::End if self.cursor == n => self.nothing(old), // nothing moves
             KeyKind::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyKind::Right => self.cursor = (self.cursor + 1).min(n),
             KeyKind::Home => self.cursor = 0,
@@ -3133,14 +3116,14 @@ impl Engine {
             // Zhen-inline section 1.3g (English mixing on): the unit before the cursor is an English token. It goes and its
             // text without the last letter becomes an English run there (a one-letter token just goes).
             KeyKind::Backspace if self.cursor > 0 && self.shadow_on() && english_of(&self.syls[self.cursor - 1]).is_some() => {
-                self.reopen_token(self.cursor - 1, false)?;
+                self.reopen_token(self.cursor - 1)?;
             }
             KeyKind::Backspace if self.cursor > 0 => {
                 self.cursor -= 1;
                 self.remove_syllable(self.cursor)?;
             }
             KeyKind::Delete if self.cursor < n => self.remove_syllable(self.cursor)?,
-            KeyKind::Backspace | KeyKind::Delete => self.pred = old,
+            KeyKind::Backspace | KeyKind::Delete => self.nothing(old),
             KeyKind::Enter => return self.commit_enter(m), // 19, 19a
             KeyKind::Esc => self.clear_all(),
             _ => {
@@ -3190,9 +3173,9 @@ impl Engine {
                 }
                 (KeyKind::PageDown | KeyKind::PageUp, _) => {}
                 (KeyKind::Enter, _) => self.choose(sel)?,
-                (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
                 _ => {
-                    self.close_cands();
+                    self.cands = None;
                     return Ok(false);
                 }
             }
@@ -3221,9 +3204,9 @@ impl Engine {
                 (KeyKind::Left, _) => c.sel = sel.saturating_sub(1),
                 (KeyKind::Right, _) => c.sel = (sel + 1).min(len - 1),
                 (KeyKind::Enter, _) => self.choose(sel)?,
-                (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
+                (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
                 _ => {
-                    self.close_cands();
+                    self.cands = None;
                     return Ok(false);
                 }
             }
@@ -3253,9 +3236,9 @@ impl Engine {
             }
             (KeyKind::Space, _) => c.sel = next_page.unwrap_or(0),
             (KeyKind::Enter, _) => self.choose(sel)?,
-            (KeyKind::Esc | KeyKind::Backspace, _) => self.close_cands(),
+            (KeyKind::Esc | KeyKind::Backspace, _) => self.cands = None,
             _ => {
-                self.close_cands();
+                self.cands = None;
                 return Ok(false);
             }
         }
@@ -3273,6 +3256,7 @@ impl Engine {
                 return Ok(None);
             }
             self.last_digits = None; // digits.md A.3.6: the next state-changing key clears the other reading of the syllable that closed
+            self.last_short = None;
             let r = self.choose_pred(index).and_then(|mut o| self.cap_after(&mut o).map(|()| o));
             if r.is_err() {
                 self.clear_all();
@@ -3289,7 +3273,7 @@ impl Engine {
         if r.is_err() {
             self.clear_all();
         } else if std::mem::take(&mut self.pred_dirty) {
-            self.recompute_pred(); // an item of the English window: a Chinese item or an English token (zhen-mixed section 2.3, zhen-inline section 1.0)
+            self.recompute_pred(); // an item that changed the composition without a key: a short word's English token, a row item, a digit alternative
             if let Ok(o) = &mut r {
                 (o.candidates, o.selected, o.total) = self.pred_view();
                 o.vertical = self.pred_vertical();
@@ -3303,13 +3287,28 @@ impl Engine {
         let mut syl = self.pending();
         // tone index 1..=4 -> marks[1..=4]; space (0) -> unmarked tone 1
         syl.push_str(TONE_MARKS[tone]);
-        if self.lex.entries(std::slice::from_ref(&syl)).is_empty() && !self.adjacent_accepts(&syl) {
-            self.pred = old; // section 1.1: a syllable the lexicon lacks changes nothing
+        let missing = self.lex.entries(std::slice::from_ref(&syl)).is_empty();
+        if missing && !self.adjacent_accepts(&syl) {
+            // Zhen-revert section 2.9: the adjacent-key rule above had its turn; what it did not take reverts (c).
+            if let Some(o) = self.revert_missing(tone)? {
+                return Ok(o);
+            }
+            self.nothing(old); // section 1.1: a syllable the lexicon lacks changes nothing
             return self.handled();
         }
+        // Section 2.6: the keys of a short word (in the lexicon, so no revert) that the candidate list adds the English of.
+        let short = (!missing && self.shadow_on()).then(|| {
+            let mut keys = self.shadow_text();
+            keys.extend((tone > 0).then(|| TONE_KEYS_STANDARD[tone - 1]));
+            keys
+        });
         self.clear_pend();
         self.pred_dirty = true;
-        self.insert_token(syl, None, None)
+        let o = self.insert_token(syl, None, None)?;
+        if let Some(word) = short.filter(|w| ENGLISH_SHORT.contains(&w.as_str())).filter(|_| o.commit.is_empty()) {
+            self.last_short = Some((self.cursor - 1, word));
+        }
+        Ok(o)
     }
 
     /// Fuzzy input, bit 4 (docs/contracts/fuzzy-input.md section 2.1): a syllable the lexicon lacks is accepted when it has a lexicon
@@ -3497,7 +3496,7 @@ impl Engine {
             }
             if let Some(word) = english_of(&self.syls[touching]) {
                 // zhen-inline sections 1.0 and 1.3c: right after an English token, its writings starting from the text it has now;
-                // the punctuation table is not asked. A token an auto-keep made adds the Chinese item of the syllable it remembers.
+                // the punctuation table is not asked. A token a revert made adds the Chinese item of the syllable it remembers.
                 let f = self.fixed.iter().find(|f| f.start == touching);
                 let mut list: Vec<(String, usize)> = Self::english_writings(f.map_or(word, |f| f.word.as_str())).into_iter().map(|w| (w, 1)).collect();
                 let zh = f.and_then(|f| f.zh.clone());
@@ -3609,11 +3608,19 @@ impl Engine {
         if let Some(keys) = &digits {
             list.push((keys.clone(), 1));
         }
+        // Zhen-revert section 2.6: right after the syllable made from a short word's keys, that word's lower and upper case close the
+        // list. Only the one syllable at position `i`, whatever range the window lists.
+        let short = self.ls_now.take().filter(|(i, _)| self.cursor == i + 1 && !list.is_empty() && digits.is_none());
+        if let Some((_, word)) = &short {
+            list.push((word.to_ascii_lowercase(), 1));
+            list.push((word.to_ascii_uppercase(), 1));
+        }
         if !list.is_empty() {
             let mut c = Cands::new(list, self.cand_vertical);
             c.alt = alt;
             c.rows = rows;
             c.dalt = digits.map(DigitAlt::Digits);
+            c.short = short;
             self.cands = Some(c);
         }
     }
@@ -3651,8 +3658,11 @@ impl Engine {
     /// still be in the file, so "memory changed" says nothing about the file. `must_rewrite` is set
     /// first, so a panic or failure part way makes the next write a full rewrite too.
     fn forget_highlighted(&mut self) -> Result<(), EngineError> {
-        let Some(c) = self.cands.as_ref().filter(|c| !c.english) else { return Ok(()) }; // an English item has nothing to forget
+        let Some(c) = self.cands.as_ref() else { return Ok(()) };
         let Some((word, l)) = c.list.get(c.sel).cloned() else { return Ok(()) };
+        if c.short.is_some() && c.sel + 2 >= c.list.len() {
+            return Ok(()); // a short word's English item (zhen-revert section 2.6) has nothing to forget
+        }
         if c.sel < c.rows.len() {
             // Predict-down contract B.3.1: a row item forgets as in the entered row (§10.3): re-decode, recompute the row
             // (its keys and its "not the shown word" filter follow the new decoding), then the window stays open on the
@@ -3668,6 +3678,7 @@ impl Engine {
             let after_digit_token = self.avail() == 0 && self.cursor > 0 && digit_of(&self.syls[self.cursor - 1]).is_some();
             let kept: Vec<(String, usize)> = match &c.dalt {
                 _ if after_digit_token => c.list[c.rows.len()..].to_vec(),
+                _ if c.short.is_some() => c.list[c.list.len() - 2..].to_vec(),
                 Some(_) => c.list[c.list.len() - 1..].to_vec(),
                 None => Vec::new(),
             };
@@ -3798,10 +3809,18 @@ impl Engine {
 
     /// Fix candidate `idx` over its range, close candidates, recompute.
     fn choose(&mut self, idx: usize) -> Result<(), EngineError> {
-        if self.english_open() {
-            return self.choose_english(idx, false);
-        }
         let Some(mut c) = self.cands.take() else { return Ok(()) };
+        // Zhen-revert section 2.6: the last two items swap the one syllable they are for for an English token, nothing else.
+        if let Some((i, _)) = c.short.take().filter(|_| idx + 2 >= c.list.len()) {
+            let word = c.list[idx].0.clone();
+            self.cursor = i;
+            self.remove_syllable(i)?;
+            let commit = self.put_english(format!("{PUNCT_PREFIX}{word}"), word, None)?;
+            if !commit.is_empty() {
+                self.commit_out = Some(commit);
+            }
+            return Ok(());
+        }
         if let Some(alt) = c.dalt.take().filter(|_| idx + 1 == c.list.len() && idx >= c.rows.len()) {
             let word = c.list[idx].0.clone();
             let commit = self.choose_digit_alt(alt, word)?;
@@ -3887,5 +3906,46 @@ impl Engine {
         self.fixed.push(Fixed { start, end, word, pre, key, pick_key, zh, frozen: false, split_off: false, displaced_new });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
+    }
+}
+
+/// Zhen-revert section 2.6, the one rule for the short-word mark: only a key that changed nothing as a whole gives it back. A key that
+/// ends an English run (or a digit buffer) and then dispatches itself again has changed something, whatever the second call does nothing
+/// about. The mark and a run never meet in typing (a run opens with a key that takes the mark), so the state is set by hand.
+#[cfg(test)]
+mod short_mark_tests {
+    use super::*;
+
+    fn engine() -> Engine {
+        let mut e = Engine::with_lexicon(Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap()), Layout::Standard);
+        e.set_english(true).unwrap();
+        e
+    }
+
+    #[test]
+    fn a_key_that_ends_a_run_and_then_does_nothing_keeps_the_mark_taken() {
+        let mut e = engine();
+        e.key(Key::ch('w', MOD_SHIFT)).unwrap(); // the run `W`
+        e.last_short = Some((0, "ai".to_string()));
+        let o = e.key(Key::new(KeyKind::Up)).unwrap(); // ends the run (a token), then Up does nothing in the inner dispatch
+        assert!(o.handled && e.syls.len() == 1, "premise: the run became a token");
+        assert!(e.last_short.is_none(), "the key changed something: the mark is not given back");
+        // The same Up on a composition with no run changes nothing: the mark is given back.
+        e.last_short = Some((0, "ai".to_string()));
+        e.key(Key::new(KeyKind::Up)).unwrap();
+        assert!(e.last_short.is_some(), "a key that changed nothing gives the mark back");
+    }
+
+    #[test]
+    fn the_up_key_of_an_open_digit_buffer_follows_the_same_rule() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let mut e = Engine::new(&root.join("data/lexicon"), Layout::Standard).unwrap();
+        e.load_lm(&root.join("data/lm/bigram.sjlm")).unwrap();
+        e.set_english(true).unwrap();
+        e.key(Key::ch('1', 0)).unwrap();
+        assert!(e.drun.is_some(), "premise: a digit buffer is open");
+        e.last_short = Some((0, "ai".to_string()));
+        e.key(Key::new(KeyKind::Up)).unwrap();
+        assert!(e.drun.is_some() && e.last_short.is_some(), "Up in the buffer changes nothing: the mark stays");
     }
 }
