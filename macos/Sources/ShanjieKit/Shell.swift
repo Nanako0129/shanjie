@@ -100,13 +100,19 @@ public final class MemoryDemoteStore: DemoteStore {
 @MainActor
 public protocol PredictionStore: AnyObject {
     var prediction: Bool? { get set }
+    /// docs/contracts/browser-first-syllable.md section 3: whether browsers hide the row for the first syllable; `nil` is on.
+    var browserFirstSyllable: Bool? { get set }
 }
 
 /// The in-memory PredictionStore.
 @MainActor
 public final class MemoryPredictionStore: PredictionStore {
     public var prediction: Bool?
-    public init(_ prediction: Bool? = nil) { self.prediction = prediction }
+    public var browserFirstSyllable: Bool?
+    public init(_ prediction: Bool? = nil, browserFirstSyllable: Bool? = nil) {
+        self.prediction = prediction
+        self.browserFirstSyllable = browserFirstSyllable
+    }
 }
 
 /// Where the "可省略韻母" switch is kept (docs/contracts/v3-engine.md section 12.1): `nil` means never chosen, which is off.
@@ -385,6 +391,35 @@ public final class Shell {
     ]
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
+    /// Chromium browsers (docs/contracts/browser-first-syllable.md section 2): Google Docs answers an input method's first
+    /// rectangle query with the view's origin, so the prediction row is not shown for the first syllable there. Crest is
+    /// missing: its bundle ID is not known yet.
+    static let browserApps: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
+        "org.chromium.Chromium",
+        "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
+        "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.nightly",
+        "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "com.operasoftware.OperaGX",
+    ]
+
+    /// browser-first-syllable section 1: at most one syllable on screen, a run of zhuyin symbols and tones counting as one and
+    /// every other character as one ("ㄘㄜ", "測" and "" are; "測ㄕ" is not).
+    static func singleSyllable(_ preedit: String) -> Bool {
+        var count = 0
+        var inZhuyin = false
+        for u in preedit.unicodeScalars {
+            let zhuyin: Bool
+            switch u.value {
+            case 0x3105...0x3129, 0x02CA, 0x02C7, 0x02CB, 0x02D9: zhuyin = true
+            default: zhuyin = false
+            }
+            if !zhuyin || !inZhuyin { count += 1 }
+            if count > 1 { return false }
+            inZhuyin = zhuyin
+        }
+        return true
+    }
+
     /// The one place the profile is decided (profile-choice section 2.2). `auto`: no bundle ID is formal, as before; then the
     /// user's choice for the app; then `chatApps`.
     static func profile(bundle: String?, mode: ProfileMode, overrides: [String: UInt32]) -> UInt32 {
@@ -409,6 +444,8 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
+    /// browser-first-syllable section 3: hide the passive prediction row for the first syllable in `browserApps` (default on).
+    private(set) var browserFirstSyllableOn = true
     private let abbreviationStore: AbbreviationStore
     /// V3 section 12: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
     private(set) var abbreviationOn = false
@@ -659,6 +696,7 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
+        browserFirstSyllableOn = predictionStore.browserFirstSyllable ?? true
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
@@ -829,6 +867,13 @@ public final class Shell {
         predictionStore.prediction = on
         defer { changed() }
         return engine?.setPrediction(on)
+    }
+
+    /// The settings window's browser switch (browser-first-syllable section 3): the shell's own switch, nothing goes to the core.
+    func setBrowserFirstSyllable(_ on: Bool) {
+        browserFirstSyllableOn = on
+        predictionStore.browserFirstSyllable = on
+        changed()
     }
 
     /// The settings window's 中英文之間自動加空格 (cjk-spacing section 2): the shell's own switch, nothing goes to the core.
@@ -1190,6 +1235,9 @@ public final class Session {
     /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
     /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
     private var spacingPrev: Character?
+    /// browser-first-syllable section 4: this client's bundle ID as last read by `send` or passed to `applyProfile`; never read
+    /// for this rule alone.
+    private var bundle: String?
 
     public init(shell: Shell, client: TextClient) {
         self.shell = shell
@@ -1423,6 +1471,7 @@ public final class Session {
     /// The profile for this client's app, `bundle` being its bundle ID as the caller read it. No owner check: callers claim
     /// first (`activate`, `handle`, `toggleAppChat`) or are the owner (`Shell.reapplyProfileToOwner`).
     fileprivate func applyProfile(bundle: String?) {
+        self.bundle = bundle
         switch shell.setProfile(profile(for: bundle)) {
         case .ok(let o)?: apply(o)
         case .failed(let c)?: _ = fail(c)
@@ -1434,6 +1483,7 @@ public final class Session {
     func send(_ key: ShanjieKey) -> Bool {
         guard let engine = shell.engine else { return false }
         let bundle = client.bundleIdentifier  // a synchronous IPC: read once, for the gate and the left context's terminal check
+        self.bundle = bundle
         let paused = applyLearningGate(engine, bundle: bundle)
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
@@ -1492,7 +1542,7 @@ public final class Session {
         shell.composing = !o.preedit.isEmpty
         // Zhen-inline section 1.3f: an open English run has no candidates, so the hint takes the window's place.
         let hint = o.candidates.isEmpty && o.englishRunLength > 0
-        if o.candidates.isEmpty && !hint {
+        if o.candidates.isEmpty && !hint || hidesFirstSyllableRow(o) {
             shell.hideCandidates()
         } else {
             let cursor = Int(o.cursorUTF16)
@@ -1521,6 +1571,12 @@ public final class Session {
             }
         }
         takeRerank()
+    }
+
+    /// browser-first-syllable sections 1 and 4: a passive prediction row for the first syllable, in a browser, is not shown.
+    private func hidesFirstSyllableRow(_ o: CoreOutput) -> Bool {
+        o.selected == -1 && !o.candidates.isEmpty && shell.browserFirstSyllableOn && !shell.abbreviationOn
+            && bundle.map(Shell.browserApps.contains) == true && Shell.singleSyllable(o.preedit)
     }
 
     /// Section 7 and zhen-inline section 1.3f: the preedit with a single underline, and a thick one over the open English run

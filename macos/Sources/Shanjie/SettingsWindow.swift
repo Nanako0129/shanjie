@@ -290,6 +290,12 @@ struct SettingsPageForm: View {
             case .candidates:
                 Section("選字") {
                     Toggle(MenuEntry.Text.prediction, isOn: Binding(get: { model.prediction }, set: { model.setPrediction($0) }))
+                    // browser-first-syllable section 3: right under 即時預測, greyed (setting kept) while it is off; not in the menu.
+                    Toggle(MenuEntry.Text.browserFirstSyllable,
+                           isOn: Binding(get: { model.browserFirstSyllable }, set: { model.setBrowserFirstSyllable($0) }))
+                        .disabled(!model.prediction)
+                    Text(MenuEntry.Text.browserFirstSyllableNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     // Greyed while the prediction row is off, like the menu item (v3-engine section 12.1).
                     if model.showsAbbreviation {
                         Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
