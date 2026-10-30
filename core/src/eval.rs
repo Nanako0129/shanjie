@@ -94,6 +94,82 @@ impl Lenient {
     }
 }
 
+/// The forms score's table (docs/contracts/forms-score.md): dictionary-attested spellings, loaded only for `--forms-rowstats`
+/// and kept apart from `Lenient` (never merged into it). `apply` runs after `Lenient::apply`: first the word pairs (greedy
+/// longest match), then the single-character pairs, each only where that position's row syllable is in the pair's reading
+/// condition. Every replacement has the same length, so positions never move. The table is normalized by tools/build_forms.py.
+pub struct Forms {
+    words: HashMap<String, String>,
+    longest: usize,
+    chars: HashMap<char, (char, Vec<String>)>,
+}
+
+impl Forms {
+    pub fn parse(text: &str) -> Result<Forms, Error> {
+        let (mut words, mut chars) = (HashMap::new(), HashMap::new());
+        for (i, line) in text.lines().enumerate() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let bad = Error::BadForms { line: i + 1 };
+            let f: Vec<&str> = line.split('\t').collect();
+            match f.as_slice() {
+                ["word", v, c] if !v.is_empty() && !c.is_empty() => {
+                    if words.insert(v.to_string(), c.to_string()).is_some() {
+                        return Err(bad);
+                    }
+                }
+                ["char", x, y, conds] => {
+                    let (mut xs, mut ys) = (x.chars(), y.chars());
+                    let (Some(x), None, Some(y), None) = (xs.next(), xs.next(), ys.next(), ys.next()) else { return Err(bad) };
+                    let conds: Vec<String> = conds.split(',').map(String::from).collect();
+                    if conds.iter().any(|c| c.is_empty()) || chars.insert(x, (y, conds)).is_some() {
+                        return Err(bad);
+                    }
+                }
+                _ => return Err(bad),
+            }
+        }
+        let longest = words.keys().map(|k| k.chars().count()).max().unwrap_or(0);
+        Ok(Forms { words, longest, chars })
+    }
+
+    fn apply_words(&self, cs: &[char]) -> Vec<char> {
+        let (mut out, mut i) = (Vec::new(), 0);
+        'outer: while i < cs.len() {
+            for n in (1..=self.longest.min(cs.len() - i)).rev() {
+                let key: String = cs[i..i + n].iter().collect();
+                if let Some(c) = self.words.get(&key) {
+                    out.extend(c.chars());
+                    i += n;
+                    continue 'outer;
+                }
+            }
+            out.push(cs[i]);
+            i += 1;
+        }
+        out
+    }
+
+    fn apply_chars(&self, cs: &[char], syls: &[String]) -> Vec<char> {
+        cs.iter()
+            .zip(syls)
+            .map(|(c, s)| match self.chars.get(c) {
+                Some((y, conds)) if conds.contains(s) => *y,
+                _ => *c,
+            })
+            .collect()
+    }
+
+    /// `s` is already `Lenient::apply`'d. `syls` is the row's reading; when its length differs from `s`'s the single-character
+    /// step is skipped (the word pairs still apply).
+    pub fn apply(&self, s: &str, syls: &[String]) -> String {
+        let cs = self.apply_words(&s.chars().collect::<Vec<_>>());
+        let cs = if cs.len() == syls.len() { self.apply_chars(&cs, syls) } else { cs };
+        cs.into_iter().collect()
+    }
+}
+
 /// Python round(x, k) then repr(): exact decimal rounding, shortest round-trip, `1.0` not `1`.
 pub fn pyround(x: f64, k: usize) -> String {
     let r: f64 = format!("{x:.k$}").parse().unwrap();

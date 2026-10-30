@@ -1,4 +1,4 @@
-use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
+use cli::common::{dev_rows, format_rowstats, levenshtein, load_forms, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
@@ -239,6 +239,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
+    let mut forms_rowstats = None::<String>;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
@@ -275,6 +276,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--dump" => dump = Some(val()?),
             "--dump-words" => dump_words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
+            "--forms-rowstats" => forms_rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
             "--rerank-level" => {
@@ -404,6 +406,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
         None => None,
     };
+    // docs/contracts/forms-score.md: the table is read, and the file opened, only when the flag is given.
+    let forms = match &forms_rowstats {
+        Some(_) => Some(load_forms()?),
+        None => None,
+    };
+    let forms_rowstats = match forms_rowstats {
+        Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create forms rowstats ({:?})", e.kind()))?),
+        None => None,
+    };
     let mut scores = match tinylm_scores {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
         None => None,
@@ -502,6 +513,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
+    let (mut frs, mut no_char_step) = (Vec::new(), 0usize);
     let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
         top1 += out.ok as usize;
         o64 += out.in64 as usize;
@@ -515,6 +527,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
         if let Some(d) = dump_words.as_mut() {
             d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
+        }
+        if let Some(fm) = &forms {
+            // Same row, same reading for both sides; Lenient first, then the forms table (the contract's fixed order).
+            let (gold, syls) = (&rows[i].0, &rows[i].1);
+            no_char_step += (gold.chars().count() != syls.len()) as usize;
+            frs.push((fm.apply(&len.apply(&out.first), syls) == fm.apply(&len.apply(gold), syls), out.first.clone(), gold.clone()));
         }
         rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
         firsts.push(out.first);
@@ -610,6 +628,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if let Some(mut f) = rowstats {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
+    }
+    if let Some(mut f) = forms_rowstats {
+        f.write_all(format_rowstats(&frs).as_bytes()).map_err(|e| format!("cannot write forms rowstats ({:?})", e.kind()))?;
+        eprintln!("forms: {no_char_step} rows without the single-character step (syllable count differs from the sentence length)");
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
     // A non-standard level is a different setting from the shipping one: tools/bench.py and tools/triage.py compare the whole tag, so it fails their cells.
