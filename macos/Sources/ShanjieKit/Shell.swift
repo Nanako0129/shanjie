@@ -626,8 +626,9 @@ public final class Shell {
     var englishOverwriteEnabled: Bool { englishEnabled && englishOn }
     /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the overwrite choice.
     var englishKeyOrderEnabled: Bool { englishOverwriteEnabled }
-    /// The 快打時鍵序顛倒不當英文 choice is greyed on the same condition.
-    var englishReversalGuardEnabled: Bool { englishOverwriteEnabled }
+    /// The 快打時鍵序顛倒不當英文 choice only matters for trigger (b), which needs the key-order choice on: greyed unless that one is
+    /// enabled and on (the setting is kept).
+    var englishReversalGuardEnabled: Bool { englishKeyOrderEnabled && englishKeyOrderOn }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
