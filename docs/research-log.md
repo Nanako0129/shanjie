@@ -10644,6 +10644,13 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 增補 1b 的 `/code-review`：提示改成只在組字區空著時顯示（組字中停一陣子再選字不算開始打字）；1a、1b 合成一個狀態（`lastTypingAt` 為 `nil` 或間隔達到 30 秒）；門檻含 30 秒整，補邊界測試；時鐘的睡眠行為改寫成引用 `man clock_gettime`，沒有實機量過；終端機翻頁時每停 30 秒閃一次「英」寫成已知行為。`ShiftToggleSessionTests` 28 個全過；六個突變（`>` 代替 `>=`、不看組字區、不看間隔、單按 Shift 不更新時間、activate 不設 `nil`、不看開關）各讓至少一個測試失敗。
 - 合併前的關卡（2026-10-31）：fresh verifier CONFIRMED（`7fa1b8bf`，措辭兩處改在 `4bd59610`）；CI 在 `4bd59610` 全綠。維護者實機（裝 main 合併這一片與設定視窗固定大小的開發版）：同一個 App 停打半分鐘以上再打字，「英」或「中」再出現一次，維護者回報 OK。契約 §2 另外要記的 TextEdit 與 Chrome 換輸入框（不擋合併）還沒記，換輸入框時會不會顯示提示仍沒量。
 
+## 2026-10-30：設定視窗固定大小
+
+- 維護者要求設定頁不要隨著內容長高、固定在舒適的大小、但不寫死以免小解析度超出邊界。契約 `docs/contracts/settings-fixed-size.md`（plan-verifier READY）。
+- 改了：視窗 frame 高度＝ min(`SettingsLayout.preferredHeight` 620 pt, 螢幕 `visibleFrame` 高度)，純函式 `SettingsLayout` 放在 `macos/Sources/ShanjieKit/Settings.swift`，和 `settingsFrame` 同一個檔；`SettingsWindow.swift` 的 `fit()` 不再用隱藏的 `NSHostingView` 量各頁，拿掉 `measureSlack` 與 `onRowCountChange`；螢幕參數改變時的重算與夾回、打開時置中不變。`settings-sidebar.md` §2.2、§3、`profile-choice.md` §2.4、`docs/PLAN.md` 已加〔2026-10-30〕註記。
+- 測試：`SettingsTests` 新增一個測試（可見高度比 `preferredHeight` 高、低、相等三種，數值用常數表示）；拿掉夾的突變讓它失敗。620 是起點、不是對照參考量的；量到維護者 Mac 的可見高度是內建螢幕 1074.5 pt、外接螢幕 1409 pt。維護者實機確認見本節最後一條。`/code-review` 的 8 項都已改（驗收步驟 6、7 的說法、註解裡沒量過的比例與高度、測試改用常數、契約狀態、`settings-window.md` §2.1 的註記、併入 `Settings.swift`）。
+- 合併前的關卡與實機（2026-10-31）：fresh verifier CONFIRMED；CI 在 `24441fa8` 全綠。維護者實機（裝 main 合併這一片與中英混打接回的開發版）：620 pt 在預設設定下舒適（10-30，調 0 輪）；外接螢幕改成 1280×720、Dock 放到最大後再開，視窗夾在選單列與 Dock 之間，「選字記憶」頁捲得到最下面的「清除選字記憶…」，維護者回報 OK（10-31）。視窗的 frame 高度沒有另外讀 `CGWindowListCopyWindowInfo` 記數字。
+
 ## 2026-10-31：錯字回報第 171 列（隨便搭T恤）
 
 - 維護者截圖「然後上衣就隨便搭T續」，「恤」出成「續」。加成 `然後上衣就隨便搭T|恤|ㄒㄩˋ`（英文字母 T 放在前文，和第 35、50 列同樣處理）；讀音由 `tools/readings.py` 產生，沒有 CHECK。

@@ -462,4 +462,12 @@ final class SettingsTests: XCTestCase {
         // Sticks out above the menu bar: moved down so the top edge sits on the area's.
         XCTAssertEqual(settingsFrame(CGRect(x: 100, y: 600, width: 580, height: 500), clampedInto: area), CGRect(x: 100, y: 440, width: 580, height: 500))
     }
+
+    // docs/contracts/settings-fixed-size.md acceptance 1: the preferred height on a tall screen, the visible height on a short one.
+    func testSettingsHeightIsThePreferredOneClampedIntoTheScreen() {
+        let h = SettingsLayout.preferredHeight
+        XCTAssertEqual(SettingsLayout.frameHeight(visibleHeight: h + 280), h)
+        XCTAssertEqual(SettingsLayout.frameHeight(visibleHeight: h - 120), h - 120)
+        XCTAssertEqual(SettingsLayout.frameHeight(visibleHeight: h), h)
+    }
 }
