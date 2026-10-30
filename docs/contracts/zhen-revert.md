@@ -1,6 +1,6 @@
 # 中英混打第四片：直接回退（每一鍵判斷、不查單字表）
 
-狀態：**已從 main revert**（2026-10-28，維護者實機：「誤觸極高不能用」「這片應該先不要出」；原因見研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。以下是當時的契約，留作紀錄，程式已不在 main。
+狀態：2026-10-30 接回，另加 `zhen-reapply.md`（新開關「快打時鍵序顛倒不當英文」，預設開，(b) 逆序因此預設不發生）。2026-10-28 曾因維護者實機誤觸太多從 main revert（研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。
 
 舊狀態：**READY**（2026-10-27 收尾審查；main 的子代理起草，plan-verifier 第 1 次 REVISE 七項逐項處置在 §10；§9 是維護者同日的決定，含 (A) 鄰鍵優先、(B) 正式寫法另開片）。**順序**：這一片接在模糊輸入（`docs/contracts/fuzzy-input.md`，分支 `feat/fuzzy-input`，PR #273 開著、領先 main 39 個 commit）**之後**：兩片都改 `finish_syllable`「詞庫沒有的音節」那一支，PR #273 先合併，本片從合併後的 main 開分支（§2.9、§8）。接在 `docs/contracts/zhen-mixed.md`（第一片）、`zhen-inline.md`（第二片）、`zhen-keyorder.md`（第三片，PR #311）之後；這一片**取代**第一片的英文窗與單字表觸發、第二片的顯示規則 D 與自動固定、第三片的證據計數與 `TWO_LETTER`，沒寫到的照那三份。標〔推論〕的是從程式讀出來、沒有在契約裡寫過的行為；標〔量過〕的是在 `data/lexicon/mcbpmf-data.txt` 查過的事實（只查基底檔，疊加層沒查，executor 實作前用 `lex.entries` 再核對一次）。
 
@@ -33,7 +33,7 @@
 | 觸發 | 開關 | 殼的預設 |
 |---|---|---|
 | (a) 覆寫同一欄 | **新開關「重打同一個位置算英文」**（`set_english_overwrite`，鍵 `englishOverwrite`） | 開（§4 的量測過了才定；§9 第 1 題） |
-| (b) 逆序 | 第三片的「依按鍵順序判斷英文」（`set_english_key_order`，鍵 `englishKeyOrder`） | **開**（維護者 2026-10-27；原本關） |
+| (b) 逆序 | 第三片的「依按鍵順序判斷英文」（`set_english_key_order`，鍵 `englishKeyOrder`）；〔2026-10-30〕另受「快打時鍵序顛倒不當英文」（`set_english_reversal_guard`，鍵 `englishReversalGuard`，預設開）管：它開著時 (b) 不發生（`zhen-reapply.md` §1.2） | **開**（維護者 2026-10-27；原本關） |
 | (c) 音節完成時詞庫沒有這個音節——**空白鍵** | 中英混打總開關（`english`） | 開 |
 | (c) ——**聲調鍵** | 「依按鍵順序判斷英文」 | 開 |
 
