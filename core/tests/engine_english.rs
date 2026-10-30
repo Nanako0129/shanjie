@@ -1588,7 +1588,7 @@ fn reversal_guard_chinese_in_a_hurry_english_words_still_come() {
         let mut e = eng();
         let o = run(&mut e, keys);
         assert!(e.english_reverted().is_none(), "{keys}");
-        assert!(o.preedit.starts_with(word) || o.candidates.iter().any(|c| c == word), "{keys}: {} {:?}", o.preedit, o.candidates);
+        assert!(o.preedit == word, "{keys}: {} {:?}", o.preedit, o.candidates);
     }
     for (keys, word) in [("o k _", "ok"), ("g t a 6 _", "gta6"), ("r d r 2 _", "rdr2"), ("p o e 2 _", "poe2")] {
         let mut e = eng();
@@ -1751,7 +1751,7 @@ fn the_calls_the_shell_makes_before_every_key_keep_the_short_word_mark() {
     let calls: Vec<(&str, Box<dyn Fn(&mut Engine)>)> = vec![
         ("set_learning", Box::new(|e| e.set_learning(true))),
         ("set_left_context", Box::new(|e| e.set_left_context(""))),
-        ("set_punctuation", Box::new(|e| drop(e.set_punctuation("")))),
+        ("set_punctuation", Box::new(|e| { let _ = e.set_punctuation(""); })),
         ("set_newword", Box::new(|e| e.set_newword(true))),
         ("set_today", Box::new(|e| e.set_today(Some(20_000)))),
     ];
