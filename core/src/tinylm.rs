@@ -298,9 +298,8 @@ pub(crate) const O_NONBLOCK: i32 = 0o4000;
 pub(crate) const O_NONBLOCK: i32 = 0x0004; // macOS and the BSDs
 
 /// S7c-2a section 2.6 (F3): opens first, then checks the opened handle (a regular file of at most `max` bytes) and reads at
-/// most the cap from that same handle, so the file checked is the file read. Also the zhen-mixed word list's reader
-/// (`Engine::load_english`, with its own cap). `Io`: unopenable or not a regular file; `Format`: over the cap.
-pub(crate) fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, TinyLmError> {
+/// most the cap from that same handle, so the file checked is the file read. `Io`: unopenable or not a regular file; `Format`: over the cap.
+fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, TinyLmError> {
     use std::io::Read;
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);

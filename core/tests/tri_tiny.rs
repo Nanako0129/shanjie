@@ -361,7 +361,6 @@ fn unknown_start_ends_at_punctuation_and_at_an_english_run() {
     close(e.total_score().unwrap(), want);
     // an open English run at the cursor
     let mut e = engine(&f, Profile::Formal);
-    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     e.set_left_context("他");
     type_syls(&mut e, "ㄓㄢˋ ㄓㄢˋ");
@@ -455,7 +454,6 @@ fn learned_word_skips_the_table_and_its_neighbour_does_not() {
 fn english_run_inside_a_stretch_cuts_the_total_like_the_decoder() {
     let f = fx(true);
     let mut e = engine(&f, Profile::Formal);
-    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     type_syls(&mut e, "ㄊㄚ ㄓㄢˋ ㄊㄚ ㄓㄢˋ");
     for _ in 0..2 {

@@ -279,24 +279,30 @@ struct SettingsPageForm: View {
                         Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                             .disabled(!model.prediction)
                     }
-                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
-                    // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
+                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the layout is Eten, like the menu item (zhen-mixed section 3.2).
                     Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
                         .disabled(!model.englishEnabled)
                     // Digits.md A.3.7: one line under the toggle, as the 聊天／書面 note above is written.
                     Text(MenuEntry.Text.englishDigitsNote)
                         .font(.caption).foregroundStyle(.secondary)
-                    // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
-                    Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
-                        Text(MenuEntry.Text.englishDisplayTyped).tag(true)
-                        Text(MenuEntry.Text.englishDisplaySpace).tag(false)
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!model.englishInlineEnabled)
-                    // zhen-keyorder section 3: after the display choice, with a line of what it costs; greyed on the same condition.
+                    // zhen-reapply section 1.2: before the key-order choice; greyed unless key-order is enabled and on, since (b) needs it on.
+                    Toggle(MenuEntry.Text.englishReversalGuard, isOn: Binding(get: { model.englishReversalGuard }, set: { model.setEnglishReversalGuard($0) }))
+                        .disabled(!model.englishReversalGuardEnabled)
+                    Text(MenuEntry.Text.englishReversalGuardNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    // zhen-keyorder section 3 with zhen-revert section 3: under the toggle, with a line of what it costs; greyed on the
+                    // toggle's condition and while the toggle is off.
                     Toggle(MenuEntry.Text.englishKeyOrder, isOn: Binding(get: { model.englishKeyOrder }, set: { model.setEnglishKeyOrder($0) }))
                         .disabled(!model.englishKeyOrderEnabled)
                     Text(MenuEntry.Text.englishKeyOrderNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle(MenuEntry.Text.englishOverwrite, isOn: Binding(get: { model.englishOverwrite }, set: { model.setEnglishOverwrite($0) }))
+                        .disabled(!model.englishOverwriteEnabled)
+                    Text(MenuEntry.Text.englishOverwriteNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    // shift-toggle section 1: always enabled (it works with the English mixing off too: then the composition is sent first).
+                    Toggle(MenuEntry.Text.shiftToggle, isOn: Binding(get: { model.shiftToggle }, set: { model.setShiftToggle($0) }))
+                    Text(MenuEntry.Text.shiftToggleNote)
                         .font(.caption).foregroundStyle(.secondary)
                     // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
                     Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
@@ -335,7 +341,7 @@ struct SettingsPageForm: View {
                     }
                     Toggle("鄰鍵打錯", isOn: Binding(get: { model.fuzzyFlags >> 4 & 1 == 1 }, set: { model.setFuzzy(bit: 4, $0) }))
                         .disabled(!model.fuzzyAdjacentEnabled)
-                    Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。")
+                    Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。開著時 go、cp、cup 這類字會被收成中文，不會變英文；要英文就按住 Shift 打，或把這個關掉。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             case .appearance:

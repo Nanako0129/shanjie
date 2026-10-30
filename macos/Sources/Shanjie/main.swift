@@ -90,12 +90,17 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "english") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "english") }
     }
-    /// The 英文的顯示 choice (docs/contracts/zhen-inline.md section 2), key `englishInline`; absent means true.
-    var englishInline: Bool? {
-        get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
-        set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
+    /// The 重打同一個位置算英文 choice (docs/contracts/zhen-revert.md section 3), key `englishOverwrite`; absent means true.
+    var englishOverwrite: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishOverwrite") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishOverwrite") }
     }
-    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means false.
+    /// The 快打時鍵序顛倒不當英文 choice (docs/contracts/zhen-reapply.md section 1.2), key `englishReversalGuard`; absent means true.
+    var englishReversalGuard: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishReversalGuard") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishReversalGuard") }
+    }
+    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means true (zhen-revert).
     var englishKeyOrder: Bool? {
         get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishKeyOrder") }
@@ -135,6 +140,15 @@ final class DefaultsItPackStore: ItPackStore {
     var itPack: Bool? {
         get { UserDefaults.standard.object(forKey: "itPack") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "itPack") }
+    }
+}
+
+/// The 單按 Shift 切換中英 switch (docs/contracts/shift-toggle.md section 1), key `shiftToggle` in the same domain; absent means on.
+@MainActor
+final class DefaultsShiftToggleStore: ShiftToggleStore {
+    var shiftToggle: Bool? {
+        get { UserDefaults.standard.object(forKey: "shiftToggle") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "shiftToggle") }
     }
 }
 
@@ -241,7 +255,8 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore())
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(),
+        shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)
