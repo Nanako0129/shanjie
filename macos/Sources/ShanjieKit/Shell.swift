@@ -1366,12 +1366,16 @@ public final class Session {
             let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
             applyProfile(bundle: bundle)
             syncAscii(bundle: bundle)
+            modeHintPending = shell.shiftToggleOn  // zhen-reapply section 1a: an owner change without activateServer counts too
         }
-        // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on.
+        // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on, after the key
+        // is handled (so a key that starts a composition anchors the hint to the marked text), only while the toggle is still on.
+        var showModeHint = false
         if modeHintPending, let event, Self.isTypingKey(event) {
             modeHintPending = false
-            showShiftHint(shell.engineAscii ? "英" : "中")
+            showModeHint = shell.shiftToggleOn
         }
+        defer { if showModeHint { showShiftHint(shell.engineAscii ? "英" : "中") } }
         // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
         if shell.engineAscii && !shell.composing { return false }
         // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
@@ -1433,12 +1437,10 @@ public final class Session {
         showShiftHint(on ? "英" : "中")
     }
 
-    /// zhen-reapply section 1a: a key that types: no Command, Control or Option, and one character from space to `~` (arrow and
-    /// function keys carry private-use characters, so they do not count).
+    /// zhen-reapply section 1a: a key that types: what `asciiKey` takes (no Control, Option, Command or Caps Lock, one character
+    /// `!` to `~`; arrow and function keys carry private-use characters, so they do not count), or a plain space.
     static func isTypingKey(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]), let chars = event.characters,
-              chars.unicodeScalars.count == 1, let u = chars.unicodeScalars.first else { return false }
-        return (0x20...0x7E).contains(u.value)
+        asciiKey(event) != nil || (event.characters == " " && event.modifierFlags.isDisjoint(with: [.control, .option, .command]))
     }
 
     /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).

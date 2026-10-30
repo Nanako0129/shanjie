@@ -100,11 +100,27 @@ final class ShiftToggleSessionTests: XCTestCase {
         let hint = FakeShiftHint()
         let c = Controller(makeShell(hint: hint))
         c.session.activate()
-        c.session.handle(Keys.event(123))  // ←, no characters
+        c.session.handle(Keys.event(123, flags: [.function, .numericPad], characters: "\u{F702}"))  // ← as the system sends it
         typeKey(c, "c", flags: .command)
         XCTAssertTrue(hint.shown.isEmpty)
         typeKey(c, "h")
         XCTAssertEqual(hint.shown.map(\.text), ["中"])
+    }
+
+    /// Section 1a: a key that reaches a new controller without activate (an owner change) arms the hint too, and the toggle turned off
+    /// in between shows nothing.
+    func testOwnerChangeArmsTheHintAndTheToggleOffSilencesIt() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(hint: hint)
+        let a = Controller(shell), b = Controller(shell)
+        a.session.activate()
+        typeKey(a, "h")
+        typeKey(b, "h")  // b claims the composition owner without activate
+        XCTAssertEqual(hint.shown.map(\.text), ["中", "中"])
+        a.session.activate()
+        shell.applyShiftToggle(false)
+        typeKey(a, "h")
+        XCTAssertEqual(hint.shown.map(\.text), ["中", "中"], "toggle off: no hint")
     }
 
     /// Section 1a: with the Shift toggle off nothing is pending.
