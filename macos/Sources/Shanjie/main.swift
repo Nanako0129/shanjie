@@ -58,6 +58,11 @@ final class DefaultsPredictionStore: PredictionStore {
         get { UserDefaults.standard.object(forKey: "prediction") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "prediction") }
     }
+    /// browser-first-syllable section 3, key `browserFirstSyllable`; absent means on.
+    var browserFirstSyllable: Bool? {
+        get { UserDefaults.standard.object(forKey: "browserFirstSyllable") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "browserFirstSyllable") }
+    }
 }
 
 /// The "可省略韻母" switch (docs/contracts/v3-engine.md section 12.1), key `abbreviation` in the same domain; absent means off.

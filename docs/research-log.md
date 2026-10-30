@@ -10571,3 +10571,22 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 起因：X0C-6 之後維護者決定 0c 實驗開關退場、核心程式也拿掉。
 - 拿掉：`core/src/oc.rs`、`core/tests/oc_tiny.rs`、`core/examples/oc_score.rs`、`eval/golden/oc-tiny/`、`tools/convert_oc.py`、`gen_oc_tiny.py`、`oc_ref.py`、`test_oc_ref.py` 與 Makefile 那一行；`tinylm.rs` 的 `gemm`、`exp_into`、`layer_norm` 改回私有。`experiments/x0c/` 與它的 CI 步驟、`eval/bench/external/x0c.json` 不動。
 - 行為不變（Mac，出貨設定，`--packs acg,it`）：拿掉前後聊天、書面 × dev302、打字測驗、錯字回報 6 格的 rowstats 與摘要行（含 `top1_sha256`）逐位元組相同。`cargo build --release --all-targets` 只有兩個 main 上本來就有的警告（`cli/src/english.rs`、`core/tests/engine_vertical.rs`）；`make test-python` 通過。
+
+## 2026-10-30：Google 文件的候選列跑到左上角（契約 `docs/contracts/browser-first-syllable.md`）
+
+- 起因：Discord 回饋（2026-10-29），Google 文件裡候選列與預測列一開始跑到視窗左上角。
+- 量法：tart 虛擬機、Chrome 156.0.8078.74，以訪客身分編輯一份 Google 文件，用 `--trace-startup=ime,input,disabled-by-default-ime` 錄 trace，偵錯版的殼把每次查詢的結果記進系統記錄（偵錯程式沒進版控）。
+- 量到的：Docs 用 EditContext，回給輸入法的組字範圍是 `{1,n}`。殼經過 IMK 能用的三條路都拿不到正確位置：
+  - `attributes(forCharacterIndex: 0)` 到 Chrome 變成 `{0,1}`，起點在組字範圍之前，Chrome 回過時的 `first_selection_rect`（`0,0 1x22`，視窗左上角）；
+  - 索引 1 以上沒有轉給 Chrome，回 (0, 0)；
+  - `firstRect(forCharacterRange:actualRange:)` 不管用 Swift 協定還是直接取 ObjC 實作呼叫，都回未初始化的值（1.6e-314），Chrome 沒收到查詢；
+  - 不顯示的 `IMKCandidates` 叫 `show` 之後，`candidateFrame()` 是 `{0,0} 51x266`，沒有定位，Chrome 也沒收到查詢。
+- 對照：蘋果注音按 ↓ 時問組字範圍內的字（例如 `{1,2}`），Chrome 走 `GetFirstRectForCompositionRange`，位置是對的。trace 裡另有回對位置的 `{1,1}` 查詢（走 `GetTextSelectionBounds`），不是殼發的。
+- 更正：前兩片的做法都不成立。
+  - 底線顏色（`marked-underline-color`）：受控實驗推翻。
+  - 重問加記住好位置（`candidate-requery`）：虛擬機驗收沒過，同一個錯的查詢重問 3 次都回 `0,0 1x22`。
+  - 加問游標所在處（`caret-line-rect`）：索引 1 以上 IMK 不轉給 Chrome。
+  - 這三片都不合併。
+- 第二個音節起位置是對的（新啟動的 Chrome、這一片的版本打 ㄘㄜˋ ㄕ）：組字區是「冊ㄕ」時殼問的範圍到 Chrome 是 `{1,2}`，走 `GetFirstRectForCompositionRange`，回 `411,241 16x20`，截圖裡預測列在游標那一行下面。偵錯記錄裡 `marked={1,2}` 拿到錯框的那幾行是「ㄘㄜ」（同一個音節的兩個注音符號），不是兩個字。
+- 維護者決定（2026-10-30）：瀏覽器清單裡第一個音節不顯示預測列，做成設定開關（預設開）。第一個音節時按 ↓ 或空白開的候選窗，問的是同一個起點 0 的範圍，位置應該一樣錯〔推論，沒有截圖量〕，寫成已知限制。
+- 驗收（虛擬機）：Google 文件打 ㄘ、ㄘㄜ、ㄘㄜˋ 每一張都沒有預測列，接著打 ㄕ 時預測列出現在游標那一行下面；TextEdit 打第一個音節時照舊有預測列。
