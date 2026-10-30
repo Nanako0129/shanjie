@@ -10601,3 +10601,25 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 流程：plan-verifier 第二次 REVISE 之後，main 把範圍縮成第 0 步就去量，沒有再送收尾審查，判讀表沒有經過審查。
 - 維護者決定（2026-10-30）：「停在這裡、寫紀錄」。
 - 結果（main 依這個決定寫的）：#334 的行為不變；Docs 第一個音節時按 Tab、↓、空白，以及游標移到組字區開頭，仍是已知限制。
+
+## 2026-10-30：Google 文件錯框能不能靠方框寬度辨認（任務 #69，探索，不出貨）
+
+- 想法：Docs 的錯框是 Chrome 的游標方框（寬 1 點），正確答案是字元方框（Chrome trace 裡 textarea `13x15`、Docs 第二個音節 `16x20`），殼若拿得到寬度，就能只在錯框時改用上一個好位置。
+- 量法：tart 虛擬機、Chrome 156.0.8078.79，偵錯版的殼把 `attributes(forCharacterIndex:lineHeightRectangle:)` 每次的回答記進系統記錄（偵錯程式沒進版控）。打 ㄘㄜˋ 按 ↓：本機 EditContext 測試頁（編輯器裡游標前有一個字，仿 Docs）、本機 textarea、TextEdit。
+- 量到的：殼拿到的方框寬度一律是 1（Chrome 的三次、TextEdit 的三次都是 `1.0x高度`）。寬度分不出錯框，這個做法不成立。
+- 另外量到：本機 EditContext 頁重現不了左上角。Chrome 對它的 `first_selection_rect` 是真的位置（`49,97 1x28`），候選窗落在那一行下面。Docs 的 `first_selection_rect` 停在 `0,0`，所以要重現左上角只能用 Docs 本身〔推論：差在 Docs 怎麼更新選取方框，沒量〕。
+
+## 2026-10-30：接回中英混打的直接回退與單按 Shift，加「快打時鍵序顛倒不當英文」（契約 `docs/contracts/zhen-reapply.md`）
+
+- 起因：Threads 使用者回報 0.6 打不出 `ok`、`gta6`；維護者選「接回來＋顛倒保護＋Shift」，隨 v0.6.1 出。
+- 接回：把 PR #322 的三個 revert commit（`34b556b3`、`5645d259`、`714744fe`）依 #319、#320、#321 的順序反轉。衝突照「保留這兩天 main 的改動」解：
+  - 文件：研究紀錄、PLAN、兩份契約留 main 的版本；s3a、s3b、設定視窗的規則照接回的版本，再補上 main 新增的瀏覽器開關與重排的 `manual` 規則。
+  - 程式：`packMask` 用 main 的（含台詞包）；`replay.rs`、建置與檢查腳本保留台詞包、拿掉單字表。
+  - 測試：`digits-off-en.txt` 用 `DIGITS_FIXTURE_DIR` 重產。和接回前的版本相比，只有候選清單與 8 列解碼不同，是換成 SJ-LM-7 的結果；和 main 的版本相比，英文段的列照 zhen-revert 的設計改變（數字鍵接在英文段後面）。
+- 新開關（核心 `set_english_reversal_guard`，殼鍵 `englishReversalGuard`，預設開）：開著時觸發 (b) 逆序不發生，(a) 覆寫、(c) 空白鍵與聲調鍵不變。
+- 驗證（Mac，只跑改到的測試檔）：
+  - 核心 `engine_english` 85、`engine_english_next` 16、`engine_replay` 5、`engine_digits` 60；FFI 26；CLI `english_sim` 7（固定種子的數字不變）；C 冒煙結束碼 0；`make test-swift` 312 個、2 個略過、0 個失敗。
+  - 實機六例（`k e 7`、`u v , ␣`、`j n o 6`、`u r . 4`、`i a 7`、`k x 7`）在預設開關下是「個、些、隨、就、麼、了」；`ok`、`gta6`、`rdr2`、`poe2` 加空白是英文 token；`ls` 只在新開關關掉時是英文。
+  - 窮舉：1,417 個讀音的 3,457 種顛倒鍵序，在預設開關下都不是英文，組字區和中英混打關著時相同。
+  - 突變：新開關不生效 → 實機六例與窮舉的測試失敗；新開關也擋掉覆寫 → 英文四個字的測試失敗（另有 28 個依賴覆寫的測試一起失敗）。
+- 還沒做：188 的完整 Rust 測試、`/code-review`、verifier、CI，以及維護者實機（契約 §2，合併前必做）。
