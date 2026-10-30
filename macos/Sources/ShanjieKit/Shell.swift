@@ -1337,6 +1337,8 @@ public final class Session {
     /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
     /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
     private var spacingPrev: Character?
+    /// zhen-reapply section 1a: set by `activate()` while the Shift toggle is on; the next typing key shows the 英/中 hint and clears it.
+    private var modeHintPending = false
     /// browser-first-syllable section 4: this client's bundle ID as last read by `send` or passed to `applyProfile`; never read
     /// for this rule alone.
     private var bundle: String?
@@ -1364,6 +1366,11 @@ public final class Session {
             let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
             applyProfile(bundle: bundle)
             syncAscii(bundle: bundle)
+        }
+        // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on.
+        if modeHintPending, let event, Self.isTypingKey(event) {
+            modeHintPending = false
+            showShiftHint(shell.engineAscii ? "英" : "中")
         }
         // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
         if shell.engineAscii && !shell.composing { return false }
@@ -1422,7 +1429,16 @@ public final class Session {
         if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
         pushAscii(on)
+        modeHintPending = false  // zhen-reapply section 1a: this hint already shows the mode
         showShiftHint(on ? "英" : "中")
+    }
+
+    /// zhen-reapply section 1a: a key that types: no Command, Control or Option, and one character from space to `~` (arrow and
+    /// function keys carry private-use characters, so they do not count).
+    static func isTypingKey(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]), let chars = event.characters,
+              chars.unicodeScalars.count == 1, let u = chars.unicodeScalars.first else { return false }
+        return (0x20...0x7E).contains(u.value)
     }
 
     /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
@@ -1454,6 +1470,7 @@ public final class Session {
         let bundle = client.bundleIdentifier
         applyProfile(bundle: bundle)
         syncAscii(bundle: bundle)
+        modeHintPending = shell.shiftToggleOn  // zhen-reapply section 1a; nothing is pending while the toggle is off
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.

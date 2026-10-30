@@ -63,6 +63,59 @@ final class ShiftToggleSessionTests: XCTestCase {
         XCTAssertEqual(hint.shown.map(\.text), ["英", "中"])
     }
 
+    /// zhen-reapply section 1a: a key event that types `ch` (with its characters, so it counts as a typing key).
+    @discardableResult
+    private func typeKey(_ c: Controller, _ ch: Character, flags: NSEvent.ModifierFlags = []) -> Bool {
+        c.session.handle(Keys.event(Keys.code(for: ch), flags: flags, characters: String(ch)))
+    }
+
+    /// Section 1a: after activate, the first typing key shows the mode once; later keys do not.
+    func testFirstTypingKeyAfterActivateShowsTheModeOnce() {
+        let hint = FakeShiftHint()
+        let c = Controller(makeShell(hint: hint))
+        c.session.activate()
+        typeKey(c, "h")
+        XCTAssertEqual(hint.shown.map(\.text), ["中"])
+        typeKey(c, "i")
+        XCTAssertEqual(hint.shown.map(\.text), ["中"], "only the first key")
+    }
+
+    /// Section 1a: in an app already in English, the first key shows 英 and still passes through.
+    func testFirstTypingKeyInEnglishShowsEnglishAndPassesThrough() {
+        let hint = FakeShiftHint()
+        let c = Controller(makeShell(hint: hint))
+        c.session.activate()
+        tap(c)  // 英 (and clears the pending hint)
+        XCTAssertEqual(hint.shown.map(\.text), ["英"])
+        typeKey(c, "h")
+        XCTAssertEqual(hint.shown.map(\.text), ["英"], "the tap already showed the mode")
+        c.session.deactivate()
+        c.session.activate()
+        XCTAssertFalse(typeKey(c, "h"), "English with nothing composed: passes through")
+        XCTAssertEqual(hint.shown.map(\.text), ["英", "英"])
+    }
+
+    /// Section 1a: arrows and shortcuts are not typing keys and keep the hint pending.
+    func testNonTypingKeysDoNotShowOrClearTheHint() {
+        let hint = FakeShiftHint()
+        let c = Controller(makeShell(hint: hint))
+        c.session.activate()
+        c.session.handle(Keys.event(123))  // ←, no characters
+        typeKey(c, "c", flags: .command)
+        XCTAssertTrue(hint.shown.isEmpty)
+        typeKey(c, "h")
+        XCTAssertEqual(hint.shown.map(\.text), ["中"])
+    }
+
+    /// Section 1a: with the Shift toggle off nothing is pending.
+    func testNoModeHintWithTheToggleOff() {
+        let hint = FakeShiftHint()
+        let c = Controller(makeShell(shift: MemoryShiftToggleStore(false), hint: hint))
+        c.session.activate()
+        typeKey(c, "h")
+        XCTAssertTrue(hint.shown.isEmpty)
+    }
+
     func testNoRectangleNoHintButTheStateSwitches() {
         let hint = FakeShiftHint()
         let c = Controller(makeShell(hint: hint))
