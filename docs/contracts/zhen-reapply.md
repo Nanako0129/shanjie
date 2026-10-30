@@ -71,7 +71,7 @@
   - 單按 Shift 關著時：activate 之後打 `h`，不顯示。
   - activate 之後單按 Shift 切換（顯示一次），接著打 `h`：不再顯示。
   - 測試的按鍵事件要明確帶 `characters:`（`Keys.event` 預設是空字串，空字串不算打字的鍵）。
-  - 突變：拿掉「待提示」的清除 → 「再打 `i` 不再顯示」失敗；拿掉 activate 時記下 → 第一條失敗。
+  - 突變：拿掉「待提示」的清除 → 「再打 `i` 不再顯示」失敗；拿掉 activate 時記下 → 英數那條（先 deactivate 再 activate）失敗〔實作修訂：新 Shell 一開始就是 `nil`，所以第一條照樣通過〕。
 - **文件**：
   - `shift-toggle.md` §3 加一句〔2026-10-30〕：輸入法被啟用（換 App；換輸入框是否也算沒實測）之後的第一個打字的鍵也顯示提示，指到這裡；
   - 設定說明 `MenuEntry.Text.shiftToggleNote` 加一句「換 App 後開始打字時也會顯示」；
