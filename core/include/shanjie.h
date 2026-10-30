@@ -187,7 +187,7 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   - Backspace deletes English one letter at a time (section 1.3g): with the cursor right after an English token (no unfinished
 //     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes). Space
 //     units and punctuation tokens still go whole.
-//   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in column order, then the shifted letter); the output
+//   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in the order typed, then the shifted letter); the output
 //     fields mark the run in preedit (0 and 0 otherwise). Without set_english the Shift rules (s3a rules 13, 21, 22) are unchanged.
 //   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
 //     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
@@ -240,7 +240,7 @@ int32_t shanjie_engine_set_english_reversal_guard(ShanjieEngine *engine, uint32_
 // set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
 //   (docs/contracts/shift-toggle.md). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
 //   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes
-//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's keys (in column order)
+//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's keys (in the order typed)
 //   open the English run, as Shift+letter does (`c` stays `c`); with no syllable the run opens with the first character. Where the
 //   core has no English run to keep a composition in (the ETen layout, the abbreviation composer, set_english 0) 1 only records the
 //   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first). From then
