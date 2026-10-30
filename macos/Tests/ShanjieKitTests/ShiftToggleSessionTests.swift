@@ -123,6 +123,51 @@ final class ShiftToggleSessionTests: XCTestCase {
         XCTAssertEqual(hint.shown.map(\.text), ["中", "中"], "toggle off: no hint")
     }
 
+    /// Section 1b: after a pause of `modeHintIdleSeconds` the next typing key shows the mode again; shorter pauses and steady typing do not.
+    func testPauseShowsTheHintAgain() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(hint: hint)
+        var clock: TimeInterval = 1000
+        shell.idleClock = { clock }
+        let c = Controller(shell)
+        c.session.activate()
+        typeKey(c, "h")
+        clock += 10; typeKey(c, "i")
+        XCTAssertEqual(hint.shown.map(\.text), ["中"], "a 10 s pause is not enough")
+        clock += 31; typeKey(c, "j")
+        XCTAssertEqual(hint.shown.map(\.text), ["中", "中"], "a 31 s pause shows it")
+        for _ in 0..<8 { clock += 5; typeKey(c, "k") }  // 40 s of steady typing
+        XCTAssertEqual(hint.shown.map(\.text), ["中", "中"], "no pause, no hint")
+    }
+
+    /// Section 1b: a Shift tap after a pause shows the hint and counts as the pause's end, so the next key does not show it again.
+    func testShiftTapAfterAPauseIsNotFollowedByASecondHint() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(hint: hint)
+        var clock: TimeInterval = 1000
+        shell.idleClock = { clock }
+        let c = Controller(shell)
+        c.session.activate()
+        typeKey(c, "h")
+        clock += 40
+        tap(c)
+        typeKey(c, "i")
+        XCTAssertEqual(hint.shown.map(\.text), ["中", "英"])
+    }
+
+    /// Section 1b: with the toggle off a pause shows nothing.
+    func testPauseShowsNothingWithTheToggleOff() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(shift: MemoryShiftToggleStore(false), hint: hint)
+        var clock: TimeInterval = 1000
+        shell.idleClock = { clock }
+        let c = Controller(shell)
+        c.session.activate()
+        typeKey(c, "h")
+        clock += 40; typeKey(c, "i")
+        XCTAssertTrue(hint.shown.isEmpty)
+    }
+
     /// Section 1a: with the Shift toggle off nothing is pending.
     func testNoModeHintWithTheToggleOff() {
         let hint = FakeShiftHint()

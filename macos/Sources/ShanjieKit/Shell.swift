@@ -554,6 +554,13 @@ public final class Shell {
     }
     /// The system uptime, the clock `NSEvent.timestamp` uses; a test replaces it.
     var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// zhen-reapply section 1b: a monotonic clock that keeps counting while the Mac sleeps (`uptime` stops), so a lid closed for an hour
+    /// is a long pause; a test replaces it.
+    var idleClock: () -> TimeInterval = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000 }
+    /// Section 1b: when the last typing key (or a Shift-tap hint) came, on `idleClock`; `nil` before the first.
+    var lastTypingAt: TimeInterval?
+    /// Section 1b: a pause at least this long before a typing key shows the 英/中 hint again. Picked, not measured; the maintainer tunes it.
+    static let modeHintIdleSeconds: TimeInterval = 30
     /// What the latest `build()` sent its engine as `set_ascii` (test hook); `nil` before the first build.
     private(set) var lastBuiltAscii: Bool?
     /// The composition cursor (UTF-16) of the last snapshot applied: where the Shift hint anchors while composing.
@@ -1371,9 +1378,14 @@ public final class Session {
         // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on, after the key
         // is handled (so a key that starts a composition anchors the hint to the marked text), only while the toggle is still on.
         var showModeHint = false
-        if modeHintPending, let event, Self.isTypingKey(event) {
-            modeHintPending = false
-            showModeHint = shell.shiftToggleOn
+        if let event, Self.isTypingKey(event) {
+            let now = shell.idleClock()
+            let paused = shell.lastTypingAt.map { now - $0 >= Shell.modeHintIdleSeconds } ?? false  // section 1b
+            shell.lastTypingAt = now
+            if modeHintPending || paused {
+                modeHintPending = false
+                showModeHint = shell.shiftToggleOn
+            }
         }
         defer { if showModeHint { showShiftHint(shell.engineAscii ? "英" : "中") } }
         // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
@@ -1434,6 +1446,7 @@ public final class Session {
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
         pushAscii(on)
         modeHintPending = false  // zhen-reapply section 1a: this hint already shows the mode
+        shell.lastTypingAt = shell.idleClock()  // section 1b: nor does the next key after a pause that ended with this tap
         showShiftHint(on ? "英" : "中")
     }
 
