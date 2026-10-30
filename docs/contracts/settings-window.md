@@ -35,7 +35,7 @@
   - **修訂（2026-10-10 實機）**：使用者點「善解設定…」看不到視窗。查視窗列表：視窗有開、在畫面上，但層級是一般視窗（layer 0），`activate()` 被系統拒絕，所以被前景 App 蓋住。改成和 `AlertDialogs`（`.modalPanel`）一樣用較高的層級：視窗 `level = .floating`，`makeKeyAndOrderFront` 之後再 `orderFrontRegardless()`（威注音的做法）。視窗會在最前面，但不一定是 key window；使用者點一下就會成為 key。不改成 `.regular`（fcitx5 的做法會在 Dock 多一個圖示）。
   - 實機上仍然帶不到前面時，才照 fcitx5 的做法改：開窗時暫時切成 `.regular`、關掉後切回。改法寫進這份契約再做（§5）。
 - **第一輪實機回饋（2026-10-10）**：
-  - **置中**：視窗出現在螢幕上方（CGWindowList：X=1279、Y=31、420×532），推論是 `center()` 在內容撐出尺寸之前就跑了。改成每次 `show()` 先設內容尺寸（`NSHostingView.fittingSize`）再置中（〔2026-10-15〕尺寸的量法與上限改由 `settings-sidebar.md` §2.2 決定），置中在滑鼠所在的螢幕（使用者剛在那裡點了選單；`NSScreen.main` 是 key window 所在的螢幕，輸入法的程序沒有）。
+  - **置中**：視窗出現在螢幕上方（CGWindowList：X=1279、Y=31、420×532），推論是 `center()` 在內容撐出尺寸之前就跑了。改成每次 `show()` 先設內容尺寸（`NSHostingView.fittingSize`）再置中（〔2026-10-15〕尺寸的量法與上限改由 `settings-sidebar.md` §2.2 決定；〔2026-10-30〕不再量內容，高度是固定值夾進可用高度，見 `settings-fixed-size.md`），置中在滑鼠所在的螢幕（使用者剛在那裡點了選單；`NSScreen.main` 是 key window 所在的螢幕，輸入法的程序沒有）。
   - **視窗背景是系統的毛玻璃**（結構照 Syrtis 的設定視窗：玻璃在內容後面、延伸到標題列底下；材質不同，Syrtis 用 `.hudWindow`）：`NSVisualEffectView`（材質 `.popover`、`.behindWindow`）放在內容**後面**填滿整個視窗，連標題列底下也是（`.fullSizeContentView`、`titlebarAppearsTransparent`），SwiftUI 的 `Form` 從標題列下面開始、`.scrollContentBackground(.hidden)` 隱藏自己的不透明背景（〔2026-10-19〕左欄的 `List` 也一樣，`settings-sidebar.md` §2）。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。視窗 `isOpaque = false`、背景透明，標題文字與關閉鈕維持系統的。只用系統樣式，沒有自訂的模糊或透明度數值。
     - 修訂（2026-10-10 第三、四輪實機）：原本是 Liquid Glass（`NSGlassEffectView`），使用者覺得設定視窗太透，換成較平的毛玻璃；標題列原本在玻璃外面、視窗背景透明，所以幾乎全透（「標題列不要做那麼透」），改成玻璃延伸到標題列底下。材質 `.popover` 是看系統的清單挑的，沒有量測；使用者實機看過 OK。
 - 視窗裡**沒有文字欄位**：只有選擇器、開關、滑桿與按鈕。所以不需要自己裝 Edit 選單，也不會讓善解在自己的視窗裡處理打字。

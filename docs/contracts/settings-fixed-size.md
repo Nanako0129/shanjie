@@ -1,6 +1,6 @@
 # 設定視窗固定大小
 
-狀態：草稿（2026-10-30）。修改 `settings-sidebar.md` §2.2 的高度規則。
+狀態：READY（2026-10-30，plan-verifier 第一次 REVISE、第二次 READY），已實作。修改 `settings-sidebar.md` §2.2 的高度規則。
 
 ## 起因
 
@@ -15,7 +15,7 @@
 1. **高度改成一個舒適的固定值，再夾進螢幕**：
    - 視窗的 frame 高度（內容加上標題列）＝ min(`SettingsLayout.preferredHeight`, 螢幕 `visibleFrame` 的高度)。
    - `preferredHeight` 是具名常數 620 pt，寬度不變（左欄 160＋內容 420＝580）。
-   - 620 pt 的理由寫在註解裡：寬高比約 1:1.07，和系統設定這類窗格的比例相近；在 13 吋筆電預設解析度（可見高度約 870 pt）下，上下各留出空間。這是挑的值，不是量的，第一輪由維護者實機調。
+   - 620 pt 是起點，不是對照某個參考量出來的，由維護者實機調（最多 3 輪）。2026-10-30 量到維護者 Mac 的可見高度：內建螢幕 1074.5 pt（1710×1112）、外接螢幕 1409 pt，兩個都留有上下空間。
    - 「不寫死」的意思：在可見高度不到 620 的螢幕上，視窗縮成可見高度，不會超出上下緣。
 2. **內容比視窗高的分類，在視窗裡捲動**：畫面上的 `Form` 已經沒有加 fixedSize，所以能捲；這一點不變。
 3. **不再量內容高度**：拿掉 `fit()` 裡隱藏 `NSHostingView` 量測、`measureSlack`，以及「個別設定的 App」清單長度改變時的重算（`onRowCountChange`）。
@@ -23,7 +23,7 @@
    - 螢幕參數改變（解析度、Dock、文字大小、拔掉螢幕）時，照舊重算高度，並把 frame 夾回 `visibleFrame`；
    - 打開時置中；
    - 切換分類時大小不變。
-5. **計算放成 ShanjieKit 的純函式**：`SettingsLayout.frameHeight(visibleHeight:) -> CGFloat`，回傳 `min(preferredHeight, visibleHeight)`，App 端呼叫它。這樣單元測試測得到；App target 測不到。
+5. **計算放成 ShanjieKit 的純函式**（和 `settingsFrame` 同放在 `Settings.swift`）：`SettingsLayout.frameHeight(visibleHeight:) -> CGFloat`，回傳 `min(preferredHeight, visibleHeight)`，App 端呼叫它。這樣單元測試測得到；App target 測不到。
 6. 同一個規則寫在別處的一起改：
    - `settings-sidebar.md` §2.2 的「量法」「高度」「位置」三點（清單長度改變時不再重算；打開時置中、螢幕參數改變時夾回照舊），以及 §3 驗收裡講內容高度與清單重算的步驟（第 6、7 步）；
    - `profile-choice.md` §2.4 第 64 行「清單列數改變時，視窗高度跟著內容重新調整」加一行〔2026-10-30〕註記，指到這份契約；
@@ -38,7 +38,7 @@
 
 ## 驗收
 
-1. **`make test-swift` 全過**，新測試 `SettingsLayoutTests`：
+1. **`make test-swift` 全過**，`SettingsTests` 新增一個測試（數值用 `preferredHeight` 表示，調常數不必改測試）：
    - 可見高度 900 → 620；
    - 可見高度 500 → 500；
    - 可見高度剛好 620 → 620。

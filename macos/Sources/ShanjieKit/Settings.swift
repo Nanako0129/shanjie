@@ -159,6 +159,19 @@ public final class SettingsModel: ObservableObject {
     }
 }
 
+/// The settings window's height (docs/contracts/settings-fixed-size.md): one fixed comfortable size, clamped into the screen so a
+/// small display never gets a window taller than its usable area.
+public enum SettingsLayout {
+    /// Frame height (content plus title bar) in points, a starting value for the maintainer's device rounds (contract budget: 3), not
+    /// measured against a reference. Measured 2026-10-30 on the maintainer's Mac: the built-in display's usable height is 1074.5 pt
+    /// (1710 x 1112) and the external one's 1409 pt, so 620 leaves room above and below on both.
+    public static let preferredHeight: CGFloat = 620
+
+    public static func frameHeight(visibleHeight: CGFloat) -> CGFloat {
+        min(preferredHeight, visibleHeight)
+    }
+}
+
 /// Settings-sidebar section 2.2: the settings window's frame moved vertically into its screen's usable area, up when it
 /// hangs below (the Dock), down when it sticks out above (the menu bar). The window's height is capped to the area's, so
 /// both never apply at once.

@@ -10610,5 +10610,5 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 ## 2026-10-30：設定視窗固定大小
 
 - 維護者要求設定頁不要隨著內容長高、固定在舒適的大小、但不寫死以免小解析度超出邊界。契約 `docs/contracts/settings-fixed-size.md`（plan-verifier READY）。
-- 改了：視窗 frame 高度＝ min(`SettingsLayout.preferredHeight` 620 pt, 螢幕 `visibleFrame` 高度)，純函式在 `macos/Sources/ShanjieKit/SettingsLayout.swift`；`SettingsWindow.swift` 的 `fit()` 不再用隱藏的 `NSHostingView` 量各頁，拿掉 `measureSlack` 與 `onRowCountChange`；螢幕參數改變時的重算與夾回、打開時置中不變。`settings-sidebar.md` §2.2、§3、`profile-choice.md` §2.4、`docs/PLAN.md` 已加〔2026-10-30〕註記。
-- 測試：新增 `SettingsLayoutTests`（900 → 620、500 → 500、620 → 620）。620 是挑的值、不是量的，維護者實機確認尚未做（契約預算最多調 3 輪）。
+- 改了：視窗 frame 高度＝ min(`SettingsLayout.preferredHeight` 620 pt, 螢幕 `visibleFrame` 高度)，純函式 `SettingsLayout` 放在 `macos/Sources/ShanjieKit/Settings.swift`，和 `settingsFrame` 同一個檔；`SettingsWindow.swift` 的 `fit()` 不再用隱藏的 `NSHostingView` 量各頁，拿掉 `measureSlack` 與 `onRowCountChange`；螢幕參數改變時的重算與夾回、打開時置中不變。`settings-sidebar.md` §2.2、§3、`profile-choice.md` §2.4、`docs/PLAN.md` 已加〔2026-10-30〕註記。
+- 測試：`SettingsTests` 新增一個測試（可見高度比 `preferredHeight` 高、低、相等三種，數值用常數表示）；拿掉夾的突變讓它失敗。620 是起點、不是對照參考量的；量到維護者 Mac 的可見高度是內建螢幕 1074.5 pt、外接螢幕 1409 pt。維護者實機確認尚未做（契約預算最多調 3 輪）。`/code-review` 的 8 項都已改（驗收步驟 6、7 的說法、註解裡沒量過的比例與高度、測試改用常數、契約狀態、`settings-window.md` §2.1 的註記、併入 `Settings.swift`）。
