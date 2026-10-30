@@ -771,6 +771,10 @@ VERSIONS2 = {
     # v0.6.0: SJ-LM-7's models (PR #324) and the IT+AI pack, on by default like the ACG pack (Shell.swift itPackOn = true; Settings.swift only mirrors it).
     "v0.6.0": {"release": "v0.6.0", "flags": ["--context", "--packs", "acg,it"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+tri:{tri8}"},
+    # v0.6.1: v0.6.0's models and packs; the quotes pack (PR #272) is off by default (Shell.swift quotePackOn = false), so the flags
+    # and tags are v0.6.0's (copied from a CLI summary line on typing76 at 9c88b87f).
+    "v0.6.1": {"release": "v0.6.1", "flags": ["--context", "--packs", "acg,it"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+tri:{tri8}"},
 }
 # Anchor (contract 3.1): S7h's measurement in the research log of 2026-10-13, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
