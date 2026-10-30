@@ -58,7 +58,7 @@
 - **規則**：
   - 英數模式在組字區空著時照舊直接放行（`shift-toggle.md` §2 不變，R3 不變）。
   - 新增：Session 在 `activate()`，以及 `handle()` 發現換了組字擁有者（`claim()` 成立，一個 controller 沒經過 activate 就收到鍵）時，（IMK 的 `activateServer`：換 App 時會呼叫；換輸入框時會不會呼叫〔推論，沒實測〕，各 App 可能不同）時記下「待提示」。之後收到的第一個「打字的鍵」在這個鍵處理完之後（所以開始組字的鍵用標記文字的方框）照 `shift-toggle.md` §3 顯示提示：英數模式顯示「英」，否則顯示「中」，位置與時間都照 §3。顯示之後清掉「待提示」。
-  - 「打字的鍵」：keyDown、沒有 Command／Control／Option、`event.characters` 是一個 0x20–0x7E 的字元（空白算；方向鍵、功能鍵的私用區字元不算）。方向鍵、Delete、Esc、Return、快捷鍵都不觸發，也不清掉「待提示」。
+  - 「打字的鍵」：keyDown、實作用既有的 `asciiKey`（沒有 Control、Option、Command、Caps Lock，一個 `!`–`~` 的字元；方向鍵、功能鍵的私用區字元不算），加上沒有 Command／Control／Option 的空白鍵。Caps Lock 開著時字母鍵不算（不顯示也不清掉），空白鍵仍算。方向鍵、Delete、Esc、Return、快捷鍵都不觸發，也不清掉「待提示」。
   - 鍵本身照舊處理：英數模式、組字區空著時照舊放行，中文模式照舊進核心。提示只顯示模式，不含任何打的內容。
   - 只在「單按 Shift 切換中英」開著時記下與顯示；顯示前再看一次開關，中途關掉就不顯示。
   - 對外的說明（設定說明、README）只寫「換 App 後」，換輸入框沒實測，不寫。
@@ -73,8 +73,8 @@
   - 測試的按鍵事件要明確帶 `characters:`（`Keys.event` 預設是空字串，空字串不算打字的鍵）。
   - 突變：拿掉「待提示」的清除 → 「再打 `i` 不再顯示」失敗；拿掉 activate 時記下 → 第一條失敗。
 - **文件**：
-  - `shift-toggle.md` §3 加一句〔2026-10-30〕：換 App 或換輸入框之後的第一個打字的鍵也顯示提示，指到這裡；
-  - 設定說明 `MenuEntry.Text.shiftToggleNote` 加一句「換 App 或輸入框後開始打字時也會顯示」；
+  - `shift-toggle.md` §3 加一句〔2026-10-30〕：輸入法被啟用（換 App；換輸入框是否也算沒實測）之後的第一個打字的鍵也顯示提示，指到這裡；
+  - 設定說明 `MenuEntry.Text.shiftToggleNote` 加一句「換 App 後開始打字時也會顯示」；
   - `settings-window.md` 若逐字引用這段說明，一起改；
   - README 第 42 行講提示只在切換時出現的那句。
 - **已知限制**：提示的位置在 Google 文件裡可能落在視窗左上角，和單按 Shift 的提示相同（研究紀錄 2026-10-30，維護者選寫成已知限制）。
