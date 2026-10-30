@@ -778,6 +778,41 @@ pub unsafe extern "C" fn shanjie_engine_set_english_key_order(
     rc
 }
 
+/// zhen-reapply section 1.2. `enabled` 0 or 1 (default 1): while 1, a Zhuyin key out of column order goes into its column (Apple
+/// Zhuyin) and is never English, whatever `set_english_key_order` says; 0 leaves trigger (b) to that switch. Returns the snapshot like
+/// `set_english_key_order`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_reversal_guard(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_reversal_guard(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// shift-toggle section 4: the ASCII state of the shell's per-app Shift toggle. `on` 0 or 1 (2 otherwise, state unchanged). With 1 the
 /// open window or row closes, the digit run flushes and the unfinished syllable's keys open the English run; every printable ASCII
 /// character after it goes on the run as typed. With 0 the run ends as a token. Returns the snapshot like `set_english` (`commit` may
@@ -1986,6 +2021,18 @@ mod tests {
         rc
     }
 
+    /// set_english_reversal_guard; returns the code and frees the output.
+    fn set_reversal_guard(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_reversal_guard(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
     /// Types `keys` (Space for `_`); the last output's (candidates, commit, preedit), freed.
     fn type_out(e: *mut ShanjieEngine, keys: &str) -> (Vec<String>, String, String) {
         let mut last = (Vec::new(), String::new(), String::new());
@@ -2010,7 +2057,7 @@ mod tests {
         if !is_child("child_english") {
             return;
         }
-        let dir = tiny_dir("english", "ㄒㄧㄣ 鑫 -1.0\n".as_bytes());
+        let dir = tiny_dir("english", "ㄒㄧㄣ 鑫 -1.0\nㄋㄠ 鬧 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
         // set_english codes, like set_abbreviation.
         let mut o: *mut ShanjieOutput = sentinel();
@@ -2054,6 +2101,22 @@ mod tests {
         // Esc right after a revert brings the Zhuyin back; the second one clears it (zhen-revert section 2.4).
         assert!(send(e, key(ESC, '\0')).1 == "ㄒㄧㄣ");
         assert!(send(e, key(ESC, '\0')).1.is_empty());
+        // set_english_reversal_guard (zhen-reapply section 1.2): the codes of set_english_key_order, then the switch through the C ABI.
+        // On (the default) `l s` Space is the Chinese ㄋㄠ although the key-order switch is on; off, it is the English token `ls`.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_reversal_guard(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "guard engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_reversal_guard(e, 1, ptr::null_mut()) } == 1, "guard out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_reversal_guard(e, v) == 2, "guard out of range");
+        }
+        let (_, _, preedit) = type_out(e, "ls_");
+        assert!(preedit != "ls" && !preedit.is_empty(), "guard on by default: Chinese, {preedit}");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_reversal_guard(e, 0) == 0);
+        let (_, _, preedit) = type_out(e, "ls_");
+        assert!(preedit == "ls", "guard off: the English token");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        // The key-order cases below are trigger (b) itself, so the guard stays off for them.
         // set_english_key_order (zhen-keyorder section 3): the codes of set_english_overwrite, then the switch through the C ABI. On
         // (the default), `p v` is out of column order and reverts; off, the symbol goes into its column.
         let mut o: *mut ShanjieOutput = sentinel();

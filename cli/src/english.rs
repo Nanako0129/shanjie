@@ -4,8 +4,8 @@
 //! are the engine's, never repeated here.
 //!
 //!   english-sim --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--retries 3]
-//!               [--overwrite on|off] [--key-order on|off] [--digits [--lm FILE]]
-//!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off]
+//!               [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off] [--digits [--lm FILE]]
+//!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
 //!
 //! `--overwrite` and `--key-order` (default on) are the engine's two switches; the third, the mixing switch, is on. With both off only
 //! the Space case (c) is left (a syllable the lexicon lacks, at Space).
@@ -371,6 +371,8 @@ fn engine_with(lex: &Arc<Lexicon>, switches: Switches) -> Result<Engine, String>
 struct Switches {
     overwrite: bool,
     key_order: bool,
+    /// zhen-reapply: default off here so the arms and `revert_b_*` keep their zhen-revert meaning.
+    reversal_guard: bool,
 }
 
 impl Switches {
@@ -378,6 +380,7 @@ impl Switches {
         e.set_english(true).map_err(|_| "cannot switch English mixing on".to_string())?;
         e.set_english_overwrite(self.overwrite).map_err(|_| "cannot set the overwrite switch".to_string())?;
         e.set_english_key_order(self.key_order).map_err(|_| "cannot set the key-order switch".to_string())?;
+        e.set_english_reversal_guard(self.reversal_guard).map_err(|_| "cannot set the reversal-guard switch".to_string())?;
         Ok(())
     }
 }
@@ -395,14 +398,14 @@ fn on_off(v: String) -> Result<bool, String> {
     match v.as_str() {
         "on" => Ok(true),
         "off" => Ok(false),
-        _ => Err("--overwrite and --key-order take on or off".into()),
+        _ => Err("--overwrite, --key-order and --reversal-guard take on or off".into()),
     }
 }
 
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut words, mut rows, mut recall) = (None::<PathBuf>, None::<PathBuf>, false);
     let (mut digits, mut lm) = (false, None::<PathBuf>);
-    let mut switches = Switches { overwrite: true, key_order: true };
+    let mut switches = Switches { overwrite: true, key_order: true, reversal_guard: false };
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut retries = MAX_RETRIES;
     let mut it = args.iter();
@@ -415,6 +418,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--digits" => digits = true,
             "--overwrite" => switches.overwrite = on_off(val()?)?,
             "--key-order" => switches.key_order = on_off(val()?)?,
+            "--reversal-guard" => switches.reversal_guard = on_off(val()?)?,
             "--lm" => lm = Some(val()?.into()),
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
             "--repair" => {
@@ -565,7 +569,7 @@ mod tests {
     use super::*;
     use core::engine::MOD_SHIFT;
 
-    const ALL_ON: Switches = Switches { overwrite: true, key_order: true };
+    const ALL_ON: Switches = Switches { overwrite: true, key_order: true, reversal_guard: false };
 
     /// Zhen-revert section 4.1, simulator: a row with mistakes that revert ends with the same text as the same row typed without a
     /// mistake (a text is checked here, in the module, because the tool's output never carries content, R2). With the overwrite repair a
@@ -590,7 +594,7 @@ mod tests {
         assert!(sim.reverts[Revert::Overwrite as usize] >= 1 && sim.typos >= 1, "premise: the rows revert");
         assert_eq!(sim.splits, 0);
         // Without the switch the same rows never revert (the key replaces), and come out the same.
-        let mut off = Sim::new(engine_with(&lex, Switches { overwrite: false, key_order: false }).unwrap(), 0.5, Repair::Overwrite, 20261014);
+        let mut off = Sim::new(engine_with(&lex, Switches { overwrite: false, key_order: false, reversal_guard: false }).unwrap(), 0.5, Repair::Overwrite, 20261014);
         for i in 0..400 {
             assert_eq!(row(&mut off), clean, "off, row {i}");
         }

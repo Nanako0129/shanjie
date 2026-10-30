@@ -99,6 +99,17 @@ fn recall_counts_the_classes_and_the_probes() {
     assert!(off.contains("probe\tcup\ttoken\n") && off.contains("probe\tgo\ttoken\n") && off.contains("probe\tok\t中文\n"), "{off}");
 }
 
+/// `--reversal-guard on` (docs/contracts/zhen-reapply.md section 1.2): trigger (b) never fires, so the recall's (b) count is 0 (it is 1,
+/// `law`, with the guard off above) and `ls`, which only a reversal types, is Chinese. The switch is off by default in this tool.
+#[test]
+fn reversal_guard_stops_trigger_b() {
+    let on = run(&["--words", LIST, "--recall", "--reversal-guard", "on"]);
+    let head: Vec<&str> = on.lines().next().unwrap().split('\t').collect();
+    assert_eq!(head[4], "0", "no (b) revert: {on}");
+    assert!(on.contains("probe\tls\t中文\n") && on.contains("probe\tok\ttoken\n"), "{on}");
+    assert!(fails(&["--words", LIST, "--recall", "--reversal-guard", "1"]));
+}
+
 /// `--digits` (docs/contracts/digits.md A.4.2): the engine with the digit table and the model; six more columns (three pairs), mean and max per 1000
 /// syllables over the seeds: the digit characters left in what the rows commit, the keys after which a digit showed, and the extra Backspaces (A.10). Three synthetic
 /// rows (ㄉㄢˋ ㄅㄚ ㄅㄞˇ, all keys in the digit alphabet or next to it), seed 20261014, two seeds. Typed right: no digit is left and none

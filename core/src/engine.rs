@@ -709,6 +709,9 @@ pub struct Engine {
     /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on.
     english_overwrite: bool,
     english_key_order: bool,
+    /// zhen-reapply section 1.2: while on (default), a key in a column before a filled one is never English (trigger (b) does not fire,
+    /// whatever `english_key_order` says): `set_english_reversal_guard`.
+    english_reversal_guard: bool,
     /// shift-toggle section 4: the ASCII state (`set_ascii`), default off. A mode like a setting: `reset` and `clear_all` keep it.
     ascii: bool,
     /// Set by a choice from the candidate window (a digit alternative, a row item, a short word's English token) whose unit reached
@@ -1011,6 +1014,7 @@ impl Engine {
             shadow_key: [None; 3],
             english_overwrite: true,
             english_key_order: true,
+            english_reversal_guard: true,
             ascii: false,
             commit_out: None,
             reverted: None,
@@ -1709,6 +1713,14 @@ impl Engine {
     /// run is text and stays. Returns the snapshot.
     pub fn set_english_key_order(&mut self, on: bool) -> Result<Output, EngineError> {
         self.english_key_order = on;
+        self.setting_changed();
+        self.handled()
+    }
+
+    /// zhen-reapply section 1.2: the reversal guard (default on). On, a key in a column before a filled one goes into its column
+    /// (Apple Zhuyin), so trigger (b) never fires; (a) overwrite and (c) are untouched. Returns the snapshot.
+    pub fn set_english_reversal_guard(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.english_reversal_guard = on;
         self.setting_changed();
         self.handled()
     }
@@ -3074,7 +3086,7 @@ impl Engine {
                     if occupied && self.english_overwrite {
                         return self.revert_keys(Revert::Overwrite, k.ch, col, sym);
                     }
-                    if !occupied && later && self.english_key_order {
+                    if !occupied && later && self.english_key_order && !self.english_reversal_guard {
                         return self.revert_keys(Revert::Order, k.ch, col, sym);
                     }
                 }

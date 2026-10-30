@@ -230,6 +230,13 @@ int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieO
 //   its column and the tone key does nothing for such a syllable, as it always did. An English run is text and stays, so the snapshot is the output
 //   before the call. Call it after every engine creation, like set_english_overwrite.
 int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_english_reversal_guard 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english_key_order in its
+//   codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/contracts/zhen-reapply.md). With 1 a Zhuyin key
+//   in a column before one that is filled goes into its column (Apple Zhuyin), so trigger (b) of set_english never fires, whatever
+//   set_english_key_order says: `l s` Space is the Chinese ㄋㄠ, and a two-letter word only a reversal can type (`ls`, `mv`) needs 0
+//   (or Shift). It does not touch trigger (a) (set_english_overwrite) or trigger (c) (Space; a tone key under set_english_key_order).
+//   Call it after every engine creation, like set_english_key_order.
+int32_t shanjie_engine_set_english_reversal_guard(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
 //   (docs/contracts/shift-toggle.md). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
 //   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes

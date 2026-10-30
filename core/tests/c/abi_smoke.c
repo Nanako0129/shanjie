@@ -382,6 +382,17 @@ static int run_english(const char *dir) {
   o = 0;
   CHECK(1020, shanjie_engine_set_english_key_order(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
+  /* zhen-reapply: set_english_reversal_guard has the same codes. */
+  o = 0;
+  CHECK(1030, shanjie_engine_set_english_reversal_guard(0, 1, &o) == 1 && o == 0);
+  CHECK(1031, shanjie_engine_set_english_reversal_guard(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1032, shanjie_engine_set_english_reversal_guard(e, 2, &o) == 2 && o == 0);
+  CHECK(1033, shanjie_engine_set_english_reversal_guard(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1034, shanjie_engine_set_english_reversal_guard(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
   /* A revert through the C ABI: with English mixing on, `o k` (the same column) is the run `ok`, and Space makes the one token. */
   o = 0;
   CHECK(1021, shanjie_engine_set_english(e, 1, &o) == 0 && o != 0);

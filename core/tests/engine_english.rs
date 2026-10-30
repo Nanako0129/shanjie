@@ -1028,12 +1028,14 @@ fn overwrite_reverts_to_the_keys() {
 #[test]
 fn order_reverts_to_the_keys() {
     let mut e = eng();
+    e.set_english_reversal_guard(false).unwrap();
     run(&mut e, "l s");
     assert!(e.english_reverted() == Some(Revert::Order));
     let o = run(&mut e, "_ Down");
     assert!(e.syllables() == ["_punct_ls"]);
     assert!(o.candidates == ["ls", "Ls", "LS", first_entry("ㄋㄠ").as_str()], "{:?}", o.candidates);
     let mut e = eng();
+    e.set_english_reversal_guard(false).unwrap();
     run(&mut e, "p r _");
     assert!(e.syllables() == ["_punct_pr"], "{:?}", e.syllables());
 }
@@ -1541,6 +1543,65 @@ fn every_syllable_alone_and_sampled_readings_never_revert() {
     }
     println!("typed {} of {n} readings and {} distinct syllables", chosen.len(), seen.len());
     assert!(n >= 20_000 && seen.len() > 1000 && chosen.len() >= 20_000, "the test saw enough");
+}
+
+/// zhen-reapply section 3.2: with the default switches (the reversal guard on), every REVERSED key order of every distinct syllable of the
+/// lexicon (the symbol keys in any order but the column order, then the tone key or Space) is never English: no revert, no split, and the
+/// composition is the one the same keys make with English mixing off. `reversed` must be non-trivial, or the test proves nothing.
+#[test]
+fn every_reversed_key_order_of_every_syllable_is_never_english() {
+    let lex = real();
+    let mut e = eng();
+    let mut plain = Engine::with_lexicon(lex.clone(), Layout::Standard);
+    let n = lex.reading_count();
+    let seen: std::collections::BTreeSet<&str> = (0..n).flat_map(|r| lex.reading_syllables(r)).collect();
+    let mut reversed = 0usize;
+    for syl in &seen {
+        let keys = keys_of(syl);
+        let (tail, head) = keys.split_last().unwrap();
+        let perms: Vec<Vec<Key>> = match head.len() {
+            2 => vec![vec![head[1], head[0]]],
+            3 => [[0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].iter().map(|p| p.iter().map(|&i| head[i]).collect()).collect(),
+            _ => continue,
+        };
+        for p in perms {
+            e.reset(ResetMode::Discard);
+            plain.reset(ResetMode::Discard);
+            for k in p.iter().chain(std::iter::once(tail)) {
+                e.key(*k).unwrap();
+                plain.key(*k).unwrap();
+                assert!(e.english_reverted().is_none() && !e.english_split(), "a reversed {syl} looked like English");
+            }
+            assert!(e.syllables() == plain.syllables(), "{syl}: {:?} / {:?}", e.syllables(), plain.syllables());
+            reversed += 1;
+        }
+    }
+    println!("typed {reversed} reversed key orders of {} syllables", seen.len());
+    assert!(reversed > 3000, "the test saw enough: {reversed}");
+}
+
+/// zhen-reapply section 3.1: the reversal guard (default on). (a) the six keyed-in-a-hurry examples are Chinese; (b) the four words
+/// that need (a) overwrite or (c) are English tokens equal to the keys; (c) `l s` Space is `ls` with the guard off and Chinese with it on.
+#[test]
+fn reversal_guard_chinese_in_a_hurry_english_words_still_come() {
+    for (keys, word) in [("k e 7", "個"), ("u v , _", "些"), ("j n o 6", "隨"), ("u r . 4", "就"), ("i a 7", "麼"), ("k x 7", "了")] {
+        let mut e = eng();
+        let o = run(&mut e, keys);
+        assert!(e.english_reverted().is_none(), "{keys}");
+        assert!(o.preedit.starts_with(word) || o.candidates.iter().any(|c| c == word), "{keys}: {} {:?}", o.preedit, o.candidates);
+    }
+    for (keys, word) in [("o k _", "ok"), ("g t a 6 _", "gta6"), ("r d r 2 _", "rdr2"), ("p o e 2 _", "poe2")] {
+        let mut e = eng();
+        let o = run(&mut e, keys);
+        assert!(o.preedit == word && e.syllables() == [format!("_punct_{word}")], "{keys}: {} {:?}", o.preedit, e.syllables());
+    }
+    let mut e = eng();
+    e.set_english_reversal_guard(false).unwrap();
+    let o = run(&mut e, "l s _");
+    assert!(o.preedit == "ls" && e.syllables() == ["_punct_ls"], "guard off: {} {:?}", o.preedit, e.syllables());
+    let mut e = eng();
+    let o = run(&mut e, "l s _");
+    assert!(e.english_reverted().is_none() && o.preedit != "ls" && !e.syllables()[0].starts_with("_punct_"), "guard on: {}", o.preedit);
 }
 
 /// Section 4.3, the second exhaustive test: every word of `ENGLISH_SHORT` typed key by key and ended (`mp3` by its tone key, the rest by

@@ -253,6 +253,7 @@ fn decoding_is_the_same_with_and_without_the_table() {
 #[test]
 fn lower_case_joe_reverts_to_the_keys() {
     let mut e = make(true, false);
+    e.set_english_reversal_guard(false).unwrap();
     for t in "j o e".split_whitespace() {
         e.key(key_of(t)).unwrap();
     }
