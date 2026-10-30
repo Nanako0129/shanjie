@@ -707,7 +707,7 @@ pub struct Engine {
     english: bool,
     /// zhen-revert section 1: the keycap that put the symbol now in each column of the unfinished syllable, with its arrival rank
     /// (zhen-reapply: with the reversal guard on a key can go into a column before a filled one, so every English text reads the keys in
-    /// the order typed, not the column order; a key that replaces a column's key takes its rank). Recorded only where `shadow_on`, so it
+    /// the order typed, not the column order; a key that replaces a column's key is the newest). Recorded only where `shadow_on`, so it
     /// always matches `pend`; empty (all `None`) otherwise. Cleared with `clear_pend`.
     shadow_key: [Option<Shadow>; 3],
     /// zhen-revert section 2.1: the triggers of the direct revert (a key over the same column: `set_english_overwrite`; a key out of
@@ -1821,20 +1821,21 @@ impl Engine {
 
     /// The keys of the unfinished syllable in the order typed (zhen-reapply).
     fn shadow_text(&self) -> String {
-        let mut keys: Vec<Shadow> = self.shadow_key.iter().flatten().copied().collect();
-        keys.sort_by_key(|&(_, rank)| rank);
-        keys.into_iter().map(|(c, _)| c).collect()
+        let mut keys = self.shadow_key;
+        keys.sort_by_key(|e| e.map_or(u16::MAX, |(_, rank)| rank as u16));
+        keys.iter().flatten().map(|&(c, _)| c).collect()
     }
 
-    /// `ch` as the entry of column `col`: the rank of the key it replaces, else one after the latest.
-    fn shadow_entry(shadow: &[Option<Shadow>; 3], ch: char, col: usize) -> Shadow {
-        (ch, shadow[col].map_or_else(|| shadow.iter().flatten().map(|&(_, r)| r + 1).max().unwrap_or(0), |(_, r)| r))
+    /// `ch` as the entry of column `col`, one after the latest key: a key that replaces a column's key (overwrite off) is the newest,
+    /// and the replaced key leaves the record with its symbol.
+    fn shadow_entry(shadow: &[Option<Shadow>; 3], ch: char) -> Shadow {
+        (ch, shadow.iter().flatten().map(|&(_, r)| r.saturating_add(1)).max().unwrap_or(0))
     }
 
     /// Section 2.2: one Zhuyin key of the unfinished syllable now sits in column `col`.
     fn shadow_push(&mut self, ch: char, col: usize) {
         if self.shadow_on() {
-            self.shadow_key[col] = Some(Self::shadow_entry(&self.shadow_key, ch, col));
+            self.shadow_key[col] = Some(Self::shadow_entry(&self.shadow_key, ch));
         }
     }
 
@@ -1914,7 +1915,7 @@ impl Engine {
         let text = format!("{}{ch}", self.shadow_text());
         let (mut pend, mut shadow) = (self.pend, self.shadow_key);
         pend[col] = Some(sym);
-        shadow[col] = Some(Self::shadow_entry(&shadow, ch, col));
+        shadow[col] = Some(Self::shadow_entry(&shadow, ch));
         let syl: String = pend.iter().flatten().collect();
         let zh = (!self.lex.entries(std::slice::from_ref(&syl)).is_empty()).then_some(syl);
         self.revert_to(kind, text, (pend, shadow), zh)

@@ -8,7 +8,9 @@
 //!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
 //!
 //! `--overwrite` and `--key-order` (default on) are the engine's two switches; the third, the mixing switch, is on. With both off only
-//! the Space case (c) is left (a syllable the lexicon lacks, at Space).
+//! the Space case (c) is left (a syllable the lexicon lacks, at Space). `--reversal-guard` defaults to off here so the arms keep the
+//! zhen-revert section 4 meaning, while the engine and the app default it on (zhen-reapply): with it on, (b) never fires, so the
+//! `revert_b_*` columns describe the guard-off setting, not what ships.
 //!
 //! Output is one TSV line and no content text (R2). Typing mode:
 //!   rows_sha256  rows  syllables  keys  typos  revert_a_mean revert_a_max  revert_b_mean revert_b_max  revert_c_mean revert_c_max

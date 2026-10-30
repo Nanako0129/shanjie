@@ -169,7 +169,7 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   run of docs/contracts/zhen-inline.md section 1.3b, underlined by the output's english_run_utf16_start / english_run_utf16_len)
 //   holds the keys as typed, in the composition at the cursor. Three triggers: (a) a Zhuyin key over the symbol already in its
 //   column (`o k` is `ok`; the switch set_english_overwrite), (b) a Zhuyin key in a column before one that is filled (`l s` is
-//   `ls`; the switch set_english_key_order), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
+//   `ls`; only with set_english_key_order 1 and set_english_reversal_guard 0, so not by default), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
 //   `cup`, `s 7` is `s7`; Space under set_english alone, a tone key under set_english_key_order), except when the adjacent-key rule
 //   of set_fuzzy (bit 4) accepts the syllable. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
 //   never reverts: the candidate list opened right after it adds its lower and upper case as its last two items, and choosing one
@@ -225,7 +225,8 @@ int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieO
 // set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation (0 before docs/contracts/zhen-revert.md), like
 //   set_english_overwrite in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL
 //   (docs/contracts/zhen-keyorder.md). With 1 (and set_english(1)) a Zhuyin key in a column before one that holds a symbol of the
-//   unfinished syllable reverts it to the raw keys as an English run (trigger (b), see set_english): `l s` is `ls`; and a tone key
+//   unfinished syllable reverts it to the raw keys as an English run (trigger (b), see set_english), unless set_english_reversal_guard is 1 (the default): `l s` is `ls`
+//   with the guard 0; and a tone key
 //   that completes a syllable the lexicon lacks does the same (trigger (c) on a tone key): `s 7` is `s7`. With 0 the symbol goes into
 //   its column and the tone key does nothing for such a syllable, as it always did. An English run is text and stays, so the snapshot is the output
 //   before the call. Call it after every engine creation, like set_english_overwrite.

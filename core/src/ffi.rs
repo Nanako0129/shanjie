@@ -744,7 +744,8 @@ pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
 }
 
 /// zhen-keyorder section 3 as zhen-revert changes it. `enabled` 0 or 1 (default 1): whether a Zhuyin key out of column order, and a
-/// tone key that completes a syllable the lexicon lacks, revert to the raw keys as English (`ls` is `ls`, `s 7` is `s7`). Returns the
+/// tone key that completes a syllable the lexicon lacks, revert to the raw keys as English (`ls` is `ls` only with the reversal guard off,
+/// `s 7` is `s7`). Returns the
 /// snapshot like `set_english_overwrite`; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
 ///
 /// # Safety

@@ -307,7 +307,7 @@ struct SettingsPageForm: View {
                     // Digits.md A.3.7: one line under the toggle, as the 聊天／書面 note above is written.
                     Text(MenuEntry.Text.englishDigitsNote)
                         .font(.caption).foregroundStyle(.secondary)
-                    // zhen-reapply section 1.2: before the key-order choice, same greying.
+                    // zhen-reapply section 1.2: before the key-order choice; greyed unless key-order is enabled and on, since (b) needs it on.
                     Toggle(MenuEntry.Text.englishReversalGuard, isOn: Binding(get: { model.englishReversalGuard }, set: { model.setEnglishReversalGuard($0) }))
                         .disabled(!model.englishReversalGuardEnabled)
                     Text(MenuEntry.Text.englishReversalGuardNote)

@@ -1625,6 +1625,11 @@ fn reversal_guard_keeps_the_typed_order_in_every_run() {
     let mut e = eng();
     let o = run(&mut e, "m e S-x");
     assert!(o.preedit == "meX", "{}", o.preedit);
+    // Overwrite off: `d` (ㄎ) replaces `e` (ㄍ) in the first column; the replaced key leaves and `d` is the newest, so the run is `kd`.
+    let mut e = eng();
+    e.set_english_overwrite(false).unwrap();
+    let o = run(&mut e, "e k d S-x");
+    assert!(o.preedit == "kdX", "replaced key: {}", o.preedit);
     let mut e = eng();
     run(&mut e, "m e");
     let o = e.set_ascii(true).unwrap();

@@ -64,7 +64,7 @@
      - 新開關不生效（(b) 照舊觸發）→ a 失敗；
      - 新開關擋掉 (a) → b 失敗。
 2. **窮舉測試**：第三片 §4 的 `key_order_clean_typing_of_every_reading_is_never_english` 加一個版本，在預設開關下，每個讀音的每一種**顛倒**鍵序都不是英文。上面 17 種撞英文的也一樣不是英文。
-3. `make test-swift` 全過；Rust 完整測試在 188 的 WSL 跑；CI 全綠。
+3. `make test-swift` 全過；Rust 完整測試在另一台 Linux 機器上跑；CI 全綠。
 4. **殼**：新開關的存取（沒存過是開、關掉後存 false、重建引擎仍送）、設定視窗的位置與反灰。
 5. **維護者實機**（§2）：
    - 平常打字至少一段時間，沒有中文被當成英文。
@@ -85,7 +85,7 @@
 
 ## 6. 負責人、順序、回復、預算
 
-- **順序**：這份契約 → fresh `pilotfish:plan-verifier`（READY 才做）→ main 在 `../shanjie-zhen` 反轉三個 revert、解衝突（判斷多，main 自己做）→ executor 加新開關（核心、FFI、C 冒煙、`cli/`（`english-sim` 的旗標與測試）、殼、設定視窗、測試、文件）→ main 跑改到的 Rust 測試檔與 `make test-swift`，完整 Rust 測試推到 GitHub 後在 188 的 WSL 跑 → `/code-review`＋fresh verifier＋CI → main 清掉維護者 Mac 上的四個鍵、裝開發版 → 維護者實機（§2）→ merge commit → v0.6.1 發版流程。
+- **順序**：這份契約 → fresh `pilotfish:plan-verifier`（READY 才做）→ main 在這一片的 worktree 反轉三個 revert、解衝突（判斷多，main 自己做）→ executor 加新開關（核心、FFI、C 冒煙、`cli/`（`english-sim` 的旗標與測試）、殼、設定視窗、測試、文件）→ main 跑改到的 Rust 測試檔與 `make test-swift`，完整 Rust 測試推到 GitHub 後在另一台 Linux 機器上跑 → `/code-review`＋fresh verifier＋CI → main 清掉維護者 Mac 上的四個鍵、裝開發版 → 維護者實機（§2）→ merge commit → v0.6.1 發版流程。
 - **回復**：
   - `git revert -m 1` 這一片的合併。程式回到 0.6.0 的樣子，含 #320 拿掉的單字表打包也會回來；建置照舊從 `data/english-words.txt.sha256` 下載單字表。
   - 舊版殼讀不到 `englishReversalGuard`、`englishOverwrite`、`shiftToggle`，直接忽略。
@@ -93,5 +93,5 @@
 - **executor 不可以**：連網；讀 `eval/holdout/` 與維護者的私人資料；安裝、啟動 App；執行 `.app` 裡的程式；呼叫 TIS 或 lsregister；碰 `~/Library` 與鑰匙圈；push、開 PR、發版；碰其他 worktree；在 Mac 跑完整 `make test-rust`（只跑改到的測試檔）。
 - **預算**：
   - executor 1 回合加 1 次修正；
-  - 188 完整 Rust 測試一次，≤ 30 分鐘；
+  - 完整 Rust 測試（另一台 Linux 機器）一次，≤ 30 分鐘；
   - 維護者實機 1 次，長度由維護者決定。只有這一步要佔用維護者的時間。
