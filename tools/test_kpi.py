@@ -202,6 +202,46 @@ def make_root(td, names=("bigram.sjlm", "classes.sjc", "tinylm.sjtl")):  # (a ve
     return root
 
 
+class WikituneThreads(unittest.TestCase):
+    """kpi run is sent to remote machines that must be filled: the wikitune-clean cell passes --threads <usable cores>, except to a
+    CLI that predates the flag."""
+
+    def cmd_for(self, takes_threads):
+        seen = []
+        v = types.SimpleNamespace(dir="/x")
+        with mock.patch.object(kpi, "usable_cores", return_value=16), \
+             mock.patch.object(kpi, "cli_takes_threads", return_value=takes_threads), \
+             mock.patch.object(bench, "cell_cmd", return_value=["cli"]), \
+             mock.patch.object(bench, "sh", side_effect=lambda cmd, **kw: seen.append(cmd) or ""), \
+             mock.patch.object(bench, "parse_summary", side_effect=RuntimeError("stop after the command")):
+            with self.assertRaises(RuntimeError):
+                kpi.wikitune_cell(v, "rows", "rowstats")
+        return seen
+
+    def test_the_cell_decodes_on_every_usable_core(self):
+        self.assertEqual(self.cmd_for(True), [["cli", "--threads", "16"]])
+
+    def test_an_old_cli_gets_no_threads_flag(self):
+        self.assertEqual(self.cmd_for(False), [["cli"]])
+
+    def test_usable_cores_follows_the_affinity_mask(self):
+        if not hasattr(os, "sched_getaffinity"):
+            self.skipTest("no sched_getaffinity on this platform")
+        with mock.patch.object(os, "sched_getaffinity", return_value={0, 1, 2}):
+            self.assertEqual(kpi.usable_cores(), 3)
+
+    def test_cli_takes_threads_reads_the_exported_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "cli/src"))
+            with open(os.path.join(d, "cli/src/main.rs"), "w") as f:
+                f.write('match a { "--threads" => {} }')
+            self.assertTrue(kpi.cli_takes_threads(d))
+            with open(os.path.join(d, "cli/src/main.rs"), "w") as f:
+                f.write('match a { "--lm" => {} }')
+            self.assertFalse(kpi.cli_takes_threads(d))
+        self.assertFalse(kpi.cli_takes_threads("/nonexistent"))
+
+
 class ReplayModels(Tmp):
     def test_matching_models_pass(self):
         root = make_root(self.td)
