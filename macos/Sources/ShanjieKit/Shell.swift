@@ -554,10 +554,11 @@ public final class Shell {
     }
     /// The system uptime, the clock `NSEvent.timestamp` uses; a test replaces it.
     var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
-    /// zhen-reapply section 1b: a monotonic clock that keeps counting while the Mac sleeps (`uptime` stops), so a lid closed for an hour
-    /// is a long pause; a test replaces it.
+    /// zhen-reapply section 1b: CLOCK_MONOTONIC, which `man clock_gettime` says "will continue to increment while the system is
+    /// asleep" (`uptime` does not), so a lid closed for an hour counts as a long pause; not observed across a real sleep. A test replaces it.
     var idleClock: () -> TimeInterval = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000 }
-    /// Section 1b: when the last typing key (or a Shift-tap hint) came, on `idleClock`; `nil` before the first.
+    /// zhen-reapply sections 1a and 1b: when the last typing key (or a Shift-tap hint) came, on `idleClock`. `nil` means the next typing
+    /// key shows the 英/中 hint: set by activation and by an owner change, and before any typing.
     var lastTypingAt: TimeInterval?
     /// Section 1b: a pause at least this long before a typing key shows the 英/中 hint again. Picked, not measured; the maintainer tunes it.
     static let modeHintIdleSeconds: TimeInterval = 30
@@ -1344,8 +1345,6 @@ public final class Session {
     /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
     /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
     private var spacingPrev: Character?
-    /// zhen-reapply section 1a: set by `activate()` while the Shift toggle is on; the next typing key shows the 英/中 hint and clears it.
-    private var modeHintPending = false
     /// browser-first-syllable section 4: this client's bundle ID as last read by `send` or passed to `applyProfile`; never read
     /// for this rule alone.
     private var bundle: String?
@@ -1373,19 +1372,18 @@ public final class Session {
             let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
             applyProfile(bundle: bundle)
             syncAscii(bundle: bundle)
-            modeHintPending = shell.shiftToggleOn  // zhen-reapply section 1a: an owner change without activateServer counts too
+            shell.lastTypingAt = nil  // zhen-reapply section 1a: an owner change without activateServer counts too
         }
         // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on, after the key
         // is handled (so a key that starts a composition anchors the hint to the marked text), only while the toggle is still on.
+        // Due after an activation or owner change (nil, section 1a) or a pause of at least `modeHintIdleSeconds` (section 1b), and only when
+        // typing starts (nothing composed: a candidate pick after a long look is not the start of typing).
         var showModeHint = false
         if let event, Self.isTypingKey(event) {
             let now = shell.idleClock()
-            let paused = shell.lastTypingAt.map { now - $0 >= Shell.modeHintIdleSeconds } ?? false  // section 1b
+            let due = shell.lastTypingAt.map { now - $0 >= Shell.modeHintIdleSeconds } ?? true
             shell.lastTypingAt = now
-            if modeHintPending || paused {
-                modeHintPending = false
-                showModeHint = shell.shiftToggleOn
-            }
+            showModeHint = due && !shell.composing && shell.shiftToggleOn
         }
         defer { if showModeHint { showShiftHint(shell.engineAscii ? "英" : "中") } }
         // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
@@ -1445,8 +1443,7 @@ public final class Session {
         if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
         pushAscii(on)
-        modeHintPending = false  // zhen-reapply section 1a: this hint already shows the mode
-        shell.lastTypingAt = shell.idleClock()  // section 1b: nor does the next key after a pause that ended with this tap
+        shell.lastTypingAt = shell.idleClock()  // zhen-reapply sections 1a, 1b: this hint already shows the mode
         showShiftHint(on ? "英" : "中")
     }
 
@@ -1485,7 +1482,7 @@ public final class Session {
         let bundle = client.bundleIdentifier
         applyProfile(bundle: bundle)
         syncAscii(bundle: bundle)
-        modeHintPending = shell.shiftToggleOn  // zhen-reapply section 1a; nothing is pending while the toggle is off
+        shell.lastTypingAt = nil  // zhen-reapply section 1a: the next typing key shows the mode (only while the toggle is on)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.

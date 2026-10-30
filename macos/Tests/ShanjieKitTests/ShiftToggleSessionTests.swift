@@ -131,13 +131,43 @@ final class ShiftToggleSessionTests: XCTestCase {
         shell.idleClock = { clock }
         let c = Controller(shell)
         c.session.activate()
-        typeKey(c, "h")
-        clock += 10; typeKey(c, "i")
+        // Esc after each key keeps the composition empty, so every key is the start of typing.
+        typeKey(c, "h"); c.press(Keys.esc)
+        clock += 10; typeKey(c, "i"); c.press(Keys.esc)
         XCTAssertEqual(hint.shown.map(\.text), ["中"], "a 10 s pause is not enough")
-        clock += 31; typeKey(c, "j")
+        clock += 31; typeKey(c, "j"); c.press(Keys.esc)
         XCTAssertEqual(hint.shown.map(\.text), ["中", "中"], "a 31 s pause shows it")
-        for _ in 0..<8 { clock += 5; typeKey(c, "k") }  // 40 s of steady typing
+        for _ in 0..<8 { clock += 5; typeKey(c, "k"); c.press(Keys.esc) }  // 40 s of steady typing
         XCTAssertEqual(hint.shown.map(\.text), ["中", "中"], "no pause, no hint")
+    }
+
+    /// Section 1b: the bound is "at least": exactly `modeHintIdleSeconds` shows, a little less does not.
+    func testPauseBoundaryIsInclusive() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(hint: hint)
+        var clock: TimeInterval = 1000
+        shell.idleClock = { clock }
+        let c = Controller(shell)
+        c.session.activate()
+        typeKey(c, "h"); c.press(Keys.esc)
+        clock += Shell.modeHintIdleSeconds - 0.1; typeKey(c, "i"); c.press(Keys.esc)
+        XCTAssertEqual(hint.shown.count, 1)
+        clock += Shell.modeHintIdleSeconds; typeKey(c, "j")
+        XCTAssertEqual(hint.shown.count, 2)
+    }
+
+    /// Section 1b: a key in the middle of a composition (a candidate pick after a long look) is not the start of typing.
+    func testNoPauseHintInsideAComposition() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(hint: hint)
+        var clock: TimeInterval = 1000
+        shell.idleClock = { clock }
+        let c = Controller(shell)
+        c.session.activate()
+        typeKey(c, "s")  // ㄋ, shows 中 at the start
+        clock += 35
+        typeKey(c, " ")  // Space opens the candidates
+        XCTAssertEqual(hint.shown.count, 1)
     }
 
     /// Section 1b: a Shift tap after a pause shows the hint and counts as the pause's end, so the next key does not show it again.
