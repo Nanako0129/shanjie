@@ -29,6 +29,12 @@
 - 保留集合併後做過兩次盲處理（只印數量）：一／不 變調改本調（0 列需要改）；刪掉與開發集重複的 2 句（229 → 227）。
 - 開發集與保留集零重疊（程式檢查）。
 
+## 合法寫法表雜湊
+
+| 檔案 | SHA-256 |
+|---|---|
+| `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；只在 `--forms-rowstats` 時讀，`docs/contracts/forms-score.md`） | `e7ca5d8b455fc14371bed08e46a68868ef73bca5296fc78f22024f44613fb579` |
+
 ## 保留集雜湊（變動就代表被改過）
 
 | 檔案 | SHA-256 |

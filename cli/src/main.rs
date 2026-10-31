@@ -1,4 +1,4 @@
-use cli::common::{dev_rows, format_rowstats, levenshtein, load_lenient, read_rows, root, three_field_rows};
+use cli::common::{dev_rows, format_rowstats, levenshtein, load_forms, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial, ReadingChannel};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
@@ -198,6 +198,9 @@ struct RowOut {
     rerank: Option<Duration>,
     /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
     first: String,
+    /// `--forms-rowstats`: the forms verdict of the row, and whether the single-character step was skipped on either side.
+    forms_ok: bool,
+    forms_no_char_step: bool,
     scores: String,
     dump: String,
     words: String,
@@ -239,6 +242,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // model-v6 section 2.5: the names layer is always on; `--no-names` (evaluation only: the section 3.1 breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
+    let mut forms_rowstats = None::<String>;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
@@ -275,6 +279,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--dump" => dump = Some(val()?),
             "--dump-words" => dump_words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
+            "--forms-rowstats" => forms_rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
             "--rerank-level" => {
@@ -391,6 +396,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         _ => return Err("need exactly one of --dev, --rows, --set holdout".into()),
     };
     let name = name.unwrap_or(default_name);
+    // docs/contracts/forms-score.md: the table is read only when the flag is given, and before any output file is created, so
+    // a bad table never empties an existing --rowstats or other file.
+    let forms = match &forms_rowstats {
+        Some(_) => Some(load_forms()?),
+        None => None,
+    };
     let mut dump = match dump {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
@@ -402,6 +413,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // Opened before decoding, like the dump: an unwritable path fails now, not after a whole (holdout) run.
     let rowstats = match rowstats {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
+        None => None,
+    };
+    let forms_rowstats = match forms_rowstats {
+        Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create forms rowstats ({:?})", e.kind()))?),
         None => None,
     };
     let mut scores = match tinylm_scores {
@@ -483,7 +498,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(&used, &top, lex.manual()), idx)?;
             }
         }
-        out.ok = len.apply(&surf[chosen]) == t;
+        let pick = len.apply(&surf[chosen]);
+        out.ok = pick == t;
+        if let Some(fm) = &forms {
+            // Lenient first, then the forms table (the contract's fixed order); both sides use the row's own reading.
+            let ((p, p_ran), (g, g_ran)) = (fm.apply_checked(&pick, syls), fm.apply_checked(&t, syls));
+            out.forms_ok = p == g;
+            out.forms_no_char_step = !(p_ran && g_ran);
+        }
         out.in64 = surf.iter().any(|s| len.apply(s) == t);
         if want_dump {
             for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
@@ -502,6 +524,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
+    let (mut frs, mut no_char_step) = (Vec::new(), 0usize);
     let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
         top1 += out.ok as usize;
         o64 += out.in64 as usize;
@@ -515,6 +538,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
         if let Some(d) = dump_words.as_mut() {
             d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
+        }
+        if forms.is_some() {
+            no_char_step += out.forms_no_char_step as usize;
+            frs.push((out.forms_ok, out.first.clone(), rows[i].0.clone()));
         }
         rs.push((out.ok, out.first.clone(), rows[i].0.clone()));
         firsts.push(out.first);
@@ -610,6 +637,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if let Some(mut f) = rowstats {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
+    }
+    if let Some(mut f) = forms_rowstats {
+        f.write_all(format_rowstats(&frs).as_bytes()).map_err(|e| format!("cannot write forms rowstats ({:?})", e.kind()))?;
+        eprintln!("forms: {no_char_step} rows without the single-character step (syllable count differs from the sentence length)");
     }
     let sha = sha256_hex(firsts.join("\n").as_bytes());
     // A non-standard level is a different setting from the shipping one: tools/bench.py and tools/triage.py compare the whole tag, so it fails their cells.

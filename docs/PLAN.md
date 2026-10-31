@@ -528,6 +528,7 @@ v4 日期 2026-10-03。v1 經 `pilotfish:plan-verifier`（REVISE，4 項）與 `
   - 其他已結案的實驗程式（n0、providers、jev、`iterate.py`、`eval_mix.py`、`eval_bigram.py`）不改；它們記錄的數字標明是舊規則。
   - **S0 契約一併更新**：§6 的寬鬆對照定義改指向 `eval/variants.tsv` 與本節語意；§1 的 `eval/golden/unigram.txt` SHA-256 改成新值，並加一列 `eval/variants.tsv` 的 SHA-256；§9 註明 S2v 可以修改 `reference/proto/eval.py`（只限上述兩項）。PLAN §S0 的指標行同樣改成指向本節。
 - **擁有者。** main。
+- **延伸（2026-10-31）：** 另報的「合法寫法」分數（`eval/forms.tsv`，不改這一節的任何行為）見 `docs/contracts/forms-score.md`。
 - **驗收。**
   1. `python3 tools/build_variants.py --check` 通過；說明行的詞對數與表的行數一致。
   2. Rust 單元測試：最長匹配、單字對照與異體的組合、重複異體與欄數錯誤會報錯。
