@@ -10682,3 +10682,9 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
   - 重播進行到一半時 ssh 斷線（本機回「Can't assign requested address」），腳本結束、本機的清理刪掉了那台機器上的私人列檔；遠端的重播沒有收到 HUP，照跑完（它只讀公開的列檔）。另開一個 session 等它結束，JSON 用雜湊核對後取回，再刪 clone。斷線不留孤兒的做法寫進維護者本機的規則（遠端工作群組自帶看門狗，本機清理等遠端結束才刪檔）。
 - **Sparkle 安全公告**（推 tag 前）：最新一則是 2026-08（2.9.6 修好）；2.10.1（2026-10-25）只有一般修正與翻譯，沒有安全修正，照舊用 2.10.0。
 
+
+## 2026-10-31：瀏覽器清單加上 Crest 與 Aside
+
+- **起因**：使用者在 Discord 回報 Crest、Aside 裡第一個音節的預測列也跑到左上角，並在自己的電腦上查到兩個 bundle ID：Crest `com.pauldavis.crest`、Aside `at.studio.AsideBrowser`（Aside 的 ID 與它是 Chromium 系，2026-10-12 那段也記過）。
+- **決定**：兩個 ID 加進 `Shell.browserApps`（契約 `docs/contracts/browser-first-syllable.md` 第 2 條），第一個音節不顯示預測列，和 Chrome 相同；測試釘住兩個 ID 的行為等於 Chrome。
+- **還沒看到的**：兩個 App 這台 Mac 都沒裝，實際在 Crest、Aside 裡不出預測列還沒有人看過；發版後請回報者確認。這份清單也是 browser-index-zero 契約裡 `browser` 旗標的來源，那一片停在第 0 步，之後重開時兩個 App 會一起算進去。
