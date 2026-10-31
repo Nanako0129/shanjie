@@ -34,6 +34,7 @@ pub enum Error {
     BadOverlayRow { line_len: usize },
     OverlayDuplicate { word_len: usize },
     BadVariants { line: usize },
+    BadForms { line: usize },
 }
 
 impl fmt::Display for Error {
@@ -50,6 +51,7 @@ impl fmt::Display for Error {
                 write!(f, "overlay duplicates a base entry (word length {word_len})")
             }
             Error::BadVariants { line } => write!(f, "bad variants table (line {line})"),
+            Error::BadForms { line } => write!(f, "bad forms table (line {line})"),
         }
     }
 }

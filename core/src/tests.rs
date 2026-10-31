@@ -105,6 +105,42 @@ fn python_round_and_repr() {
     assert_eq!(pyround(2.675, 2), "2.67");
 }
 
+/// docs/contracts/forms-score.md section 1.3: word pairs first, then single characters where the row syllable is in the
+/// pair's reading condition; the order is observable on a table where each step undoes the other.
+#[test]
+fn forms_apply_order_and_reading_condition() {
+    let f = Forms::parse("# h\nword\t溼地\t濕地\nchar\t濕\t溼\tㄕ,ㄕ˙\n").unwrap();
+    // word step first: 濕地 is not a word key, so the char step makes 溼地; the other order would end at 濕地
+    assert_eq!(f.apply("濕地", &v(&["ㄕ", "ㄉㄧˋ"])), "溼地");
+    assert_eq!(f.apply("溼地", &v(&["ㄕ", "ㄉㄧˋ"])), "溼地");
+    // the reading condition decides per position; a syllable count that differs from the sentence skips the char step only
+    assert_eq!(f.apply("濕", &v(&["ㄒㄧˊ"])), "濕");
+    assert_eq!(f.apply("濕", &v(&["ㄕ˙"])), "溼");
+    assert_eq!(f.apply("濕a", &v(&["ㄕ"])), "濕a");
+    assert_eq!(f.apply("溼地a", &v(&["ㄕ"])), "濕地a");
+    // the skip is reported by `apply_checked`, which is where the CLI's count comes from
+    assert!(f.apply_checked("濕", &v(&["ㄕ"])).1 && !f.apply_checked("濕a", &v(&["ㄕ"])).1);
+    // malformed, duplicate or multi-character `char` lines are errors carrying only the line number
+    for bad in ["word\t甲\n", "char\t濕\t溼\n", "char\t濕濕\t溼\tㄕ\n", "char\t濕\t溼\t\n", "other\ta\tb\n", "word\ta\tb\nword\ta\tc\n", "word\t甲乙\t丙\n", "char\t濕\t溼\tㄕ\nchar\t濕\t沉\tㄕ\n"] {
+        assert!(matches!(Forms::parse(bad), Err(Error::BadForms { .. })), "{bad:?}");
+    }
+}
+
+/// The shipped table (eval/forms.tsv) on the contract's cases (section 3.4), judged as the scorer does: Lenient, then Forms.
+#[test]
+fn forms_shipped_table_cases() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let f = Forms::parse(&std::fs::read_to_string(root.join("eval/forms.tsv")).unwrap()).unwrap();
+    let l = Lenient::parse(&std::fs::read_to_string(root.join("eval/variants.tsv")).unwrap()).unwrap();
+    let same = |a: &str, b: &str, syls: &[&str]| f.apply(&l.apply(a), &v(syls)) == f.apply(&l.apply(b), &v(syls));
+    assert!(same("潮濕", "潮溼", &["ㄔㄠˊ", "ㄕ"]));
+    assert!(!same("潮濕", "潮溼", &["ㄔㄠˊ", "ㄒㄧˊ"]), "濕 read ㄒㄧˊ is not swapped");
+    assert!(!same("沈", "沉", &["ㄕㄣˇ"]), "surname 沈 stays strict");
+    assert!(same("沈", "沉", &["ㄔㄣˊ"]));
+    assert!(same("姐姐", "姊姊", &["ㄐㄧㄝˇ", "ㄐㄧㄝ˙"]));
+    assert!(!same("小姐", "小姊", &["ㄒㄧㄠˇ", "ㄐㄧㄝˇ"]));
+}
+
 #[test]
 fn lenient_comparison() {
     assert_eq!(char_map("她妳它牠嘗周臺裏"), "他你他他嚐週台裡");
