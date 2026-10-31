@@ -428,14 +428,15 @@ public final class Shell {
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
     /// Chromium browsers (docs/contracts/browser-first-syllable.md section 2): Google Docs answers an input method's first
-    /// rectangle query with the view's origin, so the prediction row is not shown for the first syllable there. Crest is
-    /// missing: its bundle ID is not known yet.
+    /// rectangle query with the view's origin, so the prediction row is not shown for the first syllable there. Crest and
+    /// Aside were added from a user's report (Discord, 2026-10-31) with the bundle IDs the user read off their machine.
     static let browserApps: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
         "org.chromium.Chromium",
         "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
         "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.nightly",
         "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "com.operasoftware.OperaGX",
+        "com.pauldavis.crest", "at.studio.AsideBrowser",
     ]
 
     /// browser-first-syllable section 1: at most one syllable on screen, a run of zhuyin symbols and tones counting as one and

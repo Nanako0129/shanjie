@@ -34,6 +34,13 @@ final class BrowserFirstSyllableTests: XCTestCase {
     }
 
     /// (b) Outside the list nothing changes; (c) the switch off is the same.
+    /// Crest and Aside (bundle IDs from a user's report, 2026-10-31) behave like Chrome.
+    func testCrestAndAsideHideTheRowForTheFirstSyllable() {
+        for bundle in ["com.pauldavis.crest", "at.studio.AsideBrowser"] {
+            XCTAssertEqual(visibility(bundle: bundle), visibility(bundle: chrome), bundle)
+        }
+    }
+
     func testOtherAppsAndTheSwitchOffKeepTheRow() {
         let textEdit = visibility(bundle: "com.apple.TextEdit")
         XCTAssertEqual(textEdit, [true, true, true, true], "every key has a row in a text view")

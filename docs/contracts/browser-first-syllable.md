@@ -40,7 +40,7 @@ Docs 用的是 EditContext。它回給輸入法的組字範圍是 `{1,n}`，也�
      - 顯示規則 D 把未完成音節顯示成英文字母時，例如「abc」，照字元數算，不在此限。
      - 「可省略韻母」開著時這條規則不生效。那時「ㄋㄔ」是兩個未完成單位，只能靠預測列解決（s3a 第 9a 條）。App 目前隱藏這個開關（`showsAbbreviation` 是 false）。
 2. **瀏覽器清單**：放在 `Shell.browserApps`，和 `chatApps` 並排，用 bundle ID 比對。
-   - 名單：`com.google.Chrome`（含 `.beta`、`.dev`、`.canary`）、`org.chromium.Chromium`、`com.microsoft.edgemac`（含 `.Beta`、`.Dev`、`.Canary`）、`com.brave.Browser`（含 `.beta`、`.nightly`）、`company.thebrowser.Browser`（Arc）、`com.vivaldi.Vivaldi`、`com.operasoftware.Opera`、`com.operasoftware.OperaGX`。
+   - 名單：`com.google.Chrome`（含 `.beta`、`.dev`、`.canary`）、`org.chromium.Chromium`、`com.microsoft.edgemac`（含 `.Beta`、`.Dev`、`.Canary`）、`com.brave.Browser`（含 `.beta`、`.nightly`）、`company.thebrowser.Browser`（Arc）、`com.vivaldi.Vivaldi`、`com.operasoftware.Opera`、`com.operasoftware.OperaGX`。〔2026-10-31〕加上 Crest（`com.pauldavis.crest`）與 Aside（`at.studio.AsideBrowser`），bundle ID 由回報的使用者在自己的電腦上查到。
    - Crest 的 bundle ID 查不到，先不列，等回報者提供。
    - Electron App 不列：這次沒有量到它們有問題。
 3. **開關**：設定視窗「選字」區、「即時預測」下面加一個開關「在瀏覽器裡，第一個字不顯示預測」，下面一行說明。
