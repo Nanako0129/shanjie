@@ -168,7 +168,7 @@ class BuildFlags(unittest.TestCase):
         self.assertTrue(self.row(rows, self.other))                              # a word outside Moedict is written too
         tags = [r.rstrip("\n").split("\t")[3] for r in rows]
         tail = tags[tags.index("manual"):]
-        self.assertEqual(tail, sorted(tail, key=("manual", "slang").index))   # the tail is the manual rows, then the slang rows (docs/contracts/net-slang.md)
+        self.assertEqual(tail, sorted(tail, key=B.TAIL_TAGS.index))   # the tail is the manual rows, the slang rows (docs/contracts/net-slang.md), then the colloq rows
 
     def test_moedict_readings_and_report(self):
         (rows, _, _, _), d = self.build(True, report=True)
@@ -586,24 +586,39 @@ class Cantonese(unittest.TestCase):
         non-manual words with a CANTO_CHARS character are exactly these dictionary headwords. Regenerating with another rule or
         dictionary changes this set and has to update it here on purpose."""
         with open(B.OUT, encoding="utf-8") as f:
-            words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")}
+            words = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in B.TAIL_TAGS}
         self.assertEqual({w for w in words if not B.CANTO_CHARS.isdisjoint(w)},
                          {"付畀", "凝睇", "咿唔", "唔篤", "噏呷", "投畀豺虎", "曼睩", "睇眄", "迎睇", "從諗"})   # 從諗: a Moedict headword the 通語 SJ-LM-7-9.7M supplement brings in
 
 
 class ShippedOverlay(unittest.TestCase):
     def test_the_tails_are_what_tail_rows_makes_today(self):
-        """Without the dumps: overlay-add.tsv ends with the `manual` rows, then the `slang` rows (docs/contracts/net-slang.md), and the
-        tail equals tail_rows() over the committed overlay-manual.tsv and slang-add.tsv, so editing one file without regenerating fails here."""
+        """Without the dumps: overlay-add.tsv ends with the `manual` rows, the `slang` rows (docs/contracts/net-slang.md), then the `colloq` rows
+        (docs/contracts/frame-reading.md), and the tail equals tail_rows() over the generated rows and the committed overlay-manual.tsv and slang-add.tsv, so editing one file without regenerating fails here."""
         with open(B.OUT, encoding="utf-8") as f:
             lines = f.readlines()
         tags = [l.rstrip("\n").split("\t")[3] for l in lines]
-        tail = next((i for i, t in enumerate(tags) if t in ("manual", "slang")), len(lines))
-        self.assertEqual(tags[tail:], sorted(tags[tail:], key=("manual", "slang").index), "manual rows, then slang rows, are the tail")
+        tail = next((i for i, t in enumerate(tags) if t in B.TAIL_TAGS), len(lines))
+        self.assertEqual(tags[tail:], sorted(tags[tail:], key=B.TAIL_TAGS.index), "manual, slang, then colloq rows are the tail")
         base = ime.Lexicon(B.BASE)
         taken = set(base.by_word) | {l.split("\t")[1] for l in lines[:tail]}
-        self.assertEqual(lines[tail:], B.tail_rows(taken, B.length_scores(base), B.base_syllables(base)))
+        self.assertEqual(lines[tail:], B.tail_rows(taken, B.length_scores(base), B.base_syllables(base), lines[:tail]))
         self.assertEqual(lines, B.rebuild_tails())
+
+    def test_colloq_rows_are_the_r7_variants_of_the_generated_frame_words(self):
+        """22 rows: the 11 generated words with 幀 (ㄓㄥˋ) times ㄓㄣ and ㄓㄥ, source score, tag colloq; running the tail twice adds nothing."""
+        with open(B.OUT, encoding="utf-8") as f:
+            lines = f.readlines()
+        colloq = [l for l in lines if l.endswith("\tcolloq\n")]
+        self.assertEqual(len(colloq), 22)
+        src = {l.split("\t")[1]: l.split("\t")[:3] for l in lines if "幀" in l.split("\t")[1] and not l.endswith("\tcolloq\n")}
+        self.assertEqual(len(src), 11)
+        for w, (r, _, score) in src.items():
+            for to in ("ㄓㄣ", "ㄓㄥ"):
+                self.assertIn(f"{r.replace('ㄓㄥˋ', to)}\t{w}\t{score}\tcolloq\n", colloq)
+        self.assertEqual(B.rebuild_tails(), lines)
+        generated = [l for l in lines if not l.endswith(("\tmanual\n", "\tslang\n", "\tcolloq\n"))]
+        self.assertEqual(B.tail_rows(set(), {}, set(), generated + colloq, manual=os.devnull, slang=os.devnull), [])   # already there: nothing again
 
     def test_no_slang_file_leaves_the_manual_tail_alone(self):
         base = ime.Lexicon(B.BASE)

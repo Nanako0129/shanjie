@@ -72,5 +72,31 @@ class Neutral(unittest.TestCase):
         self.assertEqual(run("ㄗˇ 子 -4.0\n", "ㄓㄨㄛ-ㄗ˙\t桌子\t-5.0\toverlay\n"), {})
 
 
+class FrameR7(unittest.TestCase):
+    """R7（docs/contracts/frame-reading.md）：幀 ㄓㄥˋ -> ㄓㄣ、ㄓㄥ 各一列，單字也處理，分數照抄，已有的不產生。"""
+    def rows(self, base, overlay=""):
+        with tempfile.TemporaryDirectory() as d:
+            b, o = os.path.join(d, "base.txt"), os.path.join(d, "overlay.tsv")
+            open(b, "w", encoding="utf-8").write(base)
+            open(o, "w", encoding="utf-8").write(overlay)
+            text, per_rule = bs.build(b, o)
+        return {tuple(l.split("\t")[:2]): l.split("\t")[2:] for l in text.splitlines()}, per_rule
+
+    def test_two_rows_per_source_row_with_the_source_score(self):
+        got, per_rule = self.rows("ㄓㄥˋ 幀 -6.5\nㄓㄜˋ-ㄓㄥˋ 這幀 -7.5\nㄓㄥˋ 政 -3.0\n")
+        self.assertEqual(got, {("ㄓㄣ", "幀"): ["-6.5", "sandhi"], ("ㄓㄥ", "幀"): ["-6.5", "sandhi"],
+                               ("ㄓㄜˋ-ㄓㄣ", "這幀"): ["-7.5", "sandhi"], ("ㄓㄜˋ-ㄓㄥ", "這幀"): ["-7.5", "sandhi"]})
+        self.assertEqual(per_rule["R7"], 4)
+
+    def test_existing_rows_are_skipped(self):
+        got, _ = self.rows("ㄓㄥˋ 幀 -6.5\nㄓㄣ 幀 -9.0\n", "ㄓㄜˋ-ㄓㄣ\t這幀\t-1.0\toverlay\n")
+        self.assertEqual(list(got), [("ㄓㄥ", "幀")])
+
+    def test_the_committed_base_gives_exactly_twelve_rows(self):
+        _, per_rule = bs.build()
+        self.assertEqual(per_rule["R7"], bs.R7_EXPECTED)
+        bs.self_check()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 """S2r：依教育部規範補齊「一」「不」的本調／變調讀音與「法」的 ㄈㄚˇ（docs/contracts/s2r-sandhi-variants.md §1），
-以及「紮」的口語讀音 ㄓㄚ（R6，docs/contracts/zha-reading.md），
+以及「紮」的口語讀音 ㄓㄚ（R6，docs/contracts/zha-reading.md）、「幀」的口語讀音 ㄓㄣ 與 ㄓㄥ（R7，docs/contracts/frame-reading.md），
 再加輕聲詞的本調讀音（標籤 neutral，docs/contracts/neutral-tolerance.md §1）。
 
 輸入 data/lexicon/mcbpmf-data.txt（小麥基底，MIT）；讀 data/lexicon/overlay-add.tsv 只為了去重。
@@ -164,8 +164,21 @@ def r6_zha(word, syls):
     return out if changed else None
 
 
-RULES = [("R1", r1_yi_sandhi), ("R2", r2_base_tone), ("R3", r3_bu_sandhi), ("R5", r5_fa), ("R6", r6_zha)]
-SINGLE_CHAR_RULES = {"R6"}   # 其他規則只處理多字列：單字的變調讀音本來就在基底；「紮」單字沒有 ㄓㄚ
+# R7（docs/contracts/frame-reading.md）：「幀」讀 ㄓㄥˋ 的位置各改成 ㄓㄣ、ㄓㄥ 產生一列。規則表只在這裡定義；build_overlay.py 的 colloq 檔尾共用 R7_RULES。
+FRAME_CHAR, FRAME_FROM, FRAME_TO = "幀", "ㄓㄥˋ", ("ㄓㄣ", "ㄓㄥ")
+R7_EXPECTED = 12   # 基底 6 列 × 2 個讀音；不是 12 就停（main）
+
+
+def r7_frame(to):
+    def rule(word, syls):
+        out = [to if ch == FRAME_CHAR and s == FRAME_FROM else s for ch, s in zip(word, syls)]
+        return out if out != list(syls) else None
+    return rule
+
+
+R7_RULES = [r7_frame(t) for t in FRAME_TO]
+RULES = [("R1", r1_yi_sandhi), ("R2", r2_base_tone), ("R3", r3_bu_sandhi), ("R5", r5_fa), ("R6", r6_zha)] + [("R7", r) for r in R7_RULES]
+SINGLE_CHAR_RULES = {"R6", "R7"}   # 其他規則只處理多字列：單字的變調讀音本來就在基底；「紮」「幀」單字沒有口語讀音
 
 
 def self_check():
@@ -178,6 +191,8 @@ def self_check():
     assert got != BU_RISE, f"不一會: 不 before 一 must not become ㄅㄨˊ, got {got!r}"
     assert r6_zha("紮", ["ㄗㄚ"]) == ["ㄓㄚ"] and r6_zha("結紮", ["ㄐㄧㄝˊ", "ㄓㄚˊ"]) == ["ㄐㄧㄝˊ", "ㄓㄚ"], "R6: 紮 ㄗㄚ / ㄓㄚˊ -> ㄓㄚ"
     assert r6_zha("扎", ["ㄓㄚ"]) is None, "R6 touches only 紮"
+    assert [r(w, y) for r in R7_RULES for w, y in [("一幀", ["ㄧˊ", "ㄓㄥˋ"])]] == [["ㄧˊ", "ㄓㄣ"], ["ㄧˊ", "ㄓㄥ"]], "R7: 幀 ㄓㄥˋ -> ㄓㄣ, ㄓㄥ"
+    assert all(r("政", ["ㄓㄥˋ"]) is None and r("幀", ["ㄓㄣ"]) is None for r in R7_RULES), "R7 touches only 幀 read ㄓㄥˋ"
 
 
 def base_rows(path=BASE):
@@ -267,6 +282,8 @@ def main():
         self_check()
     text, per_rule = build(penalty=a.neutral_penalty)
     print("rows per rule (first rule to produce each row):", dict(sorted(per_rule.items())), "total", text.count("\n"), file=sys.stderr)
+    if per_rule["R7"] != R7_EXPECTED:
+        sys.exit(f"error: R7 produced {per_rule['R7']} rows, expected {R7_EXPECTED} (docs/contracts/frame-reading.md)")
     if a.check:
         cur = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else None
         if cur != text:

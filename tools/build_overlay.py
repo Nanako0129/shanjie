@@ -293,7 +293,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     rows += sup_rows
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
-    rows += tail_rows(words | overlay_words, length_scores(base), syllables)
+    rows += tail_rows(words | overlay_words, length_scores(base), syllables, rows)
     if pick:
         print(f"--moedict-readings: {len(kept_old)} words keep their reading because readings.py marks them CHECK or GAP"
               + (f" (listed in {reading_report})" if reading_report else " (give --reading-report to list them)"))
@@ -309,21 +309,33 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
 
 
 
+TAIL_TAGS = ("manual", "slang", "colloq")   # 檔尾的三段，依這個順序
+
+
 def rebuild_tails(out=OUT):
-    """overlay-add.tsv 產生的列（標籤不是 manual、slang）照舊，檔尾照 tail_rows 重算；給只改了手動詞或網路用語的時候用，不必有 dump。"""
+    """overlay-add.tsv 產生的列（標籤不是 TAIL_TAGS）照舊，檔尾照 tail_rows 重算；給只改了手動詞、網路用語或 colloq 規則的時候用，不必有 dump。"""
     with open(out, encoding="utf-8") as f:
-        kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")]
+        kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in TAIL_TAGS]
     base = ime.Lexicon(BASE)
-    return kept + tail_rows(set(base.by_word) | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base))
+    return kept + tail_rows(set(base.by_word) | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base), kept)
 
 
-def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG):
-    """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、兩個詞包或手動詞的詞。"""
+def tail_rows(taken, scores, syllables, generated=(), manual=MANUAL, slang=SLANG):
+    """overlay-add.tsv 的檔尾：手動詞（manual），網路用語（slang，檔案存在才有），再接 generated 裡含「幀」的列的 R7 口語讀音變體（colloq，
+    docs/contracts/frame-reading.md；分數照抄來源，已有的（讀音, 詞）不產生）。網路用語也不能是名單層、兩個詞包或手動詞的詞。"""
     meme = pack_words(MEME_PACK) if os.path.exists(MEME_PACK) else set()
     taken = taken | pack_words() | pack_words(IT_PACK) | meme | names_words()   # 同詞同讀音和詞包、名單層重複，引擎整個載入失敗
     rows = manual_rows(taken, scores, syllables, manual)
     if os.path.exists(slang):
         rows += slang_behind(manual_rows(taken | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"), boosted_words(slang))
+    seen = {tuple(r.split("\t")[:2]) for r in (*generated, *rows)}
+    for r in generated:
+        reading, word, score, _ = r.rstrip("\n").split("\t")[:4]
+        for rule in build_sandhi.R7_RULES:
+            new = rule(word, reading.split("-"))
+            if new and ("-".join(new), word) not in seen:
+                seen.add(("-".join(new), word))
+                rows.append(f"{'-'.join(new)}\t{word}\t{score}\tcolloq\n")
     return rows
 
 
@@ -725,7 +737,7 @@ def main():
     ap = argparse.ArgumentParser()
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
-    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
+    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞、網路用語與 colloq 變體")
     ap.add_argument("--moedict-readings", action="store_true")
     ap.add_argument("--reading-report", metavar="PATH")
     ap.add_argument("--moedict-supplement", nargs="+", metavar="FILE")
