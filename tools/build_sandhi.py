@@ -1,12 +1,12 @@
 """S2r：依教育部規範補齊「一」「不」的本調／變調讀音與「法」的 ㄈㄚˇ（docs/contracts/s2r-sandhi-variants.md §1），
-以及「紮」的口語讀音 ㄓㄚ（R6，docs/contracts/zha-reading.md）、「幀」的口語讀音 ㄓㄣ 與 ㄓㄥ（R7，docs/contracts/frame-reading.md），
+以及口語通行讀音：「紮」ㄓㄚ（R6，docs/contracts/zha-reading.md）、「幀」ㄓㄣ 與 ㄓㄥ（R7，docs/contracts/frame-reading.md），
 再加輕聲詞的本調讀音（標籤 neutral，docs/contracts/neutral-tolerance.md §1）。
 
 輸入 data/lexicon/mcbpmf-data.txt（小麥基底，MIT）；讀 data/lexicon/overlay-add.tsv 只為了去重。
 輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\t標籤」（sandhi 或 neutral），依（讀音, 詞）的 UTF-8 位元組序排序。
 
 R1–R5 的規則依據：《國語辭典簡編本》〈單一音讀〉（https://dict.concised.moe.edu.tw/page.jsp?ID=55&la=0&powerMode=0 ）、
-88 年《國語一字多音審訂表》；R6 的 ㄓㄚ 是口語讀音，不是審訂音（維護者逐字同意，zha-reading.md）。規則本身是事實，這個檔案不含任何教育部資料。
+88 年《國語一字多音審訂表》；R6 的 ㄓㄚ、R7 的 ㄓㄣ 與 ㄓㄥ 是口語讀音，不是審訂音（維護者逐字同意，zha-reading.md、frame-reading.md）。規則本身是事實，這個檔案不含任何教育部資料。
 
 用法：python3 tools/build_sandhi.py [--check] [--neutral-penalty δ]
 """
@@ -164,13 +164,15 @@ def r6_zha(word, syls):
     return out if changed else None
 
 
-# R7（docs/contracts/frame-reading.md）：「幀」讀 ㄓㄥˋ 的位置各改成 ㄓㄣ、ㄓㄥ 產生一列。規則表只在這裡定義；build_overlay.py 的 colloq 檔尾共用 R7_RULES。
+# R7（docs/contracts/frame-reading.md）：「幀」讀 ㄓㄥˋ 的位置各改成 ㄓㄣ、ㄓㄥ 產生一列。規則表只在這裡定義；build_overlay.py 的 colloq-reading 檔尾共用 R7_RULES。
 FRAME_CHAR, FRAME_FROM, FRAME_TO = "幀", "ㄓㄥˋ", ("ㄓㄣ", "ㄓㄥ")
-R7_EXPECTED = 12   # 基底 6 列 × 2 個讀音；不是 12 就停（main）
+R7_EXPECTED = 12   # 基底 6 列 × 2 個讀音；test_build_sandhi.py 的 test_the_committed_base_gives_exactly_twelve_rows 守這個數
 
 
 def r7_frame(to):
     def rule(word, syls):
+        if len(word) != len(syls):
+            return None
         out = [to if ch == FRAME_CHAR and s == FRAME_FROM else s for ch, s in zip(word, syls)]
         return out if out != list(syls) else None
     return rule
@@ -282,8 +284,6 @@ def main():
         self_check()
     text, per_rule = build(penalty=a.neutral_penalty)
     print("rows per rule (first rule to produce each row):", dict(sorted(per_rule.items())), "total", text.count("\n"), file=sys.stderr)
-    if per_rule["R7"] != R7_EXPECTED:
-        sys.exit(f"error: R7 produced {per_rule['R7']} rows, expected {R7_EXPECTED} (docs/contracts/frame-reading.md)")
     if a.check:
         cur = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else None
         if cur != text:

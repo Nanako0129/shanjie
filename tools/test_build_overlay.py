@@ -168,7 +168,7 @@ class BuildFlags(unittest.TestCase):
         self.assertTrue(self.row(rows, self.other))                              # a word outside Moedict is written too
         tags = [r.rstrip("\n").split("\t")[3] for r in rows]
         tail = tags[tags.index("manual"):]
-        self.assertEqual(tail, sorted(tail, key=B.TAIL_TAGS.index))   # the tail is the manual rows, the slang rows (docs/contracts/net-slang.md), then the colloq rows
+        self.assertEqual(tail, sorted(tail, key=B.TAIL_TAGS.index))   # the tail is the manual rows, the slang rows (docs/contracts/net-slang.md), then the colloq-reading rows
 
     def test_moedict_readings_and_report(self):
         (rows, _, _, _), d = self.build(True, report=True)
@@ -593,31 +593,35 @@ class Cantonese(unittest.TestCase):
 
 class ShippedOverlay(unittest.TestCase):
     def test_the_tails_are_what_tail_rows_makes_today(self):
-        """Without the dumps: overlay-add.tsv ends with the `manual` rows, the `slang` rows (docs/contracts/net-slang.md), then the `colloq` rows
+        """Without the dumps: overlay-add.tsv ends with the `manual` rows, the `slang` rows (docs/contracts/net-slang.md), then the `colloq-reading` rows
         (docs/contracts/frame-reading.md), and the tail equals tail_rows() over the generated rows and the committed overlay-manual.tsv and slang-add.tsv, so editing one file without regenerating fails here."""
         with open(B.OUT, encoding="utf-8") as f:
             lines = f.readlines()
         tags = [l.rstrip("\n").split("\t")[3] for l in lines]
         tail = next((i for i, t in enumerate(tags) if t in B.TAIL_TAGS), len(lines))
-        self.assertEqual(tags[tail:], sorted(tags[tail:], key=B.TAIL_TAGS.index), "manual, slang, then colloq rows are the tail")
+        self.assertEqual(tags[tail:], sorted(tags[tail:], key=B.TAIL_TAGS.index), "manual, slang, then colloq-reading rows are the tail")
         base = ime.Lexicon(B.BASE)
         taken = set(base.by_word) | {l.split("\t")[1] for l in lines[:tail]}
         self.assertEqual(lines[tail:], B.tail_rows(taken, B.length_scores(base), B.base_syllables(base), lines[:tail]))
         self.assertEqual(lines, B.rebuild_tails())
 
-    def test_colloq_rows_are_the_r7_variants_of_the_generated_frame_words(self):
-        """22 rows: the 11 generated words with 幀 (ㄓㄥˋ) times ㄓㄣ and ㄓㄥ, source score, tag colloq; running the tail twice adds nothing."""
+    def test_colloq_reading_rows_are_the_r7_variants_of_the_generated_frame_words(self):
+        """22 rows: the 11 generated words with 幀 (ㄓㄥˋ) times ㄓㄣ and ㄓㄥ, source score, tag colloq-reading; running the tail twice adds nothing."""
         with open(B.OUT, encoding="utf-8") as f:
             lines = f.readlines()
-        colloq = [l for l in lines if l.endswith("\tcolloq\n")]
+        tag = "\tcolloq-reading\n"
+        colloq = [l for l in lines if l.endswith(tag)]
         self.assertEqual(len(colloq), 22)
-        src = {l.split("\t")[1]: l.split("\t")[:3] for l in lines if "幀" in l.split("\t")[1] and not l.endswith("\tcolloq\n")}
+        src = {tuple(l.split("\t")[:2]): l.split("\t")[2] for l in lines if "幀" in l.split("\t")[1] and not l.endswith(tag)}
         self.assertEqual(len(src), 11)
-        for w, (r, _, score) in src.items():
-            for to in ("ㄓㄣ", "ㄓㄥ"):
-                self.assertIn(f"{r.replace('ㄓㄥˋ', to)}\t{w}\t{score}\tcolloq\n", colloq)
+        want = set()
+        for (r, w), score in src.items():
+            for to in ("ㄓㄣ", "ㄓㄥ"):   # only the positions of 幀 change
+                new = "-".join(to if ch == "幀" else s for ch, s in zip(w, r.split("-")))
+                want.add(f"{new}\t{w}\t{score}{tag}")
+        self.assertEqual(set(colloq), want)
         self.assertEqual(B.rebuild_tails(), lines)
-        generated = [l for l in lines if not l.endswith(("\tmanual\n", "\tslang\n", "\tcolloq\n"))]
+        generated = [l for l in lines if not l.endswith(("\tmanual\n", "\tslang\n", tag))]
         self.assertEqual(B.tail_rows(set(), {}, set(), generated + colloq, manual=os.devnull, slang=os.devnull), [])   # already there: nothing again
 
     def test_no_slang_file_leaves_the_manual_tail_alone(self):
