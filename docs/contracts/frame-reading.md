@@ -39,7 +39,7 @@
 
 ## 2. 載入、golden、測試
 
-- 載入不改：兩個檔都已經在每一個載入點，核心程式不動。
+- 載入不改：兩個檔都已經在每一個載入點，核心程式的行為不動（`core/src/engine.rs` 的 `load_lexicon` 只在註解補上 R7）。
 - golden 預期（重產前寫下，重產後 `git diff eval/golden/` 逐項核對）：
   - `eval/golden/s2h-lm-context.txt` 錯字回報的聊天、書面兩行：`oracle@64` 可能 +1（第 175 列）、`top1` 可能 +1、`top1_sha256` 跟著第 175 列的選字變；這三項以外不變。
   - `eval/golden/sp-predict.txt`：讀音 ㄓㄣ 或 ㄓㄥ 的預測列可能多出「幀」或幀字詞。變了就逐行看，只能是新增的「幀」詞造成的差異。
@@ -71,6 +71,7 @@
   - 評測的列檔雜湊或模型雜湊不符。
 - **檔案範圍**：
   - `tools/build_sandhi.py`、`tools/test_build_sandhi.py`、`tools/build_overlay.py`、`tools/test_build_overlay.py`；
+  - `core/src/engine.rs`（只改註解）、`README.md`（功能列）；
   - `data/lexicon/sandhi-add.tsv`、`data/lexicon/overlay-add.tsv`（只多 22 列）；
   - `docs/contracts/s2r-sandhi-variants.md`、`docs/contracts/frame-reading.md`、`LICENSES/data.md`；
   - `eval/golden/s2h-lm-context.txt`、`eval/golden/sp-predict.txt`（只在 §2 的條件下）；
