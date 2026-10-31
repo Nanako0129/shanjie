@@ -5,7 +5,8 @@
   python3 experiments/loss0/loss0.py --rows F   also write one TSV line per row to F (set, profile, row number, layer, D2, gold rank,
                                                 label, tags, difference pair; keep it in the private cache)
 
-Reads only HOMO-0's saved outputs under ~/.cache/shanjie/triage/homo0 (main ba8d3860, triage setting S; no decoding here):
+Reads HOMO-0's saved outputs under ~/.cache/shanjie/triage/homo0 and RUHI-0's human labels (triage/ruhi0/labels.tsv,
+triage/ruhi0-big/labels.tsv) (main ba8d3860, triage setting S; no decoding here):
 <set>-<prof>.map/.txt, .full.dump (top 64), .full.words (segmentation; k 0 = gold, k c+1 = chosen), .full.sc (top-n window:
 decoder n-gram score, reranker log-likelihood, lenient ok flags, chosen index), .norc.r and .notri.r (rerun right or wrong).
 Primary layer, first match in the registered order:

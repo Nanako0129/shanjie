@@ -135,7 +135,7 @@ def main():
             z = homophone_rows(s, "formal")[1] or set()
             zf += sum(1 for i in z if cand[i - 1] and not cli[i - 1])
         reg.append(f"small-set 在/再 rows fixed {zf} of {sum(len(homophone_rows(s, 'formal')[1] or ()) for s in SMALL)}")
-        passed = ok_all and 2 * tot_b <= tot_f and tot_f > 0
+        passed = ok_all and 2 * tot_b <= tot_f and tot_f > 0   # tot_f > 0 (not in the registration) only drops 0/0 cells, the shipping cell among them
         print(f"  α {a:4} δ {d:4}: total +{tot_f}/-{tot_b} net {tot_f - tot_b:+d}  pass {passed}  |  " + "; ".join(line))
         print(f"      regression: " + "; ".join(reg))
         # registered tie-break "nearer the shipping cell": distance taken as |dα| + |dδ| (the registration names no metric); an equal
