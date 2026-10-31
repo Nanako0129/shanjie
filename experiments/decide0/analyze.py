@@ -53,11 +53,11 @@ def homophone_rows(s, p):
     lr = f"{CACHE}/triage/homo0/loss0-rows.tsv"
     if not os.path.exists(lr):
         sys.exit(f"STOP: {lr} is missing; write it first with experiments/loss0/loss0.py --rows {lr}")
-    if True:   # column 3 is the row's number in the original set file (loss0.py writes the .map's first field)
-        for l in open(lr, encoding="utf-8"):
-            t = l.rstrip("\n").split("\t")
-            if t[0] == s and t[1] == p and t[-1] != "?" and set(t[-1].replace("→", "")) <= {"在", "再"}:
-                zai.add(int(t[2]))
+    # column 3 is the row's number in the original set file (loss0.py writes the .map's first field)
+    for l in open(lr, encoding="utf-8"):
+        t = l.rstrip("\n").split("\t")
+        if t[0] == s and t[1] == p and t[-1] != "?" and set(t[-1].replace("→", "")) <= {"在", "再"}:
+            zai.add(int(t[2]))
     return c, zai
 
 
@@ -138,7 +138,9 @@ def main():
         passed = ok_all and 2 * tot_b <= tot_f and tot_f > 0
         print(f"  α {a:4} δ {d:4}: total +{tot_f}/-{tot_b} net {tot_f - tot_b:+d}  pass {passed}  |  " + "; ".join(line))
         print(f"      regression: " + "; ".join(reg))
-        far = abs(a - FORMAL_CELLS[0][0]) + abs(d - FORMAL_CELLS[0][1])   # registered tie-break: nearer the shipping cell wins
+        # registered tie-break "nearer the shipping cell": distance taken as |dα| + |dδ| (the registration names no metric); an equal
+        # distance keeps the first cell in FORMAL_CELLS order
+        far = abs(a - FORMAL_CELLS[0][0]) + abs(d - FORMAL_CELLS[0][1])
         if passed and (best is None or (tot_f - tot_b, -far) > (best[0], -best[3])):
             best = (tot_f - tot_b, a, d, far)
     print(f"  -> formal: best passing cell {best}")

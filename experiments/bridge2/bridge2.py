@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""BRIDGE-2 (research log 2026-10-31), run on the eval VM by bridge2-remote.sh: rescore the CLI's decoder-only n-best with the seen-only bridge term.
+"""BRIDGE-2 (research log 2026-10-31), run on the eval VM by bridge2-remote.sh (kept as run: the logged cells came from this code; its
+own SJT3 and lenient readers, and its untested build(), are left as they were rather than refactored after the fact): rescore the CLI's decoder-only n-best with the seen-only bridge term.
 
   python3 bridge2.py SRC OUT MODELS VARIANTS N GOLD
     SRC       the private folder (tmpfs): SRC/dec/<arm>.chatclause.chat.{dump,words,r} from the CLI, arms base and A (de-glue)

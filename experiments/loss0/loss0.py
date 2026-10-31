@@ -19,7 +19,8 @@ rerank cannot move the pick), b (core pick with delta 0 would take a gold candid
 score ng + alpha * ll prefers a wrong candidate). Not in chat: there the core adds the colloquial and reading-channel terms to the
 fusion, which triage.pick does not reproduce (triage.plain_pick_applies). Added after the code review, as a breakdown of the
 registered layers; the formal choices are checked against triage.pick row by row.
-Needs data/lm/bigram.sjlm and data/lm/tinylm.sjtl in this checkout, matching data/*.sha256.
+Needs data/lm/bigram.sjlm and data/lm/tinylm.sjtl in this checkout: the files HOMO-0 ran with (main ba8d3860, pinned in HOMO0_MODELS),
+not necessarily what the checkout's data/*.sha256 names.
 Tags (not exclusive): HOMO-0's compound / segmentation / sentence start / seen, no-reading-channel fixes, no-trigram fixes, and
 RUHI-0's human label (near, far, undecidable; else unlabelled). Observed phenomena, not causes.
 """
