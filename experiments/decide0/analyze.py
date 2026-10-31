@@ -28,10 +28,15 @@ TAU = 2.0
 
 
 def rowstats(path):
-    return [l.split("\t")[1] == "1" for l in open(path) if l.strip()]
+    v = [l.split("\t") for l in open(path) if l.strip()]
+    if [int(t[0]) for t in v] != list(range(1, len(v) + 1)):
+        sys.exit(f"STOP: {path}: rows are not numbered 1..{len(v)} in order")
+    return [t[1] == "1" for t in v]
 
 
 def compare(base, cand):
+    if len(base) != len(cand):
+        sys.exit(f"STOP: row counts differ ({len(base)} vs {len(cand)})")
     fixed = sum(1 for b, c in zip(base, cand) if c and not b)
     broken = sum(1 for b, c in zip(base, cand) if b and not c)
     return fixed, broken
@@ -46,7 +51,9 @@ def homophone_rows(s, p):
     c = {int(t.split("\t")[0]) for t in open(f, encoding="utf-8") if t.split("\t")[1].startswith("C")}
     zai = set()
     lr = f"{CACHE}/triage/homo0/loss0-rows.tsv"
-    if os.path.exists(lr):   # column 3 is the row's number in the original set file (loss0.py writes the .map's first field)
+    if not os.path.exists(lr):
+        sys.exit(f"STOP: {lr} is missing; write it first with experiments/loss0/loss0.py --rows {lr}")
+    if True:   # column 3 is the row's number in the original set file (loss0.py writes the .map's first field)
         for l in open(lr, encoding="utf-8"):
             t = l.rstrip("\n").split("\t")
             if t[0] == s and t[1] == p and t[-1] != "?" and set(t[-1].replace("→", "")) <= {"在", "再"}:
@@ -64,8 +71,13 @@ def subset(base, cand, rows):
 
 def formal_pick(sc_path, cli, alpha, delta):
     out = []
-    for l, v in zip(open(sc_path), cli):
+    lines = open(sc_path).read().splitlines()
+    if len(lines) != len(cli):
+        sys.exit(f"STOP: {sc_path}: {len(lines)} score records for {len(cli)} rows")
+    for k, (l, v) in enumerate(zip(lines, cli), 1):
         r = json.loads(l)
+        if r["i"] != k:
+            sys.exit(f"STOP: {sc_path}: record {k} is row {r['i']}")
         if "ll" not in r or len(r["ng"]) < 2:
             out.append(v)
             continue
@@ -126,8 +138,9 @@ def main():
         passed = ok_all and 2 * tot_b <= tot_f and tot_f > 0
         print(f"  α {a:4} δ {d:4}: total +{tot_f}/-{tot_b} net {tot_f - tot_b:+d}  pass {passed}  |  " + "; ".join(line))
         print(f"      regression: " + "; ".join(reg))
-        if passed and (best is None or tot_f - tot_b > best[0]):
-            best = (tot_f - tot_b, a, d)
+        far = abs(a - FORMAL_CELLS[0][0]) + abs(d - FORMAL_CELLS[0][1])   # registered tie-break: nearer the shipping cell wins
+        if passed and (best is None or (tot_f - tot_b, -far) > (best[0], -best[3])):
+            best = (tot_f - tot_b, a, d, far)
     print(f"  -> formal: best passing cell {best}")
 
 

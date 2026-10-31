@@ -41,12 +41,16 @@ SETS = ["dev302", "typing76", "probe", "fw", "user-reported", "cvtune", "wikitun
 SMALL = {"dev302", "typing76", "probe", "fw", "user-reported"}
 LAYERS = ["1 outside top 64", "2 outside rerank window", "3 broken by rerank/fusion", "4 rerank prefers gold, not adopted",
           "5 rerank also prefers wrong"]
+HOMO0_MODELS = {"bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",   # data/*.sha256 at ba8d3860
+                "tinylm.sjtl": "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478"}
 TAGS = ["compound", "segmentation", "sentence start", "seen", "no-rc fixes", "no-tri fixes"]
 
 
 def load_bigram(path):
     """HOMO-0's reader: has(u, w) is True when the bigram (u, w) is stored in the pruned model."""
     b = open(path, "rb").read()
+    if b[:8] != b"SJLM0001":
+        sys.exit(f"STOP: {path} is not an SJLM0001 model")
     V, N, eos, D = struct.unpack_from("<IQQd", b, 8)
     p = 8 + struct.calcsize("<IQQd")
     ids = {}
@@ -162,9 +166,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rows")
     a = ap.parse_args()
-    for f in ["bigram.sjlm", "tinylm.sjtl"]:
-        if not os.path.exists(f"{REPO}/data/lm/{f}") or bench.sha_file(f"{REPO}/data/lm/{f}") != open(f"{REPO}/data/{f}.sha256").read().split()[0]:
-            sys.exit(f"STOP: copy data/lm/{f} into this checkout and check it with shasum -a 256 -c data/{f}.sha256")
+    for f, want in HOMO0_MODELS.items():   # the models HOMO-0's outputs came from, not whatever this checkout ships
+        if not os.path.exists(f"{REPO}/data/lm/{f}") or bench.sha_file(f"{REPO}/data/lm/{f}") != want:
+            sys.exit(f"STOP: data/lm/{f} is not the file HOMO-0 used (main ba8d3860, SHA-256 {want[:12]}...); copy that one in")
     lm = f"{REPO}/data/lm/bigram.sjlm"
     par = triage.tinylm_params(f"{REPO}/data/lm/tinylm.sjtl")
     has = load_bigram(lm)
