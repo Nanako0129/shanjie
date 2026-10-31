@@ -3,7 +3,9 @@
 
   python3 experiments/loss0/loss0.py            print the tables (per profile x set group)
   python3 experiments/loss0/loss0.py --rows F   also write one TSV line per row to F (set, profile, row number, layer, D2, gold rank,
-                                                label, tags, difference pair; keep it in the private cache)
+                                                label, tags, then for layers 4 and 5 the reranker margin (best gold ll minus
+                                                chosen ll), the chosen candidate and that gold candidate (else empty), and last the
+                                                difference pair; keep it in the private cache)
 
 Reads HOMO-0's saved outputs under ~/.cache/shanjie/triage/homo0 and RUHI-0's human labels (triage/ruhi0/labels.tsv,
 triage/ruhi0-big/labels.tsv) (main ba8d3860, triage setting S; no decoding here):
@@ -251,7 +253,11 @@ def main():
                 if L == 3:
                     LLD[key].append(lld)
                 if out:
-                    out.write("\t".join([s, p, m[0], str(L + 1), sub, str(gold_rank or 0), hl, ",".join(tags), f["pair"]]) + "\n")
+                    extra = ["", "", ""]
+                    if L in (3, 4):   # L5-0: the margin and the two candidates behind it
+                        bg = max((k for k in window(d) if d["ok"][k] == 1), key=lambda k: d["ll"][k])
+                        extra = [f"{lld:.6f}", surf[(i, d["c"] + 1)], surf[(i, bg + 1)]]
+                    out.write("\t".join([s, p, m[0], str(L + 1), sub, str(gold_rank or 0), hl, ",".join(tags)] + extra + [f["pair"]]) + "\n")
     for key in sorted(T):
         n = sum(T[key][L]["rows"] for L in T[key])
         zai = sum(T[key][L]["zai"] for L in T[key])
