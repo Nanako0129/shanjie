@@ -10,8 +10,9 @@ without --context for the E flags), puts every wrong row (rowstats ok=0) into on
 main bucket (section 3: A1, B1, B2, D1, C; F is the user-reported rows that are right offline) and writes
 eval/bench/triage/<label>.json (counts only). Public sets also get a per-row numbers file under --rows-out (default
 ~/.cache/shanjie/triage), outside the repo; private sets only ever get counts. `table` renders docs/triage.md from the JSON files.
-The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so they include the colloquial term and the reading-channel term that
-rides on it. The D2b / D2c sub-diagnosis does not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model
+The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so they include the colloquial term and the decoder's reading term
+(docs/contracts/reading-decode-2.md; the CLI's tag ends in `+rd+rx:<sha8 of data/lexicon/std-exempt.tsv>`, which `expected_tag` checks; a checkout from before it
+has no such file and keeps the older tag, `+rc` after `+colloq:` in chat). The D2b / D2c sub-diagnosis does not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model
 rule, so in a run with the table a row whose pick either term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
 import argparse, collections, concurrent.futures, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading
@@ -156,14 +157,15 @@ def tri_tag(path):
     return f"+tri:{bench.sha_file(path)[:8]}" if os.path.lexists(path) else ""
 
 
-def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8=""):
+def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8="", rx8=None):
     """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). `kn` and `tri` are the profile's own parts: both profiles
     keep Kneser-Ney (`+kn:` before `+tl:`, the formal one at beta 0.75) and read their own trigram table (`+tri:` after `+acg`), formal
     `trigram.sjt3` and chat `trigram-chat.sjt3`; either part is "" when the file is not beside the model. With `--colloquial-core`
-    the tag ends in `+colloq:<sha8 of the table>` in both profiles, and in chat (where the term applies, with the reading-channel term on by default)
-    `+rc` after it: the CLI marks the shipping behavior, so a `--no-reading-channel` run is refused."""
-    colloq = f"+colloq:{colloq8}" + ("+rc" if prof == "chat" else "") if colloq8 else ""
-    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{tri}{colloq}"
+    the tag has `+colloq:<sha8 of the table>` in both profiles. With `rx8` (the first 8 hex of data/lexicon/std-exempt.tsv: the CLI has the decoder's
+    reading term, docs/contracts/reading-decode-2.md) every setting's tag ends in `+rd+rx:<rx8>`, so a `--no-reading-decode` run is refused; with `rx8` None
+    (a checkout from before the term) chat has `+rc` after `+colloq:` (the reading-channel term that rode on the table)."""
+    colloq = f"+colloq:{colloq8}" + ("+rc" if prof == "chat" and rx8 is None else "") if colloq8 else ""
+    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{tri}{colloq}" + ("" if rx8 is None else f"+rd+rx:{rx8}")
 
 
 def pick(ng, ll, alpha, tau, delta, masked=()):
@@ -412,12 +414,14 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
     f = lambda n: os.path.join(td, n)
     env = dict(os.environ, SHANJIE_VARIANTS=os.path.join(ROOT, "eval/variants.tsv"))
     tl8, co8 = bench.sha_file(tl)[:8], bench.sha_file(colloq)[:8] if colloq else ""
+    exempt = os.path.join(ROOT, "data/lexicon/std-exempt.tsv")
+    rx8 = bench.sha_file(exempt)[:8] if os.path.isfile(exempt) else None
     # bench.sh raises with the tail of the CLI's stderr; bench.parse_summary checks there is exactly one summary line.
     m = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, True, ["--dump", f("d"), "--dump-words", f("w"), "--rowstats", f("r"), "--tinylm-scores", f("s")], threads, colloq), env=env))
     m0 = bench.parse_summary(bench.sh(cli_cmd(cli, lm, tl, prof, rows_file, False, ["--rowstats", f("r0")], threads, colloq), env=env))
     # The setting tag the CLI prints: a dropped flag (no context, no pack, no small model) must fail the cell, as in bench.run_cell2.
     for got, ctx_tag in ((m["tag"], "+ctx"), (m0["tag"], "")):
-        if got != expected_tag(prof, ctx_tag, tl8, kn, tri, co8):
+        if got != expected_tag(prof, ctx_tag, tl8, kn, tri, co8, rx8):
             raise RuntimeError(f"{prof}: CLI setting tag {got} is not the shipping setting")
     n, top1, o64, sha = m["n"], m["top1"], m["oracle64"], m["top1_sha256"]
     if not (len(rows) == n == m0["n"]):

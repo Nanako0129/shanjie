@@ -384,7 +384,7 @@ open(opt("--rowstats"), "w").write("".join(f"{{i}}\\t{{int(i > bad)}}\\t0\\t3\\n
 sys.stderr.write(os.environ.get("FAKE_MODELS", {models!r}) + "\\n")
 if ("--no-colloquial" in a) != (not {co8!r}):  # the replay is told to leave the table out exactly when the version does not ship it
     sys.exit(3)
-tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + "+rc" if {co8!r} else "")
+tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + {rc!r} if {co8!r} else "") + {rd!r}
 if os.environ.get("FAKE_TAG"): tag = os.environ["FAKE_TAG"]
 print("## " + os.path.basename(opt("--rows")) + "  " + tag + "  {{'n': %d, 'top1': %d, 'final_ok': %d, 'unfixable': 0, 'autocommits': 0, 'kyss': 0.9123, 'picks_per100': 1.5, 'rewrites': 3, 'top1_sha256': 'aa'}}" % (n, n - bad, n - bad))
 """
@@ -396,6 +396,7 @@ class ReplayRun(Tmp):
     def setUp(self):
         super().setUp()
         self.root = make_root(self.td, self.NAMES)
+        self.extra_root_files()
         self.models = kpi.check_models(self.root, self.SPEC)
         self.rows = {}
         for name, k in (("user-reported", 4), ("dev302", 6)):
@@ -404,8 +405,15 @@ class ReplayRun(Tmp):
             self.rows[name] = (p, bench.sha_file(p))
         self.fake = os.path.join(self.td, "fake-replay")
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models.get("colloquial.sjlm", "")[:8]
-        open(self.fake, "w").write(FAKE.format(py=sys.executable, models=kpi.models_line(self.models), lm8=lm8, tl8=tl8, co8=co8))
+        open(self.fake, "w").write(FAKE.format(py=sys.executable, models=kpi.models_line(self.models), lm8=lm8, tl8=tl8, co8=co8, **self.tag_parts()))
         os.chmod(self.fake, 0o755)
+
+    def extra_root_files(self):
+        """Files a version's checkout holds besides data/lm (none for a version before the decoder's reading term)."""
+
+    def tag_parts(self):
+        """The reading-channel mark (`rc`) and the reading term's marks (`rd`) the fake binary prints: a version before the decoder's reading term has `+rc`."""
+        return {"rc": "+rc", "rd": ""}
 
     def replay(self, **env):
         a = types.SimpleNamespace(as_="v0.4.3")
@@ -469,6 +477,30 @@ class ReplayRunWithTheColloquialTable(ReplayRun):
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}")
+
+
+class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
+    """A version with `"reading": True` (docs/contracts/reading-decode-2.md): its replay tag has no `+rc` and ends in `+rd+rx:<sha8 of its std-exempt.tsv>`;
+    the older tag (with `+rc`, or without the reading marks) is refused."""
+    SPEC = dict(ReplayRunWithTheColloquialTable.SPEC, reading=True)
+
+    def extra_root_files(self):
+        os.makedirs(os.path.join(self.root, "data", "lexicon"))
+        with open(os.path.join(self.root, "data", "lexicon", "std-exempt.tsv"), "w", encoding="utf-8") as f:
+            f.write("ㄅㄛ\t波\n")
+
+    def rx8(self):
+        return bench.sha_file(os.path.join(self.root, "data", "lexicon", "std-exempt.tsv"))[:8]
+
+    def tag_parts(self):
+        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}"}
+
+    def test_the_old_tags_are_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        base = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}"
+        for tag in (base + "+rc", base, base + "+rc" + f"+rd+rx:{self.rx8()}", base + "+rd+rx:00000000"):
+            with self.assertRaises(SystemExit, msg=tag):
+                self.replay(FAKE_TAG=tag)
 
 
 # ---------- run ----------

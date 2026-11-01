@@ -1,6 +1,6 @@
 """Tests for tools/bench.py's reference row, static table check and table rendering (sbench 7.1, 7.2, 7.4).
 Run: python3 -m unittest tools/test_bench.py   (from the repo root). No network, no private data, no real builds."""
-import argparse, contextlib, io, json, os, stat, sys, tempfile, types, unittest
+import argparse, contextlib, hashlib, io, json, os, stat, sys, tempfile, types, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -539,6 +539,41 @@ class SuiteV2(Tmp):
             os.remove(os.path.join(v.dir, "data", "colloquial.sjlm.sha256"))
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a colloquial version without data/colloquial.sjlm.sha256 stops
+
+    def test_reading_version_ends_every_tag_with_rd_rx_and_has_no_rc(self):
+        """docs/contracts/reading-decode-2.md: a version with `"reading": True` ships the decoder's reading term. Every setting's tag (chat, formal, the anchor
+        run, the replay-setting cell) ends in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>`, and the colloquial tag has no `+rc` any more (the term was
+        removed); a version without the key keeps `+rc` and gets no `+rd` (the previous test and `test_sj_lm_7_version_...`). The export must hold the file."""
+        spec = {"release": "vR", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "reading": True, "tag": "+ctx+tl:{tl8}+acg"}
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        with mock.patch.dict(bench.VERSIONS2, {"vR": spec}):
+            v = self.stage_models("vR", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash(), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf0"))   # the export has no std-exempt.tsv
+            os.makedirs(os.path.join(v.dir, "data", "lexicon"))
+            exempt = os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv")
+            with open(exempt, "w", encoding="utf-8") as f:
+                f.write("ㄅㄛ\t波\n")
+            rx8 = hashlib.sha256(b"\xe3\x84\x85\xe3\x84\x9b\t\xe6\xb3\xa2\n").hexdigest()[:8]
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(v.rx8, rx8)
+            self.assertEqual(bench.expected_tag(v, "chat", False), f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}")
+            self.assertEqual(bench.expected_tag(v, "formal", False), f"lm-formal+ctx+tl:7e73ef67+acg+rd+rx:{rx8}")
+            self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{rx8}")
+            self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{rx8}")
+            # a cell is scored against that tag: the old tag (with +rc, or without the reading marks) is not the shipping setting of this version
+            self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}")
+            for tag in ("lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc", "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5", f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc+rd+rx:{rx8}"):
+                self.fake_cli(tag, [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        # the previous release is unchanged
+        self.assertNotIn("reading", bench.VERSIONS2["v0.6.1"])
 
     def test_a_version_without_the_key_never_gets_the_table(self):
         """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""
