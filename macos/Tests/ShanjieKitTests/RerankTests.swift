@@ -715,6 +715,23 @@ final class RerankTests: XCTestCase {
         empty.c.press(Keys.enter)
         XCTAssertEqual(empty.runner.waited, 0, "nothing composed")
 
+        // A job still running when the switch goes off, or after Esc emptied the composition: the guards, not the absence of a job.
+        let offMid = enterRig()
+        offMid.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(offMid.runner.held.count, 1, "premise: a job is running")
+        _ = offMid.shell.setRerank(false)
+        offMid.c.press(Keys.enter)
+        XCTAssertEqual(offMid.runner.waited, 0, "switch turned off while a job runs")
+        offMid.runner.drain()
+
+        let escMid = enterRig()
+        escMid.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(escMid.runner.held.count, 1, "premise: a job is running")
+        escMid.c.press(Keys.esc)
+        escMid.c.press(Keys.enter)
+        XCTAssertEqual(escMid.runner.waited, 0, "Esc emptied the composition while a job runs")
+        escMid.runner.drain()
+
         let open = enterRig()
         open.c.type(RerankRow.standardKeys)
         XCTAssertEqual(open.runner.held.count, 1, "premise: a job is running")
@@ -804,6 +821,7 @@ final class RerankTests: XCTestCase {
         XCTAssertTrue(spin { c.client.marked == RerankRow.reranked }, "the first composition was not reranked")
         c.press(Keys.esc)
         c.type(RerankRow.standardKeys)
+        XCTAssertEqual(c.client.marked, RerankRow.ngram, "premise: the job is not applied yet when Enter arrives")
         let start = DispatchTime.now().uptimeNanoseconds
         XCTAssertTrue(c.press(Keys.enter))
         XCTAssertLessThan(DispatchTime.now().uptimeNanoseconds - start, 10_000_000_000, "the wait ended before the limit")
