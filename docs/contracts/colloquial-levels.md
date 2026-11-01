@@ -2,6 +2,8 @@
 
 狀態：READY（2026-10-22；plan-verifier REVISE 五項照改後，收尾審查 READY）。
 
+〔2026-11-02：融合層的讀音通道項（ν 項）已由 `docs/contracts/reading-decode-2.md` 拿掉，讀音改由 n-gram 解碼器的讀音項處理（所有設定、三檔、語意校正開或關都生效）；`Engine::set_reading_channel`、`--no-reading-channel` 與摘要標記 `+rc` 一起退場。本檔寫到讀音通道項、`+rc` 之處，是 v0.6.1 以前出貨的行為與當時的量法，不是現在的行為。〕
+
 ## 0. 起因、要做到什麼、怎麼看到
 
 - **起因**：維護者錄 v0.5.0 demo 時發現，強度不是「標準」就沒有常談：「保守或積極都不應該覆蓋常談」。

@@ -2,6 +2,8 @@
 
 狀態：READY（2026-10-14 收尾審查）；plan-verifier 兩次 REVISE 都照改（§9）。
 
+〔2026-11-02：融合層的讀音通道項（ν 項）已由 `docs/contracts/reading-decode-2.md` 拿掉，讀音改由 n-gram 解碼器的讀音項處理（所有設定、三檔、語意校正開或關都生效）；`Engine::set_reading_channel`、`--no-reading-channel` 與摘要標記 `+rc` 一起退場。本檔寫到讀音通道項、`+rc` 之處，是 v0.6.1 以前出貨的行為與當時的量法，不是現在的行為。〕
+
 ## 0. 起因
 
 - 維護者 2026-10-14 選擇題定了迭代流程：沒有固定週期，有空就開下一片，方向先和研究顧問（Fable）討論再出選擇題；**第一個做錯誤桶工具**（`.agent-local` 的「迭代流程」一節、`docs/PLAN.md`「迭代流程與錯誤桶工具」）。
@@ -20,7 +22,7 @@
 
 ## 2. 出貨設定與要跑的集合
 
-- 出貨設定 S：`--lm data/lm/bigram.sjlm --profile <chat|formal> --context --packs acg --tinylm data/lm/tinylm.sjtl`（App 預設；`tools/bench.py` 的 `VERSIONS2` 最新一版）。`data/lm/colloquial.sjlm` 存在時再加 `--colloquial-core data/lm/colloquial.sjlm`（App 的 `Shell.build()` 一定載入它；設定標記與 JSON 的 `models`、`setting` 都帶它，沒有這個檔時指令與輸出和以前相同）。D2b／D2c 的細分是 Python 的 `pick`（δ＝0），不含口語項與讀音通道項，所以有口語表的那一次，這兩項改過選字的列可能被它歸錯；D1 與 E 照 CLI 的選字，含這兩項。CLI 的聊天設定標記是 `+colloq:<sha8>+rc`（書面 `+colloq:<sha8>`），`--no-reading-channel` 的那一次標記沒有 `+rc`，`expected_tag` 不收。
+- 出貨設定 S：`--lm data/lm/bigram.sjlm --profile <chat|formal> --context --packs acg --tinylm data/lm/tinylm.sjtl`（App 預設；`tools/bench.py` 的 `VERSIONS2` 最新一版）。`data/lm/colloquial.sjlm` 存在時再加 `--colloquial-core data/lm/colloquial.sjlm`（App 的 `Shell.build()` 一定載入它；設定標記與 JSON 的 `models`、`setting` 都帶它，沒有這個檔時指令與輸出和以前相同）。D2b／D2c 的細分是 Python 的 `pick`（δ＝0），不含口語項，所以有口語表的那一次，口語項改過選字的列可能被它歸錯；D1 與 E 照 CLI 的選字，含口語項與解碼器的讀音項（`reading-decode-2.md`，已在 `ng` 裡）。CLI 的摘要標記每一格都以 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>` 結尾（聊天另有 `+colloq:<sha8>`，書面 `+colloq:<sha8>` 在 `+rd` 之前），`--no-reading-decode` 的那一次沒有 `+rd+rx`，`expected_tag` 不收；沒有 `data/lexicon/std-exempt.tsv` 的舊 checkout 仍用舊標記（聊天 `+colloq:<sha8>+rc`）。
 - 每個（集合, 設定）跑兩次：S 加 `--dump --dump-words --rowstats --tinylm-scores`；S 去掉 `--context` 只加 `--rowstats`（§3 的 E）。
 - 集合：套件 v2（`tools/bench.py` 的 `SETS2`）：dev302、typing76、probe、錯字回報（全部列）、fw、cvtune、wikitune、lytune、wikitypo、discordtune。**保留集不跑、不分桶**，`docs/triage.md` 不列保留集（照保留集規則，只由 fresh verifier 跑：2026-10-18 起只在推 `v*` tag 前，之前是每片收尾；要看保留集照 `docs/benchmark.md`）。
 - 在哪裡跑：重的評測一律在 Mac 以外的機器（Windows 主機或 Colab）；cvtune、wikitune、lytune、wikitypo 與 discordtune 一定在那裡跑，先在那台機器上確認 dev302 兩種設定的 `top1_sha256` 和 Mac 相同才用。dev302、typing76、probe、錯字回報、fw（合計約 750 列）也可以在 Mac 上跑，但只當快速檢查。私人集合的 dump 與切分只留在那台機器，分桶在那裡算完只帶回計數。（2026-10-18 起）CLI 的 `--threads N`（只有 LM 模式，預設 1）用 N 條執行緒共用同一份模型解碼各列，輸出檔與摘要行和 N = 1 逐位元組相同。實際的工作執行緒數 W 是 N 與「列數除以 32 的區塊數」取小；W > 1 時 stderr 的小模型延遲行時間數字不同（在爭用下量的），且行尾多一段 `(threads W: measured under contention)`；W = 1（N = 1，或列數 ≤ 32）時沒有這一段、延遲行和以前一樣；次數都相同；`run --cli-threads K` 把 `--threads K` 傳給每一次 CLI 呼叫（K = 1 不傳）。`run --jobs N` 用 N 條執行緒同時跑（集合, 設定）各格（每格的重活是 CLI 子程序，同 `tools/bench.py`），寫出的 JSON 與逐列檔和依序跑逐位元組相同；某一格失敗時，之後不再開始任何格、正在跑的跑完（它們的暫存目錄含句子，由它們自己刪），再丟出第一個錯；重複的 `--set` 名稱只算一次。每一格的逐列檔在該格結果回到主執行緒時就寫出，JSON 最後一次寫。

@@ -283,7 +283,7 @@ mod tests {
         }
     }
 
-    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text (the sha256 of "b\t甲\n" is checked against the shasum of the file).
+    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text.
     #[test]
     fn the_tag_carries_the_exempt_lists_hash() {
         let (_, rd) = built(LEX, None, "b\t甲\n");

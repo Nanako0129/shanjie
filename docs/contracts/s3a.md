@@ -249,7 +249,7 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 // 引擎維持原狀；NULL → 1、路徑不是 UTF-8 → 2。不改 set_rerank 的開關、不改目前顯示。load_lm 成功會丟掉小模型（要在 load_lm 之後呼叫）。
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // load_colloquial（colloquial-term.md §2.2）：口語表（常談 colloquial.sjlm）。引擎從建立時的詞庫資料夾讀 k 的詞集合（mcbpmf-data.txt、overlay-add.tsv），加上建立時讀的詞包列；可以在 load_lm、load_tinylm 之前或之後呼叫（表和它們無關）。
-// 口語項在每個工作建立時決定要不要用：聊天設定、載入的 .sjtl 的 SHA-256 等於量測用的那一份，三個條件（含表已載入；任何強度都用，保守、標準、積極各用自己的 α、τ、δ，colloquial-levels.md）都成立才用；其他情況的工作和沒有表的引擎逐位元組相同。口語項生效時融合另加讀音通道項（reading-channel.md）：每個單字詞的讀音對照詞庫裡該字最常用的讀音，罕用讀音扣分（每字最多 4），不生效的地方沒有這一項；FFI 與設定都不變。
+// 口語項在每個工作建立時決定要不要用：聊天設定、載入的 .sjtl 的 SHA-256 等於量測用的那一份，三個條件（含表已載入；任何強度都用，保守、標準、積極各用自己的 α、τ、δ，colloquial-levels.md）都成立才用；其他情況的工作和沒有表的引擎逐位元組相同。融合層沒有讀音項（v0.6.1 以前的讀音通道項由 reading-decode-2.md 拿掉）。讀音項在 n-gram 解碼器裡（`Engine::load_lm` 建表，讀 `mcbpmf-data.txt` 與 `std-exempt.tsv`）：每個單字詞的路徑分數加 `2 × max(t, −4)`，t 是該讀音相對這個字最常用讀音的 log10 差（變調讀音、簡編本第一讀音被詞庫排後面的 12 對不扣分），所有設定（聊天、書面、三檔、語意校正開或關）都生效，學習抬起的詞不加；沒有使用者開關，評測用 `Engine::set_reading_decode(false)`，FFI 與設定都不變（`shanjie_engine_load_lm` 需要 `data_dir/std-exempt.tsv`，缺檔回 3）。
 // 讀檔失敗或格式錯 → 3（引擎維持原本的表，沒有就沒有）；NULL → 1；路徑不是 UTF-8 → 2。會讓進行中的重排工作作廢。路徑不寫進任何紀錄。
 int32_t shanjie_engine_load_colloquial(ShanjieEngine *engine, const char *path);
 // set_rerank：0 或 1（其他回 2、狀態不變），建立時預設 0（S7c-2c 起；之前是 1）；碼與快照同 set_demote（重算組字，關掉時畫面回到 n-gram 的結果）。殼每次建 engine 後都要呼叫。

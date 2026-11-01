@@ -2,6 +2,8 @@
 
 狀態：READY（2026-10-21，plan-verifier 第二輪；第一輪的三項見修訂一 `09f70dcf`）。疊在常談（`docs/contracts/colloquial-term.md`）上面，和常談同一版出貨。〔修訂（2026-10-22）：保守、積極也生效，通道項跟著常談走、用那一檔自己的 α（係數 ν／α），見 `docs/contracts/colloquial-levels.md`；下文原本寫「標準強度」的條件以那份契約為準，這裡逐處改成三檔。〕
 
+〔2026-11-02：融合層的讀音通道項（ν 項）已由 `docs/contracts/reading-decode-2.md` 拿掉，讀音改由 n-gram 解碼器的讀音項處理（所有設定、三檔、語意校正開或關都生效）；`Engine::set_reading_channel`、`--no-reading-channel` 與摘要標記 `+rc` 一起退場。本檔寫到讀音通道項、`+rc` 之處，是 v0.6.1 以前出貨的行為與當時的量法，不是現在的行為。〕
+
 ## 0. 起因、要做到什麼、怎麼看到
 
 - **起因**：P5（`experiments/p5-reading-channel/README.md`）照登記四條全過：對 P4d 那一格（常談），chatclause 23／0、discordtune 23／0、cvtune-clean 9／0、打字測驗 0／0、錯字回報 2／1。維護者 2026-10-21 選擇題：**跟常談一起出貨，不等沒看過的判讀集確認**（對這一次的例外，研究紀錄同日一節）。

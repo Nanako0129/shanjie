@@ -118,6 +118,7 @@ PR 需要：
     ```
 
   - 前後比較用逐列統計：基準與新版各加 `--rowstats "$TMPDIR/before.rowstats"`／`--rowstats "$TMPDIR/after.rowstats"`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare "$TMPDIR/before.rowstats" "$TMPDIR/after.rowstats" --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、打字測驗（`eval/dev/user-typing.txt`）、錯字回報檔在聊天與書面各一行；
+  - 解碼器有讀音項（`docs/contracts/reading-decode-2.md`；評測 CLI 與重播預設都開，`--no-reading-decode` 關閉），而 Python 參考（`reference/proto/lm_eval.py`）沒有，所以 golden 有兩份：`eval/golden/s2h-lm-context.txt` 等 Python 逐位元組對照的檔，CLI 帶 `--no-reading-decode` 比對；`eval/golden/reading-decode-shipping.txt` 是只有 Rust 的出貨預設釘值（dev302、打字測驗、錯字回報，聊天與書面，各兩行：`--context` 的 n-gram，以及出貨旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`、聊天另加 `--colloquial-core data/lm/colloquial.sjlm`）。往 `eval/dev/user-reported.txt` 加列時兩份都要更新：`make test-golden` 會指出哪幾行不同；Python 那份用 `reference/proto/lm_eval.py` 重新產生，Rust 那份用 `cli/tests/golden.rs` 的 `shipping_default_matches_its_rust_only_pins` 裡的指令重跑，換上新的摘要行。
   - 只要求不退步（2026-10-20 起 dev302 的聊天設定只報、不擋，書面照擋；聊天另由維護者用 cvtune-clean 守門，這份集合不在 repo 裡，見 `docs/methodology.md` 同日一節）；
   - 有進步的話寫出是哪幾句。
 - **對應的文件一起更新**：契約、`docs/PLAN.md`、README。

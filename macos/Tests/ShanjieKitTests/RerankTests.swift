@@ -458,7 +458,7 @@ final class RerankTests: XCTestCase {
     /// Without the small model (file missing or corrupt) the switch can do nothing: the menu item and the settings toggle are
     /// greyed, the checkmark still shows the stored choice, and no job is made. With the file both are enabled.
     func testGreyedWithoutTheSmallModel() throws {
-        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "std-exempt.tsv", "bigram.sjlm", "classes.sjc"]
         let missing = try XCTUnwrap(TestData.resources(only: names))
         let corrupt = try XCTUnwrap(TestData.resources(only: names))
         try Data("not a model".utf8).write(to: corrupt.appendingPathComponent(Shell.tinyLMFile))
@@ -518,7 +518,7 @@ final class RerankTests: XCTestCase {
             throw CocoaError(.fileReadCorruptFile)  // fails the test: neither version 2 nor 3 ships
         }
         XCTAssertEqual(v3.count, v2.count + 96)
-        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "std-exempt.tsv", "bigram.sjlm", "classes.sjc"]
         let dirs = (try XCTUnwrap(TestData.resources(only: names)), try XCTUnwrap(TestData.resources(only: names)))
         try v2.write(to: dirs.0.appendingPathComponent(Shell.tinyLMFile))
         try v3.write(to: dirs.1.appendingPathComponent(Shell.tinyLMFile))
@@ -575,7 +575,7 @@ final class RerankTests: XCTestCase {
         XCTAssertFalse(model.rerankLevelEnabled, "demotion off")
         model.setDemote(true)
         XCTAssertTrue(model.rerankLevelEnabled)
-        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "bigram.sjlm", "classes.sjc"]
+        let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "std-exempt.tsv", "bigram.sjlm", "classes.sjc"]
         let none = rig(resources: try XCTUnwrap(TestData.resources(only: names)))
         XCTAssertEqual(none.shell.rerankLevels, 0)
         XCTAssertFalse(SettingsModel(shell: none.shell).rerankLevelEnabled, "no small model")

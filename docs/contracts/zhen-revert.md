@@ -2,6 +2,8 @@
 
 狀態：2026-10-30 接回，另加 `zhen-reapply.md`（新開關「快打時鍵序顛倒不當英文」，預設開，(b) 逆序因此預設不發生）。2026-10-28 曾因維護者實機誤觸太多從 main revert（研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。
 
+〔2026-11-02：融合層的讀音通道項（ν 項）已由 `docs/contracts/reading-decode-2.md` 拿掉，讀音改由 n-gram 解碼器的讀音項處理（所有設定、三檔、語意校正開或關都生效）；`Engine::set_reading_channel`、`--no-reading-channel` 與摘要標記 `+rc` 一起退場。本檔寫到讀音通道項、`+rc` 之處，是 v0.6.1 以前出貨的行為與當時的量法，不是現在的行為。〕
+
 舊狀態：**READY**（2026-10-27 收尾審查；main 的子代理起草，plan-verifier 第 1 次 REVISE 七項逐項處置在 §10；§9 是維護者同日的決定，含 (A) 鄰鍵優先、(B) 正式寫法另開片）。**順序**：這一片接在模糊輸入（`docs/contracts/fuzzy-input.md`，分支 `feat/fuzzy-input`，PR #273 開著、領先 main 39 個 commit）**之後**：兩片都改 `finish_syllable`「詞庫沒有的音節」那一支，PR #273 先合併，本片從合併後的 main 開分支（§2.9、§8）。接在 `docs/contracts/zhen-mixed.md`（第一片）、`zhen-inline.md`（第二片）、`zhen-keyorder.md`（第三片，PR #311）之後；這一片**取代**第一片的英文窗與單字表觸發、第二片的顯示規則 D 與自動固定、第三片的證據計數與 `TWO_LETTER`，沒寫到的照那三份。標〔推論〕的是從程式讀出來、沒有在契約裡寫過的行為；標〔量過〕的是在 `data/lexicon/mcbpmf-data.txt` 查過的事實（只查基底檔，疊加層沒查，executor 實作前用 `lex.entries` 再核對一次）。
 
 ## 0. 起因與決定
