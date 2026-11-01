@@ -1,6 +1,6 @@
 //! E-E real-engine replay (docs/contracts/engine-replay.md): rows typed key by key through one `core::engine::Engine`
 //! built like the App's `Shell.build()`, with the user's re-picks simulated on request. Numbers only come out of here.
-use core::engine::{Engine, Key, KeyKind, Layout, Output, PACK_ACG, PACK_IT, PAGE_SIZE};
+use core::engine::{Engine, Key, KeyKind, Layout, Output, MOD_SHIFT, PACK_ACG, PACK_IT, PAGE_SIZE};
 use core::eval::{pyround, sha256_hex, Lenient};
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
@@ -45,8 +45,25 @@ pub struct RowOut {
     pub guard_skips: usize,
 }
 
-/// The keys of one syllable: its symbols, then its tone key (Space for the first tone). `None` for a symbol without a key.
+/// The punctuation marks a reading token may be, with the key the App sends for each (`core/src/engine.rs` `SHIFT_PUNCT` / `PLAIN_PUNCT`, standard
+/// layout; those tables are private to core, so a drift shows only as a wrong committed mark, which the replay test of each mark checks):
+/// `(mark, key, modifiers)`. Other marks (`；`) have no entry.
+const MARKS: [(char, char, u32); 6] = [('，', ',', MOD_SHIFT), ('。', '.', MOD_SHIFT), ('？', '/', MOD_SHIFT), ('！', '1', MOD_SHIFT), ('：', ';', MOD_SHIFT), ('、', '\\', 0)];
+
+/// Whether `c` is one of the marks a row may type (`MARKS`).
+pub fn is_mark(c: char) -> bool {
+    MARKS.iter().any(|m| m.0 == c)
+}
+
+/// The keys of one reading token: for a syllable its symbols, then its tone key (Space for the first tone); for a punctuation mark of `MARKS`
+/// its one key, which keeps the mark in the same composition. `None` for a symbol without a key.
 pub fn keys_of(syl: &str) -> Option<Vec<Key>> {
+    let mut cs = syl.chars();
+    if let (Some(c), None) = (cs.next(), cs.next()) {
+        if let Some(&(_, key, mods)) = MARKS.iter().find(|m| m.0 == c) {
+            return Some(vec![Key::ch(key, mods)]);
+        }
+    }
     let layout = Layout::Standard;
     let (mut v, mut toned) = (Vec::new(), false);
     for c in syl.chars() {
@@ -69,8 +86,8 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
     from.abs_diff(to).min(1 + to).min(1 + (n - to))
 }
 
-/// The packs the engine is built with: the App's defaults (`Shell.swift` `acgPackOn = true`, `itPackOn = true`). The bin's setting tag is
-/// formatted from this mask, so the tag and the engine cannot drift apart.
+/// The packs the engine is built with when `--packs` is not given: the App's defaults (`Shell.swift` `acgPackOn = true`, `itPackOn = true`).
+/// The bin formats its setting tag from the same mask it passes to `build_engine_packs`.
 pub const PACKS: u32 = PACK_ACG | PACK_IT;
 
 /// The engine as `Shell.build()` makes it (the packs of `PACKS`; bigram, small model, colloquial table, demotion on, rerank on at the standard level,
@@ -85,11 +102,17 @@ pub fn build_engine(root: &Path, lm: &Path, tinylm: Option<&Path>, colloquial: O
 /// `build_engine`; `no_english_next` drops the data directory's `english-next.tsv` before the model loads, so the engine has neither the table
 /// nor the word cache built from it (`--english-next` measures the cost of loading it).
 pub fn build_engine_opts(root: &Path, lm: &Path, tinylm: Option<&Path>, colloquial: Option<&Path>, profile: Profile, learn: bool, no_english_next: bool) -> Result<Engine, String> {
+    build_engine_packs(root, lm, tinylm, colloquial, profile, learn, no_english_next, PACKS)
+}
+
+/// `build_engine_opts` with the pack mask given (`PACK_*` bits; research: `shanjie-replay --packs`), where the other builders use `PACKS`.
+#[allow(clippy::too_many_arguments)]
+pub fn build_engine_packs(root: &Path, lm: &Path, tinylm: Option<&Path>, colloquial: Option<&Path>, profile: Profile, learn: bool, no_english_next: bool, packs_mask: u32) -> Result<Engine, String> {
     fn fail<T>(what: &'static str) -> impl Fn(T) -> String {
         move |_| format!("{what} failed")
     }
     let packs = root.join("data/packs");
-    let mut e = Engine::new_with_packs(&root.join("data/lexicon"), Layout::Standard, Some((&packs, PACKS))).map_err(fail("engine build"))?;
+    let mut e = Engine::new_with_packs(&root.join("data/lexicon"), Layout::Standard, Some((&packs, packs_mask))).map_err(fail("engine build"))?;
     if no_english_next {
         e.set_english_next(None);
     }

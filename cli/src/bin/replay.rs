@@ -3,7 +3,10 @@
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-channel] [--rowstats FILE] [--keys FILE]
-//!                [--firsts FILE]
+//!                [--firsts FILE] [--packs LIST]
+//!
+//! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
+//! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
 //!
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
 //! after the small model), `--colloquial FILE` loads that table instead and `--no-colloquial` leaves it out. Loaded, the models line and the
@@ -12,7 +15,8 @@
 //! the shipping behavior: with the table loaded in chat and the channel on it ends `+colloq:<sha8>+rc`; with the option (or in formal) just `+colloq:<sha8>`.
 //! Without a loaded table the option changes nothing.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
-use cli::replay::{build_engine, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
+use cli::replay::{build_engine_packs, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
+use core::engine::{PACK_ACG, PACK_IT, PACK_QUOTES};
 use core::eval::sha256_hex;
 use core::learn_store::{Opened, FILE};
 use core::lm::Profile;
@@ -55,6 +59,7 @@ fn run() -> Result<(), String> {
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_channel) = (None::<String>, false, true);
+    let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -92,6 +97,20 @@ fn run() -> Result<(), String> {
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
             "--firsts" => firsts = Some(val()?),
+            "--packs" => {
+                // Like shanjie-eval: a repeated `--packs` adds to the earlier ones; the first one replaces the default.
+                let base = if packs_given { packs_mask } else { 0 };
+                packs_given = true;
+                packs_mask = base | val()?
+                    .split(',')
+                    .map(|n| match n {
+                        "acg" => Ok(PACK_ACG),
+                        "it" => Ok(PACK_IT),
+                        "quotes" => Ok(PACK_QUOTES),
+                        _ => Err("--packs is a comma list of acg, it, quotes"),
+                    })
+                    .try_fold(0, |m, b| b.map(|b| m | b))?
+            }
             _ => return Err("unknown argument".into()),
         }
     }
@@ -156,9 +175,10 @@ fn run() -> Result<(), String> {
     // `+rc` only where the channel is read: the colloquial term applies (chat here, any rerank level, the paired small model).
     let rc_model = tl8.as_deref() == Some(&core::colloquial::PAIRED_TINYLM_SHA256[..8]);
     let packs = format!(
-        "{}{}",
-        if cli::replay::PACKS & core::engine::PACK_ACG != 0 { "+acg" } else { "" },
-        if cli::replay::PACKS & core::engine::PACK_IT != 0 { "+it" } else { "" }
+        "{}{}{}",
+        if packs_mask & PACK_ACG != 0 { "+acg" } else { "" },
+        if packs_mask & PACK_QUOTES != 0 { "+quotes" } else { "" },
+        if packs_mask & PACK_IT != 0 { "+it" } else { "" }
     );
     let tag = format!(
         "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
@@ -170,7 +190,7 @@ fn run() -> Result<(), String> {
         if guard { "" } else { "+noguard" },
         co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel && profile == Profile::Chat && rc_model { "+rc" } else { "" })),
     );
-    let mut e = build_engine(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn)?;
+    let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;
     e.set_learn_guard(guard);
     e.set_reading_channel(reading_channel);
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
@@ -209,7 +229,8 @@ fn run() -> Result<(), String> {
     write(rowstats, format_rowstats(&outs.iter().zip(&rows).map(|(o, r)| (o.first_ok, o.first.clone(), r.sent.clone())).collect::<Vec<_>>()))?;
     write(keys, format_keys(&outs))?;
     write(firsts, outs.iter().map(|o| format!("{}\n", o.first)).collect())?;
-    let gold_chars = rows.iter().map(|r| r.sent.chars().count()).sum();
+    // Marks typed in a row are not counted, so picks per 100 characters stays comparable with the same text split at the marks.
+    let gold_chars = rows.iter().map(|r| r.sent.chars().filter(|&c| !cli::replay::is_mark(c)).count()).sum();
     println!("{}", summary_line(&name, &tag, &outs, gold_chars));
     Ok(())
 }
