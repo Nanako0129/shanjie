@@ -359,7 +359,7 @@ pub struct RowIn {
 
 /// The SINIT counters of a set (docs/contracts/sinit-learn.md section 2), summed over its rows: stretches with a rule 10 record, learned paths
 /// swapped into the pool, stretches with no learned path in the n-best, learned candidates the semantic correction overturned, stretches where
-/// the lift took the n-gram margin under tau. One line of numbers, for the sweep script.
+/// the lift took the n-gram margin under tau (always 0 since revision 5.2). One line of numbers, for the sweep script.
 pub fn sinit_line(outs: &[RowOut]) -> String {
     let sum = |f: fn(&RowOut) -> usize| outs.iter().map(f).sum::<usize>();
     format!(

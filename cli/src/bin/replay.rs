@@ -230,7 +230,6 @@ fn run() -> Result<(), String> {
     if let Some(x) = eps_sinit_ng {
         e.set_eps_sinit_ng(x);
     }
-    e.set_sinit_probe(learn);
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
     // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.
     if let Some(f) = &learn_file {

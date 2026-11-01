@@ -2389,46 +2389,143 @@ fn tiny_rerank_taught() -> Engine {
     e
 }
 
-/// SINIT section 1.2, the guard half. Only a rule 10 record (照 under `^>ㄐㄧㄢˋ`, a character that is not the first of its reading: 趙 is
-/// -1, 照 -6), the semantic correction on: the decoder lifts 照 to 趙's lp and marks it, the learning guard does not count it as a taught
-/// boost (`guard_skips` 0), and the job's candidates hold a path with 照. Reverting `boosted` to the lp comparison (`lp > best_lp(reading,
-/// word)`: -1 > -6) makes this fail: the job is gone (checked 2026-11-01, see the contract).
+/// One path of `decode_with`: its text, its score, and the lp and the SINIT marker of its first word.
+type Decoded = (String, f64, f64, Option<(f64, f64)>);
+
+/// The n-best of one `lm::decode_segment_fuzzy` for `reading` at sentence start on the lexicon text `lexicon`, with the learner of `e` and `sinit` as the
+/// rule 10 setting.
+fn decode_with(e: &Engine, lexicon: &str, reading: &str, sinit: lm::Sinit) -> Vec<Decoded> {
+    let s = shared();
+    let capped = CappedLexicon::new(Arc::new(Lexicon::parse(lexicon).unwrap()), "", &s.lm, None).unwrap();
+    let learn = lm::Learn { learner: e.learner(), before: "", after: None, today: DAY, eps_global: lm::LEARN_EPS_GLOBAL, sinit, eps_sinit_ng: lm::EPS_SINIT_NG };
+    lm::decode_segment_fuzzy(&capped, &syls(reading), &s.lm, s.lm.scoring(lm::Profile::Chat), "<s>", lm::End::Eos, core::BEAM_S1, Some(&learn), true, 0, core::fuzzy::DELTA_SOUND)
+        .unwrap()
+        .into_iter()
+        .map(|(sc, ws)| (ws.iter().map(|w| w.0).collect::<String>(), sc, ws[0].1, ws[0].5))
+        .collect()
+}
+
+/// SINIT section 1.2, the guard half (revision 5.2: the pool is the unlifted decode). Only a rule 10 record (照 under `^>ㄐㄧㄢˋ`, a character that is not the
+/// first of its reading: 趙 is -1, 照 -6), the semantic correction on: the display before the rerank is the n-gram's first without the record (趙建議), the
+/// guard does not fire (`guard_skips` 0), the job's candidates hold a path with 照 (in the unlifted n-best already, so nothing is swapped in) and it carries
+/// b = 1/(1+1). Mutation checked (the pool back to the lifted decode: `Sinit::Lift` for the first decode): the display is 照建議 and this fails; the second
+/// half is `sinit_total_score_after_a_learned_pick_is_the_unlifted_decode_score`.
 #[test]
 fn sinit_a_rule_10_record_does_not_trigger_the_learning_guard() {
     chat_only();
     let mut e = tiny_rerank_taught();
     let o = type_syls(&mut e, R16);
-    assert_eq!(o.preedit, "照建議", "the lifted 照 is among the n-gram's first paths");
-    assert_eq!(e.guard_skips(), 0, "the guard does not count a lifted rule 10 character");
+    assert_eq!(o.preedit, "趙建議", "the display before the rerank is the n-gram's first path without the lift");
+    assert_eq!(e.guard_skips(), 0, "the guard does not count a rule 10 record");
     let job = e.take_rerank_job().expect("the stretch is sent to the semantic correction");
     let cands = job.candidates();
-    assert!(cands[0].iter().any(|c| c.starts_with('照')), "the pool holds a path with 照: {cands:?}");
-    assert_eq!(job.sinit_weights(), [[0.5, 0.0]], "照建議 carries b = 1/(1+1), 趙建議 none");
+    assert_eq!(cands[0][0], "趙建議", "the anchor is the unlifted first path");
+    let at = cands[0].iter().position(|c| c.starts_with('照')).unwrap_or_else(|| panic!("the pool holds a path with 照: {cands:?}"));
+    let want: Vec<f64> = (0..cands[0].len()).map(|i| if i == at { 0.5 } else { 0.0 }).collect();
+    assert_eq!(job.sinit_weights(), [want], "only the path with 照 carries b = 1/(1+1)");
     assert_eq!(e.sinit_stats(), SinitStats { stretches: 1, swaps: 0, missing: 0, tau_opened: 0 });
 }
 
-/// SINIT section 1.2, the total half: with 照建議 shown, `total_score` equals the decoder's score of that path (the n-gram's top score), which
-/// scores the lifted 照 by the ordinary path (`prob_tri`), not as a learned boost. Reverting `total_score` to the lp comparison makes it score 照 by
-/// `word_learned` (no Kneser-Ney substitution), which differs on the shipping model. The reference is computed here from the decoder.
+/// SINIT section 1.2, the total half (revision 5.3 and 5.4): the semantic correction picks the path with 照 (`EPS_SINIT` large enough here), and after it is
+/// applied `total_score` is the path's score of the unlifted decode (`Sinit::Off`, computed here by another decode of the same lexicon and learner), which
+/// differs from the score of the same path in the lifted decode (premise: the lift raised the word's lp and so its score). A pool of the lifted decode
+/// would show the path with its lifted lp and fail here (mutation checked, see the commit).
 #[test]
-fn sinit_total_score_of_a_lifted_character_is_the_decode_score() {
+fn sinit_total_score_after_a_learned_pick_is_the_unlifted_decode_score() {
     chat_only();
     let mut e = tiny_rerank_taught();
-    assert_eq!(type_syls(&mut e, R16).preedit, "照建議", "precondition: the path with the lifted 照 is shown");
-    let s = shared();
-    let capped = CappedLexicon::new(Arc::new(Lexicon::parse(SINIT_TINY).unwrap()), "", &s.lm, None).unwrap();
-    let learn = lm::Learn {
-        learner: e.learner(), before: "", after: None, today: DAY, eps_global: lm::LEARN_EPS_GLOBAL, sinit: lm::Sinit::Lift, eps_sinit_ng: lm::EPS_SINIT_NG,
-    };
-    let nb = lm::decode_segment_fuzzy(
-        &capped, &syls(R16), &s.lm, s.lm.scoring(lm::Profile::Chat), "<s>", lm::End::Eos, core::BEAM_S1, Some(&learn), true, 0, core::fuzzy::DELTA_SOUND,
-    )
-    .unwrap();
-    let (want, words) = nb.iter().find(|(_, ws)| ws.iter().map(|w| w.0).collect::<String>() == "照建議").expect("the path is in the n-best");
-    let (_, lp, _, _, _, marker) = words[0];
-    assert!(marker && lp > capped.best_lp(&syls("ㄓㄠˋ"), "照").unwrap(), "premise: 照 is lifted above its own best lp and marked");
+    e.set_eps_sinit(100.0);
+    let typed = type_syls(&mut e, R16).preedit;
+    let job = e.take_rerank_job().expect("a job");
+    let shown = e.apply_rerank(job.run()).unwrap().map_or(typed, |o| o.preedit);
+    assert_eq!(shown, "照建議", "precondition: the learning term makes the correction pick the path with 照 (the display half is the test above)");
+    let find = |nb: Vec<Decoded>| nb.into_iter().find(|p| p.0 == "照建議").expect("the path is in the n-best");
+    let off = find(decode_with(&e, SINIT_TINY, R16, lm::Sinit::Off));
+    let lift = find(decode_with(&e, SINIT_TINY, R16, lm::Sinit::Lift));
+    let (lp0, gain) = lift.3.expect("the lifted word carries its marker");
+    assert!(lift.2 > lp0 && gain > 0.0, "premise: the lift raised the word's lp ({} against {lp0}) and its term ({gain})", lift.2);
+    assert!((lift.1 - gain - off.1).abs() < 1e-12, "the lifted score less the gain is the unlifted score: {} - {gain} against {}", lift.1, off.1);
+    assert!(off.3.is_none() && off.2 == lp0, "the unlifted decode has the word at lp0, unmarked");
     let total = e.total_score().unwrap();
-    assert!((total - want).abs() < 1e-9, "total_score {total} against the decoder's {want}");
+    assert!((total - off.1).abs() < 1e-9, "total_score {total} against the unlifted decode's {}", off.1);
+    assert!((total - lift.1).abs() > 1e-3, "total_score {total} is not the lifted decode's {}", lift.1);
+}
+
+/// SINIT section 1.2 (revision 5.2), the pool is the unlifted decode: 瑁 taught before ㄐㄧㄢˋ in a lexicon where 瑁 is the last of eleven readings of ㄓㄠˋ (the
+/// capped scores keep the rare character at the end of the n-best), so the path 瑁建 is the eleventh of the unlifted n-best, outside the pool of eight. The display before the rerank is the unlifted first path; the pool is the
+/// unlifted n-best's first seven paths with the same scores (1e-12) and the learned path last, with the score the unlifted decode gives it (1e-12), not the
+/// lifted one.
+#[test]
+fn sinit_the_pool_is_the_unlifted_n_best_and_the_swapped_in_path_has_its_unlifted_score() {
+    chat_only();
+    const L: &str = "ㄓㄠˋ 趙 -1.0\nㄓㄠˋ 兆 -2.0\nㄓㄠˋ 召 -3.0\nㄓㄠˋ 罩 -4.0\nㄓㄠˋ 肇 -5.0\nㄓㄠˋ 詔 -6.0\nㄓㄠˋ 棹 -7.0\nㄓㄠˋ 笊 -8.0\nㄓㄠˋ 炤 -9.0\nㄓㄠˋ 照 -10.0\nㄓㄠˋ 瑁 -11.0\nㄐㄧㄢˋ 建 -1.0\n";
+    const R: &str = "ㄓㄠˋ ㄐㄧㄢˋ";
+    let mut e = tiny_rerank(L);
+    e.set_newword(false); // the committed 瑁建 would otherwise be learned as a new word and lead the n-best
+    type_settled(&mut e, R);
+    pick(&mut e, 2, 1, "瑁");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, "瑁"), [("^>ㄐㄧㄢˋ".to_string(), 1.0)], "precondition: the record");
+    let o = type_syls(&mut e, R);
+    let off = decode_with(&e, L, R, lm::Sinit::Off);
+    let rank = off.iter().position(|p| p.0 == "瑁建").expect("照建 is in the unlifted n-best");
+    assert!(rank >= 8, "premise: the learned path is outside the pool of eight (rank {rank})");
+    assert_eq!(o.preedit, off[0].0, "the display before the rerank is the unlifted first path");
+    let job = e.take_rerank_job().expect("a job");
+    let (cands, ng) = (job.candidates().remove(0), job.ng_scores().remove(0));
+    assert_eq!(cands.len(), 8);
+    for i in 0..7 {
+        assert_eq!(cands[i], off[i].0, "pool path {i} is the unlifted n-best's");
+        assert!((ng[i] - off[i].1).abs() < 1e-12, "pool path {i}: {} against {}", ng[i], off[i].1);
+    }
+    assert_eq!(cands[7], "瑁建", "the learned path takes the last place");
+    assert!((ng[7] - off[rank].1).abs() < 1e-12, "its score is the unlifted decode's: {} against {}", ng[7], off[rank].1);
+    let lift = decode_with(&e, L, R, lm::Sinit::Lift).into_iter().find(|p| p.0 == "瑁建").unwrap();
+    assert!((lift.1 - off[rank].1 - lift.3.unwrap().1).abs() < 1e-12 && lift.3.unwrap().1 > 0.0, "premise: the lifted decode scores the path higher by the marker's gain");
+    assert_eq!(job.sinit_weights()[0][7], 0.5);
+    assert_eq!(e.sinit_stats(), SinitStats { stretches: 1, swaps: 1, missing: 0, tau_opened: 0 });
+}
+
+/// SINIT sections 1.2 and 1.5 (revision 5.2): 照 taught before ㄐㄧㄢˋ in the small lexicon where the lift alone would make 照建議 the n-gram's first path. With
+/// `EPS_SINIT` 0 and `DELTA_SINIT` 0 the correction chooses as if there were no record; with a large `EPS_SINIT` it chooses 照建議.
+#[test]
+fn sinit_at_eps_0_and_delta_0_a_record_changes_nothing_and_a_large_eps_takes_it() {
+    chat_only();
+    let none = {
+        let mut e = tiny_rerank(SINIT_TINY);
+        type_settled(&mut e, R16)
+    };
+    let with = |eps: f64, delta: f64| {
+        let mut e = tiny_rerank_taught();
+        e.set_eps_sinit(eps);
+        e.set_delta_sinit(delta);
+        type_settled(&mut e, R16)
+    };
+    assert_eq!(with(0.0, 0.0), none, "no learning term: the record changes nothing");
+    assert_eq!(with(100.0, 0.0), "照建議");
+}
+
+/// SINIT section 2 (revision 5.2), shipping models, formal: 再 taught from 再算一次 (the first syllable re-picked), then 在算帳 stays 在算帳 at `EPS_SINIT` 0 (the
+/// first sweep showed 再算帳 here, where the lift made the learned path the anchor); at some `EPS_SINIT` of the grid 再算帳 is shown, so the knob acts.
+#[test]
+fn sinit_formal_zai_suan_zhang_stays_at_eps_0_and_the_knob_acts() {
+    let mut e = ship(lm::Profile::Formal);
+    e.set_eps_sinit(0.0);
+    let (teach, row) = ("ㄗㄞˋ ㄙㄨㄢˋ ㄧ ㄘˋ", "ㄗㄞˋ ㄙㄨㄢˋ ㄓㄤˋ");
+    assert_eq!(type_settled(&mut e, teach), "在算一次", "precondition: the default");
+    e.key(k(KeyKind::Enter)).unwrap();
+    teach_first(&mut e, teach, "再");
+    assert!(e.learner().records().iter().any(|r| r.word == "再" && r.context == "^>ㄙㄨㄢˋ"), "precondition: 再 was learned before ㄙㄨㄢˋ");
+    assert_eq!(type_settled(&mut e, row), "在算帳", "EPS_SINIT 0");
+    e.key(k(KeyKind::Enter)).unwrap();
+    let mut shown = Vec::new();
+    for eps in [0.5, 1.0, 2.0, 4.0] {
+        e.set_eps_sinit(eps);
+        shown.push(type_settled(&mut e, row));
+        e.key(k(KeyKind::Enter)).unwrap();
+    }
+    println!("SINIT formal 在算帳 after teaching 再算一次, EPS_SINIT 0.5 1 2 4: {shown:?}");
+    assert!(shown.iter().any(|t| t == "再算帳"), "the knob acts: {shown:?}");
 }
 
 /// The learned character is part of a two-character word in a candidate (SINIT section 1.3, "by the surface"): 再 taught under `^>ㄐㄧㄚ`
@@ -2543,8 +2640,12 @@ fn sinit_preference_class_can_be_reverted_by_one_repick() {
     const TEACH: &str = "ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ"; // 她很喜歡看書
     let rows = [("他很忙", "ㄊㄚ ㄏㄣˇ ㄇㄤˊ"), ("他很高", "ㄊㄚ ㄏㄣˇ ㄍㄠ")];
     const RARE: [(&str, &str); 2] = [("她很晚才回家", "ㄊㄚ ㄏㄣˇ ㄨㄢˇ ㄘㄞˊ ㄏㄨㄟˊ ㄐㄧㄚ"), ("她很有禮貌", "ㄊㄚ ㄏㄣˇ ㄧㄡˇ ㄌㄧˇ ㄇㄠˋ")];
+    // Its own size, not the placeholder: with the unlifted pool (revision 5.2) a row shows 她 after one teach only for a large enough EPS_SINIT, and this test is
+    // about the revert, not about the size the sweep sets.
+    const EPS: f64 = 4.0;
     for p in [lm::Profile::Chat, lm::Profile::Formal] {
         let mut e = ship(p);
+        e.set_eps_sinit(EPS);
         assert_eq!(type_settled(&mut e, TEACH), "他很喜歡看書", "{p:?} precondition: the default");
         e.key(k(KeyKind::Enter)).unwrap();
         assert_eq!(teach_first(&mut e, TEACH, "她"), "她很喜歡看書", "{p:?}: the re-pick took");
