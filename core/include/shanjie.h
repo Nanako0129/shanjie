@@ -51,7 +51,7 @@
  *  - data_dir must also hold std-exempt.tsv (docs/contracts/reading-decode-2.md): shanjie_engine_load_lm reads it, with mcbpmf-data.txt, to build the
  *    reading table of the n-gram decoder (every single-character word's path score gains a term for a rare reading of that character;
  *    the rows of std-exempt.tsv, syllable TAB character, are readings that cost nothing). Missing, unreadable or malformed, the load fails with 3,
- *    never a silent decoder without the exemptions. The term has no switch, file or setting of its own.
+ *    never a silent decoder without the exemptions. The term has no switch or setting of its own.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;

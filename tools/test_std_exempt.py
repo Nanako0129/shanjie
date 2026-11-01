@@ -1,6 +1,6 @@
 """tools/std_exempt.py against the shipped data/lexicon/std-exempt.tsv (docs/contracts/reading-decode-2.md): the data rows (the lines that do not start with `#`)
 are what the rule gives. The rule reads the concised MOE dictionary zip, which is not in the repository: where it is absent (CI) that test is skipped and
-says why on stderr; with it present (a maintainer's machine, ~/.cache/shanjie/sources/concised, or SHANJIE_CONCISED) it always runs.
+says why on stderr; with it present (the default path `build_overlay.CONCISED`, or SHANJIE_CONCISED) it always runs.
 Run: python3 -m unittest tools/test_std_exempt.py   (from the repo root)."""
 import os
 import sys
