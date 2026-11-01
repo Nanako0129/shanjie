@@ -353,7 +353,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
 /// S2c. Loads the bigram model at `path` (with `classes.sjc` beside it, and a `kn.sjkn` Kneser-Ney side file if one
 /// exists there: a broken or mismatching one fails the load with code 3, a valid one changes the scoring; the app
 /// ships one since model-v6; likewise the two optional trigram tables beside it, `trigram.sjt3` (the formal profile's) and `trigram-chat.sjt3` (the chat
-/// profile's), each a failure with code 3 when broken, both shipped by the app), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
+/// profile's), each a failure with code 3 when broken, both shipped by the app), reading `data_dir/overlay-add.tsv`, `names-add.tsv`, `demote.tsv` and `std-exempt.tsv` (the reading term, docs/contracts/reading-decode-2.md) again; any of them missing is code 3. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety
@@ -1217,6 +1217,8 @@ mod tests {
         std::fs::write(d.join("sandhi-add.tsv"), "").unwrap();
         std::fs::write(d.join("names-add.tsv"), "").unwrap();
         std::fs::write(d.join("demote.tsv"), "").unwrap();
+        // load_lm reads the reading-decode exemptions too (docs/contracts/reading-decode-2.md): none here.
+        std::fs::write(d.join("std-exempt.tsv"), "").unwrap();
         d
     }
 
@@ -1805,7 +1807,7 @@ mod tests {
         std::fs::write(&classes_path, crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
         // An engine without data_dir is not reachable through the ABI (only `new` creates engines);
         // the closest cases are overlay-add.tsv, names-add.tsv or demote.tsv vanishing from data_dir after `new`:
-        // load_lm reads them again (capping_overlay and demote.tsv), so any one fails with code 3.
+        // load_lm reads them again (capping_overlay, demote.tsv and std-exempt.tsv), so any one fails with code 3.
         std::fs::rename(dir.join("overlay-add.tsv"), dir.join("overlay-add.bak")).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without overlay-add.tsv");
         std::fs::rename(dir.join("overlay-add.bak"), dir.join("overlay-add.tsv")).unwrap();
@@ -1815,6 +1817,13 @@ mod tests {
         std::fs::rename(dir.join("demote.tsv"), dir.join("demote.bak")).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without demote.tsv");
         std::fs::rename(dir.join("demote.bak"), dir.join("demote.tsv")).unwrap();
+        // docs/contracts/reading-decode-2.md: std-exempt.tsv is required like the others, a malformed one fails the same way, never a silent table without it.
+        std::fs::rename(dir.join("std-exempt.tsv"), dir.join("std-exempt.bak")).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load without std-exempt.tsv");
+        std::fs::write(dir.join("std-exempt.tsv"), "ㄅㄛ 波 extra\n").unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 3, "load with a malformed std-exempt.tsv");
+        std::fs::remove_file(dir.join("std-exempt.tsv")).unwrap();
+        std::fs::rename(dir.join("std-exempt.bak"), dir.join("std-exempt.tsv")).unwrap();
         assert!(type_xin(e) == "鑫" && profile(e, 1).3 == "鑫", "failed loads left no LM");
         assert!(profile(e, 0).0 == 0 && enter(e) == "鑫", "still unigram");
 

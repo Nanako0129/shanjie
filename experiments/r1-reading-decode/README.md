@@ -439,3 +439,5 @@ R1 與 R1b 的零成本檢查找到「長歪了」→「掌歪了」的原因：
   | 聊天積極 | cjudge-1 | 3／4 | 1 | 5,078 → 5,077 |
   - cjudge-1 分兩半（S1 維護者自己的文字 2,880 列／PTT 2,759 列，改對／改壞）：聊天標準 1／2、2／2；聊天關 2／0、3／0；保守 2／0、4／1；積極 1／1、2／3。
 - 照登記：兩條都成立 → 寫產品片契約（讀音項進核心解碼器、12 對不罰、融合拿掉讀音通道項、三檔與語意校正關都生效）。cjudge-1 與 wikijudge5 用過退役。
+
+- 搬家說明（2026-11-02，`docs/contracts/reading-decode-2.md`）：`std-exempt.tsv` 逐位元組原樣搬到 `data/lexicon/std-exempt.tsv`（SHA-256 仍是 `a821a206…`），`std_exempt.py` 搬到 `tools/std_exempt.py`（檔頭寫的舊路徑不改）；本資料夾的 `r1e.py` 與測試改指新位置。`--reading-decode`、`--reading-exempt`、`--no-reading-channel` 是 `b90adc96` 的評測 CLI 的旗標，核心的出貨行為取代了它們（出貨預設就是 R1g，關閉旗標是 `--no-reading-decode`）。

@@ -1,8 +1,8 @@
-//! `--reading-decode` (experiments/r1-reading-decode, section R1d; evaluation only): the n-gram decoder adds the reading term to the path
-//! score of every single-character word. Without the option the CLI is what it was: the summary lines of eight settings (chat and formal,
-//! with and without `--tinylm`, on dev302 and typing76 of eval/bench/suite-v1, `--context --packs acg`) and the dump of the four n-gram ones
-//! are pinned to what the binary before the option printed (re-recorded 2026-11-01 from origin/main 533a029d, which has no option; Mac arm64, data/lm as in data/*.sha256). With it, a public
-//! row's decoder first changes and the scores file's `ng` is the decoder's score with the term in it.
+//! The reading term of the n-gram decoder (docs/contracts/reading-decode-2.md; it is the CLI's default now, `--no-reading-decode` leaves it out). With the
+//! option the CLI is what main printed before the term existed: the summary lines of eight settings (chat and formal, with and without `--tinylm`, on
+//! dev302 and typing76 of eval/bench/suite-v1, `--context --packs acg`) and the dump of the four n-gram ones are pinned to what origin/main 533a029d printed
+//! (recorded 2026-11-01; Mac arm64, data/lm as in data/*.sha256). By default every tag ends `+rd+rx:<sha8 of data/lexicon/std-exempt.tsv>`, a public row's
+//! decoder first changes and the scores file's `ng` is the decoder's score with the term in it.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -63,21 +63,21 @@ fn args<'a>(profile: &'a str, tinylm: bool, rows: &'a str) -> Vec<&'a str> {
     a
 }
 
-/// The default path is untouched: the summary line (tag, n, top1, oracle@64, top1_sha256) of eight settings is that of the binary before
-/// `--reading-decode`, and (macOS only: the f64 dump values round differently under the Linux libm) so is the dump of four.
+/// `--no-reading-decode`: the summary line (tag, n, top1, oracle@64, top1_sha256) of eight settings is that of main before the term existed, and (macOS only:
+/// the f64 dump values round differently under the Linux libm) so is the dump of four. The tag has neither `+rd` nor `+rx`.
 #[test]
-fn without_the_option_every_output_is_what_it_was() {
+fn no_reading_decode_is_what_main_printed() {
     let dir = tmp("off");
     for (profile, tinylm, set, n, top1, o64, sha) in BEFORE {
         let rows = format!("eval/bench/suite-v1/{set}.txt");
         let dump = dir.0.join(format!("{profile}-{set}-{tinylm}.dump")).to_string_lossy().into_owned();
         let mut a = args(profile, tinylm, &rows);
-        a.extend(["--dump", &dump]);
+        a.extend(["--dump", &dump, "--no-reading-decode"]);
         let o = run(&a);
         assert!(o.status.success(), "{}", text(&o.stderr));
         let line = text(&o.stdout);
         assert!(line.contains(&format!("{{'n': {n}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")), "{profile} {tinylm} {set}: {line}");
-        assert!(!line.contains("+rd"), "{line}");
+        assert!(!line.contains("+rd") && !line.contains("+rx"), "{line}");
         // macOS only: the dump carries f64 values that the Linux libm rounds differently in the last bit (as in colloquial.rs)
         #[cfg(target_os = "macos")]
         if !tinylm {
@@ -87,91 +87,59 @@ fn without_the_option_every_output_is_what_it_was() {
     }
 }
 
-/// With the option: the tag ends in `+rd`; row 37 of eval/dev/user-reported.txt (`搞完這波`, read ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ, where ㄅㄛ is 波's minor reading
-/// in the lexicon: -4.72 against ㄆㄛ's -4.02) has another decoder first than without it, the homophone 播 (the term charges 波 for its minor reading;
-/// the row's truth is 波, so this row is a case where the term costs a row, not one it fixes: the test pins that the term acts, not that it helps);
-/// and the scores file's `ng` of that row is the decoder's score with the term in it (the dump's), not the score without. A reading that changes
-/// nothing for a row keeps the row's first and its score.
+/// The shipped list's hash, as the tag prints it.
+fn exempt_sha8() -> String {
+    core::eval::sha256_hex(&std::fs::read(root().join("data/lexicon/std-exempt.tsv")).unwrap())[..8].to_string()
+}
+
+/// By default every one of the eight settings ends its tag `+rd+rx:<sha8 of std-exempt.tsv>` (the numbers of these two public sets do not move: the term acts on
+/// other rows, see the next test).
 #[test]
-fn with_the_option_the_decoder_first_changes_and_ng_carries_the_term() {
-    let dir = tmp("on");
-    let src = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
-    let rows = dir.0.join("rows.txt");
-    // row 37 (搞完這波) and row 1 (nothing to change in a plain sentence), both public
-    std::fs::write(&rows, format!("{}\n{}\n", src.lines().nth(36).unwrap(), src.lines().next().unwrap())).unwrap();
-    let rows = rows.to_string_lossy().into_owned();
-    let go = |profile: &str, rd: bool| {
-        let (d, s) = (dir.0.join(format!("{profile}-{rd}.dump")).to_string_lossy().into_owned(), dir.0.join(format!("{profile}-{rd}.scores")).to_string_lossy().into_owned());
-        let mut a = args(profile, true, &rows);
-        a.extend(["--dump", &d, "--tinylm-scores", &s]);
-        if rd {
-            a.push("--reading-decode");
-        }
-        let o = run(&a);
+fn every_setting_ends_its_tag_with_rd_and_rx() {
+    let want = format!("+rd+rx:{}  {{'n': ", exempt_sha8());
+    for (profile, tinylm, set, _n, _top1, _o64, sha) in BEFORE {
+        let rows = format!("eval/bench/suite-v1/{set}.txt");
+        let o = run(&args(profile, tinylm, &rows));
         assert!(o.status.success(), "{}", text(&o.stderr));
         let line = text(&o.stdout);
-        assert_eq!(line.contains("+rd  {"), rd, "{line}");
-        assert!(!rd || line.contains("+rd  {'n': 2,"), "the tag ends with +rd: {line}");
-        let dump = std::fs::read_to_string(d).unwrap();
-        // (surface, score) of rank 1 per row
-        let firsts: Vec<(String, f64)> = dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "1").map(|f| (f[2].to_string(), f[3].parse().unwrap())).collect();
-        let scores = std::fs::read_to_string(s).unwrap();
-        let ng0: Vec<f64> = scores
-            .lines()
-            .map(|l| l.split("\"ng\": [").nth(1).unwrap().split([',', ']']).next().unwrap().parse().unwrap())
-            .collect();
-        (firsts, ng0)
-    };
-    for profile in ["chat", "formal"] {
-        let (off, off_ng) = go(profile, false);
-        let (on, on_ng) = go(profile, true);
-        assert_eq!(off[0].0, "搞完這波", "{profile}: premise, the n-gram's first reads 波 as its minor reading ㄅㄛ");
-        assert_eq!(on[0].0, "搞完這播", "{profile}: the term moves the decoder's first to the homophone with the major reading");
-        assert_eq!(on[0].1, on_ng[0], "{profile}: ng is the decoder's score with the term");
-        assert_eq!(off[0].1, off_ng[0]);
-        assert_eq!(off[1].0, on[1].0, "{profile}: row 2 keeps its first");
+        assert!(line.contains(&want), "{profile} {tinylm} {set}: {line}");
+        assert!(line.contains(sha), "{profile} {tinylm} {set}: public sets are not moved by the term: {line}");
     }
 }
 
-/// R1g: `--reading-exempt FILE` (experiments/r1-reading-decode/std-exempt.tsv) puts `+rx:<sha8 of the file>` right after `+rd`, and the pair
-/// ㄅㄛ 波 costs nothing, so row 37 of eval/dev/user-reported.txt (`搞完這波`) keeps 波 as the first where `--reading-decode` alone moved it to 播;
-/// the option without `--reading-decode`, or with a malformed file, stops the run.
+/// The effect on a public row, through the CLI (main's sentence, after wikitune): 以敵偽人員的名字命名 has the decoder first 以狄為… without the term in the written
+/// setting (formal; chat has it right already) and the right sentence with it; the scores file's `ng` of the first candidate is the decoder's path score with the term in it, the dump's (not the score without). 搞完這波 (row 37
+/// of eval/dev/user-reported.txt) keeps 波 as the first: ㄅㄛ 波 is one of the 12 exempt pairs.
 #[test]
-fn reading_exempt_tags_the_summary_and_frees_the_standard_reading() {
-    let dir = tmp("exempt");
-    let src = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+fn the_default_decoder_first_carries_the_term_and_ng_is_its_score() {
+    let dir = tmp("on");
     let rows = dir.0.join("rows.txt");
-    std::fs::write(&rows, format!("{}\n", src.lines().nth(36).unwrap())).unwrap();
+    let src = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+    std::fs::write(&rows, format!("|以敵偽人員的名字命名|ㄧˇ ㄉㄧˊ ㄨㄟˋ ㄖㄣˊ ㄩㄢˊ ㄉㄜ˙ ㄇㄧㄥˊ ㄗˋ ㄇㄧㄥˋ ㄇㄧㄥˊ\n{}\n", src.lines().nth(36).unwrap())).unwrap();
     let rows = rows.to_string_lossy().into_owned();
-    let list = root().join("experiments/r1-reading-decode/std-exempt.tsv");
-    let (list, sha8) = (list.to_string_lossy().into_owned(), core::eval::sha256_hex(&std::fs::read(root().join("experiments/r1-reading-decode/std-exempt.tsv")).unwrap())[..8].to_string());
+    let go = |profile: &str, off: bool| {
+        let (d, s) = (dir.0.join(format!("{profile}-{off}.dump")).to_string_lossy().into_owned(), dir.0.join(format!("{profile}-{off}.scores")).to_string_lossy().into_owned());
+        let mut a = args(profile, true, &rows);
+        a.extend(["--dump", &d, "--tinylm-scores", &s]);
+        if off {
+            a.push("--no-reading-decode");
+        }
+        let o = run(&a);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        let dump = std::fs::read_to_string(d).unwrap();
+        let firsts: Vec<(String, f64)> = dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "1").map(|f| (f[2].to_string(), f[3].parse().unwrap())).collect();
+        let scores = std::fs::read_to_string(s).unwrap();
+        let ng0: Vec<f64> = scores.lines().map(|l| l.split("\"ng\": [").nth(1).unwrap().split([',', ']']).next().unwrap().parse().unwrap()).collect();
+        (firsts, ng0)
+    };
     for profile in ["chat", "formal"] {
-        let first = |extra: &[&str]| {
-            let d = dir.0.join(format!("{profile}-{}.dump", extra.len())).to_string_lossy().into_owned();
-            let mut a = args(profile, true, &rows);
-            a.extend(["--dump", &d]);
-            a.extend(extra);
-            let o = run(&a);
-            assert!(o.status.success(), "{}", text(&o.stderr));
-            let dump = std::fs::read_to_string(d).unwrap();
-            (text(&o.stdout), dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).find(|f| f[1] == "1").unwrap()[2].to_string())
-        };
-        let (line, top) = first(&["--reading-decode"]);
-        assert!(line.contains("+rd  {") && !line.contains("+rx"), "{line}");
-        assert_eq!(top, "搞完這播", "{profile}: premise, the term moves the first off 波");
-        let (line, top) = first(&["--reading-decode", "--reading-exempt", &list]);
-        assert!(line.contains(&format!("+rd+rx:{sha8}  {{'n': 1,")), "{line}");
-        assert_eq!(top, "搞完這波", "{profile}: the exempt pair costs nothing");
+        let (off, off_ng) = go(profile, true);
+        let (on, on_ng) = go(profile, false);
+        assert_eq!(off[0].0.starts_with("以狄為"), profile == "formal", "{profile}: premise, without the term {}", off[0].0);
+        assert_eq!(on[0].0, "以敵偽人員的名字命名", "{profile}: the term makes the decoder first right");
+        assert_eq!((on[0].1, off[0].1), (on_ng[0], off_ng[0]), "{profile}: ng is the decoder's score (with the term, or without)");
+        // chat has the right sentence either way, and its words all read standard readings (term 0): the same score; formal's first path changed
+        assert_eq!(on[0].1 != off[0].1, profile == "formal", "{profile}: the term is in the score");
+        assert_eq!((off[1].0.as_str(), on[1].0.as_str()), ("搞完這波", "搞完這波"), "{profile}: the exempt pair keeps 波");
     }
-    let mut a = args("chat", true, &rows);
-    a.extend(["--reading-exempt", &list]);
-    let o = run(&a);
-    assert!(!o.status.success() && text(&o.stderr).contains("--reading-exempt needs --reading-decode"), "{}", text(&o.stderr));
-    let bad = dir.0.join("bad.tsv");
-    std::fs::write(&bad, "ㄅㄛ 波\n").unwrap();
-    let bad = bad.to_string_lossy().into_owned();
-    let mut a = args("chat", true, &rows);
-    a.extend(["--reading-decode", "--reading-exempt", &bad]);
-    let o = run(&a);
-    assert!(!o.status.success() && text(&o.stderr).contains("--reading-exempt"), "{}", text(&o.stderr));
 }

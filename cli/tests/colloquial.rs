@@ -75,8 +75,7 @@ fn full_run(dir: &Path, base: &[&str], set: &[&str], extra: &[&str]) -> Out {
 /// The summary line without the tag the option adds.
 fn untagged(out: &str) -> String {
     let i = out.find("+colloq:").expect("the tag");
-    let rest = &out[i + "+colloq:".len() + 8..];
-    format!("{}{}", &out[..i], rest.strip_prefix("+rc").unwrap_or(rest))
+    format!("{}{}", &out[..i], &out[i + "+colloq:".len() + 8..])
 }
 
 /// The files and the summary line are equal, the summary tag aside (stderr holds timings).
@@ -103,7 +102,8 @@ fn row25(dir: &Path) -> String {
 #[test]
 fn no_option_is_byte_identical_to_before() {
     let d = tmp("golden");
-    let o = full_run(&d, &BASE, &["16"], &[]);
+    // `--no-reading-decode`: the decoder without the reading term (docs/contracts/reading-decode-2.md), the binary these hashes were taken from
+    let o = full_run(&d, &BASE, &["16"], &["--no-reading-decode"]);
     let h = |s: &str| sha256_hex(s.as_bytes());
     assert_eq!(h(&o.dump), "ea7dac7b34a98ba85be7cab65e0c67cc41331981c127af618a50b12b08b184c7");
     assert_eq!(h(&o.words), "5c8e89a037daa1056ac9295d95995c8504c70a529272621cc45dcaf312a26bc9");
@@ -191,7 +191,7 @@ fn level_rows(dir: &Path) -> String {
 }
 
 /// docs/contracts/colloquial-levels.md: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+rc`, after `+rl:` at the other two). The picks are those the CLI gives on the final 通語 SJ-LM-7-9.7M files with the cells of sj-lm-7.md section 2.9
+/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:`). The picks are those the CLI gives on the final 通語 SJ-LM-7-9.7M files with the cells of sj-lm-7.md section 2.9
 /// (measured 2026-10-27; the cell arithmetic itself is `core/src/colloquial.rs`'s unit tests): standard (0.7, 2, 0) [1, 0, 0, 3]; conservative (0.7, 2, 1) keeps the
 /// n-gram first on the three dev302 rows and picks 3 on the user-reported one, where the header triple without the term picks [0, 0, 0, 0]; aggressive (1.0, 2, 0.1)
 /// picks [1, 5, 2, 3], the header triple without the term [0, 0, 0, 0].
@@ -213,7 +213,7 @@ fn the_term_applies_at_every_strength() {
         let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
         assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
         let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
-        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rc  {{")), "{level}: {}", new.stdout);
+        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rd+rx:a821a206  {{")), "{level}: {}", new.stdout);
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
@@ -266,24 +266,26 @@ fn chosen(sc: &str) -> Vec<usize> {
     sc.lines().map(|l| l.split("\"c\": ").nth(1).unwrap().split(',').next().unwrap().parse().unwrap()).collect()
 }
 
-/// docs/contracts/reading-channel.md section 2.2: with `--colloquial-core` the reading-channel term goes with the colloquial term (row 81 moves to the pick
-/// the channel gives, [2, 0, 0]; the cell `lex,1.0,4` of `p5.py`); `--no-reading-channel` is the colloquial term alone (the P4d picks; here [0, 4, 0], where
-/// row 159 is the one the colloquial term moves and the channel moves back) and its summary tag lacks the `+rc` of the default run; without `--colloquial-core`
-/// the option changes nothing at all. Picks measured with the CLI on the 通語 SJ-LM-7-9.7M files, 2026-10-27 (rows 10, 81 and 102, [2, 0, 0] and [0, 1, 1], until then).
+/// The reading-channel term is gone (docs/contracts/reading-decode-2.md): `--no-reading-channel` is an unknown argument, the summary tag has no `+rc`, and the
+/// colloquial term stands alone, so rows 81, 159 and 10 pick the P4d picks [0, 4, 0] (main's `--no-reading-channel`; main's default was [2, 0, 0], the channel's
+/// doing, and row 81 is wrong there: the regression check of the removal). The decoder's reading term (the default) and `--no-reading-decode` pick the same here.
 #[test]
-fn the_reading_channel_is_on_by_default_and_the_flag_leaves_the_colloquial_term_alone() {
+fn the_colloquial_term_stands_alone() {
     let d = tmp("rc");
     let rows = channel_rows(&d);
     let set = ["--rows", rows.as_str()];
-    let (a, b, c, e) = (tmp("rc-a"), tmp("rc-b"), tmp("rc-c"), tmp("rc-d"));
+    let (a, b) = (tmp("rc-a"), tmp("rc-b"));
     let with = full_run(&a, &BASE[..9], &set, &["--colloquial-core", TABLE]);
-    let alone = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, "--no-reading-channel"]);
-    assert_eq!(chosen(&with.sc), vec![2, 0, 0], "the channel's picks");
-    assert_eq!(chosen(&alone.sc), vec![0, 4, 0], "the colloquial term alone");
-    assert!(with.stdout.contains("+colloq:81c2470d+rc  {") && alone.stdout.contains("+colloq:81c2470d  {"), "{}{}", with.stdout, alone.stdout);
-    assert_eq!((&with.dump, &with.words), (&alone.dump, &alone.words), "the decoder's order is the same");
-    // without the table the option has nothing to switch: every output, the summary line included, is the plain run's
-    let plain = full_run(&c, &BASE[..9], &set, &[]);
-    let flag_only = full_run(&e, &BASE[..9], &set, &["--no-reading-channel"]);
-    assert_eq!((&flag_only.stdout, &flag_only.dump, &flag_only.words, &flag_only.rs, &flag_only.sc), (&plain.stdout, &plain.dump, &plain.words, &plain.rs, &plain.sc));
+    let off = full_run(&b, &BASE[..9], &set, &["--colloquial-core", TABLE, "--no-reading-decode"]);
+    assert_eq!(chosen(&with.sc), vec![0, 4, 0], "the colloquial term alone, the reading term on");
+    assert_ne!(chosen(&with.sc), vec![2, 0, 0], "premise: main's pick for these rows came from the channel");
+    assert_eq!(chosen(&off.sc), vec![0, 4, 0], "the colloquial term alone, the reading term off");
+    for out in [&with.stdout, &off.stdout] {
+        assert!(out.contains("+colloq:81c2470d") && !out.contains("+rc"), "{out}");
+    }
+    assert!(with.stdout.contains("+colloq:81c2470d+rd+rx:a821a206  {") && off.stdout.contains("+colloq:81c2470d  {"), "{}{}", with.stdout, off.stdout);
+    let mut args: Vec<String> = BASE[..9].iter().map(|s| s.to_string()).collect();
+    args.extend(["--rows".to_string(), rows.clone(), "--colloquial-core".to_string(), TABLE.to_string(), "--no-reading-channel".to_string()]);
+    let o = run(&args);
+    assert!(!o.status.success() && text(&o.stderr).contains("unknown argument"), "{}", text(&o.stderr));
 }

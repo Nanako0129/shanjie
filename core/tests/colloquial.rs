@@ -1,7 +1,6 @@
 //! The colloquial term (docs/contracts/colloquial-term.md section 2.2): lc, k and col on a synthetic table (expected values computed
 //! by hand below and by experiments/p4-colloquial/p4.py), the sets read from literal texts, and `TinyLm::rerank_colloquial`.
-use core::colloquial::{self, channel_of, fused_pick, Colloquial, ColloquialError, STANDARD};
-use core::Lexicon;
+use core::colloquial::{self, fused_pick, Colloquial, ColloquialError, STANDARD};
 use core::tinylm::{RerankLevel, TinyLm, TOPK};
 use std::path::{Path, PathBuf};
 
@@ -173,25 +172,14 @@ fn rerank_colloquial_is_ll_then_fused_pick() {
     let cands = ["甲乙", "甲丙", "丁乙", "丁丙", "甲丁", "乙丙", "乙丁", "丙丁", "丙乙"];
     let words: Vec<Vec<&str>> = vec![vec!["a", "b"], vec!["x"], vec!["x", "x"], vec!["b"], vec!["a"], vec!["zzz"], vec!["a", "a"], vec!["b", "a"], vec!["x"]];
     let ng = [-10.0, -10.1, -10.2, -10.3, -10.4, -10.5, -10.6, -10.7, -10.8];
-    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, None, RerankLevel::Standard, &[], &Default::default()).unwrap();
+    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, RerankLevel::Standard, &[], &Default::default()).unwrap();
     let ll = ll.unwrap();
     let want_ll = tl.ll_many(&cands[..TOPK].iter().map(|c| ("你", *c)).collect::<Vec<_>>()).unwrap();
     assert_eq!(ll, want_ll);
     let col: Vec<f64> = words[..TOPK].iter().map(|w| co.col(w)).collect();
-    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD, &[]));
-    // with the reading channel: the same LLs, the pick is `fused_pick` over each split's `channel_of` for the stretch's syllables
-    let lex = Lexicon::parse("p a -1.0\nq a -6.0\np b -1.0\nq b -1.0\n").unwrap();
-    let syls = strs(&["q", "p"]);
-    let rc = Some(core::colloquial::ReadingChannel { lex: &lex, syls: &syls });
-    let (pick_rc, ll_rc) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, rc, RerankLevel::Standard, &[], &Default::default()).unwrap();
-    assert_eq!(ll_rc.unwrap(), ll);
-    let ch: Vec<f64> = words[..TOPK].iter().map(|w| channel_of(&lex, &syls, w)).collect();
-    assert_eq!(ch[0], -4.0, "premise: the first split reads a under q, 5 below its best, clipped at 4");
-    assert_eq!(pick_rc, fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD, &[]));
-    assert_ne!(pick_rc, pick, "premise: the channel changes the pick for this input, so a rerank_colloquial that ignores `rc` fails");
-    assert_ne!(fused_pick(&ng[..TOPK], &ll, &col, Some(&ch), STANDARD, &[]), fused_pick(&ng[..TOPK], &ll, &col, None, STANDARD, &[]));
-    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, None, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
-    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, None, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None), "one split: fewer than two candidates");
+    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, STANDARD, &[]));
+    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
+    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None), "one split: fewer than two candidates");
 }
 
 const LEVELS: [RerankLevel; 3] = [RerankLevel::Standard, RerankLevel::Conservative, RerankLevel::Aggressive];
@@ -202,7 +190,7 @@ fn toy_v3() -> TinyLm {
 
 /// Which candidate each level's `rerank_colloquial` picks: (standard, conservative, aggressive).
 fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], co: &Colloquial) -> [usize; 3] {
-    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, None, l, &[], &Default::default()).unwrap().0)
+    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, l, &[], &Default::default()).unwrap().0)
 }
 
 /// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the 通語 SJ-LM-7-9.7M cells of sj-lm-7.md section 2.9), not the standard one. One

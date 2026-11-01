@@ -10,7 +10,7 @@ colloquial cells from core/src/colloquial.rs (r1.COLLOQ_CELLS), the rows of each
   r1e.py commands --arm r1g --confirm ...                      (the 16 commands of the R1g confirmation shot, README "R1g 確認片")
   r1e.py judge DIR --arm r1g --confirm [--out OUT.json]        (its two primary verdicts: CONFIRMED / NOT CONFIRMED)
 
-`--arm r1g` (README section "R1g"): the same 60 runs, the R1f arm adds `--reading-exempt experiments/r1-reading-decode/std-exempt.tsv` and its tag
+`--arm r1g` (README section "R1g"): the same 60 runs, the R1f arm adds `--reading-exempt data/lexicon/std-exempt.tsv` and its tag
 must end `+rd+rx:<first 8 hex of that file's SHA-256>` (the committed file's). Labels (`base.*`, `e.*`) are the same. R1f is the default.
 
 DIR holds, for each (setting, set) of ROLES, `base.<setting>.<set>.r` / `.cli.txt` (the shipping run) and `e.<setting>.<set>.r` / `.cli.txt`
@@ -29,7 +29,7 @@ stop = R.stop
 ROLES, SETTINGS = RD.ROLES, RD.SETTINGS
 
 
-EXEMPT = "experiments/r1-reading-decode/std-exempt.tsv"   # the R1g exemption list, as the CLI is given it (relative to the repository root)
+EXEMPT = "data/lexicon/std-exempt.tsv"   # the R1g exemption list, as the b90adc96 CLI is given it (relative to the repository root; moved here from this folder by docs/contracts/reading-decode-2.md, bytes unchanged)
 
 
 # R1g confirmation shot (README "R1g 確認片"): 4 formal settings on wikijudge5, 4 chat settings on cjudge-1. Primary: formal-std/wikijudge5 ("conf1"), chat-std/cjudge-1
@@ -41,7 +41,7 @@ CONFIRM_RATIO_PCT = 65     # breaks / fixes <= 0.65, as integers so the edge is 
 
 def exempt_sha8():
     """First 8 hex of the committed std-exempt.tsv's SHA-256 (the CLI's `+rx:` tag)."""
-    return R.sha_file(os.path.join(HERE, "std-exempt.tsv"))[:8]
+    return R.sha_file(os.path.join(os.path.dirname(os.path.dirname(HERE)), EXEMPT))[:8]
 
 
 def check_tags(setting, base_tag, tag, sjtl_sha8=None, rx=None):

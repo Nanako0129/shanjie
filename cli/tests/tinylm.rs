@@ -76,7 +76,8 @@ fn another_ngram_model_is_refused() {
     assert!(ok.status.success(), "{}", text(&ok.stderr));
     let line = text(&ok.stdout);
     let sha8 = &core::eval::sha256_hex(&std::fs::read(&patched).unwrap())[..8];
-    assert!(line.starts_with(&format!("## {}  lm-chat+tl:{sha8}  {{", rows.file_name().unwrap().to_string_lossy())), "{line}");
+    let rx8 = &core::eval::sha256_hex(&std::fs::read(root().join("data/lexicon/std-exempt.tsv")).unwrap())[..8];
+    assert!(line.starts_with(&format!("## {}  lm-chat+tl:{sha8}+rd+rx:{rx8}  {{", rows.file_name().unwrap().to_string_lossy())), "{line}");
     std::fs::remove_dir_all(dir).unwrap();
     std::fs::remove_file(rows).unwrap();
 }
@@ -349,7 +350,8 @@ fn summary_line_records_a_non_standard_level() {
     assert!(plain.contains("+tl:") && !plain.contains("+rl:"), "{plain}");
     assert_eq!(head(&["--rerank-level", "standard"]), plain);
     for name in ["conservative", "aggressive"] {
-        assert_eq!(head(&["--rerank-level", name]), format!("{plain}+rl:{name}"));
+        // `+rl:` stays after `+tl:`; the reading term's `+rd+rx:` is the last mark of every tag (docs/contracts/reading-decode-2.md)
+        assert_eq!(head(&["--rerank-level", name]), plain.replacen("+rd+rx:", &format!("+rl:{name}+rd+rx:"), 1));
     }
     std::fs::remove_dir_all(dir).unwrap();
 }

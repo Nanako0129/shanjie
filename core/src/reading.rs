@@ -1,8 +1,11 @@
-//! Reading decode, evaluation only (experiments/r1-reading-decode/README.md, section "R1d"): the n-gram decoder adds a reading term to the path
-//! score of every single-character word, `LAMBDA * max(t(r, w), -CAP)`, t being P5's reading term (experiments/p5-reading-channel/p5.py
-//! `lex_logp`) with the two exceptions of r1.py (`sandhi_exempt`, `floor_mc`), the registered arm B-f of section R1c. It is switched on only by
-//! `CappedLexicon::with_reading_decode` (the CLI's `--reading-decode`); the engine never calls it, and without it the decoder's arithmetic is untouched.
+//! Reading decode (docs/contracts/reading-decode-2.md; experiments/r1-reading-decode/README.md, sections R1d and R1g): the n-gram decoder adds a
+//! reading term to the path score of every single-character word, `LAMBDA * max(t(r, w), -CAP)`, t being P5's reading term
+//! (experiments/p5-reading-channel/p5.py `lex_logp`) with the exceptions of r1.py (`sandhi_exempt`, `floor_mc`) and the 12 pairs of
+//! `data/lexicon/std-exempt.tsv` (R1g), the registered arm B-f of section R1c. The table is built by `engine::load_reading_decode` from the merged
+//! lexicon and the data directory, and handed to the decoder by `CappedLexicon::with_reading`; the engine (`load_lm`), the evaluation CLI and the replay
+//! all call that one function. A lexicon built without it decodes as before.
 use crate::Lexicon;
+use crate::eval::sha256_hex;
 use std::collections::{HashMap, HashSet};
 
 /// Weight of the reading term in the path score (R1 README, R1c: lambda 2.0 of the registered grid, arm B-f; R1d fixes it, no selection).
@@ -93,13 +96,15 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
 /// `mcbpmf-data.txt`, read-only afterwards.
 pub struct ReadingDecode {
     floor_mc: HashMap<(u32, char), f64>,
-    /// (syllable, character) pairs whose term is 0 like a `SANDHI` reading (R1g: `exempt`, the CLI's `--reading-exempt`); empty without it.
+    /// (syllable, character) pairs whose term is 0 like a `SANDHI` reading (R1g, `std-exempt.tsv`); empty until `with_exempt`.
     exempt: HashSet<(String, char)>,
+    /// First 8 hex of the SHA-256 of the exempt list's text (`with_exempt`), for the summary tag; empty until then.
+    exempt_sha8: String,
 }
 
 impl ReadingDecode {
     pub fn new(lex: &Lexicon, base_text: &str) -> ReadingDecode {
-        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new() }
+        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new() }
     }
 
     /// R1g: the pairs in `text` (`syllable<TAB>character` rows; blank lines and `#` lines skipped) cost 0, whatever the lexicon scores them.
@@ -114,7 +119,14 @@ impl ReadingDecode {
                 _ => return Err(format!("line {}: expected syllable<TAB>character", i + 1)),
             };
         }
+        self.exempt_sha8 = sha256_hex(text.as_bytes())[..8].to_string();
         Ok(self)
+    }
+
+    /// The summary-line tag of a run that decodes with this table: `+rd`, then `+rx:<sha8 of the exempt list>` once `with_exempt` gave one
+    /// (the CLI and the replay print it at the end of every setting's tag).
+    pub fn tag(&self) -> String {
+        if self.exempt_sha8.is_empty() { "+rd".into() } else { format!("+rd+rx:{}", self.exempt_sha8) }
     }
 
     /// log10 P(reading | word) of the single-character word `word` read `syl`, relative to the word's best reading (<= 0): the lexicon's score
@@ -146,8 +158,34 @@ impl ReadingDecode {
     }
 }
 
+/// Tests build the table through `engine::load_reading_decode`, the one function the engine and the CLIs call: a data directory of two files.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// `base` is the text of `mcbpmf-data.txt` (the lexicon is parsed from it, plus `overlay` when given), `exempt` that of `std-exempt.tsv`.
+    /// `Err` is the loader's error as a string.
+    pub fn try_built(base: &str, overlay: Option<&str>, exempt: &str) -> Result<(Lexicon, ReadingDecode), String> {
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("shanjie-reading-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mcbpmf-data.txt"), base).unwrap();
+        std::fs::write(dir.join(crate::engine::READING_EXEMPT_FILE), exempt).unwrap();
+        let lex = Lexicon::parse_with(base, overlay).unwrap();
+        let rd = crate::engine::load_reading_decode(&lex, &dir).map_err(|e| e.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+        rd.map(|rd| (lex, rd))
+    }
+
+    pub fn built(base: &str, overlay: Option<&str>, exempt: &str) -> (Lexicon, ReadingDecode) {
+        try_built(base, overlay, exempt).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_support::{built, try_built};
     use super::*;
 
     fn close(a: f64, b: f64) {
@@ -155,9 +193,7 @@ mod tests {
     }
 
     fn mk(base: &str) -> (Lexicon, ReadingDecode) {
-        let lex = Lexicon::parse(base).unwrap();
-        let rd = ReadingDecode::new(&lex, base);
-        (lex, rd)
+        built(base, None, "")
     }
 
     /// 甲 has three readings (a -1.0 twice over, b -3.0, c -9.0: the duplicate row a -5.0 loses to a -1.0), 乙 ties under a and b, 丁 has one reading,
@@ -184,8 +220,7 @@ mod tests {
     fn a_multi_character_word_gets_no_term() {
         // the base file drops such a row; an overlay row (pack, learned word) can carry one
         let base = "a 甲 -1.0\nb 甲 -3.0\n";
-        let lex = Lexicon::parse_with(base, Some("b\t甲乙\t-9.0\tx\n")).unwrap();
-        let rd = ReadingDecode::new(&lex, base);
+        let (lex, rd) = built(base, Some("b\t甲乙\t-9.0\tx\n"), "");
         close(rd.term(&lex, "b", "甲"), LAMBDA * -2.0);
         assert!(rd.logp(&lex, "b", "甲乙").is_some());
         close(rd.term(&lex, "b", "甲乙"), 0.0);
@@ -234,18 +269,25 @@ mod tests {
     }
 
     /// R1g: an exempt pair scores 0 (its lexicon difference is -2.0 without the list), a rare pair that is not on the list still gets the term,
-    /// and the list's comments, blank lines and a malformed row are handled (the row stops the run).
+    /// the list's comments and blank lines are skipped, and a malformed row is a load error naming std-exempt.tsv, never a table without it.
     #[test]
     fn an_exempt_pair_scores_zero_and_the_rest_keep_the_term() {
-        let (lex, rd) = mk(LEX);
-        let rd = rd.with_exempt("# header\n\nb\t甲\nz\t乙\n").unwrap();
+        let (lex, rd) = built(LEX, None, "# header\n\nb\t甲\nz\t乙\n");
         close(rd.logp(&lex, "b", "甲").unwrap(), 0.0);
         close(rd.term(&lex, "b", "甲"), 0.0);
         close(rd.term(&lex, "c", "甲"), -LAMBDA * CAP);
         assert!(rd.logp(&lex, "z", "乙").is_none(), "an exempt pair the lexicon lacks is still absent");
-        let (_, rd) = mk(LEX);
-        assert!(rd.with_exempt("b\t甲乙\n").is_err());
-        let (_, rd) = mk(LEX);
-        assert!(rd.with_exempt("b 甲\n").is_err());
+        for bad in ["b\t甲乙\n", "b 甲\n", "b\t甲\textra\n", "\t甲\n"] {
+            let e = try_built(LEX, None, bad).err().unwrap_or_else(|| panic!("{bad:?} loaded"));
+            assert!(e.contains("std-exempt.tsv"), "{e}");
+        }
+    }
+
+    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text (the sha256 of "b\t甲\n" is checked against the shasum of the file).
+    #[test]
+    fn the_tag_carries_the_exempt_lists_hash() {
+        let (_, rd) = built(LEX, None, "b\t甲\n");
+        assert_eq!(rd.tag(), format!("+rd+rx:{}", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
+        assert_eq!(ReadingDecode::new(&Lexicon::parse(LEX).unwrap(), LEX).tag(), "+rd");
     }
 }

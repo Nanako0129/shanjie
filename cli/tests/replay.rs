@@ -41,7 +41,7 @@ fn zhi() -> Row {
 fn yi() -> Row {
     row("|奕|ㄧˋ")
 }
-/// Several rewrites of the small model while it is typed (3 with `Rerank::Each`, measured).
+/// Several rewrites of the small model while it is typed (3 with `Rerank::Each`, measured with the decoder's reading term off; 1 with it).
 fn guqi() -> Row {
     row("|我好奇其他競品記憶體都佔多少|ㄨㄛˇ ㄏㄠˋ ㄑㄧˊ ㄑㄧˊ ㄊㄚ ㄐㄧㄥˋ ㄆㄧㄣˇ ㄐㄧˋ ㄧˋ ㄊㄧˇ ㄉㄡ ㄓㄢˋ ㄉㄨㄛ ㄕㄠˇ")
 }
@@ -188,10 +188,13 @@ fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
     let len = load_lenient().unwrap();
     let r = guqi();
     let (_g, mut e) = engine(false);
+    // The rule is about the rewriting, not the reading term: with the term (the default) the n-gram's own displays are right sooner and this row is rewritten
+    // once while it is typed (measured 2026-11-02, reading-decode-2), so the row serves the rule with the term off, where it is rewritten three times.
+    e.set_reading_decode(false);
     let each = go(&mut e, &r, &len, EACH);
     let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final });
     let (mid, changed, shown) = by_hand(&mut e, &r, true);
-    assert!(each.rewrites >= 2, "this row is rewritten at least twice while it is typed (3 measured)");
+    assert!(each.rewrites >= 2, "this row is rewritten at least twice while it is typed (3 measured, with the reading term off)");
     assert_eq!((each.typing_applies, each.rewrites, &each.first), (mid, changed, &shown));
     let (_, changed, shown) = by_hand(&mut e, &r, false);
     assert!(fin.rewrites <= 1, "final applies once, after the last key, not while typing");
@@ -346,35 +349,46 @@ fn colloquial_replay_agrees_with_the_cli() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// docs/contracts/reading-channel.md section 2.2 and item 4: the replay's engine adds the reading-channel term to the colloquial term by default,
-/// so its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) on rows 81, 159 and 10 of the set, where the term moves the
-/// picks (rows 10, 81 and 102 until 通語 SJ-LM-7-9.7M); `--no-reading-channel` is the colloquial term alone, the CLI's `--no-reading-channel` (and its tag lacks the `+rc` of the default).
+/// docs/contracts/reading-decode-2.md section 2: the replay's engine (`Engine::load_lm` on the real data folder, which builds the reading table with the one
+/// function the CLI calls) decodes with the reading term by default, so its choices are the CLI's (equal `top1_sha256`) on main's two sentences, in the written
+/// and the chat setting (standard strength, the colloquial table loaded in chat); `--no-reading-decode` is the CLI's `--no-reading-decode`. The premise is
+/// asserted for each setting first: the term changes the CLI's choice among these rows, so an engine that left the term out could not pass. The summary tag
+/// ends `+rd+rx:<sha8>` by default and has neither mark with the option.
 #[test]
-fn reading_channel_replay_agrees_with_the_cli() {
-    let dir = std::env::temp_dir().join(format!("shanjie-replay-rc-{}", std::process::id()));
+fn reading_decode_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-rd-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let rows = dir.join("rows.txt");
-    let all = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
-    let lines: Vec<&str> = all.lines().collect();
-    assert!(lines[80].starts_with("|長歪了|") && lines[158].starts_with("|有點累贅|") && lines[9].starts_with("|你有東西要先進版控嗎|"));
-    std::fs::write(&rows, [lines[80], lines[158], lines[9]].join("\n") + "\n").unwrap();
+    std::fs::write(
+        &rows,
+        "|以敵偽人員的名字命名|ㄧˇ ㄉㄧˊ ㄨㄟˋ ㄖㄣˊ ㄩㄢˊ ㄉㄜ˙ ㄇㄧㄥˊ ㄗˋ ㄇㄧㄥˋ ㄇㄧㄥˊ\n|這個屬叫散白蟻屬|ㄓㄜˋ ㄍㄜ˙ ㄕㄨˇ ㄐㄧㄠˋ ㄙㄢˋ ㄅㄞˊ ㄧˇ ㄕㄨˇ\n",
+    )
+    .unwrap();
     let rows = rows.to_str().unwrap();
     let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
     let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
-    let cli = |extra: &[&str]| {
-        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it", "--tinylm", tl.to_str().unwrap(), "--colloquial-core", co.to_str().unwrap(), "--rows", rows];
-        a.extend_from_slice(extra);
-        run(eval, &a)
-    };
-    let (with, alone) = (cli(&[]), cli(&["--no-reading-channel"]));
-    let (rep_with, rep_alone) = (run(replay, &["--rows", rows]), run(replay, &["--rows", rows, "--no-reading-channel"]));
-    assert_ne!(sha_of(&with), sha_of(&alone), "premise: the channel moves a choice among these rows");
-    assert_eq!(sha_of(&with), sha_of(&rep_with));
-    assert_eq!(sha_of(&alone), sha_of(&rep_alone));
-    assert!(rep_with.contains("+colloq:81c2470d+rc") && rep_alone.contains("+colloq:81c2470d") && !rep_alone.contains("+rc"), "{rep_with}{rep_alone}");
-    // no table loaded: nothing to switch off, the summary is the one without the option
-    assert_eq!(run(replay, &["--rows", rows, "--no-colloquial"]), run(replay, &["--rows", rows, "--no-colloquial", "--no-reading-channel"]));
+    let sha8 = &core::eval::sha256_hex(&std::fs::read(r.join("data/lexicon/std-exempt.tsv")).unwrap())[..8];
+    for profile in ["formal", "chat"] {
+        let cli = |extra: &[&str]| {
+            let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", profile, "--context", "--packs", "acg,it", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+            if profile == "chat" {
+                a.extend(["--colloquial-core", co.to_str().unwrap()]);
+            }
+            a.extend_from_slice(extra);
+            run(eval, &a)
+        };
+        let (on, off) = (cli(&[]), cli(&["--no-reading-decode"]));
+        assert_ne!(sha_of(&on), sha_of(&off), "{profile}: premise, the term changes a choice among these rows");
+        let (rep_on, rep_off) = (run(replay, &["--rows", rows, "--profile", profile]), run(replay, &["--rows", rows, "--profile", profile, "--no-reading-decode"]));
+        assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile}: the replay's engine decodes like the CLI");
+        assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile}: --no-reading-decode");
+        assert!(on.contains(&format!("+rd+rx:{sha8}  {{")) && rep_on.contains(&format!("+rd+rx:{sha8}  {{")), "{profile}: {on}{rep_on}");
+        assert!(!off.contains("+rd") && !rep_off.contains("+rd") && !rep_off.contains("+rx"), "{profile}: {off}{rep_off}");
+    }
+    // the reading-channel switch is gone from the replay too
+    let o = Command::new(replay).args(["--rows", rows, "--no-reading-channel"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

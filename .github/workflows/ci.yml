@@ -260,6 +260,11 @@ jobs:
       - name: Benchmark tool (Python)
         run: python3 -m unittest tools/test_bench.py
 
+      # docs/contracts/reading-decode-2.md: the shipped reading-decode exemption list (data/lexicon/std-exempt.tsv) against tools/std_exempt.py's rule. The
+      # rule needs the concised dictionary zip, which is not in the repository, so that test is skipped here (it says so on stderr); the file's shape is checked.
+      - name: Reading-decode exemption list (Python)
+        run: python3 -m unittest tools/test_std_exempt.py
+
       # docs/contracts/kpi.md: the per-version KPI table rules and the replay model checks, synthetic JSON and fake binaries.
       - name: KPI table tool (Python)
         run: python3 -W ignore -m unittest tools/test_kpi.py

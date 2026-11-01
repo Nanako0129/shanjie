@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""R1g: the (syllable, character) pairs the reading term must not charge (experiments/r1-reading-decode/README.md, section R1g).
+"""R1g: the (syllable, character) pairs the reading term must not charge (experiments/r1-reading-decode/README.md, section R1g; shipped data since
+docs/contracts/reading-decode-2.md). tools/test_std_exempt.py checks that this rule still gives data/lexicon/std-exempt.tsv.
 
-  std_exempt.py [OUT]     -> OUT (default: std-exempt.tsv next to this script), two columns: syllable, character.
+  std_exempt.py [OUT]     -> OUT (default: data/lexicon/std-exempt.tsv), two columns: syllable, character.
 
 Rule: the single-character rows of data/lexicon/mcbpmf-data.txt (one syllable, `_` rows skipped, the largest score of a repeated
 (syllable, character)); for each character with two or more readings, the concised MOE dictionary's entry (tools/build_overlay.load_concised)
@@ -13,7 +14,7 @@ import hashlib
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import build_overlay as bo  # noqa: E402
 
@@ -43,17 +44,24 @@ def pairs():
     return out
 
 
+HEADER = "# python3 experiments/r1-reading-decode/std_exempt.py"   # the first line of the shipped file, kept as it was written (the script moved to tools/)
+
+
+def render(got):
+    """The file's text for the pairs `got` (the header lines name the two sources by their hashes)."""
+    sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+    return (f"{HEADER}\n# data/lexicon/mcbpmf-data.txt sha256 {sha(LEXICON)}\n"
+            f"# concised dictionary zip (dict_concised_2014_20260929.zip) sha256 {bo.CONCISED_SHA256}\n"
+            + "".join(f"{syl}\t{c}\n" for syl, c in got))
+
+
 def main():
-    out_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "std-exempt.tsv")
+    out_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "data", "lexicon", "std-exempt.tsv")
     got = pairs()
     if set(got) != EXPECTED or len(got) != len(EXPECTED):
         sys.exit(f"not the 12 registered pairs: extra {sorted(set(got) - EXPECTED)}, missing {sorted(EXPECTED - set(got))}")
-    sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write(f"# python3 experiments/r1-reading-decode/std_exempt.py\n# data/lexicon/mcbpmf-data.txt sha256 {sha(LEXICON)}\n"
-                f"# concised dictionary zip (dict_concised_2014_20260929.zip) sha256 {bo.CONCISED_SHA256}\n")
-        for syl, c in got:
-            f.write(f"{syl}\t{c}\n")
+        f.write(render(got))
     print(f"{len(got)} pairs -> {out_path}")
 
 

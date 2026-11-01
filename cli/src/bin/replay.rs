@@ -2,7 +2,7 @@
 //! Research tool, not shipped. Output is numbers only: the summary line on stdout, `--rowstats`, `--keys` and `--firsts` files.
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
-//!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-channel] [--rowstats FILE] [--keys FILE]
+//!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-decode] [--rowstats FILE] [--keys FILE]
 //!                [--firsts FILE] [--packs LIST]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
@@ -10,10 +10,11 @@
 //!
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
 //! after the small model), `--colloquial FILE` loads that table instead and `--no-colloquial` leaves it out. Loaded, the models line and the
-//! summary tag name it (`colloquial.sjlm:<sha8>`, `+colloq:<sha8>`). Where the colloquial term applies the reading-channel term goes with it, as in the
-//! App (docs/contracts/reading-channel.md); `--no-reading-channel` (research only) leaves the colloquial term alone, the P4d cell. The tag marks
-//! the shipping behavior: with the table loaded in chat and the channel on it ends `+colloq:<sha8>+rc`; with the option (or in formal) just `+colloq:<sha8>`.
-//! Without a loaded table the option changes nothing.
+//! summary tag name it (`colloquial.sjlm:<sha8>`, `+colloq:<sha8>`).
+//!
+//! The engine's n-gram decoder carries the reading term (docs/contracts/reading-decode-2.md), built by `Engine::load_lm`; the summary tag of every setting ends
+//! `+rd+rx:<sha8 of std-exempt.tsv>` (the table the engine really loaded). `--no-reading-decode` (research only, `Engine::set_reading_decode(false)`) leaves the
+//! term out and the tag without those two marks. There is no reading-channel term in the fusion any more.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine_packs, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
 use core::engine::{PACK_ACG, PACK_IT, PACK_QUOTES};
@@ -58,7 +59,7 @@ fn run() -> Result<(), String> {
     let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each });
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
     let (mut learn_file, mut guard) = (None::<String>, true);
-    let (mut colloquial, mut no_colloquial, mut reading_channel) = (None::<String>, false, true);
+    let (mut colloquial, mut no_colloquial, mut reading_decode) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -93,7 +94,7 @@ fn run() -> Result<(), String> {
             "--correct" => cfg.correct = true,
             "--colloquial" => colloquial = Some(val()?),
             "--no-colloquial" => no_colloquial = true,
-            "--no-reading-channel" => reading_channel = false,
+            "--no-reading-decode" => reading_decode = false,
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
             "--firsts" => firsts = Some(val()?),
@@ -172,27 +173,26 @@ fn run() -> Result<(), String> {
         tl8.as_deref().unwrap_or("none"),
         co8.as_ref().map_or(String::new(), |h| format!(" colloquial.sjlm:{h}"))
     );
-    // `+rc` only where the channel is read: the colloquial term applies (chat here, any rerank level, the paired small model).
-    let rc_model = tl8.as_deref() == Some(&core::colloquial::PAIRED_TINYLM_SHA256[..8]);
     let packs = format!(
         "{}{}{}",
         if packs_mask & PACK_ACG != 0 { "+acg" } else { "" },
         if packs_mask & PACK_QUOTES != 0 { "+quotes" } else { "" },
         if packs_mask & PACK_IT != 0 { "+it" } else { "" }
     );
+    let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;
+    e.set_learn_guard(guard);
+    e.set_reading_decode(reading_decode);
     let tag = format!(
-        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
+        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
         if cfg.correct { "+correct" } else { "" },
         if learn_file.is_some() { "+learnfile" } else { "" },
         if guard { "" } else { "+noguard" },
-        co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel && profile == Profile::Chat && rc_model { "+rc" } else { "" })),
+        co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}")),
+        e.reading_tag(),
     );
-    let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;
-    e.set_learn_guard(guard);
-    e.set_reading_channel(reading_channel);
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
     // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.
     if let Some(f) = &learn_file {

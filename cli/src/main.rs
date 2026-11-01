@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_forms, load_lenient, read_rows, root, three_field_rows};
-use core::colloquial::{self, Colloquial, ReadingChannel};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
+use core::colloquial::{self, Colloquial};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
@@ -237,24 +237,13 @@ struct RowOut {
 /// candidates of the n-gram order instead of 8, the extra ones scored by `TinyLm::ll_many` under the key `rerank_ll` uses (a candidate over the model's context gets `null`, counted on stderr). The pick `c`, the
 /// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
 ///
-/// `--no-reading-channel` (research only; docs/contracts/reading-channel.md section 2.2): where the colloquial term applies it is applied alone, the P4d
-/// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
-/// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
-/// engine. It changes nothing where the colloquial term does not apply. The summary tag marks the shipping behavior: where the colloquial term
-/// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal or another
-/// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
-/// changes nothing.
-///
-/// `--reading-decode` (evaluation only; experiments/r1-reading-decode, section R1d; not in the engine or the C ABI): the n-gram decoder adds
-/// `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the
-/// multi-character words: arm B-f) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
-/// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it the path is the one it was: cli/tests/reading_decode.rs checks the summary line of eight settings
-/// (chat and formal, with and without `--tinylm`, dev302 and typing76) and, on macOS, the sha256 of the `--dump` file of the four n-gram-only ones
-/// against the binary before the option; other outputs (rowstats, `--tinylm-scores`, `--dump-words`) are not compared.
-///
-/// `--reading-exempt FILE` (evaluation only; experiments/r1-reading-decode, section R1g; needs `--reading-decode`, an error without it): the
-/// `syllable<TAB>character` pairs of FILE (`#` lines and blank lines skipped) get the reading term 0, like the sandhi readings. The summary tag gains
-/// `+rx:<first 8 hex of FILE's SHA-256>` right after `+rd`. Without the option every output is what it was.
+/// The reading term (docs/contracts/reading-decode-2.md; experiments/r1-reading-decode, sections R1d and R1g): the n-gram decoder adds `core::reading`'s term
+/// (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words, the 12 pairs of
+/// `data/lexicon/std-exempt.tsv` free) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
+/// `--tinylm-scores` `ng` and the pick all see it. The table is built by `core::engine::load_reading_decode` from the merged lexicon and the data folder, the one
+/// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>` in every setting. `--no-reading-decode`
+/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has neither `+rd` nor `+rx`. There is no reading-channel term in the
+/// fusion any more (it was removed by the same contract), so the colloquial tag is just `+colloq:<sha8>`.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -278,9 +267,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // `--fuzzy-delta-sound D` (section 3.5, evaluation only): the fuzzy-sound penalty of this run; the summary tag gets `:dD` when it is not the default.
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut delta_given = false;
-    let mut reading_channel = true;
-    let mut reading_decode = false;
-    let mut reading_exempt = None::<String>;
+    let mut reading_decode = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -333,14 +320,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 delta_given = true;
             }
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
-            "--no-reading-channel" => reading_channel = false,
-            "--reading-decode" => reading_decode = true,
-            "--reading-exempt" => reading_exempt = Some(val()?),
+            "--no-reading-decode" => reading_decode = false,
             _ => return Err("unknown argument".into()),
         }
-    }
-    if reading_exempt.is_some() && !reading_decode {
-        return Err("--reading-exempt needs --reading-decode".into());
     }
     check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
     if tinylm_scores.is_some() && tinylm.is_none() {
@@ -413,21 +395,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // The rows of the pack-oov packs (not `--extra-overlay`, not other packs): their words are unknown to the model and keep the pack's score (pack-oov contract).
     let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
     let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
-    // R1d: the mc estimate of the floor readings counts the multi-character rows of mcbpmf-data.txt alone (the base the lexicon was parsed from).
-    let capped = if reading_decode {
-        let base = fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|e| format!("--reading-decode: cannot read mcbpmf-data.txt ({:?})", e.kind()))?;
-        capped.with_reading_decode(&base)
+    // The reading term: the engine's own table (mcbpmf-data.txt for the mc estimate of the floor readings, std-exempt.tsv for the exemptions) and its tag.
+    let (capped, rd_tag) = if reading_decode {
+        let rd = load_reading_decode(&lex, &dir).map_err(|e| e.to_string())?;
+        let tag = rd.tag();
+        (capped.with_reading(rd), tag)
     } else {
-        capped
-    };
-    // R1g: the pairs of FILE cost nothing; the tag carries the first 8 hex of the file's SHA-256.
-    let (capped, rx_tag) = match &reading_exempt {
-        Some(p) => {
-            let bytes = fs::read(p).map_err(|e| format!("--reading-exempt: cannot read {p} ({:?})", e.kind()))?;
-            let text = String::from_utf8(bytes.clone()).map_err(|_| format!("--reading-exempt: {p} is not UTF-8"))?;
-            (capped.with_reading_exempt(&text).map_err(|e| format!("--reading-exempt: {e}"))?, format!("+rx:{}", &sha256_hex(&bytes)[..8]))
-        }
-        None => (capped, String::new()),
+        (capped, String::new())
     };
 
     // (display name, [(truth, reading)])
@@ -525,8 +499,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
-                    let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, &used, lex.manual())
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, level, &used, lex.manual())
                 }
                 None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual()),
             };
@@ -740,7 +713,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rx_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}", &co.sha256()[..8])), rd_tag, rows.len());
     Ok(())
 }
 

@@ -218,7 +218,7 @@ class Judge(unittest.TestCase):
                 self.assertEqual(line, f[stem])
         self.assertEqual(E.cli_args("chat-std", "r1g")[-4:], ["--reading-decode", "--no-reading-channel", "--reading-exempt", E.EXEMPT])
         rx = E.exempt_sha8()
-        self.assertEqual(rx, hashlib.sha256(open(os.path.join(E.HERE, "std-exempt.tsv"), "rb").read()).hexdigest()[:8])
+        self.assertEqual(rx, hashlib.sha256(open(os.path.join(os.path.dirname(os.path.dirname(E.HERE)), E.EXEMPT), "rb").read()).hexdigest()[:8])
         for s in RD.SETTINGS:
             E.check_tags(s, base_tag(s), rd_tag(s) + f"+rx:{rx}", rx=rx)
             with self.assertRaises(SystemExit):

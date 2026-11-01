@@ -44,11 +44,11 @@ fn fuzzy_tags_the_summary_counts_an_uncovered_row_wrong_and_goes_on() {
     let o = lm(ROWS, &["--fuzzy", "0"]);
     assert!(o.status.success());
     let s = summary(&o);
-    assert!(s.contains("+fz:0  {'n': 3, 'top1': 1,"), "{s}");
+    assert!(s.contains("+fz:0+rd+rx:") && s.contains("  {'n': 3, 'top1': 1,"), "{s}");
     let o = lm(ROWS, &["--fuzzy", "2"]);
     assert!(o.status.success());
     let s = summary(&o);
-    assert!(s.contains("+fz:2  {'n': 3, 'top1': 2,"), "{s}");
+    assert!(s.contains("+fz:2+rd+rx:") && s.contains("  {'n': 3, 'top1': 2,"), "{s}");
     // bit 4 alone does not touch the legal slip
     assert!(summary(&lm(ROWS, &["--fuzzy", "16"])).contains("'top1': 1,"));
 }
@@ -89,9 +89,9 @@ fn fuzzy_delta_sound_default_is_identical_and_other_values_shift_fuzzy_candidate
     let (s0, c0) = dump_298(&[]);
     let (s1, c1) = dump_298(&["--fuzzy-delta-sound", "2.5"]);
     assert_eq!((&s0, &c0), (&s1, &c1));
-    assert!(s0.contains("+fz:15  {"), "{s0}");
+    assert!(s0.contains("+fz:15+rd+rx:"), "{s0}"); // the reading term's tag ends every setting (docs/contracts/reading-decode-2.md)
     let (s2, c2) = dump_298(&["--fuzzy-delta-sound", "1"]);
-    assert!(s2.contains("+fz:15:d1  {"), "{s2}");
+    assert!(s2.contains("+fz:15:d1+rd+rx:"), "{s2}");
     // The first choice of this row no longer changes with D on 通語 SJ-LM-7-9.7M (it did on SJ-LM-6-9.1M); the exact score shift below
     // is what shows D is applied.
     let (shu, su) = ("這家店的排骨書很好吃", "這家店的排骨酥很好吃");
