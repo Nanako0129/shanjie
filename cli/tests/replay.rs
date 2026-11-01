@@ -3,7 +3,7 @@
 //! test states the display it relies on, so a model change fails there first. Each engine is about 700 MB, so the tests take turns.
 use cli::common::{load_lenient, root};
 use cli::replay::{build_engine, keys_of, move_cost, replay_row, summary_line, Cfg, Rerank, RowOut};
-use core::engine::{Engine, Key, KeyKind, MAX_SYLLABLES};
+use core::engine::{Engine, Key, KeyKind, MAX_SYLLABLES, MOD_SHIFT};
 use core::eval::Lenient;
 use core::lm::Profile;
 use std::process::Command;
@@ -108,6 +108,26 @@ fn a_repick_costs_the_moves_the_window_and_the_digit() {
         assert!(o.final_ok && !o.unfixable && o.committed == r.gold, "sent text is the gold text");
         assert_eq!((o.picks, o.actual), (1, o.ideal + extra), "{}", r.gold);
     }
+}
+
+/// Rule (docs/contracts/punct-composition.md section 1, item 1): a mark of `，。？！：、` is a reading token of its own, typed as the App's key
+/// (Shift+`,` `.` `/` `1` `;`, plain `\`); it stays in the composition, is sent with Enter, and counts one key in `ideal` and `actual`. The
+/// sent text is compared as a string, not through `Lenient`. `；` has no key: the row is an error.
+#[test]
+fn a_punctuation_mark_stays_in_the_composition_and_is_sent_exactly() {
+    for (mark, key, mods) in [('，', ',', MOD_SHIFT), ('。', '.', MOD_SHIFT), ('？', '/', MOD_SHIFT), ('！', '1', MOD_SHIFT), ('：', ';', MOD_SHIFT), ('、', '\\', 0)] {
+        assert!(keys_of(&mark.to_string()).unwrap() == vec![Key::ch(key, mods)], "{mark}");
+    }
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    for mark in ["，", "。", "？", "！", "：", "、"] {
+        let r = Row { ctx: "", gold: "", syls: ["ㄋㄧˇ", "ㄏㄠˇ", mark].map(String::from).to_vec() };
+        let o = go(&mut e, &r, &len, EACH);
+        assert_eq!(o.committed, format!("你好{mark}"), "{mark}");
+        assert_eq!((o.ideal, o.actual, o.autocommit), (3 + 3 + 1 + 1, 3 + 3 + 1 + 1, false), "{mark}: one key for the mark");
+    }
+    let r = Row { ctx: "", gold: "", syls: ["ㄋㄧˇ", "；"].map(String::from).to_vec() };
+    assert!(replay_row(&mut e, "", &r.syls, "", &len, EACH).is_err(), "； has no key");
 }
 
 /// Rule: gold text that no window offers (才 is not a reading of ㄗㄞˋ), or of another length than the reading, is not fixed: no
@@ -479,5 +499,25 @@ fn an_output_that_is_the_learn_file_is_refused() {
             assert_eq!(std::fs::read(&src).unwrap(), b"#shanjie-learning v1\n", "{opt}: untouched");
         }
     }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rule (section 1, item 2): `--packs` is research only. Omitted, the summary tag is the App's `+acg+it` (the dev302 rows' rowstats and summary
+/// are byte for byte those of before the option, checked by hand when it was added); `acg,quotes,it` adds `+quotes`; a name that is not
+/// a pack is an error.
+#[test]
+fn packs_option_changes_only_the_tag_it_names() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-packs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let replay = env!("CARGO_BIN_EXE_shanjie-replay");
+    assert!(run(replay, &["--rows", rows]).contains("+ctx+acg+it+nopred"));
+    assert!(run(replay, &["--rows", rows, "--packs", "acg,it"]).contains("+ctx+acg+it+nopred"));
+    assert!(run(replay, &["--rows", rows, "--packs", "acg,quotes,it"]).contains("+ctx+acg+quotes+it+nopred"));
+    let bad = Command::new(replay).args(["--rows", rows, "--packs", "acg,mystery"]).output().unwrap();
+    assert_eq!(bad.status.code(), Some(1));
     std::fs::remove_dir_all(&dir).unwrap();
 }
