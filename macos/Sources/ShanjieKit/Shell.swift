@@ -1,5 +1,6 @@
 import AppKit
 import CShanjie
+import Synchronization
 import os
 
 /// R2 (docs/contracts/s3b.md section 9): messages are static strings and C ABI return codes only.
@@ -324,26 +325,61 @@ public enum RerankLevel: String, CaseIterable, Sendable {
     }
 }
 
+/// One job's token, returned by `RerankRunner.run` (enter-rerank-wait section 1 item 4). The shell keeps it as its running state
+/// and hands it back to `wait`; a runner subclasses it to find the job again. Compared with `===`, never by address.
+@MainActor
+open class RerankHandle {
+    public init() {}
+}
+
 /// Runs a rerank job off the main thread (s7c2b section 2.1): `job.run()` on another thread, then `done` with its code on the
 /// main thread. The app passes `QueueRerankRunner`; the tests pass runners they complete by hand.
 @MainActor
 public protocol RerankRunner: AnyObject {
-    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void)
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle
+
+    /// Enter's bounded wait (enter-rerank-wait section 1 items 2 and 4): blocks the calling (main) thread until `deadline` for the
+    /// job `handle` names, and returns its code only after that job's `run()` returned; `nil` when the deadline came first. The
+    /// job's `done` is still called afterwards (the shell makes that late call a no-op).
+    func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32?
+}
+
+/// The wait object of one job of `QueueRerankRunner`: the queue's block signals it once, after the code is in the box (so a
+/// woken waiter always finds the code). One per job, never shared, so a signal left by a job nobody waited for cannot end the
+/// next wait early. Holds no pointer, only the semaphore and the code.
+private final class RerankWaiter: Sendable {
+    let signal = DispatchSemaphore(value: 0)
+    let code = Mutex<Int32?>(nil)
+}
+
+private final class QueueRerankHandle: RerankHandle {
+    let waiter: RerankWaiter
+    init(_ waiter: RerankWaiter) { self.waiter = waiter }
 }
 
 /// The app's runner (F2): one serial `.utility` queue with a fixed label. The closure holds the job wrapper (never its
-/// pointer) until run returns; the code comes back through `DispatchQueue.main.async`, which orders the run before the
-/// main-thread apply. The main thread never waits for the queue.
+/// pointer) until run returns. Two orderings put the run before the main-thread apply (RerankJob invariant 2): the code comes
+/// back through `DispatchQueue.main.async`, or the main thread is woken by this job's semaphore, which is signalled only after
+/// `run()` returned (Enter's bounded wait, `wait(_:until:)`, enter-rerank-wait.md). The main thread otherwise never waits for the queue.
 public final class QueueRerankRunner: RerankRunner {
     private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.rerank", qos: .utility)
 
     public init() {}
 
-    public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+    public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle {
+        let waiter = RerankWaiter()
         queue.async {
             let code = job.run()
+            waiter.code.withLock { $0 = code }  // before the signal
+            waiter.signal.signal()
             DispatchQueue.main.async { done(code) }
         }
+        return QueueRerankHandle(waiter)
+    }
+
+    public func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32? {
+        guard let waiter = (handle as? QueueRerankHandle)?.waiter, waiter.signal.wait(timeout: deadline) == .success else { return nil }
+        return waiter.code.withLock { $0 }
     }
 }
 
@@ -590,8 +626,15 @@ public final class Shell {
     /// colloquial-term.md section 2.3: the colloquial table (常談 SJ-CL), in Resources next to the other model files.
     static let colloquialFile = "colloquial.sjlm"
     private let rerankRunner: RerankRunner
-    /// A job is with the runner (section 2.1: one at a time).
-    private var rerankRunning = false
+    /// The job with the runner (section 2.1: one at a time), nil when none. Its completion is handled once: by the runner's
+    /// `done` or by Enter's bounded wait, whichever comes first; the other finds it no longer here (`rerankFinished`).
+    private var rerankRunning: RunningRerank?
+    /// enter-rerank-wait.md section 1 item 1: the longest Enter waits for the rerank (ms), in total. 33 to 84 ms was the last job's
+    /// time in PUNCT-0's VM measurement (research log 2026-11-01), so the limit is above the largest; on the Mac dev302's per-row p95 is
+    /// 12.6 ms. PLAN A3/A7's exception: only Enter waits, and only while a job of this session runs or is queued.
+    static let ENTER_RERANK_WAIT_MS = 100
+    /// The limit `Session.handle` uses on Enter; the tests replace it (the real-queue test gives it 10 s, the shipping value is asserted apart).
+    var enterRerankWaitMS = Shell.ENTER_RERANK_WAIT_MS
     /// The latest job taken while another ran. A newer one replaces it, and the replaced job is freed as it is dropped here.
     private var rerankPending: PendingRerank?
     /// Jobs taken from the core; the tests compare it with the frees.
@@ -646,6 +689,20 @@ public final class Shell {
         weak var session: Session?
         weak var engine: CoreEngine?
     }
+    /// The job with the runner: the same three, and the runner's handle. Compared with ===, so a new job on an old one's address is
+    /// still another job.
+    @MainActor
+    private final class RunningRerank {
+        let job: RerankJob
+        weak var session: Session?
+        weak var engine: CoreEngine?
+        var handle: RerankHandle?
+        init(_ p: PendingRerank) {
+            job = p.job
+            session = p.session
+            engine = p.engine
+        }
+    }
     private let profileModeStore: ProfileModeStore
     private let appProfileStore: AppProfileStore
     /// profile-choice section 2.1: both read once at init, then changed only through the setters below.
@@ -655,6 +712,9 @@ public final class Shell {
     /// The `vertical` value (0, 1 or 2) of what the panel shows now; 0 once it hid. Page Up / Down go to the core only while
     /// it is 1, the vertical candidate window (section 2.2); the vertical prediction row, 2, does not count.
     private(set) var shownVertical = 0
+    /// The `selected` of what the panel shows now (-1: no candidate window and no entered prediction row, also after it hid).
+    /// Enter does not wait for a rerank while it is >= 0: the core applies none then (enter-rerank-wait.md section 1 item 2).
+    private(set) var candidateSelected = -1
     var verticalOpen: Bool { shownVertical == VerticalLayout.candidates }
     /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
     /// the window's model re-reads on it (settings-window section 2.2).
@@ -1055,23 +1115,27 @@ public final class Shell {
     func enqueueRerank(_ job: RerankJob, session: Session, engine: CoreEngine) {
         rerankTaken += 1
         let pending = PendingRerank(job: job, session: session, engine: engine)
-        if rerankRunning { rerankPending = pending } else { startRerank(pending) }
+        if rerankRunning != nil { rerankPending = pending } else { startRerank(pending) }
     }
 
     private func startRerank(_ p: PendingRerank) {
-        rerankRunning = true
-        let job = p.job, session = p.session, engine = p.engine
-        rerankRunner.run(job) { [weak self, weak session, weak engine] code in
-            self?.rerankFinished(job, code: code, session: session, engine: engine)
+        let slot = RunningRerank(p)
+        rerankRunning = slot
+        slot.handle = rerankRunner.run(slot.job) { [weak self, slot] code in
+            self?.rerankFinished(slot, code: code)
         }
     }
 
-    /// On the main thread once run returned. Applied only while the switch is on, the session still owns the composition and the
-    /// engine is still the current one (weak references compared with ===, F3); the core's generation check is the second line.
-    private func rerankFinished(_ job: RerankJob, code: Int32, session: Session?, engine: CoreEngine?) {
-        // F4: whatever is returned below, the running flag is cleared and a waiting job starts.
+    /// On the main thread once run returned: from the runner's `done`, or from Enter's bounded wait. Applied only while the switch
+    /// is on, the session still owns the composition and the engine is still the current one (weak references compared with ===,
+    /// F3); the core's generation check is the second line.
+    private func rerankFinished(_ slot: RunningRerank, code: Int32) {
+        // A job is finished once. The second call (the main.async one after Enter's wait got the code, or one from an engine
+        // rebuilt meanwhile) finds another job or none here and does nothing: no apply, no flag clear, no second start.
+        guard rerankRunning === slot else { return }
+        // F4: whatever is returned below, the running state is cleared and a waiting job starts.
         defer {
-            rerankRunning = false
+            rerankRunning = nil
             if let next = rerankPending {
                 rerankPending = nil
                 startRerank(next)
@@ -1081,8 +1145,25 @@ public final class Shell {
             Log.shell.error("shanjie_rerank_run failed, code \(code)")
             return
         }
-        guard rerankOn, let session, session === owner, let engine, engine === self.engine else { return }
-        session.applyRerankJob(job, on: engine)
+        guard rerankOn, let session = slot.session, session === owner, let engine = slot.engine, engine === self.engine else { return }
+        session.applyRerankJob(slot.job, on: engine)
+    }
+
+    /// Enter's bounded wait (enter-rerank-wait.md section 1): while a job of `session` for the current engine runs or waits, block
+    /// the main thread on the runner until it is done and apply it (`rerankFinished`, the same path as the async completion), all
+    /// within one deadline of `enterRerankWaitMS` taken now. No nested run loop and no unbounded wait: after the deadline the jobs
+    /// are left as they are and Enter commits what is shown. Not when the core would not apply (a selection is open).
+    func waitForRerank(session: Session) {
+        func mine(_ s: Session?, _ e: CoreEngine?) -> Bool { s === session && e != nil && e === engine }
+        func relevant() -> Bool {
+            rerankOn && composing && candidateSelected < 0
+                && (rerankRunning.map { mine($0.session, $0.engine) } ?? false || rerankPending.map { mine($0.session, $0.engine) } ?? false)
+        }
+        guard relevant() else { return }
+        let deadline = DispatchTime.now() + .milliseconds(enterRerankWaitMS)
+        while relevant(), let slot = rerankRunning, let handle = slot.handle, let code = rerankRunner.wait(handle, until: deadline) {
+            rerankFinished(slot, code: code)
+        }
     }
 
     /// The settings switch (acg-pack contract A.2; it-pack 3.2 moved it out of the menu): the pack is part of the lexicon, so like a layout change the
@@ -1301,6 +1382,7 @@ public final class Shell {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         shownVertical = vertical
+        candidateSelected = selected
         hintShown = false
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
@@ -1313,6 +1395,7 @@ public final class Shell {
     /// Down see no vertical window (`verticalOpen` is false for the prediction row).
     func showHint(lineRect: NSRect?, appearance: NSAppearance?) {
         shownVertical = candidateVertical ? VerticalLayout.predictions : 0
+        candidateSelected = -1
         hintShown = true
         panel.showHint(Self.englishRunHint, vertical: shownVertical, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
@@ -1322,6 +1405,7 @@ public final class Shell {
         hintAnchor = nil
         hintShown = false
         shownVertical = 0
+        candidateSelected = -1
         panel.hide()
     }
 
@@ -1401,6 +1485,9 @@ public final class Session {
             if shell.composing { finish(mode: 0) }
             return false
         }
+        // enter-rerank-wait.md section 1 item 2: after claim/applyProfile/syncAscii (a profile change would stale the job), right before
+        // the Enter reaches the core, the shown composition catches up with the rerank that is running for it, within the limit.
+        if key.kind == KeyMap.enter { shell.waitForRerank(session: self) }
         return send(key)
     }
 

@@ -12,7 +12,7 @@
 
 ## 1. 要做到什麼、怎麼看到
 
-- 裝好的輸入法打字時，組字區先顯示 n-gram 的結果，小模型在背景算完後（2a 量到一次 p95 約 8 ms）若選了別的候選就換字；按鍵本身不等它。
+- 裝好的輸入法打字時，組字區先顯示 n-gram 的結果，小模型在背景算完後（2a 量到一次 p95 約 8 ms）若選了別的候選就換字；按鍵本身不等它（唯一的例外：Enter 時這個 session 的重排工作在跑或排隊，主執行緒有上限地等，上限 100 ms，`docs/contracts/enter-rerank-wait.md`）。
 - 「語意校正」在設定視窗與選單都能開關，預設開〔修訂：預設關；再修訂 2026-10-13：S7h 起預設開〕；關掉時立刻回到 n-gram 的結果。
 - **怎麼看到**：使用者實機（§3 第 5 項）；殼的測試、selftest、CI。
 
@@ -24,8 +24,8 @@
 - 每次把引擎的輸出套到組字區之後（按鍵、候選窗選字、各種設定的快照），呼叫 `take` 取工作；**一次只跑一個**：已經有在跑的，新工作先留著（只留最新的一個，被取代的立刻 free），跑完再接著跑。
 - 完成時在主執行緒：確認還是同一個 session、同一個引擎物件（引擎可能因為換排列、開關詞包而重建）；呼叫 `apply`：0 → 照現有的方式套用輸出（`setMarkedText` 與候選列）；5 → 不做事；4 → 照現有處理碼 4 的方式（組字已被引擎清空）。之後若有留著的工作就接著跑。
 - 工作用一個 Swift 包裝類別持有，`deinit` 呼叫 `shanjie_rerank_free`（經過一個可注入的 free 函式，測試在那裡計數），所以每條路徑都恰好 free 一次：被新工作取代、引擎重建、開關關掉、結果過期、apply 回 4、正常套用。run 在背景執行時，包裝物件由那個 closure 持有，run 回傳之前不會被 free。
-- **包裝類別的規則**（安全審查 F1）：原始指標是 `private`，包裝類別只提供 `run()`（nonisolated）與 `apply(on:)`（@MainActor），沒有任何明確的 free 方法，free 只在 `deinit`；它是 nonisolated 的 `final class`，標 `@unchecked Sendable`，註解寫明三個不變條件（一次只跑一個；apply 只在 run 回傳之後、經 `DispatchQueue.main.async` 排序；free 只在 deinit）；runner 的 closure 抓的是包裝物件，不是指標；可注入的 free 函式型別是 `@Sendable (OpaquePointer) -> Void`（最後一個參照可能在背景執行緒放掉，標頭允許 run 回傳後在任何執行緒 free）。不實作 `CustomStringConvertible`。
-- **runner 的位置**（F2）：真的佇列 runner 寫在 ShanjieKit（Swift 6 嚴格並行），App 只建立實例；佇列的 label 是固定字串，不加 signpost；**主執行緒從不等背景**（沒有 `queue.sync`、沒有 semaphore）。
+- **包裝類別的規則**（安全審查 F1）：原始指標是 `private`，包裝類別只提供 `run()`（nonisolated）與 `apply(on:)`（@MainActor），沒有任何明確的 free 方法，free 只在 `deinit`；它是 nonisolated 的 `final class`，標 `@unchecked Sendable`，註解寫明三個不變條件（一次只跑一個；apply 只在 run 回傳之後，由兩條排序之一保證：經 `DispatchQueue.main.async`，或 Enter 的有上限等候被 run 回傳之後才發的訊號喚醒（`docs/contracts/enter-rerank-wait.md`），遲到的那一次回呼不再套用；free 只在 deinit）；runner 的 closure 抓的是包裝物件，不是指標；可注入的 free 函式型別是 `@Sendable (OpaquePointer) -> Void`（最後一個參照可能在背景執行緒放掉，標頭允許 run 回傳後在任何執行緒 free）。不實作 `CustomStringConvertible`。
+- **runner 的位置**（F2）：真的佇列 runner 寫在 ShanjieKit（Swift 6 嚴格並行），App 只建立實例；佇列的 label 是固定字串，不加 signpost；**主執行緒不無限期等背景**（沒有 `queue.sync`、沒有沒有上限的等候）；唯一的等候是 Enter 時的有上限等候（`docs/contracts/enter-rerank-wait.md`）：每個工作各自的信號量，在 `run()` 回傳之後才發訊號，主執行緒最多等 100 ms。
 - **完成時的比對**（F3）：用 weak 參照比對 session 與引擎（`===`），不用 `ObjectIdentifier`（新引擎可能配到舊引擎的位址），也不強參照舊引擎（否則兩個約 240 MB 的引擎同時存在）。核心的世代號是第二道防線。
 - **不會卡住**（F4）：完成處理一進來就用 `defer` 清掉「執行中」並接著跑留著的工作，不論是過期、session 換人、引擎重建、開關已關或碼 5。
 - **`take` 回非 0**（F5）：和 apply 回 4 走同一條處理（清組字區與候選窗，只記靜態字串加回傳碼）。
@@ -84,6 +84,7 @@
 - 第二次 plan-verifier（2026-10-11）：READY。
 - 實作（security-executor，2026-10-11）：殼的 ← 測試在真的殼裡失敗（`set_learning` 每鍵讓工作過期，見 §2.1 最後一條），回報 main；main 選「核心只在值改變時作廢」（不改殼的 S4 呼叫方式），在這一片處理。
 - /code-review（2026-10-11）後 main 處置：`set_learning` 改成不論值都不作廢（開關不改變解碼，見 §2.1 最後一條）；模型載入失敗時「語意校正」反灰；選單的切換改走 `shell.applyRerank`（交給擁有組字的 session）；apply 回 4 以外非 0 碼的測試；`rerankTake` 非 0 時不再處理指標（標頭保證非 0 時是 NULL）；設定視窗裡「語意校正」移到降權開關之後。
+- ENTER-WAIT（2026-11-01，`docs/contracts/enter-rerank-wait.md`）：Enter 時的有上限等候是 §1、§2.1 F1／F2 的例外，security-reviewer 的處置見該契約 §9（遲到回呼綁 handle 的 `===`、整次 Enter 一個期限、信號量初始 0 與 `Mutex`、不新增 `@unchecked Sendable`）。
 
 ## 6. 結果
 

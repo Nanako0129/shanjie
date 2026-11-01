@@ -327,24 +327,57 @@ enum TestLearning {
     }
 }
 
+/// The handle of one job of `HeldRerankRunner`.
+@MainActor
+final class HeldHandle: RerankHandle {}
+
 /// s7c2b section 2.1: a rerank runner that never completes on its own. It holds each job until the test completes it, so a
 /// result never lands at a time the test did not choose.
+///
+/// Enter's bounded wait (enter-rerank-wait.md) is answered by hand too: `waitMode` `.timeout` (the default) reports the deadline as
+/// passed at once, so a test that presses Enter with a job held sees the old behaviour; `.complete` runs the job of the handle on
+/// this thread and returns its code, as the queue runner's semaphore would. The entry leaves `held` and its `done` goes to `late`,
+/// for the test to call afterwards (the `DispatchQueue.main.async` call of `QueueRerankRunner`).
 @MainActor
 final class HeldRerankRunner: RerankRunner {
-    private(set) var held: [(job: RerankJob, done: @MainActor @Sendable (Int32) -> Void)] = []
+    enum WaitMode { case timeout, complete }
+
+    private(set) var held: [(job: RerankJob, done: @MainActor @Sendable (Int32) -> Void, handle: HeldHandle)] = []
     /// Jobs handed over so far.
     private(set) var received = 0
+    var waitMode = WaitMode.timeout
+    /// The deadline of every `wait` call, in order; `waited` counts the calls.
+    private(set) var deadlines: [DispatchTime] = []
+    var waited: Int { deadlines.count }
+    /// The `done` of jobs a wait finished, not yet called.
+    private(set) var late: [@MainActor @Sendable (Int32) -> Void] = []
 
-    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle {
         received += 1
-        held.append((job, done))
+        let handle = HeldHandle()
+        held.append((job, done, handle))
+        return handle
+    }
+
+    func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32? {
+        deadlines.append(deadline)
+        guard waitMode == .complete, let i = held.firstIndex(where: { $0.handle === handle }) else { return nil }
+        let (job, done, _) = held.remove(at: i)
+        late.append(done)
+        return job.run()
+    }
+
+    /// Calls the `done` of the oldest job a wait finished, with `code`.
+    func fireLate(code: Int32 = 0, file: StaticString = #filePath, line: UInt = #line) {
+        guard !late.isEmpty else { return XCTFail("no late callback", file: file, line: line) }
+        late.removeFirst()(code)
     }
 
     /// Runs the oldest held job on this thread and hands back its code, as the app's runner does from its queue. `code`
     /// instead skips the run and hands back that code (run's 4, a caught panic, keeps no result).
     func complete(code: Int32? = nil, file: StaticString = #filePath, line: UInt = #line) {
         guard !held.isEmpty else { return XCTFail("no job is with the runner", file: file, line: line) }
-        let (job, done) = held.removeFirst()
+        let (job, done, _) = held.removeFirst()
         let c = code ?? job.run()
         done(c)
     }

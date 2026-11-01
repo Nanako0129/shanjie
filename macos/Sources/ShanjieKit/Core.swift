@@ -262,8 +262,10 @@ final class CoreEngine {
 ///
 /// `@unchecked Sendable` rests on three invariants the shell keeps (the header's rules for one job):
 /// 1. One run at a time: `run()` is called once, on one thread, by the shell's runner, which runs a single job at a time.
-/// 2. `apply(on:)` only after `run()` returned: the runner hands the code back through `DispatchQueue.main.async`, which
-///    orders the background run before the main-thread apply.
+/// 2. `apply(on:)` only after `run()` returned, by either of two orderings: the runner hands the code back through
+///    `DispatchQueue.main.async`, which orders the background run before the main-thread apply; or Enter's bounded wait
+///    (docs/contracts/enter-rerank-wait.md) is woken by a semaphore the queue signals only after `run()` returned, and the
+///    shell applies on the waking thread. Either way the job is finished once: the later callback applies nothing.
 /// 3. The job is freed only in `deinit`, exactly once: the last reference may go on any thread (the header allows free on
 ///    any thread once run returned), and the runner's closure holds this wrapper, never the pointer, while run is running.
 public final class RerankJob: @unchecked Sendable {
