@@ -10,6 +10,8 @@
 //! `--rerank-level` (default standard, the App's) and `--eps-sinit`, `--eps-sinit-ng` (the sentence-start learning's sizes, docs/contracts/sinit-learn.md
 //! section 2) are evaluation only; `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
 //! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
+//! `--strict` (evaluation only) compares the first display, the sent text and the `--correct` target character for character, not through
+//! `core::eval::char_map` and eval/variants.tsv; the tag ends `+strict` only then, and without it the output is unchanged.
 //!
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
 //! after the small model), `--colloquial FILE` loads that table instead and `--no-colloquial` leaves it out. Loaded, the models line and the
@@ -59,7 +61,7 @@ fn sha8(p: &Path) -> Result<String, String> {
 
 fn run() -> Result<(), String> {
     let (mut rows_file, mut dev, mut profile_name) = (None::<String>, None::<usize>, "chat".to_string());
-    let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each });
+    let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each, strict: false });
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
     let mut sinit_stretches = None::<String>;
     let (mut learn_file, mut guard) = (None::<String>, true);
@@ -97,6 +99,7 @@ fn run() -> Result<(), String> {
                 }
             }
             "--correct" => cfg.correct = true,
+            "--strict" => cfg.strict = true,
             "--colloquial" => colloquial = Some(val()?),
             "--no-colloquial" => no_colloquial = true,
             "--no-reading-channel" => reading_channel = false,
@@ -215,6 +218,7 @@ fn run() -> Result<(), String> {
         eps_sinit_ng.map_or(String::new(), |x| format!("+eps_sinit_ng:{x}")),
     );
     let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;
+    let tag = if cfg.strict { format!("{tag}+strict") } else { tag };
     e.set_learn_guard(guard);
     e.set_reading_channel(reading_channel);
     if let Some(l) = level {

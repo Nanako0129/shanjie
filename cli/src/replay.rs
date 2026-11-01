@@ -20,6 +20,26 @@ pub enum Rerank {
 pub struct Cfg {
     pub correct: bool,
     pub rerank: Rerank,
+    /// `--strict` (evaluation only): the first display, the sent text and the `--correct` target are compared character for character, not
+    /// through `Lenient` (`core::eval::char_map` and eval/variants.tsv).
+    pub strict: bool,
+}
+
+/// How the replay judges a display against the gold text: through `Lenient`, or with `strict` the texts as they are.
+#[derive(Clone, Copy)]
+struct Judge<'a> {
+    len: &'a Lenient,
+    strict: bool,
+}
+
+impl Judge<'_> {
+    fn apply(&self, s: &str) -> String {
+        if self.strict {
+            s.to_string()
+        } else {
+            self.len.apply(s)
+        }
+    }
 }
 
 /// What one row produced. `first` is the preedit once the last reading key (and, with `Rerank::Final`, the one apply) is in.
@@ -210,7 +230,7 @@ impl Session<'_> {
     /// Contract section 4: from j = i + 1 rightwards (to `i` + the longest word at most), the first cursor position whose window lists an
     /// item that covers syllable `i` and spells the gold text over its own span; `(j, index in the window's list)`. The scan opens
     /// windows page by page up to the first such item and closes them (uncounted); it leaves the cursor at the position it stopped on.
-    fn find(&mut self, i: usize, gold: &[char], len: &Lenient) -> Result<Option<(usize, usize)>, String> {
+    fn find(&mut self, i: usize, gold: &[char], len: Judge) -> Result<Option<(usize, usize)>, String> {
         for j in i + 1..=self.n.min(i + self.max_len) {
             self.move_to(j)?;
             self.press(Key::new(KeyKind::Space), false)?;
@@ -242,7 +262,7 @@ impl Session<'_> {
 
     /// Contract section 4: re-pick until the shown text is the gold text (lenient) or no pick can fix the first difference. `gold` is
     /// the part of the sentence the composition holds (what was committed before is not in it), the cursor is at its end.
-    fn correct(&mut self, gold: &str, len: &Lenient, rerank: Rerank, picks: &mut usize) -> Result<(), String> {
+    fn correct(&mut self, gold: &str, len: Judge, rerank: Rerank, picks: &mut usize) -> Result<(), String> {
         let (graw, gl): (Vec<char>, Vec<char>) = (gold.chars().collect(), len.apply(gold).chars().collect());
         for _ in 0..2 * graw.len() {
             let shown: Vec<char> = len.apply(&self.cur().preedit).chars().collect();
@@ -276,9 +296,10 @@ impl Session<'_> {
 }
 
 /// One row through `e` (contract section 1): left context, the reading key by key, the first display, the re-picks when asked for, Enter.
-/// `gold` is the row's sentence, compared with the display through `len`. Errors carry no row text. Text the engine commits while the
+/// `gold` is the row's sentence, compared with the display through `len` (or as it is with `cfg.strict`). Errors carry no row text. Text the engine commits while the
 /// row is typed (composition limit) is kept: it is part of the first display and of what is sent, and no pick can change it.
 pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &Lenient, cfg: Cfg) -> Result<RowOut, String> {
+    let len = Judge { len, strict: cfg.strict };
     let per: Vec<Vec<Key>> = syls.iter().map(|s| keys_of(s).ok_or("a reading symbol has no key")).collect::<Result<_, _>>()?;
     // ends[s]: how many keys have been typed when syllable s is complete.
     let ends: Vec<usize> = per.iter().scan(0, |t, v| Some({ *t += v.len(); *t })).collect();

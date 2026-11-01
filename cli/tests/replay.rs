@@ -50,8 +50,8 @@ fn tone1() -> Row {
     row("|跟我說我再換|ㄍㄣ ㄨㄛˇ ㄕㄨㄛ ㄨㄛˇ ㄗㄞˋ ㄏㄨㄢˋ")
 }
 
-const EACH: Cfg = Cfg { correct: false, rerank: Rerank::Each };
-const FIX: Cfg = Cfg { correct: true, rerank: Rerank::Each };
+const EACH: Cfg = Cfg { correct: false, rerank: Rerank::Each, strict: false };
+const FIX: Cfg = Cfg { correct: true, rerank: Rerank::Each, strict: false };
 
 fn go(e: &mut Engine, r: &Row, len: &Lenient, cfg: Cfg) -> RowOut {
     replay_row(e, r.ctx, &r.syls, r.gold, len, cfg).unwrap()
@@ -108,6 +108,42 @@ fn a_repick_costs_the_moves_the_window_and_the_digit() {
         assert!(o.final_ok && !o.unfixable && o.committed == r.gold, "sent text is the gold text");
         assert_eq!((o.picks, o.actual), (1, o.ideal + extra), "{}", r.gold);
     }
+}
+
+/// `--strict` (docs/contracts/engine-replay.md section 2): the first display, the sent text and the `--correct` target are compared as they are, not through
+/// `Lenient` (`char_map` reads 她 as 他). The engine shows 他很喜歡看書 for the gold 她很喜歡看書 (without learning, stated here so a model change fails here
+/// first): lenient, the first display is right and `--correct` has nothing to fix; strict, it is wrong, `--correct` re-picks 她 and the sent text is the gold.
+/// The tool's default is unchanged: the same rows give the same bytes with and without the flag, except for the `+strict` tag.
+#[test]
+fn strict_compares_the_texts_exactly_and_is_off_by_default() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    let r = row("|她很喜歡看書|ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ");
+    let strict = |cfg: Cfg| Cfg { strict: true, ..cfg };
+    let lenient = go(&mut e, &r, &len, FIX);
+    assert_eq!(lenient.first, "他很喜歡看書", "premise: the engine shows 他");
+    assert!(lenient.first_ok && lenient.final_ok && lenient.picks == 0, "lenient: 他 is right for 她");
+    let exact = go(&mut e, &r, &len, strict(EACH));
+    assert!(!exact.first_ok && !exact.final_ok && exact.picks == 0 && exact.committed == "他很喜歡看書");
+    let fixed = go(&mut e, &r, &len, strict(FIX));
+    assert!(!fixed.first_ok && fixed.final_ok && fixed.picks >= 1 && fixed.committed == r.gold, "strict --correct picks 她");
+    // A row both comparisons agree on: the same numbers.
+    let agree = go(&mut e, &zai(), &len, strict(FIX));
+    let base = go(&mut e, &zai(), &len, FIX);
+    assert_eq!((agree.first_ok, agree.final_ok, agree.picks, agree.actual), (base.first_ok, base.final_ok, base.picks, base.actual));
+    drop(e);
+    let dir = scratch("strict");
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|她很喜歡看書|ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ\n").unwrap();
+    let run = |extra: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap()]).args(extra).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let (plain, with) = (run(&[]), run(&["--strict"]));
+    assert!(!plain.contains("+strict") && plain.contains("'top1': 1"), "{plain}");
+    assert!(with.contains("+strict") && with.contains("'top1': 0"), "{with}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Rule (docs/contracts/punct-composition.md section 1, item 1): a mark of `，。？！：、` is a reading token of its own, typed as the App's key
@@ -189,7 +225,7 @@ fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
     let r = guqi();
     let (_g, mut e) = engine(false);
     let each = go(&mut e, &r, &len, EACH);
-    let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final });
+    let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final, strict: false });
     let (mid, changed, shown) = by_hand(&mut e, &r, true);
     assert!(each.rewrites >= 2, "this row is rewritten at least twice while it is typed (3 measured)");
     assert_eq!((each.typing_applies, each.rewrites, &each.first), (mid, changed, &shown));
