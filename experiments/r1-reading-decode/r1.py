@@ -38,10 +38,69 @@ TOP_K = 8
 LAMBDAS, CS = (0.25, 0.5, 1.0, 2.0), (1, 2, 4)
 GRID = [(lam, c) for lam in LAMBDAS for c in CS]        # 12 cells, estimator lex only
 SHIP_NU, SHIP_C = 1.0, 4                                 # P5's registered cell lex,1.0,4 (the shipping chat cell of every level, with its colloquial cell)
-TRI8, COLLOQ8 = "fdd3b05d", P.T2_SHA256[:8]
+TRI8, COLLOQ8 = "fdd3b05d", P.T2_SHA256[:8]   # R1 / R1d era only (check_tag below); the current shipping tags come from ship_tag()
 LEVELS = {"conservative": 0, "standard": 1, "aggressive": 2}
-# core/src/colloquial.rs `cell(level)` (STANDARD, CONSERVATIVE, AGGRESSIVE): the chat (alpha, tau, delta) the colloquial term fuses with
-COLLOQ_CELLS = {"standard": (0.5, 2.0, 0.25), "conservative": (1.0, 2.0, 3.0), "aggressive": (0.5, 2.0, 0.1)}
+
+
+def colloq_cells():
+    """The chat (alpha, tau, delta) the colloquial term fuses with at each level, read from core/src/colloquial.rs (`pub const STANDARD` /
+    `CONSERVATIVE` / `AGGRESSIVE`, what `cell(level)` returns), never copied: the file is the source of truth."""
+    with open(os.path.join(ROOT, "core", "src", "colloquial.rs"), encoding="utf-8") as f:
+        src = f.read()
+    out = {}
+    for level, name in (("standard", "STANDARD"), ("conservative", "CONSERVATIVE"), ("aggressive", "AGGRESSIVE")):
+        m = re.search(rf"pub const {name}: \(f64, f64, f64\) = \(([^)]*)\);", src)
+        if not m:
+            stop(f"core/src/colloquial.rs has no `pub const {name}: (f64, f64, f64)`")
+        out[level] = tuple(float(x) for x in m.group(1).split(","))
+    return out
+
+
+COLLOQ_CELLS = colloq_cells()   # R1 / R1d's offline fusion reads the current core cells; their recorded numbers were measured with the cells of their day
+
+
+# ---------------------------------------------------------------- the CURRENT shipping setting (R1f): tags and model hashes read from their sources
+
+SHIP_VERSION = "v0.6.1"    # tools/bench.py VERSIONS2 row of the shipping release; the R1f registration names it
+
+
+def model_sha8(name):
+    """First 8 hex of data/<name>.sha256 (the model files' own hash lists)."""
+    with open(os.path.join(ROOT, "data", name + ".sha256"), encoding="utf-8") as f:
+        return f.read().split()[0][:8]
+
+
+def bench_mod():
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import bench
+    return bench
+
+
+def ship_flags():
+    """The shipping run's context / pack flags, from tools/bench.py VERSIONS2[SHIP_VERSION]["flags"]."""
+    return list(bench_mod().VERSIONS2[SHIP_VERSION]["flags"])
+
+
+def ship_tag(profile, level, rerank, tl8=None, colloq=None):
+    """The CLI summary-line setting tag of the shipping run of (profile, level, rerank on / off), built from tools/bench.py's own `spec_tag` /
+    `colloq_tag` on VERSIONS2[SHIP_VERSION] (`tag`, `formal_tag`, the packs, +kn / +tri / +colloq:..+rc) and the hashes in data/*.sha256;
+    only what bench's cell table does not spell is added here: `+rl:<level>` after `+tl:` for a non-standard level (bench's cell is standard only),
+    and no `+tl:` / `+colloq` at all with the rerank off (no --tinylm: the colloquial term needs the small model). `tl8` overrides the small
+    model's hash (a run's own file); `colloq=False` drops the colloquial part of a chat run that was not given --colloquial-core."""
+    import types
+    bench = bench_mod()
+    ver = types.SimpleNamespace(spec=bench.VERSIONS2[SHIP_VERSION], tl8=tl8 or model_sha8("tinylm.sjtl"), kn8=model_sha8("kn.sjkn"),
+                                tri8=model_sha8("trigram.sjt3"), trichat8=model_sha8("trigram-chat.sjt3"), co8=model_sha8("colloquial.sjlm"))
+    t, co = bench.spec_tag(ver, profile), bench.colloq_tag(ver, profile)
+    if colloq is False or (colloq is None and not rerank):
+        t = t.removesuffix(co)
+    tl = f"+tl:{ver.tl8}"
+    if not rerank:
+        t = t.replace(tl, "")
+    elif level != "standard":
+        t = t.replace(tl, f"{tl}+rl:{level}")
+    return f"lm-{profile}{t}"
+
 
 # setting -> (profile, level). The roles below are the README tables: select (the selection set), 1 / 2a / 2b / 3 (clauses), report.
 SETTINGS = {"chat-std": ("chat", "standard"), "chat-cons": ("chat", "conservative"), "chat-aggr": ("chat", "aggressive"),

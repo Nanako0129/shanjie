@@ -55,35 +55,13 @@ def mu_label(mu):
 # ---------------------------------------------------------------- summary tags
 
 def check_tag(tag, setting, sjtl_sha8, rd):
-    """STOP unless the summary tag is the setting's. rd: the --reading-decode run (tag ends in +rd, chat has no colloquial term, `setting` is the
-    run's own: the -std one for a -off setting); otherwise the shipping baseline of `setting` (chat-on: +colloq:..+rc)."""
+    """STOP unless the summary tag is exactly the setting's. rd: the --reading-decode run (tag ends in +rd, chat has no colloquial term, `setting`
+    is the run's own: the -std one for a -off setting); otherwise the shipping baseline of `setting` (chat-on: +colloq:..+rc). Both are
+    built by r1.ship_tag from tools/bench.py's VERSIONS2[v0.6.1] row and data/*.sha256 (the small model's hash is `sjtl_sha8`, the run's own file)."""
     profile, level, rerank = SETTINGS[setting]
-    bad = []
-    if not tag.startswith(f"lm-{profile}+ctx"):
-        bad.append("profile / +ctx")
-    if tag.endswith("+rd") != rd or ("+rd" in tag[:-3]):
-        bad.append("+rd")
-    tag = tag[:-3] if tag.endswith("+rd") else tag
-    bad += [x for x in ("-nodemote", "-noclasses", "-nonames", "+xo:") if x in tag]
-    if "+acg" not in tag:
-        bad.append("+acg")
-    if rerank:
-        if f"+tl:{sjtl_sha8}" not in tag:
-            bad.append("+tl:")
-        if ("+rl:" in tag) != (level != "standard") or (level != "standard" and f"+rl:{level}" not in tag):
-            bad.append("+rl:")
-    elif "+tl:" in tag or "+rl:" in tag:
-        bad.append("+tl: / +rl: in a rerank-off run")
-    if profile == "chat":
-        if "+kn:" not in tag:
-            bad.append("+kn:")
-        ship_colloq = rerank and not rd
-        if ship_colloq != (f"+colloq:{R.COLLOQ8}" in tag) or ship_colloq != tag.endswith("+rc") or (not ship_colloq and "+colloq" in tag):
-            bad.append("+colloq / +rc")
-    elif "+colloq" in tag or f"+tri:{R.TRI8}" not in tag:
-        bad.append("+colloq / +tri")
-    if bad:
-        stop(f"{setting}: summary tag {tag} does not match the {'rd run' if rd else 'baseline'} of the setting ({', '.join(bad)})")
+    want = R.ship_tag(profile, level, rerank, tl8=sjtl_sha8, colloq=False if rd else None) + ("+rd" if rd else "")
+    if tag != want:
+        stop(f"{setting}: summary tag {tag} is not the {'rd run' if rd else 'baseline'} tag {want} of the setting")
 
 
 # ---------------------------------------------------------------- loading

@@ -1,4 +1,4 @@
-import json, os, shutil, subprocess, sys, tempfile, unittest
+import importlib.util, json, os, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -111,9 +111,13 @@ class Anchors(unittest.TestCase):
 
 
 class Tags(unittest.TestCase):
-    KN = "+kn:cbefbced:θ1:β1"
-    TL = "+tl:" + (R.sha_file(SJTL)[:8] if os.path.exists(SJTL) else "e7c179d8")
-    SHA = TL[4:]
+    """The expected tags are R.ship_tag's (tools/bench.py VERSIONS2["v0.6.1"] + data/*.sha256); the mislabels are edits of them."""
+    SHA = R.model_sha8("tinylm.sjtl")
+    TL = f"+tl:{SHA}"
+
+    def tag(self, setting, **kw):
+        p, l, on = D.SETTINGS[setting]
+        return R.ship_tag(p, l, on, **kw)
 
     def ok(self, tag, setting, rd):
         D.check_tag(tag, setting, self.SHA, rd)
@@ -123,29 +127,35 @@ class Tags(unittest.TestCase):
             D.check_tag(tag, setting, self.SHA, rd)
 
     def test_baseline_tags(self):
-        self.ok(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc", "chat-std", False)
-        self.ok(f"lm-chat+ctx{self.KN}{self.TL}+rl:conservative+acg+colloq:{R.COLLOQ8}+rc", "chat-cons", False)
-        self.ok(f"lm-formal+ctx{self.TL}+acg+tri:{R.TRI8}", "formal-std", False)
-        self.ok(f"lm-chat+ctx{self.KN}+acg", "chat-off", False)
-        self.ok(f"lm-formal+ctx+acg+tri:{R.TRI8}", "formal-off", False)
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}", "chat-std", False)          # no +rc
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg", "chat-std", False)                              # no colloquial term in the shipping baseline
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc", "chat-off", False)         # a rerank-off baseline has no small model
-        self.bad(f"lm-formal+ctx{self.TL}+acg", "formal-std", False)                                    # no +tri
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc+rd", "chat-std", False)      # a baseline must not be an rd run
-        self.bad(f"lm-chat+ctx{self.TL}+acg+colloq:{R.COLLOQ8}+rc", "chat-std", False)                  # a --no-kn run: no +kn:
+        for s in D.SETTINGS:
+            self.ok(self.tag(s), s, False)
+        c, f = self.tag("chat-std"), self.tag("formal-std")
+        self.assertIn("+acg+it+", c)                                                       # the shipping packs, not the pre-SJ-LM-7 `acg`
+        self.assertTrue(c.endswith("+rc") and "+colloq:" in c and "+kn:" in c and "+tri:" in c)
+        self.assertNotIn("+tl:", self.tag("chat-off") + self.tag("formal-off"))
+        self.assertNotIn("+colloq", self.tag("chat-off"))
+        self.bad(c.removesuffix("+rc"), "chat-std", False)                                 # no +rc
+        self.bad(c.split("+colloq")[0], "chat-std", False)                                 # no colloquial term in the shipping baseline
+        self.bad(c, "chat-off", False)                                                     # a rerank-off baseline has no small model
+        self.bad(f.split("+tri:")[0], "formal-std", False)                                 # no +tri
+        self.bad(c + "+rd", "chat-std", False)                                             # a baseline must not be an rd run
+        self.bad(c.replace(f"+kn:{R.model_sha8('kn.sjkn')}:θ1:β1", ""), "chat-std", False)  # a --no-kn run
+        self.bad(c.replace("+acg+it", "+acg"), "chat-std", False)                          # the old pack set
+        self.bad(c.replace(R.model_sha8("colloquial.sjlm"), "2984eeb5"), "chat-std", False)  # the old colloquial table
+        self.bad(c.replace(self.TL, self.TL + "+rl:aggressive"), "chat-std", False)        # another level's run
+        self.bad(self.tag("chat-cons").replace("+rl:conservative", ""), "chat-cons", False)
         self.bad("lm-chat+ctx+acg", "chat-off", False)
 
     def test_rd_run_tags(self):
-        self.ok(f"lm-chat+ctx{self.KN}{self.TL}+acg+rd", "chat-std", True)
-        self.ok(f"lm-chat+ctx{self.KN}{self.TL}+rl:aggressive+acg+rd", "chat-aggr", True)
-        self.ok(f"lm-formal+ctx{self.TL}+acg+tri:{R.TRI8}+rd", "formal-std", True)
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg", "chat-std", True)                                 # no +rd
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+colloq:{R.COLLOQ8}+rc+rd", "chat-std", True)        # the CLI's own colloquial term must be off
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+acg+rd+x", "chat-std", True)                            # +rd is the last tag
-        self.bad(f"lm-formal+ctx{self.TL}+acg+rd", "formal-std", True)
-        self.bad(f"lm-chat+ctx{self.TL}+acg+rd", "chat-std", True)                                       # no +kn:
-        self.bad(f"lm-chat+ctx{self.KN}{self.TL}+rl:aggressive+acg+rd", "chat-std", True)                # the level of another run
+        for s in ("chat-std", "chat-cons", "chat-aggr", "formal-std", "formal-cons", "formal-aggr"):
+            self.ok(self.tag(s, colloq=False) + "+rd", s, True)
+        c = self.tag("chat-std", colloq=False)
+        self.assertNotIn("+colloq", c)
+        self.bad(c, "chat-std", True)                                                      # no +rd
+        self.bad(self.tag("chat-std") + "+rd", "chat-std", True)                           # the CLI's own colloquial term must be off
+        self.bad(c + "+rd+x", "chat-std", True)                                            # +rd is the last tag
+        self.bad(self.tag("formal-std").split("+tri:")[0] + "+rd", "formal-std", True)
+        self.bad(self.tag("chat-aggr", colloq=False) + "+rd", "chat-std", True)            # the level of another run
 
 
 class Choose(unittest.TestCase):
@@ -313,6 +323,7 @@ def cli_has_reading_decode():
 @unittest.skipUnless(os.path.exists(CLI) and os.path.exists(SJTL) and os.path.exists(os.path.join(R.ROOT, "data", "lm", "colloquial.sjlm")),
                      "target/release/shanjie-eval and data/lm (build the CLI first)")
 @unittest.skipUnless(cli_has_reading_decode(), "target/release/shanjie-eval is older than --reading-decode (rebuild it)")
+@unittest.skipUnless(importlib.util.find_spec("numpy"), "numpy is not installed (export_sjtl, which reads the .sjtl header, needs it)")
 class EndToEndOnTyping76(unittest.TestCase):
     """The CLI's real rd run and shipping baseline on typing76 (public): the anchors hold for the six rerank-on settings' std runs and the -off
     settings read the same files; mu 0 and a formal run reproduce the CLI's own pick."""
@@ -324,7 +335,7 @@ class EndToEndOnTyping76(unittest.TestCase):
         cls.rows = os.path.join(R.ROOT, "eval", "bench", "suite-v1", "typing76.txt")
 
     def cli(self, prof, tag, extra):
-        a = [CLI, "--lm", "data/lm/bigram.sjlm", "--profile", prof, "--context", "--packs", "acg", "--rows", self.rows, *extra]
+        a = [CLI, "--lm", "data/lm/bigram.sjlm", "--profile", prof, *R.ship_flags(), "--rows", self.rows, *extra]
         out = subprocess.run(a, cwd=R.ROOT, capture_output=True, text=True, check=True).stdout
         p = os.path.join(self.d, tag)
         with open(p, "w") as f:
@@ -334,6 +345,9 @@ class EndToEndOnTyping76(unittest.TestCase):
     def test_anchors_hold_on_a_real_run(self):
         f = lambda n: os.path.join(self.d, n)
         for prof in ("chat", "formal"):
+            if prof == "chat" and R.sha_file(os.path.join(R.ROOT, "data", "lm", "colloquial.sjlm")) != R.P.T2_SHA256:
+                print("skipped the chat half: R1d's offline colloquial column reads P4's T2 table (P.T2_SHA256), which data/lm/colloquial.sjlm no longer is", file=sys.stderr)
+                continue
             t = prof
             summary = self.cli(prof, f"{t}.sum", ["--tinylm", SJTL, "--reading-decode", "--dump", f(f"{t}.d"), "--dump-words", f(f"{t}.w"), "--rowstats", f(f"{t}.rs"),
                                                   "--tinylm-scores", f(f"{t}.sc"), "--tinylm-scores-topk", "64"])

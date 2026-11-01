@@ -1,4 +1,4 @@
-import json, os, sys, tempfile, unittest
+import importlib.util, json, os, re, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -26,6 +26,7 @@ PLAIN = {"kind": "plain", "plain": (0.5, 2.0, 0.25)}
 
 class Header(unittest.TestCase):
     @unittest.skipUnless(os.path.exists(SJTL), "data/lm/tinylm.sjtl")
+    @unittest.skipUnless(importlib.util.find_spec("numpy"), "numpy is not installed (export_sjtl, the reader this test compares with, needs it)")
     def test_levels_come_from_the_file(self):
         import triage
         std = triage.tinylm_params(SJTL)            # the exporter's reader: tensors and all
@@ -74,11 +75,12 @@ class Pick(unittest.TestCase):
 
     def test_colloquial_cell_uses_the_new_first_as_the_anchor_and_drops_p5_with_nu_zero(self):
         # equal ll: the gate is sigmoid(0) = 0.5, so candidate 1 gains 0.5 * (0.5 / 0.5) * 6 = 3 in ll_eff, fused -0.5 + 0.5 * 3 = 1.0
-        cfg = {"kind": "colloq", "nu": 0.0, "plain": (0.3, 2.0, 0.25), "cell": R.COLLOQ_CELLS["standard"]}
+        # synthetic cells, not the shipping ones: this tests the fusion arithmetic, whichever cells core/src/colloquial.rs holds (R.COLLOQ_CELLS)
+        cfg = {"kind": "colloq", "nu": 0.0, "plain": (0.3, 2.0, 0.25), "cell": (0.5, 2.0, 0.25)}
         r = row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 6.0])
         self.assertEqual(R.r1_pick(cfg, r, 0.5, 4)[0], 1)
         # conservative (1.0, 2, 3.0): mu / alpha with the level's alpha, 0.5 * (0.5 / 1.0) * 6 = 1.5, fused -0.5 + 1.0 * 1.5 = 1.0 < delta 3
-        cons = {**cfg, "cell": R.COLLOQ_CELLS["conservative"]}
+        cons = {**cfg, "cell": (1.0, 2.0, 3.0)}
         self.assertEqual(R.r1_pick(cons, r, 0.5, 4)[0], 0)
         self.assertEqual(R.r1_pick(cons, row([0.0, -0.5], [0.0, 0.0], [0, 1], col=[0.0, 16.0]), 0.5, 4)[0], 1)   # 4 - 0.5 = 3.5 >= 3
         # alpha cancels in alpha * (mu / alpha): with standard's alpha 0.5 in mu / alpha, col 10 would fuse 0.5 * 1.0 * 10 - 0.5 = 4.5 >= 3
@@ -93,12 +95,16 @@ class Pick(unittest.TestCase):
         self.assertEqual(R.ship_picks(ship, [bad]), [0])
 
     def test_colloquial_cells_are_core_colloquial_rs(self):
-        import re
+        """COLLOQ_CELLS is read from core/src/colloquial.rs, so this checks the reading against an independent one: the `cell(level)` match arms
+        name the three constants for the three levels, and each constant's literal triple is the cell."""
         with open(os.path.join(R.ROOT, "core", "src", "colloquial.rs"), encoding="utf-8") as f:
             src = f.read()
+        arms = dict(re.findall(r"RerankLevel::(\w+) => (\w+),", src[src.index("pub fn cell("):]))
+        self.assertEqual(arms, {"Conservative": "CONSERVATIVE", "Standard": "STANDARD", "Aggressive": "AGGRESSIVE"})
         for level, name in (("standard", "STANDARD"), ("conservative", "CONSERVATIVE"), ("aggressive", "AGGRESSIVE")):
             m = re.search(rf"pub const {name}: \(f64, f64, f64\) = \(([^)]*)\);", src)
             self.assertEqual(tuple(float(x) for x in m.group(1).split(",")), R.COLLOQ_CELLS[level], name)
+        self.assertEqual(len(set(R.COLLOQ_CELLS.values())), 3)
 
     def test_rows_without_ll_keep_the_first(self):
         self.assertEqual(R.ship_picks(PLAIN, [row([0.0, -0.1], None, [0, 1])]), [0])
