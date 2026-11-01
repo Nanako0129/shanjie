@@ -140,6 +140,9 @@ struct Choice {
     key: String,
     /// A SINIT learned candidate led the stretch (`b_0 > 0`) and the choice is one with none (`b == 0`): the semantic correction undid the learning.
     overturned: bool,
+    /// Evaluation only: for a stretch with a SINIT learned candidate the small model scored, (`ng[0] - ng[i]`, `alpha * (ll[0] - ll[i])`) of the
+    /// best-ranked learned candidate `i` (the anchor itself: (0, 0)); `alpha` is the strength's cell when the colloquial term applies, else the header's.
+    sinit_diag: Option<(f64, f64)>,
 }
 
 /// The output of `RerankJob::run`, for `Engine::apply_rerank`. Holds input text, so no `Debug`.
@@ -165,7 +168,8 @@ impl RerankJob {
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
                 let learn: Vec<f64> = s.b.iter().map(|b| self.eps_sinit * b).collect();
-                let pick = match &self.colloquial {
+                let alpha = if self.colloquial.is_some() { colloquial::cell(self.level).0 } else { self.params.0 };
+                let picked = match &self.colloquial {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                         let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
@@ -173,13 +177,18 @@ impl RerankJob {
                     }
                     None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual, &learn),
                 }
-                .map_or(0, |r| r.0);
+                .map_or((0, None), |r| r);
+                let (pick, ll) = picked;
+                let sinit_diag = ll.as_ref().and_then(|ll| {
+                    let i = s.b.iter().position(|&b| b > 0.0)?;
+                    Some((s.ng[0] - s.ng[i], alpha * (ll[0] - ll[i])))
+                });
                 let pick = if pick < s.paths.len() { pick } else { 0 };
                 before.push_str(&surfaces[pick]);
                 let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
                 let expect = s.paths[0].iter().map(|w| w.0.clone()).collect();
                 let overturned = s.b.first().is_some_and(|&b0| b0 > 0.0) && s.b[pick] == 0.0;
-                Choice { at: s.at, expect, pick, words, key, overturned }
+                Choice { at: s.at, expect, pick, words, key, overturned, sinit_diag }
             })
             .collect();
         RerankResult { generation: self.generation, choices }
@@ -218,6 +227,11 @@ impl RerankResult {
     /// How many stretches the semantic correction took a SINIT learned candidate away from (`Choice::overturned`); the evaluation replay counts it.
     pub fn sinit_overturned(&self) -> usize {
         self.choices.iter().filter(|c| c.overturned).count()
+    }
+
+    /// Evaluation only (`shanjie-replay --sinit-stretches`): `Choice::sinit_diag` of every stretch that has one, in composition order.
+    pub fn sinit_diag(&self) -> Vec<(f64, f64)> {
+        self.choices.iter().filter_map(|c| c.sinit_diag).collect()
     }
 
     /// The context key each stretch was scored with, in composition order (holds input text: never log it).

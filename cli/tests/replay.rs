@@ -479,6 +479,38 @@ fn sinit_flags_tag_the_summary_and_the_counters_go_to_stderr() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// SINIT section 2, the per-stretch numbers (`--sinit-stretches`): the file holds digits, `-`, `.`, tabs and newlines only, a line `row 1 dng adll` per rule 10
+/// stretch of the one-record file's row (再見: the learned 再 leads or follows the anchor, both numbers finite), and no line for a row without one; the
+/// summary line and the rowstats are the bytes they are without the flag; the formatter writes a stretch whose learned path is not in the pool as `row 0`
+/// with no numbers; an output that is the learn file is refused.
+#[test]
+fn sinit_stretches_file_is_numbers_only_and_changes_no_other_output() {
+    use cli::replay::{format_sinit_stretches, RowOut};
+    let mut a = RowOut::default();
+    a.sinit_diag = vec![(0.5, -1.25), (0.0, 0.0)];
+    let mut b = RowOut::default();
+    b.sinit.missing = 2;
+    assert_eq!(format_sinit_stretches(&[a, RowOut::default(), b]), "1\t1\t0.500000\t-1.250000\n1\t1\t0.000000\t0.000000\n3\t0\t\t\n3\t0\t\t\n");
+    let dir = scratch("sinit-stretches");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>ㄐㄧㄢˋ\tㄗㄞˋ\t再\t1\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (rs0, rs1, st) = (dir.join("rs0.txt"), dir.join("rs1.txt"), dir.join("st.txt"));
+    let without = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rowstats", rs0.to_str().unwrap()]));
+    let with = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rowstats", rs1.to_str().unwrap(), "--sinit-stretches", st.to_str().unwrap()]));
+    assert_eq!(without, with);
+    assert_eq!(std::fs::read(&rs0).unwrap(), std::fs::read(&rs1).unwrap());
+    let numbers = std::fs::read_to_string(&st).unwrap();
+    assert!(numbers.chars().all(|c| c.is_ascii_digit() || "-.\t\n".contains(c)), "{numbers:?}");
+    let lines: Vec<Vec<&str>> = numbers.lines().map(|l| l.split('\t').collect()).collect();
+    assert_eq!(lines.len(), 1, "{numbers:?}");
+    assert!(lines[0][0] == "1" && lines[0][1] == "1" && lines[0][2].parse::<f64>().is_ok() && lines[0][3].parse::<f64>().is_ok(), "{numbers:?}");
+    let out = replay_with_learn(&dir, &src, &["--sinit-stretches", src.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// Rules: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
 /// as it was (core's quarantine renames the copy only), no temporary directory is left, and an existing output file keeps its
 /// bytes (the learning file is loaded before any output is created). Also an all-skipped file and a missing file are errors.

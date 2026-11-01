@@ -4,10 +4,11 @@
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-channel] [--rowstats FILE] [--keys FILE]
 //!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--eps-sinit X] [--eps-sinit-ng X]
+//!                [--sinit-stretches FILE]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
 //! `--rerank-level` (default standard, the App's) and `--eps-sinit`, `--eps-sinit-ng` (the sentence-start learning's sizes, docs/contracts/sinit-learn.md
-//! section 2) are evaluation only; each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
+//! section 2) are evaluation only; `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
 //! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
 //!
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
@@ -17,7 +18,7 @@
 //! the shipping behavior: with the table loaded in chat and the channel on it ends `+colloq:<sha8>+rc`; with the option (or in formal) just `+colloq:<sha8>`.
 //! Without a loaded table the option changes nothing.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
-use cli::replay::{build_engine_packs, format_keys, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
+use cli::replay::{build_engine_packs, format_keys, format_sinit_stretches, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
 use core::engine::{PACK_ACG, PACK_IT, PACK_QUOTES};
 use core::eval::sha256_hex;
 use core::learn_store::{Opened, FILE};
@@ -60,6 +61,7 @@ fn run() -> Result<(), String> {
     let (mut rows_file, mut dev, mut profile_name) = (None::<String>, None::<usize>, "chat".to_string());
     let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each });
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
+    let mut sinit_stretches = None::<String>;
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_channel) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
@@ -111,6 +113,7 @@ fn run() -> Result<(), String> {
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
             "--firsts" => firsts = Some(val()?),
+            "--sinit-stretches" => sinit_stretches = Some(val()?),
             "--packs" => {
                 // Like shanjie-eval: a repeated `--packs` adds to the earlier ones; the first one replaces the default.
                 let base = if packs_given { packs_mask } else { 0 };
@@ -137,7 +140,7 @@ fn run() -> Result<(), String> {
     let len = load_lenient()?;
     // An output that is the rows file would be emptied before the rows are read, and one that is the learning file would empty
     // it: refuse, comparing the files themselves (device and inode). `--firsts` could print learned words of the private file.
-    for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts)] {
+    for (opt, f) in [("--rowstats", &rowstats), ("--keys", &keys), ("--firsts", &firsts), ("--sinit-stretches", &sinit_stretches)] {
         for (what, src) in [("--rows", &rows_file), ("--learn-file", &learn_file)] {
             if let (Some(f), Some(src)) = (f, src) {
                 if same_file(f, src) {
@@ -248,7 +251,7 @@ fn run() -> Result<(), String> {
     }
     // Opened after the rows are read, like the CLI's outputs are not touched by a failed start.
     let create = |f: Option<String>| f.map(|f| fs::File::create(f).map_err(|e| format!("cannot create output file ({:?})", e.kind()))).transpose();
-    let (rowstats, keys, firsts) = (create(rowstats)?, create(keys)?, create(firsts)?);
+    let (rowstats, keys, firsts, sinit_stretches) = (create(rowstats)?, create(keys)?, create(firsts)?, create(sinit_stretches)?);
     let mut outs = Vec::with_capacity(rows.len());
     for (i, r) in rows.iter().enumerate() {
         outs.push(replay_row(&mut e, &r.ctx, &r.syls, &r.sent, &len, cfg).map_err(|m| format!("row {}: {m}", i + 1))?);
@@ -260,6 +263,7 @@ fn run() -> Result<(), String> {
     write(rowstats, format_rowstats(&outs.iter().zip(&rows).map(|(o, r)| (o.first_ok, o.first.clone(), r.sent.clone())).collect::<Vec<_>>()))?;
     write(keys, format_keys(&outs))?;
     write(firsts, outs.iter().map(|o| format!("{}\n", o.first)).collect())?;
+    write(sinit_stretches, format_sinit_stretches(&outs))?;
     // Marks typed in a row are not counted, so picks per 100 characters stays comparable with the same text split at the marks.
     let gold_chars = rows.iter().map(|r| r.sent.chars().filter(|&c| !cli::replay::is_mark(c)).count()).sum();
     println!("{}", summary_line(&name, &tag, &outs, gold_chars));

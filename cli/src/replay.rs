@@ -47,6 +47,8 @@ pub struct RowOut {
     /// contract section 2), and how many stretches the semantic correction took a learned candidate away from at that key's rerank.
     pub sinit: SinitStats,
     pub sinit_overturned: usize,
+    /// (`ng[anchor] - ng[learned]`, `alpha * (ll[anchor] - ll[learned])`) of each rule 10 stretch of the last reading key's job (`RerankResult::sinit_diag`).
+    pub sinit_diag: Vec<(f64, f64)>,
 }
 
 /// The punctuation marks a reading token may be, with the key the App sends for each (`core/src/engine.rs` `SHIFT_PUNCT` / `PLAIN_PUNCT`, standard
@@ -151,8 +153,9 @@ struct Session<'a> {
     max_len: usize,
     keys: usize,
     rewrites: usize,
-    /// `RerankResult::sinit_overturned` of the last job `rerank` ran (0 when it ran none).
+    /// `RerankResult::sinit_overturned` and `sinit_diag` of the last job `rerank` ran (0 and empty when it ran none).
     overturned: usize,
+    diag: Vec<(f64, f64)>,
     cursor: usize,
     n: usize,
 }
@@ -176,10 +179,12 @@ impl Session<'_> {
     /// take, run, apply; whether `apply_rerank` returned `Some`. A change of the preedit counts as a rewrite.
     fn rerank(&mut self) -> Result<bool, String> {
         self.overturned = 0;
+        self.diag.clear();
         let Some(job) = self.e.take_rerank_job() else { return Ok(false) };
         let before = self.cur().preedit.clone();
         let result = job.run();
         self.overturned = result.sinit_overturned();
+        self.diag = result.sinit_diag();
         match self.e.apply_rerank(result).map_err(|_| "engine error on apply_rerank".to_string())? {
             Some(o) => {
                 self.rewrites += (o.preedit != before) as usize;
@@ -283,7 +288,7 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
     }
     e.set_left_context(ctx);
     let max_len = e.max_window_len();
-    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, overturned: 0, cursor: syls.len(), n: syls.len() };
+    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, overturned: 0, diag: Vec::new(), cursor: syls.len(), n: syls.len() };
     let (mut out, last) = (RowOut { ideal: typed.len() + 1, ..RowOut::default() }, typed.len() - 1);
     let mut committed_syls = 0; // syllables complete when the engine last committed
     for (k, key) in typed.into_iter().enumerate() {
@@ -306,6 +311,7 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
         }
         if k == last {
             out.sinit_overturned = s.overturned;
+            out.sinit_diag = std::mem::take(&mut s.diag);
         }
     }
     out.first = format!("{}{}", s.committed, s.cur().preedit);
@@ -343,6 +349,22 @@ pub fn sinit_line(outs: &[RowOut]) -> String {
         sum(|o| o.sinit_overturned),
         sum(|o| o.sinit.tau_opened),
     )
+}
+
+/// `--sinit-stretches` file (docs/contracts/sinit-learn.md section 2): one line per rule 10 stretch of the decode after each row's last reading key,
+/// `row\t1\tΔng\tα·Δll` (`ng[anchor] - ng[learned path]` and `alpha * (ll[anchor] - ll[learned path])`, 6 decimals; both 0 when the anchor is the
+/// learned path), or `row\t0\t\t` when the learned path is not in the pool (no numbers). Rows counted from 1; digits, `-`, `.`, tabs and newlines only.
+pub fn format_sinit_stretches(outs: &[RowOut]) -> String {
+    let mut text = String::new();
+    for (i, o) in outs.iter().enumerate() {
+        for (dng, adll) in &o.sinit_diag {
+            text += &format!("{}\t1\t{dng:.6}\t{adll:.6}\n", i + 1);
+        }
+        for _ in 0..o.sinit.missing {
+            text += &format!("{}\t0\t\t\n", i + 1);
+        }
+    }
+    text
 }
 
 /// `--keys` file: `row\tideal\tactual\tpicks\tfinal_ok\trewrites` per row, rows counted from 1. Digits only.
