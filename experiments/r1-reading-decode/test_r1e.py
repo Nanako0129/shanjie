@@ -238,5 +238,152 @@ class Judge(unittest.TestCase):
             E.judge_one(self.d, "formal-std", "typing76", COUNTS)
 
 
+class Confirm(unittest.TestCase):
+    """R1g confirmation shot (`--confirm`): 16 commands and the two registered verdicts, on synthetic rowstats."""
+    N = {"wikijudge5": 300, "cjudge-1": 500}
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d)
+        self.rx = E.exempt_sha8()
+
+    def fill(self, formal=(3, 1), chat=(1, 0), chat_n=None, formal_n=None):
+        """(fixes, breaks) of formal-std/wikijudge5 and chat-std/cjudge-1; every other pair gets (1, 1)."""
+        n = {"wikijudge5": formal_n or self.N["wikijudge5"], "cjudge-1": chat_n or self.N["cjudge-1"]}
+        with open(os.path.join(self.d, "counts.json"), "w") as f:
+            json.dump(n, f)
+        for i, (s, name) in enumerate(E.CONFIRM_PAIRS):
+            fx, br = formal if (s, name) == ("formal-std", "wikijudge5") else chat if (s, name) == ("chat-std", "cjudge-1") else (1, 1)
+            b, e = pattern(n[name], i, fx, br)
+            write_run(self.d, "base", s, name, b, base_tag(s))
+            write_run(self.d, "e", s, name, e, rd_tag(s) + f"+rx:{self.rx}")
+
+    def judge(self):
+        return E.judge_confirm(self.d, rx=self.rx)
+
+    def test_16_commands(self):
+        cmds = dict(E.commands("$ROWS", "$OUT", "shanjie-eval", 32, "r1g", confirm=True))
+        want = [f"{k}.{s}.{n}" for s, n in [(f"{p}-{l}", n) for p, n in (("formal", "wikijudge5"), ("chat", "cjudge-1")) for l in ("std", "off", "cons", "aggr")]
+                for k in ("base", "e")]
+        self.assertEqual([os.path.basename(k) for k in cmds], want)
+        self.assertEqual(len(cmds), 16)
+        full = dict(E.commands("$ROWS", "$OUT", "shanjie-eval", 32, "r1g"))
+        for s, name in E.CONFIRM_PAIRS:
+            for k in ("base", "e"):
+                stem = f"$OUT/{k}.{s}.{name}"
+                line = cmds[stem]
+                self.assertIn(f'--rows "$ROWS/{name}.txt"', line)
+                self.assertIn("--threads 32", line)
+                self.assertTrue(line.endswith(f'> "{stem}.cli.txt"'))
+                self.assertEqual("--reading-exempt" in line, k == "e")
+        self.assertEqual(sum(1 for line in cmds.values() if "--no-reading-channel" in line), 3)   # e of chat-std / chat-cons / chat-aggr
+        self.assertEqual(cmds["$OUT/e.formal-std.wikijudge5"], full["$OUT/e.formal-std.wikitune-clean"].replace("wikitune-clean", "wikijudge5"))   # same flags as the R1g run
+        self.assertEqual(cmds["$OUT/base.chat-aggr.cjudge-1"], dict(E.commands("$ROWS", "$OUT", "shanjie-eval", 32))["$OUT/base.chat-aggr.discordtune"].replace("discordtune", "cjudge-1"))
+        with self.assertRaises(SystemExit):
+            E.commands("$ROWS", "$OUT", "shanjie-eval", 32, "r1f", confirm=True)
+
+    def test_default_commands_unchanged(self):
+        self.assertEqual(len(E.commands("$ROWS", "$OUT", "shanjie-eval", 32)), 60)
+        self.assertEqual(len(E.commands("$ROWS", "$OUT", "shanjie-eval", 32, "r1g")), 60)
+        self.assertFalse(any("wikijudge5" in l or "cjudge-1" in l for _, l in E.commands("$ROWS", "$OUT", "shanjie-eval", 32, "r1g")))
+        self.assertEqual(E.judge_one.__defaults__, (None, None, None))      # role override defaults to ROLES
+
+    def test_primary_pass_and_report_only(self):
+        self.fill()
+        out = self.judge()
+        self.assertEqual(out["primary"], {"formal-std/wikijudge5": False, "chat-std/cjudge-1": True})   # 3 fixes / 1 break: net > 0 but p = 0.625
+        self.assertEqual(len(out["runs"]), 8)
+        self.assertNotIn("verdict", out["runs"]["formal-off/wikijudge5"])        # report only
+        self.assertNotIn("verdict", out["runs"]["chat-aggr/cjudge-1"])
+        self.assertEqual(out["runs"]["chat-off/cjudge-1"]["net"], 0)
+        self.assertFalse(out["all_pass"])
+        self.fill(formal=(30, 5))
+        out = self.judge()
+        self.assertTrue(out["all_pass"] and all(out["primary"].values()))
+
+    def test_formal_edges(self):
+        cases = ((0, 0, False),        # net 0
+                 (10, 10, False),      # net 0
+                 (6, 0, True),         # p 0.031, net 6
+                 (5, 0, False),        # p 0.0625
+                 (22, 9, True),        # p 0.0294
+                 (22, 10, False),      # p 0.0501 just above
+                 (100, 65, True),      # ratio exactly 0.65, p < 0.05
+                 (100, 66, False),     # ratio 0.66
+                 (20, 13, False),      # ratio exactly 0.65 but p large
+                 (50, 40, False))      # net > 0, ratio 0.8
+        for fx, br, want in cases:
+            self.fill(formal=(fx, br))
+            self.assertEqual(self.judge()["primary"]["formal-std/wikijudge5"], want, (fx, br))
+
+    def test_p_exactly_005_fails(self):
+        from unittest import mock
+        self.fill(formal=(30, 5))
+        with mock.patch.object(evalstats, "mcnemar_exact", return_value=0.05):
+            self.assertFalse(self.judge()["primary"]["formal-std/wikijudge5"])
+        with mock.patch.object(evalstats, "mcnemar_exact", return_value=0.0499999):
+            self.assertTrue(self.judge()["primary"]["formal-std/wikijudge5"])
+
+    def test_chat_bootstrap_edge(self):
+        # 500 rows, k breaks: the 90% lower bound is -0.6 pp (k=1), exactly -1.0 pp (k=2, passes), -1.2 pp (k=3)
+        for k, lb, want in ((0, 0.0, True), (1, -0.6, True), (2, -1.0, True), (3, -1.2, False), (15, None, False)):
+            self.fill(chat=(0, k))
+            r = self.judge()["runs"]["chat-std/cjudge-1"]
+            if lb is not None:
+                self.assertAlmostEqual(r["bootstrap90_lower_pp"], lb, places=9)
+            self.assertEqual(r["verdict"], want, k)
+        self.fill(chat=(10, 2))                                   # fixes lift the bound
+        self.assertTrue(self.judge()["runs"]["chat-std/cjudge-1"]["verdict"])
+
+    def test_stops(self):
+        self.fill()
+        write_run(self.d, "e", "chat-cons", "cjudge-1", [1] * 500, rd_tag("chat-cons"))     # R1f tag in an R1g run
+        with self.assertRaises(SystemExit):
+            self.judge()
+        self.fill()
+        b, e = pattern(499, 1, 1, 0)                                                         # one row short
+        write_run(self.d, "base", "formal-off", "wikijudge5", b, base_tag("formal-off"))
+        write_run(self.d, "e", "formal-off", "wikijudge5", e, rd_tag("formal-off") + f"+rx:{self.rx}")
+        with self.assertRaises(SystemExit):
+            self.judge()
+        self.fill()
+        b, e = pattern(300, 1, 1, 0)
+        write_run(self.d, "base", "formal-off", "wikijudge5", b, base_tag("formal-off"))
+        write_run(self.d, "e", "formal-off", "wikijudge5", e, rd_tag("formal-off") + f"+rx:{self.rx}", glen=[5] * 299 + [6])   # gold lengths differ
+        with self.assertRaises(SystemExit):
+            self.judge()
+        self.fill()
+        with open(os.path.join(self.d, "counts.json"), "w") as f:
+            json.dump({"wikijudge5": 300}, f)                                                # no cjudge-1 count
+        with self.assertRaises(SystemExit):
+            self.judge()
+
+    def test_main_prints_verdict(self):
+        import contextlib, io
+        from unittest import mock
+        self.fill(formal=(30, 5))
+        out = os.path.join(self.d, "out.json")
+        buf = io.StringIO()
+        real = R.sha_file
+        patch = mock.patch.object(R, "sha_file", lambda p: SHA + "0" * 56 if p.endswith("tinylm.sjtl") else real(p))   # the fake model file check only
+        patch.start()
+        self.addCleanup(patch.stop)
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(E.main(["judge", self.d, "--arm", "r1g", "--confirm", "--out", out]), 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), 9)
+        self.assertEqual(lines[-1], "CONFIRMED")
+        with open(out) as f:
+            self.assertTrue(json.load(f)["all_pass"])
+        self.fill()
+        os.remove(out)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            E.main(["judge", self.d, "--arm", "r1g", "--confirm", "--out", out])
+        self.assertEqual(buf.getvalue().splitlines()[-1], "NOT CONFIRMED: 照登記不過")
+        with self.assertRaises(SystemExit):
+            E.main(["judge", self.d, "--confirm"])               # r1f arm
+
+
 if __name__ == "__main__":
     unittest.main()
