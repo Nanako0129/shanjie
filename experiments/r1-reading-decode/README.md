@@ -402,3 +402,21 @@ R1 與 R1b 的零成本檢查找到「長歪了」→「掌歪了」的原因：
   - dev302 四個設定都 0／0。只報：chatclause 聊天關 5／0、聊天標準 2／2；wikitune-clean 書面關 13／0、書面標準 16／0。
   - 和 R1f 比：「搞完這波」回到對（聊天關、書面關的錯字回報 0／1 → 0／0）；書面三檔 wikitune 的改壞 2 → 0；聊天標準與積極在 discordtune、聊天標準在 cvtune 各多 1 列改壞（都在門檻內）。
 - 維護者 2026-11-01 決定例外：條件 3 關的那組是 0／0（沒有證據、不是變差），R1g 照出貨規則進確認一發（在沒看過的判讀集、淨值 > 0、精確 McNemar p < 0.05、改壞÷改對 ≤ 0.65，數字之前先鎖定並 commit 確認片）。
+
+## R1g 確認片：在沒看過的 cjudge-1 與 wikijudge5 確認一發（確認；2026-11-01 登記，在任何數字之前）
+
+- **起因**：R1g 照登記不過（條件 3 關的那組 0／0），維護者 2026-11-01 決定例外，照出貨規則在沒看過的判讀集確認一發。維護者同日選「書面標準判『變好』＋聊天標準判『不變差』」。
+- **診斷（既有分數，數字之前印）**：R1g 對出貨在聊天標準幾乎不改列（discordtune 0／1、cvtune 0／1、chatclause 2／2），在書面標準是 cvtune 8／0、wikitune 16／0；聊天關 discordtune 6／0。所以聊天標準只判不變差。
+- **判讀集**（兩份都在這一登記之前凍結、之前沒有任何數字）：
+  - wikijudge5：`build_tune.py --part wiki --wiki-range 330000 335000 --wiki-name wikijudge5`，2026-11-01 在 Mac 上建（dump 同 wikijudge4），2,816 列，SHA-256 `74359bd3c9edc9eaecd46af4387ff374d3b1116647d755e2c1d9ff35241354e5`。
+  - cjudge-1（CE3，`docs/contracts/chat-eval-3.md`）：S1（維護者自己的文字）2,880 列 `c255ae46…` 與 S2（PTT 推文）2,759 列 `8a32c907…` 依序接起來，共 5,639 列，SHA-256 `cd782a0d61fa4fe2638bb7e55c4344f6987e344042c55ab9a0e8b12a531c01f9`。私人檔，不進 repo；校對抽樣與拿掉的列只報數字（研究紀錄同日）。
+- **兩臂**（工具 `b90adc96` 的評測 CLI，`data/lm/` 是 v0.6.1 出貨的模型、雜湊先核對）：
+  - 基準：R1f 的 `base` 指令（`r1e.py commands` 的 `formal-std`、`chat-std`）。
+  - R1g：R1g 的 `e` 指令（`r1e.py commands --arm r1g`；書面標準加 `--reading-decode --reading-exempt experiments/r1-reading-decode/std-exempt.tsv`，聊天標準另加 `--no-reading-channel`）。
+- **主判讀**（兩條都成立才算確認成立）：
+  1. 書面標準在 wikijudge5：淨值 > 0、精確 McNemar 雙尾 p < 0.05（`tools/evalstats.py` 的 `mcnemar_exact`）、改壞÷改對 ≤ 0.65。
+  2. 聊天標準在 cjudge-1：Δtop1 的 90% 配對 bootstrap 下界 ≥ −1.0 個百分點（`evalstats.paired_bootstrap`，種子 20261008、10,000 次、逐列，和條件 2b 同一個做法）。
+- **只報**：兩份集合上的聊天關、書面關、保守、積極（同 R1g 的指令），以及兩條主判讀以外的數字（cjudge-1 的淨值與 McNemar、S1 與 S2 分開的表）。
+- **第二份來源**：數字決定出不出貨，照規則要另一台機器：GCP 跑一輪（共用函式庫的腳本、送出前 fresh verifier 審），188 的 WSL 再跑主判讀的四跑（兩集合 × 兩臂）；兩台的 rowstats 逐列相同才判讀，不同就停下回報。
+- **預算**：GCP ≤ 1 小時；188 ≤ 30 分鐘。私人列跑完就刪。
+- **之後**：兩條都成立 → 寫產品片契約（讀音項進核心解碼器、12 對不罰、融合拿掉讀音通道項、三檔與語意校正關都生效）。不成立 → 照登記不過，報數字，不開子片救同一次確認；cjudge-1 與 wikijudge5 用過退役。
