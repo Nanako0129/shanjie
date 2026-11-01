@@ -1,6 +1,6 @@
 """Tests for r1e.py (tags, rows identity, 2b bootstrap, clause 3 pooling, and judge() end to end on synthetic files).
 Run: python3 -m unittest test_r1e (in this directory)."""
-import json, os, random, shutil, sys, tempfile, unittest
+import hashlib, json, os, random, shutil, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import r1e as E  # noqa: E402
@@ -206,6 +206,27 @@ class Judge(unittest.TestCase):
         self.assertEqual(flags("chat-off", "base"), ["--context", "--packs", "acg,it"])
         self.assertEqual(flags("chat-off", "r1f"), ["--context", "--packs", "acg,it", "--reading-decode"])
         self.assertEqual(flags("formal-cons", "r1f")[-3:], ["--rerank-level", "conservative", "--reading-decode"])
+
+    def test_r1g_commands_and_tag(self):
+        """R1g: the same 60 commands and labels, the R1f arm gains `--reading-exempt <list>` last; its tag must end `+rd+rx:<sha8 of the committed list>`."""
+        f, g = dict(E.commands("$ROWS", "$OUT", "shanjie-eval", 32)), dict(E.commands("$ROWS", "$OUT", "shanjie-eval", 32, "r1g"))
+        self.assertEqual((len(g), list(g)), (60, list(f)))
+        for stem, line in g.items():
+            if "/e." in stem:
+                self.assertEqual(line, f[stem].replace(" --threads", f" --reading-exempt {E.EXEMPT} --threads"))
+            else:
+                self.assertEqual(line, f[stem])
+        self.assertEqual(E.cli_args("chat-std", "r1g")[-4:], ["--reading-decode", "--no-reading-channel", "--reading-exempt", E.EXEMPT])
+        rx = E.exempt_sha8()
+        self.assertEqual(rx, hashlib.sha256(open(os.path.join(E.HERE, "std-exempt.tsv"), "rb").read()).hexdigest()[:8])
+        for s in RD.SETTINGS:
+            E.check_tags(s, base_tag(s), rd_tag(s) + f"+rx:{rx}", rx=rx)
+            with self.assertRaises(SystemExit):
+                E.check_tags(s, base_tag(s), rd_tag(s), rx=rx)                    # an R1f tag is not an R1g tag
+            with self.assertRaises(SystemExit):
+                E.check_tags(s, base_tag(s), rd_tag(s) + f"+rx:{rx}")             # an R1g tag is not an R1f tag
+            with self.assertRaises(SystemExit):
+                E.check_tags(s, base_tag(s), rd_tag(s) + "+rx:00000000", rx=rx)   # another list
 
     def test_rows_identity_stops(self):
         self.fill()

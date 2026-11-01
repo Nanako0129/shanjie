@@ -132,3 +132,46 @@ fn with_the_option_the_decoder_first_changes_and_ng_carries_the_term() {
         assert_eq!(off[1].0, on[1].0, "{profile}: row 2 keeps its first");
     }
 }
+
+/// R1g: `--reading-exempt FILE` (experiments/r1-reading-decode/std-exempt.tsv) puts `+rx:<sha8 of the file>` right after `+rd`, and the pair
+/// ㄅㄛ 波 costs nothing, so row 37 of eval/dev/user-reported.txt (`搞完這波`) keeps 波 as the first where `--reading-decode` alone moved it to 播;
+/// the option without `--reading-decode`, or with a malformed file, stops the run.
+#[test]
+fn reading_exempt_tags_the_summary_and_frees_the_standard_reading() {
+    let dir = tmp("exempt");
+    let src = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
+    let rows = dir.0.join("rows.txt");
+    std::fs::write(&rows, format!("{}\n", src.lines().nth(36).unwrap())).unwrap();
+    let rows = rows.to_string_lossy().into_owned();
+    let list = root().join("experiments/r1-reading-decode/std-exempt.tsv");
+    let (list, sha8) = (list.to_string_lossy().into_owned(), core::eval::sha256_hex(&std::fs::read(root().join("experiments/r1-reading-decode/std-exempt.tsv")).unwrap())[..8].to_string());
+    for profile in ["chat", "formal"] {
+        let first = |extra: &[&str]| {
+            let d = dir.0.join(format!("{profile}-{}.dump", extra.len())).to_string_lossy().into_owned();
+            let mut a = args(profile, true, &rows);
+            a.extend(["--dump", &d]);
+            a.extend(extra);
+            let o = run(&a);
+            assert!(o.status.success(), "{}", text(&o.stderr));
+            let dump = std::fs::read_to_string(d).unwrap();
+            (text(&o.stdout), dump.lines().map(|l| l.split('\t').collect::<Vec<_>>()).find(|f| f[1] == "1").unwrap()[2].to_string())
+        };
+        let (line, top) = first(&["--reading-decode"]);
+        assert!(line.contains("+rd  {") && !line.contains("+rx"), "{line}");
+        assert_eq!(top, "搞完這播", "{profile}: premise, the term moves the first off 波");
+        let (line, top) = first(&["--reading-decode", "--reading-exempt", &list]);
+        assert!(line.contains(&format!("+rd+rx:{sha8}  {{'n': 1,")), "{line}");
+        assert_eq!(top, "搞完這波", "{profile}: the exempt pair costs nothing");
+    }
+    let mut a = args("chat", true, &rows);
+    a.extend(["--reading-exempt", &list]);
+    let o = run(&a);
+    assert!(!o.status.success() && text(&o.stderr).contains("--reading-exempt needs --reading-decode"), "{}", text(&o.stderr));
+    let bad = dir.0.join("bad.tsv");
+    std::fs::write(&bad, "ㄅㄛ 波\n").unwrap();
+    let bad = bad.to_string_lossy().into_owned();
+    let mut a = args("chat", true, &rows);
+    a.extend(["--reading-decode", "--reading-exempt", &bad]);
+    let o = run(&a);
+    assert!(!o.status.success() && text(&o.stderr).contains("--reading-exempt"), "{}", text(&o.stderr));
+}

@@ -3,7 +3,7 @@
 //! `lex_logp`) with the two exceptions of r1.py (`sandhi_exempt`, `floor_mc`), the registered arm B-f of section R1c. It is switched on only by
 //! `CappedLexicon::with_reading_decode` (the CLI's `--reading-decode`); the engine never calls it, and without it the decoder's arithmetic is untouched.
 use crate::Lexicon;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Weight of the reading term in the path score (R1 README, R1c: lambda 2.0 of the registered grid, arm B-f; R1d fixes it, no selection).
 pub const LAMBDA: f64 = 2.0;
@@ -93,11 +93,28 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
 /// `mcbpmf-data.txt`, read-only afterwards.
 pub struct ReadingDecode {
     floor_mc: HashMap<(u32, char), f64>,
+    /// (syllable, character) pairs whose term is 0 like a `SANDHI` reading (R1g: `exempt`, the CLI's `--reading-exempt`); empty without it.
+    exempt: HashSet<(String, char)>,
 }
 
 impl ReadingDecode {
     pub fn new(lex: &Lexicon, base_text: &str) -> ReadingDecode {
-        ReadingDecode { floor_mc: build_floor_mc(lex, base_text) }
+        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new() }
+    }
+
+    /// R1g: the pairs in `text` (`syllable<TAB>character` rows; blank lines and `#` lines skipped) cost 0, whatever the lexicon scores them.
+    /// A row that is not a syllable and one character stops the run (`Err`); a pair the lexicon lacks stays harmless (`logp` is `None` for it).
+    pub fn with_exempt(mut self, text: &str) -> Result<ReadingDecode, String> {
+        for (i, l) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty() && !l.starts_with('#')) {
+            let mut f = l.split('\t');
+            let (Some(syl), Some(w), None) = (f.next(), f.next(), f.next()) else { return Err(format!("line {}: expected syllable<TAB>character", i + 1)) };
+            let mut cs = w.chars();
+            match (cs.next(), cs.next()) {
+                (Some(c), None) if !syl.is_empty() => self.exempt.insert((syl.to_string(), c)),
+                _ => return Err(format!("line {}: expected syllable<TAB>character", i + 1)),
+            };
+        }
+        Ok(self)
     }
 
     /// log10 P(reading | word) of the single-character word `word` read `syl`, relative to the word's best reading (<= 0): the lexicon's score
@@ -112,6 +129,9 @@ impl ReadingDecode {
         if is_floor(s) {
             let mc = lex.syl_ids.get(syl).zip(word.chars().next()).and_then(|(&id, c)| self.floor_mc.get(&(id, c)));
             t = mc.copied().unwrap_or(t);
+        }
+        if word.chars().next().is_some_and(|c| self.exempt.contains(&(syl.to_string(), c))) {
+            t = 0.0;
         }
         Some(t)
     }
@@ -211,5 +231,21 @@ mod tests {
         // with no multi-character word at all the pair costs its lexicon difference
         let (lex, rd) = mk("a 長 -1.0\nb 長 -6.8\n");
         close(rd.logp(&lex, "b", "長").unwrap(), (10f64.powf(-6.8)).log10() - (10f64.powf(-1.0)).log10());
+    }
+
+    /// R1g: an exempt pair scores 0 (its lexicon difference is -2.0 without the list), a rare pair that is not on the list still gets the term,
+    /// and the list's comments, blank lines and a malformed row are handled (the row stops the run).
+    #[test]
+    fn an_exempt_pair_scores_zero_and_the_rest_keep_the_term() {
+        let (lex, rd) = mk(LEX);
+        let rd = rd.with_exempt("# header\n\nb\t甲\nz\t乙\n").unwrap();
+        close(rd.logp(&lex, "b", "甲").unwrap(), 0.0);
+        close(rd.term(&lex, "b", "甲"), 0.0);
+        close(rd.term(&lex, "c", "甲"), -LAMBDA * CAP);
+        assert!(rd.logp(&lex, "z", "乙").is_none(), "an exempt pair the lexicon lacks is still absent");
+        let (_, rd) = mk(LEX);
+        assert!(rd.with_exempt("b\t甲乙\n").is_err());
+        let (_, rd) = mk(LEX);
+        assert!(rd.with_exempt("b 甲\n").is_err());
     }
 }

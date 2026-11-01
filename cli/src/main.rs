@@ -251,6 +251,10 @@ struct RowOut {
 /// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it the path is the one it was: cli/tests/reading_decode.rs checks the summary line of eight settings
 /// (chat and formal, with and without `--tinylm`, dev302 and typing76) and, on macOS, the sha256 of the `--dump` file of the four n-gram-only ones
 /// against the binary before the option; other outputs (rowstats, `--tinylm-scores`, `--dump-words`) are not compared.
+///
+/// `--reading-exempt FILE` (evaluation only; experiments/r1-reading-decode, section R1g; needs `--reading-decode`, an error without it): the
+/// `syllable<TAB>character` pairs of FILE (`#` lines and blank lines skipped) get the reading term 0, like the sandhi readings. The summary tag gains
+/// `+rx:<first 8 hex of FILE's SHA-256>` right after `+rd`. Without the option every output is what it was.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -276,6 +280,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_given = false;
     let mut reading_channel = true;
     let mut reading_decode = false;
+    let mut reading_exempt = None::<String>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -330,8 +335,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-channel" => reading_channel = false,
             "--reading-decode" => reading_decode = true,
+            "--reading-exempt" => reading_exempt = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
+    }
+    if reading_exempt.is_some() && !reading_decode {
+        return Err("--reading-exempt needs --reading-decode".into());
     }
     check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
     if tinylm_scores.is_some() && tinylm.is_none() {
@@ -410,6 +419,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         capped.with_reading_decode(&base)
     } else {
         capped
+    };
+    // R1g: the pairs of FILE cost nothing; the tag carries the first 8 hex of the file's SHA-256.
+    let (capped, rx_tag) = match &reading_exempt {
+        Some(p) => {
+            let bytes = fs::read(p).map_err(|e| format!("--reading-exempt: cannot read {p} ({:?})", e.kind()))?;
+            let text = String::from_utf8(bytes.clone()).map_err(|_| format!("--reading-exempt: {p} is not UTF-8"))?;
+            (capped.with_reading_exempt(&text).map_err(|e| format!("--reading-exempt: {e}"))?, format!("+rx:{}", &sha256_hex(&bytes)[..8]))
+        }
+        None => (capped, String::new()),
     };
 
     // (display name, [(truth, reading)])
@@ -722,7 +740,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rx_tag, rows.len());
     Ok(())
 }
 

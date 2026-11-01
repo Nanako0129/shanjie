@@ -381,3 +381,4 @@ R1 與 R1b 的零成本檢查找到「長歪了」→「掌歪了」的原因：
 - **集合、跑法、判讀**：同 R1f（60 跑，同一支 GCP 腳本，只多這個旗標；四條照修訂一）。
 - **已看過的**：R1f 的全部數字，包括第 37 列；這一片改的正是那一列看到的原因，所以 R1g 不能當確認，只能當探索。四條過了之後照規則在沒看過的判讀集確認一發才出貨。
 - **之後**：四條全過 → 報給維護者，寫產品片契約前先在沒看過的判讀集確認一發（chatjudge 的確認規則）。不過 → 照登記不過，報數字討論，不結案。
+- **工具補記（2026-11-01，工具改完、任何 R1g 的數字之前；登記的值與規則不動）**：旗標 `--reading-exempt FILE`（只能和 `--reading-decode` 一起，否則報錯停下）把 FILE 裡的（讀音，字）記 0；摘要標記在 `+rd` 後面加 `+rx:<FILE 的 SHA-256 前 8 碼>`。`std_exempt.py` 產生的 `std-exempt.tsv` 剛好是登記的那 12 對，SHA-256 `a821a206482437ecb4c6917fa9dcfb1e5402dd87b4daa86992b5a8a9b4f071c1`（`+rx:a821a206`）；來源是詞庫 `mcbpmf-data.txt`（`25b3ecb0…`）與簡編本 zip（`5bab99da…`）。不給旗標時輸出逐位元組不變：Mac 上用改之前（`cc866eed`）與改之後的評測 CLI，各跑 dev302 聊天標準與書面標準（出貨旗標 `--context --packs acg,it --tinylm`，聊天加 `--colloquial-core --no-reading-channel`），有與沒有 `--reading-decode` 共 4 組，摘要列與 rowstats 逐位元組相同（`cmp`）；`cli/tests/reading_decode.rs` 的原有八組摘要與四組傾印雜湊照舊通過。`r1e.py commands|judge --arm r1g` 印出／判讀 R1g 的 60 跑（標籤不變，R1f 仍是預設）。

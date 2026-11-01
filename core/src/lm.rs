@@ -898,6 +898,14 @@ impl CappedLexicon {
         self
     }
 
+    /// R1g (evaluation only, the CLI's `--reading-exempt`): the (syllable, character) pairs of `exempt_text` get the term 0 (`ReadingDecode::with_exempt`).
+    /// Needs `with_reading_decode` first; without it the pairs have nothing to exempt from (`Err`).
+    pub fn with_reading_exempt(mut self, exempt_text: &str) -> Result<CappedLexicon, String> {
+        let rd = self.reading.take().ok_or("--reading-exempt needs --reading-decode")?;
+        self.reading = Some(rd.with_exempt(exempt_text)?);
+        Ok(self)
+    }
+
     /// Whether `word` is a forced pack word (a pack row tagged `PACK_OOV_TAG`, docs/contracts/pack-oov.md section 1b).
     pub fn is_pack(&self, word: &str) -> bool {
         let at = |&(off, len): &(u32, u32)| &self.base.words[off as usize..(off + len) as usize];
