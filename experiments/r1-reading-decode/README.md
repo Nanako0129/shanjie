@@ -349,3 +349,4 @@ R1 與 R1b 的零成本檢查找到「長歪了」→「掌歪了」的原因：
   - `formal-off` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --reading-decode --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.formal-off.<集合>.r > $OUT/e.formal-off.<集合>.cli.txt`；集合：wikitune-clean、cvtune-clean、typing76、user-reported、dev302
 - 判讀：`python3 experiments/r1-reading-decode/r1e.py judge $OUT --out $OUT/judge.json`（`$OUT/counts.json` 先寫好）。
 - 判讀角色與集合同 R1e（`r1d.py` 的 `ROLES`）：discordtune 用過濾後的 4,919 列，cvtune-clean 3,286 列，錯字回報與 wikitune-clean 用現在的列檔；列數以 `counts.json` 為準。
+- **修訂一（2026-11-01，在任何 R1f 的數字之前）**：判讀表從 R1e 繼承的條件 1「改壞 ≤ 26 或改壞÷改對 ≤ 0.6」裡的 26 是舊 discordtune（4,958 列）時的寫法；本登記寫明「照現在的出貨標準」，現行的條件 1 是「不顯著變差（精確 McNemar p ≥ 0.05 或淨值 ≥ 0），而且改壞÷改對 ≤ 0.6」，所以 R1f 的判定照現行條件 1（`r1e.py judge` 的 `verdict_ratio_only`）；舊讀法照樣印出、只報不判。
