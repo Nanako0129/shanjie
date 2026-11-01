@@ -2,7 +2,7 @@
 //! engine_lm.rs. The `store_` tests write the learning file into a temporary directory.
 use core::engine::*;
 use core::eval::{parse_rows, usable};
-use core::learn::{context_key, Learner, Level, Record, CAPACITY, GLOBAL, PRUNE_FLOOR, SENTINEL};
+use core::learn::{context_key, record_key, Learner, Level, Record, CAPACITY, GLOBAL, PRUNE_FLOOR, SENTINEL};
 use core::lm::{self, CappedLexicon, Lm};
 use core::{Lexicon, Syls};
 use std::path::{Path, PathBuf};
@@ -448,7 +448,7 @@ fn context_key_learned_equals_context_key_queried() {
     assert_eq!(type_syls(&mut e, "ㄅㄣ ㄒㄧㄣ").preedit, format!("{b}欣"));
     e.key(k(KeyKind::Esc)).unwrap();
 
-    // (c) after punctuation the key is ^ (rule 8: ^> and the next reading): a single character is not learned there (rule 6) ...
+    // (c) after punctuation the key is ^ (rule 8: ^> and the next reading): the single character here ends the composition (^>$), where none is learned (rule 10) ...
     let mut e = tiny(TINY, TINY);
     type_syls(&mut e, "ㄊㄚ");
     e.key(Key::ch(',', MOD_SHIFT)).unwrap();
@@ -473,7 +473,7 @@ fn context_key_learned_equals_context_key_queried() {
     assert_ne!(type_syls(&mut e, &format!("ㄊㄚ {R2}")).preedit, format!("他{w}"), "no punctuation: key 他, not ^");
     e.key(k(KeyKind::Esc)).unwrap();
 
-    // (d) sentence start: a single character is not learned, a 2-character word is, under ^>$
+    // (d) sentence start, the character ends the composition (^>$): a single character is not learned, a 2-character word is
     let mut e = tiny(TINY, TINY);
     type_syls(&mut e, "ㄒㄧㄣ");
     pick(&mut e, 1, 1, "欣");
@@ -909,7 +909,7 @@ fn row_flag_must_be_on_at_pick_and_at_commit() {
 }
 #[test]
 fn left_context_is_dropped_after_commit() {
-    // Two-character words may learn at sentence start, under ^>... (single characters may not, §12), so use the real model.
+    // Two-character words may learn at sentence start, under ^>...; single characters only before a syllable (rule 10) and not under ^>$ (§12), so use the real model.
     let mut e = engine();
     e.set_left_context("好他");
     type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ");
@@ -1560,6 +1560,8 @@ fn row_collides(ctx: &str, texts: &[&str], rd: &[String], span: &[String], taugh
         let chars: Vec<char> = t.chars().collect();
         rd.windows(span.len()).enumerate().filter(|(_, w)| *w == span).any(|(i, _)| {
             let key = context_key(&format!("{ctx}{}", chars[..i].iter().collect::<String>()));
+            // Rule 10: a single character is also learned at sentence start, under `^>` plus the next syllable's reading.
+            let key = if single { record_key(key, rd.get(i + span.len()).map(String::as_str)) } else { key };
             taught.iter().any(|t| collides(t, &key, single))
         })
     }))
@@ -1613,8 +1615,8 @@ fn old_single_character_global_record_is_dropped_at_load() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The user's case (§12): 再 re-picked under 可以 and at sentence start. Under rule 6 the sentence-start
-/// pick creates no record. Rows are replayed with their own 前文; those whose decoder keys equal the
+/// The user's case (§12): 再 re-picked under 可以 and at sentence start. The sentence-start pick of a lone 再 is `^>$`
+/// and creates no record; a 再 before a following syllable is rule 10's (second half). Rows are replayed with their own 前文; those whose decoder keys equal the
 /// taught full key 可以 (a single character answers only on an equal non-"^" key) are listed, not gated.
 #[test]
 fn pollution_zai_taught_under_two_contexts() {
@@ -1634,10 +1636,26 @@ fn pollution_zai_taught_under_two_contexts() {
     }
     let zai_records: Vec<String> = e.learner().records().iter().filter(|r| r.word == "再").map(|r| r.context.clone()).collect();
     assert_eq!(zai_records, ["可以"], "only the pick after 可以 is learned; none under ^, none global");
+    zai_sweep(&mut e, &rows, &base, &taught, &zai);
+    // Rule 10 (sinit-learn §2): 再 taught at sentence start before a following syllable is a record under `^>`+syllable; the
+    // rows whose decoder keys reach it are listed, every other ㄗㄞˋ row stays as it was (also: one more control, the pick
+    // alone at sentence start is `^>$` and leaves nothing).
+    let mut e = engine();
+    e.set_left_context("");
+    assert_ne!(type_syls(&mut e, "ㄗㄞˋ ㄐㄧㄚ").preedit.chars().next(), Some('再'), "precondition: 再 is not the default");
+    pick(&mut e, 2, 1, "再");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, "再"), [("^>ㄐㄧㄚ".to_string(), 1.0)], "taught under the next syllable, not global");
+    zai_sweep(&mut e, &rows, &base, &["^>ㄐㄧㄚ"], &zai);
+}
+
+/// The sweep of `pollution_zai_taught_under_two_contexts`: replays `rows` on `e` (after teaching) against their unlearned
+/// decodes `base`; rows whose decoder keys equal one of `taught` are listed, the others must not change at all.
+fn zai_sweep(e: &mut Engine, rows: &[(String, String, Syls)], base: &[String], taught: &[&str], zai: &[String]) {
     let (mut regress, mut changed, mut collided, mut unaligned, mut checked) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
-    for (r, b) in rows.iter().zip(&base) {
-        let after = decode(&mut e, &r.0, &r.2);
-        match row_collides(&r.0, &[&r.1, b, &after], &r.2, &zai, &taught, true) {
+    for (r, b) in rows.iter().zip(base) {
+        let after = decode(e, &r.0, &r.2);
+        match row_collides(&r.0, &[&r.1, b, &after], &r.2, zai, taught, true) {
             None => unaligned.push(format!("{}|{}", r.0, r.1)),
             Some(true) => collided.push(format!("{}|{} : {} -> {}", r.0, r.1, b, after)),
             Some(false) => {
@@ -1653,7 +1671,7 @@ fn pollution_zai_taught_under_two_contexts() {
             }
         }
     }
-    println!("global 再 records: {}", e.learner().records().iter().filter(|r| r.context == GLOBAL).count());
+    println!("taught {taught:?}; global 再 records: {}", e.learner().records().iter().filter(|r| r.context == GLOBAL).count());
     println!("rows {} (checked {checked}), colliding {}, unaligned (not checked) {}:", rows.len(), collided.len(), unaligned.len());
     for c in &collided {
         println!("  colliding: {c}");
@@ -2194,4 +2212,138 @@ fn sentence_start_keys_count_as_one_key_for_globalization() {
     l.teach("可以", &two, "再見", "在建", DAY);
     l.teach("我們", &two, "再見", "在建", DAY);
     assert_eq!(globals(&l), 1, "two different two-character contexts globalize as before");
+}
+
+// ---------- 15: SINIT (docs/contracts/sinit-learn.md, s4-learning §14 rule 10): a sentence-start single character is learned ----------
+
+/// Row 16 of user-reported.txt, with a lexicon in which 趙 outscores 照 and 建議 is a word, so the default is fixed by the
+/// test and not by the shipping model. 照 sits 5 below 趙: with a gap of 1 the bigram model's liking for 照建議 still shows
+/// 照建議 (measured 2026-11-01); the single characters 建 and 議 are there because without them the decoder fails on the
+/// three-syllable path and shows 趙ㄐㄧㄢ.
+const SINIT_TINY: &str = "ㄓㄠˋ 趙 -1.0\nㄓㄠˋ 照 -6.0\nㄒㄧㄤˋ 像 -1.0\nㄐㄧㄢˋ 建 -1.0\nㄧˋ 議 -1.0\nㄐㄧㄢˋ-ㄧˋ 建議 -1.0\n";
+const R16: &str = "ㄓㄠˋ ㄐㄧㄢˋ ㄧˋ";
+
+/// Types `reading` (no left context) on a fresh tiny engine and commits it: the unlearned decode.
+fn tiny_default(reading: &str) -> String {
+    commit_of(&mut tiny(SINIT_TINY, SINIT_TINY), reading)
+}
+/// Teaches 照 for row 16 on a fresh tiny engine (the first syllable re-picked, the rest as decoded); returns it.
+fn tiny_taught() -> Engine {
+    let mut e = tiny(SINIT_TINY, SINIT_TINY);
+    type_syls(&mut e, R16);
+    pick(&mut e, 3, 1, "照");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "照建議", "precondition: the re-pick took");
+    e
+}
+
+#[test]
+fn sinit_row16_sentence_start_single_character_is_learned() {
+    chat_only();
+    assert_eq!(tiny_default(R16), "趙建議", "precondition: the tiny lexicon's default is 趙建議");
+    let mut e = tiny_taught();
+    assert_eq!(records_of(&e, "照"), [("^>ㄐㄧㄢˋ".to_string(), 1.0)], "taught under the next syllable's reading");
+    assert_eq!(commit_of(&mut e, R16), "照建議", "typed again, the learned character shows");
+    // same reading only: another next syllable is not boosted
+    assert_eq!(tiny_default("ㄓㄠˋ ㄒㄧㄤˋ"), "趙像", "precondition");
+    assert_eq!(commit_of(&mut e, "ㄓㄠˋ ㄒㄧㄤˋ"), "趙像", "a different next syllable decodes as without the record");
+    // the pick-time key is `^>ㄐㄧㄢˋ` too, so re-picking back to 趙 halves the record
+    type_syls(&mut e, R16);
+    pick(&mut e, 3, 1, "趙");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, "照"), [("^>ㄐㄧㄢˋ".to_string(), 0.5)], "the displaced 照 is halved");
+}
+
+#[test]
+fn sinit_not_after_two_han_characters() {
+    chat_only();
+    let with_left = |e: &mut Engine| {
+        e.set_left_context(TAUGHT_AFTER);
+        commit_of(e, R16)
+    };
+    let want = with_left(&mut tiny(SINIT_TINY, SINIT_TINY));
+    assert_eq!(want, "趙建議", "precondition: the default after 他們");
+    let mut e = tiny_taught();
+    assert_eq!(with_left(&mut e), want, "the sentence-start record does not act after two Han characters");
+    assert_eq!(records_of(&e, "照").len(), 1);
+}
+
+#[test]
+fn sinit_single_character_at_the_end_is_not_learned() {
+    chat_only();
+    let mut e = tiny(SINIT_TINY, SINIT_TINY);
+    type_syls(&mut e, "ㄓㄠˋ");
+    pick(&mut e, 1, 1, "照");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "照", "precondition: the re-pick took");
+    assert!(e.learner().records().is_empty(), "`^>$` keeps no single character");
+}
+
+/// Types the syllable ㄒㄧㄣ and then `tail` (keys: a char, `_` for Space), re-picks the syllable as another candidate and
+/// commits; returns the contexts of the single-character records that resulted.
+fn sinit_repick_before(tail: &[Key], digits: &Arc<core::digits::DigitTable>) -> Vec<String> {
+    let mut e = engine();
+    e.set_english(true).unwrap();
+    e.set_digit_table(Some(digits.clone()));
+    type_syls(&mut e, "ㄒㄧㄣ");
+    for key in tail {
+        e.key(*key).unwrap();
+    }
+    e.key(k(KeyKind::Home)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap(); // the cursor right after the syllable
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    let shown = o.candidates[o.selected.unwrap()].clone();
+    let o = e.key(k(KeyKind::Right)).unwrap();
+    assert_ne!(o.candidates[o.selected.unwrap()], shown, "setup: another candidate");
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.learner().records().iter().filter(|r| r.word.chars().count() == 1).map(|r| r.context.clone()).collect()
+}
+
+/// Typing "rust" or the digit 7 after the single character: the neighbour is the whole class (`^>_punct_en`,
+/// `^>_punct_num`), so nothing is learned; with a syllable after it the same re-pick is learned (control).
+#[test]
+fn sinit_english_and_digit_neighbours_are_not_learned() {
+    chat_only();
+    let digits = Arc::new(core::digits::DigitTable::parse(&std::fs::read_to_string(root().join("data/lexicon/digits.tsv")).unwrap()).unwrap());
+    let ch = |c: char| Key::ch(c, 0);
+    let english = [ch('r'), ch('u'), ch('s'), ch('t'), k(KeyKind::Space)];
+    assert!(sinit_repick_before(&english, &digits).is_empty(), "English neighbour");
+    assert!(sinit_repick_before(&[ch('7')], &digits).is_empty(), "digit neighbour");
+    let syl = keys_of("ㄑㄧㄥˊ");
+    assert_eq!(sinit_repick_before(&syl, &digits), ["^>ㄑㄧㄥˊ"], "control: a syllable neighbour is learned");
+}
+
+/// Measured (sinit-learn §2, "same key"): 再 taught before ㄐㄧㄚ (from 再加, or 再 alone) is one record `^>ㄐㄧㄚ` for 再, and
+/// the learner cannot tell the sentences apart: 在家 typed at sentence start then shows 再加 (2026-11-01, shipping chat model),
+/// not 在家. This test records that cost; it is the maintainer's to accept or reject (contract §5), not a requirement.
+#[test]
+fn sinit_same_key_two_character_word_measured() {
+    chat_only();
+    assert_eq!(baseline("ㄗㄞˋ ㄐㄧㄚ"), "在家", "precondition: the unlearned default");
+    for also_second in [false, true] {
+        let mut e = engine();
+        type_syls(&mut e, "ㄗㄞˋ ㄐㄧㄚ");
+        pick(&mut e, 2, 1, "再");
+        if also_second {
+            pick(&mut e, 2, 2, "加");
+        }
+        e.key(k(KeyKind::Enter)).unwrap();
+        assert_eq!(records_of(&e, "再"), [("^>ㄐㄧㄚ".to_string(), 1.0)]);
+        let after = commit_of(&mut e, "ㄗㄞˋ ㄐㄧㄚ");
+        println!("SINIT same-key (second syllable also picked: {also_second}): 在家 typed after teaching shows {after:?}");
+        assert_eq!(after, "再加", "measured 2026-11-01; a change here means the decoder or the model changed");
+    }
+}
+
+/// The shipping model, formal profile, row 16 (user-reported.txt): only recorded. 2026-10-05 measured 趙建議 (formal wrong, chat right).
+#[test]
+fn sinit_row16_shipping_model_reference() {
+    let mut e = engine();
+    if e.set_profile(lm::Profile::Formal).is_err() {
+        println!("SINIT row16 reference: formal profile unavailable (no trigram table)");
+        return;
+    }
+    let formal = commit_of(&mut e, R16);
+    let mut c = engine();
+    c.set_profile(lm::Profile::Chat).unwrap();
+    println!("SINIT row16 reference (shipping model, no learning record): formal {formal:?}, chat {:?}", commit_of(&mut c, R16));
 }

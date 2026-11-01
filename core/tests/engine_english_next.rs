@@ -344,7 +344,7 @@ fn the_left_text_goes_with_the_composition() {
     assert!(after_left("").0 == row(&run(&mut e, "g")), "the row after it is the one without a left text");
 }
 
-/// The learning file after a row pick of 使用 (a single character is not learned at sentence start) behind `left` (learning on, a fixed day), as text.
+/// The learning file after a row pick of 使用 (a prediction pick is stored under `^>$`, where no single character is learned) behind `left` (learning on, a fixed day), as text.
 fn learned_from_the_row(left: &str, tag: &str) -> String {
     let dir = std::env::temp_dir().join(format!("shanjie-english-next-learn-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

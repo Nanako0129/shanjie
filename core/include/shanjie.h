@@ -302,16 +302,20 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   and pending learns are dropped anyway.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // A single-character pick is learned, and a single-character record looked up, only under a full
-//   context key made of exactly two Han characters: the last 2 Han characters before the word, taken
-//   from the composition text before it AND the left context from set_left_context. When fewer than
-//   two Han characters precede the word (sentence start, after punctuation or ASCII, or only one
-//   Han character) a single character is neither learned nor looked up. With a NULL left context, or a
+//   context key made of exactly two Han characters (the last 2 Han characters before the word, taken
+//   from the composition text before it AND the left context from set_left_context), or at sentence
+//   start (no Han character before it) under "^>" plus the reading of the syllable right after it
+//   (rule 10, below). With one Han character before the word, or at sentence start with nothing after
+//   the word ("^>$") or English or a number after it, a single character is neither learned nor looked
+//   up. With a NULL left context, or a
 //   paused gate that makes the shell pass NULL, keys that follow two Han characters typed in the same
 //   composition still teach (if learning is on) and look up. set_learning(0) stops teaching only; it
-//   does not stop lookup (docs/contracts/s4-learning.md sections 12 and 14).
+//   does not stop lookup (docs/contracts/s4-learning.md sections 12, 14 and 15).
 // A word of 2+ characters picked with no Han character before it (context key "^") is learned, and
 //   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
+//   A single-character word at sentence start is learned and looked up under "^>" plus a syllable reading
+//   too (rule 10); never under "^>$" (nothing follows) or the English / digit neighbour classes.
 //   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a
 //   re-pick halves the displaced word under the key it was shown under when it was picked as well as
 //   under the key at the commit.

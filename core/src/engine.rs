@@ -1437,7 +1437,7 @@ impl Engine {
             for (reading, word) in &uses {
                 touched.extend(self.learner.use_new(reading, word, today));
             }
-            // Nothing touched (e.g. a single character under "^" or a one-character key, §12, §14): no write, unless a full
+            // Nothing touched (e.g. a single character under a one-character key or at `^>$`, §12, §14, §15): no write, unless a full
             // rewrite is pending (a failed forget or rewrite). It is retried only by commits that reach
             // this point: learning on and at least one re-pick or displaced new word, or new-word B learning on
             // (no pause) with any new-word record in the learner (the early return above); other commits leave it

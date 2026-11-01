@@ -7,7 +7,7 @@
 //! that would not read back as itself (a tab, newline or control character in a field, a `-` or an
 //! empty syllable in the reading, a bad context, weight or day) is never written and is skipped one
 //! line at a time on load. A bad context includes the ones contract §14 retired: a single character
-//! under a one-Han key or a synthetic key, and every bare "^" (sentence-start records are `^>` plus
+//! under a one-Han key or a synthetic key that is `^>$` or an English/digit class (rule 10 keeps `^>` plus a syllable reading), and every bare "^" (sentence-start records are `^>` plus
 //! the next syllable's reading, `^>$` when none follows). When a (context, reading, word) appears on several lines, the last one
 //! wins: `append` adds newer versions of records at the end (revision one, §4 and §11).
 //!
@@ -22,7 +22,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_full_context, is_han, is_single, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
+use crate::learn::{context_key, is_han, is_single, single_key_ok, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -137,7 +137,8 @@ fn clean(s: &str) -> bool {
 
 /// A legal context key for `r` (s4-learning §14): `GLOBAL` for words of 2+ characters; one or two Han
 /// characters (a single-character word only with exactly two, rule 7); `NEXT_PREFIX` plus a clean,
-/// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8). A bare "^" is
+/// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8), and for a single-character word
+/// only when that reading is a syllable's (rule 10: not `$`, not the English/digit classes; `single_key_ok`). A bare "^" is
 /// never legal: sentence-start records live under the synthetic keys. A new-word record (context exactly
 /// `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han characters and one syllable per
 /// character; the single-character rules above are not relaxed for it.
@@ -151,9 +152,9 @@ fn legal_context(r: &Record) -> bool {
         return (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n;
     }
     if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
-        return !is_single(&r.word) && clean(next);
+        return clean(next) && (!is_single(&r.word) || single_key_ok(c));
     }
-    c != SENTINEL && context_key(c) == c && (!is_single(&r.word) || is_full_context(c))
+    c != SENTINEL && context_key(c) == c && (!is_single(&r.word) || single_key_ok(c))
 }
 
 /// Whether `r` survives a write and a read unchanged; the one rule for both directions. A record under

@@ -1085,7 +1085,7 @@ struct Hyp<'a> {
 }
 
 /// Learned boost (S4 §1.4, §12, §14): which records may boost is decided by `Learner::lookup` (single
-/// characters only at the exact full two-character key). A learned word scores
+/// characters only at the exact full two-character key, or at sentence start under `^>` plus the next syllable's reading, rule 10). A learned word scores
 /// `best of its reading + eps * w / (w + 1)`, eps being `LEARN_EPS` (6.0) at the exact and last-character
 /// levels and `LEARN_EPS_GLOBAL` (0, `Learn::eps_global`) at the global level, for weight `w`
 /// (so a heavier record outranks a lighter one: a re-pick halves the displaced word), never

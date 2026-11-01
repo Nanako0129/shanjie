@@ -157,7 +157,7 @@ fn single_character_global_records_are_not_loaded_or_written() {
 }
 
 /// Contract section 14 (rules 7 and 8), the one migration point `valid`: the synthetic sentence-start keys
-/// survive a save and a load as written; a single character under a synthetic key, under a one-Han key, and
+/// survive a save and a load as written; a single character under `^>$` or an English/digit class key (rule 10 keeps `^>` plus a syllable reading), under a one-Han key, and
 /// every bare "^" record are not loaded (counted as bad lines), and a full rewrite leaves none of them in the file.
 #[test]
 fn synthetic_keys_round_trip_and_old_records_are_dropped() {
@@ -171,9 +171,13 @@ fn synthetic_keys_round_trip_and_old_records_are_dropped() {
         rec("^>_punct_，", two, "我是", 1.0, 20_000),
         rec("^>ㄒㄧㄢ-ㄕㄥ", two, "我是", 1.0, 20_000), // a reading may hold "-": the key field is not split
         rec("他們", "ㄗㄞˋ", "再", 1.0, 20_000),         // a single character under exactly two Han characters
+        rec("^>ㄕˋ", "ㄗㄞˋ", "再", 1.0, 20_000),       // rule 10: a single character under `^>` plus a syllable reading
+        rec("^>ㄐㄧㄢˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
     ];
     let dropped = vec![
-        rec("^>ㄕˋ", "ㄗㄞˋ", "再", 1.0, 20_000), // a single character under a synthetic key
+        rec("^>$", "ㄗㄞˋ", "再", 1.0, 20_000),   // a single character under `^>$` (nothing follows)
+        rec("^>_punct_en", "ㄗㄞˋ", "再", 1.0, 20_000), // ... under the English/space neighbour class
+        rec("^>_punct_num", "ㄗㄞˋ", "再", 1.0, 20_000), // ... under the digit neighbour class
         rec("他", "ㄗㄞˋ", "再", 1.0, 20_000),    // a single character under a one-Han key
         rec("^", two, "我試", 1.0, 20_000),       // every bare "^" record (written before rule 8)
         rec("^", "ㄗㄞˋ", "再", 1.0, 20_000),
@@ -194,7 +198,8 @@ fn synthetic_keys_round_trip_and_old_records_are_dropped() {
     assert_eq!(opened, Opened::Loaded { skipped: dropped.len() });
     assert!(records == kept, "records differ (contents not printed: R2)");
     let l = Learner::from_records(records.clone());
-    assert!(l.words_of(&["ㄗㄞˋ".to_string()]) == ["再"], "only the one under 他們 is visible");
+    assert!(l.words_of(&["ㄗㄞˋ".to_string()]) == ["再"], "再 under 他們 and under ^>ㄕˋ is one word");
+    assert!(l.words_of(&["ㄓㄠˋ".to_string()]) == ["照"]);
     assert!(l.records().iter().all(|r| r.context != "^" && r.context != "他"));
     store.save(&records).unwrap();
     assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), want, "the rewrite leaves none of them");

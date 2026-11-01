@@ -12,7 +12,8 @@ pub const MAX_CONTEXT: usize = 2;
 pub const SENTINEL: &str = "^";
 /// Prefix of the synthetic context keys (s4-learning §14, rule 8): at sentence start (`SENTINEL`) a word is learned
 /// and looked up under `^>` plus the reading of the syllable right after it, `^>$` when nothing follows.
-/// These keys never take part in the last-character level.
+/// These keys never take part in the last-character level. A one-character word is learned under them only for a
+/// syllable reading, not `^>$` or the English/digit classes (rule 10, `single_key_ok`).
 pub const NEXT_PREFIX: &str = "^>";
 /// s3d §2: punctuation in the composition is a one-cell token under this reserved reading prefix (`_punct_，`); the
 /// lexicon has no such reading. An English word kept in the composition (zhen-inline §1.0) is one too (`_punct_rust`).
@@ -160,14 +161,22 @@ pub enum Level {
 }
 
 /// A one-character word: no global level, no last-character level, learned only under a full two-character
-/// context (§12, rule 7).
+/// context (§12, rule 7) or at sentence start under `^>` plus the next syllable's reading (rule 10, `single_key_ok`).
 pub fn is_single(word: &str) -> bool {
     word.chars().count() == 1
 }
 
-/// Exactly `MAX_CONTEXT` Han characters: the only key a one-character word is learned under (rule 7).
+/// Exactly `MAX_CONTEXT` Han characters: the key a one-character word is learned under after Han text (rule 7).
 pub fn is_full_context(key: &str) -> bool {
     key.chars().count() == MAX_CONTEXT && key.chars().all(is_han)
+}
+
+/// The keys a one-character word is learned and kept under, the one test `teach` and `learn_store::valid` share: a full
+/// two-Han-character key (rule 7), or at sentence start `^>` plus the reading of the syllable right after it (rule 10).
+/// Not `^>$` (nothing follows), not the English/space or digit neighbour classes (`^>_punct_en`, `^>_punct_num`: one
+/// teach would boost the word before any English word or any number, not only before the same reading), not bare `^`.
+pub fn single_key_ok(key: &str) -> bool {
+    is_full_context(key) || key.strip_prefix(NEXT_PREFIX).is_some_and(|next| !matches!(next, "" | "$" | ENGLISH_NEXT | DIGIT_NEXT))
 }
 
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
@@ -381,9 +390,10 @@ impl Learner {
     /// writes (§4).
     pub fn teach(&mut self, context: &str, reading: &[String], word: &str, displaced: &str, today: i64) -> Vec<Record> {
         // The bare "^" is never a record key (§14 rule 8; §8 point 5: memory matches the disk, where `valid` drops it).
-        // §12 rules 6 and 7: a single character learns only under a full two-character Han context (not "^",
-        // not a one-character key, not a synthetic key).
-        if context == SENTINEL || (is_single(word) && !is_full_context(context)) {
+        // §12 rules 6 and 7, rule 10: a single character learns only under a full two-character Han context or a
+        // sentence-start key `^>` plus a syllable reading (not "^", not a one-character key, not `^>$` or the
+        // English/digit classes); see `single_key_ok`.
+        if context == SENTINEL || (is_single(word) && !single_key_ok(context)) {
             return Vec::new();
         }
         let mut touched = Vec::with_capacity(3);
@@ -416,7 +426,7 @@ impl Learner {
     /// (exact, last character, global), with their decayed weight, and the level that answered. The
     /// first level that has any usable record answers; a word found by several records of that level
     /// keeps the highest weight. Single characters skip the last-character level (§12 rule 5); a
-    /// single-character record under any key but a full two-character one cannot exist (rules 6 and 7: teach
+    /// single-character record under any key but `single_key_ok`'s cannot exist (rules 6, 7 and 10: teach
     /// does not make one, and load drops old ones). A synthetic key (`NEXT_PREFIX`, rule 8) has no
     /// last-character level, like "^".
     pub fn lookup(&self, context: &str, reading: &[String], today: i64) -> (Level, Vec<(&str, f64)>) {
@@ -429,7 +439,7 @@ impl Learner {
         ];
         for (lv, level) in levels {
             // Rule 5: no last-character level for single characters. Single-character records under any
-            // key but a full two-character one do not exist: teach never makes them and load drops old ones.
+            // key but `single_key_ok`'s do not exist: teach never makes them and load drops old ones.
             let single_barred = lv == Level::LastChar;
             let mut hits: Vec<(&str, f64)> = Vec::new();
             for &i in ix {
