@@ -470,9 +470,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
                     let rc = reading_channel.then_some(ReadingChannel { lex: &lex, syls });
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, &used, lex.manual())
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, rc, level, &used, lex.manual(), &[])
                 }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual()),
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual(), &[]),
             };
             let ll = match picked {
                 Ok((c, ll)) => {

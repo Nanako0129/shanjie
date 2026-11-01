@@ -94,7 +94,7 @@ fn expect_key(model: &Path, syls: &[String], start: &str, end: End<'_>, key: &st
     let ng: Vec<f64> = top.iter().map(|x| x.0).collect();
     let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
     let tl = TinyLm::load(model).unwrap();
-    let pick = tl.rerank(&ng, &cands, key, tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap().0;
+    let pick = tl.rerank(&ng, &cands, key, tl.alpha_tau_delta(Profile::Chat), &[], &Default::default(), &[]).unwrap().0;
     Expect { surfaces, ng, pick }
 }
 
@@ -915,7 +915,7 @@ fn replay_dev302_parity_and_measurements() {
             let surf: Vec<String> = nb.iter().take(TOPK).map(|(_, ws)| ws.concat()).collect();
             let ng: Vec<f64> = nb.iter().take(TOPK).map(|x| x.0).collect();
             let top: Vec<&str> = surf.iter().map(String::as_str).collect();
-            let pick = tl.rerank(&ng, &top, "", tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).map_or(0, |r| r.0);
+            let pick = tl.rerank(&ng, &top, "", tl.alpha_tau_delta(Profile::Chat), &[], &Default::default(), &[]).map_or(0, |r| r.0);
             surf[pick].clone()
         })
         .collect();

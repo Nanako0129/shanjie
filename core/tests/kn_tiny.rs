@@ -240,7 +240,7 @@ fn learned_entry_skips_kneser_ney_and_its_neighbour_does_not() {
     let (before, today) = ("我們", 20_000);
     let mut learner = Learner::from_records(Vec::new());
     assert!(!learner.teach(&context_key(before), &reading, "佔", "占", today).is_empty(), "premise: a context record for 佔");
-    let learn = Learn { learner: &learner, before, after: None, today, eps_global: LEARN_EPS_GLOBAL };
+    let learn = Learn { learner: &learner, before, after: None, today, eps_global: LEARN_EPS_GLOBAL, sinit: core::lm::Sinit::Boost, eps_sinit_ng: core::lm::EPS_SINIT_NG };
     let lam = Profile::Chat.lambda();
     let nb = decode_segment_learned(&capped, &reading, &on, lam, "<s>", End::Eos, 64, Some(&learn), true).unwrap();
     let path = |w: &str| nb.iter().find(|(_, ws)| ws.len() == 1 && ws[0].0 == w).map(|(s, ws)| (*s, ws[0].1)).unwrap();
@@ -284,7 +284,7 @@ fn total_score_equals_the_top_decode_with_a_learned_word_and_kn_on() {
     e.key(Key::new(KeyKind::Enter)).unwrap();
     assert!(e.learner().records().iter().any(|r| r.word == "佔"), "premise: 佔 was learned");
     assert_eq!(type_zhan(&mut e).preedit, "佔", "premise: the learned word is on the best path");
-    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL };
+    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL, sinit: core::lm::Sinit::Boost, eps_sinit_ng: core::lm::EPS_SINIT_NG };
     let lam = Profile::Chat.lambda();
     let reading = vec!["ㄓㄢˋ".to_string()];
     let nb = decode_segment_learned(&capped, &reading, &on, lam, history(left, &on), End::Eos, 64, Some(&learn), true).unwrap();

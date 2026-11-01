@@ -91,3 +91,31 @@
 - 修訂三 plan-verifier 第二次 REVISE（3 項，逐項處置）：(1) 三個公開集合判不出改選有沒有變少 → FIX：新的句首學習集判「少於 main」，三個公開集合只當否決，零成本計數寫進 §2；(2) 保送可能把模糊音路徑換進池 → FIX：排除模糊音路徑、加測試；(3) 「選『再加』」學的是兩字詞 → FIX：測試與實機都寫明單選第一個字、先斷言紀錄。另把 `Stretch.paths`／`apply_rerank` 帶標記寫進第 3 點（審查的非阻擋項）。接著一次收尾審查。
 - 修訂三收尾審查 REVISE（P1 一項）：`b` 與保送照詞還是照字面認沒寫，照詞認時學到的字開頭的兩字詞（再加一個）永遠學不到 → 照字面認、標記只給守門與總分、加測試。非阻擋的 6 項（common 列用第一次顯示判、預算併成一次工作與保守／積極的停止條件、五欄轉三欄、守門段的範圍外、`total_score` 測試的路徑要含「照」、δ 0 的說明）一起改。第 7 項（security-reviewer）：檔案格式不變、只多收原本就有的紀錄，不加。到上限，交維護者。
 - 加審（維護者 11-01 選「再送一次審查才實作」）：READY。非阻擋項照改：保守／積極兩檔確認的基準（replay 加 `--rerank-level`）、範圍外的守門段寫成「其他規則的紀錄」、紀錄照輸入讀音查、每格報保送開了 τ 的段數、檔案清單補 `cli/src/main.rs` 與載入小模型的寫法。security-reviewer 不加（只改紀錄的用法，不改存什麼）。
+
+## 9. 實作紀錄（2026-11-01，`feat/sinit-learn`）
+
+- **程式**：`core/src/lm.rs`（`Sinit::{Boost, Lift, Off}`、`Learn.sinit`／`Learn.eps_sinit_ng`、`DecodedWord` 第 6 欄、常數 `EPS_SINIT`、`EPS_SINIT_NG`）、`core/src/engine.rs`（`PathWord.sinit`、`Stretch.b`、`sinit_chars`、`sinit_swap`、守門與 `total_score` 讀標記、`SinitStats`、`RerankJob::sinit_weights`）、`core/src/tinylm.rs` 與 `core/src/colloquial.rs`（`pick_masked`、`fused_pick`、`guarded_pick`、`rerank`、`rerank_colloquial` 多一個 `learn` 參數，值是 `EPS_SINIT·b_i`，空的或全 0 時結果與以前逐一相同）、`cli`（`shanjie-eval` 傳 `&[]`；`shanjie-replay` 加 `--rerank-level`、`--eps-sinit`、`--eps-sinit-ng`，`--learn on` 時 stderr 多一行 `sinit: stretches … swaps … missing … overturned … tau_opened …`）。
+- **兩個常數是暫定值**：`EPS_SINIT` 1.0、`EPS_SINIT_NG` 1.0，掃檔（§2）決定。
+- **標記的突變檢查**：把 `boosted` 的標記判斷與 `total_score` 的 `!sinit` 都拿掉（還原成 `lp > best_lp`），`sinit_a_rule_10_record_does_not_trigger_the_learning_guard`（`guard_skips` 變 1）與 `sinit_total_score_of_a_lifted_character_is_the_decode_score`（總分差 0.21）都失敗；各拿掉一處時只有對應的那一個失敗；還原後兩個都過。
+- **偏離**：(1) 守門與 `total_score` 的測試放在 `engine_learn.rs`（小詞庫加出貨小模型），不放 `engine_rerank.rs`：總分差來自 Kneser-Ney，`engine_rerank.rs` 的玩具模型要沒有 KN 的 n-gram 才配得起來，量不到。(2) `learn` 參數是 `EPS_SINIT·b_i`（已乘過），不是 `b_i`；τ 規則比的是 `learn[i] > learn[0]`，`EPS_SINIT` > 0 時和比 `b_i` 相同。(3) 池與 `b` 都只在有會意工作、池 2 條以上的段計算；`sinit_swap` 是獨立的函式，單元測試用手做的 n-best（第 9 名以後、已在池裡、沒有、只在模糊音路徑）。
+- **停止條件 §5「第 16 列與『再加一個』四個例子沒學之前都已經對」成立**：出貨模型（聊天、書面各一，會意開、標準檔、`PACK_ACG | PACK_IT`）打 `ㄓㄠˋ ㄐㄧㄢˋ ㄧˋ`、`ㄗㄞˋ ㄐㄧㄚ ㄧˊ ㄍㄜˋ` 都是「照建議」「再加一個」，n-gram 第一名就對、會意的選擇是第 0 條。所以「沒學之前／教一次之後」的出貨模型斷言沒有寫（等維護者決定用哪些列）；「在家休息」不污染的斷言（`sinit_taught_zai_does_not_pollute_zai_jia_xiu_xi`）不依賴這四例，已寫。
+- **`eval/learn/sinit-cases.tsv` 的 teach 列預設表**（出貨模型、會意開、標準檔、每列單打；「錯」＝預設就錯，要教；沒有「不必教」的組）：
+
+| 組 | teach 列 | 聊天 | 書面 |
+|---|---|---|---|
+| 她/他+很 | 她很喜歡看書 | 錯（他…） | 錯（他…） |
+| 她/他+要 | 她要去台北出差 | 錯 | 錯 |
+| 她/他+都 | 她都不說話 | 錯 | 錯 |
+| 她/他+說 | 她說明天會來 | 錯 | 錯 |
+| 妳/你+要 | 妳要去哪裡 | 錯（你…） | 錯 |
+| 妳/你+有 | 妳有看到我的書嗎 | 錯 | 錯 |
+| 妳/你+先 | 妳先走吧 | 錯 | 錯 |
+| 妳/你+怎 | 妳怎麼還沒睡 | 錯 | 錯 |
+| 牠/他+有 | 牠有點怕生 | 錯 | 錯 |
+| 牠/他+今 | 牠今天不想吃飯 | 錯 | 錯 |
+| 祂/他+不 | 祂不會離開你 | 錯 | 錯 |
+| 祂/他+是 | 祂是萬能的神 | 錯 | 錯 |
+| 喂/為 | 喂你在嗎 | 錯（為你在嗎） | 錯 |
+| 吶/那 | 吶給你 | 錯（那給你） | 錯 |
+
+  14 組都要教（≥ 6，§5 這一條不成立）。同一次單打：28 列 rare 沒學之前全錯，28 列 common 全對。各組的（第一音節、第二音節）互不相同，掃檔時依序在同一個引擎裡教、不會互相蓋掉。這份集合偏代名詞（她／妳／牠／祂的預設都是他／你）：它們是出貨模型預設會錯、又有自然的 common 句子的句首單字；非代名詞的只有喂／吶兩組，其他（咦→一、蛤→格、咳→殼、啊→阿）找不到自然的 common 句子，沒收。

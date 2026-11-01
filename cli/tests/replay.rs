@@ -453,6 +453,32 @@ fn learn_guard_counts_and_switches() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// SINIT (docs/contracts/sinit-learn.md section 2): `--rerank-level`, `--eps-sinit` and `--eps-sinit-ng` are evaluation flags that show in the tag only
+/// when given (and `--rerank-level standard` is the default, so no tag); a bad level is refused; with `--learn on` a `sinit:` line of the five counters
+/// goes to stderr (stdout stays the summary line). The one-record file holds 再 as a sentence-start single character before ㄐㄧㄢˋ, so the row's stretch
+/// (再見, two syllables) has a learned character and is counted.
+#[test]
+fn sinit_flags_tag_the_summary_and_the_counters_go_to_stderr() {
+    let dir = scratch("sinit");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>ㄐㄧㄢˋ\tㄗㄞˋ\t再\t1\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let plain = replay_with_learn(&dir, &src, &["--learn", "on"]);
+    let plain_out = text(&plain);
+    assert!(!plain_out.contains("+level") && !plain_out.contains("+eps_sinit"), "{plain_out}");
+    let err = String::from_utf8(plain.stderr.clone()).unwrap();
+    let line = err.lines().find(|l| l.starts_with("sinit: ")).unwrap_or_else(|| panic!("no sinit line: {err}"));
+    assert!(line.starts_with("sinit: stretches 1 swaps 0 missing 0 overturned "), "{line}");
+    let std_out = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "standard"]));
+    assert_eq!(std_out, plain_out, "the standard level is the default: same bytes, same tag");
+    let swept = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "conservative", "--eps-sinit", "2", "--eps-sinit-ng", "3"]));
+    assert!(swept.contains("+level:conservative+eps_sinit:2+eps_sinit_ng:3"), "{swept}");
+    assert_eq!(replay_with_learn(&dir, &src, &["--rerank-level", "loud"]).status.code(), Some(1));
+    assert_eq!(replay_with_learn(&dir, &src, &["--eps-sinit", "lots"]).status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// Rules: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
 /// as it was (core's quarantine renames the copy only), no temporary directory is left, and an existing output file keeps its
 /// bytes (the learning file is loaded before any output is created). Also an all-skipped file and a missing file are errors.

@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN};
+use crate::learn::{context_key, is_single, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX};
 use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
@@ -1039,23 +1039,26 @@ impl CappedLexicon {
 }
 
 /// How a decoded segment ends: the sentence end, or the transition into a fixed word on its right.
+#[derive(Clone, Copy)]
 pub enum End<'a> {
     Eos,
     /// `delta` is the fixed word's demotion (0.0 for none).
     Next { word: &'a str, lp: f64, delta: f64 },
 }
 
-/// A word of a decoded path: the text, the lp it was scored with, its demotion delta, the count of syllables it covers (`.3`), and the
+/// A word of a decoded path: the text, the lp it was scored with, its demotion delta, the count of syllables it covers (`.3`), the
 /// fuzzy-sound marker (`.4`, docs/contracts/fuzzy-input.md section 3.6): the word was read through the fuzzy-sound alternative of a span
 /// with no unknown syllable. The decoder sets the marker from the word's `Source`, never from the delta or the scores, and a learning
-/// boost does not take it off.
-pub type DecodedWord<'a> = (&'a str, f64, f64, usize, bool);
+/// boost does not take it off. And the SINIT marker (`.5`, docs/contracts/sinit-learn.md section 1.2): a sentence-start single character
+/// (rule 10) the decoder lifted to its reading's best lp for the semantic correction to choose; its lp is above its own best lp
+/// without being a learned boost, so the learning guard and `Engine::total_score` read this marker instead of comparing lps.
+pub type DecodedWord<'a> = (&'a str, f64, f64, usize, bool, bool);
 
 /// A path: total score and its words.
 pub type Scored<'a> = (f64, Vec<DecodedWord<'a>>);
 
 /// A path with a fuzzy word is a fuzzy path.
-fn fuzzy_path(ws: &[DecodedWord]) -> bool {
+pub fn fuzzy_path(ws: &[DecodedWord]) -> bool {
     ws.iter().any(|w| w.4)
 }
 
@@ -1095,16 +1098,40 @@ struct Hyp<'a> {
 /// that follow a re-pick of the pair's other word, key reachable): 2.0 learned 4 of 10, 4.0 learned
 /// 8 of 10, 6.0 and 8.0 learned 9 of 10 (smallest value that gets there). The unlearned
 /// remainder is a 3-syllable word winning over the taught 2-syllable one.
+/// Not for a rule 10 record (a single character at sentence start, docs/contracts/sinit-learn.md): with a semantic correction job it is only lifted
+/// to its reading's best lp (`Sinit::Lift`, the preference is the job's `EPS_SINIT` term), without one it takes `EPS_SINIT_NG` instead of this.
 pub const LEARN_EPS: f64 = 6.0;
 /// Boost size for the global level only (§12): enough to break a near tie, not to override a confident
 /// language model. 0 switches the level off (s4-learning §13, user decision 2026-10-08): with the word-class
 /// term (S2k) every value tried from 0.1 to 0.5 turned at least one correct common sentence wrong, because
 /// the class model leaves some of them near ties (`global_eps_table`). Global records are still written.
 pub const LEARN_EPS_GLOBAL: f64 = 0.0;
+/// SINIT (docs/contracts/sinit-learn.md section 1.4): the size of the learning term in the semantic correction's fused score,
+/// `EPS_SINIT * (b_i - b_0)` with `b_i = w / (w + 1)` of the sentence-start single character a candidate starts with. PLACEHOLDER: the
+/// GCP sweep of the contract (section 2, grid {0.5, 1, 2, 4}) sets the value; until then 1.0, the grid's second cell, so the feature is
+/// on. Shared by the three strengths (learning is not the strength of the semantic correction).
+pub const EPS_SINIT: f64 = 1.0;
+/// SINIT section 1.6: the size of the n-gram boost of a sentence-start single character when no semantic correction job runs (the
+/// decoder then scores it `best + EPS_SINIT_NG * w / (w + 1)` like any learned word). PLACEHOLDER, set by the same sweep (grid
+/// {0.5, 1, 2, 6}); until then 1.0.
+pub const EPS_SINIT_NG: f64 = 1.0;
+
+/// What the decoder does with a sentence-start single character it finds a record for (rule 10, SINIT section 1.2 and 1.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sinit {
+    /// No semantic correction job runs for this decode: the character gets the small n-gram boost (`Learn::eps_sinit_ng`) of any learned word.
+    Boost,
+    /// A job runs: the character's lp is lifted to the best lp of its reading (never lower than its own) and it is scored by the
+    /// ordinary path (`prob_tri`), the path word carrying the SINIT marker; the preference is the job's (`EPS_SINIT`).
+    Lift,
+    /// Rule 10 records are ignored (the evaluation probe that counts what the lift changes).
+    Off,
+}
 
 /// What decoding needs to apply learning: the learner, the text just before the segment (only its
 /// last two characters matter) and today's day number. The decoded path borrows new words (new-word B) from the
 /// learner, so the learner lives as long as the lexicon borrow of the result.
+#[derive(Clone, Copy)]
 pub struct Learn<'a> {
     pub learner: &'a Learner,
     pub before: &'a str,
@@ -1117,6 +1144,10 @@ pub struct Learn<'a> {
     /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
     /// float read per hypothesis key).
     pub eps_global: f64,
+    /// What a rule 10 record does (SINIT): `Sinit::Lift` when the engine runs a rerank job, `Sinit::Boost` when not.
+    pub sinit: Sinit,
+    /// `Sinit::Boost`'s ε: `EPS_SINIT_NG` in production; `Engine::set_eps_sinit_ng` overrides it for the sweep.
+    pub eps_sinit_ng: f64,
 }
 
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
@@ -1303,7 +1334,8 @@ pub fn decode_segment_fuzzy<'a>(
                 // Each hypothesis's learned hits depend only on its context key, not on the entry: look
                 // them up once per hypothesis (shared by key) before trying the entries.
                 let hits_of: Vec<usize>;
-                let mut hits: Vec<(Level, Vec<(&str, f64)>)> = Vec::new();
+                // The flag: the key is a sentence-start key (`^>` plus the next syllable), where only rule 10 records of a single character exist.
+                let mut hits: Vec<(Level, Vec<(&str, f64)>, bool)> = Vec::new();
                 if let Some(ln) = learned {
                     let mut by_ctx: HashMap<String, usize> = HashMap::new();
                     // Rule 8: at sentence start the key also holds the syllable after the word.
@@ -1313,7 +1345,8 @@ pub fn decode_segment_fuzzy<'a>(
                         .map(|h| {
                             let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
                             *by_ctx.entry(key).or_insert_with_key(|k| {
-                                hits.push(ln.learner.lookup(k, span, ln.today));
+                                let (lv, ws) = ln.learner.lookup(k, span, ln.today);
+                                hits.push((lv, ws, k.starts_with(NEXT_PREFIX)));
                                 hits.len() - 1
                             })
                         })
@@ -1329,13 +1362,33 @@ pub fn decode_segment_fuzzy<'a>(
                     // `Engine::total_score` and the rerank job see the score the decoder used.
                     let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1) + src.pen;
                     for (hi, h) in hyps[i - l].iter().enumerate() {
-                        let (mut lp, mut pb, mut was_boosted) = (lp0, pb0, false);
+                        let (mut lp, mut pb, mut was_boosted, mut sinit_mark) = (lp0, pb0, false, false);
                         if let Some(ln) = learned.filter(|_| p.is_some()) {
-                            let (lv, ws) = &hits[hits_of[hi]];
-                            let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
+                            let (lv, ws, sentence_start) = &hits[hits_of[hi]];
+                            // Rule 10 (SINIT): a single character under a sentence-start key.
+                            let rule10 = *sentence_start && is_single(word);
+                            let eps = match (*lv == Level::Global, rule10) {
+                                (true, _) => ln.eps_global,
+                                (_, true) => ln.eps_sinit_ng,
+                                _ => LEARN_EPS,
+                            };
                             // eps 0 switches the level off, for `extra` entries too: `best + 0` would
                             // still lift a word to a tie with the top.
                             match ws.iter().find(|(w, _)| *w == word) {
+                                // A rule 10 record is not looked at at all when `Sinit::Off`: the entry is scored as if it had no record.
+                                Some(_) if rule10 && ln.sinit == Sinit::Off => {
+                                    if extra {
+                                        continue;
+                                    }
+                                }
+                                // A job runs: only the way into the pool (SINIT section 1.2), the preference is the job's.
+                                Some(_) if rule10 && ln.sinit == Sinit::Lift => {
+                                    if best > lp {
+                                        lp = best;
+                                        pb = pow10(lp);
+                                    }
+                                    sinit_mark = true;
+                                }
                                 Some(&(_, w)) if eps > 0.0 => {
                                     let boosted = best + eps * (w / (w + 1.0));
                                     if boosted > lp {
@@ -1358,7 +1411,7 @@ pub fn decode_segment_fuzzy<'a>(
                             Some(q) if !(sc > cand[q].score) => {}
                             found => {
                                 let mut words = h.words.clone();
-                                words.push((word, lp, delta, l, src.sound));
+                                words.push((word, lp, delta, l, src.sound, sinit_mark));
                                 // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
                                 let surface = match found {
                                     Some(_) => key.0,
@@ -2109,7 +2162,7 @@ mod tests {
     /// The pool rule on hand-made n-bests: a fuzzy first path is a skip; otherwise the first `topk` paths without a fuzzy word, in order.
     #[test]
     fn rerank_pool_takes_the_first_non_fuzzy_paths_and_skips_a_fuzzy_first() {
-        let path = |f: bool| (0.0, vec![("x", 0.0, 0.0, 1, false), ("y", 0.0, 0.0, 1, f)]);
+        let path = |f: bool| (0.0, vec![("x", 0.0, 0.0, 1, false, false), ("y", 0.0, 0.0, 1, f, false)]);
         let nb = |fz: &[bool]| fz.iter().map(|&f| path(f)).collect::<Vec<Scored>>();
         assert_eq!(rerank_pool(&nb(&[false, true, false, false, true, false]), 3), Some(vec![0, 2, 3]));
         assert_eq!(rerank_pool(&nb(&[false, true, false]), 8), Some(vec![0, 2]), "fewer than topk: all of them");

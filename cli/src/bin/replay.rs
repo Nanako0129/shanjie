@@ -3,9 +3,11 @@
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-channel] [--rowstats FILE] [--keys FILE]
-//!                [--firsts FILE] [--packs LIST]
+//!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--eps-sinit X] [--eps-sinit-ng X]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
+//! `--rerank-level` (default standard, the App's) and `--eps-sinit`, `--eps-sinit-ng` (the sentence-start learning's sizes, docs/contracts/sinit-learn.md
+//! section 2) are evaluation only; each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
 //! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
 //!
 //! The engine is the App's: with the small model on, `data/lm/colloquial.sjlm` is loaded when the file exists (`Shell.build()` always loads it
@@ -15,11 +17,12 @@
 //! the shipping behavior: with the table loaded in chat and the channel on it ends `+colloq:<sha8>+rc`; with the option (or in formal) just `+colloq:<sha8>`.
 //! Without a loaded table the option changes nothing.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
-use cli::replay::{build_engine_packs, format_keys, replay_row, summary_line, Cfg, Rerank, RowIn};
+use cli::replay::{build_engine_packs, format_keys, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
 use core::engine::{PACK_ACG, PACK_IT, PACK_QUOTES};
 use core::eval::sha256_hex;
 use core::learn_store::{Opened, FILE};
 use core::lm::Profile;
+use core::tinylm::RerankLevel;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
@@ -60,6 +63,7 @@ fn run() -> Result<(), String> {
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_channel) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
+    let (mut level, mut eps_sinit, mut eps_sinit_ng) = (None::<RerankLevel>, None::<f64>, None::<f64>);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -94,6 +98,16 @@ fn run() -> Result<(), String> {
             "--colloquial" => colloquial = Some(val()?),
             "--no-colloquial" => no_colloquial = true,
             "--no-reading-channel" => reading_channel = false,
+            "--rerank-level" => {
+                level = Some(match val()?.as_str() {
+                    "conservative" => RerankLevel::Conservative,
+                    "standard" => RerankLevel::Standard,
+                    "aggressive" => RerankLevel::Aggressive,
+                    _ => return Err("--rerank-level must be conservative, standard or aggressive".into()),
+                })
+            }
+            "--eps-sinit" => eps_sinit = Some(val()?.parse().map_err(|_| "bad number for --eps-sinit")?),
+            "--eps-sinit-ng" => eps_sinit_ng = Some(val()?.parse().map_err(|_| "bad number for --eps-sinit-ng")?),
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
             "--firsts" => firsts = Some(val()?),
@@ -181,7 +195,7 @@ fn run() -> Result<(), String> {
         if packs_mask & PACK_IT != 0 { "+it" } else { "" }
     );
     let tag = format!(
-        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}",
+        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
@@ -189,10 +203,27 @@ fn run() -> Result<(), String> {
         if learn_file.is_some() { "+learnfile" } else { "" },
         if guard { "" } else { "+noguard" },
         co8.as_ref().map_or(String::new(), |h| format!("+colloq:{h}{}", if reading_channel && profile == Profile::Chat && rc_model { "+rc" } else { "" })),
+        match level {
+            Some(RerankLevel::Conservative) => "+level:conservative",
+            Some(RerankLevel::Aggressive) => "+level:aggressive",
+            _ => "",
+        },
+        eps_sinit.map_or(String::new(), |x| format!("+eps_sinit:{x}")),
+        eps_sinit_ng.map_or(String::new(), |x| format!("+eps_sinit_ng:{x}")),
     );
     let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;
     e.set_learn_guard(guard);
     e.set_reading_channel(reading_channel);
+    if let Some(l) = level {
+        e.set_rerank_level(l).map_err(|_| "set_rerank_level failed")?;
+    }
+    if let Some(x) = eps_sinit {
+        e.set_eps_sinit(x);
+    }
+    if let Some(x) = eps_sinit_ng {
+        e.set_eps_sinit_ng(x);
+    }
+    e.set_sinit_probe(learn);
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
     // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.
     if let Some(f) = &learn_file {
@@ -232,6 +263,9 @@ fn run() -> Result<(), String> {
     // Marks typed in a row are not counted, so picks per 100 characters stays comparable with the same text split at the marks.
     let gold_chars = rows.iter().map(|r| r.sent.chars().filter(|&c| !cli::replay::is_mark(c)).count()).sum();
     println!("{}", summary_line(&name, &tag, &outs, gold_chars));
+    if learn {
+        eprintln!("{}", sinit_line(&outs));
+    }
     Ok(())
 }
 

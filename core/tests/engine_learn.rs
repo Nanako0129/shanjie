@@ -2312,29 +2312,8 @@ fn sinit_english_and_digit_neighbours_are_not_learned() {
     assert_eq!(sinit_repick_before(&syl, &digits), ["^>ㄑㄧㄥˊ"], "control: a syllable neighbour is learned");
 }
 
-/// Measured (sinit-learn §2, "same key"): 再 taught before ㄐㄧㄚ (from 再加, or 再 alone) is one record `^>ㄐㄧㄚ` for 再, and
-/// the learner cannot tell the sentences apart: 在家 typed at sentence start then shows 再加 (2026-11-01, shipping chat model),
-/// not 在家. This test records that cost; it is the maintainer's to accept or reject (contract §5), not a requirement.
-#[test]
-fn sinit_same_key_two_character_word_measured() {
-    chat_only();
-    assert_eq!(baseline("ㄗㄞˋ ㄐㄧㄚ"), "在家", "precondition: the unlearned default");
-    for also_second in [false, true] {
-        let mut e = engine();
-        type_syls(&mut e, "ㄗㄞˋ ㄐㄧㄚ");
-        pick(&mut e, 2, 1, "再");
-        if also_second {
-            pick(&mut e, 2, 2, "加");
-        }
-        e.key(k(KeyKind::Enter)).unwrap();
-        assert_eq!(records_of(&e, "再"), [("^>ㄐㄧㄚ".to_string(), 1.0)]);
-        let after = commit_of(&mut e, "ㄗㄞˋ ㄐㄧㄚ");
-        println!("SINIT same-key (second syllable also picked: {also_second}): 在家 typed after teaching shows {after:?}");
-        assert_eq!(after, "再加", "measured 2026-11-01; a change here means the decoder or the model changed");
-    }
-}
-
-/// The shipping model, formal profile, row 16 (user-reported.txt): only recorded. 2026-10-05 measured 趙建議 (formal wrong, chat right).
+/// The n-gram alone (no small model), formal profile, row 16 (user-reported.txt): only recorded. 2026-10-05 measured 趙建議 (formal wrong, chat right);
+/// 2026-11-01 with the current model both show 照建議.
 #[test]
 fn sinit_row16_shipping_model_reference() {
     let mut e = engine();
@@ -2346,4 +2325,209 @@ fn sinit_row16_shipping_model_reference() {
     let mut c = engine();
     c.set_profile(lm::Profile::Chat).unwrap();
     println!("SINIT row16 reference (shipping model, no learning record): formal {formal:?}, chat {:?}", commit_of(&mut c, R16));
+}
+
+// ---------- SINIT with the shipping models, rerank on (docs/contracts/sinit-learn.md sections 1.2 to 1.5, 2) ----------
+
+/// The shipping models as `Shell.build()` and `shanjie-replay` build them: lexicon with the default packs, n-gram model, small model,
+/// colloquial table, demotion, rerank on at the standard level, `profile`; learning on with a fixed clock.
+fn ship(profile: lm::Profile) -> Engine {
+    let data = |f: &str| root().join("data/lm").join(f);
+    let packs = root().join("data/packs");
+    let mut e = Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&packs, PACK_ACG | PACK_IT))).unwrap();
+    e.load_lm(&lm_path()).unwrap();
+    e.load_tinylm(&data("tinylm.sjtl")).unwrap();
+    e.load_colloquial(&data("colloquial.sjlm")).unwrap();
+    e.set_demote(true).unwrap();
+    e.set_prediction(false).unwrap();
+    e.set_rerank(true).unwrap();
+    e.set_rerank_level(core::tinylm::RerankLevel::Standard).unwrap();
+    e.set_profile(profile).unwrap();
+    e.set_today(Some(DAY));
+    e.set_learning(true);
+    e
+}
+/// What the semantic correction would show now: its job taken, run and applied as the shell does between keys.
+fn settle(e: &mut Engine, mut o: Output) -> Output {
+    if let Some(job) = e.take_rerank_job() {
+        if let Some(n) = e.apply_rerank(job.run()).unwrap() {
+            o = n;
+        }
+    }
+    o
+}
+/// Types `reading` and returns the display once the semantic correction has applied.
+fn type_settled(e: &mut Engine, reading: &str) -> String {
+    let o = type_syls(e, reading);
+    settle(e, o).preedit
+}
+/// One teach: types `reading`, re-picks the first syllable as `word`, lets the correction apply, Enter; returns what was committed.
+fn teach_first(e: &mut Engine, reading: &str, word: &str) -> String {
+    let n = reading.split(' ').count();
+    type_settled(e, reading);
+    pick(e, n, 1, word);
+    let o = e.key(k(KeyKind::End)).unwrap();
+    settle(e, o);
+    e.key(k(KeyKind::Enter)).unwrap().commit
+}
+
+/// `tiny` with the shipping small model and the semantic correction on (no colloquial table: a lexicon engine has no data folder, so the
+/// jobs use the header triple of the model).
+fn tiny_rerank(text: &str) -> Engine {
+    let mut e = tiny(text, text);
+    e.load_tinylm(&root().join("data/lm/tinylm.sjtl")).unwrap();
+    e.set_rerank(true).unwrap();
+    e
+}
+/// `tiny_taught` with the semantic correction on: 照 taught for row 16 (the first syllable re-picked), the composition closed.
+fn tiny_rerank_taught() -> Engine {
+    let mut e = tiny_rerank(SINIT_TINY);
+    type_settled(&mut e, R16);
+    pick(&mut e, 3, 1, "照");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "照建議", "precondition: the re-pick took");
+    assert_eq!(records_of(&e, "照"), [("^>ㄐㄧㄢˋ".to_string(), 1.0)], "precondition: the record");
+    e
+}
+
+/// SINIT section 1.2, the guard half. Only a rule 10 record (照 under `^>ㄐㄧㄢˋ`, a character that is not the first of its reading: 趙 is
+/// -1, 照 -6), the semantic correction on: the decoder lifts 照 to 趙's lp and marks it, the learning guard does not count it as a taught
+/// boost (`guard_skips` 0), and the job's candidates hold a path with 照. Reverting `boosted` to the lp comparison (`lp > best_lp(reading,
+/// word)`: -1 > -6) makes this fail: the job is gone (checked 2026-11-01, see the contract).
+#[test]
+fn sinit_a_rule_10_record_does_not_trigger_the_learning_guard() {
+    chat_only();
+    let mut e = tiny_rerank_taught();
+    let o = type_syls(&mut e, R16);
+    assert_eq!(o.preedit, "照建議", "the lifted 照 is among the n-gram's first paths");
+    assert_eq!(e.guard_skips(), 0, "the guard does not count a lifted rule 10 character");
+    let job = e.take_rerank_job().expect("the stretch is sent to the semantic correction");
+    let cands = job.candidates();
+    assert!(cands[0].iter().any(|c| c.starts_with('照')), "the pool holds a path with 照: {cands:?}");
+    assert_eq!(job.sinit_weights(), [[0.5, 0.0]], "照建議 carries b = 1/(1+1), 趙建議 none");
+    assert_eq!(e.sinit_stats(), SinitStats { stretches: 1, swaps: 0, missing: 0, tau_opened: 0 });
+}
+
+/// SINIT section 1.2, the total half: with 照建議 shown, `total_score` equals the decoder's score of that path (the n-gram's top score), which
+/// scores the lifted 照 by the ordinary path (`prob_tri`), not as a learned boost. Reverting `total_score` to the lp comparison makes it score 照 by
+/// `word_learned` (no Kneser-Ney substitution), which differs on the shipping model. The reference is computed here from the decoder.
+#[test]
+fn sinit_total_score_of_a_lifted_character_is_the_decode_score() {
+    chat_only();
+    let mut e = tiny_rerank_taught();
+    assert_eq!(type_syls(&mut e, R16).preedit, "照建議", "precondition: the path with the lifted 照 is shown");
+    let s = shared();
+    let capped = CappedLexicon::new(Arc::new(Lexicon::parse(SINIT_TINY).unwrap()), "", &s.lm, None).unwrap();
+    let learn = lm::Learn {
+        learner: e.learner(), before: "", after: None, today: DAY, eps_global: lm::LEARN_EPS_GLOBAL, sinit: lm::Sinit::Lift, eps_sinit_ng: lm::EPS_SINIT_NG,
+    };
+    let nb = lm::decode_segment_fuzzy(
+        &capped, &syls(R16), &s.lm, s.lm.scoring(lm::Profile::Chat), "<s>", lm::End::Eos, core::BEAM_S1, Some(&learn), true, 0, core::fuzzy::DELTA_SOUND,
+    )
+    .unwrap();
+    let (want, words) = nb.iter().find(|(_, ws)| ws.iter().map(|w| w.0).collect::<String>() == "照建議").expect("the path is in the n-best");
+    let (_, lp, _, _, _, marker) = words[0];
+    assert!(marker && lp > capped.best_lp(&syls("ㄓㄠˋ"), "照").unwrap(), "premise: 照 is lifted above its own best lp and marked");
+    let total = e.total_score().unwrap();
+    assert!((total - want).abs() < 1e-9, "total_score {total} against the decoder's {want}");
+}
+
+/// The learned character is part of a two-character word in a candidate (SINIT section 1.3, "by the surface"): 再 taught under `^>ㄐㄧㄚ`
+/// from a lexicon where 再加 is a word. The job's candidates that start with 再, whether the path cuts 再 off as a word or reads 再加, carry
+/// b = 0.5; those that do not, 0; 再加一個 is among them.
+#[test]
+fn sinit_the_learned_character_inside_a_two_character_word_counts() {
+    chat_only();
+    const L: &str = "ㄗㄞˋ 在 -1.0\nㄗㄞˋ 再 -3.0\nㄐㄧㄚ 加 -1.0\nㄐㄧㄚ 家 -1.5\nㄗㄞˋ-ㄐㄧㄚ 再加 -4.0\nㄧˊ 一 -1.0\nㄍㄜˋ 個 -1.0\nㄧˊ-ㄍㄜˋ 一個 -1.0\n";
+    const R: &str = "ㄗㄞˋ ㄐㄧㄚ ㄧˊ ㄍㄜˋ";
+    // taught without the semantic correction (whose own choice here is 再加一個 already, nothing to re-pick), then it is turned on
+    let mut e = tiny(L, L);
+    assert_ne!(type_syls(&mut e, R).preedit, "再加一個", "precondition: the n-gram's default is another writing");
+    pick(&mut e, 4, 1, "再");
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.load_tinylm(&root().join("data/lm/tinylm.sjtl")).unwrap();
+    e.set_rerank(true).unwrap();
+    assert_eq!(records_of(&e, "再"), [("^>ㄐㄧㄚ".to_string(), 1.0)], "precondition: the single character was taught, not the word");
+    type_syls(&mut e, R);
+    let job = e.take_rerank_job().expect("a job");
+    let (cands, b) = (job.candidates(), job.sinit_weights());
+    assert!(cands[0].iter().any(|c| c == "再加一個"), "premise: 再加一個 is a candidate: {cands:?}");
+    for (c, b) in cands[0].iter().zip(&b[0]) {
+        assert_eq!(*b, if c.starts_with('再') { 0.5 } else { 0.0 }, "{c}");
+    }
+    assert_eq!(e.sinit_stats().missing, 0);
+}
+
+/// SINIT section 2, the fuzzy case: a record that can only match a path with a fuzzy-sound word (照 recorded under the typed ㄗㄠˋ; the lexicon reads
+/// 照 as ㄓㄠˋ, the ㄓ/ㄗ pair is on) puts no weight on any candidate and changes neither the pool nor the job.
+#[test]
+fn sinit_a_learned_character_only_on_a_fuzzy_path_changes_nothing() {
+    chat_only();
+    const L: &str = "ㄗㄠˋ 造 -1.0\nㄗㄠˋ 皂 -2.0\nㄓㄠˋ 照 -1.0\nㄐㄧㄢˋ 建 -1.0\n";
+    const R: &str = "ㄗㄠˋ ㄐㄧㄢˋ";
+    let candidates = |record: bool| {
+        let mut e = tiny_rerank(L);
+        let dir = tmp_dir(if record { "sinit-fuzzy-on" } else { "sinit-fuzzy-off" });
+        if record {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(file_of(&dir), format!("{}\n^>ㄐㄧㄢˋ\tㄗㄠˋ\t照\t1\t{DAY}\n", core::learn_store::HEADER)).unwrap();
+            e.learning_open(&dir).unwrap();
+            assert_eq!(e.learner().records().len(), 1, "precondition: the record was read");
+        }
+        e.set_fuzzy(0b0010).unwrap(); // ㄓ/ㄗ
+        type_syls(&mut e, R);
+        let job = e.take_rerank_job().expect("a job");
+        (job.candidates(), job.sinit_weights(), e.sinit_stats())
+    };
+    let (without, _, _) = candidates(false);
+    let (with, weights, stats) = candidates(true);
+    assert_eq!(with, without, "the pool is the one without the record");
+    assert!(with[0].iter().all(|c| !c.starts_with('照')), "premise: no fuzzy path is a candidate");
+    assert_eq!(weights, [[0.0, 0.0]]);
+    assert_eq!(stats, SinitStats { stretches: 1, swaps: 0, missing: 1, tau_opened: 0 });
+}
+
+/// SINIT section 1.6, the fallback (no semantic correction): 照 taught for row 16 shows with the n-gram boost of `EPS_SINIT_NG`; set here to the
+/// placeholder value so the test does not follow the sweep. 再 taught before ㄐㄧㄚ and then 在家 typed (the same key, "same key" of the
+/// contract): measured with the shipping n-gram model, 2026-11-01, `EPS_SINIT_NG` 1: 在家 stays 在家 (the prototype's `LEARN_EPS` 6 showed
+/// 再加). A change here means the decoder or the model changed, or the fallback's size did.
+#[test]
+fn sinit_same_key_two_character_word_measured() {
+    chat_only();
+    assert_eq!(baseline("ㄗㄞˋ ㄐㄧㄚ"), "在家", "precondition: the unlearned default");
+    for also_second in [false, true] {
+        let mut e = engine();
+        e.set_eps_sinit_ng(1.0);
+        type_syls(&mut e, "ㄗㄞˋ ㄐㄧㄚ");
+        pick(&mut e, 2, 1, "再");
+        if also_second {
+            pick(&mut e, 2, 2, "加");
+        }
+        e.key(k(KeyKind::Enter)).unwrap();
+        assert_eq!(records_of(&e, "再"), [("^>ㄐㄧㄚ".to_string(), 1.0)]);
+        let after = commit_of(&mut e, "ㄗㄞˋ ㄐㄧㄚ");
+        println!("SINIT same-key fallback (second syllable also picked: {also_second}): 在家 typed after teaching shows {after:?}");
+        assert_eq!(after, "在家", "measured 2026-11-01 with EPS_SINIT_NG 1.0");
+    }
+}
+
+/// SINIT section 2, the pollution test with the shipping models (semantic correction on, the standard level, both profiles): 再 taught at
+/// sentence start before ㄐㄧㄚ (the first syllable re-picked as the single character) leaves 在家休息 typed at sentence start as 在家休息.
+/// The two-syllable 在家 alone is not asserted (measured, see the contract: it shows 再加 for some values of `EPS_SINIT`).
+#[test]
+fn sinit_taught_zai_does_not_pollute_zai_jia_xiu_xi() {
+    for p in [lm::Profile::Chat, lm::Profile::Formal] {
+        let mut e = ship(p);
+        let want = "在家休息";
+        let r = "ㄗㄞˋ ㄐㄧㄚ ㄒㄧㄡ ㄒㄧˊ";
+        assert_eq!(type_settled(&mut e, r), want, "{p:?} precondition: the default");
+        e.key(k(KeyKind::Enter)).unwrap();
+        teach_first(&mut e, "ㄗㄞˋ ㄐㄧㄚ", "再");
+        let recs: Vec<_> = e.learner().records().iter().filter(|r| r.word == "再").collect();
+        assert!(recs.len() == 1 && recs[0].context == "^>ㄐㄧㄚ" && recs[0].reading == syls("ㄗㄞˋ"), "{p:?} precondition: (^>ㄐㄧㄚ, ㄗㄞˋ, 再) was learned");
+        assert_eq!(type_settled(&mut e, r), want, "{p:?}: 再 before ㄐㄧㄚ does not turn 在家休息 into 再加休息");
+        println!("SINIT {p:?}: ㄗㄞˋ ㄐㄧㄚ typed alone after teaching shows {:?}", {
+            e.key(k(KeyKind::Enter)).unwrap();
+            type_settled(&mut e, "ㄗㄞˋ ㄐㄧㄚ")
+        });
+    }
 }

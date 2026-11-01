@@ -1,6 +1,6 @@
 //! E-E real-engine replay (docs/contracts/engine-replay.md): rows typed key by key through one `core::engine::Engine`
 //! built like the App's `Shell.build()`, with the user's re-picks simulated on request. Numbers only come out of here.
-use core::engine::{Engine, Key, KeyKind, Layout, Output, MOD_SHIFT, PACK_ACG, PACK_IT, PAGE_SIZE};
+use core::engine::{Engine, Key, KeyKind, Layout, Output, SinitStats, MOD_SHIFT, PACK_ACG, PACK_IT, PAGE_SIZE};
 use core::eval::{pyround, sha256_hex, Lenient};
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
@@ -43,6 +43,10 @@ pub struct RowOut {
     /// Stretches the learning guard kept out of the rerank job of the decode after the last reading key, read before any
     /// `final` apply or re-pick (contract section 5).
     pub guard_skips: usize,
+    /// What the sentence-start single-character learning did in the decode after the last reading key (`Engine::sinit_stats`, SINIT
+    /// contract section 2), and how many stretches the semantic correction took a learned candidate away from at that key's rerank.
+    pub sinit: SinitStats,
+    pub sinit_overturned: usize,
 }
 
 /// The punctuation marks a reading token may be, with the key the App sends for each (`core/src/engine.rs` `SHIFT_PUNCT` / `PLAIN_PUNCT`, standard
@@ -147,6 +151,8 @@ struct Session<'a> {
     max_len: usize,
     keys: usize,
     rewrites: usize,
+    /// `RerankResult::sinit_overturned` of the last job `rerank` ran (0 when it ran none).
+    overturned: usize,
     cursor: usize,
     n: usize,
 }
@@ -169,9 +175,12 @@ impl Session<'_> {
 
     /// take, run, apply; whether `apply_rerank` returned `Some`. A change of the preedit counts as a rewrite.
     fn rerank(&mut self) -> Result<bool, String> {
+        self.overturned = 0;
         let Some(job) = self.e.take_rerank_job() else { return Ok(false) };
         let before = self.cur().preedit.clone();
-        match self.e.apply_rerank(job.run()).map_err(|_| "engine error on apply_rerank".to_string())? {
+        let result = job.run();
+        self.overturned = result.sinit_overturned();
+        match self.e.apply_rerank(result).map_err(|_| "engine error on apply_rerank".to_string())? {
             Some(o) => {
                 self.rewrites += (o.preedit != before) as usize;
                 self.cur = Some(o);
@@ -274,7 +283,7 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
     }
     e.set_left_context(ctx);
     let max_len = e.max_window_len();
-    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, cursor: syls.len(), n: syls.len() };
+    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, overturned: 0, cursor: syls.len(), n: syls.len() };
     let (mut out, last) = (RowOut { ideal: typed.len() + 1, ..RowOut::default() }, typed.len() - 1);
     let mut committed_syls = 0; // syllables complete when the engine last committed
     for (k, key) in typed.into_iter().enumerate() {
@@ -282,6 +291,7 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
         s.press(key, true)?;
         if k == last {
             out.guard_skips = s.e.guard_skips();
+            out.sinit = s.e.sinit_stats();
         }
         if s.committed.len() > before {
             out.autocommit = true;
@@ -293,6 +303,9 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
                 s.rerank()?;
             }
             Rerank::Final => {}
+        }
+        if k == last {
+            out.sinit_overturned = s.overturned;
         }
     }
     out.first = format!("{}{}", s.committed, s.cur().preedit);
@@ -315,6 +328,21 @@ pub struct RowIn {
     pub ctx: String,
     pub sent: String,
     pub syls: Syls,
+}
+
+/// The SINIT counters of a set (docs/contracts/sinit-learn.md section 2), summed over its rows: stretches with a rule 10 record, learned paths
+/// swapped into the pool, stretches with no learned path in the n-best, learned candidates the semantic correction overturned, stretches where
+/// the lift took the n-gram margin under tau. One line of numbers, for the sweep script.
+pub fn sinit_line(outs: &[RowOut]) -> String {
+    let sum = |f: fn(&RowOut) -> usize| outs.iter().map(f).sum::<usize>();
+    format!(
+        "sinit: stretches {} swaps {} missing {} overturned {} tau_opened {}",
+        sum(|o| o.sinit.stretches),
+        sum(|o| o.sinit.swaps),
+        sum(|o| o.sinit.missing),
+        sum(|o| o.sinit_overturned),
+        sum(|o| o.sinit.tau_opened),
+    )
 }
 
 /// `--keys` file: `row\tideal\tactual\tpicks\tfinal_ok\trewrites` per row, rows counted from 1. Digits only.

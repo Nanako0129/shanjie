@@ -208,7 +208,7 @@ fn total_score_equals_the_top_decode_with_a_learned_pack_word() {
     e.key(Key::new(KeyKind::Enter)).unwrap();
     assert_eq!(zhan(&mut e).preedit, "佔", "premise: the learned pack word is on the best path");
     let cap = capped(&lex, &lm, &["佔"]);
-    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL };
+    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL, sinit: core::lm::Sinit::Boost, eps_sinit_ng: core::lm::EPS_SINIT_NG };
     let nb = decode_segment_learned(&cap, &syls("ㄓㄢˋ"), &lm, Profile::Chat.lambda(), history(left, &lm), End::Eos, 64, Some(&learn), true).unwrap();
     assert!(nb[0].1[0].1 > -3.5, "premise: boosted");
     close(e.total_score().unwrap(), nb[0].0);

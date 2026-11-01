@@ -2,11 +2,11 @@
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
 use crate::colloquial::{self, Colloquial, ReadingChannel};
-use crate::learn::{context_key, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
+use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, SENTINEL, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
-use crate::lm::{decode_segment_fuzzy, history, rerank_pool, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, Scored};
+use crate::lm::{decode_segment_fuzzy, history, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, Scored, Sinit};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
@@ -28,15 +28,68 @@ fn next_generation() -> u64 {
     GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
+/// A word of a job's path as `PathWord` keeps it: (word, lp, demotion delta, syllables, SINIT marker).
+type JobWord = (String, f64, f64, usize, bool);
+
+/// SINIT section 1.4: `b` of a path, the weight of the learned sentence-start character it starts with (the literal first character of its
+/// text, whatever words the path cuts it into); 0 when it starts with none.
+fn sinit_b(path: &[DecodedWord], chars: &[(char, f64)]) -> f64 {
+    let first = path.first().and_then(|w| w.0.chars().next());
+    first.and_then(|c| chars.iter().find(|x| x.0 == c)).map_or(0.0, |x| x.1)
+}
+
+/// What `sinit_swap` did to a pool.
+#[derive(Debug, PartialEq, Eq)]
+enum Swap {
+    /// The n-best has no path without a fuzzy word that starts with a learned character: nothing to put in, the pool is as it was.
+    Missing,
+    /// The first such path is in the pool already.
+    Kept,
+    /// That path was not in the pool and replaced its last path.
+    In,
+}
+
+/// SINIT section 1.3: makes sure the pool (`rerank_pool`'s indices into the n-best `best`, two paths at least) holds the best path that starts
+/// with a learned sentence-start character and has no fuzzy word. A path outside the pool takes the place of the pool's last path, never of the
+/// first: the pool has two paths at least, so its last one is not the n-gram's first.
+fn sinit_swap(best: &[Scored], pool: &mut [usize], chars: &[(char, f64)]) -> Swap {
+    match (0..best.len()).find(|&i| !fuzzy_path(&best[i].1) && sinit_b(&best[i].1, chars) > 0.0) {
+        None => Swap::Missing,
+        Some(i) if pool.contains(&i) => Swap::Kept,
+        Some(i) => {
+            *pool.last_mut().expect("a pool has two paths") = i;
+            Swap::In
+        }
+    }
+}
+
+/// What the sentence-start single-character learning (SINIT, docs/contracts/sinit-learn.md) did in the current decode, counted for the
+/// evaluation replay only (`Engine::sinit_stats`): reset with the job.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SinitStats {
+    /// Stretches sent to the semantic correction that have a rule 10 record for their first syllable under the key the stretch starts with.
+    pub stretches: usize,
+    /// Of those, the stretches whose pool got a learned path swapped in (section 1.3).
+    pub swaps: usize,
+    /// Of those, the stretches whose n-best has no non-fuzzy path starting with a learned character (nothing to swap in).
+    pub missing: usize,
+    /// Only with `Engine::set_sinit_probe`: stretches where the lift brought the n-gram's first-second margin under tau, from tau or more
+    /// (the decode with rule 10 records ignored is the comparison). The learned candidates then compete with the unlearned ones.
+    pub tau_opened: usize,
+}
+
 /// One free stretch of a rerank job (S7c-2a section 2.2). Owned data only.
 struct Stretch {
     /// Index in `Engine::path` of the stretch's first word.
     at: usize,
-    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta, syllables), as `path` holds them. `paths[0]` is what `path` holds at
+    /// The first `TOPK` paths of the n-best: (word, lp, demotion delta, syllables, SINIT marker), as `path` holds them. `paths[0]` is what `path` holds at
     /// `at..at + len` when the job is made; apply checks that it still does (section 2.3, revision 1).
-    paths: Vec<Vec<(String, f64, f64, usize)>>,
+    paths: Vec<Vec<JobWord>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
+    /// Their SINIT weights `b_i = w / (w + 1)` (section 1.4): the record weight of the sentence-start single character the candidate starts with, else 0.
+    /// All 0 for almost every stretch.
+    b: Vec<f64>,
     /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
     /// has no channel term.
     syls: Vec<String>,
@@ -68,6 +121,8 @@ pub struct RerankJob {
     /// The `manual` words of the engine's lexicon (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with the lexicon: the rerank of either profile
     /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
     manual: Arc<ManualSet>,
+    /// `EPS_SINIT` (or the sweep's override) when the job was made: `b` times it is the learning term of the fused score.
+    eps_sinit: f64,
     /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
     /// the last L characters of `Engine::left_full` (context-return section 2; nothing longer is copied into a job).
     left: String,
@@ -80,9 +135,11 @@ struct Choice {
     /// The words `path` must still hold at `at..` (the n-gram first path the job was made from).
     expect: Vec<String>,
     pick: usize,
-    words: Vec<(String, f64, f64, usize)>,
+    words: Vec<JobWord>,
     /// The context key the stretch was scored with.
     key: String,
+    /// A SINIT learned candidate led the stretch (`b_0 > 0`) and the choice is one with none (`b == 0`): the semantic correction undid the learning.
+    overturned: bool,
 }
 
 /// The output of `RerankJob::run`, for `Engine::apply_rerank`. Holds input text, so no `Debug`.
@@ -107,20 +164,22 @@ impl RerankJob {
                 let key = self.model.key_for(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
+                let learn: Vec<f64> = s.b.iter().map(|b| self.eps_sinit * b).collect();
                 let pick = match &self.colloquial {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                         let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.used, &self.manual)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.used, &self.manual, &learn)
                     }
-                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual),
+                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual, &learn),
                 }
                 .map_or(0, |r| r.0);
                 let pick = if pick < s.paths.len() { pick } else { 0 };
                 before.push_str(&surfaces[pick]);
                 let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
                 let expect = s.paths[0].iter().map(|w| w.0.clone()).collect();
-                Choice { at: s.at, expect, pick, words, key }
+                let overturned = s.b.first().is_some_and(|&b0| b0 > 0.0) && s.b[pick] == 0.0;
+                Choice { at: s.at, expect, pick, words, key, overturned }
             })
             .collect();
         RerankResult { generation: self.generation, choices }
@@ -130,6 +189,11 @@ impl RerankJob {
     /// to choose among. The tests read it; the job does not change.
     pub fn candidates(&self) -> Vec<Vec<String>> {
         self.stretches.iter().map(|s| s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect()).collect()
+    }
+
+    /// Every stretch's SINIT weights `b_i`, in the candidates' order (docs/contracts/sinit-learn.md section 1.4); the tests read them, the job does not change.
+    pub fn sinit_weights(&self) -> Vec<Vec<f64>> {
+        self.stretches.iter().map(|s| s.b.clone()).collect()
     }
 
     /// The most characters any candidate of any stretch has (composition-cap: at most `ctx - 3`, so none ends in `TooLong`).
@@ -149,6 +213,11 @@ impl RerankResult {
     /// The chosen index of each stretch, in composition order (0 = the n-gram first).
     pub fn picks(&self) -> Vec<usize> {
         self.choices.iter().map(|c| c.pick).collect()
+    }
+
+    /// How many stretches the semantic correction took a SINIT learned candidate away from (`Choice::overturned`); the evaluation replay counts it.
+    pub fn sinit_overturned(&self) -> usize {
+        self.choices.iter().filter(|c| c.overturned).count()
     }
 
     /// The context key each stretch was scored with, in composition order (holds input text: never log it).
@@ -422,6 +491,8 @@ struct EnWords {
 struct PathWord {
     word: String,
     lp: f64,
+    /// The SINIT marker of the decoded word (`DecodedWord.5`): lifted by rule 10, not boosted. The learning guard and `total_score` read it.
+    sinit: bool,
     is_punct: bool,
     delta: f64,
     /// Syllables the word covers (punctuation is 1).
@@ -653,6 +724,14 @@ pub struct Engine {
     subspans: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
+    /// SINIT: the fused score's learning term size and the no-job boost (`lm::EPS_SINIT`, `lm::EPS_SINIT_NG`); `set_eps_sinit`,
+    /// `set_eps_sinit_ng` override them for the evaluation sweep.
+    eps_sinit: f64,
+    eps_sinit_ng: f64,
+    /// Evaluation only (`set_sinit_probe`): also decode a rule 10 stretch without its records, to count `SinitStats::tau_opened`.
+    sinit_probe: bool,
+    /// What SINIT did in the current decode (`sinit_stats`); reset with the job in `invalidate`.
+    sinit: SinitStats,
     learner: Learner,
     store: Option<LearnStore>,
     /// §4 bit0: the last full rewrite failed. Set by a failed full rewrite; cleared only by a
@@ -997,6 +1076,10 @@ impl Engine {
             newword: true,
             subspans: crate::learn::NEWWORD_SUBSPANS,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
+            eps_sinit: crate::lm::EPS_SINIT,
+            eps_sinit_ng: crate::lm::EPS_SINIT_NG,
+            sinit_probe: false,
+            sinit: SinitStats::default(),
             learner: Learner::default(),
             store: None,
             write_failed: false,
@@ -1072,6 +1155,7 @@ impl Engine {
         self.rerank_job = None;
         self.guard_skips = 0;
         self.fuzzy_skips = 0;
+        self.sinit = SinitStats::default();
     }
 
     // ---- S7c-2a rerank (docs/contracts/s7c2a-core-rerank.md) ----
@@ -1214,7 +1298,7 @@ impl Engine {
         }
         // Right to left, so the earlier ranges still point at their words.
         for c in changes.into_iter().rev() {
-            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(word, lp, delta, syllables)| PathWord { word, lp, is_punct: false, delta, syllables }));
+            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(word, lp, delta, syllables, sinit)| PathWord { word, lp, sinit, is_punct: false, delta, syllables }));
         }
         // `refresh_lm` builds the display from exactly the strings of `path`.
         self.display = self.path.iter().map(|p| p.word.as_str()).collect();
@@ -1327,6 +1411,29 @@ impl Engine {
     /// Test hook (§12): ε of the global level.
     pub fn set_eps_global(&mut self, eps: f64) {
         self.eps_global = eps;
+    }
+
+    /// Evaluation only (the SINIT sweep, `shanjie-replay --eps-sinit`): the size of the learning term in the fused score
+    /// (`lm::EPS_SINIT`). Taken by the jobs made after it; it does not drop the pending one.
+    pub fn set_eps_sinit(&mut self, eps: f64) {
+        self.eps_sinit = eps;
+    }
+
+    /// Evaluation only (`shanjie-replay --eps-sinit-ng`): the n-gram boost of a sentence-start single character when no semantic correction
+    /// job runs (`lm::EPS_SINIT_NG`). The next decode uses it.
+    pub fn set_eps_sinit_ng(&mut self, eps: f64) {
+        self.eps_sinit_ng = eps;
+    }
+
+    /// Evaluation only: with `true` a stretch that has a SINIT record is decoded a second time with its records ignored, so
+    /// `SinitStats::tau_opened` can count what the lift changed. Off in production (one more decode on those stretches).
+    pub fn set_sinit_probe(&mut self, on: bool) {
+        self.sinit_probe = on;
+    }
+
+    /// What SINIT did in the current decode (see `SinitStats`); all 0 after any change that drops the job, until the next decode.
+    pub fn sinit_stats(&self) -> SinitStats {
+        self.sinit
     }
 
     /// Test-purpose clock: day number to use instead of the local day.
@@ -2199,7 +2306,7 @@ impl Engine {
         fn close_u<'a>(before: Option<&'a str>, unknown: bool, count: usize) -> Option<&'a str> {
             if unknown && count == 1 { None } else { before }
         }
-        for PathWord { word: w, lp, is_punct, delta, syllables: n } in &self.path {
+        for PathWord { word: w, lp, sinit, is_punct, delta, syllables: n } in &self.path {
             if cut == Some(at) {
                 if open {
                     total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev));
@@ -2217,7 +2324,8 @@ impl Engine {
             let n = *n;
             // model-v6 section 2.8 rule 1: a word the learner boosted (lp above its best capped lp under its reading, the test of
             // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
-            let learned = self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
+            // A word the decoder lifted for rule 10 (`sinit`) is not one of those: its lp is above its own best without a boost (SINIT section 1.2).
+            let learned = !sinit && self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
             // A learned word is scored by P2 alone (no Kneser-Ney substitution, no table), as in the decoder.
             // A fixed word is the right neighbour that closes the stretch before it (`End::Next`), so (b') applies to its term.
             let fixed_here = self.fixed.iter().any(|f| f.start == at);
@@ -2776,6 +2884,8 @@ impl Engine {
         // The stretches also keep the readings of their first path when the lexicon has `manual` words, which the rerank matches against them.
         let keep_used = !self.lex.manual().is_empty();
         let mut stretches = Vec::new();
+        // The evaluation probe of `set_sinit_probe` needs the tau the jobs pick with.
+        let probe_tau = if self.sinit_probe { self.rerank_tau() } else { None };
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
         let mut job_end = 0;
@@ -2813,7 +2923,11 @@ impl Engine {
                 let before = format!("{}{out}{}", self.left, if after_run { self.run.as_str() } else { "" });
                 let run_next = before_run.then(|| format!("{PUNCT_PREFIX}{}", self.run));
                 let after = run_next.as_deref().or(self.syls.get(stop).map(String::as_str));
-                let learn = (!self.learner.is_empty()).then(|| Learn { learner: &self.learner, before: &before, after, today, eps_global: self.eps_global });
+                // SINIT: with a job a rule 10 record only lifts its character into the candidates; without one it is a small n-gram boost.
+                let sinit = if jobs { Sinit::Lift } else { Sinit::Boost };
+                let learn = (!self.learner.is_empty()).then(|| Learn {
+                    learner: &self.learner, before: &before, after, today, eps_global: self.eps_global, sinit, eps_sinit_ng: self.eps_sinit_ng,
+                });
                 let best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
                     crate::fuzzy::DELTA_SOUND,
@@ -2829,6 +2943,27 @@ impl Engine {
                 let guarded = pool.is_some() && self.learn_guard && self.boosted(st, start, first);
                 self.guard_skips += usize::from(guarded);
                 let pool = pool.filter(|_| !guarded);
+                // SINIT sections 1.3 and 1.4: the learned sentence-start characters of the stretch, and the pool with a learned path in it.
+                let mut pool = pool;
+                let sinit_chars = if pool.is_some() { self.sinit_chars(start, stop, &before, after, today) } else { Vec::new() };
+                if let (Some(pool), false) = (pool.as_mut(), sinit_chars.is_empty()) {
+                    self.sinit.stretches += 1;
+                    match sinit_swap(&best, pool, &sinit_chars) {
+                        Swap::Missing => self.sinit.missing += 1,
+                        Swap::In => self.sinit.swaps += 1,
+                        Swap::Kept => {}
+                    }
+                    if let (true, Some(ln), Some(tau)) = (self.sinit_probe, learn.as_ref(), probe_tau) {
+                        let off = Learn { sinit: Sinit::Off, ..*ln };
+                        let margin = |nb: &[Scored]| rerank_pool(nb, TOPK).filter(|p| p.len() >= 2).map(|p| nb[p[0]].0 - nb[p[1]].0);
+                        let plain = decode_segment_fuzzy(
+                            &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&off), self.demote, self.fuzzy,
+                            crate::fuzzy::DELTA_SOUND,
+                        )
+                        .map_err(|_| EngineError::Internal)?;
+                        self.sinit.tau_opened += usize::from(margin(&plain).is_some_and(|m| m >= tau) && margin(&best).is_some_and(|m| m < tau));
+                    }
+                }
                 let in_job = pool.is_some();
                 if let Some(pool) = pool {
                     let top: Vec<&Scored> = pool.iter().map(|&i| &best[i]).collect();
@@ -2838,16 +2973,17 @@ impl Engine {
                     }
                     stretches.push(Stretch {
                         at: path.len(),
-                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _)| (w.to_string(), lp, delta, l)).collect()).collect(),
+                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _, sinit)| (w.to_string(), lp, delta, l, sinit)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
+                        b: top.iter().map(|(_, ws)| sinit_b(ws, &sinit_chars)).collect(),
                         syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
                         used: if keep_used { self.lex.path_readings(&self.syls[start..stop], first.iter().map(|w| (w.0, w.3))) } else { Vec::new() },
                         gap: gap_text,
                     });
                 }
-                for (w, lp, delta, l, _) in first {
+                for (w, lp, delta, l, _, sinit) in first {
                     out.push_str(w);
-                    path.push(PathWord { word: w.to_string(), lp: *lp, is_punct: false, delta: *delta, syllables: *l });
+                    path.push(PathWord { word: w.to_string(), lp: *lp, sinit: *sinit, is_punct: false, delta: *delta, syllables: *l });
                 }
                 if in_job {
                     job_end = out.len();
@@ -2859,7 +2995,7 @@ impl Engine {
             }
             if let Some(f) = right {
                 out.push_str(&f.word);
-                path.push(PathWord { word: f.word.clone(), lp: lp_fixed[gap], is_punct: self.is_punct(f.start), delta: delta_fixed[gap], syllables: f.end - f.start });
+                path.push(PathWord { word: f.word.clone(), lp: lp_fixed[gap], sinit: false, is_punct: self.is_punct(f.start), delta: delta_fixed[gap], syllables: f.end - f.start });
             }
         }
         self.display = out;
@@ -2872,22 +3008,56 @@ impl Engine {
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
             let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, manual: self.lex.manual().clone(), left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, manual: self.lex.manual().clone(), eps_sinit: self.eps_sinit, left, stretches });
         }
         Ok(())
+    }
+
+    /// The tau the jobs made now pick with: the colloquial cell's where the colloquial term applies, else the small model's header triple (the
+    /// two paths of `RerankJob::run`). `None` without a small model.
+    fn rerank_tau(&self) -> Option<f64> {
+        let model = self.tinylm.as_deref()?;
+        Some(if self.colloquial.is_some() && colloquial::applies(self.profile, model) {
+            colloquial::cell(self.rerank_level).1
+        } else {
+            model.params(self.profile, self.rerank_level).1
+        })
+    }
+
+    /// SINIT (docs/contracts/sinit-learn.md section 1.3): the sentence-start single characters the learner holds for the stretch
+    /// `start..stop`, each with `b = w / (w + 1)` of its record. Only a stretch that starts a sentence (no Han character before it: the key
+    /// is `^`) has any: the records under `^>` plus the syllable after the first one (the next syllable of the stretch, or `after` for a
+    /// one-syllable stretch), looked up under the first syllable as typed, the key the decoder reads (`record_key`).
+    fn sinit_chars(&self, start: usize, stop: usize, before: &str, after: Option<&str>, today: i64) -> Vec<(char, f64)> {
+        if self.learner.is_empty() || context_key(before) != SENTINEL {
+            return Vec::new();
+        }
+        let next = if stop - start >= 2 { Some(self.syls[start + 1].as_str()) } else { after };
+        let (level, hits) = self.learner.lookup(&record_key(SENTINEL.to_string(), next), std::slice::from_ref(&self.syls[start]), today);
+        if level != Level::Exact {
+            return Vec::new();
+        }
+        hits.into_iter().filter(|(w, _)| is_single(w)).filter_map(|(w, wt)| Some((w.chars().next()?, wt / (wt + 1.0)))).collect()
     }
 
     /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)
     /// was scored with a learned boost, i.e. with an lp above the best capped lp of that word under its reading (the decoder
     /// raises lp only that way). Such a stretch is not reranked, so a choice the user taught is never undone by the model.
+    /// Except a rule 10 character (SINIT, docs/contracts/sinit-learn.md section 1.2): the decoder lifts it to its reading's best lp when a job
+    /// runs and marks the word (`DecodedWord.5`); a marked word is not a boost whatever its lp, so the stretch is reranked with the learned
+    /// candidate in the pool and the learning term in the fused score.
     fn boosted(&self, st: &LmState, from: usize, words: &[DecodedWord]) -> bool {
         if self.learner.is_empty() {
             return false;
         }
         let mut at = from;
-        words.iter().any(|&(w, lp, _, n, _)| {
+        words.iter().any(|&(w, lp, _, n, _, sinit)| {
             let span = self.syls.get(at..at + n);
             at += n;
+            // A word the decoder lifted for rule 10 (SINIT section 1.2) is not a taught boost whatever its lp: the model may choose against it.
+            if sinit {
+                return false;
+            }
             // A span that does not fit cannot happen (one character per syllable); counted as boosted, the safe side.
             // A word read through an adjacent-key syllable (fuzzy input) is not an entry of the typed reading either, but nothing taught
             // it: not boosted, so a stretch with one is reranked whether or not the learner holds a record (the evaluation CLI, which has
@@ -4022,5 +4192,55 @@ mod short_mark_tests {
         e.last_short = Some((0, "ai".to_string()));
         e.key(Key::new(KeyKind::Up)).unwrap();
         assert!(e.drun.is_some() && e.last_short.is_some(), "Up in the buffer changes nothing: the mark stays");
+    }
+}
+
+#[cfg(test)]
+mod sinit_tests {
+    use super::*;
+
+    /// A path of one-character words `text`; `fuzzy` marks its last word as a fuzzy-sound one.
+    fn path(text: &'static str, fuzzy: bool) -> Scored<'static> {
+        let n = text.chars().count();
+        (0.0, text.char_indices().enumerate().map(|(i, (at, c))| (&text[at..at + c.len_utf8()], 0.0, 0.0, 1, fuzzy && i + 1 == n, false)).collect())
+    }
+    const LEARNED: [(char, f64); 1] = [('照', 0.5)];
+
+    /// SINIT section 1.4: `b` is the weight of the learned character the path's text starts with, however the path cuts its words.
+    #[test]
+    fn b_is_the_weight_of_the_first_character() {
+        assert_eq!(sinit_b(&path("照建議", false).1, &LEARNED), 0.5);
+        assert_eq!(sinit_b(&path("趙建議", false).1, &LEARNED), 0.0);
+        assert_eq!(sinit_b(&path("建議照", false).1, &LEARNED), 0.0, "only the first character counts");
+        assert_eq!(sinit_b(&[("照建", 0.0, 0.0, 2, false, false), ("議", 0.0, 0.0, 1, false, false)], &LEARNED), 0.5, "inside a two-character word");
+        assert_eq!(sinit_b(&[], &LEARNED), 0.0);
+        assert_eq!(sinit_b(&path("照", false).1, &[]), 0.0);
+    }
+
+    /// Section 1.3 and the test list of section 2: a learned path ranked after the pool's end replaces the pool's last path and never the first;
+    /// one already in the pool changes nothing; none in the n-best (or only a fuzzy one) leaves the pool as it was.
+    #[test]
+    fn a_learned_path_outside_the_pool_takes_the_last_place() {
+        let mut best: Vec<Scored> = (0..8).map(|i| path(Box::leak(format!("趙{i}").into_boxed_str()), false)).collect();
+        best.push(path("照9", false)); // the ninth path, the pool is the first eight
+        best.push(path("照10", false));
+        let mut pool: Vec<usize> = (0..8).collect();
+        assert_eq!(sinit_swap(&best, &mut pool, &LEARNED), Swap::In);
+        assert_eq!(pool, [0, 1, 2, 3, 4, 5, 6, 8], "the best learned path (the ninth), in the last place; the first is where it was");
+        assert_eq!(sinit_swap(&best, &mut pool, &LEARNED), Swap::Kept, "now it is in the pool");
+        let mut small = vec![0, 1];
+        let mut two = vec![path("趙", false), path("照", false), path("照照", false)];
+        assert_eq!(sinit_swap(&two, &mut small, &LEARNED), Swap::Kept);
+        two.truncate(1);
+        two[0] = path("趙", false);
+        assert_eq!(sinit_swap(&two, &mut vec![0, 1], &LEARNED), Swap::Missing);
+        let mut pool: Vec<usize> = (0..8).collect();
+        let none: Vec<Scored> = (0..10).map(|i| path(Box::leak(format!("趙{i}").into_boxed_str()), false)).collect();
+        assert_eq!(sinit_swap(&none, &mut pool, &LEARNED), Swap::Missing);
+        assert_eq!(pool, (0..8).collect::<Vec<_>>(), "no learned path in the n-best: the pool is unchanged");
+        let mut fuzzy_only: Vec<Scored> = (0..9).map(|i| path(Box::leak(format!("趙{i}").into_boxed_str()), false)).collect();
+        fuzzy_only.push(path("照9", true));
+        assert_eq!(sinit_swap(&fuzzy_only, &mut pool, &LEARNED), Swap::Missing, "a learned path with a fuzzy word is not a candidate");
+        assert_eq!(pool, (0..8).collect::<Vec<_>>());
     }
 }
