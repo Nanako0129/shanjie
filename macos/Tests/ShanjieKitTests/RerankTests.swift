@@ -756,7 +756,8 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.runner.late.count, 2)
         XCTAssertEqual(r.c.client.text, RerankRow.reranked)
         r.runner.waitMode = .timeout
-        r.c.type("su3")  // a new composition: one job runs, the next one waits
+        r.c.type(RerankRow.standardKeys)  // a new composition: one job runs, the latest waits
+        XCTAssertEqual(r.runner.received, 3, "premise: the second composition's first job is running, the others wait")
         let received = r.runner.received, held = r.runner.held.count
         XCTAssertEqual(held, 1, "premise: one job running")
         let calls = r.c.client.calls.count
