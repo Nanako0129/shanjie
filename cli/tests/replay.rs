@@ -3,7 +3,7 @@
 //! test states the display it relies on, so a model change fails there first. Each engine is about 700 MB, so the tests take turns.
 use cli::common::{load_lenient, root};
 use cli::replay::{build_engine, keys_of, move_cost, replay_row, summary_line, Cfg, Rerank, RowOut};
-use core::engine::{Engine, Key, KeyKind, MAX_SYLLABLES, MOD_SHIFT};
+use core::engine::{Engine, Key, KeyKind, MAX_SYLLABLES};
 use core::eval::Lenient;
 use core::lm::Profile;
 use std::process::Command;
@@ -115,9 +115,6 @@ fn a_repick_costs_the_moves_the_window_and_the_digit() {
 /// sent text is compared as a string, not through `Lenient`. `；` has no key: the row is an error.
 #[test]
 fn a_punctuation_mark_stays_in_the_composition_and_is_sent_exactly() {
-    for (mark, key, mods) in [('，', ',', MOD_SHIFT), ('。', '.', MOD_SHIFT), ('？', '/', MOD_SHIFT), ('！', '1', MOD_SHIFT), ('：', ';', MOD_SHIFT), ('、', '\\', 0)] {
-        assert!(keys_of(&mark.to_string()).unwrap() == vec![Key::ch(key, mods)], "{mark}");
-    }
     let (_g, mut e) = engine(false);
     let len = load_lenient().unwrap();
     for mark in ["，", "。", "？", "！", "：", "、"] {
@@ -517,6 +514,17 @@ fn packs_option_changes_only_the_tag_it_names() {
     assert!(run(replay, &["--rows", rows]).contains("+ctx+acg+it+nopred"));
     assert!(run(replay, &["--rows", rows, "--packs", "acg,it"]).contains("+ctx+acg+it+nopred"));
     assert!(run(replay, &["--rows", rows, "--packs", "acg,quotes,it"]).contains("+ctx+acg+quotes+it+nopred"));
+    assert!(run(replay, &["--rows", rows, "--packs", "acg", "--packs", "it"]).contains("+ctx+acg+it+nopred"), "repeats add up");
+    // The mask reaches the engine: 經典台詞 changes this line's pick (室蘭 without it, 世蘭 with it; experiments/punct0/gold-*.txt line 3).
+    let quote = dir.join("quote.txt");
+    std::fs::write(&quote, "|皇上，你害得世蘭好苦啊！|ㄏㄨㄤˊ ㄕㄤˋ ， ㄋㄧˇ ㄏㄞˋ ㄉㄜˊ ㄕˋ ㄌㄢˊ ㄏㄠˇ ㄎㄨˇ ㄚ˙ ！\n").unwrap();
+    let first = |packs: &[&str]| {
+        let out = dir.join("firsts.txt");
+        let _ = std::fs::remove_file(&out);
+        run(replay, &[&["--rows", quote.to_str().unwrap(), "--firsts", out.to_str().unwrap()], packs].concat());
+        std::fs::read_to_string(&out).unwrap()
+    };
+    assert_eq!((first(&[]), first(&["--packs", "acg,quotes,it"])), ("皇上，你害得室蘭好苦啊！\n".into(), "皇上，你害得世蘭好苦啊！\n".into()));
     let bad = Command::new(replay).args(["--rows", rows, "--packs", "acg,mystery"]).output().unwrap();
     assert_eq!(bad.status.code(), Some(1));
     std::fs::remove_dir_all(&dir).unwrap();

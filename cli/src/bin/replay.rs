@@ -59,7 +59,7 @@ fn run() -> Result<(), String> {
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_channel) = (None::<String>, false, true);
-    let mut packs_mask = cli::replay::PACKS;
+    let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -98,7 +98,10 @@ fn run() -> Result<(), String> {
             "--keys" => keys = Some(val()?),
             "--firsts" => firsts = Some(val()?),
             "--packs" => {
-                packs_mask = val()?
+                // Like shanjie-eval: a repeated `--packs` adds to the earlier ones; the first one replaces the default.
+                let base = if packs_given { packs_mask } else { 0 };
+                packs_given = true;
+                packs_mask = base | val()?
                     .split(',')
                     .map(|n| match n {
                         "acg" => Ok(PACK_ACG),
@@ -226,7 +229,8 @@ fn run() -> Result<(), String> {
     write(rowstats, format_rowstats(&outs.iter().zip(&rows).map(|(o, r)| (o.first_ok, o.first.clone(), r.sent.clone())).collect::<Vec<_>>()))?;
     write(keys, format_keys(&outs))?;
     write(firsts, outs.iter().map(|o| format!("{}\n", o.first)).collect())?;
-    let gold_chars = rows.iter().map(|r| r.sent.chars().count()).sum();
+    // Marks typed in a row are not counted, so picks per 100 characters stays comparable with the same text split at the marks.
+    let gold_chars = rows.iter().map(|r| r.sent.chars().filter(|&c| !cli::replay::is_mark(c)).count()).sum();
     println!("{}", summary_line(&name, &tag, &outs, gold_chars));
     Ok(())
 }
