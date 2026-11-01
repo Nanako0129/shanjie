@@ -3,11 +3,11 @@
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-channel] [--rowstats FILE] [--keys FILE]
-//!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--eps-sinit X] [--eps-sinit-ng X]
+//!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--eps-sinit X] [--delta-sinit X] [--eps-sinit-ng X]
 //!                [--sinit-stretches FILE]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
-//! `--rerank-level` (default standard, the App's) and `--eps-sinit`, `--eps-sinit-ng` (the sentence-start learning's sizes, docs/contracts/sinit-learn.md
+//! `--rerank-level` (default standard, the App's) and `--eps-sinit`, `--delta-sinit`, `--eps-sinit-ng` (the sentence-start learning's sizes, docs/contracts/sinit-learn.md
 //! section 2) are evaluation only; `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
 //! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
 //! `--strict` (evaluation only) compares the first display, the sent text and the `--correct` target character for character, not through
@@ -67,7 +67,7 @@ fn run() -> Result<(), String> {
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_channel) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
-    let (mut level, mut eps_sinit, mut eps_sinit_ng) = (None::<RerankLevel>, None::<f64>, None::<f64>);
+    let (mut level, mut eps_sinit, mut delta_sinit, mut eps_sinit_ng) = (None::<RerankLevel>, None::<f64>, None::<f64>, None::<f64>);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -112,6 +112,7 @@ fn run() -> Result<(), String> {
                 })
             }
             "--eps-sinit" => eps_sinit = Some(val()?.parse().map_err(|_| "bad number for --eps-sinit")?),
+            "--delta-sinit" => delta_sinit = Some(val()?.parse().map_err(|_| "bad number for --delta-sinit")?),
             "--eps-sinit-ng" => eps_sinit_ng = Some(val()?.parse().map_err(|_| "bad number for --eps-sinit-ng")?),
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
@@ -201,7 +202,7 @@ fn run() -> Result<(), String> {
         if packs_mask & PACK_IT != 0 { "+it" } else { "" }
     );
     let tag = format!(
-        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}",
+        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
@@ -215,6 +216,7 @@ fn run() -> Result<(), String> {
             _ => "",
         },
         eps_sinit.map_or(String::new(), |x| format!("+eps_sinit:{x}")),
+        delta_sinit.map_or(String::new(), |x| format!("+delta_sinit:{x}")),
         eps_sinit_ng.map_or(String::new(), |x| format!("+eps_sinit_ng:{x}")),
     );
     let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;
@@ -226,6 +228,9 @@ fn run() -> Result<(), String> {
     }
     if let Some(x) = eps_sinit {
         e.set_eps_sinit(x);
+    }
+    if let Some(x) = delta_sinit {
+        e.set_delta_sinit(x);
     }
     if let Some(x) = eps_sinit_ng {
         e.set_eps_sinit_ng(x);

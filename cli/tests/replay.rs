@@ -489,7 +489,7 @@ fn learn_guard_counts_and_switches() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// SINIT (docs/contracts/sinit-learn.md section 2): `--rerank-level`, `--eps-sinit` and `--eps-sinit-ng` are evaluation flags that show in the tag only
+/// SINIT (docs/contracts/sinit-learn.md section 2): `--rerank-level`, `--eps-sinit`, `--delta-sinit` and `--eps-sinit-ng` are evaluation flags that show in the tag only
 /// when given (and `--rerank-level standard` is the default, so no tag); a bad level is refused; with `--learn on` a `sinit:` line of the five counters
 /// goes to stderr (stdout stays the summary line). The one-record file holds 再 as a sentence-start single character before ㄐㄧㄢˋ, so the row's stretch
 /// (再見, two syllables) has a learned character and is counted.
@@ -510,6 +510,9 @@ fn sinit_flags_tag_the_summary_and_the_counters_go_to_stderr() {
     assert_eq!(std_out, plain_out, "the standard level is the default: same bytes, same tag");
     let swept = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "conservative", "--eps-sinit", "2", "--eps-sinit-ng", "3"]));
     assert!(swept.contains("+level:conservative+eps_sinit:2+eps_sinit_ng:3"), "{swept}");
+    let delta = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--delta-sinit", "1.5"]));
+    assert!(delta.contains("+delta_sinit:1.5") && !delta.contains("+eps_sinit"), "{delta}");
+    assert_eq!(replay_with_learn(&dir, &src, &["--delta-sinit", "wide"]).status.code(), Some(1));
     assert_eq!(replay_with_learn(&dir, &src, &["--rerank-level", "loud"]).status.code(), Some(1));
     assert_eq!(replay_with_learn(&dir, &src, &["--eps-sinit", "lots"]).status.code(), Some(1));
     std::fs::remove_dir_all(&dir).unwrap();
