@@ -1,0 +1,441 @@
+# R1：解碼時用讀音算機率（探索；2026-10-22 登記）
+
+起因（維護者 2026-10-22）：「變快這題我覺得不算是進步而是修正，這個應該是我們的n-gram有問題，不應該靠常談解決」「上次說到應該用讀音判斷機率或許是根本解」。選擇題：先做這片，字幕檢查（SUB-0，`exp/sub0-subtitles`）暫停。
+
+問題：n-gram 只看字，不看讀音。「否則便會」的「會」讀ㄎㄨㄞˋ幾乎只出現在「會計」，n-gram 卻照「便會」這個字串的次數給分。v0.5.0 的讀音通道項（P5）在融合那一層修了這種錯，但只在常談生效時才加（聊天、標準強度、配對的會意、常談表已載入）；書面、保守、積極都沒有。
+
+做法的方向：noisy channel。候選的分數 = 這串字的機率 × 這些字讀成打的音的機率，在每個設定、每個強度都算。這一頁在任何 R1 的數字之前 commit。
+
+修訂一（2026-10-22，任何數字之前；plan-verifier 第一次 REVISE）：每個設定的 CLI 指令、雜湊與摘要標記；聊天標準拆成「基準＝出貨」與「λ 0＝P4d 那一格」兩個錨點；列出每一跑。
+
+探索片：只用調參層（chatclause、cvtune-clean、wikitune-clean）、開發層（discordtune）與回歸層集合；不碰判讀集與保留集；不改核心與 App；不出貨。
+
+## 讀音項
+
+- 和 P5 的通道項同一個定義（`experiments/p5-reading-channel/p5.py` 的 `lex_logp`、`word_terms`、`ch_of`，估法 lex）：
+  - 路徑上每個**單字詞** w 讀 r：t(r, w) = s(r, w) − max_r' s(r', w)，s 是引擎詞庫的分數。多字詞一律 0；詞庫找不到 (r, w) 照 0 算並計數。
+  - ch_j = Σ max(t, −c)。
+- **不同的地方是加在哪裡**：P5 加在融合之後；R1 加在 n-gram 分數上：s_j = ng_j + λ·ch_j。
+  - 用 s 對 n-gram 的前 64 名重新排序，取新的前 8 名進語意校正。
+  - 融合照各設定、各強度出貨的規則（α、τ、δ），n-gram 那一欄改用 s。
+  - 聊天、標準強度：常談照出貨（P4d 那一格），P5 的通道項拿掉（ν 0）。R1 這一項就是要取代它。
+- **離線近似**：用 CLI 的傾印（每列前 64 名候選）重算，不改解碼器。真的解碼器可能把第 64 名以外的路徑拉上來；只報「正解在前 64 名」的比例，不估它。
+
+## 小模型分數（工具改動）
+
+- 新的前 8 名可能有原本第 8 名以外的候選，CLI 現在只替前 8 名打 `ll`。
+- `cli/` 加 `--tinylm-scores-topk N`（預設 8；不給時所有輸出逐位元組不變，單元測試斷言）：`--tinylm-scores` 的紀錄改成前 N 名的 `ll`，用核心已公開的 `TinyLm::ll_many`，和出貨的 `rerank` 用同一個函式與同一個前文 key。不改 `core/`。
+- 錨點：N 64 時，前 8 名的 `ll` 和 N 8 那一跑逐位元組相同，不同就停。
+
+## 設定、基準與每一次 CLI
+
+「現行出貨」照 `tools/bench.py` VERSIONS2 的 v0.5.0 那一列：兩種設定都是 `--context --packs acg --tinylm`，聊天另加 `--colloquial-core`，書面靠模型旁的連文表。
+
+**每一跑的指令**（`data/lm/` 放出貨的模型；跑之前 `shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/trigram.sjt3.sha256 data/tinylm.sjtl.sha256 data/colloquial.sjlm.sha256`，有一個不符就停）：
+
+```
+shanjie-eval --lm data/lm/bigram.sjlm --profile <P> --context --packs acg --tinylm data/lm/tinylm.sjtl --rerank-level <L> \
+  [--colloquial-core data/lm/colloquial.sjlm] --rows <集合> --dump D --dump-words W --rowstats R \
+  --tinylm-scores S --tinylm-scores-topk 64
+```
+
+| 設定 | `--profile` | `--rerank-level` | `--colloquial-core` | 摘要行的設定標記要有 | 集合 |
+|---|---|---|---|---|---|
+| 聊天標準 | chat | standard | 有 | `+colloq:2984eeb5+rc` | chatclause、discordtune、cvtune-clean、打字測驗、錯字回報（前 154 列）、dev302 |
+| 聊天保守 | chat | conservative | 有 | `+colloq:2984eeb5`，沒有 `+rc` | discordtune、打字測驗 |
+| 聊天積極 | chat | aggressive | 有 | `+colloq:2984eeb5`，沒有 `+rc` | discordtune、打字測驗 |
+| 書面標準 | formal | standard | 無 | `+tri:fdd3b05d`，沒有 `+colloq` | wikitune-clean、cvtune-clean、打字測驗、錯字回報（前 154 列）、dev302 |
+| 書面保守 | formal | conservative | 無 | 同上 | wikitune-clean、打字測驗 |
+| 書面積極 | formal | aggressive | 無 | 同上 | wikitune-clean、打字測驗 |
+
+標記不符就停（例如書面沒有 `+tri`、聊天標準沒有 `+rc`）。上表共 19 跑。另外三種錨點用的跑：
+
+- 聊天標準加 `--no-reading-channel`（P4d 那一格），只跑 chatclause 與 discordtune：2 跑。
+- `--tinylm-scores-topk` 不給（N 8）：聊天標準與書面標準的 cvtune-clean 各一跑，共 2 跑。
+
+**錨點**（不符就停）：
+
+1. **基準＝出貨**：每個設定、每個集合，離線重算出貨的那一格（λ 0；聊天標準是 P4d 那一格加 P5 的 lex／1.0／4，其他設定是各自那一檔的融合），每列的選字等於那一跑 `--tinylm-scores` 的 `c`，對錯等於 rowstats。
+2. **λ 0 的聊天標準＝P4d 那一格**：離線的 P4d 那一格（ν 0）等於 `--no-reading-channel` 那兩跑的選字與 rowstats。
+3. **小模型分數**：N 64 那一跑前 8 名的 `ll`，和 N 8 那一跑逐位元組相同。
+
+R1 的每一格在聊天標準是「P4d 那一格＋λ·ch」（P5 那一項拿掉，ν 0）；其他設定是「各自那一檔＋λ·ch」。所有判讀都對錨點 1 的出貨比。
+
+**第 9 名以後的候選**：沒有 `ll` 的列（`--tinylm-scores` 沒寫紀錄的列）由 s 的第一名決定，照 d23 的規則。新的前 8 名裡只要有一個候選沒有 `ll`（太長、模型打不了分），那一列也由 s 的第一名決定，和核心在前 8 名有候選太長時跳過重排一樣；這種列只報列數（修訂二，任何數字之前，`/code-review` 指出原本沒有規定）。第 9–64 名的對錯用和 rowstats 相同的寬鬆對照，CER 用 `evalstats.levenshtein`。
+
+## 格點與選格（事先固定）
+
+- 格點：λ ∈ {0.25, 0.5, 1.0, 2.0} × c ∈ {1, 2, 4}，12 格；估法只用 lex（P5 選的估法）。
+- 一組值用在所有設定（產品只出一組）。
+- 選格：每一格算兩個 U2（改對 − 2×改壞，對各自的基準）：chatclause（聊天、標準）與 wikitune-clean（書面、標準）。
+  - 只看兩個 U2 都 > 0 的格，取兩者相加最大的一格。
+  - 同分時依序取：較小的那個 U2 大的、λ 小的、c 大的。
+- **沒有合格的格 → 照登記不過**，不跑後面的條件。
+
+## 判讀（選中的那一格，對各設定的基準；10-20 第三次放寬的出貨標準）
+
+| # | 條件 | 設定與集合 |
+|---|---|---|
+| 1 | 不顯著變差（精確 McNemar p ≥ 0.05 或淨值 ≥ 0），而且改壞 ≤ 26 或改壞÷改對 ≤ 0.6 | discordtune：聊天標準、聊天保守、聊天積極 |
+| 2a | 回歸層：逐列相同，或改壞 ≤ 2 且淨值 ≥ 0 | 打字測驗：六個設定；dev302 書面標準（dev302 聊天只報、逐列標類別） |
+| 2b | Δtop1 的 90% 配對 bootstrap 下界 ≥ −1.0 個百分點 | cvtune-clean：聊天標準、書面標準；wikitune-clean：書面保守、書面積極 |
+| 3 | 淨值 > 0，而且改壞÷改對 ≤ 0.6（不帶學習檔） | 錯字回報（前 154 列）：聊天標準＋書面標準合計 |
+
+- 四條全過：報給維護者。下一步是產品片：讀音項放進核心的解碼器（每個設定、每個強度），以這片的離線選字當錨點逐列核對，常談上 P5 那一項同時拿掉；出貨前照規則在沒看過的判讀集確認一發。
+- 任一條不過：寫「照登記不過」，和維護者討論，不結案。
+- **只報**：
+  - 每個設定的 n-gram 層改對／改壞（只看 s 的第一名）。
+  - 新的前 8 名換掉候選的列數，以及需要第 8 名以外 `ll` 的列數。
+  - 錯字回報裡讀音項扣分的正解列（10-21 記的盲點：「長」ㄓㄤˇ、「嗎」ㄇㄚ˙、「波」ㄅㄛ）。調參層與開發層的讀音由 `tools/readings.py` 產生，看不到正解用次要讀音被扣分；只有錯字回報與打字測驗是真人讀音。
+  - wikitune-clean 同時是書面標準的選格集合，和書面保守／積極的 2b 集合；那兩條只能當回歸看。
+  - error ratio。
+- 看過任何數字之後，不改格點、選格規則與門檻。
+
+## 預算、停止條件、範圍外
+
+- **預算**：
+  - GCP c4d VM ≤ 6 小時：上面 23 跑 CLI，再離線算 12 格。
+  - 同一個比較的所有設定在同一台、同一種 CPU 上跑。私人集合的傾印與分數檔跑完就刪（`trap … EXIT`）。
+  - executor 1 回合：CLI 選項與離線重算的程式；兩者都過 `/code-review`（CLI 選項是程式改動，另照改動分級送 verifier）。
+  - 超過 1.5 倍就停下來問。
+- **停止條件**：
+  - 錨點 1–3 任何一個對不上；模型檔的雜湊或摘要行的設定標記不符。
+  - 前 8 名的 `ll` 兩跑不同。
+  - 私人句子被帶回 Mac。
+  - 用到判讀集或保留集。
+- **範圍外**：
+  - 改核心的解碼器（產品片）。
+  - 讀音計數 B（按讀音重新計數語料；這片之後）。
+  - mc 估法、多字詞的讀音項。
+  - 改常談或會意的參數。
+  - SUB-0。
+
+## R1b：兩臂固定格子重判（探索；2026-10-22 登記，在任何 R1b 的判讀數字之前）
+
+R1 照登記不過（研究紀錄 2026-10-22）：選出 λ 2.0、c 4，條件 1、2b 全過；2a 的 dev302 書面 0／1、條件 3 錯字回報合計 2／3，各差 1 列。之後的零成本檢查（只看 dev302 與錯字回報這兩個公開集合）找到原因：「用一個快速鍵」的「一」讀變調 ㄧˋ 被讀音項扣 1.39（dev302 第 302 列與錯字回報第 3 列是同一句）；「長歪了」是詞庫裡「長」讀 ㄓㄤˇ 的分數有誤（v0.5.0 說明裡的已知問題，另外修）。維護者選「兩個都做」：
+
+- **A 臂**：λ 1.0、c 4（R1 的格點裡的一格），其他照 R1。
+- **B 臂**：λ 2.0、c 4，R1 的讀音項把「一」的 ㄧˊ、ㄧˋ 與「不」的 ㄅㄨˊ 當 0（`r1.py run --sandhi-exempt`；不看後一個音節，P5 的出貨項不受影響，錨點 1 照舊）。
+- 詞庫裡「不」讀 ㄅㄨˊ 的讀音項本來就是 0（`/code-review` 量到），所以 B 臂實際只改了「一」的 ㄧˊ、ㄧˋ；定義照登記不變。
+- **不再選格**：兩臂的格子事先固定，選格集（chatclause、wikitune-clean）只報。執行時用 `r1.py run --cell L,C`（不用選格檔），`final` 的第一個參數直接寫格子；`final` 拒絕混用有沒有 `--sandhi-exempt` 的判讀檔。
+- **CLI 與錨點**：和 R1 相同的 23 跑（同一個 commit 的 CLI、同樣的模型雜湊與摘要標記），每一個判讀集合各算兩臂；錨點 1–3 不符就停。
+- **判讀**：每一臂照 R1 的四條（第 1、2a、2b、3 條，對各設定的出貨值），兩臂分開判，不合併、不挑。dev302 與錯字回報在 R1 之後已經用來找原因、看過這兩臂，所以它們的結果照登記判，但只算回歸層的證據，不算「有進步」的證據；寫報告時註明。
+- **之後**：任一臂四條全過 → 報給維護者；下一步是產品片，出貨前照規則在沒看過的判讀集確認一發。兩臂都不過 → 寫「照登記不過」，和維護者討論，不結案。
+- 看過任何 R1b 的數字之後不改兩臂的格子與規則。預算、停止條件、範圍外照 R1。
+
+### R1b 結果（2026-10-22，雲端 VM 一台；工具 `81eba149`）
+
+- 錨點 1–3 全部相符，兩臂各 17 個判讀檔，列數與雜湊相符。〔同日補〕R1c 起 `r1.py` 的錯字回報雜湊改成更正後的列，要重算 R1b 的數字得用工具 `81eba149`。
+- **兩臂都四條全過**（`final` 印 ALL FOUR CLAUSES PASS）。對各設定出貨值的改對／改壞（R1 是同一套 23 跑、選中的 λ 2.0、c 4，參考用）：
+
+  | 設定／集合 | R1（λ 2.0） | A（λ 1.0） | B（λ 2.0＋變調免扣） |
+  |---|---|---|---|
+  | 聊天標準 discordtune | 7／0 | 4／0 | 7／1 |
+  | 聊天保守 discordtune | 22／0 | 19／0 | 22／0 |
+  | 聊天積極 discordtune | 22／0 | 18／0 | 22／0 |
+  | 聊天標準 cvtune-clean | 3／0 | 1／0 | 3／0 |
+  | 書面標準 cvtune-clean | 14／1 | 13／1 | 12／1 |
+  | 書面保守 wikitune-clean | 15／3 | 15／3 | 14／3 |
+  | 書面積極 wikitune-clean | 19／2 | 18／1 | 17／2 |
+  | 打字測驗（五種設定） | 每種 0 或 1／0 | 同左 | 同左 |
+  | dev302 書面 | 0／1 | 0／0 | 0／0 |
+  | 錯字回報（聊天＋書面） | 2／3 | 2／1 | 2／1 |
+
+- dev302 與錯字回報在 R1 之後已經用來找原因，這兩列只算回歸層的證據（照登記）。
+- B 臂在聊天標準 discordtune 多一個改壞（R1 同格 7／0），是變調免扣造成的；私人集合，只報數字。
+- 照登記，任一臂四條全過 → 報給維護者，下一步是產品片，出貨前在沒看過的判讀集確認一發。
+
+## R1c：詞庫底分改用多字詞估（探索；2026-10-22 登記，在任何 R1b 與 R1c 的判讀數字之前）
+
+R1 與 R1b 的零成本檢查找到「長歪了」→「掌歪了」的原因：`data/lexicon/mcbpmf-data.txt` 給一部分單字的次要讀音一個底分 −6.8（不是量出來的次數），lex 照它重罰（「長」讀 ㄓㄤˇ 的讀音項 −3.75）。同樣是底分的單字讀音有 551 個（其中 490 個的讀音項低於 −1），例如「得」ㄉㄜ˙、「調」ㄉㄧㄠˋ、「樂」ㄩㄝˋ、「種」ㄓㄨㄥˋ、「著」ㄓㄠˊ、「傳」ㄓㄨㄢˋ、「空」ㄎㄨㄥˋ。維護者選「整類修」：
+
+- **估法 lexf**：照 lex，只有詞庫分數等於底分 −6.8 的單字讀音改用 P5 的 mc 值（這個字在多字詞裡用這個讀音的質量，相對於它最常見的讀音）。其他讀音不變；B 臂已經免扣的變調讀音維持 0。`r1.py run --floor-mc`，只改 R1 的讀音項；P5 的出貨項不動（R1 出貨時那一項會拿掉），錨點 1 照舊。
+  - P5 試過整張換成 mc，在 chatclause 每一格都有 1～6 個改壞；lexf 只換底分那 551 個，其他 225 個 mc 會移動超過 0.5 的讀音不換。
+  - 例：「長」ㄓㄤˇ −3.75 → 0.0、「得」ㄉㄜ˙ −3.88 → −0.43、「種」ㄓㄨㄥˋ −3.65 → −1.45、「會」ㄎㄨㄞˋ −4.18 → −2.43、「還」ㄒㄩㄢˊ −3.76 → −4.33（多字詞也少見，反而更低）。
+- **兩臂，事先固定、不選格**：
+  - **A-f**：λ 1.0、c 4、`--floor-mc`。
+  - **B-f**：λ 2.0、c 4、`--sandhi-exempt --floor-mc`。
+- **列**：R1b 跑完之後，錯字回報第 3 列的「一個」讀音由 ㄧˋ 更正成 ㄧˊ（維護者實際這樣打；main `c8842c8e`）。R1c 的錯字回報用更正後的前 154 列，新的雜湊寫進 `r1.py`。〔同日補〕dev302 第 302 列是同一句，但 dev302 讀的是凍結的跨版本套件 `eval/bench/suite-v1/dev302.txt`（`tools/bench.py` 寫死雜湊，改檔等於開新版套件），所以 dev302 維持 ㄧˋ、不改；其他列不動。
+- **CLI、錨點、判讀**：照 R1b（同樣的 23 跑、錨點 1–3、四條判讀對各設定的出貨值），兩臂分開判，不合併、不挑。dev302 與錯字回報已經用來找原因、看過 lexf（下面），結果照登記判，但只算回歸層的證據。
+- **只報**：每個集合 A-f 對 A 臂、B-f 對 B 臂的改對／改壞（底分改法單獨的效果）。同一次雲端工作也跑一次沒有 `--floor-mc` 的 A、B 兩臂，用兩邊的逐列對錯（只有 0／1）比；錯字回報的列更正過，這一列和 R1b 不同。
+- **變調版（只報，不擋；維護者 2026-10-22 選）**：維護者打字照變調（低年級課本標變調；辭典、作業與考卷寫本調），評測列照 `tools/readings.py` 用本調。`sandhi.py IN OUT` 把每一列「一」「不」的讀音照下一個音節的聲調改成口語變調（規則與例外在檔頭），其他音節不動。聊天標準與書面標準的 discordtune、cvtune-clean、打字測驗、dev302、錯字回報各多跑一次變調版：報出貨與兩臂各自的 top1，以及兩臂對出貨的改對／改壞。私人集合的變調版在 VM 上產生、跑完和原列一起刪掉。公開集合改到的列數（`/code-review` 之後的規則：下一個字要緊接在後、「個」寫輕聲時照四聲算）：dev302 53／302、打字測驗 17／76、錯字回報（更正後的前 154 列）25／154。私人集合的變調版若有超過 5% 的列對不齊（漢字數不等於音節數），或沒有任何一列改到，就停下來。
+- **登記前已看過的數字**（Mac，只有公開集合 dev302 與錯字回報前 154 列、更正前的列。〔更正，同日〕書面是對出貨；聊天是對 P4d 那一格（不含 P5 的讀音項），不是對出貨：零成本檢查的腳本拿錯了基準。R1b 雲端對出貨的聊天錯字回報是 A 0／0、B 0／0）：聊天 λ 1.0：lex 2／1（改對第 10、102 列，改壞第 81 列）、lexf 1／0（只改對第 102 列；第 81 列「長歪了」不再改壞，第 10 列「版控」不再改對：「空」ㄎㄨㄥˋ 也是底分，lex 的扣分是碰巧幫上）。聊天 λ 2.0：lex 2／2、lexf 2／1（剩第 3 列「一個」，更正讀音之後再看）。dev302 兩種設定 lex 與 lexf 相同。
+- **之後**：任一臂四條全過 → 報給維護者；下一步是產品片，出貨前照規則在沒看過的判讀集確認一發。兩臂都不過 → 寫「照登記不過」，和維護者討論，不結案。看過任何 R1c 的數字之後不改兩臂與規則。預算、停止條件、範圍外照 R1。
+
+### R1c 結果（2026-10-22，雲端 VM 一台；工具 `e3c2bdab`）
+
+- 錨點 1–3 全部相符；錯字回報用更正後的前 154 列（`63f67b72…`）。變調版五個集合都沒有對不齊的列。
+- **兩臂都四條全過**。對各設定出貨值的改對／改壞，和同一次跑的 A、B（沒有底分修正）逐列比：
+
+  | 設定／集合 | A-f | A | A-f 對 A | B-f | B | B-f 對 B |
+  |---|---|---|---|---|---|---|
+  | 聊天標準 discordtune | 3／1 | 4／0 | 0／2 | 7／1 | 7／1 | 0／0 |
+  | 聊天保守 discordtune | 19／0 | 19／0 | 0／0 | 22／0 | 22／0 | 0／0 |
+  | 聊天積極 discordtune | 18／0 | 18／0 | 0／0 | 22／0 | 22／0 | 0／0 |
+  | 聊天標準 cvtune-clean | 1／1 | 1／0 | 0／1 | 3／0 | 3／0 | 0／0 |
+  | 書面標準 cvtune-clean | 12／1 | 13／1 | 0／1 | 12／1 | 12／1 | 0／0 |
+  | 書面保守 wikitune-clean | 15／3 | 15／3 | 0／0 | 14／3 | 14／3 | 0／0 |
+  | 書面積極 wikitune-clean | 16／1 | 18／1 | 0／2 | 17／2 | 17／2 | 0／0 |
+  | 打字測驗（五種設定）、dev302 | 每種 0 或 1／0 | 同左 | 0／0 | 同左 | 同左 | 0／0 |
+  | 錯字回報（聊天＋書面） | 2／1 | 2／1 | 2／2 | **3／0** | 2／1 | **2／0** |
+
+- 底分修正單獨的效果：在 B 臂上只改了錯字回報的兩列（「長歪了」在兩種設定都不再改壞），其他集合逐列相同；在 A 臂上反而多 6 列改壞（discordtune 2、cvtune-clean 2、wikitune 2）。〔推論〕A 的 λ 較小，原本靠底分扣分壓住的錯選在修正後浮上來；B 的 λ 2.0 讓其他讀音項繼續擋住。
+- **變調版（只報）**，出貨在本調列與變調列的 top1：聊天 discordtune 4,358／4,359、cvtune-clean 3,002／3,001、打字測驗 72／72、錯字回報 56／56、dev302 269／269；書面 cvtune-clean 2,986／2,985、打字測驗 69／69、錯字回報 47／47、dev302 265／264。出貨對兩種打法差不多。兩臂在變調列上對出貨：A-f 聊天 discordtune 3／**4**、cvtune-clean 1／1；B-f 8／1、3／0；書面 cvtune-clean A-f 12／2、B-f 12／1；其他集合 0 或 1／0、2／0。A 臂在變調打法下改壞變多（「一」的變調讀音被扣分），B 臂不會。
+- 照登記，任一臂四條全過 → 報給維護者，下一步是產品片，出貨前在沒看過的判讀集確認一發。
+
+## 產品片的重量（2026-10-23 登記，在任何重量數字之前；契約 `docs/contracts/reading-decode.md` §2.1）
+
+- **起因**：R1c 量的時候，出貨的常談與讀音通道項只在聊天標準生效。之後 PR #271 讓它們在聊天三檔都生效（保守 (1.0, 2, 3.0)、積極 (0.5, 2, 0.1)，各用自己那一檔的 α），所以聊天保守、積極的基準變了，B-f 要對現在的出貨重量一次。維護者選的是 B-f（λ 2.0、c 4、變調免扣、底分用 mc），只量這一臂、不選格。
+- **在哪裡跑**：`feat/reading-decode`（本探索分支合進 main，CLI 與詞庫都是現行的，含「紮」的 R6），同一台 GCP VM、同一個 commit。
+- **和 R1c 不同的地方**（其他照上面的表與錨點）：
+  - 聊天三檔的摘要標記都要有 `+colloq:2984eeb5+rc`；只有 `--no-reading-channel` 那一跑沒有 `+rc`。上面表格裡「聊天保守、積極沒有 `+rc`」是 R1c 那時的出貨。
+  - 錨點 1：聊天每一檔的出貨格＝那一檔的常談格（`core/src/colloquial.rs` 的 `cell(level)`）加 P5 的 lex／1.0／4，口語項與讀音項的係數用那一檔的 α。
+  - 錨點 2：聊天標準的 chatclause、discordtune，加上聊天保守、積極的 discordtune，各有一跑 `--no-reading-channel`，離線的「那一檔的常談格、ν 0」要等於它。
+  - 跑數：上表 19 跑＋錨點 2 的 4 跑＋N 8 的 2 跑＝25 跑。
+  - 兩個選格集合（chatclause、wikitune-clean）也用固定的 B-f 格跑一次，只報、不判，輸出每列的選字索引給核心比對（§2.2）。
+- **判讀**：對各設定現在的出貨照四條判（上面「判讀」一節）。四條全過才往下做產品片；任一條不過就停下來報數字，和維護者討論，不結案。
+- R1c 那時的結果用 R1c 的工具（`e3c2bdab`）在當時的 main 上重現；這一版的 r1.py 照現在的出貨檢查標記，舊的 CLI 輸出會被擋下。
+
+### 產品片重量結果（2026-10-23，GCP VM 一台；工具 `ef7bdd60`）
+
+- 錨點 1–3 全部相符；錨點 2 四跑（聊天標準 chatclause、discordtune，聊天保守、積極 discordtune）都相符；保守、積極的出貨格記成 (1.0, 2, 3.0)、(0.5, 2, 0.1)。CLI 25 跑共 4,607 秒。
+- **B-f 對現在的出貨四條全過**（`final` 印 ALL FOUR CLAUSES PASS）。改對／改壞：
+
+  | 設定／集合 | 產品片重量 | R1c（當時的出貨） |
+  |---|---|---|
+  | 聊天標準 discordtune | 7／1 | 7／1 |
+  | 聊天保守 discordtune | 16／0 | 22／0 |
+  | 聊天積極 discordtune | 6／1 | 22／0 |
+  | 聊天標準 cvtune-clean | 3／0 | 3／0 |
+  | 書面標準 cvtune-clean | 12／1 | 12／1 |
+  | 書面保守 wikitune-clean | 14／3 | 14／3 |
+  | 書面積極 wikitune-clean | 17／2 | 17／2 |
+  | 打字測驗（五種設定）、dev302 書面 | 每種 0 或 1／0 | 同左 |
+  | 錯字回報（聊天＋書面） | 3／0 | 3／0 |
+  | 只報：chatclause（聊天標準）、wikitune-clean（書面標準） | 5／0、17／2 | — |
+
+- 聊天保守、積極的數字變小，因為基準變了：PR #271 之後這兩檔已經有常談與 P5 的讀音通道項，R1c 對的是沒有這兩項的舊出貨。其他設定的基準沒變，數字和 R1c 相同。
+- 照契約，四條全過 → 實作核心。
+
+## R1d：底層重做（探索；2026-10-23 登記，在任何 R1d 的數字之前）
+
+- **起因**（維護者 2026-10-23）：「分級本身講的是語意校正強度」「所以R1不是修正的是ngram嗎」「分級只在語意校正調整，其他都是選最好的成績不是嗎」。R1b／R1c 與產品契約把讀音項放在重排工作裡（只在語意校正開時生效、非同步、繞過 δ），常談與 P5 讀音通道項接在融合分數裡、受各檔 δ 管。這些數字都不沿用。
+- **兩層**：
+  - **底層**（三檔共用，語意校正關也生效，每一鍵同步）：
+    1. **讀音項進解碼器**：n-gram 解碼器的路徑分數，對每個單字詞加 λ·max(t(r, w), −c)，B-f 的兩個例外照舊（「一」ㄧˊ、ㄧˋ 與「不」ㄅㄨˊ 算 0；詞庫底分 −6.8 改用 mc）。λ 2.0、c 4 固定，不選。束搜尋的剪枝也看得到這一項。
+    2. **常談在解碼之後、重排之前**：常談表是整串字的口語分數，放不進逐字的解碼器，所以對解碼出來的前 64 名加 μ·(col − col₀) 重排，取第一名（語意校正關時就是它）。沒有會意的軟閘門（閘門要用小模型的分數）。只在聊天。μ 從格點選。
+  - **上層**（只有這層分級）：會意重排，三檔用 `.sjtl` 檔頭原本的三個值（加常談之前的分級定義），不重選；融合裡不再有常談項與讀音通道項。
+- **維護者確認的兩點**（2026-10-23，「好」）：常談放在解碼之後、重排之前（不進逐字的解碼器）；三檔的會意參數用 `.sjtl` 檔頭原本的值，不重選。
+- **工具**：CLI 加只給評測用的選項，讓解碼器帶讀音項（不給時逐位元組不變，單元測試斷言）；常談與融合離線從傾印重算，同 R1 的做法。
+- **格點**：μ ∈ {0, 0.25, 0.5, 1.0}（只在聊天），在 chatclause 的聊天、語意校正關上選：U2 最大、同分取 μ 小的。
+- **判讀**：對各設定現在的出貨照四條判。設定共 8 種：聊天與書面的語意校正關，加上六種語意校正開。另外報每一檔加 R1d 前後的 top1 總數，確認三檔的高低順序還在。
+- **延遲**：每鍵延遲（`timing_typing76_keys`）p95 ≤ 16 ms；常談重排 64 名的時間單獨量。
+
+### R1d 實作註記（2026-10-23，工具寫完、任何私人集合的數字之前；只補登記沒寫的選擇，登記的值不動）
+
+- **工具**：CLI 的 `--reading-decode`（核心 `core/src/reading.rs`，B-f 的 λ 2.0、c 4、變調免扣、底分用 mc；只給評測用，不在 `shanjie.h` 與引擎，摘要標記最後加 `+rd`）；離線的 `r1d.py`（`run`／`select`／`anchor3`／`final`），測試 `test_r1d.py`。
+- **每個設定的 CLI 跑法**（`data/lm/` 放出貨的模型，雜湊先核對）：
+  - **rd 跑**：`--reading-decode --context --packs acg --tinylm data/lm/tinylm.sjtl --rerank-level L --tinylm-scores-topk 64` 加 `--dump --dump-words --rowstats --tinylm-scores`；聊天**不給** `--colloquial-core`（CLI 自己的融合就是檔頭的三個值，常談在離線算）。摘要標記要是 `+tl:…+acg…+rd`，聊天沒有 `+colloq`，書面有 `+tri:fdd3b05d`。語意校正關的兩個設定（聊天關、書面關）用標準那一跑的檔案，不另外跑 rd。
+  - **基準（現行出貨）**：六個語意校正開的設定照上面「設定、基準與每一次 CLI」那張表（聊天三檔 `+colloq:2984eeb5+rc`、書面 `+tri:fdd3b05d`）；兩個語意校正關的設定是同一個 profile 不給 `--tinylm` 的跑（沒有小模型時常談不生效），摘要標記沒有 `+tl:`、`+rl:`、`+colloq`。
+  - 集合與判讀角色：六個開的設定照 R1 的表（`r1.py` 的 `ROLES`）；聊天關用聊天標準的集合與角色，書面關用書面標準的；聊天關的 chatclause 是 μ 的選格集合，其他標了「選格」的 (設定, 集合)（聊天標準的 chatclause、書面標準與書面關的 wikitune-clean）只報、不判（聊天的用選定的 μ）。
+- **離線**：`b_j = ng_j + μ·(col_j − col_0)`（聊天；col 照 `r1.py load_run`，P4 的 T2 表，`col = lc − 0.5·k`）、書面 `b_j = ng_j`，依 b 排序、同分依傾印名次；語意校正關取 b 的第一名；開則取 b 的前 8 名進 `triage.pick`（該設定的檔頭三個值），沒有 `ll` 的列或前 8 名裡有候選沒有 `ll` 的列取 b 的第一名。col 不是有限值就停（核心的守門在這裡不適用；T2 表有平滑，正常不會發生，發生就是資料不對）。
+- **錨點**（不符就停）：
+  1. 書面：離線語意校正開的選字等於 CLI 的 `c`；聊天：離線 μ 0 的語意校正開的選字等於 CLI 的 `c`（CLI 沒有常談項），並且最後對錯等於該跑的 rowstats、傾印是 μ 0 時的 b 順序。六個開的設定各自檢查；兩個關的設定讀標準的 rd 檔，同一個檢查也做一次。
+  2. 語意校正關、μ 0 時 b 的第一名是傾印第 1 名（直接斷言）。
+  3. N 64 與 N 8 的前 8 名 `ll`（沿用 `r1.py anchor3`，兩跑都帶 `--reading-decode`）。
+- **選 μ**：格點 {0, 0.25, 0.5, 1.0}，只在聊天關的 chatclause 上，U2（改對 − 2×改壞）最大，同分取較小的 μ；沒有「U2 要大於 0」的門檻（登記沒有寫）。選出的 μ 用在三檔聊天開與聊天關。
+- **報告**：每個設定每個集合的 top1 前後、改對／改壞、b 第一名單獨的改對／改壞（只看解碼器加常談，不含小模型）、前 8 名換掉候選的列數、每列的 `pick_idx`；三檔的 top1 前後次序（`final` 的 `level_order`）。錯字回報的聊天標準＋書面標準、聊天關＋書面關各自合併判第 3 條。
+- **這份工具沒有做的**：延遲項（`timing_typing76_keys` 的 p95 ≤ 16 ms、常談重排 64 名的時間）；CLI 不量解碼時間，要另外用 `shanjie-replay` 或引擎路徑量，等產品片。
+- **登記後、私人集合之前已看過的數字**（寫工具時的公開集合測試）：dev302 與錯字回報前 154 列在聊天標準的 μ 四格（dev302 改對／改壞 2／9、0／13、0／13、0／20；錯字回報 4／16、9／13、19／10、26／10），以及 μ 0.5 時聊天關、書面標準與書面關在這兩個集合與打字測驗上的數字。選 μ 只看聊天關的 chatclause，不受影響；這兩個公開集合的判讀照登記，但只算回歸層的證據。登記的值與規則都沒改。
+
+### R1d 結果（2026-10-23，GCP VM 一台；工具 `6c3d0703`；第一次跑被 Spot 搶占，同一個 commit 重跑）
+
+- 錨點 1–3 全部相符；公開集合的煙霧測試通過；CLI 3,672 秒。
+- **選 μ**（chatclause、聊天關，U2）：μ 0 → 17、0.25 → 67、0.5 → 49、1.0 → −39，選中 **μ 0.25**。
+- **判讀：照登記不過**。對各設定現在的出貨（改對／改壞）：
+
+  | 設定 | discordtune（條件 1） | cvtune-clean（2b） | 打字測驗（2a） | 錯字回報 | dev302 | top1 前→後 |
+  |---|---|---|---|---|---|---|
+  | 聊天關 | 127／44 過 | 58／30 過 | 2／0 過 | 21／1 | 6／8（只報） | discordtune 4,223 → 4,306 |
+  | 聊天保守 | 112／44 過 | — | 0／0 過 | — | — | 4,260 → 4,328 |
+  | 聊天標準 | **60／51 不過** | **15／38 不過** | 0／0 過 | 9／13 | 0／13（只報） | 4,358 → 4,367 |
+  | 聊天積極 | **63／66 不過** | — | 0／0 過 | — | — | 4,370 → 4,367 |
+  | 書面關 | — | 14／0 過 | 1／0 過 | 1／0 | 0／0 過 | wikitune 1,585 → 1,600 |
+  | 書面保守 | — | wikitune 14／2 過 | 1／0 過 | — | — | wikitune 1,601 → 1,613 |
+  | 書面標準 | — | 12／1 過 | 1／0 過 | 2／0 | 0／0 過 | wikitune 1,642 → 1,658 |
+  | 書面積極 | — | wikitune 17／1 過 | 1／0 過 | — | — | wikitune 1,642 → 1,658 |
+
+  - 條件 3：聊天標準＋書面標準 11／13 **不過**；聊天關＋書面關 22／1 過。
+  - 三檔的 top1 順序：聊天 discordtune 前 4,260／4,358／4,370、後 4,328／4,367／4,367（標準與積極打平）；書面打字測驗 69／70／70。
+- **讀法**（推論，沒有拆開量）：書面的每一種設定、聊天的語意校正關都過；不過的只有聊天語意校正開的標準與積極。書面沒有常談，它的數字就是「讀音項進解碼器」單獨的效果，全部是改對多。聊天開的設定同時換了三件事：常談移出融合（也拿掉了看小模型分數的軟閘門）、融合改回檔頭三個值（標準 α 由 0.5 回到 0.3）、讀音通道項拿掉。dev302 聊天標準在 μ 0 也是 2／9（寫工具時看過），所以退步至少有一部分來自常談離開融合，不是讀音項。
+- 照規則：照登記不過，報給維護者、出選擇題，不結案。
+
+## R1e：只把讀音項放進解碼器（探索；2026-10-23 登記，在任何 R1e 的數字之前）
+
+- **起因**：R1d 照登記不過，不過的只有聊天語意校正開的標準與積極；R1d 同時換了三件事。維護者 2026-10-23 選「拆開：先只量讀音項進解碼器」。常談該不該移出融合（分級原則）另外處理。
+- **只換一件事**：解碼器帶讀音項（`--reading-decode`，B-f：λ 2.0、c 4、變調免扣、底分用 mc，和 R1d 同一份程式），融合裡的讀音通道項拿掉（`--no-reading-channel`）。其他照現在的出貨：
+  - 聊天語意校正開（三檔）：常談照出貨留在融合裡（`--colloquial-core`，各檔的常談格、軟閘門）。
+  - 聊天與書面語意校正關：只有解碼器的讀音項（沒有常談，和現在的出貨一樣）。
+  - 書面三檔：解碼器的讀音項＋檔頭三個值（和 R1d 的書面相同）。
+- **沒有離線重算**：每個設定就是一次 CLI，CLI 自己的選字就是 R1e。不選格。
+- **CLI**（同一台 VM、同一個 commit；基準照 R1d 的出貨跑法）。2026-10-23 實作補記：每一跑的共同部分是出貨指令 `--lm data/lm/bigram.sjlm --profile P --context --packs acg --threads 32 --rows … --rowstats …`，再加下列選項；基準跑不加 `--reading-decode`：
+  - 聊天開：`--reading-decode --colloquial-core data/lm/colloquial.sjlm --no-reading-channel --tinylm data/lm/tinylm.sjtl --rerank-level L`，標記 `…+colloq:2984eeb5+rd`（沒有 `+rc`）。
+  - 聊天關、書面關：`--reading-decode`，不給 `--tinylm`。
+  - 書面三檔：`--reading-decode --tinylm data/lm/tinylm.sjtl --rerank-level L`。
+  - 集合與判讀角色同 R1d（`r1d.py` 的 `ROLES`，含聊天關、書面關）；選格集合（chatclause、wikitune-clean）只報。
+- **判讀**：`r1e.py judge`，對各設定現在的出貨照四條；第 3 條分兩組合併（聊天標準＋書面標準、聊天關＋書面關）。另報三檔 top1 前後。
+- **已看過的**：R1d 的全部數字；書面三檔的 R1e 和 R1d 是同一個做法，〔推論〕結果應該相同（這次重跑，不沿用）。實作補記（2026-10-23）：聊天語意校正關的 R1e 就是 R1d 聊天關在 μ 0 的做法（chatclause 的 U2 17 已看過），書面語意校正關的 R1e 等於 R1d 書面關（已看過），除了書面三檔之外也重跑不沿用。聊天語意校正開的三檔在這個組合下沒有任何數字。
+- **預算**：GCP ≤ 2 小時。實作補記（2026-10-23）：一共 60 跑＝30 個（設定，集合）組（R1d 的 `ROLES`，含兩個關的設定）× 基準與 R1e 各一次；約 36 跑是寫錯的算法。判讀工具 `r1e.py judge` 另給 `--sjtl`（算標記裡 `+tl:` 的雜湊），並驗基準標記（用 R1d 的 `check_tag`）、R1e 標記必須等於基準標記改成 `+rd`（聊天開去掉 `+rc`），兩邊逐列的金標長度相同。私人列跑完就刪。
+- **之後**：四條全過 → 報給維護者；產品片另寫契約（讀音項進核心解碼器、融合拿掉讀音通道項）。不過 → 照登記不過，報數字討論，不結案。
+
+### R1e 結果（2026-10-23，GCP VM 一台；工具 `abd676ab`）
+
+- 標記與逐列金標長度的檢查全部通過；60 跑 CLI 892 秒。
+- **四條全過**（`r1e.py judge` 印 ALL FOUR CLAUSES PASS）。對各設定現在的出貨（改對／改壞）：
+
+  | 設定 | discordtune（條件 1） | cvtune-clean／wikitune（2b） | 打字測驗 | 錯字回報 | top1 前→後 |
+  |---|---|---|---|---|---|
+  | 聊天關 | 17／0 | cvtune 5／1 | 0／0 | 1／1 | discordtune 4,223 → 4,240 |
+  | 聊天保守 | 16／0 | — | 0／0 | — | 4,260 → 4,276 |
+  | 聊天標準 | 7／1 | cvtune 3／0 | 0／0 | 1／0 | 4,358 → 4,364 |
+  | 聊天積極 | 6／1 | — | 0／0 | — | 4,370 → 4,375 |
+  | 書面關 | — | cvtune 14／0 | 1／0 | 1／0 | cvtune 2,917 → 2,931 |
+  | 書面保守 | — | wikitune 14／2 | 1／0 | — | 1,601 → 1,613 |
+  | 書面標準 | — | cvtune 12／1 | 1／0 | 2／0 | cvtune 2,986 → 2,997 |
+  | 書面積極 | — | wikitune 17／1 | 1／0 | — | 1,642 → 1,658 |
+
+  - dev302：聊天關、聊天標準、書面關、書面標準都 0／0。chatclause（只報）：聊天關 17／0、聊天標準 3／0。
+  - 條件 3：聊天標準＋書面標準 3／0，聊天關＋書面關 2／1，都過。
+  - 三檔的 top1 順序都保持：聊天 discordtune 4,276／4,364／4,375，書面 wikitune 1,613／1,658／1,658。
+- 聊天開的三檔數字和 10-23 重排前一步那個設計的重量相同（7／1、16／0、6／1），〔推論〕在這些集合上兩種放法選出的字幾乎一樣；差別在讀音項現在每一鍵同步算、語意校正關也有（聊天關 discordtune 17／0）。
+- 照登記，四條全過 → 報給維護者；產品片另寫契約。
+
+## R1f：R1e 的設計在新底層重量（探索；2026-11-01 登記，在任何 R1f 的數字之前）
+
+- **起因**：R1e（2026-10-23）四條在八種設定全過，但量的是當時的出貨（通語 SJ-LM-6-9.1M、會意 SJ-SR-6-14M 等）。之後出貨換成通語 SJ-LM-7-9.7M、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K，核心的常談格、詞包（`acg,it`）與解碼器也改過；照規則要在新底層重量才寫產品片。分支已合併 main（`b92f72e8`），不給 `--reading-decode` 時 dev302 兩種設定的輸出和 main 逐位元組相同。
+- **設計不變**：解碼器帶讀音項（`--reading-decode`，B-f：λ 2.0、c 4、變調免扣、底分用 mc，程式同 R1e），融合裡的讀音通道項拿掉（`--no-reading-channel`）；聊天語意校正開時常談照出貨留在融合裡。其他一律照**現在的出貨**：v0.6.1 的旗標（`tools/bench.py` `VERSIONS2["v0.6.1"]`：`--context --packs acg,it`、會意、聊天的常談），三檔用核心現在的格（標準 (0.7, 2, 0) 等，以核心為準）。
+- **集合與角色**：同 R1e（`r1d.py` 的 `ROLES`，含聊天關、書面關），集合換成現行規則下的版本：discordtune 用過濾後的那份（4,919 列）、cvtune-clean（3,286 列）、wikitune-clean、打字測驗、錯字回報（現在的列數）、dev302；chatclause 只報。
+- **工具在數字之前改**：`r1.py`／`r1d.py`／`r1e.py` 裡凍結在舊出貨的常數（常談格、會意雜湊、標記）改成讀現在的出貨，標記檢查對 `VERSIONS2["v0.6.1"]` 加 `+rd`（聊天開去掉 `+rc`）；改完的工具 commit 後才跑。
+- **判讀**：`r1e.py judge`，對各設定現在的出貨照四條（第 4 條是錯字回報兩種設定合計），第 3 條分兩組合併同 R1e。另報三檔 top1 前後。
+- **機器與預算**：GCP（c4d-highmem-32 Spot，用 `.agent-local` 的共用函式庫，腳本送出前由 fresh verifier 審）；60 跑上下，≤ 2 小時。私人列跑完就刪。
+- **已看過的**：R1e 在舊底層的全部數字；新底層下 dev302 聊天開 `--reading-decode` 的第一名和出貨相同（合併檢查時量到，0 列改變），其他集合沒有數字。
+- **之後**：四條全過 → 報給維護者，寫產品片契約（讀音項進核心解碼器、融合拿掉讀音通道項、三檔與語意校正關都生效）。不過 → 照登記不過，報數字討論，不結案。
+
+### 工具補記（2026-11-01，工具改完、任何 R1f 數字之前；只補登記沒寫的做法，登記的值與規則不動）
+
+- **工具改了什麼**（`r1.py`／`r1d.py`／`r1e.py`）：凍結在舊出貨的常數改成讀來源，不再抄：
+  - 基準與 R1f 的摘要標記由 `r1.ship_tag` 組出，直接呼叫 `tools/bench.py` 的 `spec_tag`／`colloq_tag`，吃 `VERSIONS2["v0.6.1"]` 的 `tag`／`formal_tag`（`+acg+it`、`+kn:`、`+tri:`、聊天的 `+colloq:…+rc`），各模型的雜湊讀 `data/*.sha256`（不再是通語 SJ-LM-6 的 `e7c179d8` 與舊常談表 `2984eeb5`）；非標準強度在 `+tl:` 後加 `+rl:<強度>`，語意校正關沒有 `+tl:` 與 `+colloq`。基準標記必須等於它；R1f 標記必須等於它加 `+rd`，聊天語意校正開時去掉 `+rc`（R1e 的做法）。CLI 旗標（`--context --packs acg,it`）同樣讀 `VERSIONS2["v0.6.1"]["flags"]`。
+  - 三檔的常談格（`COLLOQ_CELLS`）讀 `core/src/colloquial.rs` 的 `STANDARD`／`CONSERVATIVE`／`AGGRESSIVE`；R1／R1d 的離線重算也讀現在的格，它們已記下的數字是用當時的格量的，不改。
+  - 各集合的列數不再寫死：`r1e.py judge DIR` 讀 `DIR/counts.json`（`{集合名: 列數}`，由跑的腳本在核對列檔雜湊之後、從實際跑的列檔寫出；少一個集合就停），基準與 R1f 的 rowstats、摘要列數必須等於它，兩邊逐列金標長度仍須相同。`--sjtl` 只剩一致性檢查（檔的雜湊必須是 `data/tinylm.sjtl.sha256`）。
+  - 第 4 條（判讀表的「3」）本來就是聊天與書面合併判：`CLAUSE3_PAIRS` 把聊天標準＋書面標準、聊天關＋書面關的錯字回報逐列接起來，再判淨值 > 0 且改壞÷改對 ≤ 0.6；逐設定不判。沒有改動，測試涵蓋「各自淨值 0、合併後過／不過」。
+  - 第 1 條照登記仍是「改壞 ≤ 26 或改壞÷改對 ≤ 0.6」（上面的判讀表）；出貨標準現在只有比值，所以 `judge` 的每個第 1 條結果另印 `verdict_ratio_only`（只看比值），不改登記的判定，報告時兩者並列。
+  - 新增 `r1e.py commands`：印出下面的 60 條指令（`--rows-dir`、`--out-dir`、`--cli`、`--threads`），GCP 腳本直接用它產生，不手抄。
+- **每個（設定，集合）的 CLI 指令**（`$ROWS/<集合>.txt` 是該集合的列檔，`$OUT` 是 `judge` 的資料夾；`data/lm/` 放出貨的模型、雜湊先核對；基準與 R1f 各一次，共 30 組×2＝60 跑；標記實測過：8 種設定的基準與 R1f 在打字測驗上用目前的 CLI 跑過，`check_tags` 全過）：
+  - `chat-std` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.chat-std.<集合>.r > $OUT/base.chat-std.<集合>.cli.txt`；集合：chatclause、discordtune、cvtune-clean、typing76、user-reported、dev302
+  - `chat-std` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm --reading-decode --no-reading-channel --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.chat-std.<集合>.r > $OUT/e.chat-std.<集合>.cli.txt`；集合：chatclause、discordtune、cvtune-clean、typing76、user-reported、dev302
+  - `chat-cons` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level conservative --colloquial-core data/lm/colloquial.sjlm --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.chat-cons.<集合>.r > $OUT/base.chat-cons.<集合>.cli.txt`；集合：discordtune、typing76
+  - `chat-cons` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level conservative --colloquial-core data/lm/colloquial.sjlm --reading-decode --no-reading-channel --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.chat-cons.<集合>.r > $OUT/e.chat-cons.<集合>.cli.txt`；集合：discordtune、typing76
+  - `chat-aggr` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level aggressive --colloquial-core data/lm/colloquial.sjlm --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.chat-aggr.<集合>.r > $OUT/base.chat-aggr.<集合>.cli.txt`；集合：discordtune、typing76
+  - `chat-aggr` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level aggressive --colloquial-core data/lm/colloquial.sjlm --reading-decode --no-reading-channel --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.chat-aggr.<集合>.r > $OUT/e.chat-aggr.<集合>.cli.txt`；集合：discordtune、typing76
+  - `formal-std` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.formal-std.<集合>.r > $OUT/base.formal-std.<集合>.cli.txt`；集合：wikitune-clean、cvtune-clean、typing76、user-reported、dev302
+  - `formal-std` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --reading-decode --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.formal-std.<集合>.r > $OUT/e.formal-std.<集合>.cli.txt`；集合：wikitune-clean、cvtune-clean、typing76、user-reported、dev302
+  - `formal-cons` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level conservative --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.formal-cons.<集合>.r > $OUT/base.formal-cons.<集合>.cli.txt`；集合：wikitune-clean、typing76
+  - `formal-cons` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level conservative --reading-decode --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.formal-cons.<集合>.r > $OUT/e.formal-cons.<集合>.cli.txt`；集合：wikitune-clean、typing76
+  - `formal-aggr` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level aggressive --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.formal-aggr.<集合>.r > $OUT/base.formal-aggr.<集合>.cli.txt`；集合：wikitune-clean、typing76
+  - `formal-aggr` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rerank-level aggressive --reading-decode --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.formal-aggr.<集合>.r > $OUT/e.formal-aggr.<集合>.cli.txt`；集合：wikitune-clean、typing76
+  - `chat-off` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.chat-off.<集合>.r > $OUT/base.chat-off.<集合>.cli.txt`；集合：chatclause、discordtune、cvtune-clean、typing76、user-reported、dev302
+  - `chat-off` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg,it --reading-decode --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.chat-off.<集合>.r > $OUT/e.chat-off.<集合>.cli.txt`；集合：chatclause、discordtune、cvtune-clean、typing76、user-reported、dev302
+  - `formal-off` 基準：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/base.formal-off.<集合>.r > $OUT/base.formal-off.<集合>.cli.txt`；集合：wikitune-clean、cvtune-clean、typing76、user-reported、dev302
+  - `formal-off` R1f：`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile formal --context --packs acg,it --reading-decode --threads 32 --rows $ROWS/<集合>.txt --rowstats $OUT/e.formal-off.<集合>.r > $OUT/e.formal-off.<集合>.cli.txt`；集合：wikitune-clean、cvtune-clean、typing76、user-reported、dev302
+- 判讀：`python3 experiments/r1-reading-decode/r1e.py judge $OUT --out $OUT/judge.json`（`$OUT/counts.json` 先寫好）。
+- 判讀角色與集合同 R1e（`r1d.py` 的 `ROLES`）：discordtune 用過濾後的 4,919 列，cvtune-clean 3,286 列，錯字回報與 wikitune-clean 用現在的列檔；列數以 `counts.json` 為準。
+- **修訂一（2026-11-01，在任何 R1f 的數字之前）**：判讀表從 R1e 繼承的條件 1「改壞 ≤ 26 或改壞÷改對 ≤ 0.6」裡的 26 是舊 discordtune（4,958 列）時的寫法；本登記寫明「照現在的出貨標準」，現行的條件 1 是「不顯著變差（精確 McNemar p ≥ 0.05 或淨值 ≥ 0），而且改壞÷改對 ≤ 0.6」，所以 R1f 的判定照現行條件 1（`r1e.py judge` 的 `verdict_ratio_only`）；舊讀法照樣印出、只報不判。
+
+### R1f 結果（2026-11-01，GCP VM 一台；工具 `e7fad888`）
+
+- 60 跑全部完成，標記與逐列金標長度的檢查都通過；VM 上的解碼約 13 分鐘。
+- **照登記不過**：只有條件 3 的「聊天關＋書面關」不過（錯字回報合併 0／2），其他條款全過（條件 1 照修訂一的 `verdict_ratio_only` 也全過）。對各設定現在的出貨（改對／改壞）：
+
+  | 設定 | discordtune（條件 1） | cvtune-clean／wikitune（2b） | 打字測驗 | 錯字回報 | top1 前→後 |
+  |---|---|---|---|---|---|
+  | 聊天關 | 6／0 | cvtune 6／1 | 0／0 | 0／1 | discordtune 4,508 → 4,514 |
+  | 聊天保守 | 3／0 | — | 0／0 | — | 4,572 → 4,575 |
+  | 聊天標準 | 0／0 | cvtune 0／0 | 0／0 | 6／0 | 4,615 → 4,615 |
+  | 聊天積極 | 0／0 | — | 0／0 | — | 4,624 → 4,624 |
+  | 書面關 | — | cvtune 10／0 | 0／0 | 0／1 | cvtune 2,957 → 2,967 |
+  | 書面保守 | — | wikitune 17／2 | 0／0 | — | 1,594 → 1,609 |
+  | 書面標準 | — | cvtune 9／0 | 0／0 | 0／0 | cvtune 3,028 → 3,037 |
+  | 書面積極 | — | wikitune 18／2 | 0／0 | — | 1,625 → 1,641 |
+
+  - dev302：四個設定都 0／0。只報：chatclause 聊天關 6／0、聊天標準 2／1；wikitune-clean 書面關 17／0、書面標準 18／2。
+  - 條件 3：聊天標準＋書面標準 6／0（過）；聊天關＋書面關 0／2（不過）。
+  - 三檔的 top1 順序都保持。
+- **不過的那兩列是同一句**：錯字回報第 37 列「搞完這波」（ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ），聊天關與書面關各算一次。Mac 上單列重解（聊天關）：基準第一名「搞完這波」−12.34；R1f 的「波」被扣 1.39，第一名變成「搞完這播」−13.23（「搞完這波」−13.72，第二）。原因：詞庫 `mcbpmf-data.txt` 的「波」ㄆㄛ −4.02、ㄅㄛ −4.72，讀音項把 ㄅㄛ 當成較少見的讀音（t −0.69，λ 2）。教育部《國語辭典簡編本》只收 ㄅㄛ，《重編國語辭典修訂本》ㄅㄛ、又音 ㄆㄛ。語意校正開時會意把它改回來（聊天標準 6／0）。
+- 照登記不過；維護者 2026-11-01 選「開探索變體 R1g」（讀音項不罰辭典的標準讀音）。
+
+## R1g：讀音項不罰簡編本的標準讀音（探索；2026-11-01 登記，在任何 R1g 的數字之前）
+
+- **起因**：R1f 照登記不過，不過的只有「搞完這波」：詞庫把「波」的標準讀音 ㄅㄛ 排在 ㄆㄛ 後面，讀音項就把照標準讀音打的人扣分。維護者：「也有人唸ㄆㄛ吧？查一下正確讀音，如果差不多人唸那這件事情嚴重性才夠高」。兩部辭典都以 ㄅㄛ 為正讀、ㄆㄛ 為又音；台灣口語兩種都常聽到〔推論，沒有找到調查數字〕。
+- **零成本檢查（2026-11-01，Mac，只讀公開的詞庫與簡編本）**：詞庫裡有兩個以上單字讀音的字 3,584 個；其中「簡編本的第一讀音（多音排序最小、只有一個音節）在詞庫的分數低於這個字的另一個讀音、而且不在底分 −6.8」的有 12 對，t 都是 −0.69：朴 ㄆㄛˋ、嗎 ㄇㄚ˙、率 ㄕㄨㄞˋ、哩 ㄌㄧ、還 ㄏㄨㄢˊ、和 ㄏㄜˊ、癌 ㄞˊ、賃 ㄌㄧㄣˋ、波 ㄅㄛ、相 ㄒㄧㄤ、嚇 ㄏㄜˋ、教 ㄐㄧㄠˋ。
+- **只換一件事**：R1f 的設計，讀音項對這 12 對（讀音，字）記 0（和變調免扣同一種處理）。清單由 `build_overlay.load_concised` 與詞庫算出，寫成 `experiments/r1-reading-decode/std-exempt.tsv`（讀音、字兩欄，含產生它的指令與兩份來源的雜湊），CLI 用旗標讀它；不給旗標時 R1f 的輸出逐位元組不變。
+- **集合、跑法、判讀**：同 R1f（60 跑，同一支 GCP 腳本，只多這個旗標；四條照修訂一）。
+- **已看過的**：R1f 的全部數字，包括第 37 列；這一片改的正是那一列看到的原因，所以 R1g 不能當確認，只能當探索。四條過了之後照規則在沒看過的判讀集確認一發才出貨。
+- **之後**：四條全過 → 報給維護者，寫產品片契約前先在沒看過的判讀集確認一發（chatjudge 的確認規則）。不過 → 照登記不過，報數字討論，不結案。
+- **工具補記（2026-11-01，工具改完、任何 R1g 的數字之前；登記的值與規則不動）**：旗標 `--reading-exempt FILE`（只能和 `--reading-decode` 一起，否則報錯停下）把 FILE 裡的（讀音，字）記 0；摘要標記在 `+rd` 後面加 `+rx:<FILE 的 SHA-256 前 8 碼>`。`std_exempt.py` 產生的 `std-exempt.tsv` 剛好是登記的那 12 對，SHA-256 `a821a206482437ecb4c6917fa9dcfb1e5402dd87b4daa86992b5a8a9b4f071c1`（`+rx:a821a206`）；來源是詞庫 `mcbpmf-data.txt`（`25b3ecb0…`）與簡編本 zip（`5bab99da…`）。不給旗標時輸出逐位元組不變：Mac 上用改之前（`cc866eed`）與改之後的評測 CLI，各跑 dev302 聊天標準與書面標準（出貨旗標 `--context --packs acg,it --tinylm`，聊天加 `--colloquial-core --no-reading-channel`），有與沒有 `--reading-decode` 共 4 組，摘要列與 rowstats 逐位元組相同（`cmp`）；`cli/tests/reading_decode.rs` 的原有八組摘要與四組傾印雜湊照舊通過。`r1e.py commands|judge --arm r1g` 印出／判讀 R1g 的 60 跑（標籤不變，R1f 仍是預設）。
+
+### R1g 結果（2026-11-01，GCP VM 一台；工具 `b90adc96`）
+
+- 60 跑全部完成，標記（`+rd+rx:a821a206`）與逐列金標長度的檢查都通過。
+- **照登記不過**：條件 3 的「聊天關＋書面關」錯字回報合併 0／0（淨值要 > 0），其他條款全過。對各設定現在的出貨（改對／改壞）：
+
+  | 設定 | discordtune（條件 1） | cvtune-clean／wikitune（2b） | 打字測驗 | 錯字回報 | top1 前→後 |
+  |---|---|---|---|---|---|
+  | 聊天關 | 6／0 | cvtune 3／0 | 0／0 | 0／0 | discordtune 4,508 → 4,514 |
+  | 聊天保守 | 3／0 | — | 0／0 | — | 4,572 → 4,575 |
+  | 聊天標準 | 0／1 | cvtune 0／1 | 0／0 | 6／0 | 4,615 → 4,614 |
+  | 聊天積極 | 0／1 | — | 0／0 | — | 4,624 → 4,623 |
+  | 書面關 | — | cvtune 9／0 | 0／0 | 0／0 | cvtune 2,957 → 2,966 |
+  | 書面保守 | — | wikitune 14／0 | 0／0 | — | 1,594 → 1,608 |
+  | 書面標準 | — | cvtune 8／0 | 0／0 | 0／0 | cvtune 3,028 → 3,036 |
+  | 書面積極 | — | wikitune 16／0 | 0／0 | — | 1,625 → 1,641 |
+
+  - dev302 四個設定都 0／0。只報：chatclause 聊天關 5／0、聊天標準 2／2；wikitune-clean 書面關 13／0、書面標準 16／0。
+  - 和 R1f 比：「搞完這波」回到對（聊天關、書面關的錯字回報 0／1 → 0／0）；書面三檔 wikitune 的改壞 2 → 0；聊天標準與積極在 discordtune、聊天標準在 cvtune 各多 1 列改壞（都在門檻內）。
+- 維護者 2026-11-01 決定例外：條件 3 關的那組是 0／0（沒有證據、不是變差），R1g 照出貨規則進確認一發（在沒看過的判讀集、淨值 > 0、精確 McNemar p < 0.05、改壞÷改對 ≤ 0.65，數字之前先鎖定並 commit 確認片）。
+
+## R1g 確認片：在沒看過的 cjudge-1 與 wikijudge5 確認一發（確認；2026-11-01 登記，在任何數字之前）
+
+- **起因**：R1g 照登記不過（條件 3 關的那組 0／0），維護者 2026-11-01 決定例外，照出貨規則在沒看過的判讀集確認一發。維護者同日選「書面標準判『變好』＋聊天標準判『不變差』」。
+- **診斷（既有分數，數字之前印）**：R1g 對出貨在聊天標準幾乎不改列（discordtune 0／1、cvtune 0／1、chatclause 2／2），在書面標準是 cvtune 8／0、wikitune 16／0；聊天關 discordtune 6／0。所以聊天標準只判不變差。
+- **判讀集**（兩份都在這一登記之前凍結、之前沒有任何數字）：
+  - wikijudge5：`build_tune.py --part wiki --wiki-range 330000 335000 --wiki-name wikijudge5`，2026-11-01 在 Mac 上建（dump 同 wikijudge4），2,816 列，SHA-256 `74359bd3c9edc9eaecd46af4387ff374d3b1116647d755e2c1d9ff35241354e5`。
+  - cjudge-1（CE3，`docs/contracts/chat-eval-3.md`）：S1（維護者自己的文字）2,880 列 `c255ae46…` 與 S2（PTT 推文）2,759 列 `8a32c907…` 依序接起來，共 5,639 列，SHA-256 `cd782a0d61fa4fe2638bb7e55c4344f6987e344042c55ab9a0e8b12a531c01f9`。私人檔，不進 repo；校對抽樣與拿掉的列只報數字（研究紀錄同日）。
+- **兩臂**（工具 `b90adc96` 的評測 CLI，`data/lm/` 是 v0.6.1 出貨的模型、雜湊先核對）：
+  - 基準：R1f 的 `base` 指令（`r1e.py commands` 的 `formal-std`、`chat-std`）。
+  - R1g：R1g 的 `e` 指令（`r1e.py commands --arm r1g`；書面標準加 `--reading-decode --reading-exempt experiments/r1-reading-decode/std-exempt.tsv`，聊天標準另加 `--no-reading-channel`）。
+- **主判讀**（兩條都成立才算確認成立）：
+  1. 書面標準在 wikijudge5：淨值 > 0、精確 McNemar 雙尾 p < 0.05（`tools/evalstats.py` 的 `mcnemar_exact`）、改壞÷改對 ≤ 0.65。
+  2. 聊天標準在 cjudge-1：Δtop1 的 90% 配對 bootstrap 下界 ≥ −1.0 個百分點（`evalstats.paired_bootstrap`，種子 20261008、10,000 次、逐列，和條件 2b 同一個做法）。
+- **只報**：兩份集合上的聊天關、書面關、保守、積極（同 R1g 的指令），以及兩條主判讀以外的數字（cjudge-1 的淨值與 McNemar、S1 與 S2 分開的表）。
+- **第二份來源**：數字決定出不出貨，照規則要另一台機器：GCP 跑一輪（共用函式庫的腳本、送出前 fresh verifier 審），188 的 WSL 再跑主判讀的四跑（兩集合 × 兩臂）；兩台的 rowstats 逐列相同才判讀，不同就停下回報。
+- **預算**：GCP ≤ 1 小時；188 ≤ 30 分鐘。私人列跑完就刪。
+- **之後**：兩條都成立 → 寫產品片契約（讀音項進核心解碼器、12 對不罰、融合拿掉讀音通道項、三檔與語意校正關都生效）。不成立 → 照登記不過，報數字，不開子片救同一次確認；cjudge-1 與 wikijudge5 用過退役。
+- **工具補記（2026-11-01，工具改完、任何確認片數字之前；登記的值與規則不動）**：`r1e.py commands --arm r1g --confirm` 印出確認片的 16 條指令（書面標準、關、保守、積極在 wikijudge5，聊天同四檔在 cjudge-1；旗標、`--threads`、標籤 `base.<設定>.<集合>`／`e.<設定>.<集合>` 與 R1g 的 60 跑相同，列檔 `$ROWS/wikijudge5.txt`、`$ROWS/cjudge-1.txt`）；`r1e.py judge DIR --arm r1g --confirm [--out]` 做和 `judge` 相同的檢查（counts.json 兩個集合、標籤 `+rd+rx:<前 8 碼>`、列數、正解長度逐列相同），再照上面兩條主判讀判（書面標準：淨值 > 0、精確 McNemar p < 0.05、改壞÷改對 ≤ 0.65，比例用整數比較 100×改壞 ≤ 65×改對；聊天標準：Δtop1 的 90% 配對 bootstrap 下界 ≥ −1.0 個百分點），其餘六對只印改對、改壞、淨值、p、比例、top1 前後；最後一行 `CONFIRMED` 或 `NOT CONFIRMED: 照登記不過`。沒給 `--confirm` 時 `commands`（R1f、R1g 各 60 條）的輸出與改之前逐字相同（舊版與新版各印一次 `diff`）。我跑的只有 `python3 -m unittest`（合成 rowstats，沒有跑任何真資料）：邊界有淨值 0、p 剛好 0.0294／0.0501、比例 0.65／0.66、聊天下界 −1.0／−1.2 個百分點。
+
+### R1g 確認片結果（2026-11-01，GCP 一台＋188 的 WSL 第二份來源；工具 `4261d8cb`）
+
+- GCP 16 跑全部完成；188 重跑主判讀的四跑，rowstats 和 GCP 逐位元組相同（四份都相同）之後才判讀。標記、列數、逐列金標長度的檢查都通過。
+- **確認成立（CONFIRMED）**：
+  1. 書面標準在 wikijudge5（2,816 列）：改對 15、改壞 0，淨值 +15，精確 McNemar p 6.1×10⁻⁵，比例 0；top1 2,137 → 2,152。過。
+  2. 聊天標準在 cjudge-1（5,639 列）：改對 3、改壞 4，淨值 −1；Δtop1 的 90% 配對 bootstrap 下界 −0.089 個百分點（≥ −1）。過（不變差）。
+- 只報：
+  | 設定 | 集合 | 改對／改壞 | p | top1 前→後 |
+  |---|---|---|---|---|
+  | 書面關 | wikijudge5 | 14／0 | 0.00012 | 2,069 → 2,083 |
+  | 書面保守 | wikijudge5 | 13／0 | 0.00024 | 2,108 → 2,121 |
+  | 書面積極 | wikijudge5 | 15／0 | 6.1×10⁻⁵ | 2,137 → 2,152 |
+  | 聊天關 | cjudge-1 | 5／0 | 0.0625 | 4,900 → 4,905 |
+  | 聊天保守 | cjudge-1 | 6／1 | 0.125 | 4,984 → 4,989 |
+  | 聊天積極 | cjudge-1 | 3／4 | 1 | 5,078 → 5,077 |
+  - cjudge-1 分兩半（S1 維護者自己的文字 2,880 列／PTT 2,759 列，改對／改壞）：聊天標準 1／2、2／2；聊天關 2／0、3／0；保守 2／0、4／1；積極 1／1、2／3。
+- 照登記：兩條都成立 → 寫產品片契約（讀音項進核心解碼器、12 對不罰、融合拿掉讀音通道項、三檔與語意校正關都生效）。cjudge-1 與 wikijudge5 用過退役。

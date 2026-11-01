@@ -5,7 +5,7 @@ use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
 use core::lm::{decode_from_fuzzy_scored, history, rerank_pool, CappedLexicon, Demote, Lm, Profile};
-use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, TOPK};
+use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, BATCH, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
 use std::collections::BTreeMap;
@@ -157,9 +157,12 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 /// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/contracts/sj-lm-7-pr2.md section 2.7; empty when none, always present).
 /// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
 /// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, masked: &[bool], idx: Option<&[usize]>) -> Result<String, String> {
+/// `extra` (`--tinylm-scores-topk`) continues the `ll` list past the 8 the rerank scored: one entry per further candidate, `null` for a
+/// candidate the small model could not score (longer than its context); it is empty without the option, so the line is then unchanged.
+#[allow(clippy::too_many_arguments)]
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, extra: &[Option<f64>], masked: &[bool], idx: Option<&[usize]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
-    if !ng.iter().chain(ll.unwrap_or(&[])).all(|x| x.is_finite()) {
+    if !ng.iter().chain(ll.unwrap_or(&[])).chain(extra.iter().flatten()).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
     }
     let list = |v: Vec<String>| format!("[{}]", v.join(", "));
@@ -171,7 +174,8 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
         list(ed.iter().map(u32::to_string).collect())
     );
     if let Some(ll) = ll {
-        s += &format!(", \"ll\": {}", list(ll.iter().map(|x| format!("{x:?}")).collect()));
+        let all = ll.iter().map(|x| format!("{x:?}")).chain(extra.iter().map(|x| x.map_or("null".to_string(), |x| format!("{x:?}"))));
+        s += &format!(", \"ll\": {}", list(all.collect()));
     }
     s += &format!(", \"masked\": {}", list(masked.iter().enumerate().filter(|(_, &m)| m).map(|(k, _)| k.to_string()).collect()));
     if let Some(idx) = idx {
@@ -195,6 +199,8 @@ struct RowOut {
     ok: bool,
     in64: bool,
     long: bool,
+    /// `--tinylm-scores-topk`: candidates 9..N the small model could not score (longer than its context).
+    no_ll: usize,
     rerank: Option<Duration>,
     /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
     first: String,
@@ -227,6 +233,10 @@ struct RowOut {
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
 ///
+/// `--tinylm-scores-topk N` (N >= 8, default 8; research, experiments/r1-reading-decode): the `--tinylm-scores` `ll` covers the first N
+/// candidates of the n-gram order instead of 8, the extra ones scored by `TinyLm::ll_many` under the key `rerank_ll` uses (a candidate over the model's context gets `null`, counted on stderr). The pick `c`, the
+/// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
+///
 /// `--no-reading-channel` (research only; docs/contracts/reading-channel.md section 2.2): where the colloquial term applies it is applied alone, the P4d
 /// cell. Without it the reading-channel term goes with it (the cell `lex,1.0,4` of experiments/p5-reading-channel: each single-character word's reading
 /// against that word's most common reading, from the lexicon this run loaded), `TinyLm::rerank_colloquial` being the one function for the CLI and the
@@ -234,6 +244,17 @@ struct RowOut {
 /// applies and the channel is on it reads `+colloq:<sha8>+rc`; with the option, or where the term does not apply (formal or another
 /// small model), just `+colloq:<sha8>`, so a P4d-cell run is never taken for the shipping setting. The option alone, without `--colloquial-core`,
 /// changes nothing.
+///
+/// `--reading-decode` (evaluation only; experiments/r1-reading-decode, section R1d; not in the engine or the C ABI): the n-gram decoder adds
+/// `core::reading`'s term (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the
+/// multi-character words: arm B-f) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
+/// `--tinylm-scores` `ng` and the pick all see it. The summary tag gains `+rd` at its very end. Without it the path is the one it was: cli/tests/reading_decode.rs checks the summary line of eight settings
+/// (chat and formal, with and without `--tinylm`, dev302 and typing76) and, on macOS, the sha256 of the `--dump` file of the four n-gram-only ones
+/// against the binary before the option; other outputs (rowstats, `--tinylm-scores`, `--dump-words`) are not compared.
+///
+/// `--reading-exempt FILE` (evaluation only; experiments/r1-reading-decode, section R1g; needs `--reading-decode`, an error without it): the
+/// `syllable<TAB>character` pairs of FILE (`#` lines and blank lines skipped) get the reading term 0, like the sandhi readings. The summary tag gains
+/// `+rx:<first 8 hex of FILE's SHA-256>` right after `+rd`. Without the option every output is what it was.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -244,6 +265,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut names = true;
     let mut forms_rowstats = None::<String>;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
+    let mut scores_topk = None::<usize>;
     let mut level = None::<RerankLevel>;
     // acg-pack contract A.2: `--packs acg` adds data/packs/acg-add.tsv (or `--packs-dir DIR`'s) to the lexicon and the cap; off by default.
     let (mut packs, mut packs_dir) = (0u32, None::<String>);
@@ -257,6 +279,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut delta_given = false;
     let mut reading_channel = true;
+    let mut reading_decode = false;
+    let mut reading_exempt = None::<String>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -282,6 +306,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--forms-rowstats" => forms_rowstats = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
+            "--tinylm-scores-topk" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= TOPK => scores_topk = Some(n),
+                _ => return Err(format!("--tinylm-scores-topk takes a whole number of at least {TOPK}")),
+            },
             "--rerank-level" => {
                 level = Some(match val()?.as_str() {
                     "conservative" => RerankLevel::Conservative,
@@ -306,8 +334,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-channel" => reading_channel = false,
+            "--reading-decode" => reading_decode = true,
+            "--reading-exempt" => reading_exempt = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
+    }
+    if reading_exempt.is_some() && !reading_decode {
+        return Err("--reading-exempt needs --reading-decode".into());
     }
     check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
     if tinylm_scores.is_some() && tinylm.is_none() {
@@ -322,6 +355,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         return Err("--fuzzy-delta-sound needs --fuzzy with a sound bit (0-3)".into());
     }
     let level = level.unwrap_or(RerankLevel::Standard);
+    if scores_topk.is_some() && tinylm_scores.is_none() {
+        return Err("--tinylm-scores-topk needs --tinylm-scores".into());
+    }
+    if scores_topk.is_some() && fuzzy.is_some() {
+        // The extra candidates are the n-best's 9..N; with --fuzzy the rerank pool is not the first 8, so the two lists would not line up.
+        return Err("--tinylm-scores-topk cannot be combined with --fuzzy".into());
+    }
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
@@ -373,6 +413,22 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // The rows of the pack-oov packs (not `--extra-overlay`, not other packs): their words are unknown to the model and keep the pack's score (pack-oov contract).
     let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
     let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    // R1d: the mc estimate of the floor readings counts the multi-character rows of mcbpmf-data.txt alone (the base the lexicon was parsed from).
+    let capped = if reading_decode {
+        let base = fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|e| format!("--reading-decode: cannot read mcbpmf-data.txt ({:?})", e.kind()))?;
+        capped.with_reading_decode(&base)
+    } else {
+        capped
+    };
+    // R1g: the pairs of FILE cost nothing; the tag carries the first 8 hex of the file's SHA-256.
+    let (capped, rx_tag) = match &reading_exempt {
+        Some(p) => {
+            let bytes = fs::read(p).map_err(|e| format!("--reading-exempt: cannot read {p} ({:?})", e.kind()))?;
+            let text = String::from_utf8(bytes.clone()).map_err(|_| format!("--reading-exempt: {p} is not UTF-8"))?;
+            (capped.with_reading_exempt(&text).map_err(|e| format!("--reading-exempt: {e}"))?, format!("+rx:{}", &sha256_hex(&bytes)[..8]))
+        }
+        None => (capped, String::new()),
+    };
 
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
@@ -489,13 +545,41 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if ll.is_some() {
                 out.rerank = Some(t0.elapsed());
             }
+            // `--tinylm-scores-topk N`: the candidates 9..N get an `ll` from `ll_many` under the key `TinyLm::rerank_ll` builds (SENTINEL = the
+            // empty k; keep the two the same, the test scores_topk_extends_ll_and_changes_nothing_else pins it), apart from the pick, which stays
+            // on the first 8. Scored in blocks of BATCH like `ll_many` does; a block with a candidate over the model's context is scored one by
+            // one, so only that candidate loses its `ll` (null in the record, counted in `out.no_ll`).
+            let mut extra: Vec<Option<f64>> = Vec::new();
+            if want_scores && scores_topk.is_some_and(|n| n > TOPK) && ll.is_some() {
+                let k = if key == SENTINEL { "" } else { key };
+                let more: Vec<&str> = surf.iter().skip(TOPK).take(scores_topk.unwrap_or(TOPK) - TOPK).map(String::as_str).collect();
+                for block in more.chunks(BATCH) {
+                    let items: Vec<(&str, &str)> = block.iter().map(|c| (k, *c)).collect();
+                    match tl.ll_many(&items) {
+                        Ok(v) => extra.extend(v.into_iter().map(Some)),
+                        Err(TinyLmError::TooLong) => {
+                            for it in &items {
+                                match tl.ll_many(std::slice::from_ref(it)) {
+                                    Ok(v) => extra.push(Some(v[0])),
+                                    Err(TinyLmError::TooLong) => {
+                                        extra.push(None);
+                                        out.no_ll += 1;
+                                    }
+                                    Err(e) => return Err(e.to_string()),
+                                }
+                            }
+                        }
+                        Err(e) => return Err(e.to_string()),
+                    }
+                }
+            }
             if want_scores {
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
                 // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
                 // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
                 let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &manual_mask(&used, &top, lex.manual()), idx)?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &extra, &manual_mask(&used, &top, lex.manual()), idx)?;
             }
         }
         let pick = len.apply(&surf[chosen]);
@@ -523,12 +607,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Ok(out)
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    let mut no_ll = 0usize;
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
     let (mut frs, mut no_char_step) = (Vec::new(), 0usize);
     let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
         top1 += out.ok as usize;
         o64 += out.in64 as usize;
         long += out.long as usize;
+        no_ll += out.no_ll;
         rerank.extend(out.rerank);
         if let Some(w) = scores.as_mut() {
             w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
@@ -612,6 +698,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
     }
+    if scores_topk.is_some_and(|n| n > TOPK) {
+        // stderr only, in the style of the latency line below: candidates 9..N the small model could not score (`null` in the record).
+        eprintln!("tinylm: --tinylm-scores-topk candidates without ll (candidate over the context) {no_ll}");
+    }
     if let (Some((_, load, _)), false) = (&tl, rerank.is_empty()) {
         // Latency record (S7c-1 item 6), stderr only: one rerank = the forward pass over up to 8 candidates of a row (rows with fewer
         // than two candidates run nothing and are not counted); load = read + parse of the .sjtl, the file loaded once.
@@ -650,7 +740,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if colloq_on.is_some() && reading_channel { "+rc" } else { "" })), if reading_decode { "+rd" } else { "" }, rx_tag, rows.len());
     Ok(())
 }
 
