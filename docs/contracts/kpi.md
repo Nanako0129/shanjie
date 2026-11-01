@@ -11,7 +11,7 @@
 ## 1. 要做到什麼
 
 1. `tools/kpi.py`：
-   - `run REF... [--as VERSION] --wikitune-clean FILE`（列檔路徑轉成絕對路徑；`eval/holdout/` 底下的檔拒絕）：參數和 `tools/bench.py run --suite v2` 相同（ref 是 tag 或 commit，`--as` 給最後一個還沒打 tag 的 commit 命名，名稱要在 `VERSIONS2` 裡）。匯出、編譯與模型設定直接 import bench.py 的 `Ver`／`build`／`setup_models`；wikitune-clean 這一格用 `cell_cmd` ＋ `cli_env(False)` ＋ `parse_summary` ＋ `expected_tag` ＋ `parse_rowstats` ＋ `truths` 組起來，做和 `run_cell2` 相同的檢查（設定標記、列數、rowstats 的 top1 等於摘要行）。`run_cell2` 本身不能用（它只認 `SETS2` 裡的集合），**bench.py 一行都不改**。跑出貨設定、書面設定，寫 `eval/bench/kpi/<version>.json`：`sha`（量的 commit）、`wikitune_clean`：`n`、`top1`、`top1_sha256`、設定標記、列檔的 `rows_sha256`。檔案已有的欄位保留，只更新這次跑的。
+   - `run REF... [--as VERSION] --wikitune-clean FILE`（列檔路徑轉成絕對路徑；`eval/holdout/` 底下的檔拒絕）：參數和 `tools/bench.py run --suite v2` 相同（ref 是 tag 或 commit，`--as` 給最後一個還沒打 tag 的 commit 命名，名稱要在 `VERSIONS2` 裡）。匯出、編譯與模型設定直接 import bench.py 的 `Ver`／`build`／`setup_models`；wikitune-clean 這一格用 `cell_cmd`（另加 `--threads <這個程序能用的核心數>`，2026-10-31：送到別台機器的工作要吃滿核心；CLI 註明多執行緒的輸出檔與摘要行和單執行緒逐位元組相同）＋ `cli_env(False)` ＋ `parse_summary` ＋ `expected_tag` ＋ `parse_rowstats` ＋ `truths` 組起來，做和 `run_cell2` 相同的檢查（設定標記、列數、rowstats 的 top1 等於摘要行）。`run_cell2` 本身不能用（它只認 `SETS2` 裡的集合），**bench.py 一行都不改**。跑出貨設定、書面設定，寫 `eval/bench/kpi/<version>.json`：`sha`（量的 commit）、`wikitune_clean`：`n`、`top1`、`top1_sha256`、設定標記、列檔的 `rows_sha256`。檔案已有的欄位保留，只更新這次跑的。
    - `replay --as VERSION`：在**目前的 checkout** 跑（發版時就是要打 tag 的那個 commit；已追蹤的檔有改動就拒絕，未追蹤的結果檔——`bench.py`／`kpi.py run` 剛寫的——不算；`VERSION` 的 tag 已存在時，它指的 commit 必須就是 HEAD），記下 `git rev-parse HEAD`。模型用 `data/lm/` 裡的檔，先照 `VERSIONS2[VERSION]` 列出該版出貨的檔（`resolve_models` 的那一組；出貨口語表的版本在它的列加 `"colloquial": True`，`kpi.py` 的 `check_models` 才把 `colloquial.sjlm` 算進這一組），每個都要和 `data/*.sha256` 相符，而且 `data/lm/` 不能多出不在這組裡的模型檔；`shanjie-replay` 預設載入 `data/lm/colloquial.sjlm`（照 App），所以這組有口語表時不加旗標、設定標記與 `models:` 行都要帶它（`+colloq:<sha8>`、`colloquial.sjlm:<sha8>`），沒有時加 `--no-colloquial` 並要求沒有這個標記；`SHANJIE_VARIANTS` 照 `cli_env(False)` 設；跑完再用 `shanjie-replay` 在 stderr 印的 `models:` 那行核對雜湊，不符就失敗。列檔固定：錯字回報用 `eval/bench/suite-v2/user-reported.txt`（套件 v2 凍結的 80 列），dev302 用 `eval/bench/suite-v1/dev302.txt`。跑錯字回報（聊天，`--correct`，學習關與開各一次）與 dev302（聊天，`--correct`，學習關），把摘要行的數字、`evalstats compare` 的改對／改壞，以及每個列檔的 `rows_sha256` 與 `n` 寫進同一個 JSON 的 `replay` 欄。含 `shanjie-replay` 之前的版本不回填（舊引擎沒有這個工具，用新工具重播舊模型不等於舊版的行為）。
    - `table`：讀 `eval/bench/results/v2-*.json` 與 `eval/bench/kpi/*.json`，重產 `docs/kpi.md`，不手改。
 2. 單元測試 `tools/test_kpi.py`：合成的小 JSON，每條規則一個會失敗的突變（§4）。
@@ -34,13 +34,14 @@
 - 表頭寫明每一欄的集合大小與雜湊（v2 JSON 的 `sets`，以及 `kpi/<v>.json` 記的 `rows_sha256`），換集合時欄位分開，不同集合的數字不放在同一欄；兩種來源都適用。
 - 表下方列出每一列的來源檔名。
 
-## 3. 保留集兩個半邊（從下一個發版起）
+## 3. 保留集兩個半邊（2026-10-29 修訂：新聞半邊改私人檔，`docs/contracts/news-corpus.md` §2.4）
 
-- 保留集規則不變：只在推 `v*` tag 前由 fresh verifier 跑一次，基準與新版各跑 `--set holdout --rowstats`（聊天、書面各一次）。改的只是回報：
-  - 全集合照舊每種設定一行（聊天、書面），存在 v2 JSON 的 `holdout.chat`／`holdout.formal`；
-  - 另加兩行：口語半邊用**聊天**設定、新聞半邊用**書面**設定。`--set holdout` 依檔名排序讀，`news.txt` 是第 1–150 列、`talk.txt` 是第 151–300 列；基準與新版的 rowstats 用同樣的方式切出那一段、列號從 1 重編，再跑 `evalstats compare --net`；
-  - 兩個半邊存在 `eval/bench/kpi/<version>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（欄位同 v2 JSON 的 holdout：`n`、`top1`、`fixed`、`broken`、`p`，另加那個半邊檔案的 `rows_sha256`，表依它分欄，換份時不同份的數字不會在同一欄）；
-  - 同一次發版前量的這四行算一次「使用」。
+- 保留集規則不變：只在推 `v*` tag 前由 fresh verifier 跑一次。回報改成：
+  - **口語半邊**＝`--set holdout` 全集（`eval/holdout/` 只剩 `talk.txt`，n 150），聊天設定，存在 v2 JSON 的 `holdout.chat` 與 kpi JSON 的 `holdout_talk_chat`；全集合那兩行不再存在，不跨份比；
+  - **新聞半邊**＝私人檔（`--rows <holdout-news-1.txt> --profile formal --rowstats`，書面設定），存在 v2 JSON 的 `holdout.formal` 與 kpi JSON 的 `holdout_news_formal`；
+  - 欄位：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`；`tools/kpi.py` 與 `tools/bench.py` 的表都依它分欄，換份時不同份的數字不會在同一欄；`kpi.py` 只看這個雜湊（沒填的全放進同一欄，`bench.py` 沒填時改依 n 分欄），所以每筆都要填（`tools/test_kpi.py` 有兩份新聞半邊換檔、以及口語半邊雜湊不變而新聞半邊雜湊換了的分欄測試；`tools/test_bench.py` 有 bench 兩個表畫出來的對應測試）；
+  - 量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（流程規則，不是技術防護）；
+  - 兩個半邊各自計次：同一次發版前兩個都量，各加一次「使用」，不互相牽動（`eval/README.md` 使用紀錄）。
 - `docs/verification.md` 與 `eval/README.md` 的保留集段落跟著改；`kpi.py table` 從 `kpi/<v>.json` 的這兩個欄位讀兩個半邊的 top1。
 
 ## 4. 驗收

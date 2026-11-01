@@ -14,7 +14,7 @@ The picks, the rowstats and the buckets (D1, the E flags) follow the CLI, so the
 rides on it. The D2b / D2c sub-diagnosis does not: it re-picks in Python with `pick` and delta 0 on the file's alpha and tau, the plain small-model
 rule, so in a run with the table a row whose pick either term changed can be labelled by the plain rule. The holdout is never a set here. Standard library only, except that `tinylm_params` needs numpy (export_sjtl.py's reader), plus tools/bench.py's set table, reference/proto/eval.py's `lenient` and reference/proto/lm_eval.py's `kn_tag`).
 """
-import argparse, collections, concurrent.futures, importlib.util, json, os, struct, subprocess, sys, tempfile, threading
+import argparse, collections, concurrent.futures, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -140,14 +140,15 @@ def tinylm_params(path):
     return {p: (*head[p], head["delta"][i]) for i, p in enumerate(PROFILES)}
 
 
-def kn_tag(path):
+def kn_tag(path, beta=None):
     """The CLI's setting tag for the Kneser-Ney side file beside the model (`+kn:<sha8>:θ<θ>:β<β>`, cli/src/main.rs via Lm::kn_tag,
-    lm_eval.py kn_tag), or "" when there is none (the CLI then runs without KN). SJKN0002: θ u32 at byte 44, β f64 at 48."""
+    lm_eval.py kn_tag), or "" when there is none (the CLI then runs without KN). SJKN0002: θ u32 at byte 44, β f64 at 48. `beta` is the β the
+    profile scores with when it is not the file's (the formal profile's lm.FORMAL_KN_BETA; the tag shows it)."""
     if not os.path.lexists(path):
         return ""
     sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
     import lm_eval   # the one KN tag format (the Python reference's summary line)
-    return lm_eval.kn_tag(path)
+    return lm_eval.kn_tag(path, beta)
 
 
 def tri_tag(path):
@@ -156,23 +157,25 @@ def tri_tag(path):
 
 
 def expected_tag(prof, ctx_tag, tl8, kn, tri, colloq8=""):
-    """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). With a trigram table the formal profile reads it,
-    scores without Kneser-Ney (no `+kn:`) and ends the tag with `+tri:`; chat ignores the table and keeps `+kn:`. With `--colloquial-core`
+    """The setting tag the CLI prints in the shipping setting (--packs acg --tinylm). `kn` and `tri` are the profile's own parts: both profiles
+    keep Kneser-Ney (`+kn:` before `+tl:`, the formal one at beta 0.75) and read their own trigram table (`+tri:` after `+acg`), formal
+    `trigram.sjt3` and chat `trigram-chat.sjt3`; either part is "" when the file is not beside the model. With `--colloquial-core`
     the tag ends in `+colloq:<sha8 of the table>` in both profiles, and in chat (where the term applies, with the reading-channel term on by default)
     `+rc` after it: the CLI marks the shipping behavior, so a `--no-reading-channel` run is refused."""
     colloq = f"+colloq:{colloq8}" + ("+rc" if prof == "chat" else "") if colloq8 else ""
-    if prof == "formal" and tri:
-        return f"lm-{prof}{ctx_tag}+tl:{tl8}+acg{tri}{colloq}"
-    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{colloq}"
+    return f"lm-{prof}{ctx_tag}{kn}+tl:{tl8}+acg{tri}{colloq}"
 
 
-def pick(ng, ll, alpha, tau, delta):
-    """core/src/tinylm.rs pick, line for line."""
+def pick(ng, ll, alpha, tau, delta, masked=()):
+    """core/src/tinylm.rs pick_masked, line for line: `masked` are the indices tinylm::manual_mask kept the rerank from choosing (the CLI's
+    `--tinylm-scores` field of that name, docs/contracts/sj-lm-7-pr2.md section 2.7); the threshold and the scores use the whole list."""
     if len(ng) < 2 or ng[0] - ng[1] >= tau:
         return 0
     s0 = ng[0] + alpha * ll[0]
     best, best_s = 0, s0
     for i in range(1, len(ng)):
+        if i in masked:
+            continue
         s = ng[i] + alpha * ll[i]
         if s > best_s:
             best, best_s = i, s
@@ -279,13 +282,14 @@ def classify(row, lex, par, lenient):
     sc = row["scores"]
     if gold_rank <= TOPK and sc is not None:
         alpha, tau, delta = par
-        if "ll" not in sc:
+        if "ll" not in sc or len(sc["ng"]) < 2:   # no rerank ran: a fuzzy first path, or a pool of one
             res["d2"] = "D2-none"
         elif sc["ng"][0] - sc["ng"][1] >= tau:
             res["d2"] = "D2a"
         else:
             # core pick with delta 0 is the plain argmax of ng + alpha * ll, ties to the better n-gram rank; here the margin is below tau already
-            res["d2"] = "D2b" if sc["ok"][pick(sc["ng"], sc["ll"], alpha, tau, 0.0)] else "D2c"
+            # `pick` is a position in the record's lists, which `ok` shares: no mapping through idx here
+            res["d2"] = "D2b" if sc["ok"][pick(sc["ng"], sc["ll"], alpha, tau, 0.0, sc.get("masked", ()))] else "D2c"
     return res
 
 
@@ -361,6 +365,42 @@ def read_cli_files(dump, words, scores, n):
     return cands, gold0, recs
 
 
+def nbest_index(sc, j):
+    """The n-best index (the dump's order, what the record's `c` names) of entry j of the record's lists `ng`, `ll`, `ok`, `ed`. A record
+    made with a fuzzy-sound bit lists the pool of the semantic correction in pool order and says in `idx` which n-best path each entry is
+    (fuzzy-input contract section 3.6); without `idx` the lists are the first n paths and j is the index."""
+    return sc["idx"][j] if "idx" in sc else j
+
+
+def by_nbest(sc, key):
+    """The record's list `key` as {n-best index: value}."""
+    return dict(zip(sc.get("idx", range(len(sc[key]))), sc[key]))
+
+
+def refuse_pool(recs, who):
+    """For a tool that reads the record by n-best position (the first 8 candidates of the dump): a record with `idx` has a pool that
+    reaches beyond them and is in another order, so the tool stops instead of reading the wrong entries."""
+    if any(r is not None and "idx" in r for r in recs):
+        raise RuntimeError(f"{who}: the scores record has an idx column (a fuzzy-sound bit); this tool reads the first 8 candidates by position")
+
+
+def check_choice(i, sc, cands, truth, ok, lenient, par, plain=True):
+    """Row i's (1-based) chosen candidate against the rowstats ok and, when the plain pick applies, against `pick`; -> `c`, an n-best index.
+    `pick` returns a position in the record's lists, `c` an index into the dump's candidates: with `idx` the two are mapped before they are
+    compared, and the chosen candidate is read from the dump by `c`."""
+    c = sc["c"]
+    sel_ok = int(lenient(cands[c][0]) == lenient(truth))
+    if sel_ok != ok or (plain and sc["n"] > 1 and "ll" in sc and not pick_agrees(sc, par)):
+        raise RuntimeError(f"row {i}: the chosen candidate disagrees with rowstats or with pick")
+    return c
+
+
+def pick_agrees(sc, par):
+    """Whether the CLI's chosen index `c` of a scores record (an n-best index) is `pick(ng, ll, *par)` with the record's masked candidates left out
+    (a record without the field, from an older CLI, has none masked), mapped through `idx` when the record lists a pool."""
+    return sc["c"] == nbest_index(sc, pick(sc["ng"], sc["ll"], *par, masked=sc.get("masked", ())))
+
+
 def plain_pick_applies(prof, colloq):
     """Whether the CLI's chosen index must equal the plain `pick(ng, ll, *par)`: not in chat with the colloquial table, where the core
     adds the colloquial term (and the terms that ride on it) to the fusion on purpose, which this Python `pick` does not reproduce."""
@@ -389,20 +429,23 @@ def run_cell(cli, lm, tl, prof, rows_file, lex, par, lenient, report, td, kn="",
     recs_rows = []
     for i, (ctx, truth, syls) in enumerate(rows):
         sc = recs[i]
-        c = sc["c"]
-        sel_ok = int(lenient(cands[i][c][0]) == lenient(truth))
-        if sel_ok != ok[i] or (plain_pick_applies(prof, colloq) and sc["n"] > 1 and "ll" in sc and c != pick(sc["ng"], sc["ll"], *par)):
-            raise RuntimeError(f"row {i + 1}: the chosen candidate disagrees with rowstats or with pick")
+        c = check_choice(i + 1, sc, cands[i], truth, ok[i], lenient, par, plain_pick_applies(prof, colloq))
         recs_rows.append({"ctx": ctx, "truth": truth, "syls": syls, "cands": cands[i], "gold0": gold0[i], "c": c, "scores": sc})
     cn, per = triage_rows(recs_rows, [int(x) for x in ok], [int(x) for x in ok_nc], lex, par, lenient, report)
     cn["oracle64"], cn["top1_sha256"] = o64, sha
     return cn, per
 
 
+CE3_SET = re.compile(r"(ctune|cdev|cmicro|cjudge-[1-9]\d*)\Z")
+
+
 def set_file(name, private_root):
     if name in OWN_SETS:
         return OWN_SETS[name], False
-    f, want, private = bench.SETS2[name]
+    if CE3_SET.match(name):     # chat-eval-3 section 5: private row files under --private-root, hash recorded in the JSON, not pinned
+        f, want, private = f"{name}-rows.txt", None, True
+    else:
+        f, want, private = bench.SETS2[name]
     if private:
         f = os.path.join(os.path.abspath(os.path.expanduser(private_root)), f)
     if not os.path.isfile(f):
@@ -431,14 +474,19 @@ def cmd_run(a):
     cli = a.cli or os.path.join(ROOT, "target/release/shanjie-eval")
     lm, tl = os.path.join(ROOT, "data/lm/bigram.sjlm"), os.path.join(ROOT, "data/lm/tinylm.sjtl")
     lenient, lex, par = load_lenient(), Lex.load(), tinylm_params(tl)
-    kn = kn_tag(os.path.join(ROOT, "data/lm/kn.sjkn"))   # the CLI turns KN on when the side file is beside the model
-    tri = tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))   # the CLI reads it for the formal profile only
+    sys.path.insert(0, os.path.join(ROOT, "reference", "proto"))
+    import lm as L   # FORMAL_KN_BETA, the one constant the Rust core's Lm::scoring and the Python reference share
+    kn_file = os.path.join(ROOT, "data/lm/kn.sjkn")
+    # The CLI turns KN on when the side file is beside the model, and reads each profile's own table (docs/contracts/sj-lm-7-pr2.md):
+    # `kn` and `tri` are per profile (formal scores at beta 0.75; formal reads trigram.sjt3, chat trigram-chat.sjt3).
+    kn = {"chat": kn_tag(kn_file), "formal": kn_tag(kn_file, L.FORMAL_KN_BETA)}
+    tri = {"chat": tri_tag(os.path.join(ROOT, "data/lm/trigram-chat.sjt3")), "formal": tri_tag(os.path.join(ROOT, "data/lm/trigram.sjt3"))}
     colloq = os.path.join(ROOT, "data/lm/colloquial.sjlm")   # the App always loads it (Shell.build()); the CLI applies it in chat at every strength (the triage runs the standard)
     colloq = colloq if os.path.isfile(colloq) else ""
     path = os.path.join(OUT_DIR, a.label + ".json")
     doc = json.load(open(path, encoding="utf-8")) if os.path.isfile(path) else {"label": a.label, "sets": {}}
     meta = {"commit": git_head(), "setting": "--context --packs acg --tinylm" + (" --colloquial-core" if colloq else ""), "cli_sha256": bench.sha_file(cli),
-            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri else ()) + (("colloquial.sjlm",) if colloq else ())},
+            "models": {n: bench.sha_file(os.path.join(ROOT, "data/lm", n)) for n in ("bigram.sjlm", "classes.sjc") + (("kn.sjkn",) if kn["chat"] else ()) + ("tinylm.sjtl",) + (("trigram.sjt3",) if tri["formal"] else ()) + (("trigram-chat.sjt3",) if tri["chat"] else ()) + (("colloquial.sjlm",) if colloq else ())},
             "alpha_tau_delta": {p: list(v) for p, v in par.items()}}
     check_same_run(doc, meta)
     doc.update(meta)
@@ -456,7 +504,7 @@ def cmd_run(a):
         try:
             with tempfile.TemporaryDirectory() as td:   # the dump and the word dump hold sentences: they are deleted here
                 try:
-                    cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn, tri, a.cli_threads, colloq)
+                    cn, per = run_cell(cli, lm, tl, prof, files[name][0], lex, par[prof], lenient, name == "user-reported", td, kn[prof], tri[prof], a.cli_threads, colloq)
                 except BaseException:
                     stop.set()   # before the temp dir is removed: a worker freed by this failure finds the event set
                     raise

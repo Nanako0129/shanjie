@@ -8,6 +8,7 @@ import argparse
 import bz2
 import collections
 import hashlib
+import html
 import math
 import os
 import pickle
@@ -164,14 +165,16 @@ def is_simplified(text):
     return (m > 0 and t == 0) or sum(c in SIMP_ONLY for c in text) > t
 
 
-def convert(text, phrase, char, maxp):
+def convert(text, phrase, char, maxp, trad_tw_phrases=True):
     """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照。
     其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞（TWPhrases），
-    最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。"""
+    最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。
+    trad_tw_phrases=False（SJ-LM-7 契約 §2.2，計數用）：繁體句不套 TWPhrases，只剩字形層（簡體專用字、POST_TRAD 的 VARIANTS 與台灣字形），
+    「插件」不會被換成「外掛」；簡體句不變。預設 True＝原行為，holdout_guard.py、build_digits.py 與其他呼叫者不傳。"""
     simp = is_simplified(text)
     # S2f 修訂一 6.2.2：TWPhrases 之前不套台灣字形或 VARIANTS（OpenCC 的順序），鍵寫成 OpenCC 字形的台灣用詞才對得到
     text = _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR) if simp else _longest(text, phrase, maxp, char)
-    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE else text
+    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE and (simp or trad_tw_phrases) else text
     table = POST_SIMP if simp else POST_TRAD   # 喫→吃 也在 TW_VARIANTS 裡，S2n 的「輸入有喫就保留」規則拿掉
     return _longest(text, PROTECT if simp else PROTECT_TRAD, PROTECT_MAXP[0], table)   # 保護詞原樣保留，其餘逐字套表
 
@@ -196,21 +199,23 @@ def fold(text):
     return "".join(MERGE.get(c, c) for c in text)
 
 
-def text_runs(line, conv):
-    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple."""
-    return HAN.findall(convert(line, *conv))
+def text_runs(line, conv, trad_tw_phrases=True):
+    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple.
+    trad_tw_phrases: see convert()."""
+    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases))
 
 
-def article_runs(raw, conv, mw=None, mwconv=None):
+def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
-    The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8)."""
-    for s in article_sentences(raw, conv, mw, mwconv):
+    The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8).
+    trad_tw_phrases: see convert(); a counting run and the guard that scans it must pass the same value."""
+    for s in article_sentences(raw, conv, mw, mwconv, trad_tw_phrases):
         yield from HAN.findall(s)
 
 
-def article_sentences(raw, conv, mw=None, mwconv=None):
-    """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
-    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
+def article_text(raw, mw=None, mwconv=None):
+    """The article body before the SENT split and before convert(): entity unescape, [mw conversion], TEMPLATE x3, MARKUP. Paragraphs are its
+    lines. experiments/sj-lm-7/wikinews.py exports this layer so a reader (build_counts_text, holdout_guard --text) converts exactly once."""
     t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
     if mw:   # S2w：整篇先交給 MediaWiki 的 zh-tw 轉換（站上轉換表、NoteTA 群組、條目規則），之後的句子不再呼叫 convert()
         t = mwconv.convert(t, mw)
@@ -218,12 +223,21 @@ def article_sentences(raw, conv, mw=None, mwconv=None):
         t = TEMPLATE.sub("", t)
     for pat, rep in MARKUP:
         t = pat.sub(rep, t)
-    for s in SENT.findall(t):
-        yield s if mw else convert(s, *conv)
+    return t
 
 
-def articles(limit, dump=None):
+def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
+    """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
+    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
+    for s in SENT.findall(article_text(raw, mw, mwconv)):
+        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases)
+
+
+def articles(limit, dump=None, meta=False):
+    """Main-namespace non-redirect pages in dump order: the wikitext, or with meta=True (title, revid, wikitext) (XML-unescaped title; revid
+    is the first <revision><id>, "" when absent). Default: exactly the old output."""
     text_re = re.compile(r"<text[^>]*>(.*?)</text>", re.S)
+    title_re, rev_re = re.compile(r"<title>(.*?)</title>", re.S), re.compile(r"<revision>\s*<id>(\d+)</id>")
     buf, n = "", 0
     with bz2.open(dump or DUMP, "rt", encoding="utf-8") as f:
         for line in f:
@@ -232,7 +246,11 @@ def articles(limit, dump=None):
                 if "<ns>0</ns>" in buf and "#REDIRECT" not in buf.upper() and "#重定向" not in buf:
                     m = text_re.search(buf)
                     if m:
-                        yield m.group(1)
+                        if meta:
+                            t, r = title_re.search(buf), rev_re.search(buf)
+                            yield html.unescape(t.group(1)).strip() if t else "", r.group(1) if r else "", m.group(1)
+                        else:
+                            yield m.group(1)
                         n += 1
                         if n >= limit:
                             return
@@ -325,23 +343,24 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def guard_matcher(rows):
+def guard_matcher(rows, trad_tw_phrases=True):
     """--holdout-guard (docs/contracts/holdout-refresh.md section 8), called once in main() before any Pool exists: None when off, else the
     Matcher over the held-out rows (`rows` = row files; empty = every .txt under eval/holdout/). Prints how many rows were loaded and skipped.
+    trad_tw_phrases must be the counter's own setting, so the patterns cover the text that is actually counted.
     A bad rows file stops here (SystemExit, message = path, line, field count only), never inside a worker initializer."""
     if rows is None:
         return None
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import holdout_guard
     try:
-        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv())
+        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv(), trad_tw_phrases)
     except (holdout_guard.GuardError, OSError) as e:
         sys.exit(f"holdout-guard: {e}")
     print(f"holdout-guard: {loaded} rows loaded, {skipped} skipped as shorter than {holdout_guard.MIN_LEN} characters", flush=True)
     return matcher
 
 
-def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None):
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None, trad_tw_phrases=True):
     """holdout_guard: None, or the Matcher guard_matcher() built in main (already validated)."""
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
@@ -363,6 +382,7 @@ def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_gu
         _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
     _W["guard"] = holdout_guard
+    _W["trad_tw"] = trad_tw_phrases
 
 
 def run_expected(run):
@@ -400,7 +420,7 @@ def _count(texts):
     guard, skipped = _W.get("guard"), 0
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
-        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv")):
+        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv"), trad_tw_phrases=_W.get("trad_tw", True)):
             if len(run) < 2:
                 continue
             if guard is not None and guard.any(fold(run)):
@@ -449,28 +469,33 @@ def main():
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
+    ap.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 契約 §2.2：繁體句不套 OpenCC TWPhrases（「插件」不換成「外掛」）；預設關＝model-v6 的行為。--holdout-guard 的比對也跟著這個設定")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("--shard", metavar="K/N", help="只數第 i 篇（i %% N == K）、寫 counts-<篇數>-shard<K>of<N>.pkl；N 個程序各給一個 K 平行跑，計數相加就是全部（SJ-LM-7：主程序合併是單核瓶頸）。預設關")
     ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數（契約 holdout-refresh §8）；不給檔＝eval/holdout/ 底下全部 .txt")
     a = ap.parse_args()
     if a.expected and a.trigram:
         ap.error("--expected 不算 trigram")
     if a.extra_lexicon and not a.expected:
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
-    guard = guard_matcher(a.holdout_guard)
+    guard = guard_matcher(a.holdout_guard, not a.no_trad_tw_phrases)
     load_conv()   # in the parent first: a missing or wrong OpenCC file stops here, not in every Pool worker's initializer (which respawns forever)
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = skipped = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard)) as pool:
-        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(articles(a.articles))):
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard, not a.no_trad_tw_phrases)) as pool:
+        k, n = map(int, a.shard.split("/")) if a.shard else (0, 1)
+        mine = (x for i, x in enumerate(articles(a.articles)) if i % n == k)
+        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(mine)):
             uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {sents} runs, {len(uni)} words, {len(bi)} bigrams", flush=True)
-    arts = min(arts, a.articles)
+    arts = min(arts, a.articles) if not a.shard else len(range(k, a.articles, n))
     out = {"uni": uni, "bi": bi, "articles": arts, "runs": sents}
     if a.trigram:
         out["tri"] = tri
-    pickle.dump(out, open(os.path.join(OUT, f"counts-{arts}{'-tri' if a.trigram else ''}.pkl"), "wb"))
+    name = f"counts-{a.articles}-shard{k}of{n}" if a.shard else f"counts-{arts}"
+    pickle.dump(out, open(os.path.join(OUT, f"{name}{'-tri' if a.trigram else ''}.pkl"), "wb"))
     print(f"done: {arts} articles, {sents} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
     if a.holdout_guard is not None:
         print(f"holdout-guard: skipped {skipped} runs")

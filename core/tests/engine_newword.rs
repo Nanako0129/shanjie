@@ -122,7 +122,7 @@ fn tmp_dir(tag: &str) -> PathBuf {
     d
 }
 
-const PAIGONG: &str = "ㄆㄞˋ ㄍㄨㄥ";
+const PAIGONG: &str = "ㄇㄥˋ ㄧ";
 /// The motivating report: the maintainer's re-picks of the name 正彬 were never learned (no lexicon word under its
 /// reading; S4 learns a single character only after exactly two Han characters, rule 7).
 const ZHENGBIN: &str = "ㄓㄥˋ ㄅㄧㄣ";
@@ -140,15 +140,15 @@ fn spell(e: &mut Engine, target: &str) {
     panic!("could not spell the target");
 }
 
-/// The user story of §1 with 派工, one of the reported missing words (contract §0; since model-v6 the model decodes 版控
-/// unaided in most contexts, 派工 stays 派公 in every one): after 要進 was sent, type ㄆㄞˋ ㄍㄨㄥ, re-pick each wrong
-/// character one by one, Enter.
+/// The user story of §1 with 夢依, a made-up name the lexicon lacks and the corpus never saw (the reported missing words, 版控 and
+/// then 派工, are decoded unaided by the models since model-v6 and 通語 SJ-LM-7-9.7M, which count the vocabulary of the lexicon): 夢依 stays 夢一 in every
+/// context. After 要進 was sent, type ㄇㄥˋ ㄧ, re-pick each wrong character one by one, Enter.
 fn teach_paigong(e: &mut Engine) {
     e.set_left_context("要進");
     let o = type_syls(e, PAIGONG);
-    assert_ne!(o.preedit, "派工", "the lexicon lacks 派工 (else this slice has nothing to show)");
-    spell(e, "派工");
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "派工");
+    assert_ne!(o.preedit, "夢依", "the lexicon lacks 夢依 (else this slice has nothing to show)");
+    spell(e, "夢依");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "夢依");
 }
 
 // ---------- §3.1 measurement tool ----------
@@ -335,18 +335,18 @@ fn measure_newword() {
 #[test]
 fn measure_dump_and_show_formats() {
     let row = |c: &str, g: &str, r: &str| (c.to_string(), g.to_string(), r.split(' ').map(String::from).collect::<Vec<_>>());
-    let teach = vec![row("要進", "派工", PAIGONG)];
-    let replay = vec![row("加入", "派工", PAIGONG), row("", "正彬", ZHENGBIN)];
+    let teach = vec![row("要進", "夢依", PAIGONG)];
+    let replay = vec![row("加入", "夢依", PAIGONG), row("", "正彬", ZHENGBIN)];
     let len = core::eval::Lenient::parse(&std::fs::read_to_string(root().join("eval/variants.tsv")).unwrap()).unwrap();
     let dir = tmp_dir("dump");
     std::fs::create_dir_all(&dir).unwrap();
     let dump = dir.join("dump.tsv");
     let mut e = engine();
     let (rs, top1, learned) = measure(&mut e, &teach, &replay, &len, Some(&dump));
-    assert_eq!(std::fs::read_to_string(&dump).unwrap(), "1\t1\t派工\t派工\n2\t0\t正賓\t正彬\n");
+    assert_eq!(std::fs::read_to_string(&dump).unwrap(), "1\t1\t夢依\t夢依\n2\t0\t正賓\t正彬\n");
     assert_eq!(rs, "1\t1\t0\t2\n2\t0\t1\t2\n");
     assert_eq!(top1, 1);
-    assert_eq!(learned, vec!["newword\tㄆㄞˋ-ㄍㄨㄥ\t派工".to_string()]);
+    assert_eq!(learned, vec!["newword\tㄇㄥˋ-ㄧ\t夢依".to_string()]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -363,8 +363,9 @@ fn tiny(text: &str) -> Engine {
     e.set_learning(true);
     e
 }
-/// Syllables of T (each one character, two homophones apart from 的 and Ａ).
-const T: &str = "ㄅㄢˇ 板 -1.0\nㄅㄢˇ 版 -1.5\nㄎㄨㄥˋ 控 -1.0\nㄎㄨㄥˋ 空 -1.5\nㄕㄨ 書 -1.0\nㄕㄨ 舒 -1.5\nㄏㄨㄚ 花 -1.0\nㄏㄨㄚ 嘩 -1.5\nㄉㄜ˙ 的 -1.0\nㄟ Ａ -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\n";
+/// Syllables of T (each one character, two homophones apart from 的 and Ａ). The second homophone is at -4.0 (-1.5 before 通語 SJ-LM-7-9.7M): with -1.5 the
+/// new model, which counts 版控 and the like, decodes the run from the characters unaided and there is nothing to learn.
+const T: &str = "ㄅㄢˇ 板 -1.0\nㄅㄢˇ 版 -4.0\nㄎㄨㄥˋ 控 -1.0\nㄎㄨㄥˋ 空 -4.0\nㄕㄨ 書 -1.0\nㄕㄨ 舒 -4.0\nㄏㄨㄚ 花 -1.0\nㄏㄨㄚ 嘩 -4.0\nㄉㄜ˙ 的 -1.0\nㄟ Ａ -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\n";
 /// Type `reading` on a T engine, re-pick the character at `at`, Enter; the new words learned. Sub-spans (§2.2 item 5)
 /// are off here: these tests pin the whole-run rules of items 1–4; item 5 has its own tests (`boundary_*`).
 fn learn_t(text: &str, reading: &str, at: usize) -> (Vec<String>, String) {
@@ -638,34 +639,34 @@ fn store_writes_the_new_word_line_and_reopen_restores() {
     e.learning_open(&dir).unwrap();
     teach_paigong(&mut e);
     let text = raw(&dir);
-    assert!(text.lines().any(|l| l == "#\tㄆㄞˋ-ㄍㄨㄥ\t派工\t1\t20000"), "the # line");
+    assert!(text.lines().any(|l| l == "#\tㄇㄥˋ-ㄧ\t夢依\t1\t20000"), "the # line");
     let mut f = engine();
     f.learning_open(&dir).unwrap();
-    assert!(new_record(&f, "派工").is_some());
+    assert!(new_record(&f, "夢依").is_some());
     f.set_left_context("加入");
-    assert_eq!(type_syls(&mut f, PAIGONG).preedit, "派工");
+    assert_eq!(type_syls(&mut f, PAIGONG).preedit, "夢依");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ---------- §2.4 decoding and the candidate window ----------
 
-/// §2.4: after 派工 is learned, ㄆㄞˋ ㄍㄨㄥ decodes as 派工 in other contexts and inside other sentences, and the
+/// §2.4: after 夢依 is learned, ㄇㄥˋ ㄧ decodes as 夢依 in other contexts and inside other sentences, and the
 /// candidate window lists it ahead of the lexicon's two-syllable words.
 #[test]
 fn a_learned_word_wins_in_any_context_and_leads_its_length_in_the_window() {
     let mut e = engine();
     e.set_left_context("要進");
-    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派公", "before");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "夢一", "before");
     e.key(k(KeyKind::Esc)).unwrap();
     teach_paigong(&mut e);
     e.set_left_context("記得加入");
-    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派工");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "夢依");
     e.key(k(KeyKind::Esc)).unwrap();
     e.set_left_context("");
     e.set_prediction(false).unwrap(); // predict-down B.4: the window's lexicon part is the subject; the row's items come first
-    assert_eq!(type_syls(&mut e, &format!("ㄐㄧˋ ㄉㄜ˙ ㄐㄧㄚ ㄖㄨˋ {PAIGONG}")).preedit, "記得加入派工");
+    assert_eq!(type_syls(&mut e, &format!("ㄐㄧˋ ㄉㄜ˙ ㄐㄧㄚ ㄖㄨˋ {PAIGONG}")).preedit, "記得加入夢依");
     let o = e.key(k(KeyKind::Space)).unwrap();
-    assert_eq!(o.candidates[0], "派工", "first among the two-syllable candidates (none longer here)");
+    assert_eq!(o.candidates[0], "夢依", "first among the two-syllable candidates (none longer here)");
 }
 
 /// §2.4: choosing the new word from the window in a new context fixes it; the composition shows and commits it
@@ -676,26 +677,26 @@ fn choosing_and_forgetting_a_fixed_new_word() {
     let mut e = engine();
     teach_paigong(&mut e);
     e.set_left_context("我們");
-    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派工", "decoded with the record");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "夢依", "decoded with the record");
     e.key(k(KeyKind::Esc)).unwrap();
     // fix it from the window: after 我們 the record decides; pick it explicitly
     e.set_left_context("我們");
     type_syls(&mut e, PAIGONG);
-    let o = pick(&mut e, 2, 2, "派工");
-    assert_eq!(o.preedit, "派工");
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "派工");
-    assert!(e.learner().records().iter().filter(|r| r.word == "派工").all(|r| r.context == NEWWORD), "no S4 or global record");
+    let o = pick(&mut e, 2, 2, "夢依");
+    assert_eq!(o.preedit, "夢依");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "夢依");
+    assert!(e.learner().records().iter().filter(|r| r.word == "夢依").all(|r| r.context == NEWWORD), "no S4 or global record");
     // fixed, then forgotten
     e.set_left_context("我們");
     type_syls(&mut e, PAIGONG);
-    pick(&mut e, 2, 2, "派工");
-    open_at(&mut e, 2, 2, "派工");
+    pick(&mut e, 2, 2, "夢依");
+    open_at(&mut e, 2, 2, "夢依");
     let o = e.key(FORGET).unwrap();
-    assert!(new_record(&e, "派工").is_none());
-    assert_ne!(o.preedit, "派工", "decoded again without the record");
+    assert!(new_record(&e, "夢依").is_none());
+    assert_ne!(o.preedit, "夢依", "decoded again without the record");
     e.key(k(KeyKind::Esc)).unwrap();
     let o = e.key(k(KeyKind::Enter)).unwrap();
-    assert_eq!(o.commit, "派公");
+    assert_eq!(o.commit, "夢一");
     assert!(new_words(&e).is_empty());
 }
 
@@ -708,10 +709,10 @@ fn a_fixed_new_word_without_a_record_is_unfixed() {
     teach_paigong(&mut e);
     e.set_left_context("加入");
     type_syls(&mut e, PAIGONG);
-    pick(&mut e, 2, 2, "派工");
+    pick(&mut e, 2, 2, "夢依");
     e.learning_clear().unwrap();
     let o = type_syls(&mut e, "ㄉㄜ˙"); // the next key decodes again
-    assert!(o.preedit.starts_with("派公"), "unfixed and decoded without the record");
+    assert!(o.preedit.starts_with("夢一"), "unfixed and decoded without the record");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -739,7 +740,7 @@ fn new_word_records_that_are_never_enumerated_change_nothing() {
     let n_low = records.len();
     assert!(n_low > 100, "{n_low}");
     records.truncate(1999);
-    records.push(Record { context: NEWWORD.into(), reading: vec!["ㄆㄞˋ".into(), "ㄍㄨㄥ".into()], word: "派工".into(), weight: 3.0, day: DAY });
+    records.push(Record { context: NEWWORD.into(), reading: vec!["ㄇㄥˋ".into(), "ㄧ".into()], word: "夢依".into(), weight: 3.0, day: DAY });
     let dir = tmp_dir("never");
     let (store, _, _) = LearnStore::open(&dir).unwrap();
     store.save(&records).unwrap();
@@ -750,7 +751,7 @@ fn new_word_records_that_are_never_enumerated_change_nothing() {
     assert!(b.learner().records().iter().all(|r| r.context == NEWWORD) && b.learner().records().len() == records.len().min(2000));
     let mut diff = Vec::new();
     for (i, (ctx, _, syls)) in rows.iter().enumerate() {
-        assert!(!syls.windows(2).any(|w| w == ["ㄆㄞˋ", "ㄍㄨㄥ"]), "dev302 types the active one");
+        assert!(!syls.windows(2).any(|w| w == ["ㄇㄥˋ", "ㄧ"]), "dev302 types the active one");
         a.set_left_context(ctx);
         b.set_left_context(ctx);
         for key in syls.iter().flat_map(|s| keys_of(s)).chain([k(KeyKind::Enter)]) {
@@ -782,14 +783,14 @@ fn a_use_counts_once_a_day() {
         e.set_today(Some(day));
         e.set_left_context("加入");
         type_syls(&mut e, PAIGONG);
-        assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "派工");
+        assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "夢依");
     }
-    let r = new_record(&e, "派工").unwrap();
+    let r = new_record(&e, "夢依").unwrap();
     assert_eq!(r.day, DAY + 1);
     assert!((r.weight - (0.5f64.powf(1.0 / 14.0) + 1.0)).abs() < 1e-12, "decayed one day, plus one");
     // DAY + 1's first Enter is the day's full rewrite; the second Enter that day adds nothing either
     let text = raw(&dir);
-    assert_eq!(text.lines().filter(|l| l.contains("派工")).count(), 1, "rewritten once on the new day, no second line");
+    assert_eq!(text.lines().filter(|l| l.contains("夢依")).count(), 1, "rewritten once on the new day, no second line");
     assert!(lines(&dir) <= n0, "no line added by the uses");
     // the same day, append path: a use of an already counted word appends nothing
     let before = raw(&dir);
@@ -836,8 +837,8 @@ fn a_use_with_learning_off_counts_nothing() {
     e.set_learning(false);
     e.set_left_context("加入");
     type_syls(&mut e, PAIGONG);
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "派工");
-    let r = new_record(&e, "派工").unwrap();
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "夢依");
+    let r = new_record(&e, "夢依").unwrap();
     assert_eq!((r.weight, r.day), (1.0, DAY));
 }
 
@@ -847,23 +848,23 @@ fn a_repick_over_a_new_word_halves_it() {
     let mut e = engine();
     teach_paigong(&mut e);
     e.set_left_context("加入");
-    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派工");
-    pick(&mut e, 2, 2, "公");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "夢依");
+    pick(&mut e, 2, 2, "一");
     e.key(k(KeyKind::Enter)).unwrap();
-    assert_eq!(new_record(&e, "派工").unwrap().weight, 0.5);
+    assert_eq!(new_record(&e, "夢依").unwrap().weight, 0.5);
 }
 
 /// §2.5 (finding 2): choosing the character already shown over part of a new word changes no text (S4's pre == word),
-/// so it re-picks nothing away: 派工 keeps its weight.
+/// so it re-picks nothing away: 夢依 keeps its weight.
 #[test]
 fn choosing_the_shown_character_inside_a_new_word_does_not_halve_it() {
     let mut e = engine();
     teach_paigong(&mut e);
     e.set_left_context("加入");
-    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派工");
-    pick(&mut e, 2, 1, "派");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "夢依");
+    pick(&mut e, 2, 1, "夢");
     e.key(k(KeyKind::Enter)).unwrap();
-    assert_eq!(new_record(&e, "派工").unwrap().weight, 1.0);
+    assert_eq!(new_record(&e, "夢依").unwrap().weight, 1.0);
 }
 
 /// T plus a weak two-syllable lexicon word (板空 -9.0, under NEWWORD_SHADOW) under ㄅㄢˇ ㄎㄨㄥˋ, with 版控 learned as a
@@ -911,7 +912,7 @@ fn a_sub_span_spelled_twice_in_one_commit_is_learned_once() {
     let mut e = tiny(T);
     e.set_newword_subspans(true);
     let shown = type_syls(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ ㄅㄢˇ ㄎㄨㄥˋ").preedit;
-    assert_eq!(shown, "板控板空", "measured: spelling 版空版空 re-picks 版 in both halves");
+    assert_eq!(shown, "板控板控", "measured: spelling 版空版空 re-picks both characters of both halves");
     spell(&mut e, "版空版空");
     assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "版空版空");
     assert!(new_words(&e).contains(&"版空版空".to_string()), "{:?}", new_words(&e));
@@ -930,17 +931,17 @@ fn forgetting_a_new_word_removes_its_line() {
     teach_paigong(&mut e);
     e.set_left_context("加入");
     type_syls(&mut e, PAIGONG);
-    open_at(&mut e, 2, 2, "派工");
+    open_at(&mut e, 2, 2, "夢依");
     let o = e.key(FORGET).unwrap();
-    assert_eq!(o.preedit, "派公");
+    assert_eq!(o.preedit, "夢一");
     assert!(!o.candidates.is_empty(), "the window stays open");
-    assert!(!o.candidates.iter().any(|c| c == "派工"), "a forgotten new word is no longer listed");
-    assert!(!raw(&dir).contains("派工"));
+    assert!(!o.candidates.iter().any(|c| c == "夢依"), "a forgotten new word is no longer listed");
+    assert!(!raw(&dir).contains("夢依"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// §2.6 (security review P2-1): re-pick 工 → ⌘⌫ on 派工 → Esc → Enter must not learn 派工 back. The word is below
-/// ACTIVE here (30 days old), so the composition shows 派公 while the window still lists it.
+/// §2.6 (security review P2-1): re-pick 依 → ⌘⌫ on 夢依 → Esc → Enter must not learn 夢依 back. The word is below
+/// ACTIVE here (30 days old), so the composition shows 夢一 while the window still lists it.
 #[test]
 fn forget_then_enter_does_not_learn_the_word_back() {
     let dir = tmp_dir("forget-enter");
@@ -949,16 +950,16 @@ fn forget_then_enter_does_not_learn_the_word_back() {
     teach_paigong(&mut e);
     e.set_today(Some(DAY + 30));
     e.set_left_context("加入");
-    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "派公", "under ACTIVE: not enumerated");
-    pick(&mut e, 2, 2, "工");
-    open_at(&mut e, 2, 2, "派工");
+    assert_eq!(type_syls(&mut e, PAIGONG).preedit, "夢一", "under ACTIVE: not enumerated");
+    pick(&mut e, 2, 2, "依");
+    open_at(&mut e, 2, 2, "夢依");
     e.key(FORGET).unwrap();
     e.key(k(KeyKind::Esc)).unwrap();
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "派工");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "夢依");
     let mut f = engine();
     f.learning_open(&dir).unwrap();
-    assert!(new_record(&f, "派工").is_none(), "learned back");
-    assert!(!raw(&dir).contains("派工"));
+    assert!(new_record(&f, "夢依").is_none(), "learned back");
+    assert!(!raw(&dir).contains("夢依"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -980,6 +981,8 @@ fn clear_removes_new_words() {
 /// PLAN §7 R2 (new-word B wording): re-pick one character in the middle of a marker string the lexicon has no word
 /// for and commit; the file holds marker characters only inside the ≤ 4 run holding the re-picked one and the ≤ 2
 /// characters before it. Typing the same marker again without a re-pick adds no line holding any of them.
+/// context-return section 4 (P3-6): the left text ends with an ASCII marker word, which the engine holds (`left_full`) for the
+/// English table; it is nowhere in the file. The text has no Han tail, so decoding starts as without one.
 #[test]
 fn r2_marker_characters_on_disk() {
     r2_marker(false);
@@ -996,6 +999,9 @@ fn r2_marker(subspans: bool) {
     let mut e = tiny(marker);
     e.set_newword_subspans(subspans);
     e.learning_open(&dir).unwrap();
+    let left_marker = "Zqxjvk";
+    e.set_left_context(&format!("我說 {left_marker} "));
+    assert_eq!(e.left_full_chars(), left_marker.len() + 1, "premise: the marker word is held");
     type_syls(&mut e, reading);
     let at = 4;
     repick_char(&mut e, 9, at);
@@ -1006,6 +1012,7 @@ fn r2_marker(subspans: bool) {
     // the run holding the re-pick: 3..6 (的 at 2 and 了 at 6 split it); the context: 2..4
     let allowed: Vec<char> = c[2..6].to_vec();
     let text = raw(&dir);
+    assert!(!text.to_ascii_lowercase().contains(&left_marker.to_ascii_lowercase()), "the left text's marker is on disk");
     for line in text.lines().skip(1) {
         let f: Vec<&str> = line.split('\t').collect();
         assert_eq!(f.len(), 5);
@@ -1026,39 +1033,39 @@ fn r2_marker(subspans: bool) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ---------- the boundary case: 要進 and ㄆㄞˋ ㄍㄨㄥ in one composition ----------
+// ---------- the boundary case: 要進 and ㄇㄥˋ ㄧ in one composition ----------
 
-/// Type 要進 + ㄆㄞˋ ㄍㄨㄥ in ONE composition, re-pick 派 if needed and 工, Enter; then type ㄆㄞˋ ㄍㄨㄥ after
+/// Type 要進 + ㄇㄥˋ ㄧ in ONE composition, re-pick 夢 if needed and 依, Enter; then type ㄇㄥˋ ㄧ after
 /// 記得加入. Returns the new words and the second display.
 fn boundary(subspans: bool) -> (Vec<String>, String) {
     let mut e = engine();
     e.set_newword_subspans(subspans);
     e.set_left_context("");
     let o = type_syls(&mut e, &format!("ㄧㄠˋ ㄐㄧㄣˋ {PAIGONG}"));
-    assert_eq!(o.preedit, "要進派公");
-    spell(&mut e, "要進派工");
-    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "要進派工");
+    assert_eq!(o.preedit, "要進夢一");
+    spell(&mut e, "要進夢依");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "要進夢依");
     let learned = new_words(&e);
     e.set_left_context("記得加入");
     (learned, type_syls(&mut e, PAIGONG).preedit)
 }
 
-/// Rule A (the approved contract): 要 is a function character and 進 is not, so the run is 進派工 and only that is
-/// learned; ㄆㄞˋ ㄍㄨㄥ alone never meets it, so 記得加入 + ㄆㄞˋ ㄍㄨㄥ stays 派公 (the user's original report).
+/// Rule A (the approved contract): 要 is a function character and 進 is not, so the run is 進夢依 and only that is
+/// learned; ㄇㄥˋ ㄧ alone never meets it, so 記得加入 + ㄇㄥˋ ㄧ stays 夢一 (the user's original report).
 #[test]
 fn boundary_rule_a_learns_only_the_whole_run() {
     let (learned, shown) = boundary(false);
-    assert_eq!(learned, vec!["進派工"]);
-    assert_eq!(shown, "派公");
+    assert_eq!(learned, vec!["進夢依"]);
+    assert_eq!(shown, "夢一");
 }
 
-/// Variant B: the run's sub-spans holding the re-pick whose reading has no lexicon word are learned too (派工 here),
-/// so 記得加入 + ㄆㄞˋ ㄍㄨㄥ gives 派工.
+/// Variant B: the run's sub-spans holding the re-pick whose reading has no lexicon word are learned too (夢依 here),
+/// so 記得加入 + ㄇㄥˋ ㄧ gives 夢依.
 #[test]
 fn boundary_variant_b_learns_the_sub_span() {
     let (learned, shown) = boundary(true);
-    assert!(learned.contains(&"派工".to_string()) && learned.contains(&"進派工".to_string()), "{learned:?}");
-    assert_eq!(shown, "派工");
+    assert!(learned.contains(&"夢依".to_string()) && learned.contains(&"進夢依".to_string()), "{learned:?}");
+    assert_eq!(shown, "夢依");
 }
 
 // ---------- §3.4 per-key time with 2,000 new words ----------

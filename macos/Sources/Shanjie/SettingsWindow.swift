@@ -55,37 +55,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.close()
     }
 
-    /// Measured page heights come out this much short of what the window draws: a 10-toggle grouped form measured 435 pt
-    /// in a window and was drawn 438 pt tall (/code-review probe, 2026-10-15). Without it the tallest page would scroll.
-    private static let measureSlack: CGFloat = 4
-
-    /// Sizes the window (settings-sidebar section 2.2): the tallest page plus the title bar, at most the usable height of
-    /// `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Each page is measured
-    /// with a vertical fixedSize in a hidden hosting view attached to the window: the window shows only the selected page, the
-    /// on-screen form has no fixedSize so it can scroll when the cap bites, and a hosting view outside any window measured
-    /// about 4.5 pt per row too tall (/code-review probe). Every page is rebuilt on every fit; that happens only on
-    /// show, an app-list change and a screen change, so it is not cached. With `.fullSizeContentView` the content rect is the
-    /// whole frame, so this height is the frame's.
+    /// Sizes the window (settings-fixed-size.md): one fixed height, `SettingsLayout.frameHeight`, clamped to the usable
+    /// height of `screen`, keeping the top edge where it is (`show()` centres it afterwards, `refit()` clamps it). Nothing
+    /// is measured: pages taller than the window scroll. With `.fullSizeContentView` the content rect is the whole frame,
+    /// so this height is the frame's.
     private func fit(_ w: NSWindow, on screen: NSScreen?) {
-        guard let model, let container = w.contentView else { return }
-        let tallest = SettingsPage.allCases.map { page in
-            let probe = NSHostingView(rootView: SettingsPageForm(page: page, model: model, appLabels: appLabels)
-                .fixedSize(horizontal: false, vertical: true))
-            probe.isHidden = true
-            container.addSubview(probe)
-            defer { probe.removeFromSuperview() }
-            return probe.fittingSize.height
-        }.max() ?? 0
-        let cap = screen?.visibleFrame.height ?? .greatestFiniteMagnitude
         let top = w.frame.maxY
-        w.setContentSize(NSSize(width: SettingsForm.width, height: min(tallest + Self.measureSlack + Self.titleBarHeight, cap)))
+        let visible = screen?.visibleFrame.height ?? .greatestFiniteMagnitude
+        w.setContentSize(NSSize(width: SettingsForm.width, height: SettingsLayout.frameHeight(visibleHeight: visible)))
         w.setFrameTopLeftPoint(NSPoint(x: w.frame.minX, y: top))
     }
 
-    /// The 個別設定的 App list changed length (profile-choice section 2.4) or the screen changed, while the window is open.
-    /// The app-list call comes one main-actor turn after SwiftUI's onChange, so the window is not resized in the middle of
-    /// SwiftUI's update. The window grows downward from its top edge, so it is clamped back into its screen's usable area
-    /// (settings-sidebar section 2.2): a window dragged down to the Dock moves up instead of growing under it.
+    /// The screen changed (Dock, resolution, text size, display removed) while the window is open: recompute the height,
+    /// then clamp the frame back into the screen's usable area (settings-sidebar section 2.2), so a window dragged down
+    /// to the Dock moves up instead of sitting under it.
     private func refit() {
         guard let window, window.isVisible else { return }
         let screen = window.screen ?? NSScreen.main
@@ -119,11 +102,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         glass.material = Self.backgroundMaterial
         glass.blendingMode = .behindWindow
         glass.state = .active
-        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels, onRowCountChange: { [weak self] in
-            Task { @MainActor in self?.refit() }
-        }))
+        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels))
         host.safeAreaRegions = []  // placed below the title bar by its top constraint, so no second inset
-        host.sizingOptions = []  // the window's size comes from fit() alone (settings-sidebar section 2.2), not the content's
+        host.sizingOptions = []  // the window's size comes from fit() alone (settings-fixed-size.md), not the content's
         let container = NSView()
         let layers: [(NSView, CGFloat)] = [(glass, 0), (host, Self.titleBarHeight)]
         for (v, top) in layers {
@@ -209,8 +190,6 @@ struct SettingsForm: View {
     static var width: CGFloat { sidebarWidth + SettingsPageForm.formWidth }
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
-    /// The 個別設定的 App list changed length: the window refits its height.
-    let onRowCountChange: () -> Void
     @State private var page: SettingsPage = .general
 
     var body: some View {
@@ -229,12 +208,11 @@ struct SettingsForm: View {
             SettingsPageForm(page: page, model: model, appLabels: appLabels)
                 .id(page)
         }
-        .onChange(of: model.appProfiles.count) { onRowCountChange() }
     }
 }
 
 /// One page's controls, system controls only; each control writes through `SettingsModel`. The sections are the single
-/// form's (settings-window section 2.2), grouped by page; `fit()` measures each page on its own.
+/// form's (settings-window section 2.2), grouped by page.
 struct SettingsPageForm: View {
     /// Chosen to fit the controls and their labels on one line each; not measured against any reference.
     static let formWidth: CGFloat = 420
@@ -242,6 +220,8 @@ struct SettingsPageForm: View {
     private static let tintIconSpacing: CGFloat = 8
     /// The app icons in the 個別設定的 App list: one line of body text; not measured against any reference.
     private static let appIconSize: CGFloat = 16
+    /// The four pair checkboxes, in the order of the bits of `shanjie_engine_set_fuzzy` (fuzzy-input section 2.1).
+    private static let fuzzyPairs = ["ㄣ／ㄥ", "ㄓ／ㄗ", "ㄔ／ㄘ", "ㄕ／ㄙ"]
     let page: SettingsPage
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
@@ -288,25 +268,42 @@ struct SettingsPageForm: View {
             case .candidates:
                 Section("選字") {
                     Toggle(MenuEntry.Text.prediction, isOn: Binding(get: { model.prediction }, set: { model.setPrediction($0) }))
+                    // browser-first-syllable section 3: right under 即時預測, greyed (setting kept) while it is off; not in the menu.
+                    Toggle(MenuEntry.Text.browserFirstSyllable,
+                           isOn: Binding(get: { model.browserFirstSyllable }, set: { model.setBrowserFirstSyllable($0) }))
+                        .disabled(!model.prediction)
+                    Text(MenuEntry.Text.browserFirstSyllableNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     // Greyed while the prediction row is off, like the menu item (v3-engine section 12.1).
                     if model.showsAbbreviation {
                         Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                             .disabled(!model.prediction)
                     }
-                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the word list did not load
-                    // or the layout is Eten, like the menu item (zhen-mixed section 3.2).
+                    // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the layout is Eten, like the menu item (zhen-mixed section 3.2).
                     Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
                         .disabled(!model.englishEnabled)
                     // Digits.md A.3.7: one line under the toggle, as the 聊天／書面 note above is written.
                     Text(MenuEntry.Text.englishDigitsNote)
                         .font(.caption).foregroundStyle(.secondary)
-                    // Under the toggle (zhen-inline section 2); greyed on the toggle's condition and while the toggle is off.
-                    Picker(MenuEntry.Text.englishDisplay, selection: Binding(get: { model.englishInline }, set: { model.setEnglishInline($0) })) {
-                        Text(MenuEntry.Text.englishDisplayTyped).tag(true)
-                        Text(MenuEntry.Text.englishDisplaySpace).tag(false)
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!model.englishInlineEnabled)
+                    // zhen-reapply section 1.2: before the key-order choice; greyed unless key-order is enabled and on, since (b) needs it on.
+                    Toggle(MenuEntry.Text.englishReversalGuard, isOn: Binding(get: { model.englishReversalGuard }, set: { model.setEnglishReversalGuard($0) }))
+                        .disabled(!model.englishReversalGuardEnabled)
+                    Text(MenuEntry.Text.englishReversalGuardNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    // zhen-keyorder section 3 with zhen-revert section 3: under the toggle, with a line of what it costs; greyed on the
+                    // toggle's condition and while the toggle is off.
+                    Toggle(MenuEntry.Text.englishKeyOrder, isOn: Binding(get: { model.englishKeyOrder }, set: { model.setEnglishKeyOrder($0) }))
+                        .disabled(!model.englishKeyOrderEnabled)
+                    Text(MenuEntry.Text.englishKeyOrderNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle(MenuEntry.Text.englishOverwrite, isOn: Binding(get: { model.englishOverwrite }, set: { model.setEnglishOverwrite($0) }))
+                        .disabled(!model.englishOverwriteEnabled)
+                    Text(MenuEntry.Text.englishOverwriteNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    // shift-toggle section 1: always enabled (it works with the English mixing off too: then the composition is sent first).
+                    Toggle(MenuEntry.Text.shiftToggle, isOn: Binding(get: { model.shiftToggle }, set: { model.setShiftToggle($0) }))
+                    Text(MenuEntry.Text.shiftToggleNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     // cjk-spacing section 2: always enabled, independent of the 中英混打 switch.
                     Toggle(MenuEntry.Text.spacing, isOn: Binding(get: { model.spacing }, set: { model.setSpacing($0) }))
                     Text(MenuEntry.Text.spacingNote)
@@ -325,10 +322,27 @@ struct SettingsPageForm: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!model.rerankLevelEnabled)
+                }
+                // it-pack contract 3.2: every pack switch lives here (the input menu only names the loaded packs); new packs join this section.
+                Section("詞包") {
                     Toggle(MenuEntry.Text.acgPack, isOn: Binding(get: { model.acgPack }, set: { model.setAcgPack($0) }))
                     if let line = model.acgDataLine {
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
+                    // Next to the other word pack; off until chosen (quote-pack contract section 2).
+                    Toggle(MenuEntry.Text.quotePack, isOn: Binding(get: { model.quotePack }, set: { model.setQuotePack($0) }))
+                    Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
+                }
+                // fuzzy-input section 2.2: all off by default. The adjacent-key checkbox is greyed (value kept) in the Eten layout, where
+                // the core does nothing with it.
+                Section("模糊輸入") {
+                    ForEach(0..<Self.fuzzyPairs.count, id: \.self) { bit in
+                        Toggle(Self.fuzzyPairs[bit], isOn: Binding(get: { model.fuzzyFlags >> UInt32(bit) & 1 == 1 }, set: { model.setFuzzy(bit: bit, $0) }))
+                    }
+                    Toggle("鄰鍵打錯", isOn: Binding(get: { model.fuzzyFlags >> 4 & 1 == 1 }, set: { model.setFuzzy(bit: 4, $0) }))
+                        .disabled(!model.fuzzyAdjacentEnabled)
+                    Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。開著時 go、cp、cup 這類字會被收成中文，不會變英文；要英文就按住 Shift 打，或把這個關掉。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             case .appearance:
                 Section("外觀") {

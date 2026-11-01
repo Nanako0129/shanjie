@@ -63,11 +63,12 @@ pub(super) struct DigitEnv {
     pub st: LmState,
     pub table: Arc<DigitTable>,
     pub cache: Arc<DigitCache>,
+    pub profile: Profile,
 }
 
 impl DigitEnv {
     pub fn scorer(&self) -> Scorer<'_> {
-        Scorer { table: &self.table, lm: &self.st.lm, idx: self.st.capped.predict_index(&self.st.lm), legal: &self.cache.legal }
+        Scorer { table: &self.table, lm: &self.st.lm, idx: self.st.capped.predict_index(&self.st.lm), legal: &self.cache.legal, cfg: self.st.lm.scoring(self.profile) }
     }
 }
 
@@ -139,12 +140,12 @@ impl Engine {
         let (st, table) = (self.lm.clone()?, self.digit_table.clone()?);
         let key = (Arc::as_ptr(&st.capped) as usize, st.lm.identity());
         if let Some(c) = self.digit_cache.clone().filter(|c| c.key == key) {
-            return Some(DigitEnv { st, table, cache: c });
+            return Some(DigitEnv { st, table, cache: c, profile: self.profile });
         }
         let idx = st.capped.predict_index(&st.lm);
-        let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings()), words: idx.digit_words(&table.all_words()) });
+        let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings(&st.lm)), words: idx.digit_words(&table.all_words()) });
         self.digit_cache = Some(cache.clone());
-        Some(DigitEnv { st, table, cache })
+        Some(DigitEnv { st, table, cache, profile: self.profile })
     }
 
     /// The text before the cursor as the context sees it: the left context and the display up to the cursor.
@@ -199,7 +200,7 @@ impl Engine {
         self.clear_pend();
         for &k in tail {
             if let Some((col, sym)) = Layout::Standard.symbol_of(k) {
-                self.shadow_push(k, false);
+                self.shadow_push(k, col);
                 self.pend[col] = Some(sym);
             }
         }
@@ -291,6 +292,7 @@ impl Engine {
             // Not in A.3.4's list of boundary keys, so as today: behind an unfinished syllable the key does nothing.
             (KeyKind::Up, _) => {
                 self.pred_dirty = true; // the row was taken at the top of `dispatch`
+                self.mark_noop(); // changes nothing: the short-word mark stays, by the same rule as every other arm that does nothing
                 self.handled()
             }
             (KeyKind::Esc, _) => {
@@ -485,7 +487,7 @@ impl Engine {
                     self.cursor = self.cursor.saturating_sub(1);
                     self.remove_syllable(self.cursor)?;
                 }
-                // Like the Chinese item of the English window: the word is fixed, nothing is learned.
+                // Like the Chinese item of an English token's list: the word is fixed, nothing is learned.
                 Ok(self.insert_token(syl, Some(word), None)?.commit)
             }
         }

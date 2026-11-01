@@ -167,7 +167,8 @@ fn sentinel_context_is_an_empty_k() {
     let model = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap();
     let want = model.ll_many(&cands.iter().map(|c| ("我們", c.as_str())).collect::<Vec<_>>()).unwrap();
     let l = &with_ctx[2];
-    let got: Vec<f64> = l[l.find("\"ll\": [").unwrap() + 7..l.rfind(']').unwrap()].split(", ").map(|x| x.parse().unwrap()).collect();
+    let from = l.find("\"ll\": [").unwrap() + 7;
+    let got: Vec<f64> = l[from..from + l[from..].find(']').unwrap()].split(", ").map(|x| x.parse().unwrap()).collect();
     assert_eq!(got, want, "a Han prefix is the model's context");
     // numbers only: no candidate text in the file
     assert!(plain.iter().all(|l| l.is_ascii()));
@@ -427,6 +428,54 @@ fn scores_topk_extends_ll_and_changes_nothing_else() {
     for n in ["8", "16"] {   // given at all, any value, without --tinylm-scores
         let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--tinylm", &sjtl, "--tinylm-scores-topk", n]);
         assert!(!o.status.success() && text(&o.stderr).contains("--tinylm-scores"), "topk {n}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The version 1 toy bytes `b` as version 4 (`left` None) or version 5 declaring the left-context length `left`
+/// (docs/contracts/context-return.md section 2): both deltas 0, the standard triples for every level, an all-zero side file hash, then L.
+fn upgraded(b: &[u8], left: Option<u32>) -> Vec<u8> {
+    let triple = |at: usize| [&b[at..at + 16], &0f64.to_le_bytes()[..]].concat();
+    let (chat, formal) = (triple(36), triple(52));
+    let mut h = [&b[..100], &[0; 16][..], &chat, &chat, &formal, &formal, &[0; 32][..]].concat();
+    let version: u32 = if let Some(l) = left { h.extend_from_slice(&l.to_le_bytes()); 5 } else { 4 };
+    h[7] = b'0' + version as u8;
+    h[8..12].copy_from_slice(&version.to_le_bytes());
+    [h.as_slice(), &b[100..]].concat()
+}
+
+/// context-return section 2 (review of PR #294): with `--context` the CLI keys a model declaring L = 8 like the engine
+/// (`TinyLm::key_for`: the last 8 characters of the row's context as they are, the display before the one stretch being empty), and
+/// the same model as version 4 with the context key as before.
+#[test]
+fn a_declared_left_length_keys_cli_rows_like_the_engine() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("v5", Path::new(&lm));
+    let v1 = std::fs::read(&sjtl).unwrap();
+    let rows = dir.join("rows.txt");
+    let ctxs = ["昨天我們去看了Joe的表演，", "我們"];
+    std::fs::write(&rows, ctxs.iter().map(|c| format!("{c}|你好嗎|ㄋㄧˇ ㄏㄠˇ ㄇㄚ˙\n")).collect::<String>()).unwrap();
+    let dump = dir.join("ctx.dump");
+    let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--context", "--dump", dump.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let dump = std::fs::read_to_string(&dump).unwrap();
+    let cands = |row: &str| -> Vec<String> {
+        dump.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); (f[0] == row && f[1].parse::<usize>().unwrap() <= 8).then(|| f[2].to_string()) }).collect()
+    };
+    for (left, keys) in [(Some(8), ["了Joe的表演，", "我們"]), (None, ["", "我們"])] {
+        let file = dir.join(format!("m{}.sjtl", left.unwrap_or(0)));
+        std::fs::write(&file, upgraded(&v1, left)).unwrap();
+        let out = dir.join("s.jsonl");
+        let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--context", "--tinylm", file.to_str().unwrap(),
+            "--tinylm-scores", out.to_str().unwrap()]);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        let model = core::tinylm::TinyLm::load(&file).unwrap();
+        assert_eq!(model.left_len(), left.map(|l| l as usize));
+        for (i, line) in std::fs::read_to_string(&out).unwrap().lines().enumerate() {
+            let c = cands(&(i + 1).to_string());
+            let want = model.ll_many(&c.iter().map(|c| (keys[i], c.as_str())).collect::<Vec<_>>()).unwrap();
+            assert_eq!(list_of(line, "ll"), want, "L {left:?}, row {}", i + 1);
+        }
     }
     std::fs::remove_dir_all(dir).unwrap();
 }

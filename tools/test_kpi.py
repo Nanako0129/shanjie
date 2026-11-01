@@ -163,6 +163,17 @@ class TableRules(Tmp):
             a, b = (next(h for h in cols if x in h) for x in ("#11111111", "#22222222"))
             self.assertEqual((rows["v0.4.7"][a] != "—", rows["v0.4.7"][b], rows["v0.4.8"][a], rows["v0.4.8"][b] != "—"), (True, "—", "—", True), p)
 
+    def test_news_half_from_a_private_file_gets_its_own_column(self):
+        # the news half moved from eval/holdout/news.txt to a private rows file (news-corpus.md 2.4): the talk half keeps its hash, the news half's changes
+        self.put(self.kp, "v0.5.0.json", {"holdout_talk_chat": {"n": 150, "top1": 120, "rows_sha256": H1}, "holdout_news_formal": {"n": 150, "top1": 135, "rows_sha256": H1}})
+        self.put(self.kp, "v0.6.0.json", {"holdout_talk_chat": {"n": 150, "top1": 121, "rows_sha256": H1}, "holdout_news_formal": {"n": 150, "top1": 130, "rows_sha256": H2}})
+        head, rows = self.table()
+        self.assertEqual(len([h for h in head if h.startswith("保留集口語半邊")]), 1, head)
+        cols = [h for h in head if h.startswith("保留集新聞半邊")]
+        self.assertEqual(len(cols), 2, head)
+        a, b = (next(h for h in cols if x in h) for x in ("#11111111", "#22222222"))
+        self.assertEqual((rows["v0.5.0"][a] != "—", rows["v0.5.0"][b], rows["v0.6.0"][a], rows["v0.6.0"][b] != "—"), (True, "—", "—", True))
+
     def test_table_is_byte_identical_across_runs(self):
         for i, h in enumerate((H1, H2, "3" * 64)):  # several column groups, so an unordered iteration would show
             self.put(self.res, f"v2-{i}.json", v2_file(f"2026-10-0{i + 1}", [v2_version(f"v0.4.{i}"), v2_version(f"v0.4.{i + 1}", 70, {"fixed": 2, "broken": 1}, SPEED)], h=h))
@@ -191,6 +202,46 @@ def make_root(td, names=("bigram.sjlm", "classes.sjc", "tinylm.sjtl")):  # (a ve
     return root
 
 
+class WikituneThreads(unittest.TestCase):
+    """kpi run is sent to remote machines that must be filled: the wikitune-clean cell passes --threads <usable cores>, except to a
+    CLI that predates the flag."""
+
+    def cmd_for(self, takes_threads):
+        seen = []
+        v = types.SimpleNamespace(dir="/x")
+        with mock.patch.object(kpi, "usable_cores", return_value=16), \
+             mock.patch.object(kpi, "cli_takes_threads", return_value=takes_threads), \
+             mock.patch.object(bench, "cell_cmd", return_value=["cli"]), \
+             mock.patch.object(bench, "sh", side_effect=lambda cmd, **kw: seen.append(cmd) or ""), \
+             mock.patch.object(bench, "parse_summary", side_effect=RuntimeError("stop after the command")):
+            with self.assertRaises(RuntimeError):
+                kpi.wikitune_cell(v, "rows", "rowstats")
+        return seen
+
+    def test_the_cell_decodes_on_every_usable_core(self):
+        self.assertEqual(self.cmd_for(True), [["cli", "--threads", "16"]])
+
+    def test_an_old_cli_gets_no_threads_flag(self):
+        self.assertEqual(self.cmd_for(False), [["cli"]])
+
+    def test_usable_cores_follows_the_affinity_mask(self):
+        if not hasattr(os, "sched_getaffinity"):
+            self.skipTest("no sched_getaffinity on this platform")
+        with mock.patch.object(os, "sched_getaffinity", return_value={0, 1, 2}):
+            self.assertEqual(kpi.usable_cores(), 3)
+
+    def test_cli_takes_threads_reads_the_exported_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "cli/src"))
+            with open(os.path.join(d, "cli/src/main.rs"), "w") as f:
+                f.write('match a { "--threads" => {} }')
+            self.assertTrue(kpi.cli_takes_threads(d))
+            with open(os.path.join(d, "cli/src/main.rs"), "w") as f:
+                f.write('match a { "--lm" => {} }')
+            self.assertFalse(kpi.cli_takes_threads(d))
+        self.assertFalse(kpi.cli_takes_threads("/nonexistent"))
+
+
 class ReplayModels(Tmp):
     def test_matching_models_pass(self):
         root = make_root(self.td)
@@ -202,6 +253,20 @@ class ReplayModels(Tmp):
         with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
             kpi.check_models(root, SPEC)
         self.assertIn("colloquial.sjlm", err.getvalue())
+
+    def test_the_chat_trigram_table_is_a_model_only_for_a_version_that_ships_it(self):
+        """docs/contracts/sj-lm-7-pr2.md: `"tri_chat"` adds trigram-chat.sjt3 next to trigram.sjt3, and the replay's models line lists it right after trigram.sjt3."""
+        names = ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "tinylm.sjtl")
+        root = make_root(self.td, names)
+        spec = dict(SPEC, kn=True, tri=True, tri_chat=True)
+        models = kpi.check_models(root, spec)
+        self.assertEqual(set(models), set(names))
+        h = lambda n: hashlib.sha256(n.encode()).hexdigest()[:8]
+        self.assertEqual(kpi.models_line(models), f"models: bigram.sjlm:{h('bigram.sjlm')} classes.sjc:{h('classes.sjc')} kn.sjkn:{h('kn.sjkn')} "
+                         f"trigram.sjt3:{h('trigram.sjt3')} trigram-chat.sjt3:{h('trigram-chat.sjt3')} tinylm.sjtl:{h('tinylm.sjtl')}")
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, dict(spec, tri_chat=False))
+        self.assertIn("trigram-chat.sjt3", err.getvalue())
 
     def test_hash_mismatch_fails(self):
         root = make_root(self.td)
@@ -389,6 +454,17 @@ class ReplayRunWithTheColloquialTable(ReplayRun):
         with self.assertRaises(SystemExit):
             self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct")
 
+    def test_the_pack_part_follows_each_versions_flags(self):
+        # derived, not hard-coded: an ACG-only version expects +acg, the two-pack release +acg+it
+        self.assertEqual(kpi.pack_tag(bench.VERSIONS2["v0.4.3"]), "+acg")
+        self.assertEqual(kpi.pack_tag(bench.VERSIONS2["v0.6.0"]), "+acg+it")
+
+    def test_a_binary_with_other_packs_than_the_version_is_refused(self):
+        # v0.4.3 ships the ACG pack only (VERSIONS2 flags); a replay built with ACG and IT+AI is not that version's engine
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        with self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+it+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+rc")
+
     def test_the_tag_without_the_reading_channel_is_refused(self):
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
         with self.assertRaises(SystemExit):
@@ -457,7 +533,7 @@ class RunWikitune(Tmp):
 
     def test_rows_under_eval_holdout_are_refused(self):
         link = os.path.join(self.td, "innocent.txt")
-        os.symlink(os.path.join(kpi.ROOT, "eval/holdout/news.txt"), link)  # only the resolved path is looked at, nothing is read
+        os.symlink(os.path.join(kpi.ROOT, "eval/holdout/next/shard-2/talk.txt"), link)  # only the resolved path is looked at, nothing is read
         for path in (os.path.join(kpi.ROOT, "eval/holdout/talk.txt"), link):
             with self.subTest(path), mock.patch.object(kpi, "die", side_effect=SystemExit) as die, self.assertRaises(SystemExit):
                 self.run_cmd(rows=path)

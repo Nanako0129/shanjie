@@ -2,10 +2,14 @@
 No network: the build runs against a fake API. It needs the repo's data (data/lexicon, data/lm/bigram.sjlm) and the evaluation CLI
 (built on demand with cargo) for the collision detection; it fails loudly without them, never skips."""
 import atexit
+import collections
+import contextlib
+import io
 import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -14,6 +18,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_acg_pack as B  # noqa: E402
+import readings as R  # noqa: E402
 
 
 def second_column(path):
@@ -197,6 +202,14 @@ class LexiconWords(unittest.TestCase):
         self.assertEqual(B.dedupe([w, "碇源堂"], B.lexicon_words()), ["碇源堂"])
 
 
+class LiReading(unittest.TestCase):
+    # The real reading tool needs the MoeDict and McBopomofo inputs, which CI does not have (tools/readings.py MOEDICT, HETERO).
+    @unittest.skipUnless(all(os.path.isfile(p) for p in (R.MOEDICT, R.HETERO)), "reading-tool inputs not on this machine")
+    def test_li_in_names_reads_li4(self):        # 契約 A4：名字裡的「麗」讀 ㄌㄧˋ（tools/reading_overrides.tsv），ㄌㄧˊ 只留給詞庫裡的詞（高麗）
+        rd = B.make_readings(["愛麗兒", "朵麗絲"])
+        self.assertEqual((rd["愛麗兒"][0][1], rd["朵麗絲"][0][1]), ("ㄌㄧˋ", "ㄌㄧˋ"))
+
+
 class Dedupe(unittest.TestCase):
     def test_words_already_in_the_lexicon_are_dropped(self):
         self.assertEqual(B.dedupe(["悲慘世界", "碇源堂", "碇源堂"], {"悲慘世界"}), ["碇源堂"])
@@ -218,6 +231,288 @@ class Ordering(unittest.TestCase):
         n = {"乙乙": 1, "甲甲": 1, "丙丙": 3}
         self.assertEqual(B.ordered(["乙乙", "甲甲", "丙丙"], n.get), ["丙丙"] + sorted(["乙乙", "甲甲"]))
         self.assertEqual(B.ordered(["丙丙", "甲甲", "乙乙"], n.get), B.ordered(["乙乙", "丙丙", "甲甲"], n.get))
+
+
+class PackOovRegrade(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1 item 3a: regrade keeps every row and recomputes only the scores."""
+    SC = {2: -7.0}
+    TIE = B.TIE
+
+    def rows(self, *items):
+        return [f"{k}\t{w}\t{s!r}\tacg\n" for k, w, s in items]
+
+    def test_formula_offsets_penalty_and_order(self):
+        s, tie = self.SC[2], self.TIE
+        lines = self.rows(("a-b", "甲甲", s), ("a-b", "乙乙", s - tie - 3.0),     # shipped, then a new word with the shipped penalty
+                          ("c-b", "甲甲", s - 0.5), ("c-b", "丙丙", s - 0.5 - tie - 3.0))   # the sandhi rows of the same words
+        grade = B.grade_fn({"甲甲": 10 ** 3, "乙乙": 10 ** 4}, 10 ** 9, 0.0)        # log10 = -6 and -5, both above S_len
+        out = [l.split("\t") for l in B.regrade_rows(lines, self.SC, grade, {})]
+        self.assertEqual([(k, w) for k, w, _, _ in out], [("a-b", "甲甲"), ("a-b", "乙乙"), ("c-b", "甲甲"), ("c-b", "丙丙")])
+        got = {(k, w): float(x) for k, w, x, _ in out}
+        self.assertAlmostEqual(got[("a-b", "甲甲")], -6.0)
+        self.assertAlmostEqual(got[("a-b", "乙乙")], -6.0 - tie - 3.0, msg="min chain then the kept penalty: the count does not lift it past the shipped word")
+        self.assertAlmostEqual(got[("c-b", "甲甲")], -6.5, msg="a sandhi row is g(w) - 0.5")
+        self.assertAlmostEqual(got[("c-b", "丙丙")], min(s - 0.5, -6.5 - tie) - 3.0, msg="a penalized sandhi row is min(g - 0.5, prev - TIE) - 3.0")
+
+    def test_collision_rank_reorders_and_first_named_drops_the_penalty(self):
+        s, tie = self.SC[2], self.TIE
+        lines = self.rows(("a-b", "甲甲", s), ("a-b", "乙乙", s - tie - 3.0))
+        rank = B.collision_rank([["a b", "乙乙", "+甲甲", "test"]])
+        out = {(k, w): float(x) for k, w, x, _ in (l.split("\t") for l in B.regrade_rows(lines, self.SC, B.grade_fn({}, 1, 0.0), rank))}
+        self.assertAlmostEqual(out[("a-b", "乙乙")], s, msg="named first: first in the reading and not penalized")
+        self.assertAlmostEqual(out[("a-b", "甲甲")], s - tie)
+
+    def test_the_committed_pack_is_regrade_bonus_0_of_the_a4_pack(self):
+        texts = {n: self.a4_pack(n) for n in ("acg-add.tsv", "acg-sources.tsv", "acg.json")}
+        if None in texts.values():
+            self.skipTest("the A4 commit is not in this clone")
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "src"), os.path.join(d, "out")
+            os.makedirs(src)
+            for n, x in texts.items():
+                open(os.path.join(src, n), "w", encoding="utf-8", newline="").write(x)
+            B.regrade(src, out, 0.0)
+            for n in ("acg-add.tsv", "acg-sources.tsv", "acg.json"):
+                self.assertEqual(open(os.path.join(out, n), "rb").read(), open(os.path.join(B.PACKS, n), "rb").read(), n)
+            with self.assertRaises(SystemExit):             # a graded pack is not a valid input
+                B.regrade(out, os.path.join(d, "again"), 0.0)
+
+    def test_a_yield_row_drops_by_the_shipped_penalty(self):
+        s = self.SC[2]
+        lines = self.rows(("a-b", "甲甲", s))
+        out = float(B.regrade_rows(lines, self.SC, B.grade_fn({}, 1, 0.0), {}, {("a b", "甲甲")})[0].split("\t")[2])
+        self.assertAlmostEqual(out, s - B.NEW_BEHIND_SHIPPED)
+
+    def test_the_committed_yield_list_names_pack_rows(self):
+        pack = {(l.split("\t")[0].replace("-", " "), l.split("\t")[1]) for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8")}
+        ys = B.read_tsv(os.path.join(B.PACKS, "acg-yield.tsv"))
+        self.assertEqual(len(ys), 17)                                                 # 維護者 2026-10-24 審 B=0 清單 6 個，加錯字回報第 88 列的佐拉，加重驗未處置 (a)(b) 的 10 組讀音
+        self.assertTrue(all((r, w) in pack for r, w, _ in ys), [(r, w) for r, w, _ in ys if (r, w) not in pack])
+
+    def test_an_offset_outside_the_four_groups_stops(self):
+        with self.assertRaises(SystemExit):
+            B.regrade_rows(self.rows(("a-b", "甲甲", self.SC[2] - 1.0)), self.SC, B.grade_fn({}, 1, 0.0), {})
+
+    @staticmethod
+    def a4_pack(name="acg-add.tsv"):
+        r = subprocess.run(["git", "-C", B.ROOT, "show", f"{B.REGRADE_SRC_COMMIT}:data/packs/{name}"], capture_output=True)
+        return r.stdout.decode() if r.returncode == 0 else None
+
+    def test_empty_counts_keep_the_a4_order_outside_the_a4_readings(self):
+        text = self.a4_pack()
+        if text is None:
+            self.skipTest("the A4 commit is not in this clone")
+        lines = text.splitlines(keepends=True)
+        sc = B.scores(B.base_lexicon())
+        rank = B.collision_rank(B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")))
+        out = B.regrade_rows(lines, sc, B.grade_fn({}, 1, 0.0), rank)
+        def order_and_groups(ls):
+            by = collections.defaultdict(list)
+            for k, w, x, _ in (l.rstrip("\n").split("\t") for l in ls):
+                by[k].append((float(x), w, round((sc[len(w)] - float(x)) / 0.5) * 0.5))
+            return {k: [(w, g) for _, w, g in sorted(v, reverse=True)] for k, v in by.items()}
+        a, b = order_and_groups(lines), order_and_groups(out)
+        a4 = {"ㄧ-ㄌㄧˋ-ㄙ", "ㄎㄜˋ-ㄌㄚ-ㄌㄧˋ-ㄙ", "ㄅㄨˋ-ㄌㄧˋ-ㄊㄚˇ", "ㄅㄨˋ-ㄌㄧˋ-ㄐㄧ-ㄊㄜˋ", "ㄞˋ-ㄌㄧˋ-ㄎㄚˇ", "ㄇㄟˊ-ㄌㄧˋ", "ㄇㄧˇ-ㄙㄚˋ-ㄌㄧˋ",
+              "ㄒㄧㄝˋ-ㄌㄧˋ-ㄦˇ", "ㄉㄨㄛ-ㄌㄧˋ-ㄙ", "ㄋㄚˋ-ㄒㄧㄡ",
+              "ㄞˋ-ㄌㄧˋ-ㄕㄚ"}                                                   # pack-oov 把這組也改成研究順序（艾莉莎第一）
+        col = open(os.path.join(B.PACKS, "acg-collisions.tsv"), encoding="utf-8").read()
+        a4 |= {l.split("\t")[0].replace(" ", "-") for l in col[col.index("# pack-oov V1c 的 51 組"):].splitlines()[1:]}   # 維護者 2026-10-24 的 51 組處置
+        self.assertEqual({k for k in a if a[k] != b[k]} - a4, set(), "regrade changed the order or an offset group outside the A4 readings and ㄞˋ ㄌㄧˋ ㄕㄚ")
+        self.assertEqual([l.split("\t")[:2] for l in lines], [l.split("\t")[:2] for l in out])
+
+
+class PackOovV1(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1b: only the dispositioned readings' pack words are forced (column 4 OOV_TAG), closed over
+    the string; every other row equals the source."""
+    ROWS = ["a-b\t甲甲\t-7.0\tacg\n", "a-b\t乙乙\t-7.0\tacg\n", "c-d\t丙丙\t-7.0\tacg\n", "e-f\t甲甲\t-7.0\tacg\n", "g-h\t丁丁\t-7.0\tacg\n"]
+
+    N, SC = 10 ** 9, {2: -7.0}
+
+    def forced(self, rows, rank, yields, counts):
+        return B.forced_words(rows, rank, yields, counts, self.N, self.SC)
+
+    def test_dolisi_is_first_and_keeps_its_statistics_in_the_committed_pack(self):
+        # 維護者 2026-10-24（51 組第 17 列）：ㄉㄨㄛ ㄌㄧˋ ㄙ 的多利斯排第一、通語認得（model-v6：82 次）所以不強制；多力斯強制、排在它封頂後的分數之下。
+        # SJ-LM-7 臂 A（sj-lm-7.md §2.1）的計數詞表沒有動漫詞：多利斯、多力斯在凍結次數表裡都查不到（0 次），「通語認得就不強制」對它們不成立，
+        # 兩個都強制；多利斯仍排第一（差一個 TIE）。
+        rows = {r[1]: r for r in (l.rstrip("\n").split("\t") for l in open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8") if l.strip())
+                if r[0] == "ㄉㄨㄛ-ㄌㄧˋ-ㄙ"}
+        self.assertEqual((rows["多利斯"][3], rows["多力斯"][3]), (B.OOV_TAG, B.OOV_TAG))
+        self.assertLess(float(rows["多力斯"][2]), float(rows["多利斯"][2]))
+
+    def test_source_fixes_replace_only_the_source_column(self):
+        new = B.SOURCE_FIXES["一之瀨"]
+        self.assertEqual(B.fix_sources("一之瀨\tchar\t舊來源@1\t\n一之瀨帆波\tchar\t別的@2\t\n"), f"一之瀨\tchar\t{new}\t\n一之瀨帆波\tchar\t別的@2\t\n")
+        self.assertEqual(B.fix_sources("一之瀨\tchar\t舊來源@1\n下一列\n"), f"一之瀨\tchar\t{new}\n下一列\n")   # three columns: the newline stays
+        self.assertEqual(B.fix_sources("一之瀨\n"), "一之瀨\n")
+
+    def test_forced_words_are_the_dispositioned_readings_closed_over_the_string(self):
+        rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
+        self.assertEqual(self.forced(self.ROWS, rank, {("c d", "丙丙")}, {}), {"甲甲", "乙乙", "丙丙"})
+        self.assertEqual(self.forced(self.ROWS, rank, set(), {}), {"甲甲", "乙乙"}, "a yield reading is a dispositioned reading")
+        self.assertEqual(self.forced(self.ROWS, {}, set(), {}), set())
+        # V1c: the first-named word the model knows, capped no lower than S_len - KEEP_MARGIN, keeps its statistics
+        self.assertEqual(self.forced(self.ROWS, rank, set(), {"乙乙": 10 ** 3, "甲甲": 7}), {"甲甲"})
+        # ... but not one the cap would push far below the pack score (5 counts: log10 = -8.3 < -7.0 - 0.5)
+        self.assertEqual(self.forced(self.ROWS, rank, set(), {"乙乙": 5}), {"甲甲", "乙乙"})
+        # a kept first-named word that is behind on another dispositioned reading stays forced there and so everywhere
+        rows = self.ROWS + ["e-f\t乙乙\t-7.0\tacg\n", "e-f\t丁丁\t-7.0\tacg\n"]
+        self.assertEqual(self.forced(rows, {**rank, ("e f", "丁丁"): 0, ("e f", "乙乙"): 1}, set(), {"乙乙": 10 ** 3, "丁丁": 10 ** 3}), {"甲甲", "乙乙"})
+
+    def test_v1_rows_keep_unforced_rows_and_tag_the_forced_ones(self):
+        graded = [l.replace("-7.0", "-6.5") for l in self.ROWS]
+        out = B.v1_rows(self.ROWS, graded, {"甲甲"})
+        self.assertEqual([out[i] for i in (1, 2, 4)], [self.ROWS[i] for i in (1, 2, 4)], "unforced rows are the source rows")
+        self.assertEqual([out[i] for i in (0, 3)], [f"a-b\t甲甲\t-6.5\t{B.OOV_TAG}\n", f"e-f\t甲甲\t-6.5\t{B.OOV_TAG}\n"], "every row of a forced string")
+        self.assertEqual(B.v1_rows(self.ROWS[:2] + ["\n"] + self.ROWS[2:], graded, {"甲甲"}), out, "a blank source line does not shift the rows")
+
+    def test_forced_rows_sit_below_the_kept_first_words_capped_score(self):
+        # 乙乙 is first and kept; its core score is min(-7.0, log10(10^3 / 10^9) = -6) = -7.0 here, so the forced 甲甲 behind it, graded to
+        # -6.5, is pushed to -7.0 - TIE
+        rank = {("a b", "乙乙"): 0, ("a b", "甲甲"): 1}
+        counts = {"乙乙": 10 ** 3}
+        forced = self.forced(self.ROWS, rank, set(), counts)
+        caps = B.kept_caps(self.ROWS, rank, forced, counts, self.N)
+        self.assertEqual(caps, {"a-b": -7.0})
+        graded = [l.replace("-7.0", "-6.5") if "甲甲" in l else l for l in self.ROWS]
+        out = B.v1_rows(self.ROWS, graded, forced, caps)
+        self.assertEqual(out[0], f"a-b\t甲甲\t{round(-7.0 - B.TIE, 8)!r}\t{B.OOV_TAG}\n")
+        self.assertEqual(out[3], f"e-f\t甲甲\t-6.5\t{B.OOV_TAG}\n", "only the reading with the kept word is pushed down")
+
+    def test_the_committed_pack_is_the_v1_output_of_the_a4_source(self):
+        src = PackOovRegrade.a4_pack()
+        if src is None:
+            self.skipTest("the A4 commit is not in this clone")
+        lines = src.splitlines(keepends=True)
+        ys = {(r[0], r[1]) for r in B.read_tsv(os.path.join(B.PACKS, "acg-yield.tsv"))}
+        counts, n = B.load_counts()
+        rank = B.collision_rank(B.read_tsv(os.path.join(B.PACKS, "acg-collisions.tsv")))
+        now = open(os.path.join(B.PACKS, "acg-add.tsv"), encoding="utf-8").read()
+        self.assertEqual(now, B.v1_pack(lines, rank, ys, counts, n, B.scores(B.base_lexicon())), "regrade --bonus 0 of the A4 source")
+        forced = {l.split("\t")[1] for l in now.splitlines() if l.endswith("\t" + B.OOV_TAG)}
+        self.assertEqual([a for a, b in zip(lines, now.splitlines(keepends=True)) if a.split("\t")[1] not in forced],
+                         [b for b in now.splitlines(keepends=True) if b.split("\t")[1] not in forced], "unforced rows equal the source")
+        self.assertEqual((len(forced), sum(1 for l in now.splitlines() if l.endswith(B.OOV_TAG))), (328, 332))   # 契約修訂四 V1c：處置讀音（含 51 組新加的 23 個）上的字串，減去排第一、通語認得而且封頂不壓過詞包分數 0.5 以上的；SJ-LM-7 臂 A 的計數詞表沒有動漫詞，通語認得的詞包詞變少，所以 model-v6 的 302／306 變成 328／332
+
+
+class RecheckBaseDecoder(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1b item 5: the shipped-words comparison decodes its base column with the base decoder (main's
+    CLI) and its candidate column with the candidate decoder; with no base decoder both columns use the candidate one."""
+    def run_recheck(self, **kw):
+        same = lambda pairs, prof, d=None: [w for w, _ in pairs]       # every decode returns the word itself
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "reference.txt"), "w").close()
+            return B.recheck(B.PACKS, d, decode=same, base_dir=B.PACKS, **kw)
+
+    def test_the_base_column_comes_from_the_base_decoder(self):
+        base = lambda pairs, prof, d=None: ["BASE"] * len(pairs)
+        text = self.run_recheck(base_decode=base)
+        shipped = [l.split("\t") for l in text.split("shipped (word, reading) pairs")[1].splitlines()[1:] if l.count("\t") == 4]
+        self.assertTrue(shipped and all(f[3] == "BASE" and f[4] == f[0].strip() for f in shipped), shipped[:3])
+        self.assertNotIn("BASE", self.run_recheck(), "without a base decoder both columns come from the candidate decoder")
+
+
+class PackOovGrading(unittest.TestCase):
+    """docs/contracts/pack-oov.md section 1 item 3 and section 2 item 5: the graded score, the order inside a reading, the frozen counts table."""
+    N = 10 ** 9
+
+    def table(self, d, body="a\t5\n", n=None):
+        path = os.path.join(d, "acg-counts.tsv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(f"#model_sha256\t{'0' * 64}\n#N\t{n or self.N}\n{body}")
+        return path
+
+    def test_graded_score_formula(self):
+        g = B.grade_fn({"高頻": 10 ** 6, "低頻": 1}, self.N, 0.5)
+        self.assertEqual(g("高頻", -7.0), max(-7.0, -3.0 + 0.5))          # log10(1e6 / 1e9) + B beats S_len
+        self.assertEqual(g("低頻", -7.0), -7.0)                            # log10(1e-9) + B = -8.5 is below S_len
+        self.assertEqual(g("沒有", -7.0), -7.0)                            # not in the table: S_len
+        self.assertEqual(B.grade_fn({"高頻": 10 ** 6}, self.N, 0.0)("高頻", -7.0), -3.0)
+        self.assertEqual(B.grade_fn({"高頻": 10 ** 6}, self.N, 1.0)("高頻", -7.0), -2.0)
+
+    def test_order_inside_a_reading_follows_ordered_even_when_a_later_word_is_more_frequent(self):
+        reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"], "丙丙": ["ㄅ", "ㄅ"]}
+        g = B.grade_fn({"甲甲": 10, "乙乙": 10 ** 6, "丙丙": 10 ** 7}, self.N, 0.0)
+        rows = B.pack_rows(["甲甲", "乙乙", "丙丙"], reading, {2: -7.0}, grade=g)
+        score = {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        self.assertEqual(score["甲甲"], -7.0)                               # g = max(-7, -8 + 0)
+        self.assertAlmostEqual(score["乙乙"], -7.0 - B.TIE, places=8)       # g = -3 but never above the row before
+        self.assertAlmostEqual(score["丙丙"], -7.0 - 2 * B.TIE, places=8)
+        self.assertGreater(score["甲甲"], score["乙乙"])
+        self.assertGreater(score["乙乙"], score["丙丙"])
+
+    def test_a_reading_is_lifted_as_a_whole_and_new_words_still_sit_behind_shipped_ones(self):
+        reading = {"舊詞": ["ㄅ", "ㄅ"], "新詞": ["ㄅ", "ㄅ"], "新乙": ["ㄅ", "ㄅ"]}
+        g = B.grade_fn({"舊詞": 10 ** 6, "新詞": 10 ** 6, "新乙": 10 ** 6}, self.N, 0.0)
+        score = lambda rows: {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        got = score(B.pack_rows(["舊詞", "新詞", "新乙"], reading, {2: -7.0}, shipped={"舊詞"}, grade=g))
+        self.assertEqual(got["舊詞"], -3.0)
+        self.assertAlmostEqual(got["新詞"], -3.0 - B.TIE - B.NEW_BEHIND_SHIPPED, places=8)    # chain first, the penalty after
+        self.assertAlmostEqual(got["新乙"], -3.0 - 2 * B.TIE - B.NEW_BEHIND_SHIPPED, places=8)   # the penalty does not stack down the chain
+
+    def test_a_yield_row_is_lowered_by_new_behind_shipped_after_the_grade_like_regrade_rows(self):
+        reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"]}
+        g = B.grade_fn({"甲甲": 10 ** 6, "乙乙": 10 ** 6}, self.N, 0.0)
+        score = lambda rows: {l.split("\t")[1]: float(l.split("\t")[2]) for l in rows}
+        base = score(B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0}, grade=g))
+        got = score(B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0}, grade=g, yields={("ㄅ ㄅ", "甲甲")}))
+        self.assertAlmostEqual(got["甲甲"], base["甲甲"] - B.NEW_BEHIND_SHIPPED, places=8)
+        self.assertAlmostEqual(got["乙乙"], base["乙乙"], places=8)    # the chain was built before the subtraction
+
+    def test_no_grade_is_the_old_s_len_rows(self):
+        reading = {"甲甲": ["ㄅ", "ㄅ"], "乙乙": ["ㄅ", "ㄅ"]}
+        rows = B.pack_rows(["甲甲", "乙乙"], reading, {2: -7.0})
+        self.assertEqual([l.split("\t")[2] for l in rows], ["-7.0", repr(round(-7.0 - B.TIE, 8))])
+
+    def test_counts_table_missing_or_changed_stops_and_the_model_file_is_not_looked_at(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.table(d, "a\t5\nb\t7\n")
+            sha = B.bo.sha256_file(path)
+            with self.assertRaises(SystemExit):
+                B.load_counts(os.path.join(d, "nope.tsv"), sha)                  # missing
+            with self.assertRaises(SystemExit):
+                B.load_counts(path, "")                                           # pin not set
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("c\t9\n")
+            with self.assertRaises(SystemExit):
+                B.load_counts(path, sha)                                          # the table was edited
+            path = self.table(d, "a\t5\nb\t7\n")
+            want = B.load_counts(path, sha)
+            self.assertEqual(want, ({"a": 5, "b": 7}, self.N))
+            with mock.patch.object(B, "LM", os.path.join(d, "another-model.sjlm")):    # data/lm replaced by something else: same table, same rows
+                got = B.load_counts(path, sha)
+                reading = {"甲甲": ["ㄅ", "ㄅ"]}
+                self.assertEqual(got, want)
+                self.assertEqual(B.pack_rows(["甲甲"], reading, {2: -7.0}, grade=B.grade_fn(*got, 0.0)), B.pack_rows(["甲甲"], reading, {2: -7.0}, grade=B.grade_fn(*want, 0.0)))
+
+    def test_freeze_counts_checks_the_model_and_records_it(self):
+        model = os.path.join(B.ROOT, "eval", "golden", "kn-tiny", "bigram.sjlm")
+        with tempfile.TemporaryDirectory() as d:
+            add, out = os.path.join(d, "add.tsv"), os.path.join(d, "counts.tsv")
+            with open(add, "w", encoding="utf-8") as f:
+                f.write("ㄊㄚ\t他\t-7.0\tacg\nㄓㄢˋ\t占\t-7.0\tacg\nㄅ\t沒見過\t-7.0\tacg\n")
+            with self.assertRaises(SystemExit):
+                B.freeze_counts(model, out, add, model_sha="0" * 64)               # not the pinned model: nothing written
+            self.assertFalse(os.path.exists(out))
+            self.assertGreater(B.freeze_counts(model, out, add, model_sha=B.bo.sha256_file(model)), 0)
+            lines = open(out, encoding="utf-8").read().splitlines()
+            self.assertEqual(lines[0], f"#model_sha256\t{B.bo.sha256_file(model)}")
+            self.assertTrue(lines[1].startswith("#N\t"))
+            words = dict(l.split("\t") for l in lines[2:])
+            self.assertIn("他", words)
+            self.assertNotIn("沒見過", words)                                        # count 0: left out, so it falls back to S_len
+
+    def test_freeze_counts_command_line_takes_the_expected_model(self):
+        for argv, want in ([], B.MODEL_V6_SHA), (["--expected-model", "ab" * 32], "ab" * 32):
+            with mock.patch.object(sys, "argv", ["build_acg_pack.py", "freeze-counts"] + argv), \
+                 mock.patch.object(B, "freeze_counts", return_value=1) as fc, mock.patch.object(B.bo, "sha256_file", return_value="x"), contextlib.redirect_stdout(io.StringIO()):
+                B.main()
+            fc.assert_called_once_with(model_sha=want)
+
+    def test_the_committed_pack_shares_no_string_with_lexicon_words(self):
+        pack = second_column(os.path.join(B.PACKS, "acg-add.tsv"))
+        self.assertGreater(len(pack), 10000)
+        self.assertEqual(pack & B.lexicon_words(), set())
 
 
 # ---- a fake API serving a small, fixed corner of Wikipedia
@@ -357,10 +652,11 @@ class Build(unittest.TestCase):
         cls.excl = os.path.join(cls.tmp, "collisions.tsv")
         open(cls.excl, "w", encoding="utf-8").write("# c\nㄈㄥ ㄓ ㄍㄨˇ\t風之谷\t楓之谷\t保留既有的名字\n")
 
-    def build(self, collisions, exclude=None, real_decoder=False, years=()):
-        # 真的解碼器每次建置要跑 4 個 CLI 程序；只有斷言需要真實解碼結果的測試才開（real_decoder=True）。
+    def build(self, collisions, exclude=None, decode=None, years=()):
+        # 解碼器是假的（真的解碼器每次建置要跑 4 個 CLI 程序，結果還跟著出貨的模型變：通語 SJ-LM-7-9.7M 自己就把 風之谷 排在 楓之谷 前面）；
+        # 預設每個詞都解成它自己，要測衝突的測試自己給會「換掉第一名」的解碼器。
         return build(FakeApi(), self.groups, collisions, self.manual, readings=fake_readings, exclude_tsv=exclude or self.none, years=years, min_year_works=1,
-                       **({} if real_decoder else {"decode": lambda pairs, prof, packs=None: [w for w, _ in pairs]}))
+                       decode=decode or (lambda pairs, prof, packs=None: [w for w, _ in pairs]))
 
     def test_pack_content_and_filters(self):
         files, manifest, col, unread, ref, _ = self.build(self.excl)
@@ -452,12 +748,13 @@ class Build(unittest.TestCase):
             self.assertEqual(hashlib.sha256(open(os.path.join(out[0], name), "rb").read()).hexdigest(), meta["sha256"])
 
     def test_collisions_are_listed_without_a_disposition(self):
-        _, manifest, col, _, _, _ = self.build(self.none, real_decoder=True)
-        # 夾具裡 風之谷（作品標題）與 楓之谷（轉換組）都在詞包、同讀音、來源數相同；同分時依字串排序，楓之谷排在前（pack_rows 的 TIE），
-        # 開了詞包第一名是 楓之谷，所以風之谷被換掉，列為未處置（正式資料由 acg-collisions.tsv 處置）。
+        # 夾具裡 風之谷（作品標題）與 楓之谷（轉換組）都在詞包、同讀音、來源數相同；開了詞包第一名是 楓之谷（假解碼器：不開是 風之谷），
+        # 所以風之谷被換掉，列為未處置（正式資料由 acg-collisions.tsv 處置）。其他詞開不開都解成自己。
+        displace = lambda pairs, prof, packs=None: [("楓之谷" if packs else "風之谷") if w in ("楓之谷", "風之谷") else w for w, _ in pairs]
+        _, manifest, col, _, _, _ = self.build(self.none, decode=displace)
         self.assertIn("ㄈㄥ ㄓ ㄍㄨˇ", col)
-        self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：不開是 定元堂，不在參考名單
-        self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：不開是 螢火蟲之目
+        self.assertNotIn("ㄉㄧㄥˋ ㄩㄢˊ ㄊㄤˊ", col)                   # 碇源堂：開不開第一名都沒變
+        self.assertNotIn("ㄧㄥˊ ㄏㄨㄛˇ ㄔㄨㄥˊ ㄓ ㄇㄨˋ", col)         # 螢火蟲之墓：同上
         self.assertEqual(manifest["unresolved_collision_readings"], 1)      # 楓之谷／風之谷 那一個，沒有處置檔
 
     def test_a_collision_counts_only_when_the_pack_changes_the_top1(self):
@@ -591,8 +888,25 @@ class Build(unittest.TestCase):
         pairs = [(k, r.split()) for r, k in first.items()]
         for prof in ("chat", "formal"):
             on, off = B.top1(pairs, prof, B.PACKS), B.top1(pairs, prof)
-            bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o]
+            bad = [(k, g) for (k, _), g, o in zip(pairs, on, off) if g != k and g != o and (k, prof) not in B.FIRST_NAMED_EXCEPTIONS]
             self.assertEqual(bad, [], prof)
+
+
+class DecodeThreads(unittest.TestCase):
+    def test_the_build_decodes_on_every_core(self):
+        # 建置的解碼都經過 top1；只開 1 個執行緒時 32 核的 VM 只用到一個核心（維護者 2026-10-23：「單核心跑太浪費了」）
+        seen = []
+
+        def run(cmd, **_):
+            seen.append(cmd)
+            raise RuntimeError
+
+        with mock.patch.object(B.subprocess, "run", run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"):
+            with self.assertRaises(RuntimeError):
+                B.top1([("詞", ["ㄘˊ"])], "chat")
+        self.assertEqual(seen[0][seen[0].index("--threads") + 1], str(B.THREADS))
+        if not os.environ.get("SHANJIE_THREADS"):
+            self.assertEqual(B.THREADS, 1 if sys.platform == "darwin" else os.cpu_count())
 
 
 class TopOneKneserNeyTest(unittest.TestCase):
@@ -764,6 +1078,8 @@ class A3(unittest.TestCase):
         self.assertEqual((with_shipped["舊甲"], with_shipped["舊乙"]), (plain["舊甲"], plain["舊乙"]))          # 已出貨的分數和沒有新詞時一樣
         self.assertAlmostEqual(plain["新詞"] - with_shipped["新詞"], B.NEW_BEHIND_SHIPPED)                    # 新詞在已出貨的讀音上另外減分
         self.assertEqual(with_shipped["別的"], plain["別的"])                                                 # 沒有已出貨的詞的讀音：不動
+        named = score(B.pack_rows(["新詞", "舊甲", "舊乙", "別的"], reading, sc, shipped={"舊甲", "舊乙"}, first={"ㄅ ㄅ": "新詞"}))
+        self.assertGreater(named["新詞"], max(named["舊甲"], named["舊乙"]))                                   # 契約 A4：處置列要它排第一的新詞不減分
 
     def test_a_new_word_that_resolves_to_a_shipped_word_is_fine_but_not_the_other_way(self):
         r, shipped = "ㄅ ㄅ", frozenset({"舊甲", "舊乙"})
@@ -831,18 +1147,20 @@ class A3(unittest.TestCase):
             k, w, *_ = l.split("\t")
             pack.setdefault(w, set()).add(k.replace("-", " "))
         kept = B.read_tsv(os.path.join(B.PACKS, "acg-kept-c.tsv"))
-        self.assertEqual(len(kept), 178)                                      # 契約 A3.3a
+        self.assertEqual(len(kept), 175)                                      # 契約 A3.3a 的 178 個，加 A4 的「多莉」，減 A4 讀音改了之後不再同音的 4 個
         self.assertTrue(all(w in pack and r in pack[w] for r, w, _ in kept))
         both = B.read_keep_both(os.path.join(B.PACKS, "acg-keep-both.tsv"))
-        self.assertEqual((len(both), len({r for r, _ in both})), (235, 129))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音
+        self.assertEqual((len(both), len({r for r, _ in both})), (229, 127))       # 契約 A3.3a 的 49 個詞、28 組讀音，加 A3 修正輪的 120 個詞、69 組讀音（全是新詞的讀音，與 3 組新舊詞包第一名相同的），加 model-v6 §3.3 的 66 個詞、32 組讀音；加 A4 的 22 列、10 組讀音（其中 ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本就有，只多艾麗卡）與 ㄞˋ ㄌㄧˋ ㄕㄚ 的 2 個詞（「麗」改讀 ㄌㄧˋ 後通語 SJ-LM-6-9.1M 詞表裡的寫法靠語料排前，維護者先不處理）；pack-oov（2026-10-24）把 A4 那 10 組讀音的 22 列移回 acg-collisions.tsv 的研究順序（ㄞˋ ㄌㄧˋ ㄎㄚˇ 原本那三列也拿掉，改由處置列決定）
         self.assertTrue({(r, w) for r, w in both if w in ("坂木", "阪木", "加米", "嘉米", "愛莉卡", "艾莉卡", "艾利卡")} and len(both) >= 49)
         self.assertTrue(all(r in pack.get(w, ()) for r, w in both), sorted((r, w) for r, w in both if r not in pack.get(w, ())))
         dropped = B.model_v6_dropped()
         self.assertEqual(len(dropped), 106)                                   # model-v6 §3.3（使用者 2026-10-15）：A2 規則排除的類型 (c)，105 個加第二輪的 1 個
-        self.assertTrue(set(B.load_v040()) - dropped <= set(pack))             # v0.4.0 的詞一個都不能少，A2 規則排除的除外
-        self.assertFalse(dropped & set(pack))
+        removed = B.approved_removed()
+        self.assertEqual(len(removed), 19)                                    # 契約 A4：來源消失的 15 個、瀬能葵、本条二亞、塞德利克、奧菲莉婭（維護者 2026-10-23）
+        self.assertTrue(set(B.load_v040()) - dropped - removed <= set(pack))   # v0.4.0 的詞一個都不能少，A2 規則排除的與 A4 核准拿掉的除外
+        self.assertFalse((dropped | removed) & set(pack))
         self.assertIn("ㄩˋ ㄇㄣˊ ㄐㄧㄤ", pack["獄門疆"])                          # 契約 A3.4
-        self.assertTrue({"ㄏㄨ ㄓㄤˋ ㄧㄡ ㄖㄣˊ", "ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"} <= pack["虎杖悠仁"])
+        self.assertEqual(pack["虎杖悠仁"], {"ㄏㄨˇ ㄓㄤˋ ㄧㄡ ㄖㄣˊ"})          # A4：讀音覆寫「虎 ㄏㄨˇ」之後工具也選三聲，A3.4 留著的 ㄏㄨ 那一列就沒了
         self.assertNotIn("艾文斯", pack)                                           # 契約 A3：新詞若在 model-v5 擠下詞庫的詞就不收（kb 例外只給已出貨的詞）
 
 

@@ -44,65 +44,49 @@ cd "$ROOT"
 fail() { echo "error: $*" >&2; exit 1; }
 
 # The model is not in git (docs/PLAN.md S2c); check it before spending time on the build.
-[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the model-v6 release asset:
-  gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
+[ -f data/lm/bigram.sjlm ] || fail "data/lm/bigram.sjlm is missing. Download the sj-lm-7-9.7m release asset:
+  gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm"
 shasum -a 256 -c data/bigram.sjlm.sha256 >/dev/null \
-  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download model-v6 again"
-[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the classes-v5 release asset:
-  gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm"
+  || fail "data/lm/bigram.sjlm does not match data/bigram.sjlm.sha256; download sj-lm-7-9.7m again"
+[ -f data/lm/classes.sjc ] || fail "data/lm/classes.sjc is missing (the word-class term of the model, S2k). Download the sj-wc-6-512c release asset:
+  gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm"
 shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
-  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download classes-v5 again"
-# The Kneser-Ney side file (docs/contracts/kn-core.md, model-v6 section 2.3): bound to model-v6's hash; the core turns the term on
+  || fail "data/lm/classes.sjc does not match data/classes.sjc.sha256; download sj-wc-6-512c again"
+# The Kneser-Ney side file (docs/contracts/kn-core.md, sj-lm-7-9.7m section 2.3): bound to sj-lm-7-9.7m's hash; the core turns the term on
 # when it sits beside the model, and the small model below records its SHA-256.
-[ -f data/lm/kn.sjkn ] || fail "data/lm/kn.sjkn is missing (the Kneser-Ney side file of the model). Download the kn-v1 release asset:
-  gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm"
+[ -f data/lm/kn.sjkn ] || fail "data/lm/kn.sjkn is missing (the Kneser-Ney side file of the model). Download the sj-kn-2-397k release asset:
+  gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm"
 shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
-  || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download kn-v1 again"
-# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with model-v6's and kn-v1's hashes (SJTL0004).
-[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-6-14m release asset:
-  gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+  || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download sj-kn-2-397k again"
+# The small model behind 語意校正 (docs/contracts/s7c2b-shell-rerank.md section 2.4), paired with sj-lm-7-9.7m's and sj-kn-2-397k's hashes (SJTL0004).
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-7-15m release asset:
+  gh release download sj-sr-7-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
-  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-6-14m again"
-# The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to model-v6's hash; the core loads it from beside the model.
-[ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-1-7.7m release asset:
-  gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-7-15m again"
+# The trigram table of the formal profile (docs/contracts/trigram-core.md): bound to the bigram model's hash; the core loads it from beside the model.
+[ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-2-7.7m release asset:
+  gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
 shasum -a 256 -c data/trigram.sjt3.sha256 >/dev/null \
-  || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-1-7.7m again"
+  || fail "data/lm/trigram.sjt3 does not match data/trigram.sjt3.sha256; download sj-cx-2-7.7m again"
+# The trigram table of the chat profile (docs/contracts/sj-lm-7-pr2.md): bound to the same bigram.sjlm; the core loads it from beside the model too, and a
+# missing one would silently leave chat on the bigram.
+[ -f data/lm/trigram-chat.sjt3 ] || fail "data/lm/trigram-chat.sjt3 is missing (the trigram table of the chat profile, docs/contracts/sj-lm-7-pr2.md section 1). Download the sj-cx-2-950k release asset:
+  gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D data/lm"
+shasum -a 256 -c data/trigram-chat.sjt3.sha256 >/dev/null \
+  || fail "data/lm/trigram-chat.sjt3 does not match data/trigram-chat.sjt3.sha256; download sj-cx-2-950k again"
 # The colloquial table of the chat rerank (docs/contracts/colloquial-term.md section 2.3) and the list that attributes the public sentences
-# its counts come from (section 2.1): both are assets of the data release sj-cl-1-68k, and both must match the hashes recorded in git.
-[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-1-68k release assets:
-  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
-[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-1-68k release assets:
-  gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+# its counts come from (section 2.1): both are assets of the data release sj-cl-2-69k, and both must match the hashes recorded in git.
+[ -f data/lm/colloquial.sjlm ] || fail "data/lm/colloquial.sjlm is missing (the colloquial table, 常談). Download the sj-cl-2-69k release assets:
+  gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
+[ -s data/lm/colloquial-attribution.tsv ] || fail "data/lm/colloquial-attribution.tsv is missing or empty (the attribution list of the colloquial table). Download the sj-cl-2-69k release assets:
+  gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm"
 shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256 >/dev/null \
-  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-1-68k again"
+  || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/contracts/about-models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
-
-# The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): not in git. Downloaded from the pinned SymSpell commit
-# into the cache (the URL, the commit and the input hash live only in tools/build_english_words.py), checked, generated, and the
-# output checked against data/english-words.txt.sha256. A download failure or either hash mismatch fails the build.
-EN_URL="$(python3 tools/build_english_words.py --print-url)"
-EN_COMMIT="$(python3 tools/build_english_words.py --print-commit)"
-EN_IN_SHA="$(python3 tools/build_english_words.py --print-input-sha256)"
-EN_IN="${SHANJIE_ENGLISH_CACHE:-$HOME/.cache/shanjie/english}/frequency_dictionary_en_82_765.txt"
-en_input_ok() { [ -f "$EN_IN" ] && [ "$(shasum -a 256 "$EN_IN" | awk '{ print $1 }')" = "$EN_IN_SHA" ]; }
-if ! en_input_ok; then
-  mkdir -p "$(dirname "$EN_IN")"
-  rm -f "$EN_IN"
-  curl -fsSL --retry 3 -o "$EN_IN.part" "$EN_URL" || fail "cannot download the English word list input from $EN_URL"
-  mv "$EN_IN.part" "$EN_IN"
-  en_input_ok || { rm -f "$EN_IN"; fail "the downloaded English word list input does not match SHA-256 $EN_IN_SHA"; }
-fi
-EN_TMP="$(mktemp -d)"
-trap 'rm -rf "$EN_TMP"' EXIT
-python3 tools/build_english_words.py --input "$EN_IN" --out "$EN_TMP/english-words.txt" >/dev/null || fail "tools/build_english_words.py failed"
-EN_OUT_SHA="$(shasum -a 256 "$EN_TMP/english-words.txt" | awk '{ print $1 }')"
-EN_RECORDED="$(awk 'NR == 1 { print $1 }' data/english-words.txt.sha256)"
-[ "$EN_OUT_SHA" = "$EN_RECORDED" ] || fail "the generated english-words.txt (SHA-256 $EN_OUT_SHA) does not match data/english-words.txt.sha256"
 
 SHIPPING_ID=com.nyanako.inputmethod.shanjie
 BUNDLE_ID="${BUNDLE_ID:-$SHIPPING_ID.dev}"
@@ -214,12 +198,13 @@ cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi
 # silently loses the feature, so check-app.sh requires it and compares it with this file.
 cp data/lexicon/digits.tsv "$RES/"
 # The optional word packs (docs/contracts/acg-pack.md A.2): the runtime files only, not the build inputs
-# (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
+# (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv, quotes-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
-cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json "$RES/packs/"
+cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/quotes-add.tsv data/packs/quotes.json "$RES/packs/"
+# The IT+AI pack (docs/contracts/it-pack.md section 3.2), same arrangement (build inputs it-manual.tsv, it-collisions.tsv stay out).
+cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"
-cp "$EN_TMP/english-words.txt" "$RES/"   # generated above (docs/contracts/zhen-mixed.md section 3.4)
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
 scripts/compile-app-icon.sh "$RES"   # the app icon (docs/contracts/app-icon.md): Assets.car and AppIcon.icns
 cp "$RES/AppIcon.icns" "$HELPER/Contents/Resources/"   # the helper's Dock icon while it runs
@@ -250,23 +235,31 @@ EOF
 plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
 cp LICENSE "$RES/LICENSES/LICENSE"
-cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
+cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
 # Sparkle.framework ships in Contents/Frameworks/Updater: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (colloquial-term.md section 2.1); no corpus text in it.
 cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, demote.tsv, digits.tsv, bigram.sjlm,
-classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
+overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, demote.tsv, digits.tsv, bigram.sjlm,
+classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 
-overlay-add.tsv: built from Wikipedia and Wiktionary page titles.
-  Attribution: Wikipedia contributors, Wiktionary contributors.
+overlay-add.tsv: built from Wikipedia and Wiktionary page titles; its `slang` rows (internet set phrases) also from
+  PTT 鄉民百科 (Fandom) category titles and Fandom 迷因 Wiki page titles, whose CC BY-SA 3.0 text is used under
+  CC BY-SA 4.0 by the 3.0 later-version clause.
+  Attribution: Wikipedia contributors, Wiktionary contributors, PTT 鄉民百科 contributors, 迷因 Wiki contributors (Fandom).
 packs/acg-add.tsv: the optional anime and game word pack, built from Chinese Wikipedia (common
   conversion groups, anime article titles, character names in those articles). The page and revision
   every word comes from are listed in packs/acg-sources.tsv.
   Attribution: Wikipedia contributors.
+packs/it-add.tsv: the optional IT and AI word pack (words and readings only, no definitions). Sources, listed per word in
+  packs/it-sources.tsv: (1) the National Academy for Educational Research (國家教育研究院) 電子計算機學術名詞 and
+  兩岸對照名詞—計算機學術名詞 (data.gov.tw datasets 15416 and 15275), released under the Open Government Data License
+  (政府資料開放授權條款, https://data.gov.tw/license ); (2) Chinese Wikipedia conversion groups Module:CGroup/IT and
+  Module:CGroup/Electronics and the titles of articles in its AI categories (Wikipedia contributors, CC BY-SA 4.0);
+  (3) a hand-written list by the project (CC0).
 names-add.tsv: common proper nouns (brands, shops, companies, schools), always
   on. Built from three sources; the source of every word is listed in
   data/lexicon/names-sources.tsv of the project repository. Attribution, one
@@ -282,7 +275,9 @@ names-add.tsv: common proper nouns (brands, shops, companies, schools), always
       得利用之（https://data.gov.tw/license ）。
 demote.tsv: written for this project; no third-party data.
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
-  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic sentences;
+  sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic sentences,
+  public messages of the g0v Slack #rand0m channel (CC0) and articles and
+  replies of public PTT boards (counted only, no original text);
   the anime and game pack words (Chinese Wikipedia, and Wikidata, CC0) and
   the words of names-add.tsv (sources above) are also counted as words.
   Attribution: Wikipedia contributors, Tatoeba contributors.
@@ -290,16 +285,20 @@ classes.sjc: word classes and class transition probabilities computed from
   the same counts as bigram.sjlm; same sources and attribution.
 kn.sjkn: Kneser-Ney continuation counts computed from the same counts as
   bigram.sjlm; same sources and attribution.
-trigram.sjt3: pruned trigram counts of the same corpus as bigram.sjlm, mapped to
-  its word ids; same sources and attribution.
+trigram.sjt3, trigram-chat.sjt3: pruned trigram counts of the same corpus as bigram.sjlm, mapped to
+  its word ids (the formal profile's and the chat profile's table); same sources and attribution.
 tinylm.sjtl: a small character model (the 語意校正 rerank) trained on text
   from the same sources as bigram.sjlm: Wikipedia articles, Mozilla Common
-  Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR) and synthetic
-  sentences. No private conversation data.
-  Attribution: Wikipedia contributors, Tatoeba contributors.
-colloquial.sjlm: the colloquial table (常談 SJ-CL-1-68K, the chat rerank's colloquial term): word counts of colloquial text only,
+  Voice sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic
+  sentences, g0v Slack #rand0m messages (CC0), public PTT board articles and
+  replies (no original text), and OPUS OpenSubtitles v2018 Traditional-script
+  subtitles (training only, no original text). No private conversation data.
+  Attribution: Wikipedia contributors, Tatoeba contributors, OpenSubtitles
+  (P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large
+  Parallel Corpora from Movie and TV Subtitles, LREC 2016; http://www.opensubtitles.org/ ).
+colloquial.sjlm: the colloquial table (常談 SJ-CL-2-69K, the chat rerank's colloquial term): word counts of colloquial text only,
   from two groups of sources.
-  (1) The colloquial text counted into bigram.sjlm (model-v6): Mozilla Common Voice sentences (CC0), Tatoeba sentences
+  (1) The colloquial text counted under the SJ-LM-7 word list (no g0v or PTT): Mozilla Common Voice sentences (CC0), Tatoeba sentences
       (CC BY 2.0 FR) and synthetic sentences. Attribution: Tatoeba contributors.
   (2) A public pool of 143,895 colloquial sentences from four sources, each used under its own licence (all of them only ask for
       attribution, which this paragraph and colloquial-attribution.tsv give):
@@ -324,22 +323,6 @@ The name-suggestion-index notice (names-add.tsv, source 1), in full:
 
 EOF
 cat LICENSES/name-suggestion-index-BSD-3-Clause.txt >> "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt"
-
-# english-words.txt is not CC BY-SA: its own attribution, not folded into the file above (docs/contracts/zhen-mixed.md section 3.4).
-cat > "$RES/LICENSES/english-words-attribution.txt" <<EOF
-english-words.txt is generated at build time from frequency_dictionary_en_82_765.txt of SymSpell
-(https://github.com/wolfgarbe/SymSpell, commit $EN_COMMIT): all of its words of 3 to 32 lowercase ASCII letters
-(words with an apostrophe, a digit or a capital letter dropped), sorted. SymSpell's list is the intersection of two sources (1 and 2), and the list
-itself is SymSpell's (3):
-
-1. Word frequencies: Google Books Ngram Viewer data, Creative Commons Attribution 3.0 Unported (CC BY 3.0),
-   https://creativecommons.org/licenses/by/3.0/ . The data was filtered as described above.
-2. Words: SCOWL (Spell Checker Oriented Word Lists), Copyright 2000-2026 by Kevin Atkinson. Its notice is
-   LICENSES/SCOWL.txt. SymSpell does not say which SCOWL version it used; the notice included is the current release's.
-3. The list itself: SymSpell, MIT License, Copyright (c) 2018 Wolf Garbe. Its text is LICENSES/SymSpell-MIT.txt.
-
-The program is Apache-2.0 (LICENSE). Details: data.md.
-EOF
 
 # One input mode (section 13.2); the keyboard layout is chosen in its menu, not by mode.
 MODE="$BUNDLE_ID.zhuyin"

@@ -5,7 +5,7 @@
 
 use crate::engine::Layout;
 use crate::learn::is_han;
-use crate::lm::Lm;
+use crate::lm::{Lm, Scoring};
 use crate::predict::{compat_words, units_of, Index, Unit};
 use std::collections::{HashMap, HashSet};
 
@@ -217,6 +217,8 @@ pub struct Scorer<'a> {
     pub lm: &'a Lm,
     pub idx: &'a Index<'a>,
     pub legal: &'a Legal,
+    /// The profile's scoring: its Kneser-Ney beta is the one `lp_z` blends with (`Lm::unigram_back`).
+    pub cfg: Scoring,
 }
 
 fn log10_sum(terms: impl Iterator<Item = f64>) -> Option<f64> {
@@ -246,7 +248,7 @@ impl Scorer<'_> {
         let ctx = self.lm.context_of(c);
         let mut tot = 0.0;
         for (w, lp, wid) in compat_words(self.idx, units) {
-            let pb = self.lm.unigram_back(wid, lp);
+            let pb = self.lm.unigram_back(self.cfg, wid, lp);
             tot += if digit_ctx { self.table.p_w_given_vd(w, c, pb) } else { self.lm.prob_back(ctx, wid, pb) };
         }
         if tot > 0.0 { tot.log10() } else { f64::NEG_INFINITY }

@@ -1,6 +1,6 @@
 //! Helpers `shanjie-eval` and `shanjie-replay` share: the repo root, the lenient table and the rowstats writer
 //! (docs/contracts/eval-stats.md section 1). Moved out of cli/src/main.rs unchanged, so the eval output bytes stay what they were.
-use core::eval::Lenient;
+use core::eval::{Forms, Lenient};
 use core::Syls;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,17 @@ pub fn load_lenient() -> Result<Lenient, String> {
         .unwrap_or_else(|| root().join("eval/variants.tsv"));
     let text = fs::read_to_string(p).map_err(|e| format!("cannot read variants table ({:?})", e.kind()))?;
     Lenient::parse(&text).map_err(|e| e.to_string())
+}
+
+/// forms-score contract section 1.3: SHANJIE_FORMS if set, else the repo's eval/forms.tsv. Only `--forms-rowstats` calls this;
+/// a missing or bad file is an error there, and nothing reads the table without the flag.
+pub fn load_forms() -> Result<Forms, String> {
+    let p = std::env::var_os("SHANJIE_FORMS")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root().join("eval/forms.tsv"));
+    let text = fs::read_to_string(p).map_err(|e| format!("cannot read forms table ({:?})", e.kind()))?;
+    Forms::parse(&text).map_err(|e| e.to_string())
 }
 
 /// lm_eval.py `rows_of`: only lines with exactly three `|` fields (context|sentence|reading).

@@ -6,39 +6,58 @@
 | `dev/existing.txt` | 109 | 確認過 | 同 trap＋daily，讀音改成使用者實際會打的 |
 | `dev/homophones.txt` | 165 | 確認過 | 同音陷阱與單字混淆（同音組取奇數行） |
 | `dev/oov.txt`、`dev/oov_words.list` | 25 | 確認過 | 關鍵詞不在 S0 詞庫快照裡、但每個字都讀得出 |
-| `dev/user-reported.txt` | 157 | 使用者實際打的注音（2026-10-09 起的列由 `tools/readings.py` 產生，研究紀錄逐批註明；第 3、81、89、119、120、151、156 列的讀音是手動定的（第 3 列「一個」照維護者實際的打法用變調 ㄧˊ；第 156 列「紮」照維護者實際的打法用 ㄓㄚ，萌典是 ㄗㄚ），重產時不要用工具覆蓋） | 使用者遇到的錯字（2026-10-03 同意以 CC0 釋出）；之後回報的句子直接加在這裡 |
+| `dev/user-reported.txt` | 177 | 使用者實際打的注音（2026-10-09 起的列由 `tools/readings.py` 產生，研究紀錄逐批註明；第 3、81、89、119、120、151、156、159、163、166、168、170、173、175 列的讀音是手動定的（第 175 列「幀」照維護者實際的打法用 ㄓㄣ，詞庫與工具給 ㄓㄥˋ；第 166、168、173 列「長這樣」、第 170 列「長高」的「長」照維護者實際的打法用 ㄓㄤˇ，工具給 ㄔㄤˊ；第 3 列「一個」與第 163 列「變一樣了」照維護者實際的打法用變調 ㄧˊ；第 156 列「紮」照維護者實際的打法用 ㄓㄚ，萌典是 ㄗㄚ），重產時不要用工具覆蓋） | 使用者遇到的錯字（2026-10-03 同意以 CC0 釋出）；之後回報的句子直接加在這裡 |
 | `dev/user-typing.txt` | 76 | 確認過（「那麼多」「覺得」「寫得」「找得到」改成輕聲，「欸」改成 ㄟˋ） | 打字測驗：十八段專案自寫的文章（CC0；第一輪六段書面、第二輪十二段口語／流行語／AI 用語），在標點處切成子句，前文是同一段裡前面的子句。2026-10-03 使用者用蘋果內建、小麥、自然三套輸入法實打，結果見 `docs/typing-test.md`。檔名排在 `user-reported` 之後，不影響「開發集前 302 列」 |
 | `dev/acg/works.txt`、`dev/acg/characters.txt`、`dev/acg/character-parts.txt` | 142、227、105 | `tools/readings.py` 產生，標 CHECK 的列（依序 7、12、11 列）沒有逐列確認，無法讀出的 1 列沒收 | ACG 詞包（`docs/contracts/acg-pack.md` A.3）的評測：Wikidata 上有中文維基條目、sitelink 至少 3、有 zh-tw 標籤的作品名、角色名與角色名片段（只留 2–10 個漢字、整串一次打、沒有前文）。**來源是 Wikidata 的標籤，CC0**（Wikidata 的資料授權）。在 `dev/acg/` 子目錄，所以 `--dev N` 不會讀到；只用來回報，**不用來調任何參數** |
+| `dev/it/words.txt` | 60 | 讀音照建置用的讀音（`tools/readings.py`＋`data/packs/it-readings.tsv`），標 CHECK 的詞不抽 | 資訊＋AI 詞包（`docs/contracts/it-pack.md` §3.5）的檢查集：從 `data/packs/it-add.tsv` 依來源比例抽 60 個詞（固定種子 20261024），一列一詞、沒有前文。授權同 `it-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；`--dev N` 不會讀到 |
+| `dev/net-slang/words.txt` | 每個讀音一列 | 讀音同 `data/lexicon/slang-add.tsv` | 網路用語（`docs/contracts/net-slang.md` §3）的檢查集：每個讀音上排第一的收錄詞一列（同讀音排後面的寫法只當候選、不收），加 4 個已經打得對的對照（幹你娘、靠北、三小、北七）；一列一詞、沒有前文。授權同 `slang-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；放在子資料夾，`--dev N` 不會讀到 |
+| `dev/net-slang/round2.txt` | 906 | 讀音同 `data/lexicon/slang-add.tsv` | 網路用語第二輪（`docs/contracts/net-slang-2.md`）的檢查集：每個讀音上排第一的第二輪新詞一列，沒有前文。授權同 `slang-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；門檻照契約不算會意重排 |
 | `rerank/s7e-function-words.txt` | 186 | `tools/readings.py` 產生；標 CHECK 的 10 列與工具沒標的 2 列由 main 逐列確認（`docs/contracts/s7e-fewer-breaks.md` §2.1） | 功能字測試句（專案自寫，CC0）：在／再、是／事／試／式／市、的／得／地、做／作 等同音功能字，第二批 64 列專挑功能字和後面的字能組成常見詞的搭配（再這樣、是出）。S7e 用來檢查語意重排有沒有把功能字改壞，不用來調參；第 80、85 列的「地」讀音是 ㄉㄧˋ（不是副詞的 ㄉㄜ˙），測不到的／得／地的混淆，之後在最後面補改正的列。不放在 `probe/`：CLI 的 `--set probe` 會讀那個資料夾的每個檔案（S2r 探針集的 golden）；句子凍結後不改，要加就加在最後面 |
-| `holdout/news.txt`、`holdout/talk.txt` | 150、150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **保留集（現役，2026-10-16 起）**：換新的第一份（shard-1，`docs/contracts/holdout-refresh.md`）。公開語料的新聞與口語書寫，逐列出處在 `holdout/next/sources.tsv`（第 1 份）。只在推 `v*` tag 前由 fresh verifier 跑（2026-10-18 起；之前是每片結束時） |
+| `holdout/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **保留集（現役，2026-10-16 起）**：換新的第一份（shard-1，`docs/contracts/holdout-refresh.md`）。公開語料的口語書寫，逐列出處在 `holdout/next/sources.tsv`（第 1 份）。**新聞的列已退役**（2026-10-29，`docs/contracts/news-corpus.md` §2.4）：`holdout/news.txt` 與 `next/shard-{2,3}/news.txt` 已刪，`sources.tsv` 裡新聞那幾列留著當退役紀錄；新聞半邊改用私人檔（見下）。只在推 `v*` tag 前由 fresh verifier 跑（2026-10-18 起；之前是每片結束時） |
 | `dev/holdout-2026-10-03/holdout.txt`、`oov_words.list` | 227（最後 25 列是 OOV） | 寫作者確認 | 2026-10-03 到 10-16 的保留集，回填之後退役，改當**可讀的挑戰集**（同音組取偶數行）；在 `dev/` 的子資料夾，`--dev N` 不會讀到，開發集前 302 列不變 |
-| `holdout/next/shard-{2,3}/news.txt`、`talk.txt` | 每份新聞 150、口語 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/contracts/holdout-refresh.md`）：和現役的 shard-1 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
+| `holdout/next/shard-{2,3}/talk.txt` | 每份口語 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/contracts/holdout-refresh.md`）：和現役的 shard-1 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 
 ## 規則
 
 - 讀音由 `tools/readings.py` 產生，人工確認的詞記在 `tools/reading_overrides.tsv`；評測時有第三欄就直接用、不重算。
-- 保留集的報法（2026-10-08）：fresh verifier 對基準與新版各跑一次 `shanjie-eval --lm data/lm/bigram.sjlm --profile chat|formal --set holdout --rowstats FILE`（寫到它自己的暫存目錄；檔內只有數字、tab、換行，已檢查 `[0-9\t\n]`），再用 `tools/evalstats.py compare` 只回報那一行表格（n、top1、改對／改壞、McNemar p、CER、Δ 區間），然後刪掉兩個檔。`--set holdout --dump` 仍然禁止。其他集合的報法見 `CLAUDE.md`「評測與資料」。
-- 保留集的兩個半邊（從下一個發版起，`docs/contracts/kpi.md` §3）：全集合照上面每種設定一行；另加口語半邊（聊天設定）與新聞半邊（書面設定）各一行。`--set holdout` 依檔名排序讀，`news.txt` 是第 1–150 列、`talk.txt` 是第 151–300 列；基準與新版的 rowstats 用同樣的方式切出那一段、列號從 1 重編，再跑 `evalstats compare --net`。結果存進 `eval/bench/kpi/<版本>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（`n`、`top1`、`fixed`、`broken`、`p`，另加那個半邊檔案的 `rows_sha256`，表依它分欄）。同一次發版前量的這四行算一次「使用」。
+- 保留集的報法（2026-10-08）：fresh verifier 對基準與新版各跑一次 `shanjie-eval --lm data/lm/bigram.sjlm --profile chat --set holdout --rowstats FILE`（2026-10-29 起 `--set holdout` 只讀口語半邊，只用聊天設定；新聞半邊另見下一條）（寫到它自己的暫存目錄；檔內只有數字、tab、換行，已檢查 `[0-9\t\n]`），再用 `tools/evalstats.py compare` 只回報那一行表格（n、top1、改對／改壞、McNemar p、CER、Δ 區間），然後刪掉兩個檔。`--set holdout --dump` 仍然禁止。新聞半邊：`shanjie-eval --lm … --profile formal --rows <私人檔> --rowstats FILE`，報法同上，沒有別的指令。其他集合的報法見 `CLAUDE.md`「評測與資料」。
+- 保留集的兩個半邊（`docs/contracts/kpi.md` §3；2026-10-29 換手，`docs/contracts/news-corpus.md` §2.4）：`--set holdout` 從此只讀 `holdout/talk.txt`（n 150），就是**口語半邊**，用聊天設定量，存進 v2 JSON 的 `holdout.chat` 與 `eval/bench/kpi/<版本>.json` 的 `holdout_talk_chat`。**新聞半邊**不在 repo：fresh verifier 在評測機器上對私人檔 `holdout-news-1.txt`（雜湊見下）用 `--rows <檔> --profile formal --rowstats` 量基準與新版（檔用前核對雜湊，量完刪掉 rowstats 與那台機器上的副本），再 `evalstats compare --net`，存進 v2 JSON 的 `holdout.formal` 與 kpi JSON 的 `holdout_news_formal`（`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔的 `rows_sha256`，兩個表都依它分欄）。基準與新版的口語半邊 rowstats 不必再切段。
+- **量新聞半邊的旗標禁令（流程規則，不是技術防護）**：`--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的 verifier，brief 明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（檔內只有 `[0-9\t\n]`），照 `docs/contracts/holdout-refresh.md` §6。兩個半邊各自計次：同一次發版前兩個都量，各加一次「使用」（見下面的使用紀錄）。`rows_sha256` 由 main 填，口語半邊是 `holdout/talk.txt` 的 sha256、新聞半邊是那個私人檔的 sha256，一定要填。
 - `tools/evalstats.py compare … --net`（E2，`docs/contracts/e2-chat-eval.md`）：表格最後多三欄，淨值（改對 − 改壞）、改壞率（改壞 ÷ n）、改壞數的 95% 精確 Poisson 單尾上界；不加 `--net` 時輸出不變。
 - 保留集（現役，2026-10-16 起）：從公開語料由 fresh agent 抽樣、另一個 fresh agent 盲後處理，main 只看列號、計數與雜湊（`docs/contracts/holdout-refresh.md` §4）。舊集（`dev/holdout-2026-10-03/`）由不參與實作的 fresh agent 在獨立 worktree 撰寫；main 沒有讀過內容。所有 executor 的 brief 都禁止讀 `holdout/`；`shanjie-eval` 對保留集只印指標、不印錯句。這是流程規則，不是技術防護。
 - 保留集合併後做過兩次盲處理（只印數量）：一／不 變調改本調（0 列需要改）；刪掉與開發集重複的 2 句（229 → 227）。
 - 開發集與保留集零重疊（程式檢查）。
 
+## 合法寫法表雜湊
+
+| 檔案 | SHA-256 |
+|---|---|
+| `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；只在 `--forms-rowstats` 時讀，`docs/contracts/forms-score.md`） | `e7ca5d8b455fc14371bed08e46a68868ef73bca5296fc78f22024f44613fb579` |
+
 ## 保留集雜湊（變動就代表被改過）
 
 | 檔案 | SHA-256 |
 |---|---|
-| `holdout/news.txt`（shard-1，現役） | `b9bc7190e81bb546baf390ed442cf953ef65fdcfe0922f62e8fbe274b423cbf4` |
 | `holdout/talk.txt`（shard-1，現役） | `667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d` |
 | `dev/holdout-2026-10-03/holdout.txt`（退役） | `2445f7ad0347cc68e2c7a62a1cbb25870247a43aec6d11a20d981bd439f5ad0b` |
 | `dev/holdout-2026-10-03/oov_words.list`（退役） | `211771e80a1b17529c3791eef77ab639d305554770730b3d43de9623e4fe3f45` |
-| `holdout/next/shard-2/news.txt` | `1c9c928c307e54d29768450f1f936f16ea426c8758cedf2fc430bf1812d8eca4` |
 | `holdout/next/shard-2/talk.txt` | `71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e` |
-| `holdout/next/shard-3/news.txt` | `fc1477681a6f97aaef83b4df388de3f0bc066eb3ef3b936677fcd94ade14e1b4` |
 | `holdout/next/shard-3/talk.txt` | `743d3687f74e43c9a0d5ea40f7c6b463cb360b0e60bd7bd5b11265f291d984d3` |
 | `holdout/next/sources.tsv` | `f58939d776d6c5132004878a3ed2a700fc9d4f8f044b175f6d704448d599eb5d` |
 
+### 私人新聞集（2026-10-28／29 建，檔在 repo 外，只記雜湊與列數）
+
+來源是「報社新聞（只在本機驗證，不訓練、不散布）」加中文維基新聞驗證那一邊的條目（`docs/contracts/news-corpus.md` §2）。保留集每份是 30 列維基新聞＋120 列報社新聞；`newstune` 是 72＋1,928。
+
+| 檔案 | 列數 | 用途 | SHA-256 |
+|---|---|---|---|
+| `newstune.txt` | 2,000 | 開發層，書面判讀集之一（可調參、選臂，只報數字） | `c69f8f0b5a4fefb9f07393964b1ecbac291ff0e2d9b22f567f168e5bf1c77d0a` |
+| `holdout-news-1.txt` | 150 | 保留集新聞半邊（現役） | `637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38` |
+| `holdout-news-2.txt` | 150 | 保留集新聞半邊（之後） | `d0c0b82ea936349128117d69b2d89c54ffa527279d94787ee6d2e5ee1bf194d5` |
+| `holdout-news-3.txt` | 150 | 保留集新聞半邊（之後） | `344432589b80d168e297b6009e522b954b3e9b54615f023c9d128c065086a203` |
+
+使用次數：三份保留集新聞半邊都從 0 開始（口語半邊接著舊的累計）；換份與換新規則同下。行政院 294 句新聞稿驗證集已退役，從 2026-10-29 起是訓練語料。
 ## 保留集的換新規則與使用紀錄（`docs/contracts/holdout-refresh.md` §7）
 
 - **一次「使用」**：現役保留集的任何一個數字回到 main 或維護者手上。回填凍結的 tag、量份與份之間的雜訊底線不算。
@@ -46,13 +65,19 @@
 - 三份都用完後，把時間窗往後延，用同樣的規則重抽。
 - 新的份是怎麼來的：抽樣與過濾的 agent 和量測的 agent 都是 fresh agent，main 只看列號、計數與雜湊（契約 §4）；和訓練文字、所有公開評測集、舊保留集與行政院 294 句的包含比對丟掉 508 句（契約 §8）。
 
-| 日期 | 現役 | 片 | PR | 第幾次 |
-|---|---|---|---|---|
-| （shard-1 從 2026-10-16 起現役；之後每次使用加一列） | | | | |
-| 2026-10-17 | shard-1 | v0.4.7 發版（v0.4.6 對 v0.4.7，fresh verifier；聊天 234 → 234、書面 230 → 233） | #184 | 1 |
-| 2026-10-17 | shard-1 | rerank-formal（會意 SJ-SR-6 書面三檔，fresh verifier；對 tinylm-v5：標準與積極 +8／−0、保守 0／0；對只用 n-gram：標準與積極 +12／−0、保守 +3／−0） | #199 | 2 |
-| 2026-10-17 | shard-1 | newword-b（新詞 B，fresh verifier；對 main：聊天 +5／−0、書面 +5／−0） | #196 | 3 |
-| 2026-10-22 | shard-1 | v0.5.0 發版（v0.4.7 對 v0.5.0，fresh verifier；聊天 234 → 237（7／4）、書面 233 → 241（8／0）；口語半邊聊天 116 → 115（3／4）、新聞半邊書面 116 → 120（4／0）） | #258 | 4 |
+| 日期 | 現役 | 半邊 | 片 | PR | 第幾次 |
+|---|---|---|---|---|---|
+| （shard-1 從 2026-10-16 起現役；之後每次使用加一列） | | | | | |
+| 2026-10-17 | shard-1 | 兩個半邊（舊集合） | v0.4.7 發版（v0.4.6 對 v0.4.7，fresh verifier；聊天 234 → 234、書面 230 → 233） | #184 | 1 |
+| 2026-10-17 | shard-1 | 兩個半邊（舊集合） | rerank-formal（會意 SJ-SR-6 書面三檔，fresh verifier；對 tinylm-v5：標準與積極 +8／−0、保守 0／0；對只用 n-gram：標準與積極 +12／−0、保守 +3／−0） | #199 | 2 |
+| 2026-10-17 | shard-1 | 兩個半邊（舊集合） | newword-b（新詞 B，fresh verifier；對 main：聊天 +5／−0、書面 +5／−0） | #196 | 3 |
+| 2026-10-22 | shard-1 | 兩個半邊（舊集合） | v0.5.0 發版（v0.4.7 對 v0.5.0，fresh verifier；聊天 234 → 237（7／4）、書面 233 → 241（8／0）；口語半邊聊天 116 → 115（3／4）、新聞半邊書面 116 → 120（4／0）） | #258 | 4 |
+| 2026-10-29 | shard-1 | 口語半邊（`talk.txt`，聊天） | v0.6.0 發版（v0.5.0 對 v0.6.0，fresh verifier；115 → 124（10／1，p 0.012）） | #327 | 5 |
+| 2026-10-29 | `holdout-news-1` | 新聞半邊（書面） | v0.6.0 發版（v0.5.0 對 v0.6.0，fresh verifier；125 → 128（3／0，p 0.25）） | #327 | 1 |
+| 2026-10-31 | shard-1 | 口語半邊（`talk.txt`，聊天） | v0.6.1 發版（v0.6.0 對 v0.6.1，fresh verifier；124 → 124（0／0）） | #338 | 6 |
+| 2026-10-31 | `holdout-news-1` | 新聞半邊（書面） | v0.6.1 發版（v0.6.0 對 v0.6.1，fresh verifier；128 → 128（0／0）） | #338 | 2 |
+
+2026-10-29 換手：兩個半邊從此各算各的使用次數，上表原有的第 1–4 次是舊新聞半邊加口語半邊合併的 shard-1 用量，列保持原樣。**口語半邊**（shard-1 的 `talk.txt`）接著上表的 4 次往下數，滿 8 次或有決定因它而做就換成 `next/shard-2/talk.txt`；**新聞半邊**（`holdout-news-1.txt`）從 0 起算，同一條規則，滿了換成 `holdout-news-2.txt`。每個半邊各自適用上面的「換下一份」規則，不互相牽動。換份前後的數字不跨份比。之後每次使用在上表為兩個半邊各記一列（「半邊」欄寫口語或新聞）。
 
 ### shard-1 回填（2026-10-16，不計入使用次數）
 

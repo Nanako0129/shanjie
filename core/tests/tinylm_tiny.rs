@@ -116,7 +116,8 @@ fn bad_files_are_format_errors() {
             ("SJTL0003 + 1", at(7, b"3")),
             ("SJTL0003 + 2", relabel(&good, b'3', 2)),
             ("SJTL0002 + 3", relabel(&good, b'2', 3)),
-            ("unknown version SJTL0005 + 5", relabel(&good, b'5', 5)),
+            ("unknown version SJTL0006 + 6", relabel(&good, b'6', 6)),
+            ("a version 1 body under a version 5 header", relabel(&good, b'5', 5)),
             ("SJTL0004 + 1", at(7, b"4")),
             ("weight type", at(12, &2u32.to_le_bytes())),
             ("n_layer 0", at(16, &0u32.to_le_bytes())),
@@ -319,8 +320,8 @@ fn rerank_uses_the_files_delta() {
     // s1 - s0 = (ng1 - ng0) + 0.7 (ll1 - ll0) = 0.1; the n-gram margin ng0 - ng1 stays below tau 2
     let ng = [0.0, 0.1 - 0.7 * (ll[1] - ll[0])];
     assert!(ng[0] - ng[1] < 2.0, "premise: inside the tau gate");
-    let (c1, l1) = v1.rerank(&ng, &cands, "", v1.alpha_tau_delta(Profile::Chat)).unwrap();
-    let (c2, l2) = v2.rerank(&ng, &cands, "", v2.alpha_tau_delta(Profile::Chat)).unwrap();
+    let (c1, l1) = v1.rerank(&ng, &cands, "", v1.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap();
+    let (c2, l2) = v2.rerank(&ng, &cands, "", v2.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap();
     assert_eq!(l1, l2, "same LLs");
     assert_eq!((c1, c2), (1, 0), "delta 0.25 keeps the first, delta 0 moves");
     assert_eq!(c2, pick(&ng, &l2.unwrap(), 0.7, 2.0, 0.25));
@@ -541,4 +542,83 @@ fn load_paired_binds_the_kn_side_file() {
         [KnPairing::TunedWithout, KnPairing::OtherSideFile, KnPairing::TunedWith].map(|e| TinyLmError::KneserNey(e).to_string()).to_vec();
     assert!(msgs.iter().all(|m| m.contains(".sjtl") && m.contains("kn.sjkn")), "{msgs:?}");
     assert!(msgs[0].contains("tuned without") && msgs[1].contains("another") && msgs[2].contains("none is loaded"), "{msgs:?}");
+}
+
+
+// ---------- context-return: SJTL0005 and the declared left-context length (docs/contracts/context-return.md section 2) ----------
+
+/// The version 4 file as version 5: its 244 header bytes relabelled, then L (u32) at 244, then the rest.
+fn v5(l: u32) -> Vec<u8> {
+    let b = bytes(V4);
+    relabel(&[&b[..244], &l.to_le_bytes(), &b[244..]].concat(), b'5', 5)
+}
+
+/// L is read from 244 and nothing else moves: the same parameters, hashes and LLs as the version 4 file; versions 1 to 4 declare
+/// none. 1 <= L <= ctx - 2 (the toy's ctx is 64): 0 and 63 are refused, as are a version 5 header on a version 4 body and the
+/// crosses of magic and version field, and every prefix of the header.
+#[test]
+fn v5_declares_the_left_context_length() {
+    let (v4, m) = (TinyLm::parse(&bytes(V4)).unwrap(), TinyLm::parse(&v5(8)).unwrap());
+    assert_eq!((m.left_len(), m.ctx()), (Some(8), 64));
+    for p in [Profile::Chat, Profile::Formal] {
+        for level in [RerankLevel::Conservative, RerankLevel::Standard, RerankLevel::Aggressive] {
+            assert_eq!(m.params(p, level), v4.params(p, level));
+        }
+    }
+    assert_eq!((m.ngram_sha256(), m.kn_sha256(), m.has_levels()), (v4.ngram_sha256(), v4.kn_sha256(), true));
+    let its = items();
+    let pairs: Vec<(&str, &str)> = its.iter().map(|(k, c, ..)| (k.as_str(), c.as_str())).collect();
+    let (x, y) = (v4.ll_many(&pairs).unwrap(), m.ll_many(&pairs).unwrap());
+    assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()), "LLs differ");
+    for f in ["tiny-int8.sjtl", "tiny-int8-v2.sjtl", V3, V4] {
+        assert_eq!(TinyLm::parse(&bytes(f)).unwrap().left_len(), None, "{f}");
+    }
+    assert_eq!(TinyLm::parse(&v5(1)).unwrap().left_len(), Some(1));
+    assert_eq!(TinyLm::parse(&v5(62)).unwrap().left_len(), Some(62), "ctx - 2");
+    for l in [0, 63, 64, u32::MAX] {
+        assert!(is_format(&v5(l)), "L {l}");
+    }
+    let good = v5(8);
+    for n in 0..=248 {
+        assert!(is_format(&good[..n]), "prefix of {n} bytes");
+    }
+    assert!(is_format(&relabel(&bytes(V4), b'5', 5)), "a version 4 body under a version 5 header");
+    assert!(is_format(&relabel(&good, b'4', 4)), "a version 5 body under a version 4 header");
+    assert!(is_format(&relabel(&good, b'5', 4)), "SJTL0005 + 4");
+    assert!(is_format(&relabel(&good, b'4', 5)), "SJTL0004 + 5");
+}
+
+/// `key_for` is the one keying rule (engine and CLI): `context_key` for versions 1 to 4, the last L characters as they are for version 5.
+/// A declared key of "^" is the text "^" (UNK here), never the empty k that `context_key`'s SENTINEL stands for (review of PR #294).
+#[test]
+fn v5_keys_with_the_raw_last_l_characters() {
+    let (v4, m) = (TinyLm::parse(&bytes(V4)).unwrap(), TinyLm::parse(&v5(8)).unwrap());
+    let text = "我們說了一些話Joe的表演，";
+    assert_eq!((v4.key_for(text), m.key_for(text)), ("^".to_string(), "話Joe的表演，".to_string()));
+    assert_eq!((v4.key_for("你好嗎"), m.key_for("你好嗎")), ("好嗎".to_string(), "你好嗎".to_string()));
+    let cands = ["你好", "我們"];
+    let ll = |model: &TinyLm, key: &str| model.rerank(&[-1.0, -1.5], &cands, key, (1.0, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.unwrap();
+    let many = |model: &TinyLm, k: &str| model.ll_many(&cands.map(|c| (k, c))).unwrap();
+    assert_ne!(many(&m, "^"), many(&m, ""), "premise: \"^\" is a character of the key");
+    assert_eq!(ll(&m, "^"), many(&m, "^"), "declared: \"^\" as it is");
+    assert_eq!(ll(&v4, "^"), many(&v4, ""), "versions 1 to 4: SENTINEL is the empty k");
+}
+
+/// context-return section 2: of a declared key the model sees min(L, ctx - 1 - |c|) characters (`ll_many`'s window). With L 8 and ctx
+/// 64, a 60-character candidate leaves room for exactly the last 3 characters of the key.
+#[test]
+fn a_long_candidate_sees_only_the_tail_of_a_declared_key() {
+    let m = TinyLm::parse(&v5(8)).unwrap();
+    let key = m.key_for("這個人都說要來我你他好嗎");
+    assert_eq!(key, "說要來我你他好嗎");
+    let long: Vec<String> = ["我們", "你們"].iter().map(|p| format!("{p}{}", "的是不了在有".repeat(10).chars().take(58).collect::<String>())).collect();
+    assert!(long.iter().all(|c| c.chars().count() == 60));
+    let cands: Vec<&str> = long.iter().map(String::as_str).collect();
+    let got = m.rerank(&[-1.0, -1.5], &cands, &key, (1.0, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.unwrap();
+    let with = |k: &str| m.ll_many(&cands.iter().map(|&c| (k, c)).collect::<Vec<_>>()).unwrap();
+    let ranked = |k: &str| m.rerank(&[-1.0, -1.5], &cands, k, (1.0, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.unwrap();
+    assert_eq!(got, with("他好嗎"), "the last 3 characters");
+    assert_eq!(got, ranked("說要來我我他好嗎"), "the 4th character from the end is not seen");
+    assert_ne!(got, ranked("說要來我你你好嗎"), "the 3rd is");
+    assert_ne!(got, with("好嗎"), "not only 2");
 }

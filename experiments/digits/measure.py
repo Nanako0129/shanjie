@@ -172,8 +172,9 @@ def pred_row(env, row, lams=LAMBDAS):
     cands = P3.reference(env.idx, units, "P")
     out = {"n": 1, "i_hit": int(r_i is not None and r_i <= 9), "i_in_layer": int(r_i is not None)}
     for prof, lam in lams:
-        base = P3.rank_s(P3.order_s(cands, P1.scores(cands, env.lm, lam, "<s>"), P1.succ_words(env.lm, "<s>")), word)
-        new = P3.rank_s(DS.digit_tiers(env.table, env.lm, env.idx, units, v, lam), word)
+        lm = L.profile_lm(env.lm, prof)   # formal takes the core's FORMAL_KN_BETA 0.75 (Lm::scoring), not the side file's beta
+        base = P3.rank_s(P3.order_s(cands, P1.scores(cands, lm, lam, "<s>"), P1.succ_words(lm, "<s>")), word)
+        new = P3.rank_s(DS.digit_tiers(env.table, lm, env.idx, units, v, lam), word)
         h0, h1 = base is not None and base <= 9, new is not None and new <= 9
         out.update({f"{prof}.base": int(h0), f"{prof}.new": int(h1), f"{prof}.new_only": int(h1 and not h0), f"{prof}.base_only": int(h0 and not h1)})
     return out

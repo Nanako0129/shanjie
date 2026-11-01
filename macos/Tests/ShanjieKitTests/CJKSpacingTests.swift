@@ -47,7 +47,7 @@ final class CJKSpacingShellTests: XCTestCase {
     final class Gate { var secure = false }
 
     private func makeShell(spacing: Bool?, gate: Gate = Gate(), store: MemorySpacingStore? = nil) -> Shell {
-        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: store ?? MemorySpacingStore(spacing))
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: store ?? MemorySpacingStore(spacing))
         XCTAssertNotNil(shell.engine)
         return shell
     }
@@ -115,7 +115,8 @@ final class CJKSpacingShellTests: XCTestCase {
         for _ in 0..<127 { c.type("su3") }
         c.type("c", flags: .shift)
         c.type("laude")
-        c.type("2")  // a Zhuyin key closes the run: the token is unit 128, 127 x 你 + Claude is committed, and ㄉ starts a new syllable
+        c.type(" ")  // Space closes the run (a Zhuyin key now goes on it, zhen-revert section 2.4): the token is unit 128, 127 x 你 + Claude is committed
+        c.type("2")  // and ㄉ starts a new syllable in the emptied composition
         let first = inserts(c)
         XCTAssertEqual(first.count, 1)
         XCTAssertEqual(first.first, String(repeating: "你", count: 127) + " Claude")
@@ -163,6 +164,7 @@ final class CJKSpacingShellTests: XCTestCase {
         for _ in 0..<127 { c.type("su3") }
         c.type("c", flags: .shift)
         c.type("laude")
+        c.type(" ")  // Space ends the run; a Zhuyin key would go on it (zhen-revert section 2.4)
         c.type("2")
         XCTAssertEqual(inserts(c), [String(repeating: "你", count: 127) + " Claude"])
         return c

@@ -2,7 +2,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/contracts/profile-choice.md section 3.1: how chat or formal is chosen, the per-app menu switch, the stores read back at
-/// start, the composition owner, and the settings window's model. Observable results are row 284 typed then Enter, as in
+/// start, the composition owner, and the settings window's model. Observable results are row 131 typed then Enter, as in
 /// `ShellTests.testProfileFollowsTheApp`.
 @MainActor
 final class ProfileChoiceTests: XCTestCase {
@@ -17,19 +17,19 @@ final class ProfileChoiceTests: XCTestCase {
                            apps: MemoryAppProfileStore = MemoryAppProfileStore()) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
-                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
                           candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: mode, appProfileStore: apps, spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return shell
     }
 
-    /// Activates, types row 284 and Enter; returns what the client received in this call. Without a left context, so an
+    /// Activates, types row 131 and Enter; returns what the client received in this call. Without a left context, so an
     /// earlier row in the same client cannot change the result (as `ShellTests.testOwnerChangeReappliesTheProfile`).
-    private func row284(_ c: Controller) -> String {
+    private func profileRow(_ c: Controller) -> String {
         let before = c.client.text
         c.client.selectedOverride = NSRange(location: NSNotFound, length: 0)
         c.session.activate()
-        c.type(Row284.standardKeys)
+        c.type(Row131.standardKeys)
         c.press(Keys.enter)
         return String(c.client.text.dropFirst(before.count))
     }
@@ -64,14 +64,14 @@ final class ProfileChoiceTests: XCTestCase {
     func testMenuSwitchChangesTextEditToChatAndDiscordToFormal() {
         let shell = makeShell()
         let textEdit = Controller(shell, bundle: Self.textEdit), discord = Controller(shell, bundle: Self.discord)
-        XCTAssertEqual(row284(textEdit), Row284.formal)
-        XCTAssertEqual(row284(discord), Row284.chat)
+        XCTAssertEqual(profileRow(textEdit), Row131.formal)
+        XCTAssertEqual(profileRow(discord), Row131.chat)
         textEdit.session.activate()
         textEdit.session.perform(.toggleAppChat)
-        XCTAssertEqual(row284(textEdit), Row284.chat)
+        XCTAssertEqual(profileRow(textEdit), Row131.chat)
         discord.session.activate()
         discord.session.perform(.toggleAppChat)
-        XCTAssertEqual(row284(discord), Row284.formal)
+        XCTAssertEqual(profileRow(discord), Row131.formal)
     }
 
     /// The two forced modes give their profile in every app, the built-in chat app and another alike; auto restores the rule.
@@ -79,13 +79,13 @@ final class ProfileChoiceTests: XCTestCase {
         let shell = makeShell()
         let textEdit = Controller(shell, bundle: Self.textEdit), discord = Controller(shell, bundle: Self.discord)
         shell.setProfileMode(.chat)
-        XCTAssertEqual(row284(textEdit), Row284.chat)
-        XCTAssertEqual(row284(discord), Row284.chat)
+        XCTAssertEqual(profileRow(textEdit), Row131.chat)
+        XCTAssertEqual(profileRow(discord), Row131.chat)
         shell.setProfileMode(.formal)
-        XCTAssertEqual(row284(discord), Row284.formal)
-        XCTAssertEqual(row284(textEdit), Row284.formal)
+        XCTAssertEqual(profileRow(discord), Row131.formal)
+        XCTAssertEqual(profileRow(textEdit), Row131.formal)
         shell.setProfileMode(.auto)
-        XCTAssertEqual(row284(discord), Row284.chat)
+        XCTAssertEqual(profileRow(discord), Row131.chat)
     }
 
     /// Section 1: mid-composition, the switch recomputes the composition at once; Enter commits the new profile's result
@@ -93,13 +93,13 @@ final class ProfileChoiceTests: XCTestCase {
     func testSwitchMidCompositionRecomputesAtOnce() {
         let c = Controller(makeShell(), bundle: Self.textEdit)
         c.session.activate()
-        c.type(Row284.standardKeys)
-        XCTAssertEqual(c.client.marked, Row284.formal)
+        c.type(Row131.standardKeys)
+        XCTAssertEqual(c.client.marked, Row131.formal)
         c.session.perform(.toggleAppChat)
-        XCTAssertEqual(c.client.marked, Row284.chat, "the composition was not recomputed")
+        XCTAssertEqual(c.client.marked, Row131.chat, "the composition was not recomputed")
         XCTAssertEqual(c.client.text, "", "nothing committed by the switch")
         c.press(Keys.enter)
-        XCTAssertEqual(c.client.text, Row284.chat)
+        XCTAssertEqual(c.client.text, Row131.chat)
     }
 
     // MARK: menu (section 2.3)
@@ -109,7 +109,7 @@ final class ProfileChoiceTests: XCTestCase {
         let textEdit = Controller(shell, bundle: Self.textEdit), discord = Controller(shell, bundle: Self.discord)
         let titles = textEdit.session.menu.map(\.title)
         let at = titles.firstIndex(of: "這個 App 用聊天設定")
-        XCTAssertEqual(at.map { titles[$0 - 1] }, "動漫與遊戲詞")
+        XCTAssertEqual(at.map { titles[$0 - 1] }, "語意校正", "no pack file in this fixture, so no pack line before it")
         XCTAssertEqual(at.map { titles[$0 + 1] }, "善解設定…")
         XCTAssertEqual(item(textEdit)?.checked, false)
         XCTAssertEqual(item(textEdit)?.enabled, true)
@@ -156,7 +156,7 @@ final class ProfileChoiceTests: XCTestCase {
         for value in [nil, "", "Chat", "CHAT", "書面", "1"] as [String?] {
             let shell = makeShell(mode: MemoryProfileModeStore(value))
             XCTAssertEqual(shell.profileMode, .auto, "\(value ?? "nil")")
-            XCTAssertEqual(row284(Controller(shell, bundle: Self.textEdit)), Row284.formal, "\(value ?? "nil")")
+            XCTAssertEqual(profileRow(Controller(shell, bundle: Self.textEdit)), Row131.formal, "\(value ?? "nil")")
         }
     }
 
@@ -183,16 +183,16 @@ final class ProfileChoiceTests: XCTestCase {
 
     func testStoredProfileModeAppliesFromTheStart() {
         let chat = makeShell(mode: MemoryProfileModeStore("chat"))
-        XCTAssertEqual(row284(Controller(chat, bundle: Self.textEdit)), Row284.chat)
+        XCTAssertEqual(profileRow(Controller(chat, bundle: Self.textEdit)), Row131.chat)
         let formal = makeShell(mode: MemoryProfileModeStore("formal"))
-        XCTAssertEqual(row284(Controller(formal, bundle: Self.discord)), Row284.formal)
+        XCTAssertEqual(profileRow(Controller(formal, bundle: Self.discord)), Row131.formal)
     }
 
     func testStoredAppProfilesApplyFromTheStartAndSurviveTheNextWrite() {
         let apps = MemoryAppProfileStore([Self.textEdit: "chat", "com.example.bad": NSNumber(value: 1)] as [String: Any])
         let shell = makeShell(apps: apps)
         let textEdit = Controller(shell, bundle: Self.textEdit)
-        XCTAssertEqual(row284(textEdit), Row284.chat)
+        XCTAssertEqual(profileRow(textEdit), Row131.chat)
         XCTAssertEqual(item(textEdit)?.checked, true)
         XCTAssertEqual(SettingsModel(shell: shell).appProfiles, [AppProfileRow(bundle: Self.textEdit, chat: true)])
         Controller(shell, bundle: Self.notes).session.perform(.toggleAppChat)
@@ -213,7 +213,7 @@ final class ProfileChoiceTests: XCTestCase {
         XCTAssertEqual(a.client.marked, "")
         XCTAssertEqual(b.client.calls, [], "B received A's composition")
         XCTAssertTrue(shell.owner === b.session)
-        XCTAssertEqual(row284(b), Row284.chat)
+        XCTAssertEqual(profileRow(b), Row131.chat)
     }
 
     /// Section 2.2 (review round): the window's changes reach the owner's composition at once, with no new activateServer, so
@@ -227,20 +227,20 @@ final class ProfileChoiceTests: XCTestCase {
         c.session.activate()
         model.setProfileMode(.formal)                       // owner not composing: nothing reaches the client
         XCTAssertEqual(c.client.calls, [])
-        c.type(Row284.standardKeys)
-        XCTAssertEqual(c.client.marked, Row284.formal)
+        c.type(Row131.standardKeys)
+        XCTAssertEqual(c.client.marked, Row131.formal)
         model.setProfileMode(.chat)
-        XCTAssertEqual(c.client.marked, Row284.chat, "the mode did not reach the composition")
+        XCTAssertEqual(c.client.marked, Row131.chat, "the mode did not reach the composition")
         c.press(Keys.enter)
-        XCTAssertEqual(c.client.text, Row284.chat)
+        XCTAssertEqual(c.client.text, Row131.chat)
 
         model.setProfileMode(.auto)                         // TextEdit set to chat: still chat
-        c.type(Row284.standardKeys)
-        XCTAssertEqual(c.client.marked, Row284.chat)
+        c.type(Row131.standardKeys)
+        XCTAssertEqual(c.client.marked, Row131.chat)
         model.removeAppProfile(Self.textEdit)
-        XCTAssertEqual(c.client.marked, Row284.formal, "the removal did not reach the composition")
+        XCTAssertEqual(c.client.marked, Row131.formal, "the removal did not reach the composition")
         c.press(Keys.enter)
-        XCTAssertEqual(c.client.text, Row284.chat + Row284.formal)
+        XCTAssertEqual(c.client.text, Row131.chat + Row131.formal)
         XCTAssertNil(apps.appProfiles)
     }
 
@@ -278,6 +278,6 @@ final class ProfileChoiceTests: XCTestCase {
         model.removeAppProfile(Self.textEdit)
         XCTAssertEqual(model.appProfiles.map(\.bundle), [Self.notes, Self.discord])
         XCTAssertEqual(stored(apps), [Self.discord: "formal", Self.notes: "chat"])
-        XCTAssertEqual(row284(Controller(shell, bundle: Self.textEdit)), Row284.formal, "removed: back to the built-in rule")
+        XCTAssertEqual(profileRow(Controller(shell, bundle: Self.textEdit)), Row131.formal, "removed: back to the built-in rule")
     }
 }

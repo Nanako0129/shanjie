@@ -4,7 +4,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// The repository's data, laid out like the app's Resources (docs/contracts/s3b.md section 10.4):
-/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, tinylm.sjtl and colloquial.sjlm. Missing files fail
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm. Missing files fail
 /// the test with instructions; nothing is skipped for a missing file (the one opt-in benchmark, CandidateCellTests.testBenchmark, is skipped without SHANJIE_BENCH=1).
 enum TestData {
     static let repo = URL(fileURLWithPath: #filePath)
@@ -22,17 +22,20 @@ enum TestData {
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
         ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
+        ("trigram-chat.sjt3", "data/lm/trigram-chat.sjt3"),  // sj-lm-7-pr2.md: the chat profile's table; the engine loads both, a missing one only turns that profile's level off
         ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
         ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // colloquial-term.md: the colloquial table the selftest requires
-        // zhen-mixed: the synthetic list stands in for the generated Resources/english-words.txt (docs/contracts/zhen-mixed.md section 5.3).
-        ("english-words.txt", "eval/golden/english-tiny.txt"),
     ]
+
+    static let itPackRow = "ㄧㄥˊ-ㄇㄨˋ-ㄅㄠˇ-ㄏㄨˋ-ㄑㄧˋ\t螢幕保護器\t-3.17843815\tit\n"
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
     /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
-    static func addBundledPack(to dir: URL) throws {
+    static func addBundledPack(to dir: URL, itPack: Bool = true) throws {
         let packs = dir.appendingPathComponent("packs", isDirectory: true)
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        // The IT+AI pack's one row (the selftest word, core/tests/engine_pack.rs): a real file, so the test does not depend on the generated data/packs/it-add.tsv.
+        if itPack { try itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8) }
         try FileManager.default.createSymbolicLink(at: packs.appendingPathComponent("acg-add.tsv"),
                                                    withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
     }
@@ -47,13 +50,8 @@ enum TestData {
             let src = repo.appendingPathComponent(f.source)
             guard FileManager.default.fileExists(atPath: src.path) else {
                 XCTFail("""
-                    \(f.source) is missing. The lexicon is in git; the model is the model-v6 release asset: \
-                    gh release download model-v6 -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-                    classes.sjc: gh release download classes-v5 -R Nanako0129/shanjie -p classes.sjc -D data/lm
-                    kn.sjkn: gh release download kn-v1 -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-                    trigram.sjt3: gh release download sj-cx-1-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
-                    tinylm.sjtl: gh release download sj-sr-6-14m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
-                    colloquial.sjlm: gh release download sj-cl-1-68k -R Nanako0129/shanjie -p colloquial.sjlm -D data/lm
+                    \(f.source) is missing. The lexicon is in git; the models are the files data/*.sha256 record \
+                    (bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl, colloquial.sjlm), put in data/lm.
                     """, file: file, line: line)
                 return nil
             }
@@ -78,7 +76,10 @@ final class FakeClient: TextClient {
     }
     private(set) var underlineRuns: [UnderlineRun] = []
 
-    let bundleIdentifier: String?
+    private let bundle: String?
+    /// Every read of `bundleIdentifier` (a synchronous IPC in the app).
+    private(set) var bundleReads = 0
+    var bundleIdentifier: String? { bundleReads += 1; return bundle }
     private(set) var calls: [Call] = []
     private(set) var text = ""   // committed text
     private(set) var marked = ""
@@ -88,6 +89,8 @@ final class FakeClient: TextClient {
     /// Overrides for the left-context tests: no insertion point, or marked text left over.
     var selectedOverride: NSRange?
     var markedOverride: NSRange?
+    /// context-return section 1 (P3-2): an app that answers attributedSubstring with this, whatever range was asked for.
+    var replyOverride: String?
     /// s3b2: the line rectangle this client reports.
     var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
     private(set) var lineCursor: Int?
@@ -95,12 +98,15 @@ final class FakeClient: TextClient {
     var appearance: NSAppearance?
 
     func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; lineAsks += 1; return line }
+    /// shift-toggle section 3: the insertion point's rectangle when nothing is marked.
+    var caret: NSRect? = NSRect(x: 300, y: 400, width: 2, height: 18)
+    func caretRect() -> NSRect? { caret }
 
     /// Every call of the three reading methods, and each range requested.
     private(set) var reads = 0
     private(set) var requested: [NSRange] = []
 
-    init(bundle: String? = "com.apple.TextEdit") { bundleIdentifier = bundle }
+    init(bundle: String? = "com.apple.TextEdit") { self.bundle = bundle }
 
     private var document: NSString { (before + text + marked) as NSString }
 
@@ -120,6 +126,7 @@ final class FakeClient: TextClient {
     func attributedSubstring(from range: NSRange) -> NSAttributedString? {
         reads += 1
         requested.append(range)
+        if let replyOverride { return NSAttributedString(string: replyOverride) }
         guard range.location != NSNotFound, NSMaxRange(range) <= document.length else { return nil }
         return NSAttributedString(string: document.substring(with: range))
     }
@@ -225,6 +232,11 @@ final class Controller {
         session = Session(shell: shell, client: client)
     }
 
+    /// The session's left-context read with this client's bundle ID, as `send` passes it.
+    func readLeft() -> (text: String?, last: Character?) {
+        session.leftContext(bundle: client.bundleIdentifier)
+    }
+
     /// Presses each ASCII key of `keys` (a space is the space bar); returns the handled flags.
     @discardableResult
     func type(_ keys: String, flags: NSEvent.ModifierFlags = []) -> [Bool] {
@@ -248,14 +260,15 @@ enum Keys {
         return code
     }
 
-    static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown) -> NSEvent {
+    static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown, time: TimeInterval = 0,
+                      characters: String = "") -> NSEvent {
         if type == .flagsChanged {
-            return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+            return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
                                     context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
                                     keyCode: code) ?? event(code, flags: flags)
         }
-        return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
-                                context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
+        return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
+                                context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
                                 keyCode: code)!
     }
 }
@@ -287,14 +300,15 @@ enum Layouts {
     }
 }
 
-/// dev302 row 284 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, see Selftest.swift).
-enum Row284 {
-    static let zhuyin = "ㄔㄨˊ ㄈㄤˊ ㄒㄧㄣ ㄓㄨㄤ ㄌㄜ˙ ㄧ ㄍㄜ˙ ㄌㄩˋ ㄕㄨㄟˇ ㄏㄨˊ"
+/// dev302 row 131 (docs/contracts/s3b.md section 9; row 10 before S2k, row 226 before dec-recombine, row 284 before 通語 SJ-LM-7-9.7M, see Selftest.swift).
+enum Row131 {
+    static let zhuyin = "ㄅㄣˇ ㄕˋ ㄒㄧㄚˋ ㄓㄡ ㄙㄢ ㄏㄨㄟˋ ㄧㄡˇ ㄉㄚˋ ㄩˇ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
-    static let chat = "廚房新裝了一個率水壺"
-    // With trigram.sjt3 beside the model the formal profile gives 律水壺; without the table it gives 濾水壺, so a test
-    // (and the App selftest) that expects 律水壺 also catches a missing table. Checked with the CLI `--profile formal --context`.
-    static let formal = "廚房新裝了一個律水壺"
+    static let chat = "本市下週三會有大雨"
+    // With trigram.sjt3 beside the model the formal profile gives 本是…; without the table it gives 本市…, so a test
+    // (and the App selftest) that expects 本是 also catches a missing table. Checked with the CLI `--profile formal --context`, 2026-10-27;
+    // the n-gram first and the shipping rerank (both packs, all three strengths) give the same sentence in both profiles.
+    static let formal = "本是下週三會有大雨"
 }
 
 /// A temporary learning directory (S4 section 4); never the real Application Support.
@@ -313,24 +327,57 @@ enum TestLearning {
     }
 }
 
+/// The handle of one job of `HeldRerankRunner`.
+@MainActor
+final class HeldHandle: RerankHandle {}
+
 /// s7c2b section 2.1: a rerank runner that never completes on its own. It holds each job until the test completes it, so a
 /// result never lands at a time the test did not choose.
+///
+/// Enter's bounded wait (enter-rerank-wait.md) is answered by hand too: `waitMode` `.timeout` (the default) reports the deadline as
+/// passed at once, so a test that presses Enter with a job held sees the old behaviour; `.complete` runs the job of the handle on
+/// this thread and returns its code, as the queue runner's semaphore would. The entry leaves `held` and its `done` goes to `late`,
+/// for the test to call afterwards (the `DispatchQueue.main.async` call of `QueueRerankRunner`).
 @MainActor
 final class HeldRerankRunner: RerankRunner {
-    private(set) var held: [(job: RerankJob, done: @MainActor @Sendable (Int32) -> Void)] = []
+    enum WaitMode { case timeout, complete }
+
+    private(set) var held: [(job: RerankJob, done: @MainActor @Sendable (Int32) -> Void, handle: HeldHandle)] = []
     /// Jobs handed over so far.
     private(set) var received = 0
+    var waitMode = WaitMode.timeout
+    /// The deadline of every `wait` call, in order; `waited` counts the calls.
+    private(set) var deadlines: [DispatchTime] = []
+    var waited: Int { deadlines.count }
+    /// The `done` of jobs a wait finished, not yet called.
+    private(set) var late: [@MainActor @Sendable (Int32) -> Void] = []
 
-    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle {
         received += 1
-        held.append((job, done))
+        let handle = HeldHandle()
+        held.append((job, done, handle))
+        return handle
+    }
+
+    func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32? {
+        deadlines.append(deadline)
+        guard waitMode == .complete, let i = held.firstIndex(where: { $0.handle === handle }) else { return nil }
+        let (job, done, _) = held.remove(at: i)
+        late.append(done)
+        return job.run()
+    }
+
+    /// Calls the `done` of the oldest job a wait finished, with `code`.
+    func fireLate(code: Int32 = 0, file: StaticString = #filePath, line: UInt = #line) {
+        guard !late.isEmpty else { return XCTFail("no late callback", file: file, line: line) }
+        late.removeFirst()(code)
     }
 
     /// Runs the oldest held job on this thread and hands back its code, as the app's runner does from its queue. `code`
     /// instead skips the run and hands back that code (run's 4, a caught panic, keeps no result).
     func complete(code: Int32? = nil, file: StaticString = #filePath, line: UInt = #line) {
         guard !held.isEmpty else { return XCTFail("no job is with the runner", file: file, line: line) }
-        let (job, done) = held.removeFirst()
+        let (job, done, _) = held.removeFirst()
         let c = code ?? job.run()
         done(c)
     }
@@ -372,24 +419,25 @@ final class FreeCounter: @unchecked Sendable {
     }
 }
 
-/// dev302 row 27 since classes-v5 (2026-10-16; the selftest's sentence): in the chat profile the n-gram's first is 回復 and tinylm-v5
-/// picks 回覆, with and without the pack (CLI rowstats). Before: dev302 row 65 (s7c2b section 2.5, revised 2026-10-12): in the chat profile the n-gram's first is 在,
-/// the small model picks 再, under tinylm-v2, tinylm-v3 and tinylm-v4 alike (RerankTests, 2026-10-13; v4: CLI and these tests, 2026-10-14); under model-v6 + kn-v1 +
-/// tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`). Row 25 (執行這個城市 -> 程式) was this
-/// sentence under tinylm-v1; v2's strict chat values did not change it, v3's do again (`DeviceRow` below).
-/// dev302 row 65: under classes-v5 the chat n-gram already gives 我等一下再過去 and the small model keeps it (CLI rowstats: right with
-/// and without `--tinylm`), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall).
+/// dev302 row 10 (期中報告明天要交): in the chat profile the n-gram's first is right and the small model keeps it, with and without the pack and the
+/// colloquial table (CLI, 2026-10-27), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall). Before 通語 SJ-LM-7-9.7M: dev302 row 65 (since
+/// classes-v5, whose chat n-gram gave 我等一下再過去 already; the sentence of the s7c2b section 2.5 selftest before that), which the 通語 SJ-LM-7-9.7M n-gram gets
+/// wrong again (`RerankRow`).
 enum NoChangeRow {
-    static let standardKeys = Layouts.keys("ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ", eten: false)
-    static let text = "我等一下再過去"
+    static let standardKeys = Layouts.keys("ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ", eten: false)
+    static let text = "期中報告明天要交"
 }
 
+/// dev302 row 65 (s7c2b section 2.5, the selftest's sentence since the 通語 SJ-LM-7-9.7M files; row 27 from classes-v5 to model-v6, whose rerank changed 回復 to 回覆): in the
+/// chat profile the n-gram's first is 我等一下在過去 and the small model picks 再 (CLI, 2026-10-27, chat standard, with and without the bundled packs, without
+/// the colloquial table; with it the pick is the same). The same happened under tinylm-v2 to v4 (RerankTests, 2026-10-13). Row 25 (執行這個城市 -> 程式) was this
+/// sentence under tinylm-v1 (`DeviceRow` below).
 enum RerankRow {
-    static let zhuyin = "ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙"
+    static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let etenKeys = Layouts.keys(zhuyin, eten: true)
-    static let ngram = "我已經回復你的郵件了"
-    static let reranked = "我已經回覆你的郵件了"
+    static let ngram = "我等一下在過去"
+    static let reranked = "我等一下再過去"
 }
 
 /// dev302 row 25, the device sentence of docs/contracts/s7h-tinylm-v3.md section 1: in the chat profile with no left context and

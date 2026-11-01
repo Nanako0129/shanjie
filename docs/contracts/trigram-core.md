@@ -123,7 +123,7 @@
   - 聊天不變：混合兩種設定的檔（`s2-lm.txt`、`s2h-lm-context.txt`、`top1.tsv`），`git diff` 只碰書面的行與欄；只有聊天的檔逐位元組不變。
   - 研究紀錄逐一列出改變的檔、改變的列數，以及每個書面 golden 新舊 top1 的差。
 - **C4 書面重播列**（從第 B 片移來）：`tools/bench/replay` 加第五個參數 `chat|formal`（預設 chat）；`tools/bench.py` 套件 v2 的速度表（`measure_speed2`）在聊天重播之外多一列書面重播，模型資料夾照 `VERSIONS2`（有 `trigram.sjt3` 的版本放表）；書面的「重播＝CLI」核對對一格 `--profile formal` 的 CLI，預期標記在有表時含 `+tri:`；舊的結果 JSON 沒有書面列時表上顯示「—」；套件 v1 的文字逐位元組不變（`test_table_appends_v2_after_unchanged_v1_text` 照舊通過），`test_bench.py` 加書面列的測試。`VERSIONS2` 加下一版的一列（書面帶 `+tri:`）。
-- **C5 發版**：照發版流程（跨版本基準套件 v2、保留集由 fresh verifier 跑一次，現役是 shard-1，n 300）。保留集書面那一行「改壞 > 改對且 p < 0.05」就不出貨，回報維護者。發版說明寫：書面設定改用 trigram（百科、正式文較常一次選對；口語打字的差別不大），安裝檔與記憶體變大的實際數字（安裝 zip 約多 44 MB：表單獨 zip 後 44.3 MB，Mac 量；記憶體：表改用唯讀映射之後，重播的 peak memory footprint 只比沒表多約 2 MB（`docs/contracts/trigram-mmap.md`、研究紀錄 2026-10-16「trigram-mmap」），活動監視器的「記憶體」欄看的是這個數字；max RSS 仍多約 152 MB（三輪中位數），那是可以隨時被系統丟掉的檔案頁）。推 tag 要維護者當下同意。
+- **C5 發版**：照發版流程（跨版本基準套件 v2、保留集由 fresh verifier 跑一次，現役是 shard-1；2026-10-29 起 `--set holdout` 只有口語半邊 n 150，新聞半邊另量私人檔，見 `docs/verification.md`）。保留集書面那一行「改壞 > 改對且 p < 0.05」就不出貨，回報維護者。發版說明寫：書面設定改用 trigram（百科、正式文較常一次選對；口語打字的差別不大），安裝檔與記憶體變大的實際數字（安裝 zip 約多 44 MB：表單獨 zip 後 44.3 MB，Mac 量；記憶體：表改用唯讀映射之後，重播的 peak memory footprint 只比沒表多約 2 MB（`docs/contracts/trigram-mmap.md`、研究紀錄 2026-10-16「trigram-mmap」），活動監視器的「記憶體」欄看的是這個數字；max RSS 仍多約 152 MB（三輪中位數），那是可以隨時被系統丟掉的檔案頁）。推 tag 要維護者當下同意。
 - 停止條件：有表時失敗、卻不在研究紀錄那份失敗清單上的測試；golden 重產時聊天的任何一個檔或行改變；Rust 與 Python 的書面 golden 不相同；書面重播列超過上限（p95 +1 ms、記憶體 +150 MB；記憶體自 trigram-mmap 起以 peak memory footprint 計，見第 0 節的註）；保留集書面顯著變差。
 - 預算：C2–C4 executor 1 次＋修正 1 次；C1、C5 由 main 做。
 

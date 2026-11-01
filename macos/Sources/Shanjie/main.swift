@@ -58,6 +58,11 @@ final class DefaultsPredictionStore: PredictionStore {
         get { UserDefaults.standard.object(forKey: "prediction") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "prediction") }
     }
+    /// browser-first-syllable section 3, key `browserFirstSyllable`; absent means on.
+    var browserFirstSyllable: Bool? {
+        get { UserDefaults.standard.object(forKey: "browserFirstSyllable") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "browserFirstSyllable") }
+    }
 }
 
 /// The "可省略韻母" switch (docs/contracts/v3-engine.md section 12.1), key `abbreviation` in the same domain; absent means off.
@@ -85,10 +90,29 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "english") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "english") }
     }
-    /// The 英文的顯示 choice (docs/contracts/zhen-inline.md section 2), key `englishInline`; absent means true.
-    var englishInline: Bool? {
-        get { UserDefaults.standard.object(forKey: "englishInline") as? Bool }
-        set { UserDefaults.standard.set(newValue, forKey: "englishInline") }
+    /// The 重打同一個位置算英文 choice (docs/contracts/zhen-revert.md section 3), key `englishOverwrite`; absent means true.
+    var englishOverwrite: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishOverwrite") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishOverwrite") }
+    }
+    /// The 快打時鍵序顛倒不當英文 choice (docs/contracts/zhen-reapply.md section 1.2), key `englishReversalGuard`; absent means true.
+    var englishReversalGuard: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishReversalGuard") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishReversalGuard") }
+    }
+    /// The 依按鍵順序判斷英文 choice (docs/contracts/zhen-keyorder.md section 3), key `englishKeyOrder`; absent means true (zhen-revert).
+    var englishKeyOrder: Bool? {
+        get { UserDefaults.standard.object(forKey: "englishKeyOrder") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "englishKeyOrder") }
+    }
+}
+
+/// The 模糊輸入 flags (docs/contracts/fuzzy-input.md section 2.2), key `fuzzyFlags` (an integer) in the same domain; absent means 0.
+@MainActor
+final class DefaultsFuzzyStore: FuzzyStore {
+    var fuzzyFlags: UInt32? {
+        get { (UserDefaults.standard.object(forKey: "fuzzyFlags") as? Int).flatMap { UInt32(exactly: $0) } }
+        set { UserDefaults.standard.set(newValue.map { Int($0) }, forKey: "fuzzyFlags") }
     }
 }
 
@@ -98,6 +122,33 @@ final class DefaultsAcgPackStore: AcgPackStore {
     var acgPack: Bool? {
         get { UserDefaults.standard.object(forKey: "acgPack") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "acgPack") }
+    }
+}
+
+/// The "經典台詞" switch (docs/contracts/quote-pack.md section 2), key `quotePack` in the same domain; absent means **off**.
+@MainActor
+final class DefaultsQuotePackStore: QuotePackStore {
+    var quotePack: Bool? {
+        get { UserDefaults.standard.object(forKey: "quotePack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "quotePack") }
+    }
+}
+
+/// The "資訊與 AI 詞" switch (docs/contracts/it-pack.md section 3.2), key `itPack` in the same domain; absent means on.
+@MainActor
+final class DefaultsItPackStore: ItPackStore {
+    var itPack: Bool? {
+        get { UserDefaults.standard.object(forKey: "itPack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "itPack") }
+    }
+}
+
+/// The 單按 Shift 切換中英 switch (docs/contracts/shift-toggle.md section 1), key `shiftToggle` in the same domain; absent means on.
+@MainActor
+final class DefaultsShiftToggleStore: ShiftToggleStore {
+    var shiftToggle: Bool? {
+        get { UserDefaults.standard.object(forKey: "shiftToggle") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "shiftToggle") }
     }
 }
 
@@ -197,14 +248,15 @@ func runServer() -> Never {
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
         isSecureInput: { IsSecureEventInputEnabled() }, layoutStore: DefaultsLayoutStore(),
-        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(),
+        learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(), quotePackStore: DefaultsQuotePackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
-        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(),
+        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), fuzzyStore: DefaultsFuzzyStore(),
         // 可省略韻母 does not ship in v0.4.0 (user, 2026-10-10); see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore())
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(),
+        shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)

@@ -19,15 +19,29 @@ public final class SettingsModel: ObservableObject {
 
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
+    /// 在瀏覽器裡，第一個字不顯示預測 (browser-first-syllable section 3), greyed while the prediction row is off.
+    @Published public private(set) var browserFirstSyllable = true
     @Published public private(set) var abbreviation = false
-    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the word list loaded and the standard layout, like
+    /// The 中英混打（實驗） toggle (zhen-mixed section 3.2), and whether it is enabled: the standard layout, like
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
-    /// The 英文的顯示 choice under it (zhen-inline section 2): true shows the English as it is typed. Enabled when the toggle is
-    /// enabled and on.
-    @Published public private(set) var englishInline = true
-    @Published public private(set) var englishInlineEnabled = false
+    /// The 模糊輸入 flags (fuzzy-input section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key slips, as
+    /// `shanjie_engine_set_fuzzy`. `fuzzyAdjacentEnabled` is false in the Eten layout, which greys the adjacent-key checkbox (the
+    /// value is kept).
+    @Published public private(set) var fuzzyFlags: UInt32 = 0
+    @Published public private(set) var fuzzyAdjacentEnabled = true
+    /// The 重打同一個位置算英文 choice under the 中英混打 toggle (zhen-revert section 3): a key over the symbol already in its column reverts
+    /// to the raw keys as English. Default true. Enabled when the toggle is enabled and on.
+    @Published public private(set) var englishOverwrite = true
+    @Published public private(set) var englishOverwriteEnabled = false
+    /// The 依按鍵順序判斷英文 choice (zhen-keyorder section 3, default true since zhen-revert): a key out of column order, and a tone key
+    /// that makes a syllable the lexicon lacks, revert to English. Enabled on the overwrite choice's condition.
+    @Published public private(set) var englishKeyOrder = true
+    @Published public private(set) var englishKeyOrderEnabled = false
+    /// The 快打時鍵序顛倒不當英文 choice (zhen-reapply section 1.2, default true): while on, a key out of column order is never English.
+    @Published public private(set) var englishReversalGuard = true
+    @Published public private(set) var englishReversalGuardEnabled = false
     /// 中英文之間自動加空格 (cjk-spacing section 2).
     @Published public private(set) var spacing = false
     /// The abbreviation toggle is shown only when the shell offers it (`Shell.showsAbbreviation`).
@@ -43,6 +57,11 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var rerankLevel = RerankLevel.standard
     @Published public private(set) var rerankLevelEnabled = false
     @Published public private(set) var acgPack = true
+    /// 經典台詞 (quote-pack contract section 2): off until chosen.
+    @Published public private(set) var quotePack = false
+    @Published public private(set) var itPack = true
+    /// 單按 Shift 切換中英 (shift-toggle section 1).
+    @Published public private(set) var shiftToggle = true
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
@@ -80,18 +99,28 @@ public final class SettingsModel: ObservableObject {
     func refreshSettings() {
         layout = shell.layout
         prediction = shell.predictionOn
+        browserFirstSyllable = shell.browserFirstSyllableOn
         abbreviation = shell.abbreviationOn
         spacing = shell.spacingOn
         english = shell.englishOn
         englishEnabled = shell.englishEnabled
-        englishInline = shell.englishInlineOn
-        englishInlineEnabled = shell.englishInlineEnabled
+        fuzzyFlags = shell.fuzzyFlags
+        fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
+        englishOverwrite = shell.englishOverwriteOn
+        englishOverwriteEnabled = shell.englishOverwriteEnabled
+        englishKeyOrder = shell.englishKeyOrderOn
+        englishKeyOrderEnabled = shell.englishKeyOrderEnabled
+        englishReversalGuard = shell.englishReversalGuardOn
+        englishReversalGuardEnabled = shell.englishReversalGuardEnabled
         demote = shell.demoteOn
         rerank = shell.rerankOn
         rerankEnabled = shell.rerankEnabled
         rerankLevel = shell.rerankLevel
         rerankLevelEnabled = shell.rerankLevelEnabled
         acgPack = shell.acgPackOn
+        quotePack = shell.quotePackOn
+        itPack = shell.itPackOn
+        shiftToggle = shell.shiftToggleOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
         profileMode = shell.profileMode
@@ -110,12 +139,23 @@ public final class SettingsModel: ObservableObject {
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }
     public func setAbbreviation(_ on: Bool) { shell.applyAbbreviation(on) }
     public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
+    public func setBrowserFirstSyllable(_ on: Bool) { shell.setBrowserFirstSyllable(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
-    public func setEnglishInline(_ on: Bool) { shell.applyEnglishInline(on) }
+    /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips).
+    public func setFuzzy(bit: Int, _ on: Bool) {
+        precondition((0..<5).contains(bit))
+        shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
+    }
+    public func setEnglishOverwrite(_ on: Bool) { shell.applyEnglishOverwrite(on) }
+    public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
+    public func setEnglishReversalGuard(_ on: Bool) { shell.applyEnglishReversalGuard(on) }
     public func setDemote(_ on: Bool) { shell.applyDemote(on) }
     public func setRerank(_ on: Bool) { shell.applyRerank(on) }
     public func setRerankLevel(_ level: RerankLevel) { shell.applyRerankLevel(level) }
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
+    public func setQuotePack(_ on: Bool) { shell.setQuotePack(on) }
+    public func setItPack(_ on: Bool) { shell.setItPack(on) }
+    public func setShiftToggle(_ on: Bool) { shell.applyShiftToggle(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
         refreshExternal()  // not read on the change notification
@@ -127,6 +167,19 @@ public final class SettingsModel: ObservableObject {
     /// The same confirmation window as the menu's.
     public func clear() {
         shell.confirmAndClear { [weak self] in self?.refreshExternal() }  // the "cannot save" row may change
+    }
+}
+
+/// The settings window's height (docs/contracts/settings-fixed-size.md): one fixed comfortable size, clamped into the screen so a
+/// small display never gets a window taller than its usable area.
+public enum SettingsLayout {
+    /// Frame height (content plus title bar) in points, a starting value for the maintainer's device rounds (contract budget: 3), not
+    /// measured against a reference. Measured 2026-10-30 on the maintainer's Mac: the built-in display's usable height is 1074.5 pt
+    /// (1710 x 1112) and the external one's 1409 pt, so 620 leaves room above and below on both.
+    public static let preferredHeight: CGFloat = 620
+
+    public static func frameHeight(visibleHeight: CGFloat) -> CGFloat {
+        min(preferredHeight, visibleHeight)
     }
 }
 

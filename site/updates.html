@@ -71,6 +71,37 @@
 <p class="sub">每週一段，新的在上面。標「已發佈」的可以從 Releases 或 Homebrew 更新；「已合併」的已進主線，不在 App 裡或還沒出新版本。</p>
 
 <section>
+  <h2>2026-10-30～10-31</h2>
+
+  <article>
+    <h3>Crest 與 Aside 加進瀏覽器清單 <span class="tag done">已合併</span></h3>
+    <p>使用者回報 Crest、Aside 裡第一個音節的預測列也跑到左上角（PR <a href="https://github.com/Nanako0129/shanjie/pull/341">#341</a>，2026-10-31）：兩個 App 加進瀏覽器清單，套用和 Chrome 相同的第一個音節規則，隨下一版出貨。</p>
+  </article>
+
+  <article>
+    <h3>v0.6.1：中英混打接回、單按 Shift、經典台詞詞包 <span class="tag done">已發佈</span></h3>
+    <p>2026-10-31 發佈（說明：<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/releases/v0.6.1.md">v0.6.1</a>）。中英混打打得出 <code>ok</code>、<code>gta6</code>：打的鍵不可能是注音時直接變回原本打的英文，英文留在組字區；新開關「快打時鍵序顛倒不當英文」（預設開）讓快打時同一個字的注音鍵先後顛倒照注音處理，不會變成英文；「依按鍵順序判斷英文」改成預設開（PR <a href="https://github.com/Nanako0129/shanjie/pull/336">#336</a>）。單按一下 Shift 在中文和英文之間切換，游標上方短暫顯示「英」或「中」，每個 App 各自記；換 App 或同一個 App 停打 30 秒以上之後，開始打字的第一個鍵也會提示一次（預設開，設定可關，PR <a href="https://github.com/Nanako0129/shanjie/pull/336">#336</a>）。</p>
+    <p>經典台詞詞包（預設關，設定 → 選字 →「詞包」）：208 列電影台詞（電影原句和網友常打的說法都收），每列對照過文字出處（PR <a href="https://github.com/Nanako0129/shanjie/pull/272">#272</a>）。在 Chrome、Edge 等瀏覽器裡，組字區只有一個字時不顯示預測列，因為 Google 文件會把它擺到視窗左上角（預設開，設定可關，PR <a href="https://github.com/Nanako0129/shanjie/pull/334">#334</a>）。設定視窗固定 620 pt 高，螢幕放不下時縮到可見範圍、內容捲動（PR <a href="https://github.com/Nanako0129/shanjie/pull/337">#337</a>）。</p>
+    <p>跨版本基準測試（v0.6.0 → v0.6.1，出貨設定）：十個集合在聊天與書面兩種設定下，每一句的選字都和 v0.6.0 相同；保留集口語半邊 124 → 124、新聞半邊 128 → 128。已知問題：Google 文件裡，組字區空著或只有一個字時，「英／中」的提示可能出現在視窗左上角。</p>
+  </article>
+
+</section>
+
+<section>
+  <h2>2026-10-23～10-29</h2>
+
+  <article>
+    <h3>v0.6.0：新模型、資訊與 AI 詞包、模糊輸入 <span class="tag done">已發佈</span></h3>
+    <p>2026-10-29 發佈（說明：<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/releases/v0.6.0.md">v0.6.0</a>）。換上一整組新模型：通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K；連文分成兩張，書面 SJ-CX-2-7.7M、聊天 SJ-CX-2-950K（聊天設定第一次用到前兩個詞）（PR <a href="https://github.com/Nanako0129/shanjie/pull/324">#324</a>）。錯字回報（出貨設定，80 句）：聊天 33 → 70 句、書面 29 → 61 句。語意校正不會再把你手動加進詞庫的詞換掉，例如書面設定的「米雅歌」不再被改成「米亞哥」。</p>
+    <p>詞庫與詞包：資訊與 AI 詞包（預設開）1,016 個詞，例如「圖像生成」（PR <a href="https://github.com/Nanako0129/shanjie/pull/275">#275</a>），開關搬到設定 → 選字 →「詞包」；動漫詞包更新到 2026-10-22 的來源，共 44,552 詞（PR <a href="https://github.com/Nanako0129/shanjie/pull/274">#274</a>）；網路用語 507 條常用說法與第二輪 910 個詞直接收進詞庫（PR <a href="https://github.com/Nanako0129/shanjie/pull/281">#281</a>、<a href="https://github.com/Nanako0129/shanjie/pull/303">#303</a>）；補了 119 個實況主、YouTuber、節目與頻道名、店家餐廳飯店企業 225 個、台灣以外的中文圈人名 14 個（PR <a href="https://github.com/Nanako0129/shanjie/pull/295">#295</a>、<a href="https://github.com/Nanako0129/shanjie/pull/302">#302</a>、<a href="https://github.com/Nanako0129/shanjie/pull/305">#305</a>）。</p>
+    <p>打字的改進：模糊輸入（設定 → 選字，預設全關）有 ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ 四組模糊音與「鄰鍵打錯」，鄰鍵只適用標準排列（PR <a href="https://github.com/Nanako0129/shanjie/pull/273">#273</a>）；只有輕聲讀音的詞打成本調也打得出來（PR <a href="https://github.com/Nanako0129/shanjie/pull/309">#309</a>）；ㄐㄧㄝˊ ㄓㄚ 打得出「結紮」（PR <a href="https://github.com/Nanako0129/shanjie/pull/269">#269</a>）；組字區最多留 128 個單位才把前段送出，51 字的長句整句留在組字區（PR <a href="https://github.com/Nanako0129/shanjie/pull/268">#268</a>）；聊天設定的保守、積極兩檔也用上常談與讀音項（PR <a href="https://github.com/Nanako0129/shanjie/pull/271">#271</a>）；輸入法讀取同一行、游標前最多 64 個字當前文，會意仍只用最後 2 個字（PR <a href="https://github.com/Nanako0129/shanjie/pull/294">#294</a>）；依按鍵順序判斷英文（預設關，快打時鍵序顛倒的情況還沒量過，PR <a href="https://github.com/Nanako0129/shanjie/pull/311">#311</a>）；密碼框的說明改成描述用途（PR <a href="https://github.com/Nanako0129/shanjie/pull/267">#267</a>）。</p>
+    <p>跨版本基準測試（v0.5.0 → v0.6.0，出貨設定）：聊天的 Discord 聊天評測集（4,958 句）87.90% → 93.69%（改對 336、改壞 49）、cvtune（3,791 句）91.93% → 93.12%（95／50）、dev302 89.07% → 92.72%（14／3，p 0.013）；書面的 Discord 聊天評測集 86.06% → 92.54%（396／75）、cvtune 91.80% → 92.96%（104／60）、dev302 87.75% → 89.74%（15／9，p 0.31，不顯著）。打字測驗（76 句）：聊天 72 → 74（2／0）、書面 69 → 74（5／0）。維基段落（wikitune）兩種設定各少約 24 句（聊天 77.26% → 76.41%，80／104，p 0.09；書面 80.16% → 79.34%，78／101，p 0.10，都不顯著）。保留集（發版前量一次，兩個半邊是新換的集合）：口語半邊（聊天，150 句）115 → 124（10／1，p 0.012）、新聞半邊（書面，150 句）125 → 128（3／0，p 0.25，不顯著）。速度與記憶體（同一場輪流跑，開跑時 load avg 5.8，不是閒置窗，只能看兩版的差距）：每鍵 p95 2.06 → 2.23 毫秒，引擎載入 892 → 945 毫秒，記憶體 441 → 480 MB，語意校正 p95 8.3 → 8.6 ms。各集合的完整數字在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">docs/benchmark.md</a>。</p>
+    <p>已知問題：資訊與 AI 詞的檢查集聊天 46 → 36、書面 39 → 27；開著 ㄓ／ㄗ 時「ㄗ ㄉㄠˋ ㄌㄜ˙」仍是「資到了」；聊天設定「長歪了」仍選成「掌歪了」（書面設定是對的），原因是讀音通道項對「長」讀ㄓㄤˇ扣了分，下一版修。更新後如果某個 App 打不出字，請把那個 App 完全結束（⌘Q）再打開。</p>
+  </article>
+
+</section>
+
+<section>
   <h2>2026-10-19～10-22</h2>
 
   <article>
@@ -157,7 +188,7 @@
 
 <footer>
   <span>善解 shanjie</span>
-  <span>最後更新：2026-10-22</span>
+  <span>最後更新：2026-11-01</span>
 </footer>
 
 </main>

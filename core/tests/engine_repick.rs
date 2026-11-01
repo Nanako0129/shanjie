@@ -87,15 +87,18 @@ fn commit(e: &mut Engine) -> String {
     e.key(k(KeyKind::Enter)).unwrap().commit
 }
 
-/// Acceptance 1, the reported case in its first form. Since the merge with main (section 10) the free decode also gives
-/// 版控 here, so this no longer tells the freeze from its absence; `freeze_row_133_six_steps` carries section 3 item 1
-/// (it fails without `freeze_outside`).
+/// Acceptance 1, the reported case in its first form. The reported 板控 (pick 版) no longer happens: since the merge with
+/// main (section 10) the free decode also gives 版控, and the 通語 SJ-LM-7-9.7M files read it that way with or without the left
+/// text 要進. The mechanism is the same the other way round: 版控 shown, 板 picked, 控 stays. So this no longer tells the
+/// freeze from its absence (checked: it passes with `freeze_outside` emptied); `freeze_row_133_six_steps` carries section 3
+/// item 1 (it fails without `freeze_outside`). Every example below that was 板控 and 版 is 版控 and 板 for the same reason;
+/// "gave …" remarks that name a commit are the strings measured in the old direction.
 #[test]
 fn freeze_reported_case_banhkong() {
     let mut e = engine();
-    assert_eq!(shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進"), "板控");
-    let o = repick(&mut e, 1, "版");
-    assert_eq!(o.preedit, "版控");
+    assert_eq!(shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進"), "版控");
+    let o = repick(&mut e, 1, "板");
+    assert_eq!(o.preedit, "板控");
 }
 
 /// Typo row 133 (docs/contracts/repick-freeze.md section 0 and the 2026-10-17 merge note): 可以做第六步 shows as
@@ -105,19 +108,19 @@ fn freeze_reported_case_banhkong() {
 #[test]
 fn freeze_row_133_six_steps() {
     const ROW: &str = "ㄎㄜˇ ㄧˇ ㄗㄨㄛˋ ㄉㄧˋ ㄌㄧㄡˋ ㄅㄨˋ";
-    // Measured on the production lexicon and bigram model: formal and chat both show 可以做第六部; without the freeze the
-    // pick of 六步 gave 可以作地六步 (formal).
+    // Measured on the production lexicon and the 通語 SJ-LM-7-9.7M model files: formal shows 可以作第六部, chat 可以做第六部 (both
+    // showed 可以做第六部 before them); the freeze keeps the left part as shown. The test fails with `freeze_outside` emptied.
     // Prediction on, the window lists the row's copy first (predict-down B.3.1, section 12); off, the lexicon entry.
-    for (prof, pred) in [(Profile::Formal, true), (Profile::Chat, true), (Profile::Formal, false), (Profile::Chat, false)] {
+    for (prof, pred, free) in [(Profile::Formal, true, "可以作第六部"), (Profile::Chat, true, "可以做第六部"), (Profile::Formal, false, "可以作第六部"), (Profile::Chat, false, "可以做第六部")] {
         for pick in ["六步", "步"] {
             let mut e = engine();
             e.set_profile(prof).unwrap();
             e.set_prediction(pred).unwrap();
-            assert_eq!(shown(&mut e, ROW, ""), "可以做第六部");
+            assert_eq!(shown(&mut e, ROW, ""), free);
             // The cursor is at the end: the window lists the words that end there.
             let o = e.key(k(KeyKind::Space)).unwrap();
             highlight(&mut e, o, pick);
-            assert_eq!(e.key(k(KeyKind::Enter)).unwrap().preedit, "可以做第六步", "pick {pick}, prediction {pred}");
+            assert_eq!(e.key(k(KeyKind::Enter)).unwrap().preedit, free.replace('部', "步"), "pick {pick}, prediction {pred}");
         }
     }
 }
@@ -128,16 +131,16 @@ fn records(e: &Engine) -> Vec<(String, String, String)> {
 }
 
 /// Acceptance 5 (with 1): the commit teaches the re-picked span only; the frozen word teaches nothing. New-word B
-/// (newword-b.md §2.2, merged 2026-10-17) also learns the run 版控 under its own `#` key: a run with at least one
+/// (newword-b.md §2.2, merged 2026-10-17) also learns the run 板控 under its own `#` key: a run with at least one
 /// re-picked character, including the characters committed with it, by design; that record is not an S4 teach.
 #[test]
 fn freeze_teaches_only_the_picked_span() {
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    repick(&mut e, 1, "版");
-    assert_eq!(commit(&mut e), "版控");
+    repick(&mut e, 1, "板");
+    assert_eq!(commit(&mut e), "板控");
     let r: Vec<_> = records(&e).into_iter().filter(|(context, _, _)| context != "#").collect();
-    assert!(r.iter().all(|(_, reading, word)| reading == "ㄅㄢˇ" && word == "版"), "{r:?}");
+    assert!(r.iter().all(|(_, reading, word)| reading == "ㄅㄢˇ" && word == "板"), "{r:?}");
     assert!(!r.is_empty());
 }
 
@@ -153,12 +156,16 @@ fn freeze_partial_overlap_keeps_the_second_character() {
     }
 }
 
-/// Acceptance 3: a pick in the middle leaves the words on both sides as they were.
+/// Acceptance 3: a pick in the middle leaves the words on both sides as they were. The free decode of 它是由於在野 changes
+/// 它 to 他 once 是 is pinned to 事, and 於 to 于 once 由 is pinned, so these two picks fail without the freeze (checked with
+/// `freeze_outside` emptied). The pick of 魷魚 changes neither side, as before the 通語 SJ-LM-7-9.7M files.
 #[test]
 fn freeze_words_outside_stay() {
-    let mut e = engine();
-    assert_eq!(shown(&mut e, "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", ""), "在也由於在野");
-    assert_eq!(repick(&mut e, 4, "魷魚").preedit, "在也魷魚在野");
+    for (end, word, want) in [(2, "事", "它事由於在野"), (3, "由", "它是由於在野"), (4, "魷魚", "它是魷魚在野")] {
+        let mut e = engine();
+        assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", ""), "它是由於在野");
+        assert_eq!(repick(&mut e, end, word).preedit, want, "pick {word}");
+    }
 }
 
 /// Acceptance 4: overlay entries whose character count differs from their syllable count (the overlay has no such
@@ -224,48 +231,54 @@ fn insert_at(e: &mut Engine, at: usize, syl: &str) -> String {
 #[test]
 fn insert_after_repick_merges_with_the_frozen_neighbour() {
     let mut e = engine();
-    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", ""), "他是");
+    assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", ""), "它是");
     assert_eq!(repick(&mut e, 1, "她").preedit, "她是");
     assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄝˋ"), "她世界");
 }
 
-/// 板控 re-picked to 版控; ㄐㄧㄢ does not form a word with 控, so 控 stays.
+/// 版控 re-picked to 板控; ㄐㄧㄢ does not form a word with 控, so 控 stays.
 #[test]
 fn insert_that_does_not_merge_keeps_the_frozen_word() {
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
-    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄢ"), "版控間");
+    assert_eq!(repick(&mut e, 1, "板").preedit, "板控");
+    assert_eq!(insert_at(&mut e, 2, "ㄐㄧㄢ"), "板控間");
 }
 
-/// 在也由於在野, the last word re-picked to 再也: frozen 在, 也 and 由於 (3-5) on the left of the pick.
-/// Inserting at 2 (between 也 and 由於): ㄕㄡˇ merges with 也 only (野手): 由於 stays. ㄐㄧㄝˋ merges with 由 of the
-/// two-syllable 由於 (the free decode reads 藉由), not with all of it: 由於 stays whole and the gap decodes as 借.
+/// 它是由於在野, the last word re-picked to 再也: frozen 它, 是 and 由於 (3-4) on the left of the pick. (The test used 在也由於在野
+/// until the 通語 SJ-LM-7-9.7M files, which read ㄗㄞˋ ㄧㄝˇ as the one word 在野, so the left no longer held two separate words.)
+/// Inserting at 2 (between 是 and 由於): ㄈㄡˇ merges with 是 only (是否): 它 and 由於 stay (the free decode reads 他是否).
+/// ㄌㄧˇ merges with 由 of the two-syllable 由於 (the free decode reads 理由於), not with all of it: 由於 stays whole and the
+/// gap decodes as 裡. The premises of both are asserted on the free decode first.
 #[test]
 fn insert_with_a_frozen_word_on_each_side() {
-    let base = "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ";
+    let base = "ㄊㄚ ㄕˋ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ";
+    let with = |syl: &str| format!("ㄊㄚ ㄕˋ {syl} ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ");
+    assert_eq!(shown(&mut engine(), base, ""), "它是由於在野");
+    assert_eq!(shown(&mut engine(), &with("ㄈㄡˇ"), ""), "他是否由於在野", "free decode: 是否 merges and 它 changes");
+    assert_eq!(shown(&mut engine(), &with("ㄌㄧˇ"), ""), "他是理由於在野", "free decode: 理由 merges, 是 does not");
     let run = |syl: &str| {
         let mut e = engine();
-        assert_eq!(shown(&mut e, base, ""), "在也由於在野");
-        assert_eq!(repick(&mut e, 6, "再也").preedit, "在也由於再也");
+        shown(&mut e, base, "");
+        assert_eq!(repick(&mut e, 6, "再也").preedit, "它是由於再也");
         insert_at(&mut e, 2, syl)
     };
-    assert_eq!(run("ㄕㄡˇ"), "在野手由於再也", "left merges, right word unchanged");
-    assert_eq!(run("ㄐㄧㄝˋ"), "在也借由於再也", "partial merge of 由於 keeps it whole");
-    assert_eq!(run("ㄋㄧㄢˊ"), "在也年由於再也", "no merge on either side");
+    assert_eq!(run("ㄈㄡˇ"), "它是否由於再也", "left merges, the other left word and the right word unchanged");
+    assert_eq!(run("ㄌㄧˇ"), "它是裡由於再也", "partial merge of 由於 keeps it whole");
+    assert_eq!(run("ㄋㄧㄢˊ"), "它是年由於再也", "no merge on either side");
 }
 
 const FORGET: Key = Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_COMMAND };
 
-/// Sections 6.1 and 9, measured: 要進 + ㄅㄢˇ ㄎㄨㄥˋ re-picked to 版控 (the cursor stays after 版); ㄐㄧㄢ typed there
+/// Sections 6.1 and 9, measured: 要進 + ㄅㄢˇ ㄎㄨㄥˋ re-picked to 板控 (the cursor stays after 板); ㄐㄧㄢ typed there
 /// merges with 控 into 監控, which is frozen in its place; Backspace deletes 監 and keeps 控 (d36a7c0 gave 版空).
 #[test]
 fn backspace_after_a_merge_fixes_the_word_again() {
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
-    assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "版監控");
-    assert_eq!(e.key(k(KeyKind::Backspace)).unwrap().preedit, "版控");
+    assert_eq!(repick(&mut e, 1, "板").preedit, "板控");
+    assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "板監控");
+    assert_eq!(e.key(k(KeyKind::Backspace)).unwrap().preedit, "板控");
 }
 
 /// Section 7.2, measured: ⌘⌫ on a word with no record forgets nothing, so the frozen words stay (d36a7c0 gave 版空).
@@ -273,17 +286,17 @@ fn backspace_after_a_merge_fixes_the_word_again() {
 fn forget_without_records_keeps_the_frozen_words() {
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    assert_eq!(repick(&mut e, 1, "板").preedit, "板控");
     e.key(k(KeyKind::End)).unwrap();
     let o = e.key(k(KeyKind::Space)).unwrap();
     highlight(&mut e, o, "控");
     let before = e.learner().records().len();
     let o = e.key(FORGET).unwrap();
     assert_eq!(e.learner().records().len(), before);
-    assert_eq!(o.preedit, "版控");
+    assert_eq!(o.preedit, "板控");
 }
 
-/// Prediction pick of 控制 after typing ㄎㄨㄥˋ and ㄓ with no left text: one record that does not touch 要進 + 版控.
+/// Prediction pick of 控制 after typing ㄎㄨㄥˋ and ㄓ with no left text: one record that does not touch 要進 + 板控.
 fn teach_kongzhi(e: &mut Engine) {
     shown(e, "ㄎㄨㄥˋ", "");
     e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
@@ -301,7 +314,7 @@ fn prediction_row_forget_keeps_the_frozen_words() {
     let mut e = engine();
     teach_kongzhi(&mut e);
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
+    assert_eq!(repick(&mut e, 1, "板").preedit, "板控");
     e.key(k(KeyKind::End)).unwrap();
     // The row shows from the first key of the next syllable (V3).
     e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
@@ -309,7 +322,7 @@ fn prediction_row_forget_keeps_the_frozen_words() {
     assert_eq!(o.candidates[o.selected.unwrap()], "控制");
     let o = e.key(FORGET).unwrap();
     assert_eq!(e.learner().records().len(), 0);
-    assert!(o.preedit.starts_with("版控"), "{}", o.preedit);
+    assert!(o.preedit.starts_with("板控"), "{}", o.preedit);
 }
 
 /// Section 7.3: inserting between the syllables of a frozen two-syllable word keeps both characters (they are not
@@ -317,8 +330,8 @@ fn prediction_row_forget_keeps_the_frozen_words() {
 #[test]
 fn insert_inside_a_frozen_word_keeps_both_halves() {
     let mut e = engine();
-    assert_eq!(shown(&mut e, "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", ""), "在也由於在野");
-    assert_eq!(repick(&mut e, 6, "再也").preedit, "再也由於再也".replacen("再也", "在也", 1));
+    assert_eq!(shown(&mut e, "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", ""), "在野由於在野");
+    assert_eq!(repick(&mut e, 6, "再也").preedit, "在野由於再也");
     for syl in ["ㄋㄧㄢˊ", "ㄕㄡˇ", "ㄐㄧㄝˋ"] {
         let mut e = engine();
         shown(&mut e, "ㄗㄞˋ ㄧㄝˇ ㄧㄡˊ ㄩˊ ㄗㄞˋ ㄧㄝˇ", "");
@@ -327,7 +340,7 @@ fn insert_inside_a_frozen_word_keeps_both_halves() {
         let ch: Vec<char> = got.chars().collect();
         assert_eq!((ch[2], ch[4]), ('由', '於'), "{got}");
     }
-    // measured: 在也由年於再也, 在也由首於再也, 在也由介於再也
+    // measured: 在野由年於再也, 在野由首於再也, 在野由介於再也
 }
 
 /// Section 9: after a merge (監控 frozen), a candidate pick over 監 freezes 控 again, and a prediction pick after the
@@ -337,20 +350,20 @@ fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
     // candidate pick
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    repick(&mut e, 1, "版");
+    repick(&mut e, 1, "板");
     let merged = type_syls(&mut e, "ㄐㄧㄢ").preedit;
     let o = e.key(k(KeyKind::Space)).unwrap(); // candidates for the syllable before the cursor (the trigger)
     let first = o.candidates[0].clone();
     let o = e.key(k(KeyKind::Enter)).unwrap();
-    assert_eq!((merged.as_str(), first.as_str(), o.preedit.as_str()), ("版監控", "間", "版間控"));
+    assert_eq!((merged.as_str(), first.as_str(), o.preedit.as_str()), ("板監控", "間", "板間控"));
     // The pick froze 控 anew (section 1).
     let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
-    assert_eq!(o.preedit, "版控");
+    assert_eq!(o.preedit, "板控");
     // prediction pick
     let mut e = engine();
     shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-    repick(&mut e, 1, "版");
+    repick(&mut e, 1, "板");
     type_syls(&mut e, "ㄐㄧㄢ");
     e.key(k(KeyKind::End)).unwrap();
     let o = e.key(Key::ch(L.key_of_symbol('ㄓ').unwrap(), 0)).unwrap();
@@ -359,7 +372,7 @@ fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
     {
         e.key(k(KeyKind::Tab)).unwrap();
         let o = e.key(k(KeyKind::Enter)).unwrap();
-        assert_eq!(o.preedit, "版監控中");
+        assert_eq!(o.preedit, "板監控中");
         e.key(k(KeyKind::Home)).unwrap();
         e.key(k(KeyKind::Right)).unwrap();
         e.key(k(KeyKind::Right)).unwrap();
@@ -367,7 +380,7 @@ fn a_candidate_pick_clears_and_a_prediction_pick_keeps_left_records() {
         // gave 版空中).
         let o = e.key(k(KeyKind::Backspace)).unwrap();
         assert!(o.handled);
-        assert_eq!(o.preedit, "版控中");
+        assert_eq!(o.preedit, "板控中");
     }
 }
 
@@ -379,13 +392,13 @@ fn an_insert_inside_a_merged_word_redecodes_it() {
     assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ ㄐㄧㄝˋ", ""), "他世界");
     assert_eq!(repick(&mut e, 1, "她").preedit, "她世界");
     assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ").preedit, "她全世界");
-    assert_eq!(insert_at(&mut e, 3, "ㄉㄜ˙"), "她詮釋的界");
+    assert_eq!(insert_at(&mut e, 3, "ㄉㄜ˙"), "她詮釋的解");
     e.key(k(KeyKind::Home)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
-    assert_eq!(o.preedit, "她釋的界");
+    assert_eq!(o.preedit, "她釋的解");
 }
 
 
@@ -406,7 +419,7 @@ fn an_insert_inside_a_merged_word_decodes_freely() {
 
 /// Section 9: the candidate window's ⌘⌫ frees frozen words only for an entry in effect over the span. 空 is taught for
 /// ㄎㄨㄥˋ after 遙遠 (a one-character word has the exact-context level only and is learned only under a full
-/// two-character context, s4-learning section 12 and rule 7: after 遙 alone nothing is learned), so it is not in effect for 要進 + 版監控: forgetting it (records 1 -> 0) changes nothing,
+/// two-character context, s4-learning section 12 and rule 7: after 遙 alone nothing is learned), so it is not in effect for 要進 + 板監控: forgetting it (records 1 -> 0) changes nothing,
 /// and deleting 監 still keeps 控 (fa0ae06 gave 版空).
 #[test]
 fn candidate_forget_of_an_entry_not_in_effect_keeps_the_frozen_words() {
@@ -415,22 +428,22 @@ fn candidate_forget_of_an_entry_not_in_effect_keeps_the_frozen_words() {
     assert_eq!(repick(&mut e, 1, "空").preedit, "空");
     assert_eq!(commit(&mut e), "空");
     assert_eq!(e.learner().records().len(), 1);
-    assert_eq!(shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進"), "板控");
-    assert_eq!(repick(&mut e, 1, "版").preedit, "版控");
-    assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "版監控");
+    assert_eq!(shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進"), "版控");
+    assert_eq!(repick(&mut e, 1, "板").preedit, "板控");
+    assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "板監控");
     e.key(k(KeyKind::End)).unwrap();
     let o = e.key(k(KeyKind::Space)).unwrap();
     highlight(&mut e, o, "空");
     let o = e.key(FORGET).unwrap();
     assert_eq!(e.learner().records().len(), 0);
-    assert_eq!(o.preedit, "版監控");
+    assert_eq!(o.preedit, "板監控");
     e.key(k(KeyKind::Esc)).unwrap();
     e.key(k(KeyKind::Home)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     e.key(k(KeyKind::Right)).unwrap();
     let o = e.key(k(KeyKind::Backspace)).unwrap();
     assert!(o.handled);
-    assert_eq!(o.preedit, "版控");
+    assert_eq!(o.preedit, "板控");
 }
 
 /// Section 9: 她 is taught for ㄊㄚ after 我們 (records: that one; a one-character word is learned only under a full
@@ -461,22 +474,22 @@ fn backspace(e: &mut Engine) -> String {
 }
 
 /// Review finding 1 (fa0ae06), as section 11 changes it: after the merge 監控 the words are not frozen again, so the extra
-/// syllable typed between them stays free and deleting it decodes 監 and 控 afresh (no longer 版監控). Each Backspace
+/// syllable typed between them stays free and deleting it decodes 監 and 控 afresh (no longer 板監控). Each Backspace
 /// keeps the other syllables of the displayed word it deletes from (監控 shown: 控 stays when 監 goes). Measured: the
-/// first Backspace gives 版監控 for 督 and 視 and re-decodes 版間空 for 有; the second gives 版控, 版控, and 版空 (the
-/// decoder reads 版間空 minus 間 as 版空; the frozen merge of fa0ae06 gave 版控 here).
+/// first Backspace gives 板監控 for 督 and 視 and re-decodes 板間空 for 有; the second gives 板控, 板控, and 板空 (the
+/// decoder reads 板間空 minus 間 as 板空; the frozen merge of fa0ae06 gave 版控 here, in the old direction).
 #[test]
 fn typing_on_after_a_merge_then_deleting_back_follows_the_display() {
     let mut got = Vec::new();
     for syl in ["ㄉㄨ", "ㄕˋ", "ㄧㄡˇ"] {
         let mut e = engine();
         shown(&mut e, "ㄅㄢˇ ㄎㄨㄥˋ", "要進");
-        repick(&mut e, 1, "版");
-        assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "版監控");
+        repick(&mut e, 1, "板");
+        assert_eq!(type_syls(&mut e, "ㄐㄧㄢ").preedit, "板監控");
         let typed = type_syls(&mut e, syl).preedit;
         got.push((typed, backspace(&mut e), backspace(&mut e)));
     }
-    let want = [("版監督控", "版監控", "版控"), ("版監視控", "版監控", "版控"), ("版間有空", "版間空", "版空")];
+    let want = [("板監督控", "板監控", "板控"), ("板監視控", "板監控", "板控"), ("板間有空", "板間空", "板空")];
     assert_eq!(got, want.map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string())));
 }
 
@@ -484,10 +497,10 @@ fn typing_on_after_a_merge_then_deleting_back_follows_the_display() {
 /// 版空 and 版間).
 #[test]
 fn deleting_inside_a_frozen_word_keeps_the_rest() {
-    for (del, want) in [(2, "版控"), (3, "版監")] {
+    for (del, want) in [(2, "板控"), (3, "板監")] {
         let mut e = engine();
-        assert_eq!(shown(&mut e, "ㄅㄢˇ ㄐㄧㄢ ㄎㄨㄥˋ", "要進"), "板監控");
-        assert_eq!(repick(&mut e, 1, "版").preedit, "版監控");
+        assert_eq!(shown(&mut e, "ㄅㄢˇ ㄐㄧㄢ ㄎㄨㄥˋ", "要進"), "版監控");
+        assert_eq!(repick(&mut e, 1, "板").preedit, "板監控");
         e.key(k(KeyKind::Home)).unwrap();
         for _ in 0..del {
             e.key(k(KeyKind::Right)).unwrap();
@@ -515,14 +528,14 @@ fn backspace_in_a_merged_or_frozen_word_like_apple() {
 
 
 
-/// Section 11, Apple Zhuyin case 1 (measured with imeshot 2026-10-17): 他是, first character re-picked to 她, cursor to the
+/// Section 11, Apple Zhuyin case 1 (measured with imeshot 2026-10-17; formal now shows 它是 where Apple and chat show 他是): 他是, first character re-picked to 她, cursor to the
 /// end, ㄐㄧˋ then ㄓㄜˇ gives 她是繼 and then 她是記者. With the merge re-frozen on insertion (revision four) it was 她世紀者.
 #[test]
 fn apple_case_1_typing_on_after_a_repick_rewrites_the_neighbour() {
-    for (name, prof) in [("formal", Profile::Formal), ("chat", Profile::Chat)] {
+    for (name, prof, free) in [("formal", Profile::Formal, "它是"), ("chat", Profile::Chat, "他是")] {
         let mut e = engine();
         e.set_profile(prof).unwrap();
-        assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", ""), "他是");
+        assert_eq!(shown(&mut e, "ㄊㄚ ㄕˋ", ""), free, "{name}");
         assert_eq!(repick(&mut e, 1, "她").preedit, "她是");
         e.key(k(KeyKind::End)).unwrap();
         assert_eq!(type_syls(&mut e, "ㄐㄧˋ").preedit, "她世紀");
@@ -611,7 +624,7 @@ fn section_15_a_repick_freeze_is_not_released_by_a_new_syllable() {
 
 /// Section 11: a prediction start may lie inside a frozen word (only a word the user chose keeps its inside). 國家 is
 /// learned for ㄍㄨㄛˊ ㄐㄧㄚ after 是美; in 他是美國, re-picked at 是 (美國 frozen), the first key of the next syllable lists
-/// 國家 first, from the start inside 美國 (picking it would take the frozen word apart). Measured: row [國家, 美國籍, 美國郡, ...].
+/// 國家 first, from the start inside 美國 (picking it would take the frozen word apart). Measured: row [國家, 美國籍, 美國軍, ...].
 #[test]
 fn prediction_row_starts_inside_a_frozen_word() {
     let mut e = engine();
@@ -626,5 +639,5 @@ fn prediction_row_starts_inside_a_frozen_word() {
     repick(&mut e, 2, "是");
     e.key(k(KeyKind::End)).unwrap();
     let o = e.key(Key::ch(L.key_of_symbol('ㄐ').unwrap(), 0)).unwrap();
-    assert_eq!(o.candidates[..3], ["國家", "美國籍", "美國郡"]);
+    assert_eq!(o.candidates[..3], ["國家", "美國籍", "美國軍"]);
 }

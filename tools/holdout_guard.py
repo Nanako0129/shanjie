@@ -18,6 +18,8 @@ build_counts_text.lines, shared with the counting scripts and s7a prep.py.
     A BOM is removed from the first line only. Prints, per source, `source<TAB>units<TAB>hit units`, then `rows<TAB>path:line` for
     every matched pattern row. Never prints sentence or row text. Errors carry only path, line number and field count.
   The counting scripts take the same matcher through `--holdout-guard [ROWS...]` (default off).
+  --no-trad-tw-phrases (report; same name in build_counts.py and build_counts_text.py): scan the text as the counters count it with that flag, Traditional
+      sentences without the OpenCC TWPhrases pass (SJ-LM-7 contract 2.2); the patterns then also include the sentence converted that way. Default off.
 """
 import argparse
 import collections
@@ -81,7 +83,7 @@ def default_rows():
     return sorted(glob.glob(os.path.join(ROOT, "eval", "holdout", "**", "*.txt"), recursive=True))
 
 
-def build_matcher(paths, conv):
+def build_matcher(paths, conv, trad_tw_phrases=True):
     """-> (Matcher, {pattern: ["path:line", ...]}, loaded rows, skipped short rows). conv = build_counts.load_conv() tuple.
     Patterns are each sentence and its converted form, folded. Raises GuardError on a bad row or when nothing loads."""
     owners = collections.defaultdict(list)
@@ -92,7 +94,10 @@ def build_matcher(paths, conv):
                 skipped += 1
                 continue
             loaded += 1
-            for pat in {bc.fold(s), bc.fold(bc.convert(s, *conv))}:
+            forms = {bc.fold(s), bc.fold(bc.convert(s, *conv))}
+            if not trad_tw_phrases:    # the text the counters see keeps its Traditional wording: match that form too
+                forms.add(bc.fold(bc.convert(s, *conv, trad_tw_phrases=False)))
+            for pat in forms:
                 owners[pat].append(f"{p}:{n}")
     if not loaded:
         raise GuardError(f"0 patterns loaded ({skipped} skipped as shorter than {MIN_LEN} characters)")
@@ -117,16 +122,17 @@ def scan_units(units, matcher):
 _G = {}
 
 
-def _gw_init(matcher, conv):
-    _G["m"], _G["conv"] = matcher, conv
+def _gw_init(matcher, conv, trad_tw_phrases=True):
+    _G["m"], _G["conv"], _G["tw"] = matcher, conv, trad_tw_phrases
 
 
 def _wiki_scan(batch):
-    return scan_units((list(bc.article_runs(x, _G["conv"])) for x in batch), _G["m"])
+    return scan_units((list(bc.article_runs(x, _G["conv"], trad_tw_phrases=_G["tw"])) for x in batch), _G["m"])
 
 
 def report(a, conv):
-    matcher, owners, loaded, skipped = build_matcher(a.rows, conv)
+    tw = not a.no_trad_tw_phrases
+    matcher, owners, loaded, skipped = build_matcher(a.rows, conv, tw)
     print(f"patterns\t{loaded}\t{skipped}")
     pats, results = set(), []
 
@@ -134,14 +140,14 @@ def report(a, conv):
         pats.update(res[2])
         results.append((name, res[:2]))
     for p in a.text:
-        add(p, scan_units((bc.text_runs(l, conv) for l in bct.lines(p, errors="replace")), matcher))
+        add(p, scan_units((bc.text_runs(l, conv, trad_tw_phrases=tw) for l in bct.lines(p, errors="replace")), matcher))
     for p in a.row_files:
-        add(p, scan_units((bc.text_runs(s, conv) for _, s in parse_rows(p, strict=False)), matcher))
+        add(p, scan_units((bc.text_runs(s, conv, trad_tw_phrases=tw) for _, s in parse_rows(p, strict=False)), matcher))
     if a.wiki:
         arts = itertools.islice(bc.articles(a.skip + a.articles, dump=a.wiki), a.skip, None)
         n = hit = 0
         wiki_pats = set()
-        with mp.get_context(START).Pool(a.procs, initializer=_gw_init, initargs=(matcher, conv)) as pool:
+        with mp.get_context(START).Pool(a.procs, initializer=_gw_init, initargs=(matcher, conv, tw)) as pool:
             for dn, dh, dp in pool.imap_unordered(_wiki_scan, bc.batches(arts)):
                 n += dn; hit += dh; wiki_pats |= dp
         add("wiki", (n, hit, wiki_pats))
@@ -159,6 +165,7 @@ def main(argv=None, conv=None):
     r.add_argument("--rows", nargs="*", default=[])
     r.add_argument("--text", nargs="*", default=[])
     r.add_argument("--row-files", nargs="*", default=[])
+    r.add_argument("--no-trad-tw-phrases", action="store_true")
     r.add_argument("--wiki")
     r.add_argument("--articles", type=int)
     r.add_argument("--skip", type=int, default=0)

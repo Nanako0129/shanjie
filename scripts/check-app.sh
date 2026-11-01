@@ -76,8 +76,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv digits.tsv models.tsv shanjie.tiff \
-         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
-         english-words.txt LICENSES/SCOWL.txt LICENSES/SymSpell-MIT.txt LICENSES/english-words-attribution.txt \
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/quotes-add.tsv packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
@@ -89,21 +88,25 @@ cmp -s "$R/digits.tsv" "$(dirname "$0")/../data/lexicon/digits.tsv" || fail "Res
 # The app icon (docs/contracts/app-icon.md): compiled by actool, named in Info.plist.
 for f in Assets.car AppIcon.icns; do [ -s "$R/$f" ] || fail "Resources/$f (the app icon) is missing or empty"; done
 for k in CFBundleIconName CFBundleIconFile; do [ "$(pb "$k")" = AppIcon ] || fail "Info.plist $k is not AppIcon"; done
-# The word pack manifest (docs/contracts/acg-pack.md A.2): every file it lists is there with the SHA-256 it records,
-# and the attribution file names the pack.
-python3 - "$R/packs" <<'PY' || fail "packs/acg.json does not match the pack files"
+# The word pack manifests (docs/contracts/acg-pack.md A.2, quote-pack.md section 2): every file one lists is there with the SHA-256 it
+# records, and the attribution file names the ACG pack. quotes-add.tsv holds the checked quotes, so the
+# non-empty test above covers it, and the manifest must name it.
+python3 - "$R/packs" <<'PY' || fail "packs/acg.json or packs/quotes.json does not match the pack files"
 import hashlib, json, os, sys
 d = sys.argv[1]
-files = json.load(open(os.path.join(d, "acg.json"), encoding="utf-8"))["files"]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-if "acg-add.tsv" not in files:
-    sys.exit("acg-add.tsv is not in the manifest")
-for name, meta in files.items():
-    data = open(os.path.join(d, name), "rb").read()
-    if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
-        sys.exit(name + " does not match the manifest")
+for manifest, required in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv"), ("it.json", "it-add.tsv")):     # quotes: docs/contracts/quote-pack.md section 2; IT+AI: docs/contracts/it-pack.md section 3.2
+    files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
+    if required not in files:
+        sys.exit(required + " is not in " + manifest)
+    for name, meta in files.items():
+        data = open(os.path.join(d, name), "rb").read()
+        if hashlib.sha256(data).hexdigest() != meta["sha256"] or len(data) != meta["bytes"]:
+            sys.exit(name + " does not match " + manifest)
 PY
 grep -q 'packs/acg-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/acg-add.tsv"
+grep -q 'packs/it-add.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list packs/it-add.tsv"
+grep -q '政府資料開放授權條款' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not carry the Open Government Data License notice for the IT+AI pack"
 # The names layer (model-v6 section 7 P3-7): the bundled file is the committed one, and the attribution file names it with its three
 # sources, the name-suggestion-index notice in full among them.
 cmp -s "$R/names-add.tsv" "$ROOT/data/lexicon/names-add.tsv" || fail "Resources/names-add.tsv differs from data/lexicon/names-add.tsv"
@@ -119,16 +122,6 @@ for pair in "colloquial-attribution.tsv:$R/LICENSES/colloquial-attribution.tsv";
   [[ "$recorded" =~ ^[0-9a-f]{64}$ ]] || fail "data/${pair%%:*}.sha256 holds no SHA-256"
   [ "$(shasum -a 256 "${pair#*:}" | awk '{ print $1 }')" = "$recorded" ] || fail "${pair#*:} does not match data/${pair%%:*}.sha256"
 done
-# The English word list of 中英混打 (docs/contracts/zhen-mixed.md section 3.4): every line a word the core's loader accepts (the
-# loader's own limits are tested in core), the three attributions present, and the bundled file against the hash recorded in git
-# (a record that is not a SHA-256 fails, like tinylm.sjtl's above).
-! grep -Eqv '^[a-z]{3,32}$' "$R/english-words.txt" || fail "english-words.txt has a line outside [a-z]{3,32}"
-grep -q 'SymSpell' "$R/LICENSES/english-words-attribution.txt" && grep -q 'Google Books Ngram' "$R/LICENSES/english-words-attribution.txt" \
-  && grep -q 'SCOWL' "$R/LICENSES/english-words-attribution.txt" || fail "the English attribution file does not name its three sources"
-EN_RECORDED="$(awk 'NR == 1 { print $1 }' "$ROOT/data/english-words.txt.sha256")"
-[[ "$EN_RECORDED" =~ ^[0-9a-f]{64}$ ]] || fail "data/english-words.txt.sha256 holds no SHA-256"
-[ "$(shasum -a 256 "$R/english-words.txt" | awk '{ print $1 }')" = "$EN_RECORDED" ] \
-  || fail "Resources/english-words.txt does not match data/english-words.txt.sha256"
 # The Kneser-Ney side file (model-v6 section 7 P3-7): against the hash recorded in git, like tinylm.sjtl; the bundled selftest then
 # shows the small model paired with it (a mismatch would leave 語意校正 off).
 grep -q 'kn.sjkn' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list kn.sjkn"
@@ -164,8 +157,9 @@ sparkle_key SUEnableSystemProfiling bool false
 # Sparkle's licence (MIT, with the third-party notices its LICENSE carries): the bundled copy is the committed one.
 cmp -s "$R/LICENSES/Sparkle-MIT.txt" "$ROOT/LICENSES/Sparkle-MIT.txt" || fail "Resources/LICENSES/Sparkle-MIT.txt differs from LICENSES/Sparkle-MIT.txt"
 grep -q 'EXTERNAL LICENSES' "$R/LICENSES/Sparkle-MIT.txt" || fail "Sparkle-MIT.txt lacks the third-party notices"
-# The trigram table of the formal profile (trigram-core): against the hash recorded in git, like kn.sjkn.
+# The trigram tables (trigram-core; the formal profile's trigram.sjt3 and the chat profile's trigram-chat.sjt3): both listed in the attribution file.
 grep -q 'trigram.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram.sjt3"
+grep -q 'trigram-chat.sjt3' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list trigram-chat.sjt3"
 echo "check 2: ok"
 
 # --- 3: signature: valid, exactly the three App Sandbox entitlements on the app (app-sandbox.md section 2.1,

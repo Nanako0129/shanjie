@@ -3,12 +3,13 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/contracts/s7c2b-shell-rerank.md section 3 items 1-2: the shell's rerank queue with the real core, the real n-gram model
-/// and the real small model, in a chat app (the selftest's sentence, dev302 row 27 since classes-v5). The runner is held by the test, except in
+/// and the real small model, in a chat app (the selftest's sentence, dev302 row 65 since the 通語 SJ-LM-7-9.7M files). The runner is held by the test, except in
 /// the last test, which uses the app's queue runner.
 @MainActor
 final class RerankTests: XCTestCase {
     static let chatApp = "com.apple.MobileSMS"
     static let leftArrow: UInt16 = 123
+    static let downArrow: UInt16 = 125
     private var resources: URL!
     private var counters: [FreeCounter] = []
 
@@ -26,6 +27,14 @@ final class RerankTests: XCTestCase {
         var c: Controller
         var runner: HeldRerankRunner
         var frees: FreeCounter
+
+        /// Taken == freed once nothing is held, and nothing was freed twice.
+        @MainActor
+        func counterCheck(file: StaticString = #filePath, line: UInt = #line) {
+            runner.drain()
+            XCTAssertEqual(frees.freed, shell.rerankTaken, "taken == freed", file: file, line: line)
+            XCTAssertEqual(frees.doubleFrees, 0, file: file, line: line)
+        }
     }
 
     /// The shipped default is on (s7h section 2.3); every test but the default's own still switches rerank on explicitly, through
@@ -34,7 +43,7 @@ final class RerankTests: XCTestCase {
                            frees: FreeCounter, resources: URL? = nil) -> Shell {
         let shell = Shell(resources: resources ?? self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                           learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: demote, predictionStore: MemoryPredictionStore(),
-                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), glassTintStore: MemoryGlassTintStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
                           candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: store, rerankRunner: runner,
                           profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
@@ -102,7 +111,7 @@ final class RerankTests: XCTestCase {
     }
 
     /// A finished job that changes nothing (code 5): no extra client call. `NoChangeRow` keeps its n-gram first in the chat profile
-    /// (row 284 did until classes-v5, whose chat first 率 the small model now changes to 濾).
+    /// (row 65 did from classes-v5 to model-v6; the 通語 SJ-LM-7-9.7M n-gram gets it wrong again, so it is `RerankRow` now).
     func testNoChangeMakesNoCall() {
         let r = rig()
         r.c.type(NoChangeRow.standardKeys)
@@ -623,6 +632,162 @@ final class RerankTests: XCTestCase {
         XCTAssertEqual(r.frees.freed, r.shell.rerankTaken)
     }
 
+    // MARK: Enter waits for the running rerank (docs/contracts/enter-rerank-wait.md section 2)
+
+    /// The wait runs the job of the handle by hand (`.complete`): the answer of a queue that finished inside the limit.
+    private func enterRig(_ mode: HeldRerankRunner.WaitMode = .complete) -> Rig {
+        let r = rig()
+        r.runner.waitMode = mode
+        return r
+    }
+
+    /// One job running, none waiting, done inside the limit: Enter sends the reranked sentence; the callback that comes later changes nothing.
+    func testEnterWaitsForTheRunningJobAndSendsTheRerankedText() {
+        let r = enterRig()
+        r.c.type(RerankRow.standardKeys)
+        r.runner.complete()  // the first, stale; the newest one runs
+        XCTAssertEqual(r.runner.held.count, 1, "premise: one job with the runner")
+        XCTAssertEqual(r.c.client.marked, RerankRow.ngram, "premise: nothing applied yet")
+        XCTAssertTrue(r.c.press(Keys.enter))
+        XCTAssertEqual(r.runner.waited, 1)
+        XCTAssertEqual(r.c.client.text, RerankRow.reranked, "Enter sent the text with the finished rerank applied")
+        let calls = r.c.client.calls.count, received = r.runner.received
+        r.runner.fireLate()
+        XCTAssertEqual(r.c.client.calls.count, calls, "the callback after the wait changes nothing")
+        XCTAssertEqual(r.runner.received, received)
+        r.counterCheck()
+    }
+
+    /// One running, one waiting, both done inside the limit: the stale first changes nothing, the waiting (newest) one is what is sent.
+    func testEnterWaitsForTheRunningAndTheWaitingJob() {
+        let r = enterRig()
+        r.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(r.runner.received, 1)
+        XCTAssertTrue(r.c.press(Keys.enter))
+        XCTAssertEqual(r.runner.waited, 2, "the running job, then the waiting one that started")
+        XCTAssertEqual(r.runner.received, 2)
+        XCTAssertEqual(r.c.client.text, RerankRow.reranked)
+        r.runner.fireLate()
+        r.runner.fireLate()
+        XCTAssertEqual(r.c.client.text, RerankRow.reranked)
+        r.counterCheck()
+    }
+
+    /// Past the limit: the n-gram sentence is sent, and the job completing afterwards changes nothing and does not stick the queue.
+    func testEnterAfterTheLimitSendsTheShownTextAndTheQueueGoesOn() {
+        let r = enterRig(.timeout)
+        r.c.type(RerankRow.standardKeys)
+        XCTAssertTrue(r.c.press(Keys.enter))
+        XCTAssertEqual(r.runner.waited, 1, "one wait, which ran out")
+        XCTAssertEqual(r.c.client.text, RerankRow.ngram, "what was shown is sent")
+        let calls = r.c.client.calls.count
+        r.runner.complete()  // the job that was running finishes late: the waiting one starts
+        XCTAssertEqual(r.runner.received, 2)
+        r.runner.drain()
+        XCTAssertEqual(r.c.client.calls.count, calls, "a late result changes nothing")
+        // not stuck: the next key's job reaches the runner
+        r.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(r.runner.received, 3, "the running flag was cleared by the late completion")
+        XCTAssertEqual(r.runner.held.count, 1)
+        r.c.press(Keys.esc)
+        r.runner.drain()
+        r.counterCheck()
+    }
+
+    /// Nothing to wait for: no job, the switch off, no composition, a candidate window open. The runner's wait is never called.
+    func testEnterDoesNotWaitWithoutAJobOrWithTheSwitchOffOrAnEmptyOrSelectedComposition() {
+        let a = enterRig()
+        a.c.type(RerankRow.standardKeys)
+        a.runner.drain()
+        XCTAssertEqual(a.c.client.marked, RerankRow.reranked)
+        a.c.press(Keys.enter)
+        XCTAssertEqual(a.runner.waited, 0, "no job")
+        XCTAssertEqual(a.c.client.text, RerankRow.reranked)
+
+        let off = rig(store: MemoryRerankStore(false))
+        off.runner.waitMode = .complete
+        off.c.type(RerankRow.standardKeys)
+        off.c.press(Keys.enter)
+        XCTAssertEqual(off.runner.waited, 0, "switch off")
+        XCTAssertEqual(off.c.client.text, RerankRow.ngram)
+
+        let empty = enterRig()
+        empty.c.press(Keys.enter)
+        XCTAssertEqual(empty.runner.waited, 0, "nothing composed")
+
+        // A job still running when the switch goes off, or after Esc emptied the composition: the guards, not the absence of a job.
+        let offMid = enterRig()
+        offMid.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(offMid.runner.held.count, 1, "premise: a job is running")
+        _ = offMid.shell.setRerank(false)
+        offMid.c.press(Keys.enter)
+        XCTAssertEqual(offMid.runner.waited, 0, "switch turned off while a job runs")
+        offMid.runner.drain()
+
+        let escMid = enterRig()
+        escMid.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(escMid.runner.held.count, 1, "premise: a job is running")
+        escMid.c.press(Keys.esc)
+        escMid.c.press(Keys.enter)
+        XCTAssertEqual(escMid.runner.waited, 0, "Esc emptied the composition while a job runs")
+        escMid.runner.drain()
+
+        let open = enterRig()
+        open.c.type(RerankRow.standardKeys)
+        XCTAssertEqual(open.runner.held.count, 1, "premise: a job is running")
+        open.c.press(Self.downArrow)  // opens the candidate window
+        XCTAssertGreaterThanOrEqual(open.shell.candidateSelected, 0, "premise: a candidate is selected")
+        open.c.press(Keys.enter)
+        XCTAssertEqual(open.runner.waited, 0, "a selection is open: the core applies no rerank")
+        open.runner.drain()
+    }
+
+    /// One deadline for the whole Enter: both waits get the same `until`, taken when Enter arrived.
+    func testOneDeadlineForTheWholeEnter() {
+        let r = enterRig()
+        r.shell.enterRerankWaitMS = 300
+        r.c.type(RerankRow.standardKeys)
+        let before = DispatchTime.now().uptimeNanoseconds
+        r.c.press(Keys.enter)
+        let after = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(r.runner.deadlines.count, 2)
+        XCTAssertEqual(r.runner.deadlines[0], r.runner.deadlines[1], "the second wait gets what is left, not a new limit")
+        let d = r.runner.deadlines[0].uptimeNanoseconds
+        XCTAssertGreaterThanOrEqual(d, before + 300_000_000)
+        XCTAssertLessThanOrEqual(d, after + 300_000_000)
+        r.runner.drain()
+    }
+
+    /// The shipping limit.
+    func testTheShippingLimitIs100ms() {
+        XCTAssertEqual(Shell.ENTER_RERANK_WAIT_MS, 100)
+        XCTAssertEqual(rig().shell.enterRerankWaitMS, 100)
+    }
+
+    /// A callback for a job a wait already finished, arriving while another job runs: it must not clear the running state or start
+    /// the waiting job a second time.
+    func testLateCallbackDoesNotDisturbTheNextJob() {
+        let r = enterRig()
+        r.c.type(RerankRow.standardKeys)
+        r.c.press(Keys.enter)
+        XCTAssertEqual(r.runner.late.count, 2)
+        XCTAssertEqual(r.c.client.text, RerankRow.reranked)
+        r.runner.waitMode = .timeout
+        r.c.type(RerankRow.standardKeys)  // a new composition: one job runs, the latest waits
+        XCTAssertEqual(r.runner.received, 3, "premise: the second composition's first job is running, the others wait")
+        let received = r.runner.received, held = r.runner.held.count
+        XCTAssertEqual(held, 1, "premise: one job running")
+        let calls = r.c.client.calls.count
+        r.runner.fireLate()
+        r.runner.fireLate()
+        XCTAssertEqual(r.c.client.calls.count, calls)
+        XCTAssertEqual(r.runner.received, received, "the waiting job was not started by a late callback")
+        XCTAssertEqual(r.runner.held.count, held)
+        r.c.press(Keys.esc)
+        r.runner.drain()
+        r.counterCheck()
+    }
+
     // MARK: the app's runner (F2)
 
     /// `QueueRerankRunner`, as the app passes it: the key returns at once with the n-gram result, the job runs on the queue and
@@ -638,6 +803,32 @@ final class RerankTests: XCTestCase {
         c.press(Keys.esc)
         XCTAssertTrue(spin { frees.freed == shell.rerankTaken }, "taken == freed")
         XCTAssertGreaterThan(shell.rerankTaken, 0)
+        XCTAssertEqual(frees.doubleFrees, 0)
+    }
+
+    /// Enter against the app's runner (enter-rerank-wait.md section 2): the first composition completes through the usual
+    /// `main.async` callback with nobody waiting; the second is typed and Enter pressed in the same main-thread turn, before any
+    /// callback runs. The reranked sentence can only be sent if the wait really got the running job's code after its `run()` returned.
+    /// The limit is 10 s here (a loaded machine must not turn this into a timing test; the shipping 100 is asserted apart).
+    func testEnterWaitsForTheRealQueue() {
+        let frees = FreeCounter()
+        counters.append(frees)
+        let shell = makeShell(runner: QueueRerankRunner(), frees: frees)
+        shell.enterRerankWaitMS = 10_000
+        let c = Controller(shell, bundle: Self.chatApp)
+        c.session.activate()
+        c.type(RerankRow.standardKeys)
+        XCTAssertTrue(spin { c.client.marked == RerankRow.reranked }, "the first composition was not reranked")
+        c.press(Keys.esc)
+        c.type(RerankRow.standardKeys)
+        XCTAssertEqual(c.client.marked, RerankRow.ngram, "premise: the job is not applied yet when Enter arrives")
+        let start = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(c.press(Keys.enter))
+        XCTAssertLessThan(DispatchTime.now().uptimeNanoseconds - start, 10_000_000_000, "the wait ended before the limit")
+        XCTAssertEqual(c.client.text, RerankRow.reranked, "Enter sent the reranked sentence")
+        let calls = c.client.calls
+        XCTAssertTrue(spin { frees.freed == shell.rerankTaken }, "taken == freed")
+        XCTAssertEqual(c.client.calls, calls, "the callbacks after the wait changed nothing")
         XCTAssertEqual(frees.doubleFrees, 0)
     }
 

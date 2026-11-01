@@ -24,7 +24,7 @@
 
 ## 2. 引擎的設定（照 App）
 
-- 建立順序與預設值照 `macos/Sources/ShanjieKit/Shell.swift` 的 `build()`：帶詞包建引擎（`acg`）、`load_lm`（bigram，連帶的 classes／kn／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表，見下）、降權開、語意校正開、強度照 App 預設、`set_profile`。
+- 建立順序與預設值照 `macos/Sources/ShanjieKit/Shell.swift` 的 `build()`：帶詞包建引擎（`acg` 與 `it`，App 的預設兩個都開；2026-10-29 起，之前只有 `acg`）、`load_lm`（bigram，連帶的 classes／kn／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表，見下）、降權開、語意校正開、強度照 App 預設、`set_profile`。
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（不載英文詞表、`set_english(false)`）。App 預設兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 §4 定義。兩者都不影響 n-gram 與語意校正的選字。縮寫、直式候選窗照 App 預設（橫式，一頁 9 項）。
 - `--profile chat|formal`（預設 chat）。`--no-tinylm` 關掉語意校正（對照用）。
 - 口語表（colloquial-term.md §2.3）：App 的 `build()` 在小模型載入後一定載入 `colloquial.sjlm`，所以重播預設在小模型開著且 `data/lm/colloquial.sjlm` 存在時載入它（`--no-tinylm` 時不載，App 小模型沒載入也不載）。`--colloquial FILE` 改載另一份表，`--no-colloquial` 不載（對照用；兩者併用是錯誤）。載入時 stderr 的 `models:` 行最後多一欄 `colloquial.sjlm:<sha8>`，設定標記最後加 `+colloq:<sha8>`；是否真的用到口語項仍由核心照條件決定（聊天、配對的小模型、表已載入；任何強度，各用自己的 α、τ、δ，colloquial-levels.md；重播只有 App 預設的強度）。沒有 `data/lm/colloquial.sjlm` 時輸出和以前逐位元組相同。口語項生效時，讀音通道項（reading-channel.md）跟著它，重播預設和 App 一樣；`--no-reading-channel`（研究用）只留口語項（P4d 那一格），設定標記：聊天、載入了口語表、小模型是配對的那一份（`--no-tinylm` 時沒有）時是 `+colloq:<sha8>+rc`，加 `--no-reading-channel` 就沒有 `+rc`（沒載入口語表時這個旗標什麼都不改）。
@@ -32,6 +32,8 @@
 - `--learn-file FILE`（唯讀載入學習檔）：引擎建好後、建立任何輸出檔之前，讀 FILE 的位元組（只有位元組，不帶權限、旗標、ACL、xattr），寫進本次執行專用的暫存目錄（0700、每次不同、在 `std::env::temp_dir()` 下）的 `learning.tsv`（`create_new`、0600），對該目錄呼叫 `learning_open`，**載入完立刻刪掉暫存目錄**（學習資料已在記憶體；刪除失敗在 stderr 警告；之後 `--learn on` 的存檔因目錄不在而無害地失敗）。原檔只被讀，不寫、不改名、不隔離。FILE 與 `--rows` 或任一輸出檔是同一個檔（比對裝置與 inode，硬連結也算）就拒絕（結束碼 2）；與 `--firsts` 併用一律拒絕（第一次顯示可能含學習檔裡的詞）。載入結果不是正常載入（檔頭錯、`Corrupt`、`Fresh`）、沒有任何可用的筆數、或 `learning_open` 失敗（錯誤只帶 `StoreError` 的種類）就報錯結束，不會在沒有學習資料下默默重放；這些失敗都發生在輸出檔建立之前，既有輸出檔不會被截斷。解碼不論 `--learn` 開關都讀載入的學習資料。摘要標記加 `+learnfile`；stderr 只印筆數與跳過的行數，不印檔案內容衍生的任何字、前文或讀音。**刻意不記錄載入的是哪一份學習檔**（隱私），所以不同快照的 `+learnfile` 結果無法從輸出區分，由執行者自己記。
 - 模型路徑同 CLI（`data/lm/`），啟動時印出各模型的 sha256 前 8 碼與旗標（像 CLI 的摘要行標記），讓結果對得回模型。
 
+- `--packs LIST`（2026-11-01 加，PUNCT-0 `docs/contracts/punct-composition.md`）：`acg`、`it`、`quotes` 的逗號清單，研究用。不給時等於 App 的預設 `acg,it`，輸出逐位元組不變；給了就照清單建引擎，設定標記照位元順序列出詞包（例如 `+acg+quotes+it`）。
+- 列裡的標點（2026-11-01 加，PUNCT-0）：讀音欄可以有單獨一個記號 `，` `。` `？` `！` `：`（照 App 送 Shift＋`,` `.` `/` `1` `;`）或 `、`（不按 Shift 的 `\`），標點和注音留在同一個組字區，每個標點算一鍵。其他記號（例如 `；`，標準排列沒有直接的鍵）照舊報錯。
 - `--learn-guard on|off`（預設 on，等於 App；2026-10-20 加，診斷 D5 (3)）：學習守門（S7c-2a §2.2：一段的 n-gram 第一名裡有學習加過分的詞，整段不送語意校正）開或關。off 時那些段照常送語意校正，其他一切不變。用途是量守門在有學習檔時擋掉多少段、擋掉的段裡語意校正會不會改對（研究紀錄 2026-10-20「讀 0c 開源的輸入法 App」）。引擎多一個 Rust 的設定函式 `set_learn_guard(bool)`（預設 true）與唯讀的 `guard_skips()`，**不進 `shanjie.h`、App 與 CLI 都不提供**。設定標記 off 時加 `+noguard`。
 
 ## 3. 語意校正的時序 `--rerank each|final`
@@ -54,13 +56,13 @@
 - 按鍵分數＝Σideal ÷ Σactual（KySS 的做法，注音版）。
 - `picks`：改選次數；`final_ok`：送出的文字是否等於正解（寬鬆比對）。
 - 摘要行：列數、第一次顯示的 top1、送出時正確的列數、改不了的列數、按鍵分數、每百字改選次數、`rewrites` 合計、`top1_sha256`（第一次顯示的文字以 `\n` 串接的 sha256，算法與 `cli/src/main.rs` 的 `top1_sha256` 相同），以及設定標記（profile、learn、learnfile、rerank、correct、`--learn-guard off` 時的 `+noguard`、模型雜湊前綴、預測列與英文關）。
-- `guard_skips`（摘要行多一欄，2026-10-20）：每列打完最後一鍵時（第一次顯示之前、`final` 套用之前），最近一次解碼裡「本來會送語意校正（語意校正開、模型已載入、那段的候選 ≥ 2）而被學習守門擋下」的段數，全部列加總；另一欄 `guard_rows` 是其中段數 ≥ 1 的列數。引擎的 `guard_skips()` 回傳最近一次解碼的段數（每次解碼重算，不累加）。`--learn-guard off` 時兩欄都是 0。沒有學習資料或 `--no-tinylm` 時恆為 0。重播的列沒有標點鍵，一列最多一段，所以現在兩欄相等；最後一鍵觸發 128 音節自動送出時，工作隨送出作廢，那一列計 0。`guard_rows` 留給之後有標點或改選的重播。
+- `guard_skips`（摘要行多一欄，2026-10-20）：每列打完最後一鍵時（第一次顯示之前、`final` 套用之前），最近一次解碼裡「本來會送語意校正（語意校正開、模型已載入、那段的候選 ≥ 2）而被學習守門擋下」的段數，全部列加總；另一欄 `guard_rows` 是其中段數 ≥ 1 的列數。引擎的 `guard_skips()` 回傳最近一次解碼的段數（每次解碼重算，不累加）。`--learn-guard off` 時兩欄都是 0。沒有學習資料或 `--no-tinylm` 時恆為 0。2026-11-01 以前重播的列沒有標點鍵，一列最多一段，兩欄相等；列裡有標點時一列可以有好幾段；最後一鍵觸發 128 音節自動送出時，工作隨送出作廢，那一列計 0。有標點的列 `guard_rows` 可以小於 `guard_skips`。
 - `--firsts FILE`（只給一致性比對用）：每列一行第一次顯示的文字。只能用在公開集合（dev302、typing76、錯字回報），檔案不進 repo；工具不知道哪個集合是私人的，這條由使用的人遵守。
 - 「本來對、學了之後錯」：同一份列檔跑 `--learn off` 與 `--learn on` 各一次（都 `--correct`），兩個 `--rowstats` 用 `evalstats compare`：改壞數就是這個數字。工具本身不另算。
 
 ## 6. 驗收
 
-1. **一致性**：`--learn off --rerank each`、不改選時，第一次顯示的文字和 CLI 出貨設定（`--lm data/lm/bigram.sjlm --profile P --context --packs acg --tinylm data/lm/tinylm.sjtl`）每一列的選字相同。在 dev302、typing76、錯字回報（全部列）兩種設定上比：
+1. **一致性**：`--learn off --rerank each`、不改選時，第一次顯示的文字和 CLI 出貨設定（`--lm data/lm/bigram.sjlm --profile P --context --packs acg,it --tinylm data/lm/tinylm.sjtl`；2026-10-29 之前是 `--packs acg`）每一列的選字相同。在 dev302、typing76、錯字回報（全部列）兩種設定上比：
    - 先比摘要行的 `top1_sha256`，相同就通過；
    - 不同時，用重播的 `--firsts` 對 CLI 每列的選字（由 CLI 的 `--dump` 加 `--tinylm-scores` 的 `"c"` 欄還原，做法同研究紀錄 2026-10-17「rerank-size」一節的重播一致性比對）逐列比，列出差異列號並歸因：重播工具的錯就修；引擎和 CLI 真的不同就寫進研究紀錄（這正是「錯字回報離線是對的那一桶」要拆的東西），不改引擎。
 2. 單元測試（合成的小詞庫或真詞庫的短句皆可）：

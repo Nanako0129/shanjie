@@ -1,6 +1,6 @@
 //! Trigram level on the toy model (docs/contracts/trigram-core.md, slice A, acceptance 2, 3 and 6).
-//! The toy bigram model, classes.sjc and kn.sjkn are eval/golden/kn-tiny/'s; the table, lexicon and decode.tsv are
-//! eval/golden/tri-tiny/'s (tools/gen_tri_tiny.py; decode.tsv is the Python reference decoder's output, compared byte for byte).
+//! The toy bigram model, classes.sjc and kn.sjkn are eval/golden/kn-tiny/'s; the two tables (formal `trigram.sjt3`, chat `trigram-chat.sjt3`), lexicon and
+//! decode.tsv are eval/golden/tri-tiny/'s (tools/gen_tri_tiny.py; decode.tsv is the Python reference decoder's output, compared byte for byte).
 //! The engine tests have no word classes, so their hand values are plain bigram arithmetic (tolerance 1e-12: the hand values use `powf`).
 use core::engine::{Engine, Key, KeyKind, Layout, Output};
 use core::lm::{decode, decode_from, decode_segment_learned, history, CappedLexicon, End, Learn, Lm, LmError, Profile, LEARN_EPS_GLOBAL};
@@ -15,15 +15,18 @@ fn dir(d: &str) -> PathBuf {
 fn bytes(d: &str, name: &str) -> Vec<u8> {
     std::fs::read(dir(d).join(name)).unwrap()
 }
-/// The toy model with the pieces asked for: word classes, the Kneser-Ney side file, the trigram table.
-fn lm_of(classes: bool, kn: bool, tri: bool) -> Lm {
+/// The toy model with the pieces asked for: word classes, the Kneser-Ney side file, the formal profile's table, the chat profile's table.
+fn lm_of(classes: bool, kn: bool, formal: bool, chat: bool) -> Lm {
     let model = bytes("kn-tiny", "bigram.sjlm");
     let mut lm = if classes { Lm::parse_with_classes(&model, &bytes("kn-tiny", "classes.sjc")).unwrap() } else { Lm::parse(&model).unwrap() };
     if kn {
         lm.add_kn(&bytes("kn-tiny", "kn.sjkn")).unwrap();
     }
-    if tri {
-        lm.add_tri(bytes("tri-tiny", "trigram.sjt3")).unwrap();
+    if formal {
+        lm.add_tri_for(Profile::Formal, bytes("tri-tiny", "trigram.sjt3")).unwrap();
+    }
+    if chat {
+        lm.add_tri_for(Profile::Chat, bytes("tri-tiny", "trigram-chat.sjt3")).unwrap();
     }
     lm
 }
@@ -45,44 +48,48 @@ fn capped_of(lm: &Lm, lexicon: &[u8]) -> CappedLexicon {
     CappedLexicon::new(lex, "", lm, Some(&core::lm::Demote::parse("").unwrap())).unwrap()
 }
 
-/// Every start word and sentence: formal with the table (Kneser-Ney off) is decode.tsv. It also holds when the side file is loaded as well
-/// (the profile turns it off), and a surface with two segmentations that differ in the previous word (ㄊㄚ ㄓㄢˋ ㄊㄚ, 他|占|他 and 他占|他) keeps
-/// both until the next word, which is what the recombination key buys: without the previous word in the key the top score differs.
+/// Every config, start word and sentence: the profile's own table with Kneser-Ney on (formal at FORMAL_KN_BETA 0.75, chat at the file's β 1) or without a side
+/// file is decode.tsv. Both tables are loaded in every config, so a profile that read the other's table would differ. A surface with two segmentations
+/// that differ in the previous word (ㄊㄚ ㄓㄢˋ ㄊㄚ, 他|占|他 and 他占|他) keeps both until the next word, which is what the recombination key buys: without
+/// the previous word in the key the top score differs.
 #[test]
-fn formal_decode_matches_python_byte_for_byte() {
+fn decode_matches_python_byte_for_byte() {
     let want = String::from_utf8(bytes("tri-tiny", "decode.tsv")).unwrap();
     let lexicon = bytes("tri-tiny", "lexicon.txt");
-    for kn in [false, true] {
-        let lm = lm_of(true, kn, true);
+    let mut got = String::new();
+    for (config, profile, kn) in [("formal", Profile::Formal, true), ("formal-nokn", Profile::Formal, false), ("chat", Profile::Chat, true), ("chat-nokn", Profile::Chat, false)] {
+        let lm = lm_of(true, kn, true, true);
         let capped = capped_of(&lm, &lexicon);
-        let mut got = String::new();
         for start in STARTS {
             for (i, s) in SENTENCES.iter().enumerate() {
-                for (r, (sc, ws)) in decode_from(&capped, &syls(s), &lm, Profile::Formal, core::BEAM_S1, start, true).unwrap().iter().enumerate() {
-                    got += &format!("{start}\t{}\t{}\t{}\t{sc:?}\n", i + 1, r + 1, ws.concat());
+                for (r, (sc, ws)) in decode_from(&capped, &syls(s), &lm, profile, core::BEAM_S1, start, true).unwrap().iter().enumerate() {
+                    got += &format!("{config}\t{start}\t{}\t{}\t{}\t{sc:?}\n", i + 1, r + 1, ws.concat());
                 }
             }
         }
-        assert_eq!(got, want, "kn side file loaded: {kn}");
     }
+    assert_eq!(got, want);
 }
 
-/// Premise for the golden: the table changes formal scores (so equality with the Python output means something), and chat does not use it.
+/// Each profile ignores the other's table and uses its own: with only the formal table, chat decodes bit for bit as with no table (and formal does not);
+/// with only the chat table the reverse. Premise for the golden above: each table changes its own profile's scores.
 #[test]
-fn chat_ignores_the_table_and_formal_does_not() {
+fn a_profile_ignores_the_other_profiles_table() {
     let lexicon = bytes("tri-tiny", "lexicon.txt");
-    let (with, without) = (lm_of(true, true, true), lm_of(true, true, false));
-    let (cw, cwo) = (capped_of(&with, &lexicon), capped_of(&without, &lexicon));
-    let mut formal_differs = false;
+    let (none, formal, chat) = (lm_of(true, true, false, false), lm_of(true, true, true, false), lm_of(true, true, false, true));
+    let capped = [&none, &formal, &chat].map(|lm| capped_of(lm, &lexicon));
+    let (mut formal_differs, mut chat_differs) = (false, false);
     for start in STARTS {
         for s in SENTENCES {
-            let run = |lm: &Lm, c: &CappedLexicon, p| decode_from(c, &syls(s), lm, p, core::BEAM_S1, start, true).unwrap();
-            let bits = |r: Vec<(f64, Vec<String>)>| r.into_iter().map(|(sc, ws)| (sc.to_bits(), ws)).collect::<Vec<_>>();
-            assert_eq!(bits(run(&with, &cw, Profile::Chat)), bits(run(&without, &cwo, Profile::Chat)), "chat {start} {s}");
-            formal_differs |= bits(run(&with, &cw, Profile::Formal)) != bits(run(&without, &cwo, Profile::Formal));
+            let run = |i: usize, lm: &Lm, p| decode_from(&capped[i], &syls(s), lm, p, core::BEAM_S1, start, true).unwrap().into_iter().map(|(sc, ws)| (sc.to_bits(), ws)).collect::<Vec<_>>();
+            let (base_chat, base_formal) = (run(0, &none, Profile::Chat), run(0, &none, Profile::Formal));
+            assert_eq!(run(1, &formal, Profile::Chat), base_chat, "chat with only the formal table {start} {s}");
+            assert_eq!(run(2, &chat, Profile::Formal), base_formal, "formal with only the chat table {start} {s}");
+            formal_differs |= run(1, &formal, Profile::Formal) != base_formal;
+            chat_differs |= run(2, &chat, Profile::Chat) != base_chat;
         }
     }
-    assert!(formal_differs);
+    assert!(formal_differs && chat_differs);
 }
 
 // ---------- Lm::load ----------
@@ -90,34 +97,63 @@ fn chat_ignores_the_table_and_formal_does_not() {
 fn table_bytes() -> Vec<u8> {
     bytes("tri-tiny", "trigram.sjt3")
 }
+fn chat_table_bytes() -> Vec<u8> {
+    bytes("tri-tiny", "trigram-chat.sjt3")
+}
 
-/// A trigram.sjt3 beside the model is read, none is off, a bad one (or a dangling symlink) is an error, `load_opts(.., tri: false)` ignores it.
+/// The tables beside the model: `trigram.sjt3` is the formal profile's, `trigram-chat.sjt3` the chat profile's. A missing file is that profile's table off and
+/// nothing else; a bad one (or a dangling symlink) is an error for `Lm::load` (the engine reads both), so one bad file fails the whole load, while `load_opts`
+/// reads only the profiles it is given (the CLI: its profile's table), so the other profile's bad file does not matter there; `--no-tri` (`&[]`) reads neither.
 #[test]
-fn load_reads_the_table_beside_the_model() {
+fn load_reads_each_profiles_table_beside_the_model() {
     let tmp = std::env::temp_dir().join(format!("shanjie-tri-tiny-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     for f in ["bigram.sjlm", "classes.sjc"] {
         std::fs::write(tmp.join(f), bytes("kn-tiny", f)).unwrap();
     }
     let m = tmp.join("bigram.sjlm");
-    assert!(Lm::load(&m).unwrap().tri_tag().is_none(), "no trigram.sjt3: off");
-    std::fs::write(tmp.join("trigram.sjt3"), table_bytes()).unwrap();
+    let (formal, chat) = (tmp.join("trigram.sjt3"), tmp.join("trigram-chat.sjt3"));
+    let tag = |b: &[u8]| format!("+tri:{}", &core::eval::sha256_hex(b)[..8]);
+    let tags = |lm: &Lm| (lm.tri_tag(Profile::Chat).map(String::from), lm.tri_tag(Profile::Formal).map(String::from));
+    assert_eq!(tags(&Lm::load(&m).unwrap()), (None, None), "no files: both off");
+    // only one file: only that profile's table, whatever the other profile's file is called
+    std::fs::write(&formal, table_bytes()).unwrap();
+    let only_formal = Lm::load(&m).unwrap();
+    assert_eq!(tags(&only_formal), (None, Some(tag(&table_bytes()))));
+    assert!(only_formal.uses_tri(only_formal.scoring(Profile::Formal)) && !only_formal.uses_tri(only_formal.scoring(Profile::Chat)));
+    std::fs::remove_file(&formal).unwrap();
+    std::fs::write(&chat, chat_table_bytes()).unwrap();
+    let only_chat = Lm::load(&m).unwrap();
+    assert_eq!(tags(&only_chat), (Some(tag(&chat_table_bytes())), None));
+    assert!(only_chat.uses_tri(only_chat.scoring(Profile::Chat)) && !only_chat.uses_tri(only_chat.scoring(Profile::Formal)));
+    // both files: the tag of each is its own file's sha8
+    std::fs::write(&formal, table_bytes()).unwrap();
     let on = Lm::load(&m).unwrap();
-    let want = format!("+tri:{}", &core::eval::sha256_hex(&table_bytes())[..8]);
-    assert_eq!(on.tri_tag(), Some(want.as_str()), "the tag is the table file's sha8");
-    assert!(on.scoring(Profile::Formal).tri);
-    assert!(Lm::load_opts(&m, true, true, false).unwrap().tri_tag().is_none(), "--no-tri");
-    assert!(Lm::load_with(&m, true, true).unwrap().tri_tag().is_some());
-    std::fs::remove_file(tmp.join("trigram.sjt3")).unwrap();
-    std::os::unix::fs::symlink(tmp.join("missing.sjt3"), tmp.join("trigram.sjt3")).unwrap();
-    assert_eq!(Lm::load(&m).err(), Some(LmError::TriTable), "a dangling trigram.sjt3 symlink is not 'absent'");
-    assert!(Lm::load_opts(&m, true, true, false).is_ok());
-    std::fs::remove_file(tmp.join("trigram.sjt3")).unwrap();
-    let mut bad = table_bytes();
-    bad[0] ^= 1;
-    std::fs::write(tmp.join("trigram.sjt3"), bad).unwrap();
-    assert_eq!(Lm::load(&m).err(), Some(LmError::TriTable), "a bad table is never ignored");
-    assert!(Lm::load_opts(&m, true, true, false).is_ok(), "--no-tri does not read it");
+    assert_eq!(tags(&on), (Some(tag(&chat_table_bytes())), Some(tag(&table_bytes()))));
+    assert_ne!(tags(&on).0, tags(&on).1, "premise: the two toy tables differ");
+    assert_eq!(tags(&Lm::load_opts(&m, true, true, &[]).unwrap()), (None, None), "--no-tri");
+    assert_eq!(tags(&Lm::load_opts(&m, true, true, &[Profile::Chat]).unwrap()), (Some(tag(&chat_table_bytes())), None), "the CLI's chat reads only the chat file");
+    assert_eq!(tags(&Lm::load_opts(&m, true, true, &[Profile::Formal]).unwrap()), (None, Some(tag(&table_bytes()))), "the CLI's formal reads only the formal file");
+    assert_eq!(tags(&Lm::load_with(&m, true, true).unwrap()), tags(&on));
+    // a bad or dangling file: the engine's load fails for either file; the CLI's profile is fine as long as its own file is
+    for (bad, reads_bad, other) in [(&chat, Profile::Chat, Profile::Formal), (&formal, Profile::Formal, Profile::Chat)] {
+        let good = std::fs::read(bad).unwrap();
+        let mut broken = good.clone();
+        broken[0] ^= 1;
+        std::fs::write(bad, broken).unwrap();
+        assert_eq!(Lm::load(&m).err(), Some(LmError::TriTable), "a bad table is never ignored: {bad:?}");
+        assert!(Lm::load_opts(&m, true, true, &[other]).is_ok(), "the other profile does not read it");
+        assert!(Lm::load_opts(&m, true, true, &[]).is_ok(), "--no-tri does not read it");
+        assert_eq!(Lm::load_opts(&m, true, true, &[reads_bad]).err(), Some(LmError::TriTable), "the profile that reads it fails");
+        std::fs::remove_file(bad).unwrap();
+        std::os::unix::fs::symlink(tmp.join("missing.sjt3"), bad).unwrap();
+        assert_eq!(Lm::load(&m).err(), Some(LmError::TriTable), "a dangling symlink is not 'absent': {bad:?}");
+        assert!(Lm::load_opts(&m, true, true, &[other]).is_ok());
+        assert_eq!(Lm::load_opts(&m, true, true, &[reads_bad]).err(), Some(LmError::TriTable));
+        std::fs::remove_file(bad).unwrap();
+        std::fs::write(bad, good).unwrap();
+    }
+    assert!(Lm::load(&m).is_ok(), "premise: both files are good again");
     std::fs::remove_dir_all(tmp).unwrap();
 }
 
@@ -130,9 +166,13 @@ struct Fx {
     lm: Arc<Lm>,
     capped: Arc<CappedLexicon>,
 }
-/// The class-less toy model (hand values are plain bigram arithmetic) with the Kneser-Ney side file, and the table or not.
+/// The class-less toy model (hand values are plain bigram arithmetic) with the formal table or not and no Kneser-Ney side file, so the hand values are P2 itself.
 fn fx(tri: bool) -> Fx {
-    let lm = Arc::new(lm_of(false, true, tri));
+    fx_of(false, tri, false)
+}
+/// `fx` with the pieces named: the Kneser-Ney side file, the formal table, the chat table.
+fn fx_of(kn: bool, formal: bool, chat: bool) -> Fx {
+    let lm = Arc::new(lm_of(false, kn, formal, chat));
     let lex = Arc::new(Lexicon::parse_with(LEX, None).unwrap());
     let capped = Arc::new(CappedLexicon::new(lex.clone(), "", &lm, None).unwrap());
     Fx { lex, lm, capped }
@@ -211,7 +251,7 @@ fn fix_at(e: &mut Engine, end: usize, word: &str) -> Output {
 #[test]
 fn fixed_word_in_the_middle_hand_values_and_total_score() {
     let f = fx(true);
-    let plain = lm_of(false, false, false); // P2 without Kneser-Ney
+    let plain = lm_of(false, false, false, false); // P2 without Kneser-Ney
     let mut e = engine(&f, Profile::Formal);
     let o = fix_word(&mut e, "ㄓㄢˋ", "ㄊㄚ", "他", "ㄓㄢˋ");
     assert_eq!(o.preedit, "占他占");
@@ -321,7 +361,6 @@ fn unknown_start_ends_at_punctuation_and_at_an_english_run() {
     close(e.total_score().unwrap(), want);
     // an open English run at the cursor
     let mut e = engine(&f, Profile::Formal);
-    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     e.set_left_context("他");
     type_syls(&mut e, "ㄓㄢˋ ㄓㄢˋ");
@@ -370,7 +409,7 @@ fn two_word_stretches_keep_the_table_closing_term() {
 #[test]
 fn learned_word_skips_the_table_and_its_neighbour_does_not() {
     let f = fx(true);
-    let plain = lm_of(false, false, false);
+    let plain = lm_of(false, false, false, false);
     let mut e = engine(&f, Profile::Formal);
     e.set_learning(true);
     e.set_today(Some(20_000));
@@ -415,7 +454,6 @@ fn learned_word_skips_the_table_and_its_neighbour_does_not() {
 fn english_run_inside_a_stretch_cuts_the_total_like_the_decoder() {
     let f = fx(true);
     let mut e = engine(&f, Profile::Formal);
-    e.load_english(&dir("").join("english-tiny.txt")).unwrap();
     e.set_english(true).unwrap();
     type_syls(&mut e, "ㄊㄚ ㄓㄢˋ ㄊㄚ ㄓㄢˋ");
     for _ in 0..2 {
@@ -435,10 +473,11 @@ fn english_run_inside_a_stretch_cuts_the_total_like_the_decoder() {
     close(e.total_score().unwrap(), continuous);
 }
 
-/// Acceptance 6, chat: with and without the table the decode output, `total_score`, the candidates and the prediction row are bit for bit the same.
+/// Acceptance 6, chat: with and without the formal table (Kneser-Ney on in both) the chat decode output, `total_score`, the candidates and the prediction row
+/// are bit for bit the same.
 #[test]
-fn chat_is_the_same_with_and_without_the_table() {
-    let (with, without) = (fx(true), fx(false));
+fn chat_is_the_same_with_and_without_the_formal_table() {
+    let (with, without) = (fx_of(true, true, false), fx_of(true, false, false));
     let run = |f: &Fx| {
         let mut e = engine(f, Profile::Chat);
         e.set_prediction(true).unwrap();
@@ -465,12 +504,34 @@ fn chat_is_the_same_with_and_without_the_table() {
     assert_eq!(fixed(&with), fixed(&without));
 }
 
+/// sj-lm-7-pr2.md §2 item 1 in the engine: the chat profile scores with `trigram-chat.sjt3`, Kneser-Ney on. The engine's `total_score` of a typed sentence is the
+/// decode with the chat scoring (not the bigram's), the top decode's score changes with the table, and the formal engine is unchanged by a chat table.
+#[test]
+fn chat_engine_scores_with_the_chat_table() {
+    let (with, without) = (fx_of(true, false, true), fx_of(true, false, false));
+    let total = |f: &Fx, p: Profile, s: &str| {
+        let mut e = engine(f, p);
+        type_syls(&mut e, s);
+        e.total_score().unwrap()
+    };
+    let mut changed = false;
+    for s in ["ㄊㄚ ㄓㄢˋ", "ㄓㄢˋ ㄊㄚ ㄓㄢˋ"] {
+        let cfg = with.lm.scoring(Profile::Chat);
+        assert!(with.lm.uses_tri(cfg), "premise: chat scores with the table");
+        let top = decode_segment_learned(&with.capped, &syls(s), &with.lm, cfg, "<s>", End::Eos, core::BEAM_S1, None, true).unwrap()[0].0;
+        close(total(&with, Profile::Chat, s), top);
+        changed |= (total(&with, Profile::Chat, s) - total(&without, Profile::Chat, s)).abs() > 1e-3;
+        assert_eq!(total(&with, Profile::Formal, s).to_bits(), total(&without, Profile::Formal, s).to_bits(), "formal ignores the chat table: {s}");
+    }
+    assert!(changed, "premise: the chat table changes chat scores");
+}
+
 /// Acceptance 6, rule (d): the prediction row of the formal profile is the v0.4.6 one whether the table is loaded or not, scored with the
 /// Kneser-Ney side file on and without the table. After 起牀 nothing is a listed successor, so the row is ordered by score alone; there Kneser-Ney
 /// puts 占 before 他 (the premise below), and a table term (<s>, 起牀) -> 佔 would put 佔 first.
 #[test]
 fn formal_prediction_row_ignores_the_table_and_keeps_kneser_ney() {
-    let (with, without) = (fx(true), fx(false));
+    let (with, without) = (fx_of(true, true, false), fx_of(true, false, false));
     let row = |f: &Fx| {
         let mut e = engine(f, Profile::Formal);
         e.set_prediction(true).unwrap();
@@ -482,17 +543,17 @@ fn formal_prediction_row_ignores_the_table_and_keeps_kneser_ney() {
     // the reference: predict() with the side file, and without it (the premise: the two orders differ)
     let idx_of = |f: &Fx| {
         let units = units_of("ㄓ");
-        predict(f.capped.predict_index(&f.lm), &f.lm, Profile::Formal.lambda(), history("起牀", &f.lm), &units, Mode::P, 9)
+        predict(f.capped.predict_index(&f.lm), &f.lm, f.lm.scoring(Profile::Formal), history("起牀", &f.lm), &units, Mode::P, 9)
             .into_iter()
             .map(|x| x.0)
             .collect::<Vec<_>>()
     };
     let with_kn = idx_of(&without);
     let no_kn = {
-        let lm = Arc::new(lm_of(false, false, false));
+        let lm = Arc::new(lm_of(false, false, false, false));
         let capped = Arc::new(CappedLexicon::new(Arc::new(Lexicon::parse_with(LEX, None).unwrap()), "", &lm, None).unwrap());
         let units = units_of("ㄓ");
-        predict(capped.predict_index(&lm), &lm, Profile::Formal.lambda(), "起牀", &units, Mode::P, 9).into_iter().map(|x| x.0).collect::<Vec<_>>()
+        predict(capped.predict_index(&lm), &lm, lm.scoring(Profile::Formal), "起牀", &units, Mode::P, 9).into_iter().map(|x| x.0).collect::<Vec<_>>()
     };
     assert_ne!(with_kn, no_kn, "premise: Kneser-Ney changes the order");
     assert_eq!(a, with_kn);

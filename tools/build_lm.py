@@ -110,7 +110,7 @@ def merged_counts(cls=None, extra_overlay=None, corpora=None):
     return uni, bi, cls
 
 
-def build(cls=None, extra_overlay=None, corpora=None):
+def build(cls=None, extra_overlay=None, corpora=None, prune=PRUNE):
     uni, bi, cls = merged_counts(cls, extra_overlay, corpora)
     words = sorted(uni, key=lambda s: s.encode("utf-8"))
     vocab = ["<s>", "</s>"] + words
@@ -125,7 +125,7 @@ def build(cls=None, extra_overlay=None, corpora=None):
     total, kept = {}, {}
     for (v, w), c in bi.items():
         total[ids[v]] = total.get(ids[v], 0) + c
-        if c >= PRUNE:
+        if c >= prune:
             kept.setdefault(ids[v], []).append((ids[w], c))
     out = [b"SJLM0001", struct.pack("<IQQd", len(vocab), N, eos_total, D)]
     for w in vocab:
@@ -153,11 +153,12 @@ def main():
     ap.add_argument("--check", action="store_true", help="重建並和現有檔比對 SHA-256，不寫檔")
     ap.add_argument("--extra-overlay", help="接在 ime.OVERLAYS 之後的疊加層檔（model-v6 §7 P3-4，預設關），影響異體類")
     ap.add_argument("--corpora", nargs="+", metavar="FILE:WEIGHT", help="計數檔與整數權重（預設：維基 ×1、口語 ×5，即 CORPORA）；實驗用，出貨檔不帶這個選項")
+    ap.add_argument("--prune", type=int, default=PRUNE, help=f"bigram 保留加權次數 ≥ 這個值的條目（預設 PRUNE = {PRUNE}）；SJ-LM-7 量剪枝門檻用")
     a = ap.parse_args()
     if a.corpora and not a.out:
         ap.error("--out is required with --corpora (an experiment table must not overwrite data/lm/bigram.sjlm)")
     a.out = a.out or os.path.join(ROOT, "data", "lm", "bigram.sjlm")
-    data, V, C, E = build(extra_overlay=a.extra_overlay, corpora=parse_corpora(a.corpora) if a.corpora else None)
+    data, V, C, E = build(extra_overlay=a.extra_overlay, corpora=parse_corpora(a.corpora) if a.corpora else None, prune=a.prune)
     sha = hashlib.sha256(data).hexdigest()
     print(f"V={V} contexts={C} entries={E} bytes={len(data)} sha256={sha}")
     if a.check:

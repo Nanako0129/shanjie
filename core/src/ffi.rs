@@ -185,7 +185,7 @@ pub unsafe extern "C" fn shanjie_engine_new(
 }
 
 /// Like `shanjie_engine_new`, with word packs (docs/contracts/acg-pack.md A.2): `packs_dir` holds the pack
-/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG). Mask 0 ignores `packs_dir` (may be
+/// files and `packs` is the bit mask of the packs to enable (bit 0 ACG, bit 2 IT). Mask 0 ignores `packs_dir` (may be
 /// NULL) and is exactly `shanjie_engine_new`. A pack whose file is missing contributes nothing. A bit outside
 /// the known ones returns 2.
 ///
@@ -352,7 +352,8 @@ pub unsafe extern "C" fn shanjie_engine_reset(
 
 /// S2c. Loads the bigram model at `path` (with `classes.sjc` beside it, and a `kn.sjkn` Kneser-Ney side file if one
 /// exists there: a broken or mismatching one fails the load with code 3, a valid one changes the scoring; the app
-/// ships one since model-v6; likewise an optional `trigram.sjt3`, which only the formal profile uses, the app ships none yet), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
+/// ships one since model-v6; likewise the two optional trigram tables beside it, `trigram.sjt3` (the formal profile's) and `trigram-chat.sjt3` (the chat
+/// profile's), each a failure with code 3 when broken, both shipped by the app), reading `data_dir/overlay-add.tsv`, `names-add.tsv` (and demote.tsv) again. Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
 ///
 /// # Safety
@@ -637,32 +638,9 @@ pub unsafe extern "C" fn shanjie_engine_set_abbreviation(
     rc
 }
 
-/// zhen-mixed (docs/contracts/zhen-mixed.md section 3.1): the English word list at `path`. 0 ok; 1 engine or path NULL; 2 path
-/// not UTF-8; 3 unreadable, not a regular file, over 4 MiB or 200,000 lines, a line outside `[a-z]{3,32}`, a duplicate, a BOM.
-/// A failure keeps the previous list. Does not change the switch or the display. No path or word in any message.
-///
-/// # Safety
-/// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
-#[no_mangle]
-pub unsafe extern "C" fn shanjie_engine_load_english(engine: *mut ShanjieEngine, path: *const c_char) -> i32 {
-    guard(|| {
-        if engine.is_null() || path.is_null() {
-            return SHANJIE_ERR_NULL;
-        }
-        // SAFETY: non-NULL, NUL-terminated per the caller contract.
-        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
-            return SHANJIE_ERR_INVALID;
-        };
-        // SAFETY: live handle, single-threaded use (§6).
-        match unsafe { &mut (*engine).0 }.load_english(Path::new(path)) {
-            Ok(()) => SHANJIE_OK,
-            Err(_) => SHANJIE_ERR_LOAD,
-        }
-    })
-}
-
-/// zhen-mixed section 3.1. `enabled` 0 or 1 (default 0): whether Space after an English word typed into one unfinished syllable
-/// opens the English window (s3a rule 10e); only with a loaded list, the standard layout and the abbreviation composer off.
+/// zhen-mixed section 3.1, as zhen-revert changes it. `enabled` 0 or 1 (default 0): English mixing. On, keys that cannot be a Zhuyin
+/// syllable revert to the raw keys as an English run in the composition (s3a rules 9 and 10; switches `set_english_overwrite` and
+/// `set_english_key_order`); only with the standard layout and the abbreviation composer off.
 /// Returns the snapshot like `set_abbreviation`; any other value changes nothing and returns 2.
 ///
 /// # Safety
@@ -696,14 +674,14 @@ pub unsafe extern "C" fn shanjie_engine_set_english(
     rc
 }
 
-/// zhen-inline section 2. `enabled` 0 or 1 (default 1): whether the English typed into the unfinished syllable shows as its letters
-/// while it can still become a listed word (the display rule D). Returns the snapshot like `set_english`, so a composition on screen
-/// is drawn again; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
+/// zhen-revert section 3. `enabled` 0 or 1 (default 1): whether a Zhuyin key over a symbol already in its column reverts the
+/// unfinished syllable to its raw keys as English (`o k` is `ok`). Returns the snapshot like `set_english`; any other value changes
+/// nothing and returns 2. Only matters with `set_english(1)`.
 ///
 /// # Safety
 /// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
 #[no_mangle]
-pub unsafe extern "C" fn shanjie_engine_set_english_inline(
+pub unsafe extern "C" fn shanjie_engine_set_english_overwrite(
     engine: *mut ShanjieEngine,
     enabled: u32,
     out: *mut *mut ShanjieOutput,
@@ -718,7 +696,144 @@ pub unsafe extern "C" fn shanjie_engine_set_english_inline(
         }
         // SAFETY: live handle, single-threaded use (§6).
         let e = unsafe { &mut (*engine).0 };
-        match e.set_english_inline(enabled == 1) {
+        match e.set_english_overwrite(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// Fuzzy input (docs/contracts/fuzzy-input.md section 2.1): `flags` bits 0-3 are the sound pairs, bit 4 the adjacent-key slips; any
+/// other bit is 2 with the state unchanged. Codes and snapshot as `shanjie_engine_set_english`.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
+    engine: *mut ShanjieEngine,
+    flags: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if flags & !crate::fuzzy::FUZZY_ALL != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_fuzzy(flags) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// zhen-keyorder section 3 as zhen-revert changes it. `enabled` 0 or 1 (default 1): whether a Zhuyin key out of column order, and a
+/// tone key that completes a syllable the lexicon lacks, revert to the raw keys as English (`ls` is `ls` only with the reversal guard off,
+/// `s 7` is `s7`). Returns the
+/// snapshot like `set_english_overwrite`; any other value changes nothing and returns 2. Only matters with `set_english(1)`.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_key_order(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_key_order(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// zhen-reapply section 1.2. `enabled` 0 or 1 (default 1): while 1, a Zhuyin key out of column order goes into its column (Apple
+/// Zhuyin) and is never English, whatever `set_english_key_order` says; 0 leaves trigger (b) to that switch. Returns the snapshot like
+/// `set_english_key_order`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_reversal_guard(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_reversal_guard(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// shift-toggle section 4: the ASCII state of the shell's per-app Shift toggle. `on` 0 or 1 (2 otherwise, state unchanged). With 1 the
+/// open window or row closes, the digit run flushes and the unfinished syllable's keys open the English run; every printable ASCII
+/// character after it goes on the run as typed. With 0 the run ends as a token. Returns the snapshot like `set_english` (`commit` may
+/// be non-empty); 1 when `engine` or `out` is NULL.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_ascii(engine: *mut ShanjieEngine, on: u32, out: *mut *mut ShanjieOutput) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if on > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (§6).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_ascii(on == 1) {
             // SAFETY: `out` checked non-NULL above.
             Ok(o) => unsafe { emit(o, out) },
             Err(_) => SHANJIE_ERR_INTERNAL,
@@ -1137,6 +1252,8 @@ mod tests {
         }
         let dir = tiny_dir("panic", "ㄒㄧㄣ 鑫 -1.0\nㄅㄣ 犇 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
+        // context-return section 2: the English word of the left text is held until the reset after code 4.
+        assert!(set_left(e, "Joe") == 0 && unsafe { &(*e).0 }.left_full_chars() == 3, "left text held");
         for c in ['v', 'u', 'p'] {
             assert!(send(e, key(CHAR, c)).0 == 0, "typing");
         }
@@ -1150,6 +1267,7 @@ mod tests {
         assert!(rc == 4, "panic maps to code 4");
         assert!(o.is_null(), "out is NULL after a panic");
         assert!(PAYLOAD.with(|p| p.borrow().contains(MARKER)), "payload carries the marker");
+        assert!(unsafe { &(*e).0 }.left_full_chars() == 0, "the left text went with the reset after code 4");
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit.is_empty(), "engine was reset after code 4");
         unsafe { shanjie_engine_free(e) };
@@ -1764,6 +1882,62 @@ mod tests {
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }
 
+    /// docs/contracts/sj-lm-7-pr2.md section 3 item 2 through the C ABI: a trigram table beside the model that is corrupt (flipped magic,
+    /// truncated) or a dangling symlink fails `shanjie_engine_load_lm` with 3, for either file (the engine reads both) and with the old
+    /// model kept; the same file good loads with 0, and a missing one only turns that profile's table off (0). The model, classes and
+    /// the other table are good in every case, so the 3 can only come from the file under test.
+    #[test]
+    fn load_lm_refuses_a_bad_trigram_table() {
+        let (ok, out, err) = run_child("child_lm_tables", false);
+        assert!(ok, "LM tables child failed");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    #[test]
+    fn child_lm_tables() {
+        if !is_child("child_lm_tables") {
+            return;
+        }
+        let dir = tiny_dir("lmtables", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\n".as_bytes());
+        let tiny = tiny_lm();
+        std::fs::write(dir.join("tiny.sjlm"), &tiny).unwrap();
+        let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
+        std::fs::write(dir.join("classes.sjc"), crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
+        let lm_c = CString::new(dir.join("tiny.sjlm").to_str().unwrap()).unwrap();
+        let load = |e| unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) };
+        // (<s>, <s>) -> 心 4 of 4: a valid table for the toy model.
+        let good = crate::lm::test_tri(&tiny, 0.75, &[((0, 0), 4, &[(2, 4)])]);
+        for (name, other) in [("trigram.sjt3", "trigram-chat.sjt3"), ("trigram-chat.sjt3", "trigram.sjt3")] {
+            let (file, other_file) = (dir.join(name), dir.join(other));
+            std::fs::write(&other_file, &good).unwrap();
+            std::fs::write(&file, &good).unwrap();
+            let e = new_engine(&dir, 0);
+            assert!(load(e) == 0, "{name}: both tables good");
+            assert!(type_xin(e) == "鑫", "{name}: model loaded");
+            let mut flipped = good.clone();
+            flipped[0] ^= 1;
+            for (what, damage) in [("corrupt magic", 0), ("truncated", 1), ("dangling symlink", 2)] {
+                std::fs::remove_file(&file).ok();
+                match damage {
+                    0 => std::fs::write(&file, &flipped).unwrap(),
+                    1 => std::fs::write(&file, &good[..good.len() - 1]).unwrap(),
+                    _ => std::os::unix::fs::symlink(dir.join("missing.sjt3"), &file).unwrap(),
+                }
+                assert!(load(e) == 3, "{name}: {what} must fail the load");
+                assert!(profile(e, 1).3 == "心", "{name}: {what}: the loaded model is kept (formal reads 心, no model reads 鑫)");
+                assert!(profile(e, 0).0 == 0);
+                let fresh = new_engine(&dir, 0);
+                assert!(load(fresh) == 3 && type_xin(fresh) == "鑫" && profile(fresh, 1).3 == "鑫", "{name}: {what}: a fresh engine ends with no LM");
+                unsafe { shanjie_engine_free(fresh) };
+            }
+            std::fs::remove_file(&file).unwrap();
+            assert!(load(e) == 0, "{name}: a missing table is only that profile off");
+            unsafe { shanjie_engine_free(e) };
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Digits (docs/contracts/digits.md A.4.3) through the C ABI: a data directory with a tiny `digits.tsv`, the tiny model, `set_english(1)`:
     /// 2 0 2 6 Enter commits "2026"; with `set_english(0)` the same keys are the old Zhuyin keys.
     #[test]
@@ -1810,12 +1984,7 @@ mod tests {
         assert!(!out.contains("2026") && !err.contains("2026"), "the keys leaked");
     }
 
-    // ---- zhen-mixed: load_english, set_english (docs/contracts/zhen-mixed.md section 5.2) ----
-
-    fn load_english(e: *mut ShanjieEngine, p: &Path) -> i32 {
-        let c = CString::new(p.to_str().unwrap()).unwrap();
-        unsafe { shanjie_engine_load_english(e, c.as_ptr()) }
-    }
+    // ---- zhen-mixed: set_english (docs/contracts/zhen-mixed.md section 5.2) ----
 
     /// set_english; returns the code and frees the output.
     fn set_english(e: *mut ShanjieEngine, on: u32) -> i32 {
@@ -1829,10 +1998,34 @@ mod tests {
         rc
     }
 
-    /// set_english_inline; returns the code and frees the output.
-    fn set_inline(e: *mut ShanjieEngine, on: u32) -> i32 {
+    /// set_english_overwrite; returns the code and frees the output.
+    fn set_overwrite(e: *mut ShanjieEngine, on: u32) -> i32 {
         let mut o: *mut ShanjieOutput = sentinel();
-        let rc = unsafe { shanjie_engine_set_english_inline(e, on, &mut o) };
+        let rc = unsafe { shanjie_engine_set_english_overwrite(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
+    /// set_english_key_order; returns the code and frees the output.
+    fn set_key_order(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_key_order(e, on, &mut o) };
+        if rc == 0 {
+            unsafe { shanjie_output_free(o) };
+        } else {
+            assert!(o.is_null(), "*out NULL on a non-zero code");
+        }
+        rc
+    }
+
+    /// set_english_reversal_guard; returns the code and frees the output.
+    fn set_reversal_guard(e: *mut ShanjieEngine, on: u32) -> i32 {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_english_reversal_guard(e, on, &mut o) };
         if rc == 0 {
             unsafe { shanjie_output_free(o) };
         } else {
@@ -1865,22 +2058,8 @@ mod tests {
         if !is_child("child_english") {
             return;
         }
-        let dir = tiny_dir("english", "ㄒㄧㄣ 鑫 -1.0\n".as_bytes());
+        let dir = tiny_dir("english", "ㄒㄧㄣ 鑫 -1.0\nㄋㄠ 鬧 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
-        let list = |name: &str, bytes: &[u8]| {
-            let p = dir.join(name);
-            std::fs::write(&p, bytes).unwrap();
-            p
-        };
-        let good = list("good.txt", b"rust\ngoogle\n");
-        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
-        let good_c = CString::new(good.to_str().unwrap()).unwrap();
-
-        // load_english: 1 for NULLs, 2 for a non-UTF-8 path.
-        assert!(unsafe { shanjie_engine_load_english(ptr::null_mut(), good_c.as_ptr()) } == 1, "load engine NULL");
-        assert!(unsafe { shanjie_engine_load_english(e, ptr::null()) } == 1, "load path NULL");
-        assert!(unsafe { shanjie_engine_load_english(e, bad_utf8.as_ptr()) } == 2, "load non-UTF-8");
-
         // set_english codes, like set_abbreviation.
         let mut o: *mut ShanjieOutput = sentinel();
         assert!(unsafe { shanjie_engine_set_english(e, 1, ptr::null_mut()) } == 1, "set_english out NULL");
@@ -1888,101 +2067,74 @@ mod tests {
         for v in [2, u32::MAX] {
             assert!(set_english(e, v) == 2, "set_english out of range");
         }
-        // On without a list: only remembered, no window.
+        // `rust` reverts and no window opens.
         assert!(set_english(e, 1) == 0);
-        let (cands, _, _) = type_out(e, "rust_");
-        assert!(cands.is_empty(), "no list, no window");
+        let (cands, _, preedit) = type_out(e, "rust_");
+        assert!(cands.is_empty() && preedit == "rust", "no window");
         assert!(send(e, key(ESC, '\0')).0 == 0);
 
-        // 3 for every file the loader refuses; each leaves no list (none was loaded yet).
-        let words = |n: usize, len: usize| -> Vec<u8> {
-            (0..n)
-                .map(|i| {
-                    let mut w: Vec<u8> = (0..len).map(|j| b'a' + ((i >> (4 * (j % 8))) & 15) as u8 + (j / 8) as u8).collect();
-                    w.push(b'\n');
-                    String::from_utf8(w).unwrap()
-                })
-                .collect::<String>()
-                .into_bytes()
-        };
-        let refused: Vec<(&str, Vec<u8>)> = vec![
-            ("one letter too few", b"rust\nab\n".to_vec()),
-            ("33 letters", [b"rust\n".to_vec(), vec![b'a'; 33], b"\n".to_vec()].concat()),
-            ("upper case", b"rust\nRust\n".to_vec()),
-            ("digit", b"rust\nab1\n".to_vec()),
-            ("blank line", b"rust\n\ngoogle\n".to_vec()),
-            ("duplicate", b"rust\ngoogle\nrust\n".to_vec()),
-            ("BOM", [b"\xef\xbb\xbf".to_vec(), b"rust\n".to_vec()].concat()),
-            ("CRLF", b"rust\r\ngoogle\r\n".to_vec()),
-            ("not UTF-8", b"rust\n\xff\xfe\n".to_vec()),
-            // `rust` first, as in every case above: a loader that kept the lines read before the limit would open the window.
-            ("over 4 MiB", [b"rust\n".to_vec(), words(140_000, 32)].concat()),
-            ("over 200,000 lines", [b"rust\n".to_vec(), words(200_000, 6)].concat()),
-        ];
-        for (what, bytes) in &refused {
-            let p = list("refused.txt", bytes);
-            assert!(load_english(e, &p) == 3, "{what}");
-        }
-        assert!(load_english(e, &dir.join("missing.txt")) == 3, "missing");
-        assert!(load_english(e, &dir) == 3, "a directory");
-        // A FIFO with no writer: 3 at once (not a regular file), not an open that waits for a writer forever.
-        let fifo = dir.join("fifo.txt");
-        assert!(Command::new("/usr/bin/mkfifo").arg(&fifo).status().unwrap().success(), "mkfifo");
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (ep, fp) = (e as usize, fifo.clone());
-        std::thread::spawn(move || tx.send(load_english(ep as *mut ShanjieEngine, &fp)).unwrap());
-        let got = rx.recv_timeout(std::time::Duration::from_secs(10));
-        assert!(got.expect("load_english blocked on a FIFO") == 3, "a FIFO");
-        std::fs::remove_file(fifo).unwrap();
-        let (cands, _, _) = type_out(e, "rust_");
-        assert!(cands.is_empty(), "failed loads left no list");
-        assert!(send(e, key(ESC, '\0')).0 == 0);
-        // The limits themselves are fine: 200,000 lines.
-        assert!(load_english(e, &list("max.txt", &words(200_000, 6))) == 0, "200,000 lines");
-
-        // A good list, then a bad one: the good list stays.
-        assert!(load_english(e, &good) == 0, "good list");
-        for (what, bytes) in &refused {
-            let p = list("refused.txt", bytes);
-            assert!(load_english(e, &p) == 3, "{what}");
-        }
-        // set_english_inline (zhen-inline section 2): the codes of set_english.
+        // set_english_overwrite (zhen-revert section 3): the codes of set_english.
         let mut o: *mut ShanjieOutput = sentinel();
-        assert!(unsafe { shanjie_engine_set_english_inline(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "inline engine NULL");
-        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, ptr::null_mut()) } == 1, "inline out NULL");
+        assert!(unsafe { shanjie_engine_set_english_overwrite(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "overwrite engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_overwrite(e, 1, ptr::null_mut()) } == 1, "overwrite out NULL");
         for v in [2, u32::MAX] {
-            assert!(set_inline(e, v) == 2, "inline out of range");
+            assert!(set_overwrite(e, v) == 2, "overwrite out of range");
         }
-        // Through the C ABI, "show as typed" (the default): rust shows as the letters, Space opens the window, 1 keeps the word
-        // in the composition (nothing is committed), Enter sends it.
-        let (cands, commit, preedit) = type_out(e, "rust");
-        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "inline display");
+        // Through the C ABI, on by default: `o k` reverts to the raw keys, Space makes the one English token; nothing is committed
+        // and no candidate window opens (zhen-revert section 5.2).
+        let (cands, commit, preedit) = type_out(e, "ok");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "ok", "the raw keys are the preedit");
         let (cands, commit, preedit) = type_out(e, "_");
-        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && preedit == "rust", "window");
-        let (cands, commit, preedit) = type_out(e, "1");
-        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "ok", "the token stays in the composition");
         let (_, preedit, commit) = send(e, key(ENTER, '\0'));
-        assert!(preedit.is_empty() && commit == "rust", "Enter sends it");
-        // "Show on Space": the Zhuyin shows until the window opens.
-        assert!(set_inline(e, 0) == 0);
-        let (_, commit, preedit) = type_out(e, "rust");
-        assert!(commit.is_empty() && preedit == "ㄔㄧ", "Zhuyin display");
-        let (cands, commit, preedit) = type_out(e, "_");
-        assert!(cands == ["rust", "Rust", "RUST"] && commit.is_empty() && preedit == "ㄔㄧ", "window");
-        let (cands, commit, preedit) = type_out(e, "1");
-        assert!(cands.is_empty() && commit.is_empty() && preedit == "rust", "the word stays in the composition");
-        assert!(send(e, key(ENTER, '\0')).2 == "rust");
-        // The snapshot redraws a composition on screen: letters typed, switch to "on Space", the Zhuyin shows, and back.
-        type_out(e, "rus");
-        let mut o: *mut ShanjieOutput = ptr::null_mut();
-        assert!(unsafe { shanjie_engine_set_english_inline(e, 1, &mut o) } == 0);
-        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "rus", "snapshot, letters");
-        unsafe { shanjie_output_free(o) };
-        assert!(unsafe { shanjie_engine_set_english_inline(e, 0, &mut o) } == 0);
-        assert!(unsafe { CStr::from_ptr((*o).preedit) }.to_str().unwrap() == "ㄋㄧ", "snapshot, Zhuyin");
-        unsafe { shanjie_output_free(o) };
+        assert!(preedit.is_empty() && commit == "ok", "Enter sends it");
+        let (cands, commit, preedit) = type_out(e, "gta6_");
+        assert!(cands.is_empty() && commit.is_empty() && preedit == "gta6", "letters and a digit in one token");
         assert!(send(e, key(ESC, '\0')).0 == 0);
-        assert!(set_inline(e, 1) == 0);
+        // Off: a fourth key over the same column replaces, as it always did; on again, it reverts.
+        assert!(set_overwrite(e, 0) == 0);
+        let (_, _, preedit) = type_out(e, "vupp");
+        assert!(preedit == "ㄒㄧㄣ", "off: the key replaces");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_overwrite(e, 1) == 0);
+        let (_, _, preedit) = type_out(e, "vupp");
+        assert!(preedit == "vupp", "on: the raw keys");
+        // Esc right after a revert brings the Zhuyin back; the second one clears it (zhen-revert section 2.4).
+        assert!(send(e, key(ESC, '\0')).1 == "ㄒㄧㄣ");
+        assert!(send(e, key(ESC, '\0')).1.is_empty());
+        // set_english_reversal_guard (zhen-reapply section 1.2): the codes of set_english_key_order, then the switch through the C ABI.
+        // On (the default) `l s` Space is the Chinese ㄋㄠ although the key-order switch is on; off, it is the English token `ls`.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_reversal_guard(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "guard engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_reversal_guard(e, 1, ptr::null_mut()) } == 1, "guard out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_reversal_guard(e, v) == 2, "guard out of range");
+        }
+        let (_, _, preedit) = type_out(e, "ls_");
+        assert!(preedit != "ls" && !preedit.is_empty(), "guard on by default: Chinese, {preedit}");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_reversal_guard(e, 0) == 0);
+        let (_, _, preedit) = type_out(e, "ls_");
+        assert!(preedit == "ls", "guard off: the English token");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        // The key-order cases below are trigger (b) itself, so the guard stays off for them.
+        // set_english_key_order (zhen-keyorder section 3): the codes of set_english_overwrite, then the switch through the C ABI. On
+        // (the default), `p v` is out of column order and reverts; off, the symbol goes into its column.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_key_order(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "key order engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_key_order(e, 1, ptr::null_mut()) } == 1, "key order out NULL");
+        for v in [2, u32::MAX] {
+            assert!(set_key_order(e, v) == 2, "key order out of range");
+        }
+        let (_, _, preedit) = type_out(e, "pv");
+        assert!(preedit == "pv", "key order on by default");
+        assert!(send(e, key(ESC, '\0')).1 == "ㄒㄣ");
+        assert!(send(e, key(ESC, '\0')).1.is_empty());
+        assert!(set_key_order(e, 0) == 0);
+        let (_, _, preedit) = type_out(e, "pv");
+        assert!(preedit == "ㄒㄣ", "key order off: today");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_key_order(e, 1) == 0);
         // The last two fields (zhen-inline section 1.3f): an open English run, in UTF-16 units of `preedit`; 0 and 0 otherwise.
         let fields = |k: ShanjieKey| {
             let mut o = ptr::null_mut();
@@ -2000,10 +2152,32 @@ mod tests {
         let r = fields(key(SPACE, '\0'));
         assert!(r.1 == 0 && r.2 == 0, "the run ended: 0 and 0, {r:?}");
         assert!(send(e, key(ESC, '\0')).0 == 0);
-        // Off: the same keys no longer open it.
+        // set_ascii (shift-toggle section 4): the codes of set_english, then the state through the C ABI.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_ascii(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "ascii engine NULL");
+        assert!(unsafe { shanjie_engine_set_ascii(e, 1, ptr::null_mut()) } == 1, "ascii out NULL");
+        for v in [2, u32::MAX] {
+            let mut o: *mut ShanjieOutput = sentinel();
+            assert!(unsafe { shanjie_engine_set_ascii(e, v, &mut o) } == 2 && o.is_null(), "ascii out of range");
+        }
+        // ㄏ then ASCII: the snapshot is the run `c` (bold range), the next `1` is a character, Enter sends them.
+        type_out(e, "c");
+        let mut o = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_ascii(e, 1, &mut o) } == 0);
+        // SAFETY: test-only read of a live output.
+        let r = unsafe { (CStr::from_ptr((*o).preedit).to_str().unwrap().to_string(), (*o).handled, (*o).english_run_utf16_start, (*o).english_run_utf16_len) };
+        unsafe { shanjie_output_free(o) };
+        assert!(r == ("c".to_string(), 1, 0, 1), "{r:?}");
+        let r = fields(key(CHAR, '1'));
+        assert!(r.0 == "c1" && r.1 == 0 && r.2 == 2, "{r:?}");
+        assert!(send(e, key(ENTER, '\0')).2 == "c1");
+        let mut o = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_set_ascii(e, 0, &mut o) } == 0);
+        unsafe { shanjie_output_free(o) };
+        // Off: the same keys no longer revert.
         assert!(set_english(e, 0) == 0);
-        let (cands, _, _) = type_out(e, "rust_");
-        assert!(cands.is_empty(), "off");
+        let (_, _, preedit) = type_out(e, "ok");
+        assert!(preedit == "ㄜ", "off");
         unsafe { shanjie_engine_free(e) };
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -2017,11 +2191,104 @@ mod tests {
         assert!(!all.contains("shanjie-ffi-") && !all.contains("rust") && !all.contains("google"), "a path or a word leaked");
     }
 
+    // ---- fuzzy input: set_fuzzy (docs/contracts/fuzzy-input.md section 2.1) ----
+
+    /// Calls set_fuzzy; returns (code, out was NULL, handled, preedit, commit) and frees the output.
+    fn fuzzy(e: *mut ShanjieEngine, flags: u32) -> (i32, bool, i32, String, String) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_fuzzy(e, flags, &mut o) };
+        if o.is_null() {
+            return (rc, true, 0, String::new(), String::new());
+        }
+        // SAFETY: test-only read of a live output.
+        let r = unsafe {
+            let s = |p| CStr::from_ptr(p).to_str().unwrap().to_string();
+            (rc, false, (*o).handled, s((*o).preedit), s((*o).commit))
+        };
+        unsafe { shanjie_output_free(o) };
+        r
+    }
+
+    #[test]
+    fn child_fuzzy() {
+        if !is_child("child_fuzzy") {
+            return;
+        }
+        // 星 (ㄒㄧㄥ) beside 鑫 and 心 (ㄒㄧㄣ); the toy model likes 鑫 (see `tiny_lm`), and 星 is scored low enough that 鑫 beats it with the pair on even after
+        // the sound penalty (`fuzzy::DELTA_SOUND`, 2.5).
+        let dir = tiny_dir("fuzzy", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\nㄒㄧㄥ 星 -6.0\n".as_bytes());
+        let lm_path = dir.join("tiny.sjlm");
+        std::fs::write(&lm_path, tiny_lm()).unwrap();
+        let tiny = tiny_lm();
+        let (cls, emit) = ([1u16, 2, 0xFFFF, 0xFFFF], [1.0, 1.0, 0.0, 0.0]);
+        std::fs::write(dir.join("classes.sjc"), crate::lm::test_classes(&tiny, 0, 0.8, &cls, &emit, &[0.1; 9])).unwrap();
+        let lm_c = CString::new(lm_path.to_str().unwrap()).unwrap();
+        let e = new_engine(&dir, 0);
+        assert!(unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) } == 0, "load ok");
+
+        // NULLs are 1 (and *out is NULL for a NULL engine).
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_fuzzy(e, 1, ptr::null_mut()) } == 1, "out NULL");
+        assert!(unsafe { shanjie_engine_set_fuzzy(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+
+        // Types ㄒㄧㄥ (`v u /`): the toy model's exact answer is 星.
+        for c in ['v', 'u', '/'] {
+            assert!(send(e, key(CHAR, c)).0 == 0, "typing");
+        }
+        let shown = send(e, key(SPACE, '\0')).1;
+        assert!(shown == "星", "exact reading, got {shown}");
+
+        // Any bit above bit 4 is 2 with a NULL out and the state unchanged: 0b1_0001 must not turn bit 0 on.
+        for flags in [32, 33, 0xffff_ffff] {
+            let (rc, null, ..) = fuzzy(e, flags);
+            assert!(rc == 2 && null, "undefined bit {flags}");
+        }
+        assert!(send(e, key(LEFT, '\0')).1 == "星", "a refused call changed nothing");
+        // Bit 0 (ㄣ/ㄥ) is 0 with the snapshot of the recomputed composition: 鑫 is read through ㄒㄧㄥ.
+        let (rc, null, handled, preedit, commit) = fuzzy(e, 1);
+        assert!(rc == 0 && !null && handled == 1 && commit.is_empty(), "snapshot");
+        assert!(preedit == "鑫", "the composition is recomputed with the pair on, got {preedit}");
+        // 0 and 31 are valid; 0 puts the exact answer back.
+        assert!(fuzzy(e, 31).0 == 0);
+        let (rc, _, _, preedit, _) = fuzzy(e, 0);
+        assert!(rc == 0 && preedit == "星", "all off again");
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fuzzy_codes_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_fuzzy", false);
+        assert!(ok, "fuzzy child failed: {out}{err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!format!("{out}{err}").contains("shanjie-ffi-"), "a path leaked");
+    }
+
     // ---- S7c-2a: load_tinylm, set_rerank, take / run / apply / free (docs/contracts/s7c2a-core-rerank.md section 3 item 3) ----
 
     /// dev302 row 12 (as engine_lm.rs counts it): the n-gram shows RERANK_NGRAM, and the toy model below changes it.
     const RERANK_ROW: usize = 12;
     const RERANK_NGRAM: &str = "我在家";
+    /// context-return section 4: an ASCII marker in the left text that reaches a job (the last L = 8 characters of "我說zqxjvk ";
+    /// no Han tail, so the n-gram decodes as without a left text).
+    const LEFT_MARKER: &str = "zqxjvk";
+
+    fn set_left(e: *mut ShanjieEngine, text: &str) -> i32 {
+        let c = CString::new(text).unwrap();
+        unsafe { shanjie_engine_set_left_context(e, c.as_ptr()) }
+    }
+
+    /// The version 1 file at `p` rewritten as version 5 declaring the left-context length `l` (docs/contracts/context-return.md
+    /// section 2): both deltas 0, the standard triples for every level, an all-zero side file hash, then L.
+    fn as_v5(p: &Path, l: u32) {
+        let b = std::fs::read(p).unwrap();
+        let triple = |at: usize| [&b[at..at + 16], &0f64.to_le_bytes()[..]].concat();
+        let (chat, formal) = (triple(36), triple(52));
+        let mut h = [&b[..100], &[0; 16][..], &chat, &chat, &formal, &formal, &[0; 32][..], &l.to_le_bytes()[..]].concat();
+        h[7] = b'5';
+        h[8..12].copy_from_slice(&5u32.to_le_bytes());
+        std::fs::write(p, [h.as_slice(), &b[100..]].concat()).unwrap();
+    }
 
     /// data/lm/bigram.sjlm and classes.sjc symlinked into `dir` without the kn.sjkn model-v6 puts beside them: the toy `.sjtl`
     /// files here (versions 1 and 3) were tuned without a side file and pair only with the model loaded without KN (model-v6
@@ -2418,10 +2685,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shanjie-ffi-{}-rerank-panic", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let good = toy_sjtl(&dir, "good.sjtl", true);
+        as_v5(&good, 8);
         let (e, keys) = rerank_engine();
         let lm = CString::new(lm_without_kn(&dir).to_str().unwrap()).unwrap();
         assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0 && load_tinylm(e, &good) == 0, "loads");
         assert!(set_rerank(e, 1).0 == 0, "on (off by default since S7c-2c)");
+        assert!(set_left(e, &format!("我說{LEFT_MARKER} ")) == 0, "left text");
         for &k in &keys {
             send(e, k);
         }
@@ -2432,6 +2701,7 @@ mod tests {
         ARMED.with(|a| a.set(true));
         assert!(unsafe { shanjie_rerank_run(j) } == 4, "run panic maps to 4");
         assert!(PAYLOAD.with(|p| p.borrow().contains(RERANK_NGRAM)), "payload carries the candidate text");
+        assert!(PAYLOAD.with(|p| p.borrow().contains(LEFT_MARKER)), "payload carries the job's left text");
         // run has no engine: the composition is unchanged, and no result was stored.
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit == RERANK_NGRAM, "composition unchanged after run's 4");
@@ -2445,11 +2715,13 @@ mod tests {
     fn r2_rerank_run_panic_is_silent() {
         let (ok, out, err) = run_child("child_rerank_panic", false);
         assert!(ok, "quiet child failed");
-        assert!(!out.contains(RERANK_NGRAM) && !err.contains(RERANK_NGRAM), "candidate text leaked with the silent hook");
+        for marker in [RERANK_NGRAM, LEFT_MARKER] {
+            assert!(!out.contains(marker) && !err.contains(marker), "input text leaked with the silent hook");
+        }
         assert!(out.contains("1 passed"), "child test actually ran");
         // Positive control: the same child with the default hook must show the text.
         let (ok, out, err) = run_child("child_rerank_panic", true);
         assert!(ok && out.contains("1 passed"), "default-hook child failed");
-        assert!(err.contains(RERANK_NGRAM), "positive control: default hook did not print the text");
+        assert!(err.contains(RERANK_NGRAM) && err.contains(LEFT_MARKER), "positive control: default hook did not print the text");
     }
 }

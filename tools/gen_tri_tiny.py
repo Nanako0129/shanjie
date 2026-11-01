@@ -1,9 +1,11 @@
 """Trigram toy golden for the cross-language check (docs/contracts/trigram-core.md section 2, acceptance 2 and 3): Python writes, core/tests/tri_tiny.rs compares.
 
 The toy bigram model, classes.sjc and kn.sjkn are the ones in eval/golden/kn-tiny/ (tools/gen_kn_tiny.py); this adds, under eval/golden/tri-tiny/:
-  trigram.sjt3 (SJT30001 bound to that bigram.sjlm, tools/build_trigram.from_counts), lexicon.txt (the kn-tiny lexicon plus the word 他占 for ㄊㄚ-ㄓㄢˋ, so one
-  surface has two segmentations that differ in the previous word) and decode.tsv (the Python reference decoder with the table, formal, Kneser-Ney off:
-  start word, sentence, rank, surface, score repr).
+  trigram.sjt3 (the formal profile's table) and trigram-chat.sjt3 (the chat profile's; other counts, so the two profiles score differently), both SJT30001 bound
+  to that bigram.sjlm (tools/build_trigram.from_counts), lexicon.txt (the kn-tiny lexicon plus the word 他占 for ㄊㄚ-ㄓㄢˋ, so one surface has two segmentations
+  that differ in the previous word) and decode.tsv (the Python reference decoder with the profile's own table: config, start word, sentence, rank, surface, score
+  repr). Configs: formal and chat score with kn-tiny's kn.sjkn (beta 1 in the file; formal takes lm.FORMAL_KN_BETA, chat the file's), formal-nokn and chat-nokn
+  without a side file.
 The table covers every case the formula has: a kept entry, a context whose entry is missing, a context that is not stored, an unknown u (a start word that is not <s>).
 Regenerate: python3 -B tools/gen_tri_tiny.py (tools/test_build_trigram.py checks the committed files equal the current output).
 """
@@ -39,27 +41,33 @@ ENTRIES = {
 }
 TOTALS = {("<s>", "<s>"): 20, ("<s>", "他"): 8, ("他", "占"): 9, ("他", "佔"): 3, ("他", "起床"): 5, ("<s>", "起床"): 6, ("<s>", "占"): 6, ("占", "他"): 10,
           ("佔", "他"): 1, ("<s>", "起牀"): 10}
+# The chat table: other counts on purpose, so that a profile reading the other profile's table is caught.
+CHAT_ENTRIES = {("<s>", "<s>", "佔"): 7, ("<s>", "<s>", "他"): 5, ("<s>", "佔", "</s>"): 3, ("<s>", "他", "佔"): 4, ("他", "佔", "</s>"): 2}
+CHAT_TOTALS = {("<s>", "<s>"): 14, ("<s>", "佔"): 4, ("<s>", "他"): 6, ("他", "佔"): 3}
 EXTRA_LEXICON = "ㄊㄚ-ㄓㄢˋ 他占 -1.0\n"
+CONFIGS = (("formal", "formal", True), ("formal-nokn", "formal", False), ("chat", "chat", True), ("chat-nokn", "chat", False))   # (name, profile, side file)
 
 
 def generate():
     """File name -> bytes (nothing is written)."""
     model = open(os.path.join(KN_TINY, "bigram.sjlm"), "rb").read()
     lexicon = open(os.path.join(KN_TINY, "lexicon.txt"), "rb").read().decode() + EXTRA_LEXICON
-    table = build_trigram.from_counts(ENTRIES, TOTALS, model)
+    tables = {"formal": build_trigram.from_counts(ENTRIES, TOTALS, model), "chat": build_trigram.from_counts(CHAT_ENTRIES, CHAT_TOTALS, model)}
+    sha = __import__("hashlib").sha256(model).digest()
     with tempfile.TemporaryDirectory() as tmp:
         for name, b in (("bigram.sjlm", model), ("classes.sjc", open(os.path.join(KN_TINY, "classes.sjc"), "rb").read()),
-                        ("trigram.sjt3", table), ("lexicon.txt", lexicon.encode())):
+                        ("trigram.sjt3", tables["formal"]), ("trigram-chat.sjt3", tables["chat"]), ("lexicon.txt", lexicon.encode())):
             open(os.path.join(tmp, name), "wb").write(b)
-        lm = L.BigramLM(os.path.join(tmp, "bigram.sjlm"))
-        tri_lm = trigram.TriLM(lm, trigram.TriTable.from_path(os.path.join(tmp, "trigram.sjt3"), __import__("hashlib").sha256(model).digest()))
-        lex = L.cap_overlay(ime.Lexicon(os.path.join(tmp, "lexicon.txt")), set(), lm, demote_path=None)
         lines = []
-        for start in STARTS:
-            for i, s in enumerate(SENTENCES, 1):
-                for r, (sc, ws) in enumerate(trigram.decode3(lex, s.split(), tri_lm, "formal", start=start), 1):
-                    lines.append(f"{start}\t{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")
-    return {"trigram.sjt3": table, "lexicon.txt": lexicon.encode(), "decode.tsv": "".join(lines).encode()}
+        for config, profile, side in CONFIGS:
+            lm = L.BigramLM(os.path.join(tmp, "bigram.sjlm"), kn=os.path.join(KN_TINY, "kn.sjkn") if side else None)
+            tri_lm = trigram.TriLM(L.profile_lm(lm, profile), trigram.TriTable.from_path(os.path.join(tmp, "trigram.sjt3" if profile == "formal" else "trigram-chat.sjt3"), sha))
+            lex = L.cap_overlay(ime.Lexicon(os.path.join(tmp, "lexicon.txt")), set(), lm, demote_path=None)
+            for start in STARTS:
+                for i, s in enumerate(SENTENCES, 1):
+                    for r, (sc, ws) in enumerate(trigram.decode3(lex, s.split(), tri_lm, profile, start=start), 1):
+                        lines.append(f"{config}\t{start}\t{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")
+    return {"trigram.sjt3": tables["formal"], "trigram-chat.sjt3": tables["chat"], "lexicon.txt": lexicon.encode(), "decode.tsv": "".join(lines).encode()}
 
 
 if __name__ == "__main__":

@@ -1,0 +1,40 @@
+{
+ "clauses": 278,
+ "decode_models_sha256": {
+  "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+  "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+  "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+  "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+  "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+ },
+ "decode_packs_sha256": {
+  "acg-add.tsv": "6d1c3a696f1bc1246004fe411c53844b6b84f16741bb83b98989cfe79a754b53",
+  "it-add.tsv": "8777420b2d669e40f12ab4cf3ee719c317f51a0d43bad8a0ea294e07001815e4"
+ },
+ "dropped_by_lexicon_rule": 0,
+ "files": {
+  "quotes-add.tsv": {
+   "bytes": 28026,
+   "lines": 311,
+   "sha256": "c5584db7aae445ffe925e9b3dbdd3b34a12bcebc1c3cc970b1ea7bf8a4bea848"
+  }
+ },
+ "first_without_quote_pack": {
+  "chat": 254,
+  "formal": 253
+ },
+ "list_sha256": "6ff0919b1be73547c55f8be3dff811028e089395b9eed885dde20dce88af1180",
+ "not_first_with_pack": 12,
+ "quotes_checked": 208,
+ "quotes_listed": 208,
+ "quotes_unchecked": 0,
+ "rows": 311,
+ "skipped": {
+  "in the lexicon": 52,
+  "not Han": 5,
+  "too long": 34,
+  "too short": 3
+ },
+ "unreadable": 0,
+ "version": "c5584db7"
+}

@@ -93,10 +93,18 @@ pub fn context_key(prefix: &str) -> String {
     }
 }
 
-/// zhen-inline §1.0: the English word of a token reading (`_punct_rust` -> `rust`): the text after `PUNCT_PREFIX`, when it is
-/// non-empty ASCII letters only (no punctuation mark is).
+/// The last `n` characters of `s` (by `chars()`, never a byte slice: context-return section 2, P3-5).
+pub fn last_chars(s: &str, n: usize) -> String {
+    s.chars().skip(s.chars().count().saturating_sub(n)).collect()
+}
+
+/// zhen-inline §1.0 as zhen-revert §1 widens it: the English text of a token reading (`_punct_rust` -> `rust`, `_punct_gta6` -> `gta6`):
+/// the text after `PUNCT_PREFIX`, non-empty, every character in `[A-Za-z0-9,.;/-]`, and not a lone character of the digit alphabet (that is
+/// a digit-string token, `digit_of`). No punctuation mark, tone symbol or space unit is one.
 pub fn english_of(reading: &str) -> Option<&str> {
-    reading.strip_prefix(PUNCT_PREFIX).filter(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphabetic()))
+    let w = reading.strip_prefix(PUNCT_PREFIX)?;
+    let text = !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphanumeric() || b",.;/-".contains(&b));
+    (text && digit_of(reading).is_none()).then_some(w)
 }
 
 /// The key of a digit-string token (`_punct_2` -> `2`, also `.` `/` `-`; docs/contracts/digits.md A.3.1): the text after `PUNCT_PREFIX`

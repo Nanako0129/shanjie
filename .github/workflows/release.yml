@@ -94,32 +94,26 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as scripts/fetch-models.sh does for ci.yml).
+      # Before build-app.sh, against the tracked hashes (data/bigram.sjlm.sha256, data/classes.sjc.sha256, data/kn.sjkn.sha256, data/tinylm.sjtl.sha256, data/trigram.sjt3.sha256, data/trigram-chat.sjt3.sha256, data/colloquial.sjlm.sha256 and data/colloquial-attribution.tsv.sha256, as scripts/fetch-models.sh does for ci.yml).
       - name: Fetch the language model
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download model-v6 --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
+          gh release download sj-lm-7-9.7m --repo "$GITHUB_REPOSITORY" -p bigram.sjlm -D data/lm
           shasum -a 256 -c data/bigram.sjlm.sha256
-          gh release download classes-v5 --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
+          gh release download sj-wc-6-512c --repo "$GITHUB_REPOSITORY" -p classes.sjc -D data/lm
           shasum -a 256 -c data/classes.sjc.sha256
-          gh release download kn-v1 --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
+          gh release download sj-kn-2-397k --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
           shasum -a 256 -c data/kn.sjkn.sha256
-          gh release download sj-sr-6-14m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download sj-sr-7-15m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
-          gh release download sj-cx-1-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
+          gh release download sj-cx-2-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256
-          gh release download sj-cl-1-68k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+          gh release download sj-cx-2-950k --repo "$GITHUB_REPOSITORY" -p trigram-chat.sjt3 -D data/lm
+          shasum -a 256 -c data/trigram-chat.sjt3.sha256
+          gh release download sj-cl-2-69k --repo "$GITHUB_REPOSITORY" -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
           shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
-
-      # The input of the English word list (SymSpell, pinned commit; build-app.sh downloads it when missing and checks its SHA-256
-      # either way, so a bad cache is only a miss). The key follows tools/build_english_words.py, where the pins live.
-      - name: Cache the English word list input
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/shanjie/english
-          key: symspell-${{ hashFiles('tools/build_english_words.py') }}
 
       - name: Version
         id: version

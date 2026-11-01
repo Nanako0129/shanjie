@@ -5,9 +5,10 @@ import XCTest
 final class ModelListTests: XCTestCase {
     private let sha = String(repeating: "0", count: 64)
 
-    func testSixRowsInFileOrder() throws {
-        let names = [("bigram.sjlm", "通語", "SJ-LM-6-9.1M"), ("classes.sjc", "辨類", "SJ-WC-5-512C"), ("kn.sjkn", "承接", "SJ-KN-1-353K"),
-                     ("trigram.sjt3", "連文", "SJ-CX-1-7.7M"), ("tinylm.sjtl", "會意", "SJ-SR-6-14M"), ("colloquial.sjlm", "常談", "SJ-CL-1-68K")]
+    func testRowsInFileOrder() throws {
+        let names = [("bigram.sjlm", "通語", "SJ-LM-7-9.7M"), ("classes.sjc", "辨類", "SJ-WC-6-512C"), ("kn.sjkn", "承接", "SJ-KN-2-397K"),
+                     ("trigram.sjt3", "連文", "SJ-CX-2-7.7M"), ("trigram-chat.sjt3", "連文", "SJ-CX-2-950K"), ("tinylm.sjtl", "會意", "SJ-SR-7-15M"),
+                     ("colloquial.sjlm", "常談", "SJ-CL-2-69K")]
         let text = names.map { "\($0.0)\t\(sha)\t\($0.1)\t\($0.2)\n" }.joined()
         let rows = ModelList.parse(text)
         XCTAssertEqual(rows.map(\.name), names.map { $0.1 })
@@ -39,12 +40,13 @@ final class ModelListTests: XCTestCase {
         XCTAssertEqual(ModelList.parse(row.replacingOccurrences(of: "\n", with: "\r\n")), [], "CRLF")
     }
 
-    /// The repo's own data/models.tsv: six rows, in the contract's order.
-    func testTheRepoListHasTheSixModels() throws {
+    /// The repo's own data/models.tsv: seven rows (the two trigram tables, formal then chat, both 連文), in the contract's order.
+    func testTheRepoListHasTheSevenModels() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let rows = ModelList.load(from: root.appendingPathComponent("data/models.tsv"))
-        XCTAssertEqual(rows.map(\.name), ["通語", "辨類", "承接", "連文", "會意", "常談"])
-        XCTAssertEqual(rows.map(\.code), ["SJ-LM-6-9.1M", "SJ-WC-5-512C", "SJ-KN-1-353K", "SJ-CX-1-7.7M", "SJ-SR-6-14M", "SJ-CL-1-68K"])
+        XCTAssertEqual(rows.map(\.name), ["通語", "辨類", "承接", "連文", "連文", "會意", "常談"])
+        XCTAssertEqual(rows.map(\.code), ["SJ-LM-7-9.7M", "SJ-WC-6-512C", "SJ-KN-2-397K", "SJ-CX-2-7.7M", "SJ-CX-2-950K", "SJ-SR-7-15M", "SJ-CL-2-69K"])
+        XCTAssertEqual(rows.map(\.file), ["bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "tinylm.sjtl", "colloquial.sjlm"])
     }
 }

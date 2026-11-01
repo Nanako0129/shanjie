@@ -1,5 +1,6 @@
 import AppKit
 import CShanjie
+import Synchronization
 import os
 
 /// R2 (docs/contracts/s3b.md section 9): messages are static strings and C ABI return codes only.
@@ -24,9 +25,40 @@ public protocol TextClient: AnyObject {
     /// client reports none.
     /// `cursor`: the composition cursor in UTF-16 units within the marked text.
     func lineRect(cursor: Int) -> NSRect?
+    /// shift-toggle section 3: the insertion point's line rectangle when nothing is marked (`attributes(forCharacterIndex: 0,
+    /// lineHeightRectangle:)` in the app), `nil` if the client reports none.
+    func caretRect() -> NSRect?
     /// s3b2 section 10: the light or dark appearance of the view being typed into, `nil` if unknown.
     var appearance: NSAppearance? { get }
 }
+
+extension TextClient {
+    /// A client that cannot tell shows no hint.
+    public func caretRect() -> NSRect? { nil }
+}
+
+/// The 英/中 hint of the Shift toggle (shift-toggle section 3): its own small window, display only, never key.
+@MainActor
+public protocol ShiftHintPanel: AnyObject {
+    /// Shows `text` above `lineRect` (screen coordinates), left edges aligned, for `SHIFT_HINT_SECONDS`, then fades it away.
+    func show(_ text: String, lineRect: NSRect, appearance: NSAppearance?, glassTint: Double)
+}
+
+/// Where the 單按 Shift 切換中英 switch is kept (shift-toggle section 1): `nil` means never chosen, which is on.
+@MainActor
+public protocol ShiftToggleStore: AnyObject {
+    var shiftToggle: Bool? { get set }
+}
+
+/// The in-memory ShiftToggleStore.
+@MainActor
+public final class MemoryShiftToggleStore: ShiftToggleStore {
+    public var shiftToggle: Bool?
+    public init(_ shiftToggle: Bool? = nil) { self.shiftToggle = shiftToggle }
+}
+
+/// SHIFT_HINT_SECONDS (shift-toggle section 3): how long the 英/中 hint stays before it fades.
+public let SHIFT_HINT_SECONDS: TimeInterval = 1.0
 
 /// A display-only candidate list (an NSPanel in the app). It never receives keys.
 @MainActor
@@ -100,13 +132,19 @@ public final class MemoryDemoteStore: DemoteStore {
 @MainActor
 public protocol PredictionStore: AnyObject {
     var prediction: Bool? { get set }
+    /// docs/contracts/browser-first-syllable.md section 3: whether browsers hide the row for the first syllable; `nil` is on.
+    var browserFirstSyllable: Bool? { get set }
 }
 
 /// The in-memory PredictionStore.
 @MainActor
 public final class MemoryPredictionStore: PredictionStore {
     public var prediction: Bool?
-    public init(_ prediction: Bool? = nil) { self.prediction = prediction }
+    public var browserFirstSyllable: Bool?
+    public init(_ prediction: Bool? = nil, browserFirstSyllable: Bool? = nil) {
+        self.prediction = prediction
+        self.browserFirstSyllable = browserFirstSyllable
+    }
 }
 
 /// Where the "可省略韻母" switch is kept (docs/contracts/v3-engine.md section 12.1): `nil` means never chosen, which is off.
@@ -142,20 +180,44 @@ public final class MemorySpacingStore: SpacingStore {
 @MainActor
 public protocol EnglishStore: AnyObject {
     var english: Bool? { get set }
-    /// The display choice under it (docs/contracts/zhen-inline.md section 2): true shows the English as it is typed, false only
-    /// when Space opens the window. `nil` means never chosen, which is true.
-    var englishInline: Bool? { get set }
+    /// The choice under it (docs/contracts/zhen-revert.md section 3): a key typed over the symbol already in its column is English
+    /// (`ok`, `rust`, `gta6`). `nil` means never chosen, which is true.
+    var englishOverwrite: Bool? { get set }
+    /// The choice next to it (docs/contracts/zhen-keyorder.md section 3, default changed by zhen-revert): keys out of Zhuyin's column order,
+    /// and a tone key that makes a syllable the lexicon lacks, are English. `nil` means never chosen, which is true.
+    var englishKeyOrder: Bool? { get set }
+    /// The choice before it (docs/contracts/zhen-reapply.md section 1.2): a key in a column before a filled one is never English, so a
+    /// hurried reversal stays Zhuyin. `nil` means never chosen, which is true.
+    var englishReversalGuard: Bool? { get set }
 }
 
 /// The in-memory EnglishStore.
 @MainActor
 public final class MemoryEnglishStore: EnglishStore {
     public var english: Bool?
-    public var englishInline: Bool?
-    public init(_ english: Bool? = nil, inline: Bool? = nil) {
+    public var englishOverwrite: Bool?
+    public var englishKeyOrder: Bool?
+    public var englishReversalGuard: Bool?
+    public init(_ english: Bool? = nil, overwrite: Bool? = nil, keyOrder: Bool? = nil, reversalGuard: Bool? = nil) {
         self.english = english
-        self.englishInline = inline
+        self.englishOverwrite = overwrite
+        self.englishKeyOrder = keyOrder
+        self.englishReversalGuard = reversalGuard
     }
+}
+
+/// Where the 模糊輸入 flags are kept (docs/contracts/fuzzy-input.md section 2.2): bits 0-3 the four sound pairs, bit 4 the adjacent-key
+/// slips, as `shanjie_engine_set_fuzzy`; `nil` means never chosen, which is 0 (all off). Same arrangement as `PredictionStore`.
+@MainActor
+public protocol FuzzyStore: AnyObject {
+    var fuzzyFlags: UInt32? { get set }
+}
+
+/// The in-memory FuzzyStore.
+@MainActor
+public final class MemoryFuzzyStore: FuzzyStore {
+    public var fuzzyFlags: UInt32?
+    public init(_ fuzzyFlags: UInt32? = nil) { self.fuzzyFlags = fuzzyFlags }
 }
 
 /// Where the "動漫與遊戲詞" switch is kept (docs/contracts/acg-pack.md A.2): `nil` means never chosen, which is on
@@ -170,6 +232,33 @@ public protocol AcgPackStore: AnyObject {
 public final class MemoryAcgPackStore: AcgPackStore {
     public var acgPack: Bool?
     public init(_ acgPack: Bool? = nil) { self.acgPack = acgPack }
+}
+
+/// Where the "經典台詞" switch is kept (docs/contracts/quote-pack.md section 2): `nil` means never chosen, which is **off**
+/// (the opposite of `AcgPackStore`: the maintainer's decision 2026-10-22 is that the quote pack ships off).
+@MainActor
+public protocol QuotePackStore: AnyObject {
+    var quotePack: Bool? { get set }
+}
+
+/// The in-memory QuotePackStore.
+@MainActor
+public final class MemoryQuotePackStore: QuotePackStore {
+    public var quotePack: Bool?
+    public init(_ quotePack: Bool? = nil) { self.quotePack = quotePack }
+}
+
+/// Where the "資訊與 AI 詞" switch is kept (docs/contracts/it-pack.md section 3.2): `nil` means never chosen, which is on. Same arrangement as `AcgPackStore`.
+@MainActor
+public protocol ItPackStore: AnyObject {
+    var itPack: Bool? { get set }
+}
+
+/// The in-memory ItPackStore.
+@MainActor
+public final class MemoryItPackStore: ItPackStore {
+    public var itPack: Bool?
+    public init(_ itPack: Bool? = nil) { self.itPack = itPack }
 }
 
 /// Where the candidate glass tint slider is kept (docs/contracts/settings-window.md section 2.3): 0...1,
@@ -236,26 +325,61 @@ public enum RerankLevel: String, CaseIterable, Sendable {
     }
 }
 
+/// One job's token, returned by `RerankRunner.run` (enter-rerank-wait section 1 item 4). The shell keeps it as its running state
+/// and hands it back to `wait`; a runner subclasses it to find the job again. Compared with `===`, never by address.
+@MainActor
+open class RerankHandle {
+    public init() {}
+}
+
 /// Runs a rerank job off the main thread (s7c2b section 2.1): `job.run()` on another thread, then `done` with its code on the
 /// main thread. The app passes `QueueRerankRunner`; the tests pass runners they complete by hand.
 @MainActor
 public protocol RerankRunner: AnyObject {
-    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void)
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle
+
+    /// Enter's bounded wait (enter-rerank-wait section 1 items 2 and 4): blocks the calling (main) thread until `deadline` for the
+    /// job `handle` names, and returns its code only after that job's `run()` returned; `nil` when the deadline came first. The
+    /// job's `done` is still called afterwards (the shell makes that late call a no-op).
+    func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32?
+}
+
+/// The wait object of one job of `QueueRerankRunner`: the queue's block signals it once, after the code is in the box (so a
+/// woken waiter always finds the code). One per job, never shared, so a signal left by a job nobody waited for cannot end the
+/// next wait early. Holds no pointer, only the semaphore and the code.
+private final class RerankWaiter: Sendable {
+    let signal = DispatchSemaphore(value: 0)
+    let code = Mutex<Int32?>(nil)
+}
+
+private final class QueueRerankHandle: RerankHandle {
+    let waiter: RerankWaiter
+    init(_ waiter: RerankWaiter) { self.waiter = waiter }
 }
 
 /// The app's runner (F2): one serial `.utility` queue with a fixed label. The closure holds the job wrapper (never its
-/// pointer) until run returns; the code comes back through `DispatchQueue.main.async`, which orders the run before the
-/// main-thread apply. The main thread never waits for the queue.
+/// pointer) until run returns. Two orderings put the run before the main-thread apply (RerankJob invariant 2): the code comes
+/// back through `DispatchQueue.main.async`, or the main thread is woken by this job's semaphore, which is signalled only after
+/// `run()` returned (Enter's bounded wait, `wait(_:until:)`, enter-rerank-wait.md). The main thread otherwise never waits for the queue.
 public final class QueueRerankRunner: RerankRunner {
     private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.rerank", qos: .utility)
 
     public init() {}
 
-    public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) {
+    public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle {
+        let waiter = RerankWaiter()
         queue.async {
             let code = job.run()
+            waiter.code.withLock { $0 = code }  // before the signal
+            waiter.signal.signal()
             DispatchQueue.main.async { done(code) }
         }
+        return QueueRerankHandle(waiter)
+    }
+
+    public func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32? {
+        guard let waiter = (handle as? QueueRerankHandle)?.waiter, waiter.signal.wait(timeout: deadline) == .success else { return nil }
+        return waiter.code.withLock { $0 }
     }
 }
 
@@ -339,6 +463,36 @@ public final class Shell {
     ]
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
+    /// Chromium browsers (docs/contracts/browser-first-syllable.md section 2): Google Docs answers an input method's first
+    /// rectangle query with the view's origin, so the prediction row is not shown for the first syllable there. Crest and
+    /// Aside were added from a user's report (Discord, 2026-10-31) with the bundle IDs the user read off their machine.
+    static let browserApps: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
+        "org.chromium.Chromium",
+        "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
+        "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.nightly",
+        "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "com.operasoftware.OperaGX",
+        "com.pauldavis.crest", "at.studio.AsideBrowser",
+    ]
+
+    /// browser-first-syllable section 1: at most one syllable on screen, a run of zhuyin symbols and tones counting as one and
+    /// every other character as one ("ㄘㄜ", "測" and "" are; "測ㄕ" is not).
+    static func singleSyllable(_ preedit: String) -> Bool {
+        var count = 0
+        var inZhuyin = false
+        for u in preedit.unicodeScalars {
+            let zhuyin: Bool
+            switch u.value {
+            case 0x3105...0x3129, 0x02CA, 0x02C7, 0x02CB, 0x02D9: zhuyin = true
+            default: zhuyin = false
+            }
+            if !zhuyin || !inZhuyin { count += 1 }
+            if count > 1 { return false }
+            inZhuyin = zhuyin
+        }
+        return true
+    }
+
     /// The one place the profile is decided (profile-choice section 2.2). `auto`: no bundle ID is formal, as before; then the
     /// user's choice for the app; then `chatApps`.
     static func profile(bundle: String?, mode: ProfileMode, overrides: [String: UInt32]) -> UInt32 {
@@ -363,6 +517,8 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
+    /// browser-first-syllable section 3: hide the passive prediction row for the first syllable in `browserApps` (default on).
+    private(set) var browserFirstSyllableOn = true
     private let abbreviationStore: AbbreviationStore
     /// V3 section 12: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
     private(set) var abbreviationOn = false
@@ -378,18 +534,80 @@ public final class Shell {
     /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
-    /// zhen-inline section 2: how the English shows while it is typed (default true: as letters, `UserDefaults` key
-    /// `englishInline`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
-    private(set) var englishInlineOn = true
-    /// Whether this engine loaded the word list (`Resources/english-words.txt`); false greys the menu item and the settings toggle
-    /// (the checkmark keeps the setting), as `rerankAvailable` does for the small model.
-    private(set) var englishAvailable = false
+    /// zhen-revert section 3: whether a key typed over the symbol already in its column is English (default true: `UserDefaults` key
+    /// `englishOverwrite`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishOverwriteOn = true
+    /// zhen-keyorder section 3 with zhen-revert's default: whether keys out of Zhuyin's column order, and a tone key that makes a
+    /// syllable the lexicon lacks, are English (default true: `UserDefaults` key `englishKeyOrder`, absent is true, a saved false stays
+    /// false); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishKeyOrderOn = true
+    /// zhen-reapply section 1.2: whether a key in a column before a filled one is never English (default true: `UserDefaults` key
+    /// `englishReversalGuard`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishReversalGuardOn = true
+    private let fuzzyStore: FuzzyStore
+    /// fuzzy-input section 2.2: the 模糊輸入 flags (default 0, all off; bits as `shanjie_engine_set_fuzzy`); sent to every engine
+    /// `build()` makes. Only the bits the core knows are kept.
+    private(set) var fuzzyFlags: UInt32 = 0
+    /// What `build()` sent to each engine it made, in order (test hook, like `rerankSent`).
+    private(set) var fuzzySent: [UInt32] = []
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on, user decision 2026-10-09): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
     /// The pack's source date for the grey menu line (acg-pack contract A2.4): `latest_source_revision` of `Resources/packs/acg.json`
     /// as a UTC date, read once at init. `nil` (file or field missing or unreadable) means no line.
     let acgDataDate: String?
+    private let quotePackStore: QuotePackStore
+    /// The classic quote pack (default off, quote-pack contract section 2): a bit of the same packs mask as the ACG pack, so a change rebuilds the engine too.
+    private(set) var quotePackOn = false
+    private let itPackStore: ItPackStore
+    /// The IT+AI word pack (default on, it-pack contract 3.2): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
+    private(set) var itPackOn = true
+    /// The packs in the settings order: mask bit, file in the packs directory, menu title. `packMask`, the missing-file check and the menu line all read this.
+    private static let packTable: [(bit: UInt32, file: String, title: String)] = [
+        (CoreEngine.packACG, "acg-add.tsv", MenuEntry.Text.acgPack),
+        (CoreEngine.packQuotes, "quotes-add.tsv", MenuEntry.Text.quotePack),
+        (CoreEngine.packIT, "it-add.tsv", MenuEntry.Text.itPack),
+    ]
+    /// The mask `build()` passes to `shanjie_engine_new_packs`: one bit per switch that is on. The quote switch never chosen is off and the
+    /// IT switch never chosen is on, so an app that never touched either builds with the ACG and IT bits, as before the quote pack existed.
+    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) }
+    /// The pack bits the current engine was really built with (it-pack contract 3.2): `packMask` when that build worked, less the bits
+    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
+    private(set) var loadedPackMask: UInt32 = 0
+    /// The names of the loaded packs in the settings order, for the menu line.
+    var loadedPackTitles: [String] {
+        Shell.packTable.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
+    }
+    private let shiftToggleStore: ShiftToggleStore
+    /// shift-toggle section 1: a lone Shift tap switches between Chinese and English (default on). Off: `flagsChanged` is not handled,
+    /// the states below are cleared and the core is back to `set_ascii(0)`.
+    private(set) var shiftToggleOn = true
+    let shiftHint: ShiftHintPanel?
+    var shiftTap = ShiftTap()
+    /// Seconds since the latest mouse-button press (left, right, other) in this login session; a test replaces it. No permission needed.
+    var mouseAgo: () -> TimeInterval = {
+        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
+    }
+    /// The system uptime, the clock `NSEvent.timestamp` uses; a test replaces it.
+    var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// zhen-reapply section 1b: CLOCK_MONOTONIC, which `man clock_gettime` says "will continue to increment while the system is
+    /// asleep" (`uptime` does not), so a lid closed for an hour counts as a long pause; not observed across a real sleep. A test replaces it.
+    var idleClock: () -> TimeInterval = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000 }
+    /// zhen-reapply sections 1a and 1b: when the last typing key (or a Shift-tap hint) came, on `idleClock`. `nil` means the next typing
+    /// key shows the 英/中 hint: set by activation and by an owner change, and before any typing.
+    var lastTypingAt: TimeInterval?
+    /// Section 1b: a pause at least this long before a typing key shows the 英/中 hint again. Picked, not measured; the maintainer tunes it.
+    static let modeHintIdleSeconds: TimeInterval = 30
+    /// What the latest `build()` sent its engine as `set_ascii` (test hook); `nil` before the first build.
+    private(set) var lastBuiltAscii: Bool?
+    /// The composition cursor (UTF-16) of the last snapshot applied: where the Shift hint anchors while composing.
+    var composingCursor = 0
+    /// shift-toggle section 2: the apps (bundle ID, `""` for a client with none) whose state is English. In memory only: a restart
+    /// of the input method puts every app back to Chinese.
+    var asciiApps: Set<String> = []
+    /// What the current engine was last told by `set_ascii` (the engine is the owner's; `build()` sends it again to a new one).
+    var engineAscii = false
     private let glassTintStore: GlassTintStore
     private let candidateOrientationStore: CandidateOrientationStore
     /// The orientation setting (default horizontal); sent to every engine `build()` makes and on every change (candidate-vertical
@@ -407,11 +625,16 @@ public final class Shell {
     static let tinyLMFile = "tinylm.sjtl"
     /// colloquial-term.md section 2.3: the colloquial table (常談 SJ-CL), in Resources next to the other model files.
     static let colloquialFile = "colloquial.sjlm"
-    /// zhen-mixed section 3.2: the English word list, in Resources next to the model (build-app.sh generates it).
-    static let englishFile = "english-words.txt"
     private let rerankRunner: RerankRunner
-    /// A job is with the runner (section 2.1: one at a time).
-    private var rerankRunning = false
+    /// The job with the runner (section 2.1: one at a time), nil when none. Its completion is handled once: by the runner's
+    /// `done` or by Enter's bounded wait, whichever comes first; the other finds it no longer here (`rerankFinished`).
+    private var rerankRunning: RunningRerank?
+    /// enter-rerank-wait.md section 1 item 1: the longest Enter waits for the rerank (ms), in total. 33 to 84 ms was the last job's
+    /// time in PUNCT-0's VM measurement (research log 2026-11-01), so the limit is above the largest; on the Mac dev302's per-row p95 is
+    /// 12.6 ms. PLAN A3/A7's exception: only Enter waits, and only while a job of this session runs or is queued.
+    static let ENTER_RERANK_WAIT_MS = 100
+    /// The limit `Session.handle` uses on Enter; the tests replace it (the real-queue test gives it 10 s, the shipping value is asserted apart).
+    var enterRerankWaitMS = Shell.ENTER_RERANK_WAIT_MS
     /// The latest job taken while another ran. A newer one replaces it, and the replaced job is freed as it is dropped here.
     private var rerankPending: PendingRerank?
     /// Jobs taken from the core; the tests compare it with the frees.
@@ -424,6 +647,12 @@ public final class Shell {
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
     /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
+    /// How many engines `build()` has tried to make (test hook, like `rerankSent`): the fall-back order is asserted by counting them.
+    private(set) var engineBuilds = 0
+    private func makeEngine(packsDir: String?, packs: UInt32) -> (CoreEngine?, Int32) {
+        engineBuilds += 1
+        return CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, packs: packs)
+    }
     /// Rerank strength (section 3): the stored level, sent to every engine `build()` makes and on every change.
     private(set) var rerankLevel: RerankLevel
     /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
@@ -439,11 +668,19 @@ public final class Shell {
     /// The settings window's 強度 control (section 3) is enabled only when the switch is on and can do something, and the loaded
     /// model offers the conservative and the aggressive set (a version 3 file); otherwise it shows greyed with the stored choice.
     var rerankLevelEnabled: Bool { rerankOn && rerankEnabled && rerankLevels & 0b101 == 0b101 }
-    /// The 中英混打（實驗） menu item and settings toggle, likewise: the word list loaded and the standard layout (the core records no
+    /// The 中英混打（實驗） menu item and settings toggle, likewise: the standard layout (the core records no
     /// shadow in the Eten layout, zhen-mixed section 2.1, so the switch would do nothing there). The checkmark still shows the choice.
-    var englishEnabled: Bool { englishAvailable && mode == .standard }
-    /// The 英文的顯示 choice under it is enabled on the same condition and while the switch itself is on.
-    var englishInlineEnabled: Bool { englishEnabled && englishOn }
+    var englishEnabled: Bool { mode == .standard }
+    /// The adjacent-key checkbox of 模糊輸入: the core's neighbour table is the standard layout's keyboard, so bit 4 does nothing
+    /// in the Eten layout and the checkbox is greyed there (the value is kept; fuzzy-input section 2.2).
+    var fuzzyAdjacentEnabled: Bool { mode == .standard }
+    /// The 重打同一個位置算英文 choice under it is enabled on the same condition and while the switch itself is on.
+    var englishOverwriteEnabled: Bool { englishEnabled && englishOn }
+    /// The 依按鍵順序判斷英文 choice is greyed on the same condition as the overwrite choice.
+    var englishKeyOrderEnabled: Bool { englishOverwriteEnabled }
+    /// The 快打時鍵序顛倒不當英文 choice only matters for trigger (b), which needs the key-order choice on: greyed unless that one is
+    /// enabled and on (the setting is kept).
+    var englishReversalGuardEnabled: Bool { englishKeyOrderEnabled && englishKeyOrderOn }
 
     /// A job waiting for the runner, with the session and engine it was taken for. Weak (F3): a waiting job keeps neither alive,
     /// and an identity is never compared by address.
@@ -451,6 +688,20 @@ public final class Shell {
         let job: RerankJob
         weak var session: Session?
         weak var engine: CoreEngine?
+    }
+    /// The job with the runner: the same three, and the runner's handle. Compared with ===, so a new job on an old one's address is
+    /// still another job.
+    @MainActor
+    private final class RunningRerank {
+        let job: RerankJob
+        weak var session: Session?
+        weak var engine: CoreEngine?
+        var handle: RerankHandle?
+        init(_ p: PendingRerank) {
+            job = p.job
+            session = p.session
+            engine = p.engine
+        }
     }
     private let profileModeStore: ProfileModeStore
     private let appProfileStore: AppProfileStore
@@ -461,6 +712,9 @@ public final class Shell {
     /// The `vertical` value (0, 1 or 2) of what the panel shows now; 0 once it hid. Page Up / Down go to the core only while
     /// it is 1, the vertical candidate window (section 2.2); the vertical prediction row, 2, does not count.
     private(set) var shownVertical = 0
+    /// The `selected` of what the panel shows now (-1: no candidate window and no entered prediction row, also after it hid).
+    /// Enter does not wait for a rerank while it is >= 0: the core applies none then (enter-rerank-wait.md section 1 item 2).
+    private(set) var candidateSelected = -1
     var verticalOpen: Bool { shownVertical == VerticalLayout.candidates }
     /// Posted (object: this shell) after any setting changes, from the menu or the settings window;
     /// the window's model re-reads on it (settings-window section 2.2).
@@ -523,6 +777,8 @@ public final class Shell {
     /// `abbreviationStore`: the abbreviation switch (V3 section 12.1). Required, like `predictionStore`.
     /// `englishStore`: the 中英混打 switch (zhen-mixed section 3.2). Required, like `abbreviationStore`.
     /// `acgPackStore`: the ACG word pack switch (acg-pack contract A.2). Required, like `demoteStore`.
+    /// `quotePackStore`: the classic quote pack switch (quote-pack contract section 2). Required, like `acgPackStore`.
+    /// `itPackStore`: the IT+AI word pack switch (it-pack contract 3.2). Defaults to an in-memory store so the many test rigs need not name it; the app passes its own.
     /// `glassTintStore`: the candidate glass tint (settings-window section 2.3). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (candidate-vertical contract section 2.1). Required, like `glassTintStore`.
     /// `rerankStore`: the 語意校正 switch (s7c2b section 2.2). Required, like `predictionStore`.
@@ -530,22 +786,33 @@ public final class Shell {
     /// `QueueRerankRunner`, the tests a runner they complete by hand.
     /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (profile-choice section 2.1).
     /// Required, like `glassTintStore`.
+    /// `fuzzyStore`: the 模糊輸入 flags (fuzzy-input section 2.2). The default (in memory, all off) is for the tests; the app passes its
+    /// UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
     /// `punctuationNames`: Apple's punctuation names (s3f); tests pass another path.
     /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
+    /// `shiftToggleStore`, `shiftHint`: the 單按 Shift 切換中英 switch and its 英/中 hint window (shift-toggle section 1, 3). The defaults (in
+    /// memory, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
-                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore,
+                demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore, quotePackStore: QuotePackStore,
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
+                fuzzyStore: FuzzyStore = MemoryFuzzyStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
                 showsAbbreviation: Bool = true,
-                spacingStore: SpacingStore) {
+                spacingStore: SpacingStore,
+                itPackStore: ItPackStore = MemoryItPackStore(),
+                shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
+                shiftHint: ShiftHintPanel? = nil) {
         self.resources = resources
+        self.shiftToggleStore = shiftToggleStore
+        shiftToggleOn = shiftToggleStore.shiftToggle ?? true
+        self.shiftHint = shiftHint
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
         // Read once: the converted table never changes while the process runs, and the layout
@@ -565,6 +832,7 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
+        browserFirstSyllableOn = predictionStore.browserFirstSyllable ?? true
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true
@@ -572,9 +840,14 @@ public final class Shell {
         spacingOn = spacingStore.spacing == true
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
-        englishInlineOn = englishStore.englishInline ?? true
+        englishOverwriteOn = englishStore.englishOverwrite ?? true
+        englishKeyOrderOn = englishStore.englishKeyOrder ?? true // zhen-revert: was false; a saved false stays false
+        englishReversalGuardOn = englishStore.englishReversalGuard ?? true
+        self.fuzzyStore = fuzzyStore
+        fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
+        self.quotePackStore = quotePackStore
         self.glassTintStore = glassTintStore
         glassTint = glassTintStore.glassTint ?? 0
         self.candidateOrientationStore = candidateOrientationStore
@@ -588,6 +861,9 @@ public final class Shell {
         self.appProfileStore = appProfileStore
         appProfiles = AppProfiles.parse(appProfileStore.appProfiles)
         acgPackOn = acgPackStore.acgPack ?? true
+        quotePackOn = quotePackStore.quotePack ?? false
+        self.itPackStore = itPackStore
+        itPackOn = itPackStore.itPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -631,12 +907,24 @@ public final class Shell {
         if let o = owner { o.applyEnglish(on) } else { dropOnFailure(setEnglish(on)) }
     }
 
+    func applyFuzzy(_ flags: UInt32) {
+        if let o = owner { o.applyFuzzy(flags) } else { dropOnFailure(setFuzzy(flags)) }
+    }
+
     func applyCandidateVertical(_ on: Bool) {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
     }
 
-    func applyEnglishInline(_ on: Bool) {
-        if let o = owner { o.applyEnglishInline(on) } else { dropOnFailure(setEnglishInline(on)) }
+    func applyEnglishOverwrite(_ on: Bool) {
+        if let o = owner { o.applyEnglishOverwrite(on) } else { dropOnFailure(setEnglishOverwrite(on)) }
+    }
+
+    func applyEnglishKeyOrder(_ on: Bool) {
+        if let o = owner { o.applyEnglishKeyOrder(on) } else { dropOnFailure(setEnglishKeyOrder(on)) }
+    }
+
+    func applyEnglishReversalGuard(_ on: Bool) {
+        if let o = owner { o.applyEnglishReversalGuard(on) } else { dropOnFailure(setEnglishReversalGuard(on)) }
     }
 
     func applyRerank(_ on: Bool) {
@@ -722,6 +1010,13 @@ public final class Shell {
         return engine?.setPrediction(on)
     }
 
+    /// The settings window's browser switch (browser-first-syllable section 3): the shell's own switch, nothing goes to the core.
+    func setBrowserFirstSyllable(_ on: Bool) {
+        browserFirstSyllableOn = on
+        predictionStore.browserFirstSyllable = on
+        changed()
+    }
+
     /// The settings window's 中英文之間自動加空格 (cjk-spacing section 2): the shell's own switch, nothing goes to the core.
     func setSpacing(_ on: Bool) {
         spacingOn = on
@@ -747,13 +1042,40 @@ public final class Shell {
         return engine?.setEnglish(on)
     }
 
-    /// The settings window's 英文的顯示 choice (zhen-inline section 2): stored, and sent to the engine; the snapshot is for the
-    /// caller to show, so a composition on screen is drawn again in the new display.
-    func setEnglishInline(_ on: Bool) -> CoreResult? {
-        englishInlineOn = on
-        englishStore.englishInline = on
+    /// The settings window's 模糊輸入 flags (fuzzy-input section 2.2): stored, and sent to the engine, which recomputes the composition
+    /// (an accepted syllable keeps decoding whatever the flags are); the snapshot is for the caller to show.
+    func setFuzzy(_ flags: UInt32) -> CoreResult? {
+        fuzzyFlags = flags & 0b11111
+        fuzzyStore.fuzzyFlags = fuzzyFlags
         defer { changed() }
-        return engine?.setEnglishInline(on)
+        return engine?.setFuzzy(fuzzyFlags)
+    }
+
+    /// The settings window's 重打同一個位置算英文 choice (zhen-revert section 3): stored, and sent to the engine; the snapshot is for the
+    /// caller to show (nothing on screen changes: an English run is text).
+    func setEnglishOverwrite(_ on: Bool) -> CoreResult? {
+        englishOverwriteOn = on
+        englishStore.englishOverwrite = on
+        defer { changed() }
+        return engine?.setEnglishOverwrite(on)
+    }
+
+    /// The settings window's 依按鍵順序判斷英文 choice (zhen-keyorder section 3): stored, and sent to the engine; the snapshot is for the
+    /// caller to show (nothing on screen changes).
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult? {
+        englishKeyOrderOn = on
+        englishStore.englishKeyOrder = on
+        defer { changed() }
+        return engine?.setEnglishKeyOrder(on)
+    }
+
+    /// The settings window's 快打時鍵序顛倒不當英文 choice (zhen-reapply section 1.2): stored, and sent to the engine; the snapshot is for
+    /// the caller to show (nothing on screen changes).
+    func setEnglishReversalGuard(_ on: Bool) -> CoreResult? {
+        englishReversalGuardOn = on
+        englishStore.englishReversalGuard = on
+        defer { changed() }
+        return engine?.setEnglishReversalGuard(on)
     }
 
     /// The settings window's choice (candidate-vertical contract section 2.1): stored, and sent to the engine, which applies it
@@ -793,23 +1115,27 @@ public final class Shell {
     func enqueueRerank(_ job: RerankJob, session: Session, engine: CoreEngine) {
         rerankTaken += 1
         let pending = PendingRerank(job: job, session: session, engine: engine)
-        if rerankRunning { rerankPending = pending } else { startRerank(pending) }
+        if rerankRunning != nil { rerankPending = pending } else { startRerank(pending) }
     }
 
     private func startRerank(_ p: PendingRerank) {
-        rerankRunning = true
-        let job = p.job, session = p.session, engine = p.engine
-        rerankRunner.run(job) { [weak self, weak session, weak engine] code in
-            self?.rerankFinished(job, code: code, session: session, engine: engine)
+        let slot = RunningRerank(p)
+        rerankRunning = slot
+        slot.handle = rerankRunner.run(slot.job) { [weak self, slot] code in
+            self?.rerankFinished(slot, code: code)
         }
     }
 
-    /// On the main thread once run returned. Applied only while the switch is on, the session still owns the composition and the
-    /// engine is still the current one (weak references compared with ===, F3); the core's generation check is the second line.
-    private func rerankFinished(_ job: RerankJob, code: Int32, session: Session?, engine: CoreEngine?) {
-        // F4: whatever is returned below, the running flag is cleared and a waiting job starts.
+    /// On the main thread once run returned: from the runner's `done`, or from Enter's bounded wait. Applied only while the switch
+    /// is on, the session still owns the composition and the engine is still the current one (weak references compared with ===,
+    /// F3); the core's generation check is the second line.
+    private func rerankFinished(_ slot: RunningRerank, code: Int32) {
+        // A job is finished once. The second call (the main.async one after Enter's wait got the code, or one from an engine
+        // rebuilt meanwhile) finds another job or none here and does nothing: no apply, no flag clear, no second start.
+        guard rerankRunning === slot else { return }
+        // F4: whatever is returned below, the running state is cleared and a waiting job starts.
         defer {
-            rerankRunning = false
+            rerankRunning = nil
             if let next = rerankPending {
                 rerankPending = nil
                 startRerank(next)
@@ -819,11 +1145,28 @@ public final class Shell {
             Log.shell.error("shanjie_rerank_run failed, code \(code)")
             return
         }
-        guard rerankOn, let session, session === owner, let engine, engine === self.engine else { return }
-        session.applyRerankJob(job, on: engine)
+        guard rerankOn, let session = slot.session, session === owner, let engine = slot.engine, engine === self.engine else { return }
+        session.applyRerankJob(slot.job, on: engine)
     }
 
-    /// The menu's choice (acg-pack contract A.2): the pack is part of the lexicon, so like a layout change the
+    /// Enter's bounded wait (enter-rerank-wait.md section 1): while a job of `session` for the current engine runs or waits, block
+    /// the main thread on the runner until it is done and apply it (`rerankFinished`, the same path as the async completion), all
+    /// within one deadline of `enterRerankWaitMS` taken now. No nested run loop and no unbounded wait: after the deadline the jobs
+    /// are left as they are and Enter commits what is shown. Not when the core would not apply (a selection is open).
+    func waitForRerank(session: Session) {
+        func mine(_ s: Session?, _ e: CoreEngine?) -> Bool { s === session && e != nil && e === engine }
+        func relevant() -> Bool {
+            rerankOn && composing && candidateSelected < 0
+                && (rerankRunning.map { mine($0.session, $0.engine) } ?? false || rerankPending.map { mine($0.session, $0.engine) } ?? false)
+        }
+        guard relevant() else { return }
+        let deadline = DispatchTime.now() + .milliseconds(enterRerankWaitMS)
+        while relevant(), let slot = rerankRunning, let handle = slot.handle, let code = rerankRunner.wait(handle, until: deadline) {
+            rerankFinished(slot, code: code)
+        }
+    }
+
+    /// The settings switch (acg-pack contract A.2; it-pack 3.2 moved it out of the menu): the pack is part of the lexicon, so like a layout change the
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
         guard on != acgPackOn else { return }
@@ -835,28 +1178,98 @@ public final class Shell {
         Log.shell.debug("word pack switched")
     }
 
+    /// The 經典台詞 switch (quote-pack contract section 2): like `setAcgPack`, the pack is part of the lexicon, so the composition
+    /// is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    func setQuotePack(_ on: Bool) {
+        guard on != quotePackOn else { return }
+        commitThenRebuild {
+            quotePackOn = on
+            quotePackStore.quotePack = on
+        }
+        changed()
+        Log.shell.debug("quote pack switched")
+    }
+
+    /// The settings switch (it-pack contract 3.2): the same as `setAcgPack` for the IT+AI pack.
+    func setItPack(_ on: Bool) {
+        guard on != itPackOn else { return }
+        commitThenRebuild {
+            itPackOn = on
+            itPackStore.itPack = on
+        }
+        changed()
+        Log.shell.debug("it pack switched")
+    }
+
+    /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the
+    /// standard layout and the abbreviation composer off. Without it a switch to English first sends the composition (section 2).
+    var shadowOn: Bool { englishOn && mode == .standard && !abbreviationOn }
+
+    /// The settings window's 單按 Shift 切換中英: stored; off clears every app's state and the core's (section 1). The snapshot is shown by the owner.
+    func applyShiftToggle(_ on: Bool) {
+        shiftToggleOn = on
+        shiftToggleStore.shiftToggle = on
+        if !on {
+            asciiApps.removeAll()
+            shiftTap = ShiftTap()
+            if let o = owner { o.pushAscii(false) } else if engineAscii {
+                engineAscii = false
+                dropOnFailure(engine?.setAscii(false))
+            }
+        }
+        changed()
+    }
+
     /// Creates the engine for the current mode, then loads the LM and the current profile. A
     /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
         engine = nil  // free the old engine first: only one exists at a time
         rerankAvailable = false
         rerankLevels = 0
-        englishAvailable = false
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
+        loadedPackMask = 0
         let packsDir = resources.appendingPathComponent("packs").path
-        var (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: acgPackOn ? packsDir : nil)
-        if made == nil && acgPackOn {
-            // Any build failure retries without the pack, so the first code alone does not say whose fault it is:
-            // blame the pack only if the pack-less build works; otherwise the second code is the real cause.
-            // The stored choice is untouched and nothing is shown; the next rebuild tries the pack again.
+        let mask = packMask
+        // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
+        let present = Shell.packTable.reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.file) ? $0 | $1.bit : $0 }
+        var built = mask & present
+        var (made, code) = makeEngine(packsDir: mask != 0 ? packsDir : nil, packs: mask)
+        if made == nil && mask != 0 {
+            // The combined build failed, so the first code alone does not say whose fault it is. (a) Build with no packs, only to learn whether
+            // it works, and free it at once (build() keeps one engine at a time): if it fails too the cause is not a pack, both codes are logged
+            // and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings order build with just
+            // that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop works (two broken
+            // files), build the no-pack engine again. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
             let packCode = code
-            (made, code) = CoreEngine.make(dataDir: resources.path, layout: mode.layout)
-            if made != nil { Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built without the pack") }
+            built = 0
+            var noPackWorks = false
+            do {
+                let (probe, probeCode) = makeEngine(packsDir: nil, packs: 0)
+                noPackWorks = probe != nil
+                code = probeCode
+            }   // the probe engine is freed here
+            if noPackWorks {
+                var kept: UInt32 = 0
+                for bit in Shell.packTable.map(\.bit) where mask & bit != 0 && mask & ~bit != 0 {
+                    let (dropped, _) = makeEngine(packsDir: packsDir, packs: mask & ~bit)
+                    if let dropped {
+                        made = dropped
+                        built = mask & ~bit & present
+                        kept = mask & ~bit
+                        break
+                    }
+                }
+                if made == nil { (made, code) = makeEngine(packsDir: nil, packs: 0) }
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(kept)")
+            } else {
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); the build without packs failed too")
+            }
         }
         guard let e = made else {
             Log.shell.error("shanjie_engine_new failed, code \(code)")
             return
         }
+        loadedPackMask = built
         let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
         if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
         // s7c2b section 2.3: after load_lm (which drops a small model). Missing or failed: the n-gram alone, no rerank.
@@ -871,11 +1284,6 @@ public final class Shell {
                 if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
             }
         }
-        // zhen-mixed section 3.2: the word list. A failure leaves the engine without it (the switch then has no effect) and greys the
-        // item; only the code is logged.
-        let english = e.loadEnglish(path: resources.appendingPathComponent(Shell.englishFile).path)
-        if english != 0 { Log.shell.error("shanjie_engine_load_english failed, code \(english)") }
-        englishAvailable = english == 0
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
@@ -886,13 +1294,31 @@ public final class Shell {
         if case .failed(let c) = e.setAbbreviation(abbreviationOn) {
             Log.shell.error("shanjie_engine_set_abbreviation failed, code \(c)")
         }
-        // And the English window's switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
+        // And the English mixing switch, every time: a rebuilt engine (layout, word pack) starts with the core's default, off.
         if case .failed(let c) = e.setEnglish(englishOn) {
             Log.shell.error("shanjie_engine_set_english failed, code \(c)")
         }
-        // And its display choice (zhen-inline section 2), every time for the same reason: the core's default is true.
-        if case .failed(let c) = e.setEnglishInline(englishInlineOn) {
-            Log.shell.error("shanjie_engine_set_english_inline failed, code \(c)")
+        // And the overwrite choice (zhen-revert section 3), every time for the same reason.
+        if case .failed(let c) = e.setEnglishOverwrite(englishOverwriteOn) {
+            Log.shell.error("shanjie_engine_set_english_overwrite failed, code \(c)")
+        }
+        // And the ASCII state of the app being served (shift-toggle section 2): a rebuilt engine starts with it off.
+        lastBuiltAscii = engineAscii
+        if case .failed(let c) = e.setAscii(engineAscii) {
+            Log.shell.error("shanjie_engine_set_ascii failed, code \(c)")
+        }
+        // And the key-order choice (zhen-keyorder section 3), every time.
+        if case .failed(let c) = e.setEnglishKeyOrder(englishKeyOrderOn) {
+            Log.shell.error("shanjie_engine_set_english_key_order failed, code \(c)")
+        }
+        // And the reversal guard (zhen-reapply section 1.2), every time.
+        if case .failed(let c) = e.setEnglishReversalGuard(englishReversalGuardOn) {
+            Log.shell.error("shanjie_engine_set_english_reversal_guard failed, code \(c)")
+        }
+        // And the 模糊輸入 flags (fuzzy-input section 2.2), every time: the core's default is 0.
+        fuzzySent.append(fuzzyFlags)
+        if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
+            Log.shell.error("shanjie_engine_set_fuzzy failed, code \(c)")
         }
         // Same for the candidate window's orientation (candidate-vertical contract section 2.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -956,6 +1382,7 @@ public final class Shell {
         // Only an exact punctuation mark has a name: a word candidate is never a key of the table.
         let notes = list.map { names[$0] }
         shownVertical = vertical
+        candidateSelected = selected
         hintShown = false
         panel.show(list, notes: notes, selected: selected, columns: columns, first: first, total: total, vertical: vertical,
                    lineRect: lineRect, appearance: appearance, glassTint: glassTint)
@@ -968,6 +1395,7 @@ public final class Shell {
     /// Down see no vertical window (`verticalOpen` is false for the prediction row).
     func showHint(lineRect: NSRect?, appearance: NSAppearance?) {
         shownVertical = candidateVertical ? VerticalLayout.predictions : 0
+        candidateSelected = -1
         hintShown = true
         panel.showHint(Self.englishRunHint, vertical: shownVertical, lineRect: lineRect, appearance: appearance, glassTint: glassTint)
     }
@@ -977,6 +1405,7 @@ public final class Shell {
         hintAnchor = nil
         hintShown = false
         shownVertical = 0
+        candidateSelected = -1
         panel.hide()
     }
 
@@ -1001,6 +1430,9 @@ public final class Session {
     /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
     /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
     private var spacingPrev: Character?
+    /// browser-first-syllable section 4: this client's bundle ID as last read by `send` or passed to `applyProfile`; never read
+    /// for this rule alone.
+    private var bundle: String?
 
     public init(shell: Shell, client: TextClient) {
         self.shell = shell
@@ -1018,27 +1450,127 @@ public final class Session {
     /// Returns whether the key was consumed. `event` is nil when IMK passes nil.
     public func handle(_ event: NSEvent?) -> Bool {
         guard shell.engine != nil else { return false }
+        if let event, event.type == .flagsChanged { return handleFlags(event) }
         guard event == nil || event?.type == .keyDown else { return false }
-        if claim() { applyProfile(bundle: client.bundleIdentifier) }
+        shell.shiftTap.keyDown()  // shift-toggle section 1: a key between Shift's press and release spoils the tap
+        if claim() {
+            let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
+            applyProfile(bundle: bundle)
+            syncAscii(bundle: bundle)
+            shell.lastTypingAt = nil  // zhen-reapply section 1a: an owner change without activateServer counts too
+        }
+        // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on, after the key
+        // is handled (so a key that starts a composition anchors the hint to the marked text), only while the toggle is still on.
+        // Due after an activation or owner change (nil, section 1a) or a pause of at least `modeHintIdleSeconds` (section 1b), and only when
+        // typing starts (nothing composed: a candidate pick after a long look is not the start of typing).
+        var showModeHint = false
+        if let event, Self.isTypingKey(event) {
+            let now = shell.idleClock()
+            let due = shell.lastTypingAt.map { now - $0 >= Shell.modeHintIdleSeconds } ?? true
+            shell.lastTypingAt = now
+            showModeHint = due && !shell.composing && shell.shiftToggleOn
+        }
+        defer { if showModeHint { showShiftHint(shell.engineAscii ? "英" : "中") } }
+        // shift-toggle section 2: English state with nothing composed: every key goes to the app untouched, not through the core.
+        if shell.engineAscii && !shell.composing { return false }
         // candidate-vertical contract section 2.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
             return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
         }
         guard let event,
-              let key = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
+              let key = (shell.engineAscii && shell.shadowOn ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
             // nil, or a key outside the tables: never sent to the core.
             if shell.composing { finish(mode: 0) }
             return false
         }
+        // enter-rerank-wait.md section 1 item 2: after claim/applyProfile/syncAscii (a profile change would stale the job), right before
+        // the Enter reaches the core, the shown composition catches up with the rerank that is running for it, within the limit.
+        if key.kind == KeyMap.enter { shell.waitForRerank(session: self) }
         return send(key)
+    }
+
+    /// Shift-toggle section 2: with a composition open in the English state, a printable key is sent as the character the keyboard
+    /// layout made of it (`event.characters`: Shift+1 is `!`), with no modifier bits. `nil` for anything else (Control, Option,
+    /// Command and Caps Lock keys, a non-ASCII or multi-character result, the space bar): those take the usual table.
+    static func asciiKey(_ event: NSEvent) -> ShanjieKey? {
+        let flags = event.modifierFlags
+        guard flags.isDisjoint(with: [.control, .option, .command, .capsLock]),
+              let chars = event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
+              (0x21...0x7E).contains(c.value) else { return nil }
+        return ShanjieKey(kind: KeyMap.char, ch: c.value, modifiers: 0)
+    }
+
+    /// Shift-toggle section 1: a `flagsChanged` event is never consumed (the app sees Shift as always); a lone tap switches.
+    private func handleFlags(_ event: NSEvent) -> Bool {
+        guard shell.shiftToggleOn else { return false }
+        let flags = event.modifierFlags
+        let others = !flags.isDisjoint(with: [.control, .option, .command, .function])
+        // The state of this Shift key from the flags: the device bits (NX_DEVICELSHIFTKEYMASK 0x2, NX_DEVICERSHIFTKEYMASK 0x4), or the
+        // generic bit for an event that carries none.
+        let raw = flags.rawValue
+        let generic = flags.contains(.shift)
+        let hasDevice = raw & 0x6 != 0
+        let leftDown = hasDevice ? raw & 0x2 != 0 : generic && event.keyCode == 56
+        let rightDown = hasDevice ? raw & 0x4 != 0 : generic && event.keyCode == 60
+        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, leftDown: leftDown, rightDown: rightDown, others: others, capsLock: flags.contains(.capsLock),
+                                       now: event.timestamp, processedAt: shell.uptime(), mouseAgo: shell.mouseAgo) {
+            toggleAscii()
+        }
+        return false
+    }
+
+    /// Section 2: this app goes to English or back to Chinese. A composition the core cannot keep as an English run (`shadowOn` false)
+    /// is sent first. The hint shows which one (section 3).
+    private func toggleAscii() {
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once
+        if claim() { applyProfile(bundle: bundle) }
+        let app = bundle ?? ""
+        let on = !shell.asciiApps.contains(app)
+        if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
+        if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
+        pushAscii(on)
+        shell.lastTypingAt = shell.idleClock()  // zhen-reapply sections 1a, 1b: this hint already shows the mode
+        showShiftHint(on ? "英" : "中")
+    }
+
+    /// zhen-reapply section 1a: a key that types: what `asciiKey` takes (no Control, Option, Command or Caps Lock, one character
+    /// `!` to `~`; arrow and function keys carry private-use characters, so they do not count), or a plain space.
+    static func isTypingKey(_ event: NSEvent) -> Bool {
+        asciiKey(event) != nil || (event.characters == " " && event.modifierFlags.isDisjoint(with: [.control, .option, .command]))
+    }
+
+    /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
+    func syncAscii(bundle: String?) {
+        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(bundle ?? ""))
+    }
+
+    func pushAscii(_ on: Bool) {
+        guard on != shell.engineAscii, let engine = shell.engine else { return }
+        shell.engineAscii = on
+        switch engine.setAscii(on) {
+        case .ok(let o): apply(o)
+        case .failed(let c): _ = fail(c)
+        }
+    }
+
+    /// Section 3: the hint above the cursor line: the marked text's rectangle while composing, the insertion point's otherwise. No
+    /// rectangle, no hint (not the screen corner, not the last place).
+    private func showShiftHint(_ text: String) {
+        guard let panel = shell.shiftHint else { return }
+        let rect = shell.composing ? client.lineRect(cursor: shell.composingCursor) : client.caretRect()
+        guard let rect else { return }
+        panel.show(text, lineRect: rect, appearance: client.appearance, glassTint: shell.glassTint)
     }
 
     /// Section 5 order: ownership first, then the profile for this client's app.
     public func activate() {
         claim()
-        applyProfile(bundle: client.bundleIdentifier)
+        let bundle = client.bundleIdentifier
+        applyProfile(bundle: bundle)
+        syncAscii(bundle: bundle)
+        shell.lastTypingAt = nil  // zhen-reapply section 1a: the next typing key shows the mode (only while the toggle is on)
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
@@ -1122,10 +1654,27 @@ public final class Session {
         }
     }
 
-    /// The settings window's 英文的顯示 choice: the snapshot is shown, if this session owns the composition (letters turn into
-    /// Zhuyin or back on screen).
-    func applyEnglishInline(_ on: Bool) {
-        switch shell.setEnglishInline(on) {
+    /// The settings window's 重打同一個位置算英文 choice: the snapshot is shown, if this session owns the composition.
+    func applyEnglishOverwrite(_ on: Bool) {
+        switch shell.setEnglishOverwrite(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 依按鍵順序判斷英文 choice: the snapshot is shown, if this session owns the composition (it is what was on screen).
+    func applyEnglishKeyOrder(_ on: Bool) {
+        switch shell.setEnglishKeyOrder(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 快打時鍵序顛倒不當英文 choice: the snapshot is shown, if this session owns the composition.
+    func applyEnglishReversalGuard(_ on: Bool) {
+        switch shell.setEnglishReversalGuard(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
@@ -1135,6 +1684,15 @@ public final class Session {
     /// The menu's abbreviation switch: the snapshot is shown, if this session owns the composition.
     func applyAbbreviation(_ on: Bool) {
         switch shell.setAbbreviation(on) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 模糊輸入 flags: the snapshot is shown, if this session owns the composition.
+    func applyFuzzy(_ flags: UInt32) {
+        switch shell.setFuzzy(flags) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break
@@ -1215,6 +1773,7 @@ public final class Session {
     /// The profile for this client's app, `bundle` being its bundle ID as the caller read it. No owner check: callers claim
     /// first (`activate`, `handle`, `toggleAppChat`) or are the owner (`Shell.reapplyProfileToOwner`).
     fileprivate func applyProfile(bundle: String?) {
+        self.bundle = bundle
         switch shell.setProfile(profile(for: bundle)) {
         case .ok(let o)?: apply(o)
         case .failed(let c)?: _ = fail(c)
@@ -1225,7 +1784,9 @@ public final class Session {
     /// The single place a key reaches the core.
     func send(_ key: ShanjieKey) -> Bool {
         guard let engine = shell.engine else { return false }
-        let paused = applyLearningGate(engine)
+        let bundle = client.bundleIdentifier  // a synchronous IPC: read once, for the gate and the left context's terminal check
+        self.bundle = bundle
+        let paused = applyLearningGate(engine, bundle: bundle)
         // Section 2: once per composition, before the key that may start it and so before its
         // first setMarkedText. Only a character key without Control, Option, Command or Caps Lock
         // can start one, so pass-through keys outside a composition never read the client.
@@ -1234,9 +1795,9 @@ public final class Session {
         if !shell.composing {
             spacingPrev = nil
             if key.kind == KeyMap.char && key.modifiers & ~1 == 0 {
-                let read = paused ? nil : leftContext()
+                let read = paused ? nil : leftContext(bundle: bundle)
                 spacingPrev = read?.last
-                let code = engine.setLeftContext(read?.han)
+                let code = engine.setLeftContext(read?.text)
                 if code != 0 { Log.shell.error("shanjie_engine_set_left_context failed, code \(code)") }
             }
         }
@@ -1267,6 +1828,7 @@ public final class Session {
     /// Section 7: commit first, then the preedit (single underline with a thick one over the open English run, caret at
     /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
+        shell.composingCursor = Int(o.cursorUTF16)
         if !o.commit.isEmpty {
             var text = o.commit
             if shell.spacingOn {
@@ -1283,7 +1845,7 @@ public final class Session {
         shell.composing = !o.preedit.isEmpty
         // Zhen-inline section 1.3f: an open English run has no candidates, so the hint takes the window's place.
         let hint = o.candidates.isEmpty && o.englishRunLength > 0
-        if o.candidates.isEmpty && !hint {
+        if o.candidates.isEmpty && !hint || hidesFirstSyllableRow(o) {
             shell.hideCandidates()
         } else {
             let cursor = Int(o.cursorUTF16)
@@ -1312,6 +1874,12 @@ public final class Session {
             }
         }
         takeRerank()
+    }
+
+    /// browser-first-syllable sections 1 and 4: a passive prediction row for the first syllable, in a browser, is not shown.
+    private func hidesFirstSyllableRow(_ o: CoreOutput) -> Bool {
+        o.selected == -1 && !o.candidates.isEmpty && shell.browserFirstSyllableOn && !shell.abbreviationOn
+            && bundle.map(Shell.browserApps.contains) == true && Shell.singleSyllable(o.preedit)
     }
 
     /// Section 7 and zhen-inline section 1.3f: the preedit with a single underline, and a thick one over the open English run

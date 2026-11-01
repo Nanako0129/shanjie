@@ -264,6 +264,123 @@ class TestCounting(unittest.TestCase):
         self.assertEqual(mp["uni"]["<X>"], 2)                 # "之後去吃飯" after 12345, "你好嗎" after hello
         self.assertEqual(meta["x_runs"], 2)
 
+    ARTICLES = ["今天天氣很好。我在學校", "你好嗎，再見。", "他說在學校，今天天氣不錯", "<ref>x</ref>你好嗎。他說再見", "天氣很好"]
+
+    def _tagged(self, d, tag, articles):
+        u, b, tri, dbi, nx, runs = count.count_batch3(articles)
+        count.write_outputs(d, tag, u, b, tri, dbi, nx, runs, len(articles), {})
+
+    def _assert_same_counts(self, d, got, want):
+        for sub, name, keys in (("unmapped", "counts", ("uni", "bi", "articles", "runs")), ("unmapped", "tri", ("tri",)), ("mapped", "counts", ("uni", "bi"))):
+            g, w = (unpickle(os.path.join(d, sub, f"{name}-{t}.pkl")) for t in (got, want))
+            for k in keys:
+                self.assertEqual(g[k].keys() if hasattr(g[k], "keys") else None, w[k].keys() if hasattr(w[k], "keys") else None, (sub, name, k))
+                if hasattr(g[k], "items"):
+                    for key, v in w[k].items():
+                        self.assertAlmostEqual(g[k][key], v, delta=1e-9, msg=(sub, name, k, key))
+                else:
+                    self.assertEqual(g[k], w[k])
+
+    def test_wiki_shards_select_i_mod_n_and_merge_to_the_unsharded_counts(self):
+        self._setup_bc()
+        self.assertEqual(list(count.shard_filter(range(10), 1, 3)), [1, 4, 7])
+        self.assertEqual(count.shard_of(None), (0, 1))
+        with self.assertRaises(ValueError):
+            count.shard_of("3/3")
+        with tempfile.TemporaryDirectory() as d:
+            self._tagged(d, "all", self.ARTICLES)
+            for k in range(3):
+                self._tagged(d, f"s{k}", list(count.shard_filter(self.ARTICLES, k, 3)))
+            with contextlib.redirect_stdout(io.StringIO()):
+                count.main(["merge", "--out", d, "--tag", "m", "s0", "s1", "s2"])
+            self._assert_same_counts(d, "m", "all")
+            self.assertEqual(unpickle(os.path.join(d, "unmapped", "counts-m.pkl"))["articles"], len(self.ARTICLES))
+            self.assertEqual(sorted(unpickle(os.path.join(d, "unmapped", "counts-m.pkl"))), ["articles", "bi", "runs", "uni"])   # the shape build_lm reads
+            self.assertEqual(json.loads(slurp(os.path.join(d, "meta-m.json")))["merged_from"], ["s0", "s1", "s2"])
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(bc.SRC, "opencc")), "needs the OpenCC tables in ~/.cache/shanjie/sources (the real conversion)")
+    def test_wiki_command_shards_end_to_end_on_a_fake_dump(self):
+        xml = "".join(f"<page>\n<ns>0</ns>\n<text xml:space=\"preserve\">{t}</text>\n</page>\n" for t in self.ARTICLES)
+        with tempfile.TemporaryDirectory() as d:
+            dump = os.path.join(d, "fake.xml.bz2")
+            with bz2.open(dump, "wt", encoding="utf-8") as f:
+                f.write(xml)
+            with mock.patch.object(bc, "DUMP", dump), contextlib.redirect_stdout(io.StringIO()):
+                count.main(["wiki", "--out", d, "--articles", "5", "--procs", "2"])
+                for k in range(2):
+                    count.main(["wiki", "--out", d, "--articles", "5", "--procs", "2", "--shard", f"{k}/2"])
+                count.main(["merge", "--out", d, "--tag", "m", "5-shard0of2", "5-shard1of2"])
+            self.assertEqual([unpickle(os.path.join(d, "unmapped", f"counts-5-shard{k}of2.pkl"))["articles"] for k in range(2)], [3, 2])
+            self._assert_same_counts(d, "m", "5")
+
+    def test_text_reads_tsv_last_field_and_shards_merge(self):
+        self._setup_bc()
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)):
+            tsv, plain, other = (os.path.join(d, n) for n in ("a.tsv", "a.txt", "b.txt"))
+            open(tsv, "w", encoding="utf-8").write("他說再見\t3\t你好嗎\n他說再見\t今天天氣很好\n")   # the first fields are Han text too: they must not be counted
+            open(plain, "w", encoding="utf-8").write("你好嗎\n今天天氣很好\n")
+            open(other, "w", encoding="utf-8").write("他說在學校\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                for tag, paths in (("tsv", [tsv]), ("plain", [plain]), ("other", [other]), ("both", [plain, other])):
+                    count.main(["text", "--out", d, "--tag", tag, *paths])
+                count.main(["merge", "--out", d, "--tag", "m", "plain", "other"])
+            self._assert_same_counts(d, "tsv", "plain")
+            self.assertEqual(unpickle(os.path.join(d, "unmapped", "counts-tsv.pkl"))["runs"], 2)
+            self._assert_same_counts(d, "m", "both")
+            seen = []
+            real = bc.convert
+            with mock.patch.object(bc, "convert", lambda *x, **kw: (seen.append(kw.get("trad_tw_phrases", True)), real(*x, **kw))[1]), contextlib.redirect_stdout(io.StringIO()):
+                count.main(["text", "--out", d, "--tag", "x", plain])
+                count.main(["text", "--out", d, "--tag", "y", "--no-trad-tw-phrases", plain])
+            self.assertEqual((set(seen[:2]), set(seen[2:])), ({True}, {False}))   # --no-trad-tw-phrases reaches the conversion, as in build_counts.py
+
+    GUARD_LINES = ["我說今天天氣很好吧", "「今天天氣很好」，他說再見", "你好嗎", "再見"]   # hit inside a longer run; hit wrapped in quotes; two clean lines
+
+    def _text_run(self, d, tag, *flag):
+        src = os.path.join(d, "g.txt")
+        open(src, "w", encoding="utf-8").write("\n".join(self.GUARD_LINES) + "\n")
+        out = io.StringIO()
+        with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), contextlib.redirect_stdout(out):
+            count.main(["text", "--out", d, "--tag", tag, src, *flag])
+        return out.getvalue()
+
+    def test_text_holdout_guard_off_is_identical_and_on_skips_the_hit_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = os.path.join(d, "rows.txt")
+            open(rows, "w", encoding="utf-8").write("|今天天氣很好|ㄐㄧㄣ ㄊㄧㄢ ㄊㄧㄢ ㄑㄧˋ ㄏㄣˇ ㄏㄠˇ\n|短句|ㄉㄨㄢˇ ㄐㄩˋ\n")
+            other = os.path.join(d, "other.txt")
+            open(other, "w", encoding="utf-8").write("|完全不相干的句子|x\n")
+            off = self._text_run(d, "off")
+            miss = self._text_run(d, "miss", "--holdout-guard", other)
+            on = self._text_run(d, "on", "--holdout-guard", rows)
+            self.assertNotIn("holdout-guard", off)
+            self.assertIn("holdout-guard: skipped 0 runs", miss)
+            self.assertIn("holdout-guard: skipped 2 runs", on)                              # the long run and the quoted one
+            for sub, name in (("unmapped", "counts"), ("unmapped", "tri"), ("mapped", "counts")):
+                a, b = (slurp(os.path.join(d, sub, f"{name}-{t}.pkl"), "rb") for t in ("off", "miss"))
+                self.assertEqual(a, b)                                                       # a guard that hits nothing changes no byte
+            self.assertNotIn("holdout_guard", json.loads(slurp(os.path.join(d, "meta-off.json"))))
+            self.assertEqual(json.loads(slurp(os.path.join(d, "meta-on.json")))["guard_skipped_runs"], 2)
+            u_off, u_on = (unpickle(os.path.join(d, "unmapped", f"counts-{t}.pkl")) for t in ("off", "on"))
+            self.assertEqual((u_off["runs"], u_on["runs"]), (5, 3))                          # runs: long, quoted, 他說再見, 你好嗎, 再見; the first two are skipped
+            self.assertEqual(u_on["uni"].get("今天", 0), 0)
+            self.assertGreater(u_off["uni"]["今天"], 0)
+            self.assertGreater(sum(u_on["uni"].values()), 0)                                 # the clean lines are still counted
+
+    def test_text_holdout_guard_errors_carry_no_row_text(self):
+        marker = "秘密標記字串"
+        with tempfile.TemporaryDirectory() as d:
+            bad = os.path.join(d, "bad.txt")
+            open(bad, "w", encoding="utf-8").write(f"{marker}|{marker}\n")
+            err, out = io.StringIO(), io.StringIO()
+            with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                with self.assertRaises(SystemExit) as cm:
+                    count.main(["text", "--out", d, "--tag", "x", os.path.join(d, "none.txt"), "--holdout-guard", bad])
+            msg = str(cm.exception.code)
+            self.assertIn("bad.txt:1", msg)
+            self.assertNotIn(marker, msg + err.getvalue() + out.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(d, "unmapped")))                   # stopped before counting
+
     def test_pack_words_add_trigrams_like_the_additive_scheme(self):
         """With a pack word (model-v5 §8) the trigram table is lex0's plus the trigrams that contain the pack word."""
         lex0 = fake_lexicon(**{"哈": -2.0, "囉": -2.0, "喵": -2.0})
@@ -292,6 +409,31 @@ class TestVariantMergeAndArrays(unittest.TestCase):
         ids = {"a": 0, "b": 1, "c": 2}
         u, v, w, c = trimodel.tri_arrays({("c", "a", "b"): 3, ("a", "b", "c"): 2, ("a", "b", "zzz"): 9, ("a", "a", "a"): 1}, ids)
         self.assertEqual(list(zip(u, v, w, c)), [(0, 0, 0, 1), (0, 1, 2, 2), (2, 0, 1, 3)])
+
+
+class TestTriCorpora(Fixture):
+    def test_tri_corpora_weights_are_applied_and_the_default_is_unchanged(self):
+        lm = self.load_lm()
+        sha = bytes.fromhex(common.sha256_file(self.lm_path))
+        ctx_total = lambda path: {tuple(lm.vocab[x] for x in tab.context_words(i)): int(tab.tot[i]) for tab in [trimodel.TriTable.from_path(path, sha)] for i in range(tab.contexts)}
+        with tempfile.TemporaryDirectory() as d:
+            def build(name, *corpora):
+                out = os.path.join(d, name)
+                build_models.main(["tri", "--counts", self.counts, "--lm", self.lm_path, "--out", out, "--thresholds", "1", *(["--corpora", *corpora] if corpora else [])])
+                return os.path.join(out, "tri-t1.sjt3"), json.loads(slurp(os.path.join(out, "tri-sizes.json")))
+            default, _ = build("default")
+            explicit, info = build("explicit", "counts-200000.pkl:1", "counts-colloquial3.pkl:5")
+            self.assertEqual(slurp(explicit, "rb"), slurp(default, "rb"), "FILE:WEIGHT with the build_lm.CORPORA values is the default")
+            self.assertEqual(slurp(default, "rb"), slurp(self.tri_path(1), "rb"))
+            self.assertEqual(sorted(os.path.basename(p) for p in info["inputs"] if os.path.basename(p).startswith("tri-")), ["tri-200000.pkl", "tri-colloquial3.pkl"])
+            w13, _ = build("w13", "counts-200000.pkl:1", "counts-colloquial3.pkl:3")
+            wiki_only, _ = build("wiki", "counts-200000.pkl:2")
+            # the ("<s>", "<s>") context total is every sentence: wiki 23 and colloquial 10 occurrences in SENTS
+            self.assertEqual(ctx_total(default)[("<s>", "<s>")], 23 + 5 * 10)
+            self.assertEqual(ctx_total(w13)[("<s>", "<s>")], 23 + 3 * 10)
+            self.assertEqual(ctx_total(wiki_only)[("<s>", "<s>")], 2 * 23)
+        with self.assertRaises(ValueError):
+            build_models.main(["tri", "--counts", self.counts, "--lm", self.lm_path, "--out", self.counts + "-x", "--thresholds", "1", "--corpora", "counts-200000.pkl:x"])
 
 
 class TestTrigramModel(Fixture):

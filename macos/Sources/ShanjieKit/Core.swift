@@ -40,14 +40,20 @@ final class CoreEngine {
 
     private init(handle: OpaquePointer) { self.handle = handle }
 
+    /// The bits of the packs mask (`SHANJIE_PACK_*` in shanjie.h).
+    static let packACG = UInt32(SHANJIE_PACK_ACG)
+    static let packQuotes = UInt32(SHANJIE_PACK_QUOTES)
+    static let packIT = UInt32(SHANJIE_PACK_IT)
+
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
-    /// `packsDir` is the directory of the word pack files and turns the ACG pack on (acg-pack contract A.2); nil is
-    /// `shanjie_engine_new`, so the engine is the one the app had before the pack existed.
-    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil) -> (CoreEngine?, Int32) {
+    /// `packsDir` is the directory of the word pack files and `packs` the bit mask of the packs to turn on (acg-pack contract A.2,
+    /// quote-pack contract section 2, it-pack contract 3.1; the default is the ACG pack alone); a nil `packsDir` is `shanjie_engine_new`,
+    /// so the engine is the one the app had before the packs existed.
+    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, packs: UInt32 = packACG) -> (CoreEngine?, Int32) {
         var out: OpaquePointer?
         let code: Int32
         if let packsDir {
-            code = shanjie_engine_new_packs(dataDir, layout, packsDir, UInt32(SHANJIE_PACK_ACG), &out)
+            code = shanjie_engine_new_packs(dataDir, layout, packsDir, packs, &out)
         } else {
             code = shanjie_engine_new(dataDir, layout, &out)
         }
@@ -137,24 +143,48 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)
     }
 
-    /// zhen-mixed: the English word list, `[a-z]{3,32}` per line; 0 ok, 3 refused (the previous list, or none, stays). Call it once
-    /// after `make`, like `loadLM`.
-    func loadEnglish(path: String) -> Int32 { shanjie_engine_load_english(handle, path) }
-
-    /// zhen-mixed: whether Space after an English word typed into one unfinished syllable opens the English window (the core's
-    /// default is off; it needs the loaded list and the standard layout); returns the snapshot. Sent to every engine
-    /// `Shell.build()` makes.
+    /// zhen-mixed: the English mixing switch (the core's default is off): keys that cannot be a Zhuyin syllable revert
+    /// directly to the raw keys as an English run in the composition. It takes effect only with the standard layout and 可省略韻母 off;
+    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
     func setEnglish(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)
     }
 
-    /// zhen-inline: whether the English typed into the unfinished syllable shows as letters while it can still become a listed word
-    /// (the core's default is true); returns the snapshot, so a composition on screen is drawn again. Sent to every engine
-    /// `Shell.build()` makes.
-    func setEnglishInline(_ on: Bool) -> CoreResult {
+    /// fuzzy-input (docs/contracts/fuzzy-input.md section 2.1): bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
+    /// adjacent-key slips (the core's default is 0, which changes nothing; bit 4 does nothing in the Eten layout); returns the
+    /// snapshot. Sent to every engine `Shell.build()` makes.
+    func setFuzzy(_ flags: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
-        return Self.take(shanjie_engine_set_english_inline(handle, on ? 1 : 0, &out), out)
+        return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
+    }
+
+    /// zhen-revert: whether a key typed over the symbol already in its column reverts the unfinished syllable to the raw keys as
+    /// English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishOverwrite(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_overwrite(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-keyorder with zhen-revert: whether keys out of Zhuyin's column order, and a tone key that makes a syllable the lexicon lacks,
+    /// revert to the raw keys as English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-reapply: whether a Zhuyin key in a column before a filled one is never English (trigger (b) off; the core's default is true);
+    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishReversalGuard(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_reversal_guard(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// shift-toggle: the ASCII state of the app the shell is serving (the core's default is off). In it a printable character key goes on the
+    /// English run as typed; returns the snapshot (the unfinished syllable has become the run). Sent on activate, owner change and toggle.
+    func setAscii(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_ascii(handle, on ? 1 : 0, &out), out)
     }
 
     func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
@@ -232,8 +262,10 @@ final class CoreEngine {
 ///
 /// `@unchecked Sendable` rests on three invariants the shell keeps (the header's rules for one job):
 /// 1. One run at a time: `run()` is called once, on one thread, by the shell's runner, which runs a single job at a time.
-/// 2. `apply(on:)` only after `run()` returned: the runner hands the code back through `DispatchQueue.main.async`, which
-///    orders the background run before the main-thread apply.
+/// 2. `apply(on:)` only after `run()` returned, by either of two orderings: the runner hands the code back through
+///    `DispatchQueue.main.async`, which orders the background run before the main-thread apply; or Enter's bounded wait
+///    (docs/contracts/enter-rerank-wait.md) is woken by a semaphore the queue signals only after `run()` returned, and the
+///    shell applies on the waking thread. Either way the job is finished once: the later callback applies nothing.
 /// 3. The job is freed only in `deinit`, exactly once: the last reference may go on any thread (the header allows free on
 ///    any thread once run returned), and the runner's closure holds this wrapper, never the pointer, while run is running.
 public final class RerankJob: @unchecked Sendable {
