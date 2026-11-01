@@ -2575,3 +2575,33 @@ fn sinit_preference_class_can_be_reverted_by_one_repick() {
         println!("SINIT revert {p:?}: after teaching 她 {shown:?}; reverted on {sent} ({r}); after the revert {after:?}");
     }
 }
+
+/// SINIT section 2, learned once with the shipping models (rerank on, standard level; maintainer's choice 2026-11-01): `before` is asserted first, then
+/// the first syllable is single-picked as `want` and Enter, then the same reading must show `sent`. Two rows of eval/dev/user-reported.txt in the
+/// formal profile only (row 31 and row 163 are already right in chat), and the semantic teach row 代你保管 of eval/learn/sinit-cases.tsv in chat.
+fn sinit_learned_once(p: lm::Profile, reading: &str, before: &str, want: &str, sent: &str) {
+    let mut e = ship(p);
+    assert_eq!(type_settled(&mut e, reading), before, "{p:?} {sent}: before teaching");
+    e.key(k(KeyKind::Enter)).unwrap();
+    teach_first(&mut e, reading, want);
+    let recs: Vec<_> = e.learner().records().iter().filter(|r| r.word == want).collect();
+    assert!(recs.len() == 1 && recs[0].context.starts_with("^>") && recs[0].reading.len() == 1, "{p:?} {sent}: the single character was learned under ^> plus a syllable");
+    assert_eq!(type_settled(&mut e, reading), sent, "{p:?} {sent}: after one teach");
+}
+
+#[test]
+fn sinit_user_reported_row_31_is_learned_once_in_formal() {
+    sinit_learned_once(lm::Profile::Formal, "ㄗㄞˋ ㄘㄜˋ ㄧ ㄘˋ", "在測一次", "再", "再測一次");
+}
+
+#[test]
+#[ignore = "fails at the placeholder EPS_SINIT 1.0 (formal: fused gain 0.113 under delta 0.5); sinit-learn.md section 9. Enable once the sweep sets EPS_SINIT"]
+fn sinit_user_reported_row_163_is_learned_once_in_formal() {
+    sinit_learned_once(lm::Profile::Formal, "ㄅㄧㄢˋ ㄧˊ ㄧㄤˋ ㄌㄜ˙", "便一樣了", "變", "變一樣了");
+}
+
+#[test]
+#[ignore = "fails at the placeholder EPS_SINIT 1.0 (chat: fused gain -1.861 + 0.5 * EPS_SINIT, negative); sinit-learn.md section 9. Enable once the sweep sets EPS_SINIT"]
+fn sinit_semantic_row_dai_ni_bao_guan_is_learned_once_in_chat() {
+    sinit_learned_once(lm::Profile::Chat, "ㄉㄞˋ ㄋㄧˇ ㄅㄠˇ ㄍㄨㄢˇ", "帶你保管", "代", "代你保管");
+}
