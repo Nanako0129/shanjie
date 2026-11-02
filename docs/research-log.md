@@ -11329,6 +11329,13 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **GCP 之前的 Mac 檢查**（§2，`shanjie-replay --learn on --correct --strict --sinit-stretches --eps-sinit 4 --delta-sinit 0`，書面第 31、163 列各打兩次、聊天「代你保管」打兩次，出貨模型、標準檔）：第二次打的 `first_ok` 全是 1（學會），第一次全是 0 且 `--correct` 各改選 1 次（兩份摘要的 `picks_per100` 都是 12.5）。逐段（Δng，α·Δll）：第 31 列 (0.886171, −1.012343)、第 163 列 (0.863698, −0.476879)、「代你保管」 (0.475424, 1.386024)。三列在 `ε` 4、`δ_sinit` 0 都學得會，可以送 GCP。
 - **未做**：`EPS_SINIT`、`DELTA_SINIT`、`EPS_SINIT_NG` 的值（掃檔決定，現在是暫定值 1.0、0、1.0）；`core/include/shanjie.h` 與其他文件的句子照這一版改了，但「查的時候怎麼用」的 `EPS_SINIT` 數字待掃檔。
 
+## 2026-11-02：SINIT 修訂七的實作（Mac）
+
+- 先把含 `751ff5cd`（R1 讀音解碼，PR #353）的 main 合併進 `feat/sinit-learn`（merge commit，不 rebase）。`lm.rs` 的解碼器裡 SINIT 的標記與 gain 和 R1 的 `rd_term` 並存：`sc = h.score + (term − delta) + rd_term`（`was_boosted` 才不加）；抬升的字不是 `was_boosted`，所以 `Sinit::Off` 與 `Sinit::Lift` 的同一條路徑都帶同一個讀音項，標記的 gain 仍是兩者的全部差。`colloquial.rs` 取 main 的版本（沒有 `ReadingChannel`）再加 `learn` 參數；replay 的設定標記順序是 `+colloq`、`+level`、`+eps_sinit`（已拿掉，見下）、引擎的 `+rd+rx:<sha8>`、`+strict`。
+- 修訂七：`EPS_SINIT` ＝ 4（具名常數）；`DELTA_SINIT`、`EPS_SINIT_NG`、`Learn.eps_sinit_ng`、`Sinit::Boost`、沒有重排工作時的退路加分、`--delta-sinit`、`--eps-sinit-ng` 拿掉。`--eps-sinit` 也從 `shanjie-replay` 拿掉（契約的量測沒有第二個 ε）；`Engine::set_eps_sinit` 留給測試。沒有重排工作時規則 10 的紀錄不影響選字、不觸發守門（紀錄照存）。
+- 測試在讀音項開著時跑（`tiny()` 的小詞庫帶 `ReadingDecode`）；`total_score` 的等式在 `set_reading_decode(false)` 下斷言；池的測試讓學到的字有第二個常見讀音，換進池的路徑帶 −8 的讀音項（前提斷言），仍等於它在 `Sinit::Off` 解碼的分數（1e-12）。row 163 與「代你保管」拿掉 `#[ignore]`，三列教一次、在家休息污染、她／他改回在 `EPS_SINIT` 4 的出貨模型上都過，沒有調任何東西。
+- 突變一次（第一次解碼 `Sinit::Off` 改成 `Sinit::Lift`，池回到抬升的解碼）：守門測試在顯示失敗（照建議對趙建議）、`total_score` 測試失敗（−5.0642 對 −7.5642），ε 0 與在算帳測試也失敗；還原後全過。
+
 ## 2026-11-01：CE3 機械計數（S1，在讀任何內容之前；契約 `docs/contracts/chat-eval-3.md` §4）
 
 - 起因：R1g（讀音解碼的探索變體，`exp/r1-reading-decode` 的實驗紀錄）的確認一發要沒看過的聊天判讀集（維護者 2026-11-01 選「建 CE3＋新維基集，兩邊都確認」）。
