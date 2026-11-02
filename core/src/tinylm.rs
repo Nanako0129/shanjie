@@ -15,7 +15,7 @@
 
 use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, last_chars, SENTINEL};
-use crate::lm::{Lm, Profile, EPS_SINIT_COARSE, EPS_SINIT_FINE};
+use crate::lm::{Lm, Profile, SinitLayer, EPS_SINIT_COARSE, EPS_SINIT_FINE, EPS_SINIT_MID};
 use crate::ManualSet;
 use std::collections::HashMap;
 use std::fmt;
@@ -739,32 +739,29 @@ pub fn pick(ng: &[f64], ll: &[f64], alpha: f64, tau: f64, delta: f64) -> usize {
     pick_masked(ng, ll, alpha, tau, delta, &[], &[])
 }
 
-/// SINIT revision 8 (docs/contracts/sinit-learn.md section 1.4): what the sentence-start learning gives one stretch of a rerank job. `fine`: the stretch's first
-/// three syllables have a record under the fine key (`learn::fine_key`), so `b` is the fine layer's; otherwise `b` is the coarse layer's. `b[i]` is
-/// `w / (w + 1)` of the layer's record of the first character of candidate `i` (a missing entry is 0). `scale` multiplies both registered
+/// SINIT revision 9 (docs/contracts/sinit-learn.md section 1.4): what the sentence-start learning gives one stretch of a rerank job. `layer`: the longest layer
+/// (fine, mid, coarse) that has a record at the stretch's start; only that layer's `b` is used. `b[i]` is
+/// `w / (w + 1)` of the layer's record of the first character of candidate `i` (a missing entry is 0). `scale` multiplies all three registered
 /// constants: 1 in production, the tests' knob (`Engine::set_eps_sinit`; 0 is no learning). `Learning::default()` is no learning.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Learning {
-    pub fine: bool,
+    pub layer: SinitLayer,
     pub b: Vec<f64>,
     pub scale: f64,
 }
 
 impl Learning {
     /// The learning term of every candidate, relative to the first (the anchor's is 0), for the small model's log-likelihoods `ll`. Fine layer:
-    /// `EPS_SINIT_FINE * (b_i - b_0)`, both signs. Coarse layer: `EPS_SINIT_COARSE * max(b_i - b_0, 0)` and only where `ll_i > ll_0`, else 0.
-    /// The two layers are never added. The result goes to `pick_masked` (and `colloquial::fused_pick`, `guarded_pick`) as their `learn`.
+    /// `EPS_SINIT_FINE * (b_i - b_0)`, both signs. Mid layer: `EPS_SINIT_MID * max(b_i - b_0, 0)` and only where `ll_i > ll_0`, else 0. Coarse layer: the same with
+    /// `EPS_SINIT_COARSE`. The layers are never added. The result goes to `pick_masked` (and `colloquial::fused_pick`, `guarded_pick`) as their `learn`.
     pub fn term(&self, ll: &[f64]) -> Vec<f64> {
         let b = |i: usize| self.b.get(i).copied().unwrap_or(0.0);
+        let gated = |eps: f64, i: usize| if ll[i] > ll[0] { self.scale * eps * (b(i) - b(0)).max(0.0) } else { 0.0 };
         (0..ll.len())
-            .map(|i| {
-                if self.fine {
-                    self.scale * EPS_SINIT_FINE * (b(i) - b(0))
-                } else if ll[i] > ll[0] {
-                    self.scale * EPS_SINIT_COARSE * (b(i) - b(0)).max(0.0)
-                } else {
-                    0.0
-                }
+            .map(|i| match self.layer {
+                SinitLayer::Fine => self.scale * EPS_SINIT_FINE * (b(i) - b(0)),
+                SinitLayer::Mid => gated(EPS_SINIT_MID, i),
+                SinitLayer::Coarse => gated(EPS_SINIT_COARSE, i),
             })
             .collect()
     }
@@ -1069,37 +1066,56 @@ mod tests {
         assert_eq!(pick_masked(&ng_close, &ll, 1.0, 2.0, 0.0, &[], &[0.0, 0.0, 3.0]), 2, "-1.2 - 1 + 3 beats -1");
     }
 
-    /// SINIT revision 8, sections 1.4 and 1.5. The fine layer: `EPS_SINIT_FINE * (b_i - b_0)`, both signs, whatever the small model says. The coarse layer:
-    /// `EPS_SINIT_COARSE * max(b_i - b_0, 0)`, and only where `ll_i > ll_0` (equal is 0 too); a taught anchor against an unlearned candidate is 0 (it only lifts).
-    /// `scale` multiplies both; no `b` is no term.
+    /// SINIT revision 9, sections 1.4 and 1.5. The fine layer: `EPS_SINIT_FINE * (b_i - b_0)`, both signs, whatever the small model says. The mid layer:
+    /// `EPS_SINIT_MID * max(b_i - b_0, 0)`, and only where `ll_i > ll_0` (equal is 0 too); the coarse layer the same with `EPS_SINIT_COARSE`; a taught anchor against an
+    /// unlearned candidate is 0 (it only lifts). A `Learning` has one layer, so the layers never add (that the engine hands over the longest one is `engine_learn.rs`,
+    /// `sinit_the_job_reads_the_longest_layer_that_has_a_record`). `scale` multiplies all three; no `b` is no term.
     #[test]
-    fn the_learning_term_is_the_fine_layer_or_the_gated_coarse_layer() {
+    fn the_learning_term_is_the_fine_layer_or_the_gated_mid_or_coarse_layer() {
+        use SinitLayer::{Coarse, Fine, Mid};
         let ll = [-5.0, -4.0, -5.0, -6.0];
-        let fine = |b: &[f64]| Learning { fine: true, b: b.to_vec(), scale: 1.0 }.term(&ll);
-        let coarse = |b: &[f64]| Learning { fine: false, b: b.to_vec(), scale: 1.0 }.term(&ll);
-        assert_eq!(fine(&[0.0, 0.5, 0.5, 0.5]), [0.0, 2.0, 2.0, 2.0], "fine: 4 * (b_i - b_0), the model's scores do not matter");
-        assert_eq!(fine(&[0.5, 0.0, 0.25, 0.0]), [0.0, -2.0, -1.0, -2.0], "fine: a learned anchor is held against the others, both signs");
-        assert_eq!(coarse(&[0.0, 0.5, 0.5, 0.5]), [0.0, 1.0, 0.0, 0.0], "coarse: 2 * b_i only for ll_i > ll_0 (candidate 2 ties, candidate 3 is lower)");
-        assert_eq!(coarse(&[0.5, 0.0, 0.25, 0.0]), [0.0; 4], "coarse: a learned anchor lifts nothing and presses nothing");
-        assert_eq!(coarse(&[0.25, 0.5, 0.0, 0.0]), [0.0, 0.5, 0.0, 0.0], "coarse: max(b_i - b_0, 0)");
-        assert_eq!(Learning { fine: true, b: vec![0.0, 0.5], scale: 0.0 }.term(&[-5.0, -4.0]), [0.0, 0.0], "scale 0 is no learning");
-        assert_eq!(Learning { fine: true, b: vec![0.0, 0.5], scale: 3.0 }.term(&[-5.0, -4.0]), [0.0, 6.0]);
+        let term = |layer: SinitLayer, b: &[f64]| Learning { layer, b: b.to_vec(), scale: 1.0 }.term(&ll);
+        assert_eq!(term(Fine, &[0.0, 0.5, 0.5, 0.5]), [0.0, 2.0, 2.0, 2.0], "fine: 4 * (b_i - b_0), the model's scores do not matter");
+        assert_eq!(term(Fine, &[0.5, 0.0, 0.25, 0.0]), [0.0, -2.0, -1.0, -2.0], "fine: a learned anchor is held against the others, both signs");
+        assert_eq!(term(Mid, &[0.0, 0.5, 0.5, 0.5]), [0.0, 2.0, 0.0, 0.0], "mid: 4 * b_i only for ll_i > ll_0 (candidate 2 ties, candidate 3 is lower)");
+        assert_eq!(term(Coarse, &[0.0, 0.5, 0.5, 0.5]), [0.0, 1.0, 0.0, 0.0], "coarse: 2 * b_i only for ll_i > ll_0");
+        for layer in [Mid, Coarse] {
+            assert_eq!(term(layer, &[0.5, 0.0, 0.25, 0.0]), [0.0; 4], "{layer:?}: a learned anchor lifts nothing and presses nothing");
+        }
+        assert_eq!(term(Mid, &[0.25, 0.5, 0.0, 0.0]), [0.0, 1.0, 0.0, 0.0], "mid: max(b_i - b_0, 0)");
+        assert_eq!(term(Coarse, &[0.25, 0.5, 0.0, 0.0]), [0.0, 0.5, 0.0, 0.0], "coarse: max(b_i - b_0, 0)");
+        let low = [-4.0, -5.0, -4.0, -6.0]; // ll_i <= ll_0 for every candidate
+        for layer in [Mid, Coarse] {
+            assert_eq!(Learning { layer, b: vec![0.0, 1.0, 1.0, 1.0], scale: 1.0 }.term(&low), [0.0; 4], "{layer:?}: 0 when ll_i <= ll_0");
+        }
+        assert_eq!(Learning { layer: Fine, b: vec![0.0, 1.0, 1.0, 1.0], scale: 1.0 }.term(&low), [0.0, 4.0, 4.0, 4.0], "fine is not gated");
+        for layer in [Fine, Mid, Coarse] {
+            assert_eq!(Learning { layer, b: vec![0.0, 0.5], scale: 0.0 }.term(&[-5.0, -4.0]), [0.0, 0.0], "{layer:?}: scale 0 is no learning");
+        }
+        assert_eq!(Learning { layer: Fine, b: vec![0.0, 0.5], scale: 3.0 }.term(&[-5.0, -4.0]), [0.0, 6.0]);
+        assert_eq!(Learning { layer: Mid, b: vec![0.0, 0.5], scale: 3.0 }.term(&[-5.0, -4.0]), [0.0, 6.0]);
+        assert_eq!(Learning { layer: Coarse, b: vec![0.0, 0.5], scale: 3.0 }.term(&[-5.0, -4.0]), [0.0, 3.0]);
         assert_eq!(Learning::default().term(&ll), [0.0; 4]);
-        assert_eq!(Learning { fine: false, b: vec![0.0, 0.5], scale: 1.0 }.term(&[-5.0, -4.0, -9.0]), [0.0, 1.0, 0.0], "a short `b` is 0 for the rest");
-        // end to end through `pick_masked`. N-gram sure (margin 3 >= tau 2): a taught candidate 2 is let through by either layer (the coarse one because the model
+        assert_eq!(Learning { layer: Coarse, b: vec![0.0, 0.5], scale: 1.0 }.term(&[-5.0, -4.0, -9.0]), [0.0, 1.0, 0.0], "a short `b` is 0 for the rest");
+        // end to end through `pick_masked`. N-gram sure (margin 3 >= tau 2): a taught candidate 2 is let through by any layer (the gated ones because the model
         // scores it above the anchor).
         let (ng, ll3) = ([0.0, -3.0, -3.2], [-5.0, 0.0, -1.0]);
         let go = |l: Learning, ng: &[f64], ll: &[f64]| pick_masked(ng, ll, 1.0, 2.0, 0.0, &[], &l.term(ll));
-        assert_eq!(go(Learning { fine: true, b: vec![0.0, 0.0, 0.5], scale: 1.0 }, &ng, &ll3), 2);
-        assert_eq!(go(Learning { fine: false, b: vec![0.0, 0.0, 0.5], scale: 1.0 }, &ng, &ll3), 2);
-        // the model scores the taught candidate 2 below the anchor: the coarse term is 0, so the sure n-gram keeps the first; the fine term still lets it through
+        for layer in [Fine, Mid, Coarse] {
+            assert_eq!(go(Learning { layer, b: vec![0.0, 0.0, 0.5], scale: 1.0 }, &ng, &ll3), 2, "{layer:?}");
+        }
+        // the model scores the taught candidate 2 below the anchor: the gated terms are 0, so the sure n-gram keeps the first; the fine term still lets it through
         let ll_low = [-1.0, 0.0, -1.5];
-        assert_eq!(go(Learning { fine: false, b: vec![0.0, 0.0, 1.0], scale: 1.0 }, &ng, &ll_low), 0, "coarse: gated by the model");
-        assert_eq!(go(Learning { fine: true, b: vec![0.0, 0.0, 1.0], scale: 1.0 }, &ng, &ll_low), 2, "fine: not gated, -3.2 - 1.5 + 4 against -1");
-        // margin under tau: a taught anchor (b_0 = 0.5) against an unlearned candidate 1 the model likes better. Fine holds it (the other sign), coarse does not.
+        for layer in [Mid, Coarse] {
+            assert_eq!(go(Learning { layer, b: vec![0.0, 0.0, 1.0], scale: 1.0 }, &ng, &ll_low), 0, "{layer:?}: gated by the model");
+        }
+        assert_eq!(go(Learning { layer: Fine, b: vec![0.0, 0.0, 1.0], scale: 1.0 }, &ng, &ll_low), 2, "fine: not gated, -3.2 - 1.5 + 4 against -1");
+        // margin under tau: a taught anchor (b_0 = 0.5) against an unlearned candidate 1 the model likes better. Fine holds it (the other sign), the others do not.
         let (ng_close, ll_pref) = ([0.0, -0.5], [-1.0, 0.5]);
-        assert_eq!(go(Learning { fine: false, b: vec![0.5, 0.0], scale: 1.0 }, &ng_close, &ll_pref), 1, "coarse: only lifts, the unlearned candidate wins on the model");
-        assert_eq!(go(Learning { fine: true, b: vec![0.5, 0.0], scale: 1.0 }, &ng_close, &ll_pref), 0, "fine: the learned anchor is held, -0.5 + 0.5 - 2 against -1");
+        for layer in [Mid, Coarse] {
+            assert_eq!(go(Learning { layer, b: vec![0.5, 0.0], scale: 1.0 }, &ng_close, &ll_pref), 1, "{layer:?}: only lifts, the unlearned candidate wins on the model");
+        }
+        assert_eq!(go(Learning { layer: Fine, b: vec![0.5, 0.0], scale: 1.0 }, &ng_close, &ll_pref), 0, "fine: the learned anchor is held, -0.5 + 0.5 - 2 against -1");
     }
 
     /// Test 3: another candidate that holds the same manual word at the same place may be chosen, and can beat the first.

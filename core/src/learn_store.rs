@@ -138,8 +138,8 @@ fn clean(s: &str) -> bool {
 /// A legal context key for `r` (s4-learning §14): `GLOBAL` for words of 2+ characters; one or two Han
 /// characters (a single-character word only with exactly two, rule 7); `NEXT_PREFIX` plus a clean,
 /// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8), and for a single-character word
-/// only when that reading is a syllable's (rule 10: not `$`, not the English/digit classes; `single_key_ok`), or the fine key of two syllables
-/// (SINIT revision 8, `learn::fine_key`). A bare "^" is
+/// only when that reading is a syllable's (rule 10: not `$`, not the English/digit classes; `single_key_ok`), or the mid key of two syllables
+/// or the fine key of three (SINIT revision 9, `learn::mid_key`, `learn::fine_key`). A bare "^" is
 /// never legal: sentence-start records live under the synthetic keys. A new-word record (context exactly
 /// `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han characters and one syllable per
 /// character; the single-character rules above are not relaxed for it.
@@ -153,7 +153,7 @@ fn legal_context(r: &Record) -> bool {
         return (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n;
     }
     if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
-        // A fine key (SINIT revision 8): a single character only, and exactly the well-formed shape (`single_key_ok`); it holds a control character, so `clean` would refuse it.
+        // A mid or fine key (SINIT revisions 8 and 9): a single character only, and exactly the well-formed shape (`single_key_ok`); it holds a control character, so `clean` would refuse it.
         if next.contains(FINE_SEP) {
             return is_single(&r.word) && single_key_ok(c);
         }
