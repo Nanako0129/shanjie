@@ -84,7 +84,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/contracts/about-models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/std-exempt.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -193,7 +193,7 @@ strip_xpc "$HSPARKLE"
 
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (model-v6 section 2.5); the core fails to start without it.
-cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv "$RES/"
+cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/std-exempt.tsv "$RES/"
 # digits.tsv: the count table of digits in the composition (docs/contracts/digits.md A.3.2). Optional for the core, but a bundle without it
 # silently loses the feature, so check-app.sh requires it and compares it with this file.
 cp data/lexicon/digits.tsv "$RES/"
@@ -241,7 +241,7 @@ cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (colloquial-term.md section 2.1); no corpus text in it.
 cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, demote.tsv, digits.tsv, bigram.sjlm,
+overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, demote.tsv, std-exempt.tsv, digits.tsv, bigram.sjlm,
 classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
@@ -274,6 +274,9 @@ names-add.tsv: common proper nouns (brands, shops, companies, schools), always
       (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，
       得利用之（https://data.gov.tw/license ）。
 demote.tsv: written for this project; no third-party data.
+std-exempt.tsv: the 12 (reading, character) pairs the decoder's reading term does not charge. Chosen by comparing the readings of
+  mcbpmf-data.txt with the first reading of each character in the Ministry of Education's 《國語辭典簡編本》
+  (CC BY-ND 3.0 Taiwan; only used to decide these readings, none of its data is in the file or distributed).
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
   sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic sentences,
   public messages of the g0v Slack #rand0m channel (CC0) and articles and

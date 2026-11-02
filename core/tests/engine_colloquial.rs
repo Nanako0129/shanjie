@@ -184,61 +184,25 @@ fn k_counts_the_pack_words_the_engine_was_built_with() {
     assert_eq!((k(PACK_ACG), k(0)), (1, 0));
 }
 
-/// Rows 81 and 159 of eval/dev/user-reported.txt (public), the two rows of that set (and of dev302, whose rows have none) where the reading-channel term
-/// (docs/contracts/reading-channel.md) changes the colloquial term's choice on the 通語 SJ-LM-7-9.7M files (rows 10, 81 and 102 on model-v6): (context, syllables, the
-/// pick with the colloquial term alone, the pick with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27).
+/// Rows 81 and 159 of eval/dev/user-reported.txt (public), the two rows where the reading-channel term (docs/contracts/reading-channel.md, removed by
+/// docs/contracts/reading-decode-2.md) changed the colloquial term's choice on the 通語 SJ-LM-7-9.7M files in v0.6.1: (context, syllables, the pick with the
+/// colloquial term alone, the pick v0.6.1 gave with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27).
 const CHANNEL_ROWS: [(&str, &str, usize, usize); 2] = [("", "ㄓㄤˇ ㄨㄞ ㄌㄜ˙", 0, 2), ("", "ㄧㄡˇ ㄉㄧㄢˇ ㄌㄟˇ ㄓㄨㄟˋ", 4, 0)];
 
-/// The term rides on the colloquial term: with the table loaded and the conditions holding the channel decides (and `set_reading_channel(false)`
-/// leaves the colloquial term alone); wherever the colloquial term does not apply (no table, formal, another small model) the jobs are those of an
-/// engine without the table, the channel included. At the aggressive strength the channel decides as at the standard one (the same alpha).
-/// There is no conservative row here: on dev302, typing76 and the user-reported rows, `--rerank-level conservative` with and without
-/// `--no-reading-channel` pick the same candidate on every row (checked with the CLI), so no public row has the channel deciding at that strength. Its
-/// guard is the unit test `the_terms_weigh_the_same_at_every_alpha` (nu / alpha at alpha 1.0) and the engine tests on the other levels, which fail
-/// when `channel_lex` is gated on one level (the mutation in the research log).
+/// There is no reading-channel term in the job any more: the colloquial term stands alone, so rows 81 and 159 pick what v0.6.1 picked with the channel off
+/// (`alone`), not what it picked with the channel on (`with`; that was the channel's doing, and the reading term of the decoder is what keeps 長 read ㄓㄤˇ
+/// in row 81 now), and `set_reading_decode(false)` does not bring the channel back.
 #[test]
-fn the_reading_channel_applies_only_where_the_colloquial_term_does() {
+fn the_colloquial_term_stands_alone() {
     let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
-    let other = other_sjtl("rc-other");
     for (i, (ctx, row, alone, with)) in CHANNEL_ROWS.iter().enumerate() {
+        assert_ne!(alone, with);
         let mut on = engine_row(PACK_ACG, &tl, Some((&table, false)), ctx, row);
         let mut off = engine_row(PACK_ACG, &tl, Some((&table, false)), ctx, row);
-        off.set_reading_channel(false);
-        let mut none = engine_row(PACK_ACG, &tl, None, ctx, row);
-        assert_ne!(alone, with);
-        assert_eq!(picks(&mut on), vec![*with], "row {i}: the channel's pick");
-        assert_eq!(picks(&mut off), vec![*alone], "row {i}: the colloquial term alone");
-        for e in [&mut on, &mut none] {
-            e.set_profile(Profile::Formal).unwrap();
-        }
-        assert_eq!(picks(&mut on), picks(&mut none), "row {i}, formal: neither term is used");
-        for e in [&mut on, &mut off, &mut none] {
-            e.set_profile(Profile::Chat).unwrap();
-            e.set_rerank_level(RerankLevel::Aggressive).unwrap();
-        }
-        // Precondition: without the channel the aggressive cell keeps the colloquial term's pick (the CLI's `--no-reading-channel` gives the same
-        // picks at both strengths), so the channel's pick below is the channel acting at this level.
-        assert_eq!(picks(&mut off), vec![*alone], "row {i}, aggressive: the colloquial term alone");
-        assert_eq!(picks(&mut on), vec![*with], "row {i}, aggressive: the channel decides as at the standard strength");
-        let (a, b) = (picks(&mut engine_row(PACK_ACG, &other, Some((&table, false)), ctx, row)), picks(&mut engine_row(PACK_ACG, &other, None, ctx, row)));
-        assert_eq!(a, b, "row {i}, another .sjtl: neither term is used");
+        off.set_reading_decode(false);
+        assert_eq!(picks(&mut off), vec![*alone], "row {i}: the colloquial term alone, no reading term anywhere");
+        assert_eq!(picks(&mut on), vec![*alone], "row {i}: the decoder's reading term does not bring the channel back");
     }
-}
-
-/// A composition with punctuation is several stretches, and each is cut over its own syllables: rows 81 and 159 of the set above on either side of
-/// a comma give two stretches whose picks are the channel's (the second one in the first's context, so it is compared with the term off, not with
-/// the row alone). Cut over the whole composition's syllables, no path would cover them and the term would be 0 in both.
-#[test]
-fn each_stretch_is_cut_over_its_own_syllables() {
-    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
-    let row = format!("{} ， {}", CHANNEL_ROWS[0].1, CHANNEL_ROWS[1].1);
-    let mut on = engine_row(PACK_ACG, &tl, Some((&table, false)), "", &row);
-    let mut off = engine_row(PACK_ACG, &tl, Some((&table, false)), "", &row);
-    off.set_reading_channel(false);
-    let (a, b) = (picks(&mut on), picks(&mut off));
-    assert_eq!(b.len(), 2, "two stretches");
-    assert_eq!((a[0], b[0]), (CHANNEL_ROWS[0].3, CHANNEL_ROWS[0].2), "the first stretch");
-    assert_eq!((a[1], b[1]), (CHANNEL_ROWS[1].3, CHANNEL_ROWS[1].2), "the second stretch");
 }
 
 /// Public rows where a level's own cell picks a candidate that the standard cell or the level's header triple (v0.5.0: the plain `rerank`) does not pick,
@@ -254,8 +218,8 @@ const LEVEL_ROWS: [(RerankLevel, &str, &str, usize, usize, usize); 3] = [
     (RerankLevel::Aggressive, "", "ㄊㄞˊ ㄅㄟˇ ㄕˋ ㄧ ㄍㄜ˙ ㄏㄣˇ ㄉㄚˋ ㄉㄜ˙ ㄔㄥˊ ㄕˋ", 2, 0, 0),
 ];
 
-/// colloquial-levels section 2.1, the engine path: the job takes the engine's rerank level when it is made, and its colloquial and reading-channel
-/// terms use that level's (alpha, tau, delta). The pick at each level is the CLI's index, and differs from the standard cell's (an engine that fuses
+/// colloquial-levels section 2.1, the engine path: the job takes the engine's rerank level when it is made, and its colloquial
+/// term uses that level's (alpha, tau, delta). The pick at each level is the CLI's index, and differs from the standard cell's (an engine that fuses
 /// with the standard values, or a job that does not remember the level, picks that) or from the header triple's (no term), see `LEVEL_ROWS`.
 #[test]
 fn each_level_uses_its_own_cell() {

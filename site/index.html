@@ -239,7 +239,7 @@
     <li><span class="tag done">已發佈</span><span>v0.6.1：中英混打打得出 ok、gta6；「快打時鍵序顛倒不當英文」（預設開）；單按 Shift 切換中英（預設開，換 App 或停打 30 秒後提示「英／中」）。</span></li>
     <li><span class="tag done">已發佈</span><span>v0.6.1：經典台詞詞包（預設關）；瀏覽器裡第一個字不顯示預測（預設開）；設定視窗固定大小。評測集上的選字和 v0.6.0 相同。</span></li>
     <li><span class="tag done">已合併</span><span>Crest 與 Aside 加進瀏覽器清單，套用和 Chrome 相同的第一個音節規則（PR #341，2026-10-31），隨下一版出貨。</span></li>
-    <li><span class="tag wip">進行中</span><span>研究：解碼時看讀音，「否則變快」這類錯要在整句選字時就修，每個設定、每種強度都生效。</span></li>
+    <li><span class="tag wip">進行中</span><span>解碼時看讀音，「否則變快」這類錯要在整句選字時就修，每個設定、每種強度都生效。研究的確認通過，正在放進輸入法本體，還沒有發版。</span></li>
   </ul>
   <p class="note"><a href="updates.html">完整更新紀錄 →</a></p>
 </section>
@@ -376,7 +376,7 @@
       <summary><span class="ver">之後</span><span class="st-title">已排定，在 v0.6 之後</span><span class="tag wip">進行中</span>
         <span class="meta">順序依實測與回報調整</span></summary>
       <ul class="items">
-        <li class="research wip"><span class="mark"></span><span class="sr-only">研究進行中：</span><h3><span class="kind">研究</span>解碼時看讀音</h3><p>語言模型只看字、不看讀音，「否則變快」才會選成「便會」（「會」讀ㄎㄨㄞˋ幾乎只用在「會計」）。在整句選字時就把「這個字讀成你打的音的機率」算進去，每個設定、每種強度都生效。</p></li>
+        <li class="research wip"><span class="mark"></span><span class="sr-only">研究進行中：</span><h3><span class="kind">研究</span>解碼時看讀音</h3><p>語言模型只看字、不看讀音，「否則變快」才會選成「便會」（「會」讀ㄎㄨㄞˋ幾乎只用在「會計」）。在整句選字時就把「這個字讀成你打的音的機率」算進去，每個設定、每種強度都生效。確認片通過（維基段落的判讀集，由錯改對 15 句、由對改錯 0 句），正在放進輸入法本體，還沒有發版；聊天設定原本的「讀音通道項」因此拿掉。</p></li>
         <li><span class="mark"></span><span class="sr-only">暫停：</span><h3>語意校正多讀一點前文</h3><p>v0.6.0 起 App 交給輸入法的前文是同一行、游標前最多 64 字，但出貨的會意 SJ-SR-7-15M 仍只用最後 2 個字。要讓語意校正真的讀長前文，得訓練讀 64 字的模型；2026-10-20 在長前文評測集上量過，舊模型讀 64 字在聊天上沒有幫助。訓練讀 64 字的模型這一步目前暫停。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>句首單字的選字記憶</h3><p>句首打「照建議」會出「趙建議」，改選也記不住。產品車道的下一片（<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/iteration-plan.md">迭代計畫</a>）。</p></li>
         <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 詞包已在 v0.6.0 出貨（1,016 個詞，預設開，可以關）；醫藥、法律接著，預設關。建語料時把台灣用詞也轉掉的問題（「插件」被換成「外掛」）已在 v0.6.0 的通語 SJ-LM-7-9.7M 修正：繁體句不再套 OpenCC 的詞組轉換。</p></li>

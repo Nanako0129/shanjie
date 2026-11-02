@@ -1,7 +1,7 @@
 //! S3a key engine (docs/contracts/s3a.md): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::colloquial::{self, Colloquial, ReadingChannel};
+use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
@@ -37,9 +37,6 @@ struct Stretch {
     paths: Vec<Vec<(String, f64, f64, usize)>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// The stretch's syllables, one per character of every path (what the reading-channel term cuts over the paths' words); empty when the job
-    /// has no channel term.
-    syls: Vec<String>,
     /// The readings the n-gram's first path used over those syllables (`Lexicon::path_readings`: a syllable typed with an adjacent key is the
     /// lexicon syllable the word was read through), what `manual_mask` matches the manual words against; empty when the lexicon has no manual word.
     used: Vec<String>,
@@ -59,12 +56,9 @@ pub struct RerankJob {
     /// The colloquial term (docs/contracts/colloquial-term.md section 2.2), decided when the job was made: `Some` only for chat (any
     /// strength) and the small model the term was measured with. `None`: the plain `rerank` with `params`.
     colloquial: Option<Arc<Colloquial>>,
-    /// The engine's rerank level when the job was made (docs/contracts/colloquial-levels.md): the colloquial and reading-channel terms use that
-    /// level's (alpha, tau, delta), and their fallback the header triple of that level. Copy, like `params`.
+    /// The engine's rerank level when the job was made (docs/contracts/colloquial-levels.md): the colloquial term uses that
+    /// level's (alpha, tau, delta), and its fallback the header triple of that level. Copy, like `params`.
     level: RerankLevel,
-    /// The engine's lexicon, `Some` only where the reading-channel term applies (docs/contracts/reading-channel.md): when `colloquial` is
-    /// `Some` and the engine's reading channel is on (the default; `Engine::set_reading_channel`).
-    channel_lex: Option<Arc<Lexicon>>,
     /// The `manual` words of the engine's lexicon (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with the lexicon: the rerank of either profile
     /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
     manual: Arc<ManualSet>,
@@ -110,8 +104,7 @@ impl RerankJob {
                 let pick = match &self.colloquial {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
-                        let rc = self.channel_lex.as_deref().map(|lex| ReadingChannel { lex, syls: &s.syls });
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, rc, self.level, &s.used, &self.manual)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, self.level, &s.used, &self.manual)
                     }
                     None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual),
                 }
@@ -679,9 +672,9 @@ pub struct Engine {
     /// The colloquial table and the word sets of its k term (`load_colloquial`); independent of the n-gram and the small model.
     /// Whether a job uses it is decided per job in `refresh_lm`.
     colloquial: Option<Arc<Colloquial>>,
-    /// Whether the reading-channel term (docs/contracts/reading-channel.md) goes with the colloquial term (default on, the App's behavior).
-    /// Off only from `set_reading_channel`, an evaluation switch for `shanjie-replay --no-reading-channel`; not in shanjie.h.
-    reading_channel: bool,
+    /// Whether the decoder adds the reading term (docs/contracts/reading-decode-2.md; default on, the App's behavior). Off only from
+    /// `set_reading_decode`, an evaluation switch for `shanjie-replay --no-reading-decode`; not in shanjie.h.
+    reading_decode: bool,
     /// Whether rerank jobs are made (default off since S7c-2c, docs/contracts/s7c2c-delta.md section 2.3; `set_rerank`).
     /// `load_tinylm` leaves it as it is.
     rerank_on: bool,
@@ -699,7 +692,7 @@ pub struct Engine {
     fuzzy_skips: usize,
     /// Section 2.3 (修正一): renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
     /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `load_colloquial`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
-    /// learning open/clear, the evaluation-only `set_learn_guard` and `set_reading_channel`).
+    /// learning open/clear, the evaluation-only `set_learn_guard` and `set_reading_decode`).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
@@ -912,6 +905,20 @@ pub fn capping_overlay_detailed(data_dir: &Path, pack_text: &str) -> Result<Stri
     Ok(if pack_text.is_empty() { overlay } else { join_overlays(overlay, pack_text) })
 }
 
+/// The reading-decode exemption list in the data directory (docs/contracts/reading-decode-2.md): `syllable<TAB>character` rows whose term is 0.
+pub const READING_EXEMPT_FILE: &str = "std-exempt.tsv";
+
+/// The reading table of the decoder (`reading::ReadingDecode`), built from the merged lexicon (`load_lexicon*`'s) and the data directory: the text
+/// of `mcbpmf-data.txt` (the rows the mc estimate counts) and `std-exempt.tsv`. The one function the engine (`load_lm`), the evaluation CLI and the
+/// replay call. A missing or unreadable file is a read error naming it, a malformed exemption row a parse error: never a silent table without the exemptions.
+pub fn load_reading_decode(lex: &Lexicon, data_dir: &Path) -> Result<crate::reading::ReadingDecode, LoadError> {
+    let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
+    let exempt = read_file(data_dir.join(READING_EXEMPT_FILE))?;
+    crate::reading::ReadingDecode::new(lex, &base)
+        .with_exempt(&exempt)
+        .map_err(|detail| LoadError::Parse { path: data_dir.join(READING_EXEMPT_FILE), detail })
+}
+
 /// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line
 /// break between them even if the first lacks a trailing one. Appends in place
 /// with an exact reserve: peak RSS of the engine_lm production replay (2026-10-04) was 373 MB before S2r,
@@ -1009,7 +1016,7 @@ impl Engine {
             tinylm: None,
             rerank_on: false,
             colloquial: None,
-            reading_channel: true,
+            reading_decode: true,
             rerank_level: RerankLevel::Standard,
             learn_guard: true,
             guard_skips: 0,
@@ -1136,12 +1143,22 @@ impl Engine {
         self.learn_guard = on;
     }
 
-    /// Evaluation only (`shanjie-replay --no-reading-channel`): with `false` the colloquial term stands alone, the P4d cell the reading-channel
-    /// term was measured against. The next decode uses it; the pending job is dropped like any decoding change.
-    pub fn set_reading_channel(&mut self, on: bool) {
+    /// Evaluation only (`shanjie-replay --no-reading-decode`): with `false` the n-gram decoder does not add the reading term
+    /// (docs/contracts/reading-decode-2.md), the arithmetic of a lexicon without it. It reaches the model already loaded and the next
+    /// `load_lm`; the pending job is dropped like any decoding change.
+    pub fn set_reading_decode(&mut self, on: bool) {
         self.setting_changed();
         self.invalidate();
-        self.reading_channel = on;
+        self.reading_decode = on;
+        if let Some(st) = &self.lm {
+            st.capped.set_reading_active(on);
+        }
+    }
+
+    /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>`; empty without a model or with `set_reading_decode(false)`): what
+    /// `shanjie-replay` prints, so the tag names the table the engine really loaded.
+    pub fn reading_tag(&self) -> String {
+        self.lm.as_ref().and_then(|st| st.capped.reading_tag()).unwrap_or_default()
     }
 
     /// How many stretches the learning guard kept out of the current job: stretches that would have gone to the small model
@@ -1567,6 +1584,10 @@ impl Engine {
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
         let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, &self.pack_text.as_deref().unwrap_or("")[..self.pack_oov_len], &lm, Some(&demote))
             .ok_or(EngineError::LoadFailed)?;
+        // The decoder's reading term (docs/contracts/reading-decode-2.md): built from the merged lexicon and the data directory, always, so a missing
+        // std-exempt.tsv fails here; `set_reading_decode(false)` only switches it off.
+        let capped = capped.with_reading(load_reading_decode(&self.lex, dir).map_err(|_| EngineError::LoadFailed)?);
+        capped.set_reading_active(self.reading_decode);
         // Built now, not at the first key: the index takes hundreds of ms (V3 engine contract section 1.2).
         capped.predict_index(&lm);
         self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
@@ -2174,7 +2195,9 @@ impl Engine {
     /// extended): `word_learned`, no table and no Kneser-Ney, as the decoder scores it; it still becomes the history of the next word. The
     /// open English run (`run_cut`) cuts the composition at the cursor the way `refresh_lm` decodes it: the part on the left closes with `eos`
     /// and the part on the right restarts from (`<s>`, `<s>`), like after punctuation. Only the trigram level does this; without it the run is
-    /// not a boundary here (the bigram total has never cut there). `total_score` then equals the top decode score of a single stretch.
+    /// not a boundary here (the bigram total has never cut there). `total_score` then equals the top decode score of a single stretch, provided the decoder
+    /// adds no reading term (docs/contracts/reading-decode-2.md): it is not in `total_score`, so the equality holds after `set_reading_decode(false)` or with a
+    /// capped lexicon built without `with_reading`.
     /// Slice A2 (b'): a stretch that starts from an unknown u (after a fixed word, or from the left context) and holds exactly one word closes
     /// with the bigram: its `eos`, or the transition into the next fixed word, takes u as unknown (`close_u`), as `decode_segment_learned` does.
     pub fn total_score(&self) -> Option<f64> {
@@ -2768,11 +2791,6 @@ impl Engine {
         let (mut out, mut path) = (String::new(), Vec::new());
         // S7c-2a section 2.2: alpha and tau hold only for the scores with the demotion table on.
         let jobs = self.jobs_on();
-        // Whether the job will read the reading-channel term (the same decision as `colloquial` and `channel_lex` at the end of this function): only
-        // then do the stretches keep their syllables, so formal, the other strengths, no table and the channel off allocate nothing for it.
-        let channel = self.reading_channel
-            && self.colloquial.is_some()
-            && self.tinylm.as_deref().is_some_and(|m| colloquial::applies(self.profile, m));
         // The stretches also keep the readings of their first path when the lexicon has `manual` words, which the rerank matches against them.
         let keep_used = !self.lex.manual().is_empty();
         let mut stretches = Vec::new();
@@ -2840,7 +2858,6 @@ impl Engine {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _)| (w.to_string(), lp, delta, l)).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
-                        syls: if channel { self.syls[start..stop].to_vec() } else { Vec::new() },
                         used: if keep_used { self.lex.path_readings(&self.syls[start..stop], first.iter().map(|w| (w.0, w.3))) } else { Vec::new() },
                         gap: gap_text,
                     });
@@ -2871,8 +2888,7 @@ impl Engine {
             // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
-            let channel_lex = colloquial.as_ref().filter(|_| self.reading_channel).map(|_| self.lex.clone());
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, channel_lex, manual: self.lex.manual().clone(), left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, manual: self.lex.manual().clone(), left, stretches });
         }
         Ok(())
     }
