@@ -308,8 +308,9 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // A single-character pick is learned, and a single-character record looked up, only under a full
 //   context key made of exactly two Han characters (the last 2 Han characters before the word, taken
 //   from the composition text before it AND the left context from set_left_context), or at sentence
-//   start (no Han character before it) under "^>" plus the reading of the syllable right after it
-//   (rule 10, below). With one Han character before the word, or at sentence start with nothing after
+//   start (no Han character before it) under "^>" plus the reading of the syllable right after it,
+//   and also, when two more syllables follow, under "^>" plus the readings of those next two (the fine
+//   key; rule 10, below). With one Han character before the word, or at sentence start with nothing after
 //   the word ("^>$") or English or a number after it, a single character is neither learned nor looked
 //   up. With a NULL left context, or a
 //   paused gate that makes the shell pass NULL, keys that follow two Han characters typed in the same
@@ -319,11 +320,15 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
 //   A single-character word at sentence start is learned and looked up under "^>" plus a syllable reading
-//   too (rule 10); never under "^>$" (nothing follows) or the English / digit neighbour classes.
+//   too (rule 10), and under the fine key of the next two syllables when both are syllables; never under
+//   "^>$" (nothing follows) or the English / digit neighbour classes, and no fine key when either of the
+//   two next syllables is English, a digit or punctuation. Forgetting the word (Cmd+Backspace) removes both keys.
 //   How a rule 10 record acts (docs/contracts/sinit-learn.md): with the semantic correction running for the
 //   stretch the n-gram does not look at it (the candidates, their scores, the first path and the learning guard are
 //   those of the decode without it); a second decode only finds the path that starts with the learned character and
-//   puts it into the candidates, and a small learning term is added to the candidates that start with it; without the
+//   puts it into the candidates, and a learning term is added to the candidates that start with it (if the
+//   stretch has a record under the fine key: 4 * (b_i - b_0), both signs; else under the coarse key: 2 * max(b_i - b_0, 0),
+//   only for a candidate the small model scores above the first; b = w / (w + 1); the two are never added); without the
 //   semantic correction (it is off, or the small model is not loaded) the record has no effect on what is shown (it
 //   is kept, and acts once the semantic correction is on).
 //   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a

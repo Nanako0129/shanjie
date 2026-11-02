@@ -22,7 +22,7 @@
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
 
-use crate::learn::{context_key, is_han, is_single, single_key_ok, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
+use crate::learn::{context_key, is_han, is_single, single_key_ok, FINE_SEP, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -138,7 +138,8 @@ fn clean(s: &str) -> bool {
 /// A legal context key for `r` (s4-learning §14): `GLOBAL` for words of 2+ characters; one or two Han
 /// characters (a single-character word only with exactly two, rule 7); `NEXT_PREFIX` plus a clean,
 /// non-empty reading (`$` when nothing follows) for words of 2+ characters (rule 8), and for a single-character word
-/// only when that reading is a syllable's (rule 10: not `$`, not the English/digit classes; `single_key_ok`). A bare "^" is
+/// only when that reading is a syllable's (rule 10: not `$`, not the English/digit classes; `single_key_ok`), or the fine key of two syllables
+/// (SINIT revision 8, `learn::fine_key`). A bare "^" is
 /// never legal: sentence-start records live under the synthetic keys. A new-word record (context exactly
 /// `NEWWORD`, new-word B §2.3) needs a word of NEWWORD_MIN..=NEWWORD_MAX Han characters and one syllable per
 /// character; the single-character rules above are not relaxed for it.
@@ -152,6 +153,10 @@ fn legal_context(r: &Record) -> bool {
         return (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n;
     }
     if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
+        // A fine key (SINIT revision 8): a single character only, and exactly the well-formed shape (`single_key_ok`); it holds a control character, so `clean` would refuse it.
+        if next.contains(FINE_SEP) {
+            return is_single(&r.word) && single_key_ok(c);
+        }
         return clean(next) && (!is_single(&r.word) || single_key_ok(c));
     }
     c != SENTINEL && context_key(c) == c && (!is_single(&r.word) || single_key_ok(c))

@@ -15,6 +15,9 @@ pub const SENTINEL: &str = "^";
 /// These keys never take part in the last-character level. A one-character word is learned under them only for a
 /// syllable reading, not `^>$` or the English/digit classes (rule 10, `single_key_ok`).
 pub const NEXT_PREFIX: &str = "^>";
+/// Between the two syllables of a fine key (`fine_key`). A control character: no syllable reading holds one, no existing key shape has one, and a build
+/// before the fine key drops such a record at load (its `learn_store::clean` refuses control characters in a key).
+pub const FINE_SEP: char = '\u{1f}';
 /// s3d §2: punctuation in the composition is a one-cell token under this reserved reading prefix (`_punct_，`); the
 /// lexicon has no such reading. An English word kept in the composition (zhen-inline §1.0) is one too (`_punct_rust`).
 pub const PUNCT_PREFIX: &str = "_punct_";
@@ -142,6 +145,22 @@ pub fn next_key(next: Option<&str>) -> String {
     format!("{NEXT_PREFIX}{}", next.unwrap_or("$"))
 }
 
+/// SINIT revision 8 (docs/contracts/sinit-learn.md section 1.1): the fine key of a sentence-start single character, `^>` plus the next two
+/// syllables joined by `FINE_SEP`. `None` when one of the two is missing, or is an English token, a space unit, a digit string or punctuation
+/// (every one of them is a `_punct_` reading): no fine key then, only the coarse one (`next_key`).
+pub fn fine_key(a: Option<&str>, b: Option<&str>) -> Option<String> {
+    let (a, b) = (a?, b?);
+    let ok = |s: &str| !s.is_empty() && !s.starts_with(PUNCT_PREFIX) && s != "$" && !s.chars().any(char::is_control);
+    (ok(a) && ok(b)).then(|| format!("{NEXT_PREFIX}{a}{FINE_SEP}{b}"))
+}
+
+/// Whether `key` is exactly a well-formed `fine_key`: `^>`, a syllable, `FINE_SEP`, a syllable.
+pub fn is_fine_key(key: &str) -> bool {
+    let Some(rest) = key.strip_prefix(NEXT_PREFIX) else { return false };
+    let mut it = rest.split(FINE_SEP);
+    matches!((it.next(), it.next(), it.next()), (Some(a), Some(b), None) if fine_key(Some(a), Some(b)).is_some_and(|k| k == key))
+}
+
 /// The one place a span's context key becomes the key records are learned and looked up under (rule 8): `^`
 /// becomes `next_key(next)`, every other key is kept. Decoding, the commit and the prediction row all call it.
 pub fn record_key(context: String, next: Option<&str>) -> String {
@@ -172,11 +191,14 @@ pub fn is_full_context(key: &str) -> bool {
 }
 
 /// The keys a one-character word is learned and kept under, the one test `teach` and `learn_store::valid` share: a full
-/// two-Han-character key (rule 7), or at sentence start `^>` plus the reading of the syllable right after it (rule 10).
+/// two-Han-character key (rule 7), or at sentence start `^>` plus the reading of the syllable right after it (rule 10, the coarse key) or
+/// plus the readings of the next two (the fine key, `fine_key`).
 /// Not `^>$` (nothing follows), not the English/space or digit neighbour classes (`^>_punct_en`, `^>_punct_num`: one
 /// teach would boost the word before any English word or any number, not only before the same reading), not bare `^`.
 pub fn single_key_ok(key: &str) -> bool {
-    is_full_context(key) || key.strip_prefix(NEXT_PREFIX).is_some_and(|next| !matches!(next, "" | "$" | ENGLISH_NEXT | DIGIT_NEXT))
+    is_full_context(key)
+        || is_fine_key(key)
+        || key.strip_prefix(NEXT_PREFIX).is_some_and(|next| !matches!(next, "" | "$" | ENGLISH_NEXT | DIGIT_NEXT) && !next.contains(FINE_SEP))
 }
 
 /// One learned record (§1.3, §4). `day` is the local calendar day as days since 1970-01-01.
@@ -520,6 +542,43 @@ fn over_cap<'a>(live: &'a mut [usize], cap: usize, w: &[f64]) -> &'a [usize] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SINIT revision 8: the fine key holds two syllable readings; none when one is missing or is English, a space unit, digits or punctuation (any `_punct_`
+    /// reading), `$` or empty. `is_fine_key` accepts exactly what `fine_key` makes, and `single_key_ok` takes it next to the coarse key but not the shapes between.
+    #[test]
+    fn the_fine_key_is_two_syllables_and_nothing_else() {
+        let fk = fine_key(Some("ㄐㄧㄢˋ"), Some("ㄧˋ")).unwrap();
+        assert_eq!(fk, format!("^>ㄐㄧㄢˋ{FINE_SEP}ㄧˋ"));
+        assert!(is_fine_key(&fk) && single_key_ok(&fk));
+        assert_eq!(fine_key(None, Some("ㄧˋ")), None);
+        assert_eq!(fine_key(Some("ㄐㄧㄢˋ"), None), None, "the composition ends after one syllable");
+        for bad in ["_punct_rust", "_punct_7", "_punct_ ", "_punct_，", "$", "", "ㄧ\u{7}"] {
+            assert_eq!(fine_key(Some(bad), Some("ㄧˋ")), None, "{bad:?} first");
+            assert_eq!(fine_key(Some("ㄧˋ"), Some(bad)), None, "{bad:?} second");
+        }
+        for not in ["^>ㄐㄧㄢˋ", "^>", "^>ㄐㄧㄢˋ\u{1f}", "^>\u{1f}ㄧˋ", "ㄐㄧㄢˋ\u{1f}ㄧˋ", "^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}ㄍㄜˋ", "^>ㄐㄧㄢˋ\u{1f}$", "^>ㄐㄧㄢˋ\u{1f}_punct_en"] {
+            assert!(!is_fine_key(not) && (not == "^>ㄐㄧㄢˋ" || !single_key_ok(not)), "{not:?}");
+        }
+        assert!(single_key_ok("^>ㄐㄧㄢˋ") && !single_key_ok("^>$") && !single_key_ok("^>_punct_en") && !single_key_ok("^>_punct_num") && single_key_ok("他們"));
+    }
+
+    /// SINIT revision 8: a sentence-start single character taught is a coarse record and (for three syllables) a fine one; `teach` on the fine key keeps and halves like the
+    /// coarse key, never globalizes.
+    #[test]
+    fn teach_takes_the_fine_key_for_a_single_character() {
+        let (zai, fk) = (vec!["ㄗㄞˋ".to_string()], fine_key(Some("ㄐㄧㄚ"), Some("ㄧˋ")).unwrap());
+        let mut l = Learner::default();
+        assert_eq!(l.teach(&fk, &zai, "再", "在", 20_000).len(), 1);
+        assert_eq!(l.teach("^>ㄐㄧㄚ", &zai, "再", "在", 20_000).len(), 1);
+        assert_eq!(l.records().len(), 2);
+        let (lv, hits) = l.lookup(&fk, &zai, 20_000);
+        assert!(lv == Level::Exact && hits == [("再", 1.0)]);
+        assert!(l.teach(&fk, &zai, "在", "再", 20_000).len() == 2, "the displaced 再 is halved under the fine key");
+        assert_eq!(l.lookup(&fk, &zai, 20_000).1, [("在", 1.0), ("再", 0.5)], "再 at 0.5 is still active");
+        l.forget(&zai, "再");
+        assert!(l.records().iter().all(|r| r.word != "再"), "forget removes both keys");
+        assert!(l.teach("^>ㄐㄧㄚ\u{1f}", &zai, "再", "在", 20_000).is_empty(), "a malformed fine key is not taught");
+    }
 
     #[test]
     fn context_key_is_the_han_tail() {

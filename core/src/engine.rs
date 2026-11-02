@@ -2,7 +2,7 @@
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
 use crate::colloquial::{self, Colloquial};
-use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, local_day, newword_score, next_key, record_key, Learner, Level, Record, SENTINEL, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
+use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, fine_key, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEXT_PREFIX, SENTINEL, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
@@ -12,7 +12,7 @@ use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
-use crate::tinylm::{RerankLevel, TinyLm, TOPK};
+use crate::tinylm::{Learning, RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, ManualSet, NoLearning, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -101,9 +101,11 @@ struct Stretch {
     paths: Vec<Vec<JobWord>>,
     /// Their n-gram scores.
     ng: Vec<f64>,
-    /// Their SINIT weights `b_i = w / (w + 1)` (section 1.4): the record weight of the sentence-start single character the candidate starts with, else 0.
-    /// All 0 for almost every stretch.
+    /// Their SINIT weights `b_i = w / (w + 1)` (section 1.4): the record weight of the sentence-start single character the candidate starts with, else 0,
+    /// of the fine key's records when `fine`, else of the coarse key's. All 0 for almost every stretch.
     b: Vec<f64>,
+    /// The stretch has a record under the fine key (`^>` plus the next two syllables), so `b` is the fine layer's (section 1.4; the layers are never added).
+    fine: bool,
     /// The readings the n-gram's first path used over those syllables (`Lexicon::path_readings`: a syllable typed with an adjacent key is the
     /// lexicon syllable the word was read through), what `manual_mask` matches the manual words against; empty when the lexicon has no manual word.
     used: Vec<String>,
@@ -129,7 +131,7 @@ pub struct RerankJob {
     /// The `manual` words of the engine's lexicon (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with the lexicon: the rerank of either profile
     /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
     manual: Arc<ManualSet>,
-    /// `EPS_SINIT` (or the tests' override) when the job was made: `b` times it is the learning term of the fused score.
+    /// 1, or the tests' override (`Engine::set_eps_sinit`) when the job was made: the factor on `EPS_SINIT_FINE` and `EPS_SINIT_COARSE`, the sizes of the learning term of the fused score.
     eps_sinit: f64,
     /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
     /// the last L characters of `Engine::left_full` (context-return section 2; nothing longer is copied into a job).
@@ -175,7 +177,7 @@ impl RerankJob {
                 let key = self.model.key_for(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
-                let learn: Vec<f64> = s.b.iter().map(|b| self.eps_sinit * b).collect();
+                let learn = Learning { fine: s.fine, b: s.b.clone(), scale: self.eps_sinit };
                 let alpha = if self.colloquial.is_some() { colloquial::cell(self.level).0 } else { self.params.0 };
                 let picked = match &self.colloquial {
                     Some(co) => {
@@ -752,7 +754,7 @@ pub struct Engine {
     subspans: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
-    /// SINIT: the fused score's learning term size (`lm::EPS_SINIT`); `set_eps_sinit` overrides it for the tests.
+    /// SINIT: the factor on the fused score's learning term sizes (`lm::EPS_SINIT_FINE`, `lm::EPS_SINIT_COARSE`), 1; `set_eps_sinit` overrides it for the tests.
     eps_sinit: f64,
     /// What SINIT did in the current decode (`sinit_stats`); reset with the job in `invalidate`.
     sinit: SinitStats,
@@ -1114,7 +1116,7 @@ impl Engine {
             newword: true,
             subspans: crate::learn::NEWWORD_SUBSPANS,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
-            eps_sinit: crate::lm::EPS_SINIT,
+            eps_sinit: 1.0,
             sinit: SinitStats::default(),
             learner: Learner::default(),
             store: None,
@@ -1459,7 +1461,7 @@ impl Engine {
         self.eps_global = eps;
     }
 
-    /// Tests only (SINIT): the size of the learning term in the fused score (`lm::EPS_SINIT`, 4), to show that the knob acts and that 0 is no record.
+    /// Tests only (SINIT): the factor on both sizes of the learning term in the fused score (`lm::EPS_SINIT_FINE` 4, `lm::EPS_SINIT_COARSE` 2; 1 is the shipping value), to show that the knob acts and that 0 is no record.
     /// Taken by the jobs made after it; it does not drop the pending one.
     pub fn set_eps_sinit(&mut self, eps: f64) {
         self.eps_sinit = eps;
@@ -1544,8 +1546,8 @@ impl Engine {
             let plans: Vec<_> = self
                 .fixed
                 .iter()
-                .filter_map(|f| {
-                    let pre = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start))?;
+                .flat_map(|f| {
+                    let Some(pre) = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start)) else { return Vec::new() };
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
                     let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
@@ -1555,7 +1557,14 @@ impl Engine {
                     let ctx = record_key(ctx, next);
                     // The key the displaced word was scored under at the pick, when it differs from the commit's.
                     let at_pick = f.pick_key.clone().filter(|k| *k != ctx);
-                    Some((ctx, self.syls[f.start..f.end].to_vec(), f.word.clone(), pre.clone(), at_pick))
+                    let reading = self.syls[f.start..f.end].to_vec();
+                    // SINIT revision 8: a sentence-start single character is also learned under the fine key, the next two syllables (none when the
+                    // composition ends after one, or either is English, a digit or punctuation: `fine_key`). The displaced word is halved under it too.
+                    let fine = (is_single(&f.word) && f.key.is_none() && ctx.starts_with(NEXT_PREFIX))
+                        .then(|| fine_key(self.syls.get(f.end).map(String::as_str), self.syls.get(f.end + 1).map(String::as_str)))
+                        .flatten()
+                        .map(|k| (k, reading.clone(), f.word.clone(), pre.clone(), None));
+                    [(ctx, reading, f.word.clone(), pre.clone(), at_pick)].into_iter().chain(fine).collect::<Vec<_>>()
                 })
                 .collect();
             let mut touched = Vec::new();
@@ -2978,7 +2987,7 @@ impl Engine {
                 let pool = pool.filter(|_| !guarded);
                 // SINIT sections 1.3 and 1.4: the learned sentence-start characters of the stretch, and the pool with a learned path in it.
                 let mut pool = pool;
-                let sinit_chars = if pool.is_some() { self.sinit_chars(start, stop, &before, after, today) } else { Vec::new() };
+                let (sinit_fine, sinit_chars) = if pool.is_some() { self.sinit_chars(start, stop, &before, after, today) } else { (false, Vec::new()) };
                 if let (Some(pool), Some(ln), false) = (pool.as_mut(), learn.as_ref(), sinit_chars.is_empty()) {
                     self.sinit.stretches += 1;
                     let lift = Learn { sinit: Sinit::Lift, ..*ln };
@@ -3005,6 +3014,7 @@ impl Engine {
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _, sinit)| (w.to_string(), lp, delta, l, sinit.is_some())).collect()).collect(),
                         ng: top.iter().map(|(score, _)| *score).collect(),
                         b: top.iter().map(|(_, ws)| sinit_b(ws, &sinit_chars)).collect(),
+                        fine: sinit_fine,
                         used: if keep_used { self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3))) } else { Vec::new() },
                         gap: gap_text,
                     });
@@ -3040,20 +3050,32 @@ impl Engine {
         Ok(())
     }
 
-    /// SINIT (docs/contracts/sinit-learn.md section 1.3): the sentence-start single characters the learner holds for the stretch
-    /// `start..stop`, each with `b = w / (w + 1)` of its record. Only a stretch that starts a sentence (no Han character before it: the key
-    /// is `^`) has any: the records under `^>` plus the syllable after the first one (the next syllable of the stretch, or `after` for a
-    /// one-syllable stretch), looked up under the first syllable as typed, the key the decoder reads (`record_key`).
-    fn sinit_chars(&self, start: usize, stop: usize, before: &str, after: Option<&str>, today: i64) -> Vec<(char, f64)> {
+    /// SINIT (docs/contracts/sinit-learn.md sections 1.3 and 1.4): the sentence-start single characters the learner holds for the stretch
+    /// `start..stop`, each with `b = w / (w + 1)` of its record, and whether they are the fine key's. Only a stretch that starts a sentence (no Han
+    /// character before it: the key is `^`) has any, looked up under the first syllable as typed, the keys the decoder reads (`record_key`, `fine_key`):
+    /// the fine key `^>` plus the next two syllables when the stretch has three, and if it has any record that is the answer (the fine layer is used for every
+    /// candidate); else the coarse key `^>` plus the syllable after the first one (the next syllable of the stretch, or `after` for a one-syllable stretch).
+    fn sinit_chars(&self, start: usize, stop: usize, before: &str, after: Option<&str>, today: i64) -> (bool, Vec<(char, f64)>) {
         if self.learner.is_empty() || context_key(before) != SENTINEL {
-            return Vec::new();
+            return (false, Vec::new());
+        }
+        let first = std::slice::from_ref(&self.syls[start]);
+        let chars_of = |key: &str| -> Vec<(char, f64)> {
+            let (level, hits) = self.learner.lookup(key, first, today);
+            if level != Level::Exact {
+                return Vec::new();
+            }
+            hits.into_iter().filter(|(w, _)| is_single(w)).filter_map(|(w, wt)| Some((w.chars().next()?, wt / (wt + 1.0)))).collect()
+        };
+        let fine = fine_key(self.syls.get(start + 1).map(String::as_str), self.syls.get(start + 2).map(String::as_str))
+            .filter(|_| stop - start >= 3)
+            .map(|k| chars_of(&k))
+            .unwrap_or_default();
+        if !fine.is_empty() {
+            return (true, fine);
         }
         let next = if stop - start >= 2 { Some(self.syls[start + 1].as_str()) } else { after };
-        let (level, hits) = self.learner.lookup(&record_key(SENTINEL.to_string(), next), std::slice::from_ref(&self.syls[start]), today);
-        if level != Level::Exact {
-            return Vec::new();
-        }
-        hits.into_iter().filter(|(w, _)| is_single(w)).filter_map(|(w, wt)| Some((w.chars().next()?, wt / (wt + 1.0)))).collect()
+        (false, chars_of(&record_key(SENTINEL.to_string(), next)))
     }
 
     /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)

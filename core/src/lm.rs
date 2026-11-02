@@ -2,7 +2,7 @@
 //! The Python code is ground truth; float operation order is kept on purpose (no fusing or reordering).
 //! R2: errors carry no content; nothing here formats input text.
 
-use crate::learn::{context_key, is_single, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX};
+use crate::learn::{context_key, fine_key, is_single, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX};
 use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
@@ -1125,7 +1125,7 @@ struct Hyp<'a> {
 /// 8 of 10, 6.0 and 8.0 learned 9 of 10 (smallest value that gets there). The unlearned
 /// remainder is a 3-syllable word winning over the taught 2-syllable one.
 /// Not for a rule 10 record (a single character at sentence start, docs/contracts/sinit-learn.md): with a semantic correction job the decode that
-/// builds the pool ignores it (`Sinit::Off`) and a second one only finds the learned path (`Sinit::Lift`; the preference is the job's `EPS_SINIT` term);
+/// builds the pool ignores it (`Sinit::Off`) and a second one only finds the learned path (`Sinit::Lift`; the preference is the job's `EPS_SINIT_FINE` / `EPS_SINIT_COARSE` term);
 /// without a job it has no effect at all (rule 10, revision 7).
 pub const LEARN_EPS: f64 = 6.0;
 /// Boost size for the global level only (§12): enough to break a near tie, not to override a confident
@@ -1133,11 +1133,17 @@ pub const LEARN_EPS: f64 = 6.0;
 /// term (S2k) every value tried from 0.1 to 0.5 turned at least one correct common sentence wrong, because
 /// the class model leaves some of them near ties (`global_eps_table`). Global records are still written.
 pub const LEARN_EPS_GLOBAL: f64 = 0.0;
-/// SINIT (docs/contracts/sinit-learn.md section 1.4): the size of the learning term in the semantic correction's fused score,
-/// `EPS_SINIT * (b_i - b_0)` with `b_i = w / (w + 1)` of the sentence-start single character a candidate starts with. 4: the second GCP sweep
-/// (2026-11-02, docs/contracts/sinit-learn.md section 1.4) is where the three teach-once rows (error report rows 31 and 163, 代你保管) were all learned.
-/// Shared by the three strengths (learning is not the strength of the semantic correction). Without a rerank job a rule 10 record has no effect.
-pub const EPS_SINIT: f64 = 4.0;
+/// SINIT revision 8 (docs/contracts/sinit-learn.md section 1.4), the fine key's learning term in the semantic correction's fused score:
+/// `EPS_SINIT_FINE * (b_i - b_0)` with `b_i = w / (w + 1)` of the sentence-start single character candidate `i` starts with, under the key `^>` plus the
+/// next two syllables; both signs (a learned anchor is also held against a better-scoring unlearned candidate). 4: the 2026-11-03 advisor offline projections
+/// (not the full candidate pool, no colloquial term; revision 7's single size 4 had learned the three teach-once rows, error report rows 31 and 163 and 代你保管)
+/// and the registered contract. Shared by the three strengths (learning is not the strength of the semantic correction). Without a rerank job
+/// a rule 10 record has no effect.
+pub const EPS_SINIT_FINE: f64 = 4.0;
+/// The coarse key's learning term (`^>` plus the next syllable), used only when the stretch has no fine-key record: `EPS_SINIT_COARSE * max(b_i - b_0, 0)`,
+/// and only for a candidate the rerank model scores above the anchor (`ll_i > ll_0`), else 0. 2: the same projections and contract; the coarse key alone does not
+/// tell 再加一 from 在家睡覺 (revision 7's confirmation shot), so it only lifts where the model already leans the same way, and half the fine size.
+pub const EPS_SINIT_COARSE: f64 = 2.0;
 
 /// What the decoder does with a sentence-start single character it finds a record for (rule 10, SINIT section 1.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1358,7 +1364,8 @@ pub fn decode_segment_fuzzy<'a>(
                 // them up once per hypothesis (shared by key) before trying the entries.
                 let hits_of: Vec<usize>;
                 // The flag: the key is a sentence-start key (`^>` plus the next syllable), where only rule 10 records of a single character exist.
-                let mut hits: Vec<(Level, Vec<(&str, f64)>, bool)> = Vec::new();
+                // The last: the records of the fine key (`^>` plus the next two syllables of the segment, SINIT revision 8) for a one-syllable span at sentence start; empty otherwise.
+                let mut hits: Vec<(Level, Vec<(&str, f64)>, bool, Vec<(&str, f64)>)> = Vec::new();
                 if let Some(ln) = learned {
                     let mut by_ctx: HashMap<String, usize> = HashMap::new();
                     // Rule 8: at sentence start the key also holds the syllable after the word.
@@ -1369,7 +1376,13 @@ pub fn decode_segment_fuzzy<'a>(
                             let key = record_key(context_key(&format!("{before_tail}{}", h.surface)), next);
                             *by_ctx.entry(key).or_insert_with_key(|k| {
                                 let (lv, ws) = ln.learner.lookup(k, span, ln.today);
-                                hits.push((lv, ws, k.starts_with(NEXT_PREFIX)));
+                                let sentence_start = k.starts_with(NEXT_PREFIX);
+                                let fine = fine_key(syls.get(i).map(String::as_str), syls.get(i + 1).map(String::as_str))
+                                    .filter(|_| sentence_start && l == 1)
+                                    .map(|fk| ln.learner.lookup(&fk, span, ln.today))
+                                    .filter(|(lv, _)| *lv == Level::Exact)
+                                    .map_or_else(Vec::new, |(_, ws)| ws);
+                                hits.push((lv, ws, sentence_start, fine));
                                 hits.len() - 1
                             })
                         })
@@ -1394,21 +1407,22 @@ pub fn decode_segment_fuzzy<'a>(
                     for (hi, h) in hyps[i - l].iter().enumerate() {
                         let (mut lp, mut pb, mut was_boosted, mut sinit_mark) = (lp0, pb0, false, None);
                         if let Some(ln) = learned.filter(|_| p.is_some()) {
-                            let (lv, ws, sentence_start) = &hits[hits_of[hi]];
-                            // Rule 10 (SINIT): a single character under a sentence-start key.
+                            let (lv, ws, sentence_start, fine) = &hits[hits_of[hi]];
+                            // Rule 10 (SINIT): a single character under a sentence-start key, the coarse or the fine one.
                             let rule10 = *sentence_start && is_single(word);
+                            let r10_hit = rule10 && (ws.iter().any(|(w, _)| *w == word) || fine.iter().any(|(w, _)| *w == word));
                             let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
                             // eps 0 switches the level off, for `extra` entries too: `best + 0` would
                             // still lift a word to a tie with the top.
                             match ws.iter().find(|(w, _)| *w == word) {
                                 // A rule 10 record is not looked at at all when `Sinit::Off`: the entry is scored as if it had no record.
-                                Some(_) if rule10 && ln.sinit == Sinit::Off => {
+                                _ if r10_hit && ln.sinit == Sinit::Off => {
                                     if extra {
                                         continue;
                                     }
                                 }
                                 // A job runs: only the way into the pool (SINIT section 1.2), the preference is the job's.
-                                Some(_) if rule10 && ln.sinit == Sinit::Lift => {
+                                _ if r10_hit && ln.sinit == Sinit::Lift => {
                                     if best > lp {
                                         lp = best;
                                         pb = pow10(lp);

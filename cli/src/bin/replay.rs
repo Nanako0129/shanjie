@@ -6,7 +6,7 @@
 //!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--sinit-stretches FILE]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
-//! `--rerank-level` (default standard, the App's) is evaluation only (`EPS_SINIT` is the constant 4: docs/contracts/sinit-learn.md section 1.4, revision 7);
+//! `--rerank-level` (default standard, the App's) is evaluation only (`EPS_SINIT_FINE` 4 and `EPS_SINIT_COARSE` 2 are constants: docs/contracts/sinit-learn.md section 1.4, revision 8);
 //! `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
 //! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
 //! `--strict` (evaluation only) compares the first display, the sent text and the `--correct` target character for character, not through

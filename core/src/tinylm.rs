@@ -15,7 +15,7 @@
 
 use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, last_chars, SENTINEL};
-use crate::lm::{Lm, Profile};
+use crate::lm::{Lm, Profile, EPS_SINIT_COARSE, EPS_SINIT_FINE};
 use crate::ManualSet;
 use std::collections::HashMap;
 use std::fmt;
@@ -524,7 +524,7 @@ impl TinyLm {
     /// slip was read through another syllable) and `manual` the maintainer's own words (`manual_mask`): a candidate that takes out a manual word the
     /// n-gram's first choice holds there cannot be chosen (docs/contracts/sj-lm-7-pr2.md section 2.7); the threshold and the scores still use the whole list.
     pub fn rerank(
-        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), syl: &[String], manual: &ManualSet, learn: &[f64],
+        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), syl: &[String], manual: &ManualSet, learn: &Learning,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
         if !valid_params(params) {
@@ -534,7 +534,8 @@ impl TinyLm {
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let (alpha, tau, delta) = params;
         let masked = manual_mask(syl, &cands[..n], manual);
-        Ok((pick_masked(&ng[..n], &ll, alpha, tau, delta, &masked, learn), Some(ll)))
+        let term = learn.term(&ll);
+        Ok((pick_masked(&ng[..n], &ll, alpha, tau, delta, &masked, &term), Some(ll)))
     }
 
     /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the key (`key_for`; for versions
@@ -557,14 +558,15 @@ impl TinyLm {
     #[allow(clippy::too_many_arguments)]
     pub fn rerank_colloquial(
         &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, level: RerankLevel,
-        syl: &[String], manual: &ManualSet, learn: &[f64],
+        syl: &[String], manual: &ManualSet, learn: &Learning,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         let n = cands.len().min(ng.len()).min(words.len()).min(TOPK);
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let col: Vec<f64> = words[..n].iter().map(|w| co.col(w)).collect();
         let plain = self.params(Profile::Chat, level);
         let masked = manual_mask(syl, &cands[..n], manual);
-        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, colloquial::cell(level), plain, &masked, learn), Some(ll)))
+        let term = learn.term(&ll);
+        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, colloquial::cell(level), plain, &masked, &term), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
@@ -737,11 +739,42 @@ pub fn pick(ng: &[f64], ll: &[f64], alpha: f64, tau: f64, delta: f64) -> usize {
     pick_masked(ng, ll, alpha, tau, delta, &[], &[])
 }
 
+/// SINIT revision 8 (docs/contracts/sinit-learn.md section 1.4): what the sentence-start learning gives one stretch of a rerank job. `fine`: the stretch's first
+/// three syllables have a record under the fine key (`learn::fine_key`), so `b` is the fine layer's; otherwise `b` is the coarse layer's. `b[i]` is
+/// `w / (w + 1)` of the layer's record of the first character of candidate `i` (a missing entry is 0). `scale` multiplies both registered
+/// constants: 1 in production, the tests' knob (`Engine::set_eps_sinit`; 0 is no learning). `Learning::default()` is no learning.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Learning {
+    pub fine: bool,
+    pub b: Vec<f64>,
+    pub scale: f64,
+}
+
+impl Learning {
+    /// The learning term of every candidate, relative to the first (the anchor's is 0), for the small model's log-likelihoods `ll`. Fine layer:
+    /// `EPS_SINIT_FINE * (b_i - b_0)`, both signs. Coarse layer: `EPS_SINIT_COARSE * max(b_i - b_0, 0)` and only where `ll_i > ll_0`, else 0.
+    /// The two layers are never added. The result goes to `pick_masked` (and `colloquial::fused_pick`, `guarded_pick`) as their `learn`.
+    pub fn term(&self, ll: &[f64]) -> Vec<f64> {
+        let b = |i: usize| self.b.get(i).copied().unwrap_or(0.0);
+        (0..ll.len())
+            .map(|i| {
+                if self.fine {
+                    self.scale * EPS_SINIT_FINE * (b(i) - b(0))
+                } else if ll[i] > ll[0] {
+                    self.scale * EPS_SINIT_COARSE * (b(i) - b(0)).max(0.0)
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+}
+
 /// `pick` where the candidates `masked` marks (`manual_mask`; a missing entry is false) cannot be chosen, and with the sentence-start learning
 /// term `learn` (docs/contracts/sinit-learn.md sections 1.4 and 1.5; empty or all equal: none). The threshold `ng[0] - ng[1] >= tau`
 /// and every score are those of the whole list; the first candidate is never masked, so there is always one to choose.
 ///
-/// `learn[i]` is `EPS_SINIT * b_i` of candidate `i` (a missing entry is 0): candidate `i` scores `ng + alpha * ll + (learn[i] - learn[0])`, relative to the
+/// `learn[i]` is the learning term of candidate `i` (`Learning::term`; a missing entry is 0): candidate `i` scores `ng + alpha * ll + (learn[i] - learn[0])`, relative to the
 /// first like the colloquial term. When the first minus second n-gram margin is `tau` or more and a candidate that can be chosen has
 /// `learn[i] > learn[0]`, only such candidates may replace the first (a taught choice would otherwise be out of reach exactly where the n-gram
 /// is sure), and by `delta` like any other; the others are out. Without a learned candidate nothing changes, and with `learn` all 0 every result is the
@@ -961,8 +994,8 @@ mod tests {
         // the real rerank: the toy model scores, the mask follows `manual_mask`
         let toy = TinyLm::parse(&std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap()).unwrap();
         let cands = ["米雅歌", "米亞哥", "米雅歌"];
-        let (a, b) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &mia(), &[]).unwrap();
-        let (c, _) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &ManualSet::default(), &[]).unwrap();
+        let (a, b) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &mia(), &Default::default()).unwrap();
+        let (c, _) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &ManualSet::default(), &Default::default()).unwrap();
         let ll = b.unwrap();
         assert_eq!(c, pick(&[0.0, -0.5, -3.0], &ll, 100.0, f64::INFINITY, 0.0));
         assert_eq!(a, pick_masked(&[0.0, -0.5, -3.0], &ll, 100.0, f64::INFINITY, 0.0, &[false, true, false], &[]));
@@ -1036,6 +1069,39 @@ mod tests {
         assert_eq!(pick_masked(&ng_close, &ll, 1.0, 2.0, 0.0, &[], &[0.0, 0.0, 3.0]), 2, "-1.2 - 1 + 3 beats -1");
     }
 
+    /// SINIT revision 8, sections 1.4 and 1.5. The fine layer: `EPS_SINIT_FINE * (b_i - b_0)`, both signs, whatever the small model says. The coarse layer:
+    /// `EPS_SINIT_COARSE * max(b_i - b_0, 0)`, and only where `ll_i > ll_0` (equal is 0 too); a taught anchor against an unlearned candidate is 0 (it only lifts).
+    /// `scale` multiplies both; no `b` is no term.
+    #[test]
+    fn the_learning_term_is_the_fine_layer_or_the_gated_coarse_layer() {
+        let ll = [-5.0, -4.0, -5.0, -6.0];
+        let fine = |b: &[f64]| Learning { fine: true, b: b.to_vec(), scale: 1.0 }.term(&ll);
+        let coarse = |b: &[f64]| Learning { fine: false, b: b.to_vec(), scale: 1.0 }.term(&ll);
+        assert_eq!(fine(&[0.0, 0.5, 0.5, 0.5]), [0.0, 2.0, 2.0, 2.0], "fine: 4 * (b_i - b_0), the model's scores do not matter");
+        assert_eq!(fine(&[0.5, 0.0, 0.25, 0.0]), [0.0, -2.0, -1.0, -2.0], "fine: a learned anchor is held against the others, both signs");
+        assert_eq!(coarse(&[0.0, 0.5, 0.5, 0.5]), [0.0, 1.0, 0.0, 0.0], "coarse: 2 * b_i only for ll_i > ll_0 (candidate 2 ties, candidate 3 is lower)");
+        assert_eq!(coarse(&[0.5, 0.0, 0.25, 0.0]), [0.0; 4], "coarse: a learned anchor lifts nothing and presses nothing");
+        assert_eq!(coarse(&[0.25, 0.5, 0.0, 0.0]), [0.0, 0.5, 0.0, 0.0], "coarse: max(b_i - b_0, 0)");
+        assert_eq!(Learning { fine: true, b: vec![0.0, 0.5], scale: 0.0 }.term(&[-5.0, -4.0]), [0.0, 0.0], "scale 0 is no learning");
+        assert_eq!(Learning { fine: true, b: vec![0.0, 0.5], scale: 3.0 }.term(&[-5.0, -4.0]), [0.0, 6.0]);
+        assert_eq!(Learning::default().term(&ll), [0.0; 4]);
+        assert_eq!(Learning { fine: false, b: vec![0.0, 0.5], scale: 1.0 }.term(&[-5.0, -4.0, -9.0]), [0.0, 1.0, 0.0], "a short `b` is 0 for the rest");
+        // end to end through `pick_masked`. N-gram sure (margin 3 >= tau 2): a taught candidate 2 is let through by either layer (the coarse one because the model
+        // scores it above the anchor).
+        let (ng, ll3) = ([0.0, -3.0, -3.2], [-5.0, 0.0, -1.0]);
+        let go = |l: Learning, ng: &[f64], ll: &[f64]| pick_masked(ng, ll, 1.0, 2.0, 0.0, &[], &l.term(ll));
+        assert_eq!(go(Learning { fine: true, b: vec![0.0, 0.0, 0.5], scale: 1.0 }, &ng, &ll3), 2);
+        assert_eq!(go(Learning { fine: false, b: vec![0.0, 0.0, 0.5], scale: 1.0 }, &ng, &ll3), 2);
+        // the model scores the taught candidate 2 below the anchor: the coarse term is 0, so the sure n-gram keeps the first; the fine term still lets it through
+        let ll_low = [-1.0, 0.0, -1.5];
+        assert_eq!(go(Learning { fine: false, b: vec![0.0, 0.0, 1.0], scale: 1.0 }, &ng, &ll_low), 0, "coarse: gated by the model");
+        assert_eq!(go(Learning { fine: true, b: vec![0.0, 0.0, 1.0], scale: 1.0 }, &ng, &ll_low), 2, "fine: not gated, -3.2 - 1.5 + 4 against -1");
+        // margin under tau: a taught anchor (b_0 = 0.5) against an unlearned candidate 1 the model likes better. Fine holds it (the other sign), coarse does not.
+        let (ng_close, ll_pref) = ([0.0, -0.5], [-1.0, 0.5]);
+        assert_eq!(go(Learning { fine: false, b: vec![0.5, 0.0], scale: 1.0 }, &ng_close, &ll_pref), 1, "coarse: only lifts, the unlearned candidate wins on the model");
+        assert_eq!(go(Learning { fine: true, b: vec![0.5, 0.0], scale: 1.0 }, &ng_close, &ll_pref), 0, "fine: the learned anchor is held, -0.5 + 0.5 - 2 against -1");
+    }
+
     /// Test 3: another candidate that holds the same manual word at the same place may be chosen, and can beat the first.
     #[test]
     fn another_candidate_holding_the_word_can_win() {
@@ -1073,20 +1139,20 @@ mod tests {
         let with = |k: &str| m.ll_many(&cands[..TOPK].iter().map(|c| (k, *c)).collect::<Vec<_>>()).unwrap();
         let key = "\u{4e01}\u{4e02}";
         let chat = m.alpha_tau_delta(Profile::Chat);
-        let (chosen, ll) = m.rerank(&ng, &cands, key, chat, &[], &Default::default(), &[]).unwrap();
+        let (chosen, ll) = m.rerank(&ng, &cands, key, chat, &[], &Default::default(), &Default::default()).unwrap();
         let ll = ll.unwrap();
         assert_eq!(ll, with(key));
         assert_ne!(ll, with(""), "the key is the model's context");
         assert_eq!(m.alpha_tau_delta(Profile::Chat), (0.7, 2.0, 0.0), "a version 1 file");
         assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0, 0.0));
-        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat, &[], &Default::default(), &[]).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
-        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat, &[], &Default::default(), &[]).unwrap(), (0, None));
+        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat, &[], &Default::default(), &Default::default()).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
+        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat, &[], &Default::default(), &Default::default()).unwrap(), (0, None));
         // params the header check would refuse are refused here too, even when fewer than two candidates would run nothing
         for bad in [(f64::NAN, 2.0, 0.0), (f64::INFINITY, 2.0, 0.0), (0.7, f64::NAN, 0.0), (0.7, 2.0, -0.25), (0.7, 2.0, f64::NAN), (0.7, 2.0, MAX_DELTA + 1.0)] {
-            assert_eq!(m.rerank(&ng, &cands, key, bad, &[], &Default::default(), &[]).unwrap_err(), TinyLmError::Format, "{bad:?}");
-            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad, &[], &Default::default(), &[]).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng, &cands, key, bad, &[], &Default::default(), &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad, &[], &Default::default(), &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
         }
-        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0), &[], &Default::default(), &[]).is_ok(), "an infinite tau is allowed: no threshold");
+        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0), &[], &Default::default(), &Default::default()).is_ok(), "an infinite tau is allowed: no threshold");
     }
 
     /// Contract 2.2: the Accelerate path (macOS) and the plain path agree to 1e-5 in LL on random weights; on other targets both
