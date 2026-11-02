@@ -18,6 +18,7 @@
 | `holdout/next/shard-{2,3}/talk.txt` | 每份口語 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/contracts/holdout-refresh.md`）：和現役的 shard-1 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 | `learn/sinit-cases.tsv` | 22 組 × 5 列（110 列） | 讀音由詞庫逐列核對（`to_syllables`），出貨模型的 teach 列預設表見 `docs/contracts/sinit-learn.md` §9 | 句首單字的選字記憶（產品片 SINIT，`docs/contracts/sinit-learn.md` §2）：專案自寫的公開句子（CC0），group 欄前面標類別：`偏好:`（她／他、妳／你 8 組：兩個寫法在這一句都通，會意分不出）與 `語意:`（14 組：牠、祂、喂、吶、再／在、代／帶、右／又、做／坐，句子本身要求某一個寫法）。每組 1 列 teach（句首是同音字裡較少見或預設會錯的那個＋下一個音節）、2 列 rare（前文空白、開頭同一個字與同一個下一個音節）、2 列 common（開頭同兩個音節、要的是另一個寫法；語意類的 common 句子本身要求那個寫法）；各組的（第一音節、第二音節）互不相同，沒有前文，same_ctx 留空。語意類 common 列當否決，偏好類只報。掃檔前先 commit |
+| `learn/sinit-confirm.tsv` | 6 組 × 5 列（30 列） | 前提在 main 臂（`--learn off --strict`）逐組核對，結果與雜湊在 `docs/research-log.md`「SINIT 確認組與前提」 | SINIT 的確認一發（`docs/contracts/sinit-learn.md` §3）：專案自寫的公開句子（CC0），格式同 `sinit-cases.tsv`，6 組都是語意類（再／在、代／帶），各組的（第一音節、第二音節）不和 `sinit-cases.tsv` 任何一組相同。學習數字之前先 commit |
 
 ## 規則
 
