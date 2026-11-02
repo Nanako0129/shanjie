@@ -6,6 +6,13 @@ fn run(args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
+/// `run` for the LM-mode goldens that the Python reference (`reference/proto/lm_eval.py`) produced: Python has no reading term
+/// (docs/contracts/reading-decode-2.md), so they are compared with `--no-reading-decode`, the decoder it implements. The shipping default, which has the term,
+/// is pinned by `shipping_default_matches_its_rust_only_pins`.
+fn run_py(args: &[&str]) -> String {
+    run(&[args, &["--no-reading-decode"]].concat())
+}
+
 #[test]
 fn matches_golden_byte_for_byte() {
     let golden = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../eval/golden/unigram.txt")).unwrap();
@@ -77,8 +84,8 @@ fn lm_mode_matches_golden_byte_for_byte() {
     let typing = format!("{root}/eval/dev/user-typing.txt");
     let mut got = String::new();
     for p in ["chat", "formal"] {
-        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302"]);
-        got += &run(&["--lm", &lm, "--profile", p, "--rows", &typing, "--name", "typing76"]);
+        got += &run_py(&["--lm", &lm, "--profile", p, "--dev", "302"]);
+        got += &run_py(&["--lm", &lm, "--profile", p, "--rows", &typing, "--name", "typing76"]);
     }
     assert_eq!(got, golden("s2-lm.txt"));
 }
@@ -89,12 +96,42 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut got = String::new();
     for p in ["chat", "formal"] {
-        got += &run(&["--lm", &lm, "--profile", p, "--dev", "302", "--context"]);
+        got += &run_py(&["--lm", &lm, "--profile", p, "--dev", "302", "--context"]);
         for (f, name) in [("user-typing", "typing76"), ("user-reported", "user-reported")] {
-            got += &run(&["--lm", &lm, "--profile", p, "--rows", &format!("{root}/eval/dev/{f}.txt"), "--name", name, "--context"]);
+            got += &run_py(&["--lm", &lm, "--profile", p, "--rows", &format!("{root}/eval/dev/{f}.txt"), "--name", name, "--context"]);
         }
     }
     assert_eq!(got, golden("s2h-lm-context.txt"));
+}
+
+/// The shipping default has the decoder's reading term (docs/contracts/reading-decode-2.md), which the Python reference does not implement, so it has no
+/// Python golden: these are Rust-only pins of the summary lines (tag, n, top1, oracle@64, `top1_sha256`) that the CLI prints by default, for dev302, typing76 and
+/// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it
+/// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
+/// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
+#[test]
+fn shipping_default_matches_its_rust_only_pins() {
+    let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let (tl, co) = (format!("{root}/data/lm/tinylm.sjtl"), format!("{root}/data/lm/colloquial.sjlm"));
+    let mut got = String::new();
+    for p in ["chat", "formal"] {
+        for (f, name) in [(None, "dev302"), (Some("user-typing"), "typing76"), (Some("user-reported"), "user-reported")] {
+            let rows = f.map(|f| format!("{root}/eval/dev/{f}.txt"));
+            let set: Vec<&str> = match &rows {
+                Some(r) => vec!["--rows", r, "--name", name],
+                None => vec!["--dev", "302"],
+            };
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context"]].concat());
+            let ship = format!("{name}-ship");
+            let set: Vec<&str> = match &rows {
+                Some(r) => vec!["--rows", r, "--name", &ship],
+                None => vec!["--dev", "302", "--name", &ship],
+            };
+            let colloquial: &[&str] = if p == "chat" { &["--colloquial-core", &co] } else { &[] };
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--packs", "acg,it", "--tinylm", &tl], colloquial].concat());
+        }
+    }
+    assert_eq!(got, golden("reading-decode-shipping.txt"));
 }
 
 /// S2c acceptance 2, second half: the top1 file's columns hash to the summary lines' top1_sha256.
@@ -203,7 +240,7 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
                 if d == "off" {
                     args.push("--no-demote");
                 }
-                got += &run(&args);
+                got += &run_py(&args);
                 for l in std::fs::read_to_string(&dump).unwrap().lines().filter(|l| l.split('\t').nth(1) == Some("1")) {
                     got += l;
                     got += "\n";
@@ -222,7 +259,7 @@ fn sw_probe_matches_python_golden_byte_for_byte() {
 #[test]
 fn no_classes_flag_matches_its_pinned_numbers() {
     let lm = lm_path();
-    let line = |p: &str| run(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
+    let line = |p: &str| run_py(&["--lm", &lm, "--no-classes", "--profile", p, "--dev", "302", "--context"]);
     assert_eq!(
         line("chat"),
         "## dev302  lm-chat+ctx-noclasses+kn:880ee87c:θ1:β1+tri:24ee8645  {'n': 302, 'top1': 249, 'oracle@64': 300, 'top1_sha256': '3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c'}\n"
@@ -242,7 +279,7 @@ fn lm_rowstats_match_python_byte_for_byte() {
     std::fs::create_dir_all(&dir).unwrap();
     for p in ["chat", "formal"] {
         let out = dir.join(format!("{p}.rowstats"));
-        let summary = run(&["--lm", &lm, "--profile", p, "--dev", "302", "--rowstats", out.to_str().unwrap()]);
+        let summary = run_py(&["--lm", &lm, "--profile", p, "--dev", "302", "--rowstats", out.to_str().unwrap()]);
         let got = std::fs::read_to_string(&out).unwrap();
         assert_eq!(got, golden(&format!("s2-lm-dev302-{p}.rowstats")), "{p}");
         assert!(got.chars().all(|c| c.is_ascii_digit() || c == '\t' || c == '\n'));
@@ -320,7 +357,8 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     let (lm, rows) = (format!("{root}/eval/golden/kn-tiny/bigram.sjlm"), std::env::temp_dir().join(format!("shanjie-kn-rows-{}.txt", std::process::id())));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let args = |extra: &[&'static str]| {
-        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t"];
+        // the tags are lm_eval.py's: no reading term (docs/contracts/reading-decode-2.md)
+        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode"];
         a.extend(extra);
         run(&a)
     };
@@ -347,7 +385,8 @@ fn each_profile_reads_only_its_own_trigram_table() {
     let (lm, rows) = (dir.join("bigram.sjlm"), dir.join("rows.txt"));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let go = |extra: &[&str]| {
-        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t"];
+        // the tags are lm_eval.py's: no reading term (docs/contracts/reading-decode-2.md)
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode"];
         a.extend(extra);
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(&a).output().unwrap();
         (out.status.success(), String::from_utf8(out.stdout).unwrap())

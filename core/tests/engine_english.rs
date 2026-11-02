@@ -1710,7 +1710,7 @@ fn every_setting_clears_the_short_word_mark() {
         ("set_english_key_order", Box::new(|e| drop(e.set_english_key_order(true).unwrap()))),
         ("set_english", Box::new(|e| drop(e.set_english(true).unwrap()))),
         ("set_learn_guard", Box::new(|e| e.set_learn_guard(true))),
-        ("set_reading_channel", Box::new(|e| e.set_reading_channel(true))),
+        ("set_reading_decode", Box::new(|e| e.set_reading_decode(true))),
         ("set_lm", Box::new(|e| {
             let (lm, capped) = lm_parts();
             e.set_lm(lm, capped);

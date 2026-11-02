@@ -17,6 +17,7 @@ enum TestData {
         ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
         ("names-add.tsv", "data/lexicon/names-add.tsv"),  // model-v6 section 2.5: the always-on names layer, required by the core
         ("demote.tsv", "data/lexicon/demote.tsv"),
+        ("std-exempt.tsv", "data/lexicon/std-exempt.tsv"),  // reading-decode-2: load_lm reads it (the decoder's reading term); missing, the load fails
         ("digits.tsv", "data/lexicon/digits.tsv"),  // digits.md A.3.2: optional for the core, but the app bundles it
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),

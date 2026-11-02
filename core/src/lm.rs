@@ -866,6 +866,12 @@ pub struct CappedLexicon {
     pack_bits: Vec<u64>,
     /// `Lm::identity` of the model the lexicon was capped with: `readings` must get the same one.
     built_for: (u64, usize, usize),
+    /// The reading term (docs/contracts/reading-decode-2.md, `with_reading`): while `reading_active` the decoder adds it to the path score of every
+    /// single-character word that learning did not lift. `None` for a lexicon built without it (unit tests, `CappedLexicon::new`), whose arithmetic is then untouched.
+    reading: Option<crate::reading::ReadingDecode>,
+    /// Evaluation switch (`set_reading_active`, `Engine::set_reading_decode`, the CLIs' `--no-reading-decode`): off, the decoder ignores `reading`.
+    /// Atomic because the capped lexicon is shared (`Arc`) and the switch is flipped on a loaded model.
+    reading_active: std::sync::atomic::AtomicBool,
 }
 
 /// Column 4 of a pack row that the pack builder marks as forced (docs/contracts/pack-oov.md section 1b): the word is unknown to the
@@ -888,6 +894,24 @@ fn bit(bits: &[u64], p: usize) -> bool {
 }
 
 impl CappedLexicon {
+    /// Gives the decoder the reading term (docs/contracts/reading-decode-2.md): `rd` is built by `engine::load_reading_decode` from this lexicon's
+    /// merged `Lexicon` and the data directory, the one function the engine, the evaluation CLI and the replay all call. It is active from here
+    /// (`set_reading_active` switches it).
+    pub fn with_reading(mut self, rd: crate::reading::ReadingDecode) -> CappedLexicon {
+        self.reading = Some(rd);
+        self
+    }
+
+    /// The summary-line tag of the table the decoder adds (`ReadingDecode::tag`), `None` without one or while it is switched off.
+    pub fn reading_tag(&self) -> Option<String> {
+        self.reading.as_ref().filter(|_| self.reading_active.load(std::sync::atomic::Ordering::Relaxed)).map(|rd| rd.tag())
+    }
+
+    /// Whether the decoder adds the reading term from the next decode on (default on once `with_reading` gave one; nothing to switch without it).
+    pub fn set_reading_active(&self, on: bool) {
+        self.reading_active.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Whether `word` is a forced pack word (a pack row tagged `PACK_OOV_TAG`, docs/contracts/pack-oov.md section 1b).
     pub fn is_pack(&self, word: &str) -> bool {
         let at = |&(off, len): &(u32, u32)| &self.base.words[off as usize..(off + len) as usize];
@@ -958,7 +982,7 @@ impl CappedLexicon {
         };
         packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
         packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, built_for: lm.identity() })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, built_for: lm.identity(), reading: None, reading_active: std::sync::atomic::AtomicBool::new(true) })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -1277,6 +1301,7 @@ pub fn decode_segment_fuzzy<'a>(
     let mut memo = TriMemo::default();
     let n = syls.len();
     let ids = base.ids(syls);
+    let reading = lex.reading.as_ref().filter(|_| lex.reading_active.load(std::sync::atomic::Ordering::Relaxed));
     let start_id = lex.model_id(lm, start);
     let start_prev = if start == "<s>" { start_id } else { None };
     let before_tail: String = {
@@ -1372,6 +1397,13 @@ pub fn decode_segment_fuzzy<'a>(
                     // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
                     // `Engine::total_score` and the rerank job see the score the decoder used.
                     let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1) + src.pen;
+                    // A single-character word of a lexicon entry adds its reading term to the path score, so the beam prunes on it (docs/contracts/reading-decode-2.md).
+                    // The reading is the one the entry is under (`span`: the typed syllable, or a tolerant source's lexicon reading). A word learning
+                    // lifted (`was_boosted`) does not take it: the term costs up to LAMBDA * CAP = 8, the lift gives at most 6, and a reading the user taught must stand.
+                    let rd_term = match (reading, p, l) {
+                        (Some(rd), Some(_), 1) => rd.term(base, &span[0], word),
+                        _ => 0.0,
+                    };
                     for (hi, h) in hyps[i - l].iter().enumerate() {
                         let (mut lp, mut pb, mut was_boosted, mut sinit_mark) = (lp0, pb0, false, None);
                         if let Some(ln) = learned.filter(|_| p.is_some()) {
@@ -1423,7 +1455,9 @@ pub fn decode_segment_fuzzy<'a>(
                                 m.1 = term - word_term(lam, lm.prob_tri(cfg, h.tri, h.ctx, wid, pb0), lp0);
                             }
                         }
-                        let sc = h.score + (term - delta);
+                        // The reading term (R1) rides on every path of every `Sinit` mode, a lifted word included (`was_boosted` is set only by a learned boost):
+                        // it is the same in the lifted and the unlifted score, so the marker's gain above is the whole difference.
+                        let sc = h.score + (term - delta) + if was_boosted { 0.0 } else { rd_term };
                         let before = if tri_on { h.words.last().map_or(start, |w| w.0) } else { "" };
                         let key = (format!("{}{word}", h.surface), before, word);
                         match idx.get(&key).copied() {
@@ -1663,6 +1697,41 @@ mod tests {
         // Starting from `b` (no context entry): the first word itself is class-scored.
         let from_b = decode_segment_learned(&capped, &syls, &lm, 0.5, "b", End::Eos, 64, None, true).unwrap();
         assert_eq!(score(&from_b, "a"), lm.word(0.5, "b", "a", -1.0) + lm.eos(0.5, "a"));
+    }
+
+    /// `with_reading` adds LAMBDA * max(t, -CAP) to the score of a single-character word's path, so a rare reading can lose the first place; the sandhi
+    /// reading of 一 costs nothing; a lexicon without it, or with `set_reading_active(false)`, is the decoder as it was.
+    #[test]
+    fn reading_decode_adds_the_term_to_the_path_score() {
+        use crate::reading::{CAP, LAMBDA};
+        let lm = Lm::parse(&tiny()).unwrap();
+        // a: best reading x, rare reading y (t -1.1); b has only y; 乙 reads ㄧˊ rarely (t -5.5, clipped to -CAP); 一 reads ㄧˊ as a sandhi reading.
+        let text = "x a -0.1\ny a -1.2\ny b -1.5\nㄧ 一 -0.1\nㄧˊ 一 -3.0\nㄧ 乙 -0.5\nㄧˊ 乙 -6.0\n";
+        let capped = || {
+            let (lex, rd) = crate::reading::test_support::built(text, None, "");
+            (CappedLexicon::new(Arc::new(lex), "", &lm, Some(&Demote::parse("").unwrap())).unwrap(), rd)
+        };
+        let (off, on) = (capped().0, { let (c, rd) = capped(); c.with_reading(rd) });
+        let run = |c: &CappedLexicon, s: &str| -> Vec<(f64, String)> {
+            decode_segment_learned(c, &[s.to_string()], &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap().into_iter().map(|(sc, ws)| (sc, ws[0].0.to_string())).collect()
+        };
+        let score = |v: &[(f64, String)], w: &str| v.iter().find(|(_, x)| x == w).unwrap().0;
+        let (o, n) = (run(&off, "y"), run(&on, "y"));
+        assert_eq!(o[0].1, "a", "premise: without the term the common reading's word wins");
+        assert_eq!(n[0].1, "b", "the rare reading of a loses the first place");
+        assert!((score(&n, "a") - (score(&o, "a") + LAMBDA * -1.1)).abs() < 1e-9);
+        assert!((score(&n, "b") - score(&o, "b")).abs() < 1e-12, "b's only reading: its own best, 0");
+        let (o, n) = (run(&off, "ㄧˊ"), run(&on, "ㄧˊ"));
+        assert!((score(&n, "一") - score(&o, "一")).abs() < 1e-12, "the sandhi reading is free");
+        assert!((score(&n, "乙") - (score(&o, "乙") - LAMBDA * CAP)).abs() < 1e-9, "clipped at -CAP");
+        // the switch alone changes nothing about a reading with no single-character word, or a word the lexicon has one reading of
+        assert_eq!(run(&off, "x").iter().map(|r| r.0.to_bits()).collect::<Vec<_>>(), run(&on, "x").iter().map(|r| r.0.to_bits()).collect::<Vec<_>>());
+        // the evaluation switch: off, every score is bit for bit the decoder without a table; on again, the term is back
+        on.set_reading_active(false);
+        let bits = |c: &CappedLexicon| run(c, "y").iter().map(|r| (r.0.to_bits(), r.1.clone())).collect::<Vec<_>>();
+        assert_eq!(bits(&on), bits(&off));
+        on.set_reading_active(true);
+        assert_ne!(bits(&on), bits(&off));
     }
 
     /// 4.3: classes.sjc must be this model's (SHA-256), with the right magic and exact length; the parse never panics.

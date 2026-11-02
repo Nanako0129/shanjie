@@ -752,6 +752,9 @@ PROFILES2 = ["chat", "formal"]
 # check_models uses too: the VERSIONS2 row decides, not whether the sha file exists): its colloquial.sjlm goes into the model folder, the chat cells pass
 # `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
 # of the table) at the end. Formal cells and the anchor run are as without it; a version without the key is unchanged.
+# A version that ships the decoder's reading term (docs/contracts/reading-decode-2.md; its data/lexicon/std-exempt.tsv is in the export) has `"reading": True`: the CLI
+# then ends EVERY setting's tag (chat, formal, the anchor run, the replay-setting cell) with `+rd+rx:{rx8}` (the first 8 hex of that file) and no longer marks the colloquial
+# tag with `+rc` (the reading-channel term was removed with it). The row of the new version is added at its release; a version without the key keeps `+rc` and no `+rd`.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -843,6 +846,12 @@ def setup_models(ver, spec, td):
     ver.trichat8 = ver.models["trigram-chat.sjt3"][1][:8] if spec.get("tri_chat") else ""
     ver.co = os.path.join(d, "colloquial.sjlm") if spec.get("colloquial") else None
     ver.co8 = ver.models["colloquial.sjlm"][1][:8] if spec.get("colloquial") else ""
+    ver.rx8 = ""
+    if spec.get("reading"):
+        f = os.path.join(ver.dir, "data", "lexicon", "std-exempt.tsv")
+        if not os.path.isfile(f):
+            die(f"{ver.label}: the export has no data/lexicon/std-exempt.tsv (the version has \"reading\": True)")
+        ver.rx8 = sha_file(f)[:8]
 
 
 def ship_flags(ver, anchor):
@@ -856,13 +865,19 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", "")) + colloq_tag(ver, prof)
+    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", "")) + colloq_tag(ver, prof) + reading_tag(ver)
 
 
 def colloq_tag(ver, prof):
-    """`+colloq:<sha8>+rc` for the chat cells of a version that ships the colloquial table (the reading-channel term ships with it and is on by
-    default, so the CLI's tag carries `+rc`), else ""."""
-    return f"+colloq:{ver.co8}+rc" if getattr(ver, "co8", "") and prof == "chat" else ""
+    """`+colloq:<sha8>` for the chat cells of a version that ships the colloquial table, with `+rc` after it for a version before the reading term (the
+    reading-channel term shipped with the table and was on by default, so the CLI's tag carried `+rc`; a `"reading"` version removed it), else ""."""
+    rc = "" if ver.spec.get("reading") else "+rc"
+    return f"+colloq:{ver.co8}{rc}" if getattr(ver, "co8", "") and prof == "chat" else ""
+
+
+def reading_tag(ver):
+    """`+rd+rx:<sha8 of std-exempt.tsv>`, the last mark of every setting's tag of a `"reading"` version (docs/contracts/reading-decode-2.md), else ""."""
+    return f"+rd+rx:{ver.rx8}" if getattr(ver, "rx8", "") else ""
 
 
 def expected_tag(ver, prof, anchor):
@@ -877,7 +892,7 @@ def replay_tag(ver, prof="chat"):
     `"tri_chat"` versions: both profiles, after the `+kn:` part)."""
     tri = re.search(r"\+tri:[^+]*", spec_tag(ver, prof))
     kn = re.search(r"\+kn:[^+]*", spec_tag(ver, prof)) if ver.spec.get("kn") else None
-    return f"lm-{prof}" + (kn.group() if kn else "") + (tri.group() if tri else "")
+    return f"lm-{prof}" + (kn.group() if kn else "") + (tri.group() if tri else "") + reading_tag(ver)
 
 
 def cli_env(anchor):
