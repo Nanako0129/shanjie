@@ -3,12 +3,11 @@
 //!
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-decode] [--rowstats FILE] [--keys FILE]
-//!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--eps-sinit X] [--delta-sinit X] [--eps-sinit-ng X]
-//!                [--sinit-stretches FILE]
+//!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--sinit-stretches FILE]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
-//! `--rerank-level` (default standard, the App's) and `--eps-sinit`, `--delta-sinit`, `--eps-sinit-ng` (the sentence-start learning's sizes, docs/contracts/sinit-learn.md
-//! section 2) are evaluation only; `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
+//! `--rerank-level` (default standard, the App's) is evaluation only (`EPS_SINIT` is the constant 4: docs/contracts/sinit-learn.md section 1.4, revision 7);
+//! `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
 //! `--packs LIST` (research only; a comma list of acg, it, quotes) replaces the App's default `acg,it`; omitted, output is unchanged.
 //! `--strict` (evaluation only) compares the first display, the sent text and the `--correct` target character for character, not through
 //! `core::eval::char_map` and eval/variants.tsv; the tag ends `+strict` only then, and without it the output is unchanged.
@@ -68,7 +67,7 @@ fn run() -> Result<(), String> {
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_decode) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
-    let (mut level, mut eps_sinit, mut delta_sinit, mut eps_sinit_ng) = (None::<RerankLevel>, None::<f64>, None::<f64>, None::<f64>);
+    let mut level = None::<RerankLevel>;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut val = || it.next().ok_or_else(|| "missing option value".to_string());
@@ -112,9 +111,6 @@ fn run() -> Result<(), String> {
                     _ => return Err("--rerank-level must be conservative, standard or aggressive".into()),
                 })
             }
-            "--eps-sinit" => eps_sinit = Some(val()?.parse().map_err(|_| "bad number for --eps-sinit")?),
-            "--delta-sinit" => delta_sinit = Some(val()?.parse().map_err(|_| "bad number for --delta-sinit")?),
-            "--eps-sinit-ng" => eps_sinit_ng = Some(val()?.parse().map_err(|_| "bad number for --eps-sinit-ng")?),
             "--rowstats" => rowstats = Some(val()?),
             "--keys" => keys = Some(val()?),
             "--firsts" => firsts = Some(val()?),
@@ -204,7 +200,7 @@ fn run() -> Result<(), String> {
     e.set_learn_guard(guard);
     e.set_reading_decode(reading_decode);
     let tag = format!(
-        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}{}{}",
+        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
@@ -217,23 +213,11 @@ fn run() -> Result<(), String> {
             Some(RerankLevel::Aggressive) => "+level:aggressive",
             _ => "",
         },
-        eps_sinit.map_or(String::new(), |x| format!("+eps_sinit:{x}")),
-        delta_sinit.map_or(String::new(), |x| format!("+delta_sinit:{x}")),
-        eps_sinit_ng.map_or(String::new(), |x| format!("+eps_sinit_ng:{x}")),
         e.reading_tag(),
     );
     let tag = if cfg.strict { format!("{tag}+strict") } else { tag };
     if let Some(l) = level {
         e.set_rerank_level(l).map_err(|_| "set_rerank_level failed")?;
-    }
-    if let Some(x) = eps_sinit {
-        e.set_eps_sinit(x);
-    }
-    if let Some(x) = delta_sinit {
-        e.set_delta_sinit(x);
-    }
-    if let Some(x) = eps_sinit_ng {
-        e.set_eps_sinit_ng(x);
     }
     // The file is copied (bytes only) into a private temporary directory under the name the store loads; core opens, and with
     // `--learn on` writes, only the copy. Anything but a normal load is an error: a replay without the learnings would mislead.

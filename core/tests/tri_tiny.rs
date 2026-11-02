@@ -427,7 +427,7 @@ fn learned_word_skips_the_table_and_its_neighbour_does_not() {
     let o = type_syls(&mut e, "ㄊㄚ ㄓㄢˋ");
     assert_eq!(o.preedit, "他佔", "premise: the learned word is on the best path");
     let today = 20_000;
-    let learn = Learn { learner: e.learner(), before: "我們", after: None, today, eps_global: LEARN_EPS_GLOBAL, sinit: core::lm::Sinit::Boost, eps_sinit_ng: core::lm::EPS_SINIT_NG };
+    let learn = Learn { learner: e.learner(), before: "我們", after: None, today, eps_global: LEARN_EPS_GLOBAL, sinit: core::lm::Sinit::Off };
     let cfg = f.lm.scoring(Profile::Formal);
     let nb = decode_segment_learned(&f.capped, &syls("ㄊㄚ ㄓㄢˋ"), &f.lm, cfg, "<s>", End::Eos, core::BEAM_S1, Some(&learn), true).unwrap();
     let path = |w: &str| nb.iter().find(|(_, ws)| ws.len() == 2 && ws[1].0 == w).map(|(s, ws)| (*s, ws[1].1)).unwrap();

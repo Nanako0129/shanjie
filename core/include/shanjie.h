@@ -324,7 +324,8 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   stretch the n-gram does not look at it (the candidates, their scores, the first path and the learning guard are
 //   those of the decode without it); a second decode only finds the path that starts with the learned character and
 //   puts it into the candidates, and a small learning term is added to the candidates that start with it; without the
-//   semantic correction, the character gets a small n-gram boost.
+//   semantic correction (it is off, or the small model is not loaded) the record has no effect on what is shown (it
+//   is kept, and acts once the semantic correction is on).
 //   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a
 //   re-pick halves the displaced word under the key it was shown under when it was picked as well as
 //   under the key at the commit.

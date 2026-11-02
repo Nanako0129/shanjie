@@ -129,10 +129,8 @@ pub struct RerankJob {
     /// The `manual` words of the engine's lexicon (docs/contracts/sj-lm-7-pr2.md section 2.7), shared with the lexicon: the rerank of either profile
     /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
     manual: Arc<ManualSet>,
-    /// `EPS_SINIT` (or the sweep's override) when the job was made: `b` times it is the learning term of the fused score.
+    /// `EPS_SINIT` (or the tests' override) when the job was made: `b` times it is the learning term of the fused score.
     eps_sinit: f64,
-    /// `DELTA_SINIT` (or the sweep's override) when the job was made: the extra margin of a learned candidate where the n-gram is sure.
-    delta_sinit: f64,
     /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
     /// the last L characters of `Engine::left_full` (context-return section 2; nothing longer is copied into a job).
     left: String,
@@ -182,9 +180,9 @@ impl RerankJob {
                 let picked = match &self.colloquial {
                     Some(co) => {
                         let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, self.level, &s.used, &self.manual, &learn, self.delta_sinit)
+                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, self.level, &s.used, &self.manual, &learn)
                     }
-                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual, &learn, self.delta_sinit),
+                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual, &learn),
                 }
                 .map_or((0, None), |r| r);
                 let (pick, ll) = picked;
@@ -754,11 +752,8 @@ pub struct Engine {
     subspans: bool,
     /// ε of the global learning level (§12); a test hook sweeps it.
     eps_global: f64,
-    /// SINIT: the fused score's learning term size, the margin where the n-gram is sure and the no-job boost (`lm::EPS_SINIT`, `lm::DELTA_SINIT`,
-    /// `lm::EPS_SINIT_NG`); `set_eps_sinit`, `set_delta_sinit`, `set_eps_sinit_ng` override them for the evaluation sweep.
+    /// SINIT: the fused score's learning term size (`lm::EPS_SINIT`); `set_eps_sinit` overrides it for the tests.
     eps_sinit: f64,
-    delta_sinit: f64,
-    eps_sinit_ng: f64,
     /// What SINIT did in the current decode (`sinit_stats`); reset with the job in `invalidate`.
     sinit: SinitStats,
     learner: Learner,
@@ -1120,8 +1115,6 @@ impl Engine {
             subspans: crate::learn::NEWWORD_SUBSPANS,
             eps_global: crate::lm::LEARN_EPS_GLOBAL,
             eps_sinit: crate::lm::EPS_SINIT,
-            delta_sinit: crate::lm::DELTA_SINIT,
-            eps_sinit_ng: crate::lm::EPS_SINIT_NG,
             sinit: SinitStats::default(),
             learner: Learner::default(),
             store: None,
@@ -1466,22 +1459,10 @@ impl Engine {
         self.eps_global = eps;
     }
 
-    /// Evaluation only (the SINIT sweep, `shanjie-replay --eps-sinit`): the size of the learning term in the fused score
-    /// (`lm::EPS_SINIT`). Taken by the jobs made after it; it does not drop the pending one.
+    /// Tests only (SINIT): the size of the learning term in the fused score (`lm::EPS_SINIT`, 4), to show that the knob acts and that 0 is no record.
+    /// Taken by the jobs made after it; it does not drop the pending one.
     pub fn set_eps_sinit(&mut self, eps: f64) {
         self.eps_sinit = eps;
-    }
-
-    /// Evaluation only (`shanjie-replay --delta-sinit`): the margin a learned candidate needs over the anchor where the n-gram is sure
-    /// (`lm::DELTA_SINIT`). Taken by the jobs made after it; it does not drop the pending one.
-    pub fn set_delta_sinit(&mut self, delta: f64) {
-        self.delta_sinit = delta;
-    }
-
-    /// Evaluation only (`shanjie-replay --eps-sinit-ng`): the n-gram boost of a sentence-start single character when no semantic correction
-    /// job runs (`lm::EPS_SINIT_NG`). The next decode uses it.
-    pub fn set_eps_sinit_ng(&mut self, eps: f64) {
-        self.eps_sinit_ng = eps;
     }
 
     /// What SINIT did in the current decode (see `SinitStats`); all 0 after any change that drops the job, until the next decode.
@@ -2976,10 +2957,10 @@ impl Engine {
                 let run_next = before_run.then(|| format!("{PUNCT_PREFIX}{}", self.run));
                 let after = run_next.as_deref().or(self.syls.get(stop).map(String::as_str));
                 // SINIT (sections 1.2 and 1.3): with a job the pool, its n-gram scores, the anchor and the display before the rerank are the decode that
-                // ignores rule 10 records (`Sinit::Off`); the lift only finds the learned path below. Without a job a record is a small n-gram boost.
-                let sinit = if jobs { Sinit::Off } else { Sinit::Boost };
+                // ignores rule 10 records (`Sinit::Off`); the lift only finds the learned path below. Without a job a rule 10 record has no effect (section 1.6):
+                // the decode is `Sinit::Off` too.
                 let learn = (!self.learner.is_empty()).then(|| Learn {
-                    learner: &self.learner, before: &before, after, today, eps_global: self.eps_global, sinit, eps_sinit_ng: self.eps_sinit_ng,
+                    learner: &self.learner, before: &before, after, today, eps_global: self.eps_global, sinit: Sinit::Off,
                 });
                 let mut best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
@@ -3054,7 +3035,7 @@ impl Engine {
             // The conditions of docs/contracts/colloquial-term.md section 2.2: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/contracts/colloquial-levels.md).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, manual: self.lex.manual().clone(), eps_sinit: self.eps_sinit, delta_sinit: self.delta_sinit, left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, manual: self.lex.manual().clone(), eps_sinit: self.eps_sinit, left, stretches });
         }
         Ok(())
     }

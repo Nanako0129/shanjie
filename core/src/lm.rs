@@ -1125,8 +1125,8 @@ struct Hyp<'a> {
 /// 8 of 10, 6.0 and 8.0 learned 9 of 10 (smallest value that gets there). The unlearned
 /// remainder is a 3-syllable word winning over the taught 2-syllable one.
 /// Not for a rule 10 record (a single character at sentence start, docs/contracts/sinit-learn.md): with a semantic correction job the decode that
-/// builds the pool ignores it (`Sinit::Off`) and a second one only finds the learned path (`Sinit::Lift`; the preference is the job's `EPS_SINIT` term),
-/// without a job it takes `EPS_SINIT_NG` instead of this.
+/// builds the pool ignores it (`Sinit::Off`) and a second one only finds the learned path (`Sinit::Lift`; the preference is the job's `EPS_SINIT` term);
+/// without a job it has no effect at all (rule 10, revision 7).
 pub const LEARN_EPS: f64 = 6.0;
 /// Boost size for the global level only (§12): enough to break a near tie, not to override a confident
 /// language model. 0 switches the level off (s4-learning §13, user decision 2026-10-08): with the word-class
@@ -1134,31 +1134,20 @@ pub const LEARN_EPS: f64 = 6.0;
 /// the class model leaves some of them near ties (`global_eps_table`). Global records are still written.
 pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 /// SINIT (docs/contracts/sinit-learn.md section 1.4): the size of the learning term in the semantic correction's fused score,
-/// `EPS_SINIT * (b_i - b_0)` with `b_i = w / (w + 1)` of the sentence-start single character a candidate starts with. PLACEHOLDER: the
-/// GCP sweep of the contract (section 2, grid {0.5, 1, 2, 4}) sets the value; until then 1.0, the grid's second cell, so the feature is
-/// on. Shared by the three strengths (learning is not the strength of the semantic correction).
-pub const EPS_SINIT: f64 = 1.0;
-/// SINIT section 1.5 (revision 5): the extra margin a learned candidate needs over the anchor, on top of the strength's delta, where the n-gram is
-/// sure (`ng[0] - ng[1] >= tau`) and a learned candidate is the only one that may replace the anchor (`tinylm::pick_masked`, `colloquial::fused_pick`
-/// and `guarded_pick`). Nowhere else. PLACEHOLDER: the sweep of the contract (grid {0, 1, 2}) sets the value; 0 until then, which is no margin at
-/// all. Shared by the three strengths.
-pub const DELTA_SINIT: f64 = 0.0;
-/// SINIT section 1.6: the size of the n-gram boost of a sentence-start single character when no semantic correction job runs (the
-/// decoder then scores it `best + EPS_SINIT_NG * w / (w + 1)` like any learned word). PLACEHOLDER, set by the same sweep (grid
-/// {0.5, 1, 2, 6}); until then 1.0.
-pub const EPS_SINIT_NG: f64 = 1.0;
+/// `EPS_SINIT * (b_i - b_0)` with `b_i = w / (w + 1)` of the sentence-start single character a candidate starts with. 4: the second GCP sweep
+/// (2026-11-02, docs/contracts/sinit-learn.md section 1.4) is where the three teach-once rows (error report rows 31 and 163, 代你保管) were all learned.
+/// Shared by the three strengths (learning is not the strength of the semantic correction). Without a rerank job a rule 10 record has no effect.
+pub const EPS_SINIT: f64 = 4.0;
 
-/// What the decoder does with a sentence-start single character it finds a record for (rule 10, SINIT section 1.2 and 1.6).
+/// What the decoder does with a sentence-start single character it finds a record for (rule 10, SINIT section 1.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sinit {
-    /// No semantic correction job runs for this decode: the character gets the small n-gram boost (`Learn::eps_sinit_ng`) of any learned word.
-    Boost,
     /// A job runs and this decode only finds the best path that starts with the learned character (SINIT section 1.3): the character's lp is lifted to
     /// the best lp of its reading (never lower than its own) and it is scored by the ordinary path (`prob_tri`), the word carrying the SINIT marker
     /// (`DecodedWord`). The score of a path is still its `Sinit::Off` score plus the marker's gain; the engine unlifts it before use.
     Lift,
-    /// Rule 10 records are ignored: the entry is scored as if it had none. The decode of a stretch with a job is this one (the pool, the n-gram scores,
-    /// the anchor and the display before the rerank, SINIT section 1.2).
+    /// Rule 10 records are ignored: the entry is scored as if it had none. Every decode that builds a result is this one (with a job: the pool, the n-gram
+    /// scores, the anchor and the display before the rerank, SINIT section 1.2; without a job the record has no effect, section 1.6).
     Off,
 }
 
@@ -1178,11 +1167,9 @@ pub struct Learn<'a> {
     /// `Engine::set_eps_global` (a feature or cfg(test) cannot reach integration tests, and it is one
     /// float read per hypothesis key).
     pub eps_global: f64,
-    /// What a rule 10 record does (SINIT): `Sinit::Off` for the decode of a stretch the engine runs a rerank job for (`Sinit::Lift` for the second
-    /// decode that finds the learned path), `Sinit::Boost` when no job runs.
+    /// What a rule 10 record does (SINIT): `Sinit::Off` for every decode that builds a result (with a rerank job or without: the record has no effect
+    /// without a job), `Sinit::Lift` for the second decode that finds the learned path.
     pub sinit: Sinit,
-    /// `Sinit::Boost`'s ε: `EPS_SINIT_NG` in production; `Engine::set_eps_sinit_ng` overrides it for the sweep.
-    pub eps_sinit_ng: f64,
 }
 
 /// lm.decode generalized to a segment: `start` is the word before the segment (`<s>` for a sentence),
@@ -1410,11 +1397,7 @@ pub fn decode_segment_fuzzy<'a>(
                             let (lv, ws, sentence_start) = &hits[hits_of[hi]];
                             // Rule 10 (SINIT): a single character under a sentence-start key.
                             let rule10 = *sentence_start && is_single(word);
-                            let eps = match (*lv == Level::Global, rule10) {
-                                (true, _) => ln.eps_global,
-                                (_, true) => ln.eps_sinit_ng,
-                                _ => LEARN_EPS,
-                            };
+                            let eps = if *lv == Level::Global { ln.eps_global } else { LEARN_EPS };
                             // eps 0 switches the level off, for `extra` entries too: `best + 0` would
                             // still lift a word to a tie with the top.
                             match ws.iter().find(|(w, _)| *w == word) {

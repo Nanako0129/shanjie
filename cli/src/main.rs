@@ -499,9 +499,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, level, &used, lex.manual(), &[], 0.0)
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, level, &used, lex.manual(), &[])
                }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual(), &[], 0.0),
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual(), &[]),
             };
             let ll = match picked {
                 Ok((c, ll)) => {
