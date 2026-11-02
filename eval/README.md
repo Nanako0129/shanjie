@@ -20,6 +20,7 @@
 | `learn/sinit-cases.tsv` | 22 組 × 5 列（110 列） | 讀音由詞庫逐列核對（`to_syllables`），出貨模型的 teach 列預設表見 `docs/contracts/sinit-learn.md` §9 | 句首單字的選字記憶（產品片 SINIT，`docs/contracts/sinit-learn.md` §2）：專案自寫的公開句子（CC0），group 欄前面標類別：`偏好:`（她／他、妳／你 8 組：兩個寫法在這一句都通，會意分不出）與 `語意:`（14 組：牠、祂、喂、吶、再／在、代／帶、右／又、做／坐，句子本身要求某一個寫法）。每組 1 列 teach（句首是同音字裡較少見或預設會錯的那個＋下一個音節）、2 列 rare（前文空白、開頭同一個字與同一個下一個音節）、2 列 common（開頭同兩個音節、要的是另一個寫法；語意類的 common 句子本身要求那個寫法）；各組的（第一音節、第二音節）互不相同，沒有前文，same_ctx 留空。語意類 common 列當否決，偏好類只報。掃檔前先 commit |
 | `learn/sinit-confirm.tsv` | 6 組 × 5 列（30 列） | 前提在 main 臂（`--learn off --strict`）逐組核對，結果與雜湊在 `docs/research-log.md`「SINIT 確認組與前提」 | SINIT 的確認一發（`docs/contracts/sinit-learn.md` §3）：專案自寫的公開句子（CC0），格式同 `sinit-cases.tsv`，6 組都是語意類（再／在、代／帶），各組的（第一音節、第二音節）不和 `sinit-cases.tsv` 任何一組相同。學習數字之前先 commit |
 | `learn/sinit-confirm-2.tsv` | 6 組 × 5 列（30 列） | 前提在 main 臂（`--learn off --strict`）逐組核對，結果與雜湊在 `docs/research-log.md`「SINIT 第二份確認組與前提」 | SINIT 修訂八的確認一發（`docs/contracts/sinit-learn.md` §3.2）：專案自寫的公開句子（CC0），格式同 `sinit-cases.tsv`，6 組語意類（再／在、代／帶）；各組的（第一音節、第二音節）不和另外兩檔的任何一組相同；至少一組第三音節不是 ㄧ、一組有 common 和 teach 前三個音節相同。學習數字之前先 commit |
+| `learn/sinit-confirm-3.tsv` | 7 組 × 5 列（35 列；第 7 組只報） | 前提在 main 臂（`--learn off --strict`）逐組核對，結果與雜湊在 `docs/research-log.md`「SINIT 第三份確認組與前提」 | SINIT 修訂九的確認一發（`docs/contracts/sinit-learn.md` §3.2）：專案自寫的公開句子（CC0），格式同 `sinit-cases.tsv`；6 組判讀（牠／他、代／帶、祂／他、再／在）加 1 組只報的三音節組；各組的（第一音節、第二音節）不和另外三檔的任何一組相同；照 §3.2 事先規定的四類句組。學習數字之前先 commit |
 
 ## 規則
 
