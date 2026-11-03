@@ -10,7 +10,7 @@
 - 產生（階段 4 的臂 C1，登記 `f34003e4`）：臂 B 計數詞表下的口語計數 `counts-colloquial3.pkl` ×1，加口語池 `pool.tsv`（143,895 句，約 300 萬漢字，SHA-256 `19fdc47430a63e24addf0ad925da090eca0ad0002656c454f757485aa00045da`，和上一版同一份）用同一組計數詞表重數 ×1：
 
   ```sh
-  python3 experiments/s2/build_counts_text.py --expected --extra-lexicon <計數詞表> counts-pool.pkl pool.tsv
+  python3 experiments/s2/build_counts_text.py --no-trad-tw-phrases --expected --extra-lexicon <計數詞表> counts-pool.pkl pool.tsv   # 實際是切 32 片各數一份，32 份計數各 :1 交給 build_lm
   python3 tools/build_lm.py --corpora counts-colloquial3.pkl:1 counts-pool.pkl:1 --prune 2 --out data/lm/colloquial.sjlm
   ```
 
