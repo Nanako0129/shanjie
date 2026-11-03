@@ -473,6 +473,14 @@ impl Learner {
         }
         touched
     }
+    /// LANY (docs/contracts/learn-anyctx.md section 1.1): whether `word` has a record under `reading` with decayed weight >= `ACTIVE` under any key
+    /// (sentence-start keys and `GLOBAL` included, a new word `NEWWORD` not). The key the user is typing under does not matter: this is what lets a word
+    /// taught in one context be protected in another.
+    pub fn has_active(&self, reading: &[String], word: &str, today: i64) -> bool {
+        self.index
+            .get(&reading_key(reading))
+            .is_some_and(|ix| ix.iter().map(|&i| &self.records[i]).any(|r| r.word == word && r.context != NEWWORD && decayed(r, today) >= ACTIVE))
+    }
     /// Words with an active record for `reading` reachable from `context` by the §1.1 lookup order
     /// (exact, last character, global), with their decayed weight, and the level that answered. The
     /// first level that has any usable record answers; a word found by several records of that level
@@ -685,6 +693,21 @@ mod tests {
         assert!(!l.records().iter().any(|x| x.context == GLOBAL), "a global record from one context");
         l.teach("加入", &r, "版控", "板控", 20_000);
         assert!(l.records().iter().any(|x| x.context == GLOBAL), "two real contexts still globalize");
+    }
+
+    /// LANY section 1.1: `has_active` looks at every key (a sentence-start key, `GLOBAL`), not at a new word, at the weight on the day, and at the reading.
+    #[test]
+    fn has_active_reads_every_key_but_not_new_words_and_decays() {
+        let r = rd("ㄑㄩㄢˊ ㄒㄧㄢˋ");
+        let rec = |c: &str, w: &str, weight: f64| Record { context: c.into(), reading: r.clone(), word: w.into(), weight, day: 20_000 };
+        let l = Learner::from_records(vec![rec("^>ㄐㄧㄚ", "權限", 1.0), rec(GLOBAL, "全線", 1.0), rec(NEWWORD, "泉現", 1.0), rec("他們", "權現", 0.4)]);
+        assert!(l.has_active(&r, "權限", 20_000), "a sentence-start key");
+        assert!(l.has_active(&r, "全線", 20_000), "GLOBAL");
+        assert!(!l.has_active(&r, "泉現", 20_000), "a new word is never a context");
+        assert!(!l.has_active(&r, "權現", 20_000), "under ACTIVE");
+        assert!(!l.has_active(&rd("ㄑㄩㄢˊ"), "權限", 20_000), "another reading");
+        assert!(l.has_active(&r, "權限", 20_013), "13 days: 0.52");
+        assert!(!l.has_active(&r, "權限", 20_015), "15 days: 0.48");
     }
 
     /// §2.4 threshold, §2.5 once a day and halving.

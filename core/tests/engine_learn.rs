@@ -906,7 +906,7 @@ fn row_flag_must_be_on_at_pick_and_at_commit() {
     e.set_learning(true);
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(n_records(&e), 0);
-    // same word picked as shown: nothing to learn
+    // a single character picked as shown: nothing to learn (LANY: a word of two characters or more is, `lany_same_word_*`)
     let mut e = tiny(TINY, TINY);
     e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
@@ -2891,4 +2891,249 @@ fn sinit_user_reported_row_163_is_learned_once_in_formal() {
 #[test]
 fn sinit_semantic_row_dai_ni_bao_guan_is_learned_once_in_chat() {
     sinit_learned_once(lm::Profile::Chat, "ㄉㄞˋ ㄋㄧˇ ㄅㄠˇ ㄍㄨㄢˇ", "帶你保管", "代", "代你保管");
+}
+
+// ---------- LANY (docs/contracts/learn-anyctx.md): a learned word survives a change of context; a window pick of the shown word is learned ----------
+
+const R179: &str = "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ ㄏㄠˇ ㄌㄜ˙";
+const R_QUAN_XIAN_TONG_CHE: &str = "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄊㄨㄥ ㄔㄜ";
+/// 我們今天: its first path holds two words of two characters (我們, 今天) with the shipping n-gram.
+const R_TODAY: &str = "ㄨㄛˇ ㄇㄣ˙ ㄐㄧㄣ ㄊㄧㄢ";
+
+/// One teach under `left`: types `reading`, chooses `word` over its first syllables and closes the composition.
+fn lany_teach(e: &mut Engine, left: &str, reading: &str, word: &str) {
+    e.set_left_context(left);
+    let n = reading.split(' ').count();
+    type_syls(e, reading);
+    pick(e, n, word.chars().count(), word);
+    e.key(k(KeyKind::Enter)).unwrap();
+}
+/// The pool of the semantic correction for `reading` typed under `left` (the candidate texts of its only stretch; `None` without a job), then the
+/// composition is closed.
+fn lany_pool(e: &mut Engine, left: &str, reading: &str) -> Option<Vec<String>> {
+    e.set_left_context(left);
+    type_syls(e, reading);
+    let pool = e.take_rerank_job().map(|job| job.candidates().remove(0));
+    e.key(k(KeyKind::Enter)).unwrap();
+    pool
+}
+
+/// Mechanism 1: 權限 taught once at sentence start. Under a context whose keys miss (「也加上」, 「好他」) the whole-stretch guard does not fire, and the
+/// pool holds only paths that show 權限 over the first two syllables (the other positions still differ: 加/家). Without the teach the pool has paths
+/// with 全線. Fails with the pool filter taken out.
+#[test]
+fn lany_the_pool_keeps_the_learned_word_in_a_new_context() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    let control = lany_pool(&mut e, "也加上", R179).expect("premise: a job");
+    assert!(control.iter().any(|c| !c.starts_with("權限")), "premise: without a record the pool has paths without 權限: {control:?}");
+    lany_teach(&mut e, "", R179, "權限");
+    assert!(e.learner().records().iter().any(|r| r.word == "權限" && r.context.starts_with("^>")), "premise: taught at sentence start");
+    for left in ["也加上", "好他"] {
+        let pool = lany_pool(&mut e, left, R179).unwrap_or_else(|| panic!("{left}: a job (the guard did not fire)"));
+        assert!(pool.len() >= 2 && pool.iter().all(|c| c.starts_with("權限")), "{left}: {pool:?}");
+        assert!(pool.iter().any(|c| c[c.char_indices().nth(2).unwrap().0..] != pool[0][pool[0].char_indices().nth(2).unwrap().0..]), "{left}: the other positions are still the model's to choose: {pool:?}");
+        assert_eq!(e.guard_skips(), 0, "{left}");
+    }
+}
+
+/// Mechanism 1, fewer than two paths left: 今天 taught under 「好他」 (not the key typed under); the first path 我們今天 holds it, only one path of the pool shows
+/// it, so the stretch has no job and the guard count is 1. The control (nothing taught) has a pool of 8.
+#[test]
+fn lany_a_pool_left_with_one_path_has_no_job() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY).expect("premise: a job").len(), 8, "premise: the control pool");
+    lany_teach(&mut e, "好他", "ㄐㄧㄣ ㄊㄧㄢ", "今天");
+    e.set_left_context("token");
+    type_syls(&mut e, R_TODAY);
+    assert!(e.take_rerank_job().is_none());
+    assert_eq!(e.guard_skips(), 1, "counted as the guard's");
+}
+
+/// Mechanism 1, two learned words: with only 我們 taught the pool keeps the paths that show 我們 (all of them, 今天 is not protected, so 我們金天 stays in); with
+/// 今天 taught too a path must keep both and the pool is down to one.
+#[test]
+fn lany_a_path_must_keep_every_learned_word_of_the_first_path() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    lany_teach(&mut e, "好他", "ㄨㄛˇ ㄇㄣ˙", "我們");
+    let pool = lany_pool(&mut e, "token", R_TODAY).expect("one word taught: a job");
+    assert!(pool.iter().all(|c| c.starts_with("我們")) && pool.contains(&"我們金天".to_string()), "{pool:?}");
+    lany_teach(&mut e, "好他", "ㄐㄧㄣ ㄊㄧㄢ", "今天");
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY), None, "both taught: only 我們今天 keeps both");
+}
+
+/// A record under ACTIVE (decayed weight < 0.5, 15 days after one teach) protects nothing.
+#[test]
+fn lany_a_decayed_record_stops_the_filter() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    lany_teach(&mut e, "好他", "ㄐㄧㄣ ㄊㄧㄢ", "今天");
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY), None, "premise: protected");
+    e.set_today(Some(DAY + 13));
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY), None, "13 days: weight 0.52, still protected");
+    e.set_today(Some(DAY + 15));
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY).expect("15 days: weight 0.48, a job").len(), 8);
+}
+
+/// ⌘⌫ on the word removes its records, so the protection goes with them.
+#[test]
+fn lany_forgetting_the_word_stops_the_filter() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    lany_teach(&mut e, "好他", "ㄐㄧㄣ ㄊㄧㄢ", "今天");
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY), None, "premise: protected");
+    e.set_left_context("好他");
+    type_syls(&mut e, "ㄐㄧㄣ ㄊㄧㄢ");
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    highlight(&mut e, o, "今天");
+    e.key(FORGET).unwrap();
+    e.key(k(KeyKind::Esc)).unwrap();
+    e.key(k(KeyKind::Esc)).unwrap();
+    assert!(!e.learner().records().iter().any(|r| r.word == "今天"), "premise: forgotten");
+    assert_eq!(lany_pool(&mut e, "token", R_TODAY).expect("a job again").len(), 8);
+}
+
+/// A single character never triggers the filter (SINIT's rules cover it): 趙 is taught at sentence start (displacing 照), the first path under another context
+/// is 趙建議, and the pool still holds 照建議.
+#[test]
+fn lany_a_single_character_record_does_not_filter() {
+    chat_only();
+    let mut e = tiny_rerank(SINIT_TINY);
+    type_settled(&mut e, R16);
+    pick(&mut e, 3, 1, "照");
+    e.key(k(KeyKind::Enter)).unwrap();
+    type_settled(&mut e, R16);
+    pick(&mut e, 3, 1, "趙");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(records_of(&e, "趙").iter().any(|r| r.1 >= 0.5), "premise: 趙 has an active record");
+    let pool = lany_pool(&mut e, "好他", R16).expect("a job");
+    assert_eq!(pool[0], "趙建議");
+    assert!(pool.contains(&"照建議".to_string()), "{pool:?}");
+}
+
+/// SINIT with a learned two-character word on the same stretch: 建議 is taught elsewhere, 照 at sentence start; typed at a sentence start the pool's paths
+/// all keep 建議 (照建議 does, and comes in with b = 1/(1+1)).
+#[test]
+fn lany_the_sinit_path_with_the_word_is_in_the_pool() {
+    chat_only();
+    let mut e = tiny_rerank(SINIT_TINY);
+    type_settled(&mut e, R16);
+    pick(&mut e, 3, 1, "照");
+    e.key(k(KeyKind::Enter)).unwrap();
+    lany_teach(&mut e, "好他", "ㄐㄧㄢˋ ㄧˋ", "建議");
+    e.set_left_context("token");
+    type_syls(&mut e, R16);
+    let job = e.take_rerank_job().expect("a job");
+    let (cands, b) = (job.candidates().remove(0), job.sinit_weights().remove(0));
+    assert!(cands.iter().all(|c| c.ends_with("建議")), "{cands:?}");
+    let at = cands.iter().position(|c| c == "照建議").unwrap_or_else(|| panic!("{cands:?}"));
+    assert_eq!(b[at], 0.5);
+    assert_eq!(e.sinit_stats().missing, 0);
+}
+
+/// The shipping models, chat, semantic correction on (docs/contracts/learn-anyctx.md section 2): row 179 of the user-reported rows. Without a record the display
+/// is 全線加好了; taught once at sentence start, it is 權限加好了 at a sentence start, after 「也加上」 and after 「token」.
+#[test]
+fn lany_row_179_taught_once_is_right_in_three_contexts_with_the_shipping_models() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    assert!(!type_settled(&mut e, R179).starts_with("權限"), "premise: the semantic correction shows 全線 before any teach");
+    pick(&mut e, 5, 2, "權限");
+    let o = e.key(k(KeyKind::End)).unwrap();
+    settle(&mut e, o);
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "權限加好了");
+    for left in ["", "也加上", "token"] {
+        e.set_left_context(left);
+        let shown = type_settled(&mut e, R179);
+        e.key(k(KeyKind::Enter)).unwrap();
+        assert_eq!(shown, "權限加好了", "left {left:?}");
+    }
+}
+
+/// The negative: 全線通車, whose n-gram first path has 全線. 權限 taught once does not turn it into 權限通車.
+#[test]
+fn lany_the_taught_word_does_not_take_over_quan_xian_tong_che() {
+    chat_only();
+    let mut e = ship(lm::Profile::Chat);
+    assert_eq!(type_settled(&mut e, R_QUAN_XIAN_TONG_CHE), "全線通車", "premise");
+    e.key(k(KeyKind::Enter)).unwrap();
+    lany_teach(&mut e, "", R179, "權限");
+    for left in ["", "也加上", "token"] {
+        e.set_left_context(left);
+        let shown = type_settled(&mut e, R_QUAN_XIAN_TONG_CHE);
+        e.key(k(KeyKind::Enter)).unwrap();
+        assert_eq!(shown, "全線通車", "left {left:?}");
+    }
+}
+
+/// Mechanism 3: a window pick of the word already on screen, two characters, is learned the way a prediction pick is. At sentence start the key is `^>` plus the
+/// syllable after the word (never the bare `^`), the weight 1.0.
+#[test]
+fn lany_same_word_window_pick_is_learned_under_a_sentence_start_key() {
+    chat_only();
+    let mut e = engine();
+    let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ").preedit;
+    let word: String = shown.chars().take(2).collect();
+    pick(&mut e, 3, 2, &word);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &word), [("^>ㄐㄧㄚ".to_string(), 1.0)], "{word}");
+}
+
+/// Nothing is displaced: a record of the word under the key it was picked under is not halved (the pick under `^>$`, the composition then goes on with a
+/// syllable after the word, so the commit key is `^>ㄐㄧㄚ`).
+#[test]
+fn lany_same_word_pick_halves_nothing() {
+    chat_only();
+    let mut e = engine();
+    let word = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
+    pick(&mut e, 2, 2, &word);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &word), [("^>$".to_string(), 1.0)], "premise: taught once");
+    assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit, word, "premise: shown as it is");
+    pick(&mut e, 2, 2, &word);
+    type_syls(&mut e, "ㄐㄧㄚ");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &word), [("^>$".to_string(), 1.0), ("^>ㄐㄧㄚ".to_string(), 1.0)]);
+}
+
+/// Picking X and then the original again confirms the original: it is learned (+1.0), X is not, nothing is halved.
+#[test]
+fn lany_picking_away_and_back_confirms_the_original() {
+    chat_only();
+    let mut e = engine();
+    let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ").preedit;
+    let other = if shown == "權力" { "全力" } else { "權力" };
+    pick(&mut e, 2, 2, other);
+    pick(&mut e, 2, 2, &shown);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &shown), [("^>$".to_string(), 1.0)]);
+    assert!(records_of(&e, other).is_empty(), "the word picked away from is not learned");
+}
+
+/// A plain Enter (no pick in the window) teaches nothing, and a single character picked as shown still does not.
+#[test]
+fn lany_enter_alone_teaches_nothing() {
+    chat_only();
+    let mut e = engine();
+    type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(n_records(&e), 0);
+}
+
+/// Picked in a second context, the same word globalizes as any teach does (two different keys).
+#[test]
+fn lany_same_word_picks_in_two_contexts_globalize() {
+    chat_only();
+    let mut e = engine();
+    for left in ["", "好他"] {
+        e.set_left_context(left);
+        let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ").preedit;
+        assert_eq!(shown, "權力", "premise: the pick is of the shown word (left {left:?})");
+        pick(&mut e, 2, 2, &shown);
+        e.key(k(KeyKind::Enter)).unwrap();
+    }
+    let keys: Vec<String> = records_of(&e, "權力").into_iter().map(|r| r.0).collect();
+    assert_eq!(keys, ["^>$", "好他", ""], "the sentence-start key, the full key and GLOBAL");
 }

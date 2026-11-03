@@ -92,3 +92,8 @@ fresh verifier CONFIRMED；/code-review 13 點，下面是要改的（其餘：�
 8. **文件**：S4 §14 加上第 2–5 點；`s4-learning.md` 第 39、40、44、69 行附近仍寫「^」一種鍵的句子改成新規則；程式與測試註解（`learn.rs` 約 215 行「SENTINEL counts」、`engine_learn.rs` 約 865、1628 行、`LearningTests.swift` 約 219 行）。
 
 本機測試照舊：`make test-rust`、`make test-swift`。停止條件同 §4；這是預算裡的那一次修正，之後不再自動加輪。
+
+## LANY 的補充（2026-11-03，`docs/contracts/learn-anyctx.md`）
+
+- 規則 8 的合成鍵 `^>…`（詞後面接什麼音）現在也用在「畫面上已是那個詞」的候選窗選取（兩個字以上）：照預測列選取的方式學，被換掉的字當空字串、不做 `at_pick` 減半；單字照舊不學（規則 7、SINIT 的句首單字學習不擴大）。
+- 句首學到的詞後面接的音不同就不加分（本片的代價）仍在；LANY 另外用「任何前文鍵下衰減後權重 ≥ `ACTIVE` 的紀錄」保護重排候選池裡第一條路徑的兩字以上詞（`s7c2a-core-rerank.md` §2.2），不改分數。

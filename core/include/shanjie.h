@@ -270,7 +270,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 //   core uses only its last <= 2 consecutive Han characters for decoding and learning (S4 section 1.1);
 //   besides them it keeps only the declared left-context length of the small model (SJTL0005), or else the
 //   trailing English word, for the small model and the English table, never returned or written. NULL
-//   or "" means none. Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
+//   or "" means none (the shell passes none for the apps of its `LeftContext.untrusted` list, docs/contracts/learn-anyctx.md section 1.2). Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
 //   code 4 and rule 22 pass-through; call it at every composition start.
 //   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
 //   one, whichever has bigram history; none: the sentence start).
@@ -320,6 +320,12 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // A word of 2+ characters picked with no Han character before it (context key "^") is learned, and
 //   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
+//   A candidate-window pick of the word already shown over its span (2+ characters) is learned too, the way a prediction
+//   row pick is (nothing displaced, no halving; a single character is not; Enter alone teaches nothing; docs/contracts/learn-anyctx.md
+//   section 1.3). Cross-context protection (section 1.1): when a stretch is still sent to the semantic correction, a 2+-character word of
+//   its first path that has a record under its reading with decayed weight >= 0.5 under any key (a sentence-start key or the global
+//   one included, a new word not) stays in every path of the candidate pool (the other paths are dropped); fewer than two paths left means
+//   no job. No score changes (the global bonus stays 0).
 //   A single-character word at sentence start is learned and looked up under "^>" plus a syllable reading
 //   too (rule 10, the coarse key), under the mid key of the next two syllables when both are syllables, and
 //   under the fine key of the next three (or two and the end); never under "^>$" (nothing follows) or the

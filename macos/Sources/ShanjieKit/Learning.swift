@@ -33,6 +33,13 @@ enum LeftContext {
         "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
     ]
 
+    /// LANY (docs/contracts/learn-anyctx.md section 1.2): apps whose text before the insertion point is not what the user sees before the cursor, so it is never
+    /// read: `leftContext` answers `(nil, nil)` without calling `attributedSubstring`, and everything that depends on the left context treats the composition as
+    /// starting a sentence (the n-gram and learning keys, the semantic correction's context, the prediction row, the space between Chinese and English).
+    /// com.stablyai.orca (Electron with xterm.js) hands back the old text of its hidden input box, not the terminal line (measured in a VM, 2026-11-03: after
+    /// "權限加好了" and Enter, the next read was still "權限加好了"). Another app is added only after it was measured the same way.
+    static let untrusted: Set<String> = ["com.stablyai.orca"]
+
     /// The range to request: at most `maxUTF16` units ending at `insertion`.
     static func range(insertion: Int) -> NSRange {
         let start = max(0, insertion - maxUTF16)
@@ -254,8 +261,9 @@ extension Session {
     ///
     /// Returns what goes to the core (context-return section 1: `LeftContext.raw`, or `LeftContext.han` for a terminal app; `bundle` is
     /// this client's bundle ID as the gate read it, no second IPC) and, from the same read, the raw last character for cjk-spacing
-    /// section 1. Only in memory: never stored or logged. Changes no state.
+    /// section 1. Only in memory: never stored or logged. Changes no state. An app in `LeftContext.untrusted` has none: `(nil, nil)`, nothing requested.
     func leftContext(bundle: String?) -> (text: String?, last: Character?) {
+        if let bundle, LeftContext.untrusted.contains(bundle) { return (nil, nil) }
         let selected = client.selectedRange(), marked = client.markedRange()
         guard selected.location != NSNotFound, marked.location == NSNotFound || marked.length == 0 else { return (nil, nil) }
         let range = LeftContext.range(insertion: selected.location)

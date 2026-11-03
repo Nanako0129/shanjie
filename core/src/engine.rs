@@ -38,6 +38,29 @@ fn sinit_b(path: &[DecodedWord], chars: &[(char, f64)]) -> f64 {
     first.and_then(|c| chars.iter().find(|x| x.0 == c)).map_or(0.0, |x| x.1)
 }
 
+/// LANY (docs/contracts/learn-anyctx.md section 1.1): a two-character-or-longer word of a stretch's first path that the learner holds an active record for
+/// under its reading, under any key: the syllables it covers (counted from the stretch's first one) and its text.
+type Protected = (usize, usize, String);
+
+/// Whether `path` shows every protected word over the syllables it covers, however the path cuts its words. One slot per syllable: a word of n syllables has
+/// its characters in the first n slots (one character per syllable; a word with another number of characters has its whole text in its first slot, so a path
+/// that matches a protected word still does and any other does not).
+fn keeps(path: &[DecodedWord], protect: &[Protected]) -> bool {
+    if protect.is_empty() {
+        return true;
+    }
+    let mut slots: Vec<String> = Vec::new();
+    for w in path {
+        if w.0.chars().count() == w.3 {
+            slots.extend(w.0.chars().map(String::from));
+        } else {
+            slots.push(w.0.to_string());
+            slots.resize(slots.len() + w.3 - 1, String::new());
+        }
+    }
+    protect.iter().all(|(s, e, word)| slots.get(*s..*e).is_some_and(|x| x.concat() == *word))
+}
+
 /// What `sinit_swap` did to a pool.
 #[derive(Debug, PartialEq, Eq)]
 enum Swap {
@@ -65,8 +88,11 @@ fn text_of(path: &[DecodedWord]) -> String {
 /// characters (the lift only finds it; the path comes into `best` unlifted, with the score and the lps of the unlifted decode, `sinit_unlift`).
 /// A path outside the pool takes the place of the pool's last path, never of the first: the pool has two paths at least, so its last one is not
 /// the n-gram's first.
-fn sinit_swap<'a>(best: &mut Vec<Scored<'a>>, lifted: &[Scored<'a>], pool: &mut [usize], chars: &[(char, f64)]) -> Swap {
-    match lifted.iter().find(|(_, ws)| !fuzzy_path(ws) && sinit_b(ws, chars) > 0.0) {
+///
+/// LANY (docs/contracts/learn-anyctx.md section 1.1): a lifted path that does not keep the `protect`ed words (`keeps`) is no candidate either, so it is
+/// not swapped in and counts as `Missing`.
+fn sinit_swap<'a>(best: &mut Vec<Scored<'a>>, lifted: &[Scored<'a>], pool: &mut [usize], chars: &[(char, f64)], protect: &[Protected]) -> Swap {
+    match lifted.iter().find(|(_, ws)| !fuzzy_path(ws) && sinit_b(ws, chars) > 0.0 && keeps(ws, protect)) {
         None => Swap::Missing,
         Some((_, ws)) if pool.iter().any(|&i| text_of(&best[i].1) == text_of(ws)) => Swap::Kept,
         Some(path) => {
@@ -1279,7 +1305,8 @@ impl Engine {
     }
 
     /// How many stretches the learning guard kept out of the current job: stretches that would have gone to the small model
-    /// (rerank on, model loaded, demotion table on, two candidates or more). Counted by each decode; 0 after any change that
+    /// (rerank on, model loaded, demotion table on, two candidates or more), the whole-stretch guard's and, since LANY, those the cross-context
+    /// protection of a learned word left with fewer than two paths. Counted by each decode; 0 after any change that
     /// drops the job (a commit, Esc, a setting) until the next decode, and 0 with the guard off.
     pub fn guard_skips(&self) -> usize {
         self.guard_skips
@@ -1549,7 +1576,14 @@ impl Engine {
                 .fixed
                 .iter()
                 .flat_map(|f| {
-                    let Some(pre) = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start)) else { return Vec::new() };
+                    let Some(pre) = f.pre.as_ref().filter(|_| !self.is_punct(f.start)) else { return Vec::new() };
+                    // LANY section 1.3: a window pick of the word already on screen is learned when it has two characters or more, as a prediction pick is
+                    // (s4-learning section 1.2): nothing displaced, so no halving. A single character is not (SINIT's single-character learning stays as it is).
+                    let same = *pre == f.word;
+                    if same && is_single(&f.word) {
+                        return Vec::new();
+                    }
+                    let displaced = if same { String::new() } else { pre.clone() };
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
                     let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
@@ -1571,9 +1605,10 @@ impl Engine {
                     };
                     // The keys the displaced word was scored under at the pick (the coarse one and, for a single character, the mid and fine ones),
                     // those that are not a key of the commit.
-                    let at_pick: Vec<String> = f.pick_keys.iter().filter(|k| **k != ctx && !deeper.contains(k)).cloned().collect();
-                    let deeper = deeper.into_iter().map(|k| (k, reading.clone(), f.word.clone(), pre.clone(), Vec::new()));
-                    [(ctx, reading.clone(), f.word.clone(), pre.clone(), at_pick)].into_iter().chain(deeper).collect::<Vec<_>>()
+                    let at_pick: Vec<String> =
+                        if same { Vec::new() } else { f.pick_keys.iter().filter(|k| **k != ctx && !deeper.contains(k)).cloned().collect() };
+                    let deeper = deeper.into_iter().map(|k| (k, reading.clone(), f.word.clone(), displaced.clone(), Vec::new()));
+                    [(ctx, reading.clone(), f.word.clone(), displaced.clone(), at_pick)].into_iter().chain(deeper).collect::<Vec<_>>()
                 })
                 .collect();
             let mut touched = Vec::new();
@@ -2994,6 +3029,13 @@ impl Engine {
                 let guarded = pool.is_some() && self.learn_guard && self.boosted(st, start, &best[0].1);
                 self.guard_skips += usize::from(guarded);
                 let pool = pool.filter(|_| !guarded);
+                // LANY section 1.1: a word of the first path that was taught (in any context) stays in every path of the pool; fewer than two paths left is
+                // the guard's doing too (no job, counted). `learn_guard` off (evaluation only) is no protection at all.
+                let protect = if pool.is_some() && self.learn_guard { self.protected_words(start, &best[0].1, today) } else { Vec::new() };
+                let pool = pool.map(|p| if protect.is_empty() { p } else { p.into_iter().filter(|&i| keeps(&best[i].1, &protect)).collect::<Vec<_>>() });
+                let thin = pool.as_ref().is_some_and(|p| p.len() < 2);
+                self.guard_skips += usize::from(thin);
+                let pool = pool.filter(|p| p.len() >= 2);
                 // SINIT sections 1.3 and 1.4: the learned sentence-start characters of the stretch, and the pool with a learned path in it.
                 let mut pool = pool;
                 let (sinit_layer, sinit_chars) = if pool.is_some() { self.sinit_chars(start, stop, &before, after, today) } else { (SinitLayer::Coarse, Vec::new()) };
@@ -3005,7 +3047,7 @@ impl Engine {
                         crate::fuzzy::DELTA_SOUND,
                     )
                     .map_err(|_| EngineError::Internal)?;
-                    match sinit_swap(&mut best, &lifted, pool, &sinit_chars) {
+                    match sinit_swap(&mut best, &lifted, pool, &sinit_chars, &protect) {
                         Swap::Missing => self.sinit.missing += 1,
                         Swap::In => self.sinit.swaps += 1,
                         Swap::Kept => {}
@@ -3090,6 +3132,23 @@ impl Engine {
         }
         let next = if stop - start >= 2 { Some(self.syls[start + 1].as_str()) } else { after };
         (SinitLayer::Coarse, chars_of(&record_key(SENTINEL.to_string(), next)))
+    }
+
+    /// LANY section 1.1: the words of 2 or more characters of a stretch's first path (the stretch starts at syllable `from`) that the learner holds an
+    /// active record for under their reading, under any key but a new word's. A single character never counts (SINIT and the existing rules cover it).
+    fn protected_words(&self, from: usize, words: &[DecodedWord], today: i64) -> Vec<Protected> {
+        if self.learner.is_empty() {
+            return Vec::new();
+        }
+        let mut at = 0;
+        let mut out = Vec::new();
+        for &(w, _, _, n, _, _) in words {
+            if !is_single(w) && self.learner.has_active(&self.syls[from + at..from + at + n], w, today) {
+                out.push((at, at + n, w.to_string()));
+            }
+            at += n;
+        }
+        out
     }
 
     /// S7c-2a section 2.2, the learning guard: whether a word of a stretch's first path (the stretch starts at syllable `from`)
@@ -4294,27 +4353,64 @@ mod sinit_tests {
         let mut learned = scored("照9", -5.5, false);
         learned.1[0] = ("照", 0.0, 0.0, 1, false, Some((-5.0, 2.0)));
         let lifted = vec![path("趙0", false), learned.clone(), scored("照10", -9.0, false)];
-        assert_eq!(sinit_swap(&mut best, &lifted, &mut pool, &LEARNED), Swap::In);
+        assert_eq!(sinit_swap(&mut best, &lifted, &mut pool, &LEARNED, &[]), Swap::In);
         assert_eq!(pool, [0, 1, 2, 3, 4, 5, 6, 10], "the best learned path, in the last place; the first is where it was");
         assert_eq!(best.len(), 11, "the learned path is appended to the unlifted n-best");
         assert_eq!((best[10].0, best[10].1[0].1, best[10].1[0].5), (-7.5, -5.0, Some((-5.0, 2.0))), "its score is the unlifted one and the lifted word has its own lp again");
-        assert_eq!(sinit_swap(&mut best, &lifted, &mut pool, &LEARNED), Swap::Kept, "now it is in the pool");
+        assert_eq!(sinit_swap(&mut best, &lifted, &mut pool, &LEARNED, &[]), Swap::Kept, "now it is in the pool");
         assert_eq!(best.len(), 11);
         // a path of the same text in the unlifted pool is the learned path already
         let mut small = vec![0, 1];
         let mut two = vec![path("趙", false), path("照", false)];
-        assert_eq!(sinit_swap(&mut two, &[path("趙", false), path("照", false)], &mut small, &LEARNED), Swap::Kept);
+        assert_eq!(sinit_swap(&mut two, &[path("趙", false), path("照", false)], &mut small, &LEARNED, &[]), Swap::Kept);
         let mut one = vec![path("趙", false), path("趙趙", false)];
-        assert_eq!(sinit_swap(&mut one, &[path("趙", false)], &mut vec![0, 1], &LEARNED), Swap::Missing);
+        assert_eq!(sinit_swap(&mut one, &[path("趙", false)], &mut vec![0, 1], &LEARNED, &[]), Swap::Missing);
         let mut pool: Vec<usize> = (0..8).collect();
         let mut best: Vec<Scored> = (0..10).map(|i| path(named("趙", i), false)).collect();
         let none: Vec<Scored> = (0..10).map(|i| path(named("趙", i), false)).collect();
-        assert_eq!(sinit_swap(&mut best, &none, &mut pool, &LEARNED), Swap::Missing);
+        assert_eq!(sinit_swap(&mut best, &none, &mut pool, &LEARNED, &[]), Swap::Missing);
         assert_eq!(pool, (0..8).collect::<Vec<_>>(), "no learned path in the lifted n-best: the pool is unchanged");
         let mut fuzzy_only: Vec<Scored> = (0..9).map(|i| path(named("趙", i), false)).collect();
         fuzzy_only.push(path("照9", true));
-        assert_eq!(sinit_swap(&mut best, &fuzzy_only, &mut pool, &LEARNED), Swap::Missing, "a learned path with a fuzzy word is not a candidate");
+        assert_eq!(sinit_swap(&mut best, &fuzzy_only, &mut pool, &LEARNED, &[]), Swap::Missing, "a learned path with a fuzzy word is not a candidate");
         assert_eq!(pool, (0..8).collect::<Vec<_>>());
         assert_eq!(best.len(), 10);
+    }
+    /// A path of `(word, syllables)` words, characters one per syllable as the decoder has them.
+    fn words(ws: &[(&'static str, usize)]) -> Scored<'static> {
+        (0.0, ws.iter().map(|&(w, n)| (w, 0.0, 0.0, n, false, None)).collect())
+    }
+
+    /// LANY section 1.1: a path keeps a protected word when it shows the word over the same syllables, whatever words it cuts it into; with several, all.
+    #[test]
+    fn keeps_compares_the_text_over_the_syllables_not_the_segmentation() {
+        let protect = vec![(0, 2, "權限".to_string())];
+        let one = words(&[("權限", 2), ("加", 1), ("好", 1)]);
+        let longer = words(&[("權限加", 3), ("好", 1)]);
+        let split = words(&[("權", 1), ("限", 1), ("加好", 2)]);
+        let other = words(&[("全線", 2), ("加好", 2)]);
+        let shifted = words(&[("加", 1), ("權限", 2), ("好", 1)]);
+        assert_eq!([&one, &longer, &split, &other, &shifted].map(|p| keeps(&p.1, &protect)), [true, true, true, false, false]);
+        let two = vec![(0, 2, "權限".to_string()), (2, 4, "加好".to_string())];
+        assert_eq!([&one, &longer, &split].map(|p| keeps(&p.1, &two)), [true, true, true], "加好 is kept by 加+好, by 權限加+好 and by 加好: the syllables 2 to 4 show it");
+        assert!(!keeps(&words(&[("權限", 2), ("家", 1), ("好", 1)]).1, &two), "a path must keep every protected word");
+        assert!(keeps(&words(&[("權限", 2), ("加好", 2)]).1, &two));
+        assert!(keeps(&other.1, &[]), "nothing protected: every path");
+        assert!(!keeps(&words(&[("權限", 2)]).1, &two), "a word beyond the path's syllables is not kept");
+    }
+
+    /// LANY section 1.1, SINIT order: a lifted path that starts with the learned character but lacks the protected word is not swapped in and counts as missing;
+    /// the lifted path that has it is.
+    #[test]
+    fn a_lifted_path_without_the_protected_word_is_not_swapped_in() {
+        let protect = vec![(1, 3, "建議".to_string())];
+        let mut best: Vec<Scored> = vec![words(&[("趙", 1), ("建議", 2)]), words(&[("趙", 1), ("建", 1), ("議", 1)])];
+        let mut pool = vec![0, 1];
+        let lacking = words(&[("照", 1), ("見", 1), ("意", 1)]);
+        assert_eq!(sinit_swap(&mut best, &[lacking.clone()], &mut pool, &LEARNED, &protect), Swap::Missing);
+        assert_eq!((pool.clone(), best.len()), (vec![0, 1], 2), "the pool is as it was");
+        let keeping = words(&[("照", 1), ("建", 1), ("議", 1)]);
+        assert_eq!(sinit_swap(&mut best, &[lacking, keeping], &mut pool, &LEARNED, &protect), Swap::In, "the first lifted path that keeps it, not the first with the character");
+        assert_eq!((pool, best.len()), (vec![0, 2], 3));
     }
 }
