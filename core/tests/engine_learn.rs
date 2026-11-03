@@ -2992,15 +2992,36 @@ fn lc2_enter_alone_teaches_nothing() {
     assert_eq!(n_records(&e), 0);
 }
 
-/// A single character picked as shown is not learned through this branch (SINIT's single-character learning stays as it is).
+/// A single character picked as shown is not learned through this branch (SINIT's single-character learning stays as it is): the character on screen
+/// is picked (the precondition is asserted), and no record at all results.
 #[test]
 fn lc2_single_character_picked_as_shown_is_not_learned() {
     chat_only();
     let mut e = engine();
     let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
-    pick_first(&mut e, 2, 1);
+    let first: String = shown.chars().take(1).collect();
+    e.key(k(KeyKind::Left)).unwrap();
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    let o = highlight(&mut e, o, &first);
+    assert_eq!(o.candidates[o.selected.unwrap()], first, "premise: the picked item is the character on screen");
     e.key(k(KeyKind::Enter)).unwrap();
-    assert!(records_of(&e, &shown.chars().take(1).collect::<String>()).is_empty());
+    e.key(k(KeyKind::End)).unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(n_records(&e), 0);
+}
+
+/// Nothing is displaced, so nothing is halved and each pick adds 1.0: the same word picked as shown twice under the same key reaches 2.0 (not 1.5).
+#[test]
+fn lc2_same_word_picked_twice_under_one_key_adds_up() {
+    chat_only();
+    let mut e = engine();
+    let mut word = String::new();
+    for _ in 0..2 {
+        word = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
+        pick_first(&mut e, 2, 2);
+        e.key(k(KeyKind::Enter)).unwrap();
+    }
+    assert_eq!(records_of(&e, &word), [("^>$".to_string(), 2.0)]);
 }
 
 /// Picked in a second context, the same word globalizes as any teach does (two different keys).

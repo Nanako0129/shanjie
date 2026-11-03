@@ -586,12 +586,16 @@ struct Fixed {
     /// New-word B §2.5: the new words (reading, word) of the path this pick displaced, chosen while learning was on;
     /// each is halved at a commit with learning on.
     displaced_new: Vec<(Vec<String>, String)>,
+    /// LC2: the text this span showed before the pick came through a tolerant (fuzzy) syllable: this pick, or an earlier one over the same span, was
+    /// a tolerant word (it rewrote the span to the word's lexicon reading, so a later pick of the shown word no longer looks tolerant). Such a span
+    /// never teaches through the same-word or pick-back path.
+    tol: bool,
 }
 
 impl Fixed {
     /// A word the engine fixed on its own (repick-freeze): not learned, not a user choice.
     fn frozen(start: usize, end: usize, word: String) -> Self {
-        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new() }
+        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), tol: false }
     }
 }
 
@@ -2780,7 +2784,7 @@ impl Engine {
         self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new() });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), tol: false });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -3648,7 +3652,7 @@ impl Engine {
         let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new() });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), tol: false });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -4176,8 +4180,10 @@ impl Engine {
         }
         // LC2 section 1 point 2: a pick of the word the span shows teaches (opened window, any selection, keyboard or mouse); an earlier pick over the span
         // that showed another word, then chosen back, has `span_text != word` and keeps `pre_pick`'s original. A word read through a tolerant syllable never
-        // teaches here: the typed reading is not the word's, and choosing it keeps rewriting the span with no record.
-        if tolerant && pre.as_deref() == Some(word.as_str()) && self.span_text(start, end) == word {
+        // teaches here: the typed reading is not the word's, and choosing it keeps rewriting the span with no record. The span remembers that origin (`Fixed.tol`): the
+        // rewrite makes a later pick of the shown word look exact, so a pick back from another word and a second pick of the word are no teach either.
+        let tol = tolerant || self.fixed.iter().any(|f| f.start == start && f.end == end && f.tol);
+        if tol && pre.as_deref() == Some(word.as_str()) {
             pre = None;
         }
         // §2.5: new words of the path this pick overlaps are halved at the commit. The earlier picks this one replaces
@@ -4223,7 +4229,7 @@ impl Engine {
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, tol });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }
