@@ -91,12 +91,30 @@ final class ShiftTapTests: XCTestCase {
         XCTAssertFalse(tap(&t, left, down: false, at: 1.1, caps: true))
     }
 
-    func testBothShiftKeysAreNotATap() {
+    /// shift-stuck section 2: the other side was already down at the press and still is at the release, so the press is a lone tap (the
+    /// accepted trade-off); the first Shift's own release is not.
+    func testHoldingOneShiftAndTappingTheOtherSwitches() {
         var t = ShiftTap()
         _ = tap(&t, left, down: true, at: 1.0)
         _ = tap(&t, right, down: true, at: 1.05, alsoHeld: true)
-        XCTAssertFalse(tap(&t, right, down: false, at: 1.1, alsoHeld: true))
+        XCTAssertTrue(tap(&t, right, down: false, at: 1.1, alsoHeld: true))
         XCTAssertFalse(tap(&t, left, down: false, at: 1.15))
+    }
+
+    /// shift-stuck section 2: the right Shift's bit stays in the flags all along (a release that never arrived): the left tap still switches.
+    func testAStaleOtherShiftBitDoesNotSpoilATap() {
+        var t = ShiftTap()
+        XCTAssertFalse(tap(&t, left, down: true, at: 1.0, alsoHeld: true))
+        XCTAssertTrue(tap(&t, left, down: false, at: 1.1, alsoHeld: true))
+    }
+
+    /// shift-stuck section 2: both Shift keys really pressed together (the other side changes during the press) never switch.
+    func testTwoShiftKeysPressedTogetherAreNotATap() {
+        var t = ShiftTap()
+        XCTAssertFalse(tap(&t, left, down: true, at: 1.0))
+        XCTAssertFalse(tap(&t, right, down: true, at: 1.05, alsoHeld: true))
+        XCTAssertFalse(tap(&t, left, down: false, at: 1.1, alsoHeld: true))
+        XCTAssertFalse(tap(&t, right, down: false, at: 1.15))
     }
 
     /// The left release was missed; the flags of the next events say only the right key is down, so a right tap still switches.

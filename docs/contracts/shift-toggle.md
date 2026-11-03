@@ -18,13 +18,14 @@
   1. 按下到放開之間沒有任何 `keyDown`（Shift＋字母、Shift＋方向鍵都不算）；
   2. 沒有按過別的修飾鍵；
   3. 期間沒有滑鼠按下（用 `CGEventSource.secondsSinceLastEventType(.combinedSessionState, …)` 查左、右、其他鍵的滑鼠按下距今的秒數，比按住的時間短就是期間按過：Shift＋點擊選取文字不切換；不需要額外權限）；
-  4. 按住的時間 ≤ `SHIFT_TAP_MAX`（具名常數 0.5 秒；註解寫明：沒有參考實測，是避免「按住 Shift 想打大寫又放棄」也切換的推論值，照實機回饋調）。
+  4. 另一側 Shift 的裝置位元和按下時相同：早就殘留在旗標裡、沒有變的不擋；按下到放開之間變了不算（`shift-stuck.md` §2；取捨：按住一側、單按另一側會切換）；
+  5. 按住的時間 ≤ `SHIFT_TAP_MAX`（具名常數 0.5 秒；註解寫明：沒有參考實測，是避免「按住 Shift 想打大寫又放棄」也切換的推論值，照實機回饋調）。
 - 偵測寫成一個不碰 AppKit 的小狀態機（`ShiftTap`：餵入「Shift 按下／放開、其他修飾鍵、keyDown、滑鼠按下距今秒數、時間」，回傳要不要切換），讓測試能直接餵事件。
 - 設定「單按 Shift 切換中英」（`shiftToggle`，**預設開**）關掉時：`flagsChanged` 一律不處理，**每個 App 的英數狀態全部清掉**、核心 `set_ascii(0)`，行為和今天逐位元組相同。
 
 ## 2. 英數模式的狀態與按鍵
 
-- **狀態**：每個 App（`client.bundleIdentifier`）各自一個布林，存在殼的記憶體裡（輸入法程序重開就回到中文；新 App 預設中文）。沒有 bundle ID 的客戶端共用一個。殼在 `activate`、換 owner、切換時把這個 App 的狀態交給核心（`set_ascii`，§4）。
+- **狀態**：每個 App（`client.bundleIdentifier`）各自一個布林，存在殼的記憶體裡（輸入法程序重開就回到中文；新 App 預設中文）。沒有 bundle ID 的客戶端共用一個（這個 session 讀到 nil 時，英數狀態的鍵改用它最近讀到的非空 bundle ID，從來沒讀到過才共用；`shift-stuck.md` §1）。殼在 `activate`、換 owner、切換時把這個 App 的狀態交給核心（`set_ascii`，§4）。
 - **組字區是空的、英數模式**：所有按鍵直通給 App（`handle` 回 false，不經核心），包括標點與空白。
 - **組字區有字、英數模式**（決定 1，保留）：殼照今天把鍵送進核心，但可印字元的鍵（`event.characters` 是一個 ASCII 0x21–0x7E 的字元，沒有 Control／Option／Command）送 `ShanjieKey(kind: .char, ch: 那個字元, modifiers: 0)`：字元由殼照目前的鍵盤配置從 `event.characters` 取（所以 Shift＋`1` 是 `!`、Shift＋`/` 是 `?`），不是鍵帽。核心在 ASCII 狀態下把它原樣接進英文段（§4）。空白、Enter、Backspace、Esc、方向鍵照今天組字區的規則（空白結束英文段成 token；Enter 送出整個組字區）。組字區送出或清空之後，下一個鍵照「組字區是空的」直通。
 - **核心沒有英文段可用時**（倚天排列、可省略韻母開著、或中英混打關著：核心的 `shadow_on()` 是 false）：組字區有字時切到英數，殼先照 Enter 送出組字區（`finish(mode: 0)`），再進英數模式（組字區變空，之後直通）。

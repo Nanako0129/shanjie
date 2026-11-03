@@ -288,6 +288,65 @@ final class ShiftToggleSessionTests: XCTestCase {
         XCTAssertFalse(a.press(Keys.code(for: "h")))
     }
 
+    /// shift-stuck section 1: a controller whose client reads nil toggles the app it knew, not the shared `""` entry, so the next key
+    /// of the original controller does not pull the state back to English.
+    func testANilBundleReadToggleUsesTheKnownApp() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let a = Controller(shell, bundle: "com.example.A"), b = Controller(shell, bundle: "com.example.A")
+        a.session.activate()
+        tap(a)
+        XCTAssertTrue(shell.engineAscii)
+        b.session.activate()
+        XCTAssertTrue(shell.engineAscii, "B read A's bundle ID: English")
+        b.client.bundle = nil
+        tap(b)
+        XCTAssertFalse(shell.asciiApps.contains(""), "the nil read did not use the shared entry")
+        XCTAssertTrue(a.press(Keys.code(for: "h")), "A types: Chinese, the composition is consumed")
+        XCTAssertFalse(shell.engineAscii)
+        XCTAssertTrue(shell.asciiApps.isEmpty)
+    }
+
+    /// shift-stuck section 1, review of PR #355: sessions activated while the toggle was off still learn their bundle ID, so turning the
+    /// setting on later does not bring the nil-read path back.
+    func testSessionsActivatedWithTheToggleOffStillKnowTheirApp() {
+        let shell = makeShell(shift: MemoryShiftToggleStore(false), hint: FakeShiftHint())
+        let a = Controller(shell, bundle: "com.example.A"), b = Controller(shell, bundle: "com.example.A")
+        b.session.activate()
+        a.session.activate()
+        shell.applyShiftToggle(true)
+        tap(a)
+        XCTAssertTrue(shell.engineAscii)
+        b.client.bundle = nil
+        tap(b)
+        XCTAssertFalse(shell.asciiApps.contains(""))
+        XCTAssertTrue(a.press(Keys.code(for: "h")), "A types: Chinese")
+        XCTAssertFalse(shell.engineAscii)
+    }
+
+    /// shift-stuck section 1: an empty bundle read is treated as no read, like a nil one.
+    func testAnEmptyBundleReadToggleUsesTheKnownApp() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let a = Controller(shell, bundle: "com.example.A"), b = Controller(shell, bundle: "com.example.A")
+        a.session.activate()
+        tap(a)
+        b.session.activate()
+        b.client.bundle = ""
+        tap(b)
+        XCTAssertFalse(shell.asciiApps.contains(""))
+        XCTAssertTrue(a.press(Keys.code(for: "h")), "A types: Chinese")
+    }
+
+    /// shift-toggle section 2: a client that never gave a bundle ID shares the `""` entry, as before.
+    func testAClientThatNeverReadABundleIDSharesTheEmptyEntry() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let c = Controller(shell, bundle: nil)
+        c.session.activate()
+        tap(c)
+        XCTAssertEqual(shell.asciiApps, [""])
+        tap(c)
+        XCTAssertTrue(shell.asciiApps.isEmpty)
+    }
+
     func testWithoutAShadowTheCompositionIsSentFirst() {
         for (name, shell) in [("English mixing off", makeShell(english: MemoryEnglishStore(false), hint: FakeShiftHint())),
                               ("Eten layout", makeShell(layout: MemoryLayoutStore("eten"), hint: FakeShiftHint()))] {

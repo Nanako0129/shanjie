@@ -77,7 +77,8 @@ final class FakeClient: TextClient {
     }
     private(set) var underlineRuns: [UnderlineRun] = []
 
-    private let bundle: String?
+    /// Settable in the middle of a test (shift-stuck section 3: a client that stops answering).
+    var bundle: String?
     /// Every read of `bundleIdentifier` (a synchronous IPC in the app).
     private(set) var bundleReads = 0
     var bundleIdentifier: String? { bundleReads += 1; return bundle }
