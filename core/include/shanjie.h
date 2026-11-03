@@ -322,7 +322,8 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
 //   A candidate-window pick of the word already shown over its span (2+ characters) is learned too, the way a prediction row pick is
 //   (nothing displaced, weight +1.0, no halving), however it was picked (keyboard or mouse, whichever item, whether or not the
-//   selection moved after the window opened); not when the word was read through a tolerant (fuzzy) syllable, not for a single
+//   selection moved after the window opened); not when the word was read through a tolerant (fuzzy) syllable, nor when a word read
+//   through a tolerant syllable was picked earlier over the same span (s4-learning section 16, the carried origin), not for a single
 //   character, and not when the composition is sent with Enter and no window pick (docs/contracts/learn-untrusted-sameword.md section 1).
 //   A single-character word at sentence start is learned and looked up under "^>" plus a syllable reading
 //   too (rule 10, the coarse key), under the mid key of the next two syllables when both are syllables, and
