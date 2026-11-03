@@ -163,6 +163,15 @@ fn pick(e: &mut Engine, n: usize, end: usize, word: &str) {
     e.key(k(KeyKind::Enter)).unwrap();
     e.key(k(KeyKind::End)).unwrap();
 }
+/// LC2: open the window over the last `end` syllables and pick the first item directly (the word shown there, no move).
+fn pick_first(e: &mut Engine, n: usize, end: usize) {
+    for _ in 0..n - end {
+        e.key(k(KeyKind::Left)).unwrap();
+    }
+    e.key(k(KeyKind::Space)).unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.key(k(KeyKind::End)).unwrap();
+}
 /// Move the highlight (candidates open, `o` the current snapshot) onto `word`.
 fn highlight(e: &mut Engine, mut o: Output, word: &str) -> Output {
     for _ in 0..5000 {
@@ -906,7 +915,7 @@ fn row_flag_must_be_on_at_pick_and_at_commit() {
     e.set_learning(true);
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(n_records(&e), 0);
-    // same word picked as shown: nothing to learn
+    // a single character picked as shown: nothing to learn (a word of two characters or more is, `lc2_*`)
     let mut e = tiny(TINY, TINY);
     e.set_left_context(TAUGHT_AFTER);
     type_syls(&mut e, "ㄒㄧㄣ");
@@ -2891,4 +2900,121 @@ fn sinit_user_reported_row_163_is_learned_once_in_formal() {
 #[test]
 fn sinit_semantic_row_dai_ni_bao_guan_is_learned_once_in_chat() {
     sinit_learned_once(lm::Profile::Chat, "ㄉㄞˋ ㄋㄧˇ ㄅㄠˇ ㄍㄨㄢˇ", "帶你保管", "代", "代你保管");
+}
+
+// ---------- LC2 (docs/contracts/learn-untrusted-sameword.md section 1, point 2): a window pick of the word already shown is learned ----------
+
+/// A window pick of the word already on screen, two characters, is learned the way a prediction pick is, with the window opened and the first item picked
+/// directly (no move of the selection). At sentence start the key is `^>` plus the syllable after the word (never the bare `^`), the weight 1.0.
+#[test]
+fn lc2_direct_pick_of_the_shown_first_item_is_learned_under_a_sentence_start_key() {
+    chat_only();
+    let mut e = engine();
+    let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ").preedit;
+    let word: String = shown.chars().take(2).collect();
+    pick_first(&mut e, 3, 2);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &word), [("^>ㄐㄧㄚ".to_string(), 1.0)], "{word}");
+}
+
+/// The shown word need not be the window's first item (the list is ordered by word length): with a 3-syllable word ending the composition the window lists it
+/// first, and the shown 2-syllable word is the second item. Picking that one learns as well.
+#[test]
+fn lc2_pick_of_a_shown_word_that_is_not_the_first_item_is_learned() {
+    chat_only();
+    let lex = format!("{TINY}ㄒㄧㄣ-ㄅㄣ 欣奔 -1.0\nㄊㄚ-ㄒㄧㄣ-ㄅㄣ 他欣奔 -5.0\n");
+    let mut e = tiny(&lex, &lex);
+    let o = type_syls(&mut e, "ㄊㄚ ㄒㄧㄣ ㄅㄣ");
+    assert_eq!(o.preedit, "他欣奔");
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    assert_eq!(o.candidates[..2], ["他欣奔", "欣奔"], "premise: the shown 欣奔 is the second item");
+    let o = e.key(k(KeyKind::Right)).unwrap();
+    assert_eq!(o.selected, Some(1));
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    let r = records_of(&e, "欣奔");
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(r[0].1, 1.0);
+}
+
+/// A mouse pick (the expanded grid, the same choose() as Enter) of the shown word is learned.
+#[test]
+fn lc2_mouse_pick_of_the_shown_word_is_learned() {
+    chat_only();
+    let mut e = engine();
+    let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
+    let o = e.key(k(KeyKind::Space)).unwrap();
+    let idx = o.candidates.iter().position(|c| *c == shown).expect("the shown word is in the window");
+    e.key(k(KeyKind::Down)).unwrap();
+    e.pick(idx).unwrap().unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &shown), [("^>$".to_string(), 1.0)]);
+}
+
+/// Nothing is displaced: a record of the word under the key it was picked under is not halved (the first pick is under `^>$`; the second composition goes
+/// on with a syllable after the word, so its commit key is `^>ㄐㄧㄚ`).
+#[test]
+fn lc2_same_word_pick_halves_nothing() {
+    chat_only();
+    let mut e = engine();
+    let word = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
+    pick_first(&mut e, 2, 2);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &word), [("^>$".to_string(), 1.0)], "premise: taught once");
+    assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit, word, "premise: shown as it is");
+    pick_first(&mut e, 2, 2);
+    type_syls(&mut e, "ㄐㄧㄚ");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &word), [("^>$".to_string(), 1.0), ("^>ㄐㄧㄚ".to_string(), 1.0)]);
+}
+
+/// Picking X and then the original again confirms the original: it is learned (+1.0), X is not, nothing is halved.
+#[test]
+fn lc2_picking_away_and_back_confirms_the_original() {
+    chat_only();
+    let mut e = engine();
+    let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ").preedit;
+    let other = if shown == "權力" { "全力" } else { "權力" };
+    pick(&mut e, 2, 2, other);
+    pick(&mut e, 2, 2, &shown);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(records_of(&e, &shown), [("^>$".to_string(), 1.0)]);
+    assert!(records_of(&e, other).is_empty(), "the word picked away from is not learned");
+}
+
+/// A plain Enter (no window) teaches nothing.
+#[test]
+fn lc2_enter_alone_teaches_nothing() {
+    chat_only();
+    let mut e = engine();
+    type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ");
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(n_records(&e), 0);
+}
+
+/// A single character picked as shown is not learned through this branch (SINIT's single-character learning stays as it is).
+#[test]
+fn lc2_single_character_picked_as_shown_is_not_learned() {
+    chat_only();
+    let mut e = engine();
+    let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
+    pick_first(&mut e, 2, 1);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert!(records_of(&e, &shown.chars().take(1).collect::<String>()).is_empty());
+}
+
+/// Picked in a second context, the same word globalizes as any teach does (two different keys).
+#[test]
+fn lc2_same_word_picks_in_two_contexts_globalize() {
+    chat_only();
+    let mut e = engine();
+    for left in ["", "好他"] {
+        e.set_left_context(left);
+        let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ").preedit;
+        assert_eq!(shown, "權力", "premise: the pick is of the shown word (left {left:?})");
+        pick_first(&mut e, 2, 2);
+        e.key(k(KeyKind::Enter)).unwrap();
+    }
+    let keys: Vec<String> = records_of(&e, "權力").into_iter().map(|r| r.0).collect();
+    assert_eq!(keys, ["^>$", "好他", ""], "the sentence-start key, the full key and GLOBAL");
 }

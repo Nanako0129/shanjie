@@ -560,8 +560,8 @@ struct Fixed {
     end: usize,
     word: String,
     /// S4: the text the span showed before the candidate pick, when the pick is a pending learn
-    /// (chosen while learning was on, not punctuation). Learned at commit if still on and different.
-    /// `Some("")` is a prediction pick (V3 section 10.1): nothing was displaced, so nothing halves.
+    /// (chosen while learning was on, not punctuation). Learned at commit if still on. Equal to `word` (LC2: the pick kept the text shown over
+    /// the span) it is taught with nothing displaced, like `Some("")`, a prediction pick (V3 section 10.1): nothing was displaced, so nothing halves.
     pre: Option<String>,
     /// The context key a prediction pick is recorded under, fixed when the row was built: re-decoding after the pick can
     /// change the text before the start, so the commit must not recompute it (section 10.1). `None` for candidate picks.
@@ -1549,7 +1549,14 @@ impl Engine {
                 .fixed
                 .iter()
                 .flat_map(|f| {
-                    let Some(pre) = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start)) else { return Vec::new() };
+                    let Some(pre) = f.pre.as_ref().filter(|_| !self.is_punct(f.start)) else { return Vec::new() };
+                    // LC2 section 1 point 2: a window pick of the word already on screen is learned when it has two characters or more, as a prediction pick is
+                    // (s4-learning section 1.2): nothing displaced, so no halving. A single character is not (SINIT's single-character learning stays as it is).
+                    let same = *pre == f.word;
+                    if same && is_single(&f.word) {
+                        return Vec::new();
+                    }
+                    let displaced = if same { String::new() } else { pre.clone() };
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
                     let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
@@ -1571,9 +1578,10 @@ impl Engine {
                     };
                     // The keys the displaced word was scored under at the pick (the coarse one and, for a single character, the mid and fine ones),
                     // those that are not a key of the commit.
-                    let at_pick: Vec<String> = f.pick_keys.iter().filter(|k| **k != ctx && !deeper.contains(k)).cloned().collect();
-                    let deeper = deeper.into_iter().map(|k| (k, reading.clone(), f.word.clone(), pre.clone(), Vec::new()));
-                    [(ctx, reading.clone(), f.word.clone(), pre.clone(), at_pick)].into_iter().chain(deeper).collect::<Vec<_>>()
+                    let at_pick: Vec<String> =
+                        if same { Vec::new() } else { f.pick_keys.iter().filter(|k| **k != ctx && !deeper.contains(k)).cloned().collect() };
+                    let deeper = deeper.into_iter().map(|k| (k, reading.clone(), f.word.clone(), displaced.clone(), Vec::new()));
+                    [(ctx, reading.clone(), f.word.clone(), displaced.clone(), at_pick)].into_iter().chain(deeper).collect::<Vec<_>>()
                 })
                 .collect();
             let mut touched = Vec::new();
@@ -4151,6 +4159,7 @@ impl Engine {
         let path_new = if self.learning { self.path_new_words() } else { Vec::new() };
         // A word found through a tolerant syllable: the span becomes its lexicon reading, as `choose_pred` replaces the span by the
         // item's reading, so refresh, `best_lp_delta` and learning read the lexicon reading (fuzzy input, section 2.1).
+        let tolerant = c.alt.contains_key(&idx);
         if let Some(reading) = c.alt.get(&idx) {
             self.syls.splice(start..end, reading.iter().cloned());
         }
@@ -4163,6 +4172,12 @@ impl Engine {
         let frozen = self.freeze_outside(start, end);
         // New-word B §2.4: picking a new word is no S4 teach (it is counted as used at the commit, §2.5).
         if !self.is_punct(start) && !self.in_lexicon(&self.syls[start..end], &word) {
+            pre = None;
+        }
+        // LC2 section 1 point 2: a pick of the word the span shows teaches (opened window, any selection, keyboard or mouse); an earlier pick over the span
+        // that showed another word, then chosen back, has `span_text != word` and keeps `pre_pick`'s original. A word read through a tolerant syllable never
+        // teaches here: the typed reading is not the word's, and choosing it keeps rewriting the span with no record.
+        if tolerant && pre.as_deref() == Some(word.as_str()) && self.span_text(start, end) == word {
             pre = None;
         }
         // §2.5: new words of the path this pick overlaps are halved at the commit. The earlier picks this one replaces
