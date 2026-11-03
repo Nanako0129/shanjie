@@ -73,6 +73,8 @@ def parser():
     ap.add_argument("--wiki-range", type=int, nargs=2, default=[300_000, 305_000], metavar=("LO", "HI"),
                     help="維基第 LO..HI-1 篇（預設是 wikitune 的 300,000–304,999；rerank-formal 的 wikijudge 用 310000 315000）")
     ap.add_argument("--wiki-name", default="wikitune", help="輸出檔名（不含 .txt）")
+    ap.add_argument("--tune-no-trad-tw-phrases", action="store_true",
+                    help="docs/contracts/sr-no-twphrases.md §5：wiki 參考句（與從它取的讀音）的繁體句不套 OpenCC TWPhrases（原文的「權限」不會變成「許可權」）；只影響 --part wiki，cvtune 與 colloquial-train 不變")
     return ap
 
 
@@ -108,9 +110,17 @@ def main():
             t = bc.TEMPLATE.sub("", t)
         for pat, rep in bc.MARKUP:
             t = pat.sub(rep, t)
-        for s in bc.SENT.findall(t):
-            wiki.extend(HAN.findall(s if a.mw else bc.convert(s, phrase, char, maxp)))
+        wiki.extend(wiki_clauses(t, (phrase, char, maxp), a.mw, not a.tune_no_trad_tw_phrases))
     readings(rnd.sample(sorted(set(wiki)), min(a.wiki_rows, len(set(wiki)))), a.wiki_name)
+
+
+def wiki_clauses(text, conv, mw=False, tw=True):
+    """The Han clauses of one article after markup removal: each sentence converted (unless mw, which converted the whole article already),
+    then split on non-Han. tw=False: Traditional sentences keep their wording, no TWPhrases (docs/contracts/sr-no-twphrases.md section 5)."""
+    out = []
+    for s in bc.SENT.findall(text):
+        out.extend(HAN.findall(s if mw else bc.convert(s, *conv, trad_tw_phrases=tw)))
+    return out
 
 
 def articles_in(lo, hi):

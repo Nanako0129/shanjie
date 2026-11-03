@@ -74,6 +74,46 @@ class TestPrepEquivalence(unittest.TestCase):
         self.assertEqual(ours, theirs)
         self.assertIn("我們明天去哪裡吃飯", ours)
 
+    def test_no_trad_tw_phrases_keeps_traditional_wording(self):
+        """docs/contracts/sr-no-twphrases.md section 2.1: with tw=False a Traditional sentence keeps 權限 (TWPhrases has 權限 -> 許可權);
+        a Simplified one is converted as before; tw=True (the default) is the old output."""
+        trad, simp = "管理員權限加好了", "我们的插件"
+        self.assertEqual(list(prep.text_runs(trad, self.conv)), [r for r in bc.text_runs(trad, self.conv) if len(r) >= 2])
+        self.assertNotIn("管理員權限加好了", list(prep.text_runs(trad, self.conv)))           # the default still rewrites it
+        self.assertEqual(list(prep.text_runs(trad, self.conv, False)), ["管理員權限加好了"])
+        self.assertEqual(list(prep.text_runs(simp, self.conv, False)), list(prep.text_runs(simp, self.conv)))
+        art = trad + "。"
+        self.assertEqual(list(prep.wiki_runs(art, self.conv, False)), ["管理員權限加好了"])
+        self.assertEqual(list(prep.wiki_runs(art, self.conv)), [r for r in bc.article_runs(art, self.conv) if len(r) >= 2])
+        prep._init(None, False)
+        try:
+            self.assertEqual(prep._work(("text", [trad]))[0], "管理員權限加好了")
+            self.assertEqual(prep._text_work(([trad], False, False))[0], "管理員權限加好了\n")
+        finally:
+            prep._init()
+        self.assertEqual(prep._work(("text", [trad]))[0], "\n".join(list(prep.text_runs(trad, self.conv))))
+
+    def test_no_trad_tw_phrases_guard_matches_the_written_text(self):
+        """The guard gets the same setting, so a held-out 權限 sentence is found in the text that is actually written."""
+        import holdout_guard
+        with tempfile.TemporaryDirectory() as td:
+            rows = os.path.join(td, "rows.txt")
+            open(rows, "w", encoding="utf-8").write("a|管理員權限加好了|x\n")
+            matcher = holdout_guard.build_matcher([rows], self.conv, False)[0]
+            prep._init(matcher, False)
+            try:
+                text, _, n, skipped = prep._work(("text", ["管理員權限加好了"]))
+            finally:
+                prep._init()
+        self.assertEqual((text, n, skipped), ("", 0, 1))
+
+    def test_no_trad_tw_phrases_expects_the_regenerated_pool(self):
+        self.assertTrue(prep.match_hash("colloquial-train.txt", "eb905936" + "0" * 52 + "57a0", prep.EXPECTED_NO_TW))
+        self.assertFalse(prep.match_hash("colloquial-train.txt", "3e833d06" + "0" * 52 + "b4db", prep.EXPECTED_NO_TW))
+        self.assertTrue(prep.match_hash("colloquial-train.txt", "3e833d06" + "0" * 52 + "b4db"))
+        self.assertEqual({k: v for k, v in prep.EXPECTED_NO_TW.items() if k != "colloquial-train.txt"},
+                         {k: v for k, v in prep.EXPECTED.items() if k != "colloquial-train.txt"})
+
     def test_input_hash_check_stops_on_mismatch(self):
         with tempfile.TemporaryDirectory() as td:
             p = os.path.join(td, "synth.txt")

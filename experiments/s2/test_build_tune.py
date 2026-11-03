@@ -22,6 +22,20 @@ class WikiRange(unittest.TestCase):
         a = bt.parser().parse_args(["--part", "wiki", "--wiki-range", "310000", "315000", "--wiki-name", "wikijudge"])
         self.assertEqual((a.part, a.wiki_range, a.wiki_name), ("wiki", [310_000, 315_000], "wikijudge"))
 
+    def test_tune_no_trad_tw_phrases_keeps_the_article_wording(self):
+        """docs/contracts/sr-no-twphrases.md section 5: off by default (wikitune and wikijudge1-5 are unchanged); on, a Traditional
+        sentence's 權限 stays in the gold instead of becoming 許可權; a Simplified sentence is converted the same either way."""
+        self.assertFalse(bt.parser().parse_args([]).tune_no_trad_tw_phrases)
+        conv = bt.bc.load_conv()
+        text = "管理員權限加好了。我们的插件很好用。"
+        default = bt.wiki_clauses(text, conv)
+        self.assertEqual(default, [c for s in bt.bc.SENT.findall(text) for c in bt.HAN.findall(bt.bc.convert(s, *conv))])
+        self.assertNotIn("管理員權限加好了", default)
+        kept = bt.wiki_clauses(text, conv, tw=False)
+        self.assertEqual(kept[0], "管理員權限加好了")
+        self.assertEqual(kept[1:], default[1:])
+        self.assertEqual(bt.wiki_clauses("已轉換的權限句子。", conv, mw=True), ["已轉換的權限句子"])
+
     def test_articles_in_takes_lo_to_hi_minus_one(self):
         calls = []
         def fake_articles(limit):
