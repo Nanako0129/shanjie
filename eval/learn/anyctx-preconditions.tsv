@@ -1,0 +1,362 @@
+set	key	profile	off_std	off_ngram	on_std	check	valid
+anyctx	1:權限:teach	chat	0	1	0	word_only=1;repeat_on=1	1
+anyctx	2:權限:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	3:權限:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	4:權限:negA	chat	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	1:權限:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	2:權限:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	3:權限:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	4:權限:negA	formal	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	5:皈依:teach	chat	0	1	0	word_only=1;repeat_on=1	1
+anyctx	6:皈依:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	7:皈依:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	5:皈依:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	6:皈依:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	7:皈依:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	8:鳴謝:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	9:鳴謝:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	10:鳴謝:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	11:鳴謝:negA	chat	1	1	1	ngram_first_has_taught_word=0	0
+anyctx	8:鳴謝:teach	formal	0	0	0	word_only=1;repeat_on=1	1
+anyctx	9:鳴謝:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	10:鳴謝:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	11:鳴謝:negA	formal	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	12:窸窣:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	13:窸窣:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	14:窸窣:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	12:窸窣:teach	formal	0	0	0	word_only=1;repeat_on=1	1
+anyctx	13:窸窣:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	14:窸窣:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	15:挑擔:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	16:挑擔:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	17:挑擔:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	18:挑擔:negA	chat	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	15:挑擔:teach	formal	0	0	0	word_only=1;repeat_on=1	1
+anyctx	16:挑擔:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	17:挑擔:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	18:挑擔:negA	formal	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	19:比附:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	20:比附:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	21:比附:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	19:比附:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	20:比附:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	21:比附:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	22:憑弔:teach	chat	0	1	0	word_only=1;repeat_on=1	1
+anyctx	23:憑弔:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	24:憑弔:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	22:憑弔:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	23:憑弔:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	24:憑弔:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	25:飭令:teach	chat	0	1	0	word_only=1;repeat_on=1	1
+anyctx	26:飭令:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	27:飭令:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	28:飭令:negA	chat	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	29:飭令:negA	chat	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	25:飭令:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	26:飭令:pos	formal	0	0	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	0
+anyctx	27:飭令:pos	formal	1	1	1	premise_b=ngram_ok,off_std_wrong,on_still_wrong	0
+anyctx	28:飭令:negA	formal	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	29:飭令:negA	formal	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	30:詮釋:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	31:詮釋:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	32:詮釋:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	33:詮釋:negA	chat	1	0	1	ngram_first_has_taught_word=1	1
+anyctx	30:詮釋:teach	formal	0	0	0	word_only=1;repeat_on=1	1
+anyctx	31:詮釋:pos	formal	1	1	1	premise_b=ngram_ok,off_std_wrong,on_still_wrong	0
+anyctx	32:詮釋:pos	formal	0	0	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	0
+anyctx	33:詮釋:negA	formal	0	0	0	ngram_first_has_taught_word=1	0
+anyctx	34:晉謁:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	35:晉謁:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	36:晉謁:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	34:晉謁:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	35:晉謁:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	36:晉謁:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	37:泅水:teach	chat	0	0	0	word_only=1;repeat_on=0	0
+anyctx	38:泅水:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	39:泅水:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	37:泅水:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	38:泅水:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	39:泅水:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	40:矗立:teach	chat	0	1	0	word_only=1;repeat_on=1	1
+anyctx	41:矗立:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	42:矗立:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	40:矗立:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	41:矗立:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	42:矗立:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	43:蔚然:teach	chat	0	0	0	word_only=1;repeat_on=1	1
+anyctx	44:蔚然:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	45:蔚然:pos	chat	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	43:蔚然:teach	formal	0	1	0	word_only=1;repeat_on=1	1
+anyctx	44:蔚然:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	45:蔚然:pos	formal	0	1	0	premise_b=ngram_ok,off_std_wrong,on_still_wrong	1
+anyctx	46:句首:再賣:teach	chat	1	1	1	firstchar_only=0;repeat_on=1	0
+anyctx	47:句首:再賣:sinit	chat	0	0	0	off_std=0	0
+anyctx	46:句首:再賣:teach	formal	0	0	0	firstchar_only=1;repeat_on=1	1
+anyctx	47:句首:再賣:sinit	formal	0	0	1	off_std=0	1
+anyctx	48:句首:再測:teach	chat	1	0	1	firstchar_only=0;repeat_on=1	0
+anyctx	49:句首:再測:sinit	chat	1	0	1	off_std=1	1
+anyctx	48:句首:再測:teach	formal	0	0	0	firstchar_only=1;repeat_on=1	1
+anyctx	49:句首:再測:sinit	formal	0	0	1	off_std=0	1
+anyctx	50:句首:再查:teach	chat	1	0	1	firstchar_only=0;repeat_on=1	0
+anyctx	51:句首:再查:sinit	chat	1	0	1	off_std=1	1
+anyctx	50:句首:再查:teach	formal	0	0	0	firstchar_only=1;repeat_on=1	1
+anyctx	51:句首:再查:sinit	formal	0	0	1	off_std=0	1
+anyctx	52:句首:再算:teach	chat	1	1	1	firstchar_only=0;repeat_on=1	0
+anyctx	53:句首:再算:sinit	chat	0	0	0	off_std=0	0
+anyctx	54:句首:再算:sinit	chat	0	0	1	off_std=0	1
+anyctx	52:句首:再算:teach	formal	0	0	0	firstchar_only=1;repeat_on=1	1
+anyctx	53:句首:再算:sinit	formal	0	0	1	off_std=0	1
+anyctx	54:句首:再算:sinit	formal	0	0	1	off_std=0	1
+group	權限	chat					1
+group	權限	formal					1
+group	皈依	chat					1
+group	皈依	formal					1
+group	鳴謝	chat					1
+group	鳴謝	formal					1
+group	窸窣	chat					1
+group	窸窣	formal					1
+group	挑擔	chat					1
+group	挑擔	formal					1
+group	比附	chat					1
+group	比附	formal					1
+group	憑弔	chat					1
+group	憑弔	formal					1
+group	飭令	chat					1
+group	飭令	formal				前提不成立：行26pos,行27pos	0
+group	詮釋	chat					1
+group	詮釋	formal				前提不成立：行31pos,行32pos	0
+group	晉謁	chat					1
+group	晉謁	formal					1
+group	泅水	chat				前提不成立：行37teach	0
+group	泅水	formal					1
+group	矗立	chat					1
+group	矗立	formal					1
+group	蔚然	chat					1
+group	蔚然	formal					1
+group	句首:再賣	chat				teach 列在這種設定不是只錯第一個字，或沒有 sinit 列 first_ok 為 1	0
+group	句首:再賣	formal					1
+group	句首:再測	chat				teach 列在這種設定不是只錯第一個字，或沒有 sinit 列 first_ok 為 1	0
+group	句首:再測	formal					1
+group	句首:再查	chat				teach 列在這種設定不是只錯第一個字，或沒有 sinit 列 first_ok 為 1	0
+group	句首:再查	formal					1
+group	句首:再算	chat				teach 列在這種設定不是只錯第一個字，或沒有 sinit 列 first_ok 為 1	0
+group	句首:再算	formal					1
+check	new_arm_learn_off_identical_to_main	chat				行為與第一次顯示逐列相同	1
+check	new_arm_learn_off_identical_to_main	formal				行為與第一次顯示逐列相同	1
+cv	13	chat	1	0		會意改對的列	1
+cv	64	chat	1	0		會意改對的列	1
+cv	92	chat	1	0		會意改對的列	1
+cv	100	chat	1	0		會意改對的列	1
+cv	190	chat	1	0		會意改對的列	1
+cv	206	chat	1	0		會意改對的列	1
+cv	211	chat	1	0		會意改對的列	1
+cv	230	chat	1	0		會意改對的列	1
+cv	247	chat	1	0		會意改對的列	1
+cv	252	chat	1	0		會意改對的列	1
+cv	267	chat	1	0		會意改對的列	1
+cv	279	chat	1	0		會意改對的列	1
+cv	294	chat	1	0		會意改對的列	1
+cv	309	chat	1	0		會意改對的列	1
+cv	335	chat	1	0		會意改對的列	1
+cv	337	chat	1	0		會意改對的列	1
+cv	349	chat	1	0		會意改對的列	1
+cv	379	chat	1	0		會意改對的列	1
+cv	381	chat	1	0		會意改對的列	1
+cv	396	chat	1	0		會意改對的列	1
+cv	475	chat	1	0		會意改對的列	1
+cv	494	chat	1	0		會意改對的列	1
+cv	500	chat	1	0		會意改對的列	1
+cv	542	chat	1	0		會意改對的列	1
+cv	545	chat	1	0		會意改對的列	1
+cv	634	chat	1	0		會意改對的列	1
+cv	641	chat	1	0		會意改對的列	1
+cv	651	chat	1	0		會意改對的列	1
+cv	671	chat	1	0		會意改對的列	1
+cv	693	chat	1	0		會意改對的列	1
+cv	706	chat	1	0		會意改對的列	1
+cv	709	chat	1	0		會意改對的列	1
+cv	712	chat	1	0		會意改對的列	1
+cv	715	chat	1	0		會意改對的列	1
+cv	732	chat	1	0		會意改對的列	1
+cv	830	chat	1	0		會意改對的列	1
+cv	846	chat	1	0		會意改對的列	1
+cv	866	chat	1	0		會意改對的列	1
+cv	897	chat	1	0		會意改對的列	1
+cv	912	chat	1	0		會意改對的列	1
+cv	954	chat	1	0		會意改對的列	1
+cv	1001	chat	1	0		會意改對的列	1
+cv	1030	chat	1	0		會意改對的列	1
+cv	1058	chat	1	0		會意改對的列	1
+cv	1076	chat	1	0		會意改對的列	1
+cv	1096	chat	1	0		會意改對的列	1
+cv	1097	chat	1	0		會意改對的列	1
+cv	1121	chat	1	0		會意改對的列	1
+cv	1127	chat	1	0		會意改對的列	1
+cv	1129	chat	1	0		會意改對的列	1
+cv	1134	chat	1	0		會意改對的列	1
+cv	1139	chat	1	0		會意改對的列	1
+cv	1151	chat	1	0		會意改對的列	1
+cv	1155	chat	1	0		會意改對的列	1
+cv	1164	chat	1	0		會意改對的列	1
+cv	1209	chat	1	0		會意改對的列	1
+cv	1223	chat	1	0		會意改對的列	1
+cv	1268	chat	1	0		會意改對的列	1
+cv	1281	chat	1	0		會意改對的列	1
+cv	1308	chat	1	0		會意改對的列	1
+cv	1340	chat	1	0		會意改對的列	1
+cv	1350	chat	1	0		會意改對的列	1
+cv	1420	chat	1	0		會意改對的列	1
+cv	1442	chat	1	0		會意改對的列	1
+cv	1458	chat	1	0		會意改對的列	1
+cv	1464	chat	1	0		會意改對的列	1
+cv	1496	chat	1	0		會意改對的列	1
+cv	1549	chat	1	0		會意改對的列	1
+cv	1589	chat	1	0		會意改對的列	1
+cv	1595	chat	1	0		會意改對的列	1
+cv	1597	chat	1	0		會意改對的列	1
+cv	1641	chat	1	0		會意改對的列	1
+cv	1654	chat	1	0		會意改對的列	1
+cv	1661	chat	1	0		會意改對的列	1
+cv	1666	chat	1	0		會意改對的列	1
+cv	1707	chat	1	0		會意改對的列	1
+cv	1768	chat	1	0		會意改對的列	1
+cv	1811	chat	1	0		會意改對的列	1
+cv	1818	chat	1	0		會意改對的列	1
+cv	1836	chat	1	0		會意改對的列	1
+cv	1837	chat	1	0		會意改對的列	1
+cv	1914	chat	1	0		會意改對的列	1
+cv	1970	chat	1	0		會意改對的列	1
+cv	2079	chat	1	0		會意改對的列	1
+cv	2088	chat	1	0		會意改對的列	1
+cv	2112	chat	1	0		會意改對的列	1
+cv	2122	chat	1	0		會意改對的列	1
+cv	2134	chat	1	0		會意改對的列	1
+cv	2147	chat	1	0		會意改對的列	1
+cv	2166	chat	1	0		會意改對的列	1
+cv	2193	chat	1	0		會意改對的列	1
+cv	2197	chat	1	0		會意改對的列	1
+cv	2228	chat	1	0		會意改對的列	1
+cv	2246	chat	1	0		會意改對的列	1
+cv	2248	chat	1	0		會意改對的列	1
+cv	2256	chat	1	0		會意改對的列	1
+cv	2294	chat	1	0		會意改對的列	1
+cv	2372	chat	1	0		會意改對的列	1
+cv	2401	chat	1	0		會意改對的列	1
+cv	2412	chat	1	0		會意改對的列	1
+cv	2428	chat	1	0		會意改對的列	1
+cv	2456	chat	1	0		會意改對的列	1
+cv	2502	chat	1	0		會意改對的列	1
+cv	2518	chat	1	0		會意改對的列	1
+cv	2532	chat	1	0		會意改對的列	1
+cv	2566	chat	1	0		會意改對的列	1
+cv	2587	chat	1	0		會意改對的列	1
+cv	2611	chat	1	0		會意改對的列	1
+cv	2628	chat	1	0		會意改對的列	1
+cv	2636	chat	1	0		會意改對的列	1
+cv	2641	chat	1	0		會意改對的列	1
+cv	2682	chat	1	0		會意改對的列	1
+cv	2699	chat	1	0		會意改對的列	1
+cv	2711	chat	1	0		會意改對的列	1
+cv	2741	chat	1	0		會意改對的列	1
+cv	2778	chat	1	0		會意改對的列	1
+cv	2826	chat	1	0		會意改對的列	1
+cv	2857	chat	1	0		會意改對的列	1
+cv	2862	chat	1	0		會意改對的列	1
+cv	2880	chat	1	0		會意改對的列	1
+cv	2923	chat	1	0		會意改對的列	1
+cv	2931	chat	1	0		會意改對的列	1
+cv	3012	chat	1	0		會意改對的列	1
+cv	3024	chat	1	0		會意改對的列	1
+cv	3043	chat	1	0		會意改對的列	1
+cv	3059	chat	1	0		會意改對的列	1
+cv	3061	chat	1	0		會意改對的列	1
+cv	3064	chat	1	0		會意改對的列	1
+cv	3073	chat	1	0		會意改對的列	1
+cv	3089	chat	1	0		會意改對的列	1
+cv	3104	chat	1	0		會意改對的列	1
+cv	3108	chat	1	0		會意改對的列	1
+cv	3129	chat	1	0		會意改對的列	1
+cv	3136	chat	1	0		會意改對的列	1
+cv	3151	chat	1	0		會意改對的列	1
+cv	3183	chat	1	0		會意改對的列	1
+cv	3225	chat	1	0		會意改對的列	1
+cv	3229	chat	1	0		會意改對的列	1
+cv	3239	chat	1	0		會意改對的列	1
+cv	3268	chat	1	0		會意改對的列	1
+cv	3270	chat	1	0		會意改對的列	1
+cv	3272	chat	1	0		會意改對的列	1
+cv	8	formal	1	0		會意改對的列	1
+cv	86	formal	1	0		會意改對的列	1
+cv	148	formal	1	0		會意改對的列	1
+cv	170	formal	1	0		會意改對的列	1
+cv	181	formal	1	0		會意改對的列	1
+cv	206	formal	1	0		會意改對的列	1
+cv	279	formal	1	0		會意改對的列	1
+cv	287	formal	1	0		會意改對的列	1
+cv	309	formal	1	0		會意改對的列	1
+cv	381	formal	1	0		會意改對的列	1
+cv	383	formal	1	0		會意改對的列	1
+cv	503	formal	1	0		會意改對的列	1
+cv	519	formal	1	0		會意改對的列	1
+cv	542	formal	1	0		會意改對的列	1
+cv	545	formal	1	0		會意改對的列	1
+cv	590	formal	1	0		會意改對的列	1
+cv	641	formal	1	0		會意改對的列	1
+cv	671	formal	1	0		會意改對的列	1
+cv	691	formal	1	0		會意改對的列	1
+cv	706	formal	1	0		會意改對的列	1
+cv	709	formal	1	0		會意改對的列	1
+cv	712	formal	1	0		會意改對的列	1
+cv	715	formal	1	0		會意改對的列	1
+cv	897	formal	1	0		會意改對的列	1
+cv	1001	formal	1	0		會意改對的列	1
+cv	1030	formal	1	0		會意改對的列	1
+cv	1097	formal	1	0		會意改對的列	1
+cv	1121	formal	1	0		會意改對的列	1
+cv	1122	formal	1	0		會意改對的列	1
+cv	1127	formal	1	0		會意改對的列	1
+cv	1151	formal	1	0		會意改對的列	1
+cv	1164	formal	1	0		會意改對的列	1
+cv	1174	formal	1	0		會意改對的列	1
+cv	1210	formal	1	0		會意改對的列	1
+cv	1350	formal	1	0		會意改對的列	1
+cv	1358	formal	1	0		會意改對的列	1
+cv	1410	formal	1	0		會意改對的列	1
+cv	1442	formal	1	0		會意改對的列	1
+cv	1464	formal	1	0		會意改對的列	1
+cv	1528	formal	1	0		會意改對的列	1
+cv	1595	formal	1	0		會意改對的列	1
+cv	1597	formal	1	0		會意改對的列	1
+cv	1661	formal	1	0		會意改對的列	1
+cv	1818	formal	1	0		會意改對的列	1
+cv	1836	formal	1	0		會意改對的列	1
+cv	1954	formal	1	0		會意改對的列	1
+cv	2134	formal	1	0		會意改對的列	1
+cv	2193	formal	1	0		會意改對的列	1
+cv	2196	formal	1	0		會意改對的列	1
+cv	2203	formal	1	0		會意改對的列	1
+cv	2220	formal	1	0		會意改對的列	1
+cv	2228	formal	1	0		會意改對的列	1
+cv	2246	formal	1	0		會意改對的列	1
+cv	2257	formal	1	0		會意改對的列	1
+cv	2294	formal	1	0		會意改對的列	1
+cv	2338	formal	1	0		會意改對的列	1
+cv	2401	formal	1	0		會意改對的列	1
+cv	2420	formal	1	0		會意改對的列	1
+cv	2437	formal	1	0		會意改對的列	1
+cv	2480	formal	1	0		會意改對的列	1
+cv	2502	formal	1	0		會意改對的列	1
+cv	2549	formal	1	0		會意改對的列	1
+cv	2587	formal	1	0		會意改對的列	1
+cv	2636	formal	1	0		會意改對的列	1
+cv	2699	formal	1	0		會意改對的列	1
+cv	2721	formal	1	0		會意改對的列	1
+cv	2747	formal	1	0		會意改對的列	1
+cv	2826	formal	1	0		會意改對的列	1
+cv	2989	formal	1	0		會意改對的列	1
+cv	3061	formal	1	0		會意改對的列	1
+cv	3073	formal	1	0		會意改對的列	1
+cv	3151	formal	1	0		會意改對的列	1
+cv	3168	formal	1	0		會意改對的列	1
+cv	3239	formal	1	0		會意改對的列	1
+cv	3272	formal	1	0		會意改對的列	1
