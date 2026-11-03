@@ -163,6 +163,26 @@ fn pick(e: &mut Engine, n: usize, end: usize, word: &str) {
     e.key(k(KeyKind::Enter)).unwrap();
     e.key(k(KeyKind::End)).unwrap();
 }
+/// LANY section 1.3: open the window over the last `end` syllables and pick the word it shows there directly (the first item), no move.
+fn pick_first(e: &mut Engine, n: usize, end: usize) {
+    for _ in 0..n - end {
+        e.key(k(KeyKind::Left)).unwrap();
+    }
+    e.key(k(KeyKind::Space)).unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.key(k(KeyKind::End)).unwrap();
+}
+/// Same, but the selection moves off the shown word and back before the pick (the confirmation).
+fn pick_confirmed(e: &mut Engine, n: usize, end: usize) {
+    for _ in 0..n - end {
+        e.key(k(KeyKind::Left)).unwrap();
+    }
+    e.key(k(KeyKind::Space)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    e.key(k(KeyKind::Left)).unwrap();
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.key(k(KeyKind::End)).unwrap();
+}
 /// Move the highlight (candidates open, `o` the current snapshot) onto `word`.
 fn highlight(e: &mut Engine, mut o: Output, word: &str) -> Output {
     for _ in 0..5000 {
@@ -2905,7 +2925,16 @@ fn lany_teach(e: &mut Engine, left: &str, reading: &str, word: &str) {
     e.set_left_context(left);
     let n = reading.split(' ').count();
     type_syls(e, reading);
-    pick(e, n, word.chars().count(), word);
+    // the selection moves off the first item and back, so a word that is the one shown counts as confirmed (LANY section 1.3)
+    for _ in 0..n - word.chars().count() {
+        e.key(k(KeyKind::Left)).unwrap();
+    }
+    e.key(k(KeyKind::Space)).unwrap();
+    e.key(k(KeyKind::Right)).unwrap();
+    let o = e.key(k(KeyKind::Left)).unwrap();
+    highlight(e, o, word);
+    e.key(k(KeyKind::Enter)).unwrap();
+    e.key(k(KeyKind::End)).unwrap();
     e.key(k(KeyKind::Enter)).unwrap();
 }
 /// The pool of the semantic correction for `reading` typed under `left` (the candidate texts of its only stretch; `None` without a job), then the
@@ -3076,7 +3105,12 @@ fn lany_same_word_window_pick_is_learned_under_a_sentence_start_key() {
     let mut e = engine();
     let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ").preedit;
     let word: String = shown.chars().take(2).collect();
-    pick(&mut e, 3, 2, &word);
+    pick_first(&mut e, 3, 2);
+    e.key(k(KeyKind::Enter)).unwrap();
+    assert_eq!(n_records(&e), 0, "opened and picked the first item directly: no teach");
+    let mut e = engine();
+    type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ");
+    pick_confirmed(&mut e, 3, 2);
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(records_of(&e, &word), [("^>ㄐㄧㄚ".to_string(), 1.0)], "{word}");
 }
@@ -3088,11 +3122,11 @@ fn lany_same_word_pick_halves_nothing() {
     chat_only();
     let mut e = engine();
     let word = type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit;
-    pick(&mut e, 2, 2, &word);
+    pick_confirmed(&mut e, 2, 2);
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(records_of(&e, &word), [("^>$".to_string(), 1.0)], "premise: taught once");
     assert_eq!(type_syls(&mut e, "ㄑㄩㄢˊ ㄒㄧㄢˋ").preedit, word, "premise: shown as it is");
-    pick(&mut e, 2, 2, &word);
+    pick_confirmed(&mut e, 2, 2);
     type_syls(&mut e, "ㄐㄧㄚ");
     e.key(k(KeyKind::Enter)).unwrap();
     assert_eq!(records_of(&e, &word), [("^>$".to_string(), 1.0), ("^>ㄐㄧㄚ".to_string(), 1.0)]);
@@ -3131,7 +3165,7 @@ fn lany_same_word_picks_in_two_contexts_globalize() {
         e.set_left_context(left);
         let shown = type_syls(&mut e, "ㄑㄩㄢˊ ㄌㄧˋ").preedit;
         assert_eq!(shown, "權力", "premise: the pick is of the shown word (left {left:?})");
-        pick(&mut e, 2, 2, &shown);
+        pick_confirmed(&mut e, 2, 2);
         e.key(k(KeyKind::Enter)).unwrap();
     }
     let keys: Vec<String> = records_of(&e, "權力").into_iter().map(|r| r.0).collect();

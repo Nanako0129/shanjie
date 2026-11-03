@@ -664,11 +664,14 @@ struct Cands {
     /// Digits contract A.3.6: the last item is not a lexicon entry but the other reading of digit keys (the digits of a syllable
     /// that just closed, or the syllable of the last digit tokens). Judged by the item's index, never by a length field.
     dalt: Option<DigitAlt>,
+    /// LANY section 1.3: the selection has moved since the window opened (a key changed `sel`). A pick of the word already shown over its
+    /// span is confirmed only then (it moved off the shown word and back); opening and picking the first item teaches nothing.
+    moved: bool,
 }
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None, moved: false }
     }
 
     fn scroll(&mut self) {
@@ -3486,6 +3489,15 @@ impl Engine {
     /// Rules 3-8 (s3a §3, s3b2 §8.2). `Ok(true)` = consumed; `Ok(false)` = candidates closed, key
     /// continues at rule 9.
     fn candidate_key(&mut self, k: Key) -> Result<bool, EngineError> {
+        let before = self.cands.as_ref().map(|c| c.sel);
+        let r = self.candidate_key_inner(k);
+        if let Some(c) = self.cands.as_mut().filter(|c| Some(c.sel) != before) {
+            c.moved = true;
+        }
+        r
+    }
+
+    fn candidate_key_inner(&mut self, k: Key) -> Result<bool, EngineError> {
         let Some(c) = &mut self.cands else { return Ok(false) };
         let (len, sel, cols) = (c.list.len(), c.sel, PAGE_SIZE);
         let digit = (k.kind == KeyKind::Char && k.modifiers == 0 && ('1'..='9').contains(&k.ch))
@@ -4210,6 +4222,7 @@ impl Engine {
         let path_new = if self.learning { self.path_new_words() } else { Vec::new() };
         // A word found through a tolerant syllable: the span becomes its lexicon reading, as `choose_pred` replaces the span by the
         // item's reading, so refresh, `best_lp_delta` and learning read the lexicon reading (fuzzy input, section 2.1).
+        let tolerant = c.alt.contains_key(&idx);
         if let Some(reading) = c.alt.get(&idx) {
             self.syls.splice(start..end, reading.iter().cloned());
         }
@@ -4222,6 +4235,12 @@ impl Engine {
         let frozen = self.freeze_outside(start, end);
         // New-word B §2.4: picking a new word is no S4 teach (it is counted as used at the commit, §2.5).
         if !self.is_punct(start) && !self.in_lexicon(&self.syls[start..end], &word) {
+            pre = None;
+        }
+        // LANY section 1.3: a pick of the word the span shows is no teach unless the selection moved off it and back (an earlier pick over
+        // the span that showed another word, then chosen back, has `span_text != word`: that confirmation stays, `pre_pick`'s original).
+        // A word read through a tolerant syllable is never taught by this branch: the typed reading is not the word's.
+        if (tolerant || !c.moved) && pre.as_deref() == Some(word.as_str()) && self.span_text(start, end) == word {
             pre = None;
         }
         // §2.5: new words of the path this pick overlaps are halved at the commit. The earlier picks this one replaces

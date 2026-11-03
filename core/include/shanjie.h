@@ -321,7 +321,9 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
 //   A candidate-window pick of the word already shown over its span (2+ characters) is learned too, the way a prediction
-//   row pick is (nothing displaced, no halving; a single character is not; Enter alone teaches nothing; docs/contracts/learn-anyctx.md
+//   row pick is (nothing displaced, no halving), but only when confirmed: the selection moved off the shown word and back, or an earlier
+//   pick over the span chose another word and this one returns to the original; opening the window and picking its first item
+//   directly teaches nothing (a single character is not learned; Enter alone teaches nothing; docs/contracts/learn-anyctx.md
 //   section 1.3). Cross-context protection (section 1.1): when a stretch is still sent to the semantic correction, a 2+-character word of
 //   its first path that has a record under its reading with decayed weight >= 0.5 under any key (a sentence-start key or the global
 //   one included, a new word not) stays in every path of the candidate pool (the other paths are dropped); fewer than two paths left means

@@ -424,6 +424,20 @@ fn choosing_the_shown_tolerant_word_rewrites_the_span() {
     assert!(e.learner().records().is_empty());
 }
 
+/// LANY section 1.3: even confirmed (selection moved off the shown tolerant word and back), the pick teaches nothing: the typed reading is not the word's.
+#[test]
+fn confirming_the_shown_tolerant_word_teaches_nothing() {
+    let mut e = engine(Layout::Standard, 0b0010, true);
+    type_syls(&mut e, Layout::Standard, "ㄗ ㄉㄠˋ");
+    press(&mut e, KeyKind::Space);
+    press(&mut e, KeyKind::Right);
+    let o = press(&mut e, KeyKind::Left);
+    select(&mut e, o, "知道");
+    press(&mut e, KeyKind::Enter);
+    press(&mut e, KeyKind::Enter);
+    assert!(e.learner().records().is_empty());
+}
+
 /// A slip accepted through bit 4: choosing from the window rewrites the unknown syllable to a lexicon reading, so the composition
 /// no longer depends on the switch.
 #[test]
