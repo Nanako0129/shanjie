@@ -14,6 +14,7 @@
 
 - **讀取點與條件不變**：組字開始讀一次；`privacyGate`（安全輸入、denylist、取不到 bundle ID）擋的時候不讀、傳 NULL；有 marked range 時不讀（`leftContext()` 現有的判斷）。
 - **終端機類 App**：bundle ID 在一份具名清單裡（`com.apple.Terminal`、`com.googlecode.iterm2`、`dev.warp.Warp-Stable`、`net.kovidgoyal.kitty`、`com.github.wez.wezterm`、`org.alacritty`、`co.zeit.hyper`、`com.mitchellh.ghostty`；清單放在 `LeftContext` 旁、註解寫出處；編輯器整個 App 不算，因為它的終端機面板和編輯區是同一個 bundle ID〔已知限制，記進範圍外〕）：照今天只傳結尾 ≤ 2 個漢字（`LeftContext.han`）。
+- **前文不可信的 App**（LC2，`docs/contracts/learn-untrusted-sameword.md` §1 第 1 點）：bundle ID 在 `LeftContext.untrusted` 清單裡（先放 `com.stablyai.orca`：Electron＋xterm.js，回的是隱藏輸入框累積的舊字，不是終端機那一行；量法與結果在 `learn-untrusted-sameword.md` §0，其他 App 量過才加）的 App 一律不讀：`leftContext` 回 `(nil, nil)`，不呼叫 `attributedSubstring`。核心收到 NULL、`cjk-spacing` 的 `last` 是 nil，每次組字都當句首；會意的 `left_full` 是空的。終端機清單（只傳漢字）照舊。
 - **其他 App 讀多少**：`LeftContext.maxUTF16` 從 32 改成 256 UTF-16 單位（64 個 grapheme 最多約 128 個單位，留餘裕給組合字元與 emoji；`oc-experimental.md` 寫的 128 一併改成 256）。取回的字串：
   1. **先夾住**：App 回傳的字串比請求的長時，只取最後 `maxUTF16` 個 UTF-16 單位，並當作被截過（P3-2）。
   2. **被截過時，先**在整段（夾住之後的）讀取上去掉開頭可能被切斷的第一個 grapheme（照現有 `han(_, truncated:)` 的順序：先去掉、再往回找）。

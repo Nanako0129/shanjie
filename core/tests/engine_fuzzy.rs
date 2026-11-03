@@ -424,6 +424,57 @@ fn choosing_the_shown_tolerant_word_rewrites_the_span() {
     assert!(e.learner().records().is_empty());
 }
 
+/// LC2: the shown tolerant word teaches nothing however it is picked (here after the selection moved off it and back): the typed reading is not the word's.
+#[test]
+fn picking_the_shown_tolerant_word_after_a_move_teaches_nothing() {
+    let mut e = engine(Layout::Standard, 0b0010, true);
+    type_syls(&mut e, Layout::Standard, "ㄗ ㄉㄠˋ");
+    press(&mut e, KeyKind::Space);
+    press(&mut e, KeyKind::Right);
+    let o = press(&mut e, KeyKind::Left);
+    select(&mut e, o, "知道");
+    press(&mut e, KeyKind::Enter);
+    press(&mut e, KeyKind::Enter);
+    assert!(e.learner().records().is_empty());
+}
+
+/// LC2, pick away and back: 之道 rewrites the span to the lexicon reading ㄓ ㄉㄠˋ, so choosing the shown 知道 back is no longer a tolerant pick by itself;
+/// the span remembers its tolerant origin and teaches nothing (as before LC2: the pick back is the original, `pre == word`, which was never learned).
+#[test]
+fn picking_away_from_the_shown_tolerant_word_and_back_teaches_nothing() {
+    let mut e = engine(Layout::Standard, 0b0010, true);
+    type_syls(&mut e, Layout::Standard, "ㄗ ㄉㄠˋ");
+    let o = press(&mut e, KeyKind::Space);
+    select(&mut e, o, "之道");
+    let o = press(&mut e, KeyKind::Enter);
+    assert_eq!(o.preedit, "之道");
+    assert_eq!(e.syllables(), ["ㄓ", "ㄉㄠˋ"], "premise: the span was rewritten");
+    let o = press(&mut e, KeyKind::Space);
+    select(&mut e, o, "知道");
+    let o = press(&mut e, KeyKind::Enter);
+    assert_eq!(o.preedit, "知道");
+    assert_eq!(press(&mut e, KeyKind::Enter).commit, "知道");
+    assert_eq!(e.learner().records().len(), 0);
+}
+
+/// LC2, pick twice: the first pick of the shown tolerant 知道 rewrites the span to ㄓ ㄉㄠˋ and teaches nothing; opening the window again and picking 知道 again
+/// is an exact pick of the shown word by itself, but the span's origin is tolerant: still nothing.
+#[test]
+fn picking_the_shown_tolerant_word_twice_teaches_nothing() {
+    let mut e = engine(Layout::Standard, 0b0010, true);
+    type_syls(&mut e, Layout::Standard, "ㄗ ㄉㄠˋ");
+    let o = press(&mut e, KeyKind::Space);
+    select(&mut e, o, "知道");
+    press(&mut e, KeyKind::Enter);
+    assert_eq!(e.syllables(), ["ㄓ", "ㄉㄠˋ"], "premise: the span was rewritten");
+    let o = press(&mut e, KeyKind::Space);
+    select(&mut e, o, "知道");
+    let o = press(&mut e, KeyKind::Enter);
+    assert_eq!(o.preedit, "知道");
+    assert_eq!(press(&mut e, KeyKind::Enter).commit, "知道");
+    assert_eq!(e.learner().records().len(), 0);
+}
+
 /// A slip accepted through bit 4: choosing from the window rewrites the unknown syllable to a lexicon reading, so the composition
 /// no longer depends on the switch.
 #[test]
