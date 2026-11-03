@@ -14,13 +14,13 @@
 ## 1. 修 (A)：一個控制器的切換只動它自己那個 App
 
 - `Session` 新增一個欄位 `knownBundle`：最近一次讀到的非空 bundle ID（`activate`、`handle` 換 owner、`toggleAscii` 讀 bundle 的那三處，讀到非空就更新，讀到 nil 不覆蓋）。既有的 `bundle` 欄位與它的瀏覽器首音節語意（browser-first-syllable §4）不動。
-- 只改英數狀態用的 App 鍵：`activate` 與 `handle` 換 owner 時呼叫的 `syncAscii`、以及 `toggleAscii` 切換的 `asciiApps` 鍵，讀到的 bundle 是 nil 時改用 `knownBundle`；`knownBundle` 也是 nil（這個 session 從來沒讀到過 bundle）才用共用的 `""`（契約 shift-toggle §2「沒有 bundle ID 的客戶端共用一個」照舊）。
+- 只改英數狀態用的 App 鍵：`activate` 與 `handle` 換 owner 時呼叫的 `syncAscii`、以及 `toggleAscii` 切換的 `asciiApps` 鍵，讀到的 bundle 是 nil 或空字串時改用 `knownBundle`（PR #355 審查後：空字串和 nil 一樣當成沒讀到；`syncAscii` 在設定關著時也照樣記下 `knownBundle`）；`knownBundle` 也是 nil（這個 session 從來沒讀到過 bundle）才用共用的 `""`（契約 shift-toggle §2「沒有 bundle ID 的客戶端共用一個」照舊）。
 - 明寫不變（照今天傳原始讀到的值，nil 就是 nil）：所有 `applyProfile(bundle:)`（`activate`、`handle` 換 owner、`toggleAscii` 換 owner、`Shell.reapplyProfileToOwner`）以及它寫入的 `bundle` 欄位與瀏覽器首音節規則（`hidesFirstSyllableRow`）；`send` 的學習閘門與前文（`applyLearningGate`、`leftContext`）、選單的 `learningPause`（Learning.swift）：nil 照舊當成「暫停學習」；`toggleAppChat`（Shell.swift）與選單的「這個 App 用聊天設定」項目（Learning.swift `menu`）：nil 照舊沒有這一項、不動作。這些地方都不更新 `knownBundle`。
 - 其餘不變：切換仍先 `claim()`；提示照舊（讀不到矩形就不畫）。
 
 ## 2. 修 (B)：另一側 Shift 早就按著不算破壞
 
-- `ShiftTap` 在按下時記下另一側 Shift 的狀態；放開時，另一側的狀態和按下時相同就照常判斷單按（早就殘留在旗標裡的位元不再擋住），按下到放開之間另一側變了（真的同時按兩個 Shift）才不算。
+- `ShiftTap` 在按下時記下另一側 Shift 的狀態；放開時，另一側的狀態和按下時相同就照常判斷單按（早就殘留在旗標裡的位元不再擋住），按下到放開之間另一側變了才不算（例如左按下、右按下、左放開：不切換；右先放開則照 §2 的取捨會切換）。
 - 其餘條件（其他修飾鍵、Caps Lock、keyDown、滑鼠、`SHIFT_TAP_MAX`）不變。
 - 已知取捨：真的按住一側 Shift、再單按另一側，會切換（今天不會）。這個動作沒有別的用途，接受。
 

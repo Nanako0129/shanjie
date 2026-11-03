@@ -1546,15 +1546,20 @@ public final class Session {
 
     /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
     func syncAscii(bundle: String?) {
-        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(asciiApp(bundle)))
+        // The key first: `&&` would skip it while the toggle is off, and a session activated then would never learn its `knownBundle`.
+        let app = asciiApp(bundle)
+        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(app))
     }
 
-    /// shift-stuck section 1: the `asciiApps` key for a bundle ID as the caller read it. A nil read (a controller whose client cannot answer
-    /// just now) takes this session's `knownBundle`, so a toggle does not land on the shared `""` entry; `""` only for a session that never
-    /// read one (shift-toggle section 2).
+    /// shift-stuck section 1: the `asciiApps` key for a bundle ID as the caller read it. A nil or empty read (a controller whose client
+    /// cannot answer just now) takes this session's `knownBundle`, so a toggle does not land on the shared `""` entry; `""` only for a session
+    /// that never read one (shift-toggle section 2).
     private func asciiApp(_ bundle: String?) -> String {
-        if let bundle, !bundle.isEmpty { knownBundle = bundle }
-        return bundle ?? knownBundle ?? ""
+        if let bundle, !bundle.isEmpty {
+            knownBundle = bundle
+            return bundle
+        }
+        return knownBundle ?? ""
     }
 
     func pushAscii(_ on: Bool) {

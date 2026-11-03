@@ -11642,5 +11642,5 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 沒有實機紀錄，所以這一片修兩個讀程式找到的可能原因，不宣稱修好：
   - (A) Shift 事件落到另一個控制器、它讀到的 bundle ID 是 nil，切換的是共用的 `""` 那一格，原控制器的下一鍵又依自己 App 的紀錄拉回英文。修法：`Session.knownBundle`（最近讀到的非空 bundle ID）只當英數狀態那一把鍵的後備，其餘讀 bundle 的地方不變。
   - (B) 另一側 Shift 的裝置位元殘留在旗標裡時，`ShiftTap` 每一次單按都不算。修法：另一側的位元和按下時相同就不擋，按下到放開之間變了才不算；取捨是按住一側、單按另一側會切換。
-- 測試：`ShiftTapTests` 兩個新序列、`testBothShiftKeysAreNotATap` 改名並改一個斷言；`ShiftToggleSessionTests` 兩個新測試。修正前新增的三個測試失敗（殘留位元、按住一側單按另一側、nil bundle 讀取），同時按兩個 Shift 的序列與從沒讀到 bundle 的客戶端共用 `""` 修正前後都過。
+- 測試：`ShiftTapTests` 兩個新序列、`testBothShiftKeysAreNotATap` 改名並改一個斷言；`ShiftToggleSessionTests` 兩個新測試。修正前有三個測試失敗（新增的殘留位元與 nil bundle 讀取，以及改了斷言的按住一側單按另一側）；審查後再加兩個：設定關著時 activate 的 session 也記得 bundle、空字串的讀取和 nil 一樣處理，同時按兩個 Shift 的序列與從沒讀到 bundle 的客戶端共用 `""` 修正前後都過。
 - 實機不是這一片的合併關卡：發版後照平常用；之後再有人回報卡在英文，在這裡記下當時的 App、動作與是否出現提示，作為匿名收集那一片的依據。
