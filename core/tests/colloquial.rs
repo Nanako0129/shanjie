@@ -172,14 +172,14 @@ fn rerank_colloquial_is_ll_then_fused_pick() {
     let cands = ["甲乙", "甲丙", "丁乙", "丁丙", "甲丁", "乙丙", "乙丁", "丙丁", "丙乙"];
     let words: Vec<Vec<&str>> = vec![vec!["a", "b"], vec!["x"], vec!["x", "x"], vec!["b"], vec!["a"], vec!["zzz"], vec!["a", "a"], vec!["b", "a"], vec!["x"]];
     let ng = [-10.0, -10.1, -10.2, -10.3, -10.4, -10.5, -10.6, -10.7, -10.8];
-    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, RerankLevel::Standard, &[], &Default::default()).unwrap();
+    let (pick, ll) = tl.rerank_colloquial(&ng, &cands, &words, "你", &co, RerankLevel::Standard, &[], &Default::default(), &Default::default()).unwrap();
     let ll = ll.unwrap();
     let want_ll = tl.ll_many(&cands[..TOPK].iter().map(|c| ("你", *c)).collect::<Vec<_>>()).unwrap();
     assert_eq!(ll, want_ll);
     let col: Vec<f64> = words[..TOPK].iter().map(|w| co.col(w)).collect();
-    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, STANDARD, &[]));
-    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
-    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None), "one split: fewer than two candidates");
+    assert_eq!(pick, fused_pick(&ng[..TOPK], &ll, &col, STANDARD, &[], &[]));
+    assert_eq!(tl.rerank_colloquial(&ng[..1], &cands[..1], &words[..1], "你", &co, RerankLevel::Standard, &[], &Default::default(), &Default::default()).unwrap(), (0, None));
+    assert_eq!(tl.rerank_colloquial(&ng, &cands, &words[..1], "你", &co, RerankLevel::Standard, &[], &Default::default(), &Default::default()).unwrap(), (0, None), "one split: fewer than two candidates");
 }
 
 const LEVELS: [RerankLevel; 3] = [RerankLevel::Standard, RerankLevel::Conservative, RerankLevel::Aggressive];
@@ -190,7 +190,7 @@ fn toy_v3() -> TinyLm {
 
 /// Which candidate each level's `rerank_colloquial` picks: (standard, conservative, aggressive).
 fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], co: &Colloquial) -> [usize; 3] {
-    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, l, &[], &Default::default()).unwrap().0)
+    LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, l, &[], &Default::default(), &Default::default()).unwrap().0)
 }
 
 /// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the 通語 SJ-LM-7-9.7M cells of sj-lm-7.md section 2.9), not the standard one. One

@@ -229,7 +229,7 @@ fn a_learned_word_keeps_its_rare_reading() {
     p.key(Key::new(KeyKind::Enter)).unwrap();
     assert_eq!(zhan(&mut p).preedit, "佔", "premise: without the reading term the learned word is first");
     // The unlifted path of the same engine is penalised by the term (the learned word is first only because it was lifted): ask the decoder without learning.
-    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL };
+    let learn = Learn { learner: e.learner(), before: left, after: None, today, eps_global: LEARN_EPS_GLOBAL, sinit: core::lm::Sinit::Off };
     let syls = vec!["ㄓㄢˋ".to_string()];
     let first = |learn: Option<&Learn>| -> String {
         let nb = core::lm::decode_segment_learned(&capped, &syls, &lm, Profile::Chat.lambda(), core::lm::history(left, &lm), core::lm::End::Eos, 64, learn, true).unwrap();

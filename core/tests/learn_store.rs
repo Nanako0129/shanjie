@@ -157,7 +157,7 @@ fn single_character_global_records_are_not_loaded_or_written() {
 }
 
 /// Contract section 14 (rules 7 and 8), the one migration point `valid`: the synthetic sentence-start keys
-/// survive a save and a load as written; a single character under a synthetic key, under a one-Han key, and
+/// survive a save and a load as written; a single character under `^>$` or an English/digit class key (rule 10 keeps `^>` plus a syllable reading), under a one-Han key, and
 /// every bare "^" record are not loaded (counted as bad lines), and a full rewrite leaves none of them in the file.
 #[test]
 fn synthetic_keys_round_trip_and_old_records_are_dropped() {
@@ -171,9 +171,13 @@ fn synthetic_keys_round_trip_and_old_records_are_dropped() {
         rec("^>_punct_，", two, "我是", 1.0, 20_000),
         rec("^>ㄒㄧㄢ-ㄕㄥ", two, "我是", 1.0, 20_000), // a reading may hold "-": the key field is not split
         rec("他們", "ㄗㄞˋ", "再", 1.0, 20_000),         // a single character under exactly two Han characters
+        rec("^>ㄕˋ", "ㄗㄞˋ", "再", 1.0, 20_000),       // rule 10: a single character under `^>` plus a syllable reading
+        rec("^>ㄐㄧㄢˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
     ];
     let dropped = vec![
-        rec("^>ㄕˋ", "ㄗㄞˋ", "再", 1.0, 20_000), // a single character under a synthetic key
+        rec("^>$", "ㄗㄞˋ", "再", 1.0, 20_000),   // a single character under `^>$` (nothing follows)
+        rec("^>_punct_en", "ㄗㄞˋ", "再", 1.0, 20_000), // ... under the English/space neighbour class
+        rec("^>_punct_num", "ㄗㄞˋ", "再", 1.0, 20_000), // ... under the digit neighbour class
         rec("他", "ㄗㄞˋ", "再", 1.0, 20_000),    // a single character under a one-Han key
         rec("^", two, "我試", 1.0, 20_000),       // every bare "^" record (written before rule 8)
         rec("^", "ㄗㄞˋ", "再", 1.0, 20_000),
@@ -194,13 +198,57 @@ fn synthetic_keys_round_trip_and_old_records_are_dropped() {
     assert_eq!(opened, Opened::Loaded { skipped: dropped.len() });
     assert!(records == kept, "records differ (contents not printed: R2)");
     let l = Learner::from_records(records.clone());
-    assert!(l.words_of(&["ㄗㄞˋ".to_string()]) == ["再"], "only the one under 他們 is visible");
+    assert!(l.words_of(&["ㄗㄞˋ".to_string()]) == ["再"], "再 under 他們 and under ^>ㄕˋ is one word");
+    assert!(l.words_of(&["ㄓㄠˋ".to_string()]) == ["照"]);
     assert!(l.records().iter().all(|r| r.context != "^" && r.context != "他"));
     store.save(&records).unwrap();
     assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), want, "the rewrite leaves none of them");
     let (_, again, opened) = LearnStore::open(&dir).unwrap();
     assert_eq!(opened, Opened::Loaded { skipped: 0 });
     assert!(again == kept, "records differ (contents not printed: R2)");
+}
+
+/// SINIT revision 9: the mid key (`^>` plus two syllables joined by FINE_SEP, a control character; revision 8's fine key) and the fine key (three syllables, or two
+/// and `$`) of a single character survive a save and a load as written; `valid` accepts exactly the well-formed shapes: not a word of two or more characters, not an
+/// empty or missing part, not four parts, not `$` anywhere but the third part, not an English/digit/punctuation neighbour (`_punct_...`) or a control character in
+/// a part. (A build before revision 8 refuses a control character in a key, `clean`, so it drops these lines at load; that build is not testable here.)
+#[test]
+fn mid_and_fine_keys_round_trip_and_malformed_ones_are_dropped() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    let kept = vec![
+        rec("^>ㄐㄧㄢˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}$", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄙㄨㄢˋ\u{1f}ㄓㄤˋ", "ㄗㄞˋ", "再", 1.0, 20_000),
+        rec("^>ㄙㄨㄢˋ\u{1f}ㄓㄤˋ\u{1f}ㄇㄧㄢˋ", "ㄗㄞˋ", "再", 1.0, 20_000),
+    ];
+    let dropped = vec![
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ", "ㄓㄠˋ-ㄐㄧㄢˋ", "照建", 1.0, 20_000), // a word of two characters never has a mid key
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}ㄍㄜˋ", "ㄓㄠˋ-ㄐㄧㄢˋ", "照建", 1.0, 20_000), // nor a fine key
+        rec("^>ㄐㄧㄢˋ\u{1f}", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>\u{1f}ㄧˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}ㄍㄜˋ\u{1f}ㄍㄜˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}$\u{1f}ㄍㄜˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}$", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}$\u{1f}ㄍㄜˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}_punct_en", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}_punct_num", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>_punct_，\u{1f}ㄧˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢ\u{7}\u{1f}ㄧˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}ㄍ\u{7}", "ㄓㄠˋ", "照", 1.0, 20_000),
+        rec("他們\u{1f}ㄧˋ", "ㄓㄠˋ", "照", 1.0, 20_000),
+    ];
+    let line = |r: &Record| format!("{}\t{}\t{}\t1\t20000\n", r.context, r.reading.join("-"), r.word);
+    let all: Vec<Record> = kept.iter().chain(&dropped).cloned().collect();
+    store.save(&all).unwrap();
+    let want = format!("{HEADER}\n{}", kept.iter().map(line).collect::<String>());
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), want, "save writes only the well-formed mid and fine keys");
+    fs::write(dir.join(FILE), format!("{want}{}", dropped.iter().map(line).collect::<String>())).unwrap();
+    let (_, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: dropped.len() });
+    assert!(records == kept, "records differ (contents not printed: R2)");
 }
 
 #[test]

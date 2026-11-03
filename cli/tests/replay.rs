@@ -50,8 +50,8 @@ fn tone1() -> Row {
     row("|跟我說我再換|ㄍㄣ ㄨㄛˇ ㄕㄨㄛ ㄨㄛˇ ㄗㄞˋ ㄏㄨㄢˋ")
 }
 
-const EACH: Cfg = Cfg { correct: false, rerank: Rerank::Each };
-const FIX: Cfg = Cfg { correct: true, rerank: Rerank::Each };
+const EACH: Cfg = Cfg { correct: false, rerank: Rerank::Each, strict: false };
+const FIX: Cfg = Cfg { correct: true, rerank: Rerank::Each, strict: false };
 
 fn go(e: &mut Engine, r: &Row, len: &Lenient, cfg: Cfg) -> RowOut {
     replay_row(e, r.ctx, &r.syls, r.gold, len, cfg).unwrap()
@@ -108,6 +108,42 @@ fn a_repick_costs_the_moves_the_window_and_the_digit() {
         assert!(o.final_ok && !o.unfixable && o.committed == r.gold, "sent text is the gold text");
         assert_eq!((o.picks, o.actual), (1, o.ideal + extra), "{}", r.gold);
     }
+}
+
+/// `--strict` (docs/contracts/engine-replay.md section 2): the first display, the sent text and the `--correct` target are compared as they are, not through
+/// `Lenient` (`char_map` reads 她 as 他). The engine shows 他很喜歡看書 for the gold 她很喜歡看書 (without learning, stated here so a model change fails here
+/// first): lenient, the first display is right and `--correct` has nothing to fix; strict, it is wrong, `--correct` re-picks 她 and the sent text is the gold.
+/// The tool's default is unchanged: the same rows give the same bytes with and without the flag, except for the `+strict` tag.
+#[test]
+fn strict_compares_the_texts_exactly_and_is_off_by_default() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    let r = row("|她很喜歡看書|ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ");
+    let strict = |cfg: Cfg| Cfg { strict: true, ..cfg };
+    let lenient = go(&mut e, &r, &len, FIX);
+    assert_eq!(lenient.first, "他很喜歡看書", "premise: the engine shows 他");
+    assert!(lenient.first_ok && lenient.final_ok && lenient.picks == 0, "lenient: 他 is right for 她");
+    let exact = go(&mut e, &r, &len, strict(EACH));
+    assert!(!exact.first_ok && !exact.final_ok && exact.picks == 0 && exact.committed == "他很喜歡看書");
+    let fixed = go(&mut e, &r, &len, strict(FIX));
+    assert!(!fixed.first_ok && fixed.final_ok && fixed.picks >= 1 && fixed.committed == r.gold, "strict --correct picks 她");
+    // A row both comparisons agree on: the same numbers.
+    let agree = go(&mut e, &zai(), &len, strict(FIX));
+    let base = go(&mut e, &zai(), &len, FIX);
+    assert_eq!((agree.first_ok, agree.final_ok, agree.picks, agree.actual), (base.first_ok, base.final_ok, base.picks, base.actual));
+    drop(e);
+    let dir = scratch("strict");
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|她很喜歡看書|ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ\n").unwrap();
+    let run = |extra: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap()]).args(extra).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let (plain, with) = (run(&[]), run(&["--strict"]));
+    assert!(!plain.contains("+strict") && plain.contains("'top1': 1"), "{plain}");
+    assert!(with.contains("+strict") && with.contains("'top1': 0"), "{with}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Rule (docs/contracts/punct-composition.md section 1, item 1): a mark of `，。？！：、` is a reading token of its own, typed as the App's key
@@ -192,7 +228,7 @@ fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
     // once while it is typed (measured 2026-11-02, reading-decode-2), so the row serves the rule with the term off, where it is rewritten three times.
     e.set_reading_decode(false);
     let each = go(&mut e, &r, &len, EACH);
-    let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final });
+    let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final, strict: false });
     let (mid, changed, shown) = by_hand(&mut e, &r, true);
     assert!(each.rewrites >= 2, "this row is rewritten at least twice while it is typed (3 measured, with the reading term off)");
     assert_eq!((each.typing_applies, each.rewrites, &each.first), (mid, changed, &shown));
@@ -464,6 +500,66 @@ fn learn_guard_counts_and_switches() {
     assert!(default.contains("'guard_skips': 1, 'guard_rows': 1,") && !default.contains("+noguard"), "{default}");
     assert!(off.contains("'guard_skips': 0, 'guard_rows': 0,") && off.contains("+noguard"), "{off}");
     assert_eq!(replay_with_learn(&dir, &src, &["--learn-guard", "maybe"]).status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// SINIT (docs/contracts/sinit-learn.md section 2): `--rerank-level` is an evaluation flag that shows in the tag only when it is not standard (`standard` is the
+/// default, so no tag); a bad level is refused; `--eps-sinit`, `--delta-sinit` and `--eps-sinit-ng` are gone (revision 7) and refused as unknown; with `--learn on` a
+/// `sinit:` line of the five counters goes to stderr (stdout stays the summary line). The one-record file holds 再 as a sentence-start single character before
+/// ㄐㄧㄢˋ, so the row's stretch (再見, two syllables) has a learned character and is counted.
+#[test]
+fn sinit_flags_tag_the_summary_and_the_counters_go_to_stderr() {
+    let dir = scratch("sinit");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>ㄐㄧㄢˋ\tㄗㄞˋ\t再\t1\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let plain = replay_with_learn(&dir, &src, &["--learn", "on"]);
+    let plain_out = text(&plain);
+    assert!(!plain_out.contains("+level") && !plain_out.contains("sinit:"), "{plain_out}");
+    let err = String::from_utf8(plain.stderr.clone()).unwrap();
+    let line = err.lines().find(|l| l.starts_with("sinit: ")).unwrap_or_else(|| panic!("no sinit line: {err}"));
+    assert!(line.starts_with("sinit: stretches 1 swaps 0 missing 0 overturned "), "{line}");
+    let std_out = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "standard"]));
+    assert_eq!(std_out, plain_out, "the standard level is the default: same bytes, same tag");
+    let cons = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "conservative"]));
+    assert!(cons.contains("+level:conservative"), "{cons}");
+    assert_eq!(replay_with_learn(&dir, &src, &["--rerank-level", "loud"]).status.code(), Some(1));
+    for gone in ["--eps-sinit", "--delta-sinit", "--eps-sinit-ng"] {
+        assert_eq!(replay_with_learn(&dir, &src, &[gone, "1"]).status.code(), Some(1), "{gone} is gone");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// SINIT section 2, the per-stretch numbers (`--sinit-stretches`): the file holds digits, `-`, `.`, tabs and newlines only, a line `row 1 dng adll` per rule 10
+/// stretch of the one-record file's row (再見: the learned 再 leads or follows the anchor, both numbers finite), and no line for a row without one; the
+/// summary line and the rowstats are the bytes they are without the flag; the formatter writes a stretch whose learned path is not in the pool as `row 0`
+/// with no numbers; an output that is the learn file is refused.
+#[test]
+fn sinit_stretches_file_is_numbers_only_and_changes_no_other_output() {
+    use cli::replay::{format_sinit_stretches, RowOut};
+    let mut a = RowOut::default();
+    a.sinit_diag = vec![(0.5, -1.25), (0.0, 0.0)];
+    let mut b = RowOut::default();
+    b.sinit.missing = 2;
+    assert_eq!(format_sinit_stretches(&[a, RowOut::default(), b]), "1\t1\t0.500000\t-1.250000\n1\t1\t0.000000\t0.000000\n3\t0\t\t\n3\t0\t\t\n");
+    let dir = scratch("sinit-stretches");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>ㄐㄧㄢˋ\tㄗㄞˋ\t再\t1\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (rs0, rs1, st) = (dir.join("rs0.txt"), dir.join("rs1.txt"), dir.join("st.txt"));
+    let without = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rowstats", rs0.to_str().unwrap()]));
+    let with = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rowstats", rs1.to_str().unwrap(), "--sinit-stretches", st.to_str().unwrap()]));
+    assert_eq!(without, with);
+    assert_eq!(std::fs::read(&rs0).unwrap(), std::fs::read(&rs1).unwrap());
+    let numbers = std::fs::read_to_string(&st).unwrap();
+    assert!(numbers.chars().all(|c| c.is_ascii_digit() || "-.\t\n".contains(c)), "{numbers:?}");
+    let lines: Vec<Vec<&str>> = numbers.lines().map(|l| l.split('\t').collect()).collect();
+    assert_eq!(lines.len(), 1, "{numbers:?}");
+    assert!(lines[0][0] == "1" && lines[0][1] == "1" && lines[0][2].parse::<f64>().is_ok() && lines[0][3].parse::<f64>().is_ok(), "{numbers:?}");
+    let out = replay_with_learn(&dir, &src, &["--sinit-stretches", src.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

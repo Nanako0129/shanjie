@@ -306,19 +306,38 @@ int32_t shanjie_engine_learning_open(ShanjieEngine *engine, const char *dir);
 //   and pending learns are dropped anyway.
 int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 // A single-character pick is learned, and a single-character record looked up, only under a full
-//   context key made of exactly two Han characters: the last 2 Han characters before the word, taken
-//   from the composition text before it AND the left context from set_left_context. When fewer than
-//   two Han characters precede the word (sentence start, after punctuation or ASCII, or only one
-//   Han character) a single character is neither learned nor looked up. With a NULL left context, or a
+//   context key made of exactly two Han characters (the last 2 Han characters before the word, taken
+//   from the composition text before it AND the left context from set_left_context), or at sentence
+//   start (no Han character before it) under "^>" plus the reading of the syllable right after it,
+//   and also, when two more syllables follow, under "^>" plus the readings of those next two (the mid
+//   key) and of the next three (the fine key; "$" as the third part when the composition ends after the
+//   second; rule 10, below). With one Han character before the word, or at sentence start with nothing after
+//   the word ("^>$") or English or a number after it, a single character is neither learned nor looked
+//   up. With a NULL left context, or a
 //   paused gate that makes the shell pass NULL, keys that follow two Han characters typed in the same
 //   composition still teach (if learning is on) and look up. set_learning(0) stops teaching only; it
-//   does not stop lookup (docs/contracts/s4-learning.md sections 12 and 14).
+//   does not stop lookup (docs/contracts/s4-learning.md sections 12, 14 and 15).
 // A word of 2+ characters picked with no Han character before it (context key "^") is learned, and
 //   looked up, under the key "^>" plus the reading of the syllable right after the word ("^>$" when the
 //   word ends the composition): it boosts the same word only where the next syllable is the same.
+//   A single-character word at sentence start is learned and looked up under "^>" plus a syllable reading
+//   too (rule 10, the coarse key), under the mid key of the next two syllables when both are syllables, and
+//   under the fine key of the next three (or two and the end); never under "^>$" (nothing follows) or the
+//   English / digit neighbour classes. English and digits stop every layer; punctuation stops only the mid and
+//   fine keys (a mid or fine key is not recorded when a syllable it needs is English, a digit or punctuation, nor
+//   is any longer key), while the coarse key "^>" plus the punctuation mark is recorded. Forgetting the word (Cmd+Backspace) removes all three keys.
+//   How a rule 10 record acts (docs/contracts/sinit-learn.md): with the semantic correction running for the
+//   stretch the n-gram does not look at it (the candidates, their scores, the first path and the learning guard are
+//   those of the decode without it); a second decode only finds the path that starts with the learned character and
+//   puts it into the candidates, and a learning term is added to the candidates that start with it (if the
+//   stretch uses only the longest layer it has a record under: the fine key: 4 * (b_i - b_0), both signs; else the mid key:
+//   4 * max(b_i - b_0, 0); else the coarse key: 2 * max(b_i - b_0, 0), the last two only for a candidate the small
+//   model scores above the first; b = w / (w + 1); the layers are never added); without the
+//   semantic correction (it is off, or the small model is not loaded) the record has no effect on what is shown (it
+//   is kept, and acts once the semantic correction is on).
 //   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a
-//   re-pick halves the displaced word under the key it was shown under when it was picked as well as
-//   under the key at the commit.
+//   re-pick halves the displaced word under the keys it was shown under when it was picked (for a sentence-start
+//   single character: the coarse, mid and fine keys of that moment) as well as under the keys at the commit.
 //   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   128-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.
