@@ -153,7 +153,8 @@ fn key_syllable_ok(s: &str) -> bool {
 
 /// SINIT revision 8, the mid key since revision 9 (docs/contracts/sinit-learn.md section 1.1): the key of a sentence-start single character, `^>` plus the
 /// next two syllables joined by `FINE_SEP`. `None` when one of the two is missing, or is an English token, a space unit, a digit string or punctuation
-/// (every one of them is a `_punct_` reading): no mid key then, only the coarse one (`next_key`). The text of the key is the one revision 8 wrote as its fine key.
+/// (every one of them is a `_punct_` reading): no mid key then, only the coarse one (`next_key`; punctuation stops only the mid and fine keys, so a punctuation mark
+/// right after the word keeps its coarse key `^>_punct_，`, while English and digits stop every layer). The text of the key is the one revision 8 wrote as its fine key.
 pub fn mid_key(a: Option<&str>, b: Option<&str>) -> Option<String> {
     let (a, b) = (a?, b?);
     (key_syllable_ok(a) && key_syllable_ok(b)).then(|| format!("{NEXT_PREFIX}{a}{FINE_SEP}{b}"))
@@ -220,7 +221,8 @@ pub fn is_full_context(key: &str) -> bool {
 /// two-Han-character key (rule 7), or at sentence start `^>` plus the reading of the syllable right after it (rule 10, the coarse key) or
 /// plus the readings of the next two (the mid key, `mid_key`) or three (the fine key, `fine_key`).
 /// Not `^>$` (nothing follows), not the English/space or digit neighbour classes (`^>_punct_en`, `^>_punct_num`: one
-/// teach would boost the word before any English word or any number, not only before the same reading), not bare `^`.
+/// teach would boost the word before any English word or any number, not only before the same reading), not bare `^`. A punctuation mark after the word is a plain
+/// coarse key (`^>_punct_，`: the coarse layer only lifts and the reranker gates it); only the mid and fine keys refuse punctuation.
 pub fn single_key_ok(key: &str) -> bool {
     is_full_context(key)
         || is_mid_key(key)

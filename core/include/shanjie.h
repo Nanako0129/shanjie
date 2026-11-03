@@ -323,8 +323,9 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   A single-character word at sentence start is learned and looked up under "^>" plus a syllable reading
 //   too (rule 10, the coarse key), under the mid key of the next two syllables when both are syllables, and
 //   under the fine key of the next three (or two and the end); never under "^>$" (nothing follows) or the
-//   English / digit neighbour classes, and a key is not recorded when a syllable it needs is English, a
-//   digit or punctuation, nor is any longer key. Forgetting the word (Cmd+Backspace) removes all three keys.
+//   English / digit neighbour classes. English and digits stop every layer; punctuation stops only the mid and
+//   fine keys (a mid or fine key is not recorded when a syllable it needs is English, a digit or punctuation, nor
+//   is any longer key), while the coarse key "^>" plus the punctuation mark is recorded. Forgetting the word (Cmd+Backspace) removes all three keys.
 //   How a rule 10 record acts (docs/contracts/sinit-learn.md): with the semantic correction running for the
 //   stretch the n-gram does not look at it (the candidates, their scores, the first path and the learning guard are
 //   those of the decode without it); a second decode only finds the path that starts with the learned character and

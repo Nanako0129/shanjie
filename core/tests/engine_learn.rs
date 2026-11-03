@@ -2263,6 +2263,31 @@ fn sinit_row16_without_a_rerank_job_the_record_has_no_effect() {
     assert_eq!(commit_of(&mut e, "ㄓㄠˋ ㄒㄧㄤˋ"), "趙像", "a different next syllable decodes as without the record");
 }
 
+/// Rule 8 point 2 under the mid and fine keys (SINIT revision 9): 照 shown over R16 is re-picked as 趙, then the user types on (ㄏㄨㄟˋ), so the commit's fine key is
+/// `…ㄏㄨㄟˋ` and no longer the `…$` one the pick-time display had. 照 is halved under the coarse and mid keys and under the pick-time fine key too.
+#[test]
+fn sinit_repick_halves_the_displaced_character_under_the_pick_time_mid_and_fine_keys() {
+    chat_only();
+    // the lexicon has the syllable that is typed on after the pick
+    let lexicon = format!("{SINIT_TINY}ㄏㄨㄟˋ 會 -1.0\n");
+    let mut e = tiny_rerank(&lexicon);
+    type_settled(&mut e, R16);
+    pick(&mut e, 3, 1, "照");
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "照建議", "precondition: the re-pick took");
+    assert_eq!(records_of(&e, "照"), r16_records(), "precondition: the coarse, the mid and the fine record");
+    assert_eq!(type_settled(&mut e, R16), "照建議", "precondition: the learned 照 is shown");
+    pick(&mut e, 3, 1, "趙");
+    assert_eq!(type_syls(&mut e, "ㄏㄨㄟˋ").preedit, "趙建議會", "precondition: the syllable was typed after the pick");
+    e.key(k(KeyKind::Enter)).unwrap();
+    let half = |w: f64| r16_records().into_iter().map(|(k, _)| (k, w)).collect::<Vec<_>>();
+    assert_eq!(records_of(&e, "照"), half(0.5), "halved under the coarse, the mid and the pick-time fine key `…$`");
+    assert!(
+        records_of(&e, "趙").iter().any(|(k, w)| k == "^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}ㄏㄨㄟˋ" && *w == 1.0),
+        "control: 趙 is taught under the commit's fine key: {:?}",
+        records_of(&e, "趙")
+    );
+}
+
 /// With the semantic correction on (where the record acts): not after two Han characters, and not before a different next syllable.
 #[test]
 fn sinit_not_after_two_han_characters_and_not_before_another_syllable() {

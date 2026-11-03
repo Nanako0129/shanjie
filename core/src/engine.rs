@@ -575,10 +575,11 @@ struct Fixed {
     /// A frozen single character a Backspace or Delete left of the word it deleted from (section 11). Any newly typed
     /// syllable drops all of these before it decodes (section 15); nothing else does.
     split_off: bool,
-    /// The synthetic sentence-start key (`^>` + the next reading) the displaced word was shown under when this candidate
-    /// pick was made, when the span's context key was `^`. The commit halves the displaced word there too if the key
-    /// at the commit differs (the user may have typed on after the pick). `None` otherwise.
-    pick_key: Option<String>,
+    /// The synthetic sentence-start keys the displaced word was shown under when this candidate pick was made, when the
+    /// span's context key was `^`: `^>` + the next reading, and for a single character the mid and fine keys the syllables after it
+    /// made then (SINIT revision 9). The commit halves the displaced word under each one that is not a key of the commit
+    /// (the user may have typed on after the pick). Empty otherwise.
+    pick_keys: Vec<String>,
     /// zhen-revert section 2.3 (zhen-inline section 1.3c): for an English token a revert made, the unfinished syllable (tone 1) the
     /// keys would have made when the lexicon has it, so the token can be turned back into that Chinese syllable. `None` for every other fixed word.
     zh: Option<String>,
@@ -590,7 +591,7 @@ struct Fixed {
 impl Fixed {
     /// A word the engine fixed on its own (repick-freeze): not learned, not a user choice.
     fn frozen(start: usize, end: usize, word: String) -> Self {
-        Fixed { start, end, word, pre: None, key: None, pick_key: None, zh: None, frozen: true, split_off: false, displaced_new: Vec::new() }
+        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new() }
     }
 }
 
@@ -1556,12 +1557,11 @@ impl Engine {
                     // prediction pick (`f.key` set) was made at the end of the composition, so it is `^>$`.
                     let next = if f.key.is_some() { None } else { self.syls.get(f.end).map(String::as_str) };
                     let ctx = record_key(ctx, next);
-                    // The key the displaced word was scored under at the pick, when it differs from the commit's.
-                    let at_pick = f.pick_key.clone().filter(|k| *k != ctx);
                     let reading = self.syls[f.start..f.end].to_vec();
                     // SINIT revision 9: a sentence-start single character is also learned under the mid key (the next two syllables) and the fine key (the next three, or
-                    // two and `$` when the composition ends there). A key is not made when a syllable it needs is missing, English, a digit or punctuation
-                    // (`mid_key`, `fine_key`), so a layer that is not recorded means no longer layer is. The displaced word is halved under them too.
+                    // two and `$` when the composition ends there). A mid or fine key is not made when a syllable it needs is missing, English, a digit or punctuation
+                    // (`mid_key`, `fine_key`), so a layer that is not recorded means no longer layer is; English and digits stop the coarse key too (`single_key_ok`),
+                    // punctuation does not (`^>_punct_，` is recorded). The displaced word is halved under them too.
                     let (a, b, c) = (self.syls.get(f.end), self.syls.get(f.end + 1), self.syls.get(f.end + 2));
                     let (a, b, c) = (a.map(String::as_str), b.map(String::as_str), c.map(String::as_str));
                     let deeper: Vec<String> = if is_single(&f.word) && f.key.is_none() && ctx.starts_with(NEXT_PREFIX) {
@@ -1569,14 +1569,17 @@ impl Engine {
                     } else {
                         Vec::new()
                     };
-                    let deeper = deeper.into_iter().map(|k| (k, reading.clone(), f.word.clone(), pre.clone(), None));
+                    // The keys the displaced word was scored under at the pick (the coarse one and, for a single character, the mid and fine ones),
+                    // those that are not a key of the commit.
+                    let at_pick: Vec<String> = f.pick_keys.iter().filter(|k| **k != ctx && !deeper.contains(k)).cloned().collect();
+                    let deeper = deeper.into_iter().map(|k| (k, reading.clone(), f.word.clone(), pre.clone(), Vec::new()));
                     [(ctx, reading.clone(), f.word.clone(), pre.clone(), at_pick)].into_iter().chain(deeper).collect::<Vec<_>>()
                 })
                 .collect();
             let mut touched = Vec::new();
             for (ctx, reading, word, displaced, at_pick) in &plans {
                 touched.extend(self.learner.teach(ctx, reading, word, displaced, today));
-                if let Some(k) = at_pick {
+                for k in at_pick {
                     touched.extend(self.learner.halve(k, reading, displaced, today));
                 }
             }
@@ -2769,7 +2772,7 @@ impl Engine {
         self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_key: None, zh: None, frozen: false, split_off: false, displaced_new: Vec::new() });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new() });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -3637,7 +3640,7 @@ impl Engine {
         let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_key: None, zh, frozen: false, split_off: false, displaced_new: Vec::new() });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new() });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -3938,13 +3941,20 @@ impl Engine {
         self.display.chars().skip(off).take(len).collect()
     }
 
-    /// Rule 8: the synthetic key (`^>` + `syls[end]`, `^>$` at the end) the span [start, end) is shown under now, when
-    /// the context key before it is `^`; `None` for any other context.
-    fn pick_key(&self, start: usize, end: usize) -> Option<String> {
+    /// Rule 8: the synthetic keys (`^>` + `syls[end]`, `^>$` at the end) the span [start, end) is shown under now, when
+    /// the context key before it is `^`; empty for any other context. For a single character (`single`) also the mid and fine keys
+    /// of SINIT revision 9, built from the syllables after it as the commit builds them (`mid_key`, `fine_key`: `$` when the composition ends there).
+    fn pick_keys(&self, start: usize, end: usize, single: bool) -> Vec<String> {
         let off: usize = (0..start).map(|i| self.token_width(i)).sum();
         let before: String = self.display.chars().take(off).collect();
         let ctx = context_key(&format!("{}{before}", self.left));
-        (ctx == crate::learn::SENTINEL).then(|| next_key(self.syls.get(end).map(String::as_str)))
+        if ctx != crate::learn::SENTINEL {
+            return Vec::new();
+        }
+        let syl = |i: usize| self.syls.get(i).map(String::as_str);
+        let (a, b, c) = (syl(end), syl(end + 1), syl(end + 2));
+        let deeper = if single { vec![mid_key(a, b), fine_key(a, b, c)] } else { Vec::new() };
+        std::iter::once(next_key(a)).chain(deeper.into_iter().flatten()).collect()
     }
 
     /// §1.5: drop the highlighted candidate's records for its reading (all keys), then re-decode.
@@ -4176,9 +4186,10 @@ impl Engine {
             }
         }
         // Re-picking the span of an earlier pick keeps that pick's key along with its displaced text.
-        let pick_key = match self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
-            Some(f) if self.learning => f.pick_key.clone(),
-            _ => (self.learning && pre.is_some()).then(|| self.pick_key(start, end)).flatten(),
+        let pick_keys = match self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
+            Some(f) if self.learning => f.pick_keys.clone(),
+            _ if self.learning && pre.is_some() => self.pick_keys(start, end, is_single(&word)),
+            _ => Vec::new(),
         };
         // Zhen-inline section 1.3c: another writing of an English token keeps the syllable it remembers; the Chinese item (the
         // last one of a window that has `zh`) turns the token back into that syllable, fixed to the word.
@@ -4197,7 +4208,7 @@ impl Engine {
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_key, zh, frozen: false, split_off: false, displaced_new });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }
