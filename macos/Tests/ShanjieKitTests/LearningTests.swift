@@ -148,6 +148,25 @@ final class LearningTests: XCTestCase {
         XCTAssertEqual(c.readLeft().text, "$ ls secret.txt 我們今天")
     }
 
+    /// LC2 section 1 point 1: a bundle in `LeftContext.untrusted` (Orca) reads nothing: no context for the core, no last character for cjk-spacing, and
+    /// `attributedSubstring` is never called. Any other bundle with the same text is read as before.
+    func testAnUntrustedAppHasNoLeftContext() {
+        XCTAssertEqual(LeftContext.untrusted, ["com.stablyai.orca"])
+        let shell = makeShell()
+        let c = Controller(shell, bundle: "com.stablyai.orca")
+        c.client.before = "權限加好了"
+        let read = c.readLeft()
+        XCTAssertNil(read.text)
+        XCTAssertNil(read.last)
+        XCTAssertEqual(c.client.requested, [], "attributedSubstring was not called")
+        let other = Controller(shell, bundle: "com.apple.TextEdit")
+        other.client.before = "權限加好了"
+        let kept = other.readLeft()
+        XCTAssertEqual(kept.text, "權限加好了")
+        XCTAssertEqual(kept.last, "了")
+        XCTAssertEqual(other.client.requested.count, 1)
+    }
+
     func testNoInsertionPointOrLeftoverMarkedTextMeansNoContext() {
         let c = Controller(makeShell())
         c.client.before = "ab\t中"
