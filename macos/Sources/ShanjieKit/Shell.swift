@@ -1433,6 +1433,9 @@ public final class Session {
     /// browser-first-syllable section 4: this client's bundle ID as last read by `send` or passed to `applyProfile`; never read
     /// for this rule alone.
     private var bundle: String?
+    /// shift-stuck section 1: the last non-empty bundle ID `activate`, an owner change in `handle` or `toggleAscii` read. Only the key of
+    /// the English state falls back to it when a read gives nil; nothing else (profile, learning, menu) uses it.
+    private var knownBundle: String?
 
     public init(shell: Shell, client: TextClient) {
         self.shell = shell
@@ -1526,7 +1529,7 @@ public final class Session {
     private func toggleAscii() {
         let bundle = client.bundleIdentifier  // a synchronous IPC: read once
         if claim() { applyProfile(bundle: bundle) }
-        let app = bundle ?? ""
+        let app = asciiApp(bundle)
         let on = !shell.asciiApps.contains(app)
         if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
@@ -1543,7 +1546,15 @@ public final class Session {
 
     /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).
     func syncAscii(bundle: String?) {
-        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(bundle ?? ""))
+        pushAscii(shell.shiftToggleOn && shell.asciiApps.contains(asciiApp(bundle)))
+    }
+
+    /// shift-stuck section 1: the `asciiApps` key for a bundle ID as the caller read it. A nil read (a controller whose client cannot answer
+    /// just now) takes this session's `knownBundle`, so a toggle does not land on the shared `""` entry; `""` only for a session that never
+    /// read one (shift-toggle section 2).
+    private func asciiApp(_ bundle: String?) -> String {
+        if let bundle, !bundle.isEmpty { knownBundle = bundle }
+        return bundle ?? knownBundle ?? ""
     }
 
     func pushAscii(_ on: Bool) {
