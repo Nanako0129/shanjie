@@ -336,8 +336,8 @@ int32_t shanjie_engine_learning_clear(ShanjieEngine *engine);
 //   semantic correction (it is off, or the small model is not loaded) the record has no effect on what is shown (it
 //   is kept, and acts once the semantic correction is on).
 //   A prediction-row pick is always stored under "^>$" (it is made at the end of the composition), and a
-//   re-pick halves the displaced word under the key it was shown under when it was picked as well as
-//   under the key at the commit.
+//   re-pick halves the displaced word under the keys it was shown under when it was picked (for a sentence-start
+//   single character: the coarse, mid and fine keys of that moment) as well as under the keys at the commit.
 //   The shell computes none of this; it only passes the left-context text (section 14).
 // Learning happens only at a commit (Enter, a key the engine passes through after committing, or the
 //   128-syllable auto-commit), never on shanjie_engine_reset or Esc, and never for punctuation picks.

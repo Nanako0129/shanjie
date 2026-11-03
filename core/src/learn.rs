@@ -426,8 +426,8 @@ impl Learner {
         }
     }
     /// Halves the decayed weight of (context, reading, word) if it has a record; returns the record as it now is.
-    /// A re-pick halves the displaced word under the key it is committed with and, when different, under the key
-    /// it was picked with (§14 amendment, point 2).
+    /// A re-pick halves the displaced word under the keys it is committed with and, when different, under the keys
+    /// it was picked with (§14 amendment, point 2; a sentence-start single character has up to three, SINIT revision 9).
     pub fn halve(&mut self, context: &str, reading: &[String], word: &str, today: i64) -> Option<Record> {
         let i = self.find(context, reading, word)?;
         let r = &mut self.records[i];

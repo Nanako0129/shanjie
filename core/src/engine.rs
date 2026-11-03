@@ -4185,7 +4185,7 @@ impl Engine {
                 }
             }
         }
-        // Re-picking the span of an earlier pick keeps that pick's key along with its displaced text.
+        // Re-picking the span of an earlier pick keeps that pick's keys along with its displaced text.
         let pick_keys = match self.fixed.iter().find(|f| f.start == start && f.end == end && f.pre.as_ref().is_some_and(|p| !p.is_empty())) {
             Some(f) if self.learning => f.pick_keys.clone(),
             _ if self.learning && pre.is_some() => self.pick_keys(start, end, is_single(&word)),
