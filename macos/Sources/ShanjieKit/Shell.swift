@@ -932,7 +932,8 @@ public final class Shell {
     public var updates: Updates?
     func openSettings() { onOpenSettings?() }
 
-    /// english-defaults-notice section 3: any session's activation arms the window while it is still owed.
+    /// english-defaults-notice section 3: any session's activation, or a keyDown that changes the owner with no activation (right
+    /// after the process starts), arms the window while it is still owed. A Shift tap or menu item that changes the owner does not.
     func armEnglishNotice() {
         if englishNotice != nil && englishNoticeStore.pending { englishNoticeArmed = true }
     }

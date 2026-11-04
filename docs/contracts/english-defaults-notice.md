@@ -45,7 +45,7 @@
 1. **單元測試**（`make test-swift`）：
    - 重設邏輯：空 domain、沒有學習檔 → 兩個值寫成關、不寫待顯示旗標；有舊設定鍵、兩個值都是開 → 兩個值寫成關、寫待顯示旗標；domain 只有 `updateLastCheck`（或只有 `updateStatus`、只有 `SU` 開頭的鍵、只有 `layout`）、兩個開關都沒存值 → 兩個值寫成關、寫待顯示旗標；domain 只有本片的兩個新鍵、沒有學習檔 → 不寫待顯示旗標；domain 空但有學習檔 → 寫待顯示旗標；已有 `englishDefaults20261104` → 不動任何值（包括使用者之後自己打開的開）。全部是 ShanjieKit 純函式的輸入輸出測試。
    - 預設值：兩個 store 都沒有存值時，`Shell` 的 `englishOverwriteOn`、`shiftToggleOn` 是 false。
-   - 視窗決策（`ShanjieKitTests`，假面板、假 store）：旗標為真時 activate 後第一個 keyDown 顯示，而且這個鍵照常往下處理；已顯示時再來的鍵不重複顯示；按任一按鈕或關閉鈕後旗標清掉、之後 activate＋keyDown 不再顯示；順序 A activate → A 顯示 → B activate → A 晚到的 deactivate：視窗收起，B 的第一個 keyDown 再顯示；順序 A activate → A 顯示 → A deactivate → B activate：同樣結果；旗標為假時不顯示。
+   - 視窗決策（`ShanjieKitTests`，假面板、假 store）：旗標為真時 activate 後第一個 keyDown 顯示，而且這個鍵照常往下處理；沒有 activate、第一個 keyDown 就換手時同樣顯示（程序剛啟動的情形）；已顯示時再來的鍵不重複顯示；按任一按鈕或關閉鈕後旗標清掉、之後 activate＋keyDown 不再顯示；順序 A activate → A 顯示 → B activate → A 晚到的 deactivate：視窗收起，B 的第一個 keyDown 再顯示；順序 A activate → A 顯示 → A deactivate → B activate：同樣結果；旗標為假時不顯示。
 2. **tart 虛擬機實機**（繁體中文系統）：前後兩個組建都用開發版 ID `com.nyanako.inputmethod.shanjie.dev`（`scripts/build-app.sh` 預設），才會讀到同一個容器 domain。舊版是 `origin/main` 的 `fe6b0371`，新版是這一片的 commit。兩個情境分開做、都要做：
    - (a) 舊版裝好後用 `defaults write` 把 `englishOverwrite`、`shiftToggle` 存成開；換裝新版 → 第一次打字跳出視窗、文字如 §3、正在打字的 App 仍保有鍵盤焦點（再按鍵仍進組字區）；按「知道了」後不再出現（重開輸入法程序也不跳）；設定頁兩個開關都是關。
    - (b) 舊版裝好後不改任何設定、打幾個字讓學習資料出現（或 `defaults write` 一個 `updateLastCheck`，模擬出貨版會自動寫的鍵）；換裝新版 → 同 (a) 跳出視窗、兩個開關是關。另驗一次「沒按就切走」：視窗出現後切到別的 App，視窗收起；切回來打字再跳。
