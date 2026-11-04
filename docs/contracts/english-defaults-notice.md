@@ -28,7 +28,7 @@
 ## 3. 說明視窗
 
 - **狀態放哪裡**：程序層級的狀態放在 ShanjieKit 的 `Shell`（比照 `shiftHint`：面板用 protocol 注入，`main.swift` 傳入真正的 `NSPanel` 實作；旗標用 store 注入），`InputController` 只轉呼叫。這樣 §4.1 的決策測試都能在 `ShanjieKitTests` 用假面板、假 store 跑。
-- **何時出現**：旗標為真時，**任何一個** session 的 `activateServer`（`Session.activate`）都把「下一個 keyDown 要顯示」設成真。`Session.handle` 收到 keyDown 時，這個鍵先照常交給既有處理（不被吃掉、不延遲）；處理完之後（比照 `showModeHint` 用 `defer`）檢查：「下一個要顯示」為真且視窗沒在顯示 → 把「下一個要顯示」設成假、顯示視窗。
+- **何時出現**：旗標為真時，**任何一個** session 的 `activateServer`（`Session.activate`）都把「下一個 keyDown 要顯示」設成真；沒有 activateServer 就換手的 keyDown（`claim()` 換了 owner）也一樣（修訂：2026-11-05 在 tart 量到，程序剛啟動時正在打字的 App 收不到 activateServer，只靠 activate 時視窗從不出現）。`Session.handle` 收到 keyDown 時，這個鍵先照常交給既有處理（不被吃掉、不延遲）；處理完之後（比照 `showModeHint` 用 `defer`）檢查：「下一個要顯示」為真且視窗沒在顯示 → 把「下一個要顯示」設成假、顯示視窗。
 - **收起與再跳**：按「知道了」、按「打開設定」或按視窗的關閉鈕 → 收起、清掉旗標（之後任何 activate 都不再設「下一個要顯示」）。都沒按就切走：**任何一個** `deactivateServer` 都只收起視窗，不看 owner、不改「下一個要顯示」。所以不論 IMK 先送新 App 的 activate 再送舊 App 的 deactivate，還是反過來，結果都一樣：視窗收起，新 App 的第一個 keyDown 再顯示。下次程序啟動時旗標還在，同樣再跳。
 - **樣式與位置**：善解自己的小視窗，不搶走使用者正在打字的 App 的鍵盤焦點（`NSPanel` 的 nonactivating 樣式；能點按鈕）。位置只有一條規則：取游標所在的螢幕（拿不到游標位置就用主螢幕），游標在螢幕上半部 → 視窗放在那個螢幕可用區域的下半部中間；游標在下半部 → 放在上半部中間。候選窗與組字區都在游標附近，所以視窗不會蓋到它們。外觀用系統預設元件與動畫。
 - **按鈕**：「打開設定」：打開善解的設定視窗並直接切到側欄的「選字」頁（`SettingsWindow` 的 `page`）；「知道了」：關閉。不搶焦點、點得到按鈕的視窗做法照 `InputController.swift` 既有的 `PanelWindow`（`canBecomeKey` 為 false）。

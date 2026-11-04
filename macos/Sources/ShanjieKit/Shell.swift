@@ -1528,6 +1528,9 @@ public final class Session {
             applyProfile(bundle: bundle)
             syncAscii(bundle: bundle)
             shell.lastTypingAt = nil  // zhen-reapply section 1a: an owner change without activateServer counts too
+            // english-defaults-notice section 3: for the notice too. Measured in a tart VM (2026-11-05): right after the process
+            // starts, the app being typed in gets its keys with no activateServer, so arming only on activate never showed it.
+            shell.armEnglishNotice()
         }
         // zhen-reapply section 1a: the first typing key after the input method was activated shows which mode is on, after the key
         // is handled (so a key that starts a composition anchors the hint to the marked text), only while the toggle is still on.

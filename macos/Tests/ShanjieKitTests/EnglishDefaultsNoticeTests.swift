@@ -124,6 +124,16 @@ final class EnglishDefaultsNoticeTests: XCTestCase {
         XCTAssertEqual(notice.shown.count, 1, "already shown: later keys do not show it again")
     }
 
+    func testFirstKeyWithNoActivateAfterAProcessStartShowsIt() {
+        let (_, notice, _) = rig()
+        let plain = Controller(makeShell())
+        let expected = plain.type("h")
+        XCTAssertEqual(a.type("h"), expected, "the key is not eaten or delayed")
+        XCTAssertEqual(notice.shown.count, 1, "IMK sent no activateServer: the owner change of the first key arms it")
+        a.type("i")
+        XCTAssertEqual(notice.shown.count, 1, "already shown: later keys do not show it again")
+    }
+
     func testNothingOwedMeansNothingShown() {
         let (_, notice, _) = rig(pending: false)
         a.session.activate()
