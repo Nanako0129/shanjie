@@ -28,9 +28,9 @@
 ## 3. 說明視窗
 
 - **狀態放哪裡**：程序層級的狀態放在 ShanjieKit 的 `Shell`（比照 `shiftHint`：面板用 protocol 注入，`main.swift` 傳入真正的 `NSPanel` 實作；旗標用 store 注入），`InputController` 只轉呼叫。這樣 §4.1 的決策測試都能在 `ShanjieKitTests` 用假面板、假 store 跑。
-- **何時出現**：旗標為真時，**任何一個** session 的 `activateServer`（`Session.activate`）都把「下一個 keyDown 要顯示」設成真。`Session.handle` 收到 keyDown 時，在把這個鍵交給既有處理之前檢查：「下一個要顯示」為真且視窗沒在顯示 → 顯示視窗、把「下一個要顯示」設成假；然後這個鍵照常往下處理，不被吃掉、不延遲。
+- **何時出現**：旗標為真時，**任何一個** session 的 `activateServer`（`Session.activate`）都把「下一個 keyDown 要顯示」設成真。`Session.handle` 收到 keyDown 時，這個鍵先照常交給既有處理（不被吃掉、不延遲）；處理完之後（比照 `showModeHint` 用 `defer`）檢查：「下一個要顯示」為真且視窗沒在顯示 → 把「下一個要顯示」設成假、顯示視窗。
 - **收起與再跳**：按「知道了」、按「打開設定」或按視窗的關閉鈕 → 收起、清掉旗標（之後任何 activate 都不再設「下一個要顯示」）。都沒按就切走：**任何一個** `deactivateServer` 都只收起視窗，不看 owner、不改「下一個要顯示」。所以不論 IMK 先送新 App 的 activate 再送舊 App 的 deactivate，還是反過來，結果都一樣：視窗收起，新 App 的第一個 keyDown 再顯示。下次程序啟動時旗標還在，同樣再跳。
-- **樣式**：善解自己的小視窗，不搶走使用者正在打字的 App 的鍵盤焦點（`NSPanel` 的 nonactivating 樣式；能點按鈕）。位置在螢幕上方中間或游標附近，不遮住組字區。外觀用系統預設元件與動畫。
+- **樣式與位置**：善解自己的小視窗，不搶走使用者正在打字的 App 的鍵盤焦點（`NSPanel` 的 nonactivating 樣式；能點按鈕）。位置只有一條規則：取游標所在的螢幕（拿不到游標位置就用主螢幕），游標在螢幕上半部 → 視窗放在那個螢幕可用區域的下半部中間；游標在下半部 → 放在上半部中間。候選窗與組字區都在游標附近，所以視窗不會蓋到它們。外觀用系統預設元件與動畫。
 - **按鈕**：「打開設定」：打開善解的設定視窗並直接切到側欄的「選字」頁（`SettingsWindow` 的 `page`）；「知道了」：關閉。不搶焦點、點得到按鈕的視窗做法照 `InputController.swift` 既有的 `PanelWindow`（`canBecomeKey` 為 false）。
 - **文字**（初稿，維護者可改字；改字不必重審契約）：
   - 標題：「英打相關設定改成預設關」
@@ -49,6 +49,7 @@
 2. **tart 虛擬機實機**（繁體中文系統）：前後兩個組建都用開發版 ID `com.nyanako.inputmethod.shanjie.dev`（`scripts/build-app.sh` 預設），才會讀到同一個容器 domain。舊版是 `origin/main` 的 `fe6b0371`，新版是這一片的 commit。兩個情境分開做、都要做：
    - (a) 舊版裝好後用 `defaults write` 把 `englishOverwrite`、`shiftToggle` 存成開；換裝新版 → 第一次打字跳出視窗、文字如 §3、正在打字的 App 仍保有鍵盤焦點（再按鍵仍進組字區）；按「知道了」後不再出現（重開輸入法程序也不跳）；設定頁兩個開關都是關。
    - (b) 舊版裝好後不改任何設定、打幾個字讓學習資料出現（或 `defaults write` 一個 `updateLastCheck`，模擬出貨版會自動寫的鍵）；換裝新版 → 同 (a) 跳出視窗、兩個開關是關。另驗一次「沒按就切走」：視窗出現後切到別的 App，視窗收起；切回來打字再跳。
+   - (d) 視窗出現時，分別在畫面中間的欄位（TextEdit）與靠近螢幕上緣的欄位（Safari 網址列）各打一個音節：組字區與候選窗都完整露出、沒被視窗蓋住，按鍵照常進組字區。
    - (c) 全新的容器（清空）直接裝新版：不跳視窗，兩個開關是關。
    - 截圖放 session 暫存區，不進 repo。
 3. **文件**：README、網站（`site/`）、`docs/contracts/zhen-revert.md`、`shift-toggle.md` 等寫到這兩個預設值的地方一起改（grep「預設開」與兩個設定名）；下一版的發版說明草稿要寫這個改變。
