@@ -43,7 +43,7 @@
 ## 4. 怎麼看到它有效（驗收）
 
 1. **單元測試**（`make test-swift`）：
-   - 重設邏輯：空 domain、沒有學習檔 → 兩個值寫成關、不寫待顯示旗標；有舊設定鍵、兩個值都是開 → 兩個值寫成關、寫待顯示旗標；domain 只有 `updateLastCheck`（或只有 `updateStatus`、只有 `SU` 開頭的鍵）、兩個開關都沒存值 → 兩個值寫成關、寫待顯示旗標；domain 空但有學習檔 → 寫待顯示旗標；已有 `englishDefaults20261104` → 不動任何值（包括使用者之後自己打開的開）；鍵清單涵蓋 `main.swift` 所有 store 的鍵（測試核對）。
+   - 重設邏輯：空 domain、沒有學習檔 → 兩個值寫成關、不寫待顯示旗標；有舊設定鍵、兩個值都是開 → 兩個值寫成關、寫待顯示旗標；domain 只有 `updateLastCheck`（或只有 `updateStatus`、只有 `SU` 開頭的鍵、只有 `layout`）、兩個開關都沒存值 → 兩個值寫成關、寫待顯示旗標；domain 只有本片的兩個新鍵、沒有學習檔 → 不寫待顯示旗標；domain 空但有學習檔 → 寫待顯示旗標；已有 `englishDefaults20261104` → 不動任何值（包括使用者之後自己打開的開）。全部是 ShanjieKit 純函式的輸入輸出測試。
    - 預設值：兩個 store 都沒有存值時，`Shell` 的 `englishOverwriteOn`、`shiftToggleOn` 是 false。
    - 視窗決策（`ShanjieKitTests`，假面板、假 store）：旗標為真時 activate 後第一個 keyDown 顯示，而且這個鍵照常往下處理；已顯示時再來的鍵不重複顯示；按任一按鈕或關閉鈕後旗標清掉、之後 activate＋keyDown 不再顯示；順序 A activate → A 顯示 → B activate → A 晚到的 deactivate：視窗收起，B 的第一個 keyDown 再顯示；順序 A activate → A 顯示 → A deactivate → B activate：同樣結果；旗標為假時不顯示。
 2. **tart 虛擬機實機**（繁體中文系統）：前後兩個組建都用開發版 ID `com.nyanako.inputmethod.shanjie.dev`（`scripts/build-app.sh` 預設），才會讀到同一個容器 domain。舊版是 `origin/main` 的 `fe6b0371`，新版是這一片的 commit。兩個情境分開做、都要做：
