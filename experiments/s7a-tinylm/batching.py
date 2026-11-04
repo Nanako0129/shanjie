@@ -87,6 +87,30 @@ def flag_path(ids_path):
     return os.path.join(d, "flags-" + base[len("ids-"):-len(".npy")] + ".u8")
 
 
+def _sha256(p):
+    import hashlib
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _flags_sha_from_report(ids_path):
+    """The flags_sha256 prep recorded for this source: charcount.json's report[wiki|coll] for ids-wiki/ids-coll, text-<name>.json for an extra;
+    None when the report or the key is absent (then only the run count is checked)."""
+    import json
+    d, base = os.path.split(ids_path)
+    name = base[len("ids-"):-len(".npy")]
+    try:
+        if name in ("wiki", "coll"):
+            rep = json.load(open(os.path.join(d, "charcount.json"), encoding="utf-8"))["report"]
+            return (rep.get(name) or {}).get("flags_sha256")
+        return json.load(open(os.path.join(d, f"text-{name}.json"), encoding="utf-8")).get("flags_sha256")
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def token_flags(work, extra=None):
     """The --changed-flags bits as a per-token uint8 array aligned with build_epoch's concatenated ids (wiki, coll, then each extra, once each):
     every token of a run (its BOS included) carries that run's flag. A source without its flags file, or whose file does not have one byte per
@@ -97,6 +121,9 @@ def token_flags(work, extra=None):
         fp = flag_path(ip)
         if not os.path.isfile(fp):
             raise ValueError(f"{fp} is missing (prep.py {'runs' if ip.endswith(('ids-wiki.npy', 'ids-coll.npy')) else 'text'} --changed-flags)")
+        want = _flags_sha_from_report(ip)
+        if want is not None and _sha256(fp) != want:   # review P3-d: a stale flags file with the same run count must not pass
+            raise ValueError(f"{fp}: sha256 differs from flags_sha256 in its prep report (re-run prep.py with --changed-flags)")
         ids, fl = np.load(ip, mmap_mode="r"), np.fromfile(fp, dtype=np.uint8)
         st = np.flatnonzero(ids == BOS)
         if len(fl) != len(st) or fl.max(initial=0) > 1:
