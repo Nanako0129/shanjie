@@ -103,3 +103,4 @@
 - **常談與讀音通道項的配對**：`core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256` 改成新 `.sjtl` 的完整雜湊（註解寫出處）；不改的話 `applies()` 回 false，聊天三檔的常談與讀音通道項會靜靜關掉。釘著 `tl:f7d0ac63` 的 golden 檔（`eval/golden/reading-decode-shipping.txt` 等，grep 全部）重產；`experiments/colloq-levels/expect_core.py`、`experiments/loss0/loss0.py` 裡的雜湊一起改。驗收：產品建置的 CLI 在聊天三檔的摘要行都有 `+tl:<新前 8 碼>` 與 `+colloq:81c2470d`。
 - 同一個 PR：`data/tinylm.sjtl.sha256`、會意的模型 Release（建立前問維護者）、`docs/releases/sj-cl-2-69k.md` 的計數指令補上 `--no-trad-tw-phrases`（照階段 4 實際的指令）、`scripts/fetch-models.sh` 與 CI 的下載名稱、App 關於頁的模型列表、README 與網站的模型代號、`docs/releases/` 的模型說明。新權重命名為會意 SJ-SR-8（規模待定，量完參數數再定）。
 - 合併關卡照程式改動：兩個 fresh verifier、CI 全綠、merge commit。
+- 〔2026-11-05，`tune-no-twphrases.md` §3〕產品步驟用候選當初被選出的那一版調參集：候選來自 SR-TW-V 就用 cvtune-clean-tw0、wikitune-clean-tw0；若維護者改選 SR-TW-Q 確認過的 W1，就照舊版（cvtune-clean `d0960ebe`、wikitune-clean `d576ea94`）。
