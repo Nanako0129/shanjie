@@ -723,6 +723,8 @@ final class ShellTests: XCTestCase {
     /// rebuild makes (the word pack switch and a layout switch rebuild it), and a new shell reads the stored on.
     func testEnglishMenuItemTogglesStoresRebuildsAndSurvivesRestart() {
         let store = MemoryEnglishStore(false)  // saved off; the default is on since digits.md A.3.7
+        // `rust` as one token needs 重打同一個位置算英文, absent-means-off since english-defaults-notice §1: stored on here.
+        store.englishOverwrite = true
         let make = {
             Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: store, acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
