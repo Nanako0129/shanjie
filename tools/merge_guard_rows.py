@@ -6,7 +6,8 @@
 REPORT is a saved stdout of `holdout_guard.py report` (lines `patterns<TAB>loaded<TAB>skipped`, `source<TAB>units<TAB>hit units`, `rows<TAB>path:line`).
 Each ROWS_IN must be spelled exactly as the reports spelled it in --rows (every report was run with the same --rows paths). The union of the `rows` lines of all
 reports is removed from the matching ROWS_IN and the rest is written to ROWS_OUT in the original order and bytes (lines count '\\n' only, as holdout_guard does).
-It stops, writing nothing, when a report has no `patterns` line (the run did not finish), when the `patterns` lines differ (not the same rows files), when a reported
+It stops, writing nothing, when a report has no `patterns` line or no source line (the run did not finish: holdout_guard prints
+`patterns` before it scans and every source line only after the last scan), when the `patterns` lines differ (not the same rows files), when a reported
 row names a file that is not a --clean input or a line that is not in it. Prints per file: lines in, removed, kept, SHA-256 of the output. Never prints row text.
 """
 import argparse
@@ -33,6 +34,8 @@ def read_report(path):
             srcs.append((f[0], int(f[1]), int(f[2])))
     if pat is None:
         raise SystemExit(f"{path}: no patterns line (the guard run did not finish)")
+    if not srcs:
+        raise SystemExit(f"{path}: no source line (the guard run did not finish)")
     return pat, rows, srcs
 
 
@@ -73,6 +76,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if len({i for i, _ in a.clean}) != len(a.clean):
         ap.error("the same --clean input twice")
+    if len({o for _, o in a.clean}) != len(a.clean):
+        ap.error("the same --clean output twice")
     for src, (n, rm, kept, sha) in merge(a.reports, a.clean).items():
         print(f"{src}\tlines {n}\tremoved {rm}\tkept {kept}\tsha256 {sha}")
     return 0

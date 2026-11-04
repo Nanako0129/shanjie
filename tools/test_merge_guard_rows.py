@@ -57,6 +57,17 @@ class Merge(unittest.TestCase):
             self.run_merge([r])
         self.assertFalse(os.path.exists(self.p("a.out")))
 
+    def test_a_report_cut_off_after_the_patterns_line_stops_everything(self):
+        # holdout_guard prints `patterns` before scanning; a run that died mid-scan leaves only that line
+        with self.assertRaisesRegex(SystemExit, "no source line"):
+            self.run_merge([self.rep("r1", report(f"{self.a}:1")), self.rep("r2", "patterns\t3\t0\n")])
+        self.assertFalse(os.path.exists(self.p("a.out")))
+
+    def test_the_same_output_twice_is_refused(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            m.main(["--clean", self.a, self.p("same"), "--clean", self.b, self.p("same"), self.rep("r1", report())])
+        self.assertFalse(os.path.exists(self.p("same")))
+
     def test_reports_from_different_row_sets_stop(self):
         with self.assertRaisesRegex(SystemExit, "disagree"):
             self.run_merge([self.rep("r1", report(patterns="3\t0")), self.rep("r2", report(patterns="4\t0"))])

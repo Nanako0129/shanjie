@@ -113,4 +113,4 @@ fresh verifier 用 `tools/bench.py` `VERSIONS2` 裡各版的出貨旗標與模�
 | 集合 | 列數 | SHA-256 | 來源 |
 |---|---|---|---|
 | cvtune-clean-tw0 | 2,992 | `91e7097d36b3812d58c8672501153d51116bef8f57a48c9350876523a7fbbe04` | Common Voice zh-TW＋Tatoeba cmn 的 tune 20%（`build_tune.py --part cv --cv-no-trad-tw-phrases`） |
-| wikitune-clean-tw0 | 2,182 | `ccddaa4f0ace8f17d69290a2b0f06dcd0fbcfeb54d6bd21242385dde5bf2cbe2` | 維基第 300,000～304,999 篇（`--part wiki --tune-no-trad-tw-phrases`） |
+| wikitune-clean-tw0 | 2,182 | `ccddaa4f0ace8f17d69290a2b0f06dcd0fbcfeb54d6bd21242385dde5bf2cbe2` | 維基第 300,000～304,999 篇（`--part wiki --cv-no-trad-tw-phrases --tune-no-trad-tw-phrases`：維基的抽樣接在 cv 半的亂數狀態後面，兩個旗標都要帶） |
