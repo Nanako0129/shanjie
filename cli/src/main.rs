@@ -233,6 +233,10 @@ struct RowOut {
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
 ///
+/// `--colloquial-first-unigram` (research, SR-TW-C in docs/research-log.md 2026-11-04): the colloquial lc scores the first word of each split with
+/// the table's unigram estimate instead of P(w | `<s>`) (`Colloquial::set_first_unigram`); it needs `--colloquial-core`, and the tag becomes
+/// `+colloq:<sha8>+fu`. The engine has no such switch.
+///
 /// `--tinylm-scores-topk N` (N >= 8, default 8; research, experiments/r1-reading-decode): the `--tinylm-scores` `ll` covers the first N
 /// candidates of the n-gram order instead of 8, the extra ones scored by `TinyLm::ll_many` under the key `rerank_ll` uses (a candidate over the model's context gets `null`, counted on stderr). The pick `c`, the
 /// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
@@ -261,6 +265,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
+    let mut first_unigram = false;
     // docs/contracts/fuzzy-input.md section 2.3: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
     // `+fz:FLAGS` and a row no reading covers counts as wrong instead of stopping the run.
     let mut fuzzy = None::<u32>;
@@ -315,6 +320,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
+            "--colloquial-first-unigram" => first_unigram = true,
             "--fuzzy-delta-sound" => {
                 delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0).ok_or("--fuzzy-delta-sound takes a number above 0")?;
                 delta_given = true;
@@ -350,6 +356,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let extra_overlay = extra_overlay_checked(extra_overlay)?;
     let colloquial_core = colloquial_checked(colloquial_core)?;
+    if first_unigram && colloquial_core.is_none() {
+        return Err("--colloquial-first-unigram needs --colloquial-core".into());
+    }
     // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
     let xo = match &extra_overlay {
         Some(p) => format!("+xo:{}", &sha256_hex(&fs::read(p).map_err(|e| format!("--extra-overlay: cannot read {} ({:?})", p.display(), e.kind()))?)[..8]),
@@ -382,7 +391,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let colloq = match &colloquial_core {
         Some(f) => {
             let pack_text = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
-            Some(Colloquial::load_from_dir(f, &dir, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?)
+            let mut co = Colloquial::load_from_dir(f, &dir, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?;
+            co.set_first_unigram(first_unigram);
+            Some(co)
         }
         None => None,
     };
@@ -713,7 +724,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}", &co.sha256()[..8])), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else { "" })), rd_tag, rows.len());
     Ok(())
 }
 
