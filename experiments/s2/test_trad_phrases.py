@@ -24,6 +24,7 @@ CONV = ({}, {}, 1)   # (phrase, char, maxp) for Traditional sentences: no stray 
 TABLES = dict(SIMP_PHRASE=SIMP_PHRASE, SIMP_CHAR=SIMP_CHAR, SIMP_MAXP=[1], MARKERS={"们"}, SIMP_ONLY={"们"}, TRAD_ONLY={"們"},
               TW_PHRASE=TW_PHRASE, TW_MAXP=[2], POST_TRAD=POST_TRAD, POST_SIMP=POST_SIMP, PROTECT={}, PROTECT_TRAD={}, PROTECT_MAXP=[1])
 
+KEEP_PLUGIN, ONLY_PLUGIN = frozenset({"軟件"}), frozenset({"插件"})   # module-level: bc._simp_tw_table caches by id(keys)
 TRAD, SIMP = "我們的插件隨着軟件", "我们的插件隨着软件"
 LEX = SimpleNamespace(by_word={w: (None, -2.0) for w in ["我們", "的", "插件", "外掛", "隨著", "軟件", "軟體"]}, max_len=2)
 
@@ -54,6 +55,17 @@ class Convert(Base):
         self.assertTrue(bc.is_simplified(SIMP))
         self.assertEqual(self.convert(SIMP, trad_tw_phrases=False), self.convert(SIMP))
         self.assertEqual(self.convert(SIMP, trad_tw_phrases=False), "我們的外掛隨著軟體")
+
+    def test_simp_tw_keys_restricts_twphrases_for_simplified_sentences_only(self):
+        """SR-TW-V V4: None = every TWPhrases entry (the old behaviour); a frozenset = only those keys, for Simplified sentences."""
+        self.assertEqual(self.convert(SIMP, simp_tw_keys=None), self.convert(SIMP))
+        self.assertEqual(self.convert(SIMP, simp_tw_keys=KEEP_PLUGIN), "我們的插件隨著軟體")        # 插件's key is not listed: stays; 軟件 is listed: converts
+        self.assertEqual(self.convert(SIMP, simp_tw_keys=ONLY_PLUGIN), "我們的外掛隨著軟件")
+        self.assertEqual(self.convert(SIMP, simp_tw_keys=frozenset()), "我們的插件隨著軟件")
+        self.assertEqual(self.convert(TRAD, simp_tw_keys=frozenset()), self.convert(TRAD))          # Traditional sentences are not affected
+        self.assertEqual(self.convert(TRAD, trad_tw_phrases=False, simp_tw_keys=ONLY_PLUGIN), "我們的插件隨著軟件")
+        self.assertEqual(bc.text_runs(SIMP, (*CONV[:2], 1), simp_tw_keys=ONLY_PLUGIN), ["我們的外掛隨著軟件"])
+        self.assertEqual(list(bc.article_runs(SIMP + "。", (*CONV[:2], 1), simp_tw_keys=ONLY_PLUGIN)), ["我們的外掛隨著軟件"])
 
     def test_the_wrappers_default_to_the_old_behaviour(self):
         conv = (*CONV[:2], 1)

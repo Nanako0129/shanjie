@@ -132,6 +132,78 @@ class TestTorch(unittest.TestCase):
             with self.assertRaises(SystemExit):                                       # size S is not the npz's T
                 train.main(["--size", "S", "--work", b, "--out", os.path.join(td, "od"), "--max-steps", "2", "--init", npz, "--device", "cpu"])
 
+    def tiny_work(self, td, flags=True):
+        """A work dir like test_tiny_training_run's, encoded, with flags-wiki.u8 / flags-coll.u8 (every run's flag cycles 0,1,0,0,1 with the run text)."""
+        runs = ["你好嗎", "今天天氣真好", "我是你", "他不是我", "天氣好嗎"]
+        for name, k in (("wiki", 400), ("coll", 20)):
+            with open(os.path.join(td, f"runs-{name}.txt"), "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(runs * k) + "\n")
+            if flags:
+                np.tile(np.array([0, 1, 0, 0, 1], dtype=np.uint8), k).tofile(os.path.join(td, f"flags-{name}.u8"))
+        cc = {c: 100 for r in runs for c in r}
+        with open(os.path.join(td, "charcount.json"), "w", encoding="utf-8") as f:
+            json.dump({"charcount": cc}, f)
+        import prep
+        prep.cmd_encode(type("A", (), {"work": td, "min_count": 5, "extra": [], "force": False})())
+
+    def train(self, td, out, *args, steps=40, seed=20261010):
+        import train
+        train.main(["--size", "T", "--work", td, "--out", out, "--tokens-per-batch", "64", "--max-steps", str(steps), "--warmup", "5",
+                    "--seed", str(seed), "--device", "cpu", *args])
+        return json.load(open(os.path.join(out, "train-T.json"))), np.load(os.path.join(out, "tinylm-T.npz"))
+
+    def test_kl_term_math(self):
+        import train
+        torch.manual_seed(0)
+        a, b = torch.randn(3, 5, 11), torch.randn(3, 5, 11)
+        self.assertLess(float(train.kl_student_teacher(a, a).abs().max()), 1e-6)         # student == teacher: zero
+        kl = train.kl_student_teacher(a, b)
+        self.assertTrue(bool((kl > 0).all()))
+        pa, pb = torch.softmax(a, -1).double(), torch.softmax(b, -1).double()
+        np.testing.assert_allclose(kl.numpy(), (pa * (pa.log() - pb.log())).sum(-1).numpy(), atol=1e-5)    # KL(student || teacher)
+        tgt = torch.randint(0, 11, (3, 5))
+        ce = train.step_loss(a, tgt)
+        keep = (torch.rand(3, 5) < 0.5).float()
+        self.assertAlmostEqual(float(train.step_loss(a, tgt, a, keep, 2.0)), float(ce), places=5)                  # student == teacher: CE only
+        want = float(ce) + 2.0 * float((train.kl_student_teacher(a, b) * keep).sum()) / keep.numel()
+        self.assertAlmostEqual(float(train.step_loss(a, tgt, b, keep, 2.0)), want, places=5)                         # CE + lambda * masked mean KL
+        self.assertAlmostEqual(float(train.step_loss(a, tgt, b, keep, 0.0)), float(ce), places=6)                  # lambda 0: the plain loss
+        self.assertAlmostEqual(float(train.step_loss(a, tgt, b, torch.zeros(3, 5), 5.0)), float(ce), places=6)     # nothing unchanged: CE only
+        self.assertGreater(float(train.step_loss(a, tgt, b, torch.ones(3, 5), 1.0)), float(ce))
+
+    def test_default_run_is_unchanged_and_kl_lambda_zero_equals_it(self):
+        """The new options at their defaults leave the run as it was; a teacher with --kl-lambda 0 gives the same weights (CPU, deterministic)."""
+        with tempfile.TemporaryDirectory() as td:
+            self.tiny_work(td)
+            teacher_info, _ = self.train(td, os.path.join(td, "t"), steps=15, seed=1)
+            teacher = os.path.join(td, "t", "tinylm-T.npz")
+            plain, pz = self.train(td, os.path.join(td, "plain"))
+            self.assertEqual((plain["weight_decay"], plain["kl_teacher"], plain["kl_lambda"], plain["changed_weight"]), (0.1, None, 0.0, None))
+            same, sz = self.train(td, os.path.join(td, "same"), "--weight-decay", "0.1", "--kl-teacher", teacher, "--kl-lambda", "0")
+            import prep
+            self.assertEqual(same["kl_teacher"]["sha256"], prep.sha256_file(teacher))
+            self.assertEqual(plain["curve"], same["curve"])
+            for k in pz.files:
+                np.testing.assert_allclose(pz[k], sz[k], atol=1e-6, err_msg=k)
+
+    def test_kl_anchor_changed_weight_and_weight_decay_options_run_and_are_recorded(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.tiny_work(td)
+            self.train(td, os.path.join(td, "t"), steps=15, seed=1)
+            self.train(td, os.path.join(td, "t2"), steps=15, seed=2)
+            start, teacher = os.path.join(td, "t", "tinylm-T.npz"), os.path.join(td, "t2", "tinylm-T.npz")     # the teacher is a different model
+            plain, pz = self.train(td, os.path.join(td, "plain"), "--init", start, "--peak-lr", "1e-4")
+            kl, kz = self.train(td, os.path.join(td, "kl"), "--init", start, "--peak-lr", "1e-4", "--kl-teacher", teacher, "--kl-lambda", "50")
+            self.assertEqual(kl["kl_lambda"], 50.0)
+            self.assertTrue(any(not np.allclose(pz[k], kz[k], atol=1e-7) for k in pz.files))          # the anchor changed the update
+            cw, _ = self.train(td, os.path.join(td, "cw"), "--changed-weight", "0.1", "--weight-decay", "0")
+            self.assertEqual((cw["changed_weight"], cw["weight_decay"]), (0.1, 0.0))
+            os.remove(os.path.join(td, "flags-coll.u8"))                                              # a source without flags is refused
+            with self.assertRaises(SystemExit):
+                self.train(td, os.path.join(td, "bad"), "--changed-weight", "0.1")
+            with self.assertRaises(SystemExit):
+                self.train(td, os.path.join(td, "bad2"), "--kl-lambda", "1")                           # lambda without a teacher
+
     def test_lr_schedule(self):
         import train
         self.assertAlmostEqual(train.lr_at(0, 1000), 1e-3 / train.WARMUP)

@@ -165,16 +165,36 @@ def is_simplified(text):
     return (m > 0 and t == 0) or sum(c in SIMP_ONLY for c in text) > t
 
 
-def convert(text, phrase, char, maxp, trad_tw_phrases=True):
+_SIMP_TW = {}   # id(simp_tw_keys) -> (keys, TW_PHRASE, len(TW_PHRASE), 受限的表, 最長鍵)；keys 留在裡面，id 才不會被別的物件借用
+
+
+def _simp_tw_table(keys):
+    """簡體句用的 TWPhrases：keys=None 是整張表（原行為）；否則只留鍵在 keys 裡的條目（SR-TW-V 的 V4，只留 SJ-LM-7 §2.7 量過的大陸用詞）。
+    keys 請傳 frozenset 且之後不要改它（表是第一次用到時依內容建好、按 id 快取）。"""
+    if keys is None:
+        return TW_PHRASE, TW_MAXP[0]
+    hit = _SIMP_TW.get(id(keys))
+    if hit is None or hit[0] is not keys or hit[1] is not TW_PHRASE or hit[2] != len(TW_PHRASE):
+        t = {k: v for k, v in TW_PHRASE.items() if k in keys}
+        hit = _SIMP_TW[id(keys)] = (keys, TW_PHRASE, len(TW_PHRASE), t, max(map(len, t), default=1))
+    return hit[3], hit[4]
+
+
+def convert(text, phrase, char, maxp, trad_tw_phrases=True, simp_tw_keys=None):
     """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照。
     其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞（TWPhrases），
     最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。
     trad_tw_phrases=False（SJ-LM-7 契約 §2.2，計數用）：繁體句不套 TWPhrases，只剩字形層（簡體專用字、POST_TRAD 的 VARIANTS 與台灣字形），
-    「插件」不會被換成「外掛」；簡體句不變。預設 True＝原行為，holdout_guard.py、build_digits.py 與其他呼叫者不傳。"""
+    「插件」不會被換成「外掛」；簡體句不變。預設 True＝原行為，holdout_guard.py、build_digits.py 與其他呼叫者不傳。
+    simp_tw_keys（SR-TW-V V4）：None＝簡體句照舊套全部 TWPhrases；給 frozenset 就只套鍵在裡面的條目（「权限」的「權限」鍵不在裡面就留「權限」）。繁體句不受影響。"""
     simp = is_simplified(text)
     # S2f 修訂一 6.2.2：TWPhrases 之前不套台灣字形或 VARIANTS（OpenCC 的順序），鍵寫成 OpenCC 字形的台灣用詞才對得到
     text = _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR) if simp else _longest(text, phrase, maxp, char)
-    text = _longest(text, TW_PHRASE, TW_MAXP[0]) if TW_PHRASE and (simp or trad_tw_phrases) else text
+    if simp:
+        tw, twp = _simp_tw_table(simp_tw_keys)
+        text = _longest(text, tw, twp) if tw else text
+    elif trad_tw_phrases and TW_PHRASE:
+        text = _longest(text, TW_PHRASE, TW_MAXP[0])
     table = POST_SIMP if simp else POST_TRAD   # 喫→吃 也在 TW_VARIANTS 裡，S2n 的「輸入有喫就保留」規則拿掉
     return _longest(text, PROTECT if simp else PROTECT_TRAD, PROTECT_MAXP[0], table)   # 保護詞原樣保留，其餘逐字套表
 
@@ -199,17 +219,17 @@ def fold(text):
     return "".join(MERGE.get(c, c) for c in text)
 
 
-def text_runs(line, conv, trad_tw_phrases=True):
+def text_runs(line, conv, trad_tw_phrases=True, simp_tw_keys=None):
     """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple.
-    trad_tw_phrases: see convert()."""
-    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases))
+    trad_tw_phrases, simp_tw_keys: see convert()."""
+    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases, simp_tw_keys=simp_tw_keys))
 
 
-def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
+def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True, simp_tw_keys=None):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
     The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8).
     trad_tw_phrases: see convert(); a counting run and the guard that scans it must pass the same value."""
-    for s in article_sentences(raw, conv, mw, mwconv, trad_tw_phrases):
+    for s in article_sentences(raw, conv, mw, mwconv, trad_tw_phrases, simp_tw_keys):
         yield from HAN.findall(s)
 
 
@@ -226,11 +246,11 @@ def article_text(raw, mw=None, mwconv=None):
     return t
 
 
-def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True):
+def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True, simp_tw_keys=None):
     """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
     HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
     for s in SENT.findall(article_text(raw, mw, mwconv)):
-        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases)
+        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases, simp_tw_keys=simp_tw_keys)
 
 
 def articles(limit, dump=None, meta=False):
@@ -343,17 +363,17 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def guard_matcher(rows, trad_tw_phrases=True):
+def guard_matcher(rows, trad_tw_phrases=True, simp_tw_keys=None):
     """--holdout-guard (docs/contracts/holdout-refresh.md section 8), called once in main() before any Pool exists: None when off, else the
     Matcher over the held-out rows (`rows` = row files; empty = every .txt under eval/holdout/). Prints how many rows were loaded and skipped.
-    trad_tw_phrases must be the counter's own setting, so the patterns cover the text that is actually counted.
+    trad_tw_phrases (and simp_tw_keys) must be the counter's own setting, so the patterns cover the text that is actually counted.
     A bad rows file stops here (SystemExit, message = path, line, field count only), never inside a worker initializer."""
     if rows is None:
         return None
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import holdout_guard
     try:
-        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv(), trad_tw_phrases)
+        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv(), trad_tw_phrases, simp_tw_keys)
     except (holdout_guard.GuardError, OSError) as e:
         sys.exit(f"holdout-guard: {e}")
     print(f"holdout-guard: {loaded} rows loaded, {skipped} skipped as shorter than {holdout_guard.MIN_LEN} characters", flush=True)

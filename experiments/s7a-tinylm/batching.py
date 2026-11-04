@@ -81,10 +81,56 @@ def build_epoch(work, extra=None):
     return np.concatenate(parts), np.concatenate(starts), np.concatenate(lengths)
 
 
-def plan(work, extra, tokens_per_batch, seed, max_steps=0):
+def flag_path(ids_path):
+    """ids-<name>.npy -> flags-<name>.u8 in the same directory (prep.py --changed-flags)."""
+    d, base = os.path.split(ids_path)
+    return os.path.join(d, "flags-" + base[len("ids-"):-len(".npy")] + ".u8")
+
+
+def token_flags(work, extra=None):
+    """The --changed-flags bits as a per-token uint8 array aligned with build_epoch's concatenated ids (wiki, coll, then each extra, once each):
+    every token of a run (its BOS included) carries that run's flag. A source without its flags file, or whose file does not have one byte per
+    run, is an error: a run that was never flagged must not silently count as unchanged."""
+    paths = [os.path.join(work, "ids-wiki.npy"), os.path.join(work, "ids-coll.npy")] + [p for p, _ in extra or ()]
+    out = []
+    for ip in paths:
+        fp = flag_path(ip)
+        if not os.path.isfile(fp):
+            raise ValueError(f"{fp} is missing (prep.py {'runs' if ip.endswith(('ids-wiki.npy', 'ids-coll.npy')) else 'text'} --changed-flags)")
+        ids, fl = np.load(ip, mmap_mode="r"), np.fromfile(fp, dtype=np.uint8)
+        st = np.flatnonzero(ids == BOS)
+        if len(fl) != len(st) or fl.max(initial=0) > 1:
+            raise ValueError(f"{fp}: {len(fl)} bytes, but {ip} has {len(st)} runs (or a byte other than 0/1)")
+        out.append(np.repeat(fl, np.diff(np.append(st, len(ids)))))
+    return np.concatenate(out)
+
+
+def reweight_changed(starts, lengths, changed, ratio, rng):
+    """SR-TW-V V3. starts/lengths: the epoch's pieces; changed: bool per piece (its run's flag). Keeps every unchanged piece exactly as it is
+    (so the source weights, wiki x1 and colloquial x5, are untouched) and repeats the changed ones as a group, floor(m) times plus a random
+    share of the rest, so that changed pieces hold `ratio` of all target tokens (length - 1 per piece). m = ratio / (1 - ratio) * (unchanged
+    targets) / (changed targets) can be below 1 (the changed ones are then thinned out). Returns (starts, lengths); the order is irrelevant
+    (make_batches shuffles)."""
+    if not 0 < ratio < 1:
+        raise ValueError(f"changed-weight ratio must be in (0, 1), got {ratio}")
+    w = lengths - 1
+    changed = np.asarray(changed, dtype=bool)
+    if not changed.any() or changed.all():
+        raise ValueError("changed-weight needs both changed and unchanged pieces")
+    m = ratio / (1 - ratio) * w[~changed].sum() / w[changed].sum()
+    ci = np.flatnonzero(changed)
+    k = int(m)
+    idx = np.concatenate([np.flatnonzero(~changed)] + [ci] * k + [ci[rng.random(len(ci)) < m - k]])
+    return starts[idx], lengths[idx]
+
+
+def plan(work, extra, tokens_per_batch, seed, max_steps=0, changed_weight=None, tokflag=None):
     """train.py's data: the epoch, its shuffled batches (rng = default_rng(seed), as S7a), cut to max_steps when given.
-    The number of steps is len(batches) (see train.py). Returns (ids, starts, lengths, batches)."""
+    The number of steps is len(batches) (see train.py). Returns (ids, starts, lengths, batches).
+    changed_weight (SR-TW-V V3): reweight_changed with tokflag = token_flags(work, extra), before the batches are made; None = S7a's epoch."""
     rng = np.random.default_rng(seed)
     ids, starts, lengths = build_epoch(work, extra)   # extra: None/empty = none
+    if changed_weight is not None:
+        starts, lengths = reweight_changed(starts, lengths, tokflag[starts] == 1, changed_weight, rng)
     batches = make_batches(lengths, tokens_per_batch, rng)
     return ids, starts, lengths, batches[:max_steps] if max_steps else batches
