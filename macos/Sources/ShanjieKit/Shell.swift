@@ -44,7 +44,8 @@ public protocol ShiftHintPanel: AnyObject {
     func show(_ text: String, lineRect: NSRect, appearance: NSAppearance?, glassTint: Double)
 }
 
-/// Where the 單按 Shift 切換中英 switch is kept (shift-toggle section 1): `nil` means never chosen, which is on.
+/// Where the 單按 Shift 切換中英 switch is kept (shift-toggle section 1): `nil` means never chosen, which is off
+/// (docs/contracts/english-defaults-notice.md section 1; on before that contract).
 @MainActor
 public protocol ShiftToggleStore: AnyObject {
     var shiftToggle: Bool? { get set }
@@ -55,6 +56,32 @@ public protocol ShiftToggleStore: AnyObject {
 public final class MemoryShiftToggleStore: ShiftToggleStore {
     public var shiftToggle: Bool?
     public init(_ shiftToggle: Bool? = nil) { self.shiftToggle = shiftToggle }
+}
+
+/// The explanation window of the English defaults change (docs/contracts/english-defaults-notice.md section 3): its own small
+/// panel that never takes the typing app's keyboard focus but whose buttons can be clicked. The app target draws it.
+@MainActor
+public protocol EnglishNoticePanel: AnyObject {
+    /// Whether the window is on screen.
+    var isShown: Bool { get }
+    /// Shows the window away from `caret` (screen coordinates, `nil` when unknown). `done(true)` is 打開設定, `done(false)` is 知道了
+    /// or the close button; the window does not hide itself, the shell does.
+    func show(caret: NSRect?, done: @escaping @MainActor (_ openSettings: Bool) -> Void)
+    func hide()
+}
+
+/// Whether the explanation window is still owed (english-defaults-notice section 2, key `englishDefaultsNoticePending`): written by
+/// the one-time reset in main.swift for a person who updated from an earlier version, cleared by a button or the close button.
+@MainActor
+public protocol EnglishNoticeStore: AnyObject {
+    var pending: Bool { get set }
+}
+
+/// The in-memory EnglishNoticeStore.
+@MainActor
+public final class MemoryEnglishNoticeStore: EnglishNoticeStore {
+    public var pending: Bool
+    public init(_ pending: Bool = false) { self.pending = pending }
 }
 
 /// SHIFT_HINT_SECONDS (shift-toggle section 3): how long the 英/中 hint stays before it fades.
@@ -181,7 +208,7 @@ public final class MemorySpacingStore: SpacingStore {
 public protocol EnglishStore: AnyObject {
     var english: Bool? { get set }
     /// The choice under it (docs/contracts/zhen-revert.md section 3): a key typed over the symbol already in its column is English
-    /// (`ok`, `rust`, `gta6`). `nil` means never chosen, which is true.
+    /// (`ok`, `rust`, `gta6`). `nil` means never chosen, which is false (docs/contracts/english-defaults-notice.md section 1; true before that contract).
     var englishOverwrite: Bool? { get set }
     /// The choice next to it (docs/contracts/zhen-keyorder.md section 3, default changed by zhen-revert): keys out of Zhuyin's column order,
     /// and a tone key that makes a syllable the lexicon lacks, are English. `nil` means never chosen, which is true.
@@ -534,9 +561,10 @@ public final class Shell {
     /// zhen-mixed: the experimental English window (default on since digits.md A.3.7; absent in the store is on, a saved off stays off); sent to every engine `build()` makes. Unlike the abbreviation
     /// switch it ships (the app shows it).
     private(set) var englishOn = false
-    /// zhen-revert section 3: whether a key typed over the symbol already in its column is English (default true: `UserDefaults` key
-    /// `englishOverwrite`, absent is true); sent to every engine `build()` makes. Only matters while `englishOn`.
-    private(set) var englishOverwriteOn = true
+    /// zhen-revert section 3: whether a key typed over the symbol already in its column is English (default false since
+    /// docs/contracts/english-defaults-notice.md section 1: `UserDefaults` key `englishOverwrite`, absent is false); sent to every
+    /// engine `build()` makes. Only matters while `englishOn`.
+    private(set) var englishOverwriteOn = false
     /// zhen-keyorder section 3 with zhen-revert's default: whether keys out of Zhuyin's column order, and a tone key that makes a
     /// syllable the lexicon lacks, are English (default true: `UserDefaults` key `englishKeyOrder`, absent is true, a saved false stays
     /// false); sent to every engine `build()` makes. Only matters while `englishOn`.
@@ -579,10 +607,19 @@ public final class Shell {
         Shell.packTable.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
     }
     private let shiftToggleStore: ShiftToggleStore
-    /// shift-toggle section 1: a lone Shift tap switches between Chinese and English (default on). Off: `flagsChanged` is not handled,
-    /// the states below are cleared and the core is back to `set_ascii(0)`.
-    private(set) var shiftToggleOn = true
+    /// shift-toggle section 1: a lone Shift tap switches between Chinese and English (default off since
+    /// docs/contracts/english-defaults-notice.md section 1). Off: `flagsChanged` is not handled, the states below are cleared and the
+    /// core is back to `set_ascii(0)`.
+    private(set) var shiftToggleOn = false
     let shiftHint: ShiftHintPanel?
+    let englishNoticeStore: EnglishNoticeStore
+    let englishNotice: EnglishNoticePanel?
+    /// english-defaults-notice section 3: the next keyDown of any session shows the window. Process-wide, so the order of one app's
+    /// deactivate and the next app's activate does not matter. Set by `Session.activate` while the store says pending; cleared when the
+    /// window is shown; the window's buttons clear the store itself.
+    var englishNoticeArmed = false
+    /// Set by the app: opens the settings window on the 選字 page (the notice's 打開設定 button).
+    public var onOpenCandidateSettings: (() -> Void)?
     var shiftTap = ShiftTap()
     /// Seconds since the latest mouse-button press (left, right, other) in this login session; a test replaces it. No permission needed.
     var mouseAgo: () -> TimeInterval = {
@@ -793,6 +830,8 @@ public final class Shell {
     /// `spacingStore`: the 中英文之間自動加空格 switch (cjk-spacing section 2). Required, with no default, like the other stores.
     /// `shiftToggleStore`, `shiftHint`: the 單按 Shift 切換中英 switch and its 英/中 hint window (shift-toggle section 1, 3). The defaults (in
     /// memory, no window) are for the tests; the app passes its own.
+    /// `englishNoticeStore`, `englishNotice`: the one-time explanation window of the English defaults change and whether it is still owed
+    /// (english-defaults-notice section 3). The defaults (in memory, not owed, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
     /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
@@ -808,11 +847,15 @@ public final class Shell {
                 spacingStore: SpacingStore,
                 itPackStore: ItPackStore = MemoryItPackStore(),
                 shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
-                shiftHint: ShiftHintPanel? = nil) {
+                shiftHint: ShiftHintPanel? = nil,
+                englishNoticeStore: EnglishNoticeStore = MemoryEnglishNoticeStore(),
+                englishNotice: EnglishNoticePanel? = nil) {
         self.resources = resources
         self.shiftToggleStore = shiftToggleStore
-        shiftToggleOn = shiftToggleStore.shiftToggle ?? true
+        shiftToggleOn = shiftToggleStore.shiftToggle ?? false // english-defaults-notice section 1: was true
         self.shiftHint = shiftHint
+        self.englishNoticeStore = englishNoticeStore
+        self.englishNotice = englishNotice
         self.learningDirectory = learningDirectory
         self.dialogs = dialogs
         // Read once: the converted table never changes while the process runs, and the layout
@@ -840,7 +883,7 @@ public final class Shell {
         spacingOn = spacingStore.spacing == true
         self.englishStore = englishStore
         englishOn = englishStore.english ?? true // digits.md A.3.7: on unless the person turned it off (a saved value wins)
-        englishOverwriteOn = englishStore.englishOverwrite ?? true
+        englishOverwriteOn = englishStore.englishOverwrite ?? false // english-defaults-notice section 1: was true
         englishKeyOrderOn = englishStore.englishKeyOrder ?? true // zhen-revert: was false; a saved false stays false
         englishReversalGuardOn = englishStore.englishReversalGuard ?? true
         self.fuzzyStore = fuzzyStore
@@ -888,6 +931,27 @@ public final class Shell {
     /// that do not set it.
     public var updates: Updates?
     func openSettings() { onOpenSettings?() }
+
+    /// english-defaults-notice section 3: any session's activation arms the window while it is still owed.
+    func armEnglishNotice() {
+        if englishNotice != nil && englishNoticeStore.pending { englishNoticeArmed = true }
+    }
+
+    /// Shows the window if armed and not already on screen. A button or the close button clears the owed flag, hides the window and
+    /// (打開設定) opens the settings on the 選字 page.
+    func showEnglishNoticeIfArmed(caret: @autoclosure () -> NSRect?) {
+        guard englishNoticeArmed, let panel = englishNotice, !panel.isShown else { return }
+        englishNoticeArmed = false
+        panel.show(caret: caret()) { [weak self] openSettings in
+            guard let self else { return }
+            self.englishNoticeStore.pending = false
+            self.englishNotice?.hide()
+            if openSettings { self.onOpenCandidateSettings?() }
+        }
+    }
+
+    /// Any session's deactivation only hides the window; the owed flag and `englishNoticeArmed` stay.
+    func hideEnglishNotice() { englishNotice?.hide() }
 
     /// The menu's switches, for a caller with no session (the settings window): the owner of the
     /// composition, if any, shows the re-ranked snapshot exactly as for the menu; otherwise just the setter.
@@ -1455,6 +1519,8 @@ public final class Session {
         guard shell.engine != nil else { return false }
         if let event, event.type == .flagsChanged { return handleFlags(event) }
         guard event == nil || event?.type == .keyDown else { return false }
+        // english-defaults-notice section 3: the key is handled as usual first; the window (when armed) shows after it.
+        defer { shell.showEnglishNoticeIfArmed(caret: currentLineRect()) }
         shell.shiftTap.keyDown()  // shift-toggle section 1: a key between Shift's press and release spoils the tap
         if claim() {
             let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
@@ -1575,9 +1641,13 @@ public final class Session {
     /// rectangle, no hint (not the screen corner, not the last place).
     private func showShiftHint(_ text: String) {
         guard let panel = shell.shiftHint else { return }
-        let rect = shell.composing ? client.lineRect(cursor: shell.composingCursor) : client.caretRect()
-        guard let rect else { return }
+        guard let rect = currentLineRect() else { return }
         panel.show(text, lineRect: rect, appearance: client.appearance, glassTint: shell.glassTint)
+    }
+
+    /// The marked text's rectangle while composing, the insertion point's otherwise; `nil` when the client gives none.
+    private func currentLineRect() -> NSRect? {
+        shell.composing ? client.lineRect(cursor: shell.composingCursor) : client.caretRect()
     }
 
     /// Section 5 order: ownership first, then the profile for this client's app.
@@ -1587,11 +1657,13 @@ public final class Session {
         applyProfile(bundle: bundle)
         syncAscii(bundle: bundle)
         shell.lastTypingAt = nil  // zhen-reapply section 1a: the next typing key shows the mode (only while the toggle is on)
+        shell.armEnglishNotice()  // english-defaults-notice section 3
     }
 
     /// Only the owner acts; a late call from any other controller does nothing at all.
     public func deactivate() {
         spacingPrev = nil
+        shell.hideEnglishNotice()  // english-defaults-notice section 3: any deactivate, owner or not, only hides the window
         guard shell.owner === self else { return }
         // Never send the composition into a field that has just turned secure.
         if shell.composing { finish(mode: shell.isSecureInput() ? 1 : 0) }

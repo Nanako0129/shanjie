@@ -90,7 +90,7 @@ final class DefaultsEnglishStore: EnglishStore {
         get { UserDefaults.standard.object(forKey: "english") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "english") }
     }
-    /// The 重打同一個位置算英文 choice (docs/contracts/zhen-revert.md section 3), key `englishOverwrite`; absent means true.
+    /// The 重打同一個位置算英文 choice (docs/contracts/zhen-revert.md section 3), key `englishOverwrite`; absent means false (docs/contracts/english-defaults-notice.md section 1; true before that).
     var englishOverwrite: Bool? {
         get { UserDefaults.standard.object(forKey: "englishOverwrite") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "englishOverwrite") }
@@ -143,13 +143,37 @@ final class DefaultsItPackStore: ItPackStore {
     }
 }
 
-/// The 單按 Shift 切換中英 switch (docs/contracts/shift-toggle.md section 1), key `shiftToggle` in the same domain; absent means on.
+/// The 單按 Shift 切換中英 switch (docs/contracts/shift-toggle.md section 1), key `shiftToggle` in the same domain; absent means off (docs/contracts/english-defaults-notice.md section 1; on before that).
 @MainActor
 final class DefaultsShiftToggleStore: ShiftToggleStore {
     var shiftToggle: Bool? {
         get { UserDefaults.standard.object(forKey: "shiftToggle") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "shiftToggle") }
     }
+}
+
+/// Whether the English defaults explanation window is still owed (docs/contracts/english-defaults-notice.md section 2), key
+/// `englishDefaultsNoticePending` in the same domain; absent means not owed.
+@MainActor
+final class DefaultsEnglishNoticeStore: EnglishNoticeStore {
+    var pending: Bool {
+        get { UserDefaults.standard.bool(forKey: EnglishDefaultsReset.pendingKey) }
+        set { UserDefaults.standard.set(newValue, forKey: EnglishDefaultsReset.pendingKey) }
+    }
+}
+
+/// docs/contracts/english-defaults-notice.md section 2: the one-time reset of the two English switches to off, run before the Shell,
+/// `Updates` and the updater exist (they write `update*` keys, which would look like an earlier version). Reads this app's own
+/// persistent domain and the learning folder, lets `EnglishDefaultsReset` decide, writes the result back.
+@MainActor
+func resetEnglishDefaults(bundleID: String) {
+    let defaults = UserDefaults.standard
+    let domain = defaults.persistentDomain(forName: bundleID) ?? [:]
+    let learningFiles = Shell.learningURL().flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.path) } ?? []
+    let writes = EnglishDefaultsReset.writes(
+        domainKeys: Set(domain.keys), learningHasFiles: !learningFiles.isEmpty,
+        markerPresent: domain[EnglishDefaultsReset.markerKey] != nil)
+    for (key, value) in writes { defaults.set(value, forKey: key) }
 }
 
 /// The candidate glass tint slider (docs/contracts/settings-window.md section 2.3), key `glassTint` (Double); absent means 0.
@@ -239,6 +263,7 @@ func runServer() -> Never {
         say("shanjie: not running from the app bundle")
         exit(1)
     }
+    resetEnglishDefaults(bundleID: bundleID)
     let app = NSApplication.shared
     guard let server = IMKServer(name: connection, bundleIdentifier: bundleID) else {
         say("shanjie: cannot create the input method server")
@@ -256,7 +281,8 @@ func runServer() -> Never {
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
         showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(),
-        shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter())
+        shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
+        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter())
     // about-update section 2: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)
@@ -264,6 +290,7 @@ func runServer() -> Never {
     let updater = Updater(updates: updates)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }
+    App.shell?.onOpenCandidateSettings = { settings.show(page: .candidates) }  // english-defaults-notice section 3
     updates.closeSettings = { settings.close() }
     withExtendedLifetime((server, updater)) { app.run() }
     exit(0)

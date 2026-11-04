@@ -16,6 +16,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var previous: NSRunningApplication?
     /// The 個別設定的 App names and icons, kept across window updates (profile-choice section 2.4).
     private let appLabels = AppLabels()
+    /// The selected sidebar page; `show(page:)` sets it (english-defaults-notice section 3 opens the 選字 page).
+    private let navigation = SettingsNavigation()
 
     init(shell: Shell) {
         self.shell = shell
@@ -27,7 +29,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    func show() {
+    func show(page: SettingsPage? = nil) {
+        if let page { navigation.page = page }
         if let front = NSWorkspace.shared.frontmostApplication, front != NSRunningApplication.current {
             previous = front
         }
@@ -102,7 +105,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         glass.material = Self.backgroundMaterial
         glass.blendingMode = .behindWindow
         glass.state = .active
-        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels))
+        let host = NSHostingView(rootView: SettingsForm(model: model, appLabels: appLabels, navigation: navigation))
         host.safeAreaRegions = []  // placed below the title bar by its top constraint, so no second inset
         host.sizingOptions = []  // the window's size comes from fit() alone (settings-fixed-size.md), not the content's
         let container = NSView()
@@ -184,18 +187,23 @@ enum SettingsPage: CaseIterable, Hashable {
 /// selection is view state in the window's one hosting view, so reopening the window shows the last page in this run.
 /// A plain fixed-width sidebar, not NavigationSplitView: that one's sidebar can be collapsed, and this window has no
 /// toolbar or View menu to bring it back (/code-review probe: canCollapse true, no toolbar).
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    @Published var page: SettingsPage = .general
+}
+
 struct SettingsForm: View {
     /// The sidebar column; a round number for the short labels, not measured against System Settings (first device round).
     static let sidebarWidth: CGFloat = 160
     static var width: CGFloat { sidebarWidth + SettingsPageForm.formWidth }
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
-    @State private var page: SettingsPage = .general
+    @ObservedObject var navigation: SettingsNavigation
 
     var body: some View {
         HStack(spacing: 0) {
             // A click on the sidebar's empty space or a ⌘-click deselects; keep the page instead of showing none.
-            List(SettingsPage.allCases, id: \.self, selection: Binding(get: { page }, set: { if let p = $0 { page = p } })) { p in
+            List(SettingsPage.allCases, id: \.self, selection: Binding(get: { navigation.page }, set: { if let p = $0 { navigation.page = p } })) { p in
                 Label(p.title, systemImage: p.symbol)
             }
             .listStyle(.sidebar)
@@ -205,8 +213,8 @@ struct SettingsForm: View {
             .scrollContentBackground(.hidden)
             .frame(width: Self.sidebarWidth)
             // A fresh form per page, so a page opens at its top rather than at the previous page's scroll offset.
-            SettingsPageForm(page: page, model: model, appLabels: appLabels)
-                .id(page)
+            SettingsPageForm(page: navigation.page, model: model, appLabels: appLabels)
+                .id(navigation.page)
         }
     }
 }
