@@ -10,6 +10,7 @@ max(1, tokens_per_batch // length) pieces, so each length ends in a partial batc
 (weighted) token count but is not exactly proportional to it; how close it is has not been measured. --max-steps only cuts the batch list
 (smoke tests, S7f's fixed budget). Every --extra ids file and ids-wiki/coll must have been encoded with the vocab.txt in --work
 (prep.check_vocab, checked before training).
+--init NPZ --peak-lr X (SR-TW-W): start from an exported model with the same size and vocabulary (prep.py encode --vocab-from NPZ) at peak lr X.
 Writes DIR/tinylm-<size>.npz (the only artefact the scoring code reads) and DIR/train-<size>.json.
 Exit code 2 = diverged (nan, or loss above its starting level after warm-up): the contract's stop condition.
 """
@@ -61,6 +62,9 @@ def main(argv=None):
                     help="an ids-<name>.npy (prep.py encode --extra) added to the epoch WEIGHT times (ASCII integer >= 1, bare PATH = 1, S7f); "
                          "repeatable; without it the epoch is S7a's. The weight is whatever follows the last ':', so a path that itself "
                          "ends in ':something' is not supported")
+    ap.add_argument("--init", metavar="NPZ", help="start from this exported model (torch_model.from_npz) instead of a fresh one (SR-TW-W warm start): "
+                    "its size must be --size's and its `chars` the vocab.txt in --work (prep.py encode --vocab-from NPZ)")
+    ap.add_argument("--peak-lr", type=float, default=PEAK_LR, help="peak learning rate of the warm-up and cosine schedule (the real runs keep 1e-3)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
@@ -72,12 +76,20 @@ def main(argv=None):
     ids, starts, lengths, batches = batching.plan(a.work, extra, a.tokens_per_batch, a.seed, a.max_steps)
     total = len(batches)
     cfg = CONFIGS[a.size]
-    model = GPT(len(chars) + 3, **cfg).to(a.device)
+    if a.init:
+        from torch_model import from_npz
+        model, ivocab = from_npz(a.init, a.device)
+        if ivocab.chars != chars:
+            sys.exit(f"--init {a.init}: its vocabulary is not the vocab.txt in {a.work} (encode with prep.py encode --vocab-from {a.init})")
+        if any(model.cfg[k] != v for k, v in cfg.items()):
+            sys.exit(f"--init {a.init}: its config {model.cfg} is not size {a.size} {cfg}")
+    else:
+        model = GPT(len(chars) + 3, **cfg).to(a.device)
     n_params = sum(p.numel() for p in model.parameters())
     decay = [p for p in model.parameters() if p.ndim >= 2]
     plain = [p for p in model.parameters() if p.ndim < 2]
     opt = torch.optim.AdamW([{"params": decay, "weight_decay": WEIGHT_DECAY}, {"params": plain, "weight_decay": 0.0}],
-                            lr=PEAK_LR, betas=(0.9, 0.95), fused=a.device.startswith("cuda"))
+                            lr=a.peak_lr, betas=(0.9, 0.95), fused=a.device.startswith("cuda"))
     cuda = a.device.startswith("cuda")
     print(f"size {a.size} {cfg} V={len(chars) + 3} params={n_params} pieces={len(lengths)} steps={total} device={a.device}", flush=True)
 
@@ -88,7 +100,7 @@ def main(argv=None):
         l = int(lengths[idx[0]])
         x = torch.from_numpy(ids[starts[idx][:, None] + np.arange(l)].astype(np.int64)).to(a.device)
         for g in opt.param_groups:
-            g["lr"] = lr_at(step, total, warmup=a.warmup)
+            g["lr"] = lr_at(step, total, peak=a.peak_lr, warmup=a.warmup)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=cuda):
             logits = model(x[:, :-1])
         loss = F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), x[:, 1:].reshape(-1))
@@ -103,7 +115,7 @@ def main(argv=None):
             m = float(acc) / n
             acc.zero_()
             curve.append((step + 1, m))
-            print(f"step {step + 1}/{total} loss {m:.4f} lr {lr_at(step, total, warmup=a.warmup):.2e} tokens {tokens} {time.time() - t0:.0f}s", flush=True)
+            print(f"step {step + 1}/{total} loss {m:.4f} lr {lr_at(step, total, peak=a.peak_lr, warmup=a.warmup):.2e} tokens {tokens} {time.time() - t0:.0f}s", flush=True)
             if not math.isfinite(m) or (step + 1 >= 3 * LOG_EVERY and m > ln_v + 1.0):
                 print("DIVERGED", flush=True)
                 sys.exit(2)
@@ -112,7 +124,7 @@ def main(argv=None):
     json.dump({"size": a.size, "config": cfg, "vocab": len(chars) + 3, "params": n_params, "pieces": int(len(lengths)), "steps": total,
                "tokens": tokens, "final_loss_nats_per_token": final, "seed": a.seed,
                "extra": [{"path": p, "weight": w, "sha256": prep.sha256_file(p)} for p, w in extra] or None, "tokens_per_batch": a.tokens_per_batch,
-               "peak_lr": PEAK_LR, "warmup": a.warmup, "seconds": time.time() - t0, "curve": curve},
+               "peak_lr": a.peak_lr, "warmup": a.warmup, "init_sha256": prep.sha256_file(a.init) if a.init else None, "seconds": time.time() - t0, "curve": curve},
               open(os.path.join(a.out, f"train-{a.size}.json"), "w"), indent=1)
     print(f"done: final loss {final:.4f} nats/token, {n_params} params")
 

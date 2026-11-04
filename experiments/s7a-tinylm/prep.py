@@ -248,16 +248,22 @@ def cmd_encode(a):
             f"ids (another arm's files); use a separate work dir, or --force")
     if os.path.isfile(os.path.join(a.work, VOCAB_RECORD)):
         os.remove(os.path.join(a.work, VOCAB_RECORD))     # re-written last: a crash in between leaves no record that looks valid
-    cc = json.load(open(os.path.join(a.work, "charcount.json"), encoding="utf-8"))
-    count = collections.Counter(cc["charcount"])
-    for name in a.extra:                                   # each extra file once, not by its epoch weight
-        with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
-            for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
-                count.update(block.replace("\n", ""))
-    chars = make_vocab(count, a.min_count)
+    vocab_from = getattr(a, "vocab_from", None)
+    if vocab_from:                                         # SR-TW-W: the vocabulary of an existing model, not rebuilt (characters outside it are UNK)
+        chars = [str(c) for c in np.load(vocab_from, allow_pickle=False)["chars"]]
+    else:
+        cc = json.load(open(os.path.join(a.work, "charcount.json"), encoding="utf-8"))
+        count = collections.Counter(cc["charcount"])
+        for name in a.extra:                               # each extra file once, not by its epoch weight
+            with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
+                for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
+                    count.update(block.replace("\n", ""))
+        chars = make_vocab(count, a.min_count)
     open(os.path.join(a.work, "vocab.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(chars) + "\n")
     lut = make_lut(chars)
-    rep = {"vocab_size": len(chars) + 3, "min_count": a.min_count}
+    rep = {"vocab_size": len(chars) + 3, "min_count": None if vocab_from else a.min_count}
+    if vocab_from:
+        rep["vocab_from_sha256"] = sha256_file(vocab_from)
     for name in ("wiki", "coll"):
         ids = encode_file(os.path.join(a.work, f"runs-{name}.txt"), lut)
         np.save(os.path.join(a.work, f"ids-{name}.npy"), ids)
@@ -377,6 +383,8 @@ def main(argv=None):
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
     e.add_argument("--force", action="store_true", help="encode over a vocab.txt made from a different --extra set (overwrites that arm's vocabulary and ids)")
     e.add_argument("--extra", nargs="*", default=[], metavar="NAME", help="NAMEs of DIR/runs-<NAME>.txt (prep.py text --runs-only) counted into the vocabulary once each and encoded")
+    e.add_argument("--vocab-from", metavar="NPZ", help="take the vocabulary from this model's npz (its `chars`) instead of counting it (SR-TW-W warm start: "
+                   "the ids must match the weights train.py --init loads); --min-count is then unused")
     t = sub.add_parser("text")
     t.add_argument("--work", required=True); t.add_argument("--in", dest="input", required=True); t.add_argument("--name", required=True)
     t.add_argument("--half", action="store_true", help="keep only runs whose SHA-256 first byte is < 128 (SJ-SR-7 arm R-half)")
