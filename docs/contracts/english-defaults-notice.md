@@ -18,15 +18,20 @@
 
 ## 2. 一次性重設
 
-- 新的布林鍵 `englishDefaults20261104` 在同一個 defaults domain。殼啟動、讀設定之前（`Shell` 建好 stores 之後、第一次套用設定之前）檢查：沒有這個鍵 → 把 `englishOverwrite` 與 `shiftToggle` 都寫成 `false`，再寫這個鍵為 `true`。有這個鍵 → 什麼都不做。之後使用者在設定裡打開，就照存的值（不會再被重設）。
-- 判斷「從舊版更新上來」：重設之前，這個 domain 裡已經有任何一個善解自己的設定鍵（`UserDefaults.standard.persistentDomain(forName:)` 非空，且不只有系統自動寫的鍵；實作時列出判斷用的鍵清單或規則並寫進註解），就是舊使用者，同時寫 `englishDefaultsNoticePending = true`。全新安裝（domain 是空的）不寫。
+- 新的布林鍵 `englishDefaults20261104` 在同一個 defaults domain。**執行位置**：`main.swift` 裡，在建 `Shell`、`Updates`、`Updater` 之前（它們之後會寫 `update*` 等鍵，順序不能反）。沒有這個鍵 → 把 `englishOverwrite` 與 `shiftToggle` 都寫成 `false`，再寫這個鍵為 `true`；有這個鍵 → 什麼都不做。之後使用者在設定裡打開，就照存的值（不會再被重設）。
+- **判斷「從舊版更新上來」**（重設之前看，寫死，實作者不另外選）：下列任一存在就是舊使用者，同時寫 `englishDefaultsNoticePending = true`：
+  1. domain 裡有 `main.swift` 任何一個設定 store 用的鍵（實作時從 `main.swift` 逐一列出、寫成常數清單，並在測試裡核對清單沒有漏掉 store）；
+  2. domain 裡有 `updateAutoCheck`、`updateLastCheck`、`updateStatus` 任一個，或任何 `SU` 開頭的鍵（Sparkle）；
+  3. 容器的 `Application Support/shanjie/` 底下有任何檔案（學習資料）。
+  三者都沒有＝全新安裝，不寫待顯示旗標（兩個值照樣寫成關，無害）。〔注意：從沒改過設定、用開發版（沒有更新程式）、也從沒打出學習資料的舊使用者會被當成全新安裝；這種人兩個值照樣被重設成關，只是不跳視窗。〕
 - 重設與待顯示旗標的邏輯放在 ShanjieKit 可測的地方（輸入：目前 domain 的鍵集合與兩個值；輸出：要寫的值），`main.swift` 只負責讀寫 UserDefaults。
 
 ## 3. 說明視窗
 
-- **何時出現**：`englishDefaultsNoticePending` 為真時，輸入法在 `activateServer` 之後第一次收到按鍵（或第一次 `activateServer`，實作擇一，契約審查後定）時顯示，一次就好。按「知道了」或「打開設定」或關閉視窗，都把旗標清掉；沒按就不清（下次啟用再跳）。
+- **何時出現**：`englishDefaultsNoticePending` 為真時，`activateServer` 之後收到的第一個 keyDown 觸發顯示；這個鍵照常交給 `Session` 處理，不被吃掉、不延遲。同一個程序裡視窗已顯示時不重複顯示。
+- **收起與再跳**：按「知道了」、按「打開設定」或按視窗的關閉鈕 → 收起並清掉旗標，之後不再出現。都沒按就切走（`deactivateServer`）→ 視窗收起、旗標保留；之後再一次 `activateServer` 後的第一個 keyDown 再跳（同一個程序或下次程序啟動都一樣）。
 - **樣式**：善解自己的小視窗，不搶走使用者正在打字的 App 的鍵盤焦點（`NSPanel` 的 nonactivating 樣式；能點按鈕）。位置在螢幕上方中間或游標附近，不遮住組字區。外觀用系統預設元件與動畫。
-- **按鈕**：「打開設定」：打開善解的設定視窗並捲到「選字」區塊（沒有捲動的方法就只打開設定視窗）；「知道了」：關閉。
+- **按鈕**：「打開設定」：打開善解的設定視窗並直接切到側欄的「選字」頁（`SettingsWindow` 的 `page`）；「知道了」：關閉。不搶焦點、點得到按鈕的視窗做法照 `InputController.swift` 既有的 `PanelWindow`（`canBecomeKey` 為 false）。
 - **文字**（初稿，維護者可改字；改字不必重審契約）：
   - 標題：「英打相關設定改成預設關」
   - 內文：
@@ -38,13 +43,13 @@
 ## 4. 怎麼看到它有效（驗收）
 
 1. **單元測試**（`make test-swift`）：
-   - 重設邏輯：空 domain → 兩個值寫成關、不寫待顯示旗標；有舊設定鍵、兩個值都是開 → 兩個值寫成關、寫待顯示旗標；已有 `englishDefaults20261104` → 不動任何值（包括使用者之後自己打開的開）。
+   - 重設邏輯：空 domain、沒有學習檔 → 兩個值寫成關、不寫待顯示旗標；有舊設定鍵、兩個值都是開 → 兩個值寫成關、寫待顯示旗標；domain 只有 `updateLastCheck`（或只有 `updateStatus`、只有 `SU` 開頭的鍵）、兩個開關都沒存值 → 兩個值寫成關、寫待顯示旗標；domain 空但有學習檔 → 寫待顯示旗標；已有 `englishDefaults20261104` → 不動任何值（包括使用者之後自己打開的開）；鍵清單涵蓋 `main.swift` 所有 store 的鍵（測試核對）。
    - 預設值：兩個 store 都沒有存值時，`Shell` 的 `englishOverwriteOn`、`shiftToggleOn` 是 false。
-   - 視窗決策：旗標為真時第一次觸發要顯示、按了任一按鈕後旗標清掉、不再顯示；旗標為假時不顯示。
-2. **tart 虛擬機實機**（繁體中文系統）：
-   - 先裝目前出貨版、打開兩個開關（或保持預設），再裝這一片的建置：第一次打字時跳出視窗，文字如 §3；按「知道了」後不再出現；設定頁兩個開關都是關。重開輸入法程序後不再跳。
-   - 全新的虛擬機（或清空容器）直接裝這一片：不跳視窗，兩個開關是關。
-   - 視窗出現時，正在打字的 App 仍保有鍵盤焦點（再按鍵仍進組字區）。
+   - 視窗決策：旗標為真時 `activateServer` 後第一個 keyDown 顯示，而且這個鍵照常交給 `Session`；已顯示時再來的鍵不重複顯示；按任一按鈕或關閉鈕後旗標清掉、之後不再顯示；沒按就 `deactivateServer` → 收起、旗標保留、下一次啟用後第一個鍵再顯示；旗標為假時不顯示。
+2. **tart 虛擬機實機**（繁體中文系統）：前後兩個組建都用開發版 ID `com.nyanako.inputmethod.shanjie.dev`（`scripts/build-app.sh` 預設），才會讀到同一個容器 domain。舊版是 `origin/main` 的 `fe6b0371`，新版是這一片的 commit。兩個情境分開做、都要做：
+   - (a) 舊版裝好後用 `defaults write` 把 `englishOverwrite`、`shiftToggle` 存成開；換裝新版 → 第一次打字跳出視窗、文字如 §3、正在打字的 App 仍保有鍵盤焦點（再按鍵仍進組字區）；按「知道了」後不再出現（重開輸入法程序也不跳）；設定頁兩個開關都是關。
+   - (b) 舊版裝好後不改任何設定、打幾個字讓學習資料出現（或 `defaults write` 一個 `updateLastCheck`，模擬出貨版會自動寫的鍵）；換裝新版 → 同 (a) 跳出視窗、兩個開關是關。另驗一次「沒按就切走」：視窗出現後切到別的 App，視窗收起；切回來打字再跳。
+   - (c) 全新的容器（清空）直接裝新版：不跳視窗，兩個開關是關。
    - 截圖放 session 暫存區，不進 repo。
 3. **文件**：README、網站（`site/`）、`docs/contracts/zhen-revert.md`、`shift-toggle.md` 等寫到這兩個預設值的地方一起改（grep「預設開」與兩個設定名）；下一版的發版說明草稿要寫這個改變。
 
