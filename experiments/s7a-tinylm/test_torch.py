@@ -184,7 +184,10 @@ class TestTorch(unittest.TestCase):
             self.assertEqual(same["kl_teacher"]["sha256"], prep.sha256_file(teacher))
             self.assertEqual(plain["curve"], same["curve"])
             for k in pz.files:
-                np.testing.assert_allclose(pz[k], sz[k], atol=1e-6, err_msg=k)
+                if np.issubdtype(pz[k].dtype, np.number):
+                    np.testing.assert_allclose(pz[k], sz[k], atol=1e-6, err_msg=k)
+                else:   # the vocabulary (`chars`) is a string array: compare it exactly (Colab 2026-11-04: assert_allclose refuses str dtypes)
+                    np.testing.assert_array_equal(pz[k], sz[k], err_msg=k)
 
     def test_kl_anchor_changed_weight_and_weight_decay_options_run_and_are_recorded(self):
         with tempfile.TemporaryDirectory() as td:
@@ -195,7 +198,7 @@ class TestTorch(unittest.TestCase):
             plain, pz = self.train(td, os.path.join(td, "plain"), "--init", start, "--peak-lr", "1e-4")
             kl, kz = self.train(td, os.path.join(td, "kl"), "--init", start, "--peak-lr", "1e-4", "--kl-teacher", teacher, "--kl-lambda", "50")
             self.assertEqual(kl["kl_lambda"], 50.0)
-            self.assertTrue(any(not np.allclose(pz[k], kz[k], atol=1e-7) for k in pz.files))          # the anchor changed the update
+            self.assertTrue(any(not np.allclose(pz[k], kz[k], atol=1e-7) for k in pz.files if np.issubdtype(pz[k].dtype, np.number)))          # the anchor changed the update
             cw, _ = self.train(td, os.path.join(td, "cw"), "--changed-weight", "0.1", "--weight-decay", "0")
             self.assertEqual((cw["changed_weight"], cw["weight_decay"]), (0.1, 0.0))
             os.remove(os.path.join(td, "flags-coll.u8"))                                              # a source without flags is refused
