@@ -161,6 +161,22 @@ final class EnglishDefaultsNoticeTests: XCTestCase {
         }
     }
 
+    /// Code review 2026-11-04: an activate while the window is on screen re-arms it. Keys while it is up do not show it twice, and a
+    /// click afterwards leaves nothing armed.
+    func testAnActivateWhileShownNeitherShowsItTwiceNorSurvivesAClick() {
+        let (_, notice, store) = rig()
+        a.session.activate()
+        a.type("h")
+        XCTAssertEqual(notice.shown.count, 1)
+        b.session.activate()  // no deactivate in between: the window stays up and the activate arms it again
+        b.type("h")
+        XCTAssertEqual(notice.shown.count, 1, "already on screen: not shown again")
+        notice.click(openSettings: false)
+        XCTAssertFalse(store.pending)
+        b.type("i")
+        XCTAssertEqual(notice.shown.count, 1, "after a click nothing is shown again, even though an activate re-armed it while it was up")
+    }
+
     /// The new app's activate arrives before the old app's deactivate.
     func testActivateOfTheNextAppBeforeTheLateDeactivateOfTheFirst() {
         let (_, notice, store) = rig()

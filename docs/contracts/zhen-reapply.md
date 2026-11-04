@@ -40,7 +40,7 @@
    - `englishOverwrite` 是 true（`zhen-revert.md` §2.1；〔2026-11-04，`english-defaults-notice.md`〕改成 false）；
    - `englishKeyOrder` 是 true（`zhen-revert.md` §2.1；0.6.0 是 false）；
    - `shiftToggle` 是 true（`shift-toggle.md`；〔2026-11-04，`english-defaults-notice.md`〕改成 false）。
-4. **切換鍵只有單按 Shift**：照 `shift-toggle.md`，預設開，不加 Caps Lock 選項。任務 #56 裡 Geoffeuz 要的 Caps Lock 不做，維護者 2026-10-30 決定。
+4. **切換鍵只有單按 Shift**：照 `shift-toggle.md`，預設開（〔2026-11-04，`english-defaults-notice.md`〕改成預設關），不加 Caps Lock 選項。任務 #56 裡 Geoffeuz 要的 Caps Lock 不做，維護者 2026-10-30 決定。
 5. 文件同 PR 改：
    - `s3a.md` 的規則表（第 9、10e 條與 §2.3 的逆序列註明新開關）、`core/include/shanjie.h`；
    - `settings-window.md`、`settings-sidebar.md`；

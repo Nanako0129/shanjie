@@ -945,6 +945,7 @@ public final class Shell {
         panel.show(caret: caret()) { [weak self] openSettings in
             guard let self else { return }
             self.englishNoticeStore.pending = false
+            self.englishNoticeArmed = false   // an activate while it was on screen re-armed it; after a button nothing shows again
             self.englishNotice?.hide()
             if openSettings { self.onOpenCandidateSettings?() }
         }

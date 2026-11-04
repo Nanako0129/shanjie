@@ -25,7 +25,7 @@ final class EnglishNoticeAdapter: NSObject, EnglishNoticePanel, NSWindowDelegate
 
     func show(caret: NSRect?, done: @escaping @MainActor (Bool) -> Void) {
         self.done = done
-        let host = NSHostingView(rootView: EnglishNoticeView(
+        let host = FirstMouseHostingView(rootView: EnglishNoticeView(
             width: Self.width,
             onOpenSettings: { [weak self] in self?.finish(openSettings: true) },
             onAcknowledge: { [weak self] in self?.finish(openSettings: false) }))
@@ -72,4 +72,10 @@ private struct EnglishNoticeView: View {
         .padding(20)
         .frame(width: width)
     }
+}
+
+/// The panel can never become key and the app is never active, so the first click on a button must count (as the candidate cells do,
+/// CandidateCells.swift `acceptsFirstMouse`); otherwise 知道了 could need two clicks and the owed flag would stay.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
