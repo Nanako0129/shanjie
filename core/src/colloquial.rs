@@ -276,6 +276,29 @@ mod tests {
         assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0], STANDARD, &[], &[]), 1);
     }
 
+    /// SINIT sections 1.4 and 1.5 in the fused routes. `learn` empty or all 0 is the pick before the term (the plain `pick` over `fuse`); where the n-gram
+    /// is sure (margin 3 >= tau 2) and candidate 2 is taught, candidate 1 (the better small-model score) cannot be chosen in `fused_pick`, in
+    /// `guarded_pick`'s fused route, or in its plain fallback (a col that is not finite), and candidate 2 still has to win by delta.
+    #[test]
+    fn the_learning_term_reaches_every_route_and_a_taught_candidate_opens_the_gate() {
+        let (ng, ll, col) = ([0.0, -3.0, -3.2], [-5.0, 0.0, -1.0], [0.0, 0.0, 0.0]);
+        let (plain, cell) = ((1.0, 2.0, 0.0), (1.0, 2.0, 0.0));
+        let learn = [0.0, 0.0, 1.0];
+        let nan = [0.0, f64::NAN, 0.0];
+        assert_eq!(fused_pick(&ng, &ll, &col, cell, &[], &[]), 0, "premise: the margin keeps the first");
+        assert_eq!(fused_pick(&ng, &ll, &col, cell, &[], &[0.0; 3]), 0, "all 0 is no term");
+        assert_eq!(fused_pick(&ng, &ll, &col, cell, &[], &learn), 2);
+        assert_eq!(fused_pick(&ng, &ll, &col, (1.0, 2.0, 2.0), &[], &[0.0, 0.0, 0.5]), 0, "delta 2: gain 1.3 is not enough");
+        assert_eq!(fused_pick(&ng, &ll, &col, (1.0, 2.0, 1.0), &[], &[0.0, 0.0, 0.5]), 2, "delta 1: it is");
+        assert_eq!(guarded_pick(&ng, &ll, &col, cell, plain, &[], &learn), 2, "the fused route");
+        assert_eq!(guarded_pick(&ng, &ll, &nan, cell, plain, &[], &[]), 0, "premise: the fallback keeps the first");
+        assert_eq!(guarded_pick(&ng, &ll, &nan, cell, plain, &[], &learn), 2, "the fallback route (plain pick) has the term too");
+        assert_eq!(guarded_pick(&ng, &ll, &nan, cell, plain, &[false, false, true], &learn), 0, "a masked taught candidate opens nothing");
+        // the term is as `pick_masked` has it on the fused scores
+        let eff = fuse(&ll, &[0.0, -2.0, 1.0], 0.7);
+        assert_eq!(fused_pick(&ng, &ll, &[0.0, -2.0, 1.0], (0.7, 2.0, 0.0), &[], &[0.0, 0.0, 1.0]), crate::tinylm::pick_masked(&ng, &eff, 0.7, 2.0, 0.0, &[], &[0.0, 0.0, 1.0]));
+    }
+
     /// A col that is +inf, -inf or NaN (the anchor's or another candidate's) must not decide: the plain pick with the given triple is used.
     /// With ng [-10.0, -10.3], ll [-5.0, -3.8] the plain (header) triple (0.3, 2, 0.25) keeps candidate 0; a +inf col would make the fused score of
     /// candidate 1 infinite (and a -inf anchor col makes col_1 - col_0 infinite) and so pick it.

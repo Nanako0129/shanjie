@@ -2838,7 +2838,7 @@ fn sinit_preference_class_can_be_reverted_by_one_repick() {
 /// SINIT section 2, learned once with the shipping models (rerank on, standard level; maintainer's choice 2026-11-01): `before` is asserted first, then
 /// the first syllable is single-picked as `want` and Enter, then the same reading must show `sent`. Two rows of eval/dev/user-reported.txt in the
 /// formal profile only (row 31, 再測一次, is right by default with 會意 SJ-SR-8-15M; row 78, 直式顯示, replaces it, and row 163 is right in chat already), and the semantic
-/// teach row 喂你在嗎 of eval/learn/sinit-cases.tsv in chat (代你保管, the row until SJ-SR-8-15M, is not learned by one teach with the new cells: it shows 帶你保管 in
+/// teach row 喂你在嗎 of eval/learn/sinit-cases.tsv in chat (代你保管, the row until 會意 SJ-SR-8-15M, is not learned by one teach with the new cells: it shows 帶你保管 in
 /// both profiles, measured 2026-11-06).
 fn sinit_learned_once(p: lm::Profile, reading: &str, before: &str, want: &str, sent: &str) {
     let mut e = ship(p);
