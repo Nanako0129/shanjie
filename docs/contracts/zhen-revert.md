@@ -1,6 +1,6 @@
 # 中英混打第四片：直接回退（每一鍵判斷、不查單字表）
 
-狀態：2026-10-30 接回，另加 `zhen-reapply.md`（新開關「快打時鍵序顛倒不當英文」，預設開，(b) 逆序因此預設不發生）。2026-10-28 曾因維護者實機誤觸太多從 main revert（研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。
+狀態：〔2026-11-04〕殼的「重打同一個位置算英文」預設改成**關**（沒有值當 false；已安裝的人一次重設為關並跳說明視窗），見 `english-defaults-notice.md`，本文下面寫「預設開／true」的地方指的是 2026-11-04 之前。2026-10-30 接回，另加 `zhen-reapply.md`（新開關「快打時鍵序顛倒不當英文」，預設開，(b) 逆序因此預設不發生）。2026-10-28 曾因維護者實機誤觸太多從 main revert（研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。
 
 〔2026-11-02：融合層的讀音通道項（ν 項）已由 `docs/contracts/reading-decode-2.md` 拿掉，讀音改由 n-gram 解碼器的讀音項處理（所有設定、三檔、語意校正開或關都生效）；`Engine::set_reading_channel`、`--no-reading-channel` 與摘要標記 `+rc` 一起退場。本檔寫到讀音通道項、`+rc` 之處，是 v0.6.1 以前出貨的行為與當時的量法，不是現在的行為。〕
 
@@ -34,7 +34,7 @@
 
 | 觸發 | 開關 | 殼的預設 |
 |---|---|---|
-| (a) 覆寫同一欄 | **新開關「重打同一個位置算英文」**（`set_english_overwrite`，鍵 `englishOverwrite`） | 開（§4 的量測過了才定；§9 第 1 題） |
+| (a) 覆寫同一欄 | **新開關「重打同一個位置算英文」**（`set_english_overwrite`，鍵 `englishOverwrite`） | 開（§4 的量測過了才定；§9 第 1 題）；〔2026-11-04，`english-defaults-notice.md`〕**關** |
 | (b) 逆序 | 第三片的「依按鍵順序判斷英文」（`set_english_key_order`，鍵 `englishKeyOrder`）；〔2026-10-30〕另受「快打時鍵序顛倒不當英文」（`set_english_reversal_guard`，鍵 `englishReversalGuard`，預設開）管：它開著時 (b) 不發生（`zhen-reapply.md` §1.2） | **開**（維護者 2026-10-27；原本關） |
 | (c) 音節完成時詞庫沒有這個音節——**空白鍵** | 中英混打總開關（`english`） | 開 |
 | (c) ——**聲調鍵** | 「依按鍵順序判斷英文」 | 開 |
@@ -169,7 +169,7 @@
 
 - **核心**：`Engine::set_english_overwrite(bool) -> Result<Output, EngineError>`，預設 **true**（`Engine::new`）；`set_english_key_order` 預設改成 **true**（原本 false；核心與殼同時改，不像第一片把預設留在核心外，§9 第 1 題）；`set_english_inline` 刪掉（§9 第 2 題）；`load_english` 在 PR 1 **留著**（§2.8）。切換這兩個開關時沒有窗要關、英文段是文字不受影響，只記開關、回快照。`#[doc(hidden)]` 工具鉤子：`english_reverted() -> Option<Revert>`（`Revert::{Overwrite, Order, Missing}`，最近一次 `key()` 是否回退、哪一種；每次 `key()` 開頭清掉，和 `english_autokept` 同一種做法）、`english_split() -> bool`（最近一次 `key()` 是否切分）、`english_shadow() -> String`（影子照欄位順序）、`english_columns` 留著；`english_open`、`english_inline_shown`、`english_autokept`、`english_evidence`、`english_window_shadow`、`english_shadow_len` 刪掉。`pub const ENGLISH_SHORT`。
 - **C ABI**（`core/include/shanjie.h`，s3a §6 同步）：新增 `shanjie_engine_set_english_overwrite(engine, uint32_t enabled, ShanjieOutput **out)`，回傳碼與快照照 `set_english_key_order`（0；NULL 回 1；0、1 以外回 2、狀態不變）。PR 1 只刪 `shanjie_engine_set_english_inline`（`shanjie_engine_load_english` 到 PR 2 才刪，§2.8）。`set_english`、`set_english_key_order` 的註解改寫成本片的行為（三種觸發、英文段、短詞清單、鄰鍵優先）。`abi_smoke.c` 跟著改。
-- **殼**：UserDefaults 鍵 `englishOverwrite`（沒有值當 true）、`englishKeyOrder`（沒有值改當 **true**；存過 false 的仍是 false）；兩個都在每次建引擎時送（放在 `setEnglishKeyOrder` 旁邊）。`loadEnglish`、`englishAvailable` 在 PR 1 不動（§2.8）。設定視窗「中英混打（實驗）」底下：拿掉「英文的顯示」那一列（`englishInline` 的 store 與 `setEnglishInline` 呼叫一起刪）；「依按鍵順序判斷英文」留著、預設打勾，說明改成「`ls`、`pr`、`a4` 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。」；在它之後加勾選「重打同一個位置算英文」，預設打勾，說明「`ok`、`rust`、`gta6` 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。」。反灰條件和「依按鍵順序判斷英文」相同。中英混打的說明那一行改成「打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。」。〔2026-10-27 實作修訂：兩句說明照 code-review 改成這樣。原寫法「或打出詞庫沒有的音節」連空白鍵的 (c) 也算，但空白鍵的 (c) 做出來的是完成的 token、沒有還原點，Esc 不會變回注音；例子不用 `cup`，因為鄰鍵打錯開著時 `cup` 會被收成中文（§2.9），`so` 鄰鍵救不回來。〕選單不加項目。
+- **殼**：UserDefaults 鍵 `englishOverwrite`（沒有值當 true；〔2026-11-04，`english-defaults-notice.md`〕改成沒有值當 **false**）、`englishKeyOrder`（沒有值改當 **true**；存過 false 的仍是 false）；兩個都在每次建引擎時送（放在 `setEnglishKeyOrder` 旁邊）。`loadEnglish`、`englishAvailable` 在 PR 1 不動（§2.8）。設定視窗「中英混打（實驗）」底下：拿掉「英文的顯示」那一列（`englishInline` 的 store 與 `setEnglishInline` 呼叫一起刪）；「依按鍵順序判斷英文」留著、預設打勾，說明改成「`ls`、`pr`、`a4` 這類字不用按 Shift。開了之後，注音鍵沒照聲母、介音、韻母的順序，或打了聲調鍵才發現音節不存在，整段會變成英文（馬上按 Esc 變回注音）。」；在它之後加勾選「重打同一個位置算英文」，預設打勾，說明「`ok`、`rust`、`gta6` 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。」。反灰條件和「依按鍵順序判斷英文」相同。中英混打的說明那一行改成「打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。」。〔2026-10-27 實作修訂：兩句說明照 code-review 改成這樣。原寫法「或打出詞庫沒有的音節」連空白鍵的 (c) 也算，但空白鍵的 (c) 做出來的是完成的 token、沒有還原點，Esc 不會變回注音；例子不用 `cup`，因為鄰鍵打錯開著時 `cup` 會被收成中文（§2.9），`so` 鄰鍵救不回來。〕選單不加項目。
 - **文件同 PR 改**：`docs/contracts/s3a.md`（§3.1 的表）、`core/include/shanjie.h`、`docs/contracts/zhen-mixed.md`／`zhen-inline.md`／`zhen-keyorder.md` 的狀態列指到這份並寫明哪些節被取代、`docs/contracts/digits.md` A.3.4「中英混打的影子」那一點（改成「字母表鍵在未完成音節裡和其他注音鍵一樣記影子；英文段開著時字母表鍵接在英文段後面」）、`docs/contracts/settings-window.md` §2.2、`docs/contracts/s3b.md` §13.2 與 §13.2 的 check-app 一段、`docs/PLAN.md` 的中英混打一項、README 的功能一句、研究紀錄（決定、量測表、數字、雜湊）、`docs/methodology.md`（若有教訓）。網站 `site/` 的說明與授權句另問維護者再部署。
 
 ### 3.1 s3a 規則表要改的列（executor 同一個 PR）

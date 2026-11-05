@@ -37,10 +37,10 @@
    - 評測工具 `english-sim`（`cli/src/english.rs`）：加 `--reversal-guard on|off`，**預設 off**，建引擎時送 `set_english_reversal_guard`。這樣它的臂 A–D、`revert_b_*` 欄與 `--recall` 的 probe 照舊是 `zhen-revert.md` §4 的意思，`cli/tests/english_sim.rs` 的固定種子數字不變；另加一個測試：`--reversal-guard on` 時 `revert_b_*` 是 0、`probe ls` 是中文。
 3. **四個開關在接回後的殼預設值**（UserDefaults 沒有值時；存過值的照存的值）：
    - `englishReversalGuard` 是 true（新）；
-   - `englishOverwrite` 是 true（`zhen-revert.md` §2.1）；
+   - `englishOverwrite` 是 true（`zhen-revert.md` §2.1；〔2026-11-04，`english-defaults-notice.md`〕改成 false）；
    - `englishKeyOrder` 是 true（`zhen-revert.md` §2.1；0.6.0 是 false）；
-   - `shiftToggle` 是 true（`shift-toggle.md`）。
-4. **切換鍵只有單按 Shift**：照 `shift-toggle.md`，預設開，不加 Caps Lock 選項。任務 #56 裡 Geoffeuz 要的 Caps Lock 不做，維護者 2026-10-30 決定。
+   - `shiftToggle` 是 true（`shift-toggle.md`；〔2026-11-04，`english-defaults-notice.md`〕改成 false）。
+4. **切換鍵只有單按 Shift**：照 `shift-toggle.md`，預設開（〔2026-11-04，`english-defaults-notice.md`〕改成預設關），不加 Caps Lock 選項。任務 #56 裡 Geoffeuz 要的 Caps Lock 不做，維護者 2026-10-30 決定。
 5. 文件同 PR 改：
    - `s3a.md` 的規則表（第 9、10e 條與 §2.3 的逆序列註明新開關）、`core/include/shanjie.h`；
    - `settings-window.md`、`settings-sidebar.md`；

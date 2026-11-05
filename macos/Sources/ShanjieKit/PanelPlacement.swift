@@ -52,4 +52,16 @@ public enum PanelPlacement {
         top = min(top, visible.maxY)
         return (NSPoint(x: x, y: top), index)
     }
+
+    /// docs/contracts/english-defaults-notice.md section 3: the bottom-left corner of the explanation window. The screen is the one
+    /// holding the caret (the main one when the caret is unknown). A caret in the upper half of that screen puts the window in the
+    /// middle of the lower half of its visible frame, a caret in the lower half in the middle of the upper half, so the window never
+    /// covers the composition or the candidate bar beside the caret.
+    public static func noticeOrigin(caret: NSRect?, size: NSSize, screens: [Screen], main: Int) -> NSPoint {
+        let screen = screens[screenIndex(for: caret, in: screens, main: main)]
+        let visible = screen.visibleFrame
+        let caretInUpperHalf = caret.map { $0.midY >= screen.frame.midY } ?? false
+        let centerY = visible.minY + visible.height * (caretInUpperHalf ? 0.25 : 0.75)
+        return NSPoint(x: visible.midX - size.width / 2, y: centerY - size.height / 2)
+    }
 }

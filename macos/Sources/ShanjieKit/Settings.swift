@@ -32,8 +32,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var fuzzyFlags: UInt32 = 0
     @Published public private(set) var fuzzyAdjacentEnabled = true
     /// The 重打同一個位置算英文 choice under the 中英混打 toggle (zhen-revert section 3): a key over the symbol already in its column reverts
-    /// to the raw keys as English. Default true. Enabled when the toggle is enabled and on.
-    @Published public private(set) var englishOverwrite = true
+    /// to the raw keys as English. Default false since docs/contracts/english-defaults-notice.md section 1. Enabled when the toggle is enabled and on.
+    @Published public private(set) var englishOverwrite = false
     @Published public private(set) var englishOverwriteEnabled = false
     /// The 依按鍵順序判斷英文 choice (zhen-keyorder section 3, default true since zhen-revert): a key out of column order, and a tone key
     /// that makes a syllable the lexicon lacks, revert to English. Enabled on the overwrite choice's condition.
@@ -60,8 +60,8 @@ public final class SettingsModel: ObservableObject {
     /// 經典台詞 (quote-pack contract section 2): off until chosen.
     @Published public private(set) var quotePack = false
     @Published public private(set) var itPack = true
-    /// 單按 Shift 切換中英 (shift-toggle section 1).
-    @Published public private(set) var shiftToggle = true
+    /// 單按 Shift 切換中英 (shift-toggle section 1). Default false since docs/contracts/english-defaults-notice.md section 1.
+    @Published public private(set) var shiftToggle = false
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (acg-pack contract A2.4): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
