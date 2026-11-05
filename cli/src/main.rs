@@ -157,10 +157,11 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 /// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/contracts/sj-lm-7-pr2.md section 2.7; empty when none, always present).
 /// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
 /// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
+/// `col` (`--colloquial-core`, only a row whose pick was the colloquial one and has an `ll`) is the last key, one entry per pool candidate. See run_lm.
 /// `extra` (`--tinylm-scores-topk`) continues the `ll` list past the 8 the rerank scored: one entry per further candidate, `null` for a
 /// candidate the small model could not score (longer than its context); it is empty without the option, so the line is then unchanged.
 #[allow(clippy::too_many_arguments)]
-fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, extra: &[Option<f64>], masked: &[bool], idx: Option<&[usize]>) -> Result<String, String> {
+fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chosen: usize, ll: Option<&[f64]>, extra: &[Option<f64>], masked: &[bool], idx: Option<&[usize]>, col: Option<&[f64]>) -> Result<String, String> {
     // JSON has no inf / NaN (Python's json.loads rejects inf, and a NaN would slip through parity.py's tolerance test).
     if !ng.iter().chain(ll.unwrap_or(&[])).chain(extra.iter().flatten()).all(|x| x.is_finite()) {
         return Err(format!("--tinylm-scores: row {i} has a non-finite score"));
@@ -180,6 +181,11 @@ fn scores_line(i: usize, ng: &[f64], ok: &[bool], ed: &[u32], glen: usize, chose
     s += &format!(", \"masked\": {}", list(masked.iter().enumerate().filter(|(_, &m)| m).map(|(k, _)| k.to_string()).collect()));
     if let Some(idx) = idx {
         s += &format!(", \"idx\": {}", list(idx.iter().map(usize::to_string).collect()));
+    }
+    // The colloquial score of each candidate (last key, so a line without it is byte for byte what it was). A col that is not finite is `null`:
+    // the engine then falls back to the plain pick (`colloquial::guarded_pick`) and `c` is that pick, not the fused one.
+    if let Some(col) = col {
+        s += &format!(", \"col\": {}", list(col.iter().map(|x| if x.is_finite() { format!("{x:?}") } else { "null".to_string() }).collect()));
     }
     Ok(s + "}\n")
 }
@@ -232,6 +238,9 @@ struct RowOut {
 /// and the `--rerank-level`) or the plain `rerank`. It refuses no setting, so
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
+/// On a row where the term is in effect (chat, paired `.sjtl`, an `ll`), `--tinylm-scores` ends with `"col": [...]`, the colloquial score of each
+/// candidate in the line's order (`null` if not finite, then `c` is the plain pick), so the fused pick can be recomputed offline
+/// (`colloquial::fused_pick` with `colloquial::cell(level)`; experiments/s7a-tinylm/fusegrid.py `fuse_pick`). Other lines (formal, no `--colloquial-core`) are unchanged.
 ///
 /// `--colloquial-first-unigram` (research, SR-TW-C in docs/research-log.md 2026-11-04): the colloquial lc scores the first word of each split with
 /// the table's unigram estimate instead of P(w | `<s>`) (`Colloquial::set_first_unigram`); it needs `--colloquial-core`, and the tag becomes
@@ -570,12 +579,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 }
             }
             if want_scores {
+                // The engine's col, the one `rerank_colloquial` fused (same words, same table); only where it ran with an `ll`.
+                let col: Option<Vec<f64>> = colloq_on.filter(|_| ll.is_some()).map(|co| pool.iter().map(|&p| co.col(&scored[p].1.iter().map(|w| w.0).collect::<Vec<_>>())).collect());
                 let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
                 // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
                 // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
                 let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &extra, &manual_mask(&used, &top, lex.manual()), idx)?;
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &extra, &manual_mask(&used, &top, lex.manual()), idx, col.as_deref())?;
             }
         }
         let pick = len.apply(&surf[chosen]);

@@ -131,7 +131,7 @@ fn the_term_changes_row_25() {
     assert!(new.stdout.contains("+colloq:81c2470d"), "{}", new.stdout);
     assert_eq!(ship.dump, new.dump, "the dump keeps the decoder's order");
     assert_eq!(ship.words, new.words);
-    let ll = |s: &str| s[s.find("\"ll\":").unwrap()..].to_string();
+    let ll = |s: &str| s[s.find("\"ll\":").unwrap()..s.find("\"masked\":").unwrap()].to_string();   // the term adds `col` after `masked`
     assert_eq!(ll(&ship.sc), ll(&new.sc), "the small model's LLs are the same numbers");
 }
 
@@ -288,4 +288,47 @@ fn the_colloquial_term_stands_alone() {
     args.extend(["--rows".to_string(), rows.clone(), "--colloquial-core".to_string(), TABLE.to_string(), "--no-reading-channel".to_string()]);
     let o = run(&args);
     assert!(!o.status.success() && text(&o.stderr).contains("unknown argument"), "{}", text(&o.stderr));
+}
+
+/// The numbers of the list under `"key": [...]` in one `--tinylm-scores` line (`null` is NaN); None when the key is not there.
+fn list_of(line: &str, key: &str) -> Option<Vec<f64>> {
+    let rest = line.split(&format!("\"{key}\": [")).nth(1)?;
+    let body = rest.split(']').next().unwrap();
+    Some(body.split(',').map(str::trim).filter(|t| !t.is_empty()).map(|t| if t == "null" { f64::NAN } else { t.parse().unwrap() }).collect())
+}
+
+/// FUSE-1: with the colloquial core in chat, every record that has an `ll` ends with `col` (one entry per candidate), and `colloquial::fused_pick` over the
+/// record's ng, ll, col and masked with the level's `cell` is the record's `c`; without the core the line has no `col` key and is the line it was.
+#[test]
+fn scores_carry_col_and_recompute_the_pick() {
+    use core::colloquial::{cell, fused_pick};
+    use core::tinylm::RerankLevel;
+    let d = tmp("colscores");
+    let rows = level_rows(&d);
+    let set = ["--rows", rows.as_str()];
+    let mut checked = 0;
+    for (i, (name, level)) in [("standard", RerankLevel::Standard), ("conservative", RerankLevel::Conservative), ("aggressive", RerankLevel::Aggressive)].into_iter().enumerate() {
+        let (a, b) = (tmp(&format!("colsc{i}a")), tmp(&format!("colsc{i}b")));
+        let extra = ["--rerank-level", name];
+        let with = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
+        let without = full_run(&b, &BASE[..9], &set, &extra);
+        assert!(without.sc.lines().all(|l| !l.contains("\"col\"")), "{name}: no core, no col");
+        assert_eq!(with.sc.lines().count(), without.sc.lines().count());
+        for l in with.sc.lines() {
+            let n = list_of(l, "ng").unwrap().len();
+            assert!(l.ends_with("]}"), "{l}");
+            let col = list_of(l, "col").unwrap_or_else(|| panic!("{name}: no col on {l}"));
+            assert_eq!(col.len(), n, "{l}");
+            assert!(col.iter().all(|x| x.is_finite()), "premise: these rows have finite col: {l}");
+            let ll = list_of(l, "ll").unwrap();
+            let mut masked = vec![false; n];
+            for k in list_of(l, "masked").unwrap() {
+                masked[k as usize] = true;
+            }
+            let c: usize = l.split("\"c\": ").nth(1).unwrap().split(',').next().unwrap().parse().unwrap();
+            assert_eq!(fused_pick(&list_of(l, "ng").unwrap(), &ll, &col, cell(level), &masked, &[]), c, "{name}: {l}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 9, "{checked}");
 }

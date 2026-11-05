@@ -56,6 +56,27 @@ class TestPick(unittest.TestCase):
         self.assertEqual(fg.correct([r], 0.1, 0.5), 0)
 
 
+class TestFusePick(unittest.TestCase):
+    # A record written by `shanjie-eval --tinylm-scores` with the colloquial core (cli/tests/colloquial.rs scores_carry_col_and_recompute_the_pick):
+    # row 25 of eval/bench/suite-v1/dev302.txt; the engine's standard cell (0.7, 2, 0) picks 1.
+    ROW25 = json.loads(
+        '{"i": 1, "n": 8, "ng": [-10.635272812609113, -10.963805120082714, -13.05462048221245, -13.065911436846172, -13.38315278968605, '
+        '-13.468519119593791, -13.859876036299964, -13.960687219511266], "ok": [0, 1, 0, 0, 0, 0, 0, 0], "ed": [2, 0, 3, 2, 1, 2, 2, 2], "glen": 6, '
+        '"c": 1, "ll": [-10.580215592815419, -9.090660490126172, -13.635530566463636, -13.641719011022145, -12.975904555421721, -13.913263025805108, '
+        '-14.195815231416766, -13.758058798901743], "masked": [], "col": [-10.400915523923112, -10.62023437741395, -13.254206025944297, '
+        '-14.772111578639494, -13.473524879435136, -14.959432102574635, -16.088125672313918, -14.959432102574635]}')
+
+    def test_reproduces_the_rust_pick(self):
+        self.assertEqual(fg.fuse_pick(self.ROW25, 0.7, 2, 0), self.ROW25["c"])
+
+    def test_gates_and_masks(self):
+        r = dict(self.ROW25)
+        self.assertEqual(fg.fuse_pick(r, 0.7, 0.1, 0), 0)          # margin 0.33 >= tau: the n-gram first
+        self.assertEqual(fg.fuse_pick(r, 0.7, 2, 5), 0)            # delta above the gain: first
+        self.assertNotEqual(fg.fuse_pick({**r, "masked": [1]}, 0.7, 2, 0), 1)   # a masked candidate is never chosen
+        self.assertEqual(fg.fuse_pick({**r, "n": 1, "ng": r["ng"][:1], "ll": r["ll"][:1], "col": r["col"][:1]}, 0.7, 2, 0), 0)
+
+
 class TestDelta(unittest.TestCase):
     """S7e section 2.2: the delta gate."""
 
