@@ -15,16 +15,16 @@
    - 不帶新選項時，所有既有輸出逐位元組不變；特別是 wikijudge6 的指令（`--part wiki --wiki-range 335000 340000 --wiki-name wikijudge6 --tune-no-trad-tw-phrases`）照舊得到 `9d792e5a…`（`test_build_tune.py` 用合成來源斷言「只帶 `--tune-no-trad-tw-phrases`」的 wiki 輸出和改動前相同）。
    - 維基那半的取樣接在 cv 那半的亂數狀態之後，所以兩邊都要帶 `--cv-no-trad-tw-phrases`，而且 188 上的 CV／Tatoeba 來源檔與讀音資料要和 Mac 的逐檔雜湊相同。
    - 指令（事先固定）：
-     - Mac：`S2_WORK=~/.cache/shanjie/work/tw0 python3 experiments/s2/build_tune.py --part cv --cv-no-trad-tw-phrases --cv-name cvtune-tw0`
+     - Mac：`S2_WORK=<另開的工作目錄> python3 experiments/s2/build_tune.py --part cv --cv-no-trad-tw-phrases --cv-name cvtune-tw0`
      - 188：`S2_WORK=<188 的工作目錄> python3 experiments/s2/build_tune.py --part wiki --cv-no-trad-tw-phrases --tune-no-trad-tw-phrases --wiki-name wikitune-tw0`
-     - `S2_WORK` 另開目錄，不碰 `~/.cache/shanjie/work/s2/tune/` 裡既有的 `colloquial-train.txt` 等檔；跑前跑後核對口語池 `eb905936…` 的雜湊不變。
+     - `S2_WORK` 另開目錄，不碰既有工作目錄裡的 `colloquial-train.txt` 等檔；跑前跑後核對口語池 `eb905936…` 的雜湊不變。
 2. **去重**（同 2026-10-18 clean 版的做法，範圍改成這一輪會意真正的訓練文字）：`tools/holdout_guard.py report --no-trad-tw-phrases` 把兩份新檔比對 SR-TW 的七個訓練來源，報告裡 `rows` 列出的列從檔案拿掉，其餘照原順序寫成 `cvtune-clean-tw0`、`wikitune-clean-tw0`。七個來源（研究紀錄「SR-TW 訓練開跑與 D1」節、SJ-LM-7 凍結的 `dedup-final`）：維基 dump 前 200,000 篇（`--wiki … --articles 200000`）、口語池 `eb905936…`、`synth.txt` `bec7a6a2…`、g0v `cedad812…`、PTT 內文 `f42d5c8b…`、PTT 推文 `6568bc66…`、字幕（`dedup-final/subs` 那一份，雜湊在跑之前從 Mac 的檔算出、寫進腳本與報告）。
    - 平行：維基用 `--procs`；每個文字來源各開一個 `holdout_guard report` 程序，和維基的池同時跑，程序數加起來等於核心數；最後合併各報告的 `rows`（聯集）。合併的程式與腳本一起送審。
 3. **輸入核對**（跑之前，不符就停）：維基 dump `zhwiki-20261001-pages-articles.xml.bz2` `5db9052e…`、`TWPhrases.txt` `bcb435b7…`（`build_counts.py` 鎖的那一份）、上面七個訓練來源、CV／Tatoeba 來源檔與讀音資料（`tools/readings.py` 讀的萌典與 McBopomofo 檔；188 上的雜湊必須等於 Mac 上的，腳本先比對）。
-4. **輸出位置**：列檔全部在 repo 外（Mac 的 `~/.cache/shanjie/work/tw0/` 與 `~/.cache/shanjie/clean/`，188 上在 `%USERPROFILE%\shanjie-private\`，用完刪）；研究紀錄與 `eval/README.md` 只寫列數與 SHA-256。
+4. **輸出位置**：列檔全部在 repo 外（Mac 與 188 的私人工作目錄，188 上用完刪）；研究紀錄與 `eval/README.md` 只寫列數與 SHA-256。
 5. **機器**：
    - cvtune 那半在 Mac（格式轉換，單程序，幾分鐘）。
-   - wikitune 那半與兩份的去重放 188（維護者 2026-11-04「那改188」）。讀 dump 前 300,000 篇是單一串流、只能單核心，這一步經維護者同意在 188 以單程序跑（負載檢查對它只記錄，記秒數）；去重照上面的平行方式用滿核心。腳本照 188 的規則（`fullspeed-wsl.ps1`、心跳回報產出、掃錯、私人檔用完刪、從複本執行），送出前 fresh verifier 審過。估 60 分鐘，超過 120 分鐘停。
+   - wikitune 那半與兩份的去重放 188（維護者 2026-11-04「那改188」）。讀 dump 前 300,000 篇是單一串流、只能單核心，這一步經維護者同意在 188 以單程序跑（負載檢查對它只記錄，記秒數）；去重照上面的平行方式用滿核心。腳本照 188 的規則（開跑前關掉降速、心跳回報產出、掃錯、私人檔用完刪、從複本執行），送出前 fresh verifier 審過。估 60 分鐘，超過 120 分鐘停。
 
 ## 2. 怎麼看到它有效（驗收）
 
