@@ -104,7 +104,9 @@ class Pick(unittest.TestCase):
         for level, name in (("standard", "STANDARD"), ("conservative", "CONSERVATIVE"), ("aggressive", "AGGRESSIVE")):
             m = re.search(rf"pub const {name}: \(f64, f64, f64\) = \(([^)]*)\);", src)
             self.assertEqual(tuple(float(x) for x in m.group(1).split(",")), R.COLLOQ_CELLS[level], name)
-        self.assertEqual(len(set(R.COLLOQ_CELLS.values())), 3)
+        # the aggressive cell is the standard one since 會意 SJ-SR-8-15M (docs/contracts/sr-tw-product.md section 1); the conservative one differs
+        self.assertEqual(R.COLLOQ_CELLS["aggressive"], R.COLLOQ_CELLS["standard"])
+        self.assertEqual(len(set(R.COLLOQ_CELLS.values())), 2)
 
     def test_rows_without_ll_keep_the_first(self):
         self.assertEqual(R.ship_picks(PLAIN, [row([0.0, -0.1], None, [0, 1])]), [0])

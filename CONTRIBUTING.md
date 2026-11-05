@@ -37,7 +37,7 @@
 gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-gh release download sj-sr-7-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-sr-8-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
 gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D data/lm
 gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
@@ -45,7 +45,7 @@ gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p coll
 # curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/sj-lm-7-9.7m/bigram.sjlm
 # curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/sj-wc-6-512c/classes.sjc
 # curl -L --create-dirs -o data/lm/kn.sjkn https://github.com/Nanako0129/shanjie/releases/download/sj-kn-2-397k/kn.sjkn
-# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/sj-sr-7-15m/tinylm.sjtl
+# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/sj-sr-8-15m/tinylm.sjtl
 # curl -L --create-dirs -o data/lm/trigram.sjt3 https://github.com/Nanako0129/shanjie/releases/download/sj-cx-2-7.7m/trigram.sjt3
 # curl -L --create-dirs -o data/lm/trigram-chat.sjt3 https://github.com/Nanako0129/shanjie/releases/download/sj-cx-2-950k/trigram-chat.sjt3
 # curl -L --create-dirs -o data/lm/colloquial.sjlm https://github.com/Nanako0129/shanjie/releases/download/sj-cl-2-69k/colloquial.sjlm

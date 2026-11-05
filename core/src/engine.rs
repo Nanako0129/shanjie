@@ -1223,12 +1223,14 @@ impl Engine {
 
     /// The colloquial table at `path` (docs/contracts/colloquial-term.md section 2.2), with the word sets of its k term read from the
     /// engine's lexicon folder (`mcbpmf-data.txt`, `overlay-add.tsv`) and the pack rows this engine was built with. Callable before or
-    /// after `load_lm` / `load_tinylm`: the pairing is checked per job. Fails (the previous table, or none, stays) when the engine has no
-    /// data folder or a file cannot be read or parsed. Drops the pending job.
+    /// after `load_lm` / `load_tinylm`: the pairing is checked per job. Turns the SR-TW-M first-word estimate on (`Colloquial::unseen_start_unigram`).
+    /// Fails (the previous table, or none, stays) when the engine has no data folder or a file cannot be read or parsed. Drops the pending job.
     pub fn load_colloquial(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let co = Colloquial::load_from_dir(path, dir, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        let mut co = Colloquial::load_from_dir(path, dir, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        // The shipping setting (docs/contracts/sr-tw-product.md section 1): a first word the table has no `<s>` bigram for is scored by the unigram estimate.
+        co.set_unseen_start_unigram(true);
         self.colloquial = Some(Arc::new(co));
         Ok(())
     }

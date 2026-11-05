@@ -41,9 +41,11 @@ fn zhi() -> Row {
 fn yi() -> Row {
     row("|奕|ㄧˋ")
 }
-/// Several rewrites of the small model while it is typed (3 with `Rerank::Each`, measured with the decoder's reading term off; 1 with it).
+/// Several rewrites of the small model while it is typed (3 with `Rerank::Each`, measured with the decoder's reading term off, 2026-11-06 with the 會意 SJ-SR-8-15M
+/// file: row 77 of eval/dev/user-reported.txt; the row used until then, 我好奇其他競品記憶體都佔多少, is rewritten once with the new file, and so are most rows: of the
+/// 483 rows of user-reported and dev302 this setting rewrites 20 at least twice, 5 at least three times).
 fn guqi() -> Row {
-    row("|我好奇其他競品記憶體都佔多少|ㄨㄛˇ ㄏㄠˋ ㄑㄧˊ ㄑㄧˊ ㄊㄚ ㄐㄧㄥˋ ㄆㄧㄣˇ ㄐㄧˋ ㄧˋ ㄊㄧˇ ㄉㄡ ㄓㄢˋ ㄉㄨㄛ ㄕㄠˇ")
+    row("|往前幾個月讀|ㄨㄤˇ ㄑㄧㄢˊ ㄐㄧˇ ㄍㄜˋ ㄩㄝˋ ㄉㄨˊ")
 }
 /// A first tone on every other syllable: ㄍㄣ ㄨㄛˇ ㄕㄨㄛ ㄨㄛˇ ㄗㄞˋ ㄏㄨㄢˋ.
 fn tone1() -> Row {
@@ -224,8 +226,8 @@ fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
     let len = load_lenient().unwrap();
     let r = guqi();
     let (_g, mut e) = engine(false);
-    // The rule is about the rewriting, not the reading term: with the term (the default) the n-gram's own displays are right sooner and this row is rewritten
-    // once while it is typed (measured 2026-11-02, reading-decode-2), so the row serves the rule with the term off, where it is rewritten three times.
+    // The rule is about the rewriting, not the reading term: with the term (the default) the n-gram's own displays can be right sooner, so the row serves the
+    // rule with the term off, where it is rewritten three times (2026-11-06; the row before it, 2026-11-02, was rewritten once with the term on).
     e.set_reading_decode(false);
     let each = go(&mut e, &r, &len, EACH);
     let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final, strict: false });
@@ -386,9 +388,11 @@ fn colloquial_replay_agrees_with_the_cli() {
 }
 
 /// docs/contracts/reading-decode-2.md section 2: the replay's engine (`Engine::load_lm` on the real data folder, which builds the reading table with the one
-/// function the CLI calls) decodes with the reading term by default, so its choices are the CLI's (equal `top1_sha256`) on main's two sentences, in the written
-/// and the chat setting (standard strength, the colloquial table loaded in chat); `--no-reading-decode` is the CLI's `--no-reading-decode`. The premise is
-/// asserted for each setting first: the term changes the CLI's choice among these rows, so an engine that left the term out could not pass. The summary tag
+/// function the CLI calls) decodes with the reading term by default, so its choices are the CLI's (equal `top1_sha256`) on main's two sentences and row 127 of
+/// eval/dev/user-reported.txt, in the written and the chat setting (standard strength, the colloquial table loaded in chat); `--no-reading-decode` is the CLI's
+/// `--no-reading-decode`. The premise is asserted for each setting first: the term changes the CLI's choice among these rows, so an engine that left the term out
+/// could not pass. With the 會意 SJ-SR-8-15M file the re-ranker repairs main's two sentences in chat by itself, so there it is row 127 (急 with the term, 吃 without,
+/// measured 2026-11-06) that carries the premise; in the written setting rows 46 and 127 of user-reported change as well. The summary tag
 /// ends `+rd+rx:<sha8>` by default and has neither mark with the option.
 #[test]
 fn reading_decode_replay_agrees_with_the_cli() {
@@ -397,7 +401,8 @@ fn reading_decode_replay_agrees_with_the_cli() {
     let rows = dir.join("rows.txt");
     std::fs::write(
         &rows,
-        "|以敵偽人員的名字命名|ㄧˇ ㄉㄧˊ ㄨㄟˋ ㄖㄣˊ ㄩㄢˊ ㄉㄜ˙ ㄇㄧㄥˊ ㄗˋ ㄇㄧㄥˋ ㄇㄧㄥˊ\n|這個屬叫散白蟻屬|ㄓㄜˋ ㄍㄜ˙ ㄕㄨˇ ㄐㄧㄠˋ ㄙㄢˋ ㄅㄞˊ ㄧˇ ㄕㄨˇ\n",
+        "|以敵偽人員的名字命名|ㄧˇ ㄉㄧˊ ㄨㄟˋ ㄖㄣˊ ㄩㄢˊ ㄉㄜ˙ ㄇㄧㄥˊ ㄗˋ ㄇㄧㄥˋ ㄇㄧㄥˊ\n|這個屬叫散白蟻屬|ㄓㄜˋ ㄍㄜ˙ ㄕㄨˇ ㄐㄧㄠˋ ㄙㄢˋ ㄅㄞˊ ㄧˇ ㄕㄨˇ\n\
+         除了|這個待辦還有哪些要做的我認為比較急|ㄓㄜˋ ㄍㄜ˙ ㄉㄞˋ ㄅㄢˋ ㄏㄞˊ ㄧㄡˇ ㄋㄚˇ ㄒㄧㄝ ㄧㄠˋ ㄗㄨㄛˋ ㄉㄜ˙ ㄨㄛˇ ㄖㄣˋ ㄨㄟˊ ㄅㄧˇ ㄐㄧㄠˋ ㄐㄧˊ\n",
     )
     .unwrap();
     let rows = rows.to_str().unwrap();

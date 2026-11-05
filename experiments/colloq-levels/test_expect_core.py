@@ -1,12 +1,12 @@
 """expect_core.py: the offline arithmetic gives the same picks as the core's unit tests `each_level_picks_with_its_own_cell` (three lists, standard [0, 1, 1],
-conservative [0, 0, 1], aggressive [1, 1, 1]) and `the_terms_weigh_the_same_at_every_alpha` (the thresholds 2 + 4 * delta and 0.5 + delta of each cell); the
+conservative [0, 0, 1], aggressive [0, 1, 1]: the aggressive cell is the standard one since 會意 SJ-SR-8-15M) and `the_terms_weigh_the_same_at_every_alpha` (the thresholds 2 + 4 * delta and 0.5 + delta of each cell); the
 real header triples (0.3/2/0.25, 1/2/3, 0.3/2/0.25) are the fallback, and `compare` flags a level run whose pick is not the level's cell."""
 import math, os, sys, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import expect_core as E  # noqa: E402
 
-LISTS = [([0.0, -1.0], [0.0, 1.2]), ([0.0, -0.4], [0.0, 1.2]), ([0.0, -1.9], [0.0, 5.0])]
+LISTS = [([0.0, -1.0], [0.0, 0.8]), ([0.0, -0.4], [0.0, 0.8]), ([0.0, -1.9], [0.0, 5.0])]
 ROW = {"sc": {"ng": [0.0, -0.4, -4.0], "ll": [0.0, 1.2, 8.0], "ok": [0, 0, 1], "ed": [1, 1, 0], "glen": 3, "n": 3, "c": 0}, "col": [0.0] * 3, "ch": [0.0] * 3}
 HDR = {lv: E.HEADER[lv] for lv in E.HEADER}
 
@@ -18,8 +18,8 @@ def row(ng, ll, col=None, ch=None):
 class T(unittest.TestCase):
     def test_each_level_picks_its_own_cell(self):
         got = {lv: [E.cell_pick(row(ng, ll), E.CELL[lv], HDR[lv]) for ng, ll in LISTS] for lv in ("standard", "conservative", "aggressive")}
-        self.assertEqual(got, {"standard": [0, 1, 1], "conservative": [0, 0, 1], "aggressive": [1, 1, 1]})
-        self.assertEqual(E.CELL, {"standard": (0.7, 2.0, 0.0), "conservative": (0.7, 2.0, 1.0), "aggressive": (1.0, 2.0, 0.1)})
+        self.assertEqual(got, {"standard": [0, 1, 1], "conservative": [0, 0, 1], "aggressive": [0, 1, 1]})
+        self.assertEqual(E.CELL, {"standard": (1.1, 2.0, 0.0), "conservative": (1.3, 2.0, 1.0), "aggressive": (1.1, 2.0, 0.0)})
 
     def test_terms_weigh_the_same_at_every_alpha(self):
         for lv, cell in E.CELL.items():

@@ -25,7 +25,7 @@
   | `kn.sjkn` | 承接 | SJ-KN-2-397K |
   | `trigram.sjt3` | 連文 | SJ-CX-2-7.7M |
   | `trigram-chat.sjt3` | 連文 | SJ-CX-2-950K |
-  | `tinylm.sjtl` | 會意 | SJ-SR-7-15M |
+  | `tinylm.sjtl` | 會意 | SJ-SR-8-15M |
   | `colloquial.sjlm` | 常談 | SJ-CL-2-69K |
 
   實作時逐一對 `docs/releases/README.md` 的表核對名稱與版本；SHA-256 欄等於 `data/<檔名>.sha256`。

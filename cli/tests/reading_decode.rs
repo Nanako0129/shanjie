@@ -35,16 +35,19 @@ fn tmp(name: &str) -> Dir {
     Dir(d)
 }
 
-/// (profile, with --tinylm, set, n, top1, oracle@64, top1_sha256) of the binary before the option existed.
+/// (profile, with --tinylm, set, n, top1, oracle@64, top1_sha256) of the binary before the option existed. The four rows with `--tinylm` are the numbers of the
+/// 會意 SJ-SR-8-15M file, taken again on 2026-11-06 (the file changed the small model's picks; chat has no `--colloquial-core` here): they are the
+/// `--no-reading-decode` run of this binary, equal to the same run of main's binary built before SR-TW (the decoder is untouched), and the same lines with the reading
+/// term on (the next test). The chat dev302 and typing76 rows were 265 and 74, the formal ones 271 and 74 with the 會意 SJ-SR-7-15M file.
 const BEFORE: [(&str, bool, &str, usize, usize, usize, &str); 8] = [
     ("chat", false, "dev302", 302, 249, 300, "3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c"),
     ("chat", false, "typing76", 76, 70, 75, "0b9e970b7ed1c0897711257c45ceb0e6dc7c9d8458fc3747a46d96ee752deed9"),
-    ("chat", true, "dev302", 302, 265, 300, "56e6bfb69d02de85d98f5000499173b96652e2d15f91c47d6e6bffb5156f26da"),
+    ("chat", true, "dev302", 302, 266, 300, "a26b4c0781fa5f4d9e9dcd63ce6618c12f4c29c30e06d7dc0383c98d67f01958"),
     ("chat", true, "typing76", 76, 74, 75, "18cc1a1c71f6096a1383168226abdd8539043a3b30739adb679e749c455defd2"),
     ("formal", false, "dev302", 302, 260, 300, "3c6f177cdd786ae2b28c852a065e99318bc22693c1a87bbc8b7f6f1386dee66c"),
     ("formal", false, "typing76", 76, 69, 75, "0d5dbcbb7f2913a8f8a98c6cb30a7ad0d75791f9ac6966fa63c58d7828c306a9"),
-    ("formal", true, "dev302", 302, 271, 300, "14308598adef27505ec096209a134e3a05c93f238369eea2b9a82dcaf2bc4ae1"),
-    ("formal", true, "typing76", 76, 74, 75, "4a493930e622f30eb106ee143b456a054349e9f47ca5ac28e23055c5cee27c73"),
+    ("formal", true, "dev302", 302, 278, 300, "9e7885c2f65d43bfd6de9162e68782ab3e56d85c83fcf27f3dac461d38041a3a"),
+    ("formal", true, "typing76", 76, 74, 75, "c6f729c37ffc6096151ab4acdbfd8f55457b6045cb5ea9e8186da7ba57dc8e9d"),
 ];
 
 /// sha256 of the `--dump` file (all 64 candidates and their path scores) of the n-gram-only runs before the option existed.

@@ -393,7 +393,9 @@ int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 //   from the lexicon folder it was created with (mcbpmf-data.txt, overlay-add.tsv) and from the pack rows it was created with. May be
 //   called before or after load_lm and load_tinylm (the table does not depend on them). The term applies per job, only with the chat
 //   profile, at any of the three rerank strengths (each with its own alpha, tau and delta: docs/contracts/colloquial-levels.md) and a small
-//   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. 3 when a file cannot be read or is malformed (the engine keeps its previous table,
+//   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. Loading also turns the
+//   first-word estimate on (docs/contracts/sr-tw-product.md): a first word the table has no sentence-start bigram for is scored by the table's unigram
+//   estimate, not by the sentence-start back-off. 3 when a file cannot be read or is malformed (the engine keeps its previous table,
 //   or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.
 int32_t shanjie_engine_load_colloquial(ShanjieEngine *engine, const char *path);
 // set_rerank 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation (S7c-2c), like set_demote in its codes and its

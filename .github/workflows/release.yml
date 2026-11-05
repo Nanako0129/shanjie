@@ -106,7 +106,7 @@ jobs:
           shasum -a 256 -c data/classes.sjc.sha256
           gh release download sj-kn-2-397k --repo "$GITHUB_REPOSITORY" -p kn.sjkn -D data/lm
           shasum -a 256 -c data/kn.sjkn.sha256
-          gh release download sj-sr-7-15m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
+          gh release download sj-sr-8-15m --repo "$GITHUB_REPOSITORY" -p tinylm.sjtl -D data/lm
           shasum -a 256 -c data/tinylm.sjtl.sha256
           gh release download sj-cx-2-7.7m --repo "$GITHUB_REPOSITORY" -p trigram.sjt3 -D data/lm
           shasum -a 256 -c data/trigram.sjt3.sha256

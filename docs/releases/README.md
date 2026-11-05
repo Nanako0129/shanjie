@@ -13,7 +13,7 @@
   | 承接（平滑） | SJ-KN | `kn-vN` | `kn.sjkn` | 詞彙數 | `sj-kn-2-397k` ＝ SJ-KN-2-397K（詞彙 396,927；舊：kn-v1 ＝ SJ-KN-1-353K） |
   | 連文（前兩個詞，書面） | SJ-CX | （新） | `trigram.sjt3` | 三元組合條數 | `sj-cx-2-7.7m` ＝ SJ-CX-2-7.7M（7,700,964 條；舊：`sj-cx-1-7.7m`） |
   | 連文（前兩個詞，聊天） | SJ-CX | （新） | `trigram-chat.sjt3` | 三元組合條數 | `sj-cx-2-950k` ＝ SJ-CX-2-950K（950,000 條） |
-  | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | `sj-sr-7-15m` ＝ SJ-SR-7-15M（14,646,912 參數；舊：`sj-sr-6-14m` ＝ SJ-SR-6-14M，tinylm-v5 ＝ SJ-SR-5-14M） |
+  | 會意（語意校正） | SJ-SR | `tinylm-vN` | `tinylm.sjtl` | 參數數 | `sj-sr-8-15m` ＝ SJ-SR-8-15M（14,646,912 參數；舊：`sj-sr-7-15m` ＝ SJ-SR-7-15M，`sj-sr-6-14m` ＝ SJ-SR-6-14M，tinylm-v5 ＝ SJ-SR-5-14M） |
   | 常談（口語表） | SJ-CL | （新） | `colloquial.sjlm` | 詞彙數 | `sj-cl-2-69k` ＝ SJ-CL-2-69K（詞彙 69,457；舊：`sj-cl-1-68k`） |
 
   連文的第一版原本以 `trigram-v1` 建立，還沒有任何地方下載就改成 `sj-cx-1-7.7m`（舊的 Release 刪除）。
