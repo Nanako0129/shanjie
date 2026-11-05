@@ -157,7 +157,7 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 /// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/contracts/sj-lm-7-pr2.md section 2.7; empty when none, always present).
 /// With a fuzzy-sound bit (`--fuzzy`, section 3.6) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
 /// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
-/// `col` (`--colloquial-core`, only a row whose pick was the colloquial one and has an `ll`) is the last key, one entry per pool candidate. See run_lm.
+/// `col` (`--colloquial-core`, only a row where the colloquial term ran: chat, the paired core and an `ll`) is the last key, one entry per pool candidate. See run_lm.
 /// `extra` (`--tinylm-scores-topk`) continues the `ll` list past the 8 the rerank scored: one entry per further candidate, `null` for a
 /// candidate the small model could not score (longer than its context); it is empty without the option, so the line is then unchanged.
 #[allow(clippy::too_many_arguments)]
