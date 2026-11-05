@@ -10,7 +10,7 @@ arithmetic of experiments/strength-colloq (sc.py `cell_pick`, copied below; that
 Three CLI runs of one set, all with `--colloquial-core` (so every summary tag must end in `+rc`): standard with `--dump --dump-words --rowstats
 --tinylm-scores`, conservative and aggressive (`--rerank-level`) with `--tinylm-scores --rowstats`. Offline side: the standard run's first 8
 candidates (ng, ll, col, ch) and `cell_pick(r, cell, header[level])` with the level's cell, restated here from the README, not read from core:
-  standard (0.7, 2, 0), conservative (0.7, 2, 1), aggressive (1.0, 2, 0.1) (the cells 通語 SJ-LM-7-9.7M selected, core/src/colloquial.rs); the fallback of a non-finite
+  standard (1.1, 2, 0), conservative (1.3, 2, 1), aggressive (1.1, 2, 0) (the cells of docs/contracts/sr-tw-product.md, core/src/colloquial.rs); the fallback of a non-finite
 col is the level's .sjtl header triple.
 Compared per row: the scores record's `c` and its right/wrong (`ok[c]`), and the level run's rowstats ok. Standard is compared too (anchor 1).
 Prints counts and row numbers only; never a sentence, context, word or character of a row (so it can run on private sets). Exit 0: 0 differing
@@ -33,10 +33,11 @@ import triage as T  # noqa: E402
 P = Q.P
 TOP_K = 8
 MU, GATE, NU, CAP = P.CONFIRM_CELL[0], P.CONFIRM_CELL[2], 1.0, 4        # mu 0.5, gate T 1.0 (P4d), nu 1.0, c 4 (P5 lex,1.0,4): fixed
-PAIRED_SJTL_SHA256 = "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478"      # core/src/colloquial.rs PAIRED_TINYLM_SHA256
-# The three cells core/src/colloquial.rs STANDARD / CONSERVATIVE / AGGRESSIVE carry (docs/contracts/sj-lm-7.md section 2.9, research log 2026-10-26); before
-# 通語 SJ-LM-7-9.7M they were (0.5, 2, 0.25), (1, 2, 3) and (0.5, 2, 0.1).
-CELL = {"standard": (0.7, 2.0, 0.0), "conservative": (0.7, 2.0, 1.0), "aggressive": (1.0, 2.0, 0.1)}
+PAIRED_SJTL_SHA256 = "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de"      # core/src/colloquial.rs PAIRED_TINYLM_SHA256
+# The three cells core/src/colloquial.rs STANDARD / CONSERVATIVE / AGGRESSIVE carry (docs/contracts/sr-tw-product.md section 1, 會意 SJ-SR-8-15M; aggressive is the
+# standard cell); before it they were (0.7, 2, 0), (0.7, 2, 1) and (1.0, 2, 0.1) (docs/contracts/sj-lm-7.md section 2.9), and before 通語 SJ-LM-7-9.7M (0.5, 2, 0.25),
+# (1, 2, 3) and (0.5, 2, 0.1).
+CELL = {"standard": (1.1, 2.0, 0.0), "conservative": (1.3, 2.0, 1.0), "aggressive": (1.1, 2.0, 0.0)}
 # The .sjtl header's chat triples (the fallback of a non-finite col); read from the file and checked against these.
 HEADER = {"standard": (0.3, 2.0, 0.25), "conservative": (1.0, 2.0, 3.0), "aggressive": (0.3, 2.0, 0.25)}
 LEVELS = ("conservative", "aggressive")

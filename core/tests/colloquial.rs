@@ -226,24 +226,24 @@ fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], 
     LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, l, &[], &Default::default(), &Default::default()).unwrap().0)
 }
 
-/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the 通語 SJ-LM-7-9.7M cells of sj-lm-7.md section 2.9), not the standard one. One
-/// list, equal col everywhere (so the colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's LLs (candidate 1 is
-/// 3.9124 above candidate 0, candidate 2 is 8.0212 above) and n-gram gaps of 1.99 and 5.3: candidate 1 gains 0.7 * 3.9124 - 1.99 = 0.75 and candidate 2
-/// 0.7 * 8.0212 - 5.3 = 0.31 at alpha 0.7, so standard (delta 0) takes 1 and conservative (delta 1) keeps 0; at the aggressive alpha 1.0 they gain
-/// 1.92 and 2.72, so aggressive (delta 0.1) takes 2. The three levels give three different picks.
+/// `rerank_colloquial` fuses with the level's own cell (colloquial-levels section 1; the 會意 SJ-SR-8-15M cells of sr-tw-product.md section 1), not the
+/// toy file's header triple. One list, equal col everywhere (so the colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's
+/// LLs (candidate 1 is 0.8252 above candidate 0) and an n-gram gap of 0.5: candidate 1 gains 1.1 * 0.8252 - 0.5 = 0.41 at the standard and aggressive cell
+/// (delta 0 takes it; the toy header's standard triple (0.7, 2, 0.25) would not: 0.08) and 1.3 * 0.8252 - 0.5 = 0.57 at the conservative one, below its delta 1.
+/// The aggressive cell is the standard one (the maintainer's decision), so two levels share a pick and the conservative one differs: only the conservative delta 1 separates the two cells' picks.
 #[test]
 fn rerank_colloquial_fuses_with_the_levels_cell() {
     let (tl, co) = (toy_v3(), colloq("lv", &[], &["a"], None));
-    let cands = ["你好你好你好", "龘龘", "好"];
-    let words = vec![vec!["a"]; 3];
-    let ng = [-10.0, -11.99, -15.3];
+    let cands = ["你好你好", "你好你"];
+    let words = vec![vec!["a"]; 2];
+    let ng = [-10.0, -10.5];
     let ll = tl.ll_many(&cands.iter().map(|c| ("", *c)).collect::<Vec<_>>()).unwrap();
-    assert!((ll[1] - ll[0] - 3.9124).abs() < 1e-3 && (ll[2] - ll[0] - 8.0212).abs() < 1e-3, "premise: the toy model's LLs {ll:?}");
-    assert_eq!(picks_by_level(&tl, &ng, &cands, &words, &co), [1, 0, 2]);
+    assert!((ll[1] - ll[0] - 0.8252).abs() < 1e-3, "premise: the toy model's LLs {ll:?}");
+    assert_eq!(picks_by_level(&tl, &ng, &cands, &words, &co), [1, 0, 1]);
     // the cells themselves (the fusion with the level's alpha and delta decides, whatever the header says)
-    assert_eq!(colloquial::cell(RerankLevel::Standard), (0.7, 2.0, 0.0));
-    assert_eq!(colloquial::cell(RerankLevel::Conservative), (0.7, 2.0, 1.0));
-    assert_eq!(colloquial::cell(RerankLevel::Aggressive), (1.0, 2.0, 0.1));
+    assert_eq!(colloquial::cell(RerankLevel::Standard), (1.1, 2.0, 0.0));
+    assert_eq!(colloquial::cell(RerankLevel::Conservative), (1.3, 2.0, 1.0));
+    assert_eq!(colloquial::cell(RerankLevel::Aggressive), colloquial::cell(RerankLevel::Standard));
 }
 
 /// The fallback of a non-finite col is the plain pick with the header triple of the same level, tested at `rerank_colloquial`: the toy file's chat

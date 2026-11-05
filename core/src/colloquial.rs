@@ -6,8 +6,8 @@
 //! (docs/contracts/reading-decode-2.md, `reading.rs`).
 //!
 //! The constants MU, GATE_T and gamma = mu / 2 are the cell P4d registered and chatjudge-2 confirmed (experiments/p4d-colloquial/README.md). The
-//! three (alpha, tau, delta) cells, one per strength (docs/contracts/colloquial-levels.md), are the ones docs/contracts/sj-lm-7.md section 2.9
-//! selected for the 通語 SJ-LM-7-9.7M base; none of them comes from the `.sjtl` header.
+//! three (alpha, tau, delta) cells, one per strength (docs/contracts/colloquial-levels.md), are the ones docs/contracts/sr-tw-product.md section 1
+//! registers for the 會意 SJ-SR-8-15M re-ranker; none of them comes from the `.sjtl` header.
 use crate::lm::{Lm, LmError, Profile};
 use crate::tinylm::{pick_masked, RerankLevel, TinyLm};
 use std::collections::HashSet;
@@ -21,15 +21,14 @@ pub const MU: f64 = 0.5;
 pub const GATE_T: f64 = 1.0;
 /// gamma / mu: col = lc - GAMMA_PER_MU * k, i.e. gamma = mu / 2 (P4d: P4c's mu 0.5 cell).
 pub const GAMMA_PER_MU: f64 = 0.5;
-/// The fusion's (alpha, tau, delta) under the colloquial term at the standard strength: the cell docs/contracts/sj-lm-7.md section 2.9
-/// selected on chatclause (n 5,761; 24-cell grid fixed beforehand) for the 通語 SJ-LM-7-9.7M base, rule "F - 2B largest with F - 2B >= 0": F 167, B 44
-/// against the n-gram first choice (docs/research-log.md 2026-10-26, "定案的選值結果"). The three cells here are the chat fusion at each
+/// The fusion's (alpha, tau, delta) under the colloquial term at the standard strength: docs/contracts/sr-tw-product.md section 1, the cell FUSE-1
+/// (wikijudge8) confirmed for the 會意 SJ-SR-8-15M re-ranker (docs/research-log.md, 2026-11-06). The three cells here are the chat fusion at each
 /// strength; the `.sjtl` header's chat triples only back a col that is not finite.
-pub const STANDARD: (f64, f64, f64) = (0.7, 2.0, 0.0);
-/// The same at the conservative strength: the section 2.9 rule "B <= half the standard's B, F > B, F - 4B largest": F 67, B 9.
-pub const CONSERVATIVE: (f64, f64, f64) = (0.7, 2.0, 1.0);
-/// The same at the aggressive strength: the section 2.9 rule "F above the standard's, F - B no lower, F - 2B largest": F 180, B 57.
-pub const AGGRESSIVE: (f64, f64, f64) = (1.0, 2.0, 0.1);
+pub const STANDARD: (f64, f64, f64) = (1.1, 2.0, 0.0);
+/// The same at the conservative strength: the cell FUSE-2 (wikijudge9) confirmed.
+pub const CONSERVATIVE: (f64, f64, f64) = (1.3, 2.0, 1.0);
+/// The same at the aggressive strength: the same cell as the standard one (the maintainer's decision in docs/contracts/sr-tw-product.md, "aggressive = the new standard").
+pub const AGGRESSIVE: (f64, f64, f64) = (1.1, 2.0, 0.0);
 
 /// The (alpha, tau, delta) of the fusion at `level` (docs/contracts/colloquial-levels.md section 1).
 pub fn cell(level: RerankLevel) -> (f64, f64, f64) {
@@ -40,8 +39,9 @@ pub fn cell(level: RerankLevel) -> (f64, f64, f64) {
     }
 }
 
-/// SHA-256 of the `.sjtl` the cells were measured with (會意 SJ-SR-7-15M R1 final file, data/tinylm.sjtl.sha256); the term applies to no other small model.
-pub const PAIRED_TINYLM_SHA256: &str = "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478";
+/// SHA-256 of the `.sjtl` the cells were measured with (會意 SJ-SR-8-15M, SR-TW-V's V4-s3 weights with the formal cells of docs/contracts/sr-tw-product.md
+/// section 1; data/tinylm.sjtl.sha256); the term applies to no other small model.
+pub const PAIRED_TINYLM_SHA256: &str = "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColloquialError {
@@ -73,11 +73,12 @@ pub struct Colloquial {
     /// docs/research-log.md, the section 3.5 memory fix).
     overlay_only: HashSet<String>,
     /// SR-TW-C (docs/research-log.md, 2026-11-04 registration): the first word of a split scored by the table's unigram estimate instead of
-    /// P(w | `<s>`). Off by default and in the engine; only the evaluation CLI's `--colloquial-first-unigram` turns it on.
+    /// P(w | `<s>`). Off after `load` and in the engine; only the evaluation CLI's `--colloquial-first-unigram` turns it on.
     first_unigram: bool,
     /// SR-TW-M (docs/research-log.md, 2026-11-04 registration): the first word scored by the unigram estimate only when the table has no
-    /// `<s>` bigram for it (a word seen at the start keeps P(w | `<s>`)). Off by default and in the engine; only the evaluation CLI's
-    /// `--colloquial-unseen-start-unigram` turns it on.
+    /// `<s>` bigram for it (a word seen at the start keeps P(w | `<s>`)). Off after `load`; the shipping setting turns it on
+    /// (docs/contracts/sr-tw-product.md section 1): `Engine::load_colloquial` and the evaluation CLI's default, whose research flag
+    /// `--colloquial-no-unseen-start-unigram` turns it off.
     unseen_start_unigram: bool,
 }
 
@@ -143,7 +144,7 @@ impl Colloquial {
         self.first_unigram
     }
 
-    /// Turn the SR-TW-M first-word estimate on or off (`unseen_start_unigram`; off after `load`).
+    /// Turn the SR-TW-M first-word estimate on or off (`unseen_start_unigram`; off after `load`, on in the shipping setting).
     pub fn set_unseen_start_unigram(&mut self, on: bool) {
         self.unseen_start_unigram = on;
     }
@@ -229,7 +230,7 @@ mod tests {
         assert!((a - b).abs() < 1e-12, "{a} vs {b}");
     }
 
-    /// The `.sjtl` header's chat standard triple of the 會意 SJ-SR-6-14M files (the fallback of a col that is not finite): not one of the three cells.
+    /// The `.sjtl` header's chat standard triple of the 會意 SJ-SR-8-15M file (the fallback of a col that is not finite): not one of the three cells.
     const HEADER_STANDARD: (f64, f64, f64) = (0.3, 2.0, 0.25);
 
     #[test]
@@ -260,40 +261,19 @@ mod tests {
         assert!(eff.iter().all(|x| x.is_finite()));
     }
 
-    /// The registered cell decides, not the header triple: with ng [-10.0, -10.3] and ll [-5.0, -3.8], candidate 1 gains 0.7 * 1.2 - 0.3 = 0.54 at the
-    /// standard alpha 0.7 (delta 0 takes it; the conservative delta 1 does not) but 0.3 * 1.2 - 0.3 = 0.06 at the header's alpha 0.3 (below its delta).
+    /// The registered cell decides, not the header triple: with ng [-10.0, -10.3] and ll [-5.0, -4.2], candidate 1 gains 1.1 * 0.8 - 0.3 = 0.58 at the
+    /// standard alpha 1.1 (delta 0 takes it) but 1.3 * 0.8 - 0.3 = 0.74 at the conservative cell (below its delta 1) and 0.3 * 0.8 - 0.3 = -0.06 at the
+    /// header's alpha 0.3. With ll [-5.0, -3.8] the conservative gain is 1.3 * 1.2 - 0.3 = 1.26, which its delta 1 takes.
     #[test]
     fn fused_pick_uses_the_registered_cell() {
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], STANDARD, &[], &[]), 1, "alpha 0.7: gain 0.54 >= delta 0");
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], CONSERVATIVE, &[], &[]), 0, "gain 0.54 < delta 1");
-        assert_eq!(pick(&[-10.0, -10.3], &[-5.0, -3.8], HEADER_STANDARD.0, HEADER_STANDARD.1, HEADER_STANDARD.2), 0, "premise: the header triple keeps the first");
-        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.7], &[0.0, 0.0], STANDARD, &[], &[]), 0, "gain 0.7 * 0.3 - 0.3 < delta 0");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.2], &[0.0, 0.0], STANDARD, &[], &[]), 1, "alpha 1.1: gain 0.58 >= delta 0");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.2], &[0.0, 0.0], CONSERVATIVE, &[], &[]), 0, "gain 0.74 < delta 1");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -3.8], &[0.0, 0.0], CONSERVATIVE, &[], &[]), 1, "gain 1.26 >= delta 1");
+        assert_eq!(pick(&[-10.0, -10.3], &[-5.0, -4.2], HEADER_STANDARD.0, HEADER_STANDARD.1, HEADER_STANDARD.2), 0, "premise: the header triple keeps the first");
+        assert_eq!(fused_pick(&[-10.0, -10.3], &[-5.0, -4.8], &[0.0, 0.0], STANDARD, &[], &[]), 0, "gain 1.1 * 0.2 - 0.3 < delta 0");
         // tau: an n-gram margin of 2 or more keeps the first whatever the small model says
         assert_eq!(fused_pick(&[-10.0, -12.0], &[-50.0, 0.0], &[0.0, 0.0], STANDARD, &[], &[]), 0);
         assert_eq!(fused_pick(&[-10.0, -11.9], &[-50.0, 0.0], &[0.0, 0.0], STANDARD, &[], &[]), 1);
-    }
-
-    /// SINIT sections 1.4 and 1.5 in the fused routes. `learn` empty or all 0 is the pick before the term (the plain `pick` over `fuse`); where the n-gram
-    /// is sure (margin 3 >= tau 2) and candidate 2 is taught, candidate 1 (the better small-model score) cannot be chosen in `fused_pick`, in
-    /// `guarded_pick`'s fused route, or in its plain fallback (a col that is not finite), and candidate 2 still has to win by delta.
-    #[test]
-    fn the_learning_term_reaches_every_route_and_a_taught_candidate_opens_the_gate() {
-        let (ng, ll, col) = ([0.0, -3.0, -3.2], [-5.0, 0.0, -1.0], [0.0, 0.0, 0.0]);
-        let (plain, cell) = ((1.0, 2.0, 0.0), (1.0, 2.0, 0.0));
-        let learn = [0.0, 0.0, 1.0];
-        let nan = [0.0, f64::NAN, 0.0];
-        assert_eq!(fused_pick(&ng, &ll, &col, cell, &[], &[]), 0, "premise: the margin keeps the first");
-        assert_eq!(fused_pick(&ng, &ll, &col, cell, &[], &[0.0; 3]), 0, "all 0 is no term");
-        assert_eq!(fused_pick(&ng, &ll, &col, cell, &[], &learn), 2);
-        assert_eq!(fused_pick(&ng, &ll, &col, (1.0, 2.0, 2.0), &[], &[0.0, 0.0, 0.5]), 0, "delta 2: gain 1.3 is not enough");
-        assert_eq!(fused_pick(&ng, &ll, &col, (1.0, 2.0, 1.0), &[], &[0.0, 0.0, 0.5]), 2, "delta 1: it is");
-        assert_eq!(guarded_pick(&ng, &ll, &col, cell, plain, &[], &learn), 2, "the fused route");
-        assert_eq!(guarded_pick(&ng, &ll, &nan, cell, plain, &[], &[]), 0, "premise: the fallback keeps the first");
-        assert_eq!(guarded_pick(&ng, &ll, &nan, cell, plain, &[], &learn), 2, "the fallback route (plain pick) has the term too");
-        assert_eq!(guarded_pick(&ng, &ll, &nan, cell, plain, &[false, false, true], &learn), 0, "a masked taught candidate opens nothing");
-        // the term is as `pick_masked` has it on the fused scores
-        let eff = fuse(&ll, &[0.0, -2.0, 1.0], 0.7);
-        assert_eq!(fused_pick(&ng, &ll, &[0.0, -2.0, 1.0], (0.7, 2.0, 0.0), &[], &[0.0, 0.0, 1.0]), crate::tinylm::pick_masked(&ng, &eff, 0.7, 2.0, 0.0, &[], &[0.0, 0.0, 1.0]));
     }
 
     /// A col that is +inf, -inf or NaN (the anchor's or another candidate's) must not decide: the plain pick with the given triple is used.
@@ -310,19 +290,20 @@ mod tests {
     }
 
     /// colloquial-levels section 2.1: each level's `fused_pick` uses its own (alpha, tau, delta). With no colloquial or channel term (equal col) a
-    /// candidate gains alpha * dll - dng over candidate 0. List 1 (dng 1.0, dll 1.2) gains 0.84 - 1.0 = -0.16 at the standard alpha 0.7 (below delta 0)
-    /// and 0.2 at the aggressive alpha 1.0 (delta 0.1 takes it); list 2 (dng 0.4) gains 0.44, which the standard delta 0 takes and the conservative
-    /// delta 1 does not (aggressive 0.8); list 3 (dng 1.9, dll 5) gains 1.6, 1.6 and 3.1: all three take it.
+    /// candidate gains alpha * dll - dng over candidate 0. List 1 (dng 1.0, dll 0.8) gains 0.88 - 1.0 < 0 at the standard (and aggressive) alpha 1.1 and
+    /// 1.04 - 1.0 = 0.04 at the conservative alpha 1.3 (delta 1): no level takes it; list 2 (dng 0.4, dll 0.8) gains 0.48, which the standard delta 0
+    /// takes and the conservative delta 1 does not (0.64); list 3 (dng 1.9, dll 5) gains 3.6 and 4.6: all take it. The aggressive cell is the standard
+    /// one (docs/contracts/sr-tw-product.md section 1), so those two rows are equal.
     #[test]
     fn each_level_picks_with_its_own_cell() {
-        let lists = [([0.0, -1.0], [0.0, 1.2]), ([0.0, -0.4], [0.0, 1.2]), ([0.0, -1.9], [0.0, 5.0])];
+        let lists = [([0.0, -1.0], [0.0, 0.8]), ([0.0, -0.4], [0.0, 0.8]), ([0.0, -1.9], [0.0, 5.0])];
         let by_level = |l| lists.map(|(ng, ll)| fused_pick(&ng, &ll, &[0.0; 2], cell(l), &[], &[]));
         assert_eq!(by_level(RerankLevel::Standard), [0, 1, 1]);
         assert_eq!(by_level(RerankLevel::Conservative), [0, 0, 1]);
-        assert_eq!(by_level(RerankLevel::Aggressive), [1, 1, 1]);
-        assert_eq!(STANDARD, (0.7, 2.0, 0.0));
-        assert_eq!(CONSERVATIVE, (0.7, 2.0, 1.0));
-        assert_eq!(AGGRESSIVE, (1.0, 2.0, 0.1));
+        assert_eq!(by_level(RerankLevel::Aggressive), [0, 1, 1]);
+        assert_eq!(STANDARD, (1.1, 2.0, 0.0));
+        assert_eq!(CONSERVATIVE, (1.3, 2.0, 1.0));
+        assert_eq!(AGGRESSIVE, STANDARD);
         assert_eq!([cell(RerankLevel::Standard), cell(RerankLevel::Conservative), cell(RerankLevel::Aggressive)], [STANDARD, CONSERVATIVE, AGGRESSIVE]);
     }
 

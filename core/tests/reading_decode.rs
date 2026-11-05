@@ -79,8 +79,11 @@ const SHU: &str = "ㄓㄜˋ ㄍㄜ˙ ㄕㄨˇ ㄐㄧㄠˋ ㄙㄢˋ ㄅㄞˊ ㄧ�
 /// The four settings: (profile, small model on). Rerank "on" is the standard strength, "off" is semantic correction off (the n-gram alone).
 const SETTINGS: [(Profile, bool); 4] = [(Profile::Formal, true), (Profile::Formal, false), (Profile::Chat, true), (Profile::Chat, false)];
 
-/// 以敵偽人員的名字命名 (main's sentence, after wikitune): without the reading term 偽 read ㄨㄟˋ goes to 為 and 敵 to 狄 in the written settings (formal, rerank on
-/// and off: 以狄為…), with it the whole sentence is right. In chat it is right either way (the colloquial term and the small model get it), so the term changes nothing there.
+/// 以敵偽人員的名字命名 (main's sentence, after wikitune): without the reading term 偽 read ㄨㄟˋ goes to 為 and 敵 to 狄 in the n-gram's first path in the written
+/// setting (formal: 以狄為…), with it the whole sentence is right. Rerank off shows that first path. Rerank on, the 會意 SJ-SR-8-15M file (formal cells 0.8, 2, 0)
+/// repairs the sentence itself (measured 2026-11-06: shown right without the term, first path still 以狄為…), so for rerank on the premise is the first path only; no
+/// public row of dev302, typing76 or user-reported is made right by the term at the shown level in either profile (the same date: with and without `--no-reading-decode`
+/// the picks' correctness is the same on all three sets, both profiles, standard strength). In chat it is right either way (the colloquial term and the small model get it), so the term changes nothing there.
 #[test]
 fn the_term_makes_the_written_sentence_right() {
     let gold = "以敵偽人員的名字命名";
@@ -88,7 +91,8 @@ fn the_term_makes_the_written_sentence_right() {
         let mut e = shipping(profile);
         let (off_ng, off) = typed(&mut e, WEI, tl, false);
         let (on_ng, on) = typed(&mut e, WEI, tl, true);
-        assert!(off.starts_with("以狄為") && off_ng.starts_with("以狄為"), "premise, {profile:?} rerank {tl}: without the term {off} / {off_ng}");
+        assert!(off_ng.starts_with("以狄為"), "premise, {profile:?} rerank {tl}: without the term the first path is {off_ng}");
+        assert!(tl || off.starts_with("以狄為"), "premise, {profile:?} rerank off: without the term {off}");
         assert_eq!((on_ng.as_str(), on.as_str()), (gold, gold), "{profile:?} rerank {tl}");
     }
     for tl in [true, false] {

@@ -7,7 +7,7 @@ final class ModelListTests: XCTestCase {
 
     func testRowsInFileOrder() throws {
         let names = [("bigram.sjlm", "通語", "SJ-LM-7-9.7M"), ("classes.sjc", "辨類", "SJ-WC-6-512C"), ("kn.sjkn", "承接", "SJ-KN-2-397K"),
-                     ("trigram.sjt3", "連文", "SJ-CX-2-7.7M"), ("trigram-chat.sjt3", "連文", "SJ-CX-2-950K"), ("tinylm.sjtl", "會意", "SJ-SR-7-15M"),
+                     ("trigram.sjt3", "連文", "SJ-CX-2-7.7M"), ("trigram-chat.sjt3", "連文", "SJ-CX-2-950K"), ("tinylm.sjtl", "會意", "SJ-SR-8-15M"),
                      ("colloquial.sjlm", "常談", "SJ-CL-2-69K")]
         let text = names.map { "\($0.0)\t\(sha)\t\($0.1)\t\($0.2)\n" }.joined()
         let rows = ModelList.parse(text)
@@ -46,7 +46,7 @@ final class ModelListTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent()
         let rows = ModelList.load(from: root.appendingPathComponent("data/models.tsv"))
         XCTAssertEqual(rows.map(\.name), ["通語", "辨類", "承接", "連文", "連文", "會意", "常談"])
-        XCTAssertEqual(rows.map(\.code), ["SJ-LM-7-9.7M", "SJ-WC-6-512C", "SJ-KN-2-397K", "SJ-CX-2-7.7M", "SJ-CX-2-950K", "SJ-SR-7-15M", "SJ-CL-2-69K"])
+        XCTAssertEqual(rows.map(\.code), ["SJ-LM-7-9.7M", "SJ-WC-6-512C", "SJ-KN-2-397K", "SJ-CX-2-7.7M", "SJ-CX-2-950K", "SJ-SR-8-15M", "SJ-CL-2-69K"])
         XCTAssertEqual(rows.map(\.file), ["bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "tinylm.sjtl", "colloquial.sjlm"])
     }
 }

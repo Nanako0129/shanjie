@@ -150,6 +150,21 @@ fn load_order_does_not_matter() {
     assert_eq!(picks(&mut engine(0, &tl, Some((&table, true)))), vec![WITH_TERM]);
 }
 
+/// SR-TW product (docs/contracts/sr-tw-product.md section 3.5): `Engine::load_colloquial` turns the mild first-word estimate on (SR-TW-M: a first word the
+/// table has no `<s>` bigram for is scored by the unigram estimate), as the evaluation CLI does by default. Row 179 of eval/dev/user-reported.txt (`權限加好了`,
+/// public) is one the estimate changes: the CLI's `--tinylm-scores` `c` at the standard strength is 0 by default and 3 with
+/// `--colloquial-no-unseen-start-unigram` (measured 2026-11-06 on the 會意 SJ-SR-8-15M file: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat
+/// --context --packs acg --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm [--colloquial-no-unseen-start-unigram] --rows <that row>
+/// --tinylm-scores OUT`), so an engine without the estimate picks 3 and fails the second assertion; without the line in `load_colloquial` the first fails too.
+#[test]
+fn load_colloquial_turns_the_first_word_estimate_on() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    let mut e = engine_row(PACK_ACG, &tl, Some((&table, false)), "", "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ ㄏㄠˇ ㄌㄜ˙");
+    assert!(e.colloquial().unwrap().unseen_start_unigram(), "load_colloquial turns the estimate on");
+    assert_eq!(picks(&mut e), vec![0], "the CLI's default pick on the row");
+    assert_ne!(picks(&mut e), vec![3], "not the pick without the estimate (--colloquial-no-unseen-start-unigram)");
+}
+
 /// A failed load leaves the engine as it was (the previous table, or none) and drops the pending job.
 #[test]
 fn a_failed_load_changes_nothing_but_the_job() {
@@ -186,7 +201,8 @@ fn k_counts_the_pack_words_the_engine_was_built_with() {
 
 /// Rows 81 and 159 of eval/dev/user-reported.txt (public), the two rows where the reading-channel term (docs/contracts/reading-channel.md, removed by
 /// docs/contracts/reading-decode-2.md) changed the colloquial term's choice on the 通語 SJ-LM-7-9.7M files in v0.6.1: (context, syllables, the pick with the
-/// colloquial term alone, the pick v0.6.1 gave with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27).
+/// colloquial term alone, the pick v0.6.1 gave with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27; the `alone` picks 0 and 4 re-measured 2026-11-06 with the 會意 SJ-SR-8-15M file, standard
+/// strength, `--packs acg --colloquial-core`: the same).
 const CHANNEL_ROWS: [(&str, &str, usize, usize); 2] = [("", "ㄓㄤˇ ㄨㄞ ㄌㄜ˙", 0, 2), ("", "ㄧㄡˇ ㄉㄧㄢˇ ㄌㄟˇ ㄓㄨㄟˋ", 4, 0)];
 
 /// There is no reading-channel term in the job any more: the colloquial term stands alone, so rows 81 and 159 pick what v0.6.1 picked with the channel off
@@ -205,17 +221,20 @@ fn the_colloquial_term_stands_alone() {
     }
 }
 
-/// Public rows where a level's own cell picks a candidate that the standard cell or the level's header triple (v0.5.0: the plain `rerank`) does not pick,
-/// with the picks of `--rerank-level L --colloquial-core` and the two it must differ from (the CLI's `--tinylm-scores` `c`, measured 2026-10-27 on the
-/// 通語 SJ-LM-7-9.7M files): (level, context, syllables, cell's pick, standard cell's pick, header triple's pick). Rows 25 and 27 of eval/bench/suite-v1/dev302.txt at the
-/// conservative strength (25: the conservative delta 1 keeps the n-gram first where the standard cell, delta 0, takes the term's pick; 27: the term's pick 回覆
-/// that the header triple alone does not make, which the standard cell makes too); row 22 at the aggressive one (the aggressive alpha 1.0 takes 2 where the
-/// standard cell and the header triple keep 0). Each row differs from at least one of the two; no public row differs from both at the conservative strength,
-/// whose cell is the standard one but for the delta.
+/// Public rows where a level's own cell picks a candidate that the standard cell or the level's header triple (the plain `rerank`) does not pick,
+/// with the picks of `--rerank-level L --colloquial-core` and the two it must differ from (the CLI's `--tinylm-scores` `c`, measured 2026-11-06 on the
+/// 會意 SJ-SR-8-15M file `data/lm/tinylm.sjtl` and the shipping cells: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg
+/// --tinylm data/lm/tinylm.sjtl --rerank-level L [--colloquial-core data/lm/colloquial.sjlm] --dev 302 --tinylm-scores OUT`, the row's `c`):
+/// (level, context, syllables, cell's pick, standard cell's pick, header triple's pick). Rows 25 and 36 of eval/bench/suite-v1/dev302.txt at the conservative
+/// strength (25: the conservative delta 1 keeps the n-gram first where the standard cell, delta 0, takes the term's pick; 36: the term's pick 忠於 that the
+/// header triple alone does not make, which the standard cell makes too). Row 22 at the aggressive one: the aggressive cell is the standard cell (the maintainer's
+/// decision, docs/contracts/sr-tw-product.md), so the two picks are the same candidate and both differ from the header triple's (the premise "the aggressive
+/// cell picks differently from the standard one" of the earlier versions is gone with the cell). The rows no longer picked apart at the conservative strength
+/// differ from the standard cell or the header triple, never from both.
 const LEVEL_ROWS: [(RerankLevel, &str, &str, usize, usize, usize); 3] = [
     (RerankLevel::Conservative, "", "ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ", 0, 1, 0),
-    (RerankLevel::Conservative, "", "ㄨㄛˇ ㄧˇ ㄐㄧㄥ ㄏㄨㄟˊ ㄈㄨˋ ㄋㄧˇ ㄉㄜ˙ ㄧㄡˊ ㄐㄧㄢˋ ㄌㄜ˙", 1, 1, 0),
-    (RerankLevel::Aggressive, "", "ㄊㄞˊ ㄅㄟˇ ㄕˋ ㄧ ㄍㄜ˙ ㄏㄣˇ ㄉㄚˋ ㄉㄜ˙ ㄔㄥˊ ㄕˋ", 2, 0, 0),
+    (RerankLevel::Conservative, "", "ㄋㄧˇ ㄧㄠˋ ㄓㄨㄥ ㄩˊ ㄗˋ ㄐㄧˇ", 1, 1, 0),
+    (RerankLevel::Aggressive, "", "ㄊㄞˊ ㄅㄟˇ ㄕˋ ㄧ ㄍㄜ˙ ㄏㄣˇ ㄉㄚˋ ㄉㄜ˙ ㄔㄥˊ ㄕˋ", 2, 2, 0),
 ];
 
 /// colloquial-levels section 2.1, the engine path: the job takes the engine's rerank level when it is made, and its colloquial

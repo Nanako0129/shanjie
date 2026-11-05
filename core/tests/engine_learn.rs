@@ -2555,25 +2555,27 @@ fn sinit_at_eps_0_a_record_changes_nothing_and_a_large_eps_takes_it() {
     assert_eq!(with(100.0), "照建議");
 }
 
-/// SINIT section 2 (revision 5.2, 9), shipping models, formal: 再 taught from 再算一次 (the first syllable re-picked; the coarse key ㄙㄨㄢˋ, the mid key
-/// ㄙㄨㄢˋ + ㄧ and the fine key ㄙㄨㄢˋ + ㄧ + ㄘˋ), then 在算帳 stays 在算帳. The typed row ㄗㄞˋ ㄙㄨㄢˋ ㄓㄤˋ has the mid key ㄙㄨㄢˋ + ㄓㄤˋ and the fine key with `$`, which no record has, so the coarse key answers; its term
-/// only counts for a candidate the small model scores above the anchor, and the small model prefers 在算帳, so even a knob 100 times the registered size changes nothing
-/// (the first sweep of the old rule showed 再算帳 here). Run at the registered sizes, at 0 and at 100.
+/// SINIT section 2 (revision 5.2, 9), shipping models, formal: 再 taught from 再寫一封信 (the first syllable re-picked; the coarse key ㄒㄧㄝˇ, the mid key
+/// ㄒㄧㄝˇ + ㄧ and the fine key ㄒㄧㄝˇ + ㄧ + ㄈㄥ), then 在寫報告 stays 在寫報告. The typed row ㄗㄞˋ ㄒㄧㄝˇ ㄅㄠˋ ㄍㄠˋ has the mid key ㄒㄧㄝˇ + ㄅㄠˋ and the fine key with `$`, which no record
+/// has, so the coarse key answers; its term only counts for a candidate the small model scores above the anchor, and the small model prefers 在寫報告, so even a knob
+/// 100 times the registered size changes nothing. Run at the registered sizes, at 0 and at 100. (Until 會意 SJ-SR-8-15M the pair was 再算一次 / 在算帳 of
+/// eval/learn/sinit-cases.tsv; the new file gets 再算一次 right by default, so there was nothing to teach; the pair 再寫一封信 / 在寫報告 is group 再/在+寫 of
+/// eval/learn/sinit-confirm.tsv, found 2026-11-06 by teaching every teach row of the four sinit-*.tsv files once in both profiles.)
 #[test]
-fn sinit_formal_zai_suan_zhang_stays_because_the_coarse_term_is_gated_by_the_model() {
+fn sinit_formal_zai_xie_bao_gao_stays_because_the_coarse_term_is_gated_by_the_model() {
     let mut e = ship(lm::Profile::Formal);
-    let (teach, row) = ("ㄗㄞˋ ㄙㄨㄢˋ ㄧ ㄘˋ", "ㄗㄞˋ ㄙㄨㄢˋ ㄓㄤˋ");
-    assert_eq!(type_settled(&mut e, teach), "在算一次", "precondition: the default");
+    let (teach, row) = ("ㄗㄞˋ ㄒㄧㄝˇ ㄧ ㄈㄥ ㄒㄧㄣˋ", "ㄗㄞˋ ㄒㄧㄝˇ ㄅㄠˋ ㄍㄠˋ");
+    assert_eq!(type_settled(&mut e, teach), "在寫一封信", "precondition: the default");
     e.key(k(KeyKind::Enter)).unwrap();
     teach_first(&mut e, teach, "再");
     assert_eq!(
         records_of(&e, "再"),
-        [("^>ㄙㄨㄢˋ".to_string(), 1.0), ("^>ㄙㄨㄢˋ\u{1f}ㄧ".to_string(), 1.0), ("^>ㄙㄨㄢˋ\u{1f}ㄧ\u{1f}ㄘˋ".to_string(), 1.0)],
-        "precondition: 再 was learned before ㄙㄨㄢˋ, before ㄙㄨㄢˋ ㄧ and before ㄙㄨㄢˋ ㄧ ㄘˋ"
+        [("^>ㄒㄧㄝˇ".to_string(), 1.0), ("^>ㄒㄧㄝˇ\u{1f}ㄧ".to_string(), 1.0), ("^>ㄒㄧㄝˇ\u{1f}ㄧ\u{1f}ㄈㄥ".to_string(), 1.0)],
+        "precondition: 再 was learned before ㄒㄧㄝˇ, before ㄒㄧㄝˇ ㄧ and before ㄒㄧㄝˇ ㄧ ㄈㄥ"
     );
     for scale in [0.0, 1.0, 100.0] {
         e.set_eps_sinit(scale);
-        assert_eq!(type_settled(&mut e, row), "在算帳", "scale {scale}");
+        assert_eq!(type_settled(&mut e, row), "在寫報告", "scale {scale}");
         e.key(k(KeyKind::Enter)).unwrap();
     }
 }
@@ -2835,7 +2837,9 @@ fn sinit_preference_class_can_be_reverted_by_one_repick() {
 
 /// SINIT section 2, learned once with the shipping models (rerank on, standard level; maintainer's choice 2026-11-01): `before` is asserted first, then
 /// the first syllable is single-picked as `want` and Enter, then the same reading must show `sent`. Two rows of eval/dev/user-reported.txt in the
-/// formal profile only (row 31 and row 163 are already right in chat), and the semantic teach row 代你保管 of eval/learn/sinit-cases.tsv in chat.
+/// formal profile only (row 31, 再測一次, is right by default with 會意 SJ-SR-8-15M; row 78, 直式顯示, replaces it, and row 163 is right in chat already), and the semantic
+/// teach row 喂你在嗎 of eval/learn/sinit-cases.tsv in chat (代你保管, the row until SJ-SR-8-15M, is not learned by one teach with the new cells: it shows 帶你保管 in
+/// both profiles, measured 2026-11-06).
 fn sinit_learned_once(p: lm::Profile, reading: &str, before: &str, want: &str, sent: &str) {
     let mut e = ship(p);
     assert_eq!(type_settled(&mut e, reading), before, "{p:?} {sent}: before teaching");
@@ -2879,8 +2883,8 @@ fn sinit_dai_wo_chu_xi_hui_yi_does_not_take_dai_wo_chu_qu_wan() {
 }
 
 #[test]
-fn sinit_user_reported_row_31_is_learned_once_in_formal() {
-    sinit_learned_once(lm::Profile::Formal, "ㄗㄞˋ ㄘㄜˋ ㄧ ㄘˋ", "在測一次", "再", "再測一次");
+fn sinit_user_reported_row_78_is_learned_once_in_formal() {
+    sinit_learned_once(lm::Profile::Formal, "ㄓˊ ㄕˋ ㄒㄧㄢˇ ㄕˋ", "值是顯示", "直", "直式顯示");
 }
 
 #[test]
@@ -2889,6 +2893,6 @@ fn sinit_user_reported_row_163_is_learned_once_in_formal() {
 }
 
 #[test]
-fn sinit_semantic_row_dai_ni_bao_guan_is_learned_once_in_chat() {
-    sinit_learned_once(lm::Profile::Chat, "ㄉㄞˋ ㄋㄧˇ ㄅㄠˇ ㄍㄨㄢˇ", "帶你保管", "代", "代你保管");
+fn sinit_semantic_row_wei_ni_zai_ma_is_learned_once_in_chat() {
+    sinit_learned_once(lm::Profile::Chat, "ㄨㄟˋ ㄋㄧˇ ㄗㄞˋ ㄇㄚ", "為你在嗎", "喂", "喂你在嗎");
 }

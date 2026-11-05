@@ -95,7 +95,10 @@ fn row25(dir: &Path) -> String {
 /// Without `--colloquial-core` every output is what the CLI wrote before the option existed (hashes of `--dev 16 --context --packs acg --tinylm
 /// data/lm/tinylm.sjtl`, `--dump --dump-words --rowstats --tinylm-scores`; taken 2026-10-27 on the 通語 SJ-LM-7-9.7M files from the measurement CLI of the
 /// sj-lm-7 selection, which has no colloquial option in this path, run with its research flag `--chat-tri on-kn`, and equal to this binary's;
-/// before that, from the binary that had no option at all, on the model-v6 files).
+/// before that, from the binary that had no option at all, on the model-v6 files). The dump, words and rowstats hashes are those of 2026-10-27 still with the
+/// 會意 SJ-SR-8-15M file (the n-gram's candidates and the plain rerank's picks on these 16 rows do not change); the scores and the summary line carry the new
+/// small model's numbers and its `tl:` tag, so their hashes were taken again on 2026-11-06 from this binary and checked equal to the same run of main's binary
+/// (the one built before SR-TW, which has no colloquial default and no cell change in this path) on the same `data/lm/tinylm.sjtl`.
 // macOS only: the dump and scores carry f64 values that the Linux libm rounds differently in the last bit (the WSL runner skips the existing
 // tests of that kind too); this is the one check against the binary from before the option existed.
 #[cfg(target_os = "macos")]
@@ -109,11 +112,11 @@ fn no_option_is_byte_identical_to_before() {
     assert_eq!(h(&o.words), "5c8e89a037daa1056ac9295d95995c8504c70a529272621cc45dcaf312a26bc9");
     assert_eq!(h(&o.rs), "a795b9d2c943e64587906438de9439fc5302cff79341a63684328ba44f9b960b");
     // The scores gained a `masked` field in sj-lm-7-pr2.md section 2.7 (empty on every one of these 16 rows); without it they are what they were.
-    assert_eq!(h(&o.sc), "066e26f8d1f6d1e900efa987dd524a005262da404d02d3c6b59ad1519e7b25c1");
-    assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "3762df4df12f06e84754f2d952dde28389a4e838821105db43a04d13fe9fe99e");
+    assert_eq!(h(&o.sc), "729efe518ebc940400134b92d7e3a9d263de9dc4e3595ae780dab70b9bb9983d");
+    assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "0a8e3d25171398c95806afe96ec6b781c89174f7422947ce69a06b52bf81800c");
     // The summary line carries the model tags; with the fingerprint entries (new bigram, kn and tinylm hashes) only those 8-character tags changed
     // (the old hash 03876095… is this line with the old tags put back).
-    assert_eq!(h(&o.stdout), "da55bd37457e24ef2f6c0bd2fe2334d45f84911a37cc30f8584e318b66f72642");
+    assert_eq!(h(&o.stdout), "bcbd01639fc673ad390e1e2a9609cae9674a3f3bd8bdd8c141afdd473e83e2f7");
 }
 
 /// The acceptance row: the shipping rerank keeps `城市` (c 0; it was row 202, 羅斯松 against 螺絲鬆, until 通語 SJ-LM-7-9.7M, whose n-gram gets that one right), the
@@ -191,19 +194,22 @@ fn level_rows(dir: &Path) -> String {
 }
 
 /// docs/contracts/colloquial-levels.md: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:`). The picks are those the CLI gives on the final 通語 SJ-LM-7-9.7M files with the cells of sj-lm-7.md section 2.9
-/// (measured 2026-10-27; the cell arithmetic itself is `core/src/colloquial.rs`'s unit tests): standard (0.7, 2, 0) [1, 0, 0, 3]; conservative (0.7, 2, 1) keeps the
-/// n-gram first on the three dev302 rows and picks 3 on the user-reported one, where the header triple without the term picks [0, 0, 0, 0]; aggressive (1.0, 2, 0.1)
-/// picks [1, 5, 2, 3], the header triple without the term [0, 0, 0, 0].
+/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:`). The picks are those the CLI gives on the final 會意 SJ-SR-8-15M
+/// file with the cells of sr-tw-product.md section 1 (measured 2026-11-06 with `--rows` over the four rows, `--tinylm-scores` `c`; the cell arithmetic itself is
+/// `core/src/colloquial.rs`'s unit tests): standard (1.1, 2, 0) [1, 5, 2, 3]; conservative (1.3, 2, 1) keeps the n-gram first on rows 25 and 22 of dev302 where
+/// the standard cell picks 1 and 2 (the conservative delta), and picks the standard's 5 and 3 on the other two; aggressive is the standard cell, so the same
+/// [1, 5, 2, 3]. The header triple without the term picks [0, 0, 0, 3] at every strength (only the user-reported row is right without it), so the term changes
+/// the pick of all three dev302 rows at standard and aggressive and of row 119 at conservative.
 #[test]
 fn the_term_applies_at_every_strength() {
     let d = tmp("lvrows");
     let rows = level_rows(&d);
     let set = ["--rows", rows.as_str()];
+    let mut by_level = Vec::new();
     for (i, (level, with, without)) in [
-        ("standard", vec![1, 0, 0, 3], None),
-        ("conservative", vec![0, 0, 0, 3], Some(vec![0, 0, 0, 0])),
-        ("aggressive", vec![1, 5, 2, 3], Some(vec![0, 0, 0, 0])),
+        ("standard", vec![1, 5, 2, 3], None),
+        ("conservative", vec![0, 5, 0, 3], Some(vec![0, 0, 0, 3])),
+        ("aggressive", vec![1, 5, 2, 3], Some(vec![0, 0, 0, 3])),
     ]
     .into_iter()
     .enumerate()
@@ -217,8 +223,12 @@ fn the_term_applies_at_every_strength() {
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
+            assert_ne!(chosen(&new.sc), plain, "{level}: the term changes picks");
         }
+        by_level.push(chosen(&new.sc));
     }
+    assert_ne!(by_level[1], by_level[0], "premise: the conservative cell picks differently from the standard one");
+    assert_eq!(by_level[2], by_level[0], "the aggressive cell is the standard one (docs/contracts/sr-tw-product.md section 1)");
 }
 
 /// In the shipping setting the option does change choices on a set of rows (so the checks above are not vacuously true), and `--threads 2`
@@ -288,6 +298,30 @@ fn the_colloquial_term_stands_alone() {
     args.extend(["--rows".to_string(), rows.clone(), "--colloquial-core".to_string(), TABLE.to_string(), "--no-reading-channel".to_string()]);
     let o = run(&args);
     assert!(!o.status.success() && text(&o.stderr).contains("unknown argument"), "{}", text(&o.stderr));
+}
+
+/// SR-TW product (docs/contracts/sr-tw-product.md section 2): the mild first-word estimate is on by default, with no tag suffix (the shipping tag stays
+/// `+colloq:81c2470d`); `--colloquial-no-unseen-start-unigram` turns it off and the tag gets `+us0`; `--colloquial-first-unigram` still runs (it used to be
+/// refused with the estimate flag) and is tagged `+fu`; the research flag needs the table. Row 179 of eval/dev/user-reported.txt (`權限加好了`, public): `c` 0
+/// by default, 3 without the estimate (measured 2026-11-06, `--rerank-level standard`).
+#[test]
+fn the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off() {
+    let d = tmp("us0");
+    let line = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap().lines().nth(178).unwrap().to_string();
+    assert!(line.starts_with("|權限加好了|"), "row 179");
+    let rows = d.join("row179.txt");
+    std::fs::write(&rows, line + "\n").unwrap();
+    let set = ["--rows", rows.to_str().unwrap()];
+    let run_with = |name: &str, extra: &[&str]| full_run(&tmp(name), &BASE[..9], &set, &[&["--colloquial-core", TABLE][..], extra].concat());
+    let (on, off, fu) = (run_with("us-on", &[]), run_with("us-off", &["--colloquial-no-unseen-start-unigram"]), run_with("us-fu", &["--colloquial-first-unigram"]));
+    assert_eq!((chosen(&on.sc), chosen(&off.sc)), (vec![0], vec![3]), "the estimate changes this row");
+    assert!(on.stdout.contains("+colloq:81c2470d+rd+rx:") && !on.stdout.contains("+us"), "{}", on.stdout);
+    assert!(off.stdout.contains("+colloq:81c2470d+us0+rd+rx:"), "{}", off.stdout);
+    assert!(fu.stdout.contains("+colloq:81c2470d+fu+rd+rx:"), "{}", fu.stdout);
+    let mut a: Vec<String> = BASE[..9].iter().map(|s| s.to_string()).collect();
+    a.extend(["--dev".to_string(), "2".to_string(), "--colloquial-no-unseen-start-unigram".to_string()]);
+    let o = run(&a);
+    assert!(!o.status.success() && text(&o.stderr).contains("--colloquial-no-unseen-start-unigram needs --colloquial-core"), "{}", text(&o.stderr));
 }
 
 /// The numbers of the list under `"key": [...]` in one `--tinylm-scores` line (`null` is NaN); None when the key is not there.
