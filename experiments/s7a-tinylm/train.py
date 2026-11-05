@@ -90,7 +90,8 @@ def main(argv=None):
     ap.add_argument("--peak-lr", type=float, default=PEAK_LR, help="peak learning rate of the warm-up and cosine schedule (the real runs keep 1e-3)")
     ap.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY, help="AdamW weight decay on the matrices (the real runs keep 0.1; SR-TW-V V4 uses 0)")
     ap.add_argument("--kl-teacher", metavar="NPZ", help="frozen teacher for the KL term (same vocabulary and shape as the student); needs flags-<name>.u8 files (prep.py --changed-flags)")
-    ap.add_argument("--kl-lambda", type=float, default=0.0, help="weight of KL(student || teacher) on the tokens of unchanged runs")
+    ap.add_argument("--kl-lambda", type=float, help="weight of KL(student || teacher) on the tokens of unchanged runs; required with --kl-teacher "
+                    "(review P3-c: a teacher without it would train with no anchor); 0 is allowed explicitly")
     ap.add_argument("--changed-weight", type=float, metavar="R", help="draw batches so that changed runs are the fraction R of the target tokens (V3 uses 0.1)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
@@ -100,8 +101,14 @@ def main(argv=None):
     chars = prep.load_vocab(a.work)
     extra = a.extra
     prep.check_vocab(a.work, [p for p, _ in extra])
-    if a.kl_lambda < 0 or (a.kl_lambda > 0 and not a.kl_teacher):
-        sys.exit("--kl-lambda needs --kl-teacher and must not be negative")
+    if a.kl_teacher and a.kl_lambda is None:
+        sys.exit("--kl-teacher needs --kl-lambda (give 0 explicitly for a run without the anchor)")
+    if a.kl_lambda is None:
+        a.kl_lambda = 0.0
+    if not a.kl_lambda >= 0 or (a.kl_lambda > 0 and not a.kl_teacher):   # `not >=` also refuses NaN
+        sys.exit("--kl-lambda needs --kl-teacher and must be a number >= 0")
+    if not a.weight_decay >= 0:
+        sys.exit("--weight-decay must be a number >= 0")
     if a.changed_weight is not None and not 0 < a.changed_weight < 1:
         sys.exit("--changed-weight must be in (0, 1)")
     try:

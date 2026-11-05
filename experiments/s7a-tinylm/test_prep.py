@@ -145,6 +145,11 @@ class TestPrepEquivalence(unittest.TestCase):
             open(keys_file, "w", encoding="utf-8").write("# comment\n軟件\n\n")
             keys, info = prep.load_simp_keys(keys_file)
             self.assertEqual((keys, info["keys"], info["basename"], info["sha256"]), (frozenset({"軟件"}), 1, "keys.txt", prep.sha256_file(keys_file)))
+            self.assertEqual(info["keys_in_twphrases"], 1)
+            bad = os.path.join(td, "bad.txt")   # Taiwan wording instead of TWPhrases keys: refused, not a silent empty table
+            open(bad, "w", encoding="utf-8").write("軟體\n滑鼠\n")
+            with self.assertRaises(SystemExit):
+                prep.load_simp_keys(bad)
             plain = prep.write_runs(src, td, "plain", self.conv, tw=False)
             self.assertFalse(os.path.exists(os.path.join(td, "flags-plain.u8")))
             self.assertNotIn("flags_sha256", plain)

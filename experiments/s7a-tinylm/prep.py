@@ -136,7 +136,13 @@ def load_simp_keys(path):
     short = sorted(k for k in keys if len(k) < 2)
     if not keys or short:
         die(f"--simp-tw-keys {path}: " + ("no keys" if not keys else f"keys shorter than two characters: {short[:5]}"))
-    return keys, {"basename": os.path.basename(path), "sha256": sha256_file(path), "keys": len(keys)}
+    # SR-TW-V review P3-b: a file in the wrong form (Simplified or Taiwan wording instead of TWPhrases keys) would leave Simplified sentences
+    # with no TWPhrases at all, silently; count the keys that really are TWPhrases keys and refuse a file with none.
+    table = {l.split("\t", 1)[0] for l in open(os.path.join(bc.SRC, "opencc", "TWPhrases.txt"), encoding="utf-8") if "\t" in l and not l.startswith("#")}
+    hit = len(keys & table)
+    if not hit:
+        die(f"--simp-tw-keys {path}: none of its {len(keys)} keys is a TWPhrases.txt key")
+    return keys, {"basename": os.path.basename(path), "sha256": sha256_file(path), "keys": len(keys), "keys_in_twphrases": hit}
 
 
 def write_flags_report(path):
