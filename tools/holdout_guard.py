@@ -83,7 +83,7 @@ def default_rows():
     return sorted(glob.glob(os.path.join(ROOT, "eval", "holdout", "**", "*.txt"), recursive=True))
 
 
-def build_matcher(paths, conv, trad_tw_phrases=True):
+def build_matcher(paths, conv, trad_tw_phrases=True, simp_tw_keys=None):
     """-> (Matcher, {pattern: ["path:line", ...]}, loaded rows, skipped short rows). conv = build_counts.load_conv() tuple.
     Patterns are each sentence and its converted form, folded. Raises GuardError on a bad row or when nothing loads."""
     owners = collections.defaultdict(list)
@@ -97,6 +97,8 @@ def build_matcher(paths, conv, trad_tw_phrases=True):
             forms = {bc.fold(s), bc.fold(bc.convert(s, *conv))}
             if not trad_tw_phrases:    # the text the counters see keeps its Traditional wording: match that form too
                 forms.add(bc.fold(bc.convert(s, *conv, trad_tw_phrases=False)))
+            if simp_tw_keys is not None:    # SR-TW-V: a Simplified row keeps the TWPhrases wording outside the key list
+                forms.add(bc.fold(bc.convert(s, *conv, trad_tw_phrases=trad_tw_phrases, simp_tw_keys=simp_tw_keys)))
             for pat in forms:
                 owners[pat].append(f"{p}:{n}")
     if not loaded:

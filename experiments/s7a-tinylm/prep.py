@@ -23,6 +23,19 @@
           byte-identical to before. encode also writes DIR/ids-vocab.json (vocab and ids hashes, the extra set); it refuses to run over a
           vocab.txt made from a different extra set (a work dir without that file counts as "no extras") unless --force, and rejects the
           names wiki, coll and duplicates. train.py checks these hashes (check_vocab) before it trains.
+`--simp-tw-keys FILE` (runs, text; SR-TW-V arm V4): Simplified sentences get only the OpenCC TWPhrases entries whose key is listed in FILE (one
+          key per line, 2+ characters, '#' lines are comments; the same format as clean_subs.py --mainland-terms, the list SJ-LM-7 section 2.7
+          measured), so a Simplified 权限 stays 權限 instead of becoming 許可權. Traditional sentences are not affected (that is
+          --no-trad-tw-phrases). Without the option every output is byte-identical to before. The file's basename, sha256 and key count go into
+          charcount.json (runs) / text-<name>.json (text), and the holdout guard matches the text as written.
+`--changed-flags` (runs, text; SR-TW-V arms V2 and V3): next to the normal output, write one byte per kept run, in runs order, 0x00 or 0x01
+          (no separator): flags-wiki.u8 and flags-coll.u8 for `runs`, flags-<name>.u8 for `text`. A run gets 0x01 when its text differs between
+          A = the conversion the shipped 會意 was trained on (convert defaults: TWPhrases on Traditional and Simplified sentences) and B = the one
+          actually written (--no-trad-tw-phrases / --simp-tw-keys). Both conversions run on the same sentence and A's and B's Han runs are
+          compared one by one (conversion never moves a non-Han character, so they pair up; if the counts ever differ, every run of that sentence
+          is flagged). The file has exactly as many bytes as runs-<name>.txt has lines, so it lines up with the BOS tokens of ids-<name>.npy;
+          batching.build_epoch turns it into a per-token mask for train.py (--kl-teacher: KL only where 0; --changed-weight: sampling where 1).
+          Its sha256 and the number of flagged runs go into charcount.json / text-<name>.json (flags_sha256, changed_runs).
 """
 import argparse
 import collections
@@ -44,6 +57,9 @@ import build_counts_text as bct  # noqa: E402
 # experiments/model-v5/README.md table: (first 8 hex, last 4 hex). OpenCC files are additionally pinned in full by build_counts._checked.
 EXPECTED = {"wiki": ("5db9052e", "7e2f"), "colloquial-train.txt": ("3e833d06", "b4db"), "synth.txt": ("bec7a6a2", "99f1"),
             "TWVariants.txt": ("245b94eb", "cb86"), "STCharacters.txt": ("a0ca1601", "582b")}
+# --no-trad-tw-phrases (docs/contracts/sr-no-twphrases.md section 2.1): the colloquial pool is the one SJ-LM-7 section 2.2 regenerated, whose
+# train side was converted without TWPhrases (3e833d06 already carries them: 權限 became 許可權, which no prep flag can undo).
+EXPECTED_NO_TW = dict(EXPECTED, **{"colloquial-train.txt": ("eb905936", "57a0")})
 MIN_COUNT = 5
 WIKI_WEIGHT, COLL_WEIGHT = 1, 5    # per epoch, same as the n-gram counts (wiki x1, colloquial x5)
 
@@ -60,93 +76,162 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-def match_hash(name, hexd):
-    head, tail = EXPECTED[name]
+def match_hash(name, hexd, expected=None):
+    head, tail = (expected or EXPECTED)[name]
     return hexd.startswith(head) and hexd.endswith(tail)
 
 
-def check_inputs(paths):
-    """paths: {expected-name: file}. Returns {name: sha256}; stops (SystemExit) on the first mismatch."""
-    got = {}
+def check_inputs(paths, expected=None):
+    """paths: {expected-name: file}. Returns {name: sha256}; stops (SystemExit) on the first mismatch. expected: EXPECTED (default) or EXPECTED_NO_TW."""
+    exp, got = expected or EXPECTED, {}
     for name, p in paths.items():
         if not os.path.isfile(p):
             die(f"INPUT MISSING {name}: {p}")
         got[name] = sha256_file(p)
-        if not match_hash(name, got[name]):
-            die(f"INPUT HASH MISMATCH {name}: {got[name]} (expected {EXPECTED[name][0]}...{EXPECTED[name][1]})")
+        if not match_hash(name, got[name], exp):
+            die(f"INPUT HASH MISMATCH {name}: {got[name]} (expected {exp[name][0]}...{exp[name][1]})")
     return got
 
 
 # ------------------------------------------------------------------ the text functions (tests compare them with build_counts)
-def wiki_runs(raw, conv):
+def wiki_runs(raw, conv, tw=True, keys=None):
     """One wiki article's Han runs, in count_batch's order (the --mw branch is not used: model-v5 counts were made without it).
     The pipeline is build_counts.article_runs, the one copy the counting scripts and holdout_guard share."""
-    for run in bc.article_runs(raw, conv):
+    for run in bc.article_runs(raw, conv, trad_tw_phrases=tw, simp_tw_keys=keys):
         if len(run) >= 2:
             yield run
 
 
-def text_runs(line, conv):
+def text_runs(line, conv, tw=True, keys=None):
     """One colloquial line's Han runs (build_counts_text.main's loop)."""
-    for run in bc.text_runs(line, conv):
+    for run in bc.text_runs(line, conv, trad_tw_phrases=tw, simp_tw_keys=keys):
         if len(run) >= 2:
             yield run
+
+
+def _flagged(sentence, conv, tw, keys):
+    """(run, changed) for one sentence: B = convert(tw, keys) as written, A = convert defaults; changed = the run differs from A's run at the same index
+    (all runs changed if A and B split the sentence into a different number of runs, which conversion should never do)."""
+    b = bc.HAN.findall(bc.convert(sentence, *conv, trad_tw_phrases=tw, simp_tw_keys=keys))
+    a = bc.HAN.findall(bc.convert(sentence, *conv))
+    same = len(a) == len(b)
+    for i, run in enumerate(b):
+        if len(run) >= 2:
+            yield run, not same or a[i] != run
+
+
+def wiki_runs_flagged(raw, conv, tw=True, keys=None):
+    """wiki_runs with the --changed-flags bit: (run, changed). Same runs in the same order (article_runs = article_text, SENT, convert, HAN)."""
+    for s in bc.SENT.findall(bc.article_text(raw)):
+        yield from _flagged(s, conv, tw, keys)
+
+
+def text_runs_flagged(line, conv, tw=True, keys=None):
+    yield from _flagged(line, conv, tw, keys)
+
+
+def load_simp_keys(path):
+    """--simp-tw-keys FILE -> (frozenset of keys, {basename, sha256, keys}). One key per line, '#' lines and blank lines skipped, 2+ characters."""
+    keys = frozenset(l.strip() for l in open(path, encoding="utf-8") if l.strip() and not l.startswith("#"))
+    short = sorted(k for k in keys if len(k) < 2)
+    if not keys or short:
+        die(f"--simp-tw-keys {path}: " + ("no keys" if not keys else f"keys shorter than two characters: {short[:5]}"))
+    # SR-TW-V review P3-b: a file in the wrong form (Simplified or Taiwan wording instead of TWPhrases keys) would leave Simplified sentences
+    # with no TWPhrases at all, silently; count the keys that really are TWPhrases keys and refuse a file with none.
+    table = {l.split("\t", 1)[0] for l in open(os.path.join(bc.SRC, "opencc", "TWPhrases.txt"), encoding="utf-8") if "\t" in l and not l.startswith("#")}
+    hit = len(keys & table)
+    if not hit:
+        die(f"--simp-tw-keys {path}: none of its {len(keys)} keys is a TWPhrases.txt key")
+    return keys, {"basename": os.path.basename(path), "sha256": sha256_file(path), "keys": len(keys), "keys_in_twphrases": hit}
+
+
+def write_flags_report(path):
+    """(sha256, number of 1s) of a finished flags file, which must hold only 0x00/0x01."""
+    data = open(path, "rb").read()
+    assert not data.strip(b"\x00\x01"), path
+    return sha256_file(path), data.count(1)
 
 
 _CONV = _GUARD = None
+_TW = True   # trad_tw_phrases for the workers (False with --no-trad-tw-phrases)
+_KEYS = None   # simp_tw_keys for the workers (--simp-tw-keys)
+_FLAGS = False   # --changed-flags: the workers also return the per-run bytes
 
 
-def _init(guard=None):
-    global _CONV, _GUARD
-    _CONV, _GUARD = bc.load_conv(), guard
+def _init(guard=None, tw=True, keys=None, flags=False):
+    global _CONV, _GUARD, _TW, _KEYS, _FLAGS
+    _CONV, _GUARD, _TW, _KEYS, _FLAGS = bc.load_conv(), guard, tw, keys, flags
 
 
 def _work(args):
+    """-> (text, character Counter, runs, guard-skipped runs) and, with --changed-flags, the bytes of the 0/1 flags as a fifth item."""
     kind, items = args
-    f = wiki_runs if kind == "wiki" else text_runs
-    runs, skipped = [], 0
+    if _FLAGS:
+        f = wiki_runs_flagged if kind == "wiki" else text_runs_flagged
+    else:
+        g = wiki_runs if kind == "wiki" else text_runs
+        f = lambda x, conv, tw, keys: ((r, False) for r in g(x, conv, tw, keys))
+    runs, flags, skipped = [], bytearray(), 0
     for x in items:
-        for r in f(x, _CONV):
+        for r, ch in f(x, _CONV, _TW, _KEYS):
             if _GUARD is not None and _GUARD.any(bc.fold(r)):   # --holdout-guard: held-out sentence inside the run, not part of the training text
                 skipped += 1
                 continue
-            runs.append(r)
+            runs.append(r); flags.append(ch)
     text = "\n".join(runs)
-    return text, collections.Counter(text.replace("\n", "")), len(runs), skipped
+    out = (text, collections.Counter(text.replace("\n", "")), len(runs), skipped)
+    return out + (bytes(flags),) if _FLAGS else out
 
 
 def cmd_runs(a):
     paths = {"wiki": bc.DUMP, "colloquial-train.txt": a.coll, "synth.txt": a.synth,
              "TWVariants.txt": os.path.join(bc.SRC, "opencc", "TWVariants.txt"), "STCharacters.txt": os.path.join(bc.SRC, "opencc", "STCharacters.txt")}
-    hashes = check_inputs(paths)
-    guard = bc.guard_matcher(a.holdout_guard)
+    tw = not a.no_trad_tw_phrases
+    hashes = check_inputs(paths, EXPECTED if tw else EXPECTED_NO_TW)
+    keys, keys_info = load_simp_keys(a.simp_tw_keys) if a.simp_tw_keys else (None, None)
+    guard = bc.guard_matcher(a.holdout_guard, tw, keys)   # the guard scans the text that is actually written
     os.makedirs(a.work, exist_ok=True)
     skipped_runs = 0
     total, report = collections.Counter(), {"input_sha256": hashes, "articles": a.articles}
-    with mp.Pool(a.procs, initializer=_init, initargs=(guard,)) as pool:
+    if not tw:
+        report["trad_tw_phrases"] = False   # absent = True, so the pre-SR-TW charcount.json files read the same
+    if keys_info:
+        report["simp_tw_keys"] = keys_info
+    flags = a.changed_flags
+    with mp.Pool(a.procs, initializer=_init, initargs=(guard, tw, keys, flags)) as pool:
         # wiki: imap (ordered), so the training text is the same on every run
         n_runs = n_chars = 0
-        with open(os.path.join(a.work, "runs-wiki.txt"), "w", encoding="utf-8", newline="\n") as out:
-            for i, (text, cnt, n, sk) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
+        with open(os.path.join(a.work, "runs-wiki.txt"), "w", encoding="utf-8", newline="\n") as out, \
+                (open(os.path.join(a.work, "flags-wiki.u8"), "wb") if flags else contextlib.nullcontext()) as fout:
+            for i, (text, cnt, n, sk, *fl) in enumerate(pool.imap(_work, (("wiki", b) for b in bc.batches(bc.articles(a.articles)))), 1):
                 if n:
                     out.write(text + "\n")
+                    if flags:
+                        fout.write(fl[0])
                 total.update(cnt); n_runs += n; n_chars += sum(cnt.values()); skipped_runs += sk
                 if i % 50 == 0:
                     print(f"~{i * 200} articles, {n_runs} runs, {n_chars} chars", flush=True)
         report["wiki"] = {"runs": n_runs, "chars": n_chars}
         n_runs = n_chars = 0
-        with open(os.path.join(a.work, "runs-coll.txt"), "w", encoding="utf-8", newline="\n") as out:
+        with open(os.path.join(a.work, "runs-coll.txt"), "w", encoding="utf-8", newline="\n") as out, \
+                (open(os.path.join(a.work, "flags-coll.u8"), "wb") if flags else contextlib.nullcontext()) as fout:
             for name, p in (("colloquial-train.txt", a.coll), ("synth.txt", a.synth)):
                 r = c = 0
-                for text, cnt, n, sk in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
+                for text, cnt, n, sk, *fl in pool.imap(_work, (("text", b) for b in bc.batches(bct.lines(p), 2000))):
                     if n:
                         out.write(text + "\n")
+                        if flags:
+                            fout.write(fl[0])
                     total.update(cnt); r += n; c += sum(cnt.values()); skipped_runs += sk
                 report[name] = {"runs": r, "chars": c}
                 n_runs += r; n_chars += c
         report["coll"] = {"runs": n_runs, "chars": n_chars}
     if guard is not None:
         report["holdout_guard_skipped_runs"] = skipped_runs
+    if flags:
+        for n in ("wiki", "coll"):
+            sha, ones = write_flags_report(os.path.join(a.work, f"flags-{n}.u8"))
+            report[n].update(flags_sha256=sha, changed_runs=ones)
     report["train_chars_once"] = report["wiki"]["chars"] + report["coll"]["chars"]
     report["train_chars_weighted"] = WIKI_WEIGHT * report["wiki"]["chars"] + COLL_WEIGHT * report["coll"]["chars"]
     json.dump({"report": report, "charcount": dict(total)}, open(os.path.join(a.work, "charcount.json"), "w", encoding="utf-8"), ensure_ascii=False)
@@ -241,16 +326,22 @@ def cmd_encode(a):
             f"ids (another arm's files); use a separate work dir, or --force")
     if os.path.isfile(os.path.join(a.work, VOCAB_RECORD)):
         os.remove(os.path.join(a.work, VOCAB_RECORD))     # re-written last: a crash in between leaves no record that looks valid
-    cc = json.load(open(os.path.join(a.work, "charcount.json"), encoding="utf-8"))
-    count = collections.Counter(cc["charcount"])
-    for name in a.extra:                                   # each extra file once, not by its epoch weight
-        with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
-            for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
-                count.update(block.replace("\n", ""))
-    chars = make_vocab(count, a.min_count)
+    vocab_from = getattr(a, "vocab_from", None)
+    if vocab_from:                                         # SR-TW-W: the vocabulary of an existing model, not rebuilt (characters outside it are UNK)
+        chars = [str(c) for c in np.load(vocab_from, allow_pickle=False)["chars"]]
+    else:
+        cc = json.load(open(os.path.join(a.work, "charcount.json"), encoding="utf-8"))
+        count = collections.Counter(cc["charcount"])
+        for name in a.extra:                               # each extra file once, not by its epoch weight
+            with open(os.path.join(a.work, f"runs-{name}.txt"), encoding="utf-8", newline="\n") as f:
+                for block in iter(lambda: f.read(1 << 24), ""):    # C-level counts over 16M-char blocks, the same counts as line by line
+                    count.update(block.replace("\n", ""))
+        chars = make_vocab(count, a.min_count)
     open(os.path.join(a.work, "vocab.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(chars) + "\n")
     lut = make_lut(chars)
-    rep = {"vocab_size": len(chars) + 3, "min_count": a.min_count}
+    rep = {"vocab_size": len(chars) + 3, "min_count": None if vocab_from else a.min_count}
+    if vocab_from:
+        rep["vocab_from_sha256"] = sha256_file(vocab_from)
     for name in ("wiki", "coll"):
         ids = encode_file(os.path.join(a.work, f"runs-{name}.txt"), lut)
         np.save(os.path.join(a.work, f"ids-{name}.npy"), ids)
@@ -273,7 +364,7 @@ def half_keep(sentence):
 
 
 TEXT_KEYS = ["input", "input_sha256", "lines", "tokens", "runs", "unk_fraction", "vocab_sha256", "runs_sha256", "ids_sha256",
-             "holdout_guard_skipped_runs", "half_dropped_runs"]   # text-<name>.json key order; the first ten are the pre-SJ-SR-7 order
+             "holdout_guard_skipped_runs", "half_dropped_runs", "simp_tw_keys", "flags_sha256", "changed_runs"]   # text-<name>.json key order; the first ten are the pre-SJ-SR-7 order
 
 
 def dump_text_report(path, rep):
@@ -282,47 +373,61 @@ def dump_text_report(path, rep):
     return rep
 
 
-def _text_batch(lines, conv, guard, half, tsv):
-    """write_runs on one batch of input lines (trailing newline removed): (the kept runs, each + "\\n"; lines; guard-skipped runs; half-dropped runs)."""
-    out, skipped, dropped = [], 0, 0
+def _text_batch(lines, conv, guard, half, tsv, tw=True, keys=None, flags=False):
+    """write_runs on one batch of input lines (trailing newline removed): (the kept runs, each + "\\n"; lines; guard-skipped runs; half-dropped runs),
+    plus with flags=True the bytes of the 0/1 --changed-flags bits of the kept runs as a fifth item."""
+    out, skipped, dropped, fl = [], 0, 0, bytearray()
+    f = text_runs_flagged if flags else (lambda line, conv, tw, keys: ((r, False) for r in text_runs(line, conv, tw, keys)))
     for line in lines:
         if half and not half_keep(line.split("\t")[-1] if tsv else line):
-            dropped += sum(1 for _ in text_runs(line, conv))
+            dropped += sum(1 for _ in text_runs(line, conv, tw, keys))
             continue
-        for run in text_runs(line, conv):
+        for run, ch in f(line, conv, tw, keys):
             if guard is not None and guard.any(bc.fold(run)):
                 skipped += 1
                 continue
-            out.append(run + "\n")
-    return "".join(out), len(lines), skipped, dropped
+            out.append(run + "\n"); fl.append(ch)
+    res = ("".join(out), len(lines), skipped, dropped)
+    return res + (bytes(fl),) if flags else res
 
 
 def _text_work(args):
-    return _text_batch(args[0], _CONV, _GUARD, *args[1:])
+    return _text_batch(args[0], _CONV, _GUARD, *args[1:], _TW, _KEYS, _FLAGS)
 
 
-def write_runs(src, work, name, conv, guard=None, half=False, procs=1):
+def write_runs(src, work, name, conv, guard=None, half=False, procs=1, tw=True, keys=None, keys_info=None, flags=False):
     """src -> DIR/runs-<name>.txt (one Han run per line) and DIR/text-<name>.json. Returns the report dict.
     half: keep a whole input line (all its runs) iff half_keep(its sentence); the sentence is the line without the trailing newline,
     before conversion, and for a ".tsv" path only the last tab-separated field. One line is never split.
     procs > 1: batches of 2,000 lines in a Pool whose workers load bc.load_conv() (as `runs` does; `conv` is then unused); imap keeps the
-    order, so the files are the same as with procs=1."""
+    order, so the files are the same as with procs=1.
+    keys (+ keys_info for the report): see --simp-tw-keys; flags: also write DIR/flags-<name>.u8 (--changed-flags, module docstring)."""
     if name in ("wiki", "coll"):
         die(f"--name {name} would overwrite the S7a training ids")
     runs_path = os.path.join(work, f"runs-{name}.txt")
     tsv = ".tsv" in src
     n_lines = skipped = dropped = 0
+    flags_path = os.path.join(work, f"flags-{name}.u8")
     with open(src, encoding="utf-8", newline="\n") as f, open(runs_path, "w", encoding="utf-8", newline="\n") as out, \
-            (mp.Pool(procs, initializer=_init, initargs=(guard,)) if procs > 1 else contextlib.nullcontext()) as pool:
+            (open(flags_path, "wb") if flags else contextlib.nullcontext()) as fout, \
+            (mp.Pool(procs, initializer=_init, initargs=(guard, tw, keys, flags)) if procs > 1 else contextlib.nullcontext()) as pool:
         jobs = ((b, half, tsv) for b in bc.batches((line.rstrip("\n") for line in f), 2000))
-        for text, n, sk, dr in (pool.imap(_text_work, jobs) if pool else (_text_batch(b, conv, guard, h, t) for b, h, t in jobs)):
+        for text, n, sk, dr, *fl in (pool.imap(_text_work, jobs) if pool else (_text_batch(b, conv, guard, h, t, tw, keys, flags) for b, h, t in jobs)):
             out.write(text)
+            if flags:
+                fout.write(fl[0])
             n_lines += n; skipped += sk; dropped += dr
     rep = {"input": src, "input_sha256": sha256_file(src), "lines": n_lines, "runs_sha256": sha256_file(runs_path)}
     if guard is not None:
         rep["holdout_guard_skipped_runs"] = skipped
     if half:
         rep["half_dropped_runs"] = dropped    # Han runs of the dropped lines
+    if not tw:
+        rep["trad_tw_phrases"] = False
+    if keys_info:
+        rep["simp_tw_keys"] = keys_info
+    if flags:
+        rep["flags_sha256"], rep["changed_runs"] = write_flags_report(flags_path)
     return dump_text_report(os.path.join(work, f"text-{name}.json"), rep)
 
 
@@ -339,16 +444,18 @@ def write_ids(work, name, lut):
     return dump_text_report(rj, rep)
 
 
-def encode_extra(src, work, name, conv, guard=None, half=False, procs=1):
+def encode_extra(src, work, name, conv, guard=None, half=False, procs=1, tw=True, keys=None, keys_info=None, flags=False):
     """`text`: src -> DIR/runs-<name>.txt -> DIR/ids-<name>.npy with the existing DIR/vocab.txt. Returns the report dict."""
-    write_runs(src, work, name, conv, guard, half, procs)
+    write_runs(src, work, name, conv, guard, half, procs, tw, keys, keys_info, flags)
     return write_ids(work, name, make_lut(load_vocab(work)))
 
 
 def cmd_text(a):
-    conv, guard = bc.load_conv(), bc.guard_matcher(a.holdout_guard)
-    print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half, a.procs) if a.runs_only
-                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs), indent=1))
+    tw = not a.no_trad_tw_phrases
+    keys, keys_info = load_simp_keys(a.simp_tw_keys) if a.simp_tw_keys else (None, None)
+    conv, guard = bc.load_conv(), bc.guard_matcher(a.holdout_guard, tw, keys)
+    print(json.dumps(write_runs(a.input, a.work, a.name, conv, guard, a.half, a.procs, tw, keys, keys_info, a.changed_flags) if a.runs_only
+                     else encode_extra(a.input, a.work, a.name, conv, guard, a.half, a.procs, tw, keys, keys_info, a.changed_flags), indent=1))
 
 
 def load_vocab(work):
@@ -361,16 +468,25 @@ def main(argv=None):
     r = sub.add_parser("runs")
     r.add_argument("--work", required=True); r.add_argument("--coll", required=True); r.add_argument("--synth", required=True)
     r.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS"); r.add_argument("--articles", type=int, default=200_000); r.add_argument("--procs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
+    NO_TW = "Traditional sentences keep their wording: no OpenCC TWPhrases (docs/contracts/sr-no-twphrases.md; SJ-LM-7 section 2.2). Simplified ones are unchanged"
+    r.add_argument("--no-trad-tw-phrases", action="store_true", help=NO_TW + "; expects the regenerated colloquial pool eb905936")
+    KEYS = "Simplified sentences get only the TWPhrases entries whose key is in FILE (one per line; docstring, SR-TW-V V4)"
+    FLAGS = "also write flags-<name>.u8: one 0/1 byte per run, 1 = the run differs from the default conversion (docstring, SR-TW-V V2/V3)"
+    r.add_argument("--simp-tw-keys", metavar="FILE", help=KEYS); r.add_argument("--changed-flags", action="store_true", help=FLAGS)
     e = sub.add_parser("encode")
     e.add_argument("--work", required=True); e.add_argument("--min-count", type=int, default=MIN_COUNT)
     e.add_argument("--force", action="store_true", help="encode over a vocab.txt made from a different --extra set (overwrites that arm's vocabulary and ids)")
     e.add_argument("--extra", nargs="*", default=[], metavar="NAME", help="NAMEs of DIR/runs-<NAME>.txt (prep.py text --runs-only) counted into the vocabulary once each and encoded")
+    e.add_argument("--vocab-from", metavar="NPZ", help="take the vocabulary from this model's npz (its `chars`) instead of counting it (SR-TW-W warm start: "
+                   "the ids must match the weights train.py --init loads); --min-count is then unused")
     t = sub.add_parser("text")
     t.add_argument("--work", required=True); t.add_argument("--in", dest="input", required=True); t.add_argument("--name", required=True)
     t.add_argument("--half", action="store_true", help="keep only runs whose SHA-256 first byte is < 128 (SJ-SR-7 arm R-half)")
     t.add_argument("--runs-only", action="store_true", help="write runs-<name>.txt only; encode later with `encode --extra`")
     t.add_argument("--procs", type=int, default=1, help="worker processes for the conversion (the output is the same for any value)")
     t.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="default off: runs containing a held-out sentence are not written (docs/contracts/holdout-refresh.md section 8)")
+    t.add_argument("--no-trad-tw-phrases", action="store_true", help=NO_TW)
+    t.add_argument("--simp-tw-keys", metavar="FILE", help=KEYS); t.add_argument("--changed-flags", action="store_true", help=FLAGS)
     a = ap.parse_args(argv)
     {"runs": cmd_runs, "encode": cmd_encode, "text": cmd_text}[a.cmd](a)
 

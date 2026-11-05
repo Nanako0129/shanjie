@@ -72,6 +72,13 @@ pub struct Colloquial {
     /// lacks: the only words k counts, so the two full sets are never kept (keeping them cost about 10 MiB more peak RSS on a Mac, measured:
     /// docs/research-log.md, the section 3.5 memory fix).
     overlay_only: HashSet<String>,
+    /// SR-TW-C (docs/research-log.md, 2026-11-04 registration): the first word of a split scored by the table's unigram estimate instead of
+    /// P(w | `<s>`). Off by default and in the engine; only the evaluation CLI's `--colloquial-first-unigram` turns it on.
+    first_unigram: bool,
+    /// SR-TW-M (docs/research-log.md, 2026-11-04 registration): the first word scored by the unigram estimate only when the table has no
+    /// `<s>` bigram for it (a word seen at the start keeps P(w | `<s>`)). Off by default and in the engine; only the evaluation CLI's
+    /// `--colloquial-unseen-start-unigram` turns it on.
+    unseen_start_unigram: bool,
 }
 
 impl Colloquial {
@@ -109,7 +116,7 @@ impl Colloquial {
             take(&l.map_err(|_| ColloquialError::Read)?);
         }
         pack_text.unwrap_or("").lines().for_each(&mut take);
-        Ok(Colloquial { lm, n1, overlay_only })
+        Ok(Colloquial { lm, n1, overlay_only, first_unigram: false, unseen_start_unigram: false })
     }
 
     /// `load` with the base lexicon and the overlay read from `lexicon_dir` (`mcbpmf-data.txt`, `overlay-add.tsv`): the one place the engine
@@ -126,14 +133,36 @@ impl Colloquial {
         self.lm.sha256()
     }
 
+    /// Turn the SR-TW-C first-word estimate on or off (`first_unigram`; off after `load`).
+    pub fn set_first_unigram(&mut self, on: bool) {
+        self.first_unigram = on;
+    }
+
+    /// Whether the SR-TW-C first-word estimate is on.
+    pub fn first_unigram(&self) -> bool {
+        self.first_unigram
+    }
+
+    /// Turn the SR-TW-M first-word estimate on or off (`unseen_start_unigram`; off after `load`).
+    pub fn set_unseen_start_unigram(&mut self, on: bool) {
+        self.unseen_start_unigram = on;
+    }
+
+    /// Whether the SR-TW-M first-word estimate is on.
+    pub fn unseen_start_unigram(&self) -> bool {
+        self.unseen_start_unigram
+    }
+
     /// lc: sum of log10 P(w_i | w_{i-1}) from `<s>`, plus log10 P(`</s>` | w_k). P backs off to the table's own (c(w) + 1) / (N + V + 1)
-    /// (0 for a word outside the table); the end term backs off to the table's end-of-sentence rate (`Lm::eos`, lam 1).
+    /// (0 for a word outside the table); the end term backs off to the table's end-of-sentence rate (`Lm::eos`, lam 1). With `first_unigram`
+    /// the first word's term is that back-off estimate (c(w) + 1) / (N + V + 1) itself, not P(w | `<s>`); with `unseen_start_unigram` the same
+    /// holds only for a first word the table has no `<s>` bigram for (`Lm::has_bigram`). The other terms are unchanged.
     pub fn lc<S: AsRef<str>>(&self, words: &[S]) -> f64 {
         let (mut prev, mut tot) = ("<s>", 0.0);
-        for w in words {
+        for (i, w) in words.iter().enumerate() {
             let w = w.as_ref();
             let pb = (self.lm.count(w) + 1) as f64 / self.n1;
-            tot += self.lm.prob(prev, w, pb).log10();
+            tot += if i == 0 && (self.first_unigram || (self.unseen_start_unigram && !self.lm.has_bigram(prev, w))) { pb } else { self.lm.prob(prev, w, pb) }.log10();
             prev = w;
         }
         tot + self.lm.eos(1.0, prev)

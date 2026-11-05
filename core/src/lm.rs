@@ -570,6 +570,14 @@ impl Lm {
         Ctx { id, idx: id.and_then(|id| self.ctx_id.binary_search(&id).ok()) }
     }
 
+    /// Whether the table keeps the bigram (v, w) with a non-zero count: the branch of `prob_c_kn` that does not back off
+    /// (SR-TW-M, docs/research-log.md 2026-11-04: the colloquial lc tells a word seen at the sentence start from an unseen one).
+    pub fn has_bigram(&self, v: &str, w: &str) -> bool {
+        let (Some(i), Some(w)) = (self.ctx_of(self.word_id(v)).idx, self.word_id(w)) else { return false };
+        let range = self.off[i] as usize..self.off[i + 1] as usize;
+        self.nxt[range.clone()].binary_search(&w).is_ok_and(|j| self.cnt[range.start + j] != 0)
+    }
+
     /// P(w | context) with the backoff distribution value `pb` (lm.py `prob`): the one probability function every
     /// caller goes through. A kept bigram is unchanged; every other pair (also a context without entries,
     /// `back` = 1) gets `back * ((1 - mu) * pb + mu * Pc[c(v), c(w)] * emit(w))` when both words have a class

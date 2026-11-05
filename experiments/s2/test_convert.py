@@ -63,6 +63,12 @@ def check(fn, rows):
 
 for src, want in SIMPLIFIED + TRADITIONAL + MIXED + KEEP:
     assert c(src) == want, (src, c(src), want)
+# SR-TW-V V4: simp_tw_keys=None is the old behaviour; a frozenset restricts the TWPhrases entries applied to Simplified sentences
+assert c("管理员权限加好了") == "管理員許可權加好了" and bc.convert("管理员权限加好了", *conv, simp_tw_keys=None) == "管理員許可權加好了"
+assert bc.convert("管理员权限加好了", *conv, simp_tw_keys=frozenset({"軟件"})) == "管理員權限加好了"        # 權限's key is not listed: stays
+assert bc.convert("管理员权限加好了", *conv, simp_tw_keys=frozenset({"權限"})) == "管理員許可權加好了"        # listed: converts
+assert bc.convert("我们的软件和插件", *conv, simp_tw_keys=frozenset({"軟件"})) == "我們的軟體和插件"
+assert bc.convert("管理員權限加好了", *conv, simp_tw_keys=frozenset()) == c("管理員權限加好了")             # Traditional sentences unchanged
 assert bc.is_simplified("之后") and not bc.is_simplified("台灣") and not bc.is_simplified("皇后說")
 assert not check(c, S2F), check(c, S2F)
 assert not check(c, THIRD), check(c, THIRD)

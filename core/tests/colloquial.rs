@@ -94,6 +94,39 @@ fn lc_by_hand() {
     close(c.lc(&strs(&["zzz", "a"])), (back_s * (1.0f64 / 15.0)).log10() + (7.0 / 15.0f64).log10() + ((2.0f64 - 0.75) / 4.0 + back_a * pe).log10());
 }
 
+/// SR-TW-C: with `first_unigram` the first word is (c + 1) / 15 instead of P(w | <s>); every later term and the end term are unchanged, and
+/// turning it off gives the value it had before it was turned on.
+#[test]
+fn lc_first_unigram_by_hand() {
+    let mut c = colloq("lcfu", &[], &[], None);
+    assert!(!c.first_unigram());
+    let off = c.lc(&strs(&["a", "b"]));
+    c.set_first_unigram(true);
+    let (back_a, pe): (f64, f64) = (1.0 - (2.0 - 0.75) / 4.0, 0.4);
+    close(c.lc(&strs(&["a", "b"])), (7.0f64 / 15.0).log10() + (back_a * (5.0f64 / 15.0)).log10() + pe.log10());
+    close(c.lc(&strs(&["b"])), (5.0f64 / 15.0).log10() + pe.log10());
+    close(c.lc(&strs(&["zzz"])), (1.0f64 / 15.0).log10() + pe.log10());
+    close(c.col(&strs(&["a", "b"])), c.lc(&strs(&["a", "b"])));
+    c.set_first_unigram(false);
+    close(c.lc(&strs(&["a", "b"])), off);
+}
+
+/// SR-TW-M: with `unseen_start_unigram` a first word the toy table keeps after `<s>` (a, b) keeps P(w | <s>); a word it does not keep (zzz)
+/// takes (c + 1) / 15 without back(`<s>`) 0.3; later terms are unchanged.
+#[test]
+fn lc_unseen_start_unigram_by_hand() {
+    let mut c = colloq("lcus", &[], &[], None);
+    let (ab, zzz) = (c.lc(&strs(&["a", "b"])), c.lc(&strs(&["zzz", "a"])));
+    c.set_unseen_start_unigram(true);
+    assert!(c.unseen_start_unigram() && !c.first_unigram());
+    close(c.lc(&strs(&["a", "b"])), ab);
+    let pe: f64 = 0.4;
+    close(c.lc(&strs(&["zzz", "a"])), (1.0f64 / 15.0).log10() + (7.0 / 15.0f64).log10() + ((2.0f64 - 0.75) / 4.0 + (1.0 - (2.0 - 0.75) / 4.0) * pe).log10());
+    close(zzz - c.lc(&strs(&["zzz", "a"])), 0.3f64.log10());
+    c.set_unseen_start_unigram(false);
+    close(c.lc(&strs(&["zzz", "a"])), zzz);
+}
+
 /// col = lc - 0.5 k; k counts overlay words that the base lexicon lacks, repeats twice.
 #[test]
 fn col_and_k() {

@@ -46,6 +46,34 @@ def pick(r, alpha, tau, col="ll", delta=0):
     return j if s[j] - s[0] >= delta else 0
 
 
+def _sigmoid(x):
+    if x >= 0:
+        return 1 / (1 + math.exp(-x))
+    e = math.exp(x)
+    return e / (1 + e)
+
+
+def fuse_pick(r, alpha, tau, delta):
+    """core/src/colloquial.rs `fused_pick` on a `--tinylm-scores` record that has `col` (chat, colloquial core; no learning term):
+    ll_eff = ll + sigmoid((ll - ll[0]) / GATE_T) * (MU / alpha) * (col - col[0]), then the masked pick. The engine falls back to the plain
+    pick when a col is not finite (`null` here): then use `pick(r, ...)` with the .sjtl header's cell instead."""
+    MU, GATE_T = 0.5, 1.0   # colloquial.rs MU, GATE_T
+    n, ng, ll, col = r["n"], r["ng"], r["ll"], r["col"]
+    if n < 2 or ng[0] - ng[1] >= tau:
+        return 0
+    eff = [ll[i] + _sigmoid((ll[i] - ll[0]) / GATE_T) * (MU / alpha) * (col[i] - col[0]) for i in range(n)]
+    masked = set(r.get("masked", []))
+    s0 = ng[0] + alpha * eff[0]
+    best, best_s = 0, s0
+    for i in range(1, n):
+        if i in masked:
+            continue
+        si = ng[i] + alpha * eff[i]
+        if si > best_s:
+            best, best_s = i, si
+    return best if best_s - s0 >= delta else 0
+
+
 def correct(rows, alpha, tau, col="ll"):
     return sum(r["ok"][pick(r, alpha, tau, col)] for r in rows)
 

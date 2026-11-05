@@ -295,6 +295,78 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             self.assertEqual(list(rep).index("ids_sha256"), list(rep).index("holdout_guard_skipped_runs") - 1)
 
 
+class TestChangedFlags(unittest.TestCase):
+    """SR-TW-V: flags-<name>.u8 -> a per-token mask (batching.token_flags) and the --changed-weight sampler (batching.reweight_changed / plan)."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.work = self.tmp.name
+        rng = np.random.default_rng(5)
+        self.extra = os.path.join(self.work, "ids-chat.npy")
+        for name, n in (("wiki", 600), ("coll", 200), ("chat", 100)):
+            ids = fake_ids(rng, n)
+            np.save(os.path.join(self.work, f"ids-{name}.npy"), ids)
+            self.flags(name, (rng.random(n) < 0.15).astype(np.uint8))
+        self.addCleanup(self.tmp.cleanup)
+
+    def flags(self, name, fl):
+        fl.tofile(os.path.join(self.work, f"flags-{name}.u8"))
+
+    def test_token_flags_repeat_each_run_flag_over_its_tokens(self):
+        tf = batching.token_flags(self.work, [(self.extra, 1)])
+        ids = np.concatenate([np.load(os.path.join(self.work, f"ids-{n}.npy")) for n in ("wiki", "coll", "chat")])
+        self.assertEqual(tf.shape, ids.shape)
+        runs = np.flatnonzero(ids == BOS)
+        want = np.concatenate([np.fromfile(os.path.join(self.work, f"flags-{n}.u8"), dtype=np.uint8) for n in ("wiki", "coll", "chat")])
+        np.testing.assert_array_equal(tf[runs], want)                        # the BOS token carries the run's flag
+        self.assertTrue(all(len(set(tf[a:b])) == 1 for a, b in zip(runs, np.append(runs[1:], len(ids)))))
+        self.assertEqual(batching.token_flags(self.work, None).shape[0], len(ids) - len(np.load(self.extra)))
+
+    def test_missing_or_misaligned_flags_are_refused(self):
+        os.remove(os.path.join(self.work, "flags-chat.u8"))
+        with self.assertRaises(ValueError):
+            batching.token_flags(self.work, [(self.extra, 1)])
+        self.flags("chat", np.zeros(3, dtype=np.uint8))                         # wrong number of runs
+        with self.assertRaises(ValueError):
+            batching.token_flags(self.work, [(self.extra, 1)])
+        self.flags("chat", np.full(100, 2, dtype=np.uint8))                     # not 0/1
+        with self.assertRaises(ValueError):
+            batching.token_flags(self.work, [(self.extra, 1)])
+
+    def share(self, starts, lengths, tf):
+        w = lengths - 1
+        ch = tf[starts] == 1
+        return w[ch].sum() / w.sum()
+
+    def test_changed_weight_hits_the_requested_fraction_and_keeps_the_rest(self):
+        extra = [(self.extra, 2)]
+        tf = batching.token_flags(self.work, extra)
+        _, starts, lengths = batching.build_epoch(self.work, extra)
+        base = self.share(starts, lengths, tf)
+        for ratio in (0.1, 0.5, base / 2):                                    # more, much more, and fewer changed tokens than the epoch has
+            s2, l2 = batching.reweight_changed(starts, lengths, tf[starts] == 1, ratio, np.random.default_rng(1))
+            self.assertAlmostEqual(self.share(s2, l2, tf), ratio, delta=0.02)
+            keep = tf[starts] == 0
+            keep2 = tf[s2] == 0                                                 # unchanged pieces: exactly the epoch's own, same multiset
+            self.assertEqual(sorted(zip(s2[keep2].tolist(), l2[keep2].tolist())), sorted(zip(starts[keep].tolist(), lengths[keep].tolist())))
+        with self.assertRaises(ValueError):
+            batching.reweight_changed(starts, lengths, tf[starts] == 1, 1.0, np.random.default_rng(1))
+        with self.assertRaises(ValueError):
+            batching.reweight_changed(starts, lengths, np.zeros(len(starts), bool), 0.1, np.random.default_rng(1))
+
+    def test_plan_default_is_unchanged_and_changed_weight_reshapes_the_batches(self):
+        ids, starts, lengths, batches = batching.plan(self.work, [(self.extra, 2)], 256, 7)
+        ids0, starts0, lengths0 = batching.build_epoch(self.work, [(self.extra, 2)])
+        np.testing.assert_array_equal(starts, starts0)
+        rng = np.random.default_rng(7)
+        want = batching.make_batches(lengths0, 256, rng)
+        self.assertTrue(all(np.array_equal(a, b) for a, b in zip(batches, want)) and len(batches) == len(want))
+        tf = batching.token_flags(self.work, [(self.extra, 2)])
+        _, s3, l3, b3 = batching.plan(self.work, [(self.extra, 2)], 256, 7, 0, 0.3, tf)
+        used = np.concatenate(b3)
+        self.assertEqual(len(used), len(l3))                                   # every reweighted piece is in exactly one batch
+        self.assertAlmostEqual(self.share(s3[used], l3[used], tf), 0.3, delta=0.02)
+
+
 class TestEncodeGuards(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
