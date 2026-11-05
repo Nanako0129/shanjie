@@ -11,7 +11,7 @@
 | `kn.sjkn` | [`sj-kn-2-397k`](https://github.com/Nanako0129/shanjie/releases/tag/sj-kn-2-397k)（承接 SJ-KN-2-397K） | Kneser–Ney 側檔（SJKN0002，`docs/contracts/kn-core.md`）：每個詞的接續次數，θ 1、β 1，詞彙 396,927；放在模型旁邊時核心就開 KN 回退分布（聊天照檔頭的 β，書面用核心的 `FORMAL_KN_BETA` 0.75） | 1,587,772 bytes | `data/kn.sjkn.sha256` |
 | `trigram.sjt3` | [`sj-cx-2-7.7m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-cx-2-7.7m)（連文 SJ-CX-2-7.7M） | 書面設定用的 trigram 表（SJT30001，`docs/contracts/trigram-core.md`）：3,584,488 個兩詞前文、7,700,964 條剪枝後的次數，綁 `bigram.sjlm`（sj-lm-7-9.7m）；資料是維基與舊口語池，不含 g0v 與 PTT | 133,297,536 bytes | `data/trigram.sjt3.sha256` |
 | `trigram-chat.sjt3` | [`sj-cx-2-950k`](https://github.com/Nanako0129/shanjie/releases/tag/sj-cx-2-950k)（連文 SJ-CX-2-950K） | 聊天設定用的 trigram 表（SJT30001，`docs/contracts/sj-lm-7-pr2.md`）：375,736 個兩詞前文、950,000 條剪枝後的次數，綁 `bigram.sjlm`（sj-lm-7-9.7m）；用 SJ-LM-7 全部語料，聊天設定起開 trigram 與 KN | 15,114,784 bytes | `data/trigram-chat.sjt3.sha256` |
-| `tinylm.sjtl` | [`sj-sr-7-15m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-7-15m)（會意 SJ-SR-7-15M） | 「語意校正」用的小型字元語言模型（S7，SJTL0004；權重重新訓練過，加了新的口語語料與字幕）：6 層、寬 384、字表 10,351 個 id，二維權重 int8；在 n-gram 的前 8 名裡重新排序；檔頭除了標準的融合參數，還有語意校正強度的保守與積極兩檔，以及調參時用的 `bigram.sjlm` 與 `kn.sjkn` 的 SHA-256 | 14,886,880 bytes | `data/tinylm.sjtl.sha256` |
+| `tinylm.sjtl` | [`sj-sr-8-15m`](https://github.com/Nanako0129/shanjie/releases/tag/sj-sr-8-15m)（會意 SJ-SR-8-15M） | 「語意校正」用的小型字元語言模型（S7，SJTL0004；權重從上一版 `sj-sr-7-15m` 接續訓練，訓練文字的繁體句不套 `TWPhrases`，見 `docs/releases/sj-sr-8-15m.md`）：6 層、寬 384、字表 10,351 個 id，二維權重 int8；在 n-gram 的前 8 名裡重新排序；檔頭除了標準的融合參數，還有語意校正強度的保守與積極兩檔，以及調參時用的 `bigram.sjlm` 與 `kn.sjkn` 的 SHA-256 | 14,886,880 bytes | `data/tinylm.sjtl.sha256` |
 | `colloquial.sjlm` | [`sj-cl-2-69k`](https://github.com/Nanako0129/shanjie/releases/tag/sj-cl-2-69k)（常談 SJ-CL-2-69K） | 聊天設定的語意校正多參考的「口語詞頻表」（一般的二元表 SJLM0001，不用詞類與 KN，詞彙 69,457、二元組合 365,888 條；`docs/contracts/colloquial-term.md`）：用 sj-lm-7-9.7m 的計數詞表重算的口語計數加公開口語池的計數 | 4,713,933 bytes | `data/colloquial.sjlm.sha256` |
 | `colloquial-attribution.tsv` | 同上（`sj-cl-2-69k` 的另一個附件） | 口語池每個來源單位一列的署名清單（YODAS 影片 id 與網址、Tatoeba 句子 id 與作者、WildChat 與 MASSIVE 的資料集出處），不含句子文字；由 `tools/build_attribution.py` 產生 | 2,000,233 bytes | `data/colloquial-attribution.tsv.sha256` |
 
@@ -42,7 +42,7 @@
 gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-gh release download sj-sr-7-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-sr-8-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
 t=$(mktemp -d) && gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D "$t" && mv "$t/trigram.sjt3" data/lm/ && rmdir "$t"
 t=$(mktemp -d) && gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D "$t" && mv "$t/trigram-chat.sjt3" data/lm/ && rmdir "$t"
