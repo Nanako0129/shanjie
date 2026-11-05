@@ -184,7 +184,7 @@ final class ClientAdapter: TextClient {
 }
 
 /// The panel that cannot take focus: keys and clicks never make it key or main (s3b2 section 2.1).
-private final class PanelWindow: NSPanel {
+final class PanelWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }

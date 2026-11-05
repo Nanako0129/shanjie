@@ -21,7 +21,8 @@ final class ShiftToggleSessionTests: XCTestCase {
         resources = try XCTUnwrap(TestData.resources())
     }
 
-    private func makeShell(shift: ShiftToggleStore = MemoryShiftToggleStore(), english: EnglishStore = MemoryEnglishStore(),
+    // The toggle defaults to off since english-defaults-notice section 1; these tests are about it on, so the default store says on.
+    private func makeShell(shift: ShiftToggleStore = MemoryShiftToggleStore(true), english: EnglishStore = MemoryEnglishStore(overwrite: true),
                            layout: LayoutStore = MemoryLayoutStore(), hint: FakeShiftHint) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: layout, learningDirectory: nil,
                           dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
@@ -362,10 +363,10 @@ final class ShiftToggleSessionTests: XCTestCase {
     }
 
     func testSettingOffStopsTheTapAndClearsEveryApp() {
-        let store = MemoryShiftToggleStore()
+        let store = MemoryShiftToggleStore(true)
         let hint = FakeShiftHint()
         let shell = makeShell(shift: store, hint: hint)
-        XCTAssertTrue(shell.shiftToggleOn, "default on")
+        XCTAssertTrue(shell.shiftToggleOn, "saved on")
         let c = Controller(shell)
         c.session.activate()
         tap(c)

@@ -1,6 +1,6 @@
 # 單按 Shift 切換中英（英數模式）
 
-狀態：2026-10-30 接回，另加 `zhen-reapply.md`（切換鍵只有單按 Shift）。2026-10-28 曾因維護者實機誤觸太多從 main revert（研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。
+狀態：〔2026-11-04〕設定「單按 Shift 切換中英」預設改成**關**（沒有值當 false；已安裝的人一次重設為關並跳說明視窗），見 `english-defaults-notice.md`，本文下面寫「預設開」的地方指的是 2026-11-04 之前。2026-10-30 接回，另加 `zhen-reapply.md`（切換鍵只有單按 Shift）。2026-10-28 曾因維護者實機誤觸太多從 main revert（研究紀錄同日「中英混打回退與單按 Shift 從 main revert」）。
 
 舊狀態：READY（2026-10-27，plan-verifier 兩次 REVISE 逐項修正後收尾審查 READY；第一次：改用核心狀態、切換時各狀態、提示視窗、設定關掉；第二次：`set_ascii` 回傳快照、ASCII 字元分支在按鍵順序的位置、組字區空時的錨點）。前提：中英混打回退（PR #319，`zhen-revert.md`）先合併；這一片從那之後的 main 開分支（英數模式在組字區有字時沿用它的英文段）。
 
@@ -21,7 +21,7 @@
   4. 另一側 Shift 的裝置位元和按下時相同：早就殘留在旗標裡、沒有變的不擋；按下到放開之間變了不算（`shift-stuck.md` §2；取捨：按住一側、單按另一側會切換）；
   5. 按住的時間 ≤ `SHIFT_TAP_MAX`（具名常數 0.5 秒；註解寫明：沒有參考實測，是避免「按住 Shift 想打大寫又放棄」也切換的推論值，照實機回饋調）。
 - 偵測寫成一個不碰 AppKit 的小狀態機（`ShiftTap`：餵入「Shift 按下／放開、其他修飾鍵、keyDown、滑鼠按下距今秒數、時間」，回傳要不要切換），讓測試能直接餵事件。
-- 設定「單按 Shift 切換中英」（`shiftToggle`，**預設開**）關掉時：`flagsChanged` 一律不處理，**每個 App 的英數狀態全部清掉**、核心 `set_ascii(0)`，行為和今天逐位元組相同。
+- 設定「單按 Shift 切換中英」（`shiftToggle`，**預設開**；〔2026-11-04，`english-defaults-notice.md`〕改成**預設關**）關掉時：`flagsChanged` 一律不處理，**每個 App 的英數狀態全部清掉**、核心 `set_ascii(0)`，行為和今天逐位元組相同。
 
 ## 2. 英數模式的狀態與按鍵
 
@@ -70,7 +70,7 @@
   - 兩個 App 各自記（App A 切英文、換到 B 是中文、回 A 是英文）；
   - 英數模式組字區空時 `handle` 回 false（直通）；組字區有字時 Shift＋`1` 送出 `ch == "!"`；
   - 倚天排列（或可省略韻母、或混打關）組字區有字時切英數 → 組字區先送出；
-  - 設定關掉 → `flagsChanged` 不處理；App A 原本是英數，關掉後 A 的字母鍵照注音送進核心；預設是開。
+  - 設定關掉 → `flagsChanged` 不處理；App A 原本是英數，關掉後 A 的字母鍵照注音送進核心；預設是開（〔2026-11-04，`english-defaults-notice.md`〕改成預設關）。
 - **回歸**：`make test-golden`、`make test-rust`（188）、`make test-swift`、dev302／打字測驗／錯字回報 `evalstats compare` 逐列相同（選字不動）。
 - **VM 實機**（main，tart 繁中 VM，`imeshot` 每次 ≤ 15 秒）：剛打開的 App（至少 TextEdit）、組字區空時單按 Shift，「英」出現在文字游標那一行的上方、打 `hello` 直通；再按出現「中」；「我要」＋單按 Shift＋`ok`＋Enter 送出「我要ok」；候選窗開著時單按 Shift，提示出現、候選窗照 §4 第 1 步關掉（2026-10-28 更正：原本寫「兩個視窗都看得到」，和 §4 矛盾）；Shift＋點擊不切換；兩個 App 各自記。
 - **合併關卡**：程式改動（`/code-review`＋fresh verifier＋CI＋188 完整 Rust 測試）。
