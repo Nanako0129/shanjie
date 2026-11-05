@@ -12045,3 +12045,13 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - **只報的**：wikitune-clean-tw0 書面，各臂淨值 −6～+1，下界 −0.27～−0.64 個百分點。cvtune-clean-tw0（第 3 條）各臂都過，下界 −0.03～−0.43。
 - **TWPhrases 桶**：改壞列裡正解含 TWPhrases 鍵的，每臂聊天 1～3 列、書面 0；選字新加 TWPhrases 鍵的改壞（SR-TW-P 那一種）全部 0。
 - 結論只寫方向（探索片）。下一步等維護者選。
+
+## 2026-11-05：SR-TW-R 確認片登記：V4-s3＋溫和版在沒看過的 wikijudge7 確認一發（例外；在任何 wikijudge7 數字之前）
+
+- **由來**：SR-TW-V 照登記不過之後，維護者選「V4-s3 送確認一發」：書面名單與動漫檢查集（1 改對／4 改壞）這一次算例外；第 1 條 V4-s3 本來就過（16／9，0.56），不需要例外。例外記在 `.agent-local` 的決定紀錄。主判讀照 SR-TW-Q（main 提議，對應維護者「以不退步為主」）。
+- **候選**：會意 V4-s3（`.sjtl` `2c69a761…`，CLI 配對到它自己的雜湊）＋聊天的常談溫和版（`--colloquial-unseen-start-unigram`）；書面沒有常談，書面的候選就是 V4-s3 本身。比較對象：現行出貨（`f7d0ac63…`，不開修正）。tree：`d8b89768`（SR-TW-V 的 GCP 那一跑同一個）。
+- **步驟一：確認前的診斷**（在 wikijudge7 打分之前印出並 commit；只報，不擋步驟二）：GCP 一次，V4-s3 與出貨在 wikitune-clean-tw0（書面標準）與 cvtune-clean-tw0（聊天標準，V4-s3 帶旗標）各跑一次並寫 `--tinylm-scores`，印四項診斷：單獨挑對率、留住率、融合上限、oracle（算法同 SR-TW-Q 的 `diag.py`，出處 `experiments/s7a-tinylm/fusegrid.py`）。
+- **步驟二：wikijudge7**：照 wikijudge6 的建法新建，`build_tune.py --part wiki --wiki-range 340000 345000 --wiki-name wikijudge7 --tune-no-trad-tw-phrases`（同一份 dump、本分支的建置程式），列數與 SHA-256 在任何分數之前記在這一節的補充。用過退役。
+- **主判讀**（事先固定）：書面標準檔，V4-s3 對出貨在 wikijudge7 的 Δtop1 的 90% 配對 bootstrap 下界 ≥ −1.0 個百分點（不變差），GCP 與 188 兩台的這兩跑 rowstats 逐位元組相同才判讀，不同就停下回報。保守、積極兩檔與聊天標準（V4-s3＋溫和版對出貨）只報。
+- **不過**＝這次確認不成立，不換臂、不重建 wikijudge7 再試；過了 → 下一步是產品片（會意換成 V4-s3、常談溫和版修正進核心），先出選擇題。
+- **預算**：GCP 兩次（步驟一、步驟二各約 15 分鐘），188 一次（主判讀兩跑）。腳本從 SR-TW-Q 的 `.agent-local/scripts/srtwq/` 改寫，送出前過 fresh verifier。
