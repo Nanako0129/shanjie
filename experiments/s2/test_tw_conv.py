@@ -11,6 +11,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import random
 import pickle
 import sys
 import tempfile
@@ -153,7 +154,11 @@ class Assertion4(Base):
         fold = lambda x: "".join(F.get(c, c) for c in x)
         need = set(btc.MEDIAWIKI)
         need |= {k for k, v in t["char"].items() if v != fold(o["st"][k][0])}
-        need |= {k for k, v in t["phrase"].items() if v != fold(o["stp"][k])}
+        changed = sorted(k for k, v in t["phrase"].items() if v != fold(o["stp"][k]))       # contract 8: phrases by a fixed sample
+        tai = lambda k: fold(o["stp"][k]).replace("臺", "台").replace("檯", "台") == t["phrase"][k]
+        rng = random.Random(20261106)
+        other, only_tai = [k for k in changed if not tai(k)], [k for k in changed if tai(k)]
+        need |= set(rng.sample(other, min(30, len(other)))) | set(rng.sample(only_tai, min(10, len(only_tai))))
         missing = sorted(k for k in need if k not in text)
         self.assertFalse(missing, f"{len(missing)} of {len(need)} changed rows have no Simplified sentence in tw-conv-simp.tsv (first: {missing[:8]})")
 
@@ -195,17 +200,37 @@ class Table(unittest.TestCase):
             self.assertEqual(status == "fold", c[y] >= btc.FOLD_MIN and c[y] >= btc.FOLD_RATIO * c[x], x)
 
     def test_table_char_and_phrase_rows(self):
-        for sec in ("char", "phrase"):
-            for k, (value, status, manual, counts, _) in self.t[sec].items():
-                if manual:
-                    continue
-                c = self.counts(counts)
-                order = sorted(range(len(c)), key=lambda i: (-c[i][1], i))
-                top, second = c[order[0]][1], (c[order[1]][1] if len(c) > 1 else 0)
+        """Contract 9: char rows change only on word-level evidence (>= WORD_RATIO and >= PICK_MIN) or by the MediaWiki rule; phrase rows
+        follow the dictionary (dict, or over-dict at >= WORD_RATIO) or the 2x rule."""
+        for k, (value, status, manual, counts, _) in self.t["char"].items():
+            if manual:
+                continue
+            chars, _, words = counts.partition(" words ")
+            if status == "evidence":
+                w = self.counts(words)
+                first, best = w[0], max(w[1:], key=lambda x: x[1])
+                self.assertTrue(best[1] >= btc.WORD_RATIO * first[1] and best[1] >= btc.PICK_MIN, ("char", k))
+                self.assertEqual(value, best[0], ("char", k))
+            elif status == "mediawiki":
+                self.assertIn(k, btc.MEDIAWIKI)
+                self.assertLess(sum(n for _, n in self.counts(chars)), btc.PICK_MIN, ("char", k))
+            else:
+                self.assertEqual(status, "hold", ("char", k))
+        for k, (value, status, manual, counts, _) in self.t["phrase"].items():
+            if manual:
+                continue
+            c = dict(self.counts(counts))
+            if status == "over-dict":
+                self.assertTrue(any(c[value] >= btc.WORD_RATIO * n and c[value] >= btc.PICK_MIN for v, n in c.items() if v != value), ("phrase", k))
+            elif status == "dict":
+                self.assertIn(value, c, ("phrase", k))
+            else:
+                order = sorted(c.items(), key=lambda x: -x[1])
+                top, second = order[0][1], (order[1][1] if len(order) > 1 else 0)
                 evidence = top >= btc.PICK_RATIO * second and top >= btc.PICK_MIN
-                self.assertEqual(status, "evidence" if evidence else "hold", (sec, k))
-                if status == "evidence":
-                    self.assertEqual(value, c[order[0]][0], (sec, k))
+                self.assertEqual(status, "evidence" if evidence else "hold", ("phrase", k))
+                if evidence:
+                    self.assertEqual(value, order[0][0], ("phrase", k))
 
     def test_table_has_the_terms_and_the_31_keys(self):
         self.assertEqual(len(self.t["term"]), 331)

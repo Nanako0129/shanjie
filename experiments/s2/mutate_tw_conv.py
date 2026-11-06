@@ -1,4 +1,4 @@
-"""The mutations M1-M11 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
+"""The mutations M1-M12 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
 fail on the test the contract names. Single process, about a minute (M6 and M8 rebuild the table from the PTT snapshot, 20 seconds each).
 
   python3 experiments/s2/mutate_tw_conv.py [--simp-rows FILE] [--only M3 ...]
@@ -29,6 +29,8 @@ TEST = os.path.join(HERE, "test_tw_conv.py")
 
 A1, A3_BCT, A3_E1, A4_ROWS = "test_a1_unchanged", "test_a3_build_counts_text_native_as_written", "test_a3_count_py_native_as_written", "test_a4_simplified_rows"
 A1_FOLD = "test_a1_a_mixed_example_gets_the_fold_rows"
+A2 = "test_a2_roundtrip_pairs_are_listed"
+A4_COVER = "test_a4_coverage_of_the_changed_rows"
 
 OLD_RULES = '''
 
@@ -70,18 +72,12 @@ MUTATIONS = [
     ("M5", "the fold rows are not applied",
      [(BC, '''    FOLD.clear(); FOLD.update({x: y for x, y in tw["fold"].items() if x != y})''', '''    FOLD.clear()''')], [A1_FOLD], False),
     ("M6", "the candidates of the single-character and phrase rows are counted without folding first",
-     [(BTC, '''            cands = list(dict.fromkeys(fold(c) for c in cand))
-            first = fold(v[0])
-            value, status = pick(cands, fc, first)
-            char_rows[k] = (value, status, fmt_counts(cands, fc))''', '''            cands = list(dict.fromkeys(cand))
-            first = fold(v[0])
-            value, status = pick(cands, cc, first)
-            char_rows[k] = (value, status, fmt_counts(cands, cc))'''),
-      (BTC, '''        chunk = chunk.translate(trans)\n''', '''        pass\n''')], [A4_ROWS], True),
+     [(BTC, '''            cands = list(dict.fromkeys(fold(c) for c in cand))''', '''            cands = list(dict.fromkeys(cand))'''),
+      (BTC, '''        chunk = chunk.translate(trans)\n''', '''        pass\n''')], [A4_COVER], True),   # revision 7: counts compare folded strings, so the table's changed rows move
     ("M7", "a sentence with marker characters only also gets the single-character table",
      [(BC, '''char if kind == "simp" else _only(char, "marker")''', '''char''')], [A1], False),
     ("M8", "a phrase `hold` always takes the single-character row's value",
-     [(BTC, '''                if fv[i] == row_cands[k[i]][1]:''', '''                if True:''')], [A4_ROWS], True),
+     [(BTC, '''                if fv[i] == row_cands[k[i]][1] and char_rows[k[i]][1] in ("evidence", "mediawiki"):''', '''                if True:''')], [A4_ROWS], True),
     ("M9", "T contains the marker characters again (么 counts as Traditional evidence)",
      [(BC, '''set(o["twv"].values())) - MARKERS)''', '''set(o["twv"].values())))''')], [A4_ROWS], False),
     ("M10", "a Traditional sentence gets no phrase at all (only the single characters of S and N)",
@@ -89,6 +85,12 @@ MUTATIONS = [
        '''        text = "".join(_only(char, "trad").get(c, c) for c in text)''')], [A4_ROWS], False),
     ("M11", "the set N is empty",
      [(BC, '''    RARE.clear(); RARE.update(tw["n"])''', '''    RARE.clear()''')], [A4_ROWS], False),
+    ("M12", "char rows go back to single-character counts and the 2x rule over every candidate (revision 4)",
+     [(BTC, '''            alts = [c for c in cands if c != first and (frozenset((first, c)) in variant or (k in MEDIAWIKI and c == fold(MEDIAWIKI[k])))]''',
+       '''            alts = [c for c in cands if c != first]'''),
+      (BTC, '''            if wc[best] >= PICK_MIN and wc[best] >= WORD_RATIO * wc[first]:''',
+       '''            best = max(alts, key=lambda c: fc[c])
+            if fc[best] >= PICK_MIN and fc[best] >= PICK_RATIO * fc[first]:''')], [A2], True),
 ]
 
 
@@ -142,7 +144,7 @@ def rebuilt_table(edits):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--simp-rows", help="use this file as tw-conv-simp.tsv for the run (the real one is put back)")
-    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M11, M4a, M4b)")
+    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M12, M4a, M4b)")
     a = ap.parse_args(argv)
     saved = {p: open(p, "rb").read() for p in (SIMP, TABLE)}
     results = []
