@@ -176,8 +176,11 @@ def _cut(table, what, keep):
 
 
 def _s_phrases(phrase):
-    """The entries of `phrase` whose key has a character of S."""
-    return _cut(phrase, "s", lambda: {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY for c in k)})
+    """(the entries of `phrase` whose key has a character of S, their longest key length); cached with the cut-down table."""
+    def keep():
+        t = {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY for c in k)}
+        return t, max(map(len, t), default=1)
+    return _cut(phrase, "s", keep)
 
 
 def _only(char, kind):
@@ -192,8 +195,8 @@ def convert(text, phrase, char, maxp):
     (longest first), then the characters of S and N not covered by one, fold; no other phrase, no terms."""
     kind = sentence_kind(text)
     if kind == "trad":
-        s_phrase = _s_phrases(phrase)
-        text = _longest(text, s_phrase, max(map(len, s_phrase), default=1), _only(char, "trad"))
+        s_phrase, s_maxp = _s_phrases(phrase)
+        text = _longest(text, s_phrase, s_maxp, _only(char, "trad"))
         return text.translate(FOLD_TRANS)
     text = _longest(text, phrase, maxp, char if kind == "simp" else _only(char, "marker"))
     return _longest(text, TW_PHRASE, TW_MAXP[0]).translate(FOLD_TRANS)
