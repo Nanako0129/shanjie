@@ -1006,6 +1006,7 @@ fn forget(e: &mut Engine, reading: &str, word: &str) {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_commit_writes_the_file_and_reopen_restores() {
     let dir = tmp_dir("commit");
     let mut e = tiny(TINY, TINY);
@@ -1034,6 +1035,7 @@ fn store_commit_writes_the_file_and_reopen_restores() {
 /// Code review 2026-10-05: ⌘⌫ on a word picked in this same composition must also drop that pick's
 /// pending learn, or the next Enter teaches the forgotten word again and appends it back to disk.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_forget_then_enter_does_not_learn_the_word_back() {
     let dir = tmp_dir("forget-enter");
     let mut e = tiny(TINY, TINY);
@@ -1054,6 +1056,7 @@ fn store_forget_then_enter_does_not_learn_the_word_back() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
     let dir = tmp_dir("off");
     let mut e = tiny(TINY, TINY);
@@ -1086,6 +1089,7 @@ fn store_learning_off_then_enter_writes_nothing_and_clear_removes_the_file() {
 
 /// Rule 6 teaches nothing, so the Enter must not touch the store at all: no file, no rewrite.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_single_character_under_caret_writes_nothing() {
     let dir = tmp_dir("caret");
     let mut e = tiny(TINY, TINY);
@@ -1098,6 +1102,7 @@ fn store_single_character_under_caret_writes_nothing() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_write_failure_sets_the_status_flag_and_keeps_the_commit() {
     let dir = tmp_dir("fail");
     let mut e = tiny(TINY, TINY);
@@ -1127,6 +1132,7 @@ fn clear_without_a_store_is_an_error() {
 /// §6.13 steps 1-4: a failed full rewrite during a forget must not let a later append succeed, or
 /// the forgotten word would come back on the next load.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_failed_rewrite_then_forget_never_brings_the_word_back() {
     let dir = tmp_dir("failforget");
     let tmp = dir.join(core::learn_store::TMP);
@@ -1159,6 +1165,7 @@ fn store_failed_rewrite_then_forget_never_brings_the_word_back() {
 /// A rewrite that is still owed (failed forget) is retried by a commit that learns nothing (a single
 /// character under ^, rule 6), not only by one that learns something.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_pending_rewrite_is_retried_by_a_commit_that_learns_nothing() {
     let dir = tmp_dir("retry-empty");
     let tmp = dir.join(core::learn_store::TMP);
@@ -1183,6 +1190,7 @@ fn store_pending_rewrite_is_retried_by_a_commit_that_learns_nothing() {
 /// §6.13: a panic inside the forget, after memory changed and before the file did: bit0 is untouched
 /// but the next learning Enter is a full rewrite, so the word is gone from the file too.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_forget_panic_forces_the_next_write_to_rewrite() {
     let dir = tmp_dir("forgetpanic");
     let mut e = tiny(TINY, TINY);
@@ -1209,6 +1217,7 @@ fn store_forget_panic_forces_the_next_write_to_rewrite() {
 
 /// §6.13: 100 days pass on the same engine; the first write of the new day rewrites and prunes.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_hundred_days_without_reopening_prunes_the_file() {
     let dir = tmp_dir("day100");
     let mut e = tiny(TINY, TINY);
@@ -1227,6 +1236,7 @@ fn store_hundred_days_without_reopening_prunes_the_file() {
 
 /// §6.13: 100 days pass and a new engine opens; its first write rewrites and prunes.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_hundred_days_then_reopen_prunes_the_file() {
     let dir = tmp_dir("day100open");
     let mut e = tiny(TINY, TINY);
@@ -1248,6 +1258,7 @@ fn store_hundred_days_then_reopen_prunes_the_file() {
 /// §6.13: the last line cut inside its word field, no newline: skipped on load, and the next write
 /// (the first after open, a full rewrite) never glues an append onto it.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_torn_tail_is_skipped_and_never_glued() {
     use core::learn_store::Opened;
     let dir = tmp_dir("torn");
@@ -1275,6 +1286,7 @@ fn store_torn_tail_is_skipped_and_never_glued() {
 /// §6.13: each learning Enter adds exactly the changed records as lines (not a rewrite); the Enter
 /// that would reach JOURNAL_MAX appended lines rewrites, leaving one line per record.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_append_grows_by_the_touched_records_and_compacts_at_journal_max() {
     use core::learn_store::JOURNAL_MAX;
     let dir = tmp_dir("journal");
@@ -1307,6 +1319,7 @@ fn store_append_grows_by_the_touched_records_and_compacts_at_journal_max() {
 /// §6.13: after a forget the word appears 0 times in the file; after a clear the next learning Enter
 /// starts a new file holding only the header and the new records.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_forget_leaves_no_trace_and_clear_starts_over() {
     let dir = tmp_dir("forgetclear");
     let mut e = tiny(TINY, TINY);
@@ -1333,6 +1346,7 @@ fn store_forget_leaves_no_trace_and_clear_starts_over() {
 /// §4: forget rewrites even when memory holds no record of the word: a record pruned on load (here
 /// 100 days old) is still in the file until a full rewrite, and the forget must take it out now.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_forget_rewrites_even_when_memory_has_no_record() {
     let dir = tmp_dir("forgetpruned");
     let mut e = tiny(TINY, TINY);
@@ -1355,6 +1369,7 @@ fn store_forget_rewrites_even_when_memory_has_no_record() {
 /// place of the learning file: the append is refused and the full rewrite replaces it with a 0600
 /// regular file, never writing through the link.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_append_refusals_fall_back_to_a_full_rewrite() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     for case in ["symlink", "fifo", "hardlink", "empty", "mode"] {
@@ -1408,6 +1423,7 @@ fn global_key_is_not_the_sentinel() {
 // ---------- §6.14 performance (asserted in release builds only, like engine_replay.rs) ----------
 
 /// Peak resident set size in bytes (macOS reports ru_maxrss in bytes).
+#[cfg(unix)]
 fn max_rss() -> i64 {
     #[repr(C)]
     struct Rusage {
@@ -1435,6 +1451,7 @@ fn p95(mut t: Vec<std::time::Duration>) -> std::time::Duration {
 /// the learned path. The first learning Enter after open rewrites the full file (and trims to
 /// CAPACITY); the timed Enters after it append (revision one, §4 and §11).
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn perf_full_store_per_key_and_enter_with_write() {
     use std::time::Instant;
     let rows = dev302();
@@ -1599,6 +1616,7 @@ fn single_character_never_globalizes_two_characters_do() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn old_single_character_global_record_is_dropped_at_load() {
     // a file written before §12, loaded by an engine: the record is not loaded at all
     let dir = tmp_dir("oldglobal");
@@ -1702,6 +1720,7 @@ fn zai_sweep(e: &mut Engine, rows: &[(String, String, Syls)], base: &[String], t
 /// two-character key, and never under "^" or a one-character key; a word of 2+ characters keeps all three
 /// levels and the synthetic sentence-start key (never the bare "^").
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn single_character_rules_in_the_learner() {
     let one = syls("ㄗㄞˋ");
     let two = syls("ㄗㄞˋ ㄐㄧㄢˋ");
@@ -1736,6 +1755,7 @@ fn single_character_rules_in_the_learner() {
 /// §12 acceptance: 再 taught after 可以 does not reach 所以, 前文 after punctuation or ASCII, or an
 /// unreadable context; a pick under ^ leaves no record; an old ^ record in a file is not used.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn single_character_pick_stays_where_it_was_taught() {
     let lex = &shared().lex;
     let cases = [("所以", "在這裡"), ("", "所以在這裡"), ("，", "在這裡"), ("n-gram ", "在做"), ("", "在做"), ("可以", "在這裡")];
@@ -2632,6 +2652,7 @@ fn sinit_job_with_records(tag: &str, records: &[(&str, &str, f64)]) -> (Vec<Stri
 /// syllables, here two and `$`), else the mid key (the next two), else the coarse key. Section 1.2/1.3: a record under any key makes the stretch eligible and the lifted decode
 /// finds the learned path (瑁建議, outside the pool of eight) for any of them.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn sinit_the_job_reads_the_longest_layer_that_has_a_record() {
     chat_only();
     let (coarse, mid, fine) = ("^>ㄐㄧㄢˋ", "^>ㄐㄧㄢˋ\u{1f}ㄧˋ", "^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}$");
@@ -2704,6 +2725,7 @@ fn sinit_mid_and_fine_keys_are_learned_by_what_follows_and_forgotten_with_the_co
 /// SINIT section 2, the fuzzy case: a record that can only match a path with a fuzzy-sound word (照 recorded under the typed ㄗㄠˋ; the lexicon reads
 /// 照 as ㄓㄠˋ, the ㄓ/ㄗ pair is on) puts no weight on any candidate and changes neither the pool nor the job.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn sinit_a_learned_character_only_on_a_fuzzy_path_changes_nothing() {
     chat_only();
     const L: &str = "ㄗㄠˋ 造 -1.0\nㄗㄠˋ 皂 -2.0\nㄓㄠˋ 照 -1.0\nㄐㄧㄢˋ 建 -1.0\n";

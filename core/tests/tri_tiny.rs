@@ -121,6 +121,9 @@ fn load_reads_each_profiles_table_beside_the_model() {
     let only_formal = Lm::load(&m).unwrap();
     assert_eq!(tags(&only_formal), (None, Some(tag(&table_bytes()))));
     assert!(only_formal.uses_tri(only_formal.scoring(Profile::Formal)) && !only_formal.uses_tri(only_formal.scoring(Profile::Chat)));
+    // Windows refuses to delete or rewrite a file that is still mapped: release the models that map it first (Unix does not need to).
+    #[cfg(windows)]
+    drop(only_formal);
     std::fs::remove_file(&formal).unwrap();
     std::fs::write(&chat, chat_table_bytes()).unwrap();
     let only_chat = Lm::load(&m).unwrap();
@@ -135,6 +138,11 @@ fn load_reads_each_profiles_table_beside_the_model() {
     assert_eq!(tags(&Lm::load_opts(&m, true, true, &[Profile::Chat]).unwrap()), (Some(tag(&chat_table_bytes())), None), "the CLI's chat reads only the chat file");
     assert_eq!(tags(&Lm::load_opts(&m, true, true, &[Profile::Formal]).unwrap()), (None, Some(tag(&table_bytes()))), "the CLI's formal reads only the formal file");
     assert_eq!(tags(&Lm::load_with(&m, true, true).unwrap()), tags(&on));
+    #[cfg(windows)]
+    {
+        drop(only_chat);
+        drop(on);
+    }
     // a bad or dangling file: the engine's load fails for either file; the CLI's profile is fine as long as its own file is
     for (bad, reads_bad, other) in [(&chat, Profile::Chat, Profile::Formal), (&formal, Profile::Formal, Profile::Chat)] {
         let good = std::fs::read(bad).unwrap();
@@ -146,11 +154,15 @@ fn load_reads_each_profiles_table_beside_the_model() {
         assert!(Lm::load_opts(&m, true, true, &[]).is_ok(), "--no-tri does not read it");
         assert_eq!(Lm::load_opts(&m, true, true, &[reads_bad]).err(), Some(LmError::TriTable), "the profile that reads it fails");
         std::fs::remove_file(bad).unwrap();
-        std::os::unix::fs::symlink(tmp.join("missing.sjt3"), bad).unwrap();
-        assert_eq!(Lm::load(&m).err(), Some(LmError::TriTable), "a dangling symlink is not 'absent': {bad:?}");
-        assert!(Lm::load_opts(&m, true, true, &[other]).is_ok());
-        assert_eq!(Lm::load_opts(&m, true, true, &[reads_bad]).err(), Some(LmError::TriTable));
-        std::fs::remove_file(bad).unwrap();
+        // The dangling-symlink steps are Unix only (win-core.md 2.2 item 5).
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(tmp.join("missing.sjt3"), bad).unwrap();
+            assert_eq!(Lm::load(&m).err(), Some(LmError::TriTable), "a dangling symlink is not 'absent': {bad:?}");
+            assert!(Lm::load_opts(&m, true, true, &[other]).is_ok());
+            assert_eq!(Lm::load_opts(&m, true, true, &[reads_bad]).err(), Some(LmError::TriTable));
+            std::fs::remove_file(bad).unwrap();
+        }
         std::fs::write(bad, good).unwrap();
     }
     assert!(Lm::load(&m).is_ok(), "premise: both files are good again");

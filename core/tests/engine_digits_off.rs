@@ -41,7 +41,10 @@ fn engine_no_table(tag: &str) -> Engine {
     std::fs::create_dir_all(&dir).unwrap();
     for f in std::fs::read_dir(root().join("data/lexicon")).unwrap().map(|f| f.unwrap().file_name()) {
         if f != "digits.tsv" {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(root().join("data/lexicon").join(&f), dir.join(&f)).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(root().join("data/lexicon").join(&f), dir.join(&f)).unwrap();
         }
     }
     let mut e = Engine::new(&dir, Layout::Standard).expect("an engine builds without digits.tsv");

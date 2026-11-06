@@ -133,7 +133,7 @@ fn golden_key(k: &str) -> Key {
 /// log10, as for the other f64 goldens): the Windows machine's WSL skips it, CI's macOS runs it.
 #[test]
 fn row49_scores_match_the_python_golden_bit_for_bit() {
-    if cfg!(target_os = "linux") {
+    if !cfg!(target_os = "macos") {
         return;
     }
     let rows = golden_score();
@@ -585,7 +585,7 @@ fn pred_script(digits: &str, syms: &str) -> String {
 /// The core function equals the Python `digit_row` on the 12 situations: words and score bits. macOS only (as #49).
 #[test]
 fn predict_digits_matches_the_python_golden_bit_for_bit() {
-    if cfg!(target_os = "linux") {
+    if !cfg!(target_os = "macos") {
         return;
     }
     let s = shared();

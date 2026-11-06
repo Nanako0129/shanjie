@@ -1917,6 +1917,19 @@ mod tests {
         let load = |e| unsafe { shanjie_engine_load_lm(e, lm_c.as_ptr()) };
         // (<s>, <s>) -> 心 4 of 4: a valid table for the toy model.
         let good = crate::lm::test_tri(&tiny, 0.75, &[((0, 0), 4, &[(2, 4)])]);
+        // Windows cannot rewrite or delete a file that is mapped, and a loaded engine maps both tables. So there the engine that must
+        // "keep the old model" through a failed load is loaded from this untouched copy; the load that fails still reads `dir`.
+        #[cfg(windows)]
+        let (spare_dir, spare_c) = {
+            let spare = dir.with_file_name(format!("shanjie-ffi-{}-lmtables-spare", std::process::id()));
+            std::fs::create_dir_all(&spare).unwrap();
+            for (f, bytes) in [("tiny.sjlm", &tiny), ("trigram.sjt3", &good), ("trigram-chat.sjt3", &good)] {
+                std::fs::write(spare.join(f), bytes).unwrap();
+            }
+            std::fs::copy(dir.join("classes.sjc"), spare.join("classes.sjc")).unwrap();
+            let c = CString::new(spare.join("tiny.sjlm").to_str().unwrap()).unwrap();
+            (spare, c)
+        };
         for (name, other) in [("trigram.sjt3", "trigram-chat.sjt3"), ("trigram-chat.sjt3", "trigram.sjt3")] {
             let (file, other_file) = (dir.join(name), dir.join(other));
             std::fs::write(&other_file, &good).unwrap();
@@ -1924,14 +1937,25 @@ mod tests {
             let e = new_engine(&dir, 0);
             assert!(load(e) == 0, "{name}: both tables good");
             assert!(type_xin(e) == "鑫", "{name}: model loaded");
+            #[cfg(windows)]
+            let e = {
+                unsafe { shanjie_engine_free(e) };
+                let e = new_engine(&dir, 0);
+                assert!(unsafe { shanjie_engine_load_lm(e, spare_c.as_ptr()) } == 0, "{name}: the untouched copy loads");
+                assert!(type_xin(e) == "鑫", "{name}: copy loaded");
+                e
+            };
             let mut flipped = good.clone();
             flipped[0] ^= 1;
-            for (what, damage) in [("corrupt magic", 0), ("truncated", 1), ("dangling symlink", 2)] {
+            for (what, damage) in [("corrupt magic", 0), ("truncated", 1), #[cfg(unix)] ("dangling symlink", 2)] {
                 std::fs::remove_file(&file).ok();
                 match damage {
                     0 => std::fs::write(&file, &flipped).unwrap(),
                     1 => std::fs::write(&file, &good[..good.len() - 1]).unwrap(),
-                    _ => std::os::unix::fs::symlink(dir.join("missing.sjt3"), &file).unwrap(),
+                    _ => {
+                        #[cfg(unix)]
+                        std::os::unix::fs::symlink(dir.join("missing.sjt3"), &file).unwrap();
+                    }
                 }
                 assert!(load(e) == 3, "{name}: {what} must fail the load");
                 assert!(profile(e, 1).3 == "心", "{name}: {what}: the loaded model is kept (formal reads 心, no model reads 鑫)");
@@ -1944,6 +1968,25 @@ mod tests {
             assert!(load(e) == 0, "{name}: a missing table is only that profile off");
             unsafe { shanjie_engine_free(e) };
         }
+        #[cfg(windows)]
+        std::fs::remove_dir_all(spare_dir).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// docs/contracts/win-core.md section 2.2 item 4: Windows has no learning file yet, so `shanjie_engine_learning_open` is 3 without
+    /// creating the directory it was given, and typing and picking go on as before.
+    #[cfg(windows)]
+    #[test]
+    fn learning_open_is_3_on_windows_and_picking_still_works() {
+        let dir = tiny_dir("winlearn", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\n".as_bytes());
+        let (e, learn_dir) = (new_engine(&dir, 0), dir.join("learning"));
+        let learn_c = CString::new(learn_dir.to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_learning_open(e, learn_c.as_ptr()) } == 3, "no learning file on Windows");
+        assert!(!learn_dir.exists(), "the directory was not created");
+        assert!(unsafe { shanjie_engine_learning_open(e, ptr::null()) } == 1, "a NULL dir is still 1");
+        assert!(unsafe { shanjie_engine_learning_clear(e) } == 3, "nothing to clear without a store");
+        assert!(type_xin(e) == "鑫", "typing and picking are unchanged");
+        unsafe { shanjie_engine_free(e) };
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2305,7 +2348,10 @@ mod tests {
     fn lm_without_kn(dir: &Path) -> PathBuf {
         for f in ["bigram.sjlm", "classes.sjc"] {
             let _ = std::fs::remove_file(dir.join(f));
+            #[cfg(unix)]
             std::os::unix::fs::symlink(root().join("data/lm").join(f), dir.join(f)).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(root().join("data/lm").join(f), dir.join(f)).unwrap();
         }
         dir.join("bigram.sjlm")
     }
