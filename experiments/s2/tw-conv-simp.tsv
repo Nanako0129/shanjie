@@ -1,0 +1,2 @@
+# tw-conv-simp.tsv (docs/contracts/tw-conv.md 3, assertion 4): one row per line, `Simplified sentence<TAB>expected Taiwan writing`. Written by main; # lines are comments.
+# Coverage is part of the assertion: the 31 MediaWiki keys and every key the table changes against OpenCC's first value need a sentence here.

@@ -1,0 +1,2 @@
+# tw-conv-ambiguous.tsv (docs/contracts/tw-conv.md 3, assertion 2): the (expected, got) character pairs that Simplified-and-back cannot restore (real one-to-many characters).
+# Columns: expected character<TAB>got character<TAB>reason. At most 40 rows; a new row needs a reason. Written by main.
