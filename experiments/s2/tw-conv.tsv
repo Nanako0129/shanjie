@@ -1,8 +1,8 @@
 # tw-conv.tsv: docs/contracts/tw-conv.md section 2.3. Built by experiments/s2/build_tw_conv.py from the PTT snapshot (characters, words and counts only).
 # input body.tsv sha256 00062f34ee21ea0d8f12d66db13fba28715eb7a5b63c7d456a43902a0b03485a
 # input push.tsv sha256 75d3f0bdfe8e0a5784fb1e30df5b930a7e58948ad7e144b53ce18ca8745b034a
-# tool commit 6acc8cfb438b14fa86b2961cfd679a265c60113e
-# columns: section, key, value, status, manual, counts. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule.
+# tool commit bd1cb4fb660a6650efe1cff350bce8a824c3041b
+# columns: section, key, value, status, manual, counts[, N]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7.
 fold	僞	偽	fold		僞:80 偽:5357
 fold	啓	啟	fold		啓:592 啟:29434
 fold	喫	吃	fold		喫:357 吃:281783
@@ -47,7 +47,7 @@ fold	齶	顎	fold		齶:0 顎:296
 char	㐹	㑶	hold		㑶:0 㐹:0
 char	万	萬	evidence		萬:179290 万:363
 char	丑	醜	evidence		醜:18185 丑:6385
-char	个	個	evidence		個:1272848 箇:103
+char	个	個	evidence		個:1272848 箇:103	N
 char	丰	豐	evidence		豐:27328 丰:244
 char	么	麼	evidence		麼:882222 么:966
 char	了	了	evidence		了:2723858 瞭:3478
@@ -56,11 +56,11 @@ char	云	雲	evidence		雲:36913 云:1980
 char	亘	亘	evidence		亙:70 亘:153
 char	仆	僕	evidence		僕:4527 仆:204
 char	仇	仇	evidence		仇:15149 讎:16
-char	仑	崙	evidence		侖:319 崙:1773
-char	价	價	evidence		價:229083 价:2
+char	仑	崙	evidence		侖:319 崙:1773	N
+char	价	價	evidence		價:229083 价:2	N
 char	仿	仿	hold		仿:5559 彷:3087
 char	伙	夥	hold		夥:9905 伙:5296
-char	体	體	evidence		體:290268 体:0
+char	体	體	evidence		體:290268 体:0	N
 char	余	餘	evidence		餘:24544 余:2860
 char	佛	佛	evidence		佛:23372 彿:3006
 char	佣	傭	evidence		傭:3003 佣:290
@@ -71,35 +71,35 @@ char	僵	僵	hold		僵:2081 殭:2052
 char	克	克	evidence		克:98373 剋:4223
 char	党	黨	evidence		黨:41918 党:2611
 char	具	具	evidence		具:65655 俱:6493
-char	冢	塚	evidence		冢:27 塚:1463
+char	冢	塚	evidence		冢:27 塚:1463	N
 char	冬	冬	evidence		冬:13568 鼕:5
-char	冲	衝	evidence		衝:48184 沖:14871 冲:0
-char	凄	淒	evidence		悽:197 淒:743
+char	冲	衝	evidence		衝:48184 沖:14871 冲:0	N
+char	凄	淒	evidence		悽:197 淒:743	N
 char	准	準	evidence		準:117468 准:5296
 char	凌	凌	evidence		凌:14677 淩:296
 char	几	幾	evidence		幾:304362 几:323
 char	凶	兇	evidence		兇:12246 凶:2952
 char	出	出	evidence		出:795591 齣:4442
 char	划	劃	evidence		劃:28712 划:14223
-char	别	別	evidence		別:226239 彆:574
+char	别	別	evidence		別:226239 彆:574	N
 char	刮	刮	evidence		刮:6772 颳:135
 char	制	制	hold		制:108693 製:62589
-char	勋	勳	evidence		勳:5319 勛:1001
+char	勋	勳	evidence		勳:5319 勛:1001	N
 char	千	千	evidence		千:62238 韆:208
 char	升	升	evidence		升:85766 昇:3985
 char	卜	卜	hold		卜:2023 蔔:3474
 char	占	佔	evidence		佔:19533 占:7066
-char	卤	滷	evidence		滷:3875 鹵:211
+char	卤	滷	evidence		滷:3875 鹵:211	N
 char	卷	卷	hold		卷:16153 捲:9880
 char	厂	廠	evidence		廠:80901 厂:33
-char	历	歷	evidence		歷:44588 曆:3288
+char	历	歷	evidence		歷:44588 曆:3288	N
 char	厘	釐	evidence		釐:1857 厘:444
-char	参	參	evidence		參:78965
-char	发	發	evidence		發:437394 髮:26305
+char	参	參	evidence		參:78965	N
+char	发	發	evidence		發:437394 髮:26305	N
 char	只	只	evidence		只:639672 隻:90934 祇:378
 char	台	台	evidence		臺:22918 檯:7747 颱:9328 台:557669
 char	叶	葉	evidence		葉:33120 叶:220
-char	叹	嘆	evidence		嘆:5417 歎:359
+char	叹	嘆	evidence		嘆:5417 歎:359	N
 char	吁	籲	evidence		籲:2302 吁:166
 char	吃	吃	evidence		吃:282140
 char	合	合	evidence		合:288504 閤:82
@@ -110,114 +110,114 @@ char	向	向	evidence		向:94340 嚮:973 曏:0
 char	吣	吣	hold		吣:0 唚:0
 char	呆	待	evidence		呆:7639 待:104064
 char	周	周	hold		周:61069 週:76675 賙:1
-char	咏	詠	evidence		詠:1188 咏:0
-char	咤	吒	evidence		吒:258 咤:0
+char	咏	詠	evidence		詠:1188 咏:0	N
+char	咤	吒	evidence		吒:258 咤:0	N
 char	咨	諮	evidence		諮:3084 咨:66
 char	咸	鹹	evidence		鹹:10866 咸:178
 char	咽	咽	hold		咽:454 嚥:288
 char	哄	哄	evidence		哄:1742 鬨:340
-char	哗	譁	hold		譁:222 嘩:370
+char	哗	譁	hold		譁:222 嘩:370	N
 char	唇	唇	evidence		唇:1764
-char	啮	齧	hold		齧:10 嚙:24
+char	啮	齧	hold		齧:10 嚙:24	N
 char	喂	餵	evidence		喂:3011 餵:6457
 char	噪	噪	evidence		噪:5050 譟:51
 char	回	回	evidence		回:419821 迴:12724
-char	团	團	evidence		團:124490 糰:3121
+char	团	團	evidence		團:124490 糰:3121	N
 char	困	困	evidence		困:21157 睏:422
 char	坐	坐	hold		坐:40117 座:45422
-char	坛	壇	evidence		壇:5482 罈:187
-char	坝	壩	evidence		壩:351 垻:1
+char	坛	壇	evidence		壇:5482 罈:187	N
+char	坝	壩	evidence		壩:351 垻:1	N
 char	坯	坯	hold		坯:15 坏:0
-char	埙	壎	hold		壎:3 塤:7
+char	埙	壎	hold		壎:3 塤:7	N
 char	堤	堤	evidence		堤:2153 隄:3
-char	复	復	hold		復:67403 複:35527 覆:21501
+char	复	復	hold		復:67403 複:35527 覆:21501	N
 char	夫	夫	evidence		夫:48184 伕:63
 char	夸	誇	evidence		誇:19533 夸:256
-char	夹	夾	evidence		夾:14265 袷:0
+char	夹	夾	evidence		夾:14265 袷:0	N
 char	奸	奸	hold		奸:1705 姦:1465
 char	姜	姜	evidence		姜:5365 薑:1471
 char	娘	娘	evidence		娘:22908 孃:240
-char	娴	嫺	hold		嫺:133 嫻:226
-char	宁	寧	evidence		寧:17541 甯:373
+char	娴	嫺	hold		嫺:133 嫻:226	N
+char	宁	寧	evidence		寧:17541 甯:373	N
 char	它	它	evidence		它:46674 牠:3774
 char	家	家	evidence		家:624697 傢:4251
-char	尝	嘗	evidence		嘗:13304 嚐:4042
+char	尝	嘗	evidence		嘗:13304 嚐:4042	N
 char	尸	屍	evidence		屍:10686 尸:147
-char	尽	盡	evidence		盡:32100 儘:6720
+char	尽	盡	evidence		盡:32100 儘:6720	N
 char	局	局	evidence		局:112400 侷:803
 char	岩	岩	evidence		巖:444 岩:7018
-char	岭	嶺	evidence		嶺:1745 岭:0
+char	岭	嶺	evidence		嶺:1745 岭:0	N
 char	岳	岳	evidence		嶽:405 岳:9496
 char	峰	峰	evidence		峰:16236
 char	巨	巨	evidence		巨:43467 鉅:990
 char	布	布	evidence		布:70270 佈:10706
-char	帘	簾	evidence		簾:2315 帘:5
+char	帘	簾	evidence		簾:2315 帘:5	N
 char	席	席	evidence		席:18442 蓆:95
 char	干	幹	hold		幹:100375 乾:51781 干:10200 榦:3
-char	并	並	evidence		並:86304 併:11977 幷:0 并:0
+char	并	並	evidence		並:86304 併:11977 幷:0 并:0	N
 char	幸	幸	evidence		幸:31631 倖:1660
-char	广	廣	evidence		廣:41153 广:3
+char	广	廣	evidence		廣:41153 广:3	N
 char	庄	莊	evidence		莊:12915 庄:1497
 char	床	床	evidence		床:14878
 char	庵	庵	evidence		庵:318 菴:5
-char	弥	彌	evidence		彌:5481 瀰:314
+char	弥	彌	evidence		彌:5481 瀰:314	N
 char	弦	弦	evidence		弦:2693 絃:150
-char	当	當	evidence		當:429861 噹:1783
-char	录	錄	evidence		錄:65075 彔:6
+char	当	當	evidence		當:429861 噹:1783	N
+char	录	錄	evidence		錄:65075 彔:6	N
 char	彩	彩	evidence		彩:34408 綵:302
 char	征	徵	evidence		徵:26260 征:6836
-char	径	徑	evidence		徑:7417 逕:572
+char	径	徑	evidence		徑:7417 逕:572	N
 char	御	御	hold		御:12463 禦:6501
 char	志	志	evidence		志:23664 誌:7088
 char	念	念	evidence		念:60407 唸:6967
 char	恤	恤	evidence		恤:691 卹:157
-char	恶	惡	evidence		惡:42071 噁:19030
+char	恶	惡	evidence		惡:42071 噁:19030	N
 char	愈	愈	hold		愈:9261 癒:4787
 char	愿	願	evidence		願:57225 愿:271
 char	戚	戚	evidence		戚:4038 慼:7 鏚:0
 char	扇	扇	evidence		扇:10952 搧:280
 char	才	才	evidence		才:397018
 char	扎	扎	hold		扎:4940 紮:3468
-char	扑	撲	evidence		撲:7130 扑:0
+char	扑	撲	evidence		撲:7130 扑:0	N
 char	托	托	hold		托:12945 託:25390
 char	扣	扣	evidence		扣:41966 釦:238
 char	折	折	evidence		折:51607 摺:4722
 char	抵	抵	evidence		抵:18150 牴:183
 char	拐	拐	evidence		拐:4283 柺:46
 char	拿	拿	evidence		拿:230182 拏:32
-char	挂	掛	evidence		掛:37319 挂:24
+char	挂	掛	evidence		掛:37319 挂:24	N
 char	挨	挨	evidence		挨:1908 捱:43
 char	挽	挽	evidence		挽:2087 輓:80
 char	捆	捆	evidence		捆:1429 綑:239
 char	捍	捍	evidence		捍:935 扞:23
 char	据	據	evidence		據:55201 据:154
 char	搜	搜	evidence		搜:17481 蒐:3758
-char	摆	擺	evidence		擺:30427 襬:110
+char	摆	擺	evidence		擺:30427 襬:110	N
 char	斗	鬥	evidence		鬥:42065 斗:6530
 char	斤	斤	evidence		斤:7314 觔:6
 char	斫	斫	hold		斫:1 斲:5
 char	旋	旋	evidence		旋:10946 鏇:0
 char	昆	昆	evidence		昆:2597 崑:762
-char	昵	暱	evidence		暱:1112 昵:0
+char	昵	暱	evidence		暱:1112 昵:0	N
 char	晒	曬	evidence		曬:7591 晒:152
 char	暗	暗	evidence		暗:42125 闇:4045
 char	曲	曲	evidence		曲:30214 麴:100
 char	札	札	evidence		札:3746 劄:6
-char	术	術	evidence		術:83283 朮:113
+char	术	術	evidence		術:83283 朮:113	N
 char	朱	朱	evidence		朱:9529 硃:65
 char	朴	朴	evidence		樸:1673 朴:5055
 char	杆	桿	evidence		杆:710 桿:7912
 char	杠	槓	evidence		槓:10342 杠:108
-char	条	條	evidence		條:97947 条:0
+char	条	條	evidence		條:97947 条:0	N
 char	杯	杯	evidence		杯:40547 盃:16938
 char	杰	傑	evidence		傑:20770 杰:4698
 char	松	松	hold		松:23466 鬆:38065
 char	板	板	evidence		板:145918 闆:26585
-char	极	極	evidence		極:56462 极:4
+char	极	極	evidence		極:56462 极:4	N
 char	果	果	evidence		果:466670 菓:375
-char	枪	槍	evidence		槍:31224 鎗:94
+char	枪	槍	evidence		槍:31224 鎗:94	N
 char	柜	櫃	evidence		櫃:22027 柜:32
-char	栖	棲	evidence		棲:1687 栖:0
+char	栖	棲	evidence		棲:1687 栖:0	N
 char	栗	栗	evidence		栗:5109 慄:275
 char	核	核	evidence		核:35244
 char	梁	梁	evidence		梁:4790 樑:1937
@@ -225,43 +225,43 @@ char	棂	欞	hold		欞:0 櫺:10
 char	棱	稜	evidence		棱:42 稜:674
 char	檗	檗	hold		檗:1 蘗:1
 char	欲	欲	hold		欲:8349 慾:5816
-char	毁	毀	evidence		毀:11767 燬:20 譭:7
-char	汇	匯	evidence		匯:18079 彙:1454 滙:445
+char	毁	毀	evidence		毀:11767 燬:20 譭:7	N
+char	汇	匯	evidence		匯:18079 彙:1454 滙:445	N
 char	沈	沈	evidence		沈:16118 瀋:48
 char	沾	沾	evidence		沾:6986 霑:47
 char	泛	泛	evidence		泛:5052 氾:508 汎:527
 char	注	注	evidence		注:57795 註:19995
-char	洒	灑	evidence		灑:4284 洒:24
+char	洒	灑	evidence		灑:4284 洒:24	N
 char	浚	浚	hold		浚:528 濬:293
 char	涂	塗	evidence		塗:5935 涂:258
 char	涌	湧	evidence		湧:2507 涌:85
 char	淀	澱	evidence		澱:1260 淀:290
 char	游	遊	evidence		遊:187786 游:12015
-char	湿	濕	evidence		溼:1171 濕:14189
+char	湿	濕	evidence		溼:1171 濕:14189	N
 char	溪	溪	evidence		溪:6592 谿:4
-char	滟	灩	hold		灩:24 灧:1
+char	滟	灩	hold		灩:24 灧:1	N
 char	漓	漓	evidence		漓:335 灕:8
 char	澄	澄	evidence		澄:3317 澂:11
 char	灶	灶	evidence		竈:103 灶:448
-char	炼	煉	hold		煉:7076 鍊:5842
-char	烟	煙	evidence		煙:12567 菸:5543
+char	炼	煉	hold		煉:7076 鍊:5842	N
+char	烟	煙	evidence		煙:12567 菸:5543	N
 char	焰	焰	evidence		焰:4835 燄:125
 char	熏	燻	hold		燻:1246 熏:148 薰:2444
-char	牦	犛	hold		犛:15 氂:12
+char	牦	犛	hold		犛:15 氂:12	N
 char	狸	狸	evidence		狸:5125 貍:420
 char	玩	玩	evidence		玩:265305 翫:3
 char	琅	琅	hold		琅:594 瑯:397
 char	璇	璇	evidence		璇:734 璿:148
-char	瓮	甕	evidence		甕:249 瓮:0
-char	疱	皰	evidence		皰:53 疱:0
+char	瓮	甕	evidence		甕:249 瓮:0	N
+char	疱	皰	evidence		皰:53 疱:0	N
 char	症	症	evidence		症:10915 癥:265
-char	痒	癢	evidence		癢:5326 痒:6
-char	痴	癡	evidence		癡:10381 痴:0
-char	瘘	瘻	hold		瘻:3 瘺:0
+char	痒	癢	evidence		癢:5326 痒:6	N
+char	痴	癡	evidence		癡:10381 痴:0	N
+char	瘘	瘻	hold		瘻:3 瘺:0	N
 char	皂	皂	evidence		皂:756
 char	矩	矩	evidence		矩:3848 榘:0
-char	确	確	evidence		確:148818 确:21
-char	硷	鹼	evidence		硷:0 礆:0 鹼:459
+char	确	確	evidence		確:148818 确:21	N
+char	硷	鹼	evidence		硷:0 礆:0 鹼:459	N
 char	私	私	evidence		私:29733 俬:10
 char	秋	秋	evidence		秋:16019 鞦:208
 char	种	種	evidence		種:318678 种:39
@@ -269,99 +269,99 @@ char	秘	秘	evidence		祕:2862 秘:19314
 char	穗	穗	evidence		穗:1759 繐:3
 char	筑	築	evidence		築:7609 筑:392
 char	筱	筱	evidence		筱:671 篠:284
-char	签	簽	evidence		籤:13693 簽:40855
+char	签	簽	evidence		籤:13693 簽:40855	N
 char	粽	粽	evidence		粽:1451
 char	糊	糊	evidence		糊:7990 餬:34
 char	系	系	evidence		系:122946 係:56805 繫:5292
 char	累	累	evidence		累:38947 纍:37
-char	纤	纖	evidence		纖:4985 縴:2
+char	纤	纖	evidence		纖:4985 縴:2	N
 char	绱	鞝	hold		鞝:0 緔:0
-char	绷	繃	evidence		繃:2629 綳:6
-char	羡	羨	evidence		羨:7719 羡:0
+char	绷	繃	evidence		繃:2629 綳:6	N
+char	羡	羨	evidence		羨:7719 羡:0	N
 char	群	群	evidence		群:56362
 char	耇	耇	hold		耇:0 耈:0
-char	联	聯	evidence		聯:98119 联:0
+char	联	聯	evidence		聯:98119 联:0	N
 char	肴	餚	evidence		餚:255 肴:60
 char	胄	冑	evidence		胄:13 冑:30
 char	背	背	evidence		背:60242 揹:1134
 char	胜	勝	evidence		勝:70955 胜:41
 char	胡	胡	hold		胡:14157 鬍:10553 衚:2
-char	脏	髒	evidence		髒:10503 臟:5179
-char	腊	臘	evidence		臘:2193 腊:5
-char	腌	醃	evidence		醃:1073 腌:4
+char	脏	髒	evidence		髒:10503 臟:5179	N
+char	腊	臘	evidence		臘:2193 腊:5	N
+char	腌	醃	evidence		醃:1073 腌:4	N
 char	膻	羶	evidence		羶:88 膻:6
 char	致	致	evidence		致:42193 緻:4931
 char	舍	捨	evidence		舍:4219 捨:10205
-char	艳	豔	hold		豔:3002 艷:3462
+char	艳	豔	hold		豔:3002 艷:3462	N
 char	芸	芸	evidence		芸:1627 蕓:16
-char	苏	蘇	evidence		蘇:23061 甦:1168 囌:1
+char	苏	蘇	evidence		蘇:23061 甦:1168 囌:1	N
 char	苔	苔	evidence		苔:1140 薹:1
-char	苧	薴	hold		薴:4 苧:0
-char	苹	蘋	evidence		蘋:19506 苹:3
+char	苧	薴	hold		薴:4 苧:0	N
+char	苹	蘋	evidence		蘋:19506 苹:3	N
 char	范	範	evidence		範:24709 范:4254
 char	荐	薦	evidence		薦:64269 荐:95
-char	荡	蕩	hold		蕩:2432 盪:2288
-char	荫	蔭	evidence		蔭:612 廕:0
-char	药	藥	evidence		藥:29168 葯:9
-char	获	獲	evidence		獲:34657 穫:1782
+char	荡	蕩	hold		蕩:2432 盪:2288	N
+char	荫	蔭	evidence		蔭:612 廕:0	N
+char	药	藥	evidence		藥:29168 葯:9	N
+char	获	獲	evidence		獲:34657 穫:1782	N
 char	蒙	蒙	evidence		蒙:9478 矇:541 濛:486 懞:7
 char	蔑	蔑	hold		蔑:232 衊:207
 char	藤	藤	evidence		藤:11934 籐:62
 char	虫	蟲	evidence		蟲:12180 虫:198
 char	虱	虱	evidence		蝨:41 虱:514
-char	蚝	蠔	evidence		蠔:267 蚝:0
-char	蜡	蠟	evidence		蠟:1892 蜡:1
-char	蝎	蠍	evidence		蠍:1143 蝎:27
+char	蚝	蠔	evidence		蠔:267 蚝:0	N
+char	蜡	蠟	evidence		蠟:1892 蜡:1	N
+char	蝎	蠍	evidence		蠍:1143 蝎:27	N
 char	表	表	evidence		表:190836 錶:17884
-char	袅	嫋	hold		嫋:284 裊:161
-char	装	裝	evidence		裝:177510 装:0
+char	袅	嫋	hold		嫋:284 裊:161	N
+char	装	裝	evidence		裝:177510 装:0	N
 char	裥	襉	hold		襉:0 襇:0
-char	证	證	evidence		證:81505 証:710
-char	谥	諡	hold		諡:7 謚:3
+char	证	證	evidence		證:81505 証:710	N
+char	谥	諡	hold		諡:7 謚:3	N
 char	谷	谷	evidence		谷:18954 穀:661
 char	豆	豆	evidence		豆:36433 荳:666
 char	象	像	evidence		象:67245 像:330971
-char	账	帳	evidence		賬:560 帳:87839
-char	赝	贗	evidence		贗:68 贋:8
-char	赞	讚	evidence		贊:7835 讚:60885
+char	账	帳	evidence		賬:560 帳:87839	N
+char	赝	贗	evidence		贗:68 贋:8	N
+char	赞	讚	evidence		贊:7835 讚:60885	N
 char	跖	蹠	evidence		蹠:42 跖:3
 char	辟	闢	evidence		闢:1625 辟:295
-char	迹	跡	evidence		跡:13523 蹟:4965
-char	适	適	evidence		適:80776 适:5
+char	迹	跡	evidence		跡:13523 蹟:4965	N
+char	适	適	evidence		適:80776 适:5	N
 char	郁	鬱	hold		鬱:3378 郁:3302
 char	酸	酸	evidence		酸:38574 痠:1470
 char	采	採	evidence		採:22125 采:4672 寀:9
 char	里	裡	evidence		裡:214969 里:48838 哩:18476
-char	鉴	鑑	evidence		鑑:6732 鑒:885
-char	针	針	evidence		針:24659
-char	钚	鈈	hold		鈈:2 鈽:24
-char	钟	鐘	evidence		鍾:3702 鐘:48545 鈡:1
-char	钥	鑰	evidence		鑰:5260 鈅:2
-char	钫	鈁	hold		鈁:3 鍅:3
-char	钻	鑽	evidence		鑽:11469 鉆:11
-char	铲	鏟	evidence		鏟:1316 剷:278
-char	链	鏈	hold		鏈:7008 鍊:5842
-char	锄	鋤	evidence		鋤:163 耡:0
+char	鉴	鑑	evidence		鑑:6732 鑒:885	N
+char	针	針	evidence		針:24659	N
+char	钚	鈈	hold		鈈:2 鈽:24	N
+char	钟	鐘	evidence		鍾:3702 鐘:48545 鈡:1	N
+char	钥	鑰	evidence		鑰:5260 鈅:2	N
+char	钫	鈁	hold		鈁:3 鍅:3	N
+char	钻	鑽	evidence		鑽:11469 鉆:11	N
+char	铲	鏟	evidence		鏟:1316 剷:278	N
+char	链	鏈	hold		鏈:7008 鍊:5842	N
+char	锄	鋤	evidence		鋤:163 耡:0	N
 char	锎	鐦	hold		鐦:0 鉲:0
-char	锝	鍀	hold		鍀:10 鎝:0
+char	锝	鍀	hold		鍀:10 鎝:0	N
 char	锨	鍁	hold		鍁:0 杴:0
 char	锫	錇	hold		錇:0 鉳:0
-char	锿	鑀	evidence		鎄:0 鑀:156
+char	锿	鑀	evidence		鎄:0 鑀:156	N
 char	镅	鎇	hold		鎇:0 鋂:1
 char	镋	钂	hold		钂:0 鎲:0
 char	镎	鎿	hold		鎿:0 錼:1
 char	镢	钁	hold		钁:0 鐝:0
-char	镥	鑥	hold		鑥:1 鎦:1
-char	镰	鐮	hold		鐮:871 鎌:621
-char	闲	閒	evidence		閒:19719 閑:652
+char	镥	鑥	hold		鑥:1 鎦:1	N
+char	镰	鐮	hold		鐮:871 鎌:621	N
+char	闲	閒	evidence		閒:19719 閑:652	N
 char	雇	僱	hold		僱:3043 雇:3890
 char	雕	雕	evidence		雕:7212 鵰:436
 char	霉	霉	evidence		黴:397 霉:2577
 char	面	面	evidence		面:460626 麵:38140
-char	须	須	evidence		須:28693 鬚:1318
-char	饥	飢	evidence		飢:2990 饑:151
-char	鹇	鷳	hold		鷳:1 鷴:7
-char	鹚	鷀	hold		鷀:1 鶿:8
+char	须	須	evidence		須:28693 鬚:1318	N
+char	饥	飢	evidence		飢:2990 饑:151	N
+char	鹇	鷳	hold		鷳:1 鷴:7	N
+char	鹚	鷀	hold		鷀:1 鶿:8	N
 char	𩙧	䬞	hold		䬞:0 𩗡:0
 phrase	一冲性子	一沖性子	hold		一沖性子:0 一衝性子:0 一冲性子:0
 phrase	一分钟	一分鐘	evidence		一分鐘:1968 一分鍾:11 一分鈡:0
