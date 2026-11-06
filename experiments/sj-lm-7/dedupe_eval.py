@@ -9,8 +9,8 @@
             `source<TAB>id<TAB>sentence`). .gz/.bz2 are not read here.
   --min-len  rows of set LABEL whose sentence (the second field) has fewer than N characters are not patterns (contract 2.4: the private
             discordtune and chat-reserve sets from 6 characters up, maintainer 2026-10-25); the other sets keep holdout_guard's 4.
-  A source sentence is a hit for a set when one of its Han runs (build_counts.text_runs: convert, HAN) contains a set sentence whole, the sentence
-  itself or its converted form, on build_counts.fold (holdout_guard's rule; sentences under 4 characters are not patterns). A hit for any set
+  A source sentence is a hit for a set when one of its Han runs (build_counts.text_runs: HAN, as written and as the `mixed` conversion; the
+  comparison needs no input kind, docs/contracts/tw-conv.md 2.5) contains a set sentence whole, the sentence itself or its converted form, on build_counts.fold (holdout_guard's rule; sentences under 4 characters are not patterns). A hit for any set
   removes the sentence. The kept lines go to OUT/NAME unchanged and in order.
   Prints, per source and set, the number of source sentences that hit it (a sentence hitting two sets counts in both), then per source
   `total`, `removed`, `kept` and the SHA-256 of the output. No sentence or row text is printed; errors carry a path, line and field count only.
@@ -39,7 +39,7 @@ def _hits(chunk):
     """chunk: lines -> for each line the tuple of set labels it hits."""
     out = []
     for line in chunk:
-        runs = bc.text_runs(line.rstrip("\n").split("\t")[-1], _W["conv"])
+        runs = hg.both_forms(line.rstrip("\n").split("\t")[-1], _W["conv"])
         out.append(tuple(label for label, m in _W["m"].items() if any(m.any(bc.fold(r)) for r in runs)))
     return out
 

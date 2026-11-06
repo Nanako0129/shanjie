@@ -1,6 +1,6 @@
 """S2 實驗：從中文維基 dump 統計詞的 unigram／bigram（只訓練、不散布原文）。
 
-串流讀 bz2，去掉 wiki 標記，用 OpenCC 對照表（commit 3ac34aa，Apache-2.0）轉台灣繁體，
+串流讀 bz2，去掉 wiki 標記，用 OpenCC 對照表（commit 3ac34aa，Apache-2.0）加上台灣用量的轉換表 tw-conv.tsv 轉台灣繁體（維基是 mixed 來源，docs/contracts/tw-conv.md），
 在句末標點切句，用善解詞庫（基底＋疊加層）的最高分切分斷詞，計數寫到 ~/.cache/shanjie/work/s2/。
 用法：python3 experiments/s2/build_counts.py [--articles N]
 """
@@ -36,20 +36,10 @@ def _checked(name, sha):
     return path
 
 
-# S2f 契約 §2.1：台灣字形表。TWVariants.txt 每條取第一個值；排除 4 條（詞庫的成對詞偏好不在轉換後的寫法：
-# 污 32:2、癡 12:4、樑 9:9、蔘 1:2，Fable 2026-10-07 逐條對照）；k==v 的恆等列（梁）略過。
-TW_VARIANTS_EXCLUDED = {"污", "癡", "樑", "蔘"}
-
-
-def _load_tw_variants():
-    out = {}
-    for line in open(_checked("TWVariants.txt", "245b94eb5842957e735dd44b7e7d4ff469a3643126cc8fa511adda5281e9cb86"), encoding="utf-8"):
-        p = line.rstrip("\n").split("\t")
-        if len(p) == 2 and not line.startswith("#"):
-            v = p[1].split(" ")[0]
-            if v != p[0] and p[0] not in TW_VARIANTS_EXCLUDED:
-                out[p[0]] = v
-    return out
+# docs/contracts/tw-conv.md: native Taiwan text is never converted; Simplified sentences go through the table experiments/s2/tw-conv.tsv
+# (built from Taiwan's own usage by build_tw_conv.py); the eight hand-written exception tables of S2f/S2n are gone.
+TW_CONV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tw-conv.tsv")
+KINDS = ("native", "mixed")   # contract 2.1: the caller says which kind every input is; there is no default
 
 
 def read_opencc():
@@ -77,88 +67,54 @@ def true_simplified(st, word_chars):
     return {k for k, v in st.items() if k not in v and k not in word_chars}
 
 
-TW_VARIANTS = {}   # load_conv() 填（S2f 修訂一：import 不讀檔）；build_overlay.py、build_tune.py（經 build_counts）與之後的 S2w 都用這一個
-# 繁體句的簡體專用字要再扣掉的字：OpenCC 沒有換回、但基底詞庫有 5 條以上用到（S2f 契約 §2.2）
-TRAD_KEEP = set("秘庄晒霉虱么肴洒痒")
+def read_tw_conv(path=TW_CONV):
+    """The tw-conv.tsv rows as {section: {key: chosen value}}: `manual` (value@date) beats the rule; a `nofold` fold row chooses the key itself.
+    A missing file stops with the command that makes it."""
+    if not os.path.isfile(path):
+        sys.exit(f"{path} is missing: run experiments/s2/build_tw_conv.py (docs/contracts/tw-conv.md 2.3)")
+    out = {"fold": {}, "char": {}, "phrase": {}, "term": {}}
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or not line.strip():
+            continue
+        sec, key, value, status, manual, _ = (line.rstrip("\n").split("\t") + [""] * 6)[:6]
+        out[sec][key] = manual.split("@")[0] if manual else (key if sec == "fold" and status != "fold" else value)
+    return out
+
+
+TW_VARIANTS = {}   # TWVariants.txt's first value of every entry (identity rows left out); load_conv() fills it. Only the sets T and the fold candidates come from it
+TRAD_SIMP_ONLY = set()   # set S (contract 2.2): true Simplified characters. Also what the Traditional-sentence path converts and what the corpus cleaners drop
+MARKERS = set()   # set M: keys whose first STCharacters value is not themselves (含 后、于、里、台、床)
+TRAD_ONLY = set()   # set T: Traditional evidence characters (values that are no key, the fold targets, the TWVariants targets)
+FOLD = {}   # fold map {X: Y} of tw-conv.tsv (the rows folded by the PTT counts); applied last, to every kind of sentence
+FOLD_TRANS = {}   # str.translate table of FOLD
+TW_PHRASE, TW_MAXP = {}, [1]   # the mainland-term subset of TWPhrases (tw-conv.tsv `term` rows), Simplified sentences only
 
 
 def load_conv():
-    """回傳 (詞組表, 字表, 最長詞組)，給「繁體句」用。只收「簡體專用字」：本身也是正確繁體的字（例：吃、后、里、游）不轉，
-    否則會把原本正確的繁體字改掉（2026-10-03 的 bug：吃→喫、后→後、里→裏）。詞組只在含簡體專用字時才收。
-    S2n：同時填好「簡體句」用的全域表（SIMP_*、MARKERS、TRAD_ONLY），見 convert()。"""
-    simp_only, phrase, char = set(), {}, {}
-    keys, vals, first_char, simp_phrase = set(), set(), {}, {}
-    TW_VARIANTS.clear(); TW_VARIANTS.update(_load_tw_variants())
-    for line in open(_checked("STCharacters.txt", "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b"), encoding="utf-8"):
-        p = line.rstrip("\n").split("\t")
-        if len(p) == 2 and not line.startswith("#"):   # 檔頭的 `# Format: key<TAB>value(s)` 不是對照
-            keys.add(p[0]); vals.update("".join(p[1].split(" "))); first_char[p[0]] = p[1].split(" ")[0]
-            if p[0] not in p[1].split(" "):
-                simp_only.add(p[0])
-    # S2f §2.2：繁體句用縮小後的簡體專用字（扣掉 TW_VARIANTS 的目標字與 TRAD_KEEP）；SIMP_ONLY（簡繁判斷）仍用完整集合
-    trad_simp_only = simp_only - set(TW_VARIANTS.values()) - TRAD_KEEP
-    for c in trad_simp_only:
-        char[c] = first_char[c]
-    for f in ["STPhrases.txt", "TWPhrases.txt"]:
-        for line in open(_checked(f, PHRASE_SHA[f]), encoding="utf-8"):
-            if line.startswith("#") or "\t" not in line:
-                continue
-            k, v = line.rstrip("\n").split("\t")
-            if f == "TWPhrases.txt":
-                TW_PHRASE[k] = v.split(" ")[0]
-            else:
-                simp_phrase[k] = v.split(" ")[0]
-                if any(c in trad_simp_only for c in k):
-                    phrase[k] = v.split(" ")[0]
-    # S2f 修訂一：繁體句的字表只剩縮小後的簡體專用字；VARIANTS 全部交給最後一層（TWPhrases 之後）
-    SIMP_PHRASE.clear(); SIMP_PHRASE.update(simp_phrase)
-    SIMP_CHAR.clear(); SIMP_CHAR.update({c: (c if c in TAIWAN_KEEP else v) for c, v in first_char.items()})
-    MARKERS.clear(); MARKERS.update(c for c, v in first_char.items() if c != v)   # 標記字：第一個對照不是自己（含 后、于、里 這類）
-    TRAD_SIMP_ONLY.clear(); TRAD_SIMP_ONLY.update(trad_simp_only)                  # 繁體句的簡體專用字（縮小後）；build_overlay.py 也用
-    SIMP_ONLY.clear(); SIMP_ONLY.update(simp_only)                                 # 簡體專用字：對照裡不含自己
-    TRAD_ONLY.clear(); TRAD_ONLY.update(first_char[c] for c in MARKERS)            # 繁體專用字：標記字的第一個對照（像、待、座 不在其中）
-    SIMP_MAXP[0] = max(map(len, simp_phrase))
+    """Fills the module tables (S, M, T, FOLD, TW_VARIANTS, TW_PHRASE) and returns (phrase, char, longest phrase) for convert():
+    phrase = STPhrases with tw-conv.tsv's chosen values, char = STCharacters' first value with tw-conv.tsv's chosen values."""
+    o = read_opencc()
+    st, tw = o["st"], read_tw_conv()
+    S = true_simplified(st, lexicon_word_chars())
+    FOLD.clear(); FOLD.update({x: y for x, y in tw["fold"].items() if x != y})
+    FOLD_TRANS.clear(); FOLD_TRANS.update({ord(x): y for x, y in FOLD.items()})
+    TW_VARIANTS.clear(); TW_VARIANTS.update(o["twv"])
+    TRAD_SIMP_ONLY.clear(); TRAD_SIMP_ONLY.update(S)
+    MARKERS.clear(); MARKERS.update(k for k, v in st.items() if v[0] != k)
+    TRAD_ONLY.clear(); TRAD_ONLY.update({c for v in st.values() for x in v for c in x if c not in st} | set(FOLD.values()) | set(o["twv"].values()))
+    TW_PHRASE.clear(); TW_PHRASE.update(tw["term"])
     TW_MAXP[0] = max(map(len, TW_PHRASE), default=1)
-    POST_SIMP.clear(); POST_SIMP.update({**TW_VARIANTS, **TW_CHAR})
-    POST_TRAD.clear(); POST_TRAD.update({**TW_VARIANTS, **VARIANTS})
-    # S2f 修訂一 6.2.1：保護詞只看基底詞庫（成員與「不在詞庫」都是）；疊加層本身用到轉換，讀它會循環。
-    # 修訂二 7.2.1：只收含 PROTECT_KEYS 的詞；VARIANTS 鍵（裏 羣 啓）與 喫、竈 照常轉換，否則兩字保護詞會在無關文字裡命中（痛苦里→痛苦裏）。
-    # ponytail: 「三棱鏡」裡的「三棱」也被保護（詞庫是「三稜鏡」）；要逐詞反查再說。
-    base = set(ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word)
-    # 修訂三 8.2：繁體句另外保護含 竈 的詞（竈門）；PROTECT 是其中含 PROTECT_KEYS 的子集，簡體句用
-    PROTECT_TRAD.clear()
-    PROTECT_TRAD.update({w: w for w in base if any(c in PROTECT_KEYS_TRAD for c in w) and "".join(POST_TRAD.get(c, c) for c in w) not in base})
-    PROTECT.clear()
-    PROTECT.update({w: w for w in PROTECT_TRAD if any(c in PROTECT_KEYS for c in w)})
-    PROTECT_MAXP[0] = max(map(len, PROTECT_TRAD), default=1)
+    phrase = {**o["stp"], **tw["phrase"]}
+    char = {**{k: v[0] for k, v in st.items()}, **tw["char"]}
     return phrase, char, max(map(len, phrase))
 
 
-# OpenCC 只轉簡體；維基常見的繁體異體字另外換成台灣用字
-VARIANTS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教", "着": "著", "説": "說"}
-
-
-# S2n 簡體句用的表（load_conv 填）：全部 STPhrases、STCharacters 第一個對照、簡體專用字、繁體專用字
-SIMP_PHRASE, SIMP_CHAR, MARKERS, SIMP_ONLY, TRAD_ONLY, SIMP_MAXP = {}, {}, set(), set(), set(), [0]
-TRAD_SIMP_ONLY = set()
-# 台灣用字例外（S2n 契約 §2.1）：簡體句的字表這一步保留原字，不換成 STCharacters 的第一個對照（吃→喫、岩→巖 在台灣不是正確用字）。
-# 挑法：2026-10-05 在維基前 25,000 篇被判為繁體句的句子裡，原字出現次數 >= 3 倍第一個對照、且原字 >= 30 次；
-# 比例 吃 28.8、皂 78.5、唇 12.2、岩 9.1、岳 5.0、咸 3.4（experiments/s2n/pick_exceptions.py，輸出在契約 §2.1）。
-# 后 于 里 台 干 余 不在此列：契約表明定要轉。詞組那一步照舊，所以 岩石、范围 這類由詞組決定。
-TAIWAN_KEEP = set("吃皂唇岩岳咸秘")   # S2f：加 秘（簡體句保留，秘／祕 由 build_lm 的合併與詞庫分數決定）
-# S2f §2.4：build_lm 合併同讀音異體寫法的字表（週／周、唸／念、嚐／嘗、它／牠、妳 台灣用法有分工，不在其中）；build_overlay 的 §2.5 也用（再加 TW_VARIANTS）
-MERGE = {**VARIANTS, "佔": "占", "佈": "布", "祕": "秘", "臺": "台", "牀": "床", "汙": "污"}
-TW_CHAR = {**VARIANTS, "臺": "台"}   # 簡體句的台灣用字（併進 POST_SIMP）
-# S2f §2.3：全部轉換完（含 TWPhrases）之後再套一層；兩種句子各一張表（繁體句不套 臺→台）。重疊的 9 條方向相同（test_convert 檢查）
-# load_conv() 填；PROTECT 裡的詞在這一層原樣保留（修訂一 6.2.1）。
-POST_SIMP, POST_TRAD, PROTECT, PROTECT_TRAD, PROTECT_MAXP = {}, {}, {}, {}, [1]
-PROTECT_KEYS = set("脣泄棱覈齶")   # 修訂二：TWVariants 獨有、而且會改壞基底詞的鍵（排泄、棱錐、泄殖腔…）
-PROTECT_KEYS_TRAD = PROTECT_KEYS | set("竈")   # 修訂三：竈 只在繁體句保護；簡體句的 竈 是 灶 轉出來的（§7.1 灶门口）
+# S2f 2.4: build_lm merges these spellings of one word (週／周、唸／念、嚐／嘗、它／牠、妳 are used differently in Taiwan, so they are not here) and
+# build_overlay does the same to the overlay words; the holdout guard compares on it. A merge, not a conversion: it is unchanged by tw-conv.
+MERGE = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教", "着": "著", "説": "說",
+         "佔": "占", "佈": "布", "祕": "秘", "臺": "台", "牀": "床", "汙": "污"}
 PHRASE_SHA = {"STPhrases.txt": "f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561eadd8e114194e2925a",
               "TWPhrases.txt": "bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31"}
-
-
-TW_PHRASE, TW_MAXP = {}, [1]   # 台灣用詞（TWPhrases，鍵是繁體詞組），在簡轉繁之後第二遍套用
 
 
 _FIRST = {}   # (id(table), len(table)) → {首字: 該首字開頭的最長鍵}，讓沒有詞組可比對的位置不必切片查表（輸出和逐長度試完全相同）
@@ -183,45 +139,38 @@ def _longest(text, table, maxp, char=None):
     return "".join(out)
 
 
+def sentence_kind(text):
+    """Contract 2.2. R, M, T = how many characters of the sentence are in S, M, T. "simp": R >= 1 and R >= T. "marker": R = 0, M >= 1, T = 0
+    (only marker characters: 之后他去了; 奇希里斯 and 后里 are in this class too, which is why it converts less). Otherwise "trad"."""
+    r = m = t = 0
+    for c in text:
+        r += c in TRAD_SIMP_ONLY
+        m += c in MARKERS
+        t += c in TRAD_ONLY
+    if r and r >= t:
+        return "simp"
+    return "marker" if not r and m and not t else "trad"
+
+
 def is_simplified(text):
-    """簡體句（S2n 契約 §2.1）：(i) 有標記字而且沒有繁體專用字，或 (ii) 簡體專用字比繁體專用字多。"""
-    m = sum(c in MARKERS for c in text)
-    t = sum(c in TRAD_ONLY for c in text)
-    return (m > 0 and t == 0) or sum(c in SIMP_ONLY for c in text) > t
+    return sentence_kind(text) != "trad"
 
 
-_SIMP_TW = {}   # id(simp_tw_keys) -> (keys, TW_PHRASE, len(TW_PHRASE), 受限的表, 最長鍵)；keys 留在裡面，id 才不會被別的物件借用
+def fold_tw(text):
+    """Only the fold rows of tw-conv.tsv (contract 2.3): what any text may be changed by, native or converted."""
+    return text.translate(FOLD_TRANS)
 
 
-def _simp_tw_table(keys):
-    """簡體句用的 TWPhrases：keys=None 是整張表（原行為）；否則只留鍵在 keys 裡的條目（SR-TW-V 的 V4，只留 SJ-LM-7 §2.7 量過的大陸用詞）。
-    keys 請傳 frozenset 且之後不要改它（表是第一次用到時依內容建好、按 id 快取）。"""
-    if keys is None:
-        return TW_PHRASE, TW_MAXP[0]
-    hit = _SIMP_TW.get(id(keys))
-    if hit is None or hit[0] is not keys or hit[1] is not TW_PHRASE or hit[2] != len(TW_PHRASE):
-        t = {k: v for k, v in TW_PHRASE.items() if k in keys}
-        hit = _SIMP_TW[id(keys)] = (keys, TW_PHRASE, len(TW_PHRASE), t, max(map(len, t), default=1))
-    return hit[3], hit[4]
+def convert(text, phrase, char, maxp):
+    """The `mixed` conversion (contract 2.4); a `native` input is never given to it. simp: STPhrases longest first (chosen values), the remaining
+    characters from `char`, the mainland-term subset of TWPhrases longest first, fold. marker (only marker characters): the phrases and terms, no
+    single character, fold. trad (also Traditional with a few Simplified characters): only the characters of S, fold; no phrase table at all."""
+    kind = sentence_kind(text)
+    if kind == "trad":
+        return "".join(char.get(c, c) if c in TRAD_SIMP_ONLY else c for c in text).translate(FOLD_TRANS)
+    text = _longest(text, phrase, maxp, char if kind == "simp" else None)
+    return _longest(text, TW_PHRASE, TW_MAXP[0]).translate(FOLD_TRANS)
 
-
-def convert(text, phrase, char, maxp, trad_tw_phrases=True, simp_tw_keys=None):
-    """簡體句（S2n）：全部 STPhrases 最長優先，沒蓋到的字用 STCharacters 第一個對照。
-    其他句（繁體句，含簡繁夾雜）：只轉縮小後的簡體專用字（S2f）。兩種都再套台灣用詞（TWPhrases），
-    最後一層保護詞原樣保留、其餘逐字套台灣字形表（簡體句另含 臺→台；S2f §2.3 與修訂一）。
-    trad_tw_phrases=False（SJ-LM-7 契約 §2.2，計數用）：繁體句不套 TWPhrases，只剩字形層（簡體專用字、POST_TRAD 的 VARIANTS 與台灣字形），
-    「插件」不會被換成「外掛」；簡體句不變。預設 True＝原行為，holdout_guard.py、build_digits.py 與其他呼叫者不傳。
-    simp_tw_keys（SR-TW-V V4）：None＝簡體句照舊套全部 TWPhrases；給 frozenset 就只套鍵在裡面的條目（「权限」的「權限」鍵不在裡面就留「權限」）。繁體句不受影響。"""
-    simp = is_simplified(text)
-    # S2f 修訂一 6.2.2：TWPhrases 之前不套台灣字形或 VARIANTS（OpenCC 的順序），鍵寫成 OpenCC 字形的台灣用詞才對得到
-    text = _longest(text, SIMP_PHRASE, SIMP_MAXP[0], SIMP_CHAR) if simp else _longest(text, phrase, maxp, char)
-    if simp:
-        tw, twp = _simp_tw_table(simp_tw_keys)
-        text = _longest(text, tw, twp) if tw else text
-    elif trad_tw_phrases and TW_PHRASE:
-        text = _longest(text, TW_PHRASE, TW_MAXP[0])
-    table = POST_SIMP if simp else POST_TRAD   # 喫→吃 也在 TW_VARIANTS 裡，S2n 的「輸入有喫就保留」規則拿掉
-    return _longest(text, PROTECT if simp else PROTECT_TRAD, PROTECT_MAXP[0], table)   # 保護詞原樣保留，其餘逐字套表
 
 
 MARKUP = [
@@ -244,17 +193,24 @@ def fold(text):
     return "".join(MERGE.get(c, c) for c in text)
 
 
-def text_runs(line, conv, trad_tw_phrases=True, simp_tw_keys=None):
-    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple.
-    trad_tw_phrases, simp_tw_keys: see convert()."""
-    return HAN.findall(convert(line, *conv, trad_tw_phrases=trad_tw_phrases, simp_tw_keys=simp_tw_keys))
+def check_kind(kind):
+    """The input kind of docs/contracts/tw-conv.md 2.1: "native" (never converted) or "mixed" (sentence by sentence, convert()). No default."""
+    if kind not in KINDS:
+        raise ValueError(f"input kind must be one of {KINDS}, got {kind!r}")
+    return kind
 
 
-def article_runs(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True, simp_tw_keys=None):
+def text_runs(line, conv, kind):
+    """One plain-text line's Han runs (build_counts_text.main's loop, before its length filter). conv = load_conv()'s tuple; kind: see check_kind().
+    A `native` line is not converted at all; a `mixed` line is converted as one sentence."""
+    return HAN.findall(line if check_kind(kind) == "native" else convert(line, *conv))
+
+
+def article_runs(raw, conv, mw=None, mwconv=None):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
     The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8).
-    trad_tw_phrases: see convert(); a counting run and the guard that scans it must pass the same value."""
-    for s in article_sentences(raw, conv, mw, mwconv, trad_tw_phrases, simp_tw_keys):
+    A wiki article is a `mixed` input (tw-conv contract 2.1)."""
+    for s in article_sentences(raw, conv, mw, mwconv):
         yield from HAN.findall(s)
 
 
@@ -271,11 +227,11 @@ def article_text(raw, mw=None, mwconv=None):
     return t
 
 
-def article_sentences(raw, conv, mw=None, mwconv=None, trad_tw_phrases=True, simp_tw_keys=None):
+def article_sentences(raw, conv, mw=None, mwconv=None):
     """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
     HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
     for s in SENT.findall(article_text(raw, mw, mwconv)):
-        yield s if mw else convert(s, *conv, trad_tw_phrases=trad_tw_phrases, simp_tw_keys=simp_tw_keys)
+        yield s if mw else convert(s, *conv)
 
 
 def articles(limit, dump=None, meta=False):
@@ -388,24 +344,23 @@ def expected_counts(lex, text, min_count=EXPECTED_MIN):
 _W = {}
 
 
-def guard_matcher(rows, trad_tw_phrases=True, simp_tw_keys=None):
+def guard_matcher(rows):
     """--holdout-guard (docs/contracts/holdout-refresh.md section 8), called once in main() before any Pool exists: None when off, else the
     Matcher over the held-out rows (`rows` = row files; empty = every .txt under eval/holdout/). Prints how many rows were loaded and skipped.
-    trad_tw_phrases (and simp_tw_keys) must be the counter's own setting, so the patterns cover the text that is actually counted.
     A bad rows file stops here (SystemExit, message = path, line, field count only), never inside a worker initializer."""
     if rows is None:
         return None
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import holdout_guard
     try:
-        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv(), trad_tw_phrases, simp_tw_keys)
+        matcher, _, loaded, skipped = holdout_guard.build_matcher(list(rows), load_conv())
     except (holdout_guard.GuardError, OSError) as e:
         sys.exit(f"holdout-guard: {e}")
     print(f"holdout-guard: {loaded} rows loaded, {skipped} skipped as shorter than {holdout_guard.MIN_LEN} characters", flush=True)
     return matcher
 
 
-def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None, trad_tw_phrases=True):
+def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_guard=None):
     """holdout_guard: None, or the Matcher guard_matcher() built in main (already validated)."""
     _W["mw"] = None
     if mw:   # S2w：每個 worker 載一次 mwdata.json（契約 §3.2）
@@ -427,7 +382,6 @@ def _init(trigram=False, expected=False, mw=False, extra_lexicons=(), holdout_gu
         _W["pack_lens"] = sorted({len(w) for w in _W["pack"]})
     _W["conv"] = load_conv()
     _W["guard"] = holdout_guard
-    _W["trad_tw"] = trad_tw_phrases
 
 
 def run_expected(run):
@@ -465,7 +419,7 @@ def _count(texts):
     guard, skipped = _W.get("guard"), 0
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
-        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv"), trad_tw_phrases=_W.get("trad_tw", True)):
+        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv")):
             if len(run) < 2:
                 continue
             if guard is not None and guard.any(fold(run)):
@@ -514,7 +468,6 @@ def main():
     ap.add_argument("--trigram", action="store_true", help="也算 trigram（記憶體用量大，請搭配較少的篇數）")
     ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（S2n 契約 §6.2），取代最高分切分；不算 trigram")
     ap.add_argument("--mw", action="store_true", help="S2w：用 MediaWiki 的 zh-tw 轉換（zhconv-rs ＋ $S2_WORK/mwdata.json），取代 convert()")
-    ap.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 契約 §2.2：繁體句不套 OpenCC TWPhrases（「插件」不換成「外掛」）；預設關＝model-v6 的行為。--holdout-guard 的比對也跟著這個設定")
     ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式（讀音\\t詞\\t分數\\t來源）的檔加進斷詞詞庫，可給多次")
     ap.add_argument("--shard", metavar="K/N", help="只數第 i 篇（i %% N == K）、寫 counts-<篇數>-shard<K>of<N>.pkl；N 個程序各給一個 K 平行跑，計數相加就是全部（SJ-LM-7：主程序合併是單核瓶頸）。預設關")
     ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數（契約 holdout-refresh §8）；不給檔＝eval/holdout/ 底下全部 .txt")
@@ -523,12 +476,12 @@ def main():
         ap.error("--expected 不算 trigram")
     if a.extra_lexicon and not a.expected:
         ap.error("--extra-lexicon 只用在 --expected（加法計數，model-v5 契約 §8）")
-    guard = guard_matcher(a.holdout_guard, not a.no_trad_tw_phrases)
+    guard = guard_matcher(a.holdout_guard)
     load_conv()   # in the parent first: a missing or wrong OpenCC file stops here, not in every Pool worker's initializer (which respawns forever)
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = skipped = 0
-    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard, not a.no_trad_tw_phrases)) as pool:
+    with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard)) as pool:
         k, n = map(int, a.shard.split("/")) if a.shard else (0, 1)
         mine = (x for i, x in enumerate(articles(a.articles)) if i % n == k)
         for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(mine)):

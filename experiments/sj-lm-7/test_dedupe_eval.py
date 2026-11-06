@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dedupe_eval as D  # noqa: E402
@@ -24,6 +25,8 @@ def write(d, name, text):
 class Dedupe(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.TemporaryDirectory(); self.addCleanup(self.d.cleanup)
+        # tw-conv: only characters of set S (build_counts.TRAD_SIMP_ONLY, which load_conv fills) are converted in a sentence that is not Simplified
+        p = mock.patch.object(D.bc, "TRAD_SIMP_ONLY", set(CONV[1])); p.start(); self.addCleanup(p.stop)
 
     def run_main(self, extra=(), source_text=None, **kw):
         d = self.d.name
@@ -62,7 +65,8 @@ class Dedupe(unittest.TestCase):
 
     def test_two_processes_give_the_same_output(self):
         one = self.run_main()
-        two = self.run_main(["--jobs", "2"])
+        with mock.patch.object(D.mp, "Pool", D.mp.get_context("fork").Pool):   # forked workers inherit the patched stand-in for set S; spawned ones would load an empty one
+            two = self.run_main(["--jobs", "2"])
         self.assertEqual(one, two)
 
     def test_a_bad_set_file_stops_with_a_path_and_line_only(self):

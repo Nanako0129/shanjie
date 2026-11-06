@@ -1,6 +1,6 @@
-"""SJ-LM-7 contract section 2.2: convert(..., trad_tw_phrases=False) leaves a Traditional sentence's wording alone (no OpenCC TWPhrases:
-插件 stays), keeps the glyph layer, and converts Simplified sentences as before. The default is the old behaviour, so the other callers
-(holdout_guard.py, build_digits.py, build_counts_text without its flag) do not move. Synthetic tables only: no OpenCC files."""
+"""docs/contracts/tw-conv.md sections 2.1, 2.4 and 2.5 with synthetic tables (no OpenCC files): a `native` input is never converted, a `mixed` one goes
+sentence by sentence through convert() (Traditional sentences get only the glyph layer, Simplified ones also the mainland-term subset), every input
+must name its kind, and the removed TWPhrases flags are errors. (The file was the SJ-LM-7 section 2.2 flag test before tw-conv removed the flag.)"""
 import contextlib
 import io
 import os
@@ -18,62 +18,45 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 import holdout_guard as hg  # noqa: E402
 
 # Module-level so the tables outlive the tests (bc._longest caches by id(table)).
-SIMP_PHRASE, SIMP_CHAR, TW_PHRASE = {}, {"们": "們"}, {"插件": "外掛", "軟件": "軟體"}
-POST_TRAD, POST_SIMP = {"着": "著", "喫": "吃"}, {"着": "著", "臺": "台"}
-CONV = ({}, {}, 1)   # (phrase, char, maxp) for Traditional sentences: no stray Simplified characters in these rows
-TABLES = dict(SIMP_PHRASE=SIMP_PHRASE, SIMP_CHAR=SIMP_CHAR, SIMP_MAXP=[1], MARKERS={"们"}, SIMP_ONLY={"们"}, TRAD_ONLY={"們"},
-              TW_PHRASE=TW_PHRASE, TW_MAXP=[2], POST_TRAD=POST_TRAD, POST_SIMP=POST_SIMP, PROTECT={}, PROTECT_TRAD={}, PROTECT_MAXP=[1])
+TW_PHRASE = {"軟件": "軟體"}
+CHAR = {"们": "們", "软": "軟"}
+CONV = ({}, CHAR, 1)   # (phrase, char, maxp)
+TABLES = dict(TRAD_SIMP_ONLY={"们", "软"}, MARKERS={"们", "软"}, TRAD_ONLY={"們", "軟"}, FOLD_TRANS={ord("着"): "著", ord("喫"): "吃"},
+              TW_PHRASE=TW_PHRASE, TW_MAXP=[2])
 
-KEEP_PLUGIN, ONLY_PLUGIN = frozenset({"軟件"}), frozenset({"插件"})   # module-level: bc._simp_tw_table caches by id(keys)
 TRAD, SIMP = "我們的插件隨着軟件", "我们的插件隨着软件"
-LEX = SimpleNamespace(by_word={w: (None, -2.0) for w in ["我們", "的", "插件", "外掛", "隨著", "軟件", "軟體"]}, max_len=2)
+LEX = SimpleNamespace(by_word={w: (None, -2.0) for w in ["我們", "的", "插件", "隨著", "軟件", "軟體", "隨着"]}, max_len=2)
 
 
 class Base(unittest.TestCase):
     def setUp(self):
         for k, v in TABLES.items():
             p = mock.patch.object(bc, k, v); p.start(); self.addCleanup(p.stop)
-        TW_PHRASE["软件"] = "軟體"   # the Simplified sentence reaches TWPhrases after the character table
-        self.addCleanup(TW_PHRASE.pop, "软件", None)
-        SIMP_CHAR["软"] = "軟"; SIMP_CHAR["件"] = "件"
-        self.addCleanup(SIMP_CHAR.pop, "软", None); self.addCleanup(SIMP_CHAR.pop, "件", None)
-
-    def convert(self, s, **kw):
-        return bc.convert(s, *CONV, **kw)
 
 
 class Convert(Base):
-    def test_default_is_the_old_behaviour(self):
+    def test_traditional_sentence_gets_the_glyph_layer_only(self):
         self.assertFalse(bc.is_simplified(TRAD))
-        self.assertEqual(self.convert(TRAD), "我們的外掛隨著軟體")
-        self.assertEqual(self.convert(TRAD, trad_tw_phrases=True), self.convert(TRAD))
+        self.assertEqual(bc.convert(TRAD, *CONV), "我們的插件隨著軟件")   # 着→著 fold; 軟件 is a mainland term but a Traditional sentence has no phrase table
 
-    def test_traditional_sentence_keeps_its_wording_but_gets_the_glyph_layer(self):
-        self.assertEqual(self.convert(TRAD, trad_tw_phrases=False), "我們的插件隨著軟件")   # 插件 kept, 着→著 still applied
-
-    def test_simplified_sentence_is_converted_as_before(self):
+    def test_simplified_sentence_gets_characters_terms_and_fold(self):
         self.assertTrue(bc.is_simplified(SIMP))
-        self.assertEqual(self.convert(SIMP, trad_tw_phrases=False), self.convert(SIMP))
-        self.assertEqual(self.convert(SIMP, trad_tw_phrases=False), "我們的外掛隨著軟體")
+        self.assertEqual(bc.convert(SIMP, *CONV), "我們的插件隨著軟體")
 
-    def test_simp_tw_keys_restricts_twphrases_for_simplified_sentences_only(self):
-        """SR-TW-V V4: None = every TWPhrases entry (the old behaviour); a frozenset = only those keys, for Simplified sentences."""
-        self.assertEqual(self.convert(SIMP, simp_tw_keys=None), self.convert(SIMP))
-        self.assertEqual(self.convert(SIMP, simp_tw_keys=KEEP_PLUGIN), "我們的插件隨著軟體")        # 插件's key is not listed: stays; 軟件 is listed: converts
-        self.assertEqual(self.convert(SIMP, simp_tw_keys=ONLY_PLUGIN), "我們的外掛隨著軟件")
-        self.assertEqual(self.convert(SIMP, simp_tw_keys=frozenset()), "我們的插件隨著軟件")
-        self.assertEqual(self.convert(TRAD, simp_tw_keys=frozenset()), self.convert(TRAD))          # Traditional sentences are not affected
-        self.assertEqual(self.convert(TRAD, trad_tw_phrases=False, simp_tw_keys=ONLY_PLUGIN), "我們的插件隨著軟件")
-        self.assertEqual(bc.text_runs(SIMP, (*CONV[:2], 1), simp_tw_keys=ONLY_PLUGIN), ["我們的外掛隨著軟件"])
-        self.assertEqual(list(bc.article_runs(SIMP + "。", (*CONV[:2], 1), simp_tw_keys=ONLY_PLUGIN)), ["我們的外掛隨著軟件"])
+    def test_native_is_never_converted_and_mixed_is(self):
+        self.assertEqual(bc.text_runs(SIMP, CONV, "native"), ["我们的插件隨着软件"])
+        self.assertEqual(bc.text_runs(SIMP, CONV, "mixed"), ["我們的插件隨著軟體"])
+        self.assertEqual(bc.text_runs(TRAD, CONV, "native"), ["我們的插件隨着軟件"])
 
-    def test_the_wrappers_default_to_the_old_behaviour(self):
-        conv = (*CONV[:2], 1)
-        self.assertEqual(bc.text_runs(TRAD, conv), ["我們的外掛隨著軟體"])
-        self.assertEqual(bc.text_runs(TRAD, conv, trad_tw_phrases=False), ["我們的插件隨著軟件"])
-        self.assertEqual(list(bc.article_sentences(TRAD + "。", conv)), ["我們的外掛隨著軟體"])
-        self.assertEqual(list(bc.article_runs(TRAD + "。", conv)), ["我們的外掛隨著軟體"])
-        self.assertEqual(list(bc.article_runs(TRAD + "。", conv, trad_tw_phrases=False)), ["我們的插件隨著軟件"])
+    def test_the_kind_is_required_and_checked(self):
+        with self.assertRaises(TypeError):
+            bc.text_runs(SIMP, CONV)
+        with self.assertRaises(ValueError):
+            bc.text_runs(SIMP, CONV, "both")
+
+    def test_a_wiki_article_is_a_mixed_input(self):
+        self.assertEqual(list(bc.article_runs(SIMP + "。", CONV)), ["我們的插件隨著軟體"])
+        self.assertEqual(list(bc.article_sentences(TRAD + "。", CONV)), ["我們的插件隨著軟件"])
 
 
 class FakePool:
@@ -92,72 +75,71 @@ class FakePool:
 
 
 class Counting(Base):
-    def test_the_counter_follows_its_setting_and_the_default_is_model_v6(self):
-        for tw, want in ((True, {"我們": 1, "的": 1, "外掛": 1, "隨著": 1, "軟體": 1}), (False, {"我們": 1, "的": 1, "插件": 1, "隨著": 1, "軟件": 1})):
-            with mock.patch.dict(bc._W, {"lex": LEX, "conv": CONV, "mw": None, "expected": False, "guard": None, "trad_tw": tw}):
-                self.assertEqual(dict(bc._count([TRAD + "。"])[0]), want)
-        with mock.patch.dict(bc._W, {"lex": LEX, "conv": CONV, "mw": None, "expected": False, "guard": None}):     # no setting at all: the old behaviour
-            self.assertEqual(dict(bc._count([TRAD + "。"])[0]), {"我們": 1, "的": 1, "外掛": 1, "隨著": 1, "軟體": 1})
-            self.assertEqual(dict(bc._count([SIMP + "。"])[0]), {"我們": 1, "的": 1, "外掛": 1, "隨著": 1, "軟體": 1})
+    def test_a_wiki_count_converts_its_sentences(self):
+        with mock.patch.dict(bc._W, {"lex": LEX, "conv": CONV, "mw": None, "expected": False, "guard": None}):
+            self.assertEqual(dict(bc._count([SIMP + "。"])[0]), {"我們": 1, "的": 1, "插件": 1, "隨著": 1, "軟體": 1})
 
-    def test_build_counts_main_flag_defaults_to_off(self):
-        for argv, want in (([], True), (["--no-trad-tw-phrases"], False)):
-            with tempfile.TemporaryDirectory() as d, mock.patch.object(bc, "OUT", d), mock.patch.object(bc, "load_conv", lambda: CONV), \
-                 mock.patch.object(bc, "articles", lambda limit: iter([TRAD])), mock.patch("multiprocessing.Pool", FakePool), \
-                 mock.patch.object(sys, "argv", ["build_counts.py", "--articles", "1", *argv]), mock.patch.dict(bc._W), contextlib.redirect_stdout(io.StringIO()):
+    def test_build_counts_main_has_no_twphrases_flag(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(bc, "OUT", d), mock.patch.object(bc, "load_conv", lambda: CONV), \
+             mock.patch.object(bc, "articles", lambda limit: iter([TRAD])), mock.patch("multiprocessing.Pool", FakePool), \
+             mock.patch.object(sys, "argv", ["build_counts.py", "--articles", "1", "--no-trad-tw-phrases"]), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
                 bc.main()
-                self.assertEqual(bc._W["trad_tw"], want, argv)
 
-    def test_build_counts_text_flag(self):
-        def counted(*flags):
-            with tempfile.TemporaryDirectory() as d:
-                src, out = os.path.join(d, "s.txt"), os.path.join(d, "o.pkl")
-                open(src, "w", encoding="utf-8").write(TRAD + "\n")
-                init = lambda *a, **k: bc._W.update(lex=LEX, conv=CONV)
-                with mock.patch.object(bc, "_init", init), contextlib.redirect_stdout(io.StringIO()):
-                    bct.main([*flags, out, src])
-                return dict(pickle.load(open(out, "rb"))["uni"])
-        self.assertIn("外掛", counted())                      # default: model-v6 behaviour
-        self.assertNotIn("外掛", counted("--no-trad-tw-phrases"))
-        self.assertIn("插件", counted("--no-trad-tw-phrases"))
+    def counted(self, kind, text):
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "s.txt"), os.path.join(d, "o.pkl")
+            open(src, "w", encoding="utf-8").write(text + "\n")
+            init = lambda *a, **k: bc._W.update(lex=LEX, conv=CONV)
+            with mock.patch.object(bc, "_init", init), contextlib.redirect_stdout(io.StringIO()):
+                bct.main([out, kind, src])
+            return dict(pickle.load(open(out, "rb"))["uni"])
+
+    def test_build_counts_text_native_and_mixed(self):
+        self.assertEqual(self.counted("--native", SIMP), {})                   # a native input is not converted: 软件 etc. do not segment
+        self.assertIn("軟體", self.counted("--mixed", SIMP))
+        self.assertIn("隨着", self.counted("--native", TRAD))                  # kept as written
+        self.assertIn("隨著", self.counted("--mixed", TRAD))
+
+    def test_build_counts_text_needs_a_kind_and_has_no_old_options(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            for argv in (["o.pkl"], ["o.pkl", "src.txt"], ["--no-trad-tw-phrases", "o.pkl", "--native", "src.txt"]):
+                with self.assertRaises(SystemExit):
+                    bct.main(argv)
 
 
 class Guard(Base):
-    """The guard scans the text that is counted (contract 2.2): with the flag its patterns and its scan both use the no-TWPhrases form."""
-    ROW = "|我們喫插件很好用呢|ㄅ\n"
+    """The guard needs no input kind: its patterns hold the sentence as written and converted, and a scanned text is searched in both forms."""
+    ROW = "|我们喫插件很好用呢|ㄅ\n"
 
     def setUp(self):
         super().setUp()
         self.d = tempfile.TemporaryDirectory(); self.addCleanup(self.d.cleanup)
         self.rows = os.path.join(self.d.name, "r.txt")
         open(self.rows, "w", encoding="utf-8").write(self.ROW)
-        self.text = os.path.join(self.d.name, "t.txt")
-        open(self.text, "w", encoding="utf-8").write("今天我們吃插件很好用呢真的\n")
 
-    def patterns(self, **kw):
-        return set(hg.build_matcher([self.rows], CONV, **kw)[1])
+    def hits(self, s):
+        p, out = os.path.join(self.d.name, "t.txt"), io.StringIO()
+        open(p, "w", encoding="utf-8").write(s + "\n")
+        with contextlib.redirect_stdout(out):
+            hg.main(["report", "--rows", self.rows, "--text", p], conv=CONV)
+        return [l for l in out.getvalue().splitlines() if l.startswith(p)]
 
-    def test_patterns_gain_the_form_the_counter_sees_only_with_the_flag(self):
-        counted = bc.fold("我們吃插件很好用呢")                 # glyph layer only
-        self.assertNotIn(counted, self.patterns())            # default: raw and the TWPhrases form
-        self.assertEqual(self.patterns(), {bc.fold("我們喫插件很好用呢"), bc.fold("我們吃外掛很好用呢")})
-        self.assertIn(counted, self.patterns(trad_tw_phrases=False))
+    def test_patterns_are_the_sentence_as_written_and_converted(self):
+        self.assertEqual(set(hg.build_matcher([self.rows], CONV)[1]), {bc.fold("我们喫插件很好用呢"), bc.fold("我們吃插件很好用呢")})
 
-    def test_report_hits_the_counted_text_with_the_flag_and_not_without(self):
-        def hits(*flags):
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                hg.main(["report", "--rows", self.rows, "--text", self.text, *flags], conv=CONV)
-            return [l for l in out.getvalue().splitlines() if l.startswith(self.text)]
-        self.assertEqual(hits(), [f"{self.text}\t1\t1"])                              # the TWPhrases form of the text against the TWPhrases pattern
-        self.assertEqual(hits("--no-trad-tw-phrases"), [f"{self.text}\t1\t1"])         # glyph-only text vs the glyph-only pattern
+    def test_report_finds_a_native_text_and_a_converted_one(self):
+        self.assertEqual(self.hits("今天我们喫插件很好用呢真的")[0].split("\t")[1:], ["1", "1"])    # as written: what a native count holds
+        self.assertEqual(self.hits("今天我們吃插件很好用呢真的")[0].split("\t")[1:], ["1", "1"])    # the converted form: what a mixed count holds
 
-    def test_guard_matcher_takes_the_setting(self):
+    def test_the_removed_flag_is_an_error(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            hg.main(["report", "--rows", self.rows, "--no-trad-tw-phrases"], conv=CONV)
+
+    def test_guard_matcher_takes_no_setting(self):
         with mock.patch.object(bc, "load_conv", lambda: CONV), contextlib.redirect_stdout(io.StringIO()):
-            m_default = bc.guard_matcher([self.rows])
-            m_flag = bc.guard_matcher([self.rows], False)
-        self.assertFalse(m_default.any(bc.fold("我們吃插件很好用呢")))
-        self.assertTrue(m_flag.any(bc.fold("我們吃插件很好用呢")))
+            m = bc.guard_matcher([self.rows])
+        self.assertTrue(m.any(bc.fold("我們吃插件很好用呢")))
 
 
 if __name__ == "__main__":

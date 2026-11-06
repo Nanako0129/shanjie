@@ -99,16 +99,18 @@ class Export(unittest.TestCase):
         self.assertIn("今天去学校", "".join(train).replace("，", ""))                      # exported unconverted (the dump's 学)
         out_txt = os.path.join(self.d.name, "train.txt")
         raws = [r for t, r in pages.items() if not W.is_validation(t)]
-        with mock.patch.object(bc, "load_conv", lambda: CONV), contextlib.redirect_stdout(io.StringIO()):
-            bct.main([os.path.join(self.d.name, "c.pkl"), out_txt])
+        # tw-conv 2.4: only a sentence with a character of set S gets the phrase table, so the stand-in S holds 网 and both spellings of 伙; the export is a mixed input
+        with mock.patch.object(bc, "load_conv", lambda: CONV), mock.patch.object(bc, "TRAD_SIMP_ONLY", set("网伙夥")), contextlib.redirect_stdout(io.StringIO()):
+            bct.main([os.path.join(self.d.name, "c.pkl"), "--mixed", out_txt])
             bc._init(False, False)
             uni, bi, _, runs = bc.count_batch(raws)
         got = pickle.load(open(os.path.join(self.d.name, "c.pkl"), "rb"))
         self.assertGreater(runs, 3)
         self.assertEqual((got["runs"], dict(got["uni"]), dict(got["bi"])), (runs, dict(uni), dict(bi)))
         # a converted export would be converted again by the reader: 一伙人 -> 一夥人 -> 一群人
-        self.assertEqual(bc.convert("一伙人", *CONV), "一夥人")
-        self.assertEqual(bc.convert(bc.convert("一伙人", *CONV), *CONV), "一群人")
+        with mock.patch.object(bc, "TRAD_SIMP_ONLY", set("网伙夥")):
+            self.assertEqual(bc.convert("一伙人", *CONV), "一夥人")
+            self.assertEqual(bc.convert(bc.convert("一伙人", *CONV), *CONV), "一群人")
 
     def test_rows_format_for_validation(self):
         make_dump(self.dump, {"條目3": "{{x}}第一段，有123和ABC。還有二句！\n\n第二段<ref>x</ref>\t與tab", "條目4": "不該在val"})
