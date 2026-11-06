@@ -72,19 +72,22 @@ def read_tw_conv(path=TW_CONV):
     A missing file stops with the command that makes it."""
     if not os.path.isfile(path):
         sys.exit(f"{path} is missing: run experiments/s2/build_tw_conv.py (docs/contracts/tw-conv.md 2.3)")
-    out = {"fold": {}, "char": {}, "phrase": {}, "term": {}}
+    out = {"fold": {}, "char": {}, "phrase": {}, "term": {}, "n": {}}   # "n": the set N (contract 7) as {key: chosen value}, the char rows flagged in column 7
     for line in open(path, encoding="utf-8"):
         if line.startswith("#") or not line.strip():
             continue
-        sec, key, value, status, manual, _ = (line.rstrip("\n").split("\t") + [""] * 6)[:6]
+        sec, key, value, status, manual, _, rare = (line.rstrip("\n").split("\t") + [""] * 7)[:7]
         out[sec][key] = manual.split("@")[0] if manual else (key if sec == "fold" and status != "fold" else value)
+        if rare == "N":
+            out["n"][key] = out[sec][key]
     return out
 
 
 TW_VARIANTS = {}   # TWVariants.txt's first value of every entry (identity rows left out); load_conv() fills it. Only the sets T and the fold candidates come from it
 TRAD_SIMP_ONLY = set()   # set S (contract 2.2): true Simplified characters. Also what the Traditional-sentence path converts and what the corpus cleaners drop
 MARKERS = set()   # set M: keys whose first STCharacters value is not themselves (含 后、于、里、台、床)
-TRAD_ONLY = set()   # set T: Traditional evidence characters (values that are no key, the fold targets, the TWVariants targets)
+TRAD_ONLY = set()   # set T: Traditional evidence characters (values that are no key, the fold targets, the TWVariants targets), minus M (contract 2.2)
+RARE = {}   # set N (contract 7): {key: chosen value} of the keys Taiwan almost never writes (装 痒 苹 价); converted on every path that skips the single-character table
 FOLD = {}   # fold map {X: Y} of tw-conv.tsv (the rows folded by the PTT counts); applied last, to every kind of sentence
 FOLD_TRANS = {}   # str.translate table of FOLD
 TW_PHRASE, TW_MAXP = {}, [1]   # the mainland-term subset of TWPhrases (tw-conv.tsv `term` rows), Simplified sentences only
@@ -101,7 +104,8 @@ def load_conv():
     TW_VARIANTS.clear(); TW_VARIANTS.update(o["twv"])
     TRAD_SIMP_ONLY.clear(); TRAD_SIMP_ONLY.update(S)
     MARKERS.clear(); MARKERS.update(k for k, v in st.items() if v[0] != k)
-    TRAD_ONLY.clear(); TRAD_ONLY.update({c for v in st.values() for x in v for c in x if c not in st} | set(FOLD.values()) | set(o["twv"].values()))
+    TRAD_ONLY.clear(); TRAD_ONLY.update(({c for v in st.values() for x in v for c in x if c not in st} | set(FOLD.values()) | set(o["twv"].values())) - MARKERS)
+    RARE.clear(); RARE.update(tw["n"])
     TW_PHRASE.clear(); TW_PHRASE.update(tw["term"])
     TW_MAXP[0] = max(map(len, TW_PHRASE), default=1)
     phrase = {**o["stp"], **tw["phrase"]}
@@ -161,14 +165,37 @@ def fold_tw(text):
     return text.translate(FOLD_TRANS)
 
 
+_CUT = {}   # (id(table), what) → (table, its cut-down copy); the table is kept so its id is never reused by another object
+
+
+def _cut(table, what, keep):
+    hit = _CUT.get((id(table), what))
+    if hit is None or hit[0] is not table or hit[2] != (len(table), len(TRAD_SIMP_ONLY), len(RARE)):
+        hit = _CUT[(id(table), what)] = (table, keep(), (len(table), len(TRAD_SIMP_ONLY), len(RARE)))
+    return hit[1]
+
+
+def _s_phrases(phrase):
+    """The entries of `phrase` whose key has a character of S."""
+    return _cut(phrase, "s", lambda: {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY for c in k)})
+
+
+def _only(char, kind):
+    """`char` cut down to the characters a path may convert: S and N on the Traditional path, N on the marker-only path (cached per table)."""
+    return _cut(char, kind, lambda: {c: char[c] for c in (TRAD_SIMP_ONLY | RARE.keys() if kind == "trad" else RARE.keys()) if c in char})
+
+
 def convert(text, phrase, char, maxp):
     """The `mixed` conversion (contract 2.4); a `native` input is never given to it. simp: STPhrases longest first (chosen values), the remaining
-    characters from `char`, the mainland-term subset of TWPhrases longest first, fold. marker (only marker characters): the phrases and terms, no
-    single character, fold. trad (also Traditional with a few Simplified characters): only the characters of S, fold; no phrase table at all."""
+    characters from `char`, the mainland-term subset of TWPhrases longest first, fold. marker (only marker characters): the phrases, then only the
+    characters of N, the terms, fold. trad (also Traditional with a few Simplified characters): the phrases whose key has a character of S
+    (longest first), then the characters of S and N not covered by one, fold; no other phrase, no terms."""
     kind = sentence_kind(text)
     if kind == "trad":
-        return "".join(char.get(c, c) if c in TRAD_SIMP_ONLY else c for c in text).translate(FOLD_TRANS)
-    text = _longest(text, phrase, maxp, char if kind == "simp" else None)
+        s_phrase = _s_phrases(phrase)
+        text = _longest(text, s_phrase, max(map(len, s_phrase)), _only(char, "trad"))
+        return text.translate(FOLD_TRANS)
+    text = _longest(text, phrase, maxp, char if kind == "simp" else _only(char, "marker"))
     return _longest(text, TW_PHRASE, TW_MAXP[0]).translate(FOLD_TRANS)
 
 

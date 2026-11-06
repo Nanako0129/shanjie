@@ -12,7 +12,9 @@ file holds characters, words and counts, never a sentence. The rules are fixed i
          candidates = OpenCC's value with each such position varied over its row's candidates; same decision, a `hold` follows the char row
          only where OpenCC's phrase value uses the key's first value
   term   the keys of mainland-terms.txt with their TWPhrases value
-Columns: section, key, value, status, manual, counts. `manual` ("value@date", the date of the decisions.md entry) beats the rule and is kept on rebuild.
+  N      (contract 7) the char rows whose chosen value is not the key, whose key has fewer than 30 PTT occurrences and fewer than 1/20 of the chosen
+         value's (folded) occurrences: the keys Taiwan almost never writes (装 痒 苹 价). Marked `N` in column 7 of the char row; --review lists them
+Columns: section, key, value, status, manual, counts, and `N` for the rows of the set N. `manual` ("value@date", the date of the decisions.md entry) beats the rule and is kept on rebuild.
 """
 import argparse
 import collections
@@ -32,6 +34,7 @@ TABLE = os.path.join(HERE, "tw-conv.tsv")
 TERMS = os.path.join(HERE, "mainland-terms.txt")
 PTT = os.path.expanduser("~/.cache/shanjie/sj7/ptt-clean")
 SECTIONS = ("fold", "char", "phrase", "term")
+RARE_MAX = 30                    # contract 7: a key under this many PTT occurrences (and under 1/20 of the chosen value's) is in N; same bar as the fold rows
 FOLD_RATIO, FOLD_MIN = 20, 30    # contract 2.3(3): folding ignores context, so the bar is 20x (not 2x): 泄 vs 洩 is 14x and 排泄 needs 泄
 PICK_RATIO, PICK_MIN = 2, 30     # contract 2.3(1)
 # The previous VARIANTS table of build_counts (it stays there only as part of MERGE); the other fold candidates are TWVariants.txt's first values.
@@ -70,21 +73,21 @@ def sentences(files, chunk_chars=1 << 24):
 
 
 def read_table(path=TABLE):
-    """{section: {key: (value, status, manual, counts)}}; the comment lines are skipped. Missing file -> empty."""
+    """{section: {key: (value, status, manual, counts, rare)}}; rare is `N` or empty (column 7). The comment lines are skipped. Missing file -> empty."""
     t = {s: {} for s in SECTIONS}
     if os.path.isfile(path):
         for line in open(path, encoding="utf-8"):
             if line.startswith("#") or not line.strip():
                 continue
-            sec, key, value, status, manual, counts = (line.rstrip("\n").split("\t") + [""] * 6)[:6]
-            t[sec][key] = (value, status, manual, counts)
+            sec, key, value, status, manual, counts, rare = (line.rstrip("\n").split("\t") + [""] * 7)[:7]
+            t[sec][key] = (value, status, manual, counts, rare)
     return t
 
 
 def fold_of(table):
     """The fold map {X: Y} of a table: a fold row whose status is `fold`, or whose manual value differs from X."""
     out = {}
-    for x, (y, status, manual, _) in table["fold"].items():
+    for x, (y, status, manual, *_) in table["fold"].items():
         y = manual.split("@")[0] if manual else (y if status == "fold" else x)
         if y != x:
             out[x] = y
@@ -131,7 +134,7 @@ def build_rows(files, old):
     F = {x: r[0] for x, r in fold_rows.items() if r[1] == "fold"}
     if any(y in F for y in F.values()):
         die("a fold target is itself folded: " + " ".join(y for y in F.values() if y in F))
-    man = lambda sec, key: old[sec].get(key, ("", "", "", ""))[2]
+    man = lambda sec, key: old[sec].get(key, ("",) * 5)[2]
     for x, (y, status, c) in fold_rows.items():     # a manual fold decision changes the fold map the counting uses
         m = man("fold", x)
         if m:
@@ -157,8 +160,10 @@ def build_rows(files, old):
             value, status = pick(cands, fc, first)
             char_rows[k] = (value, status, fmt_counts(cands, fc))
             row_cands[k] = (cands, first)
-    log(f"char rows: {len(char_rows)}", t0)
     chosen = lambda k: (man("char", k).split("@")[0] if man("char", k) else char_rows[k][0])
+    rare = {k for k in char_rows if chosen(k) != k and cc[k] < RARE_MAX and FOLD_RATIO * cc[k] < fc[chosen(k)]}
+    char_rows = {k: (*r, "N" if k in rare else "") for k, r in char_rows.items()}
+    log(f"char rows: {len(char_rows)}, N: {len(rare)}", t0)
     trig = {k for k in char_rows if k in MEDIAWIKI or chosen(k) != row_cands[k][1]}
     # phrases: candidates, then one pass over the folded text
     phrase_cands = {}
@@ -228,12 +233,12 @@ def write_table(rows, files, path):
     out = ["# tw-conv.tsv: docs/contracts/tw-conv.md section 2.3. Built by experiments/s2/build_tw_conv.py from the PTT snapshot (characters, words and counts only).",
            *(f"# input {os.path.basename(f)} sha256 {sha256_file(f)}" for f in files),
            f"# tool commit {commit}",
-           "# columns: section, key, value, status, manual, counts. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule."]
+           "# columns: section, key, value, status, manual, counts[, N]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7."]
     for sec in SECTIONS:
         for k in sorted(rows[sec]):
             r = rows[sec][k]
-            value, status, counts = r[0], r[1], (r[2] if len(r) > 2 else "")
-            out.append("\t".join((sec, k, value, status, old[sec].get(k, ("",) * 4)[2], counts)))
+            value, status, counts, rare = r[0], r[1], (r[2] if len(r) > 2 else ""), (r[3] if len(r) > 3 else "")
+            out.append("\t".join((sec, k, value, status, old[sec].get(k, ("",) * 5)[2], counts) + ((rare,) if rare else ())))
     tmp = path + ".tmp"
     open(tmp, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
     os.replace(tmp, path)
@@ -253,13 +258,16 @@ def review(table_path):
     fold = lambda s: "".join(F.get(c, c) for c in s)
     stp = bc.read_opencc()["stp"]
     lines = []
-    for k, (value, status, manual, counts) in sorted(t["char"].items()):
+    for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
         if status == "hold" or value != fold(st[k][0]):
             lines.append(("char", k, value, status, manual, counts))
-    for k, (value, status, manual, counts) in sorted(t["phrase"].items()):
+    for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
+        if rare:
+            lines.append(("N", k, value, status, manual, counts))
+    for k, (value, status, manual, counts, rare) in sorted(t["phrase"].items()):
         if value != fold(stp[k]) or (status == "hold" and any(int(c.rsplit(":", 1)[1]) for c in counts.split())):
             lines.append(("phrase", k, value, status, manual, counts))
-    for k, (value, status, manual, counts) in sorted(t["fold"].items()):
+    for k, (value, status, manual, counts, rare) in sorted(t["fold"].items()):
         if status == "nofold":
             lines.append(("fold", k, value, status, manual, counts))
     n = collections.Counter(l[0] for l in lines)
