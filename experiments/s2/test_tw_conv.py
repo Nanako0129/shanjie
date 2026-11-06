@@ -6,7 +6,7 @@ OpenCC files in ~/.cache/shanjie/sources/opencc (hash-checked by build_counts) a
   test_a3_*  `--native` is counted as written (build_counts_text.py and derisk-1015/e1/count.py)
   test_a4_*  tw-conv-simp.tsv (Simplified sentence -> its Taiwan writing) and the coverage of the table's changed rows by it
   test_table_*, test_builder_*  the table follows the fixed rules of 2.3 (checked from its own counts column)
-mutate_tw_conv.py runs the mutations M1-M8 against this file."""
+mutate_tw_conv.py runs the mutations M1-M11 against this file."""
 import contextlib
 import importlib.util
 import io
@@ -33,14 +33,16 @@ DEV = [os.path.join(ROOT, "eval", "dev", n) for n in ("user-typing.txt", "user-r
 NATIVE = ["爲了你好", "他着急了", "衣服溼了", "這個程序有問題", "安裝插件", "这个程序和插件"]
 
 
-# Taiwan sentences made of marker characters only (里 后 ...): the dev files hold one (奇希里斯), and STPhrases lists 里斯 as a phrase of its own, so a
-# mutation that gives such a sentence the single-character table (M7) is only caught by sentences whose marker is not inside a phrase.
-MARKER_ONLY = ["我住在里", "里的人", "他的后", "里有人"]
+# A marker-only Simplified sentence that no STPhrases key covers (装 is in N, so it is converted; contract 7): assertion 4 row, kind and phrase check below.
+NO_PHRASE = ("我装好了", "我裝好了")
+MIXED = "這個國家的經濟發展关系着我們"   # a Traditional sentence with a few Simplified characters (contract 7: the S-phrases apply)
+NOT_RARE = "后准于几里台干"   # marker characters Taiwan writes as they are (contract 7): none of them may be in N
 
 
 def taiwan_sentences():
-    """The context and sentence fields of the two dev files, MARKER_ONLY, and the fixture lines (comments and blanks left out)."""
-    out = list(MARKER_ONLY)
+    """The context and sentence fields of the two dev files and the fixture lines (comments and blanks left out; the fixture also holds the marker-only
+    Taiwan sentences 我住在里 …, whose marker is not inside a phrase, so that M7 is caught)."""
+    out = []
     for p in DEV:
         for line in open(p, encoding="utf-8"):
             f = line.rstrip("\n").split("|")
@@ -156,6 +158,27 @@ class Assertion4(Base):
         self.assertFalse(missing, f"{len(missing)} of {len(need)} changed rows have no Simplified sentence in tw-conv-simp.tsv (first: {missing[:8]})")
 
 
+class Kinds(Base):
+    """Contract 7: the kind a sentence is judged to be, and the set N."""
+    def test_a4_sentence_kinds(self):
+        self.assertEqual(bc.sentence_kind(MIXED), "trad")           # 么 and 关系着 mixed into Traditional text
+        self.assertEqual(bc.sentence_kind("你在想什么"), "marker")    # 么 is a marker character, not Traditional evidence
+        s, want = NO_PHRASE
+        self.assertEqual(bc.sentence_kind(s), "marker")
+        self.assertEqual(self.ck.convert(s), want)
+        self.assertIn("装", bc.RARE)
+        self.assertEqual([k for k in bc.read_opencc()["stp"] if "装" in k and k in s], [], "a STPhrases key covers 装: the row would not test N")
+
+    def test_a4_the_new_rows_are_in_the_table(self):
+        have = dict(simp_rows())
+        for s, want in (("我们住在街里", "我們住在街裡"), ("你在想什么", "你在想什麼"), (MIXED, "這個國家的經濟發展關係著我們"), NO_PHRASE):
+            self.assertEqual(have.get(s), want, s)
+
+    def test_n_excludes_the_marker_characters_taiwan_writes(self):
+        self.assertFalse([c for c in NOT_RARE if c in bc.RARE], "a character Taiwan writes as it is is in N")
+        self.assertTrue(bc.RARE, "N is empty: the table has no `N` column")
+
+
 class Table(unittest.TestCase):
     """tw-conv.tsv follows the fixed rules of contract 2.3, read back from its own counts column (manual rows excluded)."""
     @classmethod
@@ -167,13 +190,13 @@ class Table(unittest.TestCase):
         return [(w, int(n)) for w, n in (x.rsplit(":", 1) for x in s.split())]
 
     def test_table_fold_rows(self):
-        for x, (y, status, manual, counts) in self.t["fold"].items():
+        for x, (y, status, manual, counts, _) in self.t["fold"].items():
             c = dict(self.counts(counts))
             self.assertEqual(status == "fold", c[y] >= btc.FOLD_MIN and c[y] >= btc.FOLD_RATIO * c[x], x)
 
     def test_table_char_and_phrase_rows(self):
         for sec in ("char", "phrase"):
-            for k, (value, status, manual, counts) in self.t[sec].items():
+            for k, (value, status, manual, counts, _) in self.t[sec].items():
                 if manual:
                     continue
                 c = self.counts(counts)
