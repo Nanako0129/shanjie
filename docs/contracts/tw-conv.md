@@ -1,6 +1,6 @@
 # TW-CONV：語料轉換的根因修正（原生繁體不轉、簡體句用台灣用量決定）
 
-狀態：草稿（2026-11-06），等 plan-verifier。維護者 2026-11-06 選「照這個方向寫契約」：(1) 原本就是繁體的語料不再轉換；(2) 含簡體來源的簡體句用附台灣用量證據的轉換表，取代 OpenCC 第一選擇與八張手寫例外表；(3) 修好判斷簡體的程式；(4) 一道永久守門測試。在下一次重建通語（PTT 抓完整後的那一次）之前完成。顧問：Fable、Astra、Argon（2026-11-06，三位結論一致）。
+狀態：**修訂一**（2026-11-06）：plan-verifier 第一次 REVISE 的六項照最小修改（台灣地名保護條件留著、簡體輸入的 fixture 與斷言 4、詞組 hold 用單字列的選定值並加停止條件、§2.5 補齊呼叫者與共用表、31 個 MediaWiki 值寫進契約、拿掉私人路徑），另補 main 自己找到的漏洞：OpenCC 只有一個值、但鍵本身就是台灣字形的字（灶→竈）也進單字列。草稿 5d7d6ddf。維護者 2026-11-06 選「照這個方向寫契約」：(1) 原本就是繁體的語料不再轉換；(2) 含簡體來源的簡體句用附台灣用量證據的轉換表，取代 OpenCC 第一選擇與八張手寫例外表；(3) 修好判斷簡體的程式；(4) 一道永久守門測試。在下一次重建通語（PTT 抓完整後的那一次）之前完成。顧問：Fable、Astra、Argon（2026-11-06，三位結論一致）。
 
 ## 1. 為什麼
 
@@ -38,14 +38,16 @@
 
 由 `experiments/s2/build_tw_conv.py` 產生，進版控。證據只用台灣的實際寫法：PTT 快照 `ptt-clean` 的 `body.tsv`＋`push.tsv` 全部（2026-10-25 那一份，檔頭記兩個檔的 SHA-256 與工具 commit）。檔裡只有字、詞與次數，不放句子。四段，判定規則在任何次數出來之前寫死如下：
 
-1. **單字（`char`）**：鍵＝`STCharacters.txt` 有兩個以上對照的鍵（276 個），加上 OpenCC 與 MediaWiki zh-tw 單字轉換不同的 31 個鍵（冲 凄 勋 卤 吣 哗 喂 埙 棂 湿 牦 瘘 硷 签 艳 袅 账 鉴 钚 钫 锎 锝 锨 锫 锿 镅 镎 镥 鹇 鹚 𩙧；常數寫在工具裡，對照日期 2026-11-06）。候選＝OpenCC 的對照，加上 MediaWiki 的值。
-   - 第一名的次數 ≥ 第二名的 2 倍，而且 ≥ 30：選第一名（狀態 `evidence`）。
-   - 否則選 OpenCC 第一個對照（狀態 `hold`）。
-2. **詞組（`phrase`）**：`STPhrases.txt` 裡、鍵含有某個單字列的鍵，而且這個單字列是 31 個鍵之一或選定值不是 OpenCC 第一個對照的條目（現在估 821 條以上）。候選＝OpenCC 的值，加上把那個位置換成該鍵其他候選字的寫法；整串在 PTT 的次數，規則同上（2 倍、≥ 30；否則留 OpenCC 的值）。例：风湿 的候選 風溼／風濕，抽签 的候選 抽籤／抽簽。
+1. **單字（`char`）**：鍵有三類，候選是聯集：
+   - `STCharacters.txt` 有兩個以上對照的鍵（276 個）：候選＝它的對照。
+   - 鍵不在 S、而且對照不含自己的鍵（鍵本身出現在詞庫兩字以上的詞，是台灣字形；例：灶→竈、床→牀、秘→祕、群→羣、吃→喫、粽→糉）：候選＝對照加上鍵本身。
+   - OpenCC 與 MediaWiki zh-tw 單字轉換不同的 31 個鍵：候選＝OpenCC 的對照加上 MediaWiki 的值。MediaWiki 的值（main 2026-11-06 對照 MediaWiki `ZhConversion.php` 的 zh-tw 表，寫成工具裡的常數，工具不 import zhconv_rs、不連網）：冲→沖（OpenCC 衝）、凄→淒（悽）、勋→勛（勳）、卤→鹵（滷）、吣→唚（吣）、哗→嘩（譁）、喂→餵（喂）、埙→塤（壎）、棂→櫺（欞）、湿→濕（溼）、牦→氂（犛）、瘘→瘺（瘻）、硷→鹼（硷）、签→簽（籤）、艳→艷（豔）、袅→裊（嫋）、账→帳（賬）、鉴→鑒（鑑）、钚→鈽（鈈）、钫→鍅（鈁）、锎→鉲（鐦）、锝→鎝（鍀）、锨→杴（鍁）、锫→鉳（錇）、锿→鑀（鎄）、镅→鋂（鎇）、镎→錼（鎿）、镥→鎦（鑥）、鹇→鷴（鷳）、鹚→鶿（鷀）、𩙧→𩗡（䬞）。其他鍵不用 MediaWiki 的值。
+   - 判定：第一名的次數 ≥ 第二名的 2 倍，而且 ≥ 30：選第一名（狀態 `evidence`）。否則選 OpenCC 第一個對照（狀態 `hold`）。
+2. **詞組（`phrase`）**：`STPhrases.txt` 裡、鍵含有某個單字列的鍵，而且這個單字列是 31 個鍵之一或選定值不是 OpenCC 第一個對照的條目（現在估 821 條以上）。候選＝OpenCC 的值，加上把那個位置換成該鍵其他候選字的寫法；整串在 PTT 的次數，規則同上（2 倍、≥ 30 → `evidence`）。不到門檻時（`hold`）：那個位置換成單字列的選定值；單字列本身也是 `hold` 才留 OpenCC 的值。例：风湿 的候選 風溼／風濕，PTT 不夠就跟著 湿 的單字列；抽签 的候選 抽籤／抽簽。
 3. **摺疊（`fold`）**：候選＝現行 `VARIANTS` 與 `TWVariants.txt`（第一個值）的每一對 X→Y。Y 的次數 ≥ X 的 20 倍、而且 Y ≥ 30 才摺疊；其餘標 `nofold`、不摺疊。用 20 倍（不是 2 倍）是因為摺疊不看上下文：泄→洩 在抽樣是 36／513（14 倍），排泄 的 泄 是正確寫法，這種要留著。
 4. **台灣用詞（`tw_phrase`）**：簡體句才套的 `TWPhrases.txt` 子集＝SJ-LM-7 §2.7 量過的大陸用詞清單（331 個，PTT 用量不到台灣說法 10% 的；現在只在維護者本機快取），原樣複製進 `experiments/s2/mainland-terms.txt`，檔頭照抄並記 SHA-256。
 
-- **給維護者看的列**：選定值不是 OpenCC 第一個對照的列，以及有任何次數的 `hold` 列、全部 `nofold` 列。`build_tw_conv.py --review` 印成一張表（鍵、各候選與次數、規則給的結果）。維護者逐列決定時，結果寫進第五欄 `manual`（附 `decisions.md` 的日期），`manual` 優先於規則；表重產時保留 `manual` 欄。
+- **給維護者看的列**：選定值不是 OpenCC 第一個對照的列（含詞組 `hold` 跟著單字列換掉的），單字的 `hold` 列（不論次數）、有任何次數的詞組 `hold` 列、全部 `nofold` 列。`build_tw_conv.py --review` 印成一張表（鍵、各候選與次數、規則給的結果）。維護者逐列決定時，結果寫進第五欄 `manual`（附 `decisions.md` 的日期），`manual` 優先於規則；表重產時保留 `manual` 欄。
 
 ### 2.4 轉換的順序（`mixed`）
 
@@ -61,24 +63,42 @@
   - 拿掉參數 `trad_tw_phrases`、`simp_tw_keys`，以及只為它們存在的程式：`_simp_tw_table`、`_SIMP_TW`、`trad_tw_phrases` 在 `_init`／`article_runs`／`text_runs`／`article_sentences`／`guard_matcher` 的傳遞。
   - 拿掉 `TW_VARIANTS_EXCLUDED`、`TRAD_KEEP`、`TAIWAN_KEEP`、`TW_CHAR`、`PROTECT_KEYS`、`PROTECT_KEYS_TRAD`、`PROTECT`、`PROTECT_TRAD`、`POST_SIMP`、`POST_TRAD`；`VARIANTS` 只留給 `MERGE` 用。
   - **`MERGE` 不變**（逐條和現在相同的 18 條，寫成字面值）：它是 `build_lm.py` 合併異體計數與保留集比對用的，不是轉換；改它會改到模型，留給溼濕排序那一片。
-- 入口照 §2.1 給種類：`build_counts.py`（維基＝`mixed`）、`build_counts_text.py`（新增 `--native PATH`／`--mixed PATH`，位置參數拿掉）、`build_tune.py`（CV zh-TW＝`native`、Tatoeba 與維基＝`mixed`）、`experiments/s7a-tinylm/prep.py`（同上）、`tools/build_digits.py`、`tools/holdout_guard.py`（比對形式＝原文與 `convert()` 結果，各做 `fold()`）、`tools/build_overlay.py`、`tools/build_names.py`、`experiments/names/build_packs.py`、`tools/build_english_next.py`、`tools/it_wiki_counts.py`。
-- 拿掉現在沒有意義的旗標（傳了要報錯，不默默不做事）：`--no-trad-tw-phrases`、`--tune-no-trad-tw-phrases`、`--cv-no-trad-tw-phrases`、`--simp-tw-keys`、`--train-only-new-conv`。舊實驗的重現指令照研究紀錄裡的 commit 雜湊回到舊版跑。
-- `tools/build_names.py` 為了 `is_simplified` 誤判「台糖」加的 `TRAD_SIMP_ONLY` 條件，改用 S 之後會多餘：拿掉，`test_build_names.py` 的「台糖」列留著當斷言。
-- 這些目錄以外的舊實驗（`experiments/s2n`、`s2w`、`derisk-1015`、`reading-aware`、`p1a-confusion`、`s7f-corpus`、`digits`）不改；它們呼叫 `convert(text, *conv)` 的寫法仍可用，行為跟著新轉換。
+- **其他程式讀的共用表**：
+  - `TRAD_SIMP_ONLY` 改成 S（§2.2）。讀它的：`experiments/sj-lm-7/ptt_clean.py`、`p2clean.py`、`clean_subs.py`（丟掉含簡體字的句子）、`tools/build_overlay.py`、`tools/build_names.py`、`experiments/s7f-corpus/clean.py`、`experiments/e2-chateval/build_wikitypo.py`。清洗結果因此改變的句數在 §4.4 報。
+  - `experiments/s2w/mwconv.py`（`build_counts.py --mw`、`build_tune.py --mw` 用）的最後一層原本是 `PROTECT_TRAD`＋`POST_TRAD`，改成 §2.3 的摺疊列。
+  - `TW_VARIANTS` 改成 `TWVariants.txt` 每條取第一個值的完整對照（不再扣掉例外），只當 §2.2 的 T 與 §2.3 摺疊列的候選來源。`tools/build_overlay.py` 原本用 `MERGE`＋`TW_VARIANTS` 摺疊疊加層的詞，改成 `MERGE`＋§2.3 的摺疊列。
+- **入口與輸入種類**（§2.1；每份輸入一個種類，沒給就報錯）：
+
+| 程式 | 輸入 → 種類 |
+|---|---|
+| `experiments/s2/build_counts.py` | 維基 → `mixed` |
+| `experiments/s2/build_counts_text.py` | 新增 `--native PATH`、`--mixed PATH`（可重複），位置參數拿掉 |
+| `experiments/s2/build_tune.py` | CV zh-TW → `native`；Tatoeba、維基 → `mixed`；寫出的 `colloquial-train.txt` 之後一律當 `native` |
+| `experiments/s7a-tinylm/prep.py` | `runs`：維基 → `mixed`，`--coll`、`--synth` → `native`；`text`：新增必填的 `--kind native\|mixed` |
+| `experiments/sj-lm-7/wiki_text.py` | 維基 → `mixed` |
+| `tools/build_digits.py` | 維基 → `mixed`，`--colloquial` → `native` |
+| `tools/holdout_guard.py` | 比對形式＝原文與 `convert()` 結果，各做 `fold()` |
+| `tools/build_overlay.py`、`tools/build_names.py`、`experiments/names/build_packs.py`、`tools/build_english_next.py`、`tools/it_wiki_counts.py` | 維基與維基詞典 → `mixed` |
+
+- **拿掉現在沒有意義的旗標**（傳了要報錯，不默默不做事）：`--no-trad-tw-phrases`（`build_counts.py`、`build_counts_text.py`、`prep.py`、`wiki_text.py`）、`--tune-no-trad-tw-phrases`、`--cv-no-trad-tw-phrases`、`--train-only-new-conv`（`build_tune.py`）、`--simp-tw-keys`、`--changed-flags`（`prep.py`；後者是比較新舊兩種 TWPhrases 設定用的）。`prep.py` 的 `EXPECTED_NO_TW` 拿掉；`EXPECTED` 的輸入雜湊不在這一片改，重建時換成新產生的檔。`experiments/s2/trace_tune_sources.py` 的 TWPhrases 選項一併拿掉。舊實驗的重現指令照研究紀錄裡的 commit 雜湊回到舊版跑。
+- `tools/build_names.py` 的保護條件留著，只把 `TRAD_SIMP_ONLY` 換成 S：`is_simplified(name) and any(c in S for c in name)`。§2.2 的第二條（只有標記字）仍會把 台糖、台北、后里 判成簡體，這個條件擋住它們。
+- **跟著改的測試**（只改到被拿掉或改名的參數、表與旗標，預期值的改動照 §4.5 逐條列）：`experiments/s2/test_convert.py`、`test_trad_phrases.py`、`test_build_tune.py`、`test_trace_tune_sources.py`、`test_extra_lexicon.py`，`experiments/e2-chateval/test_e2.py`，`experiments/sj-lm-7/test_g0v_clean.py`，`experiments/s7a-tinylm/test_prep.py`，`experiments/sj-lm-7/test_clean_subs.py`、`test_ptt_clean.py`、`test_wikinews.py`，`experiments/p1a-confusion/test_p1a.py`（`build_counts_text` 改用 `--mixed`），`experiments/s7f-corpus/test_s7f.py`，`tools/test_holdout_guard.py`、`test_build_overlay.py`、`test_build_names.py`、`test_build_digits.py`。
+- **不改、會壞的舊實驗**（只留作歷史紀錄，不在 `make test-python` 裡）：`experiments/derisk-1015/e1/count.py`（傳 `trad_tw_phrases=`）與它的測試、`experiments/s2n/mutations.py`、`experiments/s2f/check_f2.py`（檢查 S2f 的保護詞）、`experiments/s2w/test_mw.py`（要 zhconv-rs 的 venv，斷言 S2f 的最後一層）。其餘舊實驗目錄（`s2n`、`s2w`、`reading-aware`、`digits`、`derisk-1015/e4`）呼叫 `convert(text, *conv)`，照常可跑、行為跟著新轉換；實作時用 grep 確認沒有別的呼叫者傳被拿掉的參數，有就列進這一條。
 
 ## 3. 永久守門 `experiments/s2/test_tw_conv.py`
 
 本機的 `make test-python` 執行（`experiments/` 的測試只在本機）；一秒級，不需要語料。
 
-- **台灣句子**：`eval/dev/user-typing.txt`、`eval/dev/user-reported.txt` 的句子欄與前文欄，加上 main 寫的 `experiments/s2/tw-conv-fixture.txt`：§2.3 每一條 `evidence` 列與 `fold` 列至少一句用到它的台灣寫法（保濕、帳號、簽名、抽籤、衝刺、沖泡、餵食、鹼性…），以及顧問與事故的句子（在床上看程序、為裡面的群眾提供支持、今天去台南玩、管理員權限、插件、吃不出來、排泄物、竈門炭治郎）。
+- **台灣句子**（第 1、2 條用）：`eval/dev/user-typing.txt`、`eval/dev/user-reported.txt` 的句子欄與前文欄，加上 main 寫的 `experiments/s2/tw-conv-fixture.txt`：§2.3 每一條 `evidence` 列與 `fold` 列至少一句用到它的台灣寫法（保濕、帳號、簽名、抽籤、衝刺、沖泡、餵食、鹼性…），以及顧問與事故的句子（在床上看程序、為裡面的群眾提供支持、今天去台南玩、管理員權限、插件、吃不出來、排泄物、竈門炭治郎）。
 - **斷言**：
   1. **不變**：每句 s，`convert(s, *conv) == fold_tw(s)`（`fold_tw` 只套 §2.3 的摺疊列）。不論它被判成哪一種句子都要成立。
   2. **回程**：s 用 `STCharacters.txt` 反查成簡體 s′（一個繁體字只對應一個不同於自己的鍵時才換，其餘照留），`convert(s′, *conv)` 必須等於 `fold_tw(s)`；不同的位置，（預期字, 得到字）這一對必須列在 `experiments/s2/tw-conv-ambiguous.tsv`（真正一對多、轉不回來的字對，例如 乾／幹、髮／發、麵／面；每列附理由）。清單外的字對一律失敗；清單的列數和內容進版控，新增要改檔並寫理由。
   3. **native 原樣**：`build_counts_text.py` 用 `--native` 讀一份含 爲、着、溼、程序、插件 的小檔，計數裡這些字串照原樣出現。
+  4. **簡體輸入**：`experiments/s2/tw-conv-simp.tsv`（main 寫，每列 `簡體句<TAB>預期的台灣寫法`），每列 `convert(簡體句, *conv) == 預期`。涵蓋：31 個鍵每個至少一列，以及 `tw-conv.tsv` 裡選定值不是 OpenCC 第一個對照的每一條單字列與詞組列（例：湿度→濕度、保湿→保濕、风湿病→風濕病、账号→帳號、转账→轉帳、签名→簽名、抽签→抽籤、厨房的灶→廚房的灶）。涵蓋本身也是斷言：表裡有這種列、fixture 卻沒有含那個鍵的句子，就失敗（表重產後 fixture 要跟著補）。
 - **突變**（`experiments/s2/mutate_tw_conv.py`，每項都要讓上面某一條失敗，報告列在 PR）：
   - M1 繁體句也套整張 `TWPhrases.txt` → 第 1 條失敗（權限→許可權、插件→外掛）。
   - M2 `is_simplified` 改回現行版本，而且簡體路徑套整張 `TWPhrases.txt` → 第 1 條失敗（在床上看程序→程式）。
-  - M3 單字列改回 OpenCC 第一個對照 → 第 2 條失敗（濕→湿→溼、帳→账→賬）。
+  - M3 單字列與詞組列改回 OpenCC 的值 → 第 4 條失敗（湿度→溼度、账号→賬號）。
   - M4 `build_counts_text.py` 的 `--native` 改成走 `mixed` → 第 3 條失敗。
   - M5 拿掉摺疊 → 守門裡一條 `mixed` 的例子（「隨着時間他説」→「隨著時間他說」）失敗。
 - **整份語料的版本**：`experiments/s2/tw_conv_guard.py FILE...` 對每一句做第 1、2 條，報不合的句數、字對與次數（不印句子）。下一次重建的遠端腳本第一步對整份 PTT 快照跑它，第 1 條不合超過 0.1% 或第 2 條出現清單外的字對就 STOP（寫進那一片的契約）。
@@ -89,18 +109,18 @@
 
 1. **守門**：`test_tw_conv.py` 全過；M1–M5 每一項都讓指定的斷言失敗。`tw-conv-ambiguous.tsv` 不超過 40 列。
 2. **轉換表**：`build_tw_conv.py` 在 Mac 單程序跑完整份 PTT 快照，記秒數；各段的列數與狀態分布；`--review` 的表交給維護者。
-3. **維基前 2,000 篇，現行對新版**（Mac，`.agent-local/scripts/opencc/measure_wiki.py` 的方法）：
-   - 31 個鍵各自在簡體句轉出的字（溼 381、賬 77 這些數字的新版）。
+3. **維基前 2,000 篇，現行對新版**（Mac 單程序）。方法：`articles(2000)` 的每篇經 `article_text`、`SENT` 切句；句中有任何一個「現行 `load_conv()` 回傳的字表的鍵、而且不出現在 `mcbpmf-data.txt` 任何一條（含單字條目）」的字，就算簡體句（這是 §1 量基準時的定義，和 §2.2 的 S 不同，兩版都用它分組）；「現行」＝這個分支的起點 `e38b8827` 的 `build_counts.py`。每句各用現行 `convert()`（`trad_tw_phrases=False`，SJ-LM-7 的計數設定）與新版 `convert()` 轉，數輸出裡各字的次數，依簡體句、繁體句分開。現行的基準：溼 381／18、賬 77／16。
+   - 31 個鍵與每條單字 `evidence` 列：選定值與被淘汰的字各自在簡體句轉出的次數。
    - 判斷不同的句數（現行判簡體、新版判繁體，以及反過來）；各用 `random.Random(20261106)` 抽 50 句，main 逐句看新版輸出是不是正確的台灣寫法，判讀寫進研究紀錄（數字與字對）。
    - 計數用的漢字總數，新版對現行。
    - 2,000 篇轉換的牆鐘秒數，新版對現行。
-4. **原生來源**（PTT 內文、推文、g0v，各 2 萬句抽樣）：新版判成簡體句的比例；`mixed` 路徑作用在這些句子上和 `fold_tw` 不同的句數。
+4. **原生來源**（PTT 內文、推文、g0v，各 2 萬句抽樣；字幕同樣抽 2 萬句）：新版判成簡體句的比例；`mixed` 路徑作用在這些句子上和 `fold_tw` 不同的句數；`TRAD_SIMP_ONLY` 換成 S 之後，`ptt_clean.py` 與 `clean_subs.py` 的簡體字篩選在這些抽樣上多丟、少丟的句數（只報數字與字）。
 5. **既有測試**：`make test-python` 全綠；`experiments/s2`、`experiments/s7a-tinylm`、`experiments/sj-lm-7` 的測試全綠。因為新轉換而改的預期值逐條列在 PR，每條對到本契約的一條規則（例：`test_convert.py` 的「管理员权限」→「管理員權限」，因為 權限 不在大陸用詞清單）。
 6. **疊加層**：`build_overlay.py` 用新轉換重產到暫存目錄，和現行 `data/lexicon/overlay-add.tsv` 的差異列（例：賬號、轉賬）報在 PR；`data/` 不改。
 
 ## 5. 停止條件、預算、範圍外
 
-- **停止條件**：任何一項突變沒被抓到；`tw-conv-ambiguous.tsv` 超過 40 列；§4.3 任一組 50 句裡新版輸出錯的超過 5 句；§4.4 PTT 或 g0v 判成簡體句超過 0.1%；§4.3 漢字總數下降超過 1%；轉換時間超過現行的 1.5 倍；`build_tw_conv.py` 在 Mac 超過 10 分鐘（改到 188，照遠端腳本規則）。停下時報數字，不改門檻。
+- **停止條件**：任何一項突變沒被抓到；`tw-conv-ambiguous.tsv` 超過 40 列；§4.3 任一組 50 句裡新版輸出錯的超過 5 句；§4.3 某條單字 `evidence` 列被淘汰的字（溼、賬…）在簡體句仍轉出超過現行次數的 10%（例：溼 超過 38），而且多出來的不是由選定那個字的詞組 `evidence` 或 `manual` 列產生（停下時列出產生它的詞組給維護者）；§4.4 PTT 或 g0v 判成簡體句超過 0.1%；§4.3 漢字總數下降超過 1%；轉換時間超過現行的 1.5 倍；`build_tw_conv.py` 在 Mac 超過 10 分鐘（改到 188，照遠端腳本規則）。停下時報數字，不改門檻。
 - **預算**：executor 實作 1 回合加 1 次修正；main 寫 fixture、`tw-conv-ambiguous.tsv` 的理由、§4.3 的判讀；維護者看 §2.3 的表。
 - **範圍外**：
   - 重建與出貨（通語、辨類、承接、連文、常談、會意都在下一次重建一起重做，照出貨標準量）。
