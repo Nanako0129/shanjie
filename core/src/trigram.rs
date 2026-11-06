@@ -11,17 +11,22 @@
 use crate::lm::LmError;
 use std::ffi::c_void;
 use std::ops::Deref;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::OnceLock;
 
-// <sys/mman.h>: PROT_READ and MAP_PRIVATE have the same values on macOS and x86_64 Linux (learn_store.rs refuses to build elsewhere);
+// <sys/mman.h>: PROT_READ and MAP_PRIVATE have the same values on macOS and x86_64 Linux (learn_store.rs has no other values; this block is Unix only);
 // `off_t` is 64 bits on both. std has no names for them and the crate has no libc dependency.
+#[cfg(unix)]
 const PROT_READ: i32 = 1;
+#[cfg(unix)]
 const MAP_PRIVATE: i32 = 2;
 /// `mmap` returns this (all bits set), not null, on failure.
+#[cfg(unix)]
 const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
 
+#[cfg(unix)]
 extern "C" {
     fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, off: i64) -> *mut c_void;
     fn munmap(addr: *mut c_void, len: usize) -> i32;
@@ -50,6 +55,7 @@ impl Mapped {
     /// The file must not be truncated or rewritten in place while the mapping is alive: a page past a new end is a SIGBUS, and
     /// bytes that change after `Tri::parse` checked them break the invariants the lookups rely on (an index could panic).
     /// Replacing the file by rename is fine (the mapping keeps the old inode).
+    #[cfg(unix)]
     pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, ()> {
         use std::os::unix::fs::OpenOptionsExt;
         let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::tinylm::O_NONBLOCK).open(path).map_err(|_| ())?;
@@ -65,6 +71,44 @@ impl Mapped {
         }
         Ok(Mapped { ptr, len })
     }
+
+    /// Windows: the same contract through a file mapping. The file is opened `GENERIC_READ` with `FILE_SHARE_READ` only (what
+    /// `CreateFileW(GENERIC_READ, FILE_SHARE_READ, ...)` gives, through std's `share_mode`), checked on that handle (a disk file, not a
+    /// directory, not empty), then `CreateFileMappingW(PAGE_READONLY)` and `MapViewOfFile(FILE_MAP_READ)`. The mapping object's handle
+    /// is closed at once; the view keeps the section alive until `drop`. While a view exists Windows refuses to delete or rewrite the file.
+    ///
+    /// # Safety
+    /// As the Unix `open`: the file must not be rewritten in place while mapped (Windows refuses it anyway, so this is a
+    /// property of the platform here, not only of the caller).
+    #[cfg(windows)]
+    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, ()> {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Storage::FileSystem::{GetFileType, FILE_SHARE_READ, FILE_TYPE_DISK};
+        use windows_sys::Win32::System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_READ, PAGE_READONLY};
+        let f = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path).map_err(|_| ())?;
+        let meta = f.metadata().map_err(|_| ())?;
+        let len = meta.len() as usize;
+        let h = f.as_raw_handle();
+        // SAFETY: `h` is the open handle `f` owns for the whole function.
+        if !meta.is_file() || len == 0 || unsafe { GetFileType(h) } != FILE_TYPE_DISK {
+            return Err(());
+        }
+        // SAFETY: a valid read-only handle; size 0/0 maps the whole file, which `meta` showed is non-empty; no name, default security.
+        let map = unsafe { CreateFileMappingW(h, std::ptr::null(), PAGE_READONLY, 0, 0, std::ptr::null()) };
+        if map.is_null() {
+            return Err(());
+        }
+        // SAFETY: `map` is the mapping object just created; 0 bytes maps from offset 0 to the end of the object.
+        let view = unsafe { MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0) };
+        // SAFETY: `map` is closed once; the view (if any) holds its own reference to the section.
+        unsafe { CloseHandle(map) };
+        if view.Value.is_null() {
+            return Err(());
+        }
+        Ok(Mapped { ptr: view.Value, len })
+    }
 }
 
 impl Deref for Mapped {
@@ -78,7 +122,13 @@ impl Deref for Mapped {
 impl Drop for Mapped {
     fn drop(&mut self) {
         // SAFETY: exactly the range `mmap` returned, unmapped once.
-        unsafe { munmap(self.ptr, self.len) };
+        #[cfg(unix)]
+        let _ = unsafe { munmap(self.ptr, self.len) };
+        // SAFETY: exactly the view `MapViewOfFile` returned, unmapped once.
+        #[cfg(windows)]
+        let _ = unsafe {
+            windows_sys::Win32::System::Memory::UnmapViewOfFile(windows_sys::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS { Value: self.ptr })
+        };
     }
 }
 
