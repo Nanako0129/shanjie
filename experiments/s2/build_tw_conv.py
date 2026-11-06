@@ -20,6 +20,7 @@ import argparse
 import collections
 import hashlib
 import itertools
+import json
 import os
 import re
 import subprocess
@@ -42,11 +43,15 @@ VARIANT_PAIRS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": 
 # OpenCC (STCharacters) and MediaWiki zh-tw single-character conversion differ in these 31 keys; the MediaWiki value is a candidate (contract 2.3(1)).
 MEDIAWIKI = dict(zip("冲凄勋卤吣哗喂埙棂湿牦瘘硷签艳袅账鉴钚钫锎锝锨锫锿镅镎镥鹇鹚𩙧", "沖淒勛鹵唚嘩餵塤櫺濕氂瘺鹼簽艷裊帳鑒鈽鍅鉲鎝杴鉳鑀鋂錼鎦鷴鶿𩗡"))
 assert len(MEDIAWIKI) == 31
-# Contract 8: a char row may choose a value other than OpenCC's first only when the two are forms of one character (a variant pair).
-# Pairs come from TWVariants.txt, VARIANT_PAIRS, build_counts.MERGE and this list; each entry here is one character written two ways
-# (same meaning), checked by main 2026-11-06. Pairs that are two different characters (象/像, 舍/捨, 贊/讚, 鍾/鐘, 喂/餵, 籤/簽, 呆/待,
-# 樸/朴, 杆/桿, 胄/冑, 黴/霉, 侖/崙, 嶽/岳) are not variants: their single-character default stays OpenCC's, the phrase rows decide.
-VARIANT_EXTRA = ["溼濕", "賬帳", "悽淒", "硷鹼", "冢塚", "亙亘", "巖岩", "蝨虱", "譁嘩", "豔艷", "鑑鑒", "嫋裊", "竈灶", "棱稜"]
+# Contract 9 (revision 7, the maintainer's rules of 2026-11-06): a char row may leave OpenCC's first value only for a variant pair
+# (TWVariants.txt, VARIANT_PAIRS, build_counts.MERGE, or the MediaWiki value of the 31 keys), and only on word-level evidence: summed over
+# the phrase rows of that key, the other form of the same word is >= WORD_RATIO x OpenCC's form and >= PICK_MIN. Single-character counts
+# compare different words (亙古 vs 亘, 土虱 vs 蝨子) and are not evidence. A MediaWiki key with under PICK_MIN uses in all takes the
+# MediaWiki value (the maintainer: 「用 MediaWiki（台灣用字）」).
+# Phrase rows: when exactly one candidate is a dictionary entry (重編國語辭典修訂本 or 國語辭典簡編本), it wins unless another candidate
+# is >= WORD_RATIO x its count and >= PICK_MIN (the maintainer: 「成語要照字典，標準還是要界定，除非出現次數壓倒性」); such rows are
+# status `over-dict` and listed for main's sentence-level check (--contexts).
+WORD_RATIO = 10
 
 
 def die(msg):
@@ -100,6 +105,15 @@ def fold_of(table):
 
 
 # ---------------------------------------------------------------------------------------------------------------- building
+def dictionary_words():
+    """Entry titles of 重編國語辭典修訂本 (Moedict revised JSON, tools/readings.MOEDICT) and 國語辭典簡編本 (tools/build_overlay.load_concised)."""
+    sys.path.insert(0, os.path.join(bc.ROOT, "tools"))
+    import readings, build_overlay   # noqa: E402
+    words = {e["title"] for e in json.load(open(readings.MOEDICT, encoding="utf-8")) if e.get("title")}
+    words |= set(build_overlay.load_concised())
+    return words
+
+
 def pick(cands, counts, first):
     """cands: unique candidates (folded), counts: {cand: n}. -> (value, status)."""
     order = sorted(range(len(cands)), key=lambda i: (-counts[cands[i]], i))
@@ -119,8 +133,9 @@ def build_rows(files, old):
     o = bc.read_opencc()
     st, stp, twv, twp = o["st"], o["stp"], o["twv"], o["twp"]
     word_chars = bc.lexicon_word_chars()
-    variant = {frozenset(p) for p in VARIANT_EXTRA} | {frozenset((x, y)) for x, y in twv.items()} \
-        | {frozenset((x, y)) for x, y in VARIANT_PAIRS.items()} | {frozenset((x, y)) for x, y in bc.MERGE.items()}
+    variant = {frozenset((x, y)) for x, y in twv.items()} | {frozenset((x, y)) for x, y in VARIANT_PAIRS.items()} \
+        | {frozenset((x, y)) for x, y in bc.MERGE.items()}
+    dictionary = dictionary_words()
     S = bc.true_simplified(st, word_chars)
     # pass 1: raw character counts
     cc = collections.Counter()
@@ -164,16 +179,10 @@ def build_rows(files, old):
         if len(v) > 1 or k in MEDIAWIKI or (k not in S and k not in v):
             cands = list(dict.fromkeys(fold(c) for c in cand))
             first = fold(v[0])
-            value, status = pick(cands, fc, first)
-            if status == "evidence" and value != first and frozenset((first, value)) not in variant:
-                value, status = first, "distinct"     # contract 8: two different characters, the phrase rows decide
-            char_rows[k] = (value, status, fmt_counts(cands, fc))
-            row_cands[k] = (cands, first)
-    chosen = lambda k: (man("char", k).split("@")[0] if man("char", k) else char_rows[k][0])
-    rare = {k for k in char_rows if chosen(k) != k and cc[k] < RARE_MAX and FOLD_RATIO * cc[k] < fc[chosen(k)]}
-    char_rows = {k: (*r, "N" if k in rare else "") for k, r in char_rows.items()}
-    log(f"char rows: {len(char_rows)}, N: {len(rare)}", t0)
-    trig = {k for k in char_rows if k in MEDIAWIKI or chosen(k) != row_cands[k][1]}
+            alts = [c for c in cands if c != first and (frozenset((first, c)) in variant or (k in MEDIAWIKI and c == fold(MEDIAWIKI[k])))]
+            char_rows[k] = None
+            row_cands[k] = (cands, first, alts)
+    trig = {k for k in char_rows if row_cands[k][2]}       # keys whose single-character default may change: their phrases give the evidence
     # phrases: candidates, then one pass over the folded text
     phrase_cands = {}
     for k, v in stp.items():
@@ -192,8 +201,26 @@ def build_rows(files, old):
             cands.append("".join(s))
         cands = list(dict.fromkeys(cands))
         phrase_cands[k] = (pos, fv, cands)
-    strings = {s for _, _, cands in phrase_cands.values() for s in cands}
-    anchor = {c for k, (pos, _, cands) in phrase_cands.items() for s in cands for c in (s[i] for i in pos)}
+    # contract 9: word-level evidence for the single-character default. Every word of the lexicon (two or more characters) and of the
+    # dictionaries that holds the key's OpenCC form or one of its variants, written once with each form (all such positions together).
+    lex_words = {l.split()[1] for l in open(os.path.join(bc.ROOT, "data", "lexicon", "mcbpmf-data.txt"), encoding="utf-8")
+                 if not l.startswith("#") and len(l.split()) > 2} | dictionary
+    word_forms = {}
+    for k in trig:
+        cands_k, first, alts = row_cands[k]
+        forms = [first] + alts
+        fs = set(forms)
+        seen = {}
+        for w in lex_words:
+            if len(w) < 2 or not any(c in fs for c in w):
+                continue
+            base = "".join(first if c in fs else fold(c) for c in w)
+            if base not in seen:
+                seen[base] = {c: "".join(c if x in fs else fold(x) for x in w) for c in forms}
+        word_forms[k] = seen
+    strings = {s for _, _, cands in phrase_cands.values() for s in cands} | {s for seen in word_forms.values() for d in seen.values() for s in d.values()}
+    anchor = {c for k, (pos, _, cands) in phrase_cands.items() for s in cands for c in (s[i] for i in pos)} \
+        | {c for k in word_forms for c in [row_cands[k][1]] + row_cands[k][2]}
     shapes = collections.defaultdict(set)
     for s in strings:
         j = next(i for i, c in enumerate(s) if c in anchor)
@@ -213,13 +240,44 @@ def build_rows(files, old):
                     if s in pc:
                         pc[s] += 1
     log("pass 2 done", t0)
+    # char rows (contract 9): word-level evidence from the phrase strings of the key, same word written with each form
+    word = {k: collections.Counter() for k in trig}
+    for k, seen in word_forms.items():
+        for d in seen.values():
+            for c, w in d.items():
+                word[k][c] += pc.get(w, 0)
+    for k, (cands, first, alts) in row_cands.items():
+        value, status, extra = first, "hold", ""
+        if alts:
+            wc = word[k]
+            best = max(alts, key=lambda c: (wc[c], -alts.index(c)))
+            extra = " words " + " ".join(f"{c}:{wc[c]}" for c in [first] + alts)
+            if wc[best] >= PICK_MIN and wc[best] >= WORD_RATIO * wc[first]:
+                value, status = best, "evidence"
+            elif k in MEDIAWIKI and sum(fc[c] for c in cands) < PICK_MIN:
+                value, status = fold(MEDIAWIKI[k]), "mediawiki"
+        char_rows[k] = (value, status, fmt_counts(cands, fc) + extra)
+    chosen = lambda k: (man("char", k).split("@")[0] if man("char", k) else char_rows[k][0])
+    rare = {k for k in char_rows if chosen(k) != k and cc[k] < RARE_MAX and FOLD_RATIO * cc[k] < fc[chosen(k)]}
+    char_rows = {k: (*r, "N" if k in rare else "") for k, r in char_rows.items()}
+    log(f"char rows: {len(char_rows)}, changed: {sum(1 for k in char_rows if chosen(k) != row_cands[k][1])}, N: {len(rare)}", t0)
     phrase_rows = {}
     for k, (pos, fv, cands) in phrase_cands.items():
+        in_dict = [c for c in cands if c in dictionary]
+        if len(in_dict) == 1:
+            d = in_dict[0]
+            rival = max((c for c in cands if c != d), key=lambda c: pc[c], default=None)
+            if rival is not None and pc[rival] >= PICK_MIN and pc[rival] >= WORD_RATIO * pc[d]:
+                value, status = rival, "over-dict"
+            else:
+                value, status = d, "dict"
+            phrase_rows[k] = (value, status, fmt_counts(cands, pc))
+            continue
         value, status = pick(cands, pc, fv)
         if status == "hold":    # follow the char row only where OpenCC's phrase value uses the key's own first value
             s = list(fv)
             for i in pos:
-                if fv[i] == row_cands[k[i]][1]:
+                if fv[i] == row_cands[k[i]][1] and char_rows[k[i]][1] in ("evidence", "mediawiki"):
                     s[i] = chosen(k[i])
             value = "".join(s)
         phrase_rows[k] = (value, status, fmt_counts(cands, pc))
