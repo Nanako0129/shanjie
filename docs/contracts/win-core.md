@@ -71,7 +71,7 @@
 4. **`learn_store.rs`：這一片 Windows 不做學習檔。**
    - `LearnStore` 的型別與公開方法在所有平台都編譯，`engine.rs` 不用改。
    - Unix 專用的內容放進 `cfg(unix)`。`cfg(not(unix))` 版的 `open` 不碰檔案系統，直接回 `Err(StoreError::Io)`；其他方法也回 `Err(StoreError::Io)`。因為 open 一定失敗，實際走不到這些方法。
-   - 結果是 `shanjie_engine_learning_open` 在 Windows 上回 3，殼照現有契約在沒有學習檔的狀態下運作：選字照常，不記學習。
+   - 結果是 `shanjie_engine_learning_open` 在 Windows 上回 3，殼照現有契約在沒有學習檔的狀態下運作：選字照常；學習只在這次執行的記憶體裡，不寫進檔案。
    - `core/include/shanjie.h` 的 `shanjie_engine_learning_open` 註解加一句：Windows 版目前一律回 3。
    - 理由：Windows 的學習檔要另外處理 ACL、reparse point、多個 App 同時寫入。三位顧問都指出，單純加鎖仍會互相覆蓋。這屬於資安相關的一片，要先過 security-reviewer。
 5. **測試**：

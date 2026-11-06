@@ -75,11 +75,13 @@ impl Mapped {
     /// Windows: the same contract through a file mapping. The file is opened `GENERIC_READ` with `FILE_SHARE_READ` only (what
     /// `CreateFileW(GENERIC_READ, FILE_SHARE_READ, ...)` gives, through std's `share_mode`), checked on that handle (a disk file, not a
     /// directory, not empty), then `CreateFileMappingW(PAGE_READONLY)` and `MapViewOfFile(FILE_MAP_READ)`. The mapping object's handle
-    /// is closed at once; the view keeps the section alive until `drop`. While a view exists Windows refuses to delete or rewrite the file.
+    /// is closed at once; the view keeps the section alive until `drop`. While a view exists Windows refuses to delete or truncate the
+    /// file, to open it with `CREATE_ALWAYS`, and to replace it by rename; it does not stop another process that opens the file for
+    /// writing after `open` returns from changing bytes in place.
     ///
     /// # Safety
-    /// As the Unix `open`: the file must not be rewritten in place while mapped (Windows refuses it anyway, so this is a
-    /// property of the platform here, not only of the caller).
+    /// As the Unix `open`: the file must not be rewritten in place while mapped. Windows blocks truncation and deletion, not an
+    /// in-place write, so this stays the caller's promise; an update replaces the file only after the engine has dropped the map.
     #[cfg(windows)]
     pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, ()> {
         use std::os::windows::fs::OpenOptionsExt;
