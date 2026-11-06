@@ -85,7 +85,7 @@ MUTATIONS = [
     ("M9", "T contains the marker characters again (么 counts as Traditional evidence)",
      [(BC, '''set(o["twv"].values())) - MARKERS)''', '''set(o["twv"].values())))''')], [A4_ROWS], False),
     ("M10", "a Traditional sentence gets no phrase at all (only the single characters of S and N)",
-     [(BC, '''        text = _longest(text, s_phrase, max(map(len, s_phrase)), _only(char, "trad"))''',
+     [(BC, '''        text = _longest(text, s_phrase, max(map(len, s_phrase), default=1), _only(char, "trad"))''',
        '''        text = "".join(_only(char, "trad").get(c, c) for c in text)''')], [A4_ROWS], False),
     ("M11", "the set N is empty",
      [(BC, '''    RARE.clear(); RARE.update(tw["n"])''', '''    RARE.clear()''')], [A4_ROWS], False),

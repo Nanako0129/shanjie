@@ -193,7 +193,7 @@ def convert(text, phrase, char, maxp):
     kind = sentence_kind(text)
     if kind == "trad":
         s_phrase = _s_phrases(phrase)
-        text = _longest(text, s_phrase, max(map(len, s_phrase)), _only(char, "trad"))
+        text = _longest(text, s_phrase, max(map(len, s_phrase), default=1), _only(char, "trad"))
         return text.translate(FOLD_TRANS)
     text = _longest(text, phrase, maxp, char if kind == "simp" else _only(char, "marker"))
     return _longest(text, TW_PHRASE, TW_MAXP[0]).translate(FOLD_TRANS)
