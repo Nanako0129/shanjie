@@ -1,6 +1,6 @@
 # WIN-CORE：核心在 Windows 編得過、測得過（官方 Windows 版第一片）
 
-狀態：**修訂一**（2026-11-06）：plan-verifier 第一次 REVISE 的九項照最小修改處理。
+狀態：**修訂二**（2026-11-06）：第二次 REVISE 的五項逐項處置，五項都修（`.gitattributes` 改 `text=auto` 不碰二進位 golden、`scripts/` 也固定 LF、每鍵 p95 計時測試事先定處置、mmap 測試只擋 symlink 那幾行、188 的工具鏈列為前提並把六組逐位元組比對交給 CI 兩邊都用 1.97.1）。修訂一：plan-verifier 第一次 REVISE 的九項照最小修改處理。
 - 錯誤盤點改用含測試的 `--tests`，fixture 的 symlink 改走 Windows 分支，不再整檔擋掉。
 - 呼叫 `learning_open` 的測試有明確處置，另加 Windows 專用測試。
 - `LearnStore` 的公開方法在所有平台都編譯。
@@ -75,6 +75,7 @@
    - 理由：Windows 的學習檔要另外處理 ACL、reparse point、多個 App 同時寫入。三位顧問都指出，單純加鎖仍會互相覆蓋。這屬於資安相關的一片，要先過 security-reviewer。
 5. **測試**：
    - 測 symlink 或 Unix 權限**行為本身**的測試標 `#[cfg(unix)]`，例如 `ffi.rs`、`lm.rs` 裡的 symlink 測試、`tests/learn_store.rs`。
+   - 同一個測試裡只有幾步用 symlink 的，只把那幾步（陳述式）標 `#[cfg(unix)]`，其餘照跑：`core/src/lm.rs` 的 `load_opts_maps_the_trigram_table`（驗證 trigram 真的有 mmap、mmap 與讀進記憶體的分數逐位元相同、空檔／截斷／壞檔頭／目錄都拒絕）與 `core/src/ffi.rs` 約第 1929 行那個測試（損壞、截斷、懸空 symlink）。
    - 只拿 symlink **組模型資料夾**的 fixture（`tests/common/toy.rs::lm_path` 等）加 `#[cfg(windows)]` 分支，改用 `fs::copy`，Unix 那行不動。所以 engine_rerank、engine_fuzzy、engine_fuzzy_rerank 在 Windows 上照跑。
    - `engine_learn.rs` 的 `getrusage` 那段標 `cfg(unix)`。
    - 會呼叫 `learning_open` 而且預期成功的測試，在 Windows 一律標 `cfg(unix)`，例如 engine_newword、engine_learn、engine_predict、engine_english、engine_english_next、engine_fuzzy_rerank 裡的那些。逐個列進 PR。
@@ -83,8 +84,8 @@
 6. **f64 逐位元比對的 golden**：`core/tests/engine_digits.rs`（約第 136–138、588 行）與 `core/tests/pack_oov.rs`（約第 159–163 行）有三個測試只在 Linux 跳過。理由是它們拿 macOS libm 的位元當答案，glibc 的 log10 已知在最後一位不同。
    - 把跳過條件從「是 Linux」改成 `!cfg!(target_os = "macos")`。每個只改一個 token，Linux 上的行為不變（照樣跳過），Windows 也跳過。
    - 其他測試在 Windows 上的浮點失敗一律是停止條件（§4）。
-7. **換行**：`.gitattributes` 加上 `data/** text eol=lf`、`eval/** text eol=lf`、`core/tests/** text eol=lf`、`cli/tests/** text eol=lf`。
-   - Unix 上沒有作用；repo 裡這些檔現在都是 LF（`git ls-files --eol`：179 個 `i/lf`，其他是二進位或空檔）。
+7. **換行**：`.gitattributes` 加上 `data/** text=auto eol=lf`、`eval/** text=auto eol=lf`、`core/tests/** text=auto eol=lf`、`cli/tests/** text=auto eol=lf`、`scripts/** text=auto eol=lf`。用 `text=auto`，git 自己判定為二進位的檔（`eval/golden/` 下的 `.sjlm`、`.sjc`、`.sjkn`、`.sjtl`、`.sjt3`）不當文字處理，不會被改位元組。
+   - Unix 上沒有作用；repo 裡這些文字檔現在都是 LF（`git ls-files --eol`：data／eval／core/tests 179 個 `i/lf`、scripts 22 個 `i/lf`，其他是二進位或空檔）。驗收：macOS 上改完 `git status` 乾淨，`git ls-files --eol eval/golden/kn-tiny eval/golden/tinylm-tiny eval/golden/tri-tiny` 的 attr 欄是 `text=auto eol=lf`、index 欄是 `-text`。
    - 理由：Windows 預設 `core.autocrlf=true`，checkout 會變成 CRLF，`DigitTable::parse` 遇到 `\r` 失敗，數字表會默默關掉。
    - 被測的程式不改。
 8. **評測 CLI**：只建 `shanjie-eval`（`cargo build -p cli --release --bin shanjie-eval`）。`shanjie-replay` 用 Unix 專用的 API，不在這一片，Windows 上不建。
@@ -93,31 +94,28 @@
 
 - **Linux 那邊**：在既有的 `debug` job（映像 `ubuntu-24.04`）最後加三步，前面的步驟不動：
   1. `cargo build --release --locked -p cli --bin shanjie-eval`；
-  2. 跑兩條評測，都是聊天、`--context --packs acg,it --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm`：dev302（`--dev 302`）與打字測驗（`--rows eval/dev/user-typing.txt`），各寫一份 `--rowstats`；
-  3. `actions/upload-artifact` 上傳這兩份。
+  2. 跑六組評測：dev302（`--dev 302`）、打字測驗（`--rows eval/dev/user-typing.txt`）、錯字回報（`--rows eval/dev/user-reported.txt`），聊天與書面兩種設定，出貨旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`，各寫一份 `--rowstats`；
+  3. `actions/upload-artifact` 上傳這六份。
 - **新的 `windows` job**：映像 `windows-2025`，`needs: [changes, debug]`，`if:` 和其他 job 相同（`needs.changes.outputs.run == 'true'`）。步驟如下：
   1. Rust 1.97.1；
   2. checkout，`.gitattributes` 讓資料是 LF；
-  3. 取模型並核對 `data/*.sha256`，用和其他 job 相同的 `scripts/fetch-models.sh`，這一步加 `shell: bash`；
-  4. `cargo test -p core --release --locked`；
+  3. 取模型並核對 `data/*.sha256`，用和其他 job 相同的 `scripts/fetch-models.sh`，這一步加 `shell: bash`（`scripts/` 已固定 LF）。映像的 Git Bash 若沒有 `shasum`，`fetch-models.sh` 改成有 `shasum` 用 `shasum -a 256 -c`、沒有就用 `sha256sum -c`（允許改這支共用腳本，macOS 與 Linux 照舊走 `shasum`）；
+  4. `cargo test -p core --release --locked -- --skip replay_standard_chat_production_path --skip replay_standard_302_of_302 --skip replay_eten_302_of_302 --skip replay_with_english_on --skip replay_with_english_on_and_the_revert_switches_off --skip replay_with_english_and_digits_on --skip perf_two_thousand_new_words_per_key`（這幾個在 release 下斷言每鍵 p95 < 16 ms；4 vCPU 的 runner 上量不準，和 188 WSL 跳過它們的理由相同；它們的選字斷言在 Linux 與 macOS job 照跑）；
   5. `cargo build --release --locked -p cli --bin shanjie-eval`；
-  6. 用同樣兩條指令產生 rowstats，下載 Linux 的 artifact 後逐檔 `cmp`，不同就失敗；
-  7. 檢查 `git ls-files --eol data eval` 工作區全是 `w/lf`。
+  6. 用同樣六條指令產生 rowstats，下載 Linux 的 artifact 後逐檔 `cmp`，不同就失敗；兩邊都是 Rust 1.97.1；
+  7. 檢查 `git ls-files --eol data eval scripts core/tests cli/tests`：沒有任何 `w/crlf` 或 `w/mixed`，而且每個 `i/lf` 的檔工作區都是 `w/lf`。
 - **只編不測**：在 windows job 裡加兩個目標，`rustup target add` 之後 `cargo build -p core --target i686-pc-windows-msvc` 與 `--target aarch64-pc-windows-msvc`。
 - 其他 job 不改。
 
 ## 3. 驗收（怎麼看到它有效）
 
-1. **188 的原生 Windows**（main 在 188 上跑，不經 WSL；188 的 clone 先照 `.gitattributes` 重新 checkout，`git ls-files --eol data eval` 全是 `w/lf`）：
-   - `cargo test -p core --release` 全過。
+0. **前提（已核對，2026-11-06）**：188 原生 Windows 有 `rustc 1.97.1`（x86_64-pc-windows-msvc）與 MSVC 的 `link.exe`（`C:\BuildTools\VC\Tools\MSVC\14.44.35207\…\link.exe`）。188 WSL 只有 1.99，不拿它比對；逐位元組比對由 CI 的 Linux 與 Windows job 做，兩邊都 1.97.1。PR 記下 188 原生的 `rustc --version`。
+1. **188 的原生 Windows**（main 在 188 上跑，不經 WSL；關降速、綁 P-core（`SetProcessInformation` 與親和性 0x0FFF，做法同 188 的其他工作）；188 的 clone 先照新的 `.gitattributes` 重新 checkout，`git ls-files --eol` 符合 §2.3 第 7 步的檢查）：
+   - `cargo test -p core --release`（多執行緒，跳過 §2.3 第 4 步那七個計時測試）全過，輸出裡有 `lm::tests::load_opts_maps_the_trigram_table ... ok`。
+   - 那七個計時測試另外以 `--test-threads=1` 單獨跑一次，結果（通過或失敗與量到的 p95）只記錄、不擋：188 不是量延遲的機器。
    - 列出被 `cfg(unix)` 擋掉、或因 §2.2 第 6 點跳過的測試名稱與數量。
    - 有一個測試證明 Windows 上載入了數字表（engine 的 digits 測試在 Windows 有跑、通過）。
-2. **逐位元組相同**：188 原生 Windows 與 188 WSL（Linux）各用同一個 commit、同一份 `data/lm`，跑：
-   - 集合：dev302、打字測驗、錯字回報；
-   - 兩種設定：聊天、書面；
-   - 出貨旗標：`--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`。
-
-   六組 `--rowstats` 要逐位元組相同。這一步用多執行緒（`--threads 12`，綁 P-core、關降速），照 188 的負載規則。
+2. **逐位元組相同**：CI 的 windows job 六組 rowstats 和 Linux job 逐位元組相同（§2.3）。另外 main 在 188 原生 Windows 用同一個 commit 跑同樣六組（`--threads 12`），和 CI Linux 的 artifact 比對，結果記進 PR。
 3. **Unix 不變**：macOS 上只跑改到的 Rust 測試檔；CI 的 macOS、Linux job 全綠；golden 不變。
 4. **CI**：新的 windows job 綠（含 rowstats 的 `cmp` 與換行檢查），三個 Windows 目標都編得過。
 
@@ -125,6 +123,7 @@
 
 - **停止條件**：
   - §3.2 任何一組不同；
+  - 除了 §2.3 第 4 步那七個計時測試以外，任何測試在 Windows 上失敗而原因不是本契約列出的平台差異；
   - §2.2 第 6 點以外的測試在 Windows 上因浮點不同而失敗；
   - Unix 的任何測試或 golden 改變；
   - `windows-sys` 以外還需要新的相依。
