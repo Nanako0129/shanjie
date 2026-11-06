@@ -1,4 +1,4 @@
-"""The mutations M1-M8 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
+"""The mutations M1-M11 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
 fail on the test the contract names. Single process, about a minute (M6 and M8 rebuild the table from the PTT snapshot, 20 seconds each).
 
   python3 experiments/s2/mutate_tw_conv.py [--simp-rows FILE] [--only M3 ...]
@@ -55,10 +55,9 @@ def convert(text, phrase, char, maxp):
 # (name, what, [(file, old text, new text or ("append", text))], tests that must fail, rebuild the table first)
 MUTATIONS = [
     ("M1", "a Traditional sentence also gets the whole TWPhrases.txt",
-     [(BC, '''        return "".join(char.get(c, c) if c in TRAD_SIMP_ONLY else c for c in text).translate(FOLD_TRANS)''',
-       '''        t = "".join(char.get(c, c) if c in TRAD_SIMP_ONLY else c for c in text)
-        full = convert.__dict__.get("full") or convert.__dict__.setdefault("full", read_opencc()["twp"])
-        return _longest(t, full, max(map(len, full))).translate(FOLD_TRANS)''')], [A1], False),
+     [(BC, '''        return text.translate(FOLD_TRANS)''',
+       '''        full = convert.__dict__.get("full") or convert.__dict__.setdefault("full", read_opencc()["twp"])
+        return _longest(text, full, max(map(len, full))).translate(FOLD_TRANS)''')], [A1], False),
     ("M2", "is_simplified is the previous version and the Simplified path gets the whole TWPhrases.txt",
      [(BC, None, ("append", OLD_RULES))], [A1], False),
     ("M3", "the single-character and phrase rows go back to OpenCC's values",
@@ -80,9 +79,16 @@ MUTATIONS = [
             char_rows[k] = (value, status, fmt_counts(cands, cc))'''),
       (BTC, '''        chunk = chunk.translate(trans)\n''', '''        pass\n''')], [A4_ROWS], True),
     ("M7", "a sentence with marker characters only also gets the single-character table",
-     [(BC, '''    text = _longest(text, phrase, maxp, char if kind == "simp" else None)''', '''    text = _longest(text, phrase, maxp, char)''')], [A1], False),
+     [(BC, '''char if kind == "simp" else _only(char, "marker")''', '''char''')], [A1], False),
     ("M8", "a phrase `hold` always takes the single-character row's value",
      [(BTC, '''                if fv[i] == row_cands[k[i]][1]:''', '''                if True:''')], [A4_ROWS], True),
+    ("M9", "T contains the marker characters again (么 counts as Traditional evidence)",
+     [(BC, '''set(o["twv"].values())) - MARKERS)''', '''set(o["twv"].values())))''')], [A4_ROWS], False),
+    ("M10", "a Traditional sentence gets no phrase at all (only the single characters of S and N)",
+     [(BC, '''        text = _longest(text, s_phrase, max(map(len, s_phrase)), _only(char, "trad"))''',
+       '''        text = "".join(_only(char, "trad").get(c, c) for c in text)''')], [A4_ROWS], False),
+    ("M11", "the set N is empty",
+     [(BC, '''    RARE.clear(); RARE.update(tw["n"])''', '''    RARE.clear()''')], [A4_ROWS], False),
 ]
 
 
@@ -136,7 +142,7 @@ def rebuilt_table(edits):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--simp-rows", help="use this file as tw-conv-simp.tsv for the run (the real one is put back)")
-    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M8, M4a, M4b)")
+    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M11, M4a, M4b)")
     a = ap.parse_args(argv)
     saved = {p: open(p, "rb").read() for p in (SIMP, TABLE)}
     results = []
