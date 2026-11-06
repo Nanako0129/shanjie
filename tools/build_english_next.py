@@ -3,7 +3,7 @@
 
 Sources (each an optional path; the raw input, read BEFORE the cleaning that drops English), weight, spread unit:
   --wiki DUMP.bz2        first --wiki-limit (200,000) articles, x1, article. build_counts.article_sentences (entity unescape, templates, markup,
-                         sentence split, convert without TWPhrases as SJ-LM-7 counts), so the Han-only step of article_runs is skipped.
+                         sentence split, convert: a wiki article is a mixed input, docs/contracts/tw-conv.md), so the Han-only step of article_runs is skipped.
   --colloquial FILE      colloquial-train.txt (build_tune.py), one sentence per line, x5, sentence.
   --g0v FILE             the g0v #rand0m source file as UTF-8 text, one message per line, x5, message.
   --ptt DIR              <board>/<article>.html as ptt_clean parses it (body, merged pushes; no p2clean). Pushes x5, bodies x1, unit = board.
@@ -158,7 +158,7 @@ def wiki_sentences(raw):
     import build_counts as bc
     if "conv" not in _G:
         _G["conv"] = bc.load_conv()
-    return list(bc.article_sentences(raw, _G["conv"], trad_tw_phrases=False))
+    return list(bc.article_sentences(raw, _G["conv"]))
 
 
 def work(batch):

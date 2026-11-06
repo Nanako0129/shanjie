@@ -163,7 +163,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         got = sorted(s for syls, ents in base.by_reading.items() if len(syls) == n for _, s in ents)
         assert got[len(got) // 4] == want, (n, got[len(got) // 4])
     conv = bc.load_conv()
-    simp_only = bc.TRAD_SIMP_ONLY                   # S2f §2.2：和繁體句同一個縮小後的簡體專用字集合（不含台灣字形：床 灶 粽 秘 庄…）
+    simp_only = bc.TRAD_SIMP_ONLY                   # tw-conv §2.2 的集合 S：真簡體字（不含台灣字形：床 灶 粽 秘 庄…）
 
     def titles(name):
         out = set()
@@ -179,7 +179,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
     rows, removed, variant_removed, jp_removed = [], [], [], []
     moe = moe_titles()
     cand = {w for w in wikt | compounds if not cantonese(w, moe)}   # canto-prune：在候選階段拿掉，S2n／S2f 的落點不會指向被拿掉的詞
-    fold = {**bc.MERGE, **bc.TW_VARIANTS}           # S2f §2.5：套到兩邊後字串相同，就是同一個詞的異體寫法
+    fold = {**bc.MERGE, **bc.FOLD}                  # S2f §2.5（tw-conv §2.5：MERGE 加 tw-conv.tsv 的摺疊列）：套到兩邊後字串相同，就是同一個詞的異體寫法
     fold_w = lambda t: "".join(fold.get(c, c) for c in t)
     # 第一輪：哪些詞條符合 (i)(iii)，目標寫法是什麼；第二輪由落點決定（修訂二 7.2.4：避免 A→B 而 B 不在了）
     target = {}

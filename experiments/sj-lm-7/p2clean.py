@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 for _p in ("tools", "experiments/s2", "reference/proto"):
     sys.path.insert(0, os.path.join(ROOT, *_p.split("/")))
-import build_counts as bc  # noqa: E402  HAN, fold, convert, load_conv, TRAD_SIMP_ONLY, SIMP_ONLY, TW_PHRASE
+import build_counts as bc  # noqa: E402  HAN, fold, convert, load_conv, TRAD_SIMP_ONLY
 import holdout_guard as hg  # noqa: E402  tools/holdout_guard.py; it puts experiments/s7f-corpus first on sys.path and imports ITS `clean`
 s7f = hg.clean   # experiments/s7f-corpus/clean.py (Matcher). This file has the same name: never `import clean` here, load it by path (test_p2.py does)
 

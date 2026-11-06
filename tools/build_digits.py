@@ -260,12 +260,13 @@ def sha256_file(path):
 
 
 def _work(job):
-    """job = (kind, items): kind "wiki" (raw articles) or "text" (lines). A worker process; bc._init filled bc._W."""
+    """job = (kind, items): kind "wiki" (raw articles, a mixed input) or "native" (lines of colloquial-train.txt, already converted when it was built,
+    never converted again: docs/contracts/tw-conv.md 2.1). A worker process; bc._init filled bc._W."""
     kind, batch = job
     lex, conv, guard, hist = bc._W["lex"], bc._W["conv"], bc._W.get("guard"), bc._W["hist"]
     c = Counts()
     for raw in batch:
-        sents = bc.article_sentences(raw, conv) if kind == "wiki" else [bc.convert(raw, *conv)]
+        sents = bc.article_sentences(raw, conv) if kind == "wiki" else [raw]
         for s in sents:
             c.add_line(line_items(s, lex, hist, guard))
     return c
@@ -281,7 +282,7 @@ def _init(guard):
 def count_all(wiki, articles, colloquial, procs, guard):
     c = Counts()
     jobs = itertools.chain((("wiki", b) for b in bc.batches(bc.articles(articles, dump=wiki))),
-                           (("text", b) for b in bc.batches(bct.lines(colloquial), 2000)))
+                           (("native", b) for b in bc.batches(bct.lines(colloquial), 2000)))
     with mp.Pool(procs, initializer=_init, initargs=(guard,)) as pool:
         for done, r in enumerate(pool.imap_unordered(_work, jobs), 1):   # the sum does not depend on the order
             c.merge(r)

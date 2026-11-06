@@ -42,7 +42,7 @@ def fixture(name):
 def tiny_simplified():
     """is_simplified's tables reduced to 库 统 捞 汉 (simplified) and 庫 統 撈 漢 (traditional); 台 is a marker with no traditional partner, like the real table."""
     with mock.patch.object(B.bc, "MARKERS", set("库统捞汉台")), mock.patch.object(B.bc, "TRAD_ONLY", set("庫統撈漢")), \
-            mock.patch.object(B.bc, "SIMP_ONLY", set("库统捞汉")), mock.patch.object(B.bc, "TRAD_SIMP_ONLY", set("库统捞汉")):
+            mock.patch.object(B.bc, "TRAD_SIMP_ONLY", set("库统捞汉")):
         yield
 
 
