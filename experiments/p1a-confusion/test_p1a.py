@@ -105,7 +105,7 @@ class DataPrep(TmpCase):
             return ws
         with mock.patch.dict(bc._W), mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), mock.patch.object(bc, "segment", spy), \
                 redirect_stdout(io.StringIO()):   # patch.dict restores the module-global _W that bct.main overwrites
-            bct.main([os.path.join(self.tmp, "o.pkl"), *paths])
+            bct.main([os.path.join(self.tmp, "o.pkl"), *[x for p in paths for x in ("--mixed", p)]])   # p1a.colloquial_runs converts every line: mixed inputs
             lex = bc._W["lex"]
         mine = list(p1a.colloquial_runs(lex, paths, ({}, {}, 1)))
         self.assertGreaterEqual(len(rec), 3)

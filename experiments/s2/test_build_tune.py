@@ -23,19 +23,16 @@ class WikiRange(unittest.TestCase):
         a = bt.parser().parse_args(["--part", "wiki", "--wiki-range", "310000", "315000", "--wiki-name", "wikijudge"])
         self.assertEqual((a.part, a.wiki_range, a.wiki_name), ("wiki", [310_000, 315_000], "wikijudge"))
 
-    def test_tune_no_trad_tw_phrases_keeps_the_article_wording(self):
-        """docs/contracts/sr-no-twphrases.md section 5: off by default (wikitune and wikijudge1-5 are unchanged); on, a Traditional
-        sentence's 權限 stays in the gold instead of becoming 許可權; a Simplified sentence is converted the same either way."""
-        self.assertFalse(bt.parser().parse_args([]).tune_no_trad_tw_phrases)
+    def test_wiki_clauses_convert_a_mixed_source_and_the_old_flags_are_gone(self):
+        """docs/contracts/tw-conv.md 2.1: a wiki article is a mixed input (each sentence through convert(); mw already converted the whole article)."""
         conv = bt.bc.load_conv()
         text = "管理員權限加好了。我们的插件很好用。"
-        default = bt.wiki_clauses(text, conv)
-        self.assertEqual(default, [c for s in bt.bc.SENT.findall(text) for c in bt.HAN.findall(bt.bc.convert(s, *conv))])
-        self.assertNotIn("管理員權限加好了", default)
-        kept = bt.wiki_clauses(text, conv, tw=False)
-        self.assertEqual(kept[0], "管理員權限加好了")
-        self.assertEqual(kept[1:], default[1:])
+        self.assertEqual(bt.wiki_clauses(text, conv), [c for s in bt.bc.SENT.findall(text) for c in bt.HAN.findall(bt.bc.convert(s, *conv))])
+        self.assertEqual(bt.wiki_clauses(text, conv)[0], "管理員權限加好了")   # 權限 is not a mainland term: the Traditional sentence is as written
         self.assertEqual(bt.wiki_clauses("已轉換的權限句子。", conv, mw=True), ["已轉換的權限句子"])
+        for flag in ("--tune-no-trad-tw-phrases", "--cv-no-trad-tw-phrases", "--train-only-new-conv"):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                bt.parser().parse_args([flag])
 
     def test_articles_in_progress_lines_go_to_stderr_only_when_asked(self):
         orig, err = bt.bc.articles, io.StringIO()
@@ -66,72 +63,45 @@ class WikiRange(unittest.TestCase):
         self.assertEqual(calls, [7, 2])
 
 
-# SJ-LM-7 section 2.2: --train-only-new-conv. Synthetic conversion tables (no OpenCC files), see test_trad_phrases.py.
+# docs/contracts/tw-conv.md 2.1: Common Voice zh-TW is native, Tatoeba cmn is mixed. Synthetic conversion tables (no OpenCC files), see test_trad_phrases.py.
 import test_trad_phrases as ttp  # noqa: E402
 
-ROWS = ["我們的插件很好用" + c for c in "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥天地玄黃宇宙洪荒日月盈昃辰宿列張"]
+ROWS = ["我们的软件很好用" + c for c in "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥天地玄黃宇宙洪荒日月盈昃辰宿列張"]
 
 
-class TrainOnlyNewConv(ttp.Base):
-    def files(self, d):
-        a, b = os.path.join(d, "cv-a.tsv"), os.path.join(d, "cmn_sentences.tsv.bz2")
-        open(a, "w", encoding="utf-8").write("".join(f"x\t{r}\n" for r in ROWS[:20]))
-        with bz2.open(b, "wt", encoding="utf-8") as f:
+class Sources(ttp.Base):
+    def sources(self, d):
+        """cv-a.tsv (the first 20 rows) and cmn_sentences.tsv.bz2 (the rest) in directory d."""
+        open(os.path.join(d, "cv-a.tsv"), "w", encoding="utf-8").write("".join(f"x\t{r}\n" for r in ROWS[:20]))
+        with bz2.open(os.path.join(d, "cmn_sentences.tsv.bz2"), "wt", encoding="utf-8") as f:
             f.write("".join(f"1\tcmn\t{r}\n" for r in ROWS[20:]))
-        return [a, b]
 
-    def test_split_and_tune_side_do_not_move_and_plugin_survives_on_train(self):
+    def files(self, d):
+        self.sources(d)
+        return [(os.path.join(d, "cv-a.tsv"), "native"), (os.path.join(d, "cmn_sentences.tsv.bz2"), "mixed")]
+
+
+class Split(Sources):
+    def test_common_voice_is_kept_as_written_and_tatoeba_is_converted(self):
         with tempfile.TemporaryDirectory() as d:
-            files = self.files(d)
-            old_train, old_tune = bt.split_colloquial(files, ttp.CONV)
-            new_train, new_tune = bt.split_colloquial(files, ttp.CONV, new_train=True)
-        self.assertEqual(new_tune, old_tune)
-        self.assertTrue(old_tune and old_train)                                          # the fixture has both sides
-        self.assertEqual(len(old_train) + len(old_tune), len(ROWS))
-        self.assertTrue(all("外掛" in r and "插件" not in r for r in old_train))          # current conversion
-        self.assertTrue(all("插件" in r and "外掛" not in r for r in new_train))          # new conversion, same rows in the same order
-        self.assertEqual([r.replace("插件", "外掛") for r in new_train], old_train)
-        self.assertTrue(all("外掛" in r for r in old_tune))                               # the tune side still uses the current conversion
+            train, tune = bt.split_colloquial(self.files(d), ttp.CONV)
+        cv_rows = {r for r in ROWS[:20]}
+        self.assertTrue(train and tune)
+        self.assertEqual(len(train) + sum(1 for r in ROWS if bt.is_tune(r)), len(ROWS))          # the split hashes the raw sentence, kind does not move it
+        for r in train:
+            self.assertEqual(r in cv_rows, "软件" in r)                                          # native: Simplified wording kept; mixed: 软件 converted
+            self.assertEqual("軟體" in r, r not in cv_rows)
+        self.assertEqual({t for t in tune if "软件" in t}, {t for t in (r for r in cv_rows if bt.is_tune(r))})   # a native tune clause is the raw sentence
+        self.assertTrue(all("軟體" in t for t in tune if "軟體" in t) and any("軟體" in t for t in tune))
 
-    def test_main_writes_only_the_train_side(self):
-        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as out:
-            self.files(src)
-            out_io = io.StringIO()
-            with mock.patch.object(bt, "SRC", src), mock.patch.object(bt, "OUT", out), mock.patch.object(bt.bc, "load_conv", lambda: ttp.CONV), \
-                 mock.patch.object(sys, "argv", ["build_tune.py", "--train-only-new-conv"]), contextlib.redirect_stdout(out_io):
-                bt.main()
-            self.assertEqual(os.listdir(out), ["colloquial-train.txt"])                    # no cvtune, no wikitune
-            lines = open(os.path.join(out, "colloquial-train.txt"), encoding="utf-8").read().splitlines()
-            self.assertTrue(lines and all("插件" in l for l in lines))
-            self.assertIn(f"{len(lines)} sentences, {len(lines)} with 插件, SHA-256 ", out_io.getvalue())
+    def test_an_unknown_kind_stops(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.sources(d)
+            with self.assertRaises(ValueError):
+                bt.split_colloquial([(os.path.join(d, "cv-a.tsv"), "both")], ttp.CONV)
 
 
-# --cv-no-trad-tw-phrases / --cv-name (docs/contracts/tune-no-twphrases.md section 1.1). The goldens below were taken from build_tune.py before the
-# option existed, on these synthetic sources: without the new flag every output must stay as it was (the contract's regression assertion).
-CV_TRAD, CV_SIMP = "我們的權限很好用戊", "我们的权限很好用丙"   # both hash into the tune 20%
-CV_ROWS = ROWS + [CV_TRAD, CV_SIMP]
-WIKI = ["管理員權限加好了。我们的插件很好用。", "大家都來吃飯吧。我们的权限很好用！", "今天天氣很好吧。軟件權限都改了；", "這個插件我们天天用。",
-        "我们的软件權限很好用。", "天氣很好所以出門玩。"]
-
-
-class SynthTables(ttp.Base):
-    """The synthetic conversion tables plus 權限 -> 許可權 (Traditional keys) and 权 -> 權 (Simplified characters); no tests of its own."""
-    def setUp(self):
-        super().setUp()
-        for k, v in (("權限", "許可權"), ("管理員權限", "管理員許可權")):
-            ttp.TW_PHRASE[k] = v; self.addCleanup(ttp.TW_PHRASE.pop, k, None)
-        ttp.SIMP_CHAR["权"] = "權"; self.addCleanup(ttp.SIMP_CHAR.pop, "权", None)
-        ttp.TABLES["TW_MAXP"][0] = 5; self.addCleanup(ttp.TABLES["TW_MAXP"].__setitem__, 0, 2)
-
-    def sources(self, src):
-        """Write the synthetic Common Voice / Tatoeba files into src."""
-        a, b = os.path.join(src, "cv-a.tsv"), os.path.join(src, "cmn_sentences.tsv.bz2")
-        open(a, "w", encoding="utf-8").write("".join(f"x\t{r}\n" for r in CV_ROWS[:21]))
-        with bz2.open(b, "wt", encoding="utf-8") as f:
-            f.write("".join(f"1\tcmn\t{r}\n" for r in CV_ROWS[21:]))
-
-
-class MainOutputs(SynthTables):
+class MainOutputs(Sources):
     """build_tune.main on synthetic sources: the sampled clauses handed to readings() and colloquial-train.txt."""
     def run_main(self, *argv):
         with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as out:
@@ -139,62 +109,28 @@ class MainOutputs(SynthTables):
             calls, out_io = [], io.StringIO()
             with mock.patch.object(bt, "SRC", src), mock.patch.object(bt, "OUT", out), mock.patch.object(bt.bc, "load_conv", lambda: ttp.CONV), \
                  mock.patch.object(bt, "readings", lambda rows, name: calls.append((name, rows))), \
-                 mock.patch.object(bt, "articles_in", lambda lo, hi, progress=0: iter(WIKI)), \
+                 mock.patch.object(bt, "articles_in", lambda lo, hi, progress=0: iter(["我们的软件很好用。", "今天天氣很好吧。"])), \
                  mock.patch.object(sys, "argv", ["build_tune.py", *argv]), contextlib.redirect_stdout(out_io):
                 bt.main()
-            train = open(os.path.join(out, "colloquial-train.txt"), encoding="utf-8").read() if "colloquial-train.txt" in os.listdir(out) else None
-            return calls, train
+            return calls, open(os.path.join(out, "colloquial-train.txt"), encoding="utf-8").read() if "colloquial-train.txt" in os.listdir(out) else None
 
-    OLD_CV = ['我們的外掛很好用壬', '我們的許可權很好用戊', '我們的外掛很好用宇', '我們的外掛很好用子', '我們的外掛很好用宙', '我們的外掛很好用申', '我們的外掛很好用巳', '我們的許可權很好用丙']
-    OLD_WIKI = ['管理員許可權加好了', '我們的許可權很好用', '今天天氣很好吧', '這個外掛我們天天用', '我們的外掛很好用']
-    OLD_WIKI_KEPT = ['管理員權限加好了', '我們的許可權很好用', '今天天氣很好吧', '這個外掛我們天天用', '我們的外掛很好用']   # --tune-no-trad-tw-phrases alone
-    OLD_TRAIN = (31, "fb43ed6a1504f8431dab29ec9abda650e3225a625fd167a19c2cb8c81e838b5c")
-
-    def train_id(self, train):
-        return (train.count("\n"), hashlib.sha256(train.encode("utf-8")).hexdigest())
-
-    def test_without_the_new_flag_every_output_is_as_before(self):
+    def test_main_writes_the_converted_pool_and_the_sampled_tune_rows(self):
         calls, train = self.run_main("--cv-rows", "8", "--wiki-rows", "5")
-        self.assertEqual(calls, [("cvtune", self.OLD_CV), ("wikitune", self.OLD_WIKI)])
-        self.assertEqual(self.train_id(train), self.OLD_TRAIN)
-        calls, train = self.run_main("--part", "cv", "--cv-rows", "8")
-        self.assertEqual((calls, self.train_id(train)), ([("cvtune", self.OLD_CV)], self.OLD_TRAIN))
-        self.assertEqual(self.run_main("--part", "wiki", "--cv-rows", "8", "--wiki-rows", "5"), ([("wikitune", self.OLD_WIKI)], None))
+        self.assertEqual([c[0] for c in calls], ["cvtune", "wikitune"])
+        lines = train.splitlines()
+        self.assertEqual(len(lines), sum(1 for r in ROWS if not bt.is_tune(r)))
+        self.assertTrue(any("軟體" in l for l in lines) and any("软件" in l for l in lines))   # Tatoeba converted, Common Voice as written
+        self.assertEqual(calls[1][1], ["我們的軟體很好用", "今天天氣很好吧"])                    # the wiki clauses are converted (mixed)
 
-    def test_wiki_part_with_only_the_wiki_flag_is_as_before(self):
-        """wikijudge6's command (--part wiki ... --tune-no-trad-tw-phrases) must not move: the wiki half keeps the article wording, cv is untouched."""
-        self.assertEqual(self.run_main("--part", "wiki", "--cv-rows", "8", "--wiki-rows", "5", "--tune-no-trad-tw-phrases"),
-                         ([("wikitune", self.OLD_WIKI_KEPT)], None))
-        calls, train = self.run_main("--cv-rows", "8", "--wiki-rows", "5", "--tune-no-trad-tw-phrases")
-        self.assertEqual((calls, self.train_id(train)), ([("cvtune", self.OLD_CV), ("wikitune", self.OLD_WIKI_KEPT)], self.OLD_TRAIN))
-
-    def test_cv_flag_keeps_a_traditional_quanxian_and_still_converts_a_simplified_one(self):
-        calls, train = self.run_main("--part", "cv", "--cv-rows", "100", "--cv-no-trad-tw-phrases", "--cv-name", "cvtune-tw0")
-        self.assertEqual([c[0] for c in calls], ["cvtune-tw0"])
-        self.assertIsNone(train)                                                    # colloquial-train is not written
-        rows = calls[0][1]
-        self.assertIn("我們的權限很好用戊", rows)                                     # the Traditional source sentence keeps 權限
-        self.assertNotIn("我們的許可權很好用戊", rows)
-        self.assertIn("我們的許可權很好用丙", rows)                                   # the Simplified one still goes through TWPhrases
-        self.assertNotIn("我們的權限很好用丙", rows)
-        default = set(self.run_main("--part", "cv", "--cv-rows", "100")[0][0][1])
-        self.assertEqual({r.replace("權限", "許可權").replace("插件", "外掛") for r in rows}, default)   # the same clauses, only TWPhrases wording differs
-        self.assertIn("我們的插件很好用壬", rows)                                      # (the other Traditional rows keep their wording too)
-
-    def test_wiki_part_continues_the_cv_random_state(self):
-        """--part wiki re-runs the cv sampling, so it gives the wiki rows a full run gives (with both flags, as the two TW0 commands do)."""
-        both = ("--cv-no-trad-tw-phrases", "--tune-no-trad-tw-phrases")
-        full = self.run_main("--cv-rows", "8", "--wiki-rows", "5", *both)[0]
-        wiki = self.run_main("--part", "wiki", "--cv-rows", "8", "--wiki-rows", "5", *both)[0]
-        self.assertEqual([c[0] for c in full], ["cvtune", "wikitune"])
+    def test_part_wiki_gives_the_wiki_rows_a_full_run_gives(self):
+        """--part wiki re-runs the cv sampling to continue its random state."""
+        full = self.run_main("--cv-rows", "8", "--wiki-rows", "1")[0]
+        wiki, train = self.run_main("--part", "wiki", "--cv-rows", "8", "--wiki-rows", "1")
         self.assertEqual(wiki, full[1:])
-        self.assertEqual(wiki[0][1][0], "管理員權限加好了")
+        self.assertIsNone(train)
 
-    def test_the_cv_flag_does_not_combine_with_train_only(self):
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            self.run_main("--cv-no-trad-tw-phrases", "--train-only-new-conv")
-        a = bt.parser().parse_args([])
-        self.assertEqual((a.cv_no_trad_tw_phrases, a.cv_name), (False, "cvtune"))
+    def test_the_cv_name_option_renames_the_cv_output(self):
+        self.assertEqual(self.run_main("--part", "cv", "--cv-rows", "8", "--cv-name", "cvtune-x")[0][0][0], "cvtune-x")
 
 
 if __name__ == "__main__":

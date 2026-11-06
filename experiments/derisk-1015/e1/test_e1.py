@@ -322,17 +322,22 @@ class TestCounting(unittest.TestCase):
             open(other, "w", encoding="utf-8").write("他說在學校\n")
             with contextlib.redirect_stdout(io.StringIO()):
                 for tag, paths in (("tsv", [tsv]), ("plain", [plain]), ("other", [other]), ("both", [plain, other])):
-                    count.main(["text", "--out", d, "--tag", tag, *paths])
+                    count.main(["text", "--out", d, "--tag", tag, *[x for p in paths for x in ("--mixed", p)]])
                 count.main(["merge", "--out", d, "--tag", "m", "plain", "other"])
             self._assert_same_counts(d, "tsv", "plain")
             self.assertEqual(unpickle(os.path.join(d, "unmapped", "counts-tsv.pkl"))["runs"], 2)
             self._assert_same_counts(d, "m", "both")
             seen = []
             real = bc.convert
-            with mock.patch.object(bc, "convert", lambda *x, **kw: (seen.append(kw.get("trad_tw_phrases", True)), real(*x, **kw))[1]), contextlib.redirect_stdout(io.StringIO()):
-                count.main(["text", "--out", d, "--tag", "x", plain])
-                count.main(["text", "--out", d, "--tag", "y", "--no-trad-tw-phrases", plain])
-            self.assertEqual((set(seen[:2]), set(seen[2:])), ({True}, {False}))   # --no-trad-tw-phrases reaches the conversion, as in build_counts.py
+            with mock.patch.object(bc, "convert", lambda *x, **kw: (seen.append(x[0]), real(*x, **kw))[1]), contextlib.redirect_stdout(io.StringIO()):
+                count.main(["text", "--out", d, "--tag", "x", "--native", plain])
+                self.assertEqual(seen, [])                                  # docs/contracts/tw-conv.md 2.1: a native input never reaches the conversion
+                count.main(["text", "--out", d, "--tag", "y", "--mixed", plain])
+            self.assertEqual(seen, ["你好嗎", "今天天氣很好"])               # a mixed one is converted line by line
+            self._assert_same_counts(d, "x", "y")
+            for argv in (["text", "--out", d, "--tag", "z", plain], ["text", "--out", d, "--tag", "z", "--no-trad-tw-phrases", "--native", plain]):
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit, msg=argv):    # no kind, or the removed flag: an error
+                    count.main(argv)
 
     GUARD_LINES = ["我說今天天氣很好吧", "「今天天氣很好」，他說再見", "你好嗎", "再見"]   # hit inside a longer run; hit wrapped in quotes; two clean lines
 
@@ -341,7 +346,7 @@ class TestCounting(unittest.TestCase):
         open(src, "w", encoding="utf-8").write("\n".join(self.GUARD_LINES) + "\n")
         out = io.StringIO()
         with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), contextlib.redirect_stdout(out):
-            count.main(["text", "--out", d, "--tag", tag, src, *flag])
+            count.main(["text", "--out", d, "--tag", tag, "--mixed", src, *flag])
         return out.getvalue()
 
     def test_text_holdout_guard_off_is_identical_and_on_skips_the_hit_runs(self):
@@ -375,7 +380,7 @@ class TestCounting(unittest.TestCase):
             err, out = io.StringIO(), io.StringIO()
             with mock.patch.object(bc, "load_conv", lambda: ({}, {}, 1)), contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
                 with self.assertRaises(SystemExit) as cm:
-                    count.main(["text", "--out", d, "--tag", "x", os.path.join(d, "none.txt"), "--holdout-guard", bad])
+                    count.main(["text", "--out", d, "--tag", "x", "--mixed", os.path.join(d, "none.txt"), "--holdout-guard", bad])
             msg = str(cm.exception.code)
             self.assertIn("bad.txt:1", msg)
             self.assertNotIn(marker, msg + err.getvalue() + out.getvalue())

@@ -2,13 +2,13 @@
 
 For the rows of a tune file whose sentence contains 區域性／分割槽／擴充套件／指令碼／許可權 (override with --words), re-read the same sources with the same
 split and range as build_tune.py and print which raw source sentence each such clause came from, and whether convert() itself treats that raw sentence
-as Simplified (build_counts.is_simplified, the test convert() applies). A Simplified source sentence still goes through TWPhrases on purpose; a Traditional
-one with --cv-no-trad-tw-phrases / --tune-no-trad-tw-phrases would be a failure (contract section 4).
+as Simplified (build_counts.is_simplified, the test convert() applies). Only a Simplified source sentence (or a marker-only one, which is_simplified
+also calls Simplified) gets the mainland-term TWPhrases subset of tw-conv.tsv, so a hit that traces to a Traditional sentence is a failure (contract section 4).
 
-  python3 experiments/s2/trace_tune_sources.py --part cv   --tune cvtune-tw0.txt  [--cv-no-trad-tw-phrases]
-  python3 experiments/s2/trace_tune_sources.py --part wiki --tune wikitune-tw0.txt [--tune-no-trad-tw-phrases] [--wiki-range 300000 305000]
+  python3 experiments/s2/trace_tune_sources.py --part cv   --tune cvtune-tw0.txt
+  python3 experiments/s2/trace_tune_sources.py --part wiki --tune wikitune-tw0.txt [--wiki-range 300000 305000]
 
-Give the same conversion flags as the build. The wiki pass reads the dump again (single process, as long as the build's read). That pass does not need the tune
+The wiki pass reads the dump again (single process, as long as the build's read). That pass does not need the tune
 file, so it can run next to the build: `--collect HITS` scans and writes every source clause that contains one of the words (no --tune), and later
 `--tune FILE --hits HITS` joins that file to the rows without reading the sources. Output, tab separated, to
 stdout: `hit<TAB>word<TAB>tune line<TAB>source<TAB>simplified|traditional<TAB>raw sentence`, then `count<TAB>word<TAB>rows<TAB>from simplified<TAB>from traditional`,
@@ -38,22 +38,22 @@ def tune_rows(path, words):
     return out
 
 
-def cv_sources(conv, tw):
-    """(source label, raw sentence, clauses) for every tune-side source line, converted as build_tune does."""
-    for n, (raw, tuned) in enumerate(bt.tune_sentences(bt.cv_files()), 1):
+def cv_sources(conv):
+    """(source label, raw sentence, clauses) for every tune-side source line, converted as build_tune does (native sources are not converted)."""
+    for n, (raw, tuned, kind) in enumerate(bt.tune_sentences(bt.cv_files()), 1):
         if tuned:
-            yield f"cv:{n}", raw, bt.HAN.findall(bc.convert(raw, *conv, trad_tw_phrases=tw))
+            yield f"cv:{n}", raw, bt.HAN.findall(raw if bc.check_kind(kind) == "native" else bc.convert(raw, *conv))
 
 
-def wiki_sources(conv, tw, lo, hi, progress=0):
+def wiki_sources(conv, lo, hi, progress=0):
     for i, raw in enumerate(bt.articles_in(lo, hi, progress), lo):
         for s in bc.SENT.findall(bt.wiki_markup(raw)):
-            yield f"wiki:{i}", s, bt.wiki_clauses(s, conv, False, tw)
+            yield f"wiki:{i}", s, bt.wiki_clauses(s, conv, False)
 
 
-def trace(part, want, conv, tw, lo=300_000, hi=305_000, progress=0):
+def trace(part, want, conv, lo=300_000, hi=305_000, progress=0):
     """-> [(clause, source label, raw sentence, simplified?)] for every source clause for which want(clause) is true."""
-    src = cv_sources(conv, tw) if part == "cv" else wiki_sources(conv, tw, lo, hi, progress)
+    src = cv_sources(conv) if part == "cv" else wiki_sources(conv, lo, hi, progress)
     return [(c, label, raw, bc.is_simplified(raw)) for label, raw, clauses in src for c in clauses if want(c)]
 
 
@@ -76,16 +76,13 @@ def main(argv=None, conv=None):
     ap.add_argument("--tune", help="the built tune file (before or after the guard); not needed with --collect")
     ap.add_argument("--collect", metavar="HITS", help="scan the sources only: write every source clause that contains one of the words to HITS (never overwrites)")
     ap.add_argument("--hits", metavar="HITS", help="with --tune: take the sources' hits from a --collect file instead of scanning")
-    ap.add_argument("--cv-no-trad-tw-phrases", action="store_true", help="the cv build's flag (only --part cv)")
-    ap.add_argument("--tune-no-trad-tw-phrases", action="store_true", help="the wiki build's flag (only --part wiki)")
     ap.add_argument("--wiki-range", type=int, nargs=2, default=[300_000, 305_000], metavar=("LO", "HI"))
     ap.add_argument("--progress-every", type=int, default=0, metavar="N", help="a line on stderr every N articles read (build_tune's option)")
     ap.add_argument("--words", nargs="+", default=list(WORDS))
     a = ap.parse_args(argv)
     if bool(a.tune) == bool(a.collect) or (a.hits and not a.tune):
         ap.error("give --tune (optionally with --hits), or --collect alone")
-    tw = not (a.cv_no_trad_tw_phrases if a.part == "cv" else a.tune_no_trad_tw_phrases)
-    scan = lambda want: trace(a.part, want, conv or bc.load_conv(), tw, *a.wiki_range, a.progress_every)
+    scan = lambda want: trace(a.part, want, conv or bc.load_conv(), *a.wiki_range, a.progress_every)
     if a.collect:
         hits = scan(lambda c: any(w in c for w in a.words))
         with open(a.collect, "x", encoding="utf-8", newline="\n") as f:

@@ -1,5 +1,7 @@
 """S7a unit tests, numpy only: training-text equivalence with build_counts, vocabulary / ids, batching, construction check.
 Needs the OpenCC files in ~/.cache/shanjie/sources/opencc (the same ones build_counts needs; hash-checked by build_counts)."""
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -55,11 +57,11 @@ class TestPrepEquivalence(unittest.TestCase):
             matcher = holdout_guard.build_matcher([rows], self.conv)[0]
             lines = ["今天天氣真好", "我们明天去哪里吃饭"]
             prep._init()
-            off = prep._work(("text", lines))
-            self.assertEqual(off[0].split("\n"), [r for l in lines for r in prep.text_runs(l, self.conv)])
+            off = prep._work(("mixed", lines))
+            self.assertEqual(off[0].split("\n"), [r for l in lines for r in prep.text_runs(l, self.conv, "mixed")])
             self.assertEqual(off[3], 0)
             prep._init(matcher)
-            on = prep._work(("text", lines))
+            on = prep._work(("mixed", lines))
             prep._init()
         self.assertEqual((on[2], on[3]), (off[2] - 1, 1))
         self.assertNotIn("今天天氣真好", on[0])
@@ -69,125 +71,62 @@ class TestPrepEquivalence(unittest.TestCase):
             src = os.path.join(td, "c.txt")
             with open(src, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(COLLOQUIAL) + "\n")
-            theirs = self.record(lambda: bct.main([os.path.join(td, "o.pkl"), src]))
-            ours = [r for line in bct.lines(src) for r in prep.text_runs(line, self.conv)]
+            theirs = self.record(lambda: bct.main([os.path.join(td, "o.pkl"), "--mixed", src]))
+            ours = [r for line in bct.lines(src) for r in prep.text_runs(line, self.conv, "mixed")]
         self.assertEqual(ours, theirs)
         self.assertIn("我們明天去哪裡吃飯", ours)
 
-    def test_no_trad_tw_phrases_keeps_traditional_wording(self):
-        """docs/contracts/sr-no-twphrases.md section 2.1: with tw=False a Traditional sentence keeps 權限 (TWPhrases has 權限 -> 許可權);
-        a Simplified one is converted as before; tw=True (the default) is the old output."""
-        trad, simp = "管理員權限加好了", "我们的插件"
-        self.assertEqual(list(prep.text_runs(trad, self.conv)), [r for r in bc.text_runs(trad, self.conv) if len(r) >= 2])
-        self.assertNotIn("管理員權限加好了", list(prep.text_runs(trad, self.conv)))           # the default still rewrites it
-        self.assertEqual(list(prep.text_runs(trad, self.conv, False)), ["管理員權限加好了"])
-        self.assertEqual(list(prep.text_runs(simp, self.conv, False)), list(prep.text_runs(simp, self.conv)))
-        art = trad + "。"
-        self.assertEqual(list(prep.wiki_runs(art, self.conv, False)), ["管理員權限加好了"])
+    def test_native_is_not_converted_and_mixed_is(self):
+        """docs/contracts/tw-conv.md 2.1: a native input (colloquial-train.txt, synth.txt) is never converted again; wiki and --kind mixed are converted."""
+        simp, trad = "我们的软件", "管理員權限加好了"
+        self.assertEqual(list(prep.text_runs(simp, self.conv, "native")), [simp])
+        self.assertEqual(list(prep.text_runs(simp, self.conv, "mixed")), ["我們的軟體"])
+        self.assertEqual(list(prep.text_runs(trad, self.conv, "mixed")), [trad])       # 權限 is no mainland term and a Traditional sentence has no phrase table
+        art = simp + "。"
         self.assertEqual(list(prep.wiki_runs(art, self.conv)), [r for r in bc.article_runs(art, self.conv) if len(r) >= 2])
-        prep._init(None, False)
-        try:
-            self.assertEqual(prep._work(("text", [trad]))[0], "管理員權限加好了")
-            self.assertEqual(prep._text_work(([trad], False, False))[0], "管理員權限加好了\n")
-        finally:
-            prep._init()
-        self.assertEqual(prep._work(("text", [trad]))[0], "\n".join(list(prep.text_runs(trad, self.conv))))
+        self.assertEqual(list(prep.wiki_runs(art, self.conv)), ["我們的軟體"])
+        prep._init()
+        self.assertEqual(prep._work(("native", [simp]))[0], simp)
+        self.assertEqual(prep._work(("mixed", [simp]))[0], "我們的軟體")
+        self.assertEqual(prep._text_work(([simp], False, False, "native"))[0], simp + "\n")
+        self.assertEqual(prep._text_work(([simp], False, False, "mixed"))[0], "我們的軟體\n")
 
-    def test_simp_tw_keys_and_changed_flags(self):
-        """SR-TW-V: --simp-tw-keys restricts TWPhrases on Simplified sentences; --changed-flags marks the runs that differ from the default
-        conversion (A) in the one written (B), one byte per kept run; off (the default) nothing changes."""
-        trad, simp, same = "管理員權限加好了", "管理员权限加好了", "今天天氣真好"
-        lines = [trad, same, simp]
-        listed, other = frozenset({"權限"}), frozenset({"軟件"})
-        # B = --no-trad-tw-phrases: the Traditional 權限 run differs from A (許可權); the plain run and (keys unset) the Simplified run do not
-        self.assertEqual(list(prep.text_runs_flagged(trad, self.conv, False)), [("管理員權限加好了", True)])
-        self.assertEqual(list(prep.text_runs_flagged(same, self.conv, False)), [(same, False)])
-        self.assertEqual(list(prep.text_runs_flagged(simp, self.conv, False)), [("管理員許可權加好了", False)])
-        # B = --simp-tw-keys: the Simplified run stays 權限 unless 權限 is listed; Traditional runs follow tw
-        self.assertEqual(list(prep.text_runs(simp, self.conv, True, other)), ["管理員權限加好了"])
-        self.assertEqual(list(prep.text_runs(simp, self.conv, True, listed)), ["管理員許可權加好了"])
-        self.assertEqual(list(prep.text_runs_flagged(simp, self.conv, True, other)), [("管理員權限加好了", True)])
-        self.assertEqual(list(prep.text_runs_flagged(simp, self.conv, True, listed)), [("管理員許可權加好了", False)])
-        # the flagged wiki path yields the same runs as wiki_runs
-        art = "管理员权限加好了。今天天氣真好！" + trad + "。"
-        for tw, keys in ((True, None), (False, None), (True, other), (False, other)):
-            self.assertEqual([r for r, _ in prep.wiki_runs_flagged(art, self.conv, tw, keys)], list(prep.wiki_runs(art, self.conv, tw, keys)))
-        self.assertEqual([c for _, c in prep.wiki_runs_flagged(art, self.conv, False, other)], [True, False, True])
-        # the workers: flags are bytes aligned with the runs, 4-tuple without the option
-        prep._init(None, False, other, True)
-        try:
-            text, _, n, _, fl = prep._work(("text", lines))
-            self.assertEqual((text.split("\n"), n, fl), (["管理員權限加好了", same, "管理員權限加好了"], 3, b"\x01\x00\x01"))
-            out = prep._text_work((lines, False, False))
-            self.assertEqual((out[0], out[4]), ("管理員權限加好了\n" + same + "\n管理員權限加好了\n", b"\x01\x00\x01"))
-        finally:
-            prep._init()
-        self.assertEqual(len(prep._work(("text", lines))), 4)
-        self.assertEqual(len(prep._text_work((lines, False, False))), 4)
-        # the guard drops a run from both the text and the flags
-        import holdout_guard
+    def test_write_runs_needs_a_valid_kind_and_the_text_command_requires_it(self):
         with tempfile.TemporaryDirectory() as td:
-            rows = os.path.join(td, "rows.txt")
-            open(rows, "w", encoding="utf-8").write("a|" + same + "|x\n")
-            prep._init(holdout_guard.build_matcher([rows], self.conv, False)[0], False, None, True)
-            try:
-                text, _, n, skipped, fl = prep._work(("text", lines))
-            finally:
-                prep._init()
-        self.assertEqual((n, skipped, fl), (2, 1, b"\x01\x00"))
-
-    def test_write_runs_changed_flags_file_and_report(self):
-        lines = ["管理員權限加好了", "今天天氣真好", "管理员权限加好了"]
-        keys_file = None
-        with tempfile.TemporaryDirectory() as td:
-            src, keys_file = os.path.join(td, "in.txt"), os.path.join(td, "keys.txt")
-            open(src, "w", encoding="utf-8").write("\n".join(lines) + "\n")
-            open(keys_file, "w", encoding="utf-8").write("# comment\n軟件\n\n")
-            keys, info = prep.load_simp_keys(keys_file)
-            self.assertEqual((keys, info["keys"], info["basename"], info["sha256"]), (frozenset({"軟件"}), 1, "keys.txt", prep.sha256_file(keys_file)))
-            self.assertEqual(info["keys_in_twphrases"], 1)
-            bad = os.path.join(td, "bad.txt")   # Taiwan wording instead of TWPhrases keys: refused, not a silent empty table
-            open(bad, "w", encoding="utf-8").write("軟體\n滑鼠\n")
-            with self.assertRaises(SystemExit):
-                prep.load_simp_keys(bad)
-            plain = prep.write_runs(src, td, "plain", self.conv, tw=False)
-            self.assertFalse(os.path.exists(os.path.join(td, "flags-plain.u8")))
-            self.assertNotIn("flags_sha256", plain)
+            src = os.path.join(td, "in.txt")
+            open(src, "w", encoding="utf-8").write("我们的软件\n今天天氣真好\n")
+            with self.assertRaises(TypeError):
+                prep.write_runs(src, td, "x", self.conv)
+            with self.assertRaises(ValueError):
+                prep.write_runs(src, td, "x", self.conv, "both")
             for procs in (1, 2):
-                rep = prep.write_runs(src, td, f"f{procs}", self.conv, procs=procs, tw=False, keys=keys, keys_info=info, flags=True)
-                self.assertEqual(open(os.path.join(td, f"flags-f{procs}.u8"), "rb").read(), b"\x01\x00\x01")
-                self.assertEqual((rep["changed_runs"], rep["simp_tw_keys"]), (2, info))
-                self.assertEqual(rep["flags_sha256"], prep.sha256_file(os.path.join(td, f"flags-f{procs}.u8")))
-            self.assertEqual(open(os.path.join(td, "runs-f1.txt"), "rb").read(), open(os.path.join(td, "runs-f2.txt"), "rb").read())
-            self.assertEqual(open(os.path.join(td, "runs-f1.txt"), encoding="utf-8").read().split("\n")[:-1], ["管理員權限加好了", "今天天氣真好", "管理員權限加好了"])
-            # the same keys and no flags: identical runs, no flags file
-            prep.write_runs(src, td, "nf", self.conv, tw=False, keys=keys, keys_info=info)
-            self.assertEqual(open(os.path.join(td, "runs-nf.txt"), "rb").read(), open(os.path.join(td, "runs-f1.txt"), "rb").read())
-            self.assertFalse(os.path.exists(os.path.join(td, "flags-nf.u8")))
-            open(keys_file, "w", encoding="utf-8").write("軟\n")
-            with self.assertRaises(SystemExit):
-                prep.load_simp_keys(keys_file)
+                prep.write_runs(src, td, f"n{procs}", self.conv, "native", procs=procs)
+                prep.write_runs(src, td, f"m{procs}", self.conv, "mixed", procs=procs)
+            self.assertEqual(open(os.path.join(td, "runs-n1.txt"), encoding="utf-8").read(), "我们的软件\n今天天氣真好\n")
+            self.assertEqual(open(os.path.join(td, "runs-m1.txt"), encoding="utf-8").read(), "我們的軟體\n今天天氣真好\n")
+            for k in "nm":
+                self.assertEqual(open(os.path.join(td, f"runs-{k}1.txt"), "rb").read(), open(os.path.join(td, f"runs-{k}2.txt"), "rb").read())
+        for argv in (["text", "--work", "w", "--in", "x", "--name", "n"],   # no --kind
+                     ["text", "--work", "w", "--in", "x", "--name", "n", "--kind", "native", "--no-trad-tw-phrases"],
+                     ["text", "--work", "w", "--in", "x", "--name", "n", "--kind", "native", "--simp-tw-keys", "f"],
+                     ["text", "--work", "w", "--in", "x", "--name", "n", "--kind", "native", "--changed-flags"],
+                     ["runs", "--work", "w", "--coll", "c", "--synth", "s", "--no-trad-tw-phrases"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit, msg=argv):
+                prep.main(argv)
 
-    def test_no_trad_tw_phrases_guard_matches_the_written_text(self):
-        """The guard gets the same setting, so a held-out 權限 sentence is found in the text that is actually written."""
+    def test_the_guard_matches_the_text_that_is_written(self):
+        """The guard's patterns hold the sentence as written and converted, so a held-out sentence is found in a native line and in a mixed one."""
         import holdout_guard
         with tempfile.TemporaryDirectory() as td:
             rows = os.path.join(td, "rows.txt")
-            open(rows, "w", encoding="utf-8").write("a|管理員權限加好了|x\n")
-            matcher = holdout_guard.build_matcher([rows], self.conv, False)[0]
-            prep._init(matcher, False)
+            open(rows, "w", encoding="utf-8").write("a|我们的软件好用|x\n")
+            matcher = holdout_guard.build_matcher([rows], self.conv)[0]
+            prep._init(matcher)
             try:
-                text, _, n, skipped = prep._work(("text", ["管理員權限加好了"]))
+                results = [prep._work((kind, ["我们的软件好用"])) for kind in ("native", "mixed")]
             finally:
                 prep._init()
-        self.assertEqual((text, n, skipped), ("", 0, 1))
-
-    def test_no_trad_tw_phrases_expects_the_regenerated_pool(self):
-        self.assertTrue(prep.match_hash("colloquial-train.txt", "eb905936" + "0" * 52 + "57a0", prep.EXPECTED_NO_TW))
-        self.assertFalse(prep.match_hash("colloquial-train.txt", "3e833d06" + "0" * 52 + "b4db", prep.EXPECTED_NO_TW))
-        self.assertTrue(prep.match_hash("colloquial-train.txt", "3e833d06" + "0" * 52 + "b4db"))
-        self.assertEqual({k: v for k, v in prep.EXPECTED_NO_TW.items() if k != "colloquial-train.txt"},
-                         {k: v for k, v in prep.EXPECTED.items() if k != "colloquial-train.txt"})
+        self.assertEqual([(r[0], r[2], r[3]) for r in results], [("", 0, 1), ("", 0, 1)])
 
     def test_input_hash_check_stops_on_mismatch(self):
         with tempfile.TemporaryDirectory() as td:

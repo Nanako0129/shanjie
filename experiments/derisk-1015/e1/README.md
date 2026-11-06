@@ -13,7 +13,7 @@ cd <REPO> && python3 -W ignore experiments/derisk-1015/e1/test_e1.py > /tmp/e1-t
 | 檔 | 做什麼 |
 |---|---|
 | `mapping.py` | E4 (b) 的**唯一**切分函式 `tokenize`：漢字段／數字段或英文字母段（每段一個 `<X>`）／其他。計數（`han_runs_with_left`）與解碼（`ends_with_x`）都經由模組呼叫它 |
-| `count.py` | E1a。包 `experiments/s2/build_counts.py`、`build_counts_text.py`（import，不改）：一次輸出 uni／bi／**tri**（未對應）與同一趟的對應版 uni／bi ；`wiki --shard K/N`、`merge`（把各份的計數相加）、`--no-trad-tw-phrases`（SJ-LM-7，預設關），用法見 `experiments/sj-lm-7/README.md`。`build_models.py tri --corpora FILE:WEIGHT …` 換來源與權重（預設不變） |
+| `count.py` | E1a。包 `experiments/s2/build_counts.py`、`build_counts_text.py`（import，不改）：一次輸出 uni／bi／**tri**（未對應）與同一趟的對應版 uni／bi ；`wiki --shard K/N`、`merge`（把各份的計數相加）、`text` 的 `--native`／`--mixed`（每份輸入標種類，`docs/contracts/tw-conv.md`），用法見 `experiments/sj-lm-7/README.md`。`build_models.py tri --corpora FILE:WEIGHT …` 換來源與權重（預設不變） |
 | `sjlm_io.py` | SJLM 與 trigram 表 `SJT30001` 的 numpy 讀寫（格式寫在檔頭） |
 | `trimodel.py` | trigram 表（建、剪、載入、查）與 `TriLM`：B0 加上 trigram 層的打分（雙歷史詞） |
 | `build_models.py` | E1b。`bigram`：B0／B0m（`tools/build_lm.py` 配方）加 KN 側檔（kn-v1）；`tri`：各剪枝門檻的 trigram 表與大小表 |
@@ -92,7 +92,7 @@ git -C $REPO rev-parse HEAD      # 記進研究紀錄；每個輸出 JSON 也會
 git -C $REPO show 4d47a50:data/lexicon/overlay-add.tsv > $WORK/overlay-add-4d47a50.tsv   # 先算 sha256sum，要等於上表
 OVL=$WORK/overlay-add-4d47a50.tsv
 python3 -u $E1/count.py text --out $WORK --tag colloquial3 --overlay-add $OVL \
-    --extra-lexicon <acg 計數詞表> --extra-lexicon <names 計數詞表> <colloquial-train.txt> <synth.txt> <topup.txt>
+    --extra-lexicon <acg 計數詞表> --extra-lexicon <names 計數詞表> --native <colloquial-train.txt> --native <synth.txt> --native <topup.txt>   # tw-conv 之後的介面；model-v6 當時的計數用 tw-conv 之前的 commit
 python3 -u $E1/count.py wiki --out $WORK --articles 200000 --procs 44 --overlay-add $OVL \
     --extra-lexicon <acg 計數詞表> --extra-lexicon <names 計數詞表>
 ```
