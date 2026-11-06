@@ -1,7 +1,7 @@
 # tw-conv.tsv: docs/contracts/tw-conv.md section 2.3. Built by experiments/s2/build_tw_conv.py from the PTT snapshot (characters, words and counts only).
 # input body.tsv sha256 00062f34ee21ea0d8f12d66db13fba28715eb7a5b63c7d456a43902a0b03485a
 # input push.tsv sha256 75d3f0bdfe8e0a5784fb1e30df5b930a7e58948ad7e144b53ce18ca8745b034a
-# tool commit bd1cb4fb660a6650efe1cff350bce8a824c3041b
+# tool commit ec3f587a5bc8a9e9d2c637f9fcabf304ed785366
 # columns: section, key, value, status, manual, counts[, N]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7.
 fold	僞	偽	fold		僞:80 偽:5357
 fold	啓	啟	fold		啓:592 啟:29434
@@ -56,7 +56,7 @@ char	云	雲	evidence		雲:36913 云:1980
 char	亘	亘	evidence		亙:70 亘:153
 char	仆	僕	evidence		僕:4527 仆:204
 char	仇	仇	evidence		仇:15149 讎:16
-char	仑	崙	evidence		侖:319 崙:1773	N
+char	仑	侖	distinct		侖:319 崙:1773	N
 char	价	價	evidence		價:229083 价:2	N
 char	仿	仿	hold		仿:5559 彷:3087
 char	伙	夥	hold		夥:9905 伙:5296
@@ -108,7 +108,7 @@ char	同	同	evidence		同:281152 衕:2
 char	后	後	evidence		後:954284 后:8329
 char	向	向	evidence		向:94340 嚮:973 曏:0
 char	吣	吣	hold		吣:0 唚:0
-char	呆	待	evidence		呆:7639 待:104064
+char	呆	呆	distinct		呆:7639 待:104064
 char	周	周	hold		周:61069 週:76675 賙:1
 char	咏	詠	evidence		詠:1188 咏:0	N
 char	咤	吒	evidence		吒:258 咤:0	N
@@ -119,7 +119,7 @@ char	哄	哄	evidence		哄:1742 鬨:340
 char	哗	譁	hold		譁:222 嘩:370	N
 char	唇	唇	evidence		唇:1764
 char	啮	齧	hold		齧:10 嚙:24	N
-char	喂	餵	evidence		喂:3011 餵:6457
+char	喂	喂	distinct		喂:3011 餵:6457
 char	噪	噪	evidence		噪:5050 譟:51
 char	回	回	evidence		回:419821 迴:12724
 char	团	團	evidence		團:124490 糰:3121	N
@@ -147,7 +147,7 @@ char	尽	盡	evidence		盡:32100 儘:6720	N
 char	局	局	evidence		局:112400 侷:803
 char	岩	岩	evidence		巖:444 岩:7018
 char	岭	嶺	evidence		嶺:1745 岭:0	N
-char	岳	岳	evidence		嶽:405 岳:9496
+char	岳	嶽	distinct		嶽:405 岳:9496
 char	峰	峰	evidence		峰:16236
 char	巨	巨	evidence		巨:43467 鉅:990
 char	布	布	evidence		布:70270 佈:10706
@@ -205,8 +205,8 @@ char	曲	曲	evidence		曲:30214 麴:100
 char	札	札	evidence		札:3746 劄:6
 char	术	術	evidence		術:83283 朮:113	N
 char	朱	朱	evidence		朱:9529 硃:65
-char	朴	朴	evidence		樸:1673 朴:5055
-char	杆	桿	evidence		杆:710 桿:7912
+char	朴	樸	distinct		樸:1673 朴:5055
+char	杆	杆	distinct		杆:710 桿:7912
 char	杠	槓	evidence		槓:10342 杠:108
 char	条	條	evidence		條:97947 条:0	N
 char	杯	杯	evidence		杯:40547 盃:16938
@@ -269,7 +269,7 @@ char	秘	秘	evidence		祕:2862 秘:19314
 char	穗	穗	evidence		穗:1759 繐:3
 char	筑	築	evidence		築:7609 筑:392
 char	筱	筱	evidence		筱:671 篠:284
-char	签	簽	evidence		籤:13693 簽:40855	N
+char	签	籤	distinct		籤:13693 簽:40855	N
 char	粽	粽	evidence		粽:1451
 char	糊	糊	evidence		糊:7990 餬:34
 char	系	系	evidence		系:122946 係:56805 繫:5292
@@ -282,7 +282,7 @@ char	群	群	evidence		群:56362
 char	耇	耇	hold		耇:0 耈:0
 char	联	聯	evidence		聯:98119 联:0	N
 char	肴	餚	evidence		餚:255 肴:60
-char	胄	冑	evidence		胄:13 冑:30
+char	胄	胄	distinct		胄:13 冑:30
 char	背	背	evidence		背:60242 揹:1134
 char	胜	勝	evidence		勝:70955 胜:41
 char	胡	胡	hold		胡:14157 鬍:10553 衚:2
@@ -291,7 +291,7 @@ char	腊	臘	evidence		臘:2193 腊:5	N
 char	腌	醃	evidence		醃:1073 腌:4	N
 char	膻	羶	evidence		羶:88 膻:6
 char	致	致	evidence		致:42193 緻:4931
-char	舍	捨	evidence		舍:4219 捨:10205
+char	舍	舍	distinct		舍:4219 捨:10205
 char	艳	豔	hold		豔:3002 艷:3462	N
 char	芸	芸	evidence		芸:1627 蕓:16
 char	苏	蘇	evidence		蘇:23061 甦:1168 囌:1	N
@@ -320,10 +320,10 @@ char	证	證	evidence		證:81505 証:710	N
 char	谥	諡	hold		諡:7 謚:3	N
 char	谷	谷	evidence		谷:18954 穀:661
 char	豆	豆	evidence		豆:36433 荳:666
-char	象	像	evidence		象:67245 像:330971
+char	象	象	distinct		象:67245 像:330971
 char	账	帳	evidence		賬:560 帳:87839	N
 char	赝	贗	evidence		贗:68 贋:8	N
-char	赞	讚	evidence		贊:7835 讚:60885	N
+char	赞	贊	distinct		贊:7835 讚:60885	N
 char	跖	蹠	evidence		蹠:42 跖:3
 char	辟	闢	evidence		闢:1625 辟:295
 char	迹	跡	evidence		跡:13523 蹟:4965	N
@@ -335,7 +335,7 @@ char	里	裡	evidence		裡:214969 里:48838 哩:18476
 char	鉴	鑑	evidence		鑑:6732 鑒:885	N
 char	针	針	evidence		針:24659	N
 char	钚	鈈	hold		鈈:2 鈽:24	N
-char	钟	鐘	evidence		鍾:3702 鐘:48545 鈡:1	N
+char	钟	鍾	distinct		鍾:3702 鐘:48545 鈡:1	N
 char	钥	鑰	evidence		鑰:5260 鈅:2	N
 char	钫	鈁	hold		鈁:3 鍅:3	N
 char	钻	鑽	evidence		鑽:11469 鉆:11	N
@@ -346,7 +346,7 @@ char	锎	鐦	hold		鐦:0 鉲:0
 char	锝	鍀	hold		鍀:10 鎝:0	N
 char	锨	鍁	hold		鍁:0 杴:0
 char	锫	錇	hold		錇:0 鉳:0
-char	锿	鑀	evidence		鎄:0 鑀:156	N
+char	锿	鎄	distinct		鎄:0 鑀:156
 char	镅	鎇	hold		鎇:0 鋂:1
 char	镋	钂	hold		钂:0 鎲:0
 char	镎	鎿	hold		鎿:0 錼:1
@@ -356,7 +356,7 @@ char	镰	鐮	hold		鐮:871 鎌:621	N
 char	闲	閒	evidence		閒:19719 閑:652	N
 char	雇	僱	hold		僱:3043 雇:3890
 char	雕	雕	evidence		雕:7212 鵰:436
-char	霉	霉	evidence		黴:397 霉:2577
+char	霉	黴	distinct		黴:397 霉:2577
 char	面	面	evidence		面:460626 麵:38140
 char	须	須	evidence		須:28693 鬚:1318	N
 char	饥	飢	evidence		飢:2990 饑:151	N
@@ -364,47 +364,22 @@ char	鹇	鷳	hold		鷳:1 鷴:7	N
 char	鹚	鷀	hold		鷀:1 鶿:8	N
 char	𩙧	䬞	hold		䬞:0 𩗡:0
 phrase	一冲性子	一沖性子	hold		一沖性子:0 一衝性子:0 一冲性子:0
-phrase	一分钟	一分鐘	evidence		一分鐘:1968 一分鍾:11 一分鈡:0
-phrase	一口钟	一口鐘	hold		一口鐘:0 一口鍾:0 一口鈡:0
 phrase	一台	一台	evidence		一臺:179 一檯:15 一颱:5 一台:24861
 phrase	一台台	一台台	evidence		一臺臺:0 一臺檯:0 一臺颱:0 一臺台:0 一檯臺:0 一檯檯:0 一檯颱:0 一檯台:0 一颱臺:0 一颱檯:0 一颱颱:0 一颱台:0 一台臺:0 一台檯:0 一台颱:0 一台台:66
-phrase	一号木杆	一號木桿	hold		一號木桿:3 一號木杆:0
-phrase	一天钟	一天鐘	hold		一天鐘:10 一天鍾:1 一天鈡:0
-phrase	一杆	一桿	evidence		一杆:3 一桿:61
-phrase	一杆进洞	一桿進洞	hold		一桿進洞:27 一杆進洞:0
-phrase	一点钟	一點鐘	hold		一點鐘:8 一點鍾:0 一點鈡:0
-phrase	一秒钟	一秒鐘	evidence		一秒鐘:135 一秒鍾:2 一秒鈡:0
 phrase	一签	一簽	evidence		一簽:209 一籤:5
-phrase	一见钟情	一見鍾情	evidence		一見鍾情:367 一見鐘情:58 一見鈡情:0
-phrase	一赞	一讚	evidence		一讚:39 一贊:6
-phrase	一辞莫赞	一辭莫讚	hold		一辭莫贊:0 一辭莫讚:0
 phrase	一飞冲天	一飛沖天	hold		一飛沖天:59 一飛衝天:36 一飛冲天:0
-phrase	七分钟	七分鐘	evidence		七分鐘:103 七分鍾:0 七分鈡:0
 phrase	七台	七台	evidence		七臺:1 七檯:0 七颱:1 七台:35
 phrase	七台河	七台河	hold		七臺河:0 七檯河:0 七颱河:0 七台河:2
 phrase	七台河市	七台河市	hold		七臺河市:0 七檯河市:0 七颱河市:0 七台河市:2
 phrase	七星岩	七星岩	hold		七星巖:0 七星岩:2
-phrase	七点钟	七點鐘	hold		七點鐘:10 七點鍾:0 七點鈡:0
-phrase	七秒钟	七秒鐘	hold		七秒鐘:1 七秒鍾:0 七秒鈡:0
-phrase	万签插架	萬簽插架	hold		萬籤插架:0 萬簽插架:0
+phrase	万签插架	萬籤插架	hold		萬籤插架:0 萬簽插架:0
 phrase	万花争艳	萬花爭豔	hold		萬花爭豔:0 萬花爭艷:0
-phrase	万象	萬象	evidence		萬象:175 萬像:84
-phrase	万象包罗	萬像包羅	hold		萬象包羅:0 萬像包羅:0
-phrase	万象更新	萬像更新	hold		萬象更新:5 萬像更新:0
-phrase	万象森罗	萬像森羅	hold		萬象森羅:0 萬像森羅:0
 phrase	丈八灯台	丈八燈台	hold		丈八燈臺:0 丈八燈檯:0 丈八燈颱:0 丈八燈台:1
 phrase	三仙台	三仙台	hold		三仙臺:1 三仙檯:0 三仙颱:0 三仙台:29
-phrase	三分钟	三分鐘	evidence		三分鐘:1097 三分鍾:9 三分鈡:0
 phrase	三台	三台	evidence		三臺:19 三檯:0 三颱:1 三台:2358
 phrase	三台县	三台縣	hold		三臺縣:0 三檯縣:0 三颱縣:0 三台縣:0
 phrase	三台联播	三台聯播	hold		三臺聯播:0 三檯聯播:0 三颱聯播:0 三台聯播:0
 phrase	三思台	三思台	hold		三思臺:0 三思檯:0 三思颱:0 三思台:2
-phrase	三杆	三桿	hold		三杆:0 三桿:2
-phrase	三点钟	三點鐘	hold		三點鐘:16 三點鍾:1 三點鈡:0
-phrase	三瓦两舍	三瓦兩捨	hold		三瓦兩舍:0 三瓦兩捨:0
-phrase	三瓦四舍	三瓦四捨	hold		三瓦四舍:0 三瓦四捨:0
-phrase	三秒钟	三秒鐘	evidence		三秒鐘:53 三秒鍾:0 三秒鈡:0
-phrase	三舍	三舍	evidence		三舍:31 三捨:1
 phrase	上不了台面	上不了檯面	evidence		上不了檯面:42 上不了臺面:18 上不了颱面:0 上不了台面:4
 phrase	上不得台盘	上不得檯盤	hold		上不得檯盤:0 上不得臺盤:0 上不得颱盤:0 上不得台盤:0
 phrase	上冲	上衝	evidence		上衝:317 上沖:115 上冲:0
@@ -418,61 +393,30 @@ phrase	上签写	上簽寫	hold		上簽寫:1 上籤寫:0
 phrase	上签名	上簽名	evidence		上簽名:69 上籤名:0
 phrase	上签字	上簽字	hold		上簽字:8 上籤字:0
 phrase	上签收	上簽收	hold		上簽收:0 上籤收:0
-phrase	上舍	上捨	hold		上舍:1 上捨:9
 phrase	上花台	上花台	hold		上花臺:0 上花檯:0 上花颱:0 上花台:0
-phrase	上课钟	上課鐘	hold		上課鐘:7 上課鍾:0 上課鈡:0
 phrase	下不了台	下不了台	evidence		下不了臺:2 下不了檯:0 下不了颱:0 下不了台:52
 phrase	下不来台	下不來台	hold		下不來臺:0 下不來檯:0 下不來颱:0 下不來台:1
-phrase	下仑路	下崙路	hold		下崙路:0 下侖路:0
 phrase	下冲	下衝	evidence		下衝:89 下沖:41 下冲:0
 phrase	下台	下台	evidence		下臺:201 下檯:7 下颱:17 下台:3684
 phrase	下台阶	下台階	evidence		下臺階:3 下檯階:0 下颱階:0 下台階:66
-phrase	下签	下簽	hold		下籤:41 下簽:65
+phrase	下签	下籤	hold		下籤:41 下簽:65
 phrase	下签写	下簽寫	hold		下簽寫:0 下籤寫:0
 phrase	下签名	下簽名	hold		下簽名:20 下籤名:0
 phrase	下签字	下簽字	hold		下簽字:0 下籤字:0
 phrase	下签收	下簽收	hold		下簽收:0 下籤收:0
-phrase	下课钟	下課鐘	hold		下課鐘:14 下課鍾:0 下課鈡:0
 phrase	不上台盘	不上檯盤	hold		不上檯盤:0 不上臺盤:0 不上颱盤:0 不上台盤:0
 phrase	不得台盘	不得檯盤	hold		不得檯盤:0 不得臺盤:0 不得颱盤:0 不得台盤:0
-phrase	不能赞一辞	不能讚一辭	hold		不能贊一辭:0 不能讚一辭:0
-phrase	不舍	不捨	evidence		不捨:1244 不舍:9
-phrase	不舍得	不捨得	evidence		不捨得:125 不舍得:0
-phrase	不舍昼夜	不捨晝夜	hold		不捨晝夜:0 不舍晝夜:0
-phrase	不赞	不贊	evidence		不讚:45 不贊:337
-phrase	不赞一词	不讚一詞	hold		不讚一詞:0 不贊一詞:0
-phrase	不赞一辞	不讚一辭	hold		不讚一辭:0 不贊一辭:0
-phrase	不赞同	不贊同	evidence		不贊同:88 不讚同:3
-phrase	不赞成	不贊成	evidence		不贊成:231 不讚成:5
 phrase	专鉴	專鑒	hold		專鑒:0 專鑑:0
 phrase	世台	世台	hold		世臺:1 世檯:2 世颱:0 世台:11
 phrase	世台会	世台會	hold		世臺會:0 世檯會:0 世颱會:0 世台會:0
-phrase	世纪钟	世紀鐘	hold		世紀鐘:0 世紀鍾:0 世紀鈡:0
-phrase	世纪钟表	世紀鐘錶	hold		世紀鐘錶:0 世紀鍾錶:0 世紀鈡錶:0
-phrase	世胄	世冑	hold		世胄:0 世冑:0
-phrase	丙舍	丙捨	hold		丙舍:0 丙捨:0
 phrase	业馀电台	業餘電台	hold		業餘電臺:0 業餘電檯:0 業餘電颱:0 業餘電台:0
 phrase	丛台区	叢台區	hold		叢臺區:0 叢檯區:0 叢颱區:0 叢台區:0
 phrase	东冲西突	東衝西突	hold		東衝西突:0 東沖西突:0 東冲西突:0
 phrase	东台	東台	evidence		東臺:3 東檯:0 東颱:0 東台:177
 phrase	东台市	東台市	hold		東臺市:0 東檯市:0 東颱市:0 東台市:0
 phrase	东台湾	東台灣	evidence		東臺灣:3 東檯灣:0 東颱灣:0 東台灣:38
-phrase	东周钟	東周鐘	hold		東周鐘:0 東周鍾:0 東周鈡:0
-phrase	东岳	東岳	hold		東嶽:18 東岳:12
-phrase	东邻西舍	東鄰西捨	hold		東鄰西舍:0 東鄰西捨:0
-phrase	丝杆	絲桿	hold		絲桿:0 絲杆:0
 phrase	两台	兩台	evidence		兩臺:60 兩檯:0 兩颱:0 兩台:8097
-phrase	两杆	兩桿	hold		兩杆:0 兩桿:2
-phrase	两点钟	兩點鐘	hold		兩點鐘:17 兩點鍾:0 兩點鈡:0
-phrase	两秒钟	兩秒鐘	hold		兩秒鐘:19 兩秒鍾:0 兩秒鈡:0
-phrase	丧钟	喪鐘	evidence		喪鐘:101 喪鍾:0 喪鈡:0
 phrase	个中奥秘	箇中奧秘	hold		箇中奧祕:0 箇中奧秘:1
-phrase	个别现象	個別現像	hold		個別現象:0 個別現像:0
-phrase	个钟	個鐘	evidence		個鐘:144 個鍾:12 個鈡:0
-phrase	个钟表	個鐘錶	hold		個鐘錶:2 個鍾錶:0 個鈡錶:0
-phrase	中书舍人	中書捨人	hold		中書舍人:0 中書捨人:0
-phrase	中仑	中崙	evidence		中崙:104 中侖:0
-phrase	中仑站	中崙站	hold		中崙站:3 中侖站:0
 phrase	中华台北	中華台北	evidence		中華臺北:21 中華檯北:0 中華颱北:0 中華台北:221
 phrase	中华电视台	中華電視台	hold		中華電視臺:0 中華電視檯:0 中華電視颱:0 中華電視台:1
 phrase	中台	中台	evidence		中臺:28 中檯:1 中颱:31 中台:707
@@ -480,13 +424,9 @@ phrase	中台医专	中台醫專	hold		中臺醫專:0 中檯醫專:0 中颱醫�
 phrase	中台湾	中台灣	evidence		中臺灣:9 中檯灣:0 中颱灣:0 中台灣:133
 phrase	中台禅寺	中台禪寺	hold		中臺禪寺:0 中檯禪寺:0 中颱禪寺:0 中台禪寺:9
 phrase	中台科技大学	中台科技大學	hold		中臺科技大學:0 中檯科技大學:0 中颱科技大學:0 中台科技大學:0
-phrase	中型钟	中型鐘	hold		中型鐘:0 中型鍾:0 中型鈡:0
-phrase	中型钟表	中型鐘錶	hold		中型鐘錶:0 中型鍾錶:0 中型鈡錶:0
-phrase	中型钟面	中型鐘面	hold		中型鐘面:0 中型鍾面:0 中型鈡面:0
 phrase	中央台	中央台	hold		中央臺:0 中央檯:1 中央颱:1 中央台:3
 phrase	中央广播电台	中央廣播電台	hold		中央廣播電臺:2 中央廣播電檯:0 中央廣播電颱:0 中央廣播電台:8
 phrase	中央电视台	中央電視台	hold		中央電視臺:1 中央電視檯:0 中央電視颱:0 中央電視台:10
-phrase	中岳	中岳	evidence		中嶽:6 中岳:43
 phrase	中度台风	中度颱風	hold		中度颱風:14 中度臺風:0 中度檯風:0 中度台風:0
 phrase	中控台	中控台	evidence		中控臺:0 中控檯:0 中控颱:0 中控台:40
 phrase	中文台	中文台	evidence		中文臺:3 中文檯:0 中文颱:0 中文台:179
@@ -502,174 +442,101 @@ phrase	为鉴	為鑑	evidence		為鑑:38 為鑒:8
 phrase	主席台	主席台	hold		主席臺:1 主席檯:0 主席颱:0 主席台:14
 phrase	主控台	主控台	hold		主控臺:0 主控檯:0 主控颱:0 主控台:15
 phrase	主播台	主播台	evidence		主播臺:5 主播檯:9 主播颱:0 主播台:193
-phrase	主钟差	主鐘差	hold		主鐘差:0 主鍾差:0 主鈡差:0
-phrase	主钟曲线	主鐘曲線	hold		主鐘曲線:0 主鍾曲線:0 主鈡曲線:0
-phrase	丽舍	麗捨	hold		麗舍:14 麗捨:0
 phrase	之鉴	之鑑	evidence		之鑑:174 之鑒:18
-phrase	之钟	之鐘	evidence		之鐘:34 之鍾:3 之鈡:0
 phrase	乌兹冲锋枪	烏茲衝鋒槍	hold		烏茲衝鋒槍:1 烏茲沖鋒槍:0 烏茲冲鋒槍:0
 phrase	乌里雅苏台	烏里雅蘇台	hold		烏里雅蘇臺:0 烏里雅蘇檯:0 烏里雅蘇颱:0 烏里雅蘇台:0
-phrase	乐器钟	樂器鐘	hold		樂器鐘:0 樂器鍾:0 樂器鈡:0
 phrase	乒乓球台	乒乓球檯	hold		乒乓球檯:5 乒乓球臺:0 乒乓球颱:0 乒乓球台:0
-phrase	乔岳	喬岳	hold		喬嶽:0 喬岳:1
-phrase	九分钟	九分鐘	evidence		九分鐘:36 九分鍾:0 九分鈡:0
 phrase	九台	九台	hold		九臺:0 九檯:0 九颱:0 九台:22
 phrase	九台市	九台市	hold		九臺市:0 九檯市:0 九颱市:0 九台市:0
-phrase	九点钟	九點鐘	hold		九點鐘:8 九點鍾:0 九點鈡:0
-phrase	九秒钟	九秒鐘	hold		九秒鐘:0 九秒鍾:0 九秒鈡:0
-phrase	也舍下	也捨下	hold		也捨下:0 也舍下:0
-phrase	书中自有千钟粟	書中自有千鐘粟	hold		書中自有千鍾粟:0 書中自有千鐘粟:0 書中自有千鈡粟:0
 phrase	书台	書檯	hold		書檯:0 書臺:0 書颱:0 書台:24
-phrase	书呆子	書呆子	evidence		書呆子:71 書待子:0
 phrase	书签	書籤	evidence		書籤:349 書簽:28
 phrase	乱冲	亂衝	evidence		亂衝:132 亂沖:12 亂冲:0
-phrase	乾象历	乾像曆	hold		乾象曆:0 乾像曆:0
 phrase	了望台	瞭望台	evidence		瞭望臺:0 瞭望檯:0 瞭望颱:0 瞭望台:39
 phrase	了账	了帳	evidence		了賬:0 了帳:172
 phrase	争奇斗艳	爭奇鬥豔	hold		爭奇鬥豔:7 爭奇鬥艷:2
 phrase	争妍斗艳	爭妍鬥豔	hold		爭妍鬥豔:0 爭妍鬥艷:0
-phrase	二仑	二崙	hold		二崙:9 二侖:0
-phrase	二仑乡	二崙鄉	hold		二崙鄉:0 二侖鄉:0
 phrase	二冲程引擎	二衝程引擎	hold		二衝程引擎:0 二沖程引擎:0 二冲程引擎:0
-phrase	二分钟	二分鐘	evidence		二分鐘:36 二分鍾:0 二分鈡:0
 phrase	二台	二台	evidence		二臺:5 二檯:3 二颱:2 二台:994
-phrase	二堂舍子	二堂捨子	hold		二堂舍子:0 二堂捨子:0
-phrase	二杆子	二桿子	hold		二桿子:0 二杆子:0
-phrase	二点钟	二點鐘	hold		二點鐘:2 二點鍾:0 二點鈡:0
-phrase	二秒钟	二秒鐘	hold		二秒鐘:1 二秒鍾:0 二秒鈡:0
-phrase	二缶钟惑	二缶鐘惑	hold		二缶鐘惑:0 二缶鍾惑:0 二缶鈡惑:0
 phrase	于台烟	于台煙	hold		于臺煙:0 于檯煙:0 于颱煙:0 于台煙:2
 phrase	云台	雲台	evidence		雲臺:6 雲檯:0 雲颱:1 雲台:363
 phrase	云台山	雲台山	hold		雲臺山:0 雲檯山:0 雲颱山:0 雲台山:0
 phrase	云岩区	雲岩區	hold		雲巖區:0 雲岩區:0
-phrase	云笈七签	雲笈七簽	hold		雲笈七籤:1 雲笈七簽:0
+phrase	云笈七签	雲笈七籤	hold		雲笈七籤:1 雲笈七簽:0
 phrase	云麾勋章	雲麾勳章	hold		雲麾勳章:0 雲麾勛章:0
 phrase	互动台	互動台	hold		互動臺:0 互動檯:0 互動颱:0 互動台:0
 phrase	互鉴	互鑑	hold		互鑑:0 互鑒:0
-phrase	五分钟	五分鐘	evidence		五分鐘:2221 五分鍾:21 五分鈡:0
 phrase	五台	五台	evidence		五臺:4 五檯:0 五颱:29 五台:228
 phrase	五台县	五台縣	hold		五臺縣:0 五檯縣:0 五颱縣:0 五台縣:0
 phrase	五台山	五台山	hold		五臺山:0 五檯山:0 五颱山:0 五台山:1
 phrase	五台市	五台市	hold		五臺市:0 五檯市:0 五颱市:0 五台市:0
-phrase	五岳	五岳	hold		五嶽:19 五岳:10
-phrase	五点钟	五點鐘	evidence		五點鐘:39 五點鍾:0 五點鈡:0
-phrase	五秒钟	五秒鐘	evidence		五秒鐘:33 五秒鍾:0 五秒鈡:0
 phrase	井台	井台	hold		井臺:0 井檯:0 井颱:0 井台:10
 phrase	亘古	亙古	evidence		亙古:44 亘古:2
-phrase	交口称赞	交口稱讚	hold		交口稱讚:1 交口稱贊:0
 phrase	交易台	交易台	hold		交易臺:0 交易檯:3 交易颱:0 交易台:26
-phrase	亦舍下	亦捨下	hold		亦捨下:0 亦舍下:0
 phrase	亭台	亭台	hold		亭臺:4 亭檯:0 亭颱:0 亭台:6
 phrase	亭台楼榭	亭台樓榭	hold		亭臺樓榭:0 亭檯樓榭:0 亭颱樓榭:0 亭台樓榭:0
 phrase	亭台楼阁	亭台樓閣	hold		亭臺樓閣:3 亭檯樓閣:0 亭颱樓閣:0 亭台樓閣:3
-phrase	亮钟	亮鐘	hold		亮鐘:2 亮鍾:0 亮鈡:0
 phrase	亲台	親台	hold		親臺:0 親檯:0 親颱:0 親台:8
 phrase	亲子台	親子台	hold		親子臺:0 親子檯:0 親子颱:0 親子台:2
 phrase	亲子鉴定	親子鑑定	evidence		親子鑑定:35 親子鑒定:9
 phrase	亲笔签名	親筆簽名	evidence		親筆簽名:83 親筆籤名:0
 phrase	人生舞台	人生舞台	hold		人生舞臺:1 人生舞檯:0 人生舞颱:0 人生舞台:4
-phrase	介胄	介冑	hold		介冑:0 介胄:0
-phrase	仑丰村	崙豐村	hold		崙豐村:0 侖豐村:0
-phrase	仑背	崙背	hold		崙背:15 侖背:0
-phrase	仑背乡	崙背鄉	hold		崙背鄉:4 侖背鄉:0
-phrase	他钟	他鐘	hold		他鐘:1 他鍾:3 他鈡:0
 phrase	仙台	仙台	evidence		仙台:1478 仙臺:3 仙檯:0 仙颱:0
 phrase	仙岩	仙岩	hold		仙岩:0 仙巖:19
 phrase	代签	代簽	evidence		代簽:50 代籤:0
 phrase	代签人	代簽人	hold		代簽人:0 代籤人:0
-phrase	令岳	令岳	hold		令岳:1 令嶽:0
 phrase	令狐冲	令狐沖	evidence		令狐沖:177 令狐衝:0 令狐冲:0
 phrase	以人为鉴	以人為鑑	hold		以人為鑑:0 以人為鑒:0
 phrase	以古为鉴	以古為鑑	hold		以古為鑑:0 以古為鑒:0
 phrase	以往鉴来	以往鑑來	hold		以往鑑來:0 以往鑒來:0
-phrase	以莛叩钟	以莛叩鐘	hold		以莛叩鐘:0 以莛叩鍾:0 以莛叩鈡:0
-phrase	以莛撞钟	以莛撞鐘	hold		以莛撞鐘:0 以莛撞鍾:0 以莛撞鈡:0
-phrase	件钟	件鐘	hold		件鐘:0 件鍾:2 件鈡:0
 phrase	价值冲突	價值衝突	hold		價值衝突:2 價值沖突:0 價值冲突:0
-phrase	价格标签	價格標簽	hold		價格標籤:10 價格標簽:0
-phrase	休仑湖	休崙湖	hold		休崙湖:0 休侖湖:0
+phrase	价格标签	價格標籤	hold		價格標籤:10 價格標簽:0
 phrase	会上签署	會上簽署	hold		會上簽署:1 會上籤署:0
 phrase	会上签订	會上簽訂	hold		會上簽訂:0 會上籤訂:0
 phrase	会签制度	會簽制度	hold		會簽制度:0 會籤制度:0
 phrase	伟晶岩	偉晶岩	hold		偉晶岩:0 偉晶巖:0
-phrase	传舍	傳捨	hold		傳舍:0 傳捨:0
-phrase	传赞	傳讚	hold		傳贊:0 傳讚:6
-phrase	伤寒杆菌	傷寒桿菌	hold		傷寒桿菌:0 傷寒杆菌:0
 phrase	体育台	體育台	evidence		體育臺:2 體育檯:0 體育颱:0 體育台:234
 phrase	佛罗棱萨	佛羅稜薩	hold		佛羅棱薩:0 佛羅稜薩:0
-phrase	佛舍利	佛捨利	hold		佛舍利:1 佛捨利:0
-phrase	佛钟	佛鐘	hold		佛鐘:1 佛鍾:0 佛鈡:0
 phrase	作业平台	作業平台	hold		作業平臺:0 作業平檯:0 作業平颱:0 作業平台:5
-phrase	作舍道旁	作捨道旁	hold		作舍道旁:0 作捨道旁:0
-phrase	作舍道边	作捨道邊	hold		作舍道邊:0 作捨道邊:0
-phrase	依依不舍	依依不捨	evidence		依依不捨:87 依依不舍:1
-phrase	依依难舍	依依難捨	hold		依依難捨:2 依依難舍:0
-phrase	依赞	依讚	hold		依贊:0 依讚:0
 phrase	侦听台	偵聽台	hold		偵聽臺:0 偵聽檯:0 偵聽颱:0 偵聽台:0
 phrase	侧冲	側衝	hold		側衝:6 側沖:0 側冲:0
 phrase	侵入岩	侵入岩	hold		侵入岩:0 侵入巖:0
 phrase	便签	便簽	evidence		便籤:18 便簽:59
-phrase	保险杆	保險桿	evidence		保險桿:88 保險杆:0
 phrase	信号台	信號台	hold		信號臺:0 信號檯:0 信號颱:0 信號台:0
-phrase	俭朴	儉朴	hold		儉樸:8 儉朴:0
 phrase	俯冲	俯衝	evidence		俯衝:181 俯沖:0 俯冲:0
 phrase	俯冲点	俯衝點	hold		俯衝點:0 俯沖點:0 俯冲點:0
 phrase	俯冲角	俯衝角	hold		俯衝角:0 俯沖角:0 俯冲角:0
-phrase	俱舍师	俱捨師	hold		俱舍師:0 俱捨師:0
-phrase	俱舍论	俱捨論	hold		俱舍論:0 俱捨論:0
 phrase	倒台	倒台	evidence		倒臺:7 倒檯:3 倒颱:0 倒台:226
-phrase	倒钟摆效应	倒鐘擺效應	hold		倒鐘擺效應:0 倒鍾擺效應:0 倒鈡擺效應:0
-phrase	倒霉	倒霉	evidence		倒霉:696 倒黴:9
 phrase	借鉴	借鑑	hold		借鑑:168 借鑒:132
 phrase	倪嗣冲	倪嗣沖	hold		倪嗣沖:0 倪嗣衝:0 倪嗣冲:0
 phrase	债台高筑	債台高築	hold		債臺高築:0 債檯高築:0 債颱高築:0 債台高築:17
-phrase	值得称赞	值得稱讚	evidence		值得稱讚:159 值得稱贊:0
 phrase	偎干就湿	偎乾就濕	hold		偎乾就溼:0 偎乾就濕:0
-phrase	做一天和尚撞一天钟	做一天和尚撞一天鐘	hold		做一天和尚撞一天鐘:0 做一天和尚撞一天鍾:0 做一天和尚撞一天鈡:0
 phrase	傅岩	傅岩	hold		傅巖:0 傅岩:0
-phrase	像赞	像讚	hold		像贊:22 像讚:20
-phrase	僦舍	僦捨	hold		僦舍:0 僦捨:0
 phrase	儿童台	兒童台	hold		兒童臺:0 兒童檯:1 兒童颱:0 兒童台:5
 phrase	兄台	兄台	evidence		兄臺:9 兄檯:0 兄颱:0 兄台:32
 phrase	先签	先簽	evidence		先簽:534 先籤:2
 phrase	光冲量	光衝量	hold		光衝量:0 光沖量:0 光冲量:0
 phrase	光卤石	光鹵石	hold		光鹵石:0 光滷石:0
 phrase	光可鉴人	光可鑑人	hold		光可鑑人:3 光可鑒人:0
-phrase	光杆	光桿	hold		光桿:6 光杆:0
-phrase	光杆儿	光桿兒	hold		光桿兒:0 光杆兒:0
-phrase	光杆司令	光桿司令	hold		光桿司令:5 光杆司令:0
-phrase	克仑特罗	克崙特羅	hold		克侖特羅:0 克崙特羅:0
 phrase	克孜尔尕哈烽火台	克孜爾尕哈烽火台	hold		克孜爾尕哈烽火臺:0 克孜爾尕哈烽火檯:0 克孜爾尕哈烽火颱:0 克孜爾尕哈烽火台:0
-phrase	克林霉素	克林霉素	hold		克林黴素:0 克林霉素:0
 phrase	克隆斯台	克隆斯台	hold		克隆斯臺:0 克隆斯檯:0 克隆斯颱:0 克隆斯台:0
-phrase	克霉唑	克霉唑	hold		克黴唑:0 克霉唑:0
-phrase	免胄	免冑	hold		免冑:0 免胄:0
 phrase	入境签证	入境簽證	hold		入境簽證:3 入境籤證:0
-phrase	入舍	入捨	hold		入舍:0 入捨:1
 phrase	全台	全台	evidence		全臺:159 全檯:3 全颱:2 全台:5915
 phrase	全台湾	全台灣	evidence		全臺灣:48 全檯灣:0 全颱灣:1 全台灣:1376
 phrase	八台	八台	evidence		八臺:0 八檯:0 八颱:0 八台:43
-phrase	八点钟	八點鐘	hold		八點鐘:13 八點鍾:0 八點鈡:0
-phrase	八秒钟	八秒鐘	hold		八秒鐘:0 八秒鍾:0 八秒鈡:0
 phrase	六冲	六沖	hold		六沖:0 六衝:7 六冲:0
 phrase	六台	六台	evidence		六臺:0 六檯:0 六颱:5 六台:119
-phrase	六点钟	六點鐘	hold		六點鐘:7 六點鍾:0 六點鈡:0
 phrase	兰台	蘭台	evidence		蘭臺:0 蘭檯:0 蘭颱:5 蘭台:46
 phrase	兰台令史	蘭台令史	hold		蘭臺令史:0 蘭檯令史:0 蘭颱令史:0 蘭台令史:0
 phrase	兰台公子	蘭台公子	hold		蘭臺公子:0 蘭檯公子:0 蘭颱公子:0 蘭台公子:0
 phrase	兰台石室	蘭台石室	hold		蘭臺石室:0 蘭檯石室:0 蘭颱石室:0 蘭台石室:0
 phrase	兰棱	蘭稜	hold		蘭棱:0 蘭稜:0
 phrase	关台	關台	evidence		關臺:8 關檯:0 關颱:4 關台:416
-phrase	关岳	關岳	hold		關岳:2 關嶽:0
 phrase	兴冲冲	興沖沖	evidence		興沖沖:162 興沖衝:0 興沖冲:0 興衝沖:0 興衝衝:0 興衝冲:0 興冲沖:0 興冲衝:0 興冲冲:0
 phrase	兴隆台	興隆台	hold		興隆臺:0 興隆檯:0 興隆颱:0 興隆台:0
 phrase	兴隆台区	興隆台區	hold		興隆臺區:0 興隆檯區:0 興隆颱區:0 興隆台區:0
 phrase	再冲	再衝	evidence		再衝:294 再沖:49 再冲:0
 phrase	写字台	寫字檯	hold		寫字檯:1 寫字臺:0 寫字颱:0 寫字台:0
-phrase	军团杆菌	軍團桿菌	hold		軍團桿菌:0 軍團杆菌:0
 phrase	军舰岩	軍艦岩	hold		軍艦岩:4 軍艦巖:0
-phrase	农舍	農舍	evidence		農舍:114 農捨:0
-phrase	冠胄	冠冑	hold		冠冑:0 冠胄:0
 phrase	冰岩	冰岩	evidence		冰岩:32 冰巖:0
 phrase	冰碛岩	冰磧岩	hold		冰磧岩:0 冰磧巖:0
 phrase	冲上	衝上	evidence		衝上:1141 沖上:48 冲上:0
@@ -904,11 +771,7 @@ phrase	凄雨	淒雨	hold		淒雨:1 悽雨:0
 phrase	凄风	淒風	hold		悽風:0 淒風:14
 phrase	凉台	涼台	hold		涼臺:1 涼檯:0 涼颱:0 涼台:1
 phrase	凝灰岩	凝灰岩	hold		凝灰岩:2 凝灰巖:0
-phrase	几分钟	幾分鐘	evidence		幾分鐘:2779 幾分鍾:28 幾分鈡:0
 phrase	几台	幾台	evidence		幾臺:20 幾檯:0 幾颱:0 幾台:2566
-phrase	几杆	幾桿	hold		幾桿:1 幾杆:0
-phrase	几点钟	幾點鐘	hold		幾點鐘:12 幾點鍾:0 幾點鈡:0
-phrase	几秒钟	幾秒鐘	evidence		幾秒鐘:337 幾秒鍾:2 幾秒鈡:0
 phrase	凤凰台	鳳凰台	hold		鳳凰臺:6 鳳凰檯:0 鳳凰颱:20 鳳凰台:13
 phrase	凤去台空	鳳去台空	hold		鳳去臺空:0 鳳去檯空:0 鳳去颱空:0 鳳去台空:0
 phrase	凤台	鳳台	hold		鳳台:17 鳳臺:0 鳳檯:0 鳳颱:0
@@ -916,75 +779,37 @@ phrase	凤台县	鳳台縣	hold		鳳臺縣:0 鳳檯縣:0 鳳颱縣:0 鳳台縣:0
 phrase	出台	出台	evidence		出臺:42 出檯:28 出颱:6 出台:962
 phrase	出境签证	出境簽證	hold		出境簽證:0 出境籤證:0
 phrase	出纳台	出納台	hold		出納臺:0 出納檯:0 出納颱:0 出納台:0
-phrase	击钟	擊鐘	hold		擊鐘:0 擊鍾:0 擊鈡:0
-phrase	击钟陈鼎	擊鐘陳鼎	hold		擊鐘陳鼎:0 擊鍾陳鼎:0 擊鈡陳鼎:0
-phrase	击钟鼎食	擊鐘鼎食	hold		擊鐘鼎食:0 擊鍾鼎食:0 擊鈡鼎食:0
 phrase	凿岩	鑿岩	hold		鑿巖:0 鑿岩:2
 phrase	凿岩机	鑿岩機	hold		鑿岩機:0 鑿巖機:0
-phrase	分半钟	分半鐘	evidence		分半鐘:31 分半鍾:0 分半鈡:0
-phrase	分多钟	分多鐘	evidence		分多鐘:215 分多鍾:1 分多鈡:0
-phrase	分子钟	分子鐘	hold		分子鐘:0 分子鍾:0 分子鈡:0
-phrase	分钟	分鐘	evidence		分鐘:38783 分鍾:212 分鈡:0
 phrase	刘鉴	劉鑑	hold		劉鑑:0 劉鑒:0
 phrase	刘鉴庭	劉鑑庭	hold		劉鑑庭:0 劉鑒庭:0
 phrase	刘阮上天台	劉阮上天台	hold		劉阮上天臺:0 劉阮上天檯:0 劉阮上天颱:0 劉阮上天台:0
 phrase	利害冲突	利害衝突	hold		利害衝突:8 利害沖突:0 利害冲突:0
 phrase	到达签证	到達簽證	hold		到達簽證:0 到達籤證:0
 phrase	制台	制台	evidence		制臺:4 制檯:4 制颱:3 制台:254
-phrase	制签	制簽	hold		制籤:1 制簽:6
-phrase	制钟	製鐘	hold		製鐘:0 製鍾:0 製鈡:0
-phrase	刻半钟	刻半鐘	hold		刻半鐘:0 刻半鍾:0 刻半鈡:0
-phrase	刻多钟	刻多鐘	hold		刻多鐘:0 刻多鍾:0 刻多鈡:0
-phrase	刻板印象	刻板印象	evidence		刻板印象:683 刻板印像:2
-phrase	刻钟	刻鐘	hold		刻鐘:9 刻鍾:1 刻鈡:0
+phrase	制签	制籤	hold		制籤:1 制簽:6
 phrase	前台	前台	evidence		前臺:71 前檯:64 前颱:67 前台:2033
 phrase	前车之覆后车之鉴	前車之覆後車之鑑	hold		前車之覆後車之鑑:0 前車之覆後車之鑒:0
 phrase	前车之鉴	前車之鑑	evidence		前車之鑑:165 前車之鑒:14
 phrase	前车可鉴	前車可鑑	hold		前車可鑑:0 前車可鑒:1
-phrase	剑杆	劍桿	hold		劍桿:0 劍杆:0
-phrase	剪牡丹喂牛	剪牡丹餵牛	hold		剪牡丹喂牛:0 剪牡丹餵牛:0
-phrase	割舍	割捨	evidence		割捨:214 割舍:0
-phrase	割舍不下	割捨不下	hold		割捨不下:6 割舍不下:0
+phrase	剪牡丹喂牛	剪牡丹喂牛	hold		剪牡丹喂牛:0 剪牡丹餵牛:0
 phrase	办公台	辦公檯	hold		辦公檯:0 辦公臺:0 辦公颱:0 辦公台:0
-phrase	加仑	加侖	evidence		加侖:122 加崙:6
 phrase	加签	加簽	evidence		加簽:71 加籤:11
 phrase	加签证	加簽證	hold		加簽證:1 加籤證:0
 phrase	劳台重	勞台重	hold		勞臺重:0 勞檯重:0 勞颱重:0 勞台重:0
 phrase	勋章	勳章	evidence		勳章:585 勛章:10
-phrase	勤俭朴实	勤儉朴實	hold		勤儉樸實:1 勤儉朴實:0
-phrase	勤俭朴素	勤儉朴素	hold		勤儉樸素:0 勤儉朴素:0
-phrase	勤朴	勤朴	hold		勤樸:1 勤朴:0
-phrase	包罗万象	包羅萬像	hold		包羅萬象:24 包羅萬像:0
 phrase	化妆台	化妝台	evidence		化妝臺:1 化妝檯:3 化妝颱:0 化妝台:34
 phrase	化验台	化驗台	hold		化驗臺:0 化驗檯:0 化驗颱:0 化驗台:0
-phrase	北仑	北崙	hold		北侖:15 北崙:2
-phrase	北仑区	北崙區	hold		北侖區:0 北崙區:0
-phrase	北岳	北岳	hold		北嶽:1 北岳:1
 phrase	医宗金鉴	醫宗金鑑	hold		醫宗金鑑:0 醫宗金鑒:0
-phrase	十分钟	十分鐘	evidence		十分鐘:2428 十分鍾:15 十分鈡:0
-phrase	十加仑	十加崙	hold		十加侖:0 十加崙:0
 phrase	十台	十台	evidence		十臺:4 十檯:0 十颱:0 十台:145
-phrase	十点钟	十點鐘	hold		十點鐘:7 十點鍾:0 十點鈡:0
-phrase	十秒钟	十秒鐘	hold		十秒鐘:29 十秒鍾:0 十秒鈡:0
 phrase	千岩万壑	千岩萬壑	hold		千巖萬壑:0 千岩萬壑:0
 phrase	千岩万谷	千岩萬谷	hold		千巖萬谷:0 千岩萬谷:0
 phrase	千岩竞秀	千岩競秀	hold		千巖競秀:0 千岩競秀:0
-phrase	半分钟	半分鐘	evidence		半分鐘:65 半分鍾:1 半分鈡:0
 phrase	半岛电视台	半島電視台	evidence		半島電視臺:0 半島電視檯:0 半島電視颱:0 半島電視台:31
-phrase	半点钟	半點鐘	hold		半點鐘:1 半點鍾:0 半點鈡:0
-phrase	半秒钟	半秒鐘	hold		半秒鐘:11 半秒鍾:0 半秒鈡:0
-phrase	华严钟	華嚴鐘	hold		華嚴鐘:0 華嚴鍾:0 華嚴鈡:0
-phrase	华胄	華冑	hold		華胄:0 華冑:0
-phrase	单端孢霉烯类毒素中毒症	單端孢霉烯類毒素中毒症	hold		單端孢黴烯類毒素中毒症:0 單端孢霉烯類毒素中毒症:0
-phrase	卖呆	賣待	hold		賣呆:6 賣待:0
-phrase	南京钟	南京鐘	hold		南京鐘:0 南京鍾:0 南京鈡:0
-phrase	南京钟表	南京鐘錶	hold		南京鐘錶:0 南京鍾錶:0 南京鈡錶:0
 phrase	南台	南台	evidence		南臺:43 南檯:0 南颱:1 南台:401
 phrase	南台工专	南台工專	hold		南臺工專:0 南檯工專:0 南颱工專:0 南台工專:0
 phrase	南台湾	南台灣	evidence		南臺灣:18 南檯灣:0 南颱灣:0 南台灣:168
-phrase	南屏晚钟	南屏晚鐘	hold		南屏晚鐘:1 南屏晚鍾:0 南屏晚鈡:0
 phrase	南山有台	南山有台	hold		南山有臺:0 南山有檯:0 南山有颱:0 南山有台:2
-phrase	南岳	南岳	hold		南嶽:6 南岳:3
 phrase	占台	佔台	evidence		佔臺:2 佔檯:4 佔颱:0 佔台:41
 phrase	卢棱伽	盧稜伽	hold		盧棱伽:0 盧稜伽:0
 phrase	卤人	鹵人	hold		鹵人:0 滷人:0
@@ -1019,55 +844,27 @@ phrase	卤钝	鹵鈍	hold		鹵鈍:0 滷鈍:0
 phrase	卤面	滷麵	hold		滷麵:23 鹵麵:1
 phrase	卤鸡	滷雞	evidence		滷雞:33 鹵雞:0
 phrase	卤鸡肉	滷雞肉	hold		滷雞肉:1 鹵雞肉:0
-phrase	卫星钟	衛星鐘	hold		衛星鐘:0 衛星鍾:0 衛星鈡:0
 phrase	印台	印台	evidence		印臺:0 印檯:0 印颱:0 印台:113
 phrase	印台区	印台區	hold		印臺區:0 印檯區:0 印颱區:0 印台區:0
 phrase	印鉴	印鑑	evidence		印鑑:301 印鑒:0
 phrase	印鉴鉴定	印鑑鑑定	hold		印鑑鑑定:0 印鑑鑒定:0 印鑒鑑定:0 印鑒鑒定:0
 phrase	厄台	厄台	hold		厄臺:0 厄檯:0 厄颱:0 厄台:0
-phrase	厅舍	廳舍	evidence		廳舍:74 廳捨:1
-phrase	历象	曆像	hold		曆象:0 曆像:0
-phrase	历象表	曆像表	hold		曆象表:0 曆像表:0
-phrase	压杆	壓桿	evidence		壓桿:46 壓杆:0
-phrase	压胄子	壓冑子	hold		壓冑子:0 壓胄子:0
-phrase	厚朴	厚朴	hold		厚朴:0 厚樸:0
-phrase	原子钟	原子鐘	hold		原子鐘:3 原子鍾:0 原子鈡:0
-phrase	原钟	原鐘	hold		原鐘:0 原鍾:0 原鈡:0
-phrase	厮舍	廝捨	hold		廝舍:0 廝捨:0
 phrase	去台人员	去台人員	hold		去臺人員:0 去檯人員:0 去颱人員:0 去台人員:0
-phrase	参赞	參讚	hold		參贊:1 參讚:0
 phrase	友台	友台	evidence		友臺:2 友檯:1 友颱:2 友台:97
 phrase	双台子	雙台子	hold		雙臺子:0 雙檯子:0 雙颱子:0 雙台子:0
 phrase	双台子区	雙台子區	hold		雙臺子區:0 雙檯子區:0 雙颱子區:0 雙台子區:0
-phrase	双手赞成	雙手贊成	evidence		雙手贊成:51 雙手讚成:1
 phrase	反冲	反衝	hold		反衝:13 反沖:8 反冲:0
 phrase	反冲力	反衝力	hold		反衝力:0 反沖力:0 反冲力:0
-phrase	反时钟	反時鐘	hold		反時鐘:1 反時鍾:0 反時鈡:0
-phrase	反时钟方向	反時鐘方向	hold		反時鐘方向:0 反時鍾方向:0 反時鈡方向:0
-phrase	反朴	反朴	hold		反樸:1 反朴:0
 phrase	发上冲冠	髮上衝冠	hold		髮上衝冠:0 髮上沖冠:0 髮上冲冠:0
 phrase	发光可鉴	髮光可鑑	hold		髮光可鑑:0 髮光可鑒:0
 phrase	发冢	發塚	hold		發冢:0 發塚:1
-phrase	发呆	發呆	evidence		發呆:1072 發待:3
 phrase	发射台	發射台	evidence		發射臺:0 發射檯:0 發射颱:0 發射台:38
 phrase	发签	發簽	evidence		發籤:1 發簽:36
 phrase	发言台	發言台	hold		發言臺:2 發言檯:0 發言颱:0 發言台:1
 phrase	发踊冲冠	髮踴沖冠	hold		髮踴沖冠:0 髮踴衝冠:0 髮踴冲冠:0
-phrase	发霉	發霉	evidence		發黴:45 發霉:963
-phrase	取舍	取捨	evidence		取捨:1283 取舍:3
-phrase	取舍不定	取捨不定	hold		取捨不定:0 取舍不定:0
-phrase	取舍之间	取捨之間	hold		取捨之間:1 取舍之間:0
-phrase	取舍难定	取捨難定	hold		取捨難定:0 取舍難定:0
 phrase	变质岩	變質岩	hold		變質岩:0 變質巖:0
-phrase	变速杆	變速桿	hold		變速桿:0 變速杆:0
 phrase	叠层岩	疊層岩	hold		疊層岩:0 疊層巖:0
-phrase	口钟	口鐘	hold		口鐘:4 口鍾:1 口鈡:0
-phrase	古朴	古樸	evidence		古樸:57 古朴:0
-phrase	古钟	古鐘	hold		古鐘:3 古鍾:0 古鈡:0
-phrase	古钟表	古鐘錶	hold		古鐘錶:1 古鍾錶:0 古鈡錶:0
-phrase	叩钟	叩鐘	hold		叩鐘:0 叩鍾:0 叩鈡:0
 phrase	只冲	只衝	evidence		只衝:34 只沖:10 只冲:0
-phrase	可仑坡	可崙坡	hold		可侖坡:0 可崙坡:0
 phrase	可鉴	可鑑	hold		可鑑:9 可鑒:3
 phrase	台上	台上	evidence		臺上:178 檯上:175 颱上:1 台上:3565
 phrase	台下	台下	evidence		臺下:28 檯下:14 颱下:2 台下:834
@@ -1380,7 +1177,7 @@ phrase	台达	台達	evidence		臺達:6 檯達:0 颱達:0 台達:2398
 phrase	台达电	台達電	evidence		臺達電:1 檯達電:0 颱達電:0 台達電:825
 phrase	台金	台金	evidence		臺金:0 檯金:1 颱金:0 台金:42
 phrase	台鉴	台鑒	hold		臺鑒:0 臺鑑:0 檯鑒:0 檯鑑:0 颱鑒:0 颱鑑:0 台鑒:0 台鑑:0
-phrase	台钟	檯鐘	hold		檯鐘:0 檯鍾:0 檯鈡:0 臺鐘:0 臺鍾:0 臺鈡:0 颱鐘:0 颱鍾:0 颱鈡:0 台鐘:4 台鍾:0 台鈡:0
+phrase	台钟	檯鐘	hold		檯鐘:0 臺鐘:0 颱鐘:0 台鐘:2
 phrase	台钱	台錢	evidence		臺錢:29 檯錢:11 颱錢:0 台錢:563
 phrase	台钻	台鑽	hold		臺鑽:0 檯鑽:0 颱鑽:0 台鑽:5
 phrase	台铁	台鐵	evidence		臺鐵:1513 檯鐵:0 颱鐵:0 台鐵:17809
@@ -1409,24 +1206,14 @@ phrase	台风险	颱風險	hold		颱風險:4 臺風險:0 檯風險:0 台風險:7
 phrase	台风雨	颱風雨	hold		颱風雨:13 臺風雨:0 檯風雨:0 台風雨:1
 phrase	台马轮	台馬輪	hold		臺馬輪:3 檯馬輪:0 颱馬輪:0 台馬輪:18
 phrase	台驾	台駕	hold		臺駕:0 檯駕:0 颱駕:0 台駕:10
-phrase	号舍	號捨	hold		號舍:1 號捨:0
 phrase	司令台	司令台	hold		司令臺:0 司令檯:0 司令颱:0 司令台:13
 phrase	司天台	司天台	hold		司天臺:0 司天檯:0 司天颱:0 司天台:0
-phrase	吃亏的是乖占便宜的是呆	吃虧的是乖占便宜的是待	hold		吃虧的是乖占便宜的是呆:0 吃虧的是乖占便宜的是待:0
 phrase	各签	各簽	hold		各簽:6 各籤:0
-phrase	各类钟	各類鐘	hold		各類鐘:1 各類鍾:0 各類鈡:0
-phrase	合眼摸象	合眼摸像	hold		合眼摸象:0 合眼摸像:0
 phrase	合签	合簽	hold		合簽:21 合籤:1
-phrase	吊杆	吊桿	hold		吊杆:0 吊桿:16
-phrase	吊钟	吊鐘	hold		吊鐘:4 吊鍾:0 吊鈡:0
-phrase	同舍生	同捨生	hold		同舍生:0 同捨生:0
-phrase	名称标签	名稱標簽	hold		名稱標籤:0 名稱標簽:0
-phrase	名胄	名冑	hold		名胄:0 名冑:0
+phrase	名称标签	名稱標籤	hold		名稱標籤:0 名稱標簽:0
 phrase	名鉴	名鑑	hold		名鑑:18 名鑒:1
-phrase	后印象主义	後印像主義	hold		後印象主義:0 後印像主義:0
 phrase	后台	後台	evidence		後臺:168 後檯:10 後颱:27 後台:3571
 phrase	后台老板	後台老闆	hold		後臺老闆:0 後檯老闆:0 後颱老闆:0 後台老闆:0
-phrase	后期印象派	後期印像派	hold		後期印象派:0 後期印像派:0
 phrase	后账	後帳	evidence		後賬:1 後帳:89
 phrase	后车之鉴	後車之鑑	hold		後車之鑑:0 後車之鑒:0
 phrase	向后冲	向後衝	hold		向後衝:0 向後沖:0 向後冲:0
@@ -1434,43 +1221,19 @@ phrase	向外冲	向外衝	hold		向外衝:0 向外沖:0 向外冲:0
 phrase	向湿性	向濕性	hold		向溼性:0 向濕性:0
 phrase	向里面冲	向裡面衝	hold		向裡面衝:0 向裡面沖:0 向裡面冲:0
 phrase	吕岩	呂岩	hold		呂岩:0 呂巖:0
-phrase	吠舍	吠捨	hold		吠舍:3 吠捨:0
 phrase	吧台	吧台	evidence		吧檯:269 吧臺:24 吧颱:7 吧台:1116
 phrase	含油岩	含油岩	hold		含油岩:0 含油巖:0
 phrase	吴子冲	吳子沖	hold		吳子沖:0 吳子衝:0 吳子冲:0
-phrase	吴岳修	吳岳修	hold		吳嶽修:0 吳岳修:0
 phrase	吹台	吹台	evidence		吹臺:1 吹檯:0 吹颱:4 吹台:77
-phrase	呆串了皮	待串了皮	hold		呆串了皮:0 待串了皮:0
-phrase	呆了	待了	evidence		呆了:453 待了:2298
-phrase	呆了一呆	待了一待	hold		呆了一呆:0 呆了一待:0 待了一呆:0 待了一待:0
-phrase	呆呆兽	呆呆獸	evidence		呆呆獸:354 呆待獸:0 待呆獸:0 待待獸:0
-phrase	呆呆挣挣	待待掙掙	hold		呆呆掙掙:0 呆待掙掙:0 待呆掙掙:0 待待掙掙:0
-phrase	呆头	呆頭	evidence		呆頭:32 待頭:8
-phrase	呆小症	待小症	hold		呆小症:0 待小症:0
-phrase	呆板	呆板	evidence		呆板:85 待板:41
-phrase	呆气	待氣	hold		呆氣:1 待氣:7
-phrase	呆滞	呆滯	evidence		呆滯:101 待滯:0
-phrase	呆痴	待癡	hold		呆癡:0 待癡:0
-phrase	呆着	待著	evidence		待著:879 呆著:23
-phrase	呆脑	待腦	hold		呆腦:8 待腦:6
-phrase	呆致致	待緻緻	hold		呆緻緻:0 待緻緻:0
-phrase	呆话	待話	hold		呆話:1 待話:5
-phrase	呆里呆气	待裡待氣	hold		呆裡呆氣:0 呆裡待氣:0 待裡呆氣:0 待裡待氣:0
-phrase	呆里撒奸	待裡撒奸	hold		呆裡撒奸:0 待裡撒奸:0
-phrase	呗赞	唄讚	hold		唄讚:0 唄贊:0
-phrase	周一岳	周一岳	hold		周一嶽:0 周一岳:0
 phrase	周俊勋	周俊勳	hold		周俊勳:0 周俊勛:0
 phrase	周台竹	周台竹	hold		周臺竹:0 周檯竹:0 周颱竹:0 周台竹:0
 phrase	咍台	咍台	hold		咍臺:0 咍檯:0 咍颱:0 咍台:0
-phrase	咏赞	詠讚	hold		詠贊:1 詠讚:0
-phrase	咕咕钟	咕咕鐘	hold		咕咕鐘:6 咕咕鍾:0 咕咕鈡:0
 phrase	咸卤	鹹鹵	hold		鹹鹵:0 鹹滷:0
 phrase	咸湿	鹹濕	evidence		鹹溼:1 鹹濕:37
 phrase	哀凄	哀淒	hold		哀悽:0 哀淒:0
 phrase	品花宝鉴	品花寶鑑	hold		品花寶鑑:0 品花寶鑒:0
 phrase	品莲台	品蓮台	hold		品蓮臺:0 品蓮檯:0 品蓮颱:0 品蓮台:0
 phrase	品鉴	品鑑	evidence		品鑑:79 品鑒:5
-phrase	响钟	響鐘	hold		響鐘:3 響鍾:0 響鈡:0
 phrase	哗众	譁眾	evidence		譁眾:137 嘩眾:27
 phrase	哗变	譁變	hold		譁變:5 嘩變:6
 phrase	哗哗	嘩嘩	evidence		嘩嘩:32 嘩譁:0 譁嘩:0 譁譁:0
@@ -1484,17 +1247,11 @@ phrase	哺喂	哺餵	hold		哺餵:5 哺喂:0
 phrase	售台	售台	evidence		售臺:1 售檯:2 售颱:0 售台:56
 phrase	售货台	售貨台	hold		售貨臺:0 售貨檯:0 售貨颱:0 售貨台:0
 phrase	唱对台戏	唱對台戲	hold		唱對臺戲:0 唱對檯戲:0 唱對颱戲:0 唱對台戲:0
-phrase	啧啧称赞	嘖嘖稱讚	hold		嘖嘖稱讚:0 嘖嘖稱贊:0
-phrase	啧啧赞叹	嘖嘖讚歎	hold		嘖嘖讚歎:0 嘖嘖贊歎:0
-phrase	喀喇昆仑公路	喀喇崑崙公路	hold		喀喇崑崙公路:0 喀喇崑侖公路:0
-phrase	喀喇昆仑山	喀喇崑崙山	hold		喀喇崑崙山:0 喀喇崑侖山:0
-phrase	喀喇昆仑山脉	喀喇崑崙山脈	hold		喀喇崑崙山脈:0 喀喇崑侖山脈:0
-phrase	喀拉昆仑山	喀拉崑崙山	hold		喀拉崑崙山:0 喀拉崑侖山:0
 phrase	喂乳	餵乳	hold		餵乳:0 喂乳:0
 phrase	喂了	餵了	evidence		餵了:173 喂了:12
-phrase	喂了一声	餵了一聲	hold		喂了一聲:1 餵了一聲:0
+phrase	喂了一声	喂了一聲	hold		喂了一聲:1 餵了一聲:0
 phrase	喂你	餵你	evidence		餵你:111 喂你:28
-phrase	喂偏食	餵偏食	hold		喂偏食:0 餵偏食:0
+phrase	喂偏食	喂偏食	hold		喂偏食:0 餵偏食:0
 phrase	喂养	餵養	evidence		餵養:133 喂養:3
 phrase	喂动物	餵動物	hold		餵動物:11 喂動物:2
 phrase	喂哺	餵哺	hold		餵哺:2 喂哺:0
@@ -1508,7 +1265,7 @@ phrase	喂牛	餵牛	hold		餵牛:3 喂牛:1
 phrase	喂狗	餵狗	evidence		餵狗:239 喂狗:18
 phrase	喂猪	餵豬	evidence		餵豬:42 喂豬:2
 phrase	喂猫	餵貓	evidence		餵貓:31 喂貓:5
-phrase	喂眼	餵眼	hold		喂眼:0 餵眼:0
+phrase	喂眼	喂眼	hold		喂眼:0 餵眼:0
 phrase	喂给	餵給	evidence		餵給:218 喂給:14
 phrase	喂羊	餵羊	hold		餵羊:6 喂羊:1
 phrase	喂过	餵過	evidence		餵過:35 喂過:4
@@ -1521,26 +1278,15 @@ phrase	喂鱼	餵魚	evidence		餵魚:49 喂魚:1
 phrase	喂鸡	餵雞	hold		餵雞:18 喂雞:1
 phrase	喂鸭	餵鴨	hold		餵鴨:3 喂鴨:0
 phrase	喂鹅	餵鵝	hold		餵鵝:0 喂鵝:0
-phrase	善财难舍	善財難捨	hold		善財難捨:0 善財難舍:0
 phrase	喜冲冲	喜衝衝	hold		喜衝衝:18 喜衝沖:0 喜衝冲:0 喜沖衝:0 喜沖沖:0 喜沖冲:0 喜冲衝:0 喜冲沖:0 喜冲冲:0
-phrase	喜欢钟	喜歡鐘	hold		喜歡鐘:7 喜歡鍾:14 喜歡鈡:0
-phrase	喜欢钟表	喜歡鐘錶	hold		喜歡鐘錶:0 喜歡鍾錶:0 喜歡鈡錶:0
 phrase	喧哗	喧嘩	evidence		喧譁:4 喧嘩:81
-phrase	嗜血杆菌	嗜血桿菌	hold		嗜血桿菌:0 嗜血杆菌:0
 phrase	嘘下台	噓下台	hold		噓下臺:0 噓下檯:0 噓下颱:0 噓下台:4
 phrase	嘘下台去	噓下台去	hold		噓下臺去:0 噓下檯去:0 噓下颱去:0 噓下台去:0
 phrase	嘘下台来	噓下台來	hold		噓下臺來:0 噓下檯來:0 噓下颱來:0 噓下台來:0
-phrase	四分钟	四分鐘	evidence		四分鐘:198 四分鍾:3 四分鈡:0
 phrase	四台	四台	evidence		四臺:25 四檯:0 四颱:0 四台:2373
 phrase	四号台	四號台	hold		四號臺:0 四號檯:0 四號颱:0 四號台:0
 phrase	四方台	四方台	hold		四方臺:0 四方檯:0 四方颱:0 四方台:1
 phrase	四方台区	四方台區	hold		四方臺區:0 四方檯區:0 四方颱區:0 四方台區:0
-phrase	四点钟	四點鐘	hold		四點鐘:8 四點鍾:0 四點鈡:0
-phrase	四秒钟	四秒鐘	hold		四秒鐘:1 四秒鍾:0 四秒鈡:0
-phrase	四舍五入	四捨五入	evidence		四捨五入:479 四舍五入:0
-phrase	四舍六入	四捨六入	hold		四捨六入:2 四舍六入:0
-phrase	四邻八舍	四鄰八捨	hold		四鄰八舍:0 四鄰八捨:0
-phrase	四面钟	四面鐘	hold		四面鐘:0 四面鍾:0 四面鈡:0
 phrase	回冲	回沖	evidence		回沖:93 回衝:23 回冲:0
 phrase	回台	回台	evidence		回臺:131 回檯:3 回颱:2 回台:4597
 phrase	围岩	圍岩	hold		圍巖:0 圍岩:3
@@ -1553,15 +1299,12 @@ phrase	国立台湾博物馆	國立台灣博物館	hold		國立臺灣博物館:3
 phrase	国立台湾图书馆	國立台灣圖書館	hold		國立臺灣圖書館:2 國立檯灣圖書館:0 國立颱灣圖書館:0 國立台灣圖書館:5
 phrase	国立台湾技术大学	國立台灣技術大學	hold		國立臺灣技術大學:0 國立檯灣技術大學:0 國立颱灣技術大學:0 國立台灣技術大學:0
 phrase	国立教育广播电台	國立教育廣播電台	hold		國立教育廣播電臺:5 國立教育廣播電檯:0 國立教育廣播電颱:0 國立教育廣播電台:1
-phrase	国胄	國冑	hold		國胄:0 國冑:0
 phrase	国际台	國際台	hold		國際臺:0 國際檯:2 國際颱:0 國際台:17
-phrase	国际学舍	國際學捨	hold		國際學舍:0 國際學捨:0
 phrase	国际舞台	國際舞台	evidence		國際舞臺:5 國際舞檯:0 國際舞颱:0 國際舞台:76
 phrase	图鉴	圖鑑	evidence		圖鑑:2174 圖鑒:25
 phrase	圆台	圓台	hold		圓臺:0 圓檯:0 圓颱:0 圓台:4
 phrase	圆锥台	圓錐台	hold		圓錐臺:0 圓錐檯:0 圓錐颱:0 圓錐台:0
 phrase	土壤冲蚀	土壤沖蝕	hold		土壤沖蝕:0 土壤衝蝕:0 土壤冲蝕:0
-phrase	土霉素	土霉素	hold		土黴素:0 土霉素:0
 phrase	圣帕台风	聖帕颱風	hold		聖帕颱風:0 聖帕臺風:0 聖帕檯風:0 聖帕台風:0
 phrase	圣帕强台	聖帕強颱	hold		聖帕強颱:0 聖帕強臺:0 聖帕強檯:0 聖帕強台:0
 phrase	圣帕袭台	聖帕襲台	hold		聖帕襲臺:0 聖帕襲檯:0 聖帕襲颱:0 聖帕襲台:0
@@ -1575,72 +1318,43 @@ phrase	地下签赌	地下簽賭	hold		地下簽賭:2 地下籤賭:0
 phrase	地冲	地衝	evidence		地衝:98 地沖:7 地冲:0
 phrase	地区冲突	地區衝突	hold		地區衝突:8 地區沖突:0 地區冲突:0
 phrase	地台	地台	evidence		地臺:21 地檯:0 地颱:2 地台:1132
-phrase	地瓜签	地瓜簽	hold		地瓜籤:3 地瓜簽:3
-phrase	地胄	地冑	hold		地胄:0 地冑:0
+phrase	地瓜签	地瓜籤	hold		地瓜籤:3 地瓜簽:3
 phrase	坍台	坍台	hold		坍臺:0 坍檯:0 坍颱:0 坍台:0
 phrase	坐台	坐台	evidence		坐檯:12 坐臺:6 坐颱:0 坐台:61
 phrase	坐台子	坐檯子	hold		坐檯子:0 坐臺子:0 坐颱子:0 坐台子:0
 phrase	坐台小姐	坐檯小姐	hold		坐檯小姐:1 坐臺小姐:0 坐颱小姐:0 坐台小姐:0
-phrase	坐如钟	坐如鐘	hold		坐如鐘:0 坐如鍾:0 坐如鈡:0
-phrase	坐钟	坐鐘	hold		坐鐘:0 坐鍾:0 坐鈡:0
 phrase	坛台	壇台	hold		壇臺:0 壇檯:0 壇颱:0 壇台:3
 phrase	垮台	垮台	evidence		垮臺:4 垮檯:0 垮颱:1 垮台:169
 phrase	埃及艳后	埃及豔后	evidence		埃及豔后:30 埃及艷后:3
 phrase	埃荣冲	埃榮衝	hold		埃榮衝:0 埃榮沖:0 埃榮冲:0
-phrase	埋头寻钟	埋頭尋鐘	hold		埋頭尋鐘:0 埋頭尋鍾:0 埋頭尋鈡:0
-phrase	埋头寻钟表	埋頭尋鐘錶	hold		埋頭尋鐘錶:0 埋頭尋鍾錶:0 埋頭尋鈡錶:0
-phrase	埋杆竖柱	埋桿豎柱	hold		埋杆豎柱:0 埋桿豎柱:0
 phrase	基地台	基地台	evidence		基地臺:5 基地檯:0 基地颱:0 基地台:948
 phrase	基岩	基岩	hold		基岩:14 基巖:0
 phrase	基性岩石	基性岩石	hold		基性岩石:0 基性巖石:0
 phrase	塌台	塌台	hold		塌臺:0 塌檯:0 塌颱:0 塌台:1
 phrase	塔台	塔台	evidence		塔臺:20 塔檯:0 塔颱:1 塔台:232
-phrase	塔钟	塔鐘	hold		塔鐘:0 塔鍾:0 塔鈡:0
-phrase	塞耳盗钟	塞耳盜鐘	hold		塞耳盜鐘:0 塞耳盜鍾:0 塞耳盜鈡:0
 phrase	墩台	墩台	hold		墩臺:0 墩檯:0 墩颱:0 墩台:0
-phrase	壁钟	壁鐘	hold		壁鐘:0 壁鍾:3 壁鈡:0
-phrase	士胄	士冑	hold		士胄:0 士冑:0
-phrase	声如洪钟	聲如洪鐘	hold		聲如洪鐘:0 聲如洪鍾:0 聲如洪鈡:0
 phrase	复兴广播电台	復興廣播電台	hold		復興廣播電臺:0 復興廣播電檯:0 復興廣播電颱:0 復興廣播電台:0
 phrase	外屋里的灶君爷	外屋裡的灶君爺	hold		外屋裡的竈君爺:0 外屋裡的灶君爺:0
-phrase	外舍	外捨	hold		外舍:1 外捨:3
 phrase	多冲	多衝	evidence		多衝:99 多沖:20 多冲:0
 phrase	多台	多台	evidence		多臺:35 多檯:6 多颱:22 多台:1841
 phrase	多平台	多平台	evidence		多平臺:1 多平檯:0 多平颱:0 多平台:254
 phrase	多平台环境	多平台環境	hold		多平臺環境:0 多平檯環境:0 多平颱環境:0 多平台環境:0
-phrase	夜半钟声	夜半鐘聲	hold		夜半鐘聲:2 夜半鍾聲:0 夜半鈡聲:0
 phrase	夜台	夜台	hold		夜臺:1 夜檯:0 夜颱:2 夜台:21
-phrase	够钟情	夠鐘情	hold		夠鍾情:0 夠鐘情:0 夠鈡情:0
-phrase	够钟爱	夠鐘愛	hold		夠鍾愛:0 夠鐘愛:0 夠鈡愛:0
 phrase	大冲	大衝	evidence		大沖:15 大衝:136 大冲:0
 phrase	大卤面	大滷麵	hold		大滷麵:12 大鹵麵:0
 phrase	大台	大台	evidence		大臺:77 大檯:2 大颱:19 大台:2183
 phrase	大台北	大台北	evidence		大臺北:32 大檯北:0 大颱北:0 大台北:431
 phrase	大台北区	大台北區	hold		大臺北區:0 大檯北區:0 大颱北區:0 大台北區:6
 phrase	大哗	大譁	hold		大譁:0 大嘩:0
-phrase	大型钟	大型鐘	hold		大型鐘:1 大型鍾:0 大型鈡:0
-phrase	大型钟表	大型鐘錶	hold		大型鐘錶:1 大型鍾錶:0 大型鈡錶:0
-phrase	大型钟面	大型鐘面	hold		大型鐘面:0 大型鍾面:0 大型鈡面:0
 phrase	大岩桐	大岩桐	hold		大巖桐:0 大岩桐:1
 phrase	大抚台	大撫台	hold		大撫臺:0 大撫檯:0 大撫颱:0 大撫台:0
-phrase	大本钟	大本鐘	hold		大本鐘:0 大本鍾:0 大本鈡:0
-phrase	大本钟敲	大本鐘敲	hold		大本鐘敲:0 大本鍾敲:0 大本鈡敲:0
-phrase	大武仑	大武崙	hold		大武崙:13 大武侖:0
 phrase	大水冲倒龙王庙	大水沖倒龍王廟	hold		大水沖倒龍王廟:0 大水衝倒龍王廟:0 大水冲倒龍王廟:0
 phrase	大水冲倒龙王殿	大水沖倒龍王殿	hold		大水沖倒龍王殿:0 大水衝倒龍王殿:0 大水冲倒龍王殿:0
 phrase	大水冲溺	大水沖溺	hold		大水沖溺:0 大水衝溺:0 大水冲溺:0
 phrase	大爱台	大愛台	hold		大愛臺:0 大愛檯:0 大愛颱:0 大愛台:22
 phrase	大理岩	大理岩	hold		大理岩:0 大理巖:0
-phrase	大笨钟	大笨鐘	hold		大笨鐘:12 大笨鍾:0 大笨鈡:0
-phrase	大笨钟敲	大笨鐘敲	hold		大笨鐘敲:0 大笨鍾敲:0 大笨鈡敲:0
-phrase	大肠杆菌	大腸桿菌	evidence		大腸桿菌:34 大腸杆菌:0
-phrase	大肠杆菌群	大腸桿菌群	hold		大腸桿菌群:0 大腸杆菌群:0
-phrase	大舍	大捨	hold		大舍:0 大捨:3
 phrase	大角度俯冲轰炸	大角度俯衝轟炸	hold		大角度俯衝轟炸:0 大角度俯沖轟炸:0 大角度俯冲轟炸:0
-phrase	大象口里拔生牙	大像口裡拔生牙	hold		大象口裡拔生牙:0 大像口裡拔生牙:0
-phrase	大赞	大讚	evidence		大讚:513 大贊:32
 phrase	大鉴	大鑒	hold		大鑒:0 大鑑:2
-phrase	大钟	大鐘	evidence		大鐘:63 大鍾:10 大鈡:0
 phrase	大风鉴	大風鑑	hold		大風鑑:0 大風鑒:0
 phrase	天克地冲	天剋地衝	hold		天剋地衝:0 天剋地沖:0 天剋地冲:0
 phrase	天台	天台	evidence		天台:1206 天臺:62 天檯:1 天颱:201
@@ -1650,83 +1364,41 @@ phrase	天台宗	天台宗	hold		天台宗:1 天臺宗:0 天檯宗:0 天颱宗:0
 phrase	天台山	天台山	hold		天台山:1 天臺山:1 天檯山:0 天颱山:0
 phrase	天心岩	天心岩	hold		天心岩:0 天心巖:0
 phrase	天文台	天文台	evidence		天文臺:6 天文檯:0 天文颱:0 天文台:106
-phrase	天文学钟	天文學鐘	hold		天文學鐘:0 天文學鍾:0 天文學鈡:0
-phrase	天文钟	天文鐘	hold		天文鐘:3 天文鍾:0 天文鈡:0
-phrase	天潢贵胄	天潢貴冑	hold		天潢貴胄:2 天潢貴冑:2
 phrase	太冲	太衝	evidence		太沖:0 太衝:350 太冲:0
-phrase	太子舍人	太子捨人	hold		太子舍人:0 太子捨人:0
 phrase	太空天文台	太空天文台	hold		太空天文臺:0 太空天文檯:0 太空天文颱:0 太空天文台:0
-phrase	夸赞	誇讚	evidence		誇讚:159 誇贊:2
 phrase	奇台	奇台	evidence		奇台:218 奇臺:8 奇檯:1 奇颱:2
 phrase	奇台县	奇台縣	hold		奇臺縣:0 奇檯縣:0 奇颱縣:0 奇台縣:0
 phrase	奇岩	奇岩	evidence		奇巖:0 奇岩:41
-phrase	奖赞	獎讚	hold		獎贊:0 獎讚:4
-phrase	套马杆	套馬桿	hold		套馬杆:0 套馬桿:0
-phrase	女宿舍	女宿捨	hold		女宿舍:5 女宿捨:0
-phrase	女舍监	女捨監	hold		女舍監:0 女捨監:0
 phrase	好戏连台	好戲連台	hold		好戲連臺:0 好戲連檯:0 好戲連颱:0 好戲連台:1
 phrase	好签	好籤	evidence		好籤:276 好簽:116
 phrase	妆台	妝台	evidence		妝臺:2 妝檯:3 妝颱:0 妝台:69
 phrase	妖气冲天	妖氣沖天	hold		妖氣沖天:5 妖氣衝天:0 妖氣冲天:0
 phrase	姌袅	姌嫋	hold		姌嫋:0 姌裊:0
-phrase	姓岳	姓岳	hold		姓岳:1 姓嶽:0
 phrase	娇艳欲滴	嬌豔欲滴	hold		嬌豔欲滴:1 嬌艷欲滴:0
 phrase	娇袅不胜	嬌嫋不勝	hold		嬌嫋不勝:0 嬌裊不勝:0
 phrase	娱乐台	娛樂台	evidence		娛樂臺:0 娛樂檯:0 娛樂颱:1 娛樂台:58
-phrase	子母钟	子母鐘	hold		子母鐘:3 子母鍾:0 子母鈡:0
 phrase	孤凄	孤淒	hold		孤悽:0 孤淒:0
 phrase	学力鉴定	學力鑑定	hold		學力鑑定:2 學力鑒定:0
 phrase	学台	學台	evidence		學臺:52 學檯:1 學颱:0 學台:373
-phrase	学舍	學捨	hold		學舍:5 學捨:1
-phrase	宁撞金钟一下不打破鼓三千	寧撞金鐘一下不打破鼓三千	hold		寧撞金鐘一下不打破鼓三千:0 寧撞金鍾一下不打破鼓三千:0 寧撞金鈡一下不打破鼓三千:0
-phrase	宅舍	宅捨	hold		宅舍:0 宅捨:0
-phrase	守舍	守捨	hold		守舍:21 守捨:0
 phrase	安山岩	安山岩	hold		安山岩:0 安山巖:0
-phrase	安岳	安岳	hold		安岳:1 安嶽:0
-phrase	宗周钟	宗周鐘	hold		宗周鐘:0 宗周鍾:0 宗周鈡:0
 phrase	官台木	官台木	hold		官臺木:0 官檯木:0 官颱木:0 官台木:0
-phrase	官舍	官捨	hold		官舍:11 官捨:0
-phrase	定时钟	定時鐘	hold		定時鐘:0 定時鍾:0 定時鈡:0
-phrase	宝胄	寶冑	hold		寶胄:0 寶冑:0
 phrase	宝鉴	寶鑑	hold		寶鑑:17 寶鑒:5
-phrase	客舍	客捨	hold		客舍:1 客捨:2
-phrase	宣赞	宣讚	hold		宣贊:0 宣讚:0
 phrase	宪台	憲台	hold		憲臺:0 憲檯:0 憲颱:0 憲台:3
-phrase	宿舍	宿舍	evidence		宿舍:2006 宿捨:0
-phrase	宿舍区	宿捨區	hold		宿舍區:16 宿捨區:0
-phrase	宿舍楼	宿捨樓	hold		宿舍樓:5 宿捨樓:0
-phrase	宿舍网路	宿捨網路	hold		宿舍網路:12 宿捨網路:0
-phrase	宿舍费	宿捨費	hold		宿舍費:5 宿捨費:0
 phrase	寅台	寅台	hold		寅臺:0 寅檯:0 寅颱:0 寅台:0
-phrase	密仑	密崙	hold		密侖:0 密崙:0
-phrase	富于想象	富於想像	hold		富於想像:0 富於想象:0
-phrase	寒舍	寒舍	evidence		寒舍:35 寒捨:0
 phrase	察合台	察合台	hold		察合臺:1 察合檯:0 察合颱:0 察合台:6
 phrase	察合台汗国	察合台汗國	hold		察合臺汗國:0 察合檯汗國:0 察合颱汗國:0 察合台汗國:0
 phrase	对冲	對沖	evidence		對沖:169 對衝:78 對冲:0
 phrase	对冲基金	對沖基金	evidence		對沖基金:37 對衝基金:1 對冲基金:0
-phrase	对准钟	對準鐘	hold		對準鐘:0 對準鍾:0 對準鈡:0
-phrase	对准钟表	對準鐘錶	hold		對準鐘錶:0 對準鍾錶:0 對準鈡錶:0
 phrase	对台	對台	evidence		對臺:117 對檯:7 對颱:22 對台:3260
 phrase	对台戏	對台戲	hold		對臺戲:0 對檯戲:0 對颱戲:0 對台戲:0
-phrase	寺舍	寺捨	hold		寺舍:0 寺捨:0
-phrase	寺钟	寺鐘	hold		寺鐘:2 寺鍾:0 寺鈡:0
 phrase	封台	封台	hold		封臺:1 封檯:0 封颱:0 封台:16
 phrase	小冲突	小衝突	hold		小衝突:28 小沖突:0 小冲突:0
-phrase	小型钟	小型鐘	hold		小型鐘:1 小型鍾:0 小型鈡:0
-phrase	小型钟表	小型鐘錶	hold		小型鐘錶:1 小型鍾錶:0 小型鈡錶:0
-phrase	小型钟面	小型鐘面	hold		小型鐘面:0 小型鍾面:0 小型鈡面:0
 phrase	小岩洞	小岩洞	hold		小巖洞:0 小岩洞:0
-phrase	小舍人	小捨人	hold		小舍人:0 小捨人:0
-phrase	小钟	小鐘	evidence		小鐘:285 小鍾:30 小鈡:0
 phrase	少冲	少衝	evidence		少衝:39 少沖:6 少冲:0
 phrase	尿布台	尿布台	hold		尿布臺:0 尿布檯:17 尿布颱:0 尿布台:32
 phrase	层台	層台	hold		層臺:3 層檯:0 層颱:0 層台:17
-phrase	屋舍	屋捨	hold		屋舍:22 屋捨:0
 phrase	展台	展台	evidence		展臺:3 展檯:0 展颱:0 展台:148
 phrase	山岩	山岩	hold		山岩:24 山巖:14
-phrase	山岳	山岳	evidence		山嶽:9 山岳:59
-phrase	山崩钟应	山崩鐘應	hold		山崩鐘應:0 山崩鍾應:0 山崩鈡應:0
 phrase	岗台	崗台	hold		崗臺:0 崗檯:0 崗颱:0 崗台:0
 phrase	岩仓使节团	岩倉使節團	hold		岩倉使節團:0 巖倉使節團:0
 phrase	岩圈	岩圈	hold		岩圈:2 巖圈:0
@@ -1776,27 +1448,6 @@ phrase	岩郎	岩郎	hold		巖郎:0 岩郎:0
 phrase	岩阻	岩阻	hold		巖阻:0 岩阻:0
 phrase	岩陛	岩陛	hold		巖陛:0 岩陛:0
 phrase	岫岩县	岫岩縣	hold		岫巖縣:0 岫岩縣:0
-phrase	岱岳	岱岳	hold		岱嶽:0 岱岳:0
-phrase	岳丈	岳丈	hold		岳丈:6 嶽丈:0
-phrase	岳云	岳雲	hold		岳雲:19 嶽雲:0
-phrase	岳坟	岳墳	hold		岳墳:0 嶽墳:0
-phrase	岳家	岳家	evidence		岳家:250 嶽家:2
-phrase	岳家军	岳家軍	hold		岳家軍:3 嶽家軍:0
-phrase	岳岳	岳岳	evidence		嶽嶽:0 嶽岳:0 岳嶽:0 岳岳:300
-phrase	岳庙	岳廟	hold		岳廟:0 嶽廟:5
-phrase	岳武穆	岳武穆	hold		岳武穆:1 嶽武穆:0
-phrase	岳母	岳母	evidence		岳母:762 嶽母:0
-phrase	岳氏	岳氏	hold		岳氏:0 嶽氏:0
-phrase	岳父	岳父	evidence		岳父:1023 嶽父:0
-phrase	岳王	岳王	hold		岳王:1 嶽王:0
-phrase	岳王庙	岳王廟	hold		岳王廟:0 嶽王廟:0
-phrase	岳珂	岳珂	hold		岳珂:0 嶽珂:0
-phrase	岳阳	岳陽	hold		岳陽:7 嶽陽:0
-phrase	岳阳县	岳陽縣	hold		岳陽縣:0 嶽陽縣:0
-phrase	岳阳楼	岳陽樓	hold		岳陽樓:5 嶽陽樓:0
-phrase	岳阳楼记	岳陽樓記	hold		岳陽樓記:5 嶽陽樓記:0
-phrase	岳飞	岳飛	evidence		岳飛:216 嶽飛:0
-phrase	岳麓	岳麓	hold		嶽麓:0 岳麓:0
 phrase	峰岩	峰岩	hold		峰巖:0 峰岩:4
 phrase	峰火台	峰火台	hold		峰火臺:0 峰火檯:0 峰火颱:0 峰火台:1
 phrase	嵌岩	嵌岩	hold		嵌巖:0 嵌岩:0
@@ -1804,29 +1455,15 @@ phrase	巉岩	巉岩	hold		巉巖:1 巉岩:0
 phrase	工作台	工作台	evidence		工作臺:6 工作檯:9 工作颱:2 工作台:87
 phrase	左冲	左衝	hold		左衝:4 左沖:0 左冲:0
 phrase	左冲右突	左衝右突	hold		左衝右突:2 左沖右突:0 左冲右突:0
-phrase	左邻右舍	左鄰右捨	hold		左鄰右舍:26 左鄰右捨:0
-phrase	巴尔舍夫斯基	巴爾捨夫斯基	hold		巴爾舍夫斯基:0 巴爾捨夫斯基:0
-phrase	巴尔赞	巴爾讚	hold		巴爾贊:0 巴爾讚:0
-phrase	巴氏杆菌	巴氏桿菌	hold		巴氏桿菌:0 巴氏杆菌:0
 phrase	巴洛马天文台	巴洛馬天文台	hold		巴洛馬天文臺:0 巴洛馬天文檯:0 巴洛馬天文颱:0 巴洛馬天文台:0
-phrase	巴舍莱	巴捨萊	hold		巴舍萊:0 巴捨萊:0
-phrase	布仑特	布崙特	hold		布侖特:0 布崙特:0
-phrase	布氏杆菌	布氏桿菌	hold		布氏桿菌:0 布氏杆菌:0
-phrase	布氏杆菌病	布氏桿菌病	hold		布氏桿菌病:0 布氏杆菌病:0
-phrase	布谷鸟钟	布穀鳥鐘	hold		布穀鳥鐘:1 布穀鳥鍾:0 布穀鳥鈡:0
-phrase	帅呆了	帥呆了	evidence		帥呆了:30 帥待了:0
-phrase	希斯仑	希斯崙	hold		希斯崙:0 希斯侖:0
 phrase	帕台农	帕台農	hold		帕臺農:0 帕檯農:0 帕颱農:0 帕台農:0
 phrase	帕台农神庙	帕台農神廟	hold		帕臺農神廟:0 帕檯農神廟:0 帕颱農神廟:0 帕台農神廟:0
-phrase	帝胄	帝冑	hold		帝胄:0 帝冑:0
 phrase	干劲冲天	幹勁沖天	hold		幹勁沖天:0 幹勁衝天:0 幹勁冲天:0
 phrase	干台	乾颱	hold		乾颱:0 乾臺:1 乾檯:2 乾台:29
 phrase	干啼湿哭	乾啼濕哭	hold		乾啼溼哭:0 乾啼濕哭:0
 phrase	干撂台	乾撂台	hold		乾撂臺:0 乾撂檯:0 乾撂颱:0 乾撂台:0
-phrase	干涉现象	干涉現像	hold		干涉現象:0 干涉現像:0
 phrase	干湿	乾濕	evidence		乾溼:40 乾濕:173
 phrase	干湿发	乾濕髮	hold		乾溼髮:0 乾濕髮:1
-phrase	干象	乾像	hold		乾象:0 乾像:2
 phrase	平台	平台	evidence		平臺:371 平檯:0 平颱:0 平台:16048
 phrase	平台式扫描器	平台式掃描器	hold		平臺式掃描器:0 平檯式掃描器:0 平颱式掃描器:0 平台式掃描器:1
 phrase	平台数	平台數	hold		平臺數:0 平檯數:0 平颱數:0 平台數:17
@@ -1840,52 +1477,31 @@ phrase	幽岩	幽岩	hold		幽巖:0 幽岩:0
 phrase	幽栖岩谷	幽棲岩谷	hold		幽棲巖谷:0 幽棲岩谷:0
 phrase	广播台	廣播台	hold		廣播臺:0 廣播檯:0 廣播颱:0 廣播台:9
 phrase	广播电台	廣播電台	evidence		廣播電臺:20 廣播電檯:0 廣播電颱:0 廣播電台:58
-phrase	广舍	廣捨	hold		廣捨:0 廣舍:0
-phrase	庐舍	廬捨	hold		廬舍:0 廬捨:0
-phrase	库仑	庫崙	hold		庫侖:1 庫崙:0
-phrase	库仑定律	庫崙定律	hold		庫侖定律:0 庫崙定律:0
-phrase	库仑计	庫崙計	hold		庫侖計:0 庫崙計:0
 phrase	库里尔台	庫里爾台	hold		庫里爾臺:0 庫里爾檯:0 庫里爾颱:0 庫里爾台:0
 phrase	应用平台	應用平台	hold		應用平臺:0 應用平檯:0 應用平颱:0 應用平台:1
-phrase	应钟	應鐘	hold		應鐘:1 應鍾:0 應鈡:0
 phrase	庙台	廟台	hold		廟臺:1 廟檯:0 廟颱:0 廟台:6
 phrase	府台	府台	hold		府臺:1 府檯:1 府颱:2 府台:16
-phrase	座钟	座鐘	hold		座鐘:8 座鍾:1 座鈡:0
-phrase	庵舍	菴捨	hold		菴舍:0 菴捨:0
-phrase	廖金钟	廖金鐘	hold		廖金鐘:0 廖金鍾:0 廖金鈡:0
 phrase	建台	建台	evidence		建臺:2 建檯:0 建颱:1 建台:44
 phrase	开台	開台	evidence		開臺:44 開檯:6 開颱:5 開台:2076
 phrase	开台圣王	開台聖王	hold		開臺聖王:0 開檯聖王:0 開颱聖王:0 開台聖王:0
 phrase	开台锣鼓	開台鑼鼓	hold		開臺鑼鼓:0 開檯鑼鼓:0 開颱鑼鼓:0 開台鑼鼓:0
 phrase	开放舞台	開放舞台	hold		開放舞臺:0 開放舞檯:0 開放舞颱:0 開放舞台:0
-phrase	开杆	開桿	hold		開杆:0 開桿:5
-phrase	弃宗弄赞	棄宗弄讚	hold		棄宗弄贊:0 棄宗弄讚:0
-phrase	弃舍	棄捨	hold		棄捨:2 棄舍:0
 phrase	引以为鉴	引以為鑑	hold		引以為鑑:18 引以為鑒:4
 phrase	张勋	張勳	hold		張勳:2 張勛:8
 phrase	弥天亘地	彌天亘地	hold		彌天亙地:0 彌天亘地:0
 phrase	弹子台	彈子檯	hold		彈子檯:0 彈子臺:0 彈子颱:0 彈子台:0
 phrase	弹珠台	彈珠台	evidence		彈珠檯:23 彈珠臺:5 彈珠颱:0 彈珠台:102
 phrase	强烈台风	強烈颱風	hold		強烈颱風:28 強烈臺風:0 強烈檯風:0 強烈台風:0
-phrase	强聒不舍	強聒不捨	hold		強聒不捨:0 強聒不舍:0
-phrase	归真反朴	歸真反朴	hold		歸真反樸:0 歸真反朴:0
 phrase	当其冲	當其衝	evidence		當其衝:104 當其沖:3 當其冲:0
-phrase	形象艺术	形像藝術	hold		形象藝術:0 形像藝術:0
 phrase	往后冲	往後衝	hold		往後衝:6 往後沖:0 往後冲:0
 phrase	往外冲	往外衝	hold		往外衝:9 往外沖:0 往外冲:0
 phrase	往里面冲	往裡面衝	hold		往裡面衝:22 往裡面沖:1 往裡面冲:0
 phrase	征台	征台	hold		征臺:0 征檯:0 征颱:0 征台:10
-phrase	征象	徵像	hold		徵象:29 徵像:1
 phrase	徐台荪	徐台蓀	hold		徐臺蓀:0 徐檯蓀:0 徐颱蓀:0 徐台蓀:0
 phrase	徐台荪宫仲毅	徐台蓀宮仲毅	hold		徐臺蓀宮仲毅:0 徐檯蓀宮仲毅:0 徐颱蓀宮仲毅:0 徐台蓀宮仲毅:0
-phrase	徐赞升	徐讚昇	hold		徐讚昇:0 徐贊昇:0
 phrase	御史台	御史台	hold		御史臺:2 御史檯:0 御史颱:0 御史台:3
 phrase	德法年鉴	德法年鑑	hold		德法年鑑:0 德法年鑒:0
 phrase	志冲斗牛	志沖斗牛	hold		志沖斗牛:0 志衝斗牛:0 志冲斗牛:0
-phrase	忘生舍死	忘生捨死	hold		忘生捨死:0 忘生舍死:0
-phrase	快舍下	快捨下	hold		快捨下:0 快舍下:0
-phrase	忽舍下	忽捨下	hold		忽捨下:0 忽舍下:0
-phrase	怀钟	懷鐘	hold		懷鐘:0 懷鍾:0 懷鈡:0
 phrase	怒冲冲	怒衝衝	hold		怒衝衝:0 怒衝沖:0 怒衝冲:0 怒沖衝:0 怒沖沖:6 怒沖冲:0 怒冲衝:0 怒冲沖:0 怒冲冲:0
 phrase	怒发冲冠	怒髮衝冠	hold		怒髮衝冠:7 怒髮沖冠:0 怒髮冲冠:0
 phrase	怒发冲天	怒髮沖天	hold		怒髮沖天:0 怒髮衝天:0 怒髮冲天:0
@@ -1898,53 +1514,32 @@ phrase	急冲而下	急衝而下	hold		急衝而下:0 急沖而下:0 急冲而�
 phrase	性冲动	性衝動	evidence		性衝動:37 性沖動:0 性冲動:0
 phrase	怨气冲天	怨氣沖天	hold		怨氣沖天:8 怨氣衝天:0 怨氣冲天:0
 phrase	总台	總台	evidence		總檯:0 總臺:11 總颱:0 總台:33
-phrase	总杆数	總桿數	hold		總桿數:0 總杆數:0
-phrase	总杆赛	總桿賽	hold		總桿賽:0 總杆賽:0
-phrase	恋恋不舍	戀戀不捨	hold		戀戀不捨:9 戀戀不舍:0
-phrase	恋恋难舍	戀戀難捨	hold		戀戀難捨:0 戀戀難舍:0
 phrase	恢台	恢台	hold		恢臺:0 恢檯:0 恢颱:0 恢台:0
 phrase	恩台	恩台	hold		恩臺:0 恩檯:0 恩颱:1 恩台:25
 phrase	恶湿居下	惡濕居下	hold		惡溼居下:0 惡濕居下:0
 phrase	悬岩	懸岩	hold		懸巖:0 懸岩:1
 phrase	悬岩峭壁	懸岩峭壁	hold		懸巖峭壁:0 懸岩峭壁:0
-phrase	悬胄	懸冑	hold		懸冑:0 懸胄:0
-phrase	悬钟	懸鐘	hold		懸鐘:0 懸鍾:0 懸鈡:0
 phrase	悲凄	悲淒	hold		悲悽:2 悲淒:5
 phrase	情感冲动	情感衝動	hold		情感衝動:0 情感沖動:0 情感冲動:0
-phrase	情有所钟	情有所鐘	hold		情有所鍾:1 情有所鐘:0 情有所鈡:0
-phrase	情有独钟	情有獨鍾	evidence		情有獨鍾:182 情有獨鐘:8 情有獨鈡:0
-phrase	惇朴	惇朴	hold		惇樸:0 惇朴:0
 phrase	惊才绝艳	驚才絕豔	hold		驚才絕豔:2 驚才絕艷:8
-phrase	惊赞	驚讚	hold		驚讚:1 驚贊:0
-phrase	惊钟	驚鐘	hold		驚鐘:0 驚鍾:0 驚鈡:0
 phrase	惠鉴	惠鑒	hold		惠鑒:0 惠鑑:0
-phrase	想象	想像	evidence		想像:16085 想象:165
-phrase	愿朴	愿朴	hold		愿樸:0 愿朴:0
-phrase	慈悲喜舍	慈悲喜捨	hold		慈悲喜捨:1 慈悲喜舍:0
 phrase	戏剧台	戲劇台	evidence		戲劇臺:0 戲劇檯:0 戲劇颱:0 戲劇台:39
 phrase	戏台	戲台	evidence		戲臺:9 戲檯:2 戲颱:0 戲台:131
 phrase	成岩作用	成岩作用	hold		成岩作用:0 成巖作用:0
-phrase	战地钟声	戰地鐘聲	hold		戰地鐘聲:0 戰地鍾聲:0 戰地鈡聲:0
-phrase	房舍	房舍	evidence		房舍:31 房捨:1
 phrase	手冢治虫	手塚治虫	hold		手塚治虫:23 手冢治虫:0
 phrase	手工台	手工檯	hold		手工檯:0 手工臺:0 手工颱:0 手工台:0
 phrase	手术台	手術台	evidence		手術檯:3 手術臺:3 手術颱:0 手術台:51
 phrase	打冲锋	打衝鋒	hold		打衝鋒:0 打沖鋒:0 打冲鋒:0
-phrase	打卡钟	打卡鐘	hold		打卡鐘:2 打卡鍾:0 打卡鈡:0
 phrase	打卤面	打滷麵	hold		打滷麵:4 打鹵麵:0
 phrase	打印台	打印台	hold		打印臺:0 打印檯:0 打印颱:0 打印台:0
-phrase	打家劫舍	打家劫捨	hold		打家劫舍:14 打家劫捨:0
 phrase	打对台	打對台	evidence		打對臺:7 打對檯:1 打對颱:0 打對台:119
 phrase	打报台	打報台	hold		打報臺:0 打報檯:0 打報颱:0 打報台:0
 phrase	打擂台	打擂台	hold		打擂臺:6 打擂檯:0 打擂颱:0 打擂台:27
-phrase	打桨杆	打槳桿	hold		打槳桿:0 打槳杆:0
-phrase	打钟	打鐘	hold		打鐘:12 打鍾:4 打鈡:0
 phrase	找台阶	找台階	evidence		找臺階:2 找檯階:0 找颱階:0 找台階:92
 phrase	找台阶下	找台階下	evidence		找臺階下:1 找檯階下:0 找颱階下:0 找台階下:78
 phrase	找台阶儿	找台階兒	hold		找臺階兒:0 找檯階兒:0 找颱階兒:0 找台階兒:0
 phrase	抄台	抄台	hold		抄臺:0 抄檯:0 抄颱:0 抄台:20
 phrase	投喂	投餵	evidence		投餵:48 投喂:9
-phrase	投潘岳果	投潘岳果	hold		投潘岳果:0 投潘嶽果:0
 phrase	折冲	折衝	hold		折衝:13 折沖:0 折冲:0
 phrase	折冲厌难	折衝厭難	hold		折衝厭難:0 折沖厭難:0 折冲厭難:0
 phrase	折冲尊俎	折衝尊俎	hold		折衝尊俎:0 折沖尊俎:0 折冲尊俎:0
@@ -1955,307 +1550,107 @@ phrase	折账	折帳	evidence		折賬:0 折帳:93
 phrase	抚台	撫台	hold		撫臺:0 撫檯:0 撫颱:0 撫台:2
 phrase	抚台街	撫台街	hold		撫臺街:0 撫檯街:0 撫颱街:0 撫台街:0
 phrase	报台	報台	evidence		報臺:5 報檯:1 報颱:5 報台:109
-phrase	抱大足杆	抱大足桿	hold		抱大足桿:0 抱大足杆:0
-phrase	抱朴	抱朴	hold		抱朴:12 抱樸:4
-phrase	抱朴子	抱朴子	hold		抱朴子:3 抱樸子:0
-phrase	抱朴而长吟兮	抱朴而長吟兮	hold		抱朴而長吟兮:0 抱樸而長吟兮:0
-phrase	抱素怀朴	抱素懷朴	hold		抱素懷樸:0 抱素懷朴:0
-phrase	抽公签	抽公簽	hold		抽公籤:0 抽公簽:0
+phrase	抽公签	抽公籤	hold		抽公籤:0 抽公簽:0
 phrase	抽签	抽籤	evidence		抽籤:1897 抽簽:31
-phrase	拂钟无声	拂鐘無聲	hold		拂鐘無聲:0 拂鍾無聲:0 拂鈡無聲:0
 phrase	拆台	拆台	evidence		拆臺:8 拆檯:0 拆颱:0 拆台:127
-phrase	拉克施尔德钟	拉克施爾德鐘	hold		拉克施爾德鐘:0 拉克施爾德鍾:0 拉克施爾德鈡:0
-phrase	拉杆	拉桿	evidence		拉桿:541 拉杆:18
-phrase	拉杆子	拉桿子	hold		拉桿子:1 拉杆子:0
 phrase	拍台拍凳	拍檯拍凳	hold		拍檯拍凳:0 拍臺拍凳:0 拍颱拍凳:0 拍台拍凳:0
-phrase	拓朴	拓樸	evidence		拓樸:54 拓朴:0
-phrase	拓朴学	拓朴學	hold		拓樸學:6 拓朴學:0
-phrase	拙朴	拙朴	hold		拙樸:1 拙朴:0
-phrase	拚舍	拚捨	hold		拚捨:0 拚舍:0
 phrase	拜台	拜台	evidence		拜臺:1 拜檯:0 拜颱:8 拜台:36
-phrase	拜岳	拜岳	hold		拜岳:2 拜嶽:0
 phrase	拟卤素	擬鹵素	hold		擬鹵素:0 擬滷素:0
 phrase	拳击台	拳擊台	hold		拳擊臺:0 拳擊檯:0 拳擊颱:0 拳擊台:1
-phrase	拿下钟	拿下鐘	hold		拿下鐘:0 拿下鍾:1 拿下鈡:0
-phrase	拿枪杆	拿槍桿	hold		拿槍桿:0 拿槍杆:0
-phrase	拿破仑	拿破崙	evidence		拿破崙:347 拿破侖:11
-phrase	拿破仑法典	拿破崙法典	hold		拿破崙法典:0 拿破侖法典:0
-phrase	拿破仑波拿巴	拿破崙波拿巴	hold		拿破崙波拿巴:1 拿破侖波拿巴:0
-phrase	拿笔杆	拿筆桿	hold		拿筆桿:0 拿筆杆:0
 phrase	挂账	掛帳	hold		掛賬:0 掛帳:15
-phrase	挂钟	掛鐘	hold		掛鐘:25 掛鍾:0 掛鈡:0
 phrase	指挥台	指揮台	hold		指揮台:9 指揮臺:1 指揮檯:0 指揮颱:0
 phrase	指纹鉴定	指紋鑑定	hold		指紋鑑定:0 指紋鑒定:0
 phrase	挑台	挑台	evidence		挑臺:1 挑檯:1 挑颱:2 挑台:42
-phrase	挥杆	揮桿	hold		揮杆:1 揮桿:22
 phrase	捕虏岩	捕虜岩	hold		捕虜岩:0 捕虜巖:0
 phrase	换台	換台	evidence		換臺:13 換檯:0 換颱:2 換台:727
-phrase	换挡杆	換擋桿	hold		換擋桿:0 換擋杆:0
-phrase	换档杆	換檔桿	hold		換檔桿:0 換檔杆:0
-phrase	换签	換簽	hold		換籤:115 換簽:60
+phrase	换签	換籤	hold		換籤:115 換簽:60
 phrase	捶台拍凳	捶檯拍凳	hold		捶檯拍凳:0 捶臺拍凳:0 捶颱拍凳:0 捶台拍凳:0
-phrase	排档杆	排檔桿	evidence		排檔桿:114 排檔杆:2
-phrase	掣签	掣簽	hold		掣籤:0 掣簽:0
+phrase	掣签	掣籤	hold		掣籤:0 掣簽:0
 phrase	控制台	控制台	evidence		控制台:158 控制臺:2 控制檯:3 控制颱:1
-phrase	控制杆	控制桿	hold		控制桿:19 控制杆:1
-phrase	推杆	推桿	evidence		推杆:0 推桿:54
-phrase	掩耳盗钟	掩耳盜鐘	hold		掩耳盜鐘:0 掩耳盜鍾:0 掩耳盜鈡:0
-phrase	提舍尼	提捨尼	hold		提舍尼:0 提捨尼:0
 phrase	揩台抹凳	揩檯抹凳	hold		揩檯抹凳:0 揩臺抹凳:0 揩颱抹凳:0 揩台抹凳:0
 phrase	摆擂台	擺擂台	hold		擺擂臺:0 擺擂檯:0 擺擂颱:0 擺擂台:1
-phrase	摆钟	擺鐘	hold		擺鐘:1 擺鍾:0 擺鈡:0
-phrase	摇杆	搖桿	evidence		搖桿:1271 搖杆:3
-phrase	摸钟	摸鐘	hold		摸鐘:1 摸鍾:0 摸鈡:0
-phrase	撑杆	撐桿	hold		撐杆:0 撐桿:9
-phrase	撑杆跳	撐桿跳	hold		撐杆跳:0 撐桿跳:0
-phrase	撑杆跳高	撐桿跳高	hold		撐杆跳高:0 撐桿跳高:0
 phrase	撞府冲州	撞府沖州	hold		撞府沖州:0 撞府衝州:0 撞府冲州:0
-phrase	撞木钟	撞木鐘	hold		撞木鐘:0 撞木鍾:0 撞木鈡:0
 phrase	撞球台	撞球檯	hold		撞球檯:1 撞球臺:0 撞球颱:0 撞球台:1
-phrase	撞球杆	撞球桿	hold		撞球桿:2 撞球杆:0
-phrase	撞警钟	撞警鐘	hold		撞警鐘:0 撞警鍾:0 撞警鈡:0
-phrase	撞钟	撞鐘	hold		撞鐘:17 撞鍾:0 撞鈡:0
-phrase	撞钟太岁	撞鐘太歲	hold		撞鐘太歲:0 撞鍾太歲:0 撞鈡太歲:0
 phrase	撞阵冲军	撞陣衝軍	hold		撞陣衝軍:0 撞陣沖軍:0 撞陣冲軍:0
 phrase	擂台	擂台	evidence		擂臺:18 擂檯:0 擂颱:0 擂台:545
 phrase	擂台赛	擂台賽	evidence		擂臺賽:1 擂檯賽:0 擂颱賽:0 擂台賽:36
 phrase	操作台	操作檯	hold		操作檯:1 操作臺:1 操作颱:0 操作台:15
-phrase	操作钟	操作鐘	hold		操作鐘:0 操作鍾:0 操作鈡:0
 phrase	操纵台	操縱檯	hold		操縱檯:0 操縱臺:0 操縱颱:1 操縱台:2
-phrase	操纵杆	操縱桿	evidence		操縱桿:75 操縱杆:1
 phrase	攀岩	攀岩	evidence		攀巖:0 攀岩:265
-phrase	支杆	支桿	hold		支桿:4 支杆:0
-phrase	支胄	支冑	hold		支胄:0 支冑:0
 phrase	收款台	收款台	hold		收款臺:0 收款檯:0 收款颱:0 收款台:0
 phrase	收银台	收銀台	evidence		收銀臺:2 收銀檯:5 收銀颱:0 收銀台:47
 phrase	改签	改簽	evidence		改簽:126 改籤:1
 phrase	政治舞台	政治舞台	hold		政治舞臺:1 政治舞檯:0 政治舞颱:0 政治舞台:3
-phrase	故舍	故捨	hold		故舍:0 故捨:0
 phrase	敌台	敵台	hold		敵臺:2 敵檯:0 敵颱:0 敵台:23
-phrase	教学钟	教學鐘	hold		教學鐘:0 教學鍾:0 教學鈡:0
-phrase	教胄	教冑	hold		教胄:0 教冑:0
-phrase	敝舍	敝捨	hold		敝舍:0 敝捨:0
-phrase	敦朴	敦朴	hold		敦樸:0 敦朴:0
 phrase	敬鉴	敬鑒	hold		敬鑒:0 敬鑑:0
-phrase	数字时钟	數字時鐘	hold		數字時鐘:1 數字時鍾:0 數字時鈡:0
-phrase	数字钟	數字鐘	hold		數字鐘:0 數字鍾:0 數字鈡:0
-phrase	数字钟表	數字鐘錶	hold		數字鐘錶:0 數字鍾錶:0 數字鈡錶:0
-phrase	敲丧钟	敲喪鐘	hold		敲喪鐘:1 敲喪鍾:0 敲喪鈡:0
-phrase	敲钟	敲鐘	evidence		敲鐘:146 敲鍾:0 敲鈡:0
 phrase	文书鉴定	文書鑑定	hold		文書鑑定:0 文書鑒定:0
 phrase	文化冲击	文化衝擊	hold		文化衝擊:20 文化沖擊:0 文化冲擊:0
 phrase	文鉴	文鑑	hold		文鑑:2 文鑒:0
-phrase	斋舍	齋捨	hold		齋舍:0 齋捨:0
 phrase	斑岩	斑岩	hold		斑岩:0 斑巖:0
 phrase	斗犀台	鬥犀台	hold		鬥犀臺:0 鬥犀檯:0 鬥犀颱:0 鬥犀台:0
 phrase	斗艳	鬥豔	hold		鬥豔:10 鬥艷:2
 phrase	斗艳争芳	鬥豔爭芳	hold		鬥豔爭芳:0 鬥艷爭芳:0
 phrase	斗鸡台	鬥雞台	hold		鬥雞臺:0 鬥雞檯:0 鬥雞颱:0 鬥雞台:0
 phrase	斥卤	斥鹵	hold		斥鹵:0 斥滷:0
-phrase	斫雕为朴	斫雕為朴	hold		斫雕為樸:0 斫雕為朴:0
 phrase	断头台	斷頭台	evidence		斷頭臺:11 斷頭檯:0 斷頭颱:0 斷頭台:116
 phrase	斯摩棱斯克	斯摩稜斯克	hold		斯摩棱斯克:1 斯摩稜斯克:0
 phrase	新台	新台	evidence		新臺:852 新檯:5 新颱:3 新台:2053
 phrase	新台币	新台幣	evidence		新臺幣:837 新檯幣:0 新颱幣:0 新台幣:1734
 phrase	新城电台	新城電台	hold		新城電臺:0 新城電檯:0 新城電颱:0 新城電台:0
 phrase	新报台	新報台	hold		新報臺:0 新報檯:0 新報颱:0 新報台:0
-phrase	新斯科舍	新斯科捨	hold		新斯科舍:1 新斯科捨:0
 phrase	新闻台	新聞台	evidence		新聞臺:5 新聞檯:0 新聞颱:3 新聞台:291
-phrase	斲雕为朴	斲雕為朴	hold		斲雕為樸:0 斲雕為朴:0
-phrase	方岳	方岳	hold		方岳:0 方嶽:0
-phrase	施粥舍饭	施粥捨飯	hold		施粥捨飯:0 施粥舍飯:0
-phrase	施舍	施捨	evidence		施捨:420 施舍:0
-phrase	施舍之道	施捨之道	hold		施舍之道:0 施捨之道:0
-phrase	旅舍	旅舍	evidence		旅舍:42 旅捨:0
 phrase	旋转台	旋轉台	hold		旋轉臺:0 旋轉檯:0 旋轉颱:0 旋轉台:2
-phrase	旗杆	旗桿	hold		旗杆:3 旗桿:17
-phrase	旗杆上绑鸡毛	旗桿上綁雞毛	hold		旗杆上綁雞毛:0 旗桿上綁雞毛:0
 phrase	无线新闻台	無線新聞台	hold		無線新聞台:0 無線新聞臺:0 無線新聞檯:0 無線新聞颱:0
 phrase	无线电台	無線電台	hold		無線電臺:2 無線電檯:0 無線電颱:0 無線電台:3
 phrase	日本台	日本台	evidence		日本臺:4 日本檯:0 日本颱:5 日本台:154
-phrase	旧钟	舊鐘	hold		舊鐘:2 舊鍾:1 舊鈡:0
-phrase	旧钟表	舊鐘錶	hold		舊鐘錶:0 舊鍾錶:0 舊鈡錶:0
-phrase	时钟	時鐘	evidence		時鐘:1168 時鍾:4 時鈡:0
-phrase	时钟座	時鐘座	hold		時鐘座:1 時鍾座:0 時鈡座:0
-phrase	昆仑	崑崙	evidence		崑崙:309 崑侖:0
-phrase	昆仑山	崑崙山	hold		崑崙山:6 崑侖山:0
-phrase	昆仑山脉	崑崙山脈	hold		崑崙山脈:0 崑侖山脈:0
-phrase	昆都仑	昆都崙	hold		昆都侖:0 昆都崙:0
-phrase	昆都仑区	昆都崙區	hold		昆都侖區:0 昆都崙區:0
-phrase	明中舍去暗中来	明中捨去暗中來	hold		明中捨去暗中來:0 明中舍去暗中來:0
 phrase	明台	明台	evidence		明臺:12 明檯:1 明颱:8 明台:288
 phrase	明鉴	明鑑	hold		明鑑:16 明鑒:5
 phrase	明鉴万里	明鑑萬里	hold		明鑑萬里:0 明鑒萬里:0
 phrase	明鉴秋毫	明鑑秋毫	hold		明鑑秋毫:0 明鑒秋毫:0
-phrase	星象恶曜	星像惡曜	hold		星象惡曜:0 星像惡曜:0
 phrase	春台	春台	hold		春臺:2 春檯:0 春颱:0 春台:14
-phrase	显示钟	顯示鐘	hold		顯示鐘:0 顯示鍾:0 顯示鈡:0
-phrase	显示钟表	顯示鐘錶	hold		顯示鐘錶:0 顯示鍾錶:0 顯示鈡錶:0
 phrase	晒台	曬台	hold		曬臺:1 曬檯:0 曬颱:0 曬台:3
 phrase	晕台	暈台	hold		暈臺:0 暈檯:0 暈颱:0 暈台:0
-phrase	晚钟	晚鐘	hold		晚鐘:12 晚鍾:1 晚鈡:0
-phrase	晨钟	晨鐘	hold		晨鐘:5 晨鍾:0 晨鈡:0
-phrase	晨钟暮鼓	晨鐘暮鼓	hold		晨鐘暮鼓:1 晨鍾暮鼓:0 晨鈡暮鼓:0
-phrase	景岳	景岳	hold		景岳:1 景嶽:0
-phrase	景胄	景冑	hold		景胄:0 景冑:0
-phrase	暮云亲舍	暮雲親捨	hold		暮雲親舍:0 暮雲親捨:0
-phrase	暮鼓晨钟	暮鼓晨鐘	hold		暮鼓晨鐘:2 暮鼓晨鍾:0 暮鼓晨鈡:0
 phrase	曲台	曲台	hold		曲臺:0 曲檯:0 曲颱:0 曲台:7
-phrase	曲霉	麴霉	hold		麴黴:2 麴霉:0
-phrase	曲霉毒素	麴霉毒素	hold		麴黴毒素:1 麴霉毒素:0
-phrase	更签	更簽	hold		更籤:0 更簽:1
-phrase	更钟	更鐘	hold		更鐘:1 更鍾:3 更鈡:0
+phrase	更签	更籤	hold		更籤:0 更簽:1
 phrase	曾台霖	曾台霖	hold		曾臺霖:0 曾檯霖:0 曾颱霖:0 曾台霖:0
-phrase	曾朴	曾朴	hold		曾樸:0 曾朴:0
 phrase	月台	月台	evidence		月臺:186 月檯:3 月颱:19 月台:5668
 phrase	月台票	月台票	hold		月臺票:0 月檯票:0 月颱票:0 月台票:19
 phrase	月岩	月岩	hold		月岩:14 月巖:0
-phrase	有够赞	有夠讚	evidence		有夠讚:262 有夠贊:1
 phrase	有棱有角	有稜有角	hold		有棱有角:2 有稜有角:21
 phrase	有鉴	有鑑	evidence		有鑑:482 有鑒:100
 phrase	有鉴于	有鑑於	evidence		有鑑於:344 有鑒於:88
 phrase	有鉴于此	有鑑於此	hold		有鑑於此:23 有鑒於此:3
 phrase	服务台	服務台	evidence		服務檯:3 服務臺:6 服務颱:0 服務台:312
-phrase	服舍	服捨	hold		服舍:0 服捨:4
 phrase	望乡台	望鄉台	hold		望鄉臺:0 望鄉檯:0 望鄉颱:0 望鄉台:1
 phrase	望楼台	望樓台	hold		望樓臺:0 望樓檯:0 望樓颱:0 望樓台:0
-phrase	望胄	望冑	hold		望胄:0 望冑:0
-phrase	朝钟	朝鐘	hold		朝鐘:1 朝鍾:0 朝鈡:0
-phrase	朝钟暮鼓	朝鐘暮鼓	hold		朝鐘暮鼓:0 朝鍾暮鼓:0 朝鈡暮鼓:0
-phrase	木杆	木桿	hold		木杆:0 木桿:8
-phrase	木钟	木鐘	hold		木鐘:0 木鍾:1 木鈡:0
 phrase	未签字者	未簽字者	hold		未簽字者:0 未籤字者:0
-phrase	末胄	末冑	hold		末胄:0 末冑:0
 phrase	本台	本台	evidence		本臺:10 本檯:2 本颱:12 本台:424
 phrase	本台消息	本台消息	hold		本臺消息:0 本檯消息:0 本颱消息:0 本台消息:0
 phrase	本报台	本報台	hold		本報臺:0 本報檯:0 本報颱:0 本報台:1
-phrase	朱仑街	朱崙街	hold		朱崙街:5 朱侖街:0
 phrase	朱智勋	朱智勛	evidence		朱智勳:76 朱智勛:169
-phrase	朴世莉	朴世莉	hold		朴世莉:10 樸世莉:0
-phrase	朴京琳	朴京琳	hold		朴京琳:0 樸京琳:0
-phrase	朴仔树	朴仔樹	hold		朴仔樹:0 樸仔樹:0
-phrase	朴修斯	朴修斯	hold		樸修斯:0 朴修斯:0
-phrase	朴克牌	朴克牌	hold		樸克牌:4 朴克牌:0
-phrase	朴凤柱	朴鳳柱	hold		朴鳳柱:0 樸鳳柱:0
-phrase	朴刀	朴刀	hold		朴刀:13 樸刀:0
-phrase	朴厚	朴厚	hold		樸厚:1 朴厚:1
-phrase	朴吉渊	朴吉淵	hold		朴吉淵:0 樸吉淵:0
-phrase	朴周永	朴周永	hold		朴周永:0 樸周永:0
-phrase	朴子	朴子	evidence		朴子:116 樸子:0
-phrase	朴子市	朴子市	hold		朴子市:5 樸子市:0
-phrase	朴子溪	朴子溪	hold		朴子溪:1 樸子溪:0
-phrase	朴学	朴學	hold		樸學:7 朴學:0
-phrase	朴实	樸實	evidence		樸實:598 朴實:0
-phrase	朴实作风	朴實作風	hold		樸實作風:0 朴實作風:0
-phrase	朴实无华	樸實無華	evidence		樸實無華:248 朴實無華:0
-phrase	朴宣英	朴宣英	hold		朴宣英:1 樸宣英:0
-phrase	朴屯	朴屯	hold		朴屯:0 樸屯:0
-phrase	朴志胤	朴志胤	hold		朴志胤:0 樸志胤:0
-phrase	朴忠	朴忠	hold		朴忠:5 樸忠:0
-phrase	朴念仁	朴念仁	hold		樸念仁:0 朴念仁:0
-phrase	朴恩惠	朴恩惠	hold		朴恩惠:13 樸恩惠:0
-phrase	朴拙	朴拙	hold		樸拙:1 朴拙:0
-phrase	朴新阳	朴新陽	hold		朴新陽:4 樸新陽:0
-phrase	朴智星	朴智星	hold		朴智星:15 樸智星:0
-phrase	朴树	朴樹	hold		朴樹:1 樸樹:0
-phrase	朴槿惠	朴槿惠	hold		朴槿惠:2 樸槿惠:0
-phrase	朴樕	朴樕	hold		樸樕:0 朴樕:0
-phrase	朴次茅斯	朴次茅斯	hold		樸次茅斯:0 朴次茅斯:0
-phrase	朴正恩	朴正恩	hold		朴正恩:3 樸正恩:0
-phrase	朴正熙	朴正熙	hold		朴正熙:16 樸正熙:0
-phrase	朴正祥	朴正祥	hold		朴正祥:0 樸正祥:0
-phrase	朴永训	朴永訓	hold		朴永訓:0 樸永訓:0
-phrase	朴泰桓	朴泰桓	hold		朴泰桓:2 樸泰桓:0
-phrase	朴父	朴父	hold		朴父:0 樸父:0
-phrase	朴璐美	朴璐美	hold		朴璐美:3 樸璐美:0
-phrase	朴直	朴直	hold		樸直:3 朴直:0
-phrase	朴真熙	朴真熙	hold		朴真熙:4 樸真熙:0
-phrase	朴硝	朴硝	hold		朴硝:0 樸硝:0
-phrase	朴素	樸素	evidence		樸素:358 朴素:22
-phrase	朴素无华	朴素無華	hold		樸素無華:0 朴素無華:0
-phrase	朴茂	朴茂	hold		朴茂:1 樸茂:0
-phrase	朴茨茅斯	朴茨茅斯	hold		朴茨茅斯:1 樸茨茅斯:5
-phrase	朴茨茅斯队	朴茨茅斯隊	hold		朴茨茅斯隊:0 樸茨茅斯隊:0
-phrase	朴讷	朴訥	hold		樸訥:0 朴訥:0
-phrase	朴讷诚笃	朴訥誠篤	hold		樸訥誠篤:0 朴訥誠篤:0
-phrase	朴诗妍	朴詩妍	hold		朴詩妍:0 樸詩妍:0
-phrase	朴质	朴質	hold		樸質:8 朴質:0
-phrase	朴质无华	朴質無華	hold		樸質無華:1 朴質無華:0
-phrase	朴资茅斯	朴資茅斯	hold		朴資茅斯:0 樸資茅斯:0
-phrase	朴资茅斯条约	朴資茅斯條約	hold		朴資茅斯條約:0 樸資茅斯條約:0
-phrase	朴赞浩	朴讚浩	hold		朴贊浩:4 朴讚浩:0 樸贊浩:0 樸讚浩:0
-phrase	朴鄙	朴鄙	hold		樸鄙:0 朴鄙:0
-phrase	朴重	朴重	hold		樸重:0 朴重:0
-phrase	朴野	朴野	hold		樸野:2 朴野:0
-phrase	朴野无文	朴野無文	hold		樸野無文:0 朴野無文:0
-phrase	朴钝	朴鈍	hold		樸鈍:0 朴鈍:0
-phrase	朴陋	朴陋	hold		樸陋:0 朴陋:0
-phrase	朴马	朴馬	hold		樸馬:1 朴馬:0
-phrase	朴鲁	朴魯	hold		樸魯:0 朴魯:0
 phrase	机台	機台	evidence		機臺:20 機檯:6 機颱:3 機台:2368
-phrase	机械钟	機械鐘	hold		機械鐘:3 機械鍾:0 機械鈡:0
-phrase	机械钟表	機械鐘錶	hold		機械鐘錶:1 機械鍾錶:0 機械鈡錶:0
-phrase	杆上	桿上	evidence		杆上:37 桿上:132
-phrase	杆儿	桿兒	hold		杆兒:0 桿兒:0
-phrase	杆刀	桿刀	hold		桿刀:0 杆刀:0
-phrase	杆塔	桿塔	hold		杆塔:0 桿塔:0
-phrase	杆子	桿子	evidence		杆子:11 桿子:200
-phrase	杆状	桿狀	hold		桿狀:2 杆狀:0
-phrase	杆直	桿直	hold		桿直:20 杆直:1
-phrase	杆秤	桿秤	hold		桿秤:1 杆秤:0
-phrase	杆茵	桿茵	hold		桿茵:0 杆茵:0
-phrase	杆菌	桿菌	evidence		桿菌:76 杆菌:0
-phrase	杆菌性	桿菌性	hold		桿菌性:0 杆菌性:0
-phrase	杆菌类	桿菌類	hold		桿菌類:0 杆菌類:0
-phrase	杆菌素	桿菌素	hold		桿菌素:0 杆菌素:0
-phrase	杈杆儿	杈桿兒	hold		杈桿兒:0 杈杆兒:0
-phrase	李公朴	李公朴	hold		李公樸:0 李公朴:0
 phrase	李志勋	李志勳	hold		李志勳:2 李志勛:0
-phrase	李斯特氏杆菌	李斯特氏桿菌	hold		李斯特氏桿菌:0 李斯特氏杆菌:0
 phrase	李鉴原	李鑑原	hold		李鑑原:0 李鑒原:0
-phrase	李钟奭	李鐘奭	hold		李鐘奭:16 李鍾奭:7 李鈡奭:0
-phrase	李钟郁	李鐘郁	hold		李鍾郁:0 李鐘郁:0 李鈡郁:0
-phrase	村胄	村冑	hold		村胄:0 村冑:0
-phrase	村舍	村捨	hold		村舍:2 村捨:0
-phrase	杠杆	槓桿	evidence		槓桿:2576 槓杆:1
-phrase	杠杆原理	槓桿原理	hold		槓桿原理:19 槓杆原理:0
-phrase	杠杆收购	槓桿收購	hold		槓桿收購:1 槓杆收購:0
 phrase	来台	來台	evidence		來臺:206 來檯:10 來颱:39 來台:7274
 phrase	来台访问	來台訪問	hold		來臺訪問:0 來檯訪問:0 來颱訪問:0 來台訪問:2
 phrase	杯台	杯台	evidence		杯臺:1 杯檯:1 杯颱:0 杯台:38
-phrase	松赞干布	松讚干布	hold		松贊干布:0 松讚干布:0
-phrase	松赞干布陵	松讚干布陵	hold		松贊干布陵:0 松讚干布陵:0
 phrase	板岩	板岩	hold		板岩:1 板巖:0
 phrase	枕岩漱流	枕岩漱流	hold		枕巖漱流:0 枕岩漱流:0
 phrase	枕状玄武岩	枕狀玄武岩	hold		枕狀玄武岩:0 枕狀玄武巖:0
 phrase	林冲	林沖	evidence		林沖:39 林衝:13 林冲:0
 phrase	林冲夜奔	林沖夜奔	hold		林沖夜奔:0 林衝夜奔:0 林冲夜奔:0
 phrase	林口台地	林口台地	hold		林口臺地:1 林口檯地:0 林口颱地:0 林口台地:27
-phrase	林宏岳	林宏岳	hold		林宏嶽:0 林宏岳:0
-phrase	林钟	林鐘	hold		林鐘:29 林鍾:28 林鈡:0
-phrase	枝胄	枝冑	hold		枝胄:0 枝冑:0
-phrase	枪杆	槍桿	hold		槍桿:28 槍杆:0
-phrase	枪杆儿	槍桿兒	hold		槍桿兒:0 槍杆兒:0
-phrase	枪杆子	槍桿子	hold		槍桿子:25 槍杆子:0
-phrase	枯草杆菌	枯草桿菌	hold		枯草桿菌:0 枯草杆菌:0
-phrase	架钟	架鐘	hold		架鐘:0 架鍾:0 架鈡:0
 phrase	柏台	柏台	hold		柏臺:0 柏檯:0 柏颱:0 柏台:0
 phrase	柏台乌府	柏台烏府	hold		柏臺烏府:0 柏檯烏府:0 柏颱烏府:0 柏台烏府:0
 phrase	柏梁台	柏梁台	hold		柏梁臺:0 柏梁檯:0 柏梁颱:0 柏梁台:0
-phrase	某舍	某捨	hold		某舍:0 某捨:0
 phrase	柜台	櫃檯	hold		櫃檯:4490 櫃臺:187 櫃颱:0 櫃台:2697
 phrase	柜台委讬	櫃檯委託	hold		櫃檯委託:0 櫃臺委託:0 櫃颱委託:0 櫃台委託:0
 phrase	查号台	查號台	hold		查號臺:0 查號檯:0 查號颱:0 查號台:2
 phrase	查询台	查詢檯	hold		查詢檯:0 查詢臺:0 查詢颱:0 查詢台:15
-phrase	标准杆	標準桿	hold		標準桿:0 標準杆:0
-phrase	标杆	標桿	hold		標杆:21 標桿:8
 phrase	标签	標籤	evidence		標籤:4489 標簽:41
-phrase	栏杆	欄杆	evidence		欄杆:383 欄桿:13
-phrase	校舍	校舍	evidence		校舍:183 校捨:0
 phrase	核电磁脉冲	核電磁脈衝	hold		核電磁脈衝:0 核電磁脈沖:0 核電磁脈冲:0
 phrase	格林威治天文台	格林威治天文台	hold		格林威治天文臺:0 格林威治天文檯:0 格林威治天文颱:0 格林威治天文台:0
 phrase	桃园中坜台地	桃園中壢台地	hold		桃園中壢臺地:0 桃園中壢檯地:0 桃園中壢颱地:0 桃園中壢台地:0
-phrase	桅杆	桅桿	hold		桅杆:16 桅桿:7
 phrase	桓台	桓台	hold		桓臺:0 桓檯:0 桓颱:0 桓台:0
 phrase	桓台县	桓台縣	hold		桓臺縣:0 桓檯縣:0 桓颱縣:0 桓台縣:0
 phrase	桥台	橋台	evidence		橋臺:3 橋檯:0 橋颱:0 橋台:70
@@ -2263,16 +1658,11 @@ phrase	梁仙台	梁仙台	hold		梁仙臺:0 梁仙檯:0 梁仙颱:0 梁仙台:0
 phrase	梁山伯与祝英台	梁山伯與祝英台	hold		梁山伯與祝英臺:0 梁山伯與祝英檯:0 梁山伯與祝英颱:0 梁山伯與祝英台:4
 phrase	梁山伯祝英台	梁山伯祝英台	hold		梁山伯祝英臺:0 梁山伯祝英檯:0 梁山伯祝英颱:0 梁山伯祝英台:2
 phrase	梁文冲	梁文沖	hold		梁文沖:0 梁文衝:0 梁文冲:0
-phrase	梁赞	梁讚	hold		梁贊:7 梁讚:0
 phrase	梯冲	梯衝	hold		梯衝:3 梯沖:0 梯冲:0
 phrase	梳妆台	梳妝台	evidence		梳妝檯:0 梳妝臺:0 梳妝颱:0 梳妝台:33
 phrase	检阅台	檢閱台	hold		檢閱臺:0 檢閱檯:0 檢閱颱:0 檢閱台:0
-phrase	棉签	棉簽	hold		棉籤:1 棉簽:0
-phrase	棉药签	棉藥簽	hold		棉藥籤:0 棉藥簽:0
-phrase	棒曲霉素	棒麴霉素	hold		棒麴黴素:0 棒麴霉素:0
-phrase	棒状杆菌	棒狀桿菌	hold		棒狀桿菌:0 棒狀杆菌:0
-phrase	棫朴	棫朴	hold		棫樸:0 棫朴:0
-phrase	森罗万象	森羅萬像	hold		森羅萬象:12 森羅萬像:0
+phrase	棉签	棉籤	hold		棉籤:1 棉簽:0
+phrase	棉药签	棉藥籤	hold		棉藥籤:0 棉藥簽:0
 phrase	棱体	稜體	hold		棱體:0 稜體:0
 phrase	棱台	稜台	hold		棱臺:0 棱檯:0 棱颱:0 棱台:0 稜臺:0 稜檯:0 稜颱:0 稜台:0
 phrase	棱层	稜層	hold		棱層:0 稜層:0
@@ -2291,36 +1681,19 @@ phrase	楼阁亭台	樓閣亭台	hold		樓閣亭臺:0 樓閣亭檯:0 樓閣亭�
 phrase	横亘	橫亘	hold		橫亙:16 橫亘:0
 phrase	横冲	橫衝	evidence		橫衝:120 橫沖:0 橫冲:0
 phrase	横冲直撞	橫衝直撞	evidence		橫衝直撞:97 橫沖直撞:0 橫冲直撞:0
-phrase	横杆	橫桿	evidence		橫杆:0 橫桿:86
-phrase	横舍	橫捨	hold		橫舍:0 橫捨:0
 phrase	橄榄岩	橄欖岩	hold		橄欖岩:0 橄欖巖:0
 phrase	歌台舞榭	歌台舞榭	hold		歌臺舞榭:0 歌檯舞榭:0 歌颱舞榭:0 歌台舞榭:0
-phrase	歌钟	歌鐘	hold		歌鐘:0 歌鍾:0 歌鈡:0
 phrase	歌风台	歌風台	hold		歌風臺:0 歌風檯:0 歌風颱:0 歌風台:0
 phrase	武装冲突	武裝衝突	hold		武裝衝突:21 武裝沖突:0 武裝冲突:0
-phrase	殡舍	殯捨	hold		殯舍:0 殯捨:0
 phrase	殷鉴	殷鑑	hold		殷鑑:29 殷鑒:0
 phrase	殷鉴不远	殷鑑不遠	hold		殷鑑不遠:26 殷鑒不遠:0
-phrase	殿钟自鸣	殿鐘自鳴	hold		殿鐘自鳴:0 殿鍾自鳴:0 殿鈡自鳴:0
-phrase	毁钟为铎	毀鐘為鐸	hold		毀鐘為鐸:0 毀鍾為鐸:0 毀鈡為鐸:0
 phrase	母乳喂养	母乳餵養	hold		母乳餵養:1 母乳喂養:0
-phrase	母钟	母鐘	hold		母鐘:4 母鍾:0 母鈡:0
-phrase	每分钟	每分鐘	evidence		每分鐘:133 每分鍾:0 每分鈡:0
-phrase	每秒钟	每秒鐘	hold		每秒鐘:7 每秒鍾:0 每秒鈡:0
-phrase	比杆赛	比桿賽	hold		比桿賽:0 比杆賽:0
-phrase	比舍	比捨	hold		比舍:3 比捨:2
-phrase	毗舍婆佛	毗捨婆佛	hold		毗舍婆佛:0 毗捨婆佛:0
-phrase	毫仑目	毫崙目	hold		毫侖目:0 毫崙目:0
-phrase	氏胄	氏冑	hold		氏胄:0 氏冑:0
-phrase	民风淳朴	民風淳朴	hold		民風淳樸:8 民風淳朴:0
-phrase	民风纯朴	民風純朴	hold		民風純樸:15 民風純朴:0
 phrase	气一冲	氣一衝	hold		氣一衝:0 氣一沖:0 氣一冲:0
 phrase	气冲冲	氣沖沖	evidence		氣沖沖:108 氣沖衝:2 氣沖冲:0 氣衝沖:0 氣衝衝:10 氣衝冲:0 氣冲沖:0 氣冲衝:0 氣冲冲:0
 phrase	气冲斗牛	氣沖斗牛	hold		氣沖斗牛:0 氣衝斗牛:0 氣冲斗牛:0
 phrase	气冲牛斗	氣沖牛斗	hold		氣沖牛斗:1 氣衝牛斗:0 氣冲牛斗:0
 phrase	气冲霄汉	氣沖霄漢	hold		氣沖霄漢:0 氣衝霄漢:0 氣冲霄漢:0
-phrase	气象万千	氣像萬千	hold		氣象萬千:0 氣像萬千:0
-phrase	气象台	氣像台	hold		氣象臺:0 氣象檯:0 氣象颱:0 氣象台:10 氣像臺:0 氣像檯:0 氣像颱:0 氣像台:2
+phrase	气象台	氣象台	hold		氣象臺:0 氣象檯:0 氣象颱:0 氣象台:5
 phrase	氢卤酸	氫鹵酸	hold		氫鹵酸:0 氫滷酸:0
 phrase	水一冲	水一衝	hold		水一衝:0 水一沖:2 水一冲:0
 phrase	水再冲	水再衝	hold		水再衝:1 水再沖:0 水再冲:0
@@ -2331,50 +1704,32 @@ phrase	水成岩	水成岩	hold		水成岩:0 水成巖:0
 phrase	水流内布袋戏台	水流內布袋戲台	hold		水流內布袋戲臺:0 水流內布袋戲檯:0 水流內布袋戲颱:0 水流內布袋戲台:0
 phrase	水清可鉴	水清可鑑	hold		水清可鑑:0 水清可鑒:0
 phrase	水鉴	水鑑	hold		水鑑:0 水鑒:0
-phrase	求田问舍	求田問捨	hold		求田問舍:0 求田問捨:0
-phrase	求签	求簽	hold		求籤:25 求簽:48
+phrase	求签	求籤	hold		求籤:25 求簽:48
 phrase	汉台	漢台	hold		漢臺:0 漢檯:0 漢颱:0 漢台:6
 phrase	汉台区	漢台區	hold		漢臺區:0 漢檯區:0 漢颱區:0 漢台區:0
-phrase	汉弥登钟	漢彌登鐘	hold		漢彌登鐘:0 漢彌登鍾:0 漢彌登鈡:0
-phrase	汉弥登钟表公司	漢彌登鐘錶公司	hold		漢彌登鐘錶公司:0 漢彌登鍾錶公司:0 漢彌登鈡錶公司:0
-phrase	江韦仑	江韋崙	hold		江韋侖:0 江韋崙:0
 phrase	沈文台	沈文台	hold		沈文臺:0 沈文檯:0 沈文颱:0 沈文台:0
 phrase	沉积岩	沉積岩	hold		沉積岩:2 沉積巖:0
-phrase	沙仑	沙崙	evidence		沙崙:561 沙侖:0
-phrase	沙坑杆	沙坑桿	hold		沙坑桿:0 沙坑杆:0
 phrase	沙岩	沙岩	hold		沙岩:5 沙巖:0
 phrase	没签	沒簽	evidence		沒簽:735 沒籤:130
-phrase	沮舍	沮捨	hold		沮舍:0 沮捨:0
-phrase	河岳	河岳	hold		河嶽:0 河岳:0
 phrase	油页岩	油頁岩	hold		油頁岩:0 油頁巖:0
 phrase	泉台	泉台	hold		泉臺:0 泉檯:0 泉颱:1 泉台:7
 phrase	法台	法台	evidence		法臺:4 法檯:0 法颱:1 法台:149
-phrase	法身舍利	法身捨利	hold		法身舍利:0 法身捨利:0
 phrase	波棱菜	波稜菜	hold		波棱菜:0 波稜菜:0
 phrase	泥岩	泥岩	hold		泥岩:5 泥巖:0
 phrase	泥板岩	泥板岩	hold		泥板岩:0 泥板巖:0
 phrase	泥灰岩	泥灰岩	hold		泥灰岩:0 泥灰巖:0
 phrase	泥质岩	泥質岩	hold		泥質岩:0 泥質巖:0
 phrase	泥质页岩	泥質頁岩	hold		泥質頁岩:0 泥質頁巖:0
-phrase	泳气钟	泳氣鐘	hold		泳氣鐘:0 泳氣鍾:0 泳氣鈡:0
 phrase	泽卤	澤鹵	hold		澤鹵:0 澤滷:0
 phrase	洗手台	洗手台	evidence		洗手檯:27 洗手臺:2 洗手颱:0 洗手台:270
 phrase	洗脸台	洗臉檯	hold		洗臉檯:0 洗臉臺:0 洗臉颱:0 洗臉台:9
-phrase	洛钟东应	洛鐘東應	hold		洛鐘東應:0 洛鍾東應:0 洛鈡東應:0
 phrase	洞鉴	洞鑑	hold		洞鑑:0 洞鑒:0
 phrase	洞鉴古今	洞鑑古今	hold		洞鑑古今:0 洞鑒古今:0
-phrase	洪胄	洪冑	hold		洪胄:0 洪冑:0
-phrase	洪若朴	洪若朴	hold		洪若樸:0 洪若朴:0
-phrase	洪钟	洪鐘	hold		洪鐘:4 洪鍾:6 洪鈡:0
-phrase	活塞杆	活塞桿	hold		活塞桿:0 活塞杆:0
 phrase	流理台	流理台	evidence		流理臺:39 流理檯:6 流理颱:0 流理台:112
 phrase	流纹岩	流紋岩	hold		流紋岩:0 流紋巖:0
 phrase	流血冲突	流血衝突	hold		流血衝突:8 流血沖突:0 流血冲突:0
 phrase	流血漂卤	流血漂鹵	hold		流血漂鹵:0 流血漂滷:0
 phrase	浊积岩	濁積岩	hold		濁積岩:0 濁積巖:0
-phrase	测量杆	測量桿	hold		測量桿:0 測量杆:0
-phrase	浑朴	渾朴	hold		渾樸:0 渾朴:0
-phrase	浑朴自然	渾朴自然	hold		渾樸自然:0 渾朴自然:0
 phrase	浙江天台县	浙江天台縣	hold		浙江天台縣:0 浙江天臺縣:0 浙江天檯縣:0 浙江天颱縣:0
 phrase	浪冲	浪衝	hold		浪衝:10 浪沖:7 浪冲:0
 phrase	浪又冲	浪又衝	hold		浪又衝:0 浪又沖:0 浪又冲:0
@@ -2382,21 +1737,15 @@ phrase	浮台	浮台	hold		浮臺:2 浮檯:1 浮颱:0 浮台:4
 phrase	浮签	浮簽	hold		浮簽:2 浮籤:0
 phrase	海上台风警报	海上颱風警報	hold		海上颱風警報:13 海上臺風警報:0 海上檯風警報:0 海上台風警報:0
 phrase	海台	海台	evidence		海臺:1 海檯:0 海颱:1 海台:36
-phrase	海岳名言	海岳名言	hold		海岳名言:0 海嶽名言:0
 phrase	海蚀台地	海蝕台地	hold		海蝕臺地:0 海蝕檯地:0 海蝕颱地:0 海蝕台地:0
 phrase	海蚀平台	海蝕平台	hold		海蝕平臺:0 海蝕平檯:0 海蝕平颱:0 海蝕平台:1
 phrase	涂壮勋	涂壯勳	hold		涂壯勳:0 涂壯勛:0
 phrase	涂浆台	塗漿檯	hold		塗漿檯:0 塗漿臺:0 塗漿颱:0 塗漿台:0
 phrase	涉台	涉台	hold		涉臺:1 涉檯:0 涉颱:0 涉台:13
 phrase	淋冲	淋沖	hold		淋沖:0 淋衝:1 淋冲:0
-phrase	深山何处钟	深山何處鐘	hold		深山何處鐘:0 深山何處鍾:0 深山何處鈡:0
 phrase	深成岩	深成岩	hold		深成岩:0 深成巖:0
 phrase	深沟墩台	深溝墩台	hold		深溝墩臺:0 深溝墩檯:0 深溝墩颱:0 深溝墩台:0
-phrase	淳朴	淳朴	hold		淳樸:26 淳朴:0
 phrase	清台	清台	evidence		清檯:9 清臺:0 清颱:0 清台:62
-phrase	清杆运动	清桿運動	hold		清桿運動:0 清杆運動:0
-phrase	清胄	清冑	hold		清胄:0 清冑:0
-phrase	渊淳岳峙	淵淳岳峙	hold		淵淳嶽峙:0 淵淳岳峙:0
 phrase	渊鉴类函	淵鑑類函	hold		淵鑑類函:0 淵鑒類函:0
 phrase	渠冲	渠衝	hold		渠衝:0 渠沖:0 渠冲:0
 phrase	港台	港台	evidence		港臺:7 港檯:0 港颱:5 港台:265
@@ -2409,16 +1758,9 @@ phrase	湿度表	濕度表	hold		溼度表:0 濕度表:2
 phrase	湿肉伴干柴	濕肉伴乾柴	hold		溼肉伴乾柴:0 濕肉伴乾柴:0
 phrase	溶岩	溶岩	hold		溶岩:29 溶巖:0
 phrase	溶岩流	溶岩流	hold		溶岩流:0 溶巖流:0
-phrase	滑杆	滑桿	hold		滑桿:23 滑杆:0
-phrase	滞后现象	滯後現像	hold		滯後現象:0 滯後現像:0
-phrase	满口称赞	滿口稱讚	hold		滿口稱讚:1 滿口稱贊:0
 phrase	演奏台	演奏台	hold		演奏臺:0 演奏檯:0 演奏颱:0 演奏台:0
 phrase	演讲台	演講台	hold		演講臺:2 演講檯:0 演講颱:0 演講台:5
-phrase	潘岳	潘岳	hold		潘岳:2 潘嶽:0
-phrase	潘岳白发	潘岳白髮	hold		潘岳白髮:0 潘嶽白髮:0
 phrase	潜台词	潛台詞	evidence		潛臺詞:2 潛檯詞:0 潛颱詞:0 潛台詞:77
-phrase	潜水钟	潛水鐘	hold		潛水鐘:2 潛水鍾:0 潛水鈡:0
-phrase	潜水钟表	潛水鐘錶	hold		潛水鐘錶:0 潛水鍾錶:0 潛水鈡錶:0
 phrase	潟卤	潟鹵	hold		潟鹵:0 潟滷:0
 phrase	澳洲广播电台	澳洲廣播電台	hold		澳洲廣播電臺:0 澳洲廣播電檯:0 澳洲廣播電颱:0 澳洲廣播電台:0
 phrase	澹台	澹台	evidence		澹臺:117 澹檯:0 澹颱:0 澹台:348
@@ -2426,34 +1768,25 @@ phrase	澹台灭明	澹台滅明	hold		澹臺滅明:0 澹檯滅明:0 澹颱滅�
 phrase	瀛台	瀛台	hold		瀛臺:0 瀛檯:0 瀛颱:0 瀛台:2
 phrase	火山岩	火山岩	hold		火山岩:15 火山巖:0
 phrase	火成岩	火成岩	hold		火成岩:4 火成巖:0
-phrase	火柴杆	火柴桿	hold		火柴桿:0 火柴杆:0
-phrase	火签	火簽	hold		火籤:0 火簽:13
-phrase	火绳杆	火繩桿	hold		火繩桿:0 火繩杆:0
+phrase	火签	火籤	hold		火籤:0 火簽:13
 phrase	灯台	燈台	hold		燈臺:3 燈檯:1 燈颱:0 燈台:15
 phrase	灯台不照自己	燈台不照自己	hold		燈臺不照自己:0 燈檯不照自己:0 燈颱不照自己:0 燈台不照自己:0
 phrase	灯台不自照	燈台不自照	hold		燈臺不自照:0 燈檯不自照:0 燈颱不自照:0 燈台不自照:0
-phrase	灯杆	燈桿	evidence		燈杆:17 燈桿:40
 phrase	灰岩残丘	灰岩殘丘	hold		灰巖殘丘:0 灰岩殘丘:0
 phrase	灵台	靈台	hold		靈臺:3 靈檯:0 靈颱:0 靈台:14
 phrase	灵台县	靈台縣	hold		靈臺縣:0 靈檯縣:0 靈颱縣:0 靈台縣:0
 phrase	炉台	爐台	hold		爐臺:0 爐檯:1 爐颱:0 爐台:20
 phrase	炊烟袅袅	炊煙裊裊	hold		炊煙裊裊:7 炊煙裊嫋:0 炊煙嫋裊:0 炊煙嫋嫋:0
-phrase	炭疽杆菌	炭疽桿菌	hold		炭疽桿菌:0 炭疽杆菌:0
 phrase	炮台	炮台	evidence		炮臺:7 炮檯:1 炮颱:0 炮台:69
 phrase	炮台山循道卫理中学	炮台山循道衛理中學	hold		炮台山循道衛理中學:0 炮臺山循道衛理中學:0 炮檯山循道衛理中學:0 炮颱山循道衛理中學:0
-phrase	点半钟	點半鐘	hold		點半鐘:2 點半鍾:0 點半鈡:0
-phrase	点多钟	點多鐘	hold		點多鐘:0 點多鍾:1 點多鈡:0
-phrase	点钟	點鐘	evidence		點鐘:264 點鍾:3 點鈡:0
 phrase	烛台	燭台	evidence		燭臺:5 燭檯:2 燭颱:0 燭台:47
 phrase	烟台	煙台	hold		煙臺:1 煙檯:0 煙颱:0 煙台:6
 phrase	烟台地区	煙台地區	hold		煙臺地區:0 煙檯地區:0 煙颱地區:0 煙台地區:0
 phrase	烟台市	煙台市	hold		煙臺市:0 煙檯市:0 煙颱市:0 煙台市:0
 phrase	烟台师范学院	煙台師範學院	hold		煙臺師範學院:0 煙檯師範學院:0 煙颱師範學院:0 煙台師範學院:0
-phrase	烟杆	煙桿	hold		煙桿:0 煙杆:0
-phrase	烟袋杆儿	菸袋桿兒	hold		菸袋桿兒:0 菸袋杆兒:0
 phrase	热脉冲	熱脈衝	hold		熱脈衝:0 熱脈沖:0 熱脈冲:0
 phrase	烽火台	烽火台	hold		烽火臺:0 烽火檯:0 烽火颱:0 烽火台:3
-phrase	照入签	照入簽	hold		照入籤:0 照入簽:0
+phrase	照入签	照入籤	hold		照入籤:0 照入簽:0
 phrase	照台	照台	evidence		照臺:12 照檯:0 照颱:2 照台:235
 phrase	照签	照簽	hold		照簽:27 照籤:1
 phrase	照签不误	照簽不誤	hold		照簽不誤:0 照籤不誤:0
@@ -2466,29 +1799,19 @@ phrase	熔岩穹丘	熔岩穹丘	hold		熔岩穹丘:0 熔巖穹丘:0
 phrase	熔融岩浆	熔融岩漿	hold		熔融岩漿:0 熔融巖漿:0
 phrase	燕台	燕台	hold		燕臺:0 燕檯:0 燕颱:0 燕台:5
 phrase	燕昭筑台	燕昭築台	hold		燕昭築臺:0 燕昭築檯:0 燕昭築颱:0 燕昭築台:0
-phrase	爱丽舍	愛麗捨	hold		愛麗舍:4 愛麗捨:0
-phrase	爱丽舍宫	愛麗捨宮	hold		愛麗舍宮:4 愛麗捨宮:0
 phrase	父台	父台	hold		父臺:0 父檯:0 父颱:0 父台:3
 phrase	片岩	片岩	hold		片岩:3 片巖:0
 phrase	片麻岩	片麻岩	hold		片麻岩:0 片麻巖:0
 phrase	牙签	牙籤	evidence		牙籤:193 牙簽:6
-phrase	牙签万轴	牙簽萬軸	hold		牙籤萬軸:0 牙簽萬軸:0
-phrase	牙签犀轴	牙簽犀軸	hold		牙籤犀軸:0 牙簽犀軸:0
-phrase	牙签玉轴	牙簽玉軸	hold		牙籤玉軸:0 牙簽玉軸:0
-phrase	牙签锦轴	牙簽錦軸	hold		牙籤錦軸:0 牙簽錦軸:0
-phrase	牛舍	牛捨	hold		牛舍:4 牛捨:1
+phrase	牙签万轴	牙籤萬軸	hold		牙籤萬軸:0 牙簽萬軸:0
+phrase	牙签犀轴	牙籤犀軸	hold		牙籤犀軸:0 牙簽犀軸:0
+phrase	牙签玉轴	牙籤玉軸	hold		牙籤玉軸:0 牙簽玉軸:0
+phrase	牙签锦轴	牙籤錦軸	hold		牙籤錦軸:0 牙簽錦軸:0
 phrase	犯台	犯台	evidence		犯臺:4 犯檯:0 犯颱:0 犯台:60
-phrase	犹如钟	猶如鐘	hold		猶如鐘:0 猶如鍾:0 猶如鈡:0
-phrase	犹如钟表	猶如鐘錶	hold		猶如鐘錶:0 猶如鍾錶:0 猶如鈡錶:0
-phrase	狗口里吐不出象牙	狗口裡吐不出像牙	hold		狗口裡吐不出象牙:0 狗口裡吐不出像牙:0
-phrase	狗嘴里还有象牙	狗嘴裡還有像牙	hold		狗嘴裡還有象牙:0 狗嘴裡還有像牙:0
-phrase	独钟	獨鍾	evidence		獨鍾:196 獨鐘:11 獨鈡:0
 phrase	猛冲	猛衝	evidence		猛衝:34 猛沖:0 猛冲:0
-phrase	猪舍	豬捨	hold		豬舍:10 豬捨:0
 phrase	献台	獻台	hold		獻臺:1 獻檯:0 獻颱:0 獻台:11
 phrase	玄武岩	玄武岩	hold		玄武岩:15 玄武巖:0
 phrase	玄武质熔岩	玄武質熔岩	hold		玄武質熔岩:0 玄武質熔巖:0
-phrase	玄胄	玄冑	hold		玄胄:0 玄冑:0
 phrase	玉台	玉台	hold		玉臺:1 玉檯:0 玉颱:0 玉台:0
 phrase	玉台体	玉台體	hold		玉臺體:0 玉檯體:0 玉颱體:0 玉台體:0
 phrase	玉台新咏	玉台新詠	hold		玉臺新詠:0 玉檯新詠:0 玉颱新詠:0 玉台新詠:0
@@ -2498,10 +1821,7 @@ phrase	王鉴	王鑑	hold		王鑑:0 王鑒:0
 phrase	玢岩	玢岩	hold		玢岩:0 玢巖:0
 phrase	珍珠岩	珍珠岩	hold		珍珠岩:0 珍珠巖:0
 phrase	球台	球台	evidence		球檯:19 球臺:1 球颱:2 球台:153
-phrase	球杆	球桿	evidence		球杆:15 球桿:82
 phrase	琅邪台刻石	琅邪台刻石	hold		琅邪臺刻石:0 琅邪檯刻石:0 琅邪颱刻石:0 琅邪台刻石:0
-phrase	琴杆	琴桿	hold		琴桿:0 琴杆:0
-phrase	琴钟	琴鐘	hold		琴鐘:1 琴鍾:1 琴鈡:0
 phrase	琼台玉宇	瓊台玉宇	hold		瓊臺玉宇:0 瓊檯玉宇:0 瓊颱玉宇:0 瓊台玉宇:0
 phrase	琼台玉阁	瓊台玉閣	hold		瓊臺玉閣:0 瓊檯玉閣:0 瓊颱玉閣:0 瓊台玉閣:0
 phrase	瑞签	瑞簽	hold		瑞簽:0 瑞籤:0
@@ -2509,86 +1829,38 @@ phrase	瑶台	瑤台	hold		瑤臺:1 瑤檯:0 瑤颱:0 瑤台:6
 phrase	瑶台琼室	瑤台瓊室	hold		瑤臺瓊室:0 瑤檯瓊室:0 瑤颱瓊室:0 瑤台瓊室:0
 phrase	瑶台银阙	瑤台銀闕	hold		瑤臺銀闕:0 瑤檯銀闕:0 瑤颱銀闕:0 瑤台銀闕:0
 phrase	瑶台镜	瑤台鏡	hold		瑤臺鏡:0 瑤檯鏡:0 瑤颱鏡:0 瑤台鏡:0
-phrase	瑶签	瑤簽	hold		瑤籤:0 瑤簽:0
+phrase	瑶签	瑤籤	hold		瑤籤:0 瑤簽:0
 phrase	璧炉台	璧爐台	hold		璧爐臺:0 璧爐檯:0 璧爐颱:0 璧爐台:0
-phrase	瓦舍	瓦捨	hold		瓦舍:8 瓦捨:0
-phrase	生命征象	生命徵像	hold		生命徵象:22 生命徵像:0
-phrase	生物时钟	生物時鐘	hold		生物時鐘:1 生物時鍾:0 生物時鈡:0
-phrase	生物钟	生物鐘	hold		生物鐘:0 生物鍾:0 生物鈡:0
-phrase	生理时钟	生理時鐘	evidence		生理時鐘:39 生理時鍾:1 生理時鈡:0
 phrase	用报台	用報台	hold		用報臺:0 用報檯:0 用報颱:0 用報台:0
-phrase	用舍失宜	用捨失宜	hold		用舍失宜:0 用捨失宜:0
-phrase	用舍行藏	用捨行藏	hold		用舍行藏:0 用捨行藏:0
-phrase	用行舍藏	用行捨藏	hold		用行舍藏:0 用行捨藏:0
-phrase	田舍	田捨	hold		田舍:19 田捨:2
-phrase	田舍奴	田捨奴	hold		田舍奴:0 田捨奴:0
-phrase	田舍翁	田捨翁	hold		田舍翁:0 田捨翁:0
-phrase	田舍郎	田捨郎	hold		田舍郎:1 田捨郎:0
-phrase	甲胄	甲冑	hold		甲冑:25 甲胄:4
-phrase	甲胄鱼类	甲冑魚類	hold		甲冑魚類:0 甲胄魚類:0
 phrase	电冲	電衝	hold		電衝:26 電沖:3 電冲:0
 phrase	电台	電台	evidence		電臺:85 電檯:1 電颱:3 電台:612
-phrase	电子钟	電子鐘	hold		電子鐘:15 電子鍾:0 電子鈡:0
-phrase	电子钟表	電子鐘錶	hold		電子鐘錶:0 電子鍾錶:0 電子鈡錶:0
 phrase	电影台	電影台	evidence		電影臺:3 電影檯:0 電影颱:0 電影台:193
-phrase	电杆	電桿	evidence		電杆:26 電桿:127
 phrase	电磁脉冲	電磁脈衝	hold		電磁脈衝:5 電磁脈沖:0 電磁脈冲:0
-phrase	电线杆	電線桿	evidence		電線杆:55 電線桿:224
 phrase	电脑台	電腦檯	hold		電腦檯:0 電腦臺:1 電腦颱:0 電腦台:4
 phrase	电视台	電視台	evidence		電視臺:92 電視檯:1 電視颱:2 電視台:2216
-phrase	电钟	電鐘	hold		電鐘:0 電鍾:1 電鈡:0
-phrase	男生宿舍	男生宿捨	hold		男生宿舍:17 男生宿捨:0
-phrase	留连不舍	留連不捨	hold		留連不捨:0 留連不舍:0
-phrase	病舍	病捨	hold		病舍:0 病捨:0
-phrase	痛赞	痛讚	hold		痛贊:0 痛讚:1
-phrase	痢疾杆菌	痢疾桿菌	hold		痢疾桿菌:0 痢疾杆菌:0
 phrase	登台	登台	evidence		登臺:18 登檯:0 登颱:0 登台:266
 phrase	登台拜将	登台拜將	hold		登臺拜將:0 登檯拜將:0 登颱拜將:0 登台拜將:0
 phrase	登台演唱	登台演唱	hold		登臺演唱:0 登檯演唱:0 登颱演唱:0 登台演唱:5
 phrase	登台表演	登台表演	hold		登臺表演:1 登檯表演:0 登颱表演:0 登台表演:6
 phrase	登机手续柜台	登機手續櫃檯	hold		登機手續櫃檯:0 登機手續櫃臺:0 登機手續櫃颱:0 登機手續櫃台:0
-phrase	白云亲舍	白雲親捨	hold		白雲親舍:0 白雲親捨:0
 phrase	白云岩	白雲岩	hold		白雲岩:0 白雲巖:0
-phrase	白喉杆菌	白喉桿菌	hold		白喉桿菌:0 白喉杆菌:0
-phrase	白朴	白朴	hold		白樸:2 白朴:0
-phrase	白杆兵	白桿兵	hold		白桿兵:0 白杆兵:0
-phrase	白蜡杆子	白蠟桿子	hold		白蠟杆子:0 白蠟桿子:0
-phrase	白霉	白霉	hold		白黴:0 白霉:1
-phrase	百舍重茧	百捨重繭	hold		百舍重繭:0 百捨重繭:0
-phrase	百舍重趼	百捨重趼	hold		百舍重趼:0 百捨重趼:0
-phrase	的钟	的鐘	evidence		的鐘:234 的鍾:56 的鈡:0
-phrase	皇胄	皇冑	hold		皇胄:0 皇冑:0
 phrase	盐卤	鹽滷	hold		鹽滷:20 鹽鹵:2
-phrase	盐酸克仑特罗	鹽酸克崙特羅	hold		鹽酸克侖特羅:0 鹽酸克崙特羅:0
-phrase	盗钟	盜鐘	hold		盜鐘:0 盜鍾:0 盜鈡:0
-phrase	盗钟掩耳	盜鐘掩耳	hold		盜鐘掩耳:0 盜鍾掩耳:0 盜鈡掩耳:0
-phrase	盛赞	盛讚	evidence		盛讚:252 盛贊:2
 phrase	直冲	直衝	evidence		直衝:1000 直沖:28 直冲:0
-phrase	直杆	直桿	hold		直杆:0 直桿:7
 phrase	相冲	相衝	evidence		相沖:17 相衝:156 相冲:0
 phrase	相台	相台	hold		相臺:0 相檯:0 相颱:0 相台:2
 phrase	省道台	省道台	hold		省道臺:0 省道檯:0 省道颱:0 省道台:9
-phrase	看下钟	看下鐘	hold		看下鐘:0 看下鍾:0 看下鈡:0
 phrase	看台	看台	evidence		看臺:189 看檯:14 看颱:39 看台:2786
 phrase	看台股	看台股	evidence		看臺股:0 看檯股:0 看颱股:0 看台股:41
-phrase	看钟	看鐘	hold		看鐘:14 看鍾:22 看鈡:0
-phrase	真身舍利	真身捨利	hold		真身舍利:0 真身捨利:0
-phrase	眷舍	眷捨	hold		眷舍:11 眷捨:0
 phrase	眺台	眺台	hold		眺臺:0 眺檯:0 眺颱:0 眺台:3
 phrase	眺望台	眺望台	hold		眺望臺:0 眺望檯:0 眺望颱:0 眺望台:3
-phrase	瞅下钟	瞅下鐘	hold		瞅下鐘:0 瞅下鍾:0 瞅下鈡:0
 phrase	瞭望台	瞭望台	evidence		瞭望臺:0 瞭望檯:0 瞭望颱:0 瞭望台:39
 phrase	知往鉴今	知往鑑今	hold		知往鑑今:0 知往鑒今:0
-phrase	矮杆品种	矮桿品種	hold		矮桿品種:0 矮杆品種:0
 phrase	石台	石台	evidence		石臺:4 石檯:10 石颱:1 石台:44
 phrase	石台县	石台縣	hold		石臺縣:0 石檯縣:0 石颱縣:0 石台縣:0
 phrase	石灰岩	石灰岩	hold		石灰岩:12 石灰巖:0
 phrase	石灰岩洞	石灰岩洞	hold		石灰岩洞:2 石灰巖洞:0
 phrase	石英卤素灯	石英鹵素燈	hold		石英鹵素燈:0 石英滷素燈:0
 phrase	石英岩	石英岩	hold		石英岩:0 石英巖:0
-phrase	石英钟	石英鐘	hold		石英鐘:0 石英鍾:1 石英鈡:0
-phrase	石英钟表	石英鐘錶	hold		石英鐘錶:0 石英鍾錶:0 石英鈡錶:0
-phrase	石钟乳	石鐘乳	hold		石鐘乳:0 石鍾乳:0 石鈡乳:0
 phrase	矽岩	矽岩	hold		矽岩:0 矽巖:0
 phrase	矽质岩	矽質岩	hold		矽質岩:0 矽質巖:0
 phrase	砂岩	砂岩	hold		砂岩:13 砂巖:0
@@ -2601,68 +1873,46 @@ phrase	硬冲	硬衝	evidence		硬衝:56 硬沖:6 硬冲:0
 phrase	硬页岩	硬頁岩	hold		硬頁岩:0 硬頁巖:0
 phrase	碎屑岩	碎屑岩	hold		碎屑岩:0 碎屑巖:0
 phrase	碛卤	磧鹵	hold		磧鹵:0 磧滷:0
-phrase	碰钟	碰鐘	hold		碰鐘:0 碰鍾:0 碰鈡:0
 phrase	碱性岩	鹼性岩	hold		鹼性岩:0 鹼性巖:0
 phrase	碳酸岩	碳酸岩	hold		碳酸岩:0 碳酸巖:0
 phrase	磨变岩	磨變岩	hold		磨變岩:0 磨變巖:0
 phrase	磨石粗砂岩	磨石粗砂岩	hold		磨石粗砂岩:0 磨石粗砂巖:0
-phrase	磬钟	磬鐘	hold		磬鐘:0 磬鍾:0 磬鈡:0
 phrase	磷酸盐岩	磷酸鹽岩	hold		磷酸鹽岩:0 磷酸鹽巖:0
 phrase	礁岩	礁岩	hold		礁岩:9 礁巖:0
 phrase	礼台	禮台	hold		禮臺:0 禮檯:0 禮颱:0 禮台:6
-phrase	礼赞	禮讚	hold		禮讚:26 禮贊:2
 phrase	社区电台	社區電台	hold		社區電臺:0 社區電檯:0 社區電颱:0 社區電台:0
-phrase	祇洹精舍	祇洹精捨	hold		祇洹精舍:0 祇洹精捨:0
 phrase	祈仙台	祈仙台	hold		祈仙臺:0 祈仙檯:0 祈仙颱:0 祈仙台:0
 phrase	祖冲之	祖沖之	hold		祖沖之:2 祖衝之:0 祖冲之:0
 phrase	祝英台	祝英台	hold		祝英臺:0 祝英檯:0 祝英颱:0 祝英台:20
-phrase	祝赞	祝讚	hold		祝讚:0 祝贊:0
-phrase	神不守舍	神不守捨	hold		神不守舍:0 神不守捨:0
 phrase	神人鉴知	神人鑑知	hold		神人鑑知:0 神人鑒知:0
 phrase	神台	神台	evidence		神臺:1 神檯:1 神颱:5 神台:33
 phrase	神秘	神秘	evidence		神祕:946 神秘:4593
-phrase	神胄	神冑	hold		神胄:0 神冑:0
 phrase	祭台	祭台	hold		祭臺:1 祭檯:0 祭颱:0 祭台:26
 phrase	禁忌站台	禁忌站台	hold		禁忌站臺:0 禁忌站檯:0 禁忌站颱:0 禁忌站台:0
-phrase	福舍	福捨	hold		福舍:0 福捨:1
 phrase	禹王台	禹王台	hold		禹王臺:0 禹王檯:0 禹王颱:0 禹王台:0
 phrase	禹王台区	禹王台區	hold		禹王臺區:0 禹王檯區:0 禹王颱區:0 禹王台區:0
-phrase	禽舍	禽捨	hold		禽舍:1 禽捨:0
 phrase	秉台衡	秉台衡	hold		秉臺衡:0 秉檯衡:0 秉颱衡:0 秉台衡:0
 phrase	秉鉴	秉鑑	hold		秉鑑:0 秉鑒:0
 phrase	秋后算账	秋後算帳	evidence		秋後算賬:21 秋後算帳:50
-phrase	秒钟	秒鐘	evidence		秒鐘:837 秒鍾:5 秒鈡:0
 phrase	秘制	秘製	evidence		祕製:7 秘製:124
 phrase	秘密	秘密	evidence		祕密:695 秘密:5087
 phrase	秘录	秘錄	evidence		祕錄:3 秘錄:51
-phrase	秤杆	秤桿	hold		秤桿:0 秤杆:0
-phrase	称赞	稱讚	evidence		稱讚:3813 稱贊:10
-phrase	称赞不已	稱讚不已	hold		稱讚不已:3 稱贊不已:0
 phrase	稀里哗啦	稀里嘩啦	hold		稀里嘩啦:5 稀里譁啦:0
 phrase	稳坐钓鱼台	穩坐釣魚台	hold		穩坐釣魚臺:0 穩坐釣魚檯:0 穩坐釣魚颱:0 穩坐釣魚台:1
 phrase	穆棱	穆稜	hold		穆稜:0 穆棱:0
-phrase	穷追不舍	窮追不捨	hold		窮追不捨:29 窮追不舍:0
 phrase	空气缓冲间	空氣緩衝間	hold		空氣緩衝間:0 空氣緩沖間:0 空氣緩冲間:0
-phrase	空钟	空鐘	hold		空鐘:0 空鍾:2 空鈡:0
-phrase	窃钟掩耳	竊鐘掩耳	hold		竊鐘掩耳:0 竊鍾掩耳:0 竊鈡掩耳:0
 phrase	窗台	窗台	evidence		窗臺:6 窗檯:8 窗颱:0 窗台:68
 phrase	窗台上	窗台上	hold		窗臺上:3 窗檯上:1 窗颱上:0 窗台上:17
 phrase	窝阔台	窩闊台	hold		窩闊臺:0 窩闊檯:0 窩闊颱:0 窩闊台:7
 phrase	窝阔台汗	窩闊台汗	hold		窩闊臺汗:0 窩闊檯汗:0 窩闊颱汗:0 窩闊台汗:0
 phrase	窝阔台汗国	窩闊台汗國	hold		窩闊臺汗國:0 窩闊檯汗國:0 窩闊颱汗國:0 窩闊台汗國:0
-phrase	立杆	立桿	hold		立杆:0 立桿:16
-phrase	立杆见影	立桿見影	hold		立杆見影:0 立桿見影:1
 phrase	站台	站台	evidence		站臺:13 站檯:1 站颱:1 站台:608
 phrase	站台票	站台票	hold		站臺票:0 站檯票:0 站颱票:0 站台票:0
 phrase	站柜台	站櫃檯	hold		站櫃檯:26 站櫃臺:1 站櫃颱:0 站櫃台:14
-phrase	竞合现象	競合現像	hold		競合現象:0 競合現像:0
 phrase	章台	章台	hold		章臺:0 章檯:0 章颱:0 章台:14
 phrase	章台杨柳	章台楊柳	hold		章臺楊柳:0 章檯楊柳:0 章颱楊柳:0 章台楊柳:0
 phrase	章台柳	章台柳	hold		章臺柳:0 章檯柳:0 章颱柳:0 章台柳:0
 phrase	竹签	竹籤	evidence		竹籤:52 竹簽:3
-phrase	竹篱茅舍	竹籬茅捨	hold		竹籬茅舍:0 竹籬茅捨:0
-phrase	笔杆	筆桿	hold		筆桿:9 筆杆:0
-phrase	笔杆子	筆桿子	hold		筆桿子:5 筆杆子:0
 phrase	笔迹鉴定	筆跡鑑定	hold		筆跡鑑定:2 筆跡鑒定:0
 phrase	第四台	第四台	evidence		第四臺:16 第四檯:0 第四颱:0 第四台:1906
 phrase	筛子喂驴	篩子餵驢	hold		篩子餵驢:0 篩子喂驢:0
@@ -2699,7 +1949,7 @@ phrase	签唱会	簽唱會	hold		簽唱會:12 籤唱會:0
 phrase	签在	簽在	hold		簽在:48 籤在:65
 phrase	签好	簽好	evidence		簽好:145 籤好:67
 phrase	签妥	簽妥	hold		簽妥:2 籤妥:0
-phrase	签子	簽子	hold		籤子:0 簽子:3
+phrase	签子	籤子	hold		籤子:0 簽子:3
 phrase	签字	簽字	evidence		簽字:214 籤字:2
 phrase	签字笔	簽字筆	hold		簽字筆:24 籤字筆:0
 phrase	签字者	簽字者	hold		簽字者:0 籤字者:0
@@ -2708,14 +1958,14 @@ phrase	签完	簽完	evidence		簽完:281 籤完:13
 phrase	签定	簽定	hold		簽定:17 籤定:3
 phrase	签帐	簽帳	evidence		簽帳:3128 籤帳:0
 phrase	签帐卡	簽帳卡	evidence		簽帳卡:613 籤帳卡:0
-phrase	签幐	簽幐	hold		籤幐:0 簽幐:0
+phrase	签幐	籤幐	hold		籤幐:0 簽幐:0
 phrase	签得	簽得	evidence		簽得:99 籤得:4
 phrase	签报	簽報	hold		簽報:19 籤報:3
 phrase	签押	簽押	hold		簽押:1 籤押:0
 phrase	签押房	簽押房	hold		簽押房:0 籤押房:0
 phrase	签收	簽收	evidence		簽收:382 籤收:4
 phrase	签有	簽有	hold		簽有:83 籤有:110
-phrase	签条	簽條	hold		籤條:7 簽條:6
+phrase	签条	籤條	hold		籤條:7 簽條:6
 phrase	签注	簽註	hold		簽註:13 籤註:2
 phrase	签派室	簽派室	hold		簽派室:0 籤派室:0
 phrase	签着	簽著	hold		簽著:2 籤著:1
@@ -2734,53 +1984,36 @@ phrase	签订	簽訂	evidence		簽訂:345 籤訂:0
 phrase	签证	簽證	evidence		簽證:1423 籤證:0
 phrase	签证费	簽證費	hold		簽證費:26 籤證費:0
 phrase	签诗	籤詩	evidence		籤詩:59 簽詩:1
-phrase	签语饼	簽語餅	hold		籤語餅:0 簽語餅:0
+phrase	签语饼	籤語餅	hold		籤語餅:0 簽語餅:0
 phrase	签赌	簽賭	evidence		簽賭:75 籤賭:2
 phrase	签赌案	簽賭案	hold		簽賭案:4 籤賭案:0
 phrase	签赌站	簽賭站	hold		簽賭站:2 籤賭站:0
 phrase	签过	簽過	evidence		簽過:122 籤過:14
 phrase	签退	簽退	hold		簽退:14 籤退:1
-phrase	简朝仑	簡朝崙	hold		簡朝崙:0 簡朝侖:0
-phrase	简朴	簡樸	evidence		簡樸:84 簡朴:0
 phrase	管制塔台	管制塔台	hold		管制塔臺:0 管制塔檯:0 管制塔颱:0 管制塔台:1
-phrase	箭杆	箭桿	hold		箭桿:0 箭杆:0
-phrase	篮下三秒钟	籃下三秒鐘	hold		籃下三秒鐘:0 籃下三秒鍾:0 籃下三秒鈡:0
-phrase	簪缨世胄	簪纓世冑	hold		簪纓世胄:0 簪纓世冑:0
 phrase	米卤蛋	米滷蛋	hold		米滷蛋:0 米鹵蛋:0
 phrase	粉砂岩	粉砂岩	hold		粉砂岩:0 粉砂巖:0
-phrase	粉签子	粉簽子	hold		粉籤子:0 粉簽子:0
+phrase	粉签子	粉籤子	hold		粉籤子:0 粉簽子:0
 phrase	粒变岩	粒變岩	hold		粒變岩:0 粒變巖:0
 phrase	粗卤	粗鹵	hold		粗鹵:0 粗滷:0
 phrase	粗面岩	粗面岩	hold		粗面岩:0 粗面巖:0
 phrase	粘板岩	粘板岩	hold		粘板岩:0 粘板巖:0
 phrase	精悟玄鉴	精悟玄鑑	hold		精悟玄鑑:0 精悟玄鑒:0
-phrase	精舍	精捨	hold		精舍:14 精捨:0
 phrase	精虫冲脑	精蟲衝腦	evidence		精蟲衝腦:32 精蟲沖腦:0 精蟲冲腦:0
 phrase	糊涂账	糊塗帳	hold		糊塗賬:0 糊塗帳:2
-phrase	系胄	系冑	hold		系胄:0 系冑:0
-phrase	素朴	素朴	hold		素樸:7 素朴:0
-phrase	紧追不舍	緊追不捨	hold		緊追不捨:15 緊追不舍:1
 phrase	紫台	紫台	hold		紫臺:0 紫檯:0 紫颱:0 紫台:1
 phrase	紫金山天文台	紫金山天文台	hold		紫金山天文臺:0 紫金山天文檯:0 紫金山天文颱:0 紫金山天文台:0
 phrase	繁台	繁台	hold		繁臺:0 繁檯:0 繁颱:0 繁台:2
-phrase	繁钟	繁鐘	hold		繁鐘:0 繁鍾:0 繁鈡:0
-phrase	纂胄	纂冑	hold		纂胄:0 纂冑:0
 phrase	红岩	紅岩	hold		紅巖:0 紅岩:3
-phrase	红钟	紅鐘	hold		紅鐘:0 紅鍾:1 紅鈡:0
-phrase	红霉素	紅霉素	hold		紅黴素:0 紅霉素:0
-phrase	纯朴	純樸	evidence		純樸:196 純朴:0
 phrase	纲鉴	綱鑑	hold		綱鑑:0 綱鑒:0
 phrase	纳莉台风	納莉颱風	hold		納莉颱風:26 納莉臺風:0 納莉檯風:0 納莉台風:0
 phrase	细袅袅	細嫋嫋	hold		細嫋嫋:0 細嫋裊:0 細裊嫋:0 細裊裊:0
 phrase	终端台	終端檯	hold		終端檯:0 終端臺:0 終端颱:0 終端台:0
-phrase	经济杠杆	經濟槓桿	hold		經濟槓桿:0 經濟槓杆:0
 phrase	结晶岩	結晶岩	hold		結晶岩:0 結晶巖:0
-phrase	结核杆菌	結核桿菌	hold		結核桿菌:1 結核杆菌:0
 phrase	绝岩	絕岩	hold		絕巖:0 絕岩:0
 phrase	绝缘台	絕緣檯	hold		絕緣檯:0 絕緣臺:0 絕緣颱:0 絕緣台:0
 phrase	绞刑台	絞刑台	hold		絞刑臺:0 絞刑檯:0 絞刑颱:0 絞刑台:4
 phrase	绥棱	綏稜	hold		綏稜:0 綏棱:0
-phrase	绪胄	緒冑	hold		緒胄:0 緒冑:0
 phrase	续签	續簽	evidence		續簽:301 續籤:1
 phrase	缓冲	緩衝	evidence		緩衝:1113 緩沖:5 緩冲:0
 phrase	缓冲体	緩衝體	hold		緩衝體:0 緩沖體:0 緩冲體:0
@@ -2796,46 +2029,16 @@ phrase	缓冲式	緩衝式	hold		緩衝式:1 緩沖式:0 緩冲式:0
 phrase	缓冲期	緩衝期	evidence		緩衝期:53 緩沖期:0 緩冲期:0
 phrase	缓冲液	緩衝液	hold		緩衝液:2 緩沖液:0 緩冲液:0
 phrase	缓冲溶液	緩衝溶液	hold		緩衝溶液:0 緩沖溶液:0 緩冲溶液:0
-phrase	编钟	編鐘	hold		編鐘:3 編鍾:0 編鈡:0
-phrase	缱绻难舍	繾綣難捨	hold		繾綣難捨:0 繾綣難舍:0
 phrase	网际电台	網際電台	hold		網際電臺:0 網際電檯:0 網際電颱:0 網際電台:0
-phrase	羊舍	羊捨	hold		羊舍:6 羊捨:0
-phrase	美仑	美崙	evidence		美崙:41 美侖:6
-phrase	美仑美奂	美崙美奐	hold		美侖美奐:4 美崙美奐:0
 phrase	美台	美台	evidence		美臺:3 美檯:0 美颱:4 美台:130
 phrase	美国在台协会	美國在台協會	hold		美國在臺協會:2 美國在檯協會:0 美國在颱協會:0 美國在台協會:21
 phrase	美泽鉴人	美澤鑑人	hold		美澤鑑人:0 美澤鑒人:0
-phrase	翊赞	翊讚	hold		翊贊:0 翊讚:0
 phrase	翻台	翻台	evidence		翻檯:0 翻臺:4 翻颱:0 翻台:43
 phrase	老台	老台	evidence		老臺:1 老檯:0 老颱:0 老台:176
-phrase	老和尚撞钟	老和尚撞鐘	hold		老和尚撞鐘:0 老和尚撞鍾:0 老和尚撞鈡:0
-phrase	老态龙钟	老態龍鐘	hold		老態龍鍾:22 老態龍鐘:2 老態龍鈡:0
-phrase	老爷钟	老爺鐘	hold		老爺鐘:0 老爺鍾:0 老爺鈡:0
-phrase	老舍	老捨	hold		老舍:1 老捨:3
-phrase	耍笔杆	耍筆桿	hold		耍筆桿:0 耍筆杆:0
-phrase	肉毒杆菌	肉毒桿菌	hold		肉毒桿菌:13 肉毒杆菌:0
-phrase	肉毒杆菌毒素	肉毒桿菌毒素	hold		肉毒桿菌毒素:1 肉毒杆菌毒素:0
-phrase	肉毒梭状芽孢杆菌	肉毒梭狀芽孢桿菌	hold		肉毒梭狀芽孢桿菌:0 肉毒梭狀芽孢杆菌:0
 phrase	肢体冲突	肢體衝突	evidence		肢體衝突:73 肢體沖突:0 肢體冲突:0
 phrase	育乐台	育樂台	evidence		育樂臺:0 育樂檯:0 育樂颱:0 育樂台:71
-phrase	胄嗣	冑嗣	hold		胄嗣:0 冑嗣:0
-phrase	胄子	冑子	hold		胄子:0 冑子:0
-phrase	胄序	冑序	hold		胄序:0 冑序:0
-phrase	胄族	冑族	hold		胄族:0 冑族:0
-phrase	胄甲	冑甲	hold		冑甲:0 胄甲:0
-phrase	胄监	冑監	hold		胄監:0 冑監:0
-phrase	胄科	冑科	hold		冑科:0 胄科:0
-phrase	胄绪	冑緒	hold		胄緒:0 冑緒:0
-phrase	胄胤	冑胤	hold		胄胤:0 冑胤:0
-phrase	胄裔	冑裔	hold		胄裔:0 冑裔:0
-phrase	胄裔繁衍	冑裔繁衍	hold		胄裔繁衍:0 冑裔繁衍:0
-phrase	胄阀	冑閥	hold		胄閥:0 冑閥:0
 phrase	胡吣	胡唚	hold		胡唚:0 胡吣:0
-phrase	胡朴安	胡朴安	hold		胡樸安:0 胡朴安:0
 phrase	胡雪岩	胡雪岩	hold		胡雪巖:5 胡雪岩:0
-phrase	胤胄	胤冑	hold		胤胄:0 胤冑:0
-phrase	胸罗万象	胸羅萬像	hold		胸羅萬象:0 胸羅萬像:0
-phrase	能舍	能捨	evidence		能捨:73 能舍:0
 phrase	脉冲	脈衝	evidence		脈衝:157 脈沖:0 脈冲:0
 phrase	脉冲光	脈衝光	hold		脈衝光:8 脈沖光:0 脈冲光:0
 phrase	脉冲式	脈衝式	hold		脈衝式:2 脈沖式:0 脈冲式:0
@@ -2844,85 +2047,13 @@ phrase	脉冲星	脈衝星	hold		脈衝星:14 脈沖星:0 脈冲星:0
 phrase	脉冲电磁场	脈衝電磁場	hold		脈衝電磁場:1 脈沖電磁場:0 脈冲電磁場:0
 phrase	脉冲雷达	脈衝雷達	hold		脈衝雷達:0 脈沖雷達:0 脈冲雷達:0
 phrase	脉岩	脈岩	hold		脈岩:0 脈巖:0
-phrase	腰杆	腰桿	hold		腰桿:29 腰杆:0
-phrase	腰杆子	腰桿子	hold		腰桿子:0 腰杆子:0
 phrase	腾冲	騰衝	hold		騰衝:0 騰沖:0 騰冲:0
 phrase	腾冲县	騰衝縣	hold		騰衝縣:0 騰沖縣:0 騰冲縣:0
 phrase	膨土岩	膨土岩	hold		膨土岩:0 膨土巖:0
 phrase	自由亚洲电台	自由亞洲電台	hold		自由亞洲電臺:0 自由亞洲電檯:0 自由亞洲電颱:0 自由亞洲電台:1
-phrase	自赞	自讚	hold		自贊:4 自讚:1
-phrase	自鸣钟	自鳴鐘	hold		自鳴鐘:0 自鳴鍾:0 自鳴鈡:0
 phrase	臭气冲天	臭氣沖天	hold		臭氣沖天:7 臭氣衝天:0 臭氣冲天:0
 phrase	舄卤	舄鹵	hold		舄鹵:0 舄滷:0
 phrase	舆台	輿台	hold		輿臺:0 輿檯:0 輿颱:0 輿台:0
-phrase	舍下	捨下	hold		舍下:3 捨下:13
-phrase	舍下他	捨下他	hold		捨下他:0 舍下他:0
-phrase	舍下你	捨下你	hold		捨下你:0 舍下你:0
-phrase	舍下她	捨下她	hold		捨下她:0 舍下她:0
-phrase	舍下我	捨下我	hold		捨下我:0 舍下我:0
-phrase	舍不得	捨不得	evidence		捨不得:2893 舍不得:5
-phrase	舍亲	捨親	hold		舍親:1 捨親:2
-phrase	舍人	捨人	hold		舍人:14 捨人:7
-phrase	舍出	捨出	hold		捨出:5 舍出:2
-phrase	舍利	舍利	evidence		舍利:88 捨利:1
-phrase	舍利佛	捨利佛	hold		舍利佛:0 捨利佛:0
-phrase	舍利塔	捨利塔	hold		舍利塔:2 捨利塔:0
-phrase	舍利子	捨利子	hold		舍利子:25 捨利子:0
-phrase	舍利子塔	捨利子塔	hold		舍利子塔:0 捨利子塔:0
-phrase	舍利弗	捨利弗	hold		舍利弗:0 捨利弗:0
-phrase	舍去	捨去	evidence		捨去:346 舍去:4
-phrase	舍命	捨命	evidence		捨命:43 舍命:0
-phrase	舍命救人	捨命救人	hold		捨命救人:0 舍命救人:0
-phrase	舍堕	捨墮	hold		捨墮:0 舍墮:0
-phrase	舍妹	捨妹	hold		舍妹:5 捨妹:0
-phrase	舍姪	捨姪	hold		舍姪:0 捨姪:0
-phrase	舍安就危	捨安就危	hold		捨安就危:0 舍安就危:0
-phrase	舍实	捨實	hold		捨實:3 舍實:4
-phrase	舍实求虚	捨實求虛	hold		捨實求虛:0 舍實求虛:0
-phrase	舍己	捨己	hold		捨己:24 舍己:0
-phrase	舍己为人	捨己為人	hold		捨己為人:9 舍己為人:0
-phrase	舍己为公	捨己為公	hold		捨己為公:0 舍己為公:0
-phrase	舍己为国	捨己為國	hold		捨己為國:0 舍己為國:0
-phrase	舍己从人	捨己從人	hold		捨己從人:0 舍己從人:0
-phrase	舍己就人	捨己就人	hold		捨己就人:0 舍己就人:0
-phrase	舍己成人	捨己成人	hold		捨己成人:0 舍己成人:0
-phrase	舍己救人	捨己救人	hold		捨己救人:7 舍己救人:0
-phrase	舍己芸人	捨己芸人	hold		捨己芸人:0 舍己芸人:0
-phrase	舍弃	捨棄	evidence		捨棄:1556 舍棄:0
-phrase	舍弗勒	捨弗勒	hold		舍弗勒:0 捨弗勒:0
-phrase	舍弟	捨弟	hold		舍弟:13 捨弟:0
-phrase	舍得	捨得	evidence		捨得:544 舍得:1
-phrase	舍德主义	捨德主義	hold		舍德主義:0 捨德主義:0
-phrase	舍我其谁	捨我其誰	evidence		捨我其誰:39 舍我其誰:2
-phrase	舍我复谁	捨我復誰	hold		捨我復誰:0 舍我復誰:0
-phrase	舍旧迎新	捨舊迎新	hold		捨舊迎新:0 舍舊迎新:0
-phrase	舍本	捨本	evidence		捨本:44 舍本:4
-phrase	舍本事末	捨本事末	hold		捨本事末:0 舍本事末:0
-phrase	舍本逐末	捨本逐末	evidence		捨本逐末:40 舍本逐末:3
-phrase	舍本问末	捨本問末	hold		捨本問末:0 舍本問末:0
-phrase	舍正从邪	捨正從邪	hold		捨正從邪:0 舍正從邪:0
-phrase	舍死忘生	捨死忘生	hold		捨死忘生:0 舍死忘生:0
-phrase	舍生	捨生	hold		捨生:9 舍生:14
-phrase	舍生取义	捨生取義	hold		捨生取義:4 舍生取義:0
-phrase	舍生存义	捨生存義	hold		舍生存義:0 捨生存義:0
-phrase	舍生忘死	捨生忘死	hold		捨生忘死:0 舍生忘死:0
-phrase	舍监	舍監	evidence		舍監:44 捨監:0
-phrase	舍短从长	捨短從長	hold		捨短從長:0 舍短從長:0
-phrase	舍短取长	捨短取長	hold		捨短取長:0 舍短取長:0
-phrase	舍短录长	捨短錄長	hold		捨短錄長:0 舍短錄長:0
-phrase	舍短用长	捨短用長	hold		捨短用長:0 舍短用長:0
-phrase	舍身	捨身	evidence		捨身:90 舍身:4
-phrase	舍身为国	捨身為國	hold		捨身為國:0 舍身為國:0
-phrase	舍身图报	捨身圖報	hold		捨身圖報:0 舍身圖報:0
-phrase	舍身报国	捨身報國	hold		捨身報國:0 舍身報國:0
-phrase	舍身救人	捨身救人	hold		捨身救人:1 舍身救人:0
-phrase	舍身求法	捨身求法	hold		捨身求法:0 舍身求法:0
-phrase	舍车保帅	捨車保帥	hold		捨車保帥:0 舍車保帥:0
-phrase	舍近务远	捨近務遠	hold		捨近務遠:0 舍近務遠:0
-phrase	舍近即远	捨近即遠	hold		捨近即遠:0 舍近即遠:0
-phrase	舍近求远	捨近求遠	evidence		捨近求遠:48 舍近求遠:0
-phrase	舍近谋远	捨近謀遠	hold		捨近謀遠:0 舍近謀遠:0
-phrase	舍间	捨間	hold		舍間:1 捨間:1
 phrase	舞台	舞台	evidence		舞臺:256 舞檯:1 舞颱:0 舞台:8103
 phrase	舞台剧	舞台劇	evidence		舞臺劇:17 舞檯劇:0 舞颱劇:0 舞台劇:845
 phrase	舞台区	舞台區	hold		舞臺區:0 舞檯區:0 舞颱區:0 舞台區:27
@@ -2933,37 +2064,27 @@ phrase	舞台艺术	舞台藝術	hold		舞臺藝術:0 舞檯藝術:0 舞颱藝�
 phrase	舞台音乐	舞台音樂	hold		舞臺音樂:1 舞檯音樂:0 舞颱音樂:0 舞台音樂:0
 phrase	舞榭歌台	舞榭歌台	hold		舞榭歌臺:0 舞榭歌檯:0 舞榭歌颱:0 舞榭歌台:0
 phrase	船台	船台	hold		船臺:0 船檯:0 船颱:0 船台:11
-phrase	船钟	船鐘	hold		船鐘:4 船鍾:0 船鈡:0
 phrase	艨冲	艨衝	hold		艨衝:0 艨沖:0 艨冲:0
 phrase	色彩艳丽	色彩豔麗	hold		色彩豔麗:0 色彩艷麗:0
 phrase	色彩鲜艳	色彩鮮豔	hold		色彩鮮豔:16 色彩鮮艷:9
 phrase	艳后	豔后	hold		豔后:76 艷后:45
-phrase	芦洲蟹舍	蘆洲蟹捨	hold		蘆洲蟹舍:0 蘆洲蟹捨:0
 phrase	花台	花台	evidence		花臺:7 花檯:0 花颱:0 花台:71
 phrase	花岗岩	花崗岩	hold		花崗岩:22 花崗巖:0
 phrase	花岗岩质层	花崗岩質層	hold		花崗岩質層:0 花崗巖質層:0
-phrase	花钟	花鐘	hold		花鐘:5 花鍾:1 花鈡:0
-phrase	苗胄	苗冑	hold		苗胄:0 苗冑:0
 phrase	苦卤	苦鹵	hold		苦鹵:0 苦滷:1
 phrase	英国广播电台	英國廣播電台	hold		英國廣播電臺:0 英國廣播電檯:0 英國廣播電颱:0 英國廣播電台:0
-phrase	英胄	英冑	hold		英胄:0 英冑:0
 phrase	茅台	茅台	evidence		茅臺:0 茅檯:0 茅颱:0 茅台:35
 phrase	茅台酒	茅台酒	hold		茅臺酒:0 茅檯酒:0 茅颱酒:0 茅台酒:4
-phrase	茅舍	茅捨	hold		茅舍:1 茅捨:0
 phrase	茶卤	茶滷	hold		茶滷:1 茶鹵:0
 phrase	草台班子	草台班子	evidence		草臺班子:1 草檯班子:0 草颱班子:0 草台班子:53
 phrase	草签	草簽	hold		草簽:5 草籤:0
-phrase	草舍	草捨	hold		草舍:2 草捨:0
-phrase	药签	藥簽	hold		藥籤:1 藥簽:0
+phrase	药签	藥籤	hold		藥籤:1 藥簽:0
 phrase	莲台	蓮台	evidence		蓮臺:5 蓮檯:0 蓮颱:0 蓮台:82
 phrase	莽卤	莽鹵	hold		莽鹵:0 莽滷:0
 phrase	菠棱菜	菠稜菜	hold		菠棱菜:0 菠稜菜:0
-phrase	菲舍尔	菲捨爾	hold		菲舍爾:0 菲捨爾:0
-phrase	营舍	營捨	hold		營舍:16 營捨:0
 phrase	落了灶	落了灶	hold		落了竈:0 落了灶:0
 phrase	落台	落台	evidence		落臺:0 落檯:0 落颱:1 落台:32
 phrase	落地签证	落地簽證	hold		落地簽證:4 落地籤證:0
-phrase	蒋舍三径	蔣捨三徑	hold		蔣舍三徑:0 蔣捨三徑:0
 phrase	蒙冲	蒙衝	hold		蒙衝:1 蒙沖:0 蒙冲:0
 phrase	蒙台梭利	蒙台梭利	hold		蒙臺梭利:0 蒙檯梭利:0 蒙颱梭利:0 蒙台梭利:0
 phrase	藩台	藩台	hold		藩臺:0 藩檯:0 藩颱:0 藩台:0
@@ -2975,18 +2096,9 @@ phrase	蛇纹岩	蛇紋岩	hold		蛇紋岩:0 蛇紋巖:0
 phrase	蛇绿岩	蛇綠岩	hold		蛇綠岩:0 蛇綠巖:0
 phrase	蛇绿混杂岩	蛇綠混雜岩	hold		蛇綠混雜岩:0 蛇綠混雜巖:0
 phrase	蛇绿混杂岩带	蛇綠混雜岩帶	hold		蛇綠混雜岩帶:0 蛇綠混雜巖帶:0
-phrase	蜗杆	蝸桿	hold		蝸桿:0 蝸杆:0
-phrase	蜗舍	蝸捨	hold		蝸舍:0 蝸捨:0
 phrase	蜡台	蠟台	hold		蠟臺:0 蠟檯:0 蠟颱:0 蠟台:0
 phrase	蜡烛台	蠟燭台	hold		蠟燭臺:1 蠟燭檯:1 蠟燭颱:0 蠟燭台:5
-phrase	螺旋杆菌	螺旋桿菌	hold		螺旋桿菌:4 螺旋杆菌:0
-phrase	螺杆	螺桿	hold		螺桿:11 螺杆:0
-phrase	血胄	血冑	hold		血胄:0 血冑:0
-phrase	衅钟	釁鐘	hold		釁鐘:0 釁鍾:0 釁鈡:0
 phrase	行台	行台	evidence		行臺:58 行檯:2 行颱:0 行台:201
-phrase	街坊邻舍	街坊鄰捨	hold		街坊鄰舍:0 街坊鄰捨:0
-phrase	表现对象	表現對像	hold		表現對象:0 表現對像:0
-phrase	表象	表象	evidence		表象:121 表像:24
 phrase	袅娜	嫋娜	hold		嫋娜:3 裊娜:1
 phrase	袅娜纤巧	嫋娜纖巧	hold		嫋娜纖巧:0 裊娜纖巧:0
 phrase	袅娜风流	嫋娜風流	hold		嫋娜風流:0 裊娜風流:0
@@ -2999,24 +2111,16 @@ phrase	袅袅娜娜	嫋嫋娜娜	hold		嫋嫋娜娜:0 嫋裊娜娜:0 裊嫋娜�
 phrase	袅袅婷婷	嫋嫋婷婷	hold		嫋嫋婷婷:0 嫋裊婷婷:0 裊嫋婷婷:0 裊裊婷婷:0
 phrase	袅袅炊烟	裊裊炊煙	hold		裊裊炊煙:10 裊嫋炊煙:0 嫋裊炊煙:0 嫋嫋炊煙:0
 phrase	装岩机	裝岩機	hold		裝岩機:0 裝巖機:0
-phrase	裔胄	裔冑	hold		裔胄:0 裔冑:0
 phrase	裸岩	裸岩	hold		裸岩:0 裸巖:0
-phrase	褒赞	褒讚	hold		褒讚:0 褒贊:0
-phrase	襄赞	襄讚	hold		襄贊:0 襄讚:0
 phrase	西冲	西衝	hold		西衝:14 西沖:6 西冲:0
 phrase	西台	西台	evidence		西臺:27 西檯:0 西颱:1 西台:841
 phrase	西台人	西台人	hold		西臺人:0 西檯人:0 西颱人:0 西台人:3
 phrase	西台古堡	西台古堡	hold		西臺古堡:1 西檯古堡:0 西颱古堡:0 西台古堡:2
 phrase	西台帝国	西台帝國	hold		西臺帝國:0 西檯帝國:0 西颱帝國:0 西台帝國:3
-phrase	西周钟	西周鐘	hold		西周鐘:0 西周鍾:0 西周鈡:0
-phrase	西岳	西岳	hold		西嶽:2 西岳:1
 phrase	要冲	要衝	evidence		要衝:1469 要沖:84 要冲:0
 phrase	覆车之鉴	覆車之鑑	hold		覆車之鑑:0 覆車之鑒:0
 phrase	见棱见角	見稜見角	hold		見棱見角:0 見稜見角:0
-phrase	见素抱朴	見素抱朴	hold		見素抱樸:0 見素抱朴:0
 phrase	见鉴	見鑒	hold		見鑒:1 見鑑:0
-phrase	见钟不打	見鐘不打	hold		見鐘不打:0 見鍾不打:0 見鈡不打:0
-phrase	见钟不打更去炼铜	見鐘不打更去煉銅	hold		見鐘不打更去煉銅:0 見鍾不打更去煉銅:0 見鈡不打更去煉銅:0
 phrase	观众台	觀眾台	hold		觀眾臺:0 觀眾檯:0 觀眾颱:0 觀眾台:6
 phrase	观光台	觀光台	hold		觀光臺:0 觀光檯:0 觀光颱:0 觀光台:2
 phrase	观光签证	觀光簽證	hold		觀光簽證:27 觀光籤證:0
@@ -3026,128 +2130,37 @@ phrase	观景台	觀景台	evidence		觀景臺:14 觀景檯:0 觀景颱:0 觀景
 phrase	观望台	觀望台	hold		觀望臺:0 觀望檯:0 觀望颱:0 觀望台:5
 phrase	观测台	觀測台	hold		觀測臺:0 觀測檯:0 觀測颱:0 觀測台:2
 phrase	观礼台	觀禮台	hold		觀禮臺:0 觀禮檯:0 觀禮颱:0 觀禮台:0
-phrase	观象台	觀像台	hold		觀象臺:0 觀象檯:0 觀象颱:0 觀象台:0 觀像臺:0 觀像檯:0 觀像颱:0 觀像台:0
+phrase	观象台	觀象台	hold		觀象臺:0 觀象檯:0 觀象颱:0 觀象台:0
 phrase	角砾岩	角礫岩	hold		角礫岩:0 角礫巖:0
 phrase	角色冲突	角色衝突	hold		角色衝突:7 角色沖突:0 角色冲突:0
 phrase	角页岩	角頁岩	hold		角頁岩:0 角頁巖:0
 phrase	詹氏年鉴	詹氏年鑑	hold		詹氏年鑑:0 詹氏年鑒:0
 phrase	謻台	謻台	hold		謻臺:0 謻檯:0 謻颱:0 謻台:0
-phrase	警世钟	警世鐘	hold		警世鐘:0 警世鍾:0 警世鈡:0
 phrase	警察广播电台	警察廣播電台	hold		警察廣播電臺:3 警察廣播電檯:0 警察廣播電颱:0 警察廣播電台:0
-phrase	警寤钟	警寤鐘	hold		警寤鐘:0 警寤鍾:0 警寤鈡:0
-phrase	警报钟	警報鐘	hold		警報鐘:0 警報鍾:0 警報鈡:0
 phrase	警民冲突	警民衝突	hold		警民衝突:7 警民沖突:0 警民冲突:0
-phrase	警示钟	警示鐘	hold		警示鐘:0 警示鍾:0 警示鈡:0
-phrase	警钟	警鐘	evidence		警鐘:48 警鍾:0 警鈡:0
-phrase	训胄	訓冑	hold		訓胄:0 訓冑:0
 phrase	讲台	講台	evidence		講臺:32 講檯:4 講颱:9 講台:774
-phrase	论赞	論讚	hold		論贊:2 論讚:3
 phrase	设台	設台	evidence		設臺:13 設檯:1 設颱:1 設台:113
-phrase	设鼓悬钟	設鼓懸鐘	hold		設鼓懸鐘:0 設鼓懸鍾:0 設鼓懸鈡:0
 phrase	访台	訪台	evidence		訪臺:3 訪檯:1 訪颱:0 訪台:138
 phrase	访台之旅	訪台之旅	hold		訪臺之旅:0 訪檯之旅:0 訪颱之旅:0 訪台之旅:0
 phrase	评鉴	評鑑	evidence		評鑑:321 評鑒:13
 phrase	评鉴为	評鑑為	hold		評鑑為:4 評鑒為:0
 phrase	评鉴报告	評鑑報告	hold		評鑑報告:2 評鑒報告:0
 phrase	识面台官	識面台官	hold		識面臺官:0 識面檯官:0 識面颱官:0 識面台官:0
-phrase	诔赞	誄讚	hold		誄讚:0 誄贊:0
-phrase	试胄	試冑	hold		試胄:0 試冑:0
 phrase	试验台	試驗檯	hold		試驗檯:1 試驗臺:0 試驗颱:0 試驗台:0
-phrase	诗赞	詩讚	hold		詩讚:1 詩贊:1
-phrase	诗钟	詩鐘	hold		詩鐘:0 詩鍾:0 詩鈡:0
-phrase	诚朴	誠朴	hold		誠樸:3 誠朴:0
-phrase	该钟	該鐘	hold		該鐘:0 該鍾:0 該鈡:0
-phrase	说岳	說岳	evidence		說岳:38 說嶽:1
-phrase	说岳全传	說岳全傳	hold		說岳全傳:0 說嶽全傳:0
 phrase	诵经台	誦經台	hold		誦經臺:0 誦經檯:0 誦經颱:0 誦經台:0
-phrase	读不舍手	讀不捨手	hold		讀不捨手:0 讀不舍手:0
 phrase	谁家灶内无烟	誰家灶內無煙	hold		誰家竈內無煙:0 誰家灶內無煙:0
 phrase	调幅台	調幅台	hold		調幅臺:0 調幅檯:0 調幅颱:0 調幅台:0
-phrase	调钟表	調鐘錶	hold		調鐘錶:0 調鍾錶:0 調鈡錶:0
 phrase	调频台	調頻台	hold		調頻臺:0 調頻檯:0 調頻颱:0 調頻台:1
 phrase	调频电台	調頻電台	hold		調頻電臺:0 調頻電檯:0 調頻電颱:0 調頻電台:0
 phrase	谦冲	謙沖	hold		謙沖:2 謙衝:0 謙冲:0
 phrase	谦冲自牧	謙沖自牧	hold		謙沖自牧:0 謙衝自牧:0 謙冲自牧:0
-phrase	谬赞	謬讚	hold		謬讚:2 謬贊:0
 phrase	谷口耕岩	谷口耕岩	hold		谷口耕岩:0 谷口耕巖:0
-phrase	谷象	谷像	hold		谷象:4 谷像:1
 phrase	豆签	豆簽	hold		豆簽:8 豆籤:0
-phrase	象征	象徵	evidence		象徵:2104 像徵:11
-phrase	象征主义	像徵主義	hold		象徵主義:2 像徵主義:0
-phrase	象征性	象徵性	evidence		象徵性:190 像徵性:1
-phrase	象征着	象徵著	evidence		象徵著:184 像徵著:1
-phrase	象板	像板	evidence		象板:19 像板:166
-phrase	象牙针尖	像牙針尖	hold		象牙針尖:0 像牙針尖:0
-phrase	象牙雕	像牙雕	hold		象牙雕:0 像牙雕:0
-phrase	象箸玉杯	像箸玉杯	hold		象箸玉杯:0 像箸玉杯:0
-phrase	象鼻虫	像鼻蟲	hold		象鼻蟲:1 像鼻蟲:0
-phrase	豪门贵胄	豪門貴冑	hold		豪門貴胄:0 豪門貴冑:0
-phrase	贝胄	貝冑	hold		貝冑:0 貝胄:0
-phrase	贤胄	賢冑	hold		賢胄:0 賢冑:0
 phrase	账面	帳面	evidence		賬面:10 帳面:1052
-phrase	质朴	質樸	evidence		質樸:56 質朴:0
-phrase	贪生舍义	貪生捨義	hold		貪生舍義:0 貪生捨義:0
 phrase	购物台	購物台	evidence		購物臺:0 購物檯:0 購物颱:0 購物台:46
-phrase	贵胄	貴冑	hold		貴胄:3 貴冑:2
-phrase	费舍尔	費捨爾	hold		費舍爾:1 費捨爾:1
 phrase	资治通鉴	資治通鑑	hold		資治通鑑:10 資治通鑒:0
 phrase	赌台	賭檯	hold		賭檯:1 賭臺:1 賭颱:4 賭台:20
-phrase	赏赞	賞讚	hold		賞讚:6 賞贊:0
 phrase	赏鉴	賞鑑	hold		賞鑑:1 賞鑒:0
-phrase	赞一句	讚一句	hold		讚一句:4 贊一句:0
-phrase	赞一声	讚一聲	hold		讚一聲:1 贊一聲:0
-phrase	赞一赞	讚一讚	hold		讚一讚:0 讚一贊:0 贊一讚:0 贊一贊:0
-phrase	赞不绝口	讚不絕口	evidence		讚不絕口:150 贊不絕口:2
-phrase	赞两句	讚兩句	hold		讚兩句:0 贊兩句:0
-phrase	赞个不	讚個不	hold		讚個不:1 贊個不:0
-phrase	赞乐	讚樂	hold		讚樂:9 贊樂:0
-phrase	赞了	讚了	evidence		讚了:1522 贊了:38
-phrase	赞伯拉诺	讚伯拉諾	hold		贊伯拉諾:0 讚伯拉諾:0
-phrase	赞佩	讚佩	hold		讚佩:3 贊佩:0
-phrase	赞佩不已	讚佩不已	hold		讚佩不已:0 贊佩不已:0
-phrase	赞助	贊助	evidence		贊助:3856 讚助:20
-phrase	赞助人	讚助人	hold		贊助人:14 讚助人:0
-phrase	赞助商	贊助商	evidence		贊助商:727 讚助商:2
-phrase	赞助者	贊助者	evidence		贊助者:52 讚助者:0
-phrase	赞口不	讚口不	hold		讚口不:1 贊口不:0
-phrase	赞叹	讚歎	evidence		讚歎:121 贊歎:0
-phrase	赞叹不已	讚歎不已	hold		讚歎不已:5 贊歎不已:0
-phrase	赞叹声	讚歎聲	hold		讚歎聲:1 贊歎聲:0
-phrase	赞同	贊同	evidence		贊同:709 讚同:52
-phrase	赞呗	讚唄	hold		讚唄:2 贊唄:0
-phrase	赞善	讚善	hold		贊善:0 讚善:3
-phrase	赞布拉诺	讚布拉諾	hold		贊布拉諾:0 讚布拉諾:0
-phrase	赞成	贊成	evidence		贊成:1566 讚成:67
-phrase	赞成票	讚成票	hold		贊成票:22 讚成票:1
-phrase	赞成者	讚成者	hold		贊成者:4 讚成者:2
-phrase	赞我	讚我	evidence		讚我:326 贊我:5
-phrase	赞扬	讚揚	evidence		讚揚:214 贊揚:1
-phrase	赞拜	讚拜	hold		贊拜:2 讚拜:13
-phrase	赞普	讚普	hold		贊普:3 讚普:6
-phrase	赞歌	讚歌	evidence		讚歌:46 贊歌:5
-phrase	赞理	讚理	hold		贊理:0 讚理:0
-phrase	赞的	讚的	evidence		讚的:2614 贊的:60
-phrase	赞皇	讚皇	hold		贊皇:0 讚皇:1
-phrase	赞皇县	讚皇縣	hold		贊皇縣:0 讚皇縣:0
-phrase	赞礼	讚禮	hold		贊禮:1 讚禮:7
-phrase	赞美	讚美	evidence		讚美:588 贊美:9
-phrase	赞美有加	讚美有加	hold		讚美有加:0 贊美有加:0
-phrase	赞美歌	讚美歌	hold		讚美歌:0 贊美歌:0
-phrase	赞美诗	讚美詩	hold		讚美詩:3 贊美詩:0
-phrase	赞羡	讚羨	hold		讚羨:8 贊羨:0
-phrase	赞翼	讚翼	hold		贊翼:0 讚翼:0
-phrase	赞自己	讚自己	hold		讚自己:27 贊自己:0
-phrase	赞誉	讚譽	evidence		讚譽:166 贊譽:0
-phrase	赞誉为	讚譽為	hold		讚譽為:3 贊譽為:0
-phrase	赞许	讚許	evidence		讚許:102 贊許:2
-phrase	赞词	讚詞	hold		讚詞:3 贊詞:0
-phrase	赞语	讚語	hold		讚語:3 贊語:0
-phrase	赞赏	讚賞	evidence		讚賞:519 贊賞:5
-phrase	赞赏不已	讚賞不已	hold		讚賞不已:2 贊賞不已:0
-phrase	赞辞	讚辭	hold		讚辭:0 贊辭:0
-phrase	赞道	讚道	hold		讚道:15 贊道:1
-phrase	赞颂	讚頌	evidence		讚頌:70 贊頌:0
-phrase	赤霉素	赤霉素	hold		赤黴素:0 赤霉素:0
 phrase	赫麦汉士台	赫麥漢士台	hold		赫麥漢士臺:0 赫麥漢士檯:0 赫麥漢士颱:0 赫麥漢士台:0
 phrase	走上台	走上台	hold		走上臺:1 走上檯:0 走上颱:0 走上台:7
 phrase	走下台	走下台	hold		走下臺:1 走下檯:0 走下颱:0 走下台:7
@@ -3155,23 +2168,17 @@ phrase	走马章台	走馬章台	hold		走馬章臺:0 走馬章檯:0 走馬章�
 phrase	赴台	赴台	evidence		赴臺:4 赴檯:0 赴颱:0 赴台:43
 phrase	赵治勋	趙治勳	hold		趙治勳:0 趙治勛:0
 phrase	赶下台	趕下台	evidence		趕下臺:3 趕下檯:0 趕下颱:0 趕下台:38
-phrase	起扑杆	起撲桿	hold		起撲桿:0 起撲杆:0
 phrase	超基性岩	超基性岩	hold		超基性岩:0 超基性巖:0
 phrase	超然台	超然台	hold		超然臺:0 超然檯:0 超然颱:0 超然台:0
 phrase	超级台风	超級颱風	hold		超級颱風:3 超級臺風:0 超級檯風:0 超級台風:0
-phrase	超赞	超讚	evidence		超讚:4310 超贊:15
-phrase	趋舍	趨捨	hold		趨舍:0 趨捨:0
-phrase	趋舍异路	趨捨異路	hold		趨舍異路:0 趨捨異路:0
-phrase	趋舍指凑	趨捨指湊	hold		趨舍指湊:0 趨捨指湊:0
 phrase	跑台子	跑檯子	hold		跑檯子:0 跑臺子:0 跑颱子:0 跑台子:0
 phrase	跨平台	跨平台	evidence		跨平臺:14 跨平檯:0 跨平颱:0 跨平台:485
-phrase	路签	路簽	hold		路籤:4 路簽:19
+phrase	路签	路籤	hold		路籤:4 路簽:19
 phrase	跳伞台	跳傘台	hold		跳傘臺:0 跳傘檯:0 跳傘颱:0 跳傘台:0
 phrase	跳台	跳台	evidence		跳臺:1 跳檯:0 跳颱:1 跳台:216
 phrase	跳台滑雪	跳台滑雪	hold		跳臺滑雪:0 跳檯滑雪:0 跳颱滑雪:0 跳台滑雪:0
 phrase	跳水台	跳水台	hold		跳水臺:0 跳水檯:1 跳水颱:0 跳水台:17
 phrase	蹭棱子	蹭稜子	hold		蹭棱子:0 蹭稜子:0
-phrase	躬擐甲胄	躬擐甲冑	hold		躬擐甲冑:0 躬擐甲胄:0
 phrase	转台	轉台	evidence		轉檯:15 轉臺:23 轉颱:2 轉台:827
 phrase	转播台	轉播台	evidence		轉播臺:3 轉播檯:0 轉播颱:0 轉播台:63
 phrase	转车台	轉車台	hold		轉車臺:1 轉車檯:0 轉車颱:0 轉車台:19
@@ -3181,90 +2188,50 @@ phrase	轮台古城	輪台古城	hold		輪臺古城:0 輪檯古城:0 輪颱古�
 phrase	软件平台	軟件平台	hold		軟件平臺:0 軟件平檯:0 軟件平颱:0 軟件平台:0
 phrase	轻度台风	輕度颱風	hold		輕度颱風:3 輕度臺風:0 輕度檯風:0 輕度台風:0
 phrase	轻袅袅	輕嫋嫋	hold		輕嫋嫋:0 輕嫋裊:0 輕裊嫋:0 輕裊裊:0
-phrase	辅赞	輔讚	hold		輔贊:0 輔讚:0
 phrase	辉绿岩	輝綠岩	hold		輝綠岩:0 輝綠巖:0
 phrase	辉长岩	輝長岩	hold		輝長岩:0 輝長巖:0
-phrase	辟君三舍	辟君三捨	hold		辟君三舍:0 辟君三捨:0
 phrase	边境冲突	邊境衝突	hold		邊境衝突:3 邊境沖突:0 邊境冲突:0
 phrase	迁台	遷台	hold		遷臺:2 遷檯:0 遷颱:0 遷台:17
 phrase	过冲	過沖	hold		過沖:51 過衝:54 過冲:0
 phrase	过境签证	過境簽證	hold		過境簽證:5 過境籤證:0
-phrase	过杆	過桿	hold		過杆:1 過桿:4
 phrase	近水楼台	近水樓台	evidence		近水樓臺:3 近水樓檯:0 近水樓颱:0 近水樓台:32
 phrase	返台	返台	evidence		返臺:9 返檯:0 返颱:0 返台:512
-phrase	返朴	返朴	hold		返樸:6 返朴:0
 phrase	还冲	還衝	evidence		還衝:73 還沖:8 還冲:0
-phrase	还淳反朴	還淳反朴	hold		還淳反樸:0 還淳反朴:0
-phrase	还淳返朴	還淳返朴	hold		還淳返樸:0 還淳返朴:0
-phrase	这钟	這鐘	hold		這鐘:6 這鍾:0 這鈡:0
 phrase	进口加签权	進口加簽權	hold		進口加簽權:0 進口加籤權:0
 phrase	远端签入	遠端簽入	hold		遠端簽入:0 遠端籤入:0
-phrase	远胄	遠冑	hold		遠胄:0 遠冑:0
 phrase	连亘	連亘	hold		連亙:0 連亘:0
 phrase	连台	連台	evidence		連臺:20 連檯:1 連颱:38 連台:628
 phrase	连台好戏	連台好戲	hold		連臺好戲:0 連檯好戲:0 連颱好戲:0 連台好戲:0
 phrase	连台本戏	連台本戲	hold		連臺本戲:0 連檯本戲:0 連颱本戲:0 連台本戲:0
-phrase	连杆	連桿	evidence		連桿:90 連杆:2
-phrase	连杆机构	連桿機構	hold		連桿機構:3 連杆機構:0
-phrase	退徙三舍	退徙三捨	hold		退徙三舍:0 退徙三捨:0
-phrase	退避三舍	退避三捨	hold		退避三舍:24 退避三捨:0
 phrase	送客台	送客台	hold		送客臺:0 送客檯:0 送客颱:0 送客台:0
 phrase	逃债台	逃債台	hold		逃債臺:0 逃債檯:0 逃債颱:0 逃債台:0
-phrase	逆钟	逆鐘	hold		逆鐘:0 逆鍾:0 逆鈡:0
-phrase	逆钟向	逆鐘向	hold		逆鐘向:0 逆鍾向:0 逆鈡向:0
-phrase	逐末舍本	逐末捨本	hold		逐末捨本:0 逐末舍本:0
-phrase	通事舍人	通事捨人	hold		通事舍人:0 通事捨人:0
 phrase	通鉴	通鑑	hold		通鑑:16 通鑒:1
 phrase	造岩矿物	造岩礦物	hold		造岩礦物:0 造巖礦物:0
-phrase	造钟	造鐘	hold		造鐘:0 造鍾:0 造鈡:0
-phrase	造钟表	造鐘錶	hold		造鐘錶:0 造鍾錶:0 造鈡錶:0
 phrase	逼下台	逼下台	hold		逼下臺:0 逼下檯:0 逼下颱:0 逼下台:6
-phrase	遐胄	遐冑	hold		遐胄:0 遐冑:0
 phrase	道冲	道衝	evidence		道沖:22 道衝:52 道冲:0
 phrase	道鉴	道鑒	hold		道鑒:0 道鑑:1
-phrase	遗传钟	遺傳鐘	hold		遺傳鐘:0 遺傳鍾:0 遺傳鈡:0
-phrase	遗胄	遺冑	hold		遺胄:0 遺冑:0
-phrase	遥胄	遙冑	hold		遙胄:0 遙冑:0
-phrase	遥遥华胄	遙遙華冑	hold		遙遙華胄:0 遙遙華冑:0
 phrase	避风台	避風台	hold		避風臺:0 避風檯:0 避風颱:0 避風台:0
 phrase	邢台	邢台	hold		邢臺:0 邢檯:0 邢颱:0 邢台:2
 phrase	邢台县	邢台縣	hold		邢臺縣:0 邢檯縣:0 邢颱縣:0 邢台縣:0
 phrase	邢台地区	邢台地區	hold		邢臺地區:0 邢檯地區:0 邢颱地區:0 邢台地區:0
 phrase	邢台市	邢台市	hold		邢臺市:0 邢檯市:0 邢颱市:0 邢台市:0
 phrase	那台	那台	evidence		那臺:42 那檯:2 那颱:11 那台:4767
-phrase	邸舍	邸捨	hold		邸舍:1 邸捨:0
-phrase	邻舍	鄰捨	hold		鄰舍:4 鄰捨:0
-phrase	郁朴	郁朴	hold		郁樸:0 郁朴:0
-phrase	郑家钟	鄭家鐘	hold		鄭家鐘:0 鄭家鍾:0 鄭家鈡:0
-phrase	郘钟	郘鐘	hold		郘鐘:0 郘鍾:0 郘鈡:0
 phrase	郝铭鉴	郝銘鑒	hold		郝銘鑒:0 郝銘鑑:0
 phrase	郭台成	郭台成	hold		郭台成:0 郭臺成:0 郭檯成:0 郭颱成:0
 phrase	郭台铭	郭台銘	evidence		郭台銘:277 郭臺銘:0 郭檯銘:0 郭颱銘:0
-phrase	都舍下	都捨下	hold		都捨下:0 都舍下:0
 phrase	配膳台	配膳檯	hold		配膳檯:0 配膳臺:0 配膳颱:0 配膳台:0
 phrase	酒气冲天	酒氣沖天	hold		酒氣沖天:1 酒氣衝天:0 酒氣冲天:0
-phrase	酒逢知己千钟少	酒逢知己千鐘少	hold		酒逢知己千鍾少:0 酒逢知己千鐘少:0 酒逢知己千鈡少:0
 phrase	酥签	酥簽	hold		酥簽:0 酥籤:0
-phrase	醇朴	醇朴	hold		醇樸:0 醇朴:0
 phrase	释迦佛也恼下莲台	釋迦佛也惱下蓮台	hold		釋迦佛也惱下蓮臺:0 釋迦佛也惱下蓮檯:0 釋迦佛也惱下蓮颱:0 釋迦佛也惱下蓮台:0
-phrase	里舍	里捨	hold		里舍:8 里捨:1
 phrase	重台	重台	evidence		重臺:0 重檯:1 重颱:1 重台:82
 phrase	重岩叠嶂	重岩疊嶂	hold		重巖疊嶂:0 重岩疊嶂:0
 phrase	野台	野台	evidence		野臺:4 野檯:0 野颱:0 野台:91
 phrase	野台戏	野台戲	evidence		野臺戲:3 野檯戲:0 野颱戲:0 野台戲:54
-phrase	金仑溪	金崙溪	hold		金崙溪:1 金侖溪:0
 phrase	金伯利岩	金伯利岩	hold		金伯利岩:0 金伯利巖:0
 phrase	金台	金台	evidence		金臺:6 金檯:2 金颱:0 金台:104
 phrase	金台区	金台區	hold		金臺區:0 金檯區:0 金颱區:0 金台區:0
-phrase	金属杆	金屬桿	hold		金屬桿:8 金屬杆:1
 phrase	金盏银台	金盞銀台	hold		金盞銀臺:1 金盞銀檯:0 金盞銀颱:0 金盞銀台:0
 phrase	金粉楼台	金粉樓台	hold		金粉樓臺:0 金粉樓檯:0 金粉樓颱:0 金粉樓台:0
-phrase	金胄	金冑	hold		金胄:0 金冑:0
-phrase	金融杠杆	金融槓桿	hold		金融槓桿:1 金融槓杆:0
-phrase	金钟	金鐘	evidence		金鐘:1184 金鍾:87 金鈡:0
-phrase	金钟罩	金鐘罩	evidence		金鐘罩:58 金鍾罩:0 金鈡罩:0
-phrase	金钟铲	金鐘鏟	hold		金鐘鏟:0 金鍾鏟:0 金鈡鏟:0
-phrase	金马仑道	金馬崙道	hold		金馬崙道:0 金馬侖道:0
 phrase	鉴于	鑑於	hold		鑑於:523 鑒於:278
 phrase	鉴别	鑑別	evidence		鑑別:274 鑒別:31
 phrase	鉴别力	鑑別力	hold		鑑別力:6 鑒別力:1
@@ -3306,138 +2273,25 @@ phrase	鉴赏家	鑑賞家	hold		鑑賞家:22 鑒賞家:1
 phrase	鉴赏能力	鑑賞能力	hold		鑑賞能力:16 鑒賞能力:0
 phrase	鉴频	鑑頻	hold		鑑頻:0 鑒頻:0
 phrase	鉴频器	鑑頻器	hold		鑑頻器:0 鑒頻器:0
-phrase	针孔现象	針孔現像	hold		針孔現象:0 針孔現像:0
 phrase	钓鱼台	釣魚台	evidence		釣魚臺:1 釣魚檯:0 釣魚颱:0 釣魚台:59
 phrase	钓鱼台列岛	釣魚台列島	hold		釣魚臺列島:0 釣魚檯列島:0 釣魚颱列島:0 釣魚台列島:0
-phrase	钓鱼杆	釣魚桿	hold		釣魚杆:0 釣魚桿:0
-phrase	钟上	鐘上	evidence		鐘上:132 鍾上:2 鈡上:0
-phrase	钟下	鐘下	evidence		鐘下:76 鍾下:0 鈡下:0
-phrase	钟不	鐘不	evidence		鐘不:462 鍾不:10 鈡不:0
-phrase	钟不扣不鸣	鐘不扣不鳴	hold		鐘不扣不鳴:0 鍾不扣不鳴:0 鈡不扣不鳴:0
-phrase	钟不撞不鸣	鐘不撞不鳴	hold		鐘不撞不鳴:0 鍾不撞不鳴:0 鈡不撞不鳴:0
-phrase	钟不敲不响	鐘不敲不響	hold		鐘不敲不響:0 鍾不敲不響:0 鈡不敲不響:0
-phrase	钟不空则哑	鐘不空則啞	hold		鐘不空則啞:0 鍾不空則啞:0 鈡不空則啞:0
-phrase	钟乐	鐘樂	hold		鐘樂:1 鍾樂:0 鈡樂:0
-phrase	钟乳洞	鐘乳洞	hold		鐘乳洞:6 鍾乳洞:2 鈡乳洞:0
-phrase	钟乳石	鐘乳石	hold		鐘乳石:21 鍾乳石:0 鈡乳石:0
-phrase	钟体	鐘體	hold		鐘體:14 鍾體:0 鈡體:0
-phrase	钟停	鐘停	hold		鐘停:18 鍾停:0 鈡停:0
-phrase	钟关	鐘關	evidence		鐘關:44 鍾關:0 鈡關:0
-phrase	钟匠	鐘匠	hold		鐘匠:0 鍾匠:0 鈡匠:0
-phrase	钟发音	鐘發音	hold		鐘發音:0 鍾發音:0 鈡發音:0
-phrase	钟口	鐘口	hold		鐘口:4 鍾口:0 鈡口:0
-phrase	钟响	鐘響	evidence		鐘響:96 鍾響:1 鈡響:0
-phrase	钟响声	鐘響聲	hold		鐘響聲:0 鍾響聲:0 鈡響聲:0
-phrase	钟在寺里	鐘在寺裡	hold		鐘在寺裡:0 鍾在寺裡:0 鈡在寺裡:0
-phrase	钟塔	鐘塔	evidence		鐘塔:213 鍾塔:2 鈡塔:0
-phrase	钟壁	鐘壁	hold		鐘壁:0 鍾壁:0 鈡壁:0
-phrase	钟声	鐘聲	evidence		鐘聲:141 鍾聲:0 鈡聲:0
-phrase	钟太	鐘太	evidence		鐘太:70 鍾太:1 鈡太:0
-phrase	钟头	鐘頭	evidence		鐘頭:105 鍾頭:1 鈡頭:0
-phrase	钟好	鐘好	evidence		鐘好:119 鍾好:7 鈡好:0
-phrase	钟山	鐘山	hold		鐘山:1 鍾山:0 鈡山:0
-phrase	钟山区	鐘山區	hold		鐘山區:0 鍾山區:0 鈡山區:0
-phrase	钟山县	鐘山縣	hold		鐘山縣:0 鍾山縣:0 鈡山縣:0
-phrase	钟左右	鐘左右	evidence		鐘左右:906 鍾左右:2 鈡左右:0
-phrase	钟差	鐘差	evidence		鐘差:74 鍾差:1 鈡差:0
-phrase	钟座	鐘座	hold		鐘座:3 鍾座:1 鈡座:0
-phrase	钟形	鐘形	hold		鐘形:13 鍾形:0 鈡形:0
-phrase	钟形虫	鐘形蟲	hold		鐘形蟲:0 鍾形蟲:0 鈡形蟲:0
-phrase	钟律	鐘律	hold		鐘律:0 鍾律:0 鈡律:0
-phrase	钟快	鐘快	evidence		鐘快:41 鍾快:0 鈡快:0
-phrase	钟情	鍾情	evidence		鍾情:433 鐘情:64 鈡情:0
-phrase	钟意	鍾意	evidence		鍾意:30 鐘意:14 鈡意:0
-phrase	钟慢	鐘慢	hold		鐘慢:13 鍾慢:0 鈡慢:0
-phrase	钟摆	鐘擺	evidence		鐘擺:134 鍾擺:0 鈡擺:0
-phrase	钟敲	鐘敲	hold		鐘敲:14 鍾敲:0 鈡敲:0
-phrase	钟无艳	鐘無豔	hold		鍾無豔:1 鍾無艷:5 鐘無豔:0 鐘無艷:0 鈡無豔:0 鈡無艷:0
-phrase	钟有	鐘有	evidence		鐘有:267 鍾有:4 鈡有:0
-phrase	钟楚红	鐘楚紅	hold		鐘楚紅:1 鍾楚紅:17 鈡楚紅:0
-phrase	钟楼	鐘樓	evidence		鐘樓:92 鍾樓:0 鈡樓:0
-phrase	钟楼区	鐘樓區	hold		鐘樓區:0 鍾樓區:0 鈡樓區:0
-phrase	钟楼怪人	鐘樓怪人	hold		鐘樓怪人:15 鍾樓怪人:0 鈡樓怪人:0
-phrase	钟模	鐘模	hold		鐘模:6 鍾模:0 鈡模:0
-phrase	钟欣桐	鐘欣桐	hold		鍾欣桐:0 鐘欣桐:0 鈡欣桐:0
-phrase	钟没	鐘沒	evidence		鐘沒:314 鍾沒:6 鈡沒:0
-phrase	钟漏	鐘漏	hold		鐘漏:1 鍾漏:0 鈡漏:0
-phrase	钟点	鐘點	evidence		鐘點:820 鍾點:3 鈡點:0
-phrase	钟点房	鐘點房	hold		鐘點房:1 鍾點房:0 鈡點房:0
-phrase	钟点费	鐘點費	evidence		鐘點費:321 鍾點費:1 鈡點費:0
-phrase	钟爱	鍾愛	evidence		鍾愛:75 鐘愛:5 鈡愛:0
-phrase	钟王	鐘王	hold		鐘王:9 鍾王:0 鈡王:0
-phrase	钟珮瑄	鐘珮瑄	hold		鐘珮瑄:0 鍾珮瑄:0 鈡珮瑄:0
-phrase	钟琴	鐘琴	hold		鐘琴:1 鍾琴:1 鈡琴:0
-phrase	钟的	鐘的	evidence		鐘的:2443 鍾的:47 鈡的:0
-phrase	钟盘	鐘盤	hold		鐘盤:1 鍾盤:1 鈡盤:0
-phrase	钟相	鐘相	hold		鐘相:9 鍾相:1 鈡相:0
-phrase	钟磬	鐘磬	hold		鐘磬:0 鍾磬:0 鈡磬:0
-phrase	钟祥	鐘祥	hold		鍾祥:0 鐘祥:0 鈡祥:0
-phrase	钟祥县	鐘祥縣	hold		鍾祥縣:0 鐘祥縣:0 鈡祥縣:0
-phrase	钟祥市	鐘祥市	hold		鍾祥市:0 鐘祥市:0 鈡祥市:0
-phrase	钟福松	鐘福松	hold		鐘福松:0 鍾福松:0 鈡福松:0
-phrase	钟离	鍾離	evidence		鍾離:292 鐘離:99 鈡離:0
-phrase	钟纽	鐘紐	hold		鐘紐:0 鍾紐:0 鈡紐:0
-phrase	钟罩	鐘罩	evidence		鐘罩:58 鍾罩:0 鈡罩:0
-phrase	钟腰	鐘腰	hold		鐘腰:0 鍾腰:0 鈡腰:0
-phrase	钟螺	鐘螺	hold		鐘螺:0 鍾螺:0 鈡螺:0
-phrase	钟行	鐘行	hold		鐘行:7 鍾行:0 鈡行:0
-phrase	钟表	鐘錶	evidence		鐘錶:188 鍾錶:0 鈡錶:0
-phrase	钟表停	鐘錶停	hold		鐘錶停:0 鍾錶停:0 鈡錶停:0
-phrase	钟表盘	鐘錶盤	hold		鐘錶盤:0 鍾錶盤:0 鈡錶盤:0
-phrase	钟被	鐘被	evidence		鐘被:100 鍾被:2 鈡被:0
-phrase	钟调	鐘調	evidence		鐘調:52 鍾調:0 鈡調:0
-phrase	钟身	鐘身	hold		鐘身:2 鍾身:0 鈡身:0
-phrase	钟速	鐘速	hold		鐘速:24 鍾速:1 鈡速:0
-phrase	钟面	鐘面	hold		鐘面:12 鍾面:0 鈡面:0
-phrase	钟顶	鐘頂	hold		鐘頂:2 鍾頂:0 鈡頂:0
-phrase	钟馗	鍾馗	evidence		鍾馗:130 鐘馗:3 鈡馗:0
-phrase	钟鸣	鐘鳴	hold		鐘鳴:4 鍾鳴:12 鈡鳴:0
-phrase	钟鸣漏尽	鐘鳴漏盡	hold		鐘鳴漏盡:0 鍾鳴漏盡:0 鈡鳴漏盡:0
-phrase	钟鸣鼎食	鐘鳴鼎食	hold		鐘鳴鼎食:0 鍾鳴鼎食:0 鈡鳴鼎食:0
-phrase	钟鼎	鐘鼎	hold		鐘鼎:0 鍾鼎:0 鈡鼎:0
-phrase	钟鼎之家	鐘鼎之家	hold		鐘鼎之家:0 鍾鼎之家:0 鈡鼎之家:0
-phrase	钟鼎人家	鐘鼎人家	hold		鐘鼎人家:0 鍾鼎人家:0 鈡鼎人家:0
-phrase	钟鼎山林	鐘鼎山林	hold		鐘鼎山林:0 鍾鼎山林:0 鈡鼎山林:0
-phrase	钟鼎文	鐘鼎文	hold		鐘鼎文:0 鍾鼎文:0 鈡鼎文:0
-phrase	钟鼎款识	鐘鼎款識	hold		鐘鼎款識:0 鍾鼎款識:0 鈡鼎款識:0
-phrase	钟鼎高门	鐘鼎高門	hold		鐘鼎高門:0 鍾鼎高門:0 鈡鼎高門:0
-phrase	钟鼓	鐘鼓	hold		鐘鼓:3 鍾鼓:0 鈡鼓:0
-phrase	钟鼓齐鸣	鐘鼓齊鳴	hold		鐘鼓齊鳴:1 鍾鼓齊鳴:0 鈡鼓齊鳴:0
-phrase	钢笔杆	鋼筆桿	hold		鋼筆桿:0 鋼筆杆:0
+phrase	钟无艳	鍾無豔	hold		鍾無豔:1 鍾無艷:5
 phrase	钧鉴	鈞鑒	hold		鈞鑒:2 鈞鑑:0
-phrase	钱钟书	錢鐘書	hold		錢鍾書:0 錢鐘書:1 錢鈡書:0
 phrase	钻井平台	鑽井平台	hold		鑽井平臺:0 鑽井平檯:0 鑽井平颱:0 鑽井平台:0
 phrase	钻台	鑽台	hold		鑽臺:0 鑽檯:2 鑽颱:0 鑽台:8
-phrase	钻杆	鑽桿	hold		鑽桿:0 鑽杆:0
-phrase	铁杆	鐵桿	evidence		鐵桿:220 鐵杆:10
-phrase	铁栏杆	鐵欄杆	evidence		鐵欄杆:30 鐵欄桿:2
-phrase	铁钟	鐵鐘	hold		鐵鐘:0 鐵鍾:2 鐵鈡:0
 phrase	铉台	鉉台	hold		鉉臺:0 鉉檯:0 鉉颱:0 鉉台:0
-phrase	铜山西崩洛钟东应	銅山西崩洛鐘東應	hold		銅山西崩洛鐘東應:0 銅山西崩洛鍾東應:0 銅山西崩洛鈡東應:0
-phrase	铜钟	銅鐘	hold		銅鐘:20 銅鍾:0 銅鈡:0
 phrase	铜雀台	銅雀台	hold		銅雀臺:0 銅雀檯:0 銅雀颱:0 銅雀台:0
-phrase	铠胄	鎧冑	hold		鎧冑:0 鎧胄:0
-phrase	铯钟	銫鐘	hold		銫鐘:0 銫鍾:0 銫鈡:0
 phrase	银台	銀台	evidence		銀臺:8 銀檯:5 銀颱:0 銀台:138
 phrase	银色冲浪手	銀色衝浪手	hold		銀色衝浪手:8 銀色沖浪手:0 銀色冲浪手:0
-phrase	铸钟	鑄鐘	hold		鑄鐘:0 鑄鍾:0 鑄鈡:0
-phrase	链霉素	鏈霉素	hold		鏈黴素:0 鏈霉素:0
 phrase	锅台	鍋台	evidence		鍋臺:1 鍋檯:0 鍋颱:0 鍋台:48
-phrase	锚杆	錨桿	hold		錨杆:0 錨桿:0
-phrase	锲而不舍	鍥而不捨	evidence		鍥而不捨:52 鍥而不舍:0
 phrase	镇台	鎮台	hold		鎮臺:0 鎮檯:0 鎮颱:0 鎮台:15
 phrase	镕岩	鎔岩	hold		鎔岩:0 鎔巖:0
 phrase	镜台	鏡台	hold		鏡臺:2 鏡檯:1 鏡颱:0 鏡台:27
 phrase	镜框舞台	鏡框舞台	hold		鏡框舞臺:0 鏡框舞檯:0 鏡框舞颱:0 鏡框舞台:0
 phrase	镜鉴	鏡鑑	hold		鏡鑑:1 鏡鑒:0
-phrase	门胄	門冑	hold		門胄:0 門冑:0
-phrase	问舍求田	問捨求田	hold		問舍求田:0 問捨求田:0
 phrase	闹台	鬧台	hold		鬧臺:0 鬧檯:0 鬧颱:0 鬧台:11
-phrase	闹钟	鬧鐘	evidence		鬧鐘:1433 鬧鍾:6 鬧鈡:0
-phrase	闹铃时钟	鬧鈴時鐘	hold		鬧鈴時鐘:0 鬧鈴時鍾:0 鬧鈴時鈡:0
 phrase	闽台	閩台	hold		閩臺:0 閩檯:0 閩颱:0 閩台:0
 phrase	闽台地区	閩台地區	hold		閩臺地區:0 閩檯地區:0 閩颱地區:0 閩台地區:0
-phrase	阀杆	閥桿	hold		閥杆:0 閥桿:0
 phrase	阅兵台	閱兵台	hold		閱兵臺:0 閱兵檯:0 閱兵颱:0 閱兵台:1
 phrase	防台	防颱	evidence		防颱:232 防臺:1 防檯:0 防台:18
 phrase	阳台	陽台	evidence		陽臺:20 陽檯:0 陽颱:0 陽台:1777
@@ -3445,52 +2299,24 @@ phrase	阳台云雨	陽台雲雨	hold		陽臺雲雨:0 陽檯雲雨:0 陽颱雲�
 phrase	阳台春梦	陽台春夢	hold		陽臺春夢:0 陽檯春夢:0 陽颱春夢:0 陽台春夢:0
 phrase	陈冲	陳沖	hold		陳沖:13 陳衝:2 陳冲:0
 phrase	陈列台	陳列台	hold		陳列臺:0 陳列檯:0 陳列颱:0 陳列台:0
-phrase	陈瀛钟	陳瀛鐘	hold		陳瀛鐘:0 陳瀛鍾:0 陳瀛鈡:0
-phrase	陈鼎击钟	陳鼎擊鐘	hold		陳鼎擊鐘:0 陳鼎擊鍾:0 陳鼎擊鈡:0
-phrase	难分难舍	難分難捨	evidence		難分難捨:61 難分難舍:0
-phrase	难割难舍	難割難捨	hold		難割難捨:0 難割難舍:0
-phrase	难舍	難捨	evidence		難捨:94 難舍:0
-phrase	难舍难分	難捨難分	hold		難捨難分:7 難舍難分:0
-phrase	难舍难离	難捨難離	hold		難捨難離:0 難舍難離:0
-phrase	雅舍	雅捨	hold		雅舍:13 雅捨:0
 phrase	雅鉴	雅鑒	hold		雅鑒:0 雅鑑:0
 phrase	雨花台	雨花台	hold		雨花臺:0 雨花檯:0 雨花颱:0 雨花台:1
 phrase	雨花台区	雨花台區	hold		雨花臺區:0 雨花檯區:0 雨花颱區:0 雨花台區:1
 phrase	雾台	霧台	hold		霧臺:2 霧檯:0 霧颱:0 霧台:24
 phrase	雾台乡	霧台鄉	hold		霧臺鄉:1 霧檯鄉:0 霧颱鄉:0 霧台鄉:4
-phrase	霉干菜	霉乾菜	hold		黴乾菜:0 霉乾菜:0
-phrase	霉毒	霉毒	hold		黴毒:1 霉毒:0
-phrase	霉气冲天	霉氣沖天	hold		黴氣沖天:0 黴氣衝天:0 黴氣冲天:0 霉氣沖天:0 霉氣衝天:0 霉氣冲天:0
-phrase	霉素	霉素	hold		黴素:29 霉素:11
-phrase	霉菌	黴菌	evidence		黴菌:159 霉菌:20
-phrase	霉运当头	霉運當頭	hold		黴運當頭:0 霉運當頭:0
-phrase	霉黑	霉黑	hold		黴黑:0 霉黑:1
-phrase	霉黧	霉黧	hold		黴黧:0 霉黧:0
-phrase	霍乱杆菌	霍亂桿菌	hold		霍亂桿菌:0 霍亂杆菌:0
+phrase	霉气冲天	黴氣沖天	hold		黴氣沖天:0 黴氣衝天:0 黴氣冲天:0
 phrase	露台	露台	evidence		露臺:36 露檯:0 露颱:0 露台:128
 phrase	露台弟子	露台弟子	hold		露臺弟子:0 露檯弟子:0 露颱弟子:0 露台弟子:0
 phrase	青瓦台	青瓦台	evidence		青瓦臺:7 青瓦檯:0 青瓦颱:0 青瓦台:42
-phrase	青霉	青黴	evidence		青黴:33 青霉:12
-phrase	青霉素	青霉素	hold		青黴素:27 青霉素:9
-phrase	静舍	靜捨	hold		靜舍:0 靜捨:0
 phrase	非层岩	非層岩	hold		非層巖:0 非層岩:0
-phrase	非形象艺术	非形像藝術	hold		非形象藝術:0 非形像藝術:0
-phrase	非杠杆化	非槓桿化	hold		非槓桿化:0 非槓杆化:0
 phrase	非签不可	非簽不可	hold		非簽不可:1 非籤不可:0
-phrase	面向对象的技术	面向對像的技術	hold		面向對象的技術:0 面向對像的技術:0
-phrase	面向对象语言	面向對像語言	hold		面向對象語言:0 面向對像語言:0
 phrase	靶台	靶台	hold		靶臺:0 靶檯:0 靶颱:0 靶台:0
 phrase	靶台上	靶台上	hold		靶臺上:0 靶檯上:0 靶颱上:0 靶台上:0
-phrase	韩侂胄	韓侂冑	hold		韓侂冑:1 韓侂胄:0
 phrase	音乐台	音樂台	hold		音樂臺:0 音樂檯:0 音樂颱:0 音樂台:13
-phrase	音声如钟	音聲如鐘	hold		音聲如鐘:0 音聲如鍾:0 音聲如鈡:0
 phrase	韶山冲	韶山沖	hold		韶山沖:0 韶山衝:0 韶山冲:0
 phrase	页岩	頁岩	evidence		頁岩:58 頁巖:0
-phrase	顺时钟	順時鐘	evidence		順時鐘:54 順時鍾:0 順時鈡:0
-phrase	顺钟向	順鐘向	hold		順鐘向:0 順鍾向:0 順鈡向:0
 phrase	顽卤	頑鹵	hold		頑鹵:0 頑滷:0
 phrase	颁奖台	頒獎台	evidence		頒獎臺:8 頒獎檯:0 頒獎颱:0 頒獎台:699
-phrase	颂赞	頌讚	hold		頌讚:6 頌贊:0
 phrase	领台	領台	evidence		領檯:0 領臺:13 領颱:1 領台:134
 phrase	题签	題簽	hold		題簽:8 題籤:0
 phrase	风成砂岩	風成砂岩	hold		風成砂岩:0 風成砂巖:0
@@ -3498,73 +2324,35 @@ phrase	风月宝鉴	風月寶鑑	hold		風月寶鑑:0 風月寶鑒:1
 phrase	风湿性心脏病	風濕性心臟病	hold		風溼性心臟病:0 風濕性心臟病:1
 phrase	风湿症	風濕症	hold		風溼症:0 風濕症:0
 phrase	飞必冲天	飛必沖天	hold		飛必沖天:0 飛必衝天:0 飛必冲天:0
-phrase	飞行钟	飛行鐘	hold		飛行鐘:0 飛行鍾:0 飛行鈡:0
 phrase	餐台	餐檯	evidence		餐檯:96 餐臺:1 餐颱:0 餐台:33
-phrase	饭后钟	飯後鐘	hold		飯後鐘:0 飯後鍾:0 飯後鈡:0
-phrase	饮胄	飲冑	hold		飲冑:0 飲胄:0
 phrase	饲喂	飼餵	hold		飼餵:0 飼喂:0
-phrase	馆舍	館捨	hold		館舍:13 館捨:0
 phrase	首台	首台	hold		首臺:1 首檯:0 首颱:0 首台:19
 phrase	首当其冲	首當其衝	evidence		首當其衝:104 首當其沖:3 首當其冲:0
-phrase	香榭丽舍	香榭麗捨	hold		香榭麗舍:10 香榭麗捨:0
-phrase	香榭丽舍大街	香榭麗捨大街	hold		香榭麗舍大街:6 香榭麗捨大街:0
 phrase	香港电台	香港電台	hold		香港電臺:0 香港電檯:0 香港電颱:0 香港電台:1
 phrase	马台	馬台	evidence		馬臺:39 馬檯:0 馬颱:1 馬台:115
-phrase	马杆	馬桿	hold		馬杆:1 馬桿:0
 phrase	驻台	駐台	evidence		駐臺:5 駐檯:0 駐颱:0 駐台:94
-phrase	驽马十舍	駑馬十捨	hold		駑馬十舍:0 駑馬十捨:0
 phrase	骨岩岩	骨岩岩	hold		骨巖巖:0 骨巖岩:0 骨岩巖:0 骨岩岩:0
-phrase	骾朴	骾朴	hold		骾朴:0 骾樸:0
 phrase	高台	高台	evidence		高臺:5 高檯:7 高颱:2 高台:261
 phrase	高台县	高台縣	hold		高臺縣:0 高檯縣:0 高颱縣:0 高台縣:0
-phrase	高杆	高桿	hold		高杆:3 高桿:14
-phrase	高胄	高冑	hold		高胄:0 高冑:0
 phrase	高跳台	高跳台	hold		高跳臺:0 高跳檯:0 高跳颱:0 高跳台:2
 phrase	鬼气冲天	鬼氣沖天	hold		鬼氣沖天:0 鬼氣衝天:0 鬼氣冲天:0
-phrase	魂不守舍	魂不守捨	hold		魂不守舍:20 魂不守捨:0
 phrase	魏台复	魏台復	hold		魏臺復:0 魏檯復:0 魏颱復:0 魏台復:0
 phrase	鱼台	魚台	evidence		魚臺:3 魚檯:0 魚颱:0 魚台:78
 phrase	鱼台县	魚台縣	hold		魚臺縣:0 魚檯縣:0 魚颱縣:0 魚台縣:0
-phrase	鱼胄	魚冑	hold		魚冑:0 魚胄:0
-phrase	鲜胄	鮮冑	hold		鮮胄:0 鮮冑:0
-phrase	鳣舍	鱣捨	hold		鱣舍:0 鱣捨:0
-phrase	鸡舍	雞舍	evidence		雞舍:39 雞捨:0
-phrase	鸣钟	鳴鐘	hold		鳴鐘:2 鳴鍾:0 鳴鈡:0
-phrase	鸣钟列鼎	鳴鐘列鼎	hold		鳴鐘列鼎:0 鳴鍾列鼎:0 鳴鈡列鼎:0
-phrase	鸿胄	鴻冑	hold		鴻胄:0 鴻冑:0
-phrase	鹘仑吞枣	鶻崙吞棗	hold		鶻崙吞棗:0 鶻侖吞棗:0
 phrase	鹰架栈台	鷹架棧台	hold		鷹架棧臺:0 鷹架棧檯:0 鷹架棧颱:0 鷹架棧台:0
 phrase	鹿台	鹿台	hold		鹿臺:0 鹿檯:1 鹿颱:0 鹿台:7
 phrase	麟台	麟台	hold		麟臺:0 麟檯:0 麟颱:0 麟台:2
-phrase	麻杆	麻桿	hold		麻桿:0 麻杆:0
 phrase	黄岩	黃岩	hold		黃岩:6 黃巖:0
 phrase	黄岩区	黃岩區	hold		黃巖區:0 黃岩區:0
 phrase	黄岩岛	黃岩島	hold		黃巖島:0 黃岩島:6
-phrase	黄曲霉	黃麴霉	hold		黃麴黴:1 黃麴霉:0
-phrase	黄曲霉毒素	黃麴霉毒素	hold		黃麴黴毒素:0 黃麴霉毒素:0
-phrase	黄曲霉菌	黃麴霉菌	hold		黃麴黴菌:0 黃麴霉菌:0
-phrase	黄炎贵胄	黃炎貴冑	hold		黃炎貴胄:0 黃炎貴冑:0
 phrase	黄金台	黃金台	hold		黃金臺:2 黃金檯:0 黃金颱:0 黃金台:17
-phrase	黄钟	黃鐘	hold		黃鐘:6 黃鍾:0 黃鈡:0
-phrase	黄钟大吕	黃鐘大呂	hold		黃鐘大呂:0 黃鍾大呂:0 黃鈡大呂:0
-phrase	黄钟毁弃	黃鐘毀棄	hold		黃鐘毀棄:1 黃鍾毀棄:0 黃鈡毀棄:0
-phrase	黄钟长弃	黃鐘長棄	hold		黃鐘長棄:0 黃鍾長棄:0 黃鈡長棄:0
-phrase	黉舍	黌捨	hold		黌舍:0 黌捨:0
-phrase	黑加仑	黑加崙	hold		黑加侖:1 黑加崙:0
 phrase	黑曜岩	黑曜岩	hold		黑曜岩:1 黑曜巖:0
 phrase	黑气冲天	黑氣沖天	hold		黑氣沖天:0 黑氣衝天:0 黑氣冲天:0
-phrase	鼎食鸣钟	鼎食鳴鐘	hold		鼎食鳴鐘:0 鼎食鳴鍾:0 鼎食鳴鈡:0
-phrase	鼓不打不响钟不撞不鸣	鼓不打不響鐘不撞不鳴	hold		鼓不打不響鐘不撞不鳴:0 鼓不打不響鍾不撞不鳴:0 鼓不打不響鈡不撞不鳴:0
 phrase	鼓台	鼓台	hold		鼓臺:0 鼓檯:0 鼓颱:0 鼓台:0
-phrase	鼠疫杆菌	鼠疫桿菌	hold		鼠疫桿菌:0 鼠疫杆菌:0
-phrase	齐王舍牛	齊王捨牛	hold		齊王捨牛:0 齊王舍牛:0
-phrase	齿胄	齒冑	hold		齒胄:0 齒冑:0
 phrase	龙岩	龍岩	hold		龍巖:32 龍岩:28
 phrase	龙岩市	龍岩市	hold		龍巖市:0 龍岩市:0
 phrase	龙岩村	龍岩村	hold		龍巖村:0 龍岩村:0
 phrase	龙应台	龍應台	hold		龍應台:5 龍應臺:0 龍應檯:0 龍應颱:0
-phrase	龙胄	龍冑	hold		龍胄:0 龍冑:0
-phrase	龙钟	龍鐘	hold		龍鍾:23 龍鐘:3 龍鈡:0
 phrase	龙龛手鉴	龍龕手鑑	hold		龍龕手鑑:0 龍龕手鑒:0
 phrase	龟鉴	龜鑑	hold		龜鑑:0 龜鑒:0
 term	SQL注入攻擊	SQL隱碼攻擊	term		
