@@ -241,3 +241,49 @@
    - 守門：`tw-conv-simp.tsv` 加 `厨房的灶`→`廚房的灶`（§3 第 4 條原本就列的例子）；`tw-conv-ambiguous.tsv` 拿掉（灶, 竈）那一列（它的理由寫錯了）；`test_tw_conv.py` 的表檢查認得 `dict` 的單字列；突變 M19：拿掉這一條 → 第 4 條失敗（廚房的灶 變成 廚房的竈）。§4 第 1 條與 §5 的突變範圍改成 M1–M19。
    - `test_convert.py` 的「秘书→秘書」改成「祕書」：《重編國語辭典修訂本》的 祕 是正字（秘 的詞條只寫又音），單字列留 祕 合乎這一條。
 5. **預算**：main 實作 1 回合加 1 次修正；契約送 fresh plan-verifier。
+
+## 11. 修訂九（2026-11-07）：維基缺口的逐句校對表
+
+**起因**：修訂八實作完（65b4a80e），§4.3 又觸發停止條件；維護者選「先討論」，之後決定缺口由 agent 逐句校對（decisions 11-06、11-07）。量到的缺口（維基前 20 萬篇＝出貨計數的範圍，SJ-LM-7 §2.1 `--articles 200000`）：只有標記字的繁體句裡有 R2 字、照 §10 第 1 條會改的 36,620 句（gap1，抽 50 約 30 句現在錯，整批轉會改壞約 19 句，多為人名地名）；簡體句裡 `li_decide` 判的 里 37,301 句（gap2）。修訂八的規則不改。
+
+**校對**（已做完，在這個分支之外；數字在研究紀錄）：
+- 模型：兩次試點（50 句、200 句；main 先盲標）比 Luna、Sonnet、Muse、Opus 之後，維護者選 Sonnet。73,877 句（含 tab／換行的 44 句不送）分 204 批，一批一個 agent，只回改過的句子加 `#done` 行；合併時每個改動要是同一列 OpenCC 單字表或 TWVariants 的變體、一字換一字，否則整句退回。中文句裡的日文字形（産様顔撃鉄録尓）在不含假名的句子放行（維護者）。
+- 退回的句子：一個 verifier agent 逐處判斷、驗收整句（維護者），只套用它收下的位置；侄→姪、准→淮 一律不收（維護者：前者台灣也用，後者是原文錯字、不屬簡繁）。verifier 記了「整句還有別的錯」的句子另列。
+- 抽查（200 句，`random.Random(20261108)`，排除兩次試點，main 在跑之前盲標）：gap1 該改 69 處修對 64、該留 41 處改壞 0；gap2 里／裡 該改 16 處修對 16、該留 92 處改壞 0。
+
+**規則**：
+
+1. **校對表** `tw-clean`：兩欄 `現在的輸出<TAB>校對後的句子`，一列一句；第二欄空白＝這句不計數。讀表只去掉行尾的 `\n`、用第一個 tab 切兩欄，不 `strip()`（句子頭尾的空白是鍵的一部分）。只放維基句（`article_sentences` 的輸出：`convert()` 之後、`HAN` 切段之前）和校對結果不同的句子：
+   - 校對收下的句子（23,889 句）：第二欄＝校對後的句子；
+   - verifier 記了「整句還有別的錯」的句子（46 句）：第二欄空白（維護者 11-06 選「agent 判不出的字：整句不計數」，這裡照同一條）；
+   - 同一個第一欄對到兩種校對結果時兩列都不收。
+   - 檔頭：`# tw-conv.tsv <SHA-256>`、`# mcbpmf-data.txt <SHA-256>`（**缺口量測那次**的轉換表與詞庫；兩個都決定 `convert()` 的輸出：詞庫決定 S 與 `li_decide` 的詞庫那一支）、`# entries <列數>`。
+   - 表放在 `SRC`（`~/.cache/shanjie/sources/tw-clean-zhwiki-20261001-200k.tsv`），不進 repo（從公開維基與模型輸出建出的列，照「語料不進版控」）；`build_counts.py` 寫死它的 SHA-256。
+   - 產表 `experiments/s2/build_tw_clean.py`（進 repo）：輸入是缺口檔、校對結果（快取裡的檔，路徑由參數給）與缺口量測那次的兩個 SHA-256（參數；這次是 65b4a80e 的 `tw-conv.tsv` `0e0f09a6…97b3`、`mcbpmf-data.txt` `25b3ecb0…9553`：缺口檔寫在這個 commit 之後，兩個檔之後沒改）。目前 checkout 的兩個檔和參數不同就拒絕產表（非零結束，訊息寫「轉換表或詞庫改過：要重跑缺口量測與校對」）。輸出寫到參數給的路徑、不覆寫既有檔；印列數、空白列數、衝突數，以及**期望命中數**：前 2,000 篇（缺口列的文章編號 `a < 2000`）與前 200,000 篇各有幾個不同的第一欄會被查到（排除衝突）。
+2. **套用**（第二次 REVISE 後簡化：不在各入口傳旗標）：
+   - 表是 `build_counts` 的模組表 `TW_CLEAN`，`load_conv()` **每次都讀**（和 `tw-conv.tsv` 一樣），沒有參數。`article_sentences` 第一次查表時如果這個程序還沒讀過（例如子程序沒呼叫 `load_conv()`、靠 fork 繼承或 spawn 起來的），就自己讀一次。所以每一條經過 `article_sentences`／`article_runs` 的路都一定套到表，入口不用改：`build_counts.py main()`（通語）、`experiments/sj-lm-7/wiki_text.py`（會意的訓練文字）、`experiments/s7a-tinylm/prep.py`、`tools/build_digits.py`、`tools/build_english_next.py`、`tools/holdout_guard.py`、`experiments/reading-aware/` 都是。
+   - `experiments/derisk-1015/e1/count.py wiki`（連文）的 `wiki_sentences` 現在自己做一份前處理，改成呼叫 `bc.article_sentences(raw, bc._W["conv"])`。`build_counts_text.py` 讀的是已經轉好的文字（`text_runs`），不經過這裡、不受影響。實作時 grep `article_sentences`、`article_runs`、`wiki_sentences`、`SENT.findall` 的所有呼叫者，結果列在 PR，確認沒有別的出貨入口自己切句再接 `convert`。
+   - 查表：`convert()` 之後；命中＝換成第二欄（空白就不輸出這句），沒命中＝原樣。MediaWiki 路徑（`mw`）不查。
+   - **找不到表就停**：檔不存在、檔的 SHA-256 不是 `build_counts.py` 寫死的值、或檔頭的兩個雜湊和目前的 `tw-conv.tsv`、`mcbpmf-data.txt` 不同 → `sys.exit`（訊息含檔名、「要重跑缺口量測與校對」與下面的環境變數）。
+   - **明講才不套用**：環境變數 `SHANJIE_TW_CLEAN=off`（子程序自動繼承，fork、spawn 都一樣）時表是空的，每個程序第一次讀時在 stderr 印一次 `tw-clean: off`。用在 CI、`make test-python`、重現舊計數。CI 與 Makefile 的 Python 測試目標設這個變數；測試要用自己的小表時另外設 `SHANJIE_TW_CLEAN=<路徑>`（路徑也走雜湊以外的同一套檢查，測試用的檔頭寫測試算出的雜湊）。
+   - **命中回報**（通語的計數）：`_count` 多回傳這批命中的第一欄集合；`main()` 合併後寫進輸出 pickle 的 `tw_clean_hits`（`--shard` 的各片可以合併），並印 `tw-clean: <命中的不同列數> distinct entries hit, <換掉的句數> replaced, <不計數的句數> dropped`。其他出貨入口不另外數命中，但每一個都留下**表狀態**：`build_counts.tw_clean_state()` 回傳 `sha256:<表的雜湊>` 或 `off`，入口把它印成 `tw-clean: <狀態>`，並寫進它自己的輸出紀錄：`count.py wiki` 寫進 `meta-<tag>.json` 的 `tw_clean` 欄；`build_counts.py` 寫進 pickle 的 `tw_clean`；`wiki_text.py`、`prep.py`、`build_digits.py`、`build_english_next.py` 各在輸出檔旁寫 `<輸出檔>.tw-clean`（一行狀態）。重建（`#104`）逐一核對：每個模型的 wiki 輸入紀錄都是寫死的那個 `sha256:…`（不是 `off`），而且產生它們的 commit 和通語命中檢查通過的是同一個；不符就停。
+3. **守門**（`test_tw_conv.py`，用測試自己寫的小表與檔頭，不讀真的表）：
+   - 一篇含三句的假文章：第一句命中、換成第二欄；第二句命中、第二欄空白，不輸出；第三句沒命中、原樣。另一列第一欄以 `#` 開頭，要被查到。
+   - 檔頭的 `tw-conv.tsv` 或 `mcbpmf-data.txt` 雜湊不同 → `SystemExit`；表的路徑指到不存在的檔 → `SystemExit`，訊息含 `SHANJIE_TW_CLEAN=off`。
+   - `SHANJIE_TW_CLEAN=off` 時 `article_sentences` 的輸出和這一條之前逐字相同。
+   - 表狀態：表在時 `tw_clean_state()` 是 `sha256:` 加表的雜湊，`SHANJIE_TW_CLEAN=off` 時是 `off`；`count.py wiki` 的 meta 與 `wiki_text.py` 的旁檔在假文章上寫出這個值（M27：入口寫死 `sha256:` 而不呼叫 `tw_clean_state()` → `off` 那條失敗）。
+   - 子程序：用 `multiprocessing` 的 spawn context 開一個子程序跑 `article_sentences`（不先呼叫 `load_conv()`），第一句被換掉。
+   - 經過 `_init` 跑 `_count`：命中集合等於單程序直接查的結果。
+   - `count.wiki_sentences(raw)` 在假文章上等於 `bc.article_sentences(raw, conv)`，而且第一句已換掉。
+   - `build_tw_clean.py` 在目前檔的雜湊和參數不同時非零結束。
+   - 突變：M20 查表那一行拿掉 → 第一句那條失敗；M21 空白第二欄也照樣輸出 → 第二句那條失敗；M22 不核對檔頭的兩個雜湊 → 雜湊那條失敗；M23 表不存在時當成空表繼續 → 表不存在那條失敗；M24 `article_sentences` 不自己讀表（只靠 `load_conv()`）→ spawn 那條失敗；M25 `count.py` 的 `wiki_sentences` 換回自己的前處理 → `count.wiki_sentences` 那條失敗；M26 讀表時跳過 `#` 開頭的行 → `#` 那列失敗。§4 第 1 條與 §5 的突變範圍改成 M1–M27。
+   - 表的格式：**前三行**固定是檔頭（`# tw-conv.tsv `、`# mcbpmf-data.txt `、`# entries ` 開頭，順序固定），其餘每一行都是資料，`#` 開頭照樣是鍵。期望命中數從校對結果與缺口檔直接算，不從讀回來的表算。
+4. **驗收**：
+   - 守門全過、M20–M27 都被抓到；`make test-python` 與 `experiments/s2`、`experiments/derisk-1015/e1`、`experiments/sj-lm-7`、`experiments/s7a-tinylm` 的測試全綠（設 `SHANJIE_TW_CLEAN=off`）。
+   - `build_tw_clean.py` 在 Mac 跑（單程序、秒級）：列數、空白列數、衝突數、兩個期望命中數；表的 SHA-256 寫進 `build_counts.py` 與研究紀錄。
+   - 2,000 篇對照（Mac 單程序，§4.3 的方法，表套用）：實際命中的不同列數、換掉的句數與不計數的句數（分開報）、于／后／里／裡 等字的次數變化。研究紀錄寫「期望 X、實際 Y」。
+   - **修訂八觸發的停止條件**（§4.3 的兩組與 §10 第 4 條的 里 組，各 50 句、錯超過 5 句就停）：表套用後，在同 2,000 篇用沒看過的種子 `random.Random(20261110)` 各重抽 50 句，main 逐句看，照原門檻判。
+   - 計數本身不在這一片重跑（範圍外：下一次重建，`#104`）。重建（`#104`）的契約要寫進這一條 **STOP**：通語前 200,000 篇各片 pickle 的 `tw_clean_hits` 取聯集（合併 `counts-…-shard*` 的那一步做），不同列數 ≠ `build_tw_clean.py` 印的 200,000 篇期望命中數，就在任何模型用這份計數建出來之前停下；數字寫進那一片的研究紀錄（和 §3 的全語料守門寫法相同）。
+   - **停止條件**：2,000 篇實際命中數 ≠ 期望命中數；命中、而且第二欄不是空白的句子裡，有一句校對後的漢字數和原輸出不同（一字換一字被破壞）；重抽的任一組錯超過 5 句。停下時報數字，不改門檻。
+5. **範圍外**：前 20 萬篇以外的文章（出貨計數只讀前 20 萬篇；換 dump 或加篇數時表要重做）；長度不同而退回的 13 句、沒收下任何改動的句子（照原輸出）；verifier 註記但沒人提改法的錯字（只記在研究紀錄）；把表發成 Release（要的話另外問）。
+6. **預算**：main 實作 1 回合加 1 次修正；契約送 fresh plan-verifier。
