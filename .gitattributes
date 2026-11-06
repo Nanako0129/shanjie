@@ -1,3 +1,12 @@
 # Research code and its reproduction tooling. Some of it still feeds later work (count building, tinylm training,
 # golden generation), so it stays tracked; it is not the shipped app, so GitHub's language statistics leave it out.
 experiments/** linguist-detectable=false
+
+# Windows checks out with core.autocrlf=true by default: a CRLF in data/lexicon/digits.tsv makes `DigitTable::parse` fail and the digit layer
+# silently switch off (docs/contracts/win-core.md 2.2 item 7). `text=auto` leaves what git judges binary (eval/golden's .sjlm, .sjc, .sjkn,
+# .sjtl, .sjt3) alone, so golden bytes never change.
+data/** text=auto eol=lf
+eval/** text=auto eol=lf
+core/tests/** text=auto eol=lf
+cli/tests/** text=auto eol=lf
+scripts/** text=auto eol=lf
