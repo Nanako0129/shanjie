@@ -1,7 +1,7 @@
 # tw-conv-simp.tsv (docs/contracts/tw-conv.md 3, assertion 4): one row per line, `Simplified sentence<TAB>expected Taiwan writing`. Written by main; # lines are comments.
 # Coverage is part of the assertion: the 31 MediaWiki keys and every key the table changes against OpenCC's first value need a sentence here.
 # executor, 2026-11-06 (revision 5): the rows M6 (单字列), M9 (T without M), M10 (S-phrases on the Traditional path) and M11 (the set N) need
-我们住在街里	我們住在街裡
+我们住在这条街里的房子	我們住在這條街裡的房子
 你在想什么	你在想什麼
 這個國家的經濟發展关系着我們	這個國家的經濟發展關係著我們
 我装好了	我裝好了
@@ -88,3 +88,17 @@
 新闻台在播报	新聞台在播報
 近水楼台先得月	近水樓台先得月
 他来台访问	他來台訪問
+# contract 10.1: Traditional sentences with an S character (the test asserts kind trad): keep words (a) 咸陽 and (b) 并州, (c) the R2 single character, (d) an R2 phrase
+秦國的首都咸陽在這裡，他们說	秦國的首都咸陽在這裡，他們說
+朱兆由并州出兵，當時他們說这場戰役很難	朱兆由并州出兵，當時他們說這場戰役很難
+他在逝世后被追封為國公，這是他们的榮譽	他在逝世後被追封為國公，這是他們的榮譽
+這場戰爭的死者達万余人，他们說	這場戰爭的死者達萬餘人，他們說
+# contract 10.2: 里 on the Simplified path (the test asserts kind simp): transliteration, numeral, closing mark, lexicon word, folded lexicon word, PTT counts
+这位埃里克先生	這位埃里克先生
+他们走了十万里路	他們走了十萬里路
+在《红楼梦》里	在《紅樓夢》裡
+在学校里	在學校裡
+在这些人群里	在這些人群裡
+在那个洞里有光	在那個洞裡有光
+# contract 10.6: the dictionary's standard form of a char row
+厨房的灶	廚房的灶

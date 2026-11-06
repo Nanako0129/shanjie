@@ -1,4 +1,4 @@
-"""The mutations M1-M12 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
+"""The mutations M1-M18 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
 fail on the test the contract names. Single process, about a minute (M6 and M8 rebuild the table from the PTT snapshot, 20 seconds each).
 
   python3 experiments/s2/mutate_tw_conv.py [--simp-rows FILE] [--only M3 ...]
@@ -80,9 +80,9 @@ MUTATIONS = [
      [(BTC, '''                if fv[i] == row_cands[k[i]][1] and char_rows[k[i]][1] in ("evidence", "mediawiki"):''', '''                if True:''')], [A4_ROWS], True),
     ("M9", "T contains the marker characters again (么 counts as Traditional evidence)",
      [(BC, '''set(o["twv"].values())) - MARKERS)''', '''set(o["twv"].values())))''')], [A4_ROWS], False),
-    ("M10", "a Traditional sentence gets no phrase at all (only the single characters of S and N)",
-     [(BC, '''        text = _longest(text, s_phrase, max(map(len, s_phrase), default=1), _only(char, "trad"))''',
-       '''        text = "".join(_only(char, "trad").get(c, c) for c in text)''')], [A4_ROWS], False),
+    ("M10", "a Traditional sentence with an S character gets no phrase at all (only the single characters of S, N and R2)",
+     [(BC, '''            return _longest(text, r_phrase, r_maxp, _only(char, "trad_s")).translate(FOLD_TRANS)''',
+       '''            return "".join(_only(char, "trad_s").get(c, c) for c in text).translate(FOLD_TRANS)''')], [A4_ROWS], False),
     ("M11", "the set N is empty",
      [(BC, '''    RARE.clear(); RARE.update(tw["n"])''', '''    RARE.clear()''')], [A4_ROWS], False),
     ("M12", "char rows go back to single-character counts and the 2x rule over every candidate (revision 4)",
@@ -91,6 +91,19 @@ MUTATIONS = [
       (BTC, '''            if wc[best] >= PICK_MIN and wc[best] >= WORD_RATIO * wc[first]:''',
        '''            best = max(alts, key=lambda c: fc[c])
             if fc[best] >= PICK_MIN and fc[best] >= PICK_RATIO * fc[first]:''')], [A2], True),
+    ("M13", "a Traditional sentence with an S character does not convert R2 in the single-character step (contract 10)",
+     [(BC, '''"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys()''', '''"trad_s": TRAD_SIMP_ONLY | RARE.keys()''')], [A4_ROWS], False),
+    ("M14", "no keep words", [(BC, '''        t.update({w: w for w in KEEP})''', '''        pass''')], [A4_ROWS], False),
+    ("M15", "an uncovered 里 of a Simplified sentence always becomes 裡", [(BC, '''            if li and text[i] == "里":''', '''            if False:''')], [A4_ROWS], False),
+    ("M16", "the li rows are not read (every count 0)",
+     [(BC, '''    LI["prev"], LI["next"] = tw["li_prev"], tw["li_next"]''', '''    LI["prev"], LI["next"] = {}, {}''')], [A4_ROWS], False),
+    ("M17", "the contract 10 path runs on every Traditional sentence, with or without an S character",
+     [(BC, '''        if any(c in TRAD_SIMP_ONLY for c in text):     # contract 10.1''', '''        if True:     # contract 10.1''')], [A1], False),
+    ("M18", "the phrase filter of a Traditional sentence with an S character takes S keys only",
+     [(BC, '''        t = {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY or c in R2 for c in k)}''',
+       '''        t = {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY for c in k)}''')], [A4_ROWS], False),
+    ("M19", "a char row keeps a dictionary variant (no standard-form rule, contract 10.6)",
+     [(BTC, '''        if status == "hold" and std in cands:''', '''        if False:''')], [A4_ROWS], True),
 ]
 
 
@@ -144,7 +157,7 @@ def rebuilt_table(edits):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--simp-rows", help="use this file as tw-conv-simp.tsv for the run (the real one is put back)")
-    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M12, M4a, M4b)")
+    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M18, M4a, M4b)")
     a = ap.parse_args(argv)
     saved = {p: open(p, "rb").read() for p in (SIMP, TABLE)}
     results = []

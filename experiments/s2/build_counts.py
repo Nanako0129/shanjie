@@ -72,14 +72,21 @@ def read_tw_conv(path=TW_CONV):
     A missing file stops with the command that makes it."""
     if not os.path.isfile(path):
         sys.exit(f"{path} is missing: run experiments/s2/build_tw_conv.py (docs/contracts/tw-conv.md 2.3)")
-    out = {"fold": {}, "char": {}, "phrase": {}, "term": {}, "n": {}}   # "n": the set N (contract 7) as {key: chosen value}, the char rows flagged in column 7
+    out = {"fold": {}, "char": {}, "phrase": {}, "term": {}, "n": {}, "r": {}, "keep": set(), "li_prev": {}, "li_next": {}}
+    # "n": the set N (contract 7) as {key: chosen value}, the char rows flagged N in column 7; "r": the rows flagged R (contract 10.1);
+    # "keep": the keep words; "li_prev"/"li_next": {char: (裡 count, 里 count)} of the li rows (contract 10.2)
     for line in open(path, encoding="utf-8"):
         if line.startswith("#") or not line.strip():
             continue
-        sec, key, value, status, manual, _, rare = (line.rstrip("\n").split("\t") + [""] * 7)[:7]
+        f = line.rstrip("\n").split("\t")
+        if f[0] == "keep":
+            out["keep"].add(f[1]); continue
+        if f[0] == "li":
+            out["li_" + f[1]][f[2]] = (int(f[3]), int(f[4])); continue
+        sec, key, value, status, manual, _, rare = (f + [""] * 7)[:7]
         out[sec][key] = manual.split("@")[0] if manual else (key if sec == "fold" and status != "fold" else value)
-        if rare == "N":
-            out["n"][key] = out[sec][key]
+        if rare in ("N", "R"):
+            out[rare.lower()][key] = out[sec][key]
     return out
 
 
@@ -91,6 +98,12 @@ RARE = {}   # set N (contract 7): {key: chosen value} of the keys Taiwan almost 
 FOLD = {}   # fold map {X: Y} of tw-conv.tsv (the rows folded by the PTT counts); applied last, to every kind of sentence
 FOLD_TRANS = {}   # str.translate table of FOLD
 TW_PHRASE, TW_MAXP = {}, [1]   # the mainland-term subset of TWPhrases (tw-conv.tsv `term` rows), Simplified sentences only
+R2 = {}     # contract 10.1: {marker key: chosen value} that a Traditional sentence with an S character also converts (column 7 R, or N with the key in M)
+KEEP = set()   # contract 10.1: dictionary words with an R2 character, written as they are on that path
+LI = {"prev": {}, "next": {}}   # contract 10.2: PTT counts {char: (裡, 里)} of the character before / after 裡 and 里 (folded text)
+LEX_WORDS = set()   # contract 10.2: the lexicon words of 2 to 6 characters (mcbpmf-data.txt)
+LI_NUM = set("〇一二三四五六七八九十百千萬兩0123456789")
+LI_CLOSE = set("》）」』”)>")
 
 
 def load_conv():
@@ -110,6 +123,11 @@ def load_conv():
     TW_MAXP[0] = max(map(len, TW_PHRASE), default=1)
     phrase = {**o["stp"], **tw["phrase"]}
     char = {**{k: v[0] for k, v in st.items()}, **tw["char"]}
+    R2.clear(); R2.update({**tw["r"], **{k: v for k, v in tw["n"].items() if k in MARKERS}})
+    KEEP.clear(); KEEP.update(tw["keep"])
+    LI["prev"], LI["next"] = tw["li_prev"], tw["li_next"]
+    if not LEX_WORDS:
+        LEX_WORDS.update(w for w in ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word if 2 <= len(w) <= 6)
     return phrase, char, max(map(len, phrase))
 
 
@@ -124,7 +142,23 @@ PHRASE_SHA = {"STPhrases.txt": "f6eab5e5c6dd7640597878d3dfc6599ee1279d2bc91561ea
 _FIRST = {}   # (id(table), len(table)) → {首字: 該首字開頭的最長鍵}，讓沒有詞組可比對的位置不必切片查表（輸出和逐長度試完全相同）
 
 
-def _longest(text, table, maxp, char=None):
+def li_decide(before, nxt):
+    """Contract 10.2: 裡 or 里 for a 里 that the single-character step of a Simplified sentence takes. before = the output so far, nxt = the next
+    input character after the single-character row (both folded here). -> (character, branch) with branch num | close | lexicon | ptt."""
+    tail = fold_tw(before[-6:])
+    last = tail[-1:]
+    if last in LI_NUM:
+        return "里", "num"
+    if last in LI_CLOSE or (last.isascii() and last.isalpha()):
+        return "裡", "close"
+    if any(tail[-k:] in LEX_WORDS for k in range(2, len(tail) + 1)):
+        return "裡", "lexicon"
+    a, b = LI["prev"].get(last, (0, 0))
+    c, d = LI["next"].get(fold_tw(nxt), (0, 0))
+    return ("裡" if math.log((a + 1) / (b + 1)) + math.log((c + 1) / (d + 1)) >= math.log(10) else "里"), "ptt"
+
+
+def _longest(text, table, maxp, char=None, li=False):
     first = _FIRST.get((id(table), len(table)))
     if first is None:
         first = {}
@@ -139,7 +173,11 @@ def _longest(text, table, maxp, char=None):
             if w:
                 out.append(w); i += L; break
         else:
-            out.append(char.get(text[i], text[i]) if char else text[i]); i += 1
+            if li and text[i] == "里":
+                out.append(li_decide("".join(out[-6:]), char.get(text[i + 1], text[i + 1]) if i + 1 < n else "")[0])
+            else:
+                out.append(char.get(text[i], text[i]) if char else text[i])
+            i += 1
     return "".join(out)
 
 
@@ -170,35 +208,40 @@ _CUT = {}   # (id(table), what) → (table, its cut-down copy); the table is kep
 
 def _cut(table, what, keep):
     hit = _CUT.get((id(table), what))
-    if hit is None or hit[0] is not table or hit[2] != (len(table), len(TRAD_SIMP_ONLY), len(RARE)):
-        hit = _CUT[(id(table), what)] = (table, keep(), (len(table), len(TRAD_SIMP_ONLY), len(RARE)))
+    if hit is None or hit[0] is not table or hit[2] != (len(table), len(TRAD_SIMP_ONLY), len(RARE), len(R2), len(KEEP)):
+        hit = _CUT[(id(table), what)] = (table, keep(), (len(table), len(TRAD_SIMP_ONLY), len(RARE), len(R2), len(KEEP)))
     return hit[1]
 
 
-def _s_phrases(phrase):
-    """(the entries of `phrase` whose key has a character of S, their longest key length); cached with the cut-down table."""
+def _r2_phrases(phrase):
+    """Contract 10.1: the keep words (as they are) and the `phrase` entries whose key has an S or R2 character; the keep word wins on the same key."""
     def keep():
-        t = {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY for c in k)}
+        t = {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY or c in R2 for c in k)}
+        t.update({w: w for w in KEEP})
         return t, max(map(len, t), default=1)
-    return _cut(phrase, "s", keep)
+    return _cut(phrase, "r2", keep)
 
 
 def _only(char, kind):
     """`char` cut down to the characters a path may convert: S and N on the Traditional path, N on the marker-only path (cached per table)."""
-    return _cut(char, kind, lambda: {c: char[c] for c in (TRAD_SIMP_ONLY | RARE.keys() if kind == "trad" else RARE.keys()) if c in char})
+    keys = {"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys(), "marker": RARE.keys()}[kind]
+    return _cut(char, kind, lambda: {c: char[c] for c in keys if c in char})
 
 
 def convert(text, phrase, char, maxp):
     """The `mixed` conversion (contract 2.4); a `native` input is never given to it. simp: STPhrases longest first (chosen values), the remaining
     characters from `char`, the mainland-term subset of TWPhrases longest first, fold. marker (only marker characters): the phrases, then only the
-    characters of N, the terms, fold. trad (also Traditional with a few Simplified characters): the phrases whose key has a character of S
-    (longest first), then the characters of S and N not covered by one, fold; no other phrase, no terms."""
+    characters of N, the terms, fold. trad with an S character (contract 10.1): the keep words and the phrases whose key has an S or R2
+    character (longest first), then the characters of S, N and R2 not covered by one, fold. trad without one: the characters of N, fold. No
+    other phrase and no terms on a Traditional sentence; an uncovered 里 of a simp sentence follows li_decide (contract 10.2)."""
     kind = sentence_kind(text)
     if kind == "trad":
-        s_phrase, s_maxp = _s_phrases(phrase)
-        text = _longest(text, s_phrase, s_maxp, _only(char, "trad"))
+        if any(c in TRAD_SIMP_ONLY for c in text):     # contract 10.1: also the R2 characters, the keep words as they are
+            r_phrase, r_maxp = _r2_phrases(phrase)
+            return _longest(text, r_phrase, r_maxp, _only(char, "trad_s")).translate(FOLD_TRANS)
+        text = "".join(RARE.get(c, c) for c in text)   # no S character, so no S-phrase can match: only the characters of N (contract 7)
         return text.translate(FOLD_TRANS)
-    text = _longest(text, phrase, maxp, char if kind == "simp" else _only(char, "marker"))
+    text = _longest(text, phrase, maxp, char if kind == "simp" else _only(char, "marker"), li=kind == "simp")
     return _longest(text, TW_PHRASE, TW_MAXP[0]).translate(FOLD_TRANS)
 
 

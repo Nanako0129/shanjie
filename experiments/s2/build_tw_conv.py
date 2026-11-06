@@ -52,6 +52,8 @@ assert len(MEDIAWIKI) == 31
 # is >= WORD_RATIO x its count and >= PICK_MIN (the maintainer: 「成語要照字典，標準還是要界定，除非出現次數壓倒性」); such rows are
 # status `over-dict` and listed for main's sentence-level check (--contexts).
 WORD_RATIO = 10
+LI_RE = re.compile("[裡里]")
+HAN_RE = re.compile("[一-鿿]")   # the Han range build_counts.HAN uses
 
 
 def die(msg):
@@ -90,7 +92,8 @@ def read_table(path=TABLE):
             if line.startswith("#") or not line.strip():
                 continue
             sec, key, value, status, manual, counts, rare = (line.rstrip("\n").split("\t") + [""] * 7)[:7]
-            t[sec][key] = (value, status, manual, counts, rare)
+            if sec in SECTIONS:      # keep and li rows have their own layout (contract 10) and are rebuilt every time
+                t[sec][key] = (value, status, manual, counts, rare)
     return t
 
 
@@ -112,6 +115,22 @@ def dictionary_words():
     words = {e["title"] for e in json.load(open(readings.MOEDICT, encoding="utf-8")) if e.get("title")}
     words |= set(build_overlay.load_concised())
     return words
+
+
+def dictionary_variants():
+    """{variant: standard} from 重編國語辭典修訂本: a single-character entry whose definition starts with 「X」的異體字 (contract 10.6)."""
+    sys.path.insert(0, os.path.join(bc.ROOT, "tools"))
+    import readings   # noqa: E402
+    out = {}
+    for e in json.load(open(readings.MOEDICT, encoding="utf-8")):
+        t = e.get("title", "")
+        if len(t) == 1:
+            for h in e.get("heteronyms", []):
+                for x in h.get("definitions", []):
+                    m = re.match(r"「(.)」的異體字", x.get("def", ""))
+                    if m:
+                        out[t] = m.group(1)
+    return out
 
 
 def pick(cands, counts, first):
@@ -136,6 +155,7 @@ def build_rows(files, old):
     variant = {frozenset((x, y)) for x, y in twv.items()} | {frozenset((x, y)) for x, y in VARIANT_PAIRS.items()} \
         | {frozenset((x, y)) for x, y in bc.MERGE.items()}
     dictionary = dictionary_words()
+    variant_of = dictionary_variants()
     S = bc.true_simplified(st, word_chars)
     # pass 1: raw character counts
     cc = collections.Counter()
@@ -230,8 +250,15 @@ def build_rows(files, old):
     pc = dict.fromkeys(strings, 0)
     anchor_re = re.compile("[" + "".join(re.escape(c) for c in sorted(anchor)) + "]")
     trans = str.maketrans(F)
+    li = {"prev": collections.Counter(), "next": collections.Counter()}   # contract 10.2: (character, 裡 or 里) next to 裡/里, folded text
     for chunk in sentences(files):
         chunk = chunk.translate(trans)
+        for m in LI_RE.finditer(chunk):
+            i = m.start()
+            if i and HAN_RE.match(chunk[i - 1]):
+                li["prev"][(chunk[i - 1], m.group())] += 1
+            if i + 1 < len(chunk) and HAN_RE.match(chunk[i + 1]):
+                li["next"][(chunk[i + 1], m.group())] += 1
         for m in anchor_re.finditer(chunk):
             i = m.start()
             for j, n in shapes[chunk[i]]:
@@ -256,11 +283,21 @@ def build_rows(files, old):
                 value, status = best, "evidence"
             elif k in MEDIAWIKI and sum(fc[c] for c in cands) < PICK_MIN:
                 value, status = fold(MEDIAWIKI[k]), "mediawiki"
+        std = variant_of.get(value)
+        if status == "hold" and std in cands:   # contract 10.6: the dictionary's standard form, unless the variant is >= 10x on the same evidence
+            cnt = word[k] if (k in word and std in word[k]) else fc
+            if not (cnt[value] >= PICK_MIN and cnt[value] >= WORD_RATIO * cnt[std]):
+                value, status = std, "dict"
         char_rows[k] = (value, status, fmt_counts(cands, fc) + extra)
     chosen = lambda k: (man("char", k).split("@")[0] if man("char", k) else char_rows[k][0])
     rare = {k for k in char_rows if chosen(k) != k and cc[k] < RARE_MAX and FOLD_RATIO * cc[k] < fc[chosen(k)]}
-    char_rows = {k: (*r, "N" if k in rare else "") for k, r in char_rows.items()}
-    log(f"char rows: {len(char_rows)}, changed: {sum(1 for k in char_rows if chosen(k) != row_cands[k][1])}, N: {len(rare)}", t0)
+    # contract 10.1, R2: marker keys (first OpenCC value not the key) that Taiwan writes under 1/20 of the chosen value; no minimum count
+    markers = {k for k, v in st.items() if v[0] != k}
+    r2 = {k for k in char_rows if k in markers and chosen(k) != k and FOLD_RATIO * cc[k] < fc[chosen(k)]}
+    char_rows = {k: (*r, "N" if k in rare else ("R" if k in r2 else "")) for k, r in char_rows.items()}
+    log(f"char rows: {len(char_rows)}, changed: {sum(1 for k in char_rows if chosen(k) != row_cands[k][1])}, N: {len(rare)}, "
+        f"R2 (markers, N included): {len(r2)}", t0)
+    keep = sorted(w for w in dictionary if len(w) > 1 and any(c in r2 for c in w) and not any(c in S for c in w))   # contract 10.1
     phrase_rows = {}
     for k, (pos, fv, cands) in phrase_cands.items():
         in_dict = [c for c in cands if c in dictionary]
@@ -286,7 +323,8 @@ def build_rows(files, old):
     missing = [k for k in terms if k not in twp]
     if missing:
         die(f"mainland-terms.txt keys that are not TWPhrases.txt keys: {missing[:5]}")
-    return {"fold": fold_rows, "char": char_rows, "phrase": phrase_rows, "term": {k: (twp[k], "term", "") for k in terms}}, cc
+    return {"fold": fold_rows, "char": char_rows, "phrase": phrase_rows, "term": {k: (twp[k], "term", "") for k in terms},
+            "keep": keep, "li": li}, cc
 
 
 def write_table(rows, files, path):
@@ -300,12 +338,18 @@ def write_table(rows, files, path):
     out = ["# tw-conv.tsv: docs/contracts/tw-conv.md section 2.3. Built by experiments/s2/build_tw_conv.py from the PTT snapshot (characters, words and counts only).",
            *(f"# input {os.path.basename(f)} sha256 {sha256_file(f)}" for f in files),
            f"# tool commit {commit}",
-           "# columns: section, key, value, status, manual, counts[, N]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7."]
+           "# columns: section, key, value, status, manual, counts[, N|R]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7; R: R2 of contract 10.",
+           "# keep<TAB>word: contract 10.1 (written as is on a Traditional sentence with an S character). li<TAB>prev|next<TAB>char<TAB>裡<TAB>里: contract 10.2 (PTT counts, folded)."]
     for sec in SECTIONS:
         for k in sorted(rows[sec]):
             r = rows[sec][k]
             value, status, counts, rare = r[0], r[1], (r[2] if len(r) > 2 else ""), (r[3] if len(r) > 3 else "")
             out.append("\t".join((sec, k, value, status, old[sec].get(k, ("",) * 5)[2], counts) + ((rare,) if rare else ())))
+    out += [f"keep\t{w}" for w in rows.get("keep", [])]                     # contract 10.1: keep<TAB>word
+    for side in ("prev", "next"):                                           # contract 10.2: li<TAB>prev|next<TAB>char<TAB>裡 count<TAB>里 count
+        cs = rows.get("li", {}).get(side, {})
+        for c in sorted({c for c, _ in cs}):
+            out.append(f"li\t{side}\t{c}\t{cs.get((c, '裡'), 0)}\t{cs.get((c, '里'), 0)}")
     tmp = path + ".tmp"
     open(tmp, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
     os.replace(tmp, path)
@@ -330,7 +374,7 @@ def review(table_path):
             lines.append(("char", k, value, status, manual, counts))
     for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
         if rare:
-            lines.append(("N", k, value, status, manual, counts))
+            lines.append((rare, k, value, status, manual, counts))   # N or R (contract 10.1)
     for k, (value, status, manual, counts, rare) in sorted(t["phrase"].items()):
         if value != fold(stp[k]) or (status == "hold" and any(int(c.rsplit(":", 1)[1]) for c in counts.split())):
             lines.append(("phrase", k, value, status, manual, counts))
@@ -357,7 +401,8 @@ def main(argv=None):
     files = [a.body, a.push]
     rows, _ = build_rows(files, read_table(a.out))
     write_table(rows, files, a.out)
-    print(f"wrote {a.out}: " + ", ".join(f"{s} {len(rows[s])}" for s in SECTIONS) + f"; {time.time() - t0:.1f} s")
+    print(f"wrote {a.out}: " + ", ".join(f"{s} {len(rows[s])}" for s in SECTIONS) + f", keep {len(rows['keep'])}, li prev {len(rows['li']['prev'])} "
+          f"next {len(rows['li']['next'])}; {time.time() - t0:.1f} s")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 # tw-conv.tsv: docs/contracts/tw-conv.md section 2.3. Built by experiments/s2/build_tw_conv.py from the PTT snapshot (characters, words and counts only).
 # input body.tsv sha256 00062f34ee21ea0d8f12d66db13fba28715eb7a5b63c7d456a43902a0b03485a
 # input push.tsv sha256 75d3f0bdfe8e0a5784fb1e30df5b930a7e58948ad7e144b53ce18ca8745b034a
-# tool commit be23be9f8e2a2c4c277ba8636654d3c36e6cf480
-# columns: section, key, value, status, manual, counts[, N]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7.
+# tool commit 891302a3addb02301182771b21499780722eaf44 (tool files modified)
+# columns: section, key, value, status, manual, counts[, N|R]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7; R: R2 of contract 10.
+# keep<TAB>word: contract 10.1 (written as is on a Traditional sentence with an S character). li<TAB>prev|next<TAB>char<TAB>裡<TAB>里: contract 10.2 (PTT counts, folded).
 fold	僞	偽	fold		僞:80 偽:5357
 fold	啓	啟	fold		啓:592 啟:29434
 fold	喫	吃	fold		喫:357 吃:281783
@@ -45,16 +46,16 @@ fold	鮎	鯰	nofold		鮎:275 鯰:497
 fold	麪	麵	fold		麪:2 麵:38138
 fold	齶	顎	fold		齶:0 顎:296
 char	㐹	㑶	hold		㑶:0 㐹:0
-char	万	萬	hold		萬:179290 万:363
+char	万	萬	hold		萬:179290 万:363	R
 char	丑	醜	hold		醜:18185 丑:6385
 char	个	個	hold		個:1272848 箇:103	N
-char	丰	豐	hold		豐:27328 丰:244
-char	么	麼	hold		麼:882222 么:966
+char	丰	豐	hold		豐:27328 丰:244	R
+char	么	麼	hold		麼:882222 么:966	R
 char	了	了	hold		了:2723858 瞭:3478
-char	于	於	hold		於:235102 于:2230
+char	于	於	hold		於:235102 于:2230	R
 char	云	雲	hold		雲:36913 云:1980
 char	亘	亙	hold		亙:70 亘:153
-char	仆	僕	hold		僕:4527 仆:204
+char	仆	僕	hold		僕:4527 仆:204	R
 char	仇	仇	hold		仇:15149 讎:16
 char	仑	侖	hold		侖:319 崙:1773	N
 char	价	價	hold		價:229083 价:2	N
@@ -75,9 +76,9 @@ char	冢	冢	hold		冢:27 塚:1463
 char	冬	冬	hold		冬:13568 鼕:5
 char	冲	衝	hold		衝:48184 沖:14871 冲:0 words 衝:38006 沖:7912	N
 char	凄	悽	hold		悽:197 淒:743 words 悽:204 淒:793	N
-char	准	準	hold		準:117468 准:5296
+char	准	準	hold		準:117468 准:5296	R
 char	凌	凌	hold		凌:14677 淩:296
-char	几	幾	hold		幾:304362 几:323
+char	几	幾	hold		幾:304362 几:323	R
 char	凶	兇	hold		兇:12246 凶:2952
 char	出	出	hold		出:795591 齣:4442
 char	划	劃	hold		劃:28712 划:14223
@@ -91,29 +92,29 @@ char	卜	卜	hold		卜:2023 蔔:3474
 char	占	佔	hold		佔:19533 占:7066 words 佔:15522 占:5771
 char	卤	滷	hold		滷:3875 鹵:211 words 滷:3947 鹵:295	N
 char	卷	卷	hold		卷:16153 捲:9880
-char	厂	廠	hold		廠:80901 厂:33
+char	厂	廠	hold		廠:80901 厂:33	R
 char	历	歷	hold		歷:44588 曆:3288	N
 char	厘	釐	hold		釐:1857 厘:444
 char	参	參	hold		參:78965	N
 char	发	發	hold		發:437394 髮:26305	N
 char	只	只	hold		只:639672 隻:90934 祇:378
 char	台	台	evidence		臺:22918 檯:7747 颱:9328 台:557669 words 臺:30526 台:607895
-char	叶	葉	hold		葉:33120 叶:220
+char	叶	葉	hold		葉:33120 叶:220	R
 char	叹	嘆	hold		嘆:5417 歎:359	N
 char	吁	籲	hold		籲:2302 吁:166
 char	吃	吃	hold		吃:282140
 char	合	合	hold		合:288504 閤:82
 char	吊	吊	hold		吊:8962 弔:300
 char	同	同	hold		同:281152 衕:2
-char	后	後	hold		後:954284 后:8329
+char	后	後	hold		後:954284 后:8329	R
 char	向	向	hold		向:94340 嚮:973 曏:0
 char	吣	唚	mediawiki		吣:0 唚:0 words 吣:0 唚:0
 char	呆	呆	hold		呆:7639 待:104064
 char	周	周	hold		周:61069 週:76675 賙:1
 char	咏	詠	hold		詠:1188 咏:0	N
 char	咤	吒	hold		吒:258 咤:0	N
-char	咨	諮	hold		諮:3084 咨:66
-char	咸	鹹	hold		鹹:10866 咸:178
+char	咨	諮	hold		諮:3084 咨:66	R
+char	咸	鹹	hold		鹹:10866 咸:178	R
 char	咽	咽	hold		咽:454 嚥:288
 char	哄	哄	hold		哄:1742 鬨:340
 char	哗	譁	hold		譁:222 嘩:370 words 譁:226 嘩:405	N
@@ -132,7 +133,7 @@ char	埙	塤	mediawiki		壎:3 塤:7 words 壎:0 塤:0	N
 char	堤	堤	hold		堤:2153 隄:3
 char	复	復	hold		復:67403 複:35527 覆:21501	N
 char	夫	夫	hold		夫:48184 伕:63
-char	夸	誇	hold		誇:19533 夸:256
+char	夸	誇	hold		誇:19533 夸:256	R
 char	夹	夾	hold		夾:14265 袷:0	N
 char	奸	奸	hold		奸:1705 姦:1465
 char	姜	姜	hold		姜:5365 薑:1471
@@ -142,7 +143,7 @@ char	宁	寧	hold		寧:17541 甯:373	N
 char	它	它	hold		它:46674 牠:3774
 char	家	家	hold		家:624697 傢:4251
 char	尝	嘗	hold		嘗:13304 嚐:4042	N
-char	尸	屍	hold		屍:10686 尸:147
+char	尸	屍	hold		屍:10686 尸:147	R
 char	尽	盡	hold		盡:32100 儘:6720	N
 char	局	局	hold		局:112400 侷:803
 char	岩	巖	hold		巖:444 岩:7018
@@ -173,7 +174,7 @@ char	念	念	hold		念:60407 唸:6967
 char	恤	恤	hold		恤:691 卹:157
 char	恶	惡	hold		惡:42071 噁:19030	N
 char	愈	愈	hold		愈:9261 癒:4787
-char	愿	願	hold		願:57225 愿:271
+char	愿	願	hold		願:57225 愿:271	R
 char	戚	戚	hold		戚:4038 慼:7 鏚:0
 char	扇	扇	hold		扇:10952 搧:280
 char	才	才	hold		才:397018
@@ -190,7 +191,7 @@ char	挨	挨	hold		挨:1908 捱:43
 char	挽	挽	hold		挽:2087 輓:80
 char	捆	捆	hold		捆:1429 綑:239
 char	捍	捍	hold		捍:935 扞:23
-char	据	據	hold		據:55201 据:154
+char	据	據	hold		據:55201 据:154	R
 char	搜	搜	hold		搜:17481 蒐:3758
 char	摆	擺	hold		擺:30427 襬:110	N
 char	斗	鬥	hold		鬥:42065 斗:6530
@@ -199,7 +200,7 @@ char	斫	斫	hold		斫:1 斲:5
 char	旋	旋	hold		旋:10946 鏇:0
 char	昆	昆	hold		昆:2597 崑:762
 char	昵	暱	hold		暱:1112 昵:0	N
-char	晒	曬	hold		曬:7591 晒:152
+char	晒	曬	hold		曬:7591 晒:152	R
 char	暗	暗	hold		暗:42125 闇:4045
 char	曲	曲	hold		曲:30214 麴:100
 char	札	札	hold		札:3746 劄:6
@@ -207,7 +208,7 @@ char	术	術	hold		術:83283 朮:113	N
 char	朱	朱	hold		朱:9529 硃:65
 char	朴	樸	hold		樸:1673 朴:5055
 char	杆	杆	hold		杆:710 桿:7912
-char	杠	槓	hold		槓:10342 杠:108
+char	杠	槓	hold		槓:10342 杠:108	R
 char	条	條	hold		條:97947 条:0	N
 char	杯	杯	hold		杯:40547 盃:16938
 char	杰	傑	hold		傑:20770 杰:4698
@@ -216,7 +217,7 @@ char	板	板	hold		板:145918 闆:26585
 char	极	極	hold		極:56462 极:4	N
 char	果	果	hold		果:466670 菓:375
 char	枪	槍	hold		槍:31224 鎗:94	N
-char	柜	櫃	hold		櫃:22027 柜:32
+char	柜	櫃	hold		櫃:22027 柜:32	R
 char	栖	棲	hold		棲:1687 栖:0	N
 char	栗	栗	hold		栗:5109 慄:275
 char	核	核	hold		核:35244
@@ -233,8 +234,8 @@ char	泛	泛	hold		泛:5052 氾:508 汎:527
 char	注	注	hold		注:57795 註:19995
 char	洒	灑	hold		灑:4284 洒:24	N
 char	浚	浚	hold		浚:528 濬:293
-char	涂	塗	hold		塗:5935 涂:258
-char	涌	湧	hold		湧:2507 涌:85
+char	涂	塗	hold		塗:5935 涂:258	R
+char	涌	湧	hold		湧:2507 涌:85	R
 char	淀	澱	hold		澱:1260 淀:290
 char	游	遊	hold		遊:187786 游:12015
 char	湿	濕	evidence		溼:1171 濕:14189 words 溼:1119 濕:12445	N
@@ -242,7 +243,7 @@ char	溪	溪	hold		溪:6592 谿:4
 char	滟	灩	hold		灩:24 灧:1	N
 char	漓	漓	hold		漓:335 灕:8
 char	澄	澄	hold		澄:3317 澂:11
-char	灶	竈	hold		竈:103 灶:448 words 竈:89 灶:427
+char	灶	灶	dict		竈:103 灶:448 words 竈:89 灶:427
 char	炼	煉	hold		煉:7076 鍊:5842	N
 char	烟	煙	hold		煙:12567 菸:5543	N
 char	焰	焰	hold		焰:4835 燄:125
@@ -264,7 +265,7 @@ char	确	確	hold		確:148818 确:21	N
 char	硷	鹼	evidence		硷:0 礆:0 鹼:459 words 硷:0 鹼:471	N
 char	私	私	hold		私:29733 俬:10
 char	秋	秋	hold		秋:16019 鞦:208
-char	种	種	hold		種:318678 种:39
+char	种	種	hold		種:318678 种:39	R
 char	秘	祕	hold		祕:2862 秘:19314 words 祕:2823 秘:17645
 char	穗	穗	hold		穗:1759 繐:3
 char	筑	築	hold		築:7609 筑:392
@@ -284,7 +285,7 @@ char	联	聯	hold		聯:98119 联:0	N
 char	肴	餚	hold		餚:255 肴:60
 char	胄	胄	hold		胄:13 冑:30
 char	背	背	hold		背:60242 揹:1134
-char	胜	勝	hold		勝:70955 胜:41
+char	胜	勝	hold		勝:70955 胜:41	R
 char	胡	胡	hold		胡:14157 鬍:10553 衚:2
 char	脏	髒	hold		髒:10503 臟:5179	N
 char	腊	臘	hold		臘:2193 腊:5	N
@@ -299,7 +300,7 @@ char	苔	苔	hold		苔:1140 薹:1
 char	苧	薴	hold		薴:4 苧:0	N
 char	苹	蘋	hold		蘋:19506 苹:3	N
 char	范	範	hold		範:24709 范:4254
-char	荐	薦	hold		薦:64269 荐:95
+char	荐	薦	hold		薦:64269 荐:95	R
 char	荡	蕩	hold		蕩:2432 盪:2288	N
 char	荫	蔭	hold		蔭:612 廕:0	N
 char	药	藥	hold		藥:29168 葯:9	N
@@ -307,7 +308,7 @@ char	获	獲	hold		獲:34657 穫:1782	N
 char	蒙	蒙	hold		蒙:9478 矇:541 濛:486 懞:7
 char	蔑	蔑	hold		蔑:232 衊:207
 char	藤	藤	hold		藤:11934 籐:62
-char	虫	蟲	hold		蟲:12180 虫:198
+char	虫	蟲	hold		蟲:12180 虫:198	R
 char	虱	蝨	hold		蝨:41 虱:514
 char	蚝	蠔	hold		蠔:267 蚝:0	N
 char	蜡	蠟	hold		蠟:1892 蜡:1	N
@@ -3890,3 +3891,5635 @@ term	黃體酮	黃體素	term
 term	黑客	駭客	term		
 term	默認值	預設值	term		
 term	鼠標	滑鼠	term		
+keep	一准
+keep	一心挂兩頭
+keep	一片痴心
+keep	万俟
+keep	三天打魚，兩天晒網
+keep	三尸
+keep	三尸神
+keep	三日打魚，兩日晒網
+keep	不准
+keep	不准翻印
+keep	不挂眼
+keep	不痴不聾，不作家翁
+keep	丰儀
+keep	丰姿
+keep	丰姿冶麗
+keep	丰姿綽約
+keep	丰度
+keep	丰情
+keep	丰標不凡
+keep	丰神
+keep	丰神俊美
+keep	丰神綽約
+keep	丰神飄灑
+keep	丰茸
+keep	丰采
+keep	丰韻
+keep	么二
+keep	么二三的
+keep	么兒
+keep	么喝
+keep	么女
+keep	么師
+keep	么末
+keep	么篇
+keep	么絃
+keep	么麼
+keep	么麼小丑
+keep	于于
+keep	于今
+keep	于右任
+keep	于嗟
+keep	于徐
+keep	于思
+keep	于斌
+keep	于是
+keep	于時
+keep	于歸
+keep	于謙
+keep	于闐
+keep	于飛
+keep	于飛之樂
+keep	仆地
+keep	仆然
+keep	仙后座
+keep	伊于胡底
+keep	伏几
+keep	伏尸
+keep	伏尸流血
+keep	似醉如痴
+keep	作准
+keep	保准
+keep	倍日并行
+keep	偃仆
+keep	僵仆
+keep	僵尸
+keep	允准
+keep	元后
+keep	八蜡
+keep	六么
+keep	兼容并包
+keep	兼并
+keep	准予
+keep	准伏
+keep	准信
+keep	准假
+keep	准奏
+keep	准定
+keep	准將
+keep	准尉
+keep	准式
+keep	准折
+keep	准擬
+keep	准此
+keep	准算
+keep	准考證
+keep	准許
+keep	几几
+keep	几凳
+keep	几席
+keep	几杖
+keep	几案
+keep	几筵
+keep	刑于
+keep	前仆後繼
+keep	前仆後起
+keep	包准
+keep	半痴不顛
+keep	友于
+keep	叔于田
+keep	合并
+keep	同心并力
+keep	后冠
+keep	后土
+keep	后妃
+keep	后帝
+keep	后座
+keep	后王
+keep	后皇
+keep	后稷
+keep	后羿
+keep	后羿射日
+keep	后辛
+keep	后辟
+keep	后里
+keep	君子于役
+keep	呂后
+keep	呂太后的筵席
+keep	呈准
+keep	告么
+keep	呢呢痴痴
+keep	呼么喝六
+keep	咒愿
+keep	咨呈
+keep	咨咨
+keep	咨嗟
+keep	咨文
+keep	咨牙倈嘴
+keep	咨訪
+keep	咨請
+keep	咸五登三
+keep	咸和
+keep	咸宜
+keep	咸池
+keep	咸豐
+keep	咸豐草
+keep	咸陽
+keep	咸陽宮
+keep	咸陽火
+keep	喝六呼么
+keep	單于
+keep	嚌咨
+keep	國情咨文
+keep	墨痴
+keep	夏后氏
+keep	夢蘭叶吉
+keep	大力推荐
+keep	大叔于田
+keep	大咸
+keep	大單于
+keep	大天后宮
+keep	大蜡
+keep	大言非夸
+keep	天后
+keep	天疱瘡
+keep	太后
+keep	太皇太后
+keep	夸人
+keep	夸克
+keep	夸姣
+keep	夸容
+keep	夸毗
+keep	夸父
+keep	夸父逐日
+keep	夸特
+keep	夸誕
+keep	夸飾
+keep	夸麗
+keep	如痴似醉
+keep	如痴如夢
+keep	如痴如狂
+keep	如痴如迷
+keep	如痴如醉
+keep	如醉如痴
+keep	妍皮不裹痴骨
+keep	妍皮痴骨
+keep	嬌痴
+keep	季咸
+keep	官准
+keep	定准
+keep	密昵
+keep	寧養逆子，不養痴兒
+keep	寸絲不挂
+keep	小么兒
+keep	小价
+keep	小黠大痴
+keep	尸位
+keep	尸位素餐
+keep	尸利
+keep	尸居餘氣
+keep	尸居龍見
+keep	尸祝
+keep	尸祝代庖
+keep	尸祿
+keep	尸祿素餐
+keep	尸解
+keep	尸諫
+keep	尸身
+keep	尸陀林
+keep	尸饔
+keep	尸首
+keep	尸鳩之仁
+keep	尸鳩之平
+keep	屢仆屢起
+keep	川后
+keep	巫咸
+keep	布帘
+keep	帘子
+keep	帘布
+keep	帘幕
+keep	帶狀疱疹
+keep	并介之人
+keep	并兼
+keep	并刀
+keep	并列關係
+keep	并力
+keep	并包
+keep	并吞
+keep	并州
+keep	并州剪
+keep	并州故鄉
+keep	并日
+keep	并日而食
+keep	并網
+keep	并行
+keep	并贓拿敗
+keep	并迭
+keep	并邦
+keep	弄鬼妝么
+keep	張三丰
+keep	彭咸
+keep	影后
+keep	徒杠
+keep	急并各邦
+keep	怨咨
+keep	恩准
+keep	悲喜交并
+keep	悲犬咸陽
+keep	情痴
+keep	愚痴
+keep	慈安太后
+keep	慈禧太后
+keep	憑准
+keep	懵懂痴呆
+keep	懷寵尸位
+keep	扑作教刑
+keep	扑打
+keep	扑撻
+keep	打并
+keep	批准
+keep	批尸
+keep	披紅挂綵
+keep	拮据
+keep	拿不准
+keep	挂一漏百
+keep	挂一漏萬
+keep	挂冠
+keep	挂口
+keep	挂名
+keep	挂孝
+keep	挂心
+keep	挂念
+keep	挂慮
+keep	挂懷
+keep	挂搭
+keep	挂燈結綵
+keep	挂牌
+keep	挂衣冠
+keep	挂齒
+keep	挑么挑六
+keep	挺尸
+keep	撒嬌撒痴
+keep	撒風撒痴
+keep	撫尸慟哭
+keep	擊扑
+keep	攧攧仆仆
+keep	敲扑
+keep	方几
+keep	日晒雨淋
+keep	明窗淨几
+keep	昵交
+keep	昵友
+keep	昵愛
+keep	昵昵
+keep	昵比
+keep	昵聲
+keep	昵藩
+keep	晒乾
+keep	晒圖
+keep	晒斑
+keep	晒暖兒
+keep	晒書
+keep	晒穀
+keep	晒穀場
+keep	晒臺
+keep	晒衣場
+keep	晒黑
+keep	曝晒
+keep	書痴
+keep	杠人
+keep	杠梁
+keep	杠轂
+keep	林冲夜奔
+keep	栖息
+keep	栖栖
+keep	栖身
+keep	核准
+keep	案准
+keep	此仆彼起
+keep	武后
+keep	殭尸
+keep	母后
+keep	毗婆尸佛
+keep	水疱
+keep	波涌雲亂
+keep	洒如
+keep	洒家
+keep	洒淅
+keep	洒濯
+keep	洒然
+keep	洶涌
+keep	洶涌澎湃
+keep	流血浮尸
+keep	涂月
+keep	涌流
+keep	涌湍
+keep	涌裔
+keep	淳于
+keep	淳于意
+keep	淳于髡
+keep	清么
+keep	湓涌
+keep	潭祉叶吉
+keep	澎湖天后宮
+keep	灑晒
+keep	無价事
+keep	照准
+keep	燕几
+keep	燕燕于飛
+keep	特准
+keep	犖确
+keep	狎昵
+keep	獃痴
+keep	獲准
+keep	王后
+keep	甄后
+keep	男痴
+keep	疇咨之憂
+keep	疱疹
+keep	疱疹性咽狹症
+keep	痴人
+keep	痴人痴福
+keep	痴人說夢
+keep	痴倒
+keep	痴傻
+keep	痴兒
+keep	痴叔
+keep	痴呆
+keep	痴呆懵懂
+keep	痴呆症
+keep	痴姨
+keep	痴子
+keep	痴心
+keep	痴心女子負心漢
+keep	痴心妄想
+keep	痴情
+keep	痴想
+keep	痴掙
+keep	痴漢
+keep	痴然如醉
+keep	痴物
+keep	痴狂
+keep	痴獃
+keep	痴男怨女
+keep	痴痴
+keep	痴福
+keep	痴笑
+keep	痴肥
+keep	痴蟲
+keep	痴迷
+keep	痴那
+keep	痴鈍
+keep	痴長
+keep	痴頑
+keep	痴騃
+keep	發痴
+keep	白痴
+keep	皇后
+keep	皇天后土
+keep	皇太后
+keep	盛价
+keep	确瘠
+keep	磨蝎
+keep	磽确
+keep	祭尸
+keep	福生于微
+keep	种師中
+keep	种師道
+keep	种放
+keep	稱王封后
+keep	窗帘
+keep	窗明几淨
+keep	竇太后
+keep	素餐尸位
+keep	績麻拈苧
+keep	羊栖菜
+keep	群后
+keep	老么
+keep	老人痴呆症
+keep	老少咸宜
+keep	老年痴呆症
+keep	老幼咸宜
+keep	胜鍵
+keep	腊毒
+keep	腌{[91c9]}
+keep	腌臢
+keep	腌裡巴臢
+keep	膿疱病
+keep	臭么
+keep	舉荐
+keep	良价
+keep	花痴
+keep	苧麻
+keep	苹縈
+keep	茶几
+keep	草荐
+keep	荊尸
+keep	荐任
+keep	荐食
+keep	荐饑
+keep	蕭太后
+keep	蜡月
+keep	蜡祭
+keep	蝎蝎螫螫
+keep	行尸走肉
+keep	行尸走骨
+keep	裝么
+keep	西后
+keep	西太后
+keep	親昵
+keep	言大而夸
+keep	言歸于好
+keep	許愿
+keep	詅痴符
+keep	貪夫痴客
+keep	貴价
+keep	賀后罵殿
+keep	賄賂并行
+keep	賈后
+keep	賣痴獃
+keep	跌扑
+keep	輿尸
+keep	遺挂
+keep	郝隆晒書
+keep	鄉愿
+keep	酒帘
+keep	酒帘子
+keep	酒瓮飯囊
+keep	錞于
+keep	門帘
+keep	阮咸
+keep	防晒油
+keep	阿咸
+keep	隱几
+keep	雞尸牛從
+keep	雪窗螢几
+keep	青帘
+keep	鞭尸
+keep	鞭扑
+keep	韋后
+keep	音痴
+keep	頂夸克
+keep	顛仆
+keep	風后
+keep	風痴
+keep	風起水涌
+keep	飯囊酒瓮
+keep	饑饉荐臻
+keep	馬后練服
+keep	高几
+keep	高栖
+keep	鳳凰于飛
+keep	鳳皇于蜚
+keep	麻苧
+keep	齊后破環
+li	prev	一	27	68
+li	prev	丁	5	1
+li	prev	七	6	44
+li	prev	万	0	17
+li	prev	三	12	16
+li	prev	上	135	39
+li	prev	下	117	47
+li	prev	不	6	22
+li	prev	丑	2	0
+li	prev	且	109	12
+li	prev	世	22	2
+li	prev	丘	11	10
+li	prev	丟	11	1
+li	prev	中	50	47
+li	prev	串	62	0
+li	prev	丸	7	0
+li	prev	主	25	19
+li	prev	丼	1	0
+li	prev	乃	1	4
+li	prev	久	6	12
+li	prev	么	1	0
+li	prev	之	10	134
+li	prev	乎	4	2
+li	prev	乏	1	1
+li	prev	乒	1	0
+li	prev	乓	1	0
+li	prev	乖	4	0
+li	prev	乘	0	14
+li	prev	乙	1	0
+li	prev	九	2	92
+li	prev	也	2	2
+li	prev	乳	2	0
+li	prev	乾	8	1
+li	prev	亂	8	1
+li	prev	了	166	80
+li	prev	事	559	8
+li	prev	二	14	7
+li	prev	于	0	2
+li	prev	互	0	1
+li	prev	五	5	41
+li	prev	井	112	8
+li	prev	些	30	38
+li	prev	亜	0	12
+li	prev	亞	14	95
+li	prev	交	1	0
+li	prev	亨	1	0
+li	prev	享	14	4
+li	prev	京	7	6
+li	prev	亭	22	0
+li	prev	亮	4	1
+li	prev	人	548	22
+li	prev	仁	1	20
+li	prev	仇	3	0
+li	prev	今	0	2
+li	prev	介	21	0
+li	prev	仔	13	2
+li	prev	他	67	17
+li	prev	仗	3	0
+li	prev	付	64	3
+li	prev	仙	8	2
+li	prev	代	117	17
+li	prev	令	17	1
+li	prev	以	85	33
+li	prev	仰	1	0
+li	prev	仲	0	43
+li	prev	件	142	3
+li	prev	任	8	12
+li	prev	份	29	16
+li	prev	仿	2	0
+li	prev	伊	11	32
+li	prev	伍	235	1
+li	prev	伏	1	0
+li	prev	伐	2	0
+li	prev	休	1	2
+li	prev	伯	0	32
+li	prev	估	2	9
+li	prev	伴	7	9
+li	prev	伸	1	0
+li	prev	伺	1	0
+li	prev	似	3	2
+li	prev	伽	2	0
+li	prev	但	299	34
+li	prev	佈	2	1
+li	prev	位	125	29
+li	prev	低	1	112
+li	prev	住	21	1
+li	prev	佐	1	0
+li	prev	佑	1	0
+li	prev	佔	0	3
+li	prev	何	6	3
+li	prev	余	0	1
+li	prev	佛	1	57
+li	prev	作	162	4
+li	prev	你	46	24
+li	prev	佩	10	33
+li	prev	佬	4	0
+li	prev	佳	1	167
+li	prev	併	0	11
+li	prev	使	9	2
+li	prev	來	144	111
+li	prev	例	23	0
+li	prev	侍	2	0
+li	prev	侑	0	2
+li	prev	供	1	2
+li	prev	依	0	10
+li	prev	侯	0	1
+li	prev	侶	2	0
+li	prev	便	10	3
+li	prev	係	87	2
+li	prev	促	2	0
+li	prev	俄	1	163
+li	prev	俗	2	0
+li	prev	保	7	4
+li	prev	俠	30	11
+li	prev	信	122	6
+li	prev	修	8	1
+li	prev	俸	1	0
+li	prev	倉	14	5
+li	prev	個	284	268
+li	prev	倍	3	6
+li	prev	們	45	15
+li	prev	倒	1	0
+li	prev	候	18	8
+li	prev	借	0	1
+li	prev	倫	0	2
+li	prev	值	23	0
+li	prev	假	13	3
+li	prev	偉	1	0
+li	prev	偏	3	0
+li	prev	偕	1	0
+li	prev	做	3	7
+li	prev	停	4	0
+li	prev	側	5	0
+li	prev	偵	1	0
+li	prev	偶	15	0
+li	prev	偷	5	0
+li	prev	傀	1	0
+li	prev	傅	3	2
+li	prev	傑	10	7
+li	prev	傘	7	0
+li	prev	備	17	1
+li	prev	傲	1	0
+li	prev	傳	84	5
+li	prev	債	2	0
+li	prev	傷	9	0
+li	prev	傻	7	3
+li	prev	像	109	12
+li	prev	僕	1	0
+li	prev	僚	1	0
+li	prev	價	57	6
+li	prev	億	7	0
+li	prev	儕	2	0
+li	prev	償	0	1
+li	prev	優	2	43
+li	prev	元	39	9
+li	prev	兄	1	0
+li	prev	充	1	1
+li	prev	兆	2	1
+li	prev	兇	2	0
+li	prev	先	3	2
+li	prev	光	135	13
+li	prev	克	47	1891
+li	prev	兌	0	1
+li	prev	免	5	2
+li	prev	兒	9	1
+li	prev	兔	2	0
+li	prev	党	1	0
+li	prev	兜	8	3
+li	prev	入	57	11
+li	prev	內	607	23
+li	prev	全	3	7
+li	prev	兩	0	3
+li	prev	八	2	466
+li	prev	公	11	10223
+li	prev	六	3	4
+li	prev	兮	2	0
+li	prev	共	1	0
+li	prev	兵	18	2
+li	prev	其	4	9
+li	prev	具	65	1
+li	prev	典	90	0
+li	prev	兼	1	1
+li	prev	冊	58	0
+li	prev	再	11	1
+li	prev	冠	10	1
+li	prev	冨	0	175
+li	prev	冬	5	0
+li	prev	冰	10	0
+li	prev	冷	2	0
+li	prev	冽	0	5
+li	prev	准	1	0
+li	prev	凋	1	0
+li	prev	凌	1	0
+li	prev	凍	5	0
+li	prev	凡	1	3
+li	prev	処	0	1
+li	prev	凰	1	0
+li	prev	凱	0	11
+li	prev	凳	3	0
+li	prev	凶	3	1
+li	prev	凸	2	0
+li	prev	出	89	10
+li	prev	函	3	0
+li	prev	刀	14	1
+li	prev	刃	3	0
+li	prev	分	31	21
+li	prev	切	7	20
+li	prev	刊	9	0
+li	prev	列	84	40
+li	prev	初	4	3
+li	prev	判	3	0
+li	prev	別	26	6
+li	prev	利	22	17
+li	prev	到	447	129
+li	prev	制	48	8
+li	prev	刷	53	15
+li	prev	券	58	0
+li	prev	刺	3	0
+li	prev	刻	9	3
+li	prev	則	52	2
+li	prev	剋	0	1
+li	prev	前	33	59
+li	prev	剛	3	5
+li	prev	剩	3	2
+li	prev	副	7	0
+li	prev	創	16	4
+li	prev	劃	86	3
+li	prev	劇	1528	5
+li	prev	劈	10	1
+li	prev	劉	0	5
+li	prev	劍	29	0
+li	prev	劑	2	0
+li	prev	力	48	4
+li	prev	功	6	7
+li	prev	加	10	445
+li	prev	助	6	2
+li	prev	努	5	6
+li	prev	劫	6	0
+li	prev	劵	2	0
+li	prev	勁	1	0
+li	prev	勇	0	4
+li	prev	勒	0	1
+li	prev	動	210	13
+li	prev	務	113	5
+li	prev	勝	15	15
+li	prev	勞	14	1
+li	prev	勢	8	8
+li	prev	勤	2	8
+li	prev	勵	20	2
+li	prev	勺	1	0
+li	prev	勾	1	0
+li	prev	包	1070	10
+li	prev	匏	0	1
+li	prev	化	33	10
+li	prev	北	4	44
+li	prev	匙	8	0
+li	prev	匠	1	0
+li	prev	匡	1	0
+li	prev	匣	28	2
+li	prev	匪	0	1
+li	prev	匭	1	0
+li	prev	匯	1	0
+li	prev	匹	1	0
+li	prev	區	395	40
+li	prev	十	9	297
+li	prev	千	12	1085
+li	prev	午	1	0
+li	prev	卉	1	0
+li	prev	半	8	10
+li	prev	卓	4	0
+li	prev	協	6	0
+li	prev	南	23	30
+li	prev	博	7	1
+li	prev	卡	288	340
+li	prev	卦	0	3
+li	prev	印	6	0
+li	prev	卵	2	0
+li	prev	卷	38	0
+li	prev	卻	3	0
+li	prev	卿	2	0
+li	prev	厄	1	16
+li	prev	厘	1	1
+li	prev	厚	2	13
+li	prev	厝	10	2
+li	prev	原	11	14
+li	prev	厭	2	2
+li	prev	去	188	33
+li	prev	又	3	1
+li	prev	叉	3	1
+li	prev	及	17	16
+li	prev	友	46	12
+li	prev	反	2	0
+li	prev	叔	3	0
+li	prev	取	16	1
+li	prev	受	6	3
+li	prev	叢	57	0
+li	prev	口	88	2
+li	prev	古	9	21
+li	prev	句	6	0
+li	prev	叨	1	0
+li	prev	只	2	1
+li	prev	叫	5	12
+li	prev	召	2	0
+li	prev	叭	6	0
+li	prev	可	5	2
+li	prev	台	130	12
+li	prev	史	50	3
+li	prev	右	1	2
+li	prev	司	341	6
+li	prev	吃	65	6
+li	prev	各	1	13
+li	prev	合	78	11
+li	prev	吉	10	23
+li	prev	吋	2	0
+li	prev	同	16	14
+li	prev	名	62	15
+li	prev	后	8	269
+li	prev	向	17	13
+li	prev	君	20	4
+li	prev	吟	2	0
+li	prev	否	15	0
+li	prev	吧	70	9
+li	prev	含	11	0
+li	prev	吳	0	1
+li	prev	吸	5	1
+li	prev	吹	0	1
+li	prev	吻	3	0
+li	prev	吼	4	3
+li	prev	呀	2	0
+li	prev	呃	1	0
+li	prev	告	315	3
+li	prev	呢	3	0
+li	prev	周	18	6
+li	prev	味	26	2
+li	prev	呼	2	1
+li	prev	命	85	4
+li	prev	和	40	96
+li	prev	咒	9	0
+li	prev	咕	0	2
+li	prev	咖	25	8
+li	prev	咧	1	0
+li	prev	咩	1	0
+li	prev	咪	2	0
+li	prev	咬	1	0
+li	prev	咲	0	5
+li	prev	哀	1	0
+li	prev	品	338	0
+li	prev	哄	3	0
+li	prev	哇	5	1
+li	prev	哈	47	254
+li	prev	員	148	27
+li	prev	哥	23	14
+li	prev	哦	2	0
+li	prev	哨	1	0
+li	prev	哩	13	14
+li	prev	哪	32859	82
+li	prev	哭	2	24
+li	prev	哲	0	2
+li	prev	唇	2	0
+li	prev	唐	1	0
+li	prev	唭	0	1
+li	prev	售	4	4
+li	prev	唱	3	0
+li	prev	商	48	1
+li	prev	啊	28	9
+li	prev	問	71	31
+li	prev	啟	3	0
+li	prev	啡	35	0
+li	prev	啥	1	3
+li	prev	啦	15	3
+li	prev	啪	1	0
+li	prev	喀	0	3
+li	prev	善	0	2
+li	prev	喉	4	0
+li	prev	喊	0	1
+li	prev	喔	11	1
+li	prev	喙	2	0
+li	prev	喚	3	1
+li	prev	喜	1	3
+li	prev	喝	3	0
+li	prev	喬	0	2
+li	prev	單	773	2
+li	prev	喵	2	2
+li	prev	喻	4	0
+li	prev	嗎	13	2
+li	prev	嗚	1	0
+li	prev	嗯	1	1
+li	prev	嘉	1	53
+li	prev	嘎	4	1
+li	prev	嘛	3	1
+li	prev	嘰	1	1
+li	prev	嘴	833	7
+li	prev	嘻	0	1
+li	prev	噓	1	1
+li	prev	器	173	4
+li	prev	噴	4	0
+li	prev	噹	2	0
+li	prev	嚐	0	1
+li	prev	嚕	0	2
+li	prev	嚨	26	0
+li	prev	囉	1	0
+li	prev	囊	16	0
+li	prev	囍	2	0
+li	prev	四	3	3
+li	prev	回	23	5
+li	prev	因	65	14
+li	prev	囧	1	0
+li	prev	囪	1	0
+li	prev	固	5	1
+li	prev	圃	5	0
+li	prev	圈	217	3
+li	prev	國	54	18
+li	prev	圍	74	1
+li	prev	園	353	10
+li	prev	圓	11	0
+li	prev	圖	356	9
+li	prev	團	480	3
+li	prev	土	142	0
+li	prev	在	3789	123
+li	prev	地	379	51
+li	prev	圳	1	1
+li	prev	圾	12	1
+li	prev	址	33	0
+li	prev	坂	11	2
+li	prev	均	1	7
+li	prev	坊	5	0
+li	prev	坎	94	0
+li	prev	坐	4	0
+li	prev	坑	175	3
+li	prev	坡	2	1158
+li	prev	坤	4	0
+li	prev	坦	2	0
+li	prev	坨	1	0
+li	prev	坪	0	1
+li	prev	型	45	3
+li	prev	垣	1	0
+li	prev	埂	1	0
+li	prev	埃	32	44
+li	prev	埋	1	0
+li	prev	城	286	6
+li	prev	埔	0	287
+li	prev	域	87	3
+li	prev	埤	0	2
+li	prev	執	3	0
+li	prev	培	1	24
+li	prev	基	11	772
+li	prev	堂	87	1
+li	prev	堅	1	2
+li	prev	堆	114	23
+li	prev	堡	188	4
+li	prev	堤	1	5
+li	prev	報	64	9
+li	prev	場	612	18
+li	prev	塊	37	3
+li	prev	塑	1	0
+li	prev	塔	125	114
+li	prev	塘	15	1
+li	prev	塚	2	0
+li	prev	塞	15	3
+li	prev	塢	5	1
+li	prev	填	0	1
+li	prev	塵	21	0
+li	prev	塾	2	0
+li	prev	境	196	1
+li	prev	墅	23	0
+li	prev	墊	19	0
+li	prev	墓	46	0
+li	prev	增	2	1
+li	prev	墟	15	1
+li	prev	墨	0	5
+li	prev	墳	8	0
+li	prev	壁	37	12
+li	prev	壇	13	0
+li	prev	壊	1	0
+li	prev	壓	5	3
+li	prev	壘	8	0
+li	prev	壞	7	3
+li	prev	壢	1	1
+li	prev	壤	6	0
+li	prev	士	44	6
+li	prev	壯	1	0
+li	prev	壺	54	0
+li	prev	壽	0	2
+li	prev	夏	4	5
+li	prev	夕	0	63
+li	prev	外	48	5
+li	prev	多	31	78
+li	prev	夜	392	4
+li	prev	夠	7	6
+li	prev	夢	1229	20
+li	prev	大	55	612
+li	prev	天	159	22
+li	prev	太	31	2
+li	prev	夫	22	1
+li	prev	央	2	7
+li	prev	夯	1	0
+li	prev	失	1	3
+li	prev	夷	1	0
+li	prev	夾	111	0
+li	prev	奇	38	64
+li	prev	奈	2	4
+li	prev	奉	0	1
+li	prev	奎	0	29
+li	prev	奏	22	0
+li	prev	契	2	1
+li	prev	奔	1	0
+li	prev	套	88	0
+li	prev	奧	9	65
+li	prev	奮	1	0
+li	prev	女	31	3
+li	prev	奶	27	0
+li	prev	奸	1	0
+li	prev	她	7	1
+li	prev	好	67	19
+li	prev	如	6	11
+li	prev	妃	2	0
+li	prev	妄	2	0
+li	prev	妒	1	0
+li	prev	妓	1	0
+li	prev	妖	4	0
+li	prev	妙	1	0
+li	prev	妥	3	0
+li	prev	妮	1	0
+li	prev	妲	0	1
+li	prev	妳	3	0
+li	prev	妹	13	0
+li	prev	妻	11	1
+li	prev	姆	4	4
+li	prev	姊	1	0
+li	prev	始	4	4
+li	prev	姐	4	0
+li	prev	姓	1	5
+li	prev	委	1	1
+li	prev	姨	1	0
+li	prev	姬	18	1
+li	prev	姻	100	0
+li	prev	威	10	0
+li	prev	娃	5	0
+li	prev	娘	34	0
+li	prev	娜	6	40
+li	prev	娥	0	1
+li	prev	婁	1	0
+li	prev	婆	6	1
+li	prev	婚	5	0
+li	prev	婦	4	0
+li	prev	婿	3	0
+li	prev	媒	1	0
+li	prev	媛	1	0
+li	prev	媽	33	2
+li	prev	嫁	2	0
+li	prev	嫂	1	0
+li	prev	嫌	0	1
+li	prev	嬉	0	2
+li	prev	嬌	4	0
+li	prev	嬤	1	0
+li	prev	嬸	1	0
+li	prev	子	3652	52
+li	prev	孔	46	0
+li	prev	字	302	0
+li	prev	存	50	1
+li	prev	孝	0	4
+li	prev	季	94	0
+li	prev	孩	13	0
+li	prev	學	116	3
+li	prev	孺	1	0
+li	prev	孽	2	0
+li	prev	它	43	3
+li	prev	宅	46	1
+li	prev	宇	8	21
+li	prev	守	7	0
+li	prev	安	12	106
+li	prev	宋	1	0
+li	prev	完	24	11
+li	prev	宗	4	0
+li	prev	官	5	0
+li	prev	宙	67	1
+li	prev	定	560	38
+li	prev	宛	1	0
+li	prev	宜	5	4
+li	prev	実	0	1
+li	prev	客	18	3
+li	prev	宣	4	0
+li	prev	室	835	6
+li	prev	宮	216	2
+li	prev	宰	1	0
+li	prev	害	5	2
+li	prev	宴	1	0
+li	prev	宵	1	0
+li	prev	家	20413	42
+li	prev	容	107	2
+li	prev	宿	11	1
+li	prev	密	4	0
+li	prev	寇	0	14
+li	prev	富	3	49
+li	prev	寓	34	0
+li	prev	寞	0	1
+li	prev	察	5	1
+li	prev	寢	7	0
+li	prev	實	170	16
+li	prev	寧	3	5
+li	prev	寨	2	0
+li	prev	審	5	0
+li	prev	寫	10	8
+li	prev	寮	5	9
+li	prev	寶	25	1
+li	prev	寸	3	0
+li	prev	寺	37	0
+li	prev	封	22	1
+li	prev	射	10	0
+li	prev	將	51	5
+li	prev	專	2	0
+li	prev	尊	8	0
+li	prev	尋	7	1
+li	prev	對	60	30
+li	prev	導	32	1
+li	prev	小	22	16
+li	prev	少	14	34
+li	prev	尖	2	0
+li	prev	尤	0	83
+li	prev	尬	1	0
+li	prev	就	83	37
+li	prev	尺	0	2
+li	prev	尼	11	0
+li	prev	尾	15	6
+li	prev	尿	3	0
+li	prev	局	171	0
+li	prev	居	4	2
+li	prev	屆	4	10
+li	prev	屋	221	1
+li	prev	屌	2	1
+li	prev	屍	2	0
+li	prev	屎	19	0
+li	prev	屏	4	0
+li	prev	展	10	5
+li	prev	屜	90	0
+li	prev	層	54	5
+li	prev	屬	5	1
+li	prev	山	442	106
+li	prev	岡	0	61
+li	prev	岩	5	2
+li	prev	岸	9	5
+li	prev	峇	0	161
+li	prev	峒	1	0
+li	prev	峰	1	3
+li	prev	島	22	7
+li	prev	峽	5	0
+li	prev	崁	3	1
+li	prev	崎	2	4
+li	prev	崖	3	0
+li	prev	崗	1	3
+li	prev	崙	1	8
+li	prev	崩	1	0
+li	prev	嵐	1	0
+li	prev	嶺	0	3
+li	prev	川	2	7
+li	prev	州	2	1
+li	prev	巡	2	0
+li	prev	巢	8	0
+li	prev	工	17	3
+li	prev	巧	5	0
+li	prev	巨	4	0
+li	prev	巫	2	2
+li	prev	差	4	2
+li	prev	己	14	2
+li	prev	已	8	0
+li	prev	巴	96	64
+li	prev	巷	47	0
+li	prev	巾	8	0
+li	prev	市	307	12
+li	prev	布	88	623
+li	prev	希	2	149
+li	prev	帕	7	101
+li	prev	帖	6	0
+li	prev	帝	4	1
+li	prev	帥	1	0
+li	prev	師	52	14
+li	prev	席	5	1
+li	prev	帳	20	1
+li	prev	帶	72	7
+li	prev	常	55	13
+li	prev	帽	40	1
+li	prev	幅	14	1
+li	prev	幕	67	2
+li	prev	幡	10	0
+li	prev	幣	12	9
+li	prev	幫	7	5
+li	prev	干	1	1
+li	prev	平	2	16
+li	prev	年	291	125
+li	prev	幸	4	0
+li	prev	幹	2	1
+li	prev	幻	6	0
+li	prev	幾	0	18
+li	prev	広	0	2
+li	prev	庄	3	8
+li	prev	庇	0	3
+li	prev	床	6	0
+li	prev	序	8	0
+li	prev	底	24	146
+li	prev	店	2605	3
+li	prev	庚	1	3
+li	prev	府	98	2
+li	prev	度	64	4
+li	prev	座	28	3
+li	prev	庫	411	162
+li	prev	庭	99	2
+li	prev	庵	1	0
+li	prev	康	16	6
+li	prev	庸	8	0
+li	prev	廁	8	0
+li	prev	廂	148	0
+li	prev	廄	3	0
+li	prev	廈	20	0
+li	prev	廊	17	0
+li	prev	廍	0	5
+li	prev	廓	0	1
+li	prev	廚	8	0
+li	prev	廟	384	1
+li	prev	廠	132	2
+li	prev	廢	1	5
+li	prev	廣	2	0
+li	prev	廳	233	2
+li	prev	延	1	0
+li	prev	廷	5	1
+li	prev	建	2	3
+li	prev	弄	74	1
+li	prev	弈	2	0
+li	prev	弊	0	1
+li	prev	式	115	1
+li	prev	引	2	0
+li	prev	弗	56	152
+li	prev	弟	9	1
+li	prev	弦	1	0
+li	prev	弧	5	0
+li	prev	張	54	19
+li	prev	強	20	18
+li	prev	彈	15	2
+li	prev	彎	4	0
+li	prev	彙	2	0
+li	prev	形	9	0
+li	prev	彩	1	20
+li	prev	影	653	2
+li	prev	役	7	0
+li	prev	彿	1	0
+li	prev	往	350	7
+li	prev	待	17	6
+li	prev	很	24	0
+li	prev	律	13	1
+li	prev	後	169	32
+li	prev	徑	14	0
+li	prev	徒	5	0
+li	prev	得	186	41
+li	prev	從	240	18
+li	prev	復	5	13
+li	prev	循	1	0
+li	prev	徳	0	1
+li	prev	徵	1	1
+li	prev	德	8	1711
+li	prev	心	8074	25
+li	prev	必	1	0
+li	prev	忍	3	0
+li	prev	忑	1	0
+li	prev	忒	0	11
+li	prev	志	5	0
+li	prev	忙	30	1
+li	prev	忠	0	4
+li	prev	快	5	1
+li	prev	念	39	2
+li	prev	怒	1	0
+li	prev	怕	21	5
+li	prev	怖	3	0
+li	prev	思	12	1
+li	prev	怡	0	1
+li	prev	性	27	6
+li	prev	怨	0	1
+li	prev	怪	53	13
+li	prev	恆	7	0
+li	prev	恥	0	1
+li	prev	恨	1	0
+li	prev	恩	15	120
+li	prev	息	40	0
+li	prev	恰	0	1
+li	prev	恵	0	6
+li	prev	悅	5	0
+li	prev	悉	1	0
+li	prev	悍	0	127
+li	prev	悠	0	10
+li	prev	悶	1	0
+li	prev	情	574	7
+li	prev	惑	1	0
+li	prev	惜	14	1
+li	prev	惠	26	18
+li	prev	惡	6	0
+li	prev	想	71	9
+li	prev	惹	2	2
+li	prev	意	25	4
+li	prev	愕	1	0
+li	prev	愛	50	47
+li	prev	感	17	0
+li	prev	慈	0	2
+li	prev	態	37	1
+li	prev	慌	1	0
+li	prev	慕	1	1
+li	prev	慢	1	0
+li	prev	慣	4	1
+li	prev	慧	1	0
+li	prev	慮	5	11
+li	prev	慶	0	4
+li	prev	慾	1	0
+li	prev	憂	1	0
+li	prev	憐	1	0
+li	prev	憬	0	3
+li	prev	憶	315	5
+li	prev	憾	1	0
+li	prev	懂	6	1
+li	prev	應	17	5
+li	prev	懵	1	0
+li	prev	懷	365	5
+li	prev	懼	5	0
+li	prev	戀	4	0
+li	prev	戈	1	19
+li	prev	戎	1	0
+li	prev	成	83	55
+li	prev	我	56	33
+li	prev	戒	10	1
+li	prev	或	39	30
+li	prev	戚	1	2
+li	prev	截	2	0
+li	prev	戰	103	17
+li	prev	戲	2416	11
+li	prev	戴	0	1
+li	prev	戶	285	0
+li	prev	房	453	5
+li	prev	所	199	11
+li	prev	扁	1	0
+li	prev	扇	7	0
+li	prev	扉	1	0
+li	prev	手	1226	20
+li	prev	才	2	0
+li	prev	扎	0	5
+li	prev	打	119	11
+li	prev	托	5	49
+li	prev	扣	7	5
+li	prev	扭	1	0
+li	prev	扶	1	0
+li	prev	批	7	0
+li	prev	找	26	40
+li	prev	承	6	0
+li	prev	技	13	0
+li	prev	抄	3	0
+li	prev	把	157	43
+li	prev	抓	2	1
+li	prev	投	11	0
+li	prev	抗	3	0
+li	prev	折	6	1
+li	prev	披	0	2
+li	prev	抱	9	0
+li	prev	抵	1	0
+li	prev	押	1	0
+li	prev	抽	34	3
+li	prev	拂	1	0
+li	prev	拆	5	1
+li	prev	拉	61	186
+li	prev	拌	1	0
+li	prev	拍	10	3
+li	prev	拔	4	1
+li	prev	拖	0	1
+li	prev	招	6	0
+li	prev	拜	3	1
+li	prev	括	4	3
+li	prev	拱	1	0
+li	prev	拳	10	0
+li	prev	拼	1	2
+li	prev	拿	25	6
+li	prev	持	5	3
+li	prev	指	15	0
+li	prev	按	3	8
+li	prev	挑	3	0
+li	prev	挖	4	0
+li	prev	挫	1	0
+li	prev	振	1	0
+li	prev	捆	1	0
+li	prev	捧	2	0
+li	prev	捲	11	0
+li	prev	捷	11	2
+li	prev	掃	2	0
+li	prev	授	2	0
+li	prev	掉	23	7
+li	prev	掌	7	0
+li	prev	掏	0	1
+li	prev	排	18	2
+li	prev	掛	2	1
+li	prev	採	0	3
+li	prev	探	6	0
+li	prev	接	9	13
+li	prev	控	10	2
+li	prev	推	19	11
+li	prev	掰	0	1
+li	prev	揍	1	0
+li	prev	提	6	23
+li	prev	插	3	0
+li	prev	揚	0	2
+li	prev	換	31	124
+li	prev	握	1	2
+li	prev	援	9	1
+li	prev	揹	1	0
+li	prev	損	2	0
+li	prev	搖	3	2
+li	prev	搜	1	0
+li	prev	搞	12	3
+li	prev	搬	1	0
+li	prev	搭	3	5
+li	prev	搶	0	2
+li	prev	摩	1	9
+li	prev	摳	1	0
+li	prev	摸	3	0
+li	prev	摺	9	0
+li	prev	撈	1	0
+li	prev	撒	1	1
+li	prev	撞	2	0
+li	prev	撥	2	0
+li	prev	撫	0	2
+li	prev	播	67	2
+li	prev	撮	1	0
+li	prev	撲	2	0
+li	prev	撿	3	0
+li	prev	擇	17	5
+li	prev	擊	10	1
+li	prev	操	0	1
+li	prev	擎	19	1
+li	prev	擔	1	1
+li	prev	據	27	2
+li	prev	擠	1	0
+li	prev	擬	1	0
+li	prev	擴	5	0
+li	prev	擺	2	0
+li	prev	擾	2	1
+li	prev	攔	1	0
+li	prev	攜	1	0
+li	prev	攤	7	1
+li	prev	支	19	1
+li	prev	收	22	2
+li	prev	改	15	9
+li	prev	攻	16	3
+li	prev	放	61	20
+li	prev	政	1	1
+li	prev	故	14	22
+li	prev	效	5	1
+li	prev	敏	1	0
+li	prev	救	4	2
+li	prev	敗	3	2
+li	prev	教	30	2
+li	prev	散	1	4
+li	prev	敦	1	0
+li	prev	敬	1	6
+li	prev	整	10	3
+li	prev	敵	4	0
+li	prev	敷	1	0
+li	prev	數	31	7
+li	prev	文	1225	14
+li	prev	斐	0	1
+li	prev	斗	4	2
+li	prev	料	124	1
+li	prev	斜	0	11
+li	prev	斤	2	0
+li	prev	斧	1	0
+li	prev	斬	3	0
+li	prev	斯	31	174
+li	prev	新	23	66
+li	prev	斷	5	1
+li	prev	方	29	13
+li	prev	於	35	25
+li	prev	施	13	1
+li	prev	旅	6	0
+li	prev	旋	0	1
+li	prev	族	104	1
+li	prev	旗	3	1
+li	prev	日	76	16
+li	prev	旦	1	0
+li	prev	早	1	0
+li	prev	旯	1	0
+li	prev	昂	1	0
+li	prev	昇	0	2
+li	prev	昌	1	2
+li	prev	明	98	186
+li	prev	昏	5	0
+li	prev	易	22	1
+li	prev	昔	1	0
+li	prev	星	78	9
+li	prev	映	0	5
+li	prev	春	16	0
+li	prev	昧	1	0
+li	prev	是	888	323
+li	prev	時	73	16
+li	prev	晃	2	0
+li	prev	晚	9	0
+li	prev	晝	2	0
+li	prev	普	3	54
+li	prev	景	80	0
+li	prev	晶	2	0
+li	prev	智	1	1
+li	prev	暈	0	1
+li	prev	暖	5	0
+li	prev	暗	59	0
+li	prev	暮	0	80
+li	prev	暴	8	2
+li	prev	曆	8	0
+li	prev	曉	0	1
+li	prev	曜	3	0
+li	prev	曦	1	0
+li	prev	曬	1	1
+li	prev	曲	52	1
+li	prev	更	21	0
+li	prev	書	629	7
+li	prev	曼	1	0
+li	prev	替	19	1
+li	prev	最	124	0
+li	prev	會	207	13
+li	prev	月	131	16
+li	prev	有	171	248
+li	prev	服	54	2
+li	prev	朗	3	7
+li	prev	望	27	6
+li	prev	朝	13	4
+li	prev	期	63	7
+li	prev	木	8	3
+li	prev	末	6	0
+li	prev	本	353	22
+li	prev	札	2	3
+li	prev	朱	1	66
+li	prev	朴	0	1
+li	prev	朵	52	1
+li	prev	杆	2	0
+li	prev	杉	2	1
+li	prev	李	19	2
+li	prev	杏	0	20
+li	prev	材	93	2
+li	prev	村	301	116
+li	prev	杖	4	0
+li	prev	杜	1	27
+li	prev	束	4	1
+li	prev	杯	105	2
+li	prev	杰	0	1
+li	prev	東	7	44
+li	prev	松	2	6
+li	prev	板	74	4
+li	prev	析	3	0
+li	prev	枕	3	0
+li	prev	林	345	9
+li	prev	果	152	29
+li	prev	枝	2	0
+li	prev	枯	0	1
+li	prev	架	38	0
+li	prev	柄	1	0
+li	prev	柏	0	5
+li	prev	某	2	3
+li	prev	染	1	1
+li	prev	柔	3	1
+li	prev	查	34	33
+li	prev	柯	0	8
+li	prev	柱	15	0
+li	prev	柴	0	1
+li	prev	柵	2	0
+li	prev	栓	1	0
+li	prev	栞	0	7
+li	prev	校	217	7
+li	prev	核	2	0
+li	prev	根	5	0
+li	prev	格	161	292
+li	prev	栽	2	0
+li	prev	桂	0	3
+li	prev	桃	0	1
+li	prev	框	57	0
+li	prev	案	124	2
+li	prev	桌	14	2
+li	prev	桐	0	1
+li	prev	桔	0	2
+li	prev	桜	0	1
+li	prev	桶	295	6
+li	prev	桿	3	0
+li	prev	梅	57	62
+li	prev	梗	4	0
+li	prev	條	47	0
+li	prev	梟	1	0
+li	prev	梨	8	0
+li	prev	梯	121	0
+li	prev	械	2	2
+li	prev	棄	2	0
+li	prev	棉	2	0
+li	prev	棋	5	0
+li	prev	棒	16	0
+li	prev	棘	1	0
+li	prev	棚	38	0
+li	prev	棟	4	0
+li	prev	棧	9	1
+li	prev	森	10	35
+li	prev	棺	13	0
+li	prev	椅	8	0
+li	prev	椎	1	0
+li	prev	椒	1	0
+li	prev	楊	1	0
+li	prev	楚	10	1
+li	prev	楦	1	0
+li	prev	業	103	24
+li	prev	楮	0	1
+li	prev	極	2	1
+li	prev	概	2	2
+li	prev	榜	22	0
+li	prev	榮	2	48
+li	prev	榻	1	0
+li	prev	構	32	0
+li	prev	槍	11	0
+li	prev	槨	1	0
+li	prev	槽	50	0
+li	prev	樁	0	1
+li	prev	樂	55	7
+li	prev	樑	2	0
+li	prev	樓	143	3
+li	prev	標	6	2
+li	prev	模	1	13
+li	prev	樣	33	21
+li	prev	樹	31	130
+li	prev	橇	1	0
+li	prev	橋	2	13
+li	prev	橘	4	0
+li	prev	機	764	4
+li	prev	橫	4	0
+li	prev	檔	62	1
+li	prev	檢	1	0
+li	prev	檬	1	0
+li	prev	檯	9	1
+li	prev	檳	0	2
+li	prev	檻	8	0
+li	prev	櫃	298	0
+li	prev	櫥	37	0
+li	prev	櫻	1	0
+li	prev	欄	93	1
+li	prev	權	9	4
+li	prev	次	78	26
+li	prev	欲	1	0
+li	prev	欸	9	2
+li	prev	欺	1	0
+li	prev	欽	1	0
+li	prev	款	104	1
+li	prev	歉	1	0
+li	prev	歌	74	1
+li	prev	歐	12	9
+li	prev	歡	102	16
+li	prev	止	1	6
+li	prev	正	16	13
+li	prev	此	0	5
+li	prev	步	9	8
+li	prev	武	16	45
+li	prev	歧	2	0
+li	prev	歪	1	0
+li	prev	歲	3	3
+li	prev	歷	17	0
+li	prev	歸	0	1
+li	prev	歹	2	0
+li	prev	死	626	16
+li	prev	殊	1	1
+li	prev	段	63	5
+li	prev	殺	23	2
+li	prev	殻	1	0
+li	prev	殼	107	1
+li	prev	殿	33	0
+li	prev	母	8	2
+li	prev	毒	7	0
+li	prev	比	36	26
+li	prev	毛	2	3
+li	prev	毯	2	0
+li	prev	氏	8	0
+li	prev	民	18	11
+li	prev	氓	1	0
+li	prev	氛	7	0
+li	prev	氣	133	3
+li	prev	氧	1	0
+li	prev	水	897	111
+li	prev	永	1	1
+li	prev	汀	0	2
+li	prev	汁	27	0
+li	prev	求	10	7
+li	prev	汐	1	75
+li	prev	汗	0	1
+li	prev	汝	0	77
+li	prev	江	10	9
+li	prev	池	268	5
+li	prev	污	1	0
+li	prev	汪	1	0
+li	prev	汰	0	1
+li	prev	決	11	2
+li	prev	汽	1	0
+li	prev	沃	1	5
+li	prev	沉	1	0
+li	prev	沒	6	27
+li	prev	沖	3	0
+li	prev	沙	23	30
+li	prev	沫	3	0
+li	prev	河	164	3
+li	prev	油	69	23
+li	prev	治	13	5
+li	prev	沼	9	0
+li	prev	沿	1	0
+li	prev	況	10	2
+li	prev	泉	17	24
+li	prev	泊	3	0
+li	prev	法	119	41
+li	prev	泡	41	0
+li	prev	波	13	242
+li	prev	泥	26	2
+li	prev	注	6	0
+li	prev	泰	2	21
+li	prev	泳	1	0
+li	prev	泵	1	0
+li	prev	洋	17	2
+li	prev	洗	4	1
+li	prev	洛	10	18
+li	prev	洞	322	2
+li	prev	津	2	4
+li	prev	洨	1	0
+li	prev	洲	8	8
+li	prev	活	202	1
+li	prev	洽	2	0
+li	prev	派	31	9
+li	prev	流	60	3
+li	prev	浦	0	2
+li	prev	浩	1	0
+li	prev	浪	17	2
+li	prev	浮	0	1
+li	prev	浴	1	0
+li	prev	海	920	67
+li	prev	涅	0	4
+li	prev	消	2	1
+li	prev	涉	1	0
+li	prev	涯	26	14
+li	prev	液	52	0
+li	prev	涼	0	1
+li	prev	淇	0	6
+li	prev	淋	12	0
+li	prev	淑	2	0
+li	prev	淖	4	0
+li	prev	淘	1	0
+li	prev	淚	7	0
+li	prev	淡	2	0
+li	prev	淨	3	0
+li	prev	淫	0	1
+li	prev	深	1	1
+li	prev	淵	34	1
+li	prev	添	0	1
+li	prev	清	22	3
+li	prev	減	0	1
+li	prev	渠	3	0
+li	prev	渡	7	1
+li	prev	渣	9	0
+li	prev	渦	19	0
+li	prev	測	16	3
+li	prev	港	10	6
+li	prev	游	5	0
+li	prev	渺	1	0
+li	prev	湊	0	7
+li	prev	湖	80	6
+li	prev	湘	0	1
+li	prev	湧	1	0
+li	prev	湯	195	1
+li	prev	湳	0	7
+li	prev	満	0	10
+li	prev	溏	1	0
+li	prev	源	19	6
+li	prev	準	14	1
+li	prev	溝	91	4
+li	prev	溪	13	10
+li	prev	滅	4	0
+li	prev	滋	2	0
+li	prev	滑	1	0
+li	prev	滝	0	2
+li	prev	滴	5	0
+li	prev	滸	1	0
+li	prev	滾	0	1
+li	prev	滿	12	20
+li	prev	漆	2	0
+li	prev	漏	0	1
+li	prev	演	21	4
+li	prev	漠	49	0
+li	prev	漢	10	2
+li	prev	漪	1	0
+li	prev	漫	27	4
+li	prev	漯	0	1
+li	prev	漿	36	0
+li	prev	潔	2	0
+li	prev	潛	2	0
+li	prev	潢	15	0
+li	prev	潤	1	0
+li	prev	潭	7	7
+li	prev	潮	12	0
+li	prev	澀	1	0
+li	prev	澎	1	0
+li	prev	澤	2	3
+li	prev	澳	0	3
+li	prev	濃	3	0
+li	prev	濘	5	1
+li	prev	濛	5	0
+li	prev	濤	5	0
+li	prev	濱	0	1
+li	prev	濾	1	2
+li	prev	瀨	1	0
+li	prev	瀬	0	1
+li	prev	灘	2	0
+li	prev	灣	83	9
+li	prev	火	44	0
+li	prev	灰	1	0
+li	prev	灼	1	0
+li	prev	災	5	0
+li	prev	炎	1	0
+li	prev	炒	1	0
+li	prev	炕	1	0
+li	prev	炭	1	0
+li	prev	炮	1	0
+li	prev	炸	6	7
+li	prev	為	228	45
+li	prev	烏	1	4
+li	prev	烤	1	1
+li	prev	焙	2	0
+li	prev	無	3	6
+li	prev	焦	6	1
+li	prev	焰	5	1
+li	prev	然	90	23
+li	prev	煉	2	1
+li	prev	煌	0	1
+li	prev	煎	1	0
+li	prev	煙	8	0
+li	prev	煞	1	0
+li	prev	煥	0	1
+li	prev	照	49	7
+li	prev	煩	3	3
+li	prev	煮	1	0
+li	prev	煲	3	0
+li	prev	熊	3	0
+li	prev	熟	3	0
+li	prev	熱	4	1
+li	prev	燈	13	3
+li	prev	燒	15	1
+li	prev	燙	2	0
+li	prev	營	99	7
+li	prev	燥	4	0
+li	prev	燻	0	6
+li	prev	燼	6	0
+li	prev	爆	5	1
+li	prev	爐	43	0
+li	prev	爛	39	2
+li	prev	爪	2	0
+li	prev	爬	1	0
+li	prev	爭	32	1
+li	prev	爵	1	0
+li	prev	父	4	0
+li	prev	爸	4	0
+li	prev	爺	0	2
+li	prev	爽	3	1
+li	prev	爾	20	28
+li	prev	牆	64	1
+li	prev	片	1358	2
+li	prev	版	145	5
+li	prev	牌	85	3
+li	prev	牙	6	10
+li	prev	牛	8	7
+li	prev	牠	2	0
+li	prev	牢	222	1
+li	prev	牧	0	2
+li	prev	物	110	6
+li	prev	特	53	149
+li	prev	犬	5	0
+li	prev	犯	3	0
+li	prev	狀	4	0
+li	prev	狂	4	1
+li	prev	狐	4	0
+li	prev	狗	6	1
+li	prev	狠	1	0
+li	prev	狩	1	0
+li	prev	狸	1	0
+li	prev	狼	5	0
+li	prev	猛	1	0
+li	prev	猜	9	1
+li	prev	猩	1	0
+li	prev	猴	2	0
+li	prev	獄	201	35
+li	prev	獅	1	1
+li	prev	獎	1	0
+li	prev	獨	2	0
+li	prev	獵	3	0
+li	prev	獸	40	1
+li	prev	獻	3	0
+li	prev	玄	0	1
+li	prev	率	8	0
+li	prev	玉	2	171
+li	prev	王	148	7
+li	prev	玩	24	57
+li	prev	玹	1	0
+li	prev	玻	0	14
+li	prev	珀	4	1
+li	prev	珈	1	0
+li	prev	珠	25	13
+li	prev	班	35	2
+li	prev	珮	8	0
+li	prev	現	189	11
+li	prev	球	85	9
+li	prev	理	31	11
+li	prev	琊	1	0
+li	prev	琪	2	0
+li	prev	琴	6	8
+li	prev	瑛	0	8
+li	prev	瑜	1	3
+li	prev	瑞	0	4
+li	prev	瑟	2	23
+li	prev	瑤	0	1
+li	prev	瑪	3	18
+li	prev	璃	17	0
+li	prev	璋	0	1
+li	prev	璧	1	0
+li	prev	環	48	2
+li	prev	璽	1	0
+li	prev	瓏	1	0
+li	prev	瓜	6	0
+li	prev	瓦	10	113
+li	prev	瓶	42	0
+li	prev	甕	14	0
+li	prev	甜	3	0
+li	prev	生	163	19
+li	prev	產	22	0
+li	prev	甦	2	0
+li	prev	用	85	157
+li	prev	甫	1	0
+li	prev	田	147	46
+li	prev	由	11	41
+li	prev	甲	17	13
+li	prev	男	10	0
+li	prev	甸	1	0
+li	prev	町	3	0
+li	prev	界	953	8
+li	prev	畏	1	0
+li	prev	留	2	12
+li	prev	畢	1	0
+li	prev	略	16	2
+li	prev	番	4	0
+li	prev	畫	593	3
+li	prev	當	54	38
+li	prev	疆	1	0
+li	prev	疇	6	0
+li	prev	疊	1	2
+li	prev	疏	1	0
+li	prev	疑	12	1
+li	prev	疫	1	0
+li	prev	病	5	0
+li	prev	症	4	0
+li	prev	痕	1	0
+li	prev	痛	3	0
+li	prev	痾	1	0
+li	prev	瘦	2	0
+li	prev	癌	1	0
+li	prev	癡	1	1
+li	prev	癮	2	0
+li	prev	登	3	3
+li	prev	發	46	13
+li	prev	白	42	3
+li	prev	百	21	458
+li	prev	的	397	833
+li	prev	皇	18	0
+li	prev	皮	52	5
+li	prev	皿	3	0
+li	prev	盃	4	4
+li	prev	盅	2	0
+li	prev	盆	26	0
+li	prev	盈	2	0
+li	prev	益	12	1
+li	prev	盒	209	1
+li	prev	盔	5	0
+li	prev	盛	0	3
+li	prev	盜	2	3
+li	prev	盟	119	7
+li	prev	盡	0	2
+li	prev	監	2	1
+li	prev	盤	105	1
+li	prev	盧	1	0
+li	prev	目	199	0
+li	prev	盲	1	0
+li	prev	相	18	34
+li	prev	盾	2	0
+li	prev	省	1	2
+li	prev	眉	3	1
+li	prev	看	251	69
+li	prev	真	10	10
+li	prev	眠	3	0
+li	prev	眶	13	0
+li	prev	眸	3	0
+li	prev	眼	1792	7
+li	prev	眾	34	1
+li	prev	睛	78	0
+li	prev	睡	1	0
+li	prev	督	6	2
+li	prev	瞧	1	0
+li	prev	瞰	0	1
+li	prev	瞳	2	0
+li	prev	瞻	6	0
+li	prev	瞼	1	0
+li	prev	知	97	13
+li	prev	短	0	27
+li	prev	石	23	3
+li	prev	砂	4	1
+li	prev	砍	2	6
+li	prev	研	1	0
+li	prev	砲	2	0
+li	prev	破	7	10
+li	prev	砸	0	1
+li	prev	硬	3	0
+li	prev	碁	1	0
+li	prev	碌	2	0
+li	prev	碎	0	1
+li	prev	碑	2	0
+li	prev	碗	173	0
+li	prev	碟	93	0
+li	prev	碧	1	0
+li	prev	碩	1	0
+li	prev	碰	0	1
+li	prev	碴	1	0
+li	prev	確	3	1
+li	prev	碼	37	6
+li	prev	碾	3	0
+li	prev	磅	2	0
+li	prev	磚	4	0
+li	prev	磨	0	1
+li	prev	磯	1	0
+li	prev	礎	1	0
+li	prev	礙	3	0
+li	prev	礦	3	0
+li	prev	礫	4	0
+li	prev	示	27	7
+li	prev	社	36	9
+li	prev	祐	0	4
+li	prev	祕	1	0
+li	prev	祖	9	1
+li	prev	祝	1	1
+li	prev	神	127	42
+li	prev	祠	1	0
+li	prev	祥	0	1
+li	prev	票	39	10
+li	prev	祭	11	0
+li	prev	祿	1	1
+li	prev	禍	3	0
+li	prev	福	40	27
+li	prev	禑	1	0
+li	prev	禧	2	0
+li	prev	禮	12	0
+li	prev	禱	1	0
+li	prev	禿	1	0
+li	prev	秀	21	2
+li	prev	私	1	0
+li	prev	秋	0	3
+li	prev	科	36	9
+li	prev	秒	2	1
+li	prev	秘	4	1
+li	prev	租	3	0
+li	prev	稀	20	22
+li	prev	稅	8	0
+li	prev	程	151	11
+li	prev	稠	1	0
+li	prev	種	35	38
+li	prev	稱	16	4
+li	prev	稿	20	0
+li	prev	穆	18	73
+li	prev	穌	0	1
+li	prev	積	15	89
+li	prev	穎	0	1
+li	prev	穩	3	0
+li	prev	穫	1	0
+li	prev	穴	54	1
+li	prev	究	24	1
+li	prev	穹	1	0
+li	prev	空	66	24
+li	prev	穿	7	1
+li	prev	突	3	1
+li	prev	窖	1	0
+li	prev	窗	39	0
+li	prev	窟	37	0
+li	prev	窩	141	0
+li	prev	窪	1	0
+li	prev	窯	1	0
+li	prev	窿	1	0
+li	prev	立	3	2
+li	prev	站	211	5
+li	prev	竟	27	2
+li	prev	章	408	1
+li	prev	端	11	2
+li	prev	競	2	0
+li	prev	竹	2	8
+li	prev	笑	33	1
+li	prev	笠	2	0
+li	prev	符	3	0
+li	prev	第	2	0
+li	prev	筆	6	0
+li	prev	等	16	30
+li	prev	筍	3	3
+li	prev	筐	2	0
+li	prev	筒	23	1
+li	prev	答	12	4
+li	prev	策	8	0
+li	prev	箔	1	0
+li	prev	算	67	39
+li	prev	管	67	9
+li	prev	箭	6	0
+li	prev	箱	607	1
+li	prev	節	128	1
+li	prev	篁	1	0
+li	prev	範	9	0
+li	prev	篇	132	0
+li	prev	築	19	1
+li	prev	篷	37	0
+li	prev	簡	1	0
+li	prev	簪	1	0
+li	prev	簽	7	0
+li	prev	簾	4	0
+li	prev	簿	90	0
+li	prev	籃	23	0
+li	prev	籌	1	0
+li	prev	籍	5	9
+li	prev	籠	61	0
+li	prev	籤	10	0
+li	prev	米	8	40
+li	prev	粉	15	0
+li	prev	粗	0	1
+li	prev	粥	18	0
+li	prev	粽	2	0
+li	prev	精	11	1
+li	prev	粿	1	0
+li	prev	糊	39	26
+li	prev	糕	24	0
+li	prev	糖	23	4
+li	prev	糜	2	0
+li	prev	糞	2	0
+li	prev	糧	1	0
+li	prev	糬	4	0
+li	prev	糰	12	0
+li	prev	系	85	0
+li	prev	紀	15	1
+li	prev	約	100	1
+li	prev	紅	14	1
+li	prev	紋	2	0
+li	prev	納	2	42
+li	prev	純	2	15
+li	prev	紗	1	3
+li	prev	紙	15	0
+li	prev	級	42	6
+li	prev	紛	1	0
+li	prev	素	12	6
+li	prev	紡	1	0
+li	prev	索	10	43
+li	prev	紫	8	0
+li	prev	紮	0	1
+li	prev	累	6	1
+li	prev	細	24	1
+li	prev	紹	41	4
+li	prev	終	3	0
+li	prev	組	419	5
+li	prev	絆	1	0
+li	prev	結	76	4
+li	prev	絕	6	0
+li	prev	絡	7	3
+li	prev	給	13	42
+li	prev	絨	1	0
+li	prev	絮	52	0
+li	prev	統	161	2
+li	prev	絲	22	0
+li	prev	絵	1	4
+li	prev	綁	1	0
+li	prev	綃	0	2
+li	prev	經	39	1
+li	prev	綜	10	0
+li	prev	綠	2	5
+li	prev	綢	0	1
+li	prev	維	13	82
+li	prev	綱	6	0
+li	prev	網	49	1
+li	prev	綴	1	0
+li	prev	綿	5	0
+li	prev	緊	1	0
+li	prev	緒	30	228
+li	prev	線	216	12
+li	prev	緞	1	0
+li	prev	緣	12	0
+li	prev	編	3	0
+li	prev	緯	0	1
+li	prev	練	23	2
+li	prev	緹	1	8
+li	prev	緻	0	1
+li	prev	縣	9	0
+li	prev	縫	65	0
+li	prev	縮	2	0
+li	prev	縱	1	0
+li	prev	總	5	65
+li	prev	績	6	0
+li	prev	織	37	7
+li	prev	繞	2	1
+li	prev	繡	2	0
+li	prev	繪	38	165
+li	prev	繭	5	0
+li	prev	繳	3	0
+li	prev	續	3	3
+li	prev	纜	1	0
+li	prev	缸	76	0
+li	prev	缺	13	2
+li	prev	缽	10	0
+li	prev	罈	5	0
+li	prev	罐	18	0
+li	prev	罩	20	1
+li	prev	罪	6	0
+li	prev	置	36	0
+li	prev	罰	2	0
+li	prev	署	12	1
+li	prev	罵	2	0
+li	prev	羅	11	110
+li	prev	羊	6	11
+li	prev	美	16	167
+li	prev	群	368	5
+li	prev	義	25	16
+li	prev	羹	13	0
+li	prev	羽	3	0
+li	prev	翁	4	0
+li	prev	翅	3	0
+li	prev	習	7	1
+li	prev	翔	2	0
+li	prev	翠	0	13
+li	prev	翡	1	0
+li	prev	翻	1	0
+li	prev	翼	3	0
+li	prev	耀	16	1
+li	prev	老	6	13
+li	prev	考	6	3
+li	prev	者	86	5
+li	prev	而	46	7
+li	prev	耗	1	2
+li	prev	耘	0	1
+li	prev	耳	65	1
+li	prev	耶	22	19
+li	prev	耽	3	0
+li	prev	聊	12	0
+li	prev	聖	3	6
+li	prev	聞	190	1
+li	prev	聯	19	0
+li	prev	聲	24	2
+li	prev	職	17	2
+li	prev	聽	13	11
+li	prev	肉	52	0
+li	prev	肌	3	1
+li	prev	肖	2	0
+li	prev	肚	66	1
+li	prev	肝	1	0
+li	prev	股	38	0
+li	prev	肢	2	0
+li	prev	肥	2	0
+li	prev	肩	0	7
+li	prev	肯	2	0
+li	prev	育	14	0
+li	prev	肺	19	1
+li	prev	胃	61	0
+li	prev	背	5	0
+li	prev	胎	15	4
+li	prev	胖	0	2
+li	prev	胛	0	1
+li	prev	胞	5	1
+li	prev	胡	1	9
+li	prev	胸	0	2
+li	prev	能	90	10
+li	prev	脆	21	1
+li	prev	脈	3	0
+li	prev	脊	0	1
+li	prev	脫	4	0
+li	prev	腎	1	0
+li	prev	腐	5	0
+li	prev	腔	17	1
+li	prev	腕	2	0
+li	prev	腥	1	0
+li	prev	腦	290	4
+li	prev	腫	1	0
+li	prev	腰	5	0
+li	prev	腳	2	4
+li	prev	腸	7	0
+li	prev	腹	4	0
+li	prev	腿	7	0
+li	prev	膀	3	1
+li	prev	膏	3	0
+li	prev	膚	4	0
+li	prev	膛	4	0
+li	prev	膜	7	0
+li	prev	膠	5	0
+li	prev	膨	1	0
+li	prev	膳	1	0
+li	prev	臂	9	0
+li	prev	臉	2	1
+li	prev	臍	1	0
+li	prev	臟	10	0
+li	prev	臣	3	0
+li	prev	臥	2	0
+li	prev	臨	1	0
+li	prev	自	3	1
+li	prev	臭	2	0
+li	prev	至	9	2
+li	prev	致	12	2
+li	prev	臺	5	0
+li	prev	臼	3	0
+li	prev	與	23	38
+li	prev	興	2	54
+li	prev	舉	5	0
+li	prev	舊	1	2
+li	prev	舌	0	1
+li	prev	舍	45	0
+li	prev	舖	3	0
+li	prev	舞	3	0
+li	prev	舟	3	0
+li	prev	航	12	69
+li	prev	般	5	3
+li	prev	船	32	0
+li	prev	艇	7	0
+li	prev	艘	2	0
+li	prev	艙	44	3
+li	prev	艦	11	1
+li	prev	良	4	1
+li	prev	色	108	3
+li	prev	艾	0	70
+li	prev	芊	8	0
+li	prev	芒	3	0
+li	prev	芙	8	0
+li	prev	芬	3	427
+li	prev	芭	0	10
+li	prev	芯	1	0
+li	prev	花	126	44
+li	prev	芳	0	1
+li	prev	芷	6	0
+li	prev	芽	4	2
+li	prev	苑	115	4
+li	prev	苗	0	1
+li	prev	苣	1	0
+li	prev	若	3	3
+li	prev	苦	4	0
+li	prev	英	8	526
+li	prev	苿	0	1
+li	prev	茂	1	0
+li	prev	茄	5	0
+li	prev	茅	0	1
+li	prev	茉	0	15
+li	prev	茲	5	15
+li	prev	茶	179	4
+li	prev	草	10	5
+li	prev	荷	1	3
+li	prev	莉	3	7
+li	prev	莊	37	1
+li	prev	莎	0	6
+li	prev	莫	2	226
+li	prev	菇	2	0
+li	prev	菊	2	4
+li	prev	菌	1	0
+li	prev	菜	44	0
+li	prev	華	17	31
+li	prev	菲	0	1
+li	prev	菸	1	0
+li	prev	萊	3	28
+li	prev	萌	0	1
+li	prev	萬	43	871
+li	prev	萱	1	0
+li	prev	萵	0	1
+li	prev	落	69	1
+li	prev	葉	6	3
+li	prev	著	142	12
+li	prev	葛	1	36
+li	prev	葵	2	1
+li	prev	蒂	1	0
+li	prev	蒐	1	0
+li	prev	蒸	2	0
+li	prev	蒿	2	9
+li	prev	蓄	2	1
+li	prev	蓋	19	5
+li	prev	蓬	1	0
+li	prev	蓮	4	1
+li	prev	蔥	2	0
+li	prev	蔬	1	1
+li	prev	蔭	0	1
+li	prev	蕉	1	0
+li	prev	蕪	1	0
+li	prev	蕭	1	0
+li	prev	蕾	2	0
+li	prev	薄	1	0
+li	prev	薇	1	0
+li	prev	薦	20	0
+li	prev	薩	12	120
+li	prev	薪	8	0
+li	prev	薯	3	0
+li	prev	藍	8	6
+li	prev	藏	26	1
+li	prev	藝	30	1
+li	prev	藤	1	2
+li	prev	藥	7	1
+li	prev	蘆	31	0
+li	prev	蘇	3	188
+li	prev	蘋	2	0
+li	prev	蘭	21	64
+li	prev	蘿	0	4
+li	prev	虎	2	1
+li	prev	虐	1	1
+li	prev	處	211	3
+li	prev	虛	1	0
+li	prev	號	155	0
+li	prev	虧	1	0
+li	prev	虹	1	0
+li	prev	蛆	1	0
+li	prev	蛇	3	0
+li	prev	蛋	190	21
+li	prev	蛙	2	0
+li	prev	蛛	1	0
+li	prev	蜜	10	1
+li	prev	蝓	1	0
+li	prev	蝕	1	0
+li	prev	蝦	4	2
+li	prev	蝶	1	0
+li	prev	蝸	1	0
+li	prev	融	3	0
+li	prev	螺	3	0
+li	prev	蟲	2	0
+li	prev	蟹	1	0
+li	prev	蠣	2	0
+li	prev	蠱	1	0
+li	prev	蠻	2	0
+li	prev	血	16	4
+li	prev	衊	1	0
+li	prev	行	153	25
+li	prev	術	18	1
+li	prev	衕	0	1
+li	prev	街	31	3
+li	prev	衙	0	2
+li	prev	衛	21	1
+li	prev	衝	6	1
+li	prev	衡	1	1
+li	prev	衣	36	2
+li	prev	表	428	19
+li	prev	衫	5	0
+li	prev	袋	748	0
+li	prev	袍	3	0
+li	prev	袖	8	1
+li	prev	被	111	27
+li	prev	袱	3	0
+li	prev	裁	1	0
+li	prev	裂	4	0
+li	prev	裔	3	0
+li	prev	裕	0	2
+li	prev	裘	0	2
+li	prev	裙	4	0
+li	prev	補	7	5
+li	prev	裝	79	9
+li	prev	裡	38	5
+li	prev	裹	39	0
+li	prev	製	5	1
+li	prev	褓	1	0
+li	prev	褥	1	0
+li	prev	褲	38	3
+li	prev	襖	1	0
+li	prev	襠	27	0
+li	prev	襪	2	0
+li	prev	襯	7	0
+li	prev	襲	4	0
+li	prev	西	38	447
+li	prev	要	66	100
+li	prev	覆	11	0
+li	prev	見	32	2
+li	prev	規	34	1
+li	prev	視	60	2
+li	prev	親	1	0
+li	prev	覺	58	7
+li	prev	覽	14	1
+li	prev	觀	73	1
+li	prev	角	81	9
+li	prev	解	14	6
+li	prev	觸	1	0
+li	prev	言	85	0
+li	prev	訂	2	1
+li	prev	計	25	16
+li	prev	訊	64	2
+li	prev	討	1	1
+li	prev	訓	7	1
+li	prev	託	5	1
+li	prev	記	146	14
+li	prev	訝	1	0
+li	prev	訣	15	0
+li	prev	訪	14	5
+li	prev	設	19	2
+li	prev	許	9	2
+li	prev	訴	0	1
+li	prev	訶	1	0
+li	prev	診	2	0
+li	prev	註	5	0
+li	prev	評	9	2
+li	prev	詞	90	0
+li	prev	詢	6	0
+li	prev	試	18	6
+li	prev	詩	21	0
+li	prev	詭	5	0
+li	prev	話	308	4
+li	prev	該	7	12
+li	prev	詳	0	1
+li	prev	詹	1	1
+li	prev	誌	39	0
+li	prev	認	12	0
+li	prev	誕	1	0
+li	prev	誘	2	0
+li	prev	語	35	0
+li	prev	誠	0	5
+li	prev	誤	3	0
+li	prev	說	779	37
+li	prev	誰	6	1
+li	prev	課	16	3
+li	prev	誼	1	0
+li	prev	調	17	4
+li	prev	談	62	1
+li	prev	請	3	14
+li	prev	論	70	2
+li	prev	諾	6	83
+li	prev	謀	1	0
+li	prev	謂	1	1
+li	prev	謎	1	0
+li	prev	謐	1	0
+li	prev	講	3	5
+li	prev	謝	4	25
+li	prev	謠	4	0
+li	prev	證	13	11
+li	prev	識	60	4
+li	prev	譚	2	0
+li	prev	譜	7	0
+li	prev	警	8	0
+li	prev	譯	4	0
+li	prev	議	25	5
+li	prev	護	2	1
+li	prev	讀	6	1
+li	prev	變	27	2
+li	prev	讓	39	42
+li	prev	讚	0	2
+li	prev	谷	28	4
+li	prev	豆	13	0
+li	prev	豐	5	8
+li	prev	象	175	2
+li	prev	豪	3	1
+li	prev	豬	4	45
+li	prev	豹	4	0
+li	prev	貓	14	1
+li	prev	貝	43	190
+li	prev	負	0	1
+li	prev	財	7	0
+li	prev	貨	51	0
+li	prev	販	2	0
+li	prev	貫	3	0
+li	prev	責	1	1
+li	prev	貳	1	0
+li	prev	貴	0	4
+li	prev	買	21	27
+li	prev	貸	4	0
+li	prev	費	59	59
+li	prev	貼	10	0
+li	prev	貿	1	1
+li	prev	賀	1	1
+li	prev	賁	1	0
+li	prev	資	25	6
+li	prev	賈	0	7
+li	prev	賊	38	1
+li	prev	賓	5	3
+li	prev	賜	1	0
+li	prev	賞	8	0
+li	prev	賠	0	1
+li	prev	賢	1	1
+li	prev	賣	5	13
+li	prev	賦	12	0
+li	prev	質	24	0
+li	prev	賴	7	0
+li	prev	賺	3	7
+li	prev	購	15	0
+li	prev	賽	199	32
+li	prev	贊	1	0
+li	prev	贏	6	1
+li	prev	赫	1	27
+li	prev	走	19	8
+li	prev	赴	0	2
+li	prev	起	7	4
+li	prev	趁	1	0
+li	prev	超	10	0
+li	prev	越	13	0
+li	prev	趟	2	3
+li	prev	趣	13	52
+li	prev	足	3	6
+li	prev	趴	3	2
+li	prev	跑	7	11
+li	prev	距	8	0
+li	prev	跟	101	141
+li	prev	跡	17	1
+li	prev	跨	1	1
+li	prev	路	72	166
+li	prev	跳	4	0
+li	prev	踏	1	0
+li	prev	踝	1	0
+li	prev	踢	3	2
+li	prev	踰	0	2
+li	prev	蹈	2	0
+li	prev	蹟	7	0
+li	prev	蹤	2	1
+li	prev	蹲	4	0
+li	prev	身	29	4
+li	prev	躲	2	0
+li	prev	軀	4	0
+li	prev	車	484	70
+li	prev	軌	6	0
+li	prev	軍	54	0
+li	prev	軟	6	0
+li	prev	軸	36	0
+li	prev	較	25	1
+li	prev	載	9	2
+li	prev	輕	0	1
+li	prev	輛	2	1
+li	prev	輝	1	1
+li	prev	輩	6	0
+li	prev	輪	16	3
+li	prev	輯	58	1
+li	prev	輸	1	0
+li	prev	輾	3	0
+li	prev	轂	1	0
+li	prev	轄	1	2
+li	prev	轉	15	8
+li	prev	轎	6	0
+li	prev	轟	0	2
+li	prev	辣	3	0
+li	prev	辦	7	10
+li	prev	辭	1	0
+li	prev	辯	2	0
+li	prev	農	9	1
+li	prev	迎	1	0
+li	prev	近	4	16
+li	prev	返	0	1
+li	prev	迢	1	0
+li	prev	迦	162	0
+li	prev	迪	3	3
+li	prev	述	21	1
+li	prev	迴	14	0
+li	prev	迷	6	0
+li	prev	追	0	2
+li	prev	退	1	1
+li	prev	送	8	12
+li	prev	逆	0	1
+li	prev	透	5	2
+li	prev	途	3	0
+li	prev	這	32150	126
+li	prev	通	32	4
+li	prev	逛	6	0
+li	prev	速	6	2
+li	prev	造	5	1
+li	prev	連	32	25
+li	prev	週	17	4
+li	prev	進	15	3
+li	prev	逸	1	1
+li	prev	逼	1	0
+li	prev	遇	1	0
+li	prev	遊	56	7
+li	prev	運	36	12
+li	prev	遍	1	0
+li	prev	過	202	36
+li	prev	道	369	20
+li	prev	達	21	81
+li	prev	違	1	0
+li	prev	遙	4	0
+li	prev	遜	1	0
+li	prev	遞	1	0
+li	prev	遠	1	1
+li	prev	遣	1	0
+li	prev	遭	0	1
+li	prev	選	32	70
+li	prev	邁	0	1
+li	prev	還	7	3
+li	prev	邊	14	14
+li	prev	邋	2	0
+li	prev	那	8467	50
+li	prev	邦	8	1
+li	prev	邪	4	0
+li	prev	邸	7	0
+li	prev	郁	3	0
+li	prev	郎	9	0
+li	prev	部	272	7
+li	prev	郵	1	0
+li	prev	都	23	28
+li	prev	鄉	6	56
+li	prev	鄰	3	94
+li	prev	酆	1	0
+li	prev	配	23	10
+li	prev	酒	25	1
+li	prev	酥	9	0
+li	prev	酪	2	0
+li	prev	酬	3	0
+li	prev	酷	0	6
+li	prev	酸	2	2
+li	prev	醇	1	0
+li	prev	醉	3	0
+li	prev	醋	3	7
+li	prev	醒	9	0
+li	prev	醜	1	0
+li	prev	醣	1	0
+li	prev	醫	7	0
+li	prev	醬	49	0
+li	prev	釀	1	0
+li	prev	采	1	0
+li	prev	釉	1	0
+li	prev	釋	5	0
+li	prev	里	9	89
+li	prev	重	6	6
+li	prev	野	39	10
+li	prev	量	24	6
+li	prev	金	41	6
+li	prev	釘	1	0
+li	prev	釜	1	0
+li	prev	針	4	0
+li	prev	鈕	5	0
+li	prev	鈴	3	0
+li	prev	鉗	0	1
+li	prev	鉢	1	0
+li	prev	銀	25	0
+li	prev	銅	0	4
+li	prev	銳	1	0
+li	prev	銷	5	0
+li	prev	鋒	19	3
+li	prev	鋪	6	0
+li	prev	鋸	1	0
+li	prev	鋼	8	2
+li	prev	錄	124	4
+li	prev	錐	1	0
+li	prev	錘	1	0
+li	prev	錠	1	0
+li	prev	錢	14	3
+li	prev	錦	3	4
+li	prev	錫	3	1
+li	prev	錯	14	1
+li	prev	錶	29	9
+li	prev	鍊	9	0
+li	prev	鍋	160	2
+li	prev	鍵	10	6
+li	prev	鎖	13	3
+li	prev	鎮	48	1
+li	prev	鏈	11	0
+li	prev	鏡	33	2
+li	prev	鐘	35	1
+li	prev	鐙	2	0
+li	prev	鐲	1	0
+li	prev	鐵	33	9
+li	prev	鐺	6	0
+li	prev	鑑	36	0
+li	prev	鑒	1	0
+li	prev	鑰	1	0
+li	prev	鑲	1	0
+li	prev	鑽	1	0
+li	prev	長	50	36
+li	prev	門	146	10
+li	prev	閉	1	0
+li	prev	開	109	28
+li	prev	閒	1	3
+li	prev	間	1183	21
+li	prev	閘	1	1
+li	prev	閣	8	0
+li	prev	閥	1	0
+li	prev	閨	1	0
+li	prev	閱	6	0
+li	prev	闆	1	0
+li	prev	闇	2	6
+li	prev	闕	1	0
+li	prev	關	88	4
+li	prev	阱	20	0
+li	prev	防	9	2
+li	prev	阿	37	1521
+li	prev	陀	1	0
+li	prev	附	1	0
+li	prev	降	2	2
+li	prev	限	9	17
+li	prev	院	312	1
+li	prev	陣	55	15
+li	prev	除	17	4
+li	prev	陳	2	1
+li	prev	陵	6	1
+li	prev	陸	2	1
+li	prev	陽	17	5
+li	prev	隆	4	8
+li	prev	隊	602	7
+li	prev	隍	1	0
+li	prev	階	14	3
+li	prev	隔	4	0
+li	prev	隙	24	1
+li	prev	際	2	22
+li	prev	障	5	1
+li	prev	隧	3	0
+li	prev	隨	0	3
+li	prev	險	20	0
+li	prev	隱	2	0
+li	prev	隻	48	3
+li	prev	隼	1	0
+li	prev	雄	17	5
+li	prev	雅	0	8
+li	prev	集	277	18
+li	prev	雕	5	0
+li	prev	雙	18	4
+li	prev	雛	0	14
+li	prev	雜	1	0
+li	prev	雞	19	15
+li	prev	離	9	2
+li	prev	難	10	1
+li	prev	雨	38	3
+li	prev	雪	74	1
+li	prev	雫	1	0
+li	prev	雲	61	0
+li	prev	零	1	0
+li	prev	雷	10	15
+li	prev	電	58	18
+li	prev	需	1	1
+li	prev	霄	17	0
+li	prev	霆	1	0
+li	prev	霍	0	6
+li	prev	霜	1	0
+li	prev	霧	126	1
+li	prev	露	4	0
+li	prev	霸	7	3
+li	prev	霾	3	0
+li	prev	靂	19	0
+li	prev	靈	13	0
+li	prev	青	4	0
+li	prev	靜	2	0
+li	prev	非	20	6
+li	prev	靠	11	16
+li	prev	面	249	12
+li	prev	靨	1	0
+li	prev	革	2	0
+li	prev	靴	1	0
+li	prev	靶	1	0
+li	prev	鞋	22	3
+li	prev	鞘	4	0
+li	prev	韋	2	2
+li	prev	韌	1	0
+li	prev	音	65	1
+li	prev	韻	7	0
+li	prev	響	5	4
+li	prev	頁	101	3
+li	prev	頂	2	6
+li	prev	頃	1	0
+li	prev	項	150	20
+li	prev	順	4	3
+li	prev	須	0	1
+li	prev	頌	2	0
+li	prev	頓	3	0
+li	prev	領	3	1
+li	prev	頭	233	51
+li	prev	頸	1	0
+li	prev	頻	17	3
+li	prev	顆	21	0
+li	prev	題	75	1
+li	prev	額	34	0
+li	prev	顏	2	0
+li	prev	願	5	0
+li	prev	顛	2	0
+li	prev	類	62	3
+li	prev	顧	4	1
+li	prev	顯	2	1
+li	prev	風	69	4
+li	prev	飄	1	0
+li	prev	飆	3	0
+li	prev	飛	4	5
+li	prev	食	19	2
+li	prev	飩	2	0
+li	prev	飯	77	0
+li	prev	飲	6	0
+li	prev	飽	8	2
+li	prev	飾	4	0
+li	prev	餃	11	0
+li	prev	餅	66	1
+li	prev	養	1	15
+li	prev	餐	78	1
+li	prev	餓	1	1
+li	prev	餘	2	18
+li	prev	餡	14	0
+li	prev	館	225	5
+li	prev	餵	0	1
+li	prev	饃	1	0
+li	prev	饋	19	7
+li	prev	首	10	63
+li	prev	香	10	28
+li	prev	馬	54	277
+li	prev	駁	1	0
+li	prev	駅	1	0
+li	prev	駐	2	2
+li	prev	駒	0	17
+li	prev	駛	3	41
+li	prev	駿	1	0
+li	prev	騎	4	4
+li	prev	騙	3	3
+li	prev	騰	1	0
+li	prev	騷	3	0
+li	prev	驊	1	0
+li	prev	驒	0	1
+li	prev	驕	1	0
+li	prev	驗	36	3
+li	prev	驚	1	0
+li	prev	驛	1	0
+li	prev	驟	1	0
+li	prev	骨	19	0
+li	prev	骰	1	0
+li	prev	骸	1	0
+li	prev	髓	4	1
+li	prev	體	427	7
+li	prev	高	10	154
+li	prev	髮	18	1
+li	prev	鬆	2	0
+li	prev	鬚	1	6
+li	prev	鬥	30	0
+li	prev	鬧	3	0
+li	prev	鬼	17	1
+li	prev	魂	34	0
+li	prev	魄	4	0
+li	prev	魔	16	94
+li	prev	魘	5	0
+li	prev	魚	14	1
+li	prev	魯	0	17
+li	prev	鮑	1	7
+li	prev	鮭	1	0
+li	prev	鮮	4	1
+li	prev	鱗	5	0
+li	prev	鳥	8	2
+li	prev	鳳	3	0
+li	prev	鳴	4	0
+li	prev	鴉	1	0
+li	prev	鴞	1	0
+li	prev	鴨	1	0
+li	prev	鵰	6	0
+li	prev	鶯	1	2
+li	prev	鶴	2	0
+li	prev	鷗	1	0
+li	prev	鷹	5	3
+li	prev	鹹	1	0
+li	prev	鹽	1	0
+li	prev	鹿	2	1
+li	prev	麗	1	1
+li	prev	麟	2	0
+li	prev	麥	1	0
+li	prev	麵	86	0
+li	prev	麻	3	272
+li	prev	麼	48	21
+li	prev	黃	3	0
+li	prev	黎	1	7
+li	prev	黑	6	6
+li	prev	默	1	1
+li	prev	點	93	17
+li	prev	黨	40	6
+li	prev	鼓	72	1
+li	prev	鼠	15	1
+li	prev	齁	2	1
+li	prev	齊	37	53
+li	prev	齋	3	0
+li	prev	齡	3	0
+li	prev	齣	6	0
+li	prev	齦	1	0
+li	prev	龍	49	12
+li	prev	龕	2	0
+li	prev	龜	9	0
+li	next	一	1534	191
+li	next	丁	2	0
+li	next	七	16	6
+li	next	万	2	0
+li	next	三	171	32
+li	next	上	184	56
+li	next	下	144	34
+li	next	不	3856	354
+li	next	丑	0	1
+li	next	且	9	0
+li	next	世	84	119
+li	next	丘	1	0
+li	next	丟	60	1
+li	next	並	111	4
+li	next	丫	3	0
+li	next	中	90	63
+li	next	串	5	4
+li	next	丹	3	17
+li	next	主	200	24
+li	next	乃	0	7
+li	next	久	19	1
+li	next	之	113	169
+li	next	乒	2	0
+li	next	乖	6	0
+li	next	乘	4	1
+li	next	乙	0	1
+li	next	九	20	5
+li	next	乞	1	0
+li	next	也	2907	224
+li	next	乳	1	2
+li	next	乾	32	1
+li	next	亂	133	1
+li	next	了	2111	200
+li	next	予	0	1
+li	next	事	34	12
+li	next	二	25	24
+li	next	云	0	1
+li	next	互	42	3
+li	next	五	43	11
+li	next	井	3	6
+li	next	亞	46	501
+li	next	交	47	14
+li	next	亦	4	1
+li	next	亨	2	1
+li	next	享	51	2
+li	next	亭	0	11
+li	next	亮	22	9
+li	next	人	558	50
+li	next	什	348	12
+li	next	仁	1	58
+li	next	仇	10	0
+li	next	今	10	14
+li	next	介	19	1
+li	next	仍	53	8
+li	next	仔	2	0
+li	next	他	217	6
+li	next	仗	0	1
+li	next	付	31	2
+li	next	代	24	6
+li	next	令	4	1
+li	next	以	137	303
+li	next	仰	3	0
+li	next	仲	0	1
+li	next	任	26	3
+li	next	份	1	0
+li	next	仿	1	0
+li	next	企	4	0
+li	next	伊	13	23
+li	next	伏	2	0
+li	next	休	48	6
+li	next	伙	1	0
+li	next	伝	0	1
+li	next	伯	1	1
+li	next	估	8	4
+li	next	伴	0	1
+li	next	伸	7	0
+li	next	伺	4	0
+li	next	似	56	3
+li	next	伽	1	5
+li	next	但	75	20
+li	next	佈	4	0
+li	next	位	15	2
+li	next	低	50	2
+li	next	住	116	10
+li	next	佐	17	5
+li	next	佑	0	1
+li	next	佔	35	1
+li	next	何	7	2
+li	next	余	0	2
+li	next	佛	7	12
+li	next	作	101	3
+li	next	你	211	25
+li	next	佩	5	0
+li	next	佮	0	1
+li	next	佳	0	47
+li	next	併	0	1
+li	next	使	144	5
+li	next	來	1414	57
+li	next	例	2	0
+li	next	侑	0	1
+li	next	供	24	0
+li	next	依	41	65
+li	next	侮	1	0
+li	next	侯	1	8
+li	next	侵	1	0
+li	next	侷	1	0
+li	next	便	82	8
+li	next	促	2	1
+li	next	俄	3	2
+li	next	俊	1	0
+li	next	俗	1	0
+li	next	保	64	68
+li	next	俠	1	0
+li	next	信	10	2
+li	next	修	86	12
+li	next	俱	1	6
+li	next	倆	1	0
+li	next	倉	10	0
+li	next	個	27	5
+li	next	倍	0	1
+li	next	倏	0	1
+li	next	倒	81	3
+li	next	候	1	1
+li	next	倚	1	0
+li	next	借	26	1
+li	next	值	37	1
+li	next	假	29	5
+li	next	偉	2	0
+li	next	偏	34	1
+li	next	做	371	12
+li	next	停	76	10
+li	next	健	29	9
+li	next	側	616	4
+li	next	偵	2	3
+li	next	偶	28	1
+li	next	偷	158	3
+li	next	偽	1	0
+li	next	傅	7	0
+li	next	傍	1	0
+li	next	傑	7	4
+li	next	傘	0	30
+li	next	備	27	1
+li	next	傢	2	0
+li	next	催	10	1
+li	next	傭	2	0
+li	next	傲	1	0
+li	next	傳	122	14
+li	next	債	1	0
+li	next	傷	28	7
+li	next	傻	16	6
+li	next	傾	3	2
+li	next	僅	39	3
+li	next	像	288	3
+li	next	僕	1	0
+li	next	僥	1	0
+li	next	僧	1	0
+li	next	價	17	5
+li	next	儀	1	0
+li	next	億	20	0
+li	next	償	1	0
+li	next	優	25	10
+li	next	儲	18	0
+li	next	允	1	0
+li	next	元	3	1
+li	next	兄	5	2
+li	next	充	124	4
+li	next	兆	17	0
+li	next	兇	9	3
+li	next	先	147	15
+li	next	光	33	12
+li	next	克	92	509
+li	next	兌	18	1
+li	next	免	18	35
+li	next	兒	3	1
+li	next	兔	3	0
+li	next	兜	1	0
+li	next	入	29	6
+li	next	內	43	201
+li	next	全	123	32
+li	next	兩	234	21
+li	next	八	22	12
+li	next	公	109	34
+li	next	六	11	11
+li	next	共	28	12
+li	next	其	305	16
+li	next	具	3	2
+li	next	典	2	0
+li	next	兼	5	0
+li	next	冊	1	0
+li	next	再	179	57
+li	next	冒	63	0
+li	next	冠	5	6
+li	next	冤	4	1
+li	next	冥	4	0
+li	next	冬	6	1
+li	next	冰	35	27
+li	next	冷	61	3
+li	next	准	0	1
+li	next	凌	4	1
+li	next	凍	3	0
+li	next	凜	1	3
+li	next	凝	1	1
+li	next	凪	1	0
+li	next	凱	13	1
+li	next	凶	10	0
+li	next	凸	3	3
+li	next	凹	4	0
+li	next	出	940	57
+li	next	刀	13	0
+li	next	刁	2	0
+li	next	分	132	25
+li	next	切	73	10
+li	next	刊	1	0
+li	next	划	17	1
+li	next	列	62	2
+li	next	初	7	3
+li	next	判	12	0
+li	next	別	28	15
+li	next	利	17	14
+li	next	刪	19	0
+li	next	到	265	82
+li	next	制	3	1
+li	next	刷	53	1
+li	next	券	1	0
+li	next	刺	7	1
+li	next	刻	22	0
+li	next	剁	1	0
+li	next	則	57	13
+li	next	剉	0	1
+li	next	削	1	1
+li	next	剋	2	0
+li	next	前	71	52
+li	next	剎	1	0
+li	next	剔	1	0
+li	next	剖	2	0
+li	next	剛	129	16
+li	next	剝	2	0
+li	next	剣	4	0
+li	next	剩	31	2
+li	next	剪	16	0
+li	next	副	2	1
+li	next	割	2	0
+li	next	創	46	3
+li	next	剷	1	0
+li	next	劃	6	0
+li	next	劇	45	2
+li	next	劈	1	0
+li	next	劉	6	1
+li	next	劍	176	8
+li	next	力	5	6
+li	next	功	3	1
+li	next	加	170	57
+li	next	劣	1	0
+li	next	助	0	1
+li	next	努	28	17
+li	next	劫	2	0
+li	next	劾	1	0
+li	next	勁	4	1
+li	next	勇	6	3
+li	next	勉	4	2
+li	next	勒	6	2
+li	next	動	33	2
+li	next	務	4	0
+li	next	勝	9	4
+li	next	勞	1	0
+li	next	募	1	0
+li	next	勢	6	0
+li	next	勤	1	0
+li	next	勸	4	0
+li	next	勾	12	0
+li	next	勿	3	0
+li	next	包	60	9
+li	next	匆	2	0
+li	next	化	14	4
+li	next	北	9	10
+li	next	匪	1	1
+li	next	匯	4	0
+li	next	匹	1	0
+li	next	區	6	132
+li	next	十	40	8
+li	next	千	97	3
+li	next	升	22	0
+li	next	午	2	1
+li	next	半	15	13
+li	next	卓	1	0
+li	next	協	6	0
+li	next	南	17	34
+li	next	博	6	1
+li	next	卜	0	5
+li	next	占	7	1
+li	next	卡	116	61
+li	next	卯	1	0
+li	next	印	17	1
+li	next	危	13	0
+li	next	即	14	9
+li	next	卷	4	1
+li	next	卸	1	0
+li	next	卻	196	7
+li	next	厄	1	0
+li	next	厚	5	1
+li	next	原	127	16
+li	next	厭	5	0
+li	next	厲	17	0
+li	next	去	1425	54
+li	next	參	31	13
+li	next	又	424	33
+li	next	及	12	6
+li	next	友	3	1
+li	next	反	165	11
+li	next	叔	0	5
+li	next	取	109	5
+li	next	受	80	6
+li	next	叛	1	0
+li	next	口	20	7
+li	next	古	12	18
+li	next	句	1	0
+li	next	另	63	3
+li	next	叨	3	0
+li	next	只	1181	54
+li	next	叫	116	9
+li	next	召	17	2
+li	next	叭	1	0
+li	next	叮	1	0
+li	next	可	2299	134
+li	next	台	65	27
+li	next	史	5	13
+li	next	右	10	4
+li	next	司	0	3
+li	next	叼	5	0
+li	next	吃	376	30
+li	next	各	87	6
+li	next	吆	1	0
+li	next	合	50	11
+li	next	吉	10	17
+li	next	吊	4	2
+li	next	同	90	20
+li	next	名	23	24
+li	next	后	0	1
+li	next	吐	66	1
+li	next	向	22	4
+li	next	吞	19	1
+li	next	吠	7	0
+li	next	否	1	0
+li	next	吧	445	79
+li	next	含	27	2
+li	next	吱	1	0
+li	next	吳	5	2
+li	next	吵	45	2
+li	next	吶	5	0
+li	next	吸	35	2
+li	next	吹	86	0
+li	next	吻	1	0
+li	next	吼	5	0
+li	next	吾	0	1
+li	next	呀	106	8
+li	next	呂	1	0
+li	next	呆	5	0
+li	next	呈	14	1
+li	next	告	34	3
+li	next	呢	436	16
+li	next	呦	1	0
+li	next	周	16	10
+li	next	味	6	1
+li	next	呵	7	0
+li	next	呻	1	0
+li	next	呼	12	3
+li	next	命	2	2
+li	next	咀	4	0
+li	next	咂	2	0
+li	next	咆	1	0
+li	next	和	161	75
+li	next	咒	2	0
+li	next	咕	6	1
+li	next	咖	11	56
+li	next	咧	8	0
+li	next	咩	2	0
+li	next	咪	1	0
+li	next	咬	11	1
+li	next	咯	3	0
+li	next	哀	3	2
+li	next	品	20	3
+li	next	哄	2	0
+li	next	哇	3	3
+li	next	哈	72	4
+li	next	哉	1	0
+li	next	哏	0	1
+li	next	員	4	0
+li	next	哥	2	26
+li	next	哦	16	1
+li	next	哩	1	0
+li	next	哪	112	10
+li	next	哭	112	2
+li	next	哺	1	0
+li	next	哼	1	1
+li	next	唉	6	0
+li	next	唐	2	1
+li	next	唬	3	0
+li	next	售	2	0
+li	next	唯	138	5
+li	next	唱	27	0
+li	next	唷	20	1
+li	next	唸	16	2
+li	next	唾	1	0
+li	next	啃	9	0
+li	next	商	10	4
+li	next	啊	582	50
+li	next	問	413	3
+li	next	啜	1	0
+li	next	啞	2	0
+li	next	啟	5	1
+li	next	啥	48	0
+li	next	啦	135	16
+li	next	啪	10	0
+li	next	啵	2	0
+li	next	啾	1	0
+li	next	喂	1	0
+li	next	喃	5	0
+li	next	善	5	3
+li	next	喇	2	0
+li	next	喉	0	1
+li	next	喊	41	0
+li	next	喔	102	14
+li	next	喘	3	0
+li	next	喚	1	1
+li	next	喜	26	2
+li	next	喝	90	4
+li	next	喪	7	0
+li	next	喬	9	9
+li	next	單	35	11
+li	next	喲	1	0
+li	next	喵	3	13
+li	next	嗄	0	1
+li	next	嗆	7	1
+li	next	嗉	1	0
+li	next	嗎	676	75
+li	next	嗑	3	0
+li	next	嗚	5	0
+li	next	嗡	1	0
+li	next	嗨	4	0
+li	next	嗯	2	0
+li	next	嘀	4	0
+li	next	嘆	5	0
+li	next	嘉	1	4
+li	next	嘎	1	25
+li	next	嘔	1	0
+li	next	嘗	7	1
+li	next	嘛	5	0
+li	next	嘞	1	0
+li	next	嘟	1	0
+li	next	嘠	0	1
+li	next	嘩	17	6
+li	next	嘭	0	1
+li	next	嘰	1	0
+li	next	嘲	14	0
+li	next	嘴	28	1
+li	next	嘶	1	0
+li	next	嘻	6	0
+li	next	嘿	3	1
+li	next	噁	17	1
+li	next	噓	15	0
+li	next	噗	3	0
+li	next	噙	1	0
+li	next	器	4	0
+li	next	噴	52	1
+li	next	噹	1	0
+li	next	嚇	8	0
+li	next	嚎	1	0
+li	next	嚐	1	0
+li	next	嚕	1	0
+li	next	嚥	1	0
+li	next	嚴	21	1
+li	next	嚶	1	0
+li	next	嚼	3	0
+li	next	囁	1	0
+li	next	囂	6	1
+li	next	囉	29	3
+li	next	囗	1	0
+li	next	囚	2	0
+li	next	四	77	9
+li	next	回	116	45
+li	next	因	81	12
+li	next	囤	4	0
+li	next	囧	4	0
+li	next	困	5	0
+li	next	固	12	4
+li	next	圈	6	0
+li	next	國	36	41
+li	next	圍	5	1
+li	next	園	0	1
+li	next	圓	9	1
+li	next	圖	15	4
+li	next	團	9	2
+li	next	土	7	1
+li	next	在	334	100
+li	next	圭	1	0
+li	next	地	84	38
+li	next	坂	39	0
+li	next	均	3	7
+li	next	坍	1	0
+li	next	坎	1	5
+li	next	坐	69	4
+li	next	坑	3	0
+li	next	坡	1	69
+li	next	坤	1	0
+li	next	坦	0	1
+li	next	坪	13	0
+li	next	坳	1	0
+li	next	垂	1	0
+li	next	垃	21	4
+li	next	垢	3	0
+li	next	埃	19	3
+li	next	埋	30	0
+li	next	城	16	41
+li	next	埔	0	4
+li	next	執	12	0
+li	next	培	5	1
+li	next	基	38	17
+li	next	堀	0	2
+li	next	堅	3	2
+li	next	堆	25	1
+li	next	堇	1	0
+li	next	堡	0	1
+li	next	堤	0	8
+li	next	堪	3	0
+li	next	報	58	12
+li	next	場	4	4
+li	next	堵	4	0
+li	next	塊	1	0
+li	next	塑	3	0
+li	next	塔	35	8
+li	next	塗	3	0
+li	next	塚	0	5
+li	next	塞	107	5
+li	next	填	21	1
+li	next	塵	6	1
+li	next	境	2	1
+li	next	墊	4	1
+li	next	墜	4	0
+li	next	增	15	10
+li	next	墨	1	3
+li	next	墮	0	1
+li	next	壁	1	0
+li	next	壓	59	9
+li	next	壞	70	7
+li	next	壟	1	0
+li	next	壠	0	1
+li	next	士	4	31
+li	next	壯	2	0
+li	next	壹	2	0
+li	next	壽	1	4
+li	next	夏	10	13
+li	next	夕	1	0
+li	next	外	183	174
+li	next	多	311	88
+li	next	夜	8	0
+li	next	夠	34	6
+li	next	夢	31	1
+li	next	大	655	219
+li	next	天	40	16
+li	next	太	195	44
+li	next	夫	12	680
+li	next	央	0	3
+li	next	夯	1	0
+li	next	失	39	2
+li	next	夸	0	1
+li	next	夾	24	0
+li	next	奇	67	138
+li	next	奈	4	267
+li	next	奉	1	0
+li	next	奎	0	4
+li	next	奏	1	0
+li	next	契	1	2
+li	next	奔	7	2
+li	next	套	7	1
+li	next	奢	3	0
+li	next	奧	33	241
+li	next	奪	13	4
+li	next	奮	6	0
+li	next	女	72	11
+li	next	奴	5	0
+li	next	奶	6	2
+li	next	她	82	6
+li	next	好	1082	110
+li	next	如	149	16
+li	next	妃	1	0
+li	next	妄	1	0
+li	next	妖	10	0
+li	next	妙	2	0
+li	next	妝	1	0
+li	next	妥	7	0
+li	next	妨	3	0
+li	next	妮	3	1
+li	next	妳	10	1
+li	next	妹	5	4
+li	next	妻	1	0
+li	next	姆	6	275
+li	next	姊	1	0
+li	next	始	18	1
+li	next	姐	3	2
+li	next	姑	3	1
+li	next	姓	2	0
+li	next	委	10	4
+li	next	姜	4	0
+li	next	姪	1	0
+li	next	姬	1	19
+li	next	姿	3	0
+li	next	威	13	0
+li	next	娃	1	0
+li	next	娛	1	0
+li	next	娜	4	7
+li	next	娶	1	0
+li	next	婁	1	0
+li	next	婆	4	1
+li	next	婊	2	1
+li	next	婚	4	0
+li	next	婢	1	0
+li	next	婦	0	1
+li	next	婭	0	1
+li	next	媒	1	1
+li	next	媚	1	0
+li	next	媲	1	0
+li	next	媳	1	0
+li	next	媽	14	5
+li	next	嫌	9	1
+li	next	嫖	2	0
+li	next	嫩	11	1
+li	next	嬉	1	1
+li	next	嬌	2	0
+li	next	子	158	198
+li	next	孔	6	0
+li	next	孕	2	0
+li	next	字	6	1
+li	next	存	56	3
+li	next	孛	0	3
+li	next	孝	4	0
+li	next	孟	1	3
+li	next	季	4	3
+li	next	孤	6	2
+li	next	孩	16	0
+li	next	孫	2	0
+li	next	孬	1	0
+li	next	孵	10	17
+li	next	學	144	11
+li	next	它	11	0
+li	next	宅	4	0
+li	next	宇	3	1
+li	next	守	18	5
+li	next	安	118	190
+li	next	宋	5	1
+li	next	完	149	21
+li	next	宗	2	0
+li	next	官	3	9
+li	next	定	27	5
+li	next	宛	5	0
+li	next	客	82	1
+li	next	宣	20	3
+li	next	室	16	0
+li	next	宮	3	2
+li	next	害	14	2
+li	next	宴	4	0
+li	next	宵	0	1
+li	next	家	39	40
+li	next	容	27	2
+li	next	宿	1	0
+li	next	寄	18	2
+li	next	密	4	1
+li	next	富	11	5
+li	next	寒	2	2
+li	next	察	3	2
+li	next	寡	1	0
+li	next	寢	1	0
+li	next	實	127	8
+li	next	寧	2	23
+li	next	審	3	0
+li	next	寫	276	5
+li	next	寬	6	4
+li	next	寵	9	1
+li	next	寶	21	5
+li	next	寸	1	0
+li	next	寺	0	2
+li	next	封	49	3
+li	next	射	15	16
+li	next	將	41	16
+li	next	專	29	3
+li	next	尊	21	1
+li	next	尋	84	20
+li	next	對	256	34
+li	next	導	14	2
+li	next	小	335	67
+li	next	少	87	7
+li	next	尖	7	0
+li	next	尚	7	1
+li	next	尤	5	8
+li	next	尬	3	3
+li	next	就	2544	445
+li	next	尷	6	0
+li	next	尹	1	0
+li	next	尻	4	2
+li	next	尼	40	166
+li	next	尾	7	0
+li	next	尿	5	0
+li	next	局	0	1
+li	next	屁	9	1
+li	next	居	91	21
+li	next	屋	10	1
+li	next	屌	9	2
+li	next	屍	1	1
+li	next	屎	3	0
+li	next	屏	2	0
+li	next	展	50	5
+li	next	屠	1	1
+li	next	屢	1	0
+li	next	層	26	2
+li	next	屬	11	3
+li	next	屯	1	4
+li	next	山	17	752
+li	next	岔	1	0
+li	next	岡	13	1
+li	next	岩	0	1
+li	next	岱	0	1
+li	next	岳	1	0
+li	next	岸	1	1
+li	next	峙	0	1
+li	next	峰	1	0
+li	next	島	1	218
+li	next	崇	0	5
+li	next	崎	0	7
+li	next	崑	1	0
+li	next	崔	1	0
+li	next	崩	32	6
+li	next	嵌	3	0
+li	next	嵩	1	0
+li	next	川	7	1
+li	next	州	0	16
+li	next	巡	6	7
+li	next	工	158	8
+li	next	左	23	214
+li	next	巧	5	0
+li	next	巨	5	2
+li	next	巫	4	6
+li	next	差	80	22
+li	next	己	1	0
+li	next	已	512	42
+li	next	巴	9	261
+li	next	巷	9	0
+li	next	市	8	39
+li	next	布	11	198
+li	next	帆	0	73
+li	next	希	39	110
+li	next	帕	0	5
+li	next	帝	3	0
+li	next	帥	38	1
+li	next	師	8	1
+li	next	帳	11	2
+li	next	帶	149	7
+li	next	常	139	3
+li	next	幫	119	6
+li	next	干	2	2
+li	next	平	59	23
+li	next	年	27	5
+li	next	幸	5	1
+li	next	幹	122	199
+li	next	幻	14	0
+li	next	幼	1	0
+li	next	幽	2	0
+li	next	幾	134	11
+li	next	庄	0	1
+li	next	庇	0	2
+li	next	床	9	2
+li	next	序	2	0
+li	next	底	8	1
+li	next	店	37	27
+li	next	府	0	2
+li	next	度	39	1
+li	next	座	14	0
+li	next	庫	5	16
+li	next	庭	1	0
+li	next	康	0	2
+li	next	庸	1	0
+li	next	廁	9	0
+li	next	廉	2	0
+li	next	廊	1	0
+li	next	廚	25	1
+li	next	廝	1	0
+li	next	廟	1	0
+li	next	廠	1	3
+li	next	廢	32	0
+li	next	廣	7	4
+li	next	延	9	13
+li	next	建	52	18
+li	next	弄	66	5
+li	next	式	0	16
+li	next	弓	1	1
+li	next	弔	2	0
+li	next	引	22	9
+li	next	弗	3	6
+li	next	弟	2	1
+li	next	弭	1	0
+li	next	弱	37	0
+li	next	張	9	3
+li	next	強	112	11
+li	next	彆	1	0
+li	next	彈	17	1
+li	next	彌	3	1
+li	next	彎	2	4
+li	next	彙	1	0
+li	next	形	14	1
+li	next	彩	2	0
+li	next	彭	4	1
+li	next	彰	0	1
+li	next	影	19	2
+li	next	彷	10	0
+li	next	役	0	7
+li	next	彼	6	0
+li	next	往	24	12
+li	next	征	1	46
+li	next	待	118	1
+li	next	很	1041	76
+li	next	律	1	0
+li	next	後	105	129
+li	next	徐	5	0
+li	next	徒	1	2
+li	next	得	209	13
+li	next	徘	6	0
+li	next	從	78	11
+li	next	御	1	4
+li	next	復	18	6
+li	next	循	2	0
+li	next	微	25	1
+li	next	徵	47	1
+li	next	德	13	117
+li	next	徹	1	1
+li	next	徽	1	0
+li	next	心	38	16
+li	next	必	42	5
+li	next	忌	1	0
+li	next	忍	14	2
+li	next	忐	2	0
+li	next	志	1	0
+li	next	忘	20	3
+li	next	忙	23	0
+li	next	忠	2	9
+li	next	快	52	20
+li	next	念	23	0
+li	next	忽	12	3
+li	next	怎	220	28
+li	next	怒	2	2
+li	next	怕	49	3
+li	next	思	15	5
+li	next	怠	2	5
+li	next	急	11	1
+li	next	怦	3	0
+li	next	性	12	2
+li	next	怨	7	0
+li	next	怪	589	14
+li	next	恆	0	1
+li	next	恐	28	0
+li	next	恕	1	0
+li	next	恢	6	2
+li	next	恨	2	1
+li	next	恩	27	58
+li	next	恭	3	3
+li	next	恰	10	0
+li	next	悄	9	0
+li	next	悍	0	40
+li	next	悖	1	0
+li	next	悟	0	1
+li	next	悠	22	0
+li	next	您	1	0
+li	next	悲	8	0
+li	next	悶	23	0
+li	next	悸	1	0
+li	next	情	16	4
+li	next	惆	1	0
+li	next	惜	2	0
+li	next	惟	1	0
+li	next	惠	1	5
+li	next	惡	12	0
+li	next	惱	0	1
+li	next	想	712	9
+li	next	惶	1	0
+li	next	惹	67	1
+li	next	惻	3	0
+li	next	愈	2	0
+li	next	意	34	5
+li	next	愚	1	0
+li	next	愛	34	33
+li	next	感	242	37
+li	next	愣	2	0
+li	next	慈	1	1
+li	next	態	2	0
+li	next	慌	1	0
+li	next	慕	0	4
+li	next	慘	40	1
+li	next	慢	59	15
+li	next	慣	1	0
+li	next	慧	1	0
+li	next	慰	1	0
+li	next	慶	13	0
+li	next	慷	1	0
+li	next	憂	1	0
+li	next	憋	3	1
+li	next	憎	1	0
+li	next	憑	4	0
+li	next	憔	1	0
+li	next	憤	6	0
+li	next	憨	1	0
+li	next	憶	1	0
+li	next	懂	12	0
+li	next	懇	1	0
+li	next	應	537	56
+li	next	懟	1	0
+li	next	懵	1	0
+li	next	懶	9	0
+li	next	懷	11	0
+li	next	懸	3	1
+li	next	戀	4	0
+li	next	戈	1	86
+li	next	成	107	39
+li	next	我	953	74
+li	next	戒	1	0
+li	next	或	139	50
+li	next	截	5	1
+li	next	戰	31	11
+li	next	戲	118	5
+li	next	戳	3	0
+li	next	戴	16	1
+li	next	戶	2	2
+li	next	戾	2	0
+li	next	房	60	0
+li	next	所	245	14
+li	next	扁	5	0
+li	next	扉	1	0
+li	next	手	40	12
+li	next	才	504	123
+li	next	扎	7	19
+li	next	扒	42	0
+li	next	打	929	34
+li	next	扔	10	1
+li	next	托	5	48
+li	next	扛	7	0
+li	next	扣	25	9
+li	next	扭	13	0
+li	next	扮	16	0
+li	next	扯	36	0
+li	next	扶	5	0
+li	next	批	9	1
+li	next	找	977	13
+li	next	承	19	3
+li	next	技	10	3
+li	next	抄	74	0
+li	next	把	128	7
+li	next	抒	3	0
+li	next	抓	81	5
+li	next	投	38	2
+li	next	抖	7	0
+li	next	抗	4	2
+li	next	折	11	11
+li	next	披	0	72
+li	next	抬	5	0
+li	next	抱	61	37
+li	next	抵	5	1
+li	next	抹	10	0
+li	next	抽	97	6
+li	next	拄	1	0
+li	next	拆	10	4
+li	next	拉	69	190
+li	next	拋	7	0
+li	next	拌	3	0
+li	next	拍	150	3
+li	next	拎	3	0
+li	next	拐	1	0
+li	next	拒	2	2
+li	next	拔	25	1
+li	next	拖	23	1
+li	next	拗	2	0
+li	next	拚	3	0
+li	next	招	25	1
+li	next	拜	91	3
+li	next	拭	0	1
+li	next	拯	7	0
+li	next	拱	1	0
+li	next	拳	1	0
+li	next	拼	11	5
+li	next	拾	1	1
+li	next	拿	375	19
+li	next	持	17	1
+li	next	指	80	7
+li	next	按	49	1
+li	next	挑	195	19
+li	next	挖	78	1
+li	next	挨	2	1
+li	next	挪	3	0
+li	next	振	0	1
+li	next	挺	17	0
+li	next	挾	1	1
+li	next	捅	4	0
+li	next	捉	0	1
+li	next	捏	12	1
+li	next	捐	1	0
+li	next	捕	7	0
+li	next	捧	15	0
+li	next	捨	5	1
+li	next	捲	5	3
+li	next	捷	2	3
+li	next	掀	4	0
+li	next	掃	17	0
+li	next	授	1	0
+li	next	掉	27	4
+li	next	掌	6	0
+li	next	掏	46	0
+li	next	掐	1	0
+li	next	排	91	4
+li	next	掙	10	0
+li	next	掛	25	6
+li	next	掠	3	0
+li	next	採	38	4
+li	next	探	40	1
+li	next	接	113	21
+li	next	控	6	4
+li	next	推	152	19
+li	next	掩	3	5
+li	next	措	1	0
+li	next	掰	2	3
+li	next	揉	2	0
+li	next	揍	4	0
+li	next	描	34	0
+li	next	提	316	5
+li	next	插	24	2
+li	next	揚	1	2
+li	next	換	155	108
+li	next	握	15	1
+li	next	揣	5	0
+li	next	揪	8	0
+li	next	揭	7	0
+li	next	揮	19	0
+li	next	援	1	0
+li	next	揹	1	0
+li	next	損	2	0
+li	next	搓	5	0
+li	next	搔	1	0
+li	next	搖	9	0
+li	next	搜	23	0
+li	next	搞	150	11
+li	next	搬	21	0
+li	next	搭	42	7
+li	next	搶	25	1
+li	next	搾	1	0
+li	next	摀	1	0
+li	next	摔	6	2
+li	next	摘	3	0
+li	next	摟	2	0
+li	next	摩	9	5
+li	next	摯	1	0
+li	next	摳	6	0
+li	next	摸	37	0
+li	next	摻	4	0
+li	next	撇	1	0
+li	next	撈	54	1
+li	next	撐	10	1
+li	next	撒	17	1
+li	next	撕	1	1
+li	next	撞	14	11
+li	next	撤	1	0
+li	next	撥	4	0
+li	next	撩	5	0
+li	next	撫	3	0
+li	next	撬	2	0
+li	next	播	29	1
+li	next	撰	1	1
+li	next	撲	2	0
+li	next	撿	99	3
+li	next	擁	18	2
+li	next	擅	3	0
+li	next	擇	2	0
+li	next	擊	6	2
+li	next	擋	9	0
+li	next	操	50	2
+li	next	擔	13	8
+li	next	據	8	0
+li	next	擠	19	1
+li	next	擦	6	1
+li	next	擱	2	0
+li	next	擲	9	0
+li	next	擴	7	2
+li	next	擷	2	0
+li	next	擺	93	2
+li	next	擾	2	0
+li	next	攀	1	0
+li	next	攏	1	0
+li	next	攔	5	1
+li	next	攜	1	3
+li	next	攝	2	3
+li	next	攤	8	0
+li	next	攪	8	0
+li	next	支	40	14
+li	next	收	157	8
+li	next	改	86	9
+li	next	攻	17	1
+li	next	放	336	13
+li	next	政	14	8
+li	next	故	23	7
+li	next	效	17	4
+li	next	敏	8	2
+li	next	救	43	5
+li	next	敗	6	1
+li	next	敘	3	0
+li	next	教	42	0
+li	next	敞	1	0
+li	next	敢	8	0
+li	next	散	37	1
+li	next	敦	0	3
+li	next	敬	1	1
+li	next	敲	13	0
+li	next	整	110	15
+li	next	敵	6	0
+li	next	敷	2	1
+li	next	數	34	227
+li	next	斂	1	0
+li	next	文	28	18
+li	next	斑	0	2
+li	next	料	4	7
+li	next	斜	1	0
+li	next	斤	1	0
+li	next	斬	6	2
+li	next	斯	60	2290
+li	next	新	74	27
+li	next	斷	32	7
+li	next	方	27	12
+li	next	於	0	3
+li	next	施	11	0
+li	next	旁	28	5
+li	next	旅	15	2
+li	next	族	0	1
+li	next	旗	1	3
+li	next	既	17	0
+li	next	日	33	9
+li	next	早	80	4
+li	next	旱	1	0
+li	next	旺	1	2
+li	next	昂	3	912
+li	next	昆	2	0
+li	next	昇	0	2
+li	next	昌	0	3
+li	next	明	112	8
+li	next	昏	5	0
+li	next	星	12	5
+li	next	映	6	0
+li	next	春	5	2
+li	next	昨	3	3
+li	next	昭	1	0
+li	next	是	4240	236
+li	next	昴	0	1
+li	next	時	192	87
+li	next	晃	19	0
+li	next	晉	1	0
+li	next	晚	16	2
+li	next	普	25	34
+li	next	景	2	4
+li	next	晴	2	14
+li	next	晶	1	1
+li	next	智	12	0
+li	next	晾	3	0
+li	next	暈	4	0
+li	next	暐	1	0
+li	next	暑	3	0
+li	next	暖	45	3
+li	next	暗	81	1
+li	next	暢	1	1
+li	next	暫	18	1
+li	next	暮	0	1
+li	next	暴	16	1
+li	next	曇	1	0
+li	next	曉	1	0
+li	next	曝	5	2
+li	next	曬	18	0
+li	next	曲	0	2
+li	next	更	156	27
+li	next	書	16	0
+li	next	曹	0	1
+li	next	曼	8	112
+li	next	曾	45	3
+li	next	替	15	4
+li	next	最	1236	48
+li	next	會	984	59
+li	next	月	13	5
+li	next	有	10918	218
+li	next	服	26	10
+li	next	朗	1	0
+li	next	望	11	0
+li	next	朝	7	3
+li	next	期	10	0
+li	next	朦	1	0
+li	next	木	6	5
+li	next	未	23	4
+li	next	末	2	1
+li	next	本	168	26
+li	next	札	0	4
+li	next	朱	2	0
+li	next	朴	2	0
+li	next	朵	1	0
+li	next	杉	2	1
+li	next	李	6	2
+li	next	杏	0	2
+li	next	村	5	20
+li	next	杙	0	4
+li	next	杜	2	3
+li	next	束	3	0
+li	next	杭	1	0
+li	next	杯	3	0
+li	next	東	39	76
+li	next	杳	1	0
+li	next	松	2	8
+li	next	板	13	1
+li	next	林	8	9
+li	next	果	21	6
+li	next	枝	1	0
+li	next	枯	1	0
+li	next	架	3	2
+li	next	柏	1	1
+li	next	某	52	12
+li	next	染	2	1
+li	next	柔	10	0
+li	next	柚	0	1
+li	next	查	168	10
+li	next	柯	1	1
+li	next	柳	1	0
+li	next	柴	2	1
+li	next	柵	2	0
+li	next	校	5	0
+li	next	核	5	1
+li	next	根	179	38
+li	next	格	36	49
+li	next	栽	1	0
+li	next	桃	7	118
+li	next	案	2	0
+li	next	桌	18	2
+li	next	桑	2	6
+li	next	桓	1	0
+li	next	桶	2	0
+li	next	梁	1	0
+li	next	梅	14	4
+li	next	梓	1	0
+li	next	條	19	0
+li	next	梨	1	0
+li	next	梯	1	0
+li	next	棄	8	0
+li	next	棒	5	2
+li	next	棚	1	0
+li	next	森	8	90
+li	next	椅	4	0
+li	next	植	6	0
+li	next	椎	1	1
+li	next	椒	0	1
+li	next	楊	6	2
+li	next	楓	1	0
+li	next	楚	1	0
+li	next	業	15	3
+li	next	極	16	3
+li	next	榆	0	1
+li	next	榜	1	0
+li	next	榨	3	0
+li	next	榭	0	1
+li	next	榮	6	4
+li	next	槁	1	0
+li	next	構	2	2
+li	next	槓	2	0
+li	next	樂	9	5
+li	next	樓	20	0
+li	next	標	14	4
+li	next	模	21	2
+li	next	樣	4	0
+li	next	樸	3	0
+li	next	樹	6	3
+li	next	橋	0	19
+li	next	橘	6	0
+li	next	橙	2	0
+li	next	機	102	36
+li	next	橫	17	3
+li	next	檔	2	0
+li	next	檢	25	9
+li	next	檯	1	0
+li	next	檳	0	1
+li	next	檸	0	6
+li	next	櫃	4	0
+li	next	櫥	2	0
+li	next	櫻	9	2
+li	next	權	5	0
+li	next	欠	10	0
+li	next	次	46	0
+li	next	欣	9	0
+li	next	欲	2	1
+li	next	欸	45	14
+li	next	欺	4	1
+li	next	歇	1	4
+li	next	歉	1	0
+li	next	歌	6	6
+li	next	歐	26	610
+li	next	歡	16	2
+li	next	止	1	0
+li	next	正	144	20
+li	next	此	3	0
+li	next	步	4	2
+li	next	武	10	7
+li	next	歧	7	0
+li	next	歪	14	0
+li	next	歲	1	1
+li	next	歴	0	2
+li	next	歷	4	1
+li	next	歸	7	2
+li	next	歹	1	0
+li	next	死	95	2
+li	next	殊	1	0
+li	next	殘	9	2
+li	next	段	4	22
+li	next	殷	2	0
+li	next	殺	70	5
+li	next	殼	2	0
+li	next	毀	4	2
+li	next	毅	0	1
+li	next	毆	0	1
+li	next	母	6	3
+li	next	每	190	21
+li	next	毒	6	0
+li	next	比	513	70
+li	next	毛	18	0
+li	next	毫	10	2
+li	next	氏	0	6
+li	next	民	3	264
+li	next	氛	5	1
+li	next	氣	46	5
+li	next	氮	1	0
+li	next	水	60	12
+li	next	永	49	12
+li	next	求	38	3
+li	next	汐	0	1
+li	next	汙	1	1
+li	next	江	4	22
+li	next	池	6	5
+li	next	污	4	1
+li	next	汰	2	0
+li	next	汲	2	0
+li	next	決	14	5
+li	next	汽	2	1
+li	next	沃	1	3
+li	next	沈	5	2
+li	next	沉	14	2
+li	next	沐	1	0
+li	next	沒	2739	136
+li	next	沖	6	0
+li	next	沙	25	170
+li	next	河	3	10
+li	next	沸	2	0
+li	next	油	16	24
+li	next	治	14	1
+li	next	沾	8	0
+li	next	沿	6	2
+li	next	泉	1	0
+li	next	泓	0	1
+li	next	法	15	9
+li	next	泛	8	0
+li	next	泡	32	0
+li	next	波	7	57
+li	next	泣	1	34
+li	next	注	10	1
+li	next	泰	6	4
+li	next	泳	3	1
+li	next	洋	10	4
+li	next	洗	91	4
+li	next	洛	7	18
+li	next	洞	2	6
+li	next	津	0	3
+li	next	洩	3	0
+li	next	洪	4	1
+li	next	活	65	41
+li	next	洽	22	1
+li	next	派	12	2
+li	next	流	84	4
+li	next	浜	0	6
+li	next	浣	1	0
+li	next	浪	17	0
+li	next	浮	57	0
+li	next	浴	11	0
+li	next	海	105	52
+li	next	浸	1	0
+li	next	涅	0	1
+li	next	消	81	10
+li	next	涉	2	2
+li	next	涮	1	0
+li	next	涵	0	1
+li	next	涼	14	0
+li	next	淀	7	0
+li	next	淋	2	0
+li	next	淌	1	0
+li	next	淑	1	0
+li	next	淘	8	1
+li	next	淚	4	0
+li	next	淡	6	11
+li	next	淥	1	0
+li	next	淨	7	0
+li	next	淫	0	1
+li	next	深	27	7
+li	next	混	42	2
+li	next	淹	22	3
+li	next	淺	3	2
+li	next	添	12	0
+li	next	清	65	7
+li	next	減	4	4
+li	next	渡	8	6
+li	next	渣	5	1
+li	next	渥	0	1
+li	next	測	35	6
+li	next	港	4	16
+li	next	渴	1	0
+li	next	游	41	3
+li	next	渾	1	0
+li	next	湊	11	1
+li	next	湖	22	2
+li	next	湘	1	0
+li	next	湧	14	0
+li	next	湯	3	1
+li	next	源	1	0
+li	next	準	153	2
+li	next	溜	4	0
+li	next	溝	9	0
+li	next	溢	3	0
+li	next	溪	0	25
+li	next	溫	20	5
+li	next	溺	6	0
+li	next	溼	4	0
+li	next	滄	0	1
+li	next	滅	4	1
+li	next	滋	4	1
+li	next	滑	27	2
+li	next	滯	0	8
+li	next	滲	10	0
+li	next	滴	3	0
+li	next	滷	1	0
+li	next	滾	18	0
+li	next	滿	139	4
+li	next	漁	0	2
+li	next	漂	19	0
+li	next	漆	3	0
+li	next	漏	54	6
+li	next	演	140	13
+li	next	漢	2	1
+li	next	漫	18	0
+li	next	漱	1	0
+li	next	漲	5	0
+li	next	漸	6	1
+li	next	潑	2	0
+li	next	潘	1	0
+li	next	潛	8	0
+li	next	潭	0	1
+li	next	潮	3	3
+li	next	潰	1	0
+li	next	澄	3	0
+li	next	澆	2	0
+li	next	澡	1	0
+li	next	澢	0	1
+li	next	澤	2	3
+li	next	激	14	0
+li	next	濃	1	0
+li	next	濕	32	0
+li	next	濟	2	1
+li	next	濫	1	0
+li	next	濱	0	17
+li	next	瀏	1	0
+li	next	瀕	1	0
+li	next	瀝	2	0
+li	next	瀟	0	4
+li	next	瀨	1	3
+li	next	瀰	8	0
+li	next	灌	15	0
+li	next	灑	6	1
+li	next	火	13	16
+li	next	灰	18	1
+li	next	災	1	0
+li	next	炎	2	1
+li	next	炒	6	1
+li	next	炙	1	0
+li	next	炫	12	1
+li	next	炭	1	0
+li	next	炮	1	0
+li	next	炸	32	136
+li	next	為	141	40
+li	next	烏	8	45
+li	next	烘	3	0
+li	next	烙	8	1
+li	next	烤	16	30
+li	next	烹	1	0
+li	next	烽	0	5
+li	next	無	219	66
+li	next	焦	3	3
+li	next	然	56	20
+li	next	煉	1	0
+li	next	煎	4	0
+li	next	煙	1	0
+li	next	煞	0	4
+li	next	照	33	5
+li	next	煨	1	0
+li	next	煩	2	0
+li	next	煮	57	1
+li	next	煽	1	0
+li	next	熄	2	1
+li	next	熊	7	1
+li	next	熟	6	0
+li	next	熠	1	0
+li	next	熬	5	0
+li	next	熱	36	9
+li	next	燃	3	1
+li	next	燈	15	6
+li	next	燉	2	1
+li	next	燒	48	6
+li	next	燕	3	0
+li	next	燙	4	0
+li	next	營	10	2
+li	next	燥	2	1
+li	next	燻	0	2
+li	next	燼	2	0
+li	next	爆	43	4
+li	next	爐	3	0
+li	next	爛	76	3
+li	next	爬	61	5
+li	next	爭	8	3
+li	next	父	18	0
+li	next	爸	17	12
+li	next	爹	0	1
+li	next	爺	0	3
+li	next	爽	71	3
+li	next	爾	4	572
+li	next	牆	21	0
+li	next	片	5	0
+li	next	版	36	7
+li	next	牌	2	2
+li	next	牙	3	0
+li	next	牛	7	7
+li	next	牠	3	0
+li	next	牢	1	0
+li	next	牧	1	0
+li	next	物	7	2
+li	next	特	85	84
+li	next	牽	18	0
+li	next	犒	1	0
+li	next	犧	2	0
+li	next	犯	36	0
+li	next	狀	34	7
+li	next	狂	35	7
+li	next	狐	3	0
+li	next	狗	14	1
+li	next	狙	1	1
+li	next	狠	6	0
+li	next	狡	1	0
+li	next	狩	0	1
+li	next	狹	3	0
+li	next	狼	1	1
+li	next	猛	6	1
+li	next	猜	15	1
+li	next	猥	1	0
+li	next	猩	1	0
+li	next	猴	2	0
+li	next	猶	5	0
+li	next	獄	1	0
+li	next	獅	0	1
+li	next	獎	1	1
+li	next	獐	1	0
+li	next	獨	25	7
+li	next	獲	70	2
+li	next	獵	3	0
+li	next	獸	1	1
+li	next	獻	2	0
+li	next	玄	6	0
+li	next	率	2	0
+li	next	玉	7	3
+li	next	王	160	14
+li	next	玟	1	0
+li	next	玩	353	10
+li	next	玻	1	1
+li	next	珀	1	3
+li	next	珈	0	2
+li	next	珊	1	0
+li	next	珍	10	1
+li	next	班	3	2
+li	next	現	110	28
+li	next	球	19	16
+li	next	理	32	2
+li	next	琉	0	17
+li	next	琛	0	2
+li	next	琢	1	0
+li	next	琥	1	0
+li	next	琳	5	0
+li	next	琴	1	6
+li	next	瑞	0	4
+li	next	瑟	15	4
+li	next	瑤	0	1
+li	next	瑪	3	6
+li	next	瑲	1	0
+li	next	璟	2	0
+li	next	環	66	1
+li	next	瓦	9	11
+li	next	瓶	1	0
+li	next	甄	1	0
+li	next	甘	0	1
+li	next	甚	42	7
+li	next	甜	20	0
+li	next	生	223	27
+li	next	產	33	3
+li	next	甦	1	0
+li	next	用	664	23
+li	next	甩	3	0
+li	next	田	1	1
+li	next	由	14	1
+li	next	甲	2	4
+li	next	申	21	1
+li	next	男	73	13
+li	next	町	2	3
+li	next	界	33	4
+li	next	留	101	7
+li	next	畢	41	7
+li	next	略	10	1
+li	next	番	44	6
+li	next	畫	51	4
+li	next	異	40	4
+li	next	當	355	43
+li	next	疆	0	1
+li	next	疊	2	0
+li	next	疏	5	0
+li	next	疑	7	0
+li	next	疙	7	0
+li	next	疫	1	1
+li	next	疲	1	1
+li	next	疼	2	0
+li	next	疾	8	0
+li	next	病	9	0
+li	next	症	1	1
+li	next	痛	67	1
+li	next	痠	4	0
+li	next	瘋	23	2
+li	next	瘦	1	1
+li	next	療	2	0
+li	next	癌	3	0
+li	next	癡	2	0
+li	next	癢	11	0
+li	next	登	54	6
+li	next	發	700	52
+li	next	白	44	10
+li	next	百	26	1
+li	next	的	17054	1815
+li	next	皆	5	5
+li	next	皇	6	5
+li	next	皮	2	17
+li	next	皺	1	0
+li	next	盃	1	3
+li	next	盆	1	0
+li	next	盈	1	0
+li	next	益	1	6
+li	next	盒	2	0
+li	next	盛	12	2
+li	next	盜	3	0
+li	next	盡	18	2
+li	next	監	7	2
+li	next	盤	15	1
+li	next	盥	2	0
+li	next	盧	3	0
+li	next	盪	1	0
+li	next	目	86	19
+li	next	盯	2	0
+li	next	盲	4	2
+li	next	直	166	34
+li	next	相	175	14
+li	next	盼	2	1
+li	next	盾	1	0
+li	next	省	43	5
+li	next	眉	1	0
+li	next	看	2293	45
+li	next	真	784	88
+li	next	眨	1	0
+li	next	眺	1	0
+li	next	眼	14	89
+li	next	眾	7	1
+li	next	睜	1	0
+li	next	睡	82	0
+li	next	督	1	0
+li	next	睪	0	1
+li	next	睽	1	0
+li	next	睿	1	0
+li	next	瞄	1	0
+li	next	瞎	14	0
+li	next	瞥	3	0
+li	next	瞧	8	0
+li	next	瞪	3	0
+li	next	瞬	19	1
+li	next	瞭	5	0
+li	next	矗	3	0
+li	next	矛	5	1
+li	next	矜	1	0
+li	next	矢	1	0
+li	next	知	115	3
+li	next	短	44	16
+li	next	矮	1	0
+li	next	石	6	2
+li	next	砂	1	3
+li	next	砍	18	1
+li	next	研	7	0
+li	next	砲	1	0
+li	next	破	38	3
+li	next	砸	6	0
+li	next	硬	33	1
+li	next	碎	11	5
+li	next	碗	2	0
+li	next	碧	1	0
+li	next	碩	2	0
+li	next	碰	33	1
+li	next	碳	0	1
+li	next	確	95	10
+li	next	碼	1	1
+li	next	碾	1	0
+li	next	磁	5	0
+li	next	磅	0	3
+li	next	磐	6	2
+li	next	磨	18	8
+li	next	礙	12	0
+li	next	礦	0	1
+li	next	示	2	0
+li	next	社	20	9
+li	next	祈	9	0
+li	next	祐	0	3
+li	next	祕	1	0
+li	next	祖	7	0
+li	next	祝	11	0
+li	next	神	65	15
+li	next	祥	0	1
+li	next	票	6	6
+li	next	祭	13	1
+li	next	禁	17	4
+li	next	禍	1	0
+li	next	福	8	15
+li	next	禮	5	2
+li	next	禱	1	0
+li	next	禽	0	1
+li	next	禾	1	0
+li	next	禿	1	0
+li	next	秀	13	2
+li	next	私	10	2
+li	next	秋	6	1
+li	next	科	17	8
+li	next	秒	4	1
+li	next	秘	1	0
+li	next	租	15	1
+li	next	秦	1	0
+li	next	移	21	0
+li	next	稀	2	0
+li	next	稅	1	0
+li	next	程	8	5654
+li	next	稍	24	2
+li	next	種	40	2
+li	next	稱	17	3
+li	next	稻	5	0
+li	next	稽	0	1
+li	next	穂	0	2
+li	next	積	13	3
+li	next	穗	0	3
+li	next	穩	27	5
+li	next	穴	1	5
+li	next	究	14	1
+li	next	空	224	4
+li	next	穿	51	10
+li	next	突	93	4
+li	next	窄	1	0
+li	next	窗	12	0
+li	next	窩	5	0
+li	next	窮	43	0
+li	next	窸	1	0
+li	next	窺	2	0
+li	next	竄	5	0
+li	next	竇	1	0
+li	next	竊	6	0
+li	next	立	15	5
+li	next	站	53	57
+li	next	竟	103	6
+li	next	章	1	0
+li	next	童	1	0
+li	next	竭	1	0
+li	next	端	8	8
+li	next	競	12	69
+li	next	竹	4	1
+li	next	笑	58	5
+li	next	笛	1	0
+li	next	符	6	1
+li	next	笨	3	1
+li	next	第	129	27
+li	next	筆	2	1
+li	next	等	223	21
+li	next	筋	0	1
+li	next	答	3	1
+li	next	算	284	24
+li	next	管	26	1
+li	next	箭	2	1
+li	next	箱	5	0
+li	next	節	7	1
+li	next	範	1	25
+li	next	篇	24	2
+li	next	築	3	1
+li	next	篤	0	1
+li	next	篩	1	0
+li	next	簡	50	5
+li	next	簽	18	3
+li	next	籃	3	0
+li	next	籌	3	0
+li	next	籍	1	0
+li	next	籠	1	0
+li	next	籤	0	1
+li	next	米	4	254
+li	next	粉	11	3
+li	next	粒	1	0
+li	next	粗	2	0
+li	next	粘	1	0
+li	next	粽	1	0
+li	next	精	27	2
+li	next	粿	1	0
+li	next	糊	41	40
+li	next	糖	1	3
+li	next	糞	1	0
+li	next	糟	15	0
+li	next	糧	1	0
+li	next	糯	22	1
+li	next	系	8	5
+li	next	糾	10	2
+li	next	紀	8	4
+li	next	約	106	221
+li	next	紅	74	11
+li	next	紈	1	0
+li	next	納	4	19
+li	next	純	15	5
+li	next	紗	1	2
+li	next	紙	4	0
+li	next	級	0	6
+li	next	紛	1	1
+li	next	素	41	1
+li	next	紡	1	0
+li	next	索	6	13
+li	next	紫	0	2
+li	next	紬	0	3
+li	next	紮	9	4
+li	next	累	24	4
+li	next	細	17	1
+li	next	終	22	10
+li	next	組	22	22
+li	next	絆	2	1
+li	next	結	88	18
+li	next	絕	49	3
+li	next	絢	1	0
+li	next	給	168	19
+li	next	絨	4	0
+li	next	絮	2	0
+li	next	統	14	0
+li	next	絲	2	31
+li	next	綁	15	0
+li	next	經	103	4
+li	next	綜	1	3
+li	next	綠	13	4
+li	next	維	39	74
+li	next	綱	1	0
+li	next	網	162	10
+li	next	綻	4	0
+li	next	綾	0	12
+li	next	綿	1	3
+li	next	緊	17	0
+li	next	緋	1	0
+li	next	緒	0	9
+li	next	線	70	33
+li	next	緞	1	0
+li	next	編	12	0
+li	next	緩	8	2
+li	next	緬	2	0
+li	next	練	84	1
+li	next	緻	0	1
+li	next	縈	3	0
+li	next	縣	1	0
+li	next	縫	5	0
+li	next	縮	7	3
+li	next	縱	2	3
+li	next	總	148	16
+li	next	績	1	0
+li	next	繁	4	0
+li	next	繆	1	0
+li	next	織	2	0
+li	next	繚	1	0
+li	next	繞	22	2
+li	next	繪	1	2
+li	next	繳	18	0
+li	next	繼	63	8
+li	next	繽	1	0
+li	next	繾	1	0
+li	next	續	3	11
+li	next	纏	2	1
+li	next	纜	0	3
+li	next	缺	70	4
+li	next	罕	5	0
+li	next	罩	2	0
+li	next	置	9	3
+li	next	罰	2	1
+li	next	署	1	0
+li	next	罵	64	1
+li	next	罷	6	1
+li	next	羅	5	15
+li	next	羈	1	0
+li	next	羊	3	0
+li	next	羋	1	0
+li	next	美	53	49
+li	next	羞	2	0
+li	next	群	3	1
+li	next	羨	2	0
+li	next	義	1	17
+li	next	翁	1	192
+li	next	翌	1	0
+li	next	習	12	0
+li	next	翡	0	2
+li	next	翩	1	0
+li	next	翹	2	0
+li	next	翻	95	0
+li	next	耀	1	0
+li	next	老	205	28
+li	next	考	10	2
+li	next	者	0	3
+li	next	而	123	71
+li	next	耍	14	0
+li	next	耐	3	0
+li	next	耗	4	2
+li	next	耳	5	2
+li	next	耶	36	56
+li	next	耽	1	0
+li	next	聆	2	0
+li	next	聊	60	1
+li	next	聖	9	0
+li	next	聘	2	0
+li	next	聚	43	2
+li	next	聞	11	0
+li	next	聯	16	13
+li	next	聰	5	0
+li	next	聲	6	3
+li	next	職	6	0
+li	next	聽	221	2
+li	next	肆	2	0
+li	next	肇	0	1
+li	next	肉	9	5
+li	next	肌	3	224
+li	next	肖	3	0
+li	next	肚	2	1
+li	next	肝	1	0
+li	next	股	5	0
+li	next	肥	12	0
+li	next	肩	1	0
+li	next	肯	43	2
+li	next	育	3	1
+li	next	肺	0	1
+li	next	胃	0	1
+li	next	背	22	4
+li	next	胎	1	1
+li	next	胖	8	2
+li	next	胡	70	29
+li	next	胥	0	1
+li	next	胸	1	0
+li	next	能	496	33
+li	next	脆	5	0
+li	next	脊	0	10
+li	next	脫	11	2
+li	next	脹	1	0
+li	next	腎	1	0
+li	next	腐	1	0
+li	next	腔	2	0
+li	next	腕	2	0
+li	next	腥	1	0
+li	next	腦	19	0
+li	next	腫	1	1
+li	next	腰	3	1
+li	next	腱	0	1
+li	next	腳	3	5
+li	next	腸	1	0
+li	next	腹	0	3
+li	next	腿	1	1
+li	next	膚	1	0
+li	next	膜	2	0
+li	next	膝	1	1
+li	next	膠	1	0
+li	next	膨	3	0
+li	next	膩	1	0
+li	next	臉	11	5
+li	next	臣	0	1
+li	next	臥	7	0
+li	next	臨	16	2
+li	next	自	265	43
+li	next	臭	20	8
+li	next	至	47	27
+li	next	致	7	1
+li	next	臺	0	3
+li	next	舀	2	0
+li	next	舅	0	1
+li	next	與	75	47
+li	next	興	2	2
+li	next	舉	39	10
+li	next	舊	51	3
+li	next	舌	1	0
+li	next	舍	0	8
+li	next	舒	34	3
+li	next	舔	7	0
+li	next	舞	4	0
+li	next	航	0	9
+li	next	般	2	1
+li	next	艙	1	0
+li	next	艦	1	2
+li	next	良	3	0
+li	next	艱	1	0
+li	next	色	13	2
+li	next	艾	1	3
+li	next	芋	0	4
+li	next	芙	1	0
+li	next	芝	1	0
+li	next	芬	0	56
+li	next	芭	1	2
+li	next	花	52	25
+li	next	芳	1	0
+li	next	芽	1	0
+li	next	苗	2	5
+li	next	苟	1	15
+li	next	若	19	1
+li	next	苦	75	4
+li	next	英	7	4
+li	next	范	4	0
+li	next	茄	2	0
+li	next	茉	0	1
+li	next	茍	0	1
+li	next	茜	5	0
+li	next	茨	0	8
+li	next	茫	2	7
+li	next	茭	0	1
+li	next	茲	1	187
+li	next	茶	19	2
+li	next	茸	1	0
+li	next	草	8	5
+li	next	荊	1	0
+li	next	荒	4	2
+li	next	荖	0	1
+li	next	荷	0	3
+li	next	荼	1	0
+li	next	莉	2	0
+li	next	莊	1	4
+li	next	莎	8	47
+li	next	莫	22	27
+li	next	菁	1	1
+li	next	菇	0	1
+li	next	菈	0	5
+li	next	菊	0	1
+li	next	菜	9	18
+li	next	華	2	13
+li	next	菲	1	7
+li	next	萊	2	2
+li	next	萌	4	0
+li	next	萬	32	4
+li	next	落	17	4
+li	next	葉	20	3
+li	next	著	12	0
+li	next	葛	2	1
+li	next	葡	1	1
+li	next	董	1	1
+li	next	葬	2	0
+li	next	蒂	1	1
+li	next	蒐	5	0
+li	next	蒙	0	1
+li	next	蒜	1	0
+li	next	蒸	2	0
+li	next	蒼	5	0
+li	next	蒿	0	2
+li	next	蓄	1	0
+li	next	蓋	37	9
+li	next	蓬	1	0
+li	next	蓮	10	1
+li	next	蔓	5	0
+li	next	蔡	1	1
+li	next	蔣	2	0
+li	next	蔥	2	0
+li	next	蕭	7	1
+li	next	蕾	2	0
+li	next	薄	4	0
+li	next	薇	1	11
+li	next	薛	1	0
+li	next	薩	4	22
+li	next	薪	9	1
+li	next	薯	3	0
+li	next	薰	2	0
+li	next	藉	1	0
+li	next	藍	10	6
+li	next	藏	111	3
+li	next	藝	1	3
+li	next	藤	1	0
+li	next	藥	1	0
+li	next	藺	1	0
+li	next	藿	1	0
+li	next	蘆	0	4
+li	next	蘇	2	6
+li	next	蘊	3	0
+li	next	蘋	3	0
+li	next	蘑	1	0
+li	next	蘭	2	186
+li	next	蘿	4	0
+li	next	虎	7	41
+li	next	虐	24	2
+li	next	虔	1	0
+li	next	處	40	94
+li	next	虛	11	0
+li	next	虞	2	0
+li	next	號	3	36
+li	next	虧	12	0
+li	next	蚊	3	0
+li	next	蛇	5	1
+li	next	蛋	5	430
+li	next	蛔	4	0
+li	next	蛤	1	0
+li	next	蜂	1	1
+li	next	蜘	2	0
+li	next	蝦	3	1
+li	next	蝴	1	0
+li	next	螃	2	0
+li	next	融	4	1
+li	next	螞	1	0
+li	next	螢	6	1
+li	next	螺	2	0
+li	next	蟄	1	0
+li	next	蟑	1	0
+li	next	蟲	1	0
+li	next	蟹	0	15
+li	next	蟻	1	0
+li	next	蠕	1	0
+li	next	蠢	4	0
+li	next	蠻	55	4
+li	next	血	8	1
+li	next	行	164	24
+li	next	衍	2	0
+li	next	術	2	0
+li	next	街	2	7
+li	next	衛	9	0
+li	next	衝	47	2
+li	next	衡	1	0
+li	next	衣	16	0
+li	next	表	94	19
+li	next	衰	8	2
+li	next	袁	2	0
+li	next	袋	3	0
+li	next	袖	1	0
+li	next	被	442	41
+li	next	裁	1	1
+li	next	裂	1	0
+li	next	裕	1	0
+li	next	補	79	13
+li	next	裝	317	7
+li	next	裡	38	9
+li	next	裴	1	0
+li	next	裸	2	0
+li	next	製	34	1
+li	next	複	32	1
+li	next	褲	2	0
+li	next	襯	2	0
+li	next	襲	3	2
+li	next	西	26	54
+li	next	要	610	136
+li	next	覆	3	2
+li	next	見	75	170
+li	next	規	20	2
+li	next	覓	3	25
+li	next	視	14	3
+li	next	親	27	3
+li	next	覬	1	0
+li	next	覺	169	9
+li	next	觀	32	6
+li	next	角	29	2
+li	next	解	57	6
+li	next	觸	7	0
+li	next	言	5	0
+li	next	訂	26	1
+li	next	計	8	11
+li	next	訊	10	1
+li	next	討	163	1
+li	next	訓	22	7
+li	next	訕	1	0
+li	next	記	39	3
+li	next	訝	1	0
+li	next	訣	1	0
+li	next	訪	8	0
+li	next	設	230	13
+li	next	許	11	3
+li	next	訴	1	1
+li	next	診	3	0
+li	next	註	5	0
+li	next	詐	9	1
+li	next	評	25	1
+li	next	詛	3	0
+li	next	詠	0	1
+li	next	詢	26	0
+li	next	試	115	3
+li	next	詩	0	3
+li	next	詭	7	0
+li	next	詮	1	0
+li	next	話	157	6
+li	next	該	52	3
+li	next	詳	5	0
+li	next	詹	3	1
+li	next	誇	12	0
+li	next	認	100	7
+li	next	誒	0	1
+li	next	誕	10	0
+li	next	誘	2	0
+li	next	語	5	2
+li	next	誠	5	0
+li	next	誤	22	3
+li	next	誦	0	1
+li	next	說	713	26
+li	next	誰	67	1
+li	next	課	5	1
+li	next	調	52	10
+li	next	談	41	4
+li	next	請	73	5
+li	next	論	5	0
+li	next	諮	12	1
+li	next	諷	1	0
+li	next	諸	1	0
+li	next	諾	4	523
+li	next	謀	1	0
+li	next	謊	1	0
+li	next	謎	2	0
+li	next	謙	1	0
+li	next	講	262	3
+li	next	謝	29	10
+li	next	謠	3	0
+li	next	謹	2	1
+li	next	謾	1	0
+li	next	證	8	1
+li	next	識	1	0
+li	next	譚	2	0
+li	next	譜	0	1
+li	next	警	8	9
+li	next	議	2	2
+li	next	護	10	3
+li	next	讀	33	0
+li	next	變	196	17
+li	next	讓	143	10
+li	next	讚	8	2
+li	next	谷	1	1
+li	next	豆	7	2
+li	next	豐	3	3
+li	next	豔	1	0
+li	next	豚	3	0
+li	next	象	2	1
+li	next	豪	5	2
+li	next	豬	5	1
+li	next	貓	35	1
+li	next	貝	5	9
+li	next	負	35	2
+li	next	財	12	0
+li	next	貢	7	2
+li	next	貧	6	1
+li	next	貨	4	0
+li	next	販	21	0
+li	next	貪	9	0
+li	next	責	3	1
+li	next	貴	37	1
+li	next	貶	4	0
+li	next	買	1044	27
+li	next	貸	4	0
+li	next	費	5	13
+li	next	貼	67	1
+li	next	賀	1	1
+li	next	資	44	2
+li	next	賈	2	10
+li	next	賊	1	0
+li	next	賞	7	1
+li	next	賠	3	0
+li	next	賢	1	2
+li	next	賣	130	6
+li	next	質	6	0
+li	next	賭	9	0
+li	next	賴	0	4
+li	next	賺	46	1
+li	next	購	64	2
+li	next	賽	7	33
+li	next	贅	1	0
+li	next	贈	4	0
+li	next	贊	5	0
+li	next	贏	37	3
+li	next	贖	1	0
+li	next	赤	1	5
+li	next	赫	2	28
+li	next	走	269	33
+li	next	起	48	29
+li	next	趁	3	0
+li	next	超	230	43
+li	next	越	96	11
+li	next	趕	17	5
+li	next	趙	6	1
+li	next	趣	2	0
+li	next	趨	1	0
+li	next	足	4	3
+li	next	趴	9	2
+li	next	趺	1	0
+li	next	跋	0	1
+li	next	跌	39	0
+li	next	跑	175	48
+li	next	距	13	4
+li	next	跟	469	140
+li	next	跨	12	3
+li	next	跪	5	0
+li	next	路	54	85
+li	next	跳	95	3
+li	next	踏	6	1
+li	next	踢	20	3
+li	next	踩	7	1
+li	next	踱	1	0
+li	next	踹	1	0
+li	next	蹦	17	0
+li	next	蹭	14	0
+li	next	蹲	147	2
+li	next	躁	2	0
+li	next	躊	1	0
+li	next	躍	1	0
+li	next	身	16	4
+li	next	躲	28	1
+li	next	躺	50	0
+li	next	車	52	50
+li	next	軋	3	0
+li	next	軌	1	0
+li	next	軍	9	1
+li	next	軟	39	5
+li	next	軸	1	0
+li	next	較	24	3
+li	next	載	16	0
+li	next	輔	2	1
+li	next	輕	43	95
+li	next	輪	12	2
+li	next	輸	62	7
+li	next	輾	2	1
+li	next	轄	1	3
+li	next	轉	79	18
+li	next	轎	2	0
+li	next	轟	7	1
+li	next	辛	11	16
+li	next	辜	1	0
+li	next	辣	5	0
+li	next	辦	55	39
+li	next	辨	4	0
+li	next	辭	2	0
+li	next	辯	1	0
+li	next	農	13	3
+li	next	迅	3	0
+li	next	迎	14	0
+li	next	近	26	15
+li	next	返	1	0
+li	next	迢	0	56
+li	next	迦	1	0
+li	next	迪	3	5
+li	next	述	2	0
+li	next	迴	11	0
+li	next	迷	18	6
+li	next	迸	2	0
+li	next	追	44	13
+li	next	退	37	5
+li	next	送	56	14
+li	next	逃	84	4
+li	next	逆	8	1
+li	next	透	62	3
+li	next	逐	4	6
+li	next	逗	3	1
+li	next	這	414	125
+li	next	通	68	82
+li	next	逛	38	1
+li	next	逞	1	0
+li	next	速	12	25
+li	next	造	43	13
+li	next	連	119	20
+li	next	逮	1	0
+li	next	週	7	10
+li	next	進	132	30
+li	next	逼	10	1
+li	next	遇	132	7
+li	next	遊	33	4
+li	next	運	38	15
+li	next	遍	2	0
+li	next	過	169	21
+li	next	道	20	5
+li	next	達	11	144
+li	next	違	30	2
+li	next	遙	4	1
+li	next	遛	2	0
+li	next	遜	0	80
+li	next	遞	0	1
+li	next	遠	26	58
+li	next	適	39	10
+li	next	遭	18	1
+li	next	遮	1	1
+li	next	遲	2	0
+li	next	遷	1	0
+li	next	選	117	15
+li	next	遺	8	0
+li	next	遼	1	1
+li	next	避	12	2
+li	next	邀	1	2
+li	next	邁	2	0
+li	next	邂	2	0
+li	next	還	2357	218
+li	next	邊	39	4
+li	next	邋	2	0
+li	next	邏	10	0
+li	next	那	705	114
+li	next	邦	2	0
+li	next	邪	10	0
+li	next	邱	2	0
+li	next	郊	2	1
+li	next	郎	0	53
+li	next	郡	0	2
+li	next	部	14	2
+li	next	郭	4	0
+li	next	郵	1	1
+li	next	都	2522	234
+li	next	鄉	19	17
+li	next	鄙	2	0
+li	next	鄧	2	0
+li	next	鄭	3	0
+li	next	鄰	4	19
+li	next	配	45	34
+li	next	酒	5	4
+li	next	酬	0	1
+li	next	酷	4	1
+li	next	酸	51	1
+li	next	醉	0	2
+li	next	醋	1	0
+li	next	醍	1	0
+li	next	醒	15	2
+li	next	醜	28	2
+li	next	醞	1	0
+li	next	醫	17	3
+li	next	醬	4	9
+li	next	釀	1	0
+li	next	釋	1	2
+li	next	里	5	89
+li	next	重	134	13
+li	next	野	14	3
+li	next	量	5	0
+li	next	釐	2	0
+li	next	金	32	22
+li	next	釘	1	1
+li	next	針	6	1
+li	next	釣	8	1
+li	next	鈔	2	1
+li	next	鈣	1	0
+li	next	鈴	2	2
+li	next	銀	7	1
+li	next	銅	1	1
+li	next	銜	1	0
+li	next	銷	2	0
+li	next	銹	1	0
+li	next	鋒	1	1
+li	next	鋪	8	1
+li	next	鋰	1	0
+li	next	鋼	5	0
+li	next	錄	8	1
+li	next	錢	36	0
+li	next	錦	1	3
+li	next	錯	67	1
+li	next	錶	1	1
+li	next	鍊	2	0
+li	next	鍋	4	0
+li	next	鍛	4	0
+li	next	鍵	14	3
+li	next	鎖	12	0
+li	next	鎮	11	48
+li	next	鏈	0	2
+li	next	鏟	1	0
+li	next	鏡	3	1
+li	next	鐵	10	8
+li	next	鑄	2	0
+li	next	鑑	1	0
+li	next	鑰	11	0
+li	next	鑽	19	1
+li	next	鑿	1	1
+li	next	長	372	1970
+li	next	門	31	9
+li	next	閃	41	2
+li	next	閉	7	1
+li	next	開	689	68
+li	next	閑	3	0
+li	next	閒	37	1
+li	next	間	5	27
+li	next	閥	1	0
+li	next	閱	1	0
+li	next	閻	1	0
+li	next	闇	1	0
+li	next	闖	7	1
+li	next	關	162	10
+li	next	阪	6	1
+li	next	防	25	8
+li	next	阻	1	1
+li	next	阿	92	61
+li	next	附	576	19
+li	next	降	10	3
+li	next	限	12	10
+li	next	陡	1	0
+li	next	院	6	0
+li	next	陣	6	3
+li	next	除	208	9
+li	next	陪	33	0
+li	next	陰	51	0
+li	next	陳	9	2
+li	next	陵	1	0
+li	next	陷	4	2
+li	next	陸	13	1
+li	next	陽	13	3
+li	next	隆	1	0
+li	next	隊	6	6
+li	next	階	1	0
+li	next	隔	21	9
+li	next	障	5	2
+li	next	隧	1	8
+li	next	隨	79	4
+li	next	險	1	1
+li	next	隱	30	0
+li	next	隸	0	1
+li	next	雀	3	0
+li	next	雁	2	0
+li	next	雄	0	1
+li	next	雅	3	21
+li	next	集	12	6
+li	next	雇	3	2
+li	next	雖	81	14
+li	next	雙	46	8
+li	next	雛	1	1
+li	next	雜	11	0
+li	next	雞	18	20
+li	next	離	68	6
+li	next	難	172	8
+li	next	雨	4	2
+li	next	雪	2	3
+li	next	雲	11	27
+li	next	零	33	0
+li	next	雷	21	7
+li	next	電	235	15
+li	next	需	223	12
+li	next	震	5	0
+li	next	霍	1	2
+li	next	霧	31	39
+li	next	露	20	0
+li	next	霸	12	3
+li	next	霹	3	0
+li	next	靈	11	0
+li	next	青	18	9
+li	next	靖	1	0
+li	next	靜	19	2
+li	next	非	88	3
+li	next	靠	38	2
+li	next	面	41040	53
+li	next	革	1	0
+li	next	鞋	2	4
+li	next	鞭	1	0
+li	next	韋	2	1
+li	next	韌	2	0
+li	next	韓	11	0
+li	next	韭	1	0
+li	next	音	10	0
+li	next	響	17	4
+li	next	頂	26	4
+li	next	順	29	5
+li	next	須	1	0
+li	next	預	48	9
+li	next	頑	1	0
+li	next	頒	0	2
+li	next	頓	9	24
+li	next	頗	14	1
+li	next	領	168	6
+li	next	頤	1	0
+li	next	頭	1640	9
+li	next	頹	1	0
+li	next	頻	2	1
+li	next	題	4	0
+li	next	額	7	0
+li	next	顏	9	0
+li	next	願	6	1
+li	next	類	13	1
+li	next	顧	26	1
+li	next	顯	48	4
+li	next	風	56	13
+li	next	颱	1	0
+li	next	颳	1	0
+li	next	飄	22	0
+li	next	飆	3	1
+li	next	飛	35	25
+li	next	食	18	1
+li	next	飢	1	0
+li	next	飯	4	0
+li	next	飲	11	0
+li	next	飼	1	0
+li	next	飽	3	0
+li	next	飾	16	91
+li	next	餅	4	7
+li	next	養	97	4
+li	next	餐	11	5
+li	next	餓	2	0
+li	next	餘	2	0
+li	next	餡	1	0
+li	next	館	2	3
+li	next	餵	10	0
+li	next	饒	1	0
+li	next	饗	1	0
+li	next	首	15	4
+li	next	香	58	123
+li	next	馬	51	124
+li	next	馮	0	1
+li	next	馳	0	1
+li	next	駅	1	0
+li	next	駐	4	1
+li	next	駕	2	1
+li	next	駛	1	0
+li	next	駡	1	0
+li	next	騎	31	26
+li	next	騙	19	4
+li	next	騰	1	4
+li	next	騷	4	0
+li	next	驀	3	0
+li	next	驅	1	0
+li	next	驍	1	3
+li	next	驗	8	2
+li	next	驚	6	2
+li	next	骨	7	0
+li	next	骰	1	0
+li	next	髒	18	0
+li	next	體	34	10
+li	next	高	127	75
+li	next	髮	3	0
+li	next	鬆	14	0
+li	next	鬥	10	0
+li	next	鬧	33	1
+li	next	鬼	14	0
+li	next	魂	7	0
+li	next	魅	2	0
+li	next	魏	2	0
+li	next	魔	320	5
+li	next	魚	5	1
+li	next	魯	13	1
+li	next	鮑	1	0
+li	next	鮮	4	2
+li	next	鯛	1	0
+li	next	鯨	1	0
+li	next	鯰	1	0
+li	next	鯷	0	1
+li	next	鳥	11	2
+li	next	鳳	1	0
+li	next	鴛	0	1
+li	next	鴨	1	0
+li	next	鴻	1	0
+li	next	鴿	1	0
+li	next	鵝	0	3
+li	next	鵬	0	5
+li	next	鶯	0	1
+li	next	鷇	1	0
+li	next	鷹	2	0
+li	next	鹹	3	2
+li	next	鹿	1	2
+li	next	麥	6	3
+li	next	麵	7	12
+li	next	麻	29	8
+li	next	麼	0	1
+li	next	黃	15	11
+li	next	黎	1	0
+li	next	黏	3	0
+li	next	黑	53	10
+li	next	默	69	1
+li	next	點	130	10
+li	next	黨	1	0
+li	next	黯	3	0
+li	next	黴	1	0
+li	next	鼎	1	1
+li	next	鼓	2	0
+li	next	鼠	1	0
+li	next	鼻	0	1
+li	next	齁	4	0
+li	next	齊	4	2
+li	next	龍	13	5
+li	next	龐	1	0
+li	next	龜	5	0
