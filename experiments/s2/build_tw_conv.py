@@ -42,6 +42,11 @@ VARIANT_PAIRS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": 
 # OpenCC (STCharacters) and MediaWiki zh-tw single-character conversion differ in these 31 keys; the MediaWiki value is a candidate (contract 2.3(1)).
 MEDIAWIKI = dict(zip("冲凄勋卤吣哗喂埙棂湿牦瘘硷签艳袅账鉴钚钫锎锝锨锫锿镅镎镥鹇鹚𩙧", "沖淒勛鹵唚嘩餵塤櫺濕氂瘺鹼簽艷裊帳鑒鈽鍅鉲鎝杴鉳鑀鋂錼鎦鷴鶿𩗡"))
 assert len(MEDIAWIKI) == 31
+# Contract 8: a char row may choose a value other than OpenCC's first only when the two are forms of one character (a variant pair).
+# Pairs come from TWVariants.txt, VARIANT_PAIRS, build_counts.MERGE and this list; each entry here is one character written two ways
+# (same meaning), checked by main 2026-11-06. Pairs that are two different characters (象/像, 舍/捨, 贊/讚, 鍾/鐘, 喂/餵, 籤/簽, 呆/待,
+# 樸/朴, 杆/桿, 胄/冑, 黴/霉, 侖/崙, 嶽/岳) are not variants: their single-character default stays OpenCC's, the phrase rows decide.
+VARIANT_EXTRA = ["溼濕", "賬帳", "悽淒", "硷鹼", "冢塚", "亙亘", "巖岩", "蝨虱", "譁嘩", "豔艷", "鑑鑒", "嫋裊", "竈灶", "棱稜"]
 
 
 def die(msg):
@@ -114,6 +119,8 @@ def build_rows(files, old):
     o = bc.read_opencc()
     st, stp, twv, twp = o["st"], o["stp"], o["twv"], o["twp"]
     word_chars = bc.lexicon_word_chars()
+    variant = {frozenset(p) for p in VARIANT_EXTRA} | {frozenset((x, y)) for x, y in twv.items()} \
+        | {frozenset((x, y)) for x, y in VARIANT_PAIRS.items()} | {frozenset((x, y)) for x, y in bc.MERGE.items()}
     S = bc.true_simplified(st, word_chars)
     # pass 1: raw character counts
     cc = collections.Counter()
@@ -158,6 +165,8 @@ def build_rows(files, old):
             cands = list(dict.fromkeys(fold(c) for c in cand))
             first = fold(v[0])
             value, status = pick(cands, fc, first)
+            if status == "evidence" and value != first and frozenset((first, value)) not in variant:
+                value, status = first, "distinct"     # contract 8: two different characters, the phrase rows decide
             char_rows[k] = (value, status, fmt_counts(cands, fc))
             row_cands[k] = (cands, first)
     chosen = lambda k: (man("char", k).split("@")[0] if man("char", k) else char_rows[k][0])
@@ -259,7 +268,7 @@ def review(table_path):
     stp = bc.read_opencc()["stp"]
     lines = []
     for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
-        if status == "hold" or value != fold(st[k][0]):
+        if status in ("hold", "distinct") or value != fold(st[k][0]):
             lines.append(("char", k, value, status, manual, counts))
     for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
         if rare:
