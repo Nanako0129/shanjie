@@ -52,6 +52,31 @@ def _load_tw_variants():
     return out
 
 
+def read_opencc():
+    """The hash-checked OpenCC tables as {"st": {key: [values]}, "stp": {key: first value}, "twv": {key: first value}, "twp": {key: first value}}
+    (STCharacters, STPhrases, TWVariants without identity rows, TWPhrases). load_conv() and experiments/s2/build_tw_conv.py (docs/contracts/tw-conv.md) share it."""
+    def rows(name, sha):
+        for line in open(_checked(name, sha), encoding="utf-8"):
+            p = line.rstrip("\n").split("\t")
+            if len(p) == 2 and not line.startswith("#"):
+                yield p[0], p[1].split(" ")
+    twv = {k: v[0] for k, v in rows("TWVariants.txt", "245b94eb5842957e735dd44b7e7d4ff469a3643126cc8fa511adda5281e9cb86") if v[0] != k}
+    return {"st": dict(rows("STCharacters.txt", "a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b")),
+            "stp": {k: v[0] for k, v in rows("STPhrases.txt", PHRASE_SHA["STPhrases.txt"])},
+            "twv": twv, "twp": {k: v[0] for k, v in rows("TWPhrases.txt", PHRASE_SHA["TWPhrases.txt"])}}
+
+
+def lexicon_word_chars():
+    """Every character that occurs in a word of two or more characters of the base lexicon (single-character entries also carry Simplified
+    characters at the lowest score, so they say nothing)."""
+    return {c for w in ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word if len(w) >= 2 for c in w}
+
+
+def true_simplified(st, word_chars):
+    """docs/contracts/tw-conv.md 2.2, set S: keys of STCharacters whose values do not contain the key and that no lexicon word of two or more characters uses."""
+    return {k for k, v in st.items() if k not in v and k not in word_chars}
+
+
 TW_VARIANTS = {}   # load_conv() 填（S2f 修訂一：import 不讀檔）；build_overlay.py、build_tune.py（經 build_counts）與之後的 S2w 都用這一個
 # 繁體句的簡體專用字要再扣掉的字：OpenCC 沒有換回、但基底詞庫有 5 條以上用到（S2f 契約 §2.2）
 TRAD_KEEP = set("秘庄晒霉虱么肴洒痒")
