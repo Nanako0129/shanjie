@@ -12349,3 +12349,17 @@ XL 比 `MAX_FILE`（67,108,864）小 1,168,880 位元組。錨點：4 個模型 
 - 重現（main `e38b8827`，出貨旗標，沒有前文）：聊天第一名 縮（−5.09 對 莎 −5.21），書面第一名 莎（−5.29 對 縮 −5.66）。
 - 原因（main 量）：詞庫給 莎 的兩個讀音同一個分數（ㄕㄚ、ㄙㄨㄛ 都是 −5.007），計數也不分讀音；語料裡的 莎 幾乎都是唸 ㄕㄚ 的譯名（PTT 抽樣：伊莉莎白、莎莎醬、阿莎力、伊莎貝、莎拉），ㄙㄨㄛ 的 莎 因此拿到 ㄕㄚ 的用量；書面偏維基、譯名更多。這是讀音計數 B（估準 P(讀音｜字)）要處理的問題，不是 OpenCC 的轉換。維護者：「沒有人會唸這個字叫縮，是不是什麼污染了」。
 - golden 重產：n 183 → 184；n-gram 第一名聊天 102 → 103、書面 111 不變；出貨設定聊天 143 → 144、書面 139 不變；前 64 名命中 178 → 179。
+
+## 2026-11-06：WIN-CORE，核心在原生 Windows 編譯與測試
+
+- 契約 `docs/contracts/win-core.md`（修訂三，三輪 plan-verifier）。官方 Windows 版的第一片：核心在 x86_64-pc-windows-msvc 編得過、測試全過，選字和 Linux 逐位元組相同。維護者決定的路線（候選窗用 WinUI 3 獨立程式、核心先放 DLL、這一片 main 自己在 188 做）記在契約 §0。
+- 改了什麼：連文表（`trigram.sjt3`）的唯讀對應在 Windows 改用 `CreateFileMappingW`／`MapViewOfFile`（windows-sys 0.59，只在 Windows 引入；通語 `bigram.sjlm` 本來就整檔讀進記憶體，沒改）；`local_day` 在 Windows 用 `GetLocalTime`；學習檔這一片先不支援 Windows，`learning_open` 回 3，沒有學習檔照樣能選字（新測試 `learning_open_is_3_on_windows_and_picking_still_works`）；學習相關的 60 個測試只在 unix 跑；`.gitattributes` 讓 data、eval、core/tests、cli/tests、scripts 一律 LF。
+- 188 原生 Windows（不經 WSL；綁 P-core、關降速；`rustc 1.97.1 (8bab26f4f 2026-07-14)`；head `e11ab170`）：換行檢查 226 個檔、0 個不合；模型雜湊相符；`cargo check` 6.3 秒、release 測試建置 24.4 秒；27 個測試執行檔全部 exit 0，**683 個通過**，`lm::tests::load_opts_maps_the_trigram_table ... ok`，數字表的測試（`engine_digits` 的 a12、a36 等）在 Windows 有跑、通過；契約 §2.3 第 4 步的七個計時測試跳過。
+- 跑測試的池子（同時 6 支、每支 2 執行緒）在 125 秒時 27 支都排進去，之後 `engine_cap` 一支獨跑到 399 秒、平均 3 核。驅動腳本改成 `engine_cap` 排第一、給 6 執行緒，其餘同時 3 支、各 2 執行緒（合計 12 執行緒），下一次跑時生效。
+- CI（PR #364，run 42223308009，head `e11ab170`）：7 個 job 全綠，含新的 windows job（windows-2025）：六組 rowstats 和 Linux `debug` job 的 artifact 逐位元組相同、換行檢查通過。
+- 188 原生 Windows 同一個 commit 的六組 rowstats（dev302、打字測驗、錯字回報 × 聊天、書面，出貨旗標；`--threads` 依各集合的 32 列塊數給 10／3／6，不改輸出）：41.0 秒、平均 10.7 核；六個檔的 SHA-256 和 CI Linux artifact 完全相同：dev302 聊天 `e3a730ac6c5a75b8265146162a985d375ab52db00ec010f0e27e930a311c18a2`、書面 `4694c6f0748255693fa6ee8b2310d59067592d71b0e43f179c96bc7caa56b771`；錯字回報聊天 `3be52e55fc87d97c2163f2039a70d304806341b4f7a2ce3faa26961488b0b043`、書面 `92012157515ebeaa7ae4a2a0ba27d5a83598a7507093964bc097bdd82a7e37fb`；打字測驗聊天與書面都是 `618fdc1e356b2bb2de9d47f8c53c954aa4707ccf13d63ad00e0881c1b3b7f146`（兩種設定的 rowstats 相同，摘要行的 top1_sha256 不同）。
+- Windows 上沒有跑的測試（Linux 核心測試 769 個對 Windows 700 個，結果驗收的 verifier 逐名稱核對）：
+  - 不編譯（`cfg(unix)`，86 個）：學習相關 60 個（engine_learn 21、engine_predict 21、engine_newword 11、engine_english 3、engine_english_next 2、engine_fuzzy_rerank 2）；`core/tests/learn_store.rs` 整檔 25 個；`tinylm::tests::load_refuses_a_fifo_without_blocking`（main 上原本就是 unix 限定）。
+  - `--skip` 跳過的計時測試 7 個名稱（契約 §2.3 第 4 步）：engine_replay 的 5 個、engine_lm 的 `replay_standard_chat_production_path`、`perf_two_thousand_new_words_per_key`（後者已被 `cfg(unix)` 擋掉，實際 filtered 6 個）。
+  - Windows 多的 17 個：engine_cap 的 16 個（只在 release 存在，Linux 跑的是 debug job）與新測試 `learning_open_is_3_on_windows_and_picking_still_works`。
+  - Unix 上沒有測試被拿掉：對 main 的 CI（merge-base），Linux debug 與 macOS core 都只多 `learn::tests::days_from_civil_known_dates`。

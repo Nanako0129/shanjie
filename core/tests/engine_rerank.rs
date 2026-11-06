@@ -991,7 +991,10 @@ fn lexicon_without_manual_tags() -> PathBuf {
     for f in std::fs::read_dir(root().join("data/lexicon")).unwrap() {
         let f = f.unwrap().path();
         if f.file_name().unwrap() != "overlay-add.tsv" {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(&f, d.join(f.file_name().unwrap())).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(&f, d.join(f.file_name().unwrap())).unwrap();
         }
     }
     let overlay = std::fs::read_to_string(root().join("data/lexicon/overlay-add.tsv")).unwrap();

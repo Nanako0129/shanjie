@@ -421,23 +421,42 @@ fn load_lm_refuses_a_bad_trigram_table() {
     let lm = lm_path();
     let lmdir = lm.parent().unwrap().to_path_buf();
     for f in ["bigram.sjlm", "classes.sjc", "kn.sjkn"] {
+        #[cfg(unix)]
         std::os::unix::fs::symlink(lmdir.join(f), dir.join(f)).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(lmdir.join(f), dir.join(f)).unwrap();
     }
     let model = dir.join("bigram.sjlm");
     let (_, syls) = row(10);
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     for (name, other) in [("trigram.sjt3", "trigram-chat.sjt3"), ("trigram-chat.sjt3", "trigram.sjt3")] {
         let (file, other_file) = (dir.join(name), dir.join(other));
+        #[cfg(unix)]
         std::os::unix::fs::symlink(lmdir.join(other), &other_file).unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(lmdir.join(name), &file).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(lmdir.join(other), &other_file).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(lmdir.join(name), &file).unwrap();
         assert_eq!(e.load_lm(&model), Ok(()), "{name}: premise: the shipping files load from the temporary folder");
         type_row(&mut e, Layout::Standard, &syls[..3].to_vec());
         assert!(e.total_score().is_some(), "{name}: premise: a typed row scores with the model");
-        for what in ["truncated", "dangling symlink"] {
+        // Windows cannot rewrite or delete a mapped file: drop the engine that maps this folder's tables and keep the "previous model is
+        // kept" check on an engine loaded from the untouched shipping folder (`lm`).
+        #[cfg(windows)]
+        {
+            e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+            assert_eq!(e.load_lm(&lm), Ok(()), "{name}: the shipping folder loads");
+            type_row(&mut e, Layout::Standard, &syls[..3].to_vec());
+            assert!(e.total_score().is_some(), "{name}: the shipping folder scores");
+        }
+        for what in ["truncated", #[cfg(unix)] "dangling symlink"] {
             std::fs::remove_file(&file).unwrap();
             if what == "truncated" {
                 std::fs::write(&file, &std::fs::read(lmdir.join(name)).unwrap()[..4096]).unwrap();
             } else {
+                #[cfg(unix)]
                 std::os::unix::fs::symlink(dir.join("missing.sjt3"), &file).unwrap();
             }
             assert_eq!(e.load_lm(&model), Err(EngineError::LoadFailed), "{name}: {what} must fail the load");
@@ -450,6 +469,11 @@ fn load_lm_refuses_a_bad_trigram_table() {
         std::fs::remove_file(&file).unwrap();
         assert_eq!(e.load_lm(&model), Ok(()), "{name}: a missing table is only that profile's table off");
         e.key(Key::new(KeyKind::Esc)).unwrap();
+        // The engine now maps `other_file` (and the model); release it before deleting.
+        #[cfg(windows)]
+        {
+            e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+        }
         std::fs::remove_file(&other_file).unwrap();
     }
     std::fs::remove_dir_all(&dir).unwrap();

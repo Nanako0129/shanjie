@@ -109,8 +109,11 @@ fn a_fuzzy_first_path_is_not_reranked() {
 
 /// A learning directory (a temporary one, removed on drop) with `records` written as its learning.tsv: (context, reading, word, weight),
 /// day `DAY`. The directory is 0700 and the file 0600, as the store requires.
+#[cfg(unix)] // the learning file is Unix only for now (win-core.md 2.2 item 4)
 const DAY: i64 = 20_000;
+#[cfg(unix)]
 struct LearnDir(std::path::PathBuf);
+#[cfg(unix)]
 impl LearnDir {
     fn new(tag: &str, records: &[(&str, &str, &str, u32)]) -> LearnDir {
         use std::os::unix::fs::PermissionsExt;
@@ -135,6 +138,7 @@ impl LearnDir {
         e
     }
 }
+#[cfg(unix)]
 impl Drop for LearnDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
@@ -146,6 +150,7 @@ impl Drop for LearnDir {
 /// alternative still, so the stretch is a rescue: skipped by the fuzzy rule (`fuzzy_skips` 1), never by the learning guard
 /// (`guard_skips` 0, though the guard would take the word for a boosted one).
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn a_fuzzy_first_path_with_a_learned_boost_counts_as_a_fuzzy_skip_only() {
     let dir = LearnDir::new("fuzzy-first", &[("^>$", "ㄓ-ㄉㄠˋ", "之道", 1)]);
     let syls = ["ㄗ", "ㄉㄠˋ"];
@@ -162,6 +167,7 @@ fn a_fuzzy_first_path_with_a_learned_boost_counts_as_a_fuzzy_skip_only() {
 /// learner makes a taught word), the rest are fuzzy ones: nothing is guarded. 身為 for ㄕㄣ ㄨㄟˊ is a taught word of a stretch with a
 /// full pool: the guard keeps the job out and counts it.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn the_guard_counts_only_a_job_it_kept_out() {
     let alone = nbest(&["ㄋㄥˋ", "ㄋㄥˋ"], 15);
     assert!(!alone[0].1 && alone.iter().filter(|p| !p.1).count() == 1 && alone.len() > 1, "premise: one path without a fuzzy word, others behind it");

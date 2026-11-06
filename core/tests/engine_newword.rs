@@ -633,6 +633,7 @@ fn raw(dir: &Path) -> String {
 
 /// §2.3: a learned new word is one "#" line; a fresh engine reads it back and decodes with it.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn store_writes_the_new_word_line_and_reopen_restores() {
     let dir = tmp_dir("store");
     let mut e = engine();
@@ -702,6 +703,7 @@ fn choosing_and_forgetting_a_fixed_new_word() {
 
 /// §2.4: a fixed new word whose record goes some other way (clear) is unfixed, not an error.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn a_fixed_new_word_without_a_record_is_unfixed() {
     let dir = tmp_dir("unfix");
     let mut e = engine();
@@ -720,6 +722,7 @@ fn a_fixed_new_word_without_a_record_is_unfixed() {
 /// readings it never types, every key's output (composition and prediction row) and every commit is the one of an
 /// engine without any record: `has_reading`, `words_of` and the prediction row's gate all see the "#" rows.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn new_word_records_that_are_never_enumerated_change_nothing() {
     use core::learn_store::LearnStore;
     let rows = rows_of("dev302");
@@ -772,6 +775,7 @@ fn new_word_records_that_are_never_enumerated_change_nothing() {
 /// §2.5: a commit with the new word on the path counts once per local day (+1 after decay, one appended line);
 /// a second use the same day writes nothing.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn a_use_counts_once_a_day() {
     let dir = tmp_dir("use");
     let mut e = engine();
@@ -803,6 +807,7 @@ fn a_use_counts_once_a_day() {
 
 /// §2.5: on the append path (a second commit the same day), a use the next day appends exactly one line.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn a_use_on_a_later_day_appends_one_line() {
     let dir = tmp_dir("use-append");
     let mut e = engine();
@@ -924,6 +929,7 @@ fn a_sub_span_spelled_twice_in_one_commit_is_learned_once() {
 /// §2.6: ⌘⌫ on a new word removes its "#" line (full rewrite) and decoding goes back to the unlearned output; the
 /// open window stops listing it.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn forgetting_a_new_word_removes_its_line() {
     let dir = tmp_dir("forget");
     let mut e = engine();
@@ -943,6 +949,7 @@ fn forgetting_a_new_word_removes_its_line() {
 /// §2.6 (security review P2-1): re-pick 依 → ⌘⌫ on 夢依 → Esc → Enter must not learn 夢依 back. The word is below
 /// ACTIVE here (30 days old), so the composition shows 夢一 while the window still lists it.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn forget_then_enter_does_not_learn_the_word_back() {
     let dir = tmp_dir("forget-enter");
     let mut e = engine();
@@ -965,6 +972,7 @@ fn forget_then_enter_does_not_learn_the_word_back() {
 
 /// §2.6: clearing removes every "#" record and the file.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn clear_removes_new_words() {
     let dir = tmp_dir("clear");
     let mut e = engine();
@@ -984,11 +992,13 @@ fn clear_removes_new_words() {
 /// context-return section 4 (P3-6): the left text ends with an ASCII marker word, which the engine holds (`left_full`) for the
 /// English table; it is nowhere in the file. The text has no Han tail, so decoding starts as without one.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn r2_marker_characters_on_disk() {
     r2_marker(false);
 }
 /// The same under variant B: sub-spans lie inside the run, so the bound is unchanged.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn r2_marker_characters_on_disk_with_subspans() {
     r2_marker(true);
 }
@@ -1079,6 +1089,7 @@ fn p95(mut t: Vec<std::time::Duration>) -> std::time::Duration {
 /// the same replay without records (rows interleaved, so load on the machine hits both alike). Stop condition: more
 /// than 1 ms over.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn perf_two_thousand_new_words_per_key() {
     use core::learn::NEWWORD_CAP;
     use core::learn_store::LearnStore;

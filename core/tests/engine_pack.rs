@@ -200,7 +200,10 @@ fn the_quote_bit_reads_quotes_add_tsv_only() {
 fn the_names_layer_is_capped_on_the_engine_path() {
     let d = tempdir("names", None);
     for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "demote.tsv", "std-exempt.tsv"] {
+        #[cfg(unix)]
         std::os::unix::fs::symlink(root().join("data/lexicon").join(f), d.join(f)).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(root().join("data/lexicon").join(f), d.join(f)).unwrap();
     }
     assert!(matches!(Engine::new_with_packs(&d, L, None), Err(EngineError::LoadFailed)), "a missing names-add.tsv must fail");
     std::fs::write(d.join("names-add.tsv"), "ㄒㄧㄣ-ㄅㄣ\t鑫犇\t-0.5\tnames\n").unwrap();

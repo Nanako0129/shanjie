@@ -906,6 +906,7 @@ fn teach_typing76_picks(dir: &Path) -> usize {
 /// Taught picks only (the store the timed rows really hit).
 #[test]
 #[ignore]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn timing_typing76_keys_with_taught_picks() {
     let dir = tmp_dir("timing-taught");
     println!("taught records: {}", teach_typing76_picks(&dir));
@@ -916,6 +917,7 @@ fn timing_typing76_keys_with_taught_picks() {
 /// Taught picks plus synthetic records up to the capacity: matching records are in long buckets.
 #[test]
 #[ignore]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn timing_typing76_keys_with_taught_picks_and_50k() {
     let dir = tmp_dir("timing-taught50k");
     let taught = teach_typing76_picks(&dir);
@@ -930,6 +932,7 @@ fn timing_typing76_keys_with_taught_picks_and_50k() {
 /// Taught picks plus synthetic records up to the capacity, with the abbreviation composer on.
 #[test]
 #[ignore]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn timing_typing76_keys_with_taught_picks_and_50k_abbreviation() {
     let dir = tmp_dir("timing-taught50k-abbr");
     let taught = teach_typing76_picks(&dir);
@@ -963,6 +966,7 @@ fn synthetic_records(count: usize) -> Vec<Record> {
 /// samples' syllables under varied two-character keys, so every lookup scans a long bucket and none matches an item.
 #[test]
 #[ignore]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn timing_typing76_keys_with_50k_records() {
     let dir = tmp_dir("timing");
     seed(&dir, &synthetic_records(core::learn::CAPACITY));
@@ -1019,6 +1023,7 @@ fn timing_typing76_keys_digits() {
 
 #[test]
 #[ignore]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn timing_typing76_keys_with_taught_picks_and_50k_digits() {
     let dir = tmp_dir("timing-taught50k-digits");
     let taught = teach_typing76_picks(&dir);
@@ -1040,7 +1045,10 @@ fn digits_engine_load_cost() {
     std::fs::create_dir_all(&tmp).unwrap();
     for f in std::fs::read_dir(&dir).unwrap().map(|f| f.unwrap().file_name()) {
         if f != "digits.tsv" {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(dir.join(&f), tmp.join(&f)).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(dir.join(&f), tmp.join(&f)).unwrap();
         }
     }
     for round in 0..2 {
@@ -1349,6 +1357,7 @@ fn reach(left: &str, pending: &str, word: &str) -> Option<usize> {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t4_another_context_is_untouched() {
     // 牛奶 taught after 喝熱. After 麵包配 neither character matches (no exact, no last-character level), yet 牛奶 is
     // reachable there (index 13 of 27; after 想買 on model-v6, where it is out of reach now), so a lookup that ignored the key would move it.
@@ -1362,6 +1371,7 @@ fn t4_another_context_is_untouched() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t4b_a_context_sharing_the_last_character_is_promoted() {
     // 喝熱 taught; after 杯熱 only the last character matches (the last-character level of s4-learning section 1.1).
     let i = reach("一杯熱", "ㄋ", "牛奶").expect("reachable");
@@ -1389,6 +1399,7 @@ fn t5_a_global_record_does_not_move_the_row() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t6_the_order_survives_a_restart() {
     let dir = tmp_dir("t6");
     let mut e = learner_engine(Profile::Formal, Some(&dir));
@@ -1402,6 +1413,7 @@ fn t6_the_order_survives_a_restart() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t7_cmd_backspace_on_the_entered_row_forgets_the_item() {
     let dir = tmp_dir("t7");
     let base = fresh_row(Profile::Formal, "我想喝一杯", "ㄋ");
@@ -1510,6 +1522,7 @@ fn without(r: &[String], w: &str) -> Vec<String> {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t9_slice_one_states_hold_with_unrelated_records() {
     // Records that match nothing in these rows leave every state of section 7.1 as the first slice had it.
     let unrelated = rec("我想", &["ㄇㄧㄥˊ".to_string(), "ㄊㄧㄢ".to_string()], "明天");
@@ -1521,6 +1534,7 @@ fn t9_slice_one_states_hold_with_unrelated_records() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t10_a_learned_item_beats_the_long_start_cap_and_the_cursor_start() {
     let want = oracle(F.0, F.1, F.2);
     let base = words(&want);
@@ -1544,6 +1558,7 @@ fn t10_a_learned_item_beats_the_long_start_cap_and_the_cursor_start() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t11_a_word_ranked_10_to_27_comes_first_once_taught() {
     let all = raw_at_cursor(A.0, A.1, "ㄋ", 27);
     let base = slice_one(A);
@@ -1558,6 +1573,7 @@ fn t11_a_word_ranked_10_to_27_comes_first_once_taught() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t12_records_that_match_nothing_leave_a_short_row_short() {
     // 我想 + ㄋㄧˇ typed: 你 is the decoded word and is filtered out, so the first slice shows fewer than 9.
     let st: (&str, &[Tok], &str) = ("我想", &[Syl("ㄋㄧˇ")], "");
@@ -1573,6 +1589,7 @@ fn t12_records_that_match_nothing_leave_a_short_row_short() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t13_a_learned_item_deep_in_the_merge_still_comes_first() {
     let want = oracle(F.0, F.1, F.2);
     let all = raw_at_cursor(F.0, F.1, F.2, 27);
@@ -1595,6 +1612,7 @@ fn t13_a_learned_item_deep_in_the_merge_still_comes_first() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t14_a_learned_item_among_the_first_three_keeps_the_others_in_place() {
     let want = oracle(F.0, F.1, F.2);
     let base = words(&want);
@@ -1609,6 +1627,7 @@ fn t14_a_learned_item_among_the_first_three_keeps_the_others_in_place() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t15_a_word_found_from_two_starts_is_listed_once() {
     // ㄊㄚ ㄇㄢˋ typed, ㄇ pending: 慢慢 comes from the long start (ㄇㄢˋ + ㄇ) and from the cursor start (ㄇ) alike (ㄋㄧㄡˊ typed and ㄋ pending, 牛奶
     // after 我想喝一杯, until 通語 SJ-LM-7-9.7M: its row lists 牛 alone from the cursor start now; found 2026-10-27 by trying the prefixes of the dev rows).
@@ -1724,6 +1743,7 @@ fn t17_choosing_the_same_word_again_in_the_window_keeps_the_prediction_learn() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t18_cmd_backspace_on_the_row_re_decodes_the_composition() {
     // 她們 taught after 她們: the free syllables ㄊㄚ ㄇㄣˊ decode to 她們 only because of the record. The row (cursor
     // start ㄊㄚ) lists 她們 first; forgetting it must show 他們 at once.
@@ -1742,6 +1762,7 @@ fn t18_cmd_backspace_on_the_row_re_decodes_the_composition() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t19_a_word_in_two_long_starts_keeps_the_largest_weight() {
     // Two fixed 爸 (picked in the window) make two long starts: 0 (ㄅㄚˋ ㄅㄚˋ ㄅ) and 1 (ㄅㄚˋ ㄅ). 爸爸爸 is the far
     // start's only item (weight 0) and the near start has it taught twice; 爸比 is taught once at the near start. The
@@ -1778,6 +1799,7 @@ fn t19_a_word_in_two_long_starts_keeps_the_largest_weight() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn t20_the_scan_gate_changes_nothing_but_time() {
     // Same rows with the gate and without it (every start asks 27 once there is any record), over states whose records
     // match the start, match only another start, or match nothing.
@@ -1853,6 +1875,7 @@ fn positions_inside_words_come_last_so_the_cursor_start_keeps_its_items() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn a_learned_item_of_a_position_inside_a_word_comes_first() {
     let reading = vec!["ㄗㄞˋ".to_string(), "ㄐㄧㄚ".to_string()];
     // (b) untaught, 在家 is in the row but not first.
@@ -2585,6 +2608,7 @@ fn esc_closes_the_window_and_the_row_stays_gone() {
 }
 
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn cmd_backspace_on_a_row_item_in_the_window_forgets_it() {
     let dir = tmp_dir("pdown-forget");
     let mut e = learner_engine(Profile::Formal, Some(&dir));

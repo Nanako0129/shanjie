@@ -27,7 +27,11 @@ pub fn lm_path() -> PathBuf {
         std::fs::create_dir_all(&d).unwrap();
         for f in ["bigram.sjlm", "classes.sjc"] {
             let _ = std::fs::remove_file(d.join(f));
+            #[cfg(unix)]
             std::os::unix::fs::symlink(real.with_file_name(f), d.join(f)).unwrap();
+            // Windows: symlinks need a privilege; the model folder is assembled from copies (win-core.md 2.2 item 5).
+            #[cfg(windows)]
+            std::fs::copy(real.with_file_name(f), d.join(f)).unwrap();
         }
         d.join("bigram.sjlm")
     })
