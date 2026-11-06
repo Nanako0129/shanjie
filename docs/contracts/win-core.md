@@ -1,6 +1,6 @@
 # WIN-CORE：核心在 Windows 編得過、測得過（官方 Windows 版第一片）
 
-狀態：**修訂二**（2026-11-06）：第二次 REVISE 的五項逐項處置，五項都修（`.gitattributes` 改 `text=auto` 不碰二進位 golden、`scripts/` 也固定 LF、每鍵 p95 計時測試事先定處置、mmap 測試只擋 symlink 那幾行、188 的工具鏈列為前提並把六組逐位元組比對交給 CI 兩邊都用 1.97.1）。修訂一：plan-verifier 第一次 REVISE 的九項照最小修改處理。
+狀態：**修訂三**（2026-11-06）：收尾審查 REVISE 的三項照最小修改（mmap 中的檔在 Windows 不能刪或改寫：三個測試在改寫前只在 Windows drop 掉持有者；拿掉 188 的單執行緒計時；換行驗收只對二進位檔要求不當文字）。修訂二：第二次 REVISE 的五項逐項處置，五項都修（`.gitattributes` 改 `text=auto` 不碰二進位 golden、`scripts/` 也固定 LF、每鍵 p95 計時測試事先定處置、mmap 測試只擋 symlink 那幾行、188 的工具鏈列為前提並把六組逐位元組比對交給 CI 兩邊都用 1.97.1）。修訂一：plan-verifier 第一次 REVISE 的九項照最小修改處理。
 - 錯誤盤點改用含測試的 `--tests`，fixture 的 symlink 改走 Windows 分支，不再整檔擋掉。
 - 呼叫 `learning_open` 的測試有明確處置，另加 Windows 專用測試。
 - `LearnStore` 的公開方法在所有平台都編譯。
@@ -56,7 +56,8 @@
 - Unix 的程式碼與測試行為不變。允許的改動只有三種：
   1. 加 `cfg` 屬性；
   2. 把共用部分抽成函式，抽出前後的行為與測試相同；
-  3. §2.2 第 6 點寫明的三個測試條件，每個只改一個 token。
+  3. §2.2 第 6 點寫明的三個測試條件，每個只改一個 token；
+  4. §2.2 第 5 點最後一項：只在 Windows 加的 `drop`（`#[cfg(windows)]`），Unix 的行不動。
 - 不在建置時改寫原始碼，也不加會改變選字或按鍵行為的 Windows 專用邏輯。
 - Windows 才需要的系統呼叫用 `windows-sys`。它放在 `[target.'cfg(windows)'.dependencies]`，版本固定、只開用到的 feature。由 main 加進 `Cargo.toml` 與 `Cargo.lock`，executor 開工前就已存在。
 
@@ -81,11 +82,12 @@
    - 會呼叫 `learning_open` 而且預期成功的測試，在 Windows 一律標 `cfg(unix)`，例如 engine_newword、engine_learn、engine_predict、engine_english、engine_english_next、engine_fuzzy_rerank 裡的那些。逐個列進 PR。
    - 另加一個只在 Windows 跑的測試：`shanjie_engine_learning_open` 回 3，之後打一段鍵選字照常。
    - 標成 `cfg(unix)` 的測試清單（檔名、測試名、原因）列進 PR。engine_rerank、engine_fuzzy、engine_fuzzy_rerank 不能整檔被擋掉。
+   - **平台差異：Windows 不能刪除或改寫正在被 mmap 的檔**（Unix 可以）。三個測試在還持有 `Lm`／engine 時刪或改寫 trigram 表：`core/tests/tri_tiny.rs` 的 `load_reads_each_profiles_table_beside_the_model`、`core/tests/engine_lm.rs` 的 `load_lm_refuses_a_bad_trigram_table`、`core/src/ffi.rs` 的 `child_lm_tables`（`ffi::tests::load_lm_refuses_a_bad_trigram_table` 的子程序）。處置：在刪除或改寫之前，加只在 Windows 編譯的 `drop`（`#[cfg(windows)] drop(x);`）釋放持有映射的物件；這個測試之後還要用到那個物件的斷言，在 Windows 上改成重新載入同一份（同樣用 `#[cfg(windows)]` 分支），Unix 的行不動。基準指令或 188 上找到的其他同類測試照同樣處置，逐個列進 PR。
 6. **f64 逐位元比對的 golden**：`core/tests/engine_digits.rs`（約第 136–138、588 行）與 `core/tests/pack_oov.rs`（約第 159–163 行）有三個測試只在 Linux 跳過。理由是它們拿 macOS libm 的位元當答案，glibc 的 log10 已知在最後一位不同。
    - 把跳過條件從「是 Linux」改成 `!cfg!(target_os = "macos")`。每個只改一個 token，Linux 上的行為不變（照樣跳過），Windows 也跳過。
    - 其他測試在 Windows 上的浮點失敗一律是停止條件（§4）。
 7. **換行**：`.gitattributes` 加上 `data/** text=auto eol=lf`、`eval/** text=auto eol=lf`、`core/tests/** text=auto eol=lf`、`cli/tests/** text=auto eol=lf`、`scripts/** text=auto eol=lf`。用 `text=auto`，git 自己判定為二進位的檔（`eval/golden/` 下的 `.sjlm`、`.sjc`、`.sjkn`、`.sjtl`、`.sjt3`）不當文字處理，不會被改位元組。
-   - Unix 上沒有作用；repo 裡這些文字檔現在都是 LF（`git ls-files --eol`：data／eval／core/tests 179 個 `i/lf`、scripts 22 個 `i/lf`，其他是二進位或空檔）。驗收：macOS 上改完 `git status` 乾淨，`git ls-files --eol eval/golden/kn-tiny eval/golden/tinylm-tiny eval/golden/tri-tiny` 的 attr 欄是 `text=auto eol=lf`、index 欄是 `-text`。
+   - Unix 上沒有作用；repo 裡這些文字檔現在都是 LF（`git ls-files --eol`：data／eval／core/tests 179 個 `i/lf`、scripts 22 個 `i/lf`，其他是二進位或空檔）。驗收：macOS 上改完 `git status` 乾淨；`git ls-files --eol` 對 `eval/golden/{kn-tiny,tinylm-tiny,tri-tiny}/` 底下的 `*.sjlm`、`*.sjc`、`*.sjkn`、`*.sjtl`、`*.sjt3` 顯示 index 欄 `-text`，同資料夾的 `.tsv`、`.txt` 顯示 `i/lf`。
    - 理由：Windows 預設 `core.autocrlf=true`，checkout 會變成 CRLF，`DigitTable::parse` 遇到 `\r` 失敗，數字表會默默關掉。
    - 被測的程式不改。
 8. **評測 CLI**：只建 `shanjie-eval`（`cargo build -p cli --release --bin shanjie-eval`）。`shanjie-replay` 用 Unix 專用的 API，不在這一片，Windows 上不建。
@@ -112,7 +114,6 @@
 0. **前提（已核對，2026-11-06）**：188 原生 Windows 有 `rustc 1.97.1`（x86_64-pc-windows-msvc）與 MSVC 的 `link.exe`（`C:\BuildTools\VC\Tools\MSVC\14.44.35207\…\link.exe`）。188 WSL 只有 1.99，不拿它比對；逐位元組比對由 CI 的 Linux 與 Windows job 做，兩邊都 1.97.1。PR 記下 188 原生的 `rustc --version`。
 1. **188 的原生 Windows**（main 在 188 上跑，不經 WSL；關降速、綁 P-core（`SetProcessInformation` 與親和性 0x0FFF，做法同 188 的其他工作）；188 的 clone 先照新的 `.gitattributes` 重新 checkout，`git ls-files --eol` 符合 §2.3 第 7 步的檢查）：
    - `cargo test -p core --release`（多執行緒，跳過 §2.3 第 4 步那七個計時測試）全過，輸出裡有 `lm::tests::load_opts_maps_the_trigram_table ... ok`。
-   - 那七個計時測試另外以 `--test-threads=1` 單獨跑一次，結果（通過或失敗與量到的 p95）只記錄、不擋：188 不是量延遲的機器。
    - 列出被 `cfg(unix)` 擋掉、或因 §2.2 第 6 點跳過的測試名稱與數量。
    - 有一個測試證明 Windows 上載入了數字表（engine 的 digits 測試在 Windows 有跑、通過）。
 2. **逐位元組相同**：CI 的 windows job 六組 rowstats 和 Linux job 逐位元組相同（§2.3）。另外 main 在 188 原生 Windows 用同一個 commit 跑同樣六組（`--threads 12`），和 CI Linux 的 artifact 比對，結果記進 PR。
