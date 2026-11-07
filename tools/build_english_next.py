@@ -3,7 +3,7 @@
 
 Sources (each an optional path; the raw input, read BEFORE the cleaning that drops English), weight, spread unit:
   --wiki DUMP.bz2        first --wiki-limit (200,000) articles, x1, article. build_counts.article_sentences (entity unescape, templates, markup,
-                         sentence split, convert without TWPhrases as SJ-LM-7 counts), so the Han-only step of article_runs is skipped.
+                         sentence split, convert: a wiki article is a mixed input, docs/contracts/tw-conv.md), so the Han-only step of article_runs is skipped.
   --colloquial FILE      colloquial-train.txt (build_tune.py), one sentence per line, x5, sentence.
   --g0v FILE             the g0v #rand0m source file as UTF-8 text, one message per line, x5, message.
   --ptt DIR              <board>/<article>.html as ptt_clean parses it (body, merged pushes; no p2clean). Pushes x5, bodies x1, unit = board.
@@ -158,7 +158,7 @@ def wiki_sentences(raw):
     import build_counts as bc
     if "conv" not in _G:
         _G["conv"] = bc.load_conv()
-    return list(bc.article_sentences(raw, _G["conv"], trad_tw_phrases=False))
+    return list(bc.article_sentences(raw, _G["conv"]))
 
 
 def work(batch):
@@ -301,12 +301,19 @@ def main():
     if not any(src.values()):
         sys.exit("error: give at least one source")
     src["wiki_limit"] = a.wiki_limit
+    if a.wiki:   # tw-conv 11.2: read the tw-clean table here, in the parent, so a missing table stops at once instead of inside every pool worker
+        import build_counts as bc
+        bc.load_conv()
     text, report = build(a.lexicon, src, a.jobs)
     print(report)
     if text is None:
         sys.exit("error: the table is over 2 MB at every e->w cut; stop and report")
     with open(a.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
+    if a.wiki:   # docs/contracts/tw-conv.md 11.2: which tw-clean table made this file (only the wiki sentences go through it)
+        state = bc.tw_clean_state()
+        open(a.out + ".tw-clean", "w", encoding="utf-8").write(state + "\n")
+        print(f"tw-clean: {state}")
 
 
 if __name__ == "__main__":

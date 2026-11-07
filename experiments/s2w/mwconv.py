@@ -110,19 +110,17 @@ def _bc():
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "s2"))
         import build_counts
-        if not build_counts.POST_TRAD:
+        if not build_counts.TRAD_SIMP_ONLY:
             build_counts.load_conv()
-        if not (build_counts.POST_TRAD and build_counts.PROTECT_TRAD):
+        if not build_counts.TRAD_SIMP_ONLY:
             raise RuntimeError("build_counts tables are empty after load_conv()")
         _BC.append(build_counts)
     return _BC[0]
 
 
 def tw_layer(text):
-    """契約 §8.1：S2f 繁體句的最後一層。PROTECT_TRAD 最長比對保留原字，其餘逐字套 POST_TRAD（TW_VARIANTS ∪ VARIANTS）；
-    和 build_counts.convert 同一份表與 _longest，不另抄；不套 臺→台。"""
-    bc = _bc()
-    return bc._longest(text, bc.PROTECT_TRAD, bc.PROTECT_MAXP[0], bc.POST_TRAD)
+    """契約 §8.1 的最後一層，docs/contracts/tw-conv.md §2.5 之後只剩 tw-conv.tsv 的摺疊列（build_counts.fold_tw）；不套 臺→台。"""
+    return _bc().fold_tw(text)
 
 
 def convert(text, mw, groups=True, site=True):

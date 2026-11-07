@@ -33,6 +33,8 @@ test-rust:
 test-golden:
 	cargo test --release --locked -p cli --test golden
 
+# docs/contracts/tw-conv.md 11.2: the Python tests use their own tw-clean tables, never the real one (not in the repo); off says so out loud.
+test-python: export SHANJIE_TW_CLEAN = off
 test-python:
 	python3 -m unittest tools/test_build_forms.py
 	python3 -m unittest tools/test_build_acg_pack.py
@@ -76,6 +78,8 @@ test-python:
 	python3 -W ignore experiments/p4c-colloquial/test_p4c.py
 	python3 -W ignore experiments/p4d-colloquial/test_p4d.py
 	python3 -W ignore experiments/p5-reading-channel/test_p5.py
+	# The tw-conv guard (docs/contracts/tw-conv.md sections 3 and 11), last so the other suites report first.
+	python3 -W ignore -m unittest experiments/s2/test_tw_conv.py
 
 test-swift: rust
 	@$(call relink_if_stale,Debug)

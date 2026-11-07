@@ -62,13 +62,14 @@ python3 experiments/sj-lm-7/moore_lewis.py score --in-domain <打分集合.txt> 
     --out <OUT_DIR> --seed <N> --jobs <N>                        # 每個來源留 50%（預設 --keep 0.5）；--jobs 預設 1，用滿核心，輸出和 --jobs 1 逐位元組相同
 ```
 
-計數（繁體句不套 `TWPhrases`）：
+計數（`docs/contracts/tw-conv.md`：每份輸入說明種類，沒有預設值。`native` 一個字都不改：PTT、g0v、Common Voice zh-TW、`synth.txt`、`colloquial-train.txt` 這類已轉過的文字；`mixed` 逐句判斷簡繁，簡體句走 `experiments/s2/tw-conv.tsv`：口語池 `pool.tsv`、維基、維基新聞匯出、Tatoeba、字幕。維基是 mixed，`build_counts.py` 不用旗標）：
 
 ```sh
-S2_WORK=<WORK> python3 experiments/s2/build_counts.py --no-trad-tw-phrases --articles 200000 --procs <N> --expected --extra-lexicon <計數詞表>   # 不帶旗標＝model-v6 的行為
-S2_WORK=<WORK> python3 experiments/s2/build_counts_text.py --no-trad-tw-phrases --expected --extra-lexicon <計數詞表> <OUT.pkl> <口語檔>…
-python3 experiments/s2/build_tune.py --train-only-new-conv       # 只重寫 colloquial-train.txt；cvtune 的抽樣與參考句不動；印出 SHA-256
+S2_WORK=<WORK> python3 experiments/s2/build_counts.py --articles 200000 --procs <N> --expected --extra-lexicon <計數詞表>
+S2_WORK=<WORK> python3 experiments/s2/build_counts_text.py --expected --extra-lexicon <計數詞表> <OUT.pkl> --mixed <口語池檔> --native <g0v、PTT、colloquial-train.txt…檔>…   # 每份輸入各自標種類
+python3 experiments/s2/build_tune.py --part cv       # 重寫 colloquial-train.txt（Common Voice 原樣、Tatoeba 轉過）與 cvtune；之後的計數與訓練讀它一律用 --native
 ```
+轉換表 `experiments/s2/tw-conv.tsv` 由 `experiments/s2/build_tw_conv.py`（PTT 快照，Mac 單程序約 20 秒）產生；`build_tw_conv.py --review` 印給維護者看的列。
 
 詞庫（讀音修正與萌典補詞；`SHANJIE_MOEDICT`、`SHANJIE_HETERO`、`SHANJIE_UNIHAN` 指到本機檔，什麼都不下載）：
 
@@ -77,7 +78,7 @@ python3 tools/readings.py --report-inverted [--unihan <Unihan_Readings.txt>]    
 python3 tools/readings.py --apply-inverted data/lexicon/mcbpmf-data.txt --unihan <Unihan_Readings.txt>   # 就地套用；要在重建疊加層、變調列之前（它們讀這份基底）
 # readings.py 的規則 3b 預設關（其他建置工具的輸出不變）；要用就加 --rule-3b（--unihan 才有作用），build_overlay 的 --moedict-readings 路徑自己開
 python3 tools/build_overlay.py --moedict-readings --reading-report <report.tsv>   # 讀音：萌典第一讀音優先，其次 readings.py；列出讀音改變的詞
-python3 experiments/sj-lm-7/wiki_text.py <維基文字> --articles 200000 --procs <N> --no-trad-tw-phrases   # <維基文字>：和計數同一批篇、同一條管線的漢字段，一行一段
+python3 experiments/sj-lm-7/wiki_text.py <維基文字> --articles 200000 --procs <N>   # <維基文字>：和計數同一批篇、同一條管線的漢字段，一行一段
 python3 tools/build_overlay.py --moedict-readings --moedict-supplement <維基文字> <口語檔>… --jobs <N>   # 加「萌典補詞」來源
 ```
 
@@ -87,22 +88,22 @@ python3 tools/build_overlay.py --moedict-readings --moedict-supplement <維基�
 python3 tools/build_acg_pack.py freeze-counts --expected-model <SHA-256>
 ```
 
-維基文字檔（萌典補詞要數子字串的語料）要自己先備好：一行一段漢字，用 `build_counts.article_runs(raw, conv, trad_tw_phrases=False)` 從 dump 產生；腳本沒有包這一步。
+維基文字檔（萌典補詞要數子字串的語料）要自己先備好：一行一段漢字，用 `build_counts.article_runs(raw, conv)` 從 dump 產生；腳本沒有包這一步。
 
 ## 連文表重數與剪成四個大小（探索 `trigram-explore.md`；之後由 main 在 GCP 執行）
 
 連文表由 `experiments/derisk-1015/e1/` 的管線出：`count.py`（uni／bi／tri 期望次數，和 bigram 的 `build_counts.py` 同一套詞庫、轉換、切句）→ `build_models.py tri`（加權、四捨五入、異體合併、建不剪的表）→ `entropy_prune.py`（相對熵剪枝）。這條管線的 uni／bi 不拿去建 bigram（bigram 照上面 `build_counts.py` 與 `tools/build_lm.py`）；它的 uni／bi 只是順便算出的同一份次數。`<C>` 是計數輸出資料夾，`<詞表>` 是 bigram 計數用的同一份計數詞表。
 
 ```sh
-# 1. 維基切 32 份平行（每份 1 個工作程序；i % 32 == K 的篇；輸出名帶 200000-shardKof32）。--no-trad-tw-phrases 要和 bigram 計數一致（契約 §2.2）
+# 1. 維基切 32 份平行（每份 1 個工作程序；i % 32 == K 的篇；輸出名帶 200000-shardKof32）。維基是 mixed 輸入，轉換和 bigram 計數同一條
 for K in $(seq 0 31); do
-  python3 experiments/derisk-1015/e1/count.py wiki --out <C> --articles 200000 --procs 1 --shard $K/32 --no-trad-tw-phrases --extra-lexicon <詞表> --tri-min 0.01 &
+  python3 experiments/derisk-1015/e1/count.py wiki --out <C> --articles 200000 --procs 1 --shard $K/32 --extra-lexicon <詞表> --tri-min 0.01 &
 done; wait
 python3 experiments/derisk-1015/e1/count.py merge --out <C> --tag 200000 $(for K in $(seq 0 31); do printf '200000-shard%sof32 ' $K; done)
 
-# 2. 口語各來源：一個 TSV 一個程序（路徑含 .tsv 取最後一欄，.bz2 自動解壓），再按來源合併。<來源> 是 bigram 用的那個計數檔名（counts-<來源>.pkl）
+# 2. 口語各來源：一個 TSV 一個程序（路徑含 .tsv 取最後一欄，.bz2 自動解壓；每個檔標 `--native` 或 `--mixed`：口語池 mixed，g0v、PTT 推文、PTT 內文 native），再按來源合併。<來源> 是 bigram 用的那個計數檔名（counts-<來源>.pkl）
 for F in <來源>_1.tsv <來源>_2.tsv …; do
-  python3 experiments/derisk-1015/e1/count.py text --out <C> --tag <來源>-$(basename $F .tsv) --no-trad-tw-phrases --extra-lexicon <詞表> --tri-min 0.01 $F &
+  python3 experiments/derisk-1015/e1/count.py text --out <C> --tag <來源>-$(basename $F .tsv) --extra-lexicon <詞表> --tri-min 0.01 --<native|mixed> $F &
 done; wait
 python3 experiments/derisk-1015/e1/count.py merge --out <C> --tag <來源> <來源>-<檔1> <來源>-<檔2> …     # 每個來源一次：口語池、g0v、PTT 推文、PTT 內文
 
@@ -131,7 +132,7 @@ shanjie-eval --lm <資料夾>/bigram.sjlm --profile chat …     # 資料夾裡�
 | 輸入 | SHA-256 |
 |---|---|
 | 維基 dump | |
-| `colloquial-train.txt`（`--train-only-new-conv` 重產） | |
+| `colloquial-train.txt`（`build_tune.py --part cv` 重產，之後當 native） | |
 | g0v `#rand0m` 增量、PTT 內文、PTT 推文（和評測集去重後） | g0v `cedad812b4cd71964be00a13c3c64dad87d8295e44667ebac363feeb224389e4`（15,207 句）、PTT 內文 `f42d5c8b04dcbb8759b932975121e3a9745c0392bc804bdca734d0b781da1928`（5,343,729 句）、PTT 推文 `6568bc6696cd99b4bc0139f6cf9d8fa3608fa6ac02c41ee342d3355519cdd115`（8,665,059 句） |
 | 字幕（§2.7，審查與去重後；會意用） | `e005cf44544909a0b6f0696e7b97a6a089b24755eadde142f00a3c0b4074cc1b`（4,432,866 句；`SHA-256(句子)` 第一個位元組 < 128 的一半 `9ee7cfb3296c66f23cbf57a68d34c9886de8c13d6ed67f98b80bc977d06afbf4`） |
 | `synth.txt` | |

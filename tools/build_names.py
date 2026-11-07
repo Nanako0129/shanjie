@@ -142,7 +142,7 @@ def is_taiwan(location_set):
 
 def _conv():
     if not bc.MARKERS:
-        bc.load_conv()      # 填 MARKERS、TRAD_ONLY、SIMP_ONLY、TRAD_SIMP_ONLY（讀 ~/.cache/shanjie/sources/opencc，核對 SHA-256）
+        bc.load_conv()      # 填 MARKERS、TRAD_ONLY、TRAD_SIMP_ONLY（讀 ~/.cache/shanjie/sources/opencc，核對 SHA-256）
 
 
 def simplified(name):

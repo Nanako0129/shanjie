@@ -44,5 +44,5 @@
 ## S2n：簡體句轉換與口語計數的輸入（2026-10-05）
 
 - `counts-colloquial3.pkl` 的輸入是 `colloquial-train.txt`（`build_tune.py --part cv` 產生）加 `synth.txt`，各 ×1；用現行轉換重建後 uni／bi／tri／runs 與舊檔逐項相同（S1 版或現行疊加層都相同）。`synth-targeted.txt(.ok)` 不在內。舊的 `colloquial-train.txt` 是修掉 吃→喫 之前產生的。
-- `build_counts.py` 的 `convert` 先判斷簡體句（契約 §2.1），簡體句走全部 STPhrases、第一個對照、台灣用字（`TAIWAN_KEEP` 例外），繁體句維持只轉簡體專用字。`test_convert.py` 是固定字串檢查；`experiments/s2n/` 放挑例外字（`pick_exceptions.py`）、突變（`mutations.py`）、語料量測（`measure_residue.py`）、評測（`evaluate.py`）與模型表面字串量測（`model_surfaces.py`）。
+- `build_counts.py` 的 `convert` 先判斷簡體句（契約 §2.1）。**tw-conv 之後（`docs/contracts/tw-conv.md`）**：原生繁體的來源不轉；含簡體的來源逐句判斷，簡體句用 `tw-conv.tsv`（`build_tw_conv.py` 從 PTT 的台灣用量產生）加大陸用詞子集（`mainland-terms.txt`），繁體句只換 S 的字，最後都套摺疊列；原本的八張手寫例外表（`TAIWAN_KEEP` 等）拿掉。每份輸入要說明種類：`build_counts_text.py` 用 `--native PATH`／`--mixed PATH`。`test_convert.py` 是固定字串檢查，`test_tw_conv.py` 是永久守門（`mutate_tw_conv.py` 跑突變、`tw_conv_guard.py` 對整份語料報不合的句數）；`experiments/s2n/` 放挑例外字（`pick_exceptions.py`）、突變（`mutations.py`）、語料量測（`measure_residue.py`）、評測（`evaluate.py`）與模型表面字串量測（`model_surfaces.py`）；其中 `mutations.py`、`model_surfaces.py`、`source_chars.py` 讀的舊表已拿掉，只留作歷史紀錄。
 - 重建用 `S2_WORK=<目錄>` 避免蓋掉舊計數；維基 20 萬篇約 41 ms／篇（單程序），在多核機器上用 `--procs`。數字見 `docs/research-log.md` 2026-10-05 S2n。

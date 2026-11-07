@@ -1,0 +1,409 @@
+"""Build experiments/s2/tw-conv.tsv, the Simplified-to-Taiwan conversion table (docs/contracts/tw-conv.md section 2.3).
+
+  python3 experiments/s2/build_tw_conv.py [--body FILE --push FILE] [--out FILE]   build the table from the PTT snapshot, single process
+  python3 experiments/s2/build_tw_conv.py --review [--table FILE]                    print the rows the maintainer looks at, from the table alone
+
+The evidence is the PTT snapshot only (Taiwan's own spelling): the sentence is the last tab field of every line of body.tsv and push.tsv. The
+file holds characters, words and counts, never a sentence. The rules are fixed in the contract before any count exists:
+  fold   a pair X->Y (VARIANT_PAIRS and the first value of TWVariants.txt) is folded when count(Y) >= 20 * count(X) and count(Y) >= 30
+  char   candidates are folded first, then counted in the folded text; the first >= 2 * the second and >= 30 -> `evidence`, else
+         the first OpenCC value (folded) -> `hold`
+  phrase STPhrases keys that contain a char row whose chosen value is not OpenCC's first value (folded) or that is one of the 31 MediaWiki keys;
+         candidates = OpenCC's value with each such position varied over its row's candidates; same decision, a `hold` follows the char row
+         only where OpenCC's phrase value uses the key's first value
+  term   the keys of mainland-terms.txt with their TWPhrases value
+  N      (contract 7) the char rows whose chosen value is not the key, whose key has fewer than 30 PTT occurrences and fewer than 1/20 of the chosen
+         value's (folded) occurrences: the keys Taiwan almost never writes (装 痒 苹 价). Marked `N` in column 7 of the char row; --review lists them
+Columns: section, key, value, status, manual, counts, and `N` for the rows of the set N. `manual` ("value@date", the date of the decisions.md entry) beats the rule and is kept on rebuild.
+"""
+import argparse
+import collections
+import hashlib
+import itertools
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import build_counts as bc  # noqa: E402
+
+TABLE = os.path.join(HERE, "tw-conv.tsv")
+TERMS = os.path.join(HERE, "mainland-terms.txt")
+PTT = os.path.expanduser("~/.cache/shanjie/sj7/ptt-clean")
+SECTIONS = ("fold", "char", "phrase", "term")
+RARE_MAX = 30                    # contract 7: a key under this many PTT occurrences (and under 1/20 of the chosen value's) is in N; same bar as the fold rows
+FOLD_RATIO, FOLD_MIN = 20, 30    # contract 2.3(3): folding ignores context, so the bar is 20x (not 2x): 泄 vs 洩 is 14x and 排泄 needs 泄
+PICK_RATIO, PICK_MIN = 2, 30     # contract 2.3(1)
+# The previous VARIANTS table of build_counts (it stays there only as part of MERGE); the other fold candidates are TWVariants.txt's first values.
+VARIANT_PAIRS = {"爲": "為", "衆": "眾", "綫": "線", "麪": "麵", "僞": "偽", "裏": "裡", "峯": "峰", "羣": "群", "啓": "啟", "敎": "教", "着": "著", "説": "說"}
+# OpenCC (STCharacters) and MediaWiki zh-tw single-character conversion differ in these 31 keys; the MediaWiki value is a candidate (contract 2.3(1)).
+MEDIAWIKI = dict(zip("冲凄勋卤吣哗喂埙棂湿牦瘘硷签艳袅账鉴钚钫锎锝锨锫锿镅镎镥鹇鹚𩙧", "沖淒勛鹵唚嘩餵塤櫺濕氂瘺鹼簽艷裊帳鑒鈽鍅鉲鎝杴鉳鑀鋂錼鎦鷴鶿𩗡"))
+assert len(MEDIAWIKI) == 31
+# Contract 9 (revision 7, the maintainer's rules of 2026-11-06): a char row may leave OpenCC's first value only for a variant pair
+# (TWVariants.txt, VARIANT_PAIRS, build_counts.MERGE, or the MediaWiki value of the 31 keys), and only on word-level evidence: summed over
+# the phrase rows of that key, the other form of the same word is >= WORD_RATIO x OpenCC's form and >= PICK_MIN. Single-character counts
+# compare different words (亙古 vs 亘, 土虱 vs 蝨子) and are not evidence. A MediaWiki key with under PICK_MIN uses in all takes the
+# MediaWiki value (the maintainer: 「用 MediaWiki（台灣用字）」).
+# Phrase rows: when exactly one candidate is a dictionary entry (重編國語辭典修訂本 or 國語辭典簡編本), it wins unless another candidate
+# is >= WORD_RATIO x its count and >= PICK_MIN (the maintainer: 「成語要照字典，標準還是要界定，除非出現次數壓倒性」); such rows are
+# status `over-dict` and listed for main's sentence-level check (--contexts).
+WORD_RATIO = 10
+LI_RE = re.compile("[裡里]")
+HAN_RE = re.compile("[一-鿿]")   # the Han range build_counts.HAN uses
+
+
+def die(msg):
+    sys.exit(f"build_tw_conv: {msg}")
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 22), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def sentences(files, chunk_chars=1 << 24):
+    """The sentence (last tab field) of every line, joined in chunks of about chunk_chars characters, one sentence per line of the chunk."""
+    for path in files:
+        buf, size = [], 0
+        with open(path, encoding="utf-8", newline="\n") as f:
+            for line in f:
+                s = line[line.rindex("\t") + 1:]
+                buf.append(s if s.endswith("\n") else s + "\n")
+                size += len(s)
+                if size >= chunk_chars:
+                    yield "".join(buf)
+                    buf, size = [], 0
+        if buf:
+            yield "".join(buf)
+
+
+def read_table(path=TABLE):
+    """{section: {key: (value, status, manual, counts, rare)}}; rare is `N` or empty (column 7). The comment lines are skipped. Missing file -> empty."""
+    t = {s: {} for s in SECTIONS}
+    if os.path.isfile(path):
+        for line in open(path, encoding="utf-8"):
+            if line.startswith("#") or not line.strip():
+                continue
+            sec, key, value, status, manual, counts, rare = (line.rstrip("\n").split("\t") + [""] * 7)[:7]
+            if sec in SECTIONS:      # keep and li rows have their own layout (contract 10) and are rebuilt every time
+                t[sec][key] = (value, status, manual, counts, rare)
+    return t
+
+
+def fold_of(table):
+    """The fold map {X: Y} of a table: a fold row whose status is `fold`, or whose manual value differs from X."""
+    out = {}
+    for x, (y, status, manual, *_) in table["fold"].items():
+        y = manual.split("@")[0] if manual else (y if status == "fold" else x)
+        if y != x:
+            out[x] = y
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------- building
+def dictionary_words():
+    """Entry titles of 重編國語辭典修訂本 (Moedict revised JSON, tools/readings.MOEDICT) and 國語辭典簡編本 (tools/build_overlay.load_concised)."""
+    sys.path.insert(0, os.path.join(bc.ROOT, "tools"))
+    import readings, build_overlay   # noqa: E402
+    words = {e["title"] for e in json.load(open(readings.MOEDICT, encoding="utf-8")) if e.get("title")}
+    words |= set(build_overlay.load_concised())
+    return words
+
+
+def dictionary_variants():
+    """{variant: standard} from 重編國語辭典修訂本: a single-character entry whose definition starts with 「X」的異體字 (contract 10.6)."""
+    sys.path.insert(0, os.path.join(bc.ROOT, "tools"))
+    import readings   # noqa: E402
+    out = {}
+    for e in json.load(open(readings.MOEDICT, encoding="utf-8")):
+        t = e.get("title", "")
+        if len(t) == 1:
+            for h in e.get("heteronyms", []):
+                for x in h.get("definitions", []):
+                    m = re.match(r"「(.)」的異體字", x.get("def", ""))
+                    if m:
+                        out[t] = m.group(1)
+    return out
+
+
+def pick(cands, counts, first):
+    """cands: unique candidates (folded), counts: {cand: n}. -> (value, status)."""
+    order = sorted(range(len(cands)), key=lambda i: (-counts[cands[i]], i))
+    top = counts[cands[order[0]]]
+    second = counts[cands[order[1]]] if len(order) > 1 else 0
+    if top >= PICK_RATIO * second and top >= PICK_MIN:
+        return cands[order[0]], "evidence"
+    return first, "hold"
+
+
+def fmt_counts(cands, counts):
+    return " ".join(f"{c}:{counts[c]}" for c in cands)
+
+
+def build_rows(files, old):
+    t0 = time.time()
+    o = bc.read_opencc()
+    st, stp, twv, twp = o["st"], o["stp"], o["twv"], o["twp"]
+    word_chars = bc.lexicon_word_chars()
+    variant = {frozenset((x, y)) for x, y in twv.items()} | {frozenset((x, y)) for x, y in VARIANT_PAIRS.items()} \
+        | {frozenset((x, y)) for x, y in bc.MERGE.items()}
+    dictionary = dictionary_words()
+    variant_of = dictionary_variants()
+    S = bc.true_simplified(st, word_chars)
+    # pass 1: raw character counts
+    cc = collections.Counter()
+    for chunk in sentences(files):
+        cc.update(chunk)
+    log(f"pass 1: {sum(cc.values())} characters, {len(cc)} types", t0)
+    # fold
+    pairs = dict(twv)
+    for x, y in VARIANT_PAIRS.items():
+        if pairs.setdefault(x, y) != y:
+            die(f"VARIANT_PAIRS and TWVariants.txt disagree on {x}")
+    pairs = {x: y for x, y in pairs.items() if x != y}
+    fold_rows = {}
+    for x in sorted(pairs):
+        y = pairs[x]
+        yes = cc[y] >= FOLD_MIN and cc[y] >= FOLD_RATIO * cc[x]
+        fold_rows[x] = (y, "fold" if yes else "nofold", f"{x}:{cc[x]} {y}:{cc[y]}")
+    F = {x: r[0] for x, r in fold_rows.items() if r[1] == "fold"}
+    if any(y in F for y in F.values()):
+        die("a fold target is itself folded: " + " ".join(y for y in F.values() if y in F))
+    man = lambda sec, key: old[sec].get(key, ("",) * 5)[2]
+    for x, (y, status, c) in fold_rows.items():     # a manual fold decision changes the fold map the counting uses
+        m = man("fold", x)
+        if m:
+            if m.split("@")[0] == x:
+                F.pop(x, None)
+            else:
+                F[x] = m.split("@")[0]
+    fold = lambda s: "".join(F.get(c, c) for c in s)
+    fc = collections.Counter()
+    for c, n in cc.items():
+        fc[F.get(c, c)] += n
+    # single characters
+    char_rows, row_cands = {}, {}
+    for k, v in st.items():
+        cand = list(v)
+        if k not in S and k not in v:
+            cand.append(k)
+        if k in MEDIAWIKI and MEDIAWIKI[k] not in cand:
+            cand.append(MEDIAWIKI[k])
+        if len(v) > 1 or k in MEDIAWIKI or (k not in S and k not in v):
+            cands = list(dict.fromkeys(fold(c) for c in cand))
+            first = fold(v[0])
+            alts = [c for c in cands if c != first and (frozenset((first, c)) in variant or (k in MEDIAWIKI and c == fold(MEDIAWIKI[k])))]
+            char_rows[k] = None
+            row_cands[k] = (cands, first, alts)
+    trig = {k for k in char_rows if row_cands[k][2]}       # keys whose single-character default may change: their phrases give the evidence
+    # phrases: candidates, then one pass over the folded text
+    phrase_cands = {}
+    for k, v in stp.items():
+        pos = [i for i, c in enumerate(k) if c in trig]
+        if not pos:
+            continue
+        if len(v) != len(k):
+            die(f"STPhrases {k}: value length differs, no position to vary")
+        fv = fold(v)
+        opts = [list(dict.fromkeys([fv[i]] + row_cands[k[i]][0])) for i in pos]
+        cands = []
+        for combo in itertools.product(*opts):
+            s = list(fv)
+            for i, c in zip(pos, combo):
+                s[i] = c
+            cands.append("".join(s))
+        cands = list(dict.fromkeys(cands))
+        phrase_cands[k] = (pos, fv, cands)
+    # contract 9: word-level evidence for the single-character default. Every word of the lexicon (two or more characters) and of the
+    # dictionaries that holds the key's OpenCC form or one of its variants, written once with each form (all such positions together).
+    lex_words = {l.split()[1] for l in open(os.path.join(bc.ROOT, "data", "lexicon", "mcbpmf-data.txt"), encoding="utf-8")
+                 if not l.startswith("#") and len(l.split()) > 2} | dictionary
+    word_forms = {}
+    for k in trig:
+        cands_k, first, alts = row_cands[k]
+        forms = [first] + alts
+        fs = set(forms)
+        seen = {}
+        for w in lex_words:
+            if len(w) < 2 or not any(c in fs for c in w):
+                continue
+            base = "".join(first if c in fs else fold(c) for c in w)
+            if base not in seen:
+                seen[base] = {c: "".join(c if x in fs else fold(x) for x in w) for c in forms}
+        word_forms[k] = seen
+    strings = {s for _, _, cands in phrase_cands.values() for s in cands} | {s for seen in word_forms.values() for d in seen.values() for s in d.values()}
+    anchor = {c for k, (pos, _, cands) in phrase_cands.items() for s in cands for c in (s[i] for i in pos)} \
+        | {c for k in word_forms for c in [row_cands[k][1]] + row_cands[k][2]}
+    shapes = collections.defaultdict(set)
+    for s in strings:
+        j = next(i for i, c in enumerate(s) if c in anchor)
+        shapes[s[j]].add((j, len(s)))
+    log(f"phrase keys: {len(phrase_cands)}, candidate strings: {len(strings)}, anchor chars: {len(anchor)}, "
+        f"anchor occurrences: {sum(cc[c] for c in anchor)}", t0)
+    pc = dict.fromkeys(strings, 0)
+    anchor_re = re.compile("[" + "".join(re.escape(c) for c in sorted(anchor)) + "]")
+    trans = str.maketrans(F)
+    li = {"prev": collections.Counter(), "next": collections.Counter()}   # contract 10.2: (character, 裡 or 里) next to 裡/里, folded text
+    for chunk in sentences(files):
+        chunk = chunk.translate(trans)
+        for m in LI_RE.finditer(chunk):
+            i = m.start()
+            if i and HAN_RE.match(chunk[i - 1]):
+                li["prev"][(chunk[i - 1], m.group())] += 1
+            if i + 1 < len(chunk) and HAN_RE.match(chunk[i + 1]):
+                li["next"][(chunk[i + 1], m.group())] += 1
+        for m in anchor_re.finditer(chunk):
+            i = m.start()
+            for j, n in shapes[chunk[i]]:
+                if i >= j:
+                    s = chunk[i - j:i - j + n]
+                    if s in pc:
+                        pc[s] += 1
+    log("pass 2 done", t0)
+    # char rows (contract 9): word-level evidence from the phrase strings of the key, same word written with each form
+    word = {k: collections.Counter() for k in trig}
+    for k, seen in word_forms.items():
+        for d in seen.values():
+            for c, w in d.items():
+                word[k][c] += pc.get(w, 0)
+    for k, (cands, first, alts) in row_cands.items():
+        value, status, extra = first, "hold", ""
+        if alts:
+            wc = word[k]
+            best = max(alts, key=lambda c: (wc[c], -alts.index(c)))
+            extra = " words " + " ".join(f"{c}:{wc[c]}" for c in [first] + alts)
+            if wc[best] >= PICK_MIN and wc[best] >= WORD_RATIO * wc[first]:
+                value, status = best, "evidence"
+            elif k in MEDIAWIKI and sum(fc[c] for c in cands) < PICK_MIN:
+                value, status = fold(MEDIAWIKI[k]), "mediawiki"
+        std = variant_of.get(value)
+        if status == "hold" and std in cands:   # contract 10.6: the dictionary's standard form, unless the variant is >= 10x on the same evidence
+            cnt = word[k] if (k in word and std in word[k]) else fc
+            if not (cnt[value] >= PICK_MIN and cnt[value] >= WORD_RATIO * cnt[std]):
+                value, status = std, "dict"
+        char_rows[k] = (value, status, fmt_counts(cands, fc) + extra)
+    chosen = lambda k: (man("char", k).split("@")[0] if man("char", k) else char_rows[k][0])
+    rare = {k for k in char_rows if chosen(k) != k and cc[k] < RARE_MAX and FOLD_RATIO * cc[k] < fc[chosen(k)]}
+    # contract 10.1, R2: marker keys (first OpenCC value not the key) that Taiwan writes under 1/20 of the chosen value; no minimum count
+    markers = {k for k, v in st.items() if v[0] != k}
+    r2 = {k for k in char_rows if k in markers and chosen(k) != k and FOLD_RATIO * cc[k] < fc[chosen(k)]}
+    char_rows = {k: (*r, "N" if k in rare else ("R" if k in r2 else "")) for k, r in char_rows.items()}
+    log(f"char rows: {len(char_rows)}, changed: {sum(1 for k in char_rows if chosen(k) != row_cands[k][1])}, N: {len(rare)}, "
+        f"R2 (markers, N included): {len(r2)}", t0)
+    keep = sorted(w for w in dictionary if len(w) > 1 and any(c in r2 for c in w) and not any(c in S for c in w))   # contract 10.1
+    phrase_rows = {}
+    for k, (pos, fv, cands) in phrase_cands.items():
+        in_dict = [c for c in cands if c in dictionary]
+        if len(in_dict) == 1:
+            d = in_dict[0]
+            rival = max((c for c in cands if c != d), key=lambda c: pc[c], default=None)
+            if rival is not None and pc[rival] >= PICK_MIN and pc[rival] >= WORD_RATIO * pc[d]:
+                value, status = rival, "over-dict"
+            else:
+                value, status = d, "dict"
+            phrase_rows[k] = (value, status, fmt_counts(cands, pc))
+            continue
+        value, status = pick(cands, pc, fv)
+        if status == "hold":    # follow the char row only where OpenCC's phrase value uses the key's own first value
+            s = list(fv)
+            for i in pos:
+                if fv[i] == row_cands[k[i]][1] and char_rows[k[i]][1] in ("evidence", "mediawiki"):
+                    s[i] = chosen(k[i])
+            value = "".join(s)
+        phrase_rows[k] = (value, status, fmt_counts(cands, pc))
+    # mainland terms
+    terms = [l.rstrip("\n") for l in open(TERMS, encoding="utf-8") if l.strip() and not l.startswith("#")]
+    missing = [k for k in terms if k not in twp]
+    if missing:
+        die(f"mainland-terms.txt keys that are not TWPhrases.txt keys: {missing[:5]}")
+    return {"fold": fold_rows, "char": char_rows, "phrase": phrase_rows, "term": {k: (twp[k], "term", "") for k in terms},
+            "keep": keep, "li": li}, cc
+
+
+def write_table(rows, files, path):
+    old = read_table(path)
+    try:
+        dirty = subprocess.run(["git", "status", "--porcelain", "--", os.path.join(HERE, "build_tw_conv.py"), os.path.join(HERE, "build_counts.py")],
+                               capture_output=True, text=True, cwd=HERE).stdout.strip()
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=HERE).stdout.strip() + (" (tool files modified)" if dirty else "")
+    except OSError:
+        commit = "unknown"
+    out = ["# tw-conv.tsv: docs/contracts/tw-conv.md section 2.3. Built by experiments/s2/build_tw_conv.py from the PTT snapshot (characters, words and counts only).",
+           *(f"# input {os.path.basename(f)} sha256 {sha256_file(f)}" for f in files),
+           f"# tool commit {commit}",
+           "# columns: section, key, value, status, manual, counts[, N|R]. status: evidence | hold | fold | nofold | term. manual: value@date beats the rule. N (char rows): the set N of contract 7; R: R2 of contract 10.",
+           "# keep<TAB>word: contract 10.1 (written as is on a Traditional sentence with an S character). li<TAB>prev|next<TAB>char<TAB>裡<TAB>里: contract 10.2 (PTT counts, folded)."]
+    for sec in SECTIONS:
+        for k in sorted(rows[sec]):
+            r = rows[sec][k]
+            value, status, counts, rare = r[0], r[1], (r[2] if len(r) > 2 else ""), (r[3] if len(r) > 3 else "")
+            out.append("\t".join((sec, k, value, status, old[sec].get(k, ("",) * 5)[2], counts) + ((rare,) if rare else ())))
+    out += [f"keep\t{w}" for w in rows.get("keep", [])]                     # contract 10.1: keep<TAB>word
+    for side in ("prev", "next"):                                           # contract 10.2: li<TAB>prev|next<TAB>char<TAB>裡 count<TAB>里 count
+        cs = rows.get("li", {}).get(side, {})
+        for c in sorted({c for c, _ in cs}):
+            out.append(f"li\t{side}\t{c}\t{cs.get((c, '裡'), 0)}\t{cs.get((c, '里'), 0)}")
+    tmp = path + ".tmp"
+    open(tmp, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
+    os.replace(tmp, path)
+
+
+def log(msg, t0):
+    print(f"[{time.time() - t0:7.1f}s] {msg}", file=sys.stderr, flush=True)
+
+
+# ---------------------------------------------------------------------------------------------------------------- review
+def review(table_path):
+    """The rows for the maintainer (contract 2.3, end): chosen value not OpenCC's first (folded), every char `hold`, phrase `hold` with any count,
+    every `nofold`. Printed as key, rule result, manual, candidates with counts."""
+    t = read_table(table_path)
+    st = bc.read_opencc()["st"]
+    F = fold_of(t)
+    fold = lambda s: "".join(F.get(c, c) for c in s)
+    stp = bc.read_opencc()["stp"]
+    lines = []
+    for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
+        if status in ("hold", "distinct") or value != fold(st[k][0]):
+            lines.append(("char", k, value, status, manual, counts))
+    for k, (value, status, manual, counts, rare) in sorted(t["char"].items()):
+        if rare:
+            lines.append((rare, k, value, status, manual, counts))   # N or R (contract 10.1)
+    for k, (value, status, manual, counts, rare) in sorted(t["phrase"].items()):
+        if value != fold(stp[k]) or (status == "hold" and any(int(c.rsplit(":", 1)[1]) for c in counts.split())):
+            lines.append(("phrase", k, value, status, manual, counts))
+    for k, (value, status, manual, counts, rare) in sorted(t["fold"].items()):
+        if status == "nofold":
+            lines.append(("fold", k, value, status, manual, counts))
+    n = collections.Counter(l[0] for l in lines)
+    print(f"# review rows: {dict(n)}; columns: section, key, rule value, status, manual, candidates with counts")
+    for l in lines:
+        print("\t".join(l))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--review", action="store_true", help="print the rows for the maintainer from the table (needs no corpus)")
+    ap.add_argument("--table", default=TABLE)
+    ap.add_argument("--body", default=os.path.join(PTT, "body.tsv"))
+    ap.add_argument("--push", default=os.path.join(PTT, "push.tsv"))
+    ap.add_argument("--out", default=TABLE)
+    a = ap.parse_args(argv)
+    if a.review:
+        return review(a.table)
+    t0 = time.time()
+    files = [a.body, a.push]
+    rows, _ = build_rows(files, read_table(a.out))
+    write_table(rows, files, a.out)
+    print(f"wrote {a.out}: " + ", ".join(f"{s} {len(rows[s])}" for s in SECTIONS) + f", keep {len(rows['keep'])}, li prev {len(rows['li']['prev'])} "
+          f"next {len(rows['li']['next'])}; {time.time() - t0:.1f} s")
+
+
+if __name__ == "__main__":
+    main()

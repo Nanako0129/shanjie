@@ -80,10 +80,10 @@ class ExtraLexicon(unittest.TestCase):
         src = os.path.join(self.tmp.name, "s.txt")
         open(src, "w", encoding="utf-8").write(WORD + "\n")
         with self.assertRaises(SystemExit):   # 只有 --expected 是加法計數（契約 §8），其他路徑不收這個選項
-            bct.main(["--extra-lexicon", self.extra, os.path.join(self.tmp.name, "x.pkl"), src])
+            bct.main(["--extra-lexicon", self.extra, os.path.join(self.tmp.name, "x.pkl"), "--native", src])
         for extra, want in [([], False), (["--extra-lexicon", self.extra], True)]:
             out = os.path.join(self.tmp.name, f"e{want}.pkl")
-            bct.main(["--expected"] + extra + [out, src])
+            bct.main(["--expected"] + extra + [out, "--native", src])
             self.assertEqual(pickle.load(open(out, "rb"))["uni"].get(WORD, 0) > 0.99, want)
 
     def test_wiki_script_parses_option(self):

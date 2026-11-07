@@ -1,6 +1,7 @@
 """SJ-LM-7 契約 §2.1a：萌典補詞要數子字串的「維基 20 萬篇」純文字。和 build_counts.py 數的是同一批篇、同一條管線
 （article_runs：模板、標記、斷句、轉換、漢字段），一行一段漢字（2 字以上，和計數一樣），篇照 dump 順序。
-用法：python3 experiments/sj-lm-7/wiki_text.py OUT [--articles 200000] [--procs N] [--no-trad-tw-phrases]"""
+用法：python3 experiments/sj-lm-7/wiki_text.py OUT [--articles 200000] [--procs N]
+維基是 mixed 來源（docs/contracts/tw-conv.md §2.1），article_runs 逐句判斷簡繁。"""
 import argparse
 import multiprocessing as mp
 import os
@@ -12,12 +13,12 @@ import build_counts as bc  # noqa: E402
 _CONV = {}
 
 
-def _init(trad_tw):
-    _CONV["conv"], _CONV["trad_tw"] = bc.load_conv(), trad_tw
+def _init():
+    _CONV["conv"] = bc.load_conv()
 
 
 def _runs(batch):
-    return "".join(r + "\n" for raw in batch for r in bc.article_runs(raw, _CONV["conv"], trad_tw_phrases=_CONV["trad_tw"]) if len(r) >= 2)
+    return "".join(r + "\n" for raw in batch for r in bc.article_runs(raw, _CONV["conv"]) if len(r) >= 2)
 
 
 def main(argv=None):
@@ -25,13 +26,15 @@ def main(argv=None):
     ap.add_argument("out")
     ap.add_argument("--articles", type=int, default=200_000)
     ap.add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
-    ap.add_argument("--no-trad-tw-phrases", action="store_true", help="和 build_counts.py 的同名旗標相同（SJ-LM-7 §2.2）")
     a = ap.parse_args(argv)
     bc.load_conv()   # OpenCC 檔錯了在這裡就停，不在每個 worker 裡
-    with mp.Pool(a.procs, initializer=_init, initargs=(not a.no_trad_tw_phrases,)) as pool, open(a.out + ".tmp", "w", encoding="utf-8") as f:
+    with mp.Pool(a.procs, initializer=_init) as pool, open(a.out + ".tmp", "w", encoding="utf-8") as f:
         for text in pool.imap(_runs, bc.batches(bc.articles(a.articles))):   # imap：輸出照篇的順序
             f.write(text)
     os.replace(a.out + ".tmp", a.out)
+    state = bc.tw_clean_state()   # docs/contracts/tw-conv.md 11.2: which tw-clean table made this text
+    open(a.out + ".tw-clean", "w", encoding="utf-8").write(state + "\n")
+    print(f"tw-clean: {state}")
 
 
 if __name__ == "__main__":

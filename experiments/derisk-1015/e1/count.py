@@ -2,7 +2,7 @@
 same pass, the "mapped" unigram / bigram counts of E4 (b), where a Han run that starts right after a digit or Latin run
 starts from <X> instead of <s>.
 
-It wraps experiments/s2/build_counts.py (imported, not edited): the lexicon, the OpenCC conversion, the sentence split, the markup
+It wraps experiments/s2/build_counts.py (imported, not edited): the lexicon, the conversion (docs/contracts/tw-conv.md), the sentence split, the markup
 stripping and `run_expected` (the additive extra-lexicon counting of model-v5 §8) are the original functions, so the unmapped uni / bi
 are the model-v6 recipe's own numbers (test_e1 checks the batch result equals `bc.count_batch`). New here:
   - `expected_tri`: expected trigram counts on the same forward-backward lattice as `bc.expected_counts`
@@ -20,12 +20,13 @@ Outputs, under --out:
   meta-<tag>.json             commit, argv, SHA-256 of every input, counts
 
   python3 count.py wiki --out DIR --articles 200000 --procs 40 --extra-lexicon FILE... [--overlay-add FILE] [--tri-min 0.01]
-  python3 count.py text --out DIR --tag colloquial3 --extra-lexicon FILE... [--overlay-add FILE] [--holdout-guard [ROWS...]] FILE...
+  python3 count.py text --out DIR --tag colloquial3 --extra-lexicon FILE... [--overlay-add FILE] [--holdout-guard [ROWS...]] (--native FILE | --mixed FILE)...
   python3 count.py wiki ... --shard K/N          only articles i with i % N == K (build_counts.py --shard's rule); the tag becomes
                                                  <articles>-shard<K>of<N>; the N processes run side by side, each with its own --procs
   python3 count.py merge --out DIR --tag T SHARD_TAG...   sums the unmapped / mapped / tri pickles of the shard tags (wiki shards, or the
                                                  `text` runs of the TSV shards of one source) into tag T, deletes nothing
 `text` reads a path the way build_counts_text.lines() does: .bz2 is decompressed, a path with ".tsv" in it contributes its last tab field.
+Every `text` input names its kind (tw-conv contract 2.1), there is no default: --native is counted as it is, --mixed goes through build_counts.convert. `wiki` is a mixed input.
 """
 import argparse
 import collections
@@ -142,15 +143,9 @@ class Acc:
 
 
 def wiki_sentences(raw):
-    """build_counts.count_batch's per-article preprocessing (entities, templates, markup, sentence split, OpenCC), without --mw."""
-    phrase, char, maxp = bc._W["conv"]
-    t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
-    for _ in range(3):
-        t = bc.TEMPLATE.sub("", t)
-    for pat, rep in bc.MARKUP:
-        t = pat.sub(rep, t)
-    for s in bc.SENT.findall(t):
-        yield bc.convert(s, phrase, char, maxp, trad_tw_phrases=bc._W.get("trad_tw", True))
+    """build_counts.count_batch's per-article preprocessing (entities, templates, markup, sentence split, convert, the tw-clean table: a wiki article is a mixed input,
+    docs/contracts/tw-conv.md 11.2), without --mw: bc.article_sentences itself."""
+    return bc.article_sentences(raw, bc._W["conv"])
 
 
 def count_batch3(texts):
@@ -172,9 +167,9 @@ def _reload_lexicons(overlay_add, extra):
         bc._W["pack_lens"] = sorted({len(w) for w in bc._W["pack"]})
 
 
-def init3(extra_lexicons=(), overlay_add=None, tri_min=bc.EXPECTED_MIN, trad_tw_phrases=True):
+def init3(extra_lexicons=(), overlay_add=None, tri_min=bc.EXPECTED_MIN):
     extra = tuple(dict.fromkeys(os.path.abspath(f) for f in extra_lexicons))
-    bc._init(False, True, False, extra, trad_tw_phrases=trad_tw_phrases)
+    bc._init(False, True, False, extra)
     if overlay_add:
         _reload_lexicons(os.path.abspath(overlay_add), extra)
     bc._W["tri_min"] = tri_min
@@ -220,10 +215,10 @@ def cmd_wiki(a):
     import multiprocessing as mp
     uni, bi, tri, dbi = (collections.Counter() for _ in range(4))
     nx = runs = arts = 0
-    init3(tuple(a.extra_lexicon), a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)   # in the parent first (OpenCC tables, lexicon): a failure stops here, not in every Pool worker's initializer (which respawns forever)
+    init3(tuple(a.extra_lexicon), a.overlay_add, a.tri_min)   # in the parent first (OpenCC tables, lexicon): a failure stops here, not in every Pool worker's initializer (which respawns forever)
     k, n = shard_of(a.shard)
     mine = shard_filter(bc.articles(a.articles), k, n)
-    with mp.Pool(a.procs, initializer=init3, initargs=(tuple(a.extra_lexicon), a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)) as pool:
+    with mp.Pool(a.procs, initializer=init3, initargs=(tuple(a.extra_lexicon), a.overlay_add, a.tri_min)) as pool:
         for u, b, t, d, x, s_ in pool.imap_unordered(count_batch3, bc.batches(mine)):
             uni.update(u); bi.update(b); tri.update(t); dbi.update(d); nx += x; runs += s_; arts += 200
             if arts % 10000 == 0:
@@ -234,21 +229,23 @@ def cmd_wiki(a):
     else:
         arts = min(arts, a.articles)
         tag = str(arts)
-    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard, "no_trad_tw_phrases": a.no_trad_tw_phrases})
+    state = bc.tw_clean_state()
+    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard, "tw_clean": state})
+    print(f"tw-clean: {state}")
     write_outputs(a.out, tag, uni, bi, tri, dbi, nx, runs, arts, meta)
 
 
 def cmd_text(a):
-    guard = bc.guard_matcher(a.holdout_guard, not a.no_trad_tw_phrases)   # first: a bad rows file stops here, before the lexicon loads
-    init3(a.extra_lexicon, a.overlay_add, a.tri_min, not a.no_trad_tw_phrases)
+    guard = bc.guard_matcher(a.holdout_guard)   # first: a bad rows file stops here, before the lexicon loads
+    init3(a.extra_lexicon, a.overlay_add, a.tri_min)
     acc = Acc()
-    for p in a.paths:
+    for kind, p in a.inputs:
         for s in bct.lines(p):
-            acc.add_text(bc.convert(s, *bc._W["conv"], trad_tw_phrases=not a.no_trad_tw_phrases), a.tri_min, guard)
-    extra = {"tri_min": a.tri_min, "no_trad_tw_phrases": a.no_trad_tw_phrases}
+            acc.add_text(s if bc.check_kind(kind) == "native" else bc.convert(s, *bc._W["conv"]), a.tri_min, guard)
+    extra = {"tri_min": a.tri_min, "inputs": [[kind, os.path.basename(p)] for kind, p in a.inputs]}
     if guard is not None:
         extra.update(holdout_guard=a.holdout_guard, guard_skipped_runs=acc.skipped)   # only when on: off keeps the meta keys as before
-    meta = common.provenance(_inputs(a, a.paths), extra)
+    meta = common.provenance(_inputs(a, [p for _, p in a.inputs]), extra)
     write_outputs(a.out, a.tag, acc.uni, acc.bi, acc.tri, acc.dbi, acc.nx, acc.runs, 0, meta)
     if guard is not None:
         print(f"holdout-guard: skipped {acc.skipped} runs")
@@ -280,19 +277,21 @@ def main(argv=None):
         p.add_argument("--out", required=True)
         p.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE")
         p.add_argument("--overlay-add", help="overlay-add.tsv to count with instead of the checkout's (model-v6 used commit 4d47a50's file)")
-        p.add_argument("--no-trad-tw-phrases", action="store_true", help="SJ-LM-7 contract 2.2, same as build_counts.py: traditional sentences skip OpenCC TWPhrases (use it whenever the bigram counts did)")
         p.add_argument("--tri-min", type=float, default=bc.EXPECTED_MIN, help="a trigram path below this posterior inside one run is not recorded (default = the bigram's 0.01)")
     sub.choices["wiki"].add_argument("--articles", type=int, default=200000)
     sub.choices["wiki"].add_argument("--procs", type=int, default=max(1, os.cpu_count() - 2))
     sub.choices["text"].add_argument("--tag", required=True)
     sub.choices["text"].add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="default off. A Han run that contains a guarded sentence is not counted; the skipped count is printed. Same matcher as build_counts_text.py --holdout-guard (no files = every .txt under eval/holdout/). Put it after the positional paths or separate with --")
-    sub.choices["text"].add_argument("paths", nargs="+")
+    sub.choices["text"].add_argument("--native", dest="inputs", action="append", metavar="FILE", type=lambda p: ("native", p), help="an input counted as it is (never converted); repeatable")
+    sub.choices["text"].add_argument("--mixed", dest="inputs", action="append", metavar="FILE", type=lambda p: ("mixed", p), help="an input converted sentence by sentence; repeatable")
     sub.choices["wiki"].add_argument("--shard", metavar="K/N", help="only articles i with i %% N == K; output tag <articles>-shard<K>of<N>; merge the N shards with `merge`")
     p = sub.add_parser("merge")
     p.add_argument("--out", required=True)
     p.add_argument("--tag", required=True)
     p.add_argument("shards", nargs="+", metavar="SHARD_TAG")
     a = ap.parse_args(argv)
+    if a.cmd == "text" and not a.inputs:
+        ap.error("give every input as --native FILE or --mixed FILE (no default kind)")
     {"wiki": cmd_wiki, "text": cmd_text, "merge": cmd_merge}[a.cmd](a)
 
 

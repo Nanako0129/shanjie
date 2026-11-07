@@ -63,9 +63,8 @@ class TestClean(unittest.TestCase):
         self.assertEqual(list(clean.sentences(clean.scrub("電話（02-2345-6789）請撥"))), ["電話", "請撥"])   # no stray `）`
 
     def test_simp_set_is_the_traditional_one(self):
-        # build_counts.SIMP_ONLY holds 群 床 秘 峰 ..., standard in Taiwan; TRAD_SIMP_ONLY is the set for traditional sentences
-        with mock.patch.object(clean.bc, "load_conv"), mock.patch.object(clean.bc, "SIMP_ONLY", set("们群床")), \
-                mock.patch.object(clean.bc, "TRAD_SIMP_ONLY", set("们")):
+        # TRAD_SIMP_ONLY is the set S of docs/contracts/tw-conv.md 2.2: it leaves out 群 床 秘 峰 ..., standard in Taiwan
+        with mock.patch.object(clean.bc, "load_conv"), mock.patch.object(clean.bc, "TRAD_SIMP_ONLY", set("们")):
             simp = clean.load_simp_only()
         f = clean.Filter(simp, set())
         self.assertTrue(f.keep("我把你加進群組了"))

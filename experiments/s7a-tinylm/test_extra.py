@@ -99,7 +99,7 @@ class TestPrepText(unittest.TestCase):
             with open(src, "w", encoding="utf-8", newline="\n") as f:
                 f.write("我們去吃飯，好嗎\n好\nok 我們\n")
             with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):     # no OpenCC tables here
-                rep = prep.encode_extra(src, work, "chat", ())
+                rep = prep.encode_extra(src, work, "chat", (), "native")
             runs = open(os.path.join(work, "runs-chat.txt"), encoding="utf-8").read()
             self.assertEqual(runs, "我們去吃飯\n好嗎\n我們\n")                       # Han runs of length >= 2, as the colloquial text
             ids = np.load(os.path.join(work, "ids-chat.npy"))
@@ -108,7 +108,7 @@ class TestPrepText(unittest.TestCase):
             self.assertEqual(json.load(open(os.path.join(work, "text-chat.json")))["ids_sha256"], prep.sha256_file(os.path.join(work, "ids-chat.npy")))
             self.assertEqual(open(os.path.join(work, "vocab.txt"), encoding="utf-8").read(), "我\n們\n去\n吃\n飯\n好\n")
             with self.assertRaises(SystemExit):
-                prep.encode_extra(src, work, "coll", ())
+                prep.encode_extra(src, work, "coll", (), "native")
 
 
 class TestWeightedExtra(unittest.TestCase):
@@ -226,8 +226,8 @@ class TestPrepVocabAndHalf(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             self.write(work, "in.txt", "\n".join(lines) + "\n")
             with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):
-                rep = prep.write_runs(os.path.join(work, "in.txt"), work, "g", (), half=True)
-                prep.write_runs(os.path.join(work, "in.txt"), work, "all", ())
+                rep = prep.write_runs(os.path.join(work, "in.txt"), work, "g", (), "native", half=True)
+                prep.write_runs(os.path.join(work, "in.txt"), work, "all", (), "native")
             self.assertEqual(open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read(), "吃飯了沒\n好嗎\n你好\n我是你\n")   # input order kept
             self.assertEqual(len(open(os.path.join(work, "runs-all.txt"), encoding="utf-8").read().split("\n")) - 1, 9)           # no --half: all
             self.assertEqual((rep["lines"], rep["half_dropped_runs"]), (6, 5))                                                      # 1 + 2 + 2 runs
@@ -237,7 +237,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             self.write(work, "in.tsv", "a1\t吃飯了沒\n7\t天氣好嗎\n")
             with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):
-                prep.write_runs(os.path.join(work, "in.tsv"), work, "g", (), half=True)
+                prep.write_runs(os.path.join(work, "in.tsv"), work, "g", (), "native", half=True)
             self.assertEqual(open(os.path.join(work, "runs-g.txt"), encoding="utf-8").read(), "吃飯了沒\n")
 
     def test_procs_gives_the_same_files_as_one_process(self):
@@ -255,7 +255,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             guard = prep.bc.guard_matcher([os.path.join(work, "rows.txt")])
             for half in (False, True):
                 for g in (None, guard):
-                    reps = [prep.write_runs(os.path.join(work, "in.tsv"), work, f"p{p}", conv, guard=g, half=half, procs=p) for p in (1, 2)]
+                    reps = [prep.write_runs(os.path.join(work, "in.tsv"), work, f"p{p}", conv, "mixed", guard=g, half=half, procs=p) for p in (1, 2)]
                     self.assertEqual(open(os.path.join(work, "runs-p1.txt"), "rb").read(), open(os.path.join(work, "runs-p2.txt"), "rb").read())
                     self.assertEqual(reps[0], reps[1])
                     self.assertEqual(reps[0]["lines"], 4500)
@@ -275,7 +275,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
             os.chdir(work)
             try:
                 with mock.patch.object(prep.bc, "convert", lambda text, *conv, **kw: text):
-                    rep = prep.encode_extra("chat.txt", ".", "chat", ())
+                    rep = prep.encode_extra("chat.txt", ".", "chat", (), "native")
             finally:
                 os.chdir(cwd)
             raw = open(os.path.join(work, "text-chat.json"), "rb").read()
@@ -288,7 +288,7 @@ class TestPrepVocabAndHalf(unittest.TestCase):
                         return False
                 os.chdir(work)
                 try:
-                    rep = prep.encode_extra("chat.txt", ".", "chat", (), guard=G(), half=True)
+                    rep = prep.encode_extra("chat.txt", ".", "chat", (), "native", guard=G(), half=True)
                 finally:
                     os.chdir(cwd)
             self.assertEqual(list(rep)[-2:], ["holdout_guard_skipped_runs", "half_dropped_runs"])

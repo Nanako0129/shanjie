@@ -45,6 +45,8 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
         self.addCleanup(self.d.cleanup)
+        # tw-conv: a sentence is converted only for the characters in set S (build_counts.TRAD_SIMP_ONLY), which load_conv() fills; the fake table's keys are S here
+        p = mock.patch.object(bc, "TRAD_SIMP_ONLY", set(CONV[1])); p.start(); self.addCleanup(p.stop)
 
     def w(self, name, data):
         p = os.path.join(self.d.name, name)
@@ -210,7 +212,7 @@ class Counting(Base):
     def count_text(self, *flag):
         out = os.path.join(self.d.name, "o%d.pkl" % len(os.listdir(self.d.name)))
         with contextlib.redirect_stdout(io.StringIO()) as so:
-            bct.main([out, self.text, *flag])
+            bct.main([out, "--mixed", self.text, *flag])   # the corpus has Simplified lines: a mixed input
         return pickle.load(open(out, "rb")), so.getvalue()
 
     @staticmethod
