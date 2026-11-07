@@ -52,6 +52,11 @@ R8_TRAD = [("秦國的首都咸陽在這裡，他们說", "秦國的首都咸陽
            ("他在逝世后被追封為國公，這是他们的榮譽", "他在逝世後被追封為國公，這是他們的榮譽"), ("這場戰爭的死者達万余人，他们說", "這場戰爭的死者達萬餘人，他們說")]
 R8_LI = [("这位埃里克先生", "這位埃里克先生"), ("他们走了十万里路", "他們走了十萬里路"), ("在《红楼梦》里", "在《紅樓夢》裡"), ("在学校里", "在學校裡"),
          ("在这些人群里", "在這些人群裡"), ("在那个洞里有光", "在那個洞裡有光")]
+# contract 12.3: (a)-(e) of Revision10, Traditional sentences with an S character; (f), (g) are in TwClean
+R10 = {"a": ("他說韋斯咸在这裡", "他說韋斯咸在這裡"), "b": ("人群涌入了廣場，他们說", "人群湧入了廣場，他們說"), "c": ("他住在東涌站附近，他们說", "他住在東涌站附近，他們說"),
+       "d": ("他们在這個國家的河邊看見水涌", "他們在這個國家的河邊看見水涌"), "e": ("咸丰年間他们說", "咸豐年間他們說")}
+R10_F = "他在韋斯咸，并說他们來了"   # an uncovered 咸 and an uncovered 并 (並 in the old output)
+R10_G = "韋斯咸在咸水湖旁，他们說汹涌的河邊很美"   # an uncovered 咸 and the phrases 咸水湖, 汹涌
 LI_PTT = "在那个洞里有光"   # its 里 is decided by the PTT counts, not by the numeral, closing-mark or lexicon branch   # marker characters Taiwan writes as they are (contract 7): none of them may be in N
 
 
@@ -229,6 +234,35 @@ class Revision8(Base):
         self.assertIn("于美人說她明天會來", open(FIXTURE, encoding="utf-8").read())
 
 
+class Revision10(Base):
+    """Contract 12.1: an uncovered 咸 of a Traditional sentence with an S character stays, an uncovered 涌 becomes 湧 only before 入現出至起動."""
+    def row(self, k):
+        s, want = R10[k]
+        self.assertIn((s, want), simp_rows())
+        self.assertEqual(bc.sentence_kind(s), "trad", s)
+        self.assertTrue(any(c in bc.TRAD_SIMP_ONLY for c in s), s)
+        self.assertEqual(self.ck.convert(s), want)
+
+    def test_r10_a_a_name_with_xian_stays(self):
+        self.row("a")
+
+    def test_r10_b_yong_before_ru_converts(self):
+        self.row("b")
+
+    def test_r10_c_yong_before_zhan_stays(self):
+        self.row("c")
+
+    def test_r10_d_yong_at_the_end_stays(self):
+        self.row("d")
+
+    def test_r10_e_phrases_are_as_before(self):
+        self.row("e")
+
+    def test_r10_rev9_is_the_output_before_contract_12(self):
+        self.assertEqual(bc.convert("他說韋斯咸在这裡", *self.ck.conv, rev9=True), "他說韋斯鹹在這裡")
+        self.assertEqual(bc.convert(R10["c"][0], *self.ck.conv, rev9=True), "他住在東湧站附近，他們說")
+
+
 class Table(unittest.TestCase):
     """tw-conv.tsv follows the fixed rules of contract 2.3, read back from its own counts column (manual rows excluded)."""
     @classmethod
@@ -358,6 +392,29 @@ class TwClean(unittest.TestCase):
     def test_t_a_sentence_not_in_the_table_is_unchanged(self):
         self.table()
         self.assertEqual(self.sentences(), ["甲乙丁", "庚辛壬", "井號"])
+
+    def clean_with_real_tables(self, rows, raw):
+        self.table(rows=rows)
+        return list(bc.article_sentences(raw, bc.load_conv()))
+
+    def test_r10_f_the_key_is_the_output_before_contract_12(self):
+        """Contract 12.2: the table is keyed by the old output (咸 -> 鹹); a hit keeps its other corrections and takes the new 咸; a sentence not in the table uses the new output."""
+        conv = guard.Checker().conv
+        key = bc.convert(R10_F, *conv, rev9=True)
+        self.assertEqual(key, "他在韋斯鹹，並說他們來了")
+        self.assertEqual(bc.convert(R10_F, *conv), "他在韋斯咸，並說他們來了")
+        got = self.clean_with_real_tables({key: "他在韋斯鹹，併說他們來了"}, R10_F + "。他說韋斯咸在这裡。")
+        self.assertEqual(got, ["他在韋斯咸，併說他們來了", "他說韋斯咸在這裡"])
+
+    def test_r10_g_a_phrase_covered_xian_and_yong_stay_converted_on_a_hit(self):
+        conv = guard.Checker().conv
+        new = bc.convert(R10_G, *conv)
+        key = bc.convert(R10_G, *conv, rev9=True)
+        self.assertEqual(new, "韋斯咸在鹹水湖旁，他們說洶湧的河邊很美")
+        self.assertEqual(key, "韋斯鹹在鹹水湖旁，他們說洶湧的河邊很美")
+        hit = self.clean_with_real_tables({key: key.replace("很美", "很大")}, R10_G + "。")
+        self.assertEqual(hit, [new.replace("很美", "很大")])
+        self.assertEqual(self.clean_with_real_tables({"無關": "x"}, R10_G + "。"), [new])
 
     def test_t_hash_key_is_looked_up(self):
         """Only the first three lines are the header: a data line that starts with `#` (even `# entries`) is a key."""

@@ -1,4 +1,4 @@
-"""The mutations M1-M27 of docs/contracts/tw-conv.md sections 3, 10 and 11: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
+"""The mutations M1-M32 of docs/contracts/tw-conv.md sections 3, 10, 11 and 12: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
 fail on the test the contract names. Single process, about a minute (M6 and M8 rebuild the table from the PTT snapshot, 20 seconds each).
 
   python3 experiments/s2/mutate_tw_conv.py [--simp-rows FILE] [--only M3 ...]
@@ -48,7 +48,7 @@ def sentence_kind(text):
     return "simp" if (m > 0 and t == 0) or sum(c in _OLD["S"] for c in text) > t else "trad"
 
 
-def convert(text, phrase, char, maxp):
+def convert(text, phrase, char, maxp, rev9=False):   # rev9 only so that article_sentences can call it; the copy does not know contract 12
     if sentence_kind(text) == "trad":
         return "".join(char.get(c, c) if c in TRAD_SIMP_ONLY else c for c in text).translate(FOLD_TRANS)
     text = _longest(text, phrase, maxp, char)
@@ -82,8 +82,8 @@ MUTATIONS = [
     ("M9", "T contains the marker characters again (么 counts as Traditional evidence)",
      [(BC, '''set(o["twv"].values())) - MARKERS)''', '''set(o["twv"].values())))''')], [A4_ROWS], False),
     ("M10", "a Traditional sentence with an S character gets no phrase at all (only the single characters of S, N and R2)",
-     [(BC, '''            return _longest(text, r_phrase, r_maxp, _only(char, "trad_s")).translate(FOLD_TRANS)''',
-       '''            return "".join(_only(char, "trad_s").get(c, c) for c in text).translate(FOLD_TRANS)''')], [A4_ROWS], False),
+     [(BC, '''            return _longest(text, r_phrase, r_maxp, _only(char, "trad_s" if rev9 else "trad_s10"), follow=None if rev9 else R10_FOLLOW).translate(FOLD_TRANS)''',
+       '''            return "".join(_only(char, "trad_s10").get(c, c) for c in text).translate(FOLD_TRANS)''')], [A4_ROWS], False),
     ("M11", "the set N is empty",
      [(BC, '''    RARE.clear(); RARE.update(tw["n"])''', '''    RARE.clear()''')], [A4_ROWS], False),
     ("M12", "char rows go back to single-character counts and the 2x rule over every candidate (revision 4)",
@@ -93,7 +93,8 @@ MUTATIONS = [
        '''            best = max(alts, key=lambda c: fc[c])
             if fc[best] >= PICK_MIN and fc[best] >= PICK_RATIO * fc[first]:''')], [A2], True),
     ("M13", "a Traditional sentence with an S character does not convert R2 in the single-character step (contract 10)",
-     [(BC, '''"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys()''', '''"trad_s": TRAD_SIMP_ONLY | RARE.keys()''')], [A4_ROWS], False),
+     [(BC, '''"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys()''', '''"trad_s": TRAD_SIMP_ONLY | RARE.keys()'''),
+      (BC, '''(TRAD_SIMP_ONLY | RARE.keys() | R2.keys()) - R10_AS_IS''', '''(TRAD_SIMP_ONLY | RARE.keys()) - R10_AS_IS''')], [A4_ROWS], False),
     ("M14", "no keep words", [(BC, '''        t.update({w: w for w in KEEP})''', '''        pass''')], [A4_ROWS], False),
     ("M15", "an uncovered 里 of a Simplified sentence always becomes 裡", [(BC, '''            if li and text[i] == "里":''', '''            if False:''')], [A4_ROWS], False),
     ("M16", "the li rows are not read (every count 0)",
@@ -107,15 +108,15 @@ MUTATIONS = [
      [(BTC, '''        if status == "hold" and std in cands:''', '''        if False:''')], [A4_ROWS], True),
     # contract 11.3: the tw-clean table
     ("M20", "article_sentences does not look the sentence up",
-     [(BC, '''        if s in TW_CLEAN:\n''', '''        if False:\n''')], ["test_t_first_sentence_replaced"], False),
+     [(BC, '''        if key in TW_CLEAN:\n''', '''        if False:\n''')], ["test_t_first_sentence_replaced"], False),
     ("M21", "an empty second column is yielded like any other",
-     [(BC, '''            if not s:\n                continue\n''', '''            if False:\n                continue\n''')], ["test_t_empty_second_column_not_yielded"], False),
+     [(BC, '''            if not v:\n                continue\n''', '''            if False:\n                continue\n''')], ["test_t_empty_second_column_not_yielded"], False),
     ("M22", "the two header hashes are not checked",
      [(BC, '''        if tuple(h[len(p):].strip() for h, p in zip(head[:2], TW_CLEAN_HEADER)) != want:''', '''        if False:''')], ["test_t_header_hash_mismatch"], False),
     ("M23", "a missing table is an empty table",
      [(BC, '''        sys.exit(f"tw-clean: {path} is missing: {how}")\n''', '''        _TW_CLEAN["state"] = "off"; return\n''')], ["test_t_missing_table_stops"], False),
     ("M24", "article_sentences does not read the table itself (only load_conv() does)",
-     [(BC, '''        if _TW_CLEAN["state"] is None:\n            load_tw_clean()\n        if s in TW_CLEAN:''', '''        if s in TW_CLEAN:''')], ["test_t_a_spawned_process_reads_the_table_itself"], False),
+     [(BC, '''        if _TW_CLEAN["state"] is None:\n            load_tw_clean()\n        if key in TW_CLEAN:''', '''        if key in TW_CLEAN:''')], ["test_t_a_spawned_process_reads_the_table_itself"], False),
     ("M25", "count.py's wiki_sentences has its own preprocessing again",
      [(E1, '''    return bc.article_sentences(raw, bc._W["conv"])\n''', '''    phrase, char, maxp = bc._W["conv"]
     for s in bc.SENT.findall(bc.article_text(raw)):
@@ -124,9 +125,23 @@ MUTATIONS = [
     ("M26", "reading the table skips the lines that start with #",
      [(BC, '''        for n, line in enumerate(f, 4):\n''', '''        for n, line in enumerate((x for x in f if not x.startswith("#")), 4):\n''')], ["test_t_hash_key_is_looked_up"], False),
     ("M27", "count.py and wiki_text.py write a fixed table state instead of asking tw_clean_state()",
-     [(E1, '''"tw_clean": bc.tw_clean_state()})''', '''"tw_clean": "sha256:" + "0" * 64})'''),
+     [(E1, '''"tw_clean": state})''', '''"tw_clean": "sha256:" + "0" * 64})'''),
       (WIKI_TEXT, '''    state = bc.tw_clean_state()   # docs''', '''    state = "sha256:" + "0" * 64   # docs''')],
      ["test_t_state_count_py_meta", "test_t_state_wiki_text_side_file"], False),
+    # contract 12.3: 咸 and 涌 on a Traditional sentence with an S character, and the tw-clean lookup
+    ("M28", "an uncovered 咸 of a Traditional sentence with an S character is converted to 鹹 again",
+     [(BC, '''R10_AS_IS = {"咸"}''', '''R10_AS_IS = set()''')], ["test_r10_a_a_name_with_xian_stays"], False),
+    ("M29", "an uncovered 涌 there is always converted to 湧",
+     [(BC, '''R10_FOLLOW = {"涌": "入现現出至起动動"}''', '''R10_FOLLOW = {}''')], ["test_r10_c_yong_before_zhan_stays"], False),
+    ("M30", "an uncovered 涌 there is never converted",
+     [(BC, '''R10_FOLLOW = {"涌": "入现現出至起动動"}''', '''R10_FOLLOW = {"涌": ""}''')], ["test_r10_b_yong_before_ru_converts"], False),
+    ("M31", "the tw-clean lookup uses the new output as the key",
+     [(BC, '''        key = convert(s, *conv, rev9=True) if "咸" in s or "涌" in s else s10''', '''        key = s10''')],
+     ["test_r10_f_the_key_is_the_output_before_contract_12"], False),
+    ("M32", "a hit puts 咸 and 涌 back wherever the sentence has them, not only where contract 12 changed the output",
+     [(BC, '''            s10 = "".join(b if a != b and w == a else w for a, b, w in zip(key, s10, v)) if len(v) == len(key) == len(s10) else v''',
+       '''            s10 = "".join(c if w in "鹹湧" and c in "咸涌" else w for c, w in zip(s, v)) if len(s) == len(v) else v''')],
+     ["test_r10_g_a_phrase_covered_xian_and_yong_stay_converted_on_a_hit"], False),
 ]
 
 
@@ -180,7 +195,7 @@ def rebuilt_table(edits):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--simp-rows", help="use this file as tw-conv-simp.tsv for the run (the real one is put back)")
-    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M27, M4a, M4b)")
+    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M32, M4a, M4b)")
     a = ap.parse_args(argv)
     saved = {p: open(p, "rb").read() for p in (SIMP, TABLE)}
     results = []
