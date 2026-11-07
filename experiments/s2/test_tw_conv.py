@@ -7,7 +7,7 @@ OpenCC files in ~/.cache/shanjie/sources/opencc (hash-checked by build_counts) a
   test_a4_*  tw-conv-simp.tsv (Simplified sentence -> its Taiwan writing) and the coverage of the table's changed rows by it
   test_table_*, test_builder_*  the table follows the fixed rules of 2.3 (checked from its own counts column)
   test_t_*   the tw-clean table of contract 11 (the tests write their own small tables to a temp dir, never the real one)
-mutate_tw_conv.py runs the mutations M1-M27 against this file."""
+mutate_tw_conv.py runs the mutations M1-M32 against this file."""
 import argparse
 import collections
 import contextlib
@@ -606,6 +606,17 @@ class BuildTwClean(unittest.TestCase):
             r = subprocess.run([sys.executable, btcl.__file__, "--gaps", "x", "--final", "x", "--gap-tw-conv-sha", "0" * 64, "--gap-lexicon-sha", "0" * 64, "--out", os.path.join(d, "o"), "--batches", d],
                                capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
+
+    def test_t_builder_refuses_empty_batches(self):
+        """An empty or missing --batches folder would drop the unchanged sentences from the conflict check: refused, nothing written."""
+        with tempfile.TemporaryDirectory() as d:
+            for bdir in ("", os.path.join(d, "none"), d):   # d itself holds no .tsv file
+                argv = ["--gaps", "x", "--final", "x", "--gap-tw-conv-sha", sha_of(btcl.TW_CONV), "--gap-lexicon-sha", sha_of(btcl.LEXICON),
+                        "--out", os.path.join(d, "o.tsv"), "--batches", bdir]
+                with self.assertRaises(SystemExit) as cm:
+                    btcl.main(argv)
+                self.assertIn("--batches", str(cm.exception.code))
+                self.assertFalse(os.path.exists(os.path.join(d, "o.tsv")))
 
     def test_t_builder_table_and_counts(self):
         """甲 has two different corrections (a conflict: dropped); 乙 is in review_issues (empty wins over its accepted value); 丙 is proofread from the

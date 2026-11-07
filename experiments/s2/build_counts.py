@@ -285,9 +285,11 @@ R10_FOLLOW = {"涌": "入现現出至起动動"}   # contract 12.1: an uncovered
 
 def _only(char, kind):
     """`char` cut down to the characters a path may convert: S and N on the Traditional path, N on the marker-only path (cached per table)."""
-    keys = {"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys(), "trad_s10": (TRAD_SIMP_ONLY | RARE.keys() | R2.keys()) - R10_AS_IS,
-            "marker": RARE.keys()}[kind]
-    return _cut(char, kind, lambda: {c: char[c] for c in keys if c in char})
+    def keep():   # built only on a cache miss: building the key sets on every call doubled the mixed-sentence time (PR #366 review)
+        s = TRAD_SIMP_ONLY | RARE.keys() | R2.keys()
+        keys = {"trad_s": s, "trad_s10": s - R10_AS_IS, "marker": RARE.keys()}[kind]
+        return {c: char[c] for c in keys if c in char}
+    return _cut(char, kind, keep)
 
 
 def convert(text, phrase, char, maxp, rev9=False):

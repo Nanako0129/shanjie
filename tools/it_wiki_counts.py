@@ -73,6 +73,8 @@ def count_batch(raws):
 
 def count_dump(dump, cands, procs=1, mw_mode="mediawiki", batch=100):
     total = collections.Counter()
+    if mw_mode != "mediawiki":   # the convert() path reads the tw-clean table: read it here, so a missing table stops this process, not a pool worker
+        bc.load_tw_clean()
     batches = bc.batches(bc.articles(10**9, dump=dump), batch)
     if procs <= 1:
         init_worker(cands, mw_mode)
