@@ -22,5 +22,7 @@ get sj-sr-8-15m -p tinylm.sjtl
 get sj-cx-2-7.7m -p trigram.sjt3
 get sj-cx-2-950k -p trigram-chat.sjt3
 get sj-cl-2-69k -p colloquial.sjlm -p colloquial-attribution.tsv
-shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 \
+# macOS and Linux have shasum; Git Bash on the Windows runner may have only sha256sum (docs/contracts/win-core.md section 2.3). Same check file format.
+if command -v shasum >/dev/null 2>&1; then check=(shasum -a 256 -c); else check=(sha256sum -c); fi
+"${check[@]}" data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 \
   data/trigram.sjt3.sha256 data/trigram-chat.sjt3.sha256 data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256

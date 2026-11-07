@@ -2208,8 +2208,12 @@ mod tests {
             assert_eq!(Lm::load_opts(&m, false, true, &[Profile::Formal]).err(), Some(LmError::TriTable), "{name}");
         }
         std::fs::remove_file(&t).unwrap();
+        // The symlink steps are Unix only (win-core.md 2.2 item 5); the directory step below runs everywhere.
+        #[cfg(unix)]
         std::os::unix::fs::symlink(dir.join("nowhere"), &t).unwrap();
+        #[cfg(unix)]
         assert_eq!(Lm::load_opts(&m, false, true, &[Profile::Formal]).err(), Some(LmError::TriTable), "dangling symlink");
+        #[cfg(unix)]
         std::fs::remove_file(&t).unwrap();
         std::fs::create_dir(&t).unwrap();
         assert_eq!(Lm::load_opts(&m, false, true, &[Profile::Formal]).err(), Some(LmError::TriTable), "directory");

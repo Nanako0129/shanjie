@@ -173,7 +173,10 @@ fn a_table_that_does_not_parse_is_an_error() {
     let tmp = std::env::temp_dir().join(format!("shanjie-english-next-data-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     for name in std::fs::read_dir(root().join("data/lexicon")).unwrap().map(|e| e.unwrap().file_name()) {
+        #[cfg(unix)]
         std::os::unix::fs::symlink(root().join("data/lexicon").join(&name), tmp.join(&name)).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(root().join("data/lexicon").join(&name), tmp.join(&name)).unwrap();
     }
     assert!(Engine::new(&tmp, Layout::Standard).is_ok());
     std::fs::copy(&f, tmp.join("english-next.tsv")).unwrap();
@@ -368,6 +371,7 @@ fn learned_from_the_row(left: &str, tag: &str) -> String {
 /// Section 4 (P3-6): a row pick behind the English left text learns line for line what the same pick behind "" learns; the
 /// English word is nowhere in the file.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn the_english_left_text_never_reaches_the_learning_file() {
     let (with, without) = (learned_from_the_row("我說Joe", "with"), learned_from_the_row("", "without"));
     assert!(with.lines().count() > 1, "the pick was learned: {} lines", with.lines().count());
@@ -378,6 +382,7 @@ fn the_english_left_text_never_reaches_the_learning_file() {
 /// Section 4: a left text ending in Han ("……好") decodes, shows, predicts and learns byte for byte as its Han tail alone ("好"):
 /// a re-pick in the candidate window, then Enter, with learning on.
 #[test]
+#[cfg(unix)] // learning_open fails on Windows for now (win-core.md 2.2 item 4)
 fn a_long_left_text_decodes_and_learns_as_its_han_tail() {
     let session = |left: &str, tag: &str| {
         let dir = std::env::temp_dir().join(format!("shanjie-english-next-tail-{}-{tag}", std::process::id()));

@@ -1,5 +1,8 @@
 //! docs/contracts/s4-learning.md §6.13 (R5): the learning file's storage, in temporary directories
 //! only. Nothing here touches ~/Library/Application Support.
+//! Unix only: the store tests are about symlinks, FIFOs and file modes, and the store itself is Unix only for now (win-core.md 2.2 item 4:
+//! off Unix `open` is `Err(StoreError::Io)`).
+#![cfg(unix)]
 
 use core::learn::{Learner, Record};
 use core::learn_store::{LearnStore, Opened, StoreError, CORRUPT, FILE, HEADER, MAX_BYTES, TMP};

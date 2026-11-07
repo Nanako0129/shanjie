@@ -252,7 +252,10 @@ fn load_lm_needs_std_exempt() {
     for f in std::fs::read_dir(root().join("data/lexicon")).unwrap() {
         let f = f.unwrap().path();
         if f.file_name().unwrap() != READING_EXEMPT_FILE {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(&f, d.0.join(f.file_name().unwrap())).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(&f, d.0.join(f.file_name().unwrap())).unwrap();
         }
     }
     let new = || Engine::new(&d.0, Layout::Standard).unwrap();

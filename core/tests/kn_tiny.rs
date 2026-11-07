@@ -192,10 +192,14 @@ fn load_reads_the_side_file_beside_the_model() {
     assert!(Lm::load_with(&m, true, false).unwrap().kn_tag(Profile::Chat).is_none(), "--no-kn");
     assert_eq!(on.prob("占", "他", 0.1), lm_with(Some(&bytes("kn.sjkn")), true).unwrap().prob("占", "他", 0.1));
     std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
-    std::os::unix::fs::symlink(tmp.join("missing.sjkn"), tmp.join("kn.sjkn")).unwrap();
-    assert_eq!(Lm::load(&m).err(), Some(LmError::KnSide), "a dangling kn.sjkn symlink is not 'absent'");
-    assert!(Lm::load_with(&m, true, false).is_ok());
-    std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
+    // The dangling-symlink steps are Unix only (win-core.md 2.2 item 5).
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(tmp.join("missing.sjkn"), tmp.join("kn.sjkn")).unwrap();
+        assert_eq!(Lm::load(&m).err(), Some(LmError::KnSide), "a dangling kn.sjkn symlink is not 'absent'");
+        assert!(Lm::load_with(&m, true, false).is_ok());
+        std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
+    }
     std::fs::write(tmp.join("kn.sjkn"), patched(48, &2.0f64.to_le_bytes())).unwrap();
     assert_eq!(Lm::load(&m).err(), Some(LmError::KnSide), "a bad side file is never ignored");
     assert!(Lm::load_with(&m, true, false).is_ok(), "--no-kn does not read it");

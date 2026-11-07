@@ -242,6 +242,7 @@ pub struct Record {
 }
 
 /// Local calendar day as days since 1970-01-01 (the `Record::day` unit).
+#[cfg(unix)]
 pub fn local_day() -> i64 {
     #[repr(C)]
     struct Tm {
@@ -269,6 +270,29 @@ pub fn local_day() -> i64 {
         (t, off)
     };
     (t + off).div_euclid(86_400)
+}
+
+/// Windows: the user's local calendar date (daylight saving included) from `GetLocalTime`, converted to days since 1970-01-01.
+#[cfg(windows)]
+pub fn local_day() -> i64 {
+    // SAFETY: `GetLocalTime` fills the whole struct and cannot fail.
+    let st = unsafe {
+        let mut st: windows_sys::Win32::Foundation::SYSTEMTIME = std::mem::zeroed();
+        windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut st);
+        st
+    };
+    days_from_civil(st.wYear as i64, st.wMonth as i64, st.wDay as i64)
+}
+
+/// Days from 1970-01-01 to the proleptic Gregorian date (Howard Hinnant's `days_from_civil`).
+#[cfg(any(windows, test))]
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
 }
 
 /// Weight of `r` on `today`: halves every `HALF_LIFE_DAYS`; a clock that went back never grows it.
@@ -728,5 +752,17 @@ mod tests {
         assert_eq!(l.records().len(), NEWWORD_CAP + 1, "the S4 record stays");
         assert!(l.has_new_words());
         assert_eq!(l.new_words(&rd("ㄆㄞˋ ㄍㄨㄥ"), 20_000), vec![("派工", 1.0)], "index rebuilt");
+    }
+
+    /// The Windows `local_day` conversion, checked on every platform: epoch, leap day, a century non-leap year, the 2000 leap year.
+    #[test]
+    fn days_from_civil_known_dates() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(1969, 12, 31), -1);
+        assert_eq!(days_from_civil(2000, 2, 29), 11_016);
+        assert_eq!(days_from_civil(2000, 3, 1), 11_017);
+        assert_eq!(days_from_civil(2100, 3, 1) - days_from_civil(2100, 2, 28), 1);
+        assert_eq!(days_from_civil(2026, 11, 6), 20_763);
+        assert_eq!(days_from_civil(9999, 12, 31), 2_932_896);
     }
 }

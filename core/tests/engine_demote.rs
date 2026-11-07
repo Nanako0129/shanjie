@@ -189,7 +189,10 @@ fn data_dir_with(tag: &str, demote: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv"] {
+        #[cfg(unix)]
         std::os::unix::fs::symlink(root().join("data/lexicon").join(f), d.join(f)).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(root().join("data/lexicon").join(f), d.join(f)).unwrap();
     }
     std::fs::write(d.join("demote.tsv"), demote).unwrap();
     d

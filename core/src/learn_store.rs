@@ -21,12 +21,19 @@
 //! Loads open with O_NOFOLLOW|O_NONBLOCK, require a regular file by fstat and cap it at 16 MB. A
 //! bad header or an oversized file is renamed to `learning.tsv.corrupt` (0600, one copy). Nothing
 //! here logs: no path and no record ever leaves this module except as data.
+//!
+//! Windows (docs/contracts/win-core.md section 2.2 item 4): the type and its methods compile everywhere, but off Unix `open` fails with
+//! `Err(StoreError::Io)` before it touches the file system, so no store exists and the other methods cannot be reached. A Windows
+//! store needs its own ACL and reparse-point design and a security review (a later slice).
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 use crate::learn::{context_key, is_han, is_single, single_key_ok, FINE_SEP, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -41,7 +48,7 @@ pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// several.
 pub const JOURNAL_MAX: usize = 1024;
 
-// <fcntl.h> values. std has no names for them and the crate has no libc dependency; the shipping
+// <fcntl.h> values (Unix only). std has no names for them and the crate has no libc dependency; the shipping
 // target is macOS only (CI builds and tests core on macOS). The symlink and FIFO tests in
 // core/tests/learn_store.rs fail if a value is wrong.
 #[cfg(target_os = "macos")]
@@ -65,6 +72,7 @@ const ELOOP: i32 = 40;
 #[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
 compile_error!("learn_store.rs has <fcntl.h> values only for macOS and x86_64 Linux (O_NOFOLLOW differs by architecture)");
 
+#[cfg(unix)]
 extern "C" {
     fn geteuid() -> u32;
     fn fcntl(fd: i32, cmd: i32, ...) -> i32;
@@ -190,6 +198,7 @@ fn parse(line: &str) -> Option<Record> {
     valid(&r).then_some(r)
 }
 
+#[cfg(unix)]
 impl LearnStore {
     /// Creates `dir` (0700) if needed, checks its owner, loads `FILE`.
     pub fn open(dir: &Path) -> Result<(LearnStore, Vec<Record>, Opened), StoreError> {
@@ -334,8 +343,35 @@ impl LearnStore {
     pub fn clear(&self) -> Result<(), StoreError> {
         [FILE, TMP, CORRUPT].iter().fold(Ok(()), |acc, name| acc.and(remove(&self.dir.join(name))))
     }
+}
 
+impl LearnStore {
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+}
+
+/// Not Unix (Windows): no learning file in this slice. `open` fails before it touches the file system, so there is no store to call
+/// the rest on; they fail the same way rather than pretend to work.
+#[cfg(not(unix))]
+impl LearnStore {
+    pub fn open(_dir: &Path) -> Result<(LearnStore, Vec<Record>, Opened), StoreError> {
+        Err(StoreError::Io)
+    }
+
+    pub fn save(&self, _records: &[Record]) -> Result<(), StoreError> {
+        Err(StoreError::Io)
+    }
+
+    pub fn save_forgetting(&self, _records: &[Record]) -> Result<(), StoreError> {
+        Err(StoreError::Io)
+    }
+
+    pub fn append(&self, _records: &[Record]) -> Result<(), StoreError> {
+        Err(StoreError::Io)
+    }
+
+    pub fn clear(&self) -> Result<(), StoreError> {
+        Err(StoreError::Io)
     }
 }
