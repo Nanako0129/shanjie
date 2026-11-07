@@ -301,6 +301,9 @@ def main():
     if not any(src.values()):
         sys.exit("error: give at least one source")
     src["wiki_limit"] = a.wiki_limit
+    if a.wiki:   # tw-conv 11.2: read the tw-clean table here, in the parent, so a missing table stops at once instead of inside every pool worker
+        import build_counts as bc
+        bc.load_conv()
     text, report = build(a.lexicon, src, a.jobs)
     print(report)
     if text is None:

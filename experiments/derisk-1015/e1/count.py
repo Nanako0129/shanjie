@@ -229,7 +229,9 @@ def cmd_wiki(a):
     else:
         arts = min(arts, a.articles)
         tag = str(arts)
-    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard, "tw_clean": bc.tw_clean_state()})
+    state = bc.tw_clean_state()
+    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard, "tw_clean": state})
+    print(f"tw-clean: {state}")
     write_outputs(a.out, tag, uni, bi, tri, dbi, nx, runs, arts, meta)
 
 

@@ -55,7 +55,7 @@ def main(argv=None):
     ap.add_argument("--gap-tw-conv-sha", required=True)
     ap.add_argument("--gap-lexicon-sha", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--batches", help="folder of the proofreading batch files (id<TAB>sentence): their ids are the sentences that were proofread")
+    ap.add_argument("--batches", required=True, help="folder of the proofreading batch files (id<TAB>sentence): their ids are the sentences that were proofread")
     a = ap.parse_args(argv)
     if (sha256(TW_CONV), sha256(LEXICON)) != (a.gap_tw_conv_sha.lower(), a.gap_lexicon_sha.lower()):
         sys.exit("轉換表或詞庫改過：要重跑缺口量測與校對")

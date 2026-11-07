@@ -8,6 +8,7 @@ OpenCC files in ~/.cache/shanjie/sources/opencc (hash-checked by build_counts) a
   test_table_*, test_builder_*  the table follows the fixed rules of 2.3 (checked from its own counts column)
   test_t_*   the tw-clean table of contract 11 (the tests write their own small tables to a temp dir, never the real one)
 mutate_tw_conv.py runs the mutations M1-M27 against this file."""
+import argparse
 import collections
 import contextlib
 import hashlib
@@ -489,6 +490,34 @@ class TwClean(unittest.TestCase):
                 wiki_text.main([out, "--articles", "1", "--procs", "1"])
             self.assertEqual(open(out + ".tw-clean", encoding="utf-8").read(), state + "\n")
 
+    def test_t_english_next_writes_its_state_and_stops_early(self):
+        """tools/build_english_next.py --wiki: the side file is written (review F1: `bc` was unbound in main), and a missing table stops in the
+        parent before any pool starts (review F2: it hung in the workers)."""
+        sys.path.insert(0, os.path.join(ROOT, "tools")); self.addCleanup(sys.path.remove, os.path.join(ROOT, "tools"))
+        ben = importlib.import_module("build_english_next")
+        out = os.path.join(self.tmp.name, "en.tsv")
+        argv = ["build_english_next.py", "--lexicon", "x", "--out", out, "--wiki", "dump", "--jobs", "2"]
+        os.environ["SHANJIE_TW_CLEAN"] = "off"
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(ben, "build", return_value=("t\n", {})), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            ben.main()
+        self.assertEqual(open(out + ".tw-clean", encoding="utf-8").read(), "off\n")
+        os.environ["SHANJIE_TW_CLEAN"] = os.path.join(self.tmp.name, "nope.tsv")
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(ben, "build", side_effect=AssertionError("build ran")), \
+                self.assertRaises(SystemExit) as cm:
+            ben.main()
+        self.assertIn("SHANJIE_TW_CLEAN=off", str(cm.exception.code))
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(bc.SRC, "opencc")), "needs the OpenCC tables in ~/.cache/shanjie/sources")
+    def test_t_s7a_prep_runs_stops_before_the_pool(self):
+        """experiments/s7a-tinylm/prep.py runs: a missing table stops in the parent, before mp.Pool (review F2)."""
+        p = os.path.join(ROOT, "experiments", "s7a-tinylm"); sys.path.insert(0, p); self.addCleanup(sys.path.remove, p)
+        prep = importlib.import_module("prep")
+        os.environ["SHANJIE_TW_CLEAN"] = os.path.join(self.tmp.name, "nope.tsv")
+        with mock.patch.object(prep.mp, "Pool", side_effect=AssertionError("pool started")), self.assertRaises(SystemExit) as cm:
+            prep.cmd_runs(argparse.Namespace())
+        self.assertIn("SHANJIE_TW_CLEAN=off", str(cm.exception.code))
+
 
 class BuildTwClean(unittest.TestCase):
     """experiments/s2/build_tw_clean.py on a small hand-made gap file (the real gap data is not read)."""
@@ -500,8 +529,11 @@ class BuildTwClean(unittest.TestCase):
         for name, obj in (("gaps.json", self.GAPS), ("final.json", self.FINAL)):
             files.append(os.path.join(d, name))
             json.dump(obj, open(files[-1], "w", encoding="utf-8"), ensure_ascii=False)
+        bdir = os.path.join(d, "batches"); os.makedirs(bdir, exist_ok=True)   # the proofread ids: the accepted and the review_issues ones
+        with open(os.path.join(bdir, "b0001.tsv"), "w", encoding="utf-8") as f:
+            f.writelines(f"{i}\tx\n" for i in sorted(set(self.FINAL["accepted"]) | set(self.FINAL["review_issues"])))
         argv = ["--gaps", files[0], "--final", files[1], "--gap-tw-conv-sha", tw or sha_of(btcl.TW_CONV), "--gap-lexicon-sha", lex or sha_of(btcl.LEXICON),
-                "--out", os.path.join(d, out)]
+                "--out", os.path.join(d, out), "--batches", bdir]
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             btcl.main(argv)
@@ -514,7 +546,7 @@ class BuildTwClean(unittest.TestCase):
                     self.run_builder(d, **kw)
                 self.assertIn("轉換表或詞庫改過", str(cm.exception.code))
                 self.assertFalse(os.path.exists(os.path.join(d, "t.tsv")))
-            r = subprocess.run([sys.executable, btcl.__file__, "--gaps", "x", "--final", "x", "--gap-tw-conv-sha", "0" * 64, "--gap-lexicon-sha", "0" * 64, "--out", os.path.join(d, "o")],
+            r = subprocess.run([sys.executable, btcl.__file__, "--gaps", "x", "--final", "x", "--gap-tw-conv-sha", "0" * 64, "--gap-lexicon-sha", "0" * 64, "--out", os.path.join(d, "o"), "--batches", d],
                                capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
 

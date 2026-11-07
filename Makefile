@@ -78,7 +78,7 @@ test-python:
 	python3 -W ignore experiments/p4c-colloquial/test_p4c.py
 	python3 -W ignore experiments/p4d-colloquial/test_p4d.py
 	python3 -W ignore experiments/p5-reading-channel/test_p5.py
-	# Last on purpose: until tw-conv-simp.tsv and tw-conv-ambiguous.tsv are filled (docs/contracts/tw-conv.md section 3) this test fails on the coverage and the pair list, and a failing line stops the recipe.
+	# The tw-conv guard (docs/contracts/tw-conv.md sections 3 and 11), last so the other suites report first.
 	python3 -W ignore -m unittest experiments/s2/test_tw_conv.py
 
 test-swift: rust

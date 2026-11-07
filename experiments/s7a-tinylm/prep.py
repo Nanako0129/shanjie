@@ -119,6 +119,7 @@ def _work(args):
 
 
 def cmd_runs(a):
+    bc.load_conv()   # tw-conv 11.2: in the parent first, so a missing tw-clean table stops here, not in every Pool worker's initializer (which respawns forever)
     paths = {"wiki": bc.DUMP, "colloquial-train.txt": a.coll, "synth.txt": a.synth,
              "TWVariants.txt": os.path.join(bc.SRC, "opencc", "TWVariants.txt"), "STCharacters.txt": os.path.join(bc.SRC, "opencc", "STCharacters.txt")}
     hashes = check_inputs(paths)
