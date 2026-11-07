@@ -213,7 +213,7 @@ def li_decide(before, nxt):
     return ("裡" if math.log((a + 1) / (b + 1)) + math.log((c + 1) / (d + 1)) >= math.log(10) else "里"), "ptt"
 
 
-def _longest(text, table, maxp, char=None, li=False):
+def _longest(text, table, maxp, char=None, li=False, follow=None):
     first = _FIRST.get((id(table), len(table)))
     if first is None:
         first = {}
@@ -230,6 +230,8 @@ def _longest(text, table, maxp, char=None, li=False):
         else:
             if li and text[i] == "里":
                 out.append(li_decide("".join(out[-6:]), char.get(text[i + 1], text[i + 1]) if i + 1 < n else "")[0])
+            elif follow and text[i] in follow and text[i + 1:i + 2] not in tuple(follow[text[i]]):   # contract 12.1: converted only before one of these
+                out.append(text[i])
             else:
                 out.append(char.get(text[i], text[i]) if char else text[i])
             i += 1
@@ -277,23 +279,30 @@ def _r2_phrases(phrase):
     return _cut(phrase, "r2", keep)
 
 
+R10_AS_IS = {"咸"}            # contract 12.1: an uncovered 咸 of a Traditional sentence with an S character stays (names: 韋斯咸, 碧咸)
+R10_FOLLOW = {"涌": "入现現出至起动動"}   # contract 12.1: an uncovered 涌 there becomes 湧 only before one of these input characters (東涌, 鰂魚涌 stay)
+
+
 def _only(char, kind):
     """`char` cut down to the characters a path may convert: S and N on the Traditional path, N on the marker-only path (cached per table)."""
-    keys = {"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys(), "marker": RARE.keys()}[kind]
+    keys = {"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys(), "trad_s10": (TRAD_SIMP_ONLY | RARE.keys() | R2.keys()) - R10_AS_IS,
+            "marker": RARE.keys()}[kind]
     return _cut(char, kind, lambda: {c: char[c] for c in keys if c in char})
 
 
-def convert(text, phrase, char, maxp):
+def convert(text, phrase, char, maxp, rev9=False):
     """The `mixed` conversion (contract 2.4); a `native` input is never given to it. simp: STPhrases longest first (chosen values), the remaining
     characters from `char`, the mainland-term subset of TWPhrases longest first, fold. marker (only marker characters): the phrases, then only the
     characters of N, the terms, fold. trad with an S character (contract 10.1): the keep words and the phrases whose key has an S or R2
     character (longest first), then the characters of S, N and R2 not covered by one, fold. trad without one: the characters of N, fold. No
-    other phrase and no terms on a Traditional sentence; an uncovered 里 of a simp sentence follows li_decide (contract 10.2)."""
+    other phrase and no terms on a Traditional sentence; an uncovered 里 of a simp sentence follows li_decide (contract 10.2). In that Traditional
+    branch contract 12 leaves an uncovered 咸 as it is and converts an uncovered 涌 only before R10_FOLLOW's characters; rev9=True gives the output
+    before contract 12 (咸 and 涌 always converted), the key of the tw-clean table (contract 12.2): it differs from the default only there."""
     kind = sentence_kind(text)
     if kind == "trad":
         if any(c in TRAD_SIMP_ONLY for c in text):     # contract 10.1: also the R2 characters, the keep words as they are
             r_phrase, r_maxp = _r2_phrases(phrase)
-            return _longest(text, r_phrase, r_maxp, _only(char, "trad_s")).translate(FOLD_TRANS)
+            return _longest(text, r_phrase, r_maxp, _only(char, "trad_s" if rev9 else "trad_s10"), follow=None if rev9 else R10_FOLLOW).translate(FOLD_TRANS)
         text = "".join(RARE.get(c, c) for c in text)   # no S character, so no S-phrase can match: only the characters of N (contract 7)
         return text.translate(FOLD_TRANS)
     text = _longest(text, phrase, maxp, char if kind == "simp" else _only(char, "marker"), li=kind == "simp")
@@ -364,16 +373,19 @@ def article_sentences(raw, conv, mw=None, mwconv=None, hits=None):
         if mw:
             yield s
             continue
-        s = convert(s, *conv)
+        s10 = convert(s, *conv)
+        key = convert(s, *conv, rev9=True) if "咸" in s or "涌" in s else s10   # contract 12.2: the table's keys are the output before contract 12
         if _TW_CLEAN["state"] is None:
             load_tw_clean()
-        if s in TW_CLEAN:
+        if key in TW_CLEAN:
             if hits is not None:
-                hits[s] += 1
-            s = TW_CLEAN[s]
-            if not s:
+                hits[key] += 1
+            v = TW_CLEAN[key]
+            if not v:
                 continue
-        yield s
+            # only where contract 12 changed the sentence (咸, 涌): keep the table's value there if it still has the old character
+            s10 = "".join(b if a != b and w == a else w for a, b, w in zip(key, s10, v)) if len(v) == len(key) == len(s10) else v
+        yield s10
 
 
 def articles(limit, dump=None, meta=False):

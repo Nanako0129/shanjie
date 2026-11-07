@@ -102,3 +102,9 @@
 在那个洞里有光	在那個洞裡有光
 # contract 10.6: the dictionary's standard form of a char row
 厨房的灶	廚房的灶
+# contract 12.1: 咸 and 涌 on a Traditional sentence with an S character (the test asserts kind trad): (a) a name, (b) 涌 before 入, (c) 涌 before 站, (d) 涌 at the end, (e) a phrase
+他說韋斯咸在这裡	他說韋斯咸在這裡
+人群涌入了廣場，他们說	人群湧入了廣場，他們說
+他住在東涌站附近，他们說	他住在東涌站附近，他們說
+他们在這個國家的河邊看見水涌	他們在這個國家的河邊看見水涌
+咸丰年間他们說	咸豐年間他們說
