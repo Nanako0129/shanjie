@@ -312,6 +312,9 @@ def main(argv=None):
         sys.exit(f"STOP: still over {MAX_BYTES} bytes at k = {K_STEPS[-1]}")
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+    state = bc.tw_clean_state()   # docs/contracts/tw-conv.md 11.2: which tw-clean table made this file
+    open(a.out + ".tw-clean", "w", encoding="utf-8").write(state + "\n")
+    print(f"tw-clean: {state}")
     print(f"k={k} bytes={len(text.encode('utf-8'))} T={c.t} N(D)={c.nd} sha256={sha256_file(a.out)}")
 
 

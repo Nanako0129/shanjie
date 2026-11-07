@@ -6,13 +6,20 @@ OpenCC files in ~/.cache/shanjie/sources/opencc (hash-checked by build_counts) a
   test_a3_*  `--native` is counted as written (build_counts_text.py and derisk-1015/e1/count.py)
   test_a4_*  tw-conv-simp.tsv (Simplified sentence -> its Taiwan writing) and the coverage of the table's changed rows by it
   test_table_*, test_builder_*  the table follows the fixed rules of 2.3 (checked from its own counts column)
-mutate_tw_conv.py runs the mutations M1-M18 against this file."""
+  test_t_*   the tw-clean table of contract 11 (the tests write their own small tables to a temp dir, never the real one)
+mutate_tw_conv.py runs the mutations M1-M27 against this file."""
+import collections
 import contextlib
+import hashlib
+import importlib
 import importlib.util
+import json
+import multiprocessing
 import io
 import os
 import random
 import pickle
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import build_counts as bc  # noqa: E402
 import build_counts_text as bct  # noqa: E402
+import build_tw_clean as btcl  # noqa: E402
 import build_tw_conv as btc  # noqa: E402
 import tw_conv_guard as guard  # noqa: E402
 
@@ -290,6 +298,261 @@ class Table(unittest.TestCase):
         self.assertEqual(btc.fold_of(t), {"爲": "為"})                                # a manual value equal to the key un-folds it
         t["fold"]["泄"] = ("洩", "nofold", "洩@2026-11-07", "")
         self.assertEqual(btc.fold_of(t), {"爲": "為", "泄": "洩"})
+
+
+# ---------------------------------------------------------------- contract 11: the tw-clean table
+LEXICON = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
+IDENT = ({}, {}, 1)   # convert() with empty tables: these sentences have no marker or Simplified characters, so it leaves them as they are
+ARTICLE = "甲乙丙。丁戊己。庚辛壬。#井字。"   # four sentences: replaced, dropped, not in the table, a key that starts with #
+CLEAN_ROWS = {"甲乙丙": "甲乙丁", "丁戊己": "", "#井字": "井號"}
+
+
+def sha_of(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def spawn_job(raw):
+    """Runs in a spawn child that never calls load_conv(): contract 11.2 says article_sentences reads the table itself."""
+    return list(bc.article_sentences(raw, IDENT))
+
+
+def fake_dump(d, pages):
+    path = os.path.join(d, "fake.xml.bz2")
+    import bz2
+    with bz2.open(path, "wt", encoding="utf-8") as f:
+        f.write("".join(f"<page>\n<ns>0</ns>\n<text xml:space=\"preserve\">{t}</text>\n</page>\n" for t in pages))
+    return path
+
+
+class TwClean(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        env = mock.patch.dict(os.environ)
+        env.start(); self.addCleanup(env.stop)
+        self.addCleanup(lambda: (bc.TW_CLEAN.clear(), bc._TW_CLEAN.update(state=None, off_said=False)))   # the next reader reads the table again
+        bc._TW_CLEAN.update(state=None, off_said=False)
+
+    def table(self, rows=CLEAN_ROWS, tw=None, lex=None, name="tw-clean.tsv", text=None):
+        """Writes a table with a header of this checkout's two hashes (or the given ones); points SHANJIE_TW_CLEAN at it; -> its path."""
+        path = os.path.join(self.tmp.name, name)
+        head = f"# tw-conv.tsv {tw or sha_of(bc.TW_CONV)}\n# mcbpmf-data.txt {lex or sha_of(LEXICON)}\n# entries {len(rows)}\n"
+        open(path, "w", encoding="utf-8", newline="\n").write(text if text is not None else head + "".join(f"{k}\t{v}\n" for k, v in rows.items()))
+        os.environ["SHANJIE_TW_CLEAN"] = path
+        return path
+
+    def sentences(self, raw=ARTICLE, **kw):
+        bc.load_tw_clean()
+        return list(bc.article_sentences(raw, IDENT, **kw))
+
+    def test_t_first_sentence_replaced(self):
+        self.table()
+        self.assertEqual(self.sentences()[0], "甲乙丁")
+
+    def test_t_empty_second_column_not_yielded(self):
+        self.table()
+        self.assertNotIn("丁戊己", self.sentences())
+        self.assertNotIn("", self.sentences())
+
+    def test_t_a_sentence_not_in_the_table_is_unchanged(self):
+        self.table()
+        self.assertEqual(self.sentences(), ["甲乙丁", "庚辛壬", "井號"])
+
+    def test_t_hash_key_is_looked_up(self):
+        """Only the first three lines are the header: a data line that starts with `#` (even `# entries`) is a key."""
+        self.table(rows={"#井字": "井號", "# entries 9": "x"})
+        self.assertEqual(self.sentences()[-1], "井號")
+        self.assertEqual(bc.TW_CLEAN["# entries 9"], "x")
+
+    def test_t_table_format_keeps_spaces_and_carriage_returns(self):
+        self.table(rows={" 甲 ": "乙 \r丙"})
+        bc.load_tw_clean()
+        self.assertEqual(bc.TW_CLEAN, {" 甲 ": "乙 \r丙"})
+
+    def test_t_hits_are_counted_per_sentence_found(self):
+        self.table()
+        hits = collections.Counter()
+        self.sentences(ARTICLE + "甲乙丙。", hits=hits)
+        self.assertEqual(dict(hits), {"甲乙丙": 2, "丁戊己": 1, "#井字": 1})
+
+    def test_t_header_hash_mismatch(self):
+        for kw in ({"tw": "0" * 64}, {"lex": "0" * 64}):
+            self.table(**kw)
+            with self.assertRaises(SystemExit):
+                bc.load_tw_clean()
+
+    def test_t_bad_header_and_missing_tab_stop(self):
+        for text in ("甲\t乙\n", "# tw-conv.tsv x\n# entries 0\n# mcbpmf-data.txt y\n"):
+            self.table(text=text)
+            with self.assertRaises(SystemExit):
+                bc.load_tw_clean()
+        self.table(text=open(self.table(), encoding="utf-8").read() + "沒有tab\n")
+        with self.assertRaises(SystemExit):
+            bc.load_tw_clean()
+
+    def test_t_missing_table_stops(self):
+        os.environ["SHANJIE_TW_CLEAN"] = os.path.join(self.tmp.name, "nope.tsv")
+        with self.assertRaises(SystemExit) as cm:
+            bc.load_tw_clean()
+        self.assertIn("SHANJIE_TW_CLEAN=off", str(cm.exception.code))
+        self.assertIn(os.path.join(self.tmp.name, "nope.tsv"), str(cm.exception.code))
+
+    def test_t_unset_uses_the_pinned_default_and_a_placeholder_never_loads(self):
+        path = self.table()
+        del os.environ["SHANJIE_TW_CLEAN"]
+        with mock.patch.object(bc, "TW_CLEAN_DEFAULT", path):
+            with mock.patch.object(bc, "TW_CLEAN_SHA", "PLACEHOLDER"), self.assertRaises(SystemExit) as cm:
+                bc.load_tw_clean()
+            self.assertIn("SHANJIE_TW_CLEAN=off", str(cm.exception.code))
+            with mock.patch.object(bc, "TW_CLEAN_SHA", sha_of(path)):
+                bc.load_tw_clean()
+                self.assertEqual(bc.TW_CLEAN, CLEAN_ROWS)
+                self.assertEqual(bc.tw_clean_state(), "sha256:" + sha_of(path))
+        with mock.patch.object(bc, "TW_CLEAN_DEFAULT", os.path.join(self.tmp.name, "nope.tsv")), self.assertRaises(SystemExit):
+            bc.load_tw_clean()
+
+    def test_t_off_is_the_output_before_contract_11(self):
+        os.environ["SHANJIE_TW_CLEAN"] = "off"
+        want = [bc.convert(x, *IDENT) for x in bc.SENT.findall(bc.article_text(ARTICLE))]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.sentences(), want)
+            self.assertEqual(self.sentences(), want)
+        self.assertEqual(err.getvalue(), "tw-clean: off\n", "said once per process")
+        self.assertEqual(bc.tw_clean_state(), "off")
+
+    def test_t_state_is_the_table_hash(self):
+        path = self.table()
+        bc.load_tw_clean()
+        self.assertEqual(bc.tw_clean_state(), "sha256:" + sha_of(path))
+
+    def test_t_a_spawned_process_reads_the_table_itself(self):
+        self.table()
+        with multiprocessing.get_context("spawn").Pool(1) as pool:
+            got = pool.apply(spawn_job, (ARTICLE,))
+        self.assertEqual(got[0], "甲乙丁")
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(bc.SRC, "opencc")), "needs the OpenCC tables in ~/.cache/shanjie/sources")
+    def test_t_count_through_init_hits_what_a_direct_lookup_hits(self):
+        conv = bc.load_conv()   # the real conversion: the table keys are what it outputs
+        sents = [bc.convert(x, *conv) for x in ("今天天氣很好", "我在學校", "你好嗎")]
+        self.table(rows={sents[0]: "今天天氣不好", sents[1]: ""})
+        bc.load_tw_clean()
+        raws = ["今天天氣很好。我在學校。", "你好嗎。今天天氣很好。"]
+        direct = collections.Counter()
+        for raw in raws:
+            list(bc.article_sentences(raw, conv, hits=direct))
+        with mock.patch.dict(bc._W):
+            bc._init()
+            got = bc._count(raws)[5]
+        self.assertEqual(set(got), {sents[0], sents[1]})
+        self.assertEqual(got, direct)
+
+    def e1(self):
+        """experiments/derisk-1015/e1/count.py and sj-lm-7/wiki_text.py as importable modules (spawn children import them by name too)."""
+        for sub in (("derisk-1015", "e1"), ("sj-lm-7",)):
+            p = os.path.join(ROOT, "experiments", *sub)
+            sys.path.insert(0, p)
+            self.addCleanup(sys.path.remove, p)
+        return importlib.import_module("count"), importlib.import_module("wiki_text")
+
+    def test_t_count_py_wiki_sentences_is_article_sentences(self):
+        count, _ = self.e1()
+        self.table()
+        bc.load_tw_clean()
+        with mock.patch.dict(bc._W, {"conv": IDENT}):
+            got = list(count.wiki_sentences(ARTICLE))
+        self.assertEqual(got, list(bc.article_sentences(ARTICLE, IDENT)))
+        self.assertEqual(got[0], "甲乙丁")
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(bc.SRC, "opencc")), "needs the OpenCC tables in ~/.cache/shanjie/sources")
+    def test_t_state_count_py_meta(self):
+        count, _ = self.e1()
+        dump = fake_dump(self.tmp.name, [ARTICLE])
+        path = self.table()
+        for state in ("off", "sha256:" + sha_of(path)):   # `off` first: a fixed `sha256:` value in the entry fails here (M27)
+            os.environ["SHANJIE_TW_CLEAN"] = "off" if state == "off" else path
+            out = os.path.join(self.tmp.name, state[:3])
+            with mock.patch.object(bc, "DUMP", dump), mock.patch.dict(bc._W), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                count.main(["wiki", "--out", out, "--articles", "1", "--procs", "1"])
+            self.assertEqual(json.load(open(os.path.join(out, "meta-1.json")))["tw_clean"], state)
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(bc.SRC, "opencc")), "needs the OpenCC tables in ~/.cache/shanjie/sources")
+    def test_t_state_wiki_text_side_file(self):
+        _, wiki_text = self.e1()
+        dump = fake_dump(self.tmp.name, [ARTICLE])
+        path = self.table()
+        for state in ("off", "sha256:" + sha_of(path)):   # `off` first: a fixed `sha256:` value in the entry fails here (M27)
+            os.environ["SHANJIE_TW_CLEAN"] = "off" if state == "off" else path
+            out = os.path.join(self.tmp.name, state[:3] + ".txt")
+            with mock.patch.object(bc, "DUMP", dump), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                wiki_text.main([out, "--articles", "1", "--procs", "1"])
+            self.assertEqual(open(out + ".tw-clean", encoding="utf-8").read(), state + "\n")
+
+
+class BuildTwClean(unittest.TestCase):
+    """experiments/s2/build_tw_clean.py on a small hand-made gap file (the real gap data is not read)."""
+    GAPS = {"gap1": [[0, 0, "甲"], [5, 1, "乙"], [3000, 2, "丙"], [7, 3, "丙"]], "gap2": [[1, 0, "丁"], [300000, 1, "戊"], [10, 2, "甲"]]}
+    FINAL = {"accepted": {"g1-0": "甲一", "g1-1": "乙一", "g1-2": "丙一", "g2-0": "丁一", "g2-1": "戊一", "g2-2": "甲二"}, "review_issues": {"g1-1": ["still wrong"]}}
+
+    def run_builder(self, d, tw=None, lex=None, out="t.tsv"):
+        files = []
+        for name, obj in (("gaps.json", self.GAPS), ("final.json", self.FINAL)):
+            files.append(os.path.join(d, name))
+            json.dump(obj, open(files[-1], "w", encoding="utf-8"), ensure_ascii=False)
+        argv = ["--gaps", files[0], "--final", files[1], "--gap-tw-conv-sha", tw or sha_of(btcl.TW_CONV), "--gap-lexicon-sha", lex or sha_of(btcl.LEXICON),
+                "--out", os.path.join(d, out)]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            btcl.main(argv)
+        return os.path.join(d, out), buf.getvalue()
+
+    def test_t_builder_refuses_when_a_hash_differs(self):
+        with tempfile.TemporaryDirectory() as d:
+            for kw in ({"tw": "0" * 64}, {"lex": "0" * 64}):
+                with self.assertRaises(SystemExit) as cm:
+                    self.run_builder(d, **kw)
+                self.assertIn("轉換表或詞庫改過", str(cm.exception.code))
+                self.assertFalse(os.path.exists(os.path.join(d, "t.tsv")))
+            r = subprocess.run([sys.executable, btcl.__file__, "--gaps", "x", "--final", "x", "--gap-tw-conv-sha", "0" * 64, "--gap-lexicon-sha", "0" * 64, "--out", os.path.join(d, "o")],
+                               capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+
+    def test_t_builder_table_and_counts(self):
+        """甲 has two different corrections (a conflict: dropped); 乙 is in review_issues (empty wins over its accepted value); 丙 is proofread from the
+        a = 3000 row but also occurs in the a = 7 row, which has no id; 戊 only occurs at a = 300000."""
+        with tempfile.TemporaryDirectory() as d:
+            path, printed = self.run_builder(d)
+            self.assertEqual(open(path, encoding="utf-8").read().split("\n"),
+                             [f"# tw-conv.tsv {sha_of(btcl.TW_CONV)}", f"# mcbpmf-data.txt {sha_of(btcl.LEXICON)}", "# entries 4", "丁\t丁一", "丙\t丙一", "乙\t", "戊\t戊一", ""])
+            self.assertEqual(printed.split("\n")[:2], ["rows 4, empty rows 1, conflicts 1", "expected hits (a < 2000): 3 expected hits (a < 200000): 3"])
+            with self.assertRaises(FileExistsError):
+                self.run_builder(d)   # never overwrites
+
+    def test_t_builder_sent_but_unchanged_is_a_result(self):
+        """A sentence proofread twice, changed once and left unchanged once (后髮座 in the real run), is a conflict and is dropped; a sentence
+        proofread once and left unchanged gets no row."""
+        gaps = {"gap1": [[0, 0, "后髮座"], [1, 1, "后髮座"], [2, 2, "其后"]], "gap2": [[3, 0, "里"]]}
+        final = {"accepted": {"g1-0": "後髮座", "g1-2": "其後"}, "review_issues": {}}
+        rows, conflicts, expected = btcl.build(gaps, final, sent=["g1-0", "g1-1", "g1-2", "g2-0"])
+        self.assertEqual((rows, conflicts, expected), ({"其后": "其後"}, 1, (1, 1)))
+        self.assertEqual(btcl.build(gaps, final)[0], {"后髮座": "後髮座", "其后": "其後"})   # without sent the unchanged copy is invisible
+
+    def test_t_builder_reads_gap3_ids(self):
+        """gap3 (Traditional sentences with an S character, contract 11): g3-<n> ids index gaps["gap3"] the same way."""
+        gaps = {"gap1": [], "gap2": [], "gap3": [[2500, 0, "其余", "余", ""], [10, 1, "建筑", "筑", ""]]}
+        final = {"accepted": {"g3-0": "其餘", "g3-1": "建築"}, "review_issues": {}}
+        self.assertEqual(btcl.build(gaps, final, sent=["g3-0", "g3-1"]), ({"其余": "其餘", "建筑": "建築"}, 0, (1, 2)))
+
+    def test_t_builder_table_loads_back(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ):
+            path, _ = self.run_builder(d)
+            os.environ["SHANJIE_TW_CLEAN"] = path
+            try:
+                bc.load_tw_clean()
+                self.assertEqual(bc.TW_CLEAN, {"丁": "丁一", "丙": "丙一", "乙": "", "戊": "戊一"})
+            finally:
+                bc.TW_CLEAN.clear(); bc._TW_CLEAN["state"] = None
 
 
 if __name__ == "__main__":

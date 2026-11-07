@@ -150,6 +150,9 @@ def cmd_runs(a):
         report["coll"] = {"runs": n_runs, "chars": n_chars}
     if guard is not None:
         report["holdout_guard_skipped_runs"] = skipped_runs
+    report["tw_clean"] = bc.tw_clean_state()   # contract 11.2; also the side file of runs-wiki.txt
+    open(os.path.join(a.work, "runs-wiki.txt.tw-clean"), "w", encoding="utf-8").write(report["tw_clean"] + "\n")
+    print(f"tw-clean: {report['tw_clean']}")
     report["train_chars_once"] = report["wiki"]["chars"] + report["coll"]["chars"]
     report["train_chars_weighted"] = WIKI_WEIGHT * report["wiki"]["chars"] + COLL_WEIGHT * report["coll"]["chars"]
     json.dump({"report": report, "charcount": dict(total)}, open(os.path.join(a.work, "charcount.json"), "w", encoding="utf-8"), ensure_ascii=False)

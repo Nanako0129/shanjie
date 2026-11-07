@@ -106,6 +106,60 @@ LI_NUM = set("〇一二三四五六七八九十百千萬兩0123456789")
 LI_CLOSE = set("》）」』”)>")
 
 
+# docs/contracts/tw-conv.md section 11: the per-sentence correction table of the wiki gaps (built by build_tw_clean.py, kept in SRC, not in the repo).
+TW_CLEAN_DEFAULT = os.path.join(SRC, "tw-clean-zhwiki-20261001-200k.tsv")
+TW_CLEAN_SHA = "810476043b39f24898fded48476e0954ccc636e707ea6622b1fee4c06608623e"   # pinned SHA-256 of TW_CLEAN_DEFAULT (built 2026-11-07 from the Sonnet proofreading, research log)
+TW_CLEAN = {}   # {convert() output: corrected sentence, "" = the sentence is not counted}
+_TW_CLEAN = {"state": None, "off_said": False}   # state None = not read in this process yet; "off" or "sha256:<hex>" afterwards
+TW_CLEAN_HEADER = ("# tw-conv.tsv ", "# mcbpmf-data.txt ", "# entries ")
+
+
+def _sha256_file(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def load_tw_clean():
+    """Contract 11.2: reads the table named by SHANJIE_TW_CLEAN (unset = TW_CLEAN_DEFAULT, whose SHA-256 must be TW_CLEAN_SHA; `off` = empty table;
+    anything else = a path, the pinned SHA-256 not checked). The first three lines are the header (its two hashes must be the checkout's
+    tw-conv.tsv and mcbpmf-data.txt); every other line is data, `#` included, split on the first tab, only the trailing \n removed."""
+    env = os.environ.get("SHANJIE_TW_CLEAN")
+    TW_CLEAN.clear()
+    if env == "off":
+        _TW_CLEAN["state"] = "off"
+        if not _TW_CLEAN["off_said"]:
+            _TW_CLEAN["off_said"] = True
+            print("tw-clean: off", file=sys.stderr, flush=True)
+        return
+    path = env or TW_CLEAN_DEFAULT
+    how = "要重跑缺口量測與校對（docs/contracts/tw-conv.md 11），或設 SHANJIE_TW_CLEAN=off 明講不套用（CI、重現舊計數）"
+    if not os.path.isfile(path):
+        sys.exit(f"tw-clean: {path} is missing: {how}")
+    got = _sha256_file(path)
+    if not env and got != TW_CLEAN_SHA:
+        sys.exit(f"tw-clean: {path} has SHA-256 {got}, build_counts.py pins {TW_CLEAN_SHA}: {how}")
+    want = (_sha256_file(TW_CONV), _sha256_file(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")))
+    with open(path, encoding="utf-8", newline="\n") as f:   # newline="\n": only \n ends a line, a \r inside a sentence stays
+        head = [f.readline() for _ in range(3)]
+        for line, prefix in zip(head, TW_CLEAN_HEADER):
+            if not line.startswith(prefix):
+                sys.exit(f"tw-clean: {path} does not start with the three header lines {TW_CLEAN_HEADER}: {how}")
+        if tuple(h[len(p):].strip() for h, p in zip(head[:2], TW_CLEAN_HEADER)) != want:
+            sys.exit(f"tw-clean: {path} was made for another tw-conv.tsv or mcbpmf-data.txt: 轉換表或詞庫改過：{how}")
+        for n, line in enumerate(f, 4):
+            key, tab, value = (line[:-1] if line.endswith("\n") else line).partition("\t")
+            if not tab:
+                sys.exit(f"tw-clean: {path} line {n} has no tab")
+            TW_CLEAN[key] = value
+    _TW_CLEAN["state"] = "sha256:" + got
+
+
+def tw_clean_state():
+    """What a shipping entry records next to its output (contract 11.2): `sha256:<table hash>` or `off`."""
+    if _TW_CLEAN["state"] is None:
+        load_tw_clean()
+    return _TW_CLEAN["state"]
+
+
 def load_conv():
     """Fills the module tables (S, M, T, FOLD, TW_VARIANTS, TW_PHRASE) and returns (phrase, char, longest phrase) for convert():
     phrase = STPhrases with tw-conv.tsv's chosen values, char = STCharacters' first value with tw-conv.tsv's chosen values."""
@@ -128,6 +182,7 @@ def load_conv():
     LI["prev"], LI["next"] = tw["li_prev"], tw["li_next"]
     if not LEX_WORDS:
         LEX_WORDS.update(w for w in ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")).by_word if 2 <= len(w) <= 6)
+    load_tw_clean()   # contract 11.2: read every time, like tw-conv.tsv
     return phrase, char, max(map(len, phrase))
 
 
@@ -279,11 +334,11 @@ def text_runs(line, conv, kind):
     return HAN.findall(line if check_kind(kind) == "native" else convert(line, *conv))
 
 
-def article_runs(raw, conv, mw=None, mwconv=None):
+def article_runs(raw, conv, mw=None, mwconv=None, hits=None):
     """One wiki article's Han runs, in count_batch's order: entity unescape, [mw conversion], TEMPLATE x3, MARKUP, SENT, convert, HAN.
     The one copy of this pipeline: count_batch, build_counts_text, holdout_guard and s7a prep.py all call it (docs/contracts/holdout-refresh.md section 8).
     A wiki article is a `mixed` input (tw-conv contract 2.1)."""
-    for s in article_sentences(raw, conv, mw, mwconv):
+    for s in article_sentences(raw, conv, mw, mwconv, hits):
         yield from HAN.findall(s)
 
 
@@ -300,11 +355,25 @@ def article_text(raw, mw=None, mwconv=None):
     return t
 
 
-def article_sentences(raw, conv, mw=None, mwconv=None):
+def article_sentences(raw, conv, mw=None, mwconv=None, hits=None):
     """article_runs' steps up to (not including) the HAN split: one converted sentence per SENT match. tools/build_digits.py swaps the
-    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged."""
+    HAN split for one that keeps digit runs (docs/contracts/digit-context.md C.3); article_runs itself is unchanged.
+    Contract 11.2: after convert() a sentence found in TW_CLEAN is replaced by its second column (empty = not yielded); the table is read here
+    when this process has not read it yet. hits: a Counter that gets +1 for every first column found (the mw path is not looked up)."""
     for s in SENT.findall(article_text(raw, mw, mwconv)):
-        yield s if mw else convert(s, *conv)
+        if mw:
+            yield s
+            continue
+        s = convert(s, *conv)
+        if _TW_CLEAN["state"] is None:
+            load_tw_clean()
+        if s in TW_CLEAN:
+            if hits is not None:
+                hits[s] += 1
+            s = TW_CLEAN[s]
+            if not s:
+                continue
+        yield s
 
 
 def articles(limit, dump=None, meta=False):
@@ -488,11 +557,12 @@ def count_batch(texts):
 
 
 def _count(texts):
+    """-> (uni, bi, tri, sents, skipped, tw_clean_hits): the last is a Counter {table first column: times found} of this batch (contract 11.2)."""
     lex = _W["lex"]
-    guard, skipped = _W.get("guard"), 0
+    guard, skipped, tw_hits = _W.get("guard"), 0, collections.Counter()
     uni, bi, tri, sents = collections.Counter(), collections.Counter(), collections.Counter(), 0
     for raw in texts:
-        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv")):
+        for run in article_runs(raw, _W["conv"], _W["mw"], _W.get("mwconv"), tw_hits):
             if len(run) < 2:
                 continue
             if guard is not None and guard.any(fold(run)):
@@ -520,7 +590,7 @@ def _count(texts):
                 seq = ["<s>", "<s>"] + ws + ["</s>"]
                 for i in range(2, len(seq)):
                     tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
-    return uni, bi, tri, sents, skipped
+    return uni, bi, tri, sents, skipped, tw_hits
 
 
 def batches(it, size=200):
@@ -554,19 +624,22 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     uni, bi, tri = collections.Counter(), collections.Counter(), collections.Counter()
     sents = arts = skipped = 0
+    tw_hits = collections.Counter()
     with mp.Pool(a.procs, initializer=_init, initargs=(a.trigram, a.expected, a.mw, tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), guard)) as pool:
         k, n = map(int, a.shard.split("/")) if a.shard else (0, 1)
         mine = (x for i, x in enumerate(articles(a.articles)) if i % n == k)
-        for u, b, t, s_, k_ in pool.imap_unordered(_count, batches(mine)):
-            uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200
+        for u, b, t, s_, k_, h_ in pool.imap_unordered(_count, batches(mine)):
+            uni.update(u); bi.update(b); tri.update(t); sents += s_; skipped += k_; arts += 200; tw_hits.update(h_)
             if arts % 10000 == 0:
                 print(f"~{arts} articles, {sents} runs, {len(uni)} words, {len(bi)} bigrams", flush=True)
     arts = min(arts, a.articles) if not a.shard else len(range(k, a.articles, n))
-    out = {"uni": uni, "bi": bi, "articles": arts, "runs": sents}
+    replaced = sum(n for k, n in tw_hits.items() if TW_CLEAN[k])
+    out = {"uni": uni, "bi": bi, "articles": arts, "runs": sents, "tw_clean_hits": set(tw_hits), "tw_clean": tw_clean_state()}
     if a.trigram:
         out["tri"] = tri
     name = f"counts-{a.articles}-shard{k}of{n}" if a.shard else f"counts-{arts}"
     pickle.dump(out, open(os.path.join(OUT, f"{name}{'-tri' if a.trigram else ''}.pkl"), "wb"))
+    print(f"tw-clean: {len(tw_hits)} distinct entries hit, {replaced} replaced, {sum(tw_hits.values()) - replaced} dropped ({out['tw_clean']})")
     print(f"done: {arts} articles, {sents} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
     if a.holdout_guard is not None:
         print(f"holdout-guard: skipped {skipped} runs")

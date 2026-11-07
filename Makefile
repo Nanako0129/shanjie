@@ -33,6 +33,8 @@ test-rust:
 test-golden:
 	cargo test --release --locked -p cli --test golden
 
+# docs/contracts/tw-conv.md 11.2: the Python tests use their own tw-clean tables, never the real one (not in the repo); off says so out loud.
+test-python: export SHANJIE_TW_CLEAN = off
 test-python:
 	python3 -m unittest tools/test_build_forms.py
 	python3 -m unittest tools/test_build_acg_pack.py

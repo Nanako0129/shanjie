@@ -307,6 +307,10 @@ def main():
         sys.exit("error: the table is over 2 MB at every e->w cut; stop and report")
     with open(a.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
+    if a.wiki:   # docs/contracts/tw-conv.md 11.2: which tw-clean table made this file (only the wiki sentences go through it)
+        state = bc.tw_clean_state()
+        open(a.out + ".tw-clean", "w", encoding="utf-8").write(state + "\n")
+        print(f"tw-clean: {state}")
 
 
 if __name__ == "__main__":

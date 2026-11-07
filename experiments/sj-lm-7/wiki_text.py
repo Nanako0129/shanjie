@@ -32,6 +32,9 @@ def main(argv=None):
         for text in pool.imap(_runs, bc.batches(bc.articles(a.articles))):   # imap：輸出照篇的順序
             f.write(text)
     os.replace(a.out + ".tmp", a.out)
+    state = bc.tw_clean_state()   # docs/contracts/tw-conv.md 11.2: which tw-clean table made this text
+    open(a.out + ".tw-clean", "w", encoding="utf-8").write(state + "\n")
+    print(f"tw-clean: {state}")
 
 
 if __name__ == "__main__":

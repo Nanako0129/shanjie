@@ -143,15 +143,9 @@ class Acc:
 
 
 def wiki_sentences(raw):
-    """build_counts.count_batch's per-article preprocessing (entities, templates, markup, sentence split, convert: a wiki article is a mixed input), without --mw."""
-    phrase, char, maxp = bc._W["conv"]
-    t = raw.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
-    for _ in range(3):
-        t = bc.TEMPLATE.sub("", t)
-    for pat, rep in bc.MARKUP:
-        t = pat.sub(rep, t)
-    for s in bc.SENT.findall(t):
-        yield bc.convert(s, phrase, char, maxp)
+    """build_counts.count_batch's per-article preprocessing (entities, templates, markup, sentence split, convert, the tw-clean table: a wiki article is a mixed input,
+    docs/contracts/tw-conv.md 11.2), without --mw: bc.article_sentences itself."""
+    return bc.article_sentences(raw, bc._W["conv"])
 
 
 def count_batch3(texts):
@@ -235,7 +229,7 @@ def cmd_wiki(a):
     else:
         arts = min(arts, a.articles)
         tag = str(arts)
-    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard})
+    meta = common.provenance(_inputs(a, [bc.DUMP]), {"tri_min": a.tri_min, "shard": a.shard, "tw_clean": bc.tw_clean_state()})
     write_outputs(a.out, tag, uni, bi, tri, dbi, nx, runs, arts, meta)
 
 

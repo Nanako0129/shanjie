@@ -1,4 +1,4 @@
-"""The mutations M1-M18 of docs/contracts/tw-conv.md section 3: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
+"""The mutations M1-M27 of docs/contracts/tw-conv.md sections 3, 10 and 11: each one breaks the conversion (or the table builder) in one way, and test_tw_conv.py must
 fail on the test the contract names. Single process, about a minute (M6 and M8 rebuild the table from the PTT snapshot, 20 seconds each).
 
   python3 experiments/s2/mutate_tw_conv.py [--simp-rows FILE] [--only M3 ...]
@@ -31,6 +31,7 @@ A1, A3_BCT, A3_E1, A4_ROWS = "test_a1_unchanged", "test_a3_build_counts_text_nat
 A1_FOLD = "test_a1_a_mixed_example_gets_the_fold_rows"
 A2 = "test_a2_roundtrip_pairs_are_listed"
 A4_COVER = "test_a4_coverage_of_the_changed_rows"
+WIKI_TEXT = os.path.join(ROOT, "experiments", "sj-lm-7", "wiki_text.py")
 
 OLD_RULES = '''
 
@@ -104,13 +105,35 @@ MUTATIONS = [
        '''        t = {k: v for k, v in phrase.items() if any(c in TRAD_SIMP_ONLY for c in k)}''')], [A4_ROWS], False),
     ("M19", "a char row keeps a dictionary variant (no standard-form rule, contract 10.6)",
      [(BTC, '''        if status == "hold" and std in cands:''', '''        if False:''')], [A4_ROWS], True),
+    # contract 11.3: the tw-clean table
+    ("M20", "article_sentences does not look the sentence up",
+     [(BC, '''        if s in TW_CLEAN:\n''', '''        if False:\n''')], ["test_t_first_sentence_replaced"], False),
+    ("M21", "an empty second column is yielded like any other",
+     [(BC, '''            if not s:\n                continue\n''', '''            if False:\n                continue\n''')], ["test_t_empty_second_column_not_yielded"], False),
+    ("M22", "the two header hashes are not checked",
+     [(BC, '''        if tuple(h[len(p):].strip() for h, p in zip(head[:2], TW_CLEAN_HEADER)) != want:''', '''        if False:''')], ["test_t_header_hash_mismatch"], False),
+    ("M23", "a missing table is an empty table",
+     [(BC, '''        sys.exit(f"tw-clean: {path} is missing: {how}")\n''', '''        _TW_CLEAN["state"] = "off"; return\n''')], ["test_t_missing_table_stops"], False),
+    ("M24", "article_sentences does not read the table itself (only load_conv() does)",
+     [(BC, '''        if _TW_CLEAN["state"] is None:\n            load_tw_clean()\n        if s in TW_CLEAN:''', '''        if s in TW_CLEAN:''')], ["test_t_a_spawned_process_reads_the_table_itself"], False),
+    ("M25", "count.py's wiki_sentences has its own preprocessing again",
+     [(E1, '''    return bc.article_sentences(raw, bc._W["conv"])\n''', '''    phrase, char, maxp = bc._W["conv"]
+    for s in bc.SENT.findall(bc.article_text(raw)):
+        yield bc.convert(s, phrase, char, maxp)
+''')], ["test_t_count_py_wiki_sentences_is_article_sentences"], False),
+    ("M26", "reading the table skips the lines that start with #",
+     [(BC, '''        for n, line in enumerate(f, 4):\n''', '''        for n, line in enumerate((x for x in f if not x.startswith("#")), 4):\n''')], ["test_t_hash_key_is_looked_up"], False),
+    ("M27", "count.py and wiki_text.py write a fixed table state instead of asking tw_clean_state()",
+     [(E1, '''"tw_clean": bc.tw_clean_state()})''', '''"tw_clean": "sha256:" + "0" * 64})'''),
+      (WIKI_TEXT, '''    state = bc.tw_clean_state()   # docs''', '''    state = "sha256:" + "0" * 64   # docs''')],
+     ["test_t_state_count_py_meta", "test_t_state_wiki_text_side_file"], False),
 ]
 
 
 def run_tests():
     """-> (set of failing test names, raw output)."""
     with tempfile.TemporaryDirectory() as cache:
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": cache}
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": cache, "SHANJIE_TW_CLEAN": "off"}   # contract 11.2: the tests use their own tables
         r = subprocess.run([sys.executable, "-B", "-W", "ignore", "-m", "unittest", TEST], cwd=ROOT, env=env, capture_output=True, text=True, timeout=900)
     failed = set(re.findall(r"^(?:FAIL|ERROR): (\w+) ", r.stderr, re.M))
     if not failed and r.returncode != 0:
@@ -157,7 +180,7 @@ def rebuilt_table(edits):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--simp-rows", help="use this file as tw-conv-simp.tsv for the run (the real one is put back)")
-    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M18, M4a, M4b)")
+    ap.add_argument("--only", nargs="*", default=[], help="run only these mutations (M1 ... M27, M4a, M4b)")
     a = ap.parse_args(argv)
     saved = {p: open(p, "rb").read() for p in (SIMP, TABLE)}
     results = []
