@@ -72,6 +72,16 @@ class Counts(unittest.TestCase):
         self.assertRegex(head.split()[3], r"^tool_commit=[0-9a-f]{40}(-dirty)?$")
         self.assertEqual([r.split("\t")[0] for r in rows], sorted(CANDS))
 
+    def test_missing_tw_clean_table_stops_in_the_parent(self):
+        """--no-mw goes through convert(), which reads the tw-clean table: a missing table stops the run with the message, also with a pool."""
+        d, dump, cands = write_dump()
+        env = {**os.environ, "SHANJIE_TW_CLEAN": os.path.join(d, "missing.tsv")}
+        r = subprocess.run([sys.executable, C.__file__, "--dump", dump, "--candidates", cands, "--out", os.path.join(d, "o.tsv"), "--procs", "2",
+                            "--expect-sha256", C.sha256(dump), "--no-mw"], capture_output=True, text=True, env=env, timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("tw-clean:", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(d, "o.tsv")))
+
     def test_dump_hash_mismatch_stops(self):
         d, dump, cands = write_dump()
         o = os.path.join(d, "o.tsv")

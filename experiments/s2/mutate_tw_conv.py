@@ -93,8 +93,7 @@ MUTATIONS = [
        '''            best = max(alts, key=lambda c: fc[c])
             if fc[best] >= PICK_MIN and fc[best] >= PICK_RATIO * fc[first]:''')], [A2], True),
     ("M13", "a Traditional sentence with an S character does not convert R2 in the single-character step (contract 10)",
-     [(BC, '''"trad_s": TRAD_SIMP_ONLY | RARE.keys() | R2.keys()''', '''"trad_s": TRAD_SIMP_ONLY | RARE.keys()'''),
-      (BC, '''(TRAD_SIMP_ONLY | RARE.keys() | R2.keys()) - R10_AS_IS''', '''(TRAD_SIMP_ONLY | RARE.keys()) - R10_AS_IS''')], [A4_ROWS], False),
+     [(BC, '''        s = TRAD_SIMP_ONLY | RARE.keys() | R2.keys()''', '''        s = TRAD_SIMP_ONLY | RARE.keys()''')], [A4_ROWS], False),
     ("M14", "no keep words", [(BC, '''        t.update({w: w for w in KEEP})''', '''        pass''')], [A4_ROWS], False),
     ("M15", "an uncovered 里 of a Simplified sentence always becomes 裡", [(BC, '''            if li and text[i] == "里":''', '''            if False:''')], [A4_ROWS], False),
     ("M16", "the li rows are not read (every count 0)",

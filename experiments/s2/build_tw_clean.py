@@ -3,7 +3,10 @@ column = the sentence is not counted. Inputs: the gap file (JSON {"gap1": [[a, j
 proofreading result (JSON {"accepted": {id: corrected sentence}, "review_issues": {id: [...]}}; ids g1-<index into gap1>, g2-<index into gap2>) and the
 SHA-256 of tw-conv.tsv and mcbpmf-data.txt of the gap measurement. Refuses when this checkout's two files differ from those hashes. Never overwrites --out.
 
-  python3 experiments/s2/build_tw_clean.py --gaps GAPS.json --final FINAL.json --gap-tw-conv-sha HEX --gap-lexicon-sha HEX --out TABLE.tsv
+  python3 experiments/s2/build_tw_clean.py --gaps GAPS.json --final FINAL.json --batches BATCH_DIR --gap-tw-conv-sha HEX --gap-lexicon-sha HEX --out TABLE.tsv
+
+BATCH_DIR holds the bNNNN.tsv files sent for proofreading (id<TAB>sentence); a sent id with no accepted or review_issues entry came back
+unchanged, which counts as a result for the conflict check. Refuses a BATCH_DIR that is not a folder or holds no .tsv file.
 
 Prints the rows, the empty rows, the conflicts and the expected hit counts (distinct kept keys that occur in a gap row with a < 2000 and a < 200000),
 all computed from the inputs, not from the written file."""
@@ -59,10 +62,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if (sha256(TW_CONV), sha256(LEXICON)) != (a.gap_tw_conv_sha.lower(), a.gap_lexicon_sha.lower()):
         sys.exit("轉換表或詞庫改過：要重跑缺口量測與校對")
-    sent = None
-    if a.batches:
-        sent = [l.split("\t", 1)[0] for f in sorted(os.listdir(a.batches)) if f.endswith(".tsv")
-                for l in open(os.path.join(a.batches, f), encoding="utf-8")]
+    names = sorted(f for f in os.listdir(a.batches) if f.endswith(".tsv")) if os.path.isdir(a.batches) else []
+    if not names:   # an empty --batches would silently drop the unchanged sentences from the conflict check
+        sys.exit(f"--batches {a.batches!r}: not a folder with the proofreading batch files (*.tsv)")
+    sent = [l.split("\t", 1)[0] for f in names for l in open(os.path.join(a.batches, f), encoding="utf-8")]
     rows, conflicts, expected = build(json.load(open(a.gaps, encoding="utf-8")), json.load(open(a.final, encoding="utf-8")), sent)
     with open(a.out, "x", encoding="utf-8", newline="\n") as f:   # "x": never overwrite
         f.write(f"# tw-conv.tsv {a.gap_tw_conv_sha.lower()}\n# mcbpmf-data.txt {a.gap_lexicon_sha.lower()}\n# entries {len(rows)}\n")
