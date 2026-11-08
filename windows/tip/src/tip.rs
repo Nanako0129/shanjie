@@ -121,7 +121,7 @@ impl TextService_Impl {
             *self.thread_mgr.borrow_mut() = Some(mgr.clone());
             // The timing file first (it opens once per process; its own Medium-integrity gate decides), so 49 and 48 are recorded
             // on the first activation too.
-            timing::init();
+            timing::init("timing");
             // SAFETY: no preconditions.
             let os_tid = unsafe { GetCurrentThreadId() } as u64;
             timing::record(timing::EV_ACTIVATE_THREAD, os_tid, os_tid);

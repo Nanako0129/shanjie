@@ -1,10 +1,15 @@
-//! The measurement file (docs/spec/windows-tip.md §3.11). The line format is pure and always compiled; the file exists only with
-//! the cargo feature `timing`. Numbers only: `<event>\t<start>\t<end>\n`, microseconds of one `QueryPerformanceCounter` clock.
+//! The measurement file (docs/contracts/win-tip.md section 2.5, win-resident.md section 2.8). The line format is pure and always
+//! compiled; the file exists only with the cargo feature `timing`. Numbers only: `<event>\t<start>\t<end>\n`, microseconds of one
+//! `QueryPerformanceCounter` clock (the same clock in every process, so the DLL's and the host's times compare). Shared by the text
+//! service (`timing-<pid>.txt`) and the resident host (`host-<pid>.txt`, which includes this file by path): the event codes of both
+//! are listed here, in one place.
 
 #![cfg_attr(not(feature = "timing"), allow(dead_code))]
 
 pub const EV_ACTIVATE: u32 = 1;
+/// The model load (in the host: from before `new_packs` to the engine in place).
 pub const EV_LOAD: u32 = 2;
+/// One key: in the DLL from entering `OnKeyDown` to the document edited; in the host from the key received to the answer sent.
 pub const EV_KEY: u32 = 3;
 /// Diagnostic events (docs/spec/windows-tip.md §3.11): a point in time (start = end) with a numeric reason, never any key or text.
 /// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the engine is not usable, the keyboard compartment is
@@ -32,6 +37,16 @@ pub const EV_KD_CLOSED: u32 = 53;
 pub const EV_KD_CONTEXT: u32 = 54;
 pub const EV_KD_UNMAPPED: u32 = 55;
 pub const EV_REOPENED: u32 = 56;
+/// win-resident.md section 2.8. 60: the DLL waited for the host's answer to a key (start = sent, end = received). 61: the DLL's
+/// `CreateProcessW` of the host succeeded (start = end = now). 62: a timeout or a broken connection (both columns: the Win32 code).
+/// 63: the DLL passed a key through for a reason below (both columns: the reason). 64: the host accepted an AppContainer client
+/// (both columns 1). 65: the host's number of simultaneous connections reached a new high (both columns: that number).
+pub const EV_WAIT: u32 = 60;
+pub const EV_LAUNCHED: u32 = 61;
+pub const EV_IO_FAILED: u32 = 62;
+pub const EV_PASS: u32 = 63;
+pub const EV_HOST_APPCONTAINER: u32 = 64;
+pub const EV_HOST_PEAK: u32 = 65;
 
 /// Records a diagnostic event whose two columns carry one number (a thread id or an HRESULT), not times.
 pub fn diag_value(event: u32, value: u64) {
@@ -104,8 +119,8 @@ mod file {
         }
     }
 
-    /// `%LOCALAPPDATA%\shanjie-dev\timing\timing-<pid>.txt`; the folder is made by the driver script, never by the TIP.
-    fn open_file() -> Option<std::fs::File> {
+    /// `%LOCALAPPDATA%\shanjie-dev\timing\<prefix>-<pid>.txt`; the folder is made by the driver script, never by the TIP or the host.
+    fn open_file(prefix: &str) -> Option<std::fs::File> {
         if !is_medium() {
             return None;
         }
@@ -118,15 +133,15 @@ mod file {
         };
         // SAFETY: plain query.
         let pid = unsafe { GetCurrentProcessId() };
-        let path = std::path::Path::new(&dir).join("shanjie-dev").join("timing").join(format!("timing-{pid}.txt"));
+        let path = std::path::Path::new(&dir).join("shanjie-dev").join("timing").join(format!("{prefix}-{pid}.txt"));
         std::fs::OpenOptions::new().write(true).create_new(true).open(path).ok()
     }
 
-    /// Opens the file once per process; any failure leaves the process without timing.
-    pub fn init() {
+    /// Opens the file once per process (`prefix`: "timing" for the DLL, "host" for the host); any failure leaves the process without timing.
+    pub fn init(prefix: &str) {
         OPEN.call_once(|| {
             if let Ok(mut g) = SINK.lock() {
-                *g = open_file();
+                *g = open_file(prefix);
             }
         });
     }
@@ -147,7 +162,7 @@ mod file {
 pub use file::{init, now_us, record};
 
 #[cfg(not(feature = "timing"))]
-pub fn init() {}
+pub fn init(_prefix: &str) {}
 #[cfg(not(feature = "timing"))]
 pub fn now_us() -> u64 {
     0
@@ -165,7 +180,7 @@ mod tests {
         assert!(l == "3\t12\t4000000000000\n");
         assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         assert!(l.matches('\t').count() == 2 && l.matches('\n').count() == 1 && l.ends_with('\n'));
-        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY] {
+        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK] {
             let l = format_line(ev, 0, u64::MAX);
             assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         }
