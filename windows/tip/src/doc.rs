@@ -1,7 +1,7 @@
 //! Everything that touches the TSF document (docs/spec/windows-tip.md §3.7): edit sessions, the composition range, the underline
 //! attribute, the selection. The functions take the edit cookie `ec` of a session that is already running.
-use crate::engine::Out;
 use crate::guard;
+use shanjie_win_proto::Out;
 use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::ptr;
@@ -54,11 +54,7 @@ pub fn request(ctx: &ITfContext, tid: u32, flags: TF_CONTEXT_EDIT_CONTEXT_FLAGS,
     session_hr.ok()
 }
 
-pub fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
-}
-
-/// docs/spec/windows-tip.md §3.8: the underline attribute goes before `EndComposition`, on every path that ends a composition.
+/// Section 2.2: the underline attribute goes before `EndComposition`, on every path that ends a composition.
 fn clear_attr(ec: u32, ctx: &ITfContext, range: &ITfRange) {
     // SAFETY: live interfaces; failures are ignored (the text is what matters).
     unsafe {
@@ -134,20 +130,20 @@ fn start_composition(ec: u32, ctx: &ITfContext, sink: &ITfCompositionSink) -> Re
 pub fn apply(ec: u32, ctx: &ITfContext, slot: &CompSlot, sink: &ITfCompositionSink, atom: u32, out: &Out) -> Result<()> {
     if !out.commit.is_empty() {
         let open = slot.borrow_mut().take();
-        let text = wide(&out.commit);
+        let text = &out.commit;
         // SAFETY: live interfaces.
         unsafe {
             match open {
                 Some(c) => {
                     let range = c.composition.GetRange()?;
                     clear_attr(ec, &c.ctx, &range);
-                    range.SetText(ec, 0, &text)?;
+                    range.SetText(ec, 0, text)?;
                     caret_after(ec, ctx, &range)?;
                     c.composition.EndComposition(ec)?;
                 }
                 None => {
                     let ins: ITfInsertAtSelection = ctx.cast()?;
-                    let range = ins.InsertTextAtSelection(ec, INSERT_TEXT_AT_SELECTION_FLAGS(0), &text)?;
+                    let range = ins.InsertTextAtSelection(ec, INSERT_TEXT_AT_SELECTION_FLAGS(0), text)?;
                     caret_after(ec, ctx, &range)?;
                 }
             }
@@ -166,9 +162,9 @@ pub fn apply(ec: u32, ctx: &ITfContext, slot: &CompSlot, sink: &ITfCompositionSi
         // SAFETY: live interfaces; the attribute value is a TfGuidAtom as VT_I4.
         unsafe {
             let range = c.composition.GetRange()?;
-            range.SetText(ec, 0, &wide(&out.preedit))?;
+            range.SetText(ec, 0, &out.preedit)?;
             ctx.GetProperty(&GUID_PROP_ATTRIBUTE)?.SetValue(ec, &range, &VARIANT::from(atom as i32))?;
-            caret_at(ec, ctx, &range, out.cursor)?;
+            caret_at(ec, ctx, &range, out.cursor_utf16)?;
         }
     } else {
         let open = slot.borrow_mut().take();

@@ -1,9 +1,9 @@
-//! The text service object (docs/spec/windows-tip.md §3.5): activation, the key sink, the focus sinks and the composition sink.
-//! One instance per UI thread; the engine they share lives in `engine`. The core decides what a key does; this file maps keys in and
-//! applies the output to the document (`doc`), and ends compositions in time.
+//! The text service object (docs/contracts/win-tip.md section 2.2): activation, the key sink, the focus sinks and the composition sink.
+//! One instance per UI thread. The core, in the resident host, decides what a key does (`client` carries it there and back,
+//! win-resident.md); this file maps keys in, applies the answer to the document (`doc`), and ends compositions in time.
+use crate::client::{self, Reply};
 use crate::display::{DisplayEnum, DisplayInfo};
-use crate::doc::{self, CompSlot};
-use crate::engine::{self, Owner};
+use crate::doc::{self, Comp, CompSlot};
 use crate::guard;
 use crate::guids::DISPLAY_ATTR_COMPOSING;
 use crate::keys::{map_key, may_eat, Mods};
@@ -68,9 +68,19 @@ impl Drop for TextService {
     }
 }
 
-fn owner_of(ctx: &ITfContext) -> Owner {
-    // SAFETY: plain query.
-    Owner { thread: unsafe { GetCurrentThreadId() }, ctx: ctx.as_raw() as usize }
+/// The context as this connection names it to the host: its pointer value. The host pairs it with the connection (win-resident.md
+/// section 2.3), so it needs no thread id and means nothing on any other connection.
+fn ctx_id(ctx: &ITfContext) -> u64 {
+    ctx.as_raw() as usize as u64
+}
+
+/// Ends a composition the host no longer backs: in this edit session when it lives in `ctx`, else in its own context later.
+fn end_stale(ec: u32, ctx: &ITfContext, tid: u32, c: Comp) {
+    if c.ctx.as_raw() == ctx.as_raw() {
+        let _ = doc::end_composition(ec, &c);
+    } else {
+        doc::end_composition_later(tid, c);
+    }
 }
 
 /// `GetKeyState` high bit: down.
@@ -94,12 +104,13 @@ fn flag(mgr: &ITfCompartmentMgr, guid: &GUID) -> Option<bool> {
 
 #[derive(Default)]
 struct Outcome {
+    /// The host answered with an `Out`.
     ran: bool,
     eaten: bool,
 }
 
 impl TextService_Impl {
-    /// A COM method body: panics become a bare failure code, the engine is reset and the composition object dropped (docs/spec/windows-tip.md §3.9).
+    /// A COM method body: panics become a bare failure code, the host is told to reset and the composition object dropped (section 2.2).
     fn guarded<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         guard::com_with(f, || drop(self.comp.try_borrow_mut().map(|mut c| c.take())))
     }
@@ -107,7 +118,7 @@ impl TextService_Impl {
     /// A key method: on a panic or any error the answer is "not eaten", never an error code (the out parameter would stay unset).
     fn guarded_key(&self, f: impl FnOnce() -> Result<bool>) -> Result<BOOL> {
         let eaten = guard::run(false, || f().unwrap_or(false), || {
-            engine::reset_after_panic();
+            client::reset_after_panic();
             drop(self.comp.try_borrow_mut().map(|mut c| c.take()));
         });
         Ok(eaten.into())
@@ -130,7 +141,7 @@ impl TextService_Impl {
                 timing::diag(timing::EV_ACTIVATE_SECURE);
                 return Ok(());
             }
-            engine::ensure_loaded();
+            // No connection here: the first key opens it (win-resident.md section 2.4).
             if let Err(e) = self.advise(&mgr, tid) {
                 self.unadvise();
                 timing::diag(timing::EV_ACTIVATE_ADVISE_FAILED);
@@ -225,11 +236,11 @@ impl TextService_Impl {
         }
     }
 
-    /// Ends this instance's own composition in its own context (underline off, text stays) and lets go of the engine if it was the owner.
+    /// Ends this instance's own composition in its own context (underline off, text stays) and tells the host to let go of it.
     fn end_own_composition(&self) {
         let open = self.comp.borrow_mut().take();
         if let Some(c) = open {
-            engine::release_if_owner(owner_of(&c.ctx));
+            client::release(ctx_id(&c.ctx));
             doc::end_composition_later(self.tid.get(), c);
         }
     }
@@ -238,6 +249,7 @@ impl TextService_Impl {
         self.guarded(|| {
             self.end_own_composition();
             self.unadvise();
+            client::close();
             self.seen_dims.borrow_mut().clear();
             *self.thread_mgr.borrow_mut() = None;
             self.active.set(false);
@@ -263,7 +275,9 @@ impl TextService_Impl {
             timing::diag(timing::EV_TEST_INACTIVE);
             return Ok(false);
         }
-        if !engine::usable() {
+        // Section 2.4: the connection is not looked at here, only the three blocks (else explorer, which asks this first, would never
+        // reach OnKeyDown and never start the host).
+        if client::blocked() {
             timing::diag(timing::EV_TEST_UNUSABLE);
             return Ok(false);
         }
@@ -293,7 +307,7 @@ impl TextService_Impl {
             timing::diag(timing::EV_KD_INACTIVE);
             return Ok(false);
         }
-        if !engine::usable() {
+        if client::blocked() {
             timing::diag(timing::EV_KD_UNUSABLE);
             return Ok(false);
         }
@@ -310,34 +324,42 @@ impl TextService_Impl {
             timing::diag(timing::EV_KD_UNMAPPED);
             return Ok(false);
         };
-        let me = owner_of(&ctx);
+        let me = ctx_id(&ctx);
         let tid = self.tid.get();
         let atom = self.atom.get();
         let sink: ITfCompositionSink = self.to_interface();
         let svc = self.to_object();
         let outcome = Rc::new(Cell::new(Outcome::default()));
         let (o2, ctx2) = (outcome.clone(), ctx.clone());
-        // Step 2: everything happens inside the edit session. If the host refuses the synchronous request the core is never called.
+        // Step 2: everything happens inside the edit session. If the app refuses the synchronous request nothing is sent to the host.
         let granted = doc::request(&ctx, tid, doc::SYNC_WRITE, move |ec| {
             let svc = svc.get();
-            let keyed = engine::key(me, k);
-            if !keyed.ran {
-                timing::diag(timing::EV_KEY_ENGINE_BUSY);
-                return Ok(());
-            }
+            let composing = svc.comp.borrow().is_some();
+            let out = match client::key(me, k, composing) {
+                Reply::Out(o) => o,
+                Reply::Pass => {
+                    // win-resident.md section 2.6, first row: with a composition open, the host's state for it is gone or out of reach.
+                    // The composition ends here (underline off, the text stays) and the key is eaten. Without one the key goes to the app.
+                    let open = svc.comp.borrow_mut().take();
+                    if let Some(c) = open {
+                        end_stale(ec, &ctx2, tid, c);
+                        o2.set(Outcome { ran: false, eaten: true });
+                    }
+                    return Ok(());
+                }
+            };
             o2.set(Outcome { ran: true, eaten: false });
             // A composition this instance left open while another owner took the engine is stale: end it before anything else.
-            if keyed.took_over {
+            if out.took_over {
                 let stale = svc.comp.borrow_mut().take();
                 if let Some(s) = stale {
-                    if s.ctx.as_raw() == ctx2.as_raw() {
-                        let _ = doc::end_composition(ec, &s);
-                    } else {
-                        doc::end_composition_later(tid, s);
-                    }
+                    end_stale(ec, &ctx2, tid, s);
                 }
             }
-            let Some(out) = keyed.out else { return Ok(()) };
+            // The core returned non-zero: not handled, the document is not touched (shanjie.h).
+            if out.core_error {
+                return Ok(());
+            }
             match doc::apply(ec, &ctx2, &svc.comp, &sink, atom, &out) {
                 Ok(()) => o2.set(Outcome { ran: true, eaten: out.handled }),
                 Err(_) => {
@@ -346,7 +368,7 @@ impl TextService_Impl {
                     if let Some(c) = open {
                         let _ = doc::end_composition(ec, &c);
                     }
-                    engine::release_if_owner(me);
+                    client::release(me);
                 }
             }
             Ok(())
@@ -360,7 +382,7 @@ impl TextService_Impl {
             if granted.is_err() {
                 // The job did not finish (a panic in it): same cleanup.
                 self.comp.borrow_mut().take();
-                engine::release_if_owner(me);
+                client::release(me);
             }
         }
         Ok(o.eaten && granted.is_ok())
@@ -370,7 +392,7 @@ impl TextService_Impl {
         self.guarded(|| {
             let open = self.comp.borrow_mut().take();
             if let Some(c) = open {
-                // The app ended it; the text is already in the document as displayed. Only the underline and the engine's state are left.
+                // The app ended it; the text is already in the document as displayed. Only the underline and the host's state are left.
                 if let Ok(done) = pcomposition.ok() {
                     // SAFETY: live interfaces; best effort.
                     unsafe {
@@ -379,7 +401,7 @@ impl TextService_Impl {
                         }
                     }
                 }
-                engine::release_if_owner(owner_of(&c.ctx));
+                client::release(ctx_id(&c.ctx));
             }
             Ok(())
         })

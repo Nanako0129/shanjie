@@ -7,12 +7,13 @@
 #![cfg_attr(not(feature = "timing"), allow(dead_code))]
 
 pub const EV_ACTIVATE: u32 = 1;
-/// The model load (in the host: from before `new_packs` to the engine in place).
+/// The model load: written by the host only since win-resident (the DLL loads nothing).
 pub const EV_LOAD: u32 = 2;
 /// One key: in the DLL from entering `OnKeyDown` to the document edited; in the host from the key received to the answer sent.
 pub const EV_KEY: u32 = 3;
-/// Diagnostic events (docs/spec/windows-tip.md §3.11): a point in time (start = end) with a numeric reason, never any key or text.
-/// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the engine is not usable, the keyboard compartment is
+/// Diagnostic events (contract section 2.5): a point in time (start = end) with a numeric reason, never any key or text.
+/// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the client is blocked (since win-resident: the circuit
+/// breaker, the permanent pass-through after `Refuse { 1 }`, the cool-down after `Refuse { 3 }`), the keyboard compartment is
 /// closed, or the context is disabled or empty. 47: ActivateEx could not advise its sinks. 48: ActivateEx in secure mode.
 pub const EV_TEST_INACTIVE: u32 = 41;
 pub const EV_TEST_UNUSABLE: u32 = 42;
@@ -25,10 +26,10 @@ pub const EV_ACTIVATE_THREAD: u32 = 49;
 /// 40: OnTestKeyDown answered TRUE; 50: OnKeyDown entered. Both columns are the OS thread id, so runs show which threads get keys.
 pub const EV_TEST_TRUE_THREAD: u32 = 40;
 pub const EV_KEYDOWN_THREAD: u32 = 50;
-/// 45: OnKeyDown's synchronous edit session was not granted; both columns are the HRESULT (as u32). 46: the engine lock was busy.
+/// 45: OnKeyDown's synchronous edit session was not granted; both columns are the HRESULT (as u32). 46 (the DLL's engine lock was
+/// busy) is no longer written: a busy host engine is event 63 with reason `pass::BUSY`.
 pub const EV_KEY_SESSION_REFUSED: u32 = 45;
-pub const EV_KEY_ENGINE_BUSY: u32 = 46;
-/// 51-55: OnKeyDown returned before calling the core because the instance is not active, the engine is not usable, the keyboard
+/// 51-55: OnKeyDown returned before calling the host because the instance is not active, the client is blocked (as 42), the keyboard
 /// compartment is closed, the context is disabled or empty, or the key has no mapping. 56: the keyboard compartment read closed when the
 /// TIP opened it for a document manager getting focus for the first time (docs/spec/windows-tip.md §3.11).
 pub const EV_KD_INACTIVE: u32 = 51;
@@ -47,6 +48,31 @@ pub const EV_IO_FAILED: u32 = 62;
 pub const EV_PASS: u32 = 63;
 pub const EV_HOST_APPCONTAINER: u32 = 64;
 pub const EV_HOST_PEAK: u32 = 65;
+
+/// Reasons of event 63.
+pub mod pass {
+    /// This process may not connect (SYSTEM or a service account, integrity System or above).
+    pub const NO_CONNECT: u64 = 1;
+    /// The host is not running and this process may not start it (package identity, AppContainer, elevated, restricted, session 0).
+    pub const NOT_ELIGIBLE: u64 = 2;
+    /// The host is not running; a start by this process is less than 10 s old (or in progress on another thread).
+    pub const BACKOFF: u64 = 3;
+    /// `CreateProcessW` failed (a job that refuses breakaway among the causes).
+    pub const LAUNCH_FAILED: u64 = 4;
+    /// Still no pipe 15 s after this process started the host, or the host it started has exited (noted once per start).
+    pub const STILL_MISSING: u64 = 5;
+    /// `ERROR_PIPE_BUSY`: every instance is taken.
+    pub const PIPE_BUSY: u64 = 6;
+    pub const NOT_READY: u64 = 7;
+    pub const BUSY: u64 = 8;
+    /// The server check of section 2.5 item 1 failed.
+    pub const SERVER_CHECK: u64 = 9;
+    pub const REFUSE_PROTO: u64 = 10;
+    pub const REFUSE_LIMIT: u64 = 11;
+    pub const REFUSE_CLIENT: u64 = 12;
+    /// An answer of the wrong type for the request.
+    pub const UNEXPECTED: u64 = 13;
+}
 
 /// Records a diagnostic event whose two columns carry one number (a thread id or an HRESULT), not times.
 pub fn diag_value(event: u32, value: u64) {

@@ -108,10 +108,11 @@ pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *cons
     .into()
 }
 
-/// Once an engine was loaded (or tried) the answer is always `S_FALSE`: unloading would drop the statics and leak the models (docs/spec/windows-tip.md §3.4).
+/// Once a connection to the host existed the answer is always `S_FALSE`: a thread timer and thread-local destructors of this DLL may
+/// still be registered (win-resident.md section 2.4).
 #[no_mangle]
 pub extern "system" fn DllCanUnloadNow() -> HRESULT {
-    guard::run(S_FALSE, || if OBJECTS.load(Ordering::Acquire) == 0 && LOCKS.load(Ordering::Acquire) == 0 && !crate::engine::attempted() { S_OK } else { S_FALSE }, || {})
+    guard::run(S_FALSE, || if OBJECTS.load(Ordering::Acquire) == 0 && LOCKS.load(Ordering::Acquire) == 0 && !crate::client::attempted() { S_OK } else { S_FALSE }, || {})
 }
 
 // ---- registration (development only; needs an administrator) ----

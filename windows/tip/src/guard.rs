@@ -30,7 +30,7 @@ pub fn run<T>(fail: T, f: impl FnOnce() -> T, cleanup: impl FnOnce()) -> T {
     }
 }
 
-/// The default wrapper: after a caught panic the engine is reset (discard).
+/// The default wrapper: after a caught panic the host is told to reset this connection's state (discard) and the connection closes.
 pub fn com<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
     com_with(f, || {})
 }
@@ -38,7 +38,7 @@ pub fn com<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
 /// `com` plus the instance's own cleanup (it drops the composition object it holds).
 pub fn com_with<T>(f: impl FnOnce() -> Result<T>, cleanup: impl FnOnce()) -> Result<T> {
     run(Err(fail()), f, || {
-        crate::engine::reset_after_panic();
+        crate::client::reset_after_panic();
         cleanup();
     })
 }

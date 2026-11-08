@@ -3,18 +3,13 @@
 
 pub const KIND_CHAR: u32 = 1;
 pub const KIND_SPACE: u32 = 2;
-pub const KIND_ESC: u32 = 6;
 
 pub const MOD_SHIFT: u32 = 1;
 pub const MOD_CONTROL: u32 = 2;
 pub const MOD_CAPS: u32 = 16;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Key {
-    pub kind: u32,
-    pub ch: u32,
-    pub modifiers: u32,
-}
+/// The `ShanjieKey` the host gets (win-resident.md section 2.3).
+pub use shanjie_win_proto::Key;
 
 /// Modifier state read by the sink with `GetKeyState`.
 #[derive(Clone, Copy, Default)]
