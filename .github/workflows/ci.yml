@@ -141,7 +141,12 @@ jobs:
       - name: Tests (debug, cli unit tests)
         run: cargo test --locked -p cli --lib --bins
 
-      # docs/spec/windows-tip.md §2.9: the Linux side of the Windows comparison. The evaluation CLI in release, the six rowstats
+      # docs/contracts/win-resident.md section 2.10: the wire format of the Windows client and host is plain Rust and is tested on every
+      # platform (macOS runs it in the `core` job's workspace test, Windows in the `windows` job).
+      - name: Tests (debug, Windows wire format)
+        run: cargo test --locked -p shanjie-win-proto
+
+      # docs/contracts/win-core.md section 2.3: the Linux side of the Windows comparison. The evaluation CLI in release, the six rowstats
       # (dev302, the typing test and the user-reported rows, chat and formal) with the shipping flags, and the files as an artifact for the
       # `windows` job to compare byte for byte (scripts/ci-rowstats.sh is the one copy of the six commands). Both sides run Rust 1.97.1.
       - name: Evaluation CLI (release)
@@ -242,16 +247,59 @@ jobs:
           cargo build --locked -p core --target i686-pc-windows-msvc
           cargo build --locked -p core --target aarch64-pc-windows-msvc
 
-      # docs/spec/windows-tip.md §3.13: the text service DLL builds (without and with the `timing` feature), then its unit tests and the
-      # R2 behaviour tests run. COM and TSF themselves are covered by the VM run (docs/spec/windows-tip.md §3.13), not here.
-      - name: shanjie-tip builds (release, without and with timing)
+      # docs/contracts/win-tip.md section 2.7 and win-resident.md section 2.10: the text service DLL and the resident host build (each without
+      # and with the `timing` feature), then the tests of the three Windows crates run: the wire format, the client's impersonation level,
+      # the host against a real server and engine (two connections, the rate limit), and the R2 behaviour tests of the DLL and the host.
+      # COM, TSF and the apps are covered by the VM run of win-resident.md section 3, not here. The timing builds come first, so the
+      # binaries checked below are the builds without timing.
+      - name: shanjie-tip and shanjie-host builds (release, with and without timing)
         run: |
           set -euo pipefail
-          cargo build --release --locked -p shanjie-tip
           cargo build --release --locked -p shanjie-tip --features timing
+          cargo build --release --locked -p shanjie-host --features timing
+          cargo build --release --locked -p shanjie-tip
+          cargo build --release --locked -p shanjie-host
 
-      - name: shanjie-tip tests (release)
-        run: cargo test --release --locked -p shanjie-tip
+      # win-resident.md section 2.10: neither binary imports a C runtime DLL (static CRT, win-tip.md section 2.1); the DLL exports no
+      # `shanjie_` symbol and `cargo tree` shows no `core` under it (the core would be linked statically, so the import table could not
+      # show it). The DLL's size is printed.
+      - name: shanjie-tip and shanjie-host binaries
+        run: |
+          set -euo pipefail
+          found="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe')"
+          first="${found%%$'\n'*}"
+          first="${first%$'\r'}"
+          test -n "$first"
+          dumpbin="$(cygpath -u "$first")"
+          for f in target/release/shanjie_tip.dll target/release/shanjie-host.exe; do
+            "$dumpbin" -nologo -dependents "$f" > deps.txt
+            cat deps.txt
+            grep -qi 'kernel32\.dll' deps.txt || { echo "error: no imports listed for $f" >&2; exit 1; }
+            if grep -iE 'vcruntime|msvcp|ucrtbase|api-ms-win-crt' deps.txt; then
+              echo "error: $f imports a C runtime DLL" >&2
+              exit 1
+            fi
+          done
+          "$dumpbin" -nologo -exports target/release/shanjie_tip.dll > exports-crlf.txt
+          tr -d '\r' < exports-crlf.txt > exports.txt
+          cat exports.txt
+          grep -q DllGetClassObject exports.txt || { echo "error: the export table was not read" >&2; exit 1; }
+          # An export name ends its line; the "Dump of file ...shanjie_tip.dll" header does not match (".dll" follows).
+          if grep -iE '[[:space:]]shanjie_[A-Za-z0-9_]*$' exports.txt; then
+            echo "error: the DLL exports core symbols" >&2
+            exit 1
+          fi
+          cargo tree --locked -p shanjie-tip -e normal > tree.txt
+          cat tree.txt
+          grep -q 'shanjie-win-proto v' tree.txt || { echo "error: cargo tree printed no dependencies" >&2; exit 1; }
+          if grep -E '(^|[[:space:]])core v[0-9]' tree.txt; then
+            echo "error: shanjie-tip depends on the core" >&2
+            exit 1
+          fi
+          ls -l target/release/shanjie_tip.dll target/release/shanjie-host.exe
+
+      - name: Windows client and host tests (release)
+        run: cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host
 
   # docs/spec/release-and-ci.md: the Python steps, which used to follow the release tests in `core`, on Linux. They are development
   # tools; their goldens (the dev302 rowstats among them) match byte for byte on Linux. A golden that only matches on macOS
