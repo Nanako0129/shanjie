@@ -40,7 +40,7 @@ pub struct TextService {
     comp: CompSlot,
     /// Document managers this thread has already focused: the keyboard is opened only the first time each one gets focus, so a state
     /// the user changed later (for example Ctrl+Space in that window) is kept. Holding the references keeps their addresses unique;
-    /// cleared on Deactivate.
+    /// a manager is removed when TSF uninitialises it (`OnUninitDocumentMgr`), and the list is cleared on Deactivate.
     seen_dims: RefCell<Vec<ITfDocumentMgr>>,
 }
 
@@ -390,15 +390,22 @@ impl TextService_Impl {
 
     fn composition_terminated(&self, ecwrite: u32, pcomposition: Ref<'_, ITfComposition>) -> Result<()> {
         self.guarded(|| {
-            let open = self.comp.borrow_mut().take();
+            // Only the composition this instance holds (the same interface pointer) is cleared; any other one is not ours to touch.
+            let Ok(done) = pcomposition.ok() else { return Ok(()) };
+            let open = {
+                let mut slot = self.comp.borrow_mut();
+                if slot.as_ref().is_some_and(|c| c.composition.as_raw() == done.as_raw()) {
+                    slot.take()
+                } else {
+                    None
+                }
+            };
             if let Some(c) = open {
                 // The app ended it; the text is already in the document as displayed. Only the underline and the host's state are left.
-                if let Ok(done) = pcomposition.ok() {
-                    // SAFETY: live interfaces; best effort.
-                    unsafe {
-                        if let (Ok(range), Ok(p)) = (done.GetRange(), c.ctx.GetProperty(&GUID_PROP_ATTRIBUTE)) {
-                            let _ = p.Clear(ecwrite, &range);
-                        }
+                // SAFETY: live interfaces; best effort.
+                unsafe {
+                    if let (Ok(range), Ok(p)) = (done.GetRange(), c.ctx.GetProperty(&GUID_PROP_ATTRIBUTE)) {
+                        let _ = p.Clear(ecwrite, &range);
                     }
                 }
                 client::release(ctx_id(&c.ctx));
@@ -454,8 +461,14 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
     fn OnInitDocumentMgr(&self, _pdim: Ref<'_, ITfDocumentMgr>) -> Result<()> {
         Ok(())
     }
-    fn OnUninitDocumentMgr(&self, _pdim: Ref<'_, ITfDocumentMgr>) -> Result<()> {
-        Ok(())
+    /// The document manager goes away: it leaves `seen_dims` (a new one may later get the same address).
+    fn OnUninitDocumentMgr(&self, pdim: Ref<'_, ITfDocumentMgr>) -> Result<()> {
+        self.guarded(|| {
+            if let Ok(d) = pdim.ok() {
+                self.seen_dims.borrow_mut().retain(|x| x.as_raw() != d.as_raw());
+            }
+            Ok(())
+        })
     }
     /// A different document got the focus: the composition of the old one ends, its text stays.
     fn OnSetFocus(&self, pdimfocus: Ref<'_, ITfDocumentMgr>, _pdimprevfocus: Ref<'_, ITfDocumentMgr>) -> Result<()> {
