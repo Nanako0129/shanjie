@@ -166,14 +166,20 @@ mod file {
     /// Opens the file once per process (`prefix`: "timing" for the DLL, "host" for the host); any failure leaves the process without timing.
     pub fn init(prefix: &str) {
         OPEN.call_once(|| {
+            WAIT.store(prefix == "host", std::sync::atomic::Ordering::Relaxed);
             if let Ok(mut g) = SINK.lock() {
                 *g = open_file(prefix);
             }
         });
     }
 
+    /// The host waits for the file lock: it has many connection threads and no UI thread, and a dropped load event (2) would fail the
+    /// VM acceptance. The DLL keeps `try_lock` (a UI thread never waits on the timing file; a contended line is dropped).
+    static WAIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
     pub fn record(event: u32, start_us: u64, end_us: u64) {
-        if let Ok(mut g) = SINK.try_lock() {
+        let g = if WAIT.load(std::sync::atomic::Ordering::Relaxed) { SINK.lock().ok() } else { SINK.try_lock().ok() };
+        if let Some(mut g) = g {
             if let Some(f) = g.as_mut() {
                 let line = super::format_line(event, start_us, end_us);
                 if f.write_all(line.as_bytes()).and_then(|_| f.flush()).is_err() {
