@@ -81,7 +81,7 @@ def build():
                     sys.exit("variant maps to two canonical forms")
                 canon[w] = c
     head = [
-        "# 寬鬆對照用的異體詞表（docs/PLAN.md §S2v）。由 tools/build_variants.py 產生，請勿手改。",
+        "# 寬鬆對照用的異體詞表（docs/spec/evaluation.md §1.3）。由 tools/build_variants.py 產生，請勿手改。",
         f"# 來源：教育部《重編國語辭典修訂本》，經 g0v/moedict-data dict-revised_bkup.json（commit {MOEDICT_COMMIT}）。CC BY-ND 3.0 TW，只用於評測。",
         "# 標準：釋義寫「也作／亦作」、字數相同、至少一個注音讀音相同；已套單字對照（她妳它牠嘗周臺裏 → 他你他他嚐週台裡）。",
         f"# 詞對 {len(pairs)} 組（套單字對照後不同的 {kept} 組），分成 {len(groups)} 組，異體 {len(canon)} 個。格式：異體<TAB>標準形。",

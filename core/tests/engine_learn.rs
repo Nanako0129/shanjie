@@ -1977,7 +1977,7 @@ fn global_eps_table() {
     // docs/spec/learning.md §6.2, §13.1: with the class term no value above 0 has 0 pollution, so the level is off; the table
     // still prints the learn rate and pollution of each value for the next study of the global level.
     for r in &res {
-        // PLAN A2: of the learnable mirror cases (the model does not already produce the taught sentence) at least 80% are learned.
+        // docs/spec/learning.md §13.1 (learn rate): of the learnable mirror cases (the model does not already produce the taught sentence) at least 80% are learned.
         // The learnable count depends on the model (9/10 with model-v1, 8/9 once 戰機/戰績 became right on its own), so the
         // floor is on the count of learnable cases, which keeps the rate from passing vacuously.
         assert!(r.3 >= 8, "fewer than 8 learnable mirror cases ({} at eps {}): the rate below would not mean anything", r.3, r.0);
