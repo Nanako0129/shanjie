@@ -6,6 +6,6 @@ resolver = "2"
 debug = false
 
 # Debug tests keep debug assertions and overflow checks. Unoptimised, the per-key prediction scan made the dev302
-# replays outgrow CI's 20-minute core job (replay_standard_formal 79 s locally); opt-level 1 brings it to 9 s.
+# replays outgrow CI's 20-minute debug job (replay_standard_formal 79 s locally); opt-level 1 brings it to 9 s.
 [profile.test]
 opt-level = 1
