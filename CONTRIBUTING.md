@@ -170,4 +170,5 @@ Signed-off-by: 你的名字 <你的 email>
 
 - 日誌只能記靜態字串與回傳碼，不能記組字、候選、按鍵或 App 名稱（`docs/spec/privacy.md` §3）。
 - 不能新增連網，除非是預設關閉、使用者明確開啟的功能（`docs/spec/privacy.md` §8）。
+- 診斷紀錄只能有列舉、布林與清理過的 bundle ID，只在記憶體、安全輸入時不記 Shift、不新增客戶端讀取（`docs/spec/privacy.md` §11）。
 - 不申請「輸入監控」或「輔助使用」權限；InputMethodKit 不需要。

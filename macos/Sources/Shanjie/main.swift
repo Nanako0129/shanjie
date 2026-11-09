@@ -161,6 +161,15 @@ final class DefaultsShiftToggleStore: ShiftToggleStore {
     }
 }
 
+/// The 記錄偶發問題的診斷資料 switch (docs/spec/macos-shell.md §13.3), key `diagLog` in the same domain; absent means on.
+@MainActor
+final class DefaultsDiagLogStore: DiagLogStore {
+    var diagLog: Bool? {
+        get { UserDefaults.standard.object(forKey: "diagLog") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "diagLog") }
+    }
+}
+
 /// Whether the English defaults explanation window is still owed (docs/spec/english-mixed.md §10.2), key
 /// `englishDefaultsNoticePending` in the same domain; absent means not owed.
 @MainActor
@@ -291,7 +300,7 @@ func runServer() -> Never {
         // device check confirms the menu has no 可省略韻母.
         showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), beautyPackStore: DefaultsBeautyPackStore(),
         shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
-        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter())
+        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore())
     // docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)
