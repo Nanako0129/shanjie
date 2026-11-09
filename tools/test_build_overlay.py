@@ -102,7 +102,6 @@ class LexgapRows(unittest.TestCase):
             "unknown syllable": ("jia3-ㄧˇ\t甲乙\t0\tlexgap\n", {}),
             "not Han": ("ㄐㄧㄚˇ-ㄧˇ\tab\t0\tlexgap\n", {}),
             "a length without a score": ("-".join(["ㄧˇ"] * 11) + "\t" + "甲" * 11 + "\t0\tlexgap\n", {}),
-            "the same row twice": (ok + ok, {}),
             "a variant of a base word on the same reading": ("ㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", {"by_reading": {("ㄐㄧㄚˇ", "ㄧˇ"): [("台乙", -5.0)]}}),
             "a variant of an earlier row on the same reading": ("ㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", {"earlier": [["ㄐㄧㄚˇ-ㄧˇ", "台乙"]]}),
             "a variant of an earlier row of this list": ("ㄐㄧㄚˇ-ㄧˇ\t台乙\t0\tlexgap\nㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", {}),
@@ -110,6 +109,8 @@ class LexgapRows(unittest.TestCase):
         for why, (text, kw) in bad.items():
             with self.assertRaises(SystemExit, msg=why):
                 self.rows(text, **kw)
+        with self.assertRaisesRegex(SystemExit, "repeats a reading"):                # the word is not reported as a variant of itself
+            self.rows(ok + ok)
         self.assertEqual(len(self.rows("ㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", by_reading={("ㄅㄧㄥˇ", "ㄧˇ"): [("台乙", -5.0)]})), 1)   # the same fold on another reading is no variant
 
 
@@ -233,6 +234,25 @@ class BuildFlags(unittest.TestCase):
         (empty, *_), _ = self.build(lexgap=self.lexgap_file("# nothing\n"))
         self.assertEqual((plain, empty), (again, plain))
         self.assertFalse([r for r in plain if r.endswith("\tlexgap\n")])
+
+    def test_a_word_of_a_pack_or_the_names_layer_or_an_earlier_row_stops_the_build_on_any_reading(self):
+        w = self.words[-2]
+        line = lambda x, syls: f"{'-'.join(syls)}\t{x}\t-1.0\tlexgap\n"
+        own = B.normalize(w, self.base.to_syllables(w))
+        real = B.other_layers()
+        with mock.patch.object(B, "other_layers", lambda: real | {w}), self.assertRaisesRegex(SystemExit, "already in"):
+            self.build(lexgap=self.lexgap_file(line(w, own)))
+        other = list(reversed(B.normalize(self.title, self.base.to_syllables(self.title))))   # the title's row is written on the other reading
+        with self.assertRaisesRegex(SystemExit, "already in"):
+            self.build(lexgap=self.lexgap_file(line(self.title, other)))
+
+    def test_an_empty_lexgap_path_and_lexgap_with_tails_only_are_usage_errors(self):
+        for argv in (["--lexgap", ""], ["--lexgap", "x.tsv", "--tails-only"]):
+            with mock.patch.object(sys, "argv", ["build_overlay.py", *argv]), mock.patch.object(B, "build", side_effect=AssertionError("built")), \
+                    mock.patch.object(B, "rebuild_tails", side_effect=AssertionError("rebuilt")), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as e:
+                B.main()
+            self.assertEqual(e.exception.code, 2, argv)
 
     def test_lexgap_rows_sit_after_the_supplement_rows_and_before_the_manual_tail(self):
         w, bu = self.words[-1], self.bu

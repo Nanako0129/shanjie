@@ -754,7 +754,8 @@ def lexgap_rows(path, taken, scores, syllables, by_reading, fold_w, earlier=()):
             continue
         if w in taken:
             raise SystemExit(f"{path}:{n}: {w!r} is already in the base, a layer or a pack")
-        twin = next((b for b, _ in by_reading.get(tuple(syls), ()) if fold_w(b) == fold_w(w)), None) or next((b for b in by_read[p[0]] if fold_w(b) == fold_w(w)), None)
+        twin = next((b for b, _ in by_reading.get(tuple(syls), ()) if b != w and fold_w(b) == fold_w(w)), None) \
+            or next((b for b in by_read[p[0]] if b != w and fold_w(b) == fold_w(w)), None)   # w itself on the same reading is the seen check below
         if twin:
             raise SystemExit(f"{path}:{n}: {w!r} is a variant of {twin!r} on the same reading")
         sandhi[w] = sandhi_variant(w, syls)
@@ -781,6 +782,8 @@ def main():
     a = ap.parse_args()
     if a.reading_report and not a.moedict_readings:
         ap.error("--reading-report needs --moedict-readings")
+    if a.lexgap == "":
+        ap.error("--lexgap needs a file")
     if a.lexgap and a.tails_only:
         ap.error("--lexgap needs a full build, not --tails-only")
     if a.tails_only:
