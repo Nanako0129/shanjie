@@ -2221,4 +2221,4 @@ v5（2026-10-03，N0 之後）。S0、E 完成；N0 未過門檻（§2 N0 結果
 | 口語表當獨立項、似然不直接覆寫詞圖 | Xiao et al. 2022, PERT（https://arxiv.org/abs/2205.11737 ）；rime-wanxiang 與 librime-witogram 的正負結果（https://github.com/amzxyz/rime-wanxiang 、https://github.com/levelel/librime-witogram ） |
 | 按鍵分數、串流修正模擬、J 子集 | Jia & Zhao 2013, KySS（https://aclanthology.org/I13-1170/ ）；Jiang et al. 2011（https://aclanthology.org/W11-3509/ ）；AJIMEE-Bench（https://github.com/azooKey/AJIMEE-Bench ） |
 | 本機學習逐次累加、不一次到頂 | 威注音 3.8.2 起單字每選一次只挪一位（論壇 A 上的一篇文章）；Kuhn & De Mori 1990 的快取語言模型 |
-| 沒有授權乾淨的繁中聊天語料 | MozTW cc0-sentences 只有 26,393 句（https://github.com/moztw/cc0-sentences ）；論壇 A 的使用者條款只授權站方非營利使用 |
+| 沒有授權乾淨的繁中聊天語料 | MozTW cc0-sentences 只有 26,393 句（https://github.com/moztw/cc0-sentences ） |
