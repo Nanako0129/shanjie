@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用說明：按鍵、候選窗、中英混打與詞包｜善解輸入法</title>
+<meta name="description" content="善解在 Mac 上怎麼打字：標準與倚天鍵盤、候選窗按鍵、即時預測、看前文與語意校正、聊天／書面、選字記憶、中英混打與單按 Shift、詞包、模糊輸入。每一項寫預設值與開關位置。">
+<meta property="og:title" content="使用說明：按鍵、候選窗、中英混打與詞包｜善解輸入法">
+<meta property="og:description" content="善解在 Mac 上怎麼打字：標準與倚天鍵盤、候選窗按鍵、即時預測、看前文與語意校正、聊天／書面、選字記憶、中英混打與單按 Shift、詞包、模糊輸入。每一項寫預設值與開關位置。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/guide">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="使用說明：按鍵、候選窗、中英混打與詞包｜善解輸入法">
+<meta name="twitter:description" content="善解在 Mac 上怎麼打字：標準與倚天鍵盤、候選窗按鍵、即時預測、看前文與語意校正、聊天／書面、選字記憶、中英混打與單按 Shift、詞包、模糊輸入。每一項寫預設值與開關位置。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/guide">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "使用說明", "item": "https://shanjie.nyanako.com/guide"}]}</script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide" aria-current="page">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>使用說明</h1>
+<p class="sub">善解（v0.6.1）在 Mac 上怎麼打字。每一節寫它做什麼、預設值、在哪裡開關、從哪一版起有。設定都在輸入選單的「善解設定…」，常用的幾項選單上也有。</p>
+
+<ul class="toc" aria-label="本頁目錄">
+  <li><a href="#typing">打字與送出</a></li><li><a href="#candidates">候選窗</a></li><li><a href="#punctuation">標點</a></li>
+  <li><a href="#prediction">即時預測</a></li><li><a href="#context">看前文</a></li><li><a href="#rerank">語意校正</a></li>
+  <li><a href="#profiles">聊天與書面</a></li><li><a href="#learning">選字記憶</a></li><li><a href="#english">中英混打</a></li>
+  <li><a href="#packs">詞包</a></li><li><a href="#fuzzy">模糊輸入</a></li>
+</ul>
+
+<h2 id="typing">打字與送出</h2>
+<p>整句打注音，善解每一鍵都在本機重新選出整句；組字區的字都還能改，按 Enter 才送出。</p>
+<ul>
+<li>鍵盤：標準與倚天（v0.1.0），在善解的選單裡切換。</li>
+<li><kbd>Enter</kbd> 送出整句；<kbd>Shift</kbd><kbd>Enter</kbd> 送出後再換行。只打了注音、還沒選字時按 Enter，照畫面上顯示的送出（v0.4.0）。</li>
+<li>音節還沒打完時，<kbd>Backspace</kbd> 逐個刪注音符號；打完的字一次刪一個（v0.2.1）。<kbd>Esc</kbd> 清空組字區。</li>
+<li>組字區是空的時候按聲調鍵，打出聲調符號（v0.2.0）。</li>
+<li>組字區最多留 128 個單位才把前段送出（v0.6.0，之前是 40）。</li>
+</ul>
+
+<h2 id="candidates">候選窗</h2>
+<p>組字區有字時，按空白鍵或 <kbd>↓</kbd> 開候選窗，改選游標所在的那一段。改選之後，其他已經顯示的字固定不動（v0.5.0）。</p>
+<div class="table">
+<table>
+<thead><tr><th>按鍵</th><th>橫排（預設）</th><th>直排</th></tr></thead>
+<tbody>
+<tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>選這一列的第幾個</td><td>選看得到的第幾個</td></tr>
+<tr><td><kbd>↓</kbd></td><td>往下疊出更多候選列，每列 9 個（v0.2.0）</td><td>下一個</td></tr>
+<tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>上一個、下一個</td><td>上一個、下一個</td></tr>
+<tr><td>空白鍵</td><td>下一頁</td><td>下一個</td></tr>
+<tr><td><kbd>Enter</kbd></td><td colspan="2">選目前反白的</td></tr>
+<tr><td><kbd>Esc</kbd>、<kbd>Backspace</kbd></td><td colspan="2">關閉候選窗，組字區不變</td></tr>
+<tr><td><kbd>⌘</kbd><kbd>⌫</kbd></td><td colspan="2">忘記反白的詞（選字記憶），窗保持開著</td></tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>方向：設定視窗的「候選窗方向」選橫排或直排（v0.4.0），直排的按鍵照蘋果注音的直排。</li>
+<li>候選窗跟著 App 的深淺色（v0.3.0）；玻璃的深淺在設定視窗調。</li>
+</ul>
+
+<h2 id="punctuation">標點</h2>
+<ul>
+<li>標點留在組字區、和字一起送出；游標左邊是標點時開候選窗，列出同類的標點，附上和蘋果相同的名稱（v0.1.0、v0.2.0）。</li>
+<li><code>[</code>、<code>]</code>、<code>\</code>、<code>`</code> 不按 Shift 也打出標點，標準鍵盤的 <code>'</code>、<code>=</code> 也是（比照蘋果注音；倚天鍵盤這兩個鍵是注音）。</li>
+</ul>
+
+<h2 id="prediction">即時預測</h2>
+<ul>
+<li>打下一個詞的第一個注音，候選窗就列出接得上前文的詞（v0.3.0）；打到詞的中間也會預測，往回找 5 個音節（v0.4.0）。</li>
+<li>按 <kbd>Tab</kbd> 進入預測列，數字或 Enter 選取；不會自動替換你打的字。還沒進入的預測列前面有 ⇥ 提示；預測列顯示時按 <kbd>↓</kbd>，候選窗前面就是同樣的幾個詞（v0.5.0）。</li>
+<li>在 Chrome、Edge 等瀏覽器裡，組字區只有一個字時不顯示預測列（v0.6.1，預設開，設定可關）。</li>
+<li>預設開，選單可關。</li>
+</ul>
+
+<h2 id="context">看前文</h2>
+<ul>
+<li>善解讀取游標前已經送出的字，接著它選這一段的第一個詞；分好幾次送出的句子，選字仍接得上前面（v0.3.0）。</li>
+<li>v0.6.0 起，輸入法讀取同一行、游標前最多 64 個字；選字仍只用最後 2 個字。</li>
+<li>密碼欄與安全輸入時不讀前文。</li>
+</ul>
+
+<h2 id="rerank">語意校正</h2>
+<ul>
+<li>停頓時，小型字元語言模型（會意 SJ-SR-7-15M）在背景重排整句的前 8 名，不產生新字、不拖慢打字（v0.4.1）。</li>
+<li>強度有保守、標準（預設）、積極三段（v0.4.4），在設定視窗選。</li>
+<li>預設開，選單或設定視窗可關。手動加進詞庫的詞不會被它換掉（v0.6.0）。</li>
+<li>怎麼運作、量了什麼，見<a href="/how">怎麼選字</a>。</li>
+</ul>
+
+<h2 id="profiles">聊天與書面</h2>
+<ul>
+<li>兩種設定：聊天多參考口語詞頻表「常談」與打的讀音（v0.5.0）；書面多看前兩個詞（三元表「連文」，v0.4.7）。</li>
+<li>設定視窗可選「依 App 自動」（預設）、「一律聊天」、「一律書面」；依 App 自動時，選單的「這個 App 用聊天設定」可以逐個 App 切換（v0.4.1）。</li>
+</ul>
+
+<h2 id="learning">選字記憶</h2>
+<ul>
+<li>只從候選窗的改選與預測列的選取學習，依前文分開記；單字只在前文完全相同時套用（v0.2.0、v0.3.0）。</li>
+<li>句首學到的詞要後面接的音相同才加分，單字只在緊接兩個漢字的前文後面記（v0.4.2）。</li>
+<li>逐字改選拼出的 2–4 字詞學成新詞，下次直接打得出來（v0.5.0）。</li>
+<li>在候選窗按 <kbd>⌘</kbd><kbd>⌫</kbd> 忘記一個詞；選單的「清除選字記憶…」全部刪掉，刪之前會先確認。</li>
+<li>密碼欄與安全輸入時停止學習。學習檔放在哪、裡面有什麼，見<a href="/privacy#learning">隱私與資料</a>。</li>
+</ul>
+
+<h2 id="english">中英混打</h2>
+<p>v0.5.0 起預設開，設定 → 選字。英文留在組字區，和中文一起按 Enter 送出。</p>
+<ul>
+<li>打的鍵不可能是注音時，直接變回原本打的英文（<code>ok</code>、<code>gta6</code>，v0.6.1）；打錯了立刻按 <kbd>Esc</kbd> 變回注音。</li>
+<li>「快打時鍵序顛倒不當英文」（v0.6.1，預設開）：快打時同一個字的注音鍵先後顛倒（ㄍㄜˋ 打成 ㄜㄍˋ）照注音處理；開著時 <code>ls</code>、<code>mv</code> 這類字要按 Shift 打。</li>
+<li>「依按鍵順序判斷英文」（v0.6.1 起預設開）：打了聲調鍵才發現音節不存在時，整段變成英文。</li>
+<li><kbd>Shift</kbd>＋字母打一段英文，<kbd>Backspace</kbd> 逐字母刪（v0.4.5）。</li>
+<li>單按一下 <kbd>Shift</kbd> 在中文和英文之間切換（v0.6.1，預設開，設定可關）：游標上方短暫顯示「英」或「中」，每個 App 各自記；換 App 或停打 30 秒以上後開始打字，也會提示一次。</li>
+<li>標準排列下數字列直接打數字（「2026年1月15日」「3.14」），打完數字預測列接上可能的詞（v0.5.0）。</li>
+<li>中英文之間自動加空格：「我用claude寫」送出成「我用 claude 寫」（v0.5.0，預設關）。</li>
+</ul>
+
+<h2 id="packs">詞包</h2>
+<p>開關在設定 → 選字 →「詞包」；輸入選單只列出已開啟的詞包。</p>
+<div class="table">
+<table>
+<thead><tr><th>詞包</th><th class="num">詞數</th><th>預設</th><th>內容</th></tr></thead>
+<tbody>
+<tr><td>動漫與遊戲</td><td class="num">44,552</td><td>開</td><td>作品名與角色名（v0.4.0 起，v0.6.0 更新）；開著時詞包裡的詞照詞包自己的分數排</td></tr>
+<tr><td>資訊與 AI</td><td class="num">1,016</td><td>開</td><td>資訊名詞與 AI 用語（v0.6.0），例如「圖像生成」</td></tr>
+<tr><td>經典台詞</td><td class="num">208 列</td><td>關</td><td>電影台詞，原句和常打的說法都收（v0.6.1）</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">來源與授權見<a href="/licenses">開源與授權</a>。</p>
+
+<h2 id="fuzzy">模糊輸入與讀音容錯</h2>
+<ul>
+<li>模糊輸入（v0.6.0，預設全關，設定 → 選字 →「模糊輸入」）：ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ 四組模糊音，以及「鄰鍵打錯」（只適用標準排列）。</li>
+<li>輕聲容錯（v0.6.0，一律生效）：只有輕聲讀音的詞打成本調也打得出來；ㄐㄧㄝˊ ㄓㄚ 打得出「結紮」。</li>
+<li>「一／不／法」打本調或變調都能打出整個詞（v0.1.2）；詞庫為了容錯收錄的非標準讀音不擋住同音的一般詞（v0.3.0）。</li>
+</ul>
+
+<p class="next"><a href="/faq">常見問題 →</a><a href="/how">怎麼選字 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>

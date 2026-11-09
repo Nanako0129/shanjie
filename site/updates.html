@@ -3,192 +3,123 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>更新紀錄｜善解輸入法</title>
-<meta name="description" content="善解每週改了什麼：發佈了什麼、合併了哪些、評測的數字。">
-<meta property="og:title" content="善解更新紀錄">
-<meta property="og:description" content="善解每週改了什麼：發佈了什麼、合併了哪些、評測的數字。">
+<title>更新紀錄：每一版的變化與已知問題｜善解輸入法</title>
+<meta name="description" content="善解每一版對使用者的變化（v0.6.1、v0.6.0、v0.5.0…）、已合併還沒發版的改動，以及目前的已知問題。">
+<meta property="og:title" content="更新紀錄：每一版的變化與已知問題｜善解輸入法">
+<meta property="og:description" content="善解每一版對使用者的變化（v0.6.1、v0.6.0、v0.5.0…）、已合併還沒發版的改動，以及目前的已知問題。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://shanjie.nyanako.com/updates">
-<meta property="og:site_name" content="善解">
+<meta property="og:site_name" content="善解輸入法">
 <meta property="og:locale" content="zh_TW">
 <meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="更新紀錄：每一版的變化與已知問題｜善解輸入法">
+<meta name="twitter:description" content="善解每一版對使用者的變化（v0.6.1、v0.6.0、v0.5.0…）、已合併還沒發版的改動，以及目前的已知問題。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
 <link rel="canonical" href="https://shanjie.nyanako.com/updates">
 <meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="favicon.png" type="image/png" sizes="64x64">
-<style>
-  :root {
-    --paper: #F6F1E7; --paper-2: #EFE8DA; --ink: #1F1D1A; --ink-2: #5A544C; --line: #D9CFBD;
-    --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #8A5C14;
-    /* macOS built-in faces only (no web fonts): readers are Mac users; other systems fall back to their default serif/sans. */
-    --serif: "Songti TC", serif;
-    --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
-      --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
-    }
-  }
-  :root[data-theme="dark"] {
-    --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
-    --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.8 var(--sans); -webkit-font-smoothing: antialiased; }
-  main { max-width: 760px; margin: 0 auto; padding: 0 16px 72px; }
-  a { color: var(--seal); text-underline-offset: 3px; }
-  h1, h2, h3 { font-family: var(--serif); font-weight: 900; letter-spacing: .02em; }
-  h2 { font-size: 26px; margin: 72px 0 8px; }
-  h2 + .sub { color: var(--ink-2); margin: 0 0 24px; }
-  .rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
-
-  .tag { font: 500 13px/1.6 var(--sans); padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
-  .tag.done { color: var(--ok); border-color: currentColor; }
-  .tag.wip { color: var(--wip); border-color: currentColor; }
-  .back { display: inline-block; margin-top: 40px; font-size: 15px; }
-  h1 { font-size: 34px; margin: 12px 0 0; }
-  h1 + .sub { color: var(--ink-2); margin: 8px 0 0; }
-  article { margin: 28px 0 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
-  article h3 { margin: 0; font-size: 19px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
-  article p { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; }
-  article p b { color: var(--ink); font-weight: 500; }
-  article code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-  .note { margin: 12px 0 0; color: var(--ink-2); font-size: 15px; }
-  footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
-
-</style>
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "更新紀錄", "item": "https://shanjie.nyanako.com/updates"}]}</script>
 </head>
 <body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates" aria-current="page">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
 <main>
 
-<a class="back" href="./">← 善解首頁</a>
 <h1>更新紀錄</h1>
-<p class="sub">每週一段，新的在上面。標「已發佈」的可以從 Releases 或 Homebrew 更新；「已合併」的已進主線，不在 App 裡或還沒出新版本。</p>
+<p class="sub">每一版對使用者的變化，新的在上面。新版本可以在輸入法裡更新（設定→關於），或照<a href="/install#update">安裝頁的更新方式</a>。每一版完整的發佈說明在 <a href="https://github.com/Nanako0129/shanjie/releases">GitHub Releases</a> 。</p>
 
-<section>
-  <h2>2026-10-30～10-31</h2>
+<h2 id="unreleased">已合併、還沒發版</h2>
+<p class="sub">已經進了主線，隨下一版出貨；現在的 App 還沒有。</p>
+<ul>
+<li>語意校正模型換成會意 SJ-SR-8-15M：權重從 SJ-SR-7-15M 接續訓練，訓練用的繁體句不再套把台灣用語換掉的轉換，例如「權限」不再被換成「許可權」。</li>
+<li>在 Chromium 系的瀏覽器裡（例如 Threads 網頁的發文框），按 Tab 進入預測列時組字會重複出現一份：已修好。</li>
+<li>Crest 與 Aside 加進瀏覽器清單，套用和 Chrome 相同的「第一個字不顯示預測」規則。</li>
+</ul>
 
-  <article>
-    <h3>Crest 與 Aside 加進瀏覽器清單 <span class="tag done">已合併</span></h3>
-    <p>使用者回報 Crest、Aside 裡第一個音節的預測列也跑到左上角（2026-10-31）：兩個 App 加進瀏覽器清單，套用和 Chrome 相同的第一個音節規則，隨下一版出貨。</p>
-  </article>
+<h2 id="known-issues">目前的已知問題</h2>
+<p class="sub">v0.6.1 仍有的問題；修好的會從這裡移到對應的版本。</p>
+<ul>
+<li>Google 文件裡，組字區空著或只有一個字時，「英／中」的提示可能出現在視窗左上角；只有一個字時按 Tab、↓ 叫出的候選列也一樣。</li>
+<li>聊天設定「長歪了」「長這樣」的「長」仍可能選錯（書面設定是對的）；要靠「解碼時看讀音」修，見<a href="/roadmap">路線圖</a>。</li>
+<li>候選窗在 Orca（Electron 終端機）裡會跑位，還在收集紀錄。</li>
+</ul>
+<p class="note">遇到問題先看<a href="/faq">常見問題</a>。</p>
 
-  <article>
-    <h3>v0.6.1：中英混打接回、單按 Shift、經典台詞詞包 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-31 發佈（說明：<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/releases/v0.6.1.md">v0.6.1</a>）。中英混打打得出 <code>ok</code>、<code>gta6</code>：打的鍵不可能是注音時直接變回原本打的英文，英文留在組字區；新開關「快打時鍵序顛倒不當英文」（預設開）讓快打時同一個字的注音鍵先後顛倒照注音處理，不會變成英文；「依按鍵順序判斷英文」改成預設開。單按一下 Shift 在中文和英文之間切換，游標上方短暫顯示「英」或「中」，每個 App 各自記；換 App 或同一個 App 停打 30 秒以上之後，開始打字的第一個鍵也會提示一次（預設開，設定可關）。</p>
-    <p>經典台詞詞包（預設關，設定 → 選字 →「詞包」）：208 列電影台詞（電影原句和網友常打的說法都收），每列對照過文字出處。在 Chrome、Edge 等瀏覽器裡，組字區只有一個字時不顯示預測列，因為 Google 文件會把它擺到視窗左上角（預設開，設定可關）。設定視窗固定 620 pt 高，螢幕放不下時縮到可見範圍、內容捲動。</p>
-    <p>跨版本基準測試（v0.6.0 → v0.6.1，出貨設定）：十個集合在聊天與書面兩種設定下，每一句的選字都和 v0.6.0 相同；保留集口語半邊 124 → 124、新聞半邊 128 → 128。已知問題：Google 文件裡，組字區空著或只有一個字時，「英／中」的提示可能出現在視窗左上角。</p>
-  </article>
+<h2>發佈的版本</h2>
 
-</section>
+<article id="v0.6.1">
+  <h3>v0.6.1 <time datetime="2026-10-31">2026-10-31</time></h3>
+  <p>中英混打打得出 <code>ok</code>、<code>gta6</code>，可以單按 Shift 切換中英；加上經典台詞詞包。評測集上的選字和 v0.6.0 相同。</p>
+  <ul>
+    <li>中英混打：打的鍵不可能是注音時，直接變回原本打的英文，英文留在組字區和中文一起送出；新開關「快打時鍵序顛倒不當英文」（預設開）；「依按鍵順序判斷英文」改成預設開；不再查英文單字表。</li>
+    <li>單按一下 Shift 切換中英，游標上方短暫顯示「英」或「中」，每個 App 各自記；換 App 或停打 30 秒以上之後，開始打字的第一個鍵也會提示一次（預設開，設定可關）。</li>
+    <li>經典台詞詞包（預設關，設定 → 選字 →「詞包」）：208 列電影台詞，每列對照過文字出處。</li>
+    <li>在 Chrome、Edge 等瀏覽器裡，組字區只有一個字時不顯示預測列（Google 文件會把它擺到視窗左上角；預設開，設定可關）。</li>
+    <li>設定視窗固定 620 pt 高，螢幕放不下時縮到可見範圍、內容捲動。</li>
+  </ul>
+</article>
 
-<section>
-  <h2>2026-10-23～10-29</h2>
+<article id="v0.6.0">
+  <h3>v0.6.0 <time datetime="2026-10-29">2026-10-29</time></h3>
+  <p>換上一整組新模型，加上資訊與 AI 詞包與模糊輸入。錯字回報（80 句）聊天 33 → 70 句、書面 29 → 61 句。</p>
+  <ul>
+    <li>新模型：通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K；連文分成書面 SJ-CX-2-7.7M 與聊天 SJ-CX-2-950K。語意校正不會再把你手動加進詞庫的詞換掉。</li>
+    <li>資訊與 AI 詞包（1,016 詞，預設開）；動漫詞包更新到 44,552 詞；網路用語與實況主、店家、人名進詞庫。詞包開關搬到設定 → 選字 →「詞包」。</li>
+    <li>模糊輸入（預設全關）：ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ 與鄰鍵打錯；輕聲容錯；ㄐㄧㄝˊ ㄓㄚ 打得出「結紮」。</li>
+    <li>組字區最多留 128 個單位才把前段送出（之前 40）；常談在三種強度都生效；輸入法讀取同一行、游標前最多 64 個字，會意仍只用最後 2 個字。</li>
+    <li>已知的退步：資訊與 AI 詞的檢查集聊天 46 → 36、書面 39 → 27。</li>
+  </ul>
+</article>
 
-  <article>
-    <h3>v0.6.0：新模型、資訊與 AI 詞包、模糊輸入 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-29 發佈（說明：<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/releases/v0.6.0.md">v0.6.0</a>）。換上一整組新模型：通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、會意 SJ-SR-7-15M、常談 SJ-CL-2-69K；連文分成兩張，書面 SJ-CX-2-7.7M、聊天 SJ-CX-2-950K（聊天設定第一次用到前兩個詞）。錯字回報（出貨設定，80 句）：聊天 33 → 70 句、書面 29 → 61 句。語意校正不會再把你手動加進詞庫的詞換掉，例如書面設定的「米雅歌」不再被改成「米亞哥」。</p>
-    <p>詞庫與詞包：資訊與 AI 詞包（預設開）1,016 個詞，例如「圖像生成」，開關搬到設定 → 選字 →「詞包」；動漫詞包更新到 2026-10-22 的來源，共 44,552 詞；網路用語 507 條常用說法與第二輪 910 個詞直接收進詞庫；補了 119 個實況主、YouTuber、節目與頻道名、店家餐廳飯店企業 225 個、台灣以外的中文圈人名 14 個。</p>
-    <p>打字的改進：模糊輸入（設定 → 選字，預設全關）有 ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ 四組模糊音與「鄰鍵打錯」，鄰鍵只適用標準排列；只有輕聲讀音的詞打成本調也打得出來；ㄐㄧㄝˊ ㄓㄚ 打得出「結紮」；組字區最多留 128 個單位才把前段送出，51 字的長句整句留在組字區；聊天設定的保守、積極兩檔也用上常談與讀音項；輸入法讀取同一行、游標前最多 64 個字當前文，會意仍只用最後 2 個字；依按鍵順序判斷英文（預設關，快打時鍵序顛倒的情況還沒量過）；密碼框的說明改成描述用途。</p>
-    <p>跨版本基準測試（v0.5.0 → v0.6.0，出貨設定）：聊天的 Discord 聊天評測集（4,958 句）87.90% → 93.69%（改對 336、改壞 49）、cvtune（3,791 句）91.93% → 93.12%（95／50）、dev302 89.07% → 92.72%（14／3，p 0.013）；書面的 Discord 聊天評測集 86.06% → 92.54%（396／75）、cvtune 91.80% → 92.96%（104／60）、dev302 87.75% → 89.74%（15／9，p 0.31，不顯著）。打字測驗（76 句）：聊天 72 → 74（2／0）、書面 69 → 74（5／0）。維基段落（wikitune）兩種設定各少約 24 句（聊天 77.26% → 76.41%，80／104，p 0.09；書面 80.16% → 79.34%，78／101，p 0.10，都不顯著）。保留集（發版前量一次，兩個半邊是新換的集合）：口語半邊（聊天，150 句）115 → 124（10／1，p 0.012）、新聞半邊（書面，150 句）125 → 128（3／0，p 0.25，不顯著）。速度與記憶體（同一場輪流跑，開跑時 load avg 5.8，不是閒置窗，只能看兩版的差距）：每鍵 p95 2.06 → 2.23 毫秒，引擎載入 892 → 945 毫秒，記憶體 441 → 480 MB，語意校正 p95 8.3 → 8.6 ms。各集合的完整數字在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">docs/benchmark.md</a>。</p>
-    <p>已知問題：資訊與 AI 詞的檢查集聊天 46 → 36、書面 39 → 27；開著 ㄓ／ㄗ 時「ㄗ ㄉㄠˋ ㄌㄜ˙」仍是「資到了」；聊天設定「長歪了」仍選成「掌歪了」（書面設定是對的），原因是讀音通道項對「長」讀ㄓㄤˇ扣了分，下一版修。更新後如果某個 App 打不出字，請把那個 App 完全結束（⌘Q）再打開。</p>
-  </article>
+<article id="v0.5.0">
+  <h3>v0.5.0 <time datetime="2026-10-22">2026-10-22</time></h3>
+  <p>聊天更懂口語；安裝程式可以選「這台 Mac」；輸入法在 App 沙盒裡執行。</p>
+  <ul>
+    <li>聊天設定的語意校正多參考口語詞頻表「常談」與打的讀音：「桌腳的螺絲鬆掉了」「是不是很雷啊」不再選成「羅斯松」「很累」。</li>
+    <li>「這台 Mac」：每個帳號都能用，有程式開著安全輸入時照常能用，安裝與更新各要一次管理員密碼。更新交給「善解更新」。</li>
+    <li>數字列直接打數字（標準排列、中英混打開著時）；中英混打改成預設開；改選後其他字不動；預測列與 ↓ 的候選一致；逐字改選拼出的 2–4 字詞學成新詞；中英文之間自動加空格（預設關）。</li>
+  </ul>
+</article>
 
-</section>
+<h2 id="older">更早的版本</h2>
+<div class="table">
+<table>
+<thead><tr><th>版本</th><th>日期</th><th>重點</th></tr></thead>
+<tbody>
+<tr><td>v0.4.7</td><td><time datetime="2026-10-17">2026-10-17</time></td><td>書面設定加上三元表「連文」；設定的「關於」頁與自動更新；App 圖示。這一版要手動更新一次</td></tr>
+<tr><td>v0.4.6</td><td><time datetime="2026-10-16">2026-10-16</time></td><td>詞類表換成 classes-v5，補回 v0.4.4 起立法院發言語料的大部分退步</td></tr>
+<tr><td>v0.4.5</td><td><time datetime="2026-10-16">2026-10-16</time></td><td>中英混打（實驗）：英文留在組字區和中文一起送出、Shift＋字母打一段英文</td></tr>
+<tr><td>v0.4.4</td><td><time datetime="2026-10-15">2026-10-15</time></td><td>設定視窗改成左側分類；model-v6；語意校正強度；中英混打（實驗，預設關）</td></tr>
+<tr><td>v0.4.3</td><td><time datetime="2026-10-14">2026-10-14</time></td><td>解碼器依「字串＋最後一個詞」保留斷法（「下來分析」不再出現「夏來分析」）</td></tr>
+<tr><td>v0.4.2</td><td><time datetime="2026-10-14">2026-10-14</time></td><td>選字記憶的修正：句首學到的詞要後面接的音相同才加分（「我是買新的」不再變成「我試買新的」）</td></tr>
+<tr><td>v0.4.1</td><td><time datetime="2026-10-13">2026-10-13</time></td><td>語意校正預設開；聊天／書面可以自己選；動漫詞包補上含間隔號的名字</td></tr>
+<tr><td>v0.4.0</td><td><time datetime="2026-10-10">2026-10-10</time></td><td>新的安裝程式、更新不再弄壞 Caps Lock 切換、設定視窗、候選窗直排、動漫與遊戲詞包、Enter 送出未完成的注音</td></tr>
+<tr><td>v0.3.0</td><td><time datetime="2026-10-08">2026-10-08</time></td><td>看前文選字、台灣字形、詞類回退、即時預測、候選窗跟著 App 深淺色</td></tr>
+<tr><td>v0.2.1</td><td><time datetime="2026-10-07">2026-10-07</time></td><td>Backspace 逐個刪注音符號</td></tr>
+<tr><td>v0.2.0</td><td><time datetime="2026-10-05">2026-10-05</time></td><td>選字記憶、玻璃候選窗與多列候選、標點名稱、空組字區的聲調鍵</td></tr>
+<tr><td>v0.1.0–v0.1.2</td><td><time datetime="2026-10-04">2026-10-04</time>～10-05</td><td>輸入法本體與整句選字、安裝程式、標點留在組字區、「一／不／法」變調讀音</td></tr>
+</tbody>
+</table>
+</div>
 
-<section>
-  <h2>2026-10-19～10-22</h2>
-
-  <article>
-    <h3>v0.5.0：聊天更懂口語、這台 Mac、App 沙盒 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-22 發佈（說明：<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/releases/v0.5.0.md">v0.5.0</a>）。聊天設定的語意校正多參考口語詞頻表「常談」（SJ-CL-1-68K），也看打的讀音是不是那個字常見的讀法：「桌腳的螺絲鬆掉了」「是不是很雷啊」「變快」上一版選成「羅斯松」「很累」「便會」，這一版都選對（這一版的常談與讀音在語意校正強度保守、積極時沒有生效，之後的版本補上，三種強度都生效）。書面設定的語意校正重選融合參數（會意 SJ-SR-6-14M，權重和上一版相同，聊天的參數不變）。</p>
-    <p>安裝程式可以選「這台 Mac」（裝到 <code>/Library/Input Methods</code>，每個帳號都能用，有程式開著安全輸入時照常能用，安裝與更新各要一次管理員密碼）或「只有我的帳號」。輸入法本體在 App 沙盒裡執行，更新由不在沙盒裡、只會更新善解的「善解更新」完成。</p>
-    <p>打字的改進：標準排列、中英混打開著時數字列直接打數字（「2026年1月15日」「3.14」，「下午3」之後預測列接「點」）；中英混打（實驗）改成預設開；改選後其他字不動；預測列與 ↓ 的候選一致；逐字改選拼出的 2–4 字詞會學成新詞；中英文之間自動加空格（預設關）；「關於」頁列出內附的六個模型。</p>
-    <p>跨版本基準測試（v0.4.7 → v0.5.0）：兩種設定都沒有集合顯著變差；聊天的 Discord 聊天評測集 +88／−34、書面的 wikitune +39／−5。保留集（300 句）：聊天 234 → 237、書面 233 → 241。</p>
-  </article>
-
-</section>
-
-<section>
-  <h2>2026-10-12～10-18</h2>
-
-  <article>
-    <h3>v0.4.7：書面設定看前兩個詞；「關於」頁與自動更新；App 圖示 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-17 發佈。書面設定解碼時加上三元表「連文」（SJ-CX-1-7.7M）；設定多了「關於」頁、自動檢查更新（Sparkle）；App 有了朱紅印章「解」的圖示。這一版要手動更新一次，之後的版本可以在輸入法裡直接更新。</p>
-  </article>
-  <article>
-    <h3>v0.4.6：詞類表換成 classes-v5 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-16 發佈。補回 v0.4.4 起立法院發言語料的退步。</p>
-  </article>
-  <article>
-    <h3>v0.4.5：中英混打打英文不用先按空白 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-16 發佈。英文留在組字區和中文一起送出；Shift＋字母打一段英文。</p>
-  </article>
-  <article>
-    <h3>v0.4.4：設定視窗左側分類、model-v6、語意校正強度、中英混打（實驗） <span class="tag done">已發佈</span></h3>
-    <p>2026-10-15 發佈。設定視窗改成左側分類、不再超出螢幕；新模型 model-v6；語意校正強度可以選；中英混打（實驗，當時預設關）。</p>
-  </article>
-
-  <article>
-    <h3>v0.4.3：解碼器依「字串＋最後一個詞」保留斷法 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-14 發佈。以前每個位置同樣的字只留分數最高的一種斷法，會提早丟掉後面接得比較順的那一種；書面設定句首打「ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ」會出「夏來分析」，現在是「下來分析」（實機確認）。</p>
-    <p>跨版本基準測試（v0.4.2 → v0.4.3）：每個集合、兩種設定的第一名相同或變好；立法院發言語料聊天 +12、書面 +18（都顯著）。保留集：聊天 191 → 191、書面 187 → 189。名單去重後變短，少數集合「正解在前 64 名」少了 1–4 句。</p>
-  </article>
-
-  <article>
-    <h3>v0.4.2：選字記憶的修正 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-14 發佈。句首改選過一次「我試」之後，「我是買新的」會變成「我試買新的」；現在句首學到的詞要後面接的音相同才加分，單字只在緊接兩個漢字的前文後面記。選字結果在評測上和 v0.4.1 相同（評測沒有學習資料）。</p>
-  </article>
-
-  <article>
-    <h3>語意校正預設開 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-13 合併，v0.4.1 發佈（2026-10-13）。模型是 tinylm-v3（1,440 萬參數，本機執行，只在前 8 名候選之間挑，不產生新字）。</p>
-    <p>聊天設定的參數用私人聊天訊息選，計分是「改對 − 改壞」，改壞率上限 0.5%。選值時沒用到的月份（2026-08，6,559 個子句）：<b>改對 125、改壞 16</b>。保留的評測句（227 句）聊天設定：<b>改對 11、改壞 0</b>。</p>
-    <p>例子：<code>我等一下在過去</code> → <code>我等一下再過去</code>。語意校正要「避免把敏感字詞排在前面」開著才作用。</p>
-  </article>
-
-  <article>
-    <h3>聊天／書面可以自己選 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-12 合併，v0.4.1 發佈（2026-10-13）。設定視窗可選「依 App 自動」（預設）、「一律聊天」、「一律書面」；依 App 自動時，選單可替目前的 App 切換，設定視窗列出改過的 App、可以移除。</p>
-  </article>
-
-  <article>
-    <h3>動漫詞包 <span class="tag done">已發佈</span></h3>
-    <p>2026-10-13 合併，v0.4.1 發佈（2026-10-13）。含間隔號的名字（例如「洛琪希·米格路迪亞」）把名和姓分開收；新增「獄門疆」、補上「虎杖悠仁」的讀音；名字裡的「唯」改讀 ㄨㄟˊ。</p>
-    <p>詞包從約 3 萬詞增加到約 4.5 萬詞。</p>
-  </article>
-
-  <article>
-    <h3>每一版用出貨設定跑分 <span class="tag done">已合併</span></h3>
-    <p>S-bench 套件 v2：每一版用自己出貨的模型與設定量，結果在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">docs/benchmark.md</a>。v0.4.1 對 v0.4.0，聊天設定，數字是答對句數（修好／弄壞）：</p>
-    <p>開發集 dev302：241 → 259（18／0）；錯字回報（前 80 句）：17 → 25（9／1）；公開對話集 cvtune：3,360 → 3,441（84／3）；維基 wikitune：2,074 → 2,179（110／5）；唯一變差的是維基錯字表 wikitypo：136 → 134（0／2，p = 0.5）。書面設定每個集合持平或變好。保留集（227 句，平常不看）：聊天 180 → 191（11／0），書面 184 → 187（3／0）。</p>
-  </article>
-
-  <article>
-    <h3>錯字回報與解碼器的合併問題</h3>
-    <p>這週加了第 73–87 列，共 15 句（2026-10-12～13）。這些句子只用來評測，不拿來訓練。</p>
-    <p>從「夏來分析」（應為「下來分析」）找到解碼器的合併問題：每個位置同一個字串只留一條路徑，會丟掉接下去更好的拆法。試驗在公開調參集上淨改對 +3 到 +7 句。原本排成 v0.4.2 的第一片，2026-10-14 改跟 v0.4.3 出（v0.4.2 先單獨發選字記憶的修正），同日發佈。</p>
-  </article>
-
-  <article>
-    <h3>接下來的順序 <span class="tag">規劃</span></h3>
-    <p>2026-10-13 排定的順序：解碼器合併（後來改跟 v0.4.3，2026-10-14 發佈）→ 句首單字的選字記憶（句首打「照建議」會出「趙建議」，改選也記不住）→ 語意校正強度（保守／標準／積極，預設維持改壞率 ≤ 0.5%）。領域詞包（資訊與 AI、醫藥、法律）跟下一版語言模型一起。</p>
-  </article>
-
-  <article>
-    <h3>資料類 Release <span class="tag done">已發佈</span></h3>
-    <p>tinylm-v2（2026-10-12）、tinylm-v3（2026-10-13）已發佈在 <a href="https://github.com/Nanako0129/shanjie/releases">GitHub Releases</a>。</p>
-  </article>
-</section>
-
-<footer>
-  <span>善解 shanjie</span>
-  <span>最後更新：2026-11-01</span>
-</footer>
+<p class="next"><a href="/roadmap">路線圖 →</a><a href="/install#update">怎麼更新 →</a></p>
 
 </main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
 </body>
 </html>
