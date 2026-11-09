@@ -293,9 +293,9 @@ final class SettingsTests: XCTestCase {
         try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
         let r = rig()
         let before = r.shell.engine
-        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        let line = { r.controller.session.menu.packLines }
         XCTAssertTrue(r.model.itPack, "default on")
-        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞")
+        XCTAssertEqual(line(), ["資訊與 AI 詞"])
         r.model.setItPack(false)
         XCTAssertFalse(r.model.itPack)
         XCTAssertNil(line(), "the menu line follows the switch")
@@ -319,11 +319,11 @@ final class SettingsTests: XCTestCase {
         }
         let r = rig()
         let before = r.shell.engine
-        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        let line = { r.controller.session.menu.packLines }
         XCTAssertNil(r.beauty.beautyPack)
         XCTAssertTrue(r.model.beautyPack, "default on")
         XCTAssertEqual(r.shell.packMask & CoreEngine.packBeauty, CoreEngine.packBeauty, "an unset beautyPack is in the mask")
-        XCTAssertEqual(line(), "已開啟的詞包：美妝與保養詞")
+        XCTAssertEqual(line(), ["美妝與保養詞"])
         XCTAssertEqual(typed(r), "碧莉菁華")
         r.model.setBeautyPack(false)
         XCTAssertEqual(r.beauty.beautyPack, false)
