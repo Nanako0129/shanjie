@@ -169,7 +169,7 @@ Linux `debug` job 在既有步驟之後加三步：
 - `VK_PRIOR`、`VK_NEXT` 不送核心：核心只在直排候選窗開著時才收這兩個鍵（`shanjie.h`），目前沒有候選窗。表外的鍵（功能鍵、數字鍵盤、`VK_PROCESSKEY` 等）換不出來，直通。
 - 字元鍵（`0`–`9`、`A`–`Z`、`VK_OEM_1`–`VK_OEM_7`、`VK_OEM_PLUS`、`VK_OEM_MINUS`、`VK_OEM_COMMA`、`VK_OEM_PERIOD`）送 kind 1，`ch` 是美式鍵盤上該鍵**不按 Shift** 的字元（`a`、`1`、`,`、`;`、`` ` ``、`\` …）。標準注音排列依實體鍵位，與目前的鍵盤配置無關，所以用固定的表，不呼叫 `ToUnicode`。
 - 修飾鍵：Shift → bit0、Ctrl → bit1，Caps Lock 為開時帶 bit4（`GetKeyState` 的 toggle 位元；核心第 1 條直通）。帶 Alt 或 Win 的鍵（含 AltGr＝Ctrl+Alt）不送核心，`pfEaten = FALSE`。
-- **`OnTestKeyDown` 不推進引擎**，只回答「可能會吃」：這個實例有開著的組字時，任何換得出來的鍵都回 TRUE；沒有組字時，只有沒帶 Ctrl 的字元鍵與空白鍵、以及 Ctrl+\（核心第 1 條的例外，修飾位元恰為 Ctrl）回 TRUE，其他回 FALSE，鍵直接交給 App。
+- **`OnTestKeyDown` 不推進引擎**，只回答「可能會吃」：這個實例有開著的組字時，任何換得出來的鍵都回 TRUE；沒有組字時，剛好是核心在組字區空時會處理的鍵才回 TRUE（中英混打、預測關、標準排列）：沒帶修飾鍵的字元鍵（注音、聲調、標點鍵，規則 2、14、22a）、`docs/spec/keys-and-composition.md` §8.1 那幾個 Shift＋標點鍵、Ctrl+\（核心第 1 條的例外，修飾位元恰為 Ctrl）；其他回 FALSE，鍵直接交給 App，包括核心會直通的空白鍵、Shift＋英文字母與 Caps Lock 開著時的鍵（規則 1、22）。理由見 §5.4：IMM32 宿主裡 `OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失。
 - 驗證：`keys::tests`（`special_keys_map_to_their_kind`、`page_keys_and_unlisted_keys_are_not_sent`、`character_keys_carry_the_unshifted_keycap`、`modifier_bits`、`alt_and_win_keys_are_not_converted`、`on_test_key_down_with_an_empty_composition`、`on_test_key_down_with_a_composition`）。
 
 ### 3.7 `OnKeyDown` 與文件的改動
@@ -441,7 +441,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 - 固定寬度、小端，不用自描述的序列化。每則：`u32 len`、`u16 proto`、`u16 type`、`u64 seq`，後面是型別專屬的內容。字串一律 UTF-16 長度加資料。
 - 客戶端 → 常駐程序：`Hello { build_hash, pid, tid }`（pid、tid 只是資訊，不拿來授權）；`Key { ctx, ShanjieKey }`；`Release { ctx }`；`Reset { ctx }`（DLL 接住 panic 之後；送出後客戶端關掉這條連線，因為 panic 可能發生在一次交換的中間）。
-- 常駐程序 → 客戶端：`Welcome { build_hash }`；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected }`（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理）；預留 `Pushed`，客戶端收到就丟掉。
+- 常駐程序 → 客戶端：`Welcome { build_hash }`；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected, candidates }`（`candidates` 預留給候選窗，這一版一定是空的、客戶端不用）（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理）；預留 `Pushed`，客戶端收到就丟掉。
 - `proto` 不同 → `Refuse { 1 }`；`build_hash` 不同不拒絕、不記錄。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
 - **擁有者由常駐程序指定**：`owner = (連線 ID, ctx)`，連線 ID 單調遞增、不重用；客戶端只送自己的 `ctx`（`ITfContext` 的指標值），它只在自己那條連線裡有意義。換擁有者先 `reset(mode 1)`（§3.4 的那一套：一個引擎、開了候選窗就在常駐程序裡補一個 ESC）。`Release` 要 `(連線, ctx)` 完全相符才 reset；`Reset` 與斷線只看連線，是目前的擁有者才 reset 並清掉擁有者。
 - **解析規則**（兩端共用）：
@@ -454,7 +454,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 5.4 通訊
 
-- **直通在 `OnTestKeyDown` 決定**：斷路器生效、`Refuse { 1 }` 之後的永久直通、`Refuse { 3 }` 的 60 秒冷卻期間一律回 FALSE。組字區是空的、照 §3.6 會吃的鍵，`OnTestKeyDown` 先確認這條執行緒有能用的連線：沒有就當場連線（開 pipe、核對伺服器、`Hello`；pipe 不存在時照 §5.2 的條件啟動常駐程序、不等），連不上（含 `NotReady`）就回 FALSE，鍵照原樣交給 App。理由：IMM32（CUAS）的宿主（例如「執行」對話框）裡，`OnTestKeyDown` 回 TRUE 的鍵會變成 `VK_PROCESSKEY`，`OnKeyDown` 再放行也收不回原本的字元，鍵就消失了（VM 實測：常駐程序還沒起來時在「執行」對話框送的鍵沒有出現）。explorer 會先呼叫 `OnTestKeyDown`，所以啟動也從這裡發生。組字開著時照常送常駐程序；每鍵才知道的 `Busy` 在 IMM32 宿主裡仍會讓那一鍵消失（已知限制，應該很少見）。
+- **直通在 `OnTestKeyDown` 決定**：斷路器生效、`Refuse { 1 }` 之後的永久直通、`Refuse { 3 }` 的 60 秒冷卻期間一律回 FALSE。組字區是空的、照 §3.6 會吃的鍵，`OnTestKeyDown` 先確認這條執行緒有能用的連線：沒有就當場連線（開 pipe、核對伺服器、`Hello`；pipe 不存在時照 §5.2 的條件啟動常駐程序、不等），連不上（含 `NotReady`）就回 FALSE，鍵照原樣交給 App。理由：IMM32（CUAS）的宿主（例如「執行」對話框）裡，`OnTestKeyDown` 回 TRUE 的鍵會變成 `VK_PROCESSKEY`，`OnKeyDown` 再放行也收不回原本的字元，鍵就消失了（VM 實測：常駐程序還沒起來時在「執行」對話框送的鍵沒有出現）。explorer 會先呼叫 `OnTestKeyDown`，所以啟動也從這裡發生。組字區空時核心一定會直通的鍵（空白鍵、Shift＋英文字母、Caps Lock 開著時的鍵）在 §3.6 就回 FALSE。留著的舊連線在 `OnTestKeyDown` 先以零位元組的 `PeekNamedPipe` 核對（不等待），常駐程序已經結束就丟掉重連。剩下的已知限制：`OnTestKeyDown` 之後才知道的失敗（`OnKeyDown` 收到 `Busy`、讀取逾時、常駐程序剛好在兩次呼叫之間結束）在 IMM32 宿主裡仍會讓那一鍵消失，應該很少見。
 - **第一個鍵才連線**（不在 `ActivateEx` 連）；一個 TIP 實例最多一條連線。組字區是空的而且閒置 60 秒，客戶端自己關連線（UI 執行緒上 15 秒一次的 `SetTimer`）。連線曾經存在後 `DllCanUnloadNow` 一律回 `S_FALSE`。
 - 常駐程序每條連線一條執行緒，本體包 `catch_unwind`。引擎一把鎖：`Key` 一律 `try_lock`，拿不到就立刻回 `Busy`（客戶端直通）；`Release`、`Reset` 與斷線清理等鎖（沒有人在等它們的回應，跳過會留下錯的擁有者、讓已經送出的字再出現一次），等的時間最多是別人一次核心呼叫。先放掉鎖再寫回應，寫入逾時 1 秒就斷那條連線。
 - 閒置逾時只用在 `Hello` 之前（1 秒）。依客戶端的 AppContainer SID 或 PID 限制每個客戶端的連線數（4）：只拿來限流，不拿來授權。送出最後一則（`Refuse`、`NotReady`）之後等客戶端關閉最多 1 秒再 `DisconnectNamedPipe`，免得客戶端讀不到。

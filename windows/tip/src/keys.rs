@@ -2,7 +2,6 @@
 //! Pure functions: no TSF, so the unit tests need no host. `Key` holds a typed character, so no `Debug` (R2).
 
 pub const KIND_CHAR: u32 = 1;
-pub const KIND_SPACE: u32 = 2;
 
 pub const MOD_SHIFT: u32 = 1;
 pub const MOD_CONTROL: u32 = 2;
@@ -72,14 +71,27 @@ pub fn map_key(vk: u32, m: Mods) -> Option<Key> {
     Some(Key { kind, ch, modifiers })
 }
 
-/// `OnTestKeyDown` does not advance the engine, so it can only say "may eat". With a composition every mapped key may be eaten;
-/// without one only a plain character key, Space, and Ctrl+\ (core rule 1's exception) may.
+/// The keycaps whose Shift form is a punctuation key of docs/spec/keys-and-composition.md §8.1 (Shift+, gives ，, Shift+1 gives ！, …).
+const SHIFT_PUNCT: [char; 13] = [',', '.', '/', '1', ';', '\\', '=', '[', ']', '9', '0', '`', '\''];
+
+/// `OnTestKeyDown` does not advance the engine, so it can only say "may eat". With a composition every mapped key may be eaten.
+/// Without one, exactly the keys the core handles with an empty composition (English input and prediction off, standard layout):
+/// a plain character key (a Zhuyin, tone or punctuation key, rules 2, 14, 22a), a Shift+key of the §8.1 punctuation list, and Ctrl+\.
+/// Everything else the core passes through (rules 1 and 22): Space, Shift+letter, Caps Lock on, other modifiers. Those must be
+/// refused here: in an IMM32 host a key `OnTestKeyDown` claims is lost when `OnKeyDown` then lets it go (docs/spec/windows-tip.md §5.4).
 pub fn may_eat(composing: bool, k: &Key) -> bool {
     if composing {
         return true;
     }
-    let plain = k.modifiers & MOD_CONTROL == 0;
-    (plain && (k.kind == KIND_CHAR || k.kind == KIND_SPACE)) || (k.kind == KIND_CHAR && k.ch == '\\' as u32 && k.modifiers == MOD_CONTROL)
+    if k.kind != KIND_CHAR {
+        return false;
+    }
+    match k.modifiers {
+        0 => true,
+        MOD_SHIFT => char::from_u32(k.ch).is_some_and(|c| SHIFT_PUNCT.contains(&c)),
+        MOD_CONTROL => k.ch == '\\' as u32,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -148,12 +160,21 @@ mod tests {
 
     #[test]
     fn on_test_key_down_with_an_empty_composition() {
-        // Plain character keys and Space may be eaten.
+        // Plain character keys (Zhuyin, tone, punctuation) and the §8.1 Shift punctuation may be eaten.
         assert!(may_eat(false, &key(0x41, plain())));
         assert!(may_eat(false, &key(0x31, plain())));
         assert!(may_eat(false, &key(0xBC, plain())));
-        assert!(may_eat(false, &key(0x41, Mods { shift: true, ..plain() })));
-        assert!(may_eat(false, &key(0x20, plain())));
+        for vk in [0xBC, 0xBE, 0xBF, 0x31, 0xBA, 0xDC, 0xBB, 0xDB, 0xDD, 0x39, 0x30, 0xC0, 0xDE] {
+            assert!(may_eat(false, &key(vk, Mods { shift: true, ..plain() })), "Shift+vk {vk:#x}");
+        }
+        // What the core passes with an empty composition goes to the app (rules 1 and 22): Space, Shift+letter, Shift+2..8,
+        // Shift+-, and any key with Caps Lock on.
+        assert!(!may_eat(false, &key(0x20, plain())));
+        assert!(!may_eat(false, &key(0x41, Mods { shift: true, ..plain() })));
+        assert!(!may_eat(false, &key(0x32, Mods { shift: true, ..plain() })));
+        assert!(!may_eat(false, &key(0xBD, Mods { shift: true, ..plain() })));
+        assert!(!may_eat(false, &key(0x41, Mods { caps: true, ..plain() })));
+        assert!(!may_eat(false, &key(0x31, Mods { caps: true, ..plain() })));
         // Everything else goes to the app.
         for vk in [0x0D, 0x08, 0x2E, 0x1B, 0x25, 0x27, 0x26, 0x28, 0x24, 0x23, 0x09] {
             assert!(!may_eat(false, &key(vk, plain())), "vk {vk:#x}");

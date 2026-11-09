@@ -1,4 +1,4 @@
-//! The COM boundary wrapper (docs/spec/windows-tip.md §3 "COM boundary"). Every COM method body, every `Dll*` export, every
+//! The COM boundary wrapper (docs/spec/windows-tip.md §3.9). Every COM method body, every `Dll*` export, every
 //! `IClassFactory` method and `DoEditSession` runs inside it: a silent panic hook installed on first entry (`DllMain` does nothing, so it
 //! cannot be installed there), `catch_unwind`, and a bare failure code. Failures are `Error::from_hresult`, never an error with a message
 //! (which would hang an `IErrorInfo` on the thread or hand text to a debugger).

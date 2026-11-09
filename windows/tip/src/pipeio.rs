@@ -71,6 +71,7 @@ impl Pipe {
         self.h
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // only the tests wait on it directly
     pub fn event(&self) -> HANDLE {
         self.ev
     }

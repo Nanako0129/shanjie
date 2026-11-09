@@ -32,7 +32,7 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_OVERLAPPED, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, SECURITY_IDENTIFICATION,
     SECURITY_SQOS_PRESENT, FILE_FLAGS_AND_ATTRIBUTES,
 };
-use windows::Win32::System::Pipes::{GetNamedPipeServerProcessId, GetNamedPipeServerSessionId};
+use windows::Win32::System::Pipes::{GetNamedPipeServerProcessId, GetNamedPipeServerSessionId, PeekNamedPipe};
 use windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcessId, GetCurrentThreadId, InitializeProcThreadAttributeList, OpenProcess, OpenProcessToken,
@@ -42,7 +42,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
-/// §5.4: the in-DLL engine measured a per-key p95 of 5.5 ms and a maximum of 12.5 ms inside the DLL; 200 ms is far above both.
+/// §5.4's 200 ms deadline. The in-DLL engine measured a per-key p95 of 5.5 ms and a maximum of 12.5 ms (§3.13); 200 ms is far above both.
 const REPLY: Duration = Duration::from_millis(200);
 const IDLE: Duration = Duration::from_secs(60);
 /// How often the idle check runs (the connection closes between 60 and 75 s idle).
@@ -301,6 +301,12 @@ pub fn ready() -> bool {
     let Some(me) = me() else { return false };
     LINK.try_with(|cell| {
         let Ok(mut slot) = cell.try_borrow_mut() else { return false };
+        // A connection kept from an earlier key may point at a host that has since ended: a broken pipe fails a zero-byte peek at
+        // once (no wait), so it is dropped and a new one made here, before the key is claimed.
+        // SAFETY: a pipe handle this connection owns; no buffers.
+        if slot.as_ref().is_some_and(|l| unsafe { PeekNamedPipe(l.pipe.handle(), None, 0, None, None, None) }.is_err()) {
+            *slot = None;
+        }
         if slot.is_none() {
             *slot = connect(me);
         }
