@@ -16,13 +16,13 @@
   function halfEvenUp(kept, rest) {
     return rest[0] > "5" || (rest[0] === "5" && (/[1-9]/.test(rest.slice(1)) || Number(kept.slice(-1)) % 2 === 1));
   }
-  function fixed(x, dec) { // Python f"{x:.{dec}f}" for x >= 0
+  function fixed(x, dec) { // Python f"{x:.{dec}f}" for 0 <= x < 1e21 (toFixed switches to exponent form from 1e21)
     const { i, f } = digitsOf(x);
     const kept = i + f.slice(0, dec);
     const s = (BigInt(kept) + (halfEvenUp(kept, f.slice(dec)) ? 1n : 0n)).toString().padStart(dec + 1, "0");
     return dec ? s.slice(0, -dec) + "." + s.slice(-dec) : s;
   }
-  function g3(x) { // Python f"{x:.3g}" for x >= 0
+  function g3(x) { // Python f"{x:.3g}" for 0 <= x < 1e21; the site's numbers (p, %, ms, MB) stay far below
     if (x === 0) return "0";
     // 1e-4 以下 Python 用指數寫法。這個範圍的浮點數不可能剛好落在 3 位有效數字的一半（要 5^8 整除一個四位數），
     // 所以 toExponential 的捨入就是 Python 的結果；toFixed(100) 只留給 1e-4 以上，100 位小數足夠判斷是不是剛好一半
