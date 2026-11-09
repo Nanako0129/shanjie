@@ -35,13 +35,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "shanjie-tip"
+name = "shanjie-host"
 version = "0.0.0"
 dependencies = [
  "core",
+ "shanjie-win-proto",
  "windows",
  "windows-core",
 ]
+
+[[package]]
+name = "shanjie-tip"
+version = "0.0.0"
+dependencies = [
+ "shanjie-win-proto",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
+name = "shanjie-win-proto"
+version = "0.0.0"
 
 [[package]]
 name = "syn"

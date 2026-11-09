@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "cli", "windows/tip"]
+members = ["core", "cli", "windows/proto", "windows/host", "windows/tip"]
 resolver = "2"
 
 [profile.release]

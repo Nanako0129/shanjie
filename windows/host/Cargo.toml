@@ -1,0 +1,36 @@
+[package]
+name = "shanjie-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# docs/spec/windows-tip.md §5.1: the resident host, one per user and logon session; the only process that loads the models.
+# An empty binary on non-Windows targets (main.rs gates everything on cfg(windows)).
+
+[features]
+# §5.8: numbers-only timing file (host-<pid>.txt), for the VM measurements; never in a build given to users.
+timing = []
+
+[dependencies]
+shanjie-win-proto = { path = "../proto" }
+
+[target.'cfg(windows)'.dependencies]
+# The core's package is named `core`, which shadows `::core` paths emitted by the windows macros: renamed (docs/spec/windows-tip.md §3.1).
+shanjie_core = { package = "core", path = "../../core" }
+windows-core = "0.62"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Com",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_ErrorReporting",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Performance",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }

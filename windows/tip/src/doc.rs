@@ -1,7 +1,7 @@
 //! Everything that touches the TSF document (docs/spec/windows-tip.md §3.7): edit sessions, the composition range, the underline
 //! attribute, the selection. The functions take the edit cookie `ec` of a session that is already running.
-use crate::engine::Out;
 use crate::guard;
+use shanjie_win_proto::Out;
 use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::ptr;
@@ -52,10 +52,6 @@ pub fn request(ctx: &ITfContext, tid: u32, flags: TF_CONTEXT_EDIT_CONTEXT_FLAGS,
     // SAFETY: `es` is a live COM object.
     let session_hr = unsafe { ctx.RequestEditSession(tid, &es, flags) }?;
     session_hr.ok()
-}
-
-pub fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
 }
 
 /// docs/spec/windows-tip.md §3.8: the underline attribute goes before `EndComposition`, on every path that ends a composition.
@@ -128,29 +124,38 @@ fn start_composition(ec: u32, ctx: &ITfContext, sink: &ITfCompositionSink) -> Re
     }
 }
 
+/// Runs `f`, which ends `c`. A composition taken out of its slot is ended on every path: when `f` fails part way, `c` is still ended
+/// (underline off, the text as it is) before the error goes up, so no composition stays open with nothing tracking it.
+fn ending(ec: u32, c: &Comp, f: impl FnOnce() -> Result<()>) -> Result<()> {
+    let r = f();
+    if r.is_err() {
+        let _ = end_composition(ec, c);
+    }
+    r
+}
+
 /// `OnKeyDown` step 3 (docs/spec/windows-tip.md §3.7), in this order: `commit` replaces the composition range (or goes in at the selection) and ends the
 /// composition; `preedit` starts or continues one, with the underline and the caret; nothing at all with a composition open empties the
-/// range first and then ends it.
+/// range first and then ends it. A composition that stays in `slot` when this fails is ended by the caller.
 pub fn apply(ec: u32, ctx: &ITfContext, slot: &CompSlot, sink: &ITfCompositionSink, atom: u32, out: &Out) -> Result<()> {
     if !out.commit.is_empty() {
         let open = slot.borrow_mut().take();
-        let text = wide(&out.commit);
-        // SAFETY: live interfaces.
-        unsafe {
-            match open {
-                Some(c) => {
-                    let range = c.composition.GetRange()?;
-                    clear_attr(ec, &c.ctx, &range);
-                    range.SetText(ec, 0, &text)?;
-                    caret_after(ec, ctx, &range)?;
-                    c.composition.EndComposition(ec)?;
-                }
-                None => {
-                    let ins: ITfInsertAtSelection = ctx.cast()?;
-                    let range = ins.InsertTextAtSelection(ec, INSERT_TEXT_AT_SELECTION_FLAGS(0), &text)?;
-                    caret_after(ec, ctx, &range)?;
-                }
-            }
+        let text = &out.commit;
+        match open {
+            // SAFETY: live interfaces.
+            Some(c) => ending(ec, &c, || unsafe {
+                let range = c.composition.GetRange()?;
+                clear_attr(ec, &c.ctx, &range);
+                range.SetText(ec, 0, text)?;
+                caret_after(ec, ctx, &range)?;
+                c.composition.EndComposition(ec)
+            })?,
+            // SAFETY: live interfaces.
+            None => unsafe {
+                let ins: ITfInsertAtSelection = ctx.cast()?;
+                let range = ins.InsertTextAtSelection(ec, INSERT_TEXT_AT_SELECTION_FLAGS(0), text)?;
+                caret_after(ec, ctx, &range)?;
+            },
         }
     }
     if !out.preedit.is_empty() {
@@ -166,20 +171,20 @@ pub fn apply(ec: u32, ctx: &ITfContext, slot: &CompSlot, sink: &ITfCompositionSi
         // SAFETY: live interfaces; the attribute value is a TfGuidAtom as VT_I4.
         unsafe {
             let range = c.composition.GetRange()?;
-            range.SetText(ec, 0, &wide(&out.preedit))?;
+            range.SetText(ec, 0, &out.preedit)?;
             ctx.GetProperty(&GUID_PROP_ATTRIBUTE)?.SetValue(ec, &range, &VARIANT::from(atom as i32))?;
-            caret_at(ec, ctx, &range, out.cursor)?;
+            caret_at(ec, ctx, &range, out.cursor_utf16)?;
         }
     } else {
         let open = slot.borrow_mut().take();
         if let Some(c) = open {
             // SAFETY: live interfaces.
-            unsafe {
+            ending(ec, &c, || unsafe {
                 let range = c.composition.GetRange()?;
                 clear_attr(ec, &c.ctx, &range);
                 range.SetText(ec, 0, &[])?;
-                c.composition.EndComposition(ec)?;
-            }
+                c.composition.EndComposition(ec)
+            })?;
         }
     }
     Ok(())
