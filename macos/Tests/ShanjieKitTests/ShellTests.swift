@@ -1033,9 +1033,9 @@ final class ShellTests: XCTestCase {
         }
     }
 
-    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore) -> Shell {
+    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore, beauty: MemoryBeautyPackStore = MemoryBeautyPackStore(false)) -> Shell {
         Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: acg, quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it)
+              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: acg, quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it, beautyPackStore: beauty)
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2, §4.3: the menu has one non-clickable line naming the packs the engine loaded, in the settings order; none loaded, no line.
@@ -1053,6 +1053,47 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(line(false, true)?.title, "已開啟的詞包：資訊與 AI 詞")
         XCTAssertNil(line(false, false), "no pack, no line")
         XCTAssertNil(line(true, true)?.action, "not clickable")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.2 (the menu test with the third pack): all on, each one alone, two of three and none, in the settings order (ACG, IT, beauty); the
+    /// beauty pack follows its own switch and an off beauty pack is not named although its file is there.
+    func testPackLineNamesTheBeautyPackInSettingsOrder() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.beautyPackRow.write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8)
+        let line = { (acg: Bool, it: Bool, beauty: Bool) -> MenuEntry? in
+            let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it), beauty: MemoryBeautyPackStore(beauty)))
+            return c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }
+        }
+        XCTAssertEqual(line(true, true, true)?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞、美妝與保養詞")
+        XCTAssertEqual(line(false, false, true)?.title, "已開啟的詞包：美妝與保養詞", "only beauty")
+        XCTAssertEqual(line(true, false, false)?.title, "已開啟的詞包：動漫與遊戲詞", "only ACG")
+        XCTAssertEqual(line(false, true, false)?.title, "已開啟的詞包：資訊與 AI 詞", "only IT")
+        XCTAssertEqual(line(true, false, true)?.title, "已開啟的詞包：動漫與遊戲詞、美妝與保養詞")
+        XCTAssertEqual(line(true, true, false)?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "beauty off, its file is there")
+        XCTAssertNil(line(false, false, false), "no pack, no line")
+        XCTAssertNil(line(true, true, true)?.action, "not clickable")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.3, the fall-back: with all three on and only beauty-add.tsv broken, dropping ACG and then IT still fails and dropping beauty works, so the
+    /// menu names ACG and IT only, and the stored beauty choice stays on and is not rewritten. Builds: combined, no packs, drop ACG, drop IT, drop beauty.
+    func testBrokenBeautyFileKeepsAcgAndIt() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        try "not a row\n".write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8)
+        let beauty = MemoryBeautyPackStore(true)
+        let shell = packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true), beauty: beauty)
+        XCTAssertNotNil(shell.engine)
+        XCTAssertEqual(shell.packMask, 21)
+        XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
+        XCTAssertEqual(shell.engineBuilds, 5, "combined, no packs, drop ACG (still broken), drop IT (still broken), drop beauty (works)")
+        XCTAssertEqual(Controller(shell).session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
+        XCTAssertTrue(shell.beautyPackOn, "Settings keeps showing the stored choice")
+        XCTAssertEqual(beauty.beautyPack, true)
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2, §4.3: a broken it-add.tsv fails the pack build; the retry drops that pack, and this fixture has no acg-add.tsv either, so
@@ -1077,7 +1118,7 @@ final class ShellTests: XCTestCase {
               learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(true), quotePackStore: MemoryQuotePackStore(quote), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: MemoryItPackStore(true))
     }
 
-    /// Fall-back order when the combined build fails: with all three packs on (mask 7) and only quotes-add.tsv broken, the no-pack build works
+    /// Fall-back order when the combined build fails: with the quote switch on (mask 23) and only quotes-add.tsv broken, the no-pack build works
     /// (so a pack is at fault), then dropping one pack at a time keeps the healthy ones: ACG and IT stay loaded (mask 5), the menu names both.
     func testBrokenQuotesFileKeepsAcgAndIt() throws {
         let packs = resources.appendingPathComponent("packs")
@@ -1087,7 +1128,7 @@ final class ShellTests: XCTestCase {
         try "not a row\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
         let shell = packShell3(quote: true)
         XCTAssertNotNil(shell.engine)
-        XCTAssertEqual(shell.packMask, 7)
+        XCTAssertEqual(shell.packMask, 23, "ACG, quotes, IT and beauty (the beauty file is not there, so it is never loaded)")
         XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
         XCTAssertEqual(shell.engineBuilds, 4, "combined, no packs, drop ACG (still broken), drop quotes (works)")
         let c = Controller(shell)

@@ -143,6 +143,15 @@ final class DefaultsItPackStore: ItPackStore {
     }
 }
 
+/// The "美妝與保養詞" switch (docs/spec/lexicon-and-packs.md §4.2, §8.3), key `beautyPack` in the same domain; absent means on.
+@MainActor
+final class DefaultsBeautyPackStore: BeautyPackStore {
+    var beautyPack: Bool? {
+        get { UserDefaults.standard.object(forKey: "beautyPack") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "beautyPack") }
+    }
+}
+
 /// The 單按 Shift 切換中英 switch (docs/spec/keys-and-composition.md §9.1), key `shiftToggle` in the same domain; absent means off (docs/spec/english-mixed.md §10.1; on before that).
 @MainActor
 final class DefaultsShiftToggleStore: ShiftToggleStore {
@@ -280,7 +289,7 @@ func runServer() -> Never {
         // 可省略韻母 does not ship in v0.4.0; see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(),
+        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), beautyPackStore: DefaultsBeautyPackStore(),
         shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
         englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter())
     // docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.

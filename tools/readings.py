@@ -243,8 +243,21 @@ class Reader:
         return out, notes, gaps
 
 
+# The two inputs outside the repo, with where to get them (the copies this tool was built against). A machine without them (a GCP VM,
+# 2026-11-08) stops here with this list instead of a bare FileNotFoundError.
+INPUTS = (("SHANJIE_MOEDICT", "MOEDICT", "dict-revised_bkup.json from https://github.com/g0v/moedict-data (commit a6dc997)"),
+          ("SHANJIE_HETERO", "HETERO", "Source/Data/heterophony1.list from https://github.com/openvanilla/McBopomofo (commit be6564a)"))
+
+
+def require_inputs():
+    missing = [f"  {var}={globals()[name]}: missing; get {where}" for var, name, where in INPUTS if not os.path.isfile(globals()[name])]
+    if missing:
+        raise SystemExit("tools/readings.py needs two files outside the repo; set the variable to the file's path:\n" + "\n".join(missing))
+
+
 def make_reader(lex, unihan_path=UNIHAN, rule_3b=False):
     """Reader over the files MOEDICT, HETERO, OVERRIDES (and, with rule_3b, the Unihan file if there is one)."""
+    require_inputs()
     hetero = dict(l.split() for l in open(need(HETERO, "SHANJIE_HETERO"), encoding="utf-8") if len(l.split()) == 2)
     overrides = {w: tuple(r.split()) for w, r in
                  (l.rstrip("\n").split("\t") for l in open(OVERRIDES, encoding="utf-8") if not l.startswith("#"))}

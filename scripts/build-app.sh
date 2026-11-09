@@ -84,7 +84,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/spec/models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -202,6 +202,9 @@ mkdir -p "$RES/packs"
 cp data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/quotes-add.tsv data/packs/quotes.json "$RES/packs/"
 # The IT+AI pack (docs/spec/lexicon-and-packs.md §4.2, §4.3), same arrangement (build inputs it-manual.tsv, it-collisions.tsv stay out).
 cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/packs/"
+# The beauty pack (docs/spec/lexicon-and-packs.md §4.4, §8.3), same arrangement (build inputs beauty-manual.tsv, beauty-exclude.tsv, beauty-collisions.tsv, beauty-readings.tsv stay out).
+# CC0, so there is no paragraph for it in the CC BY-SA attribution file below.
+cp data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"
 swift scripts/make-icon.swift "$RES/shanjie.tiff"

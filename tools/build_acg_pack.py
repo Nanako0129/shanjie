@@ -752,7 +752,11 @@ def make_readings(words):
         with open(src, "w", encoding="utf-8") as f:
             f.writelines(f"|{w}\n" for w in words)
         with open(err, "w", encoding="utf-8") as e:
-            subprocess.run([sys.executable, "-B", os.path.join(ROOT, "tools", "readings.py"), src, dst], stderr=e, check=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+            r = subprocess.run([sys.executable, "-B", os.path.join(ROOT, "tools", "readings.py"), src, dst], stderr=e, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        if r.returncode:   # the tool's own message, not only its status (2026-11-08: a GCP run without the moedict file showed only "exit status 1")
+            tail = [l for l in open(err, encoding="utf-8") if not l.startswith(("CHECK\t", "\t"))][-12:]
+            raise SystemExit(f"tools/readings.py exited {r.returncode} (it reads SHANJIE_MOEDICT and SHANJIE_HETERO; their defaults "
+                             f"are in tools/readings.py):\n" + "".join(tail))
         check, cur = set(), None
         for l in open(err, encoding="utf-8"):
             if l.startswith("CHECK\t"):

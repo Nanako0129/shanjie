@@ -1,7 +1,10 @@
 """迷因詞包建置工具（詞包不隨 App 出貨）：由候選檔、兩份論壇 A 用量計數檔與出貨的 data/lm，
 產生 data/packs/meme-add.tsv（疊加層格式，標籤 meme）、meme-sources.tsv、meme.json，報告放 build/meme-pack/。
 分數、讀音、排序、同音衝突偵測共用 tools/build_acg_pack.py；出貨 data/lm 的核對、讀音覆寫檔、寫檔共用 tools/build_it_pack.py（import）。
-全程不連網。輸出以 CC BY-SA 4.0 釋出（LICENSES/data.md，由後續的引擎與 App PR 加）。同一份輸入建兩次，輸出逐位元組相同。
+`--pack beauty`（docs/spec/lexicon-and-packs.md §8.2）：同一支工具建美妝詞包，標籤 beauty、所有檔名的 meme 換成 beauty、種子 20261108、
+自己的 beauty-add.tsv 不算去重；--exclude／--exclude-private 剔除的字串在 collisions 處置檔同一處生效；(b) 的參考名單只收過了門檻的候選；
+beauty.json 的 candidate_files 只記檔名。`--pack meme`（預設）的輸出不變。以下說明以迷因的檔名為例。
+全程不連網。迷因詞包的輸出以 CC BY-SA 4.0 釋出；美妝詞包是 CC0（LICENSES/data.md）。同一份輸入建兩次，輸出逐位元組相同。
 
 候選檔（--cand，可多個，一個檔一個來源）：UTF-8 文字，一行一個，`字串<TAB>來源`；來源欄可省（用檔名去掉副檔名），`#` 開頭與空行略過。
   字串含 ASCII 英數的整串不收（數量列在報告）；其餘照標點（任何非漢字）切開，每段各自當候選；只收 2–10 個漢字的段。
@@ -39,7 +42,8 @@ TAG = "meme"
 MIN_BOARDS, MIN_ARTICLES = 3, 10    # 用量門檻：事先固定，量之前 commit
 MIN_WORDS = 30                      # 停止條件：收錄後不到 30 個詞就停
 BONUS = 3.0                         # docs/spec/lexicon-and-packs.md §6.2「分數」：同資訊詞包，每列的 log10 分數加 3
-SEED, CHECK_N = 20261025, 60        # 檢查集的固定種子與抽樣數
+SEEDS, CHECK_N = {"meme": 20261025, "beauty": 20261108}, 60        # 各詞包檢查集的固定種子與抽樣數
+SEED = SEEDS[TAG]
 HEAD_FIELDS = ("tree_sha256", "input_sha256", "tool_commit")
 ASCII_ALNUM = re.compile(r"[A-Za-z0-9]")
 NON_HAN = re.compile(r"[^一-鿿]+")
@@ -108,14 +112,24 @@ def have_words():
     return frozenset(B.lexicon_words())
 
 
-def pack_words(packs_dir=PACKS):
+def pack_words(packs_dir=PACKS, tag=TAG):
     """data/packs 裡每個詞包檔（動漫、資訊、經典台詞…，除了本詞包自己）的詞。"""
     out = set()
     for f in sorted(glob.glob(os.path.join(packs_dir, "*-add.tsv"))):
-        if os.path.basename(f) != "meme-add.tsv":
+        if os.path.basename(f) != f"{tag}-add.tsv":
             with open(f, encoding="utf-8") as fh:
                 out |= {l.split("\t")[1] for l in fh if l.strip() and not l.startswith("#")}
     return frozenset(out)
+
+
+def read_exclude(path, must_exist=True):
+    """--exclude／--exclude-private 的檔：`字串<TAB>…`，只讀第一欄（NFKC 之後比，同候選）；`#` 與空行略過。回傳 (字串集合, 檔案 SHA-256)；
+    沒給檔或預設檔不存在（must_exist=False）就是 (空集合, None)。"""
+    if path is None or (not must_exist and not os.path.exists(path)):
+        return frozenset(), None
+    with open(path, encoding="utf-8") as f:
+        strings = {unicodedata.normalize("NFKC", l.split("\t")[0].strip()) for l in f if l.strip() and not l.startswith("#")}
+    return frozenset(strings - {""}), B.sha256_file(path)
 
 
 # ---------------------------------------------------------------- 解碼（出貨的 data/lm；動漫、資訊詞包開）
@@ -187,29 +201,29 @@ def x_rows(reading, decode):
     return [(w, " ".join(reading[w]), x, f) for w, x, f in zip(words, decode(pairs, "chat"), decode(pairs, "formal"))]
 
 
-def write_x(work, rows):
+def write_x(work, rows, tag=TAG):
     os.makedirs(work, exist_ok=True)
     tsv = "".join("\t".join(r) + "\n" for r in rows)
     strings = lines_text(r[2] for r in rows)
-    meta = {"meme-x.tsv": IT.sha256_text(tsv), "meme-x-strings.txt": IT.sha256_text(strings)}
-    for n, t in (("meme-x.tsv", tsv), ("meme-x-strings.txt", strings), ("meme-x.json", json.dumps(meta, indent=1, sort_keys=True) + "\n")):
+    meta = {f"{tag}-x.tsv": IT.sha256_text(tsv), f"{tag}-x-strings.txt": IT.sha256_text(strings)}
+    for n, t in ((f"{tag}-x.tsv", tsv), (f"{tag}-x-strings.txt", strings), (f"{tag}-x.json", json.dumps(meta, indent=1, sort_keys=True) + "\n")):
         with open(os.path.join(work, n), "w", encoding="utf-8", newline="\n") as f:
             f.write(t)
     return meta
 
 
-def read_x(work):
+def read_x(work, tag=TAG):
     """meme-x.tsv → ([(候選, 讀音, X, 書面第一名)], 雜湊)；它或 meme-x-strings.txt 的雜湊和第一段記的不同（有人改過）就中止。"""
     def text(n):
         with open(os.path.join(work, n), encoding="utf-8") as f:
             return f.read()
-    if not os.path.exists(os.path.join(work, "meme-x.json")):
-        raise SystemExit(f"{work}/meme-x.json is missing: run --emit-x first (with the same --work)")
-    meta = json.loads(text("meme-x.json"))
+    if not os.path.exists(os.path.join(work, f"{tag}-x.json")):
+        raise SystemExit(f"{work}/{tag}-x.json is missing: run --emit-x first (with the same --work)")
+    meta = json.loads(text(f"{tag}-x.json"))
     for n, sha in meta.items():
         if IT.sha256_text(text(n)) != sha:
             raise SystemExit(f"{work}/{n} does not match the SHA-256 --emit-x recorded: it was changed after the first stage")
-    return [tuple(l.split("\t")) for l in text("meme-x.tsv").splitlines()], meta
+    return [tuple(l.split("\t")) for l in text(f"{tag}-x.tsv").splitlines()], meta
 
 
 # ---------------------------------------------------------------- 第二段：讓不讓第一名
@@ -244,25 +258,32 @@ def judge(admitted, reading, xs, fs, counts2, packwords=frozenset()):
 
 
 def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozenset(), packwords=frozenset(),
-          collisions_tsv=os.path.join(PACKS, "meme-collisions.tsv"), readings_tsv=None, sc=None, info=None):
-    """最後一段。x_table：read_x 的列。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)], 讀不出來的詞, 被 (c) 規則丟掉的 ldrop)。"""
+          collisions_tsv=None, readings_tsv=None, sc=None, info=None, tag=TAG, exclude=None):
+    """最後一段。x_table：read_x 的列。tag：詞包（meme|beauty），決定檔名與 (b) 的參考名單。exclude：--exclude／--exclude-private 的字串（None＝這個詞包沒有剔除）。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)], 讀不出來的詞, 被 (c) 規則丟掉的 ldrop)。"""
+    collisions_tsv = collisions_tsv or os.path.join(PACKS, f"{tag}-collisions.tsv")
     admitted, reading, check, st, unread = prepare(cands, counts1, have, packwords, readings, readings_tsv)
     if sorted((w, " ".join(r)) for w, r in reading.items()) != sorted((w, r) for w, r, *_ in x_table):
         raise SystemExit("the candidates, counts or readings are not the ones meme-x.tsv was made from: run --emit-x again")
     xs, fs = {w: x for w, _, x, _ in x_table}, {w: f for w, _, _, f in x_table}
     sc = sc or {k: round(v + BONUS, 8) for k, v in B.scores(B.base_lexicon()).items()}
     excluded, decided = B.read_collisions(collisions_tsv)       # 處置檔排除的詞先拿掉，再選同讀音的贏家（被排除的不能擋住同音的詞）
-    st["excluded_by_meme_collisions_tsv"] = sum(w in excluded for w in reading)
+    st[f"excluded_by_{tag}_collisions_tsv"] = sum(w in excluded for w in reading)
+    # beauty 的 (b) 參考名單（docs/spec/lexicon-and-packs.md §8.2）：過了門檻、不在詞庫與其他詞包的候選（prepare 已篩），剔除的不算；剔除的詞和處置檔排除的詞同一處拿掉（judge 之前）。
+    # 處置檔排除的詞照舊留在參考名單裡（它們只是不進詞包）。meme 的參考名單是全部候選。
+    ref = set(admitted) - set(exclude or ()) if tag == "beauty" else set(cands)
+    if exclude is not None:
+        st["excluded_by_exclude"] = sum(w in exclude for w in reading)
+        excluded = {**excluded, **{w: None for w in exclude}}
     admitted, reading = ({w: v for w, v in d.items() if w not in excluded} for d in (admitted, reading))
     words, dropped = judge(admitted, reading, xs, fs, counts2, packwords)
     reasons = collections.Counter(d[1] for d in dropped)
-    ref = set(cands)                    # 參考名單：所有候選（切段後）。(b)：迷因詞搶走參考名單裡別的字串的第一名
+    # (b)：詞包詞搶走參考名單裡別的字串的第一名
     rank = B.collision_rank(B.read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else [])
     existing = frozenset(have) | packwords
     ldrop = []
     for _ in range(B.LEXICON_RULE_ROUNDS):
         order = B.ordered(words, lambda w: admitted[w][0], rank, reading)
-        rows = B.pack_rows(order, reading, sc, tag=TAG)
+        rows = B.pack_rows(order, reading, sc, tag=tag)
         # (c)：迷因列把任何既有詞（詞庫任何一層或動漫、資訊詞包）擠下第一名就丟（變調列、書面也算；先出貨的勝）。例外：聊天、主要讀音上被擠下的正是 X，
         # 而且 X 不是別的詞包的詞——這一條讀音已經由 judge 的 X 規則判給迷因了。
         found = B.detect_collisions(words, reading, rows, ref, decode, existing=existing)
@@ -278,6 +299,8 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         words = [w for w in words if w not in hit]
     else:
         raise SystemExit(f"type (c) collisions not settled after {B.LEXICON_RULE_ROUNDS} rounds")
+    if tag == "beauty":
+        found = exempt_judged_x(found, reading, xs)
     keep_now = B.first_named(rank, set(words))
     col = B.open_collisions(found, decided, keep_now, set(), frozenset(), {(r.split("\t")[0].replace("-", " "), r.split("\t")[1]) for r in rows})
     srcs = ["word\tsources\tarticles\tboards\tnote\n"]
@@ -292,7 +315,17 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
     }
     if info is not None:
         info.update(order=order, reading=reading, check={w: check[w] for w in reading})
-    return {"meme-add.tsv": "".join(rows), "meme-sources.tsv": "".join(srcs)}, manifest, col, dropped, unread, ldrop
+    return {f"{tag}-add.tsv": "".join(rows), f"{tag}-sources.tsv": "".join(srcs)}, manifest, col, dropped, unread, ldrop
+
+
+def exempt_judged_x(found, reading, xs):
+    """beauty 的 (b) 豁免（docs/spec/lexicon-and-packs.md §8.2）：聊天、主要讀音上被擠下的第一名就是 judge 為這個讀音比過文章數的那個 X，不算 (b)（同 (c) 的豁免），
+    同樣條件的 (c) 也不算未處置；其他讀音（含變調列）、書面、或被擠下的不是 X，照舊列出。"""
+    # (c) rows with the same exemption are the ones the (c) loop in build() kept on purpose (the judge gave that reading to the pack word):
+    # listing them as open collisions counted settled readings (2026-11-08: 28 of the 34 after the classification rounds)
+    keep = lambda r, e: not (e[1] in ("b", "c") and e[2] == "chat" and r == " ".join(reading[e[0]]) and e[3] == xs[e[0]])
+    out = {r: [e for e in v if keep(r, e)] for r, v in found.items()}
+    return {r: v for r, v in out.items() if v}
 
 
 def check_words(info, seed=SEED, n=CHECK_N):
@@ -305,22 +338,34 @@ def check_words(info, seed=SEED, n=CHECK_N):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--pack", choices=sorted(SEEDS), default="meme")
     ap.add_argument("--cand", nargs="+", required=True)
     ap.add_argument("--counts", nargs="+", default=[])
     ap.add_argument("--emit-candidates", action="store_true")
     ap.add_argument("--emit-x", action="store_true")
-    ap.add_argument("--work", default=os.path.join(ROOT, "build", "meme-pack"))
+    ap.add_argument("--work")
     ap.add_argument("--out", default=PACKS)
-    ap.add_argument("--collisions", default=os.path.join(PACKS, "meme-collisions.tsv"))
-    ap.add_argument("--readings", default=os.path.join(PACKS, "meme-readings.tsv"))
+    ap.add_argument("--collisions")
+    ap.add_argument("--readings")
+    ap.add_argument("--exclude", help="字串<TAB>…（只讀第一欄）；beauty 預設 data/packs/beauty-exclude.tsv（不存在就是空集合），meme 預設沒有")
+    ap.add_argument("--exclude-private", help="同 --exclude；beauty.json 只記它的 SHA-256 與筆數，不記路徑與內容")
     a = ap.parse_args()
+    tag = a.pack
+    a.work = a.work or os.path.join(ROOT, "build", f"{tag}-pack")
+    a.collisions = a.collisions or os.path.join(PACKS, f"{tag}-collisions.tsv")
+    a.readings = a.readings or os.path.join(PACKS, f"{tag}-readings.tsv")
     cands, cst, cfiles = read_candidates(a.cand)
+    if tag == "beauty":                      # docs/spec/lexicon-and-packs.md §8.2：candidate_files 只記檔名，私人路徑不進公開檔
+        names = [os.path.basename(p) for p in cfiles]
+        if len(set(names)) != len(names):
+            sys.exit("--pack beauty: the --cand files must have different names (beauty.json records them by name)")
+        cfiles = {os.path.basename(p): h for p, h in cfiles.items()}
     cand_text = lines_text(cands)
     os.makedirs(a.work, exist_ok=True)
     if a.emit_candidates:
-        with open(os.path.join(a.work, "meme-candidates.txt"), "w", encoding="utf-8", newline="\n") as f:
+        with open(os.path.join(a.work, f"{tag}-candidates.txt"), "w", encoding="utf-8", newline="\n") as f:
             f.write(cand_text)
-        print(f"candidates {len(cands)} ({cst}); wrote {a.work}/meme-candidates.txt sha256 {IT.sha256_text(cand_text)}")
+        print(f"candidates {len(cands)} ({cst}); wrote {a.work}/{tag}-candidates.txt sha256 {IT.sha256_text(cand_text)}")
         return
     need = 1 if a.emit_x else 2
     if len(a.counts) != need:
@@ -329,29 +374,39 @@ def main():
     if h1["input_sha256"] != IT.sha256_text(cand_text):
         sys.exit(f"{a.counts[0]}: input_sha256 is not that of the candidates (--emit-candidates) these --cand files give")
     IT.check_shipping_lm()
-    have, packwords = have_words(), pack_words()
+    have, packwords = have_words(), (pack_words() if tag == TAG else pack_words(tag=tag))      # meme: the call the existing tests stub
     dec = decoder()
     if a.emit_x:
         _, reading, _, st, unread = prepare(cands, counts1, have, packwords, B.make_readings, a.readings)
-        meta = write_x(a.work, x_rows(reading, dec))
-        print(f"{st}\nwrote {a.work}/meme-x.tsv, meme-x-strings.txt, meme-x.json: {meta}")
+        meta = write_x(a.work, x_rows(reading, dec), tag)
+        print(f"{st}\nwrote {a.work}/{tag}-x.tsv, {tag}-x-strings.txt, {tag}-x.json: {meta}")
         return
-    x_table, xmeta = read_x(a.work)
+    x_table, xmeta = read_x(a.work, tag)
     h2, counts2 = read_counts(a.counts[1])
-    if h2["input_sha256"] != xmeta["meme-x-strings.txt"]:
-        sys.exit(f"{a.counts[1]}: input_sha256 is not that of meme-x-strings.txt")
+    if h2["input_sha256"] != xmeta[f"{tag}-x-strings.txt"]:
+        sys.exit(f"{a.counts[1]}: input_sha256 is not that of {tag}-x-strings.txt")
     if h2["tree_sha256"] != h1["tree_sha256"]:
         sys.exit("the two counts files were made from different page directories (tree_sha256)")
+    # --exclude：beauty 預設 data/packs/beauty-exclude.tsv（沒有就空集合）；明給的檔一定要存在。meme 沒給就沒有剔除，輸出不變。
+    default_exclude = os.path.join(PACKS, "beauty-exclude.tsv") if tag == "beauty" else None
+    ex, ex_sha = read_exclude(a.exclude or default_exclude, must_exist=bool(a.exclude))
+    exp, exp_sha = read_exclude(a.exclude_private)
+    exclude = (ex | exp) if (tag == "beauty" or a.exclude or a.exclude_private) else None
     info = {}
     files, manifest, col, dropped, unread, ldrop = build(cands, counts1, x_table, counts2, dec, have=have, packwords=packwords, collisions_tsv=a.collisions,
-                                                           readings_tsv=a.readings, info=info)
-    manifest.update(version=IT.sha256_text(files["meme-add.tsv"])[:8], candidate_files=cfiles, candidate_stats=cst,
+                                                           readings_tsv=a.readings, info=info, tag=tag, exclude=exclude)
+    manifest.update(version=IT.sha256_text(files[f"{tag}-add.tsv"])[:8], candidate_files=cfiles, candidate_stats=cst,
                     counts_candidates=dict(h1, sha256=B.sha256_file(a.counts[0])), counts_x=dict(h2, sha256=B.sha256_file(a.counts[1])),
-                    meme_x=xmeta, dropped_unreadable=len(unread))
+                    dropped_unreadable=len(unread))
+    manifest[f"{tag}_x"] = xmeta
+    if ex_sha:
+        manifest["exclude"] = {"sha256": ex_sha, "strings": len(ex)}
+    if exp_sha:
+        manifest["exclude_private"] = {"sha256": exp_sha, "strings": len(exp)}
     checks = sorted((w, " ".join(info["reading"][w])) for w, c in info["check"].items() if c)
     report = {"dropped.tsv": "candidate\treason\tother\tcandidate_articles\tother_articles\n" + "".join("\t".join(map(str, d)) + "\n" for d in dropped),
               "collisions.txt": B.collisions_text(col, {"unclassified_groups": []}, ldrop), "unreadable.txt": "".join(w + "\n" for w in unread),
-              "check-readings.txt": "".join(f"{w}\t{r}\n" for w, r in checks), "words.txt": "".join(check_words(info)),
+              "check-readings.txt": "".join(f"{w}\t{r}\n" for w, r in checks), "words.txt": "".join(check_words(info, SEEDS[tag])),
               "report.txt": json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"}
     for n, t in report.items():
         with open(os.path.join(a.work, n), "w", encoding="utf-8", newline="\n") as f:
@@ -359,7 +414,7 @@ def main():
     print(report["report.txt"], end="")
     if manifest["words"] < MIN_WORDS:      # 停止條件：先回報各來源的數量再問；data/packs 一個檔都不寫
         sys.exit(f"STOP: {manifest['words']} words, fewer than {MIN_WORDS}; nothing written to {a.out}; report the per-source counts before going on")
-    IT.write_all(files, manifest, a.out, "meme.json")
+    IT.write_all(files, manifest, a.out, f"{tag}.json")
 
 
 if __name__ == "__main__":

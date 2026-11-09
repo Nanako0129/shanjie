@@ -351,6 +351,11 @@ jobs:
       - name: Meme pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_meme_pack
 
+      # docs/spec/lexicon-and-packs.md §8.4: the same builder with --pack beauty (file names, seed, the exclude files, the (b) reference list).
+      # No network, no evaluation CLI.
+      - name: Beauty pack builder (Python)
+        run: python3 -W ignore -m unittest tools.test_build_beauty_pack
+
       # docs/spec/lexicon-and-packs.md §3.2, §3.7: the common proper-noun builder against fixtures and a fake API, and the
       # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
       - name: Names lexicon builder (Python)

@@ -136,7 +136,7 @@ fn window_first(packs: Option<(&Path, u32)>, syls: &[&str]) -> Vec<String> {
 #[test]
 fn the_it_pack_has_its_own_bit_and_file() {
     assert_eq!(PACK_IT, 4);
-    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT | PACK_BEAUTY);
     let syls = ["ㄊㄨˊ", "ㄒㄧㄤˋ", "ㄕㄥ", "ㄔㄥˊ"];
     let (both, none) = (tempdir("it-both", Some(PACK)), tempdir("it-none", None));
     std::fs::write(both.join("it-add.tsv"), IT_PACK).unwrap();
@@ -155,12 +155,41 @@ fn the_it_pack_has_its_own_bit_and_file() {
     }
 }
 
+/// docs/spec/lexicon-and-packs.md §4.1, §8.3: the beauty pack is bit 4 (`PACK_BEAUTY`, value 16; value 8 is kept for the meme pack) and reads `beauty-add.tsv`,
+/// appended after the IT pack. Same checks as the IT pack: its own bit and file, off (bit clear, or no file) is the engine without it, and it sits beside the others.
+/// The fixture row is a made-up word the base lexicon cannot spell (a fixture, so the test does not depend on the generated data/packs/beauty-add.tsv), scored like the IT row.
+const BEAUTY_PACK: &str = "ㄅㄧˋ-ㄌㄧˇ-ㄐㄧㄥ-ㄏㄨㄚˊ\t碧莉菁華\t-6.60980192\tbeauty\n";
+
+#[test]
+fn the_beauty_pack_has_its_own_bit_and_file() {
+    assert_eq!(PACK_BEAUTY, 16);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT | PACK_BEAUTY);
+    assert_eq!(PACK_ALL & 8, 0, "bit 3 is kept for the meme pack");
+    let syls = ["ㄅㄧˋ", "ㄌㄧˇ", "ㄐㄧㄥ", "ㄏㄨㄚˊ"];
+    let (both, none) = (tempdir("beauty-both", Some(PACK)), tempdir("beauty-none", None));
+    std::fs::write(both.join("beauty-add.tsv"), BEAUTY_PACK).unwrap();
+    std::fs::write(both.join("it-add.tsv"), IT_PACK).unwrap();
+    let plain = window_first(None, &syls);
+    assert!(plain.iter().all(|w| w != "碧莉菁華"), "the word is already the first candidate without the pack: {plain:?}");
+    // Bit clear with the file present, and the bit set with no file: both are the engine without the beauty pack.
+    assert_eq!(window_first(Some((&both, PACK_ACG | PACK_IT)), &syls), plain, "beauty-add.tsv was read without the beauty bit");
+    assert_eq!(window_first(Some((&none, PACK_BEAUTY)), &syls), plain, "a missing beauty-add.tsv changes the engine");
+    assert_eq!(window_first(Some((&both, PACK_BEAUTY)), &syls), vec!["碧莉菁華"; 2]);
+    assert_eq!(window_first(Some((&both, PACK_ACG | PACK_IT | PACK_BEAUTY)), &syls), vec!["碧莉菁華"; 2]);
+    // The other packs' words still work beside it.
+    assert_eq!(window_first(Some((&both, PACK_ACG | PACK_IT | PACK_BEAUTY)), &["ㄉㄧㄥˋ", "ㄩㄢˊ", "ㄊㄤˊ"]), vec!["碇源堂"; 2]);
+    assert_eq!(window_first(Some((&both, PACK_ACG | PACK_IT | PACK_BEAUTY)), &["ㄊㄨˊ", "ㄒㄧㄤˋ", "ㄕㄥ", "ㄔㄥˊ"]), vec!["圖像生成"; 2]);
+    for d in [both, none] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
 #[test]
 fn an_unknown_pack_bit_is_refused() {
     let d = tempdir("bit", None);
     assert!(matches!(Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, 8))), Err(EngineError::LoadFailed)));
     assert!(matches!(Engine::new_with_packs(&root().join("data/lexicon"), L, Some((&d, PACK_ALL << 1))), Err(EngineError::LoadFailed)));
-    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT);
+    assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT | PACK_BEAUTY);
     let _ = std::fs::remove_dir_all(d);
 }
 

@@ -44,7 +44,7 @@ fn shared() -> &'static Shared {
 fn packs_from_env() -> Option<(PathBuf, u32)> {
     let v = std::env::var("PACKS").ok()?;
     let mask = v.split(',').fold(0, |m, n| {
-        m | PACK_FILES.iter().find(|(_, f)| f.strip_suffix("-add.tsv") == Some(n)).unwrap_or_else(|| panic!("PACKS takes acg, quotes, it or a comma list of them, not {n:?}")).0
+        m | PACK_FILES.iter().find(|(_, f)| f.strip_suffix("-add.tsv") == Some(n)).unwrap_or_else(|| panic!("PACKS takes acg, quotes, it, beauty or a comma list of them, not {n:?}")).0
     });
     Some((std::env::var("PACKS_DIR").map_or_else(|_| root().join("data/packs"), PathBuf::from), mask))
 }
