@@ -9,6 +9,7 @@
 - 輸入法程序（`善解輸入法.app/Contents/MacOS/shanjie`）會碰到的使用者資料只有：組字與候選、游標前的文字、前景 App 的 bundle ID、學習檔、偏好設定。
 - 目前的程式裡沒有任何雲端功能、帳號、遙測，也不讀剪貼簿、不發 Apple events、不建 XPC 連線、不啟動子程序、不用鑰匙圈。核心（Rust）沒有網路程式碼。
 - 唯一的對外連線是更新探測（§8）。
+- 診斷紀錄（§11）只在輸入法程序的記憶體裡；只有使用者按「複製診斷紀錄…」、看過全文、按「複製」時才寫進剪貼簿。
 - 組字、候選、前文、送出的文字、路徑、bundle ID 不進任何日誌、錯誤訊息、當機報告（§3、§4）。
 - 寫到磁碟的使用者內容只有學習檔（§6）與偏好設定（§7）；兩者都只在使用者本機，不上傳。
 - 輸入法在 App 沙盒裡執行，entitlements 只有三個鍵（§2）。對外不說「輸入內容無法外流」，因為沙盒擋不住把輸入內容送出去；對外的說法是：輸入法在 App 沙盒裡執行；更新由另一個不在沙盒裡、只會更新已安裝那一份善解的小程式完成。
@@ -113,3 +114,14 @@
 - entitlements：CI `shell` job 的 entitlements 與 Sparkle 變造測試（`scripts/test-sandbox-mutations.sh`）與 `scripts/check-app.sh`。
 - 需要真人的部分：安全輸入的三處情境（Safari 密碼欄、Terminal 開 Secure Keyboard Entry、Terminal `sudo`）；活動監視器的「沙盒」欄位是「是」。
 - 已知限制：裝在使用者帳號的 `~/Library/Input Methods` 時，安全輸入期間系統會把第三方輸入法反灰，選單打不開，所以那時看不到「學習已暫停（安全輸入）」那一列。
+
+## 11. 診斷紀錄
+
+規格在 `docs/spec/macos-shell.md` §13。隱私上的規則：
+- 欄位只有列舉、布林與清理過的 bundle ID（1–255 個 `[A-Za-z0-9._-]`，其他記 `?`）；不記打的字、組字、候選、前文、按鍵字元或鍵碼。
+- 只在記憶體：Shift 最多 200 筆、其他最多 800 筆；不寫檔、不用 `Logger`／`print`／檔案 I/O；程序結束就沒了。
+- 安全輸入期間不記 Shift（逐次的 Shift 會透露密碼裡有幾個要按 Shift 的字、用哪一側）；切換中英、換 App 這類狀態照記。
+- 記錄不新增任何 IMK 讀取。
+- 不自動送出：複製前先顯示全文；剪貼簿用 `.currentHostOnly` 加 `org.nspasteboard.TransientType`。預設開，設定→診斷可關，關掉立刻清空。
+
+驗證：`DiagLogTests` 與 `LogTests`（`docs/spec/macos-shell.md` §13.4）。
