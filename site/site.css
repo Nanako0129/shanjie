@@ -38,7 +38,7 @@
 }
 /* 段落、清單、說明區塊不跟著整頁放寬，一行維持約 45 字；卡片、表格、統計格照整頁寬 */
 main > :is(p, ul, ol, dl, pre, blockquote, details), main > :is(article, #numbers) > :is(p, ul, ol, dl, pre) { max-width: var(--prose-max); }
-/* 一欄式、內文較長的卡片（怎麼選字的步驟卡、路線圖的階段卡）整張跟段落同寬：A／B／C 三種並排比較後選 B。並排小卡、數字格、表格照整頁寬 */
+/* 一欄式、內文較長的卡片（怎麼選字的步驟卡、路線圖的階段卡）整張跟段落同寬，卡片邊界和上下的段落、標題對齊，文字也維持約 45 字一行。並排小卡、數字格、表格照整頁寬 */
 .layers, .stages { max-width: var(--prose-max); }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--nav-h) + 12px); }
