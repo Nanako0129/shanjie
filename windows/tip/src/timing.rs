@@ -13,7 +13,8 @@ pub const EV_LOAD: u32 = 2;
 pub const EV_KEY: u32 = 3;
 /// Diagnostic events (docs/spec/windows-tip.md §3.11): a point in time (start = end) with a numeric reason, never any key or text.
 /// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the client is blocked (since the resident host, §5: the circuit
-/// breaker, the permanent pass-through after `Refuse { 1 }`, the cool-down after `Refuse { 3 }`), the keyboard compartment is
+/// breaker, the permanent pass-through after `Refuse { 1 }`, the cool-down after `Refuse { 3 }`, or, with an empty composition, no
+/// working connection to the host: §5.4), the keyboard compartment is
 /// closed, or the context is disabled or empty. 47: ActivateEx could not advise its sinks. 48: ActivateEx in secure mode.
 pub const EV_TEST_INACTIVE: u32 = 41;
 pub const EV_TEST_UNUSABLE: u32 = 42;

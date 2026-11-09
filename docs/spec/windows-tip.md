@@ -161,7 +161,7 @@ Linux `debug` job 在既有步驟之後加三步：
 - 實作的 sink 與用途：`OnTestKeyDown`／`OnKeyDown`（`OnKeyUp`、`OnTestKeyUp`、`OnPreservedKey` 一律不吃）、`OnCompositionTerminated`、`ITfThreadMgrEventSink::OnSetFocus`（換文件時結束組字）、`ITfThreadFocusSink::OnKillThreadFocus`（換到別的執行緒時結束組字）。
 - **鍵盤開關隔間**（`GUID_COMPARTMENT_KEYBOARD_OPENCLOSE`）：`ActivateEx` 時設成開；每一份文件（document manager）**第一次**拿到焦點時（`OnSetFocus`、`OnSetThreadFocus`）也設成開，因為 Windows 的開關狀態跟著視窗走，新開的視窗可能是關的；之後回到同一份文件時保留當下的值，不覆蓋使用者自己改的狀態（例如在該視窗按 Ctrl+Space），與微軟注音的中英模式各視窗分開記一致。這個隔間為關時，`OnTestKeyDown`、`OnKeyDown` 一律直通。目前 TIP 沒有自己的中英切換，所以預設一直是中文模式。
 - 停用的 context：`GUID_COMPARTMENT_KEYBOARD_DISABLED` 或 `GUID_COMPARTMENT_EMPTYCONTEXT` 為真時（例如密碼欄這類 context），`OnTestKeyDown`、`OnKeyDown` 都直通。輸入範圍 `IS_PASSWORD` 的處理尚未做。
-- 這個實例未啟用（`ActivateEx` 之前、`Deactivate` 之後、安全模式）、或客戶端被擋住（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，§5.4）時，同樣直通。
+- 這個實例未啟用（`ActivateEx` 之前、`Deactivate` 之後、安全模式）、或客戶端被擋住（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，或組字區空時連不上常駐程序，§5.4）時，同樣直通。
 
 ### 3.6 按鍵對應與 `OnTestKeyDown`
 
@@ -454,7 +454,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 5.4 通訊
 
-- **`OnTestKeyDown` 不看連線**：照 §3.6 判斷，連線與啟動都在 `OnKeyDown` 裡做；只有斷路器生效、`Refuse { 1 }` 之後的永久直通、`Refuse { 3 }` 的 60 秒冷卻期間才一律回 FALSE。（explorer 會先呼叫 `OnTestKeyDown`；若它因為還沒連上而回 FALSE，`OnKeyDown` 永遠不會被呼叫，常駐程序也永遠不會被啟動。）
+- **直通在 `OnTestKeyDown` 決定**：斷路器生效、`Refuse { 1 }` 之後的永久直通、`Refuse { 3 }` 的 60 秒冷卻期間一律回 FALSE。組字區是空的、照 §3.6 會吃的鍵，`OnTestKeyDown` 先確認這條執行緒有能用的連線：沒有就當場連線（開 pipe、核對伺服器、`Hello`；pipe 不存在時照 §5.2 的條件啟動常駐程序、不等），連不上（含 `NotReady`）就回 FALSE，鍵照原樣交給 App。理由：IMM32（CUAS）的宿主（例如「執行」對話框）裡，`OnTestKeyDown` 回 TRUE 的鍵會變成 `VK_PROCESSKEY`，`OnKeyDown` 再放行也收不回原本的字元，鍵就消失了（VM 實測：常駐程序還沒起來時在「執行」對話框送的鍵沒有出現）。explorer 會先呼叫 `OnTestKeyDown`，所以啟動也從這裡發生。組字開著時照常送常駐程序；每鍵才知道的 `Busy` 在 IMM32 宿主裡仍會讓那一鍵消失（已知限制，應該很少見）。
 - **第一個鍵才連線**（不在 `ActivateEx` 連）；一個 TIP 實例最多一條連線。組字區是空的而且閒置 60 秒，客戶端自己關連線（UI 執行緒上 15 秒一次的 `SetTimer`）。連線曾經存在後 `DllCanUnloadNow` 一律回 `S_FALSE`。
 - 常駐程序每條連線一條執行緒，本體包 `catch_unwind`。引擎一把鎖：`Key` 一律 `try_lock`，拿不到就立刻回 `Busy`（客戶端直通）；`Release`、`Reset` 與斷線清理等鎖（沒有人在等它們的回應，跳過會留下錯的擁有者、讓已經送出的字再出現一次），等的時間最多是別人一次核心呼叫。先放掉鎖再寫回應，寫入逾時 1 秒就斷那條連線。
 - 閒置逾時只用在 `Hello` 之前（1 秒）。依客戶端的 AppContainer SID 或 PID 限制每個客戶端的連線數（4）：只拿來限流，不拿來授權。送出最後一則（`Refuse`、`NotReady`）之後等客戶端關閉最多 1 秒再 `DisconnectNamedPipe`，免得客戶端讀不到。
@@ -489,8 +489,8 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 | 情況 | DLL 看到什麼 | DLL 做什麼 | 使用者看到什麼 |
 |---|---|---|---|
 | **組字開著時任何讀寫錯誤**（斷線、逾時、重連得到 `ERROR_FILE_NOT_FOUND`），或收到 `NotReady`、`Busy`、`Refuse`、格式不對的回應 | 讀寫失敗或不能用的回應 | 在同一個 edit session 裡結束組字（先清底線、字留著），**吃掉這一鍵**，關連線；之後的鍵照 §5.2 的條件連線或啟動常駐程序（不等） | 打到一半的字留在文件、沒有底線；之後的鍵依常駐程序的狀態直通或恢復 |
-| 常駐程序沒在跑（組字區是空的） | `ERROR_FILE_NOT_FOUND` | 符合 §5.2 的條件就啟動（不等），這一鍵直通 | 前幾個字母以英文出現，之後恢復 |
-| 常駐程序載入中 | `NotReady` | 直通 | 同上 |
+| 常駐程序沒在跑（組字區是空的） | `ERROR_FILE_NOT_FOUND`（在 `OnTestKeyDown`） | 符合 §5.2 的條件就啟動（不等），`OnTestKeyDown` 回 FALSE，這一鍵直通 | 前幾個字母以英文出現，之後恢復 |
+| 常駐程序載入中 | `NotReady`（在 `OnTestKeyDown` 的 `Hello`） | `OnTestKeyDown` 回 FALSE，直通 | 同上 |
 | 引擎忙碌 | `Busy` | 直通 | 那一鍵是英文 |
 | 常駐程序當掉或卡住（組字區是空的） | 讀寫失敗、逾時 | 寫入失敗重送一次（§5.4）；讀取失敗或逾時：取消並等完成、關連線、這一鍵直通；連續兩次逾時觸發斷路器 | 那一鍵是英文，之後恢復 |
 | 版本不同（更新後還載著舊 DLL） | `Refuse { 1 }` | 這個程序從此直通、不再重試（只有這一種會永久直通） | 這個 App 只剩英文，重開 App 恢復 |
@@ -511,7 +511,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 - DLL 與常駐程序各自照 §3.11 寫（同樣的 Medium 閘門、`CREATE_NEW`、只有數字）；常駐程序的檔名 `host-<pid>.txt`，同一個資料夾。DLL 寫入用 `try_lock`（UI 執行緒不等計時檔），常駐程序等鎖（64 條連線執行緒共用一個檔，略過會丟掉事件 2）。
 - 常駐程序記 2（模型載入）、3（每鍵：收到到送回）、64（一個 AppContainer 客戶端連上，兩欄都是 1）、65（同時連線數創新高時的值，兩欄都是那個數）。DLL 不再寫 2 與 46。
-- DLL 記：60 等常駐程序回應（開始＝送出、結束＝收到）；61 `CreateProcessW` 成功的時刻（同一個 QPC 時鐘；冷啟動秒數＝常駐程序事件 2 的結束減這個時刻）；62 逾時或斷線（兩欄都是 Win32 錯誤碼）；63 不符條件而直通（兩欄都是原因碼：1 不准連線、2 不符啟動條件、3 退避中或另一條執行緒正在啟動、4 `CreateProcessW` 失敗（含 Job 不准脫離）、5 啟動後仍找不到、6 `ERROR_PIPE_BUSY`、7 `NotReady`、8 `Busy`、9 伺服器核對不過、10 `Refuse { 1 }`、11 `Refuse { 2 }`（含不認得的原因碼）、12 `Refuse { 3 }`、13 回應型別不對）。42、52 的意思是「被擋住」（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻）。
+- DLL 記：60 等常駐程序回應（開始＝送出、結束＝收到）；61 `CreateProcessW` 成功的時刻（同一個 QPC 時鐘；冷啟動秒數＝常駐程序事件 2 的結束減這個時刻）；62 逾時或斷線（兩欄都是 Win32 錯誤碼）；63 不符條件而直通（兩欄都是原因碼：1 不准連線、2 不符啟動條件、3 退避中或另一條執行緒正在啟動、4 `CreateProcessW` 失敗（含 Job 不准脫離）、5 啟動後仍找不到、6 `ERROR_PIPE_BUSY`、7 `NotReady`、8 `Busy`、9 伺服器核對不過、10 `Refuse { 1 }`、11 `Refuse { 2 }`（含不認得的原因碼）、12 `Refuse { 3 }`、13 回應型別不對）。42 的意思是「被擋住」（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，或組字區空時連不上常駐程序，§5.4），52 是同樣的擋住出現在 `OnKeyDown`。
 
 ### 5.9 介面的層級
 
@@ -527,7 +527,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 測試 VM 同 §3.13（從乾淨檢查點開始、結束還原）。驗收步驟：
 
 1. CI 全綠。
-2. **暖機**（在 (b) 之前）：先在記事本（有套件身分）送一鍵，核對沒有啟動常駐程序；再開「執行」對話框（`explorer.exe`，沒有套件身分）送 `s`，等常駐程序的計時檔出現事件 2、而且只有一支 `shanjie-host`（上限 60 秒），Esc 關掉。記錄冷啟動秒數（事件 61 到常駐程序事件 2 的結束），核對常駐程序的父程序是 explorer、沒有套件身分、權杖是 Medium。
+2. **暖機**（在 (b) 之前）：先在記事本（有套件身分）送一鍵，核對沒有啟動常駐程序；再開「執行」對話框（`explorer.exe`，沒有套件身分）送 `s`，等常駐程序的計時檔出現事件 2、而且只有一支 `shanjie-host`（上限 60 秒），核對對話框裡是直通的 `s`，Esc 關掉。記錄冷啟動秒數（事件 61 到常駐程序事件 2 的結束），核對常駐程序的父程序是 explorer、沒有套件身分、權杖是 Medium。
 3. **逐字相同**：§3.13 的 (b)、(c)、(d)、(e)、(e2) 用同樣的鍵與預期字。
 4. **模型只載一份**：每個檢查點只有一支常駐程序；DLL 的計時檔都沒有事件 2，每個 `host-*.txt` 剛好一筆事件 2。
 5. **記憶體**：記事本與 explorer 各做兩組（微軟注音、善解），取樣點相同、兩組之間開「執行」對話框的次數相同。判準：善解的差減掉微軟注音的差 < 10 MB。常駐程序的私有記憶體照實報。

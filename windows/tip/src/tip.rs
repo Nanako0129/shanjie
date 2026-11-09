@@ -275,8 +275,8 @@ impl TextService_Impl {
             timing::diag(timing::EV_TEST_INACTIVE);
             return Ok(false);
         }
-        // §5.4: the connection is not looked at here, only the three blocks (else explorer, which asks this first, would never
-        // reach OnKeyDown and never start the host).
+        // §5.4: the three blocks pass every key. With an empty composition the connection is checked further down (and the host
+        // started from here when it is missing: explorer asks this first).
         if client::blocked() {
             timing::diag(timing::EV_TEST_UNUSABLE);
             return Ok(false);
@@ -291,7 +291,13 @@ impl TextService_Impl {
             return Ok(false);
         }
         let Some(k) = map_key(wparam.0 as u32, read_mods()) else { return Ok(false) };
-        let eat = may_eat(self.comp.borrow().is_some(), &k);
+        let composing = self.comp.borrow().is_some();
+        let mut eat = may_eat(composing, &k);
+        // §5.4, §5.6: a key that would only pass through must be refused here, not let go in OnKeyDown (an IMM32 host loses it).
+        if eat && !composing && !client::ready() {
+            timing::diag(timing::EV_TEST_UNUSABLE);
+            eat = false;
+        }
         if eat {
             // SAFETY: no preconditions.
             timing::diag_value(timing::EV_TEST_TRUE_THREAD, unsafe { GetCurrentThreadId() } as u64);

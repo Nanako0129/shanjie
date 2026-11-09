@@ -290,6 +290,25 @@ pub fn key(ctx: u64, k: Key, composing: bool) -> Reply {
     .unwrap_or(Reply::Pass)
 }
 
+/// Called from `OnTestKeyDown` with an empty composition (§5.4): makes sure this thread has a working connection, connecting (and
+/// starting the host when the pipe is missing and this process may) as `key` would. `false` means the key must pass through, and
+/// `OnTestKeyDown` must say so itself: in an IMM32 (CUAS) host such as the Run dialog, a key `OnTestKeyDown` claimed reaches the app
+/// as `VK_PROCESSKEY` and is lost when `OnKeyDown` then lets it go (seen in the VM: the passed-through `s` never appeared).
+pub fn ready() -> bool {
+    if blocked() {
+        return false;
+    }
+    let Some(me) = me() else { return false };
+    LINK.try_with(|cell| {
+        let Ok(mut slot) = cell.try_borrow_mut() else { return false };
+        if slot.is_none() {
+            *slot = connect(me);
+        }
+        slot.is_some()
+    })
+    .unwrap_or(false)
+}
+
 /// A message without an answer (`Release`, `Reset`); a failed write closes the connection.
 fn tell(m: ClientMsg) {
     let _ = LINK.try_with(|cell| {
