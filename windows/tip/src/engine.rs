@@ -74,7 +74,7 @@ pub fn attempted() -> bool {
 
 // ---- loading (docs/spec/windows-tip.md §3.4: the call list of cli/src/replay.rs `build_engine_packs`, except set_rerank(0)) ----
 
-/// `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`, `cli::replay::PACKS`.
+/// `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`: `cli::replay::PACKS` without the beauty pack (16), which the Windows build does not ship (docs/spec/windows-tip.md §3.4).
 const PACKS: u32 = 1 | 4;
 
 pub fn ensure_loaded() {

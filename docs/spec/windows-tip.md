@@ -16,7 +16,7 @@
 ### 1.2 現況
 
 - 核心與它全部的測試在 Windows 上編得過、測得過，評測 CLI 的逐列結果和 Linux 逐位元組相同。
-- TSF 文字服務可在測試 VM 的記事本與「執行」對話框打出一句注音並送出，送出的字和 Mac 上 `shanjie-replay` 用同一串鍵解出的字逐字相同。
+- TSF 文字服務可在測試 VM 的記事本與「執行」對話框打出一句注音並送出，送出的字和 Mac 上 `shanjie-replay --packs acg,it`（Windows 版的詞包，見 §3.4）用同一串鍵解出的字逐字相同。
 - 目前的按鍵行為就是核心現行的規則（Mac 版的規則）。微軟注音的規則組與 Mac 做法的切換設定尚未實作（§3.14）。
 - 沒有候選窗、預測列、設定、學習檔、安裝程式與簽章（§3.14）。
 
@@ -137,7 +137,7 @@ Linux `debug` job 在既有步驟之後加三步：
 
 - 程序層級的單例（`Mutex`），第一次 `ActivateEx` 時**同步載入**，之後的 `ActivateEx` 沿用，直到程序結束都不釋放。載入期間宿主的 UI 執行緒會等。
 - 建引擎的呼叫順序與值照 `cli::replay::build_engine_packs`（不是照 Mac App 的設定：App 的中英混打預設開，replay 是關的）：
-  1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`）；
+  1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`；replay 不給 `--packs` 時是 21，多了 Mac App 預設開的美妝詞包，Windows 版不帶它）；
   2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`；
   3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(0)`、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
   4. `set_learning(0)`。重排強度與設定檔類型用核心預設（標準、聊天）；不呼叫 `set_fuzzy`、`set_left_context`、`learning_open`。

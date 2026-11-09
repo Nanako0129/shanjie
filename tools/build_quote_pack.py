@@ -9,7 +9,7 @@
 
 用法：python3 tools/build_quote_pack.py [--list FILE] [--out DIR] [--report DIR] [--acg-dir DIR]
 （--acg-dir 的資料夾要同時有 acg-add.tsv 與 it-add.tsv，解碼的「不開」「開」都帶它們）
-解碼靠評測 CLI（target/release/shanjie-eval）與出貨的 data/lm（雜湊見 SHIPPED_LM_SHA，開始前核對）；「不開」帶 ACG 與資訊詞包（--packs acg,it）、「開」再加台詞（acg,quotes,it），照出貨；
+解碼靠評測 CLI（target/release/shanjie-eval）與出貨的 data/lm（雜湊見 SHIPPED_LM_SHA，開始前核對）；「不開」帶 ACG 與資訊詞包（--packs acg,it）、「開」再加台詞（acg,quotes,it），照美妝詞包加進預設之前的出貨組合；
 quotes.json 記下解碼用的模型與 ACG、資訊詞包檔的雜湊。
 """
 import argparse
