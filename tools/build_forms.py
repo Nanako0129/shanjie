@@ -139,7 +139,7 @@ def build(entries):
     wl = [f"word\t{w}\t{wcanon[w]}" for w in sorted(wcanon)]
     cl = [f"char\t{x}\t{ccanon[x][0]}\t{','.join(ccanon[x][1])}" for x in sorted(ccanon)]
     head = [
-        f"# 合法寫法分數用的表（docs/contracts/forms-score.md，規則版本 {VERSION}）。由 tools/build_forms.py 產生，請勿手改。",
+        f"# 合法寫法分數用的表（docs/spec/evaluation.md §3，規則版本 {VERSION}）。由 tools/build_forms.py 產生，請勿手改。",
         f"# 來源：教育部《重編國語辭典修訂本》，經 g0v/moedict-data dict-revised_bkup.json（commit {MOEDICT_COMMIT}，SHA-256 {MOEDICT_SHA256}）。CC BY-ND 3.0 TW，只用於評測。",
         "# 格式：word<TAB>寫法<TAB>標準形；char<TAB>X<TAB>Y<TAB>讀音1,讀音2…（只在該位置的讀音符合時才換）。先套現行寬鬆對照，再套本表。",
         f"# 詞對 {len(wl)} 個、單字對 {len(cl)} 個、丟掉的組 {dropped} 組",

@@ -21,9 +21,9 @@
  },
  "first_without_quote_pack": {
   "chat": 254,
-  "formal": 253
+  "formal": 256
  },
- "list_sha256": "85614d4fae17456919b15a79da93282449b90a4f58364a33d80e5bc15326962e",
+ "list_sha256": "edd7ba2e55d84fa8234ca746c74620e95b605fa3a8723f5b30ab917afa606f97",
  "not_first_with_pack": 12,
  "quotes_checked": 208,
  "quotes_listed": 208,
