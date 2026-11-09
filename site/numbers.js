@@ -24,8 +24,12 @@
   }
   function g3(x) { // Python f"{x:.3g}" for x >= 0
     if (x === 0) return "0";
-    // toFixed(100) 裝不下 1e-100 以下的數：這麼小的 p 不會剛好落在一半，直接用指數寫法再整理成 Python 的樣子
-    if (x < 1e-90) return x.toExponential(2).replace(/\.?0+e/, "e").replace(/e([+-])(\d)$/, "e$10$2");
+    // 1e-4 以下 Python 用指數寫法。這個範圍的浮點數不可能剛好落在 3 位有效數字的一半（要 5^8 整除一個四位數），
+    // 所以 toExponential 的捨入就是 Python 的結果；toFixed(100) 只留給 1e-4 以上，100 位小數足夠判斷是不是剛好一半
+    if (x < 1e-4) {
+      const s = x.toExponential(2);
+      if (Number(s.split("e")[1]) < -4) return s.replace(/\.?0+e/, "e").replace(/e([+-])(\d)$/, "e$10$2");
+    }
     const { i, f } = digitsOf(x);
     const all = i + f, lead = all.match(/^0*/)[0].length;
     let e = i.length - 1 - lead; // 第一個有效位數的 10 的次方
