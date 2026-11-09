@@ -79,7 +79,7 @@ Windows 只建 `shanjie-eval`（`cargo build -p cli --release --bin shanjie-eval
 Linux `debug` job 在既有步驟之後加三步：
 
 1. `cargo build --release --locked -p cli --bin shanjie-eval`；
-2. `scripts/ci-rowstats.sh rowstats-linux`：跑六組評測（dev302 `--dev 302`、打字測驗 `eval/dev/user-typing.txt`、錯字回報 `eval/dev/user-reported.txt`，各在聊天與書面設定下），出貨旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`，`--threads 4`，各寫一份 `--rowstats`（`--threads` 不改輸出的任何位元組）；
+2. `scripts/ci-rowstats.sh rowstats-linux`：跑六組評測（dev302 `--dev 302`、打字測驗 `eval/dev/user-typing.txt`、錯字回報 `eval/dev/user-reported.txt`，各在聊天與書面設定下），Windows 輸入法出貨的旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`，`--threads 4`，各寫一份 `--rowstats`（`--threads` 不改輸出的任何位元組）；
 3. `actions/upload-artifact` 上傳這六份。
 
 `windows` job（映像 `windows-2025`，`needs: [changes, debug]`，`if` 與其他 job 相同，逾時 45 分鐘，所有步驟用 bash）：

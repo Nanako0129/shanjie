@@ -20,7 +20,7 @@
 | 美妝與保養詞包 | `beauty-add.tsv` | `beauty` | `tools/build_meme_pack.py --pack beauty` | 當作沒有這個詞包 |
 
 - `variant-order.tsv`（異體排序表）也在載入時讀，缺檔或有一行不成立都是載入失敗；它的格式與規則在 `docs/spec/decoder.md`，這份不重複。
-- 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
+- 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
 - 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。
 - 疊加層、名單層、詞包彼此的詞串不可重複：同一個（讀音, 詞）在兩個檔都有，核心載入時回 `OverlayDuplicate`（引擎建立失敗）；封頂又是依字串封頂所有讀音，所以各建置工具另外要求「新層的詞串不在任何既有層的任何讀音下」。若 `data/packs/meme-add.tsv`（迷因詞包的建置輸出）存在，各工具也把它的詞當作已佔用；目前 repo 沒有出貨這個檔，引擎也沒有對應的位元。
@@ -232,7 +232,7 @@
 - `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`：`packs` 是位元遮罩，遮罩 0 忽略 `packs_dir`（可為 NULL），等於 `shanjie_engine_new`。回傳碼：1 = `packs_dir` 是 NULL 而遮罩非 0（或其他空指標）、2 = 遮罩有未知的位元或路徑不是 UTF-8、3 = 詞包檔存在卻讀不了或解析失敗（也包括基底、疊加層、名單層、變調層載入失敗）。
 - 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼用「釋放引擎、再建一個」切換，和換鍵盤排列相同。遮罩內缺檔的詞包什麼都不貢獻。
 - 關掉的詞包不讀檔：選字結果、候選清單與預測和沒有那個詞包檔的引擎逐位元組相同。
-- 評測 CLI：`--packs acg|quotes|it|beauty` 或逗號串列，`--packs-dir DIR`（預設 `data/packs`）。要求的詞包檔不存在時 CLI 報錯並印路徑（引擎不報錯，這是 CLI 與引擎的差別）；單用 `--packs-dir` 沒有 `--packs` 是錯誤；兩個檢查都在讀模型之前。摘要行在載入詞包時依序多 `+acg`、`+quotes`、`+it` 標記，沒有詞包時一字不變。`PACKS=acg,it`（`PACKS_DIR` 預設 `data/packs`）讓 `core/tests/engine_predict.rs` 的延遲測試載入出貨的遮罩，並斷言詞庫列數等於基底加所列詞包。
+- 評測 CLI：`--packs acg|quotes|it|beauty` 或逗號串列，`--packs-dir DIR`（預設 `data/packs`）。要求的詞包檔不存在時 CLI 報錯並印路徑（引擎不報錯，這是 CLI 與引擎的差別）；單用 `--packs-dir` 沒有 `--packs` 是錯誤；兩個檢查都在讀模型之前。摘要行在載入詞包時依序多 `+acg`、`+quotes`、`+it`、`+beauty` 標記，沒有詞包時一字不變。`PACKS=acg,it,beauty`（`PACKS_DIR` 預設 `data/packs`）讓 `core/tests/engine_predict.rs` 的延遲測試載入出貨的遮罩，並斷言詞庫列數等於基底加所列詞包。
 - 驗證：`core/tests/engine_pack.rs`（`the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file`、`the_it_pack_has_its_own_bit_and_file`、`an_unknown_pack_bit_is_refused`、`the_quote_bit_reads_quotes_add_tsv_only`、`the_names_layer_is_capped_on_the_engine_path`、`an_anime_pack_word_keeps_its_score_on_the_engine_path`）；`cli/tests/golden.rs` 的 `packs_options_fail_loudly`、`unreadable_pack_file_names_the_path_and_kind`、`unparsable_pack_is_a_parse_error`。
 
 ### 4.2 App 的開關與預設
@@ -258,13 +258,13 @@
 3. 它成功：對每個啟用的詞包依設定順序各試「少這一個」（`mask & ~bit`），第一個成功的留下，其餘詞包照開，記一行含回傳碼與留下遮罩的日誌；
 4. 沒有任何一個少一個的組合成功（兩個以上的檔壞了）：建不帶詞包的引擎。
 
-偏好值不動，也不顯示錯誤，下一次重建會再試。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`。
+偏好值不動，也不顯示錯誤，下一次重建會再試。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
 
 ### 4.4 打包與自測
 
 - `scripts/build-app.sh` 把詞包的執行期檔放進 `Resources/packs/`：`acg-add.tsv`、`acg-sources.tsv`、`acg.json`、`quotes-add.tsv`、`quotes.json`、`it-add.tsv`、`it-sources.tsv`、`it.json`、`beauty-add.tsv`、`beauty-sources.tsv`、`beauty.json`；建置輸入（`acg-groups.tsv`、`acg-collisions.tsv`、`acg-exclude.tsv`、`acg-manual.tsv`、`quotes-manual.tsv`、`it-manual.tsv`、`it-collisions.tsv`、`it-readings.tsv` 等）不進 App。疊加層、變調層、名單層與 `digits.tsv` 放在 `Resources/` 根。
 - `scripts/check-app.sh`：四個清單檔（`acg.json`、`quotes.json`、`it.json`、`beauty.json`）列出的每個檔都在、SHA-256 與位元組數與實際檔案相符，且必須列出對應的 `*-add.tsv`；署名檔 `LICENSES/CC-BY-SA-4.0-attribution.txt` 要列 `packs/acg-add.tsv`、`packs/it-add.tsv`、`names-add.tsv`、政府資料開放授權條款的標示與 name-suggestion-index 的 BSD-3 全文；`Resources/names-add.tsv`、`digits.tsv` 與 repo 的檔逐位元組相同。
-- 自測（`shanjie --selftest`）帶動漫與資訊詞包建引擎：要求 `ㄕㄣˊ ㄧㄡˊ ㄕˇ` 得到 `榊遊矢`、`ㄧㄥˊ ㄇㄨˋ ㄅㄠˇ ㄏㄨˋ ㄑㄧˋ` 得到 `螢幕保護器`、`ㄇㄟˊ ㄘㄞˇ ㄍㄠ` 得到 `眉彩膏`，所以三個詞包缺檔、壞檔或沒生效都失敗；經典台詞預設關，不在自測裡。
+- 自測（`shanjie --selftest`）帶動漫、資訊與美妝詞包建引擎：要求 `ㄕㄣˊ ㄧㄡˊ ㄕˇ` 得到 `榊遊矢`、`ㄧㄥˊ ㄇㄨˋ ㄅㄠˇ ㄏㄨˋ ㄑㄧˋ` 得到 `螢幕保護器`、`ㄇㄟˊ ㄘㄞˇ ㄍㄠ` 得到 `眉彩膏`，所以三個詞包缺檔、壞檔或沒生效都失敗；經典台詞預設關，不在自測裡。
 - 授權：`acg-*`、`it-*` 的資料檔與 `names-add.tsv`、`overlay-add.tsv` 以 CC BY-SA 4.0 散布（署名維基與維基詞典貢獻者，資訊詞包另標政府資料開放授權條款的提供機關，名單層另附 NSI 的版權聲明）；經典台詞的清單與詞包、美妝詞包 CC0。逐檔的授權與署名寫在 `LICENSES/data.md`。
 
 ### 4.5 共通的建置機制
