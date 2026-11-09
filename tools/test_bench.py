@@ -916,7 +916,8 @@ class SiteData(Tmp):
         here = os.getcwd()
         self.addCleanup(os.chdir, here)
         os.chdir(bench.ROOT)   # the relative path below resolves inside the repository
-        for md, env in ((os.path.join(bench.ROOT, "docs/benchmark.md"), None), ("docs/benchmark.md", None), (None, bench.ROOT)):
+        for md, env in ((os.path.join(bench.ROOT, "docs/benchmark.md"), None), ("docs/benchmark.md", None), (None, bench.ROOT),
+                        (os.path.join(os.path.dirname(bench.ROOT), "ROOT", "docs", "benchmark.md"), None)):   # case-insensitive volumes
             with self.subTest(md=md, env=env), mock.patch.dict(os.environ), contextlib.redirect_stderr(io.StringIO()) as err:
                 os.environ.pop("SHANJIE_TABLES", None)
                 if env:

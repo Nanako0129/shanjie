@@ -24,6 +24,8 @@
   }
   function g3(x) { // Python f"{x:.3g}" for x >= 0
     if (x === 0) return "0";
+    // toFixed(100) 裝不下 1e-100 以下的數：這麼小的 p 不會剛好落在一半，直接用指數寫法再整理成 Python 的樣子
+    if (x < 1e-90) return x.toExponential(2).replace(/\.?0+e/, "e").replace(/e([+-])(\d)$/, "e$10$2");
     const { i, f } = digitsOf(x);
     const all = i + f, lead = all.match(/^0*/)[0].length;
     let e = i.length - 1 - lead; // 第一個有效位數的 10 的次方

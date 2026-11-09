@@ -448,7 +448,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   - `static`：`date` 與 `groups`（每組 `name`、`n`、`ime`：輸入法 → `sentences`、`chars`）。
   - `external`：每個外部模型一項，`name`、`date`、`label`、`ours_label` 與 `rows`（`setting`、`set`、`n`、`ngram`、`ours`、`external`、`fixed`、`broken`、`p`）。
 - 版本列（`suite_v1`、`suite_v2` 同形）：`date`、`label`（結果檔標籤）、`ref`、`sha`、`version`（只有 v2）、`machine`、`macos`、`load_avg_start`、`load_avg_end`；`accuracy`（格名 `集合/設定` → `n`、`top1`、`oracle64`）；`vs`、`vs_prev`（格名 → `fixed`、`broken`、`p`，有上一版時）；`holdout_chat`（`commit`、`n`、`top1`、有的話 `oracle64`、`rows_sha256`，量過時再加 `fixed`、`broken`、`p`）；`speed`（`p95_us`、`max_us`、`load_ms`、`rss_mb`、`keys`、`rounds`、`rows_match`，有語意校正時加 `rerank_p50_ms`、`rerank_p95_ms`，v2 另有書面那一列 `formal`）；`models`（v2，檔名 → SHA-256）。
-- 網站的 /benchmark 頁（`site/benchmark.html`）由 `site/numbers.js` 讀這個檔畫表；每格的寫法和完整表逐字相同（數字照 Python 的 round-half-even 捨入），發版時用核對腳本（研究 repo）比對兩頁與完整表。
+- 網站的 /benchmark 頁（`site/benchmark.html`）由 `site/numbers.js` 讀這個檔畫表；每格的寫法和完整表逐字相同（數字照 Python 的 round-half-even 捨入；失敗的格網站只寫「失敗」，不帶錯誤訊息，核對時會被列成不同），發版時用核對腳本（研究 repo）比對兩頁與完整表。
 
 ### 7.12 發版時的指令順序
 

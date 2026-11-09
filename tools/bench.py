@@ -845,7 +845,8 @@ def md_path(arg, name, who="bench"):
         print(f"{who}: {name} not written: pass the file or set SHANJIE_TABLES (the full table stays out of this repository)", file=sys.stderr)
         return None
     p, root = os.path.realpath(p), os.path.realpath(ROOT)
-    if os.path.commonpath([p, root]) == root:
+    # casefold: macOS volumes are case-insensitive, so /Users/x/SHANJIE is the same folder as /Users/x/shanjie
+    if os.path.commonpath([p.casefold(), root.casefold()]) == root.casefold():
         print(f"{who}: {p} is inside this repository: the full table carries private-set numbers and stays out of it; "
               "write it elsewhere (--md / --out FILE or SHANJIE_TABLES)", file=sys.stderr)
         sys.exit(1)
