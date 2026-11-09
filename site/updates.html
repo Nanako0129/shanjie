@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>更新紀錄 — 善解</title>
+<title>更新紀錄｜善解輸入法</title>
 <meta name="description" content="善解每週改了什麼：發佈了什麼、合併了哪些、評測的數字。">
 <meta property="og:title" content="善解更新紀錄">
 <meta property="og:description" content="善解每週改了什麼：發佈了什麼、合併了哪些、評測的數字。">
@@ -17,15 +17,13 @@
 <meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="favicon.png" type="image/png" sizes="64x64">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;900&display=swap">
 <style>
   :root {
     --paper: #F6F1E7; --paper-2: #EFE8DA; --ink: #1F1D1A; --ink-2: #5A544C; --line: #D9CFBD;
     --seal: #B83A2E; --seal-ink: #F6F1E7; --ok: #3F6B4F; --wip: #8A5C14;
-    --serif: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
-    --sans: "Noto Sans TC", -apple-system, "PingFang TC", "Heiti TC", sans-serif;
+    /* macOS built-in faces only (no web fonts): readers are Mac users; other systems fall back to their default serif/sans. */
+    --serif: "Songti TC", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {

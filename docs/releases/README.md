@@ -45,6 +45,8 @@
 
   資料類的 Release 一律不標 Latest，Releases 頁的 Latest 永遠是輸入法的最新版。
 
+- **網站連結**：輸入法版本（`v*`）的說明最後一行是「安裝與使用說明：https://shanjie.nyanako.com/ 」（網址後面留一個空格，免得全形標點黏進連結）。已發的舊版說明不回頭改。
+
 ## Sparkle 自動更新（v0.4.7 起）
 
 規格在 `docs/spec/install-and-update.md` §3，信任模型在 §1。
