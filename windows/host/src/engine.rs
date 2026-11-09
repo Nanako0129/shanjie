@@ -1,17 +1,22 @@
-//! The process-level engine (docs/spec/windows-tip.md §3.4): one engine per process behind a `Mutex`, loaded synchronously by the
-//! first `ActivateEx`, never freed (a loaded engine also pins the DLL, see `dll::DllCanUnloadNow`). Only the C ABI of the core is used.
-//! The lock covers "call the core, copy the output" and nothing else; the document is edited after it is released.
-use crate::keys::{Key, KIND_ESC};
-use crate::timing;
+//! The host's one engine (docs/spec/windows-tip.md §5.2 and §5.3; the scheme of the in-DLL engine of docs/spec/windows-tip.md §3.4). One engine behind
+//! one lock; its owner is assigned by the host as (connection id, ctx), so a client's `ctx` means nothing on any other connection.
+//! A key from another owner first discards the old owner's state (reset mode 1, never mode 0). Only the core's C ABI is used.
+//!
+//! Locking: a key takes the lock with `try_lock` only and answers `Busy` when it is taken, so no client waits on another; the lock
+//! covers "call the core, copy the output", and the answer is written after it is released (the caller writes). `Release`, `Reset` and
+//! a closed connection have no one waiting for an answer and must not be skipped (a stale owner would keep its composition), so they
+//! wait for the lock. A poisoned lock ends the process (the next client starts a new host).
+use crate::server::{exit, EXIT_POISONED};
 use shanjie_core::ffi::{self as core_ffi, ShanjieEngine, ShanjieKey, ShanjieOutput};
+use shanjie_win_proto::{Key, Out};
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, TryLockError};
 
-/// The engine handle crosses threads under the mutex. The assertion below is the contract's precondition for the `unsafe impl`:
-/// the core's engine type is itself `Send`, so the pointer may move between the UI threads of the process.
+/// The engine handle crosses threads under the mutex. The assertion below is the precondition for the `unsafe impl`: the core's engine
+/// type is itself `Send`, so the pointer may move between the host's connection threads.
 struct EnginePtr(*mut ShanjieEngine);
 const _: () = {
     fn assert_send<T: Send>() {}
@@ -23,82 +28,39 @@ const _: () = {
 // SAFETY: see the assertion above; every use is under the `SHARED` mutex, one call at a time.
 unsafe impl Send for EnginePtr {}
 
-enum Eng {
-    Unloaded,
-    Ready(EnginePtr),
-    /// A load call failed: the process's TIP stays inert, no retry (docs/spec/windows-tip.md §3.4).
-    Failed,
-}
-
-/// Who composes: the thread and the `ITfContext` (its pointer value) of the last key that reached the core.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Owner {
-    pub thread: u32,
-    pub ctx: usize,
+    pub conn: u64,
+    pub ctx: u64,
 }
 
 struct Shared {
-    eng: Eng,
+    eng: Option<EnginePtr>,
     owner: Option<Owner>,
 }
 
-static SHARED: Mutex<Shared> = Mutex::new(Shared { eng: Eng::Unloaded, owner: None });
+static SHARED: Mutex<Shared> = Mutex::new(Shared { eng: None, owner: None });
+/// The model is loaded (the pipe exists before it is: until then every `Hello` and `Key` gets `NotReady`).
+static READY: AtomicBool = AtomicBool::new(false);
 
-const UNLOADED: u8 = 0;
-const READY: u8 = 1;
-const INERT: u8 = 2;
-/// Lock-free mirror of `SHARED.eng`, for `OnTestKeyDown` and `DllCanUnloadNow`.
-static STATE: AtomicU8 = AtomicU8::new(UNLOADED);
-
-/// `try_lock` only: a thread must never wait on the load or on another thread's key. A poisoned lock makes the process inert for good.
-fn lock() -> Option<MutexGuard<'static, Shared>> {
-    match SHARED.try_lock() {
-        Ok(g) => Some(g),
-        Err(TryLockError::WouldBlock) => None,
-        Err(TryLockError::Poisoned(_)) => {
-            STATE.store(INERT, Ordering::Release);
-            None
-        }
-    }
+pub fn ready() -> bool {
+    READY.load(Ordering::Acquire)
 }
 
-/// The engine is loaded and usable.
-pub fn usable() -> bool {
-    STATE.load(Ordering::Acquire) == READY
+fn lock_wait() -> MutexGuard<'static, Shared> {
+    SHARED.lock().unwrap_or_else(|_| exit(EXIT_POISONED))
 }
 
-/// A load was tried (so `DllCanUnloadNow` must say no).
-pub fn attempted() -> bool {
-    STATE.load(Ordering::Acquire) != UNLOADED
+/// Puts a loaded engine in place; from now on clients are welcome.
+pub fn install(e: *mut ShanjieEngine) {
+    lock_wait().eng = Some(EnginePtr(e));
+    READY.store(true, Ordering::Release);
 }
 
 // ---- loading (docs/spec/windows-tip.md §3.4: the call list of cli/src/replay.rs `build_engine_packs`, except set_rerank(0)) ----
 
 /// `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`: `cli::replay::PACKS` without the beauty pack (16), which the Windows build does not ship (docs/spec/windows-tip.md §3.4).
 const PACKS: u32 = 1 | 4;
-
-pub fn ensure_loaded() {
-    if STATE.load(Ordering::Acquire) != UNLOADED {
-        return;
-    }
-    let Some(mut g) = lock() else { return };
-    if !matches!(g.eng, Eng::Unloaded) {
-        return;
-    }
-    let t0 = timing::now_us();
-    let loaded = crate::dll::module_path().and_then(|p| p.parent().map(Path::to_path_buf)).and_then(|d| load(&d));
-    match loaded {
-        Some(p) => {
-            timing::record(timing::EV_LOAD, t0, timing::now_us());
-            g.eng = Eng::Ready(EnginePtr(p));
-            STATE.store(READY, Ordering::Release);
-        }
-        None => {
-            g.eng = Eng::Failed;
-            STATE.store(INERT, Ordering::Release);
-        }
-    }
-}
 
 /// Calls a setter that returns a snapshot; the snapshot is freed at once.
 ///
@@ -114,7 +76,9 @@ unsafe fn snap(f: impl FnOnce(*mut *mut ShanjieOutput) -> i32) -> bool {
     rc == 0
 }
 
-fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
+/// The engine of `dir/data` (the folder of this exe, §5.1). `None` when any call fails (the engine built so far is freed).
+/// Done without the lock, so a load never holds it.
+pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
     fn c(p: PathBuf) -> Option<CString> {
         CString::new(p.to_str()?).ok()
     }
@@ -147,18 +111,21 @@ fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
 
 // ---- keys ----
 
-/// What the TIP keeps of a `ShanjieOutput`: copied and freed inside one call (the header's rule).
-pub struct Out {
-    pub handled: bool,
-    pub commit: String,
-    pub preedit: String,
-    pub cursor: u32,
-    pub candidate_selected: i32,
+/// `KIND_ESC` of shanjie.h.
+const KIND_ESC: u32 = 6;
+
+/// What is kept of a `ShanjieOutput`: copied and freed inside one call (the header's rule).
+struct CoreOut {
+    handled: bool,
+    commit: String,
+    preedit: String,
+    cursor: u32,
+    candidate_selected: i32,
 }
 
 /// # Safety
 /// `e` is a live engine handle, used under the mutex.
-unsafe fn send(e: *mut ShanjieEngine, k: Key) -> Option<Out> {
+unsafe fn send(e: *mut ShanjieEngine, k: Key) -> Option<CoreOut> {
     let mut o: *mut ShanjieOutput = ptr::null_mut();
     // SAFETY: caller contract; `o` is a valid out pointer.
     let rc = unsafe { core_ffi::shanjie_engine_key(e, ShanjieKey { kind: k.kind, ch: k.ch, modifiers: k.modifiers }, &mut o) };
@@ -169,11 +136,11 @@ unsafe fn send(e: *mut ShanjieEngine, k: Key) -> Option<Out> {
     let out = unsafe {
         let r = &*o;
         let s = |p: *const std::os::raw::c_char| CStr::from_ptr(p).to_string_lossy().into_owned();
-        Out { handled: r.handled != 0, commit: s(r.commit), preedit: s(r.preedit), cursor: r.cursor_utf16, candidate_selected: r.candidate_selected }
+        CoreOut { handled: r.handled != 0, commit: s(r.commit), preedit: s(r.preedit), cursor: r.cursor_utf16, candidate_selected: r.candidate_selected }
     };
     // SAFETY: freed once, right after the copy.
     unsafe { core_ffi::shanjie_output_free(o) };
-    // A non-zero return means "not handled, do not record" (shanjie.h): the caller treats it as no output.
+    // A non-zero return means "not handled, do not record" (shanjie.h): no output.
     (rc == 0).then_some(out)
 }
 
@@ -184,24 +151,42 @@ unsafe fn reset(e: *mut ShanjieEngine) {
     unsafe { snap(|o| core_ffi::shanjie_engine_reset(e, 1, o)) };
 }
 
-pub struct Keyed {
-    /// The core was called (the lock was free and the engine ready).
-    pub ran: bool,
-    /// The engine belonged to someone else (or no one) before this key; the previous composition, if any, was discarded.
-    pub took_over: bool,
-    /// `None` when the core returned non-zero.
-    pub out: Option<Out>,
+pub enum Answer {
+    NotReady,
+    Busy,
+    Out(Out),
 }
 
-/// One key for `me`: lock, take ownership (discarding another owner's state with mode 1, never mode 0), call the core, copy, unlock.
-/// A candidate window cannot be shown in this slice, so a key that opens one is followed by ESC (docs/spec/windows-tip.md §3.7, `OnKeyDown` step 5).
-pub fn key(me: Owner, k: Key) -> Keyed {
-    let idle = Keyed { ran: false, took_over: false, out: None };
-    let Some(mut g) = lock() else { return idle };
-    let Eng::Ready(EnginePtr(e)) = g.eng else { return idle };
+fn wire(took_over: bool, out: Option<CoreOut>) -> Out {
+    match out {
+        Some(o) => Out {
+            ran: true,
+            core_error: false,
+            took_over,
+            handled: o.handled,
+            commit: o.commit.encode_utf16().collect(),
+            preedit: o.preedit.encode_utf16().collect(),
+            cursor_utf16: o.cursor,
+            candidate_selected: o.candidate_selected,
+            candidates: Vec::new(),
+        },
+        // The core returned non-zero: the client edits nothing and lets the key go (the in-DLL engine's `out: None`, docs/spec/windows-tip.md §3.4).
+        None => Out { ran: true, core_error: true, took_over, handled: false, commit: Vec::new(), preedit: Vec::new(), cursor_utf16: 0, candidate_selected: -1, candidates: Vec::new() },
+    }
+}
+
+/// One key for `me`: take ownership (discarding another owner's state with mode 1), call the core, copy, unlock. No candidate window
+/// exists in this slice, so a key that opens one is followed by ESC here (`OnKeyDown` step 5 of docs/spec/windows-tip.md §3.7, moved into the host).
+pub fn key(me: Owner, k: Key) -> Answer {
+    let mut g = match SHARED.try_lock() {
+        Ok(g) => g,
+        Err(TryLockError::WouldBlock) => return Answer::Busy,
+        Err(TryLockError::Poisoned(_)) => exit(EXIT_POISONED),
+    };
+    let Some(EnginePtr(e)) = g.eng else { return Answer::NotReady };
     let took_over = g.owner != Some(me);
     // SAFETY: `e` is the live engine and the lock is held.
-    unsafe {
+    let out = unsafe {
         if took_over && g.owner.is_some() {
             reset(e);
         }
@@ -220,21 +205,23 @@ pub fn key(me: Owner, k: Key) -> Keyed {
                         reset(e);
                         o.preedit.clear();
                         o.cursor = 0;
+                        o.candidate_selected = -1;
                     }
                 }
                 o.handled = true;
             }
         }
-        Keyed { ran: true, took_over, out }
-    }
+        out
+    };
+    drop(g);
+    Answer::Out(wire(took_over, out))
 }
 
-/// `OnSetFocus`, `OnKillThreadFocus`, `Deactivate`, `OnCompositionTerminated`, a failed document edit: discard the engine's state, but only
-/// when `me` still owns it.
-pub fn release_if_owner(me: Owner) {
-    let Some(mut g) = lock() else { return };
+/// `Release { ctx }`: the composition of exactly this owner ended in the app; discard the engine's state if it is still theirs.
+pub fn release(me: Owner) {
+    let mut g = lock_wait();
     if g.owner == Some(me) {
-        if let Eng::Ready(EnginePtr(e)) = g.eng {
+        if let Some(EnginePtr(e)) = g.eng {
             // SAFETY: live engine, lock held.
             unsafe { reset(e) };
         }
@@ -242,12 +229,14 @@ pub fn release_if_owner(me: Owner) {
     }
 }
 
-/// After a caught panic (guard.rs): reset whatever state there is.
-pub fn reset_after_panic() {
-    let Some(mut g) = lock() else { return };
-    if let Eng::Ready(EnginePtr(e)) = g.eng {
-        // SAFETY: live engine, lock held.
-        unsafe { reset(e) };
+/// `Reset` (after the client caught a panic) or the connection closed: discard the engine's state if this connection owns it, any ctx.
+pub fn drop_connection(conn: u64) {
+    let mut g = lock_wait();
+    if g.owner.is_some_and(|o| o.conn == conn) {
+        if let Some(EnginePtr(e)) = g.eng {
+            // SAFETY: live engine, lock held.
+            unsafe { reset(e) };
+        }
+        g.owner = None;
     }
-    g.owner = None;
 }

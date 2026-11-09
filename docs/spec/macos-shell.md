@@ -217,7 +217,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 ## 7. 輸入選單
 
-`IMKInputController.menu()` 每次呼叫都重建 `NSMenu`；項目由 `Session.menu`（`ShanjieKit`，`MenuEntry` 陣列）產生，App 只把它轉成 `NSMenuItem`。每個動作有**獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`，也不看 `sender`）；沒有動作或 `enabled == false` 的項目不設 action，所以選單把它畫成反灰，勾選狀態照顯示。
+`IMKInputController.menu()` 每次呼叫都重建 `NSMenu`；項目由 `Session.menu`（`ShanjieKit`，`MenuEntry` 陣列）產生，App 只把它轉成 `NSMenuItem`：一般項目是 `NSMenuItem(title:action:keyEquivalent:)`，小標題是 `NSMenuItem.sectionHeader(title:)`，分隔線是 `NSMenuItem.separator()`（都是系統原生元件；`sectionHeader` 從 macOS 14 起有，App 最低 macOS 26）。每個動作有**獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`，也不看 `sender`）；沒有動作或 `enabled == false` 的項目不設 action，所以選單把它畫成反灰，勾選狀態照顯示。
 
 項目依序（括號是出現條件）：
 
@@ -230,7 +230,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | 可省略韻母 | `toggleAbbreviation` | 目前 App 傳 `showsAbbreviation: false`，整個隱藏且一律關；顯示時預測關閉會反灰 |
 | 中英混打（實驗） | `toggleEnglish` | 預設開，鍵 `english`；倚天排列時反灰 |
 | 語意校正 | `toggleRerank` | 預設開，鍵 `rerank`；敏感字詞降權關閉或小模型沒載入時反灰 |
-| 已開啟的詞包：… | 無 | 列引擎實際載入的詞包名稱，都沒載入就不出現；詞包的開關只在設定視窗 |
+| 分隔線、小標題「已開啟的詞包」、每個詞包一行、分隔線 | 無 | 引擎實際載入的詞包，每個一行、不能點；小標題把它下面到分隔線為止的項目歸成一組，所以前後各一條分隔線（選單其他地方沒有分隔線）；都沒載入就整段（含分隔線）不出現；詞包的開關只在設定視窗 |
 | 這個 App 用聊天設定 | `toggleAppChat` | §5.3 |
 | 有新版本 X，按此更新… | `installUpdate` | 只在已知有新版本時出現，檢查中反灰；見 `docs/spec/install-and-update.md` |
 | 善解設定… | `openSettings` | 開設定視窗（§9） |
@@ -242,7 +242,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - 項目標題都是固定字串（不含 App 名稱、路徑或數量）。
 - **清除選字記憶…**的視窗是 `NSAlert`，不用 `runModal`（會讓輸入法在視窗開著時停止服務其他 App），按鈕的 target／action 回呼。「取消」排第一個、是預設鈕（Return），「清除」標為破壞性。輸入法是 agent app（`LSUIElement`）：開窗時記下前景 App，`NSApp.activate()`，視窗層級 `.modalPanel`，置中；按下按鈕後把焦點還給記下的 App（後續的失敗視窗開著時不還）。清除失敗另開一個「清除選字記憶失敗」視窗，不假裝完成。同時只開一個。
 
-驗證：`ShellTests` 的選單與偏好案例（`testMenuSelectionCommitsSwitchesAndStores`、`testStoredEtenLayoutAppliesFromTheStart`、`testMissingOrInvalidLayoutIsStandard`、各開關的 `…MenuItemTogglesStoresAndSurvivesRestart`）、`SettingsTests.testMenuHasTheSettingsItemBeforeClear`。不合法的排列偏好（不存在、空字串、大小寫不同、`zhuyin`、完整模式 ID）一律當標準。
+驗證：`ShellTests` 的選單與偏好案例（`testMenuSelectionCommitsSwitchesAndStores`、`testStoredEtenLayoutAppliesFromTheStart`、`testMissingOrInvalidLayoutIsStandard`、各開關的 `…MenuItemTogglesStoresAndSurvivesRestart`）、`SettingsTests.testMenuHasTheSettingsItemBeforeClear`；詞包那一段：`ShellTests` 的 `testPackLineNamesTheLoadedPacks`、`testPackLineNamesTheBeautyPackInSettingsOrder`（含位置緊接「語意校正」），都經過檢查整段形狀的 `packLines`（一個小標題、前後各一條分隔線、詞包行不能點也不打勾；沒有詞包時選單裡沒有分隔線）。不合法的排列偏好（不存在、空字串、大小寫不同、`zhuyin`、完整模式 ID）一律當標準。
 
 ## 8. 候選窗
 
@@ -404,7 +404,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 ### 9.2 版面與尺寸
 
 - **左側清單**：左欄是固定寬度 `sidebarWidth` = 160 pt 的 `List(selection:)`（`.sidebar` 樣式），每項是系統的 `Label`（文字加 SF Symbol）；右邊是選到那一頁的 `.grouped` `Form`，寬度 `formWidth` = 420 pt；視窗寬 580 pt。不用 `NavigationSplitView`：它的左欄可以收合，而這個視窗沒有工具列或「顯示方式」選單能把它叫回來。選取不會變成空的（點左欄空白處或 ⌘點不取消選取），換頁時右邊從最上面開始（`.id(page)`）。
-- 五頁依序：一般（`gearshape`）、選字（`character.cursor.ibeam`）、外觀（`paintpalette`）、選字記憶（`brain`）、關於（`info.circle`）。預設選「一般」；同一次執行裡再開，停在上次的頁（不存到 UserDefaults）。`show(page:)` 可指定頁（英文預設值說明窗的「到設定看」開「選字」頁）。
+- 六頁依序：一般（`gearshape`）、選字（`character.cursor.ibeam`）、外觀（`paintpalette`）、選字記憶（`brain`）、診斷（`stethoscope`）、關於（`info.circle`）。預設選「一般」；同一次執行裡再開，停在上次的頁（不存到 UserDefaults）。`show(page:)` 可指定頁（英文預設值說明窗的「到設定看」開「選字」頁）。
 - **固定大小**：視窗的 frame 高度（內容加標題列）＝ min(`SettingsLayout.preferredHeight`, 螢幕 `visibleFrame` 的高度)，`preferredHeight` 是具名常數 620 pt，不隨內容長高，切換頁時大小不變；內容比視窗高的頁在視窗裡捲動（`Form` 不加 fixedSize；hosting view 不限制內容尺寸，`sizingOptions = []`）。620 是起點，不是對照某個參考量出來的；一台內建螢幕可見高度 1074.5 pt、外接 1409 pt 都留有上下空間。可見高度不到 620 的螢幕上視窗縮成可見高度，不超出上下緣。計算是 `SettingsLayout.frameHeight(visibleHeight:)`（純函式，`ShanjieKit`）。不再量內容高度（沒有隱藏的 `NSHostingView` 量測，也不因「個別設定的 App」清單列數改變而重算）。
 - **位置**：`show()` 設好大小之後置中在滑鼠所在螢幕的 `visibleFrame`（輸入法程序沒有 key window，`NSScreen.main` 不可用；使用者剛在滑鼠所在的螢幕點選單）。螢幕參數改變（解析度、Dock、文字大小、拔掉螢幕）時重算高度，並以 `settingsFrame(_:clampedInto:)` 把 frame 夾回視窗所在螢幕的 `visibleFrame`（超出下緣往上移、超出上緣往下移；高度已被夾住，所以兩者不會同時發生）。
 
@@ -420,6 +420,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | 選字 | 「選字」：即時預測、在瀏覽器裡第一個字不顯示預測（預測關時反灰）、可省略韻母（`showsAbbreviation` 為 false 時不顯示）、中英混打（實驗）與其說明、快打時鍵序顛倒不當英文、依按鍵順序判斷英文、重打同一個位置算英文（各附說明；三個選項在中英混打關閉或倚天排列時都反灰，「快打時鍵序顛倒不當英文」另在「依按鍵順序判斷英文」關閉時反灰，設定值仍顯示）、單按 Shift 切換中英、中英文之間自動加空格、避免把敏感字詞排在前面、語意校正與「強度」（保守／標準／積極的分段控制，隨語意校正與載入的模型反灰）。「詞包」：動漫與遊戲詞（下一行灰字「資料更新至 YYYY-MM-DD（維基百科）」）、經典台詞、資訊與 AI 詞、美妝與保養詞；所有詞包的開關只在這裡。「模糊輸入」：四個音對（ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ）與「鄰鍵打錯」（倚天排列時反灰，值保留）及一段說明 |
 | 外觀 | 候選窗方向（橫排／直排的分段控制）、候選窗玻璃深淺（滑桿，兩端是裝飾用的圖示 `rectangle.on.rectangle`（中空）與 `rectangle.fill.on.rectangle.fill`（實心），放在滑桿兩旁的 `HStack`，VoiceOver 不讀，滑桿本身帶標籤；放在 `Slider` 自己的兩端標籤時兩個在分組的 `Form` 裡都變實心）、範例候選列預覽 |
 | 選字記憶 | 狀態列（學習已暫停（安全輸入）、選字記憶無法存檔）、不要備份選字記憶、清除選字記憶…（走和選單相同的確認視窗） |
+| 診斷 | 「記錄偶發問題的診斷資料」開關與說明、「複製診斷紀錄…」（見 §13.3） |
 | 關於 | 見 §10 與 `docs/spec/install-and-update.md` |
 
 - 開關類項目的文字、灰字說明與預設值各屬於所講功能的規格（`docs/spec/english-mixed.md`、`docs/spec/prediction.md`、`docs/spec/semantic-rerank.md`、`docs/spec/lexicon-and-packs.md`、`docs/spec/keys-and-composition.md`）；這裡只定它們放在哪一頁。
@@ -456,3 +457,58 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - 直排預測列的「換方向」只有 API 與測試走得到（§8.6.1）；`NSGlassEffectView.tintColor` 在 macOS 26 上的效果、動畫被取代時的行為（§8.4）都沒有用錄影驗證。
 - 範例候選列與真的候選窗的玻璃深度（一個在設定視窗的背景上、一個在 App 上）是否一致沒有比較過。
 - 不做：直排的「常用」標籤與底下的分頁、字級設定、表情候選、展開網格底部的「詞頻／部首／表情／拆字」分頁。
+
+## 13. 診斷紀錄
+
+偶發問題（例如單按 Shift 偶爾卡在英文）在測試裡重現不了，所以殼在記憶體裡記一份切換與換 App 的紀錄，由使用者自己複製、自己貼給開發者。善解不自動送出，也不新增任何連線。程式在 `ShanjieKit/DiagLog.swift`。
+
+### 13.1 記什麼
+
+兩個環狀緩衝，各自滿了丟掉最舊的：`shift` 最多 200 筆（`DiagLog.shiftLimit`），其他事件最多 800 筆（`otherLimit`）；Shift 很常按（大寫字母），分開才不會把切換與換 App 的紀錄擠掉。每筆是單調時鐘的秒數（`CLOCK_MONOTONIC`，睡眠時照樣計時；`systemUptime` 不算睡眠，會把睡前的事件顯示得比實際近）、事件與下列欄位，沒有其他欄位。
+
+| 事件 | 何時記 | 欄位 |
+|---|---|---|
+| `shift` | `ShiftTap` 在 Shift **放開**時判斷之後；按下不記；按下到放開之間有 `keyDown`（打大寫字母或符號）的那一次不記；上次兩個 Shift 都放開之後，有 Shift 按著（或按鍵的旗標帶 Shift）時打過鍵，就到兩個 Shift 都放開為止只記 `toggled`（兩個 Shift 交疊時被打斷的那一側的紀錄會被另一側取代，它的放開不能拿來分辨大寫）；`isSecureInput()` 為真時不記；「單按 Shift 切換中英」關著時不處理 `flagsChanged`，也不記 | 左或右、結果（`ShiftTap.Outcome`） |
+| `toggle` | `toggleAscii` 之後 | bundle ID（`toggleAscii` 已讀的那一次）、切換後的中英、提示有沒有畫出來（`showShiftHint` 的回傳，沿用它那一次的位置讀取） |
+| `activate`、`deactivate` | `activate` 讀過 bundle 之後；`deactivate` 每一次，不是擁有者的也記 | bundle ID（`activate` 讀的那一次；`deactivate` 不讀，用 session 記住的 `bundle`）、這個 session 是不是擁有者、當下的 `engineAscii` |
+| `owner` | `claim()` 回 true、呼叫處讀完 bundle 之後（`activate`、`handle`、`toggleAscii`、`toggleAppChat`） | 新擁有者的 bundle ID（呼叫處讀的那一次） |
+| `ascii` | `pushAscii` 真的改了狀態；`applyShiftToggle` 關掉開關、沒有擁有者時直接改 `engineAscii` 的那一支 | bundle ID（session 的 `knownBundle`；沒有擁有者時 `-`）、新狀態 |
+
+`ShiftTap.Outcome`：`toggled`，或不算的原因，每條退出路徑一個值。放開時依序判斷，幾個同時成立時取第一個：(1) 沒看到按下（`noPress`）；(2) 放開的是另一側的鍵（`otherKeyReleased`）；(3) 按下時記下的原因：其他修飾鍵（`modifierAtPress`）先於 Caps Lock（`capsLockAtPress`）；(4) 按下之後另一個修飾鍵動了（`modifierBetween`，只在按下時沒有原因時記）；(5) 另一側 Shift 的狀態和按下時不同（`otherSideChanged`）；(6) Control／Option／Command／Fn 按著（`modifierAtRelease`）；(7) Caps Lock 開著（`capsLockAtRelease`）；(8) 超過 `SHIFT_TAP_MAX`（`tooLong`）；(9) 之間有滑鼠按鍵（`mouse`）。沒看到按下是 `ShiftTap` 被重設，或啟用時 Shift 已按著；兩個 Shift 先後按下時第二次按下取代第一次的紀錄，結果是 `otherKeyReleased` 再 `noPress`。被 `keyDown` 打斷優先於任何原因：打斷了就不記。切換與否和加紀錄之前完全相同（「打過鍵」的標記只決定記不記，不影響切換）。
+
+- **不新增客戶端讀取**：bundle ID 只用呼叫處已經讀到的值或 session 記住的值，提示的位置只讀一次。
+- **bundle ID 先清理**（`DiagLog.clean`）：1–255 個 `[A-Za-z0-9._-]` 照記；其他的記 `?`；nil 或空字串記 `-`。這是唯一的字串欄位，其他都是列舉或布林。
+- **永遠不記**：打的字、組字、候選、預測列、前文、學習內容、按鍵的字元或鍵碼（Shift 的左右除外）、視窗標題、網址、文件內容。
+- **只在記憶體**：不寫檔、不用 `Logger`、`print` 或檔案 I/O，不進學習檔；輸入法程序結束就沒了。
+
+### 13.2 匯出格式
+
+第一行 `shanjie <版本> macOS <x.y.z> exported <匯出時刻，ISO 8601 UTC>`；之後一行一筆、舊的在前，時間寫成匯出前幾秒（`-12.345`），不寫時刻：
+
+```
+-12.345 shift left toggled
+-12.345 ascii com.apple.TextEdit en
+-12.345 toggle com.apple.TextEdit en hint
+-3.000 deactivate com.apple.TextEdit owner en
+-2.900 owner com.apple.Safari
+-2.900 activate com.apple.Safari owner zh
+```
+
+每一行都在一個封閉的文法裡：事件名稱、固定的列舉值（`left`／`right`、`Outcome` 的值、`en`／`zh`、`hint`／`nohint`、`owner`／`notowner`）與清理過的 bundle ID。
+
+### 13.3 設定與複製
+
+- 設定視窗的「診斷」頁（§9.2）：開關「記錄偶發問題的診斷資料」，預設開，UserDefaults 鍵 `diagLog`（沒存過算開）；灰字說明「只存在這台 Mac 的記憶體裡，不會自動送出。會記下每次放開 Shift 的判斷、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift，切換中英照記。」關掉時兩個緩衝都清空、之後不再記；打開時從空的開始。在設定視窗以外關掉（只改了 UserDefaults）時，關著就算空的（不匯出、按鈕反灰），下一個事件把緩衝清掉。
+- 按鈕「複製診斷紀錄…」：先用 sheet 顯示要複製的全文（唯讀、不能選取的文字：選取後按 ⌘C 會走一般的複製、繞過下面兩項保護；加「取消」「複製」），按「複製」才把**同一份文字**寫進剪貼簿。緩衝是空的時按鈕反灰（緩衝沒有變更通知，空不空在開窗、視窗成為 key window 與切換開關時讀）。
+- 寫剪貼簿：`prepareForNewContents(with: .currentHostOnly)`（不經通用剪貼板同步到其他裝置），再用一次 `writeObjects` 寫一個同時帶純文字與 `org.nspasteboard.TransientType`（剪貼簿管理程式的慣例：不記進歷史）的項目，讀剪貼簿的程式不會先看到沒有標記的文字。之後由剪貼簿處理；系統自己的剪貼簿歷史（macOS 26 Spotlight）是否理會這個標記沒有文件，也沒有量過。
+- 介面都是系統元件（`Toggle`、`Button`、`sheet`、`NSPasteboard`）。不用存檔面板：那要多一個沙盒權限（`docs/spec/privacy.md` §2），剪貼簿不用。
+
+### 13.4 驗證
+
+`DiagLogTests`：
+- `testRecordingAddsNoClientRead`：`activate`、`deactivate`、`commitComposition`、Shift 切換、`toggleAppChat` 與按鍵各一步，在 Shift 切換開與關兩種設定下，bundle ID、文字讀取（`selectedRange`、`markedRange`、`attributedSubstring`）、游標位置與行位置的讀取次數等於加紀錄之前量到的常數。
+- 緩衝上限、每種事件的格式、幾個原因同時成立時取第一個、預覽之後的事件不在複製的內容裡、開關（含重建 Shell 仍是關、只改 store 關掉時算空的）、兩個 Shift 交疊或 Shift 早已按著時打字不記 `shift`、一次單按記 `shift` 與 `toggle`（提示畫不出來記 `nohint`）、每一個不算的原因各一個序列、安全輸入時不記 `shift` 但 `toggle` 照記、被按鍵打斷的不記、bundle 清理、剪貼簿的呼叫、預覽與複製逐位元組相同與空緩衝反灰。
+- 打字不進紀錄：標記字串在中文組字送出、英文狀態的 `asciiKey` 路徑、`commitComposition` 三條路徑各打一次，匯出不含標記的任何 4 個以上字母的片段、不含注音符號，每一行都符合 §13.2 的文法，打字不新增事件。
+- `LogTests.testShellLogsNothingButStaticTextAndCodes`（§6.1）：用標記 bundle ID 啟用、單按 Shift 切換、經假剪貼簿複製，標記不出現在整個程序的日誌與 stdout／stderr，紀錄的事件行不出現在殼的 subsystem。
+
+實機（要真人或虛擬機）：設定頁、預覽 sheet、剪貼簿內容，以及終端機開著「加密的鍵盤輸入」時單按 Shift 只多 `toggle`、沒有 `shift`。

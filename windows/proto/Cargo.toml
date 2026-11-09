@@ -1,0 +1,8 @@
+[package]
+name = "shanjie-win-proto"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# docs/spec/windows-tip.md §5.3: the wire format between the TSF client DLL and the resident host. Pure Rust, no
+# platform code and no dependencies, so it is built and tested on every CI platform.

@@ -616,9 +616,9 @@ public final class Shell {
     /// IT and beauty switches never chosen are on, so an app that never touched any builds with the ACG, IT and beauty bits.
     var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) | (beautyPackOn ? CoreEngine.packBeauty : 0) }
     /// The pack bits the current engine was really built with (docs/spec/lexicon-and-packs.md §4.2, §4.3): `packMask` when that build worked, less the bits
-    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
+    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 section reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
-    /// The names of the loaded packs in the settings order, for the menu line.
+    /// The names of the loaded packs in the settings order, one line each in the menu's 已開啟的詞包 section.
     var loadedPackTitles: [String] {
         Shell.packTable.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
     }
@@ -637,6 +637,8 @@ public final class Shell {
     /// Set by the app: opens the settings window on the 選字 page (the notice's 打開設定 button).
     public var onOpenCandidateSettings: (() -> Void)?
     var shiftTap = ShiftTap()
+    /// docs/spec/macos-shell.md §13: the in-memory diagnostic log of the Shift toggle.
+    public let diag: DiagLog
     /// Seconds since the latest mouse-button press (left, right, other) in this login session; a test replaces it. No permission needed.
     var mouseAgo: () -> TimeInterval = {
         [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -847,6 +849,7 @@ public final class Shell {
     /// `spacingStore`: the 中英文之間自動加空格 switch (docs/spec/english-mixed.md §9, §11). Required, with no default, like the other stores.
     /// `shiftToggleStore`, `shiftHint`: the 單按 Shift 切換中英 switch and its 英/中 hint window (docs/spec/keys-and-composition.md §9.1, §9.4). The defaults (in
     /// memory, no window) are for the tests; the app passes its own.
+    /// `diagLogStore`: the 記錄偶發問題的診斷資料 switch (docs/spec/macos-shell.md §13); the default (in memory, on) is for the tests.
     /// `englishNoticeStore`, `englishNotice`: the one-time explanation window of the English defaults change and whether it is still owed
     /// (docs/spec/english-mixed.md §10.3). The defaults (in memory, not owed, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
@@ -867,8 +870,10 @@ public final class Shell {
                 shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
                 shiftHint: ShiftHintPanel? = nil,
                 englishNoticeStore: EnglishNoticeStore = MemoryEnglishNoticeStore(),
-                englishNotice: EnglishNoticePanel? = nil) {
+                englishNotice: EnglishNoticePanel? = nil,
+                diagLogStore: DiagLogStore = MemoryDiagLogStore()) {
         self.resources = resources
+        diag = DiagLog(store: diagLogStore)
         self.shiftToggleStore = shiftToggleStore
         shiftToggleOn = shiftToggleStore.shiftToggle ?? false // docs/spec/english-mixed.md §10.1: was true
         self.shiftHint = shiftHint
@@ -1311,6 +1316,7 @@ public final class Shell {
             shiftTap = ShiftTap()
             if let o = owner { o.pushAscii(false) } else if engineAscii {
                 engineAscii = false
+                diag.record(.ascii(bundle: "-", english: false))
                 dropOnFailure(engine?.setAscii(false))
             }
         }
@@ -1554,9 +1560,10 @@ public final class Session {
         guard event == nil || event?.type == .keyDown else { return false }
         // docs/spec/english-mixed.md §10.3: the key is handled as usual first; the window (when armed) shows after it.
         defer { shell.showEnglishNoticeIfArmed(caret: currentLineRect()) }
-        shell.shiftTap.keyDown()  // docs/spec/keys-and-composition.md §9.1: a key between Shift's press and release spoils the tap
+        shell.shiftTap.keyDown(shiftHeld: event?.modifierFlags.contains(.shift) ?? false)  // docs/spec/keys-and-composition.md §9.1: a key between Shift's press and release spoils the tap
         if claim() {
             let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
+            shell.diag.record(.owner(bundle: DiagLog.clean(bundle)))
             applyProfile(bundle: bundle)
             syncAscii(bundle: bundle)
             shell.lastTypingAt = nil  // docs/spec/english-mixed.md §11: an owner change without activateServer counts too
@@ -1619,10 +1626,14 @@ public final class Session {
         let hasDevice = raw & 0x6 != 0
         let leftDown = hasDevice ? raw & 0x2 != 0 : generic && event.keyCode == 56
         let rightDown = hasDevice ? raw & 0x4 != 0 : generic && event.keyCode == 60
-        if shell.shiftTap.flagsChanged(keyCode: event.keyCode, leftDown: leftDown, rightDown: rightDown, others: others, capsLock: flags.contains(.capsLock),
-                                       now: event.timestamp, processedAt: shell.uptime(), mouseAgo: shell.mouseAgo) {
-            toggleAscii()
+        let outcome = shell.shiftTap.event(keyCode: event.keyCode, leftDown: leftDown, rightDown: rightDown, others: others,
+                                           capsLock: flags.contains(.capsLock), now: event.timestamp, processedAt: shell.uptime(),
+                                           mouseAgo: shell.mouseAgo)
+        // docs/spec/macos-shell.md §13.1: never during secure input (each Shift would tell how many characters of a password needed it).
+        if let outcome, shell.diag.enabled, !shell.isSecureInput() {
+            shell.diag.record(.shift(right: event.keyCode == 60, outcome: outcome))
         }
+        if outcome == .toggled { toggleAscii() }
         return false
     }
 
@@ -1630,14 +1641,18 @@ public final class Session {
     /// is sent first. The hint shows which one (docs/spec/keys-and-composition.md §9.4).
     private func toggleAscii() {
         let bundle = client.bundleIdentifier  // a synchronous IPC: read once
-        if claim() { applyProfile(bundle: bundle) }
+        if claim() {
+            shell.diag.record(.owner(bundle: DiagLog.clean(bundle)))
+            applyProfile(bundle: bundle)
+        }
         let app = asciiApp(bundle)
         let on = !shell.asciiApps.contains(app)
         if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
         pushAscii(on)
         shell.lastTypingAt = shell.idleClock()  // docs/spec/english-mixed.md §11: this hint already shows the mode
-        showShiftHint(on ? "英" : "中")
+        let shown = showShiftHint(on ? "英" : "中")
+        shell.diag.record(.toggle(bundle: DiagLog.clean(bundle), english: on, hintShown: shown))
     }
 
     /// docs/spec/english-mixed.md §11: a key that types: what `asciiKey` takes (no Control, Option, Command or Caps Lock, one character
@@ -1667,6 +1682,7 @@ public final class Session {
     func pushAscii(_ on: Bool) {
         guard on != shell.engineAscii, let engine = shell.engine else { return }
         shell.engineAscii = on
+        shell.diag.record(.ascii(bundle: DiagLog.clean(knownBundle), english: on))
         switch engine.setAscii(on) {
         case .ok(let o): apply(o)
         case .failed(let c): _ = fail(c)
@@ -1674,11 +1690,13 @@ public final class Session {
     }
 
     /// docs/spec/keys-and-composition.md §9.4: the hint above the cursor line: the marked text's rectangle while composing, the insertion point's otherwise. No
-    /// rectangle, no hint (not the screen corner, not the last place).
-    private func showShiftHint(_ text: String) {
-        guard let panel = shell.shiftHint else { return }
-        guard let rect = currentLineRect() else { return }
+    /// rectangle, no hint (not the screen corner, not the last place). Returns whether it was shown (docs/spec/macos-shell.md §13.1).
+    @discardableResult
+    private func showShiftHint(_ text: String) -> Bool {
+        guard let panel = shell.shiftHint else { return false }
+        guard let rect = currentLineRect() else { return false }
         panel.show(text, lineRect: rect, appearance: client.appearance, glassTint: shell.glassTint)
+        return true
     }
 
     /// The marked text's rectangle while composing, the insertion point's otherwise; `nil` when the client gives none.
@@ -1688,10 +1706,12 @@ public final class Session {
 
     /// docs/spec/macos-shell.md §2.2 order: ownership first, then the profile for this client's app.
     public func activate() {
-        claim()
+        let claimed = claim()
         let bundle = client.bundleIdentifier
+        if claimed { shell.diag.record(.owner(bundle: DiagLog.clean(bundle))) }
         applyProfile(bundle: bundle)
         syncAscii(bundle: bundle)
+        shell.diag.record(.activate(bundle: DiagLog.clean(bundle), owner: shell.owner === self, english: shell.engineAscii))
         shell.lastTypingAt = nil  // docs/spec/english-mixed.md §11: the next typing key shows the mode (only while the toggle is on)
         shell.armEnglishNotice()  // docs/spec/english-mixed.md §10.3
     }
@@ -1700,6 +1720,8 @@ public final class Session {
     public func deactivate() {
         spacingPrev = nil
         shell.hideEnglishNotice()  // docs/spec/english-mixed.md §10.3: any deactivate, owner or not, only hides the window
+        // docs/spec/macos-shell.md §13.1: no bundle read here; the one this session last read.
+        shell.diag.record(.deactivate(bundle: DiagLog.clean(bundle), owner: shell.owner === self, english: shell.engineAscii))
         guard shell.owner === self else { return }
         // Never send the composition into a field that has just turned secure.
         if shell.composing { finish(mode: shell.isSecureInput() ? 1 : 0) }
@@ -1884,7 +1906,7 @@ public final class Session {
     func toggleAppChat() {
         guard let bundle = client.bundleIdentifier, !bundle.isEmpty, shell.profileMode == .auto else { return }
         shell.setAppProfile(bundle, profile(for: bundle) == Shell.chat ? Shell.formal : Shell.chat)
-        claim()
+        if claim() { shell.diag.record(.owner(bundle: DiagLog.clean(bundle))) }
         applyProfile(bundle: bundle)
         shell.changed()
     }

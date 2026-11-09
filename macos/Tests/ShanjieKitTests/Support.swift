@@ -110,7 +110,8 @@ final class FakeClient: TextClient {
     func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; lineAsks += 1; return line }
     /// docs/spec/keys-and-composition.md §9.4: the insertion point's rectangle when nothing is marked.
     var caret: NSRect? = NSRect(x: 300, y: 400, width: 2, height: 18)
-    func caretRect() -> NSRect? { caret }
+    private(set) var caretAsks = 0
+    func caretRect() -> NSRect? { caretAsks += 1; return caret }
 
     /// Every call of the three reading methods, and each range requested.
     private(set) var reads = 0

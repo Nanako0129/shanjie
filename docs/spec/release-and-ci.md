@@ -78,7 +78,7 @@
 ### 3.2 `debug`（Linux）
 
 - 目的：debug 才有的檢查（整數溢位、標準函式庫的 debug 專屬檢查），放在 Linux runner 上跑，與 macOS 的 release 測試並行。
-- 只跑 `core` 套件的全部測試，與 `cli` 套件的單元測試（`--lib --bins`）。
+- 只跑 `core` 套件的全部測試、`cli` 套件的單元測試（`--lib --bins`），與 Windows 線上格式 `shanjie-win-proto` 的測試（純 Rust，三個平台都跑）。
 - 評測 CLI（`shanjie-eval`）用 release 建置，再由 `scripts/ci-rowstats.sh rowstats-linux` 跑六份 rowstats：dev302、打字測驗、錯字回報，各在聊天與書面設定下，用出貨的旗標（前文、`acg` 與 `it` 詞包、會意小模型；聊天另加常談表）。檔案以 artifact 上傳（保留 1 天），給 `windows` 比對。
 - `scripts/ci-rowstats.sh` 是這六條指令的唯一一份；`--threads` 不改輸出的任何位元組。
 
@@ -91,7 +91,7 @@
   3. 同樣的評測 CLI 與六份 rowstats，與 `debug` 上傳的 Linux 檔逐位元組相同（`cmp`），兩邊都必須剛好 6 份；
   4. 工作樹沒有 CRLF（`git ls-files --eol data eval scripts core/tests cli/tests`：不得有 `w/crlf`、`w/mixed`，每個 `i/lf` 都是 `w/lf`；理由：`digits.tsv` 帶 CRLF 會無聲地關掉數字層）；
   5. 核心也為 `i686-pc-windows-msvc`、`aarch64-pc-windows-msvc` 編譯（只建置，不跑測試）；
-  6. `shanjie-tip`（Windows 文字服務 DLL）以 release 建置，不帶與帶 `timing` 功能各一次，再跑它的測試。
+  6. `shanjie-tip`（Windows 文字服務 DLL）與 `shanjie-host`（常駐程序）以 release 建置，各帶與不帶 `timing` 功能一次；核對兩者都沒有 C 執行階段的匯入、DLL 沒有 `shanjie_` 匯出也不相依核心；再跑 `shanjie-win-proto`、`shanjie-tip`、`shanjie-host` 的測試（`docs/spec/windows-tip.md` §5.10）。
 - Windows 版本身的規格見 `docs/spec/windows-tip.md`。
 
 ### 3.4 `python`（Linux）

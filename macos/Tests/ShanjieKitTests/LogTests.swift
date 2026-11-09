@@ -1,3 +1,4 @@
+import AppKit
 import CShanjie
 import Foundation
 import XCTest
@@ -143,6 +144,27 @@ final class LogTests: XCTestCase {
         // s3e: no punctuation table at a marked path -> the fixed fallback line (the path never logged).
         _ = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
                   punctuationTable: broken.appendingPathComponent("punct.plist"), spacingStore: MemorySpacingStore())
+        // docs/spec/macos-shell.md §13.4: the diagnostic log with a marked bundle ID: activate, a Shift tap, a copy through a fake
+        // pasteboard (never the real one).
+        let diagShell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+                              shiftToggleStore: MemoryShiftToggleStore(true))
+        diagShell.mouseAgo = { 1000 }
+        var diagUptime: TimeInterval = 0
+        diagShell.uptime = { diagUptime }
+        let diagClient = Controller(diagShell, bundle: bundleMarker)
+        diagClient.session.activate()
+        for (down, at) in [(true, 50.0), (false, 50.1)] {
+            diagUptime = at
+            let flags: NSEvent.ModifierFlags = down ? NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x2) : []
+            diagClient.session.handle(Keys.event(56, flags: flags, type: .flagsChanged, time: at))
+        }
+        let diagModel = SettingsModel(shell: diagShell)
+        diagModel.openDiagPreview()
+        let diagText = diagModel.diagPreview ?? ""
+        let pasteboard = FakePasteboard()
+        diagModel.copyDiagPreview(to: pasteboard)
+        let diagEvents = diagText.split(separator: "\n").dropFirst().map { String($0.drop(while: { $0 != " " }).dropFirst()) }
+        XCTAssertTrue(diagEvents.contains("shift left toggled") && diagText.contains(bundleMarker), "the diagnostic log did not record the tap")
 
         let stdText = std.finish()
         releaseIssues()
@@ -180,6 +202,9 @@ final class LogTests: XCTestCase {
         XCTAssertFalse(shellLines.isEmpty)
         XCTAssertFalse(shellLines.contains { $0.text.contains("<private>") },
                        "the shell logged a redacted value; it may log static text and return codes only")
+        for event in diagEvents {
+            XCTAssertFalse(shellLines.contains { $0.text.contains(event) }, "a diagnostic log line reached the shell's log")
+        }
     }
 }
 
