@@ -377,7 +377,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 集合：dev302（`eval/dev` 的前 302 列，排除 `user-typing.txt`）、typing76（`eval/dev/user-typing.txt`）、probe（讀音變體探針）、調參集 cvtune／wikitune（不進 repo）、私有的聊天調參集。dev302 與 typing76 兩種設定都量，其餘只量聊天。
 - 每格指標：n、top1、oracle@64、`top1_sha256`。
 - **逐列比較**：和上一列比修好、弄壞與 McNemar 雙尾精確 p；工具檢查兩版逐列結果的列數都等於集合列數、上一版逐列算出的 top1 等於它紀錄裡的 top1，不符就停。快取以（commit、集合 SHA-256、`variants.tsv`、模型）為鍵；紀錄的指紋和目前的套件不同、或快取的雜湊不符時，在目前的套件下重跑上一版，不拿舊結果硬比，並在 stderr 說明原因。
-- 結果寫 `eval/bench/results/<label>.json`；逐列輸出只寫快取，不進 repo。`table` 從所有結果 JSON 重產 `docs/benchmark.md`（不手改），並從同一份讀進來的資料另寫 `site/data/bench.json`（7.11）；v1 的表在加入 v2 之後逐位元組不變。
+- 結果寫 `eval/bench/results/<label>.json`；逐列輸出只寫快取，不進 repo。`table` 從所有結果 JSON 寫 `site/data/bench.json` 與完整表（含私人集合；`--md FILE` 或 `$SHANJIE_TABLES/benchmark.md`，路徑在公開 repo 裡就拒絕，見 7.11）（7.11）；v1 的表在加入 v2 之後逐位元組不變。
 
 ### 7.3 套件 v2：每一版用自己出貨的設定量
 
@@ -409,7 +409,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 7.6 保留集欄
 
 - 結果 JSON 的 `holdout` 欄由 fresh 審查者量好後手動填入（5.3）；格式 `{"commit": …, "chat": {n, top1, fixed, broken, p, rows_sha256}, "formal": …}`，`commit` 是保留集實際量的那個 commit。
-- `docs/benchmark.md` 與 `docs/kpi.md` 的保留集欄依各自的 `rows_sha256` 分欄，欄位依第一次出現的順序排列；換份時不同份的數字不在同一欄。
+- 兩張完整表（7.11、8.1）與網站的 /benchmark、/kpi 頁的保留集欄依各自的 `rows_sha256` 分欄，欄位依第一次出現的順序排列；換份時不同份的數字不在同一欄。
 
 ### 7.7 錨點檢查
 
@@ -418,7 +418,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 7.8 參考列與實打對照表
 
 - `tools/bench.py reference [--private-root DIR]`：用目前 checkout 的 CLI 跑「小麥資料基準」列（不帶 `--lm`，加 `--no-overlay`；只用 McBopomofo 基底詞庫的 unigram 解碼）。這一列不是版本，沒有修好／弄壞。結果寫 `eval/bench/results/reference-mcbpmf.json`，記 commit 與指紋（集合、`variants.tsv`、基底詞庫）；只有 commit 或任一指紋改變、或上次有集合失敗時才重算並在 stderr 說明原因；`core/`、`cli/`、`data/` 有未提交的改動時拒絕。
-- `tools/bench.py check-static [--json FILE]`：核對 `eval/bench/static/typing-test.json`（三套輸入法的實打結果，靜態）自己一致，不讀別的檔：`date` 是 `YYYY-MM-DD`；每組有名稱、列出同樣的輸入法（名稱與順序和第一組相同）；每格的 `sentences`、`chars` 是非負整數，`chars` 不小於 `sentences`，有 `n` 時 `sentences` 不大於 `n`；每組的 `sum`（各輸入法的 `sentences` 合計與 `chars` 合計，抄入時算好）等於現在各格相加，所以改任何一格都會失敗。`local_only: true` 的組（資料只放本機、只記統計）留在 `docs/benchmark.md`，不進網站資料。實打對照表和版本列的條件不同，不做統計比較。
+- `tools/bench.py check-static [--json FILE]`：核對 `eval/bench/static/typing-test.json`（三套輸入法的實打結果，靜態）自己一致，不讀別的檔：`date` 是 `YYYY-MM-DD`；每組有名稱、列出同樣的輸入法（名稱與順序和第一組相同）；每格的 `sentences`、`chars` 是非負整數，`chars` 不小於 `sentences`，有 `n` 時 `sentences` 不大於 `n`；每組的 `sum`（各輸入法的 `sentences` 合計與 `chars` 合計，抄入時算好）等於現在各格相加，所以改任何一格都會失敗。`local_only: true` 的組（資料只放本機、只記統計）只在完整表裡，不進網站資料。實打對照表和版本列的條件不同，不做統計比較。
 
 ### 7.9 輸出與驗證
 
@@ -426,7 +426,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - `python3 -m unittest tools/test_bench.py`（`make test-python`、CI 的 Python 步驟）用假的 CLI，不建置、不碰私有資料：
   - 靜態表檢查（正確的 fixture 通過、改任一格失敗、缺欄位、欄位不是整數、輸入法名稱不一致、合計不符都失敗）；
   - 舊版本的匯出（假的新 repo 有一個指向新 commit 的 `v0.4.1` tag、假的舊 clone 有 `LEGACY_SHA` 指的 commit：表上的版本解出 `LEGACY_SHA`、不是本 repo tag 的 sha；沒給 clone 或 clone 沒有那個 commit 時拒絕；不在表上的 ref 從本 repo 解；`bench run` 與 `kpi run` 都測）；
-  - `table` 的網站資料（兩次輸出逐位元組相同、沒有私人集合的鍵、`docs/benchmark.md` 與改動前的內容相同）；
+  - `table` 的網站資料（兩次輸出逐位元組相同、沒有私人集合的鍵、完整表與改動前的內容相同）；完整表的位置（沒給路徑時只寫 JSON、`SHANJIE_TABLES` 生效、公開 repo 裡的路徑在寫任何檔之前就以 1 結束）；
   - 參考列（指令不帶 `--lm` 且帶 `--no-overlay`、私有路徑不被碰、失敗的集合會重跑並說明原因、同 commit 不重算、commit 或指紋變了就重算、參考列沒有修好／弄壞）；
   - v1 的表與保留集表不變；
   - `SuiteV2`：設定表的旗標與標記、集合表、`--as` 命名最後一個 ref、模型資料夾的內容、KN／trigram／口語表／讀音項各種版本的標記與模型檔、模型缺檔或雜湊不符失敗、由 rowstats 計分、無小模型格的 dump 交叉檢查、設定標記不符或摘要行不是一行或 rowstats 壞掉都使該格失敗、重播一致性與不一致時失敗、書面重播格、重播程式設定的比對格、外部對照節、`table` 把 v2 接在原封不動的 v1 文字後面、保留集數字留在各自的欄、重跑不覆寫保留集數字。
@@ -435,11 +435,11 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 7.10 發版前的核對
 
 - 推 `v*` tag 前，被量的 commit 和要打 tag 的 commit 在 `Cargo.toml Cargo.lock core cli data eval/variants.tsv macos scripts` 上必須沒有差異（`macos` 有殼的預設值，`scripts` 有 `build-app.sh` 包進去的模型），差異清單寫在發版 PR 的說明。有差異且都在不改輸出的地方（重構、測試、註解、不出貨的研究工具）時，用兩個 commit 的 CLI 在出貨設定下跑 dev302、打字測驗、錯字回報兩種設定，`--rowstats` 逐位元組相同才沿用保留集的數字；差異碰到 `shanjie-replay` 時，KPI 的重播也要在打 tag 的 commit 上重跑或證明行為相同。
-- 結果 JSON 與 `docs/benchmark.md` 隨發版前的 PR 進 repo。步驟與時機見 `docs/spec/release-and-ci.md`。
+- 結果 JSON 與 `site/data/*.json` 隨發版前的 PR 進 repo；完整表不進公開 repo。步驟與時機見 `docs/spec/release-and-ci.md`。
 
 ### 7.11 網站資料 `site/data/bench.json`
 
-- `tools/bench.py table` 在寫 `docs/benchmark.md` 的同一次讀入之後，另寫 `site/data/bench.json`：兩個檔從同一份資料產生，工具不另外讀第二次。`json.dumps(…, ensure_ascii=False, indent=1, sort_keys=True)` 加結尾換行，同樣的輸入兩次輸出逐位元組相同。
+- `tools/bench.py table [--md FILE]` 一次讀入所有結果檔，寫 `site/data/bench.json` 與完整表：兩個檔從同一份資料產生，工具不另外讀第二次。完整表含私人集合的欄，寫到 `--md FILE`，沒給時寫 `$SHANJIE_TABLES/benchmark.md`，兩者都沒有時不寫（stderr 說明）；路徑解析後在公開 repo 裡就在寫任何檔之前以 1 結束。`json.dumps(…, ensure_ascii=False, indent=1, sort_keys=True)` 加結尾換行，同樣的輸入兩次輸出逐位元組相同。
 - **只放公開集合**：dev302、typing76（打字測驗）、probe、fw、錯字回報（`user-reported`）兩種設定的格，保留集口語半邊（`holdout_chat`，不寫新聞半邊），速度與記憶體，實打對照（`local_only` 以外的組），外部模型對照（`eval/bench/external/*.json`）裡這幾個公開集合的列。名單寫在 `tools/bench.py` 的 `PUBLIC_SETS`、`PUBLIC_EXTERNAL_SETS`，用名稱挑，所以之後新增的集合在列進名單之前不會出現；私人集合與調參集的鍵一個都不寫。失敗的格寫 `{"failed": true}`，沒量的格寫 `{"missing": true}`，都不帶錯誤文字。`holdout_chat` 取結果檔 `holdout.chat` 的那一塊：2026-10-29 以前量的列（沒有 `rows_sha256`，n 227 或 300）是當時的保留集，不是現在的口語半邊；網站要分開呈現時看 `rows_sha256`。
 - 頂層鍵：
   - `suite_v1`：陣列，每個結果檔的每一版一列（`results/*.json` 排序後的順序）。
@@ -448,7 +448,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   - `static`：`date` 與 `groups`（每組 `name`、`n`、`ime`：輸入法 → `sentences`、`chars`）。
   - `external`：每個外部模型一項，`name`、`date`、`label`、`ours_label` 與 `rows`（`setting`、`set`、`n`、`ngram`、`ours`、`external`、`fixed`、`broken`、`p`）。
 - 版本列（`suite_v1`、`suite_v2` 同形）：`date`、`label`（結果檔標籤）、`ref`、`sha`、`version`（只有 v2）、`machine`、`macos`、`load_avg_start`、`load_avg_end`；`accuracy`（格名 `集合/設定` → `n`、`top1`、`oracle64`）；`vs`、`vs_prev`（格名 → `fixed`、`broken`、`p`，有上一版時）；`holdout_chat`（`commit`、`n`、`top1`、有的話 `oracle64`、`rows_sha256`，量過時再加 `fixed`、`broken`、`p`）；`speed`（`p95_us`、`max_us`、`load_ms`、`rss_mb`、`keys`、`rounds`、`rows_match`，有語意校正時加 `rerank_p50_ms`、`rerank_p95_ms`，v2 另有書面那一列 `formal`）；`models`（v2，檔名 → SHA-256）。
-- 網站頁讀這個檔；`docs/benchmark.md` 在網站頁完成並核對數字相同之後才移除。
+- 網站的 /benchmark 頁（`site/benchmark.html`）由 `site/numbers.js` 讀這個檔畫表；每格的寫法和完整表逐字相同（數字照 Python 的 round-half-even 捨入），發版時用核對腳本（研究 repo）比對兩頁與完整表。
 
 ### 7.12 發版時的指令順序
 
@@ -460,6 +460,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 | `tools/bench.py check-static` | 改動 `eval/bench/static/typing-test.json` 時 | 7.8 |
 | `tools/bench.py run <commit> --private-root <私人資料夾>` | 不再用於發版 | 套件 v1（7.2），保留給早期版本的歷史表 |
 
+- 兩個 `table` 都設 `SHANJIE_TABLES` 指到公開 repo 以外的資料夾，完整表寫在那裡；寫完用核對腳本確認網站的 /benchmark、/kpi 頁和完整表逐格相同（7.11）。
 - 兩個保留集半邊在同一次發版前都量，各加一次「使用」（5.2）。`rows_sha256` 一定要填（5.3）。
 
 ## 8. 每版 KPI `tools/kpi.py`（研究工具，不出貨）
@@ -475,9 +476,9 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   - 然後 `cargo build --release --locked -p cli --bin shanjie-replay --message-format=json`（執行檔路徑取編譯器回報的），跑：錯字回報（聊天、`--correct`，學習關與開各一次）與 dev302（聊天、`--correct`，學習關）。版本不出貨小模型時加 `--no-tinylm`，不出貨口語表時加 `--no-colloquial`。每次跑都核對：stderr 的 `models:` 行等於由 `data/*.sha256` 推出的那一行、摘要行恰好一行、設定標記等於預期（含詞包部分，依該列的 `--packs`；有 `reading` 鍵的版本以 `+rd+rx:<8 碼>` 結尾）、列數等於集合列數、rowstats 的 top1 等於摘要行。
   - 寫入同一個 JSON 的 `replay` 欄：`sha`、`models`、`variants_sha256`，以及 `user-reported` 與 `dev302` 各自的 `rows_sha256`、`n`、`off`（學習關的摘要行數字）；`user-reported` 另有 `on` 與 `learn_fixed`／`learn_broken`（學習開對學習關，由兩份 rowstats 算）。
   - 含 `shanjie-replay` 之前的版本不回填（舊引擎沒有這個工具，用新工具重播舊模型不等於舊版的行為）。
-- `table [--results DIR] [--kpi DIR] [--out FILE] [--json FILE]`：讀 `eval/bench/results/v2-*.json` 與 `eval/bench/kpi/*.json`，重產 `docs/kpi.md`（不手改；兩次輸出逐位元組相同），並從同一份讀進來的資料另寫 `site/data/kpi.json`（8.4）。
+- `table [--results DIR] [--kpi DIR] [--out FILE] [--json FILE]`：讀 `eval/bench/results/v2-*.json` 與 `eval/bench/kpi/*.json`，寫 `site/data/kpi.json`（8.4）與完整表（不手改；兩次輸出逐位元組相同；`--out FILE` 或 `$SHANJIE_TABLES/kpi.md`，規則同 7.11）。
 
-### 8.2 欄位（`docs/kpi.md` 每個發版一列，最新在上）
+### 8.2 欄位（完整表每個發版一列，最新在上）
 
 | 欄 | 來源 |
 |---|---|
@@ -507,7 +508,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 8.4 網站資料 `site/data/kpi.json`
 
-- `tools/kpi.py table` 在寫 `docs/kpi.md` 的同一次讀入之後另寫 `site/data/kpi.json`（兩個檔同一份資料；排序、縮排、結尾換行同 7.11，兩次輸出逐位元組相同）。
+- `tools/kpi.py table` 用同一次讀入寫完整表與 `site/data/kpi.json`（兩個檔同一份資料；排序、縮排、結尾換行同 7.11，兩次輸出逐位元組相同）。
 - 頂層只有 `versions`：陣列，和表同序（最新在上），每版一列：`version`；`replay`（`user-reported`、`dev302` 各自的 `rows_sha256`、`n`、`off`：`n`、`top1`、`kyss`、`rewrites`、`picks_per100`；`user-reported` 另有 `on` 與 `learn_fixed`、`learn_broken`）；`holdout_talk_chat`（`n`、`top1`、`rows_sha256`，有量過時加 `fixed`、`broken`、`p`）；`speed`（`machine`、`load_avg_max`、`idle`；`idle` 為真時才有 `p95_us`、`rerank_p95_ms`、`rss_mb`，規則同表）。沒有的欄位不寫。
 - 不寫：私有聊天調參集的聊天 top1 與 error ratio、wikitune-clean、lytune、保留集新聞半邊。
 

@@ -2,7 +2,9 @@
 <!-- Hand-written. Add a <url> for every new page; change a page's <lastmod> when its content changes. -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://shanjie.nyanako.com/</loc><lastmod>2026-11-09</lastmod></url>
-  <url><loc>https://shanjie.nyanako.com/how</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/how</loc><lastmod>2026-11-10</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/benchmark</loc><lastmod>2026-11-10</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/kpi</loc><lastmod>2026-11-10</lastmod></url>
   <url><loc>https://shanjie.nyanako.com/install</loc><lastmod>2026-11-09</lastmod></url>
   <url><loc>https://shanjie.nyanako.com/guide</loc><lastmod>2026-11-09</lastmod></url>
   <url><loc>https://shanjie.nyanako.com/updates</loc><lastmod>2026-11-09</lastmod></url>

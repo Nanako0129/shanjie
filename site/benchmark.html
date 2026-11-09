@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>基準測試：每一版的公開評測數字｜善解輸入法</title>
+<meta name="description" content="善解每一版發佈前，用固定的公開評測集在聊天與書面兩種設定下量選字準確率、保留集、速度與記憶體。這頁列出每一版的完整公開數字，以及和其他模型、其他輸入法的對照。">
+<meta property="og:title" content="基準測試：每一版的公開評測數字｜善解輸入法">
+<meta property="og:description" content="善解每一版發佈前，用固定的公開評測集在聊天與書面兩種設定下量選字準確率、保留集、速度與記憶體。這頁列出每一版的完整公開數字，以及和其他模型、其他輸入法的對照。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/benchmark">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="基準測試：每一版的公開評測數字｜善解輸入法">
+<meta name="twitter:description" content="善解每一版發佈前，用固定的公開評測集在聊天與書面兩種設定下量選字準確率、保留集、速度與記憶體。這頁列出每一版的完整公開數字，以及和其他模型、其他輸入法的對照。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/benchmark">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "怎麼選字", "item": "https://shanjie.nyanako.com/how"}, {"@type": "ListItem", "position": 3, "name": "基準測試", "item": "https://shanjie.nyanako.com/benchmark"}]}</script>
+<script src="/numbers.js" defer></script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>基準測試</h1>
+<p class="sub">每一版發佈前，用凍結的評測集在聊天與書面兩種設定下量選字的準確率，再量保留集、速度與記憶體。這頁列出每一版所有公開集合的數字；選字流程與重點數字的說明在<a href="/how">怎麼選字</a>，每一版的使用者指標在<a href="/kpi">每版 KPI</a>。</p>
+
+<ul class="toc" aria-label="本頁目錄">
+  <li><a href="#v2">套件 v2</a></li><li><a href="#external">外部模型對照</a></li><li><a href="#static">實打對照</a></li><li><a href="#v1">套件 v1</a></li>
+</ul>
+
+<div id="numbers" data-src="/data/bench.json" data-kind="bench">
+<noscript><p class="note">這頁用 JavaScript 把 <a href="/data/bench.json">/data/bench.json</a> 畫成表格；瀏覽器關了 JavaScript 時，可以直接看那個檔。</p></noscript>
+
+<h2 id="v2">套件 v2（每一版用自己出貨的設定）</h2>
+<p>每一版用它出貨時的模型、詞包與前文設定量，聊天與書面兩種設定都量。評測工具沒有模擬 App 的這幾件事：本機的選字記憶（工具不學）；App 每按一鍵就在背景重排，工具每句只排一次；App 的前文來自輸入框，工具用評測集裡寫好的前文。所以這些數字和 App 裡的實際體驗不完全相同。私人集合與調參集的數字不放在網站上。</p>
+
+<h3>出貨設定</h3>
+<p class="note">被量的 commit 與那一版內附的模型。</p>
+<div data-fill="v2-models"></div>
+
+<h3>準確率（top1，寬鬆對照）</h3>
+<p class="note">每格：第一名正確的比例、答對／句數，以及和前一版逐句比的「改對 / 改壞，McNemar 雙尾精確 p」。dev302 是挑戰集，只當參考；錯字回報與 fw 在調整時看過；沒被看過的只有保留集。</p>
+<div data-fill="v2-accuracy"></div>
+
+<h3>保留集</h3>
+<p class="note">開發過程中不看內容，只在推出新版前由沒參與實作的審查者量一次。這裡是口語那一半；不同份的保留集分欄，數字不跨欄比。</p>
+<div data-fill="v2-holdout"></div>
+
+<h3>速度與記憶體（同場）</h3>
+<p class="note">用開發集 dev302 的按鍵逐鍵重播（標準排列，不載詞包、沒有前文、沒有語意校正），每版三輪輪流跑取中位數；每版一列聊天、一列書面。「重排」是語意校正每句的耗時，在背景執行。速度只在同一列的「同場」裡比，負載高時量的數字只適合看兩版的差距。</p>
+<div data-fill="v2-speed"></div>
+
+<h2 id="external">外部模型對照（不是善解的版本）</h2>
+<p class="note">外部模型和善解的語意校正在同一批候選（善解整句解碼的前幾名）上重排，用同一種選值方法；不是外部輸入法本身的成績。</p>
+<div data-fill="external"></div>
+
+<h2 id="static" data-fill-title="static">實打對照</h2>
+<p class="note">當天用自動打字在三套輸入法實際打同一批句子，數錯的句數與錯字數。蘋果注音在測驗中會學習，條件和上面的版本列不同，不做統計比較。</p>
+<div data-fill="static"></div>
+
+<h2 id="v1">套件 v1（早期版本的歷史表）</h2>
+<p class="note">早期版本都用同一個語言模型量，只比程式與詞庫的差別；之後的版本改用上面的套件 v2。「小麥資料基準」那一列不是善解的版本。</p>
+
+<h3>準確率（top1，寬鬆對照）</h3>
+<div data-fill="v1-accuracy"></div>
+
+<h3>保留集</h3>
+<div data-fill="v1-holdout"></div>
+
+<h3>速度與記憶體（同場）</h3>
+<div data-fill="v1-speed"></div>
+</div>
+
+<p class="next"><a href="/kpi">每版 KPI →</a><a href="/how">怎麼選字 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>
