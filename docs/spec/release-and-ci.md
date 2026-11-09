@@ -39,7 +39,7 @@
 | job | runner | 內容 | 逾時 |
 |---|---|---|---|
 | `changes` | ubuntu-latest | §1.2 | 5 分 |
-| `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 20 分 |
+| `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 35 分 |
 | `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 20 分 |
 | `windows` | windows-2025 | 見 §3.3；`needs: [changes, debug]` | 45 分 |
 | `python` | ubuntu-24.04 | 下載並核對模型；Python 工具與資料建置腳本的測試 | 20 分 |

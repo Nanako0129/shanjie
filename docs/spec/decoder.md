@@ -184,7 +184,7 @@
 - 模糊音容錯讀音的字，讀音項用它的詞庫讀音算。
 - 建表只有一個函式 `engine::load_reading_decode(lexicon, data_dir)`，讀 `mcbpmf-data.txt` 原文與 `std-exempt.tsv`；`Engine::load_lm`、評測 CLI、重播程式都只呼叫它。缺檔、讀不了或格式錯（不是「音節<TAB>單一字」）就是載入失敗（回傳 3），不會靜默沒有豁免。
 - 開關：`Engine::set_reading_decode(false)`、CLI 與重播的 `--no-reading-decode` 只給評測用，不在 `shanjie.h`。關閉等於沒有讀音項的解碼器。
-- 摘要行：每個設定的標記最後都是 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>`；`--no-reading-decode` 時兩者都沒有。標記驗證工具（`tools/triage.py`、`tools/kpi.py`、`tools/bench.py`）依版本判定尾端是否應有它。
+- 摘要行：每個設定的標記最後都是 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>`；`--no-reading-decode` 時兩者都沒有。標記驗證工具（`tools/kpi.py`、`tools/bench.py`，以及不在本 repo 的研究工具）依版本判定尾端是否應有它。
 - 融合層沒有讀音通道項：`set_reading_channel`、`--no-reading-channel` 與標記 `+rc` 已不存在。
 - Python 參考實作不實作讀音項，所以和 Python 逐位元組比對的 golden 一律帶 `--no-reading-decode`；另有只有 Rust 的出貨預設釘值（dev302、打字測驗、錯字回報，兩個設定：摘要行與 `top1_sha256`）。
 - 取捨：讀音項放在解碼器本身而不是重排前的一步，因為 n-gram 只看字不看讀音，要在每一鍵、語意校正關著時也生效，光束才會用它剪枝。

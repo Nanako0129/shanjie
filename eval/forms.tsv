@@ -1,4 +1,4 @@
-# 合法寫法分數用的表（docs/contracts/forms-score.md，規則版本 forms-v1）。由 tools/build_forms.py 產生，請勿手改。
+# 合法寫法分數用的表（docs/spec/evaluation.md §3，規則版本 forms-v1）。由 tools/build_forms.py 產生，請勿手改。
 # 來源：教育部《重編國語辭典修訂本》，經 g0v/moedict-data dict-revised_bkup.json（commit a6dc997417507eb510fc29822bc514de2c92728c，SHA-256 ea767109dfb04f838900b7462ebf6977f344f592e1dd745a204cbe3327ef8fe3）。CC BY-ND 3.0 TW，只用於評測。
 # 格式：word<TAB>寫法<TAB>標準形；char<TAB>X<TAB>Y<TAB>讀音1,讀音2…（只在該位置的讀音符合時才換）。先套現行寬鬆對照，再套本表。
 # 詞對 28 個、單字對 617 個、丟掉的組 1 組

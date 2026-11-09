@@ -78,8 +78,9 @@ jobs:
     # docs/spec/release-and-ci.md: the release tests of both packages (the shipping profile, with the per-key p95 assertions and the
     # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
     runs-on: xcode-27
-    # A hung FFI child process should not hold the runner for the 6-hour default.
-    timeout-minutes: 20
+    # A hung FFI child process should not hold the runner for the 6-hour default. The release tests took 16.3-18.5 min on main
+    # (2026-11-09) and one run was cancelled at 20 min, so the limit leaves room above that.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
