@@ -38,6 +38,9 @@
 | `data/packs/it-readings.tsv` | 人工確認過的讀音（詞、讀音），取代 `tools/readings.py` 的結果。建置輸入 | CC0 | — |
 | `data/packs/quotes-manual.tsv` | 經典電影台詞清單：台詞原文、出處、年份、核對來源、收錄人、選填的讀音。台詞是短句、廣為流傳，視為不涉版權；每列的核對來源記在檔裡，核對來源空白的列建置工具不收；只收公開影視作品的台詞。建置輸入 | CC0（清單檔本身；台詞原文的權利屬原作者） | — |
 | `data/packs/quotes-add.tsv`、`data/packs/quotes.json` | 由 `tools/build_quote_pack.py` 從 `quotes-manual.tsv` 已核對的列（208 句）切成分句（2–10 個漢字，278 個分句、311 列讀音含變調列）產生的疊加層與清單檔（版號、各項個數、檔案的 SHA-256）；讀音由 `tools/readings.py` 產生或取自清單第 6 欄。隨 App 內附，設定裡可開關（預設關） | CC0（同清單） | — |
+| `data/packs/beauty-add.tsv`、`data/packs/beauty-sources.tsv`、`data/packs/beauty.json` | 由 `tools/build_meme_pack.py --pack beauty` 產生（`docs/spec/lexicon-and-packs.md` §8）：只收詞（字串）與讀音，不收定義、說明或網頁原文。候選來自公開網站與台灣公開論壇（論壇 A）的挖詞（只取字串），收錄依論壇 A 的用量；來源欄只記類別代號。隨 App 內附，設定裡可開關（預設開）；沒有 CC BY-SA 的來源，所以署名檔不列它 | CC0（名稱清單與用量判定，沒有第三方著作權內容） | — |
+| `data/packs/beauty-collisions.tsv`、`data/packs/beauty-readings.tsv` | 美妝詞包同音衝突的處置與人工確認過的讀音。建置輸入 | CC0 | — |
+| `data/packs/beauty-exclude.tsv` | 人工審後剔除的字串與剔除類別。建置輸入 | CC0 | — |
 
 ## 模型檔（不在 git，GitHub Release 附件）
 
@@ -73,6 +76,7 @@
 | `eval/holdout/talk.txt`、`eval/holdout/next/**/talk.txt` | 從公開口語書寫切出的子句：中文維基百科討論頁與互助客棧（2026-10-01 dump 之後的修訂，API 取得）、vTaiwan UberX 的 Polis 留言、公共政策網路參與平臺「提點子」（data.gov.tw 58036，不含提議者欄位）；逐列出處在 `eval/holdout/next/sources.tsv`，不用來調參或訓練 | **CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ）；vTaiwan 資料 CC BY 4.0；提點子依政府資料開放授權條款第 1 版 | Wikipedia contributors（頁名與 revid 見 `sources.tsv`）、The Computational Democracy Project；「本資料由國家發展委員會提供，依政府資料開放授權條款（https://data.gov.tw/license ）進行公眾釋出」 |
 | `eval/holdout/next/sources.tsv` | 新保留集的逐列出處（份、檔、列號、來源、單位、授權） | CC0 | — |
 | `eval/dev/it/words.txt` | 資訊與 AI 詞包本身的檢查集：從 `it-add.tsv` 依來源比例抽 60 個詞（固定種子 20261024），一列一詞、沒有前文，讀音取自詞包 | CC BY-SA 4.0，與 `it-add.tsv` 相同 | Wikipedia 貢獻者、國家教育研究院 |
+| `eval/dev/beauty/words.txt` | 美妝詞包本身的檢查集：從 `beauty-add.tsv` 抽 60 個詞（固定種子 20261108），一列一詞、沒有前文，讀音取自建置用的讀音 | CC0 | — |
 | `eval/dev/acg/*.txt` | Wikidata 的 zh-tw 標籤（作品名、角色、角色名片段，sitelink 數最多者），讀音由 `tools/readings.py` 產生 | CC0（Wikidata 的資料授權） | — |
 | `eval/dev/acg/recent.txt` | 2026 年作品與角色名 23 個的中文維基百科條目，逐一對照條目確認；讀音由 `tools/readings.py` 產生 | **CC BY-SA 4.0** | Wikipedia 貢獻者 |
 | `eval/dev/acg/interpunct.txt` | 動漫詞包的檢查集：從含間隔號、角色列表條目整頁的角色名依作品分層抽 40 個（固定種子 20261010；`tools/readings.py` 標 CHECK、讀音有疑義的詞不抽），加 5 個指定詞共 45 列；名字取自中文維基百科的角色列表條目（revision 記在 `acg-sources.tsv`），讀音由 `tools/readings.py` 產生 | **CC BY-SA 4.0** | Wikipedia 貢獻者 |

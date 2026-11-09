@@ -1,0 +1,83 @@
+{
+ "beauty_x": {
+  "beauty-x-strings.txt": "2822ad42668082823eb6c764684a769b4b9e00ffeeec5df2c44ce6f5a6993f97",
+  "beauty-x.tsv": "f4c8a86547afc08db6938431a3f5ecc228005c788976e223435af08c32e71bdd"
+ },
+ "bonus": 3.0,
+ "candidate_files": {
+  "A.tsv": "11faa950fccfd6103d9311a3f722eac387a05395cc45252f67e638a7539177f6",
+  "B.tsv": "a1eea935436c12ef19920d8e318cfeddfcdf872d713a13a1dba7c88108fc9a0d",
+  "G.tsv": "ef102b806e69db3d9685f27c7c13a0a7a2bcc686451a22ca331be3a79b8d3177",
+  "S.tsv": "a7372e4f5e7c485b5c36d27d03128cdfd4cf97b5911d04cf445f674ef63c0ec8",
+  "brandlist.tsv": "c51bcbe17ce6fa78531ca0f2611ced5ef7f72363faed7d1c22760f1dad434b64"
+ },
+ "candidate_stats": {
+  "candidates": 126404,
+  "dropped_length": 1,
+  "lines": 194053
+ },
+ "counts_candidates": {
+  "input_sha256": "2e11bb4f0b6ebbd6a2df6324db881a93bf0006c6b220cd7a8afe23c8df8fdb55",
+  "sha256": "a4f7cb76c17a8e6106c4965658926fde99151bb10cd497592e19208d683b1e2a",
+  "tool_commit": "1ef8f06ca6d1fb73c8d8efb6847023b0c8920d03",
+  "tree_sha256": "61626f8abeca8f7bc8b66bf5c104be2326002678c671ec868caf073b4ab88f5c"
+ },
+ "counts_x": {
+  "input_sha256": "2822ad42668082823eb6c764684a769b4b9e00ffeeec5df2c44ce6f5a6993f97",
+  "sha256": "c74bab750f3dbcbcd245469c424e3f7b9cf51f07b0a0ba6874d76849870dab74",
+  "tool_commit": "591c100324aed6122c86af7f0425aa2814047094",
+  "tree_sha256": "61626f8abeca8f7bc8b66bf5c104be2326002678c671ec868caf073b4ab88f5c"
+ },
+ "dropped_unreadable": 0,
+ "exclude": {
+  "sha256": "0dd5aee8527b3798935edcb41707751a6cf25a9c43202fd1d6d9931c79ac0c2a",
+  "strings": 18072
+ },
+ "exclude_private": {
+  "sha256": "0d4ef230ad9ad23b480a8337e255fad54e9bd436f831657ca07b46b08e8d60ad",
+  "strings": 10
+ },
+ "files": {
+  "beauty-add.tsv": {
+   "bytes": 32147,
+   "lines": 539,
+   "sha256": "303136947178c81f3163d46c41d07300da8394e1f809176305d1517799f1e605"
+  },
+  "beauty-sources.tsv": {
+   "bytes": 11949,
+   "lines": 540,
+   "sha256": "c635927d2a4e248eb9538f04754d2934748ed83521c5ac711811e8a870875d70"
+  }
+ },
+ "rows": 539,
+ "sources": {
+  "A": 458,
+  "B": 192,
+  "G": 325,
+  "S": 309,
+  "brandlist": 12
+ },
+ "stages": {
+  "admitted": 109980,
+  "below_threshold": 16421,
+  "candidates": 126404,
+  "dedupe_lexicon": 3,
+  "dedupe_packs": 0,
+  "dropped_already_right": 78278,
+  "dropped_by_c_rule": 365,
+  "dropped_same_reading": 3048,
+  "dropped_x_not_fewer": 9551,
+  "dropped_x_other_pack": 113,
+  "excluded_by_beauty_collisions_tsv": 6,
+  "excluded_by_exclude": 18080,
+  "no_count": 0,
+  "unreadable": 0
+ },
+ "thresholds": {
+  "min_articles": 10,
+  "min_boards": 3
+ },
+ "unresolved_collision_readings": 0,
+ "version": "30313694",
+ "words": 539
+}

@@ -135,6 +135,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let acgPack = "動漫與遊戲詞"
         public static let quotePack = "經典台詞"
         public static let itPack = "資訊與 AI 詞"
+        public static let beautyPack = "美妝與保養詞"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         /// The menu's non-clickable pack line (docs/spec/lexicon-and-packs.md §4.2, §4.3).
         public static func packsOn(_ names: [String]) -> String { "已開啟的詞包：" + names.joined(separator: "、") }

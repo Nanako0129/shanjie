@@ -30,14 +30,21 @@ enum TestData {
     ]
 
     static let itPackRow = "ㄧㄥˊ-ㄇㄨˋ-ㄅㄠˇ-ㄏㄨˋ-ㄑㄧˋ\t螢幕保護器\t-3.17843815\tit\n"
+    /// The beauty pack's one row, a made-up word the base lexicon cannot spell (core/tests/engine_pack.rs `BEAUTY_PACK`: first candidate only with the pack, both profiles).
+    /// A fixture row, so the tests do not depend on the generated data/packs/beauty-add.tsv. Typed as `beautyPackKeys` (a space is the first tone).
+    static let beautyPackRow = "ㄅㄧˋ-ㄌㄧˇ-ㄐㄧㄥ-ㄏㄨㄚˊ\t碧莉菁華\t-6.60980192\tbeauty\n"
+    /// The beauty selftest word's row, verbatim from data/packs/beauty-add.tsv (Selftest.beautyWord), so the selftest tests do not depend on the generated file.
+    static let beautySelftestRow = "ㄇㄟˊ-ㄘㄞˇ-ㄍㄠ\t眉彩膏\t-4.04116568\tbeauty\n"
+    static let beautyPackKeys = "1u4xu3ru/ cj86"
 
     /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
     /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
-    static func addBundledPack(to dir: URL, itPack: Bool = true) throws {
+    static func addBundledPack(to dir: URL, itPack: Bool = true, beautyPack: Bool = true) throws {
         let packs = dir.appendingPathComponent("packs", isDirectory: true)
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
         // The IT+AI pack's one row (the selftest word, core/tests/engine_pack.rs): a real file, so the test does not depend on the generated data/packs/it-add.tsv.
         if itPack { try itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8) }
+        if beautyPack { try beautySelftestRow.write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8) }
         try FileManager.default.createSymbolicLink(at: packs.appendingPathComponent("acg-add.tsv"),
                                                    withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
     }
