@@ -1,4 +1,4 @@
-//! Startup and the pipe server of the resident host (docs/contracts/win-resident.md sections 2.2, 2.4, 2.5, 2.6 and 2.8).
+//! Startup and the pipe server of the resident host (docs/spec/windows-tip.md §5.2, §5.4, §5.5, §5.6 and §5.8).
 //!
 //! - `run`: the self-check (exactly Medium, no AppContainer, not restricted, not elevated, not session 0, not a service account, no
 //!   package identity), `SetDefaultDllDirectories(SYSTEM32)`, the WER exclusion, then all pipe instances, then the model. Any failure
@@ -36,10 +36,10 @@ use windows::Win32::System::Pipes::{
 };
 use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken, ResetEvent, WaitForSingleObject, INFINITE};
 
-/// Section 2.2: N, checked against the high mark of event 65 in the VM run.
+/// §5.2: N, checked against the high mark of event 65 in the VM run.
 pub const INSTANCES: u32 = 64;
 const PER_CLIENT: u32 = 4;
-/// The only idle timeout: before the `Hello` (section 2.4).
+/// The only idle timeout: before the `Hello` (§5.4).
 const HELLO: Duration = Duration::from_secs(1);
 const WRITE: Duration = Duration::from_secs(1);
 /// After a final answer (`Refuse`, `NotReady`) the host waits this long for the client to close, so the answer is read before
@@ -59,7 +59,7 @@ pub fn exit(code: i32) -> ! {
     std::process::exit(code)
 }
 
-/// Section 2.5 item 2, the one SDDL string: the user gets `FILE_GENERIC_READ | FILE_GENERIC_WRITE` (no `WRITE_DAC`, `WRITE_OWNER`,
+/// §5.5 item 2, the one SDDL string: the user gets `FILE_GENERIC_READ | FILE_GENERIC_WRITE` (no `WRITE_DAC`, `WRITE_OWNER`,
 /// `DELETE`); ALL APPLICATION PACKAGES and ALL RESTRICTED APPLICATION PACKAGES get read data, write data, read attributes,
 /// `SYNCHRONIZE` and `READ_CONTROL` only (no `FILE_CREATE_PIPE_INSTANCE`); no Everyone, no Users; a Low mandatory label (no write up).
 fn sddl(user_sid: &str) -> String {
@@ -90,7 +90,7 @@ fn exe_path() -> Option<PathBuf> {
     }
 }
 
-/// Section 2.2's self-check: the host only ever runs as the plain desktop user.
+/// §5.2's self-check: the host only ever runs as the plain desktop user.
 fn self_check(f: &Facts) -> bool {
     f.integrity == token::MEDIUM_RID && f.app_container.is_none() && !f.restricted && !f.elevated && f.session != 0 && !token::is_service_account(&f.user) && !token::has_package()
 }
@@ -118,7 +118,7 @@ pub fn run() -> ! {
     let e = engine::load(&dir).unwrap_or_else(|| exit(EXIT_LOAD));
     engine::install(e);
     timing::record(timing::EV_LOAD, t0, timing::now_us());
-    // Lives until logoff (section 2.2): the instance threads do the work.
+    // Lives until logoff (§5.2): the instance threads do the work.
     loop {
         std::thread::park();
     }
@@ -254,11 +254,11 @@ impl Drop for Slot {
     }
 }
 
-/// What the check of the client's token found, kept on the connection (section 2.5 item 4).
+/// What the check of the client's token found, kept on the connection (§5.5 item 4).
 struct Client {
     who: Who,
     app_container: bool,
-    /// Integrity and elevation are recorded for the client policies of later slices (win-resident.md section 5); nothing here
+    /// Integrity and elevation are recorded for the client policies of later slices (docs/spec/windows-tip.md §5.12); nothing here
     /// depends on them.
     #[allow(dead_code)]
     integrity: u32,
@@ -266,7 +266,7 @@ struct Client {
     elevated: bool,
 }
 
-/// Section 2.5 item 4: impersonate (the client allowed identification only), read the thread token as this process (OpenAsSelf),
+/// §5.5 item 4: impersonate (the client allowed identification only), read the thread token as this process (OpenAsSelf),
 /// revert. The same user and session, and every query answered (an anonymous client cannot be read), or `None`. A failed revert ends
 /// the process: it must never go on as the client.
 fn check_client(p: &Pipe, me: &Facts) -> Option<Client> {

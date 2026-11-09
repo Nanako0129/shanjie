@@ -1,4 +1,4 @@
-//! The wire format between the shanjie TSF client (the DLL) and the resident host (docs/contracts/win-resident.md section 2.3).
+//! The wire format between the shanjie TSF client (the DLL) and the resident host (docs/spec/windows-tip.md §5.3).
 //!
 //! Fixed width, little endian, no self-describing serialisation. Every message is `u32 len` (the whole message, these four bytes
 //! included), `u16 proto`, `u16 type`, `u64 seq`, then the body of its type. A string is a `u32` count of UTF-16 units and the units;
@@ -51,7 +51,7 @@ const fn fnv1a(b: &[u8]) -> u64 {
     h
 }
 
-/// `\\.\pipe\shanjie-dev-<user SID>-<session id>` (section 2.2). No protocol version in the name: two ends of different versions
+/// `\\.\pipe\shanjie-dev-<user SID>-<session id>` (§5.2). No protocol version in the name: two ends of different versions
 /// still meet, so the host can answer `Refuse { 1 }`.
 pub fn pipe_name(user_sid: &str, session: u32) -> String {
     format!(r"\\.\pipe\shanjie-dev-{user_sid}-{session}")
@@ -76,7 +76,7 @@ pub enum ClientMsg {
     Reset { ctx: u64 },
 }
 
-/// The answer to a `Key`: what WIN-TIP's `engine::key` gave the text service. `core_error` means the core returned non-zero: the
+/// The answer to a `Key`: what the in-DLL `engine::key` (docs/spec/windows-tip.md §3.4) gave the text service. `core_error` means the core returned non-zero: the
 /// client edits nothing and treats the key as not handled. `candidates` is reserved (always empty in this slice).
 #[derive(PartialEq)]
 pub struct Out {
@@ -359,7 +359,7 @@ impl HostSession {
     }
 }
 
-/// The client's own checks of an `Out`, beyond parsing (section 2.3): the caret within `preedit`, no candidate window (the ESC that
+/// The client's own checks of an `Out`, beyond parsing (§5.3): the caret within `preedit`, no candidate window (the ESC that
 /// closes one is sent by the host), and no control characters in `commit` or `preedit` (a forged host must not type a line break
 /// into a terminal). The client also checks that the seq is the one it sent.
 pub fn out_ok(o: &Out) -> bool {

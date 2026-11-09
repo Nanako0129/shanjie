@@ -1,4 +1,4 @@
-//! The connection wrapper (docs/contracts/win-resident.md section 2.4): every connection's body runs under `catch_unwind` with a silent
+//! The connection wrapper (docs/spec/windows-tip.md §5.4): every connection's body runs under `catch_unwind` with a silent
 //! panic hook, installed by the wrapper itself on first use (the same idea as `quiet_panics` in core/src/ffi.rs). A panic payload may
 //! hold typed text (R2), so nothing is printed.
 use std::panic::{catch_unwind, AssertUnwindSafe};

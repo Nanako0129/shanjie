@@ -1,4 +1,4 @@
-//! The host's one engine (docs/contracts/win-resident.md sections 2.2 and 2.3; the scheme of WIN-TIP's engine.rs). One engine behind
+//! The host's one engine (docs/spec/windows-tip.md §5.2 and §5.3; the scheme of the in-DLL engine of docs/spec/windows-tip.md §3.4). One engine behind
 //! one lock; its owner is assigned by the host as (connection id, ctx), so a client's `ctx` means nothing on any other connection.
 //! A key from another owner first discards the old owner's state (reset mode 1, never mode 0). Only the core's C ABI is used.
 //!
@@ -57,7 +57,7 @@ pub fn install(e: *mut ShanjieEngine) {
     READY.store(true, Ordering::Release);
 }
 
-// ---- loading (win-tip.md section 2.4: the call list of cli/src/replay.rs `build_engine_packs`, except set_rerank(0)) ----
+// ---- loading (docs/spec/windows-tip.md §3.4: the call list of cli/src/replay.rs `build_engine_packs`, except set_rerank(0)) ----
 
 /// `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`, `cli::replay::PACKS`.
 const PACKS: u32 = 1 | 4;
@@ -76,7 +76,7 @@ unsafe fn snap(f: impl FnOnce(*mut *mut ShanjieOutput) -> i32) -> bool {
     rc == 0
 }
 
-/// The engine of `dir/data` (the folder of this exe, section 2.1). `None` when any call fails (the engine built so far is freed).
+/// The engine of `dir/data` (the folder of this exe, §5.1). `None` when any call fails (the engine built so far is freed).
 /// Done without the lock, so a load never holds it.
 pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
     fn c(p: PathBuf) -> Option<CString> {
@@ -170,13 +170,13 @@ fn wire(took_over: bool, out: Option<CoreOut>) -> Out {
             candidate_selected: o.candidate_selected,
             candidates: Vec::new(),
         },
-        // The core returned non-zero: the client edits nothing and lets the key go (WIN-TIP's `out: None`).
+        // The core returned non-zero: the client edits nothing and lets the key go (the in-DLL engine's `out: None`, docs/spec/windows-tip.md §3.4).
         None => Out { ran: true, core_error: true, took_over, handled: false, commit: Vec::new(), preedit: Vec::new(), cursor_utf16: 0, candidate_selected: -1, candidates: Vec::new() },
     }
 }
 
 /// One key for `me`: take ownership (discarding another owner's state with mode 1), call the core, copy, unlock. No candidate window
-/// exists in this slice, so a key that opens one is followed by ESC here (WIN-TIP `OnKeyDown` step 5, moved into the host).
+/// exists in this slice, so a key that opens one is followed by ESC here (`OnKeyDown` step 5 of docs/spec/windows-tip.md §3.7, moved into the host).
 pub fn key(me: Owner, k: Key) -> Answer {
     let mut g = match SHARED.try_lock() {
         Ok(g) => g,

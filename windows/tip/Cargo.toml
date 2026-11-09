@@ -4,8 +4,8 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
-# docs/contracts/win-tip.md section 2.1: the TSF text service DLL. Empty on non-Windows targets (lib.rs is #![cfg(windows)]).
-# Since win-resident.md it is a thin client of shanjie-host.exe: it links no core and loads no model.
+# docs/spec/windows-tip.md §3.1: the TSF text service DLL. Empty on non-Windows targets (lib.rs is #![cfg(windows)]).
+# Since docs/spec/windows-tip.md §5 it is a thin client of shanjie-host.exe: it links no core and loads no model.
 [lib]
 crate-type = ["cdylib", "rlib"]
 

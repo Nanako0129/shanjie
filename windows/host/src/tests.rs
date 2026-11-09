@@ -1,4 +1,4 @@
-//! docs/contracts/win-resident.md section 3 item 10, against a real server: the production `server::start` on a test pipe name with
+//! docs/spec/windows-tip.md §5.11 item 10, against a real server: the production `server::start` on a test pipe name with
 //! the real engine (the models of data/, fetched by scripts/fetch-models.sh as for the core's tests), and a client that opens the pipe
 //! with the text service's access and identification-only flags. The two tests share the server and the rate limit of this process
 //! (one PID), so they run one at a time.
@@ -142,7 +142,7 @@ fn another_connection_cannot_reach_a_composition_through_its_ctx() {
     let o = a.key(ctx, '3');
     check(!o.took_over, "A still owns the engine after B's Release and Reset");
     check(o.preedit == w("你"), "A's composition went on");
-    // B's key with A's ctx is B's own: it takes the engine (A's state is discarded, section 2.5 item 8) and sees none of A's text.
+    // B's key with A's ctx is B's own: it takes the engine (A's state is discarded, §5.5 item 8) and sees none of A's text.
     let ob = b.key(ctx, 'c');
     check(ob.took_over && ob.commit.is_empty() && ob.preedit == w("ㄏ"), "B gets only its own key");
     // A sees that it lost the engine.

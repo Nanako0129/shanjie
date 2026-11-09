@@ -1,14 +1,14 @@
-//! The thin client (docs/contracts/win-resident.md sections 2.2, 2.4, 2.5 item 1 and 2.6): the text service no longer holds an
+//! The thin client (docs/spec/windows-tip.md §5.2, §5.4, §5.5 item 1 and §5.6): the text service no longer holds an
 //! engine; each key goes to the resident host over a named pipe and back, synchronously, inside the key's edit session.
 //!
 //! - One connection per UI thread (one TIP instance per thread), opened by the first key, never in `ActivateEx`. A thread timer closes
 //!   it after 60 s idle with no composition; it is also closed on `Deactivate`, after any failure and after any answer but `Out`.
-//! - Before anything is sent the host is checked (section 2.5 item 1): the pipe's owner SID and session (handle only), then, outside an
+//! - Before anything is sent the host is checked (§5.5 item 1): the pipe's owner SID and session (handle only), then, outside an
 //!   AppContainer, the server process's token and image path. A failure passes the key through.
 //! - Every exchange has a 200 ms deadline; a wait that runs out is cancelled and its cancellation awaited (`pipeio`). Two timeouts in
 //!   a row open the circuit breaker for 10 s. `Refuse { 1 }` passes every key through for the life of the process, `Refuse { 3 }`
 //!   for 60 s.
-//! - `ERROR_FILE_NOT_FOUND` starts the host without waiting for it, only from a process that meets every condition of section 2.2.
+//! - `ERROR_FILE_NOT_FOUND` starts the host without waiting for it, only from a process that meets every condition of §5.2.
 //!
 //! The host is the only holder of composition state: nothing typed is kept or replayed here. R2: no key or text reaches a log, a file
 //! or an error; the timing file gets numbers only.
@@ -42,7 +42,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
-/// Section 2.4: WIN-TIP measured a per-key p95 of 5.5 ms and a maximum of 12.5 ms inside the DLL; 200 ms is far above both.
+/// §5.4: the in-DLL engine measured a per-key p95 of 5.5 ms and a maximum of 12.5 ms inside the DLL; 200 ms is far above both.
 const REPLY: Duration = Duration::from_millis(200);
 const IDLE: Duration = Duration::from_secs(60);
 /// How often the idle check runs (the connection closes between 60 and 75 s idle).
@@ -51,19 +51,19 @@ const BREAKER: Duration = Duration::from_secs(10);
 const COOLDOWN: Duration = Duration::from_secs(60);
 const BACKOFF: Duration = Duration::from_secs(10);
 const STILL_MISSING: Duration = Duration::from_secs(15);
-/// `FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE | READ_CONTROL` (section 2.5 item 2): exactly what the pipe's DACL grants an
+/// `FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE | READ_CONTROL` (§5.5 item 2): exactly what the pipe's DACL grants an
 /// AppContainer. `GENERIC_READ`/`GENERIC_WRITE` would ask for more and make every AppContainer look shut out.
 pub const PIPE_ACCESS: u32 = 0x0000_0001 | 0x0000_0002 | 0x0010_0000 | 0x0002_0000;
-/// Section 2.5 item 3: the host can identify the client, never act as it.
+/// §5.5 item 3: the host can identify the client, never act as it.
 pub const PIPE_FLAGS: FILE_FLAGS_AND_ATTRIBUTES = FILE_FLAGS_AND_ATTRIBUTES(FILE_FLAG_OVERLAPPED.0 | SECURITY_SQOS_PRESENT.0 | SECURITY_IDENTIFICATION.0);
 const HOST_EXE: &str = "shanjie-host.exe";
-/// The one fixed argument of the host's command line (section 2.2).
+/// The one fixed argument of the host's command line (§5.2).
 const HOST_FLAG: &str = "--resident";
 
 pub enum Reply {
     /// The host's answer (checked: seq, caret, no candidate window, no control characters).
     Out(Out),
-    /// No answer to use: pass the key through (or, with a composition open, end it; section 2.6). The connection is closed.
+    /// No answer to use: pass the key through (or, with a composition open, end it; §5.6). The connection is closed.
     Pass,
 }
 
@@ -83,7 +83,7 @@ fn me() -> Option<&'static Me> {
     static ME: OnceLock<Option<Me>> = OnceLock::new();
     ME.get_or_init(|| {
         let facts = token::process_facts()?;
-        // The host sits beside this DLL (section 2.1); a path that is not complete gives no client at all (dll::module_path).
+        // The host sits beside this DLL (§5.1); a path that is not complete gives no client at all (dll::module_path).
         let dir = crate::dll::module_path()?.parent()?.to_path_buf();
         let sid = token::sid_string(&facts.user)?;
         let pipe = proto::pipe_name(&sid, facts.session).encode_utf16().chain([0]).collect();
@@ -110,7 +110,7 @@ fn later(d: Duration) -> u64 {
     now_ms() + d.as_millis() as u64
 }
 
-/// `Refuse { 1 }`: a host of another protocol version; only restarting the app helps (section 2.6).
+/// `Refuse { 1 }`: a host of another protocol version; only restarting the app helps (§5.6).
 static PERMANENT: AtomicBool = AtomicBool::new(false);
 static BREAKER_UNTIL: AtomicU64 = AtomicU64::new(0);
 static COOLDOWN_UNTIL: AtomicU64 = AtomicU64::new(0);
@@ -118,7 +118,7 @@ static TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 /// A connection (with its thread timer and thread-local destructor) has existed in this process.
 static ATTEMPTED: AtomicBool = AtomicBool::new(false);
 
-/// Every key passes through: the circuit breaker, the permanent pass-through or the `Refuse { 3 }` cool-down (section 2.4). The only
+/// Every key passes through: the circuit breaker, the permanent pass-through or the `Refuse { 3 }` cool-down (§5.4). The only
 /// connection state `OnTestKeyDown` looks at.
 pub fn blocked() -> bool {
     let now = now_ms();
@@ -146,7 +146,7 @@ fn passed(reason: u64) {
     timing::diag_value(timing::EV_PASS, reason);
 }
 
-/// Any answer but the one wanted (section 2.6): the reason is noted and its rule applied.
+/// Any answer but the one wanted (§5.6): the reason is noted and its rule applied.
 fn refused(m: &ServerMsg) {
     TIMEOUTS.store(0, Ordering::Release);
     passed(match m {
@@ -201,7 +201,7 @@ impl Link {
         Ok(self.seq)
     }
 
-    /// The answer to the message `seq`; a `Pushed` in between is dropped (reserved, section 2.3).
+    /// The answer to the message `seq`; a `Pushed` in between is dropped (reserved, §5.3).
     fn answer(&mut self, seq: u64, deadline: Instant) -> Result<ServerMsg, u32> {
         loop {
             let f = self.pipe.read_frame(Some(deadline))?;
@@ -224,7 +224,7 @@ impl Link {
 
 /// How a key exchange ended without an `Out`.
 enum Step {
-    /// The host did not get the key (section 2.4: reconnect once, send once more).
+    /// The host did not get the key (§5.4: reconnect once, send once more).
     Write(u32),
     /// Sent; the answer failed or was malformed: never sent again (the host may have acted on it).
     Read(u32),
@@ -249,7 +249,7 @@ fn call(link: &mut Link, ctx: u64, k: Key) -> Result<Out, Step> {
 }
 
 /// One key for `ctx` (this thread's context; its meaning stays inside this connection). `composing`: this instance has a composition
-/// open; then a failed write is not sent again, because the host's state for that composition is gone (section 2.6, first row).
+/// open; then a failed write is not sent again, because the host's state for that composition is gone (§5.6, first row).
 pub fn key(ctx: u64, k: Key, composing: bool) -> Reply {
     if blocked() {
         return Reply::Pass;
@@ -361,7 +361,7 @@ unsafe extern "system" fn idle_tick(_hwnd: HWND, _msg: u32, id: usize, _time: u3
 
 // ---- connecting ----
 
-/// Opens the pipe exactly as section 2.5 items 2 and 3 say (access and impersonation level). The Win32 code on failure.
+/// Opens the pipe exactly as §5.5 items 2 and 3 say (access and impersonation level). The Win32 code on failure.
 pub fn open(name: &[u16]) -> Result<Pipe, u32> {
     // SAFETY: `name` is NUL-terminated.
     let h = unsafe { CreateFileW(PCWSTR(name.as_ptr()), PIPE_ACCESS, FILE_SHARE_MODE(0), None, OPEN_EXISTING, PIPE_FLAGS, None) }.map_err(|e| pipeio::win32(&e))?;
@@ -399,7 +399,7 @@ fn connect(me: &Me) -> Option<Link> {
     let (pid, tid) = unsafe { (GetCurrentProcessId(), GetCurrentThreadId()) };
     let hello = ClientMsg::Hello { build_hash: proto::BUILD_HASH, pid, tid };
     match link.send(&hello, deadline).and_then(|seq| link.answer(seq, deadline)) {
-        // A build hash that differs is allowed (a development build); the timing file has no event for it (numbers only, section 2.8).
+        // A build hash that differs is allowed (a development build); the timing file has no event for it (numbers only, §5.8).
         Ok(ServerMsg::Welcome { .. }) => {
             TIMEOUTS.store(0, Ordering::Release);
             ATTEMPTED.store(true, Ordering::Release);
@@ -433,10 +433,10 @@ fn pipe_owner(h: HANDLE) -> Option<Vec<u8>> {
     }
 }
 
-/// Section 2.5 item 1: (a) the pipe's owner is this user and the server is in this session (every client, AppContainer included);
+/// §5.5 item 1: (a) the pipe's owner is this user and the server is in this session (every client, AppContainer included);
 /// (b) outside an AppContainer, the server process's token is this user at exactly Medium, not an AppContainer, not restricted; (c)
 /// its image is the `shanjie-host.exe` beside this DLL, as a supplement. An AppContainer cannot open the server process, so it gets
-/// (a) only: the residual risk section 2.5 item 1 accepts.
+/// (a) only: the residual risk §5.5 item 1 accepts.
 fn server_ok(me: &Me, h: HANDLE) -> bool {
     let mut session = u32::MAX;
     // SAFETY: valid out pointer.
@@ -489,7 +489,7 @@ fn image_ok(me: &Me, p: HANDLE) -> bool {
     unsafe { CompareStringOrdinal(&buf[..n as usize], &want, true) == CSTR_EQUAL }
 }
 
-// ---- starting the host (section 2.2) ----
+// ---- starting the host (§5.2) ----
 
 struct Launched {
     at: Instant,
@@ -557,7 +557,7 @@ fn minimal_environment() -> Option<Vec<u16>> {
     Some(env)
 }
 
-/// `CreateProcessW` of section 2.2: the absolute path beside this DLL, a quoted command line with one fixed flag, the install folder
+/// `CreateProcessW` of §5.2: the absolute path beside this DLL, a quoted command line with one fixed flag, the install folder
 /// as the working directory, the minimal environment, only an inheritable NUL handle as the three standard handles (the handle list
 /// lets nothing else through), no window, detached, out of the app's job: a job that refuses breakaway makes this fail, and then the
 /// host is not started at all. The process handle on success.
@@ -611,7 +611,7 @@ fn spawn(me: &Me) -> Option<isize> {
 
 #[cfg(test)]
 mod tests {
-    //! Section 2.5 item 3 (contract section 3 item 10): a test server impersonates a client opened with the production `open`, and the
+    //! §5.5 item 3 (§5.11 item 10): a test server impersonates a client opened with the production `open`, and the
     //! impersonation level it gets is `SecurityIdentification`.
     use super::open;
     use crate::pipeio::{self, Pipe};

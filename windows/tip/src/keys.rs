@@ -8,7 +8,7 @@ pub const MOD_SHIFT: u32 = 1;
 pub const MOD_CONTROL: u32 = 2;
 pub const MOD_CAPS: u32 = 16;
 
-/// The `ShanjieKey` the host gets (win-resident.md section 2.3).
+/// The `ShanjieKey` the host gets (docs/spec/windows-tip.md §5.3).
 pub use shanjie_win_proto::Key;
 
 /// Modifier state read by the sink with `GetKeyState`.

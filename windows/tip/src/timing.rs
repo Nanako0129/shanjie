@@ -1,4 +1,4 @@
-//! The measurement file (docs/contracts/win-tip.md section 2.5, win-resident.md section 2.8). The line format is pure and always
+//! The measurement file (docs/spec/windows-tip.md §3.11 and §5.8). The line format is pure and always
 //! compiled; the file exists only with the cargo feature `timing`. Numbers only: `<event>\t<start>\t<end>\n`, microseconds of one
 //! `QueryPerformanceCounter` clock (the same clock in every process, so the DLL's and the host's times compare). Shared by the text
 //! service (`timing-<pid>.txt`) and the resident host (`host-<pid>.txt`, which includes this file by path): the event codes of both
@@ -7,12 +7,12 @@
 #![cfg_attr(not(feature = "timing"), allow(dead_code))]
 
 pub const EV_ACTIVATE: u32 = 1;
-/// The model load: written by the host only since win-resident (the DLL loads nothing).
+/// The model load: written by the host only since the resident host (§5; the DLL loads nothing).
 pub const EV_LOAD: u32 = 2;
 /// One key: in the DLL from entering `OnKeyDown` to the document edited; in the host from the key received to the answer sent.
 pub const EV_KEY: u32 = 3;
-/// Diagnostic events (contract section 2.5): a point in time (start = end) with a numeric reason, never any key or text.
-/// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the client is blocked (since win-resident: the circuit
+/// Diagnostic events (docs/spec/windows-tip.md §3.11): a point in time (start = end) with a numeric reason, never any key or text.
+/// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the client is blocked (since the resident host, §5: the circuit
 /// breaker, the permanent pass-through after `Refuse { 1 }`, the cool-down after `Refuse { 3 }`), the keyboard compartment is
 /// closed, or the context is disabled or empty. 47: ActivateEx could not advise its sinks. 48: ActivateEx in secure mode.
 pub const EV_TEST_INACTIVE: u32 = 41;
@@ -38,7 +38,7 @@ pub const EV_KD_CLOSED: u32 = 53;
 pub const EV_KD_CONTEXT: u32 = 54;
 pub const EV_KD_UNMAPPED: u32 = 55;
 pub const EV_REOPENED: u32 = 56;
-/// win-resident.md section 2.8. 60: the DLL waited for the host's answer to a key (start = sent, end = received). 61: the DLL's
+/// docs/spec/windows-tip.md §5.8. 60: the DLL waited for the host's answer to a key (start = sent, end = received). 61: the DLL's
 /// `CreateProcessW` of the host succeeded (start = end = now). 62: a timeout or a broken connection (both columns: the Win32 code).
 /// 63: the DLL passed a key through for a reason below (both columns: the reason). 64: the host accepted an AppContainer client
 /// (both columns 1). 65: the host's number of simultaneous connections reached a new high (both columns: that number).
@@ -65,7 +65,7 @@ pub mod pass {
     pub const PIPE_BUSY: u64 = 6;
     pub const NOT_READY: u64 = 7;
     pub const BUSY: u64 = 8;
-    /// The server check of section 2.5 item 1 failed.
+    /// The server check of §5.5 item 1 failed.
     pub const SERVER_CHECK: u64 = 9;
     pub const REFUSE_PROTO: u64 = 10;
     pub const REFUSE_LIMIT: u64 = 11;

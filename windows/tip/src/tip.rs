@@ -1,6 +1,6 @@
-//! The text service object (docs/contracts/win-tip.md section 2.2): activation, the key sink, the focus sinks and the composition sink.
+//! The text service object (docs/spec/windows-tip.md §3.5): activation, the key sink, the focus sinks and the composition sink.
 //! One instance per UI thread. The core, in the resident host, decides what a key does (`client` carries it there and back,
-//! win-resident.md); this file maps keys in, applies the answer to the document (`doc`), and ends compositions in time.
+//! docs/spec/windows-tip.md §5); this file maps keys in, applies the answer to the document (`doc`), and ends compositions in time.
 use crate::client::{self, Reply};
 use crate::display::{DisplayEnum, DisplayInfo};
 use crate::doc::{self, Comp, CompSlot};
@@ -68,8 +68,8 @@ impl Drop for TextService {
     }
 }
 
-/// The context as this connection names it to the host: its pointer value. The host pairs it with the connection (win-resident.md
-/// section 2.3), so it needs no thread id and means nothing on any other connection.
+/// The context as this connection names it to the host: its pointer value. The host pairs it with the connection (docs/spec/windows-tip.md
+/// §5.3), so it needs no thread id and means nothing on any other connection.
 fn ctx_id(ctx: &ITfContext) -> u64 {
     ctx.as_raw() as usize as u64
 }
@@ -110,7 +110,7 @@ struct Outcome {
 }
 
 impl TextService_Impl {
-    /// A COM method body: panics become a bare failure code, the host is told to reset and the composition object dropped (section 2.2).
+    /// A COM method body: panics become a bare failure code, the host is told to reset and the composition object dropped (docs/spec/windows-tip.md §3.9).
     fn guarded<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         guard::com_with(f, || drop(self.comp.try_borrow_mut().map(|mut c| c.take())))
     }
@@ -141,7 +141,7 @@ impl TextService_Impl {
                 timing::diag(timing::EV_ACTIVATE_SECURE);
                 return Ok(());
             }
-            // No connection here: the first key opens it (win-resident.md section 2.4).
+            // No connection here: the first key opens it (docs/spec/windows-tip.md §5.4).
             if let Err(e) = self.advise(&mgr, tid) {
                 self.unadvise();
                 timing::diag(timing::EV_ACTIVATE_ADVISE_FAILED);
@@ -275,7 +275,7 @@ impl TextService_Impl {
             timing::diag(timing::EV_TEST_INACTIVE);
             return Ok(false);
         }
-        // Section 2.4: the connection is not looked at here, only the three blocks (else explorer, which asks this first, would never
+        // §5.4: the connection is not looked at here, only the three blocks (else explorer, which asks this first, would never
         // reach OnKeyDown and never start the host).
         if client::blocked() {
             timing::diag(timing::EV_TEST_UNUSABLE);
@@ -338,7 +338,7 @@ impl TextService_Impl {
             let out = match client::key(me, k, composing) {
                 Reply::Out(o) => o,
                 Reply::Pass => {
-                    // win-resident.md section 2.6, first row: with a composition open, the host's state for it is gone or out of reach.
+                    // docs/spec/windows-tip.md §5.6, first row: with a composition open, the host's state for it is gone or out of reach.
                     // The composition ends here (underline off, the text stays) and the key is eaten. Without one the key goes to the app.
                     let open = svc.comp.borrow_mut().take();
                     if let Some(c) = open {

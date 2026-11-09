@@ -141,12 +141,12 @@ jobs:
       - name: Tests (debug, cli unit tests)
         run: cargo test --locked -p cli --lib --bins
 
-      # docs/contracts/win-resident.md section 2.10: the wire format of the Windows client and host is plain Rust and is tested on every
+      # docs/spec/windows-tip.md §5.10: the wire format of the Windows client and host is plain Rust and is tested on every
       # platform (macOS runs it in the `core` job's workspace test, Windows in the `windows` job).
       - name: Tests (debug, Windows wire format)
         run: cargo test --locked -p shanjie-win-proto
 
-      # docs/contracts/win-core.md section 2.3: the Linux side of the Windows comparison. The evaluation CLI in release, the six rowstats
+      # docs/spec/windows-tip.md §2.9: the Linux side of the Windows comparison. The evaluation CLI in release, the six rowstats
       # (dev302, the typing test and the user-reported rows, chat and formal) with the shipping flags, and the files as an artifact for the
       # `windows` job to compare byte for byte (scripts/ci-rowstats.sh is the one copy of the six commands). Both sides run Rust 1.97.1.
       - name: Evaluation CLI (release)
@@ -247,10 +247,10 @@ jobs:
           cargo build --locked -p core --target i686-pc-windows-msvc
           cargo build --locked -p core --target aarch64-pc-windows-msvc
 
-      # docs/contracts/win-tip.md section 2.7 and win-resident.md section 2.10: the text service DLL and the resident host build (each without
+      # docs/spec/windows-tip.md §3.13 and §5.10: the text service DLL and the resident host build (each without
       # and with the `timing` feature), then the tests of the three Windows crates run: the wire format, the client's impersonation level,
       # the host against a real server and engine (two connections, the rate limit), and the R2 behaviour tests of the DLL and the host.
-      # COM, TSF and the apps are covered by the VM run of win-resident.md section 3, not here. The timing builds come first, so the
+      # COM, TSF and the apps are covered by the VM run of docs/spec/windows-tip.md §5.11, not here. The timing builds come first, so the
       # binaries checked below are the builds without timing.
       - name: shanjie-tip and shanjie-host builds (release, with and without timing)
         run: |
@@ -260,7 +260,7 @@ jobs:
           cargo build --release --locked -p shanjie-tip
           cargo build --release --locked -p shanjie-host
 
-      # win-resident.md section 2.10: neither binary imports a C runtime DLL (static CRT, win-tip.md section 2.1); the DLL exports no
+      # docs/spec/windows-tip.md §5.10: neither binary imports a C runtime DLL (static CRT, §3.1); the DLL exports no
       # `shanjie_` symbol and `cargo tree` shows no `core` under it (the core would be linked statically, so the import table could not
       # show it). The DLL's size is printed.
       - name: shanjie-tip and shanjie-host binaries

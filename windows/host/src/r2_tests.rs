@@ -1,4 +1,4 @@
-//! R2 behaviour test of the host (docs/contracts/win-resident.md section 2.5 item 6: the text service's r2_tests.rs, for the host's
+//! R2 behaviour test of the host (docs/spec/windows-tip.md §5.5 item 6: the text service's r2_tests.rs, for the host's
 //! connection wrapper).
 //!
 //! The child installs nothing: the production wrapper (`guard::run`, which every connection runs in) must install the silent hook

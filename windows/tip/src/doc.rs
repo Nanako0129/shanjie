@@ -54,7 +54,7 @@ pub fn request(ctx: &ITfContext, tid: u32, flags: TF_CONTEXT_EDIT_CONTEXT_FLAGS,
     session_hr.ok()
 }
 
-/// Section 2.2: the underline attribute goes before `EndComposition`, on every path that ends a composition.
+/// docs/spec/windows-tip.md §3.8: the underline attribute goes before `EndComposition`, on every path that ends a composition.
 fn clear_attr(ec: u32, ctx: &ITfContext, range: &ITfRange) {
     // SAFETY: live interfaces; failures are ignored (the text is what matters).
     unsafe {
@@ -134,7 +134,7 @@ fn ending(ec: u32, c: &Comp, f: impl FnOnce() -> Result<()>) -> Result<()> {
     r
 }
 
-/// `OnKeyDown` step 3 (section 2.2), in this order: `commit` replaces the composition range (or goes in at the selection) and ends the
+/// `OnKeyDown` step 3 (docs/spec/windows-tip.md §3.7), in this order: `commit` replaces the composition range (or goes in at the selection) and ends the
 /// composition; `preedit` starts or continues one, with the underline and the caret; nothing at all with a composition open empties the
 /// range first and then ends it. A composition that stays in `slot` when this fails is ended by the caller.
 pub fn apply(ec: u32, ctx: &ITfContext, slot: &CompSlot, sink: &ITfCompositionSink, atom: u32, out: &Out) -> Result<()> {

@@ -1,4 +1,4 @@
-//! Token facts both ends check (docs/contracts/win-resident.md sections 2.2 and 2.5): the user, the logon session, the integrity
+//! Token facts both ends check (docs/spec/windows-tip.md §5.2 and §5.5): the user, the logon session, the integrity
 //! level, AppContainer, restricted, elevated. Shared by the text service and the resident host (the host includes this file by path,
 //! so it refers to nothing else in either crate). Any query that fails makes `facts` `None`: callers refuse, never assume.
 use windows::core::PWSTR;
@@ -65,7 +65,7 @@ pub unsafe fn sid_bytes(sid: PSID) -> Option<Vec<u8>> {
     }
 }
 
-/// Everything sections 2.2 and 2.5 check about a token opened with `TOKEN_QUERY`.
+/// Everything §5.2 and §5.5 check about a token opened with `TOKEN_QUERY`.
 pub fn facts(t: HANDLE) -> Option<Facts> {
     let user = info(t, TokenUser)?;
     let label = info(t, TokenIntegrityLevel)?;

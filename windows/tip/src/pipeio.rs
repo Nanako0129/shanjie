@@ -1,4 +1,4 @@
-//! Overlapped pipe I/O with deadlines (docs/contracts/win-resident.md section 2.4), shared by the text service and the resident host
+//! Overlapped pipe I/O with deadlines (docs/spec/windows-tip.md §5.4), shared by the text service and the resident host
 //! (the host includes this file by path). A wait that runs out cancels the operation with `CancelIoEx` and then waits for the
 //! cancellation to complete (`GetOverlappedResult` with bWait = TRUE) before the `OVERLAPPED` and the buffer go out of scope. Waits are
 //! never alertable and pump no messages. Errors are Win32 codes only (numbers, R2).
@@ -128,7 +128,7 @@ impl Pipe {
         Ok(())
     }
 
-    /// One whole message: the four length bytes are checked (section 2.3) before the rest is allocated and read.
+    /// One whole message: the four length bytes are checked (§5.3) before the rest is allocated and read.
     pub fn read_frame(&self, deadline: Option<Instant>) -> Result<Vec<u8>, u32> {
         let mut prefix = [0u8; 4];
         self.read_exact(&mut prefix, deadline)?;

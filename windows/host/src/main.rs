@@ -1,4 +1,4 @@
-//! `shanjie-host.exe`, the resident host (docs/contracts/win-resident.md): one per user and logon session, the only process that loads
+//! `shanjie-host.exe`, the resident host (docs/spec/windows-tip.md §5): one per user and logon session, the only process that loads
 //! the models and holds an engine. The text service DLL in every app is its client over a named pipe. Windows only; on other targets an
 //! empty binary. R2: no composition, commit, candidate or key reaches a log, a file, an error or `OutputDebugString`; the only file is
 //! the numbers-only timing file (`timing` feature).
