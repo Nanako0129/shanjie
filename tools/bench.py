@@ -5,7 +5,7 @@
   tools/bench.py reference [--private-root DIR]
   tools/bench.py check-static [--json FILE]
   tools/bench.py run --suite v2 <ref>... [--as VERSION] [--override-packs off] [--private-root DIR] [--legacy-repo PATH]   (docs/spec/evaluation.md §7)
-  tools/bench.py table
+  tools/bench.py table [--md FILE]
 
 `run` exports each ref with `git archive`, builds its CLI and the key replay, scores the frozen suite with that
 version's own CLI (always `--rows`, never `--dev`), compares with the previous row and writes
@@ -13,8 +13,10 @@ eval/bench/results/<label>.json. A ref that names a version released before this
 the legacy clone given by --legacy-repo (or SHANJIE_LEGACY_REPO) at the commit the table names, never from this repository. `reference` (docs/spec/evaluation.md §7.8) scores the CURRENT checkout's unigram decoder on the base
 lexicon only (`--no-overlay`, no --lm) into eval/bench/results/reference-mcbpmf.json, recomputing only when the commit or a
 fingerprint changed. `check-static` verifies that eval/bench/static/typing-test.json is consistent with itself (docs/spec/evaluation.md §7.8).
-`table` regenerates docs/benchmark.md from every results JSON (version rows), the reference row and the static section, and
-writes the public-set part of the same data to site/data/bench.json (docs/spec/evaluation.md §7.11).
+`table` writes the public-set part of every results JSON (version rows), the reference row and the static section to
+site/data/bench.json, which the site's /benchmark page draws (docs/spec/evaluation.md §7.11), and the full markdown table of the same
+data (private sets included) to --md FILE or $SHANJIE_TABLES/benchmark.md, never inside this repository; without either it writes
+only the JSON.
 `run --suite v2` measures each version with its shipped settings (VERSIONS2) and writes eval/bench/results/v2-<label>.json;
 `table` appends the suite-v2 section after the suite-v1 text (which stays byte for byte the same).
 Never reads eval/holdout/. Every private path is derived from --private-root.
@@ -616,7 +618,7 @@ def cmd_check_static(args):
     sys.exit(1 if errs else 0)
 
 
-# ---------- docs/benchmark.md ----------
+# ---------- the full markdown table (written outside this repository, see md_path) ----------
 def pct(r):
     if "error" in r:
         return "失敗：" + r["error"].replace("|", "/").replace("\n", " ")[:200]
@@ -833,16 +835,40 @@ def write_json(path, data):
         f.write(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
 
 
-def cmd_table(_):
+def md_path(arg, name, who="bench"):
+    """Where `table` writes a full markdown table (private sets included): `arg` (--md / --out), else $SHANJIE_TABLES/<name>,
+    else None (stderr says so). A path inside this repository is refused before anything is written: the full tables carry
+    private-set numbers and stay out of the public repository (docs/spec/evaluation.md §7.11)."""
+    tables = os.environ.get("SHANJIE_TABLES")
+    p = arg or (os.path.join(tables, name) if tables else None)
+    if p is None:
+        print(f"{who}: {name} not written: pass the file or set SHANJIE_TABLES (the full table stays out of this repository)", file=sys.stderr)
+        return None
+    p, root = os.path.realpath(p), os.path.realpath(ROOT)
+    if os.path.commonpath([p, root]) == root:
+        print(f"{who}: {p} is inside this repository: the full table carries private-set numbers and stays out of it; "
+              "write it elsewhere (--md / --out FILE or SHANJIE_TABLES)", file=sys.stderr)
+        sys.exit(1)
+    return p
+
+
+def write_md(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def cmd_table(a):
+    md = md_path(getattr(a, "md", None), "benchmark.md")
     load = lambda p: json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
     results = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if is_v1_file(f)]
     v2 = [json.load(open(os.path.join(RESULTS, f), encoding="utf-8")) for f in sorted(os.listdir(RESULTS)) if f.startswith("v2-") and f.endswith(".json")]
     ext = [json.load(open(os.path.join(EXTERNAL, f), encoding="utf-8")) for f in sorted(os.listdir(EXTERNAL)) if f.endswith(".json")] \
         if os.path.isdir(EXTERNAL) else []
     ref, static = load(os.path.join(RESULTS, REFERENCE)), load(STATIC)
-    text = render_table(results, ref, static)
-    open(os.path.join(ROOT, "docs/benchmark.md"), "w", encoding="utf-8").write(text + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else ""))
     write_json(os.path.join(ROOT, "site/data/bench.json"), site_bench(results, ref, static, v2, ext))
+    if md:
+        write_md(md, render_table(results, ref, static) + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else ""))
 
 
 # ---------- suite v2 (docs/spec/evaluation.md §7): each version with its shipped settings ----------
@@ -1339,7 +1365,8 @@ def main():
     r.add_argument("--as", dest="as_", help="suite v2: settings-table version for the last ref (a commit without a tag yet)")
     r.add_argument("--override-packs", choices=["off"], help="suite v2: drop --packs acg and check S7h's anchor (nothing is written)")
     add_legacy_arg(r)
-    sub.add_parser("table")
+    t = sub.add_parser("table")
+    t.add_argument("--md", help="where to write the full table (default $SHANJIE_TABLES/benchmark.md; never inside this repository)")
     rf = sub.add_parser("reference")
     rf.add_argument("--private-root", default=DEFAULT_PRIVATE)
     cs = sub.add_parser("check-static")

@@ -792,14 +792,14 @@ class SuiteV2(Tmp):
                  "accuracy": {"dev302/chat": cell, "discordtune/chat": {"missing": True}}, "vs_prev": {"dev302/chat": {"fixed": 3, "broken": 1, "p": 0.625}},
                  "speed": dict(speed, rerank_p50_ms=7.0, rerank_p95_ms=12.0, formal=dict(speed, rss_mb=170)), "holdout": {"commit": "e" * 40, "chat": {"n": 227, "top1": 191, "fixed": 11, "broken": 0, "p": 0.001}}}]
         v2 = {"label": "v0.4.0+v0.4.1", "suite": "v2", "date": "2026-10-13", "env": env, "versions": recs}
-        out = os.path.join(bench.ROOT, "docs/benchmark.md")
+        out = os.path.join(self.td, "benchmark.md")   # the full table goes outside the repository
         with open(os.path.join(bench.RESULTS, "2026-10-05-baseline.json"), "w") as f:
             json.dump(v1, f)
-        bench.cmd_table(None)
+        bench.cmd_table(argparse.Namespace(md=out))
         before = open(out, encoding="utf-8").read()
         with open(os.path.join(bench.RESULTS, "v2-v0.4.0+v0.4.1.json"), "w") as f:
             json.dump(v2, f)
-        bench.cmd_table(None)
+        bench.cmd_table(argparse.Namespace(md=out))
         after = open(out, encoding="utf-8").read()
         self.assertTrue(after.startswith(before))
         self.assertEqual(after.count("\n## "), before.count("\n## ") + 1)
@@ -813,7 +813,7 @@ class SuiteV2(Tmp):
         self.assertIn("| v0.4.1 書面 | 2026-10-13 | 同上 | 1.000 ms | 2.00 ms | 5 ms | 170 MB | 99 | 302/302 |", tail)  # the formal replay row
         self.assertIn("| v0.4.0 書面 | 2026-10-13 | 同上 | — | — |", tail)  # a result without one: "—"
         self.assertNotIn("v0.4.1", before)
-        bench.cmd_table(None)  # deterministic
+        bench.cmd_table(argparse.Namespace(md=out))  # deterministic
         self.assertEqual(open(out, encoding="utf-8").read(), after)
 
     def test_holdout_numbers_stay_in_their_own_set_column(self):
@@ -852,7 +852,7 @@ PRIVATE_WORDS = ("discordtune", "cvtune", "wikitune", "lytune", "newstune", "cha
 
 
 class SiteData(Tmp):
-    """`table` writes docs/benchmark.md and site/data/bench.json from one read of the same files; the JSON holds public sets only."""
+    """`table` writes the full table (outside the repository) and site/data/bench.json from one read of the same files; the JSON holds public sets only."""
 
     def setUp(self):
         super().setUp()
@@ -891,8 +891,41 @@ class SiteData(Tmp):
             json.dump(data, f, ensure_ascii=False)
 
     def table(self):
-        bench.cmd_table(None)
-        return (open(os.path.join(bench.ROOT, "docs/benchmark.md"), "rb").read(), open(os.path.join(bench.ROOT, "site/data/bench.json"), "rb").read())
+        md = os.path.join(self.td, "tables", "benchmark.md")
+        bench.cmd_table(argparse.Namespace(md=md))
+        return (open(md, "rb").read(), open(os.path.join(bench.ROOT, "site/data/bench.json"), "rb").read())
+
+    def written(self):
+        return sorted(os.path.relpath(os.path.join(d, f), self.td) for d, _, fs in os.walk(self.td) for f in fs if f.endswith((".md", "bench.json")))
+
+    def test_without_a_path_only_the_json_is_written(self):
+        err = io.StringIO()
+        with mock.patch.dict(os.environ), contextlib.redirect_stderr(err):
+            os.environ.pop("SHANJIE_TABLES", None)
+            bench.cmd_table(argparse.Namespace(md=None))
+        self.assertEqual(self.written(), ["root/site/data/bench.json"])
+        self.assertIn("benchmark.md not written", err.getvalue())
+
+    def test_shanjie_tables_names_the_folder(self):
+        d = os.path.join(self.td, "tables")   # does not exist yet: table creates it
+        with mock.patch.dict(os.environ, {"SHANJIE_TABLES": d}):
+            bench.cmd_table(argparse.Namespace(md=None))
+        self.assertEqual(self.written(), ["root/site/data/bench.json", "tables/benchmark.md"])
+
+    def test_a_path_inside_the_repository_is_refused_before_anything_is_written(self):
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(bench.ROOT)   # the relative path below resolves inside the repository
+        for md, env in ((os.path.join(bench.ROOT, "docs/benchmark.md"), None), ("docs/benchmark.md", None), (None, bench.ROOT)):
+            with self.subTest(md=md, env=env), mock.patch.dict(os.environ), contextlib.redirect_stderr(io.StringIO()) as err:
+                os.environ.pop("SHANJIE_TABLES", None)
+                if env:
+                    os.environ["SHANJIE_TABLES"] = env
+                with self.assertRaises(SystemExit) as cm:
+                    bench.cmd_table(argparse.Namespace(md=md))
+                self.assertEqual(cm.exception.code, 1)
+                self.assertIn("inside this repository", err.getvalue())
+                self.assertEqual(self.written(), [])   # not even the JSON
 
     def test_two_runs_are_byte_identical(self):
         a = self.table()
