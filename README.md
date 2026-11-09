@@ -1,6 +1,6 @@
-# 善解 shanjie
+# 善解輸入法 shanjie
 
-以「選字正確」為第一優先的開源 macOS 注音輸入法（持續開發中）。
+以「選字正確」為第一優先的開源 macOS 注音輸入法（持續開發中）。網站：https://shanjie.nyanako.com （介紹、安裝與更新紀錄）
 
 - 規格：`docs/spec/`（現在的行為）
 - 授權：程式碼 Apache-2.0（`LICENSE`）；App 內含的 Sparkle（自動更新）是 MIT（`LICENSES/Sparkle-MIT.txt`，含它附帶的第三方授權）；資料見 `LICENSES/data.md`
