@@ -9,7 +9,8 @@ cask "shanjie" do
   homepage "https://shanjie.nyanako.com/"
 
   # The input method updates itself with Sparkle (docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4).
-  # What a plain `brew upgrade` then does with this cask is to be measured; naming it upgrades it (documented for auto_updates):
+  # What a plain `brew upgrade` then does with this cask is to be measured;
+  # naming it upgrades it (documented for auto_updates):
   # `brew upgrade --cask nanako0129/tap/shanjie`.
   auto_updates true
   depends_on arch: :arm64
