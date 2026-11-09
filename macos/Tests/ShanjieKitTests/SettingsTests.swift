@@ -18,19 +18,19 @@ final class SettingsTests: XCTestCase {
         var model: SettingsModel
         var controller: Controller
         var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore, english: MemoryEnglishStore
-        var acg: MemoryAcgPackStore, quote: MemoryQuotePackStore, tint: MemoryGlassTintStore
+        var acg: MemoryAcgPackStore, quote: MemoryQuotePackStore, tint: MemoryGlassTintStore, beauty: MemoryBeautyPackStore
         var dialogs: FakeDialogs
     }
 
     private func rig(secure: Bool = false, learning: URL? = nil, savedQuote: Bool? = nil) -> Rig {
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
-        let acg = MemoryAcgPackStore(), quote = MemoryQuotePackStore(savedQuote), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (docs/spec/english-mixed.md §1.1, §11), the tests below start from off
+        let acg = MemoryAcgPackStore(), quote = MemoryQuotePackStore(savedQuote), beauty = MemoryBeautyPackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (docs/spec/english-mixed.md §1.1, §11), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
-                          acgPackStore: acg, quotePackStore: quote, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+                          acgPackStore: acg, quotePackStore: quote, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), beautyPackStore: beauty)
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
-                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, quote: quote, tint: tint, dialogs: dialogs)
+                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, quote: quote, tint: tint, beauty: beauty, dialogs: dialogs)
     }
 
     private func item(_ r: Rig, _ a: MenuEntry.Action) -> MenuEntry? { r.controller.session.menu.first { $0.action == a } }
@@ -240,27 +240,27 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.model.acgPack, "the model did not follow the menu")
     }
 
-    /// docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2, §7.3: an unset `quotePack` is off, so the mask handed to `shanjie_engine_new_packs` is the ACG and IT bits (1 | 4 = 5);
-    /// the toggle stores `true`, rebuilds the engine, and adds bit1 (7). The three switches are independent bits of one mask.
+    /// docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2, §7.3: an unset `quotePack` is off, so the mask handed to `shanjie_engine_new_packs` is the ACG, IT and beauty bits (1 | 4 | 16 = 21);
+    /// the toggle stores `true`, rebuilds the engine, and adds bit1 (23). The switches are independent bits of one mask.
     func testQuotePackIsOffUntilChosenAndTheMaskFollowsTheSwitches() {
         let r = rig()
         XCTAssertNil(r.quote.quotePack)
         XCTAssertFalse(r.model.quotePack)
-        XCTAssertEqual(r.shell.packMask, 5, "an unset quotePack must leave the mask at the ACG and IT bits")
+        XCTAssertEqual(r.shell.packMask, 21, "an unset quotePack must leave the mask at the ACG, IT and beauty bits")
         let before = r.shell.engine
         r.model.setQuotePack(true)
         XCTAssertEqual(r.quote.quotePack, true)
         XCTAssertTrue(r.model.quotePack)
         XCTAssertTrue(r.shell.engine !== before, "no rebuild")
-        XCTAssertEqual(r.shell.packMask, 7)
+        XCTAssertEqual(r.shell.packMask, 23)
         r.model.setAcgPack(false)
-        XCTAssertEqual(r.shell.packMask, 6, "the ACG switch must not take the quote bit with it")
+        XCTAssertEqual(r.shell.packMask, 22, "the ACG switch must not take the quote bit with it")
         let again = r.shell.engine
         r.model.setQuotePack(true)
         XCTAssertTrue(r.shell.engine === again, "the same value must not rebuild")
         r.model.setQuotePack(false)
         XCTAssertEqual(r.quote.quotePack, false)
-        XCTAssertEqual(r.shell.packMask, 4, "the IT bit stays")
+        XCTAssertEqual(r.shell.packMask, 20, "the IT and beauty bits stay")
     }
 
     /// docs/spec/lexicon-and-packs.md §7.3, through the shipping path (Shell, then `shanjie_engine_new_packs`): a synthetic row in `packs/quotes-add.tsv`
@@ -302,6 +302,43 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(r.shell.engine !== before, "no rebuild")
         r.controller.session.perform(.toggleItPack)
         XCTAssertTrue(r.model.itPack, "the model did not follow the menu")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.2, §8.3: `beautyPack` never set is on (the mask has SHANJIE_PACK_BEAUTY, 16), the window switch stores the choice, rebuilds the engine and takes only its own bit,
+    /// the menu line follows (the fixture has no other pack file), and the typed result changes: the fixture row is the first candidate only while the switch is on.
+    func testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try TestData.beautyPackRow.write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8)
+        let typed = { (r: Rig) -> String in
+            r.controller.session.activate()
+            r.controller.type(TestData.beautyPackKeys)
+            let marked = r.controller.client.marked
+            r.controller.press(Keys.esc)
+            return marked
+        }
+        let r = rig()
+        let before = r.shell.engine
+        let line = { r.controller.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        XCTAssertNil(r.beauty.beautyPack)
+        XCTAssertTrue(r.model.beautyPack, "default on")
+        XCTAssertEqual(r.shell.packMask & CoreEngine.packBeauty, CoreEngine.packBeauty, "an unset beautyPack is in the mask")
+        XCTAssertEqual(line(), "已開啟的詞包：美妝與保養詞")
+        XCTAssertEqual(typed(r), "碧莉菁華")
+        r.model.setBeautyPack(false)
+        XCTAssertEqual(r.beauty.beautyPack, false)
+        XCTAssertFalse(r.model.beautyPack)
+        XCTAssertTrue(r.shell.engine !== before, "no rebuild")
+        XCTAssertEqual(r.shell.packMask & CoreEngine.packBeauty, 0, "off: the bit is gone")
+        XCTAssertEqual(r.shell.packMask, 5, "the ACG and IT bits stay")
+        XCTAssertNil(line(), "the menu line follows the switch")
+        XCTAssertNotEqual(typed(r), "碧莉菁華", "off: the base lexicon cannot spell the word")
+        let again = r.shell.engine
+        r.model.setBeautyPack(false)
+        XCTAssertTrue(r.shell.engine === again, "the same value must not rebuild")
+        r.model.setBeautyPack(true)
+        XCTAssertEqual(r.beauty.beautyPack, true)
+        XCTAssertEqual(typed(r), "碧莉菁華", "on again")
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2: the window shows the grey data-date line under the switch, also with the pack off; the menu does not.

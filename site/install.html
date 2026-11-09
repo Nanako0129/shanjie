@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安裝：macOS 安裝程式、Homebrew、更新與移除｜善解輸入法</title>
+<meta name="description" content="在 macOS 26（Apple 晶片）安裝善解：下載安裝程式照四步完成，或用 Homebrew；加入輸入方式、自動更新、換安裝方式、解除安裝與資料位置。">
+<meta property="og:title" content="安裝：macOS 安裝程式、Homebrew、更新與移除｜善解輸入法">
+<meta property="og:description" content="在 macOS 26（Apple 晶片）安裝善解：下載安裝程式照四步完成，或用 Homebrew；加入輸入方式、自動更新、換安裝方式、解除安裝與資料位置。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/install">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="安裝：macOS 安裝程式、Homebrew、更新與移除｜善解輸入法">
+<meta name="twitter:description" content="在 macOS 26（Apple 晶片）安裝善解：下載安裝程式照四步完成，或用 Homebrew；加入輸入方式、自動更新、換安裝方式、解除安裝與資料位置。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/install">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "安裝", "item": "https://shanjie.nyanako.com/install"}]}</script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install" aria-current="page">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>安裝善解輸入法</h1>
+<p class="sub">需要 macOS 26（Tahoe）以上、Apple 晶片。善解是開源軟體（Apache-2.0），除了檢查更新不連網。</p>
+
+<ul class="toc" aria-label="本頁目錄">
+  <li><a href="#download">安裝程式</a></li><li><a href="#homebrew">Homebrew</a></li><li><a href="#first-use">第一次使用</a></li>
+  <li><a href="#update">更新</a></li><li><a href="#switch">換安裝方式</a></li><li><a href="#uninstall">解除安裝</a></li>
+</ul>
+
+<h2 id="download">安裝程式（推薦）</h2>
+<p>到 GitHub Releases 下載 <code>shanjie-installer</code> 開頭的 zip，解壓縮後打開「安裝善解輸入法」，照四個步驟：歡迎、安裝、到系統設定加入、試打。</p>
+<div class="actions"><a class="btn primary" href="https://github.com/Nanako0129/shanjie/releases/latest">到 GitHub Releases 下載最新版</a></div>
+<p>歡迎頁有兩個並列的選項，沒有預設：</p>
+<div class="table">
+<table>
+<thead><tr><th></th><th>這台 Mac</th><th>只有我的帳號</th></tr></thead>
+<tbody>
+<tr><th>位置</th><td><code>/Library/Input Methods</code>，檔案由系統保護</td><td><code>~/Library/Input Methods</code></td></tr>
+<tr><th>安全輸入</th><td>有程式開著安全輸入時（密碼管理器、終端機的「加密的鍵盤輸入」），善解照常能用</td><td>系統會暫時停用善解</td></tr>
+<tr><th>安裝與更新</th><td>各要輸入一次管理員密碼</td><td>不需要密碼、一鍵更新</td></tr>
+<tr><th>其他帳號</th><td>都能用</td><td>看不到</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響；換了位置之後要登出再登入一次。第一次裝給這台 Mac 時，登入後還要到系統設定加入，安裝程式最後一頁會寫步驟。</p>
+
+<h2 id="homebrew">Homebrew</h2>
+<p>Homebrew 只裝在你的帳號。</p>
+<pre><code>brew install --cask nanako0129/tap/shanjie
+"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install</code></pre>
+<p>第二行在系統還不認得善解時註冊並啟用輸入方式；已經啟用的話什麼都不改。結束碼是 3 時，表示系統還沒接受：到「系統設定 → 鍵盤 → 輸入方式」按「+」，選「繁體中文」裡的「善解輸入法」，按「加入」。</p>
+
+<h2 id="first-use">第一次使用</h2>
+<ul>
+<li>在選單列的輸入法選單選「善解輸入法」。選單裡找不到時，到「系統設定 → 鍵盤 → 輸入方式」按「+」，在「繁體中文」裡加入「善解輸入法」。</li>
+<li>標準／倚天鍵盤在善解自己的選單裡切換。</li>
+<li>選單裡的「善解設定…」打開設定視窗：選單上的各項設定都能在裡面改，另外有候選窗的方向（橫排或直排）與玻璃深淺。</li>
+<li>怎麼打字、每個功能的預設值與開關，見<a href="/guide">使用說明</a>。</li>
+</ul>
+
+<h2 id="update">更新</h2>
+<p>設定的「關於」頁有版本、內附模型的列表、「自動檢查更新」（預設開）與「立即檢查」。開著時善解每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本時，「關於」頁多一顆「更新到 X」、輸入選單多一項「有新版本 X，按此更新…」，按下才下載，安裝前驗證簽章。善解不會自己跳出視窗，也不會沒經過你按下就安裝。連線的細節見<a href="/privacy#update-check">隱私與資料</a>。</p>
+<ul>
+<li>v0.4.6 以前的版本還沒有自動更新，要照當初安裝的方式手動升級一次：安裝程式重新裝，或 <code>brew upgrade --cask nanako0129/tap/shanjie</code>（要指名，一般的 <code>brew upgrade</code> 可能略過這個 cask）。</li>
+<li>選字記憶和設定放在 App 外面，升級不會動到。</li>
+<li>升級後選單裡找不到善解時，到「系統設定 → 鍵盤 → 輸入方式」把它加回來。</li>
+<li>更新後如果某個 App 打不出字，把那個 App 完全結束（<kbd>⌘</kbd><kbd>Q</kbd>）再打開。</li>
+</ul>
+
+<h2 id="switch">換安裝方式</h2>
+<p>兩種方式不要混用。從 Homebrew 換成安裝程式，先執行：</p>
+<pre><code>brew uninstall --cask nanako0129/tap/shanjie</code></pre>
+<p>從安裝程式換成 Homebrew，先刪掉 <code>~/Library/Input Methods/善解輸入法.app</code>；裝給「這台 Mac」的那份要用管理員刪（見下面的解除安裝）。</p>
+
+<h2 id="uninstall">解除安裝與資料位置</h2>
+<p>只有我的帳號：</p>
+<pre><code>rm -rf "$HOME/Library/Input Methods/善解輸入法.app" "$HOME/Library/Input Methods/.shanjie-previous"</code></pre>
+<p>這台 Mac（要管理員）：</p>
+<pre><code>sudo rm -rf "/Library/Input Methods/善解輸入法.app" "/Library/Input Methods/.shanjie-previous"</code></pre>
+<p>學習資料與設定在每個帳號自己的沙盒資料夾，用過善解的每個帳號各自刪：</p>
+<pre><code>rm -rf "$HOME/Library/Containers/com.nyanako.inputmethod.shanjie"</code></pre>
+<p>最後到「系統設定 → 鍵盤 → 輸入方式」把善解移除，登出再登入一次。</p>
+
+<p class="next"><a href="/guide">打字怎麼操作 →</a><a href="/faq">遇到狀況 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>

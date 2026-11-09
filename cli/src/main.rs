@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, format_rowstats, levenshtein, load_forms, load_lenient, read_rows, root, three_field_rows};
 use core::colloquial::{self, Colloquial};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
+use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
@@ -69,19 +69,26 @@ fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> 
     Ok(())
 }
 
-/// `--packs acg|quotes|it` or a comma list of them: sets the pack bits; anything else is refused.
+/// `--packs acg|quotes|it|beauty` or a comma list of them: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
     v.split(',').try_fold(0, |bits, name| match name {
         "acg" => Ok(bits | PACK_ACG),
         "quotes" => Ok(bits | PACK_QUOTES),
         "it" => Ok(bits | PACK_IT),
-        _ => Err("--packs takes acg, quotes, it or a comma list of them".to_string()),
+        "beauty" => Ok(bits | PACK_BEAUTY),
+        _ => Err("--packs takes acg, quotes, it, beauty or a comma list of them".to_string()),
     })
 }
 
-/// The summary line's pack marker: `+acg`, `+quotes`, `+it` in that order; nothing with no pack (the existing golden lines are untouched).
+/// The summary line's pack marker: `+acg`, `+quotes`, `+it`, `+beauty` in that order; nothing with no pack (the existing golden lines are untouched).
 fn pack_tag(packs: u32) -> String {
-    format!("{}{}{}", if packs & PACK_ACG != 0 { "+acg" } else { "" }, if packs & PACK_QUOTES != 0 { "+quotes" } else { "" }, if packs & PACK_IT != 0 { "+it" } else { "" })
+    format!(
+        "{}{}{}{}",
+        if packs & PACK_ACG != 0 { "+acg" } else { "" },
+        if packs & PACK_QUOTES != 0 { "+quotes" } else { "" },
+        if packs & PACK_IT != 0 { "+it" } else { "" },
+        if packs & PACK_BEAUTY != 0 { "+beauty" } else { "" }
+    )
 }
 
 /// The packs directory (`--packs-dir` or data/packs); a run that asks for a pack must fail loudly when its file is
@@ -1050,16 +1057,19 @@ mod tests {
         assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
     }
 
-    /// `--packs` takes acg, quotes, it and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.
+    /// `--packs` takes acg, quotes, it, beauty and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.
     #[test]
     fn packs_flag_takes_acg_quotes_it_and_lists() {
         assert_eq!(pack_flag("acg"), Ok(PACK_ACG));
         assert_eq!(pack_flag("quotes"), Ok(PACK_QUOTES));
         assert_eq!(pack_flag("it"), Ok(PACK_IT));
+        assert_eq!(pack_flag("beauty"), Ok(PACK_BEAUTY));
+        assert_eq!(pack_flag("acg,it,beauty"), Ok(PACK_ACG | PACK_IT | PACK_BEAUTY));
         assert_eq!(pack_flag("acg,it"), Ok(PACK_ACG | PACK_IT));
         assert_eq!(pack_flag("it,quotes,acg"), Ok(PACK_ACG | PACK_QUOTES | PACK_IT));
         assert!(pack_flag("").is_err() && pack_flag("quote").is_err() && pack_flag("acg,").is_err());
         assert_eq!((pack_tag(0), pack_tag(PACK_QUOTES), pack_tag(PACK_ACG | PACK_QUOTES | PACK_IT)), (String::new(), "+quotes".to_string(), "+acg+quotes+it".to_string()));
+        assert_eq!(pack_tag(PACK_ACG | PACK_IT | PACK_BEAUTY), "+acg+it+beauty");
         let dir = std::env::temp_dir().join(format!("shanjie-packs-flag-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("acg-add.tsv"), "").unwrap();
@@ -1067,6 +1077,8 @@ mod tests {
         assert!(packs_dir_checked(PACK_ACG, d()).is_ok());
         let e = packs_dir_checked(PACK_ACG | PACK_IT, d()).unwrap_err();
         assert!(e.contains("--packs it") && e.contains("it-add.tsv"), "{e}");
+        let e = packs_dir_checked(PACK_BEAUTY, d()).unwrap_err();
+        assert!(e.contains("--packs beauty") && e.contains("beauty-add.tsv"), "{e}");
         let e = packs_dir_checked(PACK_QUOTES, d()).unwrap_err();
         assert!(e.contains("--packs quotes") && e.contains("quotes-add.tsv"), "{e}");
         fs::remove_dir_all(&dir).unwrap();

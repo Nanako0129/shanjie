@@ -1,7 +1,7 @@
 #!/bin/bash
 # The six evaluation runs of docs/spec/windows-tip.md §2.9, one copy for the Linux `debug` job and the `windows` job so both run
 # the same commands: dev302, the typing test and the user-reported rows, each under the chat and the formal profile, with the shipping flags
-# (context, the acg and it packs, the small model; the chat runs add the colloquial table). One rowstats file per run goes to $1; ci.yml
+# of the Windows TIP (context, the acg and it packs it loads, the small model; the chat runs add the colloquial table). One rowstats file per run goes to $1; ci.yml
 # compares the Linux files with the Windows ones byte for byte. Needs the models in data/lm (scripts/fetch-models.sh) and the release CLI
 # (`cargo build --release --locked -p cli --bin shanjie-eval`). --threads does not change a byte of the output (cli/src/main.rs).
 set -euo pipefail

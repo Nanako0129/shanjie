@@ -32,6 +32,20 @@ final class SelftestTests: XCTestCase {
         XCTAssertNotEqual(Selftest.run(resources: res), 0)
     }
 
+    /// docs/spec/lexicon-and-packs.md §4.4, §8.3: the beauty pack ships on by default too, so a bundle without beauty-add.tsv, or with a broken one, fails the selftest.
+    func testFailsWithoutTheBundledBeautyPack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res, beautyPack: false)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
+    func testFailsWithACorruptBundledBeautyPack() throws {
+        let res = try XCTUnwrap(TestData.resources())
+        try TestData.addBundledPack(to: res)
+        try "not a row\n".write(to: res.appendingPathComponent("packs/beauty-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Selftest.run(resources: res), 0)
+    }
+
     func testFailsWithACorruptBundledPack() throws {
         let res = try XCTUnwrap(TestData.resources())
         let packs = res.appendingPathComponent("packs")

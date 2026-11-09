@@ -60,6 +60,8 @@ public final class SettingsModel: ObservableObject {
     /// 經典台詞 (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2): off until chosen.
     @Published public private(set) var quotePack = false
     @Published public private(set) var itPack = true
+    /// 美妝與保養詞 (docs/spec/lexicon-and-packs.md §4.2, §8.3): on until chosen otherwise.
+    @Published public private(set) var beautyPack = true
     /// 單按 Shift 切換中英 (docs/spec/keys-and-composition.md §9.1). Default false since docs/spec/english-mixed.md §10.1.
     @Published public private(set) var shiftToggle = false
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (docs/spec/lexicon-and-packs.md §4.5): the same text as the menu's, `nil` for no line.
@@ -120,6 +122,7 @@ public final class SettingsModel: ObservableObject {
         acgPack = shell.acgPackOn
         quotePack = shell.quotePackOn
         itPack = shell.itPackOn
+        beautyPack = shell.beautyPackOn
         shiftToggle = shell.shiftToggleOn
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
@@ -155,6 +158,7 @@ public final class SettingsModel: ObservableObject {
     public func setAcgPack(_ on: Bool) { shell.setAcgPack(on) }
     public func setQuotePack(_ on: Bool) { shell.setQuotePack(on) }
     public func setItPack(_ on: Bool) { shell.setItPack(on) }
+    public func setBeautyPack(_ on: Bool) { shell.setBeautyPack(on) }
     public func setShiftToggle(_ on: Bool) { shell.applyShiftToggle(on) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)

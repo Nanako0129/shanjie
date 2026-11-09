@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>怎麼選字：看前文選同音字的做法與實測｜善解輸入法</title>
+<meta name="description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 1,465 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
+<meta property="og:title" content="怎麼選字：看前文選同音字的做法與實測｜善解輸入法">
+<meta property="og:description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 1,465 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/how">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="怎麼選字：看前文選同音字的做法與實測｜善解輸入法">
+<meta name="twitter:description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 1,465 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/how">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "怎麼選字", "item": "https://shanjie.nyanako.com/how"}]}</script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how" aria-current="page">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>善解怎麼選字</h1>
+<p class="sub">注音最常見的困擾，是打出了「同音的另一個字」。善解每按一個鍵，就在本機把整句重新解一次；停下來時，再用一個小模型看前文，從前幾名裡挑最通順的一句。這頁寫最新發佈的 v0.6.1 怎麼做、量到多少。</p>
+
+<ul class="toc" aria-label="本頁目錄">
+  <li><a href="#flow">選字的流程</a></li><li><a href="#models">內附的模型</a></li><li><a href="#measure">實測</a></li>
+  <li><a href="#honest">怎麼避免背題目</a></li><li><a href="#tried">試過、沒出貨</a></li>
+</ul>
+
+<h2 id="flow">選字的流程</h2>
+<div class="layers">
+  <div class="layer"><div><h3>整句解碼</h3><p>詞庫列出每一段可能的詞，語言模型依詞與詞的搭配算出整句的分數，產生前 64 名候選；接著你送出過的前文選第一個詞。聊天設定另外參考口語詞頻表，書面設定多看前兩個詞。</p><div class="when">每次按鍵・本機・每鍵 p95 約 2.5 毫秒</div></div></div>
+  <div class="layer"><div><h3>語意校正</h3><p>約 1,465 萬參數的小型字元語言模型（會意）看前文，在前 8 名之間重新排序。它不產生新字，只能從候選裡挑；有把握時才換掉第一名。</p><div class="when">停頓或送出前・本機背景・每列 p95 約 12.6 毫秒</div></div></div>
+  <div class="layer"><div><h3>選字記憶</h3><p>你在候選窗改選的字，依前文分開記住；單字只在前文相同時套用，不會一次改選就污染所有句子。</p><div class="when">你改選時・只存在這台 Mac</div></div></div>
+</div>
+<p class="note">前文：輸入法讀取同一行、游標前最多 64 個字，選字用的是最後 2 個字。按鍵與設定見<a href="/guide">使用說明</a>。</p>
+
+<h2 id="models">內附的模型</h2>
+<p class="sub">v0.6.1 隨 App 內附七個檔，設定的「關於」頁也列出它們。全部在本機執行。</p>
+<div class="table">
+<table>
+<thead><tr><th>名稱</th><th>代號</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td>通語</td><td>SJ-LM-7-9.7M</td><td>語言模型：詞與詞兩兩搭配的頻率（9,709,510 組）</td></tr>
+<tr><td>辨類</td><td>SJ-WC-6-512C</td><td>詞類表：兩個詞沒一起出現過時，用「哪類詞後面常接哪類詞」補估計</td></tr>
+<tr><td>承接</td><td>SJ-KN-2-397K</td><td>Kneser–Ney 平滑：看一個詞接在幾種不同的詞後面</td></tr>
+<tr><td>連文</td><td>SJ-CX-2-7.7M、SJ-CX-2-950K</td><td>前兩個詞接下一個詞（三元表），書面與聊天各一張</td></tr>
+<tr><td>會意</td><td>SJ-SR-7-15M</td><td>語意校正：小型字元語言模型，重排前 8 名</td></tr>
+<tr><td>常談</td><td>SJ-CL-2-69K</td><td>口語詞頻表，聊天設定用</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">每個模型的訓練資料與授權見<a href="/licenses">開源與授權</a>；模型檔在 <a href="https://github.com/Nanako0129/shanjie/releases">GitHub Releases</a> ，各自有發佈說明。</p>
+
+<h2 id="measure">實測</h2>
+<p class="sub">「整句正確」是輸入法實際送出的整句和正解完全相同（「她／他」「臺／台」這類寫法視為相同），錯一個字整句就算錯。都是出貨設定。</p>
+
+<h3>開發與回歸用的集合（v0.6.1，2026-10-31）</h3>
+<div class="table">
+<table>
+<thead><tr><th>集合</th><th class="num">句數</th><th class="num">聊天設定</th><th class="num">書面設定</th></tr></thead>
+<tbody>
+<tr><td>開發集 dev302</td><td class="num">302</td><td class="num">92.7%（280）</td><td class="num">89.7%（271）</td></tr>
+<tr><td>打字測驗</td><td class="num">76</td><td class="num">97.4%（74）</td><td class="num">97.4%（74）</td></tr>
+<tr><td>使用者回報的錯字</td><td class="num">80</td><td class="num">87.5%（70）</td><td class="num">76.3%（61）</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">這些集合在開發時看得到，調整時會受它們影響，所以只用來確認沒有變差；判斷有沒有進步看下面的保留集。</p>
+
+<h3>保留集（發版前量一次）</h3>
+<div class="table">
+<table>
+<thead><tr><th>半邊</th><th class="num">句數</th><th>設定</th><th class="num">v0.5.0</th><th class="num">v0.6.0</th><th class="num">v0.6.1</th></tr></thead>
+<tbody>
+<tr><td>口語</td><td class="num">150</td><td>聊天</td><td class="num">76.7%（115）</td><td class="num">82.7%（124）</td><td class="num">82.7%（124）</td></tr>
+<tr><td>新聞</td><td class="num">150</td><td>書面</td><td class="num">83.3%（125）</td><td class="num">85.3%（128）</td><td class="num">85.3%（128）</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">口語半邊從公開語料切出、放在 repo 裡；新聞半邊是不公開的新聞句子，只在本機驗證。v0.5.0 → v0.6.0 口語改對 10 句、改壞 1 句（p 0.012），新聞改對 3 句、改壞 0 句（p 0.25，不顯著）。這兩份 150 句的集合是 2026-10-29 換的，不能和更早的保留集數字比。</p>
+
+<h3>速度與記憶體（v0.6.1，2026-10-31）</h3>
+<div class="table">
+<table>
+<thead><tr><th>項目</th><th class="num">聊天設定</th><th class="num">書面設定</th></tr></thead>
+<tbody>
+<tr><td>每個按鍵的處理時間（p95）</td><td class="num">2.53 ms</td><td class="num">2.54 ms</td></tr>
+<tr><td>引擎載入</td><td class="num">1,095 ms</td><td class="num">1,152 ms</td></tr>
+<tr><td>記憶體（RSS）</td><td class="num">483 MB</td><td class="num">480 MB</td></tr>
+<tr><td>語意校正每列（p50／p95，背景執行）</td><td class="num">7.67／12.62 ms</td><td class="num">—</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">重播開發集 dev302 共 8,336 個按鍵，不載詞包、沒有前文；和 v0.6.0 在同一台 Mac 同場輪流量，開跑時機器負載 5.3，不是閒置時的數字，只適合看兩版的差距。</p>
+<p>每一版、每個集合的完整數字在 <a href="https://github.com/Nanako0129/shanjie/blob/main/docs/benchmark.md">docs/benchmark.md</a> 。</p>
+
+<h2 id="honest">怎麼避免背題目</h2>
+<ul>
+<li>評測分成開發集與保留集。開發集用來調整；保留集開發過程中不看內容，只在發版前量一次。</li>
+<li>保留集用多了等於間接調參，所以用滿一定次數就換一份新的，換份前後的數字不互相比。</li>
+<li>會改變選字結果的改動，都用逐句配對比較與精確檢定判斷有沒有進步，看的是改對與改壞的句數，不只看百分比。</li>
+</ul>
+
+<h2 id="tried">試過、沒出貨</h2>
+<div class="table">
+<table>
+<thead><tr><th>做法</th><th>結論</th></tr></thead>
+<tbody>
+<tr><td>用維基百科的台灣正體轉換重建語言模型</td><td>保留集沒有顯著變化，還把使用者回報的句子打錯，不採用</td></tr>
+<tr><td>本機大模型重排</td><td>沒有一個過預先寫死的門檻，每列 p95 510–640 毫秒，超過 300 毫秒的上限</td></tr>
+<tr><td>貝氏選字記憶</td><td>40 組參數沒有一組符合條件，保留現行規則</td></tr>
+<tr><td>專門分辨「再／在」的分類器</td><td>第一階段就觸發停止規則，準確率低於語言模型</td></tr>
+<tr><td>更大的字元模型</td><td>大一級的模型在聊天判讀集上沒有贏過現在的大小</td></tr>
+<tr><td>只用口語語料重訓小模型</td><td>聊天判讀集上的淨值沒有超出雜訊範圍，不換</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="next"><a href="/install">安裝 →</a><a href="/guide">使用說明 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>

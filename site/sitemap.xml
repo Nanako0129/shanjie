@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written. Add a <url> for every new page; change a page's <lastmod> when its content changes. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://shanjie.nyanako.com/</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/how</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/install</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/guide</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/updates</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/faq</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/roadmap</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/privacy</loc><lastmod>2026-11-09</lastmod></url>
+  <url><loc>https://shanjie.nyanako.com/licenses</loc><lastmod>2026-11-09</lastmod></url>
+</urlset>

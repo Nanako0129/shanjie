@@ -287,6 +287,19 @@ public final class MemoryItPackStore: ItPackStore {
     public init(_ itPack: Bool? = nil) { self.itPack = itPack }
 }
 
+/// Where the "美妝與保養詞" switch is kept (docs/spec/lexicon-and-packs.md §4.2, §8.3): `nil` means never chosen, which is on. Same arrangement as `ItPackStore`.
+@MainActor
+public protocol BeautyPackStore: AnyObject {
+    var beautyPack: Bool? { get set }
+}
+
+/// The in-memory BeautyPackStore.
+@MainActor
+public final class MemoryBeautyPackStore: BeautyPackStore {
+    public var beautyPack: Bool?
+    public init(_ beautyPack: Bool? = nil) { self.beautyPack = beautyPack }
+}
+
 /// Where the candidate glass tint slider is kept (docs/spec/macos-shell.md §8.7): 0...1,
 /// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
 @MainActor
@@ -589,15 +602,19 @@ public final class Shell {
     private let itPackStore: ItPackStore
     /// The IT+AI word pack (default on, docs/spec/lexicon-and-packs.md §4.2, §4.3): parsed into the lexicon like the ACG pack, so a change rebuilds the engine.
     private(set) var itPackOn = true
+    private let beautyPackStore: BeautyPackStore
+    /// The beauty and skincare word pack (default on, docs/spec/lexicon-and-packs.md §4.2, §8.3): parsed into the lexicon like the IT pack, so a change rebuilds the engine.
+    private(set) var beautyPackOn = true
     /// The packs in the settings order: mask bit, file in the packs directory, menu title. `packMask`, the missing-file check and the menu line all read this.
     private static let packTable: [(bit: UInt32, file: String, title: String)] = [
         (CoreEngine.packACG, "acg-add.tsv", MenuEntry.Text.acgPack),
         (CoreEngine.packQuotes, "quotes-add.tsv", MenuEntry.Text.quotePack),
         (CoreEngine.packIT, "it-add.tsv", MenuEntry.Text.itPack),
+        (CoreEngine.packBeauty, "beauty-add.tsv", MenuEntry.Text.beautyPack),
     ]
     /// The mask `build()` passes to `shanjie_engine_new_packs`: one bit per switch that is on. The quote switch never chosen is off and the
-    /// IT switch never chosen is on, so an app that never touched either builds with the ACG and IT bits, as before the quote pack existed.
-    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) }
+    /// IT and beauty switches never chosen are on, so an app that never touched any builds with the ACG, IT and beauty bits.
+    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) | (beautyPackOn ? CoreEngine.packBeauty : 0) }
     /// The pack bits the current engine was really built with (docs/spec/lexicon-and-packs.md §4.2, §4.3): `packMask` when that build worked, less the bits
     /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
@@ -815,6 +832,7 @@ public final class Shell {
     /// `acgPackStore`: the ACG word pack switch (docs/spec/lexicon-and-packs.md §4.1). Required, like `demoteStore`.
     /// `quotePackStore`: the classic quote pack switch (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2). Required, like `acgPackStore`.
     /// `itPackStore`: the IT+AI word pack switch (docs/spec/lexicon-and-packs.md §4.2, §4.3). Defaults to an in-memory store so the many test rigs need not name it; the app passes its own.
+    /// `beautyPackStore`: the beauty and skincare word pack switch (docs/spec/lexicon-and-packs.md §4.2, §8.3). Defaults to an in-memory store like `itPackStore`; the app passes its own.
     /// `glassTintStore`: the candidate glass tint (docs/spec/macos-shell.md §8.7). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (docs/spec/macos-shell.md §8.6.1). Required, like `glassTintStore`.
     /// `rerankStore`: the 語意校正 switch (docs/spec/semantic-rerank.md §8.2). Required, like `predictionStore`.
@@ -845,6 +863,7 @@ public final class Shell {
                 showsAbbreviation: Bool = true,
                 spacingStore: SpacingStore,
                 itPackStore: ItPackStore = MemoryItPackStore(),
+                beautyPackStore: BeautyPackStore = MemoryBeautyPackStore(),
                 shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
                 shiftHint: ShiftHintPanel? = nil,
                 englishNoticeStore: EnglishNoticeStore = MemoryEnglishNoticeStore(),
@@ -906,6 +925,8 @@ public final class Shell {
         quotePackOn = quotePackStore.quotePack ?? false
         self.itPackStore = itPackStore
         itPackOn = itPackStore.itPack ?? true
+        self.beautyPackStore = beautyPackStore
+        beautyPackOn = beautyPackStore.beautyPack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -1264,6 +1285,17 @@ public final class Shell {
         }
         changed()
         Log.shell.debug("it pack switched")
+    }
+
+    /// The settings switch (docs/spec/lexicon-and-packs.md §4.2, §8.3): the same as `setItPack` for the beauty and skincare pack.
+    func setBeautyPack(_ on: Bool) {
+        guard on != beautyPackOn else { return }
+        commitThenRebuild {
+            beautyPackOn = on
+            beautyPackStore.beautyPack = on
+        }
+        changed()
+        Log.shell.debug("beauty pack switched")
     }
 
     /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the
@@ -1930,7 +1962,13 @@ public final class Session {
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {
-            client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+            // docs/spec/macos-shell.md §4: an unchanged composition (Tab into the prediction row) is not sent again. Chromium hands the key
+            // to the page before the composition, so a page that moves focus on the key would get the text a second time.
+            let marked = Marked(text: o.preedit, cursor: o.cursorUTF16, runStart: o.englishRunStart, runLength: o.englishRunLength)
+            if marked != sentMarked || !o.commit.isEmpty {
+                client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+                sentMarked = marked
+            }
         } else if shell.composing {
             clearMarkedText()
         }
@@ -2003,5 +2041,10 @@ public final class Session {
 
     private func clearMarkedText() {
         client.setMarkedText(NSAttributedString(string: ""), selectionRange: NSRange(location: 0, length: 0))
+        sentMarked = nil
     }
+
+    /// docs/spec/macos-shell.md §4: the marked text this session last sent to its client (nil after clearing it).
+    private struct Marked: Equatable { let text: String; let cursor: Int; let runStart: Int; let runLength: Int }
+    private var sentMarked: Marked?
 }

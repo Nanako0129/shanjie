@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://shanjie.nyanako.com/sitemap.xml

@@ -76,7 +76,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
   done
 done
 for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv variant-order.tsv std-exempt.tsv digits.tsv models.tsv shanjie.tiff \
-         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/quotes-add.tsv packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
+         packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/beauty-add.tsv packs/beauty-sources.tsv packs/beauty.json packs/quotes-add.tsv packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
 done
@@ -95,7 +95,7 @@ python3 - "$R/packs" <<'PY' || fail "packs/acg.json or packs/quotes.json does no
 import hashlib, json, os, sys
 d = sys.argv[1]
 # Explicit exits, not assert: PYTHONOPTIMIZE strips asserts and the check would pass vacuously.
-for manifest, required in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv"), ("it.json", "it-add.tsv")):     # quotes: docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2; IT+AI: docs/spec/lexicon-and-packs.md §4.2, §4.3
+for manifest, required in (("acg.json", "acg-add.tsv"), ("quotes.json", "quotes-add.tsv"), ("it.json", "it-add.tsv"), ("beauty.json", "beauty-add.tsv")):     # quotes: docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2; IT+AI: docs/spec/lexicon-and-packs.md §4.2, §4.3; beauty: docs/spec/lexicon-and-packs.md §4.4, §8.3
     files = json.load(open(os.path.join(d, manifest), encoding="utf-8"))["files"]
     if required not in files:
         sys.exit(required + " is not in " + manifest)

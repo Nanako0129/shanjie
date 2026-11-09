@@ -209,6 +209,16 @@ class LiReading(unittest.TestCase):
         rd = B.make_readings(["愛麗兒", "朵麗絲"])
         self.assertEqual((rd["愛麗兒"][0][1], rd["朵麗絲"][0][1]), ("ㄌㄧˋ", "ㄌㄧˋ"))
 
+    def test_a_missing_input_stops_with_the_tools_own_message(self):   # runs on CI too: it needs only that the file is absent
+        with mock.patch.dict(os.environ, {"SHANJIE_MOEDICT": "/nonexistent/dict-revised_bkup.json"}):
+            with self.assertRaises(SystemExit) as cm:
+                B.make_readings(["愛麗兒"])
+        self.assertIn("SHANJIE_MOEDICT", str(cm.exception))
+        self.assertIn("/nonexistent/dict-revised_bkup.json", str(cm.exception))   # readings.py's own message, not just its status
+        self.assertIn("github.com/g0v/moedict-data", str(cm.exception))           # and where to get the missing file
+        if os.path.isfile(R.HETERO):                                                # CI has neither file: both are listed there
+            self.assertNotIn("SHANJIE_HETERO=", str(cm.exception))                 # only the missing one is listed
+
 
 class Dedupe(unittest.TestCase):
     def test_words_already_in_the_lexicon_are_dropped(self):

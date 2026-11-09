@@ -35,6 +35,12 @@ public enum Selftest {
     /// engine below, as the shell ships it.
     static let itWordStandard = "u/6aj41l3cj4fu4"
     static let itWord = "螢幕保護器"
+    /// The bundled beauty pack (docs/spec/lexicon-and-packs.md §4.2, §8.3): 眉彩膏 `ㄇㄟˊ ㄘㄞˇ ㄍㄠ` on the standard layout (docs/spec/keys-and-composition.md §2.1: ㄇ a, ㄟ o, ˊ 6; ㄘ h, ㄞ 9, ˇ 3;
+    /// ㄍ e, ㄠ l, a space for the first tone), chat profile, small model not yet loaded. Measured with the CLI in this worktree
+    /// (`shanjie-eval --lm data/lm/bigram.sjlm --profile chat --packs acg,it` against `--packs acg,it,beauty`, one row `|眉彩膏|ㄇㄟˊ ㄘㄞˇ ㄍㄠ`, `--dump`):
+    /// without the beauty bit the first is 沒採高, with it 眉彩膏 (2026-11-08), so the sentence is the word only if the beauty pack loaded.
+    static let beautyWordStandard = "ao6h93el "
+    static let beautyWord = "眉彩膏"
 
     /// 通語 SJ-LM-7-9.7M (2026-10-27, docs/spec/decoder.md §3.6): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat profile, no left context,
     /// the bundled packs loaded, the small model loaded and the colloquial table not yet: the n-gram's first is 我等一下在過去 and the rerank picks 我等一下再過去
@@ -79,7 +85,7 @@ public enum Selftest {
         // and the ordinary sentence must still come out the same.
         let (packed, packCode) = CoreEngine.make(dataDir: resources.path, layout: 0,
                                                   packsDir: resources.appendingPathComponent("packs").path,
-                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT))
+                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT) | UInt32(SHANJIE_PACK_BEAUTY))
         guard let withPack = packed else { return fail("selftest: shanjie_engine_new_packs failed, code", packCode) }
         let packLM = withPack.loadLM(path: lmPath)
         guard packLM == 0 else { return fail("selftest: shanjie_engine_load_lm (pack) failed, code", packLM) }
@@ -91,6 +97,9 @@ public enum Selftest {
         let (itShown, itCode) = type(itWordStandard, withPack)
         guard itCode == 0 else { return fail("selftest: shanjie_engine_key (it pack) failed, code", itCode) }
         guard itShown == itWord else { return fail("selftest: the bundled IT+AI word pack is not in effect, code", 0) }
+        let (beautyShown, beautyCode) = type(beautyWordStandard, withPack)
+        guard beautyCode == 0 else { return fail("selftest: shanjie_engine_key (beauty pack) failed, code", beautyCode) }
+        guard beautyShown == beautyWord else { return fail("selftest: the bundled beauty word pack is not in effect, code", 0) }
         // The small model, as the shell loads it: a bundle without it (or with one for another n-gram model) fails here, so
         // 語意校正 cannot ship silently doing nothing.
         let tiny = withPack.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)

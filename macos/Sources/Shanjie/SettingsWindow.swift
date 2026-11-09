@@ -339,6 +339,7 @@ struct SettingsPageForm: View {
                     // Next to the other word pack; off until chosen (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2).
                     Toggle(MenuEntry.Text.quotePack, isOn: Binding(get: { model.quotePack }, set: { model.setQuotePack($0) }))
                     Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
+                    Toggle(MenuEntry.Text.beautyPack, isOn: Binding(get: { model.beautyPack }, set: { model.setBeautyPack($0) }))
                 }
                 // docs/spec/decoder.md §6.1: all off by default. The adjacent-key checkbox is greyed (value kept) in the Eten layout, where
                 // the core does nothing with it.

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開源與授權｜善解輸入法</title>
+<meta name="description" content="善解輸入法的程式碼、詞庫、詞包、語言模型、語意校正模型與評測句各自的來源與授權。">
+<meta property="og:title" content="開源與授權｜善解輸入法">
+<meta property="og:description" content="善解輸入法的程式碼、詞庫、詞包、語言模型、語意校正模型與評測句各自的來源與授權。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/licenses">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="開源與授權｜善解輸入法">
+<meta name="twitter:description" content="善解輸入法的程式碼、詞庫、詞包、語言模型、語意校正模型與評測句各自的來源與授權。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/licenses">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "開源與授權", "item": "https://shanjie.nyanako.com/licenses"}]}</script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>開源與授權</h1>
+<p class="sub">善解的程式碼、詞庫、詞包與模型各自的來源與授權。隨 App 內附的部分，署名與授權全文也在 App 裡；原始碼在 <a href="https://github.com/Nanako0129/shanjie">github.com/Nanako0129/shanjie</a> 。這頁描述最新發佈的 v0.6.1。</p>
+
+<h2>隨 App 內附</h2>
+<div class="table">
+<table>
+<thead><tr><th>元件</th><th>來源</th><th>授權</th></tr></thead>
+<tbody>
+<tr><td>程式碼</td><td>善解</td><td>Apache-2.0</td></tr>
+<tr><td>基礎詞庫</td><td>小麥注音（片語源自 libtabe）</td><td>MIT（libtabe：BSD）</td></tr>
+<tr><td>自動更新元件 Sparkle</td><td>Sparkle</td><td>MIT（全文與它附帶的第三方授權在 <code>LICENSES/Sparkle-MIT.txt</code>）</td></tr>
+<tr><td>補充詞表</td><td>維基百科與維基詞典的條目標題；網路用語詞（v0.6.0 起，註 1）</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>動漫與遊戲詞包（44,552 詞，設定裡可關）</td><td>中文維基百科（註 2）</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>資訊與 AI 詞包（1,016 詞，預設開，設定裡可關）</td><td>國家教育研究院的學術名詞、中文維基百科、手寫清單（註 3）</td><td>CC BY-SA 4.0；含政府資料開放授權的資料</td></tr>
+<tr><td>經典台詞詞包（v0.6.1 起，預設關）</td><td>208 句電影台詞，切成 278 個分句、311 列讀音，每句對照過文字出處</td><td>清單檔 CC0；台詞原文的權利屬原作者</td></tr>
+<tr><td>降權表（<code>demote.tsv</code>）</td><td>專案自寫，不含第三方資料</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>標準讀音變體</td><td>依教育部《國語辭典簡編本》〈單一音讀〉與《國語一字多音審訂表》的規則，從小麥注音詞庫產生；規則是事實，檔案不含教育部資料</td><td>MIT</td></tr>
+<tr><td>常見專有名詞層（1,997 詞）</td><td>name-suggestion-index、中文維基百科、教育部統計處的學校名錄等（註 4）</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>通語 SJ-LM-7-9.7M、辨類 SJ-WC-6-512C、承接 SJ-KN-2-397K、連文 SJ-CX-2-7.7M（書面）與 SJ-CX-2-950K（聊天）</td><td>維基百科、Mozilla Common Voice、Tatoeba、合成句等（註 5）</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>會意 SJ-SR-7-15M（語意校正，<code>tinylm.sjtl</code>，預設開）</td><td>約 1,465 萬參數的字元語言模型（註 6）</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>常談 SJ-CL-2-69K（口語詞頻表，<code>colloquial.sjlm</code>）</td><td>只有詞與詞對的次數，沒有句子（註 7）</td><td>CC BY-SA 4.0</td></tr>
+<tr><td>數字語境的計數表（<code>digits.tsv</code>）</td><td>中文維基百科與 Common Voice、Tatoeba 的句子裡，詞與數字前後相接的次數</td><td>CC BY-SA 4.0</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>註</h3>
+<ol class="notes muted">
+<li>補充詞表署名維基百科與維基詞典貢獻者。網路用語詞取自中文維基的網路用語與流行語列表、中英文維基詞典的分類、Fandom 上 PTT 鄉民百科的分類標題、台灣公開論壇的用量（只取詞，不含原文）、Muse（Meta 平台的流行語建議，收錄前都用論壇用量確認，只取詞）與 Discord 提供的詞（CC0）；署名另加 PTT 鄉民百科 contributors（Fandom）與 Fandom 迷因 Wiki 貢獻者，這兩處的文字是 CC BY-SA 3.0，依 3.0 的「後續版本」條款以 CC BY-SA 4.0 散布。</li>
+<li>約 4.5 萬個作品名與角色名。來源是中文維基百科的公共轉換組、動畫作品條目的標題、條目與角色列表頁裡的登場人物，另有手動加的詞（這些條目是 CC0，34 個 BanG Dream! 成員名字取自維基百科）；作品清單取自 Wikidata（CC0）。整份詞包署名維基百科貢獻者。</li>
+<li>只收詞與讀音。來源是國家教育研究院「電子計算機學術名詞」（政府資料開放平臺資料集 15416）與「兩岸對照名詞—計算機學術名詞」（資料集 15275）的中文名稱，依政府資料開放授權條款（Open Government Data License，<a href="https://data.gov.tw/license">https://data.gov.tw/license</a> ），提供機關：國家教育研究院；另有中文維基百科的 CGroup 轉換表與 AI 相關分類的條目標題，另有手寫清單（CC0）。整份詞包署名維基百科貢獻者。</li>
+<li>台灣品牌名取自 name-suggestion-index（BSD-3-Clause），另有中文維基百科的條目標題與教育部統計處的學校名錄（政府資料開放授權條款第 1 版）；v0.6.0 起另補實況主、YouTuber、節目與頻道名，店家、餐廳、飯店與企業名，以及台灣以外的中文圈人名：名稱取自 Muse（Meta 平台的建議，只取名稱）以及手動加入與 Discord 上提的名字，收錄依台灣公開論壇的用量（只取詞，不含原文），這幾份名稱清單本身是 CC0。三方的署名隨 App 內附。</li>
+<li>語言模型（詞的兩兩搭配頻率）、詞類表、Kneser–Ney 接續次數與連文（前兩個詞接下一個詞）由維基百科 2026-10-01 的 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子（CC0）、Tatoeba 中文句子（CC BY 2.0 FR）、gpt-oss-120b 產生的台灣口語合成句，加上 v0.6.0 新增的 g0v Slack <code>#rand0m</code> 頻道的公開訊息（CC0）與台灣公開論壇的文章與推文（只用於詞頻計數，不含原文）計算；書面設定的連文 SJ-CX-2-7.7M 不含 g0v 與論壇。署名維基百科與 Tatoeba 貢獻者。斷詞用的詞彙是常開的詞庫（小麥基底、萌典補詞、補充詞表、變調列、名單層）；動漫與遊戲詞包、資訊與 AI 詞包的詞也計入詞頻。不含任何私人對話。發佈的模型另含少量用來辨識來源的指紋條目。</li>
+<li>權重在 v0.6.0 重新訓練。訓練文字和語言模型同源（維基百科 2026-10-01 的前 20 萬篇條目、Mozilla Common Voice、Tatoeba、gpt-oss-120b 產生的台灣口語合成句），另加 g0v <code>#rand0m</code> 的公開訊息、台灣公開論壇的文章與推文，以及 OPUS OpenSubtitles v2018 的繁體字幕（清理後 4,432,866 句；都只用於訓練，字幕文字不在檔案內）。署名維基百科、Tatoeba 貢獻者與 OpenSubtitles（P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles, LREC 2016；字幕來自 <a href="http://www.opensubtitles.org/">opensubtitles.org</a> ）。聊天設定的融合參數用私人聊天訊息選，檔案裡沒有任何訊息的文字。</li>
+<li>來源是語言模型的口語計數（Common Voice、Tatoeba、合成句，不含 g0v 與論壇），加上一份公開口語池：WildChat-1M 台灣子集（ODC-BY 1.0）、YODAS 繁體字幕（1,138 支 CC BY 的 YouTube 影片，CC BY 3.0）、Tatoeba（CC BY 2.0 FR）、MASSIVE zh-TW（CC BY 4.0）。逐支影片、逐句的署名清單隨 App 內附。</li>
+</ol>
+
+<h2>評測句（不隨 App 內附，只用來量測）</h2>
+<ul>
+<li>專案自寫或使用者回報的句子（開發集、舊保留集、學習測試、陷阱句、日常句等）：CC0。</li>
+<li>保留集（<code>eval/holdout/</code>）：從公開語料切出的子句，逐列出處在 <code>eval/holdout/next/sources.tsv</code>。repo 內只有口語的列：中文維基百科討論頁與互助客棧（CC BY-SA 4.0）、vTaiwan 的 Polis 留言（The Computational Democracy Project，CC BY 4.0）、公共政策網路參與平臺「提點子」（國家發展委員會，政府資料開放授權條款第 1 版）。只用於評測，不用來調參或訓練。</li>
+<li>動漫與遊戲評測（<code>eval/dev/acg/</code>）：取自 Wikidata 的標籤，CC0；其中 2026 年作品那一份（<code>recent.txt</code>）取自中文維基百科條目，CC BY-SA 4.0。</li>
+<li>教育部《重編國語辭典修訂本》的例句抽樣（<code>eval/sets/moedict.txt</code>）與「也作／亦作」詞對（<code>eval/variants.tsv</code>）：CC BY-ND 3.0 TW，只用於評測，不用來建詞庫或改作。</li>
+</ul>
+
+<p class="next"><a href="/privacy">隱私與資料 →</a><a href="/how">怎麼選字 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses" aria-current="page">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>

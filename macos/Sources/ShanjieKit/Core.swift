@@ -44,6 +44,7 @@ final class CoreEngine {
     static let packACG = UInt32(SHANJIE_PACK_ACG)
     static let packQuotes = UInt32(SHANJIE_PACK_QUOTES)
     static let packIT = UInt32(SHANJIE_PACK_IT)
+    static let packBeauty = UInt32(SHANJIE_PACK_BEAUTY)
 
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
     /// `packsDir` is the directory of the word pack files and `packs` the bit mask of the packs to turn on (docs/spec/lexicon-and-packs.md §4.1, §4.2;
