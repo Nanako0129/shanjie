@@ -124,6 +124,8 @@ th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom
 th { font-weight: 600; color: var(--ink); background: var(--paper-2); }
 td { color: var(--ink-2); }
 td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* 基準測試與 KPI 頁的數字表：每格的分行已經用 <br> 寫好（和完整表同一個寫法），不再自動折行；太寬就在 .table 裡橫捲 */
+#numbers th, #numbers td { white-space: nowrap; }
 
 /* 本頁目錄（使用說明、安裝） */
 .toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 20px 0 0; padding: 0; list-style: none; }

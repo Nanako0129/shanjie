@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每版 KPI：每一版的使用者指標｜善解輸入法</title>
+<meta name="description" content="善解每一版的使用者指標：錯字回報用真的引擎逐鍵重播的正確率、按鍵分數、顯示後被改掉的次數、保留集口語半邊與閒置時的速度和記憶體。">
+<meta property="og:title" content="每版 KPI：每一版的使用者指標｜善解輸入法">
+<meta property="og:description" content="善解每一版的使用者指標：錯字回報用真的引擎逐鍵重播的正確率、按鍵分數、顯示後被改掉的次數、保留集口語半邊與閒置時的速度和記憶體。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/kpi">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="每版 KPI：每一版的使用者指標｜善解輸入法">
+<meta name="twitter:description" content="善解每一版的使用者指標：錯字回報用真的引擎逐鍵重播的正確率、按鍵分數、顯示後被改掉的次數、保留集口語半邊與閒置時的速度和記憶體。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/kpi">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "怎麼選字", "item": "https://shanjie.nyanako.com/how"}, {"@type": "ListItem", "position": 3, "name": "每版 KPI", "item": "https://shanjie.nyanako.com/kpi"}]}</script>
+<script src="/numbers.js" defer></script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>每版 KPI</h1>
+<p class="sub">每一版的使用者指標，最新的版本在上。錯字回報與開發集用真的引擎逐鍵重播；表頭的 n 是句數，「#」開頭的 8 碼是那份評測集的雜湊，換了評測集就另開一欄。「—」是沒有這個數字：舊版沒有重播工具、保留集不回填，或速度是在機器忙的時候量的。私人集合的數字不放在網站上；各集合的準確率在<a href="/benchmark">基準測試</a>。</p>
+
+<div id="numbers" data-src="/data/kpi.json" data-kind="kpi">
+<noscript><p class="note">這頁用 JavaScript 把 <a href="/data/kpi.json">/data/kpi.json</a> 畫成表格；瀏覽器關了 JavaScript 時，可以直接看那個檔。</p></noscript>
+<div data-fill="kpi"></div>
+</div>
+
+<ul class="note">
+<li>錯字回報重播：使用者回報選錯的句子逐鍵打一次，關掉選字記憶時，打完第一次顯示就正確的比例；「學習開改壞」是打開選字記憶後，從對變錯的句數。</li>
+<li>按鍵分數 KySS：照讀音打一句最少要按的鍵數，除以實際按的鍵數（含改選錯字的移游標、開候選窗、選字），越接近 1 越好。</li>
+<li>顯示後被改掉：打字途中，語意校正把組字區已經顯示的字換掉的次數（逐鍵解碼自己換字不算）。</li>
+<li>速度與記憶體只收機器閒置時量的數字（開始與結束的負載都在 2 以下）。</li>
+</ul>
+
+<p class="next"><a href="/benchmark">基準測試 →</a><a href="/how">怎麼選字 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>

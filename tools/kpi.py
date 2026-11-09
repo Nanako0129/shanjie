@@ -12,9 +12,10 @@ this repository (bench.LEGACY_SHA) is exported from the legacy clone given by --
 `replay` runs in the CURRENT checkout (no changes to tracked files; if the tag --as exists it must be HEAD):
 `cargo build --release --locked -p cli --bin shanjie-replay --message-format=json` (the binary path is the compiler's own report) types the pinned user-reported and dev302 rows through the real engine
 with data/lm models and writes the `replay` field of eval/bench/kpi/<version>.json.
-`table` regenerates docs/kpi.md from eval/bench/results/v2-*.json and eval/bench/kpi/*.json and writes the public-set part of the same
-data to site/data/kpi.json (docs/spec/evaluation.md §8.4).
-tools/bench.py is imported, never changed. Never reads eval/holdout/ (the holdout halves are typed into the kpi JSON by hand).
+`table` reads eval/bench/results/v2-*.json and eval/bench/kpi/*.json, writes the public-set part to site/data/kpi.json, which the
+site's /kpi page draws (docs/spec/evaluation.md §8.4), and the full markdown table (private sets included) to --out FILE or
+$SHANJIE_TABLES/kpi.md, never inside this repository; without either it writes only the JSON.
+tools/bench.py is imported for its building blocks. Never reads eval/holdout/ (the holdout halves are typed into the kpi JSON by hand).
 """
 import argparse, ast, json, os, re, subprocess, sys, tempfile
 
@@ -23,7 +24,6 @@ import bench  # noqa: E402
 
 ROOT = bench.ROOT
 KPI_DIR = os.path.join(ROOT, "eval/bench/kpi")
-OUT = os.path.join(ROOT, "docs/kpi.md")
 SITE_JSON = os.path.join(ROOT, "site/data/kpi.json")
 LOAD_MAX = 2.0  # speed numbers only count when the machine was idle at both ends of the run
 # name -> (rows file, pinned sha256): the replay rows are frozen suite files, not eval/dev/*.
@@ -353,7 +353,7 @@ COLUMNS = [
 
 
 def load(results_dir, kpi_dir):
-    """-> (rows, kpi): the one read of the JSON files that both docs/kpi.md and site/data/kpi.json are made from.
+    """-> (rows, kpi): the one read of the JSON files that both the full table and site/data/kpi.json are made from.
     rows = [(version, {"rec", "res", "kpi"}, v2 file name or None)], newest first."""
     v2, kpi = load_json_dir(results_dir, "v2-"), {f[:-5]: d for f, d in load_json_dir(kpi_dir)}
     versions = {r["version"] for _, d in v2 for r in d.get("versions", []) if "version" in r} | set(kpi)
@@ -428,10 +428,11 @@ def site_data(rows, kpi):
 
 
 def cmd_table(a):
+    md = bench.md_path(a.out, "kpi.md", "kpi")
     rows, kpi = load(a.results, a.kpi)
-    with open(a.out, "w", encoding="utf-8") as f:
-        f.write(render_data(rows, kpi))
     bench.write_json(a.json, site_data(rows, kpi))
+    if md:
+        bench.write_md(md, render_data(rows, kpi))
 
 
 def main():
@@ -447,7 +448,7 @@ def main():
     t = sub.add_parser("table")
     t.add_argument("--results", default=bench.RESULTS)
     t.add_argument("--kpi", default=KPI_DIR)
-    t.add_argument("--out", default=OUT)
+    t.add_argument("--out", help="where to write the full table (default $SHANJIE_TABLES/kpi.md; never inside this repository)")
     t.add_argument("--json", default=SITE_JSON)
     a = ap.parse_args()
     {"run": cmd_run, "replay": cmd_replay, "table": cmd_table}[a.cmd](a)
