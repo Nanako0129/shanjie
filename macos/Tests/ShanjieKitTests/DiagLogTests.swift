@@ -286,6 +286,46 @@ final class DiagLogTests: XCTestCase {
         }
     }
 
+    /// docs/spec/macos-shell.md §13.1: when several reasons hold, the first one is recorded.
+    func testTheFirstReasonWins() {
+        let cases: [(ShiftTap.Outcome, String, (Controller) -> Void)] = [
+            (.modifierAtPress, "Control at the press, then too long", { c in
+                self.flags(c, 56, 0x2, extra: .control); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1; self.flags(c, 56, 0)
+            }),
+            (.modifierAtPress, "Control and Caps Lock at the press", { c in
+                self.flags(c, 56, 0x2, extra: [.control, .capsLock]); self.time += 0.1; self.flags(c, 56, 0)
+            }),
+            (.capsLockAtPress, "Caps Lock at the press, then another modifier", { c in
+                self.flags(c, 56, 0x2, extra: .capsLock); self.flags(c, 59, 0x2, extra: [.control, .capsLock]); self.flags(c, 59, 0x2, extra: .capsLock)
+                self.time += 0.1; self.flags(c, 56, 0, extra: .capsLock)
+            }),
+            (.modifierBetween, "a modifier between, then too long with Control at the release", { c in
+                self.flags(c, 56, 0x2); self.flags(c, 59, 0x2, extra: .control); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1
+                self.flags(c, 56, 0, extra: .control)
+            }),
+            (.otherSideChanged, "the other side changed, and Control at the release", { c in
+                self.flags(c, 56, 0x6); self.time += 0.1; self.flags(c, 56, 0, extra: .control)
+            }),
+            (.modifierAtRelease, "Control and Caps Lock at the release, too long", { c in
+                self.flags(c, 56, 0x2); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1; self.flags(c, 56, 0, extra: [.control, .capsLock])
+            }),
+            (.capsLockAtRelease, "Caps Lock at the release, too long", { c in
+                self.flags(c, 56, 0x2); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1; self.flags(c, 56, 0, extra: .capsLock)
+            }),
+            (.tooLong, "too long and a click", { c in
+                c.session.shell.mouseAgo = { 0.05 }; self.flags(c, 56, 0x2); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1; self.flags(c, 56, 0)
+            }),
+        ]
+        for (outcome, name, run) in cases {
+            let shell = makeShell()
+            let c = Controller(shell)
+            c.session.activate()
+            time += 5
+            run(c)
+            XCTAssertEqual(events(shell).filter { $0.hasPrefix("shift ") }.last, "shift left \(outcome.rawValue)", name)
+        }
+    }
+
     // MARK: f. secure input
 
     func testNoShiftDuringSecureInputButTheToggleIsKept() {
@@ -329,6 +369,55 @@ final class DiagLogTests: XCTestCase {
         XCTAssertEqual(lines(shell).count, before.count)
     }
 
+    /// docs/spec/macos-shell.md §13.1: with the two Shift keys overlapping, a key between press and release still records nothing (the press
+    /// record of the interrupted side is replaced by the other side's), nor does a Shift held since before the tap saw its press.
+    func testOverlappingShiftKeysWithAKeyRecordNothing() {
+        let sequences: [(String, (Controller) -> Void)] = [
+            ("left, a, right, up left, b, up right", { c in
+                self.flags(c, 56, 0x2); c.press(Keys.code(for: "a"), flags: .shift); self.flags(c, 60, 0x6); self.time += 0.1
+                self.flags(c, 56, 0x4); c.press(Keys.code(for: "b"), flags: .shift); self.flags(c, 60, 0)
+            }),
+            ("left, right, a, up left, up right", { c in
+                self.flags(c, 56, 0x2); self.flags(c, 60, 0x6); c.press(Keys.code(for: "a"), flags: .shift); self.time += 0.1
+                self.flags(c, 56, 0x4); self.flags(c, 60, 0)
+            }),
+            ("held before, a, up", { c in c.press(Keys.code(for: "a"), flags: .shift); self.flags(c, 56, 0) }),
+        ]
+        for (name, run) in sequences {
+            let shell = makeShell()
+            let c = Controller(shell)
+            c.session.activate()
+            let before = events(shell).filter { $0.hasPrefix("shift ") }
+            time += 5
+            run(c)
+            XCTAssertEqual(events(shell).filter { $0.hasPrefix("shift ") }, before, name)
+            time += 5
+            tap(c)
+            XCTAssertEqual(events(shell).filter { $0.hasPrefix("shift ") }.last, "shift left toggled", "\(name): the next tap is recorded")
+        }
+    }
+
+    /// The switch turned off outside the settings window (the store alone, as `defaults write` does): the log reads as empty at once and the
+    /// next event empties it.
+    func testOffInTheStoreAloneEmptiesTheLog() {
+        let store = MemoryDiagLogStore()
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                          dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+                          quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
+                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(),
+                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+                          diagLogStore: store)
+        Controller(shell).session.activate()
+        XCTAssertFalse(shell.diag.isEmpty)
+        store.diagLog = false
+        XCTAssertTrue(shell.diag.isEmpty)
+        XCTAssertEqual(lines(shell).count, 1, "the export has the header only")
+        shell.diag.record(.owner(bundle: "com.x"))
+        store.diagLog = true
+        XCTAssertTrue(shell.diag.isEmpty, "the old entries are gone once it is on again")
+    }
+
     // MARK: h. bundle IDs
 
     func testABundleIDOutsideTheAllowedCharactersIsAQuestionMark() {
@@ -348,11 +437,12 @@ final class DiagLogTests: XCTestCase {
     func testTheCopyIsForThisMacOnlyAndTransient() {
         let pb = FakePasteboard()
         DiagLog.copy("x\n", to: pb)
-        XCTAssertEqual(pb.calls, ["prepare currentHostOnly", "string public.utf8-plain-text", "string org.nspasteboard.TransientType"])
+        XCTAssertEqual(pb.calls, ["prepare currentHostOnly", "item org.nspasteboard.TransientType public.utf8-plain-text"],
+                       "cleared for this Mac only, then one item with both types")
         XCTAssertEqual(pb.strings[.string], "x\n")
     }
 
-    func testThePreviewIsWhatIsCopiedAndAnEmptyLogGreysTheButton() {
+    func testThePreviewIsWhatIsCopiedAndAnEmptyLogGreysTheButton() throws {
         let shell = makeShell()
         let model = SettingsModel(shell: shell)
         XCTAssertTrue(model.diagLogEmpty)
@@ -360,10 +450,13 @@ final class DiagLogTests: XCTestCase {
         c.session.activate()
         model.refreshExternal()
         XCTAssertFalse(model.diagLogEmpty)
-        let preview = model.diagLogPreview()
+        model.openDiagPreview()
+        let preview = try XCTUnwrap(model.diagPreview)
+        tap(c)  // events after the sheet opened are not in what it copies
         let pb = FakePasteboard()
-        model.copyDiagLog(preview, to: pb)
-        XCTAssertEqual(pb.strings[.string].map { Array($0.utf8) }, Array(preview.utf8))
+        model.copyDiagPreview(to: pb)
+        XCTAssertEqual(pb.strings[.string].map { Array($0.utf8) }, Array(preview.utf8), "the copy is the text the sheet showed")
+        XCTAssertNil(model.diagPreview, "複製 closes the sheet")
         model.setDiagLog(false)
         XCTAssertTrue(model.diagLogEmpty)
         XCTAssertFalse(model.diagLog)
@@ -382,9 +475,11 @@ final class FakePasteboard: DiagPasteboard {
         return 0
     }
 
-    func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool {
-        calls.append("string \(dataType.rawValue)")
-        strings[dataType] = string
+    func writeObjects(_ objects: [NSPasteboardWriting]) -> Bool {
+        for case let item as NSPasteboardItem in objects {
+            calls.append("item " + item.types.map(\.rawValue).sorted().joined(separator: " "))
+            for t in item.types { strings[t] = item.string(forType: t) }
+        }
         return true
     }
 }

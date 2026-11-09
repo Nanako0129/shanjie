@@ -83,6 +83,8 @@ public final class SettingsModel: ObservableObject {
     /// announces no change, so `diagLogEmpty` is read with the external state.
     @Published public private(set) var diagLog = true
     @Published public private(set) var diagLogEmpty = true
+    /// The text the preview sheet shows (docs/spec/macos-shell.md §13.3), taken once when it opens; `nil` while it is closed.
+    @Published public private(set) var diagPreview: String?
 
     public init(shell: Shell) {
         self.shell = shell
@@ -149,10 +151,16 @@ public final class SettingsModel: ObservableObject {
         refreshExternal()
     }
 
-    /// The text the preview sheet shows; `copyDiagLog` puts this same text on the pasteboard.
-    public func diagLogPreview() -> String { shell.diag.export(version: shell.updates?.version ?? "0.0.0") }
+    /// 複製診斷紀錄…: the export, taken now, is what the sheet shows.
+    public func openDiagPreview() { diagPreview = shell.diag.export(version: shell.updates?.version ?? "0.0.0") }
 
-    public func copyDiagLog(_ text: String, to pasteboard: DiagPasteboard) { DiagLog.copy(text, to: pasteboard) }
+    /// 複製: the very text the sheet showed (not a new export), then the sheet closes.
+    public func copyDiagPreview(to pasteboard: DiagPasteboard) {
+        if let diagPreview { DiagLog.copy(diagPreview, to: pasteboard) }
+        diagPreview = nil
+    }
+
+    public func closeDiagPreview() { diagPreview = nil }
 
     public func selectLayout(_ m: InputMode) { shell.selectLayout(m) }
     public func setPrediction(_ on: Bool) { shell.applyPrediction(on) }

@@ -159,9 +159,10 @@ final class LogTests: XCTestCase {
             diagClient.session.handle(Keys.event(56, flags: flags, type: .flagsChanged, time: at))
         }
         let diagModel = SettingsModel(shell: diagShell)
-        let diagText = diagModel.diagLogPreview()
+        diagModel.openDiagPreview()
+        let diagText = diagModel.diagPreview ?? ""
         let pasteboard = FakePasteboard()
-        diagModel.copyDiagLog(diagText, to: pasteboard)
+        diagModel.copyDiagPreview(to: pasteboard)
         let diagEvents = diagText.split(separator: "\n").dropFirst().map { String($0.drop(while: { $0 != " " }).dropFirst()) }
         XCTAssertTrue(diagEvents.contains("shift left toggled") && diagText.contains(bundleMarker), "the diagnostic log did not record the tap")
 

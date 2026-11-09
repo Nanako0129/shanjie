@@ -395,9 +395,9 @@ struct SettingsPageForm: View {
             case .diagnostics:
                 Section("診斷") {
                     Toggle("記錄偶發問題的診斷資料", isOn: Binding(get: { model.diagLog }, set: { model.setDiagLog($0) }))
-                    Text("只存在這台 Mac 的記憶體裡，不會自動送出。會記下切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。")
+                    Text("只存在這台 Mac 的記憶體裡，不會自動送出。會記下每次放開 Shift 的判斷、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift，切換中英照記。")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button("複製診斷紀錄…") { diagPreview = model.diagLogPreview() }
+                    Button("複製診斷紀錄…") { model.openDiagPreview() }
                         .disabled(model.diagLogEmpty)
                 }
             case .about:
@@ -408,20 +408,17 @@ struct SettingsPageForm: View {
         .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
         // docs/spec/macos-shell.md §13.3: the whole text first; only 複製 puts it, unchanged, on the pasteboard.
-        .sheet(isPresented: Binding(get: { diagPreview != nil }, set: { if !$0 { diagPreview = nil } })) {
+        .sheet(isPresented: Binding(get: { model.diagPreview != nil }, set: { if !$0 { model.closeDiagPreview() } })) {
             VStack(alignment: .leading) {
                 ScrollView {
-                    Text(diagPreview ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Text(model.diagPreview ?? "").font(.system(.caption, design: .monospaced))  // not selectable: ⌘C would skip the copy below
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(width: Self.diagPreviewSize.width, height: Self.diagPreviewSize.height)
                 HStack {
                     Spacer()
-                    Button("取消", role: .cancel) { diagPreview = nil }.keyboardShortcut(.cancelAction)
-                    Button("複製") {
-                        if let text = diagPreview { model.copyDiagLog(text, to: NSPasteboard.general) }
-                        diagPreview = nil
-                    }
+                    Button("取消", role: .cancel) { model.closeDiagPreview() }.keyboardShortcut(.cancelAction)
+                    Button("複製") { model.copyDiagPreview(to: NSPasteboard.general) }
                     .keyboardShortcut(.defaultAction)
                 }
             }
@@ -430,8 +427,6 @@ struct SettingsPageForm: View {
     }
     /// The preview's text area: wide enough for a line of the log in the caption monospaced font; not measured against a reference.
     private static let diagPreviewSize = CGSize(width: 460, height: 320)
-    /// The text the preview sheet shows; `nil` while it is closed.
-    @State private var diagPreview: String?
 }
 
 /// The 關於 page (docs/spec/install-and-update.md §3.4–§3.6): version, the update controls, the site and the licence line. The

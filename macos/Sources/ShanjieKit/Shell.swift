@@ -1560,7 +1560,7 @@ public final class Session {
         guard event == nil || event?.type == .keyDown else { return false }
         // docs/spec/english-mixed.md §10.3: the key is handled as usual first; the window (when armed) shows after it.
         defer { shell.showEnglishNoticeIfArmed(caret: currentLineRect()) }
-        shell.shiftTap.keyDown()  // docs/spec/keys-and-composition.md §9.1: a key between Shift's press and release spoils the tap
+        shell.shiftTap.keyDown(shiftHeld: event?.modifierFlags.contains(.shift) ?? false)  // docs/spec/keys-and-composition.md §9.1: a key between Shift's press and release spoils the tap
         if claim() {
             let bundle = client.bundleIdentifier  // a synchronous IPC: read once for both
             shell.diag.record(.owner(bundle: DiagLog.clean(bundle)))

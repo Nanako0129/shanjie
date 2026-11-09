@@ -31,10 +31,20 @@ public struct ShiftTap {
     /// longer be a tap (`nil` while it still can), and whether a key went down since (a capital: not recorded at all).
     private var press: (key: UInt16, at: TimeInterval, otherDown: Bool, spoiled: Outcome?, interrupted: Bool)?
 
+    /// docs/spec/macos-shell.md §13.1: a key went down while a Shift was (or may have been) held, since both Shift keys were last up. While
+    /// set, a release that is not a tap is not recorded (`nil`): with the two Shift keys overlapping, the press record of the key that was
+    /// interrupted can be replaced by the other side's, and its release would otherwise tell a capital apart. The toggle decision never
+    /// reads it.
+    private var typedSinceAllUp = false
+
     public init() {}
 
-    /// A `keyDown` anywhere: Shift+letter, Shift+arrow and the like are not a tap.
-    public mutating func keyDown() { press?.interrupted = true }
+    /// A `keyDown` anywhere: Shift+letter, Shift+arrow and the like are not a tap. `shiftHeld`: the key's flags have Shift (a Shift held
+    /// since before this tap saw its press).
+    public mutating func keyDown(shiftHeld: Bool = false) {
+        press?.interrupted = true
+        if press != nil || shiftHeld { typedSinceAllUp = true }
+    }
 
     /// `event(…) == .toggled`.
     public mutating func flagsChanged(keyCode: UInt16, leftDown: Bool, rightDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
@@ -47,7 +57,8 @@ public struct ShiftTap {
     /// from them on every event, never kept, so a missed event cannot leave a stale key behind; `others`: Control, Option, Command or Fn
     /// is in the flags; `capsLock`: the light is on; `now`: the event's time; `processedAt`: the time this event is handled, on the same
     /// clock as `now` (the system uptime); `mouseAgo`: seconds since the latest mouse-button press, asked only when it can decide (a
-    /// release). The outcome of a Shift release; `nil` for anything else and for a release after a key (a capital).
+    /// release). The outcome of a Shift release; `nil` for anything else, for a release after a key (a capital), and for a release that is
+    /// not a tap after a key while both Shift keys were not yet all up.
     public mutating func event(keyCode: UInt16, leftDown: Bool, rightDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
                                processedAt: TimeInterval, mouseAgo: () -> TimeInterval) -> Outcome? {
         guard Self.shiftKeys.contains(keyCode) else {
@@ -60,7 +71,17 @@ public struct ShiftTap {
             press = (keyCode, now, otherDown, others ? .modifierAtPress : capsLock ? .capsLockAtPress : nil, false)
             return nil
         }
-        defer { press = nil }
+        defer {
+            press = nil
+            if down.isEmpty { typedSinceAllUp = false }
+        }
+        let outcome = release(keyCode: keyCode, otherDown: otherDown, others: others, capsLock: capsLock, now: now, processedAt: processedAt,
+                              mouseAgo: mouseAgo)
+        return outcome != .toggled && typedSinceAllUp ? nil : outcome
+    }
+
+    private func release(keyCode: UInt16, otherDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval, processedAt: TimeInterval,
+                         mouseAgo: () -> TimeInterval) -> Outcome? {
         guard let p = press else { return .noPress }
         if p.interrupted { return nil }
         guard p.key == keyCode else { return .otherKeyReleased }

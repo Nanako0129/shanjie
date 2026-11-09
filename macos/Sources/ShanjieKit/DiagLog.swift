@@ -17,7 +17,7 @@ public final class MemoryDiagLogStore: DiagLogStore {
 @MainActor
 public protocol DiagPasteboard: AnyObject {
     @discardableResult func prepareForNewContents(with options: NSPasteboard.ContentsOptions) -> Int
-    @discardableResult func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool
+    @discardableResult func writeObjects(_ objects: [NSPasteboardWriting]) -> Bool
 }
 
 extension NSPasteboard: DiagPasteboard {}
@@ -57,8 +57,9 @@ public final class DiagLog {
     public static let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
 
     private let store: DiagLogStore
-    /// A monotonic clock in seconds (the system uptime in the app); a test replaces it.
-    var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// A monotonic clock in seconds that keeps counting while the Mac sleeps (CLOCK_MONOTONIC, as `Shell.idleClock`; the system uptime
+    /// does not), so an event before a sleep is not shown as more recent than it was; a test replaces it.
+    var clock: () -> TimeInterval = { Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000 }
     private var shifts: [(at: TimeInterval, event: Event)] = []
     private var others: [(at: TimeInterval, event: Event)] = []
 
@@ -72,10 +73,11 @@ public final class DiagLog {
         }
     }
 
-    public var isEmpty: Bool { shifts.isEmpty && others.isEmpty }
+    /// Off counts as empty: the switch can also be turned off outside the settings window (`defaults write`), which the setter does not see.
+    public var isEmpty: Bool { !enabled || (shifts.isEmpty && others.isEmpty) }
 
     func record(_ event: Event) {
-        guard enabled else { return }
+        guard enabled else { shifts = []; others = []; return }
         let entry = (at: clock(), event: event)
         if case .shift = event {
             shifts.append(entry)
@@ -100,16 +102,19 @@ public final class DiagLog {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         let t = clock()
         var lines = ["shanjie \(Self.clean(version)) macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion) exported \(ISO8601DateFormatter().string(from: now))"]
-        for e in (shifts + others).sorted(by: { $0.at < $1.at }) {
+        for e in enabled ? (shifts + others).sorted(by: { $0.at < $1.at }) : [] {
             lines.append(String(format: "-%.3f ", max(0, t - e.at)) + e.event.line)
         }
         return lines.joined(separator: "\n") + "\n"
     }
 
-    /// Puts `text` on `pasteboard` for this Mac only (not Universal Clipboard), marked transient so clipboard managers keep no history.
+    /// Puts `text` on `pasteboard` for this Mac only (not Universal Clipboard), marked transient so clipboard managers keep no history. One
+    /// item written in one call carries both types, so no reader can see the text before the transient mark.
     public static func copy(_ text: String, to pasteboard: DiagPasteboard) {
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setString("", forType: transientType)
         pasteboard.prepareForNewContents(with: .currentHostOnly)
-        pasteboard.setString(text, forType: .string)
-        pasteboard.setString("", forType: transientType)
+        pasteboard.writeObjects([item])
     }
 }
