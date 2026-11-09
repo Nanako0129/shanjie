@@ -100,11 +100,63 @@ pub struct ReadingDecode {
     exempt: HashSet<(String, char)>,
     /// First 8 hex of the SHA-256 of the exempt list's text (`with_exempt`), for the summary tag; empty until then.
     exempt_sha8: String,
+    /// Evaluation only (`with_table`, the CLI's `--reading-table`): replaces the whole of `logp` for the pairs of the lexicon; a pair the table lacks
+    /// is 0. Keyed by (syllable id, character). `None` in the engine and in every shipping path.
+    table: Option<HashMap<(u32, char), f64>>,
 }
 
 impl ReadingDecode {
     pub fn new(lex: &Lexicon, base_text: &str) -> ReadingDecode {
-        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new() }
+        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new(), table: None }
+    }
+
+    /// Evaluation only: replaces the built-in t by `text`, one `character TAB reading TAB t` row per line (the format of `dump_table`), t being the value
+    /// before the `LAMBDA * max(t, -CAP)` step. A pair of the lexicon the text lacks reads t = 0. A malformed row, a character or reading the lexicon has
+    /// no single-character pair for, or a pair twice is an error naming the line.
+    pub fn with_table(mut self, lex: &Lexicon, text: &str) -> Result<ReadingDecode, String> {
+        let mut table = HashMap::new();
+        for (i, l) in text.lines().enumerate() {
+            let n = i + 1;
+            let bad = || format!("line {n}: not `character TAB reading TAB value`");
+            let mut f = l.split('\t');
+            let (Some(w), Some(syl), Some(t), None) = (f.next(), f.next(), f.next(), f.next()) else { return Err(bad()) };
+            let (mut cs, t) = (w.chars(), t.parse::<f64>().ok().filter(|t| t.is_finite()));
+            let (Some(c), None, Some(t)) = (cs.next(), cs.next(), t) else { return Err(bad()) };
+            let Some(&id) = lex.syl_ids.get(syl).filter(|_| lex.syllable_score(syl, w).is_some()) else {
+                return Err(format!("line {n}: the lexicon has no single-character pair {w} {syl}"));
+            };
+            if table.insert((id, c), t).is_some() {
+                return Err(format!("line {n}: the pair is twice in the table"));
+            }
+        }
+        self.table = Some(table);
+        Ok(self)
+    }
+
+    /// Evaluation only: the table `logp` uses now in the format `with_table` reads: one row per (single character, reading) pair of every character with at
+    /// least two single-character readings (the others read t = 0), sorted by character then reading, t in Rust's shortest round-trip float text so
+    /// reading it back changes nothing.
+    pub fn dump_table(&self, lex: &Lexicon) -> String {
+        let mut pairs: Vec<(char, String)> = Vec::new();
+        for (r, rd) in lex.readings.iter().enumerate() {
+            if rd.key_len != 1 {
+                continue;
+            }
+            let syl = &lex.syl_names[lex.key_pool[rd.key_off as usize] as usize];
+            for p in lex.range(r) {
+                let mut cs = lex.word(p).chars();
+                if let (Some(c), None) = (cs.next(), cs.next()) {
+                    pairs.push((c, syl.clone()));
+                }
+            }
+        }
+        pairs.sort();
+        pairs.dedup();
+        let mut readings: HashMap<char, usize> = HashMap::new();
+        for (c, _) in &pairs {
+            *readings.entry(*c).or_default() += 1;
+        }
+        pairs.iter().filter(|(c, _)| readings[c] >= 2).map(|(c, syl)| format!("{c}\t{syl}\t{:?}\n", self.logp(lex, syl, &c.to_string()).unwrap_or(0.0))).collect()
     }
 
     /// R1g: the pairs in `text` (`syllable<TAB>character` rows; blank lines and `#` lines skipped) cost 0, whatever the lexicon scores them.
@@ -133,6 +185,14 @@ impl ReadingDecode {
     /// minus the word's best score (the research's `lex_logp`), 0 for a `SANDHI` reading, the mc value for a pair at `LEX_FLOOR`. `None` when the
     /// lexicon has no such pair. The scores are the raw lexicon's (largest over duplicate rows), before capping, demotion and learning.
     pub fn logp(&self, lex: &Lexicon, syl: &str, word: &str) -> Option<f64> {
+        if let Some(tb) = &self.table {
+            lex.syllable_score(syl, word)?;
+            let mut cs = word.chars();
+            return Some(match (cs.next(), cs.next(), lex.syl_ids.get(syl)) {
+                (Some(c), None, Some(&id)) => tb.get(&(id, c)).copied().unwrap_or(0.0),
+                _ => 0.0,
+            });
+        }
         let (s, best) = (lex.syllable_score(syl, word)?, lex.best_word_score(word)?);
         let mut t = s - best;
         if SANDHI.contains(&(syl, word)) {
@@ -280,6 +340,33 @@ mod tests {
         for bad in ["b\t甲乙\n", "b 甲\n", "b\t甲\textra\n", "\t甲\n"] {
             let e = try_built(LEX, None, bad).err().unwrap_or_else(|| panic!("{bad:?} loaded"));
             assert!(e.contains("std-exempt.tsv"), "{e}");
+        }
+    }
+
+    /// Evaluation only: the dump lists the pairs of characters with at least two single-character readings (the exempt and sandhi ones as 0), and
+    /// read back it changes no `logp` or `term` bit; a changed row changes that pair only, a pair the table lacks is 0, and a malformed row, an
+    /// unknown pair or a pair twice is an error naming the line.
+    #[test]
+    fn a_table_replaces_the_built_in_values() {
+        let base = "a 長 -1.0\nb 長 -6.8\nb-a 長長 -2.0\na 甲 -1.0\nb 甲 -3.0\nc 甲 -9.0\nㄧˊ 一 -5.0\nㄧ 一 -1.0\nd 乙 -4.0\n";
+        let (lex, rd) = built(base, None, "c\t甲\n");
+        let dump = rd.dump_table(&lex);
+        assert_eq!(dump.lines().count(), 7, "乙 has one reading and is left out: {dump}");
+        assert!(dump.contains("甲\tc\t0.0\n") && dump.contains("一\tㄧˊ\t0.0\n") && !dump.contains('乙'));
+        let rd2 = ReadingDecode::new(&lex, base).with_table(&lex, &dump).unwrap();
+        for syl_w in [("a", "長"), ("b", "長"), ("a", "甲"), ("b", "甲"), ("c", "甲"), ("ㄧˊ", "一"), ("ㄧ", "一"), ("d", "乙")] {
+            assert_eq!(rd.logp(&lex, syl_w.0, syl_w.1).map(f64::to_bits), rd2.logp(&lex, syl_w.0, syl_w.1).map(f64::to_bits), "{syl_w:?}");
+            assert_eq!(rd.term(&lex, syl_w.0, syl_w.1).to_bits(), rd2.term(&lex, syl_w.0, syl_w.1).to_bits(), "{syl_w:?}");
+        }
+        assert_eq!(rd2.dump_table(&lex), dump, "the dump of a table is the table");
+        let rd3 = ReadingDecode::new(&lex, base).with_table(&lex, "甲\tb\t-0.5\n").unwrap();
+        close(rd3.logp(&lex, "b", "甲").unwrap(), -0.5);
+        close(rd3.logp(&lex, "c", "甲").unwrap(), 0.0);
+        close(rd3.logp(&lex, "ㄧˊ", "一").unwrap(), 0.0);
+        assert!(rd3.logp(&lex, "z", "甲").is_none());
+        for (bad, line) in [("甲\tb\t-1\n甲\tb\n", 2), ("甲\tb\tx\n", 1), ("甲甲\tb\t0\n", 1), ("甲\tb\t0\textra\n", 1), ("甲\tb\tNaN\n", 1), ("甲\tb\t0\n甲\tb\t1\n", 2), ("甲\tz\t0\n", 1), ("戊\ta\t0\n", 1), ("甲\ta\t0\n甲\td\t0\n", 2)] {
+            let e = ReadingDecode::new(&lex, base).with_table(&lex, bad).err().unwrap_or_else(|| panic!("{bad:?} loaded"));
+            assert!(e.starts_with(&format!("line {line}:")), "{bad:?}: {e}");
         }
     }
 

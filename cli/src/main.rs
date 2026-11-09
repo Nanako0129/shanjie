@@ -269,6 +269,13 @@ struct RowOut {
 /// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>` in every setting. `--no-reading-decode`
 /// (evaluation only) leaves the term out: the decoder is the one without it and the tag has neither `+rd` nor `+rx`. There is no reading-channel term in the
 /// fusion (docs/spec/decoder.md §5; no `+rc` tag), so the colloquial tag is just `+colloq:<sha8>`.
+///
+/// `--reading-table FILE` (evaluation only; experiments/reading-counts-b3 in the research repository; not in the engine or the C ABI): the reading term's t comes from
+/// the file's `character TAB reading TAB t` rows (t before the `lambda * max(t, -c)` step) instead of the built-in table; a pair of the lexicon the file lacks
+/// reads t = 0, and a malformed row, a character or reading the lexicon has no single-character pair for, or a pair twice stops the run naming the line. The tag
+/// gains `+rt:<first 8 hex of the file's SHA-256>` after `+rd+rx:...`. `--dump-reading-table FILE` writes the built-in table (every (character, reading) pair of
+/// a character with at least two single-character readings, t as the term's input, sorted, shortest round-trip float text) and stops, printing nothing; it refuses
+/// to overwrite. A run with the file it wrote gives the picks and `top1_sha256` of a run without `--reading-table`. Both need the reading term (no `--no-reading-decode`).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -295,6 +302,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut delta_given = false;
     let mut reading_decode = true;
+    let (mut reading_table, mut dump_reading_table) = (None::<String>, None::<String>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -350,6 +358,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-reading-decode" => reading_decode = false,
+            "--reading-table" => reading_table = Some(val()?),
+            "--dump-reading-table" => dump_reading_table = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
     }
@@ -375,6 +385,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
+    }
+    if (reading_table.is_some() || dump_reading_table.is_some()) && !reading_decode {
+        return Err("--reading-table and --dump-reading-table need the reading term (not --no-reading-decode)".into());
+    }
+    if reading_table.is_some() && dump_reading_table.is_some() {
+        return Err("--reading-table and --dump-reading-table cannot be combined".into());
     }
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let extra_overlay = extra_overlay_checked(extra_overlay)?;
@@ -436,7 +452,24 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // The reading term: the engine's own table (mcbpmf-data.txt for the mc estimate of the floor readings, std-exempt.tsv for the exemptions) and its tag.
     let (capped, rd_tag) = if reading_decode {
         let rd = load_reading_decode(&lex, &dir).map_err(|e| e.to_string())?;
-        let tag = rd.tag();
+        // The built-in table written out, then nothing else runs.
+        if let Some(f) = &dump_reading_table {
+            if Path::new(f).exists() {
+                return Err("--dump-reading-table: the file exists (not overwritten)".into());
+            }
+            fs::write(f, rd.dump_table(&lex)).map_err(|e| format!("--dump-reading-table: cannot write the file ({:?})", e.kind()))?;
+            return Ok(());
+        }
+        let mut tag = rd.tag();
+        let rd = match &reading_table {
+            Some(f) => {
+                let bytes = fs::read(f).map_err(|e| format!("--reading-table: cannot read the file ({:?})", e.kind()))?;
+                let text = String::from_utf8(bytes.clone()).map_err(|_| "--reading-table: not UTF-8".to_string())?;
+                tag += &format!("+rt:{}", &sha256_hex(&bytes)[..8]);
+                rd.with_table(&lex, &text).map_err(|e| format!("--reading-table: {e}"))?
+            }
+            None => rd,
+        };
         (capped.with_reading(rd), tag)
     } else {
         (capped, String::new())

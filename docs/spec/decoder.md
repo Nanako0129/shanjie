@@ -186,6 +186,7 @@
 - 開關：`Engine::set_reading_decode(false)`、CLI 與重播的 `--no-reading-decode` 只給評測用，不在 `shanjie.h`。關閉等於沒有讀音項的解碼器。
 - 摘要行：每個設定的標記最後都是 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>`；`--no-reading-decode` 時兩者都沒有。標記驗證工具（`tools/kpi.py`、`tools/bench.py`，以及不在本 repo 的研究工具）依版本判定尾端是否應有它。
 - 融合層沒有讀音通道項：`set_reading_channel`、`--no-reading-channel` 與標記 `+rc` 已不存在。
+- 研究用的表（只有 `shanjie-eval`，不在引擎與 `shanjie.h`）：`--dump-reading-table 檔` 把內建的 t 寫成 `字\t讀音\tt`（單字讀音至少 2 個的字，每個（字, 讀音）一行，照字與讀音排序，t 是讀音項的輸入、浮點用最短可還原的寫法；已有檔案時拒寫），寫完就結束、不印任何東西；`--reading-table 檔` 用該檔的 t 取代內建值（檔裡沒有的（字, 讀音）是 0；格式錯、詞庫沒有的字或讀音、重複的對都停下並說出行號），摘要標記在 `+rd+rx:…` 後加 `+rt:<該檔 SHA-256 前 8 碼>`。兩個選項都要有讀音項（不能和 `--no-reading-decode` 並用），彼此也不能並用。用 `--dump-reading-table` 寫的檔去跑 `--reading-table`，每列選字與 `top1_sha256` 和不帶選項的一跑相同（`cli/tests/reading_decode.rs` 釘住）；不帶選項時輸出不變。
 - Python 參考實作不實作讀音項，所以和 Python 逐位元組比對的 golden 一律帶 `--no-reading-decode`；另有只有 Rust 的出貨預設釘值（dev302、打字測驗、錯字回報，兩個設定：摘要行與 `top1_sha256`）。
 - 取捨：讀音項放在解碼器本身而不是重排前的一步，因為 n-gram 只看字不看讀音，要在每一鍵、語意校正關著時也生效，光束才會用它剪枝。
 
