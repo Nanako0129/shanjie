@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>路線圖｜善解輸入法</title>
+<meta name="description" content="善解輸入法依版本分階段的路線圖：每個階段完成了什麼、研究的結論、進行中與之後要做的事。">
+<meta property="og:title" content="路線圖｜善解輸入法">
+<meta property="og:description" content="善解輸入法依版本分階段的路線圖：每個階段完成了什麼、研究的結論、進行中與之後要做的事。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://shanjie.nyanako.com/roadmap">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="路線圖｜善解輸入法">
+<meta name="twitter:description" content="善解輸入法依版本分階段的路線圖：每個階段完成了什麼、研究的結論、進行中與之後要做的事。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/roadmap">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "路線圖", "item": "https://shanjie.nyanako.com/roadmap"}]}</script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>路線圖</h1>
+<p class="sub">依版本分階段，研究插在它進行的那個階段，寫明結論。日期是發佈日（台灣時間）。每一版改了什麼見<a href="/updates">更新紀錄</a>。</p>
+
+<ul class="legend" aria-label="圖例">
+  <li><i class="l-done"></i>完成</li><li><i class="l-wip"></i>進行中</li><li><i></i>規劃中</li><li><i class="l-res"></i>研究</li><li><i class="l-res l-res-done"></i>研究完成</li>
+</ul>
+<div class="stages">
+
+  <details class="stage">
+    <summary><span class="ver">v0.1</span><span class="st-title">輸入法本體</span><span class="tag done">完成</span>
+      <span class="meta">2026-10-04～10-05・v0.1.0～v0.1.2</span></summary>
+    <ul class="items">
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>評測基準與評測資料</h3><p>口語開發集與獨立撰寫的保留集，含同音陷阱與詞庫沒收的日常用語。</p></li>
+      <li class="research done"><span class="mark"></span><span class="sr-only">研究完成：</span><h3><span class="kind">研究</span>語意選字可行性</h3><p>結論：瓶頸在候選，不在判斷，先把正解放進候選。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>詞庫 v1 與精簡格式</h3><p>從維基標題與維基詞典補進約 34 萬個詞，記憶體從約 390 MB 降到約 88 MB。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>語言模型整句選字</h3><p>用上下文排序候選，聊天與書面兩種設定依前景 App 自動切換。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>macOS 輸入法本體</h3><p>標準與倚天鍵盤、候選窗；標點留在組字區，並有標點候選清單。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>標準讀音</h3><p>依教育部規範，「一」「不」打本調或變調都能打出整個詞。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>簽章與發佈流程</h3><p>Developer ID 簽章與 Apple 公證、安裝程式、Homebrew。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage">
+    <summary><span class="ver">v0.2</span><span class="st-title">選字記憶與候選窗</span><span class="tag done">完成</span>
+      <span class="meta">2026-10-05～10-07・v0.2.0～v0.2.1</span></summary>
+    <ul class="items">
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>個人化學習</h3><p>只從候選窗的改選學習、依前文分開記；密碼欄與安全輸入時暫停，可以全部清除。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>玻璃候選窗</h3><p>自己繪製的玻璃候選列，標點附上名稱；按 ↓ 往下疊出更多候選列，每列 9 個。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>按鍵細節</h3><p>空組字區按聲調鍵打出聲調符號；Backspace 逐個刪注音符號，和蘋果注音相同。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage">
+    <summary><span class="ver">v0.3</span><span class="st-title">選字品質</span><span class="tag done">完成</span>
+      <span class="meta">2026-10-08・v0.3.0</span></summary>
+    <ul class="items">
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>看前文選字</h3><p>讀取游標前已經送出的字，接著它選這一段的第一個詞。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>台灣字形與簡體殘留</h3><p>「最后」「由于」清掉；「床」「秘」「灶」不再被轉成異體字。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>詞類回退</h3><p>兩個詞沒在語料裡一起出現過時，用「哪一類詞後面常接哪一類詞」補估計。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>即時預測</h3><p>打下一個詞的第一個注音，就列出接得上前文的詞；按 Tab 進入選取。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>候選窗跟著 App 的深淺色</h3><p>候選列的高度與位置和蘋果注音並排量過。</p></li>
+      <li class="research done"><span class="mark"></span><span class="sr-only">研究完成：</span><h3><span class="kind">研究</span>維基百科的台灣正體轉換</h3><p>結論：對打字沒有顯著幫助，還打錯了使用者回報的句子，不採用。</p></li>
+      <li class="research done"><span class="mark"></span><span class="sr-only">研究完成：</span><h3><span class="kind">研究</span>本機大模型重排</h3><p>結論：四個本機模型都沒過門檻，每句 p95 510～640 毫秒也超過 300 毫秒的上限，暫不進輸入法。</p></li>
+      <li class="research done"><span class="mark"></span><span class="sr-only">研究完成：</span><h3><span class="kind">研究</span>評測統計</h3><p>會改變選字結果的改動都用配對比較、精確檢定與信賴區間判斷有沒有進步。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage">
+    <summary><span class="ver">v0.4</span><span class="st-title">安裝、設定與詞包</span><span class="tag done">完成</span>
+      <span class="meta">2026-10-10～10-17・v0.4.0～v0.4.7</span></summary>
+    <ul class="items">
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>新的安裝程式</h3><p>歡迎、安裝、到系統設定加入、試打四個步驟；更新不再弄壞 Caps Lock 切換。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>設定視窗與候選窗直排</h3><p>選單的選項都在設定視窗裡；候選窗可選直排。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>動漫與遊戲詞包</h3><p>從中文維基百科收錄作品名與角色名，v0.4.1 補上含間隔號的名字，約 4.5 萬詞。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>語意校正（v0.4.1）</h3><p>小型字元語言模型在背景重排整句的前 8 名，預設開；v0.4.4 起有保守、標準、積極三段強度。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>選字記憶與解碼器的修正（v0.4.2、v0.4.3）</h3><p>句首學到的詞要後面接的音相同才加分；解碼器依「字串＋最後一個詞」保留斷法。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>常見專有名詞與中英混打（v0.4.4、v0.4.5）</h3><p>公司、學校、店名有自己的一層詞表；中英混打（實驗）上線。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>書面看前兩個詞、自動更新（v0.4.7）</h3><p>書面設定加上三元表「連文」；設定的「關於」頁可以直接更新輸入法。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage">
+    <summary><span class="ver">v0.5</span><span class="st-title">口語、沙盒與數字</span><span class="tag done">完成</span>
+      <span class="meta">2026-10-22・v0.5.0</span></summary>
+    <ul class="items">
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>聊天更懂口語</h3><p>聊天設定多參考口語詞頻表「常談」與單字的讀音；「桌腳的螺絲鬆掉了」不再選成「羅斯松」。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>App 沙盒與「這台 Mac」安裝</h3><p>輸入法在沙盒裡執行；裝給這台 Mac 時，安全輸入不再讓善解反灰。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>數字列、預測列與新詞</h3><p>數字列直接打數字；預測列與 ↓ 一致；逐字改選拼出的詞記成新詞；改選後其他字不動。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage">
+    <summary><span class="ver">v0.6</span><span class="st-title">新模型、詞包與模糊輸入</span><span class="tag done">完成</span>
+      <span class="meta">2026-10-29・v0.6.0；2026-10-31・v0.6.1</span></summary>
+    <ul class="items">
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>一整組新模型</h3><p>通語 SJ-LM-7-9.7M、會意 SJ-SR-7-15M 等；錯字回報（80 句）聊天 33 → 70 句、書面 29 → 61 句。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>資訊與 AI 詞包、網路用語與名字</h3><p>資訊與 AI 詞包 1,016 個詞（預設開）；動漫詞包更新到 44,552 詞。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>模糊輸入與輕聲容錯</h3><p>四組模糊音與鄰鍵打錯（預設全關）；只有輕聲讀音的詞打成本調也打得出來。</p></li>
+      <li class="done"><span class="mark"></span><span class="sr-only">完成：</span><h3>中英混打接回、單按 Shift（v0.6.1）</h3><p>打得出 ok、gta6；單按 Shift 切換中英；經典台詞詞包（預設關）。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage" open>
+    <summary><span class="ver">之後</span><span class="st-title">已排定</span><span class="tag wip">進行中</span>
+      <span class="meta">順序依實測與回報調整</span></summary>
+    <ul class="items">
+      <li class="research wip"><span class="mark"></span><span class="sr-only">研究進行中：</span><h3><span class="kind">研究</span>解碼時看讀音</h3><p>把「這個字讀成你打的音的機率」算進整句選字，修「否則變快」選成「便會」這類錯；確認通過，正在放進輸入法，還沒發版。</p></li>
+      <li class="wip"><span class="mark"></span><span class="sr-only">進行中：</span><h3>句首單字的選字記憶</h3><p>句首打「照建議」會出「趙建議」、改選也記不住；開發中。</p></li>
+      <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>領域詞包</h3><p>資訊與 AI 之後，美妝與保養詞包已合併、隨下一版出貨；醫藥、法律接著做，預設關。</p></li>
+      <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>語料很少出現的名字</h3><p>像「宿儺」這種幾乎沒在語料出現的名字，另外開一片處理。</p></li>
+      <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>更多新詞</h3><p>從語料自動找出詞庫沒收的新詞；也能手動加詞。</p></li>
+      <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>破音字的搭配</h3><p>同一個字的不同讀音分開計算搭配。</p></li>
+      <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>Windows 版</h3><p>核心移植到 Windows 與文字服務正在做，沒有時程。</p></li>
+      <li><span class="mark"></span><span class="sr-only">暫停：</span><h3>預測可省略韻母</h3><p>一次縮寫一個詞的版本做完了，要做到整句縮寫才出；目前沒有在做。</p></li>
+      <li class="research done"><span class="mark"></span><span class="sr-only">研究完成：</span><h3><span class="kind">研究</span>外部模型 0c 的重排對照</h3><p>結論：不接進善解，0c 只當量尺。</p></li>
+    </ul>
+  </details>
+
+  <details class="stage">
+    <summary><span class="ver">未排定</span><span class="st-title">雲端校正與新手測驗</span><span class="tag">規劃中</span>
+      <span class="meta">還沒排定時程</span></summary>
+    <ul class="items">
+      <li><span class="mark"></span><span class="sr-only">規劃中：</span><h3>一鍵校正、新手測驗</h3><p>打完一段可以請雲端模型重看（預設關閉，只能從本機候選裡挑）；第一次使用時用簡單測驗了解你的打字習慣。上線前會先寫在<a href="/privacy">隱私與資料</a>。</p></li>
+    </ul>
+  </details>
+
+</div>
+
+<p class="next"><a href="/updates">更新紀錄 →</a><a href="/how">怎麼選字 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap" aria-current="page">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+</div></footer>
+</body>
+</html>
