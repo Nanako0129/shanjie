@@ -9,6 +9,8 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* 版面寬度：內文 760 px 的單欄閱讀寬（沿用改版前），表格可以放寬到 960 px */
   --col: 760px; --col-wide: 960px; --gutter: 16px;
+  /* 電腦版兩側的固定留白：16 px 的手機邊距放大三倍，寬螢幕上內文不貼著視窗邊 */
+  --gutter-desktop: 48px;
   /* 導覽列高度：一列 15 px 字加上下 12 px 留白，和頁尾 14 px 字同一個尺度 */
   --nav-h: 52px;
 }
@@ -21,6 +23,12 @@
 :root[data-theme="dark"] {
   --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
   --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+}
+/* 電腦版：內文、導覽列、頁尾的寬度跟著視窗走，兩側固定留 --gutter-desktop。
+   斷點 900 px：從這個寬度起「視窗寬 − 2×48」不小於原本的 760 − 2×16，切換時內容不會變窄；更窄的視窗（手機）照舊。
+   （media query 裡不能用 CSS 變數，所以 900 寫在這裡。） */
+@media (min-width: 900px) {
+  :root { --col: none; --col-wide: none; --gutter: var(--gutter-desktop); }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--nav-h) + 12px); }
