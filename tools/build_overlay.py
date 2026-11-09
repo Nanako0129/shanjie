@@ -16,6 +16,12 @@ docs/spec/lexicon-and-packs.md §2.7, §2.8（都預設關，不加旗標時輸�
                                   先過和維基標題候選相同的過濾（每個字是基底單字詞、不含簡體專用字），再和它們一起走異體判斷（臺／台 這類
                                   同讀音異體寫法拿掉，記進 overlay-variant-removed.tsv）
       --jobs N                    萌典補詞數子字串用幾個程序
+
+加詞表（預設關，不加旗標時輸出和原來逐位元組相同；這份詞表要進計數詞表的詞也要在常開詞庫裡才打得出來）：
+      --lexgap FILE               LEXGAP 詞表（overlay 格式四欄：讀音（音節用 - 連）、詞、分數、lexgap；變調列可以在也可以不在，會照 overlay_rows 重寫）。
+                                  讀音照詞表，分數＝同字數的 length_scores（不加手動詞的加分，詞表裡的分數不用），標籤 lexgap；列接在萌典補詞後面、手動詞前面
+                                  （--tails-only 重算檔尾時這些列留在產生的列裡）。詞在基底、疊加層前面的列、名單層或詞包、讀音有基底沒有的音節、
+                                  或是同讀音基底詞（或前面的列）的異體寫法，就中止並指出行號（維基標題候選是靜默拿掉，這份詞表是固定的，所以中止）
 """
 import argparse
 import bz2
@@ -154,8 +160,8 @@ def overlay_rows(w, syls, score, src):
 Info = collections.namedtuple("Info", "syls twin twin_reading tries extra")   # extra：第一個讀音 syls 之後同分的其他讀音們（--moedict-readings 才有）
 
 
-def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
-    """supplement：None，或萌典補詞要數的純文字檔路徑清單。其他參數見模組說明；預設值＝原本的輸出。回 (rows, removed, variant_removed, jp_removed)。"""
+def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, lexgap=None):
+    """supplement：None，或萌典補詞要數的純文字檔路徑清單。lexgap：None，或 LEXGAP 詞表檔。其他參數見模組說明；預設值＝原本的輸出。回 (rows, removed, variant_removed, jp_removed)。"""
     base = ime.Lexicon(BASE)
     words = set(base.by_word)                       # 基底詞表＝解析後（套用 S0 的行過濾）的詞，不分讀音
     chars = {w for w in words if len(w) == 1}
@@ -292,6 +298,9 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1):
         src = "wikt" if w in wikt else "zhwiki"
         rows += word_rows(w, [syls, *info[w].extra], SCORE[len(w)], src)
     rows += sup_rows
+    if lexgap:
+        rows += lexgap_rows(lexgap, words | {r.split("\t")[1] for r in rows} | other_layers(), length_scores(base), syllables, base.by_reading, fold_w,
+                            [r.split("\t")[:2] for r in rows])
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
     rows += tail_rows(words | overlay_words, length_scores(base), syllables)
@@ -722,6 +731,43 @@ def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual"):
     return rows
 
 
+def lexgap_rows(path, taken, scores, syllables, by_reading, fold_w, earlier=()):
+    """--lexgap：LEXGAP 詞表（overlay 格式）→ 列。每個詞的第一列起，不是前一個主要列的變調列的，都當主要讀音，經 overlay_rows 寫出（變調列照規則重寫）；
+    分數＝scores[字數]。taken：基底、前面各來源、名單層與詞包的詞。earlier：前面各來源的 [讀音, 詞]，異體判斷也比對它們。任何一項不符就中止並指出行號。"""
+    out, seen, sandhi = [], set(), {}
+    by_read = collections.defaultdict(set)           # 讀音（以 - 連）→ 前面已寫的詞
+    for reading, w in earlier:
+        by_read[reading].add(w)
+    with open(path, encoding="utf-8-sig") as f:
+        lines = f.read().splitlines()
+    for n, line in enumerate(lines, 1):
+        if line.startswith("#") or not line.strip():
+            continue
+        p = line.split("\t")
+        ok = len(p) == 4 and p[3] == "lexgap" and bool(MANUAL_WORD.match(p[1]))
+        if ok:
+            w, syls = p[1], p[0].split("-")
+            ok = len(w) in scores and len(syls) == len(w) and all(s in syllables for s in syls)
+        if not ok:
+            raise SystemExit(f"{path}:{n}: bad lexgap row")
+        if syls == sandhi.get(w):                    # the file's own sandhi row of the main row before it; overlay_rows writes it
+            continue
+        if w in taken:
+            raise SystemExit(f"{path}:{n}: {w!r} is already in the base, a layer or a pack")
+        twin = next((b for b, _ in by_reading.get(tuple(syls), ()) if fold_w(b) == fold_w(w)), None) or next((b for b in by_read[p[0]] if fold_w(b) == fold_w(w)), None)
+        if twin:
+            raise SystemExit(f"{path}:{n}: {w!r} is a variant of {twin!r} on the same reading")
+        sandhi[w] = sandhi_variant(w, syls)
+        for r in overlay_rows(w, syls, scores[len(w)], "lexgap"):
+            key = tuple(r.split("\t")[:2])
+            if key in seen:
+                raise SystemExit(f"{path}:{n}: {w!r} repeats a reading already listed (sandhi rows count)")
+            seen.add(key)
+            by_read[key[0]].add(w)
+            out.append(r)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     mode = ap.add_mutually_exclusive_group()
@@ -731,9 +777,12 @@ def main():
     ap.add_argument("--reading-report", metavar="PATH")
     ap.add_argument("--moedict-supplement", nargs="+", metavar="FILE")
     ap.add_argument("--jobs", type=int, default=1)
+    ap.add_argument("--lexgap", metavar="FILE")
     a = ap.parse_args()
     if a.reading_report and not a.moedict_readings:
         ap.error("--reading-report needs --moedict-readings")
+    if a.lexgap and a.tails_only:
+        ap.error("--lexgap needs a full build, not --tails-only")
     if a.tails_only:
         rows = rebuild_tails()
         with open(OUT + ".tmp", "w", encoding="utf-8") as f:
@@ -741,7 +790,7 @@ def main():
         os.replace(OUT + ".tmp", OUT)
         print(f"wrote {len(rows)} rows to {os.path.relpath(OUT, ROOT)} (tails only)")
         return
-    rows, removed, variant_removed, jp_removed = build(a.moedict_readings, a.reading_report, a.moedict_supplement, a.jobs)
+    rows, removed, variant_removed, jp_removed = build(a.moedict_readings, a.reading_report, a.moedict_supplement, a.jobs, a.lexgap)
     outputs = [(OUT, rows), (REMOVED, removed), (VARIANT_REMOVED, variant_removed)] + ([(JP_REMOVED, jp_removed)] if a.moedict_readings else [])   # 日文寫法檔只有 --moedict-readings 才有
     if a.check:
         # The shipped overlay must match; the removal reports live in build/overlay/ (untracked), so each is compared only when present.
