@@ -242,7 +242,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - 項目標題都是固定字串（不含 App 名稱、路徑或數量）。
 - **清除選字記憶…**的視窗是 `NSAlert`，不用 `runModal`（會讓輸入法在視窗開著時停止服務其他 App），按鈕的 target／action 回呼。「取消」排第一個、是預設鈕（Return），「清除」標為破壞性。輸入法是 agent app（`LSUIElement`）：開窗時記下前景 App，`NSApp.activate()`，視窗層級 `.modalPanel`，置中；按下按鈕後把焦點還給記下的 App（後續的失敗視窗開著時不還）。清除失敗另開一個「清除選字記憶失敗」視窗，不假裝完成。同時只開一個。
 
-驗證：`ShellTests` 的選單與偏好案例（`testMenuSelectionCommitsSwitchesAndStores`、`testStoredEtenLayoutAppliesFromTheStart`、`testMissingOrInvalidLayoutIsStandard`、各開關的 `…MenuItemTogglesStoresAndSurvivesRestart`）、`SettingsTests.testMenuHasTheSettingsItemBeforeClear`。不合法的排列偏好（不存在、空字串、大小寫不同、`zhuyin`、完整模式 ID）一律當標準。
+驗證：`ShellTests` 的選單與偏好案例（`testMenuSelectionCommitsSwitchesAndStores`、`testStoredEtenLayoutAppliesFromTheStart`、`testMissingOrInvalidLayoutIsStandard`、各開關的 `…MenuItemTogglesStoresAndSurvivesRestart`）、`SettingsTests.testMenuHasTheSettingsItemBeforeClear`；詞包那一段：`ShellTests` 的 `testPackLineNamesTheLoadedPacks`、`testPackLineNamesTheBeautyPackInSettingsOrder`（含位置緊接「語意校正」），都經過檢查整段形狀的 `packLines`（一個小標題、前後各一條分隔線、詞包行不能點也不打勾；沒有詞包時選單裡沒有分隔線）。不合法的排列偏好（不存在、空字串、大小寫不同、`zhuyin`、完整模式 ID）一律當標準。
 
 ## 8. 候選窗
 

@@ -618,7 +618,7 @@ public final class Shell {
     /// The pack bits the current engine was really built with (docs/spec/lexicon-and-packs.md §4.2, §4.3): `packMask` when that build worked, less the bits
     /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 section reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
-    /// The names of the loaded packs in the settings order, for the menu line.
+    /// The names of the loaded packs in the settings order, one line each in the menu's 已開啟的詞包 section.
     var loadedPackTitles: [String] {
         Shell.packTable.compactMap { loadedPackMask & $0.bit != 0 ? $0.title : nil }
     }
