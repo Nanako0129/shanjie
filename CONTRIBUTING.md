@@ -81,7 +81,7 @@ scripts/install-ime.sh "build/善解（開發版）.app"
 | `eval/` | 評測集，規則見 `eval/README.md` |
 | `tools/`、`scripts/` | 詞庫與模型的建置工具、打包與安裝腳本 |
 | `reference/` | Python 參考實作（`reference/proto/`，golden 檔的逐位元組對照） |
-| `docs/` | 現況規格（`docs/spec/`）、Release 說明（`docs/releases/`）、跨版本基準與 KPI 表 |
+| `docs/` | 現況規格（`docs/spec/`）、Release 說明（`docs/releases/`）；跨版本基準與每版 KPI 的公開數字在 `site/data/*.json`，網站的 /benchmark 與 /kpi 頁畫成表 |
 
 ## 怎麼提改動
 

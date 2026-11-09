@@ -684,7 +684,7 @@ public final class Shell {
     private var rerankRunning: RunningRerank?
     /// docs/spec/keys-and-composition.md §7.3: the longest Enter waits for the rerank (ms), in total. 33 to 84 ms was the last job's
     /// time in PUNCT-0's VM measurement, so the limit is above the largest; on the Mac dev302's per-row p95 is
-    /// 12.6 ms. PLAN A3/A7's exception: only Enter waits, and only while a job of this session runs or is queued.
+    /// 12.6 ms. The exception §7.3 makes: only Enter waits, and only while a job of this session runs or is queued.
     static let ENTER_RERANK_WAIT_MS = 100
     /// The limit `Session.handle` uses on Enter; the tests replace it (the real-queue test gives it 10 s, the shipping value is asserted apart).
     var enterRerankWaitMS = Shell.ENTER_RERANK_WAIT_MS

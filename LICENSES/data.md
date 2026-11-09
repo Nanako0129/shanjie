@@ -36,7 +36,7 @@
 | `data/packs/it-manual.tsv` | 手寫的資訊與 AI 詞（詞、類別、備註、另外的讀音選填），建置輸入 | CC0（專案自己的條目） | — |
 | `data/packs/it-collisions.tsv` | 同音衝突的處置（讀音、保留的詞、排除的詞、理由）；詞取自詞包，建置輸入 | CC BY-SA 4.0（併入詞包後和詞包一致） | Wikipedia 貢獻者 |
 | `data/packs/it-readings.tsv` | 人工確認過的讀音（詞、讀音），取代 `tools/readings.py` 的結果。建置輸入 | CC0 | — |
-| `data/packs/quotes-manual.tsv` | 經典電影台詞清單：台詞原文、出處、年份、核對來源、收錄人、選填的讀音。台詞是短句、廣為流傳，視為不涉版權；每列的核對來源記在檔裡，核對來源空白的列建置工具不收；只收公開影視作品的台詞。建置輸入 | CC0（清單檔本身；台詞原文的權利屬原作者） | — |
+| `data/packs/quotes-manual.tsv` | 經典電影台詞清單：台詞原文、出處、年份、核對來源、收錄人、選填的讀音。每列的核對來源記在檔裡，核對來源空白的列建置工具不收；只收公開影視作品的台詞。建置輸入 | CC0（清單檔本身；台詞原文的權利屬原作者） | — |
 | `data/packs/quotes-add.tsv`、`data/packs/quotes.json` | 由 `tools/build_quote_pack.py` 從 `quotes-manual.tsv` 已核對的列（208 句）切成分句（2–10 個漢字，278 個分句、311 列讀音含變調列）產生的疊加層與清單檔（版號、各項個數、檔案的 SHA-256）；讀音由 `tools/readings.py` 產生或取自清單第 6 欄。隨 App 內附，設定裡可開關（預設關） | CC0（同清單） | — |
 | `data/packs/beauty-add.tsv`、`data/packs/beauty-sources.tsv`、`data/packs/beauty.json` | 由 `tools/build_meme_pack.py --pack beauty` 產生（`docs/spec/lexicon-and-packs.md` §8）：只收詞（字串）與讀音，不收定義、說明或網頁原文。候選來自公開網站與台灣公開論壇（論壇 A）的挖詞（只取字串），收錄依論壇 A 的用量；來源欄只記類別代號。隨 App 內附，設定裡可開關（預設開）；沒有 CC BY-SA 的來源，所以署名檔不列它 | CC0（名稱清單與用量判定，沒有第三方著作權內容） | — |
 | `data/packs/beauty-collisions.tsv`、`data/packs/beauty-readings.tsv` | 美妝詞包同音衝突的處置與人工確認過的讀音。建置輸入 | CC0 | — |

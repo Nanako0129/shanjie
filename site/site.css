@@ -7,21 +7,39 @@
   --serif: "Songti TC", serif;
   --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  /* 版面寬度：內文 760 px 的單欄閱讀寬（沿用改版前），表格可以放寬到 960 px */
+  /* 版面寬度（900 px 以下）：內文 760 px 的單欄閱讀寬，導覽列與頁尾 960 px；900 px 以上換成下面的 --page-max */
   --col: 760px; --col-wide: 960px; --gutter: 16px;
+  /* 電腦版兩側的固定留白：16 px 的手機邊距放大三倍，寬螢幕上內文不貼著視窗邊 */
+  --gutter-desktop: 48px;
+  /* 電腦版的整頁上限（卡片、表格、導覽列、頁尾跟著它走）：照 0c 網站的 --max: 1360px（https://0c.biggo.com/ 的 Base CSS） */
+  --page-max: 1360px;
+  /* 段落最寬：17 px 字約 45 字一行。2026-11 實測 1440／1920 寬：Apple 台灣支援頁 817 px（17 px，約 48 字）、
+     GitHub Docs 中文 725–785 px（16 px，45–49 字）、MDN 正體中文 768 px（16 px，48 字）、0c 的 --prose 680 px（16 px，約 42 字） */
+  --prose-max: 760px;
   /* 導覽列高度：一列 15 px 字加上下 12 px 留白，和頁尾 14 px 字同一個尺度 */
   --nav-h: 52px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
-    --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+    --seal: #D86652; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
   }
 }
+/* 深色的 --seal 是原本 #D4553F 只調亮 4.5%（色相、飽和度不變）：連結對深色底 5.01、對卡片底 4.53，按鈕上的深色字 5.01，都過 WCAG AA（4.5） */
 :root[data-theme="dark"] {
   --paper: #1A1816; --paper-2: #24211E; --ink: #EDE6D8; --ink-2: #AAA192; --line: #3A352F;
-  --seal: #D4553F; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
+  --seal: #D86652; --seal-ink: #1A1816; --ok: #8DBA98; --wip: #E0B060;
 }
+/* 電腦版：內容、導覽列、頁尾最寬到 --page-max，兩側固定留 --gutter-desktop；段落另外限制在 --prose-max。
+   斷點 900 px：從這個寬度起「視窗寬 − 2×48」不小於原本的 760 − 2×16，切換時內容不會變窄；更窄的視窗（手機）照舊。
+   （media query 裡不能用 CSS 變數，所以 900 寫在這裡。） */
+@media (min-width: 900px) {
+  :root { --col: var(--page-max); --col-wide: var(--page-max); --gutter: var(--gutter-desktop); }
+}
+/* 段落、清單、說明區塊不跟著整頁放寬，一行維持約 45 字；卡片、表格、統計格照整頁寬 */
+main > :is(p, ul, ol, dl, pre, blockquote, details), main > :is(article, #numbers) > :is(p, ul, ol, dl, pre) { max-width: var(--prose-max); }
+/* 一欄式、內文較長的卡片（怎麼選字的步驟卡、路線圖的階段卡）整張跟段落同寬，卡片邊界和上下的段落、標題對齊，文字也維持約 45 字一行。並排小卡、數字格、表格照整頁寬 */
+.layers, .stages { max-width: var(--prose-max); }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--nav-h) + 12px); }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.8 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -56,6 +74,13 @@ kbd { font: 14px var(--mono); padding: 0 6px; border: 1px solid var(--line); bor
 .site-nav .home { font: 900 18px/1 var(--serif); color: var(--ink); letter-spacing: .06em; }
 /* 下載鈕固定在右端：手機上導覽列橫捲時它也一直看得到 */
 .site-nav .dl { margin-left: auto; position: sticky; right: 0; box-shadow: -12px 0 8px -2px var(--paper); }
+/* 淺色／深色切換鈕：theme.js 把它和下載鈕一起放進 .end，整組固定在右端（沒有 JS 時沒有 .end，下載鈕照上一條固定） */
+.site-nav .end { margin-left: auto; position: sticky; right: 0; display: flex; align-items: center; gap: 10px;
+                 background: var(--paper); box-shadow: -12px 0 8px -2px var(--paper); }
+.site-nav .end .dl { margin-left: 0; position: static; box-shadow: none; }
+.site-nav .theme { width: 30px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 999px;
+                   background: none; color: var(--ink-2); font: 15px/1 var(--sans); cursor: pointer; flex: none; }
+.site-nav .theme:hover { color: var(--ink); border-color: var(--ink-2); }
 
 /* 按鈕：主＝朱紅底，次＝框線 */
 .btn { display: inline-block; padding: 6px 16px; border-radius: 999px; border: 1px solid var(--seal); text-decoration: none; font-size: 15px; line-height: 1.6; }
@@ -124,6 +149,8 @@ th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom
 th { font-weight: 600; color: var(--ink); background: var(--paper-2); }
 td { color: var(--ink-2); }
 td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* 基準測試與 KPI 頁的數字表：每格的分行已經用 <br> 寫好（和完整表同一個寫法），不再自動折行；太寬就在 .table 裡橫捲 */
+#numbers th, #numbers td { white-space: nowrap; }
 
 /* 本頁目錄（使用說明、安裝） */
 .toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 20px 0 0; padding: 0; list-style: none; }

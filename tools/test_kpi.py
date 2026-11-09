@@ -245,6 +245,28 @@ class SiteData(Tmp):
         self.assertIn(f"{v['holdout_talk_chat']['top1']}/{v['holdout_talk_chat']['n']}", md)
         self.assertIn(f"{v['replay']['user-reported']['off']['top1']}/{v['replay']['user-reported']['n']}", md)
 
+    def test_the_full_table_goes_to_shanjie_tables_or_nowhere(self):
+        args = lambda out: argparse.Namespace(results=self.res, kpi=self.kp, out=out, json=self.js)
+        err = io.StringIO()
+        with mock.patch.dict(os.environ), contextlib.redirect_stderr(err):
+            os.environ.pop("SHANJIE_TABLES", None)
+            kpi.cmd_table(args(None))
+        self.assertTrue(os.path.isfile(self.js))
+        self.assertIn("kpi.md not written", err.getvalue())
+        self.assertFalse(any(f.endswith(".md") for _, _, fs in os.walk(self.td) for f in fs))
+        d = os.path.join(self.td, "tables")
+        with mock.patch.dict(os.environ, {"SHANJIE_TABLES": d}):
+            kpi.cmd_table(args(None))
+        self.assertEqual(open(os.path.join(d, "kpi.md"), encoding="utf-8").read(), kpi.render(self.res, self.kp))
+
+    def test_a_path_inside_the_repository_is_refused_before_anything_is_written(self):
+        out = os.path.join(bench.ROOT, "docs", "kpi-refused-by-test.md")   # inside the repository, never a real file
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as cm:
+            kpi.cmd_table(argparse.Namespace(results=self.res, kpi=self.kp, out=out, json=self.js))
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("inside this repository", err.getvalue())
+        self.assertFalse(os.path.exists(self.js) or os.path.exists(out))
+
 
 # ---------- replay ----------
 SPEC = bench.VERSIONS2["v0.4.3"]  # bigram + classes + tinylm
