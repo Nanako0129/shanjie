@@ -6,7 +6,7 @@
 - 修正詞庫；
 - 改 Swift 殼或 Rust 核心。
 
-先看 README 的「進度」與「路線圖」，知道現在做到哪裡；現在的行為與規格在 `docs/spec/`，評測方法在 `docs/spec/evaluation.md`，建置、CI 與本機關卡在 `docs/spec/release-and-ci.md`。
+先看網站的「更新紀錄」與「路線圖」（https://shanjie.nyanako.com/updates 、https://shanjie.nyanako.com/roadmap ），知道現在做到哪裡；現在的行為與規格在 `docs/spec/`，評測方法在 `docs/spec/evaluation.md`，建置、CI 與本機關卡在 `docs/spec/release-and-ci.md`。
 
 ## 回報選錯的字
 
