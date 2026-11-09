@@ -134,7 +134,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 `Session.apply` 的順序：
 
 1. `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`；「中英文之間自動加空格」開著時先交給 `CJKSpacing.apply`（`docs/spec/english-mixed.md`）。
-2. `preedit` 非空：`setMarkedText`，整段單線底線，中英混打的英文段改粗底線（範圍夾在文字長度內，核心給錯範圍也不會丟例外）；選取範圍 `NSRange(location: cursor_utf16, length: 0)`。`preedit` 變成空而原本有組字時，用空字串清掉。
+2. `preedit` 非空：`setMarkedText`，整段單線底線，中英混打的英文段改粗底線（範圍夾在文字長度內，核心給錯範圍也不會丟例外）；選取範圍 `NSRange(location: cursor_utf16, length: 0)`。`preedit` 變成空而原本有組字時，用空字串清掉。組字字串、游標、英文段的起點與長度都和這個 session 上一次送出的相同、而且這次沒有 `commit` 時，不重送 `setMarkedText`（例如 Tab 進入或移動預測列）：Chromium 先把輸入法吃下的鍵交給網頁（keyCode 229、`key` 保留原鍵），再套用這次的組字；網頁在 Tab 上移走焦點時（對話框的焦點陷阱），遲到的組字會讓欄位拿回焦點、多出一份文字。用空字串清掉組字時一併忘記上一次送出的值，所以之後打出相同的組字照樣會送；有 `commit` 時一定重送，因為 `insertText` 已經換掉 client 的 marked text。
 3. `handled = 0` 且 `commit` 為空是純直通（核心狀態沒變）：殼完全不碰 client，App 看到的和沒按過一樣。`handled = 0` 但有 `commit`：先套用再回傳 `false` 讓 App 處理這個鍵。
 4. 候選：`candidates` 為空且沒有英文段提示，或被「瀏覽器第一個字不顯示預測」隱藏（`docs/spec/prediction.md`）時，隱藏候選窗並清掉游標行快取；否則取游標所在行矩形（同一個 `preedit` 與游標的重複輸出重用上一次的答案，因為問 client 是同步 IPC）交給候選窗。英文段開著時，候選窗的位置改以那一段的起點為準，並顯示一行提示（`docs/spec/english-mixed.md`）。
 5. 最後取出核心留下的語意校正工作交給執行器（`docs/spec/semantic-rerank.md`）。
