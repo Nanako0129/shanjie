@@ -118,7 +118,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let prediction = "即時預測"
         /// The browser toggle under 即時預測 in the settings window and the line under it (docs/spec/prediction.md §9.4).
         public static let browserFirstSyllable = "在瀏覽器裡，第一個字不顯示預測"
-        public static let browserFirstSyllableNote = "在 Chrome 編輯 Google 文件時，第一個字回給輸入法的位置是錯的，預測列會跑到視窗左上角。Edge、Brave 等 Chromium 瀏覽器也一起套用。"
+        public static let browserFirstSyllableNote = "給 Chrome 156 以前（或同代的 Edge、Brave 等 Chromium 瀏覽器）的 Google 文件用：那些版本會把第一個字的預測列擺到視窗左上角。打開後，在這些瀏覽器裡第一個字一律不顯示預測列。Chrome 157 起不需要。"
         public static let english = "中英混打（實驗）"
         /// The line under that toggle in the settings window (docs/spec/english-mixed.md §1.1, §11).
         public static let englishDigitsNote = "打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。"
