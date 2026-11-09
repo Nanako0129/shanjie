@@ -2,14 +2,16 @@
 
 這份寫的是現在的行為。
 
-範圍：核心（`core`）在 `x86_64-pc-windows-msvc` 上編譯與測試的做法、Windows 的 CI、TSF 文字服務 DLL（`windows/tip`，套件名 `shanjie-tip`）、以及微軟注音的量測參考（Windows 版按鍵與介面的對照依據）。按鍵規則本身見 `docs/spec/keys-and-composition.md`，核心的 C 介面見 `docs/spec/c-abi.md`，隱私規則見 `docs/spec/privacy.md`。
+範圍：核心（`core`）在 `x86_64-pc-windows-msvc` 上編譯與測試的做法、Windows 的 CI、TSF 文字服務 DLL（`windows/tip`，套件名 `shanjie-tip`）、常駐程序（`windows/host`）與兩者之間的線上格式（`windows/proto`）、以及微軟注音的量測參考（Windows 版按鍵與介面的對照依據）。按鍵規則本身見 `docs/spec/keys-and-composition.md`，核心的 C 介面見 `docs/spec/c-abi.md`，隱私規則見 `docs/spec/privacy.md`。
 
 ## 1. 組成與現況
 
 ### 1.1 組成
 
 - `core`：同一份核心程式碼，Windows 上加少量 `cfg`，行為與 macOS、Linux 相同（§2）。
-- `windows/tip`：TSF 文字服務 DLL。`crate-type = ["cdylib", "rlib"]`（rlib 給單元測試），`lib.rs` 開頭 `#![cfg(windows)]`，在 macOS 與 Linux 上是空的 crate，不影響既有的建置與測試。
+- `windows/host`：常駐程序 `shanjie-host.exe`，每個使用者的每個登入工作階段一支，只有它載入模型（§5）。
+- `windows/proto`：DLL 與常駐程序之間的線上格式，純 Rust、不分平台（§5.3）。
+- `windows/tip`：TSF 文字服務 DLL，常駐程序的薄客戶端，不相依核心。`crate-type = ["cdylib", "rlib"]`（rlib 給單元測試），`lib.rs` 開頭 `#![cfg(windows)]`，在 macOS 與 Linux 上是空的 crate，不影響既有的建置與測試。
 - CI 的 `windows` job 與 Linux `debug` job 的 rowstats 比對（§2.9）。
 - 微軟注音量測（§4）：只是參考資料，程式不讀它。
 
@@ -17,6 +19,7 @@
 
 - 核心與它全部的測試在 Windows 上編得過、測得過，評測 CLI 的逐列結果和 Linux 逐位元組相同。
 - TSF 文字服務可在測試 VM 的記事本與「執行」對話框打出一句注音並送出，送出的字和 Mac 上 `shanjie-replay` 用同一串鍵解出的字逐字相同。
+- 模型只在常駐程序裡載一份；DLL 每按一鍵經 named pipe 同步問常駐程序（§5）。
 - 目前的按鍵行為就是核心現行的規則（Mac 版的規則）。微軟注音的規則組與 Mac 做法的切換設定尚未實作（§3.14）。
 - 沒有候選窗、預測列、設定、學習檔、安裝程式與簽章（§3.14）。
 
@@ -106,12 +109,12 @@ Linux `debug` job 在既有步驟之後加三步：
 
 ### 3.1 crate、相依與建置
 
-- 套件名 `shanjie-tip`，workspace 成員。核心以 path 相依靜態連進同一顆 DLL，相依名稱改為 `shanjie_core = { package = "core", path = "../../core" }`：核心的套件名 `core` 會遮住標準函式庫的 `::core`，而 `windows` 的程序巨集展開成 `::core::ffi::c_void` 這類路徑。呼叫寫 `shanjie_core::ffi::shanjie_*`。
-- TIP **只呼叫 C ABI**（`shanjie_core::ffi::shanjie_*`，語意以 `core/include/shanjie.h` 為準），不用 `Engine` 的 Rust API：Mac 殼也只用這一層，`handled`、`commit`、`preedit`、`cursor_utf16` 的語意與 `catch_unwind` 都已寫在那裡。
+- 套件名 `shanjie-tip`，workspace 成員。DLL **不相依核心**、不載模型，只相依 `shanjie-win-proto`（§5.1）；`cargo tree -p shanjie-tip` 沒有 `core`，`dumpbin /exports` 沒有 `shanjie_` 開頭的匯出。
+- 核心在常駐程序裡（`windows/host`），以 path 相依靜態連入，相依名稱改為 `shanjie_core = { package = "core", path = "../../core" }`：核心的套件名 `core` 會遮住標準函式庫的 `::core`，而 `windows` 的程序巨集展開成 `::core::ffi::c_void` 這類路徑。常駐程序**只呼叫 C ABI**（`shanjie_core::ffi::shanjie_*`，語意以 `core/include/shanjie.h` 為準），不用 `Engine` 的 Rust API：Mac 殼也只用這一層，`handled`、`commit`、`preedit`、`cursor_utf16` 的語意與 `catch_unwind` 都已寫在那裡。
 - COM 用 `windows` 0.62 與 `windows-core` 0.62（`#[implement]`），只開用到的 feature，放在 `[target.'cfg(windows)'.dependencies]`；這兩個以外沒有新相依，`Cargo.lock` 鎖版本。
 - 只出 x64（`x86_64-pc-windows-msvc`）。
 - cargo feature `timing`（預設關）：數字計時檔（§3.11），只用於 VM 量測，不用於給使用者的建置。
-- C 執行階段靜態連結：`.cargo/config.toml` 對 `cfg(all(windows, target_env = "msvc"))` 設 `-C target-feature=+crt-static`。理由：動態 CRT 會讓 DLL 相依 `VCRUNTIME140.dll`，沒裝 Visual C++ 可轉散發套件的乾淨 Windows 11 上 `LoadLibrary` 失敗（`regsvr32` 回 3）。這個設定套用到 workspace 裡所有 Windows MSVC 建置，評測 CLI 的輸出由 §2.9 的 rowstats 比對核對。每次建完 DLL 要用 `dumpbin /dependents` 核對沒有 `VCRUNTIME*` 相依。
+- C 執行階段靜態連結：`.cargo/config.toml` 對 `cfg(all(windows, target_env = "msvc"))` 設 `-C target-feature=+crt-static`。理由：動態 CRT 會讓 DLL 與常駐程序相依 `VCRUNTIME140.dll`，沒裝 Visual C++ 可轉散發套件的乾淨 Windows 11 上 `LoadLibrary` 失敗（`regsvr32` 回 3）。這個設定套用到 workspace 裡所有 Windows MSVC 建置，評測 CLI 的輸出由 §2.9 的 rowstats 比對核對。每次建完 DLL 與常駐程序要用 `dumpbin /dependents` 核對沒有 `VCRUNTIME*`、`MSVCP*`、`api-ms-win-crt-*`、`ucrtbase` 相依。
 - 風格：`unsafe` 區塊都有 `// SAFETY:` 註解；`Drop` 只釋放資源（§3.9）。
 
 ### 3.2 COM 進入點與註冊
@@ -128,39 +131,37 @@ Linux `debug` job 在既有步驟之後加三步：
 
 ### 3.3 安裝位置與信任
 
-- TIP 會被載進每個程序（含提升權限的），所以 DLL 與資料放在同一個只有系統管理員能寫的資料夾（開發版為 `C:\Program Files\shanjie-dev\`），`regsvr32` 只註冊這個路徑上的 DLL。DLL 或模型被一般使用者換掉就等於提權。
-- 資料路徑從 DLL 自己的位置推：`GetModuleFileNameW`（緩衝不夠就加倍重取，最多 65536 單位，仍放不下或取不到就回 `None`，不拿截斷的前綴去推資料夾），資料在 DLL 旁的 `data\`（`lexicon`、`packs`、`lm\bigram.sjlm`、`lm\tinylm.sjtl`、`lm\colloquial.sjlm`）；不讀環境變數。模型檔要與 `data/*.sha256` 相符。
+- TIP 會被載進每個程序（含提升權限的），所以 DLL、常駐程序 `shanjie-host.exe` 與資料放在同一個只有系統管理員能寫的資料夾（開發版為 `C:\Program Files\shanjie-dev\`），`regsvr32` 只註冊這個路徑上的 DLL。DLL、常駐程序或模型被一般使用者換掉就等於提權。
+- 常駐程序的路徑從 DLL 自己的位置推，資料路徑從常駐程序自己的位置推：`GetModuleFileNameW`（緩衝不夠就加倍重取，最多 65536 單位，仍放不下或取不到就回 `None`，不拿截斷的前綴去推資料夾），資料在常駐程序旁的 `data\`（`lexicon`、`packs`、`lm\bigram.sjlm`、`lm\tinylm.sjtl`、`lm\colloquial.sjlm`）；不讀環境變數。模型檔要與 `data/*.sha256` 相符。
 - 執行期不載入別的 DLL。
 - 驗證：複製進 VM 後核對 DLL 與每個模型檔的雜湊；用 `Get-Acl` 核對 DLL 與整個資料夾樹，Users、Authenticated Users、Everyone、INTERACTIVE、ALL APPLICATION PACKAGES 都沒有寫入權（最多讀取與執行）。
 
-### 3.4 引擎：一個程序一個
+### 3.4 引擎：在常駐程序裡
 
-- 程序層級的單例（`Mutex`），第一次 `ActivateEx` 時**同步載入**，之後的 `ActivateEx` 沿用，直到程序結束都不釋放。載入期間宿主的 UI 執行緒會等。
-- 建引擎的呼叫順序與值照 `cli::replay::build_engine_packs`（不是照 Mac App 的設定：App 的中英混打預設開，replay 是關的）：
+- 引擎只在常駐程序裡、只有一個（§5）。DLL 不載入任何模型。
+- 常駐程序先建好 pipe 再載模型（§5.2）。建引擎的呼叫順序與值照 `cli::replay::build_engine_packs`（不是照 Mac App 的設定：App 的中英混打預設開，replay 是關的）：
   1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`）；
-  2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`；
+  2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`（`load_lm` 一併讀同一資料夾的承接、trigram 與辨類檔，所以 `data\lm` 要放 `data/*.sha256` 列的全部模型）；
   3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(0)`、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
   4. `set_learning(0)`。重排強度與設定檔類型用核心預設（標準、聊天）；不呼叫 `set_fuzzy`、`set_left_context`、`learning_open`。
 - 中英混打關，所以數字層（`digits.tsv`）也不開；`1`、`0` 鍵照注音處理，與 replay 相同。
-- 與 replay 的差別：TIP 呼叫 `set_rerank(0)`，會意與常談表照樣載入（記憶體是真實的），但不跑背景重排工作（`rerank_take/run/apply` 不使用）；replay 帶 `--no-tinylm` 時連會意與常談表都不載。兩者解出的字相同，因為會意與常談表只在重排工作裡起作用；另一個差別是凍結視窗 W（有沒有小模型時不同），只影響約 45 字以上的組字。
-- 載入失敗（任何呼叫回非 0，例如缺檔、沙箱程序讀不到）：`shanjie_engine_free` 掉載入一半的引擎，這個程序的 TIP 從此不動作（`OnTestKeyDown` 一律回 FALSE），不重試，不留任何錯誤文字（`shanjie.h` 規定不能記 LM 路徑），`ActivateEx` 照樣回 `S_OK`。
-- 狀態有一份不用鎖的鏡像（`UNLOADED`、`READY`、`INERT`），給 `OnTestKeyDown` 與 `DllCanUnloadNow` 讀。
-- `DllCanUnloadNow`：只要曾嘗試載入引擎（不論成敗）就一律回 `S_FALSE`，因為 DLL 被卸載再載入會讓 static 從頭來、模型再載一次、舊的一份漏掉；否則在沒有存活物件與 `LockServer` 鎖時回 `S_OK`。
-- **鎖**：只用 `try_lock`。拿不到（例如別的執行緒正在同步載入）就當作不吃，絕不讓 UI 執行緒等。拿鎖範圍只有「呼叫核心、複製輸出」，改文件時已放掉鎖，所以 TSF 同步回呼我們的 sink 時不會在同一執行緒重複拿鎖。鎖 poisoned 時，這個程序的 TIP 從此不動作，不 `unwrap`。
+- 與 replay 的差別：`set_rerank(0)`，會意與常談表照樣載入，但不跑背景重排工作；replay 帶 `--no-tinylm` 時連會意與常談表都不載。兩者解出的字相同，因為會意與常談表只在重排工作裡起作用；另一個差別是凍結視窗 W（有沒有小模型時不同），只影響約 45 字以上的組字。
+- 載入失敗或引擎的鎖 poisoned：常駐程序結束（§5.2），不留任何錯誤文字（`shanjie.h` 規定不能記 LM 路徑）。
 - 引擎指標需要 `unsafe impl Send`；旁邊有編譯期斷言「核心的引擎型別本身是 `Send`」，斷言不成立就不可寫這行 `unsafe impl`。
-- **組字的擁有者**：TSF 是每個執行緒一個 thread manager，`explorer.exe` 這類程序有好幾個 UI 執行緒共用這個引擎。單例旁記下目前組字的擁有者（OS 執行緒 ID 加上 `ITfContext` 的指標值）。別的擁有者送來按鍵時，先 `reset(mode 1)`（丟掉，**不能用 mode 0**：那會把前一個視窗的字送進這個視窗），擁有者換成新的，再照常處理。`OnSetFocus`、`OnKillThreadFocus`、`Deactivate`、`OnCompositionTerminated` 與文件改動失敗只在擁有者相符時才 reset 引擎。panic 之後則無條件 reset 並清掉擁有者。
-- 驗證：兩個視窗不串字（§3.13 (e2)）。
+- **組字的擁有者**：好幾個 App、`explorer.exe` 這類程序的好幾個 UI 執行緒共用這個引擎。常駐程序記下目前組字的擁有者 `(連線 ID, ctx)`（§5.3）。別的擁有者送來按鍵時，先 `reset(mode 1)`（丟掉，**不能用 mode 0**：那會把前一個視窗的字送進這個視窗），擁有者換成新的，再照常處理，回應帶 `took_over`。DLL 在 `OnSetFocus`、`OnKillThreadFocus`、`Deactivate`、`OnCompositionTerminated` 與文件改動失敗時送 `Release`，panic 之後送 `Reset` 並關連線；常駐程序只在擁有者相符時 reset。
+- 輸出開了候選窗（`candidate_selected >= 0`）時，常駐程序在同一個鎖內補一個 ESC（§3.7 第 5 步）；ESC 失敗則 reset 引擎並回空的 `preedit`。
+- 驗證：兩個視窗不串字（§3.13 (e2)），§5.11 第 10 點的單元測試。
 
 ### 3.5 TIP 實例與 TSF 介面
 
 每個 UI 執行緒一個 `TextService` 實例（`#[implement]` 了 `ITfTextInputProcessorEx`、`ITfThreadMgrEventSink`、`ITfThreadFocusSink`、`ITfKeyEventSink`、`ITfCompositionSink`、`ITfDisplayAttributeProvider`），所有文件修改都在 edit session（`ITfEditSession`）裡做。
 
-- `ActivateEx`：記下 thread manager 與 client id；開計時檔（§3.11）；旗標有 `TF_TMAE_SECUREMODE` 時這個執行緒不動作（不載引擎、不註冊 sink）；否則 `ensure_loaded`，註冊 sink（`AdviseKeyEventSink`、`ITfThreadMgrEventSink`、`ITfThreadFocusSink`），向 `ITfCategoryMgr::RegisterGUID` 取顯示屬性的 atom，把鍵盤隔間設成開。註冊 sink 失敗會撤銷已註冊的並回傳失敗。
+- `ActivateEx`：記下 thread manager 與 client id；開計時檔（§3.11）；旗標有 `TF_TMAE_SECUREMODE` 時這個執行緒不動作（不載引擎、不註冊 sink）；否則註冊 sink（`AdviseKeyEventSink`、`ITfThreadMgrEventSink`、`ITfThreadFocusSink`），向 `ITfCategoryMgr::RegisterGUID` 取顯示屬性的 atom，把鍵盤隔間設成開。註冊 sink 失敗會撤銷已註冊的並回傳失敗。
 - `Deactivate`：結束自己的組字（§3.8）、撤銷 sink、清掉狀態，之後不動作。
 - 實作的 sink 與用途：`OnTestKeyDown`／`OnKeyDown`（`OnKeyUp`、`OnTestKeyUp`、`OnPreservedKey` 一律不吃）、`OnCompositionTerminated`、`ITfThreadMgrEventSink::OnSetFocus`（換文件時結束組字）、`ITfThreadFocusSink::OnKillThreadFocus`（換到別的執行緒時結束組字）。
 - **鍵盤開關隔間**（`GUID_COMPARTMENT_KEYBOARD_OPENCLOSE`）：`ActivateEx` 時設成開；每一份文件（document manager）**第一次**拿到焦點時（`OnSetFocus`、`OnSetThreadFocus`）也設成開，因為 Windows 的開關狀態跟著視窗走，新開的視窗可能是關的；之後回到同一份文件時保留當下的值，不覆蓋使用者自己改的狀態（例如在該視窗按 Ctrl+Space），與微軟注音的中英模式各視窗分開記一致。這個隔間為關時，`OnTestKeyDown`、`OnKeyDown` 一律直通。目前 TIP 沒有自己的中英切換，所以預設一直是中文模式。
 - 停用的 context：`GUID_COMPARTMENT_KEYBOARD_DISABLED` 或 `GUID_COMPARTMENT_EMPTYCONTEXT` 為真時（例如密碼欄這類 context），`OnTestKeyDown`、`OnKeyDown` 都直通。輸入範圍 `IS_PASSWORD` 的處理尚未做。
-- 這個實例未啟用（`ActivateEx` 之前、`Deactivate` 之後、安全模式）、或引擎不可用時，同樣直通。
+- 這個實例未啟用（`ActivateEx` 之前、`Deactivate` 之後、安全模式）、或客戶端被擋住（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，§5.4）時，同樣直通。
 
 ### 3.6 按鍵對應與 `OnTestKeyDown`
 
@@ -174,29 +175,29 @@ Linux `debug` job 在既有步驟之後加三步：
 ### 3.7 `OnKeyDown` 與文件的改動
 
 1. 把鍵換成 `ShanjieKey`（§3.6）；換不出來、或前面任何直通條件成立：`pfEaten = FALSE`，不呼叫核心。
-2. 用 `RequestEditSession(TF_ES_SYNC | TF_ES_READWRITE)` 開 edit session。**在 edit session 裡**依序：拿鎖 → `shanjie_engine_key` → 複製輸出 → 放鎖 → 照輸出改文件。同步請求被拒時不呼叫核心、`pfEaten = FALSE`、引擎狀態不變。
+2. 用 `RequestEditSession(TF_ES_SYNC | TF_ES_READWRITE)` 開 edit session。**在 edit session 裡**依序：送 `Key` 給常駐程序、等 `Out`（§5.4）→ 照輸出改文件。同步請求被拒時不送、`pfEaten = FALSE`、引擎狀態不變。沒拿到能用的回應時照 §5.6。
 3. 照輸出改文件，順序固定（`doc::apply`）：
    - `commit` 非空：有開著的組字就用它取代組字範圍（先清底線屬性）、游標移到其後、結束組字；沒有組字就插在選取處（`InsertTextAtSelection`）。
    - `preedit` 非空：沒有組字就在選取處開始組字（`InsertTextAtSelection(TF_IAS_QUERYONLY)` 取範圍再 `StartComposition`）；把組字範圍的文字設成 `preedit`、套上底線屬性（`GUID_PROP_ATTRIBUTE` 的值為顯示屬性 atom，`VT_I4`）、選取（游標）設在 `cursor_utf16`（核心與 TSF range 都以 UTF-16 單位計）。
    - `preedit` 為空且仍有開著的組字（例如組字中 Backspace 刪光、Esc 清空）：先清底線屬性，把組字範圍設成空字串，再結束組字；不先清空的話，結束組字會把範圍裡的文字留在文件裡。
-4. `handled = 1`：`pfEaten = TRUE`。`handled = 0`：做完第 3 步（先插入 `commit`）之後 `pfEaten = FALSE`，App 接著收到這個鍵（「先送出組字再把按鍵交給 App」）。`shanjie_engine_key` 回非 0：當成 `handled = 0`、不改文件。
-5. 輸出開了候選窗（`candidate_selected >= 0`）時，因為沒有候選 UI，馬上在同一個鎖內再送一個 ESC（核心第 7 條：關閉候選、不改變），把兩個輸出合併（`commit` 串接，`preedit` 與游標用 ESC 的），原本的鍵算已處理。所以組字中按空白鍵或 ↓ 看起來不動作。ESC 失敗則 reset 引擎並清空 `preedit`。
-6. 每個 `ShanjieOutput` 在同一個呼叫裡複製完要用的欄位就 `shanjie_output_free`。
-7. 文件改動失敗：結束手上的組字、`reset` 引擎（雙方都丟掉，避免文件與引擎狀態不一致）；edit session 的工作沒做完（例如 panic）同樣清掉。
-8. 如果這個實例留著組字、但單例的擁有者已不是它（`took_over`）：先結束那個組字（同一 context 在目前的 edit session 內結束；不同 context 則排進非同步 edit session），再處理這個鍵。引擎狀態已經丟掉的組字不能沿用，否則會把使用者看得到的字換成新的 `preedit`。
+4. `handled = 1`：`pfEaten = TRUE`。`handled = 0`：做完第 3 步（先插入 `commit`）之後 `pfEaten = FALSE`，App 接著收到這個鍵（「先送出組字再把按鍵交給 App」）。核心回非 0（`Out` 的 `core_error`）：當成 `handled = 0`、不改文件。
+5. 輸出開了候選窗時，因為沒有候選 UI，常駐程序在同一個鎖內再送一個 ESC（核心第 7 條：關閉候選、不改變），把兩個輸出合併（`commit` 串接，`preedit` 與游標用 ESC 的），原本的鍵算已處理；客戶端收到的 `candidate_selected` 一定是 −1。所以組字中按空白鍵或 ↓ 看起來不動作。
+6. 常駐程序在同一個呼叫裡複製完要用的欄位就 `shanjie_output_free`。
+7. 文件改動失敗：結束手上的組字（每一條錯誤路徑都先結束取出的組字，§5.7）、送 `Release`（雙方都丟掉，避免文件與引擎狀態不一致）；edit session 的工作沒做完（例如 panic）同樣清掉。
+8. 如果這個實例留著組字、但回應說擁有者換過（`took_over`）：先結束那個組字（同一 context 在目前的 edit session 內結束；不同 context 則排進非同步 edit session），再處理這個鍵。引擎狀態已經丟掉的組字不能沿用，否則會把使用者看得到的字換成新的 `preedit`。
 - 驗證：§3.13。
 
 ### 3.8 結束組字
 
 - **一律先拿掉底線屬性**：每一條會結束組字的路（`commit`、Backspace／Esc 刪光、`OnSetFocus`、`OnKillThreadFocus`、`Deactivate`）都在同一個 edit session 裡先清掉組字範圍的 `GUID_PROP_ATTRIBUTE`，再 `EndComposition`。不清的話，處理 TSF 的宿主可能照樣在送出的字下面畫虛線。
-- `OnCompositionTerminated`（App 自己結束組字）：文字已照顯示留在文件裡，只清掉底線屬性、並 `reset(mode 1)`（僅當擁有者相符）。
-- `OnSetFocus` 換文件、`OnKillThreadFocus`、`Deactivate`：每個實例**自己**結束自己開的組字（用非同步寫入的 edit session：`TF_ES_ASYNCDONTCARE | TF_ES_READWRITE`，能立刻跑就立刻跑，否則排隊），顯示的文字留在文件裡（等於送出畫面上的字），擁有者相符時 `reset(mode 1)`。不論這個實例還是不是擁有者都要結束自己的組字。
+- `OnCompositionTerminated`（App 自己結束組字）：傳進來的組字是這個實例的組字（比原始指標）時，文字已照顯示留在文件裡，只清掉底線屬性、並送 `Release`（常駐程序只在擁有者相符時 reset）。
+- `OnSetFocus` 換文件、`OnKillThreadFocus`、`Deactivate`：每個實例**自己**結束自己開的組字（用非同步寫入的 edit session：`TF_ES_ASYNCDONTCARE | TF_ES_READWRITE`，能立刻跑就立刻跑，否則排隊），顯示的文字留在文件裡（等於送出畫面上的字），並送 `Release`（擁有者相符時常駐程序 `reset(mode 1)`）。不論這個實例還是不是擁有者都要結束自己的組字。
 - 失焦時是送出或取消，微軟注音沒有量到；目前行為是送出畫面上的字。
 
 ### 3.9 COM 邊界
 
 - 每個 COM 方法的本體都包在同一個包裝裡（`guard`）：`Dll*` 匯出函式、`IClassFactory` 的方法、`DoEditSession`、各 sink。
-- 包裝做三件事：進入時用 `Once` 裝上不印 payload 的 panic hook（`DllMain` 不做事，所以不能靠它裝；同 `core/src/ffi.rs` 的 `quiet_panics`）；`catch_unwind`；panic 時回 `E_FAIL`（按鍵方法則 `pfEaten = FALSE`、不回錯誤碼），接住 panic 之後對引擎 `reset(mode 1)` 並丟掉手上的組字物件。
+- 包裝做三件事：進入時用 `Once` 裝上不印 payload 的 panic hook（`DllMain` 不做事，所以不能靠它裝；同 `core/src/ffi.rs` 的 `quiet_panics`）；`catch_unwind`；panic 時回 `E_FAIL`（按鍵方法則 `pfEaten = FALSE`、不回錯誤碼），接住 panic 之後送 `Reset` 給常駐程序、關連線，並丟掉手上的組字物件。
 - 失敗一律只回不帶訊息的 HRESULT（`Error::from_hresult`），不用帶訊息字串的 `windows::core::Error`：帶訊息的錯誤會掛進 `IErrorInfo` 或交給偵錯器。
 - `Drop` 在 windows-core 產生的 `Release` 裡執行，不在包裝裡，從那裡 panic 出去會讓宿主 abort，所以 `Drop` 只釋放資源、不做會失敗的事。
 - 核心在 `panic = "abort"` 的設定下建置會失敗，所以這個 DLL 一直是 unwind 的 panic 策略。
@@ -210,12 +211,12 @@ Linux `debug` job 在既有步驟之後加三步：
 ### 3.11 計時檔（量測用）
 
 - 只在開了 cargo feature `timing` 的建置裡有（CI 兩種都建）。每行三欄 `<事件代碼>\t<開始>\t<結束>\n`，**只有數字、tab、換行**；開始與結束是同一個時鐘（`QueryPerformanceCounter` 換成微秒）。格式函式 `format_line` 永遠編譯，檔案只在 `timing` 下存在。
-- 事件代碼：1 `ActivateEx`（第一次含引擎載入）；2 引擎載入（`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進核心的按鍵（進入 `OnKeyDown` 到 edit session 改完文件、回傳之前）。
-- 診斷事件（兩欄都是當下時間，除非另註）：40 `OnTestKeyDown` 回 TRUE（兩欄為 OS 執行緒 ID）；41–44 `OnTestKeyDown` 回 FALSE 的原因（實例未啟用、引擎不可用、鍵盤隔間關著、context 停用或為空）；45 `OnKeyDown` 的同步 edit session 沒拿到（兩欄為 HRESULT）；46 引擎的鎖拿不到；47 `ActivateEx` 註冊 sink 失敗；48 `ActivateEx` 在安全模式；49 `ActivateEx` 進來的執行緒（兩欄為執行緒 ID）；50 進入 `OnKeyDown`（兩欄為執行緒 ID）；51–55 `OnKeyDown` 在呼叫核心之前就回不吃的原因（實例未啟用、引擎不可用、鍵盤隔間關著、context 停用或為空、鍵沒有對應）；56 焦點換過來時鍵盤隔間讀到關、被 TIP 重新打開。都只有數字，不含任何按鍵或文字。
+- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、回傳之前；常駐程序：收到到送回）。60–65 見 §5.8。
+- 診斷事件（兩欄都是當下時間，除非另註）：40 `OnTestKeyDown` 回 TRUE（兩欄為 OS 執行緒 ID）；41–44 `OnTestKeyDown` 回 FALSE 的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空）；45 `OnKeyDown` 的同步 edit session 沒拿到（兩欄為 HRESULT）；47 `ActivateEx` 註冊 sink 失敗；48 `ActivateEx` 在安全模式；49 `ActivateEx` 進來的執行緒（兩欄為執行緒 ID）；50 進入 `OnKeyDown`（兩欄為執行緒 ID）；51–55 `OnKeyDown` 在送出之前就回不吃的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空、鍵沒有對應）；56 焦點換過來時鍵盤隔間讀到關、被 TIP 重新打開。都只有數字，不含任何按鍵或文字。
 - **只有完整性等級剛好是 Medium 的程序才寫**（程序 token 的 `TokenIntegrityLevel`，RID 0x2000）：High、Low 與 AppContainer 的程序一律不寫。理由：同一個使用者的一般程序改得了該使用者的資料夾（例如把中間的資料夾換成 junction），提升權限的程序照那條路徑建檔就是跨權限寫檔；限定 Medium 後寫入不跨權限。
 - 位置：目前使用者的 `%LOCALAPPDATA%\shanjie-dev\timing\timing-<pid>.txt`，資料夾路徑用 `SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_NO_PACKAGE_REDIRECTION)` 取，不讀環境變數。封裝的宿主（例如 MSIX 封裝的記事本）寫 AppData 可能被檔案系統虛擬化而導到 `%LOCALAPPDATA%\Packages\<套件>\LocalCache\Local\shanjie-dev\timing\`，讀取時兩個位置都要看。
 - 資料夾由驅動腳本事先建立，TIP 不建；開檔用 `CREATE_NEW`（不開已存在的檔）。資料夾不存在、檔案已存在、開不了或程序不是 Medium 時，這個程序就不寫計時，`ActivateEx` 照常成功，不顯示、不記錄任何錯誤。
-- 檔案在第一次 `ActivateEx` 時開（每個程序一次），每行寫完就 flush；寫入用 `try_lock`，鎖忙時那一行直接略過，寫入失敗則關閉該程序的計時。
+- DLL 的檔案在第一次 `ActivateEx` 時開、常駐程序的在啟動時開（每個程序一次），每行寫完就 flush；DLL 寫入用 `try_lock`，鎖忙時那一行直接略過，常駐程序等鎖（§5.8）；寫入失敗則關閉該程序的計時。
 - 驗證：`timing::tests::a_line_has_three_numeric_columns`；VM 裡讀回每個計時檔，內容只有 `[0-9\t\n]`、每行三欄、事件代碼只有上面列出的、每行開始 ≤ 結束。
 
 ### 3.12 R2（隱私）
@@ -224,28 +225,28 @@ Linux `debug` job 在既有步驟之後加三步：
 
 ### 3.13 驗證方式
 
-CI（`windows` job 最後兩步）：
+CI（`windows` job 最後幾步，§5.10）：
 
-- `cargo build --release --locked -p shanjie-tip`，再加 `--features timing` 建一次；
-- `cargo test --release --locked -p shanjie-tip`：單元測試只測純函式（鍵碼對應表、`OnTestKeyDown` 判斷、計時行格式）；COM 與 TSF 不在 CI 裡起，靠 VM 實測。
-- R2 行為測試（`r2_tests`，子程序的寫法同 `core/src/ffi.rs` 的子程序測試）：
+- `shanjie-tip` 與 `shanjie-host` 各建帶與不帶 `timing` 兩種，核對匯入與匯出；
+- `cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host`：DLL 的單元測試只測純函式（鍵碼對應表、`OnTestKeyDown` 判斷、計時行格式、模擬等級）；常駐程序的測試對真的伺服器與引擎（§5.11 第 10 點）；COM 與 TSF 不在 CI 裡起，靠 VM 實測。
+- R2 行為測試（`r2_tests`，DLL 與常駐程序各一份，子程序的寫法同 `core/src/ffi.rs` 的子程序測試）：
   - `r2_panic_marker_never_reaches_stdout_or_stderr`：子程序什麼都不先裝，直接呼叫正式的包裝（`guard::com`），在裡面 panic（訊息帶標記字串）。斷言包裝回 `E_FAIL`（panic 沒穿出去）、`GetErrorInfo` 回 `S_FALSE`（沒有掛上錯誤物件）、子程序的 stdout 與 stderr 都找不到標記；正向對照：另一個子程序用預設 hook、不經包裝 panic，標記必須出現在 stderr。
   - `r2_panic_marker_never_reaches_the_debug_output`：父程序以 `DEBUG_ONLY_THIS_PROCESS` 開子程序，收 `OUTPUT_DEBUG_STRING_EVENT`，斷言沒有標記；子程序先送一個 `R2CHILDRAN` 證明真的跑了；正向對照的子程序自己 `OutputDebugStringW(標記)`，父程序必須收到（UTF-8 與 UTF-16LE 兩種都找）。
-- macOS 與 Linux 上 `shanjie-tip` 是空的 crate，照樣編得過。
+- macOS 與 Linux 上 `shanjie-tip` 是空的 crate、`shanjie-host` 是空的 bin，照樣編得過。
 
-VM 實測（Hyper-V、zh-TW Windows 11 乾淨檢查點；按鍵從主機送進 VM 主控台、用縮圖截圖、PowerShell Direct 讀狀態；每次跑從同一個檢查點還原）：
+VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 乾淨檢查點；按鍵從主機送進 VM 主控台、用縮圖截圖、PowerShell Direct 讀狀態；每次跑從同一個檢查點還原）：
 
 - 測試句：取 `eval/dev/user-typing.txt` 第一個「前文空、沒有標點、至少 6 字，且 `shanjie-replay --no-tinylm --learn off --strict` 解對」的列；按鍵由讀音依標準排列換算。
 - (a0) 安裝位置：複製到 `C:\Program Files\shanjie-dev\`，核對雜湊與 ACL（§3.3）。(a) `regsvr32 /s`（逾時 60 秒，結束碼 0）、讀登錄、把設定檔加進使用者清單、重開；切到善解後計時檔必須出現事件 1。
 - (b) 記事本：打測試句，Enter 之前有底線的組字，Enter 之後文字在記事本裡、沒有底線，讀回與預期逐字相同。(c) 直通：組字區空時 Enter 交給 App（多一個換行）；打 ㄋㄧˇ 再按 Tab，內容結尾是「你\t」（先送出再放行）。(d) 組字中 Backspace、Esc 清空，文件不變。(e) 「執行」對話框（`explorer.exe`）打同一句，逐字相同。(e2) 同一程序的兩個記事本視窗不串字：第一個視窗打 ㄋㄧˇ 不送出，到第二個視窗打 ㄏㄠˇ Enter，第二個視窗只有「好」；回第一個視窗，「你」留在文件裡、沒有底線；再打 ㄏㄠˇ Enter 得到「你好」。
 - (g) R2 掃描：計時檔格式（見 §3.11）；計時資料夾只有 `timing-*.txt`；安裝資料夾雜湊不變；`CrashDumps` 與 WER 的 `ReportQueue`、`ReportArchive` 沒有新項目；以 UTF-8 與 UTF-16LE 在 `%TEMP%`、計時資料夾與安裝資料夾搜尋測試句，都找不到。(h) 取消註冊後登錄鍵不在、重開後清單沒有善解、記事本照樣能用微軟注音。
-- 量測（延遲是 TIP 裡面花的時間，不含 App 畫字；同步載入、DLL 內核心的量測值）：記事本與 `explorer.exe` 多佔的私有記憶體各約 300 MB（切到善解前到打完 12 字後：24.7 → 325.3 MB 與 57.7 → 368.9 MB），模型載入 2.0–2.7 秒（即切換的整段），首鍵延遲 0.09–12.5 ms，每鍵延遲中位數 0.06–0.88 ms、p95 3.4–5.5 ms、最大 4.3–12.5 ms；同一台 VM 的微軟注音在記事本打同一句，私有記憶體約 24.4 → 24.3 MB。
+- 對照量測（常駐程序之前、核心在 DLL 內同步載入時；延遲是 TIP 裡面花的時間，不含 App 畫字）：記事本與 `explorer.exe` 多佔的私有記憶體各約 300 MB（切到善解前到打完 12 字後：24.7 → 325.3 MB 與 57.7 → 368.9 MB），模型載入 2.0–2.7 秒（即切換的整段），首鍵延遲 0.09–12.5 ms，每鍵延遲中位數 0.06–0.88 ms、p95 3.4–5.5 ms、最大 4.3–12.5 ms；同一台 VM 的微軟注音在記事本打同一句，私有記憶體約 24.4 → 24.3 MB。
 
 ### 3.14 已知限制與範圍外
 
 - 按鍵行為目前是核心現行的規則（Mac 版）。Windows 版的預設應照微軟注音（§4.6 的差異表），Mac 做法留成設定可選；這組規則與開關、單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作。
 - 沒有候選窗、預測列、UILess（`ITfCandidateListUIElement`）、UIA、`EVENT_OBJECT_IME_*`，所以組字中按空白鍵或 ↓ 看起來不動作（§3.7 第 5 步）。
-- 沒有背景重排（`rerank_take/run/apply`）、背景載入或常駐程序：引擎在每個宿主程序內同步載入，約 300 MB 私有記憶體與 2–2.7 秒的首次載入（§3.13 量測）；程序不結束，模型不釋放。
+- 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。
 - 沒有安裝程式、更新與簽章；DLL 未簽章。給使用者的建置不能開 `timing`（每個按鍵的時間戳就是打字節奏），要用看得到的方式驗證（例如 feature 開著時多匯出一個符號，發佈流程檢查它不存在），而不是掃原始碼。
 - 只出 x64；x86、ARM64 的 TIP、Chrome、Office、遊戲等其他宿主的相容性尚未驗證；CI 裡沒有離螢幕的 TSF 測試宿主。
@@ -408,3 +409,138 @@ VM 實測（Hyper-V、zh-TW Windows 11 乾淨檢查點；按鍵從主機送進 V
 | S2 Tab | 不動作 | 送出組字，再把 Tab 交給 App |
 | Ctrl+Space | 任何狀態都切英文（S1 清掉 ㄋ、S3 關窗，組字留著） | 不處理，直接交給 App |
 | 組字區上限 | 約 31 個音節（推論） | 128 個單位（`MAX_SYLLABLES`），到了送出整段並清空 |
+
+## 5. 常駐程序（`windows/host`）
+
+每個使用者的每個登入工作階段一支 x64 常駐程序 `shanjie-host.exe`，**只有它**載入模型、只有一個引擎；TSF 文字服務 DLL 是薄客戶端，不相依核心，每按一鍵經 named pipe 同步往返一次。連不上就直通，不退回 DLL 內核心。之後的候選窗（WinUI 3）是另一支程序，協定預留了常駐程序主動推送的訊息型別。
+
+### 5.1 程式放哪裡
+
+- 三個 crate，都是 workspace 成員：
+  - `windows/proto`（`shanjie-win-proto`）：線上格式。純 Rust、不分平台、不相依 `windows` crate，三個平台的 CI 都編、都測。
+  - `windows/host`（`shanjie-host`，產出 `shanjie-host.exe`）：pipe 伺服器、引擎、擁有者切換、計時檔。`#![cfg(windows)]` 包住主程式，macOS 與 Linux 上是空的 bin。相依 `shanjie_core`（§3.1 的改名寫法，只放在 `cfg(windows)`）、`shanjie-win-proto`、`windows`／`windows-core` 0.62。只呼叫核心的 C ABI。
+  - `windows/tip`：不相依核心，改相依 `shanjie-win-proto`。`client.rs`（連線、伺服器核對、逾時、斷路器、啟動常駐程序）取代 DLL 內的引擎；`tip.rs`、`doc.rs`、`keys.rs` 只改呼叫引擎的地方。`pipeio.rs`（有期限的 overlapped I/O）、`token.rs`（權杖查詢）與 `timing.rs` 兩端共用，常駐程序以 `#[path]` 引入。
+- DLL、常駐程序、資料都在同一個安裝資料夾（開發版 `C:\Program Files\shanjie-dev\`，§3.3）；常駐程序從自己的 `GetModuleFileNameW` 推資料夾，資料在旁邊的 `data\`。
+- 只出 x64。
+
+### 5.2 程序模型
+
+- pipe 名稱 `\\.\pipe\shanjie-dev-<使用者 SID>-<工作階段 ID>`。名稱不帶協定版本：版本不同的兩端要碰得到彼此，才會走到 `Refuse { 1 }`。提升權限的 App 也連這一支（§5.5 第 5 點）。
+- **實例**：啟動時一次建好全部 N＝64 個實例（`nMaxInstances = N`，第一個帶 `FILE_FLAG_FIRST_PIPE_INSTANCE`），之後以 `DisconnectNamedPipe`、`ConnectNamedPipe` 重複使用、永遠不關。第一個實例建不起來（已經有一支在跑）就結束。實例數已滿，誰都加不了實例，與 DACL 無關。不另外用具名 mutex。VM 驗收讀事件 65（同時連線數的最高值）核對 N。
+- **先建 pipe、再載模型**：載入期間收到 `Hello` 或 `Key` 立刻回 `NotReady`，客戶端直通。模型載入失敗、或引擎的鎖 poisoned，常駐程序就結束，讓下一個客戶端啟動新的一支。
+- **誰啟動**：DLL 連線得到 `ERROR_FILE_NOT_FOUND`，而且呼叫端同時符合以下全部條件時，才 `CreateProcessW`；`ERROR_PIPE_BUSY` 不啟動、直通。
+  - 呼叫端完整性剛好是 Medium、不是 AppContainer、不是提升權限、不是受限權杖、工作階段不是 0、使用者不是 SYSTEM／LocalService／NetworkService、沒有套件身分（`GetCurrentPackageFullName` 回 `APPMODEL_ERROR_NO_PACKAGE`；封裝 App 開的子程序會留在它的套件執行環境裡）。
+  - 不等：送出 `CreateProcessW` 就讓這一鍵直通，不在 `OnKeyDown` 或 `ActivateEx` 裡等 pipe 出現。每個程序同時只啟動一次；啟動後 10 秒內不再啟動，期間的鍵直通。啟動 15 秒後、或它啟動的常駐程序已經結束，連線仍是 `ERROR_FILE_NOT_FOUND`，記一次「啟動後仍找不到」（事件 63 原因 5），照退避重試；永久直通只由 `Refuse { 1 }` 觸發。
+  - `lpApplicationName` 是 DLL 旁的 `shanjie-host.exe` 的絕對路徑；命令列加引號、只有一個固定旗標 `--resident`，不帶任何從宿主取得的字串；工作目錄是安裝資料夾；環境區塊只有 `SystemRoot`。
+  - 只繼承 NUL 的三個標準 handle（`EXTENDED_STARTUPINFO_PRESENT`、`STARTF_USESTDHANDLES`、`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`），啟動後關掉。旗標 `CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB | CREATE_UNICODE_ENVIRONMENT`；宿主的 Job 不准脫離時不啟動、這一鍵直通。
+- **生命週期**：活到登出，沒有連線也不自己結束（載入一次約 2 秒）。沒有看門狗：誰連不上、符合條件，誰啟動。
+- **已知限制**：登入時預先啟動屬於安裝程式；在那之前，只在有套件身分的 App（例如 Windows 11 的記事本）或 AppContainer 裡打字時不會啟動常駐程序，那些 App 只有英文，要有一個一般的桌面程式（例如「執行」對話框、多數 Win32 App）先打過字。
+- **自我檢查**（`main` 一開始）：權杖不是剛好 Medium、提升權限、AppContainer、受限權杖、工作階段 0、SYSTEM 或服務帳號、或有套件身分，就結束。接著 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`、`WerAddExcludedApplication`（寫 HKCU；失敗就結束：記憶體裡有所有 App 的組字，dump 不能落地），裝不印 payload 的 panic hook。
+
+### 5.3 線上格式（`windows/proto`）
+
+- 固定寬度、小端，不用自描述的序列化。每則：`u32 len`、`u16 proto`、`u16 type`、`u64 seq`，後面是型別專屬的內容。字串一律 UTF-16 長度加資料。
+- 客戶端 → 常駐程序：`Hello { build_hash, pid, tid }`（pid、tid 只是資訊，不拿來授權）；`Key { ctx, ShanjieKey }`；`Release { ctx }`；`Reset { ctx }`（DLL 接住 panic 之後；送出後客戶端關掉這條連線，因為 panic 可能發生在一次交換的中間）。
+- 常駐程序 → 客戶端：`Welcome { build_hash }`；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected }`（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理）；預留 `Pushed`，客戶端收到就丟掉。
+- `proto` 不同 → `Refuse { 1 }`；`build_hash` 不同不拒絕、不記錄。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
+- **擁有者由常駐程序指定**：`owner = (連線 ID, ctx)`，連線 ID 單調遞增、不重用；客戶端只送自己的 `ctx`（`ITfContext` 的指標值），它只在自己那條連線裡有意義。換擁有者先 `reset(mode 1)`（§3.4 的那一套：一個引擎、開了候選窗就在常駐程序裡補一個 ESC）。`Release` 要 `(連線, ctx)` 完全相符才 reset；`Reset` 與斷線只看連線，是目前的擁有者才 reset 並清掉擁有者。
+- **解析規則**（兩端共用）：
+  - 讀到 `len` 之後、配置記憶體之前，先檢查 16 ≤ `len` ≤ 64 KiB，而且等於這則訊息實際的位元組數。
+  - 型別依方向用白名單；第一則一定是 `Hello` 而且只有一次，之前收到別的就斷線。
+  - 字串長度不得超過剩下的內容，結尾不能有多出來的位元組，旗標只收 0 或 1。
+  - 任何一條不符就斷線、不回應。
+  - 客戶端另外核對：`seq` 等於送出的那一則；`ran` 為真；`cursor_utf16` 不大於 `preedit` 的長度；`candidate_selected` 一定是 −1；`commit`、`preedit` 不含 C0、C1 控制字元與落單的代理字元（偽造的伺服器打換行進終端機的縱深防禦；核心的送出路徑本來就不送控制字元）。
+- 驗證：`shanjie-win-proto` 的單元測試（每個型別編解碼往返、長度上限、壞的或截斷的訊息被拒絕、亂數位元組解碼不會 panic），三個平台都跑。
+
+### 5.4 通訊
+
+- **`OnTestKeyDown` 不看連線**：照 §3.6 判斷，連線與啟動都在 `OnKeyDown` 裡做；只有斷路器生效、`Refuse { 1 }` 之後的永久直通、`Refuse { 3 }` 的 60 秒冷卻期間才一律回 FALSE。（explorer 會先呼叫 `OnTestKeyDown`；若它因為還沒連上而回 FALSE，`OnKeyDown` 永遠不會被呼叫，常駐程序也永遠不會被啟動。）
+- **第一個鍵才連線**（不在 `ActivateEx` 連）；一個 TIP 實例最多一條連線。組字區是空的而且閒置 60 秒，客戶端自己關連線（UI 執行緒上 15 秒一次的 `SetTimer`）。連線曾經存在後 `DllCanUnloadNow` 一律回 `S_FALSE`。
+- 常駐程序每條連線一條執行緒，本體包 `catch_unwind`。引擎一把鎖：`Key` 一律 `try_lock`，拿不到就立刻回 `Busy`（客戶端直通）；`Release`、`Reset` 與斷線清理等鎖（沒有人在等它們的回應，跳過會留下錯的擁有者、讓已經送出的字再出現一次），等的時間最多是別人一次核心呼叫。先放掉鎖再寫回應，寫入逾時 1 秒就斷那條連線。
+- 閒置逾時只用在 `Hello` 之前（1 秒）。依客戶端的 AppContainer SID 或 PID 限制每個客戶端的連線數（4）：只拿來限流，不拿來授權。送出最後一則（`Refuse`、`NotReady`）之後等客戶端關閉最多 1 秒再 `DisconnectNamedPipe`，免得客戶端讀不到。
+- **每鍵同步**：`OnKeyDown` 在同步 edit session 裡送 `Key`、等 `Out`，拿到就照 §3.7 改文件；edit session 沒拿到時不送。
+- **逾時 200 ms**（寫入與讀取共用一個期限）。overlapped I/O，不做可警示的等待、不 pump 訊息；逾時就 `CancelIoEx`，再 `GetOverlappedResult(bWait = TRUE)` 等取消完成，才釋放 `OVERLAPPED` 與緩衝。
+- 寫入失敗：組字區是空的時候重連一次、重送一次；組字開著時照 §5.6 第一列。寫完之後讀取失敗或逾時不重送。
+- **斷路器**：連續兩次逾時，這個程序 10 秒內不再連線、直通。
+- 常駐程序是組字狀態的唯一來源；DLL 不留按鍵紀錄、不重放。
+
+### 5.5 安全
+
+1. **客戶端核對伺服器**（連上之後、送任何訊息之前；任一步失敗就斷線、直通，Medium 客戶端記事件 63 原因 9）：
+   - (a) 只用 handle：`GetSecurityInfo` 讀 pipe 的擁有者 SID，必須等於客戶端自己的 `TokenUser`；`GetNamedPipeServerSessionId` 必須等於自己的工作階段。每個客戶端都做，AppContainer 也是。
+   - (b) 不是 AppContainer 的客戶端再查伺服器程序的權杖（`GetNamedPipeServerProcessId` → `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` → `OpenProcessToken(TOKEN_QUERY)`）：使用者相同、完整性剛好是 Medium、不是 AppContainer、不是受限權杖。
+   - (c) 映像路徑（`QueryFullProcessImageNameW`，不分大小寫）必須等於 DLL 旁的 `shanjie-host.exe`，只當補充、查不到就拒絕；和 (b) 一樣只對非 AppContainer 客戶端做（AppContainer 開不了常駐程序的程序）。
+   - 受限權杖的判斷直接讀 `TokenRestrictedSids` 的群組數，查詢失敗就拒絕。
+   - 邊界：同一個使用者、同為 Medium 的程式本來就能裝鍵盤鉤子或注入，對 Medium 客戶端這是縱深防禦。擋得住的是其他使用者冒充（擁有者 SID、工作階段不同），以及對非 AppContainer 客戶端的 Low／AppContainer 冒充者（伺服器權杖不是 Medium）。AppContainer 客戶端只做得到 (a)：同一個使用者的 Low 程序搶先建的 pipe，擁有者與工作階段都相同，(a) 分不出來，這是接受的殘餘風險（需要同一使用者的 Low 程式先在跑、搶在常駐程序之前）。任何本機使用者都能搶先佔用別人的 pipe 名稱讓對方只剩英文；登入時預先啟動會縮小這兩個空檔。
+   - 客戶端的使用者是 SYSTEM、LocalService、NetworkService，或完整性是 System 以上，一律不連線、直通。
+2. **SDDL**（程式裡一個常數）：`D:P(A;;0x12019F;;;<使用者 SID>)(A;;0x120083;;;AC)(A;;0x120083;;;S-1-15-2-2)S:(ML;;NW;;;LW)`。
+   - 使用者 SID 那條是 `FILE_GENERIC_READ | FILE_GENERIC_WRITE`：留著建實例要的權限，沒有 `WRITE_DAC`、`WRITE_OWNER`、`DELETE`。
+   - `AC` 與 `S-1-15-2-2` 只有 `FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE | READ_CONTROL`，沒有 `FILE_CREATE_PIPE_INSTANCE`。沒有 Everyone、Users；`PIPE_REJECT_REMOTE_CLIENTS`；位元組讀取模式（客戶端不呼叫 `SetNamedPipeHandleState`）。
+   - 客戶端 `CreateFileW` 要的權限剛好是 `FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE | READ_CONTROL`（要 `GENERIC_READ`／`GENERIC_WRITE` 會多出 AppContainer 拿不到的權限）。
+3. **常駐程序不能冒用客戶端身分**：客戶端開 pipe 一律帶 `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`。測試伺服器模擬客戶端之後，斷言模擬等級是 `SecurityIdentification`。
+4. **常駐程序核對客戶端**：讀到 `Hello` 之後 `ImpersonateNamedPipeClient` → `OpenThreadToken(OpenAsSelf = TRUE)` 讀 `TokenUser`（等於常駐程序的使用者）、`TokenSessionId`（等於常駐程序的工作階段）、AppContainer、完整性、提升權限 → `RevertToSelf`。任何一項查不到就拒絕（`Refuse { 3 }`）；`RevertToSelf` 失敗就結束程序。查到的類別記在連線上。不用 `GetNamedPipeClientProcessId` 再開程序查授權。常駐程序永遠不以客戶端身分做任何事。
+5. **提升權限的 App**：連同一支 Medium 常駐程序，絕不啟動它（§5.2 的條件）；常駐程序的自我檢查保證它不會以提升權限執行；客戶端照第 1 點核對伺服器。**接受的風險**：管理員 App 的按鍵經 pipe 進到一般權限的常駐程序，送出的字再回到管理員 App，同一個帳號下的一般權限惡意程式可以注入或讀取常駐程序，因此能讀到、也能偽造打進管理員視窗的字（Windows 的 UIPI 原本擋住的事）。Mozc、小狼毫、PIME 都是同樣的設計。縮小的措施：安裝資料夾只有系統管理員能寫（§3.3）、第 1 點的伺服器核對、§5.3 的控制字元檢查。常駐程序維持 Medium（之後的學習要寫 `%LOCALAPPDATA%`，Low 寫不了）。
+6. **R2**：線上訊息就是組字內容。兩端都不得把它寫進任何 log、檔案、錯誤訊息或 `OutputDebugString`；型別不 derive `Debug`；錯誤只有 Win32 碼與結束碼；計時檔只有數字，事件 62、63 只放錯誤碼或原因碼。R2 行為測試（§3.13）在常駐程序也跑一份。常駐程序關掉自己的 WER dump（§5.2）。
+7. 常駐程序只用 `LOAD_LIBRARY_SEARCH_SYSTEM32`，不讀環境變數找資料夾，不開網路。
+8. **接受並記錄**：單一引擎共用，任何連得上的客戶端都能讓正在打字那個 App 的組字被丟掉（換擁有者就 reset），也能從 `took_over` 看出別的 App 有沒有在打字。
+
+### 5.6 故障時怎麼做
+
+| 情況 | DLL 看到什麼 | DLL 做什麼 | 使用者看到什麼 |
+|---|---|---|---|
+| **組字開著時任何讀寫錯誤**（斷線、逾時、重連得到 `ERROR_FILE_NOT_FOUND`），或收到 `NotReady`、`Busy`、`Refuse`、格式不對的回應 | 讀寫失敗或不能用的回應 | 在同一個 edit session 裡結束組字（先清底線、字留著），**吃掉這一鍵**，關連線；之後的鍵照 §5.2 的條件連線或啟動常駐程序（不等） | 打到一半的字留在文件、沒有底線；之後的鍵依常駐程序的狀態直通或恢復 |
+| 常駐程序沒在跑（組字區是空的） | `ERROR_FILE_NOT_FOUND` | 符合 §5.2 的條件就啟動（不等），這一鍵直通 | 前幾個字母以英文出現，之後恢復 |
+| 常駐程序載入中 | `NotReady` | 直通 | 同上 |
+| 引擎忙碌 | `Busy` | 直通 | 那一鍵是英文 |
+| 常駐程序當掉或卡住（組字區是空的） | 讀寫失敗、逾時 | 寫入失敗重送一次（§5.4）；讀取失敗或逾時：取消並等完成、關連線、這一鍵直通；連續兩次逾時觸發斷路器 | 那一鍵是英文，之後恢復 |
+| 版本不同（更新後還載著舊 DLL） | `Refuse { 1 }` | 這個程序從此直通、不再重試（只有這一種會永久直通） | 這個 App 只剩英文，重開 App 恢復 |
+| 限流 | `Refuse { 2 }` | 這一鍵直通、關連線，下一鍵再連 | 那一鍵是英文 |
+| 常駐程序拒絕這個客戶端 | `Refuse { 3 }` | 直通，60 秒內不再連 | 那個 App 只有英文 |
+| 沙箱 App 連不上 | `ERROR_ACCESS_DENIED` | 直通。AppContainer 寫不了計時檔，連不上的這一端沒有紀錄；常駐程序在 AppContainer 客戶端連上時記事件 64 | 那個 App 只有英文 |
+| 伺服器核對不過 | 擁有者、工作階段或權杖不符 | 斷線、直通，Medium 客戶端記事件 63 原因 9 | 那個 App 只有英文 |
+
+都不顯示任何視窗、對話框或通知。
+
+### 5.7 文字服務的三項修正
+
+- `OnUninitDocumentMgr` 時把那個 document manager 從「已開過鍵盤隔間」的集合拿掉（§3.5）。
+- `doc::apply` 中途失敗時，取出的組字在每一條錯誤路徑上都先結束（清底線、`EndComposition`），不留下開著的組字。
+- `OnCompositionTerminated`：只有傳進來的組字和這個實例的組字是同一個（比原始指標）時才清掉並通知常駐程序。
+
+### 5.8 計時檔
+
+- DLL 與常駐程序各自照 §3.11 寫（同樣的 Medium 閘門、`CREATE_NEW`、只有數字）；常駐程序的檔名 `host-<pid>.txt`，同一個資料夾。DLL 寫入用 `try_lock`（UI 執行緒不等計時檔），常駐程序等鎖（64 條連線執行緒共用一個檔，略過會丟掉事件 2）。
+- 常駐程序記 2（模型載入）、3（每鍵：收到到送回）、64（一個 AppContainer 客戶端連上，兩欄都是 1）、65（同時連線數創新高時的值，兩欄都是那個數）。DLL 不再寫 2 與 46。
+- DLL 記：60 等常駐程序回應（開始＝送出、結束＝收到）；61 `CreateProcessW` 成功的時刻（同一個 QPC 時鐘；冷啟動秒數＝常駐程序事件 2 的結束減這個時刻）；62 逾時或斷線（兩欄都是 Win32 錯誤碼）；63 不符條件而直通（兩欄都是原因碼：1 不准連線、2 不符啟動條件、3 退避中或另一條執行緒正在啟動、4 `CreateProcessW` 失敗（含 Job 不准脫離）、5 啟動後仍找不到、6 `ERROR_PIPE_BUSY`、7 `NotReady`、8 `Busy`、9 伺服器核對不過、10 `Refuse { 1 }`、11 `Refuse { 2 }`（含不認得的原因碼）、12 `Refuse { 3 }`、13 回應型別不對）。42、52 的意思是「被擋住」（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻）。
+
+### 5.9 介面的層級
+
+常駐程序不畫任何介面。組字底線仍是 TSF 顯示屬性（§3.10）；故障時也不顯示任何東西。
+
+### 5.10 CI
+
+- `windows` job：建 `shanjie-tip`、`shanjie-host`（各自先帶 `timing`、再不帶，檢查的是不帶的那一份），`dumpbin /dependents` 核對 DLL 與 exe 都沒有 C 執行階段的匯入，`dumpbin /exports` 核對 DLL 沒有 `shanjie_` 開頭的匯出（另核對 `DllGetClassObject` 在），`cargo tree -p shanjie-tip` 沒有 `core`，印出大小；跑三個 crate 的測試（線上格式、客戶端的模擬等級、對真的伺服器與引擎的兩條連線與限流、DLL 與常駐程序的 R2 行為測試）。
+- Linux `debug` job 跑 `shanjie-win-proto` 的測試；macOS 的 core job 跑整個 workspace。
+
+### 5.11 驗證方式
+
+測試 VM 同 §3.13（從乾淨檢查點開始、結束還原）。驗收步驟：
+
+1. CI 全綠。
+2. **暖機**（在 (b) 之前）：先在記事本（有套件身分）送一鍵，核對沒有啟動常駐程序；再開「執行」對話框（`explorer.exe`，沒有套件身分）送 `s`，等常駐程序的計時檔出現事件 2、而且只有一支 `shanjie-host`（上限 60 秒），Esc 關掉。記錄冷啟動秒數（事件 61 到常駐程序事件 2 的結束），核對常駐程序的父程序是 explorer、沒有套件身分、權杖是 Medium。
+3. **逐字相同**：§3.13 的 (b)、(c)、(d)、(e)、(e2) 用同樣的鍵與預期字。
+4. **模型只載一份**：每個檢查點只有一支常駐程序；DLL 的計時檔都沒有事件 2，每個 `host-*.txt` 剛好一筆事件 2。
+5. **記憶體**：記事本與 explorer 各做兩組（微軟注音、善解），取樣點相同、兩組之間開「執行」對話框的次數相同。判準：善解的差減掉微軟注音的差 < 10 MB。常駐程序的私有記憶體照實報。
+6. **延遲**：DLL 的每鍵（事件 3）中位數、p95、最大值，p95 < 16 ms；事件 60 的 p95 另報；首鍵分常駐程序已在跑（目標 < 16 ms）與冷啟動兩種報。另報事件 65 的最高值。
+7. **故障**：(k1) 記事本組字中結束常駐程序，下一鍵照 §5.6 第一列（組字結束、字留著、這一鍵被吃掉），記事本沒有當掉、沒有啟動常駐程序；在「執行」對話框送一鍵重起常駐程序後，記事本打同一句逐字相同。只記錄、不擋：(k2) 設定 App 的搜尋框（字對不對、事件 64）；(k3) 以系統管理員身分開的記事本（字對不對、常駐程序沒有換、仍是 Medium；常駐程序沒在跑時直通、不啟動）；(k4) 模型載入期間打字（不卡 200 ms、之後不重複出字）；(k5) Low 完整性的測試程序對真的 pipe 呼叫 `CreateNamedPipeW`，應該被拒絕或拿到 `ERROR_PIPE_BUSY`。
+8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～65；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
+9. **取消註冊**照 §3.13 (h)，另外核對重開之後沒有 `shanjie-host` 在跑。
+10. 單元測試（CI）：兩條連線，B 用 A 的 `ctx` 送 `Release`、`Reset`，A 的狀態不變；B 用 A 的 `ctx` 送 `Key`，B 只拿到自己那一鍵、拿不到 A 的 `preedit`（單一引擎下這一鍵接手，A 下一鍵看到 `took_over`）；限流（`Refuse { 2 }`）之後下一條連線照常可用；模擬等級是 `SecurityIdentification`；`proto` 的解析規則。
+
+### 5.12 範圍外
+
+- 登入時預先啟動的排程工作、安裝程式、更新流程、簽章。
+- 學習檔（含 AppContainer 客戶端的學習政策）；背景重排與 `Pushed` 的實際使用；候選窗與預測列；聊天／書面、分級等設定。
+- 微軟注音的按鍵規則組（§3.14）。
+- x86、ARM64 的 DLL 與 ARM64 的常駐程序；每個客戶端一個引擎；可 mmap 的零拷貝模型格式；常駐程序在沒有連線時自己結束。
+- 之後新增送往常駐程序的資料（前文回傳、學習的查詢）時，要重審 §5.5 第 1、5 點與 AppContainer 客戶端的政策。
