@@ -209,7 +209,7 @@ python3 tools/lib/export_sjtl.py --npz <權重.npz> --out <輸出>.sjtl --type i
 
 1. **PR 1（不換檔）**：說明檔 `docs/releases/<tag>.md`、規格；本地驗收（§9）通過、審查與 CI 全綠後合併。保留集在這個階段、建 Release 之前量。
 2. **建 Release**（對外動作，每次先確認）：指令、核對步驟與規則（資料類 Release 不標 Latest、上傳前後用說明檔的雜湊核對、說明檔不能留草稿標記）寫在 `docs/releases/README.md`。
-3. **PR 2（換引用）**：同一個 PR 更新 `docs/spec/models.md` §12 列的那一串（雜湊檔、`data/models.tsv`、CI 與 `release.yml` 的下載、`cli/tests/golden.rs`、各測試的缺檔訊息、`scripts/build-app.sh`、README、CONTRIBUTING、`LICENSES/data.md`）；依模型的 golden 重產。
+3. **PR 2（換引用）**：同一個 PR 更新 `docs/spec/models.md` §12 列的那一串（雜湊檔、`data/models.tsv`、CI 與 `release.yml` 的下載、`cli/tests/golden.rs`、各測試的缺檔訊息、`scripts/build-app.sh`、網站的「已合併、還沒發版」、CONTRIBUTING、`LICENSES/data.md`）；依模型的 golden 重產。
 4. 舊 Release 保留，可以回到那一版。
 5. 換檔順序：先把新雜湊合進 main 會讓 CI 拿舊檔對新雜湊而失敗，所以雜湊檔和 CI 下載在同一個切換的 PR 裡改；第一次加的新檔沒有人讀，雜湊檔可以和說明檔一起先進 main。
 

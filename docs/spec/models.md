@@ -520,7 +520,7 @@ shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sh
 
 - 舊的 Release 保留，可以回到那一版。
 - 發佈的通語要先加上來源辨識條目（§2.3）再算雜湊，詞類表也對加過的檔建。
-- 換版時同一個 PR 更新：雜湊檔（`data/*.sha256`）與 `data/models.tsv` 的那一列、CI 的 `scripts/fetch-models.sh` 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh` 的提示與內附的署名文字、README、CONTRIBUTING、`LICENSES/data.md`、這份規格 §11 的表；換會意檔時另外照 `docs/releases/README.md` 的上傳與核對步驟。換會意檔而融合參數有變時，要重新確認 selftest 用的那一句仍會被重排改掉（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText`，與測試的 `RerankRow`），不會就重挑一句。依模型的 golden 照各自的產生方式用 Python 參考實作重產，Rust 逐位元組相同。
+- 換版時同一個 PR 更新：雜湊檔（`data/*.sha256`）與 `data/models.tsv` 的那一列、CI 的 `scripts/fetch-models.sh` 與 `release.yml` 的下載、`cli/tests/golden.rs` 的雜湊與訊息、`core/tests/engine_*.rs` 的缺檔訊息、`macos/Tests/ShanjieKitTests/Support.swift`、`scripts/build-app.sh` 的提示與內附的署名文字、網站 `site/updates.html` 的「已合併、還沒發版」（發版時再改其他頁的模型名稱）、CONTRIBUTING、`LICENSES/data.md`、這份規格 §11 的表；換會意檔時另外照 `docs/releases/README.md` 的上傳與核對步驟。換會意檔而融合參數有變時，要重新確認 selftest 用的那一句仍會被重排改掉（`Selftest.rerankRowStandard`、`rerankedText`、`ngramText`，與測試的 `RerankRow`），不會就重挑一句。依模型的 golden 照各自的產生方式用 Python 參考實作重產，Rust 逐位元組相同。
 - 換檔順序：先把新雜湊合進 main 會讓 CI 拿舊檔對新雜湊而失敗，所以雜湊檔和 CI 下載在同一個切換的 PR 裡改；第一次加的新檔沒有人讀，雜湊檔可以和說明檔一起先進 main（`docs/releases/README.md`）。
 
 ## 13. 怎麼產生

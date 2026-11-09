@@ -110,7 +110,7 @@ public struct InstallDecision: Equatable, Sendable {
         case .accountOnly:
             // Any copy in /Library blocks, also one whose version cannot be read ("").
             if system != nil { return InstallDecision(action: .blocked) }
-            // The reverse move: installed in /Library before, removed per the README, still in the enabled list.
+            // The reverse move: installed in /Library before, removed per the uninstall steps (site/install.html), still in the enabled list.
             if !accountCopy && listedBeforeCopy { return InstallDecision(action: .account(.install), moved: true) }
             return InstallDecision(action: .account(InstallerPlan.decide(installed: account, bundled: bundled)))
         }

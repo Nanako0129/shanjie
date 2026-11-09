@@ -18,7 +18,7 @@ public enum RootStage {
         #"anchor apple generic and identifier "com.nyanako.inputmethod.shanjie" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "2LJ882GPY8""#
 
     /// Removes this Mac's copy (docs/spec/install-and-update.md §5.3), shown when "My Account Only" is blocked; the same line
-    /// install-ime.sh prints and the README gives.
+    /// install-ime.sh prints and the website's install page (site/install.html, uninstall) gives.
     public static let removalCommand = #"sudo rm -rf "/Library/Input Methods/善解輸入法.app" "/Library/Input Methods/.shanjie-previous""#
 
     public struct Parameters: Equatable, Sendable {
