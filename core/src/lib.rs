@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 pub const BEAM: usize = 32;
 pub const PER_KEY: usize = 12;
-/// S1 candidate path (PLAN S1): 64 candidates need a beam of at least 64. S0 BEAM stays for `unigram`/golden.
+/// S1 candidate path (docs/spec/decoder.md §4.1): 64 candidates need a beam of at least 64. S0 BEAM stays for `unigram`/golden.
 pub const BEAM_S1: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

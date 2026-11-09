@@ -978,7 +978,7 @@ fn run() -> Result<(), String> {
         }
         let (m, misses) = evaluate(&lex, &len, &rows, |_| {}).map_err(|e| e.to_string())?;
         println!("\n## {name}  unigram  {}", m.repr());
-        // 保留集只印指標：錯句會把內容露給調整系統的人（PLAN 片 E 保留集規則）
+        // 保留集只印指標：錯句會把內容露給調整系統的人（docs/spec/evaluation.md §1.4 的保留集規則）
         if name != "萌典例句" && name != "保留集" {
             for (t, o) in misses {
                 println!("   ✗ {t} → {o}");
