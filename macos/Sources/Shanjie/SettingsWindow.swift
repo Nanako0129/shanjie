@@ -158,7 +158,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 /// The sidebar pages (docs/spec/macos-shell.md §9.2), in sidebar order.
 enum SettingsPage: CaseIterable, Hashable {
     /// 關於 last (docs/spec/install-and-update.md §3.4–§3.6).
-    case general, candidates, appearance, memory, about
+    case general, candidates, appearance, memory, diagnostics, about
 
     var title: String {
         switch self {
@@ -166,6 +166,7 @@ enum SettingsPage: CaseIterable, Hashable {
         case .candidates: "選字"
         case .appearance: "外觀"
         case .memory: "選字記憶"
+        case .diagnostics: "診斷"
         case .about: "關於"
         }
     }
@@ -177,6 +178,7 @@ enum SettingsPage: CaseIterable, Hashable {
         case .candidates: "character.cursor.ibeam"
         case .appearance: "paintpalette"
         case .memory: "brain"
+        case .diagnostics: "stethoscope"
         case .about: "info.circle"
         }
     }
@@ -390,6 +392,14 @@ struct SettingsPageForm: View {
                     Toggle(MenuEntry.Text.excludeBackup, isOn: Binding(get: { model.backupExcluded }, set: { model.setBackupExcluded($0) }))
                     Button(MenuEntry.Text.clear) { model.clear() }
                 }
+            case .diagnostics:
+                Section("診斷") {
+                    Toggle("記錄偶發問題的診斷資料", isOn: Binding(get: { model.diagLog }, set: { model.setDiagLog($0) }))
+                    Text("只存在這台 Mac 的記憶體裡，不會自動送出。會記下切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("複製診斷紀錄…") { diagPreview = model.diagLogPreview() }
+                        .disabled(model.diagLogEmpty)
+                }
             case .about:
                 if let updates = model.updates { AboutSections(updates: updates) }
             }
@@ -397,7 +407,31 @@ struct SettingsPageForm: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)  // the window's glass shows through
         .frame(width: Self.formWidth)
+        // docs/spec/macos-shell.md §13.3: the whole text first; only 複製 puts it, unchanged, on the pasteboard.
+        .sheet(isPresented: Binding(get: { diagPreview != nil }, set: { if !$0 { diagPreview = nil } })) {
+            VStack(alignment: .leading) {
+                ScrollView {
+                    Text(diagPreview ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(width: Self.diagPreviewSize.width, height: Self.diagPreviewSize.height)
+                HStack {
+                    Spacer()
+                    Button("取消", role: .cancel) { diagPreview = nil }.keyboardShortcut(.cancelAction)
+                    Button("複製") {
+                        if let text = diagPreview { model.copyDiagLog(text, to: NSPasteboard.general) }
+                        diagPreview = nil
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding()
+        }
     }
+    /// The preview's text area: wide enough for a line of the log in the caption monospaced font; not measured against a reference.
+    private static let diagPreviewSize = CGSize(width: 460, height: 320)
+    /// The text the preview sheet shows; `nil` while it is closed.
+    @State private var diagPreview: String?
 }
 
 /// The 關於 page (docs/spec/install-and-update.md §3.4–§3.6): version, the update controls, the site and the licence line. The

@@ -13,38 +13,66 @@ public struct ShiftTap {
     /// kVK_Shift, kVK_RightShift.
     static let shiftKeys: Set<UInt16> = [56, 60]
 
-    /// The Shift key now down, the time it went down and whether the other Shift's bit was set then; `nil` when no tap is possible
-    /// (nothing down, or the press is spoiled).
-    private var candidate: (key: UInt16, at: TimeInterval, otherDown: Bool)?
+    /// What a Shift release was (docs/spec/macos-shell.md §13.1): `toggled`, or the one reason it was not a tap, one per exit path.
+    public enum Outcome: String, CaseIterable, Sendable {
+        case toggled
+        /// At the press: another modifier was down, or Caps Lock was on.
+        case modifierAtPress, capsLockAtPress
+        /// Between press and release: another modifier moved; the other Shift's bit differs from the press.
+        case modifierBetween, otherSideChanged
+        case tooLong, mouse
+        /// No press seen (the tap was reset, or Shift was down when the input method became active); the release is of the other side.
+        case noPress, otherKeyReleased
+        /// At the release, with no flagsChanged of it in between: Control, Option, Command or Fn down; Caps Lock on.
+        case modifierAtRelease, capsLockAtRelease
+    }
+
+    /// The Shift key now down, the time it went down, whether the other Shift's bit was set then, the first reason the press can no
+    /// longer be a tap (`nil` while it still can), and whether a key went down since (a capital: not recorded at all).
+    private var press: (key: UInt16, at: TimeInterval, otherDown: Bool, spoiled: Outcome?, interrupted: Bool)?
 
     public init() {}
 
     /// A `keyDown` anywhere: Shift+letter, Shift+arrow and the like are not a tap.
-    public mutating func keyDown() { candidate = nil }
+    public mutating func keyDown() { press?.interrupted = true }
+
+    /// `event(…) == .toggled`.
+    public mutating func flagsChanged(keyCode: UInt16, leftDown: Bool, rightDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
+                                      processedAt: TimeInterval, mouseAgo: () -> TimeInterval) -> Bool {
+        event(keyCode: keyCode, leftDown: leftDown, rightDown: rightDown, others: others, capsLock: capsLock, now: now,
+              processedAt: processedAt, mouseAgo: mouseAgo) == .toggled
+    }
 
     /// One `flagsChanged` event. `leftDown`, `rightDown`: whether the flags say each Shift key is down now. The set of down keys is rebuilt
     /// from them on every event, never kept, so a missed event cannot leave a stale key behind; `others`: Control, Option, Command or Fn
     /// is in the flags; `capsLock`: the light is on; `now`: the event's time; `processedAt`: the time this event is handled, on the same
     /// clock as `now` (the system uptime); `mouseAgo`: seconds since the latest mouse-button press, asked only when it can decide (a
-    /// release). True: switch.
-    public mutating func flagsChanged(keyCode: UInt16, leftDown: Bool, rightDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
-                                      processedAt: TimeInterval, mouseAgo: () -> TimeInterval) -> Bool {
+    /// release). The outcome of a Shift release; `nil` for anything else and for a release after a key (a capital).
+    public mutating func event(keyCode: UInt16, leftDown: Bool, rightDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
+                               processedAt: TimeInterval, mouseAgo: () -> TimeInterval) -> Outcome? {
         guard Self.shiftKeys.contains(keyCode) else {
-            candidate = nil  // another modifier moved while Shift may be down
-            return false
+            if press?.spoiled == nil { press?.spoiled = .modifierBetween }  // another modifier moved while Shift may be down
+            return nil
         }
         let down = Set([leftDown ? UInt16(56) : nil, rightDown ? UInt16(60) : nil].compactMap { $0 })
         let otherDown = !down.subtracting([keyCode]).isEmpty
         if down.contains(keyCode) {
-            candidate = !others && !capsLock ? (keyCode, now, otherDown) : nil
-            return false
+            press = (keyCode, now, otherDown, others ? .modifierAtPress : capsLock ? .capsLockAtPress : nil, false)
+            return nil
         }
-        defer { candidate = nil }
+        defer { press = nil }
+        guard let p = press else { return .noPress }
+        if p.interrupted { return nil }
+        guard p.key == keyCode else { return .otherKeyReleased }
+        if let spoiled = p.spoiled { return spoiled }
         // docs/spec/keys-and-composition.md §9.1: the other side's bit that was already set at the press and is unchanged now (a stale bit) does not spoil
         // the tap; a change of it in between (two Shift keys really pressed together) does.
-        guard let c = candidate, c.key == keyCode, c.otherDown == otherDown, !others, !capsLock else { return false }
-        // A click since the press is `mouseAgo` seconds old at most `processedAt - c.at`; the event's own timestamps would miss a click
+        if p.otherDown != otherDown { return .otherSideChanged }
+        if others { return .modifierAtRelease }
+        if capsLock { return .capsLockAtRelease }
+        if now - p.at > Self.SHIFT_TAP_MAX { return .tooLong }
+        // A click since the press is `mouseAgo` seconds old at most `processedAt - p.at`; the event's own timestamps would miss a click
         // between a late-handled release and the release itself.
-        return now - c.at <= Self.SHIFT_TAP_MAX && mouseAgo() > processedAt - c.at
+        return mouseAgo() > processedAt - p.at ? .toggled : .mouse
     }
 }

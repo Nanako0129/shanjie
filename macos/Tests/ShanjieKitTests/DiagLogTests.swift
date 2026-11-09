@@ -102,4 +102,289 @@ final class DiagLogTests: XCTestCase {
         XCTAssertEqual(readSteps(shiftToggle: true), on, "toggle on")
         XCTAssertEqual(readSteps(shiftToggle: false), off, "toggle off")
     }
+
+    // MARK: helpers for the log
+
+    private func lines(_ shell: Shell) -> [String] {
+        shell.diag.export(version: "0.0.0").split(separator: "\n").map(String.init)
+    }
+
+    /// The event part of each line after the header (the time dropped).
+    private func events(_ shell: Shell) -> [String] {
+        lines(shell).dropFirst().map { String($0.drop(while: { $0 != " " }).dropFirst()) }
+    }
+
+    private static let bundlePattern = #"(-|\?|[A-Za-z0-9._-]{1,255})"#
+    private static let outcomePattern = "(" + ShiftTap.Outcome.allCases.map(\.rawValue).joined(separator: "|") + ")"
+    /// docs/spec/macos-shell.md §13.2: the closed grammar of an exported line.
+    private static let headerLine = try! NSRegularExpression(
+        pattern: #"^shanjie [A-Za-z0-9._-]+ macOS [0-9]+\.[0-9]+\.[0-9]+ exported [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"#)
+    private static let eventLine = try! NSRegularExpression(pattern: "^-[0-9]+\\.[0-9]{3} (shift (left|right) \(outcomePattern)"
+        + "|toggle \(bundlePattern) (en|zh) (hint|nohint)|(activate|deactivate) \(bundlePattern) (owner|notowner) (en|zh)"
+        + "|owner \(bundlePattern)|ascii \(bundlePattern) (en|zh))$")
+
+    private static func matches(_ re: NSRegularExpression, _ s: String) -> Bool {
+        re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
+
+    /// A Shift event with explicit device bits (0x2 left, 0x4 right) and other flags.
+    private func flags(_ c: Controller, _ code: UInt16, _ raw: UInt, extra: NSEvent.ModifierFlags = []) {
+        uptimeNow = time
+        var f = NSEvent.ModifierFlags(rawValue: raw).union(extra)
+        if raw & 0x6 != 0 { f.insert(.shift) }
+        c.session.handle(Keys.event(code, flags: f, type: .flagsChanged, time: time))
+    }
+
+    // MARK: a. buffer limits
+
+    func testEachBufferKeepsItsNewestEntries() {
+        let shell = makeShell()
+        var t = 0.0
+        shell.diag.clock = { t }
+        for i in 0...DiagLog.shiftLimit { t = Double(i); shell.diag.record(.shift(right: i == 0, outcome: .toggled)) }
+        for i in 0...DiagLog.otherLimit { t = Double(i); shell.diag.record(.owner(bundle: i == 0 ? "com.first" : "com.next")) }
+        let ev = events(shell)
+        XCTAssertEqual(ev.filter { $0.hasPrefix("shift ") }.count, DiagLog.shiftLimit)
+        XCTAssertEqual(ev.filter { $0.hasPrefix("owner ") }.count, DiagLog.otherLimit)
+        XCTAssertFalse(ev.contains("shift right toggled"), "the oldest Shift entry is dropped")
+        XCTAssertFalse(ev.contains("owner com.first"), "the oldest other entry is dropped")
+    }
+
+    // MARK: b. format
+
+    func testEveryEventHasItsFixedFormat() {
+        let shell = makeShell()
+        var t = 10.0
+        shell.diag.clock = { t }
+        shell.diag.record(.shift(right: false, outcome: .toggled))
+        t = 11
+        shell.diag.record(.toggle(bundle: "com.a", english: true, hintShown: false))
+        t = 12.5
+        shell.diag.record(.activate(bundle: DiagLog.clean(nil), owner: true, english: false))
+        shell.diag.record(.deactivate(bundle: "com.a", owner: false, english: true))
+        shell.diag.record(.owner(bundle: "com.b"))
+        shell.diag.record(.ascii(bundle: "-", english: false))
+        t = 20
+        let l = lines(shell)
+        XCTAssertTrue(Self.matches(Self.headerLine, l[0]), l[0])
+        XCTAssertEqual(Array(l.dropFirst()), [
+            "-10.000 shift left toggled", "-9.000 toggle com.a en nohint", "-7.500 activate - owner zh", "-7.500 deactivate com.a notowner en",
+            "-7.500 owner com.b", "-7.500 ascii - zh",
+        ])
+    }
+
+    // MARK: c. nothing typed is recorded
+
+    func testTypedTextNeverReachesTheLog() {
+        let shell = makeShell()
+        let c = Controller(shell)
+        c.session.activate()
+        let marker = "quixoticzebra"
+        var before = lines(shell).count
+        // 1. Chinese composition sent by Enter.
+        c.type(marker)
+        c.press(Keys.enter)
+        XCTAssertEqual(lines(shell).count, before, "typing in Chinese adds no event")
+        // 2. English with a composition open: the asciiKey path.
+        c.type("su3")
+        tap(c)
+        before = lines(shell).count
+        for ch in marker { typeKey(c, ch) }
+        XCTAssertTrue(c.client.marked.contains(marker), "the asciiKey path did not run")
+        // 3. commitComposition sends it.
+        c.session.commitComposition()
+        XCTAssertEqual(lines(shell).count, before, "the English keys and commitComposition add no event")
+        let text = shell.diag.export(version: "0.0.0")
+        let scalars = Array(marker)
+        for n in 4...scalars.count {
+            for i in 0...(scalars.count - n) {
+                XCTAssertFalse(text.contains(String(scalars[i..<i + n])), "a piece of the typed text is in the log")
+            }
+        }
+        XCTAssertFalse(text.unicodeScalars.contains { (0x3100...0x312F).contains($0.value) || "ˊˇˋ˙".unicodeScalars.contains($0) },
+                       "a Zhuyin symbol is in the log")
+        let l = lines(shell)
+        XCTAssertTrue(Self.matches(Self.headerLine, l[0]), l[0])
+        for line in l.dropFirst() { XCTAssertTrue(Self.matches(Self.eventLine, line), line) }
+    }
+
+    // MARK: d. the switch
+
+    func testTheSwitchIsOnUntilTurnedOffAndOffEmptiesTheLog() {
+        let store = MemoryDiagLogStore()
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                          dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+                          quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
+                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(),
+                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+                          diagLogStore: store)
+        XCTAssertTrue(shell.diag.enabled, "never chosen is on")
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertFalse(shell.diag.isEmpty)
+        shell.diag.enabled = false
+        XCTAssertTrue(shell.diag.isEmpty, "off empties the log")
+        XCTAssertEqual(store.diagLog, false)
+        c.session.deactivate()
+        c.session.activate()
+        shell.diag.record(.shift(right: false, outcome: .toggled))
+        XCTAssertTrue(shell.diag.isEmpty, "nothing is recorded while off")
+        let rebuilt = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                            dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                            abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+                            quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
+                            candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(),
+                            profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+                            diagLogStore: store)
+        XCTAssertFalse(rebuilt.diag.enabled, "the stored choice survives a new Shell")
+        shell.diag.enabled = true
+        XCTAssertTrue(shell.diag.isEmpty, "on starts from empty")
+    }
+
+    // MARK: e. a tap
+
+    func testATapRecordsTheShiftAndTheToggle() {
+        let hint = FakeShiftHint()
+        let shell = makeShell(hint: hint)
+        let c = Controller(shell, bundle: "com.example.A")
+        c.session.activate()
+        tap(c)
+        XCTAssertEqual(Array(events(shell).suffix(3)), ["shift left toggled", "ascii com.example.A en", "toggle com.example.A en hint"])
+        c.client.caret = nil  // no rectangle: no hint
+        tap(c)
+        XCTAssertEqual(events(shell).last, "toggle com.example.A zh nohint")
+    }
+
+    // MARK: e2. every reason
+
+    func testEveryReasonIsRecorded() {
+        // keyCodes: 56 left Shift, 60 right Shift, 59 Control. Flags: 0x2 left down, 0x4 right down.
+        let sequences: [ShiftTap.Outcome: (Controller, Shell) -> Void] = [
+            .modifierAtPress: { c, _ in self.flags(c, 56, 0x2, extra: .control); self.time += 0.1; self.flags(c, 56, 0) },
+            .capsLockAtPress: { c, _ in self.flags(c, 56, 0x2, extra: .capsLock); self.time += 0.1; self.flags(c, 56, 0) },
+            .modifierBetween: { c, _ in
+                self.flags(c, 56, 0x2); self.flags(c, 59, 0x2, extra: .control); self.flags(c, 59, 0x2); self.time += 0.1; self.flags(c, 56, 0)
+            },
+            .otherSideChanged: { c, _ in self.flags(c, 56, 0x6); self.time += 0.1; self.flags(c, 56, 0) },
+            .tooLong: { c, _ in self.flags(c, 56, 0x2); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1; self.flags(c, 56, 0) },
+            .mouse: { c, s in s.mouseAgo = { 0.05 }; self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0); s.mouseAgo = { 1000 } },
+            .noPress: { c, _ in self.flags(c, 56, 0) },
+            .otherKeyReleased: { c, _ in self.flags(c, 56, 0x2); self.flags(c, 60, 0x6); self.time += 0.1; self.flags(c, 56, 0x4) },
+            .modifierAtRelease: { c, _ in self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0, extra: .control) },
+            .capsLockAtRelease: { c, _ in self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0, extra: .capsLock) },
+        ]
+        XCTAssertEqual(Set(sequences.keys), Set(ShiftTap.Outcome.allCases).subtracting([.toggled]), "a reason without a test")
+        for (outcome, run) in sequences {
+            let shell = makeShell()
+            let c = Controller(shell)
+            c.session.activate()
+            time += 5
+            run(c, shell)
+            XCTAssertEqual(events(shell).filter { $0.hasPrefix("shift ") }.last, "shift left \(outcome.rawValue)", outcome.rawValue)
+            XCTAssertFalse(events(shell).contains { $0.hasPrefix("toggle ") }, "\(outcome.rawValue) switched")
+        }
+    }
+
+    // MARK: f. secure input
+
+    func testNoShiftDuringSecureInputButTheToggleIsKept() {
+        var secure = true
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                          dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+                          quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
+                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(),
+                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+                          shiftToggleStore: MemoryShiftToggleStore(true))
+        shell.mouseAgo = { 1000 }
+        shell.uptime = { [unowned self] in self.uptimeNow }
+        let c = Controller(shell)
+        c.session.activate()
+        tap(c)
+        time += 5
+        shift(c, down: true)
+        c.press(Keys.code(for: "a"), flags: .shift)
+        time += 0.1
+        shift(c, down: false)
+        XCTAssertFalse(events(shell).contains { $0.hasPrefix("shift ") }, "a Shift was recorded during secure input")
+        XCTAssertTrue(events(shell).contains { $0.hasPrefix("toggle ") }, "the switch itself is recorded")
+        secure = false
+        tap(c)
+        XCTAssertTrue(events(shell).contains { $0.hasPrefix("shift ") }, "positive control: recorded once secure input ends")
+    }
+
+    // MARK: g. a capital
+
+    func testAShiftInterruptedByAKeyRecordsNothing() {
+        let shell = makeShell()
+        let c = Controller(shell)
+        c.session.activate()
+        let before = lines(shell)
+        time += 5
+        shift(c, down: true)
+        c.press(Keys.code(for: "a"), flags: .shift)
+        time += 0.1
+        shift(c, down: false)
+        XCTAssertEqual(lines(shell).count, before.count)
+    }
+
+    // MARK: h. bundle IDs
+
+    func testABundleIDOutsideTheAllowedCharactersIsAQuestionMark() {
+        XCTAssertEqual(DiagLog.clean("com.apple.TextEdit"), "com.apple.TextEdit")
+        XCTAssertEqual(DiagLog.clean(nil), "-")
+        XCTAssertEqual(DiagLog.clean(String(repeating: "a", count: 255)), String(repeating: "a", count: 255))
+        for bad in ["com.a\nb", "com.[x](y)", "com.a b", "com.例子", String(repeating: "a", count: 300)] {
+            let shell = makeShell()
+            let c = Controller(shell, bundle: bad)
+            c.session.activate()
+            XCTAssertEqual(events(shell).last, "activate ? owner zh")
+        }
+    }
+
+    // MARK: i, j. copying
+
+    func testTheCopyIsForThisMacOnlyAndTransient() {
+        let pb = FakePasteboard()
+        DiagLog.copy("x\n", to: pb)
+        XCTAssertEqual(pb.calls, ["prepare currentHostOnly", "string public.utf8-plain-text", "string org.nspasteboard.TransientType"])
+        XCTAssertEqual(pb.strings[.string], "x\n")
+    }
+
+    func testThePreviewIsWhatIsCopiedAndAnEmptyLogGreysTheButton() {
+        let shell = makeShell()
+        let model = SettingsModel(shell: shell)
+        XCTAssertTrue(model.diagLogEmpty)
+        let c = Controller(shell)
+        c.session.activate()
+        model.refreshExternal()
+        XCTAssertFalse(model.diagLogEmpty)
+        let preview = model.diagLogPreview()
+        let pb = FakePasteboard()
+        model.copyDiagLog(preview, to: pb)
+        XCTAssertEqual(pb.strings[.string].map { Array($0.utf8) }, Array(preview.utf8))
+        model.setDiagLog(false)
+        XCTAssertTrue(model.diagLogEmpty)
+        XCTAssertFalse(model.diagLog)
+    }
+}
+
+/// docs/spec/macos-shell.md §13.3: records the pasteboard calls a copy makes; never the real pasteboard.
+@MainActor
+final class FakePasteboard: DiagPasteboard {
+    private(set) var calls: [String] = []
+    private(set) var strings: [NSPasteboard.PasteboardType: String] = [:]
+
+    func prepareForNewContents(with options: NSPasteboard.ContentsOptions) -> Int {
+        calls.append(options.contains(.currentHostOnly) ? "prepare currentHostOnly" : "prepare")
+        strings = [:]
+        return 0
+    }
+
+    func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool {
+        calls.append("string \(dataType.rawValue)")
+        strings[dataType] = string
+        return true
+    }
 }
