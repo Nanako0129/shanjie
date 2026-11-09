@@ -58,10 +58,15 @@ final class ShanjieInputController: IMKInputController {
         let entries = MainActor.assumeIsolated { session.menu }
         let menu = NSMenu()
         for entry in entries {
-            // A disabled entry keeps its checkmark but has no action, so the menu greys it.
-            let item = NSMenuItem(title: entry.title, action: entry.enabled ? entry.action.map(Self.selector(for:)) : nil, keyEquivalent: "")
-            item.state = entry.checked ? .on : .off
-            menu.addItem(item)
+            switch entry.kind {
+            case .separator: menu.addItem(.separator())
+            case .header: menu.addItem(.sectionHeader(title: entry.title))
+            case .item:
+                // A disabled entry keeps its checkmark but has no action, so the menu greys it.
+                let item = NSMenuItem(title: entry.title, action: entry.enabled ? entry.action.map(Self.selector(for:)) : nil, keyEquivalent: "")
+                item.state = entry.checked ? .on : .off
+                menu.addItem(item)
+            }
         }
         return menu
     }

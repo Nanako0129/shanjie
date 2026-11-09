@@ -908,9 +908,9 @@ final class ShellTests: XCTestCase {
         let name = "gp6u.6g3"  // ㄕㄣˊ ㄧㄡˊ ㄕˇ; both profiles spell it 神遊使 without the pack (measured with the CLI, 2026-10-27)
         let c = Controller(make(), bundle: "com.hnc.Discord")
         c.session.activate()
-        let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        let line = { c.session.menu.packLines }
         XCTAssertNil(c.session.menu.first { $0.action == .toggleAcgPack }, "docs/spec/lexicon-and-packs.md §4.2: no switch in the menu")
-        XCTAssertEqual(line(), "已開啟的詞包：動漫與遊戲詞", "default on; the IT switch is on too but this fixture has no it-add.tsv, so it is not loaded")
+        XCTAssertEqual(line(), ["動漫與遊戲詞"], "default on; the IT switch is on too but this fixture has no it-add.tsv, so it is not loaded")
         c.type(name)
         XCTAssertEqual(c.client.marked, "榊遊矢")
         c.press(Keys.esc)
@@ -946,9 +946,9 @@ final class ShellTests: XCTestCase {
         let name = "u/6aj41l3cj4fu4"  // ㄧㄥˊ ㄇㄨˋ ㄅㄠˇ ㄏㄨˋ ㄑㄧˋ (a space is the first tone)
         let c = Controller(make(), bundle: "com.hnc.Discord")
         c.session.activate()
-        let line = { c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title }
+        let line = { c.session.menu.packLines }
         XCTAssertNil(c.session.menu.first { $0.action == .toggleItPack }, "docs/spec/lexicon-and-packs.md §4.2: no switch in the menu")
-        XCTAssertEqual(line(), "已開啟的詞包：資訊與 AI 詞", "default on; this fixture has no acg-add.tsv")
+        XCTAssertEqual(line(), ["資訊與 AI 詞"], "default on; this fixture has no acg-add.tsv")
         c.type(name)
         XCTAssertEqual(c.client.marked, "螢幕保護器")
         c.press(Keys.esc)
@@ -986,7 +986,7 @@ final class ShellTests: XCTestCase {
         let on = make(MemoryAcgPackStore())
         let line = "資料更新至 2026-10-06（維基百科）"
         // docs/spec/lexicon-and-packs.md §4.2: the date line moved to Settings (SettingsTests); the menu has one non-clickable pack line instead.
-        // No pack file in this fixture, so no 已開啟的詞包 line either (testPackLineNamesTheLoadedPacks covers it).
+        // No pack file in this fixture, so no 已開啟的詞包 section either (testPackLineNamesTheLoadedPacks covers it).
         XCTAssertEqual(titles(on), ["標準鍵盤", "倚天鍵盤", "避免把敏感字詞排在前面", "即時預測", "可省略韻母", "中英混打（實驗）", "語意校正", "這個 App 用聊天設定", "善解設定…", "清除選字記憶…", "不要備份選字記憶"])
         XCTAssertFalse(titles(on).contains(line), "the date is not in the menu")
         XCTAssertEqual(on.session.shell.acgDataDate.map(MenuEntry.Text.acgDataDate), line, "the date Settings shows")
@@ -1010,7 +1010,7 @@ final class ShellTests: XCTestCase {
         XCTAssertNil(store.acgPack, "the preference is left as it was")
         let c = Controller(shell)
         c.session.activate()
-        XCTAssertNil(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }, "docs/spec/lexicon-and-packs.md §4.2: the fall-back engine has no pack, so the menu names none")
+        XCTAssertNil(c.session.menu.packLines, "docs/spec/lexicon-and-packs.md §4.2: the fall-back engine has no pack, so the menu names none")
         XCTAssertEqual(c.type("su3cl3"), Array(repeating: true, count: 6))
         XCTAssertEqual(c.client.marked, "你好")
     }
@@ -1044,15 +1044,14 @@ final class ShellTests: XCTestCase {
         try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
         try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
         try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
-        let line = { (acg: Bool, it: Bool) -> MenuEntry? in
+        let line = { (acg: Bool, it: Bool) -> [String]? in
             let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it)))
-            return c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }
+            return c.session.menu.packLines
         }
-        XCTAssertEqual(line(true, true)?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
-        XCTAssertEqual(line(true, false)?.title, "已開啟的詞包：動漫與遊戲詞")
-        XCTAssertEqual(line(false, true)?.title, "已開啟的詞包：資訊與 AI 詞")
+        XCTAssertEqual(line(true, true), ["動漫與遊戲詞", "資訊與 AI 詞"])
+        XCTAssertEqual(line(true, false), ["動漫與遊戲詞"])
+        XCTAssertEqual(line(false, true), ["資訊與 AI 詞"])
         XCTAssertNil(line(false, false), "no pack, no line")
-        XCTAssertNil(line(true, true)?.action, "not clickable")
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2 (the menu test with the third pack): all on, each one alone, two of three and none, in the settings order (ACG, IT, beauty); the
@@ -1063,18 +1062,21 @@ final class ShellTests: XCTestCase {
         try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
         try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
         try TestData.beautyPackRow.write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8)
-        let line = { (acg: Bool, it: Bool, beauty: Bool) -> MenuEntry? in
+        let line = { (acg: Bool, it: Bool, beauty: Bool) -> [String]? in
             let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it), beauty: MemoryBeautyPackStore(beauty)))
-            return c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }
+            return c.session.menu.packLines
         }
-        XCTAssertEqual(line(true, true, true)?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞、美妝與保養詞")
-        XCTAssertEqual(line(false, false, true)?.title, "已開啟的詞包：美妝與保養詞", "only beauty")
-        XCTAssertEqual(line(true, false, false)?.title, "已開啟的詞包：動漫與遊戲詞", "only ACG")
-        XCTAssertEqual(line(false, true, false)?.title, "已開啟的詞包：資訊與 AI 詞", "only IT")
-        XCTAssertEqual(line(true, false, true)?.title, "已開啟的詞包：動漫與遊戲詞、美妝與保養詞")
-        XCTAssertEqual(line(true, true, false)?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞", "beauty off, its file is there")
+        XCTAssertEqual(line(true, true, true), ["動漫與遊戲詞", "資訊與 AI 詞", "美妝與保養詞"])
+        XCTAssertEqual(line(false, false, true), ["美妝與保養詞"], "only beauty")
+        XCTAssertEqual(line(true, false, false), ["動漫與遊戲詞"], "only ACG")
+        XCTAssertEqual(line(false, true, false), ["資訊與 AI 詞"], "only IT")
+        XCTAssertEqual(line(true, false, true), ["動漫與遊戲詞", "美妝與保養詞"])
+        XCTAssertEqual(line(true, true, false), ["動漫與遊戲詞", "資訊與 AI 詞"], "beauty off, its file is there")
         XCTAssertNil(line(false, false, false), "no pack, no line")
-        XCTAssertNil(line(true, true, true)?.action, "not clickable")
+        let menu = Controller(packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true), beauty: MemoryBeautyPackStore(true))).session.menu
+        let rerank = try XCTUnwrap(menu.firstIndex { $0.title == MenuEntry.Text.rerank })
+        XCTAssertEqual(menu[(rerank + 1)...].prefix(6).map { "\($0.kind):\($0.title)" },
+                       ["separator:", "header:已開啟的詞包", "item:動漫與遊戲詞", "item:資訊與 AI 詞", "item:美妝與保養詞", "separator:"], "the section follows 語意校正")
     }
 
     /// docs/spec/lexicon-and-packs.md §4.3, the fall-back: with all three on and only beauty-add.tsv broken, dropping ACG and then IT still fails and dropping beauty works, so the
@@ -1091,7 +1093,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(shell.packMask, 21)
         XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
         XCTAssertEqual(shell.engineBuilds, 5, "combined, no packs, drop ACG (still broken), drop IT (still broken), drop beauty (works)")
-        XCTAssertEqual(Controller(shell).session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
+        XCTAssertEqual(Controller(shell).session.menu.packLines, ["動漫與遊戲詞", "資訊與 AI 詞"])
         XCTAssertTrue(shell.beautyPackOn, "Settings keeps showing the stored choice")
         XCTAssertEqual(beauty.beautyPack, true)
     }
@@ -1107,7 +1109,7 @@ final class ShellTests: XCTestCase {
         XCTAssertNotNil(shell.engine, "the pack-less retry built an engine")
         XCTAssertEqual(shell.loadedPackMask, 0)
         let c = Controller(shell)
-        XCTAssertNil(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") })
+        XCTAssertNil(c.session.menu.packLines)
         XCTAssertTrue(shell.acgPackOn && shell.itPackOn, "Settings keeps showing the stored choices")
         XCTAssertEqual(acg.acgPack, true)
         XCTAssertEqual(it.itPack, true)
@@ -1132,7 +1134,7 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
         XCTAssertEqual(shell.engineBuilds, 4, "combined, no packs, drop ACG (still broken), drop quotes (works)")
         let c = Controller(shell)
-        XCTAssertEqual(c.session.menu.first { $0.title.hasPrefix("已開啟的詞包") }?.title, "已開啟的詞包：動漫與遊戲詞、資訊與 AI 詞")
+        XCTAssertEqual(c.session.menu.packLines, ["動漫與遊戲詞", "資訊與 AI 詞"])
         XCTAssertTrue(shell.quotePackOn, "the stored choice is untouched")
     }
 
@@ -1165,5 +1167,34 @@ final class ShellTests: XCTestCase {
         c.type(Row131.standardKeys)
         c.press(Keys.enter)
         XCTAssertTrue(c.client.text.hasSuffix(Row131.formal))
+    }
+}
+
+extension Array where Element == MenuEntry {
+    /// docs/spec/lexicon-and-packs.md §4.2: the pack lines under the menu's 已開啟的詞包 section header, or nil when the menu has no such section.
+    /// Fails the calling test when the section is malformed: not one header between two separators, a header or pack line that is clickable,
+    /// checked or empty, or a separator or 已開啟的詞包 title left in a menu without the section.
+    var packLines: [String]? {
+        guard let h = firstIndex(where: { $0.kind == .header }) else {
+            XCTAssertFalse(contains { $0.kind == .separator }, "no pack section, no separator")
+            XCTAssertFalse(contains { $0.title.hasPrefix(MenuEntry.Text.packsHeader) }, "no pack section, no 已開啟的詞包 line")
+            return nil
+        }
+        XCTAssertEqual(self[h].title, MenuEntry.Text.packsHeader)
+        XCTAssertEqual(filter { $0.kind == .header }.count, 1, "one header")
+        XCTAssertEqual(filter { $0.kind == .separator }.count, 2, "a separator before the header and one after the last pack, no other")
+        XCTAssertTrue(h > 0 && self[h - 1].kind == .separator, "a separator right before the header")
+        guard let end = self[(h + 1)...].firstIndex(where: { $0.kind != .item }), self[end].kind == .separator else {
+            XCTFail("a separator after the last pack line")
+            return nil
+        }
+        let lines = self[h ..< end]
+        XCTAssertGreaterThan(lines.count, 1, "at least one pack line")
+        for e in lines {
+            XCTAssertNil(e.action, "\(e.title): not clickable")
+            XCTAssertFalse(e.checked, "\(e.title): no checkmark")
+            XCTAssertFalse(e.title.isEmpty)
+        }
+        return lines.dropFirst().map(\.title)
     }
 }

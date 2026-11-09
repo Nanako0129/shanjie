@@ -616,7 +616,7 @@ public final class Shell {
     /// IT and beauty switches never chosen are on, so an app that never touched any builds with the ACG, IT and beauty bits.
     var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) | (beautyPackOn ? CoreEngine.packBeauty : 0) }
     /// The pack bits the current engine was really built with (docs/spec/lexicon-and-packs.md §4.2, §4.3): `packMask` when that build worked, less the bits
-    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 line reads this, never the stored choices.
+    /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 section reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
     /// The names of the loaded packs in the settings order, for the menu line.
     var loadedPackTitles: [String] {

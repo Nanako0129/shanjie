@@ -217,7 +217,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 ## 7. 輸入選單
 
-`IMKInputController.menu()` 每次呼叫都重建 `NSMenu`；項目由 `Session.menu`（`ShanjieKit`，`MenuEntry` 陣列）產生，App 只把它轉成 `NSMenuItem`。每個動作有**獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`，也不看 `sender`）；沒有動作或 `enabled == false` 的項目不設 action，所以選單把它畫成反灰，勾選狀態照顯示。
+`IMKInputController.menu()` 每次呼叫都重建 `NSMenu`；項目由 `Session.menu`（`ShanjieKit`，`MenuEntry` 陣列）產生，App 只把它轉成 `NSMenuItem`：一般項目是 `NSMenuItem(title:action:keyEquivalent:)`，小標題是 `NSMenuItem.sectionHeader(title:)`，分隔線是 `NSMenuItem.separator()`（都是系統原生元件；`sectionHeader` 從 macOS 14 起有，App 最低 macOS 26）。每個動作有**獨立的 selector**（IMK 呼叫時 `sender` 不一定是 `NSMenuItem`，也不看 `sender`）；沒有動作或 `enabled == false` 的項目不設 action，所以選單把它畫成反灰，勾選狀態照顯示。
 
 項目依序（括號是出現條件）：
 
@@ -230,7 +230,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | 可省略韻母 | `toggleAbbreviation` | 目前 App 傳 `showsAbbreviation: false`，整個隱藏且一律關；顯示時預測關閉會反灰 |
 | 中英混打（實驗） | `toggleEnglish` | 預設開，鍵 `english`；倚天排列時反灰 |
 | 語意校正 | `toggleRerank` | 預設開，鍵 `rerank`；敏感字詞降權關閉或小模型沒載入時反灰 |
-| 已開啟的詞包：… | 無 | 列引擎實際載入的詞包名稱，都沒載入就不出現；詞包的開關只在設定視窗 |
+| 分隔線、小標題「已開啟的詞包」、每個詞包一行、分隔線 | 無 | 引擎實際載入的詞包，每個一行、不能點；小標題把它下面到分隔線為止的項目歸成一組，所以前後各一條分隔線（選單其他地方沒有分隔線）；都沒載入就整段（含分隔線）不出現；詞包的開關只在設定視窗 |
 | 這個 App 用聊天設定 | `toggleAppChat` | §5.3 |
 | 有新版本 X，按此更新… | `installUpdate` | 只在已知有新版本時出現，檢查中反灰；見 `docs/spec/install-and-update.md` |
 | 善解設定… | `openSettings` | 開設定視窗（§9） |
