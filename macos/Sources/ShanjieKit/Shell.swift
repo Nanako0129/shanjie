@@ -1930,7 +1930,13 @@ public final class Session {
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         if !o.preedit.isEmpty {
-            client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+            // docs/spec/macos-shell.md §4: an unchanged composition (Tab into the prediction row) is not sent again. Chromium hands the key
+            // to the page before the composition, so a page that moves focus on the key would get the text a second time.
+            let marked = Marked(text: o.preedit, cursor: o.cursorUTF16, runStart: o.englishRunStart, runLength: o.englishRunLength)
+            if marked != sentMarked || !o.commit.isEmpty {
+                client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+                sentMarked = marked
+            }
         } else if shell.composing {
             clearMarkedText()
         }
@@ -2003,5 +2009,10 @@ public final class Session {
 
     private func clearMarkedText() {
         client.setMarkedText(NSAttributedString(string: ""), selectionRange: NSRange(location: 0, length: 0))
+        sentMarked = nil
     }
+
+    /// docs/spec/macos-shell.md §4: the marked text this session last sent to its client (nil after clearing it).
+    private struct Marked: Equatable { let text: String; let cursor: Int; let runStart: Int; let runLength: Int }
+    private var sentMarked: Marked?
 }
