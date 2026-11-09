@@ -1,0 +1,37 @@
+[package]
+name = "shanjie-tip"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# docs/spec/windows-tip.md §3.1: the TSF text service DLL. Empty on non-Windows targets (lib.rs is #![cfg(windows)]).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# docs/spec/windows-tip.md §3.11: numbers-only timing file, for the VM measurements; never in a build given to users.
+timing = []
+
+[dependencies]
+# The core's package is named `core`, which shadows `::core` paths emitted by the windows macros: renamed (docs/spec/windows-tip.md §3.1).
+shanjie_core = { package = "core", path = "../../core" }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.62"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_TextServices",
+    "Win32_UI_WindowsAndMessaging",
+] }

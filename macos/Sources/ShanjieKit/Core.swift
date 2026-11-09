@@ -1,0 +1,291 @@
+import CShanjie
+
+/// One output of the core, copied into Swift values in the call that received it; the C output is
+/// freed before this is returned (docs/spec/macos-shell.md §4).
+///
+/// R2: this holds user input. It is deliberately not an `Error` and not `CustomStringConvertible`
+/// or `CustomDebugStringConvertible`, so it cannot reach a crash report or a log by description.
+struct CoreOutput {
+    var handled: Bool
+    var commit: String
+    var preedit: String
+    var cursorUTF16: Int
+    var candidates: [String]
+    var selected: Int
+    /// docs/spec/keys-and-composition.md §4.3: 0 = collapsed single row, > 0 = expanded grid with this many columns.
+    var columns: Int
+    /// Position of `candidates[0]` in the whole list, and the whole list's length (scroll bar).
+    var first: Int
+    var total: Int
+    /// docs/spec/macos-shell.md §8.6.2: 0 horizontal (or no candidates), 1 vertical candidate window, 2 vertical
+    /// prediction row (entered or not).
+    var vertical: Int
+    /// docs/spec/english-mixed.md §4.6: the open English run in `preedit`, UTF-16 start and length; both 0 when no run is open.
+    var englishRunStart: Int = 0
+    var englishRunLength: Int = 0
+}
+
+/// The result of a core call: an output, or the non-zero C ABI return code (carries no input).
+enum CoreResult {
+    case ok(CoreOutput)
+    case failed(Int32)
+}
+
+/// Owns one `ShanjieEngine` handle. Every call is on the main thread (IMK's callback thread), as
+/// the handle is not thread-safe (docs/spec/c-abi.md §5.2).
+@MainActor
+final class CoreEngine {
+    /// fileprivate, not private: only `RerankJob.apply(on:)` in this file reads it.
+    fileprivate let handle: OpaquePointer
+
+    private init(handle: OpaquePointer) { self.handle = handle }
+
+    /// The bits of the packs mask (`SHANJIE_PACK_*` in shanjie.h).
+    static let packACG = UInt32(SHANJIE_PACK_ACG)
+    static let packQuotes = UInt32(SHANJIE_PACK_QUOTES)
+    static let packIT = UInt32(SHANJIE_PACK_IT)
+
+    /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
+    /// `packsDir` is the directory of the word pack files and `packs` the bit mask of the packs to turn on (docs/spec/lexicon-and-packs.md §4.1, §4.2;
+    /// the default is the ACG pack alone); a nil `packsDir` is `shanjie_engine_new`,
+    /// so the engine is the one the app had before the packs existed.
+    static func make(dataDir: String, layout: UInt32, packsDir: String? = nil, packs: UInt32 = packACG) -> (CoreEngine?, Int32) {
+        var out: OpaquePointer?
+        let code: Int32
+        if let packsDir {
+            code = shanjie_engine_new_packs(dataDir, layout, packsDir, packs, &out)
+        } else {
+            code = shanjie_engine_new(dataDir, layout, &out)
+        }
+        guard code == 0, let out else { return (nil, code == 0 ? 4 : code) }
+        return (CoreEngine(handle: out), 0)
+    }
+
+    isolated deinit { shanjie_engine_free(handle) }
+
+    func loadLM(path: String) -> Int32 { shanjie_engine_load_lm(handle, path) }
+
+    /// S7c-2a: the small model for the loaded n-gram model; call it after `loadLM`. Non-zero keeps the n-gram only.
+    func loadTinyLM(path: String) -> Int32 { shanjie_engine_load_tinylm(handle, path) }
+
+    /// docs/spec/semantic-rerank.md §4: the colloquial table (常談). Independent of the n-gram and the small model; the core applies it per job
+    /// only in the chat profile, at any rerank strength, with the paired small model. Non-zero leaves the rerank as it was.
+    func loadColloquial(path: String) -> Int32 { shanjie_engine_load_colloquial(handle, path) }
+
+    /// S7c-2a: whether rerank jobs are made (the core's default is off since S7c-2c; the shell sends its own value to every engine); returns the snapshot, like `setDemote`.
+    func setRerank(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_rerank(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// Rerank strength (docs/spec/semantic-rerank.md §7): 0 conservative, 1 standard, 2 aggressive; returns the
+    /// snapshot, like `setRerank`. The core remembers it without a small model and keeps it across `loadLM` / `loadTinyLM`.
+    func setRerankLevel(_ level: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_rerank_level(handle, level, &out), out)
+    }
+
+    /// The levels the loaded small model offers (bit0 conservative, bit1 standard, bit2 aggressive); 0 without one, and on a
+    /// non-zero code (logged; then nothing is offered).
+    func rerankLevels() -> UInt32 {
+        var mask: UInt32 = 0
+        let code = shanjie_engine_rerank_levels(handle, &mask)
+        if code != 0 { Log.shell.error("shanjie_engine_rerank_levels failed, code \(code)") }
+        return code == 0 ? mask : 0
+    }
+
+    /// S7c-2a: the job of the last change, once; `(nil, 0)` when there is none, `(nil, code)` on a non-zero code (the header
+    /// guarantees `*job` is NULL then, so there is nothing to free). The job is wrapped at once, so the pointer never leaves this
+    /// file and is freed exactly once, by `free`, when the wrapper goes.
+    func rerankTake(free: @escaping @Sendable (OpaquePointer) -> Void) -> (RerankJob?, Int32) {
+        var job: OpaquePointer?
+        let code = shanjie_engine_rerank_take(handle, &job)
+        guard code == 0 else { return (nil, code) }
+        return (job.map { RerankJob($0, free: free) }, 0)
+    }
+
+    /// s3e: replace the punctuation alternatives; 0 on success, 2 on an invalid table (kept as before).
+    func setPunctuation(_ table: String) -> Int32 { shanjie_engine_set_punctuation(handle, table) }
+
+    // S4 (docs/spec/learning.md §2, §10); each returns the C ABI code.
+
+    /// `nil` means no left context (NULL).
+    func setLeftContext(_ text: String?) -> Int32 {
+        guard let text else { return shanjie_engine_set_left_context(handle, nil) }
+        return text.withCString { shanjie_engine_set_left_context(handle, $0) }
+    }
+
+    /// sw: whether the demotion table applies (the core's default is on); recomputes the composition and
+    /// returns the snapshot, like `setProfile`.
+    func setDemote(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_demote(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// V3: whether the prediction row is computed (the core's default is on); returns the snapshot, like `setDemote`.
+    func setPrediction(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_prediction(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// docs/spec/macos-shell.md §8.6.2: the orientation of the candidate windows that open from now on (the core's
+    /// default is horizontal); an open window keeps its own, while a prediction row on screen is re-rendered in the new
+    /// orientation in the snapshot (docs/spec/macos-shell.md §8.6.4). Sent to every engine `Shell.build()` makes, like `setPrediction`.
+    func setCandidateVertical(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_candidate_vertical(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// docs/spec/prediction.md §6: whether a symbol typed into an occupied column opens a new unfinished unit (the core's default is
+    /// off); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setAbbreviation(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-mixed: the English mixing switch (the core's default is off): keys that cannot be a Zhuyin syllable revert
+    /// directly to the raw keys as an English run in the composition. It takes effect only with the standard layout and 可省略韻母 off;
+    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglish(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// fuzzy-input (docs/spec/decoder.md §6.2): bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
+    /// adjacent-key slips (the core's default is 0, which changes nothing; bit 4 does nothing in the Eten layout); returns the
+    /// snapshot. Sent to every engine `Shell.build()` makes.
+    func setFuzzy(_ flags: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
+    }
+
+    /// zhen-revert: whether a key typed over the symbol already in its column reverts the unfinished syllable to the raw keys as
+    /// English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishOverwrite(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_overwrite(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-keyorder with zhen-revert: whether keys out of Zhuyin's column order, and a tone key that makes a syllable the lexicon lacks,
+    /// revert to the raw keys as English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishKeyOrder(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_key_order(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// zhen-reapply: whether a Zhuyin key in a column before a filled one is never English (trigger (b) off; the core's default is true);
+    /// returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setEnglishReversalGuard(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_english_reversal_guard(handle, on ? 1 : 0, &out), out)
+    }
+
+    /// shift-toggle: the ASCII state of the app the shell is serving (the core's default is off). In it a printable character key goes on the
+    /// English run as typed; returns the snapshot (the unfinished syllable has become the run). Sent on activate, owner change and toggle.
+    func setAscii(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_ascii(handle, on ? 1 : 0, &out), out)
+    }
+
+    func setLearning(_ enabled: Bool) -> Int32 { shanjie_engine_set_learning(handle, enabled ? 1 : 0) }
+
+    func learningOpen(dir: String) -> Int32 { shanjie_engine_learning_open(handle, dir) }
+
+    func learningClear() -> Int32 { shanjie_engine_learning_clear(handle) }
+
+    /// bit0: a full rewrite of the learning file failed and no full rewrite or clear has succeeded
+    /// since (docs/spec/learning.md §10; a failed append that falls back to a successful rewrite does not set it).
+    /// `nil` on a non-zero code.
+    func learningStatus() -> UInt32? {
+        var flags: UInt32 = 0
+        return shanjie_engine_learning_status(handle, &flags) == 0 ? flags : nil
+    }
+
+    func key(_ key: ShanjieKey) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_key(handle, key, &out), out)
+    }
+
+    /// docs/spec/keys-and-composition.md §4.3 mouse pick: `index` is a position in the last output's candidates. With the
+    /// candidate window closed and a prediction row showing (entered or not), it selects that row's item
+    /// (docs/spec/prediction.md §1.1). Code 2 when neither is showing or `index` is outside that output (state unchanged).
+    func pick(_ index: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_pick(handle, index, &out), out)
+    }
+
+    /// mode 0 commits the composition then clears, 1 discards.
+    func reset(mode: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_reset(handle, mode, &out), out)
+    }
+
+    /// profile 0 chat, 1 formal.
+    func setProfile(_ profile: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_profile(handle, profile, &out), out)
+    }
+
+    /// Copies every field into Swift values, then frees the C output at once.
+    fileprivate static func take(_ code: Int32, _ out: UnsafeMutablePointer<ShanjieOutput>?) -> CoreResult {
+        guard code == 0, let out else {
+            shanjie_output_free(out)  // NULL on a non-zero code (docs/spec/c-abi.md §4.1, §5.1); freeing NULL is a no-op
+            return .failed(code == 0 ? 4 : code)
+        }
+        defer { shanjie_output_free(out) }
+        let o = out.pointee
+        var candidates: [String] = []
+        if let list = o.candidates {
+            for i in 0..<Int(o.candidate_count) {
+                if let c = list[i] { candidates.append(String(cString: c)) }
+            }
+        }
+        return .ok(CoreOutput(
+            handled: o.handled != 0,
+            commit: String(cString: o.commit),
+            preedit: String(cString: o.preedit),
+            cursorUTF16: Int(o.cursor_utf16),
+            candidates: candidates,
+            selected: Int(o.candidate_selected),
+            columns: Int(o.candidate_columns),
+            first: Int(o.candidate_first),
+            total: Int(o.candidate_total),
+            vertical: Int(o.candidate_vertical),
+            englishRunStart: Int(o.english_run_utf16_start),
+            englishRunLength: Int(o.english_run_utf16_len)
+        ))
+    }
+}
+
+/// One rerank job of the core (S7c-2a; docs/spec/semantic-rerank.md §8.1). It holds candidate text and the left
+/// context, so it is not `CustomStringConvertible` and is never logged (R2).
+///
+/// `@unchecked Sendable` rests on three invariants the shell keeps (the header's rules for one job):
+/// 1. One run at a time: `run()` is called once, on one thread, by the shell's runner, which runs a single job at a time.
+/// 2. `apply(on:)` only after `run()` returned, by either of two orderings: the runner hands the code back through
+///    `DispatchQueue.main.async`, which orders the background run before the main-thread apply; or Enter's bounded wait
+///    (docs/spec/keys-and-composition.md §7.3) is woken by a semaphore the queue signals only after `run()` returned, and the
+///    shell applies on the waking thread. Either way the job is finished once: the later callback applies nothing.
+/// 3. The job is freed only in `deinit`, exactly once: the last reference may go on any thread (the header allows free on
+///    any thread once run returned), and the runner's closure holds this wrapper, never the pointer, while run is running.
+public final class RerankJob: @unchecked Sendable {
+    private let job: OpaquePointer
+    private let free: @Sendable (OpaquePointer) -> Void
+
+    fileprivate init(_ job: OpaquePointer, free: @escaping @Sendable (OpaquePointer) -> Void) {
+        self.job = job
+        self.free = free
+    }
+
+    deinit { free(job) }
+
+    /// `shanjie_rerank_run`, off the main thread: 0, or 4 (caught panic; nothing touched, no result kept).
+    nonisolated func run() -> Int32 { shanjie_rerank_run(job) }
+
+    /// `shanjie_engine_rerank_apply` on the main thread: `.ok` with the snapshot when the composition changed, `.failed(5)`
+    /// for no change (stale, nothing to do, applied before), `.failed(4)` internal (the engine has reset itself).
+    @MainActor func apply(on engine: CoreEngine) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return CoreEngine.take(shanjie_engine_rerank_apply(engine.handle, job, &out), out)
+    }
+}

@@ -1,0 +1,215 @@
+{
+ "versions": [
+  {
+   "holdout_talk_chat": {
+    "broken": 0,
+    "fixed": 0,
+    "n": 150,
+    "p": 1.0,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 124
+   },
+   "replay": {
+    "dev302": {
+     "n": 302,
+     "off": {
+      "kyss": 0.9852,
+      "n": 302,
+      "picks_per100": 1.13,
+      "rewrites": 265,
+      "top1": 280
+     },
+     "rows_sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"
+    },
+    "user-reported": {
+     "learn_broken": 0,
+     "learn_fixed": 1,
+     "n": 80,
+     "off": {
+      "kyss": 0.9722,
+      "n": 80,
+      "picks_per100": 2.11,
+      "rewrites": 78,
+      "top1": 70
+     },
+     "on": {
+      "kyss": 0.9763,
+      "n": 80,
+      "picks_per100": 1.94,
+      "rewrites": 78,
+      "top1": 71
+     },
+     "rows_sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a"
+    }
+   },
+   "speed": {
+    "idle": false,
+    "load_avg_max": 8.18701171875,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.6.1"
+  },
+  {
+   "holdout_talk_chat": {
+    "broken": 1,
+    "fixed": 10,
+    "n": 150,
+    "p": 0.0117,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 124
+   },
+   "replay": {
+    "dev302": {
+     "n": 302,
+     "off": {
+      "kyss": 0.9852,
+      "n": 302,
+      "picks_per100": 1.13,
+      "rewrites": 265,
+      "top1": 280
+     },
+     "rows_sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"
+    },
+    "user-reported": {
+     "learn_broken": 0,
+     "learn_fixed": 1,
+     "n": 80,
+     "off": {
+      "kyss": 0.9722,
+      "n": 80,
+      "picks_per100": 2.11,
+      "rewrites": 78,
+      "top1": 70
+     },
+     "on": {
+      "kyss": 0.9763,
+      "n": 80,
+      "picks_per100": 1.94,
+      "rewrites": 78,
+      "top1": 71
+     },
+     "rows_sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a"
+    }
+   },
+   "speed": {
+    "idle": false,
+    "load_avg_max": 5.81640625,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.6.0"
+  },
+  {
+   "holdout_talk_chat": {
+    "broken": 4,
+    "fixed": 3,
+    "n": 150,
+    "p": 1.0,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 115
+   },
+   "replay": {
+    "dev302": {
+     "n": 302,
+     "off": {
+      "kyss": 0.9773,
+      "n": 302,
+      "picks_per100": 1.8,
+      "rewrites": 188,
+      "top1": 269
+     },
+     "rows_sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"
+    },
+    "user-reported": {
+     "learn_broken": 0,
+     "learn_fixed": 1,
+     "n": 80,
+     "off": {
+      "kyss": 0.8947,
+      "n": 80,
+      "picks_per100": 10.04,
+      "rewrites": 61,
+      "top1": 33
+     },
+     "on": {
+      "kyss": 0.8982,
+      "n": 80,
+      "picks_per100": 9.86,
+      "rewrites": 60,
+      "top1": 34
+     },
+     "rows_sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a"
+    }
+   },
+   "speed": {
+    "idle": false,
+    "load_avg_max": 4.12841796875,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.5.0"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 37.55029296875,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.7"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 5.447265625,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.6"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 5.07373046875,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.5"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 5.2001953125,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.4"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 5.77490234375,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.3"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 19.14892578125,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.2"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 13.9033203125,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.1"
+  },
+  {
+   "speed": {
+    "idle": false,
+    "load_avg_max": 13.9033203125,
+    "machine": "Mac17,3"
+   },
+   "version": "v0.4.0"
+  }
+ ]
+}

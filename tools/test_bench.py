@@ -1,0 +1,942 @@
+"""Tests for tools/bench.py's reference row, static table check, legacy export, table rendering and site data (docs/spec/evaluation.md §7).
+Run: python3 -m unittest tools/test_bench.py   (from the repo root). No network, no private data, no real builds."""
+import argparse, contextlib, hashlib, io, json, os, re, stat, subprocess, sys, tempfile, types, unittest
+from unittest import mock
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bench  # noqa: E402
+
+STATIC_OK = {"date": "2026-10-03", "groups": [
+    {"name": "第一輪", "n": 23, "ime": {"蘋果": {"sentences": 3, "chars": 3}, "小麥": {"sentences": 5, "chars": 12}}, "sum": {"sentences": 8, "chars": 15}},
+    {"name": "第二輪（只放本機）", "ime": {"蘋果": {"sentences": 8, "chars": 10}, "小麥": {"sentences": 19, "chars": 24}},
+     "sum": {"sentences": 27, "chars": 34}, "local_only": True}]}
+
+
+class Tmp(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.td = self._td.name
+        self.addCleanup(self._td.cleanup)
+
+    def write(self, name, text):
+        p = os.path.join(self.td, name)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text if isinstance(text, str) else json.dumps(text, ensure_ascii=False))
+        return p
+
+
+class StaticCheck(Tmp):
+    def check(self, static):
+        return bench.check_static(self.write("s.json", static))
+
+    def test_correct_fixture_passes(self):
+        self.assertEqual(self.check(STATIC_OK), [])
+
+    def test_the_real_file_passes(self):
+        self.assertEqual(bench.check_static(), [])
+
+    def test_altering_any_cell_fails(self):
+        cells = [(g, k, f) for g in range(2) for k in STATIC_OK["groups"][g]["ime"] for f in ("sentences", "chars")]
+        self.assertEqual(len(cells), 8)
+        for g, k, f in cells:
+            for d in (1, -1):
+                bad = json.loads(json.dumps(STATIC_OK))
+                bad["groups"][g]["ime"][k][f] += d
+                self.assertTrue(self.check(bad), f"{g}/{k}/{f} {d:+d} not detected")
+
+    def test_altering_a_sum_fails(self):
+        bad = json.loads(json.dumps(STATIC_OK))
+        bad["groups"][1]["sum"]["chars"] += 1
+        self.assertIn("sum", self.check(bad)[0])
+
+    def test_missing_or_malformed_fields_fail(self):
+        def edit(f):
+            bad = json.loads(json.dumps(STATIC_OK))
+            f(bad)
+            return self.check(bad)
+        self.assertTrue(edit(lambda d: d.pop("date")))
+        self.assertTrue(edit(lambda d: d.update(groups=[])))
+        self.assertTrue(edit(lambda d: d["groups"][0].pop("name")))
+        self.assertTrue(edit(lambda d: d["groups"][0].pop("ime")))
+        self.assertTrue(edit(lambda d: d["groups"][0].pop("sum")))
+        self.assertTrue(edit(lambda d: d["groups"][0]["ime"]["蘋果"].pop("chars")))
+        self.assertTrue(edit(lambda d: d["groups"][0]["ime"]["蘋果"].update(chars="3")))
+        self.assertTrue(edit(lambda d: d["groups"][0]["ime"]["蘋果"].update(chars=2.0)))
+        self.assertTrue(edit(lambda d: d["groups"][1]["ime"].pop("小麥")))   # a group that lacks an input method the first has
+        self.assertTrue(edit(lambda d: d["groups"][0].update({"local-only": True})))   # a misspelt flag must not let a local group into the site data
+        self.assertTrue(edit(lambda d: d["groups"][0].update(local_only="yes")))
+        self.assertTrue(edit(lambda d: d.update(extra=1)))
+
+    def test_rules_between_cells(self):
+        bad = json.loads(json.dumps(STATIC_OK))
+        bad["groups"][0]["ime"]["小麥"].update(sentences=24, chars=24)   # more wrong sentences than the group has
+        bad["groups"][0]["sum"] = {"sentences": 27, "chars": 27}
+        self.assertTrue(any("above the group's n" in e for e in self.check(bad)))
+        bad = json.loads(json.dumps(STATIC_OK))
+        bad["groups"][0]["ime"]["蘋果"].update(sentences=4)             # fewer wrong chars than wrong sentences
+        bad["groups"][0]["sum"]["sentences"] = 9
+        self.assertTrue(any("below sentences" in e for e in self.check(bad)))
+
+
+class Reference(Tmp):
+    def setUp(self):
+        super().setUp()
+        rows = self.write("typing.txt", "|你好|ㄋㄧˇ ㄏㄠˇ\n")
+        self.cmds, self.sha = [], "a" * 40
+        self.saved = {k: getattr(bench, k) for k in ("SETS", "RESULTS", "CACHE", "sh", "head_sha", "tree_dirty", "BASE_LEXICON")}
+        bench.SETS = {"pub": (rows, None, ["chat"], False), "priv": ("none.txt", None, ["chat"], True)}
+        bench.RESULTS, bench.CACHE = os.path.join(self.td, "results"), os.path.join(self.td, "cache")
+        bench.BASE_LEXICON = self.write("lex.txt", "lexicon")
+        bench.head_sha, bench.tree_dirty, bench.sh = lambda: self.sha, lambda: False, self.fake_sh
+        self.addCleanup(lambda: [setattr(bench, k, v) for k, v in self.saved.items()])
+        self.args = argparse.Namespace(private_root=os.path.join(self.td, "empty"))
+        os.makedirs(self.args.private_root)
+
+    def fake_sh(self, cmd, **kw):
+        if cmd[0] == "cargo":
+            return ""
+        self.cmds.append(cmd)
+        dump = cmd[cmd.index("--dump") + 1]
+        with open(dump, "w", encoding="utf-8") as f:
+            f.write("1\t1\t你好\t-1.0\n1\t2\t妳好\t-2.0\n")
+        res, _ = bench.score(cmd[cmd.index("--rows") + 1], dump)
+        return f"## x  unigram  {{'n': {res['n']}, 'top1': {res['top1']}, 'oracle@64': {res['oracle64']}, 'top1_sha256': '{res['top1_sha256']}'}}\n"
+
+    def run_ref(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            bench.cmd_reference(self.args)
+        return err.getvalue()
+
+    def result(self):
+        return json.load(open(os.path.join(bench.RESULTS, bench.REFERENCE), encoding="utf-8"))
+
+    def test_command_has_no_overlay_and_no_lm(self):
+        self.run_ref()
+        (cmd,) = self.cmds
+        self.assertIn("--no-overlay", cmd)
+        for bad in ("--lm", "--profile"):
+            self.assertNotIn(bad, cmd)
+        self.assertEqual(self.result()["accuracy"]["priv"], {"missing": True})
+        self.assertEqual(self.result()["accuracy"]["pub"]["top1"], 1)
+
+    def test_missing_private_set_leaves_private_root_empty(self):
+        self.run_ref()
+        self.assertEqual(os.listdir(self.args.private_root), [])
+
+    def test_unset_private_root_reads_no_private_path(self):
+        """SHANJIE_PRIVATE unset (DEFAULT_PRIVATE empty): the private columns are skipped and no private file is looked at."""
+        self.assertEqual(bench.DEFAULT_PRIVATE, os.environ.get("SHANJIE_PRIVATE", ""))
+        self.args.private_root = ""
+        checked = []
+        real = os.path.isfile
+        with mock.patch.object(bench.os.path, "isfile", lambda p: checked.append(p) or real(p)):
+            self.run_ref()
+        private_names = [f for f, _, _, p in bench.SETS.values() if p]
+        self.assertFalse([c for c in checked if os.path.basename(c) in private_names])
+        self.assertEqual(self.result()["accuracy"]["priv"], {"missing": True})
+
+    def test_failed_set_is_retried_and_says_why(self):
+        real = self.fake_sh
+
+        def broken(cmd, **kw):
+            if cmd[0] != "cargo":
+                raise RuntimeError("simulated failure")
+            return real(cmd, **kw)
+        bench.sh = broken
+        with self.assertRaises(SystemExit):
+            self.run_ref()
+        self.assertIn("error", self.result()["accuracy"]["pub"])
+        bench.sh = real
+        err = self.run_ref()
+        self.assertIn("failed last time: pub", err)
+        self.assertEqual(self.result()["accuracy"]["pub"]["top1"], 1)
+
+    def test_same_commit_is_not_recomputed(self):
+        self.run_ref()
+        err = self.run_ref()
+        self.assertEqual(len(self.cmds), 1)
+        self.assertIn("current", err)
+
+    def test_new_commit_recomputes_and_says_why(self):
+        self.run_ref()
+        self.sha = "b" * 40
+        err = self.run_ref()
+        self.assertEqual(len(self.cmds), 2)
+        self.assertIn("commit changed", err)
+        self.assertEqual(self.result()["commit"], self.sha)
+
+    def test_changed_fingerprint_recomputes_and_says_why(self):
+        self.run_ref()
+        with open(bench.BASE_LEXICON, "a") as f:
+            f.write("x")
+        err = self.run_ref()
+        self.assertEqual(len(self.cmds), 2)
+        self.assertIn("fingerprint", err)
+
+    def test_reference_row_has_no_fixed_broken(self):
+        self.run_ref()
+        row = bench.reference_row(self.result(), ["pub/chat", "priv/chat"])
+        self.assertIn("小麥資料基準", row)
+        self.assertIn(self.sha[:7], row)
+        self.assertIn("不是小麥本身的解碼器", row)
+        self.assertNotIn("修好", row)
+        self.assertNotIn("p=", row)
+        self.assertNotIn("/ −", row)
+
+
+class Table(Tmp):
+    def test_version_rows_and_holdout_table_unchanged(self):
+        cell = {"n": 10, "top1": 7, "oracle64": 9, "top1_sha256": "x"}
+        res = [{"label": "L", "date": "2026-10-05", "env": {"machine": "M", "macos": "27", "load_avg_start": 1.0, "load_avg_end": 2.0},
+                "versions": [{"ref": "v1", "sha": "c" * 40, "accuracy": {"dev302/chat": cell}, "vs_prev": {"dev302/chat": {"fixed": 2, "broken": 1, "p": 1.0}},
+                              "holdout": {"chat": cell}, "speed": {"p95_us": 1000, "max_us": 2000, "load_ms": 5, "rss_mb": 40, "keys": 99, "rows_match": "302/302"}}]}]
+        refj = {"commit": "d" * 40, "accuracy": {"dev302": cell}}
+        plain = bench.render_table(res)
+        full = bench.render_table(res, refj, STATIC_OK)
+        self.assertNotIn("## 實打對照", plain)
+        head, rest = full.split("\n## 實打對照", 1)
+        static, tail = rest.split("\n## 量測規則", 1)
+        refrow = bench.reference_row(refj, [f"{n}/{p}" for n, (_, _, ps, _) in bench.SETS.items() for p in ps])
+        self.assertEqual(head.replace(refrow + "\n", "") + "\n## 量測規則" + tail, plain)
+        self.assertEqual(head.count(refrow), 1)
+        self.assertLess(head.index(refrow), head.index("| v1<br>"))  # first row of the main table
+        self.assertIn("2026-10-03", static)
+        self.assertNotIn("來源行", static)
+        self.assertNotIn("typing-test.md", static)
+        self.assertIn("| 小麥 | 5 | 12 |", static)
+        self.assertIn("tools/bench.py reference", plain)
+
+
+def git(root, *a):
+    return subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *a],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+def make_repo(path, marker):
+    """A repository with the files `Ver.build` exports, all holding `marker`; -> its HEAD."""
+    for f in ("Cargo.toml", "Cargo.lock", "core/a.rs", "cli/a.rs", "data/a.txt", "eval/variants.tsv"):
+        fp = os.path.join(path, f)
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        open(fp, "w").write(marker)
+    git(path, "init", "-q")
+    git(path, "add", "-A")
+    git(path, "commit", "-q", "-m", marker)
+    return git(path, "rev-parse", "HEAD")
+
+
+class Stop(Exception):
+    pass
+
+
+class LegacyExport(Tmp):
+    """A version released before this repository is exported from the legacy clone at LEGACY_SHA, never from this repository's tag of that name."""
+
+    def setUp(self):
+        super().setUp()
+        self.new, self.legacy = os.path.join(self.td, "new"), os.path.join(self.td, "legacy")
+        self.new_sha, self.legacy_sha = make_repo(self.new, "new"), make_repo(self.legacy, "legacy")
+        git(self.new, "tag", "v0.4.1")   # in the new repository every version tag points at its one first commit
+        git(self.new, "branch", "feature")
+        self.assertNotEqual(self.new_sha, self.legacy_sha)
+        for patch in (mock.patch.object(bench, "ROOT", self.new), mock.patch.object(bench, "CACHE", os.path.join(self.td, "cache")),
+                      mock.patch.dict(bench.LEGACY_SHA, {"v0.4.1": self.legacy_sha}), mock.patch.object(bench, "LEGACY_REPO", self.legacy)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def die_message(self, ref):
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            bench.Ver(ref)
+        return err.getvalue()
+
+    def test_a_table_version_resolves_to_its_legacy_commit_not_the_tag_here(self):
+        v = bench.Ver("v0.4.1")
+        self.assertEqual(v.sha, self.legacy_sha)
+        self.assertNotEqual(v.sha, git(self.new, "rev-parse", "v0.4.1"))
+        self.assertEqual(os.path.realpath(v.src), os.path.realpath(self.legacy))
+
+    def test_other_spellings_of_a_table_version_are_legacy_too(self):
+        for ref in ("refs/tags/v0.4.1", "tags/v0.4.1", "v0.4.1^0", "v0.4.1^{commit}"):
+            v = bench.Ver(ref)
+            self.assertEqual(v.sha, self.legacy_sha, ref)
+            self.assertEqual(os.path.realpath(v.src), os.path.realpath(self.legacy), ref)
+        with mock.patch.object(bench, "LEGACY_REPO", ""):
+            self.assertIn("is a legacy version", self.die_message("refs/tags/v0.4.1"))
+
+    def test_without_a_legacy_clone_it_is_refused_and_says_how_to_fix_it(self):
+        with mock.patch.object(bench, "LEGACY_REPO", ""):
+            msg = self.die_message("v0.4.1")
+        self.assertIn("v0.4.1 is a legacy version: pass --legacy-repo", msg)
+        self.assertIn("SHANJIE_LEGACY_REPO", msg)
+
+    def test_a_clone_without_the_commit_is_refused(self):
+        with mock.patch.object(bench, "LEGACY_REPO", self.new):   # this repository has a v0.4.1 tag, but not that commit
+            msg = self.die_message("v0.4.1")
+        self.assertIn(self.legacy_sha, msg)
+        self.assertIn("does not have", msg)
+        with mock.patch.object(bench, "LEGACY_REPO", os.path.join(self.td, "nothing-here")):
+            self.assertIn("does not have", self.die_message("v0.4.1"))
+
+    def test_a_ref_not_in_the_table_resolves_here(self):
+        for ref in ("HEAD", "feature", self.new_sha):
+            v = bench.Ver(ref)
+            self.assertEqual((v.sha, v.src), (self.new_sha, self.new), ref)
+        with mock.patch.object(bench, "LEGACY_REPO", ""):   # and needs no legacy clone
+            self.assertEqual(bench.Ver("feature").sha, self.new_sha)
+
+    def test_the_export_is_the_legacy_tree(self):
+        def stop_at_cargo(cmd, **kw):
+            if cmd[0] == "cargo":
+                raise Stop
+            return real_sh(cmd, **kw)
+        real_sh = bench.sh
+        v = bench.Ver("v0.4.1")
+        with mock.patch.object(bench, "sh", stop_at_cargo), self.assertRaises(Stop):
+            v.build()
+        self.assertEqual(open(os.path.join(v.dir, "Cargo.toml")).read(), "legacy")
+        self.assertEqual(open(os.path.join(v.dir, "data/a.txt")).read(), "legacy")
+        self.assertTrue(os.path.isfile(os.path.join(v.dir, ".exported")))
+        w = bench.Ver("feature")   # a ref here is exported from here
+        with mock.patch.object(bench, "sh", stop_at_cargo), self.assertRaises(Stop):
+            w.build()
+        self.assertEqual(open(os.path.join(w.dir, "Cargo.toml")).read(), "new")
+
+    def test_the_cache_key_is_the_commit_so_another_clone_path_reuses_it(self):
+        other = os.path.join(self.td, "legacy-copy")
+        git(self.td, "clone", "-q", self.legacy, other)
+        a = bench.Ver("v0.4.1")
+        with mock.patch.object(bench, "LEGACY_REPO", other):
+            b = bench.Ver("v0.4.1")
+        self.assertEqual(a.dir, b.dir)
+        self.assertTrue(a.dir.endswith(self.legacy_sha))
+
+    def test_the_argument_beats_the_environment_variable(self):
+        p = argparse.ArgumentParser()
+        bench.add_legacy_arg(p)
+        other = os.path.join(self.td, "elsewhere")
+        with mock.patch.object(bench, "LEGACY_REPO", other):   # what the variable gave at import
+            bench.set_legacy(p.parse_args([]))
+            self.assertEqual(bench.LEGACY_REPO, other)
+            bench.set_legacy(p.parse_args(["--legacy-repo", self.legacy]))
+            self.assertEqual(bench.LEGACY_REPO, self.legacy)
+
+    def test_run_takes_the_argument(self):
+        old = sys.argv
+        for suite in ("v1", "v2"):
+            sys.argv = ["bench.py", "run", "--suite", suite, "v0.4.1", "--legacy-repo", self.legacy]
+            with mock.patch.object(bench, "cmd_run", side_effect=lambda a: self.assertEqual(bench.LEGACY_REPO, self.legacy)), \
+                    mock.patch.object(bench, "cmd_run2", side_effect=lambda a: self.assertEqual(bench.LEGACY_REPO, self.legacy)), \
+                    mock.patch.object(bench, "LEGACY_REPO", ""):
+                bench.main()
+        sys.argv = old
+
+    def test_the_table_lists_every_legacy_release_once(self):
+        tags = ["v0.1.0", "v0.1.1", "v0.1.2", "v0.2.0", "v0.2.1", "v0.3.0", "v0.4.0", "v0.4.1", "v0.4.2", "v0.4.3", "v0.4.4", "v0.4.5", "v0.4.6", "v0.4.7",
+                "v0.5.0", "v0.6.0", "v0.6.1"]
+        real = {k: v for k, v in bench.LEGACY_SHA.items() if k != "v0.4.1"}
+        self.assertEqual(sorted(real), [t for t in tags if t != "v0.4.1"])
+        self.assertTrue(all(re.fullmatch("[0-9a-f]{40}", v) for v in real.values()))
+        self.assertEqual(len(set(real.values())), 16)
+        for label in bench.VERSIONS2:   # the versions released before this repository are exported from the legacy repository
+            if label in tags:
+                self.assertIn(label, bench.LEGACY_SHA)
+        self.assertIsNone(bench.legacy_name("v9.9.9"))   # a version released here later is not one of them
+
+
+@contextlib.contextmanager
+def mock_hash():
+    """The model files in the tests are one byte: make sha_file return the hash named by the file's folder."""
+    real = bench.sha_file
+    bench.sha_file = lambda p: os.path.basename(os.path.dirname(p)) if "/models/" in p else real(p)
+    try:
+        yield
+    finally:
+        bench.sha_file = real
+
+
+HEX = {"bigram.sjlm": "a" * 64, "classes.sjc": "b" * 64, "tinylm.sjtl": "7e73ef67" + "c" * 56}
+
+
+def fake_ver(label, td, models=True):
+    spec = bench.VERSIONS2[label]
+    v = types.SimpleNamespace(label=label, sha="d" * 40, ref=label, dir=os.path.join(td, "src-" + label), cli="cli", spec=spec,
+                              lm="lm", tl="/m/tinylm.sjtl" if spec["tinylm"] else None, tl8=HEX["tinylm.sjtl"][:8] if spec["tinylm"] else "")
+    return v
+
+
+class SuiteV2(Tmp):
+    """Suite v2 (docs/spec/evaluation.md §7): settings table, --as, model folder, rowstats scoring, guards. No real builds."""
+
+    def setUp(self):
+        super().setUp()
+        self.saved = {k: getattr(bench, k) for k in ("CACHE", "MODELS", "sh", "RESULTS", "ROOT", "STATIC", "EXTERNAL")}
+        bench.CACHE, bench.MODELS = os.path.join(self.td, "cache"), os.path.join(self.td, "models")
+        self.addCleanup(lambda: [setattr(bench, k, v) for k, v in self.saved.items()])
+        self.rows = self.write("rows.txt", "|你好|ㄋㄧˇ ㄏㄠˇ\n|世界|ㄕˋ ㄐㄧㄝˋ\n")
+        self.ctx = types.SimpleNamespace(files={"dev302": self.rows, "pub": self.rows}, private_root=os.path.join(self.td, "priv"))
+        bench.SETS2 = dict(bench.SETS2, pub=(self.rows, None, False))
+        self.addCleanup(lambda: bench.SETS2.pop("pub", None))
+
+    # --- 2.1 table, flags, tags
+    def test_table_flags_and_tags(self):
+        v0, v1 = fake_ver("v0.4.0", self.td), fake_ver("v0.4.1", self.td)
+        self.assertEqual(bench.expected_tag(v0, "chat", False), "lm-chat+ctx+acg")
+        self.assertEqual(bench.expected_tag(v1, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg")
+        self.assertEqual(bench.expected_tag(v1, "formal", False), "lm-formal+ctx+tl:7e73ef67+acg")
+        self.assertEqual(bench.expected_tag(v1, "chat", True), "lm-chat+ctx+tl:7e73ef67")  # --override-packs off
+        c0, c1 = (bench.cell_cmd(v, "chat", "r", "d", "s", False) for v in (v0, v1))
+        self.assertEqual(c0[-3:], ["--context", "--packs", "acg"])
+        self.assertNotIn("--tinylm", c0)
+        self.assertEqual(c1[-5:], ["--context", "--packs", "acg", "--tinylm", "/m/tinylm.sjtl"])
+        self.assertNotIn("--packs", bench.cell_cmd(v1, "chat", "r", "d", "s", True))
+        self.assertIn("--rowstats", c1)
+        self.assertNotIn("--dump", bench.cell_cmd(v1, "chat", "r", None, "s", False))  # only cells whose dump is read get one
+        self.assertEqual(bench.cli_env(False)["SHANJIE_VARIANTS"], bench.VARIANTS)
+        self.assertNotIn("SHANJIE_VARIANTS", bench.cli_env(True))
+
+    def test_set_table_matches_the_spec(self):
+        self.assertEqual([n for n in bench.SETS2 if n != "pub"], ["dev302", "typing76", "probe", "user-reported", "fw", "cvtune", "wikitune", "lytune", "wikitypo", "discordtune"])
+        for n in ("dev302", "typing76", "probe"):
+            self.assertEqual(bench.SETS2[n][:2], bench.SETS[n][:2])  # suite v1's files, same hashes
+        for n, (f, want, private) in bench.SETS2.items():
+            if want and not private and f.startswith(bench.SUITE2):
+                self.assertEqual(bench.sha_file(f), want, n)
+        self.assertEqual(bench.truths(bench.SETS2["user-reported"][0]).__len__(), 80)
+        self.assertEqual(bench.truths(bench.SETS2["fw"][0]).__len__(), 186)
+
+    # --- --as
+    def test_as_names_the_last_ref(self):
+        self.assertEqual(bench.version_labels(["v0.4.0", "abc123"], "v0.4.1"), ["v0.4.0", "v0.4.1"])
+        self.assertEqual(bench.version_labels(["v0.4.0", "v0.4.1"], None), ["v0.4.0", "v0.4.1"])
+        for refs, as_ in ((["v0.4.0", "abc123"], None), (["v0.4.0", "abc123"], "v9.9.9"), (["v0.4.0", "v0.4.0"], None)):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.version_labels(refs, as_)
+
+    # --- model folder
+    def stage_models(self, label, names):
+        v = fake_ver(label, self.td)
+        os.makedirs(os.path.join(v.dir, "data"))
+        for n in names:
+            with open(os.path.join(v.dir, "data", n + ".sha256"), "w") as f:
+                f.write(f"{HEX[n]}  data/lm/{n}\n")
+        return v
+
+    def put_model(self, n, content=None):
+        d = os.path.join(bench.MODELS, HEX[n])
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, n), "wb") as f:
+            f.write(content or b"x")
+
+    def test_model_folder_has_only_bigram_and_classes(self):
+        v = self.stage_models("v0.4.1", HEX)
+        for n in HEX:
+            self.put_model(n)
+        with mock_hash():
+            bench.setup_models(v, bench.VERSIONS2["v0.4.1"], os.path.join(self.td, "mf"))
+        self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc"])  # never kn.sjkn, never the .sjtl
+        self.assertTrue(v.tl.endswith("tinylm.sjtl"))
+        self.assertEqual(v.tl8, "7e73ef67")
+
+    def test_kn_version_gets_its_side_file_and_tag(self):
+        """model-v6 and later: a version with "kn" gets its kn.sjkn in the folder and `+kn:{kn8}` in the tag; others never do."""
+        spec = {"release": "vK", "flags": ["--context", "--packs", "acg"], "tinylm": True, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg"}
+        HEX["kn.sjkn"] = "cbefbced" + "e" * 56
+        self.addCleanup(HEX.pop, "kn.sjkn")
+        with mock.patch.dict(bench.VERSIONS2, {"vK": spec}):
+            v = self.stage_models("vK", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "kn.sjkn"])
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+kn:cbefbced:θ1:β1+tl:7e73ef67+acg")
+            os.remove(os.path.join(v.dir, "data", "kn.sjkn.sha256"))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf2"))   # a KN version without data/kn.sjkn.sha256 stops
+
+    def test_v040_has_no_tinylm_sha_file_and_needs_none(self):
+        v = self.stage_models("v0.4.0", ["bigram.sjlm", "classes.sjc"])
+        for n in ("bigram.sjlm", "classes.sjc"):
+            self.put_model(n)
+        with mock_hash():
+            bench.setup_models(v, bench.VERSIONS2["v0.4.0"], os.path.join(self.td, "mf"))
+        self.assertIsNone(v.tl)
+
+    def test_missing_or_wrong_model_fails(self):
+        v = self.stage_models("v0.4.1", HEX)
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):  # nothing cached
+            bench.setup_models(v, bench.VERSIONS2["v0.4.1"], os.path.join(self.td, "mf1"))
+        self.assertIn("download bigram.sjlm from its own Release (docs/spec/models.md §11 names it; v0.4.1 is the app release", err.getvalue())
+        for n in HEX:
+            self.put_model(n)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):  # files exist, hashes do not match data/*.sha256
+            bench.setup_models(v, bench.VERSIONS2["v0.4.1"], os.path.join(self.td, "mf2"))
+        self.assertIn("does not match", err.getvalue())
+
+    # --- rowstats scoring and the guards
+    def fake_cli(self, tag, ok, first, extra_rows=0):
+        """`tag` is the chat tag; a formal run (`--profile formal`) prints it with `lm-formal`, or a dict {profile: tag} gives each its own."""
+        def sh(cmd, **kw):
+            prof = cmd[cmd.index("--profile") + 1] if "--profile" in cmd else "chat"
+            t = tag[prof] if isinstance(tag, dict) else tag.replace("lm-chat", "lm-" + prof, 1)
+            if "--dump" in cmd:
+                with open(cmd[cmd.index("--dump") + 1], "w", encoding="utf-8") as f:
+                    for i, w in enumerate(first, 1):
+                        f.write(f"{i}\t1\t{w}\t-1.0\n{i}\t2\t別的\t-2.0\n")
+            if "--rowstats" in cmd:
+                with open(cmd[cmd.index("--rowstats") + 1], "w") as f:
+                    f.write("".join(f"{i}\t{int(o)}\t0\t2\n" for i, o in enumerate(ok, 1)))
+            return f"## rows.txt  {t}  {{'n': 2, 'top1': {sum(ok)}, 'oracle@64': 2, 'top1_sha256': '{bench.sha_str(chr(10).join(first))}'}}\n"
+        bench.sh = sh
+
+    def cell(self, label="v0.4.0", tag=None, ok=(True, True), first=("你好", "世界")):
+        v = fake_ver(label, self.td)
+        self.fake_cli(tag or bench.expected_tag(v, "chat", False), list(ok), first)
+        return bench.run_cell2(self.ctx, v, "pub", "chat", False)
+
+    def test_cell_scores_from_rowstats(self):
+        res, ok = self.cell("v0.4.1", ok=(True, False), first=("別的", "世界"))  # rerank on: the chosen sentence is not the dump's first row
+        self.assertEqual((res["n"], res["top1"]), (2, 1))
+        self.assertEqual(ok, [True, False])
+        self.assertEqual(res["tag"], "lm-chat+ctx+tl:7e73ef67+acg")
+
+    def test_no_tinylm_cell_cross_checks_the_dump(self):
+        # the first row of the dump is the chosen one here: 2 rows right by the tool's own lenient scoring
+        res, ok = self.cell("v0.4.0")
+        self.assertEqual(ok, [True, True])
+        # fixture: rowstats says row 2 is wrong while the dump's first row is right -> the cross-check fails
+        with self.assertRaisesRegex(RuntimeError, "disagrees with rowstats"):
+            self.cell("v0.4.0", ok=(True, False))
+        # and the reverse: rowstats says both right while the dump's first row 2 is wrong
+        with self.assertRaisesRegex(RuntimeError, "disagrees with rowstats"):
+            self.cell("v0.4.0", ok=(True, True), first=("你好", "別的"))
+
+    def test_wrong_setting_tag_fails_the_cell(self):
+        for tag in ("lm-chat+ctx", "lm-chat+ctx+acg+kn:abc", "lm-chat+acg"):  # flag dropped / a kn.sjkn picked up
+            with self.assertRaisesRegex(RuntimeError, "setting tag"):
+                self.cell("v0.4.0", tag=tag)
+        with self.assertRaisesRegex(RuntimeError, "setting tag"):  # v0.4.1 without --packs acg
+            self.cell("v0.4.1", tag="lm-chat+ctx+tl:7e73ef67")
+        for lv in ("conservative", "aggressive"):  # --rerank-level other than standard: the CLI adds +rl:, which is not the shipping setting
+            with self.assertRaisesRegex(RuntimeError, "setting tag"):
+                self.cell("v0.4.1", tag=f"lm-chat+ctx+tl:7e73ef67+rl:{lv}+acg")
+
+    def test_malformed_rowstats_fail(self):
+        for text in ("1\t1\t0\n", "1\tx\t0\t2\n2\t1\t0\t2\n", "2\t1\t0\t2\n1\t1\t0\t2\n", "1\t1\t0\t2\n"):
+            with self.assertRaises(RuntimeError):
+                bench.parse_rowstats(self.write("rs.tsv", text), 2)
+        self.assertEqual(bench.parse_rowstats(self.write("rs.tsv", "1\t1\t0\t2\n2\t0\t1\t2\n"), 2), [True, False])
+
+    def test_summary_must_be_one_line(self):
+        with self.assertRaises(RuntimeError):
+            bench.parse_summary("nothing\n")
+
+    # --- replay consistency (own CLI cell, replay settings)
+    def replay_script(self, commits):
+        """A stand-in for the replay binary: writes `commits`, appends its 5th argument (if any) to replay.args, prints one JSON line."""
+        args = os.path.join(self.td, "replay.args")
+        p = self.write("replay.py", "#!/usr/bin/env python3\nimport sys\nopen(sys.argv[4], 'w').write(%r)\nopen(%r, 'a').write(' '.join(sys.argv[5:]) + '\\n')\nprint('{\"keys\":9,\"load_ms\":1.0,\"p95_us\":2.0,\"max_us\":3.0}')\n" % (commits, args))
+        os.chmod(p, os.stat(p).st_mode | stat.S_IXUSR)
+        return p
+
+    def speed(self, first, commits="你好\n世界\n"):
+        v = fake_ver("v0.4.0", self.td)
+        v.replay = self.replay_script(commits)
+        self.fake_cli("lm-chat", [True, True], first)
+        return bench.measure_speed2(self.ctx, [v])[v.sha]
+
+    def test_replay_consistency(self):
+        s = self.speed(("你好", "世界"))
+        self.assertEqual((s["rows_match"], s["rounds"], s["p95_us"]), ("2/2", 3, 2.0))
+        self.assertNotIn("rerank_p50_ms", s)
+
+    def test_replay_differs_from_the_comparison_cell_fails(self):
+        s = self.speed(("你好", "改掉的"))  # the comparison cell's row 2 changed
+        self.assertIn("replay differs", s["error"])
+        self.assertIn("[2]", s["error"])
+
+    def test_replay_cell_of_a_kn_version_carries_its_kn_tag(self):
+        spec = {"release": "vK", "flags": ["--context", "--packs", "acg"], "tinylm": False, "kn": True, "tag": "+ctx+kn:{kn8}:θ1:β1+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vK": spec}):
+            v = fake_ver("vK", self.td)
+            v.kn8 = "cbefbced"
+            v.replay = self.replay_script("你好\n世界\n")
+            self.assertEqual(bench.replay_tag(v), "lm-chat+kn:cbefbced:θ1:β1")
+            self.fake_cli("lm-chat+kn:cbefbced:θ1:β1", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.measure_speed2(self.ctx, [v])[v.sha]["rows_match"], "2/2")
+            self.fake_cli("lm-chat", [True, True], ("你好", "世界"))   # a KN version whose cell lost KN is not the replay setting
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
+            self.fake_cli("lm-chat+kn:00000000:θ1:β1", [True, True], ("你好", "世界"))   # nor is another side file
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
+
+    def test_formal_replay_row_runs_the_replay_with_formal(self):
+        s = self.speed(("你好", "世界"))
+        self.assertEqual(s["formal"]["rows_match"], "2/2")
+        self.assertEqual(s["formal"]["rounds"], 3)
+        # chat rounds call the replay exactly as before (no 5th argument); the formal rounds pass `formal`
+        self.assertEqual(open(os.path.join(self.td, "replay.args")).read().split("\n")[:-1], ["", "formal"] * 3)
+
+    def test_formal_replay_row_fails_on_its_own(self):
+        v = fake_ver("v0.4.0", self.td)
+        v.replay = self.replay_script("你好\n世界\n")
+        self.fake_cli({"chat": "lm-chat", "formal": "lm-formal+kn:00000000:θ1:β1"}, [True, True], ("你好", "世界"))  # the formal cell picked up a side file
+        s = bench.measure_speed2(self.ctx, [v])[v.sha]
+        self.assertEqual(s["rows_match"], "2/2")  # the chat row is unaffected
+        self.assertIn("setting tag", s["formal"]["error"])
+
+    def test_trigram_version_has_its_own_formal_tag_and_replay_tag(self):
+        spec = {"release": "vT", "flags": ["--context", "--packs", "acg"], "tinylm": False, "kn": True, "tri": True,
+                "tag": "+ctx+kn:{kn8}:θ1:β1+acg", "formal_tag": "+ctx+acg+tri:{tri8}"}
+        with mock.patch.dict(bench.VERSIONS2, {"vT": spec}):
+            v = fake_ver("vT", self.td)
+            v.kn8, v.tri8 = "cbefbced", "fdd3b05d"
+            v.replay = self.replay_script("你好\n世界\n")
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+kn:cbefbced:θ1:β1+acg")  # chat never reads the table
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+acg+tri:fdd3b05d")  # formal: table on, KN off
+            self.assertEqual((bench.replay_tag(v, "chat"), bench.replay_tag(v, "formal")), ("lm-chat+kn:cbefbced:θ1:β1", "lm-formal+tri:fdd3b05d"))
+            self.fake_cli({"chat": "lm-chat+kn:cbefbced:θ1:β1", "formal": "lm-formal+tri:fdd3b05d"}, [True, True], ("你好", "世界"))
+            s = bench.measure_speed2(self.ctx, [v])[v.sha]
+            self.assertEqual((s["rows_match"], s["formal"]["rows_match"]), ("2/2", "2/2"))
+            self.fake_cli({"chat": "lm-chat+kn:cbefbced:θ1:β1", "formal": "lm-formal+kn:cbefbced:θ1:β1"}, [True, True], ("你好", "世界"))  # table missing: not the shipping formal
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["formal"]["error"])
+            self.fake_cli({"chat": "lm-chat+kn:cbefbced:θ1:β1", "formal": "lm-formal+tri:00000000"}, [True, True], ("你好", "世界"))  # another table
+            self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["formal"]["error"])
+            # a cell scored with the version's tags: the formal cell checks formal_tag, the chat cell tag
+            self.fake_cli({"chat": bench.expected_tag(v, "chat", False), "formal": bench.expected_tag(v, "formal", False)}, [True, False], ("你好", "別的"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "formal", False)[0]["tag"], "lm-formal+ctx+acg+tri:fdd3b05d")
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+kn:cbefbced:θ1:β1+acg")
+
+    def test_tri_version_gets_the_table_in_its_model_folder(self):
+        spec = {"release": "vT", "flags": ["--context", "--packs", "acg"], "tinylm": False, "kn": True, "tri": True,
+                "tag": "+ctx+kn:{kn8}:θ1:β1+acg", "formal_tag": "+ctx+acg+tri:{tri8}"}
+        HEX["kn.sjkn"], HEX["trigram.sjt3"] = "cbefbced" + "e" * 56, "fdd3b05d" + "f" * 56
+        self.addCleanup(HEX.pop, "kn.sjkn")
+        self.addCleanup(HEX.pop, "trigram.sjt3")
+        with mock.patch.dict(bench.VERSIONS2, {"vT": spec}):
+            v = self.stage_models("vT", ["bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3"])
+            for n in ("bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3"):
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3"])
+            self.assertEqual(v.tri8, "fdd3b05d")
+            os.remove(os.path.join(v.dir, "data", "trigram.sjt3.sha256"))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a table version without data/trigram.sjt3.sha256 stops
+
+    def test_sj_lm_7_version_has_both_tables_and_per_profile_tags(self):
+        """docs/spec/decoder.md §3.6: the `"tri_chat"` row keeps KN in both profiles (formal at beta 0.75) and each profile reads its own table, so the
+        chat tag ends in the chat table's `+tri:` and the formal tag keeps `+kn:...β0.75` before its own; the model folder holds both tables and a missing
+        trigram-chat.sjt3.sha256 stops."""
+        spec = bench.VERSIONS2["sj-lm-7"]
+        self.assertTrue(spec["tri"] and spec["tri_chat"])
+        HEX.update({"kn.sjkn": "880ee87c" + "e" * 56, "trigram.sjt3": "34305a2d" + "f" * 56, "trigram-chat.sjt3": "24ee8645" + "9" * 56,
+                    "colloquial.sjlm": "81c2470d" + "d" * 56})
+        for n in ("kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "colloquial.sjlm"):
+            self.addCleanup(HEX.pop, n)
+        names = ["bigram.sjlm", "classes.sjc", "kn.sjkn", "trigram.sjt3", "trigram-chat.sjt3", "tinylm.sjtl", "colloquial.sjlm"]
+        v = self.stage_models("sj-lm-7", names)
+        for n in names:
+            self.put_model(n)
+        with mock_hash():
+            bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+        self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "colloquial.sjlm", "kn.sjkn", "trigram-chat.sjt3", "trigram.sjt3"])
+        self.assertEqual((v.kn8, v.tri8, v.trichat8), ("880ee87c", "34305a2d", "24ee8645"))
+        chat, formal = "lm-chat+ctx+kn:880ee87c:θ1:β1+tl:7e73ef67+acg+tri:24ee8645+colloq:81c2470d+rc", "lm-formal+ctx+kn:880ee87c:θ1:β0.75+tl:7e73ef67+acg+tri:34305a2d"
+        self.assertEqual((bench.expected_tag(v, "chat", False), bench.expected_tag(v, "formal", False)), (chat, formal))
+        replay = ("lm-chat+kn:880ee87c:θ1:β1+tri:24ee8645", "lm-formal+kn:880ee87c:θ1:β0.75+tri:34305a2d")
+        self.assertEqual((bench.replay_tag(v, "chat"), bench.replay_tag(v, "formal")), replay)
+        # the replay-setting cells (no small model): a cell that lost one of the parts (formal at the file's beta 1, chat on the formal table, no table)
+        # is not the shipping setting
+        speed = {**spec, "tinylm": False, "colloquial": False, "tag": "+ctx+kn:{kn8}:θ1:β1+acg+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+acg+tri:{tri8}"}
+        with mock.patch.dict(bench.VERSIONS2, {"vS": speed}):
+            sv = fake_ver("vS", self.td)
+            sv.kn8, sv.tri8, sv.trichat8 = v.kn8, v.tri8, v.trichat8
+            sv.replay = self.replay_script("你好\n世界\n")
+            self.fake_cli({"chat": replay[0], "formal": replay[1]}, [True, True], ("你好", "世界"))
+            s = bench.measure_speed2(self.ctx, [sv])[sv.sha]
+            self.assertEqual((s["rows_match"], s["formal"]["rows_match"]), ("2/2", "2/2"))
+            for chat_tag, formal_tag, bad in ((replay[0], "lm-formal+kn:880ee87c:θ1:β1+tri:34305a2d", "formal"), (replay[0], "lm-formal+tri:34305a2d", "formal"),
+                                              ("lm-chat+kn:880ee87c:θ1:β1+tri:34305a2d", replay[1], "chat"), ("lm-chat+kn:880ee87c:θ1:β1", replay[1], "chat")):
+                self.fake_cli({"chat": chat_tag, "formal": formal_tag}, [True, True], ("你好", "世界"))
+                r = bench.measure_speed2(self.ctx, [sv])[sv.sha]
+                self.assertIn("setting tag", r["error"] if bad == "chat" else r["formal"]["error"], (chat_tag, formal_tag))
+        os.remove(os.path.join(v.dir, "data", "trigram-chat.sjt3.sha256"))
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            bench.setup_models(v, spec, os.path.join(self.td, "mf2"))
+
+    def test_colloquial_version_gets_the_table_the_flag_and_the_chat_tag(self):
+        """A version with `"colloquial": True` (the rule kpi.py uses too): its table goes into the model folder, only the chat cells pass
+        --colloquial-core and their tag ends in +colloq:<sha8>+rc (the reading-channel term rides on the table); formal cells and the anchor run are as without it."""
+        spec = {"release": "vC", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "tag": "+ctx+tl:{tl8}+acg"}
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        with mock.patch.dict(bench.VERSIONS2, {"vC": spec}):
+            v = self.stage_models("vC", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc", "colloquial.sjlm"])
+            self.assertEqual((v.co8, os.path.basename(v.co)), ("2984eeb5", "colloquial.sjlm"))
+            self.assertEqual(v.models["colloquial.sjlm"][0], os.path.join(bench.MODELS, HEX["colloquial.sjlm"], "colloquial.sjlm"))
+            chat, formal, anchor = (bench.cell_cmd(v, p, "r", "d", "s", a) for p, a in (("chat", False), ("formal", False), ("chat", True)))
+            self.assertEqual(chat[chat.index("--colloquial-core") + 1], v.co)
+            self.assertNotIn("--colloquial-core", formal)
+            self.assertNotIn("--colloquial-core", anchor)
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+tl:7e73ef67")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")  # the replay-setting cell is the bare model
+            # a cell is scored against that tag: the CLI that printed no +colloq: (flag dropped) is not the shipping setting
+            self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc")
+            # the table without the reading-channel term (--no-reading-channel, or a CLI that has none) is not the shipping setting either
+            for tag in ("lm-chat+ctx+tl:7e73ef67+acg", "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5"):
+                self.fake_cli(tag, [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+            os.remove(os.path.join(v.dir, "data", "colloquial.sjlm.sha256"))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf2"))  # a colloquial version without data/colloquial.sjlm.sha256 stops
+
+    def test_reading_version_ends_every_tag_with_rd_rx_and_has_no_rc(self):
+        """docs/spec/decoder.md §5: a version with `"reading": True` ships the decoder's reading term. Every setting's tag (chat, formal, the anchor
+        run, the replay-setting cell) ends in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>`, and the colloquial tag has no `+rc` any more (the term was
+        removed); a version without the key keeps `+rc` and gets no `+rd` (the previous test and `test_sj_lm_7_version_...`). The export must hold the file."""
+        spec = {"release": "vR", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "reading": True, "tag": "+ctx+tl:{tl8}+acg"}
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        with mock.patch.dict(bench.VERSIONS2, {"vR": spec}):
+            v = self.stage_models("vR", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash(), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                bench.setup_models(v, spec, os.path.join(self.td, "mf0"))   # the export has no std-exempt.tsv
+            os.makedirs(os.path.join(v.dir, "data", "lexicon"))
+            exempt = os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv")
+            with open(exempt, "w", encoding="utf-8") as f:
+                f.write("ㄅㄛ\t波\n")
+            rx8 = hashlib.sha256(b"\xe3\x84\x85\xe3\x84\x9b\t\xe6\xb3\xa2\n").hexdigest()[:8]
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(v.rx8, rx8)
+            self.assertEqual(bench.expected_tag(v, "chat", False), f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}")
+            self.assertEqual(bench.expected_tag(v, "formal", False), f"lm-formal+ctx+tl:7e73ef67+acg+rd+rx:{rx8}")
+            self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{rx8}")
+            self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{rx8}")
+            # a cell is scored against that tag: the old tag (with +rc, or without the reading marks) is not the shipping setting of this version
+            self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}")
+            for tag in ("lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc", "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5", f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc+rd+rx:{rx8}"):
+                self.fake_cli(tag, [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        # the previous release is unchanged
+        self.assertNotIn("reading", bench.VERSIONS2["v0.6.1"])
+
+    def test_a_version_without_the_key_never_gets_the_table(self):
+        """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""
+        HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
+        self.addCleanup(HEX.pop, "colloquial.sjlm")
+        v = self.stage_models("v0.4.1", HEX)
+        for n in HEX:
+            self.put_model(n)
+        with mock_hash():
+            bench.setup_models(v, bench.VERSIONS2["v0.4.1"], os.path.join(self.td, "mf"))
+        self.assertEqual(sorted(os.listdir(os.path.dirname(v.lm))), ["bigram.sjlm", "classes.sjc"])
+        self.assertNotIn("--colloquial-core", bench.cell_cmd(v, "chat", "r", "d", "s", False))
+        self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+tl:7e73ef67+acg")
+
+    def test_v047_is_v046_plus_the_table(self):
+        a, b = bench.VERSIONS2["v0.4.6"], bench.VERSIONS2["v0.4.7"]
+        for k in ("flags", "tinylm", "kn", "tag"):
+            self.assertEqual(a[k], b[k], k)
+        self.assertTrue(b["tri"])
+        self.assertNotIn("+kn:", b["formal_tag"])
+        self.assertTrue(b["formal_tag"].endswith("+acg+tri:{tri8}"))
+        self.assertNotIn("tri", a)
+
+    def test_comparison_cell_must_carry_the_replay_settings(self):
+        v = fake_ver("v0.4.0", self.td)
+        v.replay = self.replay_script("你好\n世界\n")
+        self.fake_cli("lm-chat+ctx+acg", [True, True], ("你好", "世界"))
+        self.assertIn("setting tag", bench.measure_speed2(self.ctx, [v])[v.sha]["error"])
+
+    # --- table: suite v1 text unchanged, v2 appended, v2 files invisible to v1
+    def test_external_section_rows(self):
+        x = {"name": "m", "date": "2026-10-13", "conditions": "c", "label": "0c", "ours_label": "v3",
+             "rows": [{"setting": "chat", "set": "dev302", "n": 4, "ngram": 1, "ours": 2, "external": 3, "fixed": 2, "broken": 1, "p": 1.0},
+                      {"setting": "formal", "set": "cvtune", "n": 4, "ngram": 4, "ours": 4, "external": 4, "fixed": 0, "broken": 0, "p": 1.0,
+                       "tuning": True},
+                      {"setting": "chat", "set": "x", "n": 4, "ngram": 1, "ours": 1, "external": 4, "fixed": 3, "broken": 0, "p": 0.0}]}
+        t = bench.render_external([x])
+        self.assertIn("## 外部模型對照（不是善解的版本）", t)
+        self.assertIn("| chat／dev302 | 4 | 25.00%<br>1/4 | 50.00%<br>2/4 | 75.00%<br>3/4 | +2 / −1，p=1 |", t)
+        self.assertIn("| formal／cvtune（選值用） |", t)
+        self.assertIn("+3 / −0，p<0.0001 |", t)
+
+    def test_table_appends_v2_after_unchanged_v1_text(self):
+        bench.RESULTS, bench.ROOT, bench.STATIC = (os.path.join(self.td, "results"), os.path.join(self.td, "root"), os.path.join(self.td, "none.json"))
+        bench.EXTERNAL = os.path.join(self.td, "no-external")
+        os.makedirs(bench.RESULTS)
+        os.makedirs(os.path.join(bench.ROOT, "docs"))
+        cell = {"n": 10, "top1": 7, "oracle64": 9, "top1_sha256": "x"}
+        env = {"machine": "M", "macos": "27", "load_avg_start": 1.0, "load_avg_end": 2.0}
+        v1 = {"label": "L", "date": "2026-10-05", "env": env, "versions": [{"ref": "v1", "sha": "c" * 40, "accuracy": {"dev302/chat": cell}}]}
+        speed = {"p95_us": 1000, "max_us": 2000, "load_ms": 5, "rss_mb": 40, "keys": 99, "rows_match": "302/302"}
+        recs = [{"ref": "v0.4.0", "version": "v0.4.0", "sha": "a" * 40, "models": {"bigram.sjlm": "a" * 64}, "flags": ["--context"], "accuracy": {"dev302/chat": cell}, "speed": speed},
+                {"ref": "c", "version": "v0.4.1", "sha": "b" * 40, "models": {"bigram.sjlm": "a" * 64}, "flags": ["--context", "--tinylm", "<file>"],
+                 "accuracy": {"dev302/chat": cell, "discordtune/chat": {"missing": True}}, "vs_prev": {"dev302/chat": {"fixed": 3, "broken": 1, "p": 0.625}},
+                 "speed": dict(speed, rerank_p50_ms=7.0, rerank_p95_ms=12.0, formal=dict(speed, rss_mb=170)), "holdout": {"commit": "e" * 40, "chat": {"n": 227, "top1": 191, "fixed": 11, "broken": 0, "p": 0.001}}}]
+        v2 = {"label": "v0.4.0+v0.4.1", "suite": "v2", "date": "2026-10-13", "env": env, "versions": recs}
+        out = os.path.join(bench.ROOT, "docs/benchmark.md")
+        with open(os.path.join(bench.RESULTS, "2026-10-05-baseline.json"), "w") as f:
+            json.dump(v1, f)
+        bench.cmd_table(None)
+        before = open(out, encoding="utf-8").read()
+        with open(os.path.join(bench.RESULTS, "v2-v0.4.0+v0.4.1.json"), "w") as f:
+            json.dump(v2, f)
+        bench.cmd_table(None)
+        after = open(out, encoding="utf-8").read()
+        self.assertTrue(after.startswith(before))
+        self.assertEqual(after.count("\n## "), before.count("\n## ") + 1)
+        tail = after[len(before):]
+        self.assertIn("## 套件 v2", tail)
+        self.assertIn("+3 / −1，p=0.625", tail)
+        self.assertIn("191/227", tail)
+        self.assertIn("| v0.4.1<br>`eeeeeee` |", tail)  # the holdout row names the commit the holdout ran on
+        self.assertIn("| v0.4.0<br>`aaaaaaa` |", tail)  # no commit recorded: the measured one
+        self.assertIn("7.00／12.00 ms", tail)
+        self.assertIn("| v0.4.1 書面 | 2026-10-13 | 同上 | 1.000 ms | 2.00 ms | 5 ms | 170 MB | 99 | 302/302 |", tail)  # the formal replay row
+        self.assertIn("| v0.4.0 書面 | 2026-10-13 | 同上 | — | — |", tail)  # a result without one: "—"
+        self.assertNotIn("v0.4.1", before)
+        bench.cmd_table(None)  # deterministic
+        self.assertEqual(open(out, encoding="utf-8").read(), after)
+
+    def test_holdout_numbers_stay_in_their_own_set_column(self):
+        # legacy n=227 (no hash), the talk half (hash T, kept) and two news halves (hashes N1, N2): a number shows only in its own column, in both renderers
+        env = {"machine": "M", "macos": "27", "load_avg_start": 1.0, "load_avg_end": 2.0}
+        T, N1, N2 = "1" * 64, "2" * 64, "3" * 64
+        hs = [{"chat": {"n": 227, "top1": 191}}, {"chat": {"n": 150, "top1": 120, "rows_sha256": T}, "formal": {"n": 150, "top1": 130, "rows_sha256": N1}},
+              {"chat": {"n": 150, "top1": 121, "rows_sha256": T}, "formal": {"n": 150, "top1": 140, "rows_sha256": N2}}]
+        recs = [{"ref": f"v{i}", "version": f"v{i}", "sha": str(i) * 40, "models": {}, "flags": [], "holdout": {p: dict(b, oracle64=9) for p, b in h.items()}} for i, h in enumerate(hs)]
+        for render in (lambda r: bench.render_table(r), bench.render_v2):
+            md = render([{"label": "L", "date": "2026-10-29", "env": env, "versions": recs}])
+            rows = {l.split("|")[1].split("<br>")[0].strip(): [c.strip() for c in l.split("|")[2:-1]] for l in md.splitlines() if l.startswith("| v") and "<br>" in l.split("|")[1] and "%" in l}
+            head = next(l for l in md.splitlines() if l.startswith("| 版本 | chat")).split("|")[2:-1]
+            self.assertEqual(len(head), 4, head)  # chat n227, chat T, formal N1, formal N2: first-appearance order
+            self.assertIn("n 227", head[0]); self.assertIn(f"#{T[:8]}", head[1]); self.assertIn(f"#{N1[:8]}", head[2]); self.assertIn(f"#{N2[:8]}", head[3])
+            miss = lambda c: c.startswith("—")
+            self.assertEqual([[not miss(c) for c in rows[v]] for v in ("v0", "v1", "v2")],
+                             [[True, False, False, False], [False, True, True, False], [False, True, False, True]])
+            self.assertIn("191/227", rows["v0"][0]); self.assertIn("130/150", rows["v1"][2]); self.assertIn("140/150", rows["v2"][3])
+
+    def test_rerun_never_overwrites_holdout_numbers(self):
+        bench.RESULTS = os.path.join(self.td, "results")
+        os.makedirs(bench.RESULTS)
+        with open(os.path.join(bench.RESULTS, "v2-v0.4.0+v0.4.1.json"), "w") as f:
+            json.dump({"versions": [{"version": "v0.4.1", "holdout": {"chat": {"n": 1, "top1": 1}}}]}, f)
+        args = types.SimpleNamespace(lm=None, base=None, override_packs=None, refs=["v0.4.0", "v0.4.1"], as_=None, label=None, private_root=self.td)
+        err = io.StringIO()
+        # preflight is a tripwire: without the guard the test fails here, before any build starts
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err), \
+                mock.patch.object(bench, "preflight2", side_effect=AssertionError("reached preflight")):
+            bench.cmd_run2(args)  # stops before preflight and any build
+        self.assertIn("holdout numbers", err.getvalue())
+
+
+PRIVATE_WORDS = ("discordtune", "cvtune", "wikitune", "lytune", "newstune", "chatjudge", "wikitypo", "Discord", "政府")
+
+
+class SiteData(Tmp):
+    """`table` writes docs/benchmark.md and site/data/bench.json from one read of the same files; the JSON holds public sets only."""
+
+    def setUp(self):
+        super().setUp()
+        self.saved = {k: getattr(bench, k) for k in ("RESULTS", "ROOT", "STATIC", "EXTERNAL")}
+        self.addCleanup(lambda: [setattr(bench, k, v) for k, v in self.saved.items()])
+        bench.RESULTS, bench.ROOT = os.path.join(self.td, "results"), os.path.join(self.td, "root")
+        bench.STATIC, bench.EXTERNAL = os.path.join(self.td, "typing-test.json"), os.path.join(self.td, "external")
+        for d in (bench.RESULTS, bench.EXTERNAL, os.path.join(bench.ROOT, "docs")):
+            os.makedirs(d)
+        cell = lambda n, t: {"n": n, "top1": t, "oracle64": n, "top1_sha256": "x"}
+        accuracy = {c: cell(10, 7) for c in ("dev302/chat", "dev302/formal", "typing76/chat", "probe/chat", "fw/chat", "user-reported/formal",
+                                              "cvtune/chat", "wikitune/formal", "lytune/chat", "wikitypo/chat", "discordtune/chat", "discordtune/formal")}
+        accuracy["fw/formal"] = {"error": "boom in /x/y/rows.txt"}
+        vs = {c: {"fixed": 2, "broken": 1, "p": 1.0} for c in accuracy if c != "fw/formal"}
+        vs["fw/formal"] = {"error": "x"}
+        speed = {"p95_us": 1000, "max_us": 2000, "load_ms": 5, "rss_mb": 40, "keys": 99, "rows_match": "302/302", "rounds": 3, "unlisted_field": 1}
+        run_env = {"machine": "M", "macos": "27", "load_avg_start": 1.0, "load_avg_end": 2.0}
+        hold = {"commit": "e" * 40, "chat": {"n": 150, "top1": 120, "oracle64": 140, "rows_sha256": "1" * 64},
+                "formal": {"n": 150, "top1": 130, "oracle64": 145, "rows_sha256": "2" * 64}}
+        recs = [{"ref": "a", "version": "v0.4.0", "sha": "a" * 40, "models": {"bigram.sjlm": "a" * 64}, "flags": [], "accuracy": accuracy, "speed": speed},
+                {"ref": "b", "version": "v0.4.1", "sha": "b" * 40, "models": {"bigram.sjlm": "a" * 64}, "flags": [], "accuracy": accuracy, "vs": "a", "vs_prev": vs,
+                 "speed": dict(speed, formal=dict(speed, rss_mb=170)), "holdout": hold}]
+        self.put("v2-v0.4.0+v0.4.1.json", {"label": "v0.4.0+v0.4.1", "suite": "v2", "date": "2026-10-13", "env": run_env, "versions": recs})
+        self.put("2026-10-05-baseline.json", {"label": "L", "date": "2026-10-05", "env": run_env,
+                                               "versions": [{"ref": "v1", "sha": "c" * 40, "accuracy": accuracy, "vs_prev": vs, "holdout": hold}]})
+        self.put("reference-mcbpmf.json", {"commit": "d" * 40, "accuracy": {"dev302": cell(10, 5), "cvtune": cell(10, 5), "discordtune": {"missing": True}}})
+        with open(bench.STATIC, "w", encoding="utf-8") as f:
+            json.dump(STATIC_OK, f, ensure_ascii=False)
+        rows = [{"setting": "chat", "set": n, "n": 4, "ngram": 1, "ours": 2, "external": 3, "fixed": 2, "broken": 1, "p": 1.0}
+                for n in ("dev302", "cvtune", "discordtune（私人）", "錯字回報（前 84 列）")]
+        with open(os.path.join(bench.EXTERNAL, "x.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "m", "date": "2026-10-13", "conditions": "uses cvtune", "label": "0c", "ours_label": "v3", "rows": rows}, f, ensure_ascii=False)
+
+    def put(self, name, data):
+        with open(os.path.join(bench.RESULTS, name), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+
+    def table(self):
+        bench.cmd_table(None)
+        return (open(os.path.join(bench.ROOT, "docs/benchmark.md"), "rb").read(), open(os.path.join(bench.ROOT, "site/data/bench.json"), "rb").read())
+
+    def test_two_runs_are_byte_identical(self):
+        a = self.table()
+        self.assertEqual(self.table(), a)
+        self.assertTrue(a[1].endswith(b"}\n"))
+        self.assertEqual(a[1].decode(), json.dumps(json.loads(a[1]), ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+
+    def test_no_private_set_in_the_json(self):
+        text = self.table()[1].decode()
+        for w in PRIVATE_WORDS:
+            self.assertNotIn(w, text, w)
+        self.assertNotIn("/x/y", text)       # failed cells carry no error text
+        self.assertNotIn("unlisted_field", text)  # only listed speed fields
+        j = json.loads(text)
+        for v in j["suite_v1"] + j["suite_v2"]:
+            self.assertLessEqual({c.split("/")[0] for c in v["accuracy"]}, set(bench.PUBLIC_SETS))
+            if "holdout_chat" in v:   # the talk half only, with its own hash
+                self.assertEqual(sorted(v["holdout_chat"]), ["commit", "n", "oracle64", "rows_sha256", "top1"])
+                self.assertEqual(v["holdout_chat"]["rows_sha256"], "1" * 64)
+            self.assertEqual(v["accuracy"]["fw/formal"], {"failed": True})
+        self.assertEqual([r["set"] for r in j["external"][0]["rows"]], ["dev302", "錯字回報（前 84 列）"])
+        self.assertEqual(list(j["reference"]["accuracy"]), ["dev302"])
+        self.assertEqual([g["name"] for g in j["static"]["groups"]], ["第一輪"])   # the local_only group stays in the markdown only
+
+    def test_markdown_is_what_the_renderers_make_of_the_same_files(self):
+        """The markdown is unchanged by the data file: the old composition of the same renderers, on the same fixtures."""
+        md = self.table()[0].decode()
+        results = [json.load(open(os.path.join(bench.RESULTS, "2026-10-05-baseline.json"), encoding="utf-8"))]
+        v2 = [json.load(open(os.path.join(bench.RESULTS, "v2-v0.4.0+v0.4.1.json"), encoding="utf-8"))]
+        ext = [json.load(open(os.path.join(bench.EXTERNAL, "x.json"), encoding="utf-8"))]
+        ref = json.load(open(os.path.join(bench.RESULTS, bench.REFERENCE), encoding="utf-8"))
+        self.assertEqual(md, bench.render_table(results, ref, STATIC_OK) + bench.render_v2(v2) + bench.render_external(ext))
+        self.assertIn("cvtune", md)   # the markdown keeps the private-set columns that the JSON drops
+        self.assertIn("第二輪（只放本機）", md)
+
+    def test_numbers_in_the_json_are_the_ones_in_the_markdown(self):
+        md, js = (x.decode() for x in self.table())
+        j = json.loads(js)
+        v = j["suite_v2"][1]
+        self.assertIn(f"{v['accuracy']['dev302/chat']['top1']}/{v['accuracy']['dev302/chat']['n']}", md)
+        self.assertIn(f"+{v['vs_prev']['dev302/chat']['fixed']} / −{v['vs_prev']['dev302/chat']['broken']}", md)
+        self.assertIn(f"{v['speed']['formal']['rss_mb']:.0f} MB", md)
+        self.assertIn(f"{v['holdout_chat']['top1']}/{v['holdout_chat']['n']}", md)
+
+
+if __name__ == "__main__":
+    unittest.main()

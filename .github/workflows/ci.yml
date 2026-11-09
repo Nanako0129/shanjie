@@ -1,0 +1,621 @@
+name: CI
+
+# Core build and tests on every pull request and every push to main.
+# Modeled on syrtis (Nanako0129/syrtis .github/workflows/ci.yml).
+# The workflow always runs, so every main commit keeps a concluded run for the
+# release gate (scripts/check-ci-gate.sh); the `changes` job skips the test
+# jobs when only documentation or the website changed (scripts/ci-changes.sh),
+# and skipped jobs leave the run's conclusion `success`.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR branch makes the previous run moot; pushes to main key on
+# the run id so every main commit keeps its own run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # actions: read lets the push case look up the previous main commit's run.
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      # Full history without file contents: enough for `git diff --name-only`.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - id: diff
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A new branch (all-zero before) or a base outside the history (force
+          # push) cannot be diffed, so everything runs.
+          if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            run=true
+          else
+            # A PR compares against the merge base (three dots); a push compares
+            # the two trees directly (two dots), so commits a force push dropped
+            # from main still count. --no-renames: rename detection would fetch
+            # file contents; listing both the old and the new path is also the
+            # conservative answer.
+            range="$BASE..$GITHUB_SHA"
+            [[ "$GITHUB_EVENT_NAME" == pull_request ]] && range="$BASE...$GITHUB_SHA"
+            run=$(git diff --no-renames --name-only "$range" | scripts/ci-changes.sh | sed 's/^run=//')
+          fi
+          # On main, a skip is only safe when the previous commit's run passed:
+          # otherwise a docs-only commit after a red, cancelled or unfinished
+          # run would conclude `success` and clear the release gate
+          # (scripts/check-ci-gate.sh) for code that last failed. The check sees
+          # the previous run as it is at decision time: a later re-run of that
+          # commit that turns red does not reach commits already skipped.
+          if [[ "$run" == false && "$GITHUB_EVENT_NAME" == push ]]; then
+            prev=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BASE&event=push&branch=main&per_page=100" \
+                     --jq '[.workflow_runs[]] | sort_by(.created_at) | last | .conclusion // "none"' 2>/dev/null || echo none)
+            echo "previous main run for $BASE: $prev"
+            [[ "$prev" == success ]] || run=true
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
+
+  core:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # docs/spec/release-and-ci.md: the release tests of both packages (the shipping profile, with the per-key p95 assertions and the
+    # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
+    runs-on: xcode-27
+    # A hung FFI child process should not hold the runner for the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # Pinned to the toolchain the golden files were generated with: scores
+      # must be bit-identical to the Python reference, and a codegen change
+      # has already moved one result by 1 ulp (Rust
+      # lowers powf of a constant base to exp10). The action is pinned to a master commit, as its
+      # README recommends; the `stable` branch is regenerated on every merge.
+      # There is no rust-toolchain file: every job that runs cargo carries this step.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # Release also enforces the per-key p95 < 16 ms assertions in the replays.
+      - name: Tests (release)
+        run: cargo test --release --locked
+
+  # docs/spec/release-and-ci.md: the debug run (overflow checks and the standard library's debug-only checks) on Linux, beside the
+  # release tests instead of on a second macOS runner. Linux runs the core package's tests faster than the macOS runner; the cli
+  # package's integration tests score with the small model, which has no Accelerate on Linux (2.4 times the macOS time), so they run
+  # in release only (the `core` job) and here only the cli package's unit tests run. Not checked in debug any more: the macOS-only
+  # branches (the small model's Accelerate calls, learn_store.rs's macOS constants) and the two f64 goldens in engine_digits.rs that
+  # return early on Linux (row49_scores_match_the_python_golden_bit_for_bit, predict_digits_matches_the_python_golden_bit_for_bit);
+  # all of them run in the `core` job. Skipped exactly when `core` is.
+  debug:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # The image the Linux results were measured on, not ubuntu-latest: the goldens and libm-dependent tests are image facts.
+    runs-on: ubuntu-24.04
+    # A hung child process should not hold the runner for the 6-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      - name: Tests (debug, core package)
+        run: cargo test --locked -p core
+
+      - name: Tests (debug, cli unit tests)
+        run: cargo test --locked -p cli --lib --bins
+
+      # docs/spec/windows-tip.md §2.9: the Linux side of the Windows comparison. The evaluation CLI in release, the six rowstats
+      # (dev302, the typing test and the user-reported rows, chat and formal) with the shipping flags, and the files as an artifact for the
+      # `windows` job to compare byte for byte (scripts/ci-rowstats.sh is the one copy of the six commands). Both sides run Rust 1.97.1.
+      - name: Evaluation CLI (release)
+        run: cargo build --release --locked -p cli --bin shanjie-eval
+
+      - name: Evaluation rowstats (the Linux side of the Windows comparison)
+        run: scripts/ci-rowstats.sh rowstats-linux
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rowstats-linux
+          path: rowstats-linux
+          if-no-files-found: error
+          retention-days: 1
+
+  # docs/spec/windows-tip.md §2.9: the core on x86_64-pc-windows-msvc. The tests pass (minus the per-key p95 assertions, which a
+  # 4 vCPU runner cannot measure and which the Linux and macOS jobs keep), the evaluation CLI's six rowstats equal the Linux job's byte for
+  # byte, the checkout has LF line endings where the data and tests need them, and the core also builds for i686 and aarch64 (build only).
+  # Needs `debug` for its rowstats artifact; skipped exactly when `core` is. Every step runs in bash (Git Bash on the runner), not PowerShell.
+  windows:
+    needs: [changes, debug]
+    if: needs.changes.outputs.run == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment), here and on the Linux side of the comparison.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # The one copy of the model download and hash check; on this image Git Bash may have no `shasum`, so the script falls back to `sha256sum`.
+      - name: Fetch the language model
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # The seven tests that assert a per-key p95 under 16 ms in release (a 4 vCPU runner measures them wrongly; the 188 WSL run skips them for
+      # the same reason). Their selection assertions run in the Linux and macOS jobs.
+      - name: Tests (release, core package)
+        run: >-
+          cargo test -p core --release --locked --
+          --skip replay_standard_chat_production_path
+          --skip replay_standard_302_of_302
+          --skip replay_eten_302_of_302
+          --skip replay_with_english_on
+          --skip replay_with_english_on_and_the_revert_switches_off
+          --skip replay_with_english_and_digits_on
+          --skip perf_two_thousand_new_words_per_key
+
+      - name: Evaluation CLI (release)
+        run: cargo build --release --locked -p cli --bin shanjie-eval
+
+      - name: Evaluation rowstats
+        run: scripts/ci-rowstats.sh rowstats-windows
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rowstats-linux
+          path: rowstats-linux
+
+      # docs/spec/windows-tip.md §2.9: the six files are the Linux job's, byte for byte.
+      - name: Rowstats equal the Linux job's
+        run: |
+          set -euo pipefail
+          n=0
+          for f in rowstats-linux/*.rowstats; do
+            cmp "$f" "rowstats-windows/$(basename "$f")"
+            n=$((n + 1))
+          done
+          [ "$n" -eq 6 ] || { echo "error: $n Linux rowstats files, not 6" >&2; exit 1; }
+          [ "$(ls rowstats-windows | wc -l)" -eq 6 ] || { echo "error: not 6 Windows rowstats files" >&2; exit 1; }
+
+      # docs/spec/windows-tip.md §2.7: no CRLF in the working tree (a CRLF in digits.tsv switches the digit layer off without a message).
+      # `git ls-files --eol` prints `i/<index> w/<working tree> attr/...`: no `w/crlf` or `w/mixed`, and every `i/lf` file is `w/lf`.
+      - name: Line endings of the checkout
+        run: |
+          set -euo pipefail
+          git ls-files --eol data eval scripts core/tests cli/tests > eol.txt
+          test -s eol.txt
+          if awk '$2 ~ /^w\/(crlf|mixed)$/ || ($1 == "i/lf" && $2 != "w/lf")' eol.txt | grep .; then
+            echo "error: the files above are not LF in the working tree" >&2
+            exit 1
+          fi
+
+      # Build only: the core also compiles for the 32-bit x86 and the ARM64 Windows targets (no tests run).
+      - name: Core builds for i686 and aarch64
+        run: |
+          set -euo pipefail
+          rustup target add i686-pc-windows-msvc aarch64-pc-windows-msvc
+          cargo build --locked -p core --target i686-pc-windows-msvc
+          cargo build --locked -p core --target aarch64-pc-windows-msvc
+
+      # docs/spec/windows-tip.md §3.13: the text service DLL builds (without and with the `timing` feature), then its unit tests and the
+      # R2 behaviour tests run. COM and TSF themselves are covered by the VM run (docs/spec/windows-tip.md §3.13), not here.
+      - name: shanjie-tip builds (release, without and with timing)
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p shanjie-tip
+          cargo build --release --locked -p shanjie-tip --features timing
+
+      - name: shanjie-tip tests (release)
+        run: cargo test --release --locked -p shanjie-tip
+
+  # docs/spec/release-and-ci.md: the Python steps, which used to follow the release tests in `core`, on Linux. They are development
+  # tools; their goldens (the dev302 rowstats among them) match byte for byte on Linux. A golden that only matches on macOS
+  # would move its step back to a macOS job. Skipped exactly when `core` is.
+  python:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    # The measured image, as in `debug`.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # docs/spec/models.md §9.8: the tw-clean table is not in the repo; the Python tests use their own tables or none.
+    env:
+      SHANJIE_TW_CLEAN: "off"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # docs/spec/evaluation.md §1.3: Rust and Python lenient comparison agree
+      # on every probe line, and the variant table is actually applied.
+      - name: Lenient comparison parity (Rust vs Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          python3 tools/build_variants.py --probe > "$T/probe.txt"
+          python3 reference/proto/eval.py --lenient-dump "$T/probe.txt" > "$T/py.txt"
+          cargo run --release --locked -q -p cli -- --lenient-dump "$T/probe.txt" > "$T/rs.txt"
+          diff "$T/py.txt" "$T/rs.txt"
+          N=$(grep -vc '^#' eval/variants.tsv)
+          diff <(head -n "$N" "$T/rs.txt") <(grep -v '^#' eval/variants.tsv | cut -f2)
+
+      # docs/spec/decoder.md §8.1: the sandhi
+      # rows and the public probe rebuild byte for byte, and Python's unigram
+      # decode with both overlays matches the Rust goldens.
+      - name: Sandhi rows, probe and unigram parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/build_sandhi.py --check
+          python3 tools/build_probe.py --check
+          python3 reference/proto/check_unigram_overlay.py
+          python3 reference/proto/test_demote.py
+
+      # numpy for the Python steps that need it, in a throwaway venv (the runner's python3 may not have it); with trigram.sjt3 beside the model,
+      # lm_eval.py --profile formal imports reference/proto/trigram.py (numpy), and the trigram-table tests need it too.
+      # Steps that do not need numpy keep the runner's python3.
+      - name: Python venv with numpy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/x0c-venv"
+          "$RUNNER_TEMP/x0c-venv/bin/python" -m pip install --quiet numpy==2.5.4
+
+      # docs/spec/evaluation.md §2: the statistics tests, and the Python rowstats of dev302 equal
+      # the golden the Rust CLI is compared with (cli/tests/golden.rs), so both writers are held.
+      # The formal pass reads the trigram table beside the model, so both passes run in the numpy venv.
+      - name: Eval statistics (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          python3 -m unittest tools.test_evalstats
+          for p in chat formal; do
+            "$T/x0c-venv/bin/python" reference/proto/lm_eval.py --profile "$p" --dev 302 --rowstats "$T/$p.rowstats" > /dev/null
+            cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
+          done
+
+      # docs/spec/lexicon-and-packs.md §5.8: the pack builder against a fake API (dedupe, collision dispositions, ordering,
+      # deterministic output) and the committed pack against the lexicon. Builds the evaluation CLI for the collision detection.
+      - name: ACG pack builder (Python)
+        run: python3 -m unittest tools.test_build_acg_pack
+
+      # docs/spec/decoder.md §2.5: the Python half of the cross-language golden (eval/golden/pack-oov/decode.tsv);
+      # the Rust half is core/tests/pack_oov.rs.
+      - name: pack-oov golden (Python)
+        run: python3 -B -m unittest tools/test_pack_oov.py
+
+      # docs/spec/lexicon-and-packs.md §6.4: the IT+AI pack builder against a fake web and fake decoders (source rules, dedupe, collisions,
+      # offline determinism). No network, no evaluation CLI.
+      - name: IT pack builder (Python)
+        run: python3 -W ignore -m unittest tools.test_build_it_pack tools.test_it_sources tools.test_it_wiki_counts
+
+      # The meme pack builder (a build tool; the pack is not shipped) against fixtures and a fake decoder (thresholds, dedupe, the
+      # first-place rule, count-file provenance, determinism). No network, no evaluation CLI.
+      - name: Meme pack builder (Python)
+        run: python3 -W ignore -m unittest tools.test_build_meme_pack
+
+      # docs/spec/lexicon-and-packs.md §3.2, §3.7: the common proper-noun builder against fixtures and a fake API, and the
+      # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.
+      - name: Names lexicon builder (Python)
+        run: python3 -m unittest tools.test_build_names
+
+      # docs/spec/decoder.md §8.3: the neutral-tone rows of tools/build_sandhi.py against synthetic fixtures.
+      - name: Sandhi builder (Python)
+        run: python3 -m unittest tools.test_build_sandhi
+
+      # docs/spec/models.md §4.2, §4.3: the count scripts' --extra-lexicon (additive counting), the
+      # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
+      - name: model-v5 build scripts (Python)
+        run: python3 -W ignore -m unittest tools/test_build_lm.py tools/test_extra_lexicon.py
+
+      # docs/spec/decoder.md §3.3: the SJKN0002 writer and lm.py reader, and the kn-tiny golden is the generator's current output.
+      - name: Kneser-Ney side file (Python)
+        run: python3 -W ignore -m unittest tools/test_kn_cont.py
+
+      # docs/spec/evaluation.md §7: the benchmark tool's guards (frozen set hashes, settings table and tags,
+      # rowstats scoring, dump cross-check, replay consistency) against a fake CLI; no builds, no private data.
+      - name: Benchmark tool (Python)
+        run: python3 -m unittest tools/test_bench.py
+
+      # docs/spec/decoder.md §5: the shipped reading-decode exemption list (data/lexicon/std-exempt.tsv) against tools/std_exempt.py's rule. The
+      # rule needs the concised dictionary zip, which is not in the repository, so that test is skipped here (it says so on stderr); the file's shape is checked.
+      - name: Reading-decode exemption list (Python)
+        run: python3 -m unittest tools/test_std_exempt.py
+
+      # docs/spec/evaluation.md §8: the per-version KPI table rules and the replay model checks, synthetic JSON and fake binaries.
+      - name: KPI table tool (Python)
+        run: python3 -W ignore -m unittest tools/test_kpi.py
+
+      # docs/spec/english-mixed.md §13.5: the English word list builder (filter, cut, sort, input hash), synthetic input.
+      - name: English word list builder (Python)
+        run: python3 -m unittest tools/test_build_english_words.py
+
+      # tools/build_overlay.py manual words: row checks, and the `manual` tail of overlay-add.tsv equals manual_rows() today (no dumps); the
+      # Moedict readings and supplement source (docs/spec/lexicon-and-packs.md §2.7, §2.8) and tools/readings.py rule 3b on synthetic input.
+      - name: Overlay manual words and readings (Python)
+        run: python3 -W ignore -m unittest tools/test_build_overlay.py tools/test_readings.py
+
+      # docs/spec/semantic-rerank.md §4.7: the attribution list builder (per-source sums, the stop conditions), synthetic input.
+      - name: Colloquial attribution list (Python)
+        run: python3 -W ignore -m unittest tools/test_build_attribution.py
+
+      # docs/spec/evaluation.md §5.4: the held-out containment guard (tools/holdout_guard.py report, build_counts --holdout-guard), synthetic input and a fake conversion table.
+      - name: Holdout guard (Python)
+        run: python3 -W ignore -m unittest tools/test_holdout_guard.py tools/test_merge_guard_rows.py
+
+      # docs/spec/decoder.md §3.4 slice A: tools/test_build_trigram.py (the SJT30001 builder, reader and scorer, the toy golden
+      # file check, and lm_eval.py's loading rules) needs numpy, so it runs in the throwaway venv built earlier in the job ("Python venv with numpy").
+      - name: Trigram table (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
+
+  # docs/spec/release-and-ci.md: the Swift tests through the real core and model, on their own runner beside `shell`. They launch
+  # no sandboxed build (the installer tests make their own throwaway bundles), so docs/spec/install-and-update.md §10.2's order does not bind
+  # them, and they need only target/release/libcore.a (macos/Package.swift), the lexicon and the models: no `make bundle`.
+  swift:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 30  # the Swift tests took 394-479 s on runners up to twice as slow as each other
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # `make rust`: the static library macos/Package.swift links.
+      - name: Core static library
+        run: cargo build --release --locked -p core
+
+      # docs/spec/c-abi.md §9: compile the C header against the
+      # staticlib and drive both layouts, the LM and the profile switch.
+      # In this job since ci-speed-2 (off the slowest job, `core`), after the static library above.
+      # macOS cc links without the native libs too, so an empty capture would
+      # pass silently; it is captured and checked first.
+      - name: C header smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          LIBS=$(cargo rustc --color never --release --locked -p core --crate-type staticlib -- --print native-static-libs 2>&1 | sed -n 's/.*native-static-libs: //p')
+          test -n "$LIBS"
+          cc -std=c11 -Wall -Wextra -Werror -Icore/include core/tests/c/abi_smoke.c target/release/libcore.a $LIBS -o "$T/abi_smoke"
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm
+          # S4: a third argument (a fresh learning directory) runs the learning checks 518-521.
+          "$T/abi_smoke" data/lexicon data/lm/bigram.sjlm "$T/learn"
+
+      # Includes the log-stream test: it needs /usr/bin/log
+      # stream, which the runner's user can run.
+      # --parallel starts one xctest process per test method (the log prints `[n/N] Testing Class/method`;
+      # docs/spec/release-and-ci.md). Trade-off: state that leaks from one test into the next inside one process is no longer
+      # caught here, only by the serial `make test-swift`. --parallel drops XCTest's `Executed N tests` summary, so the number
+      # of test cases is printed from the xUnit file (it does not mark XCTSkip, so there is no skip count to print).
+      - name: Swift tests
+        run: |
+          set -euo pipefail
+          swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
+          python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
+
+  # The Swift input method (docs/spec/release-and-ci.md, docs/spec/install-and-update.md
+  # §10.2): the ad-hoc sandboxed builds, the container migration, the
+  # bundled selftest, acceptance checks 2, 3 and 6 of docs/spec/macos-shell.md §11, the
+  # entitlement and Sparkle mutations, and the installer. The Swift tests are
+  # the `swift` job (docs/spec/release-and-ci.md).
+  shell:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The same toolchain as the other cargo jobs and release.yml: libcore.a is built by every job that links it.
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # docs/spec/install-and-update.md §10.2, in its order: no step before
+      # step 3 launches any sandboxed build. cargo test runs in the core and
+      # debug jobs and the Swift tests in the swift job.
+      # Step 0: the default build has the development ID, the development names
+      # (docs/spec/install-and-update.md §2.1), and no migration list. Build only.
+      - name: "Step 0: default build (development ID), build only"
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bundle OUT_DIR=build/default
+          APP="build/default/善解（開發版）.app"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
+          ID=$(pb CFBundleIdentifier "$APP/Contents/Info.plist")
+          echo "default CFBundleIdentifier: $ID"
+          [ "$ID" = com.nyanako.inputmethod.shanjie.dev ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Info.plist")" = 善解（開發版） ]
+          [ "$(pb CFBundleName "$APP/Contents/Info.plist")" = "Shanjie (Dev)" ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/zh-Hant.lproj/InfoPlist.strings")" = 善解（開發版） ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/en.lproj/InfoPlist.strings")" = "Shanjie (Dev)" ]
+          [ ! -e "$APP/Contents/Resources/container-migration.plist" ]
+          [ ! -e build/default/善解輸入法.app ]
+
+      - name: "Step 1: shipping-ID build, build only"
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie
+          M="build/善解輸入法.app/Contents/Resources/container-migration.plist"
+          plutil -p "$M"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :Move:0' "$M")" = '${ApplicationSupport}/shanjie' ]
+
+      - name: "Step 2: throwaway build with no migration list, build only"
+        run: make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie.ci-nomanifest OUT_DIR=build/nomanifest
+
+      # Step 2a: check-app.sh's local guard, verified here rather than on a
+      # a developer machine: outside CI it must refuse to run a shipping-ID
+      # build and must not have created the shipping container; with SKIP_RUN=1
+      # it passes checks 2 and 3.
+      - name: "Step 2a: check-app.sh refuses a shipping-ID run outside CI"
+        shell: bash
+        run: |
+          set -euo pipefail
+          rc=0
+          CI='' EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app" > "$RUNNER_TEMP/2a.out" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/2a.out"
+          [ "$rc" -ne 0 ] || { echo "error: check-app.sh ran a shipping-ID build with CI unset" >&2; exit 1; }
+          grep -q 'check 6 refused' "$RUNNER_TEMP/2a.out"
+          [ ! -e "$HOME/Library/Containers/com.nyanako.inputmethod.shanjie" ] || { echo "error: the shipping container exists" >&2; exit 1; }
+          CI='' SKIP_RUN=1 EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
+
+      # Step 3: the first sandboxed launches in this job (the script prints
+      # sw_vers). A TCC prompt while reading a container would hang here
+      # (docs/spec/install-and-update.md §10.2), hence the timeout.
+      - name: "Step 3: container migration (shipping ID), and no list, no move"
+        timeout-minutes: 10
+        run: scripts/test-sandbox-migration.sh "build/善解輸入法.app" "build/nomanifest/善解（開發版）.app"
+
+      - name: "Step 4: the migration test refuses outside CI and with a temporary HOME"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ci in "" true; do
+            T=$(mktemp -d "$RUNNER_TEMP/refuse.XXXXXX")
+            rc=0
+            CI="$ci" HOME="$T" scripts/test-sandbox-migration.sh "build/善解輸入法.app" "build/nomanifest/善解（開發版）.app" > "$T.out" 2>&1 || rc=$?
+            cat "$T.out"
+            [ "$rc" -ne 0 ] || { echo "error: not refused with CI='$ci' HOME=$T" >&2; exit 1; }
+            [ -z "$(ls -A "$T")" ] || { echo "error: the refused run wrote into $T" >&2; exit 1; }
+            [ -n "$ci" ] || grep -q 'refused: CI is not true' "$T.out"
+          done
+          grep -q "is not this account's home directory" "$T.out"
+
+      # release.yml's CI gate against a stub gh: a tag on an appcast.xml-only commit uses its parent's run.
+      - name: CI gate script
+        run: scripts/test-check-ci-gate.sh
+
+      # The model list of the About page (docs/spec/models.md §1): scripts/check-models.sh on fake folders.
+      - name: Model list check
+        run: scripts/test-check-models.sh
+
+      # Step 5: install-ime.sh file handling with a stub app in a temporary HOME; nothing can be registered.
+      - name: "Step 5: install script file handling"
+        run: scripts/test-install-ime.sh
+
+      # Step 6: the bundled selftest with a per-run throwaway ID (no migration
+      # list); its container must not exist before and must exist after. The
+      # shipping ID's selftest already ran in steps 3 and 7.
+      - name: "Step 6: bundled selftest (throwaway ID)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          ID="com.nyanako.inputmethod.shanjie.selftest-$GITHUB_RUN_ID"
+          C="$HOME/Library/Containers/$ID"
+          [ ! -e "$C" ] || { echo "error: $C exists before the selftest" >&2; exit 1; }
+          make selftest-bundled SELFTEST_BUNDLE_ID="$ID"
+          [ -d "$C" ] || { echo "error: no $C after the selftest: not sandboxed" >&2; exit 1; }
+          echo "ok: $C absent before, present after"
+
+      # Step 7: docs/spec/macos-shell.md §11 acceptance 2, 3 and 6 on the shipping build.
+      - name: "Step 7: acceptance checks 2, 3 and 6"
+        run: EXPECTED_BUNDLE_ID=com.nyanako.inputmethod.shanjie scripts/check-app.sh "build/善解輸入法.app"
+
+      # Step 8: ten changed copies of the shipping build against
+      # check-entitlements.sh and check-app.sh; none is
+      # launched.
+      - name: "Step 8: entitlement and Sparkle mutations"
+        run: scripts/test-sandbox-mutations.sh "build/善解輸入法.app"
+
+      # Step 9: docs/spec/install-and-update.md §10.1, §10.2, acceptance 1: the
+      # installer around the shipping build of step 1, inspected only (never launched).
+      - name: "Step 9: installer"
+        run: |
+          make installer
+          scripts/check-installer.sh
+
+      # docs/spec/release-and-ci.md, acceptance 1 and 2: render-cask.sh's checks, then brew style on a
+      # rendered cask (brew applies the cask rules only under a Casks/ directory).
+      - name: Homebrew cask
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+        run: |
+          set -euo pipefail
+          scripts/test-render-cask.sh
+          mkdir -p "$RUNNER_TEMP/cask/Casks"
+          scripts/render-cask.sh 0.0.0 "$(printf '0%.0s' $(seq 64))" > "$RUNNER_TEMP/cask/Casks/shanjie.rb"
+          cd "$RUNNER_TEMP/cask"
+          brew style Casks/shanjie.rb

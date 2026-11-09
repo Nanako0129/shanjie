@@ -1,0 +1,91 @@
+{
+ "holdout_news_formal": {
+  "broken": 0,
+  "fixed": 4,
+  "n": 150,
+  "p": 0.125,
+  "rows_sha256": "b9bc7190e81bb546baf390ed442cf953ef65fdcfe0922f62e8fbe274b423cbf4",
+  "top1": 120
+ },
+ "holdout_talk_chat": {
+  "broken": 4,
+  "fixed": 3,
+  "n": 150,
+  "p": 1.0,
+  "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+  "top1": 115
+ },
+ "replay": {
+  "dev302": {
+   "n": 302,
+   "off": {
+    "autocommits": 0,
+    "final_ok": 302,
+    "guard_rows": 0,
+    "guard_skips": 0,
+    "kyss": 0.9773,
+    "n": 302,
+    "picks_per100": 1.8,
+    "rewrites": 188,
+    "tag": "replay-chat+ctx+acg+nopred+noen+lm:fc2bddd1+tl:e7c179d8+correct+colloq:2984eeb5+rc",
+    "top1": 269,
+    "top1_sha256": "d7230f186c0653667b9e4fed032c6db1a24f4cfa6d8668895da37a834668de9e",
+    "unfixable": 0
+   },
+   "rows_sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"
+  },
+  "models": {
+   "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+   "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+   "colloquial.sjlm": "2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33",
+   "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+   "tinylm.sjtl": "e7c179d85405ec42a40bb22adb58a7485c58f77aed89dfc2ca76a0d89568ed5e",
+   "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"
+  },
+  "sha": "93ddf32a7d1b2c544dd014143dcb3aadc0537fa6",
+  "user-reported": {
+   "learn_broken": 0,
+   "learn_fixed": 1,
+   "n": 80,
+   "off": {
+    "autocommits": 0,
+    "final_ok": 79,
+    "guard_rows": 0,
+    "guard_skips": 0,
+    "kyss": 0.8947,
+    "n": 80,
+    "picks_per100": 10.04,
+    "rewrites": 61,
+    "tag": "replay-chat+ctx+acg+nopred+noen+lm:fc2bddd1+tl:e7c179d8+correct+colloq:2984eeb5+rc",
+    "top1": 33,
+    "top1_sha256": "e0b98ca54c35760b23fa3b182d09accf203dde9c42eb001b43c079f832a0c166",
+    "unfixable": 1
+   },
+   "on": {
+    "autocommits": 0,
+    "final_ok": 79,
+    "guard_rows": 1,
+    "guard_skips": 1,
+    "kyss": 0.8982,
+    "n": 80,
+    "picks_per100": 9.86,
+    "rewrites": 60,
+    "tag": "replay-chat+ctx+acg+nopred+noen+lm:fc2bddd1+tl:e7c179d8+learn+correct+colloq:2984eeb5+rc",
+    "top1": 34,
+    "top1_sha256": "62f05edad66987a464535dbe2ff5f0854e8739a1f9a811fd7a452cd2ce7337dc",
+    "unfixable": 1
+   },
+   "rows_sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a"
+  },
+  "variants_sha256": "50cb44bd0f1fa33c48624bc0185d03d4e87e99107bc15971d638528bcf69cdb3"
+ },
+ "sha": "299230a5e2f5083d7f265c982ce6721b7ba7b071",
+ "version": "v0.5.0",
+ "wikitune_clean": {
+  "n": 2181,
+  "rows_sha256": "d576ea941242e04d718c3d5cf4711c43693588d1089461970293edcec9c5db92",
+  "tag": "lm-formal+ctx+tl:e7c179d8+acg+tri:fdd3b05d",
+  "top1": 1642,
+  "top1_sha256": "a23a2036a5bcf479a974dd34c6ede092a1033c2d2ac6197e74d11facb175eac3"
+ }
+}

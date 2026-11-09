@@ -1,0 +1,454 @@
+import AppKit
+import CShanjie
+import XCTest
+@testable import ShanjieKit
+
+/// The repository's data, laid out like the app's Resources (docs/spec/macos-shell.md §11):
+/// a temporary directory of symlinks to data/lexicon/*, data/lm/bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm. Missing files fail
+/// the test with instructions; nothing is skipped for a missing file (the one opt-in benchmark, CandidateCellTests.testBenchmark, is skipped without SHANJIE_BENCH=1).
+enum TestData {
+    static let repo = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent()
+
+    static let files: [(name: String, source: String)] = [
+        ("mcbpmf-data.txt", "data/lexicon/mcbpmf-data.txt"),
+        ("overlay-add.tsv", "data/lexicon/overlay-add.tsv"),
+        ("sandhi-add.tsv", "data/lexicon/sandhi-add.tsv"),
+        ("names-add.tsv", "data/lexicon/names-add.tsv"),  // docs/spec/lexicon-and-packs.md §1.1, §3: the always-on names layer, required by the core
+        ("demote.tsv", "data/lexicon/demote.tsv"),
+        ("variant-order.tsv", "data/lexicon/variant-order.tsv"),  // docs/spec/decoder.md §2.3: required by the core like demote.tsv (engine creation and load_lm fail with 3 without it)
+        ("std-exempt.tsv", "data/lexicon/std-exempt.tsv"),  // reading-decode-2: load_lm reads it (the decoder's reading term); missing, the load fails
+        ("digits.tsv", "data/lexicon/digits.tsv"),  // docs/spec/english-mixed.md §7.2, §7.8: optional for the core, but the app bundles it
+        ("bigram.sjlm", "data/lm/bigram.sjlm"),
+        ("classes.sjc", "data/lm/classes.sjc"),
+        ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
+        ("trigram.sjt3", "data/lm/trigram.sjt3"),  // trigram-core: the formal profile's table, loaded from beside the model
+        ("trigram-chat.sjt3", "data/lm/trigram-chat.sjt3"),  // docs/spec/decoder.md §3.6: the chat profile's table; the engine loads both, a missing one only turns that profile's level off
+        ("tinylm.sjtl", "data/lm/tinylm.sjtl"),
+        ("colloquial.sjlm", "data/lm/colloquial.sjlm"),  // docs/spec/semantic-rerank.md §4: the colloquial table the selftest requires
+    ]
+
+    static let itPackRow = "ㄧㄥˊ-ㄇㄨˋ-ㄅㄠˇ-ㄏㄨˋ-ㄑㄧˋ\t螢幕保護器\t-3.17843815\tit\n"
+
+    /// Adds Resources/packs/acg-add.tsv (a symlink to the repo's pack) like the app bundle has it. Opt-in: tests
+    /// that write their own pack file into `packs` must not get a link through which they would overwrite the repo's.
+    static func addBundledPack(to dir: URL, itPack: Bool = true) throws {
+        let packs = dir.appendingPathComponent("packs", isDirectory: true)
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        // The IT+AI pack's one row (the selftest word, core/tests/engine_pack.rs): a real file, so the test does not depend on the generated data/packs/it-add.tsv.
+        if itPack { try itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8) }
+        try FileManager.default.createSymbolicLink(at: packs.appendingPathComponent("acg-add.tsv"),
+                                                   withDestinationURL: repo.appendingPathComponent("data/packs/acg-add.tsv"))
+    }
+
+    /// Builds a Resources-like directory with the given files; nil (after failing the test) when a
+    /// source file is missing.
+    static func resources(only names: Set<String>? = nil, file: StaticString = #filePath, line: UInt = #line) -> URL? {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shanjie-tests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for f in files where names?.contains(f.name) ?? true {
+            let src = repo.appendingPathComponent(f.source)
+            guard FileManager.default.fileExists(atPath: src.path) else {
+                XCTFail("""
+                    \(f.source) is missing. The lexicon is in git; the models are the files data/*.sha256 record \
+                    (bigram.sjlm, classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl, colloquial.sjlm), put in data/lm.
+                    """, file: file, line: line)
+                return nil
+            }
+            try? FileManager.default.createSymbolicLink(at: dir.appendingPathComponent(f.name), withDestinationURL: src)
+        }
+        return dir
+    }
+}
+
+/// An IMKTextInput stand-in that behaves like a text view: insertText replaces the marked text.
+@MainActor
+final class FakeClient: TextClient {
+    enum Call: Equatable {
+        case insert(String)
+        case mark(String, cursor: Int, underlined: Bool)
+    }
+
+    /// One stretch of the last marked text with the same underline style (`NSUnderlineStyle` raw value, 0 for none).
+    struct UnderlineRun: Equatable {
+        let range: NSRange
+        let style: Int
+    }
+    private(set) var underlineRuns: [UnderlineRun] = []
+
+    /// Settable in the middle of a test (docs/spec/keys-and-composition.md §9.5: a client that stops answering).
+    var bundle: String?
+    /// Every read of `bundleIdentifier` (a synchronous IPC in the app).
+    private(set) var bundleReads = 0
+    var bundleIdentifier: String? { bundleReads += 1; return bundle }
+    private(set) var calls: [Call] = []
+    private(set) var text = ""   // committed text
+    private(set) var marked = ""
+    /// S4: the document's text before anything this client received; the insertion point is
+    /// after `before + text`.
+    var before = ""
+    /// Overrides for the left-context tests: no insertion point, or marked text left over.
+    var selectedOverride: NSRange?
+    var markedOverride: NSRange?
+    /// docs/spec/semantic-rerank.md §5.1: an app that answers attributedSubstring with this, whatever range was asked for.
+    var replyOverride: String?
+    /// s3b2: the line rectangle this client reports.
+    var line: NSRect? = NSRect(x: 100, y: 200, width: 8, height: 18)
+    private(set) var lineCursor: Int?
+    private(set) var lineAsks = 0
+    var appearance: NSAppearance?
+
+    func lineRect(cursor: Int) -> NSRect? { lineCursor = cursor; lineAsks += 1; return line }
+    /// docs/spec/keys-and-composition.md §9.4: the insertion point's rectangle when nothing is marked.
+    var caret: NSRect? = NSRect(x: 300, y: 400, width: 2, height: 18)
+    func caretRect() -> NSRect? { caret }
+
+    /// Every call of the three reading methods, and each range requested.
+    private(set) var reads = 0
+    private(set) var requested: [NSRange] = []
+
+    init(bundle: String? = "com.apple.TextEdit") { self.bundle = bundle }
+
+    private var document: NSString { (before + text + marked) as NSString }
+
+    func selectedRange() -> NSRange {
+        reads += 1
+        return selectedOverride ?? NSRange(location: document.length, length: 0)
+    }
+
+    /// NSTextInputClient: {NSNotFound, 0} without marked text.
+    func markedRange() -> NSRange {
+        reads += 1
+        if let markedOverride { return markedOverride }
+        let m = (marked as NSString).length
+        return m == 0 ? NSRange(location: NSNotFound, length: 0) : NSRange(location: document.length - m, length: m)
+    }
+
+    func attributedSubstring(from range: NSRange) -> NSAttributedString? {
+        reads += 1
+        requested.append(range)
+        if let replyOverride { return NSAttributedString(string: replyOverride) }
+        guard range.location != NSNotFound, NSMaxRange(range) <= document.length else { return nil }
+        return NSAttributedString(string: document.substring(with: range))
+    }
+
+    func insertText(_ text: String, replacementRange: NSRange) {
+        XCTAssertEqual(replacementRange.location, NSNotFound)
+        calls.append(.insert(text))
+        self.text += text
+        marked = ""
+    }
+
+    func setMarkedText(_ text: NSAttributedString, selectionRange: NSRange) {
+        let underline = text.length == 0
+            ? false
+            : (text.attribute(.underlineStyle, at: 0, effectiveRange: nil) as? Int) == NSUnderlineStyle.single.rawValue
+        var runs: [UnderlineRun] = []
+        text.enumerateAttribute(.underlineStyle, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            runs.append(UnderlineRun(range: range, style: value as? Int ?? 0))
+        }
+        underlineRuns = runs
+        calls.append(.mark(text.string, cursor: selectionRange.location, underlined: underline))
+        marked = text.string
+    }
+}
+
+/// Answers the clear's windows for the user (docs/spec/learning.md §10) and counts them.
+@MainActor
+final class FakeDialogs: LearningDialogs {
+    var answer = true
+    private(set) var asked = 0
+    private(set) var failures = 0
+    func confirmClear(_ reply: @escaping @MainActor (Bool) -> Void) { asked += 1; reply(answer) }
+    func clearFailed() { failures += 1 }
+}
+
+@MainActor
+final class FakePanel: CandidatePanel {
+    private(set) var visible = false
+    private(set) var items: [String] = []
+    /// The text of the one-line hint on screen (docs/spec/english-mixed.md §4.6); `nil` when none. Any `show` or `hide` clears it.
+    private(set) var hint: String?
+    private(set) var notes: [String?] = []
+    private(set) var selected = -1
+    private(set) var lineRect: NSRect?
+    private(set) var appearance: NSAppearance?
+    private(set) var columns = 0
+    private(set) var first = 0
+    private(set) var total = 0
+    /// The `vertical` of the last show: 0 horizontal, 1 vertical candidate window, 2 vertical prediction row.
+    private(set) var vertical = 0
+    /// The glassTint of every show, in order.
+    private(set) var glassTints: [Double] = []
+    var onSelect: ((Int) -> Void)?
+    /// The values `setGlassTint` was called with, in order.
+    private(set) var retints: [Double] = []
+
+    func setGlassTint(_ glassTint: Double) { retints.append(glassTint) }
+
+    func show(_ candidates: [String], notes: [String?], selected: Int, columns: Int, first: Int, total: Int, vertical: Int,
+              lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        hint = nil
+        glassTints.append(glassTint)
+        self.lineRect = lineRect
+        self.appearance = appearance
+        self.columns = columns
+        self.first = first
+        self.total = total
+        self.vertical = vertical
+        visible = true
+        items = candidates
+        self.notes = notes
+        self.selected = selected
+    }
+
+    /// A mouse click on the cell at `i`, as the app's panel reports it.
+    func click(_ i: Int) { onSelect?(i) }
+
+    func showHint(_ text: String, vertical: Int, lineRect: NSRect?, appearance: NSAppearance?, glassTint: Double) {
+        show([], notes: [], selected: -1, columns: 0, first: 0, total: 0, vertical: vertical, lineRect: lineRect, appearance: appearance,
+             glassTint: glassTint)
+        hint = text
+    }
+
+    func hide() {
+        visible = false
+        hint = nil
+        items = []
+        selected = -1
+    }
+}
+
+/// One fake IMK controller: a session with its own client and panel. Dropping it models IMK
+/// releasing the controller (the session's deinit runs on the main actor, synchronously).
+@MainActor
+final class Controller {
+    let client: FakeClient
+    let session: Session
+    /// The shell's one panel, shared by every controller.
+    var panel: FakePanel { session.shell.panel as! FakePanel }
+
+    init(_ shell: Shell, bundle: String? = "com.apple.TextEdit") {
+        client = FakeClient(bundle: bundle)
+        session = Session(shell: shell, client: client)
+    }
+
+    /// The session's left-context read with this client's bundle ID, as `send` passes it.
+    func readLeft() -> (text: String?, last: Character?) {
+        session.leftContext(bundle: client.bundleIdentifier)
+    }
+
+    /// Presses each ASCII key of `keys` (a space is the space bar); returns the handled flags.
+    @discardableResult
+    func type(_ keys: String, flags: NSEvent.ModifierFlags = []) -> [Bool] {
+        keys.map { session.handle(Keys.event(Keys.code(for: $0), flags: flags)) }
+    }
+
+    @discardableResult
+    func press(_ code: UInt16, flags: NSEvent.ModifierFlags = []) -> Bool {
+        session.handle(Keys.event(code, flags: flags))
+    }
+}
+
+enum Keys {
+    static let enter: UInt16 = 36, space: UInt16 = 49, esc: UInt16 = 53, keypad0: UInt16 = 82
+
+    static func code(for c: Character) -> UInt16 {
+        if c == " " { return space }
+        guard let code = KeyMap.ansi.first(where: { $0.value == c })?.key else {
+            fatalError("no ANSI key for a test character")
+        }
+        return code
+    }
+
+    static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown, time: TimeInterval = 0,
+                      characters: String = "") -> NSEvent {
+        if type == .flagsChanged {
+            return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
+                                    context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
+                                    keyCode: code) ?? event(code, flags: flags)
+        }
+        return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
+                                context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+                                keyCode: code)!
+    }
+}
+
+/// docs/spec/keys-and-composition.md §2.1, transcribed independently of the core: symbol to (standard, ETen) key.
+enum Layouts {
+    static let symbols: [(String, Character, Character)] = [
+        ("ㄅ", "1", "b"), ("ㄆ", "q", "p"), ("ㄇ", "a", "m"), ("ㄈ", "z", "f"), ("ㄉ", "2", "d"),
+        ("ㄊ", "w", "t"), ("ㄋ", "s", "n"), ("ㄌ", "x", "l"), ("ㄍ", "e", "v"), ("ㄎ", "d", "k"),
+        ("ㄏ", "c", "h"), ("ㄐ", "r", "g"), ("ㄑ", "f", "7"), ("ㄒ", "v", "c"), ("ㄓ", "5", ","),
+        ("ㄔ", "t", "."), ("ㄕ", "g", "/"), ("ㄖ", "b", "j"), ("ㄗ", "y", ";"), ("ㄘ", "h", "'"),
+        ("ㄙ", "n", "s"), ("ㄧ", "u", "e"), ("ㄨ", "j", "x"), ("ㄩ", "m", "u"), ("ㄚ", "8", "a"),
+        ("ㄛ", "i", "o"), ("ㄜ", "k", "r"), ("ㄝ", ",", "w"), ("ㄞ", "9", "i"), ("ㄟ", "o", "q"),
+        ("ㄠ", "l", "z"), ("ㄡ", ".", "y"), ("ㄢ", "0", "8"), ("ㄣ", "p", "9"), ("ㄤ", ";", "0"),
+        ("ㄥ", "/", "-"), ("ㄦ", "-", "="),
+    ]
+    /// Tones 2-5; the first tone is the space bar on both layouts.
+    static let tones: [(String, Character, Character)] = [
+        ("ˊ", "6", "2"), ("ˇ", "3", "3"), ("ˋ", "4", "4"), ("˙", "7", "1"),
+    ]
+
+    /// Keys for space-separated syllables; a syllable without a tone mark ends with a space.
+    static func keys(_ zhuyin: String, eten: Bool) -> String {
+        let table = Dictionary(uniqueKeysWithValues: (symbols + tones).map { ($0.0, eten ? $0.2 : $0.1) })
+        return zhuyin.split(separator: " ").map { syl -> String in
+            let ks = String(syl.map { table[String($0)]! })
+            return tones.contains { syl.hasSuffix($0.0) } ? ks : ks + " "
+        }.joined()
+    }
+}
+
+/// dev302 row 131 (docs/spec/macos-shell.md §6; row 10 before S2k, row 226 before dec-recombine, row 284 before 通語 SJ-LM-7-9.7M, see Selftest.swift).
+enum Row131 {
+    static let zhuyin = "ㄅㄣˇ ㄕˋ ㄒㄧㄚˋ ㄓㄡ ㄙㄢ ㄏㄨㄟˋ ㄧㄡˇ ㄉㄚˋ ㄩˇ"
+    static let standardKeys = Layouts.keys(zhuyin, eten: false)
+    static let chat = "本市下週三會有大雨"
+    // With trigram.sjt3 beside the model the formal profile gives 本是…; without the table it gives 本市…, so a test
+    // (and the App selftest) that expects 本是 also catches a missing table. Checked with the CLI `--profile formal --context`, 2026-10-27;
+    // the n-gram first and the shipping rerank (both packs, all three strengths) give the same sentence in both profiles.
+    static let formal = "本是下週三會有大雨"
+}
+
+/// A temporary learning directory (docs/spec/learning.md §10); never the real Application Support.
+enum TestLearning {
+    static func directory(create: Bool = true) -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shanjie-learning-\(UUID().uuidString)", isDirectory: true)
+        if create { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+        return dir
+    }
+
+    /// The record lines of learning.tsv (header excluded); empty when there is no file.
+    static func records(in dir: URL) -> [String] {
+        guard let text = try? String(contentsOf: dir.appendingPathComponent("learning.tsv"), encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").dropFirst().map(String.init)
+    }
+}
+
+/// The handle of one job of `HeldRerankRunner`.
+@MainActor
+final class HeldHandle: RerankHandle {}
+
+/// docs/spec/semantic-rerank.md §8.1: a rerank runner that never completes on its own. It holds each job until the test completes it, so a
+/// result never lands at a time the test did not choose.
+///
+/// Enter's bounded wait (docs/spec/keys-and-composition.md §7.3) is answered by hand too: `waitMode` `.timeout` (the default) reports the deadline as
+/// passed at once, so a test that presses Enter with a job held sees the old behaviour; `.complete` runs the job of the handle on
+/// this thread and returns its code, as the queue runner's semaphore would. The entry leaves `held` and its `done` goes to `late`,
+/// for the test to call afterwards (the `DispatchQueue.main.async` call of `QueueRerankRunner`).
+@MainActor
+final class HeldRerankRunner: RerankRunner {
+    enum WaitMode { case timeout, complete }
+
+    private(set) var held: [(job: RerankJob, done: @MainActor @Sendable (Int32) -> Void, handle: HeldHandle)] = []
+    /// Jobs handed over so far.
+    private(set) var received = 0
+    var waitMode = WaitMode.timeout
+    /// The deadline of every `wait` call, in order; `waited` counts the calls.
+    private(set) var deadlines: [DispatchTime] = []
+    var waited: Int { deadlines.count }
+    /// The `done` of jobs a wait finished, not yet called.
+    private(set) var late: [@MainActor @Sendable (Int32) -> Void] = []
+
+    func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle {
+        received += 1
+        let handle = HeldHandle()
+        held.append((job, done, handle))
+        return handle
+    }
+
+    func wait(_ handle: RerankHandle, until deadline: DispatchTime) -> Int32? {
+        deadlines.append(deadline)
+        guard waitMode == .complete, let i = held.firstIndex(where: { $0.handle === handle }) else { return nil }
+        let (job, done, _) = held.remove(at: i)
+        late.append(done)
+        return job.run()
+    }
+
+    /// Calls the `done` of the oldest job a wait finished, with `code`.
+    func fireLate(code: Int32 = 0, file: StaticString = #filePath, line: UInt = #line) {
+        guard !late.isEmpty else { return XCTFail("no late callback", file: file, line: line) }
+        late.removeFirst()(code)
+    }
+
+    /// Runs the oldest held job on this thread and hands back its code, as the app's runner does from its queue. `code`
+    /// instead skips the run and hands back that code (run's 4, a caught panic, keeps no result).
+    func complete(code: Int32? = nil, file: StaticString = #filePath, line: UInt = #line) {
+        guard !held.isEmpty else { return XCTFail("no job is with the runner", file: file, line: line) }
+        let (job, done, _) = held.removeFirst()
+        let c = code ?? job.run()
+        done(c)
+    }
+
+    /// Completes until nothing is held (a completion may start the job that waited).
+    func drain() {
+        while !held.isEmpty { complete() }
+    }
+}
+
+/// Counts rerank frees at the shell's injectable free function (docs/spec/semantic-rerank.md §10). The jobs are not freed until
+/// `release()`, so no address is reused while a test runs: a job freed twice is counted as such, never undefined behaviour.
+/// Lock-protected: the app's runner may drop the last reference on its queue.
+final class FreeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var freedJobs: [UInt] = []
+    private var seen: Set<UInt> = []
+    private var twice = 0
+
+    var free: @Sendable (OpaquePointer) -> Void { { [self] in record($0) } }
+
+    private func record(_ job: OpaquePointer) {
+        let bits = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(job)))
+        lock.lock()
+        defer { lock.unlock() }
+        if seen.insert(bits).inserted { freedJobs.append(bits) } else { twice += 1 }
+    }
+
+    var freed: Int { lock.lock(); defer { lock.unlock() }; return freedJobs.count }
+    var doubleFrees: Int { lock.lock(); defer { lock.unlock() }; return twice }
+
+    /// Frees every recorded job once, for real.
+    func release() {
+        lock.lock()
+        let jobs = freedJobs
+        freedJobs = []
+        lock.unlock()
+        for bits in jobs { shanjie_rerank_free(OpaquePointer(bitPattern: bits)) }
+    }
+}
+
+/// dev302 row 10 (期中報告明天要交): in the chat profile the n-gram's first is right and the small model keeps it, with and without the pack and the
+/// colloquial table (CLI, 2026-10-27), so a finished job changes nothing (RerankTests.testNoChangeMakesNoCall). Before 通語 SJ-LM-7-9.7M: dev302 row 65 (since
+/// classes-v5, whose chat n-gram gave 我等一下再過去 already; the sentence of the docs/spec/semantic-rerank.md §8.4 selftest before that), which the 通語 SJ-LM-7-9.7M n-gram gets
+/// wrong again (`RerankRow`).
+enum NoChangeRow {
+    static let standardKeys = Layouts.keys("ㄑㄧˊ ㄓㄨㄥ ㄅㄠˋ ㄍㄠˋ ㄇㄧㄥˊ ㄊㄧㄢ ㄧㄠˋ ㄐㄧㄠ", eten: false)
+    static let text = "期中報告明天要交"
+}
+
+/// dev302 row 65 (docs/spec/semantic-rerank.md §8.4, the selftest's sentence since the 通語 SJ-LM-7-9.7M files; row 27 from classes-v5 to model-v6, whose rerank changed 回復 to 回覆): in the
+/// chat profile the n-gram's first is 我等一下在過去 and the small model picks 再 (CLI, 2026-10-27, chat standard, with and without the bundled packs, without
+/// the colloquial table; with it the pick is the same). The same happened under tinylm-v2 to v4 (RerankTests, 2026-10-13). Row 25 (執行這個城市 -> 程式) was this
+/// sentence under tinylm-v1 (`DeviceRow` below).
+enum RerankRow {
+    static let zhuyin = "ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ"
+    static let standardKeys = Layouts.keys(zhuyin, eten: false)
+    static let etenKeys = Layouts.keys(zhuyin, eten: true)
+    static let ngram = "我等一下在過去"
+    static let reranked = "我等一下再過去"
+}
+
+/// dev302 row 25, the device sentence of the chat rerank: in the chat profile with no left context and
+/// the bundled pack (RerankTests adds it for this sentence), the n-gram's first is 城市; tinylm-v3's chat values pick 程式
+/// (tinylm-v2's did not).
+enum DeviceRow {
+    static let zhuyin = "ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ"
+    static let standardKeys = Layouts.keys(zhuyin, eten: false)
+    static let ngram = "執行這個城市"
+    static let reranked = "執行這個程式"
+}

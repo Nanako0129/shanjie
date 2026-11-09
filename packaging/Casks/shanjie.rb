@@ -1,0 +1,54 @@
+cask "shanjie" do
+  version "0.0.0"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+
+  url "https://github.com/Nanako0129/shanjie/releases/download/v#{version}/shanjie-#{version}.zip"
+  name "善解輸入法"
+  name "Shanjie"
+  desc "Zhuyin input method that converts whole sentences on the device"
+  homepage "https://shanjie.nyanako.com/"
+
+  # The input method updates itself with Sparkle (docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4).
+  # What a plain `brew upgrade` then does with this cask is to be measured; naming it upgrades it (documented for auto_updates):
+  # `brew upgrade --cask nanako0129/tap/shanjie`.
+  auto_updates true
+  depends_on arch: :arm64
+  depends_on macos: :tahoe
+
+  # The cask installs for the current account only (~/Library/Input Methods). The installer
+  # app's "This Mac" option puts it in /Library/Input Methods instead
+  # (docs/spec/install-and-update.md); with that copy present, a brew install adds a second
+  # one, which is not blocked here.
+  input_method "善解輸入法.app"
+
+  # Upgrade and reinstall: stop the running old copy only once the new bundle is in place, so the
+  # system starts the new one. Homebrew skips `uninstall signal` on upgrade, and `on_upgrade` did
+  # not take effect when the installed cask was read back from its receipt (measured 2026-10-08,
+  # Homebrew 7.0.7; docs/spec/install-and-update.md). The system starts the input method with no
+  # arguments; `[^ ]*` keeps a command that merely names this path as an argument from matching
+  # (a home directory containing a space is not matched either). An empty prefix covers a
+  # system-wide /Library/Input Methods install.
+  postflight_steps do
+    terminate_process '^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$',
+                      match:   :full,
+                      notices: ["Stopping any running copy of the input method so the new version is used"]
+  end
+
+  uninstall signal: ["TERM", "com.nyanako.inputmethod.shanjie"]
+
+  # The learning data and preferences: unsandboxed versions keep them in the first and last paths;
+  # the sandboxed version moves them into its container (docs/spec/install-and-update.md §9.2).
+  zap trash: [
+    "~/Library/Application Support/shanjie",
+    "~/Library/Containers/com.nyanako.inputmethod.shanjie",
+    "~/Library/Preferences/com.nyanako.inputmethod.shanjie.plist",
+  ]
+
+  caveats <<~EOS
+    After the first install, register and enable the input method:
+      "$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install
+    If the command exits with 3, macOS has not accepted the input method yet:
+    add 善解輸入法 in System Settings > Keyboard > Input Sources (+ → 繁體中文 →
+    善解輸入法 → Add).
+  EOS
+end

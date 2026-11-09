@@ -1,0 +1,646 @@
+//! docs/spec/evaluation.md §4.9: the replay's rules, one test each, on the real engine, n-gram and small model.
+//! Rows are lines of eval/dev/user-reported.txt (public, CC0), whose first display is known to be wrong for most of them; every
+//! test states the display it relies on, so a model change fails there first. Each engine is about 700 MB, so the tests take turns.
+use cli::common::{load_lenient, root};
+use cli::replay::{build_engine, keys_of, move_cost, replay_row, summary_line, Cfg, Rerank, RowOut};
+use core::engine::{Engine, Key, KeyKind, MAX_SYLLABLES};
+use core::eval::Lenient;
+use core::lm::Profile;
+use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
+
+static ONE_ENGINE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+fn engine(learn: bool) -> (MutexGuard<'static, ()>, Engine) {
+    let guard = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let r = root();
+    let e = build_engine(&r, &r.join("data/lm/bigram.sjlm"), Some(&r.join("data/lm/tinylm.sjtl")), None, Profile::Chat, learn).expect("data/lm models");
+    (guard, e)
+}
+
+/// `前文|句子|讀音`.
+struct Row {
+    ctx: &'static str,
+    gold: &'static str,
+    syls: Vec<String>,
+}
+fn row(line: &'static str) -> Row {
+    let f: Vec<&str> = line.split('|').collect();
+    Row { ctx: f[0], gold: f[1], syls: f[2].split_whitespace().map(String::from).collect() }
+}
+/// 我在重打 is shown for it; the gold text is 我再重打. Fix: Left, Left, Space, digit (cursor 4 -> 2).
+fn zai() -> Row {
+    row("我打錯了我看成號碼|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ")
+}
+/// 這隻乾脆留下來了 is shown; the gold text has 支 at the second place. Fix: Home, Right, Right (3 keys, not 6 Lefts), Space, digit. (This row replaced
+/// 這家速度很快你看一下, which the 通語 SJ-LM-7-9.7M model shows right.)
+fn zhi() -> Row {
+    row("所以雖然退了一支，|這支乾脆留下來了|ㄓㄜˋ ㄓ ㄍㄢ ㄘㄨㄟˋ ㄌㄧㄡˊ ㄒㄧㄚˋ ㄌㄞˊ ㄌㄜ˙")
+}
+/// The gold 奕 sits on the third page of the window for ㄧˋ (checked by hand in the test), so the re-pick pages twice.
+fn yi() -> Row {
+    row("|奕|ㄧˋ")
+}
+/// Several rewrites of the small model while it is typed (3 with `Rerank::Each`, measured with the decoder's reading term off, 2026-11-06 with the 會意 SJ-SR-8-15M
+/// file: row 77 of eval/dev/user-reported.txt; the row used until then, 我好奇其他競品記憶體都佔多少, is rewritten once with the new file, and so are most rows: of the
+/// 483 rows of user-reported and dev302 this setting rewrites 20 at least twice, 5 at least three times).
+fn guqi() -> Row {
+    row("|往前幾個月讀|ㄨㄤˇ ㄑㄧㄢˊ ㄐㄧˇ ㄍㄜˋ ㄩㄝˋ ㄉㄨˊ")
+}
+/// A first tone on every other syllable: ㄍㄣ ㄨㄛˇ ㄕㄨㄛ ㄨㄛˇ ㄗㄞˋ ㄏㄨㄢˋ.
+fn tone1() -> Row {
+    row("|跟我說我再換|ㄍㄣ ㄨㄛˇ ㄕㄨㄛ ㄨㄛˇ ㄗㄞˋ ㄏㄨㄢˋ")
+}
+
+const EACH: Cfg = Cfg { correct: false, rerank: Rerank::Each, strict: false };
+const FIX: Cfg = Cfg { correct: true, rerank: Rerank::Each, strict: false };
+
+fn go(e: &mut Engine, r: &Row, len: &Lenient, cfg: Cfg) -> RowOut {
+    replay_row(e, r.ctx, &r.syls, r.gold, len, cfg).unwrap()
+}
+
+/// Rule: `ideal` is the symbol keys plus the tone key (Space for the first tone) plus Enter, and without a re-pick `actual` is
+/// exactly the keys typed plus Enter, so the key score of a perfect row is 1. Hand counts: 我再重打 3+3+4+3+1 = 14,
+/// 跟我說我再換 3+3+4+3+3+4+1 = 21 (three Space tones).
+#[test]
+fn ideal_and_actual_are_the_hand_count() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    for (r, keys) in [(zai(), 14), (tone1(), 21)] {
+        let o = go(&mut e, &r, &len, EACH);
+        assert_eq!((o.ideal, o.actual, o.picks), (keys, keys, 0), "{}", r.syls.join(" "));
+    }
+    // Without --correct the first display is what is sent.
+    let o = go(&mut e, &zai(), &len, EACH);
+    assert!(!o.first_ok && !o.final_ok && o.committed == o.first, "the model shows 我在重打, which is sent as it is");
+    assert!(!o.unfixable, "unfixable is only for --correct");
+}
+
+#[test]
+fn cursor_move_cost_takes_the_shortest_route() {
+    assert_eq!(move_cost(4, 2, 4), 2); // Left, Left
+    assert_eq!(move_cost(10, 2, 10), 3); // Home, Right, Right
+    assert_eq!(move_cost(0, 9, 10), 2); // End, Left
+    assert_eq!(move_cost(3, 3, 10), 0);
+    assert_eq!(move_cost(2, 4, 10), 2); // Right, Right
+    assert_eq!(keys_of("ㄨㄛˇ").unwrap().len(), 3);
+    assert_eq!(keys_of("ㄍㄣ").unwrap().len(), 3);
+}
+
+/// Rule (docs/spec/evaluation.md §4): a wrong first display with the gold word in the window at the cursor is fixed by moving the cursor (the
+/// shortest way), Space to open, Space for each page before the item, and the item's digit; `actual` is the typed keys plus those plus
+/// Enter, and what is sent is the gold text. 我再重打: Left, Left, Space, digit = 4; the 這支 row: Home, Right, Right, Space, digit = 5;
+/// 奕 on the third page: Space, Space, Space, digit = 4 (no move: the cursor is already at the end).
+#[test]
+fn a_repick_costs_the_moves_the_window_and_the_digit() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    // The page by hand: the first Space opens page one, two more page to the third, which lists 奕 (18 items before it).
+    let mut third = None;
+    for k in keys_of("ㄧˋ").unwrap().into_iter().chain([Key::new(KeyKind::Space); 3]) {
+        let o = e.key(k).unwrap();
+        third = Some((o.first, o.candidates.iter().any(|w| w == "奕")));
+    }
+    assert_eq!(third, Some((18, true)), "奕 is on the third page");
+    e.key(Key::new(KeyKind::Esc)).unwrap();
+    e.key(Key::new(KeyKind::Esc)).unwrap(); // clears the composition
+    for (r, extra) in [(zai(), 4), (zhi(), 5), (yi(), 4)] {
+        let o = go(&mut e, &r, &len, FIX);
+        assert!(!o.first_ok, "the model shows the wrong word first");
+        assert!(o.final_ok && !o.unfixable && o.committed == r.gold, "sent text is the gold text");
+        assert_eq!((o.picks, o.actual), (1, o.ideal + extra), "{}", r.gold);
+    }
+}
+
+/// `--strict` (docs/spec/evaluation.md §4.3): the first display, the sent text and the `--correct` target are compared as they are, not through
+/// `Lenient` (`char_map` reads 她 as 他). The engine shows 他很喜歡看書 for the gold 她很喜歡看書 (without learning, stated here so a model change fails here
+/// first): lenient, the first display is right and `--correct` has nothing to fix; strict, it is wrong, `--correct` re-picks 她 and the sent text is the gold.
+/// The tool's default is unchanged: the same rows give the same bytes with and without the flag, except for the `+strict` tag.
+#[test]
+fn strict_compares_the_texts_exactly_and_is_off_by_default() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    let r = row("|她很喜歡看書|ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ");
+    let strict = |cfg: Cfg| Cfg { strict: true, ..cfg };
+    let lenient = go(&mut e, &r, &len, FIX);
+    assert_eq!(lenient.first, "他很喜歡看書", "premise: the engine shows 他");
+    assert!(lenient.first_ok && lenient.final_ok && lenient.picks == 0, "lenient: 他 is right for 她");
+    let exact = go(&mut e, &r, &len, strict(EACH));
+    assert!(!exact.first_ok && !exact.final_ok && exact.picks == 0 && exact.committed == "他很喜歡看書");
+    let fixed = go(&mut e, &r, &len, strict(FIX));
+    assert!(!fixed.first_ok && fixed.final_ok && fixed.picks >= 1 && fixed.committed == r.gold, "strict --correct picks 她");
+    // A row both comparisons agree on: the same numbers.
+    let agree = go(&mut e, &zai(), &len, strict(FIX));
+    let base = go(&mut e, &zai(), &len, FIX);
+    assert_eq!((agree.first_ok, agree.final_ok, agree.picks, agree.actual), (base.first_ok, base.final_ok, base.picks, base.actual));
+    drop(e);
+    let dir = scratch("strict");
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|她很喜歡看書|ㄊㄚ ㄏㄣˇ ㄒㄧˇ ㄏㄨㄢ ㄎㄢˋ ㄕㄨ\n").unwrap();
+    let run = |extra: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap()]).args(extra).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let (plain, with) = (run(&[]), run(&["--strict"]));
+    assert!(!plain.contains("+strict") && plain.contains("'top1': 1"), "{plain}");
+    assert!(with.contains("+strict") && with.contains("'top1': 0"), "{with}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rule (docs/spec/keys-and-composition.md §8.2): a mark of `，。？！：、` is a reading token of its own, typed as the App's key
+/// (Shift+`,` `.` `/` `1` `;`, plain `\`); it stays in the composition, is sent with Enter, and counts one key in `ideal` and `actual`. The
+/// sent text is compared as a string, not through `Lenient`. `；` has no key: the row is an error.
+#[test]
+fn a_punctuation_mark_stays_in_the_composition_and_is_sent_exactly() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    for mark in ["，", "。", "？", "！", "：", "、"] {
+        let r = Row { ctx: "", gold: "", syls: ["ㄋㄧˇ", "ㄏㄠˇ", mark].map(String::from).to_vec() };
+        let o = go(&mut e, &r, &len, EACH);
+        assert_eq!(o.committed, format!("你好{mark}"), "{mark}");
+        assert_eq!((o.ideal, o.actual, o.autocommit), (3 + 3 + 1 + 1, 3 + 3 + 1 + 1, false), "{mark}: one key for the mark");
+    }
+    let r = Row { ctx: "", gold: "", syls: ["ㄋㄧˇ", "；"].map(String::from).to_vec() };
+    assert!(replay_row(&mut e, "", &r.syls, "", &len, EACH).is_err(), "； has no key");
+}
+
+/// Rule: gold text that no window offers (才 is not a reading of ㄗㄞˋ), or of another length than the reading, is not fixed: no
+/// pick, the shown text is sent, the row is `unfixable`, and the loop ends.
+#[test]
+fn a_gold_text_no_window_offers_is_unfixable() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    for gold in ["我才重打", "我再重打吧"] {
+        let r = Row { gold, ..zai() };
+        let o = go(&mut e, &r, &len, FIX);
+        assert!(o.unfixable && !o.final_ok && o.picks == 0, "{gold}");
+        assert_eq!((o.committed == o.first, o.actual), (true, o.ideal), "{gold}: what is shown is sent, no key is counted for the search");
+    }
+}
+
+/// Rule: with learning on, the pick of one row is kept for the next row on the same engine (same sentence typed twice: the second
+/// first display is the first one's fix, nothing to re-pick); with learning off the second row is wrong again and is re-picked.
+#[test]
+fn learning_carries_a_pick_to_the_next_row_only_when_on() {
+    let len = load_lenient().unwrap();
+    for (learn, kept) in [(true, true), (false, false)] {
+        let (_g, mut e) = engine(learn);
+        let (a, b) = (go(&mut e, &zai(), &len, FIX), go(&mut e, &zai(), &len, FIX));
+        assert!(!a.first_ok && a.final_ok && a.picks == 1, "the first time it is re-picked");
+        assert_eq!((b.first_ok, b.picks), (kept, !kept as usize), "learn {learn}");
+        assert!(b.final_ok);
+        assert_eq!(b.actual, b.ideal + if kept { 0 } else { 4 });
+    }
+}
+
+/// What a hand-written take, run, apply loop sees: (`Some` results after keys other than the last, those that changed the preedit,
+/// the preedit after the last key's apply). `each` applies after every key, otherwise only after the last one.
+fn by_hand(e: &mut Engine, r: &Row, each: bool) -> (usize, usize, String) {
+    e.set_left_context(r.ctx);
+    let keys: Vec<_> = r.syls.iter().flat_map(|s| keys_of(s).unwrap()).collect();
+    let (mut mid, mut changed, mut shown) = (0, 0, String::new());
+    for (i, k) in keys.iter().enumerate() {
+        let last = i + 1 == keys.len();
+        let o = e.key(*k).unwrap();
+        shown = o.preedit.clone();
+        if each || last {
+            if let Some(job) = e.take_rerank_job() {
+                if let Some(a) = e.apply_rerank(job.run()).unwrap() {
+                    mid += !last as usize;
+                    changed += (a.preedit != o.preedit) as usize;
+                    shown = a.preedit;
+                }
+            }
+        }
+    }
+    e.key(Key::new(KeyKind::Enter)).unwrap();
+    (mid, changed, shown)
+}
+
+/// Rule (docs/spec/evaluation.md §4): with `each` the small model's work is applied between the keys (here several times while the row is typed);
+/// with `final` nothing is applied while typing and at most once at the end, so `rewrites` <= 1. Counted by a hand-written loop on
+/// a second engine, which the replay's counters must agree with, first display included.
+#[test]
+fn rerank_each_applies_while_typing_and_final_only_at_the_end() {
+    let len = load_lenient().unwrap();
+    let r = guqi();
+    let (_g, mut e) = engine(false);
+    // The rule is about the rewriting, not the reading term: with the term (the default) the n-gram's own displays can be right sooner, so the row serves the
+    // rule with the term off, where it is rewritten three times (2026-11-06; the row before it, 2026-11-02, was rewritten once with the term on).
+    e.set_reading_decode(false);
+    let each = go(&mut e, &r, &len, EACH);
+    let fin = go(&mut e, &r, &len, Cfg { correct: false, rerank: Rerank::Final, strict: false });
+    let (mid, changed, shown) = by_hand(&mut e, &r, true);
+    assert!(each.rewrites >= 2, "this row is rewritten at least twice while it is typed (3 measured, with the reading term off)");
+    assert_eq!((each.typing_applies, each.rewrites, &each.first), (mid, changed, &shown));
+    let (_, changed, shown) = by_hand(&mut e, &r, false);
+    assert!(fin.rewrites <= 1, "final applies once, after the last key, not while typing");
+    assert_eq!((fin.rewrites, &fin.first), (changed, &shown));
+}
+
+/// Rule (docs/spec/evaluation.md §4): a reading longer than the composition limit (`MAX_SYLLABLES`, 128 syllables) makes the engine commit text before Enter. That
+/// text is part of the first display and of what is sent, `autocommits` counts the row, and a re-pick works on the syllables still
+/// in the composition (here 我再重打, four, so Left, Left, Space, digit as without the commit), not on the 132.
+#[test]
+fn text_committed_mid_row_is_kept_counted_and_not_re_picked() {
+    let (_g, mut e) = engine(false);
+    let len = load_lenient().unwrap();
+    let filler = "你好".repeat(MAX_SYLLABLES / 2);
+    let mut syls: Vec<String> = ["ㄋㄧˇ", "ㄏㄠˇ"].repeat(MAX_SYLLABLES / 2).into_iter().map(String::from).collect();
+    syls.extend(zai().syls);
+    let long = Row { ctx: "", gold: Box::leak(format!("{filler}我再重打").into_boxed_str()), syls };
+    let o = go(&mut e, &long, &len, EACH);
+    assert!(o.autocommit && o.first.chars().count() == MAX_SYLLABLES + 4, "the 128 committed characters come first");
+    assert!(o.first.starts_with(&filler) && !o.first_ok, "the display ends in 我在重打, which is wrong");
+    let short = go(&mut e, &zai(), &len, EACH);
+    assert!(!short.autocommit);
+    let fixed = go(&mut e, &long, &len, FIX);
+    assert!(fixed.final_ok && fixed.committed == long.gold && fixed.picks == 1);
+    assert_eq!(fixed.actual, fixed.ideal + 4);
+    assert!(summary_line("x", "t", &[o, short], 0).contains("'autocommits': 1,"));
+}
+
+/// docs/spec/evaluation.md §4: 'guard_skips' sums the rows' counts and 'guard_rows' counts the rows with one or more, in that order (a swap, or a
+/// sum in both, fails here). No engine: the summary line is a function of the row outputs.
+#[test]
+fn summary_line_sums_guard_skips_and_counts_guard_rows() {
+    let rows = [2, 0, 1].map(|g| RowOut { guard_skips: g, ..RowOut::default() });
+    assert!(summary_line("x", "t", &rows, 0).contains("'guard_skips': 3, 'guard_rows': 2,"));
+}
+
+/// Rule (docs/spec/evaluation.md §4): a pick that leaves the shown text as it was ends the re-picking. The table below makes 我在重 and 我再重 differ
+/// as whole strings although the first character is right, so the first difference is reported at 我, and picking 我 changes nothing.
+#[test]
+fn a_pick_that_changes_nothing_ends_the_repicking() {
+    let (_g, mut e) = engine(false);
+    let len = Lenient::parse("我在重\tZZZ\n").unwrap();
+    let o = replay_row(&mut e, zai().ctx, &zai().syls, zai().gold, &len, FIX).unwrap();
+    assert!(!o.final_ok && o.unfixable);
+    assert_eq!((o.picks, o.actual), (1, o.ideal + 4), "one pick (Home, Right, Space, digit), then it stops");
+}
+
+/// Rule (docs/spec/evaluation.md §4): an output path that is the rows file is refused before anything is written (exit 2, file as it was), also
+/// when spelled with `..` or through a symlink (the check compares device and inode, so a hard link is caught too; docs/spec/evaluation.md §4.1); the
+/// outputs are created only once the rows have been read.
+#[test]
+fn an_output_that_is_the_rows_file_is_refused() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-refuse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let text = "|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ\n";
+    std::fs::write(&rows, text).unwrap();
+    let alias = format!("{}/./rows.txt", dir.display());
+    for opt in ["--rowstats", "--keys", "--firsts"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), opt, &alias]).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{opt}");
+        assert_eq!(std::fs::read_to_string(&rows).unwrap(), text, "{opt}: the rows file is untouched");
+    }
+    let new = dir.join("never.txt");
+    let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", dir.join("missing.txt").to_str().unwrap(), "--keys", new.to_str().unwrap()]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!new.exists(), "no output file before the rows are read");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+fn run(bin: &str, args: &[&str]) -> String {
+    let out = Command::new(bin).args(args).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+fn sha_of(summary: &str) -> &str {
+    summary.split("'top1_sha256': '").nth(1).and_then(|s| s.split('\'').next()).expect("a top1_sha256")
+}
+
+/// Rule (docs/spec/evaluation.md §4): `--rowstats` and `--keys` hold digits, tabs and newlines only; the rowstats file is byte for byte the CLI's
+/// for the same rows file (same writer; here the first displays are also the CLI's choices, so every column is equal) and the
+/// summary's `top1_sha256` is the CLI's. `--keys` has the six columns for every row, with every option on.
+#[test]
+fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = |n: &str| dir.join(n).to_str().unwrap().to_string();
+    let rows = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap().lines().take(20).collect::<Vec<_>>().join("\n") + "\n";
+    std::fs::write(p("rows.txt"), rows).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let replay = env!("CARGO_BIN_EXE_shanjie-replay");
+    let eval = env!("CARGO_BIN_EXE_shanjie-eval");
+    let r = root();
+    let lm = r.join("data/lm/bigram.sjlm");
+    let tl = r.join("data/lm/tinylm.sjtl");
+    // The replay loads data/lm/colloquial.sjlm by default, as the App does, so the CLI is given it too.
+    let co = r.join("data/lm/colloquial.sjlm");
+    let cli = run(eval, &["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it", "--tinylm", tl.to_str().unwrap(), "--colloquial-core", co.to_str().unwrap(), "--rows", &p("rows.txt"), "--rowstats", &p("cli.rs")]);
+    let mine = run(replay, &["--rows", &p("rows.txt"), "--rowstats", &p("rep.rs"), "--keys", &p("rep.keys")]);
+    assert_eq!(std::fs::read(p("cli.rs")).unwrap(), std::fs::read(p("rep.rs")).unwrap());
+    assert_eq!(sha_of(&cli), sha_of(&mine));
+    let all = run(replay, &["--rows", &p("rows.txt"), "--correct", "--learn", "on", "--rerank", "final", "--profile", "formal", "--rowstats", &p("all.rs"), "--keys", &p("all.keys")]);
+    assert!(all.contains("+learn") && all.contains("+rerank:final") && all.contains("+correct") && all.contains("replay-formal"));
+    for f in ["rep.rs", "rep.keys", "all.rs", "all.keys"] {
+        let b = std::fs::read(p(f)).unwrap();
+        assert!(!b.is_empty() && b.iter().all(|c| c.is_ascii_digit() || *c == b'\t' || *c == b'\n'), "{f}");
+        let text = String::from_utf8(b).unwrap();
+        assert_eq!(text.lines().count(), 20, "{f}");
+        let cols = if f.ends_with("keys") { 6 } else { 4 };
+        assert!(text.lines().all(|l| l.split('\t').count() == cols), "{f}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The App's engine loads the colloquial table (docs/spec/semantic-rerank.md §4.6), so the replay does by default: on row 25
+/// of dev302 and on the first rows of dev302 its choices are the CLI's `--colloquial-core` choices (equal `top1_sha256`) and the summary is
+/// tagged; `--colloquial FILE` is the same; `--no-colloquial` (and `--no-tinylm`) is untagged with the shipping choice; the two options together
+/// are an error.
+#[test]
+fn colloquial_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-colloq-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
+    let lines: Vec<&str> = dev.lines().collect();
+    assert!(lines[24].starts_with("|執行這個程式|"));
+    std::fs::write(&rows, [&lines[..12], &lines[22..28]].concat().join("\n") + "\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    let cli = |extra: &[&str]| {
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+        a.extend_from_slice(extra);
+        run(eval, &a)
+    };
+    let (plain, with) = (cli(&[]), cli(&["--colloquial-core", co.to_str().unwrap()]));
+    let firsts = dir.join("firsts.txt");
+    let rep_plain = run(replay, &["--rows", rows, "--no-colloquial", "--firsts", firsts.to_str().unwrap()]);
+    let rep_with = run(replay, &["--rows", rows, "--firsts", firsts.to_str().unwrap()]);
+    let rep_file = run(replay, &["--rows", rows, "--colloquial", co.to_str().unwrap()]);
+    assert_eq!(rep_with, rep_file, "the default is data/lm/colloquial.sjlm");
+    assert!(!run(replay, &["--rows", rows, "--no-tinylm"]).contains("colloq"), "no small model: the App loads no table either");
+    let both = Command::new(replay).args(["--rows", rows, "--colloquial", co.to_str().unwrap(), "--no-colloquial"]).output().unwrap();
+    assert_eq!(both.status.code(), Some(1));
+    assert_ne!(sha_of(&plain), sha_of(&with), "premise: the term changes a choice among these rows");
+    assert_eq!(sha_of(&plain), sha_of(&rep_plain));
+    assert_eq!(sha_of(&with), sha_of(&rep_with));
+    assert!(rep_with.contains("+colloq:81c2470d") && !rep_plain.contains("colloq"), "{rep_with}{rep_plain}");
+    let shown = std::fs::read_to_string(&firsts).unwrap();
+    assert_eq!(shown.lines().nth(14), Some("執行這個程式"), "row 25 is the 15th row of the file: the term's choice is the first display");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// docs/spec/decoder.md §5: the replay's engine (`Engine::load_lm` on the real data folder, which builds the reading table with the one
+/// function the CLI calls) decodes with the reading term by default, so its choices are the CLI's (equal `top1_sha256`) on main's two sentences and row 127 of
+/// eval/dev/user-reported.txt, in the written and the chat setting (standard strength, the colloquial table loaded in chat); `--no-reading-decode` is the CLI's
+/// `--no-reading-decode`. The premise is asserted for each setting first: the term changes the CLI's choice among these rows, so an engine that left the term out
+/// could not pass. With the 會意 SJ-SR-8-15M file the re-ranker repairs main's two sentences in chat by itself, so there it is row 127 (急 with the term, 吃 without,
+/// measured 2026-11-06) that carries the premise; in the written setting rows 46 and 127 of user-reported change as well. The summary tag
+/// ends `+rd+rx:<sha8>` by default and has neither mark with the option.
+#[test]
+fn reading_decode_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-rd-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(
+        &rows,
+        "|以敵偽人員的名字命名|ㄧˇ ㄉㄧˊ ㄨㄟˋ ㄖㄣˊ ㄩㄢˊ ㄉㄜ˙ ㄇㄧㄥˊ ㄗˋ ㄇㄧㄥˋ ㄇㄧㄥˊ\n|這個屬叫散白蟻屬|ㄓㄜˋ ㄍㄜ˙ ㄕㄨˇ ㄐㄧㄠˋ ㄙㄢˋ ㄅㄞˊ ㄧˇ ㄕㄨˇ\n\
+         除了|這個待辦還有哪些要做的我認為比較急|ㄓㄜˋ ㄍㄜ˙ ㄉㄞˋ ㄅㄢˋ ㄏㄞˊ ㄧㄡˇ ㄋㄚˇ ㄒㄧㄝ ㄧㄠˋ ㄗㄨㄛˋ ㄉㄜ˙ ㄨㄛˇ ㄖㄣˋ ㄨㄟˊ ㄅㄧˇ ㄐㄧㄠˋ ㄐㄧˊ\n",
+    )
+    .unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    let sha8 = &core::eval::sha256_hex(&std::fs::read(r.join("data/lexicon/std-exempt.tsv")).unwrap())[..8];
+    for profile in ["formal", "chat"] {
+        let cli = |extra: &[&str]| {
+            let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", profile, "--context", "--packs", "acg,it", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+            if profile == "chat" {
+                a.extend(["--colloquial-core", co.to_str().unwrap()]);
+            }
+            a.extend_from_slice(extra);
+            run(eval, &a)
+        };
+        let (on, off) = (cli(&[]), cli(&["--no-reading-decode"]));
+        assert_ne!(sha_of(&on), sha_of(&off), "{profile}: premise, the term changes a choice among these rows");
+        let (rep_on, rep_off) = (run(replay, &["--rows", rows, "--profile", profile]), run(replay, &["--rows", rows, "--profile", profile, "--no-reading-decode"]));
+        assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile}: the replay's engine decodes like the CLI");
+        assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile}: --no-reading-decode");
+        assert!(on.contains(&format!("+rd+rx:{sha8}  {{")) && rep_on.contains(&format!("+rd+rx:{sha8}  {{")), "{profile}: {on}{rep_on}");
+        assert!(!off.contains("+rd") && !rep_off.contains("+rd") && !rep_off.contains("+rx"), "{profile}: {off}{rep_off}");
+    }
+    // the reading-channel switch is gone from the replay too
+    let o = Command::new(replay).args(["--rows", rows, "--no-reading-channel"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--learn-file` tests: a scratch dir per test, and TMPDIR pointed into it so the tool's temporary directory is countable.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    dir
+}
+fn replay_with_learn(dir: &std::path::Path, learn: &std::path::Path, extra: &[&str]) -> std::process::Output {
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|再見|ㄗㄞˋ ㄐㄧㄢˋ\n").unwrap();
+    let mut args = vec!["--rows", rows.to_str().unwrap(), "--learn-file", learn.to_str().unwrap()];
+    args.extend_from_slice(extra);
+    Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).env("TMPDIR", dir.join("tmp")).args(args).output().unwrap()
+}
+fn text(o: &std::process::Output) -> String {
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout.clone()).unwrap()
+}
+
+/// Rules: the loaded file changes the choice (without it 再見 is shown for ㄗㄞˋ ㄐㄧㄢˋ and is right, measured; the file holds one
+/// record, context `^>$` (sentence start, nothing after) for the word 在建 with weight 50 and today's day, so 在建 is shown and
+/// the row is wrong: the rowstats differ); the source file is only read (bytes and mtime as before, also with `--learn on
+/// --correct`, where the re-pick to 再見 is learned and saved against the already removed temporary directory); the temporary
+/// directory is gone afterwards; the tag says `+learnfile`; `--firsts` is refused with it.
+#[test]
+fn learn_file_changes_the_choice_and_the_source_is_untouched() {
+    let dir = scratch("learnfile");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>$\tㄗㄞˋ-ㄐㄧㄢˋ\t在建\t50\t{today}\n")).unwrap();
+    let (bytes, mtime) = (std::fs::read(&src).unwrap(), std::fs::metadata(&src).unwrap().modified().unwrap());
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|再見|ㄗㄞˋ ㄐㄧㄢˋ\n").unwrap();
+    let rs = dir.join("rs.txt");
+    let plain = text(&Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), "--rowstats", rs.to_str().unwrap()]).output().unwrap());
+    let plain_rs = std::fs::read(&rs).unwrap();
+    assert!(plain.contains("'top1': 1"), "{plain}");
+    for extra in [&[][..], &["--learn", "on", "--correct"][..]] {
+        let args: Vec<&str> = ["--rowstats", rs.to_str().unwrap()].iter().chain(extra).copied().collect();
+        let with = text(&replay_with_learn(&dir, &src, &args));
+        assert!(with.contains("+learnfile") && !plain.contains("+learnfile"));
+        assert_ne!(std::fs::read(&rs).unwrap(), plain_rs, "{extra:?}: the learned word changes the first display");
+        assert!(with.contains("'top1': 0"), "{extra:?}: {with}");
+        assert_eq!(std::fs::read(&src).unwrap(), bytes, "{extra:?}: source bytes");
+        assert_eq!(std::fs::metadata(&src).unwrap().modified().unwrap(), mtime, "{extra:?}: source mtime");
+        assert_eq!(std::fs::read_dir(dir.join("tmp")).unwrap().count(), 0, "{extra:?}: temporary directory removed");
+    }
+    let out = replay_with_learn(&dir, &src, &["--firsts", dir.join("f.txt").to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!dir.join("f.txt").exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// docs/spec/evaluation.md §4.3 (`--learn-guard`): the one-record file of the test above (在建 learned for the row's reading, so
+/// the row's stretch has a boosted word): the default counts it in `guard_skips` and `guard_rows` (read before the re-pick),
+/// `--learn-guard off` counts none and tags `+noguard`, the default prints the same bytes as an explicit `--learn-guard on`, and
+/// another value is refused.
+#[test]
+fn learn_guard_counts_and_switches() {
+    let dir = scratch("guard");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>$\tㄗㄞˋ-ㄐㄧㄢˋ\t在建\t50\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    // With --correct the re-pick fixes 再見 after the first display: a count read after the re-pick (or after Enter) would be 0.
+    let default = text(&replay_with_learn(&dir, &src, &["--correct"]));
+    let off = text(&replay_with_learn(&dir, &src, &["--learn-guard", "off"]));
+    assert_eq!(default, text(&replay_with_learn(&dir, &src, &["--correct", "--learn-guard", "on"])));
+    assert!(default.contains("'guard_skips': 1, 'guard_rows': 1,") && !default.contains("+noguard"), "{default}");
+    assert!(off.contains("'guard_skips': 0, 'guard_rows': 0,") && off.contains("+noguard"), "{off}");
+    assert_eq!(replay_with_learn(&dir, &src, &["--learn-guard", "maybe"]).status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// SINIT (docs/spec/learning.md §13.4): `--rerank-level` is an evaluation flag that shows in the tag only when it is not standard (`standard` is the
+/// default, so no tag); a bad level is refused; `--eps-sinit`, `--delta-sinit` and `--eps-sinit-ng` are gone and refused as unknown; with `--learn on` a
+/// `sinit:` line of the five counters goes to stderr (stdout stays the summary line). The one-record file holds 再 as a sentence-start single character before
+/// ㄐㄧㄢˋ, so the row's stretch (再見, two syllables) has a learned character and is counted.
+#[test]
+fn sinit_flags_tag_the_summary_and_the_counters_go_to_stderr() {
+    let dir = scratch("sinit");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>ㄐㄧㄢˋ\tㄗㄞˋ\t再\t1\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let plain = replay_with_learn(&dir, &src, &["--learn", "on"]);
+    let plain_out = text(&plain);
+    assert!(!plain_out.contains("+level") && !plain_out.contains("sinit:"), "{plain_out}");
+    let err = String::from_utf8(plain.stderr.clone()).unwrap();
+    let line = err.lines().find(|l| l.starts_with("sinit: ")).unwrap_or_else(|| panic!("no sinit line: {err}"));
+    assert!(line.starts_with("sinit: stretches 1 swaps 0 missing 0 overturned "), "{line}");
+    let std_out = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "standard"]));
+    assert_eq!(std_out, plain_out, "the standard level is the default: same bytes, same tag");
+    let cons = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rerank-level", "conservative"]));
+    assert!(cons.contains("+level:conservative"), "{cons}");
+    assert_eq!(replay_with_learn(&dir, &src, &["--rerank-level", "loud"]).status.code(), Some(1));
+    for gone in ["--eps-sinit", "--delta-sinit", "--eps-sinit-ng"] {
+        assert_eq!(replay_with_learn(&dir, &src, &[gone, "1"]).status.code(), Some(1), "{gone} is gone");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// docs/spec/learning.md §13.4, the per-stretch numbers (`--sinit-stretches`): the file holds digits, `-`, `.`, tabs and newlines only, a line `row 1 dng adll` per rule 10
+/// stretch of the one-record file's row (再見: the learned 再 leads or follows the anchor, both numbers finite), and no line for a row without one; the
+/// summary line and the rowstats are the bytes they are without the flag; the formatter writes a stretch whose learned path is not in the pool as `row 0`
+/// with no numbers; an output that is the learn file is refused.
+#[test]
+fn sinit_stretches_file_is_numbers_only_and_changes_no_other_output() {
+    use cli::replay::{format_sinit_stretches, RowOut};
+    let mut a = RowOut::default();
+    a.sinit_diag = vec![(0.5, -1.25), (0.0, 0.0)];
+    let mut b = RowOut::default();
+    b.sinit.missing = 2;
+    assert_eq!(format_sinit_stretches(&[a, RowOut::default(), b]), "1\t1\t0.500000\t-1.250000\n1\t1\t0.000000\t0.000000\n3\t0\t\t\n3\t0\t\t\n");
+    let dir = scratch("sinit-stretches");
+    let src = dir.join("mine.tsv");
+    let today = core::learn::local_day();
+    std::fs::write(&src, format!("#shanjie-learning v1\n^>ㄐㄧㄢˋ\tㄗㄞˋ\t再\t1\t{today}\n")).unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let (rs0, rs1, st) = (dir.join("rs0.txt"), dir.join("rs1.txt"), dir.join("st.txt"));
+    let without = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rowstats", rs0.to_str().unwrap()]));
+    let with = text(&replay_with_learn(&dir, &src, &["--learn", "on", "--rowstats", rs1.to_str().unwrap(), "--sinit-stretches", st.to_str().unwrap()]));
+    assert_eq!(without, with);
+    assert_eq!(std::fs::read(&rs0).unwrap(), std::fs::read(&rs1).unwrap());
+    let numbers = std::fs::read_to_string(&st).unwrap();
+    assert!(numbers.chars().all(|c| c.is_ascii_digit() || "-.\t\n".contains(c)), "{numbers:?}");
+    let lines: Vec<Vec<&str>> = numbers.lines().map(|l| l.split('\t').collect()).collect();
+    assert_eq!(lines.len(), 1, "{numbers:?}");
+    assert!(lines[0][0] == "1" && lines[0][1] == "1" && lines[0][2].parse::<f64>().is_ok() && lines[0][3].parse::<f64>().is_ok(), "{numbers:?}");
+    let out = replay_with_learn(&dir, &src, &["--sinit-stretches", src.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rules: a file that is not a valid learning file (bad header) is an error, not a replay without the learnings; the source stays
+/// as it was (core's quarantine renames the copy only), no temporary directory is left, and an existing output file keeps its
+/// bytes (the learning file is loaded before any output is created). Also an all-skipped file and a missing file are errors.
+#[test]
+fn a_corrupt_learn_file_is_an_error() {
+    let dir = scratch("learncorrupt");
+    let src = dir.join("learning.tsv");
+    std::fs::write(&src, "not a learning file\n").unwrap();
+    let out_file = dir.join("keep.rs");
+    std::fs::write(&out_file, "keep").unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let out = replay_with_learn(&dir, &src, &["--rowstats", out_file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a valid learning file"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read(&src).unwrap(), b"not a learning file\n");
+    assert!(!dir.join("learning.tsv.corrupt").exists());
+    assert_eq!(std::fs::read(&out_file).unwrap(), b"keep", "an existing output is not truncated");
+    assert_eq!(std::fs::read_dir(dir.join("tmp")).unwrap().count(), 0, "temporary directory removed on the error path");
+    std::fs::write(&src, "#shanjie-learning v1\nbad line\n").unwrap();
+    let out = replay_with_learn(&dir, &src, &["--rowstats", out_file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no usable records"));
+    let out = replay_with_learn(&dir, &dir.join("missing.tsv"), &["--rowstats", out_file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(std::fs::read(&out_file).unwrap(), b"keep");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rule: an output that is the learning file, spelled the same or as a hard link to it, is refused (exit 2) before anything is
+/// created, and the learning file keeps its bytes.
+#[test]
+fn an_output_that_is_the_learn_file_is_refused() {
+    let dir = scratch("learnrefuse");
+    let src = dir.join("mine.tsv");
+    std::fs::write(&src, "#shanjie-learning v1\n").unwrap();
+    std::fs::hard_link(&src, dir.join("link.tsv")).unwrap();
+    for opt in ["--rowstats", "--keys"] {
+        for out_path in [&src, &dir.join("link.tsv")] {
+            let out = replay_with_learn(&dir, &src, &[opt, out_path.to_str().unwrap()]);
+            assert_eq!(out.status.code(), Some(2), "{opt} {out_path:?}");
+            assert_eq!(std::fs::read(&src).unwrap(), b"#shanjie-learning v1\n", "{opt}: untouched");
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rule (docs/spec/evaluation.md §4): `--packs` is research only. Omitted, the summary tag is the App's `+acg+it` (the dev302 rows' rowstats and summary
+/// are byte for byte those of before the option, checked by hand when it was added); `acg,quotes,it` adds `+quotes`; a name that is not
+/// a pack is an error.
+#[test]
+fn packs_option_changes_only_the_tag_it_names() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-packs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = ONE_ENGINE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let replay = env!("CARGO_BIN_EXE_shanjie-replay");
+    assert!(run(replay, &["--rows", rows]).contains("+ctx+acg+it+nopred"));
+    assert!(run(replay, &["--rows", rows, "--packs", "acg,it"]).contains("+ctx+acg+it+nopred"));
+    assert!(run(replay, &["--rows", rows, "--packs", "acg,quotes,it"]).contains("+ctx+acg+quotes+it+nopred"));
+    assert!(run(replay, &["--rows", rows, "--packs", "acg", "--packs", "it"]).contains("+ctx+acg+it+nopred"), "repeats add up");
+    // The mask reaches the engine: 經典台詞 changes this line's pick (室蘭 without it, 世蘭 with it).
+    let quote = dir.join("quote.txt");
+    std::fs::write(&quote, "|皇上，你害得世蘭好苦啊！|ㄏㄨㄤˊ ㄕㄤˋ ， ㄋㄧˇ ㄏㄞˋ ㄉㄜˊ ㄕˋ ㄌㄢˊ ㄏㄠˇ ㄎㄨˇ ㄚ˙ ！\n").unwrap();
+    let first = |packs: &[&str]| {
+        let out = dir.join("firsts.txt");
+        let _ = std::fs::remove_file(&out);
+        run(replay, &[&["--rows", quote.to_str().unwrap(), "--firsts", out.to_str().unwrap()], packs].concat());
+        std::fs::read_to_string(&out).unwrap()
+    };
+    assert_eq!((first(&[]), first(&["--packs", "acg,quotes,it"])), ("皇上，你害得室蘭好苦啊！\n".into(), "皇上，你害得世蘭好苦啊！\n".into()));
+    let bad = Command::new(replay).args(["--rows", rows, "--packs", "acg,mystery"]).output().unwrap();
+    assert_eq!(bad.status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

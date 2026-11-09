@@ -1,0 +1,47 @@
+name: 選字錯誤
+description: 善解選錯了字或詞
+labels: ["選字錯誤"]
+body:
+  - type: input
+    id: keys
+    attributes:
+      label: 實際按的鍵
+      description: 照鍵盤上的英文字母與數字打，例如 `su3cl3`。用來分辨「讀音對、選錯字」和「讀音打錯」。
+    validations:
+      required: true
+  - type: input
+    id: want
+    attributes:
+      label: 想打的句子
+    validations:
+      required: true
+  - type: input
+    id: got
+    attributes:
+      label: 善解給的結果
+    validations:
+      required: true
+  - type: input
+    id: context
+    attributes:
+      label: 前一句（如果有）
+      description: 整句轉換會看前文。
+  - type: dropdown
+    id: layout
+    attributes:
+      label: 鍵盤
+      options: [標準, 倚天]
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App 與善解版本
+      description: 例如「LINE，v0.1.2」。
+  - type: checkboxes
+    id: license
+    attributes:
+      label: 授權
+      options:
+        - label: 我同意這個句子以 CC0 加進公開的評測集，內容沒有不想公開的資訊。
+          required: true

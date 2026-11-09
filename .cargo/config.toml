@@ -1,0 +1,6 @@
+# Windows MSVC builds link the C runtime statically (docs/spec/windows-tip.md §3.1). The TIP DLL is loaded into every
+# process on machines that may not have the Visual C++ redistributable: with the default dynamic CRT it depends on
+# VCRUNTIME140.dll and LoadLibrary fails on a clean Windows 11 (measured in the test VM: regsvr32 exit 3).
+# Applies to every Windows MSVC build in the workspace; CI's byte-for-byte rowstats comparison with Linux covers the CLI.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

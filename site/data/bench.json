@@ -1,0 +1,2700 @@
+{
+ "external": [
+  {
+   "date": "2026-10-13",
+   "label": "0c",
+   "name": "0c-sequence-d512（Funmula／BigGo 靈犀注音，MIT，commit 66eb4a81）",
+   "ours_label": "tinylm-v3",
+   "rows": [
+    {
+     "broken": 12,
+     "external": 259,
+     "fixed": 12,
+     "n": 302,
+     "ngram": 241,
+     "ours": 259,
+     "p": 1.0,
+     "set": "dev302",
+     "setting": "chat"
+    },
+    {
+     "broken": 2,
+     "external": 72,
+     "fixed": 5,
+     "n": 76,
+     "ngram": 66,
+     "ours": 69,
+     "p": 0.4531,
+     "set": "typing76",
+     "setting": "chat"
+    },
+    {
+     "broken": 5,
+     "external": 36,
+     "fixed": 16,
+     "n": 84,
+     "ngram": 17,
+     "ours": 25,
+     "p": 0.0266,
+     "set": "錯字回報（前 84 列）",
+     "setting": "chat"
+    },
+    {
+     "broken": 3,
+     "external": 161,
+     "fixed": 7,
+     "n": 186,
+     "ngram": 154,
+     "ours": 157,
+     "p": 0.3438,
+     "set": "fw",
+     "setting": "chat"
+    },
+    {
+     "broken": 2,
+     "external": 252,
+     "fixed": 2,
+     "n": 302,
+     "ngram": 248,
+     "ours": 252,
+     "p": 1.0,
+     "set": "dev302",
+     "setting": "formal"
+    },
+    {
+     "broken": 1,
+     "external": 69,
+     "fixed": 0,
+     "n": 76,
+     "ngram": 69,
+     "ours": 70,
+     "p": 1.0,
+     "set": "typing76",
+     "setting": "formal"
+    },
+    {
+     "broken": 1,
+     "external": 23,
+     "fixed": 2,
+     "n": 84,
+     "ngram": 21,
+     "ours": 22,
+     "p": 1.0,
+     "set": "錯字回報（前 84 列）",
+     "setting": "formal"
+    },
+    {
+     "broken": 2,
+     "external": 154,
+     "fixed": 0,
+     "n": 186,
+     "ngram": 154,
+     "ours": 156,
+     "p": 0.5,
+     "set": "fw",
+     "setting": "formal"
+    }
+   ]
+  }
+ ],
+ "reference": {
+  "accuracy": {
+   "dev302": {
+    "n": 302,
+    "oracle64": 295,
+    "top1": 160
+   },
+   "probe": {
+    "n": 83,
+    "oracle64": 82,
+    "top1": 37
+   },
+   "typing76": {
+    "n": 76,
+    "oracle64": 74,
+    "top1": 48
+   }
+  },
+  "commit": "b4f203d3d0fe33028d160871a662b513ddfc06aa"
+ },
+ "static": {
+  "date": "2026-10-03",
+  "groups": [
+   {
+    "ime": {
+     "macOS 內建注音": {
+      "chars": 3,
+      "sentences": 3
+     },
+     "小麥注音": {
+      "chars": 13,
+      "sentences": 10
+     },
+     "自然輸入法": {
+      "chars": 11,
+      "sentences": 8
+     }
+    },
+    "n": 23,
+    "name": "第一輪（書面，自動打字）"
+   },
+   {
+    "ime": {
+     "macOS 內建注音": {
+      "chars": 10,
+      "sentences": 8
+     },
+     "小麥注音": {
+      "chars": 24,
+      "sentences": 19
+     },
+     "自然輸入法": {
+      "chars": 29,
+      "sentences": 22
+     }
+    },
+    "n": 53,
+    "name": "第二輪（口語，自動打字）"
+   }
+  ]
+ },
+ "suite_v1": [
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 239
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 238
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 60
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 65
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 65
+    }
+   },
+   "date": "2026-10-05",
+   "label": "2026-10-05-baseline",
+   "load_avg_end": 8.16064453125,
+   "load_avg_start": 4.88037109375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "ref": "v0.1.0",
+   "sha": "b0d2871e16842ec643bbc7b699d8c01bc2827184",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 576.9,
+    "max_us": 133635.4,
+    "p95_us": 2091.3,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 236.390625
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 239
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 238
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 60
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 65
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 65
+    }
+   },
+   "date": "2026-10-05",
+   "label": "2026-10-05-baseline",
+   "load_avg_end": 8.16064453125,
+   "load_avg_start": 4.88037109375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "ref": "v0.1.1",
+   "sha": "1cc9b85ccd9e31ceea8350b12f39c3f49318db46",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 851.9,
+    "max_us": 95094.7,
+    "p95_us": 1821.5,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 237.5625
+   },
+   "vs": "v0.1.0",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 238
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 237
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 63
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 65
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 65
+    }
+   },
+   "date": "2026-10-05",
+   "label": "2026-10-05-baseline",
+   "load_avg_end": 8.16064453125,
+   "load_avg_start": 4.88037109375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "ref": "v0.1.2",
+   "sha": "eae57e298806d67f958c1fb0172dd8456131655f",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 572.6,
+    "max_us": 29107.0,
+    "p95_us": 1738.0,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 238.671875
+   },
+   "vs": "v0.1.1",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 1,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 1,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 3,
+     "p": 0.25
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    }
+   }
+  }
+ ],
+ "suite_v2": [
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 241
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 248
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 154
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 154
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 63
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 66
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 17
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 20
+    }
+   },
+   "date": "2026-10-13",
+   "holdout_chat": {
+    "commit": "729a858bd95729a1c9c6b9d412cc4f9c1e71bf38",
+    "n": 227,
+    "top1": 180
+   },
+   "label": "v0.4.0+v0.4.1",
+   "load_avg_end": 13.9033203125,
+   "load_avg_start": 5.2216796875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827"
+   },
+   "ref": "v0.4.0",
+   "sha": "729a858bd95729a1c9c6b9d412cc4f9c1e71bf38",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 767.1,
+    "max_us": 107530.1,
+    "p95_us": 2697.3,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 285.1875
+   },
+   "version": "v0.4.0"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 252
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 25
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 21
+    }
+   },
+   "date": "2026-10-13",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "a1c3174e2a8782e42e4c0b40c532c32d7a3917d9",
+    "fixed": 11,
+    "n": 227,
+    "p": 0.0009765625,
+    "top1": 191
+   },
+   "label": "v0.4.0+v0.4.1",
+   "load_avg_end": 13.9033203125,
+   "load_avg_start": 5.2216796875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+    "tinylm.sjtl": "7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce"
+   },
+   "ref": "76beb2454d68da371dfc7e1b3adaf32064d24149",
+   "sha": "76beb2454d68da371dfc7e1b3adaf32064d24149",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 855.2,
+    "max_us": 97757.4,
+    "p95_us": 2538.5,
+    "rerank_p50_ms": 7.061,
+    "rerank_p95_ms": 10.989,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 288.96875
+   },
+   "version": "v0.4.1",
+   "vs": "v0.4.0",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 18,
+     "p": 7.62939453125e-06
+    },
+    "dev302/formal": {
+     "broken": 0,
+     "fixed": 4,
+     "p": 0.125
+    },
+    "fw/chat": {
+     "broken": 1,
+     "fixed": 4,
+     "p": 0.375
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 2,
+     "p": 0.5
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 3,
+     "p": 0.25
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 3,
+     "p": 0.25
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 1,
+     "fixed": 9,
+     "p": 0.021484375
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 1,
+     "p": 1.0
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 252
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 25
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 21
+    }
+   },
+   "date": "2026-10-14",
+   "holdout_chat": {
+    "commit": "98e50286f87090c860396fafd6ca098cb864f56b",
+    "n": 227,
+    "top1": 191
+   },
+   "label": "v0.4.1+v0.4.2",
+   "load_avg_end": 11.81689453125,
+   "load_avg_start": 19.14892578125,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+    "tinylm.sjtl": "7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce"
+   },
+   "ref": "v0.4.1",
+   "sha": "98e50286f87090c860396fafd6ca098cb864f56b",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 1559.1,
+    "max_us": 142493.4,
+    "p95_us": 5319.3,
+    "rerank_p50_ms": 12.579,
+    "rerank_p95_ms": 20.787,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 290.546875
+   },
+   "version": "v0.4.1"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 252
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 25
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 21
+    }
+   },
+   "date": "2026-10-14",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "9c68e1b01679a37f923b9c73520277ff5f264514",
+    "fixed": 0,
+    "n": 227,
+    "p": 1.0,
+    "top1": 191
+   },
+   "label": "v0.4.1+v0.4.2",
+   "load_avg_end": 11.81689453125,
+   "load_avg_start": 19.14892578125,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+    "tinylm.sjtl": "7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce"
+   },
+   "ref": "9c68e1b",
+   "sha": "9c68e1b01679a37f923b9c73520277ff5f264514",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 2137.9,
+    "max_us": 308726.2,
+    "p95_us": 5389.0,
+    "rerank_p50_ms": 13.133,
+    "rerank_p95_ms": 21.49,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 287.21875
+   },
+   "version": "v0.4.2",
+   "vs": "v0.4.1",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 252
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 25
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 21
+    }
+   },
+   "date": "2026-10-14",
+   "holdout_chat": {
+    "commit": "c1323ea7765aeb0228b0156cf1d1ee0bbff2400a",
+    "n": 227,
+    "top1": 191
+   },
+   "label": "v0.4.2+v0.4.3",
+   "load_avg_end": 5.77490234375,
+   "load_avg_start": 3.607421875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+    "tinylm.sjtl": "7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce"
+   },
+   "ref": "v0.4.2",
+   "sha": "c1323ea7765aeb0228b0156cf1d1ee0bbff2400a",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 1088.3,
+    "max_us": 40206.4,
+    "p95_us": 3327.8,
+    "rerank_p50_ms": 9.953,
+    "rerank_p95_ms": 14.571,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 288.4375
+   },
+   "version": "v0.4.2"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 254
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 158
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 69
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 25
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 22
+    }
+   },
+   "date": "2026-10-14",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "1a640aee5afde7139c779af5e4364c3f7d045a12",
+    "fixed": 0,
+    "n": 227,
+    "p": 1.0,
+    "top1": 191
+   },
+   "label": "v0.4.2+v0.4.3",
+   "load_avg_end": 5.77490234375,
+   "load_avg_start": 3.607421875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+    "tinylm.sjtl": "7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce"
+   },
+   "ref": "5c9cfef",
+   "sha": "5c9cfefbdd26b45d0342589ea98fb6cb7f396c6c",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 1179.5,
+    "max_us": 16607.1,
+    "p95_us": 3998.5,
+    "rerank_p50_ms": 9.267,
+    "rerank_p95_ms": 13.372,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 289.890625
+   },
+   "version": "v0.4.3",
+   "vs": "v0.4.2",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 1,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 2,
+     "fixed": 4,
+     "p": 0.6875
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 1,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 1,
+     "p": 1.0
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 254
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 158
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 69
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 25
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 22
+    }
+   },
+   "date": "2026-10-15",
+   "holdout_chat": {
+    "commit": "c6d05150f10ecf5f52a7d1bf7f791d41a1299584",
+    "n": 227,
+    "top1": 191
+   },
+   "label": "v0.4.3+v0.4.4",
+   "load_avg_end": 5.2001953125,
+   "load_avg_start": 5.130859375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "f81a021e5dea08dc48dbca1db0d0f63517bb6f0f3e1b20fdac631542d13f45af",
+    "classes.sjc": "75a5efb3d050a9b0d21bca707ff6b1fd71945a8e059b869aa856618290e55827",
+    "tinylm.sjtl": "7e73ef677cd232099132b542c3f3e92aa6a1d7d17725fb0fbda25873509f12ce"
+   },
+   "ref": "v0.4.3",
+   "sha": "c6d05150f10ecf5f52a7d1bf7f791d41a1299584",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 811.9,
+    "max_us": 9757.3,
+    "p95_us": 2207.4,
+    "rerank_p50_ms": 8.463,
+    "rerank_p95_ms": 11.698,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 289.1875
+   },
+   "version": "v0.4.3"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 255
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 158
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 67
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 24
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    }
+   },
+   "date": "2026-10-15",
+   "holdout_chat": {
+    "broken": 3,
+    "commit": "39ee20560e334d67b263d22f6670a83978582867",
+    "fixed": 3,
+    "n": 227,
+    "p": 1.0,
+    "top1": 191
+   },
+   "label": "v0.4.3+v0.4.4",
+   "load_avg_end": 5.2001953125,
+   "load_avg_start": 5.130859375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "efac3184170e9795cef35855fc6615cf5672882bc0e20c624b620597aeab7a56",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "ref": "39ee205",
+   "sha": "39ee20560e334d67b263d22f6670a83978582867",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 975.2,
+    "max_us": 7624.4,
+    "p95_us": 2843.0,
+    "rerank_p50_ms": 8.555,
+    "rerank_p95_ms": 11.975,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 294.15625
+   },
+   "version": "v0.4.4",
+   "vs": "v0.4.3",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 3,
+     "fixed": 3,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 2,
+     "fixed": 3,
+     "p": 1.0
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 1,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 2,
+     "fixed": 0,
+     "p": 0.5
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 1,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 3,
+     "fixed": 2,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 6,
+     "p": 0.03125
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 255
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 158
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 67
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 24
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    }
+   },
+   "date": "2026-10-15",
+   "holdout_chat": {
+    "commit": "3560fe535fa75769d63ea52a7e8e28f706b0ea2b",
+    "n": 227,
+    "top1": 191
+   },
+   "label": "v0.4.4+v0.4.5",
+   "load_avg_end": 5.07373046875,
+   "load_avg_start": 3.67529296875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "efac3184170e9795cef35855fc6615cf5672882bc0e20c624b620597aeab7a56",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "ref": "v0.4.4",
+   "sha": "3560fe535fa75769d63ea52a7e8e28f706b0ea2b",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 789.1,
+    "max_us": 50598.6,
+    "p95_us": 2416.0,
+    "rerank_p50_ms": 6.805,
+    "rerank_p95_ms": 8.71,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 293.203125
+   },
+   "version": "v0.4.4"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 255
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 158
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 67
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 24
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    }
+   },
+   "date": "2026-10-15",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "49562572ac34087c221f4db86ecd68bdf4f1ee4e",
+    "fixed": 0,
+    "n": 227,
+    "p": 1.0,
+    "top1": 191
+   },
+   "label": "v0.4.4+v0.4.5",
+   "load_avg_end": 5.07373046875,
+   "load_avg_start": 3.67529296875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "efac3184170e9795cef35855fc6615cf5672882bc0e20c624b620597aeab7a56",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "ref": "4956257",
+   "sha": "49562572ac34087c221f4db86ecd68bdf4f1ee4e",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 774.3,
+    "max_us": 9455.8,
+    "p95_us": 2336.7,
+    "rerank_p50_ms": 8.077,
+    "rerank_p95_ms": 12.162,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 293.0625
+   },
+   "version": "v0.4.5",
+   "vs": "v0.4.4",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 259
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 255
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 158
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 156
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 66
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 67
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 24
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    }
+   },
+   "date": "2026-10-16",
+   "holdout_chat": {
+    "commit": "4f0b05205c8c70726d8c49bdfa6d1d4bd15a380b",
+    "n": 227,
+    "top1": 191
+   },
+   "label": "v0.4.5+v0.4.6",
+   "load_avg_end": 5.447265625,
+   "load_avg_start": 3.326171875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "efac3184170e9795cef35855fc6615cf5672882bc0e20c624b620597aeab7a56",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "ref": "v0.4.5",
+   "sha": "4f0b05205c8c70726d8c49bdfa6d1d4bd15a380b",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 695.5,
+    "max_us": 6780.0,
+    "p95_us": 2157.0,
+    "rerank_p50_ms": 6.407,
+    "rerank_p95_ms": 8.235,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 293.21875
+   },
+   "version": "v0.4.5"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 262
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 253
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 155
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 65
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 72
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 26
+    }
+   },
+   "date": "2026-10-16",
+   "holdout_chat": {
+    "broken": 3,
+    "commit": "7c47266d59b77329506e63480ff350aa45187c3e",
+    "fixed": 3,
+    "n": 227,
+    "p": 1.0,
+    "top1": 191
+   },
+   "label": "v0.4.5+v0.4.6",
+   "load_avg_end": 5.447265625,
+   "load_avg_start": 3.326171875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "ref": "7c47266d",
+   "sha": "7c47266d59b77329506e63480ff350aa45187c3e",
+   "speed": {
+    "keys": 8336,
+    "load_ms": 786.5,
+    "max_us": 7967.0,
+    "p95_us": 2268.3,
+    "rerank_p50_ms": 6.858,
+    "rerank_p95_ms": 9.099,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 292.765625
+   },
+   "version": "v0.4.6",
+   "vs": "v0.4.5",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 3,
+     "fixed": 6,
+     "p": 0.5078125
+    },
+    "dev302/formal": {
+     "broken": 5,
+     "fixed": 3,
+     "p": 0.7265625
+    },
+    "fw/chat": {
+     "broken": 1,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 1,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 3,
+     "p": 0.25
+    },
+    "probe/formal": {
+     "broken": 2,
+     "fixed": 0,
+     "p": 0.5
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 2,
+     "p": 0.5
+    },
+    "typing76/formal": {
+     "broken": 2,
+     "fixed": 2,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 1,
+     "fixed": 5,
+     "p": 0.21875
+    },
+    "user-reported/formal": {
+     "broken": 5,
+     "fixed": 3,
+     "p": 0.7265625
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 262
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 253
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 155
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 65
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 72
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 70
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 26
+    }
+   },
+   "date": "2026-10-17",
+   "holdout_chat": {
+    "commit": "58da6d25480b33b9349ac84a7e8217861dd778ba",
+    "n": 300,
+    "top1": 234
+   },
+   "label": "v0.4.6+v0.4.7",
+   "load_avg_end": 37.55029296875,
+   "load_avg_start": 31.42333984375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f"
+   },
+   "ref": "v0.4.6",
+   "sha": "58da6d25480b33b9349ac84a7e8217861dd778ba",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 1267.0,
+     "max_us": 160164.5,
+     "p95_us": 6609.0,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 288.40625
+    },
+    "keys": 8336,
+    "load_ms": 1139.7,
+    "max_us": 63967.2,
+    "p95_us": 2897.4,
+    "rerank_p50_ms": 14.344,
+    "rerank_p95_ms": 21.917,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 293.21875
+   },
+   "version": "v0.4.6"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 262
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 257
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 161
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 68
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 72
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 24
+    }
+   },
+   "date": "2026-10-17",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "af78dedceca017a9fb5ebf17257321be4c8d4a09",
+    "fixed": 0,
+    "n": 300,
+    "p": 1.0,
+    "top1": 234
+   },
+   "label": "v0.4.6+v0.4.7",
+   "load_avg_end": 37.55029296875,
+   "load_avg_start": 31.42333984375,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f",
+    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"
+   },
+   "ref": "af78dedc",
+   "sha": "af78dedceca017a9fb5ebf17257321be4c8d4a09",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 2069.6,
+     "max_us": 274246.4,
+     "p95_us": 8217.0,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 428.78125
+    },
+    "keys": 8336,
+    "load_ms": 1863.5,
+    "max_us": 159560.5,
+    "p95_us": 6822.2,
+    "rerank_p50_ms": 13.91,
+    "rerank_p95_ms": 23.425,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 426.484375
+   },
+   "version": "v0.4.7",
+   "vs": "v0.4.6",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 5,
+     "fixed": 9,
+     "p": 0.4239501953125
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 2,
+     "fixed": 8,
+     "p": 0.109375
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 1,
+     "fixed": 4,
+     "p": 0.375
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 2,
+     "fixed": 1,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 7,
+     "fixed": 5,
+     "p": 0.7744140625
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 262
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 257
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 157
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 161
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 69
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 68
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 72
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 28
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 24
+    }
+   },
+   "date": "2026-10-22",
+   "holdout_chat": {
+    "commit": "207b4b498cf7464b40db8c209eb4bccc400495bb",
+    "n": 300,
+    "top1": 234
+   },
+   "label": "v0.4.7+v0.5.0",
+   "load_avg_end": 3.28759765625,
+   "load_avg_start": 4.12841796875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "d07de71dbbe6f45ceab0dd67aa8b607802f40ff5fbfe60a1fa87ed69c379070f",
+    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"
+   },
+   "ref": "v0.4.7",
+   "sha": "207b4b498cf7464b40db8c209eb4bccc400495bb",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 726.6,
+     "max_us": 6849.6,
+     "p95_us": 2062.2,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 428.578125
+    },
+    "keys": 8336,
+    "load_ms": 752.5,
+    "max_us": 6498.3,
+    "p95_us": 1997.0,
+    "rerank_p50_ms": 6.239,
+    "rerank_p95_ms": 7.954,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 429.546875
+   },
+   "version": "v0.4.7"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 269
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 265
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 163
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 165
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 72
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 72
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 72
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 33
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 29
+    }
+   },
+   "date": "2026-10-22",
+   "holdout_chat": {
+    "broken": 4,
+    "commit": "299230a5e2f5083d7f265c982ce6721b7ba7b071",
+    "fixed": 7,
+    "n": 300,
+    "p": 0.5488,
+    "top1": 237
+   },
+   "label": "v0.4.7+v0.5.0",
+   "load_avg_end": 3.28759765625,
+   "load_avg_start": 4.12841796875,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "colloquial.sjlm": "2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "e7c179d85405ec42a40bb22adb58a7485c58f77aed89dfc2ca76a0d89568ed5e",
+    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"
+   },
+   "ref": "299230a5",
+   "sha": "299230a5e2f5083d7f265c982ce6721b7ba7b071",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 889.1,
+     "max_us": 7435.9,
+     "p95_us": 2019.1,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 440.59375
+    },
+    "keys": 8336,
+    "load_ms": 905.3,
+    "max_us": 6723.9,
+    "p95_us": 2047.0,
+    "rerank_p50_ms": 6.346,
+    "rerank_p95_ms": 8.225,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 441.15625
+   },
+   "version": "v0.5.0",
+   "vs": "v0.4.7",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 2,
+     "fixed": 9,
+     "p": 0.0654296875
+    },
+    "dev302/formal": {
+     "broken": 1,
+     "fixed": 9,
+     "p": 0.021484375
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 6,
+     "p": 0.03125
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 4,
+     "p": 0.125
+    },
+    "probe/chat": {
+     "broken": 1,
+     "fixed": 4,
+     "p": 0.375
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 4,
+     "p": 0.125
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 2,
+     "fixed": 7,
+     "p": 0.1796875
+    },
+    "user-reported/formal": {
+     "broken": 1,
+     "fixed": 6,
+     "p": 0.125
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 269
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 265
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 163
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 165
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 72
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 72
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 72
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 76,
+     "top1": 69
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 33
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 29
+    }
+   },
+   "date": "2026-10-29",
+   "holdout_chat": {
+    "commit": "1c9e0a7d858d3f8de51819ac4f460f3664f9f0ae",
+    "n": 150,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 115
+   },
+   "label": "v0.5.0+v0.6.0",
+   "load_avg_end": 2.8671875,
+   "load_avg_start": 5.81640625,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "fc2bddd1f0c2029deb7e7568f64868c11f535b3d5c5c7c97c3d0599c8b2cde42",
+    "classes.sjc": "9e36fa1be4518adb34bcddc2c79761006b0b06c539aa64a4564ba00397cf0262",
+    "colloquial.sjlm": "2984eeb525a06b12c244b3c04b84641c9a67492486132ebf404198372b684c33",
+    "kn.sjkn": "cbefbced072f7e9d40dbfc3d2fad27c29f82e44bf801800dfb17b4eec962597e",
+    "tinylm.sjtl": "e7c179d85405ec42a40bb22adb58a7485c58f77aed89dfc2ca76a0d89568ed5e",
+    "trigram.sjt3": "fdd3b05d8c18cf85da434443d4fabbbfebf31e8c97a04e00e4a339bbe19eec84"
+   },
+   "ref": "v0.5.0",
+   "sha": "1c9e0a7d858d3f8de51819ac4f460f3664f9f0ae",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 892.3,
+     "max_us": 7042.2,
+     "p95_us": 2088.6,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 441.359375
+    },
+    "keys": 8336,
+    "load_ms": 891.6,
+    "max_us": 6288.6,
+    "p95_us": 2064.8,
+    "rerank_p50_ms": 6.513,
+    "rerank_p95_ms": 8.253,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 440.828125
+   },
+   "version": "v0.5.0"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 280
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 271
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 177
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 171
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 76
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 77
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 70
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 61
+    }
+   },
+   "date": "2026-10-29",
+   "holdout_chat": {
+    "broken": 1,
+    "commit": "ba8d38605b0f9a64847204ac75f5f6a515433717",
+    "fixed": 10,
+    "n": 150,
+    "p": 0.0117,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 124
+   },
+   "label": "v0.5.0+v0.6.0",
+   "load_avg_end": 2.8671875,
+   "load_avg_start": 5.81640625,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "tinylm.sjtl": "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+   },
+   "ref": "ba8d38605b0f9a64847204ac75f5f6a515433717",
+   "sha": "ba8d38605b0f9a64847204ac75f5f6a515433717",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 964.2,
+     "max_us": 7597.0,
+     "p95_us": 2261.5,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 480.5
+    },
+    "keys": 8336,
+    "load_ms": 945.2,
+    "max_us": 6870.8,
+    "p95_us": 2231.9,
+    "rerank_p50_ms": 6.68,
+    "rerank_p95_ms": 8.581,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 480.171875
+   },
+   "version": "v0.6.0",
+   "vs": "v0.5.0",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 3,
+     "fixed": 14,
+     "p": 0.012725830078125
+    },
+    "dev302/formal": {
+     "broken": 9,
+     "fixed": 15,
+     "p": 0.30745625495910645
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 14,
+     "p": 0.0001220703125
+    },
+    "fw/formal": {
+     "broken": 3,
+     "fixed": 9,
+     "p": 0.14599609375
+    },
+    "probe/chat": {
+     "broken": 1,
+     "fixed": 5,
+     "p": 0.21875
+    },
+    "probe/formal": {
+     "broken": 1,
+     "fixed": 6,
+     "p": 0.125
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 2,
+     "p": 0.5
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 5,
+     "p": 0.0625
+    },
+    "user-reported/chat": {
+     "broken": 1,
+     "fixed": 38,
+     "p": 1.4551915228366852e-10
+    },
+    "user-reported/formal": {
+     "broken": 2,
+     "fixed": 34,
+     "p": 1.941225491464138e-08
+    }
+   }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 280
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 271
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 177
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 171
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 76
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 77
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 70
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 61
+    }
+   },
+   "date": "2026-10-31",
+   "holdout_chat": {
+    "commit": "a03e8bf158cbeb8f0a1ec645711469bb6b8b7e0e",
+    "n": 150,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 124
+   },
+   "label": "v0.6.0+v0.6.1",
+   "load_avg_end": 8.18701171875,
+   "load_avg_start": 5.26806640625,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "tinylm.sjtl": "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+   },
+   "ref": "v0.6.0",
+   "sha": "a03e8bf158cbeb8f0a1ec645711469bb6b8b7e0e",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 1195.1,
+     "max_us": 93715.4,
+     "p95_us": 4747.5,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 483.796875
+    },
+    "keys": 8336,
+    "load_ms": 1078.3,
+    "max_us": 39928.0,
+    "p95_us": 2517.8,
+    "rerank_p50_ms": 7.622,
+    "rerank_p95_ms": 9.902,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 482.625
+   },
+   "version": "v0.6.0"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 280
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 271
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 177
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 171
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 76
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 77
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 70
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 61
+    }
+   },
+   "date": "2026-10-31",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "9c88b87fc9d55b4d40af77ccab2d390238acef95",
+    "fixed": 0,
+    "n": 150,
+    "p": 1.0,
+    "rows_sha256": "667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d",
+    "top1": 124
+   },
+   "label": "v0.6.0+v0.6.1",
+   "load_avg_end": 8.18701171875,
+   "load_avg_start": 5.26806640625,
+   "machine": "Mac17,3",
+   "macos": "27.0.1",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "tinylm.sjtl": "f7d0ac6377bfe973cf4239a949d7a763f1acb0095e50bc6c1323bd3ed09d3478",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+   },
+   "ref": "9c88b87f",
+   "sha": "9c88b87fc9d55b4d40af77ccab2d390238acef95",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 1152.2,
+     "max_us": 8462.7,
+     "p95_us": 2543.8,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 479.90625
+    },
+    "keys": 8336,
+    "load_ms": 1094.7,
+    "max_us": 18298.6,
+    "p95_us": 2534.5,
+    "rerank_p50_ms": 7.67,
+    "rerank_p95_ms": 12.625,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 482.6875
+   },
+   "version": "v0.6.1",
+   "vs": "v0.6.0",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+# Windows checks out with core.autocrlf=true by default: a CRLF in data/lexicon/digits.tsv makes `DigitTable::parse` fail and the digit layer
+# silently switch off (docs/spec/windows-tip.md §2.7). `text=auto` leaves what git judges binary (eval/golden's .sjlm, .sjc, .sjkn,
+# .sjtl, .sjt3) alone, so golden bytes never change.
+data/** text=auto eol=lf
+eval/** text=auto eol=lf
+core/tests/** text=auto eol=lf
+cli/tests/** text=auto eol=lf
+scripts/** text=auto eol=lf

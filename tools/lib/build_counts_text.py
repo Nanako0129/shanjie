@@ -1,0 +1,81 @@
+"""S2 實驗：從純文字句子檔統計 unigram／bigram（口語語料：Common Voice zh-TW、Tatoeba cmn）。
+
+和 build_counts.py 用同一套轉換、切句與斷詞。
+用法：python3 tools/lib/build_counts_text.py <out.pkl> (--native 句子檔 | --mixed 句子檔)...（.tsv 取最後一欄；.bz2 自動解壓）
+每一份輸入都要說明種類（docs/spec/models.md §9.1），沒有預設值：--native 原樣計數、一個字都不改（本來就是台灣繁體，或已經轉過的文字）；
+--mixed 逐句判斷簡繁，簡體句走轉換表 tw-conv.tsv。
+"""
+import argparse
+import bz2
+import collections
+import os
+import pickle
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_counts as bc  # noqa: E402
+
+
+def lines(path, errors="strict"):
+    """errors="replace": bad bytes become U+FFFD (not Han) instead of an exception; holdout_guard --text reads this way."""
+    f = bz2.open(path, "rt", encoding="utf-8", errors=errors) if path.endswith(".bz2") else open(path, encoding="utf-8", errors=errors)
+    for line in f:
+        line = line.rstrip("\n")
+        yield line.split("\t")[-1] if ".tsv" in path else line
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--expected", action="store_true", help="詞圖上的期望次數（docs/spec/models.md §4.2）；不算 trigram")
+    ap.add_argument("--extra-lexicon", action="append", default=[], metavar="FILE", help="model-v5：疊加層格式的檔加進斷詞詞庫，可給多次")
+    ap.add_argument("--holdout-guard", nargs="*", default=None, metavar="ROWS", help="預設關。命中保留集句子的漢字段不計數；不給檔＝eval/holdout/ 底下全部 .txt。放在位置參數之後（或用 -- 隔開）")
+    ap.add_argument("out")
+    ap.add_argument("--native", dest="inputs", action="append", metavar="PATH", type=lambda p: ("native", p), help="不轉換的輸入，可給多次")
+    ap.add_argument("--mixed", dest="inputs", action="append", metavar="PATH", type=lambda p: ("mixed", p), help="逐句判斷簡繁再轉換的輸入，可給多次")
+    a = ap.parse_args(argv)
+    if a.extra_lexicon and not a.expected:
+        ap.error("--extra-lexicon 只用在 --expected（加法計數，docs/spec/models.md §4.2）")
+    if not a.inputs:
+        ap.error("give every input as --native PATH or --mixed PATH (no default kind)")
+    expected, out = a.expected, a.out
+    guard, skipped = bc.guard_matcher(a.holdout_guard), 0   # validated before anything else is loaded
+    bc._init(False, expected, extra_lexicons=tuple(dict.fromkeys(os.path.abspath(f) for f in a.extra_lexicon)), holdout_guard=guard)
+    lex, conv = bc._W["lex"], bc._W["conv"]
+    uni, bi, tri, runs = collections.Counter(), collections.Counter(), collections.Counter(), 0
+    for kind, p in a.inputs:
+        for s in lines(p):
+            for run in bc.text_runs(s, conv, kind):
+                if len(run) < 2:
+                    continue
+                if guard is not None and guard.any(bc.fold(run)):
+                    skipped += 1
+                    continue
+                if expected:
+                    r = bc.run_expected(run)
+                    if r is None:
+                        continue
+                    runs += 1
+                    for w, e in r[0].items():
+                        uni[w] += e
+                    for k, e in r[1].items():
+                        bi[k] += e
+                    continue
+                ws = bc.segment(lex, run)
+                if not ws:
+                    continue
+                runs += 1
+                prev = "<s>"
+                for w in ws:
+                    uni[w] += 1; bi[(prev, w)] += 1; prev = w
+                bi[(prev, "</s>")] += 1
+                seq = ["<s>", "<s>"] + ws + ["</s>"]
+                for i in range(2, len(seq)):
+                    tri[(seq[i - 2], seq[i - 1], seq[i])] += 1
+    pickle.dump({"uni": uni, "bi": bi, "tri": tri, "articles": 0, "runs": runs}, open(out, "wb"))
+    print(f"{runs} runs, {sum(uni.values())} tokens, {len(uni)} types, {len(bi)} bigram types")
+    if guard is not None:
+        print(f"holdout-guard: skipped {skipped} runs")
+
+
+if __name__ == "__main__":
+    main()

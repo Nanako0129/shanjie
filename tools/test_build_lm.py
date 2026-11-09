@@ -1,0 +1,148 @@
+"""docs/spec/models.md §4.4：build_lm 的異體寫法合併。用法：python3 -B -m unittest tools.test_build_lm（從 repo 根目錄）。
+小語料、小類別表跑 build()，用參考實作 lm.BigramLM 讀回來檢查，再交給 Rust 的 shanjie-eval 載入。"""
+import os
+import pickle
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+for sub in ("tools", "reference/proto", "tools/lib"):
+    sys.path.insert(0, os.path.join(ROOT, sub))
+import build_lm  # noqa: E402
+import lm as L  # noqa: E402
+
+# 起床／起牀 同讀音（MERGE 牀→床），代表 起床（分數高）；占／佔 都有 ㄓㄢˋ，但 占 另有 ㄓㄢ（占卜），讀音集合不同所以不併；
+# 世界線／世界綫 同分，代表取 MERGE 正規形 世界線（綫→線 在 VARIANTS 裡；只比 code point 會選 綫 U+7DAB）；他 是前文。
+BY_READING = {
+    ("ㄑㄧˇ", "ㄔㄨㄤˊ"): [("起床", -4.9), ("起牀", -7.2)],
+    ("ㄓㄢˋ",): [("占", -3.0), ("佔", -3.5)],
+    ("ㄓㄢ",): [("占", -3.0)],
+    ("ㄕˋ", "ㄐㄧㄝˋ", "ㄒㄧㄢˋ"): [("世界綫", -7.17), ("世界線", -7.17)],
+    ("ㄊㄚ",): [("他", -2.0)],
+}
+WIKI = {"uni": {"起床": 10, "起牀": 4, "佔": 5, "他": 30},
+        "bi": {("<s>", "起床"): 6, ("<s>", "起牀"): 2, ("他", "起床"): 1, ("他", "起牀"): 3, ("他", "佔"): 2, ("起牀", "</s>"): 4, ("起床", "</s>"): 10}}
+COLL = {"uni": {"起牀": 1, "占": 2}, "bi": {("他", "占"): 1, ("<s>", "他"): 3}}
+
+
+class BuildLm(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        for name, c in (("counts-200000.pkl", WIKI), ("counts-colloquial3.pkl", COLL)):
+            pickle.dump(c, open(os.path.join(cls.tmp.name, name), "wb"))
+        build_lm.WORK = cls.tmp.name
+        cls.cls = build_lm.variant_classes(BY_READING)
+        data = build_lm.build(cls.cls)[0]
+        cls.path = os.path.join(cls.tmp.name, "tiny.sjlm")
+        open(cls.path, "wb").write(data)
+        cls.lm = L.BigramLM(cls.path, classes=False)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_classes(self):
+        self.assertEqual(self.cls, {"起床": ("起床", "起牀"), "起牀": ("起床", "起牀"),
+                                    "世界線": ("世界線", "世界綫"), "世界綫": ("世界線", "世界綫")})   # 第一個是代表
+        self.assertNotIn("占", self.cls)   # 讀音集合不同
+        self.assertNotIn("他", self.cls)   # 單獨成類的不進表
+
+    def test_merge_needs_same_readings(self):
+        no_zhan1 = {k: v for k, v in BY_READING.items() if k != ("ㄓㄢ",)}
+        self.assertEqual(build_lm.variant_classes(no_zhan1)["占"], ("占", "佔"))   # 拿掉 ㄓㄢ 就併（占 -3.0 分數高，是代表）
+
+    def test_members_in_vocab_and_contexts_equal(self):
+        lm = self.lm
+        self.assertEqual(lm.count("起床"), lm.count("起牀"))
+        self.assertEqual(lm.count("起床"), 19)    # 10 + 4 + 口語 1×5
+        self.assertNotEqual(lm.count("占"), lm.count("佔"))
+        self.assertEqual(lm.ctx[lm.ids["起床"]][2], lm.ctx[lm.ids["起牀"]][2])   # 當前文時條目相同
+        self.assertEqual(lm.ctx[lm.ids["起床"]][2][lm.ids["</s>"]], 14)          # 4 + 10
+
+    def test_next_word_only_on_representative(self):
+        lm = self.lm
+        for v in ("<s>", "他"):
+            ent = lm.ctx[lm.ids[v]][2]
+            self.assertNotIn(lm.ids["起牀"], ent, v)
+        self.assertEqual(lm.ctx[lm.ids["<s>"]][2][lm.ids["起床"]], 8)   # 6 + 2
+        self.assertEqual(lm.ctx[lm.ids["他"]][2][lm.ids["起床"]], 4)    # 1 + 3
+
+    def test_context_total_counts_class_once(self):
+        for v, (t, back, entries) in self.lm.ctx.items():
+            self.assertGreaterEqual(back, 0, self.lm.vocab[v])
+            self.assertGreaterEqual(t, sum(entries.values()), self.lm.vocab[v])
+        self.assertEqual(self.lm.ctx[self.lm.ids["他"]][0], 11)   # 原始：1 + 3 + 2 + 口語 1×5（寫回每個成員會變 22）
+
+    def test_totals_count_class_once(self):
+        """N 與 eos_total 每類只算一次（代表成員）。手算：起床類 19、佔 5、占 10、他 30 → 64；</s>：起床類 14。"""
+        self.assertEqual(self.lm.N, 64)
+        self.assertEqual(round(self.lm.p_eos * self.lm.N), 14)
+
+    def test_real_lexicon_ties_pick_normal_form(self):
+        """真實詞庫（基底＋疊加層）：最高分同分、而且類裡有 MERGE 正規形的，代表一律是正規形。"""
+        import build_counts as bc
+        import ime
+        lex = ime.Lexicon(os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt"), overlay=ime.OVERLAYS)
+        best = {}
+        for ents in lex.by_reading.values():
+            for w, lp in ents:
+                best[w] = max(best.get(w, lp), lp)
+        fold = lambda w: "".join(bc.MERGE.get(c, c) for c in w)
+        cls = build_lm.variant_classes(lex.by_reading)
+        tied = 0
+        for g in set(cls.values()):
+            top = max(best[w] for w in g)
+            normal = [w for w in g if best[w] == top and fold(w) == w]
+            if normal and sum(best[w] == top for w in g) > 1:
+                tied += 1
+                self.assertEqual(fold(g[0]), g[0], g)
+        self.assertGreater(tied, 10)     # 延伸規則拿掉多數疊加層舊字形後，同分而有正規形的類量到 23 個（延伸規則之前約 1,656）
+
+    def test_bigram_with_a_word_outside_the_vocabulary_is_dropped(self):
+        """docs/spec/models.md §4.2：二元組的一端不在詞彙表（單詞計數四捨五入成 0）時丟掉那個二元組，不中止建置。"""
+        with tempfile.TemporaryDirectory() as d:
+            wiki = {"uni": {**WIKI["uni"], "令坦": 0.2}, "bi": {**WIKI["bi"], ("令坦", "他"): 3, ("他", "令坦"): 2}}
+            for name, c in (("counts-200000.pkl", wiki), ("counts-colloquial3.pkl", COLL)):
+                pickle.dump(c, open(os.path.join(d, name), "wb"))
+            old, build_lm.WORK = build_lm.WORK, d
+            try:
+                data = build_lm.build(self.cls)[0]
+            finally:
+                build_lm.WORK = old
+            self.assertEqual(data, open(self.path, "rb").read())   # 丟掉之後和沒有那兩個二元組時逐位元組相同
+
+    def test_corpora_option(self):
+        """--corpora: FILE:WEIGHT parsing, the default is CORPORA, and an explicit list builds from exactly those files and weights."""
+        self.assertEqual(build_lm.parse_corpora(["a.pkl:1", "/x/b:c.pkl:12", "C:\\w\\d.pkl:3"]), [("a.pkl", 1), ("/x/b:c.pkl", 12), ("C:\\w\\d.pkl", 3)])
+        for bad in ("a.pkl", "a.pkl:", ":3", "a.pkl:x", "a.pkl:-1"):
+            with self.assertRaises(ValueError, msg=bad):
+                build_lm.parse_corpora([bad])
+        self.assertEqual(build_lm.build(self.cls, corpora=list(build_lm.CORPORA))[0], open(self.path, "rb").read())   # default == CORPORA
+        coll_only = build_lm.build(self.cls, corpora=[("counts-colloquial3.pkl", 1)])[0]
+        path = os.path.join(self.tmp.name, "coll.sjlm")
+        open(path, "wb").write(coll_only)
+        lm = L.BigramLM(path, classes=False)
+        self.assertEqual(lm.count("起牀"), 1)      # weight 1, no wiki counts
+        self.assertEqual(lm.count("他"), 0)
+
+    def test_corpora_requires_out(self):
+        """--corpora without --out is an argparse error (exit 2) and writes nothing; the default --out is still data/lm/bigram.sjlm for a plain run."""
+        r = subprocess.run([sys.executable, "-B", os.path.join(ROOT, "tools", "build_lm.py"), "--corpora", "x.pkl:1"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--out is required with --corpora", r.stderr)
+
+    def test_rust_loads(self):
+        rows = os.path.join(self.tmp.name, "rows.txt")
+        open(rows, "w", encoding="utf-8").write("|起床|ㄑㄧˇ ㄔㄨㄤˊ\n")
+        r = subprocess.run(["cargo", "run", "--locked", "-q", "-p", "cli", "--bin", "shanjie-eval", "--", "--lm", self.path, "--no-classes", "--profile", "chat", "--rows", rows],
+                           cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("'n': 1", r.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,95 @@
+{
+ "date": "2026-10-03",
+ "groups": [
+  {
+   "name": "第一輪（書面，自動打字）",
+   "n": 23,
+   "ime": {
+    "macOS 內建注音": {
+     "sentences": 3,
+     "chars": 3
+    },
+    "小麥注音": {
+     "sentences": 10,
+     "chars": 13
+    },
+    "自然輸入法": {
+     "sentences": 8,
+     "chars": 11
+    }
+   },
+   "sum": {
+    "sentences": 21,
+    "chars": 27
+   }
+  },
+  {
+   "name": "第二輪（口語，自動打字）",
+   "n": 53,
+   "ime": {
+    "macOS 內建注音": {
+     "sentences": 8,
+     "chars": 10
+    },
+    "小麥注音": {
+     "sentences": 19,
+     "chars": 24
+    },
+    "自然輸入法": {
+     "sentences": 22,
+     "chars": 29
+    }
+   },
+   "sum": {
+    "sentences": 49,
+    "chars": 63
+   }
+  },
+  {
+   "name": "第三次：Discord 群聊例句（只放本機，只記統計）",
+   "n": 845,
+   "ime": {
+    "macOS 內建注音": {
+     "sentences": 100,
+     "chars": 134
+    },
+    "小麥注音": {
+     "sentences": 199,
+     "chars": 280
+    },
+    "自然輸入法": {
+     "sentences": 237,
+     "chars": 336
+    }
+   },
+   "sum": {
+    "sentences": 536,
+    "chars": 750
+   },
+   "local_only": true
+  },
+  {
+   "name": "第四次：政府新聞稿（只放本機，只記統計）",
+   "n": 294,
+   "ime": {
+    "macOS 內建注音": {
+     "sentences": 64,
+     "chars": 99
+    },
+    "小麥注音": {
+     "sentences": 85,
+     "chars": 127
+    },
+    "自然輸入法": {
+     "sentences": 94,
+     "chars": 152
+    }
+   },
+   "sum": {
+    "sentences": 243,
+    "chars": 378
+   },
+   "local_only": true
+  }
+ ]
+}

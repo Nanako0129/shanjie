@@ -1,0 +1,807 @@
+//! S0 core: port of reference/proto/ime.py (lexicon, to_syllables, beam decode, learners).
+//! R2 (docs/spec/privacy.md): errors carry a kind and a length only, never input text.
+
+pub mod colloquial;
+pub mod digits;
+pub mod engine;
+pub mod english_next;
+pub mod eval;
+pub mod ffi;
+pub mod fuzzy;
+pub mod learn;
+pub mod learn_store;
+pub mod lm;
+pub mod predict;
+pub mod reading;
+pub mod tinylm;
+mod trigram;
+
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+use std::fmt;
+use std::sync::Arc;
+
+pub const BEAM: usize = 32;
+pub const PER_KEY: usize = 12;
+/// S1 candidate path (PLAN S1): 64 candidates need a beam of at least 64. S0 BEAM stays for `unigram`/golden.
+pub const BEAM_S1: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    BadScore { token_len: usize },
+    EmptyLexicon,
+    NoPath { len: usize },
+    MissingSeparator { line_len: usize },
+    BadOverlayRow { line_len: usize },
+    OverlayDuplicate { word_len: usize },
+    BadVariants { line: usize },
+    BadForms { line: usize },
+    BadVariantOrder { line: usize },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::BadScore { token_len } => write!(f, "bad score (token length {token_len})"),
+            Error::EmptyLexicon => write!(f, "empty lexicon"),
+            Error::NoPath { len } => write!(f, "no decode path (input length {len})"),
+            Error::MissingSeparator { line_len } => {
+                write!(f, "missing separator (line length {line_len})")
+            }
+            Error::BadOverlayRow { line_len } => write!(f, "bad overlay row (line length {line_len})"),
+            Error::OverlayDuplicate { word_len } => {
+                write!(f, "overlay duplicates a base entry (word length {word_len})")
+            }
+            Error::BadVariants { line } => write!(f, "bad variants table (line {line})"),
+            Error::BadForms { line } => write!(f, "bad forms table (line {line})"),
+            Error::BadVariantOrder { line } => write!(f, "bad variant-order table (line {line})"),
+        }
+    }
+}
+impl std::error::Error for Error {}
+
+pub type Syls = Vec<String>;
+
+/// Compact lexicon, layout in docs/spec/lexicon-and-packs.md §1.3. Syllables are interned ids; readings are sorted
+/// id sequences with contiguous entry ranges; words live in one string pool.
+pub struct Lexicon {
+    pub max_len: usize,
+    syl_ids: HashMap<String, u32>,
+    syl_names: Vec<String>,
+    key_pool: Vec<u32>,
+    readings: Vec<Reading>,
+    ents: Vec<Ent>,
+    words: String,
+    /// Entry positions of each distinct word's by_word winner, sorted by word bytes.
+    by_word: Vec<u32>,
+    /// The overlay rows tagged `manual` (docs/spec/decoder.md §7), shared with every rerank job of an engine built on this lexicon.
+    manual: Arc<ManualSet>,
+    /// The variant-order rows (docs/spec/decoder.md §2.3) the lexicon was built with, sorted by reading index; empty without a table.
+    variants: Vec<(usize, VariantRow)>,
+    /// Fuzzy input tables (docs/spec/decoder.md §6.2), built once, at the first lookup that needs them (`tol`): a
+    /// lexicon that is only ever read without fuzzy input never builds them.
+    tol: OnceLock<fuzzy::Tolerance>,
+}
+
+/// The words added by hand (`manual` rows of overlay-add.tsv) as (word, reading): the small model's rerank must not take one out of the
+/// n-gram's first choice (`tinylm::manual_mask`). Built where the overlay is read (`Lexicon::parse_with`), so the engine and the evaluation CLI share it.
+/// A row whose word does not have one character per syllable is not kept (the lexicon guarantees it for the shipped rows).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ManualSet {
+    words: Vec<(Vec<char>, Vec<String>)>,
+}
+
+impl ManualSet {
+    /// A set of (word, reading with `-` between the syllables) pairs; for tests.
+    pub fn from_pairs<'a>(pairs: impl IntoIterator<Item = (&'a str, &'a str)>) -> ManualSet {
+        let mut set = ManualSet::default();
+        pairs.into_iter().for_each(|(w, r)| set.push(w, r));
+        set
+    }
+
+    fn push(&mut self, word: &str, reading: &str) {
+        let chars: Vec<char> = word.chars().collect();
+        let syls: Vec<String> = reading.split('-').map(String::from).collect();
+        if chars.len() == syls.len() {
+            self.words.push((chars, syls));
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.words.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.words.len()
+    }
+
+    /// The (word, syllables) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&[char], &[String])> {
+        self.words.iter().map(|(w, r)| (w.as_slice(), r.as_slice()))
+    }
+}
+
+/// One row of `data/lexicon/variant-order.tsv` (docs/spec/decoder.md §2.3): under `reading`, the lexicon score of `less` (the
+/// spelling people type less) is at most that of `more` minus `VARIANT_GAP`. Mirrored by `load_variant_order` in reference/proto/ime.py.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantRow {
+    pub reading: Vec<String>,
+    pub less: String,
+    pub more: String,
+}
+
+/// The gap the variant-order rows keep between the two spellings' scores.
+pub const VARIANT_GAP: f64 = 0.01;
+
+/// The parsed variant-order table. `parse` is as strict as the Python loader: 4 fields without surrounding whitespace, a (reading, less)
+/// key only once, less != more, no `more` that is another row's `less` (no chains). That both spellings exist under the reading is
+/// checked where the table meets a lexicon (`Lexicon::parse_with_variants`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VariantOrder {
+    rows: Vec<(usize, VariantRow)>,
+}
+
+impl VariantOrder {
+    /// `Err(BadVariantOrder { line })` names the first bad line (1-based).
+    pub fn parse(text: &str) -> Result<VariantOrder, Error> {
+        let mut rows: Vec<(usize, VariantRow)> = Vec::new();
+        for (i, line) in text.lines().enumerate().filter(|(_, l)| !l.is_empty() && !l.starts_with('#')) {
+            let bad = Error::BadVariantOrder { line: i + 1 };
+            let f: Vec<&str> = line.split('\t').collect();
+            let [reading, less, more, source] = f[..] else { return Err(bad) };
+            let edge = |s: &str| s.is_empty() || s.starts_with(lm::DEMOTE_EDGE) || s.ends_with(lm::DEMOTE_EDGE);
+            if [reading, less, more, source].into_iter().any(edge) || less == more || rows.iter().any(|(_, r)| r.reading.join("-") == reading && r.less == less) {
+                return Err(bad);
+            }
+            rows.push((i + 1, VariantRow { reading: reading.split('-').map(String::from).collect(), less: less.to_string(), more: more.to_string() }));
+        }
+        for (line, r) in &rows {
+            if rows.iter().any(|(_, o)| o.less == r.more) {
+                return Err(Error::BadVariantOrder { line: *line });
+            }
+        }
+        Ok(VariantOrder { rows })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Reading {
+    key_off: u32,
+    key_len: u32,
+    start: u32,
+}
+
+#[derive(Clone, Copy)]
+struct Ent {
+    off: u32,
+    len: u32,
+    score: f64,
+}
+
+/// File-order row while parsing: an `Ent` plus where its reading ids sit in the key pool.
+struct Raw {
+    ent: Ent,
+    key_off: u32,
+    key_len: u32,
+}
+
+#[derive(Default)]
+struct Builder {
+    syl_ids: HashMap<String, u32>,
+    syl_names: Vec<String>,
+    key_pool: Vec<u32>,
+    raw: Vec<Raw>,
+    words: String,
+}
+
+impl Builder {
+    fn push(&mut self, reading: &str, word: &str, score: f64) {
+        let key_off = self.key_pool.len() as u32;
+        for s in reading.split('-') {
+            let id = match self.syl_ids.get(s) {
+                Some(&i) => i,
+                None => {
+                    let i = self.syl_names.len() as u32;
+                    self.syl_names.push(s.to_string());
+                    self.syl_ids.insert(s.to_string(), i);
+                    i
+                }
+            };
+            self.key_pool.push(id);
+        }
+        let ent = Ent { off: self.words.len() as u32, len: word.len() as u32, score };
+        self.words.push_str(word);
+        self.raw.push(Raw { ent, key_off, key_len: self.key_pool.len() as u32 - key_off });
+    }
+}
+
+/// (reading, word, score, tag) of an overlay row.
+fn overlay_row(line: &str) -> Option<(&str, &str, f64, &str)> {
+    let mut it = line.split('\t');
+    let (Some(r), Some(w), Some(s), Some(tag), None) = (it.next(), it.next(), it.next(), it.next(), it.next()) else {
+        return None;
+    };
+    Some((r, w, s.parse().ok()?, tag))
+}
+
+/// The tag of the rows `ManualSet` collects (tools/build_overlay.py puts overlay-manual.tsv in with it).
+const MANUAL_TAG: &str = "manual";
+
+impl Lexicon {
+    pub fn parse(text: &str) -> Result<Lexicon, Error> {
+        Self::parse_with(text, None)
+    }
+
+    /// Base parse, then overlay rows `reading\tword\tscore\ttag` appended in file order, then one stable sort.
+    pub fn parse_with(text: &str, overlay: Option<&str>) -> Result<Lexicon, Error> {
+        Self::parse_with_variants(text, overlay, None)
+    }
+
+    /// `parse_with`, then the variant-order rows (docs/spec/decoder.md §2.3): before sorting, under each row's reading the score of
+    /// `less` becomes min(its score, `more`'s score - `VARIANT_GAP`). A row naming a spelling the lexicon lacks under that reading is an error.
+    pub fn parse_with_variants(text: &str, overlay: Option<&str>, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+        let mut b = Builder::default();
+        for line in text.lines() {
+            if matches!(line.chars().next(), Some('#') | Some('_')) {
+                continue;
+            }
+            let mut it = line.split_whitespace();
+            let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else {
+                continue;
+            };
+            if word.chars().count() != reading.split('-').count() {
+                continue;
+            }
+            let score: f64 = score.parse().map_err(|_| Error::BadScore { token_len: score.chars().count() })?;
+            b.push(reading, word, score);
+        }
+        let base_n = b.raw.len();
+        // A bad overlay row stops parsing but is reported only if no earlier row is a duplicate.
+        let mut bad_row = None;
+        let mut manual = ManualSet::default();
+        for line in overlay.unwrap_or("").lines() {
+            match overlay_row(line) {
+                Some((r, w, s, tag)) => {
+                    b.push(r, w, s);
+                    if tag == MANUAL_TAG {
+                        manual.push(w, r);
+                    }
+                }
+                None => {
+                    bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() });
+                    break;
+                }
+            }
+        }
+        b.finish(base_n, bad_row, manual, variants)
+    }
+}
+
+impl Builder {
+    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+        let Builder { syl_ids, syl_names, key_pool, mut raw, words } = self;
+        let n = raw.len();
+        // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
+        for (line, v) in variants.map_or(&[][..], |v| &v.rows[..]) {
+            let bad = Error::BadVariantOrder { line: *line };
+            let ids: Vec<u32> = v.reading.iter().map(|s| syl_ids.get(s).copied().ok_or(bad.clone())).collect::<Result<_, _>>()?;
+            let at = |w: &str| -> Vec<usize> {
+                (0..n)
+                    .filter(|&f| {
+                        let r = &raw[f];
+                        r.ent.len as usize == w.len()
+                            && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
+                            && key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize] == ids[..]
+                    })
+                    .collect()
+            };
+            let (less, more) = (at(&v.less), at(&v.more));
+            let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
+            if less.is_empty() || more.is_empty() {
+                return Err(bad);
+            }
+            for f in less {
+                raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
+            }
+        }
+        let key = |f: u32| {
+            let r = &raw[f as usize];
+            &key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]
+        };
+        let word = |f: u32| {
+            let e = &raw[f as usize].ent;
+            &words[e.off as usize..(e.off + e.len) as usize]
+        };
+        // by_word: per distinct word, the first row in file order holding the maximum (strict `>` replaces).
+        let mut widx: Vec<u32> = (0..n as u32).collect();
+        widx.sort_by(|&a, &b| word(a).cmp(word(b)));
+        let mut winners: Vec<u32> = Vec::new();
+        let mut i = 0;
+        while i < n {
+            let mut cur = widx[i];
+            let mut j = i + 1;
+            while j < n && word(widx[j]) == word(cur) {
+                if raw[widx[j] as usize].ent.score > raw[cur as usize].ent.score {
+                    cur = widx[j];
+                }
+                j += 1;
+            }
+            winners.push(cur);
+            i = j;
+        }
+        drop(widx);
+
+        // Group rows by reading (stable: file order kept inside a group).
+        let mut order: Vec<u32> = (0..n as u32).collect();
+        order.sort_by(|&a, &b| key(a).cmp(key(b)));
+        let mut dup: Option<u32> = None;
+        let mut readings: Vec<Reading> = Vec::new();
+        let mut fkeys: Vec<u32> = Vec::new();
+        let mut max_len = 0;
+        let mut s = 0;
+        while s < n {
+            let mut e = s + 1;
+            while e < n && key(order[e]) == key(order[s]) {
+                e += 1;
+            }
+            // An overlay row repeating any earlier row of the same reading (base or overlay) is a duplicate.
+            for p in s..e {
+                let f = order[p];
+                if f as usize >= base_n && (s..p).any(|q| word(order[q]) == word(f)) {
+                    dup = Some(dup.map_or(f, |d| d.min(f)));
+                    break;
+                }
+            }
+            order[s..e].sort_by(|&a, &b| {
+                raw[b as usize].ent.score.partial_cmp(&raw[a as usize].ent.score).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let k = key(order[s]);
+            readings.push(Reading { key_off: fkeys.len() as u32, key_len: k.len() as u32, start: s as u32 });
+            fkeys.extend_from_slice(k);
+            max_len = max_len.max(k.len());
+            s = e;
+        }
+        if let Some(f) = dup {
+            return Err(Error::OverlayDuplicate { word_len: word(f).chars().count() });
+        }
+        if let Some(e) = bad_row {
+            return Err(e);
+        }
+        if n == 0 {
+            return Err(Error::EmptyLexicon);
+        }
+        let mut pos = vec![0u32; n];
+        for (p, &f) in order.iter().enumerate() {
+            pos[f as usize] = p as u32;
+        }
+        let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
+        let ents = order.iter().map(|&f| raw[f as usize].ent).collect();
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual), variants: Vec::new(), tol: OnceLock::new() };
+        let found: Vec<(usize, VariantRow)> = variants.map_or(&[][..], |v| &v.rows[..]).iter().filter_map(|(_, v)| Some((lex.find(&lex.ids(&v.reading))?, v.clone()))).collect();
+        lex.variants = found;
+        lex.words.shrink_to_fit();
+        Ok(lex)
+    }
+}
+
+impl Lexicon {
+    /// The variant-order rows this lexicon was built with (empty without a table).
+    pub fn variant_rows(&self) -> impl Iterator<Item = &VariantRow> {
+        self.variants.iter().map(|(_, v)| v)
+    }
+
+    /// The `manual` words of the overlay this lexicon was built with (empty without an overlay or without such rows).
+    pub fn manual(&self) -> &Arc<ManualSet> {
+        &self.manual
+    }
+
+    fn word(&self, p: usize) -> &str {
+        let e = &self.ents[p];
+        &self.words[e.off as usize..(e.off + e.len) as usize]
+    }
+    fn key_of(&self, r: &Reading) -> &[u32] {
+        &self.key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]
+    }
+    /// Syllable ids; unknown syllables map to u32::MAX, which no reading contains.
+    fn ids(&self, syls: &[String]) -> Vec<u32> {
+        syls.iter().map(|s| self.syl_ids.get(s).copied().unwrap_or(u32::MAX)).collect()
+    }
+    fn find(&self, ids: &[u32]) -> Option<usize> {
+        self.readings.binary_search_by(|r| self.key_of(r).cmp(ids)).ok()
+    }
+    fn range(&self, r: usize) -> std::ops::Range<usize> {
+        let end = self.readings.get(r + 1).map_or(self.ents.len(), |n| n.start as usize);
+        self.readings[r].start as usize..end
+    }
+    fn reading_entries(&self, r: usize) -> impl Iterator<Item = (&str, f64)> {
+        self.range(r).map(|p| (self.word(p), self.ents[p].score))
+    }
+    /// Entry position of the by_word winner.
+    fn winner(&self, w: &str) -> Option<usize> {
+        let i = self.by_word.binary_search_by(|&p| self.word(p as usize).cmp(w)).ok()?;
+        Some(self.by_word[i] as usize)
+    }
+    fn reading_of(&self, p: usize) -> usize {
+        self.readings.partition_point(|r| r.start as usize <= p) - 1
+    }
+
+    /// The tolerance tables, built on first use. An adjacent-key alternative must have a one-syllable entry (the interned syllables
+    /// include the packs', and a pack word may be the only place a syllable stands): the decoder reads an unknown syllable alone through
+    /// its alternatives' one-syllable entries, so an alternative without one could leave a composition no path covers.
+    fn tol(&self) -> &fuzzy::Tolerance {
+        self.tol.get_or_init(|| {
+            let single: HashSet<u32> = self.readings.iter().filter(|r| r.key_len == 1).map(|r| self.key_pool[r.key_off as usize]).collect();
+            fuzzy::Tolerance::build(&self.syl_names, &single)
+        })
+    }
+
+    /// Whether `syl` is a syllable of some reading (an interned one; `ids` maps any other to `u32::MAX`).
+    pub fn has_syllable(&self, syl: &str) -> bool {
+        self.syl_ids.contains_key(syl)
+    }
+
+    /// Every interned syllable (any reading of any entry).
+    pub fn syllables(&self) -> &[String] {
+        &self.syl_names
+    }
+
+    /// Fuzzy sound (bits 0-3 of `flags`): the other lexicon syllables that read as `syl` once the enabled pairs are merged,
+    /// sorted by name. Empty for a syllable the lexicon does not have.
+    pub fn sound_alts(&self, syl: &str, flags: u32) -> Vec<&str> {
+        let Some(&id) = self.syl_ids.get(syl) else { return Vec::new() };
+        self.tol().sound(id, flags).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// Adjacent key: the lexicon syllables that show as `shown` when one key of them is typed as a left/right neighbour in the
+    /// same keyboard row (standard layout, composer columns applied), sorted by name.
+    pub fn adjacent_alts(&self, shown: &str) -> Vec<&str> {
+        self.tol().adjacent(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// The readings (syllable ids) of the words a span may be tolerantly read as: exactly one syllable replaced. A span with an
+    /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
+    /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
+    /// Order: position, then alternative name. The exact reading itself is never among them.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32) -> Vec<Vec<u32>> {
+        let mut out = Vec::new();
+        let mut put = |j: usize, alts: &[u32]| {
+            for &a in alts {
+                let mut r = ids.to_vec();
+                r[j] = a;
+                out.push(r);
+            }
+        };
+        let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
+        match unknown[..] {
+            [j] => put(j, self.tol().adjacent(&syls[j])),
+            [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
+            _ => {}
+        }
+        out
+    }
+
+    /// The one place the words of a span's tolerant readings are chosen, for the decoder (`CappedLexicon::sources`) and the candidate
+    /// window (`tolerant_words`) alike. Returns the tolerant readings that are lexicon readings, as (reading index, syllable ids), and
+    /// the words found through them: not words of the typed reading, each at its best score over the readings (an earlier reading wins
+    /// a tie), best first, at most `per_reading` taken from each reading's entries (after the typed reading's words are left out) and
+    /// `total` kept. A word is (text, score, entry position, index into the readings). `entry` gives an entry position's word and score
+    /// (the decoder's capped ones, or the lexicon's own). Nothing is looked up when the flags and the span allow no tolerant reading.
+    pub(crate) fn tolerant_pick<'a>(
+        &self,
+        ids: &[u32],
+        syls: &[String],
+        flags: u32,
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
+            return (Vec::new(), Vec::new());
+        }
+        let readings: Vec<(usize, Vec<u32>)> = self.tolerant_readings(ids, syls, flags).into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
+        let exact: HashSet<&str> = self.find(ids).into_iter().flat_map(|r| self.range(r)).map(|p| entry(p).0).collect();
+        let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
+        let mut order: Vec<&str> = Vec::new();
+        for (a, (r, _)) in readings.iter().enumerate() {
+            for p in self.range(*r).filter(|&p| !exact.contains(entry(p).0)).take(per_reading) {
+                let (w, sc) = entry(p);
+                match best.get(w) {
+                    Some(&(b, _, _)) if b >= sc => {}
+                    Some(_) => {
+                        best.insert(w, (sc, p, a));
+                    }
+                    None => {
+                        best.insert(w, (sc, p, a));
+                        order.push(w);
+                    }
+                }
+            }
+        }
+        let mut words: Vec<(&str, f64, usize, usize)> = order.iter().map(|&w| (w, best[w].0, best[w].1, best[w].2)).collect();
+        words.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        words.truncate(total);
+        (readings, words)
+    }
+
+    /// Fuzzy input, candidate window: the words of the tolerant readings of `key` (see `tolerant_readings`) that are not words of
+    /// the typed reading, each at its best score, best first, with the lexicon reading each was found under. The same choice as the
+    /// decoder's (`tolerant_pick`), without the decoder's cap per reading: the window lists them all.
+    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32) -> Vec<(&str, Vec<String>)> {
+        let (readings, words) = self.tolerant_pick(&self.ids(key), key, flags, usize::MAX, usize::MAX, |p| (self.word(p), self.ents[p].score));
+        words.into_iter().map(|(w, _, _, a)| (w, readings[a].1.iter().map(|&i| self.syl_names[i as usize].clone()).collect())).collect()
+    }
+
+    /// The readings a decoded path used over the typed syllables `syls`: `words` are its (word, syllable count) in order. A word read through an
+    /// adjacent-key alternative of an unknown syllable (`tolerant_words`) is given under the lexicon reading it was found under, every other word under
+    /// the typed syllables. What `tinylm::manual_mask` matches the manual words against, so a manual word the n-gram's first choice holds through a
+    /// tolerated reading is protected too (docs/spec/decoder.md §7). `syls` itself when the words do not cover it.
+    pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>) -> Vec<String> {
+        let mut out: Vec<String> = Vec::with_capacity(syls.len());
+        for (w, l) in words {
+            let Some(span) = syls.get(out.len()..out.len() + l) else { return syls.to_vec() };
+            let tolerated = self.ids(span).contains(&u32::MAX).then(|| self.tolerant_words(span, 0).into_iter().find(|(tw, _)| *tw == w)).flatten();
+            match tolerated {
+                Some((_, reading)) => out.extend(reading),
+                None => out.extend_from_slice(span),
+            }
+        }
+        if out.len() == syls.len() { out } else { syls.to_vec() }
+    }
+
+    pub fn reading_count(&self) -> usize {
+        self.readings.len()
+    }
+    /// The syllables of reading `r` (`0..reading_count()`), for the exhaustive clean-typing test of docs/spec/english-mixed.md §13.1.
+    #[doc(hidden)]
+    pub fn reading_syllables(&self, r: usize) -> Vec<&str> {
+        self.key_of(&self.readings[r]).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+    /// Sorted (word, score) list of one reading; empty when the reading is unknown.
+    pub fn entries(&self, key: &[String]) -> Vec<(&str, f64)> {
+        self.find(&self.ids(key)).map(|r| self.reading_entries(r).collect()).unwrap_or_default()
+    }
+    /// Whether `word` is an entry of the reading `key`: the one lexicon-membership test of new-word B (the engine's
+    /// rules and refresh, and the decoder's "the lexicon has it" filter), so the three cannot drift apart.
+    pub fn has(&self, key: &[String], word: &str) -> bool {
+        self.find(&self.ids(key)).is_some_and(|r| self.range(r).any(|p| self.word(p) == word))
+    }
+    /// by_word[word]: the winning reading and score.
+    pub fn word_info(&self, word: &str) -> Option<(Syls, f64)> {
+        let p = self.winner(word)?;
+        let r = &self.readings[self.reading_of(p)];
+        Some((self.key_of(r).iter().map(|&i| self.syl_names[i as usize].clone()).collect(), self.ents[p].score))
+    }
+
+    /// Score of the row (`syl`, `word`) of the one-syllable reading `syl`: the largest over duplicate rows (a reading's entries are sorted
+    /// best first), before any demotion or learning; `None` when the lexicon has no such row. The reading term's s(r, w) (`reading::ReadingDecode`).
+    pub fn syllable_score(&self, syl: &str, word: &str) -> Option<f64> {
+        let r = self.find(&[*self.syl_ids.get(syl)?])?;
+        self.reading_entries(r).find(|&(w, _)| w == word).map(|(_, s)| s)
+    }
+
+    /// The highest score of `word` under any of its readings (the by_word winner's), `None` for a word the lexicon lacks. The reading
+    /// term's max over r' of s(r', w).
+    pub fn best_word_score(&self, word: &str) -> Option<f64> {
+        self.winner(word).map(|p| self.ents[p].score)
+    }
+
+    /// Best word segmentation as (start, end) char spans; strict `>` keeps the first best.
+    fn segment_spans(&self, chars: &[char]) -> Option<Vec<(usize, usize)>> {
+        let n = chars.len();
+        let mut best = vec![(f64::NEG_INFINITY, 0usize); n + 1];
+        best[0] = (0.0, 0);
+        for i in 1..=n {
+            for l in 1..=self.max_len.min(i) {
+                let w: String = chars[i - l..i].iter().collect();
+                if let Some(p) = self.winner(&w) {
+                    let ws = self.ents[p].score;
+                    if best[i - l].0 > f64::NEG_INFINITY {
+                        let s = best[i - l].0 + ws;
+                        if s > best[i].0 {
+                            best[i] = (s, i - l);
+                        }
+                    }
+                }
+            }
+        }
+        if best[n].0 == f64::NEG_INFINITY {
+            return None;
+        }
+        let (mut out, mut i) = (Vec::new(), n);
+        while i > 0 {
+            let j = best[i].1;
+            out.push((j, i));
+            i = j;
+        }
+        out.reverse();
+        Some(out)
+    }
+
+    pub fn to_syllables(&self, text: &str) -> Option<Syls> {
+        let chars: Vec<char> = text.chars().collect();
+        let spans = self.segment_spans(&chars)?;
+        let mut out = Vec::new();
+        for (j, i) in spans {
+            let w: String = chars[j..i].iter().collect();
+            out.extend(self.word_info(&w).unwrap().0);
+        }
+        Some(out)
+    }
+
+    /// Words of the answer sentence with their readings (eval.py segment_words).
+    pub fn segment_words(&self, text: &str) -> Option<Vec<(String, Syls)>> {
+        let syls = self.to_syllables(text)?;
+        let chars: Vec<char> = text.chars().collect();
+        let mut pos = 0;
+        Some(
+            self.segment_spans(&chars)?
+                .into_iter()
+                .map(|(j, i)| {
+                    let w: String = chars[j..i].iter().collect();
+                    let r = (w, syls[pos..pos + (i - j)].to_vec());
+                    pos += i - j;
+                    r
+                })
+                .collect(),
+        )
+    }
+
+    fn best_score(&self, key: &[String]) -> f64 {
+        let r = self.find(&self.ids(key)).expect("reading missing");
+        self.ents[self.range(r).start].score
+    }
+    /// dict(by_reading[key])[word]: last duplicate wins.
+    fn word_score(&self, key: &[String], word: &str) -> f64 {
+        let r = self.find(&self.ids(key)).expect("reading missing");
+        self.range(r)
+            .rev()
+            .find(|&p| self.word(p) == word)
+            .map(|p| self.ents[p].score)
+            .expect("learner word missing from reading")
+    }
+}
+
+pub trait Learner {
+    fn bonus(&mut self, _prev: &str, _key: &[String], _word: &str) -> f64 {
+        0.0
+    }
+    fn observe(&mut self, _prev: &str, _syls: &[String], _right: &str) {}
+}
+
+pub struct NoLearning;
+impl Learner for NoLearning {}
+
+pub struct GlobalBoost<'a> {
+    lex: &'a Lexicon,
+    top: HashMap<Syls, String>,
+}
+impl<'a> GlobalBoost<'a> {
+    pub fn new(lex: &'a Lexicon) -> Self {
+        GlobalBoost { lex, top: HashMap::new() }
+    }
+}
+impl Learner for GlobalBoost<'_> {
+    fn bonus(&mut self, _prev: &str, key: &[String], word: &str) -> f64 {
+        if self.top.get(key).map(String::as_str) != Some(word) {
+            return 0.0;
+        }
+        self.lex.best_score(key) - self.lex.word_score(key, word) + 0.01
+    }
+    fn observe(&mut self, _prev: &str, syls: &[String], right: &str) {
+        self.top.insert(syls.to_vec(), right.to_string());
+    }
+}
+
+pub struct ContextKeyed<'a> {
+    lex: &'a Lexicon,
+    mem: HashMap<(String, Syls), String>,
+}
+impl<'a> ContextKeyed<'a> {
+    pub fn new(lex: &'a Lexicon) -> Self {
+        ContextKeyed { lex, mem: HashMap::new() }
+    }
+}
+impl Learner for ContextKeyed<'_> {
+    fn bonus(&mut self, prev: &str, key: &[String], word: &str) -> f64 {
+        if self.mem.get(&(prev.to_string(), key.to_vec())).map(String::as_str) != Some(word) {
+            return 0.0;
+        }
+        self.lex.best_score(key) - self.lex.word_score(key, word) + 0.01
+    }
+    fn observe(&mut self, prev: &str, syls: &[String], right: &str) {
+        self.mem.insert((prev.to_string(), syls.to_vec()), right.to_string());
+    }
+}
+
+pub struct Promotion<'a> {
+    base: GlobalBoost<'a>,
+    count: HashMap<(Syls, String), u32>,
+}
+impl<'a> Promotion<'a> {
+    const TEMP_BONUS: f64 = 0.5;
+    const PROMOTE_AT: u32 = 3;
+    pub fn new(lex: &'a Lexicon) -> Self {
+        Promotion { base: GlobalBoost::new(lex), count: HashMap::new() }
+    }
+}
+impl Learner for Promotion<'_> {
+    fn bonus(&mut self, prev: &str, key: &[String], word: &str) -> f64 {
+        let c = self.count.get(&(key.to_vec(), word.to_string())).copied().unwrap_or(0);
+        if c >= Self::PROMOTE_AT {
+            // Side effect kept from the prototype: bonus() itself promotes.
+            self.base.top.insert(key.to_vec(), word.to_string());
+            return self.base.bonus(prev, key, word);
+        }
+        if c > 0 { Self::TEMP_BONUS } else { 0.0 }
+    }
+    fn observe(&mut self, _prev: &str, syls: &[String], right: &str) {
+        *self.count.entry((syls.to_vec(), right.to_string())).or_insert(0) += 1;
+    }
+}
+
+/// Beam N-best, best first. Each hypothesis is (score, words).
+pub fn decode(
+    lex: &Lexicon,
+    syls: &[String],
+    learner: &mut dyn Learner,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    decode_beam(lex, syls, learner, BEAM)
+}
+
+pub fn decode_beam(
+    lex: &Lexicon,
+    syls: &[String],
+    learner: &mut dyn Learner,
+    beam: usize,
+) -> Result<Vec<(f64, Vec<String>)>, Error> {
+    let n = syls.len();
+    let ids = lex.ids(syls);
+    // hyps[i]: (score, surface, words)
+    let mut hyps: Vec<Vec<(f64, String, Vec<String>)>> = vec![Vec::new(); n + 1];
+    hyps[0].push((0.0, String::new(), Vec::new()));
+    for i in 1..=n {
+        // Insertion-ordered map: index by surface, replacement keeps the slot (Python dict).
+        let mut cand: Vec<(f64, String, Vec<String>)> = Vec::new();
+        let mut idx: HashMap<String, usize> = HashMap::new();
+        for l in 1..=lex.max_len.min(i) {
+            let key = &syls[i - l..i];
+            let Some(r) = lex.find(&ids[i - l..i]) else { continue };
+            if hyps[i - l].is_empty() {
+                continue;
+            }
+            for (word, lp) in lex.reading_entries(r).take(PER_KEY) {
+                for (s, surf, ws) in &hyps[i - l] {
+                    let prev = ws.last().map(String::as_str).unwrap_or("<s>");
+                    let sc = (s + lp) + learner.bonus(prev, key, word);
+                    let surface = format!("{surf}{word}");
+                    match idx.get(&surface) {
+                        Some(&p) if !(sc > cand[p].0) => {}
+                        found => {
+                            let mut nw = ws.clone();
+                            nw.push(word.to_string());
+                            match found {
+                                Some(&p) => cand[p] = (sc, surface, nw),
+                                None => {
+                                    idx.insert(surface.clone(), cand.len());
+                                    cand.push((sc, surface, nw));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Stable descending sort == heapq.nlargest tie behavior.
+        cand.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        cand.truncate(beam);
+        hyps[i] = cand;
+    }
+    let out = std::mem::take(&mut hyps[n]);
+    if out.is_empty() {
+        return Err(Error::NoPath { len: n });
+    }
+    Ok(out.into_iter().map(|(s, _, w)| (s, w)).collect())
+}
+
+#[cfg(test)]
+mod tests;

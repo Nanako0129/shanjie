@@ -1,0 +1,173 @@
+# 參與開發
+
+歡迎三種貢獻：
+
+- 回報選錯的字；
+- 修正詞庫；
+- 改 Swift 殼或 Rust 核心。
+
+先看 README 的「進度」與「路線圖」，知道現在做到哪裡；現在的行為與規格在 `docs/spec/`，評測方法在 `docs/spec/evaluation.md`，建置、CI 與本機關卡在 `docs/spec/release-and-ci.md`。
+
+## 回報選錯的字
+
+開一個 issue，用「選字錯誤」範本，附上下面幾項：
+
+- **實際按的鍵**：例如 `su3cl3`（標準鍵盤）。我們要分辨「讀音對、但選錯字」和「讀音打錯」，這兩種要修的地方不同。
+- **想打的句子**、**善解給的結果**。
+- **前一句**（如果有）。整句轉換會看前文。
+- **App 與鍵盤**：標準或倚天。
+
+回報的句子會加進開發用的評測集 `eval/dev/user-reported.txt`，並以 CC0 釋出。只貼你願意公開的句子。
+
+## 建置與測試
+
+需要：
+
+| 項目 | 版本 |
+|---|---|
+| macOS | 26 以上，Apple 晶片 |
+| Xcode | 27（CI 用 `xcode-27`） |
+| Rust | 1.97.1（和 CI 相同；評測的 golden 檔是用這一版產生的） |
+| GitHub CLI（已 `gh auth login`）或 curl | 下載語言模型與詞類表 |
+
+步驟：
+
+```sh
+# 語言模型、詞類表、Kneser–Ney 側檔、語意校正模型、trigram 表與口語表（常談）不在 repo 裡，從 Release 下載（CC BY-SA 4.0；都要，說明見 docs/spec/models.md）
+gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
+gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm
+gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+gh release download sj-sr-8-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm
+gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D data/lm
+gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+# 沒有登入 gh 的話改用：
+# curl -L --create-dirs -o data/lm/bigram.sjlm https://github.com/Nanako0129/shanjie/releases/download/sj-lm-7-9.7m/bigram.sjlm
+# curl -L --create-dirs -o data/lm/classes.sjc https://github.com/Nanako0129/shanjie/releases/download/sj-wc-6-512c/classes.sjc
+# curl -L --create-dirs -o data/lm/kn.sjkn https://github.com/Nanako0129/shanjie/releases/download/sj-kn-2-397k/kn.sjkn
+# curl -L --create-dirs -o data/lm/tinylm.sjtl https://github.com/Nanako0129/shanjie/releases/download/sj-sr-8-15m/tinylm.sjtl
+# curl -L --create-dirs -o data/lm/trigram.sjt3 https://github.com/Nanako0129/shanjie/releases/download/sj-cx-2-7.7m/trigram.sjt3
+# curl -L --create-dirs -o data/lm/trigram-chat.sjt3 https://github.com/Nanako0129/shanjie/releases/download/sj-cx-2-950k/trigram-chat.sjt3
+# curl -L --create-dirs -o data/lm/colloquial.sjlm https://github.com/Nanako0129/shanjie/releases/download/sj-cl-2-69k/colloquial.sjlm
+# curl -L --create-dirs -o data/lm/colloquial-attribution.tsv https://github.com/Nanako0129/shanjie/releases/download/sj-cl-2-69k/colloquial-attribution.tsv
+shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256 data/trigram-chat.sjt3.sha256 data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
+
+make test      # Rust 核心測試，再跑 Swift 殼的測試，以及詞包建置工具的 python3 單元測試（需要 python3、真的模型與 cargo 建出來的 CLI）
+make bundle    # 組出 build/善解（開發版）.app（開發版 bundle ID）
+```
+
+需要模型的測試，找不到模型時會直接失敗並說明怎麼取得，不會跳過。
+
+**想實際裝起來試**：
+
+```sh
+scripts/install-ime.sh "build/善解（開發版）.app"
+```
+
+- 本機組建裝成「善解（開發版）」：`~/Library/Input Methods/善解（開發版）.app`，上一版留在 `.shanjie-dev-previous`。第一次要在「系統設定 → 鍵盤 → 輸入方式」加入一次。
+- 它的 bundle ID 是 `com.nyanako.inputmethod.shanjie.dev`，輸入模式、偏好設定與學習資料（App 沙盒的 container）都和正式版分開，不會覆蓋或搬走已裝好的「善解輸入法」（正式版或 Homebrew 版），所以不必先移除 Homebrew 版。
+- 正式 bundle ID 的組建（`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`）只給 CI 與發版用；不要在自己的機器上執行或安裝：它第一次啟動就會把正式版的學習資料搬進它的 container（`docs/spec/install-and-update.md` §2.1）。
+
+各項檢查的細節在 `docs/spec/release-and-ci.md` §7。
+
+## 程式結構
+
+| 目錄 | 內容 |
+|---|---|
+| `core/` | Rust 核心：詞庫、候選、語言模型、按鍵引擎、選字記憶；C ABI 在 `core/include/shanjie.h` |
+| `macos/` | Swift 殼：`ShanjieKit`（可測試的邏輯，一律接真的 C 核心）、`Shanjie`（InputMethodKit、候選窗、選單） |
+| `cli/` | `shanjie-eval`：評測工具 |
+| `data/` | 詞庫；授權見 `LICENSES/data.md` |
+| `eval/` | 評測集，規則見 `eval/README.md` |
+| `tools/`、`scripts/` | 詞庫與模型的建置工具、打包與安裝腳本 |
+| `reference/` | Python 參考實作（`reference/proto/`，golden 檔的逐位元組對照） |
+| `docs/` | 現況規格（`docs/spec/`）、Release 說明（`docs/releases/`）、跨版本基準與 KPI 表 |
+
+## 怎麼提改動
+
+**小改動**直接開 PR，例如錯字、詞庫的一行修正、明顯的 bug。
+
+**改到行為的改動**先開 issue 討論，例如按鍵規則、候選排序、C ABI、隱私相關的資料流。
+
+- 先寫清楚要做到什麼、怎麼看到它有效、哪些不做，再實作；改到的行為要同時改 `docs/spec/` 裡對應的規格。
+- 大的改動我們會一起把這些寫出來。
+
+PR 需要：
+
+- **CI 全綠**：Rust 測試、Swift 測試、bundle 檢查。
+- **說明怎麼看到它有效**：測試名稱、評測數字，或實機操作的步驟。
+- **改到選字結果的改動，附開發集的前後數字**：
+  - 在改動前後各跑一次，聊天與書面兩種設定都跑：
+
+    ```sh
+    cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --dev 302
+    cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile formal --dev 302
+    ```
+
+    輸出只有一行摘要，`top1` 是 302 句裡整句對的句數（寬鬆比對：`eval/variants.tsv` 裡的異體寫法也算對）；
+  - 要知道哪幾句變了，前後各加 `--dump before.tsv`／`--dump after.tsv`。每列是「句號、名次、候選、分數」，名次 1 是善解給的結果。只比句號和候選（分數幾乎每次都會變）：
+
+    ```sh
+    diff <(awk -F'\t' '$2==1{print $1"\t"$3}' before.tsv) <(awk -F'\t' '$2==1{print $1"\t"$3}' after.tsv)
+    ```
+
+  - `--dev 302` 是 `eval/dev/` 依檔名排序後的前 302 列，只涵蓋 `user-reported.txt` 的前幾句。修的是回報的錯字時，另外跑那個檔：
+
+    ```sh
+    cargo run --release -q -p cli -- --lm data/lm/bigram.sjlm --profile chat --rows eval/dev/user-reported.txt
+    ```
+
+  - 前後比較用逐列統計：基準與新版各加 `--rowstats "$TMPDIR/before.rowstats"`／`--rowstats "$TMPDIR/after.rowstats"`（`--dev 302` 與 `--rows` 檔都可以），再跑 `python3 tools/evalstats.py compare "$TMPDIR/before.rowstats" "$TMPDIR/after.rowstats" --label dev302-chat`，把那一行表格貼進 PR（改對／改壞、McNemar p、CER、95% 區間）；dev302、打字測驗（`eval/dev/user-typing.txt`）、錯字回報檔在聊天與書面各一行；
+  - 解碼器有讀音項（`docs/spec/decoder.md` §5；評測 CLI 與重播預設都開，`--no-reading-decode` 關閉），而 Python 參考（`reference/proto/lm_eval.py`）沒有，所以 golden 有兩份：`eval/golden/s2h-lm-context.txt` 等 Python 逐位元組對照的檔，CLI 帶 `--no-reading-decode` 比對；`eval/golden/reading-decode-shipping.txt` 是只有 Rust 的出貨預設釘值（dev302、打字測驗、錯字回報，聊天與書面，各兩行：`--context` 的 n-gram，以及出貨旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`、聊天另加 `--colloquial-core data/lm/colloquial.sjlm`）。往 `eval/dev/user-reported.txt` 加列時兩份都要更新：`make test-golden` 會指出哪幾行不同；Python 那份用 `reference/proto/lm_eval.py` 重新產生，Rust 那份用 `cli/tests/golden.rs` 的 `shipping_default_matches_its_rust_only_pins` 裡的指令重跑，換上新的摘要行。
+  - 只要求不退步：dev302 的聊天設定只報、不擋，書面照擋；聊天另由不在 repo 裡的調參集 cvtune-clean-tw0（正解不套 TWPhrases）守門，見 `docs/spec/evaluation.md` §6.1、§11.4；
+  - 有進步的話寫出是哪幾句。
+- **對應的文件一起更新**：`docs/spec/` 的規格、README。
+- **commit 加上 DCO 簽署**（見下一節）。
+
+PR 以 merge commit 合併（不 squash，保留每個 commit 方便 `git bisect`）。合併後 GitHub 會自動刪掉本 repo 裡的 PR 分支，但不會刪你 fork 裡的分支；fork 的分支、本機的分支與 worktree 請自己清掉：
+
+```sh
+git push origin --delete <分支>   # 你 fork 裡的分支
+git fetch --prune
+git branch -d <分支>
+git worktree remove <worktree 路徑>   # 有用 worktree 的話
+```
+
+### 保留集不要拿來調參數
+
+`eval/holdout/` 是保留集，只在發版（推 `v*` tag）前，由沒參與實作的人跑一次，用來確認沒有對開發集過度調整（規則見 `eval/README.md`）。
+
+- 請不要讀它的內容來找錯字或調參數；
+- 也不要把它的句子加進其他地方。
+
+你的 PR 只需要附開發集的數字（上面那張表）；保留集在發版前量。
+
+## DCO 簽署
+
+每個 commit 都要加 `Signed-off-by`，表示你同意 [Developer Certificate of Origin 1.1](https://developercertificate.org/) ：你有權以本專案的授權提交這段內容。
+
+```sh
+git commit -s
+```
+
+會在 commit 訊息最後加上一行：
+
+```text
+Signed-off-by: 你的名字 <你的 email>
+```
+
+忘了加的話，用 `git commit --amend -s`，或 `git rebase --signoff <你的分支開始的地方>`（例如 `upstream/main`）補上。
+
+## 授權
+
+- 程式碼：Apache-2.0（`LICENSE`），你的貢獻也以此授權。
+- 詞庫與資料：各自的授權見 `LICENSES/data.md`。新增資料來源時，要附來源與授權，而且必須可以合法再散布。
+- 授權有疑慮的資料不要提交，例如字典網站的內容、別的輸入法的詞庫。
+
+## 隱私
+
+輸入法看得到使用者打的每一個字，以下規則沒有例外：
+
+- 日誌只能記靜態字串與回傳碼，不能記組字、候選、按鍵或 App 名稱（`docs/spec/privacy.md` §3）。
+- 不能新增連網，除非是預設關閉、使用者明確開啟的功能（`docs/spec/privacy.md` §8）。
+- 不申請「輸入監控」或「輔助使用」權限；InputMethodKit 不需要。

@@ -1,0 +1,20 @@
+# tw-conv-ambiguous.tsv (docs/spec/models.md §9.10, assertion 2): the (expected, got) character pairs that Simplified-and-back cannot restore (real one-to-many characters).
+# Columns: expected character<TAB>got character<TAB>reason. At most 40 rows; a new row needs a reason. Written by main.
+乾	幹	干 一個簡體字對應 乾／幹／干；沒有詞組蓋到時只能取預設（幹），由詞組列決定其他用法
+幹	干	同上（干 本身也是正確的繁體字，例 干涉）
+併	並	并 對應 並／併；預設 並，合併、併購 這類靠詞組
+像	象	象 在簡體裡也代替 像；象 是 OpenCC 的預設，像 只能靠詞組
+兇	凶	凶 對應 凶／兇；預設 凶
+座	坐	簡化後與 坐 同形的情況（座位 的部分用法），靠詞組
+待	呆	OpenCC 把 呆 對到 呆／獃；這裡是 待 被反查成 呆 的情況，轉不回來
+後	后	后 對應 後／后（皇后）；只有標記字的句子不換 后，靠詞組 之后→之後
+樸	朴	朴 對應 樸／朴（姓、朴樹）；預設 朴 依 OpenCC
+沖	衝	冲 對應 衝／沖；預設 衝（同詞替代不到 10 倍），沖泡、沖積 靠詞組
+痠	酸	酸 在簡體裡也代替 痠；預設 酸
+紮	扎	扎 對應 扎／紮；預設 扎
+莊	庄	庄 對應 莊；庄 也是台灣寫法（地名），預設照 OpenCC
+蝨	虱	虱 對應 蝨／虱（土虱是魚、蝨子是蟲）；不是同一個字的兩種寫法，預設照 OpenCC
+霉	黴	霉 對應 霉／黴（倒霉／發黴）；兩個不同的字，預設照 OpenCC
+秘	祕	標準字：同詞替代 秘 對 祕 約 6 倍，不到 10 倍，標準字要界定，除非出現次數壓倒性，所以留 祕；台灣句子本身不轉
+于	於	于 是姓（于美人），簡體的 于 同時代表 於；回程時 STPhrases 的 于美人→於美人 把姓改掉（docs/spec/models.md §9.10）
+竈	灶	專有名詞（竈門炭治郎）寫異體字 竈；簡體 灶 的單字列照辭典正字選 灶（docs/spec/models.md §9.3）

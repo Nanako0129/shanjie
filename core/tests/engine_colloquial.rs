@@ -1,0 +1,269 @@
+//! The colloquial term in the engine (docs/spec/semantic-rerank.md §4, §10): on the real lexicon, n-gram model,
+//! small model and colloquial table (data/lm/, fail loudly without them). The sentence is row 25 of eval/bench/suite-v1/dev302.txt (row 202 until
+//! 通語 SJ-LM-7-9.7M, whose n-gram gets it right): the shipping rerank keeps the n-gram first (candidate 0, `城市`), the term picks candidate 1 (`程式`).
+use core::engine::*;
+use core::lm::Profile;
+use core::tinylm::RerankLevel;
+use std::path::{Path, PathBuf};
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+}
+fn data(f: &str) -> PathBuf {
+    let p = root().join("data/lm").join(f);
+    assert!(p.exists(), "data/lm/{f} is needed: see data/*.sha256 and docs/releases/README.md");
+    p
+}
+
+const CONTEXT: &str = "";
+const ROW: &str = "ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ";
+/// Candidate indices of the row's n-best: what the shipping rerank keeps and what the term picks.
+const SHIPPING: usize = 0;
+const WITH_TERM: usize = 1;
+
+fn keys_of(syl: &str) -> Vec<Key> {
+    let layout = Layout::Standard;
+    let mut v = Vec::new();
+    let mut toned = false;
+    for c in syl.chars() {
+        match layout.key_of_tone(c) {
+            Some(tk) => {
+                v.push(Key::ch(tk, 0));
+                toned = true;
+            }
+            None => v.push(Key::ch(layout.key_of_symbol(c).expect("symbol has a key"), 0)),
+        }
+    }
+    if !toned {
+        v.push(Key::new(KeyKind::Space));
+    }
+    v
+}
+
+/// An engine with the real models, the context set and the row typed; `table` loads the colloquial table first or last.
+fn engine(packs: u32, tinylm: &Path, table: Option<(&Path, bool)>) -> Engine {
+    engine_row(packs, tinylm, table, CONTEXT, ROW)
+}
+
+/// `engine` for another context and row (syllables separated by spaces; `，` is Shift+comma).
+fn engine_row(packs: u32, tinylm: &Path, table: Option<(&Path, bool)>, context: &str, row: &str) -> Engine {
+    let pdir = root().join("data/packs");
+    let mut e = Engine::new_with_packs(&root().join("data/lexicon"), Layout::Standard, Some((&pdir, packs))).unwrap();
+    if let Some((t, true)) = table {
+        e.load_colloquial(t).unwrap();
+    }
+    e.load_lm(&data("bigram.sjlm")).unwrap();
+    e.load_tinylm(tinylm).unwrap();
+    if let Some((t, false)) = table {
+        e.load_colloquial(t).unwrap();
+    }
+    e.set_rerank(true).unwrap();
+    e.set_left_context(context);
+    for syl in row.split(' ') {
+        if syl == "，" {
+            e.key(Key::ch(',', MOD_SHIFT)).unwrap();
+            continue;
+        }
+        for k in keys_of(syl) {
+            e.key(k).unwrap();
+        }
+    }
+    e
+}
+
+/// The picks of the job the current composition has (a fresh one: `set_rerank` recomputes and makes it).
+fn picks(e: &mut Engine) -> Vec<usize> {
+    e.set_rerank(true).unwrap();
+    e.take_rerank_job().expect("a job").run().picks()
+}
+
+fn engine_picks(table: Option<&Path>, tinylm: &Path) -> Vec<usize> {
+    picks(&mut engine(0, tinylm, table.map(|t| (t, false))))
+}
+
+/// A scratch file that is removed when it goes out of scope, an assertion failure included.
+struct Scratch(PathBuf);
+impl std::ops::Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The same `.sjtl` with its last bit flipped: it loads, pairs with the n-gram model and ranks as before, but its SHA-256 is another one.
+fn other_sjtl(name: &str) -> Scratch {
+    let mut b = std::fs::read(data("tinylm.sjtl")).unwrap();
+    *b.last_mut().unwrap() ^= 1;
+    let p = std::env::temp_dir().join(format!("shanjie-colloq-{name}-{}.sjtl", std::process::id()));
+    let p = Scratch(p);
+    std::fs::write(&*p, b).unwrap();
+    p
+}
+
+/// The conditions (docs/spec/semantic-rerank.md §4; the strength is no longer one, colloquial-levels): chat, the paired model, a table: all hold -> the term picks `程式`
+/// (standard, and aggressive with its own cell); the table missing, the formal profile and another small model each leave the jobs those of an
+/// engine without a table (the plain `rerank`). At the conservative strength this row is kept by both (its own cell is tested by
+/// `each_level_uses_its_own_cell`).
+#[test]
+fn the_term_applies_only_under_its_conditions() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    assert_eq!(engine_picks(None, &tl), vec![SHIPPING], "premise: shipping keeps the n-gram first");
+    let mut with = engine(0, &tl, Some((&table, false)));
+    assert_eq!(picks(&mut with), vec![WITH_TERM], "chat, standard, the paired model, the table loaded");
+    let mut without = engine(0, &tl, None);
+    for e in [&mut with, &mut without] {
+        e.set_profile(Profile::Formal).unwrap();
+    }
+    assert_eq!(picks(&mut with), picks(&mut without), "formal: the term is not used");
+    for e in [&mut with, &mut without] {
+        e.set_profile(Profile::Chat).unwrap();
+        e.set_rerank_level(RerankLevel::Aggressive).unwrap();
+    }
+    assert_eq!(picks(&mut without), vec![SHIPPING], "premise: the aggressive header triple keeps the n-gram first");
+    assert_eq!(picks(&mut with), vec![WITH_TERM], "aggressive: the term is used with its own cell");
+    for e in [&mut with, &mut without] {
+        e.set_rerank_level(RerankLevel::Conservative).unwrap();
+    }
+    assert_eq!(picks(&mut with), picks(&mut without), "conservative: this row is kept either way");
+    // back to the shipping setting: the term is on again, with no reload
+    for e in [&mut with, &mut without] {
+        e.set_profile(Profile::Chat).unwrap();
+        e.set_rerank_level(RerankLevel::Standard).unwrap();
+    }
+    assert_eq!(picks(&mut with), vec![WITH_TERM]);
+    // another small model (one bit differs in the file): the pairing fails, so the term is off
+    let other = other_sjtl("other");
+    let (a, b) = (engine_picks(Some(&table), &other), engine_picks(None, &other));
+    assert_eq!(a, b, "another .sjtl: the term is not used");
+    assert_eq!(b, vec![SHIPPING], "premise: the flipped file ranks as the real one");
+}
+
+/// The table may be loaded before or after the n-gram and the small model.
+#[test]
+fn load_order_does_not_matter() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    assert_eq!(picks(&mut engine(0, &tl, Some((&table, true)))), vec![WITH_TERM]);
+}
+
+/// SR-TW product (docs/spec/semantic-rerank.md §10): `Engine::load_colloquial` turns the mild first-word estimate on (SR-TW-M: a first word the
+/// table has no `<s>` bigram for is scored by the unigram estimate), as the evaluation CLI does by default. Row 179 of eval/dev/user-reported.txt (`權限加好了`,
+/// public) is one the estimate changes: the CLI's `--tinylm-scores` `c` at the standard strength is 0 by default and 3 with
+/// `--colloquial-no-unseen-start-unigram` (measured 2026-11-06 on the 會意 SJ-SR-8-15M file: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat
+/// --context --packs acg --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm [--colloquial-no-unseen-start-unigram] --rows <that row>
+/// --tinylm-scores OUT`), so an engine without the estimate picks 3 and fails the second assertion; without the line in `load_colloquial` the first fails too.
+#[test]
+fn load_colloquial_turns_the_first_word_estimate_on() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    let mut e = engine_row(PACK_ACG, &tl, Some((&table, false)), "", "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ ㄏㄠˇ ㄌㄜ˙");
+    assert!(e.colloquial().unwrap().unseen_start_unigram(), "load_colloquial turns the estimate on");
+    assert_eq!(picks(&mut e), vec![0], "the CLI's default pick on the row");
+    assert_ne!(picks(&mut e), vec![3], "not the pick without the estimate (--colloquial-no-unseen-start-unigram)");
+}
+
+/// A failed load leaves the engine as it was (the previous table, or none) and drops the pending job.
+#[test]
+fn a_failed_load_changes_nothing_but_the_job() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    let bad = Scratch(std::env::temp_dir().join(format!("shanjie-colloq-bad-{}.sjlm", std::process::id())));
+    std::fs::write(&*bad, b"not a table").unwrap();
+    let mut e = engine(0, &tl, None);
+    assert!(e.colloquial().is_none());
+    assert!(e.load_colloquial(&bad).is_err() && e.load_colloquial(Path::new("/nonexistent/x.sjlm")).is_err());
+    assert!(e.colloquial().is_none(), "no table before, none after");
+    assert_eq!(picks(&mut e), vec![SHIPPING]);
+    e.load_colloquial(&table).unwrap();
+    let sha = e.colloquial().unwrap().sha256().to_string();
+    let job = e.take_rerank_job().or_else(|| {
+        e.set_rerank(true).unwrap();
+        e.take_rerank_job()
+    });
+    assert!(e.load_colloquial(&bad).is_err());
+    assert_eq!(e.colloquial().map(|c| c.sha256()), Some(sha.as_str()), "the previous table stays");
+    assert!(e.apply_rerank(job.unwrap().run()).unwrap().is_none(), "the pending job was dropped");
+    assert_eq!(picks(&mut e), vec![WITH_TERM], "and the table still works");
+}
+
+/// k counts the words of the packs the engine was built with: a word only the acg pack has is in k with the pack and not without it.
+/// The row below is the first row of the pack, which overlay-add.tsv and mcbpmf-data.txt do not have.
+#[test]
+fn k_counts_the_pack_words_the_engine_was_built_with() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    let pack = std::fs::read_to_string(root().join("data/packs/acg-add.tsv")).unwrap();
+    let word = pack.lines().next().unwrap().split('\t').nth(1).unwrap().to_string();
+    let k = |packs: u32| engine(packs, &tl, Some((&table, false))).colloquial().unwrap().k(&[word.as_str()]);
+    assert_eq!((k(PACK_ACG), k(0)), (1, 0));
+}
+
+/// Rows 81 and 159 of eval/dev/user-reported.txt (public), the two rows where the reading-channel term (removed by
+/// docs/spec/decoder.md §5) changed the colloquial term's choice on the 通語 SJ-LM-7-9.7M files in v0.6.1: (context, syllables, the pick with the
+/// colloquial term alone, the pick v0.6.1 gave with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27; the `alone` picks 0 and 4 re-measured 2026-11-06 with the 會意 SJ-SR-8-15M file, standard
+/// strength, `--packs acg --colloquial-core`: the same).
+const CHANNEL_ROWS: [(&str, &str, usize, usize); 2] = [("", "ㄓㄤˇ ㄨㄞ ㄌㄜ˙", 0, 2), ("", "ㄧㄡˇ ㄉㄧㄢˇ ㄌㄟˇ ㄓㄨㄟˋ", 4, 0)];
+
+/// There is no reading-channel term in the job any more: the colloquial term stands alone, so rows 81 and 159 pick what v0.6.1 picked with the channel off
+/// (`alone`), not what it picked with the channel on (`with`; that was the channel's doing, and the reading term of the decoder is what keeps 長 read ㄓㄤˇ
+/// in row 81 now), and `set_reading_decode(false)` does not bring the channel back.
+#[test]
+fn the_colloquial_term_stands_alone() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    for (i, (ctx, row, alone, with)) in CHANNEL_ROWS.iter().enumerate() {
+        assert_ne!(alone, with);
+        let mut on = engine_row(PACK_ACG, &tl, Some((&table, false)), ctx, row);
+        let mut off = engine_row(PACK_ACG, &tl, Some((&table, false)), ctx, row);
+        off.set_reading_decode(false);
+        assert_eq!(picks(&mut off), vec![*alone], "row {i}: the colloquial term alone, no reading term anywhere");
+        assert_eq!(picks(&mut on), vec![*alone], "row {i}: the decoder's reading term does not bring the channel back");
+    }
+}
+
+/// Public rows where a level's own cell picks a candidate that the standard cell or the level's header triple (the plain `rerank`) does not pick,
+/// with the picks of `--rerank-level L --colloquial-core` and the two it must differ from (the CLI's `--tinylm-scores` `c`, measured 2026-11-06 on the
+/// 會意 SJ-SR-8-15M file `data/lm/tinylm.sjtl` and the shipping cells: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg
+/// --tinylm data/lm/tinylm.sjtl --rerank-level L [--colloquial-core data/lm/colloquial.sjlm] --dev 302 --tinylm-scores OUT`, the row's `c`):
+/// (level, context, syllables, cell's pick, standard cell's pick, header triple's pick). Rows 25 and 36 of eval/bench/suite-v1/dev302.txt at the conservative
+/// strength (25: the conservative delta 1 keeps the n-gram first where the standard cell, delta 0, takes the term's pick; 36: the term's pick 忠於 that the
+/// header triple alone does not make, which the standard cell makes too). Row 22 at the aggressive one: the aggressive cell is the standard cell (docs/spec/semantic-rerank.md §4), so the two picks are the same candidate and both differ from the header triple's (the premise "the aggressive
+/// cell picks differently from the standard one" of the earlier versions is gone with the cell). The rows no longer picked apart at the conservative strength
+/// differ from the standard cell or the header triple, never from both.
+const LEVEL_ROWS: [(RerankLevel, &str, &str, usize, usize, usize); 3] = [
+    (RerankLevel::Conservative, "", "ㄓˊ ㄒㄧㄥˊ ㄓㄜˋ ㄍㄜ˙ ㄔㄥˊ ㄕˋ", 0, 1, 0),
+    (RerankLevel::Conservative, "", "ㄋㄧˇ ㄧㄠˋ ㄓㄨㄥ ㄩˊ ㄗˋ ㄐㄧˇ", 1, 1, 0),
+    (RerankLevel::Aggressive, "", "ㄊㄞˊ ㄅㄟˇ ㄕˋ ㄧ ㄍㄜ˙ ㄏㄣˇ ㄉㄚˋ ㄉㄜ˙ ㄔㄥˊ ㄕˋ", 2, 2, 0),
+];
+
+/// docs/spec/semantic-rerank.md §4.4, the engine path: the job takes the engine's rerank level when it is made, and its colloquial
+/// term uses that level's (alpha, tau, delta). The pick at each level is the CLI's index, and differs from the standard cell's (an engine that fuses
+/// with the standard values, or a job that does not remember the level, picks that) or from the header triple's (no term), see `LEVEL_ROWS`.
+#[test]
+fn each_level_uses_its_own_cell() {
+    let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
+    for (level, ctx, row, cell, standard, plain) in LEVEL_ROWS {
+        assert!(cell != standard || cell != plain, "{level:?}: premise, a pick that one of the two alternatives does not make");
+        let at = |level: RerankLevel, table: Option<&Path>| {
+            let mut e = engine_row(PACK_ACG, &tl, table.map(|t| (t, false)), ctx, row);
+            e.set_rerank_level(level).unwrap();
+            picks(&mut e)
+        };
+        assert_eq!(at(RerankLevel::Standard, Some(&table)), vec![standard], "{level:?}: the standard cell");
+        assert_eq!(at(level, None), vec![plain], "{level:?}: the header triple, no table");
+        assert_eq!(at(level, Some(&table)), vec![cell], "{level:?}: the level's own cell");
+    }
+}
+
+/// `colloquial::applies` is the engine's and the CLI's one decision: chat and the measured small model only. It has no strength parameter; that the
+/// terms run at every strength is `each_level_uses_its_own_cell`.
+#[test]
+fn applies_is_chat_and_the_paired_model() {
+    let lm = core::lm::Lm::load(&data("bigram.sjlm")).unwrap();
+    let real = core::tinylm::TinyLm::load_paired(&data("tinylm.sjtl"), &lm).unwrap();
+    let other = other_sjtl("applies");
+    let flipped = core::tinylm::TinyLm::load_paired(&other, &lm).unwrap();
+    assert!(core::colloquial::applies(Profile::Chat, &real), "chat, the measured model");
+    assert!(!core::colloquial::applies(Profile::Formal, &real), "formal");
+    assert!(!core::colloquial::applies(Profile::Chat, &flipped), "another .sjtl");
+}
