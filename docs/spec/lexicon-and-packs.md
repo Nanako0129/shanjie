@@ -72,10 +72,13 @@
 
 1. 維基來源的列（標籤 `wikt`、`zhwiki`），依詞的 code point 排序；
 2. `萌典補詞` 的列（§2.7）；
-3. `manual` 的列（§2.9），照 `overlay-manual.tsv` 的順序；
-4. `slang` 的列（§2.10），照 `slang-add.tsv` 的順序。
+3. `lexgap` 的列，照 `--lexgap FILE` 詞表的順序；
+4. `manual` 的列（§2.9），照 `overlay-manual.tsv` 的順序；
+5. `slang` 的列（§2.10），照 `slang-add.tsv` 的順序。
 
-第 2 段只有帶 `--moedict-supplement` 才有，不帶時輸出只有 1、3、4 三段。
+第 2 段只有帶 `--moedict-supplement` 才有，第 3 段只有帶 `--lexgap` 才有；兩個都不帶時輸出只有 1、4、5 三段，和沒有這兩個旗標的建置逐位元組相同。
+
+`--lexgap FILE`（預設關）：詞表是疊加層格式、第四欄 `lexgap`，`#` 開頭與空白行略過，可以有 BOM。每個詞的讀音照給的寫，分數一律是 `length_scores[字數]`（不加 `MANUAL_BONUS`，檔裡的分數不用）；和這個詞前一個主要讀音用 `sandhi_variant` 算出的變調讀音相同的列，放在哪裡都略過（重複幾次也一樣），變調列由建置照規則寫出；其他列都當主要讀音。下列任何一項就中止並指出行號：欄數或標籤不對、不是漢字、字數沒有分數、讀音的音節數不等於字數或有不認得的音節；詞已經在基底、前面各段、名單層或任一詞包（不論讀音）；同一個讀音上和基底、前面各段或詞表前面的詞只差異體寫法；兩個主要讀音列的（讀音, 詞）相同，或主要讀音列和建置寫出的變調列相同。這份詞表的詞要進通語的計數詞表，也要在常開詞庫裡才打得出來。
 
 ### 2.2 候選來源與過濾
 
@@ -145,9 +148,9 @@
 
 ### 2.11 重建與驗證
 
-- `python3 tools/build_overlay.py`：產生並寫入（需要 dump；萌典補詞需要 `--moedict-supplement` 給語料檔；§2.7、§2.8 的旗標預設關，不帶旗標的輸出只含維基來源的列，所以和含 `萌典補詞` 列的提交檔不同）。
+- `python3 tools/build_overlay.py`：產生並寫入（需要 dump；萌典補詞需要 `--moedict-supplement` 給語料檔；§2.7、§2.8 與 `--lexgap`（§2.1）的旗標預設關，不帶旗標的輸出只含維基來源的列，所以和含 `萌典補詞` 列的提交檔不同）。
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
-- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞或網路用語時用。
+- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞或網路用語時用。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
 
 ## 3. 名單層 `names-add.tsv`

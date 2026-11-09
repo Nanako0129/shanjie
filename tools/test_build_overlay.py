@@ -63,6 +63,57 @@ class ManualRows(unittest.TestCase):
                 manual(text, taken)
 
 
+class LexgapRows(unittest.TestCase):
+    """--lexgap: a word list in overlay format, appended with the tag lexgap after the supplement rows and before the manual tail."""
+    FOLD = {"臺": "台"}
+    fold_w = staticmethod(lambda t: "".join(LexgapRows.FOLD.get(c, c) for c in t))
+
+    def rows(self, text, taken=(), by_reading=None, earlier=(), encoding="utf-8"):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "lexgap-add.tsv")
+            with open(p, "w", encoding=encoding) as f:
+                f.write(text)
+            return B.lexgap_rows(p, set(taken), SCORES, SYLLABLES, by_reading or {}, self.fold_w, list(earlier))
+
+    def test_reading_as_given_score_is_length_scores_without_the_manual_bonus_and_the_tag_is_lexgap(self):
+        rows = self.rows("# note\n\nㄐㄧㄚˇ-ㄧˇ\t甲乙\t-99.0\tlexgap\nㄐㄧㄚˇ-ㄧˇ-ㄅㄧㄥˇ\t甲乙丙\t-1.0\tlexgap\n")
+        self.assertEqual(rows, [f"ㄐㄧㄚˇ-ㄧˇ\t甲乙\t{SCORES[2]!r}\tlexgap\n", f"ㄐㄧㄚˇ-ㄧˇ-ㄅㄧㄥˇ\t甲乙丙\t{SCORES[3]!r}\tlexgap\n"])   # the file's own score is not used
+
+    def test_the_sandhi_row_is_written_once_whether_or_not_the_list_has_it(self):
+        main, var = "ㄧ-ㄒㄧㄡ-ㄍㄜ", "ㄧˋ-ㄒㄧㄡ-ㄍㄜ"
+        want = [f"{main}\t一休哥\t{SCORES[3]!r}\tlexgap\n", f"{var}\t一休哥\t{round(SCORES[3] - B.VARIANT_PENALTY, 8)!r}\tlexgap\n"]
+        self.assertEqual(self.rows(f"{main}\t一休哥\t-1.0\tlexgap\n"), want)
+        self.assertEqual(self.rows(f"{main}\t一休哥\t-1.0\tlexgap\n{var}\t一休哥\t-1.5\tlexgap\n"), want)
+
+    def test_a_word_with_two_main_readings_keeps_both_in_file_order(self):
+        rows = self.rows("ㄐㄧㄚˇ-ㄧˇ\t甲乙\t0\tlexgap\nㄧˇ-ㄐㄧㄚˇ\t甲乙\t0\tlexgap\n")
+        self.assertEqual([r.split("\t")[0] for r in rows], ["ㄐㄧㄚˇ-ㄧˇ", "ㄧˇ-ㄐㄧㄚˇ"])
+
+    def test_a_bom_is_not_part_of_the_first_line(self):
+        self.assertEqual(len(self.rows("ㄐㄧㄚˇ-ㄧˇ\t甲乙\t0\tlexgap\n", encoding="utf-8-sig")), 1)
+
+    def test_bad_rows_stop_the_build(self):
+        ok = "ㄐㄧㄚˇ-ㄧˇ\t甲乙\t0\tlexgap\n"
+        bad = {
+            "a word already in the base, a layer or a pack": (ok, {"taken": {"甲乙"}}),
+            "another tag": ("ㄐㄧㄚˇ-ㄧˇ\t甲乙\t0\tzhwiki\n", {}),
+            "three columns": ("ㄐㄧㄚˇ-ㄧˇ\t甲乙\t0\n", {}),
+            "syllable count": ("ㄐㄧㄚˇ\t甲乙\t0\tlexgap\n", {}),
+            "unknown syllable": ("jia3-ㄧˇ\t甲乙\t0\tlexgap\n", {}),
+            "not Han": ("ㄐㄧㄚˇ-ㄧˇ\tab\t0\tlexgap\n", {}),
+            "a length without a score": ("-".join(["ㄧˇ"] * 11) + "\t" + "甲" * 11 + "\t0\tlexgap\n", {}),
+            "a variant of a base word on the same reading": ("ㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", {"by_reading": {("ㄐㄧㄚˇ", "ㄧˇ"): [("台乙", -5.0)]}}),
+            "a variant of an earlier row on the same reading": ("ㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", {"earlier": [["ㄐㄧㄚˇ-ㄧˇ", "台乙"]]}),
+            "a variant of an earlier row of this list": ("ㄐㄧㄚˇ-ㄧˇ\t台乙\t0\tlexgap\nㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", {}),
+        }
+        for why, (text, kw) in bad.items():
+            with self.assertRaises(SystemExit, msg=why):
+                self.rows(text, **kw)
+        with self.assertRaisesRegex(SystemExit, "repeats a reading"):                # the word is not reported as a variant of itself
+            self.rows(ok + ok)
+        self.assertEqual(len(self.rows("ㄐㄧㄚˇ-ㄧˇ\t臺乙\t0\tlexgap\n", by_reading={("ㄅㄧㄥˇ", "ㄧˇ"): [("台乙", -5.0)]})), 1)   # the same fold on another reading is no variant
+
+
 class MoedictSupplement(unittest.TestCase):
     """docs/spec/lexicon-and-packs.md §2.7: the source 萌典補詞."""
     MOE = {"甲乙": ("ㄐㄧㄚˇ", "ㄧˇ"), "丙丁": ("ㄅㄧㄥˇ", "ㄉㄧㄥ"), "戊己": ("ㄨˋ", "ㄍㄜ"), "庚辛": ("jia3", "ㄧˇ"), "壬癸": ("ㄨˋ", "ㄍㄜ")}
@@ -154,7 +205,7 @@ class BuildFlags(unittest.TestCase):
         with contextlib.ExitStack() as st, contextlib.redirect_stdout(io.StringIO()):
             for p in patches:
                 st.enter_context(p)
-            return B.build(*args, supplement=[corpus] if kw.get("sup") else None, reading_report=kw.get("report") and os.path.join(d, "r.tsv")), d
+            return B.build(*args, supplement=[corpus] if kw.get("sup") else None, reading_report=kw.get("report") and os.path.join(d, "r.tsv"), lexgap=kw.get("lexgap")), d
 
     def row(self, rows, w):
         return [r for r in rows if r.split("\t")[1] == w]
@@ -169,6 +220,58 @@ class BuildFlags(unittest.TestCase):
         tags = [r.rstrip("\n").split("\t")[3] for r in rows]
         tail = tags[tags.index("manual"):]
         self.assertEqual(tail, sorted(tail, key=("manual", "slang").index))   # the tail is the manual rows, then the slang rows (docs/spec/lexicon-and-packs.md §2.10)
+
+    def lexgap_file(self, text):
+        d = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, d)
+        p = os.path.join(d, "lexgap-add.tsv")
+        open(p, "w", encoding="utf-8").write(text)
+        return p
+
+    def test_without_lexgap_the_code_is_not_reached_and_an_empty_list_changes_nothing(self):
+        (plain, *_), _ = self.build()
+        with mock.patch.object(B, "lexgap_rows", side_effect=AssertionError("called")):
+            (again, *_), _ = self.build()
+        (empty, *_), _ = self.build(lexgap=self.lexgap_file("# nothing\n"))
+        self.assertEqual((plain, empty), (again, plain))
+        self.assertFalse([r for r in plain if r.endswith("\tlexgap\n")])
+
+    def test_a_word_of_a_pack_or_the_names_layer_or_an_earlier_row_stops_the_build_on_any_reading(self):
+        w = self.words[-2]
+        line = lambda x, syls: f"{'-'.join(syls)}\t{x}\t-1.0\tlexgap\n"
+        own = B.normalize(w, self.base.to_syllables(w))
+        real = B.other_layers()
+        with mock.patch.object(B, "other_layers", lambda: real | {w}), self.assertRaisesRegex(SystemExit, "already in"):
+            self.build(lexgap=self.lexgap_file(line(w, own)))
+        other = list(reversed(B.normalize(self.title, self.base.to_syllables(self.title))))   # the title's row is written on the other reading
+        with self.assertRaisesRegex(SystemExit, "already in"):
+            self.build(lexgap=self.lexgap_file(line(self.title, other)))
+
+    def test_an_empty_lexgap_path_and_lexgap_with_tails_only_are_usage_errors(self):
+        for argv in (["--lexgap", ""], ["--lexgap", "x.tsv", "--tails-only"]):
+            with mock.patch.object(sys, "argv", ["build_overlay.py", *argv]), mock.patch.object(B, "build", side_effect=AssertionError("built")), \
+                    mock.patch.object(B, "rebuild_tails", side_effect=AssertionError("rebuilt")), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as e:
+                B.main()
+            self.assertEqual(e.exception.code, 2, argv)
+
+    def test_lexgap_rows_sit_after_the_supplement_rows_and_before_the_manual_tail(self):
+        w, bu = self.words[-1], self.bu
+        text = "".join(f"{'-'.join(B.normalize(x, self.base.to_syllables(x)))}\t{x}\t-1.0\tlexgap\n" for x in (w, bu))
+        (rows, *_), _ = self.build(sup=True, lexgap=self.lexgap_file(text))
+        tags = [r.rstrip("\n").split("\t")[3] for r in rows]
+        first, last = tags.index("lexgap"), len(tags) - 1 - tags[::-1].index("lexgap")
+        self.assertLess(tags.index("萌典補詞"), first)
+        self.assertLess(last, tags.index("manual"))
+        self.assertEqual(tags[first:last + 1], ["lexgap"] * (last - first + 1))
+        score = B.length_scores(self.base)
+        self.assertEqual([float(r.split("\t")[2]) for r in self.row(rows, w)], [score[len(w)]])         # length_scores, no manual bonus
+        self.assertEqual(len(self.row(rows, bu)), 2)                                                      # 不 gets its sandhi row from overlay_rows
+
+    def test_a_lexgap_word_that_is_already_written_stops_the_build(self):
+        x = self.title                                                    # a wiktionary title the build writes
+        line = f"{'-'.join(B.normalize(x, self.base.to_syllables(x)))}\t{x}\t0\tlexgap\n"
+        with self.assertRaises(SystemExit):
+            self.build(lexgap=self.lexgap_file(line))
 
     def test_moedict_readings_and_report(self):
         (rows, _, _, _), d = self.build(True, report=True)
