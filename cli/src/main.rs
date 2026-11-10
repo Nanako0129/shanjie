@@ -266,14 +266,14 @@ struct RowOut {
 /// (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words, the 12 pairs of
 /// `data/lexicon/std-exempt.tsv` free) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
 /// `--tinylm-scores` `ng` and the pick all see it. The table is built by `core::engine::load_reading_decode` from the merged lexicon and the data folder, the one
-/// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>` in every setting. `--no-reading-decode`
-/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has neither `+rd` nor `+rx`. There is no reading-channel term in the
+/// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>+rm` in every setting (`+rm`: the reading-mass rule). `--no-reading-decode`
+/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has no `+rd`, `+rx` or `+rm`. There is no reading-channel term in the
 /// fusion (docs/spec/decoder.md §5; no `+rc` tag), so the colloquial tag is just `+colloq:<sha8>`.
 ///
 /// `--reading-table FILE` (evaluation only; experiments/reading-counts-b3 in the research repository; not in the engine or the C ABI): the reading term's t comes from
 /// the file's `character TAB reading TAB t` rows (t before the `lambda * max(t, -c)` step) instead of the built-in table; a pair of the lexicon the file lacks
 /// reads t = 0, and a malformed row, a character or reading the lexicon has no single-character pair for, or a pair twice stops the run naming the line. The tag
-/// gains `+rt:<first 8 hex of the file's SHA-256>` after `+rd+rx:...`. `--dump-reading-table FILE` writes the built-in table (every (character, reading) pair of
+/// gains `+rt:<first 8 hex of the file's SHA-256>` after `+rd+rx:...+rm`. `--dump-reading-table FILE` writes the built-in table (every (character, reading) pair of
 /// a character with at least two single-character readings, t as the term's input, sorted, shortest round-trip float text) and stops, printing nothing; it refuses
 /// to overwrite. A run with the file it wrote gives the picks and `top1_sha256` of a run without `--reading-table`. Both need the reading term (no `--no-reading-decode`).
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {

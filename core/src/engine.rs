@@ -1035,9 +1035,10 @@ pub const READING_EXEMPT_FILE: &str = "std-exempt.tsv";
 pub fn load_reading_decode(lex: &Lexicon, data_dir: &Path) -> Result<crate::reading::ReadingDecode, LoadError> {
     let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
     let exempt = read_file(data_dir.join(READING_EXEMPT_FILE))?;
-    crate::reading::ReadingDecode::new(lex, &base)
+    let rd = crate::reading::ReadingDecode::new(lex, &base)
         .with_exempt(&exempt)
-        .map_err(|detail| LoadError::Parse { path: data_dir.join(READING_EXEMPT_FILE), detail })
+        .map_err(|detail| LoadError::Parse { path: data_dir.join(READING_EXEMPT_FILE), detail })?;
+    Ok(rd.with_mass(lex, &base))
 }
 
 /// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line

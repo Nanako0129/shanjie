@@ -1,7 +1,7 @@
 //! The reading term of the n-gram decoder (docs/spec/decoder.md §5; it is the CLI's default now, `--no-reading-decode` leaves it out). With the
 //! option the CLI is what main printed before the term existed: the summary lines of eight settings (chat and formal, with and without `--tinylm`, on
 //! dev302 and typing76 of eval/bench/suite-v1, `--context --packs acg`) and the dump of the four n-gram ones are pinned to what origin/main 533a029d printed
-//! (recorded 2026-11-01; Mac arm64, data/lm as in data/*.sha256). By default every tag ends `+rd+rx:<sha8 of data/lexicon/std-exempt.tsv>`, a public row's
+//! (recorded 2026-11-01; Mac arm64, data/lm as in data/*.sha256). By default every tag ends `+rd+rx:<sha8 of data/lexicon/std-exempt.tsv>+rm`, a public row's
 //! decoder first changes and the scores file's `ng` is the decoder's score with the term in it.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -67,7 +67,7 @@ fn args<'a>(profile: &'a str, tinylm: bool, rows: &'a str) -> Vec<&'a str> {
 }
 
 /// `--no-reading-decode`: the summary line (tag, n, top1, oracle@64, top1_sha256) of eight settings is that of main before the term existed, and (macOS only:
-/// the f64 dump values round differently under the Linux libm) so is the dump of four. The tag has neither `+rd` nor `+rx`.
+/// the f64 dump values round differently under the Linux libm) so is the dump of four. The tag has no `+rd`, `+rx` or `+rm`.
 #[test]
 fn no_reading_decode_is_what_main_printed() {
     let dir = tmp("off");
@@ -95,11 +95,11 @@ fn exempt_sha8() -> String {
     core::eval::sha256_hex(&std::fs::read(root().join("data/lexicon/std-exempt.tsv")).unwrap())[..8].to_string()
 }
 
-/// By default every one of the eight settings ends its tag `+rd+rx:<sha8 of std-exempt.tsv>` (the numbers of these two public sets do not move: the term acts on
+/// By default every one of the eight settings ends its tag `+rd+rx:<sha8 of std-exempt.tsv>+rm` (the numbers of these two public sets do not move: the term acts on
 /// other rows, see the next test).
 #[test]
 fn every_setting_ends_its_tag_with_rd_and_rx() {
-    let want = format!("+rd+rx:{}  {{'n': ", exempt_sha8());
+    let want = format!("+rd+rx:{}+rm  {{'n': ", exempt_sha8());
     for (profile, tinylm, set, _n, _top1, _o64, sha) in BEFORE {
         let rows = format!("eval/bench/suite-v1/{set}.txt");
         let o = run(&args(profile, tinylm, &rows));
@@ -149,7 +149,7 @@ fn the_default_decoder_first_carries_the_term_and_ng_is_its_score() {
 
 /// `--reading-table` / `--dump-reading-table` (evaluation only; experiments/reading-counts-b3 in the research repository). The defining property: the table
 /// `--dump-reading-table` wrote, read back by `--reading-table`, is the built-in table, so a run with it has the picks (dump, rowstats) and the summary line of a
-/// run without the option, but for the tag's `+rt:<sha8 of the file>` after `+rd+rx:...`; without the option the tag has no `+rt` and the other tests above
+/// run without the option, but for the tag's `+rt:<sha8 of the file>` after `+rd+rx:...+rm`; without the option the tag has no `+rt` and the other tests above
 /// pin the output. Eight settings (chat and formal, with and without `--tinylm`, dev302 and typing76).
 #[test]
 fn a_reading_table_of_the_built_in_values_changes_nothing() {
@@ -179,7 +179,7 @@ fn a_reading_table_of_the_built_in_values_changes_nothing() {
             (text(&o.stdout), std::fs::read(d).unwrap(), std::fs::read(r).unwrap())
         };
         let (off, on) = (go(false), go(true));
-        assert!(!off.0.contains("+rt") && on.0.contains(&format!("+rd+rx:{}+rt:{sha8}  {{", exempt_sha8())), "{}", on.0);
+        assert!(!off.0.contains("+rt") && on.0.contains(&format!("+rd+rx:{}+rm+rt:{sha8}  {{", exempt_sha8())), "{}", on.0);
         assert_eq!(on.0.replace(&format!("+rt:{sha8}"), ""), off.0, "{profile} {tinylm} {set}: summary");
         assert!(on.1 == off.1 && on.2 == off.2, "{profile} {tinylm} {set}: dump / rowstats");
     }

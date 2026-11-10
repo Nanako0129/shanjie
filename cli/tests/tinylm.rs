@@ -77,7 +77,7 @@ fn another_ngram_model_is_refused() {
     let line = text(&ok.stdout);
     let sha8 = &core::eval::sha256_hex(&std::fs::read(&patched).unwrap())[..8];
     let rx8 = &core::eval::sha256_hex(&std::fs::read(root().join("data/lexicon/std-exempt.tsv")).unwrap())[..8];
-    assert!(line.starts_with(&format!("## {}  lm-chat+tl:{sha8}+rd+rx:{rx8}  {{", rows.file_name().unwrap().to_string_lossy())), "{line}");
+    assert!(line.starts_with(&format!("## {}  lm-chat+tl:{sha8}+rd+rx:{rx8}+rm  {{", rows.file_name().unwrap().to_string_lossy())), "{line}");
     std::fs::remove_dir_all(dir).unwrap();
     std::fs::remove_file(rows).unwrap();
 }

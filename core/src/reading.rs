@@ -3,7 +3,8 @@
 //! (the reading-channel research's `lex_logp`) with the sandhi exemption and the `floor_mc` floor and the 12 pairs of
 //! `data/lexicon/std-exempt.tsv` (R1g), the registered arm B-f of section R1c. The table is built by `engine::load_reading_decode` from the merged
 //! lexicon and the data directory, and handed to the decoder by `CappedLexicon::with_reading`; the engine (`load_lm`), the evaluation CLI and the replay
-//! all call that one function. A lexicon built without it decodes as before.
+//! all call that one function. A lexicon built without it decodes as before. Last of all `with_mass` (reading-counts B, variant T3b) lets the
+//! multi-character words tell apart the readings of a character whose single-character scores tie.
 use crate::Lexicon;
 use crate::eval::sha256_hex;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +19,18 @@ pub const LEX_FLOOR: f64 = -6.8;
 /// The tone-sandhi readings that cost nothing (the research's `SANDHI`): 一 read ㄧˊ or ㄧˋ and 不 read ㄅㄨˊ are the standard readings before the
 /// right tones (docs/spec/decoder.md §8.1), not rare ones. Whatever the next syllable: the rule that picks the sandhi tone is not checked.
 pub const SANDHI: [(&str, &str); 3] = [("ㄧˊ", "一"), ("ㄧˋ", "一"), ("ㄅㄨˊ", "不")];
+/// `with_mass` adopts a mass-estimated t only when it is at most `-MASS_MIN_DEDUCTION` (variant T3b of the reading-counts B research; a smaller
+/// deduction is a tie the multi-character words do not settle, so the reading stays at 0).
+pub const MASS_MIN_DEDUCTION: f64 = 1.0;
+/// Added to both masses of the ratio in `with_mass`, so a reading no multi-character word reads gets a finite (very negative) t.
+const MASS_EPS: f64 = 1e-9;
+/// The tone marks and the neutral-tone dot: a syllable without them is its initial and final.
+const TONE_MARKS: [char; 4] = ['ˊ', 'ˇ', 'ˋ', '˙'];
+
+/// Whether `with_mass` adopts the mass-estimated `t`: a deduction of at least `MASS_MIN_DEDUCTION`, the boundary included.
+fn mass_adopts(t: f64) -> bool {
+    t <= -MASS_MIN_DEDUCTION
+}
 
 fn is_floor(score: f64) -> bool {
     (score - LEX_FLOOR).abs() < 1e-9
@@ -50,27 +63,7 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
     if by_char.is_empty() {
         return HashMap::new();
     }
-    // The multi-character rows of `base`, one per (reading, word) at its largest score, in first-occurrence order.
-    let (mut at, mut rows): (HashMap<(&str, &str), usize>, Vec<(&str, &str, f64)>) = (HashMap::new(), Vec::new());
-    for l in base.lines() {
-        if l.starts_with(['#', '_']) {
-            continue;
-        }
-        let mut it = l.split_whitespace();
-        let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else { continue };
-        let n = word.chars().count();
-        if n < 2 || n != reading.split('-').count() {
-            continue;
-        }
-        let Ok(score) = score.parse::<f64>() else { continue };
-        match at.get(&(reading, word)) {
-            Some(&i) => rows[i].2 = rows[i].2.max(score),
-            None => {
-                at.insert((reading, word), rows.len());
-                rows.push((reading, word, score));
-            }
-        }
-    }
+    let rows = multi_rows(base);
     let mut extra: HashMap<(u32, char), f64> = HashMap::new();
     for (reading, word, score) in rows {
         for (c, syl) in word.chars().zip(reading.split('-')) {
@@ -92,6 +85,31 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
     out
 }
 
+/// The multi-character rows of `base`, one per (reading, word) at its largest score, in first-occurrence order (the rows `Lexicon::parse_with` reads).
+fn multi_rows(base: &str) -> Vec<(&str, &str, f64)> {
+    let (mut at, mut rows): (HashMap<(&str, &str), usize>, Vec<(&str, &str, f64)>) = (HashMap::new(), Vec::new());
+    for l in base.lines() {
+        if l.starts_with(['#', '_']) {
+            continue;
+        }
+        let mut it = l.split_whitespace();
+        let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else { continue };
+        let n = word.chars().count();
+        if n < 2 || n != reading.split('-').count() {
+            continue;
+        }
+        let Ok(score) = score.parse::<f64>() else { continue };
+        match at.get(&(reading, word)) {
+            Some(&i) => rows[i].2 = rows[i].2.max(score),
+            None => {
+                at.insert((reading, word), rows.len());
+                rows.push((reading, word, score));
+            }
+        }
+    }
+    rows
+}
+
 /// What the decoder needs for the reading term besides the lexicon: the mc values of the floor pairs. Built once from the lexicon and the text of
 /// `mcbpmf-data.txt`, read-only afterwards.
 pub struct ReadingDecode {
@@ -100,6 +118,10 @@ pub struct ReadingDecode {
     exempt: HashSet<(String, char)>,
     /// First 8 hex of the SHA-256 of the exempt list's text (`with_exempt`), for the summary tag; empty until then.
     exempt_sha8: String,
+    /// The mass-estimated t of the pairs `with_mass` adopted (each <= `-MASS_MIN_DEDUCTION`); empty until then. Keyed by (syllable id, character).
+    mass: HashMap<(u32, char), f64>,
+    /// Whether `with_mass` ran, for the summary tag.
+    mass_built: bool,
     /// Evaluation only (`with_table`, the CLI's `--reading-table`): replaces the whole of `logp` for the pairs of the lexicon; a pair the table lacks
     /// is 0. Keyed by (syllable id, character). `None` in the engine and in every shipping path.
     table: Option<HashMap<(u32, char), f64>>,
@@ -107,7 +129,7 @@ pub struct ReadingDecode {
 
 impl ReadingDecode {
     pub fn new(lex: &Lexicon, base_text: &str) -> ReadingDecode {
-        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new(), table: None }
+        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new(), mass: HashMap::new(), mass_built: false, table: None }
     }
 
     /// Evaluation only: replaces the built-in t by `text`, one `character TAB reading TAB t` row per line (the format of `dump_table`), t being the value
@@ -175,14 +197,75 @@ impl ReadingDecode {
         Ok(self)
     }
 
-    /// The summary-line tag of a run that decodes with this table: `+rd`, then `+rx:<sha8 of the exempt list>` once `with_exempt` gave one
-    /// (the CLI and the replay print it at the end of every setting's tag).
+    /// Reading counts B, variant T3b. A character with at least two single-character readings whose t are all 0 now (so after the exemptions, which is why
+    /// this runs after `with_exempt`) and that is a 聲韻字 (at least two of those readings differ once the tone marks are taken away, not only in tone)
+    /// gets, for each reading r, t(r) = log10((m(r) + EPS) / (max m + EPS)) where m(r) is the sum of 10^score over the rows of `base_text` (the text
+    /// of `mcbpmf-data.txt`) of at least two characters that read the character r at some position, once per (reading, word) at its largest score, summed
+    /// in the order the pairs first occur. Only a t <= `-MASS_MIN_DEDUCTION` is adopted; the other readings, a character no such row reads (all m 0),
+    /// the exempt pairs and the `SANDHI` readings stay at 0. `logp` then answers the adopted t.
+    pub fn with_mass(mut self, lex: &Lexicon, base_text: &str) -> ReadingDecode {
+        // The single-character readings per character (syllable ids, first occurrence first).
+        let mut by_char: HashMap<char, Vec<u32>> = HashMap::new();
+        for (r, rd) in lex.readings.iter().enumerate() {
+            if rd.key_len != 1 {
+                continue;
+            }
+            let syl = lex.key_pool[rd.key_off as usize];
+            for p in lex.range(r) {
+                let mut cs = lex.word(p).chars();
+                if let (Some(c), None) = (cs.next(), cs.next()) {
+                    let v = by_char.entry(c).or_default();
+                    if !v.contains(&syl) {
+                        v.push(syl);
+                    }
+                }
+            }
+        }
+        let body = |syl: u32| lex.syl_names[syl as usize].chars().filter(|c| !TONE_MARKS.contains(c)).collect::<String>();
+        by_char.retain(|c, v| {
+            let c = c.to_string();
+            v.len() >= 2
+                && v.iter().all(|&s| self.logp(lex, &lex.syl_names[s as usize], &c) == Some(0.0))
+                && v.iter().map(|&s| body(s)).collect::<HashSet<_>>().len() >= 2
+        });
+        let mut m: HashMap<(u32, char), f64> = HashMap::new();
+        for (reading, word, score) in multi_rows(base_text) {
+            for (c, syl) in word.chars().zip(reading.split('-')) {
+                if let (true, Some(&id)) = (by_char.contains_key(&c), lex.syl_ids.get(syl)) {
+                    if by_char[&c].contains(&id) {
+                        *m.entry((id, c)).or_insert(0.0) += 10f64.powf(score);
+                    }
+                }
+            }
+        }
+        for (c, readings) in &by_char {
+            let mx = readings.iter().map(|&s| m.get(&(s, *c)).copied().unwrap_or(0.0)).fold(0.0, f64::max);
+            if mx == 0.0 {
+                continue;
+            }
+            for &s in readings {
+                let t = ((m.get(&(s, *c)).copied().unwrap_or(0.0) + MASS_EPS) / (mx + MASS_EPS)).log10();
+                let syl = lex.syl_names[s as usize].as_str();
+                let exempt = SANDHI.contains(&(syl, c.to_string().as_str())) || self.exempt.contains(&(syl.to_string(), *c));
+                if mass_adopts(t) && !exempt {
+                    self.mass.insert((s, *c), t);
+                }
+            }
+        }
+        self.mass_built = true;
+        self
+    }
+
+    /// The summary-line tag of a run that decodes with this table: `+rd`, then `+rx:<sha8 of the exempt list>` once `with_exempt` gave one, then `+rm`
+    /// once `with_mass` ran (the CLI and the replay print it at the end of every setting's tag).
     pub fn tag(&self) -> String {
-        if self.exempt_sha8.is_empty() { "+rd".into() } else { format!("+rd+rx:{}", self.exempt_sha8) }
+        let rx = if self.exempt_sha8.is_empty() { String::new() } else { format!("+rx:{}", self.exempt_sha8) };
+        format!("+rd{rx}{}", if self.mass_built { "+rm" } else { "" })
     }
 
     /// log10 P(reading | word) of the single-character word `word` read `syl`, relative to the word's best reading (<= 0): the lexicon's score
-    /// minus the word's best score (the research's `lex_logp`), 0 for a `SANDHI` reading, the mc value for a pair at `LEX_FLOOR`. `None` when the
+    /// minus the word's best score (the research's `lex_logp`), 0 for a `SANDHI` reading, the mc value for a pair at `LEX_FLOOR`, the mass value for a pair
+    /// `with_mass` adopted (never an exempt or `SANDHI` pair, which stay 0), and 0 again for an exempt pair. `None` when the
     /// lexicon has no such pair. The scores are the raw lexicon's (largest over duplicate rows), before capping, demotion and learning.
     pub fn logp(&self, lex: &Lexicon, syl: &str, word: &str) -> Option<f64> {
         if let Some(tb) = &self.table {
@@ -201,6 +284,10 @@ impl ReadingDecode {
         if is_floor(s) {
             let mc = lex.syl_ids.get(syl).zip(word.chars().next()).and_then(|(&id, c)| self.floor_mc.get(&(id, c)));
             t = mc.copied().unwrap_or(t);
+        }
+        if !self.mass.is_empty() {
+            let id = lex.syl_ids.get(syl).zip(word.chars().next()).filter(|_| word.chars().count() == 1);
+            t = id.and_then(|(&id, c)| self.mass.get(&(id, c))).copied().unwrap_or(t);
         }
         if word.chars().next().is_some_and(|c| self.exempt.contains(&(syl.to_string(), c))) {
             t = 0.0;
@@ -265,7 +352,7 @@ mod tests {
     #[test]
     fn a_rare_reading_is_penalised_against_the_words_best() {
         let (lex, rd) = mk(LEX);
-        close(rd.logp(&lex, "b", "甲").unwrap(), -2.0);
+        assert!((rd.logp(&lex, "b", "甲").unwrap() + 2.0).abs() < 1e-4, "about -2 (the epsilon moves it by 4e-6)");
         close(rd.logp(&lex, "a", "甲").unwrap(), 0.0);
         close(rd.logp(&lex, "b", "乙").unwrap(), 0.0);
         close(rd.logp(&lex, "d", "丁").unwrap(), 0.0);
@@ -374,7 +461,109 @@ mod tests {
     #[test]
     fn the_tag_carries_the_exempt_lists_hash() {
         let (_, rd) = built(LEX, None, "b\t甲\n");
-        assert_eq!(rd.tag(), format!("+rd+rx:{}", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
-        assert_eq!(ReadingDecode::new(&Lexicon::parse(LEX).unwrap(), LEX).tag(), "+rd");
+        assert_eq!(rd.tag(), format!("+rd+rx:{}+rm", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
+        let plain = ReadingDecode::new(&Lexicon::parse(LEX).unwrap(), LEX);
+        assert_eq!(plain.tag(), "+rd");
+        assert_eq!(plain.with_exempt("b\t甲\n").unwrap().tag(), format!("+rd+rx:{}", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
+    }
+
+    /// Singles tie at -1 for every character below; the multi-character words give the masses. 甲 (a, b): m(a) = 10^-1, m(b) = 10^-3, so t(b) = -2 and
+    /// t(a) = 0. 乙 (a, b): m(a) = 10^-1, m(b) = 10^-1.5, a deduction of 0.5, under 1: both stay 0. 丙 (a, b, c): the third reading has no word at all and
+    /// takes log10(1e-9 / (0.1 + 1e-9)), about -8, the table clips it later. 丁 (a, b) has no multi-character word: all m 0, stays 0.
+    const TIES: &str = "a 甲 -1.0\nb 甲 -1.0\na 乙 -1.0\nb 乙 -1.0\na 丙 -1.0\nb 丙 -1.0\nc 丙 -1.0\na 丁 -1.0\nb 丁 -1.0\n\
+        a-x 甲戊 -1.0\nb-x 甲戊 -3.0\na-x 乙戊 -1.0\nb-x 乙戊 -1.5\na-x 丙戊 -1.0\nb-x 丙戊 -1.0\nx-x 戊戊 -2.0\n";
+
+    fn mass_ratio(m: f64, mx: f64) -> f64 {
+        ((m + 1e-9) / (mx + 1e-9)).log10()
+    }
+
+    /// A tie the multi-character words settle by at least one order of magnitude is broken (the least likely readings only); a smaller deduction, a
+    /// character no word reads and a character with one reading stay at 0; the mass counts a (reading, word) once, at its largest row.
+    #[test]
+    fn mass_breaks_a_tie_of_at_least_one_order_of_magnitude() {
+        assert_eq!(MASS_MIN_DEDUCTION, 1.0);
+        let (lex, rd) = mk(TIES);
+        close(rd.logp(&lex, "b", "甲").unwrap(), mass_ratio(1e-3, 1e-1));
+        close(rd.logp(&lex, "a", "甲").unwrap(), 0.0);
+        close(rd.term(&lex, "b", "甲"), LAMBDA * mass_ratio(1e-3, 1e-1));
+        for (syl, w) in [("a", "乙"), ("b", "乙"), ("a", "丁"), ("b", "丁"), ("c", "丙")] {
+            let want = if (syl, w) == ("c", "丙") { mass_ratio(0.0, 0.1) } else { 0.0 };
+            close(rd.logp(&lex, syl, w).unwrap(), want);
+        }
+        // 丙's a and b tie at the largest mass: 0; c has no word: about -8
+        close(rd.logp(&lex, "a", "丙").unwrap(), 0.0);
+        close(rd.logp(&lex, "b", "丙").unwrap(), 0.0);
+        assert!(rd.logp(&lex, "c", "丙").unwrap() < -7.9);
+        // a (reading, word) repeated counts once at its largest row: b-x 甲戊 -3.0 and -4.0 count once, at 10^-3, not 10^-3 + 10^-4
+        let (lex2, rd2) = mk(&format!("{TIES}b-x 甲戊 -4.0\nb-x 甲戊 -3.0\n"));
+        close(rd2.logp(&lex2, "b", "甲").unwrap(), mass_ratio(1e-3, 1e-1));
+        // a character whose readings are not all tied is not touched (甲's b is a plain lexicon difference), nor is a single-reading one
+        let (lex3, rd3) = mk(&format!("{TIES}a 己 -1.0\nb 己 -2.0\na-x 己戊 -1.0\nb-x 己戊 -9.0\nd 庚 -1.0\nd-x 庚戊 -1.0\n"));
+        close(rd3.logp(&lex3, "b", "己").unwrap(), -1.0);
+        close(rd3.logp(&lex3, "d", "庚").unwrap(), 0.0);
+    }
+
+    /// The boundary: a deduction of exactly `MASS_MIN_DEDUCTION` is adopted, anything smaller is not; on either side of it by 1e-7 the table follows.
+    #[test]
+    fn a_deduction_of_exactly_one_is_adopted() {
+        assert!(mass_adopts(-1.0) && mass_adopts(-1.0000001) && !mass_adopts(-0.9999999) && !mass_adopts(0.0));
+        // reading b has no word, a's mass is 10^s: t(b) = log10(1e-9 / (10^s + 1e-9)) is -1.0000001 for s = -8.0457573796 and -0.9999999 for -8.0457576015
+        for (s, adopted) in [("-8.0457573796", true), ("-8.0457576015", false)] {
+            let (lex, rd) = mk(&format!("a 甲 -1.0\nb 甲 -1.0\na-x 甲戊 {s}\n"));
+            assert_eq!(rd.logp(&lex, "b", "甲").unwrap() < -0.99, adopted, "{s}");
+            assert_eq!(rd.logp(&lex, "b", "甲").unwrap() == 0.0, !adopted, "{s}");
+        }
+    }
+
+    /// Readings that differ only in tone or neutral tone (a 聲調字) are not touched, however far the masses are apart; the readings of a 聲韻字 that
+    /// differ in tone as well as in the body are all treated.
+    #[test]
+    fn a_tone_only_character_is_left_alone() {
+        let tones = "ㄅㄚ 甲 -1.0\nㄅㄚˋ 甲 -1.0\nㄅㄚ˙ 甲 -1.0\nㄅㄚ-ㄇ 甲戊 -1.0\nㄅㄚˋ-ㄇ 甲戊 -5.0\n";
+        let (lex, rd) = mk(tones);
+        for syl in ["ㄅㄚ", "ㄅㄚˋ", "ㄅㄚ˙"] {
+            close(rd.logp(&lex, syl, "甲").unwrap(), 0.0);
+        }
+        let (lex, rd) = mk(&format!("{tones}ㄆㄚˊ 甲 -1.0\nㄆㄚˊ-ㄇ 甲戊 -1.0\n"));
+        close(rd.logp(&lex, "ㄅㄚˋ", "甲").unwrap(), mass_ratio(1e-5, 1e-1));
+        close(rd.logp(&lex, "ㄅㄚ˙", "甲").unwrap(), mass_ratio(0.0, 1e-1));
+        close(rd.logp(&lex, "ㄅㄚ", "甲").unwrap(), 0.0);
+    }
+
+    /// An exempt pair and a `SANDHI` reading stay 0 although their mass is the smallest (and they still count in the largest mass); a reading that is
+    /// not tied (not all t 0) keeps the character out: 一's ㄧㄠ costs -8 in the lexicon, so 一's other readings are not estimated.
+    #[test]
+    fn exempt_and_sandhi_readings_stay_free() {
+        let base = "ㄅㄨˋ 不 -1.0\nㄅㄨˊ 不 -1.0\nㄈㄡˇ 不 -1.0\nㄅㄨˋ-ㄇ 不戊 -1.0\nㄅㄨˊ-ㄇ 不戊 -4.0\nㄈㄡˇ-ㄇ 不戊 -4.0\n\
+                    a 甲 -1.0\nb 甲 -1.0\nc 甲 -1.0\na-x 甲戊 -1.0\nb-x 甲戊 -4.0\nc-x 甲戊 -4.0\n";
+        let (lex, rd) = built(base, None, "b\t甲\n");
+        // sandhi: ㄅㄨˊ is 0 whatever its mass; the other low-mass reading is estimated
+        close(rd.logp(&lex, "ㄅㄨˊ", "不").unwrap(), 0.0);
+        close(rd.logp(&lex, "ㄈㄡˇ", "不").unwrap(), mass_ratio(1e-4, 1e-1));
+        close(rd.logp(&lex, "ㄅㄨˋ", "不").unwrap(), 0.0);
+        // exempt: b of 甲 is 0, c is estimated, a is the largest
+        close(rd.logp(&lex, "b", "甲").unwrap(), 0.0);
+        close(rd.logp(&lex, "c", "甲").unwrap(), mass_ratio(1e-4, 1e-1));
+        // an untied character: 一 reads ㄧㄠ at -9 (t -8 in the lexicon), so its tied sandhi readings are left to the existing rule
+        let (lex, rd) = mk("ㄧ 一 -1.0\nㄧˊ 一 -1.0\nㄧㄠ 一 -9.0\nㄧ-x 一戊 -1.0\nㄧˊ-x 一戊 -5.0\nㄧㄠ-x 一戊 -9.0\n");
+        close(rd.logp(&lex, "ㄧˊ", "一").unwrap(), 0.0);
+        close(rd.logp(&lex, "ㄧㄠ", "一").unwrap(), -8.0);
+    }
+
+    /// Without `with_mass` the table is the one before the rule, and the exemptions are read first: an exempt pair does not make a character untied.
+    #[test]
+    fn the_rule_follows_the_exemptions() {
+        // 甲's b is -3.0 below a: not tied until it is exempt, and then the masses decide (c: m 0 against a's 10^-1: about -8)
+        let base = "a 甲 -1.0\nb 甲 -4.0\nc 甲 -1.0\na-x 甲戊 -1.0\n";
+        let rd = ReadingDecode::new(&Lexicon::parse(base).unwrap(), base);
+        let lex = Lexicon::parse(base).unwrap();
+        close(rd.logp(&lex, "c", "甲").unwrap(), 0.0);
+        let (lex, rd) = built(base, None, "");
+        close(rd.logp(&lex, "c", "甲").unwrap(), 0.0);
+        close(rd.logp(&lex, "b", "甲").unwrap(), -3.0);
+        let (lex, rd) = built(base, None, "b\t甲\n");
+        assert!(rd.logp(&lex, "c", "甲").unwrap() < -7.9);
+        close(rd.logp(&lex, "b", "甲").unwrap(), 0.0);
+        close(rd.logp(&lex, "a", "甲").unwrap(), 0.0);
     }
 }
