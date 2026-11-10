@@ -63,7 +63,7 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
     if by_char.is_empty() {
         return HashMap::new();
     }
-    let rows = multi_rows(base);
+    let rows = multi_rows(base, |c| by_char.contains_key(&c));
     let mut extra: HashMap<(u32, char), f64> = HashMap::new();
     for (reading, word, score) in rows {
         for (c, syl) in word.chars().zip(reading.split('-')) {
@@ -85,8 +85,10 @@ fn build_floor_mc(lex: &Lexicon, base: &str) -> HashMap<(u32, char), f64> {
     out
 }
 
-/// The multi-character rows of `base`, one per (reading, word) at its largest score, in first-occurrence order (the rows `Lexicon::parse_with` reads).
-fn multi_rows(base: &str) -> Vec<(&str, &str, f64)> {
+/// The multi-character rows of `base` with at least one character `keep` accepts, one per (reading, word) at its largest score, in first-occurrence
+/// order (the rows `Lexicon::parse_with` reads). The callers sum only over the characters they keep, so a row without one adds nothing; leaving it
+/// out keeps the load's transient memory to the few rows that count.
+fn multi_rows(base: &str, keep: impl Fn(char) -> bool) -> Vec<(&str, &str, f64)> {
     let (mut at, mut rows): (HashMap<(&str, &str), usize>, Vec<(&str, &str, f64)>) = (HashMap::new(), Vec::new());
     for l in base.lines() {
         if l.starts_with(['#', '_']) {
@@ -95,7 +97,7 @@ fn multi_rows(base: &str) -> Vec<(&str, &str, f64)> {
         let mut it = l.split_whitespace();
         let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else { continue };
         let n = word.chars().count();
-        if n < 2 || n != reading.split('-').count() {
+        if n < 2 || n != reading.split('-').count() || !word.chars().any(&keep) {
             continue;
         }
         let Ok(score) = score.parse::<f64>() else { continue };
@@ -229,7 +231,7 @@ impl ReadingDecode {
                 && v.iter().map(|&s| body(s)).collect::<HashSet<_>>().len() >= 2
         });
         let mut m: HashMap<(u32, char), f64> = HashMap::new();
-        for (reading, word, score) in multi_rows(base_text) {
+        for (reading, word, score) in multi_rows(base_text, |c| by_char.contains_key(&c)) {
             for (c, syl) in word.chars().zip(reading.split('-')) {
                 if let (true, Some(&id)) = (by_char.contains_key(&c), lex.syl_ids.get(syl)) {
                     if by_char[&c].contains(&id) {
