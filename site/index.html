@@ -31,7 +31,7 @@
  {"@type":"SoftwareApplication","@id":"https://shanjie.nyanako.com/#software",
   "name":"善解輸入法","alternateName":["善解","shanjie"],"url":"https://shanjie.nyanako.com/",
   "applicationCategory":"UtilitiesApplication","operatingSystem":"macOS 26 以上（Apple 晶片）",
-  "softwareVersion":"0.6.1","datePublished":"2026-10-31",
+  "softwareVersion":"0.7.0","datePublished":"2026-11-11",
   "downloadUrl":"https://github.com/Nanako0129/shanjie/releases/latest",
   "license":"https://www.apache.org/licenses/LICENSE-2.0",
   "offers":{"@type":"Offer","price":"0","priceCurrency":"TWD"},
@@ -58,7 +58,7 @@
     <p class="tagline">善解，所以選對。</p>
   </div>
   <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。</p>
-  <div class="actions"><a class="btn primary" href="/install#download">下載 v0.6.1</a><a class="btn secondary" href="#examples">看它怎麼選字</a></div>
+  <div class="actions"><a class="btn primary" href="/install#download">下載 v0.7.0</a><a class="btn secondary" href="#examples">看它怎麼選字</a></div>
   <p class="req">macOS 26 以上・Apple 晶片・開源 Apache-2.0</p>
 </header>
 
@@ -77,17 +77,17 @@
 <section id="numbers">
   <h2>量到多少</h2>
   <div class="stats">
-    <div class="stat"><b>92.7%</b><span>開發集整句正確（聊天設定，302 句）</span></div>
-    <div class="stat"><b>82.7%／85.3%</b><span>保留集整句正確：口語／新聞，各 150 句，發版前量一次</span></div>
-    <div class="stat"><b>2.5 ms</b><span>每個按鍵的處理時間（p95）</span></div>
+    <div class="stat"><b>93.0%</b><span>開發集整句正確（聊天設定，302 句）</span></div>
+    <div class="stat"><b>84.7%／84.0%</b><span>保留集整句正確：口語／新聞，各 150 句，發版前量一次</span></div>
+    <div class="stat"><b>2.0 ms</b><span>每個按鍵的處理時間（p95）</span></div>
   </div>
-  <p class="note">v0.6.1。<a href="/how#measure">怎麼量的 →</a></p>
+  <p class="note">v0.7.0。<a href="/how#measure">怎麼量的 →</a></p>
 </section>
 
 <section id="how">
   <h2>怎麼做到</h2>
   <div class="layers">
-    <div class="layer"><div><h3>每一鍵：整句解碼</h3><p>詞庫與語言模型在本機列出候選，接著前文選出整句。</p></div></div>
+    <div class="layer"><div><h3>每一鍵：整句解碼</h3><p>詞庫與語言模型在本機列出候選，也看每個字的讀音對不對得上你打的音，接著前文選出整句。</p></div></div>
     <div class="layer"><div><h3>停頓時：語意校正</h3><p>小模型看前文，在背景從前 8 名裡挑最通順的一句，不產生新字。</p></div></div>
     <div class="layer"><div><h3>改選時：記住</h3><p>你改選的字依前文記住，只存在這台 Mac。</p></div></div>
   </div>
@@ -102,8 +102,8 @@
     <li><a href="/guide#learning">選字記憶</a>：依前文記住你的改選，可以逐詞忘記。</li>
     <li><a href="/guide#profiles">聊天與書面</a>：依 App 自動切換，也可以自己選。</li>
     <li><a href="/guide#rerank">語意校正</a>：保守、標準、積極三段，可以關。</li>
-    <li><a href="/guide#english">中英混打</a>：<code>ok</code>、<code>gta6</code> 直接打，單按 Shift 切換中英。</li>
-    <li><a href="/guide#packs">詞包</a>：動漫與遊戲、資訊與 AI、經典台詞。</li>
+    <li><a href="/guide#english">中英混打</a>：打英文不用切換輸入法；<code>ok</code>、<code>gta6</code> 這類字與單按 Shift 切換中英，在設定裡打開。</li>
+    <li><a href="/guide#packs">詞包</a>：動漫與遊戲、資訊與 AI、美妝與保養、經典台詞。</li>
     <li><a href="/guide#fuzzy">模糊輸入</a>：ㄣ／ㄥ、ㄓ／ㄗ 等四組，預設關。</li>
   </ul>
 </section>
@@ -121,8 +121,9 @@
 <section id="recent">
   <h2>最近</h2>
   <ul class="feats">
+    <li><a href="/updates#v0.7.0">v0.7.0</a>・<time datetime="2026-11-11">2026-11-11</time>：整句選字多看你打的讀音，語意校正換成會意 SJ-SR-8-15M，加上美妝與保養詞包；中英混打兩個容易誤觸的設定改成預設關。</li>
     <li><a href="/updates#v0.6.1">v0.6.1</a>・<time datetime="2026-10-31">2026-10-31</time>：中英混打打得出 <code>ok</code>、<code>gta6</code>，可以單按 Shift 切換中英，加上經典台詞詞包。</li>
-    <li>進行中：解碼時看讀音，在整句選字時就修「否則變快」選成「便會」這類錯（<a href="/roadmap">路線圖</a>）。</li>
+    <li>進行中：Windows 版（<a href="/roadmap">路線圖</a>）。</li>
   </ul>
 </section>
 
@@ -132,12 +133,12 @@
   <p class="note"><a href="/privacy">隱私與資料 →</a></p>
 </section>
 
-<div class="actions"><a class="btn primary" href="/install#download">下載 v0.6.1</a><a class="btn secondary" href="/faq#report">回報選錯的字</a></div>
+<div class="actions"><a class="btn primary" href="/install#download">下載 v0.7.0</a><a class="btn secondary" href="/faq#report">回報選錯的字</a></div>
 
 </main>
 <footer class="site-foot"><div class="in">
   <nav aria-label="其他頁面"><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
-  <span>善解輸入法・最後更新：<time datetime="2026-11-09">2026-11-09</time></span>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-11">2026-11-11</time></span>
 </div></footer>
 </body>
 </html>
