@@ -194,7 +194,7 @@ fn level_rows(dir: &Path) -> String {
 }
 
 /// docs/spec/semantic-rerank.md §4.4: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:`). The picks are those the CLI gives on the final 會意 SJ-SR-8-15M
+/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:…+rm`). The picks are those the CLI gives on the final 會意 SJ-SR-8-15M
 /// file with the cells of docs/spec/semantic-rerank.md §4.4 (measured 2026-11-06 with `--rows` over the four rows, `--tinylm-scores` `c`; the cell arithmetic itself is
 /// `core/src/colloquial.rs`'s unit tests): standard (1.1, 2, 0) [1, 5, 2, 3]; conservative (1.3, 2, 1) keeps the n-gram first on rows 25 and 22 of dev302 where
 /// the standard cell picks 1 and 2 (the conservative delta), and picks the standard's 5 and 3 on the other two; aggressive is the standard cell, so the same
@@ -219,7 +219,7 @@ fn the_term_applies_at_every_strength() {
         let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
         assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
         let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
-        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rd+rx:a821a206  {{")), "{level}: {}", new.stdout);
+        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rd+rx:a821a206+rm  {{")), "{level}: {}", new.stdout);
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
@@ -293,7 +293,7 @@ fn the_colloquial_term_stands_alone() {
     for out in [&with.stdout, &off.stdout] {
         assert!(out.contains("+colloq:81c2470d") && !out.contains("+rc"), "{out}");
     }
-    assert!(with.stdout.contains("+colloq:81c2470d+rd+rx:a821a206  {") && off.stdout.contains("+colloq:81c2470d  {"), "{}{}", with.stdout, off.stdout);
+    assert!(with.stdout.contains("+colloq:81c2470d+rd+rx:a821a206+rm  {") && off.stdout.contains("+colloq:81c2470d  {"), "{}{}", with.stdout, off.stdout);
     let mut args: Vec<String> = BASE[..9].iter().map(|s| s.to_string()).collect();
     args.extend(["--rows".to_string(), rows.clone(), "--colloquial-core".to_string(), TABLE.to_string(), "--no-reading-channel".to_string()]);
     let o = run(&args);

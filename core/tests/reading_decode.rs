@@ -140,6 +140,36 @@ fn row_81_is_right_without_the_reading_channel() {
     }
 }
 
+/// Reading mass (docs/spec/decoder.md §5, `ReadingDecode::with_mass`): 莎 reads ㄕㄚ and ㄙㄨㄛ at one score, so the reading term was 0 for both and 莎 stayed first
+/// for a lone ㄙㄨㄛ (row 184 of eval/dev/user-reported.txt, gold 縮). The multi-character words that read 莎 ㄙㄨㄛ are far rarer than those reading it ㄕㄚ, so the rule
+/// charges ㄙㄨㄛ and 縮 is first: formal, with semantic correction off (the n-gram's first path) and at standard strength. Without the reading term 莎 is first.
+#[test]
+fn row_184_suo_is_right_in_the_written_setting() {
+    for tl in [false, true] {
+        let mut e = shipping(Profile::Formal);
+        assert_eq!(typed(&mut e, "ㄙㄨㄛ", tl, false).0, "莎", "premise, rerank {tl}: without the reading term 莎 is first");
+        let (ngram, shown) = typed(&mut e, "ㄙㄨㄛ", tl, true);
+        assert_eq!((ngram.as_str(), shown.as_str()), ("縮", "縮"), "rerank {tl}");
+    }
+}
+
+/// Row 13 of eval/dev/user-reported.txt, 我再重打 after 我打錯了我看成號碼, formal, semantic correction off: right before the rule and still right with it (the
+/// first mass variant of the research, T3, made it wrong).
+#[test]
+fn row_13_stays_right_with_the_mass_rule() {
+    let mut e = shipping(Profile::Formal);
+    e.reset(ResetMode::Discard);
+    e.set_left_context("我打錯了我看成號碼");
+    e.set_rerank(false).unwrap();
+    let mut out = None;
+    for syl in "ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ".split(' ') {
+        for k in keys_of(syl) {
+            out = Some(e.key(k).unwrap());
+        }
+    }
+    assert_eq!(out.unwrap().preedit, "我再重打");
+}
+
 /// 搞完這波 (row 37 of the same set): the lexicon ranks 波's standard reading ㄅㄛ behind ㄆㄛ, so the bare term (R1f) lost this row and the exemptions (R1g) keep it:
 /// right in all four settings with the term on, and with it off.
 #[test]
