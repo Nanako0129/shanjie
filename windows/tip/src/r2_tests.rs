@@ -13,7 +13,7 @@ use windows::Win32::System::Diagnostics::Debug::{
     ContinueDebugEvent, OutputDebugStringW, ReadProcessMemory, WaitForDebugEvent, DEBUG_EVENT, EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, OUTPUT_DEBUG_STRING_EVENT,
 };
 use windows::Win32::System::Threading::{CreateProcessW, DEBUG_ONLY_THIS_PROCESS, PROCESS_INFORMATION, STARTUPINFOW};
-use windows::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW, IsWindowVisible};
+use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, GWL_STYLE, WS_VISIBLE};
 use windows_core::Result;
 
 const MARKER: &str = "R2MARKER7F3A9C";
@@ -82,10 +82,11 @@ fn child_candidate_window() {
         eprintln!("check failed: no candidate window was made");
         panic!("check failed");
     };
-    // SAFETY: plain queries on a window of this thread.
+    // SAFETY: plain queries on a window of this thread. The window's own WS_VISIBLE bit, not IsWindowVisible: IsWindowVisible also needs the
+    // desktop window to be visible, which it is not in a non-interactive window station (a test run over ssh), whatever this code does.
     let (visible, title_len, title) = unsafe {
         let mut buf = [0u16; 16];
-        (IsWindowVisible(hwnd).as_bool(), GetWindowTextLengthW(hwnd), GetWindowTextW(hwnd, &mut buf))
+        (style_visible(hwnd), GetWindowTextLengthW(hwnd), GetWindowTextW(hwnd, &mut buf))
     };
     if !(shown && visible && title_len == 0 && title == 0) {
         eprintln!("check failed: shown {shown} visible {visible} title length {title_len} {title}");
@@ -93,12 +94,18 @@ fn child_candidate_window() {
     }
     cand::hide();
     // SAFETY: as above.
-    let still_visible = unsafe { IsWindowVisible(hwnd).as_bool() };
+    let still_visible = unsafe { style_visible(hwnd) };
     if still_visible {
         eprintln!("check failed: the window is still visible after hide");
         panic!("check failed");
     }
     cand::destroy();
+}
+
+/// The WS_VISIBLE bit of the window's style.
+unsafe fn style_visible(hwnd: HWND) -> bool {
+    // SAFETY: the caller passes a window of this thread.
+    (unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32) & WS_VISIBLE.0 != 0
 }
 
 fn run_child(name: &str) -> (bool, String, String) {
