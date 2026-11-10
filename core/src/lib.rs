@@ -74,7 +74,8 @@ pub struct Lexicon {
     words: String,
     /// Entry positions of each distinct word's by_word winner, sorted by word bytes.
     by_word: Vec<u32>,
-    /// The overlay rows tagged `manual` (docs/spec/decoder.md §7), shared with every rerank job of an engine built on this lexicon.
+    /// The overlay rows tagged `manual` and the rerank-protect rows (`with_protected`; docs/spec/decoder.md §7), shared with every rerank
+    /// job of an engine built on this lexicon.
     manual: Arc<ManualSet>,
     /// The variant-order rows (docs/spec/decoder.md §2.3) the lexicon was built with, sorted by reading index; empty without a table.
     variants: Vec<(usize, VariantRow)>,
@@ -83,8 +84,9 @@ pub struct Lexicon {
     tol: OnceLock<fuzzy::Tolerance>,
 }
 
-/// The words added by hand (`manual` rows of overlay-add.tsv) as (word, reading): the small model's rerank must not take one out of the
-/// n-gram's first choice (`tinylm::manual_mask`). Built where the overlay is read (`Lexicon::parse_with`), so the engine and the evaluation CLI share it.
+/// The words added by hand (`manual` rows of overlay-add.tsv) and the rerank-protect words (`Lexicon::with_protected`) as (word, reading):
+/// the small model's rerank must not take one out of the n-gram's first choice (`tinylm::manual_mask`). Built where the lexicon is loaded
+/// (`Lexicon::parse_with`, then `engine::load_lexicon_split` adds the protect rows), so the engine and the evaluation CLI share it.
 /// A row whose word does not have one character per syllable is not kept (the lexicon guarantees it for the shipped rows).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ManualSet {
@@ -390,9 +392,41 @@ impl Lexicon {
         self.variants.iter().map(|(_, v)| v)
     }
 
-    /// The `manual` words of the overlay this lexicon was built with (empty without an overlay or without such rows).
+    /// The `manual` words of the overlay this lexicon was built with, plus the rerank-protect words `with_protected` added (empty without
+    /// either).
     pub fn manual(&self) -> &Arc<ManualSet> {
         &self.manual
+    }
+
+    /// The rerank-protect rows (`data/lexicon/rerank-protect.tsv`, docs/spec/lexicon-and-packs.md §2.12) join the set `manual()` returns,
+    /// so the rerank mask (`tinylm::manual_mask`) protects them like the manual words; no score and no entry changes, and a base word is
+    /// allowed. Rows are `word<TAB>reading<TAB>note` with the syllables space-separated; `#` lines and blank lines are skipped. A row that is
+    /// not three fields, not all Han characters, not one character per syllable, or whose (reading, word) is in no layer of this lexicon is
+    /// an error naming the line: a mistyped protect word must not quietly protect nothing.
+    pub fn with_protected(mut self, text: &str) -> Result<Lexicon, String> {
+        let mut rows = Vec::new();
+        for (i, l) in text.lines().enumerate() {
+            if l.trim().is_empty() || l.starts_with('#') {
+                continue;
+            }
+            let n = i + 1;
+            let f: Vec<&str> = l.split('\t').collect();
+            let [w, reading, _] = f[..] else { return Err(format!("line {n}: expected word<TAB>reading<TAB>note")) };
+            let syls: Syls = reading.split(' ').filter(|s| !s.is_empty()).map(String::from).collect();
+            if w.is_empty() || !w.chars().all(learn::is_han) {
+                return Err(format!("line {n}: the word is not all Han characters"));
+            }
+            if w.chars().count() != syls.len() {
+                return Err(format!("line {n}: the word's length differs from its syllable count"));
+            }
+            if !self.has(&syls, w) {
+                return Err(format!("line {n}: the lexicon has no entry for this word under this reading"));
+            }
+            rows.push((w.to_string(), syls.join("-")));
+        }
+        let manual = Arc::make_mut(&mut self.manual);
+        rows.iter().for_each(|(w, r)| manual.push(w, r));
+        Ok(self)
     }
 
     fn word(&self, p: usize) -> &str {

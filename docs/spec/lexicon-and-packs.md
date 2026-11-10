@@ -13,6 +13,7 @@
 | 基底 | `mcbpmf-data.txt`（小麥注音詞庫，MIT） | 無（三欄） | 無，原封不動 | 載入失敗 |
 | 疊加層 | `overlay-add.tsv` | `wikt`、`zhwiki`、`萌典補詞`、`manual`、`slang` | `tools/build_overlay.py` | 載入失敗 |
 | 變調層 | `sandhi-add.tsv` | `sandhi`、`neutral` | `tools/build_sandhi.py` | 載入失敗 |
+| 重排保護詞 | `rerank-protect.tsv` | 無（`詞<TAB>讀音<TAB>備註`，見 §2.12） | 手寫，無建置工具 | 載入失敗 |
 | 名單層 | `names-add.tsv` | `names`、`creator`、`store` | `tools/build_names.py` | 載入失敗（評測 CLI 的 `--no-names` 例外） |
 | 動漫與遊戲詞包 | `acg-add.tsv` | `acg`、`acg-oov` | `tools/build_acg_pack.py` | 當作沒有這個詞包 |
 | 經典台詞詞包 | `quotes-add.tsv` | `quotes` | `tools/build_quote_pack.py` | 當作沒有這個詞包 |
@@ -153,6 +154,14 @@
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
 - `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞或網路用語時用。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
+
+### 2.12 重排保護詞（`data/lexicon/rerank-protect.tsv`）
+
+- 用途：語意校正的重排不得從 n-gram 的第一名換掉的常用詞。它不是詞庫的一層：不加詞、不改任何分數，只讓這些詞進入重排的遮罩（`docs/spec/decoder.md` §7 的保護集合 = 手動詞加上這份的詞，遮罩函式 `tinylm::manual_mask` 不變）。
+- 格式：三欄以 Tab 分隔，`詞<TAB>讀音<TAB>備註`；讀音的音節以空白分隔；`#` 開頭與空行略過；CC0，隨 App 內附（`Resources/rerank-protect.tsv`）。
+- 載入（`engine::load_lexicon_split` 讀完疊加層之後呼叫 `Lexicon::with_protected`；引擎建立、`load_lm` 與評測 CLI 走同一個函式）：檔案缺、讀不了或任何一列不成立都是載入失敗（C ABI 回 3），錯誤指出列號。一列不成立的情形：不是三欄、詞不是純漢字、字數不等於音節數、（讀音, 詞）不在這份詞庫的任何一層。基底詞可以列入；最後一項讓打錯的保護詞不會無聲地什麼都不保護。
+- 效果：只在重排遮罩上。重排的某一段，n-gram 第一名若在對應位置以這個讀音含有這個詞，沒有同位置保有它的候選就不能被選；第一名沒用這個詞時什麼都不保護。解碼器、候選窗與所有分數，和這份檔只有註解時逐位元組相同。
+- 驗證：`core/tests/rerank_protect.rs`（基底詞被遮罩、加入保護不改分數與詞條、只有註解的檔不保護任何東西、壞列各自報錯並指出列號、出貨檔載得進來、缺檔是載入失敗、出貨設定下的真引擎逐鍵重現）。
 
 ## 3. 名單層 `names-add.tsv`
 
