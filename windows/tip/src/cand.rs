@@ -10,7 +10,7 @@
 //! One window per UI thread at most (`STATE`, a thread local compared by `HWND`; no pointer is ever put in the window's memory, so another
 //! process cannot rewrite it). Everything that touches the window runs on the thread that made it, outside an edit session (`capture` only reads the
 //! text rectangle inside one), under `guard::run` (a panic must not leave the window procedure). The Direct2D and DirectWrite factories are
-//! one pair per process, made when the first window is about to open (every GUI process loads the TIP, most never type). The render target is a
+//! one pair per process, made on a background thread by the first key the TIP eats (`prewarm`; every GUI process loads the TIP, most never type). The render target is a
 //! software one (no GPU driver loaded into every app, no device loss) and is made again for each drawing.
 use crate::candlayout::{self, Metrics, Rect};
 use crate::dll;
@@ -374,7 +374,7 @@ struct Factories {
 
 static FACTORIES: Mutex<Option<Factories>> = Mutex::new(None);
 
-/// One pair per process, made by the first window that opens; a failed attempt is made again by the next one.
+/// One pair per process, made by `prewarm` (or by the first window if that has not run yet); a failed attempt is made again by the next caller.
 fn factories() -> Option<(ID2D1Factory, IDWriteFactory)> {
     let mut g = FACTORIES.lock().unwrap_or_else(PoisonError::into_inner);
     if g.is_none() {
@@ -394,7 +394,9 @@ fn factories() -> Option<(ID2D1Factory, IDWriteFactory)> {
 
 static PREWARM: Once = Once::new();
 
-/// Started by the first key that composes (once per process, on a background thread): makes the factories and has DirectWrite load the system
+/// Started by the first key the TIP eats (once per process, on a background thread). That key went through a connection to the host, so
+/// `client::attempted()` is already true and the DLL never unloads (`dll.rs`): the thread cannot outlive the module. Do not call this from a
+/// path that runs before a connection was attempted (for example `ActivateEx`). It makes the factories and has DirectWrite load the system
 /// font collection and the UI font once, so the first window does not pay for it on the key that opens it (C7 of the acceptance: the first
 /// window's key was the slowest). Only fixed text is laid out here; nothing of the user's.
 pub fn prewarm() {

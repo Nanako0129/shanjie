@@ -271,7 +271,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 - **畫法**：
   - `ID2D1DCRenderTarget`，類型 `D2D1_RENDER_TARGET_TYPE_SOFTWARE`（不把 GPU 驅動載進每個 App、沒有裝置遺失），每次更新現建；畫進 32 bpp 的 DIB（預乘 alpha、灰階文字抗鋸齒），用 `UpdateLayeredWindow`（`ULW_ALPHA`）送上去，圓角才有每像素 alpha。render target 建不起來就不開窗，按鍵照常處理。
   - 文字用 DirectWrite 的系統字型集合，字型 Microsoft JhengHei UI、地區 zh-TW；不用自訂的 font file loader、不從路徑或環境變數載字型。`DWRITE_WORD_WRAPPING_NO_WRAP` 加字元截斷（省略號）；視窗寬度上限是所在螢幕工作區寬度的一半。
-  - Direct2D factory（multi-threaded、`D2D1_DEBUG_LEVEL_NONE`，所有建置都一樣）與 DirectWrite shared factory 整個程序各一份，**第一次開窗時**才建（每個 GUI 程序都會載 TIP，多數不打字，所以不在 `ActivateEx` 建）。
+  - Direct2D factory（multi-threaded、`D2D1_DEBUG_LEVEL_NONE`，所有建置都一樣）與 DirectWrite shared factory 整個程序各一份，由**第一個被吃掉的鍵**在背景執行緒建好，並排版一段固定文字讓系統字型集合與 UI 字型先載入（預熱；每個 GUI 程序都會載 TIP，多數不打字，所以不在 `ActivateEx` 建）。預熱只在連上常駐程序之後才會發生，那時 DLL 已不會卸載（§3.2），所以執行緒不會比模組活得久。候選字與編號的兩個文字格式每條 UI 執行緒建一次、之後每次更新重用（只依字級重建）。
   - 尺寸與顏色是 §4.3 的值，放在 `candlayout.rs`（尺寸）與 `cand.rs`（顏色）的具名常數，註解寫那一列；像素尺寸依視窗所在螢幕的 DPI 縮放（100% 是 96、150% 是 144；寬度在兩個量到的點之間直線內插），去掉底部列的外框是 142 × 294（100%）與 215 × 442（150%）。§4.3 沒量到的是：字型大小（候選字 16 px、編號 14 px，100%）、選取條的高（16 px）、編號與文字在列內的位置、選取色塊的圓角（4 px），它們是暫定值，要照並排截圖校正。
   - 列數是這一頁的候選數（最多 9，窗高隨列數），編號 1–9，選取列有底色塊與左側選取條。沒有捲動點、底部列、展開成三欄。
 - **主題**：讀 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（讀不到，例如沙箱 App 被拒，就用淺色、不當錯誤），收到 `WM_SETTINGCHANGE`（`ImmersiveColorSet`）時重讀，下一次畫就換色。微軟注音跟的是哪一個值（App 的深淺還是系統的）沒量到。
@@ -281,7 +281,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
   - 顯示、隱藏、內容變更時用 `NotifyWinEvent` 送 `EVENT_OBJECT_IME_SHOW`、`EVENT_OBJECT_IME_HIDE`、`EVENT_OBJECT_IME_CHANGE`（微軟輸入法規範的 light dismiss；窗不收輸入）。完整的 UIA 候選清單不做。
   - 密碼欄：context 的輸入範圍（`GUID_PROP_INPUTSCOPE`）含 `IS_PASSWORD` 時不開窗（組字與按鍵照常）。
 - **候選字的保存與清除**：`Out.candidates` 畫進 DIB 後就丟，不留到下一次重畫；DIB 與 DC 在窗收下之後立刻釋放，隱藏時先換上 1 × 1 的透明內容再 `SW_HIDE`；`Show` 不 derive `Debug`。R2：候選字不進任何 log、計時檔、錯誤訊息、視窗標題、視窗屬性、`OutputDebugString`；範圍涵蓋 DIB 與 `NotifyWinEvent`。崩潰傾印裡可能有候選字（和組字同一類，§3.14）。
-- **計時事件**（DLL，只有 Medium 程序寫，§3.11）：66 一次候選窗更新（開始＝`Out` 到手，結束＝`UpdateLayeredWindow` 回來）；67 程序裡第一個窗的建立（開始＝建 Direct2D 與 DirectWrite factory 之前，結束＝`CreateWindowExW` 之後）；68 每次顯示的位置，連續六行、兩欄相同、各是一個 `i32` 的 `u32` 表示（負的座標用二補數）：組字矩形的 left、top、right、bottom，然後窗左上角的 x、y（螢幕像素）。只有數字。
+- **計時事件**（DLL，只有 Medium 程序寫，§3.11）：66 一次候選窗更新（開始＝`Out` 到手，結束＝`UpdateLayeredWindow` 回來）；67 程序裡第一個窗的建立（開始＝取得 Direct2D 與 DirectWrite factory 之前，結束＝`CreateWindowExW` 之後；factory 通常已由預熱建好，所以多半不含建 factory 的時間，和預熱加入前的數字不能直接比）；68 每次顯示的位置，連續六行、兩欄相同、各是一個 `i32` 的 `u32` 表示（負的座標用二補數）：組字矩形的 left、top、right、bottom，然後窗左上角的 x、y（螢幕像素）。只有數字。
 - **驗證**：
   - 單元測試：`candlayout::tests`（尺寸、寬度、擺位與極端值，各平台）；`window_keys_match_the_core`（§3.6）；常駐程序 crate 的 `the_window_the_host_sends_is_the_one_the_core_gives`（對直接呼叫核心）、`a_connection_never_gets_the_candidates_of_a_window_it_does_not_own`（兩條連線）、`replay_keys_vertical`（一串鍵，從開窗、↓、數字選、Enter 選到送出，算出的字等於寫定的預期字；預期字由 `print_replay_keys_vertical` 產生）；R2 子程序（§3.13）。
   - 測試 VM（乾淨檢查點）：記事本與「執行」對話框送 `replay_keys_vertical` 那一串鍵，讀回的字逐字相同；開窗位置對（組字前後截圖的範圍框對照事件 68，開再關的差異核對畫面上真的有窗）；開始功能表搜尋框與 Win+S 搜尋看得到窗；開、關、更新前後前景與焦點視窗不變；100%、150%、淺色、深色的外框與顏色；記事本多佔的私有記憶體仍小於 10 MB；DLL 端事件 3 的 p95 小於 16 ms；小算盤與系統管理員的記事本、密碼欄、R2 掃描另記。
