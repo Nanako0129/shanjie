@@ -197,7 +197,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 建立順序與預設值照 App 的建引擎流程：帶詞包建引擎（`acg`、`it` 與 `beauty`，App 的預設）、`load_lm`（bigram，連帶的 classes／KN／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表）、降權開、語意校正開、強度 standard、`set_profile`。
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（`set_english(false)`）、縮寫關。App 預設前兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 4.5 定義。兩者都不影響 n-gram 與語意校正的選字。候選窗為橫式，一頁 9 項（`PAGE_SIZE`）。
 - 口語表：小模型開著且 `data/lm/colloquial.sjlm` 存在時預設載入（`--no-tinylm` 時不載）；`--colloquial FILE` 改載另一份，`--no-colloquial` 不載（對照用；兩者併用是錯誤）。載入後 `models:` 行多一欄 `colloquial.sjlm:<8 碼>`、設定標記多 `+colloq:<8 碼>`。口語項是否真的用到由核心照條件判斷（聊天、配對的小模型、表已載入）。
-- 讀音項：引擎的 n-gram 解碼器帶讀音項（`Engine::load_lm` 建表），所有設定都生效；`--no-reading-decode`（研究用，`Engine::set_reading_decode(false)`）把它關掉。設定標記每次都以 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>+rm` 結尾（`+rm`：讀音質量規則，decoder.md §5）（取自引擎真的載入的那張表，`Engine::reading_tag`），加 `--no-reading-decode` 就沒有這兩個標記。
+- 讀音項：引擎的 n-gram 解碼器帶讀音項（`Engine::load_lm` 建表），所有設定都生效；`--no-reading-decode`（研究用，`Engine::set_reading_decode(false)`）把它關掉。設定標記每次都以 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>+rm` 結尾（`+rm`：讀音質量規則，decoder.md §5）（取自引擎真的載入的那張表，`Engine::reading_tag`），加 `--no-reading-decode` 就沒有這三個標記。
 - 學習：`--learn off|on`（預設 off）。on 時在第一個鍵之前呼叫一次 `set_learning(true)`；單獨使用時不開學習檔（只在記憶體），新詞 B 照預設開。學習狀態只在這一個引擎、這一次執行內累積。
 - `--profile chat|formal`（預設 chat）。`--no-tinylm` 關掉語意校正（對照用）。
 

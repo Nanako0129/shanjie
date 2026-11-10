@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn a_rare_reading_is_penalised_against_the_words_best() {
         let (lex, rd) = mk(LEX);
-        assert!((rd.logp(&lex, "b", "甲").unwrap() + 2.0).abs() < 1e-4, "about -2 (the epsilon moves it by 4e-6)");
+        close(rd.logp(&lex, "b", "甲").unwrap(), -2.0);
         close(rd.logp(&lex, "a", "甲").unwrap(), 0.0);
         close(rd.logp(&lex, "b", "乙").unwrap(), 0.0);
         close(rd.logp(&lex, "d", "丁").unwrap(), 0.0);
@@ -457,7 +457,7 @@ mod tests {
         }
     }
 
-    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text.
+    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text (`+rm` follows once `with_mass` ran; this table has no mass step).
     #[test]
     fn the_tag_carries_the_exempt_lists_hash() {
         let (_, rd) = built(LEX, None, "b\t甲\n");

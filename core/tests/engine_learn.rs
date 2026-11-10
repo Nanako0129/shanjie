@@ -86,7 +86,8 @@ const DAY: i64 = 20_000;
 const L: Layout = Layout::Standard;
 
 /// The capped lexicon over the lexicon text `text` with the reading term (docs/spec/decoder.md §5), as `Engine::load_lm` gives the App's: the table
-/// is built from the same text (its rows are the ones the mc estimate counts) and no exemption. `set_reading_decode(false)` or `set_reading_active(false)`
+/// is built from the same text (its rows are the ones the mc estimate counts), with no exemption and without the mass step (`with_mass`), which these
+/// small lexicons never meet. `set_reading_decode(false)` or `set_reading_active(false)`
 /// switches it off.
 fn capped_over(text: &str) -> CappedLexicon {
     let lex = Arc::new(Lexicon::parse(text).unwrap());

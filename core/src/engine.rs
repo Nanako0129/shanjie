@@ -1281,7 +1281,7 @@ impl Engine {
         }
     }
 
-    /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>`; empty without a model or with `set_reading_decode(false)`): what
+    /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>+rm`; empty without a model or with `set_reading_decode(false)`): what
     /// `shanjie-replay` prints, so the tag names the table the engine really loaded.
     pub fn reading_tag(&self) -> String {
         self.lm.as_ref().and_then(|st| st.capped.reading_tag()).unwrap_or_default()

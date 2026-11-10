@@ -350,7 +350,7 @@ fn summary_line_records_a_non_standard_level() {
     assert!(plain.contains("+tl:") && !plain.contains("+rl:"), "{plain}");
     assert_eq!(head(&["--rerank-level", "standard"]), plain);
     for name in ["conservative", "aggressive"] {
-        // `+rl:` stays after `+tl:`; the reading term's `+rd+rx:` is the last mark of every tag (docs/spec/decoder.md §5)
+        // `+rl:` stays after `+tl:`; the reading term's marks `+rd+rx:<sha8>+rm` end every tag (docs/spec/decoder.md §5)
         assert_eq!(head(&["--rerank-level", name]), plain.replacen("+rd+rx:", &format!("+rl:{name}+rd+rx:"), 1));
     }
     std::fs::remove_dir_all(dir).unwrap();
