@@ -229,11 +229,13 @@
 
 Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（組字前面多放一格）。殼用 `attributes(forCharacterIndex:)` 問第 0 個字的位置時，Chrome 收到 `{0,1}`，起點在組字範圍之前，回傳過時的 `first_selection_rect`，也就是視窗左上角；第一個音節時索引 1 以上沒有轉給 Chrome，殼拿到 (0, 0)；`firstRect(forCharacterRange:)` 與不顯示的 `IMKCandidates` 的 `candidateFrame()` 也拿不到位置。第二個音節起問到的是組字範圍內的字，位置是對的。第三方輸入法經過 IMK 能用的幾條路，量到都拿不到 Docs 第一個音節時的正確位置，所以改為這個時期不顯示預測列。
 
+以上是 Chrome 156（.0.8078.79、.80）量到的。Chrome 157（.0.8103.51）起第一個音節的位置是對的：Docs 組字時呼叫 `updateCharacterBounds`、`updateSelectionBounds`，第一個鍵後 0.15 秒的預測列與按 ↓ 的候選窗都在那一行下面（行首組字範圍 `{0,1}`、行中 `{1,2}` 都量過），同一台 Mac 從 156 更新到 157 後也不再跑到左上角。所以這個開關改成給 Chrome 156 以前（與同代的 Chromium 瀏覽器）用，預設關。
+
 ### 9.2 規則
 
 預測列這個輸出（`candidate_selected == -1`、有候選、沒有英文段提示）在同時滿足下列條件時，殼不顯示（`hideCandidates()`）：
 
-- 開關 `browserFirstSyllable` 開著（預設開；「即時預測」關掉時整個預測列都不顯示，這個開關反灰，設定保留）。
+- 開關 `browserFirstSyllable` 開著（預設關，給 Chrome 156 以前用；「即時預測」關掉時整個預測列都不顯示，這個開關反灰，設定保留）。
 - 「可省略韻母」關著。
 - 組字區只有一個音節（`Shell.singleSyllable(preedit)`）：連續的注音符號（ㄅ 至 ㄩ，U+3105 至 U+3129）與聲調（ˊ ˇ ˋ ˙）合算一個，其他每個字元各算一個，總數 ≤ 1 就算。「ㄘㄜ」是 1、「測」是 1、「1」是 1、空字串是 1，「測ㄕ」是 2；顯示規則把未完成音節顯示成英文字母時照字元數算。
 - 目前 App 的 bundle ID 在 `Shell.browserApps`。
@@ -246,8 +248,8 @@ Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（�
 
 ### 9.4 開關與判斷位置
 
-- 設定視窗「選字」區，「即時預測」下面：開關「在瀏覽器裡，第一個字不顯示預測」，下面一行說明；選單不加。
-- 存在 `PredictionStore` 的 `browserFirstSyllable`（UserDefaults 鍵 `browserFirstSyllable`），沒存過算開。
+- 設定視窗「選字」區，「即時預測」下面：開關「在瀏覽器裡，第一個字不顯示預測」，下面一行說明（給 Chrome 156 以前或同代 Chromium 瀏覽器的 Google 文件用、打開會擋掉第一個字的預測列、Chrome 157 起不需要）；選單不加。
+- 存在 `PredictionStore` 的 `browserFirstSyllable`（UserDefaults 鍵 `browserFirstSyllable`），沒存過算關；存過的（在設定裡改過，不論開或關）照存的值。
 - 判斷放在 `Session.apply(_:)`（`hidesFirstSyllableRow`），所以每一種輸出都照同一條：按鍵、點選、重排工作、各個設定的快照、activate。bundle 不另外讀：Session 記住最近一次既有讀取的值（`send` 每鍵讀的那一次，以及 `applyProfile(bundle:)` 收到的那一次），不新增 `bundleIdentifier` 讀取。
 
 ### 9.5 驗證
@@ -255,18 +257,20 @@ Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（�
 `macos/Tests/ShanjieKitTests/BrowserFirstSyllableTests.swift`（`make test-swift`，用假的 client 與面板，經過真的核心）：
 
 - `testABrowserHidesTheRowForTheFirstSyllableOnly`、`testCrestAndAsideHideTheRowForTheFirstSyllable`：清單內的 App，第一個音節的每一鍵不顯示，第二個音節的第一鍵顯示。
+- 測試的 Shell 預設把開關打開（規則的案例都在開著時跑），沒存過的預設另外測。
 - `testOtherAppsAndTheSwitchOffKeepTheRow`：不在清單或開關關閉時與一般相同。
+- `testNeverChosenShowsTheRowInABrowser`：沒存過時，清單內的瀏覽器每一鍵都顯示預測列。
 - `testTabAndDownStillShow`：Tab 與 ↓ 照常顯示。
 - `testSingleSyllable`：判斷函式。
 - `testOneBundleReadPerKey`：清單內外每鍵 `bundleReads` 增量都是 1。
-- `testTheSwitchIsStored`：預設開，關掉後存成 false，重建 Shell 仍是關。
+- `testTheSwitchIsStored`：預設關；打開後存成 true、重建 Shell 仍是開；再關掉存成 false。
 - `testANonKeyOutputFollowsTheRule`：非按鍵的輸出（設定快照）也套用同一條。
 - `testAbbreviationOnKeepsTheRow`：縮寫開時預測列不隱藏。
 
 ### 9.6 已知限制
 
-- 第一個音節時按 Tab 進入的預測列、游標移到組字區開頭（←）之後的預測列，殼問的仍是起點 0 的範圍，在 Docs 裡位置應該同樣錯（推論，沒有量過）。
-- 第一個音節時的候選窗（↓、空白）在 Docs 的位置：問的是同一個起點 0 的範圍，應該同樣錯（推論）。
+- Chrome 156 以前：第一個音節時按 Tab 進入的預測列、游標移到組字區開頭（←）之後的預測列，殼問的仍是起點 0 的範圍，在 Docs 裡位置應該同樣錯（推論，沒有量過）；第一個音節時的候選窗（↓、空白）跑到左上角（156.0.8078.80 量到）。
+- Chrome 157：第一個音節按 ↓ 的候選窗位置正確（157.0.8103.51 量到）；Tab 與 ← 之後的預測列沒有量。
 - 「不用組字區前面那一格方框」的做法（對瀏覽器改問索引 1 以上）試過：Chrome 的一般 `<textarea>` 對索引 0 會回組字的第一個字、位置本來就對，用「瀏覽器且組字起點 > 0」的判斷會讓這類欄位變差，要另找能分辨 Docs 的訊號；所以沒有做。
 - 不在清單的 Chromium 瀏覽器與 Electron App 不套用。
 

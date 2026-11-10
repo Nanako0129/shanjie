@@ -12,7 +12,8 @@ final class BrowserFirstSyllableTests: XCTestCase {
         resources = try XCTUnwrap(TestData.resources())
     }
 
-    private func makeShell(_ store: MemoryPredictionStore = MemoryPredictionStore(), abbreviation: Bool = false) -> Shell {
+    /// The switch on, unless a test passes its own store: the rule's tests are about it on (never chosen is off since Chrome 157).
+    private func makeShell(_ store: MemoryPredictionStore = MemoryPredictionStore(browserFirstSyllable: true), abbreviation: Bool = false) -> Shell {
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: store, abbreviationStore: MemoryAbbreviationStore(abbreviation), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
         XCTAssertNotNil(shell.engine)
         return shell
@@ -86,14 +87,23 @@ final class BrowserFirstSyllableTests: XCTestCase {
         }
     }
 
-    /// (h) Never chosen is on; the settings model turns it off, the store keeps it, a new shell reads it.
+    /// (h) Never chosen is off; the settings model turns it on and off, the store keeps each, a new shell reads it.
     func testTheSwitchIsStored() {
         let store = MemoryPredictionStore()
         let model = SettingsModel(shell: makeShell(store))
-        XCTAssertTrue(model.browserFirstSyllable)
+        XCTAssertFalse(model.browserFirstSyllable)
+        XCTAssertFalse(makeShell(store).browserFirstSyllableOn)
+        model.setBrowserFirstSyllable(true)
+        XCTAssertEqual(store.browserFirstSyllable, true)
+        XCTAssertTrue(makeShell(store).browserFirstSyllableOn)
         model.setBrowserFirstSyllable(false)
         XCTAssertEqual(store.browserFirstSyllable, false)
         XCTAssertFalse(makeShell(store).browserFirstSyllableOn)
+    }
+
+    /// Never chosen (the default since Chrome 157 places the first syllable right): a browser shows the row on every key, as a text view does.
+    func testNeverChosenShowsTheRowInABrowser() {
+        XCTAssertEqual(visibility(bundle: chrome, shell: makeShell(MemoryPredictionStore())), [true, true, true, true])
     }
 
     /// (i) An output that is not a key (the prediction switch's snapshot) follows the same rule.

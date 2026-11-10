@@ -159,7 +159,7 @@ public final class MemoryDemoteStore: DemoteStore {
 @MainActor
 public protocol PredictionStore: AnyObject {
     var prediction: Bool? { get set }
-    /// docs/spec/prediction.md §9.4: whether browsers hide the row for the first syllable; `nil` is on.
+    /// docs/spec/prediction.md §9.4: whether browsers hide the row for the first syllable; `nil` is off (it was on before Chrome 157 placed it right).
     var browserFirstSyllable: Bool? { get set }
 }
 
@@ -502,9 +502,9 @@ public final class Shell {
     ]
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
-    /// Chromium browsers (docs/spec/prediction.md §9.3): Google Docs answers an input method's first
-    /// rectangle query with the view's origin, so the prediction row is not shown for the first syllable there. Crest and
-    /// Aside were added with bundle IDs read off a machine.
+    /// Chromium browsers (docs/spec/prediction.md §9.3): on Chrome 156 and earlier Google Docs answers an input method's first
+    /// rectangle query with the view's origin, so with `browserFirstSyllableOn` (off by default since Chrome 157 places it right)
+    /// the prediction row is not shown for the first syllable there. Crest and Aside were added with bundle IDs read off a machine.
     static let browserApps: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
         "org.chromium.Chromium",
@@ -556,8 +556,8 @@ public final class Shell {
     private let predictionStore: PredictionStore
     /// V3: whether the prediction row is computed (default on); sent to every engine `build()` makes.
     private(set) var predictionOn = true
-    /// docs/spec/prediction.md §9.4: hide the passive prediction row for the first syllable in `browserApps` (default on).
-    private(set) var browserFirstSyllableOn = true
+    /// docs/spec/prediction.md §9.4: hide the passive prediction row for the first syllable in `browserApps` (default off; for Chrome 156 and earlier).
+    private(set) var browserFirstSyllableOn = false
     private let abbreviationStore: AbbreviationStore
     /// docs/spec/prediction.md §6: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
     private(set) var abbreviationOn = false
@@ -898,7 +898,7 @@ public final class Shell {
         demoteOn = demoteStore.demote ?? true
         self.predictionStore = predictionStore
         predictionOn = predictionStore.prediction ?? true
-        browserFirstSyllableOn = predictionStore.browserFirstSyllable ?? true
+        browserFirstSyllableOn = predictionStore.browserFirstSyllable ?? false
         self.abbreviationStore = abbreviationStore
         self.showsAbbreviation = showsAbbreviation
         abbreviationOn = showsAbbreviation && abbreviationStore.abbreviation == true

@@ -58,7 +58,7 @@ final class DefaultsPredictionStore: PredictionStore {
         get { UserDefaults.standard.object(forKey: "prediction") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "prediction") }
     }
-    /// docs/spec/prediction.md §9.4, key `browserFirstSyllable`; absent means on.
+    /// docs/spec/prediction.md §9.4, key `browserFirstSyllable`; absent means off.
     var browserFirstSyllable: Bool? {
         get { UserDefaults.standard.object(forKey: "browserFirstSyllable") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "browserFirstSyllable") }
