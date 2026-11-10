@@ -116,8 +116,11 @@ pub fn run() -> ! {
     }
     let t0 = timing::now_us();
     let e = engine::load(&dir).unwrap_or_else(|| exit(EXIT_LOAD));
+    let t1 = timing::now_us();
+    // Warm-up before `install`: until then every client passes through (§5.2).
+    let e = engine::warmed(&dir, e).unwrap_or_else(|| exit(EXIT_LOAD));
     engine::install(e);
-    timing::record(timing::EV_LOAD, t0, timing::now_us());
+    timing::record(timing::EV_LOAD, t0, t1);
     // Lives until logoff (§5.2): the instance threads do the work.
     loop {
         std::thread::park();

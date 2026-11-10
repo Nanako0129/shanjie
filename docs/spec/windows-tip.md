@@ -133,7 +133,7 @@ Linux `debug` job 在既有步驟之後加三步：
 ### 3.3 安裝位置與信任
 
 - TIP 會被載進每個程序（含提升權限的），所以 DLL、常駐程序 `shanjie-host.exe` 與資料放在同一個只有系統管理員能寫的資料夾（開發版為 `C:\Program Files\shanjie-dev\`），`regsvr32` 只註冊這個路徑上的 DLL。DLL、常駐程序或模型被一般使用者換掉就等於提權。
-- 常駐程序的路徑從 DLL 自己的位置推，資料路徑從常駐程序自己的位置推：`GetModuleFileNameW`（緩衝不夠就加倍重取，最多 65536 單位，仍放不下或取不到就回 `None`，不拿截斷的前綴去推資料夾），資料在常駐程序旁的 `data\`（`lexicon`、`packs`、`lm\bigram.sjlm`、`lm\tinylm.sjtl`、`lm\colloquial.sjlm`）；不讀環境變數。模型檔要與 `data/*.sha256` 相符。
+- 常駐程序的路徑從 DLL 自己的位置推，資料路徑從常駐程序自己的位置推：`GetModuleFileNameW`（緩衝不夠就加倍重取，最多 65536 單位，仍放不下或取不到就回 `None`，不拿截斷的前綴去推資料夾），資料在常駐程序旁的 `data\`（`lexicon`、`packs`、`lm\bigram.sjlm`、`lm\tinylm.sjtl`、`lm\colloquial.sjlm`）；正式版不讀環境變數（只有帶 `timing` 的量測版讀一個開關，§5.2）。模型檔要與 `data/*.sha256` 相符。
 - 執行期不載入別的 DLL。
 - 驗證：複製進 VM 後核對 DLL 與每個模型檔的雜湊；用 `Get-Acl` 核對 DLL 與整個資料夾樹，Users、Authenticated Users、Everyone、INTERACTIVE、ALL APPLICATION PACKAGES 都沒有寫入權（最多讀取與執行）。
 
@@ -213,7 +213,7 @@ Linux `debug` job 在既有步驟之後加三步：
 ### 3.11 計時檔（量測用）
 
 - 只在開了 cargo feature `timing` 的建置裡有（CI 兩種都建）。每行三欄 `<事件代碼>\t<開始>\t<結束>\n`，**只有數字、tab、換行**；開始與結束是同一個時鐘（`QueryPerformanceCounter` 換成微秒）。格式函式 `format_line` 永遠編譯，檔案只在 `timing` 下存在。
-- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65 見 §5.8；66–68 見 §3.15。
+- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65、69、70 見 §5.8；66–68 見 §3.15。
 - 診斷事件（兩欄都是當下時間，除非另註）：40 `OnTestKeyDown` 回 TRUE（兩欄為 OS 執行緒 ID）；41–44 `OnTestKeyDown` 回 FALSE 的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空）；45 `OnKeyDown` 的同步 edit session 沒拿到（兩欄為 HRESULT）；47 `ActivateEx` 註冊 sink 失敗；48 `ActivateEx` 在安全模式；49 `ActivateEx` 進來的執行緒（兩欄為執行緒 ID）；50 進入 `OnKeyDown`（兩欄為執行緒 ID）；51–55 `OnKeyDown` 在送出之前就回不吃的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空、鍵沒有對應）；56 焦點換過來時鍵盤隔間讀到關、被 TIP 重新打開。都只有數字，不含任何按鍵或文字。
 - **只有完整性等級剛好是 Medium 的程序才寫**（程序 token 的 `TokenIntegrityLevel`，RID 0x2000）：High、Low 與 AppContainer 的程序一律不寫。理由：同一個使用者的一般程序改得了該使用者的資料夾（例如把中間的資料夾換成 junction），提升權限的程序照那條路徑建檔就是跨權限寫檔；限定 Medium 後寫入不跨權限。
 - 位置：目前使用者的 `%LOCALAPPDATA%\shanjie-dev\timing\timing-<pid>.txt`，資料夾路徑用 `SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_NO_PACKAGE_REDIRECTION)` 取，不讀環境變數。封裝的宿主（例如 MSIX 封裝的記事本）寫 AppData 可能被檔案系統虛擬化而導到 `%LOCALAPPDATA%\Packages\<套件>\LocalCache\Local\shanjie-dev\timing\`，讀取時兩個位置都要看。
@@ -477,6 +477,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 - pipe 名稱 `\\.\pipe\shanjie-dev-<使用者 SID>-<工作階段 ID>`。名稱不帶協定版本：版本不同的兩端要碰得到彼此，才會走到 `Refuse { 1 }`。提升權限的 App 也連這一支（§5.5 第 5 點）。
 - **實例**：啟動時一次建好全部 N＝64 個實例（`nMaxInstances = N`，第一個帶 `FILE_FLAG_FIRST_PIPE_INSTANCE`），之後以 `DisconnectNamedPipe`、`ConnectNamedPipe` 重複使用、永遠不關。第一個實例建不起來（已經有一支在跑）就結束。實例數已滿，誰都加不了實例，與 DACL 無關。不另外用具名 mutex。VM 驗收讀事件 65（同時連線數的最高值）核對 N。
 - **先建 pipe、再載模型**：載入期間收到 `Hello` 或 `Key` 立刻回 `NotReady`，客戶端直通。模型載入失敗、或引擎的鎖 poisoned，常駐程序就結束，讓下一個客戶端啟動新的一支。
+- **預熱**：模型載完之後、`install()` 之前，常駐程序用同一個引擎送一串固定的假按鍵（`a u / 6 w u 0 space y l 3 g ; 4`，ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ，不按 ↓、不開候選窗、不送出），讓第一個真的按鍵不必面對還沒進記憶體的模型頁面（這是推論，量測見 §5.8 的事件 69）；不論成敗，最後一律 `reset`（模式 1），所以引擎之後沒有組字、沒有前文，學習本來就關。預熱期間 `ready()` 仍是假，客戶端照 `NotReady` 直通。某一鍵被核心拒絕就停止預熱、記事件 70，照常 `install()`，不讓常駐程序起不來；`reset` 本身失敗時，這個引擎不放上線，釋放後重新載入一次（不再預熱），再失敗就照模型載入失敗結束。只有帶 `timing` 的量測版讀環境變數 `SHANJIE_HOST_NO_WARM=1` 來跳過預熱，正式版不讀、設定頁也沒有；DLL 啟動常駐程序時環境區塊只有 `SystemRoot`，使用者環境裡的這個變數傳不進產品的常駐程序。事件 2 的結束仍是載入完成的時刻（預熱之前），它在 `install()` 之後才寫。
 - **誰啟動**：DLL 連線得到 `ERROR_FILE_NOT_FOUND`，而且呼叫端同時符合以下全部條件時，才 `CreateProcessW`；`ERROR_PIPE_BUSY` 不啟動、直通。
   - 呼叫端完整性剛好是 Medium、不是 AppContainer、不是提升權限、不是受限權杖、工作階段不是 0、使用者不是 SYSTEM／LocalService／NetworkService、沒有套件身分（`GetCurrentPackageFullName` 回 `APPMODEL_ERROR_NO_PACKAGE`；封裝 App 開的子程序會留在它的套件執行環境裡）。
   - 不等：送出 `CreateProcessW` 就讓這一鍵直通，不在 `OnKeyDown` 或 `ActivateEx` 裡等 pipe 出現。每個程序同時只啟動一次；啟動後 10 秒內不再啟動，期間的鍵直通。啟動 15 秒後、或它啟動的常駐程序已經結束，連線仍是 `ERROR_FILE_NOT_FOUND`，記一次「啟動後仍找不到」（事件 63 原因 5），照退避重試；永久直通只由 `Refuse { 1 }` 觸發。
@@ -531,7 +532,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 4. **常駐程序核對客戶端**：讀到 `Hello` 之後 `ImpersonateNamedPipeClient` → `OpenThreadToken(OpenAsSelf = TRUE)` 讀 `TokenUser`（等於常駐程序的使用者）、`TokenSessionId`（等於常駐程序的工作階段）、AppContainer、完整性、提升權限 → `RevertToSelf`。任何一項查不到就拒絕（`Refuse { 3 }`）；`RevertToSelf` 失敗就結束程序。查到的類別記在連線上。不用 `GetNamedPipeClientProcessId` 再開程序查授權。常駐程序永遠不以客戶端身分做任何事。
 5. **提升權限的 App**：連同一支 Medium 常駐程序，絕不啟動它（§5.2 的條件）；常駐程序的自我檢查保證它不會以提升權限執行；客戶端照第 1 點核對伺服器。**接受的風險**：管理員 App 的按鍵經 pipe 進到一般權限的常駐程序，送出的字再回到管理員 App，同一個帳號下的一般權限惡意程式可以注入或讀取常駐程序，因此能讀到、也能偽造打進管理員視窗的字（Windows 的 UIPI 原本擋住的事）。Mozc、小狼毫、PIME 都是同樣的設計。縮小的措施：安裝資料夾只有系統管理員能寫（§3.3）、第 1 點的伺服器核對、§5.3 的控制字元檢查。常駐程序維持 Medium（之後的學習要寫 `%LOCALAPPDATA%`，Low 寫不了）。
 6. **R2**：線上訊息就是組字內容。兩端都不得把它寫進任何 log、檔案、錯誤訊息或 `OutputDebugString`；型別不 derive `Debug`；錯誤只有 Win32 碼與結束碼；計時檔只有數字，事件 62、63 只放錯誤碼或原因碼。R2 行為測試（§3.13）在常駐程序也跑一份。常駐程序關掉自己的 WER dump（§5.2）。
-7. 常駐程序只用 `LOAD_LIBRARY_SEARCH_SYSTEM32`，不讀環境變數找資料夾，不開網路。
+7. 常駐程序只用 `LOAD_LIBRARY_SEARCH_SYSTEM32`，正式版不讀環境變數（只有帶 `timing` 的量測版讀 `SHANJIE_HOST_NO_WARM`，§5.2），不開網路。
 8. **接受並記錄**：單一引擎共用，任何連得上的客戶端都能讓正在打字那個 App 的組字被丟掉（換擁有者就 reset），也能從 `took_over` 看出別的 App 有沒有在打字。
 
 ### 5.6 故障時怎麼做
@@ -561,6 +562,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 
 - DLL 與常駐程序各自照 §3.11 寫（同樣的 Medium 閘門、`CREATE_NEW`、只有數字）；常駐程序的檔名 `host-<pid>.txt`，同一個資料夾。DLL 寫入用 `try_lock`（UI 執行緒不等計時檔），常駐程序等鎖（64 條連線執行緒共用一個檔，略過會丟掉事件 2）。
 - 常駐程序記 2（模型載入）、3（每鍵：收到到送回）、64（一個 AppContainer 客戶端連上，兩欄都是 1）、65（同時連線數創新高時的值，兩欄都是那個數）。DLL 不再寫 2 與 46。
+- 常駐程序另記 69（預熱：開始＝第一鍵之前、結束＝`reset` 之後，單位 µs；沒預熱時不寫）、70（預熱的某一鍵被核心拒絕：兩欄都是數字，依序是那一鍵在按鍵串裡的位置（從 0 起）與核心的回傳碼；只有失敗時寫）。
 - DLL 記：60 等常駐程序回應（開始＝送出、結束＝收到）；61 `CreateProcessW` 成功的時刻（同一個 QPC 時鐘；冷啟動秒數＝常駐程序事件 2 的結束減這個時刻）；62 逾時或斷線（兩欄都是 Win32 錯誤碼）；63 不符條件而直通（兩欄都是原因碼：1 不准連線、2 不符啟動條件、3 退避中或另一條執行緒正在啟動、4 `CreateProcessW` 失敗（含 Job 不准脫離）、5 啟動後仍找不到、6 `ERROR_PIPE_BUSY`、7 `NotReady`、8 `Busy`、9 伺服器核對不過、10 `Refuse { 1 }`、11 `Refuse { 2 }`（含不認得的原因碼）、12 `Refuse { 3 }`、13 回應型別不對）。42 的意思是「被擋住」（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，或組字區空時連不上常駐程序，§5.4），52 是同樣的擋住出現在 `OnKeyDown`。
 
 ### 5.9 介面的層級
@@ -583,7 +585,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 5. **記憶體**：記事本與 explorer 各做兩組（微軟注音、善解），取樣點相同、兩組之間開「執行」對話框的次數相同。判準：善解的差減掉微軟注音的差 < 10 MB。常駐程序的私有記憶體照實報。
 6. **延遲**：DLL 的每鍵（事件 3）中位數、p95、最大值，p95 < 16 ms；事件 60 的 p95 另報；首鍵分常駐程序已在跑（目標 < 16 ms）與冷啟動兩種報。另報事件 65 的最高值。
 7. **故障**：(k1) 記事本組字中結束常駐程序，下一鍵照 §5.6 第一列（組字結束、字留著、這一鍵被吃掉），記事本沒有當掉、沒有啟動常駐程序；在「執行」對話框送一鍵重起常駐程序後，記事本打同一句逐字相同。只記錄、不擋：(k2) 設定 App 的搜尋框（字對不對、事件 64）；(k3) 以系統管理員身分開的記事本（字對不對、常駐程序沒有換、仍是 Medium；常駐程序沒在跑時直通、不啟動）；(k4) 模型載入期間打字（不卡 200 ms、之後不重複出字）；(k5) Low 完整性的測試程序對真的 pipe 呼叫 `CreateNamedPipeW`，應該被拒絕或拿到 `ERROR_PIPE_BUSY`。
-8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～65；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
+8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～70；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
 9. **取消註冊**照 §3.13 (h)，另外核對重開之後沒有 `shanjie-host` 在跑。
 10. 單元測試（CI）：兩條連線，B 用 A 的 `ctx` 送 `Release`、`Reset`，A 的狀態不變；B 用 A 的 `ctx` 送 `Key`，B 只拿到自己那一鍵、拿不到 A 的 `preedit`（單一引擎下這一鍵接手，A 下一鍵看到 `took_over`）；限流（`Refuse { 2 }`）之後下一條連線照常可用；模擬等級是 `SecurityIdentification`；`proto` 的解析規則。
 11. **量測結果**（測試 VM，常駐程序版；延遲是 DLL 裡花的時間，不含 App 畫字）：

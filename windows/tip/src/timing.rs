@@ -56,6 +56,10 @@ pub const EV_HOST_PEAK: u32 = 65;
 pub const EV_CAND_UPDATE: u32 = 66;
 pub const EV_CAND_FIRST: u32 = 67;
 pub const EV_CAND_POS: u32 = 68;
+/// docs/spec/windows-tip.md §5.2, written by the host only. 69: the warm-up before `install` (start = before the first key, end = after the reset, µs).
+/// 70: a warm-up key the core refused (both columns numbers: its 0-based position in the key list, the return code).
+pub const EV_WARM: u32 = 69;
+pub const EV_WARM_FAILED: u32 = 70;
 
 /// Reasons of event 63.
 pub mod pass {
@@ -220,7 +224,7 @@ mod tests {
         assert!(l == "3\t12\t4000000000000\n");
         assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         assert!(l.matches('\t').count() == 2 && l.matches('\n').count() == 1 && l.ends_with('\n'));
-        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK, EV_CAND_UPDATE, EV_CAND_FIRST, EV_CAND_POS] {
+        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK, EV_CAND_UPDATE, EV_CAND_FIRST, EV_CAND_POS, EV_WARM, EV_WARM_FAILED] {
             let l = format_line(ev, 0, u64::MAX);
             assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         }
