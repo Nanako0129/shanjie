@@ -165,6 +165,20 @@ int32_t shanjie_engine_set_prediction(ShanjieEngine *engine, uint32_t enabled, S
 //   current setting on every output, so a row on screen is re-rendered in the new orientation in the snapshot (value 2
 //   when vertical). In the entered vertical row Up / Down move the selection (stopping at both ends). Call it after every engine creation, like set_prediction.
 int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// key-scheme (docs/spec/keys-and-composition.md §4.1, the `m` rows): set_key_scheme 0 or 1 (2 otherwise, state unchanged), default 0, like
+//   set_candidate_vertical in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL. 0 is the key rules
+//   as they are (the macOS shell never calls this). 1 adds the Microsoft Zhuyin habits the Windows text service uses: Enter and Shift+Enter
+//   do nothing on an unfinished syllable; Space, Shift+letter, Shift+, and Shift+. and the tone keys type a half-width unit in a composition (a space, the
+//   upper-case letter, `<` `>`, the tone mark); Tab does nothing; Ctrl+, and Ctrl+. type the full-width marks (Ctrl+, Ctrl+. are otherwise passed
+//   on, rule 1); Shift+Enter sends the composition and is handled (no line break). Where such a key would otherwise be passed on after dropping
+//   an unfinished syllable (Shift+letter, Shift+, Shift+. with nothing but the unfinished syllable), the core puts the character in
+//   `commit` and returns handled 1 instead. A vertical candidate window that opens under 1 moves by whole pages
+//   (candidate_first is always a multiple of 9): Up/Down wrap around the whole list, Space and Page Down turn to the next page (selecting its first
+//   row; after the last page, the first), Page Up the previous (before the first page, the last), End goes to the last row, Shift+Enter closes the window
+//   and keeps the composition, and Backspace, Tab, Left, Right, Home, Delete, Zhuyin keys, Shift+letter and Shift+, Shift+. are
+//   eaten with the window left open. A window that is already open keeps the scheme it opened with. Call it after every engine creation,
+//   like set_candidate_vertical.
+int32_t shanjie_engine_set_key_scheme(ShanjieEngine *engine, uint32_t scheme, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/spec/prediction.md §6): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the
 //   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol
