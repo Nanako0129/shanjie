@@ -22,6 +22,12 @@ mod timing;
 #[path = "../../tip/src/token.rs"]
 mod token;
 
+// The text service's key predicate, built into the test binary only: `window_keys_match_the_core` checks it against the real core.
+#[cfg(all(windows, test))]
+#[allow(dead_code)]
+#[path = "../../tip/src/keys.rs"]
+mod keys;
+
 #[cfg(all(windows, test))]
 mod r2_tests;
 #[cfg(all(windows, test))]

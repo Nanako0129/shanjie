@@ -261,7 +261,7 @@ jobs:
           cargo build --release --locked -p shanjie-tip
           cargo build --release --locked -p shanjie-host
 
-      # docs/spec/windows-tip.md §5.10: neither binary imports a C runtime DLL (static CRT, §3.1); the DLL exports no
+      # docs/spec/windows-tip.md §5.10: neither binary imports a C runtime DLL (static CRT, §3.1); the DLL imports d2d1.dll and dwrite.dll; the DLL exports no
       # `shanjie_` symbol and `cargo tree` shows no `core` under it (the core would be linked statically, so the import table could not
       # show it). The DLL's size is printed.
       - name: shanjie-tip and shanjie-host binaries
@@ -281,6 +281,16 @@ jobs:
               exit 1
             fi
           done
+          # docs/spec/windows-tip.md §3.15: the candidate window's Direct2D and DirectWrite are plain static imports of the DLL (not delay-loaded, not
+          # LoadLibrary by a bare name: neither DLL is a KnownDLL), so the import table must list them, and a delay-load table must not exist.
+          "$dumpbin" -nologo -dependents target/release/shanjie_tip.dll > deps-tip.txt
+          grep -qi 'd2d1\.dll' deps-tip.txt || { echo "error: shanjie_tip.dll does not import d2d1.dll" >&2; exit 1; }
+          grep -qi 'dwrite\.dll' deps-tip.txt || { echo "error: shanjie_tip.dll does not import dwrite.dll" >&2; exit 1; }
+          "$dumpbin" -nologo -imports target/release/shanjie_tip.dll > imports-tip.txt
+          if grep -qi 'delay load' imports-tip.txt; then
+            echo "error: shanjie_tip.dll has delay-loaded imports" >&2
+            exit 1
+          fi
           "$dumpbin" -nologo -exports target/release/shanjie_tip.dll > exports-crlf.txt
           tr -d '\r' < exports-crlf.txt > exports.txt
           cat exports.txt

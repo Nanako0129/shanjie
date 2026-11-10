@@ -98,7 +98,7 @@ pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
             && snap(|o| core_ffi::shanjie_engine_set_prediction(e, 0, o))
             && snap(|o| core_ffi::shanjie_engine_set_abbreviation(e, 0, o))
             && snap(|o| core_ffi::shanjie_engine_set_english(e, 0, o))
-            && snap(|o| core_ffi::shanjie_engine_set_candidate_vertical(e, 0, o))
+            && snap(|o| core_ffi::shanjie_engine_set_candidate_vertical(e, 1, o))
             && snap(|o| core_ffi::shanjie_engine_set_rerank(e, 0, o))
             && core_ffi::shanjie_engine_set_learning(e, 0) == 0;
         if !ok {
@@ -111,16 +111,18 @@ pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
 
 // ---- keys ----
 
-/// `KIND_ESC` of shanjie.h.
-const KIND_ESC: u32 = 6;
-
-/// What is kept of a `ShanjieOutput`: copied and freed inside one call (the header's rule).
+/// What is kept of a `ShanjieOutput`: copied and freed inside one call (the header's rule). The candidates are copied only with a window open
+/// (`candidate_selected >= 0`): `-1` with a count above 0 is the prediction row, which the Windows build keeps off; a closed window has
+/// first and total 0 (`shanjie.h`).
 struct CoreOut {
     handled: bool,
     commit: String,
     preedit: String,
     cursor: u32,
     candidate_selected: i32,
+    candidate_first: u32,
+    candidate_total: u32,
+    candidates: Vec<String>,
 }
 
 /// # Safety
@@ -136,7 +138,18 @@ unsafe fn send(e: *mut ShanjieEngine, k: Key) -> Option<CoreOut> {
     let out = unsafe {
         let r = &*o;
         let s = |p: *const std::os::raw::c_char| CStr::from_ptr(p).to_string_lossy().into_owned();
-        CoreOut { handled: r.handled != 0, commit: s(r.commit), preedit: s(r.preedit), cursor: r.cursor_utf16, candidate_selected: r.candidate_selected }
+        let open = r.candidate_selected >= 0 && !r.candidates.is_null();
+        let candidates = if open { (0..r.candidate_count as usize).map(|i| s(*r.candidates.add(i))).collect() } else { Vec::new() };
+        CoreOut {
+            handled: r.handled != 0,
+            commit: s(r.commit),
+            preedit: s(r.preedit),
+            cursor: r.cursor_utf16,
+            candidate_selected: r.candidate_selected,
+            candidate_first: if open { r.candidate_first } else { 0 },
+            candidate_total: if open { r.candidate_total } else { 0 },
+            candidates,
+        }
     };
     // SAFETY: freed once, right after the copy.
     unsafe { core_ffi::shanjie_output_free(o) };
@@ -168,15 +181,29 @@ fn wire(took_over: bool, out: Option<CoreOut>) -> Out {
             preedit: o.preedit.encode_utf16().collect(),
             cursor_utf16: o.cursor,
             candidate_selected: o.candidate_selected,
-            candidates: Vec::new(),
+            candidate_first: o.candidate_first,
+            candidate_total: o.candidate_total,
+            candidates: o.candidates.iter().map(|c| c.encode_utf16().collect()).collect(),
         },
         // The core returned non-zero: the client edits nothing and lets the key go (the in-DLL engine's `out: None`, docs/spec/windows-tip.md §3.4).
-        None => Out { ran: true, core_error: true, took_over, handled: false, commit: Vec::new(), preedit: Vec::new(), cursor_utf16: 0, candidate_selected: -1, candidates: Vec::new() },
+        None => Out {
+            ran: true,
+            core_error: true,
+            took_over,
+            handled: false,
+            commit: Vec::new(),
+            preedit: Vec::new(),
+            cursor_utf16: 0,
+            candidate_selected: -1,
+            candidate_first: 0,
+            candidate_total: 0,
+            candidates: Vec::new(),
+        },
     }
 }
 
-/// One key for `me`: take ownership (discarding another owner's state with mode 1), call the core, copy, unlock. No candidate window
-/// exists in this slice, so a key that opens one is followed by ESC here (`OnKeyDown` step 5 of docs/spec/windows-tip.md §3.7, moved into the host).
+/// One key for `me`: take ownership (discarding another owner's state with mode 1), call the core, copy, unlock. The candidate window is the
+/// core's vertical window (set in `load`); its rows, selection, first and total go to the client, which draws it (docs/spec/windows-tip.md §3.7, §5.3).
 pub fn key(me: Owner, k: Key) -> Answer {
     let mut g = match SHARED.try_lock() {
         Ok(g) => g,
@@ -191,27 +218,7 @@ pub fn key(me: Owner, k: Key) -> Answer {
             reset(e);
         }
         g.owner = Some(me);
-        let mut out = send(e, k);
-        if let Some(o) = out.as_mut() {
-            if o.candidate_selected >= 0 {
-                match send(e, Key { kind: KIND_ESC, ch: 0, modifiers: 0 }) {
-                    Some(esc) => {
-                        o.commit.push_str(&esc.commit);
-                        o.preedit = esc.preedit;
-                        o.cursor = esc.cursor;
-                        o.candidate_selected = esc.candidate_selected;
-                    }
-                    None => {
-                        reset(e);
-                        o.preedit.clear();
-                        o.cursor = 0;
-                        o.candidate_selected = -1;
-                    }
-                }
-                o.handled = true;
-            }
-        }
-        out
+        send(e, k)
     };
     drop(g);
     Answer::Out(wire(took_over, out))

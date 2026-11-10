@@ -34,9 +34,14 @@ pub extern "system" fn DllMain(hinst: HINSTANCE, _reason: u32, _reserved: *mut c
     TRUE
 }
 
+/// This DLL's module handle (the window class of the candidate window is its own).
+pub fn module() -> HMODULE {
+    HMODULE(MODULE.load(Ordering::Relaxed) as *mut c_void)
+}
+
 /// The full path of this DLL. A buffer that is too small is doubled; a path that never fits gives `None` (no truncated prefix is used).
 pub fn module_path() -> Option<PathBuf> {
-    let h = HMODULE(MODULE.load(Ordering::Relaxed) as *mut c_void);
+    let h = module();
     let mut cap = 512usize;
     loop {
         let mut buf = vec![0u16; cap];
@@ -108,11 +113,11 @@ pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *cons
     .into()
 }
 
-/// Once a connection to the host existed the answer is always `S_FALSE`: a thread timer and thread-local destructors of this DLL may
-/// still be registered (docs/spec/windows-tip.md §5.4).
+/// Once a connection to the host existed, or the candidate window's class was registered, the answer is always `S_FALSE`: a thread timer, thread-local
+/// destructors and a window procedure of this DLL may still be in use (docs/spec/windows-tip.md §5.4, §3.15).
 #[no_mangle]
 pub extern "system" fn DllCanUnloadNow() -> HRESULT {
-    guard::run(S_FALSE, || if OBJECTS.load(Ordering::Acquire) == 0 && LOCKS.load(Ordering::Acquire) == 0 && !crate::client::attempted() { S_OK } else { S_FALSE }, || {})
+    guard::run(S_FALSE, || if OBJECTS.load(Ordering::Acquire) == 0 && LOCKS.load(Ordering::Acquire) == 0 && !crate::client::attempted() && !crate::cand::attempted() { S_OK } else { S_FALSE }, || {})
 }
 
 // ---- registration (development only; needs an administrator) ----
