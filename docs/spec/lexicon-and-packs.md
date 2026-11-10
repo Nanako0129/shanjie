@@ -20,6 +20,7 @@
 | 美妝與保養詞包 | `beauty-add.tsv` | `beauty` | `tools/build_meme_pack.py --pack beauty` | 當作沒有這個詞包 |
 
 - `variant-order.tsv`（異體排序表）也在載入時讀，缺檔或有一行不成立都是載入失敗；它的格式與規則在 `docs/spec/decoder.md`，這份不重複。
+- `rerank-protect.tsv`（重排保護詞，§2.12）不是詞庫的一層，不加詞、不改分數：上表各層合併之後才讀，缺檔或有一列不成立都是載入失敗。
 - 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
 - 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。
@@ -153,6 +154,14 @@
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
 - `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞或網路用語時用。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
+
+### 2.12 重排保護詞（`data/lexicon/rerank-protect.tsv`）
+
+- 用途：語意校正的重排不得從 n-gram 的第一名換掉的常用詞。它不是詞庫的一層：不加詞、不改任何分數，只讓這些詞進入重排的遮罩（`docs/spec/decoder.md` §7 的保護集合 = 手動詞加上這份的詞，遮罩函式 `tinylm::manual_mask` 不變）。
+- 格式：三欄以 Tab 分隔，`詞<TAB>讀音<TAB>備註`；讀音的音節以空白分隔；`#` 開頭與空行略過；CC0，隨 App 內附（`Resources/rerank-protect.tsv`）。
+- 載入（`engine::load_lexicon_split` 在所有層（基底、疊加層、變調、名單、啟用的詞包、評測用的額外疊加層）合併之後呼叫 `Lexicon::with_protected`；引擎建立、評測 CLI 與重播都走這個函式，`load_lm` 不再讀）：檔案缺、讀不了或任何一列不成立都是載入失敗（C ABI 回 3），錯誤指出列號。一列不成立的情形：不是三欄、詞不是純漢字、字數不等於音節數、（讀音, 詞）不在這份詞庫的任何一層。基底詞可以列入；最後一項讓打錯的保護詞不會無聲地什麼都不保護。清單只放基底或疊加層（`overlay-add.tsv`）的詞：只在詞包或名單層的詞，在那個詞包關掉或 `--no-names` 時會讓載入失敗。它不是詞庫的一層，放在這一章是因為它和手動詞共用遮罩。
+- 效果：只在重排遮罩上。重排的某一段，n-gram 第一名若在對應位置以這個讀音含有這個詞，沒有同位置保有它的候選就不能被選；第一名沒用這個詞時什麼都不保護。解碼器、候選窗與所有分數，和這份檔只有註解時逐位元組相同。
+- 驗證：`core/tests/rerank_protect.rs`（基底詞被遮罩、加入保護不改分數與詞條、只有註解的檔不保護任何東西、壞列各自報錯並指出列號、出貨檔載得進來、缺檔是載入失敗、出貨設定下的真引擎逐鍵重現）。
 
 ## 3. 名單層 `names-add.tsv`
 

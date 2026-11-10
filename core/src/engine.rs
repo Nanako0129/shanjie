@@ -1010,8 +1010,15 @@ fn load_lexicon_split(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: 
     // Required like the other data files (docs/spec/decoder.md §2.3): missing, malformed, or naming a spelling the lexicon lacks is a load failure.
     let variants = VariantOrder::parse(&read_file(data_dir.join(VARIANT_ORDER_FILE))?).map_err(|e| LoadError::Parse { path: data_dir.join(VARIANT_ORDER_FILE), detail: e.to_string() })?;
     let lex = Lexicon::parse_with_variants(&base, Some(&text), Some(&variants)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
+    // Required too (docs/spec/lexicon-and-packs.md §2.12): the rerank-protect words join the manual mask; missing or malformed is a load failure.
+    let protect = read_file(data_dir.join(RERANK_PROTECT_FILE))?;
+    let lex = lex.with_protected(&protect).map_err(|detail| LoadError::Parse { path: data_dir.join(RERANK_PROTECT_FILE), detail })?;
     Ok((Arc::new(lex), extra, oov_len))
 }
+
+/// The rerank-protect list in the data directory (docs/spec/lexicon-and-packs.md §2.12): words the rerank may not take out of the n-gram's
+/// first choice, with no score change.
+pub const RERANK_PROTECT_FILE: &str = "rerank-protect.tsv";
 
 /// The text `CappedLexicon::with_packs` takes as its overlay: `overlay-add.tsv` and `names-add.tsv` (read here, as `load_lm` always
 /// did for the first), then the packs' rows `load_lexicon_packs` returned (no sandhi rows). Its words are capped at their corpus

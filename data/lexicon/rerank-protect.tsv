@@ -1,0 +1,9 @@
+# Rerank-protect words (docs/spec/lexicon-and-packs.md §2.12). CC0.
+# When the n-gram's first choice of a rerank stretch holds one of these words under this reading, the semantic rerank may not pick a
+# candidate that drops it (the manual-word mask, docs/spec/decoder.md §7). No score and no entry changes; the word must already be in the
+# lexicon under this reading. Columns: word, reading (syllables separated by spaces), note.
+權限	ㄑㄩㄢˊ ㄒㄧㄢˋ	the rerank put the homophone 全線 in its place
+黏住	ㄋㄧㄢˊ ㄓㄨˋ	the rerank put 年住 in its place
+直排	ㄓˊ ㄆㄞˊ	the rerank put 職排 in its place
+改期	ㄍㄞˇ ㄑㄧˊ	the rerank put 改騎 in its place
+祭出	ㄐㄧˋ ㄔㄨ	the rerank put 寄出 in its place

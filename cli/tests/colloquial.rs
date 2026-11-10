@@ -302,8 +302,9 @@ fn the_colloquial_term_stands_alone() {
 
 /// SR-TW product (docs/spec/semantic-rerank.md §4.5): the mild first-word estimate is on by default, with no tag suffix (the shipping tag stays
 /// `+colloq:81c2470d`); `--colloquial-no-unseen-start-unigram` turns it off and the tag gets `+us0`; `--colloquial-first-unigram` still runs (it used to be
-/// refused with the estimate flag) and is tagged `+fu`; the research flag needs the table. Row 179 of eval/dev/user-reported.txt (`權限加好了`, public): `c` 0
-/// by default, 3 without the estimate (measured 2026-11-06, `--rerank-level standard`).
+/// refused with the estimate flag) and is tagged `+fu`; the research flag needs the table. Row 179 of eval/dev/user-reported.txt (`權限加好了`, public): the
+/// estimate changes the colloquial scores of its candidates (`col`). It used to change the pick too (`c` 0 by default, 3 = 全線 without the estimate, measured
+/// 2026-11-06); since 權限 is a rerank-protect word (data/lexicon/rerank-protect.tsv) the mask keeps candidate 0 either way.
 #[test]
 fn the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off() {
     let d = tmp("us0");
@@ -314,7 +315,9 @@ fn the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off() {
     let set = ["--rows", rows.to_str().unwrap()];
     let run_with = |name: &str, extra: &[&str]| full_run(&tmp(name), &BASE[..9], &set, &[&["--colloquial-core", TABLE][..], extra].concat());
     let (on, off, fu) = (run_with("us-on", &[]), run_with("us-off", &["--colloquial-no-unseen-start-unigram"]), run_with("us-fu", &["--colloquial-first-unigram"]));
-    assert_eq!((chosen(&on.sc), chosen(&off.sc)), (vec![0], vec![3]), "the estimate changes this row");
+    let col = |sc: &str| sc.split("\"col\": ").nth(1).map(|t| t.split(']').next().unwrap().to_string()).expect("a col field");
+    assert_ne!(col(&on.sc), col(&off.sc), "the estimate changes this row's colloquial scores");
+    assert_eq!((chosen(&on.sc), chosen(&off.sc)), (vec![0], vec![0]), "the protect word 權限 keeps candidate 0 with and without the estimate");
     assert!(on.stdout.contains("+colloq:81c2470d+rd+rx:") && !on.stdout.contains("+us"), "{}", on.stdout);
     assert!(off.stdout.contains("+colloq:81c2470d+us0+rd+rx:"), "{}", off.stdout);
     assert!(fu.stdout.contains("+colloq:81c2470d+fu+rd+rx:"), "{}", fu.stdout);
