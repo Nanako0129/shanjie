@@ -416,6 +416,9 @@ impl TextService_Impl {
         // The candidate window follows the answer, outside the edit session: shown or redrawn when the core's window is open, hidden on every other
         // path that ran a key or ended a composition. A refused or failed session leaves no window.
         if o.ran || o.eaten {
+            if o.eaten {
+                cand::prewarm();
+            }
             if granted.is_ok() && o.window {
                 self.cand_open.set(true);
                 match o.show {

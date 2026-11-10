@@ -390,7 +390,56 @@ fn factories() -> Option<(ID2D1Factory, IDWriteFactory)> {
     g.as_ref().map(|f| (f.d2d.clone(), f.dw.clone()))
 }
 
+// ---- warming up ----
+
+static PREWARM: Once = Once::new();
+
+/// Started by the first key that composes (once per process, on a background thread): makes the factories and has DirectWrite load the system
+/// font collection and the UI font once, so the first window does not pay for it on the key that opens it (C7 of the acceptance: the first
+/// window's key was the slowest). Only fixed text is laid out here; nothing of the user's.
+pub fn prewarm() {
+    PREWARM.call_once(|| {
+        let _ = std::thread::Builder::new().name("shanjie-cand-warm".into()).spawn(|| {
+            guard::run((), warm, || ());
+        });
+    });
+}
+
+fn warm() {
+    const SAMPLE: [u16; 5] = [0x7684, 0x4E00, 0x662F, 0x6E2C, 0x8A66]; // 的一是測試, fixed text
+    let Some((_, dw)) = factories() else { return };
+    let Some(f) = format(&dw, 16) else { return };
+    if let Some(l) = layout(&dw, &SAMPLE, &f, 1000, 100) {
+        let mut tm = DWRITE_TEXT_METRICS::default();
+        // SAFETY: a live layout and a valid out pointer; the metrics force the font to load.
+        let _ = unsafe { l.GetMetrics(&mut tm) };
+    }
+}
+
 // ---- drawing ----
+
+/// The two text formats of one size pair, made once per UI thread and reused by every update (a format holds no text).
+struct Formats {
+    text_px: i32,
+    number_px: i32,
+    text: IDWriteTextFormat,
+    number: IDWriteTextFormat,
+}
+
+thread_local! {
+    static FORMATS: RefCell<Option<Formats>> = const { RefCell::new(None) };
+}
+
+fn formats(dw: &IDWriteFactory, m: &Metrics) -> Option<(IDWriteTextFormat, IDWriteTextFormat)> {
+    FORMATS.with(|c| {
+        let mut c = c.borrow_mut();
+        let fresh = c.as_ref().is_none_or(|f| f.text_px != m.font_px || f.number_px != m.number_font_px);
+        if fresh {
+            *c = Some(Formats { text_px: m.font_px, number_px: m.number_font_px, text: format(dw, m.font_px)?, number: format(dw, m.number_font_px)? });
+        }
+        c.as_ref().map(|f| (f.text.clone(), f.number.clone()))
+    })
+}
 
 /// A 32 bpp top-down DIB selected into a memory DC; released (the bitmap is deleted) when it goes out of scope, so no candidate pixel outlives one update.
 struct Frame {
@@ -468,8 +517,7 @@ fn layout(dw: &IDWriteFactory, text: &[u16], f: &IDWriteTextFormat, max_w: i32, 
 /// numbers 1 to 9 and the texts. `work_w` is the width of the monitor's work area.
 fn draw(d2d: &ID2D1Factory, dw: &IDWriteFactory, m: &Metrics, items: &[Vec<u16>], selected: usize, light: bool, work_w: i32) -> Option<Frame> {
     let theme = if light { &LIGHT } else { &DARK };
-    let text_format = format(dw, m.font_px)?;
-    let number_format = format(dw, m.number_font_px)?;
+    let (text_format, number_format) = formats(dw, m)?;
     // The most a text may take is what a window of half the work area leaves it; the layouts trim there.
     let cap = m.text_width(work_w / 2);
     let layouts: Vec<IDWriteTextLayout> = items.iter().map(|t| layout(dw, t, &text_format, cap, m.row)).collect::<Option<_>>()?;
