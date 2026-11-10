@@ -47,8 +47,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::TextServices::{ITfContext, ITfInputScope, GUID_PROP_INPUTSCOPE, IS_PASSWORD, InputScope};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetAncestor, GetWindowThreadProcessId, IsWindow, KillTimer, RegisterClassExW, SetTimer, SetWindowPos, ShowWindow, UpdateLayeredWindow,
-    EVENT_OBJECT_IME_CHANGE, EVENT_OBJECT_IME_HIDE, EVENT_OBJECT_IME_SHOW, GA_ROOT, MA_NOACTIVATE, OBJID_CLIENT, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
-    SW_SHOWNOACTIVATE, ULW_ALPHA, USER_TIMER_MINIMUM, WM_MOUSEACTIVATE, WM_NCDESTROY, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    EVENT_OBJECT_IME_CHANGE, EVENT_OBJECT_IME_HIDE, EVENT_OBJECT_IME_SHOW, GA_ROOT, MA_NOACTIVATE, OBJID_CLIENT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE,
+    HWND_TOPMOST, ULW_ALPHA, USER_TIMER_MINIMUM, WM_MOUSEACTIVATE, WM_NCDESTROY, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_POPUP,
 };
 use windows_core::Interface;
@@ -615,9 +615,11 @@ fn show_inner(v: Show) {
     }
     let was_shown = state().is_some_and(|(_, _, s)| s);
     if !was_shown {
-        // SAFETY: this thread's window; shown without activation.
+        // SAFETY: this thread's window; shown without activation. SetWindowPos with SWP_SHOWWINDOW, not ShowWindow: the first ShowWindow of a
+        // process can be replaced by the show state its parent put in STARTUPINFO (SW_HIDE for a process started without a window), and the
+        // candidate window may be the first window the host app's process shows that way.
         unsafe {
-            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
         set_shown(true);
     }
