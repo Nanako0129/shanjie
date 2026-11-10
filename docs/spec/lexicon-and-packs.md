@@ -13,7 +13,6 @@
 | 基底 | `mcbpmf-data.txt`（小麥注音詞庫，MIT） | 無（三欄） | 無，原封不動 | 載入失敗 |
 | 疊加層 | `overlay-add.tsv` | `wikt`、`zhwiki`、`萌典補詞`、`manual`、`slang` | `tools/build_overlay.py` | 載入失敗 |
 | 變調層 | `sandhi-add.tsv` | `sandhi`、`neutral` | `tools/build_sandhi.py` | 載入失敗 |
-| 重排保護詞 | `rerank-protect.tsv` | 無（`詞<TAB>讀音<TAB>備註`，見 §2.12） | 手寫，無建置工具 | 載入失敗 |
 | 名單層 | `names-add.tsv` | `names`、`creator`、`store` | `tools/build_names.py` | 載入失敗（評測 CLI 的 `--no-names` 例外） |
 | 動漫與遊戲詞包 | `acg-add.tsv` | `acg`、`acg-oov` | `tools/build_acg_pack.py` | 當作沒有這個詞包 |
 | 經典台詞詞包 | `quotes-add.tsv` | `quotes` | `tools/build_quote_pack.py` | 當作沒有這個詞包 |
@@ -21,6 +20,7 @@
 | 美妝與保養詞包 | `beauty-add.tsv` | `beauty` | `tools/build_meme_pack.py --pack beauty` | 當作沒有這個詞包 |
 
 - `variant-order.tsv`（異體排序表）也在載入時讀，缺檔或有一行不成立都是載入失敗；它的格式與規則在 `docs/spec/decoder.md`，這份不重複。
+- `rerank-protect.tsv`（重排保護詞，§2.12）不是詞庫的一層，不加詞、不改分數：上表各層合併之後才讀，缺檔或有一列不成立都是載入失敗。
 - 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
 - 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。
