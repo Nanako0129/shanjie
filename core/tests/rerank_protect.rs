@@ -160,13 +160,18 @@ fn scratch(tag: &str) -> Dir {
     Dir(d)
 }
 
-/// `dir` gets a symlink to every file of data/lexicon except rerank-protect.tsv, which is written with `protect` (left out when `None`).
+/// `dir` gets every file of data/lexicon (symlinked, or copied without symlinks) except rerank-protect.tsv, which is written with `protect`
+/// (left out when `None`).
 fn link_lexicon_dir(dir: &Path, protect: Option<&str>) {
     for f in std::fs::read_dir(root().join("data/lexicon")).unwrap() {
         let f = f.unwrap();
         let name = f.file_name();
         if name != RERANK_PROTECT_FILE {
+            // a symlink where the platform has one (cheap), a copy elsewhere (the Windows CI job builds and runs this test too)
+            #[cfg(unix)]
             std::os::unix::fs::symlink(f.path(), dir.join(&name)).unwrap();
+            #[cfg(not(unix))]
+            std::fs::copy(f.path(), dir.join(&name)).unwrap();
         }
     }
     if let Some(t) = protect {
