@@ -361,7 +361,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 7.1 版本與集合分開
 
-- **版本**只對應程式與詞庫：每個 ref 用 `git archive <ref> Cargo.toml Cargo.lock core cli data eval/variants.tsv` 匯出到快取資料夾（環境變數 `SHANJIE_CACHE`）的 `bench/src/<sha>/`（不含 `eval/` 的其他部分，所以保留集不會被複製出來；不動 repo 的 worktree 清單；匯出分兩步、成功才寫標記），各自 `cargo build --release`，另編按鍵重播程式。
+- **版本**只對應程式與詞庫：每個 ref 用 `git archive <ref> Cargo.toml Cargo.lock core cli data eval/variants.tsv` 匯出到快取資料夾（環境變數 `SHANJIE_CACHE`）的 `bench/src/<sha>/`；那個 commit 的樹裡有 `windows/` 時一併匯出（新 repo 的工作區把 `windows/*` 列為成員，cargo 就算只編 `-p cli` 也要讀到每個成員的 Cargo.toml）。不含 `eval/` 的其他部分，所以保留集不會被複製出來；不動 repo 的 worktree 清單；匯出分兩步、成功才寫標記；已有標記但缺任何一個要匯出的路徑時（例如加入 `windows/` 之前的匯出）整個重新匯出。各自 `cargo build --release`，另編按鍵重播程式。
 - **集合**一律來自套件，所有版本讀同一份，一律用 `--rows`、不用 `--dev`（`--dev` 會讀該版本自己的 `eval/dev`，版本和集合就混在一起）：
   - 公開集合凍結成 `eval/bench/suite-v1/` 與 `eval/bench/suite-v2/` 裡的列檔，SHA-256 寫死在工具裡，不符就失敗退出；
   - 不進 repo 的集合（授權）讀快取資料夾裡的檔，SHA-256 同樣寫死；
