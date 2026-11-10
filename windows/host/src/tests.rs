@@ -348,9 +348,12 @@ fn parse_keys(line: &str) -> Vec<Key> {
         .collect()
 }
 
-/// Feeds the keys to a fresh engine and returns everything it sent as text; the composition is empty at the end and a window opened on the way.
-fn replay(line: &str) -> Vec<u16> {
-    let core = Direct::new();
+/// Feeds the keys to a fresh engine and returns everything it sent as text; the composition is empty at the end, and a window opened on the way iff `want_window`.
+fn replay(line: &str, want_window: bool) -> Vec<u16> {
+    replay_on(&Direct::new(), line, want_window)
+}
+
+fn replay_on(core: &Direct, line: &str, want_window: bool) -> Vec<u16> {
     let (mut text, mut saw_window) = (Vec::new(), false);
     let mut last = None;
     for k in parse_keys(line) {
@@ -359,7 +362,7 @@ fn replay(line: &str) -> Vec<u16> {
         saw_window |= s.selected >= 0;
         last = Some(s);
     }
-    check(saw_window, "a candidate window opened during the replay");
+    check(saw_window == want_window, "a candidate window opened during the replay exactly when expected");
     check(last.is_some_and(|l| l.preedit.is_empty() && l.selected == -1), "the replay ends with nothing composed and no window");
     text
 }
@@ -375,14 +378,57 @@ fn unescape(s: &str) -> Vec<u16> {
 #[test]
 fn replay_keys_vertical() {
     check(!REPLAY_KEYS_VERTICAL_EXPECTED.is_empty(), "REPLAY_KEYS_VERTICAL_EXPECTED is not filled in: run print_replay_keys_vertical --ignored --nocapture and paste its line");
-    check(replay(REPLAY_KEYS_VERTICAL) == unescape(REPLAY_KEYS_VERTICAL_EXPECTED), "the replay sends the expected text");
+    check(replay(REPLAY_KEYS_VERTICAL, true) == unescape(REPLAY_KEYS_VERTICAL_EXPECTED), "the replay sends the expected text");
 }
 
 /// Prints the one line `replay_keys_vertical` expects. The sentence is public (a row of eval/dev/user-typing.txt), so this is the one test that prints.
 #[test]
 #[ignore = "run by hand: prints the expected text of replay_keys_vertical"]
 fn print_replay_keys_vertical() {
-    println!("const REPLAY_KEYS_VERTICAL_EXPECTED: &str = r\"{}\";", escape(&replay(REPLAY_KEYS_VERTICAL)));
+    println!("const REPLAY_KEYS_VERTICAL_EXPECTED: &str = r\"{}\";", escape(&replay(REPLAY_KEYS_VERTICAL, true)));
+}
+
+/// The first sitting of the warm-up measurement (docs/spec/windows-tip.md §5.2): ㄨㄛˇ ㄇㄣˊ ㄑㄩˋ ㄔ ㄈㄢˋ, no syllable in common with the warm-up's, sent with Enter and no window.
+const FIRST_KEYS: &str = "j i 3 a p 6 f m 4 t space z 0 4 enter";
+/// The text the core sends for `FIRST_KEYS`, UTF-16 units as `\uXXXX`.
+const FIRST_KEYS_EXPECTED: &str = r"\u6211\u5011\u53bb\u5403\u98ef";
+
+#[test]
+fn replay_first_keys() {
+    check(replay(FIRST_KEYS, false) == unescape(FIRST_KEYS_EXPECTED), "the replay sends the expected text");
+}
+
+/// After `engine::warm_with` the engine holds nothing (no composition, no window, nothing to commit), and the next replay sends what a cold engine sends.
+#[test]
+fn warm_up_leaves_no_trace() {
+    let core = Direct::new();
+    // SAFETY: a live engine of this test, used on this thread only.
+    check(unsafe { engine::warm_with(core.0, &engine::WARM_KEYS) }, "the warm-up resets");
+    let o = core.key(kind(ENTER));
+    check(o.commit.is_empty() && o.preedit.is_empty() && o.selected == -1, "nothing is composed or committed after the warm-up");
+    check(replay_on(&core, REPLAY_KEYS_VERTICAL, true) == unescape(REPLAY_KEYS_VERTICAL_EXPECTED), "the replay after the warm-up sends the expected text");
+    check(replay_on(&core, FIRST_KEYS, false) == unescape(FIRST_KEYS_EXPECTED), "the first keys after the warm-up send the expected text");
+}
+
+/// A key the core refuses in the middle of the warm-up (a lone surrogate is not a Unicode scalar: return code 2) stops it with a composition pending; the reset still empties the engine.
+#[test]
+fn warm_up_failing_midway_still_resets() {
+    let core = Direct::new();
+    let bad = Key { kind: 1, ch: 0xD800, modifiers: 0 };
+    let mut o: *mut ShanjieOutput = ptr::null_mut();
+    // SAFETY: a live engine; the output, if any, is freed at once.
+    let rc = unsafe {
+        let rc = core_ffi::shanjie_engine_key(core.0, ShanjieKey { kind: bad.kind, ch: bad.ch, modifiers: bad.modifiers }, &mut o);
+        if !o.is_null() {
+            core_ffi::shanjie_output_free(o);
+        }
+        rc
+    };
+    check(rc != 0, "the core refuses the injected key");
+    // SAFETY: as above.
+    check(unsafe { engine::warm_with(core.0, &[chr('a'), chr('u'), bad, chr('6')]) }, "the reset after the failed warm-up works");
+    let o = core.key(kind(ENTER));
+    check(o.commit.is_empty() && o.preedit.is_empty() && o.selected == -1, "nothing is composed or committed after the failed warm-up");
 }
 
 /// docs/spec/windows-tip.md §3.6: the text service's key predicate against the real core, with a candidate window open. Every virtual key of the mapping

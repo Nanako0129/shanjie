@@ -7,6 +7,7 @@
 //! a closed connection have no one waiting for an answer and must not be skipped (a stale owner would keep its composition), so they
 //! wait for the lock. A poisoned lock ends the process (the next client starts a new host).
 use crate::server::{exit, EXIT_POISONED};
+use crate::timing;
 use shanjie_core::ffi::{self as core_ffi, ShanjieEngine, ShanjieKey, ShanjieOutput};
 use shanjie_win_proto::{Key, Out};
 use std::ffi::{CStr, CString};
@@ -109,6 +110,84 @@ pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
     Some(e)
 }
 
+// ---- warm-up (docs/spec/windows-tip.md §5.2) ----
+
+const fn chr(c: char) -> Key {
+    Key { kind: 1, ch: c as u32, modifiers: 0 }
+}
+
+/// The first four syllables of `REPLAY_KEYS_VERTICAL` (tests.rs): `a u / 6 w u 0 space y l 3 g ; 4`, ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ. No Down, no window, no commit.
+pub(crate) const WARM_KEYS: [Key; 14] = [
+    chr('a'),
+    chr('u'),
+    chr('/'),
+    chr('6'),
+    chr('w'),
+    chr('u'),
+    chr('0'),
+    Key { kind: 2, ch: 0, modifiers: 0 },
+    chr('y'),
+    chr('l'),
+    chr('3'),
+    chr('g'),
+    chr(';'),
+    chr('4'),
+];
+
+/// `SHANJIE_HOST_NO_WARM=1` skips the warm-up, for the measurements only: a build without the `timing` feature never reads the environment (§5.5 item 7).
+#[cfg(feature = "timing")]
+fn warm_disabled() -> bool {
+    std::env::var_os("SHANJIE_HOST_NO_WARM").is_some_and(|v| v == "1")
+}
+#[cfg(not(feature = "timing"))]
+fn warm_disabled() -> bool {
+    false
+}
+
+/// Feeds `keys` to `e`, then always discards the state (reset mode 1). A key the core refuses stops the feed and is recorded as event 70
+/// (its position in `keys`, the return code). False when the reset itself failed.
+///
+/// # Safety
+/// `e` is a live engine handle that no other thread uses.
+pub unsafe fn warm_with(e: *mut ShanjieEngine, keys: &[Key]) -> bool {
+    for (n, k) in keys.iter().enumerate() {
+        let mut o: *mut ShanjieOutput = ptr::null_mut();
+        // SAFETY: caller contract; `o` is a valid out pointer, freed at once.
+        let rc = unsafe {
+            let rc = core_ffi::shanjie_engine_key(e, ShanjieKey { kind: k.kind, ch: k.ch, modifiers: k.modifiers }, &mut o);
+            if !o.is_null() {
+                core_ffi::shanjie_output_free(o);
+            }
+            rc
+        };
+        if rc != 0 {
+            timing::record(timing::EV_WARM_FAILED, n as u64, u64::from(rc as u32));
+            break;
+        }
+    }
+    // SAFETY: caller contract.
+    unsafe { reset(e) }
+}
+
+/// Decodes a fixed fake composition once on the freshly loaded `e` so the first real key does not meet cold model pages, then discards it:
+/// no composition, no context, no learning (it is off). `e` is not installed yet, so `ready()` is still false. If the reset fails the engine
+/// is freed and `dir` is loaded once more, without a warm-up; `None` when that load fails too.
+pub fn warmed(dir: &Path, e: *mut ShanjieEngine) -> Option<*mut ShanjieEngine> {
+    if warm_disabled() {
+        return Some(e);
+    }
+    let t0 = timing::now_us();
+    // SAFETY: `e` is the engine `load` just made; nothing else holds it.
+    let clean = unsafe { warm_with(e, &WARM_KEYS) };
+    timing::record(timing::EV_WARM, t0, timing::now_us());
+    if clean {
+        return Some(e);
+    }
+    // SAFETY: freed once, never installed.
+    unsafe { core_ffi::shanjie_engine_free(e) };
+    load(dir)
+}
+
 // ---- keys ----
 
 /// What is kept of a `ShanjieOutput`: copied and freed inside one call (the header's rule). The candidates are copied only with a window open
@@ -158,10 +237,10 @@ unsafe fn send(e: *mut ShanjieEngine, k: Key) -> Option<CoreOut> {
 }
 
 /// # Safety
-/// `e` is a live engine handle, used under the mutex.
-unsafe fn reset(e: *mut ShanjieEngine) {
+/// `e` is a live engine handle, used under the mutex. False when the core refused the reset.
+unsafe fn reset(e: *mut ShanjieEngine) -> bool {
     // SAFETY: caller contract.
-    unsafe { snap(|o| core_ffi::shanjie_engine_reset(e, 1, o)) };
+    unsafe { snap(|o| core_ffi::shanjie_engine_reset(e, 1, o)) }
 }
 
 pub enum Answer {
