@@ -502,9 +502,9 @@ public final class Shell {
     ]
     static let chat: UInt32 = 0, formal: UInt32 = 1
 
-    /// Chromium browsers (docs/spec/prediction.md §9.3): Google Docs answers an input method's first
-    /// rectangle query with the view's origin, so the prediction row is not shown for the first syllable there. Crest and
-    /// Aside were added with bundle IDs read off a machine.
+    /// Chromium browsers (docs/spec/prediction.md §9.3): on Chrome 156 and earlier Google Docs answers an input method's first
+    /// rectangle query with the view's origin, so with `browserFirstSyllableOn` (off by default since Chrome 157 places it right)
+    /// the prediction row is not shown for the first syllable there. Crest and Aside were added with bundle IDs read off a machine.
     static let browserApps: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
         "org.chromium.Chromium",
