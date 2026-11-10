@@ -20,7 +20,7 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var layout = InputMode.standard
     @Published public private(set) var prediction = true
     /// 在瀏覽器裡，第一個字不顯示預測 (docs/spec/prediction.md §9.4), greyed while the prediction row is off.
-    @Published public private(set) var browserFirstSyllable = true
+    @Published public private(set) var browserFirstSyllable = false
     @Published public private(set) var abbreviation = false
     /// The 中英混打（實驗） toggle (docs/spec/english-mixed.md §1.1, §11), and whether it is enabled: the standard layout, like
     /// the menu item (false: the toggle is greyed, the setting kept).
