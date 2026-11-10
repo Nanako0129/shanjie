@@ -186,7 +186,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=Fals
     """One shanjie-replay run (chat, --correct); checks its models line, setting tag and row count. -> the summary dict.
     The replay loads data/lm/colloquial.sjlm by default, as the App does: a version that ships the table (it is in `models`) runs as is and its tag
     ends in +colloq:<sha8>+rc (the reading-channel term rides on the colloquial term, chat); one that does not ships no data/lm/colloquial.sjlm, and `--no-colloquial` keeps the replay from loading another.
-    A version with `"reading": True` in VERSIONS2 (the decoder's reading term, docs/spec/decoder.md §5) has no `+rc` and ends its tag in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>`."""
+    A version with `"reading": True` in VERSIONS2 (the decoder's reading term, docs/spec/decoder.md §5) has no `+rc` and ends its tag in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>+rm` (`+rm`: the reading-mass rule)."""
     cmd = [binary, "--rows", rows, "--profile", "chat", "--correct", "--learn", "on" if learn else "off", "--rowstats", rowstats]
     if "tinylm.sjtl" not in models:
         cmd.append("--no-tinylm")
@@ -206,7 +206,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=Fals
     want = f"replay-chat+ctx{packs}+nopred+noen+lm:{lm8}" + (f"+tl:{tl8}" if tl8 else "-notinylm") + ("+learn" if learn else "") + "+correct" \
         + (f"+colloq:{models['colloquial.sjlm'][:8]}" + ("" if reading else "+rc") if "colloquial.sjlm" in models else "")
     if reading:
-        want += f"+rd+rx:{bench.sha_file(os.path.join(root, 'data', 'lexicon', 'std-exempt.tsv'))[:8]}"
+        want += f"+rd+rx:{bench.sha_file(os.path.join(root, 'data', 'lexicon', 'std-exempt.tsv'))[:8]}+rm"
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")
     n = len(bench.truths(rows))

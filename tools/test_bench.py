@@ -704,7 +704,7 @@ class SuiteV2(Tmp):
 
     def test_reading_version_ends_every_tag_with_rd_rx_and_has_no_rc(self):
         """docs/spec/decoder.md §5: a version with `"reading": True` ships the decoder's reading term. Every setting's tag (chat, formal, the anchor
-        run, the replay-setting cell) ends in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>`, and the colloquial tag has no `+rc` any more (the term was
+        run, the replay-setting cell) ends in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>+rm`, and the colloquial tag has no `+rc` any more (the term was
         removed); a version without the key keeps `+rc` and gets no `+rd` (the previous test and `test_sj_lm_7_version_...`). The export must hold the file."""
         spec = {"release": "vR", "flags": ["--context", "--packs", "acg"], "tinylm": True, "colloquial": True, "reading": True, "tag": "+ctx+tl:{tl8}+acg"}
         HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56
@@ -723,14 +723,14 @@ class SuiteV2(Tmp):
             with mock_hash():
                 bench.setup_models(v, spec, os.path.join(self.td, "mf"))
             self.assertEqual(v.rx8, rx8)
-            self.assertEqual(bench.expected_tag(v, "chat", False), f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}")
-            self.assertEqual(bench.expected_tag(v, "formal", False), f"lm-formal+ctx+tl:7e73ef67+acg+rd+rx:{rx8}")
-            self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{rx8}")
-            self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{rx8}")
+            self.assertEqual(bench.expected_tag(v, "chat", False), f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}+rm")
+            self.assertEqual(bench.expected_tag(v, "formal", False), f"lm-formal+ctx+tl:7e73ef67+acg+rd+rx:{rx8}+rm")
+            self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{rx8}+rm")
+            self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{rx8}+rm")
             # a cell is scored against that tag: the old tag (with +rc, or without the reading marks) is not the shipping setting of this version
             self.fake_cli(bench.expected_tag(v, "chat", False), [True, True], ("你好", "世界"))
-            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}")
-            for tag in ("lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc", "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5", f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc+rd+rx:{rx8}"):
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}+rm")
+            for tag in ("lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc", "lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5", f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rc+rd+rx:{rx8}+rm", f"lm-chat+ctx+tl:7e73ef67+acg+colloq:2984eeb5+rd+rx:{rx8}"):
                 self.fake_cli(tag, [True, True], ("你好", "世界"))
                 with self.assertRaises(RuntimeError):
                     bench.run_cell2(self.ctx, v, "pub", "chat", False)

@@ -393,7 +393,7 @@ fn colloquial_replay_agrees_with_the_cli() {
 /// `--no-reading-decode`. The premise is asserted for each setting first: the term changes the CLI's choice among these rows, so an engine that left the term out
 /// could not pass. With the 會意 SJ-SR-8-15M file the re-ranker repairs main's two sentences in chat by itself, so there it is row 127 (急 with the term, 吃 without,
 /// measured 2026-11-06) that carries the premise; in the written setting rows 46 and 127 of user-reported change as well. The summary tag
-/// ends `+rd+rx:<sha8>` by default and has neither mark with the option.
+/// ends `+rd+rx:<sha8>+rm` by default and has none of the marks with the option.
 #[test]
 fn reading_decode_replay_agrees_with_the_cli() {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-rd-{}", std::process::id()));
@@ -424,7 +424,7 @@ fn reading_decode_replay_agrees_with_the_cli() {
         let (rep_on, rep_off) = (run(replay, &["--rows", rows, "--profile", profile]), run(replay, &["--rows", rows, "--profile", profile, "--no-reading-decode"]));
         assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile}: the replay's engine decodes like the CLI");
         assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile}: --no-reading-decode");
-        assert!(on.contains(&format!("+rd+rx:{sha8}  {{")) && rep_on.contains(&format!("+rd+rx:{sha8}  {{")), "{profile}: {on}{rep_on}");
+        assert!(on.contains(&format!("+rd+rx:{sha8}+rm  {{")) && rep_on.contains(&format!("+rd+rx:{sha8}+rm  {{")), "{profile}: {on}{rep_on}");
         assert!(!off.contains("+rd") && !rep_off.contains("+rd") && !rep_off.contains("+rx"), "{profile}: {off}{rep_off}");
     }
     // the reading-channel switch is gone from the replay too

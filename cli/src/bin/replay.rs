@@ -17,8 +17,8 @@
 //! summary tag name it (`colloquial.sjlm:<sha8>`, `+colloq:<sha8>`).
 //!
 //! The engine's n-gram decoder carries the reading term (docs/spec/decoder.md §5), built by `Engine::load_lm`; the summary tag of every setting ends
-//! `+rd+rx:<sha8 of std-exempt.tsv>` (the table the engine really loaded). `--no-reading-decode` (research only, `Engine::set_reading_decode(false)`) leaves the
-//! term out and the tag without those two marks. There is no reading-channel term in the fusion any more.
+//! `+rd+rx:<sha8 of std-exempt.tsv>+rm` (the table the engine really loaded; `+rm` is the reading-mass rule). `--no-reading-decode` (research only,
+//! `Engine::set_reading_decode(false)`) leaves the term out and the tag without these marks. There is no reading-channel term in the fusion any more.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine_packs, format_keys, format_sinit_stretches, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
 use core::engine::{PACK_ACG, PACK_BEAUTY, PACK_IT, PACK_QUOTES};

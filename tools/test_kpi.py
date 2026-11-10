@@ -569,8 +569,8 @@ class ReplayRunWithTheColloquialTable(ReplayRun):
 
 
 class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
-    """A version with `"reading": True` (docs/spec/decoder.md §5): its replay tag has no `+rc` and ends in `+rd+rx:<sha8 of its std-exempt.tsv>`;
-    the older tag (with `+rc`, or without the reading marks) is refused."""
+    """A version with `"reading": True` (docs/spec/decoder.md §5): its replay tag has no `+rc` and ends in `+rd+rx:<sha8 of its std-exempt.tsv>+rm`;
+    the older tag (with `+rc`, without the reading marks, or without `+rm`) is refused."""
     SPEC = dict(ReplayRunWithTheColloquialTable.SPEC, reading=True)
 
     def extra_root_files(self):
@@ -582,12 +582,12 @@ class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
         return bench.sha_file(os.path.join(self.root, "data", "lexicon", "std-exempt.tsv"))[:8]
 
     def tag_parts(self):
-        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}"}
+        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}+rm"}
 
     def test_the_old_tags_are_refused(self):
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
         base = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}"
-        for tag in (base + "+rc", base, base + "+rc" + f"+rd+rx:{self.rx8()}", base + "+rd+rx:00000000"):
+        for tag in (base + "+rc", base, base + "+rc" + f"+rd+rx:{self.rx8()}+rm", base + "+rd+rx:00000000+rm", base + f"+rd+rx:{self.rx8()}"):
             with self.assertRaises(SystemExit, msg=tag):
                 self.replay(FAKE_TAG=tag)
 

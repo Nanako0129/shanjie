@@ -909,8 +909,8 @@ PROFILES2 = ["chat", "formal"]
 # `--colloquial-core` (as the App loads the table after the small model; the term applies in chat only) and their tag gains `+colloq:{co8}+rc` (the first 8 hex
 # of the table) at the end. Formal cells and the anchor run are as without it; a version without the key is unchanged.
 # A version that ships the decoder's reading term (docs/spec/decoder.md §5; its data/lexicon/std-exempt.tsv is in the export) has `"reading": True`: the CLI
-# then ends EVERY setting's tag (chat, formal, the anchor run, the replay-setting cell) with `+rd+rx:{rx8}` (the first 8 hex of that file) and no longer marks the colloquial
-# tag with `+rc` (the reading-channel term was removed with it). The row of the new version is added at its release; a version without the key keeps `+rc` and no `+rd`.
+# then ends EVERY setting's tag (chat, formal, the anchor run, the replay-setting cell) with `+rd+rx:{rx8}+rm` (the first 8 hex of that file, then the reading-mass rule's mark) and no longer marks the colloquial
+# tag with `+rc` (the reading-channel term was removed with it). The row of the new version is added at its release (a checkout that has the reading-mass rule, docs/spec/decoder.md §5); a version without the key keeps `+rc` and no `+rd`.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -1032,8 +1032,8 @@ def colloq_tag(ver, prof):
 
 
 def reading_tag(ver):
-    """`+rd+rx:<sha8 of std-exempt.tsv>`, the last mark of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5), else ""."""
-    return f"+rd+rx:{ver.rx8}" if getattr(ver, "rx8", "") else ""
+    """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule), else ""."""
+    return f"+rd+rx:{ver.rx8}+rm" if getattr(ver, "rx8", "") else ""
 
 
 def expected_tag(ver, prof, anchor):
