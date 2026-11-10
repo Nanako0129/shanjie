@@ -983,7 +983,7 @@ fn final_engine(dir: &Path, level: RerankLevel) -> Engine {
     e
 }
 
-/// A copy of data/lexicon (symlinks) whose overlay-add.tsv has the tag `manual` replaced by `slang`: the same words and scores, but no `ManualSet`.
+/// A copy of data/lexicon (symlinks) whose overlay-add.tsv has the tag `manual` replaced by `slang`: the same words and scores, and no manual words in the `ManualSet` (it keeps only the rerank-protect words, which do not include 米雅歌).
 fn lexicon_without_manual_tags() -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-rerank-nomanual-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -1016,7 +1016,7 @@ fn shown_after_rerank(e: &mut Engine, reading: &[&str]) -> (String, String) {
 
 /// Formal, standard and aggressive strength: 米雅歌 (dev manual-words row 4, the n-gram's first) stays 米雅歌 through the rerank. Before docs/spec/decoder.md §7 the
 /// rerank took it out for 米亞哥 at both strengths (measured 2026-10-27); conservative never did. The same engine on a copy of the lexicon whose manual
-/// rows are tagged `slang`, so the job carries no `ManualSet`, does take it out: that is the premise, and the check that fails without the set.
+/// rows are tagged `slang`, so the job's `ManualSet` lacks 米雅歌 (only the rerank-protect words are in it), does take it out: that is the premise, and the check that fails without the set.
 /// The premise holds with the formal cells of 會意 SJ-SR-8-15M (0.8, 2, 0) as well (re-run 2026-11-06: standard and aggressive take it out without the set).
 #[test]
 fn a_manual_word_survives_the_formal_rerank_on_the_final_files() {

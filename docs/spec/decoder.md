@@ -21,7 +21,7 @@
 ### 1.2 載入順序與失敗
 
 - 詞庫依序讀基底、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、選用詞包、（評測用的額外疊加層），接在基底後面，同讀音的列最後一起穩定排序（高分在前）。上述每個檔缺檔或讀不了都是載入失敗（C ABI 回傳 3）；唯一例外是選用詞包的檔缺檔時當作沒有那個詞包。
-- `Engine::load_lm` 另外要求：`classes.sjc`（缺檔、魔數、模型雜湊、長度、機率範圍任一不符就失敗）、`std-exempt.tsv`、`variant-order.tsv`（再讀一次）、`rerank-protect.tsv`（再讀一次）、`mcbpmf-data.txt`（建讀音表）。`kn.sjkn`、兩張 trigram 表是選用的：路徑不存在就是關閉，路徑存在（含壞掉的符號連結）卻讀不了或和模型不符就是載入失敗，不會靜默略過。App 的載入（`Engine::load_lm`）兩張 trigram 表都讀，所以任一張壞掉都讓整個載入失敗；評測 CLI 只讀該設定自己的那張（`--no-tri` 都不讀、`--no-kn` 不讀 `kn.sjkn`、`--no-classes` 不讀 `classes.sjc`）。
+- `Engine::load_lm` 另外要求：`classes.sjc`（缺檔、魔數、模型雜湊、長度、機率範圍任一不符就失敗）、`std-exempt.tsv`、`variant-order.tsv`（再讀一次）、`mcbpmf-data.txt`（建讀音表）。`kn.sjkn`、兩張 trigram 表是選用的：路徑不存在就是關閉，路徑存在（含壞掉的符號連結）卻讀不了或和模型不符就是載入失敗，不會靜默略過。App 的載入（`Engine::load_lm`）兩張 trigram 表都讀，所以任一張壞掉都讓整個載入失敗；評測 CLI 只讀該設定自己的那張（`--no-tri` 都不讀、`--no-kn` 不讀 `kn.sjkn`、`--no-classes` 不讀 `classes.sjc`）。
 - 沒有載入語言模型時，組字區走 `decode_beam`（只用詞庫分數，光束 64）；語言模型一旦載入，所有路徑都走 §4。
 
 ## 2. 詞庫分數

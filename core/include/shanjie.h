@@ -58,8 +58,8 @@
  *    the rows of std-exempt.tsv, syllable TAB character, are readings that cost nothing). Missing, unreadable or malformed, the load fails with 3,
  *    never a silent decoder without the exemptions. The term has no switch or setting of its own.
  *  - data_dir must hold rerank-protect.tsv (docs/spec/lexicon-and-packs.md §2.12): `word TAB reading TAB note` rows, words the semantic rerank may not take
- *    out of the n-gram's first choice. No score or entry changes. shanjie_engine_new / _new_packs read it with the lexicon, and shanjie_engine_load_lm
- *    reads it again: missing, unreadable, malformed, or a row whose word is not in the lexicon under that reading fails with 3.
+ *    out of the n-gram's first choice. No score or entry changes. shanjie_engine_new / _new_packs read it with the lexicon: missing, unreadable,
+ *    malformed, or a row whose word is not in the lexicon under that reading fails with 3. shanjie_engine_load_lm does not read it again.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
  *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
