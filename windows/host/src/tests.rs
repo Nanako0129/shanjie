@@ -58,7 +58,8 @@ fn server_name() -> &'static [u16] {
     NAME.get_or_init(|| {
         let name = format!(r"\\.\pipe\shanjie-test-host-{}", std::process::id());
         check(server::start(&name, 8, token::process_facts().need("own token")), "the test server starts");
-        engine::install(engine::load(repo_root()).need("the engine loads from data/ (scripts/fetch-models.sh)"));
+        // The shared server runs the current rules (key scheme 0, named here): the tests that use it were written for them.
+        engine::install(engine::load(repo_root(), 0).need("the engine loads from data/ (scripts/fetch-models.sh)"), 0);
         name.encode_utf16().chain([0]).collect()
     })
 }
@@ -191,10 +192,12 @@ fn a_rate_limited_client_gets_a_usable_connection_next() {
 // ---- the candidate window (docs/spec/windows-tip.md §3.15) ----
 
 /// What one core output holds, copied and freed at once.
+#[derive(Clone, PartialEq)]
 struct Snap {
     handled: bool,
     commit: Vec<u16>,
     preedit: Vec<u16>,
+    cursor: u32,
     selected: i32,
     first: u32,
     total: u32,
@@ -205,8 +208,13 @@ struct Snap {
 struct Direct(*mut ShanjieEngine);
 
 impl Direct {
+    /// Key scheme 0, named: the existing tests were written for the current rules.
     fn new() -> Direct {
-        Direct(engine::load(repo_root()).need("the engine loads from data/ (scripts/fetch-models.sh)"))
+        Direct::with_scheme(0)
+    }
+
+    fn with_scheme(scheme: u32) -> Direct {
+        Direct(engine::load(repo_root(), scheme).need("the engine loads from data/ (scripts/fetch-models.sh)"))
     }
 
     fn key(&self, k: Key) -> Snap {
@@ -219,7 +227,7 @@ impl Direct {
             let r = &*o;
             let s = |p: *const std::os::raw::c_char| CStr::from_ptr(p).to_string_lossy().encode_utf16().collect::<Vec<u16>>();
             let candidates = if r.candidates.is_null() { Vec::new() } else { (0..r.candidate_count as usize).map(|i| s(*r.candidates.add(i))).collect() };
-            let snap = Snap { handled: r.handled != 0, commit: s(r.commit), preedit: s(r.preedit), selected: r.candidate_selected, first: r.candidate_first, total: r.candidate_total, candidates };
+            let snap = Snap { handled: r.handled != 0, commit: s(r.commit), preedit: s(r.preedit), cursor: r.cursor_utf16, selected: r.candidate_selected, first: r.candidate_first, total: r.candidate_total, candidates };
             core_ffi::shanjie_output_free(o);
             snap
         }
@@ -333,17 +341,32 @@ const REPLAY_KEYS_VERTICAL_EXPECTED: &str = r"\u660e\u5929\u65e9\u5c1a\u6211\u89
 
 fn parse_keys(line: &str) -> Vec<Key> {
     line.split(' ')
-        .map(|t| match t {
-            "space" => kind(SPACE),
-            "enter" => kind(ENTER),
-            "bksp" => kind(4),
-            "esc" => kind(ESC),
-            "up" => kind(9),
-            "down" => kind(DOWN),
-            "pgup" => kind(14),
-            "pgdn" => kind(PAGE_DOWN),
-            t if t.chars().count() == 1 => chr(t.chars().next().need("a character")),
-            _ => fail("an unknown key token"),
+        .map(|t| {
+            // `S+` Shift, `C+` Control (MOD_SHIFT 1, MOD_CONTROL 2 of shanjie.h), in front of any other token.
+            let (modifiers, t) = match (t.strip_prefix("S+"), t.strip_prefix("C+")) {
+                (Some(r), _) => (1, r),
+                (_, Some(r)) => (2, r),
+                _ => (0, t),
+            };
+            let k = match t {
+                "space" => kind(SPACE),
+                "enter" => kind(ENTER),
+                "bksp" => kind(4),
+                "del" => kind(5),
+                "esc" => kind(ESC),
+                "left" => kind(7),
+                "right" => kind(8),
+                "up" => kind(9),
+                "down" => kind(DOWN),
+                "home" => kind(11),
+                "end" => kind(12),
+                "tab" => kind(13),
+                "pgup" => kind(14),
+                "pgdn" => kind(PAGE_DOWN),
+                t if t.chars().count() == 1 => chr(t.chars().next().need("a character")),
+                _ => fail("an unknown key token"),
+            };
+            Key { modifiers, ..k }
         })
         .collect()
 }
@@ -431,56 +454,440 @@ fn warm_up_failing_midway_still_resets() {
     check(o.commit.is_empty() && o.preedit.is_empty() && o.selected == -1, "nothing is composed or committed after the failed warm-up");
 }
 
-/// docs/spec/windows-tip.md §3.6: the text service's key predicate against the real core, with a candidate window open. Every virtual key of the mapping
+/// The virtual keys of the text service's mapping table, the digits, letters and punctuation keys, the page keys, and the unmapped ones.
+fn all_vks() -> Vec<u32> {
+    let mut vks: Vec<u32> = vec![0x20, 0x0D, 0x08, 0x2E, 0x1B, 0x25, 0x27, 0x26, 0x28, 0x24, 0x23, 0x09, 0x21, 0x22, 0x70, 0x60, 0x10, 0x11, 0x12, 0xE5];
+    vks.extend(0x30..=0x39);
+    vks.extend(0x41..=0x5A);
+    vks.extend([0xBA, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE, 0xBB, 0xBD, 0xBC, 0xBE]);
+    vks
+}
+
+/// An unfinished syllable ㄋ.
+fn open_syllable(core: &Direct) {
+    core.reset();
+    core.key(chr('s'));
+}
+
+/// The composition ㄋㄧˇ (你).
+fn open_composition(core: &Direct) {
+    core.reset();
+    for c in ['s', 'u', '3'] {
+        core.key(chr(c));
+    }
+}
+
+/// Opens the window of ㄋㄧˇ: Down opens it in both schemes (in scheme 1 Space types a space unit).
+fn open_window(core: &Direct) {
+    core.reset();
+    for c in ['s', 'u', '3'] {
+        core.key(chr(c));
+    }
+    let o = core.key(kind(DOWN));
+    check(o.selected >= 0 && !o.candidates.is_empty(), "the window opens");
+}
+
+/// docs/spec/windows-tip.md §3.6: the text service's key predicate against the real core, with a candidate window open, in both key schemes. Every virtual key of the mapping
 /// table, the digits, letters and punctuation keys, the page keys, and the unmapped ones, with every Shift, Ctrl and Caps Lock combination
 /// (Alt and Win keys are never sent): whenever the core handles the key, `OnTestKeyDown` must say it may be eaten, and the page keys map only with no modifier.
 #[test]
 fn window_keys_match_the_core() {
     use crate::keys::{map_key, may_eat, Mods};
-    let core = Direct::new();
-    let mut vks: Vec<u32> = vec![0x20, 0x0D, 0x08, 0x2E, 0x1B, 0x25, 0x27, 0x26, 0x28, 0x24, 0x23, 0x09, 0x21, 0x22, 0x70, 0x60, 0x10, 0x11, 0x12, 0xE5];
-    vks.extend(0x30..=0x39);
-    vks.extend(0x41..=0x5A);
-    vks.extend([0xBA, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE, 0xBB, 0xBD, 0xBC, 0xBE]);
-    let open = |core: &Direct| {
-        core.reset();
-        for c in ['s', 'u', '3'] {
-            core.key(chr(c));
+    let vks = all_vks();
+    for scheme in [0u32, 1] {
+        let core = Direct::with_scheme(scheme);
+        let (mut combos, mut handled_n) = (0u32, 0u32);
+        for &vk in &vks {
+            for bits in 0..8u32 {
+                let mods = Mods { shift: bits & 1 != 0, ctrl: bits & 2 != 0, caps: bits & 4 != 0, ..Mods::default() };
+                let page = vk == 0x21 || vk == 0x22;
+                let k = map_key(vk, mods, true);
+                if page {
+                    check(k.is_some() == (bits == 0), &format!("vk {vk:#x} mods {bits}: a page key maps only with no modifier"));
+                    check(map_key(vk, mods, false).is_none(), &format!("vk {vk:#x} mods {bits}: a page key never maps without a window"));
+                }
+                let Some(k) = k else { continue };
+                open_window(&core);
+                let s = core.key(k);
+                combos += 1;
+                if s.handled {
+                    handled_n += 1;
+                    check(may_eat(scheme as u8, false, true, &k), &format!("scheme {scheme} vk {vk:#x} mods {bits}: the core handles it, OnTestKeyDown must say TRUE"));
+                }
+                if page {
+                    check(s.handled, &format!("vk {vk:#x}: the core handles a page key with a window open"));
+                }
+            }
         }
-        let o = core.key(kind(SPACE));
-        check(o.selected >= 0 && !o.candidates.is_empty(), "the window opens");
+        // The keys of rules 3v-8 are handled and may be eaten.
+        for c in '1'..='9' {
+            open_window(&core);
+            check(core.key(chr(c)).handled && may_eat(scheme as u8, false, true, &chr(c)), "a digit");
+        }
+        for k in [SPACE, ENTER, ESC, 4, DOWN, 9, 7, 8, 14, 15] {
+            open_window(&core);
+            check(core.key(kind(k)).handled && may_eat(scheme as u8, false, true, &kind(k)), "a window key");
+        }
+        println!("scheme {scheme}: {combos} combinations with a window open, {handled_n} handled by the core, 0 where the core handles a key OnTestKeyDown refuses");
+    }
+}
+
+/// docs/spec/windows-tip.md §3.6 (A3): `may_eat(scheme, composing, window, key)` against the real core, both schemes, every virtual key of the table with every Shift, Ctrl and
+/// Caps Lock combination. With an empty composition both ways: no key `may_eat` says TRUE for that the core passes on (not handled, nothing committed), and no key the core
+/// takes (handled, or something committed) that it says FALSE for. With an unfinished syllable, a composition or a window open: only the way "the core takes it, so `may_eat` is TRUE".
+#[test]
+fn may_eat_matches_the_core_in_both_schemes() {
+    use crate::keys::{map_key, may_eat, may_eat_either, Mods};
+    let vks = all_vks();
+    for scheme in [0u32, 1] {
+        let core = Direct::with_scheme(scheme);
+        let sc = scheme as u8;
+        let states: [(&str, fn(&Direct), bool, bool); 4] = [
+            ("empty", Direct::reset, false, false),
+            ("syllable", open_syllable, true, false),
+            ("composition", open_composition, true, false),
+            ("window", open_window, true, true),
+        ];
+        let (mut combos, mut eaten, mut taken) = (0u32, 0u32, 0u32);
+        for (name, prepare, composing, window) in states {
+            for &vk in &vks {
+                for bits in 0..8u32 {
+                    let mods = Mods { shift: bits & 1 != 0, ctrl: bits & 2 != 0, caps: bits & 4 != 0, ..Mods::default() };
+                    let Some(k) = map_key(vk, mods, window) else { continue };
+                    prepare(&core);
+                    let s = core.key(k);
+                    let core_takes = s.handled || !s.commit.is_empty();
+                    let eat = may_eat(sc, composing, window, &k);
+                    combos += 1;
+                    eaten += u32::from(eat);
+                    taken += u32::from(core_takes);
+                    let what = format!("scheme {scheme}, {name}, vk {vk:#x}, mods {bits}");
+                    check(!core_takes || eat, &format!("{what}: the core takes the key, OnTestKeyDown must say TRUE"));
+                    if !composing && !window {
+                        check(!eat || core_takes, &format!("{what}: OnTestKeyDown says TRUE, the core passes the key on (an IMM32 host would lose it)"));
+                        // A thread with no connection yet refuses without connecting exactly the keys neither scheme takes.
+                        check(may_eat_either(&k) || !eat, &format!("{what}: may_eat_either is TRUE whenever the scheme's answer is"));
+                    }
+                }
+            }
+        }
+        println!("scheme {scheme}: {combos} combinations, {eaten} eaten by may_eat, {taken} taken by the core, 0 disagreements");
+    }
+}
+
+// ---- key scheme 1 (docs/spec/keys-and-composition.md §4.1.1, docs/spec/windows-tip.md §3.4, §5.2, §5.3) ----
+
+/// The segments of the VM runs, one per row of the scheme 1 rules and the cells run in the Run dialog, one token each separated by spaces (the tokens of `parse_keys`; `S+` and `C+` are Shift and
+/// Control). Every segment starts from an empty composition. `REPLAY_KEYS_MS` (scheme 1, expectations) and `print_vm_keys_scheme0` (scheme 0, the expected values of the switch-back run)
+/// both read this table, and the VM driver copies its key strings from it: a string is defined here once. The last three are the cells of the Run dialog, whose
+/// composition cannot be read back (the strings stop before the Enter that would run the text).
+const VM_KEY_STRINGS: &[(&str, &str)] = &[
+    ("enter-on-syllable", "s enter"),
+    ("shift-enter-on-syllable", "s S+enter"),
+    ("space-on-syllable", "s space"),
+    ("shift-a-on-syllable", "s S+a"),
+    ("shift-a-after-unit", "s u 3 s S+a"),
+    ("shift-comma-on-syllable", "s S+,"),
+    ("shift-period-on-syllable", "s S+."),
+    ("shift-comma-after-unit", "s u 3 s S+,"),
+    ("shift-comma-in-composition", "s u 3 S+,"),
+    ("shift-period-in-composition", "s u 3 S+."),
+    ("shift-comma-empty", "S+,"),
+    ("shift-period-empty", "S+."),
+    ("space-in-composition", "s u 3 space j i 3 down"),
+    ("tab-in-composition", "s u 3 tab"),
+    ("shift-tab-in-composition", "s u 3 S+tab"),
+    ("shift-a-in-composition", "s u 3 S+a j i 3 bksp"),
+    ("shift-a-in-composition-backspaces", "s u 3 S+a j i 3 bksp bksp"),
+    ("tone-3", "s u 3 3"),
+    ("tone-4", "s u 3 4"),
+    ("tone-6", "s u 3 6"),
+    ("tone-7", "s u 3 7"),
+    ("up-in-composition", "s u 3 up"),
+    ("shift-enter-in-composition", "s u 3 S+enter"),
+    ("ctrl-comma-empty", "C+,"),
+    ("ctrl-period-empty", "C+."),
+    ("ctrl-comma-on-syllable", "s C+,"),
+    ("ctrl-period-in-composition", "s u 3 C+."),
+    ("ctrl-comma-in-window", "s u 3 down C+,"),
+    ("backspace-in-window", "s u 3 down bksp"),
+    ("up-in-window-at-first-row", "s u 3 down up"),
+    ("up-in-window-across-a-page", "s u 3 down pgdn up"),
+    ("space-in-window-keeps-no-position", "s u 3 down down space"),
+    ("page-down-in-window-keeps-no-position", "s u 3 down down pgdn"),
+    ("space-in-window-after-the-last-page", "s u 3 down end space"),
+    ("page-up-in-window-at-first-page", "s u 3 down pgup"),
+    ("page-up-in-window-from-second-page", "s u 3 down pgdn pgup"),
+    ("down-in-window-across-a-page", "s u 3 down down down down down down down down down down"),
+    ("down-in-window-at-the-last-row", "s u 3 down end down"),
+    ("tab-in-window", "s u 3 down tab"),
+    ("shift-tab-in-window", "s u 3 down S+tab"),
+    ("right-in-window", "s u 3 down right"),
+    ("left-in-window", "s u 3 down left"),
+    ("home-in-window", "s u 3 down home"),
+    ("delete-in-window", "s u 3 down del"),
+    ("end-in-window", "s u 3 down end"),
+    ("shift-enter-in-window", "s u 3 down S+enter"),
+    ("zhuyin-a-in-window", "s u 3 down a"),
+    ("zhuyin-semicolon-in-window", "s u 3 down ;"),
+    ("zhuyin-zero-in-window", "s u 3 down 0"),
+    ("zhuyin-minus-in-window", "s u 3 down -"),
+    ("shift-a-in-window", "s u 3 down S+a"),
+    ("shift-comma-in-window", "s u 3 down S+,"),
+    ("shift-period-in-window", "s u 3 down S+."),
+    // The cells of the Run dialog (docs/windows/ms-zhuyin-ref.md): the same strings as above, named for the dialog.
+    ("run-dialog-space-then-zhuyin", "s u 3 space j i 3 down"),
+    ("run-dialog-shift-a-after-unit", "s u 3 s S+a"),
+    ("run-dialog-shift-comma-after-unit", "s u 3 s S+,"),
+];
+
+/// What a segment of `REPLAY_KEYS_MS` ends with.
+enum Want {
+    /// Everything the segment committed, the last composition, whether the last key was handled, and whether a window is open at the end. A text is that of Microsoft Zhuyin's measurement
+    /// (docs/windows/ms-zhuyin-ref.md), except where the scheme 1 rules differ on purpose: Up in a composition (ignored), Shift+Enter in a composition (sent and handled).
+    Text { commit: &'static str, preedit: &'static str, handled: bool, window: bool },
+    /// A rule about the window, judged on the outputs just before and after the last key: no character is written down, the window's own total says where the rule points.
+    Window(fn(&Snap, &Snap) -> bool),
+}
+
+use Want::{Text, Window};
+
+/// First row of the last page of a list of `total`.
+fn last_first(total: u32) -> u32 {
+    (total.max(1) - 1) / 9 * 9
+}
+/// The window, with a second page at least, is untouched by the key: the outputs equal.
+fn window_stays(before: &Snap, after: &Snap) -> bool {
+    before.selected == 0 && before.total > 9 && after == before
+}
+/// From the first row of a list of three pages or more: the last row of the last page.
+fn jumps_to_the_last_row(before: &Snap, after: &Snap) -> bool {
+    before.selected == 0 && before.first == 0 && before.total > 18 && after.first == last_first(before.total) && after.first + after.selected as u32 == before.total - 1
+}
+/// From the second page: the row before it, on the first page, still a whole page from 0.
+fn up_to_the_previous_page(before: &Snap, after: &Snap) -> bool {
+    before.first == 9 && before.selected == 0 && after.first == 0 && after.selected == 8
+}
+/// From the second row of the first page: the first row of the next page, the position inside the page is not kept.
+fn next_page_first_row(before: &Snap, after: &Snap) -> bool {
+    before.first == 0 && before.selected == 1 && before.total > 9 && after.first == 9 && after.selected == 0
+}
+/// From the last page: the first row of the first page.
+fn wraps_to_the_first_page(before: &Snap, after: &Snap) -> bool {
+    before.first == last_first(before.total) && before.first > 0 && after.first == 0 && after.selected == 0
+}
+/// From the first page: the first row of the last page.
+fn page_up_wraps_to_the_last_page(before: &Snap, after: &Snap) -> bool {
+    before.first == 0 && before.total > 9 && after.first == last_first(before.total) && after.selected == 0
+}
+/// From the second page: the first row of the first page.
+fn page_up_to_the_first_page(before: &Snap, after: &Snap) -> bool {
+    before.first == 9 && after.first == 0 && after.selected == 0
+}
+/// The ninth row, then Down: the first row of the next page.
+fn down_across_the_page(before: &Snap, after: &Snap) -> bool {
+    before.first == 0 && before.selected == 8 && before.total > 9 && after.first == 9 && after.selected == 0
+}
+/// The very last row, then Down: back to the first row of the first page.
+fn down_at_the_last_row(before: &Snap, after: &Snap) -> bool {
+    before.first == last_first(before.total) && before.first + before.selected as u32 == before.total - 1 && after.first == 0 && after.selected == 0
+}
+/// From the first row: the last row of the last page.
+fn end_goes_to_the_last_row(before: &Snap, after: &Snap) -> bool {
+    before.selected == 0 && before.total > 9 && after.first == last_first(before.total) && after.first + after.selected as u32 == before.total - 1
+}
+
+/// Scheme 1's expectations, one per segment of `VM_KEY_STRINGS` (not the Run dialog's three, which repeat strings above), by name. The two cells a Microsoft Zhuyin measurement and the scheme 1 rules
+/// part on are named in `Want::Text`. Each row of the scheme 1 rules (`m` rows of docs/spec/keys-and-composition.md §4.1.1) is touched by at least one segment; the 128-unit limit is
+/// `core/tests/engine_scheme.rs`'s.
+const REPLAY_KEYS_MS: &[(&str, Want)] = &[
+    ("enter-on-syllable", Text { commit: "", preedit: "ㄋ", handled: true, window: false }),
+    ("shift-enter-on-syllable", Text { commit: "", preedit: "ㄋ", handled: true, window: false }),
+    ("space-on-syllable", Text { commit: "", preedit: "ㄋ", handled: true, window: false }),
+    ("shift-a-on-syllable", Text { commit: "A", preedit: "", handled: true, window: false }),
+    ("shift-a-after-unit", Text { commit: "", preedit: "你A", handled: true, window: false }),
+    ("shift-comma-on-syllable", Text { commit: "<", preedit: "", handled: true, window: false }),
+    ("shift-period-on-syllable", Text { commit: ">", preedit: "", handled: true, window: false }),
+    ("shift-comma-after-unit", Text { commit: "", preedit: "你<", handled: true, window: false }),
+    ("shift-comma-in-composition", Text { commit: "", preedit: "你<", handled: true, window: false }),
+    ("shift-period-in-composition", Text { commit: "", preedit: "你>", handled: true, window: false }),
+    ("shift-comma-empty", Text { commit: "", preedit: "", handled: false, window: false }),
+    ("shift-period-empty", Text { commit: "", preedit: "", handled: false, window: false }),
+    ("space-in-composition", Text { commit: "", preedit: "你 我", handled: true, window: true }),
+    ("tab-in-composition", Text { commit: "", preedit: "你", handled: true, window: false }),
+    ("shift-tab-in-composition", Text { commit: "", preedit: "你", handled: true, window: false }),
+    ("shift-a-in-composition", Text { commit: "", preedit: "你A", handled: true, window: false }),
+    ("shift-a-in-composition-backspaces", Text { commit: "", preedit: "你", handled: true, window: false }),
+    ("tone-3", Text { commit: "", preedit: "你ˇ", handled: true, window: false }),
+    ("tone-4", Text { commit: "", preedit: "你ˋ", handled: true, window: false }),
+    ("tone-6", Text { commit: "", preedit: "你ˊ", handled: true, window: false }),
+    ("tone-7", Text { commit: "", preedit: "你˙", handled: true, window: false }),
+    ("up-in-composition", Text { commit: "", preedit: "你", handled: true, window: false }),
+    ("shift-enter-in-composition", Text { commit: "你", preedit: "", handled: true, window: false }),
+    ("ctrl-comma-empty", Text { commit: "", preedit: "，", handled: true, window: false }),
+    ("ctrl-period-empty", Text { commit: "", preedit: "。", handled: true, window: false }),
+    ("ctrl-comma-on-syllable", Text { commit: "", preedit: "，", handled: true, window: false }),
+    ("ctrl-period-in-composition", Text { commit: "", preedit: "你。", handled: true, window: false }),
+    ("ctrl-comma-in-window", Text { commit: "", preedit: "你，", handled: true, window: false }),
+    ("backspace-in-window", Window(window_stays)),
+    ("up-in-window-at-first-row", Window(jumps_to_the_last_row)),
+    ("up-in-window-across-a-page", Window(up_to_the_previous_page)),
+    ("space-in-window-keeps-no-position", Window(next_page_first_row)),
+    ("page-down-in-window-keeps-no-position", Window(next_page_first_row)),
+    ("space-in-window-after-the-last-page", Window(wraps_to_the_first_page)),
+    ("page-up-in-window-at-first-page", Window(page_up_wraps_to_the_last_page)),
+    ("page-up-in-window-from-second-page", Window(page_up_to_the_first_page)),
+    ("down-in-window-across-a-page", Window(down_across_the_page)),
+    ("down-in-window-at-the-last-row", Window(down_at_the_last_row)),
+    ("tab-in-window", Window(window_stays)),
+    ("shift-tab-in-window", Window(window_stays)),
+    ("right-in-window", Window(window_stays)),
+    ("left-in-window", Window(window_stays)),
+    ("home-in-window", Window(window_stays)),
+    ("delete-in-window", Window(window_stays)),
+    ("end-in-window", Window(end_goes_to_the_last_row)),
+    ("shift-enter-in-window", Text { commit: "", preedit: "你", handled: true, window: false }),
+    ("zhuyin-a-in-window", Window(window_stays)),
+    ("zhuyin-semicolon-in-window", Window(window_stays)),
+    ("zhuyin-zero-in-window", Window(window_stays)),
+    ("zhuyin-minus-in-window", Window(window_stays)),
+    ("shift-a-in-window", Window(window_stays)),
+    ("shift-comma-in-window", Window(window_stays)),
+    ("shift-period-in-window", Window(window_stays)),
+];
+
+fn keys_of(name: &str) -> &'static str {
+    VM_KEY_STRINGS.iter().find(|(n, _)| *n == name).map(|(_, k)| *k).need("a segment of VM_KEY_STRINGS")
+}
+
+/// What the wire would carry for a core output: the same fields the host copies (`engine::send`), so `proto::out_ok` can judge it.
+fn out_of(s: &Snap) -> Out {
+    let open = s.selected >= 0;
+    Out {
+        ran: true,
+        core_error: false,
+        took_over: false,
+        handled: s.handled,
+        commit: s.commit.clone(),
+        preedit: s.preedit.clone(),
+        cursor_utf16: s.cursor,
+        candidate_selected: s.selected,
+        candidate_first: if open { s.first } else { 0 },
+        candidate_total: if open { s.total } else { 0 },
+        candidates: if open { s.candidates.clone() } else { Vec::new() },
+    }
+}
+
+/// One segment on a fresh state of `core`: (everything committed, the output before the last key, the output of the last key); every output is judged by `proto::out_ok`.
+fn run_segment(core: &Direct, keys: &str) -> (Vec<u16>, Snap, Snap) {
+    core.reset();
+    let (mut commit, mut before, mut last) = (Vec::new(), None, None);
+    for k in parse_keys(keys) {
+        let s = core.key(k);
+        check(proto::out_ok(&out_of(&s)), "the output of a key passes the client's check");
+        commit.extend_from_slice(&s.commit);
+        before = last.take();
+        last = Some(s);
+    }
+    let last = last.need("a segment has a key");
+    (commit, before.unwrap_or_else(|| last.clone()), last)
+}
+
+/// docs/spec/keys-and-composition.md §4.1.1 on the host's own engine with key scheme 1: every segment of `REPLAY_KEYS_MS` ends as its expectation says, and every output passes `proto::out_ok`.
+#[test]
+fn replay_keys_ms() {
+    let core = Direct::with_scheme(1);
+    for (name, want) in REPLAY_KEYS_MS {
+        let (commit, before, last) = run_segment(&core, keys_of(name));
+        match want {
+            Text { commit: c, preedit: p, handled, window } => {
+                check(commit == w(c), &format!("{name}: what was committed"));
+                check(last.preedit == w(p), &format!("{name}: the composition"));
+                check(last.handled == *handled, &format!("{name}: whether the last key was handled"));
+                check((last.selected >= 0) == *window, &format!("{name}: whether a window is open"));
+            }
+            Window(rule) => check(rule(&before, &last), &format!("{name}: the window moves as the rule says")),
+        }
+    }
+    // Every segment of the table has an expectation and the other way round; the three of the Run dialog repeat strings of the others.
+    for (name, _) in VM_KEY_STRINGS {
+        check(name.starts_with("run-dialog-") || REPLAY_KEYS_MS.iter().any(|(n, _)| n == name), &format!("{name}: has an expectation"));
+    }
+    for (name, _) in REPLAY_KEYS_MS {
+        check(VM_KEY_STRINGS.iter().any(|(n, _)| n == name), &format!("{name}: is in VM_KEY_STRINGS"));
+    }
+    check(VM_KEY_STRINGS.iter().filter(|(n, _)| n.starts_with("run-dialog-")).all(|(_, k)| VM_KEY_STRINGS.iter().filter(|(_, k2)| k2 == k).count() >= 2), "a Run dialog cell repeats a string above");
+}
+
+/// The expected values of the VM run in scheme 0 (docs/spec/windows-tip.md §4.6): every segment of `VM_KEY_STRINGS` on the real core in key scheme 0, printed as
+/// `name<TAB>commit<TAB>handled<TAB>preedit<TAB>window first,selected,total`, texts as `\uXXXX`. Run once on the build machine before the VM run and give the output to the run.
+#[test]
+#[ignore = "run by hand: prints the scheme 0 outputs of the VM key strings"]
+fn print_vm_keys_scheme0() {
+    let core = Direct::with_scheme(0);
+    for (name, keys) in VM_KEY_STRINGS {
+        let (commit, _, last) = run_segment(&core, keys);
+        let win = if last.selected >= 0 { format!("{},{},{}", last.first, last.selected, last.total) } else { "-".to_string() };
+        println!("{name}\t{}\t{}\t{}\t{win}", escape(&commit), last.handled, escape(&last.preedit));
+    }
+}
+
+/// After `engine::warm_with` an engine of key scheme 1 holds nothing either, and the next replay sends what a cold scheme 1 engine sends.
+#[test]
+fn warm_up_leaves_no_trace_in_scheme_1() {
+    let core = Direct::with_scheme(1);
+    // SAFETY: a live engine of this test, used on this thread only.
+    check(unsafe { engine::warm_with(core.0, &engine::WARM_KEYS) }, "the warm-up resets");
+    let o = core.key(kind(ENTER));
+    check(o.commit.is_empty() && o.preedit.is_empty() && o.selected == -1, "nothing is composed or committed after the warm-up");
+    // The same segments, in the same order, on an engine that was never warmed: a trace of the warm-up would show in the first answers that differ.
+    let cold = Direct::with_scheme(1);
+    for (name, _) in REPLAY_KEYS_MS {
+        check(run_segment(&core, keys_of(name)).2 == run_segment(&cold, keys_of(name)).2, &format!("{name}: after the warm-up the engine answers as one that never warmed up"));
+    }
+}
+
+/// A key the core refuses in the middle of the warm-up stops it with a composition pending; the reset still empties a scheme 1 engine.
+#[test]
+fn warm_up_failing_midway_still_resets_in_scheme_1() {
+    let core = Direct::with_scheme(1);
+    let bad = Key { kind: 1, ch: 0xD800, modifiers: 0 };
+    // SAFETY: a live engine used on this thread only.
+    check(unsafe { engine::warm_with(core.0, &[chr('a'), chr('u'), bad, chr('6')]) }, "the reset after the failed warm-up works");
+    let o = core.key(kind(ENTER));
+    check(o.commit.is_empty() && o.preedit.is_empty() && o.selected == -1, "nothing is composed or committed after the failed warm-up");
+}
+
+/// docs/spec/windows-tip.md §5.2: the registry value to the scheme and the source of event 71. The read itself (`RegGetValueW`) is the one call `server::run` makes.
+#[test]
+fn the_key_scheme_value_is_read_as_the_spec_says() {
+    use crate::server::key_scheme_from;
+    const ERROR_FILE_NOT_FOUND: u32 = 2;
+    const ERROR_PATH_NOT_FOUND: u32 = 3;
+    const ERROR_MORE_DATA: u32 = 234;
+    const ERROR_UNSUPPORTED_TYPE: u32 = 1630;
+    check(key_scheme_from(0, 0) == (0, 1), "a valid 0 is kept");
+    check(key_scheme_from(0, 1) == (1, 1), "a valid 1 is kept");
+    for v in [2, 3, 255, 0x8000_0000, u32::MAX] {
+        check(key_scheme_from(0, v) == (1, 2), "a DWORD other than 0 or 1 gives 1, invalid");
+    }
+    check(key_scheme_from(ERROR_FILE_NOT_FOUND, 0) == (1, 0) && key_scheme_from(ERROR_PATH_NOT_FOUND, 0) == (1, 0), "no value gives 1, no value");
+    for rc in [ERROR_MORE_DATA, ERROR_UNSUPPORTED_TYPE, 5, 87] {
+        check(key_scheme_from(rc, 0) == (1, 2) && key_scheme_from(rc, 1) == (1, 2), "any other error gives 1, invalid");
+    }
+}
+
+/// `Welcome` carries the key scheme of the installed engine (the shared server's is 0).
+#[test]
+fn the_welcome_carries_the_scheme_of_the_engine() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let until = Instant::now() + Duration::from_secs(10);
+    let _c = loop {
+        match Client::hello() {
+            (c, m) if m == ServerMsg::Welcome { build_hash: proto::BUILD_HASH, key_scheme: 0 } => break c,
+            (_, ServerMsg::Refuse { reason: proto::REFUSE_LIMIT }) if Instant::now() < until => std::thread::sleep(Duration::from_millis(20)),
+            _ => fail("the shared server's Welcome says scheme 0"),
+        }
     };
-    let (mut combos, mut handled_n) = (0u32, 0u32);
-    for &vk in &vks {
-        for bits in 0..8u32 {
-            let mods = Mods { shift: bits & 1 != 0, ctrl: bits & 2 != 0, caps: bits & 4 != 0, ..Mods::default() };
-            let page = vk == 0x21 || vk == 0x22;
-            let k = map_key(vk, mods, true);
-            if page {
-                check(k.is_some() == (bits == 0), &format!("vk {vk:#x} mods {bits}: a page key maps only with no modifier"));
-                check(map_key(vk, mods, false).is_none(), &format!("vk {vk:#x} mods {bits}: a page key never maps without a window"));
-            }
-            let Some(k) = k else { continue };
-            open(&core);
-            let s = core.key(k);
-            combos += 1;
-            if s.handled {
-                handled_n += 1;
-                check(may_eat(true, &k), &format!("vk {vk:#x} mods {bits}: the core handles it, OnTestKeyDown must say TRUE"));
-            }
-            if page {
-                check(s.handled, &format!("vk {vk:#x}: the core handles a page key with a window open"));
-            }
-        }
-    }
-    // The keys of rules 3v-8 are handled and may be eaten.
-    for c in '1'..='9' {
-        open(&core);
-        check(core.key(chr(c)).handled && may_eat(true, &chr(c)), "a digit");
-    }
-    for k in [SPACE, ENTER, ESC, 4, DOWN, 9, 7, 8, 14, 15] {
-        open(&core);
-        check(core.key(kind(k)).handled && may_eat(true, &kind(k)), "a window key");
-    }
-    println!("{combos} combinations with a window open, {handled_n} handled by the core, 0 where the core handles a key OnTestKeyDown refuses");
+    check(engine::key_scheme() == 0, "the installed engine's scheme");
 }

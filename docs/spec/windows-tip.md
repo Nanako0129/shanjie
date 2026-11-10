@@ -143,8 +143,9 @@ Linux `debug` job 在既有步驟之後加三步：
 - 常駐程序先建好 pipe 再載模型（§5.2）。建引擎的呼叫順序與值照 `cli::replay::build_engine_packs`（不是照 Mac App 的設定：App 的中英混打預設開，replay 是關的）：
   1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`；replay 不給 `--packs` 時是 21，多了 Mac App 預設開的美妝詞包，Windows 版不帶它）；
   2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`（`load_lm` 一併讀同一資料夾的承接、trigram 與辨類檔，所以 `data\lm` 要放 `data/*.sha256` 列的全部模型）；
-  3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(1)`（候選窗一律是直排，§3.15）、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
+  3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(1)`（候選窗一律是直排，§3.15）、`set_key_scheme(<按鍵習慣>)`（見下一條）、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
   4. `set_learning(0)`。重排強度與設定檔類型用核心預設（標準、聊天）；不呼叫 `set_fuzzy`、`set_left_context`、`learning_open`。
+- **按鍵習慣**（`set_key_scheme`，`docs/spec/keys-and-composition.md` §4.1.1）：0 是核心現行的規則（Mac 版），1 是微軟注音的做法（`m` 規則，§4.6）；沒有設定值時是 1，Windows 版的預設照微軟注音。值在 `server::run` 讀一次（§5.2：`HKCU\Software\shanjie-dev\KeyScheme`），當參數傳給 `engine::load`，`engine::load` 本身不讀登錄，所以測試不受跑測試那台機器的登錄影響。所有按鍵行為都由核心算，Windows 這一側只把值經 `Welcome` 轉給 DLL，供 `OnTestKeyDown` 判斷（§3.6）。
 - 中英混打關，所以數字層（`digits.tsv`）也不開；`1`、`0` 鍵照注音處理，與 replay 相同。
 - 與 replay 的差別：`set_rerank(0)`，會意與常談表照樣載入，但不跑背景重排工作；replay 帶 `--no-tinylm` 時連會意與常談表都不載。兩者解出的字相同，因為會意與常談表只在重排工作裡起作用；另一個差別是凍結視窗 W（有沒有小模型時不同），只影響約 45 字以上的組字。
 - 載入失敗或引擎的鎖 poisoned：常駐程序結束（§5.2），不留任何錯誤文字（`shanjie.h` 規定不能記 LM 路徑）。
@@ -170,8 +171,9 @@ Linux `debug` job 在既有步驟之後加三步：
 - `VK_PRIOR`（kind 14）、`VK_NEXT`（kind 15）**只在候選窗開著、而且沒有任何修飾鍵（含 Caps Lock）時**才換成按鍵：核心只在直排候選窗開著且沒有修飾鍵時收這兩個鍵（`shanjie.h`）。「候選窗開著」是這個 TIP 實例上一個 `Out` 的 `candidate_selected >= 0`；它在組字結束的每一條路（直通、`took_over`、`Release`、換焦點、停用、`OnCompositionTerminated`、改文件失敗、panic）都清掉，窗關了就不再認這兩個鍵。表外的鍵（功能鍵、數字鍵盤、`VK_PROCESSKEY` 等）換不出來，直通。
 - 字元鍵（`0`–`9`、`A`–`Z`、`VK_OEM_1`–`VK_OEM_7`、`VK_OEM_PLUS`、`VK_OEM_MINUS`、`VK_OEM_COMMA`、`VK_OEM_PERIOD`）送 kind 1，`ch` 是美式鍵盤上該鍵**不按 Shift** 的字元（`a`、`1`、`,`、`;`、`` ` ``、`\` …）。標準注音排列依實體鍵位，與目前的鍵盤配置無關，所以用固定的表，不呼叫 `ToUnicode`。
 - 修飾鍵：Shift → bit0、Ctrl → bit1，Caps Lock 為開時帶 bit4（`GetKeyState` 的 toggle 位元；核心第 1 條直通）。帶 Alt 或 Win 的鍵（含 AltGr＝Ctrl+Alt）不送核心，`pfEaten = FALSE`。
-- **`OnTestKeyDown` 不推進引擎**，只回答「可能會吃」：這個實例有開著的組字時，任何換得出來的鍵都回 TRUE；沒有組字時，剛好是核心在組字區空時會處理的鍵才回 TRUE（中英混打、預測關、標準排列）：沒帶修飾鍵的字元鍵（注音、聲調、標點鍵，規則 2、14、22a）、`docs/spec/keys-and-composition.md` §8.1 那幾個 Shift＋標點鍵、Ctrl+\（核心第 1 條的例外，修飾位元恰為 Ctrl）；其他回 FALSE，鍵直接交給 App，包括核心會直通的空白鍵、Shift＋英文字母與 Caps Lock 開著時的鍵（規則 1、22）。理由見 §5.4：IMM32 宿主裡 `OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失。**候選窗開著時**照「有組字」算（`composing || window`）：換得出來的鍵都回 TRUE，其中核心規則 3v–8 要吃的鍵（數字 1–9、↑↓←→、空白、Enter、Esc、Backspace、Page Up、Page Down）一個都不漏；Page Up、Page Down 在窗沒開著時不換成按鍵，所以那時回 FALSE（組字中也一樣）。
-- 驗證：`keys::tests`（`special_keys_map_to_their_kind`、`unlisted_keys_are_not_sent`、`page_keys_map_only_with_a_window_open_and_no_modifier`、`character_keys_carry_the_unshifted_keycap`、`modifier_bits`、`alt_and_win_keys_are_not_converted`、`on_test_key_down_with_an_empty_composition`、`on_test_key_down_with_a_composition`、`on_test_key_down_with_a_window_open`，各平台都跑）；常駐程序 crate 的 `window_keys_match_the_core` 對真的核心逐組合核對：窗開著時，每個對照表裡的虛擬鍵、數字、字母、標點鍵、頁鍵與表外鍵，乘上 Shift、Ctrl、Caps Lock 的每種組合（Alt、Win 不送），核心處理的鍵 `may_eat` 都回 TRUE，頁鍵只有無修飾鍵時換得出來，0 個不一致。
+- **`OnTestKeyDown` 不推進引擎**，只回答「可能會吃」，函式是 `may_eat(scheme, composing, window, key)`：這個實例有開著的組字時，任何換得出來的鍵都回 TRUE；沒有組字時，剛好是核心在組字區空時會處理的鍵才回 TRUE（中英混打、預測關、標準排列），照按鍵習慣 `scheme`：沒帶修飾鍵的字元鍵（注音、聲調、標點鍵，規則 2、14、22a）、`docs/spec/keys-and-composition.md` §8.1 那幾個 Shift＋標點鍵、Ctrl+\（核心第 1 條的例外，修飾位元恰為 Ctrl）；`scheme` 1 時 Shift+, 與 Shift+. 回 FALSE（核心照規則 2m 直通，在「執行」對話框這類 IMM32 宿主裡不能先回 TRUE 再放行），Ctrl+, 與 Ctrl+. 回 TRUE（規則 1m）；其他回 FALSE，鍵直接交給 App，包括核心會直通的空白鍵、Shift＋英文字母與 Caps Lock 開著時的鍵（規則 1、22）。理由見 §5.4：IMM32 宿主裡 `OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失。**候選窗開著時**照「有組字」算（`composing || window`）：換得出來的鍵都回 TRUE，其中核心規則 3v–8 要吃的鍵（數字 1–9、↑↓←→、空白、Enter、Esc、Backspace、Page Up、Page Down）一個都不漏；Page Up、Page Down 在窗沒開著時不換成按鍵，所以那時回 FALSE（組字中也一樣）。
+- **`scheme` 只來自這條連線的 `Welcome`**（§5.3），DLL 不讀登錄：`client::scheme()` 回這個執行緒目前連線的值，沒有連線時是 `None`。組字區空而還不知道 `scheme` 時：兩種 `scheme` 下都回 FALSE 的鍵（`may_eat_either`）不連線、直接回 FALSE；其他鍵先 `client::ready()`（連上，§5.4），再用連線的 `scheme` 判斷。組字中與窗開著時照上面，換得出來的鍵都回 TRUE，核心規則 1 會直通的鍵（Ctrl＋字母等）在 IMM32 宿主裡被吞掉，沿用 §3.14 已接受的限制。
+- 驗證：`keys::tests`（`special_keys_map_to_their_kind`、`unlisted_keys_are_not_sent`、`page_keys_map_only_with_a_window_open_and_no_modifier`、`character_keys_carry_the_unshifted_keycap`、`modifier_bits`、`alt_and_win_keys_are_not_converted`、`on_test_key_down_with_an_empty_composition`、`on_test_key_down_with_a_composition`、`on_test_key_down_with_a_window_open`、`on_test_key_down_in_scheme_1_with_an_empty_composition`、`a_composition_or_a_window_eats_every_mapped_key_in_both_schemes`、`without_a_connection_only_a_key_both_schemes_refuse_is_refused`，各平台都跑）；常駐程序 crate 的 `window_keys_match_the_core` 與 `may_eat_matches_the_core_in_both_schemes` 對真的核心、兩種 `scheme` 逐組合核對：每個對照表裡的虛擬鍵、數字、字母、標點鍵、頁鍵與表外鍵，乘上 Shift、Ctrl、Caps Lock 的每種組合（Alt、Win 不送）。組字區空：雙向，`may_eat` 回 TRUE 而核心沒有處理（`handled` 0、`commit` 空）的 0 個，核心處理而 `may_eat` 回 FALSE 的 0 個；有未完成音節、組字中與窗開著：只核對「核心處理的鍵 `may_eat` 都回 TRUE」；頁鍵只有無修飾鍵時換得出來。
 
 ### 3.7 `OnKeyDown` 與文件的改動
 
@@ -213,13 +215,13 @@ Linux `debug` job 在既有步驟之後加三步：
 ### 3.11 計時檔（量測用）
 
 - 只在開了 cargo feature `timing` 的建置裡有（CI 兩種都建）。每行三欄 `<事件代碼>\t<開始>\t<結束>\n`，**只有數字、tab、換行**；開始與結束是同一個時鐘（`QueryPerformanceCounter` 換成微秒）。格式函式 `format_line` 永遠編譯，檔案只在 `timing` 下存在。
-- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65、69、70 見 §5.8；66–68 見 §3.15。
+- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65、69–71 見 §5.8；66–68 見 §3.15。
 - 診斷事件（兩欄都是當下時間，除非另註）：40 `OnTestKeyDown` 回 TRUE（兩欄為 OS 執行緒 ID）；41–44 `OnTestKeyDown` 回 FALSE 的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空）；45 `OnKeyDown` 的同步 edit session 沒拿到（兩欄為 HRESULT）；47 `ActivateEx` 註冊 sink 失敗；48 `ActivateEx` 在安全模式；49 `ActivateEx` 進來的執行緒（兩欄為執行緒 ID）；50 進入 `OnKeyDown`（兩欄為執行緒 ID）；51–55 `OnKeyDown` 在送出之前就回不吃的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空、鍵沒有對應）；56 焦點換過來時鍵盤隔間讀到關、被 TIP 重新打開。都只有數字，不含任何按鍵或文字。
 - **只有完整性等級剛好是 Medium 的程序才寫**（程序 token 的 `TokenIntegrityLevel`，RID 0x2000）：High、Low 與 AppContainer 的程序一律不寫。理由：同一個使用者的一般程序改得了該使用者的資料夾（例如把中間的資料夾換成 junction），提升權限的程序照那條路徑建檔就是跨權限寫檔；限定 Medium 後寫入不跨權限。
 - 位置：目前使用者的 `%LOCALAPPDATA%\shanjie-dev\timing\timing-<pid>.txt`，資料夾路徑用 `SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_NO_PACKAGE_REDIRECTION)` 取，不讀環境變數。封裝的宿主（例如 MSIX 封裝的記事本）寫 AppData 可能被檔案系統虛擬化而導到 `%LOCALAPPDATA%\Packages\<套件>\LocalCache\Local\shanjie-dev\timing\`，讀取時兩個位置都要看。
 - 資料夾由驅動腳本事先建立，TIP 不建；開檔用 `CREATE_NEW`（不開已存在的檔）。資料夾不存在、檔案已存在、開不了或程序不是 Medium 時，這個程序就不寫計時，`ActivateEx` 照常成功，不顯示、不記錄任何錯誤。
 - DLL 的檔案在第一次 `ActivateEx` 時開、常駐程序的在啟動時開（每個程序一次），每行寫完就 flush；DLL 寫入用 `try_lock`，鎖忙時那一行直接略過，常駐程序等鎖（§5.8）；寫入失敗則關閉該程序的計時。
-- 驗證：`timing::tests::a_line_has_three_numeric_columns`；VM 裡讀回每個計時檔，內容只有 `[0-9\t\n]`、每行三欄、事件代碼只有上面列出的、每行開始 ≤ 結束。
+- 驗證：`timing::tests::a_line_has_three_numeric_columns`；VM 裡讀回每個計時檔，內容只有 `[0-9\t\n]`、每行三欄、事件代碼只有上面列出的、每行開始 ≤ 結束（事件 70、71 的兩欄不是時間，不套這一條）。
 
 ### 3.12 R2（隱私）
 
@@ -247,7 +249,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 3.14 已知限制與範圍外
 
-- 按鍵行為目前是核心現行的規則（Mac 版，候選窗用核心的直排規則）。Windows 版的預設應照微軟注音（§4.6 的差異表），Mac 做法留成設定可選；這組規則與開關、單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作。
+- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作；`scheme` 0 下組字中把 Shift＋字母送出再直通的鍵，在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
 - 沒有預測列、UILess（`ITfCandidateListUIElement`）、完整的 UIA 候選清單（候選窗只送 `EVENT_OBJECT_IME_*`）；候選窗沒有底部列（▲▼、兩個圖示）、捲動點、展開成三欄與滑鼠點選（§3.15、§4.6）。
 - 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。
@@ -334,6 +336,8 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 | Caps Lock | 不動作 | 不動作 | 不動作 | 不動作 |
 | Ctrl+Space | 切英文 | 清掉 ㄋ、切英文 | 切英文，組字留著 | 關窗、切英文，組字留著 |
 | Win+Space | 不動作（只有一個輸入法） | 不動作 | 不動作 | 不動作 |
+
+Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/keys-and-composition.md` §4.1.1 的 `m` 規則）；有幾格不照微軟（S2 ↑、S2 ↓ 開窗的順序、組字區上限、S3 Tab 與 →、S1 聲調鍵），見 §4.6 的「不照微軟的列」。
 
 送出「你」之後（S4）和一般打字相同：空白、Enter、Tab、方向鍵、Home、End 交給記事本；注音鍵、數字鍵、`,` `.` 開新的組字；Shift+A、Shift+, Shift+. 直接送出；Ctrl+, 開組字放標點。
 
@@ -433,7 +437,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 
 ### 4.6 與善解 Mac 版不同的地方
 
-左欄是上面量到的微軟注音，右欄是善解 Mac 版現行的按鍵規則（見 `docs/spec/keys-and-composition.md`）；Windows 版現在的候選窗開成直排（§3.15），按鍵照核心的直排規則（`docs/spec/keys-and-composition.md` §4.1、§4.3：1–9 選、↓↑ 移、空白＝下一個、Page Down／Up 移 9 個）。兩邊相同的格不列（例如 S2 的 Enter、Esc、Backspace，S3 的 Esc、數字鍵，S0 的聲調鍵）。Windows 版的預設應照微軟注音，Mac 版的做法留成設定可選（尚未實作，§3.14）。
+左欄是上面量到的微軟注音，右欄是善解 Mac 版現行的按鍵規則（見 `docs/spec/keys-and-composition.md`）；Windows 版現在的候選窗開成直排（§3.15），按鍵照核心的直排規則（`docs/spec/keys-and-composition.md` §4.1、§4.3：1–9 選、↓↑ 移、空白＝下一個、Page Down／Up 移 9 個）。兩邊相同的格不列（例如 S2 的 Enter、Esc、Backspace，S3 的 Esc、數字鍵，S0 的聲調鍵）。Windows 版的預設照微軟注音（按鍵習慣 1，`set_key_scheme`，`docs/spec/keys-and-composition.md` §4.1.1），Mac 版的做法是按鍵習慣 0，由登錄值 `KeyScheme` 選（§3.4、§5.2）；下表「善解 Mac 版」那欄是習慣 0。這一版先只有登錄值、沒有設定頁。只有後面「不照微軟的列」那張表的幾列不照微軟（這一版沒做，或核心沒有那個機制）；其餘各列在習慣 1 下和微軟注音相同，一一對應核心的 `m` 規則。
 
 | 情境 | 微軟注音 | 善解 Mac 版 |
 |---|---|---|
@@ -459,6 +463,16 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 | Ctrl+Space | 任何狀態都切英文（S1 清掉 ㄋ、S3 關窗，組字留著） | 不處理，直接交給 App |
 | 組字區上限 | 31 個音節，第 32 個起把前段送出 | 128 個單位（`MAX_SYLLABLES`），到了送出整段並清空 |
 
+不照微軟的列（Windows 版在習慣 1 下也是右欄）：
+
+| 情境 | 微軟注音 | Windows 版（習慣 1） |
+|---|---|---|
+| S2 ↑ | 換游標前那個字（上面那列） | 忽略（規則 16，組字不變）：把目前的字當第一項、再換單字清單的第 3、2 項的定義要等之後那一片做；多字組字時善解的清單先列多字詞，所以不能直接照原清單算序號 |
+| S2 ↓ 開候選窗 | 窗裡目前的字排第一、其他照原順序（按過 ↑ 之後也是） | 照規則 15 的原始清單順序 |
+| 組字區上限 | 31 個音節，第 32 個起把前段送出 | 128 個單位，到了整段送出（核心沒有「送出前段」的機制） |
+| S3 Tab、→ | 候選窗展開成三欄 | 吃掉、不動作，窗開著（展開成三欄在候選窗那一片，§3.15） |
+| S1 聲調鍵 | ㄋ＋聲調，整段反藍、不成字 | 照規則 10（完成音節，詞庫沒有的音節不收） |
+
 ## 5. 常駐程序（`windows/host`）
 
 每個使用者的每個登入工作階段一支 x64 常駐程序 `shanjie-host.exe`，**只有它**載入模型、只有一個引擎；TSF 文字服務 DLL 是薄客戶端，不相依核心，每按一鍵經 named pipe 同步往返一次。連不上就直通，不退回 DLL 內核心。候選窗由 DLL 在 App 的程序裡畫（§3.15），資料走同一條連線（`Out` 的候選欄位）；協定預留了常駐程序主動推送的訊息型別，這一版沒有用。
@@ -478,6 +492,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 - **實例**：啟動時一次建好全部 N＝64 個實例（`nMaxInstances = N`，第一個帶 `FILE_FLAG_FIRST_PIPE_INSTANCE`），之後以 `DisconnectNamedPipe`、`ConnectNamedPipe` 重複使用、永遠不關。第一個實例建不起來（已經有一支在跑）就結束。實例數已滿，誰都加不了實例，與 DACL 無關。不另外用具名 mutex。VM 驗收讀事件 65（同時連線數的最高值）核對 N。
 - **先建 pipe、再載模型**：載入期間收到 `Hello` 或 `Key` 立刻回 `NotReady`，客戶端直通。模型載入失敗、或引擎的鎖 poisoned，常駐程序就結束，讓下一個客戶端啟動新的一支。
 - **預熱**：模型載完之後、`install()` 之前，常駐程序用同一個引擎送一串固定的假按鍵（`a u / 6 w u 0 space y l 3 g ; 4`，ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ，不按 ↓、不開候選窗、不送出），讓第一個真的按鍵不必面對還沒進記憶體的模型頁面（這是推論，量測見 §5.8 的事件 69）；不論成敗，最後一律 `reset`（模式 1），所以引擎之後沒有組字、沒有前文，學習本來就關。預熱期間 `ready()` 仍是假，客戶端照 `NotReady` 直通。某一鍵被核心拒絕就停止預熱、記事件 70，照常 `install()`，不讓常駐程序起不來；`reset` 本身失敗時，這個引擎不放上線，釋放後重新載入一次（不再預熱），再失敗就照模型載入失敗結束。只有帶 `timing` 的量測版讀環境變數 `SHANJIE_HOST_NO_WARM=1` 來跳過預熱，正式版不讀、設定頁也沒有；DLL 啟動常駐程序時環境區塊只有 `SystemRoot`，使用者環境裡的這個變數傳不進產品的常駐程序。事件 2 的結束仍是載入完成的時刻（預熱之前），它在 `install()` 之後才寫。
+- **按鍵習慣**：載模型之前讀一次 `HKCU\Software\shanjie-dev\KeyScheme`（DWORD），用 `RegGetValueW(HKEY_CURRENT_USER, "Software\shanjie-dev", "KeyScheme", RRF_RT_REG_DWORD, …)` 讀進一個 `u32`：值是 0 或 1 就照用；沒有這個值、型別不對、`ERROR_MORE_DATA` 等任何錯誤、或值不是 0 與 1，一律當 1（Windows 預設照微軟注音）；夾完再傳給 `engine::load`，不讓 `set_key_scheme` 回 2 而讓常駐程序結束。`engine::load` 本身不讀登錄。值只在啟動時讀一次，改了要重新登入或結束常駐程序才生效；之後每條連線的 `Welcome` 帶這個值（§5.3）。信任：寫得進 `HKCU\Software` 的只有同一個使用者的 Medium 以上程序，它們本來就能影響常駐程序（§5.5 第 1、5 點已接受），所以這個值沒有跨過權限邊界。事件 71（§5.8）記讀到的結果。
 - **誰啟動**：DLL 連線得到 `ERROR_FILE_NOT_FOUND`，而且呼叫端同時符合以下全部條件時，才 `CreateProcessW`；`ERROR_PIPE_BUSY` 不啟動、直通。
   - 呼叫端完整性剛好是 Medium、不是 AppContainer、不是提升權限、不是受限權杖、工作階段不是 0、使用者不是 SYSTEM／LocalService／NetworkService、沒有套件身分（`GetCurrentPackageFullName` 回 `APPMODEL_ERROR_NO_PACKAGE`；封裝 App 開的子程序會留在它的套件執行環境裡）。
   - 不等：送出 `CreateProcessW` 就讓這一鍵直通，不在 `OnKeyDown` 或 `ActivateEx` 裡等 pipe 出現。每個程序同時只啟動一次；啟動後 10 秒內不再啟動，期間的鍵直通。啟動 15 秒後、或它啟動的常駐程序已經結束，連線仍是 `ERROR_FILE_NOT_FOUND`，記一次「啟動後仍找不到」（事件 63 原因 5），照退避重試；永久直通只由 `Refuse { 1 }` 觸發。
@@ -491,8 +506,8 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 
 - 固定寬度、小端，不用自描述的序列化。每則：`u32 len`、`u16 proto`、`u16 type`、`u64 seq`，後面是型別專屬的內容。字串一律 UTF-16 長度加資料。
 - 客戶端 → 常駐程序：`Hello { build_hash, pid, tid }`（pid、tid 只是資訊，不拿來授權）；`Key { ctx, ShanjieKey }`；`Release { ctx }`；`Reset { ctx }`（DLL 接住 panic 之後；送出後客戶端關掉這條連線，因為 panic 可能發生在一次交換的中間）。
-- 常駐程序 → 客戶端：`Welcome { build_hash }`；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected, candidate_first, candidate_total, candidates }`（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理；`candidates` 是直排候選窗**可見的列**，最多 9 項，`candidate_selected` 是可見列裡的位置，`candidate_first` 是第一列在全部清單裡的位置，`candidate_total` 是全部清單的長度；窗沒開時 `candidate_selected` 是 −1、`candidates` 為空、兩個數字都是 0）；預留 `Pushed`，客戶端收到就丟掉。
-- `proto` 不同 → `Refuse { 1 }`（`PROTO` 目前是 2：`Out` 加了 `candidate_first`、`candidate_total` 並填入 `candidates`）；`build_hash` 不同不拒絕、不記錄。PROTO 2 的 DLL 遇到還在跑的 PROTO 1 常駐程序會收到 `Refuse { 1 }`，那個 App 直通到重開；更新時要先結束舊的常駐程序（安裝與更新流程另寫，這一版沒有）。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
+- 常駐程序 → 客戶端：`Welcome { build_hash, key_scheme }`（`key_scheme` 是一個位元組，0 或 1：這支常駐程序引擎的按鍵習慣，§5.2；DLL 的 `OnTestKeyDown` 只從這裡得知，§3.6；其他值解碼就拒絕）；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected, candidate_first, candidate_total, candidates }`（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理；`candidates` 是直排候選窗**可見的列**，最多 9 項，`candidate_selected` 是可見列裡的位置，`candidate_first` 是第一列在全部清單裡的位置，`candidate_total` 是全部清單的長度；窗沒開時 `candidate_selected` 是 −1、`candidates` 為空、兩個數字都是 0）；預留 `Pushed`，客戶端收到就丟掉。
+- `proto` 不同 → `Refuse { 1 }`（`PROTO` 目前是 3：2 是 `Out` 加了 `candidate_first`、`candidate_total` 並填入 `candidates`，3 是 `Welcome` 加了 `key_scheme`）；`build_hash` 不同不拒絕、不記錄。PROTO 3 的 DLL 遇到還在跑的 PROTO 2 常駐程序（PROTO 2 的常駐程序對 PROTO 3 的 `Hello` 也回 `Refuse { 1 }`）會收到 `Refuse { 1 }`，那個 App 直通到重開；更新時要先結束舊的常駐程序（安裝與更新流程另寫，這一版沒有）。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
 - **擁有者由常駐程序指定**：`owner = (連線 ID, ctx)`，連線 ID 單調遞增、不重用；客戶端只送自己的 `ctx`（`ITfContext` 的指標值），它只在自己那條連線裡有意義。換擁有者先 `reset(mode 1)`（§3.4 的那一套：一個引擎）；新擁有者的 `Out` 不帶舊擁有者的候選窗（reset 之後窗是關的）。`Release` 要 `(連線, ctx)` 完全相符才 reset；`Reset` 與斷線只看連線，是目前的擁有者才 reset 並清掉擁有者。
 - **解析規則**（兩端共用）：
   - 讀到 `len` 之後、配置記憶體之前，先檢查 16 ≤ `len` ≤ 64 KiB，而且等於這則訊息實際的位元組數。
@@ -562,7 +577,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 
 - DLL 與常駐程序各自照 §3.11 寫（同樣的 Medium 閘門、`CREATE_NEW`、只有數字）；常駐程序的檔名 `host-<pid>.txt`，同一個資料夾。DLL 寫入用 `try_lock`（UI 執行緒不等計時檔），常駐程序等鎖（64 條連線執行緒共用一個檔，略過會丟掉事件 2）。
 - 常駐程序記 2（模型載入）、3（每鍵：收到到送回）、64（一個 AppContainer 客戶端連上，兩欄都是 1）、65（同時連線數創新高時的值，兩欄都是那個數）。DLL 不再寫 2 與 46。
-- 常駐程序另記 69（預熱：開始＝第一鍵之前、結束＝`reset` 之後，單位 µs；沒預熱時不寫）、70（預熱的某一鍵被核心拒絕：兩欄都是數字，依序是那一鍵在按鍵串裡的位置（從 0 起）與核心的回傳碼；只有失敗時寫）。
+- 常駐程序另記 69（預熱：開始＝第一鍵之前、結束＝`reset` 之後，單位 µs；沒預熱時不寫）、70（預熱的某一鍵被核心拒絕：兩欄都是數字，依序是那一鍵在按鍵串裡的位置（從 0 起）與核心的回傳碼；只有失敗時寫）、71（啟動時的按鍵習慣：兩欄都是數字，不是時間，依序是交給核心的值（0 或 1）與來源碼（0 沒有值、1 有效的值、2 無效的值而當 1）；70、71 都不套「開始 ≤ 結束」）。只有數字、不含任何按鍵或文字（R2）。
 - DLL 記：60 等常駐程序回應（開始＝送出、結束＝收到）；61 `CreateProcessW` 成功的時刻（同一個 QPC 時鐘；冷啟動秒數＝常駐程序事件 2 的結束減這個時刻）；62 逾時或斷線（兩欄都是 Win32 錯誤碼）；63 不符條件而直通（兩欄都是原因碼：1 不准連線、2 不符啟動條件、3 退避中或另一條執行緒正在啟動、4 `CreateProcessW` 失敗（含 Job 不准脫離）、5 啟動後仍找不到、6 `ERROR_PIPE_BUSY`、7 `NotReady`、8 `Busy`、9 伺服器核對不過、10 `Refuse { 1 }`、11 `Refuse { 2 }`（含不認得的原因碼）、12 `Refuse { 3 }`、13 回應型別不對）。42 的意思是「被擋住」（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，或組字區空時連不上常駐程序，§5.4），52 是同樣的擋住出現在 `OnKeyDown`。
 
 ### 5.9 介面的層級
@@ -585,7 +600,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 5. **記憶體**：記事本與 explorer 各做兩組（微軟注音、善解），取樣點相同、兩組之間開「執行」對話框的次數相同。判準：善解的差減掉微軟注音的差 < 10 MB。常駐程序的私有記憶體照實報。
 6. **延遲**：DLL 的每鍵（事件 3）中位數、p95、最大值，p95 < 16 ms；事件 60 的 p95 另報；首鍵分常駐程序已在跑（目標 < 16 ms）與冷啟動兩種報。另報事件 65 的最高值。
 7. **故障**：(k1) 記事本組字中結束常駐程序，下一鍵照 §5.6 第一列（組字結束、字留著、這一鍵被吃掉），記事本沒有當掉、沒有啟動常駐程序；在「執行」對話框送一鍵重起常駐程序後，記事本打同一句逐字相同。只記錄、不擋：(k2) 設定 App 的搜尋框（字對不對、事件 64）；(k3) 以系統管理員身分開的記事本（字對不對、常駐程序沒有換、仍是 Medium；常駐程序沒在跑時直通、不啟動）；(k4) 模型載入期間打字（不卡 200 ms、之後不重複出字）；(k5) Low 完整性的測試程序對真的 pipe 呼叫 `CreateNamedPipeW`，應該被拒絕或拿到 `ERROR_PIPE_BUSY`。
-8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～70；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
+8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～71；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
 9. **取消註冊**照 §3.13 (h)，另外核對重開之後沒有 `shanjie-host` 在跑。
 10. 單元測試（CI）：兩條連線，B 用 A 的 `ctx` 送 `Release`、`Reset`，A 的狀態不變；B 用 A 的 `ctx` 送 `Key`，B 只拿到自己那一鍵、拿不到 A 的 `preedit`（單一引擎下這一鍵接手，A 下一鍵看到 `took_over`）；限流（`Refuse { 2 }`）之後下一條連線照常可用；模擬等級是 `SecurityIdentification`；`proto` 的解析規則。
 11. **量測結果**（測試 VM，常駐程序版；延遲是 DLL 裡花的時間，不含 App 畫字）：

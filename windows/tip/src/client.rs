@@ -176,6 +176,8 @@ struct Link {
     composing: bool,
     /// The thread timer of the idle check (0: none).
     timer: usize,
+    /// The host engine's key scheme (0 or 1), from this connection's `Welcome`; the only place the text service learns it (docs/spec/windows-tip.md §3.6).
+    scheme: u8,
 }
 
 impl Drop for Link {
@@ -315,6 +317,12 @@ pub fn ready() -> bool {
     .unwrap_or(false)
 }
 
+/// The key scheme of this thread's live connection (from its `Welcome`), or `None` when the thread has none (not connected yet, or the link is in use).
+/// Never connects: `OnTestKeyDown` asks this first, and connects only for a key the answer cannot decide (docs/spec/windows-tip.md §3.6).
+pub fn scheme() -> Option<u8> {
+    LINK.try_with(|cell| cell.try_borrow().ok().and_then(|slot| slot.as_ref().map(|l| l.scheme))).ok().flatten()
+}
+
 /// A message without an answer (`Release`, `Reset`); a failed write closes the connection.
 fn tell(m: ClientMsg) {
     let _ = LINK.try_with(|cell| {
@@ -418,14 +426,15 @@ fn connect(me: &Me) -> Option<Link> {
         passed(pass::SERVER_CHECK);
         return None;
     }
-    let mut link = Link { pipe, seq: 0, last: Instant::now(), composing: false, timer: 0 };
+    let mut link = Link { pipe, seq: 0, last: Instant::now(), composing: false, timer: 0, scheme: 0 };
     let deadline = Instant::now() + REPLY;
     // SAFETY: plain queries.
     let (pid, tid) = unsafe { (GetCurrentProcessId(), GetCurrentThreadId()) };
     let hello = ClientMsg::Hello { build_hash: proto::BUILD_HASH, pid, tid };
     match link.send(&hello, deadline).and_then(|seq| link.answer(seq, deadline)) {
         // A build hash that differs is allowed (a development build); the timing file has no event for it (numbers only, §5.8).
-        Ok(ServerMsg::Welcome { .. }) => {
+        Ok(ServerMsg::Welcome { key_scheme, .. }) => {
+            link.scheme = key_scheme;
             TIMEOUTS.store(0, Ordering::Release);
             ATTEMPTED.store(true, Ordering::Release);
             // SAFETY: a thread timer; its procedure is guarded and this DLL never unloads once `attempted`.

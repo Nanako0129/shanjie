@@ -7,7 +7,7 @@ use crate::display::{DisplayEnum, DisplayInfo};
 use crate::doc::{self, Comp, CompSlot};
 use crate::guard;
 use crate::guids::DISPLAY_ATTR_COMPOSING;
-use crate::keys::{map_key, may_eat, Mods};
+use crate::keys::{map_key, may_eat, may_eat_either, Mods};
 use crate::timing;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -312,12 +312,28 @@ impl TextService_Impl {
             return Ok(false);
         }
         let Some(k) = map_key(wparam.0 as u32, read_mods(), self.cand_open.get()) else { return Ok(false) };
-        let composing = self.comp.borrow().is_some() || self.cand_open.get();
-        let mut eat = may_eat(composing, &k);
+        let window = self.cand_open.get();
+        let composing = self.comp.borrow().is_some() || window;
+        // §3.6: with a composition or a window every mapped key may be eaten. With none, the core's key scheme decides, and the scheme is only what this
+        // connection's `Welcome` said (this DLL never reads the registry). A thread that has no connection yet refuses, without connecting, the keys
+        // both schemes pass on; for any other it connects first and decides with the scheme it then learns.
+        let mut eat = if composing {
+            may_eat(0, true, window, &k)
+        } else {
+            match client::scheme() {
+                Some(s) => may_eat(s, false, false, &k),
+                None => may_eat_either(&k),
+            }
+        };
         // §5.4, §5.6: a key that would only pass through must be refused here, not let go in OnKeyDown (an IMM32 host loses it).
-        if eat && !composing && !client::ready() {
-            timing::diag(timing::EV_TEST_UNUSABLE);
-            eat = false;
+        if eat && !composing {
+            if !client::ready() {
+                timing::diag(timing::EV_TEST_UNUSABLE);
+                eat = false;
+            } else {
+                // A connection made or replaced just now may belong to a host with another scheme: decide again with the live one.
+                eat = may_eat(client::scheme().unwrap_or(0), false, false, &k);
+            }
         }
         if eat {
             // SAFETY: no preconditions.
