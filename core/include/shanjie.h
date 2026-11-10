@@ -176,8 +176,11 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   (candidate_first is always a multiple of 9): Up/Down wrap around the whole list, Space and Page Down turn to the next page (selecting its first
 //   row; after the last page, the first), Page Up the previous (before the first page, the last), End goes to the last row, Shift+Enter closes the window
 //   and keeps the composition, and Backspace, Tab, Left, Right, Home, Delete, Zhuyin keys, Shift+letter and Shift+, Shift+. are
-//   eaten with the window left open. A window that is already open keeps the scheme it opened with. Call it after every engine creation,
-//   like set_candidate_vertical.
+//   eaten with the window left open (the punctuation keys of rule 2, such as [ ] \ ' = ` and Shift+/ Shift+1, still close the window and insert the
+//   full-width mark, in both schemes). The scheme in force for a key is read once when the key arrives: the one the open window opened with, else the
+//   current setting. So a window that is already open keeps its scheme for every key, also for the keys it closes under and lets go on (Ctrl+, Shift+,
+//   Shift+letter, Tab, Space ...); a setting changed with a window open reaches the next key after the window closed. Call it after every engine
+//   creation, like set_candidate_vertical.
 int32_t shanjie_engine_set_key_scheme(ShanjieEngine *engine, uint32_t scheme, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/spec/prediction.md §6): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the

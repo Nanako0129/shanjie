@@ -614,20 +614,20 @@ const VM_KEY_STRINGS: &[(&str, &str)] = &[
     ("up-in-window-at-first-row", "s u 3 down up"),
     ("up-in-window-across-a-page", "s u 3 down pgdn up"),
     ("space-in-window-keeps-no-position", "s u 3 down down space"),
-    ("page-down-in-window-keeps-no-position", "s u 3 down down pgdn"),
+    ("page-down-in-window-twice", "s u 3 down pgdn pgdn"),
+    ("page-down-in-window-after-the-last-page", "s u 3 down end pgdn"),
     ("space-in-window-after-the-last-page", "s u 3 down end space"),
     ("page-up-in-window-at-first-page", "s u 3 down pgup"),
-    ("page-up-in-window-from-second-page", "s u 3 down pgdn pgup"),
     ("down-in-window-across-a-page", "s u 3 down down down down down down down down down down"),
     ("down-in-window-at-the-last-row", "s u 3 down end down"),
     ("tab-in-window", "s u 3 down tab"),
     ("shift-tab-in-window", "s u 3 down S+tab"),
     ("right-in-window", "s u 3 down right"),
-    ("left-in-window", "s u 3 down left"),
+    ("left-in-window", "s u 3 down down left"),
     ("home-in-window", "s u 3 down home"),
     ("delete-in-window", "s u 3 down del"),
     ("end-in-window", "s u 3 down end"),
-    ("shift-enter-in-window", "s u 3 down S+enter"),
+    ("shift-enter-in-window", "s u 3 down down S+enter"),
     ("zhuyin-a-in-window", "s u 3 down a"),
     ("zhuyin-semicolon-in-window", "s u 3 down ;"),
     ("zhuyin-zero-in-window", "s u 3 down 0"),
@@ -680,9 +680,9 @@ fn wraps_to_the_first_page(before: &Snap, after: &Snap) -> bool {
 fn page_up_wraps_to_the_last_page(before: &Snap, after: &Snap) -> bool {
     before.first == 0 && before.total > 9 && after.first == last_first(before.total) && after.selected == 0
 }
-/// From the second page: the first row of the first page.
-fn page_up_to_the_first_page(before: &Snap, after: &Snap) -> bool {
-    before.first == 9 && after.first == 0 && after.selected == 0
+/// From the second page, a list of three pages or more: the first row of the third page (scheme 0 clamps the last move to the last nine rows).
+fn page_down_to_the_third_page(before: &Snap, after: &Snap) -> bool {
+    before.first == 9 && before.selected == 0 && before.total > 18 && after.first == 18 && after.selected == 0
 }
 /// The ninth row, then Down: the first row of the next page.
 fn down_across_the_page(before: &Snap, after: &Snap) -> bool {
@@ -691,6 +691,10 @@ fn down_across_the_page(before: &Snap, after: &Snap) -> bool {
 /// The very last row, then Down: back to the first row of the first page.
 fn down_at_the_last_row(before: &Snap, after: &Snap) -> bool {
     before.first == last_first(before.total) && before.first + before.selected as u32 == before.total - 1 && after.first == 0 && after.selected == 0
+}
+/// The window, on its second row, is untouched by the key (scheme 0 moves the selection to the first row for Left).
+fn window_stays_on_the_second_row(before: &Snap, after: &Snap) -> bool {
+    before.selected == 1 && before.first == 0 && before.total > 9 && after == before
 }
 /// From the first row: the last row of the last page.
 fn end_goes_to_the_last_row(before: &Snap, after: &Snap) -> bool {
@@ -733,16 +737,16 @@ const REPLAY_KEYS_MS: &[(&str, Want)] = &[
     ("up-in-window-at-first-row", Window(jumps_to_the_last_row)),
     ("up-in-window-across-a-page", Window(up_to_the_previous_page)),
     ("space-in-window-keeps-no-position", Window(next_page_first_row)),
-    ("page-down-in-window-keeps-no-position", Window(next_page_first_row)),
+    ("page-down-in-window-twice", Window(page_down_to_the_third_page)),
+    ("page-down-in-window-after-the-last-page", Window(wraps_to_the_first_page)),
     ("space-in-window-after-the-last-page", Window(wraps_to_the_first_page)),
     ("page-up-in-window-at-first-page", Window(page_up_wraps_to_the_last_page)),
-    ("page-up-in-window-from-second-page", Window(page_up_to_the_first_page)),
     ("down-in-window-across-a-page", Window(down_across_the_page)),
     ("down-in-window-at-the-last-row", Window(down_at_the_last_row)),
     ("tab-in-window", Window(window_stays)),
     ("shift-tab-in-window", Window(window_stays)),
     ("right-in-window", Window(window_stays)),
-    ("left-in-window", Window(window_stays)),
+    ("left-in-window", Window(window_stays_on_the_second_row)),
     ("home-in-window", Window(window_stays)),
     ("delete-in-window", Window(window_stays)),
     ("end-in-window", Window(end_goes_to_the_last_row)),

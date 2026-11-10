@@ -1,6 +1,6 @@
 //! Key scheme (docs/spec/keys-and-composition.md §4.1.1, `Engine::set_key_scheme`): every `m` row under both schemes, the whole-page vertical window of scheme 1,
-//! the 128-unit limit for the rows that insert units, and a scheme-0 control (an engine that set scheme 0 is identical, output by output, to one that never
-//! set it). Output/Key hold input text and have no Debug: compare with `assert!(a == b)`. The lexicon is a toy one (no model), so the display of a
+//! the 128-unit limit for the rows that insert units, and a check that setting scheme 0 equals the default (output by output). Each K test asserts the existing
+//! rule's result for scheme 0 explicitly. Output/Key hold input text and have no Debug: compare with `assert!(a == b)`. The lexicon is a toy one (no model), so the display of a
 //! composition is `base`, whatever the first homophone is; expectations are written against `base` and the window's own list, never against a character.
 use core::engine::*;
 use core::Lexicon;
@@ -120,6 +120,50 @@ fn an_open_window_keeps_the_scheme_it_opened_with() {
     assert!(o.first == 18 && o.selected == Some(0), "scheme 1 window turns whole pages");
     let o = kk(&mut e, KeyKind::Backspace);
     assert!(o.vertical == 1 && o.first == 18, "scheme 1 window: Backspace is eaten, the window stays");
+}
+
+/// The scheme in force for a key is the open window's, read once when the key arrives (docs/spec/keys-and-composition.md §4.1.1): the setting changed with a window open
+/// reaches no row, not even one the window closes under and lets the key go on to.
+#[test]
+fn the_keys_of_an_open_window_follow_the_scheme_it_opened_with() {
+    // (a) A scheme 1 window, the setting then 0: every key still takes its scheme 1 row.
+    let fresh = |open: u32, then: u32| {
+        let mut e = eng(30, Some(open));
+        let w = open_win(&mut e);
+        e.set_key_scheme(then).unwrap();
+        (e, w)
+    };
+    for key in [sh(','), sh('.'), sh('a'), kn(KeyKind::Tab), with_mod(KeyKind::Tab, MOD_SHIFT), kn(KeyKind::Backspace)] {
+        let (mut e, w) = fresh(1, 0);
+        assert!(k(&mut e, key) == w, "scheme 1 window: K24a, K24, K17, K12 eat the key and the window stays");
+    }
+    for (key, mark) in [(',', '，'), ('.', '。')] {
+        let (mut e, w) = fresh(1, 0);
+        let o = k(&mut e, ctl(key));
+        assert!(o.handled && o.selected.is_none() && o.preedit == format!("{}{mark}", w.preedit), "scheme 1 window: K11");
+    }
+    // (b) A scheme 0 window, the setting then 1: every key still takes its scheme 0 row.
+    for (key, full) in [(',', '，'), ('.', '。')] {
+        let (mut e, w) = fresh(0, 1);
+        let o = k(&mut e, sh(key));
+        assert!(o.handled && o.selected.is_none() && o.preedit == format!("{}{full}", w.preedit), "scheme 0 window: rule 2 closes the window and inserts the full-width mark");
+        let (mut e, w) = fresh(0, 1);
+        let o = k(&mut e, ctl(key));
+        assert!(!o.handled && o.candidates == w.candidates && o.selected == Some(0), "scheme 0 window: rule 1 passes Ctrl+{key} on, the window stays");
+    }
+    let (mut e, w) = fresh(0, 1);
+    let o = k(&mut e, sh('a'));
+    assert!(!o.handled && o.commit == w.preedit && o.selected.is_none(), "scheme 0 window: the window closes, rule 21 sends the composition and passes Shift+a on (not K7)");
+    for key in [kn(KeyKind::Tab), with_mod(KeyKind::Tab, MOD_SHIFT)] {
+        let (mut e, w) = fresh(0, 1);
+        let o = k(&mut e, key);
+        assert!(!o.handled && o.commit == w.preedit && o.selected.is_none(), "scheme 0 window: the window closes, rule 21 sends the composition and passes Tab on (not K6)");
+    }
+    // The next window opens under the new setting.
+    let (mut e, _) = fresh(0, 1);
+    kk(&mut e, KeyKind::Esc);
+    kk(&mut e, KeyKind::Down);
+    assert!(kk(&mut e, KeyKind::Backspace).vertical == 1, "a window opened after the change is a scheme 1 window");
 }
 
 // ---------- S1 ----------
@@ -671,7 +715,8 @@ fn the_rows_that_insert_units_stop_at_128() {
 
 // ---------- scheme 0 is what it was ----------
 
-/// One entry per row: the keys of the K tests above, run on an engine that set scheme 0 and on one that never did.
+/// One entry per row: the keys of the K tests above. Used to check that setting scheme 0 equals the default (both are the new code; it cannot see a regression of scheme 0 itself: that is
+/// the explicit scheme 0 assertion of each K test and the unchanged suites of the other test files).
 fn control_rows() -> Vec<(&'static str, Vec<Key>)> {
     let enter = kn(KeyKind::Enter);
     let senter = with_mod(KeyKind::Enter, MOD_SHIFT);
@@ -717,7 +762,7 @@ fn control_rows() -> Vec<(&'static str, Vec<Key>)> {
 }
 
 #[test]
-fn scheme_0_is_identical_field_by_field_to_an_engine_that_never_set_it() {
+fn setting_scheme_0_equals_the_default_field_by_field() {
     for (name, keys) in control_rows() {
         let mut a = eng(30, Some(0));
         let mut b = eng(30, None);
