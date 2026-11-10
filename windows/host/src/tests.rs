@@ -329,7 +329,7 @@ const REPLAY_KEYS_VERTICAL: &str = "a u / 6 w u 0 space y l 3 g ; 4 down down do
 
 /// The text the core sends for `REPLAY_KEYS_VERTICAL`, UTF-16 units as `\uXXXX`. EMPTY until it is filled in: run
 /// `cargo test -p shanjie-host print_replay_keys_vertical -- --ignored --nocapture` once (on the machine that has the models) and paste the `const` line it prints over this one (a raw string).
-const REPLAY_KEYS_VERTICAL_EXPECTED: &str = r"";
+const REPLAY_KEYS_VERTICAL_EXPECTED: &str = r"\u660e\u5929\u65e9\u5c1a\u6211\u8981";
 
 fn parse_keys(line: &str) -> Vec<Key> {
     line.split(' ')
