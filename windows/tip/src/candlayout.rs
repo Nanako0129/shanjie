@@ -23,10 +23,10 @@ const PADDING: i32 = 4;
 const ROW: i32 = 32;
 /// §4.3 "選取列的底色塊": 28 px high (2 above and 2 below inside its row), as wide as the window less the border and padding on both sides.
 const BLOCK_H: i32 = 28;
-/// §4.3 "選取條": 3 px wide at 100% (not measured at 150%: it scales). Its height and the corner radii below are not in the table: the bar is
-/// drawn 16 px high and centred in the block, the block's corners 4 px, a guess to be corrected by the side-by-side screenshots of the acceptance run.
+/// §4.3 "選取條": 3 px wide and 14 px high at 100% (the height measured in the test VM's 24-bit capture of Microsoft Zhuyin, Notepad, light and
+/// dark), centred in the block. The block's corners (4 px) are not measured: a guess to be corrected by the side-by-side screenshots.
 const BAR_W: i32 = 3;
-const BAR_H: i32 = 16;
+const BAR_H: i32 = 14;
 const BLOCK_RADIUS: i32 = 4;
 /// §4.3 "外框圓角": about 8 px (not measured at 150%: it scales).
 const WINDOW_RADIUS: i32 = 8;

@@ -63,7 +63,9 @@ const LOCALE: PCWSTR = w!("zh-TW");
 /// A text wider than the window is cut at a character with an ellipsis.
 const TRIM: DWRITE_TRIMMING = DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
 
-/// §4.3 "顏色（RGB565 讀值）": window, border, selected row, selection bar, candidate text, number (and the number on the selected row).
+/// Window, border, selected row, selection bar, candidate text, number (and the number on the selected row). 24-bit values of Microsoft Zhuyin's
+/// candidate window in the test VM (Notepad, 100 %, docs/spec/windows-tip.md §4.3 "顏色（24 位元）"); the RGB565 readings of §4.3 had a colour cast
+/// (white with a pink tint, dark grey with a green one) that the real neutral greys do not have.
 struct Theme {
     window: u32,
     border: u32,
@@ -74,8 +76,8 @@ struct Theme {
     number_selected: u32,
 }
 
-const LIGHT: Theme = Theme { window: 0xFFFBFF, border: 0xEFEBEF, selected: 0xF7F3F7, bar: 0x0065C6, text: 0x181818, number: 0x5A5D5A, number_selected: 0x5A595A };
-const DARK: Theme = Theme { window: 0x292C29, border: 0x181C18, selected: 0x393839, bar: 0x4AC3FF, text: 0xFFFFFF, number: 0xCECFCE, number_selected: 0xD6D3D6 };
+const LIGHT: Theme = Theme { window: 0xF9F9F9, border: 0xEAEAEA, selected: 0xF0F0F0, bar: 0x0067C0, text: 0x1A1A1A, number: 0x5F5F5F, number_selected: 0x5B5B5B };
+const DARK: Theme = Theme { window: 0x2C2C2C, border: 0x1F1F1F, selected: 0x383838, bar: 0x4CC2FF, text: 0xFFFFFF, number: 0xCFCFCF, number_selected: 0xD2D2D2 };
 
 fn color(rgb: u32) -> D2D1_COLOR_F {
     let c = |shift: u32| ((rgb >> shift) & 0xFF) as f32 / 255.0;
