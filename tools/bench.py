@@ -207,12 +207,17 @@ class Ver:
     def build(self):
         if self.built:
             return
-        if not os.path.exists(os.path.join(self.dir, ".exported")):
+        paths = ["Cargo.toml", "Cargo.lock", "core", "cli", "data", "eval/variants.tsv"]
+        # The new repository's workspace also lists windows/* members; cargo loads every member's manifest even for `-p cli`.
+        if subprocess.run(["git", "-C", self.src, "cat-file", "-e", f"{self.sha}:windows"], capture_output=True).returncode == 0:
+            paths.append("windows")
+        # An export made before a path joined the list lacks it: export again rather than build a tree cargo cannot load.
+        if not (os.path.exists(os.path.join(self.dir, ".exported")) and all(os.path.exists(os.path.join(self.dir, p)) for p in paths)):
             shutil.rmtree(self.dir, ignore_errors=True)
             os.makedirs(self.dir)
             tarball = self.dir + ".tar"
             try:  # two steps so a failed archive can never leave a marker behind
-                sh(["git", "-C", self.src, "archive", "-o", tarball, self.sha, "Cargo.toml", "Cargo.lock", "core", "cli", "data", "eval/variants.tsv"])
+                sh(["git", "-C", self.src, "archive", "-o", tarball, self.sha, *paths])
                 sh(["tar", "-x", "-f", tarball, "-C", self.dir])
             except Exception:
                 shutil.rmtree(self.dir, ignore_errors=True)
