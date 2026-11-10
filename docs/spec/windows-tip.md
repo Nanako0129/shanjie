@@ -263,7 +263,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 - **視窗**：
   - 每條 UI 執行緒最多一個。狀態放 `thread_local!`，用 `HWND` 比對；不把任何指標放進 `GWLP_USERDATA` 或 `cbWndExtra`（沙箱 App 的 Low 完整性視窗可被別的 Low 程序跨程序改寫）。
   - 建立時用 `ITfContextView::GetWnd` 取得 owner（取 `GA_ROOT`），**只有**它屬於目前執行緒（`GetWindowThreadProcessId`）才用；否則用 `GetFocus` 的 root（一樣要屬於目前執行緒），再不行就不設 owner。owner 在 `CreateWindowExW` 的 `hWndParent` 給；owner 換了就銷毀重建（owner 不能事後移轉）。對視窗呼叫 API 前先確認 `IsWindow` 而且屬於這條執行緒；`WM_NCDESTROY` 清掉存下的 `HWND`（owner 被毀時系統連帶毀掉候選窗）。
-  - `WS_POPUP`；`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED`；類別名稱 `ShanjieDevCandidate`，不設標題。`WM_MOUSEACTIVATE` 回 `MA_NOACTIVATE`；顯示用 `SW_SHOWNOACTIVATE`，移動不帶啟用。
+  - `WS_POPUP`；`WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED`；類別名稱 `ShanjieDevCandidate`，不設標題。`WM_MOUSEACTIVATE` 回 `MA_NOACTIVATE`；顯示用 `SetWindowPos(HWND_TOPMOST, SWP_SHOWWINDOW | SWP_NOACTIVATE)`（不用 `ShowWindow`：程序第一次的 `ShowWindow` 可能被父程序在 STARTUPINFO 裡給的顯示狀態蓋掉），移動不帶啟用。
   - 視窗程序整段包 `guard::run`；只處理 `WM_MOUSEACTIVATE`、`WM_NCDESTROY`、`WM_SETTINGCHANGE`（lParam 非 null 才讀、最多讀到名稱加結尾 NUL）與自己的 `WM_TIMER`，其餘交給 `DefWindowProcW`（`WM_GETOBJECT` 也是）；不處理帶指標的 `WM_USER`／`WM_APP` 自訂訊息、不用 `SetProp`。
   - 視窗類別在第一次建窗時用 `Once` 註冊（DLL 自己的 `HINSTANCE`、不用 `CS_GLOBALCLASS`），不取消註冊，也不在 `DllMain` 呼叫 user32（§3.2）；註冊過之後 `DllCanUnloadNow` 一律回 `S_FALSE`（視窗程序在這個 DLL 裡）。
   - 建窗、顯示、`UpdateLayeredWindow` 都在 edit session **之後**做（避免在 edit session 裡處理訊息而重入 TSF）；edit session 裡只讀 `GetTextExt` 的矩形，把矩形與候選字複製出來。`OnCompositionTerminated` 在 edit session 裡執行，窗不在那裡動：它用視窗自己的計時器（`WM_TIMER`，不帶指標）在訊息迴圈裡隱藏。
@@ -277,7 +277,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 - **主題**：讀 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（讀不到，例如沙箱 App 被拒，就用淺色、不當錯誤），收到 `WM_SETTINGCHANGE`（`ImmersiveColorSet`）時重讀，下一次畫就換色。和微軟注音一樣跟 App 模式（§4.3）。
 - **位置**（`candlayout::place`，純函式、飽和運算，各平台單元測試）：窗的左上角放在組字範圍 `GetTextExt` 矩形的左下角（左緣對齊組字起點）；下方放不下（超出那個螢幕的工作區）就改放在矩形上方（窗的下緣在矩形的上緣）；不超出工作區上緣；左右超出就往內推（窗比工作區寬時左緣優先）。螢幕與工作區用 `MonitorFromRect`、`GetMonitorInfoW`，DPI 用窗在組字位置時的 `GetDpiForWindow`。矩形用 `GetTextExt` 給的座標，不另外換算 DPI 虛擬化。
 - **顯示與隱藏**：
-  - 每次 `Out` 回來：`candidate_selected >= 0` 就更新內容並顯示（先 `UpdateLayeredWindow` 換上新內容、再 `SW_SHOWNOACTIVATE`，不閃出上一個欄位的候選）；−1 就隱藏。組字結束、`OnSetFocus` 換文件、`OnKillThreadFocus`、`OnCompositionTerminated`、改文件失敗、panic 之後都隱藏；`Deactivate` 銷毀。
+  - 每次 `Out` 回來：`candidate_selected >= 0` 就更新內容並顯示（先 `UpdateLayeredWindow` 換上新內容、再顯示，不閃出上一個欄位的候選）；畫不出來（factory、建窗、螢幕資訊、排版或 `UpdateLayeredWindow` 任何一步失敗）就隱藏，不留著上一頁的候選；−1 就隱藏。組字結束、`OnSetFocus` 換文件、`OnKillThreadFocus`、`OnCompositionTerminated`、改文件失敗、panic 之後都隱藏；`Deactivate` 銷毀。
   - 顯示、隱藏、內容變更時用 `NotifyWinEvent` 送 `EVENT_OBJECT_IME_SHOW`、`EVENT_OBJECT_IME_HIDE`、`EVENT_OBJECT_IME_CHANGE`（微軟輸入法規範的 light dismiss；窗不收輸入）。完整的 UIA 候選清單不做。
   - 密碼欄：context 的輸入範圍（`GUID_PROP_INPUTSCOPE`）含 `IS_PASSWORD` 時不開窗（組字與按鍵照常）。
 - **候選字的保存與清除**：`Out.candidates` 畫進 DIB 後就丟，不留到下一次重畫；DIB 與 DC 在窗收下之後立刻釋放，隱藏時先換上 1 × 1 的透明內容再 `SW_HIDE`；`Show` 不 derive `Debug`。R2：候選字不進任何 log、計時檔、錯誤訊息、視窗標題、視窗屬性、`OutputDebugString`；範圍涵蓋 DIB 與 `NotifyWinEvent`。崩潰傾印裡可能有候選字（和組字同一類，§3.14）。

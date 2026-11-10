@@ -626,10 +626,13 @@ fn ensure_window(owner: HWND, x: i32, y: i32) -> Option<HWND> {
 
 /// Draws `v` and shows the window (or moves and redraws it). Any failure leaves no window; the keys still work.
 pub fn show(v: Show) {
-    guard::run((), || show_inner(v), hide_now)
+    // A window that cannot be redrawn is hidden, so it never keeps the rows of an earlier page while the core is on a new one.
+    if !guard::run(false, || show_inner(v), hide_now) {
+        hide();
+    }
 }
 
-fn show_inner(v: Show) {
+fn show_inner(v: Show) -> bool {
     // A hide asked for inside an edit session must not take the new content down.
     if let Some((h, _, _)) = state() {
         // SAFETY: a timer of this thread's window, if any.
@@ -639,10 +642,10 @@ fn show_inner(v: Show) {
     }
     let t_first = timing::now_us();
     let _dpi = DpiScope::enter();
-    let Some((d2d, dw)) = factories() else { return };
+    let Some((d2d, dw)) = factories() else { return false };
     let owner = pick_owner(v.owner);
     let fresh = state().is_none();
-    let Some(hwnd) = ensure_window(owner, v.rect.left, v.rect.bottom) else { return };
+    let Some(hwnd) = ensure_window(owner, v.rect.left, v.rect.bottom) else { return false };
     if fresh && !FIRST_DONE.swap(true, Ordering::Relaxed) {
         timing::record(timing::EV_CAND_FIRST, t_first, timing::now_us());
     }
@@ -652,18 +655,18 @@ fn show_inner(v: Show) {
         let mon = MonitorFromRect(&v.rect, MONITOR_DEFAULTTONEAREST);
         let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
         if !GetMonitorInfoW(mon, &mut mi).as_bool() {
-            return;
+            return false;
         }
         (mi.rcWork, GetDpiForWindow(hwnd))
     };
     let work = Rect { left: work.left, top: work.top, right: work.right, bottom: work.bottom };
     let m = Metrics::new(dpi);
-    let Some(frame) = draw(&d2d, &dw, &m, &v.items, v.selected, light_theme(), work.right.saturating_sub(work.left)) else { return };
+    let Some(frame) = draw(&d2d, &dw, &m, &v.items, v.selected, light_theme(), work.right.saturating_sub(work.left)) else { return false };
     let comp = Rect { left: v.rect.left, top: v.rect.top, right: v.rect.right, bottom: v.rect.bottom };
     let (x, y) = candlayout::place(comp, frame.w, frame.h, work);
     // The new content goes in before the window is shown, so the last field's candidates never flash.
     if !present(hwnd, &frame, x, y) {
-        return;
+        return false;
     }
     let was_shown = state().is_some_and(|(_, _, s)| s);
     if !was_shown {
@@ -681,6 +684,7 @@ fn show_inner(v: Show) {
     for n in [v.rect.left, v.rect.top, v.rect.right, v.rect.bottom, x, y] {
         timing::diag_value(timing::EV_CAND_POS, u64::from(n as u32));
     }
+    true
 }
 
 /// Hides the window and empties its surface.
