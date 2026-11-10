@@ -399,8 +399,8 @@ static PREWARM: Once = Once::new();
 /// Started by the first key the TIP eats (once per process, on a background thread). That key went through a connection to the host, so
 /// `client::attempted()` is already true and the DLL never unloads (`dll.rs`): the thread cannot outlive the module. Do not call this from a
 /// path that runs before a connection was attempted (for example `ActivateEx`). It makes the factories and has DirectWrite load the system
-/// font collection and the UI font once, so the first window does not pay for it on the key that opens it (C7 of the acceptance: the first
-/// window's key was the slowest). Only fixed text is laid out here; nothing of the user's.
+/// font collection and the UI font once, so the first window does not pay for it on the key that opens it. Only fixed text is laid out here;
+/// nothing of the user's.
 pub fn prewarm() {
     PREWARM.call_once(|| {
         let _ = std::thread::Builder::new().name("shanjie-cand-warm".into()).spawn(|| {
