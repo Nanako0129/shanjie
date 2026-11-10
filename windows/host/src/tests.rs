@@ -824,15 +824,35 @@ fn replay_keys_ms() {
 }
 
 /// The expected values of the VM run in scheme 0 (docs/spec/windows-tip.md §4.6): every segment of `VM_KEY_STRINGS` on the real core in key scheme 0, printed as
-/// `name<TAB>commit<TAB>handled<TAB>preedit<TAB>window first,selected,total`, texts as `\uXXXX`. Run once on the build machine before the VM run and give the output to the run.
+/// `name<TAB>commit<TAB>handled<TAB>preedit<TAB>window first,selected,total<TAB>trace`, texts as `\uXXXX`. The trace has one entry per key, `H` (the core handled it) or `P` (it passed the key on
+/// to the application) followed by what that key committed; the VM driver uses it to tell what a passed-on key (Tab, Backspace, Shift+A, ...) adds to or removes from the Notepad text.
+/// Run once on the build machine before the VM run and give the output to the run.
 #[test]
 #[ignore = "run by hand: prints the scheme 0 outputs of the VM key strings"]
 fn print_vm_keys_scheme0() {
-    let core = Direct::with_scheme(0);
+    print_vm_keys(0);
+}
+
+/// The expected values of the VM run in scheme 1 (the A4 run): the same print as `print_vm_keys_scheme0` on an engine of key scheme 1, the outputs `replay_keys_ms` ties to the Microsoft
+/// Zhuyin measurement. `run_segment` resets the engine before each segment, as in scheme 0.
+#[test]
+#[ignore = "run by hand: prints the scheme 1 outputs of the VM key strings"]
+fn print_vm_keys_scheme1() {
+    print_vm_keys(1);
+}
+
+fn print_vm_keys(scheme: u32) {
+    let core = Direct::with_scheme(scheme);
     for (name, keys) in VM_KEY_STRINGS {
         let (commit, _, last) = run_segment(&core, keys);
         let win = if last.selected >= 0 { format!("{},{},{}", last.first, last.selected, last.total) } else { "-".to_string() };
-        println!("{name}\t{}\t{}\t{}\t{win}", escape(&commit), last.handled, escape(&last.preedit));
+        // The same keys once more, one entry per key (deterministic: `run_segment` resets first, and so does this).
+        core.reset();
+        let trace: Vec<String> = parse_keys(keys).into_iter().map(|k| {
+            let s = core.key(k);
+            format!("{}{}", if s.handled { 'H' } else { 'P' }, escape(&s.commit))
+        }).collect();
+        println!("{name}\t{}\t{}\t{}\t{win}\t{}", escape(&commit), last.handled, escape(&last.preedit), trace.join(" "));
     }
 }
 
