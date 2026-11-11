@@ -12,8 +12,10 @@ def generate(words_text):
     for l in words_text.splitlines():
         if not l.strip():
             continue
-        pre, word, reading = l.split("|")
-        assert pre == "" and word and reading, f"bad row: {l!r}"
+        f = l.split("|")
+        if len(f) != 3 or f[0] != "" or not f[1] or not f[2]:
+            sys.exit(f"bad row (want |word|reading): {l!r}")
+        _, word, reading = f
         out += [f"|{o}{word}{e}|{orr} {reading} {er}\n" for o, orr in OPENINGS for e, er in ENDINGS]
     return "".join(out)
 

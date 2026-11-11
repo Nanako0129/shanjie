@@ -479,12 +479,11 @@ jobs:
       - name: Beauty pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_beauty_pack
 
-      # docs/spec/lexicon-and-packs.md (meme pack): the embedded-sentence generator; its committed output is re-generated and compared only once
-      # eval/dev/meme/words-all.txt is in the tree.
+      # docs/spec/lexicon-and-packs.md (meme pack): the embedded-sentence generator, and its committed output re-generated and compared.
       - name: Meme embedded sentences (Python)
         run: |
           python3 -W ignore -m unittest tools.test_gen_meme_embedded
-          if [ -f eval/dev/meme/words-all.txt ]; then python3 tools/gen_meme_embedded.py --check eval/dev/meme/words-all.txt eval/dev/meme/embedded.txt; fi
+          python3 tools/gen_meme_embedded.py --check eval/dev/meme/words-all.txt eval/dev/meme/embedded.txt
 
       # docs/spec/lexicon-and-packs.md §3.2, §3.7: the common proper-noun builder against fixtures and a fake API, and the
       # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.

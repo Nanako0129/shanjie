@@ -12,7 +12,7 @@
 | `dev/acg/works.txt`、`dev/acg/characters.txt`、`dev/acg/character-parts.txt` | 142、227、105 | `tools/readings.py` 產生，標 CHECK 的列（依序 7、12、11 列）沒有逐列確認，無法讀出的 1 列沒收 | ACG 詞包（`docs/spec/lexicon-and-packs.md` §5.7）的評測：Wikidata 上有中文維基條目、sitelink 至少 3、有 zh-tw 標籤的作品名、角色名與角色名片段（只留 2–10 個漢字、整串一次打、沒有前文）。**來源是 Wikidata 的標籤，CC0**（Wikidata 的資料授權）。在 `dev/acg/` 子目錄，所以 `--dev N` 不會讀到；只用來回報，**不用來調任何參數** |
 | `dev/it/words.txt` | 60 | 讀音照建置用的讀音（`tools/readings.py`＋`data/packs/it-readings.tsv`），標 CHECK 的詞不抽 | 資訊＋AI 詞包（`docs/spec/lexicon-and-packs.md` §6.4）的檢查集：從 `data/packs/it-add.tsv` 依來源比例抽 60 個詞（固定種子 20261024），一列一詞、沒有前文。授權同 `it-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；`--dev N` 不會讀到 |
 | `dev/meme/words.txt` | 60 | 讀音照建置用的讀音（`tools/readings.py`＋`data/packs/meme-readings.tsv`，沒有該檔就沒有覆寫） | 迷因與實況用語詞包（`docs/spec/lexicon-and-packs.md` §9.4）的檢查集：就是建置輸出的 `words.txt`（固定種子 20261025，不到 60 個就全收），一列一詞、沒有前文。CC BY-SA 4.0，同 `meme-add.tsv`。只用來回報，**不用來調任何參數**；`--dev N` 不會讀到 |
-| `dev/meme/words-all.txt` | 131 | 同 `words.txt` | 迷因詞包（`docs/spec/lexicon-and-packs.md` §9.4）全部的詞（讀音標 `CHECK` 的除外），建置輸出的同名檔，一列一詞、沒有前文；開與不開詞包第一名都要對，也是預測列測試的輸入。CC BY-SA 4.0，同 `meme-add.tsv`。只用來回報，**不用來調任何參數**；`--dev N` 不會讀到 |
+| `dev/meme/words-all.txt` | 131 | 同 `words.txt` | 迷因詞包（`docs/spec/lexicon-and-packs.md` §9.4）全部的詞（讀音標 `CHECK` 的除外），建置輸出的同名檔，一列一詞、沒有前文；開著詞包時第一名要對，不開時對的列開了不能變錯；也是預測列測試的輸入。CC BY-SA 4.0，同 `meme-add.tsv`。只用來回報，**不用來調任何參數**；`--dev N` 不會讀到 |
 | `dev/meme/embedded.txt` | 786 | 同 `words-all.txt`（讀音寫在 `tools/gen_meme_embedded.py`） | 把 `words-all.txt` 的每個詞接在三個固定開頭（他說、真的是、我覺得）之後、兩個固定結尾（了、吧）之前的句子（131 × 6）：確認詞包詞放進句子裡不會變錯。工具造的句子，只確認方向，不當出貨標準的證據。CC BY-SA 4.0。`--dev N` 不會讀到 |
 | `dev/beauty/words.txt` | 60 | 讀音照建置用的讀音（`tools/readings.py`＋`data/packs/beauty-readings.tsv`） | 美妝與保養詞包（`docs/spec/lexicon-and-packs.md` §8.4）的檢查集：從 `data/packs/beauty-add.tsv` 抽 60 個詞（固定種子 20261108），一列一詞、沒有前文。CC0，同 `beauty-add.tsv`。只用來回報，**不用來調任何參數**；`--dev N` 不會讀到 |
 | `dev/net-slang/words.txt` | 每個讀音一列 | 讀音同 `data/lexicon/slang-add.tsv` | 網路用語（`docs/spec/lexicon-and-packs.md` §2.10）的檢查集：每個讀音上排第一的收錄詞一列（同讀音排後面的寫法只當候選、不收），加 4 個已經打得對的對照（幹你娘、靠北、三小、北七）；一列一詞、沒有前文。授權同 `slang-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；放在子資料夾，`--dev N` 不會讀到 |
@@ -23,6 +23,7 @@
 | `holdout/next/shard-3/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/spec/evaluation.md` §5）：和 shard-1、shard-2 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
 | `holdout/retired/shard-1/talk.txt` | 150 | 同上 | **退役的口語半邊**（shard-1，2026-10-16 到 2026-11-11 現役，用滿 8 次）：留在 `holdout/` 底下，照樣不讀、不調參；換份前後的數字不跨份比 |
 | `english/probe-common.txt`、`english/probe-ai.txt` | 208、56 | 不適用（英文字，一行一個，小寫） | 中英混打正式寫法表（`data/english-extra.txt`，`docs/spec/english-mixed.md` §4.4）的涵蓋清單：常見的技術、品牌與 App 名稱，以及 AI 廠商與產品名，專案自寫（CC0）。只用來數「幾個字在表裡」，不是評測列 |
+| `dev/mixed-words/words.txt` | 每個（英文、讀音）一列 | 讀音同 `data/lexicon/mixed-words.tsv` | 中英混合詞（`docs/spec/english-mixed.md` §5.7）的檢查集，`英文\|讀音\|寫法`，和詞表逐列相同；`core/tests/engine_mixed.rs` 逐列打（英文第一個字母按 Shift），要在 ↓ 清單裡。專案自寫（CC0） |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 | `ablation/v0.7.0/` | — | — | v0.7.0 標準檔的逐項拿掉表（三個集合的結果、每一格的 CLI 指令）與兩個閘門列的離線重算 `gate_offline.py`；不是評測列，只有結果與重跑方法 |
 

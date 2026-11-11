@@ -221,7 +221,11 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   text's writing (docs/spec/english-mixed.md §4.4): typed all lower case or with only its first letter upper case, a word of the built-in
 //   table of official writings takes the table's line (`chatgpt`, `Chatgpt` -> `ChatGPT`), anything else stays as typed; a run typed in the
 //   ASCII state stays as typed. A token a revert made keeps, as the last item of its writings list
-//   (Down right after it), the Chinese item of the syllable the keys would have made when the lexicon has it. Other keys of
+//   (Down right after it), the Chinese item of the syllable the keys would have made when the lexicon has it. With the cursor at
+//   the end, an English token and the syllables after it that the table `mixed-words.tsv` (in data_dir, optional: absent or bad,
+//   nothing is added) has as one word (`cp` + ㄓˊ = `CP值`) put that word first in the candidate list Down or Space opens, which
+//   then carries no prediction row items; choosing it puts one punctuation-kind token (not learned, removed whole) in place of the
+//   token and the syllables (docs/spec/english-mixed.md §5.7). Other keys of
 //   docs/spec/english-mixed.md §4 stand:
 //   - Backspace deletes English one letter at a time (docs/spec/english-mixed.md §5.3): with the cursor right after an English token (no unfinished
 //     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes; a writing the

@@ -192,6 +192,9 @@ const MEME_PACK: &str = "ㄇㄧˊ-ㄧㄣ-ㄍㄨㄥˇ-ㄕˋ\t迷因公式\t-6.609
 fn the_meme_pack_has_its_own_bit_and_file() {
     assert_eq!(PACK_MEME, 8);
     assert_eq!(PACK_ALL, PACK_ACG | PACK_QUOTES | PACK_IT | PACK_MEME | PACK_BEAUTY);
+    // read in bit order: the meme pack after the IT pack and before the beauty pack (docs/spec/lexicon-and-packs.md §4.1)
+    assert_eq!(PACK_FILES[3], (PACK_MEME, "meme-add.tsv"));
+    assert_eq!(PACK_FILES[4], (PACK_BEAUTY, "beauty-add.tsv"));
     let syls = ["ㄇㄧˊ", "ㄧㄣ", "ㄍㄨㄥˇ", "ㄕˋ"];
     let (both, none) = (tempdir("meme-both", Some(PACK)), tempdir("meme-none", None));
     std::fs::write(both.join("meme-add.tsv"), MEME_PACK).unwrap();

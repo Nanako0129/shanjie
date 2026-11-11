@@ -22,6 +22,7 @@
 
 - `variant-order.tsv`（異體排序表）也在載入時讀，缺檔或有一行不成立都是載入失敗；它的格式與規則在 `docs/spec/decoder.md`，這份不重複。
 - `rerank-protect.tsv`（重排保護詞，§2.12）不是詞庫的一層，不加詞、不改分數：上表各層合併之後才讀，缺檔或有一列不成立都是載入失敗。
+- `mixed-words.tsv`（中英混合詞，`docs/spec/english-mixed.md` §5.7）也不是詞庫的一層：不進解碼，只在候選清單多一項；選用，缺檔或有一列不合規就整張不載入、不回錯誤。
 - 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、迷因、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
 - 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。
