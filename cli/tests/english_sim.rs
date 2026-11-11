@@ -82,6 +82,7 @@ fn recall_counts_the_classes_and_the_probes() {
     let sha = "d4907dc4b4fffa8c0f450e3321b0837d90447af45747ef0cb49fee12fd9cbd80";
     let on = run(&["--words", LIST, "--recall"]);
     let lines: Vec<&str> = on.lines().collect();
+    // All six count: `google` is in the table of official writings and shows as `Google`, which is its writing (docs/spec/english-mixed.md §4.4).
     assert_eq!(lines[0], format!("{sha}\t6\t6\t4\t1\t1\t0"));
     // The probes, a fixed public list in a fixed order: the words that revert, the short ones that never do (ai, ui, mp3), and the missing
     // syllables (go, cp, cup).

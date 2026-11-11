@@ -877,6 +877,11 @@ pub struct Engine {
     /// docs/spec/english-mixed.md §4.1: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
     /// unit. Empty = no run. Never together with an unfinished syllable or a window.
     run: String,
+    /// docs/spec/english-mixed.md §4.4, §5.3: the run keeps its text as typed whatever ends it. Set for a run typed in the ASCII state
+    /// (`set_ascii(1)`; `set_ascii(0)` switches the state off before it ends the run, so the mark is on the run) and for a run
+    /// Backspace reopened from a token whose text the table did not write (the user picked it, or typed it in the ASCII state).
+    /// False whenever there is no run.
+    run_ascii: bool,
     /// docs/spec/english-mixed.md §4.4, §5.3: a token reopened as the run, with the Chinese item it had; it comes back when the run ends with
     /// the same letters.
     run_zh: Option<(String, String, String)>,
@@ -1196,6 +1201,7 @@ impl Engine {
             depth: 0,
             fuzzy: 0,
             run: String::new(),
+            run_ascii: false,
             run_zh: None,
             digit_table: None,
             digit_cache: None,
@@ -1976,6 +1982,7 @@ impl Engine {
             let keep = self.shadow_text();
             self.clear_pend();
             self.run = keep;
+            self.run_ascii = true;
             self.run_zh = None;
             self.revert_point = None;
             if self.cursor < self.syls.len() {
@@ -2057,6 +2064,7 @@ impl Engine {
         }
     }
 
+    // (`english_writing` is a free function below the impl: the CLI asks it too.)
     /// The writings of an English word, in the order of the window (docs/spec/english-mixed.md §4.4, §5.2): as it stands, then lower case,
     /// Capitalised, UPPER (no repeat).
     fn english_writings(word: &str) -> Vec<String> {
@@ -2072,10 +2080,12 @@ impl Engine {
         list
     }
 
-    /// Letters become an English token at the cursor (reading `PUNCT_PREFIX` + the word, the word as its fixed word). Returns what the
-    /// unit that reaches `MAX_SYLLABLES` sent, if it did (docs/spec/english-mixed.md §4.1: it goes in this key's output).
+    /// Letters become an English token at the cursor: reading `PUNCT_PREFIX` + the word as typed, fixed word its writing
+    /// (`english_writing`, docs/spec/english-mixed.md §4.4). Returns what the unit that reaches `MAX_SYLLABLES` sent, if it did
+    /// (docs/spec/english-mixed.md §4.1: it goes in this key's output).
     fn insert_english(&mut self, word: String) -> Result<String, EngineError> {
-        self.put_english(format!("{PUNCT_PREFIX}{word}"), word, None)
+        let writing = english_writing(&word);
+        self.put_english(format!("{PUNCT_PREFIX}{word}"), writing, None)
     }
 
     /// The one place an English token goes in at the cursor: the unfinished syllable and the shadow go. `zh`: the Chinese syllable a
@@ -2089,12 +2099,16 @@ impl Engine {
     /// docs/spec/english-mixed.md §5.3: the English token at `at` goes and an English run opens there, holding its text without the last letter (a
     /// one-letter token just goes). The run opens before the removal, so the decode splits at it (docs/spec/english-mixed.md §4.7).
     fn reopen_token(&mut self, at: usize) -> Result<(), EngineError> {
-        let mut letters = match self.fixed.iter().find(|f| f.start == at) {
-            Some(f) => f.word.clone(),
-            None => english_of(&self.syls[at]).unwrap_or_default().to_string(),
-        };
+        let typed = english_of(&self.syls[at]).unwrap_or_default();
+        let word = self.fixed.iter().find(|f| f.start == at).map_or(typed, |f| f.word.as_str());
+        // docs/spec/english-mixed.md §5.3: a writing the table put there goes back to what was typed, so taking a letter and typing
+        // it again ends as the first time did (`ChatGPT` reopens as `Chatgp`, never `ChatGP`). Any other text is one the user chose
+        // (picked from the list, or typed in the ASCII state): it reopens as it stands and the table leaves it alone when it ends.
+        let by_table = word == english_writing(typed);
+        let mut letters = if by_table { typed.to_string() } else { word.to_string() };
         letters.pop();
         self.run = letters;
+        self.run_ascii = (self.ascii || !by_table) && !self.run.is_empty();
         self.run_zh = None;
         self.revert_point = None;
         self.cursor = at;
@@ -2182,6 +2196,7 @@ impl Engine {
         }
         let head: String = chars[..chars.len() - tail.len()].iter().collect();
         self.run.clear();
+        self.run_ascii = false;
         self.run_zh = None;
         self.revert_point = None;
         self.split = true;
@@ -2197,17 +2212,20 @@ impl Engine {
     /// that reaches `MAX_SYLLABLES` sent, if it did. A run a revert opened and nobody changed keeps its Chinese item (docs/spec/english-mixed.md §3.2).
     fn end_run(&mut self) -> Result<String, EngineError> {
         let word = std::mem::take(&mut self.run);
+        // docs/spec/english-mixed.md §4.4: the token shows the word's writing; a run typed in the ASCII state stays as typed.
+        let writing = if std::mem::take(&mut self.run_ascii) { word.clone() } else { english_writing(&word) };
         self.revert_point = None;
         if let Some((_, zh, reading)) = self.run_zh.take().filter(|(w, _, _)| *w == word) {
-            return self.put_english(reading, word, Some(zh));
+            return self.put_english(reading, writing, Some(zh));
         }
-        self.insert_english(word)
+        self.put_english(format!("{PUNCT_PREFIX}{word}"), writing, None)
     }
 
     /// A character on the run; the 33rd ends it and starts the next one. Returns what ending sent, if it sent anything.
     fn run_push(&mut self, c: char) -> Result<String, EngineError> {
         let commit = if self.run.len() == ENGLISH_RUN_MAX { self.end_run()? } else { String::new() };
         self.run.push(c);
+        self.run_ascii |= self.ascii;
         self.run_zh = None; // the run was changed: no Chinese item, no Esc back to the Zhuyin
         self.revert_point = None;
         Ok(commit)
@@ -2264,6 +2282,7 @@ impl Engine {
         match k.kind {
             KeyKind::Backspace => {
                 self.run.pop();
+                self.run_ascii &= !self.run.is_empty();
                 self.run_zh = None;
                 self.revert_point = None;
                 self.pred_dirty = true;
@@ -2272,6 +2291,7 @@ impl Engine {
             }
             KeyKind::Esc => {
                 self.run.clear();
+                self.run_ascii = false;
                 self.run_zh = None;
                 if let Some((pend, shadow)) = self.revert_point.take() {
                     (self.pend, self.shadow_key) = (pend, shadow); // docs/spec/english-mixed.md §4.2: back to the Zhuyin the key would have made
@@ -2462,6 +2482,10 @@ impl Engine {
     pub fn reset(&mut self, mode: ResetMode) -> Output {
         // docs/spec/english-mixed.md §7.4: the buffered digits are tokens before the composition is sent (Commit); Discard drops them with the rest.
         let digits = if mode == ResetMode::Commit { self.digit_flush().unwrap_or_default().0 } else { String::new() };
+        if mode == ResetMode::Commit && !self.run.is_empty() && !self.run_ascii {
+            // docs/spec/english-mixed.md §4.4: an open run goes out in its writing, the text Enter would send (Enter ends the run first).
+            self.run = english_writing(&self.run);
+        }
         let commit = if mode == ResetMode::Commit { digits + &self.shown().0 } else { String::new() };
         self.clear_all();
         self.view(true, commit)
@@ -2853,6 +2877,7 @@ impl Engine {
         self.path.clear();
         self.cands = None;
         self.run.clear();
+        self.run_ascii = false;
         self.run_zh = None;
         self.revert_point = None;
         self.last_short = None;
@@ -3288,6 +3313,7 @@ impl Engine {
             let opened = self.run.is_empty();
             if opened {
                 self.run = self.shadow_text();
+                self.run_ascii = !self.run.is_empty();
                 self.clear_pend();
             }
             if !(k.ch.is_ascii_alphanumeric() || ",.;/-".contains(k.ch)) {
@@ -4684,5 +4710,57 @@ mod sinit_tests {
         assert_eq!(sinit_swap(&mut best, &fuzzy_only, &mut pool, &LEARNED), Swap::Missing, "a learned path with a fuzzy word is not a candidate");
         assert_eq!(pool, (0..8).collect::<Vec<_>>());
         assert_eq!(best.len(), 10);
+    }
+}
+
+/// docs/spec/english-mixed.md §4.4: the table of official writings (`data/english-extra.txt`, compiled in), lower case -> the line.
+fn english_table() -> &'static HashMap<String, &'static str> {
+    static TABLE: std::sync::OnceLock<HashMap<String, &'static str>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| english_table_of(include_str!("../../data/english-extra.txt")).expect("data/english-extra.txt"))
+}
+
+/// The table's rules: a line is `[A-Za-z]{3,32}` with an upper case letter (an all lower case line would change nothing), `#` lines and
+/// blank lines are skipped, and no two lines share a lower case.
+fn english_table_of(text: &'static str) -> Result<HashMap<String, &'static str>, String> {
+    let mut table = HashMap::new();
+    for line in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let ok = (3..=32).contains(&line.len()) && line.bytes().all(|b| b.is_ascii_alphabetic()) && line.bytes().any(|b| b.is_ascii_uppercase());
+        if !ok || table.insert(line.to_ascii_lowercase(), line).is_some() {
+            return Err(format!("bad or repeated line: {line}"));
+        }
+    }
+    Ok(table)
+}
+
+/// docs/spec/english-mixed.md §4.4: how an English word typed as `typed` is written. All lower case, or with only its first letter
+/// upper case, and in the table: the table's line. Anything else the user typed with Shift on purpose: as typed.
+pub fn english_writing(typed: &str) -> String {
+    let lower = typed.to_ascii_lowercase();
+    let plain = typed.is_ascii() && typed.get(1..).is_some_and(|rest| rest == &lower[1..]);
+    match english_table().get(&lower).filter(|_| plain) {
+        Some(w) => w.to_string(),
+        None => typed.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod english_table_tests {
+    use super::*;
+
+    #[test]
+    fn the_table_loads_and_writes() {
+        assert!(english_table().len() > 200);
+        for (typed, want) in [("chatgpt", "ChatGPT"), ("Chatgpt", "ChatGPT"), ("CHATGPT", "CHATGPT"), ("cHatgpt", "cHatgpt"), ("ChatGPT", "ChatGPT"),
+            ("macos", "macOS"), ("Macos", "macOS"), ("rust", "rust"), ("Rust", "Rust"), ("", ""), ("a", "a"), ("gta6", "gta6")] {
+            assert_eq!(english_writing(typed), want, "{typed}");
+        }
+    }
+
+    #[test]
+    fn a_bad_table_is_refused() {
+        assert!(english_table_of("# c\n\nChatGPT\nGitHub\n").is_ok());
+        for bad in ["ChatGPT\nchatGPT\n", "npm\n", "AI\n", "GPT4\n", "Wi-Fi\n"] {
+            assert!(english_table_of(bad).is_err(), "{bad}");
+        }
     }
 }
