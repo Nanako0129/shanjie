@@ -65,19 +65,32 @@ public final class DiagLog {
 
     public init(store: DiagLogStore) { self.store = store }
 
+    /// How many times the buffers were emptied: a preview taken before an emptying is not copied after it (`SettingsModel.copyDiagPreview`).
+    public private(set) var clears = 0
+
     public var enabled: Bool {
         get { store.diagLog ?? true }
         set {
             store.diagLog = newValue
-            if !newValue { shifts = []; others = [] }  // off empties both; on starts from empty
+            clear()  // off empties both; on starts from empty
         }
     }
 
-    /// Off counts as empty: the switch can also be turned off outside the settings window (`defaults write`), which the setter does not see.
+    /// The store's `diagLog` changed, possibly outside the settings window (`defaults write`; the app observes the key). Empties both buffers
+    /// whatever the store now says: an off and an on again can both land before this runs, and on starts from empty anyway.
+    public func storeChanged() { clear() }
+
+    private func clear() {
+        shifts = []
+        others = []
+        clears += 1
+    }
+
+    /// Off counts as empty: until the change notification is handled, the store can already say off.
     public var isEmpty: Bool { !enabled || (shifts.isEmpty && others.isEmpty) }
 
     func record(_ event: Event) {
-        guard enabled else { shifts = []; others = []; return }
+        guard enabled else { if !(shifts.isEmpty && others.isEmpty) { clear() }; return }
         let entry = (at: clock(), event: event)
         if case .shift = event {
             shifts.append(entry)
