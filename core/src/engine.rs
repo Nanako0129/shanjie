@@ -916,19 +916,20 @@ pub fn load_lexicon(data_dir: &Path) -> Result<Arc<Lexicon>, EngineError> {
 }
 
 /// Pack bits of `Engine::new_with_packs` and `shanjie_engine_new_packs` (docs/spec/lexicon-and-packs.md §4.1, §4.2; `PACK_QUOTES`:
-/// docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2; `PACK_IT`: docs/spec/lexicon-and-packs.md §4.1; `PACK_BEAUTY`: docs/spec/lexicon-and-packs.md §8;
-/// bit 3 (value 8) is kept for the meme pack).
+/// docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2; `PACK_IT`: docs/spec/lexicon-and-packs.md §4.1; `PACK_MEME`: docs/spec/lexicon-and-packs.md §9;
+/// `PACK_BEAUTY`: docs/spec/lexicon-and-packs.md §8).
 pub const PACK_ACG: u32 = 1;
 pub const PACK_QUOTES: u32 = 2;
 pub const PACK_IT: u32 = 4;
+pub const PACK_MEME: u32 = 8;
 pub const PACK_BEAUTY: u32 = 16;
-pub const PACK_ALL: u32 = PACK_ACG | PACK_QUOTES | PACK_IT | PACK_BEAUTY;
+pub const PACK_ALL: u32 = PACK_ACG | PACK_QUOTES | PACK_IT | PACK_MEME | PACK_BEAUTY;
 /// The packs whose rows `CappedLexicon::with_packs` reads (docs/spec/decoder.md §2.5): rows tagged `lm::PACK_OOV_TAG` are
 /// unknown to the model, scored by the pack alone, not capped; the other rows are capped as overlay words, except that a word the model
-/// never saw keeps its pack score. Only the anime pack for now; the quotes pack, the IT pack, the beauty pack and a pack added later are capped like any overlay.
+/// never saw keeps its pack score. Only the anime pack for now; the quotes pack, the IT pack, the meme pack, the beauty pack and a pack added later are capped like any overlay.
 pub const PACK_OOV: u32 = PACK_ACG;
 /// A pack's overlay file inside the packs directory, in the order the packs are appended.
-pub const PACK_FILES: [(u32, &str); 4] = [(PACK_ACG, "acg-add.tsv"), (PACK_QUOTES, "quotes-add.tsv"), (PACK_IT, "it-add.tsv"), (PACK_BEAUTY, "beauty-add.tsv")];
+pub const PACK_FILES: [(u32, &str); 5] = [(PACK_ACG, "acg-add.tsv"), (PACK_QUOTES, "quotes-add.tsv"), (PACK_IT, "it-add.tsv"), (PACK_MEME, "meme-add.tsv"), (PACK_BEAUTY, "beauty-add.tsv")];
 
 /// Why a lexicon load failed, for messages: the file that could not be read and its `ErrorKind`, or the lexicon text
 /// that did not parse (`path` is the data directory the files came from, `detail` the `Lexicon` parse error). The C ABI

@@ -372,11 +372,12 @@ class Build(unittest.TestCase):
         put(os.path.join(d, "sandhi-add.tsv"), "ㄅㄨˋ-ㄏㄠˇ\t不好\t-4.0\tsandhi\n")
         acg = os.path.join(d, "acg-add.tsv")
         put(acg, "ㄐㄧㄠˋ-ㄏㄨˊ\t叫胡\t-6.0\tacg\n")
-        self.assertEqual(B.known_words(d, acg), {"八", "巴", "拔", "罵", "不好", "叫胡"})
+        mem = os.path.join(d, "meme-add.tsv")     # not there: the real data/packs/meme-add.tsv is not this test's input
+        self.assertEqual(B.known_words(d, acg, mem), {"八", "巴", "拔", "罵", "不好", "叫胡"})
         # a name equal to any of them is dropped by the build and caught by the end-of-build check
         with self.assertRaises(SystemExit):
-            B.check_disjoint(["叫胡", "酷澎"], B.known_words(d, acg))
-        B.check_disjoint(["酷澎"], B.known_words(d, acg))
+            B.check_disjoint(["叫胡", "酷澎"], B.known_words(d, acg, mem))
+        B.check_disjoint(["酷澎"], B.known_words(d, acg, mem))
 
     def test_end_of_build_check_stops_when_the_dedupe_is_missing(self):
         # mutation: the dedupe is removed (the set claims to hold nothing when asked by `in` / `&`, but iterates honestly, which is what

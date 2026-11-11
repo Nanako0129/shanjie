@@ -469,7 +469,7 @@ jobs:
       - name: IT pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_it_pack tools.test_it_sources tools.test_it_wiki_counts
 
-      # The meme pack builder (a build tool; the pack is not shipped) against fixtures and a fake decoder (thresholds, dedupe, the
+      # docs/spec/lexicon-and-packs.md §9.2: the meme pack builder against fixtures and a fake decoder (thresholds, dedupe, the
       # first-place rule, count-file provenance, determinism). No network, no evaluation CLI.
       - name: Meme pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_meme_pack

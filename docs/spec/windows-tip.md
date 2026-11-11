@@ -145,7 +145,7 @@ Linux `debug` job 在既有步驟之後加三步：
 
 - 引擎只在常駐程序裡、只有一個（§5）。DLL 不載入任何模型。
 - 常駐程序先建好 pipe 再載模型（§5.2）。建引擎的呼叫順序與值照 `cli::replay::build_engine_packs`（不是照 Mac App 的設定：App 的中英混打預設開，replay 是關的）：
-  1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`；replay 不給 `--packs` 時是 21，多了 Mac App 預設開的美妝詞包，Windows 版不帶它）；
+  1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`；replay 不給 `--packs` 時是 29，多了 Mac App 預設開的迷因與美妝詞包，Windows 版不帶它）；
   2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`（`load_lm` 一併讀同一資料夾的承接、trigram 與辨類檔，所以 `data\lm` 要放 `data/*.sha256` 列的全部模型）；
   3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(1)`（候選窗一律是直排，§3.15）、`set_key_scheme(<按鍵習慣>)`（見下一條）、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
   4. `set_learning(0)`。重排強度與設定檔類型用核心預設（標準、聊天）；不呼叫 `set_fuzzy`、`set_left_context`、`learning_open`。

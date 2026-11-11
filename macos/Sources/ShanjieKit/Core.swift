@@ -44,6 +44,7 @@ final class CoreEngine {
     static let packACG = UInt32(SHANJIE_PACK_ACG)
     static let packQuotes = UInt32(SHANJIE_PACK_QUOTES)
     static let packIT = UInt32(SHANJIE_PACK_IT)
+    static let packMeme = UInt32(SHANJIE_PACK_MEME)
     static let packBeauty = UInt32(SHANJIE_PACK_BEAUTY)
 
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.

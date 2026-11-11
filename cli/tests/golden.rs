@@ -106,7 +106,7 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
 
 /// The shipping default has the decoder's reading term (docs/spec/decoder.md §5), which the Python reference does not implement, so it has no
 /// Python golden: these are Rust-only pins of the summary lines (tag, n, top1, oracle@64, `top1_sha256`) that the CLI prints by default, for dev302, typing76 and
-/// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it,beauty
+/// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it,meme,beauty
 /// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
 /// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
 #[test]
@@ -128,7 +128,7 @@ fn shipping_default_matches_its_rust_only_pins() {
                 None => vec!["--dev", "302", "--name", &ship],
             };
             let colloquial: &[&str] = if p == "chat" { &["--colloquial-core", &co] } else { &[] };
-            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--packs", "acg,it,beauty", "--tinylm", &tl], colloquial].concat());
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--packs", "acg,it,meme,beauty", "--tinylm", &tl], colloquial].concat());
         }
     }
     assert_eq!(got, golden("reading-decode-shipping.txt"));

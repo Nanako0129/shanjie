@@ -352,7 +352,7 @@ fn outputs_are_numbers_only_and_the_rowstats_are_the_clis() {
     let tl = r.join("data/lm/tinylm.sjtl");
     // The replay loads data/lm/colloquial.sjlm by default, as the App does, so the CLI is given it too.
     let co = r.join("data/lm/colloquial.sjlm");
-    let cli = run(eval, &["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it,beauty", "--tinylm", tl.to_str().unwrap(), "--colloquial-core", co.to_str().unwrap(), "--rows", &p("rows.txt"), "--rowstats", &p("cli.rs")]);
+    let cli = run(eval, &["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it,meme,beauty", "--tinylm", tl.to_str().unwrap(), "--colloquial-core", co.to_str().unwrap(), "--rows", &p("rows.txt"), "--rowstats", &p("cli.rs")]);
     let mine = run(replay, &["--rows", &p("rows.txt"), "--rowstats", &p("rep.rs"), "--keys", &p("rep.keys")]);
     assert_eq!(std::fs::read(p("cli.rs")).unwrap(), std::fs::read(p("rep.rs")).unwrap());
     assert_eq!(sha_of(&cli), sha_of(&mine));
@@ -387,7 +387,7 @@ fn colloquial_replay_agrees_with_the_cli() {
     let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
     let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
     let cli = |extra: &[&str]| {
-        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it,beauty", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", "chat", "--context", "--packs", "acg,it,meme,beauty", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
         a.extend_from_slice(extra);
         run(eval, &a)
     };
@@ -434,7 +434,7 @@ fn reading_decode_replay_agrees_with_the_cli() {
     let sha8 = &core::eval::sha256_hex(&std::fs::read(r.join("data/lexicon/std-exempt.tsv")).unwrap())[..8];
     for profile in ["formal", "chat"] {
         let cli = |extra: &[&str]| {
-            let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", profile, "--context", "--packs", "acg,it,beauty", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+            let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", profile, "--context", "--packs", "acg,it,meme,beauty", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
             if profile == "chat" {
                 a.extend(["--colloquial-core", co.to_str().unwrap()]);
             }
@@ -636,7 +636,7 @@ fn an_output_that_is_the_learn_file_is_refused() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// Rule (docs/spec/evaluation.md §4): `--packs` is research only. Omitted, the summary tag is the App's `+acg+it+beauty` (since the beauty pack, docs/spec/lexicon-and-packs.md §8; before it `+acg+it`; the dev302 rows' rowstats and summary
+/// Rule (docs/spec/evaluation.md §4): `--packs` is research only. Omitted, the summary tag is the App's `+acg+it+meme+beauty` (since the beauty pack, docs/spec/lexicon-and-packs.md §8; before it `+acg+it`; the dev302 rows' rowstats and summary
 /// are byte for byte those of before the option, checked by hand when it was added); `acg,quotes,it` adds `+quotes`; a name that is not
 /// a pack is an error.
 #[test]
@@ -648,7 +648,7 @@ fn packs_option_changes_only_the_tag_it_names() {
     let rows = rows.to_str().unwrap();
     let _g = slot();
     let replay = env!("CARGO_BIN_EXE_shanjie-replay");
-    assert!(run(replay, &["--rows", rows]).contains("+ctx+acg+it+beauty+nopred"));
+    assert!(run(replay, &["--rows", rows]).contains("+ctx+acg+it+meme+beauty+nopred"));
     assert!(run(replay, &["--rows", rows, "--packs", "acg,it"]).contains("+ctx+acg+it+nopred"));
     assert!(run(replay, &["--rows", rows, "--packs", "acg,quotes,it"]).contains("+ctx+acg+quotes+it+nopred"));
     assert!(run(replay, &["--rows", rows, "--packs", "acg", "--packs", "it"]).contains("+ctx+acg+it+nopred"), "repeats add up");

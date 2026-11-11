@@ -342,6 +342,7 @@ struct SettingsPageForm: View {
                     Toggle(MenuEntry.Text.quotePack, isOn: Binding(get: { model.quotePack }, set: { model.setQuotePack($0) }))
                     Toggle(MenuEntry.Text.itPack, isOn: Binding(get: { model.itPack }, set: { model.setItPack($0) }))
                     Toggle(MenuEntry.Text.beautyPack, isOn: Binding(get: { model.beautyPack }, set: { model.setBeautyPack($0) }))
+                    Toggle(MenuEntry.Text.memePack, isOn: Binding(get: { model.memePack }, set: { model.setMemePack($0) }))
                 }
                 // docs/spec/decoder.md §6.1: all off by default. The adjacent-key checkbox is greyed (value kept) in the Eten layout, where
                 // the core does nothing with it.
