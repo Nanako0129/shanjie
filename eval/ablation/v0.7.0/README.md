@@ -46,7 +46,7 @@
 - 兩個閘門列只在公開集合離線重算（下一節）；discordtune 那一跑沒有留逐候選分數，寫「—」。融合格是在軟閘門開著時選的，「拿掉軟閘門」那一列也只是描述。
 - 標準檔的格本來就是 δ＝0，所以分差閘門列只量到 τ。完整系統裡 τ 擋下重排的列：聊天 802／2,992、書面 509／2,182；拿掉 τ 後融合只改了其中 0 列與 2 列。
 
-## 閘門列與軟閘門（離線）
+## 分差閘門列與軟閘門列（離線）
 
 `gate_offline.py` 從完整系統那一跑的 `--tinylm-scores` 照 v0.7.0 核心的規則重算每一列的選擇：書面是 `tinylm::pick_masked`（檔頭書面標準組 (0.8, 2, 0)），聊天是 `colloquial::guarded_pick`（先 `fuse`，μ 0.5、T 1.0，再用 (1.1, 2, 0) 做 `pick_masked`；口語分數不是有限值時退回檔頭的 (0.3, 2, 0.25)）。評測 CLI 沒有學習項，重算也沒有。
 
@@ -72,7 +72,7 @@ shasum -a 256 -c data/*.sha256
 E=target/release/shanjie-eval
 LM="--lm data/lm/bigram.sjlm --context --packs acg,it,beauty"
 
-# 完整系統（聊天；書面拿掉 --colloquial-core）。公開集合另加 --tinylm-scores <分數檔>，給閘門列用
+# 完整系統（聊天；書面拿掉 --colloquial-core）。公開集合另加 --tinylm-scores <分數檔>，給兩個閘門列用
 $E $LM --profile chat --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm --threads 10 --rows <集合> --rowstats <輸出>
 # 拿掉重排模型（含口語項）＝只有 n-gram
 $E $LM --profile chat --threads 10 --rows <集合> --rowstats <輸出>
@@ -94,7 +94,7 @@ $E --rows <集合>
 python3 tools/evalstats.py compare <基準的輸出> <這一格的輸出> --label <名稱> --net
 ```
 
-閘門列與軟閘門，用完整系統那一跑的分數檔與 rowstats：
+分差閘門列與軟閘門列，用完整系統那一跑的分數檔與 rowstats：
 
 ```
 python3 eval/ablation/v0.7.0/gate_offline.py --self-test
