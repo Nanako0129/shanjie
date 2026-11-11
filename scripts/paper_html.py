@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Second half of scripts/build-paper-html.sh: turns pandoc's HTML of the paper into the reading page and checks it.
 
-  python3 scripts/paper_html.py HTML TEX AUX PDF FIGURES_TSV FIGDIR
+  python3 scripts/paper_html.py --prepare TEX OUT_TEX
+  python3 scripts/paper_html.py HTML TEX AUX PDF FIGURES_TSV FIGDIR PANDOC_LOG
+
+--prepare writes the copy of the source that pandoc reads: three constructs pandoc 3 gets wrong are rewritten
+(see `prepare`). PANDOC_LOG is the stderr of `pandoc --verbose` on that copy: every command pandoc skipped must be
+one of SKIPPABLE (layout and preamble only), because a skipped command can take text with it without any warning.
 
 HTML is rewritten in place. pandoc numbers nothing the way LaTeX does (appendix letters, equations, tables), so
 every visible number is put here: sections, tables, figures and display equations are counted in document order,
@@ -21,6 +26,33 @@ import sys
 import tempfile
 
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Commands pandoc may skip: they set fonts, spacing or page layout and carry no text. \begin is checked separately
+# (only a tikzpicture, which becomes an image, may be skipped).
+SKIPPABLE = set("""XeTeXlinebreaklocale XeTeXlinebreakskip appendix arxivbuild bibliographystyle centering clearpage
+    else emergencystretch endlastfoot enlargethispage fi footnotesize ifdefined maketitle newCJKfontfamily pgfplotsset
+    quad setCJKmainfont setlength simpfont small urlstyle usetikzlibrary xeCJKDeclareCharClass""".split())
+
+
+def prepare(tex):
+    """The source as pandoc can read it. Each rewrite undoes a loss seen with pandoc 3.13:
+    - `>{\\raggedright\\arraybackslash}p{..}` columns: a cell that starts with a number loses the number
+      (`64 x` becomes `x`, `1,133` becomes `,133`), so \\arraybackslash is removed;
+    - a row that is one \\multicolumn across a longtable is dropped: its text goes into the first cell;
+    - longtable repeats the head between \\endfirsthead and \\endhead as a body row: the repeat is removed."""
+    tex = tex.replace(r"\arraybackslash", "")
+    tex = re.sub(r"(?m)^\\multicolumn\{(\d+)\}\{(?:@\{\})?[lcr](?:@\{\})?\}\{(.*)\} *\\\\$",
+                 lambda m: m.group(2) + " &" * (int(m.group(1)) - 1) + r" \\", tex)
+    return re.sub(r"\\endfirsthead.*?\\endhead\n", r"\\endhead" "\n", tex, flags=re.S)
+
+
+def skipped(log):
+    """What pandoc skipped that is not in SKIPPABLE, from the stderr of `pandoc --verbose`."""
+    out = []
+    for m in re.finditer(r"(?m)^\[INFO\] Skipped '(\\([A-Za-z]+)[^\n]*)", log):
+        ok = m.group(1).startswith(r"\begin{tikzpicture}") if m.group(2) == "begin" else m.group(2) in SKIPPABLE
+        if not ok:
+            out.append(m.group(1)[:60])
+    return out
 
 
 def aux_labels(path):
@@ -76,7 +108,8 @@ def self_test():
     tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \begin{equation}x\label{eq:x}\end{equation}"
            "\n" r"\subsection{Sub}\label{sec:sub} \ref{app:a} \eqref{eq:x} \ref{tab:t}" "\n" r"\appendix"
            "\n" r"\section{App}\label{app:a}")
-    global page
+    global page, log
+    log = ""
     page = ('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n<li><a href="#app:a" id="toc-app:a">App</a></li>\n'
             '<section id="sec:one" class="level2">\n<h2>One</h2><math display="inline">a</math>'
             '<math display="block"><annotation>x\\label{eq:x}</annotation></math>\n'
@@ -91,10 +124,10 @@ def self_test():
                   (("sec:one", "1"), ("eq:x", "1"), ("sec:sub", "1.1"), ("tab:t", "1"), ("app:a", "A")))
     with tempfile.TemporaryDirectory() as tmp:
         def run(aux_text):
-            for name, text in (("p.html", page), ("m.tex", tex), ("m.aux", aux_text), ("f.tsv", "")):
+            for name, text in (("p.html", page), ("m.tex", tex), ("m.aux", aux_text), ("f.tsv", ""), ("log", log)):
                 with open(f"{tmp}/{name}", "w", encoding="utf-8") as f:
                     f.write(text)
-            sys.argv[1:] = [f"{tmp}/p.html", f"{tmp}/m.tex", f"{tmp}/m.aux", "", f"{tmp}/f.tsv", tmp]
+            sys.argv[1:] = [f"{tmp}/p.html", f"{tmp}/m.tex", f"{tmp}/m.aux", "", f"{tmp}/f.tsv", tmp, f"{tmp}/log"]
             main()
             return open(f"{tmp}/p.html", encoding="utf-8").read()
         out = run(aux)
@@ -102,25 +135,39 @@ def self_test():
         assert '<span class="secno">附錄 A</span> App' in out and '<span class="secno">1.1</span> Sub' in out
         assert out.index('id="references"') < out.index('<section id="app:a"') and '表 1：' in out
         good = page
-        for what, bad_aux, bad_page in (
-                ("a wrong appendix letter", aux.replace("{A}", "{B}"), good),
-                ("a script from another host", aux, good.replace("<h2>One</h2>", '<h2>One</h2><script src="//h/x.js"></script>')),
-                ("an unnumbered display formula", aux, good.replace("<h2>App</h2>", '<h2>App</h2><math display="block">y</math>')),
-                ("an \\autoref", aux, good.replace("<h2>App</h2>", '<h2>App</h2><a href="#sec:one" data-reference-type="ref+label" data-reference="sec:one">1</a>'))):
-            page = bad_page
+        one = "<h2>One</h2>"
+        for expect, bad_aux, bad_page, bad_log in (
+                ("labels whose visible number differs", aux.replace("{A}", "{B}"), good, ""),
+                ("load something from another site", aux, good.replace(one, one + '<script src="//h/x.js"></script>'), ""),
+                ("not an equation environment", aux, good.replace(one, one + '<math display="block">y</math>'), ""),
+                ("neither \\ref nor \\eqref", aux, good.replace(
+                    one, one + '<a href="#sec:one" data-reference-type="ref+label" data-reference="sec:one">1</a>'), ""),
+                ("links to an id that is not on the page", aux, good.replace(one, one + '<a href="#nope">x</a>'), ""),
+                ("table rows without any text", aux, good.replace("</table>", "<tr><td></td></tr></table>"), ""),
+                ("tables (numbered", aux, good.replace(one, one + "<table><tr><td>x</td></tr></table>"), ""),
+                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\pageref{sec:one}' at m.tex line 2\n"),
+                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\begin{tabular}' at m.tex line 2\n")):
+            page, log = bad_page, bad_log
             try:
                 run(bad_aux)
             except SystemExit as e:
-                assert "STOP" in str(e)
+                assert expect in str(e), (expect, str(e))
             else:
-                raise AssertionError(f"{what} passed")
+                raise AssertionError(f"passed although: {expect}")
+        assert skipped("[INFO] Skipped '\\small' at x\n[INFO] Skipped '\\begin{tikzpicture}[a]\n  \\node' at x\n") == []
+        row = prepare(">{\\raggedright\\arraybackslash}p{3cm}\n\\multicolumn{2}{@{}l}{\\emph{G}} \\\\\n"
+                      "\\endfirsthead\nH \\\\\n\\endhead\n")
+        assert row == ">{\\raggedright}p{3cm}\n\\emph{G} & \\\\\n\\endhead\n", row
     print("self-test ok")
 
 
 def main():
     if sys.argv[1:] == ["--self-test"]:
         return self_test()
-    page, tex, aux, pdf, tsv, figdir = sys.argv[1:]
+    if sys.argv[1:2] == ["--prepare"]:
+        with open(sys.argv[3], "w", encoding="utf-8") as f:
+            return f.write(prepare(open(sys.argv[2], encoding="utf-8").read())) and None
+    page, tex, aux, pdf, tsv, figdir, log = sys.argv[1:]
     s = open(page, encoding="utf-8").read()
     labels = aux_labels(aux)
     n_sections, n_main, n_figures, cited, n_math, n_numbered = tex_counts(tex_body(tex))
@@ -137,6 +184,11 @@ def main():
         if got != want:
             errors.append(name)
 
+    lost = skipped(open(log, encoding="utf-8").read())
+    for item in lost:
+        print(f"  pandoc skipped {item}")
+    check("commands pandoc skipped that may carry text", len(lost), 0)
+    check("table rows without any text", len(re.findall(r"<tr[^>]*>\s*(?:<t[dh][^>]*>\s*</t[dh]>\s*)+</tr>", s)), 0)
     check("sections (section.level2 / \\section)", len(re.findall(r'<section id="[^"]*" class="level2', s)), n_sections)
     check("math (<math / formulas in the source)", s.count("<math"), n_math)
     check("references (.csl-entry / cited keys)", s.count('class="csl-entry"'), len(cited))

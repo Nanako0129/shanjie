@@ -233,7 +233,8 @@ pre.cite { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* 獨立公式：編號靠右，太寬時在自己的框裡橫捲 */
 .eqn { display: flex; align-items: center; gap: 16px; overflow-x: auto; padding: 8px 0; max-width: var(--prose-max); }
 .eqn math { flex: 1 0 auto; }
-.eqn .eqno { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* 編號固定在框的右緣：公式比框寬、要橫捲時，編號不用捲就看得到 */
+.eqn .eqno { color: var(--ink-2); font-variant-numeric: tabular-nums; position: sticky; right: 0; padding-left: 12px; background: var(--paper); }
 /* 行內公式不能折行：手機上比一行寬時，那一段在自己的框裡橫捲，不把版面撐出去。
    不套在 <li> 上：overflow 不是 visible 的清單項目，圓點與編號會被裁掉 */
 .paper-read :is(p, dd, figcaption) { overflow-x: auto; overflow-y: hidden; }
