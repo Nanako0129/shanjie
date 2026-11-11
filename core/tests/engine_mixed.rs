@@ -464,7 +464,10 @@ fn the_table_comes_with_the_data_folder() {
     std::fs::create_dir_all(&dir).unwrap();
     for f in std::fs::read_dir(root().join("data/lexicon")).unwrap().map(|f| f.unwrap()) {
         if f.file_name() != "mixed-words.tsv" {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(f.path(), dir.join(f.file_name())).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(f.path(), dir.join(f.file_name())).unwrap();
         }
     }
     let e = Engine::new(&dir, Layout::Standard).expect("an engine builds without mixed-words.tsv");
