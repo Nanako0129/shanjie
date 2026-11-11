@@ -67,6 +67,8 @@ test-python:
 	python3 -m unittest reference/proto/test_recombine.py
 	python3 reference/proto/test_variant_order.py
 	python3 -W ignore -m unittest reference/proto/test_colloquial_ref.py
+	# eval/ablation/v0.7.0/README.md: the offline gate row's rules, cases taken from the core's unit tests.
+	python3 -B eval/ablation/v0.7.0/gate_offline.py --self-test
 	# The tw-conv guard (docs/spec/models.md §9.10, §9.8), last so the other suites report first.
 	python3 -W ignore -m unittest tools/test_tw_conv_guard.py
 
