@@ -536,7 +536,6 @@ fn the_learning_context_after_the_mixed_word() {
     let (w_mark, mark) = learned(false);
     assert_eq!(w_mixed, w_mark, "premise: the same character was picked in both");
     // After a mark the word is learned at the sentence start; after the mixed word, under its last Han character.
-    let sentence_start = mark[0].0.clone();
-    assert!(mark.len() == 1 && mark[0].1 == w_mark && sentence_start.starts_with('^'), "{mark:?}");
+    assert!(mark.len() == 1 && mark[0].1 == w_mark && mark[0].0.starts_with('^'), "{mark:?}");
     assert_eq!(mixed, [("值".to_string(), w_mixed)]);
 }
