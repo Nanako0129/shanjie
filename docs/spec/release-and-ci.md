@@ -41,7 +41,8 @@
 | `changes` | ubuntu-latest | §1.2 | 5 分 |
 | `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 35 分 |
 | `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 20 分 |
-| `windows` | windows-2025 | 見 §3.3；`needs: [changes, debug]` | 45 分 |
+| `windows` | windows-2025 | 見 §3.3；`needs: changes`，和其他 job 同時開跑 | 45 分 |
+| `rowstats` | ubuntu-24.04 | Linux 與 Windows 的六份 rowstats 逐位元組比對（§3.3）；`needs: [changes, debug, windows]` | 5 分 |
 | `python` | ubuntu-24.04 | 下載並核對模型；Python 工具與資料建置腳本的測試 | 20 分 |
 | `swift` | xcode-27 | 下載並核對模型；核心靜態庫；C 標頭冒煙測試；Swift 測試 | 30 分 |
 | `shell` | xcode-27 | 沙盒組建、容器移轉、selftest、驗收檢查、安裝程式、Homebrew cask（不含 Swift 測試） | 30 分 |
@@ -79,19 +80,20 @@
 
 - 目的：debug 才有的檢查（整數溢位、標準函式庫的 debug 專屬檢查），放在 Linux runner 上跑，與 macOS 的 release 測試並行。
 - 只跑 `core` 套件的全部測試、`cli` 套件的單元測試（`--lib --bins`），與 Windows 線上格式 `shanjie-win-proto` 的測試（純 Rust，三個平台都跑）。
-- 評測 CLI（`shanjie-eval`）用 release 建置，再由 `scripts/ci-rowstats.sh rowstats-linux` 跑六份 rowstats：dev302、打字測驗、錯字回報，各在聊天與書面設定下，用出貨的旗標（前文、`acg` 與 `it` 詞包、會意小模型；聊天另加常談表）。檔案以 artifact 上傳（保留 1 天），給 `windows` 比對。
+- 評測 CLI（`shanjie-eval`）用 release 建置，再由 `scripts/ci-rowstats.sh rowstats-linux` 跑六份 rowstats：dev302、打字測驗、錯字回報，各在聊天與書面設定下，用出貨的旗標（前文、`acg` 與 `it` 詞包、會意小模型；聊天另加常談表）。檔案以 artifact 上傳（保留 1 天），給 `rowstats` 和 `windows` 的檔比對。
 - `scripts/ci-rowstats.sh` 是這六條指令的唯一一份；`--threads` 不改輸出的任何位元組。
 
 ### 3.3 `windows`
 
-- `needs: [changes, debug]`，被略過的條件與 `core` 相同；所有步驟用 Git Bash，不用 PowerShell。
+- `needs: changes`，和其他 job 同時開跑，被略過的條件與 `core` 相同；所有步驟用 Git Bash，不用 PowerShell。
 - 內容：
   1. 下載並核對模型（§2.2）；
   2. `cargo test -p core --release --locked`，略過七個逐鍵 p95 斷言的測試（4 vCPU 的 runner 量不準；它們的選字斷言在 Linux 與 macOS 的 job 照跑）；
-  3. 同樣的評測 CLI 與六份 rowstats，與 `debug` 上傳的 Linux 檔逐位元組相同（`cmp`），兩邊都必須剛好 6 份；
+  3. 同樣的評測 CLI 與六份 rowstats，以 artifact `rowstats-windows` 上傳（保留 1 天）；
   4. 工作樹沒有 CRLF（`git ls-files --eol data eval scripts core/tests cli/tests`：不得有 `w/crlf`、`w/mixed`，每個 `i/lf` 都是 `w/lf`；理由：`digits.tsv` 帶 CRLF 會無聲地關掉數字層）；
   5. 核心也為 `i686-pc-windows-msvc`、`aarch64-pc-windows-msvc` 編譯（只建置，不跑測試）；
   6. `shanjie-tip`（Windows 文字服務 DLL）與 `shanjie-host`（常駐程序）以 release 建置，各帶與不帶 `timing` 功能一次；核對兩者都沒有 C 執行階段的匯入、DLL 沒有 `shanjie_` 匯出也不相依核心；再跑 `shanjie-win-proto`、`shanjie-tip`、`shanjie-host` 的測試（`docs/spec/windows-tip.md` §5.10）。
+- 比對在另一個 job `rowstats`（ubuntu-24.04，逾時 5 分，不 checkout）：`needs: [changes, debug, windows]`，下載兩邊的 artifact，逐檔 `cmp`，兩邊都必須剛好 6 份。拆成自己的 job，是為了讓 `windows` 不必等 `debug` 跑完才開始（以前最長的一條是 `debug` 加 `windows`）。`debug` 與 `windows` 都成功時它一定會跑；其中一個失敗時它被略過，但整個 run 照樣是 failure，所以比對只會跟著 `changes` 判定整趟不跑而略過。
 - Windows 版本身的規格見 `docs/spec/windows-tip.md`。
 
 ### 3.4 `python`（Linux）
@@ -141,7 +143,7 @@
 - **`cli` 的整合測試不在 debug 跑**：Linux 沒有 Accelerate，小模型走純 Rust 矩陣乘法，`cli` 的整合測試（重播、golden、常談、英文模擬、執行緒、小模型）在 Linux 上是 macOS 的 2.4 倍以上（opt-level 3 也一樣）。它們測的是評測工具（不出貨）與引擎在整份資料上的結果，只在 release 跑；引擎本身的 debug 檢查由 `core` 套件在 Linux 跑（含 dev302 重播）。`core/src` 與 `cli/src` 只有一個 `debug_assert!`。
 - **debug 看不到的兩塊**：只在 macOS 才編進去的分支（小模型的 Accelerate 呼叫、`learn_store.rs` 的 macOS 常數），以及上述兩個在 Linux 直接 `return` 的 f64 golden（在 Linux 的 debug 裡算通過但什麼都沒檢查）。它們在 macOS 的 release 測試照跑；Accelerate 呼叫前的長度檢查是 `assert!`，release 也檢查。
 - **`--parallel` 的代價**：一個測試殘留給下一個測試的狀態，在同一個程序內才會被看到；並行時每個方法一個程序，抓不到這種問題，只有序列的 `make test-swift` 抓得到。
-- **沒有 Rust 編譯快取**：沒有 `actions/cache` 步驟。工作區只有自己的 crate 時，快取命中仍全部重編，量不到收益（release 編譯冷、熱之差只是 runner 快慢的差）。工作區現在多了 `windows/tip` 與 Windows 相依套件，這個結論沒有重量（未量）。
+- **沒有 Rust 編譯快取**：沒有 `actions/cache` 步驟。編譯只佔各 job 的一小段，其餘是測試本身的執行時間。以 main 一次 push CI 的 log 為例：最慢的 `core`，`cargo test --release` 共 1017 秒，其中編譯 59.7 秒；`windows` 的核心測試編譯 56.3 秒，`shanjie-tip`、`shanjie-host` 的四次建置共 45 秒；`debug` 41.3 秒；模型下載每個 job 6–12 秒。快取命中時，每次合併幾乎都會改到的自己的 crate 照樣重編，省得到的只有相依套件那一段，不值得承擔快取留下錯誤建置的風險。
 - **不拆最慢的 Swift 測試**：`VerticalShellTests.testPageKeysOutsideTheVerticalWindowTakeTheOffTablePath` 約 47 秒、照字母排在最後才開始跑，讓 Swift 測試多了約 40 秒的尾巴；`swift` 變成最慢的 job 時才拆。
 - **引擎建立的成本**：Swift 測試與一部分 Rust 測試的主要成本是建立完整引擎（本機 release 約 0.85 秒：模型 0.26、預測索引 0.22、詞庫 0.14、常談 0.10、截頂詞庫 0.07、小模型 0.04），這也是輸入法啟動與切換設定時重建引擎的成本；CI 不處理它。
 - runner 的快慢差可到將近兩倍，所以比較 CI 時間只下跨 run 都成立的結論。
