@@ -422,8 +422,8 @@ fn mixed_item_sits_before_the_short_items() {
     assert_eq!(choose(&mut e, "AI").preedit, "cpAI");
 }
 
-/// The check set: every row of the shipped table, typed with Shift on the first letter, lists its writing; the check set and the
-/// table hold the same rows.
+/// The check set: every row of the shipped table, typed with Shift on the first letter, lists its writing first; the check set and
+/// the table hold the same rows.
 #[test]
 fn every_check_set_word_is_listed() {
     let table = std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap();
@@ -450,9 +450,7 @@ fn every_check_set_word_is_listed() {
         type_syls(&mut e, reading);
         assert_eq!(e.syllables().len(), 1 + reading.split(' ').count(), "{line}: premise: the syllables follow the token");
         let list = listed(&mut e);
-        let rank = list.iter().position(|w| w == writing);
-        assert!(rank.is_some(), "{line}: not listed in {list:?}");
-        println!("{line}\trank {} of {}", rank.unwrap() + 1, list.len());
+        assert_eq!(list.first().map(String::as_str), Some(writing), "{line}: not the first item of {list:?}");
     }
 }
 
