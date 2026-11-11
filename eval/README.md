@@ -20,7 +20,7 @@
 | `holdout/next/shard-3/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/spec/evaluation.md` §5）：和 shard-1、shard-2 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
 | `holdout/retired/shard-1/talk.txt` | 150 | 同上 | **退役的口語半邊**（shard-1，2026-10-16 到 2026-11-11 現役，用滿 8 次）：留在 `holdout/` 底下，照樣不讀、不調參；換份前後的數字不跨份比 |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
-| `ablation/v0.7.0/` | — | — | v0.7.0 標準檔的逐項拿掉表（三個集合的結果、每一格的 CLI 指令）與閘門列的離線重算 `gate_offline.py`；不是評測列，只有結果與重跑方法 |
+| `ablation/v0.7.0/` | — | — | v0.7.0 標準檔的逐項拿掉表（三個集合的結果、每一格的 CLI 指令）與兩個閘門列的離線重算 `gate_offline.py`；不是評測列，只有結果與重跑方法 |
 
 ## 規則
 
