@@ -167,7 +167,7 @@ jobs:
   # 4 vCPU runner cannot measure and which the Linux and macOS jobs keep), the evaluation CLI's six rowstats go up as an artifact for the
   # `rowstats` job, the checkout has LF line endings where the data and tests need them, and the core also builds for i686 and aarch64 (build only).
   # Starts beside the other jobs (the comparison with `debug` is the `rowstats` job); skipped exactly when `core` is. Every step runs in bash
-  # (Git Bash on the runner), not PowerShell.
+  # (Git Bash on the runner), not PowerShell. core/tests/engine_cap.rs runs in `windows-cap` beside it.
   windows:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -193,18 +193,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-models.sh
 
-      # The seven tests that assert a per-key p95 under 16 ms in release (a 4 vCPU runner measures them wrongly; the 188 WSL run skips them for
-      # the same reason). Their selection assertions run in the Linux and macOS jobs.
-      - name: Tests (release, core package)
-        run: >-
-          cargo test -p core --release --locked --
-          --skip replay_standard_chat_production_path
-          --skip replay_standard_302_of_302
-          --skip replay_eten_302_of_302
-          --skip replay_with_english_on
-          --skip replay_with_english_on_and_the_revert_switches_off
-          --skip replay_with_english_and_digits_on
-          --skip perf_two_thousand_new_words_per_key
+      # Every core test target but core/tests/engine_cap.rs (the `windows-cap` job), listed from the file names so that a new test file
+      # runs here without an edit (core has no [[test]] renames, examples or benches, so a file stem is its target name); then the doc tests.
+      # The seven tests that assert a per-key p95 under 16 ms in release are skipped (a 4 vCPU runner measures them wrongly; the 188 WSL run
+      # skips them for the same reason). Their selection assertions run in the Linux and macOS jobs.
+      - name: Tests (release, core package, all but engine_cap)
+        run: |
+          set -euo pipefail
+          targets=()
+          n=0
+          for f in core/tests/*.rs; do
+            n=$((n + 1))
+            t=$(basename "$f" .rs)
+            [ "$t" = engine_cap ] || targets+=(--test "$t")
+          done
+          [ "${#targets[@]}" -gt 0 ] && [ "${#targets[@]}" -eq $(( (n - 1) * 2 )) ] || { echo "error: ${#targets[@]} target arguments for $n test files" >&2; exit 1; }
+          cargo test -p core --release --locked --lib --bins "${targets[@]}" -- \
+            --skip replay_standard_chat_production_path \
+            --skip replay_standard_302_of_302 \
+            --skip replay_eten_302_of_302 \
+            --skip replay_with_english_on \
+            --skip replay_with_english_on_and_the_revert_switches_off \
+            --skip replay_with_english_and_digits_on \
+            --skip perf_two_thousand_new_words_per_key
+          cargo test -p core --release --locked --doc
 
       - name: Evaluation CLI (release)
         run: cargo build --release --locked -p cli --bin shanjie-eval
@@ -302,6 +314,36 @@ jobs:
 
       - name: Windows client and host tests (release)
         run: cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host
+
+  # docs/spec/windows-tip.md §2.9: core/tests/engine_cap.rs on x86_64-pc-windows-msvc in release, beside `windows`. It is a third to a half of
+  # the Windows core test time (no Accelerate on Windows: the small model's rerank runs in plain Rust for every key of 70-128 syllables), and it
+  # has none of the per-key p95 tests. Skipped exactly when `core` is.
+  windows-cap:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # The one copy of the model download and hash check (see the `windows` job).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      - name: Tests (release, core/tests/engine_cap.rs)
+        run: cargo test -p core --release --locked --test engine_cap
 
   # docs/spec/windows-tip.md §2.9: the six Windows rowstats equal the Linux job's byte for byte. Its own job so that `windows` need not
   # wait for `debug`. It runs whenever both succeed (the implicit success() of `if`); when either fails it is skipped and the run fails anyway.
