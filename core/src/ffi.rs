@@ -600,6 +600,39 @@ pub unsafe extern "C" fn shanjie_engine_set_candidate_vertical(
     rc
 }
 
+/// docs/spec/c-abi.md, docs/spec/keys-and-composition.md §4.1. `scheme` 0 (default) or 1: the key rules the engine follows; 1 adds the `m` rows (Microsoft Zhuyin habits, for the
+/// Windows text service). Returns the snapshot like `set_candidate_vertical`: an open candidate window keeps the scheme it opened with; any other value changes
+/// nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_key_scheme(
+    engine: *mut ShanjieEngine,
+    scheme: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_key_scheme(scheme) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(Some(o)) => unsafe { emit(o, out) },
+            Ok(None) => SHANJIE_ERR_INVALID,
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// docs/spec/prediction.md §6. `enabled` 0 or 1 (default 0): whether a symbol in an occupied column opens a new
 /// unfinished unit. Returns the snapshot like `set_prediction`; any other value changes nothing and returns 2.
 ///

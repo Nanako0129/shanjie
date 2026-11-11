@@ -85,26 +85,36 @@ pub fn map_key(vk: u32, m: Mods, window: bool) -> Option<Key> {
 /// The keycaps whose Shift form is a punctuation key of docs/spec/keys-and-composition.md §8.1 (Shift+, gives ，, Shift+1 gives ！, …).
 const SHIFT_PUNCT: [char; 13] = [',', '.', '/', '1', ';', '\\', '=', '[', ']', '9', '0', '`', '\''];
 
-/// `OnTestKeyDown` does not advance the engine, so it can only say "may eat". With a composition (a candidate window open included: the
-/// caller passes `composing || window`) every mapped key may be eaten; that covers what the core takes with a window open (rules 3v-8: the digits 1-9,
-/// Up, Down, Left, Right, Space, Enter, Esc, Backspace, Page Up, Page Down), checked against the real core by the host crate's `window_keys_match_the_core`.
-/// Without one, exactly the keys the core handles with an empty composition (English input and prediction off, standard layout):
-/// a plain character key (a Zhuyin, tone or punctuation key, rules 2, 14, 22a), a Shift+key of the §8.1 punctuation list, and Ctrl+\.
+/// `OnTestKeyDown` does not advance the engine, so it can only say "may eat". With a composition or a candidate window open every mapped key may be
+/// eaten, whatever the scheme; that covers what the core takes with a window open (rules 3v-8, and rules 3m-8m of scheme 1: the digits 1-9, Up, Down, Left, Right,
+/// Space, Enter, Esc, Backspace, Page Up, Page Down, and in scheme 1 every other key too), checked against the real core by the host crate's `window_keys_match_the_core`.
+/// Without one, exactly the keys the core handles with an empty composition (English input and prediction off, standard layout) under `scheme` (the host's
+/// `shanjie_engine_set_key_scheme` value, from this connection's `Welcome`; this module never reads the registry, and a value other than 1 is read as 0): a plain character
+/// key (a Zhuyin, tone or punctuation key, rules 2, 14, 22a), a Shift+key of the §8.1 punctuation list (scheme 1: not Shift+, and Shift+., which
+/// the core passes on, rule 2m), and Ctrl+\ (scheme 1: also Ctrl+, and Ctrl+., rule 1m).
 /// Everything else the core passes through (rules 1 and 22): Space, Shift+letter, Caps Lock on, other modifiers. Those must be
 /// refused here: in an IMM32 host a key `OnTestKeyDown` claims is lost when `OnKeyDown` then lets it go (docs/spec/windows-tip.md §5.4).
-pub fn may_eat(composing: bool, k: &Key) -> bool {
-    if composing {
+pub fn may_eat(scheme: u8, composing: bool, window: bool, k: &Key) -> bool {
+    if composing || window {
         return true;
     }
     if k.kind != KIND_CHAR {
         return false;
     }
+    let ms = scheme == 1;
+    let comma_or_period = k.ch == ',' as u32 || k.ch == '.' as u32;
     match k.modifiers {
         0 => true,
-        MOD_SHIFT => char::from_u32(k.ch).is_some_and(|c| SHIFT_PUNCT.contains(&c)),
-        MOD_CONTROL => k.ch == '\\' as u32,
+        MOD_SHIFT => char::from_u32(k.ch).is_some_and(|c| SHIFT_PUNCT.contains(&c)) && !(ms && comma_or_period),
+        MOD_CONTROL => k.ch == '\\' as u32 || (ms && comma_or_period),
         _ => false,
     }
+}
+
+/// `may_eat` with an empty composition for a thread that has no connection yet, so no `Welcome` and no scheme: only a key that both schemes refuse is
+/// refused without connecting (the caller then connects for any other key and decides again with the scheme it learns).
+pub fn may_eat_either(k: &Key) -> bool {
+    may_eat(0, false, false, k) || may_eat(1, false, false, k)
 }
 
 #[cfg(test)]
@@ -199,47 +209,98 @@ mod tests {
     #[test]
     fn on_test_key_down_with_an_empty_composition() {
         // Plain character keys (Zhuyin, tone, punctuation) and the §8.1 Shift punctuation may be eaten.
-        assert!(may_eat(false, &key(0x41, plain())));
-        assert!(may_eat(false, &key(0x31, plain())));
-        assert!(may_eat(false, &key(0xBC, plain())));
+        assert!(may_eat(0, false, false, &key(0x41, plain())));
+        assert!(may_eat(0, false, false, &key(0x31, plain())));
+        assert!(may_eat(0, false, false, &key(0xBC, plain())));
         for vk in [0xBC, 0xBE, 0xBF, 0x31, 0xBA, 0xDC, 0xBB, 0xDB, 0xDD, 0x39, 0x30, 0xC0, 0xDE] {
-            assert!(may_eat(false, &key(vk, Mods { shift: true, ..plain() })), "Shift+vk {vk:#x}");
+            assert!(may_eat(0, false, false, &key(vk, Mods { shift: true, ..plain() })), "Shift+vk {vk:#x}");
         }
         // What the core passes with an empty composition goes to the app (rules 1 and 22): Space, Shift+letter, Shift+2..8,
         // Shift+-, and any key with Caps Lock on.
-        assert!(!may_eat(false, &key(0x20, plain())));
-        assert!(!may_eat(false, &key(0x41, Mods { shift: true, ..plain() })));
-        assert!(!may_eat(false, &key(0x32, Mods { shift: true, ..plain() })));
-        assert!(!may_eat(false, &key(0xBD, Mods { shift: true, ..plain() })));
-        assert!(!may_eat(false, &key(0x41, Mods { caps: true, ..plain() })));
-        assert!(!may_eat(false, &key(0x31, Mods { caps: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0x20, plain())));
+        assert!(!may_eat(0, false, false, &key(0x41, Mods { shift: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0x32, Mods { shift: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0xBD, Mods { shift: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0x41, Mods { caps: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0x31, Mods { caps: true, ..plain() })));
         // Everything else goes to the app.
         for vk in [0x0D, 0x08, 0x2E, 0x1B, 0x25, 0x27, 0x26, 0x28, 0x24, 0x23, 0x09] {
-            assert!(!may_eat(false, &key(vk, plain())), "vk {vk:#x}");
+            assert!(!may_eat(0, false, false, &key(vk, plain())), "vk {vk:#x}");
         }
         // Ctrl+letter goes to the app; Ctrl+\ may be eaten; Ctrl+Shift+\ may not.
-        assert!(!may_eat(false, &key(0x41, Mods { ctrl: true, ..plain() })));
-        assert!(!may_eat(false, &key(0x20, Mods { ctrl: true, ..plain() })));
-        assert!(may_eat(false, &key(0xDC, Mods { ctrl: true, ..plain() })));
-        assert!(!may_eat(false, &key(0xDC, Mods { ctrl: true, shift: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0x41, Mods { ctrl: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0x20, Mods { ctrl: true, ..plain() })));
+        assert!(may_eat(0, false, false, &key(0xDC, Mods { ctrl: true, ..plain() })));
+        assert!(!may_eat(0, false, false, &key(0xDC, Mods { ctrl: true, shift: true, ..plain() })));
     }
 
     #[test]
     fn on_test_key_down_with_a_composition() {
         for vk in [0x41, 0x31, 0x20, 0x0D, 0x08, 0x2E, 0x1B, 0x25, 0x27, 0x26, 0x28, 0x24, 0x23, 0x09, 0xBC] {
-            assert!(may_eat(true, &key(vk, plain())), "vk {vk:#x}");
+            assert!(may_eat(0, true, false, &key(vk, plain())), "vk {vk:#x}");
         }
-        assert!(may_eat(true, &key(0x41, Mods { ctrl: true, ..plain() })));
+        assert!(may_eat(0, true, false, &key(0x41, Mods { ctrl: true, ..plain() })));
     }
 
     #[test]
     fn on_test_key_down_with_a_window_open() {
-        // The keys of rules 3v-8, with a window open (the caller passes composing || window).
+        // The keys of rules 3v-8, with a window open.
         for vk in [0x31, 0x39, 0x28, 0x26, 0x25, 0x27, 0x20, 0x0D, 0x1B, 0x08] {
-            assert!(may_eat(true, &map_key(vk, plain(), true).unwrap()), "vk {vk:#x}");
+            assert!(may_eat(0, false, true, &map_key(vk, plain(), true).unwrap()), "vk {vk:#x}");
         }
         for vk in [0x21, 0x22] {
-            assert!(may_eat(true, &map_key(vk, plain(), true).unwrap()), "page key {vk:#x}");
+            assert!(may_eat(0, false, true, &map_key(vk, plain(), true).unwrap()), "page key {vk:#x}");
+        }
+    }
+
+    #[test]
+    fn on_test_key_down_in_scheme_1_with_an_empty_composition() {
+        let shift = Mods { shift: true, ..plain() };
+        let ctrl = Mods { ctrl: true, ..plain() };
+        // Shift+, and Shift+. are passed on by the core (rule 2m, K8): refused in scheme 1, still eaten in scheme 0.
+        for vk in [0xBC, 0xBE] {
+            assert!(may_eat(0, false, false, &key(vk, shift)), "scheme 0, Shift+vk {vk:#x}");
+            assert!(!may_eat(1, false, false, &key(vk, shift)), "scheme 1, Shift+vk {vk:#x}");
+        }
+        // The other Shift punctuation is eaten in both.
+        for vk in [0xBF, 0x31, 0xBA, 0xDC, 0xBB, 0xDB, 0xDD, 0x39, 0x30, 0xC0, 0xDE] {
+            assert!(may_eat(0, false, false, &key(vk, shift)) && may_eat(1, false, false, &key(vk, shift)), "Shift+vk {vk:#x}");
+        }
+        // Ctrl+, and Ctrl+. are the full-width marks in scheme 1 (rule 1m), passed on in scheme 0; Ctrl+\ is eaten in both; other Ctrl keys in neither.
+        for vk in [0xBC, 0xBE] {
+            assert!(!may_eat(0, false, false, &key(vk, ctrl)) && may_eat(1, false, false, &key(vk, ctrl)), "Ctrl+vk {vk:#x}");
+            assert!(!may_eat(1, false, false, &key(vk, Mods { ctrl: true, shift: true, ..plain() })), "Ctrl+Shift+vk {vk:#x}");
+            assert!(!may_eat(1, false, false, &key(vk, Mods { ctrl: true, caps: true, ..plain() })), "Ctrl+Caps+vk {vk:#x}");
+        }
+        assert!(may_eat(0, false, false, &key(0xDC, ctrl)) && may_eat(1, false, false, &key(0xDC, ctrl)));
+        assert!(!may_eat(1, false, false, &key(0x41, ctrl)) && !may_eat(1, false, false, &key(0x20, ctrl)));
+        // Unchanged in scheme 1: plain keys eaten; Space, Shift+letter, Enter and the like passed on.
+        assert!(may_eat(1, false, false, &key(0x41, plain())) && may_eat(1, false, false, &key(0xBC, plain())));
+        assert!(!may_eat(1, false, false, &key(0x20, plain())) && !may_eat(1, false, false, &key(0x41, shift)) && !may_eat(1, false, false, &key(0x0D, plain())));
+        // A scheme the host never sends is read as 0.
+        assert!(may_eat(2, false, false, &key(0xBC, shift)) && !may_eat(2, false, false, &key(0xBC, ctrl)));
+    }
+
+    #[test]
+    fn a_composition_or_a_window_eats_every_mapped_key_in_both_schemes() {
+        for scheme in [0u8, 1] {
+            for vk in [0x41, 0x31, 0x20, 0x0D, 0x08, 0x2E, 0x1B, 0x25, 0x27, 0x26, 0x28, 0x24, 0x23, 0x09, 0xBC] {
+                assert!(may_eat(scheme, true, false, &key(vk, plain())) && may_eat(scheme, false, true, &key(vk, plain())), "scheme {scheme} vk {vk:#x}");
+            }
+            assert!(may_eat(scheme, true, false, &key(0x41, Mods { shift: true, ..plain() })));
+            assert!(may_eat(scheme, false, true, &key(0xBC, Mods { ctrl: true, ..plain() })));
+        }
+    }
+
+    #[test]
+    fn without_a_connection_only_a_key_both_schemes_refuse_is_refused() {
+        let shift = Mods { shift: true, ..plain() };
+        let ctrl = Mods { ctrl: true, ..plain() };
+        assert!(may_eat_either(&key(0x41, plain())));
+        assert!(may_eat_either(&key(0xBC, shift)), "eaten in scheme 0");
+        assert!(may_eat_either(&key(0xBC, ctrl)), "eaten in scheme 1");
+        for k in [key(0x20, plain()), key(0x41, shift), key(0x0D, plain()), key(0x41, ctrl), key(0xBD, shift), key(0x41, Mods { caps: true, ..plain() })] {
+            assert!(!may_eat_either(&k));
         }
     }
 }

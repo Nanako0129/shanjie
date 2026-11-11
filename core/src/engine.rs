@@ -620,6 +620,9 @@ struct Cands {
     /// never expands; `first` is the list position of its first visible row.
     vertical: bool,
     first: usize,
+    /// docs/spec/keys-and-composition.md §4.3: the window opened under key scheme 1 (`set_key_scheme`), fixed when it opened like `vertical`. A vertical one then
+    /// moves by whole pages (`candidate_key_ms`), so `first` is always a multiple of `PAGE_SIZE`.
+    ms: bool,
     /// docs/spec/english-mixed.md §6: the last two items are the lower and upper case of a short word (`ENGLISH_SHORT`) the syllable at
     /// this position was typed as; choosing one swaps that one syllable for an English token. Judged by the item's index, never by
     /// a length field.
@@ -641,8 +644,8 @@ struct Cands {
 }
 
 impl Cands {
-    fn new(list: Vec<(String, usize)>, vertical: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
+    fn new(list: Vec<(String, usize)>, vertical: bool, ms: bool) -> Cands {
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, ms, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
     }
 
     fn scroll(&mut self) {
@@ -660,6 +663,9 @@ impl Cands {
         self.first = self.first.min(self.sel).min(self.list.len().saturating_sub(PAGE_SIZE));
         if self.sel >= self.first + PAGE_SIZE {
             self.first = self.sel + 1 - PAGE_SIZE;
+        }
+        if self.ms && self.vertical {
+            self.first = self.sel / PAGE_SIZE * PAGE_SIZE; // whole pages (§4.3)
         }
         self.top = self.top.min((self.list.len() - 1) / PAGE_SIZE);
         if self.expanded {
@@ -730,6 +736,8 @@ pub struct Engine {
     predict_on: bool,
     /// Orientation the next candidate window opens with (default horizontal; `set_candidate_vertical`).
     cand_vertical: bool,
+    /// Key scheme (`set_key_scheme`): 0 the rules of docs/spec/keys-and-composition.md §4.1 (default), 1 the `m` rows. A candidate window keeps the one it opened with (`Cands::ms`).
+    key_scheme: u8,
     /// Whether a symbol in an occupied column opens a new unfinished unit (default off; `set_abbreviation`, docs/spec/prediction.md §6).
     abbr: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
@@ -1121,6 +1129,7 @@ impl Engine {
             pred_sel: None,
             predict_on: true,
             cand_vertical: false,
+            key_scheme: 0,
             abbr: false,
             scan_gate: true,
             pred_dirty: false,
@@ -1837,6 +1846,17 @@ impl Engine {
         self.setting_changed();
         self.cand_vertical = on;
         self.handled()
+    }
+
+    /// The key scheme (docs/spec/keys-and-composition.md §4.1, the `m` rows; default 0): 0 the rules as they are, 1 the Microsoft Zhuyin habits of the Windows text service. Any other value changes nothing
+    /// and gives `Ok(None)` (the C ABI's 2). A candidate window already open keeps the scheme it opened with; with a window open or nothing shown the snapshot equals the output before the call.
+    pub fn set_key_scheme(&mut self, scheme: u32) -> Result<Option<Output>, EngineError> {
+        if scheme > 1 {
+            return Ok(None);
+        }
+        self.setting_changed();
+        self.key_scheme = scheme as u8;
+        self.handled().map(Some)
     }
 
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, docs/spec/prediction.md §6).
@@ -3185,6 +3205,9 @@ impl Engine {
     fn dispatch_key(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         let is_char = k.kind == KeyKind::Char;
+        // The key scheme in force for this key (docs/spec/keys-and-composition.md §4.1.1): the scheme the open window opened with, else the current setting. Read once, here:
+        // a window that closes under rule 8 and lets the key go on does not change it, and a setting changed with a window open does not reach the rows until it closes.
+        let ms = self.cands.as_ref().map_or(self.key_scheme == 1, |c| c.ms);
         // docs/spec/macos-shell.md §8.6.2: Page Up / Down mean something only in an open vertical window, without
         // modifiers; anywhere else the key changes nothing (not even the prediction row) and is not handled.
         if matches!(k.kind, KeyKind::PageUp | KeyKind::PageDown) && !(m == 0 && self.cands.as_ref().is_some_and(|c| c.vertical)) {
@@ -3212,6 +3235,12 @@ impl Engine {
             return self.handled();
         }
         let ctrl_bs = is_char && k.ch == '\\' && m == MOD_CONTROL;
+        // Key scheme 1, K11 (docs/spec/keys-and-composition.md §4.1, step 3): Ctrl+, and Ctrl+. put a full-width mark into the composition, an exception to rule 1 like Ctrl+\
+        // (any unfinished syllable goes, an open window closes). Not with an English run or digit buffer open, nor in the ASCII state: those pass on as rule 1 says.
+        if ms && is_char && m == MOD_CONTROL && (k.ch == ',' || k.ch == '.') && self.run.is_empty() && self.drun.is_none() && !self.ascii {
+            self.clear_pred();
+            return self.insert_punct(if k.ch == ',' { '，' } else { '。' });
+        }
         // 1: pass through, no state change.
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
             return self.passthrough(String::new());
@@ -3294,6 +3323,31 @@ impl Engine {
         if !self.run.is_empty() {
             return self.run_key(k);
         }
+        // Key scheme 1, K8-K10 and K24a (step 7, in rule 2's place for these two keys): Shift+, and Shift+. are the half-width `<` `>`. With a window open they
+        // are eaten (K24a). Nothing composed: passed on (K8). Only an unfinished syllable: it goes and the character is committed, never passed on (K9; an IMM32
+        // host drops a key that was claimed and then passed on, docs/spec/windows-tip.md §5.4). Otherwise the character becomes a half-width unit at the cursor
+        // (K10, and K9a after the unfinished syllable went).
+        if ms && is_char && m == MOD_SHIFT && (k.ch == ',' || k.ch == '.') {
+            if self.cands.is_some() {
+                self.mark_noop();
+                return self.handled();
+            }
+            let c = if k.ch == ',' { '<' } else { '>' };
+            if !self.syls.is_empty() {
+                return self.insert_punct(c);
+            }
+            if self.pend.iter().any(Option::is_some) {
+                self.clear_pend();
+                self.left.clear(); // the app's text changes under the cursor, as at a rule 22 pass-through
+                self.left_full.clear();
+                self.left_cut = false;
+                return Ok(self.view(true, c.to_string()));
+            }
+            self.left.clear();
+            self.left_full.clear();
+            self.left_cut = false;
+            return self.passthrough(String::new());
+        }
         // 2: punctuation.
         let punct = if ctrl_bs {
             Some('、')
@@ -3306,11 +3360,25 @@ impl Engine {
         };
         if let Some(p) = punct {
             // docs/spec/keys-and-composition.md §8.2: into the composition at the cursor, not committed. Anything unfinished is dropped.
-            self.clear_pend();
-            self.cands = None;
-            return self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None);
+            return self.insert_punct(p);
         }
         let plain = m == 0;
+        // Key scheme 1, K3, K3a and K7 (before step 8, with no window open; with one, K24 eats the key in `candidate_key_ms`): Shift+letter. Only an unfinished
+        // syllable: it goes and the upper-case letter is committed (K3). Otherwise the letter becomes a half-width unit at the cursor (K3a after the unfinished
+        // syllable went, K7). Nothing composed: the rules below (rule 22, or an English run).
+        if ms && is_char && m == MOD_SHIFT && k.ch.is_ascii_alphabetic() && self.cands.is_none() {
+            let upper = k.ch.to_ascii_uppercase();
+            if !self.syls.is_empty() {
+                return self.insert_punct(upper);
+            }
+            if self.pend.iter().any(Option::is_some) {
+                self.clear_pend();
+                self.left.clear();
+                self.left_full.clear();
+                self.left_cut = false;
+                return Ok(self.view(true, upper.to_string()));
+            }
+        }
         // docs/spec/english-mixed.md §4.1: Shift+letter starts an English run (the letter in upper case, from the keycap and Shift).
         if is_char && m == MOD_SHIFT && k.ch.is_ascii_alphabetic() && self.shadow_on() {
             return self.start_run(k.ch.to_ascii_uppercase());
@@ -3372,6 +3440,8 @@ impl Engine {
                 self.pred_dirty = true;
             } else if k.kind == KeyKind::Esc {
                 self.clear_pend();
+            } else if k.kind == KeyKind::Enter && ms {
+                self.nothing(old); // K1, K2: Enter and Shift+Enter do nothing
             } else if k.kind == KeyKind::Enter {
                 return self.commit_enter(m); // 12a, 12b
             } else if k.kind == KeyKind::Down && self.pend_prev.is_empty() {
@@ -3410,11 +3480,21 @@ impl Engine {
                 self.pred_dirty = true; // docs/spec/english-mixed.md §8: the row behind English reaches the space unit (empty without the table, as before)
                 return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
             }
+            // Key scheme 1, K5: Space types a half-width space unit; only Down opens the window.
+            KeyKind::Space if ms => return self.insert_punct(' '),
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
             KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.nothing(old),
             KeyKind::Space | KeyKind::Down => self.open_candidates(old),
             KeyKind::Up => self.nothing(old),
-            KeyKind::Char if tone.is_some() => self.nothing(old),
+            KeyKind::Char if tone.is_some() => {
+                // Key scheme 1, K25: a tone key types its mark as a unit, as rule 22a does on an empty composition.
+                if let (1, Some(t)) = (u8::from(ms), tone) {
+                    return self.insert_punct(TONE_MARKS[t].chars().next().unwrap_or(' '));
+                }
+                self.nothing(old)
+            }
+            // Key scheme 1, K6: Tab and Shift+Tab do nothing.
+            KeyKind::Tab if ms => self.nothing(old),
             KeyKind::Right | KeyKind::End if self.cursor == n => self.nothing(old), // nothing moves
             KeyKind::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyKind::Right => self.cursor = (self.cursor + 1).min(n),
@@ -3431,6 +3511,11 @@ impl Engine {
             }
             KeyKind::Delete if self.cursor < n => self.remove_syllable(self.cursor)?,
             KeyKind::Backspace | KeyKind::Delete => self.nothing(old),
+            // Key scheme 1, K19: Shift+Enter sends the composition and the key is handled, so the app gets no line break.
+            KeyKind::Enter if ms => {
+                let commit = self.take_commit();
+                return Ok(self.view(true, commit));
+            }
             KeyKind::Enter => return self.commit_enter(m), // 19, 19a
             KeyKind::Esc => self.clear_all(),
             _ => {
@@ -3444,6 +3529,9 @@ impl Engine {
     /// Rules 3-8 (docs/spec/keys-and-composition.md §4.1, §4.3). `Ok(true)` = consumed; `Ok(false)` = candidates closed, key
     /// continues at rule 9.
     fn candidate_key(&mut self, k: Key) -> Result<bool, EngineError> {
+        if self.cands.as_ref().is_some_and(|c| c.ms && c.vertical) {
+            return self.candidate_key_ms(k);
+        }
         let Some(c) = &mut self.cands else { return Ok(false) };
         let (len, sel, cols) = (c.list.len(), c.sel, PAGE_SIZE);
         let digit = (k.kind == KeyKind::Char && k.modifiers == 0 && ('1'..='9').contains(&k.ch))
@@ -3550,6 +3638,63 @@ impl Engine {
             }
         }
         Ok(true)
+    }
+
+    /// Key scheme 1's rules 3-8 (docs/spec/keys-and-composition.md §4.1, K12-K17 and K21-K24) for a vertical window that opened under it: the visible range is a whole
+    /// page, so `first` stays a multiple of `PAGE_SIZE` and `sel` inside `first..first + PAGE_SIZE`. No key that reaches here closes the window and goes on (rule 8): each is
+    /// consumed, and the ones without a row (Backspace, Tab, Right, Left, Home, Delete, a Zhuyin key, Shift+letter) change nothing. Always `Ok(true)`. The keys of rule 2 (punctuation, Ctrl+\)
+    /// never get here: step 7 closes the window and inserts the mark first, in both schemes.
+    fn candidate_key_ms(&mut self, k: Key) -> Result<bool, EngineError> {
+        let Some(c) = &mut self.cands else { return Ok(false) };
+        let (len, sel, first) = (c.list.len(), c.sel, c.first);
+        let last_first = len.saturating_sub(1) / PAGE_SIZE * PAGE_SIZE;
+        let digit = (k.kind == KeyKind::Char && k.modifiers == 0 && ('1'..='9').contains(&k.ch)).then(|| k.ch as usize - '1' as usize);
+        match (k.kind, digit) {
+            (KeyKind::Char, Some(d)) => {
+                if first + d < len {
+                    self.choose(first + d)?;
+                }
+            }
+            // K16: the next one, across the page; after the last one the first.
+            (KeyKind::Down, _) => {
+                c.sel = if sel + 1 < len { sel + 1 } else { 0 };
+                c.first = c.sel / PAGE_SIZE * PAGE_SIZE;
+            }
+            // K13: the previous one, across the page; before the first one the last.
+            (KeyKind::Up, _) => {
+                c.sel = if sel > 0 { sel - 1 } else { len.saturating_sub(1) };
+                c.first = c.sel / PAGE_SIZE * PAGE_SIZE;
+            }
+            // K14: the next page, its first row selected; after the last page the first.
+            (KeyKind::Space | KeyKind::PageDown, _) => {
+                c.first = if first < last_first { first + PAGE_SIZE } else { 0 };
+                c.sel = c.first;
+            }
+            // K15: the previous page, its first row selected; before the first page the last.
+            (KeyKind::PageUp, _) => {
+                c.first = if first > 0 { first - PAGE_SIZE } else { last_first };
+                c.sel = c.first;
+            }
+            // K22: the last page, its last row selected.
+            (KeyKind::End, _) => {
+                c.sel = len.saturating_sub(1);
+                c.first = last_first;
+            }
+            // K23: Shift+Enter closes the window and chooses nothing.
+            (KeyKind::Enter, _) if k.modifiers & MOD_SHIFT != 0 => self.cands = None,
+            (KeyKind::Enter, _) => self.choose(sel)?,
+            (KeyKind::Esc, _) => self.cands = None,
+            _ => {}
+        }
+        Ok(true)
+    }
+
+    /// Rule 2's insertion, also the key scheme 1 rows that put a character into the composition: anything unfinished goes, an open window closes, and `p` becomes a
+    /// one-character fixed unit at the cursor (docs/spec/keys-and-composition.md §8.2; a half-width one is what `set_ascii` makes).
+    fn insert_punct(&mut self, p: char) -> Result<Output, EngineError> {
+        self.clear_pend();
+        self.cands = None;
+        self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None)
     }
 
     /// docs/spec/keys-and-composition.md §4.3 mouse pick: `index` is a position in the last output's `candidates`: the candidate window's, or, with
@@ -3815,7 +3960,7 @@ impl Engine {
                 let mut list: Vec<(String, usize)> = Self::english_writings(f.map_or(word, |f| f.word.as_str())).into_iter().map(|w| (w, 1)).collect();
                 let zh = f.and_then(|f| f.zh.clone());
                 let zh = zh.and_then(|syl| self.lex.entries(std::slice::from_ref(&syl)).first().map(|(w, _)| (w.to_string(), syl)));
-                let mut c = Cands::new(Vec::new(), self.cand_vertical);
+                let mut c = Cands::new(Vec::new(), self.cand_vertical, self.key_scheme == 1);
                 if let Some((word, syl)) = zh {
                     list.push((word, 1));
                     c.zh = Some(syl);
@@ -3830,7 +3975,7 @@ impl Engine {
                 let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
                 list.push((d.to_string(), 1));
                 list.push((digit_layer::full_width(d).to_string(), 1));
-                let mut c = Cands::new(Vec::new(), self.cand_vertical);
+                let mut c = Cands::new(Vec::new(), self.cand_vertical, self.key_scheme == 1);
                 if let Some((n, syl, word)) = self.digit_syllable_alt(touching + 1) {
                     list.push((word, 1));
                     c.dalt = Some(DigitAlt::Syllable { n, syl });
@@ -3848,7 +3993,7 @@ impl Engine {
                     list.push((w, 1));
                 }
             }
-            self.cands = Some(Cands::new(list, self.cand_vertical));
+            self.cands = Some(Cands::new(list, self.cand_vertical, self.key_scheme == 1));
             return;
         }
         self.open_with_rows(rows);
@@ -3971,7 +4116,7 @@ impl Engine {
             list.push((word.to_ascii_uppercase(), 1));
         }
         if !list.is_empty() {
-            let mut c = Cands::new(list, self.cand_vertical);
+            let mut c = Cands::new(list, self.cand_vertical, self.key_scheme == 1);
             c.alt = alt;
             c.rows = rows;
             c.dalt = digits.map(DigitAlt::Digits);

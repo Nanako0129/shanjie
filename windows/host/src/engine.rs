@@ -13,7 +13,7 @@ use shanjie_win_proto::{Key, Out};
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, MutexGuard, TryLockError};
 
 /// The engine handle crosses threads under the mutex. The assertion below is the precondition for the `unsafe impl`: the core's engine
@@ -43,6 +43,8 @@ struct Shared {
 static SHARED: Mutex<Shared> = Mutex::new(Shared { eng: None, owner: None });
 /// The model is loaded (the pipe exists before it is: until then every `Hello` and `Key` gets `NotReady`).
 static READY: AtomicBool = AtomicBool::new(false);
+/// The key scheme of the installed engine (0 or 1): what every `Welcome` tells the client (docs/spec/windows-tip.md §5.3). Set by `install`, before `READY`.
+static KEY_SCHEME: AtomicU8 = AtomicU8::new(0);
 
 pub fn ready() -> bool {
     READY.load(Ordering::Acquire)
@@ -52,8 +54,14 @@ fn lock_wait() -> MutexGuard<'static, Shared> {
     SHARED.lock().unwrap_or_else(|_| exit(EXIT_POISONED))
 }
 
-/// Puts a loaded engine in place; from now on clients are welcome.
-pub fn install(e: *mut ShanjieEngine) {
+/// The key scheme the installed engine was loaded with (`Welcome.key_scheme`).
+pub fn key_scheme() -> u8 {
+    KEY_SCHEME.load(Ordering::Acquire)
+}
+
+/// Puts a loaded engine in place; from now on clients are welcome. `scheme` is the one `load` gave the engine (0 or 1).
+pub fn install(e: *mut ShanjieEngine, scheme: u32) {
+    KEY_SCHEME.store(scheme as u8, Ordering::Release);
     lock_wait().eng = Some(EnginePtr(e));
     READY.store(true, Ordering::Release);
 }
@@ -77,9 +85,10 @@ unsafe fn snap(f: impl FnOnce(*mut *mut ShanjieOutput) -> i32) -> bool {
     rc == 0
 }
 
-/// The engine of `dir/data` (the folder of this exe, §5.1). `None` when any call fails (the engine built so far is freed).
+/// The engine of `dir/data` (the folder of this exe, §5.1), with key scheme `scheme` (0 or 1; `server::run` reads the registry and passes the value, this
+/// function never reads it, so a test's engine does not depend on the machine it runs on). `None` when any call fails (the engine built so far is freed).
 /// Done without the lock, so a load never holds it.
-pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
+pub fn load(dir: &Path, scheme: u32) -> Option<*mut ShanjieEngine> {
     fn c(p: PathBuf) -> Option<CString> {
         CString::new(p.to_str()?).ok()
     }
@@ -100,6 +109,7 @@ pub fn load(dir: &Path) -> Option<*mut ShanjieEngine> {
             && snap(|o| core_ffi::shanjie_engine_set_abbreviation(e, 0, o))
             && snap(|o| core_ffi::shanjie_engine_set_english(e, 0, o))
             && snap(|o| core_ffi::shanjie_engine_set_candidate_vertical(e, 1, o))
+            && snap(|o| core_ffi::shanjie_engine_set_key_scheme(e, scheme, o))
             && snap(|o| core_ffi::shanjie_engine_set_rerank(e, 0, o))
             && core_ffi::shanjie_engine_set_learning(e, 0) == 0;
         if !ok {
@@ -171,8 +181,8 @@ pub unsafe fn warm_with(e: *mut ShanjieEngine, keys: &[Key]) -> bool {
 
 /// Decodes a fixed fake composition once on the freshly loaded `e` so the first real key does not meet cold model pages, then discards it:
 /// no composition, no context, no learning (it is off). `e` is not installed yet, so `ready()` is still false. If the reset fails the engine
-/// is freed and `dir` is loaded once more, without a warm-up; `None` when that load fails too.
-pub fn warmed(dir: &Path, e: *mut ShanjieEngine) -> Option<*mut ShanjieEngine> {
+/// is freed and `dir` is loaded once more (with `scheme`), without a warm-up; `None` when that load fails too.
+pub fn warmed(dir: &Path, scheme: u32, e: *mut ShanjieEngine) -> Option<*mut ShanjieEngine> {
     if warm_disabled() {
         return Some(e);
     }
@@ -185,7 +195,7 @@ pub fn warmed(dir: &Path, e: *mut ShanjieEngine) -> Option<*mut ShanjieEngine> {
     }
     // SAFETY: freed once, never installed.
     unsafe { core_ffi::shanjie_engine_free(e) };
-    load(dir)
+    load(dir, scheme)
 }
 
 // ---- keys ----

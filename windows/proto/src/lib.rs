@@ -13,7 +13,9 @@
 
 /// 2: `Out` carries `candidate_first` and `candidate_total` and `candidates` is filled (docs/spec/windows-tip.md §5.3). A PROTO 1 host answers a PROTO 2 `Hello` with
 /// `Refuse { 1 }` and the app then passes every key through until the host is replaced.
-pub const PROTO: u16 = 2;
+/// 3: `Welcome` carries `key_scheme` (the key-habit setting of the host's engine, 0 or 1; docs/spec/windows-tip.md §5.3). A PROTO 2 host answers a PROTO 3 `Hello` with
+/// `Refuse { 1 }`, as a PROTO 1 host does a PROTO 2 one.
+pub const PROTO: u16 = 3;
 /// The most candidates one `Out` may carry: the rows of the vertical window (docs/spec/windows-tip.md §5.3, `shanjie.h`).
 pub const CAND_MAX: usize = 9;
 /// The longest candidate text of an `Out`, in UTF-16 units. Measured on the tree (a script over the tracked data files, `eval/holdout` excluded): the longest
@@ -107,7 +109,8 @@ pub struct Out {
 
 #[derive(PartialEq)]
 pub enum ServerMsg {
-    Welcome { build_hash: u64 },
+    /// `key_scheme` is the host engine's `shanjie_engine_set_key_scheme` value (0 or 1); the client's `may_eat` takes the scheme only from here.
+    Welcome { build_hash: u64, key_scheme: u8 },
     /// The layout of this message never changes across protocol versions: it is read whatever the header's version says.
     Refuse { reason: u32 },
     NotReady,
@@ -192,7 +195,10 @@ pub fn encode_server(seq: u64, m: &ServerMsg) -> Option<Vec<u8>> {
     };
     let mut e = Enc::new(PROTO, ty, seq);
     match m {
-        ServerMsg::Welcome { build_hash } => e.u64(*build_hash),
+        ServerMsg::Welcome { build_hash, key_scheme } => {
+            e.u64(*build_hash);
+            e.0.push(*key_scheme);
+        }
         ServerMsg::Refuse { reason } => e.u32(*reason),
         ServerMsg::NotReady | ServerMsg::Busy => {}
         ServerMsg::Out(o) => {
@@ -317,7 +323,7 @@ pub fn decode_server(frame: &[u8]) -> Option<(u64, ServerMsg)> {
     }
     let mut d = Dec(&frame[HEADER_LEN..]);
     let m = match h.ty {
-        T_WELCOME => ServerMsg::Welcome { build_hash: d.u64()? },
+        T_WELCOME => ServerMsg::Welcome { build_hash: d.u64()?, key_scheme: d.u8().filter(|&s| s <= 1)? }, // a scheme the core does not know is a malformed Welcome
         T_REFUSE => ServerMsg::Refuse { reason: d.u32()? },
         T_NOT_READY => ServerMsg::NotReady,
         T_BUSY => ServerMsg::Busy,
@@ -464,7 +470,7 @@ mod tests {
         with_candidates.candidate_first = 9;
         with_candidates.candidate_total = 30;
         vec![
-            ServerMsg::Welcome { build_hash: 42 },
+            ServerMsg::Welcome { build_hash: 42, key_scheme: 1 },
             ServerMsg::Refuse { reason: REFUSE_LIMIT },
             ServerMsg::NotReady,
             ServerMsg::Busy,
@@ -594,12 +600,25 @@ mod tests {
         let mut f = encode_server(3, &ServerMsg::Refuse { reason: REFUSE_PROTO }).unwrap();
         set_proto(&mut f, PROTO + 1);
         assert!(decode_server(&f) == Some((3, ServerMsg::Refuse { reason: REFUSE_PROTO })), "Refuse is read at any version");
-        let mut f = encode_server(3, &ServerMsg::Welcome { build_hash: 1 }).unwrap();
+        let mut f = encode_server(3, &ServerMsg::Welcome { build_hash: 1, key_scheme: 0 }).unwrap();
         set_proto(&mut f, PROTO + 1);
         assert!(decode_server(&f).is_none(), "every other host type needs this version");
         let mut f = encode_client(3, &ClientMsg::Release { ctx: 1 }).unwrap();
         set_proto(&mut f, 0);
         assert!(decode_client(&f).is_none());
+        // PROTO 3: Welcome carries the key scheme, 0 or 1; any other value, or a missing byte, is malformed.
+        for s in [0u8, 1] {
+            let f = encode_server(4, &ServerMsg::Welcome { build_hash: 9, key_scheme: s }).unwrap();
+            assert!(decode_server(&f) == Some((4, ServerMsg::Welcome { build_hash: 9, key_scheme: s })), "scheme {s}");
+        }
+        let mut f = encode_server(4, &ServerMsg::Welcome { build_hash: 9, key_scheme: 0 }).unwrap();
+        *f.last_mut().unwrap() = 2;
+        assert!(decode_server(&f).is_none(), "scheme 2");
+        let f = encode_server(4, &ServerMsg::Welcome { build_hash: 9, key_scheme: 0 }).unwrap();
+        let mut short = f[..f.len() - 1].to_vec();
+        let n = short.len() as u32;
+        short[..4].copy_from_slice(&n.to_le_bytes());
+        assert!(decode_server(&short).is_none(), "a PROTO 2 shaped Welcome");
     }
 
     #[test]

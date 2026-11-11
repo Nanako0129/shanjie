@@ -236,6 +236,17 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = 0;
   CHECK(840, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
+  /* set_key_scheme (docs/spec/keys-and-composition.md §4.1): codes like set_candidate_vertical; 0 is the default and a snapshot with nothing shown. */
+  o = 0;
+  CHECK(850, shanjie_engine_set_key_scheme(0, 1, &o) == 1 && o == 0);
+  CHECK(851, shanjie_engine_set_key_scheme(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(852, shanjie_engine_set_key_scheme(e, 2, &o) == 2 && o == 0);
+  CHECK(853, shanjie_engine_set_key_scheme(e, 1, &o) == 0 && o != 0 && o->handled == 1 && o->candidate_count == 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(854, shanjie_engine_set_key_scheme(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
   /* set_abbreviation (docs/spec/prediction.md §6): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), and turning it off drops them. */
   o = 0;
   CHECK(820, shanjie_engine_set_abbreviation(0, 1, &o) == 1 && o == 0);
