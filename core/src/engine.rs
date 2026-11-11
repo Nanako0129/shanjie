@@ -608,6 +608,19 @@ struct Pred {
     weight: f64,
 }
 
+/// docs/spec/keys-and-composition.md §4.1.1 rule 16u: what the first Up press of a run fixed. The run goes on only while the syllables and the cursor are
+/// as the last press left them and the character before the cursor is the one it put there; anything else starts a new run.
+struct UpRun {
+    syls: Vec<String>,
+    cursor: usize,
+    /// The character shown at the first press, then the single characters of the syllable in §6.1 order.
+    base: Vec<String>,
+    /// The positions in `base` the next presses take (2, then 1, those that exist); empty: the next press opens the window.
+    steps: Vec<usize>,
+    /// The character the last press put before the cursor.
+    shown: String,
+}
+
 struct Cands {
     /// (word, length in syllables)
     list: Vec<(String, usize)>,
@@ -738,6 +751,9 @@ pub struct Engine {
     cand_vertical: bool,
     /// Key scheme (`set_key_scheme`): 0 the rules of docs/spec/keys-and-composition.md §4.1 (default), 1 the `m` rows. A candidate window keeps the one it opened with (`Cands::ms`).
     key_scheme: u8,
+    /// docs/spec/keys-and-composition.md §4.1.1 rule 16u: the run of Up presses in a composition under key scheme 1, set by each swap. Every key past rule 1 and
+    /// 5q that is not Up clears it, and so does the third press (it opens the window); a call that is not a key is caught by `UpRun`'s check.
+    up_run: Option<UpRun>,
     /// Whether a symbol in an occupied column opens a new unfinished unit (default off; `set_abbreviation`, docs/spec/prediction.md §6).
     abbr: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
@@ -1133,6 +1149,7 @@ impl Engine {
             predict_on: true,
             cand_vertical: false,
             key_scheme: 0,
+            up_run: None,
             abbr: false,
             scan_gate: true,
             pred_dirty: false,
@@ -3269,6 +3286,11 @@ impl Engine {
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {
             return self.passthrough(String::new());
         }
+        // Rule 16u: any other key that gets past rules 1 and 5q ends a run of Up presses (the ones above that change the composition, ⌘⌫ and Ctrl+, Ctrl+.,
+        // fail `UpRun`'s check instead).
+        if k.kind != KeyKind::Up {
+            self.up_run = None;
+        }
         // docs/spec/keys-and-composition.md §9.3: in the ASCII state, with a shadow, a printable ASCII character
         // closes an open window or row without choosing (so `1` is a character, never a pick) and then either goes on the English run as
         // typed (the characters `english_of` accepts: no lower case, no tone key, no revert or split) or, being any other character,
@@ -3509,7 +3531,14 @@ impl Engine {
             KeyKind::Space if ms => return self.insert_punct(' '),
             // In front of one (cursor 0) Space opens nothing: the writings list opens with Down only.
             KeyKind::Space if self.cursor == 0 && self.breaks_with_space(0) => self.nothing(old),
+            // Key scheme 1, rule 15d: Down opens the window with the item shown over its span first.
+            KeyKind::Down if ms => {
+                self.open_candidates(old);
+                self.shown_first();
+            }
             KeyKind::Space | KeyKind::Down => self.open_candidates(old),
+            // Key scheme 1, rule 16u: Up swaps the character before the cursor.
+            KeyKind::Up if ms => return self.up_swap(old),
             KeyKind::Up => self.nothing(old),
             KeyKind::Char if tone.is_some() => {
                 // Key scheme 1, K25: a tone key types its mark as a unit, as rule 22a does on an empty composition.
@@ -4150,6 +4179,78 @@ impl Engine {
         }
     }
 
+    /// Key scheme 1, rule 15d (docs/spec/keys-and-composition.md §4.1.1): in the window just opened, the first lexicon item whose text is what the composition shows
+    /// over its span moves to the front of the lexicon items, the others keep their order, and it is selected. The prediction row's items (none on Windows,
+    /// which turns the row off) stay first, and the items tied to the end of the list (a short word's two cases, a digit alternative) and to their positions
+    /// (fuzzy readings) keep working: `alt` is renumbered and the tail is never moved.
+    fn shown_first(&mut self) {
+        let a = self.cursor;
+        let Some(c) = self.cands.as_ref() else { return };
+        let tail = if c.short.is_some() { 2 } else { usize::from(c.dalt.is_some()) };
+        let lo = c.rows.len();
+        let hi = c.list.len().saturating_sub(tail);
+        let found = (lo..hi).find(|&i| {
+            let (w, l) = &c.list[i];
+            let (s, e) = if a == 0 { (0, *l) } else { (a.saturating_sub(*l), a) };
+            e <= self.syls.len() && s < e && self.span_text(s, e) == *w
+        });
+        let Some(j) = found else { return };
+        let Some(c) = self.cands.as_mut() else { return };
+        let item = c.list.remove(j);
+        c.list.insert(lo, item);
+        c.alt = std::mem::take(&mut c.alt).into_iter().map(|(k, r)| (if k == j { lo } else if (lo..j).contains(&k) { k + 1 } else { k }, r)).collect();
+        c.sel = lo;
+        c.first = lo / PAGE_SIZE * PAGE_SIZE;
+    }
+
+    /// Key scheme 1, rule 16u (docs/spec/keys-and-composition.md §4.1.1): Up in a composition (no unfinished syllable, no window). The first press of a run takes
+    /// the character shown before the cursor and the single characters of that syllable (§6.1, lexicon order) and puts the shown one first; the presses
+    /// then choose the third item and the second (as choosing a one-syllable word, `choose`: the rest of the composition freezes, and a re-pick of the
+    /// span keeps the first pick's `pre`, so the commit teaches the last character only), and the press after them opens the window with the shown item first
+    /// (rule 15d). A list of two skips the third item, a list of one opens the window at once. Rule 16 (nothing changes) when the cursor is at 0, the
+    /// syllable before it is punctuation, a space, an English or digit token, its list is empty or the shown character is not in it.
+    fn up_swap(&mut self, old: Vec<Pred>) -> Result<Output, EngineError> {
+        let a = self.cursor;
+        let shown_now = if a > 0 { self.span_text(a - 1, a) } else { String::new() };
+        let run = self.up_run.take().filter(|r| r.syls == self.syls && r.cursor == a && r.shown == shown_now);
+        let mut run = match run {
+            Some(r) => r,
+            None => {
+                if a == 0 || self.is_punct(a - 1) {
+                    self.nothing(old);
+                    return self.handled();
+                }
+                let mut singles: Vec<String> = Vec::new();
+                for (w, _) in self.lex.entries(&self.syls[a - 1..a]) {
+                    if !singles.iter().any(|x| x == w) {
+                        singles.push(w.to_string());
+                    }
+                }
+                if !singles.contains(&shown_now) {
+                    self.nothing(old);
+                    return self.handled();
+                }
+                let mut base = vec![shown_now.clone()];
+                base.extend(singles.into_iter().filter(|w| *w != shown_now));
+                let steps = [2, 1].into_iter().filter(|&i| i < base.len()).collect();
+                UpRun { syls: self.syls.clone(), cursor: a, base, steps, shown: shown_now }
+            }
+        };
+        if run.steps.is_empty() {
+            self.open_candidates(old);
+            self.shown_first();
+            return self.handled();
+        }
+        let i = run.steps.remove(0);
+        self.cands = Some(Cands::new(vec![(run.base[i].clone(), 1)], self.cand_vertical, true));
+        self.choose(0)?;
+        run.syls.clone_from(&self.syls);
+        run.cursor = self.cursor;
+        run.shown = self.span_text(a - 1, a);
+        self.up_run = Some(run);
+        self.chosen()
+    }
+
     /// docs/spec/learning.md §4.2: what to remember as the text before this pick, `None` for punctuation. Re-picking the
     /// exact span of an earlier pick keeps that pick's original text.
     fn pre_pick(&self, start: usize, end: usize) -> Option<String> {
@@ -4439,6 +4540,47 @@ impl Engine {
         self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
+    }
+}
+
+#[cfg(test)]
+mod up_run_tests {
+    use super::*;
+
+    /// docs/spec/keys-and-composition.md §4.1.1 rule 16u: after a call that is not a key, the next Up goes on with the run only if the syllables, the cursor
+    /// and the character before the cursor are what the last press left. Each case changes one of the three in the stored run (as a call that rewrote the
+    /// composition would, with no key in between to clear it) and presses Up twice: a new run swaps on both presses, a run that went on would open the window
+    /// on the second.
+    #[test]
+    fn a_changed_composition_starts_a_new_run() {
+        let text: String = (0..30).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
+        let lex = Arc::new(Lexicon::parse(&text).unwrap());
+        let l: Vec<String> = lex.entries(&["ㄋㄧˇ".to_string()]).into_iter().map(|(w, _)| w.to_string()).collect();
+        let up = |e: &mut Engine| e.key(Key::new(KeyKind::Up)).unwrap();
+        type Change = fn(&mut UpRun);
+        let changes: [(&str, Change); 4] = [
+            ("nothing", |_| {}),
+            ("syllables", |r| r.syls.push("ㄋㄧˇ".to_string())),
+            ("cursor", |r| r.cursor += 1),
+            ("shown", |r| r.shown = "x".to_string()),
+        ];
+        for (name, change) in changes {
+            let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
+            e.set_candidate_vertical(true).unwrap();
+            e.set_key_scheme(1).unwrap();
+            for c in ['s', 'u', '3'] {
+                e.key(Key::ch(c, 0)).unwrap();
+            }
+            assert_eq!(up(&mut e).preedit, l[2], "{name}: the 1st press");
+            change(e.up_run.as_mut().expect("a run after the 1st press"));
+            assert_eq!(up(&mut e).preedit, l[1], "{name}: [l0, l1, l2][1] or [l2, l0, l1][2]");
+            let o = up(&mut e);
+            if name == "nothing" {
+                assert!(o.selected == Some(0) && o.candidates.first() == Some(&l[1]), "nothing changed: the run goes on, the 3rd press opens");
+            } else {
+                assert!(o.selected.is_none() && o.preedit == l[0], "{name}: a new run, its 2nd press swaps to [l2, l0, l1][1]");
+            }
+        }
     }
 }
 

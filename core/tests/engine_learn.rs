@@ -575,6 +575,37 @@ fn learned_word_beyond_per_key_is_enumerated() {
     assert_ne!(type_syls(&mut e, reading).preedit, word, "and only because of the record");
 }
 
+/// Key scheme 1, rule 16u (docs/spec/keys-and-composition.md §4.1.1): Up swaps are picks of one character; two presses and Enter teach the character the run
+/// stopped on (the second press re-picks the span and keeps the first press's `pre`), not the one between.
+#[test]
+fn up_swaps_teach_the_last_character_only() {
+    let s = shared();
+    let reading = "ㄧˋ";
+    let mut e = engine();
+    assert!(e.set_key_scheme(1).unwrap().is_some());
+    e.set_left_context(TAUGHT_AFTER);
+    let shown = type_syls(&mut e, reading).preedit;
+    let mut base = vec![shown.clone()];
+    for (w, _) in s.lex.entries(&syls(reading)) {
+        if !base.iter().any(|x| x == w) {
+            base.push(w.to_string());
+        }
+    }
+    assert!(base.len() > 3 && !base[1..].contains(&shown));
+    assert_eq!(e.key(k(KeyKind::Up)).unwrap().preedit, base[2]);
+    assert_eq!(e.key(k(KeyKind::Up)).unwrap().preedit, base[1]);
+    assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, base[1]);
+    e.set_left_context(TAUGHT_AFTER);
+    assert_eq!(type_syls(&mut e, reading).preedit, base[1], "the last character is taught");
+    e.key(k(KeyKind::Esc)).unwrap();
+    // Without the teach the decoder shows `shown` again (the record is what moved it).
+    let mut fresh = engine();
+    assert!(fresh.set_key_scheme(1).unwrap().is_some());
+    fresh.set_left_context(TAUGHT_AFTER);
+    assert_eq!(type_syls(&mut fresh, reading).preedit, shown);
+    assert!(e.learner().records().iter().all(|r| r.word != base[2]), "the character between is not taught");
+}
+
 // ---------- 6: empty learner changes nothing ----------
 
 fn probe_rows() -> Vec<(String, Syls)> {

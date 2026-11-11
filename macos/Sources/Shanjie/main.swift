@@ -161,12 +161,25 @@ final class DefaultsShiftToggleStore: ShiftToggleStore {
     }
 }
 
-/// The 記錄偶發問題的診斷資料 switch (docs/spec/macos-shell.md §13.3), key `diagLog` in the same domain; absent means on.
+/// The 記錄偶發問題的診斷資料 switch (docs/spec/macos-shell.md §13.3), key `diagLog` in the same domain; absent means on. Observes the key
+/// (KVO on UserDefaults also reports changes made by another process, such as `defaults write`) and empties the log on every change.
 @MainActor
-final class DefaultsDiagLogStore: DiagLogStore {
+final class DefaultsDiagLogStore: NSObject, DiagLogStore {
     var diagLog: Bool? {
         get { UserDefaults.standard.object(forKey: "diagLog") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "diagLog") }
+    }
+
+    override init() {
+        super.init()
+        UserDefaults.standard.addObserver(self, forKeyPath: "diagLog", options: [], context: nil)
+    }
+
+    // ponytail: never removed; the store lives as long as `App.shell`, which is the whole process.
+    nonisolated override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?,
+                                           context: UnsafeMutableRawPointer?) {
+        let changed: @Sendable () -> Void = { MainActor.assumeIsolated { App.shell?.diag.storeChanged() } }
+        if Thread.isMainThread { changed() } else { DispatchQueue.main.async(execute: changed) }
     }
 }
 

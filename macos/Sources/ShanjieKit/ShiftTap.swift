@@ -31,10 +31,12 @@ public struct ShiftTap {
     /// longer be a tap (`nil` while it still can), and whether a key went down since (a capital: not recorded at all).
     private var press: (key: UInt16, at: TimeInterval, otherDown: Bool, spoiled: Outcome?, interrupted: Bool)?
 
-    /// docs/spec/macos-shell.md §13.1: a key went down while a Shift was (or may have been) held, since both Shift keys were last up. While
-    /// set, a release that is not a tap is not recorded (`nil`): with the two Shift keys overlapping, the press record of the key that was
-    /// interrupted can be replaced by the other side's, and its release would otherwise tell a capital apart. The toggle decision never
-    /// reads it.
+    /// docs/spec/macos-shell.md §13.1: a key went down while a Shift was (or may have been) held, since both Shift keys were last up or
+    /// the last clean press and release. While set, a release that is not a tap is not recorded (`nil`): with the two Shift keys
+    /// overlapping, the press record of the key that was interrupted can be replaced by the other side's, and its release would otherwise
+    /// tell a capital apart. A clean press and release (its own key, no key since its press) clears it too: that press was made after the
+    /// last key, every release clears the press record, so what follows depends on later events only; without it a stale bit of the other
+    /// side would keep it set for good. The toggle decision never reads it.
     private var typedSinceAllUp = false
 
     public init() {}
@@ -58,7 +60,7 @@ public struct ShiftTap {
     /// is in the flags; `capsLock`: the light is on; `now`: the event's time; `processedAt`: the time this event is handled, on the same
     /// clock as `now` (the system uptime); `mouseAgo`: seconds since the latest mouse-button press, asked only when it can decide (a
     /// release). The outcome of a Shift release; `nil` for anything else, for a release after a key (a capital), and for a release that is
-    /// not a tap after a key while both Shift keys were not yet all up.
+    /// not a tap after a key while both Shift keys were not yet all up and no clean press and release came since.
     public mutating func event(keyCode: UInt16, leftDown: Bool, rightDown: Bool, others: Bool, capsLock: Bool, now: TimeInterval,
                                processedAt: TimeInterval, mouseAgo: () -> TimeInterval) -> Outcome? {
         guard Self.shiftKeys.contains(keyCode) else {
@@ -71,9 +73,11 @@ public struct ShiftTap {
             press = (keyCode, now, otherDown, others ? .modifierAtPress : capsLock ? .capsLockAtPress : nil, false)
             return nil
         }
+        // Read before the defer clears the press; the reset takes effect from the next release, this one is judged with the flag as it was.
+        let clean = press.map { $0.key == keyCode && !$0.interrupted } ?? false
         defer {
             press = nil
-            if down.isEmpty { typedSinceAllUp = false }
+            if down.isEmpty || clean { typedSinceAllUp = false }
         }
         let outcome = release(keyCode: keyCode, otherDown: otherDown, others: others, capsLock: capsLock, now: now, processedAt: processedAt,
                               mouseAgo: mouseAgo)

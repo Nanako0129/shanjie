@@ -418,6 +418,84 @@ final class DiagLogTests: XCTestCase {
         XCTAssertTrue(shell.diag.isEmpty, "the old entries are gone once it is on again")
     }
 
+    private func makeShell(store: DiagLogStore) -> Shell {
+        Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+              dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+              abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+              quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
+              candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(),
+              profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+              diagLogStore: store)
+    }
+
+    /// docs/spec/macos-shell.md §13.3 (a, a2, b): once turned off, the entries never come back: not when the change notification
+    /// (`storeChanged()`) is handled after it went on again, not when it is handled with the store still on (off and on both landed first),
+    /// not when the settings window turns it on with no event in between.
+    func testOldEntriesNeverComeBackAfterAnOff() {
+        let viaNotificationAfterOn: (MemoryDiagLogStore, Shell) -> Void = { store, shell in
+            store.diagLog = false; shell.diag.storeChanged(); store.diagLog = true
+        }
+        let offAndOnBeforeTheNotification: (MemoryDiagLogStore, Shell) -> Void = { store, shell in
+            store.diagLog = false; store.diagLog = true; shell.diag.storeChanged()
+        }
+        let onFromSettings: (MemoryDiagLogStore, Shell) -> Void = { store, shell in store.diagLog = false; shell.diag.enabled = true }
+        for (name, change) in [("a", viaNotificationAfterOn), ("a2", offAndOnBeforeTheNotification), ("b", onFromSettings)] {
+            let store = MemoryDiagLogStore()
+            let shell = makeShell(store: store)
+            Controller(shell).session.activate()
+            XCTAssertFalse(shell.diag.isEmpty, name)
+            change(store, shell)
+            XCTAssertTrue(shell.diag.enabled, name)
+            XCTAssertTrue(shell.diag.isEmpty, "\(name): the old entries are gone")
+            XCTAssertEqual(lines(shell).count, 1, "\(name): the export has the header only")
+        }
+    }
+
+    /// (g) The preview sheet was open when the log was emptied (turned off outside the window): 複製 copies nothing.
+    func testAPreviewTakenBeforeAnEmptyingIsNotCopied() {
+        let store = MemoryDiagLogStore()
+        let shell = makeShell(store: store)
+        Controller(shell).session.activate()
+        let model = SettingsModel(shell: shell)
+        model.openDiagPreview()
+        XCTAssertNotNil(model.diagPreview)
+        store.diagLog = false
+        shell.diag.storeChanged()
+        let pb = FakePasteboard()
+        model.copyDiagPreview(to: pb)
+        XCTAssertEqual(pb.calls, [], "nothing reaches the pasteboard")
+        XCTAssertNil(model.diagPreview, "the sheet closes")
+    }
+
+    /// docs/spec/macos-shell.md §13.1 (c): with the right Shift's bit stuck on, a capital typed with the left Shift records nothing, and a
+    /// clean tap afterwards lets the next release that is not a tap be recorded again.
+    func testAStaleOtherSideBitDoesNotStopTheRecordsForGood() {
+        let shell = makeShell()
+        let c = Controller(shell)
+        c.session.activate()
+        func shifts() -> [String] { events(shell).filter { $0.hasPrefix("shift ") } }
+        time += 5
+        flags(c, 56, 0x6); c.press(Keys.code(for: "a"), flags: .shift); time += 0.1; flags(c, 56, 0x4)
+        XCTAssertEqual(shifts(), [], "the capital records nothing")
+        time += 5
+        flags(c, 56, 0x6); time += 0.1; flags(c, 56, 0x4)
+        XCTAssertEqual(shifts(), ["shift left toggled"])
+        time += 5
+        flags(c, 56, 0x6); time += ShiftTap.SHIFT_TAP_MAX + 0.1; flags(c, 56, 0x4)
+        XCTAssertEqual(shifts(), ["shift left toggled", "shift left tooLong"], "recorded again after the clean tap")
+    }
+
+    /// (e) The clean release that clears the flag is itself judged with the flag as it was: left down, a key, right down, right up too
+    /// late — the right release is not a tap and is not recorded.
+    func testTheCleanReleaseItselfIsJudgedWithTheFlagAsItWas() {
+        let shell = makeShell()
+        let c = Controller(shell)
+        c.session.activate()
+        time += 5
+        flags(c, 56, 0x2); c.press(Keys.code(for: "a"), flags: .shift); flags(c, 60, 0x6); time += ShiftTap.SHIFT_TAP_MAX + 0.1; flags(c, 60, 0x2)
+        XCTAssertEqual(events(shell).filter { $0.hasPrefix("shift ") }, [])
+    }
+
     // MARK: h. bundle IDs
 
     func testABundleIDOutsideTheAllowedCharactersIsAQuestionMark() {
