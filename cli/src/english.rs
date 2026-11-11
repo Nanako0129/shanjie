@@ -547,7 +547,8 @@ fn run_recall(lex: &Arc<Lexicon>, words: &Path, switches: Switches) -> Result<()
     let (mut opened, mut classes) = (0usize, [0usize; 4]);
     for w in &list {
         let (first, syls, preedit) = type_word(&mut e, w)?;
-        opened += (syls == [format!("{}{w}", core::learn::PUNCT_PREFIX)] && preedit == *w) as usize;
+        // The token shows the word's writing (docs/spec/english-mixed.md §4.4): `google` typed is `Google` on the screen.
+        opened += (syls == [format!("{}{w}", core::learn::PUNCT_PREFIX)] && preedit == core::engine::english_writing(w)) as usize;
         classes[first.map_or(3, |k| k as usize)] += 1;
     }
     println!("{sha}\t{}\t{opened}\t{}\t{}\t{}\t{}", list.len(), classes[0], classes[1], classes[2], classes[3]);
