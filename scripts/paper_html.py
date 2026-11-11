@@ -50,12 +50,13 @@ def tex_counts(body):
     for keys in re.findall(r"\\cite[tp]?\*?(?:\[[^\]]*\])*\{([^}]*)\}", body):
         cited.update(k.strip() for k in keys.split(","))
     m = body.replace(r"\ngram", "$n$-gram").replace(r"\$", "")
+    numbered = len(re.findall(r"\\begin\{equation\}", m))
     display = len(re.findall(r"\\begin\{(?:equation|align|gather|multline)\*?\}", m)) + len(re.findall(r"(?<!\\)\\\[", m))
     m = re.sub(r"\\begin\{(equation|align|gather|multline)(\*?)\}.*?\\end\{\1\2\}", "", m, flags=re.S)
     dollars = m.count("$")
     if dollars % 2:
         sys.exit("STOP: odd number of $ in the source")
-    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\(")
+    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered
 
 
 def crop_figure(pdf, page, box, dest):
@@ -75,6 +76,7 @@ def self_test():
     tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \begin{equation}x\label{eq:x}\end{equation}"
            "\n" r"\subsection{Sub}\label{sec:sub} \ref{app:a} \eqref{eq:x} \ref{tab:t}" "\n" r"\appendix"
            "\n" r"\section{App}\label{app:a}")
+    global page
     page = ('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n<li><a href="#app:a" id="toc-app:a">App</a></li>\n'
             '<section id="sec:one" class="level2">\n<h2>One</h2><math display="inline">a</math>'
             '<math display="block"><annotation>x\\label{eq:x}</annotation></math>\n'
@@ -99,12 +101,18 @@ def self_test():
         assert '<a href="#app:a">A</a><a href="#eq:x">(1)</a><a href="#tab:t">1</a>' in out, out
         assert '<span class="secno">附錄 A</span> App' in out and '<span class="secno">1.1</span> Sub' in out
         assert out.index('id="references"') < out.index('<section id="app:a"') and '表 1：' in out
-        try:
-            run(aux.replace("{A}", "{B}"))
-        except SystemExit as e:
-            assert "STOP" in str(e)
-        else:
-            raise AssertionError("a wrong appendix letter passed")
+        good = page
+        for what, bad_aux, bad_page in (
+                ("a wrong appendix letter", aux.replace("{A}", "{B}"), good),
+                ("a script from another host", aux, good.replace("<h2>One</h2>", '<h2>One</h2><script src="//h/x.js"></script>')),
+                ("an unnumbered display formula", aux, good.replace("<h2>App</h2>", '<h2>App</h2><math display="block">y</math>'))):
+            page = bad_page
+            try:
+                run(bad_aux)
+            except SystemExit as e:
+                assert "STOP" in str(e)
+            else:
+                raise AssertionError(f"{what} passed")
     print("self-test ok")
 
 
@@ -114,7 +122,7 @@ def main():
     page, tex, aux, pdf, tsv, figdir = sys.argv[1:]
     s = open(page, encoding="utf-8").read()
     labels = aux_labels(aux)
-    n_sections, n_main, n_figures, cited, n_math = tex_counts(tex_body(tex))
+    n_sections, n_main, n_figures, cited, n_math, n_numbered = tex_counts(tex_body(tex))
     figs = {}
     for line in open(tsv, encoding="utf-8"):
         if line.strip() and not line.startswith("#"):
@@ -171,8 +179,9 @@ def main():
 
     s = re.sub(r'<li>\s*<a href="#([^"]+)"\s+id="toc-[^"]+">', toc, s)
 
-    # Display equations: every one is an `equation` environment, numbered in order.
-    count = {"eq": 0, "tab": 0, "fig": 0}
+    # Display equations are numbered in order, which is right only while every one is an `equation` environment
+    # (an unnumbered \[ \] or a multi-line align would shift the numbers): the check below stops otherwise.
+    count = {"eq": 0, "tab": 0, "fig": 0, "img": 0}
 
     def equation(m):
         count["eq"] += 1
@@ -184,6 +193,8 @@ def main():
         return f'<span class="eqn"{anchor}>{m.group(0)}<span class="eqno">({count["eq"]})</span></span>'
 
     s = re.sub(r'<math display="block".*?</math>', equation, s, flags=re.S)
+    check("display equations (numbered on the page / equation environments)", count["eq"], n_numbered)
+    check("display formulas that are not an equation environment", s.count('<math display="block"') - n_numbered, 0)
 
     def table(m):
         count["tab"] += 1
@@ -204,12 +215,14 @@ def main():
             return m.group(0)
         name, pg, box, alt = figs[fid]
         crop_figure(pdf, pg, box, f"{figdir}/{name}")
+        count["img"] += 1
         return (f'<figure id="{fid}">\n<a href="/paper/{name}"><img src="/paper/{name}" '
                 f'alt="{html.escape(alt, quote=True)}" width="{box[2]}" height="{box[3]}"></a>\n'
                 f'<figcaption><span class="capno">圖 {count["fig"]}：</span>')
 
     s = re.sub(r'<figure id="([^"]*)"[^>]*>\s*<figcaption>', figure, s)
-    check("figures (<figure with an image / figure environments)", s.count("<figure id="), n_figures)
+    check("figures (<figure> given an image / figure environments)", count["img"], n_figures)
+    check("figures in the list that the page does not have", sum(1 for k in figs if k not in shown), 0)
 
     # Cross-references: the text LaTeX printed, from the aux file.
     bad = {"aux": 0, "target": 0}
@@ -246,8 +259,10 @@ def main():
     ids = set(re.findall(r'\bid="([^"]+)"', s))
     check("links to an id that is not on the page", sum(1 for h in re.findall(r'href="#([^"]+)"', s) if h not in ids), 0)
     check("unresolved \\ref left in the text", len(re.findall(r"\[(?:sec|eq|tab|fig|app):", s)), 0)
-    outside = re.findall(r'(?:\bsrc|\bsrcset)="(?!/)[^"]*"|<link[^>]*href="(?!/|https://shanjie\.nyanako\.com/)[^"]*"'
-                         r'|url\(|@import|<iframe|<object|<embed', s)
+    # Anything a browser fetches must be a path on this site ("/x", not "//host/x"); <a href> may point anywhere.
+    local = r'(?:/(?!/)|https://shanjie\.nyanako\.com/)'
+    outside = re.findall(rf'\b(?:src|srcset|poster|data|xlink:href)="(?!{local})[^"]*"|<link[^>]*\bhref="(?!{local})[^"]*"'
+                         r'|url\(|@import|<iframe|<object|<embed|<image\b', s)
     check("attributes that load something from another site", len(outside), 0)
 
     with open(page, "w", encoding="utf-8") as f:

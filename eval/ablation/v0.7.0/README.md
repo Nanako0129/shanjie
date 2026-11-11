@@ -55,7 +55,7 @@
    - `--off gate`（預設）：τ＝∞、δ＝0，α、口語融合、遮罩照舊。結果是上表的「拿掉分差閘門」那一列。
    - `--off soft`（只有聊天）：口語項的軟閘門 σ((ll_i−ll_0)/T) 固定為 1，其他照舊。結果是上表的「拿掉軟閘門」那一列。
 
-用 `--out DIR` 寫出的兩份 rowstats，再用 `tools/evalstats.py compare --net` 比，數字和腳本印的相同。
+兩個公開集合用 `--out DIR` 寫出的兩份 rowstats，再用 `tools/evalstats.py compare --net` 比，數字和腳本印的相同；discordtune 只跑了腳本本身。
 
 ## 怎麼重跑
 

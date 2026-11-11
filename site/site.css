@@ -236,8 +236,12 @@ pre.cite { white-space: pre-wrap; overflow-wrap: anywhere; }
 .eqn .eqno { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 /* 行內公式不能折行：手機上比一行寬時，那一段在自己的框裡橫捲，不把版面撐出去 */
 .paper-read :is(p, li, dd, figcaption) { overflow-x: auto; overflow-y: hidden; }
-.paper-read caption { caption-side: top; text-align: left; padding: 0 0 8px; color: var(--ink-2); max-width: var(--prose-max); }
+/* 表格標題不跟著表格變寬：寬表在 .table 裡橫捲時，標題維持一個視窗寬、留在左邊 */
+.paper-read caption { caption-side: top; text-align: left; padding: 0 0 8px; color: var(--ink-2); position: sticky; left: 0;
+                      width: min(var(--prose-max), calc(100vw - 2 * var(--gutter))); }
 .paper-read .table { margin-top: 24px; }
+/* 短欄位（版本、集合名、數字）在手機寬不被擠成一字一行；表格太寬就在 .table 裡橫捲 */
+.paper-read :is(th, td) { min-width: 4.5em; }
 .paper-read figure { margin: 24px 0 0; }
 /* 圖是從 PDF 轉出的黑字 SVG、底色透明：固定鋪白底，深色主題下也看得清楚 */
 .paper-read figure img { display: block; width: 100%; max-width: 760px; height: auto; background: #fff; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
