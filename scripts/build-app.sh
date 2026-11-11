@@ -84,7 +84,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/spec/models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -205,6 +205,8 @@ cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/pack
 # The beauty pack (docs/spec/lexicon-and-packs.md §4.4, §8.3), same arrangement (build inputs beauty-exclude.tsv, beauty-collisions.tsv, beauty-readings.tsv stay out).
 # CC0, so there is no paragraph for it in the CC BY-SA attribution file below.
 cp data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json "$RES/packs/"
+# The meme pack (docs/spec/lexicon-and-packs.md §4.4, §9.3), same arrangement (build input meme-collisions.tsv stays out). CC BY-SA 4.0: its paragraph is in the attribution file below.
+cp data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"
 swift scripts/make-icon.swift "$RES/shanjie.tiff"
@@ -243,7 +245,7 @@ cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (docs/spec/semantic-rerank.md §4.7); no corpus text in it.
 cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, demote.tsv, std-exempt.tsv, digits.tsv, bigram.sjlm,
+overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, packs/meme-add.tsv, packs/meme-sources.tsv, packs/meme.json, demote.tsv, std-exempt.tsv, digits.tsv, bigram.sjlm,
 classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
@@ -262,6 +264,11 @@ packs/it-add.tsv: the optional IT and AI word pack (words and readings only, no 
   (政府資料開放授權條款, https://data.gov.tw/license ); (2) Chinese Wikipedia conversion groups Module:CGroup/IT and
   Module:CGroup/Electronics and the titles of articles in its AI categories (Wikipedia contributors, CC BY-SA 4.0);
   (3) a hand-written list by the project (CC0).
+packs/meme-add.tsv: the optional meme and livestream slang word pack (words and readings only, no definitions). Titles come from
+  Fandom 迷因 Wiki and PTT 鄉民百科 (Fandom) (CC BY-SA 3.0, used under CC BY-SA 4.0 by the 3.0 later-version clause) and Chinese
+  Wikipedia (CC BY-SA 4.0); the usage counts that admitted each word are in packs/meme-sources.tsv. Some candidate strings
+  also came from model suggestions and from a public website that was used only as a source of candidate strings (no text, no definitions).
+  Attribution: 迷因 Wiki contributors, PTT 鄉民百科 contributors (Fandom), Wikipedia contributors.
 names-add.tsv: common proper nouns (brands, shops, companies, schools), always
   on. Built from three sources; the source of every word is listed in
   data/lexicon/names-sources.tsv of the project repository. Attribution, one

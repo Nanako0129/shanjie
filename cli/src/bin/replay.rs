@@ -8,7 +8,7 @@
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
 //! `--rerank-level` (default standard, the App's) is evaluation only (`EPS_SINIT_FINE` 4, `EPS_SINIT_MID` 4 and `EPS_SINIT_COARSE` 2 are constants: docs/spec/learning.md §7.4);
 //! `--sinit-stretches FILE` writes the per-stretch numbers of the rule 10 stretches (`cli::replay::format_sinit_stretches`); each shows in the summary tag only when given, and with `--learn on` a `sinit:` line of counters goes to stderr.
-//! `--packs LIST` (research only; a comma list of acg, it, quotes, beauty) replaces the App's default `acg,it,beauty`; omitted, output is unchanged.
+//! `--packs LIST` (research only; a comma list of acg, it, quotes, meme, beauty) replaces the App's default `acg,it,meme,beauty`; omitted, output is unchanged.
 //! `--strict` (evaluation only) compares the first display, the sent text and the `--correct` target character for character, not through
 //! `core::eval::char_map` and eval/variants.tsv; the tag ends `+strict` only then, and without it the output is unchanged.
 //!
@@ -21,7 +21,7 @@
 //! `Engine::set_reading_decode(false)`) leaves the term out and the tag without these marks. There is no reading-channel term in the fusion any more.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine_packs, format_keys, format_sinit_stretches, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
-use core::engine::{PACK_ACG, PACK_BEAUTY, PACK_IT, PACK_QUOTES};
+use core::engine::{PACK_ACG, PACK_BEAUTY, PACK_IT, PACK_MEME, PACK_QUOTES};
 use core::eval::sha256_hex;
 use core::learn_store::{Opened, FILE};
 use core::lm::Profile;
@@ -125,8 +125,9 @@ fn run() -> Result<(), String> {
                         "acg" => Ok(PACK_ACG),
                         "it" => Ok(PACK_IT),
                         "quotes" => Ok(PACK_QUOTES),
+                        "meme" => Ok(PACK_MEME),
                         "beauty" => Ok(PACK_BEAUTY),
-                        _ => Err("--packs is a comma list of acg, it, quotes, beauty"),
+                        _ => Err("--packs is a comma list of acg, it, quotes, meme, beauty"),
                     })
                     .try_fold(0, |m, b| b.map(|b| m | b))?
             }
@@ -192,10 +193,11 @@ fn run() -> Result<(), String> {
         co8.as_ref().map_or(String::new(), |h| format!(" colloquial.sjlm:{h}"))
     );
     let packs = format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         if packs_mask & PACK_ACG != 0 { "+acg" } else { "" },
         if packs_mask & PACK_QUOTES != 0 { "+quotes" } else { "" },
         if packs_mask & PACK_IT != 0 { "+it" } else { "" },
+        if packs_mask & PACK_MEME != 0 { "+meme" } else { "" },
         if packs_mask & PACK_BEAUTY != 0 { "+beauty" } else { "" }
     );
     let mut e = build_engine_packs(&root, &lm_path, tl.then_some(tl_path.as_path()), colloquial.as_deref(), profile, learn, false, packs_mask)?;

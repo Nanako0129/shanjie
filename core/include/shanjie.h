@@ -103,16 +103,17 @@ int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine 
 #define SHANJIE_PACK_ACG 1u     // bit0 of the packs mask below
 #define SHANJIE_PACK_QUOTES 2u  // bit1: the classic quote pack (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2)
 #define SHANJIE_PACK_IT  4u     // bit2: the IT+AI pack, docs/spec/lexicon-and-packs.md §4.1
-#define SHANJIE_PACK_BEAUTY 16u // bit4: the beauty and skincare pack, docs/spec/lexicon-and-packs.md §4.1, §8 (bit3, 8u, is kept for the meme pack)
+#define SHANJIE_PACK_MEME 8u    // bit3: the meme and livestream slang pack, docs/spec/lexicon-and-packs.md §4.1, §9
+#define SHANJIE_PACK_BEAUTY 16u // bit4: the beauty and skincare pack, docs/spec/lexicon-and-packs.md §4.1, §8
 // acg-pack (docs/spec/lexicon-and-packs.md §4.1, §4.2): word packs. packs is a bit mask (SHANJIE_PACK_ACG = ACG, packs_dir/acg-add.tsv;
-//   SHANJIE_PACK_QUOTES = classic quotes, packs_dir/quotes-add.tsv; SHANJIE_PACK_IT = IT+AI, packs_dir/it-add.tsv; SHANJIE_PACK_BEAUTY = beauty, packs_dir/beauty-add.tsv; the files are read
-//   in that order (ACG, quotes, IT, beauty), the bits combine);
+//   SHANJIE_PACK_QUOTES = classic quotes, packs_dir/quotes-add.tsv; SHANJIE_PACK_IT = IT+AI, packs_dir/it-add.tsv; SHANJIE_PACK_MEME = meme, packs_dir/meme-add.tsv; SHANJIE_PACK_BEAUTY = beauty, packs_dir/beauty-add.tsv; the files are read
+//   in that order (ACG, quotes, IT, meme, beauty), the bits combine);
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
 //   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
-//   2 for a bit outside the mask (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT | SHANJIE_PACK_BEAUTY) or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
+//   2 for a bit outside the mask (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT | SHANJIE_PACK_MEME | SHANJIE_PACK_BEAUTY) or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
 //   be read or parsed. The anime pack's words keep the pack file's score (not capped) and are unknown to the LM when decoding (pack-oov);
-//   the quote pack's, the IT+AI pack's and the beauty pack's words are capped at their corpus frequency like the overlay.
+//   the quote pack's, the IT+AI pack's, the meme pack's and the beauty pack's words are capped at their corpus frequency like the overlay.
 int32_t shanjie_engine_new_packs(const char *data_dir, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
 void    shanjie_engine_free(ShanjieEngine *engine);
 int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput **out);

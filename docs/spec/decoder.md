@@ -60,7 +60,7 @@
 
 ### 2.5 選用詞包詞
 
-- 詞包列寫在詞包檔（目前 `acg-add.tsv`、`quotes-add.tsv`、`it-add.tsv`、`beauty-add.tsv`）的第 4 欄標籤。只有動漫詞包（`PACK_OOV`）的列用到下面的強制標籤 `acg-oov`；資訊、美妝詞包等照一般疊加層封頂。
+- 詞包列寫在詞包檔（目前 `acg-add.tsv`、`quotes-add.tsv`、`it-add.tsv`、`meme-add.tsv`、`beauty-add.tsv`）的第 4 欄標籤。只有動漫詞包（`PACK_OOV`）的列用到下面的強制標籤 `acg-oov`；資訊、迷因、美妝詞包等照一般疊加層封頂。
 - **強制詞**（第 4 欄 `acg-oov`）：解碼時被當成通語不認得的詞，分數就是詞包檔給的值，不封頂、不扣罰分。具體地，每個要用詞 id 的地方一律改用 `CappedLexicon::model_id`（強制詞回 `None`，其他詞回 `Lm::word_id`）：解碼的詞項與句尾項、解碼狀態記下的前一詞與前前詞、段落開頭的固定詞或前文詞、右邊接續的固定詞（`End::Next`）、`Engine::total_score` 走路徑的每個詞（`word3_in`／`eos3_in`／`word_learned_by_id` 吃 `Option<u32>`）。Python `cap_overlay` 與 `decode` 對同一組字串照樣當未知詞。
 - **非強制的詞包詞**（第 4 欄 `acg`）：照一般疊加層封頂，`model_id` 是 `Lm::word_id`；唯一差別是通語沒看過的（次數 0）不扣 `UNSEEN_OVERLAY_PENALTY`。
 - 不受影響的地方：`history()`（左邊前文以詞包詞結尾時仍記那個字串，只有拿它算分的地方經 `model_id` 變成未知詞）、候選窗、預測列、學習、降權表、會意的輸入、常談項。
