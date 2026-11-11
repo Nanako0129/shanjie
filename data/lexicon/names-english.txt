@@ -1,0 +1,8 @@
+# 名單層的英文寫法（docs/spec/lexicon-and-packs.md §3、docs/spec/english-mixed.md §4.4）。一行一個寫法；CC0。
+# 英文段變成 token 時（結束，或聲調鍵切分出來的前段），照打的文字全小寫或只有第一個字母大寫、而且小寫等於某一行的小寫，就寫成那一行；英數狀態下打的不換。
+# 格式和 data/english-extra.txt 相同，兩份的小寫不得重複。
+Miyago
+CabLate
+Hanako
+Nanako
+Nyanako

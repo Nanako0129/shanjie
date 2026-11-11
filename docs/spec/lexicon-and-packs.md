@@ -22,6 +22,7 @@
 
 - `variant-order.tsv`（異體排序表）也在載入時讀，缺檔或有一行不成立都是載入失敗；它的格式與規則在 `docs/spec/decoder.md`，這份不重複。
 - `rerank-protect.tsv`（重排保護詞，§2.12）不是詞庫的一層，不加詞、不改分數：上表各層合併之後才讀，缺檔或有一列不成立都是載入失敗。
+- `names-english.txt`（名單層的英文寫法，§3.1）屬於名單層，但不是解碼的一層：一行一個英文寫法、沒有讀音與標籤欄，編進核心而不是載入的檔，所以沒有缺檔的情況，評測 CLI 的 `--no-names` 也不影響它；只在英文段結束時換大小寫（`docs/spec/english-mixed.md` §4.4）。
 - `mixed-words.tsv`（中英混合詞，`docs/spec/english-mixed.md` §5.7）也不是詞庫的一層：不進解碼，只在候選清單多一項；選用，缺檔或有一列不合規就整張不載入、不回錯誤。
 - 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、迷因、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
@@ -167,7 +168,7 @@
 
 ## 3. 名單層 `names-add.tsv`
 
-常開的專有名詞層（公司、品牌、學校、店家、餐廳、飯店、創作者與節目名）。載入規則見 §1.1；標籤 `names`（主流程）、`creator`、`store`（檔尾追加）。`tools/build_names.py` 產生；`names-add.tsv`、`names-sources.tsv`、`names.json` 以 CC BY-SA 4.0 散布，`names-manual.tsv`、`names-readings.tsv`、`names-creators.tsv`、`names-stores.tsv` 是 CC0 的建置輸入，不隨 App 內附。
+常開的專有名詞層（公司、品牌、學校、店家、餐廳、飯店、創作者與節目名）。載入規則見 §1.1；標籤 `names`（主流程）、`creator`、`store`（檔尾追加）。`tools/build_names.py` 產生；`names-add.tsv`、`names-sources.tsv`、`names.json` 以 CC BY-SA 4.0 散布，`names-manual.tsv`、`names-readings.tsv`、`names-creators.tsv`、`names-stores.tsv` 是 CC0 的建置輸入，不隨 App 內附。名單層另有一份英文寫法 `names-english.txt`（CC0，本專案自寫，編進核心；規則見 `docs/spec/english-mixed.md` §4.4）。
 
 ### 3.1 檔案與載入
 
@@ -180,6 +181,7 @@
 | `names-readings.tsv` | 人工核對過的整名讀音：名字、讀音（音節數要等於字數） |
 | `names-collisions.tsv` | 同音衝突的處置（人工維護的輸入，建置只讀不改） |
 | `names-creators.tsv`、`names-stores.tsv` | 創作者與店家名字的來源檔（§3.5） |
+| `names-english.txt` | 名單層的英文寫法：一行一個寫法（`[A-Za-z]{3,32}`、至少一個大寫字母，`#` 開頭的行與空行略過），和 `data/english-extra.txt` 合成一張正式寫法表，小寫不得重複。編進核心，不由 `tools/build_names.py` 產生、不隨資料夾載入、不受 `--no-names` 影響 |
 
 - 引擎一律載入 `names-add.tsv`（缺檔是載入失敗）；評測 CLI 的 `--no-names` 才把它拿掉。名單層的詞照 §1.4 封頂；名單層的分數已含 `NAMES_BONUS`，載入端不另外加。
 

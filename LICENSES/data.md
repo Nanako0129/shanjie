@@ -15,6 +15,7 @@
 | `data/lexicon/sandhi-add.tsv` | 由 `tools/build_sandhi.py` 從 `mcbpmf-data.txt` 的多字詞產生：「一」「不」的另一種合規讀音（本調↔變調）、「法」的 ㄈㄚˋ 改成 ㄈㄚˇ、「紮」的口語讀音 ㄓㄚ、基底輕聲詞的本調讀音列（標籤 `neutral`）。規則依據教育部《國語辭典簡編本》〈單一音讀〉與 88 年《國語一字多音審訂表》；規則是事實，檔案不含教育部資料。隨 App 內附 | MIT（小麥基底的衍生；全文 `LICENSES/McBopomofo-MIT.txt`） | 小麥注音 |
 | `data/lexicon/variant-order.tsv` | 本專案自寫的異體寫法排序表（溼／濕、姐／姊等 35 組），依台灣公開論壇與 g0v 打字文字的次數排序；不含任何第三方資料，收錄規則寫在檔頭 | **CC0 1.0** | — |
 | `data/lexicon/demote.tsv` | 本專案自寫的降權表（目前一行），來源是使用者回報與探針 `eval/sw/sensitive-reading.txt`；不含第三方資料，收錄條件寫在檔頭 | **CC BY-SA 4.0**（與專案其他資料一致） | — |
+| `data/lexicon/names-english.txt` | 本專案自寫的名單層英文寫法（名字的英文大小寫）；不含第三方資料，格式寫在檔頭。編進核心，和 `data/english-extra.txt` 合成一張表（`docs/spec/english-mixed.md` §4.4） | **CC0 1.0** | — |
 | `data/english-extra.txt` | 本專案自寫的英文正式寫法表（ChatGPT、GitHub、macOS 等，兩百多行）；不含第三方資料，收錄規則寫在檔頭。編進核心（`docs/spec/english-mixed.md` §4.4） | **CC0 1.0** | — |
 | `data/lexicon/rerank-protect.tsv` | 本專案自寫的重排保護詞表（語意校正不得換掉的常用詞，目前 5 個）；不含第三方資料，收錄規則寫在檔頭。隨 App 內附（`Resources/rerank-protect.tsv`），核心載入詞庫時讀它 | **CC0 1.0** | — |
 | `data/lexicon/std-exempt.tsv` | 解碼器讀音項不扣分的 12 對（讀音，字）：詞庫 `mcbpmf-data.txt` 裡該字有兩個以上讀音、教育部《國語辭典簡編本》的第一讀音在詞庫被排在後面的那 12 對，由 `tools/std_exempt.py` 產生（只取簡編本單字條目的注音一式，原資料不散布、不在檔案內）；檔頭記兩份來源的 SHA-256。隨 App 內附（`Resources/std-exempt.tsv`），核心載入模型時讀它 | **CC BY-SA 4.0**；《國語辭典簡編本》為 CC BY-ND 3.0 臺灣（教育部，只用於決定這 12 對讀音，資料本身不散布） | — |

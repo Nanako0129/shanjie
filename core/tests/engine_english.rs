@@ -2082,6 +2082,19 @@ fn a_word_of_the_table_takes_its_writing() {
     assert_eq!(run(&mut e, "S-r u s t _").preedit, "Rust");
 }
 
+/// A writing of the names layer's file (docs/spec/lexicon-and-packs.md §3) is taken the same way; typed in the ASCII state it stays.
+#[test]
+fn a_name_of_the_names_layer_takes_its_writing() {
+    let mut e = eng();
+    assert_eq!(run(&mut e, "S-c a b l a t e _").preedit, "CabLate");
+    assert_eq!(run(&mut e, "Enter").commit, "CabLate");
+    let mut e = eng();
+    assert_eq!(run(&mut e, "S-n a n a k o _").preedit, "Nanako");
+    let mut e = eng();
+    e.set_ascii(true).unwrap();
+    assert_eq!(run(&mut e, "c a b l a t e _").preedit, "cablate");
+}
+
 /// Any other casing is what the user typed with Shift on purpose: it stays.
 #[test]
 fn other_casings_stay_as_typed() {
@@ -2110,6 +2123,16 @@ fn the_head_of_a_tone_split_takes_its_writing() {
     let o = run(&mut e, "S-c h a t g p t s u 3");
     assert!(e.english_split(), "premise: the tone key split the run");
     assert_eq!(o.preedit, format!("ChatGPT{}", shows("ㄋㄧˇ")));
+    // A run that keeps its text (reopened from a writing the user picked) keeps it through the split too.
+    let mut e = eng();
+    run(&mut e, "S-c h a t g p t _ Down");
+    assert_eq!(run(&mut e, "2").preedit, "chatgpt", "premise: the lower case writing was picked");
+    assert_eq!(run(&mut e, "BS").preedit, "chatgp");
+    let o = run(&mut e, "t s u 3");
+    assert!(e.english_split(), "premise: the tone key split the run");
+    assert_eq!(o.preedit, format!("chatgpt{}", shows("ㄋㄧˇ")));
+    // The mark went with that run.
+    assert_eq!(run(&mut e, "S-g i t h u b _").preedit, format!("chatgpt{}GitHub", shows("ㄋㄧˇ")));
 }
 
 /// Backspace after a token the table wrote reopens what was typed, so a letter taken and typed again ends as the first time did; a
