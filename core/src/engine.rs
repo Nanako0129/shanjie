@@ -10,6 +10,7 @@ use crate::lm::{decode_segment_fuzzy, history, rerank_pool, fuzzy_path, CappedLe
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
+use crate::mixed::MixedTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{Learning, RerankLevel, TinyLm, TOPK};
@@ -646,6 +647,10 @@ struct Cands {
     /// docs/spec/english-mixed.md §3.3, §5.2: the window of an English token that a revert made (docs/spec/english-mixed.md §3.2); its last item is the
     /// Chinese syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
     zh: Option<String>,
+    /// docs/spec/english-mixed.md §5.7: the list's mixed-word item, its first, as it stands in `list` (the writing, and the English
+    /// token plus its syllables as the length). No lexicon item has that length (the candidate range stops at the token), so the
+    /// pair names the item; a window that has it carries no prediction row items.
+    mixed: Option<(String, usize)>,
     /// docs/spec/prediction.md §5: the prediction row's items the window opened with. They are the first `rows.len()`
     /// entries of `list` (the length field of a list entry cannot mark them). Choosing one whose
     /// reading is longer than or differs from the typed syllables is choosing it from the row; one over exactly those
@@ -658,7 +663,7 @@ struct Cands {
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool, ms: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, ms, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, ms, short: None, alt: HashMap::new(), zh: None, mixed: None, rows: Vec::new(), dalt: None }
     }
 
     fn scroll(&mut self) {
@@ -889,6 +894,8 @@ pub struct Engine {
     /// of digit-alphabet keys being typed, the keys of the syllable that just closed (docs/spec/english-mixed.md §7.7; `ld_now` is what the current key saw), and
     /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
     digit_table: Option<Arc<DigitTable>>,
+    /// docs/spec/english-mixed.md §5.7: the mixed words (`mixed-words.tsv`, optional). `None`: no item is ever added.
+    mixed: Option<Arc<MixedTable>>,
     digit_cache: Option<Arc<DigitCache>>,
     /// English before Chinese (docs/spec/english-mixed.md §8): the count table (`english-next.tsv`, optional) and the best entry of every
     /// word it names, built once per (lexicon, model). Only the prediction row reads them.
@@ -1116,6 +1123,10 @@ impl Engine {
         e.data_dir = Some(data_dir.to_path_buf());
         // Optional (docs/spec/english-mixed.md §7.2, §7.8): a missing or malformed table leaves the digit feature off and says nothing.
         e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
+        // Optional (docs/spec/english-mixed.md §5.7): a missing table, or one with a row that breaks a rule, loads nothing and says nothing.
+        if let Ok(t) = std::fs::read_to_string(data_dir.join("mixed-words.tsv")) {
+            e.set_mixed_words(&t);
+        }
         // Optional (docs/spec/english-mixed.md §8): absent leaves the feature off; a file that is there and does not parse is a load failure (a shipping error
         // must not switch the feature off unseen).
         match std::fs::read_to_string(data_dir.join("english-next.tsv")) {
@@ -1203,6 +1214,7 @@ impl Engine {
             run_ascii: false,
             run_zh: None,
             digit_table: None,
+            mixed: None,
             digit_cache: None,
             en_table: None,
             en_words: None,
@@ -1823,6 +1835,21 @@ impl Engine {
             return 1;
         }
         self.fixed.iter().find(|f| f.start == i).map_or(1, |f| f.word.chars().count())
+    }
+
+    /// docs/spec/english-mixed.md §5.7: takes `text` as the mixed-words table. A table with any row that breaks a rule is not loaded
+    /// and the table before it goes too (the engine is as it is without one). `Engine::new` calls this with `mixed-words.tsv`;
+    /// tests call it on `with_lexicon` engines.
+    pub fn set_mixed_words(&mut self, text: &str) -> bool {
+        self.mixed = MixedTable::parse(text, &self.lex).map(Arc::new);
+        self.mixed.is_some()
+    }
+    pub fn mixed_words_loaded(&self) -> bool {
+        self.mixed.is_some()
+    }
+    /// Every row of the loaded table as (English part, reading, writing): what the check set's test types.
+    pub fn mixed_words(&self) -> Vec<(String, Vec<String>, String)> {
+        self.mixed.iter().flat_map(|t| t.rows()).map(|(e, r, w)| (e.to_string(), r.to_vec(), w.to_string())).collect()
     }
 
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
@@ -4066,13 +4093,17 @@ impl Engine {
     /// docs/spec/prediction.md §5: the window's list: the row's items in their order, then (without an unfinished
     /// syllable, which has no lexicon candidates) the lexicon's entries for the syllables before the cursor, longest
     /// first, minus the words already listed.
-    fn window_list(&self, rows: Vec<Pred>) -> (Vec<(String, usize)>, HashMap<usize, Vec<String>>, Vec<Pred>) {
-        let mut rows = rows;
+    fn window_list(&self, rows: Vec<Pred>) -> (Vec<(String, usize)>, HashMap<usize, Vec<String>>, Vec<Pred>, Option<(String, usize)>) {
+        // docs/spec/english-mixed.md §5.7: the mixed word is the first item of the list; the window then carries no row items (they are
+        // told apart by being the first `rows.len()` entries), and no lexicon word has its text.
+        let mixed = self.mixed_item();
+        let mut rows = if mixed.is_some() { Vec::new() } else { rows };
         let mut seen: HashSet<String> = rows.iter().map(|p| p.word.clone()).collect();
         let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
+        list.extend(mixed.clone());
         if self.pend.iter().any(Option::is_some) {
             self.variant_move(&mut list, &mut rows);
-            return (list, HashMap::new(), rows);
+            return (list, HashMap::new(), rows, None);
         }
         let a = self.cursor;
         let today = if self.learner.has_new_words() { self.today() } else { 0 };
@@ -4106,7 +4137,19 @@ impl Engine {
                 }
             }
         }
-        (list, alt, rows)
+        (list, alt, rows, mixed)
+    }
+
+    /// docs/spec/english-mixed.md §5.7: with the cursor at the end and no unfinished syllable, an English token and then the syllables
+    /// up to the cursor that the table has as one word: that word and its length (the token and the syllables). Only the readings as
+    /// typed are looked up.
+    fn mixed_item(&self) -> Option<(String, usize)> {
+        let (a, k) = (self.cursor, self.avail());
+        if a != self.syls.len() || k == 0 || a <= k || self.pend.iter().any(Option::is_some) {
+            return None;
+        }
+        let english = english_of(&self.syls[a - k - 1])?;
+        self.mixed.as_ref()?.get(english, &self.syls[a - k..a]).map(|w| (w.to_string(), k + 1))
     }
 
     /// Variant order (docs/spec/decoder.md §2.3): under one reading, a less-typed spelling that the window lists before its
@@ -4157,7 +4200,7 @@ impl Engine {
 
     /// Opens the window on `window_list`; an empty list opens nothing (and the row is gone, as before the prediction row).
     fn open_with_rows(&mut self, rows: Vec<Pred>) {
-        let (mut list, alt, rows) = self.window_list(rows);
+        let (mut list, alt, rows, mixed) = self.window_list(rows);
         // docs/spec/english-mixed.md §7.7: right after a syllable the digit keys closed, its digits are the last item.
         let digits = self.ld_now.take().filter(|_| !list.is_empty());
         if let Some(keys) = &digits {
@@ -4174,6 +4217,7 @@ impl Engine {
             let mut c = Cands::new(list, self.cand_vertical, self.key_scheme == 1);
             c.alt = alt;
             c.rows = rows;
+            c.mixed = mixed;
             c.dalt = digits.map(DigitAlt::Digits);
             c.short = short;
             self.cands = Some(c);
@@ -4188,7 +4232,8 @@ impl Engine {
         let a = self.cursor;
         let Some(c) = self.cands.as_ref() else { return };
         let tail = if c.short.is_some() { 2 } else { usize::from(c.dalt.is_some()) };
-        let lo = c.rows.len();
+        // The mixed word (docs/spec/english-mixed.md §5.7) stays the first item: the shown word goes right after it.
+        let lo = c.rows.len() + usize::from(c.mixed.is_some());
         let hi = c.list.len().saturating_sub(tail);
         let found = (lo..hi).find(|&i| {
             let (w, l) = &c.list[i];
@@ -4319,7 +4364,7 @@ impl Engine {
             self.recompute_pred();
             c.rows = std::mem::take(&mut self.pred);
             c.rows.retain(|p| p.word != word);
-            (c.list, c.alt, c.rows) = self.window_list(std::mem::take(&mut c.rows));
+            (c.list, c.alt, c.rows, c.mixed) = self.window_list(std::mem::take(&mut c.rows));
             c.list.extend(kept);
             if c.list.is_empty() {
                 return Ok(()); // closed, as by Esc
@@ -4476,6 +4521,21 @@ impl Engine {
             return Ok(());
         }
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
+        // docs/spec/english-mixed.md §5.7: the mixed word takes the place of the English token and its syllables as one token of the
+        // punctuation kind (reading `PUNCT_PREFIX` + the writing, fixed to the writing): not a re-pick, nothing is learned.
+        if idx >= c.rows.len() && c.mixed.as_ref() == Some(&(word.clone(), l)) && l <= self.cursor {
+            let start = self.cursor - l;
+            for i in (start..self.cursor).rev() {
+                self.remove_syllable(i)?;
+            }
+            self.cursor = start;
+            self.pred_dirty = true;
+            let commit = self.insert_token(format!("{PUNCT_PREFIX}{word}"), Some(word), None)?.commit;
+            if !commit.is_empty() {
+                self.commit_out = Some(commit);
+            }
+            return Ok(());
+        }
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         // New words of the path as shown, under the readings of their records: read before the span is rewritten below (docs/spec/learning.md §8.5, bookkeeping).
         let path_new = if self.learning { self.path_new_words() } else { Vec::new() };

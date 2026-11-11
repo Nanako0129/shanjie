@@ -1,0 +1,29 @@
+ban|ㄉㄧㄠˋ|ban掉
+beta|ㄅㄢˇ|Beta版
+cp|ㄓˊ|CP值
+debit|ㄎㄚˇ|debit卡
+discord|ㄑㄩㄣˊ|Discord群
+get|ㄅㄨˊ ㄉㄠˋ|get不到
+get|ㄅㄨˋ ㄉㄠˋ|get不到
+hdmi|ㄒㄧㄢˋ|HDMI線
+hold|ㄅㄨˊ ㄓㄨˋ|hold不住
+hold|ㄅㄨˋ ㄓㄨˋ|hold不住
+hold|ㄓㄨˋ|hold住
+ic|ㄎㄚˇ|IC卡
+jr|ㄉㄨㄥ ㄖˋ ㄅㄣˇ|JR東日本
+keroro|ㄐㄩㄣ ㄘㄠˊ|Keroro軍曹
+lamigo|ㄊㄠˊ ㄩㄢˊ|Lamigo桃猿
+ns|ㄅㄢˇ|NS版
+pdf|ㄉㄤˇ|PDF檔
+ph|ㄓˊ|pH值
+pin|ㄇㄚˇ|PIN碼
+polo|ㄕㄢ|Polo衫
+pos|ㄐㄧ|POS機
+pr|ㄓˊ|PR值
+qr|ㄇㄚˇ|QR碼
+raw|ㄉㄤˇ|RAW檔
+san|ㄓˊ|SAN值
+sd|ㄎㄚˇ|SD卡
+sim|ㄎㄚˇ|SIM卡
+sk|ㄏㄞˇ ㄌㄧˋ ㄕˋ|SK海力士
+visa|ㄎㄚˇ|VISA卡

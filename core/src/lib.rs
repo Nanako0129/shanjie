@@ -11,6 +11,7 @@ pub mod fuzzy;
 pub mod learn;
 pub mod learn_store;
 pub mod lm;
+pub mod mixed;
 pub mod predict;
 pub mod reading;
 pub mod tinylm;
