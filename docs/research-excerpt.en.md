@@ -11,7 +11,8 @@ the paragraphs the paper cites, each in full. It is a translation of the Chinese
   only their statistics. A few passages are reworded to state the rule or the fact itself.
 - The anchor before each paragraph (for example `rl-012`) is where the paper cites it. Paragraphs and anchors match the
   Chinese version one to one, with the same numbers.
-- Final as of 2026-11-09; it is not updated after that.
+- Final as of 2026-11-09. Four paragraphs of the plan (`plan-019` to `plan-022`) were added on 2026-11-11; the existing
+  paragraphs and anchors are unchanged.
 
 ## Research log
 
@@ -2097,6 +2098,30 @@ A study of Jevboard (a small tool on Windows that picks characters with Jev), Zi
 - **Typo reports with key sequences** (晶晶): reports in `eval/dev/user-reported.txt` should attach the keys actually pressed, separating "reading right but wrong character chosen" from "reading typed wrong" (「雀科」 is the latter).
 - **Candidate model**: McBopomofoLM (workfunction, weights Apache-2.0) running on the ANE, self-reporting 79.1% whole-sentence accuracy on the Common Voice zh-TW hold-out and P95 19 ms (unverified), corresponds to S5 and S7; measure first on dev302 and our tuning sets.
 - **Awaiting the user's real-device test**: a sentence-by-sentence comparison of 晶晶 and 善解, with a test list of 24 sentences (dev302 wrong sentences, user reports, 一／不／法); the results of 善解 main and S2r have already been computed.
+
+#### Other characters stay put after a pick
+
+<a id="plan-019"></a>
+
+- **Other characters stay put after a pick**: after four revisions, the fifth review measured that revision four made "typing on after a pick" worse than revision three (development-set simulation "delete a two-syllable word, retype it, pick its first character": whole sentences correct 1500 → 1438 of 2165). [2026-10-08] The root of problems such as 「版控」 may be a missing word: 「版控」 is not in the lexicon (measured), freezing after a pick only keeps 「控」 in place, and typing it again in the same context gives 「版空」 (measured). New word B (remembering a new phrase from picks) is done first and freezing after a pick is paused, to be re-evaluated against measurements of Apple Zhuyin (including typing on after a pick). [2026-10-17] After user report row 133 (picking the two-character word 「六步」 turned the preceding 「第」 into 「地」), freezing after a pick and new word B are both taken up again, in parallel. With the branch merged with the mainline of that day, row 133 keeps 「可以做第六步」 in both profiles; the finding that revision four is worse than revision three on the "typing on after a pick" simulation is to be re-measured on the merged code before a decision.
+
+#### S2w: MediaWiki's conversion tables for Simplified-to-Traditional conversion (W, W2)
+
+<a id="plan-020"></a>
+
+- **Status (2026-10-08)**: after the glyph policy was settled by S2f (model-v3), revision two stacked the MW conversion on S2f and rebuilt the model as W2: against model-v3 the gate does not veto, hold-out chat −2 / written +1 (neither significant), but the user-reported 「的市佔這麼低了嗎」 became 「的士站」. v0.3.0 stays on model-v3 and W2 does not ship. [Correction, 2026-10-08] What v0.3.0 shipped is model-v4 (model-v3 plus fingerprint entries).
+
+#### S5k: local judges
+
+<a id="plan-021"></a>
+
+- **S5k is measured (2026-10-05)**: none of the four local models passed the thresholds written down in advance. The best is Qwen3-1.7B 4-bit, per-candidate log-probability with left context: out of sample 87.2% against 84.4% (p = 0.081), with a per-row p95 of 510–640 ms for 8 candidates, above A3's 300 ms. Next: confirm on a larger discordtune sample, shorten the latency, try Qwen3 4B 4-bit, and a separate round on the prompt of the cloud judge.
+
+#### s4-bayes: pick probability
+
+<a id="plan-022"></a>
+
+- **[Status, 2026-10-10]** First slice (a probability-normalised Dirichlet posterior in place of the fixed ε, offline): none of the 40 parameter sets met the conditions: the mirror learning rate of every set is below the current rule's (0–3 of 8 against 7 of 8), and the 4 sets of variant D with α_g = 4 also polluted the tuning set globally. The current rule is kept; the code was not kept on the mainline, and another attempt needs a different design.
 
 ### 3. Risks
 
