@@ -12,7 +12,7 @@
 - `windows/host`：常駐程序 `shanjie-host.exe`，每個使用者的每個登入工作階段一支，只有它載入模型（§5）。
 - `windows/proto`：DLL 與常駐程序之間的線上格式，純 Rust、不分平台（§5.3）。
 - `windows/tip`：TSF 文字服務 DLL，常駐程序的薄客戶端，不相依核心，自己用 Direct2D 與 DirectWrite 畫候選窗（§3.15）。`crate-type = ["cdylib", "rlib"]`（rlib 給單元測試），除了兩個純函式模組（`keys`、`candlayout`，各平台都編、都測）之外都在 `cfg(windows)` 裡，在 macOS 與 Linux 上其餘是空的，不影響既有的建置與測試。
-- CI 的 `windows` job 與 Linux `debug` job 的 rowstats 比對（§2.9）。
+- CI 的 `windows` job，以及它與 Linux `debug` job 的 rowstats 比對（`rowstats` job，§2.9）。
 - 微軟注音量測（§4）：只是參考資料，程式不讀它。
 
 ### 1.2 現況
@@ -84,19 +84,21 @@ Linux `debug` job 在既有步驟之後加三步：
 
 1. `cargo build --release --locked -p cli --bin shanjie-eval`；
 2. `scripts/ci-rowstats.sh rowstats-linux`：跑六組評測（dev302 `--dev 302`、打字測驗 `eval/dev/user-typing.txt`、錯字回報 `eval/dev/user-reported.txt`，各在聊天與書面設定下），Windows 輸入法出貨的旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`，`--threads 4`，各寫一份 `--rowstats`（`--threads` 不改輸出的任何位元組）；
-3. `actions/upload-artifact` 上傳這六份。
+3. `actions/upload-artifact` 上傳這六份（artifact `rowstats-linux`）。
 
-`windows` job（映像 `windows-2025`，`needs: [changes, debug]`，`if` 與其他 job 相同，逾時 45 分鐘，所有步驟用 bash）：
+`windows` job（映像 `windows-2025`，`needs: changes`，和其他 job 同時開跑，`if` 與其他 job 相同，逾時 45 分鐘，所有步驟用 bash）：
 
 1. Rust 1.97.1（與 Linux 比對的那一邊相同）；
 2. checkout（`.gitattributes` 讓資料是 LF）；
 3. `scripts/fetch-models.sh` 取模型並核對 `data/*.sha256`；Git Bash 沒有 `shasum` 時改用 `sha256sum -c`（同一種檢查檔格式）；
 4. `cargo test -p core --release --locked -- --skip …`，跳過七個在 release 下斷言每鍵 p95 < 16 ms 的測試：`replay_standard_chat_production_path`、`replay_standard_302_of_302`、`replay_eten_302_of_302`、`replay_with_english_on`、`replay_with_english_on_and_the_revert_switches_off`、`replay_with_english_and_digits_on`、`perf_two_thousand_new_words_per_key`（4 vCPU 的 runner 量不準；它們的選字斷言在 Linux 與 macOS job 照跑）；
 5. 建 `shanjie-eval`，`scripts/ci-rowstats.sh rowstats-windows` 產生同樣六份；
-6. 下載 Linux 的 artifact，逐檔 `cmp`，數量必須是 6 對 6，任何一份不同就失敗；
+6. 這六份以 artifact `rowstats-windows` 上傳；
 7. 換行檢查：`git ls-files --eol data eval scripts core/tests cli/tests` 沒有 `w/crlf` 或 `w/mixed`，每個 `i/lf` 的檔工作區都是 `w/lf`；
 8. 只編不測：`rustup target add i686-pc-windows-msvc aarch64-pc-windows-msvc` 後 `cargo build --locked -p core --target` 這兩個目標；
 9. `shanjie-tip` 的建置與測試（§3.13）。
+
+`rowstats` job（ubuntu-24.04，`needs: [changes, debug, windows]`，`if` 與其他 job 相同，逾時 5 分鐘）下載兩邊的 artifact，逐檔 `cmp`，數量必須是 6 對 6，任何一份不同就失敗。`debug` 與 `windows` 都成功時它一定會跑；其中一個失敗時它被略過，但整個 run 照樣失敗。
 
 其他 job 不受影響。
 

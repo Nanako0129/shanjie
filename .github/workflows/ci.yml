@@ -149,7 +149,7 @@ jobs:
 
       # docs/spec/windows-tip.md §2.9: the Linux side of the Windows comparison. The evaluation CLI in release, the six rowstats
       # (dev302, the typing test and the user-reported rows, chat and formal) with the shipping flags, and the files as an artifact for the
-      # `windows` job to compare byte for byte (scripts/ci-rowstats.sh is the one copy of the six commands). Both sides run Rust 1.97.1.
+      # `rowstats` job to compare byte for byte with the `windows` job's (scripts/ci-rowstats.sh is the one copy of the six commands). Both sides run Rust 1.97.1.
       - name: Evaluation CLI (release)
         run: cargo build --release --locked -p cli --bin shanjie-eval
 
@@ -164,11 +164,12 @@ jobs:
           retention-days: 1
 
   # docs/spec/windows-tip.md §2.9: the core on x86_64-pc-windows-msvc. The tests pass (minus the per-key p95 assertions, which a
-  # 4 vCPU runner cannot measure and which the Linux and macOS jobs keep), the evaluation CLI's six rowstats equal the Linux job's byte for
-  # byte, the checkout has LF line endings where the data and tests need them, and the core also builds for i686 and aarch64 (build only).
-  # Needs `debug` for its rowstats artifact; skipped exactly when `core` is. Every step runs in bash (Git Bash on the runner), not PowerShell.
+  # 4 vCPU runner cannot measure and which the Linux and macOS jobs keep), the evaluation CLI's six rowstats go up as an artifact for the
+  # `rowstats` job, the checkout has LF line endings where the data and tests need them, and the core also builds for i686 and aarch64 (build only).
+  # Starts beside the other jobs (the comparison with `debug` is the `rowstats` job); skipped exactly when `core` is. Every step runs in bash
+  # (Git Bash on the runner), not PowerShell.
   windows:
-    needs: [changes, debug]
+    needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
@@ -211,22 +212,12 @@ jobs:
       - name: Evaluation rowstats
         run: scripts/ci-rowstats.sh rowstats-windows
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rowstats-linux
-          path: rowstats-linux
-
-      # docs/spec/windows-tip.md §2.9: the six files are the Linux job's, byte for byte.
-      - name: Rowstats equal the Linux job's
-        run: |
-          set -euo pipefail
-          n=0
-          for f in rowstats-linux/*.rowstats; do
-            cmp "$f" "rowstats-windows/$(basename "$f")"
-            n=$((n + 1))
-          done
-          [ "$n" -eq 6 ] || { echo "error: $n Linux rowstats files, not 6" >&2; exit 1; }
-          [ "$(ls rowstats-windows | wc -l)" -eq 6 ] || { echo "error: not 6 Windows rowstats files" >&2; exit 1; }
+          name: rowstats-windows
+          path: rowstats-windows
+          if-no-files-found: error
+          retention-days: 1
 
       # docs/spec/windows-tip.md §2.7: no CRLF in the working tree (a CRLF in digits.tsv switches the digit layer off without a message).
       # `git ls-files --eol` prints `i/<index> w/<working tree> attr/...`: no `w/crlf` or `w/mixed`, and every `i/lf` file is `w/lf`.
@@ -311,6 +302,37 @@ jobs:
 
       - name: Windows client and host tests (release)
         run: cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host
+
+  # docs/spec/windows-tip.md §2.9: the six Windows rowstats equal the Linux job's byte for byte. Its own job so that `windows` need not
+  # wait for `debug`. It runs whenever both succeed (the implicit success() of `if`); when either fails it is skipped and the run fails anyway.
+  rowstats:
+    needs: [changes, debug, windows]
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rowstats-linux
+          path: rowstats-linux
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rowstats-windows
+          path: rowstats-windows
+
+      - name: Rowstats equal the Linux job's
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          for f in rowstats-linux/*.rowstats; do
+            cmp "$f" "rowstats-windows/$(basename "$f")"
+            echo "equal: $(basename "$f")"
+            n=$((n + 1))
+          done
+          [ "$n" -eq 6 ] || { echo "error: $n Linux rowstats files, not 6" >&2; exit 1; }
+          [ "$(ls rowstats-windows | wc -l)" -eq 6 ] || { echo "error: not 6 Windows rowstats files" >&2; exit 1; }
 
   # docs/spec/release-and-ci.md: the Python steps, which used to follow the release tests in `core`, on Linux. They are development
   # tools; their goldens (the dev302 rowstats among them) match byte for byte on Linux. A golden that only matches on macOS
