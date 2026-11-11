@@ -1,4 +1,4 @@
-"""Tests for tools/build_meme_pack.py (the pack is not shipped). Run: python3 -m unittest tools/test_build_meme_pack.py   (from the repo root).
+"""Tests for tools/build_meme_pack.py . Run: python3 -m unittest tools/test_build_meme_pack.py   (from the repo root).
 No network, no evaluation CLI, no real corpus: candidates and counts are small fixtures, the decoder and the reading tool are fakes.
 The counting tool is not in this tree; its output is imitated (three header lines, then string, articles, boards)."""
 import contextlib
@@ -230,7 +230,7 @@ class Pipeline(unittest.TestCase):
         for patch in (mock.patch.object(IT, "check_shipping_lm"), mock.patch.object(T, "have_words", lambda: frozenset({"已有詞"})),
                       mock.patch.object(T, "pack_words", lambda: frozenset()), mock.patch.object(B, "make_readings", fake_readings),
                       mock.patch.object(B, "scores", lambda base: dict(SC)), mock.patch.object(B, "base_lexicon", lambda: None),
-                      mock.patch.object(T, "decoder", lambda: fake_decoder(chat=self.X, formal=self.FORMAL)),
+                      mock.patch.object(T, "decoder", lambda *a, **k: fake_decoder(chat=self.X, formal=self.FORMAL)),
                       mock.patch.object(T, "MIN_WORDS", 1)):
             patch.start()
             self.addCleanup(patch.stop)
@@ -278,7 +278,7 @@ class Pipeline(unittest.TestCase):
     def test_x_is_the_chat_first_place_and_the_formal_one_is_only_a_fourth_column(self):
         seen = []
         self.stage1()
-        with mock.patch.object(T, "decoder", lambda: fake_decoder(chat=self.X, formal={w: "書面不同" for w in self.X}, seen=seen)):
+        with mock.patch.object(T, "decoder", lambda *a, **k: fake_decoder(chat=self.X, formal={w: "書面不同" for w in self.X}, seen=seen)):
             run_main(*self.args("--emit-x", "--counts", self.c1))
         self.assertEqual(set(seen), {("chat", False), ("formal", False)})
         rows = [l.split("\t") for l in get(os.path.join(self.work, "meme-x.tsv")).splitlines()]
@@ -311,7 +311,8 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(m["candidate_stats"]["dropped_ascii"], 1)
         self.assertEqual(m["files"]["meme-add.tsv"]["sha256"], B.sha256_file(os.path.join(self.out, "meme-add.tsv")))
         self.assertEqual(m["sources"], {"統神": 1, "forum": 2})
-        self.assertEqual(m["candidate_files"], {self.cand: B.sha256_file(self.cand)})
+        self.assertEqual(m["candidate_files"], {"cand.tsv": B.sha256_file(self.cand)})        # names only, no temp-dir path
+        self.assertNotIn(self.tmp.name, get(os.path.join(self.out, "meme.json")))
 
     def test_the_x_article_count_is_that_of_the_x_string_not_the_row(self):
         # 拼出詞甲 is counted as a string in the second file: 39 articles (< 40) keeps 我就爛, 40 drops it. The row 我就爛 itself has 40 in the first file.
@@ -346,10 +347,57 @@ class Pipeline(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.final()
 
-    def test_fewer_than_30_words_stops_before_anything_is_written_to_the_pack_dir(self):
+    def test_two_candidate_files_with_the_same_name_stop(self):
+        other = os.path.join(self.tmp.name, "sub", "cand.tsv")
+        os.makedirs(os.path.dirname(other))
+        put(other, "別的詞\n")
+        with self.assertRaises(SystemExit) as e:
+            run_main("--cand", self.cand, other, "--work", self.work, "--emit-candidates")
+        self.assertIn("different names", str(e.exception))
+
+    def test_native_pack_is_refused_for_beauty(self):
+        with self.assertRaises(SystemExit) as e:
+            run_main("--pack", "beauty", "--native-pack", *self.args())
+        self.assertIn("--native-pack only applies to --pack meme", str(e.exception))
+
+    def test_native_pack_hands_the_built_rows_to_the_decoder_as_meme_add_tsv(self):
+        made, dirs = [], []
         self.stage1()
         self.stage2()
-        with mock.patch.object(T, "MIN_WORDS", 30), self.assertRaises(SystemExit) as e:
+
+        def make(*a, **k):
+            made.append(k)
+            inner = fake_decoder(chat=self.X, formal=self.FORMAL)
+
+            def decode(pairs, prof, meme=None):
+                if meme:
+                    dirs.append(sorted(os.listdir(meme)))
+                return inner(pairs, prof, meme)
+            return decode
+        with mock.patch.object(T, "decoder", make):
+            run_main(*self.args("--native-pack", "--counts", self.c1, self.c2))
+        self.assertEqual(made, [{"tag": "meme", "native": True}])
+        self.assertTrue(dirs and all(d == ["meme-add.tsv"] for d in dirs))
+
+    def kept_order(self, *more):
+        self.stage1()
+        self.stage2()
+        run_main(*self.args(*more, "--counts", self.c1, self.c2))
+        return [l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()]
+
+    def test_rows_wrong_in_chat_come_before_the_ones_already_right_in_chat(self):
+        self.assertEqual(self.kept_order(), ["同音多", "我就爛", "只聊天對"])          # 只聊天對 is first in chat without the pack
+
+    def test_rows_of_a_plus_pair_come_last(self):
+        coll = os.path.join(self.tmp.name, "coll.tsv")
+        put(coll, "a b c\t同音多\t+同音少\t兩個都留\n")
+        order = self.kept_order("--collisions", coll)
+        self.assertEqual(order, ["我就爛", "只聊天對", "同音多"])      # without the line 同音多 comes first
+
+    def test_fewer_than_the_minimum_words_stops_before_anything_is_written_to_the_pack_dir(self):
+        self.stage1()
+        self.stage2()
+        with mock.patch.object(T, "MIN_WORDS", 4), self.assertRaises(SystemExit) as e:
             self.final()
         self.assertIsInstance(e.exception.code, str)                                            # a message, so the exit status is non-zero
         self.assertIn("STOP", e.exception.code)
@@ -448,33 +496,83 @@ class Collisions(unittest.TestCase):
         self.assertEqual(len(T.check_words(info, n=99)), 9)         # fewer than n: all of them
 
 
+class Limits(unittest.TestCase):
+    def test_the_meme_minimum_is_10_words_and_the_beauty_one_stays_30(self):
+        self.assertEqual((T.MIN_WORDS, T.MIN_WORDS_BEAUTY), (10, 30))
+
+
 class DecodeCommand(unittest.TestCase):
-    def test_the_shipping_decode_runs_acg_and_it_with_the_meme_rows_appended_to_it(self):
-        with tempfile.TemporaryDirectory() as packs, tempfile.TemporaryDirectory() as meme:
-            put(os.path.join(packs, "acg-add.tsv"), "k\t動漫詞\t-1\tacg\n")
-            put(os.path.join(packs, "it-add.tsv"), "k\t資訊詞\t-1\tit\n")
-            put(os.path.join(meme, "acg-add.tsv"), "k\t迷因詞\t-1\tmeme\n")
-            seen = []
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.packs = os.path.join(self.tmp.name, "packs")
+        os.makedirs(self.packs)
+        for name in ("acg", "it", "beauty", "quotes"):          # quotes-add.tsv is in the folder: the meme decode must still not load it
+            put(os.path.join(self.packs, name + "-add.tsv"), f"k\t{name}詞\t-1\t{name}\n")
+        self.meme = os.path.join(self.tmp.name, "meme")
+        os.makedirs(self.meme)
 
-            def run(cmd, **_):
-                d = cmd[cmd.index("--packs-dir") + 1]
-                seen.append((cmd, get(os.path.join(d, "it-add.tsv")), get(os.path.join(d, "acg-add.tsv"))))
-                put(cmd[cmd.index("--dump") + 1], "1\t1\t答案\t0\n")
+    def decode(self, tag, native=False, on=True, profile="formal"):
+        """one decode call; returns (command, {file name: text} of the folder handed to the CLI)."""
+        seen = []
 
-            with mock.patch.object(T.subprocess, "run", run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"), mock.patch.object(IT, "SHIP_ARGS", ["--ship-flag"]):
-                self.assertEqual(T.decoder(packs)([("詞", ["a"])], "formal", meme), ["答案"])
-                T.decoder(packs)([("詞", ["a"])], "chat")
-            cmd, it, acg = seen[0]
-            self.assertEqual((cmd[cmd.index("--packs") + 1], cmd[cmd.index("--profile") + 1], it, acg), ("acg,it", "formal", "k\t資訊詞\t-1\tit\nk\t迷因詞\t-1\tmeme\n", "k\t動漫詞\t-1\tacg\n"))
-            self.assertIn("--ship-flag", cmd)                                                    # the same shipping flags as the it pack's decoder
-            self.assertEqual(cmd[cmd.index("--threads") + 1], str(B.THREADS))
-            self.assertEqual(seen[1][1], "k\t資訊詞\t-1\tit\n")                                 # no meme rows when decoding the baseline
+        def run(cmd, **_):
+            d = cmd[cmd.index("--packs-dir") + 1]
+            seen.append((cmd, {n: get(os.path.join(d, n)) for n in sorted(os.listdir(d)) if n.endswith("-add.tsv")}))
+            put(cmd[cmd.index("--dump") + 1], "1\t1\t答案\t0\n")
+
+        if on:
+            put(os.path.join(self.meme, "meme-add.tsv" if native else "acg-add.tsv"), "k\t迷因詞\t-1\tmeme\n")
+        with mock.patch.object(T.subprocess, "run", run), mock.patch.object(B, "eval_bin", lambda: "shanjie-eval"), mock.patch.object(IT, "SHIP_ARGS", ["--ship-flag"]):
+            self.assertEqual(T.decoder(self.packs, tag, native)([("詞", ["a"])], profile, self.meme if on else None), ["答案"])
+        return seen[0]
+
+    @staticmethod
+    def packs_of(cmd):
+        return cmd[cmd.index("--packs") + 1]
+
+    def test_the_meme_decode_carries_acg_it_beauty(self):
+        cmd, files = self.decode("meme", on=False, profile="chat")
+        self.assertEqual((self.packs_of(cmd), cmd[cmd.index("--profile") + 1]), ("acg,it,beauty", "chat"))
+        self.assertIn("--ship-flag", cmd)                                                   # the same shipping flags as the it pack's decoder
+        self.assertEqual(cmd[cmd.index("--threads") + 1], str(B.THREADS))
+        self.assertEqual(files["it-add.tsv"], "k\tit詞\t-1\tit\n")                         # no meme rows when decoding the baseline
+
+    def test_the_beauty_decode_carries_acg_it(self):
+        cmd, _ = self.decode("beauty", on=False)
+        self.assertEqual(self.packs_of(cmd), "acg,it")
+
+    def test_the_meme_decode_never_loads_the_quotes_pack_even_when_its_file_is_there(self):
+        for on in (False, True):
+            cmd, _ = self.decode("meme", on=on)
+            self.assertNotIn("quotes", self.packs_of(cmd))
+
+    def test_the_approximate_on_decode_appends_the_meme_rows_to_the_it_file(self):
+        cmd, files = self.decode("meme")
+        self.assertEqual((self.packs_of(cmd), files["it-add.tsv"], files["acg-add.tsv"]), ("acg,it,beauty", "k\tit詞\t-1\tit\nk\t迷因詞\t-1\tmeme\n", "k\tacg詞\t-1\tacg\n"))
+        self.assertNotIn("meme-add.tsv", files)
+
+    def test_native_pack_makes_the_on_decode_carry_acg_it_meme_beauty(self):
+        cmd, files = self.decode("meme", native=True)
+        self.assertEqual(self.packs_of(cmd), "acg,it,meme,beauty")
+        self.assertEqual((files["meme-add.tsv"], files["it-add.tsv"]), ("k\t迷因詞\t-1\tmeme\n", "k\tit詞\t-1\tit\n"))      # the it file is left alone
+
+    def test_native_pack_leaves_the_off_decode_without_meme(self):
+        cmd, files = self.decode("meme", native=True, on=False)
+        self.assertEqual(self.packs_of(cmd), "acg,it,beauty")
+        self.assertNotIn("meme-add.tsv", files)
+
+    def test_the_meme_decoder_needs_the_beauty_file_too(self):
+        os.remove(os.path.join(self.packs, "beauty-add.tsv"))
+        with self.assertRaises(SystemExit):
+            T.decoder(self.packs, "meme")
+        T.decoder(self.packs, "beauty")
 
     def test_a_missing_pack_file_stops_when_the_decoder_is_made(self):
         with tempfile.TemporaryDirectory() as packs:
             put(os.path.join(packs, "acg-add.tsv"), "")
             with self.assertRaises(SystemExit):
-                T.decoder(packs)
+                T.decoder(packs, "beauty")
 
 
 if __name__ == "__main__":

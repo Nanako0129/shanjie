@@ -1,9 +1,11 @@
-"""迷因詞包建置工具（詞包不隨 App 出貨）：由候選檔、兩份論壇 A 用量計數檔與出貨的 data/lm，
+"""迷因詞包建置工具：由候選檔、兩份論壇 A 用量計數檔與出貨的 data/lm，
 產生 data/packs/meme-add.tsv（疊加層格式，標籤 meme）、meme-sources.tsv、meme.json，報告放 build/meme-pack/。
 分數、讀音、排序、同音衝突偵測共用 tools/build_acg_pack.py；出貨 data/lm 的核對、讀音覆寫檔、寫檔共用 tools/build_it_pack.py（import）。
 `--pack beauty`（docs/spec/lexicon-and-packs.md §8.2）：同一支工具建美妝詞包，標籤 beauty、所有檔名的 meme 換成 beauty、種子 20261108、
 自己的 beauty-add.tsv 不算去重；--exclude／--exclude-private 剔除的字串在 collisions 處置檔同一處生效；(b) 的參考名單只收過了門檻的候選；
-beauty.json 的 candidate_files 只記檔名。`--pack meme`（預設）的輸出不變。以下說明以迷因的檔名為例。
+兩個詞包的 .json 的 candidate_files 都只記檔名（兩個候選檔同名就停）。以下說明以迷因的檔名為例。
+解碼用的詞包明列：`--pack meme`（預設）用 acg,it,beauty（迷因以外預設開的詞包；經典台詞詞包即使 quotes-add.tsv 在也不帶），`--pack beauty` 用 acg,it。
+輸出的列先放聊天沒有詞包時打不對的詞，再放本來就對的，最後放處置檔 `+` 列的詞（只有迷因；先後不影響分數）。
 全程不連網。迷因詞包的輸出以 CC BY-SA 4.0 釋出；美妝詞包是 CC0（LICENSES/data.md）。同一份輸入建兩次，輸出逐位元組相同。
 
 候選檔（--cand，可多個，一個檔一個來源）：UTF-8 文字，一行一個，`字串<TAB>來源`；來源欄可省（用檔名去掉副檔名），`#` 開頭與空行略過。
@@ -14,10 +16,11 @@ beauty.json 的 candidate_files 只記檔名。`--pack meme`（預設）的輸�
 
 三個階段（每一階段都用 --cand；讀音覆寫檔 --readings 同詞包目錄的 meme-readings.tsv，格式同 it-readings.tsv，沒有就沒有）：
   1. --emit-candidates                 寫 WORK/meme-candidates.txt（一行一個，去重、照位元組排序）給 main 做第一次計數
-  2. --emit-x --counts C1              收進門檻（看板 ≥ 3 且文章 ≥ 10）的候選，用出貨 CLI（動漫、資訊詞包開，沒有迷因）解碼，
+  2. --emit-x --counts C1              收進門檻（看板 ≥ 3 且文章 ≥ 10）的候選，用出貨 CLI（上面那一組詞包開，沒有迷因本身）解碼，
                                        寫 WORK/meme-x.tsv（候選、讀音、聊天的第一名 X、書面的第一名；書面的只用在「已經打得對」）、
                                        meme-x-strings.txt（一行一個 X，去重、照位元組排序）、meme-x.json（兩者的 SHA-256）
   3. --counts C1 C2                    核對 meme-x.tsv 的雜湊，讀第二次計數（對 meme-x-strings.txt）後依「讓不讓第一名」的規則建置
+     同音衝突偵測的「開」那次，預設把詞包的列接在 it-add.tsv 後面（近似）；`--native-pack`（只有 --pack meme）改成真的 `--packs acg,it,meme,beauty`。
 """
 import argparse
 import collections
@@ -40,10 +43,12 @@ B = IT.B
 PACKS = B.PACKS
 TAG = "meme"
 MIN_BOARDS, MIN_ARTICLES = 3, 10    # 用量門檻：事先固定，量之前 commit
-MIN_WORDS = 30                      # 停止條件：收錄後不到 30 個詞就停
+MIN_WORDS = 10                      # 迷因詞包的停止條件：收錄後不到 10 個詞就停。詞包只收使用者可能想關掉的詞，所以小
+MIN_WORDS_BEAUTY = 30               # 美妝詞包的停止條件：不到 30 個詞就停
 BONUS = 3.0                         # docs/spec/lexicon-and-packs.md §6.2「分數」：同資訊詞包，每列的 log10 分數加 3
 SEEDS, CHECK_N = {"meme": 20261025, "beauty": 20261108}, 60        # 各詞包檢查集的固定種子與抽樣數
 SEED = SEEDS[TAG]
+DECODE_PACKS = {"meme": ("acg", "it", "beauty"), "beauty": ("acg", "it")}     # 解碼開著的詞包：該詞包以外預設開的詞包，經典台詞詞包不在內
 HEAD_FIELDS = ("tree_sha256", "input_sha256", "tool_commit")
 ASCII_ALNUM = re.compile(r"[A-Za-z0-9]")
 NON_HAN = re.compile(r"[^一-鿿]+")
@@ -134,26 +139,32 @@ def read_exclude(path, must_exist=True):
 
 # ---------------------------------------------------------------- 解碼（出貨的 data/lm；動漫、資訊詞包開）
 
-def decoder(packs_dir=PACKS):
-    """decode(pairs, 設定, meme=None)：出貨 CLI 解碼每個 (詞, 讀音)，`--packs acg,it`，回傳第一名；旗標同資訊詞包的解碼器（THREADS、SHIP_ARGS）。
-    meme 給了（detect_collisions 寫的臨時資料夾，裡面的 acg-add.tsv 是要測的迷因列）就把那些列接在資訊詞包後面一起載入——CLI 還沒有 meme 詞包，
-    同格式的列走資訊詞包的路徑（近似；引擎 PR 之後再用 PACK_MEME 重驗）。"""
-    for name in ("acg", "it"):
+def decoder(packs_dir=PACKS, tag=TAG, native=False):
+    """decode(pairs, 設定, meme=None)：出貨 CLI 解碼每個 (詞, 讀音)，開 DECODE_PACKS[tag] 的詞包（meme：acg,it,beauty；beauty：acg,it），回傳第一名；旗標同資訊詞包的解碼器（THREADS、SHIP_ARGS）。
+    meme 給了（detect_collisions 寫的臨時資料夾，裡面是要測的詞包列）就是「開」那次：native=False 時把那些列（acg-add.tsv）接在 it-add.tsv 後面一起載入
+    （近似：把詞包的列走資訊詞包的路徑）；native=True 時那個資料夾裡是 {tag}-add.tsv，連同詞包本身 `--packs` 帶上 acg,it,{tag},beauty 的真位元（只有 tag=meme）。"""
+    names = DECODE_PACKS[tag]
+    for name in names:
         if not os.path.exists(os.path.join(packs_dir, name + "-add.tsv")):
-            raise SystemExit(f"{packs_dir}/{name}-add.tsv is missing (the shipping decode needs the acg and it packs)")
+            raise SystemExit(f"{packs_dir}/{name}-add.tsv is missing (the shipping decode needs the {', '.join(names)} packs)")
 
     def decode(pairs, profile, meme=None):
         with tempfile.TemporaryDirectory() as d:
-            shutil.copy(os.path.join(packs_dir, "acg-add.tsv"), os.path.join(d, "acg-add.tsv"))
-            with open(os.path.join(d, "it-add.tsv"), "wb") as out:
-                for src in (os.path.join(packs_dir, "it-add.tsv"), os.path.join(meme, "acg-add.tsv") if meme else None):
-                    if src:
+            for name in names:
+                if name != "it" or not meme or native:
+                    shutil.copy(os.path.join(packs_dir, name + "-add.tsv"), os.path.join(d, name + "-add.tsv"))
+            if meme and native:
+                shutil.copy(os.path.join(meme, f"{tag}-add.tsv"), os.path.join(d, f"{tag}-add.tsv"))
+            elif meme:
+                with open(os.path.join(d, "it-add.tsv"), "wb") as out:
+                    for src in (os.path.join(packs_dir, "it-add.tsv"), os.path.join(meme, "acg-add.tsv")):
                         with open(src, "rb") as f:
                             shutil.copyfileobj(f, out)
+            on = [n for n in ("acg", "it", tag, "beauty") if n in names or (native and meme and n == tag)]
             rows, dump = os.path.join(d, "rows.txt"), os.path.join(d, "dump.txt")
             with open(rows, "w", encoding="utf-8") as f:
                 f.writelines(f"|{w}|{' '.join(syls)}\n" for w, syls in pairs)
-            subprocess.run([B.eval_bin(), "--lm", B.LM, "--profile", profile, "--rows", rows, "--dump", dump, "--packs", "acg,it", "--packs-dir", d,
+            subprocess.run([B.eval_bin(), "--lm", B.LM, "--profile", profile, "--rows", rows, "--dump", dump, "--packs", ",".join(on), "--packs-dir", d,
                             "--threads", str(B.THREADS), *IT.SHIP_ARGS], check=True, stdout=subprocess.DEVNULL)
             first = {}
             with open(dump, encoding="utf-8") as f:
@@ -258,8 +269,8 @@ def judge(admitted, reading, xs, fs, counts2, packwords=frozenset()):
 
 
 def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozenset(), packwords=frozenset(),
-          collisions_tsv=None, readings_tsv=None, sc=None, info=None, tag=TAG, exclude=None):
-    """最後一段。x_table：read_x 的列。tag：詞包（meme|beauty），決定檔名與 (b) 的參考名單。exclude：--exclude／--exclude-private 的字串（None＝這個詞包沒有剔除）。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)], 讀不出來的詞, 被 (c) 規則丟掉的 ldrop)。"""
+          collisions_tsv=None, readings_tsv=None, sc=None, info=None, tag=TAG, exclude=None, native=False):
+    """最後一段。x_table：read_x 的列。tag：詞包（meme|beauty），決定檔名與 (b) 的參考名單。exclude：--exclude／--exclude-private 的字串（None＝這個詞包沒有剔除）。native：偵測衝突時把詞包的列寫成 {tag}-add.tsv 交給 decode（--native-pack）。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)], 讀不出來的詞, 被 (c) 規則丟掉的 ldrop)。"""
     collisions_tsv = collisions_tsv or os.path.join(PACKS, f"{tag}-collisions.tsv")
     admitted, reading, check, st, unread = prepare(cands, counts1, have, packwords, readings, readings_tsv)
     if sorted((w, " ".join(r)) for w, r in reading.items()) != sorted((w, r) for w, r, *_ in x_table):
@@ -286,7 +297,7 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         rows = B.pack_rows(order, reading, sc, tag=tag)
         # (c)：迷因列把任何既有詞（詞庫任何一層或動漫、資訊詞包）擠下第一名就丟（變調列、書面也算；先出貨的勝）。例外：聊天、主要讀音上被擠下的正是 X，
         # 而且 X 不是別的詞包的詞——這一條讀音已經由 judge 的 X 規則判給迷因了。
-        found = B.detect_collisions(words, reading, rows, ref, decode, existing=existing)
+        found = B.detect_collisions(words, reading, rows, ref, decode, existing=existing, pack_file=f"{tag}-add.tsv" if native else "acg-add.tsv")
         hit = {}
         for r, v in sorted(found.items()):
             for e in v:
@@ -315,6 +326,9 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
     }
     if info is not None:
         info.update(order=order, reading=reading, check={w: check[w] for w in reading})
+    if tag == TAG:      # 列的先後：聊天沒有詞包時打不對的詞，再來本來就對的，最後處置檔 `+` 列的詞；各組內維持原順序，分數不變
+        plus = {w for r in (B.read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else []) if r[2].startswith("+") for w in (r[1], r[2][1:])}
+        rows = sorted(rows, key=lambda r: 2 if r.split("\t")[1] in plus else int(xs[r.split("\t")[1]] == r.split("\t")[1]))
     return {f"{tag}-add.tsv": "".join(rows), f"{tag}-sources.tsv": "".join(srcs)}, manifest, col, dropped, unread, ldrop
 
 
@@ -347,19 +361,21 @@ def main():
     ap.add_argument("--out", default=PACKS)
     ap.add_argument("--collisions")
     ap.add_argument("--readings")
+    ap.add_argument("--native-pack", action="store_true", help="只有 --pack meme、最後一段：衝突偵測「開」的那次用真的 --packs acg,it,meme,beauty，不把列接在 it 檔後面")
     ap.add_argument("--exclude", help="字串<TAB>…（只讀第一欄）；beauty 預設 data/packs/beauty-exclude.tsv（不存在就是空集合），meme 預設沒有")
     ap.add_argument("--exclude-private", help="同 --exclude；beauty.json 只記它的 SHA-256 與筆數，不記路徑與內容")
     a = ap.parse_args()
     tag = a.pack
+    if a.native_pack and tag != TAG:
+        sys.exit("--native-pack only applies to --pack meme (the beauty decode has no pack bit of its own to turn on)")
     a.work = a.work or os.path.join(ROOT, "build", f"{tag}-pack")
     a.collisions = a.collisions or os.path.join(PACKS, f"{tag}-collisions.tsv")
     a.readings = a.readings or os.path.join(PACKS, f"{tag}-readings.tsv")
     cands, cst, cfiles = read_candidates(a.cand)
-    if tag == "beauty":                      # docs/spec/lexicon-and-packs.md §8.2：candidate_files 只記檔名，私人路徑不進公開檔
-        names = [os.path.basename(p) for p in cfiles]
-        if len(set(names)) != len(names):
-            sys.exit("--pack beauty: the --cand files must have different names (beauty.json records them by name)")
-        cfiles = {os.path.basename(p): h for p, h in cfiles.items()}
+    names = [os.path.basename(p) for p in cfiles]          # docs/spec/lexicon-and-packs.md §8.2：candidate_files 只記檔名，私人路徑不進公開檔
+    if len(set(names)) != len(names):
+        sys.exit(f"--pack {tag}: the --cand files must have different names ({tag}.json records them by name)")
+    cfiles = {os.path.basename(p): h for p, h in cfiles.items()}
     cand_text = lines_text(cands)
     os.makedirs(a.work, exist_ok=True)
     if a.emit_candidates:
@@ -375,7 +391,7 @@ def main():
         sys.exit(f"{a.counts[0]}: input_sha256 is not that of the candidates (--emit-candidates) these --cand files give")
     IT.check_shipping_lm()
     have, packwords = have_words(), (pack_words() if tag == TAG else pack_words(tag=tag))      # meme: the call the existing tests stub
-    dec = decoder()
+    dec = decoder(tag=tag, native=a.native_pack)
     if a.emit_x:
         _, reading, _, st, unread = prepare(cands, counts1, have, packwords, B.make_readings, a.readings)
         meta = write_x(a.work, x_rows(reading, dec), tag)
@@ -394,7 +410,7 @@ def main():
     exclude = (ex | exp) if (tag == "beauty" or a.exclude or a.exclude_private) else None
     info = {}
     files, manifest, col, dropped, unread, ldrop = build(cands, counts1, x_table, counts2, dec, have=have, packwords=packwords, collisions_tsv=a.collisions,
-                                                           readings_tsv=a.readings, info=info, tag=tag, exclude=exclude)
+                                                           readings_tsv=a.readings, info=info, tag=tag, exclude=exclude, native=a.native_pack)
     manifest.update(version=IT.sha256_text(files[f"{tag}-add.tsv"])[:8], candidate_files=cfiles, candidate_stats=cst,
                     counts_candidates=dict(h1, sha256=B.sha256_file(a.counts[0])), counts_x=dict(h2, sha256=B.sha256_file(a.counts[1])),
                     dropped_unreadable=len(unread))
@@ -412,8 +428,9 @@ def main():
         with open(os.path.join(a.work, n), "w", encoding="utf-8", newline="\n") as f:
             f.write(t)
     print(report["report.txt"], end="")
-    if manifest["words"] < MIN_WORDS:      # 停止條件：先回報各來源的數量再問；data/packs 一個檔都不寫
-        sys.exit(f"STOP: {manifest['words']} words, fewer than {MIN_WORDS}; nothing written to {a.out}; report the per-source counts before going on")
+    min_words = MIN_WORDS if tag == TAG else MIN_WORDS_BEAUTY
+    if manifest["words"] < min_words:      # 停止條件：先回報各來源的數量再問；data/packs 一個檔都不寫
+        sys.exit(f"STOP: {manifest['words']} words, fewer than {min_words}; nothing written to {a.out}; report the per-source counts before going on")
     IT.write_all(files, manifest, a.out, f"{tag}.json")
 
 

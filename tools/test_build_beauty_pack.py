@@ -31,7 +31,7 @@ class BeautyPipeline(unittest.TestCase):
         for patch in (mock.patch.object(IT, "check_shipping_lm"), mock.patch.object(T, "have_words", lambda: frozenset({"已有詞"})),
                       mock.patch.object(T, "pack_words", lambda *a, **k: frozenset()), mock.patch.object(B, "make_readings", M.fake_readings),
                       mock.patch.object(B, "scores", lambda base: dict(M.SC)), mock.patch.object(B, "base_lexicon", lambda: None),
-                      mock.patch.object(T, "decoder", lambda: M.fake_decoder(chat=P.X, formal=P.FORMAL)), mock.patch.object(T, "MIN_WORDS", 1),
+                      mock.patch.object(T, "decoder", lambda *a, **k: M.fake_decoder(chat=P.X, formal=P.FORMAL)), mock.patch.object(T, "MIN_WORDS_BEAUTY", 1),
                       mock.patch.object(T, "PACKS", self.packs)):        # the default beauty-exclude.tsv is looked up here: none unless a test puts one
             patch.start()
             self.addCleanup(patch.stop)
