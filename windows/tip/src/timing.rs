@@ -9,7 +9,8 @@
 pub const EV_ACTIVATE: u32 = 1;
 /// The model load: written by the host only since the resident host (§5; the DLL loads nothing).
 pub const EV_LOAD: u32 = 2;
-/// One key: in the DLL from entering `OnKeyDown` to the document edited; in the host from the key received to the answer sent.
+/// One key: in the DLL from entering `OnKeyDown` to the document edited and the candidate window updated (shown, moved, redrawn or hidden; docs/spec/windows-tip.md §3.15);
+/// in the host from the key received to the answer sent.
 pub const EV_KEY: u32 = 3;
 /// Diagnostic events (docs/spec/windows-tip.md §3.11): a point in time (start = end) with a numeric reason, never any key or text.
 /// 41-44: OnTestKeyDown answered FALSE because the instance is not active, the client is blocked (since the resident host, §5: the circuit
@@ -49,6 +50,16 @@ pub const EV_IO_FAILED: u32 = 62;
 pub const EV_PASS: u32 = 63;
 pub const EV_HOST_APPCONTAINER: u32 = 64;
 pub const EV_HOST_PEAK: u32 = 65;
+/// docs/spec/windows-tip.md §3.15, written by the DLL (a Medium process) only. 66: one update of the candidate window (start = the `Out` arrived, end = `UpdateLayeredWindow` returned, µs).
+/// 67: the first window of the process was made (start = before the Direct2D and DirectWrite factories, end = after `CreateWindowExW`, µs). 68: where a window was shown,
+/// as six lines in a row whose two columns both hold one number (an `i32` as `u32`): the composition rectangle's left, top, right, bottom, then the window's x, y; physical screen pixels.
+pub const EV_CAND_UPDATE: u32 = 66;
+pub const EV_CAND_FIRST: u32 = 67;
+pub const EV_CAND_POS: u32 = 68;
+/// docs/spec/windows-tip.md §5.2, written by the host only. 69: the warm-up before `install` (start = before the first key, end = after the reset, µs).
+/// 70: a warm-up key the core refused (both columns numbers: its 0-based position in the key list, the return code).
+pub const EV_WARM: u32 = 69;
+pub const EV_WARM_FAILED: u32 = 70;
 
 /// Reasons of event 63.
 pub mod pass {
@@ -213,7 +224,7 @@ mod tests {
         assert!(l == "3\t12\t4000000000000\n");
         assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         assert!(l.matches('\t').count() == 2 && l.matches('\n').count() == 1 && l.ends_with('\n'));
-        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK] {
+        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK, EV_CAND_UPDATE, EV_CAND_FIRST, EV_CAND_POS, EV_WARM, EV_WARM_FAILED] {
             let l = format_line(ev, 0, u64::MAX);
             assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         }

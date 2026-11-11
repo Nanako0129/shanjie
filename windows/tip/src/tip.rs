@@ -1,6 +1,7 @@
 //! The text service object (docs/spec/windows-tip.md §3.5): activation, the key sink, the focus sinks and the composition sink.
 //! One instance per UI thread. The core, in the resident host, decides what a key does (`client` carries it there and back,
 //! docs/spec/windows-tip.md §5); this file maps keys in, applies the answer to the document (`doc`), and ends compositions in time.
+use crate::cand;
 use crate::client::{self, Reply};
 use crate::display::{DisplayEnum, DisplayInfo};
 use crate::doc::{self, Comp, CompSlot};
@@ -38,6 +39,9 @@ pub struct TextService {
     atom: Cell<u32>,
     /// The composition this instance opened (each instance ends its own, docs/spec/windows-tip.md §3.8).
     comp: CompSlot,
+    /// The last `Out` of this instance had a candidate window open (`candidate_selected >= 0`): Page Up and Page Down are keys of the window (docs/spec/windows-tip.md §3.6).
+    /// Cleared with the composition on every path that ends it (`cand_closed`), so a closed window never claims those keys.
+    cand_open: Cell<bool>,
     /// Document managers this thread has already focused: the keyboard is opened only the first time each one gets focus, so a state
     /// the user changed later (for example Ctrl+Space in that window) is kept. Holding the references keeps their addresses unique;
     /// a manager is removed when TSF uninitialises it (`OnUninitDocumentMgr`), and the list is cleared on Deactivate.
@@ -56,6 +60,7 @@ impl TextService {
             focus_cookie: Cell::new(None),
             atom: Cell::new(0),
             comp: RefCell::new(None),
+            cand_open: Cell::new(false),
             seen_dims: RefCell::new(Vec::new()),
         }
     }
@@ -107,12 +112,19 @@ struct Outcome {
     /// The host answered with an `Out`.
     ran: bool,
     eaten: bool,
+    /// The answer had a candidate window open and the document was edited to match.
+    window: bool,
+    /// What to draw for it, read inside the edit session (`cand::capture`); `None` for a password field or when the rectangle was unavailable.
+    show: Option<cand::Show>,
 }
 
 impl TextService_Impl {
     /// A COM method body: panics become a bare failure code, the host is told to reset and the composition object dropped (docs/spec/windows-tip.md §3.9).
     fn guarded<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
-        guard::com_with(f, || drop(self.comp.try_borrow_mut().map(|mut c| c.take())))
+        guard::com_with(f, || {
+            drop(self.comp.try_borrow_mut().map(|mut c| c.take()));
+            self.cand_closed();
+        })
     }
 
     /// A key method: on a panic or any error the answer is "not eaten", never an error code (the out parameter would stay unset).
@@ -120,8 +132,15 @@ impl TextService_Impl {
         let eaten = guard::run(false, || f().unwrap_or(false), || {
             client::reset_after_panic();
             drop(self.comp.try_borrow_mut().map(|mut c| c.take()));
+            self.cand_closed();
         });
         Ok(eaten.into())
+    }
+
+    /// The core's candidate window is gone, or the composition it belonged to ended: Page Up and Page Down stop being claimed and the window hides.
+    fn cand_closed(&self) {
+        self.cand_open.set(false);
+        cand::hide();
     }
 
     fn activate(&self, ptim: Ref<'_, ITfThreadMgr>, tid: u32, flags: u32) -> Result<()> {
@@ -243,11 +262,13 @@ impl TextService_Impl {
             client::release(ctx_id(&c.ctx));
             doc::end_composition_later(self.tid.get(), c);
         }
+        self.cand_closed();
     }
 
     fn deactivate(&self) -> Result<()> {
         self.guarded(|| {
             self.end_own_composition();
+            cand::destroy();
             self.unadvise();
             client::close();
             self.seen_dims.borrow_mut().clear();
@@ -290,8 +311,8 @@ impl TextService_Impl {
             timing::diag(timing::EV_TEST_CONTEXT);
             return Ok(false);
         }
-        let Some(k) = map_key(wparam.0 as u32, read_mods()) else { return Ok(false) };
-        let composing = self.comp.borrow().is_some();
+        let Some(k) = map_key(wparam.0 as u32, read_mods(), self.cand_open.get()) else { return Ok(false) };
+        let composing = self.comp.borrow().is_some() || self.cand_open.get();
         let mut eat = may_eat(composing, &k);
         // §5.4, §5.6: a key that would only pass through must be refused here, not let go in OnKeyDown (an IMM32 host loses it).
         if eat && !composing && !client::ready() {
@@ -326,7 +347,7 @@ impl TextService_Impl {
             timing::diag(timing::EV_KD_CONTEXT);
             return Ok(false);
         }
-        let Some(k) = map_key(wparam.0 as u32, read_mods()) else {
+        let Some(k) = map_key(wparam.0 as u32, read_mods(), self.cand_open.get()) else {
             timing::diag(timing::EV_KD_UNMAPPED);
             return Ok(false);
         };
@@ -341,7 +362,10 @@ impl TextService_Impl {
         let granted = doc::request(&ctx, tid, doc::SYNC_WRITE, move |ec| {
             let svc = svc.get();
             let composing = svc.comp.borrow().is_some();
-            let out = match client::key(me, k, composing) {
+            let reply = client::key(me, k, composing);
+            // Event 66 starts when the answer is in hand.
+            let t_out = timing::now_us();
+            let out = match reply {
                 Reply::Out(o) => o,
                 Reply::Pass => {
                     // docs/spec/windows-tip.md §5.6, first row: with a composition open, the host's state for it is gone or out of reach.
@@ -349,12 +373,12 @@ impl TextService_Impl {
                     let open = svc.comp.borrow_mut().take();
                     if let Some(c) = open {
                         end_stale(ec, &ctx2, tid, c);
-                        o2.set(Outcome { ran: false, eaten: true });
+                        o2.set(Outcome { eaten: true, ..Default::default() });
                     }
                     return Ok(());
                 }
             };
-            o2.set(Outcome { ran: true, eaten: false });
+            o2.set(Outcome { ran: true, ..Default::default() });
             // A composition this instance left open while another owner took the engine is stale: end it before anything else.
             if out.took_over {
                 let stale = svc.comp.borrow_mut().take();
@@ -367,7 +391,13 @@ impl TextService_Impl {
                 return Ok(());
             }
             match doc::apply(ec, &ctx2, &svc.comp, &sink, atom, &out) {
-                Ok(()) => o2.set(Outcome { ran: true, eaten: out.handled }),
+                Ok(()) => {
+                    // The text rectangle can only be read inside this session; the window itself is touched after it (docs/spec/windows-tip.md §3.15).
+                    let window = out.candidate_selected >= 0;
+                    let comp = if window { svc.comp.borrow().clone() } else { None };
+                    let show = comp.and_then(|c| cand::capture(ec, &ctx2, &c.composition, &out, t_out));
+                    o2.set(Outcome { ran: true, eaten: out.handled, window, show });
+                }
                 Err(_) => {
                     // The document and the engine disagree now: drop both sides.
                     let open = svc.comp.borrow_mut().take();
@@ -383,7 +413,24 @@ impl TextService_Impl {
             timing::diag_value(timing::EV_KEY_SESSION_REFUSED, e.code().0 as u32 as u64);
         }
         let o = outcome.take();
+        // The candidate window follows the answer, outside the edit session: shown or redrawn when the core's window is open, hidden on every other
+        // path that ran a key or ended a composition. A refused or failed session leaves no window.
+        if o.ran || o.eaten {
+            if o.eaten {
+                cand::prewarm();
+            }
+            if granted.is_ok() && o.window {
+                self.cand_open.set(true);
+                match o.show {
+                    Some(s) => cand::show(s),
+                    None => cand::hide(),
+                }
+            } else {
+                self.cand_closed();
+            }
+        }
         if o.ran {
+            // Event 3 ends after the window is updated: the DLL's whole share of one key.
             timing::record(timing::EV_KEY, t0, timing::now_us());
             if granted.is_err() {
                 // The job did not finish (a panic in it): same cleanup.
@@ -407,6 +454,9 @@ impl TextService_Impl {
                 }
             };
             if let Some(c) = open {
+                // The window goes with the composition; this runs inside an edit session, so the window hides a moment later from its own timer (cand.rs).
+                self.cand_open.set(false);
+                cand::hide_later();
                 // The app ended it; the text is already in the document as displayed. Only the underline and the host's state are left.
                 // SAFETY: live interfaces; best effort.
                 unsafe {

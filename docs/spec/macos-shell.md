@@ -29,7 +29,7 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 `scripts/build-app.sh` 組出 `<資料夾>.app`（資料夾與名稱見 §1.3），內容：
 
 - `Contents/MacOS/shanjie`：執行檔。
-- `Contents/Resources/`：詞庫與資料檔（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`digits.tsv`，見 `docs/spec/lexicon-and-packs.md`）、`packs/`（詞包）、`data/models.tsv` 列的每個模型檔加 `models.tsv`（見 `docs/spec/models.md`，§10）、`shanjie.tiff`（選單列圖示）、`Assets.car` 與 `AppIcon.icns`（App 圖示）、`zh-Hant.lproj` 與 `en.lproj` 的 `InfoPlist.strings`、`LICENSES/`。只有出貨的 bundle ID 另帶 `container-migration.plist`。
+- `Contents/Resources/`：詞庫與資料檔（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`，見 `docs/spec/lexicon-and-packs.md`）、`packs/`（詞包）、`data/models.tsv` 列的每個模型檔加 `models.tsv`（見 `docs/spec/models.md`，§10）、`shanjie.tiff`（選單列圖示）、`Assets.car` 與 `AppIcon.icns`（App 圖示）、`zh-Hant.lproj` 與 `en.lproj` 的 `InfoPlist.strings`、`LICENSES/`。只有出貨的 bundle ID 另帶 `container-migration.plist`。
 - `Contents/Frameworks/Updater/Sparkle.framework`（沒有 XPC 服務）與 `Contents/Helpers/善解更新.app`，見 `docs/spec/install-and-update.md`。
 - 簽章帶三個 entitlements：App 沙盒、網路用戶端、以 `<bundle ID>_Connection` 為名的 mach-register 例外；沒有 `get-task-allow` 與 `disable-library-validation`。細節與檢查見 `docs/spec/install-and-update.md`、`docs/spec/release-and-ci.md`。
 

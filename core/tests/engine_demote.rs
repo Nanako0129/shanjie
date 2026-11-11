@@ -188,7 +188,7 @@ fn data_dir_with(tag: &str, demote: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-demote-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "variant-order.tsv"] {
+    for f in ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "variant-order.tsv", "rerank-protect.tsv"] {
         #[cfg(unix)]
         std::os::unix::fs::symlink(root().join("data/lexicon").join(f), d.join(f)).unwrap();
         #[cfg(windows)]

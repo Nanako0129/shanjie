@@ -61,7 +61,7 @@ const HOST_EXE: &str = "shanjie-host.exe";
 const HOST_FLAG: &str = "--resident";
 
 pub enum Reply {
-    /// The host's answer (checked: seq, caret, no candidate window, no control characters).
+    /// The host's answer (checked: seq, caret, the candidate window's fields, no control characters; `proto::out_ok`).
     Out(Out),
     /// No answer to use: pass the key through (or, with a composition open, end it; §5.6). The connection is closed.
     Pass,

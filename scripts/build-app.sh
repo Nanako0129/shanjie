@@ -84,7 +84,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/spec/models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -192,7 +192,7 @@ strip_xpc "$HSPARKLE"
 
 RES="$APP/Contents/Resources"
 # names-add.tsv: the always-on common proper nouns (docs/spec/lexicon-and-packs.md §1.1, §3); the core fails to start without it.
-cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv "$RES/"
+cp data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv "$RES/"
 # digits.tsv: the count table of digits in the composition (docs/spec/english-mixed.md §7.2, §7.8). Optional for the core, but a bundle without it
 # silently loses the feature, so check-app.sh requires it and compares it with this file.
 cp data/lexicon/digits.tsv "$RES/"
@@ -277,6 +277,8 @@ names-add.tsv: common proper nouns (brands, shops, companies, schools), always
       得利用之（https://data.gov.tw/license ）。
 demote.tsv: written for this project; no third-party data.
 variant-order.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. It is not part of the CC BY-SA list above.
+rerank-protect.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. The words the semantic rerank may not
+  take out of the n-gram's first choice. It is not part of the CC BY-SA list above.
 std-exempt.tsv: the 12 (reading, character) pairs the decoder's reading term does not charge. Chosen by comparing the readings of
   mcbpmf-data.txt with the first reading of each character in the Ministry of Education's 《國語辭典簡編本》
   (CC BY-ND 3.0 Taiwan; only used to decide these readings, none of its data is in the file or distributed).

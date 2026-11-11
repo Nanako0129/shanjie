@@ -11,7 +11,17 @@
 //!
 //! R2: the messages carry typed text, so nothing here derives `Debug` (no composition reaches a log through `{:?}`).
 
-pub const PROTO: u16 = 1;
+/// 2: `Out` carries `candidate_first` and `candidate_total` and `candidates` is filled (docs/spec/windows-tip.md §5.3). A PROTO 1 host answers a PROTO 2 `Hello` with
+/// `Refuse { 1 }` and the app then passes every key through until the host is replaced.
+pub const PROTO: u16 = 2;
+/// The most candidates one `Out` may carry: the rows of the vertical window (docs/spec/windows-tip.md §5.3, `shanjie.h`).
+pub const CAND_MAX: usize = 9;
+/// The longest candidate text of an `Out`, in UTF-16 units. Measured on the tree (a script over the tracked data files, `eval/holdout` excluded): the longest
+/// entry the lexicon and the packs can list is 10 units (`overlay-add.tsv`, `names-add.tsv`, `acg-add.tsv`, `quotes-add.tsv`; the base list
+/// `mcbpmf-data.txt` has 9 once the rows the lexicon loader skips, whose word does not have one character per syllable, such as the `MACRO@` date
+/// placeholders, are left out; `it-add.tsv` 9, `slang-add.tsv` 9, `sandhi-add.tsv` 7, `beauty-add.tsv` 6). Twice that is 20; the floor is 64: a refused
+/// `Out` ends the user's composition, so loose is the safe side. The limit only stops a forged host from handing the layout code an unbounded string.
+pub const CAND_MAX_UTF16: usize = 64;
 pub const HEADER_LEN: usize = 16;
 pub const MAX_LEN: usize = 64 * 1024;
 
@@ -26,7 +36,7 @@ pub const T_REFUSE: u16 = 0x82;
 pub const T_NOT_READY: u16 = 0x83;
 pub const T_BUSY: u16 = 0x84;
 pub const T_OUT: u16 = 0x85;
-/// Reserved for pushes from the host (background rerank, the candidate window); not sent in this slice, dropped by the client.
+/// Reserved for pushes from the host (background rerank); not sent in this slice, dropped by the client. The candidate window rides on `Out`.
 pub const T_PUSHED: u16 = 0x86;
 
 /// `Refuse` reasons; a later code is only another number.
@@ -77,7 +87,9 @@ pub enum ClientMsg {
 }
 
 /// The answer to a `Key`: what the in-DLL `engine::key` (docs/spec/windows-tip.md §3.4) gave the text service. `core_error` means the core returned non-zero: the
-/// client edits nothing and treats the key as not handled. `candidates` is reserved (always empty in this slice).
+/// client edits nothing and treats the key as not handled. `candidates` are the visible rows of the vertical window (at most `CAND_MAX`), `candidate_selected` the
+/// selected row among them, `candidate_first` the position of the first row in the whole list and `candidate_total` its length; with no window open
+/// `candidate_selected` is -1, `candidates` is empty and both numbers are 0.
 #[derive(PartialEq)]
 pub struct Out {
     pub ran: bool,
@@ -88,6 +100,8 @@ pub struct Out {
     pub preedit: Vec<u16>,
     pub cursor_utf16: u32,
     pub candidate_selected: i32,
+    pub candidate_first: u32,
+    pub candidate_total: u32,
     pub candidates: Vec<Vec<u16>>,
 }
 
@@ -188,6 +202,8 @@ pub fn encode_server(seq: u64, m: &ServerMsg) -> Option<Vec<u8>> {
             e.flag(o.handled);
             e.u32(o.cursor_utf16);
             e.u32(o.candidate_selected as u32);
+            e.u32(o.candidate_first);
+            e.u32(o.candidate_total);
             e.text(&o.commit);
             e.text(&o.preedit);
             e.u32(o.candidates.len() as u32);
@@ -238,10 +254,10 @@ impl<'a> Dec<'a> {
         let b = self.take(n.checked_mul(2)?)?;
         Some(b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
     }
-    /// A list of strings; each takes at least its four count bytes, so a count beyond that is refused before allocating.
-    fn texts(&mut self) -> Option<Vec<Vec<u16>>> {
+    /// A list of at most `max` strings; each takes at least its four count bytes, so a count beyond `max` or beyond that is refused before allocating.
+    fn texts(&mut self, max: usize) -> Option<Vec<Vec<u16>>> {
         let n = self.u32()? as usize;
-        if n > self.0.len() / 4 {
+        if n > max || n > self.0.len() / 4 {
             return None;
         }
         (0..n).map(|_| self.text()).collect()
@@ -312,9 +328,11 @@ pub fn decode_server(frame: &[u8]) -> Option<(u64, ServerMsg)> {
             handled: d.flag()?,
             cursor_utf16: d.u32()?,
             candidate_selected: d.u32()? as i32,
+            candidate_first: d.u32()?,
+            candidate_total: d.u32()?,
             commit: d.text()?,
             preedit: d.text()?,
-            candidates: d.texts()?,
+            candidates: d.texts(CAND_MAX)?,
         }),
         T_PUSHED => ServerMsg::Pushed(d.take(d.0.len())?.to_vec()),
         _ => return None,
@@ -359,11 +377,36 @@ impl HostSession {
     }
 }
 
-/// The client's own checks of an `Out`, beyond parsing (§5.3): the caret within `preedit`, no candidate window (the ESC that
-/// closes one is sent by the host), and no control characters in `commit` or `preedit` (a forged host must not type a line break
-/// into a terminal). The client also checks that the seq is the one it sent.
+/// The client's own checks of an `Out`, beyond parsing (§5.3): the caret within `preedit`, no control characters in `commit` or `preedit` (a forged host must
+/// not type a line break into a terminal), and the candidate window's fields:
+/// - `candidate_selected == -1`: no candidates, and `candidate_first == candidate_total == 0` (`shanjie.h`: a closed window has both 0);
+/// - otherwise `0 <= candidate_selected < candidates.len() <= CAND_MAX`, a non-empty `preedit` (a window belongs to a composition),
+///   `candidate_first + candidates.len() <= candidate_total`, and every candidate non-empty, at most `CAND_MAX_UTF16` units, valid text
+///   without control characters and without U+2028, U+2029 or a bidirectional control (they would reorder or break the drawn row).
+/// The sum is made in `u64`, so no value wraps. The client also checks that the seq is the one it sent.
 pub fn out_ok(o: &Out) -> bool {
-    o.cursor_utf16 as usize <= o.preedit.len() && o.candidate_selected == -1 && text_ok(&o.commit) && text_ok(&o.preedit)
+    if o.cursor_utf16 as usize > o.preedit.len() || !text_ok(&o.commit) || !text_ok(&o.preedit) {
+        return false;
+    }
+    if o.candidate_selected == -1 {
+        return o.candidates.is_empty() && o.candidate_first == 0 && o.candidate_total == 0;
+    }
+    // Any other negative number does not convert.
+    let Ok(sel) = usize::try_from(o.candidate_selected) else { return false };
+    let n = o.candidates.len();
+    sel < n
+        && n <= CAND_MAX
+        && !o.preedit.is_empty()
+        && u64::from(o.candidate_first) + n as u64 <= u64::from(o.candidate_total)
+        && o.candidates.iter().all(|c| cand_ok(c))
+}
+
+/// One candidate text of `out_ok`.
+fn cand_ok(c: &[u16]) -> bool {
+    !c.is_empty()
+        && c.len() <= CAND_MAX_UTF16
+        && text_ok(c)
+        && char::decode_utf16(c.iter().copied()).all(|c| c.is_ok_and(|c| !matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')))
 }
 
 /// Valid UTF-16 with no C0 or C1 control character (U+0000 to U+001F, U+007F to U+009F).
@@ -389,8 +432,20 @@ mod tests {
             preedit: w("ㄋㄧ"),
             cursor_utf16: 2,
             candidate_selected: -1,
+            candidate_first: 0,
+            candidate_total: 0,
             candidates: vec![],
         }
+    }
+
+    /// An `Out` with a window open: `n` candidates of one character each, the second selected, the window at `first` of `total`.
+    fn open_out(n: usize, first: u32, total: u32) -> Out {
+        let mut o = out();
+        o.candidates = (0..n).map(|i| vec![0x4e00 + i as u16]).collect();
+        o.candidate_selected = 1.min(n as i32 - 1);
+        o.candidate_first = first;
+        o.candidate_total = total;
+        o
     }
 
     fn clients() -> Vec<ClientMsg> {
@@ -404,8 +459,10 @@ mod tests {
 
     fn servers() -> Vec<ServerMsg> {
         let mut with_candidates = out();
-        with_candidates.candidates = vec![w("你"), w(""), w("妳")];
+        with_candidates.candidates = vec![w("你"), w("尼"), w("妳")];
         with_candidates.candidate_selected = 2;
+        with_candidates.candidate_first = 9;
+        with_candidates.candidate_total = 30;
         vec![
             ServerMsg::Welcome { build_hash: 42 },
             ServerMsg::Refuse { reason: REFUSE_LIMIT },
@@ -505,8 +562,8 @@ mod tests {
     #[test]
     fn a_string_may_not_run_past_the_body_and_flags_are_zero_or_one() {
         let f = encode_server(1, &ServerMsg::Out(out())).unwrap();
-        // The commit count sits after 4 flags, cursor and selection: header + 12.
-        let at = HEADER_LEN + 12;
+        // The commit count sits after 4 flags, cursor, selection, first and total: header + 20.
+        let at = HEADER_LEN + 20;
         let mut g = f.clone();
         g[at..at + 4].copy_from_slice(&1000u32.to_le_bytes());
         assert!(decode_server(&g).is_none());
@@ -521,6 +578,15 @@ mod tests {
         let n = g.len();
         g[n - 4..].copy_from_slice(&1_000_000u32.to_le_bytes());
         assert!(decode_server(&g).is_none());
+        // More than nine candidates is refused at decoding, before the list is allocated, even when the bytes are all there.
+        for n in [CAND_MAX + 1, 40] {
+            let mut big = open_out(n, 0, 100);
+            big.candidate_selected = 0;
+            let f = encode_server(1, &ServerMsg::Out(big)).unwrap();
+            assert!(decode_server(&f).is_none(), "{n} candidates");
+        }
+        let f = encode_server(1, &ServerMsg::Out(open_out(CAND_MAX, 0, 100))).unwrap();
+        assert!(decode_server(&f).is_some(), "nine candidates decode");
     }
 
     #[test]
@@ -572,9 +638,6 @@ mod tests {
         let mut o = out();
         o.cursor_utf16 = 3;
         assert!(!out_ok(&o), "caret beyond the preedit");
-        let mut o = out();
-        o.candidate_selected = 0;
-        assert!(!out_ok(&o), "a candidate window is never left open");
         for bad in ["\n", "\r", "\t", "\u{1b}[31m", "\u{7f}", "\u{85}", "\u{9f}", "\0"] {
             let mut o = out();
             o.commit = w(&format!("你{bad}"));
@@ -590,6 +653,68 @@ mod tests {
         let mut o = out();
         o.commit = w("😀 ,。「」ㄅ");
         assert!(out_ok(&o), "printable text, a pair of surrogates and a space pass");
+    }
+
+    #[test]
+    fn the_client_checks_of_a_candidate_window() {
+        assert!(out_ok(&open_out(9, 0, 9)) && out_ok(&open_out(1, 0, 1)) && out_ok(&open_out(9, 21, 30)));
+        assert!(out_ok(&open_out(3, u32::MAX - 3, u32::MAX)), "the last window of the largest list");
+        // A closed window carries nothing.
+        let mut o = out();
+        o.candidates = vec![w("你")];
+        assert!(!out_ok(&o), "-1 with candidates");
+        let mut o = out();
+        o.candidate_first = 1;
+        assert!(!out_ok(&o), "-1 with a first");
+        let mut o = out();
+        o.candidate_total = 1;
+        assert!(!out_ok(&o), "-1 with a total");
+        // The selection is inside the rows.
+        for sel in [-2, i32::MIN, 2, 3, i32::MAX] {
+            let mut o = open_out(2, 0, 2);
+            o.candidate_selected = sel;
+            assert!(!out_ok(&o), "selected {sel}");
+        }
+        let mut o = open_out(1, 0, 1);
+        o.candidate_selected = 0;
+        assert!(out_ok(&o));
+        assert!(!out_ok(&open_out(10, 0, 10)), "ten rows");
+        // The window lies inside the list; no sum wraps.
+        for (first, total) in [(u32::MAX, u32::MAX), (u32::MAX, 5), (1, 3), (0, 0), (8, 9), (0, 2)] {
+            assert!(!out_ok(&open_out(3, first, total)), "first {first} total {total}");
+        }
+        let mut o = open_out(0, 0, 0);
+        o.candidate_selected = 0;
+        assert!(!out_ok(&o), "selected 0 of no rows");
+        let mut o = open_out(2, 0, 2);
+        o.preedit = vec![];
+        o.cursor_utf16 = 0;
+        assert!(!out_ok(&o), "a window with no composition");
+        // Each text.
+        let mut o = open_out(2, 0, 2);
+        o.candidates[0] = vec![];
+        assert!(!out_ok(&o), "an empty candidate");
+        let mut o = open_out(2, 0, 2);
+        o.candidates[1] = vec![0x4f60; CAND_MAX_UTF16];
+        assert!(out_ok(&o), "the longest allowed text");
+        o.candidates[1] = vec![0x4f60; CAND_MAX_UTF16 + 1];
+        assert!(!out_ok(&o), "a text one unit too long");
+        o.candidates[1] = vec![0x4f60; 1 << 20];
+        assert!(!out_ok(&o), "an enormous text");
+        for bad in ["你\n", "\u{1b}", "你\u{85}", "你\u{2028}", "\u{2029}", "你\u{202A}", "你\u{202B}", "\u{202C}", "\u{202D}", "\u{202E}", "\u{2066}", "\u{2067}", "\u{2068}", "你\u{2069}"] {
+            let mut o = open_out(2, 0, 2);
+            o.candidates[1] = w(bad);
+            assert!(!out_ok(&o), "control or bidi character {bad:?}");
+        }
+        let mut o = open_out(2, 0, 2);
+        o.candidates[1] = vec![0xD800];
+        assert!(!out_ok(&o), "a lone surrogate");
+        let mut o = open_out(2, 0, 2);
+        o.candidates[1] = w("😀ㄅ,");
+        assert!(out_ok(&o), "a pair of surrogates and punctuation");
+        let mut o = open_out(2, 0, 2);
+        o.candidates[0] = w("\u{2065}\u{202F}\u{200E}");
+        assert!(out_ok(&o), "the characters next to the refused ranges pass");
     }
 
     #[test]

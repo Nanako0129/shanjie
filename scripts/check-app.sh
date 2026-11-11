@@ -75,7 +75,7 @@ for lp in "zh-Hant|$NAME_ZH" "en|$NAME_EN"; do
     [ "$(pb "$k" "$S")" = "$name" ] || fail "$l InfoPlist.strings: $k"
   done
 done
-for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv variant-order.tsv std-exempt.tsv digits.tsv models.tsv shanjie.tiff \
+for f in mcbpmf-data.txt overlay-add.tsv sandhi-add.tsv names-add.tsv demote.tsv variant-order.tsv std-exempt.tsv rerank-protect.tsv digits.tsv models.tsv shanjie.tiff \
          packs/acg-add.tsv packs/acg-sources.tsv packs/acg.json packs/it-add.tsv packs/it-sources.tsv packs/it.json packs/beauty-add.tsv packs/beauty-sources.tsv packs/beauty.json packs/quotes-add.tsv packs/quotes.json LICENSES/LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/CC-BY-SA-4.0-attribution.txt \
          LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/colloquial-attribution.tsv; do
   [ -s "$R/$f" ] || fail "Resources/$f is missing or empty"
@@ -113,6 +113,8 @@ cmp -s "$R/names-add.tsv" "$ROOT/data/lexicon/names-add.tsv" || fail "Resources/
 # The reading term's exemptions (docs/spec/decoder.md §5): the core refuses to load a model without them, and the bundled file is the committed one.
 cmp -s "$R/std-exempt.tsv" "$ROOT/data/lexicon/std-exempt.tsv" || fail "Resources/std-exempt.tsv differs from data/lexicon/std-exempt.tsv"
 grep -q 'std-exempt.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list std-exempt.tsv"
+# The rerank-protect words (docs/spec/lexicon-and-packs.md §2.12): the core refuses to load without them, and the bundled file is the committed one.
+cmp -s "$R/rerank-protect.tsv" "$ROOT/data/lexicon/rerank-protect.tsv" || fail "Resources/rerank-protect.tsv differs from data/lexicon/rerank-protect.tsv"
 for s in 'names-add.tsv' 'name-suggestion-index' 'Wikipedia contributors' '政府資料開放授權條款' 'Redistribution and use in source and binary forms'; do
   grep -qF "$s" "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not have: $s"
 done

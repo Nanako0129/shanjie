@@ -12,7 +12,7 @@
 
 | 輸入 | 檔案 | 作用 |
 |---|---|---|
-| 詞庫 | `mcbpmf-data.txt`（基底）、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、選用詞包、`variant-order.tsv`、`demote.tsv`、`std-exempt.tsv` | 每個讀音下有哪些詞、各自的分數（log10） |
+| 詞庫 | `mcbpmf-data.txt`（基底）、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、選用詞包、`variant-order.tsv`、`demote.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`（只進重排遮罩，不加詞） | 每個讀音下有哪些詞、各自的分數（log10） |
 | 語言模型 | `bigram.sjlm` 加旁邊的 `classes.sjc`、`kn.sjkn`、`trigram.sjt3`（書面）、`trigram-chat.sjt3`（聊天） | 詞與詞的接續機率 |
 | 設定 | 設定（聊天或書面）、降權開關、模糊輸入位元 | 選 λ、表與扣分 |
 
@@ -234,7 +234,7 @@
 
 ## 7. 手動詞保護
 
-- 手動詞＝`overlay-add.tsv` 第 4 欄標籤是 `manual` 的列（由 `tools/build_overlay.py` 從 `overlay-manual.tsv` 接在後面，分數為該字數的 `S_len + MANUAL_BONUS`，`MANUAL_BONUS` = 0.75）。`Lexicon` 讀疊加層時收成 `ManualSet`（詞的字，讀音音節序列）；字數不等於音節數的列不收；其他標籤不收。引擎與評測 CLI 共用同一份，重排工作帶它（`Arc` 共用）。
+- 手動詞＝`overlay-add.tsv` 第 4 欄標籤是 `manual` 的列（由 `tools/build_overlay.py` 從 `overlay-manual.tsv` 接在後面，分數為該字數的 `S_len + MANUAL_BONUS`，`MANUAL_BONUS` = 0.75）。`Lexicon` 讀疊加層時收成 `ManualSet`（詞的字，讀音音節序列）；字數不等於音節數的列不收；其他標籤不收。另外 `data/lexicon/rerank-protect.tsv` 的詞（`docs/spec/lexicon-and-packs.md` §2.12，基底詞也可以）在載入詞庫時併進同一份 `ManualSet`，所以保護集合 = 手動詞加上重排保護詞；它們不改分數也不加詞條。引擎與評測 CLI 共用同一份，重排工作帶它（`Arc` 共用）。
 - 規則：語意校正某一段的 n-gram 第一名若在某個位置以那個手動詞的音節序列、字面上含有該手動詞，這一段就保護它；候選若沒有在同樣位置保有每一個被保護的手動詞，就在選擇時被遮掉（不能被選）。門檻（τ）與所有分數仍用完整清單算；第一名永遠保有，所以至少有一個可選。遮罩函式只有一個：`tinylm::manual_mask`（`TinyLm::rerank`、`rerank_colloquial`、`guarded_pick` 的退回路徑與評測 CLI 的 `--tinylm-scores` 都呼叫它；退回時也只能退到保有的候選）。
 - 音節序列用第一名路徑實際用的讀音（`Lexicon::path_readings`）：鄰鍵輸入把詞庫沒有的音節讀成替代讀音時，用那個詞庫讀音，所以手動詞經由容錯成為第一名時也受保護。
 - 沒有手動詞時完全照舊；`--tinylm-scores` 每列多一個欄位列出被遮掉的候選索引（沒有就是空）。

@@ -1,5 +1,6 @@
 //! Virtual key to `ShanjieKey` and the `OnTestKeyDown` predicate (docs/spec/windows-tip.md §3.6).
-//! Pure functions: no TSF, so the unit tests need no host. `Key` holds a typed character, so no `Debug` (R2).
+//! Pure functions: no TSF, so the unit tests need no host (and the module is built on every platform). `Key` holds a typed character, so no `Debug` (R2).
+#![cfg_attr(not(windows), allow(dead_code))]
 
 pub const KIND_CHAR: u32 = 1;
 
@@ -20,7 +21,7 @@ pub struct Mods {
     pub caps: bool,
 }
 
-/// `VK_PRIOR` and `VK_NEXT` are absent on purpose: the core takes them only with a vertical candidate window open (docs/spec/windows-tip.md §3.6).
+/// `VK_PRIOR` and `VK_NEXT` are absent on purpose: `map_key` adds them only while the candidate window is open (docs/spec/windows-tip.md §3.6).
 const SPECIAL: [(u32, u32); 12] = [
     (0x20, 2),  // VK_SPACE
     (0x0D, 3),  // VK_RETURN
@@ -51,14 +52,24 @@ const OEM: [(u32, char); 11] = [
     (0xBE, '.'),  // VK_OEM_PERIOD
 ];
 
-/// `None` for a key the core never sees (Alt or Win held, or a key outside the table): the key goes to the app.
-pub fn map_key(vk: u32, m: Mods) -> Option<Key> {
+const VK_PRIOR: u32 = 0x21;
+const VK_NEXT: u32 = 0x22;
+/// `PAGE_UP` and `PAGE_DOWN` of shanjie.h.
+const KIND_PAGE_UP: u32 = 14;
+const KIND_PAGE_DOWN: u32 = 15;
+
+/// `None` for a key the core never sees (Alt or Win held, or a key outside the table): the key goes to the app. `window`: the last `Out` of this
+/// instance had a candidate window open (`candidate_selected >= 0`). Page Up and Page Down map only then and only with no modifier held, the one
+/// state in which the core takes them (`shanjie.h`: "only while the last output had candidate_vertical 1 and no modifier is held").
+pub fn map_key(vk: u32, m: Mods, window: bool) -> Option<Key> {
     if m.alt || m.win {
         return None;
     }
     let modifiers = (m.shift as u32 * MOD_SHIFT) | (m.ctrl as u32 * MOD_CONTROL) | (m.caps as u32 * MOD_CAPS);
     let (kind, ch) = if let Some(&(_, kind)) = SPECIAL.iter().find(|(v, _)| *v == vk) {
         (kind, 0)
+    } else if (vk == VK_PRIOR || vk == VK_NEXT) && window && modifiers == 0 {
+        (if vk == VK_PRIOR { KIND_PAGE_UP } else { KIND_PAGE_DOWN }, 0)
     } else if let Some(&(_, c)) = OEM.iter().find(|(v, _)| *v == vk) {
         (KIND_CHAR, c as u32)
     } else if (0x30..=0x39).contains(&vk) {
@@ -74,7 +85,9 @@ pub fn map_key(vk: u32, m: Mods) -> Option<Key> {
 /// The keycaps whose Shift form is a punctuation key of docs/spec/keys-and-composition.md §8.1 (Shift+, gives ，, Shift+1 gives ！, …).
 const SHIFT_PUNCT: [char; 13] = [',', '.', '/', '1', ';', '\\', '=', '[', ']', '9', '0', '`', '\''];
 
-/// `OnTestKeyDown` does not advance the engine, so it can only say "may eat". With a composition every mapped key may be eaten.
+/// `OnTestKeyDown` does not advance the engine, so it can only say "may eat". With a composition (a candidate window open included: the
+/// caller passes `composing || window`) every mapped key may be eaten; that covers what the core takes with a window open (rules 3v-8: the digits 1-9,
+/// Up, Down, Left, Right, Space, Enter, Esc, Backspace, Page Up, Page Down), checked against the real core by the host crate's `window_keys_match_the_core`.
 /// Without one, exactly the keys the core handles with an empty composition (English input and prediction off, standard layout):
 /// a plain character key (a Zhuyin, tone or punctuation key, rules 2, 14, 22a), a Shift+key of the §8.1 punctuation list, and Ctrl+\.
 /// Everything else the core passes through (rules 1 and 22): Space, Shift+letter, Caps Lock on, other modifiers. Those must be
@@ -102,7 +115,7 @@ mod tests {
         Mods::default()
     }
     fn key(vk: u32, m: Mods) -> Key {
-        map_key(vk, m).expect("mapped")
+        map_key(vk, m, false).expect("mapped")
     }
 
     #[test]
@@ -115,9 +128,34 @@ mod tests {
     }
 
     #[test]
-    fn page_keys_and_unlisted_keys_are_not_sent() {
-        for vk in [0x21, 0x22, 0x10, 0x11, 0x12, 0x14, 0x70, 0x60, 0x6B, 0xE5, 0x00] {
-            assert!(map_key(vk, plain()).is_none(), "vk {vk:#x}");
+    fn unlisted_keys_are_not_sent() {
+        for window in [false, true] {
+            for vk in [0x10, 0x11, 0x12, 0x14, 0x70, 0x60, 0x6B, 0xE5, 0x00] {
+                assert!(map_key(vk, plain(), window).is_none(), "vk {vk:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn page_keys_map_only_with_a_window_open_and_no_modifier() {
+        // Window closed: not mapped, so OnTestKeyDown answers FALSE for them even with a composition open.
+        for vk in [0x21, 0x22] {
+            assert!(map_key(vk, plain(), false).is_none(), "vk {vk:#x} without a window");
+        }
+        // Window open: kinds 14 and 15, no character.
+        let up = map_key(0x21, plain(), true).expect("Page Up");
+        let down = map_key(0x22, plain(), true).expect("Page Down");
+        assert!(up.kind == 14 && up.ch == 0 && up.modifiers == 0);
+        assert!(down.kind == 15 && down.ch == 0 && down.modifiers == 0);
+        // Any modifier: not sent (the core would not handle it, shanjie.h), including Caps Lock.
+        for vk in [0x21, 0x22] {
+            for m in [Mods { shift: true, ..plain() }, Mods { ctrl: true, ..plain() }, Mods { caps: true, ..plain() }, Mods { alt: true, ..plain() }, Mods { win: true, ..plain() }] {
+                assert!(map_key(vk, m, true).is_none(), "vk {vk:#x} with a modifier");
+            }
+        }
+        // The window changes nothing else.
+        for vk in [0x20, 0x0D, 0x28, 0x31, 0x41] {
+            assert!(map_key(vk, plain(), true) == map_key(vk, plain(), false), "vk {vk:#x}");
         }
     }
 
@@ -152,9 +190,9 @@ mod tests {
     #[test]
     fn alt_and_win_keys_are_not_converted() {
         for vk in [0x41, 0x20, 0x0D, 0x30, 0xBA] {
-            assert!(map_key(vk, Mods { alt: true, ..plain() }).is_none());
-            assert!(map_key(vk, Mods { win: true, ..plain() }).is_none());
-            assert!(map_key(vk, Mods { alt: true, ctrl: true, ..plain() }).is_none(), "AltGr");
+            assert!(map_key(vk, Mods { alt: true, ..plain() }, false).is_none());
+            assert!(map_key(vk, Mods { win: true, ..plain() }, false).is_none());
+            assert!(map_key(vk, Mods { alt: true, ctrl: true, ..plain() }, false).is_none(), "AltGr");
         }
     }
 
@@ -192,5 +230,16 @@ mod tests {
             assert!(may_eat(true, &key(vk, plain())), "vk {vk:#x}");
         }
         assert!(may_eat(true, &key(0x41, Mods { ctrl: true, ..plain() })));
+    }
+
+    #[test]
+    fn on_test_key_down_with_a_window_open() {
+        // The keys of rules 3v-8, with a window open (the caller passes composing || window).
+        for vk in [0x31, 0x39, 0x28, 0x26, 0x25, 0x27, 0x20, 0x0D, 0x1B, 0x08] {
+            assert!(may_eat(true, &map_key(vk, plain(), true).unwrap()), "vk {vk:#x}");
+        }
+        for vk in [0x21, 0x22] {
+            assert!(may_eat(true, &map_key(vk, plain(), true).unwrap()), "page key {vk:#x}");
+        }
     }
 }
