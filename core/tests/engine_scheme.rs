@@ -353,17 +353,228 @@ fn k25_tone_keys_in_a_composition() {
     }
 }
 
-#[test]
-fn k18_up_in_a_composition_is_ignored_in_both_schemes() {
-    // The change of the character before the cursor is not made: rule 16 in both.
-    for scheme in SCHEMES {
-        let mut e = eng(30, Some(scheme));
-        let before = typ(&mut e, "su3");
-        let o = kk(&mut e, KeyKind::Up);
-        assert!(o == before && o.handled && o.commit.is_empty(), "scheme {scheme}");
-        let o = kk(&mut e, KeyKind::Up);
-        assert!(o == before);
+// ---------- K18: rules 16u and 15d (Up swaps the character before the cursor; Down opens with the shown item first) ----------
+
+/// The toy lexicon plus ㄉㄚˋ 大 with the word 大小 over ㄉㄚˋ ㄉㄚˋ (its second character is not a single of ㄉㄚˋ), ㄇㄚ only in 媽媽 (no single), and two
+/// two-syllable words over ㄋㄧˇ ㄨㄛˇ.
+fn lex_k18(n: usize) -> Arc<Lexicon> {
+    let mut text: String = (0..n).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i as u32).unwrap())).collect();
+    text.push_str("ㄨㄛˇ 我 -1.0\nㄉㄚˋ 大 -1.0\nㄉㄚˋ-ㄉㄚˋ 大小 -0.1\nㄇㄚ-ㄇㄚ 媽媽 -0.1\nㄋㄧˇ-ㄨㄛˇ 甲乙 -0.1\nㄋㄧˇ-ㄨㄛˇ 丙丁 -0.2\n");
+    Arc::new(Lexicon::parse(&text).unwrap())
+}
+fn eng_k18(n: usize, scheme: u32) -> Engine {
+    let mut e = Engine::with_lexicon(lex_k18(n), Layout::Standard);
+    e.set_candidate_vertical(true).unwrap();
+    assert!(e.set_key_scheme(scheme).unwrap().is_some());
+    e
+}
+fn singles(n: usize) -> Vec<String> {
+    list_of(&lex_k18(n))
+}
+fn up(e: &mut Engine) -> Output {
+    kk(e, KeyKind::Up)
+}
+/// The window is open on `first_item`, selected at the top of the first page.
+fn opened_on(o: &Output, first_item: &str) -> bool {
+    o.selected == Some(0) && o.first == 0 && o.candidates.first().map(String::as_str) == Some(first_item)
+}
+/// Every item of the open window, page by page (Space turns the page in scheme 1; the window stays open).
+fn whole_list(e: &mut Engine, mut o: Output) -> Vec<String> {
+    let mut v = Vec::new();
+    loop {
+        v.extend(o.candidates.clone());
+        if o.first as usize + 9 >= o.total as usize {
+            return v;
+        }
+        o = kk(e, KeyKind::Space);
     }
+}
+
+#[test]
+fn k18_scheme0_ignores_up_in_a_composition() {
+    // Rule 16 in scheme 0, field by field, however many presses.
+    let mut e = eng_k18(30, 0);
+    let before = typ(&mut e, "su3");
+    for _ in 0..4 {
+        let o = up(&mut e);
+        assert!(o == before && o.handled && o.commit.is_empty());
+    }
+}
+
+#[test]
+fn k18_three_presses_swap_third_then_second_then_open_with_the_shown_first() {
+    let l = singles(30);
+    let mut e = eng_k18(30, 1);
+    assert_eq!(typ(&mut e, "su3").preedit, l[0]);
+    let o = up(&mut e);
+    assert!(o.handled && o.commit.is_empty() && o.selected.is_none() && o.preedit == l[2], "1st: the 3rd item of [shown, rest]");
+    let o = up(&mut e);
+    assert!(o.selected.is_none() && o.preedit == l[1], "2nd: the 2nd item");
+    let o = up(&mut e);
+    assert!(opened_on(&o, &l[1]) && o.preedit == l[1], "3rd: the window, the shown character first");
+    // The others keep the lexicon order behind it.
+    let full = whole_list(&mut e, o);
+    let rest: Vec<String> = l.iter().filter(|w| **w != l[1]).cloned().collect();
+    assert!(full.len() == l.len() && full[0] == l[1] && full[1..] == rest[..], "the rest keep their order");
+    // Back on the first page (Space after the last page), a 4th Up is K13: the last item of the last page.
+    kk(&mut e, KeyKind::Space);
+    let o = up(&mut e);
+    assert!(o.selected.is_some() && at(&o) == l.len() - 1, "4th: K13");
+}
+
+#[test]
+fn k18_a_shown_character_that_is_not_the_first_single() {
+    // Pick the 6th single first: the base is [it, the rest in order], so the presses take the 2nd and 1st singles of the lexicon.
+    let l = singles(30);
+    let mut e = eng_k18(30, 1);
+    open_win(&mut e);
+    let o = k(&mut e, Key::ch('6', 0));
+    assert!(o.selected.is_none() && o.preedit == l[5]);
+    assert!(up(&mut e).preedit == l[1], "1st: base [l5, l0, l1, ...][2]");
+    assert!(up(&mut e).preedit == l[0], "2nd: base[1]");
+    assert!(opened_on(&up(&mut e), &l[0]), "3rd: the shown one first");
+}
+
+#[test]
+fn k18_short_lists() {
+    // Two singles: the first press takes the 2nd, the second opens. One single: the first press opens.
+    let l = singles(2);
+    let mut e = eng_k18(2, 1);
+    typ(&mut e, "su3");
+    assert!(up(&mut e).preedit == l[1]);
+    assert!(opened_on(&up(&mut e), &l[1]));
+    let mut e = eng_k18(1, 1);
+    typ(&mut e, "su3");
+    assert!(opened_on(&up(&mut e), &singles(1)[0]));
+}
+
+#[test]
+fn k18_only_the_character_before_the_cursor_changes() {
+    let l = singles(30);
+    // At the end of 我 + ㄋㄧˇ.
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "ji3su3");
+    assert_eq!(up(&mut e).preedit, format!("我{}", l[2]));
+    // In the middle: ㄋㄧˇ ㄋㄧˇ, cursor between them.
+    let mut e = eng_k18(30, 1);
+    let shown = typ(&mut e, "su3su3").preedit;
+    kk(&mut e, KeyKind::Left);
+    let o = up(&mut e);
+    let second: String = shown.chars().nth(1).unwrap().to_string();
+    assert_eq!(o.preedit, format!("{}{second}", l[2]));
+    assert_eq!(o.cursor_utf16, 1);
+}
+
+#[test]
+fn k18_ignored_like_rule_16() {
+    // Cursor at 0; punctuation (Ctrl+, in scheme 1) before the cursor; a shown character that is not one of the syllable's singles (the 小 of 大小 over
+    // ㄉㄚˋ). Each: the output is the one before the key, field by field. A syllable with no single at all cannot be typed: one that only words have
+    // (ㄇㄚ in 媽媽) is not accepted (docs/spec/keys-and-composition.md §3.2), checked here too.
+    let mut e = eng_k18(30, 1);
+    assert_eq!(typ(&mut e, "a8 ").preedit, "ㄇㄚ", "not accepted: still unfinished");
+    let mut cases: Vec<(&str, Engine, Output)> = Vec::new();
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    let o = kk(&mut e, KeyKind::Home);
+    cases.push(("cursor 0", e, o));
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    let o = k(&mut e, ctl(','));
+    cases.push(("punctuation", e, o));
+    let mut e = eng_k18(30, 1);
+    let o = typ(&mut e, "284284");
+    assert_eq!(o.preedit, "大小");
+    cases.push(("not a single", e, o));
+    for (name, mut e, before) in cases {
+        let o = up(&mut e);
+        assert!(o == before && o.handled, "{name}");
+        assert!(up(&mut e) == before, "{name}, again");
+    }
+}
+
+#[test]
+fn k18_a_key_in_between_starts_a_new_run_except_rule_1() {
+    let l = singles(30);
+    // Up, (Left Right | Down Esc), Up, Up: the run starts again from [l2, l0, l1, ...], so the last Up swaps (to l0) instead of opening.
+    for between in [vec![kn(KeyKind::Left), kn(KeyKind::Right)], vec![kn(KeyKind::Down), kn(KeyKind::Esc)]] {
+        let mut e = eng_k18(30, 1);
+        typ(&mut e, "su3");
+        assert!(up(&mut e).preedit == l[2]);
+        run(&mut e, &between);
+        assert!(up(&mut e).preedit == l[1]);
+        let o = up(&mut e);
+        assert!(o.selected.is_none() && o.preedit == l[0], "a new run, not the 3rd press");
+    }
+    // After the 3rd press opened the window and Esc closed it, Up starts a new run (a swap, not K13).
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    presses(&mut e, 3, KeyKind::Up);
+    kk(&mut e, KeyKind::Esc);
+    let o = up(&mut e);
+    assert!(o.selected.is_none() && o.preedit == l[2], "base [l1, l0, l2, ...][2]");
+    // A rule 1 key (Ctrl+A) changes nothing: the third Up still opens.
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    up(&mut e);
+    assert!(!k(&mut e, ctl('a')).handled);
+    up(&mut e);
+    assert!(opened_on(&up(&mut e), &l[1]));
+}
+
+#[test]
+fn k18_calls_that_are_not_keys() {
+    let l = singles(30);
+    // set_profile changes neither the syllables, the cursor nor the shown character: the run goes on, and the third Up opens.
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    up(&mut e);
+    e.set_profile(core::lm::Profile::Formal).unwrap();
+    assert!(up(&mut e).preedit == l[1]);
+    assert!(opened_on(&up(&mut e), &l[1]));
+    // reset and the same syllable typed again: the shown character is not the one the last press put there, so a new run.
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    up(&mut e);
+    e.reset(ResetMode::Discard);
+    typ(&mut e, "su3");
+    assert!(up(&mut e).preedit == l[2], "a new run");
+    assert!(up(&mut e).preedit == l[1]);
+    assert!(opened_on(&up(&mut e), &l[1]));
+}
+
+#[test]
+fn k18_down_then_esc_then_up_is_up() {
+    let mut a = eng_k18(30, 1);
+    typ(&mut a, "su3");
+    let direct = up(&mut a);
+    let mut b = eng_k18(30, 1);
+    typ(&mut b, "su3");
+    kk(&mut b, KeyKind::Down);
+    kk(&mut b, KeyKind::Esc);
+    assert!(up(&mut b) == direct);
+}
+
+#[test]
+fn k18_down_opens_with_the_shown_item_first() {
+    let l = singles(30);
+    // After one Up the window starts with the shown character, selected (rule 15d).
+    let mut e = eng_k18(30, 1);
+    typ(&mut e, "su3");
+    up(&mut e);
+    assert!(opened_on(&kk(&mut e, KeyKind::Down), &l[2]));
+    // Scheme 0: the 3rd single picked through the window, then Down keeps the lexicon order.
+    let mut e = eng_k18(30, 0);
+    open_win(&mut e);
+    assert!(k(&mut e, Key::ch('3', 0)).preedit == l[2]);
+    assert!(opened_on(&kk(&mut e, KeyKind::Down), &l[0]), "scheme 0: the lexicon order");
+    // Two syllables: 甲乙 is shown and first already; pick 丙丁 (the window's 2nd item), then Down starts with 丙丁, 甲乙 behind it.
+    let mut e = eng_k18(30, 1);
+    assert_eq!(typ(&mut e, "su3ji3").preedit, "甲乙");
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(opened_on(&o, "甲乙") && o.candidates.get(1).map(String::as_str) == Some("丙丁"));
+    assert!(k(&mut e, Key::ch('2', 0)).preedit == "丙丁");
+    let o = kk(&mut e, KeyKind::Down);
+    assert!(opened_on(&o, "丙丁") && o.candidates.get(1).map(String::as_str) == Some("甲乙"));
 }
 
 #[test]
