@@ -25,7 +25,10 @@ import bench  # noqa: E402
 ROOT = bench.ROOT
 KPI_DIR = os.path.join(ROOT, "eval/bench/kpi")
 SITE_JSON = os.path.join(ROOT, "site/data/kpi.json")
-LOAD_MAX = 2.0  # speed numbers only count when the machine was idle at both ends of the run
+# Speed numbers only count when the 1-minute load was at most this when the run started. The end of the run is not looked at:
+# bench.py measures speed last and reads the load right after, so the 1-minute load at the end includes bench's own speed run; during the run
+# the machine runs nothing else (docs/spec/evaluation.md §8.2).
+LOAD_MAX = 2.0
 # name -> (rows file, pinned sha256): the replay rows are frozen suite files, not eval/dev/*.
 REPLAY_ROWS = {"user-reported": bench.SETS2["user-reported"][:2], "dev302": bench.SETS2["dev302"][:2]}
 REPLAY_SUMMARY = re.compile(r"^## (\S+)  (\S+)  (\{.*\})$", re.M)
@@ -327,9 +330,9 @@ def holdout_col(title, field):
 
 def speed(x):
     s, env = get(x["rec"], "speed"), get(x["res"], "env")  # the column splits per machine (env.machine)
-    if not s or "p95_us" not in s or not env or "load_avg_start" not in env or "load_avg_end" not in env:
+    if not s or "p95_us" not in s or not env or "load_avg_start" not in env:
         return None
-    load = max(env["load_avg_start"], env["load_avg_end"])
+    load = env["load_avg_start"]   # the start only (LOAD_MAX)
     if load > LOAD_MAX:
         return env.get("machine"), None, f"—（負載 {load:.2f}）"
     t = f"按鍵 p95 {s['p95_us'] / 1000:.2f} ms"
@@ -417,10 +420,10 @@ def site_row(x):
     if isinstance(h, dict) and "top1" in h and "n" in h:
         out["holdout_talk_chat"] = {k: h[k] for k in ("n", "top1", "fixed", "broken", "p", "rows_sha256") if k in h}
     s, env = get(x["rec"], "speed"), get(x["res"], "env")
-    if s and "p95_us" in s and env and "load_avg_start" in env and "load_avg_end" in env:
-        load = max(env["load_avg_start"], env["load_avg_end"])
-        out["speed"] = {"machine": env.get("machine"), "load_avg_max": load, "idle": load <= LOAD_MAX}
-        if load <= LOAD_MAX:   # the same rule as the table: numbers only from an idle window
+    if s and "p95_us" in s and env and "load_avg_start" in env:
+        load = env["load_avg_start"]
+        out["speed"] = {"machine": env.get("machine"), "load_avg_start": load, "idle": load <= LOAD_MAX}
+        if load <= LOAD_MAX:   # the same rule as the table: the load when the run started (LOAD_MAX)
             out["speed"].update({k: s[k] for k in ("p95_us", "rerank_p95_ms", "rss_mb") if k in s})
     return out
 
