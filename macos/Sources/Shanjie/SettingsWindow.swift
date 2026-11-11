@@ -401,7 +401,10 @@ struct SettingsPageForm: View {
                         .disabled(model.diagLogEmpty)
                 }
             case .about:
-                if let updates = model.updates { AboutSections(updates: updates) }
+                if let updates = model.updates {
+                    // docs/spec/install-and-update.md §3.8: the user may have just changed it in System Settings.
+                    AboutSections(updates: updates).onAppear { updates.refreshPermission() }
+                }
             }
         }
         .formStyle(.grouped)
@@ -449,8 +452,18 @@ private struct AboutSections: View {
         }
         Section("更新") {
             Toggle("自動檢查更新", isOn: Binding(get: { updates.autoCheck }, set: { updates.setAutoCheck($0) }))
-            Text("開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本只在這裡和輸入選單顯示，按下才更新。")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(UpdateText.autoCheckNote).font(.caption).foregroundStyle(.secondary)
+            // docs/spec/install-and-update.md §3.8: off with 自動檢查更新 (no background check, so no notification).
+            Toggle(UpdateText.notifyToggle, isOn: Binding(get: { updates.notifyEnabled }, set: { updates.setNotify($0) }))
+                .disabled(!updates.autoCheck)
+            Text(UpdateText.notifyNote).font(.caption).foregroundStyle(.secondary)
+            if updates.showsPermissionLine {
+                HStack {
+                    Text(UpdateText.permissionOff).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(UpdateText.openNotificationSettings) { updates.openNotificationSettings() }
+                }
+            }
             Text(UpdateText.location(bundleURL: Bundle.main.bundleURL)).font(.caption).foregroundStyle(.secondary)
             LabeledContent("上次檢查") {
                 Text(status).foregroundStyle(.secondary)
