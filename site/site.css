@@ -234,8 +234,9 @@ pre.cite { white-space: pre-wrap; overflow-wrap: anywhere; }
 .eqn { display: flex; align-items: center; gap: 16px; overflow-x: auto; padding: 8px 0; max-width: var(--prose-max); }
 .eqn math { flex: 1 0 auto; }
 .eqn .eqno { color: var(--ink-2); font-variant-numeric: tabular-nums; }
-/* 行內公式不能折行：手機上比一行寬時，那一段在自己的框裡橫捲，不把版面撐出去 */
-.paper-read :is(p, li, dd, figcaption) { overflow-x: auto; overflow-y: hidden; }
+/* 行內公式不能折行：手機上比一行寬時，那一段在自己的框裡橫捲，不把版面撐出去。
+   不套在 <li> 上：overflow 不是 visible 的清單項目，圓點與編號會被裁掉 */
+.paper-read :is(p, dd, figcaption) { overflow-x: auto; overflow-y: hidden; }
 /* 表格標題不跟著表格變寬：寬表在 .table 裡橫捲時，標題維持一個視窗寬、留在左邊 */
 .paper-read caption { caption-side: top; text-align: left; padding: 0 0 8px; color: var(--ink-2); position: sticky; left: 0;
                       width: min(var(--prose-max), calc(100vw - 2 * var(--gutter))); }

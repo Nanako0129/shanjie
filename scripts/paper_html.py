@@ -105,7 +105,8 @@ def self_test():
         for what, bad_aux, bad_page in (
                 ("a wrong appendix letter", aux.replace("{A}", "{B}"), good),
                 ("a script from another host", aux, good.replace("<h2>One</h2>", '<h2>One</h2><script src="//h/x.js"></script>')),
-                ("an unnumbered display formula", aux, good.replace("<h2>App</h2>", '<h2>App</h2><math display="block">y</math>'))):
+                ("an unnumbered display formula", aux, good.replace("<h2>App</h2>", '<h2>App</h2><math display="block">y</math>')),
+                ("an \\autoref", aux, good.replace("<h2>App</h2>", '<h2>App</h2><a href="#sec:one" data-reference-type="ref+label" data-reference="sec:one">1</a>'))):
             page = bad_page
             try:
                 run(bad_aux)
@@ -240,6 +241,8 @@ def main():
 
     s, n_refs = re.subn(r'<a\s+href="#([^"]+)"\s+data-reference-type="(ref|eqref)"\s+data-reference="[^"]+">.*?</a>',
                         ref, s, flags=re.S)
+    # \autoref, \cref, \pageref and \nameref come out of pandoc with its own numbers or with no text at all.
+    check("cross-references that are neither \\ref nor \\eqref", s.count("data-reference-type="), 0)
     for label, number in labels.items():            # every label LaTeX knows, referenced or not
         if label in shown and shown[label] != number:
             bad["aux"] += 1
