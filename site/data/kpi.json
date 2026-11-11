@@ -13,11 +13,11 @@
     "dev302": {
      "n": 302,
      "off": {
-      "kyss": 0.9862,
+      "kyss": 0.9869,
       "n": 302,
-      "picks_per100": 1.09,
-      "rewrites": 308,
-      "top1": 281
+      "picks_per100": 1.06,
+      "rewrites": 300,
+      "top1": 282
      },
      "rows_sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456"
     },
@@ -44,7 +44,7 @@
    },
    "speed": {
     "idle": false,
-    "load_avg_max": 2.7685546875,
+    "load_avg_max": 4.24755859375,
     "machine": "Mac18,1"
    },
    "version": "v0.7.0"
