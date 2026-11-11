@@ -6,6 +6,42 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>善解輸入法</title>
         <item>
+            <title>0.7.0</title>
+            <pubDate>Wed, 11 Nov 2026 06:30:34 +0000</pubDate>
+            <sparkle:version>0.7.0</sparkle:version>
+            <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[整句選字多看你打的讀音，語意校正模型換成會意 SJ-SR-8-15M，加上美妝與保養詞包；中英混打裡容易誤觸的兩個設定改成預設關。錯字回報（80 句）書面 61 → 69 句、聊天 70 → 70 句。
+
+- **整句選字多看你打的讀音**：每一鍵的整句選字都把「這個字讀成你打的音的機率」算進去，語意校正關著也生效；讀音對不上你打的音的字比較不會被選上。聊天設定「長歪了」「長這樣」的「長」不再選成「漲」（v0.6.1 的已知問題）。
+- **多音字的讀音同分時看多字詞**：一個字的幾個單字讀音在詞庫裡分數一樣、而且不只差聲調時（例如「莎」的ㄕㄚ、ㄙㄨㄛ），改看含這個字的多字詞各用哪個讀音；詞庫裡有 132 組讀音因此分出高低，只差聲調的字不動。單打ㄙㄨㄛ，書面設定的第一個字從「莎」變成「縮」。公開的開發集、打字測驗與錯字回報（聊天、書面各一次）裡，只有錯字回報書面多對 1 句，沒有一句改壞。
+- **語意校正模型換成會意 SJ-SR-8-15M**：從 SJ-SR-7-15M 接續訓練，訓練用的繁體句不再套把台灣用語換掉的轉換，例如「權限」不再被換成「許可權」。聊天與書面設定的語意校正參數跟著重選，聊天設定的「積極」改成和「標準」相同。聊天設定的口語詞頻表「常談」沒看過某個詞出現在句首時，改用它的整體頻率估。
+- **語意校正不再把幾個常用詞換成同音的別的詞**，例如「權限」換成「全線」、「改期」換成「改騎」。
+- **美妝與保養詞包**（539 個詞，預設開，設定 → 選字 →「詞包」可以關）：保養、彩妝、香水、美髮的成分、質地、膚質、功效、產品俗稱與品牌中文名，例如打得出「眉彩膏」「細閃」「基底油」。只收原本打不對的詞。
+- **輸入選單的「已開啟的詞包」**改成選單的小標題，下面每個開著的詞包各一行，詞包變多時選單不會越來越寬；詞包的開關仍在設定 → 選字 →「詞包」。
+- **句首單字的選字記憶**：在句首改選的單一個字也會記住；語意校正開著時，下次在句首、後面接同樣的音，它比較容易被選上。
+- **中英混打**：「重打同一個位置算英文」（打 `ok`、`gta6` 這類字要靠它）與「單按 Shift 切換中英」改成預設關：打錯注音後不刪、直接接著打下一個注音的習慣，會被前者當成英文。從舊版更新的人，這兩個設定會一次重設為關，第一次打字時跳出說明視窗；要再打開，到設定 → 選字。
+- **按 Enter 送出時**，如果語意校正正在算，最多等 0.1 秒讓畫面上的字先更新再送出；等不到就送出畫面上的字。
+- **瀏覽器**：「在瀏覽器裡，第一個字不顯示預測」改成預設關：Chrome 157 起 Google 文件第一個字的預測列位置正確。Chrome 156 以前（或同代的 Edge、Brave 等）的 Google 文件仍會把它擺到左上角，可以在設定 → 選字打開；之前在設定裡改過這個開關的，照你的設定。Crest 與 Aside 也加進這個開關的瀏覽器清單。
+- **修正**：
+  - 單按 Shift 切換中英有時卡在英文、沒有「中／英」提示，要切換輸入法才回得去：修正了兩個可能的原因（某些 App 讀不到識別碼時記錯 App；藍牙鍵盤等漏掉的放開事件讓之後的單按都不算）。
+  - 在 Chromium 系的瀏覽器裡（例如 Threads 網頁的發文框），按 Tab 進入預測列時組字會重複出現一份。
+- **設定多一頁「診斷」**：記下每次放開 Shift 的判斷、切換中英與換 App 的紀錄，只在記憶體裡、不記打的字；遇到偶發問題時按「複製診斷紀錄…」，看過再貼給我們。細節見 https://shanjie.nyanako.com/privacy 。
+- **已知問題**：
+  - Google 文件裡，組字區空著或只有一個字時，「英／中」的提示可能出現在視窗左上角（Chrome 157 還沒量過）；Chrome 156 以前，只有一個字時按 Tab、↓ 叫出的候選列也一樣。
+  - 候選窗在 Orca（Electron 終端機）裡會跑位，還在收集紀錄。
+- **跨版本比較**（v0.6.1 → v0.7.0，出貨設定；公開集合的逐格數字見 https://shanjie.nyanako.com/benchmark ）：公開集合（聊天／書面）錯字回報 70 → 70／61 → 69、開發集 dev302 280 → 282／271 → 280、功能字測試句 177 → 178／171 → 176，打字測驗兩種設定都是 74 → 74。
+  - 保留集（發版前量一次）：口語半邊（聊天，150 句）124 → 127（改對 3、改壞 0）；新聞半邊（書面，150 句）128 → 126（改對 1、改壞 3，差異不顯著）。
+  - 速度與記憶體（同一場輪流跑，開跑時 load avg 1.9、結束時 4.2）：每鍵 p95 聊天 1.91 → 1.93 ms、書面 1.92 → 1.96 ms；記憶體（RSS）480 → 489 MB；引擎載入 0.87 → 1.05 秒；語意校正每列 p95 7.15 → 7.11 ms。
+- **更新後如果某個 App 打不出字**：請把那個 App 完全結束（⌘Q）再打開。
+- 其餘是文件、網站、評測工具、測試與 CI 的更新；Windows 版還在開發，不在這一版。
+
+安裝與使用說明：https://shanjie.nyanako.com/ 
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/shanjie/releases/download/v0.7.0/shanjie-0.7.0.zip" length="111769036" type="application/octet-stream" sparkle:edSignature="bjf97UgulPsok2zvto6/hitSw4o+ztXFrsrXsOPVGCs5A5YaSG+3E0LIBv5UBwIwpXInjXPluU+FUBBEda8wCA=="/>
+        </item>
+        <item>
             <title>0.6.1</title>
             <pubDate>Fri, 30 Oct 2026 21:14:42 +0000</pubDate>
             <sparkle:version>0.6.1</sparkle:version>
@@ -168,6 +204,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: +PEpVAtDYL71FwMuebnKCRllldWLsrOGHhuUFgQ751H8igENao/sPqZgKjbmKVtGOOe98fKFuHUQMU8kkhvEBA==
-length: 22208
+edSignature: jStkVsTMwiYcG47hG2ZAFwzlkXPKWtNQKdQM45O5zGmw0zTNpx/EKjozuKIdSqKG9Z6s2QOTWdyPAPXv0xorBw==
+length: 28344
 -->
