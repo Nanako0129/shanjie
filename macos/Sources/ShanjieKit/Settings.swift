@@ -146,6 +146,8 @@ public final class SettingsModel: ObservableObject {
         unavailable = shell.learningUnavailable
         diagLog = shell.diag.enabled
         diagLogEmpty = shell.diag.isEmpty
+        // docs/spec/install-and-update.md §3.8: the user may have just changed it in System Settings and come back.
+        shell.updates?.refreshPermission()
     }
 
     public func setDiagLog(_ on: Bool) {

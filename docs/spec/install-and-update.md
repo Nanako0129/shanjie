@@ -16,7 +16,7 @@
 | Homebrew cask | 帳號層安裝 | 共用的 tap |
 | `appcast.xml` | 更新清單，EdDSA 簽章，放在 main | `SUFeedURL` 指向的位置 |
 
-更新的路徑固定：輸入法每天最多一次靜默探測 feed；使用者按「更新到 X」才啟動善解更新，由它顯示 Sparkle 的對話框、下載、驗證、換檔、重新啟動。輸入法程序本身不安裝任何東西。
+更新的路徑固定：輸入法每天最多一次靜默探測 feed，查到新版本時發一則系統通知（§3.8）；使用者按「更新到 X」、選單項或點通知才啟動善解更新，由它顯示 Sparkle 的對話框、下載、驗證、換檔、重新啟動。輸入法程序本身不安裝任何東西。
 
 ### 1.2 兩個身分
 
@@ -140,10 +140,10 @@ Sparkle 的程式碼位置、善解更新、安裝程式一律沒有 entitlement
 
 ### 3.3 結果與儲存
 
-- 鍵（輸入法自己的 UserDefaults 網域，也就是 container 內）：`updateAutoCheck`（Bool，沒有等於開）、`updateLastCheck`（Date）、`updateStatus`（字串字典：`by` 檢查時的版本、`result` 為 `upToDate`／`available`／`failed`、`available` 為較新的版本）。
+- 鍵（輸入法自己的 UserDefaults 網域，也就是 container 內）：`updateAutoCheck`（Bool，沒有等於開）、`updateLastCheck`（Date）、`updateStatus`（字串字典：`by` 檢查時的版本、`result` 為 `upToDate`／`available`／`failed`、`available` 為較新的版本）、`updateNotify`（Bool，沒有等於開，§3.8）。
 - 啟動時，`updateStatus` 的 `by` 不等於目前版本就丟掉（別的版本記下的結果不代表這個版本）。
 - 版本顯示：`CFBundleShortVersionString`；`0.0.0` 或沒有值顯示「開發版」。
-- 固定字串：「已是最新」、「有新版本 X」、「檢查失敗」、「檢查中…」、「更新到 X」、選單項「有新版本 X，按此更新…」。
+- 固定字串：「已是最新」、「有新版本 X」、「檢查失敗」、「檢查中…」、「更新到 X」、選單項「有新版本 X，按此更新…」；通知的標題「善解有新版本 X」與內文「按這裡更新；也可以從輸入選單更新。」。
 
 ### 3.4 關於頁
 
@@ -152,7 +152,8 @@ Sparkle 的程式碼位置、善解更新、安裝程式一律沒有 entitlement
 - 「善解輸入法」區：版本。
 - 「模型」區：讀 `Resources/models.tsv` 的名稱與代號；檔案缺或讀不出來就沒有這一區。
 - 「更新」區：
-  - 「自動檢查更新」開關（預設開），旁邊的說明：「開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本只在這裡和輸入選單顯示，按下才更新。」
+  - 「自動檢查更新」開關（預設開），旁邊的說明：「開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本時，關於頁與輸入選單會顯示，按下才更新。」
+  - 「有新版本時通知我」開關（預設開，自動檢查關著時反灰），說明：「每天提醒一次，直到更新。第一次會由系統詢問是否允許通知。」系統的通知對善解是拒絕或關著時（兩個開關都開著的前提下），多一行「系統設定裡關閉了善解的通知」與「打開通知設定」按鈕（§3.8）。
   - 依安裝位置的說明：只看 `Bundle.main.bundleURL` 的上層資料夾是不是 `/Library/Input Methods`。
     - 是：「善解裝給這台 Mac 的所有帳號。按更新後，善解更新會先下載並驗證，再跳出系統的密碼框，請你輸入密碼來允許更新；框裡有一行說明固定是英文：『善解更新 wants permission to update 善解輸入法.』。善解只會在你按下這裡的『更新』之後才要密碼。不是管理員的帳號，請管理員更新。」密碼框裡系統自己的字會翻成中文，這一行是 Sparkle 寫死的英文、不翻譯。
     - 否：「善解只裝在你的帳號，更新不需要密碼。有程式開著安全輸入時，系統會暫時停用善解；要改裝給整台 Mac，請重新下載安裝程式並選『這台 Mac』。」
@@ -168,7 +169,7 @@ Sparkle 的程式碼位置、善解更新、安裝程式一律沒有 entitlement
 
 `Updates.install`（關於頁按鈕與選單項共用）：
 
-1. 檢查中就忽略（自己的靜默檢查會給答案）。
+1. 檢查中就記下這次按下，不另開檢查：正在跑的那次檢查結果是有新版本，才進第 4 步（選單項與按鈕在檢查中是反灰的，這一條實際上只發生在點通知時，§3.8）。
 2. 先跑一次靜默探測。探測回 `started` 時記下「檢查完要裝」；回 `busy`（Sparkle 有 session）時直接進第 4 步；回 `unavailable` 時記日期並顯示「檢查失敗」。
 3. 檢查結果是有新版本才進第 4 步；已是最新或失敗只更新關於頁與選單的狀態，不出現任何 Sparkle 視窗。
 4. 先 `closeSettings()` 關掉設定視窗，再 `NSWorkspace.openApplication(at: Contents/Helpers/善解更新.app)`，`activates = true`，不帶參數；啟動失敗記一行靜態 log。善解更新已在執行時，再按只是把它叫到前面（LaunchServices）。
@@ -183,6 +184,18 @@ Sparkle 對不是主 bundle 的 host，用 host 的 bundle ID 開一個 user def
 - 跳過版本：Sparkle 把「跳過這個版本」存在 host 網域（鍵 `SUSkippedVersion`、`SUSkippedMajorVersion`、`SUSkippedMajorSubreleaseVersion`），探測會照它濾掉版本；善解更新寫的是 `~/Library/Preferences/<ID>.plist`、輸入法讀的是 container，按了跳過之後兩邊不一致，而且寫一個很大的跳過版本就能讓探測永遠看不到新版。所以輸入法每次探測前、善解更新啟動時，都刪掉這三個鍵。善解只在使用者按下「更新」才裝，「跳過」本來就沒有用處。
 - 排程鍵：`SUEnableAutomaticChecks`、`SUScheduledCheckInterval`、`SUAutomaticallyUpdate` 也先讀網域，所以同一時機一併刪掉（網域裡有值會啟動 Info.plist 關掉的背景檢查；在善解更新裡，背景 session 還會讓使用者的檢查不開視窗就返回）。
 - 刪除透過 `KeyRemoving` 協定，測試用記憶體實作，不寫真實偏好。
+
+### 3.8 通知
+
+程式：判斷在 `Updates`（`shouldNotify`、`showsPermissionLine`，單元測試），接系統的是 `macos/Sources/Shanjie/UpdateNotifier.swift`。
+
+- 層級：系統原生的通知（`UNUserNotificationCenter`），由輸入法程序發出；樣式、橫幅、通知中心、勿擾與專注模式都由系統決定。不自己畫提示視窗（打字時跳視窗會搶焦點，§3.2）；Sparkle 的溫和提醒只在善解更新裡，而它平常不在執行。不需要新的 entitlement（§2.3 仍是三個鍵）。
+- 何時發：背景檢查（`tick`）查到新版本，而且「有新版本時通知我」與「自動檢查更新」都開著。背景檢查一天最多一次（§3.2），所以同一版每天最多一則，直到更新或關掉開關。「立即檢查」與「更新到 X」查到新版本不發（使用者正看著關於頁）。`Updates` 在開始一次檢查時記下是不是背景檢查，`finished` 讀完就清掉。
+- 一個識別碼（`update-available`）：每天的那則取代前一則，通知中心只留一則。檢查結果是已是最新時（例如更新完），把留在通知中心的那則清掉。背景檢查進行中點了通知、那次檢查又查到新版本時，只開善解更新，不再多發一則。
+- 授權：每次要發時先讀系統的狀態。還沒決定 → `requestAuthorization`（第一次真的有新版本時才問），允許了才發；已允許 → 發；已拒絕 → 什麼都不做，不再問、不改用別的方式提醒（輸入選單那一項照舊在）。授權詢問在輸入法程序活著時一直掛著等回答；**沒回答、程序就結束（登出、更新）時，系統把它記成拒絕**，之後不再詢問（虛擬機量到）。
+- 點了通知：等同選單項「有新版本 X，按此更新…」（`Updates.install`：先靜默確認一次，再開善解更新）。delegate 在 `app.run()` 之前設好：輸入法程序沒在跑時點通知，系統另外啟動輸入法程序，一啟動就送來這次點擊；之後輸入法機制用的是同一個程序，不會再另起一份（虛擬機量到）。
+- 關於頁：每次顯示時重讀系統的通知狀態；拒絕或「橫幅與通知中心都關著」時，在兩個開關都開著的前提下顯示「系統設定裡關閉了善解的通知」與「打開通知設定」。按鈕先關設定視窗（理由同 §3.6），再打開系統設定的通知頁（`x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=<bundle ID>`）。
+- 通知要裝上帶這個功能的版本才會作用：更舊的版本查到新版本時，仍只在輸入選單與關於頁顯示。
 
 ## 4. 善解更新.app
 
@@ -601,7 +614,7 @@ EOF
 
 | 測試 | 檔案 | 涵蓋 |
 |---|---|---|
-| `UpdatesTests` | `macos/Tests/ShanjieKitTests/UpdatesTests.swift` | 位置說明（`testLocationNote`）、版本字串（`testVersionText`）、每日規則（`testShouldCheckDecision`）、tick 跟開關與天數（`testTickFollowsToggleAndDay`）、立即檢查不受開關與進行中的檢查影響（`testCheckNowIgnoresToggleAndARunningCheck`）、更新服務起不來（`testCheckNowWhenTheUpdaterCannotCheck`）、更新先檢查（`testInstallChecksFirst`）、有 Sparkle session 時（`testInstallWhileBusyFocuses`）、背景發現不開視窗也不丟已知版本（`testBackgroundFindDoesNotOpenAWindowOrDropAVersion`）、結果與還原（`testResultsAndRestore`）、只有 release／test 組建啟動（`testUpdaterRunsOnlyFromAReleaseOrTestBundle`）、選單項（`testMenuItemOnlyWhenAnUpdateIsKnown`） |
+| `UpdatesTests` | `macos/Tests/ShanjieKitTests/UpdatesTests.swift` | 位置說明（`testLocationNote`）、版本字串（`testVersionText`）、每日規則（`testShouldCheckDecision`）、tick 跟開關與天數（`testTickFollowsToggleAndDay`）、立即檢查不受開關與進行中的檢查影響（`testCheckNowIgnoresToggleAndARunningCheck`）、更新服務起不來（`testCheckNowWhenTheUpdaterCannotCheck`）、更新先檢查（`testInstallChecksFirst`）、有 Sparkle session 時（`testInstallWhileBusyFocuses`）、背景發現不開視窗也不丟已知版本（`testBackgroundFindDoesNotOpenAWindowOrDropAVersion`）、結果與還原（`testResultsAndRestore`）、只有 release／test 組建啟動（`testUpdaterRunsOnlyFromAReleaseOrTestBundle`）、選單項（`testMenuItemOnlyWhenAnUpdateIsKnown`）、通知（背景查到才發、每天一次、使用者按的不發、兩個開關、其他結果不發、開關預設開、狀態行、文字：`testBackgroundFindNotifiesOncePerDay`、`testUserChecksDoNotNotify`、`testSwitchesOffDoNotNotify`、`testOtherResultsDoNotNotify`、`testNotifySwitchDefaultsOnAndIsStored`、`testPermissionLine`、`testNotificationText`）、檢查中點通知會記下（`testInstallDuringARunningCheckIsKept`）、已是最新清掉通知（`testUpToDateClearsTheNotification`）、設定視窗重讀權限（`testSettingsRefreshReadsThePermission`） |
 | `UpdateHostTests` | `macos/Tests/UpdateHostTests/UpdateHostTests.swift` | host 路徑（兩個根 × 兩個名稱、往上三層、符號連結、container 與桌面副本、家目錄字串邊界、家目錄經 realpath、translocation）、feed 只讀 Info.plist、跳過鍵與排程鍵被清掉、哪些檢查可以跑、只放行 `application`、組建類型三種值與缺值 |
 | `InstallerPlanTests` | `macos/Tests/ShanjieInstallTests/InstallerPlanTests.swift` | `InstallerPlan.decide` 與 §5.3 的決策表每一列一個案例（含反方向換位置、帳號層較新、`/Library` 讀不到版本、「複製前沒有列出」才算換位置） |
 | `RootStageTests` | `macos/Tests/ShanjieInstallTests/RootStageTests.swift` | root 指令以一般使用者對暫存根目錄執行：成功安裝與模式、重新安裝保留上一版、改名失敗保留上一版、staging 不被打開、更新、來源帶 ACL 時結果沒有 ACL、指向外面的連結不被跟隨、副本裡的連結保留、正式需求拒絕 ad-hoc 與未簽章的副本與開發版 ID、上層可寫／別人擁有／是符號連結都停、版本低於或高於常數被拒、降版被拒、目的地是符號連結被拒、路徑含不預期字元被拒、版本缺或格式錯被拒、正式參數值、AppleScript 來源還原後與指令逐字相同（含路徑裡的空格與全形字）、指定需求可解析且提早檢查用同一份 |
@@ -680,3 +693,4 @@ EOF
 - Space（換到別的桌面）時 Sparkle 的視窗叫不回來：設定視窗本來就有同樣的限制，沒有實測。
 - `ci.yml` 的 Step 8 註解仍寫「ten changed copies」，實際是 24 種突變（§10.3）。
 - 沒有 beta 頻道與差分更新（delta）；詞庫與模型不能獨立於 App 更新。
+- 通知的授權詢問沒回答、輸入法程序就結束時，系統記成拒絕，之後不再詢問；這樣的使用者要從關於頁的「打開通知設定」或系統設定自己打開（§3.8）。
