@@ -9,7 +9,7 @@
 #
 # Needs pandoc and pdftocairo (poppler). scripts/paper_html.py first writes a copy of the source without the
 # constructs pandoc gets wrong; pandoc converts the copy with scripts/paper-zh.template.html (the whole page: head,
-# navigation, footer); paper_html.py then adds the numbers LaTeX printed, cuts the figures listed in
+# navigation, footer) and scripts/paper.csl (reference entries with every author); paper_html.py then adds the numbers LaTeX printed, cuts the figures listed in
 # scripts/paper-zh.figures.tsv out of the PDF, and prints the checks. Any failed check, a command pandoc skipped
 # that could carry text, or a formula pandoc could not convert to MathML, ends with a non-zero status. The page
 # loads nothing from another site.
@@ -29,7 +29,7 @@ trap 'rm -rf "$work"' EXIT
 python3 -B "$here/paper_html.py" --prepare "$tex" "$work/main.tex"
 pandoc "$bib" --from bibtex --to csljson -o "$work/refs.json"      # for the entries' notes, which the style omits
 if ! pandoc "$work/main.tex" --verbose --from latex --to html5 -s --template "$here/paper-zh.template.html" \
-     --math-method=mathml --citeproc --bibliography "$bib" -M link-citations=true \
+     --math-method=mathml --citeproc --csl "$here/paper.csl" --bibliography "$bib" -M link-citations=true \
      --section-divs --toc --toc-depth=2 --shift-heading-level-by=1 -o "$work/zh.html" 2> "$log"; then
   cat "$log" >&2
   exit 1

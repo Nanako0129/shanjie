@@ -10,8 +10,8 @@ one of BARE or PREAMBLE (layout and fonts only), because a skipped command can t
 Citations follow the PDF as well: it cites by number ([35], [50, 51], sorted and compressed), and the numbers are in
 AUX (`\\bibcite`). pandoc writes author-year citations, so each is rewritten to the PDF's numbers and the reference
 list is put in that order with its numbers.
-REFS_JSON is the bibliography as CSL JSON (`pandoc refs.bib -t csljson`): pandoc's default citation style prints no
-`note` field, the PDF does, so each note is appended to its entry here.
+REFS_JSON is the bibliography as CSL JSON (`pandoc refs.bib -t csljson`): the PDF prints each entry's `note`
+field (access dates, the commit a link is pinned to), and each note is appended to its entry here.
 
 HTML is rewritten in place. pandoc numbers nothing the way LaTeX does (appendix letters, equations, tables), so
 every visible number is put here: sections, tables, figures and display equations are counted in document order,
@@ -174,7 +174,7 @@ def self_test():
         assert '<span class="citation">[<a href="#ref-k">7</a>]</span>' in out and '<span class="csl-num">[7]</span> K' in out, out
         nums = {"a": 3, "b": 4, "c": 5, "d": 9, "e": 10}
         assert re.sub(r"<[^>]+>", "", cite_numbers(["d", "b", "a", "c", "e"], nums)) == "[3–5, 9, 10]"
-        assert 'K <span class="csl-note">Seen at <a href="https://e.org/x">https://e.org/x</a></span>' in out, out
+        assert 'K <span class="csl-note">Seen at <a href="https://e.org/x">https://e.org/x</a>.</span>' in out, out
         assert out.index('id="references"') < out.index('<section id="app:a"') and '表 1：' in out
         good = page
         one = "<h2>One</h2>"
@@ -378,7 +378,8 @@ def main():
         if not note:
             return m.group(0)
         added[0] += 1
-        note = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', html.escape(note, quote=False))
+        note = note if note.endswith(("。", ".")) else note + "."
+        note = re.sub(r"(https?://[^\s<]+?)(?=\.?(?:\s|$))", r'<a href="\1">\1</a>', html.escape(note, quote=False))
         return f'{m.group(0)} <span class="csl-note">{note}</span>'
 
     s = re.sub(r'<div id="ref-([^"]+)" class="csl-entry"[^>]*>(?:(?!</div>).)*?(?=\s*</div>)', entry, s, flags=re.S)
