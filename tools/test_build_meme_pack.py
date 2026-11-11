@@ -29,8 +29,8 @@ def get(path):
 
 
 def fake_readings(words):
-    """same reading for the two 同音 words, otherwise one made-up syllable per character."""
-    return {w: (["a", "b", "c"] if w.startswith("同音") else [f"s{ord(c)}" for c in w], False) for w in words}
+    """same reading for the two 同音 words, otherwise one made-up syllable per character; words starting 無讀 have no reading."""
+    return {w: (["a", "b", "c"] if w.startswith("同音") else [f"s{ord(c)}" for c in w], False) for w in words if not w.startswith("無讀")}
 
 
 def fake_decoder(chat=None, formal=None, seen=None):
@@ -189,9 +189,19 @@ class Judge(unittest.TestCase):
         kept, dropped = self.run_judge(adm, {"同音多": "拼詞", "同音少": "別的拼詞"}, {"拼詞": (90, 5)}, rd)
         self.assertEqual((kept, sorted((d[0], d[1]) for d in dropped)), ([], [("同音多", "x_not_fewer"), ("同音少", "same_reading")]))
 
-    def test_first_in_both_profiles_is_already_right(self):
-        kept, dropped = self.run_judge({"打對詞": (50, 5)}, {"打對詞": "打對詞"}, {}, fs={"打對詞": "打對詞"})
-        self.assertEqual((kept, [d[1] for d in dropped]), ([], ["already_right"]))
+    def test_first_in_both_profiles_is_already_right_for_beauty_and_kept_for_meme(self):
+        for tag, want in (("beauty", ([], ["already_right"])), ("meme", (["打對詞"], []))):
+            kept, dropped = T.judge({"打對詞": (50, 5)}, {"打對詞": ["s1"]}, {"打對詞": "打對詞"}, {"打對詞": "打對詞"}, {}, frozenset(), tag)
+            self.assertEqual((kept, [d[1] for d in dropped]), want)
+
+    def test_a_plus_pair_keeps_both_words_each_judged_on_its_own_x(self):
+        adm, rd = {"同音多": (50, 5), "同音少": (20, 5)}, {"同音多": ["a"], "同音少": ["a"]}
+        xs, fs = {"同音多": "拼詞", "同音少": "別的拼詞"}, {"同音多": "書", "同音少": "書"}
+        plus = [("a", "同音多", "同音少")]
+        self.assertEqual(T.judge(adm, rd, xs, fs, {"拼詞": (10, 5), "別的拼詞": (10, 5)}, frozenset(), "meme", plus)[0], ["同音少", "同音多"] if "同音少" < "同音多" else ["同音多", "同音少"])
+        kept, dropped = T.judge(adm, rd, xs, fs, {"拼詞": (10, 5), "別的拼詞": (90, 5)}, frozenset(), "meme", plus)
+        self.assertEqual((kept, [(d[0], d[1]) for d in dropped]), (["同音多"], [("同音少", "x_not_fewer")]))       # the pair is not a free pass
+        self.assertEqual(T.judge(adm, rd, xs, fs, {"拼詞": (10, 5), "別的拼詞": (10, 5)}, frozenset(), "meme")[0], ["同音多"])      # no + row: only the one with more articles
 
     def test_first_in_chat_but_not_in_formal_is_not_dropped_as_already_right(self):
         kept, dropped = self.run_judge({"只聊天對": (50, 5)}, {"只聊天對": "只聊天對"}, {}, fs={"只聊天對": "書面的別字"})
@@ -216,6 +226,7 @@ class Pipeline(unittest.TestCase):
     C1 = {"有人氣": (30, 5), "甘我屁事": (12, 3), "我就爛": (40, 6), "你能拿我怎樣": (15, 4), "看板二詞": (99, 2), "已有詞": (99, 9), "同音多": (50, 5),
           "同音少": (20, 5), "已打對": (60, 5), "只聊天對": (45, 5)}
     X = {"有人氣": "有人氣", "甘我屁事": "拼出詞乙", "我就爛": "拼出詞甲", "你能拿我怎樣": "拼出詞丙", "同音多": "拼出詞丁", "同音少": "拼出詞戊", "已打對": "已打對", "只聊天對": "只聊天對"}
+    ALLOW = "# the allow list\n\n有人氣\tmeme\n甘我屁事\tmeme\n我就爛\toffensive\n同音多\tmeme\n同音少\tmeme\n已打對\tmeme\n只聊天對\tmeme\n"
     FORMAL = {"有人氣": "有人氣", "已打對": "已打對"}      # first place in the formal profile: only these two are right in both profiles
     # X articles: 甲 < 40 keeps 我就爛; 乙 = 12 ties 甘我屁事 (12) and drops it; 丙 > 15 drops 你能拿我怎樣; 丁 < 50 keeps 同音多
     C2 = {"拼出詞甲": (5, 3), "拼出詞乙": (12, 3), "拼出詞丙": (80, 6), "拼出詞丁": (7, 3), "拼出詞戊": (1, 1), "有人氣": (30, 5), "已打對": (60, 5)}
@@ -227,6 +238,8 @@ class Pipeline(unittest.TestCase):
         self.work, self.out = os.path.join(t, "work"), os.path.join(t, "out")
         self.cand, self.c1, self.c2 = (os.path.join(t, n) for n in ("cand.tsv", "c1.tsv", "c2.tsv"))
         put(self.cand, self.CAND)
+        self.allow = os.path.join(t, "allow.tsv")
+        put(self.allow, self.ALLOW)
         for patch in (mock.patch.object(IT, "check_shipping_lm"), mock.patch.object(T, "have_words", lambda: frozenset({"已有詞"})),
                       mock.patch.object(T, "pack_words", lambda: frozenset()), mock.patch.object(B, "make_readings", fake_readings),
                       mock.patch.object(B, "scores", lambda base: dict(SC)), mock.patch.object(B, "base_lexicon", lambda: None),
@@ -235,9 +248,9 @@ class Pipeline(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def args(self, *more):
+    def args(self, *more, allow=True):
         return ["--cand", self.cand, "--work", self.work, "--out", self.out, "--collisions", os.path.join(self.tmp.name, "none.tsv"),
-                "--readings", os.path.join(self.tmp.name, "none-r.tsv"), *more]
+                "--readings", os.path.join(self.tmp.name, "none-r.tsv"), *(["--allow", self.allow] if allow else []), *more]
 
     def stage1(self):
         run_main(*self.args("--emit-candidates"))
@@ -290,13 +303,15 @@ class Pipeline(unittest.TestCase):
         self.stage2()
         self.final()
         words = {l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()}
-        self.assertEqual(words, {"我就爛", "同音多", "只聊天對"})
+        self.assertEqual(words, {"我就爛", "同音多", "只聊天對", "有人氣", "已打對"})         # the two already right in both profiles are shipped too; 你能拿我怎樣 is not on the list
         self.assertTrue(all(l.endswith("\tmeme") for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()))
         self.assertEqual(float(get(os.path.join(self.out, "meme-add.tsv")).splitlines()[0].split("\t")[2]), -4.0)       # the base score -7 plus BONUS 3
         dropped = {l.split("\t")[0]: l.split("\t")[1] for l in get(os.path.join(self.work, "dropped.tsv")).splitlines()[1:]}
-        self.assertEqual(dropped, {"甘我屁事": "x_not_fewer", "你能拿我怎樣": "x_not_fewer", "有人氣": "already_right", "已打對": "already_right", "同音少": "same_reading"})
+        self.assertEqual(dropped, {"甘我屁事": "x_not_fewer", "同音少": "same_reading"})
         src = get(os.path.join(self.out, "meme-sources.tsv")).splitlines()
-        self.assertIn("我就爛\t統神\t40\t6\t", src)
+        self.assertEqual(src[0], "word\tsources\tclass\tarticles\tboards\tnote")
+        self.assertIn("我就爛\t統神\toffensive\t40\t6\t", src)
+        self.assertEqual(json.loads(get(os.path.join(self.out, "meme.json")))["stages"]["not_allowed"], 1)
 
     def test_meme_json_records_the_header_fields_of_both_counts_files_and_the_x_hashes(self):
         self.stage1()
@@ -310,7 +325,8 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(m["meme_x"], json.loads(get(os.path.join(self.work, "meme-x.json"))))
         self.assertEqual(m["candidate_stats"]["dropped_ascii"], 1)
         self.assertEqual(m["files"]["meme-add.tsv"]["sha256"], B.sha256_file(os.path.join(self.out, "meme-add.tsv")))
-        self.assertEqual(m["sources"], {"統神": 1, "forum": 2})
+        self.assertEqual(m["sources"], {"統神": 2, "forum": 3})
+        self.assertEqual(m["allow"], {"file": "allow.tsv", "sha256": B.sha256_file(self.allow), "rows": 7, "shipped": {"meme": 4, "offensive": 1}})
         self.assertEqual(m["candidate_files"], {"cand.tsv": B.sha256_file(self.cand)})        # names only, no temp-dir path
         self.assertNotIn(self.tmp.name, get(os.path.join(self.out, "meme.json")))
 
@@ -357,7 +373,7 @@ class Pipeline(unittest.TestCase):
 
     def test_native_pack_is_refused_for_beauty(self):
         with self.assertRaises(SystemExit) as e:
-            run_main("--pack", "beauty", "--native-pack", *self.args())
+            run_main("--pack", "beauty", "--native-pack", *self.args(allow=False))
         self.assertIn("--native-pack only applies to --pack meme", str(e.exception))
 
     def test_native_pack_hands_the_built_rows_to_the_decoder_as_meme_add_tsv(self):
@@ -386,18 +402,110 @@ class Pipeline(unittest.TestCase):
         return [l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()]
 
     def test_rows_wrong_in_chat_come_before_the_ones_already_right_in_chat(self):
-        self.assertEqual(self.kept_order(), ["同音多", "我就爛", "只聊天對"])          # 只聊天對 is first in chat without the pack
+        self.assertEqual(self.kept_order(), ["同音多", "我就爛", "已打對", "只聊天對", "有人氣"])          # the last three are first in chat without the pack
 
     def test_rows_of_a_plus_pair_come_last(self):
         coll = os.path.join(self.tmp.name, "coll.tsv")
         put(coll, "a b c\t同音多\t+同音少\t兩個都留\n")
         order = self.kept_order("--collisions", coll)
-        self.assertEqual(order, ["我就爛", "只聊天對", "同音多"])      # without the line 同音多 comes first
+        self.assertEqual(order, ["我就爛", "已打對", "只聊天對", "有人氣", "同音多", "同音少"])      # the pair keeps both, last; without the line 同音多 comes first and 同音少 is dropped
+
+    def test_a_candidate_not_on_the_list_is_not_shipped_and_does_not_block_a_same_reading_list_word(self):
+        put(self.allow, self.ALLOW.replace("同音多\tmeme\n", ""))
+        order = self.kept_order()
+        self.assertIn("同音少", order)                      # 同音多 has more articles but is not on the list: it does not block 同音少
+        self.assertNotIn("同音多", order)
+        self.assertNotIn("同音多", get(os.path.join(self.work, "dropped.tsv")))      # removed before the rules, so not a dropped row either
+        self.assertEqual(json.loads(get(os.path.join(self.out, "meme.json")))["stages"]["not_allowed"], 2)      # 同音多 and 你能拿我怎樣
+
+    def test_a_missing_allow_file_stops_both_stages(self):
+        self.stage1()
+        os.remove(self.allow)
+        with self.assertRaises(SystemExit) as e:
+            run_main(*self.args("--emit-x", "--counts", self.c1))
+        self.assertIn("allow list is missing", str(e.exception))
+        self.allow = os.path.join(self.tmp.name, "allow.tsv")
+        put(self.allow, self.ALLOW)
+        self.stage2()
+        os.remove(self.allow)
+        with self.assertRaises(SystemExit):
+            self.final()
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_a_bad_allow_file_stops_naming_the_line(self):
+        for text, line in (("有人氣\tmeme\n甘我屁事\tother\n", ":2:"), ("有人氣\n", ":1:"), ("有人氣\tmeme\n\n有人氣\toffensive\n", ":3:")):
+            put(self.allow, text)
+            with self.assertRaises(SystemExit) as e:
+                T.read_allow(self.allow)
+            self.assertIn(line, str(e.exception))
+
+    def test_allow_is_nfkc_normalised_like_candidates(self):
+        put(self.allow, "\u2f00切都是\tmeme\n")
+        self.assertEqual(T.read_allow(self.allow)[0], {"一切都是": "meme"})
+
+    def test_allow_is_refused_for_beauty_and_exclude_for_meme(self):
+        with self.assertRaises(SystemExit) as e:
+            run_main("--pack", "beauty", *self.args())
+        self.assertIn("--allow only applies to --pack meme", str(e.exception))
+        for flag in ("--exclude", "--exclude-private"):
+            with self.assertRaises(SystemExit) as e:
+                run_main(*self.args(flag, self.allow))
+            self.assertIn("does not take --exclude", str(e.exception))
+
+    def test_emit_x_does_not_depend_on_the_allow_list(self):
+        self.stage1()
+        outs = []
+        for text in (self.ALLOW, "有人氣\toffensive\n"):
+            put(self.allow, text)
+            run_main(*self.args("--emit-x", "--counts", self.c1))
+            outs.append({n: get(os.path.join(self.work, n)) for n in ("meme-x.tsv", "meme-x-strings.txt", "meme-x.json")})
+        self.assertEqual(outs[0], outs[1])
+
+    def test_allow_missing_lists_every_list_word_that_is_not_shipped_with_a_reason(self):
+        extra = "不是候選\tmeme\n看板二詞\tmeme\n已有詞\toffensive\n無讀音詞\tmeme\n"
+        put(self.allow, self.ALLOW + extra)
+        put(self.cand, self.CAND + "無讀音詞\tforum\n")
+        self.C1 = dict(self.C1, 無讀音詞=(30, 5))
+        coll = os.path.join(self.tmp.name, "coll.tsv")
+        self.stage1()
+        self.stage2()
+        run_main(*self.args("--counts", self.c1, self.c2))
+        rows = {r[0]: r[1:] for r in (l.split("\t") for l in get(os.path.join(self.work, "allow-missing.tsv")).splitlines())}
+        self.assertEqual({w: (r[0], r[1]) for w, r in rows.items()},
+                         {"不是候選": ("meme", "not_a_candidate"), "看板二詞": ("meme", "below_threshold"), "已有詞": ("offensive", "in_lexicon_or_pack"),
+                          "無讀音詞": ("meme", "unreadable"), "甘我屁事": ("meme", "x_not_fewer"), "同音少": ("meme", "same_reading")})
+        shipped = {l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()}
+        self.assertEqual(len(shipped) + len(rows), len(T.read_allow(self.allow)[0]))
+        # a collisions-file row without + that names a list word as its third column: excluded_by_collisions_file (and it does not block the same-reading word)
+        put(coll, "a b c\t同音少\t同音多\t理由\n")
+        run_main(*self.args("--collisions", coll, "--counts", self.c1, self.c2))
+        rows = {r[0]: r[2] for r in (l.split("\t") for l in get(os.path.join(self.work, "allow-missing.tsv")).splitlines())}
+        self.assertEqual((rows["同音多"], "同音少" in rows), ("excluded_by_collisions_file", False))
+
+    def test_the_run_stops_when_the_list_is_not_accounted_for(self):
+        self.stage1()
+        self.stage2()
+        with mock.patch.object(T, "allow_missing", lambda *a: []), self.assertRaises(SystemExit) as e:
+            self.final()
+        self.assertIn("allow-missing.tsv", e.exception.code)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_words_all_is_every_shipped_word_without_check_readings_in_add_order(self):
+        self.stage1()
+        self.stage2()
+        with mock.patch.object(B, "make_readings", lambda ws: {w: (r, w == "我就爛") for w, (r, _) in fake_readings(ws).items()}):
+            self.stage2()
+            self.final()
+        order = [l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()]
+        want = "".join(f"|{w}|{'a b c' if w.startswith('同音') else ' '.join('s' + str(ord(c)) for c in w)}\n" for w in dict.fromkeys(order) if w != "我就爛")
+        self.assertEqual(get(os.path.join(self.work, "words-all.txt")), want)
+        self.assertIn("我就爛", order)
+        self.assertEqual(len(want.splitlines()), 4)
 
     def test_fewer_than_the_minimum_words_stops_before_anything_is_written_to_the_pack_dir(self):
         self.stage1()
         self.stage2()
-        with mock.patch.object(T, "MIN_WORDS", 4), self.assertRaises(SystemExit) as e:
+        with mock.patch.object(T, "MIN_WORDS", 6), self.assertRaises(SystemExit) as e:
             self.final()
         self.assertIsInstance(e.exception.code, str)                                            # a message, so the exit status is non-zero
         self.assertIn("STOP", e.exception.code)
