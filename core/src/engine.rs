@@ -877,8 +877,10 @@ pub struct Engine {
     /// docs/spec/english-mixed.md §4.1: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
     /// unit. Empty = no run. Never together with an unfinished syllable or a window.
     run: String,
-    /// docs/spec/english-mixed.md §4.4: the run was typed in the ASCII state (`set_ascii(1)`): it keeps its text as typed whatever ends it,
-    /// `set_ascii(0)` included (the state is already off when that call ends the run). False whenever there is no run.
+    /// docs/spec/english-mixed.md §4.4, §5.3: the run keeps its text as typed whatever ends it. Set for a run typed in the ASCII state
+    /// (`set_ascii(1)`; `set_ascii(0)` switches the state off before it ends the run, so the mark is on the run) and for a run
+    /// Backspace reopened from a token whose text the table did not write (the user picked it, or typed it in the ASCII state).
+    /// False whenever there is no run.
     run_ascii: bool,
     /// docs/spec/english-mixed.md §4.4, §5.3: a token reopened as the run, with the Chinese item it had; it comes back when the run ends with
     /// the same letters.
@@ -2097,16 +2099,15 @@ impl Engine {
     /// one-letter token just goes). The run opens before the removal, so the decode splits at it (docs/spec/english-mixed.md §4.7).
     fn reopen_token(&mut self, at: usize) -> Result<(), EngineError> {
         let typed = english_of(&self.syls[at]).unwrap_or_default();
-        let mut letters = match self.fixed.iter().find(|f| f.start == at) {
-            // docs/spec/english-mixed.md §5.3: a writing the table put there goes back to what was typed, so taking a letter and typing
-            // it again ends as the first time did (`ChatGPT` reopens as `Chatgp`, never `ChatGP`).
-            Some(f) if f.word != typed && f.word == english_writing(typed) => typed.to_string(),
-            Some(f) => f.word.clone(),
-            None => typed.to_string(),
-        };
+        let word = self.fixed.iter().find(|f| f.start == at).map_or(typed, |f| f.word.as_str());
+        // docs/spec/english-mixed.md §5.3: a writing the table put there goes back to what was typed, so taking a letter and typing
+        // it again ends as the first time did (`ChatGPT` reopens as `Chatgp`, never `ChatGP`). Any other text is one the user chose
+        // (picked from the list, or typed in the ASCII state): it reopens as it stands and the table leaves it alone when it ends.
+        let by_table = word == english_writing(typed);
+        let mut letters = if by_table { typed.to_string() } else { word.to_string() };
         letters.pop();
         self.run = letters;
-        self.run_ascii = self.ascii && !self.run.is_empty();
+        self.run_ascii = (self.ascii || !by_table) && !self.run.is_empty();
         self.run_zh = None;
         self.revert_point = None;
         self.cursor = at;

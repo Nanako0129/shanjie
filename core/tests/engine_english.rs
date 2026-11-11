@@ -2129,6 +2129,21 @@ fn backspace_reopens_what_was_typed() {
     run(&mut e, "S-c h a t g p t _ Down");
     assert_eq!(run(&mut e, "4").preedit, "CHATGPT", "premise: the fourth writing was picked");
     assert_eq!(run(&mut e, "BS").preedit, "CHATGP");
+    // A text the user chose stays the user's when the letter comes back: the table does not write over it again.
+    let mut e = eng();
+    run(&mut e, "S-c h a t g p t _ Down");
+    assert_eq!(run(&mut e, "3").preedit, "Chatgpt", "premise: the writing as typed was picked back");
+    assert_eq!(run(&mut e, "BS").preedit, "Chatgp");
+    assert_eq!(run(&mut e, "t _").preedit, "Chatgpt");
+    // So does a token typed in the ASCII state, reopened after the state is off.
+    let mut e = eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "c h a t g p t _");
+    e.set_ascii(false).unwrap();
+    assert_eq!(run(&mut e, "BS").preedit, "chatgp");
+    assert_eq!(run(&mut e, "t _").preedit, "chatgpt");
+    // The mark goes with that run: the next one takes its writing.
+    assert_eq!(run(&mut e, "S-g i t h u b _").preedit, "chatgptGitHub");
 }
 
 /// A run typed in the ASCII state keeps its text whatever ends it (Space, `set_ascii(0)`, `reset(Commit)`); the mark goes with the

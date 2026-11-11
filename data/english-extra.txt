@@ -67,7 +67,6 @@ Apple
 Google
 Microsoft
 Amazon
-Meta
 Tesla
 Intel
 AMD
@@ -223,17 +222,7 @@ IPO
 GDP
 FAQ
 DIY
-ASAP
-LGTM
-TBD
 FPS
 RPG
 NPC
 DLC
-
-# 名字
-Miyago
-CabLate
-Hanako
-Nanako
-Nyanako

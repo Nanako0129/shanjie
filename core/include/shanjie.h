@@ -224,7 +224,8 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   docs/spec/english-mixed.md §4 stand:
 //   - Backspace deletes English one letter at a time (docs/spec/english-mixed.md §5.3): with the cursor right after an English token (no unfinished
 //     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes; a writing the
-//     table put there reopens from the text as typed, `ChatGPT` as `Chatgp`). Space
+//     table put there reopens from the text as typed, `ChatGPT` as `Chatgp`; any other text reopens as it stands and keeps its casing
+//     when that run ends). Space
 //     units and punctuation tokens still go whole.
 //   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in the order typed, then the shifted letter); the output
 //     fields mark the run in preedit (0 and 0 otherwise). Without set_english the Shift rules (docs/spec/keys-and-composition.md §4.1 rules 13, 21, 22) are unchanged.
