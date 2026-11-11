@@ -333,6 +333,8 @@ final class UpdatesTests: XCTestCase {
     /// A click on the notification while the background check runs is kept: when that check finds a newer version, 善解更新 opens.
     func testInstallDuringARunningCheckIsKept() {
         let (u, c) = updates()
+        var posted: [String] = []
+        u.notify = { posted.append($0) }
         u.tick(now: now)
         XCTAssertTrue(u.checking)
         u.install(now: now.addingTimeInterval(5))
@@ -340,6 +342,42 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(c.opens, 0)
         u.finished(.available, version: "0.8.0")
         XCTAssertEqual(c.events, ["close", "launch"])
+        XCTAssertEqual(posted, [])  // 善解更新 opened: no second notification replacing the clicked one
+    }
+
+    /// Up to date clears the update notification left in Notification Center; other results leave it.
+    func testUpToDateClearsTheNotification() {
+        let (u, _) = updates()
+        var cleared = 0
+        u.clearNotification = { cleared += 1 }
+        u.tick(now: now)
+        u.finished(.available, version: "0.8.0")
+        u.tick(now: now.addingTimeInterval(day))
+        u.finished(.failed)
+        XCTAssertEqual(cleared, 0)
+        u.tick(now: now.addingTimeInterval(2 * day))
+        u.finished(.upToDate)
+        XCTAssertEqual(cleared, 1)
+    }
+
+    /// The settings window re-reads the permission whenever it shows or becomes key (`SettingsModel.refreshExternal`), so coming
+    /// back from System Settings to the reused window updates the 關於 page's line.
+    func testSettingsRefreshReadsThePermission() throws {
+        let resources = try XCTUnwrap(TestData.resources())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(),
+                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
+                          rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
+                          appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        let (u, _) = updates()
+        var reads = 0
+        u.refreshPermission = { reads += 1 }
+        shell.updates = u
+        let model = SettingsModel(shell: shell)
+        let before = reads
+        model.refreshExternal()
+        XCTAssertEqual(reads, before + 1)
     }
 
     /// The fixed strings of the notification and the 關於 page.

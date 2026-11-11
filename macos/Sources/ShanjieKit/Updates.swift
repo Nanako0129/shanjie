@@ -123,6 +123,8 @@ public final class Updates: ObservableObject {
     public var notify: (String) -> Void = { _ in }
     /// Reads the system's notification permission again into `notifyPermission` (the 關於 page calls it each time it shows).
     public var refreshPermission: () -> Void = {}
+    /// Removes the update notification left in Notification Center (a check found this version up to date).
+    public var clearNotification: () -> Void = {}
     /// Opens System Settings at the notification settings (the 打開通知設定 button); the settings window closes first.
     public var openNotificationSettings: () -> Void = {}
 
@@ -221,14 +223,17 @@ public final class Updates: ObservableObject {
         result = r
         switch r {
         case .available: if let newer { available = newer }
-        case .upToDate: available = nil
+        case .upToDate:
+            available = nil
+            clearNotification()   // a notification left from before the update would open nothing when clicked
         case .failed: break
         }
         var s = ["by": version, "result": r.rawValue]
         if let available { s["available"] = available }
         store.status = s
         if wantsInstall, r == .available, available != nil { openHelper() }
-        if let available, Self.shouldNotify(enabled: notifyEnabled, autoCheck: autoCheck, background: background, result: r) {
+        // A click during this background check already opened 善解更新: no second notification replacing the one just clicked.
+        if !wantsInstall, let available, Self.shouldNotify(enabled: notifyEnabled, autoCheck: autoCheck, background: background, result: r) {
             notify(available)
         }
     }

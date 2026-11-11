@@ -26,6 +26,9 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate {
         updates.notify = { [weak self] version in self?.post(version) }
         updates.refreshPermission = { [weak self] in self?.refreshPermission() }
         updates.openNotificationSettings = { [weak self] in self?.openSettings() }
+        updates.clearNotification = { [weak self] in
+            self?.center.removeDeliveredNotifications(withIdentifiers: [Self.identifier])
+        }
         refreshPermission()
     }
 

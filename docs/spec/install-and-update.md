@@ -169,7 +169,7 @@ Sparkle 的程式碼位置、善解更新、安裝程式一律沒有 entitlement
 
 `Updates.install`（關於頁按鈕與選單項共用）：
 
-1. 檢查中就忽略（自己的靜默檢查會給答案）。
+1. 檢查中就記下這次按下，不另開檢查：正在跑的那次檢查結果是有新版本，才進第 4 步（選單項與按鈕在檢查中是反灰的，這一條實際上只發生在點通知時，§3.8）。
 2. 先跑一次靜默探測。探測回 `started` 時記下「檢查完要裝」；回 `busy`（Sparkle 有 session）時直接進第 4 步；回 `unavailable` 時記日期並顯示「檢查失敗」。
 3. 檢查結果是有新版本才進第 4 步；已是最新或失敗只更新關於頁與選單的狀態，不出現任何 Sparkle 視窗。
 4. 先 `closeSettings()` 關掉設定視窗，再 `NSWorkspace.openApplication(at: Contents/Helpers/善解更新.app)`，`activates = true`，不帶參數；啟動失敗記一行靜態 log。善解更新已在執行時，再按只是把它叫到前面（LaunchServices）。
@@ -191,7 +191,7 @@ Sparkle 對不是主 bundle 的 host，用 host 的 bundle ID 開一個 user def
 
 - 層級：系統原生的通知（`UNUserNotificationCenter`），由輸入法程序發出；樣式、橫幅、通知中心、勿擾與專注模式都由系統決定。不自己畫提示視窗（打字時跳視窗會搶焦點，§3.2）；Sparkle 的溫和提醒只在善解更新裡，而它平常不在執行。不需要新的 entitlement（§2.3 仍是三個鍵）。
 - 何時發：背景檢查（`tick`）查到新版本，而且「有新版本時通知我」與「自動檢查更新」都開著。背景檢查一天最多一次（§3.2），所以同一版每天最多一則，直到更新或關掉開關。「立即檢查」與「更新到 X」查到新版本不發（使用者正看著關於頁）。`Updates` 在開始一次檢查時記下是不是背景檢查，`finished` 讀完就清掉。
-- 一個識別碼（`update-available`）：每天的那則取代前一則，通知中心只留一則。
+- 一個識別碼（`update-available`）：每天的那則取代前一則，通知中心只留一則。檢查結果是已是最新時（例如更新完），把留在通知中心的那則清掉。背景檢查進行中點了通知、那次檢查又查到新版本時，只開善解更新，不再多發一則。
 - 授權：每次要發時先讀系統的狀態。還沒決定 → `requestAuthorization`（第一次真的有新版本時才問），允許了才發；已允許 → 發；已拒絕 → 什麼都不做，不再問、不改用別的方式提醒（輸入選單那一項照舊在）。授權詢問在輸入法程序活著時一直掛著等回答；**沒回答、程序就結束（登出、更新）時，系統把它記成拒絕**，之後不再詢問（虛擬機量到）。
 - 點了通知：等同選單項「有新版本 X，按此更新…」（`Updates.install`：先靜默確認一次，再開善解更新）。delegate 在 `app.run()` 之前設好：輸入法程序沒在跑時點通知，系統另外啟動輸入法程序，一啟動就送來這次點擊；之後輸入法機制用的是同一個程序，不會再另起一份（虛擬機量到）。
 - 關於頁：每次顯示時重讀系統的通知狀態；拒絕或「橫幅與通知中心都關著」時，在兩個開關都開著的前提下顯示「系統設定裡關閉了善解的通知」與「打開通知設定」。按鈕先關設定視窗（理由同 §3.6），再打開系統設定的通知頁（`x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=<bundle ID>`）。
@@ -614,7 +614,7 @@ EOF
 
 | 測試 | 檔案 | 涵蓋 |
 |---|---|---|
-| `UpdatesTests` | `macos/Tests/ShanjieKitTests/UpdatesTests.swift` | 位置說明（`testLocationNote`）、版本字串（`testVersionText`）、每日規則（`testShouldCheckDecision`）、tick 跟開關與天數（`testTickFollowsToggleAndDay`）、立即檢查不受開關與進行中的檢查影響（`testCheckNowIgnoresToggleAndARunningCheck`）、更新服務起不來（`testCheckNowWhenTheUpdaterCannotCheck`）、更新先檢查（`testInstallChecksFirst`）、有 Sparkle session 時（`testInstallWhileBusyFocuses`）、背景發現不開視窗也不丟已知版本（`testBackgroundFindDoesNotOpenAWindowOrDropAVersion`）、結果與還原（`testResultsAndRestore`）、只有 release／test 組建啟動（`testUpdaterRunsOnlyFromAReleaseOrTestBundle`）、選單項（`testMenuItemOnlyWhenAnUpdateIsKnown`） |
+| `UpdatesTests` | `macos/Tests/ShanjieKitTests/UpdatesTests.swift` | 位置說明（`testLocationNote`）、版本字串（`testVersionText`）、每日規則（`testShouldCheckDecision`）、tick 跟開關與天數（`testTickFollowsToggleAndDay`）、立即檢查不受開關與進行中的檢查影響（`testCheckNowIgnoresToggleAndARunningCheck`）、更新服務起不來（`testCheckNowWhenTheUpdaterCannotCheck`）、更新先檢查（`testInstallChecksFirst`）、有 Sparkle session 時（`testInstallWhileBusyFocuses`）、背景發現不開視窗也不丟已知版本（`testBackgroundFindDoesNotOpenAWindowOrDropAVersion`）、結果與還原（`testResultsAndRestore`）、只有 release／test 組建啟動（`testUpdaterRunsOnlyFromAReleaseOrTestBundle`）、選單項（`testMenuItemOnlyWhenAnUpdateIsKnown`）、通知（背景查到才發、每天一次、使用者按的不發、兩個開關、其他結果不發、開關預設開、狀態行、文字：`testBackgroundFindNotifiesOncePerDay`、`testUserChecksDoNotNotify`、`testSwitchesOffDoNotNotify`、`testOtherResultsDoNotNotify`、`testNotifySwitchDefaultsOnAndIsStored`、`testPermissionLine`、`testNotificationText`）、檢查中點通知會記下（`testInstallDuringARunningCheckIsKept`）、已是最新清掉通知（`testUpToDateClearsTheNotification`）、設定視窗重讀權限（`testSettingsRefreshReadsThePermission`） |
 | `UpdateHostTests` | `macos/Tests/UpdateHostTests/UpdateHostTests.swift` | host 路徑（兩個根 × 兩個名稱、往上三層、符號連結、container 與桌面副本、家目錄字串邊界、家目錄經 realpath、translocation）、feed 只讀 Info.plist、跳過鍵與排程鍵被清掉、哪些檢查可以跑、只放行 `application`、組建類型三種值與缺值 |
 | `InstallerPlanTests` | `macos/Tests/ShanjieInstallTests/InstallerPlanTests.swift` | `InstallerPlan.decide` 與 §5.3 的決策表每一列一個案例（含反方向換位置、帳號層較新、`/Library` 讀不到版本、「複製前沒有列出」才算換位置） |
 | `RootStageTests` | `macos/Tests/ShanjieInstallTests/RootStageTests.swift` | root 指令以一般使用者對暫存根目錄執行：成功安裝與模式、重新安裝保留上一版、改名失敗保留上一版、staging 不被打開、更新、來源帶 ACL 時結果沒有 ACL、指向外面的連結不被跟隨、副本裡的連結保留、正式需求拒絕 ad-hoc 與未簽章的副本與開發版 ID、上層可寫／別人擁有／是符號連結都停、版本低於或高於常數被拒、降版被拒、目的地是符號連結被拒、路徑含不預期字元被拒、版本缺或格式錯被拒、正式參數值、AppleScript 來源還原後與指令逐字相同（含路徑裡的空格與全形字）、指定需求可解析且提早檢查用同一份 |
