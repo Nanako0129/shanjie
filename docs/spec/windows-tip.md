@@ -249,7 +249,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 3.14 已知限制與範圍外
 
-- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作；組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
+- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作；組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母、Tab、Shift+Tab），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
 - 沒有預測列、UILess（`ITfCandidateListUIElement`）、完整的 UIA 候選清單（候選窗只送 `EVENT_OBJECT_IME_*`）；候選窗沒有底部列（▲▼、兩個圖示）、捲動點、展開成三欄與滑鼠點選（§3.15、§4.6）。
 - 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。
@@ -259,6 +259,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 - 候選窗（§3.15）在測試 VM 沒量到的宿主：小算盤（AppContainer，切不到善解）、以系統管理員身分執行的記事本與密碼欄（量測時宿主沒有跑到前景）；密碼欄不開窗是程式的行為，在 VM 裡沒有核對到。
 - 候選窗的其他限制：`GetTextExt` 讀不到組字矩形時（例如 `TS_E_NOLAYOUT`），候選窗是開著的狀態但不顯示，只能盲選；`core_error` 時 DLL 收起窗，核心那邊的窗可能還開著；DPI 不感知的 App 在 150% 時 `GetTextExt` 的座標可能是虛擬化後的邏輯座標，窗會偏位（沒有換算，沒量到）；候選窗開著時，核心不處理但 `OnTestKeyDown` 回 TRUE 的鍵（例如 Ctrl＋字母）在 IMM32 宿主裡會被吞掉，和組字中相同（§5.4）。
 - 有記憶體上限的程序裡配置失敗會直接 abort，crash dump 內會含組字；這是所有輸入法共有的限制。
+- 顯示比例切換之後的慢鍵（原因未查明，候選窗之後那一片待查）：測試 VM 的驗收裡，顯示比例從 100% 切到 150% 再切回之後，記事本第一輪重播有 5 個鍵的 DLL 端事件 3 超過 15 ms（最慢 308.6 ms），記事本三輪合計的 p95 是 17.6 ms；接著量的「執行」對話框 p95 是 2.0 ms。準備完就重播的對照量測（這一版與前一版的建置各兩趟、交替）四趟的 p95 都在 2.5 ms 以內、最慢的鍵 9.3 ms，但沒有重做縮放，所以沒有重現，也沒有排除。
 
 ### 3.15 候選窗（`windows/tip/src/cand.rs`、`candlayout.rs`）
 
