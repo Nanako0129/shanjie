@@ -115,12 +115,14 @@ def cmd_run(a, kpi_dir=KPI_DIR):
 
 # ---------- replay: current checkout, data/lm models ----------
 def git_clean_head(root, version):
-    """HEAD of `root`, if no tracked file changed (untracked files, such as the results bench.py / kpi.py run just wrote, do not count)
+    """HEAD of `root`, if no tracked file changed (untracked files, such as the results bench.py / kpi.py run just wrote, do not count;
+    nor does this version's own kpi JSON, which `kpi.py run` rewrites when the version is measured again after its file was committed)
     and, when the tag `version` already exists, it points at HEAD."""
     if version in bench.LEGACY_SHA:   # this repository's tag of that name is not the version's commit (bench.LEGACY_SHA)
         die(f"{version} is a legacy version (commit {bench.LEGACY_SHA[version][:8]} of the legacy repository): replay measures the current checkout, "
             f"so run it from a checkout of that commit, not from this repository")
-    if bench.sh(["git", "-C", root, "status", "--porcelain", "--untracked-files=no"]).strip():
+    own = os.path.relpath(KPI_DIR, ROOT) + f"/{version}.json"
+    if bench.sh(["git", "-C", root, "status", "--porcelain", "--untracked-files=no", "--", f":(top,exclude){own}"]).strip():
         die("a tracked file has changes: replay measures the commit it records")
     head = bench.sh(["git", "-C", root, "rev-parse", "HEAD"]).strip()
     t = subprocess.run(["git", "-C", root, "rev-parse", "--verify", "--quiet", version + "^{commit}"], capture_output=True, text=True)

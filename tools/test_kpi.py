@@ -403,6 +403,19 @@ class ReplayGit(Tmp):
         open(os.path.join(self.repo, "eval/bench/kpi/v9.9.9.json"), "w").write("{}")
         self.assertEqual(self.head(), self.first)
 
+    def test_this_versions_tracked_kpi_file_does_not_block(self):  # kpi.py run rewrote it after it was committed
+        os.makedirs(os.path.join(self.repo, "eval/bench/kpi"))
+        for v in ("v9.9.9", "v9.9.8"):
+            open(os.path.join(self.repo, f"eval/bench/kpi/{v}.json"), "w").write("{}")
+        git(self.repo, "add", "eval")
+        git(self.repo, "commit", "-q", "-m", "kpi")
+        head = git(self.repo, "rev-parse", "HEAD")
+        open(os.path.join(self.repo, "eval/bench/kpi/v9.9.9.json"), "w").write('{"wikitune_clean": {}}')
+        self.assertEqual(self.head(), head)
+        open(os.path.join(self.repo, "eval/bench/kpi/v9.9.8.json"), "w").write('{"x": 1}')
+        with self.assertRaises(SystemExit):
+            self.head()  # another version's file is a tracked change like any other
+
     def test_tracked_change_blocks(self):
         open(os.path.join(self.repo, "a.txt"), "w").write("2")
         with self.assertRaises(SystemExit):
@@ -654,7 +667,7 @@ class RunWikitune(Tmp):
 
     def test_rows_under_eval_holdout_are_refused(self):
         link = os.path.join(self.td, "innocent.txt")
-        os.symlink(os.path.join(kpi.ROOT, "eval/holdout/next/shard-2/talk.txt"), link)  # only the resolved path is looked at, nothing is read
+        os.symlink(os.path.join(kpi.ROOT, "eval/holdout/next/shard-3/talk.txt"), link)  # only the resolved path is looked at, nothing is read
         for path in (os.path.join(kpi.ROOT, "eval/holdout/talk.txt"), link):
             with self.subTest(path), mock.patch.object(kpi, "die", side_effect=SystemExit) as die, self.assertRaises(SystemExit):
                 self.run_cmd(rows=path)
