@@ -212,6 +212,14 @@ jobs:
       - name: Evaluation rowstats
         run: scripts/ci-rowstats.sh rowstats-windows
 
+      # THROWAWAY (never merged): one changed byte must make the `rowstats` job fail.
+      - name: Inject one byte into a Windows rowstats file
+        run: |
+          set -euo pipefail
+          f="rowstats-windows/$(ls rowstats-windows | head -n 1)"
+          printf '9' >> "$f"
+          echo "appended one byte to $f"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rowstats-windows
