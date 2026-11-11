@@ -508,3 +508,35 @@ fn key_scheme_1_keeps_the_mixed_word_first() {
     assert_eq!(format!("cp{}", o.candidates[1]), shown, "the selected item is the one shown");
     assert_eq!(run(&mut e, "Enter").preedit, shown, "Enter on the shown word changes nothing");
 }
+
+/// What a re-pick right after the mixed word is learned under (docs/spec/english-mixed.md §5.7): the decode starts a sentence after the
+/// token, as after a mark, but the learning context is the text shown, and the mixed word ends in a Han character.
+#[test]
+fn the_learning_context_after_the_mixed_word() {
+    let learned = |after_mixed: bool| {
+        let mut e = eng();
+        if after_mixed {
+            run(&mut e, "c p _ 5 6");
+            choose(&mut e, "CP值");
+        } else {
+            run(&mut e, "S-,");
+        }
+        let before = records(&e);
+        let text = type_syls(&mut e, "ㄕˋ ㄕˊ").preedit;
+        let shown: String = text.chars().rev().take(2).collect::<Vec<_>>().into_iter().rev().collect();
+        let o = run(&mut e, "_");
+        let other = items(&mut e, &o).into_iter().find(|w| *w != shown && w.chars().count() == 2).expect("another word of the two syllables");
+        run(&mut e, "Esc");
+        choose_span(&mut e, &other);
+        run(&mut e, "Enter");
+        let new: Vec<(String, String)> = records(&e).into_iter().filter(|r| !before.contains(r)).collect();
+        (other, new)
+    };
+    let (w_mixed, mixed) = learned(true);
+    let (w_mark, mark) = learned(false);
+    assert_eq!(w_mixed, w_mark, "premise: the same character was picked in both");
+    // After a mark the word is learned at the sentence start; after the mixed word, under its last Han character.
+    let sentence_start = mark[0].0.clone();
+    assert!(mark.len() == 1 && mark[0].1 == w_mark && sentence_start.starts_with('^'), "{mark:?}");
+    assert_eq!(mixed, [("值".to_string(), w_mixed)]);
+}
