@@ -21,7 +21,7 @@
 - TSF 文字服務可在測試 VM 的記事本與「執行」對話框打出一句注音並送出，送出的字和 Mac 上 `shanjie-replay --packs acg,it`（Windows 版的詞包，見 §3.4）用同一串鍵解出的字逐字相同。
 - 模型只在常駐程序裡載一份；DLL 每按一鍵經 named pipe 同步問常駐程序（§5）。
 - 組字中按空白鍵或 ↓ 開出直排候選窗（每頁 9 列、編號 1–9），數字鍵、Enter 選字，Esc 關窗；窗在 DLL 裡畫，所以開始功能表與 Windows 搜尋也看得到（§3.15）。
-- 目前的按鍵行為就是核心現行的規則（直排候選窗用核心的直排規則）。微軟注音的規則組與 Mac 做法的切換設定尚未實作（§3.14）。
+- 按鍵預設照微軟注音（核心的按鍵習慣 1，§3.4；不照微軟的列在 §4.6）；登錄值 `KeyScheme` 設 0 改回 Mac 版的規則，還沒有設定頁。中英切換尚未實作（§3.14）。
 - 沒有預測列、候選窗的底部列與滑鼠操作、設定、學習檔、安裝程式與簽章（§3.14）。
 
 ## 2. 核心在 Windows
@@ -172,7 +172,7 @@ Linux `debug` job 在既有步驟之後加三步：
 - 字元鍵（`0`–`9`、`A`–`Z`、`VK_OEM_1`–`VK_OEM_7`、`VK_OEM_PLUS`、`VK_OEM_MINUS`、`VK_OEM_COMMA`、`VK_OEM_PERIOD`）送 kind 1，`ch` 是美式鍵盤上該鍵**不按 Shift** 的字元（`a`、`1`、`,`、`;`、`` ` ``、`\` …）。標準注音排列依實體鍵位，與目前的鍵盤配置無關，所以用固定的表，不呼叫 `ToUnicode`。
 - 修飾鍵：Shift → bit0、Ctrl → bit1，Caps Lock 為開時帶 bit4（`GetKeyState` 的 toggle 位元；核心第 1 條直通）。帶 Alt 或 Win 的鍵（含 AltGr＝Ctrl+Alt）不送核心，`pfEaten = FALSE`。
 - **`OnTestKeyDown` 不推進引擎**，只回答「可能會吃」，函式是 `may_eat(scheme, composing, window, key)`：這個實例有開著的組字時，任何換得出來的鍵都回 TRUE；沒有組字時，剛好是核心在組字區空時會處理的鍵才回 TRUE（中英混打、預測關、標準排列），照按鍵習慣 `scheme`：沒帶修飾鍵的字元鍵（注音、聲調、標點鍵，規則 2、14、22a）、`docs/spec/keys-and-composition.md` §8.1 那幾個 Shift＋標點鍵、Ctrl+\（核心第 1 條的例外，修飾位元恰為 Ctrl）；`scheme` 1 時 Shift+, 與 Shift+. 回 FALSE（核心照規則 2m 直通，在「執行」對話框這類 IMM32 宿主裡不能先回 TRUE 再放行），Ctrl+, 與 Ctrl+. 回 TRUE（規則 1m）；其他回 FALSE，鍵直接交給 App，包括核心會直通的空白鍵、Shift＋英文字母與 Caps Lock 開著時的鍵（規則 1、22）。理由見 §5.4：IMM32 宿主裡 `OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失。**候選窗開著時**照「有組字」算（`composing || window`）：換得出來的鍵都回 TRUE，其中核心規則 3v–8 要吃的鍵（數字 1–9、↑↓←→、空白、Enter、Esc、Backspace、Page Up、Page Down）一個都不漏；Page Up、Page Down 在窗沒開著時不換成按鍵，所以那時回 FALSE（組字中也一樣）。
-- **`scheme` 只來自這條連線的 `Welcome`**（§5.3），DLL 不讀登錄：`client::scheme()` 回這個執行緒目前連線的值，沒有連線時是 `None`。組字區空而還不知道 `scheme` 時：兩種 `scheme` 下都回 FALSE 的鍵（`may_eat_either`）不連線、直接回 FALSE；其他鍵先 `client::ready()`（連上，§5.4），再用連線的 `scheme` 判斷。組字中與窗開著時照上面，換得出來的鍵都回 TRUE，核心規則 1 會直通的鍵（Ctrl＋字母等）在 IMM32 宿主裡被吞掉，沿用 §3.14 已接受的限制。
+- **`scheme` 只來自這條連線的 `Welcome`**（§5.3），DLL 不讀登錄：`client::scheme()` 回這個執行緒目前連線的值，沒有連線時是 `None`。組字區空而還不知道 `scheme` 時：兩種 `scheme` 下都回 FALSE 的鍵（`may_eat_either`）不連線、直接回 FALSE；其他鍵先 `client::ready()`（連上，§5.4），再用連線的 `scheme` 判斷。組字中與窗開著時照上面，換得出來的鍵都回 TRUE，核心規則 1 會直通的鍵（Ctrl＋字母等）與規則 21 送出組字再直通的鍵在 IMM32 宿主裡被吞掉，沿用 §3.14 已接受的限制。
 - 驗證：`keys::tests`（`special_keys_map_to_their_kind`、`unlisted_keys_are_not_sent`、`page_keys_map_only_with_a_window_open_and_no_modifier`、`character_keys_carry_the_unshifted_keycap`、`modifier_bits`、`alt_and_win_keys_are_not_converted`、`on_test_key_down_with_an_empty_composition`、`on_test_key_down_with_a_composition`、`on_test_key_down_with_a_window_open`、`on_test_key_down_in_scheme_1_with_an_empty_composition`、`a_composition_or_a_window_eats_every_mapped_key_in_both_schemes`、`without_a_connection_only_a_key_both_schemes_refuse_is_refused`，各平台都跑）；常駐程序 crate 的 `window_keys_match_the_core` 與 `may_eat_matches_the_core_in_both_schemes` 對真的核心、兩種 `scheme` 逐組合核對：每個對照表裡的虛擬鍵、數字、字母、標點鍵、頁鍵與表外鍵，乘上 Shift、Ctrl、Caps Lock 的每種組合（Alt、Win 不送）。組字區空：雙向，`may_eat` 回 TRUE 而核心沒有處理（`handled` 0、`commit` 空）的 0 個，核心處理而 `may_eat` 回 FALSE 的 0 個；有未完成音節、組字中與窗開著：只核對「核心處理的鍵 `may_eat` 都回 TRUE」；頁鍵只有無修飾鍵時換得出來。
 
 ### 3.7 `OnKeyDown` 與文件的改動
@@ -249,7 +249,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 3.14 已知限制與範圍外
 
-- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作；`scheme` 0 下組字中把 Shift＋字母送出再直通的鍵，在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
+- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作；組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
 - 沒有預測列、UILess（`ITfCandidateListUIElement`）、完整的 UIA 候選清單（候選窗只送 `EVENT_OBJECT_IME_*`）；候選窗沒有底部列（▲▼、兩個圖示）、捲動點、展開成三欄與滑鼠點選（§3.15、§4.6）。
 - 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。
@@ -616,6 +616,5 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 
 - 登入時預先啟動的排程工作、安裝程式、更新流程、簽章。
 - 學習檔（含 AppContainer 客戶端的學習政策）；背景重排與 `Pushed` 的實際使用；預測列；候選窗的底部列、捲動點、展開成三欄與滑鼠點選；聊天／書面、分級等設定。
-- 微軟注音的按鍵規則組（§3.14）。
 - x86、ARM64 的 DLL 與 ARM64 的常駐程序；每個客戶端一個引擎；可 mmap 的零拷貝模型格式；常駐程序在沒有連線時自己結束。
 - 之後新增送往常駐程序的資料（前文回傳、學習的查詢）時，要重審 §5.5 第 1、5 點與 AppContainer 客戶端的政策。
