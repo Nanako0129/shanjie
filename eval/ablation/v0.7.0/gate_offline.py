@@ -96,6 +96,8 @@ def self_test():
     assert pick_masked(ng, [-1.0, 0.0, -9.0], 1.0, 2.0, 0.0, {1}) == 0
     assert pick_masked([0.0, -3.0, -3.5], [-9.0, 0.0, 0.0], 1.0, 2.0, 0.0, {1}) == 0
     assert pick_masked(ng, ll, 1.0, 2.0, 1.5, {1}) == 0
+    assert pick_masked([0.0, -0.5], [0.0, 0.5], 1.0, 2.0, 0.0) == 0         # a tie keeps the better n-gram rank
+    assert pick_masked([0.0, -0.5], [0.0, 1.5], 1.0, 2.0, 1.0) == 1         # beating the first by exactly delta wins
     # core/src/colloquial.rs `fused_pick_uses_the_registered_cell`, `non_finite_col_falls_back_to_the_plain_pick`
     rec = lambda ng, ll, col: {"i": 1, "n": len(ng), "ng": ng, "ll": ll, "col": col, "masked": []}
     assert row_pick(rec([-10.0, -10.3], [-5.0, -4.2], [0.0, 0.0]), "chat") == 1
@@ -104,6 +106,7 @@ def self_test():
     assert row_pick(rec([-10.0, -12.0], [-50.0, 0.0], [0.0, 0.0]), "chat", gate=False) == 1   # tau off
     assert row_pick(rec([-10.0, -11.9], [-50.0, 0.0], [0.0, 0.0]), "chat") == 1
     assert row_pick(rec([-10.0, -10.3], [-5.0, -3.8], [0.0, None]), "chat") == 0
+    assert row_pick(rec([-10.0, -10.3], [-5.0, -3.8], [0.0, None]), "chat", gate=False) == 1   # gate off drops delta 0.25
     assert abs(fuse([-10.0, -9.0, -12.0], [-5.0, -4.0, -3.0], 1.1)[1] - (-9.0 + sigmoid(1.0) * (0.5 / 1.1))) < 1e-12
     soft = rec([-10.0, -10.3], [-5.0, -8.0], [0.0, 10.0])        # sigmoid(-3) keeps the colloquial lift small
     assert row_pick(soft, "chat") == 0 and row_pick(soft, "chat", soft=False) == 1
@@ -149,9 +152,10 @@ def main():
     off = [row_pick(r, a.profile, gate=a.off != "gate", soft=a.off != "soft") for r in rows]
     ok_full = [r["ok"][j] for r, j in zip(rows, full)]
     ok_off = [r["ok"][j] for r, j in zip(rows, off)]
+    label = "gate" if a.off == "gate" else "soft gate"
     fixed = sum(1 for x, y in zip(ok_full, ok_off) if not x and y)
     broken = sum(1 for x, y in zip(ok_full, ok_off) if x and not y)
-    print(f"  full system {sum(ok_full)} correct; {"gate" if a.off == "gate" else "soft gate"} off {sum(ok_off)} correct; "
+    print(f"  full system {sum(ok_full)} correct; {label} off {sum(ok_off)} correct; "
           f"fixed {fixed}, broken {broken}, net {fixed - broken:+d}, exact McNemar p {mcnemar_exact(fixed, broken):.3g}")
     print(f"  pick differs from the full system on {sum(1 for x, y in zip(full, off) if x != y)} rows")
     if a.out:
