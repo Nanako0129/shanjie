@@ -490,7 +490,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 | 保留集口語半邊（聊天）、新聞半邊（書面） | `kpi/<版本>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（5.3） |
 | wikitune-clean 書面 top1 | `kpi/<版本>.json` 的 `wikitune_clean`（列檔不限，由 `rows_sha256` 區分） |
 | 議事口語子集（lytune）書面 top1 | 同私有聊天調參集那個 `v2-*.json` 的 `accuracy`，只當警示，不進任何判讀 |
-| 速度與記憶體 | 同一個檔的 `speed`（按鍵 p95、重排 p95、RSS）；只有開跑時的 `env.load_avg_start` ≤ 2.0 才填數字，否則寫「—（負載 x.xx）」，x.xx 是開跑時的負載（結束時的負載不看：bench 先並行跑準確率、最後才量速度，結束時的 1 分鐘負載包含 bench 自己剛跑完的這些工作；量測期間這台機器不跑別的工作）；不同機器（`env.machine`）分欄 |
+| 速度與記憶體 | 同一個檔的 `speed`（按鍵 p95、重排 p95、RSS）；只有開跑時的 `env.load_avg_start` ≤ 2.0 才填數字，否則寫「—（負載 x.xx）」，x.xx 是開跑時的負載（結束時的負載不看：bench 最後才量速度，量完馬上讀負載，所以結束時的 1 分鐘負載包含 bench 自己的速度量測；量測期間這台機器不跑別的工作）；不同機器（`env.machine`）分欄 |
 
 - 表頭寫明每一欄的集合大小與雜湊（v2 JSON 的 `sets`，或 `kpi/<版本>.json` 記的 `rows_sha256`，以 `#` 加前 8 碼表示）；換集合時欄位分開，不同集合的數字不放在同一欄。
 - 沒有這個數字（舊版沒有重播工具、保留集不回填、速度是在有負載時量的）寫「—」，不報錯。

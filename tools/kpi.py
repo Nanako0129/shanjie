@@ -26,7 +26,7 @@ ROOT = bench.ROOT
 KPI_DIR = os.path.join(ROOT, "eval/bench/kpi")
 SITE_JSON = os.path.join(ROOT, "site/data/kpi.json")
 # Speed numbers only count when the 1-minute load was at most this when the run started. The end of the run is not looked at:
-# bench.py measures accuracy in parallel first and speed last, so the 1-minute load at the end includes bench's own work; during the run
+# bench.py measures speed last and reads the load right after, so the 1-minute load at the end includes bench's own speed run; during the run
 # the machine runs nothing else (docs/spec/evaluation.md §8.2).
 LOAD_MAX = 2.0
 # name -> (rows file, pinned sha256): the replay rows are frozen suite files, not eval/dev/*.
