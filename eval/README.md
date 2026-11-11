@@ -15,9 +15,10 @@
 | `dev/net-slang/words.txt` | 每個讀音一列 | 讀音同 `data/lexicon/slang-add.tsv` | 網路用語（`docs/spec/lexicon-and-packs.md` §2.10）的檢查集：每個讀音上排第一的收錄詞一列（同讀音排後面的寫法只當候選、不收），加 4 個已經打得對的對照（幹你娘、靠北、三小、北七）；一列一詞、沒有前文。授權同 `slang-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；放在子資料夾，`--dev N` 不會讀到 |
 | `dev/net-slang/round2.txt` | 906 | 讀音同 `data/lexicon/slang-add.tsv` | 網路用語第二輪（`docs/spec/lexicon-and-packs.md` §2.10）的檢查集：每個讀音上排第一的第二輪新詞一列，沒有前文。授權同 `slang-add.tsv`（CC BY-SA 4.0）。只用來回報，**不用來調任何參數**；門檻不算會意重排 |
 | `rerank/s7e-function-words.txt` | 186 | `tools/readings.py` 產生；標 CHECK 的 10 列與工具沒標的 2 列逐列人工確認 | 功能字測試句（專案自寫，CC0）：在／再、是／事／試／式／市、的／得／地、做／作 等同音功能字，第二批 64 列專挑功能字和後面的字能組成常見詞的搭配（再這樣、是出）。S7e 用來檢查語意重排有沒有把功能字改壞，不用來調參；第 80、85 列的「地」讀音是 ㄉㄧˋ（不是副詞的 ㄉㄜ˙），測不到的／得／地的混淆，之後在最後面補改正的列。不放在 `probe/`：CLI 的 `--set probe` 會讀那個資料夾的每個檔案（S2r 探針集的 golden）；句子凍結後不改，要加就加在最後面 |
-| `holdout/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **保留集（現役，2026-10-16 起）**：換新的第一份（shard-1，`docs/spec/evaluation.md` §5）。公開語料的口語書寫，逐列出處在 `holdout/next/sources.tsv`（第 1 份）。**新聞的列已退役**（2026-10-29）：`holdout/news.txt` 與 `next/shard-{2,3}/news.txt` 已刪，`sources.tsv` 裡新聞那幾列留著當退役紀錄；新聞半邊改用私人檔（見下）。只在推 `v*` tag 前由 fresh verifier 跑（2026-10-18 起；之前是每片結束時） |
+| `holdout/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **保留集（現役，2026-11-11 起）**：第二份（shard-2，`docs/spec/evaluation.md` §5），原本放在 `next/shard-2/`。公開語料的口語書寫，逐列出處在 `holdout/next/sources.tsv`（第 2 份）。**新聞的列已退役**（2026-10-29）：`holdout/news.txt` 與 `next/shard-{2,3}/news.txt` 已刪，`sources.tsv` 裡新聞那幾列留著當退役紀錄；新聞半邊改用私人檔（見下）。只在推 `v*` tag 前由 fresh verifier 跑（2026-10-18 起；之前是每片結束時） |
 | `dev/holdout-2026-10-03/holdout.txt`、`oov_words.list` | 227（最後 25 列是 OOV） | 寫作者確認 | 2026-10-03 到 10-16 的保留集，回填之後退役，改當**可讀的挑戰集**（同音組取偶數行）；在 `dev/` 的子資料夾，`--dev N` 不會讀到，開發集前 302 列不變 |
-| `holdout/next/shard-{2,3}/talk.txt` | 每份口語 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/spec/evaluation.md` §5）：和現役的 shard-1 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
+| `holdout/next/shard-3/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/spec/evaluation.md` §5）：和 shard-1、shard-2 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
+| `holdout/retired/shard-1/talk.txt` | 150 | 同上 | **退役的口語半邊**（shard-1，2026-10-16 到 2026-11-11 現役，用滿 8 次）：留在 `holdout/` 底下，照樣不讀、不調參；換份前後的數字不跨份比 |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 
 ## 規則
@@ -41,10 +42,10 @@
 
 | 檔案 | SHA-256 |
 |---|---|
-| `holdout/talk.txt`（shard-1，現役） | `667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d` |
+| `holdout/talk.txt`（shard-2，現役） | `71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e` |
 | `dev/holdout-2026-10-03/holdout.txt`（退役） | `2445f7ad0347cc68e2c7a62a1cbb25870247a43aec6d11a20d981bd439f5ad0b` |
 | `dev/holdout-2026-10-03/oov_words.list`（退役） | `211771e80a1b17529c3791eef77ab639d305554770730b3d43de9623e4fe3f45` |
-| `holdout/next/shard-2/talk.txt` | `71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e` |
+| `holdout/retired/shard-1/talk.txt`（退役） | `667e3e31534a846f02ffc8d2ae19d18224e0a0cd60978e5ba443d1ee2ae8781d` |
 | `holdout/next/shard-3/talk.txt` | `743d3687f74e43c9a0d5ea40f7c6b463cb360b0e60bd7bd5b11265f291d984d3` |
 | `holdout/next/sources.tsv` | `f58939d776d6c5132004878a3ed2a700fc9d4f8f044b175f6d704448d599eb5d` |
 
@@ -80,8 +81,11 @@
 | 2026-10-31 | `holdout-news-1` | 新聞半邊（書面） | v0.6.1 發版（v0.6.0 對 v0.6.1，fresh verifier；128 → 128（0／0）） | 2 |
 | 2026-11-10 | shard-1 | 口語半邊（`talk.txt`，聊天） | v0.7.0 發版（v0.6.1 對 v0.7.0，fresh verifier；124 → 127（3／0，p 0.25）） | 7 |
 | 2026-11-10 | `holdout-news-1` | 新聞半邊（書面） | v0.7.0 發版（v0.6.1 對 v0.7.0，fresh verifier；128 → 126（1／3，p 0.625）） | 3 |
+| 2026-11-11 | shard-1 | 口語半邊（`talk.txt`，聊天） | v0.7.0 發版重量（加入重排保護清單之後的樹，v0.6.1 對 v0.7.0，fresh verifier；124 → 127（3／0，p 0.25）） | 8 |
+| 2026-11-11 | `holdout-news-1` | 新聞半邊（書面） | v0.7.0 發版重量（同上；128 → 126（1／3，p 0.625）） | 4 |
+| 2026-11-11 | shard-2 | 口語半邊 | 換份：shard-1 用滿 8 次，`next/shard-2/talk.txt` 移到 `holdout/talk.txt`，shard-1 移到 `holdout/retired/shard-1/` | 0 |
 
-2026-10-29 換手：兩個半邊從此各算各的使用次數，上表原有的第 1–4 次是舊新聞半邊加口語半邊合併的 shard-1 用量，列保持原樣。**口語半邊**（shard-1 的 `talk.txt`）接著上表的 4 次往下數，滿 8 次或有決定因它而做就換成 `next/shard-2/talk.txt`；**新聞半邊**（`holdout-news-1.txt`）從 0 起算，同一條規則，滿了換成 `holdout-news-2.txt`。每個半邊各自適用上面的「換下一份」規則，不互相牽動。換份前後的數字不跨份比。之後每次使用在上表為兩個半邊各記一列（「半邊」欄寫口語或新聞）。
+2026-10-29 換手：兩個半邊從此各算各的使用次數，上表原有的第 1–4 次是舊新聞半邊加口語半邊合併的 shard-1 用量，列保持原樣。**口語半邊**（shard-1 的 `talk.txt`）接著上表的 4 次往下數，滿 8 次或有決定因它而做就換成 `next/shard-2/talk.txt`；**新聞半邊**（`holdout-news-1.txt`）從 0 起算，同一條規則，滿了換成 `holdout-news-2.txt`。每個半邊各自適用上面的「換下一份」規則，不互相牽動。換份前後的數字不跨份比。之後每次使用在上表為兩個半邊各記一列（「半邊」欄寫口語或新聞）。2026-11-11 口語半邊用滿 8 次，換成 shard-2，從 0 起算；新聞半邊照舊是 `holdout-news-1.txt`（4 次）。shard-2 換上前有一列內容進過一個審查 agent 的 session（見下一段，沒有數字回來、不計使用），照規則照常換上。
 
 不計使用的讀取：2026-11-09 一支審查用的比對腳本讀入 `holdout/next/sources.tsv`（三份口語半邊的逐列出處，含現役 shard-1）做字串比對；內容沒有印出，沒有任何保留集的數字回來，不計使用，各份照舊。同日另有一道審查用的 `git grep -l` 掃過 `eval/`（含 `holdout/`），只拿到命中檔數 0，沒有檔名或內容回來，不計使用。同日又有一次審查時的 `git grep` 沒排除 `eval/holdout/`，`next/shard-2/talk.txt` 的一列內容進了審查 agent 的 session；沒有數字回來，不計使用、不換份。
 
