@@ -2106,14 +2106,6 @@ impl Engine {
         list
     }
 
-    /// Letters become an English token at the cursor: reading `PUNCT_PREFIX` + the word as typed, fixed word its writing
-    /// (`english_writing`, docs/spec/english-mixed.md §4.4). Returns what the unit that reaches `MAX_SYLLABLES` sent, if it did
-    /// (docs/spec/english-mixed.md §4.1: it goes in this key's output).
-    fn insert_english(&mut self, word: String) -> Result<String, EngineError> {
-        let writing = english_writing(&word);
-        self.put_english(format!("{PUNCT_PREFIX}{word}"), writing, None)
-    }
-
     /// The one place an English token goes in at the cursor: the unfinished syllable and the shadow go. `zh`: the Chinese syllable a
     /// revert remembers (docs/spec/english-mixed.md §3.2), the last item of the token's writings.
     fn put_english(&mut self, reading: String, word: String, zh: Option<String>) -> Result<String, EngineError> {
@@ -2222,11 +2214,12 @@ impl Engine {
         }
         let head: String = chars[..chars.len() - tail.len()].iter().collect();
         self.run.clear();
-        self.run_ascii = false;
+        // docs/spec/english-mixed.md §4.4, §5.3: the head is a token in its writing, as typed when the run keeps its text (`end_run`).
+        let writing = if std::mem::take(&mut self.run_ascii) { head.clone() } else { english_writing(&head) };
         self.run_zh = None;
         self.revert_point = None;
         self.split = true;
-        let mut commit = if head.is_empty() { String::new() } else { self.insert_english(head)? };
+        let mut commit = if head.is_empty() { String::new() } else { self.put_english(format!("{PUNCT_PREFIX}{head}"), writing, None)? };
         self.pred_dirty = true;
         commit.push_str(&self.insert_token(syl, None, None)?.commit);
         Ok(self.view(true, commit))
@@ -4772,17 +4765,20 @@ mod sinit_tests {
     }
 }
 
-/// docs/spec/english-mixed.md §4.4: the table of official writings (`data/english-extra.txt`, compiled in), lower case -> the line.
+/// docs/spec/english-mixed.md §4.4: the table of official writings, lower case -> the line. Two files, both compiled in: products,
+/// brands and abbreviations (`data/english-extra.txt`) and the English writings of the names layer
+/// (`data/lexicon/names-english.txt`, docs/spec/lexicon-and-packs.md §3). A lower case in both is an error like one twice in a file.
 fn english_table() -> &'static HashMap<String, &'static str> {
     static TABLE: std::sync::OnceLock<HashMap<String, &'static str>> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| english_table_of(include_str!("../../data/english-extra.txt")).expect("data/english-extra.txt"))
+    TABLE.get_or_init(|| english_table_of(&ENGLISH_FILES).expect("data/english-extra.txt and data/lexicon/names-english.txt"))
 }
+const ENGLISH_FILES: [&str; 2] = [include_str!("../../data/english-extra.txt"), include_str!("../../data/lexicon/names-english.txt")];
 
 /// The table's rules: a line is `[A-Za-z]{3,32}` with an upper case letter (an all lower case line would change nothing), `#` lines and
 /// blank lines are skipped, and no two lines share a lower case.
-fn english_table_of(text: &'static str) -> Result<HashMap<String, &'static str>, String> {
+fn english_table_of(texts: &[&'static str]) -> Result<HashMap<String, &'static str>, String> {
     let mut table = HashMap::new();
-    for line in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+    for line in texts.iter().flat_map(|t| t.lines()).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         let ok = (3..=32).contains(&line.len()) && line.bytes().all(|b| b.is_ascii_alphabetic()) && line.bytes().any(|b| b.is_ascii_uppercase());
         if !ok || table.insert(line.to_ascii_lowercase(), line).is_some() {
             return Err(format!("bad or repeated line: {line}"));
@@ -4809,7 +4805,8 @@ mod english_table_tests {
     #[test]
     fn the_table_loads_and_writes() {
         assert!(english_table().len() > 200);
-        for (typed, want) in [("chatgpt", "ChatGPT"), ("Chatgpt", "ChatGPT"), ("CHATGPT", "CHATGPT"), ("cHatgpt", "cHatgpt"), ("ChatGPT", "ChatGPT"),
+        // Both files are in it.
+        for (typed, want) in [("nanako", "Nanako"), ("Cablate", "CabLate"), ("CABLATE", "CABLATE"), ("chatgpt", "ChatGPT"), ("Chatgpt", "ChatGPT"), ("CHATGPT", "CHATGPT"), ("cHatgpt", "cHatgpt"), ("ChatGPT", "ChatGPT"),
             ("macos", "macOS"), ("Macos", "macOS"), ("rust", "rust"), ("Rust", "Rust"), ("", ""), ("a", "a"), ("gta6", "gta6")] {
             assert_eq!(english_writing(typed), want, "{typed}");
         }
@@ -4817,9 +4814,16 @@ mod english_table_tests {
 
     #[test]
     fn a_bad_table_is_refused() {
-        assert!(english_table_of("# c\n\nChatGPT\nGitHub\n").is_ok());
+        assert!(english_table_of(&["# c\n\nChatGPT\nGitHub\n"]).is_ok());
         for bad in ["ChatGPT\nchatGPT\n", "npm\n", "AI\n", "GPT4\n", "Wi-Fi\n"] {
-            assert!(english_table_of(bad).is_err(), "{bad}");
+            assert!(english_table_of(&[bad]).is_err(), "{bad}");
+            assert!(english_table_of(&["GitHub\n", bad]).is_err(), "{bad} in the second file");
         }
+        // The same lower case in both files.
+        assert!(english_table_of(&["ChatGPT\n", "Nanako\n"]).is_ok());
+        assert!(english_table_of(&["ChatGPT\nNanako\n", "NaNaKo\n"]).is_err());
+        // The shipped files, one at a time: each is well formed alone, and each adds lines the other lacks.
+        let (a, b) = (english_table_of(&ENGLISH_FILES[..1]).unwrap(), english_table_of(&ENGLISH_FILES[1..]).unwrap());
+        assert!(a.len() > 200 && b.len() >= 5 && a.len() + b.len() == english_table().len());
     }
 }
