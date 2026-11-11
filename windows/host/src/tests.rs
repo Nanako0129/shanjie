@@ -675,12 +675,12 @@ use Want::{Text, Window};
 fn last_first(total: u32) -> u32 {
     (total.max(1) - 1) / 9 * 9
 }
-/// The window, with a second page at least, is untouched by the key: the outputs equal.
 /// K18 (rules 16u, 15d): the window has just opened (none before the key), on the first row of the first page, and its first item is the text the composition
 /// shows over that item's span (the composition ends with it; the cursor is at the end in these segments).
 fn opens_with_the_shown_text_first(before: &Snap, after: &Snap) -> bool {
     before.selected < 0 && after.selected == 0 && after.first == 0 && after.candidates.first().is_some_and(|c| !c.is_empty() && after.preedit.ends_with(c))
 }
+/// The window, with a second page at least, is untouched by the key: the outputs equal.
 fn window_stays(before: &Snap, after: &Snap) -> bool {
     before.selected == 0 && before.total > 9 && after == before
 }

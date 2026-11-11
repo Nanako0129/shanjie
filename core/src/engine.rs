@@ -4519,6 +4519,47 @@ impl Engine {
 }
 
 #[cfg(test)]
+mod up_run_tests {
+    use super::*;
+
+    /// docs/spec/keys-and-composition.md §4.1.1 rule 16u: after a call that is not a key, the next Up goes on with the run only if the syllables, the cursor
+    /// and the character before the cursor are what the last press left. Each case changes one of the three in the stored run (as a call that rewrote the
+    /// composition would, with no key in between to clear it) and presses Up twice: a new run swaps on both presses, a run that went on would open the window
+    /// on the second.
+    #[test]
+    fn a_changed_composition_starts_a_new_run() {
+        let text: String = (0..30).map(|i| format!("ㄋㄧˇ {} -1.0\n", char::from_u32(0x4E00 + i).unwrap())).collect();
+        let lex = Arc::new(Lexicon::parse(&text).unwrap());
+        let l: Vec<String> = lex.entries(&["ㄋㄧˇ".to_string()]).into_iter().map(|(w, _)| w.to_string()).collect();
+        let up = |e: &mut Engine| e.key(Key::new(KeyKind::Up)).unwrap();
+        type Change = fn(&mut UpRun);
+        let changes: [(&str, Change); 4] = [
+            ("nothing", |_| {}),
+            ("syllables", |r| r.syls.push("ㄋㄧˇ".to_string())),
+            ("cursor", |r| r.cursor += 1),
+            ("shown", |r| r.shown = "x".to_string()),
+        ];
+        for (name, change) in changes {
+            let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
+            e.set_candidate_vertical(true).unwrap();
+            e.set_key_scheme(1).unwrap();
+            for c in ['s', 'u', '3'] {
+                e.key(Key::ch(c, 0)).unwrap();
+            }
+            assert_eq!(up(&mut e).preedit, l[2], "{name}: the 1st press");
+            change(e.up_run.as_mut().expect("a run after the 1st press"));
+            assert_eq!(up(&mut e).preedit, l[1], "{name}: [l0, l1, l2][1] or [l2, l0, l1][2]");
+            let o = up(&mut e);
+            if name == "nothing" {
+                assert!(o.selected == Some(0) && o.candidates.first() == Some(&l[1]), "nothing changed: the run goes on, the 3rd press opens");
+            } else {
+                assert!(o.selected.is_none() && o.preedit == l[0], "{name}: a new run, its 2nd press swaps to [l2, l0, l1][1]");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod variant_move_tests {
     use super::*;
 
