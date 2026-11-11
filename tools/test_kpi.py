@@ -81,15 +81,15 @@ class TableRules(Tmp):
         self.assertEqual(c["v0.4.3"], "—")  # the cell has no counts
         self.assertEqual(c["v0.4.0"], "—")  # no previous version
 
-    def test_speed_only_when_load_is_low_at_both_ends(self):
-        for name, load, shown in (("a", (0.5, 2.0), True), ("b", (2.01, 0.5), False), ("c", (0.5, 2.01), False), ("d", (37.52, 31.4), False)):
+    def test_speed_only_when_load_is_low_at_the_start(self):
+        for name, load, shown in (("a", (2.0, 0.5), True), ("b", (2.01, 0.5), False), ("c", (0.5, 4.25), True), ("d", (37.52, 31.4), False)):
             self.put(self.res, f"v2-{name}.json", v2_file("2026-10-01", [v2_version("v0." + name, speed=SPEED)], load=load))
         _, rows = self.table()
         c = self.col(rows, "速度與記憶體")
-        self.assertIn("RSS 426 MB", c["v0.a"])  # exactly 2.0 still counts
+        self.assertIn("RSS 426 MB", c["v0.a"])  # exactly 2.0 at the start still counts
         self.assertEqual(c["v0.b"], "—（負載 2.01）")  # two decimals: 2.01 is not shown as the threshold itself
-        self.assertEqual(c["v0.c"], "—（負載 2.01）")
-        self.assertEqual(c["v0.d"], "—（負載 37.52）")
+        self.assertIn("RSS 426 MB", c["v0.c"])  # a high load at the end (bench's own accuracy cells) does not count against it
+        self.assertEqual(c["v0.d"], "—（負載 37.52）")  # the start's load is the one shown
 
     def test_speed_columns_split_per_machine(self):
         for name, machine in (("a", "Mac17,3"), ("b", "gcp-c4d")):
@@ -201,7 +201,7 @@ class SiteData(Tmp):
         replay = {"user-reported": {"rows_sha256": H1, "n": 80, "off": {"top1": 70, "kyss": 0.9722, "rewrites": 78, "picks_per100": 2.11, "tag": "t", "guard_rows": 1},
                                     "on": {"top1": 71, "kyss": 0.9763, "rewrites": 78, "picks_per100": 1.94}, "learn_fixed": 1, "learn_broken": 0},
                   "dev302": {"rows_sha256": H2, "n": 302, "off": {"top1": 280, "kyss": 0.9852, "rewrites": 265, "picks_per100": 1.13}}}
-        self.put(self.res, "v2-a.json", v2_file("2026-10-13", [v2_version("v0.5.0"), v2_version("v0.6.0", 82, {"fixed": 3, "broken": 1}, SPEED, lytune=60)]))
+        self.put(self.res, "v2-a.json", v2_file("2026-10-13", [v2_version("v0.5.0"), v2_version("v0.6.0", 82, {"fixed": 3, "broken": 1}, SPEED, lytune=60)], load=(0.5, 4.25)))   # busy only at the end: still counts
         self.put(self.res, "v2-b.json", v2_file("2026-10-20", [v2_version("v0.6.0"), v2_version("v0.6.1", 83, {"fixed": 2, "broken": 0}, SPEED)], load=(3.0, 0.5)))
         self.put(self.kp, "v0.6.0.json", {"replay": replay, "holdout_talk_chat": {"n": 150, "top1": 124, "rows_sha256": H1, "fixed": 0, "broken": 0, "p": 1.0},
                                            "holdout_news_formal": {"n": 150, "top1": 128, "rows_sha256": H2}, "wikitune_clean": {"n": 5, "top1": 4, "rows_sha256": H2}})
@@ -229,8 +229,8 @@ class SiteData(Tmp):
     def test_speed_follows_the_tables_load_rule(self):
         md, raw = self.table()
         j = {v["version"]: v for v in json.loads(raw)["versions"]}
-        self.assertEqual(j["v0.6.0"]["speed"], {"machine": None, "load_avg_max": 0.5, "idle": True, "p95_us": 6822.2, "rerank_p95_ms": 23.4, "rss_mb": 426.4})
-        self.assertEqual(j["v0.6.1"]["speed"], {"machine": None, "load_avg_max": 3.0, "idle": False})   # busy window: no numbers
+        self.assertEqual(j["v0.6.0"]["speed"], {"machine": None, "load_avg_start": 0.5, "idle": True, "p95_us": 6822.2, "rerank_p95_ms": 23.4, "rss_mb": 426.4})
+        self.assertEqual(j["v0.6.1"]["speed"], {"machine": None, "load_avg_start": 3.0, "idle": False})   # busy at the start: no numbers
         self.assertIn("負載 3.00", md.decode())
         self.assertIn("按鍵 p95 6.82 ms", md.decode())
 

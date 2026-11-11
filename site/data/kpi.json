@@ -43,9 +43,12 @@
     }
    },
    "speed": {
-    "idle": false,
-    "load_avg_max": 4.24755859375,
-    "machine": "Mac18,1"
+    "idle": true,
+    "load_avg_start": 1.93505859375,
+    "machine": "Mac18,1",
+    "p95_us": 1929.3,
+    "rerank_p95_ms": 7.112,
+    "rss_mb": 489.015625
    },
    "version": "v0.7.0"
   },
@@ -93,7 +96,7 @@
    },
    "speed": {
     "idle": false,
-    "load_avg_max": 8.18701171875,
+    "load_avg_start": 5.26806640625,
     "machine": "Mac17,3"
    },
    "version": "v0.6.1"
@@ -142,7 +145,7 @@
    },
    "speed": {
     "idle": false,
-    "load_avg_max": 5.81640625,
+    "load_avg_start": 5.81640625,
     "machine": "Mac17,3"
    },
    "version": "v0.6.0"
@@ -191,7 +194,7 @@
    },
    "speed": {
     "idle": false,
-    "load_avg_max": 4.12841796875,
+    "load_avg_start": 4.12841796875,
     "machine": "Mac17,3"
    },
    "version": "v0.5.0"
@@ -199,7 +202,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 37.55029296875,
+    "load_avg_start": 31.42333984375,
     "machine": "Mac17,3"
    },
    "version": "v0.4.7"
@@ -207,7 +210,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 5.447265625,
+    "load_avg_start": 3.326171875,
     "machine": "Mac17,3"
    },
    "version": "v0.4.6"
@@ -215,7 +218,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 5.07373046875,
+    "load_avg_start": 3.67529296875,
     "machine": "Mac17,3"
    },
    "version": "v0.4.5"
@@ -223,7 +226,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 5.2001953125,
+    "load_avg_start": 5.130859375,
     "machine": "Mac17,3"
    },
    "version": "v0.4.4"
@@ -231,7 +234,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 5.77490234375,
+    "load_avg_start": 3.607421875,
     "machine": "Mac17,3"
    },
    "version": "v0.4.3"
@@ -239,7 +242,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 19.14892578125,
+    "load_avg_start": 19.14892578125,
     "machine": "Mac17,3"
    },
    "version": "v0.4.2"
@@ -247,7 +250,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 13.9033203125,
+    "load_avg_start": 5.2216796875,
     "machine": "Mac17,3"
    },
    "version": "v0.4.1"
@@ -255,7 +258,7 @@
   {
    "speed": {
     "idle": false,
-    "load_avg_max": 13.9033203125,
+    "load_avg_start": 5.2216796875,
     "machine": "Mac17,3"
    },
    "version": "v0.4.0"

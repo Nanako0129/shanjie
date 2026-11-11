@@ -208,7 +208,7 @@
     ["速度與記憶體（閒置窗）", (v) => {
       const s = v.speed;
       if (!s) return null;
-      if (!s.idle) return [s.machine, null, `—（負載 ${fixed(s.load_avg_max, 2)}）`];
+      if (!s.idle) return [s.machine, null, `—（負載 ${fixed(s.load_avg_start, 2)}）`];
       let t = `按鍵 p95 ${fixed(s.p95_us / 1000, 2)} ms`;
       if ("rerank_p95_ms" in s) t += `／重排 p95 ${fixed(s.rerank_p95_ms, 1)} ms`;
       return [s.machine, null, t + `／RSS ${fixed(s.rss_mb, 0)} MB`];

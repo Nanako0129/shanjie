@@ -490,7 +490,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 | 保留集口語半邊（聊天）、新聞半邊（書面） | `kpi/<版本>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（5.3） |
 | wikitune-clean 書面 top1 | `kpi/<版本>.json` 的 `wikitune_clean`（列檔不限，由 `rows_sha256` 區分） |
 | 議事口語子集（lytune）書面 top1 | 同私有聊天調參集那個 `v2-*.json` 的 `accuracy`，只當警示，不進任何判讀 |
-| 速度與記憶體 | 同一個檔的 `speed`（按鍵 p95、重排 p95、RSS）；只有 `env.load_avg_start` 與 `load_avg_end` 都 ≤ 2.0 才填數字，否則寫「—（負載 x.xx）」；不同機器（`env.machine`）分欄 |
+| 速度與記憶體 | 同一個檔的 `speed`（按鍵 p95、重排 p95、RSS）；只有開跑時的 `env.load_avg_start` ≤ 2.0 才填數字，否則寫「—（負載 x.xx）」，x.xx 是開跑時的負載（結束時的負載不看：bench 先並行跑準確率、最後才量速度，結束時的 1 分鐘負載包含 bench 自己剛跑完的這些工作；量測期間這台機器不跑別的工作）；不同機器（`env.machine`）分欄 |
 
 - 表頭寫明每一欄的集合大小與雜湊（v2 JSON 的 `sets`，或 `kpi/<版本>.json` 記的 `rows_sha256`，以 `#` 加前 8 碼表示）；換集合時欄位分開，不同集合的數字不放在同一欄。
 - 沒有這個數字（舊版沒有重播工具、保留集不回填、速度是在有負載時量的）寫「—」，不報錯。
@@ -509,7 +509,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 8.4 網站資料 `site/data/kpi.json`
 
 - `tools/kpi.py table` 用同一次讀入寫完整表與 `site/data/kpi.json`（兩個檔同一份資料；排序、縮排、結尾換行同 7.11，兩次輸出逐位元組相同）。
-- 頂層只有 `versions`：陣列，和表同序（最新在上），每版一列：`version`；`replay`（`user-reported`、`dev302` 各自的 `rows_sha256`、`n`、`off`：`n`、`top1`、`kyss`、`rewrites`、`picks_per100`；`user-reported` 另有 `on` 與 `learn_fixed`、`learn_broken`）；`holdout_talk_chat`（`n`、`top1`、`rows_sha256`，有量過時加 `fixed`、`broken`、`p`）；`speed`（`machine`、`load_avg_max`、`idle`；`idle` 為真時才有 `p95_us`、`rerank_p95_ms`、`rss_mb`，規則同表）。沒有的欄位不寫。
+- 頂層只有 `versions`：陣列，和表同序（最新在上），每版一列：`version`；`replay`（`user-reported`、`dev302` 各自的 `rows_sha256`、`n`、`off`：`n`、`top1`、`kyss`、`rewrites`、`picks_per100`；`user-reported` 另有 `on` 與 `learn_fixed`、`learn_broken`）；`holdout_talk_chat`（`n`、`top1`、`rows_sha256`，有量過時加 `fixed`、`broken`、`p`）；`speed`（`machine`、`load_avg_start`、`idle`；`idle` 為真時才有 `p95_us`、`rerank_p95_ms`、`rss_mb`，規則同表）。沒有的欄位不寫。
 - 不寫：私有聊天調參集的聊天 top1 與 error ratio、wikitune-clean、lytune、保留集新聞半邊。
 
 ## 9. 已知限制
