@@ -74,7 +74,7 @@
 | `eval/dev/user-reported.txt` | 使用者回報的真實句子 | CC0（回報者授權） | — |
 | `eval/learn/newword-probe-boundary.txt`、`eval/learn/newword-boundary-teach.txt` | 本專案自寫的新詞邊界探針與教學句；讀音由 `tools/readings.py` 產生 | CC0 | — |
 | `eval/learn/newword-probe.txt` | 本專案自寫的新詞探針：詞庫沒有的詞出現在新前文；讀音由 `tools/readings.py` 產生 | CC0 | — |
-| `eval/holdout/talk.txt`、`eval/holdout/next/**/talk.txt` | 從公開口語書寫切出的子句：中文維基百科討論頁與互助客棧（2026-10-01 dump 之後的修訂，API 取得）、vTaiwan UberX 的 Polis 留言、公共政策網路參與平臺「提點子」（data.gov.tw 58036，不含提議者欄位）；逐列出處在 `eval/holdout/next/sources.tsv`，不用來調參或訓練 | **CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ）；vTaiwan 資料 CC BY 4.0；提點子依政府資料開放授權條款第 1 版 | Wikipedia contributors（頁名與 revid 見 `sources.tsv`）、The Computational Democracy Project；「本資料由國家發展委員會提供，依政府資料開放授權條款（https://data.gov.tw/license ）進行公眾釋出」 |
+| `eval/holdout/talk.txt`、`eval/holdout/next/**/talk.txt`、`eval/holdout/retired/**/talk.txt` | 從公開口語書寫切出的子句：中文維基百科討論頁與互助客棧（2026-10-01 dump 之後的修訂，API 取得）、vTaiwan UberX 的 Polis 留言、公共政策網路參與平臺「提點子」（data.gov.tw 58036，不含提議者欄位）；逐列出處在 `eval/holdout/next/sources.tsv`，不用來調參或訓練 | **CC BY-SA 4.0**（https://creativecommons.org/licenses/by-sa/4.0/ ）；vTaiwan 資料 CC BY 4.0；提點子依政府資料開放授權條款第 1 版 | Wikipedia contributors（頁名與 revid 見 `sources.tsv`）、The Computational Democracy Project；「本資料由國家發展委員會提供，依政府資料開放授權條款（https://data.gov.tw/license ）進行公眾釋出」 |
 | `eval/holdout/next/sources.tsv` | 新保留集的逐列出處（份、檔、列號、來源、單位、授權） | CC0 | — |
 | `eval/dev/it/words.txt` | 資訊與 AI 詞包本身的檢查集：從 `it-add.tsv` 依來源比例抽 60 個詞（固定種子 20261024），一列一詞、沒有前文，讀音取自詞包 | CC BY-SA 4.0，與 `it-add.tsv` 相同 | Wikipedia 貢獻者、國家教育研究院 |
 | `eval/dev/beauty/words.txt` | 美妝詞包本身的檢查集：從 `beauty-add.tsv` 抽 60 個詞（固定種子 20261108），一列一詞、沒有前文，讀音取自建置用的讀音 | CC0 | — |

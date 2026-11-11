@@ -301,6 +301,30 @@ class LegacyExport(Tmp):
         with mock.patch.object(bench, "sh", stop_at_cargo), self.assertRaises(Stop):
             w.build()
         self.assertEqual(open(os.path.join(w.dir, "Cargo.toml")).read(), "new")
+        self.assertFalse(os.path.exists(os.path.join(v.dir, "windows")))   # a tree without windows/ exports without it
+
+    def test_a_tree_with_windows_members_exports_them_and_a_stale_export_is_redone(self):
+        def stop_at_cargo(cmd, **kw):
+            if cmd[0] == "cargo":
+                raise Stop
+            return real_sh(cmd, **kw)
+        real_sh = bench.sh
+        fp = os.path.join(self.new, "windows/proto/Cargo.toml")
+        os.makedirs(os.path.dirname(fp))
+        open(fp, "w").write("member")
+        git(self.new, "add", "-A")
+        git(self.new, "commit", "-q", "-m", "windows")
+        git(self.new, "branch", "-f", "feature")
+        x = bench.Ver("feature")
+        for f in ("Cargo.toml", "Cargo.lock", "core/a.rs", "cli/a.rs", "data/a.txt", "eval/variants.tsv"):   # a stale export of this
+            os.makedirs(os.path.dirname(os.path.join(x.dir, f)), exist_ok=True)                            # commit: the six old paths
+            open(os.path.join(x.dir, f), "w").write("stale")                                                # and the marker, no windows/
+        open(os.path.join(x.dir, ".exported"), "w").close()
+        with mock.patch.object(bench, "sh", stop_at_cargo), self.assertRaises(Stop):
+            x.build()
+        self.assertEqual(open(os.path.join(x.dir, "windows/proto/Cargo.toml")).read(), "member")
+        self.assertEqual(open(os.path.join(x.dir, "Cargo.toml")).read(), "new")   # exported again, not the stale copy
+        self.assertTrue(os.path.isfile(os.path.join(x.dir, ".exported")))
 
     def test_the_cache_key_is_the_commit_so_another_clone_path_reuses_it(self):
         other = os.path.join(self.td, "legacy-copy")

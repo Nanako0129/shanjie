@@ -290,7 +290,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 保留集是沒被拿來調參的判讀集，分兩個半邊，各自計次、各自換份：
 
-- **口語半邊**：`eval/holdout/talk.txt`（現役，150 列），公開語料的口語書寫，逐列出處在 `eval/holdout/next/sources.tsv`。`shanjie-eval --set holdout` 只讀這個檔，用聊天設定量。之後的兩份在 `eval/holdout/next/shard-{2,3}/talk.txt`（`--set holdout` 不讀子資料夾，換上之前不會被量到）。三份互斥。
+- **口語半邊**：`eval/holdout/talk.txt`（現役，150 列），公開語料的口語書寫，逐列出處在 `eval/holdout/next/sources.tsv`。`shanjie-eval --set holdout` 只讀這個檔，用聊天設定量。現役是第二份（shard-2）；之後的一份在 `eval/holdout/next/shard-3/talk.txt`（`--set holdout` 不讀子資料夾，換上之前不會被量到），用完的 shard-1 在 `eval/holdout/retired/shard-1/talk.txt`（照樣不讀）。三份互斥。
 - **新聞半邊**：repo 外的私人檔（150 列一份，三份），用 `shanjie-eval --lm … --rows <檔> --profile formal --rowstats` 量，用書面設定。檔不進 repo、不訓練、不散布；用前核對 `eval/README.md` 記的 SHA-256，量完刪掉 rowstats 與那台機器上的副本。
 - 另有一份私人新聞開發集（2,000 列，repo 外）：開發層，可以調參與選臂，只報數字、不讀列的內容。
 - 舊的保留集（227 列）已退役，放在 `eval/dev/holdout-2026-10-03/`，當可讀的挑戰集（`--dev N` 不讀子資料夾，開發集前 302 列不變）。
@@ -361,7 +361,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 7.1 版本與集合分開
 
-- **版本**只對應程式與詞庫：每個 ref 用 `git archive <ref> Cargo.toml Cargo.lock core cli data eval/variants.tsv` 匯出到快取資料夾（環境變數 `SHANJIE_CACHE`）的 `bench/src/<sha>/`（不含 `eval/` 的其他部分，所以保留集不會被複製出來；不動 repo 的 worktree 清單；匯出分兩步、成功才寫標記），各自 `cargo build --release`，另編按鍵重播程式。
+- **版本**只對應程式與詞庫：每個 ref 用 `git archive <ref> Cargo.toml Cargo.lock core cli data eval/variants.tsv` 匯出到快取資料夾（環境變數 `SHANJIE_CACHE`）的 `bench/src/<sha>/`；那個 commit 的樹裡有 `windows/` 時一併匯出（新 repo 的工作區把 `windows/*` 列為成員，cargo 就算只編 `-p cli` 也要讀到每個成員的 Cargo.toml）。不含 `eval/` 的其他部分，所以保留集不會被複製出來；不動 repo 的 worktree 清單；匯出分兩步、成功才寫標記；已有標記但缺任何一個要匯出的路徑時（例如加入 `windows/` 之前的匯出）整個重新匯出。各自 `cargo build --release`，另編按鍵重播程式。
 - **集合**一律來自套件，所有版本讀同一份，一律用 `--rows`、不用 `--dev`（`--dev` 會讀該版本自己的 `eval/dev`，版本和集合就混在一起）：
   - 公開集合凍結成 `eval/bench/suite-v1/` 與 `eval/bench/suite-v2/` 裡的列檔，SHA-256 寫死在工具裡，不符就失敗退出；
   - 不進 repo 的集合（授權）讀快取資料夾裡的檔，SHA-256 同樣寫死；

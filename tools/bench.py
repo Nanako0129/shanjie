@@ -207,12 +207,17 @@ class Ver:
     def build(self):
         if self.built:
             return
-        if not os.path.exists(os.path.join(self.dir, ".exported")):
+        paths = ["Cargo.toml", "Cargo.lock", "core", "cli", "data", "eval/variants.tsv"]
+        # The new repository's workspace also lists windows/* members; cargo loads every member's manifest even for `-p cli`.
+        if subprocess.run(["git", "-C", self.src, "cat-file", "-e", f"{self.sha}:windows"], capture_output=True).returncode == 0:
+            paths.append("windows")
+        # An export made before a path joined the list lacks it: export again rather than build a tree cargo cannot load.
+        if not (os.path.exists(os.path.join(self.dir, ".exported")) and all(os.path.exists(os.path.join(self.dir, p)) for p in paths)):
             shutil.rmtree(self.dir, ignore_errors=True)
             os.makedirs(self.dir)
             tarball = self.dir + ".tar"
             try:  # two steps so a failed archive can never leave a marker behind
-                sh(["git", "-C", self.src, "archive", "-o", tarball, self.sha, "Cargo.toml", "Cargo.lock", "core", "cli", "data", "eval/variants.tsv"])
+                sh(["git", "-C", self.src, "archive", "-o", tarball, self.sha, *paths])
                 sh(["tar", "-x", "-f", tarball, "-C", self.dir])
             except Exception:
                 shutil.rmtree(self.dir, ignore_errors=True)
@@ -934,6 +939,11 @@ VERSIONS2 = {
     # and tags are v0.6.0's (copied from a CLI summary line on typing76 at 9c88b87f).
     "v0.6.1": {"release": "v0.6.1", "flags": ["--context", "--packs", "acg,it"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+tri:{tri8}"},
+    # v0.7.0: v0.6.1's n-gram models with 會意 SJ-SR-8-15M (data/models.tsv), the beauty pack on by default (Shell.swift beautyPackOn = true, App mask 21) and the decoder's reading term
+    # (docs/spec/decoder.md §5, with the reading-mass rule), which ends every tag with +rd+rx:{rx8}+rm and drops the colloquial tag's +rc (copied from CLI summary lines on typing76).
+    "v0.7.0": {"release": "v0.7.0", "flags": ["--context", "--packs", "acg,it,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "reading": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+beauty+tri:{tri8}"},
 }
 # Anchor (docs/spec/evaluation.md §7.7): S7h's measurement, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
