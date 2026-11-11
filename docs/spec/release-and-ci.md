@@ -42,6 +42,7 @@
 | `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 35 分 |
 | `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 20 分 |
 | `windows` | windows-2025 | 見 §3.3；`needs: changes`，和其他 job 同時開跑 | 45 分 |
+| `windows-cap` | windows-2025 | `core/tests/engine_cap.rs`（release），與 `windows` 並行（§3.3） | 30 分 |
 | `rowstats` | ubuntu-24.04 | Linux 與 Windows 的六份 rowstats 逐位元組比對（§3.3）；`needs: [changes, debug, windows]` | 5 分 |
 | `python` | ubuntu-24.04 | 下載並核對模型；Python 工具與資料建置腳本的測試 | 20 分 |
 | `swift` | xcode-27 | 下載並核對模型；核心靜態庫；C 標頭冒煙測試；Swift 測試 | 30 分 |
@@ -53,7 +54,7 @@
 
 ### 2.1 工具鏈
 
-- 每個跑 cargo 的 job（`core`、`debug`、`windows`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。
+- 每個跑 cargo 的 job（`core`、`debug`、`windows`、`windows-cap`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。
 - repo 沒有 `rust-toolchain` 檔，工具鏈只靠這一步固定。理由：評測分數要與 Python 參考實作的 golden 逐位元組相同，編譯器的程式碼生成變動曾讓一個分數差 1 ulp（`powf` 被降成 `exp10`）。
 - `release.yml` 的 `build` 用同一個版本與同一個 action；改版本要兩個檔一起改。
 - 工作區的 debug 測試用 `[profile.test] opt-level = 1`（`Cargo.toml`），保留 debug assertions 與整數溢位檢查；完全不最佳化時，逐鍵的預測掃描讓 dev302 重播超過 20 分鐘的 job 上限。
@@ -80,7 +81,7 @@
 
 - 目的：debug 才有的檢查（整數溢位、標準函式庫的 debug 專屬檢查），放在 Linux runner 上跑，與 macOS 的 release 測試並行。
 - 只跑 `core` 套件的全部測試、`cli` 套件的單元測試（`--lib --bins`），與 Windows 線上格式 `shanjie-win-proto` 的測試（純 Rust，三個平台都跑）。
-- 評測 CLI（`shanjie-eval`）用 release 建置，再由 `scripts/ci-rowstats.sh rowstats-linux` 跑六份 rowstats：dev302、打字測驗、錯字回報，各在聊天與書面設定下，用出貨的旗標（前文、`acg` 與 `it` 詞包、會意小模型；聊天另加常談表）。檔案以 artifact 上傳（保留 1 天），給 `rowstats` 和 `windows` 的檔比對。
+- 評測 CLI（`shanjie-eval`）用 release 建置，再由 `scripts/ci-rowstats.sh rowstats-linux` 跑六份 rowstats：dev302、打字測驗、錯字回報，各在聊天與書面設定下，用出貨的旗標（前文、`acg` 與 `it` 詞包、會意小模型；聊天另加常談表）。檔案以 artifact 上傳（保留 1 天）；比對在 `rowstats` job 做，對象是 `windows` 上傳的那六份。
 - `scripts/ci-rowstats.sh` 是這六條指令的唯一一份；`--threads` 不改輸出的任何位元組。
 
 ### 3.3 `windows`
@@ -88,12 +89,13 @@
 - `needs: changes`，和其他 job 同時開跑，被略過的條件與 `core` 相同；所有步驟用 Git Bash，不用 PowerShell。
 - 內容：
   1. 下載並核對模型（§2.2）；
-  2. `cargo test -p core --release --locked`，略過七個逐鍵 p95 斷言的測試（4 vCPU 的 runner 量不準；它們的選字斷言在 Linux 與 macOS 的 job 照跑）；
+  2. 核心套件除了 `core/tests/engine_cap.rs` 以外的全部測試，release：`--lib --bins`，加上 `core/tests/*.rs` 除了 `engine_cap.rs` 以外每個檔的 `--test <檔名>`（清單在 job 裡由檔名產生，新增的測試檔自動跑到；核心套件沒有 `[[test]]` 改名、examples 與 benches，所以檔名就是測試目標名；產生的數量不對就失敗），再另跑 `--doc`；略過七個逐鍵 p95 斷言的測試（4 vCPU 的 runner 量不準；它們的選字斷言在 Linux 與 macOS 的 job 照跑）；
   3. 同樣的評測 CLI 與六份 rowstats，以 artifact `rowstats-windows` 上傳（保留 1 天）；
   4. 工作樹沒有 CRLF（`git ls-files --eol data eval scripts core/tests cli/tests`：不得有 `w/crlf`、`w/mixed`，每個 `i/lf` 都是 `w/lf`；理由：`digits.tsv` 帶 CRLF 會無聲地關掉數字層）；
   5. 核心也為 `i686-pc-windows-msvc`、`aarch64-pc-windows-msvc` 編譯（只建置，不跑測試）；
   6. `shanjie-tip`（Windows 文字服務 DLL）與 `shanjie-host`（常駐程序）以 release 建置，各帶與不帶 `timing` 功能一次；核對兩者都沒有 C 執行階段的匯入、DLL 沒有 `shanjie_` 匯出也不相依核心；再跑 `shanjie-win-proto`、`shanjie-tip`、`shanjie-host` 的測試（`docs/spec/windows-tip.md` §5.10）。
 - 比對在另一個 job `rowstats`（ubuntu-24.04，逾時 5 分，不 checkout）：`needs: [changes, debug, windows]`，下載兩邊的 artifact，逐檔 `cmp`，兩邊都必須剛好 6 份。拆成自己的 job，是為了讓 `windows` 不必等 `debug` 跑完才開始（以前最長的一條是 `debug` 加 `windows`）。`debug` 與 `windows` 都成功時它一定會跑；其中一個失敗時它被略過，但整個 run 照樣是 failure，所以比對只會跟著 `changes` 判定整趟不跑而略過。
+- `core/tests/engine_cap.rs` 在另一個 job `windows-cap`（windows-2025，逾時 30 分，`needs: changes`，略過條件與 `core` 相同）用 release 跑，與 `windows` 並行。它沒有逐鍵 p95 的測試。拆出來的理由：Windows 沒有 Accelerate，小模型的重排走純 Rust，而這個檔每個測試打 70–128 個音節、每一鍵都重排，在三次 run 裡占了 `windows` 核心測試時間的 33–52%（302／589／463 秒；同一個檔在 macOS 是 56–83 秒），runner 的快慢差也主要出在它。
 - Windows 版本身的規格見 `docs/spec/windows-tip.md`。
 
 ### 3.4 `python`（Linux）
@@ -144,6 +146,7 @@
 - **debug 看不到的兩塊**：只在 macOS 才編進去的分支（小模型的 Accelerate 呼叫、`learn_store.rs` 的 macOS 常數），以及上述兩個在 Linux 直接 `return` 的 f64 golden（在 Linux 的 debug 裡算通過但什麼都沒檢查）。它們在 macOS 的 release 測試照跑；Accelerate 呼叫前的長度檢查是 `assert!`，release 也檢查。
 - **`--parallel` 的代價**：一個測試殘留給下一個測試的狀態，在同一個程序內才會被看到；並行時每個方法一個程序，抓不到這種問題，只有序列的 `make test-swift` 抓得到。
 - **沒有 Rust 編譯快取**：沒有 `actions/cache` 步驟。編譯只佔各 job 的一小段，其餘是測試本身的執行時間。以 main 一次 push CI 的 log 為例：最慢的 `core`，`cargo test --release` 共 1017 秒，其中編譯 59.7 秒；`windows` 的核心測試編譯 56.3 秒，`shanjie-tip`、`shanjie-host` 的四次建置共 45 秒；`debug` 41.3 秒；模型下載每個 job 6–12 秒。快取命中時，每次合併幾乎都會改到的自己的 crate 照樣重編，省得到的只有相依套件那一段，不值得承擔快取留下錯誤建置的風險。
+- **`cli/tests/replay.rs` 同時最多兩個引擎**：每個引擎約 700 MB。以前一次一個，在 `core` job 跑 175–209 秒，是最慢的測試檔。在 Mac 上用 3 個測試執行緒（模仿 3 核的 macOS runner）交錯量四次，加總測試程序與它所有子程序的 RSS：一次一個 108.9、108.9 秒，峰值 1166、1066 MiB；同時兩個 66.0、66.7 秒，峰值 1856、1643 MiB（runner 是 7 GiB）。
 - **不拆最慢的 Swift 測試**：`VerticalShellTests.testPageKeysOutsideTheVerticalWindowTakeTheOffTablePath` 約 47 秒、照字母排在最後才開始跑，讓 Swift 測試多了約 40 秒的尾巴；`swift` 變成最慢的 job 時才拆。
 - **引擎建立的成本**：Swift 測試與一部分 Rust 測試的主要成本是建立完整引擎（本機 release 約 0.85 秒：模型 0.26、預測索引 0.22、詞庫 0.14、常談 0.10、截頂詞庫 0.07、小模型 0.04），這也是輸入法啟動與切換設定時重建引擎的成本；CI 不處理它。
 - runner 的快慢差可到將近兩倍，所以比較 CI 時間只下跨 run 都成立的結論。

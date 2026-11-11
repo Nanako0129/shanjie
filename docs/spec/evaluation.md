@@ -255,7 +255,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 4.9 驗證
 
-`cli/tests/replay.rs`（每個測試用真引擎、n-gram 加小模型；每個引擎約 700 MB，所以測試輪流跑；用 `eval/dev/user-reported.txt` 的公開列，每個測試寫明它依賴的顯示，模型一換就先在這裡失敗）：
+`cli/tests/replay.rs`（每個測試用真引擎、n-gram 加小模型；每個引擎約 700 MB，所以同時最多兩個測試拿著引擎（自己的，或它啟動的 CLI 程序的）；用 `eval/dev/user-reported.txt` 的公開列，每個測試寫明它依賴的顯示，模型一換就先在這裡失敗）：
 
 - `ideal_and_actual_are_the_hand_count`：`ideal` 與不改選時的 `actual` 等於手算的鍵數（我再重打 14、跟我說我再換 21）。
 - `cursor_move_cost_takes_the_shortest_route`：Left／Right／Home／End 的最短走法。
