@@ -85,6 +85,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var diagLogEmpty = true
     /// The text the preview sheet shows (docs/spec/macos-shell.md §13.3), taken once when it opens; `nil` while it is closed.
     @Published public private(set) var diagPreview: String?
+    /// `DiagLog.clears` when the preview was taken: an emptying since (the switch changed outside the window) means 複製 copies nothing.
+    private var diagPreviewClears = 0
 
     public init(shell: Shell) {
         self.shell = shell
@@ -152,11 +154,15 @@ public final class SettingsModel: ObservableObject {
     }
 
     /// 複製診斷紀錄…: the export, taken now, is what the sheet shows.
-    public func openDiagPreview() { diagPreview = shell.diag.export(version: shell.updates?.version ?? "0.0.0") }
+    public func openDiagPreview() {
+        diagPreviewClears = shell.diag.clears
+        diagPreview = shell.diag.export(version: shell.updates?.version ?? "0.0.0")
+    }
 
-    /// 複製: the very text the sheet showed (not a new export), then the sheet closes.
+    /// 複製: the very text the sheet showed (not a new export), then the sheet closes. Nothing is copied when the log was emptied since the
+    /// sheet opened (turned off, or off and on, outside the window): those entries are gone.
     public func copyDiagPreview(to pasteboard: DiagPasteboard) {
-        if let diagPreview { DiagLog.copy(diagPreview, to: pasteboard) }
+        if let diagPreview, shell.diag.clears == diagPreviewClears { DiagLog.copy(diagPreview, to: pasteboard) }
         diagPreview = nil
     }
 

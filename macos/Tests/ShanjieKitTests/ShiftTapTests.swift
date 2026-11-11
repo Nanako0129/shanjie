@@ -124,4 +124,51 @@ final class ShiftTapTests: XCTestCase {
         XCTAssertFalse(tap(&t, right, down: true, at: 5.0))
         XCTAssertTrue(tap(&t, right, down: false, at: 5.1))
     }
+
+    /// docs/spec/macos-shell.md §13.1, docs/spec/privacy.md §11 (f): every sequence of up to 7 of {left down, left up, right down, right up,
+    /// a key} (the key's Shift flag from the bits then). (1) Each Shift release's outcome is `nil` or the outcome of the same release with
+    /// every key removed: a key can only hide a record, never change one. (2) After a clean release (the event before it is its own key's
+    /// press, no key in between), every outcome equals the run with all the keys before that release removed: what was typed earlier no
+    /// longer decides whether anything is recorded.
+    func testARecordNeverDependsOnAKeyTypedWhileShiftWasHeld() {
+        enum Step: CaseIterable { case leftDown, leftUp, rightDown, rightUp, key }
+        func run(_ steps: [Step]) -> [ShiftTap.Outcome?] {
+            var t = ShiftTap(), l = false, r = false, at: TimeInterval = 1, out: [ShiftTap.Outcome?] = []
+            for step in steps {
+                at += 0.05
+                let code: UInt16
+                switch step {
+                case .key: t.keyDown(shiftHeld: l || r); continue
+                case .leftDown: l = true; code = left
+                case .leftUp: l = false; code = left
+                case .rightDown: r = true; code = right
+                case .rightUp: r = false; code = right
+                }
+                out.append(t.event(keyCode: code, leftDown: l, rightDown: r, others: false, capsLock: false, now: at, processedAt: at,
+                                   mouseAgo: { 1000 }))
+            }
+            return out
+        }
+        var sequences: [[Step]] = [[]], checked = 0
+        for _ in 1...7 {
+            sequences = sequences.flatMap { s in Step.allCases.map { s + [$0] } }
+            for s in sequences {
+                let out = run(s), noKeys = run(s.filter { $0 != .key })
+                for (i, o) in out.enumerated() where o != nil {
+                    XCTAssertEqual(o, noKeys[i], "\(s) release \(i)")
+                }
+                // The clean releases: the Shift event right before is the same key's press and no key came between.
+                var shiftIndex = -1
+                for (j, step) in s.enumerated() where step != .key {
+                    shiftIndex += 1
+                    guard step == .leftUp || step == .rightUp, j > 0, s[j - 1] == (step == .leftUp ? .leftDown : .rightDown) else { continue }
+                    let laterKeysOnly = Array(s[..<j].filter { $0 != .key }) + Array(s[j...])
+                    let expected = run(laterKeysOnly)
+                    XCTAssertEqual(Array(out[(shiftIndex + 1)...]), Array(expected[(shiftIndex + 1)...]), "\(s) after clean release \(shiftIndex)")
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(checked, 10_000)
+    }
 }

@@ -395,7 +395,7 @@ struct SettingsPageForm: View {
             case .diagnostics:
                 Section("診斷") {
                     Toggle("記錄偶發問題的診斷資料", isOn: Binding(get: { model.diagLog }, set: { model.setDiagLog($0) }))
-                    Text("只存在這台 Mac 的記憶體裡，不會自動送出。會記下每次放開 Shift 的判斷、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift，切換中英照記。")
+                    Text("只存在這台 Mac 的記憶體裡，不會自動送出。會記下放開 Shift 時算不算單按（按著 Shift 打字時不記）、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift，切換中英照記。")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("複製診斷紀錄…") { model.openDiagPreview() }
                         .disabled(model.diagLogEmpty)
