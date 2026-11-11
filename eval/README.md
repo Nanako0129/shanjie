@@ -20,6 +20,7 @@
 | `holdout/next/shard-3/talk.txt` | 150 | `tools/readings.py` 產生（CHECK 列由抽樣的 agent 決定，定不了的丟掉）；抽查 40 列錯 1 列（2.5%） | **之後的保留集**（`docs/spec/evaluation.md` §5）：和 shard-1、shard-2 同一次抽出、三份互斥（固定種子 20261015）；逐列出處在 `holdout/next/sources.tsv`。`--set holdout` 不讀子資料夾，換上之前不會被量到 |
 | `holdout/retired/shard-1/talk.txt` | 150 | 同上 | **退役的口語半邊**（shard-1，2026-10-16 到 2026-11-11 現役，用滿 8 次）：留在 `holdout/` 底下，照樣不讀、不調參；換份前後的數字不跨份比 |
 | `english/probe-common.txt`、`english/probe-ai.txt` | 208、56 | 不適用（英文字，一行一個，小寫） | 中英混打正式寫法表（`data/english-extra.txt`，`docs/spec/english-mixed.md` §4.4）的涵蓋清單：常見的技術、品牌與 App 名稱，以及 AI 廠商與產品名，專案自寫（CC0）。只用來數「幾個字在表裡」，不是評測列 |
+| `dev/mixed-words/words.txt` | 每個（英文、讀音）一列 | 讀音同 `data/lexicon/mixed-words.tsv` | 中英混合詞（`docs/spec/english-mixed.md` §5.7）的檢查集，`英文\|讀音\|寫法`，和詞表逐列相同；`core/tests/engine_mixed.rs` 逐列打（英文第一個字母按 Shift），要在 ↓ 清單裡。專案自寫（CC0） |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 | `ablation/v0.7.0/` | — | — | v0.7.0 標準檔的逐項拿掉表（三個集合的結果、每一格的 CLI 指令）與兩個閘門列的離線重算 `gate_offline.py`；不是評測列，只有結果與重跑方法 |
 
