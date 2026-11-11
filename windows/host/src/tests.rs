@@ -604,6 +604,24 @@ const VM_KEY_STRINGS: &[(&str, &str)] = &[
     ("tone-6", "s u 3 6"),
     ("tone-7", "s u 3 7"),
     ("up-in-composition", "s u 3 up"),
+    ("up-twice-in-composition", "s u 3 up up"),
+    ("up-three-times-in-composition", "s u 3 up up up"),
+    ("up-then-down-in-composition", "s u 3 up down"),
+    ("down-esc-then-up-in-composition", "s u 3 down esc up"),
+    ("up-twice-then-enter", "s u 3 up up enter"),
+    ("up-on-wo3", "j i 3 up"),
+    ("up-twice-on-wo3", "j i 3 up up"),
+    ("up-three-times-on-wo3", "j i 3 up up up"),
+    ("up-on-qu4", "f m 4 up"),
+    ("up-twice-on-qu4", "f m 4 up up"),
+    ("up-three-times-on-qu4", "f m 4 up up up"),
+    ("up-on-ni3-wo3", "s u 3 j i 3 up"),
+    ("up-twice-on-ni3-wo3", "s u 3 j i 3 up up"),
+    ("up-three-times-on-ni3-wo3", "s u 3 j i 3 up up up"),
+    ("up-on-wo3-men2", "j i 3 a p 6 up"),
+    ("up-twice-on-wo3-men2", "j i 3 a p 6 up up"),
+    ("up-three-times-on-wo3-men2", "j i 3 a p 6 up up up"),
+    ("down-on-wo3-men2", "j i 3 a p 6 down"),
     ("shift-enter-in-composition", "s u 3 S+enter"),
     ("ctrl-comma-empty", "C+,"),
     ("ctrl-period-empty", "C+."),
@@ -644,7 +662,8 @@ const VM_KEY_STRINGS: &[(&str, &str)] = &[
 /// What a segment of `REPLAY_KEYS_MS` ends with.
 enum Want {
     /// Everything the segment committed, the last composition, whether the last key was handled, and whether a window is open at the end. A text is that of Microsoft Zhuyin's measurement
-    /// (docs/windows/ms-zhuyin-ref.md), except where the scheme 1 rules differ on purpose: Up in a composition (ignored), Shift+Enter in a composition (sent and handled).
+    /// (docs/windows/ms-zhuyin-ref.md), except where the scheme 1 rules differ on purpose: Shift+Enter in a composition (sent and handled), and the characters
+    /// of the K18 Up swaps, which come from this lexicon's lists (the positions are Microsoft Zhuyin's).
     Text { commit: &'static str, preedit: &'static str, handled: bool, window: bool },
     /// A rule about the window, judged on the outputs just before and after the last key: no character is written down, the window's own total says where the rule points.
     Window(fn(&Snap, &Snap) -> bool),
@@ -657,6 +676,11 @@ fn last_first(total: u32) -> u32 {
     (total.max(1) - 1) / 9 * 9
 }
 /// The window, with a second page at least, is untouched by the key: the outputs equal.
+/// K18 (rules 16u, 15d): the window has just opened (none before the key), on the first row of the first page, and its first item is the text the composition
+/// shows over that item's span (the composition ends with it; the cursor is at the end in these segments).
+fn opens_with_the_shown_text_first(before: &Snap, after: &Snap) -> bool {
+    before.selected < 0 && after.selected == 0 && after.first == 0 && after.candidates.first().is_some_and(|c| !c.is_empty() && after.preedit.ends_with(c))
+}
 fn window_stays(before: &Snap, after: &Snap) -> bool {
     before.selected == 0 && before.total > 9 && after == before
 }
@@ -726,7 +750,27 @@ const REPLAY_KEYS_MS: &[(&str, Want)] = &[
     ("tone-4", Text { commit: "", preedit: "你ˋ", handled: true, window: false }),
     ("tone-6", Text { commit: "", preedit: "你ˊ", handled: true, window: false }),
     ("tone-7", Text { commit: "", preedit: "你˙", handled: true, window: false }),
-    ("up-in-composition", Text { commit: "", preedit: "你", handled: true, window: false }),
+    // K18 (rules 16u, 15d): the swaps are the 3rd and the 2nd item of [shown, the syllable's singles], the 3rd press and Down open with the shown text first.
+    // The characters are this lexicon's (ㄨㄛˇ lists 䂺 before 婐 and 捰, so its swaps differ from Microsoft Zhuyin's 捰, 婐; the positions are the same).
+    ("up-in-composition", Text { commit: "", preedit: "擬", handled: true, window: false }),
+    ("up-twice-in-composition", Text { commit: "", preedit: "妳", handled: true, window: false }),
+    ("up-three-times-in-composition", Window(opens_with_the_shown_text_first)),
+    ("up-then-down-in-composition", Window(opens_with_the_shown_text_first)),
+    ("down-esc-then-up-in-composition", Text { commit: "", preedit: "擬", handled: true, window: false }),
+    ("up-twice-then-enter", Text { commit: "妳", preedit: "", handled: true, window: false }),
+    ("up-on-wo3", Text { commit: "", preedit: "婐", handled: true, window: false }),
+    ("up-twice-on-wo3", Text { commit: "", preedit: "䂺", handled: true, window: false }),
+    ("up-three-times-on-wo3", Window(opens_with_the_shown_text_first)),
+    ("up-on-qu4", Text { commit: "", preedit: "覷", handled: true, window: false }),
+    ("up-twice-on-qu4", Text { commit: "", preedit: "趣", handled: true, window: false }),
+    ("up-three-times-on-qu4", Window(opens_with_the_shown_text_first)),
+    ("up-on-ni3-wo3", Text { commit: "", preedit: "你婐", handled: true, window: false }),
+    ("up-twice-on-ni3-wo3", Text { commit: "", preedit: "你䂺", handled: true, window: false }),
+    ("up-three-times-on-ni3-wo3", Window(opens_with_the_shown_text_first)),
+    ("up-on-wo3-men2", Text { commit: "", preedit: "我捫", handled: true, window: false }),
+    ("up-twice-on-wo3-men2", Text { commit: "", preedit: "我門", handled: true, window: false }),
+    ("up-three-times-on-wo3-men2", Window(opens_with_the_shown_text_first)),
+    ("down-on-wo3-men2", Window(opens_with_the_shown_text_first)),
     ("shift-enter-in-composition", Text { commit: "你", preedit: "", handled: true, window: false }),
     ("ctrl-comma-empty", Text { commit: "", preedit: "，", handled: true, window: false }),
     ("ctrl-period-empty", Text { commit: "", preedit: "。", handled: true, window: false }),

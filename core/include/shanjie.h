@@ -171,7 +171,10 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   do nothing on an unfinished syllable; Shift+letter, Shift+, and Shift+. type a half-width unit in a composition (the upper-case letter, `<` `>`,
 //   dropping an unfinished syllable), and so do Space and the tone keys when the composition has no unfinished syllable (a space, the tone
 //   mark; with one they complete it, rule 10); Tab does nothing; Ctrl+, and Ctrl+. type the full-width marks (Ctrl+, Ctrl+. are otherwise passed
-//   on, rule 1); Shift+Enter sends the composition and is handled (no line break). Where such a key would otherwise be passed on after dropping
+//   on, rule 1); Shift+Enter sends the composition and is handled (no line break); Up in a composition swaps the character before the cursor
+//   (rule 16u: the third item of [the character shown, then the syllable's single characters in lexicon order], then the second, each a pick of that
+//   one character as the candidate window would make it; the third press opens the window), and Down (and that third Up) opens the window with the
+//   item the composition shows over its span first and selected (rule 15d). Where such a key would otherwise be passed on after dropping
 //   an unfinished syllable (Shift+letter, Shift+, Shift+. with nothing but the unfinished syllable), the core puts the character in
 //   `commit` and returns handled 1 instead. A vertical candidate window that opens under 1 moves by whole pages
 //   (candidate_first is always a multiple of 9): Up/Down wrap around the whole list, Space and Page Down turn to the next page (selecting its first
