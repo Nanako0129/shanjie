@@ -234,4 +234,157 @@ final class UpdatesTests: XCTestCase {
         u.finished(.upToDate)
         XCTAssertTrue(updateItems().isEmpty, "gone once up to date")
     }
+
+    // MARK: notification (docs/spec/install-and-update.md §3.8; contract update-notify §6.1)
+
+    /// a, b: a background check that finds X notifies once; the next day's background check notifies again; a tick the same
+    /// day does not check, so does not notify.
+    func testBackgroundFindNotifiesOncePerDay() {
+        let store = MemoryUpdateStore()
+        let (u, c) = updates(store)
+        var posted: [String] = []
+        u.notify = { posted.append($0) }
+        u.tick(now: now)
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(posted, ["0.8.0"])
+        u.tick(now: now.addingTimeInterval(day / 2))
+        XCTAssertEqual(c.probes, 1)
+        XCTAssertEqual(posted, ["0.8.0"])
+        u.tick(now: now.addingTimeInterval(day))
+        XCTAssertEqual(c.probes, 2)
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(posted, ["0.8.0", "0.8.0"])
+    }
+
+    /// c: 立即檢查 and 更新到 X are pressed by someone looking at the page: no notification, also when a background check ran
+    /// before them.
+    func testUserChecksDoNotNotify() {
+        let (u, _) = updates()
+        var posted: [String] = []
+        u.notify = { posted.append($0) }
+        u.tick(now: now)
+        u.finished(.upToDate)
+        u.checkNow(now: now.addingTimeInterval(60))
+        u.finished(.available, version: "0.8.0")
+        u.install(now: now.addingTimeInterval(120))
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(posted, [])
+    }
+
+    /// d: either switch off → no notification (the background check still runs with notifications off).
+    func testSwitchesOffDoNotNotify() {
+        let (u, c) = updates()
+        var posted: [String] = []
+        u.notify = { posted.append($0) }
+        u.setNotify(false)
+        u.tick(now: now)
+        XCTAssertEqual(c.probes, 1)
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(posted, [])
+        u.setNotify(true)
+        u.setAutoCheck(false)
+        XCTAssertFalse(Updates.shouldNotify(enabled: true, autoCheck: false, background: true, result: .available))
+        u.tick(now: now.addingTimeInterval(day))
+        XCTAssertEqual(c.probes, 1)
+        XCTAssertEqual(posted, [])
+    }
+
+    /// e: up to date or a failed check → no notification, also when a failed check keeps an already known newer version.
+    func testOtherResultsDoNotNotify() {
+        let (u, _) = updates()
+        var posted: [String] = []
+        u.notify = { posted.append($0) }
+        u.tick(now: now)
+        u.finished(.upToDate)
+        XCTAssertEqual(posted, [])
+        u.tick(now: now.addingTimeInterval(day))
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(posted, ["0.8.0"])
+        u.tick(now: now.addingTimeInterval(2 * day))
+        u.finished(.failed)
+        XCTAssertEqual(u.available, "0.8.0")  // a failed check keeps the known version (docs/spec/install-and-update.md §3.2)
+        XCTAssertEqual(posted, ["0.8.0"])
+    }
+
+    /// f: an absent `updateNotify` reads on, and the switch is stored.
+    func testNotifySwitchDefaultsOnAndIsStored() {
+        let store = MemoryUpdateStore()
+        XCTAssertTrue(Updates(store: store, version: "0.4.7").notifyEnabled)
+        let u = Updates(store: store, version: "0.4.7")
+        u.setNotify(false)
+        XCTAssertEqual(store.notify, false)
+        XCTAssertFalse(Updates(store: store, version: "0.4.7").notifyEnabled)
+    }
+
+    /// g: the 關於 page's line shows only when a notification would be posted but the system has them off.
+    func testPermissionLine() {
+        XCTAssertTrue(Updates.showsPermissionLine(enabled: true, autoCheck: true, permission: .denied))
+        XCTAssertFalse(Updates.showsPermissionLine(enabled: true, autoCheck: true, permission: .allowed))
+        XCTAssertFalse(Updates.showsPermissionLine(enabled: true, autoCheck: true, permission: .notDetermined))
+        XCTAssertFalse(Updates.showsPermissionLine(enabled: false, autoCheck: true, permission: .denied))
+        XCTAssertFalse(Updates.showsPermissionLine(enabled: true, autoCheck: false, permission: .denied))
+        let (u, _) = updates()
+        u.notifyPermission = .denied
+        XCTAssertTrue(u.showsPermissionLine)
+        u.setNotify(false)
+        XCTAssertFalse(u.showsPermissionLine)
+    }
+
+    /// A click on the notification while the background check runs is kept: when that check finds a newer version, 善解更新 opens.
+    func testInstallDuringARunningCheckIsKept() {
+        let (u, c) = updates()
+        var posted: [String] = []
+        u.notify = { posted.append($0) }
+        u.tick(now: now)
+        XCTAssertTrue(u.checking)
+        u.install(now: now.addingTimeInterval(5))
+        XCTAssertEqual(c.probes, 1)  // no second check
+        XCTAssertEqual(c.opens, 0)
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(c.events, ["close", "launch"])
+        XCTAssertEqual(posted, [])  // 善解更新 opened: no second notification replacing the clicked one
+    }
+
+    /// Up to date clears the update notification left in Notification Center; other results leave it.
+    func testUpToDateClearsTheNotification() {
+        let (u, _) = updates()
+        var cleared = 0
+        u.clearNotification = { cleared += 1 }
+        u.tick(now: now)
+        u.finished(.available, version: "0.8.0")
+        u.tick(now: now.addingTimeInterval(day))
+        u.finished(.failed)
+        XCTAssertEqual(cleared, 0)
+        u.tick(now: now.addingTimeInterval(2 * day))
+        u.finished(.upToDate)
+        XCTAssertEqual(cleared, 1)
+    }
+
+    /// The settings window re-reads the permission whenever it shows or becomes key (`SettingsModel.refreshExternal`), so coming
+    /// back from System Settings to the reused window updates the 關於 page's line.
+    func testSettingsRefreshReadsThePermission() throws {
+        let resources = try XCTUnwrap(TestData.resources())
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(),
+                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
+                          rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
+                          appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        let (u, _) = updates()
+        var reads = 0
+        u.refreshPermission = { reads += 1 }
+        shell.updates = u
+        let model = SettingsModel(shell: shell)
+        let before = reads
+        model.refreshExternal()
+        XCTAssertEqual(reads, before + 1)
+    }
+
+    /// The fixed strings of the notification and the 關於 page.
+    func testNotificationText() {
+        XCTAssertEqual(UpdateText.notificationTitle("0.8.0"), "善解有新版本 0.8.0")
+        XCTAssertEqual(UpdateText.notificationBody, "按這裡更新；也可以從輸入選單更新。")
+        XCTAssertEqual(UpdateText.permissionOff, "系統設定裡關閉了善解的通知")
+        XCTAssertEqual(UpdateText.openNotificationSettings, "打開通知設定")
+    }
 }

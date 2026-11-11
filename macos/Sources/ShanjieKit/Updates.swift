@@ -6,6 +6,16 @@ public enum UpdateResult: String, Equatable, Sendable {
     case upToDate, available, failed
 }
 
+/// The system's notification permission for this app as last read (`UNUserNotificationCenter.getNotificationSettings`, in the
+/// app target's `UpdateNotifier`), shown on the 關於 page (docs/spec/install-and-update.md §3.8).
+public enum NotifyPermission: Equatable, Sendable {
+    /// Never asked: the first notification asks.
+    case notDetermined
+    case allowed
+    /// Denied by the user, or by the system after an unanswered prompt whose process ended; never asked again.
+    case denied
+}
+
 /// Where the update settings and the last check live (docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4): the app's UserDefaults domain in the input method
 /// (`DefaultsUpdateStore` in the app target), memory in the tests.
 @MainActor
@@ -17,11 +27,14 @@ public protocol UpdateStore: AnyObject {
     /// The last result, key `updateStatus`: `by` (the version that checked), `result` (an `UpdateResult`), `available` (the
     /// newer version, when known).
     var status: [String: String]? { get set }
+    /// 有新版本時通知我, key `updateNotify`; absent means on (docs/spec/install-and-update.md §3.8).
+    var notify: Bool? { get set }
 }
 
 @MainActor
 public final class MemoryUpdateStore: UpdateStore {
     public var autoCheck: Bool?
+    public var notify: Bool?
     public var lastCheck: Date?
     public var status: [String: String]?
     public init() {}
@@ -73,6 +86,18 @@ public final class Updates: ObservableObject {
         return elapsed >= interval || elapsed < 0
     }
 
+    /// Whether a finished check posts the system notification (docs/spec/install-and-update.md §3.8): both switches on, the check
+    /// was the background one (立即檢查 and 更新到 X are pressed by someone looking at the page), and it found a newer version.
+    /// The background check runs at most once a day, so this is at most one notification a day until the user updates.
+    public nonisolated static func shouldNotify(enabled: Bool, autoCheck: Bool, background: Bool, result: UpdateResult?) -> Bool {
+        enabled && autoCheck && background && result == .available
+    }
+
+    /// The 關於 page's notification line: only when a notification would be posted but the system has them off.
+    public nonisolated static func showsPermissionLine(enabled: Bool, autoCheck: Bool, permission: NotifyPermission) -> Bool {
+        enabled && autoCheck && permission == .denied
+    }
+
     public let version: String
     @Published public private(set) var autoCheck: Bool
     @Published public private(set) var lastCheck: Date?
@@ -81,6 +106,10 @@ public final class Updates: ObservableObject {
     @Published public private(set) var available: String?
     /// A check started and has not reported back yet. The 立即檢查 and 更新到 X buttons and the menu item are disabled meanwhile.
     @Published public private(set) var checking = false
+    /// 有新版本時通知我 (docs/spec/install-and-update.md §3.8).
+    @Published public private(set) var notifyEnabled: Bool
+    /// The system's permission as `UpdateNotifier` last read it.
+    @Published public var notifyPermission: NotifyPermission = .notDetermined
 
     /// Starts Sparkle's information-only check (no window).
     public var probe: () -> ProbeStart = { .unavailable }
@@ -90,15 +119,26 @@ public final class Updates: ObservableObject {
     /// Opens 善解更新.app, where the download, the notes, the install and the relaunch happen (docs/spec/install-and-update.md §4).
     /// A second open while it runs only activates it (LaunchServices).
     public var launchHelper: () -> Void = {}
+    /// Posts the system notification for this newer version (`UpdateNotifier`, which asks for permission the first time).
+    public var notify: (String) -> Void = { _ in }
+    /// Reads the system's notification permission again into `notifyPermission` (the 關於 page calls it each time it shows).
+    public var refreshPermission: () -> Void = {}
+    /// Removes the update notification left in Notification Center (a check found this version up to date).
+    public var clearNotification: () -> Void = {}
+    /// Opens System Settings at the notification settings (the 打開通知設定 button); the settings window closes first.
+    public var openNotificationSettings: () -> Void = {}
 
     private let store: UpdateStore
     /// `install` started the running check: open 善解更新 if it finds a newer version.
     private var installAfterCheck = false
+    /// The running check is the background one (`tick`), not 立即檢查 or 更新到 X; read and cleared by `finished`.
+    private var backgroundCheck = false
 
     public init(store: UpdateStore, version: String) {
         self.store = store
         self.version = version
         autoCheck = store.autoCheck ?? true
+        notifyEnabled = store.notify ?? true
         lastCheck = store.lastCheck
         // A result recorded by another version (the user updated, or installed another way) says nothing about this one.
         if let s = store.status, s["by"] == version, let r = s["result"].flatMap(UpdateResult.init(rawValue:)) {
@@ -116,10 +156,20 @@ public final class Updates: ObservableObject {
         store.autoCheck = on
     }
 
+    public func setNotify(_ on: Bool) {
+        notifyEnabled = on
+        store.notify = on
+    }
+
+    /// The 關於 page shows 「系統設定裡關閉了善解的通知」 and 打開通知設定.
+    public var showsPermissionLine: Bool {
+        Self.showsPermissionLine(enabled: notifyEnabled, autoCheck: autoCheck, permission: notifyPermission)
+    }
+
     /// The background check, called by the app's timer: checks only when `shouldCheck` says so; never records a failure.
     public func tick(now: Date = Date()) {
         guard Self.shouldCheck(enabled: autoCheck, lastCheck: lastCheck, now: now) else { return }
-        _ = begin(now)
+        _ = begin(now, background: true)
     }
 
     /// 立即檢查: always connects, whatever 自動檢查更新 says (docs/spec/install-and-update.md §3.4–§3.6). Ignored while a check runs; an updater that is
@@ -132,7 +182,9 @@ public final class Updates: ObservableObject {
     /// Otherwise the state says 已是最新 or 檢查失敗 and no window opens. While a Sparkle session of the input method runs (its
     /// own probe), the press opens 善解更新 directly, which checks again by itself.
     public func install(now: Date = Date()) {
-        guard !checking else { return }  // our own silent check runs and decides; no Sparkle window to bring up
+        // Our own silent check runs and decides: remember the press (a notification click cannot be disabled like the menu item and
+        // the button), so 善解更新 opens if that check finds a newer version.
+        guard !checking else { installAfterCheck = true; return }
         switch begin(now) {
         case .started: installAfterCheck = true
         case .busy: openHelper()
@@ -141,11 +193,12 @@ public final class Updates: ObservableObject {
     }
 
     /// The start time is recorded only when a check really started, and counts for the daily limit whatever its result.
-    private func begin(_ now: Date) -> ProbeStart {
+    private func begin(_ now: Date, background: Bool = false) -> ProbeStart {
         guard !checking else { return .busy }
         let s = probe()
         if s == .started {
             checking = true
+            backgroundCheck = background
             lastCheck = now
             store.lastCheck = now
         }
@@ -164,17 +217,25 @@ public final class Updates: ObservableObject {
         checking = false
         let wantsInstall = installAfterCheck
         installAfterCheck = false
+        let background = backgroundCheck
+        backgroundCheck = false
         guard let r else { return }
         result = r
         switch r {
         case .available: if let newer { available = newer }
-        case .upToDate: available = nil
+        case .upToDate:
+            available = nil
+            clearNotification()   // a notification left from before the update would open nothing when clicked
         case .failed: break
         }
         var s = ["by": version, "result": r.rawValue]
         if let available { s["available"] = available }
         store.status = s
         if wantsInstall, r == .available, available != nil { openHelper() }
+        // A click during this background check already opened 善解更新: no second notification replacing the one just clicked.
+        if !wantsInstall, let available, Self.shouldNotify(enabled: notifyEnabled, autoCheck: autoCheck, background: background, result: r) {
+            notify(available)
+        }
     }
 
     /// 更新到 X once a silent check confirmed a newer version, or a press while a Sparkle session runs: the settings window
@@ -193,6 +254,15 @@ public enum UpdateText {
     public static let checking = "檢查中…"
     public static func install(_ v: String) -> String { "更新到 \(v)" }
     public static func menu(_ v: String) -> String { "有新版本 \(v)，按此更新…" }
+    /// The system notification (docs/spec/install-and-update.md §3.8).
+    public static func notificationTitle(_ v: String) -> String { "善解有新版本 \(v)" }
+    public static let notificationBody = "按這裡更新；也可以從輸入選單更新。"
+    /// The 關於 page.
+    public static let autoCheckNote = "開著時每天最多連線一次，到 GitHub 讀取有沒有新版本；有新版本時，關於頁與輸入選單會顯示，按下才更新。"
+    public static let notifyToggle = "有新版本時通知我"
+    public static let notifyNote = "每天提醒一次，直到更新。第一次會由系統詢問是否允許通知。"
+    public static let permissionOff = "系統設定裡關閉了善解的通知"
+    public static let openNotificationSettings = "打開通知設定"
 
     /// The 關於 page's note on where this copy is installed and what updating it asks (docs/spec/install-and-update.md §3.4, §3.6;
     /// the user-folder note's last sentence points to the installer's 「這台 Mac」, added with U2, docs/spec/install-and-update.md §3.4).

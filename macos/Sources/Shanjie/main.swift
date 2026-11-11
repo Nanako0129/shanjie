@@ -254,8 +254,9 @@ final class DefaultsAppProfileStore: AppProfileStore {
     }
 }
 
-/// The update settings and the last check (docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4): keys `updateAutoCheck` (Bool, absent
-/// means on), `updateLastCheck` (Date) and `updateStatus` (a dictionary of strings, see `UpdateStore`) in the same domain.
+/// The update settings and the last check (docs/spec/install-and-update.md §2.2, §3.3, §3.7, §3.8, §7.2–§7.4): keys `updateAutoCheck` (Bool, absent
+/// means on), `updateLastCheck` (Date), `updateStatus` (a dictionary of strings, see `UpdateStore`) and `updateNotify` (Bool, absent
+/// means on) in the same domain.
 @MainActor
 final class DefaultsUpdateStore: UpdateStore {
     var autoCheck: Bool? {
@@ -269,6 +270,10 @@ final class DefaultsUpdateStore: UpdateStore {
     var status: [String: String]? {
         get { UserDefaults.standard.dictionary(forKey: "updateStatus") as? [String: String] }
         set { UserDefaults.standard.set(newValue, forKey: "updateStatus") }
+    }
+    var notify: Bool? {
+        get { UserDefaults.standard.object(forKey: "updateNotify") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "updateNotify") }
     }
 }
 
@@ -306,11 +311,14 @@ func runServer() -> Never {
     let updates = Updates(store: DefaultsUpdateStore(), version: version)
     App.shell?.updates = updates
     let updater = Updater(updates: updates)
+    // docs/spec/install-and-update.md §3.8: the notification center's delegate is set before app.run(), because a click on a
+    // notification while this process was not running starts it and delivers the click right at launch.
+    let notifier = UpdateNotifier(updates: updates)
     let settings = SettingsWindowController(shell: App.shell)
     App.shell?.onOpenSettings = { settings.show() }
     App.shell?.onOpenCandidateSettings = { settings.show(page: .candidates) }  // docs/spec/english-mixed.md §10.3
     updates.closeSettings = { settings.close() }
-    withExtendedLifetime((server, updater)) { app.run() }
+    withExtendedLifetime((server, updater, notifier)) { app.run() }
     exit(0)
 }
 
