@@ -136,7 +136,7 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
-int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit what is shown (unfinished zhuyin included, like ENTER) then clear, 1 discard
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit what is shown (unfinished zhuyin included, like ENTER; an open English run goes out in its writing, docs/spec/english-mixed.md §4.4, like ENTER too) then clear, 1 discard
 void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/spec/c-abi.md)
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display
@@ -213,11 +213,15 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   that Space made at once (trigger (c) at Space: `c u p` Space) is a finished token with nothing to bring back: Esc then does what it
 //   does after any English token (clears the composition); Backspace takes one letter of it.
 //   An English token is one unit like a punctuation mark in the composition (the arrow keys take it whole, the next word starts a new
-//   sentence, it is learned under the neighbour key `^>_punct_en`); a token a revert made keeps, as the last item of its writings list
+//   sentence, it is learned under the neighbour key `^>_punct_en`). Its reading keeps the text as typed; what it shows and sends is the
+//   text's writing (docs/spec/english-mixed.md §4.4): typed all lower case or with only its first letter upper case, a word of the built-in
+//   table of official writings takes the table's line (`chatgpt`, `Chatgpt` -> `ChatGPT`), anything else stays as typed; a run typed in the
+//   ASCII state stays as typed. A token a revert made keeps, as the last item of its writings list
 //   (Down right after it), the Chinese item of the syllable the keys would have made when the lexicon has it. Other keys of
 //   docs/spec/english-mixed.md §4 stand:
 //   - Backspace deletes English one letter at a time (docs/spec/english-mixed.md §5.3): with the cursor right after an English token (no unfinished
-//     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes). Space
+//     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes; a writing the
+//     table put there reopens from the text as typed, `ChatGPT` as `Chatgp`). Space
 //     units and punctuation tokens still go whole.
 //   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in the order typed, then the shifted letter); the output
 //     fields mark the run in preedit (0 and 0 otherwise). Without set_english the Shift rules (docs/spec/keys-and-composition.md §4.1 rules 13, 21, 22) are unchanged.

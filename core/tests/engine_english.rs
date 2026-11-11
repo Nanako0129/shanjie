@@ -2058,3 +2058,115 @@ fn ascii_33rd_character_in_front_of_units_decodes_again() {
     let o = run(&mut e, &"a ".repeat(33));
     assert!(o.preedit.starts_with(&"a".repeat(33)) && fields(&o) == (32, 1), "{} {:?}", o.preedit, fields(&o));
 }
+
+// ---- docs/spec/english-mixed.md §4.4: the official writings table ----
+
+/// A run that ends as a token, typed all lower case (a revert) or with only its first letter upper case (Shift), shows and sends the
+/// table's writing; the list after it starts from that writing and still holds what was typed. A word the table lacks stays.
+#[test]
+fn a_word_of_the_table_takes_its_writing() {
+    for script in ["S-c h a t g p t _", "c h a t g p t _"] {
+        let mut e = eng();
+        let o = run(&mut e, script);
+        assert!(o.preedit == "ChatGPT" && o.commit.is_empty(), "{script}: {}", o.preedit);
+        assert!(run(&mut e, "Down").candidates == ["ChatGPT", "chatgpt", "Chatgpt", "CHATGPT"], "{script}");
+        run(&mut e, "Esc");
+        let mut e = eng();
+        run(&mut e, script);
+        assert_eq!(run(&mut e, "Enter").commit, "ChatGPT", "{script}");
+    }
+    let mut e = eng();
+    assert_eq!(run(&mut e, "r u s t _").preedit, "rust");
+    assert!(run(&mut e, "Down").candidates == ["rust", "Rust", "RUST"]);
+    let mut e = eng();
+    assert_eq!(run(&mut e, "S-r u s t _").preedit, "Rust");
+}
+
+/// Any other casing is what the user typed with Shift on purpose: it stays.
+#[test]
+fn other_casings_stay_as_typed() {
+    for (script, want) in [("S-c S-h S-a S-t S-g S-p S-t _", "CHATGPT"), ("S-c S-h a t g p t _", "CHatgpt"), ("S-g i t S-h u b _", "GitHub"), ("S-g i t h u S-b _", "GithuB")] {
+        let mut e = eng();
+        assert_eq!(run(&mut e, script).preedit, want, "{script}");
+        assert_eq!(run(&mut e, "Enter").commit, want, "{script}");
+    }
+}
+
+/// A token a revert made keeps its Chinese item as the last item of the list, after the writings of the table's word.
+#[test]
+fn the_chinese_item_stays_after_the_writing() {
+    let mut e = eng();
+    let o = run(&mut e, "a p i _");
+    assert_eq!(o.preedit, "API", "premise: `api` reverts at `i` and is in the table");
+    let o = run(&mut e, "Down");
+    assert!(o.candidates[..3] == ["API", "api", "Api"] && o.candidates.len() == 4, "{:?}", o.candidates);
+    assert_eq!(o.candidates[3], first_entry("ㄇㄛ"));
+}
+
+/// The tone-key split makes the head a token on its own path: it takes the writing too.
+#[test]
+fn the_head_of_a_tone_split_takes_its_writing() {
+    let mut e = eng();
+    let o = run(&mut e, "S-c h a t g p t s u 3");
+    assert!(e.english_split(), "premise: the tone key split the run");
+    assert_eq!(o.preedit, format!("ChatGPT{}", shows("ㄋㄧˇ")));
+}
+
+/// Backspace after a token the table wrote reopens what was typed, so a letter taken and typed again ends as the first time did; a
+/// writing the user picked from the list reopens as it stands.
+#[test]
+fn backspace_reopens_what_was_typed() {
+    let mut e = eng();
+    run(&mut e, "S-c h a t g p t _");
+    assert_eq!(run(&mut e, "BS").preedit, "Chatgp");
+    assert_eq!(run(&mut e, "t _").preedit, "ChatGPT");
+    assert_eq!(run(&mut e, "Enter").commit, "ChatGPT");
+    let mut e = eng();
+    run(&mut e, "S-c h a t g p t _ Down");
+    assert_eq!(run(&mut e, "2").preedit, "chatgpt", "premise: the second writing was picked");
+    assert_eq!(run(&mut e, "BS").preedit, "chatgp");
+    let mut e = eng();
+    run(&mut e, "S-c h a t g p t _ Down");
+    assert_eq!(run(&mut e, "4").preedit, "CHATGPT", "premise: the fourth writing was picked");
+    assert_eq!(run(&mut e, "BS").preedit, "CHATGP");
+}
+
+/// A run typed in the ASCII state keeps its text whatever ends it (Space, `set_ascii(0)`, `reset(Commit)`); the mark goes with the
+/// run, so the next run outside the state takes its writing again.
+#[test]
+fn a_run_typed_in_the_ascii_state_stays_as_typed() {
+    let zh = || {
+        let mut e = eng();
+        let zh = syllable(&mut e, "ㄋㄧˇ").preedit;
+        e.set_ascii(true).unwrap();
+        (e, zh)
+    };
+    let (mut e, z) = zh();
+    assert_eq!(run(&mut e, "g i t h u b _").preedit, format!("{z}github"));
+    let (mut e, z) = zh();
+    run(&mut e, "g i t h u b");
+    assert_eq!(e.set_ascii(false).unwrap().preedit, format!("{z}github"), "set_ascii(0) ends the run after the state is off");
+    // The mark is not left for the next run.
+    assert_eq!(run(&mut e, "S-g i t h u b _").preedit, format!("{z}githubGitHub"));
+    let (mut e, z) = zh();
+    run(&mut e, "g i t h u b");
+    assert_eq!(e.reset(ResetMode::Commit).commit, format!("{z}github"));
+    // The keys of an unfinished syllable that `set_ascii(1)` turns into a run are typed in the state too.
+    let mut e = eng();
+    run(&mut e, "a");
+    e.set_ascii(true).unwrap();
+    assert_eq!(run(&mut e, "p i _").preedit, "api");
+}
+
+/// A composition the system sends (`reset(Commit)`) with a run still open sends the run's writing, the text Enter would send; what
+/// is shown before that is the run as typed.
+#[test]
+fn reset_commit_sends_an_open_run_in_its_writing() {
+    let mut e = eng();
+    assert_eq!(run(&mut e, "S-c h a t g p t").preedit, "Chatgpt", "premise: the run is open and shown as typed");
+    assert_eq!(e.reset(ResetMode::Commit).commit, "ChatGPT");
+    assert!(is_empty(&mut e));
+    let mut e = eng();
+    run(&mut e, "S-r u s t");
+    assert_eq!(e.reset(ResetMode::Commit).commit, "Rust");
+}
