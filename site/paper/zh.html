@@ -43,7 +43,7 @@
 <p class="sub">Nanako Tsai<a href="#fn1" class="footnote-ref"
 id="fnref1" role="doc-noteref"><sup>1</sup></a>・版本
 v1，2026-11-12・繁體中文閱讀版</p>
-<p class="note">這一頁由論文的原始檔轉成，章節、表格與公式的編號和 PDF 相同；有出入時以 PDF 為準。<a href="/paper/shanjie-v1-zh.pdf">下載中文 PDF</a>・<a href="/paper">論文頁（英文 PDF、引用方式）</a></p>
+<p class="note">這一頁由論文的原始檔轉成，章節、表格、公式與參考文獻的編號和 PDF 相同；參考文獻條目用的是另一種排版樣式（作者多時縮成 et al.、英文標題的大小寫不同）。有出入時以 PDF 為準。<a href="/paper/shanjie-v1-zh.pdf">下載中文 PDF</a>・<a href="/paper">論文頁（英文 PDF、引用方式）</a></p>
 
 <section id="abstract">
 <h2>摘要</h2>
@@ -115,9 +115,7 @@ class="uri">https://creativecommons.org/licenses/by/4.0/</a></p>
 <p>台灣使用者用注音打國語時，每一組按鍵是一個帶聲調的音節，而幾乎每個音節都對應許多字。輸入法因此在一個硬限制下解一個序列標註問題：輸出字串的讀音必須剛好是打進來的音節，而系統要盡量選出使用者想打的那一串，每一鍵只有幾毫秒。有兩件事讓它比聽寫式的轉換更難。第一，同一個使用者寫兩種語域——隨意的聊天和書面文字——用詞與詞頻差到一組參數兩邊都顧不好。第二，使用者在意的錯集中在語言本身局部分不出來的同音對（在／再、的／得、做／作）、專有名詞，以及編輯過的文字裡沒有的口語。</p>
 <p>善解是一個開源（Apache-2.0）的 macOS
 輸入法，只有一個明說的優先順序：送進 App 的文字永遠是本機詞庫 lattice
-產生的候選之一，而在候選之間的選擇要在資料允許的範圍內盡量正確 <span
-class="citation" data-cites="shanjie">(<a href="#ref-shanjie"
-role="doc-biblioref">Nanako0129 2026</a>)</span>。本文描述
+產生的候選之一，而在候選之間的選擇要在資料允許的範圍內盡量正確 <span class="citation">[<a href="#ref-shanjie">35</a>]</span>。本文描述
 v0.7.0（2026-11-11
 發佈）出貨的系統，以及開發約六週累積的證據。本文問三個問題。</p>
 <dl>
@@ -182,146 +180,51 @@ agent
 <p>這一節從五個面向把既有工作和本文對照：任務、輸出空間、給模型的輸入、評測，以及本文的定位。</p>
 <section id="任務" class="level5">
 <h5>任務。</h5>
-<p>把一串拼音按鍵轉成漢字，從 <span class="citation"
-data-cites="chen2000">Chen and Lee (<a href="#ref-chen2000"
-role="doc-biblioref">2000</a>)</span> 與 <span class="citation"
-data-cites="gao2002">Gao et al. (<a href="#ref-gao2002"
-role="doc-biblioref">2002</a>)</span>
+<p>把一串拼音按鍵轉成漢字，從 <span class="citation">Chen and Lee [<a href="#ref-chen2000">11</a>]</span> 與 <span class="citation">Gao et al. [<a href="#ref-gao2002">16</a>]</span>
 的拼音研究開始就當成統計語言模型的解碼問題，之後有和打字錯誤一起處理的做法
-<span class="citation" data-cites="jia2014">(<a href="#ref-jia2014"
-role="doc-biblioref">Jia and Zhao 2014</a>)</span>，近年則用神經模型
-<span class="citation"
-data-cites="huang2018moon zhang2019open tan2022pinyingpt xiao2022pert">(<a
-href="#ref-huang2018moon" role="doc-biblioref">Huang et al. 2018</a>; <a
-href="#ref-zhang2019open" role="doc-biblioref">Zhang et al. 2019</a>; <a
-href="#ref-tan2022pinyingpt" role="doc-biblioref">Tan et al. 2022</a>;
-<a href="#ref-xiao2022pert" role="doc-biblioref">Xiao et al.
-2022</a>)</span>。實際出貨的引擎另外處理字典與語言模型的壓縮 <span
-class="citation" data-cites="kudo2011">(<a href="#ref-kudo2011"
-role="doc-biblioref">Kudo et al. 2011</a>)</span>，或用有限狀態解碼器
-<span class="citation" data-cites="hellsten2017">(<a
-href="#ref-hellsten2017" role="doc-biblioref">Hellsten et al.
-2017</a>)</span>。注音方面，開源引擎有新酷音（libchewing）<span
-class="citation" data-cites="libchewing">(<a href="#ref-libchewing"
-role="doc-biblioref">The Chewing Project 2026</a>)</span>、RIME <span
-class="citation" data-cites="rime">(<a href="#ref-rime"
-role="doc-biblioref">RIME 2026</a>)</span>、小麥注音 <span
-class="citation" data-cites="mcbopomofo">(<a href="#ref-mcbopomofo"
-role="doc-biblioref">OpenVanilla
-2026</a>)</span>（善解用它的詞庫當基底層）與唯音 <span class="citation"
-data-cites="weizhuyin">(<a href="#ref-weizhuyin"
-role="doc-biblioref"><span class="nocase">vChewing</span>
-2026</a>)</span>。善解的解碼器屬於統計這一類：絕對折扣 <span
-class="citation" data-cites="ney1994 chen1999">(<a href="#ref-ney1994"
-role="doc-biblioref">Ney et al. 1994</a>; <a href="#ref-chen1999"
-role="doc-biblioref">Chen and Goodman 1999</a>)</span> 加 Kneser–Ney
-接續分布 <span class="citation" data-cites="kneser1995">(<a
-href="#ref-kneser1995" role="doc-biblioref">Kneser and Ney
-1995</a>)</span>（訓練計數是詞圖上的期望次數，所以接續次數用四捨五入的整數加門檻，不是
-<span class="citation" data-cites="zhang2014kn">(<a
-href="#ref-zhang2014kn" role="doc-biblioref">Zhang and Chiang
-2014</a>)</span> 的分數次數版本；Pitman–Yor 推廣 <span class="citation"
-data-cites="teh2006">(<a href="#ref-teh2006" role="doc-biblioref">Teh
-2006</a>)</span> 沒有做），詞類則是對 <span class="citation"
-data-cites="brown1992">(<a href="#ref-brown1992"
-role="doc-biblioref"><span class="nocase">Brown et al.</span>
-1992</a>)</span> 的類別 bigram 目標做 exchange 分群（參見 <span
-class="citation" data-cites="martin1998">(<a href="#ref-martin1998"
-role="doc-biblioref">Martin et al. 1998</a>)</span>）。</p>
+<span class="citation">[<a href="#ref-jia2014">22</a>]</span>，近年則用神經模型
+<span class="citation">[<a href="#ref-huang2018moon">20</a>, <a href="#ref-tan2022pinyingpt">42</a>, <a href="#ref-xiao2022pert">54</a>, <a href="#ref-zhang2019open">58</a>]</span>。實際出貨的引擎另外處理字典與語言模型的壓縮 <span class="citation">[<a href="#ref-kudo2011">26</a>]</span>，或用有限狀態解碼器
+<span class="citation">[<a href="#ref-hellsten2017">19</a>]</span>。注音方面，開源引擎有新酷音（libchewing）<span class="citation">[<a href="#ref-libchewing">44</a>]</span>、RIME <span class="citation">[<a href="#ref-rime">40</a>]</span>、小麥注音 <span class="citation">[<a href="#ref-mcbopomofo">37</a>]</span>（善解用它的詞庫當基底層）與唯音 <span class="citation">[<a href="#ref-weizhuyin">53</a>]</span>。善解的解碼器屬於統計這一類：絕對折扣 <span class="citation">[<a href="#ref-chen1999">10</a>, <a href="#ref-ney1994">36</a>]</span> 加 Kneser–Ney
+接續分布 <span class="citation">[<a href="#ref-kneser1995">24</a>]</span>（訓練計數是詞圖上的期望次數，所以接續次數用四捨五入的整數加門檻，不是
+<span class="citation">[<a href="#ref-zhang2014kn">57</a>]</span> 的分數次數版本；Pitman–Yor 推廣 <span class="citation">[<a href="#ref-teh2006">43</a>]</span> 沒有做），詞類則是對 <span class="citation">[<a href="#ref-brown1992">8</a>]</span> 的類別 bigram 目標做 exchange 分群（參見 <span class="citation">[<a href="#ref-martin1998">30</a>]</span>）。</p>
 </section>
 <section id="輸出空間" class="level5">
 <h5>輸出空間。</h5>
-<p>這些系統的輸出都限制在讀音符合輸入的字串；PinyinGPT <span
-class="citation" data-cites="tan2022pinyingpt">(<a
-href="#ref-tan2022pinyingpt" role="doc-biblioref">Tan et al.
-2022</a>)</span>
+<p>這些系統的輸出都限制在讀音符合輸入的字串；PinyinGPT <span class="citation">[<a href="#ref-tan2022pinyingpt">42</a>]</span>
 把這個限制寫明，把輸出分布限制在同音字。善解更嚴：神經模型從不產生文字，只重排詞庫
-lattice 上最好的 8 條路徑。rime-wanxiang 與 librime-witogram <span
-class="citation" data-cites="wanxiang witogram">(<a href="#ref-wanxiang"
-role="doc-biblioref"><span class="nocase">amzxyz</span> 2026</a>; <a
-href="#ref-witogram" role="doc-biblioref"><span
-class="nocase">levelel</span> 2026</a>)</span>
+lattice 上最好的 8 條路徑。rime-wanxiang 與 librime-witogram <span class="citation">[<a href="#ref-wanxiang">2</a>, <a href="#ref-witogram">28</a>]</span> 2026</a>)</span>
 報告過一個負面結果，專案把它採納為設計規則：把搭配表換成原始概似後 top-1
 下降，所以善解的重排模型只有在融合分數超過一個在指定資料上選定的分差門檻時，才能覆寫
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>n</mi><annotation encoding="application/x-tex">n</annotation></semantics></math>-gram
-的第一名（第 <a href="#sec:srformula">3.5</a> 節）。這個閘門是 <span
-class="citation" data-cites="geifman2017">(<a href="#ref-geifman2017"
-role="doc-biblioref">Geifman and El-Yaniv 2017</a>)</span>
-意義下的選擇性預測規則，和「學會交給專家」<span class="citation"
-data-cites="mozannar2020">(<a href="#ref-mozannar2020"
-role="doc-biblioref">Mozannar and Sontag 2020</a>)</span>
-相關；我們不主張它是 <span class="citation" data-cites="guo2017">(<a
-href="#ref-guo2017" role="doc-biblioref">Guo et al. 2017</a>)</span>
+的第一名（第 <a href="#sec:srformula">3.5</a> 節）。這個閘門是 <span class="citation">[<a href="#ref-geifman2017">17</a>]</span>
+意義下的選擇性預測規則，和「學會交給專家」<span class="citation">[<a href="#ref-mozannar2020">34</a>]</span>
+相關；我們不主張它是 <span class="citation">[<a href="#ref-guo2017">18</a>]</span>
 意義下校準過的機率。</p>
 </section>
 <section id="輸入" class="level5">
 <h5>輸入。</h5>
 <p>各系統給神經模型看的東西不同。0c（靈犀注音）公開一個
 Transformer，用前文最後 64 字加讀音重排統計引擎的候選，在它自己的 6,000
-句新聞集上報統計引擎首選 76.9%、加 Transformer 86.0% <span
-class="citation" data-cites="oc ocime">(<a href="#ref-oc"
-role="doc-biblioref">Funmula / BigGo 2026</a>; <a href="#ref-ocime"
-role="doc-biblioref"><span class="nocase">0c-biggo</span>
-2026</a>)</span>（自報數字，讀音由字典合成、集合不同，不能和本文任何數字比；<a
+句新聞集上報統計引擎首選 76.9%、加 Transformer 86.0% <span class="citation">[<a href="#ref-ocime">1</a>, <a href="#ref-oc">15</a>]</span>（自報數字，讀音由字典合成、集合不同，不能和本文任何數字比；<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-051">§rl-051</a>）。pinyin-ime-reranker-4M
-的模型卡 <span class="citation" data-cites="reranker4m">(<a
-href="#ref-reranker4m" role="doc-biblioref"><span
-class="nocase">metasequoiaime</span> 2026</a>)</span>
+的模型卡 <span class="citation">[<a href="#ref-reranker4m">31</a>]</span> 2026</a>)</span>
 報告前綴狀態在候選與按鍵之間共用後 p95 從 20.64 ms 降到 8.61 ms；Zenzai
-<span class="citation" data-cites="zenzai">(<a href="#ref-zenzai"
-role="doc-biblioref"><span class="nocase">azooKey</span>
-2024</a>)</span>
-用保留符號分段、前文放在讀音之前。善解的重排模型看到的是候選字串與最多兩個字的前文，看不到讀音。這批文獻裡有兩個想法試過、沒有採用：<span
-class="citation" data-cites="suzuki2005">(<a href="#ref-suzuki2005"
-role="doc-biblioref">Suzuki and Gao 2005</a>)</span> 與 <span
-class="citation" data-cites="tokunaga2011">(<a href="#ref-tokunaga2011"
-role="doc-biblioref">Tokunaga et al. 2011</a>)</span>
-啟發的判別式（listwise）目標，以及交叉熵差的資料挑選 <span
-class="citation" data-cites="moore2010">(<a href="#ref-moore2010"
-role="doc-biblioref">Moore and Lewis 2010</a>)</span>（第 <a href="#sec:negative">6</a> 節）。Kuhn 與 De Mori 的快取語言模型
-<span class="citation" data-cites="kuhn1990">(<a href="#ref-kuhn1990"
-role="doc-biblioref">Kuhn and De Mori 1990</a>)</span>
+<span class="citation">[<a href="#ref-zenzai">3</a>]</span>
+用保留符號分段、前文放在讀音之前。善解的重排模型看到的是候選字串與最多兩個字的前文，看不到讀音。這批文獻裡有兩個想法試過、沒有採用：<span class="citation">[<a href="#ref-suzuki2005">41</a>]</span> 與 <span class="citation">[<a href="#ref-tokunaga2011">45</a>]</span>
+啟發的判別式（listwise）目標，以及交叉熵差的資料挑選 <span class="citation">[<a href="#ref-moore2010">33</a>]</span>（第 <a href="#sec:negative">6</a> 節）。Kuhn 與 De Mori 的快取語言模型
+<span class="citation">[<a href="#ref-kuhn1990">27</a>]</span>
 是規劃中逐次累加自學的參照。</p>
 </section>
 <section id="評測" class="level5">
 <h5>評測。</h5>
-<p>KySS <span class="citation" data-cites="jia2013kyss">(<a
-href="#ref-jia2013kyss" role="doc-biblioref">Jia and Zhao
-2013</a>)</span> 與 <span class="citation" data-cites="jiang2011">Jiang
-et al. (<a href="#ref-jiang2011" role="doc-biblioref">2011</a>)</span>
+<p>KySS <span class="citation">[<a href="#ref-jia2013kyss">21</a>]</span> 與 <span class="citation">Jiang
+et al. [<a href="#ref-jiang2011">23</a>]</span>
 對適應式中文輸入法的強健性分析，促成專案重播工具的按鍵分數；AJIMEE-Bench
-<span class="citation" data-cites="ajimee">(<a href="#ref-ajimee"
-role="doc-biblioref"><span class="nocase">azooKey</span>
-2026</a>)</span> 促成判讀集凍結時切成固定子集。配對檢定照 <span
-class="citation" data-cites="dietterich1998">(<a
-href="#ref-dietterich1998" role="doc-biblioref">Dietterich
-1998</a>)</span>（精確 McNemar）與 <span class="citation"
-data-cites="koehn2004">(<a href="#ref-koehn2004"
-role="doc-biblioref">Koehn 2004</a>)</span>（配對
-bootstrap）；自然語言處理裡顯著性檢定的做法見 <span class="citation"
-data-cites="dror2018 bergkirkpatrick2012">(<a href="#ref-dror2018"
-role="doc-biblioref">Dror et al. 2018</a>; <a
-href="#ref-bergkirkpatrick2012" role="doc-biblioref">Berg-Kirkpatrick et
-al.
-2012</a>)</span>。機器學習文獻裡有兩條線對應本文說的改對、改壞與流動：模型更新造成的退步與預測流動
-<span class="citation" data-cites="milanifard2016 yan2021 xie2021">(<a
-href="#ref-milanifard2016" role="doc-biblioref">Milani Fard et al.
-2016</a>; <a href="#ref-yan2021" role="doc-biblioref">Yan et al.
-2021</a>; <a href="#ref-xie2021" role="doc-biblioref">Xie et al.
-2021</a>)</span>，以及種子等來源替基準分數帶來的變異 <span
-class="citation" data-cites="reimers2017 bouthillier2021">(<a
-href="#ref-reimers2017" role="doc-biblioref">Reimers and Gurevych
-2017</a>; <a href="#ref-bouthillier2021"
-role="doc-biblioref">Bouthillier et al.
-2021</a>)</span>。本文的分層集合（判讀集只用一次、保留集計次）是對 <span
-class="citation" data-cites="dwork2015 blum2015 recht2019">(<a
-href="#ref-dwork2015" role="doc-biblioref">Dwork et al. 2015</a>; <a
-href="#ref-blum2015" role="doc-biblioref">Blum and Hardt 2015</a>; <a
-href="#ref-recht2019" role="doc-biblioref">Recht et al. 2019</a>)</span>
+<span class="citation">[<a href="#ref-ajimee">4</a>]</span> 促成判讀集凍結時切成固定子集。配對檢定照 <span class="citation">[<a href="#ref-dietterich1998">12</a>]</span>（精確 McNemar）與 <span class="citation">[<a href="#ref-koehn2004">25</a>]</span>（配對
+bootstrap）；自然語言處理裡顯著性檢定的做法見 <span class="citation">[<a href="#ref-bergkirkpatrick2012">5</a>, <a href="#ref-dror2018">13</a>]</span>。機器學習文獻裡有兩條線對應本文說的改對、改壞與流動：模型更新造成的退步與預測流動
+<span class="citation">[<a href="#ref-milanifard2016">32</a>, <a href="#ref-xie2021">55</a>, <a href="#ref-yan2021">56</a>]</span>，以及種子等來源替基準分數帶來的變異 <span class="citation">[<a href="#ref-bouthillier2021">7</a>, <a href="#ref-reimers2017">39</a>]</span>。本文的分層集合（判讀集只用一次、保留集計次）是對 <span class="citation">[<a href="#ref-blum2015">6</a>, <a href="#ref-dwork2015">14</a>, <a href="#ref-recht2019">38</a>]</span>
 研究的「反覆使用同一份資料」問題的人工解法；在讀數字之前先 commit
-主判讀，就是 <span class="citation" data-cites="vanmiltenburg2021">(<a
-href="#ref-vanmiltenburg2021" role="doc-biblioref">Miltenburg et al.
-2021</a>)</span> 說的預先登記。</p>
+主判讀，就是 <span class="citation">[<a href="#ref-vanmiltenburg2021">52</a>]</span> 說的預先登記。</p>
 </section>
 <section id="本文的定位" class="level5">
 <h5>本文的定位。</h5>
@@ -554,9 +457,7 @@ ll_i=\sum_{t=1}^{|y_i|}\log_{10}p_\theta\big(y_{i,t}\mid[\mathrm{BOS}],k,y_{i,&l
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>U</mi><mn>0</mn></msub><annotation encoding="application/x-tex">U_0</annotation></semantics></math>
 是可用的候選：候選 0 加上每一個沒被遮罩的
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi><mo>≥</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">i\ge1</annotation></semantics></math>（候選會換掉解碼器第一名裡手動加的詞時被遮罩，v0.7.0
-起重排保護詞表的五個常用詞也一樣 <span class="citation"
-data-cites="specs">(<a href="#ref-specs" role="doc-biblioref">Tsai
-2026d</a>)</span>；附錄 <a href="#sec:lexprior">A.3</a>
+起重排保護詞表的五個常用詞也一樣 <span class="citation">[<a href="#ref-specs">51</a>]</span>；附錄 <a href="#sec:lexprior">A.3</a>
 的模糊音規則也把含容錯詞的候選拿掉，第一名本身含容錯詞的段整段不重排）。用該強度的三元組
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false" form="prefix">(</mo><mi>α</mi><mo>,</mo><mi>τ</mi><mo>,</mo><mi>δ</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">(\alpha,\tau,\delta)</annotation></semantics></math>
 與附錄 <a href="#sec:learnformula">A.8</a> 的學習項
@@ -601,9 +502,7 @@ j &amp; f_j-f_0\ge\delta,\\
 SHA-256，配到別的檔就拒絕載入、只用解碼器。訓練文字是維基（前 200,000
 篇）、Common Voice zh-TW、Tatoeba、合成口語句、g0v
 <code>#rand0m</code>、論壇 A（台灣公開論壇的文章與推文），以及
-OpenSubtitles v2018 繁體字幕 <span class="citation"
-data-cites="lison2016">(<a href="#ref-lison2016"
-role="doc-biblioref">Lison and Tiedemann 2016</a>)</span>（清理後
+OpenSubtitles v2018 繁體字幕 <span class="citation">[<a href="#ref-lison2016">29</a>]</span>（清理後
 4,432,866 句、42,814,742 個漢字）。權重先從頭訓練（36,005 步、一個
 epoch、AdamW、cosine、峰值 1e-3、200 步暖身），再接續訓練 3,000 步、峰值
 1e-4，來源相同、重新轉換、不套 <code>TWPhrases</code> 這張轉換表（第 <a href="#sec:whatmoved">5.4</a> 節）。</p>
@@ -665,10 +564,7 @@ g_i=\sigma\!\Big(\frac{ll_i-ll_0}{T_g}\Big),\qquad \mu_{\mathrm{CL}}=0.5,\ T_g=1
 的延遲。<em>每鍵</em>的數字來自跨版本基準測試：它把 302 句開發集的 8,336
 個按鍵走同步的按鍵路徑重播，載的是引擎載入模型時會讀的那一版的檔（bigram
 與詞類檔；那一版有的話，再加 Kneser–Ney
-側檔、三元表與解碼器的讀音項），不載詞包、沒有前文、沒有語意校正 <span
-class="citation" data-cites="specs">(<a href="#ref-specs"
-role="doc-biblioref">Tsai
-2026d</a>)</span>，量的是精簡後的解碼器。<em>重排</em>的數字由評測 CLI
+側檔、三元表與解碼器的讀音項），不載詞包、沒有前文、沒有語意校正 <span class="citation">[<a href="#ref-specs">51</a>]</span>，量的是精簡後的解碼器。<em>重排</em>的數字由評測 CLI
 另外量。兩者都不含輸入法的殼、候選窗與 App。</p>
 <p>在開發用的 Mac 上，v0.6.0 每鍵 p95 2.232 ms（聊天）、引擎載入 945
 ms、RSS 480 MB、重排 p50／p95 6.68／8.58 ms；發佈說明報
@@ -691,9 +587,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 輪流重播（各三輪，取 p95 的中位數），用的是和上面幾次不同的一台
 Mac，所以這組數字只能彼此比，不能和 v0.6.0 的比。開跑時 load average
 1.9，在專案回報速度數字的上限 2.0 以內；結束時
-4.2，速度是最後才量的，所以結束時的負載含它自己 <span class="citation"
-data-cites="specs">(<a href="#ref-specs" role="doc-biblioref">Tsai
-2026d</a>)</span>。從 v0.6.1 到 v0.7.0，每鍵 p95 聊天設定
+4.2，速度是最後才量的，所以結束時的負載含它自己 <span class="citation">[<a href="#ref-specs">51</a>]</span>。從 v0.6.1 到 v0.7.0，每鍵 p95 聊天設定
 1.91<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>1.93
 ms、書面設定
 1.92<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>1.96
@@ -703,9 +597,7 @@ ms，引擎載入
 480<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>489
 MB，重排 p50／p95
 5.56／7.15<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>5.53／7.11
-ms <span class="citation" data-cites="benchmark releases">(<a
-href="#ref-benchmark" role="doc-biblioref">Tsai 2026a</a>, <a
-href="#ref-releases" role="doc-biblioref">2026c</a>)</span>。</p>
+ms <span class="citation">[<a href="#ref-benchmark">47</a>, <a href="#ref-releases">50</a>]</span>。</p>
 </section>
 </section>
 <section id="sec:eval" class="level2">
@@ -739,9 +631,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 個公開口語子句與 150 個私人新聞子句）只由獨立的 agent 在推 tag
 前量，記使用次數，用滿八次換下一份（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-002">§me-002</a>、<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-014">§me-014</a>；<span
-class="citation" data-cites="evalreadme">(<a href="#ref-evalreadme"
-role="doc-biblioref">Tsai 2026b</a>)</span>）。</p>
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-014">§me-014</a>；<span class="citation">[<a href="#ref-evalreadme">48</a>]</span>）。</p>
 <section id="保留集是什麼" class="level5">
 <h5>保留集是什麼。</h5>
 <p>保留集是發版監測用的集合，不是從沒看過的測驗。口語半邊（150
@@ -756,22 +646,16 @@ agent
 個私人子句，書面設定）在 v0.6.0 發版時新啟用，那是它第一次使用，v0.6.1
 是第二次，v0.7.0 的兩次是第三、第四次。原本 227 列的保留集到 v0.4.6
 為止每次發版都量，幾個部件的實驗也量過它（附錄 <a href="#sec:components">C</a>）；公開紀錄沒有它的使用次數，它現在是可讀的挑戰集
-<span class="citation" data-cites="evalreadme">(<a
-href="#ref-evalreadme" role="doc-biblioref">Tsai
-2026b</a>)</span>。所以本文把保留集的數字當監測證據引用，確認性的證據只取表
+<span class="citation">[<a href="#ref-evalreadme">48</a>]</span>。所以本文把保留集的數字當監測證據引用，確認性的證據只取表
 <a href="#tab:confirm">1</a> 的單次確認。</p>
 </section>
 </section>
 <section id="sec:stats" class="level3">
 <h3><span class="secno">4.3</span> 配對統計與判讀的依據</h3>
 <p>比較是對基準逐列配對，報改對、改壞與淨值。用兩種檢定：不一致列上的精確雙尾
-McNemar 檢定 <span class="citation" data-cites="dietterich1998">(<a
-href="#ref-dietterich1998" role="doc-biblioref">Dietterich
-1998</a>)</span>，抽樣單位是子句；以及
+McNemar 檢定 <span class="citation">[<a href="#ref-dietterich1998">12</a>]</span>，抽樣單位是子句；以及
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi mathvariant="normal">Δ</mi><annotation encoding="application/x-tex">\Delta</annotation></semantics></math>top-1
-的配對 bootstrap 區間 <span class="citation" data-cites="koehn2004">(<a
-href="#ref-koehn2004" role="doc-biblioref">Koehn
-2004</a>)</span>，報告用 95%、非劣性用 90%。</p>
+的配對 bootstrap 區間 <span class="citation">[<a href="#ref-koehn2004">25</a>]</span>，報告用 95%、非劣性用 90%。</p>
 <section id="各時期的主判讀" class="level5">
 <h5>各時期的主判讀。</h5>
 <p>決定一個實驗過不過的統計量換過一次，下面逐期寫明。</p>
@@ -887,17 +771,8 @@ CPU、確認的量測在第二台機器重跑、每個輸入檔核對雜湊）�
 <section id="sec:repro" class="level3">
 <h3><span class="secno">4.6</span> 出處與可重現性</h3>
 <p>除了一個例外，本文每一個數字都取自專案公開的文件，沒有為了這篇論文重算：研究摘錄
-<span class="citation" data-cites="excerptzh">(<a href="#ref-excerptzh"
-role="doc-biblioref">Tsai
-2026f</a>)</span>（開發紀錄裡本文引用到的段落，逐段公開）、跨版本基準測試
-<span class="citation" data-cites="benchmark">(<a href="#ref-benchmark"
-role="doc-biblioref">Tsai 2026a</a>)</span>、評測集說明 <span
-class="citation" data-cites="evalreadme">(<a href="#ref-evalreadme"
-role="doc-biblioref">Tsai 2026b</a>)</span>、規格 <span class="citation"
-data-cites="specs">(<a href="#ref-specs" role="doc-biblioref">Tsai
-2026d</a>)</span> 與發佈說明 <span class="citation"
-data-cites="releases">(<a href="#ref-releases" role="doc-biblioref">Tsai
-2026c</a>)</span>。寫成 <a
+<span class="citation">[<a href="#ref-excerptzh">49</a>]</span>（開發紀錄裡本文引用到的段落，逐段公開）、跨版本基準測試
+<span class="citation">[<a href="#ref-benchmark">47</a>]</span>、評測集說明 <span class="citation">[<a href="#ref-evalreadme">48</a>]</span>、規格 <span class="citation">[<a href="#ref-specs">51</a>]</span> 與發佈說明 <span class="citation">[<a href="#ref-releases">50</a>]</span>。寫成 <a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-012">§rl-012</a>
 這種形式的引用，指摘錄裡同名的錨點。摘錄以 commit <code>5a33e0ad</code>
 為準：它在 v0.7.0 那個 tag 之後，補了計畫的四段（<a
@@ -912,12 +787,8 @@ commit 上跑的（第 <a href="#sec:ablation">5.3</a> 節）；結果摘要與�
 <code>--off gate</code>，軟閘門那一列用 <code>--off soft</code>）在 repo
 的 <a
 href="https://github.com/Nanako0129/shanjie/tree/e88f4a364d414780678999ee471096b40bb6212c/eval/ablation/v0.7.0"><code>eval/ablation/v0.7.0/</code></a>（commit
-<code>e88f4a36</code>）<span class="citation" data-cites="ablation">(<a
-href="#ref-ablation" role="doc-biblioref">Tsai 2026e</a>)</span>。
-程式、詞庫與模型檔都在 repo <span class="citation"
-data-cites="shanjie">(<a href="#ref-shanjie"
-role="doc-biblioref">Nanako0129
-2026</a>)</span>；公開的調參集與回歸集可以用評測 CLI
+<code>e88f4a36</code>）<span class="citation">[<a href="#ref-ablation">46</a>]</span>。
+程式、詞庫與模型檔都在 repo <span class="citation">[<a href="#ref-shanjie">35</a>]</span>；公開的調參集與回歸集可以用評測 CLI
 重跑，模型檔依雜湊抓取。私人評測集（作者自己的聊天訊息，以及一份來源未授權再散布的新聞集）只寫大小與文件已公開的統計數字，沒有任何一句出現在這裡。來源標成推論而非量測的句子，保留它的標記。</p>
 </section>
 </section>
@@ -1191,10 +1062,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 </section>
 <section id="sec:versions" class="level3">
 <h3><span class="secno">5.2</span> 各版在開發集與保留集上的結果</h3>
-<p>表 <a href="#tab:versions">2</a> 取自 repo 的跨版本基準測試 <span
-class="citation" data-cites="benchmark">(<a href="#ref-benchmark"
-role="doc-biblioref">Tsai
-2026a</a>)</span>：每一版用自己出貨的模型與旗標在凍結的集合上跑。表裡每個集合在選值時都被看過，每一版又綑綁了幾個改動，所以這張表描述的是版本，不是檢定。基準測試裡描述性的
+<p>表 <a href="#tab:versions">2</a> 取自 repo 的跨版本基準測試 <span class="citation">[<a href="#ref-benchmark">47</a>]</span>：每一版用自己出貨的模型與旗標在凍結的集合上跑。表裡每個集合在選值時都被看過，每一版又綑綁了幾個改動，所以這張表描述的是版本，不是檢定。基準測試裡描述性的
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>p</mi><annotation encoding="application/x-tex">p</annotation></semantics></math>
 這裡不列；每一版的改對與改壞在表 <a href="#tab:versionsfb">9</a>（附錄 <a href="#sec:components">C</a>）。圖 <a href="#fig:trend">2</a> 畫的是兩個
 discordtune 欄，表 <a href="#tab:holdout">3</a> 是保留集。</p>
@@ -1483,9 +1351,7 @@ bigram 配上一代的重排模型）從 46 掉到 36（聊天）、39 掉到
 27（書面），發佈說明引的是這一組數字；出貨組合的定案判讀是改對 3、改壞
 14（聊天）與改對 4、改壞 10（書面）（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-059">§rl-059</a>、<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-068">§rl-068</a>；<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>）。更早的 v0.4.4
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-068">§rl-068</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）。更早的 v0.4.4
 在立法院發言的集合 lytune 上退步（聊天
 4055<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>4010、書面
 4021<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>3979）；原因是兩個解碼器項的交互作用，兩版之後大致修好（第
@@ -1509,9 +1375,7 @@ v0.6.1，聊天開發集在聊天設定改對 31、改壞 12，書面設定改�
 126，兩個差距都不顯著（<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>0.25</mn></mrow><annotation encoding="application/x-tex">p=0.25</annotation></semantics></math>、<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mn>0.63</mn><annotation encoding="application/x-tex">0.63</annotation></semantics></math>；精確檢定約要改對對改壞
 6:0 或 8:1 才顯著，第 <a href="#sec:stats">4.3</a> 節）。其他集合的描述性
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>p</mi><annotation encoding="application/x-tex">p</annotation></semantics></math>
-值在附錄 <a href="#sec:components">C</a> <span class="citation"
-data-cites="benchmark">(<a href="#ref-benchmark"
-role="doc-biblioref">Tsai 2026a</a>)</span>。</p>
+值在附錄 <a href="#sec:components">C</a> <span class="citation">[<a href="#ref-benchmark">47</a>]</span>。</p>
 </section>
 <section id="sec:ablation" class="level3">
 <h3><span class="secno">5.3</span> v0.7.0 系統的逐項拿掉</h3>
@@ -1849,8 +1713,7 @@ Kneser–Ney
 <section id="轉換表是一類錯字的根因" class="level5">
 <h5>轉換表是一類錯字的根因。</h5>
 <p>有兩列使用者回報的錯字，原因是重排模型的訓練文字被一個中文轉換工具的詞彙表轉過（OpenCC
-<span class="citation" data-cites="opencc">(<a href="#ref-opencc"
-role="doc-biblioref">BYVoid 2026</a>)</span> 的
+<span class="citation">[<a href="#ref-opencc">9</a>]</span> 的
 <code>TWPhrases</code>）；這張表會改寫 127 個詞庫裡的詞，其中 71
 個是常用詞。在 94 句構造的句子上，出貨的重排模型把解碼器原本對的 49
 列改壞 7 列（聊天）、46 列改壞 7
@@ -1881,9 +1744,7 @@ role="doc-biblioref">BYVoid 2026</a>)</span> 的
 25，+16/<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>−</mi><annotation encoding="application/x-tex">-</annotation></semantics></math>5，<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>0.027</mn></mrow><annotation encoding="application/x-tex">p=0.027</annotation></semantics></math>；typing76
 72 對 69；功能字 161 對 157；維基錯字集 136 對 134）。檔案大小是 fp32 的
 130.7 MB 對 int8 的約 14.6 MB（<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#ip-002">§ip-002</a>；<span
-class="citation" data-cites="benchmark">(<a href="#ref-benchmark"
-role="doc-biblioref">Tsai 2026a</a>)</span>）。第二次在 v0.6.0
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#ip-002">§ip-002</a>；<span class="citation">[<a href="#ref-benchmark">47</a>]</span>）。第二次在 v0.6.0
 的解碼器上，0c 的融合（格在聊天調參集上以 0.4%
 上界選）對的是出貨的整條流程；出貨的流程除了重排模型，融合裡還有口語表與一個讀音項。在過濾後的
 discordtune 4,919 列上，0c 的融合對解碼器是
@@ -2183,9 +2044,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 <p>除了每份只用一次的判讀集，所有集合在選值時都被看過；基準測試頁寫明沒被看過的只有保留集。保留集是發版監測用的集合，它的摘要統計回報過好幾次（第
 <a href="#sec:sets">4.2</a> 節）；每個半邊 150
 列；換新集的三份之間，同一版差到 13 句（約 4%），所以保留集數字不跨份比
-<span class="citation" data-cites="benchmark evalreadme">(<a
-href="#ref-benchmark" role="doc-biblioref">Tsai 2026a</a>, <a
-href="#ref-evalreadme" role="doc-biblioref">2026b</a>)</span>。</p>
+<span class="citation">[<a href="#ref-benchmark">47</a>, <a href="#ref-evalreadme">48</a>]</span>。</p>
 </section>
 <section id="dev302" class="level5">
 <h5>dev302。</h5>
@@ -2207,13 +2066,10 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 篇，權重 1）、口語池（Common Voice zh-TW 與 Tatoeba
 的句子、合成口語句，權重 5）、g0v <code>#rand0m</code>
 頻道的公開訊息（權重 5），以及台灣一個公開論壇的文章與推文（論壇
-A；推文權重 5、內文權重 1）<span class="citation"
-data-cites="releases">(<a href="#ref-releases" role="doc-biblioref">Tsai
-2026c</a>)</span>；重排模型的訓練文字是同一批來源加上 OpenSubtitles
+A；推文權重 5、內文權重 1）<span class="citation">[<a href="#ref-releases">50</a>]</span>；重排模型的訓練文字是同一批來源加上 OpenSubtitles
 v2018 繁體字幕（清理後 4,432,866 句、42,814,742 個漢字；第 <a href="#sec:srformula">3.5</a>
 節）。釋出的模型檔是計數與權重、不是句子；每一個出貨模型的發佈說明都寫明不含任何私人對話
-<span class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>。論壇 A
+<span class="citation">[<a href="#ref-releases">50</a>]</span>。論壇 A
 的來源身分與原始文字不公開，也沒有任何從它抽出的評測集公開（第 <a href="#sec:ethics">9</a> 節）。</p>
 </section>
 <section id="範圍" class="level5">
@@ -2229,10 +2085,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 <p>本文描述的系統是 v0.7.0。跨版本基準測試量它用的 commit，和打 tag 的
 commit
 在評測規格綁定到發版的路徑（建置檔、核心、CLI、資料、異體字表、殼與腳本）上沒有差異
-<span class="citation" data-cites="specs benchmark">(<a
-href="#ref-specs" role="doc-biblioref">Tsai 2026d</a>, <a
-href="#ref-benchmark"
-role="doc-biblioref">2026a</a>)</span>。它的發版數字和先前每一版一樣，是開發集與監測用的數字。v0.6.1
+<span class="citation">[<a href="#ref-benchmark">47</a>, <a href="#ref-specs">51</a>]</span>。它的發版數字和先前每一版一樣，是開發集與監測用的數字。v0.6.1
 之後的改動裡，重排模型的權重、融合格、解碼器裡的讀音項與句首單字的學習規則各有一次單次確認（表
 <a href="#tab:confirm">1</a>）；口語項句首的估法、同分讀音的規則、重排保護詞表與第三個預設開的詞包沒有（附錄
 <a href="#sec:process">E</a>）。表 <a href="#tab:ablation">4</a>
@@ -2263,41 +2116,31 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-087">§rl-087</a>）。判讀集只從固定的月份區間（2015-07～2026-07）抽，2026-09
 永遠排除，2026-10 以後用善解打的文字不當正解（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#ip-003">§ip-003</a>）。這些集合不公開；本文只報它們的大小與在它們上面算出的統計數字，專案的評測工具對私人集合也只印數字
-<span class="citation" data-cites="specs">(<a href="#ref-specs"
-role="doc-biblioref">Tsai 2026d</a>)</span>。</p>
+<span class="citation">[<a href="#ref-specs">51</a>]</span>。</p>
 </section>
 <section id="出貨的模型與私人文字" class="level5">
 <h5>出貨的模型與私人文字。</h5>
 <p>出貨的模型只在公開文字上計數或訓練；沒有任何私人訊息進入釋出的檔案，每個模型的發佈說明都寫明這一點
-<span class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai
-2026c</a>)</span>。評測規格記下這條規則的理由：群聊裡有其他人的發言，所以這類文字只能當評測或調參用，不能用來訓練會隨安裝檔散布的模型
-<span class="citation" data-cites="specs">(<a href="#ref-specs"
-role="doc-biblioref">Tsai 2026d</a>)</span>。</p>
+<span class="citation">[<a href="#ref-releases">50</a>]</span>。評測規格記下這條規則的理由：群聊裡有其他人的發言，所以這類文字只能當評測或調參用，不能用來訓練會隨安裝檔散布的模型
+<span class="citation">[<a href="#ref-specs">51</a>]</span>。</p>
 </section>
 <section id="論壇文字" class="level5">
 <h5>論壇文字。</h5>
 <p>台灣一個公開論壇（論壇
 A）的文章與推文用於詞頻計數、訓練，以及不公開的 CE3 判讀集裡論壇 A
-的那一部分（表 <a href="#tab:sets">8</a>）；本文只用這個代號稱呼它，原始文字不散布，也沒有任何從它抽出的評測集公開（<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>、<a
+的那一部分（表 <a href="#tab:sets">8</a>）；本文只用這個代號稱呼它，原始文字不散布，也沒有任何從它抽出的評測集公開（<span class="citation">[<a href="#ref-releases">50</a>]</span>、<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-087">§rl-087</a>；第
 <a href="#sec:limits">8</a> 節）。</p>
 </section>
 <section id="新聞文字" class="level5">
 <h5>新聞文字。</h5>
 <p>私人的新聞開發集與保留集的新聞半邊來自一個未授權再散布的新聞來源；檔案放在
-repo 外，repo 只記列數與 SHA-256，而且從不用來訓練 <span
-class="citation" data-cites="evalreadme">(<a href="#ref-evalreadme"
-role="doc-biblioref">Tsai 2026b</a>)</span>。</p>
+repo 外，repo 只記列數與 SHA-256，而且從不用來訓練 <span class="citation">[<a href="#ref-evalreadme">48</a>]</span>。</p>
 </section>
 <section id="保留集的處理" class="level5">
 <h5>保留集的處理。</h5>
 <p>保留集只由獨立的 agent（沒參與實作的 LLM session）、只在推 tag
-前量，只回摘要統計；每一份 executor 的 brief 都禁止讀保留集的檔 <span
-class="citation" data-cites="evalreadme">(<a href="#ref-evalreadme"
-role="doc-biblioref">Tsai 2026b</a>)</span>。</p>
+前量，只回摘要統計；每一份 executor 的 brief 都禁止讀保留集的檔 <span class="citation">[<a href="#ref-evalreadme">48</a>]</span>。</p>
 </section>
 </section>
 <section id="references">
@@ -2305,26 +2148,26 @@ role="doc-biblioref">Tsai 2026b</a>)</span>。</p>
 <div id="refs" class="references csl-bib-body hanging-indent"
 role="list">
 <div id="ref-ocime" class="csl-entry" role="listitem">
-<span class="nocase">0c-biggo</span>. 2026. <em>0c-Ime (AGPL-3.0; Model
+<span class="csl-num">[1]</span> 0c-biggo. 2026. <em>0c-Ime (AGPL-3.0; Model
 Weights MIT)</em>. <a
-href="https://github.com/0c-biggo/0c-ime">https://github.com/0c-biggo/0c-ime</a>.
+href="https://github.com/0c-biggo/0c-ime">https://github.com/0c-biggo/0c-ime</a>. <span class="csl-note">Accessed 2026-11-10</span>
 </div>
 <div id="ref-wanxiang" class="csl-entry" role="listitem">
-<span class="nocase">amzxyz</span>. 2026. <em>Rime-Wanxiang</em>. <a
-href="https://github.com/amzxyz/rime-wanxiang">https://github.com/amzxyz/rime-wanxiang</a>.
+<span class="csl-num">[2]</span> amzxyz. 2026. <em>Rime-Wanxiang</em>. <a
+href="https://github.com/amzxyz/rime-wanxiang">https://github.com/amzxyz/rime-wanxiang</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-zenzai" class="csl-entry" role="listitem">
-<span class="nocase">azooKey</span>. 2024. <em>Zenzai: Neural Kana-Kanji
+<span class="csl-num">[3]</span> azooKey. 2024. <em>Zenzai: Neural Kana-Kanji
 Conversion in <span>AzooKeyKanaKanjiConverter</span></em>. <a
 href="https://github.com/azooKey/AzooKeyKanaKanjiConverter/blob/main/Docs/zenzai.md">https://github.com/azooKey/AzooKeyKanaKanjiConverter/blob/main/Docs/zenzai.md</a>.
 </div>
 <div id="ref-ajimee" class="csl-entry" role="listitem">
-<span class="nocase">azooKey</span>. 2026.
+<span class="csl-num">[4]</span> azooKey. 2026.
 <em><span>AJIMEE-Bench</span></em>. <a
-href="https://github.com/azooKey/AJIMEE-Bench">https://github.com/azooKey/AJIMEE-Bench</a>.
+href="https://github.com/azooKey/AJIMEE-Bench">https://github.com/azooKey/AJIMEE-Bench</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-bergkirkpatrick2012" class="csl-entry" role="listitem">
-Berg-Kirkpatrick, Taylor, David Burkett, and Dan Klein. 2012. <span>“An
+<span class="csl-num">[5]</span> Berg-Kirkpatrick, Taylor, David Burkett, and Dan Klein. 2012. <span>“An
 Empirical Investigation of Statistical Significance in
 <span>NLP</span>.”</span> <em>Proceedings of the 2012 Joint Conference
 on Empirical Methods in Natural Language Processing and Computational
@@ -2332,48 +2175,48 @@ Natural Language Learning</em>, 995–1005. <a
 href="https://aclanthology.org/D12-1091/">https://aclanthology.org/D12-1091/</a>.
 </div>
 <div id="ref-blum2015" class="csl-entry" role="listitem">
-Blum, Avrim, and Moritz Hardt. 2015. <span>“The <span>L</span>adder: A
+<span class="csl-num">[6]</span> Blum, Avrim, and Moritz Hardt. 2015. <span>“The <span>L</span>adder: A
 Reliable Leaderboard for Machine Learning Competitions.”</span>
 <em>International Conference on Machine Learning</em>, Proceedings of
 machine learning research, vol. 37: 1006–14. <a
 href="https://proceedings.mlr.press/v37/blum15.html">https://proceedings.mlr.press/v37/blum15.html</a>.
 </div>
 <div id="ref-bouthillier2021" class="csl-entry" role="listitem">
-Bouthillier, Xavier, Pierre Delaunay, Mirko Bronzi, et al. 2021.
+<span class="csl-num">[7]</span> Bouthillier, Xavier, Pierre Delaunay, Mirko Bronzi, et al. 2021.
 <span>“Accounting for Variance in Machine Learning Benchmarks.”</span>
 <em>arXiv Preprint arXiv:2103.03098</em>. <a
 href="https://arxiv.org/abs/2103.03098">https://arxiv.org/abs/2103.03098</a>.
 </div>
 <div id="ref-brown1992" class="csl-entry" role="listitem">
-<span class="nocase">Brown, Peter F., Vincent J. Della Pietra, Peter V.
-deSouza, Jennifer C. Lai, and Robert L. Mercer</span>. 1992.
+<span class="csl-num">[8]</span> Brown, Peter F., Vincent J. Della Pietra, Peter V.
+deSouza, Jennifer C. Lai, and Robert L. Mercer. 1992.
 <span>“Class-Based n-Gram Models of Natural Language.”</span>
 <em>Computational Linguistics</em> 18 (4): 467–79.
 </div>
 <div id="ref-opencc" class="csl-entry" role="listitem">
-BYVoid. 2026. <em><span>OpenCC</span>: Open Chinese Convert</em>. <a
-href="https://github.com/BYVoid/OpenCC">https://github.com/BYVoid/OpenCC</a>.
+<span class="csl-num">[9]</span> BYVoid. 2026. <em><span>OpenCC</span>: Open Chinese Convert</em>. <a
+href="https://github.com/BYVoid/OpenCC">https://github.com/BYVoid/OpenCC</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-chen1999" class="csl-entry" role="listitem">
-Chen, Stanley F., and Joshua Goodman. 1999. <span>“An Empirical Study of
+<span class="csl-num">[10]</span> Chen, Stanley F., and Joshua Goodman. 1999. <span>“An Empirical Study of
 Smoothing Techniques for Language Modeling.”</span> <em>Computer Speech
 &amp; Language</em> 13 (4): 359–93. <a
 href="https://doi.org/10.1006/csla.1999.0128">https://doi.org/10.1006/csla.1999.0128</a>.
 </div>
 <div id="ref-chen2000" class="csl-entry" role="listitem">
-Chen, Zheng, and Kai-Fu Lee. 2000. <span>“A New Statistical Approach to
+<span class="csl-num">[11]</span> Chen, Zheng, and Kai-Fu Lee. 2000. <span>“A New Statistical Approach to
 <span>C</span>hinese <span>P</span>inyin Input.”</span> <em>Proceedings
 of the 38th Annual Meeting of the <span>A</span>ssociation for
 <span>C</span>omputational <span>L</span>inguistics</em>, 241–47. <a
 href="https://aclanthology.org/P00-1031/">https://aclanthology.org/P00-1031/</a>.
 </div>
 <div id="ref-dietterich1998" class="csl-entry" role="listitem">
-Dietterich, Thomas G. 1998. <span>“Approximate Statistical Tests for
+<span class="csl-num">[12]</span> Dietterich, Thomas G. 1998. <span>“Approximate Statistical Tests for
 Comparing Supervised Classification Learning Algorithms.”</span>
 <em>Neural Computation</em> 10 (7): 1895–923.
 </div>
 <div id="ref-dror2018" class="csl-entry" role="listitem">
-Dror, Rotem, Gili Baumer, Segev Shlomov, and Roi Reichart. 2018.
+<span class="csl-num">[13]</span> Dror, Rotem, Gili Baumer, Segev Shlomov, and Roi Reichart. 2018.
 <span>“The Hitchhiker<span>’</span>s Guide to Testing Statistical
 Significance in Natural Language Processing.”</span> <em>Proceedings of
 the 56th Annual Meeting of the <span>A</span>ssociation for
@@ -2382,40 +2225,40 @@ Papers)</em>, 1383–92. <a
 href="https://aclanthology.org/P18-1128/">https://aclanthology.org/P18-1128/</a>.
 </div>
 <div id="ref-dwork2015" class="csl-entry" role="listitem">
-Dwork, Cynthia, Vitaly Feldman, Moritz Hardt, Toniann Pitassi, Omer
+<span class="csl-num">[14]</span> Dwork, Cynthia, Vitaly Feldman, Moritz Hardt, Toniann Pitassi, Omer
 Reingold, and Aaron Roth. 2015. <span>“The Reusable Holdout: Preserving
 Validity in Adaptive Data Analysis.”</span> <em>Science</em> 349 (6248):
 636–38. <a
 href="https://doi.org/10.1126/science.aaa9375">https://doi.org/10.1126/science.aaa9375</a>.
 </div>
 <div id="ref-oc" class="csl-entry" role="listitem">
-Funmula / BigGo. 2026. <em>0c Zhuyin Input Method: Character-Selection
+<span class="csl-num">[15]</span> Funmula / BigGo. 2026. <em>0c Zhuyin Input Method: Character-Selection
 Technology Page and the <span>MIT</span>-Licensed 0c-Sequence-D512
 Model</em>. <a
-href="https://0c.biggo.com/technology/">https://0c.biggo.com/technology/</a>.
+href="https://0c.biggo.com/technology/">https://0c.biggo.com/technology/</a>. <span class="csl-note">Accessed 2026-11-10</span>
 </div>
 <div id="ref-gao2002" class="csl-entry" role="listitem">
-Gao, Jianfeng, Joshua Goodman, Mingjing Li, and Kai-Fu Lee. 2002.
+<span class="csl-num">[16]</span> Gao, Jianfeng, Joshua Goodman, Mingjing Li, and Kai-Fu Lee. 2002.
 <span>“Toward a Unified Approach to Statistical Language Modeling for
 <span>C</span>hinese.”</span> <em>ACM Transactions on Asian Language
 Information Processing</em> 1 (1): 3–33. <a
 href="https://doi.org/10.1145/595576.595578">https://doi.org/10.1145/595576.595578</a>.
 </div>
 <div id="ref-geifman2017" class="csl-entry" role="listitem">
-Geifman, Yonatan, and Ran El-Yaniv. 2017. <span>“Selective
+<span class="csl-num">[17]</span> Geifman, Yonatan, and Ran El-Yaniv. 2017. <span>“Selective
 Classification for Deep Neural Networks.”</span> <em>Advances in Neural
 Information Processing Systems 30</em>. <a
 href="https://arxiv.org/abs/1705.08500">https://arxiv.org/abs/1705.08500</a>.
 </div>
 <div id="ref-guo2017" class="csl-entry" role="listitem">
-Guo, Chuan, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. 2017.
+<span class="csl-num">[18]</span> Guo, Chuan, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. 2017.
 <span>“On Calibration of Modern Neural Networks.”</span> <em>Proceedings
 of the 34th International Conference on Machine Learning</em>, 1321–30.
 <a
 href="https://arxiv.org/abs/1706.04599">https://arxiv.org/abs/1706.04599</a>.
 </div>
 <div id="ref-hellsten2017" class="csl-entry" role="listitem">
-Hellsten, Lars, Brian Roark, Prasoon Goyal, et al. 2017.
+<span class="csl-num">[19]</span> Hellsten, Lars, Brian Roark, Prasoon Goyal, et al. 2017.
 <span>“Transliterated Mobile Keyboard Input via Weighted Finite-State
 Transducers.”</span> <em>Proceedings of the 13th International
 Conference on Finite State Methods and Natural Language Processing
@@ -2423,7 +2266,7 @@ Conference on Finite State Methods and Natural Language Processing
 href="https://aclanthology.org/W17-4002/">https://aclanthology.org/W17-4002/</a>.
 </div>
 <div id="ref-huang2018moon" class="csl-entry" role="listitem">
-Huang, Yafang, Zuchao Li, Zhuosheng Zhang, and Hai Zhao. 2018.
+<span class="csl-num">[20]</span> Huang, Yafang, Zuchao Li, Zhuosheng Zhang, and Hai Zhao. 2018.
 <span>“Moon <span>IME</span>: Neural-Based <span>C</span>hinese
 <span>P</span>inyin Aided Input Method with Customizable
 Association.”</span> <em>Proceedings of <span>ACL</span> 2018, System
@@ -2431,14 +2274,14 @@ Demonstrations</em>, 140–45. <a
 href="https://aclanthology.org/P18-4024/">https://aclanthology.org/P18-4024/</a>.
 </div>
 <div id="ref-jia2013kyss" class="csl-entry" role="listitem">
-Jia, Zhongye, and Hai Zhao. 2013. <span>“<span>KySS</span> 1.0: A
+<span class="csl-num">[21]</span> Jia, Zhongye, and Hai Zhao. 2013. <span>“<span>KySS</span> 1.0: A
 Framework for Automatic Evaluation of <span>C</span>hinese Input Method
 Engines.”</span> <em>Proceedings of the Sixth International Joint
 Conference on Natural Language Processing</em>, 1195–201. <a
 href="https://aclanthology.org/I13-1170/">https://aclanthology.org/I13-1170/</a>.
 </div>
 <div id="ref-jia2014" class="csl-entry" role="listitem">
-Jia, Zhongye, and Hai Zhao. 2014. <span>“A Joint Graph Model for
+<span class="csl-num">[22]</span> Jia, Zhongye, and Hai Zhao. 2014. <span>“A Joint Graph Model for
 <span>P</span>inyin-to-<span>C</span>hinese Conversion with Typo
 Correction.”</span> <em>Proceedings of the 52nd Annual Meeting of the
 <span>A</span>ssociation for <span>C</span>omputational
@@ -2446,7 +2289,7 @@ Correction.”</span> <em>Proceedings of the 52nd Annual Meeting of the
 href="https://aclanthology.org/P14-1142/">https://aclanthology.org/P14-1142/</a>.
 </div>
 <div id="ref-jiang2011" class="csl-entry" role="listitem">
-Jiang, Mike Tian-Jian, Cheng-Wei Lee, Chad Liu, Yung-Chun Chang, and
+<span class="csl-num">[23]</span> Jiang, Mike Tian-Jian, Cheng-Wei Lee, Chad Liu, Yung-Chun Chang, and
 Wen-Lian Hsu. 2011. <span>“Robustness Analysis of Adaptive
 <span>C</span>hinese Input Methods.”</span> <em>Proceedings of the
 Workshop on Advances in Text Input Methods (<span>WTIM</span>
@@ -2454,19 +2297,19 @@ Workshop on Advances in Text Input Methods (<span>WTIM</span>
 href="https://aclanthology.org/W11-3509/">https://aclanthology.org/W11-3509/</a>.
 </div>
 <div id="ref-kneser1995" class="csl-entry" role="listitem">
-Kneser, Reinhard, and Hermann Ney. 1995. <span>“Improved Backing-off for
+<span class="csl-num">[24]</span> Kneser, Reinhard, and Hermann Ney. 1995. <span>“Improved Backing-off for
 <span>M</span>-Gram Language Modeling.”</span> <em>Proceedings of the
 IEEE International Conference on Acoustics, Speech, and Signal
 Processing (ICASSP)</em>, 181–84.
 </div>
 <div id="ref-koehn2004" class="csl-entry" role="listitem">
-Koehn, Philipp. 2004. <span>“Statistical Significance Tests for Machine
+<span class="csl-num">[25]</span> Koehn, Philipp. 2004. <span>“Statistical Significance Tests for Machine
 Translation Evaluation.”</span> <em>Proceedings of the 2004 Conference
 on Empirical Methods in Natural Language Processing (EMNLP)</em>,
 388–95.
 </div>
 <div id="ref-kudo2011" class="csl-entry" role="listitem">
-Kudo, Taku, Toshiyuki Hanaoka, Jun Mukai, Yusuke Tabata, and Hiroyuki
+<span class="csl-num">[26]</span> Kudo, Taku, Toshiyuki Hanaoka, Jun Mukai, Yusuke Tabata, and Hiroyuki
 Komatsu. 2011. <span>“Efficient Dictionary and Language Model
 Compression for Input Method Editors.”</span> <em>Proceedings of the
 Workshop on Advances in Text Input Methods (<span>WTIM</span>
@@ -2474,79 +2317,71 @@ Workshop on Advances in Text Input Methods (<span>WTIM</span>
 href="https://aclanthology.org/W11-3503/">https://aclanthology.org/W11-3503/</a>.
 </div>
 <div id="ref-kuhn1990" class="csl-entry" role="listitem">
-Kuhn, Roland, and Renato De Mori. 1990. <span>“A Cache-Based Natural
+<span class="csl-num">[27]</span> Kuhn, Roland, and Renato De Mori. 1990. <span>“A Cache-Based Natural
 Language Model for Speech Recognition.”</span> <em>IEEE Transactions on
 Pattern Analysis and Machine Intelligence</em> 12 (6): 570–83.
 </div>
 <div id="ref-witogram" class="csl-entry" role="listitem">
-<span class="nocase">levelel</span>. 2026. <em>Librime-Witogram</em>. <a
-href="https://github.com/levelel/librime-witogram">https://github.com/levelel/librime-witogram</a>.
+<span class="csl-num">[28]</span> levelel. 2026. <em>Librime-Witogram</em>. <a
+href="https://github.com/levelel/librime-witogram">https://github.com/levelel/librime-witogram</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-lison2016" class="csl-entry" role="listitem">
-Lison, Pierre, and Jörg Tiedemann. 2016.
+<span class="csl-num">[29]</span> Lison, Pierre, and Jörg Tiedemann. 2016.
 <span>“<span>OpenSubtitles2016</span>: Extracting Large Parallel Corpora
 from Movie and <span>TV</span> Subtitles.”</span> <em>Proceedings of the
 10th International Conference on Language Resources and Evaluation (LREC
 2016)</em>, 923–29.
 </div>
 <div id="ref-martin1998" class="csl-entry" role="listitem">
-Martin, Sven, Jörg Liermann, and Hermann Ney. 1998. <span>“Algorithms
+<span class="csl-num">[30]</span> Martin, Sven, Jörg Liermann, and Hermann Ney. 1998. <span>“Algorithms
 for Bigram and Trigram Word Clustering.”</span> <em>Speech
 Communication</em> 24 (1): 19–37. <a
 href="https://doi.org/10.1016/S0167-6393(97)00062-9">https://doi.org/10.1016/S0167-6393(97)00062-9</a>.
 </div>
 <div id="ref-reranker4m" class="csl-entry" role="listitem">
-<span class="nocase">metasequoiaime</span>. 2026.
+<span class="csl-num">[31]</span> metasequoiaime. 2026.
 <em>Pinyin-Ime-Reranker-4M (Model Card)</em>. <a
-href="https://huggingface.co/metasequoiaime/pinyin-ime-reranker-4M">https://huggingface.co/metasequoiaime/pinyin-ime-reranker-4M</a>.
+href="https://huggingface.co/metasequoiaime/pinyin-ime-reranker-4M">https://huggingface.co/metasequoiaime/pinyin-ime-reranker-4M</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-milanifard2016" class="csl-entry" role="listitem">
-Milani Fard, Mahdi, Quentin Cormier, Kevin Canini, and Maya Gupta. 2016.
+<span class="csl-num">[32]</span> Milani Fard, Mahdi, Quentin Cormier, Kevin Canini, and Maya Gupta. 2016.
 <span>“Launch and Iterate: Reducing Prediction Churn.”</span> In
 <em>Advances in Neural Information Processing Systems</em>, edited by D.
 Lee, M. Sugiyama, U. Luxburg, I. Guyon, and R. Garnett, vol. 29. Curran
 Associates, Inc. <a
 href="https://proceedings.neurips.cc/paper_files/paper/2016/file/dc5c768b5dc76a084531934b34601977-Paper.pdf">https://proceedings.neurips.cc/paper_files/paper/2016/file/dc5c768b5dc76a084531934b34601977-Paper.pdf</a>.
 </div>
-<div id="ref-vanmiltenburg2021" class="csl-entry" role="listitem">
-Miltenburg, Emiel van, Chris van der Lee, and Emiel Krahmer. 2021.
-<span>“Preregistering <span>NLP</span> Research.”</span> <em>Proceedings
-of the 2021 Conference of the <span>N</span>orth <span>A</span>merican
-Chapter of the <span>A</span>ssociation for <span>C</span>omputational
-<span>L</span>inguistics: Human Language Technologies</em>, 613–23. <a
-href="https://aclanthology.org/2021.naacl-main.51/">https://aclanthology.org/2021.naacl-main.51/</a>.
-</div>
 <div id="ref-moore2010" class="csl-entry" role="listitem">
-Moore, Robert C., and William Lewis. 2010. <span>“Intelligent Selection
+<span class="csl-num">[33]</span> Moore, Robert C., and William Lewis. 2010. <span>“Intelligent Selection
 of Language Model Training Data.”</span> <em>Proceedings of the 48th
 Annual Meeting of the Association for Computational Linguistics (Short
 Papers)</em>, 220–24.
 </div>
 <div id="ref-mozannar2020" class="csl-entry" role="listitem">
-Mozannar, Hussein, and David Sontag. 2020. <span>“Consistent Estimators
+<span class="csl-num">[34]</span> Mozannar, Hussein, and David Sontag. 2020. <span>“Consistent Estimators
 for Learning to Defer to an Expert.”</span> <em>Proceedings of the 37th
 International Conference on Machine Learning</em>, 7076–87. <a
 href="https://arxiv.org/abs/2006.01862">https://arxiv.org/abs/2006.01862</a>.
 </div>
 <div id="ref-shanjie" class="csl-entry" role="listitem">
-Nanako0129. 2026. <em>善解 Shanjie: An Open-Source macOS Zhuyin Input
+<span class="csl-num">[35]</span> Nanako0129. 2026. <em>善解 Shanjie: An Open-Source macOS Zhuyin Input
 Method</em>. <a
 href="https://github.com/Nanako0129/shanjie">https://github.com/Nanako0129/shanjie</a>.
 </div>
 <div id="ref-ney1994" class="csl-entry" role="listitem">
-Ney, Hermann, Ute Essen, and Reinhard Kneser. 1994. <span>“On
+<span class="csl-num">[36]</span> Ney, Hermann, Ute Essen, and Reinhard Kneser. 1994. <span>“On
 Structuring Probabilistic Dependences in Stochastic Language
 Modelling.”</span> <em>Computer Speech &amp; Language</em> 8 (1): 1–38.
 <a
 href="https://doi.org/10.1006/csla.1994.1001">https://doi.org/10.1006/csla.1994.1001</a>.
 </div>
 <div id="ref-mcbopomofo" class="csl-entry" role="listitem">
-OpenVanilla. 2026. <em><span>McBopomofo</span>: Zhuyin Input Method for
+<span class="csl-num">[37]</span> OpenVanilla. 2026. <em><span>McBopomofo</span>: Zhuyin Input Method for
 macOS (<span>MIT</span>; Phrase Data from Libtabe)</em>. <a
-href="https://github.com/openvanilla/McBopomofo">https://github.com/openvanilla/McBopomofo</a>.
+href="https://github.com/openvanilla/McBopomofo">https://github.com/openvanilla/McBopomofo</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-recht2019" class="csl-entry" role="listitem">
-Recht, Benjamin, Rebecca Roelofs, Ludwig Schmidt, and Vaishaal Shankar.
+<span class="csl-num">[38]</span> Recht, Benjamin, Rebecca Roelofs, Ludwig Schmidt, and Vaishaal Shankar.
 2019. <span>“Do <span>ImageNet</span> Classifiers Generalize to
 <span>ImageNet</span>?”</span> <em>International Conference on Machine
 Learning</em>, Proceedings of machine learning research, vol. 97:
@@ -2554,7 +2389,7 @@ Learning</em>, Proceedings of machine learning research, vol. 97:
 href="https://proceedings.mlr.press/v97/recht19a.html">https://proceedings.mlr.press/v97/recht19a.html</a>.
 </div>
 <div id="ref-reimers2017" class="csl-entry" role="listitem">
-Reimers, Nils, and Iryna Gurevych. 2017. <span>“Reporting Score
+<span class="csl-num">[39]</span> Reimers, Nils, and Iryna Gurevych. 2017. <span>“Reporting Score
 Distributions Makes a Difference: Performance Study of
 <span>LSTM</span>-Networks for Sequence Tagging.”</span> <em>Proceedings
 of the 2017 Conference on Empirical Methods in Natural Language
@@ -2562,12 +2397,12 @@ Processing</em>, 338–48. <a
 href="https://aclanthology.org/D17-1035/">https://aclanthology.org/D17-1035/</a>.
 </div>
 <div id="ref-rime" class="csl-entry" role="listitem">
-RIME. 2026. <em>Librime: <span>R</span>ime Input Method Engine, the Core
+<span class="csl-num">[40]</span> RIME. 2026. <em>Librime: <span>R</span>ime Input Method Engine, the Core
 Library</em>. <a
-href="https://github.com/rime/librime">https://github.com/rime/librime</a>.
+href="https://github.com/rime/librime">https://github.com/rime/librime</a>. <span class="csl-note">Accessed 2026-11-10</span>
 </div>
 <div id="ref-suzuki2005" class="csl-entry" role="listitem">
-Suzuki, Hisami, and Jianfeng Gao. 2005. <span>“A Comparative Study on
+<span class="csl-num">[41]</span> Suzuki, Hisami, and Jianfeng Gao. 2005. <span>“A Comparative Study on
 Language Model Adaptation Techniques Using New Evaluation
 Metrics.”</span> <em>Proceedings of Human Language Technology Conference
 and Conference on Empirical Methods in Natural Language Processing</em>,
@@ -2575,7 +2410,7 @@ and Conference on Empirical Methods in Natural Language Processing</em>,
 href="https://aclanthology.org/H05-1034/">https://aclanthology.org/H05-1034/</a>.
 </div>
 <div id="ref-tan2022pinyingpt" class="csl-entry" role="listitem">
-Tan, Minghuan, Yong Dai, Duyu Tang, et al. 2022. <span>“Exploring and
+<span class="csl-num">[42]</span> Tan, Minghuan, Yong Dai, Duyu Tang, et al. 2022. <span>“Exploring and
 Adapting <span>C</span>hinese <span>GPT</span> to <span>P</span>inyin
 Input Method.”</span> <em>Proceedings of the 60th Annual Meeting of the
 Association for Computational Linguistics (Volume 1: Long Papers)</em>,
@@ -2583,69 +2418,77 @@ Association for Computational Linguistics (Volume 1: Long Papers)</em>,
 href="https://aclanthology.org/2022.acl-long.133/">https://aclanthology.org/2022.acl-long.133/</a>.
 </div>
 <div id="ref-teh2006" class="csl-entry" role="listitem">
-Teh, Yee Whye. 2006. <span>“A Hierarchical <span>B</span>ayesian
+<span class="csl-num">[43]</span> Teh, Yee Whye. 2006. <span>“A Hierarchical <span>B</span>ayesian
 Language Model Based on <span>P</span>itman-<span>Y</span>or
 Processes.”</span> <em>Proceedings of the 21st International Conference
 on Computational Linguistics and 44th Annual Meeting of the ACL</em>,
 985–92.
 </div>
 <div id="ref-libchewing" class="csl-entry" role="listitem">
-The Chewing Project. 2026. <em>Libchewing: The Intelligent Phonetic
+<span class="csl-num">[44]</span> The Chewing Project. 2026. <em>Libchewing: The Intelligent Phonetic
 Input Method Library</em>. <a
-href="https://codeberg.org/chewing/libchewing">https://codeberg.org/chewing/libchewing</a>.
+href="https://codeberg.org/chewing/libchewing">https://codeberg.org/chewing/libchewing</a>. <span class="csl-note">Accessed 2026-11-10</span>
 </div>
 <div id="ref-tokunaga2011" class="csl-entry" role="listitem">
-Tokunaga, Hiroyuki, Daisuke Okanohara, and Shinsuke Mori. 2011.
+<span class="csl-num">[45]</span> Tokunaga, Hiroyuki, Daisuke Okanohara, and Shinsuke Mori. 2011.
 <span>“Discriminative Method for <span>J</span>apanese Kana-Kanji Input
 Method.”</span> <em>Proceedings of the Workshop on Advances in Text
 Input Methods (WTIM 2011)</em>, 10–18. <a
 href="https://aclanthology.org/W11-3502/">https://aclanthology.org/W11-3502/</a>.
 </div>
+<div id="ref-ablation" class="csl-entry" role="listitem">
+<span class="csl-num">[46]</span> Tsai, Nanako. 2026e. <em>Shanjie V0.7.0 Leave-One-out Ablation: Results
+and the Offline Recomputation of the Two Gate Rows
+(<code>eval/ablation/v0.7.0/</code>)</em>. <a
+href="https://github.com/Nanako0129/shanjie/tree/e88f4a364d414780678999ee471096b40bb6212c/eval/ablation/v0.7.0">https://github.com/Nanako0129/shanjie/tree/e88f4a364d414780678999ee471096b40bb6212c/eval/ablation/v0.7.0</a>. <span class="csl-note">As of commit e88f4a36; the directory was added after the v0.7.0 tag</span>
+</div>
 <div id="ref-benchmark" class="csl-entry" role="listitem">
-Tsai, Nanako. 2026a. <em>Shanjie Cross-Version Benchmark: Result Files
+<span class="csl-num">[47]</span> Tsai, Nanako. 2026a. <em>Shanjie Cross-Version Benchmark: Result Files
 (<code>eval/bench/</code>)</em>. <a
-href="https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/eval/bench">https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/eval/bench</a>.
+href="https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/eval/bench">https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/eval/bench</a>. <span class="csl-note">As of commit 56979b2e (the v0.7.0 tag). The public sets are shown at <a href="https://shanjie.nyanako.com/benchmark">https://shanjie.nyanako.com/benchmark</a></span>
 </div>
 <div id="ref-evalreadme" class="csl-entry" role="listitem">
-Tsai, Nanako. 2026b. <em>Shanjie Evaluation Sets: Roles, Hashes and
+<span class="csl-num">[48]</span> Tsai, Nanako. 2026b. <em>Shanjie Evaluation Sets: Roles, Hashes and
 Hold-out Usage Record (<code>eval/README.md</code>)</em>. <a
 href="https://github.com/Nanako0129/shanjie/blob/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/eval/README.md">https://github.com/Nanako0129/shanjie/blob/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/eval/README.md</a>.
 </div>
+<div id="ref-excerptzh" class="csl-entry" role="listitem">
+<span class="csl-num">[49]</span> Tsai, Nanako. 2026f. 善解研究摘錄：論文引用的開發紀錄段落. <a
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md">https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md</a>. <span class="csl-note">以 commit 5a33e0ad（2026-11-11；在 v0.7.0 的 tag 之後，補了計畫的四段）為準。正文裡 §rl-012 這種形式的引用是這份檔案裡的錨點</span>
+</div>
 <div id="ref-releases" class="csl-entry" role="listitem">
-Tsai, Nanako. 2026c. <em>Shanjie Release Notes for the Input Method and
+<span class="csl-num">[50]</span> Tsai, Nanako. 2026c. <em>Shanjie Release Notes for the Input Method and
 the Model Files (<code>docs/releases/</code>)</em>. <a
 href="https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/docs/releases">https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/docs/releases</a>.
 </div>
 <div id="ref-specs" class="csl-entry" role="listitem">
-Tsai, Nanako. 2026d. <em>Shanjie Specifications
+<span class="csl-num">[51]</span> Tsai, Nanako. 2026d. <em>Shanjie Specifications
 (<code>docs/spec/</code>): Decoder, Models, Semantic Re-Rank, Learning,
 Lexicon and Packs, Evaluation, Privacy</em>. <a
 href="https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/docs/spec">https://github.com/Nanako0129/shanjie/tree/56979b2e2f6c7fd7a7288c38ed772d26f297e0e4/docs/spec</a>.
 </div>
-<div id="ref-ablation" class="csl-entry" role="listitem">
-Tsai, Nanako. 2026e. <em>Shanjie V0.7.0 Leave-One-out Ablation: Results
-and the Offline Recomputation of the Two Gate Rows
-(<code>eval/ablation/v0.7.0/</code>)</em>. <a
-href="https://github.com/Nanako0129/shanjie/tree/e88f4a364d414780678999ee471096b40bb6212c/eval/ablation/v0.7.0">https://github.com/Nanako0129/shanjie/tree/e88f4a364d414780678999ee471096b40bb6212c/eval/ablation/v0.7.0</a>.
-</div>
-<div id="ref-excerptzh" class="csl-entry" role="listitem">
-Tsai, Nanako. 2026f. 善解研究摘錄：論文引用的開發紀錄段落. <a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md">https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md</a>.
+<div id="ref-vanmiltenburg2021" class="csl-entry" role="listitem">
+<span class="csl-num">[52]</span> Miltenburg, Emiel van, Chris van der Lee, and Emiel Krahmer. 2021.
+<span>“Preregistering <span>NLP</span> Research.”</span> <em>Proceedings
+of the 2021 Conference of the <span>N</span>orth <span>A</span>merican
+Chapter of the <span>A</span>ssociation for <span>C</span>omputational
+<span>L</span>inguistics: Human Language Technologies</em>, 613–23. <a
+href="https://aclanthology.org/2021.naacl-main.51/">https://aclanthology.org/2021.naacl-main.51/</a>.
 </div>
 <div id="ref-weizhuyin" class="csl-entry" role="listitem">
-<span class="nocase">vChewing</span>. 2026. <em><span
+<span class="csl-num">[53]</span> vChewing. 2026. <em><span
 class="nocase">vChewing</span> (唯音) Input Method</em>. <a
-href="https://github.com/vChewing/vChewing-macOS">https://github.com/vChewing/vChewing-macOS</a>.
+href="https://github.com/vChewing/vChewing-macOS">https://github.com/vChewing/vChewing-macOS</a>. <span class="csl-note">Accessed 2026-11-11</span>
 </div>
 <div id="ref-xiao2022pert" class="csl-entry" role="listitem">
-Xiao, Jinghui, Qun Liu, Xin Jiang, Yuanfeng Xiong, Haiteng Wu, and Zhe
+<span class="csl-num">[54]</span> Xiao, Jinghui, Qun Liu, Xin Jiang, Yuanfeng Xiong, Haiteng Wu, and Zhe
 Zhang. 2022. <span>“<span>PERT</span>: A New Solution to
 <span>P</span>inyin to Character Conversion Task.”</span> <em>arXiv
 Preprint arXiv:2205.11737</em>. <a
 href="https://arxiv.org/abs/2205.11737">https://arxiv.org/abs/2205.11737</a>.
 </div>
 <div id="ref-xie2021" class="csl-entry" role="listitem">
-Xie, Yuqing, Yi-An Lai, Yuanjun Xiong, Yi Zhang, and Stefano Soatto.
+<span class="csl-num">[55]</span> Xie, Yuqing, Yi-An Lai, Yuanjun Xiong, Yi Zhang, and Stefano Soatto.
 2021. <span>“Regression Bugs Are in Your Model! Measuring, Reducing and
 Analyzing Regressions in <span>NLP</span> Model Updates.”</span>
 <em>Proceedings of the 59th Annual Meeting of the
@@ -2655,20 +2498,20 @@ Natural Language Processing (Volume 1: Long Papers)</em>, 6589–602. <a
 href="https://aclanthology.org/2021.acl-long.515/">https://aclanthology.org/2021.acl-long.515/</a>.
 </div>
 <div id="ref-yan2021" class="csl-entry" role="listitem">
-Yan, Sijie, Yuanjun Xiong, Kaustav Kundu, et al. 2021.
+<span class="csl-num">[56]</span> Yan, Sijie, Yuanjun Xiong, Kaustav Kundu, et al. 2021.
 <span>“Positive-Congruent Training: Towards Regression-Free Model
 Updates.”</span> <em>Proceedings of the IEEE/CVF Conference on Computer
 Vision and Pattern Recognition (CVPR)</em>, 14299–308.
 </div>
 <div id="ref-zhang2014kn" class="csl-entry" role="listitem">
-Zhang, Hui, and David Chiang. 2014. <span>“Kneser-<span>N</span>ey
+<span class="csl-num">[57]</span> Zhang, Hui, and David Chiang. 2014. <span>“Kneser-<span>N</span>ey
 Smoothing on Expected Counts.”</span> <em>Proceedings of the 52nd Annual
 Meeting of the Association for Computational Linguistics</em>, 765–74.
 <a
 href="https://aclanthology.org/P14-1072/">https://aclanthology.org/P14-1072/</a>.
 </div>
 <div id="ref-zhang2019open" class="csl-entry" role="listitem">
-Zhang, Zhuosheng, Yafang Huang, and Hai Zhao. 2019. <span>“Open
+<span class="csl-num">[58]</span> Zhang, Zhuosheng, Yafang Huang, and Hai Zhao. 2019. <span>“Open
 Vocabulary Learning for Neural <span>C</span>hinese <span>P</span>inyin
 <span>IME</span>.”</span> <em>Proceedings of the 57th Annual Meeting of
 the <span>A</span>ssociation for <span>C</span>omputational
@@ -2690,9 +2533,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 列）；名單層（台灣的實況主、頻道、店家、企業、台灣以外的中文圈人名）；兩輪收的網路用語（507
 與 910 詞）；以及三個預設開的可選詞包：動漫與遊戲詞包（Wikidata 來的
 44,552 詞）、資訊＋AI 詞包（國教院名詞、維基轉換組與手寫清單來的 1,016
-詞），以及 v0.7.0 起的美妝與保養詞包（539 詞）<span class="citation"
-data-cites="releases">(<a href="#ref-releases" role="doc-biblioref">Tsai
-2026c</a>)</span>。疊加層的詞用上限先驗計分，分數不會高過它的語料頻率（式
+詞），以及 v0.7.0 起的美妝與保養詞包（539 詞）<span class="citation">[<a href="#ref-releases">50</a>]</span>。疊加層的詞用上限先驗計分，分數不會高過它的語料頻率（式
 <a href="#eq:cap">(7)</a>）。詞包建置工具標成強制的名字不走通語的統計，才不會被常用字拆掉（第
 <a href="#sec:lexprior">A.3</a> 節）。</p>
 </section>
@@ -2939,9 +2780,7 @@ pb_{\mathrm{KN}}(w)=\beta_p\,\frac{N&#39;(w)}{\sum_{w&#39;&#39;}N&#39;(w&#39;&#3
 時對
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>N</mi><mi>θ</mi></msub><annotation encoding="application/x-tex">N_\theta</annotation></semantics></math>
 單調。計數是四捨五入的期望次數，所以這是接續計數的「門檻＋整數」近似，不是
-<span class="citation" data-cites="zhang2014kn">(<a
-href="#ref-zhang2014kn" role="doc-biblioref">Zhang and Chiang
-2014</a>)</span> 的分數次數版本；折扣
+<span class="citation">[<a href="#ref-zhang2014kn">57</a>]</span> 的分數次數版本；折扣
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>D</mi><annotation encoding="application/x-tex">D</annotation></semantics></math>
 也不重估（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-017">§rl-017</a>）。</p>
@@ -3067,9 +2906,7 @@ v0.6.1 量到的那個形式（附錄 <a href="#sec:components">C</a>）。</p>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>ξ</mi><annotation encoding="application/x-tex">\xi</annotation></semantics></math>，其他維持
 0。出貨詞庫裡有 132
 對（讀音，字）因此分出高低，例如詞庫給同分的「莎」的兩個讀音；在公開的開發集、打字測驗與錯字回報（兩種設定）上，它只改了一列，是改對
-<span class="citation" data-cites="specs releases">(<a href="#ref-specs"
-role="doc-biblioref">Tsai 2026d</a>, <a href="#ref-releases"
-role="doc-biblioref">2026c</a>)</span>。</p>
+<span class="citation">[<a href="#ref-releases">50</a>, <a href="#ref-specs">51</a>]</span>。</p>
 </section>
 <section id="sec:learnformula" class="level3">
 <h3><span class="secno">A.8</span> 改選學習</h3>
@@ -3284,10 +3121,7 @@ style="text-align: left;">wikijudge-<math display="inline" xmlns="http://www.w3.
 <section id="基準與前幾週" class="level3">
 <h3><span class="secno">C.1</span> 基準與前幾週</h3>
 <p>用小麥基底詞庫與 unigram 解碼器，302 列開發集 51.7% 對（寬鬆
-52.6%；oracle@32 96.7%），原本的 227 列保留集 41.4%（44.5%；95.6%）<span
-class="citation" data-cites="evalreadme">(<a href="#ref-evalreadme"
-role="doc-biblioref">Tsai
-2026b</a>)</span>。加上維基／維基詞典疊加層，整體 oracle@64 從 96.9%
+52.6%；oracle@32 96.7%），原本的 227 列保留集 41.4%（44.5%；95.6%）<span class="citation">[<a href="#ref-evalreadme">48</a>]</span>。加上維基／維基詞典疊加層，整體 oracle@64 從 96.9%
 升到 97.8%。第一個 bigram（維基 50,000
 篇、<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>λ</mi><mo>=</mo><mn>0.5</mn></mrow><annotation encoding="application/x-tex">\lambda=0.5</annotation></semantics></math>、口語語料
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>×</mi><mn>5</mn></mrow><annotation encoding="application/x-tex">\times5</annotation></semantics></math>）把開發集從
@@ -3376,9 +3210,7 @@ v0.7.0 是
 39<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>27，出貨組合的定案判讀在這個檢查集上是聊天
 3/14、書面 4/10，三檔都是負的（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-059">§rl-059</a>、<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-068">§rl-068</a>；<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>）。v0.7.0
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-068">§rl-068</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）。v0.7.0
 在維基調參集上升：聊天
 2160<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>2186（+46/<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>−</mi><annotation encoding="application/x-tex">-</annotation></semantics></math>20，<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>0.0019</mn></mrow><annotation encoding="application/x-tex">p=0.0019</annotation></semantics></math>）、書面
 2243<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>2303（+97/<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>−</mi><annotation encoding="application/x-tex">-</annotation></semantics></math>37，<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>p</mi><mo>=</mo><mn>2.2</mn><mo>×</mo><msup><mn>10</mn><mrow><mi>−</mi><mn>7</mn></mrow></msup></mrow><annotation encoding="application/x-tex">p=2.2\times10^{-7}</annotation></semantics></math>）；dev302
@@ -3674,9 +3506,7 @@ bigram，重對應三元表、重分群、重算常談、重訓重排器，分�
 推文把在／再的口語寫法帶進同一個 bigram，沒有另外驗證；<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-059">§rl-059</a>）。這六列以記錄在案的第
 2 條例外出貨（<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-061">§rl-061</a>；<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>）。門檻 3、4、5、8 各剩
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-061">§rl-061</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）。門檻 3、4、5、8 各剩
 6、6、5、6 列改壞，重選的書面融合格 6–8 列（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-060">§rl-060</a>）。新來源用
 Moore–Lewis 挑一半（ML6）比全收（B6）差：discordtune
@@ -3834,10 +3664,7 @@ FUSE-1 的確認作廢：錯字回報第 179
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-098">§rl-098</a>–<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-115">§rl-115</a>）。接著
 v0.7.0 在遮罩裡加了重排保護詞表（第 <a href="#sec:srformula">3.5</a>
-節），重排模型不能換掉「權限」與另外四個常用詞 <span class="citation"
-data-cites="releases specs">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>, <a href="#ref-specs"
-role="doc-biblioref">2026d</a>)</span>。</p>
+節），重排模型不能換掉「權限」與另外四個常用詞 <span class="citation">[<a href="#ref-releases">50</a>, <a href="#ref-specs">51</a>]</span>。</p>
 </section>
 <section id="sec:sinit" class="level5">
 <h5>句首單字的改選學習（SINIT）。</h5>
@@ -4184,15 +4011,11 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 <ul>
 <li><p>依按鍵順序把不可能是注音的鍵序當英文，預設開出貨，同一天因快打誤觸太多（一個音節後面的鍵先到）退回；這條規則之後帶著「鍵序顛倒不當英文」的守門回來，兩個相關開關從
 v0.7.0 起預設關（<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-022">§me-022</a>；<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>）。</p></li>
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-022">§me-022</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）。</p></li>
 <li><p>「改選後其他字不動」在第五次審查量到「改選後繼續打字」的流程變差（整句正確
 1500<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>1438，共
 2165 句）後暫停；之後重新接回，在 v0.5.0 出貨（<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#plan-019">§plan-019</a>；<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>)</span>）。</p></li>
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#plan-019">§plan-019</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）。</p></li>
 <li><p>貝氏學習規則、全域學習層與縮寫模式仍關著。</p></li>
 </ul>
 </section>
@@ -4248,22 +4071,14 @@ v0.6.0 那一代模型是表 <a href="#tab:versions">2</a>
 bigram，跟著它建的詞類、Kneser–Ney、三元表與常談檔，以及重排模型
 SJ-SR-7-15M）；它照出貨標準的定案判讀出貨，用的是調參層、開發層與回歸層的集合，這些集合在選臂與選值時都看過，公開的紀錄裡沒有它的單次確認（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-059">§rl-059</a>–<a
-href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-068">§rl-068</a>；<span
-class="citation" data-cites="releases">(<a href="#ref-releases"
-role="doc-biblioref">Tsai
-2026c</a>)</span>）。在沒有用來選值的資料上，本文對它有的是監測用的保留集（表
+href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-068">§rl-068</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）。在沒有用來選值的資料上，本文對它有的是監測用的保留集（表
 <a href="#tab:holdout">3</a>）。(12) 表 <a href="#tab:confirm">1</a>
 列出跑過的每一次單次確認，所以其他不在表裡的出貨改動也沒有單次確認，例如：v0.7.0
 的口語項句首估法（原因見第 <a href="#sec:method">3</a>
 節開頭）、同分讀音的規則與重排保護詞表；v0.5.0
 的兩條改選與學習規則（改選後其他字不動、逐字改選學成新詞；<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#plan-019">§plan-019</a>；附錄
-<a href="#sec:learnformula">A.8</a>；<span class="citation"
-data-cites="releases">(<a href="#ref-releases" role="doc-biblioref">Tsai
-2026c</a>)</span>）；組字行為（v0.6.0 加長的組字區；<span
-class="citation" data-cites="releases specs">(<a href="#ref-releases"
-role="doc-biblioref">Tsai 2026c</a>, <a href="#ref-specs"
-role="doc-biblioref">2026d</a>)</span>）；以及詞庫各層、詞包與輸入容錯（附錄
+<a href="#sec:learnformula">A.8</a>；<span class="citation">[<a href="#ref-releases">50</a>]</span>）；組字行為（v0.6.0 加長的組字區；<span class="citation">[<a href="#ref-releases">50</a>, <a href="#ref-specs">51</a>]</span>）；以及詞庫各層、詞包與輸入容錯（附錄
 <a href="#app:lexicon">A</a> 與附錄 <a href="#sec:components">C</a>
 最後一段），紀錄裡有數字的，量的是檢查集與已經看過的集合。</p>
 </section>
@@ -4273,9 +4088,7 @@ role="doc-biblioref">2026d</a>)</span>）；以及詞庫各層、詞包與輸入
 <p>專案第一天，用送鍵的自動化工具（<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-005">§me-005</a>、<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#me-006">§me-006</a>）把同一批句子打進三套既有輸入法：macOS
-內建注音、小麥注音（MIT，片語源自 libtabe）<span class="citation"
-data-cites="mcbopomofo">(<a href="#ref-mcbopomofo"
-role="doc-biblioref">OpenVanilla 2026</a>)</span> 與一套商業輸入法。23
+內建注音、小麥注音（MIT，片語源自 libtabe）<span class="citation">[<a href="#ref-mcbopomofo">37</a>]</span> 與一套商業輸入法。23
 句書面句子三套各錯 3、10、8 句；53 句口語句子 8、19、22 句；845
 個私人聊天子句 100、199、237 句；294 句政府新聞稿 64、85、94
 句。內建注音每一輪都最好，而且被發現會在測驗中學習：它學到的 2,647
@@ -4285,10 +4098,7 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 句書面與口語句就是表 <a href="#tab:versions">2</a> 的回歸集
 typing76，善解之後在它上面調過；294 句新聞稿 2026-10-29
 起成為訓練語料、不再是測試集。這份快照是專案的起因，不是和善解的比較，旁邊也不放善解的數字。</p>
-<p>開發紀錄裡另外看過的工具：唯音（vChewing）的中英混打 <span
-class="citation" data-cites="weizhuyin">(<a href="#ref-weizhuyin"
-role="doc-biblioref"><span class="nocase">vChewing</span>
-2026</a>)</span>；閉源的晶晶輸入法（ZingIME；小麥分支加本機微調的
+<p>開發紀錄裡另外看過的工具：唯音（vChewing）的中英混打 <span class="citation">[<a href="#ref-weizhuyin">53</a>]</span>；閉源的晶晶輸入法（ZingIME；小麥分支加本機微調的
 Qwen2.5-0.5B）；Python 研究核心
 zaoseq-bopomofo（丟掉已知詞裡沒出現過的多音字讀音，並報「改錯
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>≤</mo><mn>0.5</mn><mo>×</mo></mrow><annotation encoding="application/x-tex">\le 0.5\times</annotation></semantics></math>

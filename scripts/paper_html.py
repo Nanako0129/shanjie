@@ -2,11 +2,16 @@
 """Second half of scripts/build-paper-html.sh: turns pandoc's HTML of the paper into the reading page and checks it.
 
   python3 scripts/paper_html.py --prepare TEX OUT_TEX
-  python3 scripts/paper_html.py HTML TEX AUX PDF FIGURES_TSV FIGDIR PANDOC_LOG
+  python3 scripts/paper_html.py HTML TEX AUX PDF FIGURES_TSV FIGDIR PANDOC_LOG REFS_JSON
 
 --prepare writes the copy of the source that pandoc reads: three constructs pandoc 3 gets wrong are rewritten
 (see `prepare`). PANDOC_LOG is the stderr of `pandoc --verbose` on that copy: every command pandoc skipped must be
-one of SKIPPABLE (layout and preamble only), because a skipped command can take text with it without any warning.
+one of BARE or PREAMBLE (layout and fonts only), because a skipped command can take text with it without any warning.
+Citations follow the PDF as well: it cites by number ([35], [50, 51], sorted and compressed), and the numbers are in
+AUX (`\\bibcite`). pandoc writes author-year citations, so each is rewritten to the PDF's numbers and the reference
+list is put in that order with its numbers.
+REFS_JSON is the bibliography as CSL JSON (`pandoc refs.bib -t csljson`): pandoc's default citation style prints no
+`note` field, the PDF does, so each note is appended to its entry here.
 
 HTML is rewritten in place. pandoc numbers nothing the way LaTeX does (appendix letters, equations, tables), so
 every visible number is put here: sections, tables, figures and display equations are counted in document order,
@@ -20,17 +25,21 @@ Exits 1 when any check fails. Standard library only. `python3 scripts/paper_html
 numbering and the checks on a small synthetic paper (`make test-python` runs it).
 """
 import html
+import json
 import re
 import subprocess
 import sys
 import tempfile
 
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-# Commands pandoc may skip: they set fonts, spacing or page layout and carry no text. \begin is checked separately
-# (only a tikzpicture, which becomes an image, may be skipped).
-SKIPPABLE = set("""XeTeXlinebreaklocale XeTeXlinebreakskip appendix arxivbuild bibliographystyle centering clearpage
-    else emergencystretch endlastfoot enlargethispage fi footnotesize ifdefined maketitle newCJKfontfamily pgfplotsset
-    quad setCJKmainfont setlength simpfont small urlstyle usetikzlibrary xeCJKDeclareCharClass""".split())
+# Commands pandoc may skip. BARE ones take no argument and carry no text (spacing, font size, page layout): the
+# skipped text must be the command alone, because pandoc reports `\centering64` or `\quad{text}` when it swallows
+# what follows. PREAMBLE ones set fonts and lengths before the text starts. \begin is checked separately (only a
+# tikzpicture, which becomes an image, may be skipped).
+BARE = set("appendix centering clearpage else endlastfoot fi footnotesize maketitle quad small".split())
+PREAMBLE = set("""XeTeXlinebreaklocale XeTeXlinebreakskip arxivbuild bibliographystyle emergencystretch
+    enlargethispage ifdefined newCJKfontfamily pgfplotsset setCJKmainfont setlength simpfont urlstyle usetikzlibrary
+    xeCJKDeclareCharClass""".split())
 
 
 def prepare(tex):
@@ -46,12 +55,16 @@ def prepare(tex):
 
 
 def skipped(log):
-    """What pandoc skipped that is not in SKIPPABLE, from the stderr of `pandoc --verbose`."""
+    """What pandoc skipped that may have carried text, from the stderr of `pandoc --verbose`."""
     out = []
-    for m in re.finditer(r"(?m)^\[INFO\] Skipped '(\\([A-Za-z]+)[^\n]*)", log):
-        ok = m.group(1).startswith(r"\begin{tikzpicture}") if m.group(2) == "begin" else m.group(2) in SKIPPABLE
+    for m in re.finditer(r"(?ms)^\[INFO\] Skipped '(\\([A-Za-z]+).*?)' at ", log):
+        text, name = m.group(1), m.group(2)
+        if name == "begin":
+            ok = text.startswith(r"\begin{tikzpicture}")
+        else:
+            ok = name in PREAMBLE or (name in BARE and text.strip() == "\\" + name)
         if not ok:
-            out.append(m.group(1)[:60])
+            out.append(text[:60].replace("\n", " "))
     return out
 
 
@@ -63,6 +76,25 @@ def aux_labels(path):
         if m:
             out[m.group(1)] = m.group(2)
     return out
+
+
+def aux_bibcite(path):
+    """citation key -> the number the PDF prints for it."""
+    return {m.group(1): int(m.group(2)) for m in re.finditer(r"\\bibcite\{([^}]*)\}\{\{(\d+)\}", open(path, encoding="utf-8").read())}
+
+
+def cite_numbers(keys, numbers):
+    """natbib's `numbers,sort&compress` form of one citation: [3], [50, 51], [4–6], each number linked to its entry."""
+    ordered = sorted(keys, key=numbers.get)
+    link = lambda k: f'<a href="#ref-{k}">{numbers[k]}</a>'
+    parts, i = [], 0
+    while i < len(ordered):
+        j = i
+        while j + 1 < len(ordered) and numbers[ordered[j + 1]] == numbers[ordered[j]] + 1:
+            j += 1
+        parts.append(f"{link(ordered[i])}–{link(ordered[j])}" if j - i >= 2 else ", ".join(link(k) for k in ordered[i:j + 1]))
+        i = j + 1
+    return "[" + ", ".join(parts) + "]"
 
 
 def tex_body(path):
@@ -88,7 +120,8 @@ def tex_counts(body):
     dollars = m.count("$")
     if dollars % 2:
         sys.exit("STOP: odd number of $ in the source")
-    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered
+    cite_commands = len(re.findall(r"\\cite[tp]?\*?(?:\[[^\]]*\])*\{", body))
+    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered, cite_commands
 
 
 def crop_figure(pdf, page, box, dest):
@@ -112,6 +145,7 @@ def self_test():
     log = ""
     page = ('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n<li><a href="#app:a" id="toc-app:a">App</a></li>\n'
             '<section id="sec:one" class="level2">\n<h2>One</h2><math display="inline">a</math>'
+            '<span class="citation" data-cites="k">(<a href="#ref-k" role="doc-biblioref">K 2020</a>)</span>'
             '<math display="block"><annotation>x\\label{eq:x}</annotation></math>\n'
             '<section id="sec:sub" class="level3">\n<h3>Sub</h3>'
             '<a href="#app:a" data-reference-type="ref" data-reference="app:a">2</a>'
@@ -119,20 +153,28 @@ def self_test():
             '<a href="#tab:t" data-reference-type="ref" data-reference="tab:t">1</a>'
             '<table id="tab:t">\n<caption>c</caption></table></section></section>\n'
             '<section id="app:a" class="level2">\n<h2>App</h2>'
-            '<div id="refs"><div id="ref-k" class="csl-entry">K</div></div></section>')
+            '<div id="refs" class="references">\n<div id="ref-k" class="csl-entry" role="listitem">\nK\n</div>\n</div>\n'
+            '</section>')
     aux = "".join(f"\\newlabel{{{k}}}{{{{{v}}}{{1}}}}\n" for k, v in
                   (("sec:one", "1"), ("eq:x", "1"), ("sec:sub", "1.1"), ("tab:t", "1"), ("app:a", "A")))
+    aux += "\\bibcite{k}{{7}{2020}{{K}}{{}}}\n"
     with tempfile.TemporaryDirectory() as tmp:
         def run(aux_text):
-            for name, text in (("p.html", page), ("m.tex", tex), ("m.aux", aux_text), ("f.tsv", ""), ("log", log)):
+            for name, text in (("p.html", page), ("m.tex", tex), ("m.aux", aux_text), ("f.tsv", ""), ("log", log),
+                               ("r.json", '[{"id": "k", "note": "Seen at https://e.org/x"}, {"id": "u", "note": "n"}]')):
                 with open(f"{tmp}/{name}", "w", encoding="utf-8") as f:
                     f.write(text)
-            sys.argv[1:] = [f"{tmp}/p.html", f"{tmp}/m.tex", f"{tmp}/m.aux", "", f"{tmp}/f.tsv", tmp, f"{tmp}/log"]
+            sys.argv[1:] = [f"{tmp}/p.html", f"{tmp}/m.tex", f"{tmp}/m.aux", "", f"{tmp}/f.tsv", tmp, f"{tmp}/log",
+                            f"{tmp}/r.json"]
             main()
             return open(f"{tmp}/p.html", encoding="utf-8").read()
         out = run(aux)
         assert '<a href="#app:a">A</a><a href="#eq:x">(1)</a><a href="#tab:t">1</a>' in out, out
         assert '<span class="secno">附錄 A</span> App' in out and '<span class="secno">1.1</span> Sub' in out
+        assert '<span class="citation">[<a href="#ref-k">7</a>]</span>' in out and '<span class="csl-num">[7]</span> K' in out, out
+        nums = {"a": 3, "b": 4, "c": 5, "d": 9, "e": 10}
+        assert re.sub(r"<[^>]+>", "", cite_numbers(["d", "b", "a", "c", "e"], nums)) == "[3–5, 9, 10]"
+        assert 'K <span class="csl-note">Seen at <a href="https://e.org/x">https://e.org/x</a></span>' in out, out
         assert out.index('id="references"') < out.index('<section id="app:a"') and '表 1：' in out
         good = page
         one = "<h2>One</h2>"
@@ -146,7 +188,12 @@ def self_test():
                 ("table rows without any text", aux, good.replace("</table>", "<tr><td></td></tr></table>"), ""),
                 ("tables (numbered", aux, good.replace(one, one + "<table><tr><td>x</td></tr></table>"), ""),
                 ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\pageref{sec:one}' at m.tex line 2\n"),
-                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\begin{tabular}' at m.tex line 2\n")):
+                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\begin{tabular}' at m.tex line 2\n"),
+                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\centering64' at m.tex line 2\n"),
+                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\quad{text}' at m.tex line 2\n"),
+                ("reference notes", aux, good.replace('class="csl-entry"', 'class="csl-entry x"'), ""),
+                ("no number for", aux.replace("bibcite{k}", "bibcite{z}"), good, ""),
+                ("rewritten to numbers", aux, good.replace('class="citation"', 'class="cit"'), "")):
             page, log = bad_page, bad_log
             try:
                 run(bad_aux)
@@ -154,7 +201,9 @@ def self_test():
                 assert expect in str(e), (expect, str(e))
             else:
                 raise AssertionError(f"passed although: {expect}")
-        assert skipped("[INFO] Skipped '\\small' at x\n[INFO] Skipped '\\begin{tikzpicture}[a]\n  \\node' at x\n") == []
+        assert skipped("[INFO] Skipped '\\small' at x\n[INFO] Skipped '\\quad ' at x\n"
+                       "[INFO] Skipped '\\setlength{\\tabcolsep}{3pt}' at x\n"
+                       "[INFO] Skipped '\\begin{tikzpicture}[a]\n  \\node' at x\n") == []
         row = prepare(">{\\raggedright\\arraybackslash}p{3cm}\n\\multicolumn{2}{@{}l}{\\emph{G}} \\\\\n"
                       "\\endfirsthead\nH \\\\\n\\endhead\n")
         assert row == ">{\\raggedright}p{3cm}\n\\emph{G} & \\\\\n\\endhead\n", row
@@ -167,10 +216,10 @@ def main():
     if sys.argv[1:2] == ["--prepare"]:
         with open(sys.argv[3], "w", encoding="utf-8") as f:
             return f.write(prepare(open(sys.argv[2], encoding="utf-8").read())) and None
-    page, tex, aux, pdf, tsv, figdir, log = sys.argv[1:]
+    page, tex, aux, pdf, tsv, figdir, log, refs_json = sys.argv[1:]
     s = open(page, encoding="utf-8").read()
     labels = aux_labels(aux)
-    n_sections, n_main, n_figures, cited, n_math, n_numbered = tex_counts(tex_body(tex))
+    n_sections, n_main, n_figures, cited, n_math, n_numbered, n_cite_commands = tex_counts(tex_body(tex))
     figs = {}
     for line in open(tsv, encoding="utf-8"):
         if line.strip() and not line.startswith("#"):
@@ -303,10 +352,48 @@ def main():
     check(f"labels whose visible number differs from the aux file (of {len(labels)})", bad["aux"], 0)
     check("labels in the aux file without an element on the page", sum(1 for k in labels if k not in shown), 0)
 
+    # Citations by number, as in the PDF. A \citet keeps the authors pandoc wrote in front of the bracket.
+    numbers = aux_bibcite(aux)
+    unknown = set()
+
+    def citation(m):
+        keys = m.group(1).split()
+        unknown.update(k for k in keys if k not in numbers)
+        if unknown:
+            return m.group(0)
+        authors = re.match(r"\s*([^(<]*?)\s*\(", m.group(2)).group(1)
+        return f'<span class="citation">{authors + " " if authors else ""}{cite_numbers(keys, numbers)}</span>'
+
+    s = re.sub(r'<span class="nocase">(.*?)</span>', r"\1", s, flags=re.S)      # so that citation spans do not nest
+    s, n_cites = re.subn(r'<span\s+class="citation"\s+data-cites="([^"]*)">(.*?)</span>', citation, s, flags=re.S)
+    check("citations of a key the aux file has no number for", len(unknown), 0)
+    check("citations (rewritten to numbers / \\cite commands in the source)", n_cites, n_cite_commands)
+
+    # Notes of the bibliography entries (access dates, the commit a link is pinned to): the PDF prints them.
+    notes = {e["id"]: e["note"] for e in json.load(open(refs_json, encoding="utf-8")) if e.get("note")}
+    added = [0]
+
+    def entry(m):
+        note = notes.get(m.group(1))
+        if not note:
+            return m.group(0)
+        added[0] += 1
+        note = re.sub(r"(https?://[^\s<]+)", r'<a href="\1">\1</a>', html.escape(note, quote=False))
+        return f'{m.group(0)} <span class="csl-note">{note}</span>'
+
+    s = re.sub(r'<div id="ref-([^"]+)" class="csl-entry"[^>]*>(?:(?!</div>).)*?(?=\s*</div>)', entry, s, flags=re.S)
+    check("reference notes (on the page / cited entries with a note)", added[0], sum(1 for k in cited if k in notes))
+
     # The reference list goes where the PDF has it: after the last numbered section, before the appendices.
     start = s.index('<div id="refs"')
     end = s.index("</section>", start)
     refs = s[start:end]
+    entries = re.findall(r'<div id="ref-([^"]+)" class="csl-entry".*?\n</div>', refs, flags=re.S)
+    check("reference entries without a number in the aux file", sum(1 for k in entries if k not in numbers), 0)
+    blocks = {m.group(1): m.group(0).replace('role="listitem">\n', f'role="listitem">\n<span class="csl-num">[{numbers.get(m.group(1), 0)}]</span> ', 1)
+              for m in re.finditer(r'<div id="ref-([^"]+)" class="csl-entry".*?\n</div>', refs, flags=re.S)}
+    refs = (refs[:refs.index('<div id="ref-')] + "\n".join(blocks[k] for k in sorted(blocks, key=lambda k: numbers.get(k, 0)))
+            + "\n</div>\n")
     s = s[:start] + s[end:]
     at = s.index(f'<section id="{first_appendix[0]}"')
     s = s[:at] + f'<section id="references">\n<h2>參考文獻</h2>\n{refs}</section>\n' + s[at:]
