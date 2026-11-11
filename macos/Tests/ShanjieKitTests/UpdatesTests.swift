@@ -330,6 +330,18 @@ final class UpdatesTests: XCTestCase {
         XCTAssertFalse(u.showsPermissionLine)
     }
 
+    /// A click on the notification while the background check runs is kept: when that check finds a newer version, 善解更新 opens.
+    func testInstallDuringARunningCheckIsKept() {
+        let (u, c) = updates()
+        u.tick(now: now)
+        XCTAssertTrue(u.checking)
+        u.install(now: now.addingTimeInterval(5))
+        XCTAssertEqual(c.probes, 1)  // no second check
+        XCTAssertEqual(c.opens, 0)
+        u.finished(.available, version: "0.8.0")
+        XCTAssertEqual(c.events, ["close", "launch"])
+    }
+
     /// The fixed strings of the notification and the 關於 page.
     func testNotificationText() {
         XCTAssertEqual(UpdateText.notificationTitle("0.8.0"), "善解有新版本 0.8.0")

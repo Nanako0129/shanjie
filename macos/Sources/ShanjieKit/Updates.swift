@@ -180,7 +180,9 @@ public final class Updates: ObservableObject {
     /// Otherwise the state says 已是最新 or 檢查失敗 and no window opens. While a Sparkle session of the input method runs (its
     /// own probe), the press opens 善解更新 directly, which checks again by itself.
     public func install(now: Date = Date()) {
-        guard !checking else { return }  // our own silent check runs and decides; no Sparkle window to bring up
+        // Our own silent check runs and decides: remember the press (a notification click cannot be disabled like the menu item and
+        // the button), so 善解更新 opens if that check finds a newer version.
+        guard !checking else { installAfterCheck = true; return }
         switch begin(now) {
         case .started: installAfterCheck = true
         case .busy: openHelper()
