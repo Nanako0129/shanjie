@@ -468,7 +468,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 | 事件 | 何時記 | 欄位 |
 |---|---|---|
-| `shift` | `ShiftTap` 在 Shift **放開**時判斷之後；按下不記；按下到放開之間有 `keyDown`（打大寫字母或符號）的那一次不記；有 Shift 按著（或按鍵的旗標帶 Shift）時打過鍵，就只記 `toggled`，直到兩個 Shift 都放開、或有一次乾淨的按放（放開的那一鍵有按下紀錄、按下之後沒有按鍵；這一次本身仍照舊不記）為止（兩個 Shift 交疊時被打斷的那一側的紀錄會被另一側取代，它的放開不能拿來分辨大寫；乾淨的按放是在最後一個鍵之後才按下的，每次放開都清掉按下紀錄，所以之後的紀錄只看之後的事件；只等兩個 Shift 都放開的話，另一側的位元殘留時會一直少記）；`isSecureInput()` 為真時不記；「單按 Shift 切換中英」關著時不處理 `flagsChanged`，也不記 | 左或右、結果（`ShiftTap.Outcome`） |
+| `shift` | `ShiftTap` 在 Shift **放開**時判斷之後；按下不記；按下到放開之間有 `keyDown`（打大寫字母或符號）的那一次不記；有 Shift 按著（或按鍵的旗標帶 Shift）時打過鍵，就只記 `toggled`，直到兩個 Shift 都放開、或有一次乾淨的按放（放開的那一鍵有按下紀錄、按下之後沒有按鍵；這一次本身照清掉之前的標記判斷，不是 `toggled` 就不記）為止（兩個 Shift 交疊時被打斷的那一側的紀錄會被另一側取代，它的放開不能拿來分辨大寫；乾淨的按放是在最後一個鍵之後才按下的，每次放開都清掉按下紀錄，所以之後的紀錄只看之後的事件；只等兩個 Shift 都放開的話，另一側的位元殘留時會一直少記）；`isSecureInput()` 為真時不記；「單按 Shift 切換中英」關著時不處理 `flagsChanged`，也不記 | 左或右、結果（`ShiftTap.Outcome`） |
 | `toggle` | `toggleAscii` 之後 | bundle ID（`toggleAscii` 已讀的那一次）、切換後的中英、提示有沒有畫出來（`showShiftHint` 的回傳，沿用它那一次的位置讀取） |
 | `activate`、`deactivate` | `activate` 讀過 bundle 之後；`deactivate` 每一次，不是擁有者的也記 | bundle ID（`activate` 讀的那一次；`deactivate` 不讀，用 session 記住的 `bundle`）、這個 session 是不是擁有者、當下的 `engineAscii` |
 | `owner` | `claim()` 回 true、呼叫處讀完 bundle 之後（`activate`、`handle`、`toggleAscii`、`toggleAppChat`） | 新擁有者的 bundle ID（呼叫處讀的那一次） |
