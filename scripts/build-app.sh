@@ -208,7 +208,7 @@ cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/pack
 # The beauty pack (docs/spec/lexicon-and-packs.md §4.4, §8.3), same arrangement (build inputs beauty-exclude.tsv, beauty-collisions.tsv, beauty-readings.tsv stay out).
 # CC0, so there is no paragraph for it in the CC BY-SA attribution file below.
 cp data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json "$RES/packs/"
-# The meme pack (docs/spec/lexicon-and-packs.md §4.4, §9.3), same arrangement (build input meme-collisions.tsv stays out). CC BY-SA 4.0: its paragraph is in the attribution file below.
+# The meme pack (docs/spec/lexicon-and-packs.md §4.4, §9.3), same arrangement (build inputs meme-allow.tsv, meme-collisions.tsv and meme-extra-readings.tsv stay out). CC BY-SA 4.0: its paragraph is in the attribution file below.
 cp data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"

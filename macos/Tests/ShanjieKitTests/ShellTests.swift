@@ -1218,6 +1218,21 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(c.client.marked, "你好")
     }
 
+    /// docs/spec/lexicon-and-packs.md §4.3: two switches on but only one pack file there (ACG broken, no it-add.tsv): the missing file cannot be at fault, so
+    /// this is the single-pack case: two builds, the probe kept, loaded mask 0. (Dropping IT first would have rebuilt the broken ACG once more for nothing.)
+    func testOnePresentPackBrokenWithAnotherFileMissingKeepsTheProbeEngine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packs.appendingPathComponent("it-add.tsv").path))
+        let shell = packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true))
+        XCTAssertEqual(shell.packMask, CoreEngine.packACG | CoreEngine.packIT)
+        XCTAssertNotNil(shell.engine)
+        XCTAssertEqual(shell.engineBuilds, 2, "combined, then the no-pack probe kept as the engine")
+        XCTAssertEqual(shell.loadedPackMask, 0)
+        XCTAssertTrue(shell.itPackOn, "the stored choice is untouched")
+    }
+
     /// A build failure that is not a pack's (a broken overlay-add.tsv in the data directory): the combined build and the no-pack build both
     /// fail, and the shell gives up after exactly those two builds, with no engine.
     func testBrokenNonPackFileStopsAfterTwoBuilds() throws {

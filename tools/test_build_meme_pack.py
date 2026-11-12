@@ -538,6 +538,10 @@ class Pipeline(unittest.TestCase):
             self.assertIn(msg, str(e.exception))
             self.assertFalse(os.path.exists(self.out), text)
 
+    def test_an_extra_readings_file_with_a_bom_reads_its_first_word(self):
+        put(self.extra, "\ufeff我就爛\tx y z\n")
+        self.assertEqual(T.read_extra(self.extra), [("我就爛", ["x", "y", "z"])])
+
     def test_extra_readings_is_refused_for_beauty(self):
         with self.assertRaises(SystemExit) as e:
             run_main("--pack", "beauty", *self.args(allow=False), "--extra-readings", self.extra)
@@ -580,7 +584,7 @@ class Pipeline(unittest.TestCase):
 class Collisions(unittest.TestCase):
     """The (c) rule: a meme row that pushes an existing word (lexicon layer, anime or it pack) off first place on any emitted reading, in either profile, is dropped."""
 
-    def run_build(self, decode, packwords=frozenset(), have=frozenset(), words=("擠人詞", "安分詞"), x=None, readings=fake_readings, collisions=(), counts=None):
+    def run_build(self, decode, packwords=frozenset(), have=frozenset(), words=("擠人詞", "安分詞"), x=None, readings=fake_readings, collisions=(), counts=None, extra=()):
         """x: {word: (chat X, formal first place)}, default ('？'+word, '？'+word); every X is counted once in the second file."""
         cands = {w: {"s"} for w in words}
         c1 = counts or {w: (30, 5) for w in words}
@@ -591,7 +595,7 @@ class Collisions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             coll = os.path.join(d, "meme-collisions.tsv")
             put(coll, "".join("\t".join(r) + "\n" for r in collisions))
-            return T.build(cands, c1, table, c2, decode, readings, have, packwords, coll, None, SC)
+            return T.build(cands, c1, table, c2, decode, readings, have, packwords, coll, None, SC, extra=extra)
 
     @staticmethod
     def pack_words(files):
@@ -632,6 +636,37 @@ class Collisions(unittest.TestCase):
         files, m, col, dropped, unread, ldrop = self.run_build(decode, have=frozenset({"舊詞庫詞"}), words=("不但",), readings=rd)
         self.assertEqual(files["meme-add.tsv"], "")
         self.assertEqual([(r, w, o) for r, w, o, _ in ldrop], [("ㄅㄨˊ ㄉㄢˋ", "不但", "舊詞庫詞")])
+
+    def test_an_extra_reading_that_displaces_a_lexicon_word_stops_naming_the_reading(self):
+        # the main reading is fine; the extra reading x y z pushes 舊詞庫詞 off first place: (c) drops the word, and the stop names why
+        def decode(pairs, prof, meme=None):
+            return [w for w, _ in pairs] if meme else ["舊詞庫詞" if list(syls) == ["x", "y", "z"] else "？" + w for w, syls in pairs]
+        with self.assertRaises(SystemExit) as e:
+            self.run_build(decode, have=frozenset({"舊詞庫詞"}), extra=[("擠人詞", ["x", "y", "z"])])
+        self.assertIn("擠人詞 (rule (c): it displaces 舊詞庫詞 on x y z, chat)", str(e.exception))
+
+    def test_collisions_a_and_b_are_detected_on_an_extra_reading(self):
+        # (a): on the extra reading the pack's first place is another word of the pack; (b): without the pack the first place there is a reference name
+        on_a = lambda pairs, prof, meme=None: ["安分詞" if meme and list(syls) == ["x", "y", "z"] else (w if meme else "？" + w) for w, syls in pairs]
+        off_b = lambda pairs, prof, meme=None: [w if meme else ("安分詞" if list(syls) == ["x", "y", "z"] else "？" + w) for w, syls in pairs]
+        for decode, cond in ((on_a, "a"), (off_b, "b")):
+            files, m, col, dropped, unread, ldrop = self.run_build(decode, extra=[("擠人詞", ["x", "y", "z"])])
+            self.assertEqual(ldrop, [], cond)
+            self.assertGreater(m["unresolved_collision_readings"], 0, cond)
+            self.assertIn("x y z", str(col), cond)
+            self.assertIn("x-y-z\t擠人詞", files["meme-add.tsv"], cond)
+
+    def test_an_extra_reading_equal_to_the_main_readings_sandhi_row_stops(self):
+        rd = lambda ws: {w: (["ㄅㄨˋ", "ㄉㄢˋ"], False) for w in ws}
+        with self.assertRaises(SystemExit) as e:
+            self.run_build(fake_decoder(), words=("不但",), readings=rd, extra=[("不但", ["ㄅㄨˊ", "ㄉㄢˋ"])])
+        self.assertIn("repeats a row of the word's main reading", str(e.exception))
+
+    def test_two_extra_readings_where_one_is_the_others_sandhi_row_stop(self):
+        rd = lambda ws: {w: (["x", "y"], False) for w in ws}
+        with self.assertRaises(SystemExit) as e:
+            self.run_build(fake_decoder(), words=("不但",), readings=rd, extra=[("不但", ["ㄅㄨˋ", "ㄉㄢˋ"]), ("不但", ["ㄅㄨˊ", "ㄉㄢˋ"])])
+        self.assertIn("repeats a row of another extra reading of the word", str(e.exception))
 
     def test_sandhi_rows_and_the_bonus_scores_come_from_the_shared_pack_rows(self):
         rd = lambda ws: {"不但": (["ㄅㄨˋ", "ㄉㄢˋ"], False)}

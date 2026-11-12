@@ -57,7 +57,7 @@ fn oov_words(name: &str) -> Vec<String> {
 }
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
-/// `--dump` and `--dump-words` (`dump` is true for either) are refused there; `--rowstats` holds numbers only and is allowed.
+/// `--dump`, `--dump-words` (`dump` is true for either) and `--picks` are refused there; `--rowstats` holds numbers only and is allowed.
 fn check_lm_opts(set: Option<&str>, dump: bool, picks: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
         return Err("--dump and --dump-words are not allowed with --set holdout".into());

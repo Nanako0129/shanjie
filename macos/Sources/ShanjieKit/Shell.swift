@@ -1374,11 +1374,13 @@ public final class Shell {
             // it works, and free it at once (build() keeps one engine at a time): if it fails too the cause is not a pack, both codes are logged
             // and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings order build with just
             // that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop works (two broken
-            // files), build the no-pack engine again. With a single pack enabled there is no drop to try, and the probe is kept as the engine
-            // instead of being freed and built a third time. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
+            // files), build the no-pack engine again. Only packs whose file is there are tried (a missing file contributes nothing, so dropping it
+            // cannot help); with a single such pack there is no drop to try, and the probe is kept as the engine instead of being freed and built a
+            // third time. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
             let packCode = code
             built = 0
-            let drops = Shell.packTable.map(\.bit).filter { mask & $0 != 0 && mask & ~$0 != 0 }
+            let live = mask & present
+            let drops = Shell.packTable.map(\.bit).filter { live & $0 != 0 && live & ~$0 != 0 }
             var noPackWorks = false
             var keptProbe: CoreEngine?
             do {
