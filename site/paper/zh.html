@@ -190,7 +190,7 @@ agent
 <h5>輸出空間。</h5>
 <p>這些系統的輸出都限制在讀音符合輸入的字串；PinyinGPT <span class="citation">[<a href="#ref-tan2022pinyingpt">42</a>]</span>
 把這個限制寫明，把輸出分布限制在同音字。善解更嚴：神經模型從不產生文字，只重排詞庫
-lattice 上最好的 8 條路徑。rime-wanxiang 與 librime-witogram <span class="citation">[<a href="#ref-wanxiang">2</a>, <a href="#ref-witogram">28</a>]</span> 2026</a>)</span>
+lattice 上最好的 8 條路徑。rime-wanxiang 與 librime-witogram <span class="citation">[<a href="#ref-wanxiang">2</a>, <a href="#ref-witogram">28</a>]</span>
 報告過一個負面結果，專案把它採納為設計規則：把搭配表換成原始概似後 top-1
 下降，所以善解的重排模型只有在融合分數超過一個在指定資料上選定的分差門檻時，才能覆寫
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>n</mi><annotation encoding="application/x-tex">n</annotation></semantics></math>-gram
@@ -205,7 +205,7 @@ lattice 上最好的 8 條路徑。rime-wanxiang 與 librime-witogram <span clas
 Transformer，用前文最後 64 字加讀音重排統計引擎的候選，在它自己的 6,000
 句新聞集上報統計引擎首選 76.9%、加 Transformer 86.0% <span class="citation">[<a href="#ref-ocime">1</a>, <a href="#ref-oc">15</a>]</span>（自報數字，讀音由字典合成、集合不同，不能和本文任何數字比；<a
 href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e978103030adf1/docs/research-excerpt.md#rl-051">§rl-051</a>）。pinyin-ime-reranker-4M
-的模型卡 <span class="citation">[<a href="#ref-reranker4m">31</a>]</span> 2026</a>)</span>
+的模型卡 <span class="citation">[<a href="#ref-reranker4m">31</a>]</span>
 報告前綴狀態在候選與按鍵之間共用後 p95 從 20.64 ms 降到 8.61 ms；Zenzai
 <span class="citation">[<a href="#ref-zenzai">3</a>]</span>
 用保留符號分段、前文放在讀音之前。善解的重排模型看到的是候選字串與最多兩個字的前文，看不到讀音。這批文獻裡有兩個想法試過、沒有採用：<span class="citation">[<a href="#ref-suzuki2005">41</a>]</span> 與 <span class="citation">[<a href="#ref-tokunaga2011">45</a>]</span>
@@ -2473,8 +2473,7 @@ the <span>A</span>ssociation for <span>C</span>omputational
 href="https://aclanthology.org/2021.naacl-main.51/">https://aclanthology.org/2021.naacl-main.51/</a>.
 </div>
 <div id="ref-weizhuyin" class="csl-entry" role="listitem">
-<span class="csl-num">[53]</span> vChewing. <span
-class="nocase">vChewing</span> (唯音) input method. 2026. <a
+<span class="csl-num">[53]</span> vChewing. vChewing (唯音) input method. 2026. <a
 href="https://github.com/vChewing/vChewing-macOS">https://github.com/vChewing/vChewing-macOS</a>. <span class="csl-note">Accessed 2026-11-11.</span>
 </div>
 <div id="ref-xiao2022pert" class="csl-entry" role="listitem">

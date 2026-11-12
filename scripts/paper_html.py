@@ -141,7 +141,7 @@ def crop_figure(pdf, page, box, dest):
 
 def self_test():
     """A two-section paper with one appendix, through main(): the checks pass, and fail when the aux file disagrees."""
-    tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \begin{equation}x\label{eq:x}\end{equation}"
+    tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \cite{k} \begin{equation}x\label{eq:x}\end{equation}"
            "\n" r"\subsection{Sub}\label{sec:sub} \ref{app:a} \eqref{eq:x} \ref{tab:t}" "\n" r"\appendix"
            "\n" r"\section{App}\label{app:a}"
            "\n" r"\begin{tabular}{l}\toprule H \\ I \\ \midrule x \\ \end{tabular}")
@@ -150,6 +150,7 @@ def self_test():
     page = ('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n<li><a href="#app:a" id="toc-app:a">App</a></li>\n'
             '<section id="sec:one" class="level2">\n<h2>One</h2><math display="inline">a</math>'
             '<span class="citation" data-cites="k">(<a href="#ref-k" role="doc-biblioref">K 2020</a>)</span>'
+            '<span\nclass="citation" data-cites="k">(<a href="#ref-k"\nrole="doc-biblioref"><span\nclass="nocase">k</span> 2020</a>)</span>'
             '<math display="block"><annotation>x\\label{eq:x}</annotation></math>\n'
             '<section id="sec:sub" class="level3">\n<h3>Sub</h3>'
             '<a href="#app:a" data-reference-type="ref" data-reference="app:a">2</a>'
@@ -176,6 +177,7 @@ def self_test():
         out = run(aux)
         assert '<a href="#app:a">A</a><a href="#eq:x">(1)</a><a href="#tab:t">1</a>' in out, out
         assert '<span class="secno">附錄 A</span> App' in out and '<span class="secno">1.1</span> Sub' in out
+        assert out.count('<span class="citation">[<a href="#ref-k">7</a>]</span>') == 2 and "2020" not in out, out
         assert '<span class="citation">[<a href="#ref-k">7</a>]</span>' in out and '<span class="csl-num">[7]</span> K' in out, out
         assert "<thead>\n<tr>\n<th>H</th>\n</tr>\n<tr>\n<th>I</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>x</td>" in out, out
         nums = {"a": 3, "b": 4, "c": 5, "d": 9, "e": 10}
@@ -199,7 +201,9 @@ def self_test():
                 ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\quad{text}' at m.tex line 2\n"),
                 ("reference notes", aux, good.replace('class="csl-entry"', 'class="csl-entry x"'), ""),
                 ("no number for", aux.replace("bibcite{k}", "bibcite{z}"), good, ""),
-                ("rewritten to numbers", aux, good.replace('class="citation"', 'class="cit"'), "")):
+                ("rewritten to numbers", aux, good.replace('class="citation"', 'class="cit"'), ""),
+                ("not rewritten whole", aux, good.replace('role="doc-biblioref">K 2020</a>',
+                                                          'role="doc-biblioref"><span\nclass="x">k</span> 2020</a>'), "")):
             page, log = bad_page, bad_log
             try:
                 run(bad_aux)
@@ -377,18 +381,25 @@ def main():
     # Citations by number, as in the PDF. A \citet keeps the authors pandoc wrote in front of the bracket.
     numbers = aux_bibcite(aux)
     unknown = set()
+    truncated = []
 
     def citation(m):
         keys = m.group(1).split()
+        if not m.group(2).rstrip().endswith(")") or "<span" in m.group(2):
+            truncated.append(keys)                     # the match stopped at an inner </span>: text would be left over
+            return m.group(0)
         unknown.update(k for k in keys if k not in numbers)
         if unknown:
             return m.group(0)
         authors = re.match(r"\s*([^(<]*?)\s*\(", m.group(2)).group(1)
         return f'<span class="citation">{authors + " " if authors else ""}{cite_numbers(keys, numbers)}</span>'
 
-    s = re.sub(r'<span class="nocase">(.*?)</span>', r"\1", s, flags=re.S)      # so that citation spans do not nest
+    # pandoc may break a tag across lines (`<span\nclass="nocase">`): unwrapped first, so that citation spans do not nest
+    s = re.sub(r'<span\s+class="nocase">(.*?)</span>', r"\1", s, flags=re.S)
     s, n_cites = re.subn(r'<span\s+class="citation"\s+data-cites="([^"]*)">(.*?)</span>', citation, s, flags=re.S)
     check("citations of a key the aux file has no number for", len(unknown), 0)
+    check("citations not rewritten whole (an inner span ended the match)", len(truncated), 0)
+    check("author-year citation text left on the page", len(re.findall(r'doc-biblioref|</a>\)</span>', s)), 0)
     check("citations (rewritten to numbers / \\cite commands in the source)", n_cites, n_cite_commands)
 
     # Notes of the bibliography entries (access dates, the commit a link is pinned to): the PDF prints them.
