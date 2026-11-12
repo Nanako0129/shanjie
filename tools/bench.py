@@ -1197,6 +1197,36 @@ def measure_speed2(ctx, vers):
     return out
 
 
+def tm_running():
+    """Whether Time Machine is backing up now: True or False from `tmutil status` (`Running = 1`), None when it cannot be told (not
+    macOS, tmutil missing, failing or not answering in 30 s). docs/spec/evaluation.md §7.5."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        r = subprocess.run(["tmutil", "status"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode:
+        return None
+    return bool(re.search(r"^\s*Running = 1;", r.stdout, re.M))
+
+
+def load1():
+    return os.getloadavg()[0]
+
+
+def speed_window(ctx, vers, measure=None, tm=tm_running, load=load1):
+    """The speed measurement with the machine's state read right before and right after it (docs/spec/evaluation.md §7.5): the 1-minute
+    load and whether Time Machine is backing up. Returns (what `measure_speed2` returns, the four fields for the result's machine block).
+    Without dev302 nothing is measured or read: ({}, {}). tools/kpi.py judges the speed column by these fields (§8.2)."""
+    if "dev302" not in ctx.files:
+        return {}, {}
+    before = (load(), tm())
+    speed = (measure or measure_speed2)(ctx, vers)
+    after = (load(), tm())
+    return speed, {"speed_load_before": before[0], "speed_tm_before": before[1], "speed_load_after": after[0], "speed_tm_after": after[1]}
+
+
 def preflight2(args):
     ctx = Ctx()
     if sha_file(VARIANTS) != VARIANTS_SHA:
@@ -1296,7 +1326,7 @@ def cmd_run2(args):
             fixed = sum(a and not b for a, b in zip(new, old))
             broken = sum(b and not a for a, b in zip(new, old))
             rec["vs_prev"][cell] = {"fixed": fixed, "broken": broken, "p": mcnemar(fixed, broken)}
-    speed = measure_speed2(ctx, vers) if "dev302" in ctx.files else {}
+    speed, window = speed_window(ctx, vers)
     for rec, v in zip(result["versions"], vers):
         rec["speed"] = speed.get(v.sha, {"error": "no dev302"})
         for part, sp in (("", rec["speed"]), (" formal", rec["speed"].get("formal", {}))):
@@ -1305,7 +1335,7 @@ def cmd_run2(args):
                 print(f"bench: {v.label}{part}: {sp['error']}", file=sys.stderr)
     td.cleanup()
     result["env"] = {"machine": sh(["sysctl", "-n", "hw.model"]).strip(), "macos": platform.mac_ver()[0],
-                     "cargo": sh(["cargo", "--version"]).strip(), "load_avg_start": load0, "load_avg_end": os.getloadavg()[0]}
+                     "cargo": sh(["cargo", "--version"]).strip(), "load_avg_start": load0, "load_avg_end": os.getloadavg()[0], **window}
     os.makedirs(RESULTS, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=1)

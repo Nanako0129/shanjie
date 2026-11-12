@@ -996,5 +996,60 @@ class SiteData(Tmp):
         self.assertIn(f"{v['holdout_chat']['top1']}/{v['holdout_chat']['n']}", md)
 
 
+class SpeedWindow(unittest.TestCase):
+    """docs/spec/evaluation.md §7.5: the machine's state right before and right after the speed measurement."""
+
+    def test_reads_then_measures_then_reads(self):
+        calls, loads, tms = [], iter([1.5, 4.25]), iter([False, True])
+        def measure(ctx, vers):
+            calls.append("measure")
+            return {"sha": {"p95_us": 1.0}}
+        def load():
+            calls.append("load")
+            return next(loads)
+        def tm():
+            calls.append("tm")
+            return next(tms)
+        ctx = types.SimpleNamespace(files={"dev302": "rows"})
+        speed, fields = bench.speed_window(ctx, ["v"], measure=measure, tm=tm, load=load)
+        self.assertEqual(calls, ["load", "tm", "measure", "load", "tm"])
+        self.assertEqual(speed, {"sha": {"p95_us": 1.0}})
+        self.assertEqual(fields, {"speed_load_before": 1.5, "speed_tm_before": False, "speed_load_after": 4.25, "speed_tm_after": True})
+
+    def test_the_default_measure_is_measure_speed2(self):
+        ctx = types.SimpleNamespace(files={"dev302": "rows"})
+        with mock.patch.object(bench, "measure_speed2", return_value={"sha": {}}) as m:
+            speed, fields = bench.speed_window(ctx, ["v"], tm=lambda: None, load=lambda: 0.5)
+        m.assert_called_once_with(ctx, ["v"])
+        self.assertEqual((speed, fields["speed_tm_before"], fields["speed_tm_after"]), ({"sha": {}}, None, None))
+
+    def test_without_dev302_nothing_is_measured_or_read(self):
+        def boom(*a):
+            raise AssertionError("called")
+        self.assertEqual(bench.speed_window(types.SimpleNamespace(files={}), ["v"], measure=boom, tm=boom, load=boom), ({}, {}))
+
+    def run_tm(self, platform="darwin", **kw):
+        """tm_running() with subprocess.run replaced: never the real tmutil."""
+        with mock.patch.object(bench.sys, "platform", platform), mock.patch.object(bench.subprocess, "run", **kw) as run:
+            return bench.tm_running(), run
+
+    def test_tm_running_reads_tmutil_status(self):
+        out = lambda text, rc=0: types.SimpleNamespace(returncode=rc, stdout=text)
+        got, run = self.run_tm(return_value=out("Backup session status:\n{\n    Running = 1;\n    Percent = 0;\n}\n"))
+        self.assertIs(got, True)
+        self.assertEqual(run.call_args.args[0], ["tmutil", "status"])
+        self.assertEqual(run.call_args.kwargs.get("timeout"), 30)
+        self.assertIs(self.run_tm(return_value=out("Backup session status:\n{\n    Running = 0;\n}\n"))[0], False)
+        self.assertIs(self.run_tm(return_value=out("    NotRunning = 1;\n"))[0], False)   # the key itself, not a longer one that ends in it
+        self.assertIsNone(self.run_tm(return_value=out("    Running = 1;\n", rc=1))[0])    # tmutil failed: unknown, whatever it printed
+
+    def test_tm_running_is_unknown_when_it_cannot_ask(self):
+        self.assertIsNone(self.run_tm(side_effect=subprocess.TimeoutExpired("tmutil", 30))[0])
+        self.assertIsNone(self.run_tm(side_effect=FileNotFoundError("tmutil"))[0])
+        got, run = self.run_tm(platform="linux", return_value=types.SimpleNamespace(returncode=0, stdout="    Running = 1;\n"))
+        self.assertIsNone(got)
+        run.assert_not_called()   # not macOS: tmutil is not run at all
+
+
 if __name__ == "__main__":
     unittest.main()
