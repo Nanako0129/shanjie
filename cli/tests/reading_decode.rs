@@ -77,7 +77,7 @@ fn no_reading_decode_is_what_main_printed() {
         let rows = format!("eval/bench/suite-v1/{set}.txt");
         let dump = dir.0.join(format!("{profile}-{set}-{tinylm}.dump")).to_string_lossy().into_owned();
         let mut a = args(profile, tinylm, &rows);
-        a.extend(["--dump", &dump, "--no-reading-decode"]);
+        a.extend(["--dump", &dump, "--no-reading-decode", "--no-recur"]);
         let o = run(&a);
         assert!(o.status.success(), "{}", text(&o.stderr));
         let line = text(&o.stdout);

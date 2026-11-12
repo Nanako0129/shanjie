@@ -3082,7 +3082,7 @@ impl Engine {
                 });
                 let mut best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
-                    crate::fuzzy::DELTA_SOUND,
+                    crate::fuzzy::DELTA_SOUND, None,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let eligible = jobs && best.len() >= 2;
@@ -3102,7 +3102,7 @@ impl Engine {
                     let lift = Learn { sinit: Sinit::Lift, ..*ln };
                     let lifted = decode_segment_fuzzy(
                         &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&lift), self.demote, self.fuzzy,
-                        crate::fuzzy::DELTA_SOUND,
+                        crate::fuzzy::DELTA_SOUND, None,
                     )
                     .map_err(|_| EngineError::Internal)?;
                     match sinit_swap(&mut best, &lifted, pool, &sinit_chars) {

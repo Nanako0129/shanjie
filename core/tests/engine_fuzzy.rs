@@ -53,7 +53,7 @@ fn engine(layout: Layout, flags: u32, learn: bool) -> Engine {
 
 /// The n-best of `decode_from_fuzzy_scored` as (score, words) with the words as strings.
 fn n_best(s: &Shared, syls: &[String], flags: u32) -> Vec<(f64, Vec<String>)> {
-    decode_from_fuzzy_scored(&s.capped, syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND)
+    decode_from_fuzzy_scored(&s.capped, syls, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND, None)
         .unwrap()
         .into_iter()
         .map(|(sc, ws)| (sc, ws.into_iter().map(|w| w.0.to_string()).collect()))

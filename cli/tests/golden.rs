@@ -8,9 +8,9 @@ fn run(args: &[&str]) -> String {
 
 /// `run` for the LM-mode goldens that the Python reference (`reference/proto/lm_eval.py`) produced: Python has no reading term
 /// (docs/spec/decoder.md §5), so they are compared with `--no-reading-decode`, the decoder it implements. The shipping default, which has the term,
-/// is pinned by `shipping_default_matches_its_rust_only_pins`.
+/// is pinned by `shipping_default_matches_its_rust_only_pins`. Python has no context-recurrence term either: `--no-recur`.
 fn run_py(args: &[&str]) -> String {
-    run(&[args, &["--no-reading-decode"]].concat())
+    run(&[args, &["--no-reading-decode", "--no-recur"]].concat())
 }
 
 #[test]
@@ -121,14 +121,14 @@ fn shipping_default_matches_its_rust_only_pins() {
                 Some(r) => vec!["--rows", r, "--name", name],
                 None => vec!["--dev", "302"],
             };
-            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context"]].concat());
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--no-recur"]].concat());
             let ship = format!("{name}-ship");
             let set: Vec<&str> = match &rows {
                 Some(r) => vec!["--rows", r, "--name", &ship],
                 None => vec!["--dev", "302", "--name", &ship],
             };
             let colloquial: &[&str] = if p == "chat" { &["--colloquial-core", &co] } else { &[] };
-            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--packs", "acg,it,meme,beauty", "--tinylm", &tl], colloquial].concat());
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--no-recur", "--packs", "acg,it,meme,beauty", "--tinylm", &tl], colloquial].concat());
         }
     }
     assert_eq!(got, golden("reading-decode-shipping.txt"));

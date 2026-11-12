@@ -1265,7 +1265,52 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND)
+    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None)
+}
+
+/// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/contracts/context-recurrence.md §1:
+/// longctx-1 and the chat sets were measured with 64).
+pub const RECUR_CHARS: usize = 64;
+/// The weight (log10, the n-gram score's scale) of one recurring adjacent pair on a path. longctx-1's two halves chose 2 and 3 and the
+/// typo reports are 0/0 at 2 (docs/contracts/context-recurrence.md §1).
+pub const RECUR_BETA: f64 = 2.0;
+
+/// The adjacent character pairs of the left context's last `RECUR_CHARS` characters (both characters Han). Private fields, no `Debug`/`Display`, no read
+/// access: only its size is observable.
+pub struct RecurGrams {
+    pairs: HashSet<(char, char)>,
+}
+
+impl RecurGrams {
+    fn build(text: &str, keep: impl Fn(char, char) -> bool) -> RecurGrams {
+        let cs: Vec<char> = text.chars().rev().take(RECUR_CHARS).collect::<Vec<_>>().into_iter().rev().collect();
+        RecurGrams { pairs: cs.windows(2).filter(|w| keep(w[0], w[1])).map(|w| (w[0], w[1])).collect() }
+    }
+    /// The pairs of `text`'s last `RECUR_CHARS` characters of which both characters are Han.
+    pub fn from_text(text: &str) -> RecurGrams {
+        Self::build(text, |a, b| crate::learn::is_han(a) && crate::learn::is_han(b))
+    }
+    /// TEMPORARY, evaluation only: every adjacent pair, Han or not, to measure that the Han filter changes nothing. To be removed.
+    pub fn from_text_unfiltered(text: &str) -> RecurGrams {
+        Self::build(text, |_, _| true)
+    }
+    pub fn len(&self) -> usize {
+        self.pairs.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty()
+    }
+    /// Adjacent pairs of `s` in the set.
+    fn hits(&self, s: &str) -> usize {
+        let mut it = s.chars();
+        let Some(mut p) = it.next() else { return 0 };
+        it.filter(|&c| {
+            let hit = self.pairs.contains(&(p, c));
+            p = c;
+            hit
+        })
+        .count()
+    }
 }
 
 /// One reading a span's words are looked up under (fuzzy input, docs/spec/decoder.md §6.2).
@@ -1328,7 +1373,9 @@ pub fn decode_segment_fuzzy<'a>(
     demote: bool,
     fuzzy: u32,
     delta_sound: f64,
+    recur: Option<&RecurGrams>,
 ) -> Result<Vec<Scored<'a>>, Error> {
+    let recur = recur.filter(|r| !r.is_empty());
     let base = &*lex.base;
     // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
     let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
@@ -1447,6 +1494,8 @@ pub fn decode_segment_fuzzy<'a>(
                 let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
                 for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
                     let (wid, pb0) = (lex.model_id(lm, word), pow10(lp0));
+                    // Context recurrence (docs/contracts/context-recurrence.md §2.2): the pairs inside the word, once per word.
+                    let (in_word, first) = recur.map_or((0, None), |r| (r.hits(word), word.chars().next()));
                     // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
                     // `Engine::total_score` and the rerank job see the score the decoder used.
                     let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1) + src.pen;
@@ -1507,6 +1556,14 @@ pub fn decode_segment_fuzzy<'a>(
                         }
                         // The reading term (R1) rides on every path of every `Sinit` mode, a lifted word included (`was_boosted` is set only by a learned boost):
                         // it is the same in the lifted and the unlifted score, so the marker's gain above is the whole difference.
+                        // The recurrence gain rides in the delta as a negative part, like the tolerance penalty above (`Engine::total_score` and the rerank
+                        // job read the delta), so the path score, `total_score` and the pool's n-gram scores all hold it. Pairs inside the word and
+                        // across the boundary with the hypothesis's text (none for the first word of the segment).
+                        let delta = match (recur, first, h.surface.chars().next_back()) {
+                            (Some(r), Some(f), Some(l)) => delta - RECUR_BETA * (in_word + usize::from(r.pairs.contains(&(l, f)))) as f64,
+                            (Some(_), ..) => delta - RECUR_BETA * in_word as f64,
+                            _ => delta,
+                        };
                         let sc = h.score + (term - delta) + if was_boosted { 0.0 } else { rd_term };
                         let before = if tri_on { h.words.last().map_or(start, |w| w.0) } else { "" };
                         let key = (format!("{}{word}", h.surface), before, word);
@@ -1604,7 +1661,7 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND)?
+    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND, None)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
@@ -1624,8 +1681,9 @@ pub fn decode_from_fuzzy_scored<'a>(
     demote: bool,
     fuzzy: u32,
     delta_sound: f64,
+    recur: Option<&RecurGrams>,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)
+    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound, recur)
 }
 
 #[cfg(test)]
@@ -1782,6 +1840,70 @@ mod tests {
         assert_eq!(bits(&on), bits(&off));
         on.set_reading_active(true);
         assert_ne!(bits(&on), bits(&off));
+    }
+
+    /// `RecurGrams::from_text` keeps only pairs of two Han characters out of the last `RECUR_CHARS` scalar values.
+    #[test]
+    fn recur_grams_hold_the_han_pairs_of_the_last_64_chars() {
+        let n = |t: &str| RecurGrams::from_text(t).len();
+        assert!(RecurGrams::from_text("").is_empty());
+        assert!(RecurGrams::from_text("甲").is_empty());
+        assert_eq!(n("甲乙"), 1);
+        // ASCII, digits, punctuation and an emoji break the pairs; a 4-byte Han character (U+20000) is one character.
+        assert_eq!(n("甲a乙丙1丁，戊😀己\u{20000}庚"), 3, "乙丙, 己𠀀 and 𠀀庚");
+        assert_eq!(RecurGrams::from_text_unfiltered("甲a乙").len(), 2);
+        // Only the last 64 characters are read: 64 distinct Han characters give at most 63 pairs, a first one outside them is not a pair.
+        let han: String = (0..70).map(|i| char::from_u32(0x4E00 + i).unwrap()).collect();
+        assert_eq!(n(&han), 63);
+        let g = RecurGrams::from_text(&han);
+        assert!(!g.pairs.contains(&('\u{4E00}', '\u{4E01}')) && g.pairs.contains(&('\u{4E06}', '\u{4E07}')));
+    }
+
+    /// The recurrence term: a pair inside a word or across a word boundary of the path counts, the first word of a segment has no boundary,
+    /// and `None` or an empty set is bit for bit the decoder without the argument.
+    #[test]
+    fn recurrence_term_reorders_homophones_and_none_is_the_old_decode() {
+        let lm = Lm::parse(&tiny()).unwrap();
+        let decode = |lex: &str, syls: &[&str], g: Option<&RecurGrams>| {
+            let lex = Arc::new(Lexicon::parse(lex).unwrap());
+            let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+            let syls: Vec<String> = syls.iter().map(|s| s.to_string()).collect();
+            let r = decode_segment_fuzzy(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true, 0, crate::fuzzy::DELTA_SOUND, g).unwrap();
+            r.into_iter().map(|(s, ws)| (s, ws.iter().map(|w| w.0.to_string()).collect::<String>(), ws.iter().map(|w| w.2).sum::<f64>())).collect::<Vec<_>>()
+        };
+        let text = |r: &[(f64, String, f64)]| -> Vec<String> { r.iter().map(|x| x.1.clone()).collect() };
+        // Inside a word: two two-syllable homophones of equal score.
+        let within = "ㄧ-ㄨ 甲丙 -1.0\nㄧ-ㄨ 乙丁 -1.0\n";
+        let (a, b) = (RecurGrams::from_text("乙丁"), RecurGrams::from_text("甲丙"));
+        assert_eq!(text(&decode(&within, &["ㄧ", "ㄨ"], Some(&a)))[0], "乙丁");
+        assert_eq!(text(&decode(&within, &["ㄧ", "ㄨ"], Some(&b)))[0], "甲丙");
+        // Across a boundary only: one-syllable words, the pair (乙, 丙) joins two words.
+        let across = "ㄧ 甲 -1.0\nㄧ 乙 -1.0\nㄨ 丙 -1.0\nㄨ 丁 -1.0\n";
+        let g = RecurGrams::from_text("乙丙");
+        let r = decode(across, &["ㄧ", "ㄨ"], Some(&g));
+        assert_eq!(text(&r)[0], "乙丙");
+        let plain = decode(across, &["ㄧ", "ㄨ"], None);
+        let gain = r[0].0 - plain.iter().find(|x| x.1 == "乙丙").unwrap().0;
+        assert!((gain - RECUR_BETA).abs() < 1e-9, "one pair, one RECUR_BETA: {gain}");
+        // The path's delta holds the gain (what `Engine::total_score` and the rerank job read).
+        assert!((r[0].2 + RECUR_BETA).abs() < 1e-9);
+        // The first word of the segment has nothing on its left: a pair (乙, 丙) does not help 丙 alone, nor 乙 count a left neighbour.
+        let single = "ㄨ 丙 -1.0\nㄨ 丁 -1.0\n";
+        let before = decode(single, &["ㄨ"], None);
+        let after = decode(single, &["ㄨ"], Some(&RecurGrams::from_text("乙丙")));
+        assert_eq!(before.iter().map(|r| r.0.to_bits()).collect::<Vec<_>>(), after.iter().map(|r| r.0.to_bits()).collect::<Vec<_>>());
+        // None and an empty set: the old arithmetic, bit for bit.
+        let bits = |r: &[(f64, String, f64)]| r.iter().map(|(s, w, d)| (s.to_bits(), w.clone(), d.to_bits())).collect::<Vec<_>>();
+        let old = bits(&decode(across, &["ㄧ", "ㄨ"], None));
+        assert_eq!(old, bits(&decode(across, &["ㄧ", "ㄨ"], Some(&RecurGrams::from_text("")))));
+        assert_eq!(old, bits(&decode(across, &["ㄧ", "ㄨ"], Some(&RecurGrams::from_text("乙")))));
+        // The old entry point is the same decode.
+        let lex = Arc::new(Lexicon::parse(across).unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let syls = ["ㄧ".to_string(), "ㄨ".to_string()];
+        let wrapped = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        let wrapped: Vec<_> = wrapped.into_iter().map(|(s, ws)| (s, ws.iter().map(|w| w.0.to_string()).collect::<String>(), ws.iter().map(|w| w.2).sum::<f64>())).collect();
+        assert_eq!(old, bits(&wrapped));
     }
 
     /// 4.3: classes.sjc must be this model's (SHA-256), with the right magic and exact length; the parse never panics.
@@ -2248,7 +2370,7 @@ mod tests {
         let lm = Lm::parse(&tiny()).unwrap();
         let lex = Arc::new(Lexicon::parse(lex_text).unwrap());
         let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse(demote).unwrap())).unwrap();
-        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND)
+        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND, None)
             .unwrap()
             .into_iter()
             .map(|(_, ws)| (ws[0].0.to_string(), ws[0].2, ws[0].4))
