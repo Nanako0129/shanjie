@@ -271,12 +271,12 @@
 
 合併建置失敗時（`Shell.build`）：
 
-1. 先建一個不帶詞包的引擎，只為判斷是不是詞包的錯，建完立刻釋放；
+1. 先建一個不帶詞包的引擎，只為判斷是不是詞包的錯，建完立刻釋放；只開一個詞包時沒有「少一個」可試，這個引擎成功就直接留下當引擎（共建兩次），不釋放再建；
 2. 它也失敗：原因不是詞包，記兩個回傳碼，不再嘗試，沒有引擎（所有按鍵直通）；
 3. 它成功：對每個啟用的詞包依設定順序各試「少這一個」（`mask & ~bit`），第一個成功的留下，其餘詞包照開，記一行含回傳碼與留下遮罩的日誌；
 4. 沒有任何一個少一個的組合成功（兩個以上的檔壞了）：建不帶詞包的引擎。
 
-偏好值不動，也不顯示錯誤，下一次重建會再試。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testBrokenMemeFileKeepsTheOtherPacks`（引擎建置次數 6：合併、不帶詞包、少動漫、少資訊、少美妝、少迷因）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheMemePackLast`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testMemePackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
+偏好值不動，也不顯示錯誤，下一次重建會再試。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testOnlyPackBrokenKeepsTheProbeEngine`（只開一個詞包，引擎建置次數 2）、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testBrokenMemeFileKeepsTheOtherPacks`（引擎建置次數 6：合併、不帶詞包、少動漫、少資訊、少美妝、少迷因）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheMemePackLast`、`testPackLineNamesTheQuotePackAfterAcg`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testMemePackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
 
 ### 4.4 打包與自測
 
