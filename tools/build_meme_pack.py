@@ -16,7 +16,7 @@
   報告 allow-missing.tsv：清單裡每個沒進 meme-add.tsv 的詞一列 `詞<TAB>類別<TAB>原因<TAB>細節`，原因：not_a_candidate、in_lexicon_or_pack、below_threshold、
   unreadable、excluded_by_collisions_file、same_reading、x_not_fewer、x_other_pack、rule_c；收進的詞數加這份表的列數不等於清單筆數就在寫完報告後以非 0 結束（不寫 data/packs）。
   meme-sources.tsv 在 sources 後多一欄 class；meme.json 的 allow 記清單檔名、SHA-256、筆數與各類別收進的詞數；
-  words-all.txt（報告）：收進的詞（讀音是 CHECK 的除外），`|詞|讀音`，照 meme-add.tsv 的順序、每詞取第一列（變調列不另列）。
+  words-all.txt（報告）：收進的詞（讀音是 CHECK 的除外），`|詞|讀音`，照 meme-add.tsv 的順序、每詞取第一列（變調列不另列）；之後接另外的讀音各一列（--extra-readings）。
 全程不連網。迷因詞包的輸出以 CC BY-SA 4.0 釋出；美妝詞包是 CC0（LICENSES/data.md）。同一份輸入建兩次，輸出逐位元組相同。
 
 候選檔（--cand，可多個，一個檔一個來源）：UTF-8 文字，一行一個，`字串<TAB>來源`；來源欄可省（用檔名去掉副檔名），`#` 開頭與空行略過。
@@ -144,11 +144,11 @@ def pack_words(packs_dir=PACKS, tag=TAG):
 
 def read_extra(path):
     """另外的讀音（data/packs/meme-extra-readings.tsv）→ [(詞, [音節])]（檔案順序）。`詞<TAB>讀音（空白分隔）`，一列一個另外的讀音；`#` 開頭是註解；檔不在＝沒有。
-    壞行、音節數不等於字數、同一個詞重複同一個讀音，以點名行號的訊息停止。"""
+    檔頭的 BOM 略過（編輯器存成 UTF-8 加 BOM 時，第一列的詞不會帶著它）。壞行、音節數不等於字數、同一個詞重複同一個讀音，以點名行號的訊息停止。"""
     if not os.path.exists(path):
         return []
     out = []
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         for n, l in enumerate(f, 1):
             l = l.rstrip("\n")
             if not l.strip() or l.startswith("#"):
@@ -359,9 +359,13 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
     admitted, reading = ({w: v for w, v in d.items() if w not in excluded} for d in (admitted, reading))
     words, dropped = judge(admitted, reading, xs, fs, counts2, packwords, tag, plus)
     ex = collections.defaultdict(list)
+    keys = lambda w, syls: [list(syls)] + [v for v in [B.bo.sandhi_variant(w, list(syls))] if v]     # a reading and its 一/不 row, as pack_rows writes them
     for w, r in extra:
         if w in reading and list(reading[w]) == r:
             raise SystemExit(f"extra readings: {w} {' '.join(r)} is the word's main reading")
+        if w in reading and any(k in keys(w, reading[w]) for k in keys(w, r)):
+            # the extra row (or its 一/不 row) would repeat a key the main reading already writes: two rows of one (reading, word) with different scores
+            raise SystemExit(f"extra readings: {w} {' '.join(r)} repeats a row of the word's main reading (its 一/不 variant)")
         ex[w].append(r)
     reasons = collections.Counter(d[1] for d in dropped)
     # (b)：詞包詞搶走參考名單裡別的字串的第一名
@@ -388,7 +392,8 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         raise SystemExit(f"type (c) collisions not settled after {B.LEXICON_RULE_ROUNDS} rounds")
     missing = [w for w in ex if w not in words]
     if missing:        # 另外的讀音只給收進詞包的詞：詞沒收進來（不在清單、被規則丟掉，含另外的讀音上的 (c)）就停，不寫 data/packs
-        raise SystemExit(f"extra readings: not shipped in the pack: {' '.join(missing)}")
+        why = {w: f"{w} (rule (c): it displaces {o} on {r}, {prof})" for r, w, o, prof in ldrop}
+        raise SystemExit(f"extra readings: not shipped in the pack: {'; '.join(why.get(w, w) for w in missing)}")
     if tag == "beauty":
         found = exempt_judged_x(found, reading, xs)
     keep_now = B.first_named(rank, set(words))
