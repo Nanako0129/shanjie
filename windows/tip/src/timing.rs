@@ -160,7 +160,7 @@ mod file {
         }
     }
 
-    /// `%LOCALAPPDATA%\shanjie-dev\timing\<prefix>-<pid>.txt`; the folder is made by the driver script, never by the TIP or the host.
+    /// `%LOCALAPPDATA%\<ids::IDS.timing_dir>\timing\<prefix>-<pid>.txt` (`shanjie-dev` or `Shanjie`); the folder is made by the driver script, never by the TIP or the host.
     fn open_file(prefix: &str) -> Option<std::fs::File> {
         if !is_medium() {
             return None;
@@ -174,7 +174,7 @@ mod file {
         };
         // SAFETY: plain query.
         let pid = unsafe { GetCurrentProcessId() };
-        let path = std::path::Path::new(&dir).join("shanjie-dev").join("timing").join(format!("{prefix}-{pid}.txt"));
+        let path = std::path::Path::new(&dir).join(shanjie_win_proto::ids::IDS.timing_dir).join("timing").join(format!("{prefix}-{pid}.txt"));
         std::fs::OpenOptions::new().write(true).create_new(true).open(path).ok()
     }
 

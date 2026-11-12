@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # docs/spec/windows-tip.md §3.11: numbers-only timing file, for the VM measurements; never in a build given to users.
 timing = []
+# The identity of the installer's build (shanjie-win-proto, ids.rs); off: the development identity.
+release-ids = ["shanjie-win-proto/release-ids"]
 
 [dependencies]
 shanjie-win-proto = { path = "../proto" }

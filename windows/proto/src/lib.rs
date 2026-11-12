@@ -11,6 +11,8 @@
 //!
 //! R2: the messages carry typed text, so nothing here derives `Debug` (no composition reaches a log through `{:?}`).
 
+pub mod ids;
+
 /// 2: `Out` carries `candidate_first` and `candidate_total` and `candidates` is filled (docs/spec/windows-tip.md §5.3). A PROTO 1 host answers a PROTO 2 `Hello` with
 /// `Refuse { 1 }` and the app then passes every key through until the host is replaced.
 /// 3: `Welcome` carries `key_scheme` (the key-habit setting of the host's engine, 0 or 1; docs/spec/windows-tip.md §5.3). A PROTO 2 host answers a PROTO 3 `Hello` with
@@ -63,10 +65,10 @@ const fn fnv1a(b: &[u8]) -> u64 {
     h
 }
 
-/// `\\.\pipe\shanjie-dev-<user SID>-<session id>` (§5.2). No protocol version in the name: two ends of different versions
-/// still meet, so the host can answer `Refuse { 1 }`.
+/// `\\.\pipe\<ids::IDS.pipe_prefix><user SID>-<session id>`, `shanjie-dev-` in the development build and `shanjie-` in the release build (§5.2). No
+/// protocol version in the name: two ends of different versions still meet, so the host can answer `Refuse { 1 }`.
 pub fn pipe_name(user_sid: &str, session: u32) -> String {
-    format!(r"\\.\pipe\shanjie-dev-{user_sid}-{session}")
+    format!(r"\\.\pipe\{}{user_sid}-{session}", ids::IDS.pipe_prefix)
 }
 
 /// `ShanjieKey` of core/include/shanjie.h.
@@ -738,7 +740,8 @@ mod tests {
 
     #[test]
     fn the_pipe_name_has_no_version() {
-        assert!(pipe_name("S-1-5-21-1-2-3-1001", 1) == r"\\.\pipe\shanjie-dev-S-1-5-21-1-2-3-1001-1");
+        let prefix = if cfg!(feature = "release-ids") { "shanjie-" } else { "shanjie-dev-" };
+        assert!(pipe_name("S-1-5-21-1-2-3-1001", 1) == format!(r"\\.\pipe\{prefix}S-1-5-21-1-2-3-1001-1"));
     }
 
     /// xorshift64*: no dependency for random bytes.
