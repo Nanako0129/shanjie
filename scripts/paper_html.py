@@ -21,8 +21,8 @@ so the checks at the end compare them: a link's text must equal the number shown
 Figures are TikZ, which pandoc drops: each one is cut out of PDF with `pdftocairo -svg` (one page, then the
 page is cropped to the box in FIGURES_TSV: id, file, page, x, y, width, height in PDF points, alt text).
 
-Two citation forms are refused rather than rewritten: \citet of several keys (natbib prints one author group per
-key) and \cite with a page or prefix argument (natbib prints it inside the brackets).
+Two citation forms are refused rather than rewritten: \\citet of several keys (natbib prints one author group per
+key) and \\cite with a page or prefix argument (natbib prints it inside the brackets).
 
 Exits 1 when any check fails. Standard library only. `python3 scripts/paper_html.py --self-test` runs the
 numbering and the checks on a small synthetic paper, and breaks each check once (`make test-python` runs it).
@@ -159,14 +159,14 @@ def self_test():
             '<section id="sec:one" class="level2">\n<h2>One</h2><math display="inline">a</math>'
             '<span class="citation" data-cites="k">(<a href="#ref-k" role="doc-biblioref">K 2020</a>)</span>'
             '<span\nclass="citation" data-cites="k">(<a href="#ref-k"\nrole="doc-biblioref"><span\nclass="nocase">k</span> 2020</a>)</span>'
-            '<span class="citation" data-cites="k"><em>K</em> (<a href="#ref-k" role="doc-biblioref">2020</a>)</span>'
+            '<span class="citation" data-cites="k"><em>K</em> (ROC) (<a href="#ref-k" role="doc-biblioref">2020</a>)</span>'
             '<math display="block"><annotation>x\\label{eq:x}</annotation></math>\n'
             '<section id="sec:sub" class="level3">\n<h3>Sub</h3>'
             '<a href="#app:a" data-reference-type="ref" data-reference="app:a">2</a>'
             '<a href="#eq:x" data-reference-type="eqref" data-reference="eq:x">[eq:x]</a>'
             '<a href="#tab:t" data-reference-type="ref" data-reference="tab:t">1</a>'
-            '<table id="tab:t">\n<caption>c</caption>\n<tbody>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td>I</td>\n</tr>\n'
-            '<tr>\n<td>x</td>\n</tr>\n</tbody>\n</table></section></section>\n'
+            '<table id="tab:t">\n<caption>c</caption>\n<tbody>\n<tr>\n<td>H</td>\n</tr><tr class="even"><td>I</td></tr>'
+            '<tr class="odd"><td>x</td></tr>\n</tbody>\n</table></section></section>\n'
             '<section id="app:a" class="level2">\n<h2>App</h2>'
             '<div id="refs" class="references">\n<div id="ref-k" class="csl-entry" role="listitem">\nK\n</div>\n</div>\n'
             '</section>')
@@ -189,9 +189,10 @@ def self_test():
         assert '<span class="secno">A</span> App' in out and '<span class="secno">1.1</span> Sub' in out, out
         assert 'id="toc-app:a"><span class="secno">附錄 A</span>' in out, out
         assert out.count('<span class="citation">[<a href="#ref-k">7</a>]</span>') == 2 and "2020" not in out, out
-        assert '<span class="citation"><em>K</em> [<a href="#ref-k">7</a>]</span>' in out, out
+        assert '<span class="citation"><em>K</em> (ROC) [<a href="#ref-k">7</a>]</span>' in out, out
         assert '<span class="csl-num">[7]</span> K' in out, out
-        assert "<thead>\n<tr>\n<th>H</th>\n</tr>\n<tr>\n<th>I</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>x</td>" in out, out
+        assert ('<thead>\n<tr>\n<th>H</th>\n</tr>\n<tr class="even"><th>I</th></tr>\n</thead>\n<tbody>\n'
+                '<tr class="odd"><td>x</td></tr>\n</tbody>') in out, out
         nums = {"a": 3, "b": 4, "c": 5, "d": 9, "e": 10}
         assert re.sub(r"<[^>]+>", "", cite_numbers(["d", "b", "a", "c", "e"], nums)) == "[3–5, 9, 10]"
         assert 'K <span class="csl-note">Seen at <a href="https://e.org/x">https://e.org/x</a>.</span>' in out, out
@@ -213,8 +214,9 @@ def self_test():
                 ("tables (numbered", dict(page=page.replace(one, one + "<table><tr><td>x</td></tr></table>"))),
                 ("tables (on the page", dict(tex=tex + "\n" + tab)),
                 ("not between \\toprule and \\midrule", dict(tex=tex.replace(r"\midrule ", ""))),
+                ("not between \\toprule and \\midrule", dict(tex=tex.replace(r"\toprule H \\ I \\ \midrule", r"\toprule \midrule H \\ I \\"))),
                 ("tables without a head", dict(page=page.replace("<tbody>", "").replace("</tbody>", ""))),
-                ("head rows differ", dict(page=page.replace("<tbody>\n<tr>\n<td>H</td>\n</tr>\n",
+                ("head rows differ", dict(page=page.replace("<tbody>\n<tr>\n<td>H</td>\n</tr>",
                                                             "<thead>\n<tr>\n<th>H</th>\n</tr>\n</thead>\n<tbody>\n"))),
                 ("no body row", dict(tex=tex.replace(r"\midrule x \\", r"x \\ \midrule"))),
                 ("figures (", dict(tex=tex + "\n" + r"\begin{figure}\end{figure}")),
@@ -228,7 +230,7 @@ def self_test():
                 ("labels in the aux file without an element", dict(aux=aux + "\\newlabel{sec:ghost}{{9}{1}}\n")),
                 ("no number for", dict(aux=aux.replace("bibcite{k}", "bibcite{z}"))),
                 ("\\citet of several keys", dict(page=page.replace(
-                    'data-cites="k"><em>K</em> (<a href="#ref-k" role="doc-biblioref">2020</a>)',
+                    'data-cites="k"><em>K</em> (ROC) (<a href="#ref-k" role="doc-biblioref">2020</a>)',
                     'data-cites="k q">A and B (<a href="#ref-k" role="doc-biblioref">2020</a>; '
                     '<a href="#ref-q" role="doc-biblioref">C 2021</a>)'))),
                 ("page or prefix argument", dict(tex=tex.replace(r"\citet{k}", r"\cite[p.~3]{k}"))),
@@ -357,7 +359,8 @@ def main():
     check("tables (numbered / <table)", count["tab"], s.count("<table"))
     check("tables (on the page / tabular and longtable environments)", count["tab"], len(heads))
 
-    check("tables whose head is not between \\toprule and \\midrule", heads.count(None), 0)
+    # A head of no rows (\toprule right before \midrule) is refused too: the move below would take a data row.
+    check("tables whose head is not between \\toprule and \\midrule", sum(1 for h in heads if not h), 0)
 
     # A head of two rows comes out of pandoc as body rows: they are moved into <thead> as <th>.
     it = iter(heads)
@@ -435,7 +438,12 @@ def main():
         if not m.group(2).rstrip().endswith(")") or "<span" in m.group(2):
             truncated.append(keys)                     # the match stopped at an inner </span>: text would be left over
             return m.group(0)
-        authors = re.match(r"\s*(.*?)\s*\(", m.group(2), flags=re.S).group(1)
+        # the authors end at the parenthesis that holds the links, not at one inside a name ("Taiwan (ROC) Ministry")
+        authors = re.match(r"\s*(.*?)\s*\((?=\s*<a\b)", m.group(2), flags=re.S)
+        if not authors:
+            truncated.append(keys)
+            return m.group(0)
+        authors = authors.group(1)
         if authors and len(keys) > 1:
             several.append(keys)                       # natbib: "A and B [3], C [4]"; pandoc gives one author group
             return m.group(0)
