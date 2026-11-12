@@ -199,7 +199,8 @@ pub fn fuse(ll: &[f64], col: &[f64], alpha: f64) -> Vec<f64> {
 
 /// Whether the term is used for a rerank (docs/spec/semantic-rerank.md §4, §4.4): the chat profile,
 /// any of the three strengths (so no level parameter; each strength has its own `cell`) and the small model the registered cells were measured with (`PAIRED_TINYLM_SHA256`).
-/// The fourth condition, a loaded table, is the caller having one. The engine (per job) and the evaluation CLI both decide with this function.
+/// The fourth condition, a loaded table, is the caller having one. The engine (per job) and the evaluation CLI both decide with this function;
+/// the CLI's `--tinylm-paired` (evaluation only) takes the model condition as met and keeps the profile one.
 pub fn applies(profile: Profile, model: &TinyLm) -> bool {
     profile == Profile::Chat && model.file_sha256() == PAIRED_TINYLM_SHA256
 }

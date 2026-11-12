@@ -11,7 +11,7 @@
 1. 每次組字區重新解碼（`Engine::refresh`），對每一段自由段（兩個固定詞或標點之間）取 n-gram 的 n-best，從中挑出前 `TOPK`（8）條沒有模糊音詞的路徑當候選池。
 2. 引擎把候選的文字、n-gram 分數、前文、設定打包成一個重排工作（`RerankJob`，只含自己擁有的資料，不借用引擎），組字區先顯示 n-gram 的第一名。
 3. 殼用 `take` 取走工作，在背景執行緒 `run`（算會意的對數似然，聊天設定再加常談項，用 `pick` 選一個），回主執行緒 `apply`；若期間組字有重新解碼，結果作廢，否則把選中的路徑換進組字區，字可能換一次。
-4. 評測用的命令列工具（`shanjie-eval`）與重播工具（`shanjie-replay`）呼叫同一組函式（`TinyLm::rerank`、`TinyLm::rerank_colloquial`、`colloquial::applies`、`rerank_pool`、`manual_mask`），所以引擎與評測的選字相同。
+4. 評測用的命令列工具（`shanjie-eval`）與重播工具（`shanjie-replay`）呼叫同一組函式（`TinyLm::rerank`、`TinyLm::rerank_colloquial`、`colloquial::applies`、`rerank_pool`、`manual_mask`），所以引擎與評測的選字相同。例外是評測 CLI 的 `--tinylm-paired`（4.6）：它把 `colloquial::applies` 的模型雜湊條件當成成立，只用在量測換會意模型時常談項照出貨方式作用的情形。
 
 層次：n-gram 分數（`ng`）由 Rust 核心的解碼器算好再傳進來，重排不重算；會意的對數似然 `ll` 在重排時算；常談項、學習項與手動詞遮罩是同一次 `pick` 裡的修正，不在解碼器裡。
 
@@ -169,7 +169,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - FFI `shanjie_engine_load_colloquial(engine, path)`：回傳碼同 `load_tinylm`（見 7）；子程序輸出不帶路徑。
 - App：殼的 `build()` 在 `load_tinylm` **成功之後**才載入 `Resources/colloquial.sjlm`；失敗只記一行（靜態字串加回傳碼），照沒有常談表重排。沒有獨立的設定開關：跟著語意校正開關與強度走。
 - selftest（8.4）要求常談在效：載入回 0，且在聊天、標準強度、前文「這間店的蛋糕很好吃」下打 dev302 第 108 列的讀音，第一次顯示是「你要不要嚐嚐看」（n-gram 與不帶常談的重排都是「你要不要常常看」）。
-- 評測 CLI `--colloquial-core FILE`：用同一個 `Colloquial::load_from_dir` 載入（詞包列是 `--packs` 讀的同一份），每列依 4.3 的條件用 `rerank_colloquial` 或 `rerank`，不拒絕任何設定（書面、沒有 `--tinylm` 就照條件不加常談項）；檔案不存在在開始前就報錯。摘要行設定標記 `+colloq:<表 SHA-256 前 8 碼>`，溫和版開著（出貨預設）不加尾碼，關掉加 `+us0`，`--colloquial-first-unigram` 加 `+fu`。`--tinylm-scores` 在常談實際跑過的列（聊天、配對檔、有 `ll`）最後多一個 `"col": [...]`，每個候選一項，不是有限值的是 `null`（這一列的 `c` 是退路的 plain pick）。
+- 評測 CLI `--colloquial-core FILE`：用同一個 `Colloquial::load_from_dir` 載入（詞包列是 `--packs` 讀的同一份），每列依 4.3 的條件用 `rerank_colloquial` 或 `rerank`，不拒絕任何設定（書面、沒有 `--tinylm` 就照條件不加常談項）；檔案不存在在開始前就報錯。`--tinylm-paired`（沒有值）把這次 `--tinylm` 載入的模型當成配對模型：模型雜湊的條件當成成立，聊天設定與載入常談表兩個條件照舊；要同時有 `--tinylm` 與 `--colloquial-core`，否則是用法錯誤；核心的 `colloquial::applies`、引擎、App 與重播都不受影響。摘要行設定標記 `+colloq:<表 SHA-256 前 8 碼>`，溫和版開著（出貨預設）不加尾碼，關掉加 `+us0`，`--colloquial-first-unigram` 加 `+fu`；給了 `--tinylm-paired` 時接著加 `+pair:<會意檔 SHA-256 前 8 碼>`（模型本來就是配對檔時選字不變，標記照樣加）。`--tinylm-scores` 在常談實際跑過的列（聊天、配對檔或 `--tinylm-paired`、有 `ll`）最後多一個 `"col": [...]`，每個候選一項，不是有限值的是 `null`（這一列的 `c` 是退路的 plain pick）。
 - 重播 `shanjie-replay`：像 App 一樣，小模型開著且 `data/lm/colloquial.sjlm` 存在時預設在 `load_tinylm` 之後載入常談表（詞包照重播的 `build_engine`）；`--colloquial FILE` 改載另一份、`--no-colloquial` 不載（兩者並用是錯誤）；摘要行標記同 CLI。
 - `tools/bench.py` 與 `tools/kpi.py` 依 `data/colloquial.sjlm.sha256` 有沒有，判斷這一版的設定是否帶常談標記。
 
@@ -295,6 +295,8 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - `--tinylm FILE.sjtl`：用 `load_paired` 載入；n-gram 雜湊不符、KN 側檔不符、`--no-classes`、`--no-demote` 都是錯誤（α、τ 只對辨類與降權表開著的分數成立）。每列取候選池（3.1）的前 8 名重排，top1、`--rowstats`、摘要行都用重排後的第一名；前文鍵用 `tl.key_for(ctx)`（`--context` 時；不加 `--context` 時為空）。摘要行設定標記加 `+tl:<檔 SHA-256 前 8 碼>`。
 - `--rerank-level conservative|standard|aggressive`（預設 standard）：需要 `--tinylm`（沒有 `--tinylm` 時任何值都是用法錯誤）；用在版本 1、2 的檔且不是 standard 時結束碼 2 並說明；不是 standard 時摘要行在 `+tl:…` 後加 `+rl:conservative` 或 `+rl:aggressive`。`tools/bench.py` 與不在本 repo 的研究工具因此把它當作不是出貨設定。
 - `--tinylm-scores OUT`：每列一行 JSON，只有數字沒有文字：`i`、`n`、`ng`、`ok`、`ed`、`glen`、`c`（選中的索引，沒重排為 0）、`ll`（n ≥ 2 的列）、`masked`（手動詞遮罩擋掉的索引，空也寫）；有 `--colloquial-core` 且常談實際跑過的列最後多 `col`（4.6）。有模糊音位元時 `n`、`ng`、`ok`、`ed`、`ll`、`masked` 列的是候選池，`c` 仍是 n-best 的索引。`--tinylm-scores-topk N`（研究用，N ≥ 8）把 `ll` 延伸到前 N 個候選，不改其他欄位；需要 `--tinylm-scores`，不能與 `--fuzzy` 並用。`--tinylm-scores` 與 `--set holdout` 不能並用（逐候選記錄是調 α、τ 的資料）。
+- `--tinylm-paired`：見 4.6；常談項對 `--tinylm` 給的模型照出貨方式作用，`col` 欄也在這種列出現。
+- `--picks FILE`（有沒有 `--tinylm` 都可用）：每列一行 `列號\t名次\t句子`，行數等於 rowstats，照列號順序（`--threads` 時也是）。名次是送出的那一句在這一列 n-best 的索引（0 是 n-gram 第一名，和 `--tinylm-scores` 的 `c` 同一個索引）；句子是這一列算對錯用的那一句（`top1_sha256` 用的同一份）。`--fuzzy` 時沒有任何讀音覆蓋的列寫 `列號\t-\t`。檔裡有列的內容，所以和 `--dump` 一樣在 `--set holdout` 時拒絕（讀任何檔之前）；rowstats 不變。
 - 候選比 ctx − 1 長的列保留第一名並在 stderr 計數；stderr 另印每列重排時間 p50、p95 與載入時間、載入前後的記憶體。
 - `shanjie-replay` 的重排選項：`--rerank each|final`、`--no-tinylm`、`--learn-guard on|off`、`--rerank-level`、`--colloquial`、`--no-colloquial`；引擎照 App 建（降權開、重排開、標準強度、載入常談表），所以重播的選字與 CLI 在同條件下相同。詳見 `docs/spec/evaluation.md`。
 

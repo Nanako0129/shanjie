@@ -309,7 +309,7 @@
 ## 9. Python 參考實作與 CLI
 
 - `reference/proto/lm.py`、`trigram.py`、`ime.py` 實作 bigram、詞類、KN、trigram、異體排序表（`ime.py` 的 `load_variant_order`、`lm.py` 的 `cap_overlay`）、降權表（`load_demote`）、詞包詞當未知詞與前後同樣的合併規則，與 Rust 逐位元組相同；`fuzzy_ref.py` 是容錯表的對照。Python **不實作**讀音項、模糊輸入的解碼、學習。golden 由 Python 產生、Rust 比對。
-- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--fuzzy`、`--fuzzy-delta-sound`、`--packs`、`--rowstats`、`--dump`。
+- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--fuzzy`、`--fuzzy-delta-sound`、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
 - 摘要行標記一覽：`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm`。
 - 重播程式（`shanjie-replay`）走引擎的 `load_lm`，標記與模型列同 CLI，另列出實際載入的每個模型檔。
 

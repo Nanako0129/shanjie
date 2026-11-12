@@ -51,7 +51,7 @@
 - `top1_sha256`：每列選出的那一句（原字串，不經寬鬆對照）以 `\n` 串接後的 SHA-256。
 - 設定標記依實際開的功能串起來（例如 `+ctx`、`+kn:<8 碼>:θ1:β1`、`+tl:<8 碼>`、`+acg+it`、`+tri:<8 碼>`、`+colloq:<8 碼>`、`+rd+rx:<8 碼>+rm`），讓結果對得回模型與旗標；基準測試用它守住「旗標漏帶」（見 7.3）。
 - `--threads N`（預設 1，只有 `--lm` 模式）：以每 32 列一塊分給 N 個執行緒、共用同一份模型；輸出檔與摘要行和 N = 1 逐位元組相同，stderr 的語意校正延遲行會註明是在競爭下量的。
-- 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--tinylm-scores` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許。`--rows` 沒有這道拒絕，見 5.3。
+- 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許。`--rows` 沒有這道拒絕，見 5.3。
 
 ## 2. 逐列統計與配對比較
 
@@ -306,7 +306,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 5.3 量法
 
 - 量的人是沒參與實作的 fresh 審查者。口語半邊：`--set holdout --profile chat --rowstats <自己的暫存檔>`。新聞半邊：`--rows <私人檔> --profile formal --rowstats <暫存檔>`。基準與新版各量一次，檔內只許 `[0-9\t\n]`，再 `tools/evalstats.py compare BASE CAND --net`，只回那一行，然後刪掉 rowstats。
-- `--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的審查者，指示裡明寫禁止 `--dump`、`--dump-words`、`--tinylm-scores`，只准 `--rowstats`（流程規則，不是技術防護）。
+- `--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的審查者，指示裡明寫禁止 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`，只准 `--rowstats`（流程規則，不是技術防護）。
 - 結果填進基準結果 JSON 的 `holdout.chat`（口語半邊）與 `holdout.formal`（新聞半邊），以及 KPI JSON 的 `holdout_talk_chat` 與 `holdout_news_formal`：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`（口語半邊是 `talk.txt` 的 SHA-256、新聞半邊是那個私人檔的 SHA-256）。`rows_sha256` 一定要填：兩個表依它分欄，沒填的數字在 `tools/bench.py` 只能依 n 分欄、在 `tools/kpi.py` 全放進同一欄。
 - `tools/bench.py` 與 `tools/kpi.py` 都不讀 `eval/holdout/` 底下的任何檔；`tools/kpi.py run` 拒絕位在 `eval/holdout/` 底下的列檔。
 - 基準結果 JSON 已有 `holdout` 欄位時，`tools/bench.py run --suite v2` 拒絕重跑同一個標籤（保留集的數字量一次就不重來）。

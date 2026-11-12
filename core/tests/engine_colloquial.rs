@@ -255,7 +255,8 @@ fn each_level_uses_its_own_cell() {
     }
 }
 
-/// `colloquial::applies` is the engine's and the CLI's one decision: chat and the measured small model only. It has no strength parameter; that the
+/// `colloquial::applies` is the engine's and the CLI's one decision: chat and the measured small model only (the CLI's `--tinylm-paired`, for measuring,
+/// takes the model condition as met: cli/tests/measure_flags.rs). It has no strength parameter; that the
 /// terms run at every strength is `each_level_uses_its_own_cell`.
 #[test]
 fn applies_is_chat_and_the_paired_model() {
