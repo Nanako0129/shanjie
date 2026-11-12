@@ -69,6 +69,8 @@ test-python:
 	python3 -W ignore -m unittest reference/proto/test_colloquial_ref.py
 	# eval/ablation/v0.7.0/README.md: the offline gate row's rules, cases taken from the core's unit tests.
 	python3 -B eval/ablation/v0.7.0/gate_offline.py --self-test
+	# scripts/build-paper-html.sh: the numbering and the checks of the paper's reading page, on a synthetic paper.
+	python3 -B scripts/paper_html.py --self-test > /dev/null
 	# The tw-conv guard (docs/spec/models.md §9.10, §9.8), last so the other suites report first.
 	python3 -W ignore -m unittest tools/test_tw_conv_guard.py
 
