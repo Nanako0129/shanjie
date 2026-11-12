@@ -916,6 +916,9 @@ PROFILES2 = ["chat", "formal"]
 # A version that ships the decoder's reading term (docs/spec/decoder.md §5; its data/lexicon/std-exempt.tsv is in the export) has `"reading": True`: the CLI
 # then ends EVERY setting's tag (chat, formal, the anchor run, the replay-setting cell) with `+rd+rx:{rx8}+rm` (the first 8 hex of that file, then the reading-mass rule's mark) and no longer marks the colloquial
 # tag with `+rc` (the reading-channel term was removed with it). The row of the new version is added at its release (a checkout that has the reading-mass rule, docs/spec/decoder.md §5); a version without the key keeps `+rc` and no `+rd`.
+# A version that ships the context recurrence term (docs/spec/decoder.md §4.6) has `"recur": True`: with `--context` the CLI marks every cell's tag `+recur` right after
+# `+ctx` (the anchor run too; the replay-setting cell has no `--context`, so no mark), and the replay's tag has it before the reading marks. The row of the new version is added at its
+# release; a version without the key has no mark (its binary has no such term).
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -1031,7 +1034,10 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", "")) + colloq_tag(ver, prof) + reading_tag(ver)
+    t = t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", ""))
+    if ver.spec.get("recur"):   # the CLI prints `+recur` after `+ctx` (docs/spec/decoder.md §4.6)
+        t = t.replace("+ctx", "+ctx+recur", 1)
+    return t + colloq_tag(ver, prof) + reading_tag(ver)
 
 
 def colloq_tag(ver, prof):

@@ -1749,7 +1749,7 @@ fn t18_cmd_backspace_on_the_row_re_decodes_the_composition() {
     // start ㄊㄚ) lists 她們 first; forgetting it must show 他們 at once.
     let reading = vec!["ㄊㄚ".to_string(), "ㄇㄣˊ".to_string()];
     let (mut e, dir) = seeded("t18", &[rec("她們", &reading, "她們")]);
-    // The left text 她們 is itself a pair of the context recurrence set (docs/spec/decoder.md, the context recurrence section), which would keep 她們 for
+    // The left text 她們 is itself a pair of the context recurrence set (docs/spec/decoder.md §4.6), which would keep 她們 for
     // another reason than the record; this test is about the record, so the term is off.
     e.set_recur(false);
     e.set_left_context("她們");

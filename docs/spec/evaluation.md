@@ -49,7 +49,8 @@
 - `top1`：寬鬆對照下，選出的那一句等於正解的列數。開了語意校正時，選出的那一句不一定是 n-gram 的第一名。
 - `oracle@64`：前 64 名裡有正解（寬鬆對照）的列數。
 - `top1_sha256`：每列選出的那一句（原字串，不經寬鬆對照）以 `\n` 串接後的 SHA-256。
-- 設定標記依實際開的功能串起來（例如 `+ctx`、`+kn:<8 碼>:θ1:β1`、`+tl:<8 碼>`、`+acg+it`、`+tri:<8 碼>`、`+colloq:<8 碼>`、`+rd+rx:<8 碼>+rm`），讓結果對得回模型與旗標；基準測試用它守住「旗標漏帶」（見 7.3）。
+- 設定標記依實際開的功能串起來（例如 `+ctx`、`+recur`、`+kn:<8 碼>:θ1:β1`、`+tl:<8 碼>`、`+acg+it`、`+tri:<8 碼>`、`+colloq:<8 碼>`、`+rd+rx:<8 碼>+rm`），讓結果對得回模型與旗標；基準測試用它守住「旗標漏帶」（見 7.3）。
+- `--no-recur`（評測專用）：有 `--context` 時，解碼器預設會拿到每列前文欄的漢字對集合（前文重現項，`docs/spec/decoder.md` §4.6），摘要行標記在 `+ctx` 之後多一個 `+recur`；加 `--no-recur` 就不拿、也沒有這個標記，等於沒有這一項（逐位元組等於這一項加進來之前的輸出）。沒有 `--context` 時沒有前文，這一項不存在，也沒有 `+recur`。
 - `--threads N`（預設 1，只有 `--lm` 模式）：以每 32 列一塊分給 N 個執行緒、共用同一份模型；輸出檔與摘要行和 N = 1 逐位元組相同，stderr 的語意校正延遲行會註明是在競爭下量的。
 - 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許。`--rows` 沒有這道拒絕，見 5.3。
 
@@ -178,7 +179,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
                [--rerank each|final] [--correct] [--strict] [--learn-file FILE] [--learn-guard on|off]
                [--colloquial FILE | --no-colloquial] [--no-reading-decode] [--packs LIST]
                [--rerank-level conservative|standard|aggressive]
-               [--rowstats FILE] [--keys FILE] [--firsts FILE] [--sinit-stretches FILE]
+               [--no-recur] [--rowstats FILE] [--keys FILE] [--key-times FILE] [--firsts FILE] [--sinit-stretches FILE]
 ```
 
 - 讀列和 `shanjie-eval --lm` 用同一個函式（1.2），列號對得上；`--rows` 與 `--dev` 擇一。
@@ -188,7 +189,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   3. 打完時記下「第一次顯示」：打字中途引擎已經送出的文字（`Output.commit`，例如組字達到上限自動送出）接上當下的 `preedit`（Enter 會送出的文字）；
   4. `--correct` 時模擬使用者改選（4.5）；
   5. 按 Enter 送出；`--learn on` 時引擎從這次送出學習，學到的留給後面的列（列照檔案順序）。
-- 輸出檔在讀完列檔之後才建立；`--rowstats`、`--keys`、`--firsts`、`--sinit-stretches` 任何一個和 `--rows` 或 `--learn-file` 是同一個檔（比對裝置與 inode，所以符號連結與硬連結都算）就拒絕執行，結束碼 2，原檔不動。`--dev` 沒有這道檢查。
+- 輸出檔在讀完列檔之後才建立；`--rowstats`、`--keys`、`--key-times`、`--firsts`、`--sinit-stretches` 任何一個和 `--rows` 或 `--learn-file` 是同一個檔（比對裝置與 inode，所以符號連結與硬連結都算）就拒絕執行，結束碼 2，原檔不動。`--dev` 沒有這道檢查。
 - 其他錯誤結束碼 1，訊息不帶列的內容。stderr 印 `models:` 行，列出各模型檔的 SHA-256 前 8 碼（`bigram.sjlm`、存在的 `classes.sjc`／`kn.sjkn`／`trigram.sjt3`／`trigram-chat.sjt3`、`tinylm.sjtl`、載入時的 `colloquial.sjlm`），讓結果對得回模型。
 - 模型路徑固定在 repo 的 `data/lm/`。
 
@@ -198,6 +199,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（`set_english(false)`）、縮寫關。App 預設前兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 4.5 定義。兩者都不影響 n-gram 與語意校正的選字。候選窗為橫式，一頁 9 項（`PAGE_SIZE`）。
 - 口語表：小模型開著且 `data/lm/colloquial.sjlm` 存在時預設載入（`--no-tinylm` 時不載）；`--colloquial FILE` 改載另一份，`--no-colloquial` 不載（對照用；兩者併用是錯誤）。載入後 `models:` 行多一欄 `colloquial.sjlm:<8 碼>`、設定標記多 `+colloq:<8 碼>`。口語項是否真的用到由核心照條件判斷（聊天、配對的小模型、表已載入）。
 - 讀音項：引擎的 n-gram 解碼器帶讀音項（`Engine::load_lm` 建表），所有設定都生效；`--no-reading-decode`（研究用，`Engine::set_reading_decode(false)`）把它關掉。設定標記每次都以 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>+rm` 結尾（`+rm`：讀音質量規則，decoder.md §5）（取自引擎真的載入的那張表，`Engine::reading_tag`），加 `--no-reading-decode` 就沒有這三個標記。
+- 前文重現項：引擎照 `set_left_context`（列的第一欄）建漢字對集合，解碼器預設帶這一項（`docs/spec/decoder.md` §4.6），所有設定都生效；`--no-recur`（研究用，`Engine::set_recur(false)`）把它關掉，集合照舊保存與清除。設定標記在 `+level:…` 之後、`+rd+rx:<8 碼>+rm` 之前有 `+recur`，加 `--no-recur` 就沒有。
 - 學習：`--learn off|on`（預設 off）。on 時在第一個鍵之前呼叫一次 `set_learning(true)`；單獨使用時不開學習檔（只在記憶體），新詞 B 照預設開。學習狀態只在這一個引擎、這一次執行內累積。
 - `--profile chat|formal`（預設 chat）。`--no-tinylm` 關掉語意校正（對照用）。
 
@@ -234,11 +236,12 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - `picks`：改選次數；`final_ok`：送出的文字是否等於正解；`unfixable`：要求了 `--correct`、送出的文字仍不等於正解的列。
 - `--rowstats FILE`：第一次顯示的逐列統計，格式同 2.1，可直接給 `tools/evalstats.py compare`。
 - `--keys FILE`：每列一行 `列號\tideal\tactual\tpicks\tfinal_ok\trewrites`。
+- `--key-times FILE`（量延遲用，只有數字）：每列先一行 `c\t<微秒>`（那一列 `set_left_context` 的時間），接著每個 `Engine::key()` 呼叫一行 `k\t<微秒>`（逐鍵打字、`--correct` 的改選與 Enter 的呼叫；語意校正工作的執行不算在內）；列照檔案順序、沒有列號，檔案只有 `c`、`k`、數字、tab 與換行。可以和其他旗標併用（`--rerank each|final`、`--correct`、`--learn`、`--no-recur`、`--no-tinylm` 等），不改摘要行與其他輸出；和 `--rows`、`--learn-file` 是同一個檔時照其他輸出檔的規則拒絕。比較開、關前文重現項的每鍵延遲就是同一個 commit 加與不加 `--no-recur` 各跑幾輪。
 - `--firsts FILE`（只給一致性比對用）：每列一行第一次顯示的文字。檔案可能含文字，只用在公開集合（dev302、打字測驗、錯字回報），檔案不進 repo；與 `--learn-file` 併用一律拒絕（第一次顯示可能含學習檔裡的詞）。
 - 摘要行（stdout 一行）：`## <名稱>  <設定標記>  {'n', 'top1', 'final_ok', 'unfixable', 'autocommits', 'kyss', 'picks_per100', 'rewrites', 'guard_skips', 'guard_rows', 'top1_sha256'}`。
   - `top1`：第一次顯示的第一名正確列數；`autocommits`：中途有送出（例如組字達到 128 音節的上限）的列數；`kyss` 四位小數；`picks_per100` ＝ 改選次數 × 100 ÷ 正解字數（不計標點）；`top1_sha256`＝第一次顯示以 `\n` 串接的 SHA-256，算法同 `shanjie-eval`。
   - `guard_skips`：每列打完最後一鍵時（第一次顯示之前、`final` 套用之前），最近一次解碼裡「本來會送語意校正（語意校正開、模型已載入、那段的候選至少 2）而被學習守門擋下」的段數，全部列加總；`guard_rows` 是其中段數至少 1 的列數。沒有學習資料或 `--no-tinylm` 時恆為 0。最後一鍵觸發自動送出時，工作隨送出作廢，那一列計 0。
-  - 設定標記：`replay-<profile>+ctx<詞包>+nopred+noen+lm:<8 碼>`，接 `+tl:<8 碼>`（沒有小模型時 `-notinylm`）、`+learn`、`+rerank:final`、`+correct`、`+learnfile`、`+noguard`、`+colloq:<8 碼>`、`+level:…`、`+rd+rx:<8 碼>+rm`，最後（有 `--strict` 時）`+strict`。
+  - 設定標記：`replay-<profile>+ctx<詞包>+nopred+noen+lm:<8 碼>`，接 `+tl:<8 碼>`（沒有小模型時 `-notinylm`）、`+learn`、`+rerank:final`、`+correct`、`+learnfile`、`+noguard`、`+colloq:<8 碼>`、`+level:…`、`+recur`、`+rd+rx:<8 碼>+rm`，最後（有 `--strict` 時）`+strict`。
 - 「學了之後本來對的變錯」：同一份列檔跑 `--learn off` 與 `--learn on` 各一次（都 `--correct`），兩個 `--rowstats` 用 `evalstats compare`，改壞數就是這個數字；工具本身不另算。
 
 ### 4.7 `--learn-file`（唯讀載入學習檔）
@@ -270,6 +273,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - `a_pick_that_changes_nothing_ends_the_repicking`：沒有進展的改選結束改選。
 - `an_output_that_is_the_rows_file_is_refused`：輸出等於列檔時結束碼 2、列檔不變（`./` 別名也算）；列檔讀失敗時（結束碼 1）不建立輸出檔。
 - `outputs_are_numbers_only_and_the_rowstats_are_the_clis`：`--rowstats`、`--keys` 只有 `[0-9\t\n]`，`--rowstats` 逐位元組等於 CLI 對同一份列檔的輸出，`--keys` 每列六欄。
+- `recurrence_replay_agrees_with_the_cli`：前文重現項開著時重播的選字等於 CLI（`--context`，`top1_sha256` 相同），`--no-recur` 等於 CLI 的 `--no-recur`，標記有無 `+recur`；`--key-times` 只有數字、每列一行 `c`、每個 `Engine::key()` 呼叫一行 `k`，不改摘要行。`cli/tests/recur.rs` 驗 CLI 一側。
 - `colloquial_replay_agrees_with_the_cli`、`reading_decode_replay_agrees_with_the_cli`：預設的口語表與讀音項下，選字等於 CLI（`top1_sha256` 相同）；`--colloquial FILE`、`--no-colloquial`、`--no-reading-decode` 的標記與行為。
 - `learn_file_changes_the_choice_and_the_source_is_untouched`、`a_corrupt_learn_file_is_an_error`、`an_output_that_is_the_learn_file_is_refused`（含硬連結）：`--learn-file` 的各條規則。
 - `learn_guard_counts_and_switches`（另有 `core/tests/engine_rerank.rs`）：預設計入 `guard_skips`／`guard_rows`，`--learn-guard off` 為 0 並加 `+noguard`，預設與明寫 `on` 逐位元組相同。
@@ -384,7 +388,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 指令：`tools/bench.py run --suite v2 <ref>... [--as VERSION] [--override-packs off] [--private-root DIR]`，結果寫 `eval/bench/results/v2-<label>.json`（標籤預設是各版名稱以 `+` 相連）。`--lm` 與 `--base` 不用於 v2。
 - **設定表 `VERSIONS2`**（工具裡寫死；鍵是版本標籤，`--as` 把一個還沒打 tag 的 commit 對到表上的版本；不在表裡的標籤報錯並指向表）。每一列：
   - `release`、`flags`（CLI 旗標，照 App 的預設：`--context`、`--packs acg`、`--packs acg,it`、`--packs acg,it,beauty` 或 `--packs acg,it,meme,beauty`）、`tinylm`（是否出貨小模型）、`tag`（CLI 摘要行設定標記應有的字串，`{tl8}` 等佔位符換成該版模型的 SHA-256 前 8 碼）；
-  - 選用鍵：`kn`（出貨 Kneser-Ney 側檔 `kn.sjkn`）、`tri`（出貨 `trigram.sjt3`，CLI 只在書面設定載入，需另寫 `formal_tag`）、`tri_chat`（另出貨聊天的 `trigram-chat.sjt3`，兩種設定都開 KN）、`colloquial`（出貨口語表：聊天的格帶 `--colloquial-core`，標記多 `+colloq:<8 碼>`）、`reading`（解碼器帶讀音項：每個設定標記最後都是 `+rd+rx:<該版 data/lexicon/std-exempt.tsv 的 SHA-256 前 8 碼>+rm`，聊天的口語標記後面沒有 `+rc`）。`flags` 和 `tag` 是對同一件事的兩個獨立陳述，故意不由其中一個推另一個。新版發版時在表裡加一列。
+  - 選用鍵：`kn`（出貨 Kneser-Ney 側檔 `kn.sjkn`）、`tri`（出貨 `trigram.sjt3`，CLI 只在書面設定載入，需另寫 `formal_tag`）、`tri_chat`（另出貨聊天的 `trigram-chat.sjt3`，兩種設定都開 KN）、`colloquial`（出貨口語表：聊天的格帶 `--colloquial-core`，標記多 `+colloq:<8 碼>`）、`reading`（解碼器帶讀音項：每個設定標記最後都是 `+rd+rx:<該版 data/lexicon/std-exempt.tsv 的 SHA-256 前 8 碼>+rm`，聊天的口語標記後面沒有 `+rc`）、`recur`（解碼器帶前文重現項，`docs/spec/decoder.md` §4.6：`--context` 的格的標記在 `+ctx` 之後多 `+recur`，重播的標記在讀音項標記之前多 `+recur`；沒有 `--context` 的重播設定格沒有）。`flags` 和 `tag` 是對同一件事的兩個獨立陳述，故意不由其中一個推另一個。新版發版時在表裡加一列。
 - **旗標守門**：每一格 CLI 摘要行的設定標記要等於這張表推出的字串（`lm-<profile>` ＋ tag），而且沒有表裡沒寫的標記（例如多出的 `+kn:`、非 standard 的 `+rl:<檔位>`）；不符就那一格失敗。這同時守住「旗標漏帶」與「模型資料夾裡多了側檔被自動載入」。
 - **模型檔**：工具讀匯出版本的 `data/*.sha256`（`bigram.sjlm`、`classes.sjc`，以及該列要求的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm`），到快取資料夾的 `bench/models/<sha256>/<檔名>` 找；沒有時，若 checkout 自己的 `data/lm/<檔名>` 雜湊相符就複製過去（經暫存名，中斷不留下半個檔），否則失敗退出並指向 `docs/spec/models.md` §11（下載）。雜湊不符也失敗。工具從不下載。
 - **模型資料夾**：為每一版組一個暫時的資料夾，只放 `bigram.sjlm`、`classes.sjc` 與該版出貨的側檔／表（符號連結），`--lm` 指向它。因為 CLI 會自動載入同資料夾的 `kn.sjkn`、`trigram*.sjt3`，沒出貨的版本不放，多出來會讓設定標記不符。
@@ -532,7 +536,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - McNemar 與 bootstrap 假設列獨立，同一則訊息的子句彼此相關時區間偏窄；`--cluster` 只改 bootstrap，不改 McNemar。
 - 保留集的 150 列在聊天與書面各一份，淨值要到約 6 比 0 或 9 比 1 才達顯著，只抓得到明顯的退步；份與份之間的雜訊可到約 4%。
 - 保留集與私人新聞檔的「不洩漏」靠流程（指示、旗標禁令、`rows_sha256`），`--rows` 路徑沒有技術防護。
-- `tools/kpi.py replay` 用目前 checkout 的 `shanjie-replay`，它的設定標記一律以 `+rd+rx:<8 碼>+rm` 結尾；`VERSIONS2` 裡沒有 `reading` 鍵的版本（讀音項進核心之前的版本）因此無法用現行重播程式回填。
+- `tools/kpi.py replay` 用目前 checkout 的 `shanjie-replay`，它的設定標記一律以 `+rd+rx:<8 碼>+rm` 結尾；`VERSIONS2` 裡沒有 `reading` 鍵的版本（讀音項進核心之前的版本）因此無法用現行重播程式回填。重播的標記同樣在讀音項標記之前帶 `+recur`（沒有 `recur` 鍵的版本不收這個標記），所以前文重現項進核心之前的版本也無法回填。
 - 一致性檢查只比 `top1_sha256`（與必要時的 `--firsts`）；引擎和 CLI 真的不同的列要人工歸因。
 - forms 表只收辭典明載的寫法關係；人名、有分工的字、「通」字關係不收。
 - 寬鬆對照與 forms 都只用於評測，來源授權不允許改作散布。

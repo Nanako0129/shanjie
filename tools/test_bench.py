@@ -761,6 +761,27 @@ class SuiteV2(Tmp):
         # the previous release is unchanged
         self.assertNotIn("reading", bench.VERSIONS2["v0.6.1"])
 
+    def test_recur_version_marks_every_context_tag_after_ctx(self):
+        """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
+        cell run with `--context` (chat, formal, the anchor run); the replay-setting cell has no `--context`, so no mark; a version without the key has none."""
+        spec = {"release": "vR", "flags": ["--context", "--packs", "acg"], "tinylm": True, "recur": True, "tag": "+ctx+tl:{tl8}+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vR": spec}):
+            v = self.stage_models("vR", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+recur+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+recur+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+recur+tl:7e73ef67")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")
+            self.fake_cli("lm-chat+ctx+recur+tl:7e73ef67+acg", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+recur+tl:7e73ef67+acg")
+            self.fake_cli("lm-chat+ctx+tl:7e73ef67+acg", [True, True], ("你好", "世界"))   # the tag without the mark is not this version's setting
+            with self.assertRaises(RuntimeError):
+                bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        self.assertNotIn("recur", bench.VERSIONS2["v0.7.0"])
+
     def test_a_version_without_the_key_never_gets_the_table(self):
         """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""
         HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56

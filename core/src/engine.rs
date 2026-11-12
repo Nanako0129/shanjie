@@ -774,7 +774,7 @@ pub struct Engine {
     /// `left_full` holds the last L characters of a longer text (it was cut), so a word starting at its first character may be half
     /// of one.
     left_cut: bool,
-    /// The context recurrence set (docs/spec/decoder.md, the context recurrence section): the Han pairs of the last `lm::RECUR_CHARS` characters of the
+    /// The context recurrence set (docs/spec/decoder.md §4.6): the Han pairs of the last `lm::RECUR_CHARS` characters of the
     /// text `set_left_context` was given, rebuilt (not added to) by every call. This engine's own, passed to the decoder as an argument: never in a
     /// structure engines share (`Lm`, the lexicons), never in a `RerankJob`, never returned over the C ABI, written, logged or sent anywhere. Cleared with
     /// `left` (`clear_left`).
@@ -1349,8 +1349,7 @@ impl Engine {
         }
     }
 
-    /// Evaluation only (`shanjie-replay --no-recur`): with `false` the decoder does not get the context recurrence set (docs/spec/decoder.md, the context
-    /// recurrence section), the arithmetic without the term; the set itself is kept and cleared as before. The pending job is dropped like any decoding change.
+    /// Evaluation only (`shanjie-replay --no-recur`): with `false` the decoder does not get the context recurrence set (docs/spec/decoder.md §4.6), the arithmetic without the term; the set itself is kept and cleared as before. The pending job is dropped like any decoding change.
     pub fn set_recur(&mut self, on: bool) {
         self.setting_changed();
         self.invalidate();
@@ -2484,7 +2483,7 @@ impl Engine {
     /// and the part on the right restarts from (`<s>`, `<s>`), like after punctuation. Only the trigram level does this; without it the run is
     /// not a boundary here (the bigram total has never cut there). `total_score` then equals the top decode score of a single stretch, provided the decoder
     /// adds no reading term (docs/spec/decoder.md §5): it is not in `total_score`, so the equality holds after `set_reading_decode(false)` or with a
-    /// capped lexicon built without `with_reading`. The context recurrence gain (docs/spec/decoder.md, the context recurrence section) rides in the words'
+    /// capped lexicon built without `with_reading`. The context recurrence gain (docs/spec/decoder.md §4.6) rides in the words'
     /// deltas, so it is in `total_score` and not an exception.
     /// Slice A2 (b'): a stretch that starts from an unknown u (after a fixed word, or from the left context) and holds exactly one word closes
     /// with the bigram: its `eos`, or the transition into the next fixed word, takes u as unknown (`close_u`), as `decode_segment_learned` does.

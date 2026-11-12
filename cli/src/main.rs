@@ -295,7 +295,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // docs/spec/lexicon-and-packs.md §1.1, §3: the names layer is always on; `--no-names` (evaluation only: the per-layer breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
-    // `--no-recur` (evaluation only): leave the context recurrence term out (docs/spec/decoder.md, the context recurrence section).
+    // `--no-recur` (evaluation only): leave the context recurrence term out (docs/spec/decoder.md §4.6).
     let mut recur = true;
     let mut forms_rowstats = None::<String>;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);

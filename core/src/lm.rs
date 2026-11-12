@@ -1268,11 +1268,10 @@ pub fn decode_segment_learned<'a>(
     decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None)
 }
 
-/// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/spec/decoder.md, the context
-/// recurrence section: the long-context set and the chat sets were measured with 64).
+/// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/spec/decoder.md §4.6: the long-context set and the chat sets were measured with 64).
 pub const RECUR_CHARS: usize = 64;
 /// The weight (log10, the n-gram score's scale) of one recurring adjacent pair on a path. The long-context set's two halves chose 2 and 3, and the
-/// typo reports are 0/0 at 2 (docs/spec/decoder.md, the context recurrence section).
+/// typo reports are 0/0 at 2 (docs/spec/decoder.md §4.6).
 pub const RECUR_BETA: f64 = 2.0;
 
 /// The adjacent character pairs of the left context's last `RECUR_CHARS` characters (both characters Han). Private fields, no `Debug`/`Display`, no read
@@ -1489,7 +1488,7 @@ pub fn decode_segment_fuzzy<'a>(
                 let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
                 for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
                     let (wid, pb0) = (lex.model_id(lm, word), pow10(lp0));
-                    // Context recurrence (docs/spec/decoder.md, the context recurrence section): the pairs inside the word, once per word.
+                    // Context recurrence (docs/spec/decoder.md §4.6): the pairs inside the word, once per word.
                     let (in_word, first) = recur.map_or((0, None), |r| (r.hits(word), word.chars().next()));
                     // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
                     // `Engine::total_score` and the rerank job see the score the decoder used.

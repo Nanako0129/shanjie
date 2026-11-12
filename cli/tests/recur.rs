@@ -1,4 +1,4 @@
-//! The context recurrence term in the evaluation CLI (docs/spec/decoder.md, the context recurrence section): with `--context` the CLI builds each row's set
+//! The context recurrence term in the evaluation CLI (docs/spec/decoder.md §4.6): with `--context` the CLI builds each row's set
 //! from its context column (`RecurGrams::from_text`); `--no-recur` leaves the term out. A context that is empty or one character long has no pair, so every
 //! output is what `--no-recur` prints (the tag aside); a context that holds a homophone changes the choice.
 use std::path::{Path, PathBuf};

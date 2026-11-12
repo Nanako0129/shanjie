@@ -106,7 +106,7 @@ fn row25(dir: &Path) -> String {
 fn no_option_is_byte_identical_to_before() {
     let d = tmp("golden");
     // `--no-reading-decode` and `--no-recur`: the decoder without the reading term (docs/spec/decoder.md §5) and without the context recurrence term
-    // (docs/spec/decoder.md, the context recurrence section), the binary these hashes were taken from
+    // (docs/spec/decoder.md §4.6), the binary these hashes were taken from
     let o = full_run(&d, &BASE, &["16"], &["--no-reading-decode", "--no-recur"]);
     let h = |s: &str| sha256_hex(s.as_bytes());
     assert_eq!(h(&o.dump), "ea7dac7b34a98ba85be7cab65e0c67cc41331981c127af618a50b12b08b184c7");

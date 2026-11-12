@@ -308,11 +308,16 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // learning_clear and a forget may re-decode on the next key.
 // set_left_context: copies the text before the insertion point: the raw text of the same message, at most
 //   64 graphemes (docs/spec/semantic-rerank.md §5; terminal apps: only the trailing Han characters). The
-//   core uses only its last <= 2 consecutive Han characters for decoding and learning (docs/spec/learning.md §2.1, §6.1);
-//   besides them it keeps only the declared left-context length of the small model (SJTL0005), or else the
-//   trailing English word, for the small model and the English table, never returned or written. NULL
-//   or "" means none. Not UTF-8: returns 2 and clears. Cleared by the core after every commit, reset,
-//   code 4 and rule 22 pass-through; call it at every composition start.
+//   shell calls it before a key that may start a composition (a character key with no modifier but Shift
+//   while not composing), not before every key. What the core keeps from it: the last <= 2 consecutive Han
+//   characters (the history word of the n-gram decoder and the key of learning, docs/spec/learning.md §2.1,
+//   §6.1); the set of adjacent Han character pairs of its last 64 characters, which the decoder looks up
+//   (context recurrence, docs/spec/decoder.md §4.6; the text itself is not kept); and, for the small model and
+//   the English table, only the declared left-context length of the small model (SJTL0005), or else the
+//   trailing English word. None of it is returned or written. NULL or "" means none. Not UTF-8: returns 2
+//   and clears. Cleared by the core after every commit, reset, code 4 and rule 22 pass-through, and when a
+//   key arrives on an empty composition without a set_left_context since the previous key (a composition
+//   that starts without a fresh text has none).
 //   S2h: also the condition of the first word in the bigram model (its last 2 characters, else the last
 //   one, whichever has bigram history; none: the sentence start).
 int32_t shanjie_engine_set_left_context(ShanjieEngine *engine, const char *utf8);

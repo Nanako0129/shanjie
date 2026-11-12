@@ -43,8 +43,7 @@ final class LogTests: XCTestCase {
     static let contextMarker = "鑑識前文"
     /// An English word in the left context (docs/spec/semantic-rerank.md §10): the shell passes the raw text now.
     static let englishMarker = "Quixotry"
-    /// Two Han characters side by side in a long left context: a pair the core keeps for the context recurrence term (docs/spec/decoder.md, the context
-    /// recurrence section).
+    /// Two Han characters side by side in a long left context: a pair the core keeps for the context recurrence term (docs/spec/decoder.md §4.6).
     static let pairMarker = "鑫犇"
 
     func testShellLogsNothingButStaticTextAndCodes() throws {
@@ -57,7 +56,7 @@ final class LogTests: XCTestCase {
         // characters, so the whole raw text goes from the shell to the core.
         let asciiMarker = "ctx\(nonce)"
         let leftText = "\(asciiMarker) \(Self.englishMarker)\(Self.contextMarker)"
-        // The context recurrence term (docs/spec/decoder.md, the context recurrence section): 64 characters, all of which reach the core, with an ASCII
+        // The context recurrence term (docs/spec/decoder.md §4.6): 64 characters, all of which reach the core, with an ASCII
         // marker and the Han pair marker.
         let recurAscii = "recur\(nonce.prefix(12))"
         let (recurHead, recurTail) = ("\(recurAscii) ", "\(Self.pairMarker)。")

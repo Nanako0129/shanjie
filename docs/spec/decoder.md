@@ -152,6 +152,7 @@
 - `lp` 是該詞在這個讀音下的封頂分數；學習加分把它抬到 `該讀音最高分 + ε·w/(w+1)`（ε 與層級的細節見 `docs/spec/learning.md`），抬高後 `pb` 重算。
 - `δ` = 降權表的 δ（降權開時，§2.4）＋模糊輸入的容錯扣分（§6）。δ 和學習加分都只動分數，不改「試哪些詞條」。
 - 讀音項見 §5，只加在「單字詞、來自詞庫條目、沒被學習加分」的詞上。
+- 前文重現項見 §4.6，放在這個詞的 δ 裡（負的 δ），每個詞都可能有，包含被學習加分的詞與新詞。
 
 ### 4.3 段落、前文與收尾
 
@@ -159,7 +160,7 @@
 
 - **起點**：段落左邊是固定的字 → 歷史是（未知, 那個字），第一個詞只用 bigram；左邊是標點或英文段 → 歷史 `<s>`（trigram 狀態為（`<s>`, `<s>`））；左邊沒有固定詞時從輸入框前文開始（見本節末的輸入框前文）。
 - **收尾**：右邊是固定的字 → 收尾項是從最後一詞到那個字的轉移（`End::Next`，含該字的降權 δ）；否則是句尾項（`End::Eos`）。有 trigram 表時收尾項也用（倒數第二詞, 最後一詞）。**單詞段落**例外：段落的起點歷史是（未知, 某詞）（不是 `<s>`）而且段內只有一個詞時，收尾項的 u 也當未知，用 bigram。
-- **輸入框前文**：`lm::history(left, lm)` 取殼傳進核心、結尾至多 2 個漢字的前文（`context_key` 的結果），依序試「整段」與「最後一個字」，第一個在模型裡有 bigram 前文條目的就是歷史詞；都沒有或前文空，歷史詞是 `<s>`。前文本身不計分，只當第一個詞的條件。只用在左邊沒有固定詞的那一段。核心的 n-gram 與學習只看前文結尾至多 2 個漢字，殼傳進來更長的前文（同一則訊息最多 64 字）不改變歷史詞。
+- **輸入框前文**：`lm::history(left, lm)` 取殼傳進核心、結尾至多 2 個漢字的前文（`context_key` 的結果），依序試「整段」與「最後一個字」，第一個在模型裡有 bigram 前文條目的就是歷史詞；都沒有或前文空，歷史詞是 `<s>`。前文本身不計分，只當第一個詞的條件。只用在左邊沒有固定詞的那一段。n-gram 的歷史詞與學習的鍵只看前文結尾至多 2 個漢字；殼傳進來更長的前文（同一則訊息最多 64 字）不改變歷史詞，另外由前文重現項（§4.6）查。
 - 英文段（`run_cut`）是邊界：游標處的英文打字中，左邊那段以句尾收尾、右邊從（`<s>`, `<s>`）重新開始；只在有 trigram 表時 `total_score` 照此切（沒有表時 bigram 的總分從來沒在那裡切過）。
 - 取捨：歷史詞退回 `<s>` 而不是引入第三種「沒有句首也沒有前文」狀態，因為歷史詞沒有紀錄時 `prob` 本來就直接回詞庫機率，等於不看前文；這條規則讓「好」送出後再打 ㄅㄚ˙ 得到「吧」而不是「巴」。
 
@@ -170,7 +171,19 @@
 
 ### 4.5 `Engine::total_score`
 
-組字區目前最佳路徑的總分，逐詞算 `word(λ, 前詞, 詞, lp) − δ`（trigram 表開時帶兩個歷史詞，起點與收尾照 §4.3，學習加分的詞走 `word_learned`），最後加句尾項；標點把它切成句子，標點本身不計分。沒有模型或沒有詞時回 `None`。不含讀音項：在 `set_reading_decode(false)` 或詞庫沒有讀音表時它等於單段第一名的分數，讀音項開著時差在讀音項。
+組字區目前最佳路徑的總分，逐詞算 `word(λ, 前詞, 詞, lp) − δ`（δ 含前文重現項的加分，§4.6）（trigram 表開時帶兩個歷史詞，起點與收尾照 §4.3，學習加分的詞走 `word_learned`），最後加句尾項；標點把它切成句子，標點本身不計分。沒有模型或沒有詞時回 `None`。不含讀音項：在 `set_reading_decode(false)` 或詞庫沒有讀音表時它等於單段第一名的分數，讀音項開著時差在讀音項。前文重現項在每個詞的 δ 裡，所以算在 `total_score` 裡，不是例外：有前文時它仍等於解碼第一名的分數（同樣不含讀音項）。
+
+### 4.6 前文重現項
+
+- 作用：前文裡出現過的詞，在同音候選裡再出現一次的機率高。解碼器不經任何模型，只數候選路徑的相鄰字元對有幾個在前文裡出現過，每個加分。
+- **集合 G**：`Engine::set_left_context(text)` 取 `text` 最後 `RECUR_CHARS` = 64 個 Unicode 純量值（殼傳的是最多 64 個 grapheme，核心照純量值再截一次），把裡面**兩個都是漢字**的相鄰字元對（照順序；漢字的判斷是 `context_key` 用的 `is_han`）收成一個集合。標點、英數、emoji 的字元對不收，所以密碼、網址、指令這類英數內容不進 G。不做簡繁、異體的正規化。G 至多 63 個字元對，每次 `set_left_context` 都重建（覆寫，不累加）；NULL、空字串、不是 UTF-8 時是空的。
+- **次數與加分**：一條候選路徑（一個自由段的顯示文字）的次數 = 它的「相鄰兩個字元」位置落在 G 裡的個數，詞內的與跨詞邊界的都算，同一個字元對出現在幾個位置就算幾次；自由段的第一個詞和它前面的文字之間不算邊界。路徑分數加 `RECUR_BETA` × 次數，`RECUR_BETA` = 2（log10，和 n-gram 分數同一個尺度）。只數字元對，不數單字（單字會被「的、是」這類字拖垮）。
+- **常數**：`RECUR_CHARS` 與 `RECUR_BETA` 是 `lm.rs` 的具名常數，一個值，聊天與書面、三檔語意校正強度、語意校正開或關都一樣，沒有使用者開關。值在長前文集上量得：β 在 2 與 3 之間取不傷短前文集合（dev302、打字測驗、錯字回報）的 2；64 是殼傳的前文長度上限。
+- **做在哪一層**：加分放在每個詞的 δ 裡（負的 δ，和模糊音的容錯扣分同一個管道）：詞內的字元對在放進那個詞時加，跨詞邊界的在接上前一個詞時加（解碼本來就記著前一個詞）。所以它在路徑分數裡：光束的剪枝、n-best 的順序、語意校正的候選池與它的把握閘門（n-gram 分差）、融合用的 n-gram 分數都含它；`Engine::total_score` 仍等於解碼第一名的分數（§4.5）。句首單字紀錄的兩次解碼（不抬高與抬高）和被學習加分的詞都帶這一項；讀音輸入、候選窗、預測列的前文鍵、學習的鍵都不變。
+- **只用已經在 App 裡的文字**：組字區裡還沒送出的字不進 G，免得解碼器自己猜的字回頭加強自己。前文的原文不為這一項保存，核心只留 G（保存與清除見 `docs/spec/semantic-rerank.md` §5.2 與 `docs/spec/privacy.md` §5.2）。
+- G 是空的（沒有前文、前文裡沒有兩個相鄰的漢字、隱私閘門擋住）時，這一項恆為 0，解碼與選字和沒有這一項逐位元組相同。終端機類 App 只傳結尾 ≤ 2 個漢字，G 至多一個字元對。
+- 評測開關：`Engine::set_recur(false)`（只有 Rust API，不在 `shanjie.h`，換世代號）、評測 CLI 與重播的 `--no-recur` 讓解碼器不拿到 G，等於沒有這一項；G 照舊保存與清除。評測 CLI 不建 `Engine`，有 `--context` 時從每列的前文欄呼叫同一個 `RecurGrams::from_text` 建 G，傳給 `decode_from_fuzzy_scored`；沒有 `--context` 就沒有前文，這一項不存在。摘要行標記見 §9。
+- 取捨：不放進融合分數，因為語意校正關著時融合不執行，這一項就消失；做進路徑分數，三種強度與語意校正開關都生效。
 
 ## 5. 讀音項
 
@@ -309,15 +322,16 @@
 ## 9. Python 參考實作與 CLI
 
 - `reference/proto/lm.py`、`trigram.py`、`ime.py` 實作 bigram、詞類、KN、trigram、異體排序表（`ime.py` 的 `load_variant_order`、`lm.py` 的 `cap_overlay`）、降權表（`load_demote`）、詞包詞當未知詞與前後同樣的合併規則，與 Rust 逐位元組相同；`fuzzy_ref.py` 是容錯表的對照。Python **不實作**讀音項、模糊輸入的解碼、學習。golden 由 Python 產生、Rust 比對。
-- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--fuzzy`、`--fuzzy-delta-sound`、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
-- 摘要行標記一覽：`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm`。
-- 重播程式（`shanjie-replay`）走引擎的 `load_lm`，標記與模型列同 CLI，另列出實際載入的每個模型檔。
+- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--fuzzy`、`--fuzzy-delta-sound`、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
+- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm`。
+- 重播程式（`shanjie-replay`）走引擎的 `load_lm`，標記與模型列同 CLI（`+recur` 在讀音項標記之前，`--no-recur` 時沒有），另列出實際載入的每個模型檔。
 
 ## 10. 驗證
 
-- 單元與整合：`make test-rust`（`core/src/lm.rs` 內的 trigram 公式、遮罩、容錯、`core/src/tests.rs` 的異體排序，`core/tests/kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`、`engine_pack.rs`、`engine_demote.rs`、`engine_fuzzy.rs`、`engine_fuzzy_rerank.rs`、`engine_lm.rs`、`engine_rerank.rs`、`reading_decode.rs`，`cli/tests/golden.rs`、`fuzzy.rs`、`fuzzy_rerank.rs`、`reading_decode.rs`、`replay.rs`）；`make test-python`（`reference/proto/test_recombine.py`、`test_demote.py`、`test_variant_order.py`、`test_fuzzy_ref.py`，`tools/test_build_trigram.py`、`test_kn_cont.py`、`test_build_classes.py`、`test_build_sandhi.py`、`test_build_overlay.py`、`test_build_acg_pack.py`、`test_pack_oov.py`、`test_std_exempt.py`）；`make test-swift`（設定存取、旗標送出）；`make test-golden`。
+- 單元與整合：`make test-rust`（`core/src/lm.rs` 內的 trigram 公式、遮罩、容錯、`core/src/tests.rs` 的異體排序，`core/tests/kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`、`engine_pack.rs`、`engine_demote.rs`、`engine_fuzzy.rs`、`engine_fuzzy_rerank.rs`、`engine_lm.rs`、`engine_rerank.rs`、`engine_recur.rs`、`reading_decode.rs`，`cli/tests/golden.rs`、`fuzzy.rs`、`fuzzy_rerank.rs`、`reading_decode.rs`、`recur.rs`、`replay.rs`）；`make test-python`（`reference/proto/test_recombine.py`、`test_demote.py`、`test_variant_order.py`、`test_fuzzy_ref.py`，`tools/test_build_trigram.py`、`test_kn_cont.py`、`test_build_classes.py`、`test_build_sandhi.py`、`test_build_overlay.py`、`test_build_acg_pack.py`、`test_pack_oov.py`、`test_std_exempt.py`）；`make test-swift`（設定存取、旗標送出）；`make test-golden`。
 - 跨語言 golden：玩具模型加玩具側檔／表由 Python 產生（`tools/gen_kn_tiny.py`、`gen_tri_tiny.py`、`gen_pack_oov.py`），Rust 逐位元組比對（`kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`）；真模型的 `eval/golden/` 由 `reference/proto/lm_eval.py` 重產，Rust CLI 逐位元組相同，指令見 `docs/spec/evaluation.md`。
 - 規則壞了就要失敗的測試（每條規則至少一個）：合併鍵（沒有合併修正時留下錯的路徑、修正後留下 `下｜來`，用合成小詞庫與模型）、KN 替換與 id ≥ 2 條件、trigram 公式四種情形與下限生效／不生效、單詞段落收尾、壞檔各回對應錯誤、`load_opts` 載入的表確實是映射、強制詞當未知詞且不封頂／非強制詞照封頂、降權只在指定讀音生效與 `*`、`set_demote(0)` 等於沒有表、異體排序的格式與順序與封頂後再套一次、容錯標記（降權後 δ 剛好 2.5 的打的讀音詞不是容錯詞）、遮罩與其退回路徑、學習抬高的字不被讀音項推翻。
+- 前文重現項：前文放其中一個同音詞，同音候選第一名是前文那一個，換成另一個就反過來（語意校正開、關各一次）；前文空或只有一個字元時與關掉它逐列相同（`core/tests/engine_recur.rs`、`cli/tests/recur.rs`，見 `docs/spec/semantic-rerank.md` §10）。
 - 看到它有效：書面、句首 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ` 第一名是 `下來分析`；`ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ` 開降權是「搞完這波」、關閉是「睪丸這波」；書面打「以敵偽人員的名字命名」的注音整句對（讀音項關閉時是「以狄為…」）；`ㄐㄧㄝˊ ㄓㄚ` 得到「結紮」；`ㄅㄨˋ ㄕˋ` 與 `ㄅㄨˊ ㄕˋ` 都得到「不是」、`ㄎㄢˋ ㄧ ㄒㄧㄚˋ` 得到「看一下」、`ㄈㄚˇ ㄍㄨㄛˊ` 得到「法國」；模糊音開 ㄓ/ㄗ 打 `ㄗ ㄉㄠˋ` 第一名是「知道」；「好」送出後打 `ㄅㄚ˙` 得到「吧」。
 - 選字結果改變的改動，出貨前依 `docs/spec/evaluation.md` 的出貨標準（私人的聊天集合、dev302、打字測驗、錯字回報、調參集）量；調參集與私人集合不公開。
 
@@ -330,5 +344,6 @@
 - 讀音項的 `SANDHI` 免扣不檢查下一個音節是否真的需要變調；讀音項不納入 `total_score`。
 - 強制詞（`acg-oov`）不經通語統計：當成未知詞，所以它們不會從通語的二元組得到上下文加分，也不會被當成下一個詞的上下文。
 - trigram 表的 D 固定 0.75、下限 F 固定 0.5；映射期間表檔不可原地改寫。
-- 輸入框前文只有結尾至多 2 個漢字進 n-gram；英文段只在有 trigram 表時當總分的邊界。
+- 輸入框前文只有結尾至多 2 個漢字當 n-gram 的歷史詞（前文重現項另外查最後 64 個字元的漢字對，§4.6）；英文段只在有 trigram 表時當總分的邊界。
+- 前文重現項只看字元的原樣，不做簡繁與異體的正規化；前文裡留著的錯字或另一種寫法，同音的詞會被推向它。
 - 學習加分的詞不經過 KN、trigram 與讀音項：使用者教過的選擇優先於模型統計。

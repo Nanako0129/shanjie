@@ -380,7 +380,7 @@ fn the_english_left_text_never_reaches_the_learning_file() {
 }
 
 /// docs/spec/english-mixed.md §8: a left text ending in Han ("……好") learns byte for byte as its Han tail alone ("好"): the learning keys and the learning
-/// file see only the tail. With the context recurrence term off (docs/spec/decoder.md, the context recurrence section) it also decodes, shows and predicts
+/// file see only the tail. With the context recurrence term off (docs/spec/decoder.md §4.6) it also decodes, shows and predicts
 /// byte for byte as the tail; with it on the decode may differ (the term reads the longer text's Han pairs), so that half is asserted with the term off.
 /// A re-pick in the candidate window, then Enter, with learning on.
 #[test]

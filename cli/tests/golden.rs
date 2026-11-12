@@ -109,9 +109,8 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
 /// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it,meme,beauty
 /// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
 /// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
-/// `--no-recur`: the pins were taken before the context recurrence term (docs/spec/decoder.md, the context recurrence section). With the term, the default,
-/// every line's tag gains `+recur` and the chat n-gram line of the user-reported rows prints another `top1_sha256` (the same top1), so until the file is
-/// taken again with the default these lines pin the decoder without the term.
+/// The default has the context recurrence term (docs/spec/decoder.md §4.6), so every line's tag has `+recur` (the n-gram-only lines too: `--context` builds
+/// the set from the row's context column).
 #[test]
 fn shipping_default_matches_its_rust_only_pins() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
@@ -124,14 +123,14 @@ fn shipping_default_matches_its_rust_only_pins() {
                 Some(r) => vec!["--rows", r, "--name", name],
                 None => vec!["--dev", "302"],
             };
-            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--no-recur"]].concat());
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context"]].concat());
             let ship = format!("{name}-ship");
             let set: Vec<&str> = match &rows {
                 Some(r) => vec!["--rows", r, "--name", &ship],
                 None => vec!["--dev", "302", "--name", &ship],
             };
             let colloquial: &[&str] = if p == "chat" { &["--colloquial-core", &co] } else { &[] };
-            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--no-recur", "--packs", "acg,it,meme,beauty", "--tinylm", &tl], colloquial].concat());
+            got += &run(&[&["--lm", &lm, "--profile", p][..], &set, &["--context", "--packs", "acg,it,meme,beauty", "--tinylm", &tl], colloquial].concat());
         }
     }
     assert_eq!(got, golden("reading-decode-shipping.txt"));

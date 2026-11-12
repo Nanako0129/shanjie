@@ -21,7 +21,7 @@
 //! `+rd+rx:<sha8 of std-exempt.tsv>+rm` (the table the engine really loaded; `+rm` is the reading-mass rule). `--no-reading-decode` (research only,
 //! `Engine::set_reading_decode(false)`) leaves the term out and the tag without these marks. There is no reading-channel term in the fusion any more.
 //!
-//! The decoder also adds the context recurrence term (docs/spec/decoder.md, the context recurrence section), from each row's context through
+//! The decoder also adds the context recurrence term (docs/spec/decoder.md §4.6), from each row's context through
 //! `Engine::set_left_context`; the tag then has `+recur` before the reading marks. `--no-recur` (evaluation only, `Engine::set_recur(false)`) leaves it out
 //! and the mark with it. `--key-times FILE` writes the microseconds of every `Engine::key` call and of each row's `set_left_context`
 //! (`cli::replay::format_key_times`); the summary line does not change.

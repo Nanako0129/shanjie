@@ -1,4 +1,4 @@
-//! The context recurrence term in the engine (docs/spec/decoder.md, the context recurrence section): the set the engine keeps from
+//! The context recurrence term in the engine (docs/spec/decoder.md §4.6): the set the engine keeps from
 //! `set_left_context`, where it is cleared, the key that forgets a stale left text, and that the engine decodes as the evaluation CLI does. On the
 //! real lexicon and n-gram model (data/lm/, fail loudly without them); the homophones are 反應 and 反映 (ㄈㄢˇ ㄧㄥˋ): with no left text the
 //! n-gram shows 反應, with a left text that holds 反映 the term shows 反映 (both settings, semantic correction off and on, checked with the CLI).

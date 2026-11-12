@@ -455,7 +455,7 @@ fn reading_decode_replay_agrees_with_the_cli() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// The context recurrence term (docs/spec/decoder.md, the context recurrence section): the replay's engine builds the set from each row's context through
+/// The context recurrence term (docs/spec/decoder.md §4.6): the replay's engine builds the set from each row's context through
 /// `set_left_context`, so its choices are the CLI's with `--context` (equal `top1_sha256`), and `--no-recur` is the CLI's `--no-recur`. Premise: the term
 /// changes the CLI's choice among these rows (the left text holding 反映 shows 反映 for ㄈㄢˇ ㄧㄥˋ, 反應 without the term). The tag has `+recur` before the reading
 /// marks only with the term on. `--key-times` writes `c\t<µs>` per row and `k\t<µs>` per `Engine::key` call (each typing key and the Enter here), nothing else,

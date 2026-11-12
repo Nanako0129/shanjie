@@ -1291,7 +1291,7 @@ mod tests {
         let dir = tiny_dir("panic", "ㄒㄧㄣ 鑫 -1.0\nㄅㄣ 犇 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
         // docs/spec/semantic-rerank.md §5.2: the English word of the left text is held until the reset after code 4, and so is the context recurrence
-        // set (docs/spec/decoder.md, the context recurrence section): one pair here.
+        // set (docs/spec/decoder.md §4.6): one pair here.
         let held = |e: *mut ShanjieEngine| {
             // SAFETY: test-only read of a live handle.
             let x = unsafe { &(*e).0 };
@@ -1318,7 +1318,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// The context recurrence set (docs/spec/decoder.md, the context recurrence section) over the C ABI: NULL, "" and text that is not UTF-8 (code 2)
+    /// The context recurrence set (docs/spec/decoder.md §4.6) over the C ABI: NULL, "" and text that is not UTF-8 (code 2)
     /// each empty it, with `left_full`, and ㄈㄢˇ ㄧㄥˋ then shows what it shows with no left text (反應); right after a left text holding 反映 it
     /// shows 反映. The real lexicon and n-gram model.
     #[test]

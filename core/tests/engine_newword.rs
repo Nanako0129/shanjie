@@ -1002,7 +1002,7 @@ fn r2_marker_characters_on_disk() {
 fn r2_marker_characters_on_disk_with_subspans() {
     r2_marker(true, &format!("我說 {LEFT_MARKER} "), false);
 }
-/// The same with a 64-character left text whose Han pairs the context recurrence term reads (docs/spec/decoder.md, the context recurrence section): it
+/// The same with a 64-character left text whose Han pairs the context recurrence term reads (docs/spec/decoder.md §4.6): it
 /// holds the marker pair 餅叮, which turns the decode of the marker string from 餅丁 to 餅叮, and Han characters typed nowhere (鑫犇淼焱垚). The
 /// pairs are never written: a Han character of the left text is on disk only where it is in the sent text (inside the allowed span), never otherwise.
 #[test]
