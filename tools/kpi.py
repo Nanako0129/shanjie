@@ -31,9 +31,11 @@ SITE_JSON = os.path.join(ROOT, "site/data/kpi.json")
 #   SPEED_LOAD_AFTER_MAX. The load right before is recorded and not judged: the accuracy cells run before the speed measurement, so it
 #   carries bench's own work.
 # - the start rule, for the results before that (v0.7.0 and earlier): the 1-minute load when the whole run started was at most LOAD_MAX.
-#   It cannot see what starts after the run did (a backup that began two minutes into a v0.7.0 run slowed both versions by about 40%).
-# SPEED_LOAD_AFTER_MAX is provisional: it sits between the load after the two undisturbed v0.7.0 runs (2.77, 4.25) and the disturbed one
-# (5.30), three runs in all. Set it again, and decide whether the load before joins the rule, once three versions carry the new fields.
+#   It cannot see what starts after the run did (a backup that began two minutes into a v0.7.0 run slowed both versions by about 40%;
+#   that run's result was set aside and is in no tracked file, its numbers are from the local record of the run).
+# SPEED_LOAD_AFTER_MAX is provisional: it sits between the load after the two undisturbed v0.7.0 runs (2.77 in the result of c3ffeff2,
+# 4.25 in the current one) and the disturbed one (5.30, local record only), three runs in all. Set it again, and decide whether the load
+# before joins the rule, once three versions carry the new fields.
 LOAD_MAX = 2.0
 SPEED_LOAD_AFTER_MAX = 5.0
 # name -> (rows file, pinned sha256): the replay rows are frozen suite files, not eval/dev/*.
