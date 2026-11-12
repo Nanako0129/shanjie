@@ -208,10 +208,14 @@
     ["速度與記憶體（閒置窗）", (v) => {
       const s = v.speed;
       if (!s) return null;
-      if (!s.idle) return [s.machine, null, `—（負載 ${fixed(s.load_avg_start, 2)}）`];
+      // 兩個規則（tools/kpi.py 的 speed_verdict）：有 rule: "window" 的列看速度量測前後的備份狀態與量完時的負載，其他的看開跑時的負載
+      const win = s.rule === "window";
+      if (win && (s.speed_tm_before === true || s.speed_tm_after === true)) return [s.machine, null, "—（備份中）"];
+      if (!s.idle) return [s.machine, null, win ? `—（速度段後負載 ${fixed(s.speed_load_after, 2)}）` : `—（負載 ${fixed(s.load_avg_start, 2)}）`];
       let t = `按鍵 p95 ${fixed(s.p95_us / 1000, 2)} ms`;
       if ("rerank_p95_ms" in s) t += `／重排 p95 ${fixed(s.rerank_p95_ms, 1)} ms`;
-      return [s.machine, null, t + `／RSS ${fixed(s.rss_mb, 0)} MB`];
+      const note = win && (s.speed_tm_before == null || s.speed_tm_after == null) ? "（備份狀態未知）" : "";
+      return [s.machine, null, t + `／RSS ${fixed(s.rss_mb, 0)} MB` + note];
     }],
   ];
   function kpi(d) {

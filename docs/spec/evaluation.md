@@ -403,7 +403,8 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 按鍵重播程式 `tools/bench/replay/`：獨立的 crate，執行時產生 `Cargo.toml`，把 `core` 指到該版本匯出的原始碼，只用 v0.1.0 起就有的 API。用法 `replay <詞庫資料夾> <lm 檔> <列檔> <commits 輸出檔> [chat|formal]`（profile 預設 chat）。把每列的讀音轉成標準排列的按鍵（沒有聲調鍵的音節補 Space，每列最後按 Enter），每鍵計時，每列 Enter 送出的字串寫一行到輸出檔，stdout 印一行 JSON：`keys`、`load_ms`（`Engine::new` 加 `load_lm`）、`p95_us`、`max_us`；峰值 RSS 由父程序用 `wait4` 取。
 - **重播必須真的在打字**：重播的送出字串要和「同設定的 CLI 格」的第一名逐列相同。v2 的比對格是另跑一格和重播設定完全相同的 CLI（`--profile` 同該列、不帶 `--context`、`--packs`、`--tinylm`，dev302），設定標記必須等於該版 `lm-<profile>` 加它自己的 KN、trigram 與讀音項部分；不符、有任何一列不同或重播失敗，該列的速度欄寫錯誤、工具以非 0 結束。
 - 重播不載詞包、沒有前文、沒有語意校正（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）。每版兩列：聊天，與書面（重播程式的第五個參數 `formal`；有 trigram 表的版本兩列都把表載進記憶體）。舊的結果 JSON 沒有書面列時，表上顯示「—」。
-- **同場量測**：各版本輪流跑 3 輪，每版取三輪 p95 的中位數、max 取最大、載入時間取中位數、RSS 取最大；記下機型、macOS 版本與開始、結束時的 load average。語意校正的每列耗時取 CLI 在 stderr 印的 `tinylm: rerank n=… p50=… p95=…` 行，在三輪重播都跑完之後再跑三次、取中位數，且不和其他格同時跑。
+- **同場量測**：各版本輪流跑 3 輪，每版取三輪 p95 的中位數、max 取最大、載入時間取中位數、RSS 取最大；記下機型、macOS 版本與開始、結束時的 load average（結果檔 `env` 的 `machine`、`macos`、`cargo`、`load_avg_start`、`load_avg_end`）。語意校正的每列耗時取 CLI 在 stderr 印的 `tinylm: rerank n=… p50=… p95=…` 行，在三輪重播都跑完之後再跑三次、取中位數，且不和其他格同時跑。
+- **速度段前後的狀態**（`speed_window`）：速度量測排在準確率格之後、整輪的最後；`bench.py` 在它開始前與結束後各讀一次 1 分鐘負載與 Time Machine 是否正在備份，寫進 `env` 的四個欄位 `speed_load_before`、`speed_tm_before`、`speed_load_after`、`speed_tm_after`（四個一起寫；沒有 dev302、不量速度時都不寫）。備份狀態由 `tm_running()` 讀：只在 macOS 上執行 `tmutil status`（逾時 30 秒），輸出有 `Running = 1` 是 `true`、沒有是 `false`；不是 macOS、指令失敗或逾時是 `null`。開始前的負載會帶著前面準確率格（多核心）的殘留。這四欄只有加入之後量的結果檔才有，舊檔不回填；KPI 表用它們判斷速度算不算數（§8.2）。
 - 速度只報、不設門檻；數字只在同一次執行、同一台機器裡比較才有意義。
 
 ### 7.6 保留集欄
@@ -430,6 +431,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   - 參考列（指令不帶 `--lm` 且帶 `--no-overlay`、私有路徑不被碰、失敗的集合會重跑並說明原因、同 commit 不重算、commit 或指紋變了就重算、參考列沒有修好／弄壞）；
   - v1 的表與保留集表不變；
   - `SuiteV2`：設定表的旗標與標記、集合表、`--as` 命名最後一個 ref、模型資料夾的內容、KN／trigram／口語表／讀音項各種版本的標記與模型檔、模型缺檔或雜湊不符失敗、由 rowstats 計分、無小模型格的 dump 交叉檢查、設定標記不符或摘要行不是一行或 rowstats 壞掉都使該格失敗、重播一致性與不一致時失敗、書面重播格、重播程式設定的比對格、外部對照節、`table` 把 v2 接在原封不動的 v1 文字後面、保留集數字留在各自的欄、重跑不覆寫保留集數字。
+  - `SpeedWindow`：`speed_window` 的順序是讀、量、讀，四個欄位是前後各一次讀到的值，沒有 dev302 時不量也不讀；`tm_running` 讀 `tmutil status`（測試換掉 `subprocess.run`，不執行真的 `tmutil`）：`Running = 1` 與否、指令失敗、逾時、不是 macOS 時不呼叫。
 - CI 的 Python 步驟另外跑 `tools/test_kpi.py`、`tools/test_evalstats.py`、`tools/test_holdout_guard.py`、`tools/test_merge_guard_rows.py`。
 
 ### 7.10 發版前的核對
@@ -447,7 +449,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   - `reference`：小麥資料基準列，`commit` 與公開集合的 `accuracy`。
   - `static`：`date` 與 `groups`（每組 `name`、`n`、`ime`：輸入法 → `sentences`、`chars`）。
   - `external`：每個外部模型一項，`name`、`date`、`label`、`ours_label` 與 `rows`（`setting`、`set`、`n`、`ngram`、`ours`、`external`、`fixed`、`broken`、`p`）。
-- 版本列（`suite_v1`、`suite_v2` 同形）：`date`、`label`（結果檔標籤）、`ref`、`sha`、`version`（只有 v2）、`machine`、`macos`、`load_avg_start`、`load_avg_end`；`accuracy`（格名 `集合/設定` → `n`、`top1`、`oracle64`）；`vs`、`vs_prev`（格名 → `fixed`、`broken`、`p`，有上一版時）；`holdout_chat`（`commit`、`n`、`top1`、有的話 `oracle64`、`rows_sha256`，量過時再加 `fixed`、`broken`、`p`）；`speed`（`p95_us`、`max_us`、`load_ms`、`rss_mb`、`keys`、`rounds`、`rows_match`，有語意校正時加 `rerank_p50_ms`、`rerank_p95_ms`，v2 另有書面那一列 `formal`）；`models`（v2，檔名 → SHA-256）。
+- 版本列（`suite_v1`、`suite_v2` 同形）：`date`、`label`（結果檔標籤）、`ref`、`sha`、`version`（只有 v2）、`machine`、`macos`、`load_avg_start`、`load_avg_end`（速度段前後的四個欄位不放進這份資料，§7.5）；`accuracy`（格名 `集合/設定` → `n`、`top1`、`oracle64`）；`vs`、`vs_prev`（格名 → `fixed`、`broken`、`p`，有上一版時）；`holdout_chat`（`commit`、`n`、`top1`、有的話 `oracle64`、`rows_sha256`，量過時再加 `fixed`、`broken`、`p`）；`speed`（`p95_us`、`max_us`、`load_ms`、`rss_mb`、`keys`、`rounds`、`rows_match`，有語意校正時加 `rerank_p50_ms`、`rerank_p95_ms`，v2 另有書面那一列 `formal`）；`models`（v2，檔名 → SHA-256）。
 - 網站的 /benchmark 頁（`site/benchmark.html`）由 `site/numbers.js` 讀這個檔畫表；每格的寫法和完整表逐字相同（數字照 Python 的 round-half-even 捨入；失敗的格網站只寫「失敗」，不帶錯誤訊息，核對時會被列成不同），發版時用核對腳本（研究 repo）比對兩頁與完整表。
 
 ### 7.12 發版時的指令順序
@@ -490,10 +492,22 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 | 保留集口語半邊（聊天）、新聞半邊（書面） | `kpi/<版本>.json` 的 `holdout_talk_chat`、`holdout_news_formal`（5.3） |
 | wikitune-clean 書面 top1 | `kpi/<版本>.json` 的 `wikitune_clean`（列檔不限，由 `rows_sha256` 區分） |
 | 議事口語子集（lytune）書面 top1 | 同私有聊天調參集那個 `v2-*.json` 的 `accuracy`，只當警示，不進任何判讀 |
-| 速度與記憶體 | 同一個檔的 `speed`（按鍵 p95、重排 p95、RSS）；只有開跑時的 `env.load_avg_start` ≤ 2.0 才填數字，否則寫「—（負載 x.xx）」，x.xx 是開跑時的負載（結束時的負載不看：bench 最後才量速度，量完馬上讀負載，所以結束時的 1 分鐘負載包含 bench 自己的速度量測；量測期間這台機器不跑別的工作）；不同機器（`env.machine`）分欄 |
+| 速度與記憶體 | 同一個檔的 `speed`（按鍵 p95、重排 p95、RSS）；機器閒置時量的才填數字，判定照表後的「速度算不算數」；不同機器（`env.machine`）分欄 |
 
 - 表頭寫明每一欄的集合大小與雜湊（v2 JSON 的 `sets`，或 `kpi/<版本>.json` 記的 `rows_sha256`，以 `#` 加前 8 碼表示）；換集合時欄位分開，不同集合的數字不放在同一欄。
-- 沒有這個數字（舊版沒有重播工具、保留集不回填、速度是在有負載時量的）寫「—」，不報錯。
+- **速度算不算數**（`speed_verdict`）有兩個規則，看結果檔記了什麼：
+  - **速度段規則**：結果檔的 `env` 有 `speed_load_after`（§7.5）時用。`speed_tm_before`、`speed_tm_after` 缺的當成 `null`。`speed_load_before` 只記錄、不判。
+
+    | `speed_tm_before`／`speed_tm_after` | `speed_load_after` | 速度欄 |
+    |---|---|---|
+    | 任一個是 `true` | 不論 | `—（備份中）` |
+    | 都不是 `true` | > 5.0 | `—（速度段後負載 x.xx）` |
+    | 都是 `false` | ≤ 5.0 | 數字 |
+    | 都不是 `true`、至少一個 `null` | ≤ 5.0 | 數字，後面接 `（備份狀態未知）` |
+
+    備份中的理由優先於負載。5.0（`SPEED_LOAD_AFTER_MAX`）是暫定值：取在 v0.7.0 三輪量測裡沒受干擾的兩輪（量完時 2.77、4.25）與受干擾的一輪（5.30）之間，只有三輪；累積三個帶這些欄位的版本後重訂，並決定 `speed_load_before` 要不要列入。
+  - **開跑規則**：沒有 `speed_load_after` 的結果檔（v0.7.0 與更早）用。開跑時的 `load_avg_start` ≤ 2.0（`LOAD_MAX`）才填數字，否則寫「—（負載 x.xx）」，x.xx 是開跑時的負載。它看不到開跑之後才出現的干擾（v0.7.0 有一輪開跑約兩分鐘後開始備份，兩個版本都慢了約四成，照這個規則仍算閒置），所以新的結果檔改用速度段規則；舊的列不重判。
+- 沒有這個數字（舊版沒有重播工具、保留集不回填、速度不算數）寫「—」，不報錯。
 - 表下方列出每一列的來源檔名。
 - 保留集兩個半邊不由 `kpi.py` 量（它從不讀 `eval/holdout/`），由 5.3 的流程填入 JSON。
 
@@ -501,7 +515,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 `python3 -W ignore -m unittest tools/test_kpi.py`（`make test-python`、CI）用合成的小 JSON 與假的執行檔：
 
-- 同一版出現在兩個 `v2-*.json` 時取它當新版的那個檔；error ratio 的算法與「—」；速度在負載高時不填、依機器分欄；舊版沒有重播欄位時寫「—」；
+- 同一版出現在兩個 `v2-*.json` 時取它當新版的那個檔；error ratio 的算法與「—」；速度在負載高時不填、依機器分欄；速度段規則的每一列（備份中在前或在後、量完時的負載超過門檻、備份狀態未知、缺備份欄位、開始前的負載不判）與「沒有 `speed_load_after` 就照開跑規則」；舊版沒有重播欄位時寫「—」；
 - 換集合時表頭分欄（v2 JSON 的 `sets` 雜湊不同、兩個 `kpi` JSON 的 `rows_sha256` 不同，兩種都測）；保留集兩個半邊從合成 JSON 畫進表、雜湊相同而 n 相同的兩份仍分欄、新聞半邊換檔時口語半邊的欄不動；`table` 兩次輸出逐位元組相同；網站資料（`site/data/kpi.json`）兩次逐位元組相同、沒有私人集合的欄位、數字和表一致；
 - `run`：每個可用核心都解碼（`--threads`）、舊 CLI 不加 `--threads`、記錄欄位、`run_cell2` 的各項檢查、相對路徑轉絕對、`eval/holdout/` 底下的列檔被拒絕、未知版本名被拒絕、寫入保留這次沒設的欄位、表上的舊版本從舊 clone 的 `LEGACY_SHA` commit 匯出（沒給 clone 或 clone 沒有那個 commit 時拒絕）；
 - `replay`：模型雜湊不符、多一個檔、少一個檔或缺雜湊檔時失敗（並說清楚缺哪個）、口語表與聊天 trigram 表只對出貨它們的版本算模型、舊版本名被拒絕、乾淨樹檢查（已追蹤的改動擋下、未追蹤的結果檔不擋、已存在的 tag 必須是 HEAD）、執行檔路徑取自編譯器訊息、各種設定標記（口語表、詞包、讀音項）不符時失敗、舊標記被拒絕、`replay` 欄的內容等於直接執行 `shanjie-replay` 與 `evalstats` 的結果、既有欄位保留、寫入是原子的。
@@ -509,7 +523,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 8.4 網站資料 `site/data/kpi.json`
 
 - `tools/kpi.py table` 用同一次讀入寫完整表與 `site/data/kpi.json`（兩個檔同一份資料；排序、縮排、結尾換行同 7.11，兩次輸出逐位元組相同）。
-- 頂層只有 `versions`：陣列，和表同序（最新在上），每版一列：`version`；`replay`（`user-reported`、`dev302` 各自的 `rows_sha256`、`n`、`off`：`n`、`top1`、`kyss`、`rewrites`、`picks_per100`；`user-reported` 另有 `on` 與 `learn_fixed`、`learn_broken`）；`holdout_talk_chat`（`n`、`top1`、`rows_sha256`，有量過時加 `fixed`、`broken`、`p`）；`speed`（`machine`、`load_avg_start`、`idle`；`idle` 為真時才有 `p95_us`、`rerank_p95_ms`、`rss_mb`，規則同表）。沒有的欄位不寫。
+- 頂層只有 `versions`：陣列，和表同序（最新在上），每版一列：`version`；`replay`（`user-reported`、`dev302` 各自的 `rows_sha256`、`n`、`off`：`n`、`top1`、`kyss`、`rewrites`、`picks_per100`；`user-reported` 另有 `on` 與 `learn_fixed`、`learn_broken`）；`holdout_talk_chat`（`n`、`top1`、`rows_sha256`，有量過時加 `fixed`、`broken`、`p`）；`speed`：開跑規則的列是 `machine`、`load_avg_start`、`idle`；速度段規則的列是 `machine`、`rule`（固定是 `"window"`；沒有這個鍵就是開跑規則）、`idle`、`speed_load_before`、`speed_load_after`、`speed_tm_before`、`speed_tm_after`，沒有 `load_avg_start`。兩種都是 `idle` 為真時才有 `p95_us`、`rerank_p95_ms`、`rss_mb`；`idle` 就是 §8.2 的判定，頁面照同一張表產生和完整表相同的文字。沒有的欄位不寫。
 - 不寫：私有聊天調參集的聊天 top1 與 error ratio、wikitune-clean、lytune、保留集新聞半邊。
 
 ## 9. 已知限制

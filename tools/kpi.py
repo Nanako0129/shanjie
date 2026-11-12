@@ -25,10 +25,17 @@ import bench  # noqa: E402
 ROOT = bench.ROOT
 KPI_DIR = os.path.join(ROOT, "eval/bench/kpi")
 SITE_JSON = os.path.join(ROOT, "site/data/kpi.json")
-# Speed numbers only count when the 1-minute load was at most this when the run started. The end of the run is not looked at:
-# bench.py measures speed last and reads the load right after, so the 1-minute load at the end includes bench's own speed run; during the run
-# the machine runs nothing else (docs/spec/evaluation.md §8.2).
+# When speed numbers count (docs/spec/evaluation.md §8.2). Two rules, by what the result file recorded:
+# - the window rule, for a result that has `speed_load_after` (bench.py's `speed_window`, the machine's state right before and right after
+#   the speed measurement): Time Machine was not backing up at either end and the 1-minute load right after was at most
+#   SPEED_LOAD_AFTER_MAX. The load right before is recorded and not judged: the accuracy cells run before the speed measurement, so it
+#   carries bench's own work.
+# - the start rule, for the results before that (v0.7.0 and earlier): the 1-minute load when the whole run started was at most LOAD_MAX.
+#   It cannot see what starts after the run did (a backup that began two minutes into a v0.7.0 run slowed both versions by about 40%).
+# SPEED_LOAD_AFTER_MAX is provisional: it sits between the load after the two undisturbed v0.7.0 runs (2.77, 4.25) and the disturbed one
+# (5.30), three runs in all. Set it again, and decide whether the load before joins the rule, once three versions carry the new fields.
 LOAD_MAX = 2.0
+SPEED_LOAD_AFTER_MAX = 5.0
 # name -> (rows file, pinned sha256): the replay rows are frozen suite files, not eval/dev/*.
 REPLAY_ROWS = {"user-reported": bench.SETS2["user-reported"][:2], "dev302": bench.SETS2["dev302"][:2]}
 REPLAY_SUMMARY = re.compile(r"^## (\S+)  (\S+)  (\{.*\})$", re.M)
@@ -328,17 +335,34 @@ def holdout_col(title, field):
     return title, f
 
 
+def speed_verdict(env):
+    """(rule, idle, the cell's text when not idle, the note after the numbers) for a result's machine block, or None when it recorded
+    neither rule's field. The window rule applies exactly when `speed_load_after` is there; a missing Time Machine field is unknown."""
+    if "speed_load_after" in env:
+        tms, after = (env.get("speed_tm_before"), env.get("speed_tm_after")), env["speed_load_after"]
+        if any(t is True for t in tms):   # a backup comes before the load as the reason
+            return "window", False, "—（備份中）", ""
+        if after > SPEED_LOAD_AFTER_MAX:
+            return "window", False, f"—（速度段後負載 {after:.2f}）", ""
+        return "window", True, None, "（備份狀態未知）" if any(t is None for t in tms) else ""
+    if "load_avg_start" not in env:
+        return None
+    load = env["load_avg_start"]
+    return ("start", False, f"—（負載 {load:.2f}）", "") if load > LOAD_MAX else ("start", True, None, "")
+
+
 def speed(x):
     s, env = get(x["rec"], "speed"), get(x["res"], "env")  # the column splits per machine (env.machine)
-    if not s or "p95_us" not in s or not env or "load_avg_start" not in env:
+    v = speed_verdict(env) if s and "p95_us" in s and env else None
+    if not v:
         return None
-    load = env["load_avg_start"]   # the start only (LOAD_MAX)
-    if load > LOAD_MAX:
-        return env.get("machine"), None, f"—（負載 {load:.2f}）"
+    _, idle, reason, note = v
+    if not idle:
+        return env.get("machine"), None, reason
     t = f"按鍵 p95 {s['p95_us'] / 1000:.2f} ms"
     if "rerank_p95_ms" in s:
         t += f"／重排 p95 {s['rerank_p95_ms']:.1f} ms"
-    return env.get("machine"), None, t + f"／RSS {s['rss_mb']:.0f} MB"
+    return env.get("machine"), None, t + f"／RSS {s['rss_mb']:.0f} MB" + note
 
 
 COLUMNS = [
@@ -420,10 +444,16 @@ def site_row(x):
     if isinstance(h, dict) and "top1" in h and "n" in h:
         out["holdout_talk_chat"] = {k: h[k] for k in ("n", "top1", "fixed", "broken", "p", "rows_sha256") if k in h}
     s, env = get(x["rec"], "speed"), get(x["res"], "env")
-    if s and "p95_us" in s and env and "load_avg_start" in env:
-        load = env["load_avg_start"]
-        out["speed"] = {"machine": env.get("machine"), "load_avg_start": load, "idle": load <= LOAD_MAX}
-        if load <= LOAD_MAX:   # the same rule as the table: the load when the run started (LOAD_MAX)
+    v = speed_verdict(env) if s and "p95_us" in s and env else None
+    if v:   # the same verdict as the table's (`speed`)
+        rule, idle = v[:2]
+        if rule == "window":   # a row of the start rule keeps the shape it always had: no `rule` key
+            out["speed"] = {"machine": env.get("machine"), "rule": "window", "idle": idle, "speed_load_before": env.get("speed_load_before"),
+                            "speed_load_after": env["speed_load_after"], "speed_tm_before": env.get("speed_tm_before"),
+                            "speed_tm_after": env.get("speed_tm_after")}
+        else:
+            out["speed"] = {"machine": env.get("machine"), "load_avg_start": env["load_avg_start"], "idle": idle}
+        if idle:
             out["speed"].update({k: s[k] for k in ("p95_us", "rerank_p95_ms", "rss_mb") if k in s})
     return out
 
