@@ -91,6 +91,46 @@ class TableRules(Tmp):
         self.assertIn("RSS 426 MB", c["v0.c"])  # a high load at the end (bench's own accuracy cells) does not count against it
         self.assertEqual(c["v0.d"], "—（負載 37.52）")  # the start's load is the one shown
 
+    def window_file(self, name, tm=(False, False), after=4.25, start=0.5, before=3.0, keys=("speed_tm_before", "speed_tm_after")):
+        """A result that recorded the machine's state around the speed measurement (bench.speed_window)."""
+        d = v2_file("2026-11-20", [v2_version("v0." + name, speed=SPEED)], load=(start, 9.0))
+        d["env"].update({"speed_load_before": before, "speed_load_after": after})
+        d["env"].update({k: v for k, v in zip(("speed_tm_before", "speed_tm_after"), tm) if k in keys})
+        self.put(self.res, f"v2-{name}.json", d)
+
+    def test_speed_by_the_window_around_the_speed_measurement(self):
+        # docs/spec/evaluation.md §8.2's table, one row each; the load at the start of the run is not looked at (37.5 here)
+        self.window_file("a", tm=(False, False), after=5.0, start=37.5)          # exactly the limit still counts
+        self.window_file("b", tm=(False, False), after=5.01)
+        self.window_file("c", tm=(True, False))                                 # backing up before
+        self.window_file("d", tm=(False, True))                                 # backing up after
+        self.window_file("e", tm=(True, False), after=9.99)                     # a backup comes first as the reason
+        self.window_file("f", tm=(None, False))                                 # unknown: the numbers, with the note
+        self.window_file("g", tm=(False, None), after=6.0)                      # unknown and over the limit: the load is the reason
+        self.window_file("h", keys=())                                          # no Time Machine fields at all: unknown
+        self.window_file("i", tm=(None, True))
+        self.window_file("j", tm=(False, False), before=40.0)                   # the load before is recorded, not judged
+        _, rows = self.table()
+        c = self.col(rows, "速度與記憶體")
+        numbers = "按鍵 p95 6.82 ms／重排 p95 23.4 ms／RSS 426 MB"
+        self.assertEqual(c["v0.a"], numbers)
+        self.assertEqual(c["v0.b"], "—（速度段後負載 5.01）")
+        self.assertEqual(c["v0.c"], "—（備份中）")
+        self.assertEqual(c["v0.d"], "—（備份中）")
+        self.assertEqual(c["v0.e"], "—（備份中）")
+        self.assertEqual(c["v0.f"], numbers + "（備份狀態未知）")
+        self.assertEqual(c["v0.g"], "—（速度段後負載 6.00）")
+        self.assertEqual(c["v0.h"], numbers + "（備份狀態未知）")
+        self.assertEqual(c["v0.i"], "—（備份中）")
+        self.assertEqual(c["v0.j"], numbers)
+
+    def test_a_result_without_the_window_fields_keeps_the_start_rule(self):
+        d = v2_file("2026-10-01", [v2_version("v0.a", speed=SPEED)], load=(2.01, 0.5))
+        d["env"].update({"speed_tm_before": False, "speed_tm_after": False, "speed_load_before": 0.1})   # not the field that selects the rule
+        self.put(self.res, "v2-a.json", d)
+        _, rows = self.table()
+        self.assertEqual(self.col(rows, "速度與記憶體")["v0.a"], "—（負載 2.01）")
+
     def test_speed_columns_split_per_machine(self):
         for name, machine in (("a", "Mac17,3"), ("b", "gcp-c4d")):
             d = v2_file("2026-10-01", [v2_version("v0." + name, speed=SPEED)])
@@ -233,6 +273,34 @@ class SiteData(Tmp):
         self.assertEqual(j["v0.6.1"]["speed"], {"machine": None, "load_avg_start": 3.0, "idle": False})   # busy at the start: no numbers
         self.assertIn("負載 3.00", md.decode())
         self.assertIn("按鍵 p95 6.82 ms", md.decode())
+
+    def test_speed_rows_of_the_window_rule(self):
+        def window(version, date, tm, after, before=3.0, both=True):
+            d = v2_file(date, [v2_version("v0.6.1"), v2_version(version, 84, {"fixed": 1, "broken": 0}, SPEED)], load=(9.0, 9.0))
+            d["env"].update({"speed_load_before": before, "speed_load_after": after})
+            if both:
+                d["env"].update({"speed_tm_before": tm[0], "speed_tm_after": tm[1]})
+            self.put(self.res, f"v2-{version}.json", d)
+        window("v0.7.0", "2026-11-01", (False, False), 4.25)
+        window("v0.7.1", "2026-11-02", (False, True), 1.0)
+        window("v0.7.2", "2026-11-03", (False, False), 5.5)
+        window("v0.7.3", "2026-11-04", (None, False), 2.0)
+        window("v0.7.4", "2026-11-05", None, 2.0, both=False)
+        md, raw = self.table()
+        j = {v["version"]: v for v in json.loads(raw)["versions"]}
+        base = {"machine": None, "rule": "window", "speed_load_before": 3.0}
+        numbers = {"p95_us": 6822.2, "rerank_p95_ms": 23.4, "rss_mb": 426.4}
+        self.assertEqual(j["v0.7.0"]["speed"], {**base, "idle": True, "speed_load_after": 4.25, "speed_tm_before": False, "speed_tm_after": False, **numbers})
+        self.assertEqual(j["v0.7.1"]["speed"], {**base, "idle": False, "speed_load_after": 1.0, "speed_tm_before": False, "speed_tm_after": True})
+        self.assertEqual(j["v0.7.2"]["speed"], {**base, "idle": False, "speed_load_after": 5.5, "speed_tm_before": False, "speed_tm_after": False})
+        self.assertEqual(j["v0.7.3"]["speed"], {**base, "idle": True, "speed_load_after": 2.0, "speed_tm_before": None, "speed_tm_after": False, **numbers})
+        self.assertEqual(j["v0.7.4"]["speed"], {**base, "idle": True, "speed_load_after": 2.0, "speed_tm_before": None, "speed_tm_after": None, **numbers})
+        # the rows of the start rule are as they always were: no `rule` key, the load at the start
+        self.assertEqual(j["v0.6.0"]["speed"], {"machine": None, "load_avg_start": 0.5, "idle": True, **numbers})
+        self.assertEqual(j["v0.6.1"]["speed"], {"machine": None, "load_avg_start": 3.0, "idle": False})
+        text = md.decode()
+        for cell in ("—（備份中）", "—（速度段後負載 5.50）", "MB（備份狀態未知）", "—（負載 3.00）"):
+            self.assertIn(cell, text)
 
     def test_the_markdown_is_what_render_makes_of_the_same_files(self):
         md, _ = self.table()
