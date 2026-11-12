@@ -446,7 +446,7 @@ jobs:
                Find = '<UI Id="ShanjieDialogs">'
                With = '<InstallUISequence><Custom Action="StartHost" After="ExecuteAction">NOT Installed</Custom></InstallUISequence><UI Id="ShanjieDialogs">' },
             @{ Name = 'register-ignores-failure'; Area = 'FAIL [CustomAction Register]'; Marker = 'Return is ignore'
-               Find = 'Execute="deferred" Impersonate="no" Return="check" />'; With = 'Execute="deferred" Impersonate="no" Return="ignore" />' }
+               Find = '/s &quot;[#FTipDll]&quot;" Execute="deferred" Impersonate="no" Return="check" />'; With = '/s &quot;[#FTipDll]&quot;" Execute="deferred" Impersonate="no" Return="ignore" />' }
           )
           New-Item -ItemType Directory -Force build/msi/broken | Out-Null
           $env:SHANJIE_VERSION = "0.0.$env:RUN"
