@@ -663,6 +663,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 - 語言：一份 MSI，介面與自訂動作的文字只有繁體中文（`Language` 1028、`Codepage` 950，`light -cultures:zh-TW`）。
 - 版本號：唯一來源是建置時的環境變數 `SHANJIE_VERSION`（`MAJOR.MINOR.PATCH`，不超過 MSI 的上限 255.255.65535，和 Mac 版的 `build-app.sh` 同一個變數）；沒給或格式不對，`build-msi.ps1` 失敗。CI 給 `0.0.<run_number>`。
 - 升級：`UpgradeCode` 固定、`ProductCode` 每次建置都換（`Product Id="*"`）；`MajorUpgrade`，`Schedule="afterInstallInitialize"`、`AllowSameVersionUpgrades="yes"`；降版被拒絕，顯示固定的一句「這台電腦已經裝了較新版本的善解。」（`DowngradeErrorMessage`）。量到：新版先開始，接著巢狀跑舊版的移除（`REMOVE=ALL`、`UPGRADINGPRODUCTCODE` 有值），再回到新版裝檔與註冊（§6.5）；降版在 UAC 之前就被擋下，訊息框顯示那一句。
+  - CI 的核對不檢查 `RemoveExistingProducts` 的位置（`dark` 反組譯會把它併進 `MajorUpgrade`，而且排程寫錯）；程式審查直接讀建好的 MSI 的表核對過：`RemoveExistingProducts` 是 1501，緊接 `InstallInitialize`（1500）。
 - **檔案**（`[安裝資料夾]`；逐一列在 `windows/installer/shanjie.wxs`，每個檔一個元件、KeyPath 在安裝資料夾；`scripts/windows/check-msi.ps1` 裡另有一份預期清單，多一個或少一個都失敗，§6.9）：
 
   | 位置 | 檔案 |
@@ -677,8 +678,8 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   - 模型與 `colloquial-attribution.tsv` 的 SHA-256 要符合 `data/*.sha256`（`check-msi.ps1` 核對）。
   - `CC-BY-SA-4.0-attribution.txt` 是建置時產生的（`build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段（原樣取用，所以第一段列的檔名和 Mac 版相同），在「Details: data.md.」那一行後面多一段，點名靜態連結進來的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0），最後接 name-suggestion-index 的聲明全文；文字裡出現 Sparkle 就失敗。`check-msi.ps1` 只解析第一段（到「are licensed」為止）的檔名，必須剛好是這 18 個（`check-msi.ps1` 寫死的清單，和 `build-app.sh` 那一段列的相同）。`LICENSES/data.md` 兩個平台共用。
 - **安裝位置不能改、只有系統管理員能寫**：安裝資料夾的目錄 Id 含小寫字母（私有屬性，命令列改不到），介面沒有「瀏覽」；帶 `TARGETDIR`、`ProgramFiles64Folder` 這類屬性也不改位置（待驗收，I1）。資料夾繼承 Program Files 的 ACL，安裝程式不改 ACL；因此只有系統管理員能寫是推論，要在 VM 用 §3.3 的 `Get-Acl` 方法核對（待驗收，I1）。已知限制：資料夾在安裝前就存在時，安裝程式不重設它的 ACL；只有系統管理員能預先建它。
-- **介面**：WiX 內建的歡迎、確認、進度、完成與維護歡迎頁，加兩頁自己的：「修復或移除」（只有「修復」「移除」，沒有「變更」：沒有功能可選）與「要保留什麼」（一個勾，§6.7）。不引用 `WixUI_Common`（它帶進來的自訂動作與 DLL 不能出現在套件裡），頁面用到的點陣圖與圖示是 `build-msi.ps1` 寫的純白圖與空白圖示。沒有授權頁、選資料夾頁、功能樹、`FilesInUse`、`MsiRMFilesInUse`。
-  - Windows Installer 的驗證要求 Dialog 表有 `FilesInUse`（ICE20）：連結時只關掉這一條（`light -sice:ICE20`），其他驗證照跑。量到：沒有它時 `light` 以 ICE20 擋下；另有兩條警告，ICE61（同版號升級）是預期的，ICE63（有動作排在 `InstallInitialize` 與 `RemoveExistingProducts` 之間）不該出現，`build-msi.ps1` 在 `light` 輸出有 ICE63 時失敗。
+- **介面**：WiX 內建的歡迎、確認、進度、完成與維護歡迎頁，加兩頁自己的：「修復或移除」（只有「修復」「移除」，沒有「變更」：沒有功能可選）與「要保留什麼」（一個勾，§6.7）。不引用 `WixUI_Common`（它帶進來的自訂動作與 DLL 不能出現在套件裡），頁面用到的點陣圖與圖示是 WixUIExtension 內建的（WiX 的頁面自己會帶進來；套件自己定義會和它們重複，連結失敗）。沒有授權頁、選資料夾頁、功能樹、`MsiRMFilesInUse`（重新啟動管理員關著，用不到）。有 WiX 的 `FilesInUse` 頁（§6.5）。
+  - 連結時所有 ICE 驗證都跑。量到兩條警告：ICE61（同版號升級）是預期的，ICE63（有動作排在 `InstallInitialize` 與 `RemoveExistingProducts` 之間）不該出現，`build-msi.ps1` 在 `light` 輸出有 ICE63 時失敗。
   - 完成頁的固定文字「善解已經裝好。已經開著的 App 切一次輸入法就能用。」只在 `NOT Installed`（全新安裝與升級）時顯示；同一頁在移除與修復結束時不顯示這句（WiX 的 `OptionalText` 控制項，`check-msi.ps1` 核對條件）。量到：註冊前就開著的記事本，在常駐程序已經跑著時，切到善解就打得出字；記事本是封裝 App，自己不會啟動常駐程序（§5.2）。完成頁文字與修復完成頁：待驗收（I1、U4）。
 - **不讓 MSI 自我修復、不留使用者可寫的入口**：沒有通告（advertised）捷徑；沒有 Class、Extension、SelfReg、Shortcut；每個元件的 KeyPath 在安裝資料夾或 HKLM；沒有 HKCU 的 Registry 項目；沒有安裝資料夾以外的 `RemoveFile`、`RemoveFolder`、`CreateFolder`。
 - **屬性與啟動條件**：`MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`（§6.5）；`KEEPSETTINGS`、`KEEPMEMORY` 公開且 Secure、Property 表沒有值（§6.7）；`SecureCustomProperties` 只有這兩個與升級用的屬性。啟動條件 `Installed OR MSIINSTALLPERUSER<>1`：擋下「只裝給目前使用者」（`ALLUSERS=2 MSIINSTALLPERUSER=1`），已安裝的產品永遠能修復或移除，訊息是「善解只能裝給這台電腦的所有使用者，不能只裝給目前的使用者。」帶 `ALLUSERS=""` 的結果：待驗收記錄（I1）。
@@ -710,9 +711,15 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 
 ### 6.5 檔案被占用，與升級
 
-DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`；Dialog 表沒有 `FilesInUse`、`MsiRMFilesInUse`。
+DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`；Dialog 表有 WiX 的 `FilesInUse`、沒有 `MsiRMFilesInUse`。
 
-量到（占用檔案的是沒有視窗的 `rundll32`，載著假 DLL；載著 DLL 的程序在每一列都還在、PID 不變）：
+**有視窗的 App 載著 DLL 時，Windows 會跳出它內建的「檔案使用中」視窗**（真的 MSI，測試 VM 量到：從設定頁解除安裝、記事本打過字）：標題「善解」，內文「繼續安裝之前應先關閉下列應用程式:」，清單列出那個 App（例如「*測試 - 記事本」），按鈕「取消」「重試」「略過」。原因：`MSIRESTARTMANAGERCONTROL=Disable` 讓 Windows Installer 改用它內建的檢查（verbose log：`RESTART MANAGER: Disabled by MSIRESTARTMANAGERCONTROL property; Windows Installer will use the built-in FilesInUse functionality.`），它列出用到善解、找得到視窗的程序。按「略過」照常繼續：不關任何程式，被占用的檔案照下面的方式處理。這個視窗是預期的行為，安裝說明教使用者按「略過」。
+
+- 基本介面（`/qb`、`/passive`、設定頁的解除安裝）用 Windows 自己畫的那個框；完整介面（雙擊安裝或升級、維護精靈）改用套件裡名為 `FilesInUse` 的頁，所以套件放了 WiX 的那一頁（同樣有「略過」）。量到（測試 VM）：套件沒有這一頁時，完整介面在同樣情況下跳兩次「錯誤碼為 2803」（log：`Dialog View did not find a record for the dialog`），按確定後照常完成。
+- 升級也會跳：`/qb` 升級時跳兩次（裝新版一次、移除舊版一次），略過兩次後照常完成（結束碼 0）。沒有視窗的程序（例如 explorer）載著 DLL 時不跳。
+- 修復也會跳（完整介面修復走的是基本介面的進度框，跳的是 Windows 自己的框）。
+
+量到（假安裝檔；占用檔案的是沒有視窗的 `rundll32`，所以上面那個視窗沒有出現；載著 DLL 的程序在每一列都還在、PID 不變）：
 
 | 動作 | 對話框 | 結果 | 結束碼 |
 |---|---|---|---|
@@ -741,7 +748,7 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
 | `UnregisterRollback` | `regsvr32 /s "[#DLL]"`，rollback，系統 | `Unregister` 之前 | 同 `Unregister` | 忽略 |
 | `Unregister` | `regsvr32 /s /u "[#DLL]"`，延後，系統 | `RemoveFiles` 之前 | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE` | 忽略（取消註冊失敗不該讓產品移除不掉） |
 | `SetKillHost` | 設定屬性（值 `[#常駐程序]`，給 `KillHost` 當參數） | `KillHost` 之前 | 同 `KillHost` | — |
-| `KillHost` | DLL，延後，系統 | `Unregister` 之後、`RemoveFiles` 之前 | `REMOVE="ALL"`（升級移除舊版時也做） | 忽略 |
+| `KillHost` | DLL，延後，系統 | `Unregister` 之後、`RemoveFiles` 之前 | `REMOVE="ALL" OR REINSTALL<>""`（升級移除舊版時、修復時也做） | 忽略 |
 | `RegisterRollback` | `regsvr32 /s /u "[#DLL]"`，rollback，系統 | `Register` 之前 | `NOT Installed AND NOT WIX_UPGRADE_DETECTED` | 忽略 |
 | `Register` | `regsvr32 /s "[#DLL]"`，延後，系統 | `InstallFiles` 之後 | `NOT REMOVE="ALL"`（安裝、修復、升級裝新版時） | **中止並 rollback**（註冊失敗而安裝照樣成功，就是裝了卻沒有輸入法） |
 | `DeleteSettings` | DLL，延後，模擬、`TerminalServerAware` | `InstallFinalize` 之前（最後一個延後動作） | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND KEEPSETTINGS="0"` | 忽略 |
@@ -786,7 +793,7 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
 - **「保留設定」的效果**：值是 `0` 時，`DeleteSettings` 刪掉執行解除安裝的那個使用者的 `HKCU\Software\Shanjie`（目前只有按鍵習慣 `KeyScheme` 一個值，§5.2）；值是 `1` 時留著。其他使用者的設定碰不到，留著。一般帳號請另一個管理員帳號按 UAC 時，刪到的是誰的：待驗收記錄（O1）。
 - **不論哪個選項，解除安裝一律清掉**：檔案與資料夾、TSF 註冊、Run 值、正在跑的正式版常駐程序（`KillHost`）。
 - **不刪**：`%LOCALAPPDATA%\Shanjie\`（MSI 裝的建置不帶 `timing`，不會建它）、常駐程序在 HKCU 留下的 WER 排除項（以檔名 `shanjie-host.exe` 登記，§5.2）。
-- **`KillHost`**（常駐程序沒有結束指令，會活到登出）：結束映像完整路徑（`QueryFullProcessImageNameW`，ASCII 字母不分大小寫）等於參數那個路徑的每一個程序，所有工作階段都算；不用檔名比對，因為開發版身分的常駐程序也叫 `shanjie-host.exe`。查路徑與結束用同一個 handle（`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`）。查映像路徑的緩衝是 1024 個 UTF-16 單位，更長的路徑查不到、不結束。
+- **`KillHost`**（常駐程序沒有結束指令，會活到登出）：結束映像完整路徑（`QueryFullProcessImageNameW`，ASCII 字母不分大小寫）等於參數那個路徑的每一個程序，所有工作階段都算；不用檔名比對，因為開發版身分的常駐程序也叫 `shanjie-host.exe`。查路徑與結束用同一個 handle（`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`）。查映像路徑的緩衝是 1024 個 UTF-16 單位，更長的路徑查不到、不結束。修復時也跑：修復會把執行中的 `shanjie-host.exe` 搬到 `C:\Config.Msi` 再放新檔，之後那支程序的映像路徑變成搬過去的名字，解除安裝時就比對不到。量到（測試 VM，修復時只在移除時跑的那一版）：常駐程序在跑時修復（結束碼 3010）再解除安裝，`KillHost` 記 `ended 0`，產品移除了、常駐程序還在（只放英文直通），安裝資料夾留到重開機後剩一個空資料夾。
 
 ### 6.8 `installer-ca`（自訂動作的 DLL）
 
@@ -804,6 +811,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
   - 用 TaskDialog（系統原生，`TaskDialogIndirect`）：標題「善解」、主要說明「要解除安裝善解嗎？」、內文「開著的 App 如果還在用善解，要等那些 App 重新開啟之後，善解才會完全移除。」、一個勾「保留設定」（預設勾著）、兩個按鈕「解除安裝」「取消」。只有固定文字，沒有連結、展開區、說明按鈕、輸入框，不呼叫 `ShellExecute`，沒有擁有者視窗。基本介面不顯示 Windows Installer 的對話框，所以不能用它們；之後有兩個勾時 TaskDialog 不夠（只有一個勾），要換成自己做、接近原生的視窗，這一版不做。
   - comctl32 第 6 版：DLL 帶自己的 manifest（資源 2，`build.rs` 嵌入），呼叫前建並啟用自己的啟用內容，從那個內容取 `TaskDialogIndirect`，呼叫後停用；這是唯一的執行時載入。量到：這樣成立，`hr=0`，comctl32 從 WinSxS 的第 6 版載入，勾的值帶到延後動作。
   - 建立時關掉對話框的輸入法（`ImmAssociateContextEx(…, NULL, IACE_CHILDREN)`），設成置頂並要求前景。量到（那時沒有關輸入法）：注音在中文模式時空白鍵切不動勾選框，Ctrl+Space 切到英數後可以；關掉輸入法後的效果待驗收（U1）。
+    - 第一次計時器通知時（`TDF_CALLBACK_TIMER`，只做一次）：對話框還不是前景，而且前景視窗屬於 `%SystemRoot%\System32\msiexec.exe`（`QueryFullProcessImageNameW` 比對路徑；不用類別或標題找視窗），對話框的執行緒暫時把輸入接到前景視窗的執行緒（`AttachThreadInput`），`BringWindowToTop`＋`SetForegroundWindow` 一次後解開；前景是別的程式就只要求前景。MSI log 記一行 `AskKeep: front attach=… set=…`。量到（測試 VM）：按過 Windows 的「檔案使用中」視窗之後，建立時的要求只讓對話框置頂、鍵盤不在它身上（前景留在 client msiexec 的進度框）；這個做法的效果待驗收（U1）。已知限制：前景的執行緒卡住時，接輸入可能跟著等。
   - 量到：設定頁「解除安裝」與 `/x /qb` 的對話框是 High、拿到前景；`/x /passive` 的對話框是 Medium、出現在 UAC 之前、**沒有拿到前景**（鍵盤打不到、滑鼠點得到）。已知限制。Medium 的程式對 High 的對話框送滑鼠點擊無效（UIPI）。
   - 權杖是 SYSTEM、LocalService、NetworkService，在工作階段 0，或視窗站不是互動的：不顯示，都保留。自己出錯（`TaskDialogIndirect` 回錯誤、panic）：照沒有畫面處理（都保留）、繼續解除安裝、記進 MSI 的 log。只有使用者按「取消」才回「使用者取消」。讀寫的只有 MSI 的屬性。
 - **`DeleteSettings`**：用 `RegOpenCurrentUser` 開使用者的 hive，路徑是名稱表的常數（`Software\Shanjie`）；不跟隨登錄連結：每一層都用 `REG_OPTION_OPEN_LINK` 開出 handle，是連結就只刪連結本身；往下列舉與刪除（`NtDeleteKey`）都經過同一個 handle，不先查名稱再刪；不用 `RegDeleteTree`。往下最多 32 層、每層最多 4096 個子機碼，超過的留著、log 記「not all deleted」（程式只寫一層）。行程權杖或（若有）執行緒權杖是 SYSTEM、LocalService、NetworkService，或查不到權杖時，什麼都不做（量到：SYSTEM 身分的排程工作裡，模擬動作就是 SYSTEM，§6.6）。連結的行為：待驗收（L1）。
@@ -813,7 +821,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
 
 - 建置在一支腳本 `scripts/windows/build-msi.ps1`（CI 與之後的發版 workflow 都呼叫；它與 `check-msi.ps1` 存成 UTF-8 加 BOM、用 pwsh 7 跑），兩個階段，中間留給簽章：
   - `binaries -Out <資料夾> [-Timing]`：一次 cargo 呼叫以 `release-ids` 建 `shanjie-tip`、`shanjie-host`、`shanjie-installer-ca`（`-Timing` 多開 `timing`，只用來看標記符號，不做套件），放在自己的 `--target-dir`，把三個檔複製成 `shanjie_tip.dll`、`shanjie-host.exe`、`installer-ca.dll`。`SHANJIE_BUILD_ID`（呼叫端設）是 `shanjie-win-proto` 的 `BUILD_HASH`（§5.3）的來源，所以另一個值會產出位元組不同的 DLL 與 exe。
-  - `msi -Bin <資料夾> -Out <檔> [-Variant A|T]`：印出並斷言 WiX 的版本（runner 內建的 WiX 3，至少 3.14.1），寫出產生的檔（署名檔、點陣圖與圖示），跑 `candle` 與 `light`。
+  - `msi -Bin <資料夾> -Out <檔> [-Variant A|T]`：印出並斷言 WiX 的版本（runner 內建的 WiX 3，至少 3.14.1），寫出產生的檔（署名檔），跑 `candle` 與 `light`。
 - CI 的 `windows-msi` job（windows-2025，`needs: changes`，略過條件同 `core`，逾時 45 分鐘，用 pwsh；先裝規定版本的 Rust）依序：下載並核對模型；以 `release-ids` 跑 `shanjie-win-proto`、`shanjie-host`、`shanjie-tip`、`shanjie-installer-ca` 的測試；建 A 與 C 的 DLL 與 exe（C 另一個 `--target-dir`、另一個 `SHANJIE_BUILD_ID`）；**簽章步驟（空的、有名字：只印「not signed in CI」，之後在這裡簽 `shanjie_tip.dll`、`shanjie-host.exe`、`installer-ca.dll`）**；建三份 MSI；**簽章步驟（簽 MSI）**；核對 A；核對改壞的複本與 T；帶 `timing` 的建置；A 的 SHA-256；上傳 artifact（保留 7 天）。憑證之後只放發版 workflow 的受保護環境，不進 `pull_request` 的 CI。
   - **A**：要出貨的那一份，版號 `0.0.<run_number>`，檔名 `shanjie-<版號>-x64.msi`。
   - **T**：只給 VM 驗收用，版號同 A，多一個延後動作 `TestFail`（`WIXFAILWHENDEFERRED=1` 時啟動一個不存在的檔案而失敗，排在 `DeleteSettings` 之前），檔名 `…-x64-test-fail.msi`。
@@ -824,7 +832,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
   - DLL 與 exe 沒有 C 執行階段的匯入；exe 是視窗子系統（`dumpbin /headers`）；`SjMarkTiming` 不存在、`SjMarkReleaseIds` 在 DLL 與 exe 都存在。
   - `installer-ca.dll` 是 Binary 表裡唯一的 DLL；靜態匯入在 §6.8 的名單內、沒有 delay-load；三個匯出都在。
   - 自訂動作：Id、種類、命令列或匯出名、執行方式（立即、延後、rollback、模擬、`TerminalServerAware`、不等待）、失敗時、排的位置與條件，逐列等於 §6.6 的表；沒有表以外的自訂動作；從對話框觸發的動作剛好一個（`ExitDialog`、`Finish`、`DoAction`、`StartHost`、條件 `NOT Installed`）；`InstallUISequence` 等其他序列沒有自訂動作。
-  - 安裝資料夾的目錄 Id 含小寫；對話框沒有授權頁、瀏覽、功能樹、`FilesInUse`、`MsiRMFilesInUse`、`MaintenanceTypeDlg`，沒有 `SelectionTree` 等控制項；完成頁那句只在 `NOT Installed` 時顯示。
+  - 安裝資料夾的目錄 Id 含小寫；對話框有 `FilesInUse`；沒有授權頁、瀏覽、功能樹、`MsiRMFilesInUse`、`MaintenanceTypeDlg`，沒有 `SelectionTree` 等控制項；完成頁那句只在 `NOT Installed` 時顯示。
   - 沒有 Class、Extension、Shortcut、RemoveFile、RemoveFolder、CreateFolder、RemoveRegistry*；Registry 只有 HKLM 的 Run 值那一列，內容相符。
   - Property：有 `MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`；兩個 KEEP 屬性沒有值；`SecureCustomProperties` 只有兩個 KEEP 屬性與升級用的屬性；啟動條件在。
 - **核對腳本自己會不會失敗**：同一個 job 做五份改壞的 A（改 `.wxs` 再用 `light -sval` 建）：多一列 HKCU 的 Registry；把 `DeleteSettings` 改成不模擬；拿掉 `StartHost` 的條件；把 `StartHost` 排進 `InstallUISequence`；把 `Register` 改成失敗時忽略。腳本對五份都要失敗，失敗訊息要點到埋進去的那一處，而且不能有那一處以外的新失敗。對 T 也要失敗（多一個自訂動作）。這一步在核對 A 失敗時也會跑，讓一個 run 看得到兩邊。

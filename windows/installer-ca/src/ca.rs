@@ -23,14 +23,17 @@ use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Pr
 use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleExW, GetProcAddress, LoadLibraryW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT};
 use windows::Win32::System::Registry::{RegCloseKey, RegEnumKeyExW, RegOpenCurrentUser, RegOpenKeyExW, HKEY, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_READ, REG_OPTION_OPEN_LINK, REG_SAM_FLAGS};
 use windows::Win32::System::StationsAndDesktops::{GetProcessWindowStation, GetUserObjectInformationW, UOI_FLAGS, USEROBJECTFLAGS};
-use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThread, OpenProcess, OpenThreadToken, QueryFullProcessImageNameW, TerminateProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE};
+use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId, GetCurrentProcessId, GetCurrentThread, OpenProcess, OpenThreadToken, QueryFullProcessImageNameW, TerminateProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE};
 use windows::Win32::System::WindowsProgramming::{ACTCTX_FLAG_HMODULE_VALID, ACTCTX_FLAG_RESOURCE_NAME_VALID};
 use windows::Win32::UI::Controls::{
-    TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TASKDIALOGCONFIG_1, TASKDIALOG_BUTTON, TASKDIALOG_COMMON_BUTTON_FLAGS, TASKDIALOG_NOTIFICATIONS, TDF_ALLOW_DIALOG_CANCELLATION, TDF_VERIFICATION_FLAG_CHECKED,
-    TDN_CREATED,
+    TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TASKDIALOGCONFIG_1, TASKDIALOG_BUTTON, TASKDIALOG_COMMON_BUTTON_FLAGS, TASKDIALOG_NOTIFICATIONS, TDF_ALLOW_DIALOG_CANCELLATION, TDF_CALLBACK_TIMER, TDF_VERIFICATION_FLAG_CHECKED,
+    TDN_CREATED, TDN_TIMER,
 };
 use windows::Win32::UI::Input::Ime::{ImmAssociateContextEx, HIMC, IACE_CHILDREN};
-use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, WSF_VISIBLE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, WSF_VISIBLE,
+};
 
 /// The manifest resource build.rs embeds (ISOLATIONAWARE_MANIFEST_RESOURCE_ID).
 const MANIFEST_RESOURCE: usize = 2;
@@ -301,7 +304,7 @@ unsafe fn show(h: MSIHANDLE, tdi: TaskDialogIndirectFn) -> (bool, i32, bool) {
         cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
         hwndParent: HWND::default(),
         hInstance: HINSTANCE::default(),
-        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_VERIFICATION_FLAG_CHECKED,
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_VERIFICATION_FLAG_CHECKED | TDF_CALLBACK_TIMER,
         dwCommonButtons: TASKDIALOG_COMMON_BUTTON_FLAGS(0),
         pszWindowTitle: w!("善解"),
         Anonymous1: TASKDIALOGCONFIG_0 { pszMainIcon: PCWSTR::null() },
@@ -320,7 +323,7 @@ unsafe fn show(h: MSIHANDLE, tdi: TaskDialogIndirectFn) -> (bool, i32, bool) {
         Anonymous2: TASKDIALOGCONFIG_1 { pszFooterIcon: PCWSTR::null() },
         pszFooter: PCWSTR::null(),
         pfCallback: Some(on_notify),
-        lpCallbackData: 0,
+        lpCallbackData: h.0 as isize, // on_notify's log handle (this thread, during the modal call)
         cxWidth: 0,
     };
     let (mut button, mut checked) = (0i32, BOOL(0));
@@ -334,9 +337,20 @@ unsafe fn show(h: MSIHANDLE, tdi: TaskDialogIndirectFn) -> (bool, i32, bool) {
 }
 
 /// On creation: no input method for the dialog's controls (with Zhuyin in Chinese mode the space bar would not reach the check box), then
-/// topmost and a request for the foreground. Nothing else.
-unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _: WPARAM, _: LPARAM, _: isize) -> HRESULT {
+/// topmost and a request for the foreground.
+///
+/// On the first timer tick (TDF_CALLBACK_TIMER; the dialog is visible by then, it is not yet at TDN_CREATED), once: if the dialog still
+/// is not the foreground window, its thread attaches its input to the foreground window's thread for the one call that brings it to
+/// the front, then detaches. Measured on the test VM (2026-11-12): after Windows Installer's files-in-use dialog had been answered, the
+/// request at creation left the dialog topmost but without the keyboard (the foreground stayed with the client msiexec's progress
+/// window). The foreground window is taken as it is (GetForegroundWindow): no window is looked up by class or title, and the attach is
+/// made only when that window belongs to %SystemRoot%\System32\msiexec.exe (another program's window gets only the plain request).
+/// One log line says what was done. Known limit: if the foreground thread hangs, the attach can wait on it.
+unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _: WPARAM, _: LPARAM, data: isize) -> HRESULT {
+    static FRONT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let h = MSIHANDLE(data as u32);
     if msg == TDN_CREATED {
+        FRONT_DONE.store(false, std::sync::atomic::Ordering::SeqCst);
         // A panic may not unwind into comctl32.
         let _ = catch_unwind(|| {
             // SAFETY: the dialog's own window, alive during the notification.
@@ -346,8 +360,56 @@ unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _
                 let _ = SetForegroundWindow(hwnd);
             }
         });
+    } else if msg == TDN_TIMER && !FRONT_DONE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let _ = catch_unwind(|| {
+            // SAFETY: the dialog's own window, alive during the notification; the attach is undone before returning.
+            unsafe {
+                let fg = GetForegroundWindow();
+                if fg.0.is_null() || fg == hwnd {
+                    log(h, "AskKeep: front already");
+                    return;
+                }
+                let mut fg_pid = 0u32;
+                let fg_thread = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+                let me = GetCurrentThreadId();
+                if fg_thread == 0 || fg_thread == me || !is_msiexec(fg_pid) {
+                    let set = SetForegroundWindow(hwnd).as_bool();
+                    log(h, &format!("AskKeep: front attach=0 set={}", set as u8));
+                    return;
+                }
+                let attached = AttachThreadInput(me, fg_thread, true).as_bool();
+                let _ = BringWindowToTop(hwnd);
+                let set = SetForegroundWindow(hwnd).as_bool();
+                if attached {
+                    let _ = AttachThreadInput(me, fg_thread, false);
+                }
+                log(h, &format!("AskKeep: front attach={} set={}", attached as u8, set as u8));
+            }
+        });
     }
     S_OK
+}
+
+/// `pid`'s image is %SystemRoot%\System32\msiexec.exe (false when it cannot be asked).
+fn is_msiexec(pid: u32) -> bool {
+    let mut sys = [0u16; 260];
+    // SAFETY: `sys` holds its length; the result is the length without the NUL (0 on error, more than the buffer when it is too small).
+    let n = unsafe { GetSystemDirectoryW(Some(&mut sys)) } as usize;
+    if n == 0 || n >= sys.len() {
+        return false;
+    }
+    let want: Vec<u16> = sys[..n].iter().copied().chain("\\msiexec.exe".encode_utf16()).collect();
+    // SAFETY: the handle is closed below.
+    let Ok(p) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else { return false };
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    // SAFETY: `buf` holds `len` units; on success `len` is the length without the NUL.
+    let ok = unsafe { QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len) }.is_ok() && same_path(&buf[..len as usize], &want);
+    // SAFETY: opened above.
+    unsafe {
+        let _ = CloseHandle(p);
+    }
+    ok
 }
 
 // ---- KillHost ----

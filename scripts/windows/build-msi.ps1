@@ -9,9 +9,8 @@ that calls this script (ci.yml's windows-msi job; later the release workflow). T
       <dir>\bin: shanjie_tip.dll, shanjie-host.exe, installer-ca.dll. SHANJIE_BUILD_ID, when the caller sets it, goes into the build hash.
 
   build-msi.ps1 msi -Bin <dir> -Out <file.msi> [-Variant A|T] [-Source <wxs>] [-SkipValidation]
-      Prints and checks the WiX version (the runner's WiX 3, at least 3.14.1), writes the generated files (CC-BY-SA-4.0-attribution.txt,
-      the dialog bitmaps and icons) next to the output, and runs candle and light (zh-TW, ICE20 off: the Dialog table has no FilesInUse
-      on purpose). The version is SHANJIE_VERSION and nothing else (MAJOR.MINOR.PATCH within the MSI limits 255.255.65535); without it
+      Prints and checks the WiX version (the runner's WiX 3, at least 3.14.1), writes the generated file (CC-BY-SA-4.0-attribution.txt;
+      the dialog bitmaps and icons are WiX's own) next to the output, and runs candle and light (zh-TW, every ICE on). The version is SHANJIE_VERSION and nothing else (MAJOR.MINOR.PATCH within the MSI limits 255.255.65535); without it
       the build fails. A light output naming ICE63 fails the build. -Source and -SkipValidation (light -sval) are for the check's broken
       copies only (ci.yml), never for a package.
 
@@ -112,7 +111,7 @@ if ($attribution -match 'Sparkle') { throw 'the attribution text names Sparkle, 
 $ext = @('-ext', 'WixUIExtension')
 $wixobj = Join-Path $work 'shanjie.wixobj'
 Invoke-Checked $candle (@('-nologo', '-arch', 'x64') + $ext + @("-dVariant=$Variant", "-dVersion=$version", "-dRepo=$Repo", "-dBin=$binDir", "-dGen=$gen", '-out', $wixobj, $Source))
-$lightArgs = @('-nologo') + $ext + @('-cultures:zh-TW', '-sice:ICE20')
+$lightArgs = @('-nologo') + $ext + @('-cultures:zh-TW')
 if ($SkipValidation) { $lightArgs += '-sval' }
 $lightOut = & $light @($lightArgs + @('-out', $msi, $wixobj)) 2>&1
 $lightRc = $LASTEXITCODE

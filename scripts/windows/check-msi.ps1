@@ -269,8 +269,8 @@ $expectedConditions = [ordered]@{
     SetKEEPMEMORY      = 'KEEPMEMORY<>"0"'
     UnregisterRollback = 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE'
     Unregister         = 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE'
-    SetKillHost        = 'REMOVE="ALL"'
-    KillHost           = 'REMOVE="ALL"'
+    SetKillHost        = 'REMOVE="ALL" OR REINSTALL<>""'
+    KillHost           = 'REMOVE="ALL" OR REINSTALL<>""'
     RegisterRollback   = 'NOT Installed AND NOT WIX_UPGRADE_DETECTED'
     Register           = 'NOT REMOVE="ALL"'
     DeleteSettings     = 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND KEEPSETTINGS="0"'
@@ -310,9 +310,10 @@ if ($doActions.Count -ne 1) { Fail 'DoAction' "$($doActions.Count) DoAction even
 
 # ---- dialogs ----
 $dialogIds = @(Nodes '//w:Dialog' | ForEach-Object { Attr $_ 'Id' })
-foreach ($d in 'LicenseAgreementDlg', 'WelcomeEulaDlg', 'InstallDirDlg', 'BrowseDlg', 'InvalidDirDlg', 'CustomizeDlg', 'SetupTypeDlg', 'FeaturesDlg', 'FilesInUse', 'MsiRMFilesInUse', 'MaintenanceTypeDlg') {
+foreach ($d in 'LicenseAgreementDlg', 'WelcomeEulaDlg', 'InstallDirDlg', 'BrowseDlg', 'InvalidDirDlg', 'CustomizeDlg', 'SetupTypeDlg', 'FeaturesDlg', 'MsiRMFilesInUse', 'MaintenanceTypeDlg') {
     if ($dialogIds -ccontains $d) { Fail 'Dialogs' "has $d" }
 }
+if ($dialogIds -cnotcontains 'FilesInUse') { Fail 'Dialogs' 'has no FilesInUse (the full UI shows error 2803 without it)' }
 foreach ($c in Nodes '//w:Control') {
     if (@('SelectionTree', 'DirectoryCombo', 'DirectoryList', 'PathEdit', 'ScrollableText') -contains (Attr $c 'Type')) {
         Fail 'Dialogs' "control $(Attr $c.ParentNode 'Id')/$(Attr $c 'Id') is a $(Attr $c 'Type') (feature tree, folder browsing or licence text)"

@@ -107,8 +107,10 @@
     <CustomAction Id="RegisterRollback" Directory="InstallDir" ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[#FTipDll]&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="Register" Directory="InstallDir" ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[#FTipDll]&quot;" Execute="deferred" Impersonate="no" Return="check" />
 
-    <!-- Ends the running release hosts; its only parameter is the installed host's path. -->
-    <SetProperty Id="KillHost" Value="[#FHost]" Before="KillHost" Sequence="execute">REMOVE="ALL"</SetProperty>
+    <!-- Ends the running release hosts; its only parameter is the installed host's path. Also on a repair: a repair replaces the running
+         shanjie-host.exe by moving it to C:\Config.Msi, after which its image path no longer matches and a later uninstall could not end it
+         (test VM: the host outlived the uninstall and passed every key through as English). -->
+    <SetProperty Id="KillHost" Value="[#FHost]" Before="KillHost" Sequence="execute">REMOVE="ALL" OR REINSTALL&lt;&gt;""</SetProperty>
     <CustomAction Id="KillHost" BinaryKey="InstallerCa" DllEntry="KillHost" Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- As the user who uninstalls: HKCU\Software\Shanjie, only when KEEPSETTINGS is 0. -->
@@ -122,7 +124,7 @@
       <Custom Action="AskKeep" After="InstallValidate">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND KEEPSETTINGS="" AND KEEPMEMORY=""</Custom>
       <Custom Action="UnregisterRollback" Before="Unregister">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="Unregister" Before="SetKillHost">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
-      <Custom Action="KillHost" Before="RemoveFiles">REMOVE="ALL"</Custom>
+      <Custom Action="KillHost" Before="RemoveFiles">REMOVE="ALL" OR REINSTALL&lt;&gt;""</Custom>
       <Custom Action="RegisterRollback" Before="Register">NOT Installed AND NOT WIX_UPGRADE_DETECTED</Custom>
       <Custom Action="Register" After="InstallFiles">NOT REMOVE="ALL"</Custom>
       <Custom Action="DeleteSettings" Before="InstallFinalize">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND KEEPSETTINGS="0"</Custom>
@@ -140,7 +142,9 @@
 <?endif ?>
 
     <!-- ===== Dialogs: WiX's welcome, verify, progress, exit and maintenance-welcome pages, plus two of ours (the repair-or-remove page without a
-         Change button, and the keep page). No licence page, no folder or feature page, no FilesInUse / MsiRMFilesInUse (light -sice:ICE20).
+         Change button, and the keep page). No licence page, no folder or feature page, no MsiRMFilesInUse (the Restart Manager is off).
+         WiX's FilesInUse page is there: with the full UI, Windows Installer's built-in files-in-use handling shows the package's FilesInUse
+         dialog, and without one it showed error 2803 twice instead (test VM, an upgrade with Notepad holding the DLL).
          WixUI_Common is not referenced. The WiX pages bring WiX's own bitmaps, icons and text styles with them (a first build that defined
          its own bitmaps failed with LGHT0091, duplicate symbols); check-msi.ps1 fails if that brought in any custom action. ===== -->
 
@@ -152,6 +156,7 @@
       <UIRef Id="WixUI_ErrorProgressText" />
       <DialogRef Id="ErrorDlg" />
       <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
       <DialogRef Id="PrepareDlg" />
       <DialogRef Id="ProgressDlg" />
       <DialogRef Id="ResumeDlg" />
