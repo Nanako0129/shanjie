@@ -498,6 +498,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # What the check read: the decompiled source and the check's own output, uploaded whatever the outcome (they hold no secrets),
+      # so a failed check can be read without another run.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-msi-check
+          path: |
+            build/msi/out/*.check/*.wxs
+            build/msi/out/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
   # docs/spec/windows-tip.md §2.9: the six Windows rowstats equal the Linux job's byte for byte. Its own job so that `windows` need not
   # wait for `debug`. It runs whenever both succeed (the implicit success() of `if`); when either fails it is skipped and the run fails anyway.
   rowstats:

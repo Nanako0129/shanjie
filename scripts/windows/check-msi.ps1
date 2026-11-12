@@ -59,6 +59,8 @@ function Extracted([Xml.XmlNode]$Node) {
     $src = Attr $Node 'Source'
     if (-not $src) { $src = Attr $Node 'SourceFile' }
     if (-not $src) { return $null }
+    # dark -x writes absolute paths into Source (first CI run); a relative SourceDir\ path is joined to the extraction folder
+    if ([IO.Path]::IsPathRooted($src)) { return $src }
     Join-Path $x ($src -replace '^SourceDir\\', '')
 }
 
@@ -361,7 +363,8 @@ foreach ($n in Nodes '//w:Property[@Secure="yes"]') { $null = $secure.Add((Attr 
 $scp = PropertyValue 'SecureCustomProperties'
 if ($scp) { foreach ($s in $scp -split ';') { if ($s) { $null = $secure.Add($s) } } }
 $upgradeProps = @(Nodes '//w:UpgradeVersion' | ForEach-Object { Attr $_ 'Property' } | Where-Object { $_ })
-$allowedSecure = @('KEEPSETTINGS', 'KEEPMEMORY') + $upgradeProps
+# MajorUpgrade's two action properties; the first CI run's decompiled source showed them as secure properties and no UpgradeVersion element
+$allowedSecure = @('KEEPSETTINGS', 'KEEPMEMORY', 'WIX_UPGRADE_DETECTED', 'WIX_DOWNGRADE_DETECTED') + $upgradeProps
 Write-Host "Secure: $(@($secure) -join ';')  (upgrade properties: $($upgradeProps -join ';'))"
 foreach ($s in $secure) { if ($allowedSecure -cnotcontains $s) { Fail 'Property' "$s is secure (only the two KEEP properties and the upgrade properties may be)" } }
 foreach ($s in 'KEEPSETTINGS', 'KEEPMEMORY') { if (-not $secure.Contains($s)) { Fail 'Property' "$s is not secure" } }
