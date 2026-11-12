@@ -59,6 +59,16 @@ pub fn same_path(a: &[u16], b: &[u16]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| fold(*x) == fold(*y))
 }
 
+/// The process id in Windows Installer's CLIENTPROCESSID property: decimal ASCII digits only, at most 10, not 0, fits a u32. Anything else
+/// is no id (the AskKeep dialog then attaches to no thread).
+pub fn parse_pid(v: &[u16]) -> Option<u32> {
+    if v.is_empty() || v.len() > 10 || !v.iter().all(|c| (u16::from(b'0')..=u16::from(b'9')).contains(c)) {
+        return None;
+    }
+    let n = v.iter().fold(0u64, |n, c| n * 10 + u64::from(c - u16::from(b'0')));
+    u32::try_from(n).ok().filter(|&n| n != 0)
+}
+
 /// `KillHost`'s parameter is acceptable: a drive-absolute path (`X:\…`) whose last component is `shanjie-host.exe`, with no NUL. Anything
 /// else (an empty CustomActionData, a relative path, another program) ends nothing.
 pub fn is_host_path(p: &[u16]) -> bool {
@@ -84,6 +94,15 @@ mod tests {
 
     fn w(s: &str) -> Vec<u16> {
         s.encode_utf16().collect()
+    }
+
+    #[test]
+    fn the_client_process_id() {
+        assert_eq!(parse_pid(&w("3900")), Some(3900));
+        assert_eq!(parse_pid(&w("4294967295")), Some(u32::MAX));
+        for bad in ["", "0", "4294967296", "12345678901", "-1", " 12", "12 ", "1a", "１２"] {
+            assert_eq!(parse_pid(&w(bad)), None, "{bad:?}");
+        }
     }
 
     #[test]

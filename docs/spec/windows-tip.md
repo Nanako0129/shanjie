@@ -715,7 +715,7 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
 
 **有視窗的 App 載著 DLL 時，Windows 會跳出它內建的「檔案使用中」視窗**（真的 MSI，測試 VM 量到：從設定頁解除安裝、記事本打過字）：標題「善解」，內文「繼續安裝之前應先關閉下列應用程式:」，清單列出那個 App（例如「*測試 - 記事本」），按鈕「取消」「重試」「略過」。原因：`MSIRESTARTMANAGERCONTROL=Disable` 讓 Windows Installer 改用它內建的檢查（verbose log：`RESTART MANAGER: Disabled by MSIRESTARTMANAGERCONTROL property; Windows Installer will use the built-in FilesInUse functionality.`），它列出用到善解、找得到視窗的程序。按「略過」照常繼續：不關任何程式，被占用的檔案照下面的方式處理。這個視窗是預期的行為，安裝說明教使用者按「略過」。
 
-- 基本介面（`/qb`、`/passive`、設定頁的解除安裝）用 Windows 自己畫的那個框；完整介面（雙擊安裝或升級、維護精靈）改用套件裡名為 `FilesInUse` 的頁，所以套件放了 WiX 的那一頁（同樣有「略過」）。量到（測試 VM）：套件沒有這一頁時，完整介面在同樣情況下跳兩次「錯誤碼為 2803」（log：`Dialog View did not find a record for the dialog`），按確定後照常完成。
+- 基本介面（`/qb`、`/passive`、設定頁的解除安裝）用 Windows 自己畫的那個框；完整介面（雙擊安裝或升級、維護精靈）改用套件裡名為 `FilesInUse` 的頁，所以套件放了 WiX 的那一頁（標題「檔案使用中」，按鈕「結束」「忽略」「重試」；按「忽略」照常繼續）。量到（測試 VM，新 MSI）：雙擊升級與維護精靈的移除都出現這一頁，升級時兩次，log 沒有 2803。量到（測試 VM）：套件沒有這一頁時，完整介面在同樣情況下跳兩次「錯誤碼為 2803」（log：`Dialog View did not find a record for the dialog`），按確定後照常完成。
 - 升級也會跳：`/qb` 升級時跳兩次（裝新版一次、移除舊版一次），略過兩次後照常完成（結束碼 0）。沒有視窗的程序（例如 explorer）載著 DLL 時不跳。
 - 修復也會跳（完整介面修復走的是基本介面的進度框，跳的是 Windows 自己的框）。
 
@@ -811,8 +811,8 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
   - 用 TaskDialog（系統原生，`TaskDialogIndirect`）：標題「善解」、主要說明「要解除安裝善解嗎？」、內文「開著的 App 如果還在用善解，要等那些 App 重新開啟之後，善解才會完全移除。」、一個勾「保留設定」（預設勾著）、兩個按鈕「解除安裝」「取消」。只有固定文字，沒有連結、展開區、說明按鈕、輸入框，不呼叫 `ShellExecute`，沒有擁有者視窗。基本介面不顯示 Windows Installer 的對話框，所以不能用它們；之後有兩個勾時 TaskDialog 不夠（只有一個勾），要換成自己做、接近原生的視窗，這一版不做。
   - comctl32 第 6 版：DLL 帶自己的 manifest（資源 2，`build.rs` 嵌入），呼叫前建並啟用自己的啟用內容，從那個內容取 `TaskDialogIndirect`，呼叫後停用；這是唯一的執行時載入。量到：這樣成立，`hr=0`，comctl32 從 WinSxS 的第 6 版載入，勾的值帶到延後動作。
   - 建立時關掉對話框的輸入法（`ImmAssociateContextEx(…, NULL, IACE_CHILDREN)`），設成置頂並要求前景。量到（那時沒有關輸入法）：注音在中文模式時空白鍵切不動勾選框，Ctrl+Space 切到英數後可以；關掉輸入法後的效果待驗收（U1）。
-    - 第一次計時器通知時（`TDF_CALLBACK_TIMER`，只做一次）：對話框還不是前景，而且前景視窗屬於 `%SystemRoot%\System32\msiexec.exe`（`QueryFullProcessImageNameW` 比對路徑；不用類別或標題找視窗），對話框的執行緒暫時把輸入接到前景視窗的執行緒（`AttachThreadInput`），`BringWindowToTop`＋`SetForegroundWindow` 一次後解開；前景是別的程式就只要求前景。MSI log 記一行 `AskKeep: front attach=… set=…`。量到（測試 VM）：按過 Windows 的「檔案使用中」視窗之後，建立時的要求只讓對話框置頂、鍵盤不在它身上（前景留在 client msiexec 的進度框）；這個做法的效果待驗收（U1）。已知限制：前景的執行緒卡住時，接輸入可能跟著等。
-  - 量到：設定頁「解除安裝」與 `/x /qb` 的對話框是 High、拿到前景；`/x /passive` 的對話框是 Medium、出現在 UAC 之前、**沒有拿到前景**（鍵盤打不到、滑鼠點得到）。已知限制。Medium 的程式對 High 的對話框送滑鼠點擊無效（UIPI）。
+    - 第一次計時器通知時（`TDF_CALLBACK_TIMER`，只做一次）：對話框還不是前景，而且前景視窗屬於這次安裝的用戶端程序（Windows Installer 的 `CLIENTPROCESSID`：從命令列或設定頁是 msiexec.exe，從「程式和功能」是 explorer.exe；不用類別或標題找視窗），對話框的執行緒暫時把輸入接到前景視窗的執行緒（`AttachThreadInput`），`BringWindowToTop`＋`SetForegroundWindow` 一次後解開；前景是別的程式就只要求前景。MSI log 記一行 `AskKeep: front attach=… set=…`（已是前景時記 `front already`）。量到（測試 VM）：按過 Windows 的「檔案使用中」視窗之後，建立時的要求只讓對話框置頂、鍵盤不在它身上（前景留在用戶端的進度框）；接輸入之後設定頁的解除安裝、不帶參數的 `/x` 記 `attach=1 set=1`，焦點在「解除安裝」鈕。只比對 msiexec.exe 的那一版在「程式和功能」記 `attach=0 set=0`（用戶端是 explorer），所以改成比對 `CLIENTPROCESSID`；這一版在「程式和功能」的效果待驗收。已知限制：前景的執行緒卡住時，接輸入可能跟著等。
+  - 量到：設定頁「解除安裝」與 `/x /qb` 的對話框是 High、拿到前景；`/x /passive`：假安裝檔量到對話框是 Medium、出現在 UAC 之前、沒有拿到前景；真的 MSI（測試 VM）量到 UAC 在前、對話框是 High、一出來就是前景（`front already`）。Medium 的程式對 High 的對話框送滑鼠點擊無效（UIPI）。
   - 權杖是 SYSTEM、LocalService、NetworkService，在工作階段 0，或視窗站不是互動的：不顯示，都保留。自己出錯（`TaskDialogIndirect` 回錯誤、panic）：照沒有畫面處理（都保留）、繼續解除安裝、記進 MSI 的 log。只有使用者按「取消」才回「使用者取消」。讀寫的只有 MSI 的屬性。
 - **`DeleteSettings`**：用 `RegOpenCurrentUser` 開使用者的 hive，路徑是名稱表的常數（`Software\Shanjie`）；不跟隨登錄連結：每一層都用 `REG_OPTION_OPEN_LINK` 開出 handle，是連結就只刪連結本身；往下列舉與刪除（`NtDeleteKey`）都經過同一個 handle，不先查名稱再刪；不用 `RegDeleteTree`。往下最多 32 層、每層最多 4096 個子機碼，超過的留著、log 記「not all deleted」（程式只寫一層）。行程權杖或（若有）執行緒權杖是 SYSTEM、LocalService、NetworkService，或查不到權杖時，什麼都不做（量到：SYSTEM 身分的排程工作裡，模擬動作就是 SYSTEM，§6.6）。連結的行為：待驗收（L1）。
 - **載入 DLL 的規則**：沒有 delay-load；不呼叫 `SetDefaultDllDirectories`（它改的是自訂動作宿主整個程序的狀態）；除了 comctl32 沒有別的執行時載入。靜態匯入只能是 msi、kernel32、user32、advapi32、imm32、ntdll 與 API set（`check-msi.ps1` 寫死這份名單）。
@@ -852,6 +852,5 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
 - 已經載著舊 DLL 的 App 用舊的，直到重開 App；線上協定版本有變時只有英文（§6.5）。
 - `KillHost` 沒有 rollback；升級與解除安裝時所有工作階段（含其他登入者）的正式版常駐程序都被結束；還載著 DLL 的 App 可能再把它啟動起來（§6.5、§6.6）。
 - `DeleteSettings` 只刪執行解除安裝的那個使用者的設定；`KillHost`、`DeleteSettings` 出錯時解除安裝照常完成，只記進 MSI 的 log（§6.8）。
-- `/x /passive` 的問話對話框拿不到前景，鍵盤要先用滑鼠點一下（§6.8）。
 - 常駐程序在 HKCU 留下的 WER 排除項，解除安裝後留著（§6.7）。
 - MSI 未簽章：使用者會看到 SmartScreen 的攔阻與 UAC 的「發行者: 未知」（UAC 的畫面量到）。SmartScreen 的畫面沒量。
