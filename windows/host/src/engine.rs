@@ -68,7 +68,7 @@ pub fn install(e: *mut ShanjieEngine, scheme: u32) {
 
 // ---- loading (docs/spec/windows-tip.md §3.4: the call list of cli/src/replay.rs `build_engine_packs`, except set_rerank(0)) ----
 
-/// `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`: `cli::replay::PACKS` without the beauty pack (16), which the Windows build does not ship (docs/spec/windows-tip.md §3.4).
+/// `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`: `cli::replay::PACKS` (29) without the meme (8) and beauty (16) packs, which the Windows build does not ship (docs/spec/windows-tip.md §3.4).
 const PACKS: u32 = 1 | 4;
 
 /// Calls a setter that returns a snapshot; the snapshot is freed at once.

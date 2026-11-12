@@ -41,6 +41,10 @@ public enum Selftest {
     /// without the beauty bit the first is 沒採高, with it 眉彩膏 (2026-11-08), so the sentence is the word only if the beauty pack loaded.
     static let beautyWordStandard = "ao6h93el "
     static let beautyWord = "眉彩膏"
+    /// The bundled meme pack (docs/spec/lexicon-and-packs.md §4.4, §9.3): the first row of data/packs/meme-add.tsv, 可以色色 `ㄎㄜˇ ㄧˇ ㄙㄜˋ ㄙㄜˋ` on the standard layout (ㄎ d, ㄜ k, ˇ 3; ㄧ u, ˇ 3;
+    /// ㄙ n, ㄜ k, ˋ 4, twice), chat profile. Without the meme bit the chat engine's first is 可以瑟瑟, with it 可以色色 (`shanjie-eval --profile chat --packs acg,it,beauty` against `--packs acg,it,meme,beauty`, `--dump`), so the sentence is the word only if the meme pack loaded (checked on the built data: the first candidates differ).
+    static let memeWordStandard = "dk3u3nk4nk4"
+    static let memeWord = "可以色色"
 
     /// 通語 SJ-LM-7-9.7M (2026-10-27, docs/spec/decoder.md §3.6): dev302 row 65 `ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ` on the standard layout, chat profile, no left context,
     /// the bundled packs loaded, the small model loaded and the colloquial table not yet: the n-gram's first is 我等一下在過去 and the rerank picks 我等一下再過去
@@ -85,7 +89,7 @@ public enum Selftest {
         // and the ordinary sentence must still come out the same.
         let (packed, packCode) = CoreEngine.make(dataDir: resources.path, layout: 0,
                                                   packsDir: resources.appendingPathComponent("packs").path,
-                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT) | UInt32(SHANJIE_PACK_BEAUTY))
+                                                  packs: UInt32(SHANJIE_PACK_ACG) | UInt32(SHANJIE_PACK_IT) | UInt32(SHANJIE_PACK_MEME) | UInt32(SHANJIE_PACK_BEAUTY))
         guard let withPack = packed else { return fail("selftest: shanjie_engine_new_packs failed, code", packCode) }
         let packLM = withPack.loadLM(path: lmPath)
         guard packLM == 0 else { return fail("selftest: shanjie_engine_load_lm (pack) failed, code", packLM) }
@@ -100,6 +104,9 @@ public enum Selftest {
         let (beautyShown, beautyCode) = type(beautyWordStandard, withPack)
         guard beautyCode == 0 else { return fail("selftest: shanjie_engine_key (beauty pack) failed, code", beautyCode) }
         guard beautyShown == beautyWord else { return fail("selftest: the bundled beauty word pack is not in effect, code", 0) }
+        let (memeShown, memeCode) = type(memeWordStandard, withPack)
+        guard memeCode == 0 else { return fail("selftest: shanjie_engine_key (meme pack) failed, code", memeCode) }
+        guard memeShown == memeWord else { return fail("selftest: the bundled meme word pack is not in effect, code", 0) }
         // The small model, as the shell loads it: a bundle without it (or with one for another n-gram model) fails here, so
         // 語意校正 cannot ship silently doing nothing.
         let tiny = withPack.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)

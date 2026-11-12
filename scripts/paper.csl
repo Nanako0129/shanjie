@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" default-locale="en-US">
+  <!-- Reference entries of the paper's reading page (scripts/build-paper-html.sh). Written to keep what the PDF
+       prints: every author and editor, the title in the sentence case pandoc gives it when it reads the bibliography
+       file (this style adds no title-casing of its own), venue, volume, pages,
+       year, DOI and URL; venue names are title-cased, as the PDF has them. Citation numbers and the entries' notes are added by scripts/paper_html.py. -->
+  <info>
+    <title>Shanjie paper reading page</title>
+    <id>https://shanjie.nyanako.com/paper</id>
+    <updated>2026-11-12T00:00:00+00:00</updated>
+  </info>
+  <citation>
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <names variable="author"><name form="short" and="text" et-al-min="3" et-al-use-first="1"/><substitute><text variable="title"/></substitute></names>
+      <date variable="issued" prefix=" "><date-part name="year"/></date>
+    </layout>
+  </citation>
+  <bibliography>
+    <layout>
+      <names variable="author" suffix=". "><name and="text" delimiter=", " delimiter-precedes-last="contextual"/></names>
+      <text variable="title" suffix="."/>
+      <group prefix=" " suffix="." delimiter=", ">
+        <choose>
+          <if type="paper-conference chapter" match="any">
+            <group prefix="In ">
+              <names variable="editor" suffix=", "><name and="text" delimiter=", " delimiter-precedes-last="contextual"/><label form="long" prefix=", "/></names>
+              <text variable="container-title" font-style="italic" text-case="title"/>
+            </group>
+          </if>
+          <else><text variable="container-title" font-style="italic" text-case="title"/></else>
+        </choose>
+        <text variable="collection-title" text-case="title"/>
+        <group><text variable="volume"/><text variable="issue" prefix="(" suffix=")"/></group>
+        <text variable="page"/>
+        <text variable="publisher"/>
+        <date variable="issued"><date-part name="year"/></date>
+      </group>
+      <text variable="DOI" prefix=" doi: " suffix="."/>
+      <text variable="URL" prefix=" " suffix="."/>
+    </layout>
+  </bibliography>
+</style>

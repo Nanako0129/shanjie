@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>論文：結合神經重排的開源注音輸入法｜善解輸入法</title>
+<meta name="description" content="善解論文 v1（Nanako Tsai，2026-11-12）：分層 n-gram 解碼器加小型字元語言模型重排的注音輸入法，選字靠什麼變準、哪些做法沒過標準。英文與繁體中文 PDF、網頁閱讀版、引用方式，CC BY 4.0。">
+<meta property="og:title" content="論文：結合神經重排的開源注音輸入法｜善解輸入法">
+<meta property="og:description" content="善解論文 v1（Nanako Tsai，2026-11-12）：分層 n-gram 解碼器加小型字元語言模型重排的注音輸入法，選字靠什麼變準、哪些做法沒過標準。英文與繁體中文 PDF、網頁閱讀版、引用方式，CC BY 4.0。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://shanjie.nyanako.com/paper">
+<meta property="og:site_name" content="善解輸入法">
+<meta property="og:locale" content="zh_TW">
+<meta property="og:image" content="https://shanjie.nyanako.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="論文：結合神經重排的開源注音輸入法｜善解輸入法">
+<meta name="twitter:description" content="善解論文 v1（Nanako Tsai，2026-11-12）：分層 n-gram 解碼器加小型字元語言模型重排的注音輸入法，選字靠什麼變準、哪些做法沒過標準。英文與繁體中文 PDF、網頁閱讀版、引用方式，CC BY 4.0。">
+<meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
+<link rel="canonical" href="https://shanjie.nyanako.com/paper">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<script src="/theme.js"></script>
+<script src="/paper.js"></script>
+<link rel="stylesheet" href="/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "善解輸入法", "item": "https://shanjie.nyanako.com/"}, {"@type": "ListItem", "position": 2, "name": "論文", "item": "https://shanjie.nyanako.com/paper"}]}</script>
+<!-- 換 PDF 時要一起改的地方：下面 JSON-LD 的兩個 contentSize、「下載」段的頁數與大小、英文摘要（<div id="abstract-en">）；
+     閱讀版 /paper/zh 用 scripts/build-paper-html.sh 重轉。 -->
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "ScholarlyArticle", "headline": "Shanjie: An Open-Source Zhuyin Input Method with Neural Reranking", "alternativeHeadline": "善解：結合神經重排的開源注音輸入法", "author": {"@type": "Person", "name": "Nanako Tsai"}, "datePublished": "2026-11-12", "version": "1", "inLanguage": ["en", "zh-Hant-TW"], "license": "https://creativecommons.org/licenses/by/4.0/", "url": "https://shanjie.nyanako.com/paper", "encoding": [{"@type": "MediaObject", "contentUrl": "https://shanjie.nyanako.com/paper/shanjie-v1-en.pdf", "encodingFormat": "application/pdf", "inLanguage": "en", "contentSize": "409 kB"}, {"@type": "MediaObject", "contentUrl": "https://shanjie.nyanako.com/paper/shanjie-v1-zh.pdf", "encodingFormat": "application/pdf", "inLanguage": "zh-Hant-TW", "contentSize": "711 kB"}]}</script>
+</head>
+<body>
+<nav class="site-nav" aria-label="網站"><div class="in">
+  <a class="home" href="/">善解</a>
+  <a href="/how">怎麼選字</a>
+  <a href="/install">安裝</a>
+  <a href="/guide">使用說明</a>
+  <a href="/updates">更新紀錄</a>
+  <a class="btn primary dl" href="/install#download">下載</a>
+</div></nav>
+<main>
+
+<h1>善解：結合神經重排的開源注音輸入法</h1>
+<p class="sub" lang="en">Shanjie: An Open-Source Zhuyin Input Method with Neural Reranking</p>
+<dl class="facts">
+  <dt>作者</dt><dd>Nanako Tsai</dd>
+  <dt>版本</dt><dd>v1</dd>
+  <dt>公開日期</dt><dd><time datetime="2026-11-12">2026-11-12</time></dd>
+  <dt>描述的系統</dt><dd>善解 v0.7.0（2026-11-11 發佈）</dd>
+  <dt>授權</dt><dd>CC BY 4.0</dd>
+  <!-- arXiv 編號公布後在這裡加一列：<dt>arXiv</dt><dd><a href="https://arxiv.org/abs/編號">arXiv:編號</a></dd>；同時改「引用」的兩份字串（純文字加 arXiv:編號，BibTeX 加 eprint、archivePrefix = {arXiv}），JSON-LD 的 ScholarlyArticle 加 "sameAs": "https://arxiv.org/abs/編號"。 -->
+</dl>
+
+<h2 id="about">這篇論文寫什麼</h2>
+<p>論文描述 v0.7.0 的選字流程：每一鍵跑一次的分層 n-gram 解碼器，後面接一個約 1,465 萬參數的字元語言模型，它只能重排解碼器的前 8 名。每一條決策規則都寫成分數公式。</p>
+<p>它回答三個問題：第一名正確率靠什麼往上、小模型要照什麼規則才能改掉解碼器的第一名、在開發資料上選出來的結果能信到什麼程度。試過、沒過標準的做法也逐項列出。</p>
+<div class="actions">
+  <a class="btn primary" href="/paper/zh">讀繁體中文閱讀版</a>
+  <a class="btn secondary" href="#download">下載 PDF</a>
+</div>
+
+<h2 id="abstract">摘要（英文）</h2>
+<div id="abstract-en" lang="en">
+<p>Zhuyin (Bopomofo) input is a syllable sequence, and the input method must pick, among all homophonous strings, the one the user meant. We present <em>Shanjie</em> (<span lang="zh-Hant-TW">善解</span>), an open-source macOS Zhuyin input method, as shipped in v0.7.0 (2026-11-11), and ask what improves its character selection. The system is a layered <i>n</i>-gram decoder followed by a 14.6M-parameter character language model that may only re-rank the decoder's 8 best paths behind a margin gate. Our main finding is that gains came from training text in the right register and how the re-ranker's score is fused with the decoder's, not from a larger neural component: the largest release step is the model generation rebuilt with forum and chat-channel text, while a larger re-ranker, long left context, listwise and distillation objectives and LLM judges all failed pre-specified criteria, and re-rankers retrained with the same recipe swap 65–100 rows of a chat set with a net within ±12, a noise floor most model changes did not clear. Components were accepted by paired statistics; confirmations, pre-registered since 2026-10-18, run once on unseen data. Of 13 one-shot confirmations run, 8 held and 5 did not. Among changes shipped without one, the largest step, an earlier reading term and lexicon packs were judged, where numbers exist, on check or seen sets. On the author's 4,958-clause chat development set, seen during value selection, first-choice accuracy rose from 84.89% to 94.07% in the chat profile between v0.4.0 and v0.7.0 (83.56% to 93.71% in the written profile). On the release-monitoring hold-out, v0.5.0→v0.6.0 moved the public colloquial half from 115 to 124 of 150 (exact McNemar <i>p</i> = 0.012; that half's fifth reported use) and the newly activated news half from 125 to 128 (<i>p</i> = 0.25); v0.6.1→v0.7.0 moved them to 127 (<i>p</i> = 0.25) and 126 (<i>p</i> = 0.63). All evidence is from one user's chat register and tool-generated readings.</p>
+</div>
+<p class="note">中文摘要在<a href="/paper/zh#abstract">閱讀版</a>的開頭。</p>
+
+<h2 id="download">下載</h2>
+<div class="table">
+<table>
+<thead><tr><th>檔案</th><th>語言</th><th class="num">頁數</th><th class="num">大小</th></tr></thead>
+<tbody>
+<tr><td><a href="/paper/shanjie-v1-en.pdf">shanjie-v1-en.pdf</a></td><td>英文</td><td class="num">47</td><td class="num">409 kB</td></tr>
+<tr><td><a href="/paper/shanjie-v1-zh.pdf">shanjie-v1-zh.pdf</a></td><td>繁體中文</td><td class="num">38</td><td class="num">711 kB</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">兩份的結構與數字相同。繁體中文另有<a href="/paper/zh">網頁閱讀版</a>，章節、表格與公式的編號和 PDF 一致。</p>
+
+<h2 id="cite">引用</h2>
+<!-- arXiv 編號公布後：兩份引用字串都加上 arXiv 編號（見上面「授權」那一列下的註解）。 -->
+<h3>純文字</h3>
+<pre class="cite" data-copy="複製純文字引用">Nanako Tsai. 2026. Shanjie: An Open-Source Zhuyin Input Method with Neural Reranking. Version 1, 2026-11-12. https://shanjie.nyanako.com/paper</pre>
+<h3>BibTeX</h3>
+<pre data-copy="複製 BibTeX">@misc{tsai2026shanjie,
+  author = {Tsai, Nanako},
+  title  = {Shanjie: An Open-Source Zhuyin Input Method with Neural Reranking},
+  year   = {2026},
+  month  = nov,
+  note   = {Version 1, 2026-11-12},
+  url    = {https://shanjie.nyanako.com/paper}
+}</pre>
+
+<h2 id="license">授權</h2>
+<ul>
+<li>論文（兩份 PDF 與閱讀版）：<a href="https://creativecommons.org/licenses/by/4.0/" rel="license">創用 CC 姓名標示 4.0 國際</a>（CC BY 4.0）。轉載、翻譯、改作都可以，請標示作者與出處。</li>
+<li>程式碼：Apache-2.0。</li>
+<li>模型與詞庫：照各自發佈時寫明的授權，整理在<a href="/licenses">開源與授權</a>。</li>
+</ul>
+
+<h2 id="versions">版本</h2>
+<p>這一版是 v1。v1 的網址與檔名固定，內容不再更動；日後修訂會用新的版本號與新的檔名，舊版的檔案留在原本的網址。</p>
+
+<h2 id="models">公開的模型與程式</h2>
+<ul>
+<li>論文裡的模型檔隨每一版 App 發佈，另有各代模型的資料類發佈：<a href="https://github.com/Nanako0129/shanjie/releases">GitHub Releases</a> 。</li>
+<li>原始碼、評測工具與公開的評測集：<a href="https://github.com/Nanako0129/shanjie">github.com/Nanako0129/shanjie</a> 。</li>
+<li>論文引用的研究摘錄：<a href="https://github.com/Nanako0129/shanjie/blob/main/docs/research-excerpt.md">docs/research-excerpt.md</a> 。</li>
+</ul>
+
+<p class="next"><a href="/paper/zh">繁體中文閱讀版 →</a><a href="/how">怎麼選字 →</a><a href="/benchmark">基準測試 →</a></p>
+
+</main>
+<footer class="site-foot"><div class="in">
+  <nav aria-label="其他頁面"><a href="/paper" aria-current="page">論文</a><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a></nav>
+  <span>善解輸入法・最後更新：<time datetime="2026-11-12">2026-11-12</time></span>
+</div></footer>
+</body>
+</html>

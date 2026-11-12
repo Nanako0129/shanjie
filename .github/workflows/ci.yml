@@ -635,7 +635,7 @@ jobs:
       - name: IT pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_it_pack tools.test_it_sources tools.test_it_wiki_counts
 
-      # The meme pack builder (a build tool; the pack is not shipped) against fixtures and a fake decoder (thresholds, dedupe, the
+      # docs/spec/lexicon-and-packs.md §9.2: the meme pack builder against fixtures and a fake decoder (thresholds, dedupe, the
       # first-place rule, count-file provenance, determinism). No network, no evaluation CLI.
       - name: Meme pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_meme_pack
@@ -644,6 +644,12 @@ jobs:
       # No network, no evaluation CLI.
       - name: Beauty pack builder (Python)
         run: python3 -W ignore -m unittest tools.test_build_beauty_pack
+
+      # docs/spec/lexicon-and-packs.md (meme pack): the embedded-sentence generator, and its committed output re-generated and compared.
+      - name: Meme embedded sentences (Python)
+        run: |
+          python3 -W ignore -m unittest tools.test_gen_meme_embedded
+          python3 tools/gen_meme_embedded.py --check eval/dev/meme/words-all.txt eval/dev/meme/embedded.txt
 
       # docs/spec/lexicon-and-packs.md §3.2, §3.7: the common proper-noun builder against fixtures and a fake API, and the
       # committed names-add.tsv sharing no word with the base, overlay-add, sandhi-add and acg-add.

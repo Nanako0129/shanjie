@@ -143,6 +143,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let quotePack = "經典台詞"
         public static let itPack = "資訊與 AI 詞"
         public static let beautyPack = "美妝與保養詞"
+        public static let memePack = "迷因與實況用語"
         public static func acgDataDate(_ date: String) -> String { "資料更新至 \(date)（維基百科）" }
         /// The section header over the menu's non-clickable pack lines, one line per pack (docs/spec/lexicon-and-packs.md §4.2, §4.3).
         public static let packsHeader = "已開啟的詞包"

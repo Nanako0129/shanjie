@@ -1,0 +1,4 @@
+# Figures of the reading page (scripts/build-paper-html.sh): id, file in site/paper/, PDF page, then the box on that
+# page in PDF points (x, y, width, height; origin at the top left) and the alt text. Measured on the v1 PDF.
+fig:pipeline	fig-pipeline.svg	4	80	62	452	204	流程圖：注音按鍵（音節 r）進入 n-gram 解碼器，解碼器每一鍵在本機同步跑（每鍵 p95 1.93 毫秒），它的第一名直接顯示在組字區。解碼器同時把前 8 條路徑與分數送進候選池；語意校正（1,465 萬參數的字元語言模型）在背景非同步重排候選池，選出的候選再套用到組字區，那一段中途變了就丟掉。
+fig:trend	fig-trend.svg	12	80	304	452	196	折線圖：v0.4.0 到 v0.7.0 各版在 discordtune 4,958 個子句裡對的子句數。聊天設定從 4,209（84.89%）升到 4,664（94.07%），書面設定從 4,143（83.56%）升到 4,646（93.71%）。兩條線從 v0.4.1 到 v0.4.7 大致持平，v0.5.0 小升，v0.6.0 大幅上升。
