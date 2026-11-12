@@ -120,8 +120,11 @@ def tex_counts(body):
     dollars = m.count("$")
     if dollars % 2:
         sys.exit("STOP: odd number of $ in the source")
+    # Rows of each table's head: those between \toprule and the first \midrule (pandoc keeps only a one-row head).
+    heads = [len(re.findall(r"\\\\", t.split(r"\midrule")[0].split(r"\toprule")[-1]))
+             for t in re.findall(r"\\begin\{(?:tabular|longtable)\}.*?\\end\{(?:tabular|longtable)\}", body, flags=re.S)]
     cite_commands = len(re.findall(r"\\cite[tp]?\*?(?:\[[^\]]*\])*\{", body))
-    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered, cite_commands
+    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered, cite_commands, heads
 
 
 def crop_figure(pdf, page, box, dest):
@@ -140,7 +143,8 @@ def self_test():
     """A two-section paper with one appendix, through main(): the checks pass, and fail when the aux file disagrees."""
     tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \begin{equation}x\label{eq:x}\end{equation}"
            "\n" r"\subsection{Sub}\label{sec:sub} \ref{app:a} \eqref{eq:x} \ref{tab:t}" "\n" r"\appendix"
-           "\n" r"\section{App}\label{app:a}")
+           "\n" r"\section{App}\label{app:a}"
+           "\n" r"\begin{tabular}{l}\toprule H \\ I \\ \midrule x \\ \end{tabular}")
     global page, log
     log = ""
     page = ('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n<li><a href="#app:a" id="toc-app:a">App</a></li>\n'
@@ -151,7 +155,8 @@ def self_test():
             '<a href="#app:a" data-reference-type="ref" data-reference="app:a">2</a>'
             '<a href="#eq:x" data-reference-type="eqref" data-reference="eq:x">[eq:x]</a>'
             '<a href="#tab:t" data-reference-type="ref" data-reference="tab:t">1</a>'
-            '<table id="tab:t">\n<caption>c</caption></table></section></section>\n'
+            '<table id="tab:t">\n<caption>c</caption>\n<tbody>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td>I</td>\n</tr>\n'
+            '<tr>\n<td>x</td>\n</tr>\n</tbody>\n</table></section></section>\n'
             '<section id="app:a" class="level2">\n<h2>App</h2>'
             '<div id="refs" class="references">\n<div id="ref-k" class="csl-entry" role="listitem">\nK\n</div>\n</div>\n'
             '</section>')
@@ -172,6 +177,7 @@ def self_test():
         assert '<a href="#app:a">A</a><a href="#eq:x">(1)</a><a href="#tab:t">1</a>' in out, out
         assert '<span class="secno">附錄 A</span> App' in out and '<span class="secno">1.1</span> Sub' in out
         assert '<span class="citation">[<a href="#ref-k">7</a>]</span>' in out and '<span class="csl-num">[7]</span> K' in out, out
+        assert "<thead>\n<tr>\n<th>H</th>\n</tr>\n<tr>\n<th>I</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>x</td>" in out, out
         nums = {"a": 3, "b": 4, "c": 5, "d": 9, "e": 10}
         assert re.sub(r"<[^>]+>", "", cite_numbers(["d", "b", "a", "c", "e"], nums)) == "[3–5, 9, 10]"
         assert 'K <span class="csl-note">Seen at <a href="https://e.org/x">https://e.org/x</a>.</span>' in out, out
@@ -219,7 +225,7 @@ def main():
     page, tex, aux, pdf, tsv, figdir, log, refs_json = sys.argv[1:]
     s = open(page, encoding="utf-8").read()
     labels = aux_labels(aux)
-    n_sections, n_main, n_figures, cited, n_math, n_numbered, n_cite_commands = tex_counts(tex_body(tex))
+    n_sections, n_main, n_figures, cited, n_math, n_numbered, n_cite_commands, heads = tex_counts(tex_body(tex))
     figs = {}
     for line in open(tsv, encoding="utf-8"):
         if line.strip() and not line.startswith("#"):
@@ -306,6 +312,22 @@ def main():
 
     s = re.sub(r'<table( id="([^"]*)")?>\s*<caption>', table, s)
     check("tables (numbered / <table)", count["tab"], s.count("<table"))
+    check("tables (on the page / tabular and longtable environments)", count["tab"], len(heads))
+
+    # A head of two rows comes out of pandoc as body rows: they are moved into <thead> as <th>.
+    it = iter(heads)
+
+    def head(m):
+        rows = next(it, 1)
+        if "<thead>" in m.group(0) or "<tbody>\n" not in m.group(0):
+            return m.group(0)
+        parts = re.split(r"(?<=</tr>)\n", m.group(0).split("<tbody>\n", 1)[1])
+        top = "\n".join(parts[:rows]).replace("<td", "<th").replace("</td>", "</th>")
+        return m.group(0).split("<tbody>\n", 1)[0] + "<thead>\n" + top + "\n</thead>\n<tbody>\n" + "\n".join(parts[rows:])
+
+    if len(heads) == count["tab"]:
+        s = re.sub(r"<table.*?</table>", head, s, flags=re.S)
+    check("tables without a head", s.count("<table") - s.count("<thead>"), 0)
     s = s.replace("</table>", "</table>\n</div>")
 
     def figure(m):

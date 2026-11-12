@@ -60,9 +60,7 @@ macOS 注音輸入法「善解」（以 2026-11-11 發佈的 v0.7.0
 以內，多數模型改動沒有超過這個雜訊底線。部件用配對統計判讀；確認從
 2026-10-18 起要預先登記，在沒看過的資料上只跑一次。一共跑了 13
 次單次確認，8 次成立、5
-次不成立。也有改動沒有經過單次確認就出貨，例如最大的那一步、較早的一個讀音項、詞包，以及
-v0.7.0
-幾條較小的規則；這幾類裡紀錄有數字的，判讀用的是檢查集與已經看過的集合。在作者自己
+次不成立。也有改動沒有經過單次確認就出貨，例如最大的那一步、較早的一個讀音項與詞包；這幾類裡紀錄有數字的，判讀用的是檢查集與已經看過的集合。在作者自己
 4,958 個子句的聊天開發集（選值時看過）上，聊天設定的第一名正確率從
 v0.4.0 的 84.89% 升到 v0.7.0 的 94.07%（書面設定下從 83.56% 升到
 93.71%）。在發版監測用的保留集上，v0.5.0<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mo>→</mo><annotation encoding="application/x-tex">\to</annotation></semantics></math>v0.6.0
@@ -1072,25 +1070,27 @@ discordtune 欄，表 <a href="#tab:holdout">3</a> 是保留集。</p>
 80 列；最後一欄是同一批 discordtune 子句在書面設定下的結果。版本從
 v0.4.0（2026-10-10）到
 v0.7.0（2026-11-11）。所有集合在選值時都被看過。</caption>
+<thead>
+<tr>
+<th style="text-align: left;">版本</th>
+<th style="text-align: right;">dev302</th>
+<th style="text-align: right;">typing76</th>
+<th style="text-align: right;">錯字回報</th>
+<th style="text-align: right;">cvtune</th>
+<th style="text-align: right;">discordtune</th>
+<th style="text-align: right;">同左，</th>
+</tr>
+<tr>
+<th style="text-align: left;"></th>
+<th style="text-align: right;">(302)</th>
+<th style="text-align: right;">(76)</th>
+<th style="text-align: right;">(80)</th>
+<th style="text-align: right;">(3,791)</th>
+<th style="text-align: right;">(4,958)</th>
+<th style="text-align: right;">書面</th>
+</tr>
+</thead>
 <tbody>
-<tr>
-<td style="text-align: left;">版本</td>
-<td style="text-align: right;">dev302</td>
-<td style="text-align: right;">typing76</td>
-<td style="text-align: right;">錯字回報</td>
-<td style="text-align: right;">cvtune</td>
-<td style="text-align: right;">discordtune</td>
-<td style="text-align: right;">同左，</td>
-</tr>
-<tr>
-<td style="text-align: left;"></td>
-<td style="text-align: right;">(302)</td>
-<td style="text-align: right;">(76)</td>
-<td style="text-align: right;">(80)</td>
-<td style="text-align: right;">(3,791)</td>
-<td style="text-align: right;">(4,958)</td>
-<td style="text-align: right;">書面</td>
-</tr>
 <tr>
 <td style="text-align: left;">v0.4.0</td>
 <td style="text-align: right;">241</td>
@@ -1403,19 +1403,21 @@ tag）：對的列數（top-1，寬鬆對照），括號裡是對該區塊第一
 與 wikitune-clean-tw0 是公開集合；discordtune
 是過濾後的私人集合，只報彙總數字，分數檔不公開。書面設定沒有口語項，所以是「不適用」；unigram
 基準走另一條程式路徑，不帶詞包、不寫逐列結果，所以沒有改對／改壞。三個集合在選值時都被看過，這張表是描述性的。</caption>
+<thead>
+<tr>
+<th style="text-align: left;">系統</th>
+<th style="text-align: left;">cvtune-clean-tw0</th>
+<th style="text-align: left;">wikitune-clean-tw0</th>
+<th style="text-align: left;">discordtune</th>
+</tr>
+<tr>
+<th style="text-align: left;"></th>
+<th style="text-align: left;">（聊天，2,992）</th>
+<th style="text-align: left;">（書面，2,182）</th>
+<th style="text-align: left;">（聊天，4,919）</th>
+</tr>
+</thead>
 <tbody>
-<tr>
-<td style="text-align: left;">系統</td>
-<td style="text-align: left;">cvtune-clean-tw0</td>
-<td style="text-align: left;">wikitune-clean-tw0</td>
-<td style="text-align: left;">discordtune</td>
-</tr>
-<tr>
-<td style="text-align: left;"></td>
-<td style="text-align: left;">（聊天，2,992）</td>
-<td style="text-align: left;">（書面，2,182）</td>
-<td style="text-align: left;">（聊天，4,919）</td>
-</tr>
 <tr>
 <td style="text-align: left;">完整系統</td>
 <td style="text-align: left;">2,771</td>
@@ -2342,7 +2344,8 @@ href="https://huggingface.co/metasequoiaime/pinyin-ime-reranker-4M">https://hugg
 </div>
 <div id="ref-milanifard2016" class="csl-entry" role="listitem">
 <span class="csl-num">[32]</span> Mahdi Milani Fard, Quentin Cormier, Kevin Canini, and Maya Gupta. Launch
-and iterate: Reducing prediction churn. In <em>Advances in Neural
+and iterate: Reducing prediction churn. In D. Lee, M. Sugiyama, U.
+Luxburg, I. Guyon, and R. Garnett, editors, <em>Advances in Neural
 Information Processing Systems</em>, 29, Curran Associates, Inc., 2016.
 <a
 href="https://proceedings.neurips.cc/paper_files/paper/2016/file/dc5c768b5dc76a084531934b34601977-Paper.pdf">https://proceedings.neurips.cc/paper_files/paper/2016/file/dc5c768b5dc76a084531934b34601977-Paper.pdf</a>.
@@ -3219,25 +3222,27 @@ href="https://github.com/Nanako0129/shanjie/blob/5a33e0adbd09bb4885c53db132e9781
 <table id="tab:versionsfb">
 <caption><span class="capno">表 9：</span>各版對上一版的改對／改壞，只列有改到某個集合的版本（集合與設定同表
 <a href="#tab:versions">2</a>；「—」表示那個集合逐列相同，或這裡用的來源沒有它的配對列數）。</caption>
+<thead>
+<tr>
+<th style="text-align: left;">版本</th>
+<th style="text-align: left;">dev302</th>
+<th style="text-align: left;">typing76</th>
+<th style="text-align: left;">錯字回報</th>
+<th style="text-align: left;">cvtune</th>
+<th style="text-align: left;">discordtune</th>
+<th style="text-align: left;">discordtune</th>
+</tr>
+<tr>
+<th style="text-align: left;"></th>
+<th style="text-align: left;"></th>
+<th style="text-align: left;"></th>
+<th style="text-align: left;"></th>
+<th style="text-align: left;"></th>
+<th style="text-align: left;">（聊天）</th>
+<th style="text-align: left;">（書面）</th>
+</tr>
+</thead>
 <tbody>
-<tr>
-<td style="text-align: left;">版本</td>
-<td style="text-align: left;">dev302</td>
-<td style="text-align: left;">typing76</td>
-<td style="text-align: left;">錯字回報</td>
-<td style="text-align: left;">cvtune</td>
-<td style="text-align: left;">discordtune</td>
-<td style="text-align: left;">discordtune</td>
-</tr>
-<tr>
-<td style="text-align: left;"></td>
-<td style="text-align: left;"></td>
-<td style="text-align: left;"></td>
-<td style="text-align: left;"></td>
-<td style="text-align: left;"></td>
-<td style="text-align: left;">（聊天）</td>
-<td style="text-align: left;">（書面）</td>
-</tr>
 <tr>
 <td style="text-align: left;">v0.4.1</td>
 <td style="text-align: left;">18/0</td>
