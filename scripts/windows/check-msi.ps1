@@ -260,7 +260,7 @@ $exec = @(Entries 'InstallExecuteSequence')
 foreach ($e in $exec) { if (-not $e.Sequence) { Fail 'InstallExecuteSequence' "$($e.Name) has no sequence number" } }
 $exec = @($exec | Where-Object Sequence | Sort-Object { [int]$_.Sequence })
 $expectedConditions = [ordered]@{
-    AskKeep            = 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND NOT KEEPSETTINGS AND NOT KEEPMEMORY'
+    AskKeep            = 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND KEEPSETTINGS="" AND KEEPMEMORY=""'
     SetKEEPSETTINGS    = 'KEEPSETTINGS<>"0"'
     SetKEEPMEMORY      = 'KEEPMEMORY<>"0"'
     UnregisterRollback = 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE'

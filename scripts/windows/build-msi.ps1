@@ -108,35 +108,6 @@ $attribution = ($body -join "`n") + "`n" + ([IO.File]::ReadAllText((Join-Path $R
 if ($attribution -match 'Sparkle') { throw 'the attribution text names Sparkle, which the Windows package does not ship' }
 [IO.File]::WriteAllText((Join-Path $gen 'CC-BY-SA-4.0-attribution.txt'), $attribution, [Text.UTF8Encoding]::new($false))
 
-# ---- the bitmaps and icons the WiX pages name (WixUI_Common, which carries WiX's own, is not referenced): plain white, and a blank icon ----
-function Write-WhiteBmp([string]$Path) {
-    # 1x1 pixel, 24 bits, stretched by the dialog over the control.
-    $ms = [IO.MemoryStream]::new()
-    $w = [IO.BinaryWriter]::new($ms)
-    $w.Write([byte[]](0x42, 0x4D)); $w.Write([uint32]58); $w.Write([uint32]0); $w.Write([uint32]54)
-    $w.Write([uint32]40); $w.Write([int32]1); $w.Write([int32]1); $w.Write([uint16]1); $w.Write([uint16]24); $w.Write([uint32]0)
-    $w.Write([uint32]4); $w.Write([int32]2835); $w.Write([int32]2835); $w.Write([uint32]0); $w.Write([uint32]0)
-    $w.Write([byte[]](0xFF, 0xFF, 0xFF, 0x00))
-    $w.Flush()
-    [IO.File]::WriteAllBytes($Path, $ms.ToArray())
-}
-function Write-BlankIco([string]$Path) {
-    # One 16x16 32-bit image, fully transparent (alpha 0, AND mask all set).
-    $ms = [IO.MemoryStream]::new()
-    $w = [IO.BinaryWriter]::new($ms)
-    $w.Write([uint16]0); $w.Write([uint16]1); $w.Write([uint16]1)
-    $w.Write([byte]16); $w.Write([byte]16); $w.Write([byte]0); $w.Write([byte]0); $w.Write([uint16]1); $w.Write([uint16]32); $w.Write([uint32]1128); $w.Write([uint32]22)
-    $w.Write([uint32]40); $w.Write([int32]16); $w.Write([int32]32); $w.Write([uint16]1); $w.Write([uint16]32); $w.Write([uint32]0)
-    $w.Write([uint32]1088); $w.Write([int32]0); $w.Write([int32]0); $w.Write([uint32]0); $w.Write([uint32]0)
-    $w.Write([byte[]]::new(1024))
-    $w.Write([byte[]](@(0xFF) * 64))
-    $w.Flush()
-    [IO.File]::WriteAllBytes($Path, $ms.ToArray())
-}
-Write-WhiteBmp (Join-Path $gen 'banner.bmp')
-Write-WhiteBmp (Join-Path $gen 'dialog.bmp')
-Write-BlankIco (Join-Path $gen 'blank.ico')
-
 # ---- candle and light ----
 $ext = @('-ext', 'WixUIExtension')
 if ($Variant -eq 'T') { $ext += @('-ext', 'WixUtilExtension') }

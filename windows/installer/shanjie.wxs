@@ -8,7 +8,7 @@
        Version  MAJOR.MINOR.PATCH, from SHANJIE_VERSION.
        Repo     the repository root (data files and licences).
        Bin      the folder of shanjie_tip.dll, shanjie-host.exe and installer-ca.dll (release identity, signed there when signing exists).
-       Gen      the folder of the files build-msi.ps1 writes: CC-BY-SA-4.0-attribution.txt and the dialog bitmaps and icons. -->
+       Gen      the folder of the file build-msi.ps1 writes: CC-BY-SA-4.0-attribution.txt. -->
 <?if $(var.Variant) != "A" AND $(var.Variant) != "T" ?>
 <?error Variant must be A or T ?>
 <?endif ?>
@@ -118,7 +118,7 @@
 
     <InstallExecuteSequence>
       <!-- After InstallValidate: there REMOVE is ALL also on Change, Remove (before it, the feature name). -->
-      <Custom Action="AskKeep" After="InstallValidate">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND NOT KEEPSETTINGS AND NOT KEEPMEMORY</Custom>
+      <Custom Action="AskKeep" After="InstallValidate">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND KEEPSETTINGS="" AND KEEPMEMORY=""</Custom>
       <Custom Action="UnregisterRollback" Before="Unregister">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="Unregister" Before="SetKillHost">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="KillHost" Before="RemoveFiles">REMOVE="ALL"</Custom>
@@ -137,16 +137,8 @@
 
     <!-- ===== Dialogs: WiX's welcome, verify, progress, exit and maintenance-welcome pages, plus two of ours (the repair-or-remove page without a
          Change button, and the keep page). No licence page, no folder or feature page, no FilesInUse / MsiRMFilesInUse (light -sice:ICE20).
-         WixUI_Common is not referenced: its custom actions (path validation, licence printing) and their DLL may not be in the package. The
-         bitmaps and icons the WiX pages name are ours instead (plain ones that build-msi.ps1 writes). ===== -->
-    <Binary Id="WixUI_Bmp_Banner" SourceFile="$(var.Gen)\banner.bmp" />
-    <Binary Id="WixUI_Bmp_Dialog" SourceFile="$(var.Gen)\dialog.bmp" />
-    <Binary Id="WixUI_Ico_Exclam" SourceFile="$(var.Gen)\blank.ico" />
-    <Binary Id="WixUI_Ico_Info" SourceFile="$(var.Gen)\blank.ico" />
-    <Binary Id="WixUI_Bmp_New" SourceFile="$(var.Gen)\blank.ico" />
-    <Binary Id="WixUI_Bmp_Up" SourceFile="$(var.Gen)\blank.ico" />
-    <!-- VerifyReadyDlg may read this WiX variable, whose default may sit in the left-out WixUI_Common (not checked against WiX 3.14): a fixed 0. -->
-    <WixVariable Id="WixUICostingPopupOptOut" Value="0" />
+         WixUI_Common is not referenced. The WiX pages bring WiX's own bitmaps, icons and text styles with them (a first build that defined
+         its own bitmaps failed with LGHT0091, duplicate symbols); check-msi.ps1 fails if that brought in any custom action. ===== -->
 
     <UI Id="ShanjieDialogs">
       <TextStyle Id="WixUI_Font_Normal" FaceName="Microsoft JhengHei UI" Size="8" />
