@@ -46,6 +46,8 @@ test-python:
 	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
 	python3 -W ignore -m unittest tools/test_build_meme_pack.py
 	python3 -W ignore -m unittest tools/test_build_beauty_pack.py
+	python3 -W ignore -m unittest tools/test_gen_meme_embedded.py
+	python3 tools/gen_meme_embedded.py --check eval/dev/meme/words-all.txt eval/dev/meme/embedded.txt
 	python3 -W ignore -m unittest tools/test_build_lm.py tools/test_extra_lexicon.py
 	python3 -m unittest tools/test_export_sjtl.py
 	python3 -W ignore -m unittest tools/test_kn_cont.py tools/test_extra_overlay.py

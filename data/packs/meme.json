@@ -1,0 +1,85 @@
+{
+ "allow": {
+  "file": "meme-allow.tsv",
+  "rows": 139,
+  "sha256": "c74df388fdb471b9fab98a8d270a66a418ad66e857709564f8b164748919665b",
+  "shipped": {
+   "meme": 112,
+   "offensive": 27
+  }
+ },
+ "bonus": 3.0,
+ "candidate_files": {
+  "candidates.tsv": "bca3c65827281cd07bc5e9bcd981370ddb94b96558c8e423ab3464e115356cc6"
+ },
+ "candidate_stats": {
+  "candidates": 2131,
+  "lines": 2131
+ },
+ "counts_candidates": {
+  "input_sha256": "e505e5b29045f7651aa735330aab1024a655371269816c28f4b71063e48e6dd2",
+  "sha256": "9288a19b89f9f19fa0559ffccae6a5a1a7d1d565e3915cc5a421dfe63fb79d74",
+  "tool_commit": "ea1fe5e210e0af7f7aa5327bd4a23bdeecd95947",
+  "tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f"
+ },
+ "counts_x": {
+  "input_sha256": "5b49509294349ef18e26987f7360dcf0c0d6c7a00753da653052386d75840e46",
+  "sha256": "64758fad651d3773f6cc317d3376e4ccaeadc9ecac352b5a3bd72887969d40f7",
+  "tool_commit": "ea1fe5e210e0af7f7aa5327bd4a23bdeecd95947",
+  "tree_sha256": "1f1ac2c0cdd379e5baa9c4083686e1644061438328e9fa281b890f8b7937042f"
+ },
+ "dropped_unreadable": 1,
+ "extra_readings": 7,
+ "files": {
+  "meme-add.tsv": {
+   "bytes": 11378,
+   "lines": 155,
+   "sha256": "381d73d32a0645a3fd710e809db562943110306c95e6f96e1ced4b286314e096"
+  },
+  "meme-sources.tsv": {
+   "bytes": 4997,
+   "lines": 140,
+   "sha256": "7544632b1443592ba11740a9d3f9f569421d7c3ce2ab4b106660ef15a5237367"
+  }
+ },
+ "meme_x": {
+  "meme-x-strings.txt": "5b49509294349ef18e26987f7360dcf0c0d6c7a00753da653052386d75840e46",
+  "meme-x.tsv": "cf62fe3a7f621df2268385d17679f70af056ff70259d3cba4af4115f14a04520"
+ },
+ "rows": 155,
+ "sources": {
+  "discord": 1,
+  "fandom": 11,
+  "fandom,mined": 1,
+  "mined": 18,
+  "mined,pttpedia": 1,
+  "mined,siteA": 2,
+  "muse": 6,
+  "pttpedia": 52,
+  "pttpedia,siteA": 1,
+  "siteA": 46
+ },
+ "stages": {
+  "admitted": 554,
+  "below_threshold": 530,
+  "candidates": 2131,
+  "dedupe_lexicon": 1007,
+  "dedupe_packs": 39,
+  "dropped_already_right": 0,
+  "dropped_by_c_rule": 0,
+  "dropped_same_reading": 0,
+  "dropped_x_not_fewer": 0,
+  "dropped_x_other_pack": 0,
+  "excluded_by_meme_collisions_tsv": 0,
+  "no_count": 0,
+  "not_allowed": 415,
+  "unreadable": 1
+ },
+ "thresholds": {
+  "min_articles": 10,
+  "min_boards": 3
+ },
+ "unresolved_collision_readings": 0,
+ "version": "381d73d3",
+ "words": 139
+}

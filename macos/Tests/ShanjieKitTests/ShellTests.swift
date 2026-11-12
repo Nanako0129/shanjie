@@ -1033,9 +1033,9 @@ final class ShellTests: XCTestCase {
         }
     }
 
-    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore, beauty: MemoryBeautyPackStore = MemoryBeautyPackStore(false)) -> Shell {
+    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore, beauty: MemoryBeautyPackStore = MemoryBeautyPackStore(false), meme: MemoryMemePackStore = MemoryMemePackStore(false)) -> Shell {
         Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: acg, quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it, beautyPackStore: beauty)
+              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: acg, quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it, beautyPackStore: beauty, memePackStore: meme)
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2, §4.3: the menu has one non-clickable line naming the packs the engine loaded, in the settings order; none loaded, no line.
@@ -1077,6 +1077,50 @@ final class ShellTests: XCTestCase {
         let rerank = try XCTUnwrap(menu.firstIndex { $0.title == MenuEntry.Text.rerank })
         XCTAssertEqual(menu[(rerank + 1)...].prefix(6).map { "\($0.kind):\($0.title)" },
                        ["separator:", "header:已開啟的詞包", "item:動漫與遊戲詞", "item:資訊與 AI 詞", "item:美妝與保養詞", "separator:"], "the section follows 語意校正")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.2, §9.3 (the menu test with four packs): all four on list in the settings order (ACG, IT, beauty, meme); the meme pack follows its own switch
+    /// and an off meme pack is not named although its file is there.
+    func testPackLineNamesTheMemePackLast() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.beautyPackRow.write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.memePackRow.write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let line = { (acg: Bool, it: Bool, beauty: Bool, meme: Bool) -> [String]? in
+            let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it), beauty: MemoryBeautyPackStore(beauty), meme: MemoryMemePackStore(meme)))
+            return c.session.menu.packLines
+        }
+        XCTAssertEqual(line(true, true, true, true), ["動漫與遊戲詞", "資訊與 AI 詞", "美妝與保養詞", "迷因與實況用語"])
+        XCTAssertEqual(line(false, false, false, true), ["迷因與實況用語"], "only meme")
+        XCTAssertEqual(line(true, true, true, false), ["動漫與遊戲詞", "資訊與 AI 詞", "美妝與保養詞"], "meme off, its file is there")
+        XCTAssertEqual(line(false, true, false, true), ["資訊與 AI 詞", "迷因與實況用語"])
+        XCTAssertNil(line(false, false, false, false), "no pack, no line")
+        let menu = Controller(packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true), beauty: MemoryBeautyPackStore(true), meme: MemoryMemePackStore(true))).session.menu
+        let rerank = try XCTUnwrap(menu.firstIndex { $0.title == MenuEntry.Text.rerank })
+        XCTAssertEqual(menu[(rerank + 1)...].prefix(7).map { "\($0.kind):\($0.title)" },
+                       ["separator:", "header:已開啟的詞包", "item:動漫與遊戲詞", "item:資訊與 AI 詞", "item:美妝與保養詞", "item:迷因與實況用語", "separator:"], "the section follows 語意校正")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.3, the fall-back: with all four on and only meme-add.tsv broken, dropping ACG, IT and then beauty still fails and dropping meme works, so the
+    /// menu names ACG, IT and beauty, and the stored meme choice stays on and is not rewritten. Builds: combined, no packs, drop ACG, drop IT, drop beauty, drop meme.
+    func testBrokenMemeFileKeepsTheOtherPacks() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.beautyPackRow.write(to: packs.appendingPathComponent("beauty-add.tsv"), atomically: true, encoding: .utf8)
+        try "not a row\n".write(to: packs.appendingPathComponent("meme-add.tsv"), atomically: true, encoding: .utf8)
+        let meme = MemoryMemePackStore(true)
+        let shell = packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(true), beauty: MemoryBeautyPackStore(true), meme: meme)
+        XCTAssertNotNil(shell.engine)
+        XCTAssertEqual(shell.packMask, 29)
+        XCTAssertEqual(shell.loadedPackMask, 21, "only the broken pack is dropped")
+        XCTAssertEqual(shell.engineBuilds, 6, "combined, no packs, drop ACG (still broken), drop IT (still broken), drop beauty (still broken), drop meme (works)")
+        XCTAssertEqual(Controller(shell).session.menu.packLines, ["動漫與遊戲詞", "資訊與 AI 詞", "美妝與保養詞"])
+        XCTAssertTrue(shell.memePackOn, "Settings keeps showing the stored choice")
+        XCTAssertEqual(meme.memePack, true)
     }
 
     /// docs/spec/lexicon-and-packs.md §4.3, the fall-back: with all three on and only beauty-add.tsv broken, dropping ACG and then IT still fails and dropping beauty works, so the
@@ -1130,7 +1174,7 @@ final class ShellTests: XCTestCase {
         try "not a row\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
         let shell = packShell3(quote: true)
         XCTAssertNotNil(shell.engine)
-        XCTAssertEqual(shell.packMask, 23, "ACG, quotes, IT and beauty (the beauty file is not there, so it is never loaded)")
+        XCTAssertEqual(shell.packMask, 31, "ACG, quotes, IT, meme and beauty (the meme and beauty files are not there, so they are never loaded)")
         XCTAssertEqual(shell.loadedPackMask, 5, "only the broken pack is dropped")
         XCTAssertEqual(shell.engineBuilds, 4, "combined, no packs, drop ACG (still broken), drop quotes (works)")
         let c = Controller(shell)

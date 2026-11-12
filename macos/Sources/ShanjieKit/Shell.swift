@@ -300,6 +300,19 @@ public final class MemoryBeautyPackStore: BeautyPackStore {
     public init(_ beautyPack: Bool? = nil) { self.beautyPack = beautyPack }
 }
 
+/// Where the "迷因與實況用語" switch is kept (docs/spec/lexicon-and-packs.md §4.2, §9.3): `nil` means never chosen, which is on. Same arrangement as `BeautyPackStore`.
+@MainActor
+public protocol MemePackStore: AnyObject {
+    var memePack: Bool? { get set }
+}
+
+/// The in-memory MemePackStore.
+@MainActor
+public final class MemoryMemePackStore: MemePackStore {
+    public var memePack: Bool?
+    public init(_ memePack: Bool? = nil) { self.memePack = memePack }
+}
+
 /// Where the candidate glass tint slider is kept (docs/spec/macos-shell.md §8.7): 0...1,
 /// `nil` means never set, which is 0 (no tint). Same arrangement as `DemoteStore`.
 @MainActor
@@ -605,16 +618,20 @@ public final class Shell {
     private let beautyPackStore: BeautyPackStore
     /// The beauty and skincare word pack (default on, docs/spec/lexicon-and-packs.md §4.2, §8.3): parsed into the lexicon like the IT pack, so a change rebuilds the engine.
     private(set) var beautyPackOn = true
+    private let memePackStore: MemePackStore
+    /// The meme and livestream slang pack (default on, docs/spec/lexicon-and-packs.md §4.2, §9.3): parsed into the lexicon like the beauty pack, so a change rebuilds the engine.
+    private(set) var memePackOn = true
     /// The packs in the settings order: mask bit, file in the packs directory, menu title. `packMask`, the missing-file check and the menu line all read this.
     private static let packTable: [(bit: UInt32, file: String, title: String)] = [
         (CoreEngine.packACG, "acg-add.tsv", MenuEntry.Text.acgPack),
         (CoreEngine.packQuotes, "quotes-add.tsv", MenuEntry.Text.quotePack),
         (CoreEngine.packIT, "it-add.tsv", MenuEntry.Text.itPack),
         (CoreEngine.packBeauty, "beauty-add.tsv", MenuEntry.Text.beautyPack),
+        (CoreEngine.packMeme, "meme-add.tsv", MenuEntry.Text.memePack),
     ]
     /// The mask `build()` passes to `shanjie_engine_new_packs`: one bit per switch that is on. The quote switch never chosen is off and the
-    /// IT and beauty switches never chosen are on, so an app that never touched any builds with the ACG, IT and beauty bits.
-    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) | (beautyPackOn ? CoreEngine.packBeauty : 0) }
+    /// IT, beauty and meme switches never chosen are on, so an app that never touched any builds with the ACG, IT, meme and beauty bits (29).
+    var packMask: UInt32 { (acgPackOn ? CoreEngine.packACG : 0) | (quotePackOn ? CoreEngine.packQuotes : 0) | (itPackOn ? CoreEngine.packIT : 0) | (memePackOn ? CoreEngine.packMeme : 0) | (beautyPackOn ? CoreEngine.packBeauty : 0) }
     /// The pack bits the current engine was really built with (docs/spec/lexicon-and-packs.md §4.2, §4.3): `packMask` when that build worked, less the bits
     /// whose file is missing (the core loads nothing for them); 0 after the pack-less retry and 0 with no engine. The menu's 已開啟的詞包 section reads this, never the stored choices.
     private(set) var loadedPackMask: UInt32 = 0
@@ -835,6 +852,7 @@ public final class Shell {
     /// `quotePackStore`: the classic quote pack switch (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2). Required, like `acgPackStore`.
     /// `itPackStore`: the IT+AI word pack switch (docs/spec/lexicon-and-packs.md §4.2, §4.3). Defaults to an in-memory store so the many test rigs need not name it; the app passes its own.
     /// `beautyPackStore`: the beauty and skincare word pack switch (docs/spec/lexicon-and-packs.md §4.2, §8.3). Defaults to an in-memory store like `itPackStore`; the app passes its own.
+    /// `memePackStore`: the meme and livestream slang pack switch (docs/spec/lexicon-and-packs.md §4.2, §9.3). Defaults to an in-memory store like `beautyPackStore`; the app passes its own.
     /// `glassTintStore`: the candidate glass tint (docs/spec/macos-shell.md §8.7). Required, like `demoteStore`.
     /// `candidateOrientationStore`: the candidate window's orientation (docs/spec/macos-shell.md §8.6.1). Required, like `glassTintStore`.
     /// `rerankStore`: the 語意校正 switch (docs/spec/semantic-rerank.md §8.2). Required, like `predictionStore`.
@@ -867,6 +885,7 @@ public final class Shell {
                 spacingStore: SpacingStore,
                 itPackStore: ItPackStore = MemoryItPackStore(),
                 beautyPackStore: BeautyPackStore = MemoryBeautyPackStore(),
+                memePackStore: MemePackStore = MemoryMemePackStore(),
                 shiftToggleStore: ShiftToggleStore = MemoryShiftToggleStore(),
                 shiftHint: ShiftHintPanel? = nil,
                 englishNoticeStore: EnglishNoticeStore = MemoryEnglishNoticeStore(),
@@ -932,6 +951,8 @@ public final class Shell {
         itPackOn = itPackStore.itPack ?? true
         self.beautyPackStore = beautyPackStore
         beautyPackOn = beautyPackStore.beautyPack ?? true
+        self.memePackStore = memePackStore
+        memePackOn = memePackStore.memePack ?? true
         // The preference is read before the one engine is built (about 240 MB): building first
         // and switching after would build twice.
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
@@ -1301,6 +1322,17 @@ public final class Shell {
         }
         changed()
         Log.shell.debug("beauty pack switched")
+    }
+
+    /// The settings switch (docs/spec/lexicon-and-packs.md §4.2, §9.3): the same as `setBeautyPack` for the meme and livestream slang pack.
+    func setMemePack(_ on: Bool) {
+        guard on != memePackOn else { return }
+        commitThenRebuild {
+            memePackOn = on
+            memePackStore.memePack = on
+        }
+        changed()
+        Log.shell.debug("meme pack switched")
     }
 
     /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the

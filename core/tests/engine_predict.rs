@@ -32,7 +32,7 @@ fn shared() -> &'static Shared {
         // `ACG_PACK` (only for `measure_start_range_acg`) is the word pack's acg-add.tsv; its directory is the packs dir.
         let pack = std::env::var("ACG_PACK").ok().map(PathBuf::from);
         let packs = pack.as_deref().map(|f| (f.parent().unwrap(), PACK_ACG));
-        // `PACKS=acg,it,beauty` (docs/spec/lexicon-and-packs.md §4.1; `PACKS_DIR` defaults to data/packs): the shipping mask for the latency run.
+        // `PACKS=acg,it,meme,beauty` (docs/spec/lexicon-and-packs.md §4.1; `PACKS_DIR` defaults to data/packs): the shipping mask for the latency run.
         let packs = packs.or_else(|| packs_from_env().map(|(d, m)| (&*Box::leak(d.into_boxed_path()), m)));
         let (lex, pack_text) = load_lexicon_packs(&dir, packs).unwrap();
         let overlay = capping_overlay(&dir, &pack_text).unwrap();
@@ -40,11 +40,11 @@ fn shared() -> &'static Shared {
         Shared { lex, lm: Arc::new(lm), capped }
     })
 }
-/// The `PACKS` environment variable (any comma list of `acg`, `quotes`, `it`, `beauty`, the pack files' names without `-add.tsv`) as a directory and a mask; `None` when unset.
+/// The `PACKS` environment variable (any comma list of `acg`, `quotes`, `it`, `meme`, `beauty`, the pack files' names without `-add.tsv`) as a directory and a mask; `None` when unset.
 fn packs_from_env() -> Option<(PathBuf, u32)> {
     let v = std::env::var("PACKS").ok()?;
     let mask = v.split(',').fold(0, |m, n| {
-        m | PACK_FILES.iter().find(|(_, f)| f.strip_suffix("-add.tsv") == Some(n)).unwrap_or_else(|| panic!("PACKS takes acg, quotes, it, beauty or a comma list of them, not {n:?}")).0
+        m | PACK_FILES.iter().find(|(_, f)| f.strip_suffix("-add.tsv") == Some(n)).unwrap_or_else(|| panic!("PACKS takes acg, quotes, it, meme, beauty or a comma list of them, not {n:?}")).0
     });
     Some((std::env::var("PACKS_DIR").map_or_else(|_| root().join("data/packs"), PathBuf::from), mask))
 }
@@ -757,9 +757,9 @@ fn rss_kb() -> u64 {
     String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
 }
 
-/// Every key of every typing76 sample (chat profile, with its left context), through `Engine::key`. `PACKS=acg` or a comma list such as `PACKS=acg,it,beauty`
+/// Every key of every typing76 sample (chat profile, with its left context), through `Engine::key`. `PACKS=acg` or a comma list such as `PACKS=acg,it,meme,beauty`
 /// (`PACKS_DIR`, default data/packs) loads the word packs first and asserts the lexicon size (docs/spec/lexicon-and-packs.md §4.1):
-/// `PACKS=acg,it,beauty cargo test --release -p core --test engine_predict timing_typing76_keys -- --ignored --nocapture --exact`.
+/// `PACKS=acg,it,meme,beauty cargo test --release -p core --test engine_predict timing_typing76_keys -- --ignored --nocapture --exact`.
 #[test]
 #[ignore]
 fn timing_typing76_keys() {

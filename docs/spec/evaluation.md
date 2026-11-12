@@ -194,7 +194,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 4.2 引擎的設定（照 App）
 
-- 建立順序與預設值照 App 的建引擎流程：帶詞包建引擎（`acg`、`it` 與 `beauty`，App 的預設）、`load_lm`（bigram，連帶的 classes／KN／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表）、降權開、語意校正開、強度 standard、`set_profile`。
+- 建立順序與預設值照 App 的建引擎流程：帶詞包建引擎（`acg`、`it`、`meme` 與 `beauty`，App 的預設）、`load_lm`（bigram，連帶的 classes／KN／trigram 照 `load_lm` 的規則）、`load_tinylm`、`load_colloquial`（口語表）、降權開、語意校正開、強度 standard、`set_profile`。
 - **和 App 的已知差異**（寫進設定標記）：預測列關（`set_prediction(false)`）、英文混打關（`set_english(false)`）、縮寫關。App 預設前兩者都開；開著時 Space 開的候選窗會把預測列的項目排在前面、有的項目不是以游標為結尾的範圍，英文也可能搶走 Space，改選的鍵數就無法照 4.5 定義。兩者都不影響 n-gram 與語意校正的選字。候選窗為橫式，一頁 9 項（`PAGE_SIZE`）。
 - 口語表：小模型開著且 `data/lm/colloquial.sjlm` 存在時預設載入（`--no-tinylm` 時不載）；`--colloquial FILE` 改載另一份，`--no-colloquial` 不載（對照用；兩者併用是錯誤）。載入後 `models:` 行多一欄 `colloquial.sjlm:<8 碼>`、設定標記多 `+colloq:<8 碼>`。口語項是否真的用到由核心照條件判斷（聊天、配對的小模型、表已載入）。
 - 讀音項：引擎的 n-gram 解碼器帶讀音項（`Engine::load_lm` 建表），所有設定都生效；`--no-reading-decode`（研究用，`Engine::set_reading_decode(false)`）把它關掉。設定標記每次都以 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>+rm` 結尾（`+rm`：讀音質量規則，decoder.md §5）（取自引擎真的載入的那張表，`Engine::reading_tag`），加 `--no-reading-decode` 就沒有這三個標記。
@@ -203,7 +203,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 4.3 選項與評測專用開關
 
-- `--packs LIST`：`acg`、`it`、`quotes`、`beauty` 的逗號清單（研究用）；不給時和明寫 `--packs acg,it,beauty`（App 的預設）相同，美妝詞包加進預設之前的輸出（預設 `acg,it`）會變；重複給的 `--packs` 會疊加，第一個取代預設。設定標記按位元順序列出詞包（`+acg`、`+quotes`、`+it`、`+beauty`）。
+- `--packs LIST`：`acg`、`it`、`quotes`、`meme`、`beauty` 的逗號清單（研究用）；不給時和明寫 `--packs acg,it,meme,beauty`（App 的預設，遮罩 29）相同，迷因詞包加進預設之前的輸出（預設 `acg,it,beauty`）與美妝詞包加進預設之前的輸出（預設 `acg,it`）會變；重複給的 `--packs` 會疊加，第一個取代預設。設定標記按位元順序列出詞包（`+acg`、`+quotes`、`+it`、`+meme`、`+beauty`）。
 - `--strict`（只給評測）：第一次顯示、送出文字的對錯與 `--correct` 的改選目標都逐字比，不經寬鬆對照（1.3）。不給時輸出不變；給了設定標記尾端加 `+strict`。
 - 列裡的標點：讀音欄可以有單獨一個記號 `，` `。` `？` `！` `：`（照 App 送 Shift＋`,` `.` `/` `1` `;`）或 `、`（不按 Shift 的 `\`），標點和注音留在同一個組字區，每個標點算一鍵；其他記號（例如 `；`，標準排列沒有直接的鍵）報錯。送出文字用字串比，不經寬鬆對照。每百字改選次數的分母不計標點。
 - `--learn-guard on|off`（預設 on，等於 App）：學習守門（一段的 n-gram 第一名裡有學習加過分的詞，整段不送語意校正）開或關；off 時那些段照常送語意校正，其他一切不變。引擎多一個 Rust 的設定函式 `set_learn_guard(bool)`（預設 true）與唯讀的 `guard_skips()`，不進 `core/include/shanjie.h`，App 與 `shanjie-eval` 都不提供。設定標記 off 時加 `+noguard`。非 on／off 的值被拒絕。
@@ -250,7 +250,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 ### 4.8 與 `shanjie-eval` 的關係
 
-- 一致性：`--learn off --rerank each`、不改選時，第一次顯示的文字和 CLI 出貨設定（`--lm data/lm/bigram.sjlm --profile P --context --packs acg,it,beauty --tinylm data/lm/tinylm.sjtl`，口語表載入時加 `--colloquial-core`）每一列相同；比較時先看摘要行的 `top1_sha256`，不同再用 `--firsts` 逐列比。引擎和 CLI 真的不同的列，歸入「離線對、真引擎錯」的那一桶，不改引擎去遷就重播。
+- 一致性：`--learn off --rerank each`、不改選時，第一次顯示的文字和 CLI 出貨設定（`--lm data/lm/bigram.sjlm --profile P --context --packs acg,it,meme,beauty --tinylm data/lm/tinylm.sjtl`，口語表載入時加 `--colloquial-core`）每一列相同；比較時先看摘要行的 `top1_sha256`，不同再用 `--firsts` 逐列比。引擎和 CLI 真的不同的列，歸入「離線對、真引擎錯」的那一桶，不改引擎去遷就重播。
 - 重播只在引擎外加唯讀的存取函式；不改引擎行為（唯一的例外是評測專用、預設等於 App 的開關 `set_learn_guard`）。
 
 ### 4.9 驗證
@@ -383,7 +383,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 
 - 指令：`tools/bench.py run --suite v2 <ref>... [--as VERSION] [--override-packs off] [--private-root DIR]`，結果寫 `eval/bench/results/v2-<label>.json`（標籤預設是各版名稱以 `+` 相連）。`--lm` 與 `--base` 不用於 v2。
 - **設定表 `VERSIONS2`**（工具裡寫死；鍵是版本標籤，`--as` 把一個還沒打 tag 的 commit 對到表上的版本；不在表裡的標籤報錯並指向表）。每一列：
-  - `release`、`flags`（CLI 旗標，照 App 的預設：`--context`、`--packs acg`、`--packs acg,it` 或 `--packs acg,it,beauty`）、`tinylm`（是否出貨小模型）、`tag`（CLI 摘要行設定標記應有的字串，`{tl8}` 等佔位符換成該版模型的 SHA-256 前 8 碼）；
+  - `release`、`flags`（CLI 旗標，照 App 的預設：`--context`、`--packs acg`、`--packs acg,it`、`--packs acg,it,beauty` 或 `--packs acg,it,meme,beauty`）、`tinylm`（是否出貨小模型）、`tag`（CLI 摘要行設定標記應有的字串，`{tl8}` 等佔位符換成該版模型的 SHA-256 前 8 碼）；
   - 選用鍵：`kn`（出貨 Kneser-Ney 側檔 `kn.sjkn`）、`tri`（出貨 `trigram.sjt3`，CLI 只在書面設定載入，需另寫 `formal_tag`）、`tri_chat`（另出貨聊天的 `trigram-chat.sjt3`，兩種設定都開 KN）、`colloquial`（出貨口語表：聊天的格帶 `--colloquial-core`，標記多 `+colloq:<8 碼>`）、`reading`（解碼器帶讀音項：每個設定標記最後都是 `+rd+rx:<該版 data/lexicon/std-exempt.tsv 的 SHA-256 前 8 碼>+rm`，聊天的口語標記後面沒有 `+rc`）。`flags` 和 `tag` 是對同一件事的兩個獨立陳述，故意不由其中一個推另一個。新版發版時在表裡加一列。
 - **旗標守門**：每一格 CLI 摘要行的設定標記要等於這張表推出的字串（`lm-<profile>` ＋ tag），而且沒有表裡沒寫的標記（例如多出的 `+kn:`、非 standard 的 `+rl:<檔位>`）；不符就那一格失敗。這同時守住「旗標漏帶」與「模型資料夾裡多了側檔被自動載入」。
 - **模型檔**：工具讀匯出版本的 `data/*.sha256`（`bigram.sjlm`、`classes.sjc`，以及該列要求的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm`），到快取資料夾的 `bench/models/<sha256>/<檔名>` 找；沒有時，若 checkout 自己的 `data/lm/<檔名>` 雜湊相符就複製過去（經暫存名，中斷不留下半個檔），否則失敗退出並指向 `docs/spec/models.md` §11（下載）。雜湊不符也失敗。工具從不下載。

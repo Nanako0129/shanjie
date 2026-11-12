@@ -107,7 +107,7 @@
   2. 變調列（sandhi）、公開探針與 unigram overlay 的重建與比對；
   3. 在拋棄式 venv 裝 `numpy==2.5.4`（需要 numpy 的步驟用；其餘步驟用 runner 的 `python3`）；
   4. 評測統計（`tools.test_evalstats`），與 Python 版 dev302 rowstats 逐位元組等於 `eval/golden/s2-lm-dev302-{chat,formal}.rowstats`（書面那一份讀三元表，所以在 numpy venv 裡跑）；
-  5. 詞包與詞庫建置腳本的測試（動漫與遊戲詞包、資訊與 AI 詞包、迷因詞包、美妝詞包、人名詞庫、變調建置、`pack-oov` golden 的 Python 一半）；
+  5. 詞包與詞庫建置腳本的測試（動漫與遊戲詞包、資訊與 AI 詞包、迷因與實況用語詞包、美妝詞包、人名詞庫、變調建置、`pack-oov` golden 的 Python 一半）；
   6. 模型建置腳本（`tools/test_build_lm.py`、`tools/test_extra_lexicon.py`）、承接檔（`tools/test_kn_cont.py`）、基準測試工具（`tools/test_bench.py`）、讀音解碼豁免表、KPI 表工具、英文詞表建置、覆蓋詞與讀音、常談署名表、保留集守衛、三元表（`tools/test_build_trigram.py`，需要 numpy venv）。
 - 如果出現只在 macOS 才成立的 golden，把那一步移回 macOS 的 job。
 

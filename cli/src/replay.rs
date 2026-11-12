@@ -1,6 +1,6 @@
 //! E-E real-engine replay (docs/spec/evaluation.md §4): rows typed key by key through one `core::engine::Engine`
 //! built like the App's `Shell.build()`, with the user's re-picks simulated on request. Numbers only come out of here.
-use core::engine::{Engine, Key, KeyKind, Layout, Output, SinitStats, MOD_SHIFT, PACK_ACG, PACK_BEAUTY, PACK_IT, PAGE_SIZE};
+use core::engine::{Engine, Key, KeyKind, Layout, Output, SinitStats, MOD_SHIFT, PACK_ACG, PACK_BEAUTY, PACK_IT, PACK_MEME, PAGE_SIZE};
 use core::eval::{pyround, sha256_hex, Lenient};
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
@@ -112,9 +112,9 @@ pub fn move_cost(from: usize, to: usize, n: usize) -> usize {
     from.abs_diff(to).min(1 + to).min(1 + (n - to))
 }
 
-/// The packs the engine is built with when `--packs` is not given: the App's defaults (`Shell.swift`: the ACG, IT+AI and beauty packs are on when never chosen).
+/// The packs the engine is built with when `--packs` is not given: the App's defaults (`Shell.swift`: the ACG, IT+AI, meme and beauty packs are on when never chosen).
 /// The bin formats its setting tag from the same mask it passes to `build_engine_packs`.
-pub const PACKS: u32 = PACK_ACG | PACK_IT | PACK_BEAUTY;
+pub const PACKS: u32 = PACK_ACG | PACK_IT | PACK_MEME | PACK_BEAUTY;
 
 /// The engine as `Shell.build()` makes it (the packs of `PACKS`; bigram, small model, colloquial table, demotion on, rerank on at the standard level,
 /// profile), except the two recorded deviations: prediction row off and English mixing off. `tinylm` None is
