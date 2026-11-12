@@ -161,7 +161,7 @@
 
 - 建立時：`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`variant-order.tsv`、`demote.tsv`、`rerank-protect.tsv`。疊加層依 `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、啟用的詞包這個固定順序接起來（前一份沒有結尾換行就補一個）。
 - `load_lm`：再讀一次 `overlay-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`（建構之後被移走也是 3）、`std-exempt.tsv`（`rerank-protect.tsv` 只在建立時讀，`load_lm` 不再讀）；模型檔旁必須有 `classes.sjc`；有選用的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3` 時，壞了或與模型不配對就整個載入失敗（缺哪張只關哪個設定的那一層）。
-- 選用：`digits.tsv`（缺或壞時數字層靜靜關閉）、`english-next.tsv`（不存在就關閉；存在卻讀不了或解析失敗回 3，免得出貨錯誤讓功能無聲消失）。
+- 選用：`digits.tsv`（缺或壞時數字層靜靜關閉）、`mixed-words.tsv`（缺或壞時候選清單沒有中英混合詞，`docs/spec/english-mixed.md` §5.7）、`english-next.tsv`（不存在就關閉；存在卻讀不了或解析失敗回 3，免得出貨錯誤讓功能無聲消失）。
 - 詞包：`new_packs` 的 `packs` 是位元遮罩（1 動漫與遊戲、2 經典台詞、4 資訊與 AI、16 美妝與保養，8 保留給迷因詞包；檔案 `acg-add.tsv`、`quotes-add.tsv`、`it-add.tsv`、`beauty-add.tsv` 依這個順序讀）。遮罩有未定義的位元、layout 超出範圍、路徑不是 UTF-8 回 2；`packs` 非 0 而 `packs_dir` 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。詞包的詞怎麼計分見 `docs/spec/lexicon-and-packs.md`。
 
 ## 9. 驗證

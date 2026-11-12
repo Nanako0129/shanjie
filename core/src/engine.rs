@@ -10,6 +10,7 @@ use crate::lm::{decode_segment_fuzzy, history, rerank_pool, fuzzy_path, CappedLe
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
+use crate::mixed::MixedTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
 use crate::tinylm::{Learning, RerankLevel, TinyLm, TOPK};
@@ -646,6 +647,10 @@ struct Cands {
     /// docs/spec/english-mixed.md §3.3, §5.2: the window of an English token that a revert made (docs/spec/english-mixed.md §3.2); its last item is the
     /// Chinese syllable the keys typed, and this is that syllable's reading (the token's reading is replaced by it when it is chosen).
     zh: Option<String>,
+    /// docs/spec/english-mixed.md §5.7: the list's mixed-word item, its first, as it stands in `list` (the writing, and the English
+    /// token plus its syllables as the length). No lexicon item has that length (the candidate range stops at the token), so the
+    /// pair names the item; a window that has it carries no prediction row items.
+    mixed: Option<(String, usize)>,
     /// docs/spec/prediction.md §5: the prediction row's items the window opened with. They are the first `rows.len()`
     /// entries of `list` (the length field of a list entry cannot mark them). Choosing one whose
     /// reading is longer than or differs from the typed syllables is choosing it from the row; one over exactly those
@@ -658,7 +663,7 @@ struct Cands {
 
 impl Cands {
     fn new(list: Vec<(String, usize)>, vertical: bool, ms: bool) -> Cands {
-        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, ms, short: None, alt: HashMap::new(), zh: None, rows: Vec::new(), dalt: None }
+        Cands { list, sel: 0, expanded: false, top: 0, vertical, first: 0, ms, short: None, alt: HashMap::new(), zh: None, mixed: None, rows: Vec::new(), dalt: None }
     }
 
     fn scroll(&mut self) {
@@ -889,6 +894,8 @@ pub struct Engine {
     /// of digit-alphabet keys being typed, the keys of the syllable that just closed (docs/spec/english-mixed.md §7.7; `ld_now` is what the current key saw), and
     /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
     digit_table: Option<Arc<DigitTable>>,
+    /// docs/spec/english-mixed.md §5.7: the mixed words (`mixed-words.tsv`, optional). `None`: no item is ever added.
+    mixed: Option<Arc<MixedTable>>,
     digit_cache: Option<Arc<DigitCache>>,
     /// English before Chinese (docs/spec/english-mixed.md §8): the count table (`english-next.tsv`, optional) and the best entry of every
     /// word it names, built once per (lexicon, model). Only the prediction row reads them.
@@ -1116,6 +1123,10 @@ impl Engine {
         e.data_dir = Some(data_dir.to_path_buf());
         // Optional (docs/spec/english-mixed.md §7.2, §7.8): a missing or malformed table leaves the digit feature off and says nothing.
         e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
+        // Optional (docs/spec/english-mixed.md §5.7): a missing table, or one with a row that breaks a rule, loads nothing and says nothing.
+        if let Ok(t) = std::fs::read_to_string(data_dir.join("mixed-words.tsv")) {
+            e.set_mixed_words(&t);
+        }
         // Optional (docs/spec/english-mixed.md §8): absent leaves the feature off; a file that is there and does not parse is a load failure (a shipping error
         // must not switch the feature off unseen).
         match std::fs::read_to_string(data_dir.join("english-next.tsv")) {
@@ -1203,6 +1214,7 @@ impl Engine {
             run_ascii: false,
             run_zh: None,
             digit_table: None,
+            mixed: None,
             digit_cache: None,
             en_table: None,
             en_words: None,
@@ -1825,6 +1837,21 @@ impl Engine {
         self.fixed.iter().find(|f| f.start == i).map_or(1, |f| f.word.chars().count())
     }
 
+    /// docs/spec/english-mixed.md §5.7: takes `text` as the mixed-words table. A table with any row that breaks a rule is not loaded
+    /// and the table before it goes too (the engine is as it is without one). `Engine::new` calls this with `mixed-words.tsv`;
+    /// tests call it on `with_lexicon` engines.
+    pub fn set_mixed_words(&mut self, text: &str) -> bool {
+        self.mixed = MixedTable::parse(text, &self.lex).map(Arc::new);
+        self.mixed.is_some()
+    }
+    pub fn mixed_words_loaded(&self) -> bool {
+        self.mixed.is_some()
+    }
+    /// Every row of the loaded table as (English part, reading, writing): what the check set's test types.
+    pub fn mixed_words(&self) -> Vec<(String, Vec<String>, String)> {
+        self.mixed.iter().flat_map(|t| t.rows()).map(|(e, r, w)| (e.to_string(), r.to_vec(), w.to_string())).collect()
+    }
+
     /// Test-purpose injection for `with_lexicon` engines: a prebuilt model and its capped lexicon
     /// (built by `CappedLexicon::new` from this engine's lexicon).
     pub fn set_lm(&mut self, lm: Arc<Lm>, capped: Arc<CappedLexicon>) {
@@ -2079,14 +2106,6 @@ impl Engine {
         list
     }
 
-    /// Letters become an English token at the cursor: reading `PUNCT_PREFIX` + the word as typed, fixed word its writing
-    /// (`english_writing`, docs/spec/english-mixed.md §4.4). Returns what the unit that reaches `MAX_SYLLABLES` sent, if it did
-    /// (docs/spec/english-mixed.md §4.1: it goes in this key's output).
-    fn insert_english(&mut self, word: String) -> Result<String, EngineError> {
-        let writing = english_writing(&word);
-        self.put_english(format!("{PUNCT_PREFIX}{word}"), writing, None)
-    }
-
     /// The one place an English token goes in at the cursor: the unfinished syllable and the shadow go. `zh`: the Chinese syllable a
     /// revert remembers (docs/spec/english-mixed.md §3.2), the last item of the token's writings.
     fn put_english(&mut self, reading: String, word: String, zh: Option<String>) -> Result<String, EngineError> {
@@ -2195,11 +2214,12 @@ impl Engine {
         }
         let head: String = chars[..chars.len() - tail.len()].iter().collect();
         self.run.clear();
-        self.run_ascii = false;
+        // docs/spec/english-mixed.md §4.4, §5.3: the head is a token in its writing, as typed when the run keeps its text (`end_run`).
+        let writing = if std::mem::take(&mut self.run_ascii) { head.clone() } else { english_writing(&head) };
         self.run_zh = None;
         self.revert_point = None;
         self.split = true;
-        let mut commit = if head.is_empty() { String::new() } else { self.insert_english(head)? };
+        let mut commit = if head.is_empty() { String::new() } else { self.put_english(format!("{PUNCT_PREFIX}{head}"), writing, None)? };
         self.pred_dirty = true;
         commit.push_str(&self.insert_token(syl, None, None)?.commit);
         Ok(self.view(true, commit))
@@ -4066,13 +4086,17 @@ impl Engine {
     /// docs/spec/prediction.md §5: the window's list: the row's items in their order, then (without an unfinished
     /// syllable, which has no lexicon candidates) the lexicon's entries for the syllables before the cursor, longest
     /// first, minus the words already listed.
-    fn window_list(&self, rows: Vec<Pred>) -> (Vec<(String, usize)>, HashMap<usize, Vec<String>>, Vec<Pred>) {
-        let mut rows = rows;
+    fn window_list(&self, rows: Vec<Pred>) -> (Vec<(String, usize)>, HashMap<usize, Vec<String>>, Vec<Pred>, Option<(String, usize)>) {
+        // docs/spec/english-mixed.md §5.7: the mixed word is the first item of the list; the window then carries no row items (they are
+        // told apart by being the first `rows.len()` entries), and no lexicon word has its text.
+        let mixed = self.mixed_item();
+        let mut rows = if mixed.is_some() { Vec::new() } else { rows };
         let mut seen: HashSet<String> = rows.iter().map(|p| p.word.clone()).collect();
         let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
+        list.extend(mixed.clone());
         if self.pend.iter().any(Option::is_some) {
             self.variant_move(&mut list, &mut rows);
-            return (list, HashMap::new(), rows);
+            return (list, HashMap::new(), rows, None);
         }
         let a = self.cursor;
         let today = if self.learner.has_new_words() { self.today() } else { 0 };
@@ -4106,7 +4130,19 @@ impl Engine {
                 }
             }
         }
-        (list, alt, rows)
+        (list, alt, rows, mixed)
+    }
+
+    /// docs/spec/english-mixed.md §5.7: with the cursor at the end and no unfinished syllable, an English token and then the syllables
+    /// up to the cursor that the table has as one word: that word and its length (the token and the syllables). Only the readings as
+    /// typed are looked up.
+    fn mixed_item(&self) -> Option<(String, usize)> {
+        let (a, k) = (self.cursor, self.avail());
+        if a != self.syls.len() || k == 0 || a <= k || self.pend.iter().any(Option::is_some) {
+            return None;
+        }
+        let english = english_of(&self.syls[a - k - 1])?;
+        self.mixed.as_ref()?.get(english, &self.syls[a - k..a]).map(|w| (w.to_string(), k + 1))
     }
 
     /// Variant order (docs/spec/decoder.md §2.3): under one reading, a less-typed spelling that the window lists before its
@@ -4157,7 +4193,7 @@ impl Engine {
 
     /// Opens the window on `window_list`; an empty list opens nothing (and the row is gone, as before the prediction row).
     fn open_with_rows(&mut self, rows: Vec<Pred>) {
-        let (mut list, alt, rows) = self.window_list(rows);
+        let (mut list, alt, rows, mixed) = self.window_list(rows);
         // docs/spec/english-mixed.md §7.7: right after a syllable the digit keys closed, its digits are the last item.
         let digits = self.ld_now.take().filter(|_| !list.is_empty());
         if let Some(keys) = &digits {
@@ -4174,6 +4210,7 @@ impl Engine {
             let mut c = Cands::new(list, self.cand_vertical, self.key_scheme == 1);
             c.alt = alt;
             c.rows = rows;
+            c.mixed = mixed;
             c.dalt = digits.map(DigitAlt::Digits);
             c.short = short;
             self.cands = Some(c);
@@ -4188,7 +4225,8 @@ impl Engine {
         let a = self.cursor;
         let Some(c) = self.cands.as_ref() else { return };
         let tail = if c.short.is_some() { 2 } else { usize::from(c.dalt.is_some()) };
-        let lo = c.rows.len();
+        // The mixed word (docs/spec/english-mixed.md §5.7) stays the first item: the shown word goes right after it.
+        let lo = c.rows.len() + usize::from(c.mixed.is_some());
         let hi = c.list.len().saturating_sub(tail);
         let found = (lo..hi).find(|&i| {
             let (w, l) = &c.list[i];
@@ -4319,7 +4357,7 @@ impl Engine {
             self.recompute_pred();
             c.rows = std::mem::take(&mut self.pred);
             c.rows.retain(|p| p.word != word);
-            (c.list, c.alt, c.rows) = self.window_list(std::mem::take(&mut c.rows));
+            (c.list, c.alt, c.rows, c.mixed) = self.window_list(std::mem::take(&mut c.rows));
             c.list.extend(kept);
             if c.list.is_empty() {
                 return Ok(()); // closed, as by Esc
@@ -4476,6 +4514,21 @@ impl Engine {
             return Ok(());
         }
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
+        // docs/spec/english-mixed.md §5.7: the mixed word takes the place of the English token and its syllables as one token of the
+        // punctuation kind (reading `PUNCT_PREFIX` + the writing, fixed to the writing): not a re-pick, nothing is learned.
+        if idx >= c.rows.len() && c.mixed.as_ref() == Some(&(word.clone(), l)) && l <= self.cursor {
+            let start = self.cursor - l;
+            for i in (start..self.cursor).rev() {
+                self.remove_syllable(i)?;
+            }
+            self.cursor = start;
+            self.pred_dirty = true;
+            let commit = self.insert_token(format!("{PUNCT_PREFIX}{word}"), Some(word), None)?.commit;
+            if !commit.is_empty() {
+                self.commit_out = Some(commit);
+            }
+            return Ok(());
+        }
         let (start, end) = if self.cursor == 0 { (0, l) } else { (self.cursor - l, self.cursor) };
         // New words of the path as shown, under the readings of their records: read before the span is rewritten below (docs/spec/learning.md §8.5, bookkeeping).
         let path_new = if self.learning { self.path_new_words() } else { Vec::new() };
@@ -4712,17 +4765,20 @@ mod sinit_tests {
     }
 }
 
-/// docs/spec/english-mixed.md §4.4: the table of official writings (`data/english-extra.txt`, compiled in), lower case -> the line.
+/// docs/spec/english-mixed.md §4.4: the table of official writings, lower case -> the line. Two files, both compiled in: products,
+/// brands and abbreviations (`data/english-extra.txt`) and the English writings of the names layer
+/// (`data/lexicon/names-english.txt`, docs/spec/lexicon-and-packs.md §3). A lower case in both is an error like one twice in a file.
 fn english_table() -> &'static HashMap<String, &'static str> {
     static TABLE: std::sync::OnceLock<HashMap<String, &'static str>> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| english_table_of(include_str!("../../data/english-extra.txt")).expect("data/english-extra.txt"))
+    TABLE.get_or_init(|| english_table_of(&ENGLISH_FILES).expect("data/english-extra.txt and data/lexicon/names-english.txt"))
 }
+const ENGLISH_FILES: [&str; 2] = [include_str!("../../data/english-extra.txt"), include_str!("../../data/lexicon/names-english.txt")];
 
 /// The table's rules: a line is `[A-Za-z]{3,32}` with an upper case letter (an all lower case line would change nothing), `#` lines and
 /// blank lines are skipped, and no two lines share a lower case.
-fn english_table_of(text: &'static str) -> Result<HashMap<String, &'static str>, String> {
+fn english_table_of(texts: &[&'static str]) -> Result<HashMap<String, &'static str>, String> {
     let mut table = HashMap::new();
-    for line in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+    for line in texts.iter().flat_map(|t| t.lines()).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         let ok = (3..=32).contains(&line.len()) && line.bytes().all(|b| b.is_ascii_alphabetic()) && line.bytes().any(|b| b.is_ascii_uppercase());
         if !ok || table.insert(line.to_ascii_lowercase(), line).is_some() {
             return Err(format!("bad or repeated line: {line}"));
@@ -4749,7 +4805,8 @@ mod english_table_tests {
     #[test]
     fn the_table_loads_and_writes() {
         assert!(english_table().len() > 200);
-        for (typed, want) in [("chatgpt", "ChatGPT"), ("Chatgpt", "ChatGPT"), ("CHATGPT", "CHATGPT"), ("cHatgpt", "cHatgpt"), ("ChatGPT", "ChatGPT"),
+        // Both files are in it.
+        for (typed, want) in [("nanako", "Nanako"), ("Cablate", "CabLate"), ("CABLATE", "CABLATE"), ("chatgpt", "ChatGPT"), ("Chatgpt", "ChatGPT"), ("CHATGPT", "CHATGPT"), ("cHatgpt", "cHatgpt"), ("ChatGPT", "ChatGPT"),
             ("macos", "macOS"), ("Macos", "macOS"), ("rust", "rust"), ("Rust", "Rust"), ("", ""), ("a", "a"), ("gta6", "gta6")] {
             assert_eq!(english_writing(typed), want, "{typed}");
         }
@@ -4757,9 +4814,16 @@ mod english_table_tests {
 
     #[test]
     fn a_bad_table_is_refused() {
-        assert!(english_table_of("# c\n\nChatGPT\nGitHub\n").is_ok());
+        assert!(english_table_of(&["# c\n\nChatGPT\nGitHub\n"]).is_ok());
         for bad in ["ChatGPT\nchatGPT\n", "npm\n", "AI\n", "GPT4\n", "Wi-Fi\n"] {
-            assert!(english_table_of(bad).is_err(), "{bad}");
+            assert!(english_table_of(&[bad]).is_err(), "{bad}");
+            assert!(english_table_of(&["GitHub\n", bad]).is_err(), "{bad} in the second file");
         }
+        // The same lower case in both files.
+        assert!(english_table_of(&["ChatGPT\n", "Nanako\n"]).is_ok());
+        assert!(english_table_of(&["ChatGPT\nNanako\n", "NaNaKo\n"]).is_err());
+        // The shipped files, one at a time: each is well formed alone, and each adds lines the other lacks.
+        let (a, b) = (english_table_of(&ENGLISH_FILES[..1]).unwrap(), english_table_of(&ENGLISH_FILES[1..]).unwrap());
+        assert!(a.len() > 200 && b.len() >= 5 && a.len() + b.len() == english_table().len());
     }
 }
