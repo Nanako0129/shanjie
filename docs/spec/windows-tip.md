@@ -676,7 +676,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 
   - 和 Mac 版 `scripts/build-app.sh` 的差別：沒有美妝與台詞詞包（§3.4：Windows 版只帶 `acg`、`it`）、沒有 Sparkle 的授權檔、沒有 `models.tsv`；`LICENSE` 在根而不在 `LICENSES\`。模型和 Mac 版一樣是全部 7 個：常駐程序載入 `bigram.sjlm` 時連旁邊的辨類、承接與兩個 trigram 表一起載，少了 `classes.sjc` 會載入失敗，少了其他的那一項會默默關掉，解碼結果就和量過的不同（§3.4）。`mixed-words.tsv` 核心有就讀。
   - 模型與 `colloquial-attribution.tsv` 的 SHA-256 要符合 `data/*.sha256`（`check-msi.ps1` 核對）。
-  - `CC-BY-SA-4.0-attribution.txt` 是建置時產生的（`build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段（原樣取用，所以第一段列的檔名和 Mac 版相同），在「Details: data.md.」那一行後面多一段，點名靜態連結進來的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0），最後接 name-suggestion-index 的聲明全文；文字裡出現 Sparkle 就失敗。`check-msi.ps1` 只解析第一段（到「are licensed」為止）的檔名，必須剛好是這 18 個（`check-msi.ps1` 寫死的清單，和 `build-app.sh` 那一段列的相同）。`LICENSES/data.md` 兩個平台共用。
+  - `CC-BY-SA-4.0-attribution.txt` 是建置時產生的（`build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段，拿掉 Windows 版不帶的迷因詞包（第一段的三個檔名與 `packs/meme-add.tsv` 那一段；每一處都要剛好找到一次，否則建置失敗），在「Details: data.md.」那一行後面多一段，點名靜態連結進來的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0），最後接 name-suggestion-index 的聲明全文；文字裡出現 Sparkle 就失敗。`check-msi.ps1` 只解析第一段（到「are licensed」為止）的檔名，必須剛好是這 18 個（`check-msi.ps1` 寫死的清單，和 `build-app.sh` 那一段列的相同）。`LICENSES/data.md` 兩個平台共用。
 - **安裝位置不能改、只有系統管理員能寫**：安裝資料夾的目錄 Id 含小寫字母（私有屬性，命令列改不到），介面沒有「瀏覽」；帶 `TARGETDIR`、`ProgramFiles64Folder` 這類屬性也不改位置（待驗收，I1）。資料夾繼承 Program Files 的 ACL，安裝程式不改 ACL；因此只有系統管理員能寫是推論，要在 VM 用 §3.3 的 `Get-Acl` 方法核對（待驗收，I1）。已知限制：資料夾在安裝前就存在時，安裝程式不重設它的 ACL；只有系統管理員能預先建它。
 - **介面**：WiX 內建的歡迎、確認、進度、完成與維護歡迎頁，加兩頁自己的：「修復或移除」（只有「修復」「移除」，沒有「變更」：沒有功能可選）與「要保留什麼」（一個勾，§6.7）。不引用 `WixUI_Common`（它帶進來的自訂動作與 DLL 不能出現在套件裡），頁面用到的點陣圖與圖示是 WixUIExtension 內建的（WiX 的頁面自己會帶進來；套件自己定義會和它們重複，連結失敗）。沒有授權頁、選資料夾頁、功能樹、`MsiRMFilesInUse`（重新啟動管理員關著，用不到）。有 WiX 的 `FilesInUse` 頁（§6.5）。
   - 連結時所有 ICE 驗證都跑。量到兩條警告：ICE61（同版號升級）是預期的，ICE63（有動作排在 `InstallInitialize` 與 `RemoveExistingProducts` 之間）不該出現，`build-msi.ps1` 在 `light` 輸出有 ICE63 時失敗。
@@ -828,7 +828,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
   - **C**：只給 VM 驗收用，版號 `0.0.<run_number+1>`，DLL 與 exe 另建一次，位元組與 A 不同（job 印出兩組 SHA-256 並斷言不同），檔名 `…-x64-test-upgrade.msi`。
   - artifact `windows-msi`：三份 MSI 與 A 的 SHA-256 檔。
 - **`check-msi.ps1`**（對象是建好的 A）：用 WiX 的 `dark.exe` 反組譯成 `.wxs` 並解出檔案（`-x`），讀那份 XML，再用 `dumpbin` 看解出來的檔；每一列讀到的都印出來，任何一條不符就失敗，失敗的行以 `FAIL [<區域>]` 開頭。（量到：用 Windows Installer 的 COM 讀欄位，pwsh 7 丟 `DISP_E_TYPEMISMATCH`、Windows PowerShell 5.1 讀回空字串，所以改讀反組譯的結果。）核對的是：
-  - 檔案清單與 §6.2 的表完全相同；模型與 `colloquial-attribution.tsv` 的雜湊符合 `data/*.sha256`；署名檔第一段的檔名剛好是 `build-app.sh` 那一段列的那些。
+  - 檔案清單與 §6.2 的表完全相同；模型與 `colloquial-attribution.tsv` 的雜湊符合 `data/*.sha256`；署名檔第一段的檔名剛好是 `build-app.sh` 那一段列的那些、去掉迷因詞包的三個。
   - DLL 與 exe 沒有 C 執行階段的匯入；exe 是視窗子系統（`dumpbin /headers`）；`SjMarkTiming` 不存在、`SjMarkReleaseIds` 在 DLL 與 exe 都存在。
   - `installer-ca.dll` 是 Binary 表裡唯一的 DLL；靜態匯入在 §6.8 的名單內、沒有 delay-load；三個匯出都在。
   - 自訂動作：Id、種類、命令列或匯出名、執行方式（立即、延後、rollback、模擬、`TerminalServerAware`、不等待）、失敗時、排的位置與條件，逐列等於 §6.6 的表；沒有表以外的自訂動作；從對話框觸發的動作剛好一個（`ExitDialog`、`Finish`、`DoAction`、`StartHost`、條件 `NOT Installed`）；`InstallUISequence` 等其他序列沒有自訂動作。
