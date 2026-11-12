@@ -31,7 +31,8 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Input::Ime::{ImmAssociateContextEx, HIMC, IACE_CHILDREN};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, WSF_VISIBLE,
+    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SMTO_ABORTIFHUNG,
+    SMTO_BLOCK, SWP_NOMOVE, SWP_NOSIZE, WM_NULL, WSF_VISIBLE,
 };
 
 /// The manifest resource build.rs embeds (ISOLATIONAWARE_MANIFEST_RESOURCE_ID).
@@ -322,7 +323,7 @@ unsafe fn show(h: MSIHANDLE, tdi: TaskDialogIndirectFn) -> (bool, i32, bool) {
         Anonymous2: TASKDIALOGCONFIG_1 { pszFooterIcon: PCWSTR::null() },
         pszFooter: PCWSTR::null(),
         pfCallback: Some(on_notify),
-        lpCallbackData: h.0 as isize, // on_notify's log handle (this thread, during the modal call)
+        lpCallbackData: h.0 as isize, // on_notify's MSI handle: its log line and the CLIENTPROCESSID property (this thread, during the modal call)
         cxWidth: 0,
     };
     let (mut button, mut checked) = (0i32, BOOL(0));
@@ -345,7 +346,14 @@ unsafe fn show(h: MSIHANDLE, tdi: TaskDialogIndirectFn) -> (bool, i32, bool) {
 /// window). The foreground window is taken as it is (GetForegroundWindow): no window is looked up by class or title, and the attach is
 /// made only when that window belongs to this installation's client process (Windows Installer's CLIENTPROCESSID: msiexec.exe from the
 /// command line or the Settings page, explorer.exe from Programs and Features); any other program's window gets only the plain request.
-/// One log line says what was done. Known limit: if the foreground thread hangs, the attach can wait on it.
+/// Before the attach the foreground window must answer WM_NULL within FRONT_PROBE_MS (SMTO_ABORTIFHUNG): with the input attached, the
+/// activation change is sent to its thread synchronously, and a thread that does not pump (for example explorer's thread waiting in
+/// MsiConfigureProduct) would block the uninstall. One log line says what was done and why not (client=none: no client process id;
+/// client=other: the foreground is another program; busy: the probe failed). Known limit: a thread that stops pumping right after the
+/// probe can still block it.
+/// How long the foreground window has to answer WM_NULL before the attach (it answers at once when its thread pumps messages).
+const FRONT_PROBE_MS: u32 = 500;
+
 unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _: WPARAM, _: LPARAM, data: isize) -> HRESULT {
     static FRONT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let h = MSIHANDLE(data as u32);
@@ -364,6 +372,7 @@ unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _
         let _ = catch_unwind(|| {
             // SAFETY: the dialog's own window, alive during the notification; the attach is undone before returning.
             unsafe {
+                let client = property(h, w!("CLIENTPROCESSID")).and_then(|v| parse_pid(&v));
                 let fg = GetForegroundWindow();
                 if fg.0.is_null() || fg == hwnd {
                     log(h, "AskKeep: front already");
@@ -372,10 +381,18 @@ unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _
                 let mut fg_pid = 0u32;
                 let fg_thread = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
                 let me = GetCurrentThreadId();
-                let client = property(h, w!("CLIENTPROCESSID")).and_then(|v| parse_pid(&v));
-                if fg_thread == 0 || fg_thread == me || client != Some(fg_pid) {
+                let why = if client.is_none() {
+                    Some("client=none")
+                } else if fg_thread == 0 || fg_thread == me || client != Some(fg_pid) {
+                    Some("client=other")
+                } else if SendMessageTimeoutW(fg, WM_NULL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG | SMTO_BLOCK, FRONT_PROBE_MS, None).0 == 0 {
+                    Some("busy")
+                } else {
+                    None
+                };
+                if let Some(why) = why {
                     let set = SetForegroundWindow(hwnd).as_bool();
-                    log(h, &format!("AskKeep: front attach=0 set={}", set as u8));
+                    log(h, &format!("AskKeep: front attach=0 {why} set={}", set as u8));
                     return;
                 }
                 let attached = AttachThreadInput(me, fg_thread, true).as_bool();
