@@ -319,11 +319,11 @@ foreach ($c in Nodes '//w:Control') {
         Fail 'Dialogs' "control $(Attr $c.ParentNode 'Id')/$(Attr $c 'Id') is a $(Attr $c 'Type') (feature tree, folder browsing or licence text)"
     }
 }
-# The exit page's sentence: shown by WiX's OptionalText control only when NOT Installed.
+# The exit page's sentence: shown by WiX's OptionalText control only when NOT Installed (the whole condition, as shanjie.wxs gets it from WiX).
 $finishText = '善解已經裝好。已經開著的 App 切一次輸入法就能用。'
 $optional = @(Nodes "//w:Dialog[@Id='ExitDialog']/w:Control[@Id='OptionalText']")
 if ($optional.Count -ne 1) { Fail 'Dialogs' 'ExitDialog has no OptionalText control' }
-elseif (-not (@(Nodes "w:Condition[@Action='show']" $optional[0]) | Where-Object { $_.InnerText -match '\bNOT Installed\b' })) { Fail 'Dialogs' 'ExitDialog/OptionalText is not shown only when NOT Installed' }
+elseif (-not (@(Nodes "w:Condition[@Action='show']" $optional[0]) | Where-Object { $_.InnerText.Trim() -ceq 'WIXUI_EXITDIALOGOPTIONALTEXT AND NOT Installed' })) { Fail 'Dialogs' 'ExitDialog/OptionalText is not shown only when NOT Installed' }
 
 # ---- no COM classes, file associations, self-registration, shortcuts; no files or folders made or removed outside the install ----
 foreach ($t in 'Class', 'Extension', 'Shortcut', 'RemoveFile', 'RemoveFolder', 'CreateFolder') {

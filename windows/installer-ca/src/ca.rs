@@ -348,7 +348,7 @@ unsafe fn show(h: MSIHANDLE, tdi: TaskDialogIndirectFn) -> (bool, i32, bool) {
 /// command line or the Settings page, explorer.exe from Programs and Features); any other program's window gets only the plain request.
 /// Before the attach the foreground window must answer WM_NULL within FRONT_PROBE_MS (SMTO_ABORTIFHUNG): with the input attached, the
 /// activation change is sent to its thread synchronously, and a thread that does not pump (for example explorer's thread waiting in
-/// MsiConfigureProduct) would block the uninstall. One log line says what was done and why not (client=none: no client process id;
+/// MsiConfigureProduct) would block the uninstall. One log line says what was done and why not (fg=none: no foreground window; client=none: no client process id;
 /// client=other: the foreground is another program; busy: the probe failed). Known limit: a thread that stops pumping right after the
 /// probe can still block it.
 /// How long the foreground window has to answer WM_NULL before the attach (it answers at once when its thread pumps messages).
@@ -374,14 +374,16 @@ unsafe extern "system" fn on_notify(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _
             unsafe {
                 let client = property(h, w!("CLIENTPROCESSID")).and_then(|v| parse_pid(&v));
                 let fg = GetForegroundWindow();
-                if fg.0.is_null() || fg == hwnd {
+                if fg == hwnd {
                     log(h, "AskKeep: front already");
                     return;
                 }
                 let mut fg_pid = 0u32;
                 let fg_thread = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
                 let me = GetCurrentThreadId();
-                let why = if client.is_none() {
+                let why = if fg.0.is_null() {
+                    Some("fg=none") // no foreground window at this moment (an activation in progress): only the plain request
+                } else if client.is_none() {
                     Some("client=none")
                 } else if fg_thread == 0 || fg_thread == me || client != Some(fg_pid) {
                     Some("client=other")
