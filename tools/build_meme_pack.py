@@ -25,6 +25,9 @@
   之後每列 `字串<TAB>文章數<TAB>看板數`。三個檔頭欄位都記進 meme.json。計數檔的 input_sha256 要等於它的輸入字串檔的 SHA-256：
   第一次計數的輸入是本工具 `--emit-candidates` 寫的 meme-candidates.txt，第二次是 `--emit-x` 寫的 meme-x-strings.txt；兩份計數檔的頁面目錄雜湊要相同。檔頭欄位名以 `_tree_sha256` 結尾的舊寫法也讀（當成 tree_sha256）。
 
+另外的讀音（只有 --pack meme、最後一段）：--extra-readings 同詞包目錄的 meme-extra-readings.tsv（`詞<TAB>讀音`，沒有就沒有）。收進詞包的詞每個另外的讀音多一列
+  （含變調列）、和主要讀音同分，同音衝突照樣偵測；words-all.txt 在原本的列之後接上這些讀音各一列（確認過的讀音，主要讀音是 CHECK 的詞也列）。解碼表只看主要讀音。
+
 三個階段（每一階段都用 --cand；讀音覆寫檔 --readings 同詞包目錄的 meme-readings.tsv，格式同 it-readings.tsv，沒有就沒有）：
   1. --emit-candidates                 寫 WORK/meme-candidates.txt（一行一個，去重、照位元組排序）給 main 做第一次計數
   2. --emit-x --counts C1              收進門檻（看板 ≥ 3 且文章 ≥ 10）的候選，用出貨 CLI（上面那一組詞包開，沒有迷因本身）解碼，
@@ -137,6 +140,29 @@ def pack_words(packs_dir=PACKS, tag=TAG):
             with open(f, encoding="utf-8") as fh:
                 out |= {l.split("\t")[1] for l in fh if l.strip() and not l.startswith("#")}
     return frozenset(out)
+
+
+def read_extra(path):
+    """另外的讀音（data/packs/meme-extra-readings.tsv）→ [(詞, [音節])]（檔案順序）。`詞<TAB>讀音（空白分隔）`，一列一個另外的讀音；`#` 開頭是註解；檔不在＝沒有。
+    壞行、音節數不等於字數、同一個詞重複同一個讀音，以點名行號的訊息停止。"""
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path, encoding="utf-8") as f:
+        for n, l in enumerate(f, 1):
+            l = l.rstrip("\n")
+            if not l.strip() or l.startswith("#"):
+                continue
+            cols = l.split("\t")
+            if len(cols) != 2 or not cols[0].strip() or not cols[1].split():
+                raise SystemExit(f"{path}:{n}: expected `word<TAB>reading`, got {l!r}")
+            w, r = unicodedata.normalize("NFKC", cols[0].strip()), cols[1].split()
+            if len(r) != len(w):
+                raise SystemExit(f"{path}:{n}: {w} has {len(w)} characters, the reading has {len(r)} syllables")
+            if (w, r) in out:
+                raise SystemExit(f"{path}:{n}: {w} {' '.join(r)} is listed twice")
+            out.append((w, r))
+    return out
 
 
 def read_allow(path):
@@ -308,8 +334,9 @@ def judge(admitted, reading, xs, fs, counts2, packwords=frozenset(), tag=TAG, pl
 
 
 def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozenset(), packwords=frozenset(),
-          collisions_tsv=None, readings_tsv=None, sc=None, info=None, tag=TAG, exclude=None, native=False, allow=None):
-    """最後一段。x_table：read_x 的列。tag：詞包（meme|beauty），決定檔名與 (b) 的參考名單。exclude：--exclude／--exclude-private 的字串（None＝這個詞包沒有剔除）。native：偵測衝突時把詞包的列寫成 {tag}-add.tsv 交給 decode（--native-pack）。allow：{詞: 類別}（只有迷因；None＝不篩）：不在清單的候選在解碼表核對之後、判規則之前拿掉；info 給了就多放 allow_missing（清單裡沒收進來的詞與原因）與 add_order。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)], 讀不出來的詞, 被 (c) 規則丟掉的 ldrop)。"""
+          collisions_tsv=None, readings_tsv=None, sc=None, info=None, tag=TAG, exclude=None, native=False, allow=None, extra=()):
+    """extra：read_extra 的列（只有迷因）：收進詞包的詞另外的讀音，各多一列（含變調列）、和主要讀音同分，同音衝突照樣偵測；詞沒收進來或和主要讀音相同就停。
+    最後一段。x_table：read_x 的列。tag：詞包（meme|beauty），決定檔名與 (b) 的參考名單。exclude：--exclude／--exclude-private 的字串（None＝這個詞包沒有剔除）。native：偵測衝突時把詞包的列寫成 {tag}-add.tsv 交給 decode（--native-pack）。allow：{詞: 類別}（只有迷因；None＝不篩）：不在清單的候選在解碼表核對之後、判規則之前拿掉；info 給了就多放 allow_missing（清單裡沒收進來的詞與原因）與 add_order。回傳 (檔案, manifest, 未處置的 (a)(b) 衝突, 丟掉的 [(候選, 原因, 對方, 候選文章, 對方文章)], 讀不出來的詞, 被 (c) 規則丟掉的 ldrop)。"""
     collisions_tsv = collisions_tsv or os.path.join(PACKS, f"{tag}-collisions.tsv")
     admitted, reading, check, st, unread = prepare(cands, counts1, have, packwords, readings, readings_tsv)
     if sorted((w, " ".join(r)) for w, r in reading.items()) != sorted((w, r) for w, r, *_ in x_table):
@@ -331,17 +358,22 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         excluded = {**excluded, **{w: None for w in exclude}}
     admitted, reading = ({w: v for w, v in d.items() if w not in excluded} for d in (admitted, reading))
     words, dropped = judge(admitted, reading, xs, fs, counts2, packwords, tag, plus)
+    ex = collections.defaultdict(list)
+    for w, r in extra:
+        if w in reading and list(reading[w]) == r:
+            raise SystemExit(f"extra readings: {w} {' '.join(r)} is the word's main reading")
+        ex[w].append(r)
     reasons = collections.Counter(d[1] for d in dropped)
     # (b)：詞包詞搶走參考名單裡別的字串的第一名
     rank = B.collision_rank(B.read_tsv(collisions_tsv) if os.path.exists(collisions_tsv) else [])
     existing = frozenset(have) | packwords
     ldrop = []
     for _ in range(B.LEXICON_RULE_ROUNDS):
-        order = B.ordered(words, lambda w: admitted[w][0], rank, reading)
-        rows = B.pack_rows(order, reading, sc, tag=tag)
+        order = B.ordered(words, lambda w: admitted[w][0], rank, reading, extra=ex)
+        rows = B.pack_rows(order, reading, sc, extra=ex, tag=tag)
         # (c)：迷因列把任何既有詞（詞庫任何一層或動漫、資訊詞包）擠下第一名就丟（變調列、書面也算；先出貨的勝）。例外：聊天、主要讀音上被擠下的正是 X，
         # 而且 X 不是別的詞包的詞——這一條讀音已經由 judge 的 X 規則判給迷因了。
-        found = B.detect_collisions(words, reading, rows, ref, decode, existing=existing, pack_file=f"{tag}-add.tsv" if native else "acg-add.tsv")
+        found = B.detect_collisions(words, reading, rows, ref, decode, existing=existing, extra=ex, pack_file=f"{tag}-add.tsv" if native else "acg-add.tsv")
         hit = {}
         for r, v in sorted(found.items()):
             for e in v:
@@ -354,6 +386,9 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         words = [w for w in words if w not in hit]
     else:
         raise SystemExit(f"type (c) collisions not settled after {B.LEXICON_RULE_ROUNDS} rounds")
+    missing = [w for w in ex if w not in words]
+    if missing:        # 另外的讀音只給收進詞包的詞：詞沒收進來（不在清單、被規則丟掉，含另外的讀音上的 (c)）就停，不寫 data/packs
+        raise SystemExit(f"extra readings: not shipped in the pack: {' '.join(missing)}")
     if tag == "beauty":
         found = exempt_judged_x(found, reading, xs)
     keep_now = B.first_named(rank, set(words))
@@ -367,9 +402,10 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         "stages": dict(st, **{"dropped_" + k: reasons.get(k, 0) for k in ("same_reading", "already_right", "x_other_pack", "x_not_fewer")},
                        dropped_by_c_rule=len(ldrop)),
         "unresolved_collision_readings": len(col),
+        **({"extra_readings": len(extra)} if extra else {}),
     }
     if info is not None:
-        info.update(order=order, reading=reading, check={w: check[w] for w in reading})
+        info.update(order=order, reading=reading, check={w: check[w] for w in reading}, extra=list(extra))
     if tag == TAG:      # 列的先後：聊天沒有詞包時打不對的詞，再來本來就對的，最後處置檔 `+` 列的詞；各組內維持原順序，分數不變
         plus_w = {w for _, a, b in plus for w in (a, b)}
         rows = sorted(rows, key=lambda r: 2 if r.split("\t")[1] in plus_w else int(xs[r.split("\t")[1]] == r.split("\t")[1]))
@@ -438,6 +474,7 @@ def main():
     ap.add_argument("--readings")
     ap.add_argument("--native-pack", action="store_true", help="只有 --pack meme、最後一段：衝突偵測「開」的那次用真的 --packs acg,it,meme,beauty，不把列接在 it 檔後面")
     ap.add_argument("--allow", help="只有 --pack meme：審定清單 `詞<TAB>類別`（meme|offensive），預設 data/packs/meme-allow.tsv；--emit-x 與最後一段都要它存在")
+    ap.add_argument("--extra-readings", help="只有 --pack meme、最後一段：另外的讀音 `詞<TAB>讀音`，預設 data/packs/meme-extra-readings.tsv；檔不存在就沒有")
     ap.add_argument("--exclude", help="字串<TAB>…（只讀第一欄）；beauty 預設 data/packs/beauty-exclude.tsv（不存在就是空集合），meme 預設沒有")
     ap.add_argument("--exclude-private", help="同 --exclude；beauty.json 只記它的 SHA-256 與筆數，不記路徑與內容")
     a = ap.parse_args()
@@ -446,6 +483,8 @@ def main():
         sys.exit("--native-pack only applies to --pack meme (the beauty decode has no pack bit of its own to turn on)")
     if tag != TAG and a.allow:
         sys.exit("--allow only applies to --pack meme")
+    if tag != TAG and a.extra_readings:
+        sys.exit("--extra-readings only applies to --pack meme")
     if tag == TAG and (a.exclude or a.exclude_private):
         sys.exit("--pack meme does not take --exclude or --exclude-private: the allow list (--allow) is the only way to leave a candidate out")
     a.work = a.work or os.path.join(ROOT, "build", f"{tag}-pack")
@@ -491,7 +530,8 @@ def main():
     exclude = (ex | exp) if (tag == "beauty" or a.exclude or a.exclude_private) else None
     info = {}
     files, manifest, col, dropped, unread, ldrop = build(cands, counts1, x_table, counts2, dec, have=have, packwords=packwords, collisions_tsv=a.collisions,
-                                                           readings_tsv=a.readings, info=info, tag=tag, exclude=exclude, native=a.native_pack, allow=allow)
+                                                           readings_tsv=a.readings, info=info, tag=tag, exclude=exclude, native=a.native_pack, allow=allow,
+                                                           extra=read_extra(a.extra_readings or os.path.join(PACKS, "meme-extra-readings.tsv")) if tag == TAG else ())
     manifest.update(version=IT.sha256_text(files[f"{tag}-add.tsv"])[:8], candidate_files=cfiles, candidate_stats=cst,
                     counts_candidates=dict(h1, sha256=B.sha256_file(a.counts[0])), counts_x=dict(h2, sha256=B.sha256_file(a.counts[1])),
                     dropped_unreadable=len(unread))
@@ -508,7 +548,8 @@ def main():
               "collisions.txt": B.collisions_text(col, {"unclassified_groups": []}, ldrop), "unreadable.txt": "".join(w + "\n" for w in unread),
               "check-readings.txt": "".join(f"{w}\t{r}\n" for w, r in checks), "words.txt": "".join(check_words(info, SEEDS[tag])),
               **({"allow-missing.tsv": "".join("\t".join(r) + "\n" for r in info["allow_missing"]),
-                  "words-all.txt": "".join(f"|{w}|{' '.join(info['reading'][w])}\n" for w in info["add_order"] if not info["check"][w])} if allow is not None else {}),
+                  "words-all.txt": "".join(f"|{w}|{' '.join(info['reading'][w])}\n" for w in info["add_order"] if not info["check"][w])
+                                    + "".join(f"|{w}|{' '.join(r)}\n" for w, r in info["extra"])} if allow is not None else {}),
               "report.txt": json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n"}
     for n, t in report.items():
         with open(os.path.join(a.work, n), "w", encoding="utf-8", newline="\n") as f:

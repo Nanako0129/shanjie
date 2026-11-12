@@ -526,6 +526,7 @@
 
 照 §8.2（同一支工具、同樣的三段），差別：
 
+- **另外的讀音**（`data/packs/meme-extra-readings.tsv`，建置輸入，不隨 App 出貨）：`詞<TAB>讀音（空白分隔）`，一列一個另外的讀音，`#` 開頭與空行略過。給句尾語助詞有兩種打法的詞（啦 `ㄌㄚ`／`ㄌㄚ˙`、嗎 `ㄇㄚ`／`ㄇㄚ˙`、耶 `ㄧㄝˊ`／`ㄧㄝ`）與疊字有兩種打法的詞用：主要讀音照舊，這裡的每個讀音在 `meme-add.tsv` 多一列（含它的變調列），分數和主要讀音的列相同，兩種都打得到。只在最後一段用（`--extra-readings FILE`，預設這個檔，不存在就沒有；`--pack beauty` 給這個旗標就停）；解碼表只看主要讀音。同音衝突 (a)(b)(c) 在另外的讀音上照樣偵測。列裡的詞沒有收進詞包（含因為另外的讀音被 (c) 丟掉）、音節數不等於字數、和主要讀音相同、同一個詞重複同一個讀音，都以非 0 結束、不寫 `data/packs`。`words-all.txt` 在原本的列之後接上這些讀音各一列（確認過的讀音，所以主要讀音標 `CHECK` 的詞也列）；`meme.json` 多記 `extra_readings`（列數）。
 - **審定清單只在最後一段套用**：`--emit-x` 照舊對所有過用量門檻的候選解碼（輸出不看清單，只檢查清單檔存在、能解析），所以解碼表與清單無關；最後一段在核對解碼表之後、判規則之前拿掉不在清單裡的候選（`meme.json` 的 `stages.not_allowed`）。這些候選不擋同讀音的清單詞，也不在 (b) 的參考名單裡。`--allow FILE` 預設 `data/packs/meme-allow.tsv`；`--pack beauty` 不收這個旗標；別的類別、缺類別欄、重複的詞（NFKC 之後比）都點名行號後停止。
 - **現在就打得對的清單詞照收**（§6.2 的「已經打得對」只對 `--pack beauty` 生效）；「讓不讓第一名」（X 是更常見的寫法就不收）與 (c) 不變。
 - **同讀音**：處置檔 `meme-collisions.tsv` 有 `+` 列點名的兩個詞都留（詞包詞在前）；沒有 `+` 列只留文章數多的。處置檔只放同讀音的處置，要不收的詞不放進審定清單即可。
@@ -539,7 +540,7 @@
 
 - 位元 8（`SHANJIE_PACK_MEME`／`PACK_MEME`），檔案 `meme-add.tsv`，在 `PACK_FILES` 裡排在資訊詞包之後、美妝詞包之前；CLI `--packs meme`。照 §1.4 封頂（不在 `PACK_OOV` 裡）。
 - App：偏好鍵 `memePack`，沒設過當作開（§4.2）；設定視窗「詞包」區塊在「美妝與保養詞」之後加「迷因與實況用語」（SwiftUI `Toggle`，和其他詞包開關同一種原生元件）；選單「已開啟的詞包」那一段照設定順序列出（動漫、資訊、美妝、迷因，經典台詞開著時在動漫之後）；選單沒有開關。
-- 打包：`meme-add.tsv`、`meme-sources.tsv`、`meme.json` 進 `Resources/packs/`，建置輸入 `meme-collisions.tsv`、`meme-allow.tsv` 不進；`check-app.sh` 核對 `meme.json` 與署名檔的 `packs/meme-add.tsv` 一段（§4.4）。
+- 打包：`meme-add.tsv`、`meme-sources.tsv`、`meme.json` 進 `Resources/packs/`，建置輸入 `meme-collisions.tsv`、`meme-allow.tsv`、`meme-extra-readings.tsv` 不進；`check-app.sh` 核對 `meme.json` 與署名檔的 `packs/meme-add.tsv` 一段（§4.4）。
 - 自測：帶動漫、資訊、迷因與美妝詞包的引擎要求 `ㄎㄜˇ ㄧˇ ㄙㄜˋ ㄙㄜˋ` 得到 `可以色色`（`meme-add.tsv` 的第一列；不帶迷因詞包時聊天的第一名是 `可以瑟瑟`），所以迷因詞包缺檔、壞檔或沒生效都失敗。
 - 評測重播 `shanjie-replay` 不給 `--packs` 時用 App 的預設 `acg,it,meme,beauty`，遮罩 29（`docs/spec/evaluation.md` §4）。Windows 輸入法的常駐程序不載入迷因詞包（遮罩仍是 `1 | 4`）。
 - 關掉詞包：不載入這些詞條，選字、候選窗、預測列和沒有這個詞包檔的引擎逐位元組相同。詞包不壓制字串：逐字或用較短的詞條拼得出來的詞，關掉後照樣打得出來；核心沒有壓制機制。
@@ -558,8 +559,8 @@
   5. 嵌入句（會意關與標準檔，聊天與書面）：會意關時逐字比對，開了變錯的列是 0；標準檔用 rowstats 的對錯（寬鬆對照），開了變錯的列是 0，修好的列數在聊天、書面都大於 0。這個集合是工具造的句子，只確認方向，不當出貨標準的證據。
   6. 預測列：`core/tests/engine_pack.rs` 的 `the_meme_pack_offers_whole_words_in_the_prediction_row`（讀真的 `data/packs` 與 `words-all.txt`，不是夾具）：取三個音節以上的詞照檔案順序的前 30 個，各打到剩最後一個音節為止，聊天設定、沒有前文、預測開著，開著詞包時被動預測列含整個詞的詞數嚴格多於不開時，而且大於 0；測試印出兩個數字與沒出現的詞。
   7. 記憶體與延遲（Mac 閒置窗）：尖峰 RSS 對 `acg,it,beauty` 增加不超過 40 MiB；`PACKS=acg,it,meme,beauty` 的 `timing_typing76_keys` p95 不超過 16 ms。
-- 測試（`make test-python`）：`tools/test_build_meme_pack.py`（`MIN_WORDS`、`candidate_files` 只記檔名、同名就停、列的先後、解碼的詞包組合、`--native-pack`、審定清單的各項規則與 `allow-missing.tsv`、`words-all.txt`）、`tools/gen_meme_embedded.py` 的重建核對。引擎與 App 的測試見 §4.1–§4.4。
-- 這一版：139 個詞、148 列（9 列變調列），`meme` 類 112 個、`offensive` 類 27 個；審定清單 139 筆全部收進；未處置衝突 0。檢查集：`words.txt` 60 列、`words-all.txt` 131 列、`embedded.txt` 786 列。
+- 測試（`make test-python`）：`tools/test_build_meme_pack.py`（`MIN_WORDS`、`candidate_files` 只記檔名、同名就停、列的先後、解碼的詞包組合、`--native-pack`、審定清單的各項規則與 `allow-missing.tsv`、`words-all.txt`、另外的讀音）、`tools/gen_meme_embedded.py` 的重建核對。引擎與 App 的測試見 §4.1–§4.4。
+- 這一版：139 個詞、155 列（9 列變調列、7 列另外的讀音），`meme` 類 112 個、`offensive` 類 27 個；審定清單 139 筆全部收進；未處置衝突 0。檢查集：`words.txt` 60 列、`words-all.txt` 138 列（131 個詞的主要讀音加 7 列另外的讀音）、`embedded.txt` 828 列。
 
 ## 10. 已知限制
 

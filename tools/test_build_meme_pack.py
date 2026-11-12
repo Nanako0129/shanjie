@@ -239,6 +239,7 @@ class Pipeline(unittest.TestCase):
         self.cand, self.c1, self.c2 = (os.path.join(t, n) for n in ("cand.tsv", "c1.tsv", "c2.tsv"))
         put(self.cand, self.CAND)
         self.allow = os.path.join(t, "allow.tsv")
+        self.extra = os.path.join(t, "extra.tsv")
         put(self.allow, self.ALLOW)
         for patch in (mock.patch.object(IT, "check_shipping_lm"), mock.patch.object(T, "have_words", lambda: frozenset({"已有詞"})),
                       mock.patch.object(T, "pack_words", lambda: frozenset()), mock.patch.object(B, "make_readings", fake_readings),
@@ -249,8 +250,9 @@ class Pipeline(unittest.TestCase):
             self.addCleanup(patch.stop)
 
     def args(self, *more, allow=True):
+        # --extra-readings points into the temp folder (absent unless a test writes it), so the real data/packs/meme-extra-readings.tsv is never read
         return ["--cand", self.cand, "--work", self.work, "--out", self.out, "--collisions", os.path.join(self.tmp.name, "none.tsv"),
-                "--readings", os.path.join(self.tmp.name, "none-r.tsv"), *(["--allow", self.allow] if allow else []), *more]
+                "--readings", os.path.join(self.tmp.name, "none-r.tsv"), *(["--allow", self.allow, "--extra-readings", self.extra] if allow else []), *more]
 
     def stage1(self):
         run_main(*self.args("--emit-candidates"))
@@ -489,6 +491,57 @@ class Pipeline(unittest.TestCase):
             self.final()
         self.assertIn("allow-missing.tsv", e.exception.code)
         self.assertFalse(os.path.exists(self.out))
+
+    def final_files(self):
+        self.stage1()
+        self.stage2()
+        self.final()
+        return {n: get(os.path.join(d, n)) for d, n in ((self.out, "meme-add.tsv"), (self.out, "meme-sources.tsv"), (self.out, "meme.json"),
+                                                       (self.work, "words-all.txt"), (self.work, "words.txt"))}
+
+    def test_an_extra_reading_adds_one_row_with_the_main_rows_score_and_a_words_all_row(self):
+        base = self.final_files()
+        put(self.extra, "# comment\n我就爛\tx y z\n")
+        new = self.final_files()
+        rows = [l.split("\t") for l in new["meme-add.tsv"].splitlines()]
+        mine = [r for r in rows if r[1] == "我就爛"]
+        self.assertEqual(sorted(r[0] for r in mine), sorted(["x-y-z", "-".join("s" + str(ord(c)) for c in "我就爛")]))
+        self.assertEqual(len({r[2] for r in mine}), 1)                                      # the same score under both readings
+        added = [l for l in new["meme-add.tsv"].splitlines(True) if l not in base["meme-add.tsv"].splitlines(True)]
+        self.assertEqual(len(added), 1)                                                     # nothing else moved: the old file is the new one minus that row
+        self.assertEqual("".join(l for l in new["meme-add.tsv"].splitlines(True) if l not in added), base["meme-add.tsv"])
+        self.assertEqual(new["words-all.txt"], base["words-all.txt"] + "|我就爛|x y z\n")
+        self.assertEqual((new["meme-sources.tsv"], new["words.txt"]), (base["meme-sources.tsv"], base["words.txt"]))
+        self.assertEqual((json.loads(new["meme.json"])["extra_readings"], "extra_readings" in json.loads(base["meme.json"])), (1, False))
+
+    def test_an_extra_reading_of_a_check_word_is_listed_in_words_all(self):
+        put(self.extra, "我就爛\tx y z\n")
+        with mock.patch.object(B, "make_readings", lambda ws: {w: (r, w == "我就爛") for w, (r, _) in fake_readings(ws).items()}):
+            words_all = self.final_files()["words-all.txt"]
+        self.assertEqual([l for l in words_all.splitlines() if "我就爛" in l], ["|我就爛|x y z"])      # the main reading is CHECK and left out; the confirmed extra one is in
+
+    def test_a_comment_only_extra_file_changes_nothing(self):
+        base = self.final_files()
+        put(self.extra, "# nothing\n\n")
+        self.assertEqual(self.final_files(), base)
+
+    def test_a_bad_extra_readings_row_stops_before_anything_is_written(self):
+        main = " ".join("s" + str(ord(c)) for c in "我就爛")
+        for text, msg in (("甘我屁事\ta b c d\n", "not shipped in the pack: 甘我屁事"), ("我就爛\tx y\n", "3 characters, the reading has 2 syllables"),
+                          (f"我就爛\t{main}\n", "is the word's main reading"), ("我就爛\tx y z\n我就爛\tx y z\n", "is listed twice"),
+                          ("我就爛 x y z\n", "expected `word<TAB>reading`")):
+            put(self.extra, text)
+            self.stage1()
+            self.stage2()
+            with self.assertRaises(SystemExit) as e:
+                self.final()
+            self.assertIn(msg, str(e.exception))
+            self.assertFalse(os.path.exists(self.out), text)
+
+    def test_extra_readings_is_refused_for_beauty(self):
+        with self.assertRaises(SystemExit) as e:
+            run_main("--pack", "beauty", *self.args(allow=False), "--extra-readings", self.extra)
+        self.assertIn("--extra-readings only applies to --pack meme", str(e.exception))
 
     def test_words_all_is_every_shipped_word_without_check_readings_in_add_order(self):
         self.stage1()
