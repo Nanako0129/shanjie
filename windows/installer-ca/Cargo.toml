@@ -1,0 +1,37 @@
+[package]
+name = "shanjie-installer-ca"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The custom actions of the Windows installer (windows/installer/shanjie.wxs): AskKeep, KillHost, DeleteSettings. A cdylib with the static
+# C runtime (.cargo/config.toml); empty on non-Windows targets (lib.rs gates the Windows code on cfg(windows)), where only the pure rules and
+# their tests build. Its static imports may only be msi, kernel32, user32, advapi32, imm32, ntdll and API sets (scripts/windows/check-msi.ps1);
+# comctl32 version 6 is the one run-time load (AskKeep). build.rs embeds the manifest (resource 2) that asks for that version.
+[lib]
+name = "installer_ca"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Only the RELEASE identity table is read (the settings key DeleteSettings removes); the `release-ids` feature is not turned on here, so a
+# workspace build that includes this crate never switches the identity of shanjie-tip or shanjie-host.
+shanjie-win-proto = { path = "../proto" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Wdk_System_Registry",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_ApplicationInstallationAndServicing",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_WindowsAndMessaging",
+] }

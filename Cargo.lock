@@ -45,6 +45,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "shanjie-installer-ca"
+version = "0.0.0"
+dependencies = [
+ "shanjie-win-proto",
+ "windows",
+]
+
+[[package]]
 name = "shanjie-tip"
 version = "0.0.0"
 dependencies = [

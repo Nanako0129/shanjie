@@ -345,6 +345,159 @@ jobs:
       - name: Tests (release, core/tests/engine_cap.rs)
         run: cargo test -p core --release --locked --test engine_cap
 
+  # The Windows installer (windows/installer/shanjie.wxs, windows/installer-ca): the release-identity tests, the binaries, three MSIs and
+  # scripts/windows/check-msi.ps1 on the shipped one. A ships; T (A plus a deferred action that fails on WIXFAILWHENDEFERRED=1) and C (version
+  # N+1, binaries built again with another SHANJIE_BUILD_ID so their bytes differ) are for the VM acceptance runs only. The check must also fail
+  # on five broken copies of A and on T, each at the place broken. Skipped exactly when `core` is. The two signing steps are empty: certificates
+  # live only in the release workflow's protected environment, never in pull_request CI.
+  windows-msi:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RUN: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # The one copy of the model download and hash check (see the `windows` job).
+      - name: Fetch the language model
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # The identity table with `release-ids` (each value equals its documented literal) and the custom action DLL's rules. Same target
+      # dir as A's binaries below, so the core is compiled once for both.
+      - name: Tests with the release identity
+        run: |
+          cargo test --release --locked --target-dir build/msi/a/cargo -p shanjie-win-proto -p shanjie-host -p shanjie-tip --features release-ids
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked --target-dir build/msi/a/cargo -p shanjie-installer-ca
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Binaries (A; C's with another build id)
+        run: |
+          ./scripts/windows/build-msi.ps1 binaries -Out build/msi/a
+          $env:SHANJIE_BUILD_ID = "msi-upgrade-test-$env:RUN"
+          ./scripts/windows/build-msi.ps1 binaries -Out build/msi/c
+
+      # Signing goes here (release workflow only): shanjie_tip.dll, shanjie-host.exe and installer-ca.dll in build/msi/a/bin, before they are
+      # packed. Nothing is signed in CI.
+      - name: Sign the binaries
+        run: Write-Host 'not signed in CI'
+
+      - name: MSIs (A, T, C)
+        id: msis
+        run: |
+          $n = "0.0.$env:RUN"
+          $c = "0.0.$([int]$env:RUN + 1)"
+          $env:SHANJIE_VERSION = $n
+          ./scripts/windows/build-msi.ps1 msi -Bin build/msi/a/bin -Variant A -Out "build/msi/out/shanjie-$n-x64.msi"
+          ./scripts/windows/build-msi.ps1 msi -Bin build/msi/a/bin -Variant T -Out "build/msi/out/shanjie-$n-x64-test-fail.msi"
+          $env:SHANJIE_VERSION = $c
+          ./scripts/windows/build-msi.ps1 msi -Bin build/msi/c/bin -Variant A -Out "build/msi/out/shanjie-$c-x64-test-upgrade.msi"
+          # U7 tells A's files from C's by these hashes.
+          foreach ($f in 'shanjie_tip.dll', 'shanjie-host.exe') {
+            $ha = (Get-FileHash -Algorithm SHA256 "build/msi/a/bin/$f").Hash.ToLowerInvariant()
+            $hc = (Get-FileHash -Algorithm SHA256 "build/msi/c/bin/$f").Hash.ToLowerInvariant()
+            Write-Host "$f  A $ha  C $hc"
+            if ($ha -eq $hc) { throw "$f is the same in A and C" }
+          }
+
+      # Signing goes here (release workflow only): the shipped MSI (A). Nothing is signed in CI.
+      - name: Sign the MSIs
+        run: Write-Host 'not signed in CI'
+
+      - name: Check A
+        run: ./scripts/windows/check-msi.ps1 -Msi "build/msi/out/shanjie-0.0.$env:RUN-x64.msi"
+
+      # Each broken copy changes one place of A's source (the text to change must occur exactly once) and is built without ICE validation
+      # (light -sval; never for a package). check-msi.ps1 must fail on it, name the place (the marker), and every failure it adds beyond
+      # A's own must be in that place's area. T must fail on its extra action. Runs even when "Check A" failed, so one run shows both.
+      - name: The check fails on the broken copies and on T
+        if: ${{ !cancelled() && steps.msis.outcome == 'success' }}
+        run: |
+          function Fails([string]$Msi) {
+            $out = pwsh -NoProfile -File scripts/windows/check-msi.ps1 -Msi $Msi -Work "$Msi.check" 2>&1 | Out-String
+            [pscustomobject]@{ Rc = $LASTEXITCODE; Lines = @($out -split "`r?`n" | Where-Object { $_.StartsWith('FAIL [') }) }
+          }
+          $a = Fails "build/msi/out/shanjie-0.0.$env:RUN-x64.msi"
+          $wxs = [IO.File]::ReadAllText('windows/installer/shanjie.wxs')
+          $broken = @(
+            @{ Name = 'hkcu-registry'; Area = 'FAIL [Registry]'; Marker = 'Root=HKCU'
+               Find = '<Component Id="CRun" Directory="InstallDir" Guid="*">'
+               With = '<Component Id="CRun" Directory="InstallDir" Guid="*"><RegistryValue Root="HKCU" Key="Software\Shanjie" Name="BrokenCopy" Type="string" Value="1" />' },
+            @{ Name = 'delete-settings-not-impersonated'; Area = 'FAIL [CustomAction DeleteSettings]'; Marker = 'Impersonate is no'
+               Find = 'Impersonate="yes" TerminalServerAware="yes"'; With = 'Impersonate="no"' },
+            @{ Name = 'start-host-no-condition'; Area = 'FAIL [DoAction]'; Marker = "StartHost has condition '1'"
+               Find = 'Value="StartHost" Order="1">NOT Installed</Publish>'; With = 'Value="StartHost" Order="1">1</Publish>' },
+            @{ Name = 'start-host-in-ui-sequence'; Area = 'FAIL [InstallUISequence]'; Marker = 'custom action StartHost'
+               Find = '<UI Id="ShanjieDialogs">'
+               With = '<InstallUISequence><Custom Action="StartHost" After="ExecuteAction">NOT Installed</Custom></InstallUISequence><UI Id="ShanjieDialogs">' },
+            @{ Name = 'register-ignores-failure'; Area = 'FAIL [CustomAction Register]'; Marker = 'Return is ignore'
+               Find = 'Execute="deferred" Impersonate="no" Return="check" />'; With = 'Execute="deferred" Impersonate="no" Return="ignore" />' }
+          )
+          New-Item -ItemType Directory -Force build/msi/broken | Out-Null
+          $env:SHANJIE_VERSION = "0.0.$env:RUN"
+          $bad = @()
+          foreach ($b in $broken) {
+            $count = [regex]::Matches($wxs, [regex]::Escape($b.Find)).Count
+            if ($count -ne 1) { throw "$($b.Name): the text to change occurs $count times" }
+            $src = "build/msi/broken/$($b.Name).wxs"
+            [IO.File]::WriteAllText($src, $wxs.Replace($b.Find, $b.With), [Text.UTF8Encoding]::new($false))
+            ./scripts/windows/build-msi.ps1 msi -Bin build/msi/a/bin -Source $src -SkipValidation -Out "build/msi/broken/$($b.Name).msi"
+            $r = Fails "build/msi/broken/$($b.Name).msi"
+            $new = @($r.Lines | Where-Object { $a.Lines -notcontains $_ })
+            Write-Host "---- $($b.Name): exit $($r.Rc)"; $new | ForEach-Object { Write-Host "  $_" }
+            if ($r.Rc -eq 0) { $bad += "$($b.Name): the check passed" }
+            elseif (-not ($new | Where-Object { $_.StartsWith($b.Area) -and $_.Contains($b.Marker) })) { $bad += "$($b.Name): no '$($b.Area) ... $($b.Marker)'" }
+            elseif ($new | Where-Object { -not $_.StartsWith($b.Area) }) { $bad += "$($b.Name): failures outside $($b.Area)" }
+          }
+          $t = Fails "build/msi/out/shanjie-0.0.$env:RUN-x64-test-fail.msi"
+          Write-Host "---- T: exit $($t.Rc)"; $t.Lines | ForEach-Object { Write-Host "  $_" }
+          if ($t.Rc -eq 0 -or -not ($t.Lines | Where-Object { $_.StartsWith('FAIL [CustomAction WixFailWhenDeferred]') })) { $bad += 'T: no failure for its extra action WixFailWhenDeferred' }
+          if ($bad.Count -gt 0) { $bad | ForEach-Object { Write-Host "error: $_" }; exit 1 }
+
+      # A build with `timing` (its own target dir) carries the timing markers, so their absence in A means something.
+      - name: The timing build has the timing markers
+        run: |
+          ./scripts/windows/build-msi.ps1 binaries -Out build/msi/timing -Timing
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $dumpbin = @(& $vswhere -latest -products '*' -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe') | Select-Object -First 1
+          foreach ($f in 'shanjie_tip.dll', 'shanjie-host.exe') {
+            $exports = @(& $dumpbin -nologo /exports "build/msi/timing/bin/$f" | ForEach-Object { $_.TrimEnd("`r") })
+            if ($LASTEXITCODE -ne 0) { throw "dumpbin exited with $LASTEXITCODE" }
+            if (-not ($exports -match '\sSjMarkTiming$')) { throw "$f of the timing build has no SjMarkTiming export" }
+            Write-Host "$f exports SjMarkTiming"
+          }
+
+      - name: SHA-256 of A
+        run: |
+          $name = "shanjie-0.0.$env:RUN-x64.msi"
+          $line = '{0}  {1}' -f (Get-FileHash -Algorithm SHA256 "build/msi/out/$name").Hash.ToLowerInvariant(), $name
+          Write-Host $line
+          [IO.File]::WriteAllText("build/msi/out/$name.sha256", "$line`n", [Text.UTF8Encoding]::new($false))
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-msi
+          path: |
+            build/msi/out/*.msi
+            build/msi/out/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   # docs/spec/windows-tip.md §2.9: the six Windows rowstats equal the Linux job's byte for byte. Its own job so that `windows` need not
   # wait for `debug`. It runs whenever both succeed (the implicit success() of `if`); when either fails it is skipped and the run fails anyway.
   rowstats:

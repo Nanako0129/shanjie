@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Windows installer of 善解 (WiX 3.14): a per-machine x64 MSI, Traditional Chinese only. Built by scripts/windows/build-msi.ps1,
+     checked by scripts/windows/check-msi.ps1 (which holds the expected tables: change both together).
+
+     Preprocessor variables (build-msi.ps1 passes all of them):
+       Variant  A: the shipped package (C, the upgrade test, is the same source with other binaries and a higher version);
+                T: test only, A plus WixUtilExtension's WixFailWhenDeferred (fails when WIXFAILWHENDEFERRED=1), scheduled before DeleteSettings.
+       Version  MAJOR.MINOR.PATCH, from SHANJIE_VERSION.
+       Repo     the repository root (data files and licences).
+       Bin      the folder of shanjie_tip.dll, shanjie-host.exe and installer-ca.dll (release identity, signed there when signing exists).
+       Gen      the folder of the files build-msi.ps1 writes: CC-BY-SA-4.0-attribution.txt and the dialog bitmaps and icons. -->
+<?if $(var.Variant) != "A" AND $(var.Variant) != "T" ?>
+<?error Variant must be A or T ?>
+<?endif ?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="善解" Language="1028" Codepage="950" Version="$(var.Version)" Manufacturer="善解" UpgradeCode="FB841E3C-8E3D-4303-8BC3-80CF831BF022">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" Languages="1028" SummaryCodepage="950" />
+    <MajorUpgrade Schedule="afterInstallInitialize" AllowSameVersionUpgrades="yes" DowngradeErrorMessage="這台電腦已經裝了較新版本的善解。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- ALLUSERS=2 MSIINSTALLPERUSER=1 would make it a per-user install; blocked on MSIINSTALLPERUSER alone, whatever ALLUSERS has become by now.
+         An installed product can always be repaired or removed. -->
+    <Condition Message="善解只能裝給這台電腦的所有使用者，不能只裝給目前的使用者。">Installed OR MSIINSTALLPERUSER&lt;&gt;1</Condition>
+
+    <!-- The two uninstall options: no default value, so "not defined" means the command line did not give it (SetKEEPSETTINGS and SetKEEPMEMORY
+         turn anything but 0 into 1 after AskKeep). KEEPMEMORY has nothing to keep yet: accepted and normalised, never asked. -->
+    <Property Id="KEEPSETTINGS" Secure="yes" />
+    <Property Id="KEEPMEMORY" Secure="yes" />
+    <!-- The check box of KeepDlg (an unticked MSI check box is "not defined", so it is not KEEPSETTINGS itself). -->
+    <Property Id="KEEPBOX" Value="1" />
+    <!-- Files in use: no Restart Manager, no files-in-use dialog, no reboot (the files in use are moved to C:\Config.Msi and deleted at the next restart). -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+    <Property Id="REBOOT" Value="ReallySuppress" />
+    <!-- The exit page's sentence. check-msi.ps1 checks that WiX's OptionalText control of ExitDialog shows it only when NOT Installed. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="善解已經裝好。已經開著的 App 切一次輸入法就能用。" />
+
+    <!-- Every directory id below has lower-case letters: a private property, so the command line cannot move the install folder. -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="InstallDir" Name="Shanjie">
+          <Directory Id="DataDir" Name="data">
+            <Directory Id="LexiconDir" Name="lexicon" />
+            <Directory Id="PacksDir" Name="packs" />
+            <Directory Id="LmDir" Name="lm" />
+          </Directory>
+          <Directory Id="LicensesDir" Name="LICENSES" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <!-- The one list of installed files. Each file is its own component, key path in the install folder; the Run value's key path is in HKLM. -->
+    <Feature Id="Main" Title="善解" Level="1" Absent="disallow" AllowAdvertise="no">
+      <Component Id="CTipDll" Directory="InstallDir" Guid="*"><File Id="FTipDll" Source="$(var.Bin)\shanjie_tip.dll" KeyPath="yes" /></Component>
+      <Component Id="CHost" Directory="InstallDir" Guid="*"><File Id="FHost" Source="$(var.Bin)\shanjie-host.exe" KeyPath="yes" /></Component>
+      <Component Id="CLicense" Directory="InstallDir" Guid="*"><File Id="FLicense" Source="$(var.Repo)\LICENSE" KeyPath="yes" /></Component>
+
+      <Component Id="CLexMcbpmf" Directory="LexiconDir" Guid="*"><File Id="FLexMcbpmf" Source="$(var.Repo)\data\lexicon\mcbpmf-data.txt" KeyPath="yes" /></Component>
+      <Component Id="CLexOverlay" Directory="LexiconDir" Guid="*"><File Id="FLexOverlay" Source="$(var.Repo)\data\lexicon\overlay-add.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexSandhi" Directory="LexiconDir" Guid="*"><File Id="FLexSandhi" Source="$(var.Repo)\data\lexicon\sandhi-add.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexNames" Directory="LexiconDir" Guid="*"><File Id="FLexNames" Source="$(var.Repo)\data\lexicon\names-add.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexDemote" Directory="LexiconDir" Guid="*"><File Id="FLexDemote" Source="$(var.Repo)\data\lexicon\demote.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexVariant" Directory="LexiconDir" Guid="*"><File Id="FLexVariant" Source="$(var.Repo)\data\lexicon\variant-order.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexStdExempt" Directory="LexiconDir" Guid="*"><File Id="FLexStdExempt" Source="$(var.Repo)\data\lexicon\std-exempt.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexProtect" Directory="LexiconDir" Guid="*"><File Id="FLexProtect" Source="$(var.Repo)\data\lexicon\rerank-protect.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexDigits" Directory="LexiconDir" Guid="*"><File Id="FLexDigits" Source="$(var.Repo)\data\lexicon\digits.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLexMixed" Directory="LexiconDir" Guid="*"><File Id="FLexMixed" Source="$(var.Repo)\data\lexicon\mixed-words.tsv" KeyPath="yes" /></Component>
+
+      <Component Id="CPackAcgAdd" Directory="PacksDir" Guid="*"><File Id="FPackAcgAdd" Source="$(var.Repo)\data\packs\acg-add.tsv" KeyPath="yes" /></Component>
+      <Component Id="CPackAcgSources" Directory="PacksDir" Guid="*"><File Id="FPackAcgSources" Source="$(var.Repo)\data\packs\acg-sources.tsv" KeyPath="yes" /></Component>
+      <Component Id="CPackAcgJson" Directory="PacksDir" Guid="*"><File Id="FPackAcgJson" Source="$(var.Repo)\data\packs\acg.json" KeyPath="yes" /></Component>
+      <Component Id="CPackItAdd" Directory="PacksDir" Guid="*"><File Id="FPackItAdd" Source="$(var.Repo)\data\packs\it-add.tsv" KeyPath="yes" /></Component>
+      <Component Id="CPackItSources" Directory="PacksDir" Guid="*"><File Id="FPackItSources" Source="$(var.Repo)\data\packs\it-sources.tsv" KeyPath="yes" /></Component>
+      <Component Id="CPackItJson" Directory="PacksDir" Guid="*"><File Id="FPackItJson" Source="$(var.Repo)\data\packs\it.json" KeyPath="yes" /></Component>
+
+      <Component Id="CLmBigram" Directory="LmDir" Guid="*"><File Id="FLmBigram" Source="$(var.Repo)\data\lm\bigram.sjlm" KeyPath="yes" /></Component>
+      <Component Id="CLmClasses" Directory="LmDir" Guid="*"><File Id="FLmClasses" Source="$(var.Repo)\data\lm\classes.sjc" KeyPath="yes" /></Component>
+      <Component Id="CLmKn" Directory="LmDir" Guid="*"><File Id="FLmKn" Source="$(var.Repo)\data\lm\kn.sjkn" KeyPath="yes" /></Component>
+      <Component Id="CLmTrigram" Directory="LmDir" Guid="*"><File Id="FLmTrigram" Source="$(var.Repo)\data\lm\trigram.sjt3" KeyPath="yes" /></Component>
+      <Component Id="CLmTrigramChat" Directory="LmDir" Guid="*"><File Id="FLmTrigramChat" Source="$(var.Repo)\data\lm\trigram-chat.sjt3" KeyPath="yes" /></Component>
+      <Component Id="CLmTinylm" Directory="LmDir" Guid="*"><File Id="FLmTinylm" Source="$(var.Repo)\data\lm\tinylm.sjtl" KeyPath="yes" /></Component>
+      <Component Id="CLmColloquial" Directory="LmDir" Guid="*"><File Id="FLmColloquial" Source="$(var.Repo)\data\lm\colloquial.sjlm" KeyPath="yes" /></Component>
+
+      <Component Id="CLicMcbpmf" Directory="LicensesDir" Guid="*"><File Id="FLicMcbpmf" Source="$(var.Repo)\LICENSES\McBopomofo-MIT.txt" KeyPath="yes" /></Component>
+      <Component Id="CLicData" Directory="LicensesDir" Guid="*"><File Id="FLicData" Source="$(var.Repo)\LICENSES\data.md" KeyPath="yes" /></Component>
+      <Component Id="CLicNsi" Directory="LicensesDir" Guid="*"><File Id="FLicNsi" Source="$(var.Repo)\LICENSES\name-suggestion-index-BSD-3-Clause.txt" KeyPath="yes" /></Component>
+      <Component Id="CLicColloquial" Directory="LicensesDir" Guid="*"><File Id="FLicColloquial" Source="$(var.Repo)\data\lm\colloquial-attribution.tsv" KeyPath="yes" /></Component>
+      <Component Id="CLicCcBySa" Directory="LicensesDir" Guid="*"><File Id="FLicCcBySa" Source="$(var.Gen)\CC-BY-SA-4.0-attribution.txt" KeyPath="yes" /></Component>
+
+      <!-- Logon start of the resident host (Explorer starts it as the user, Medium); given the logon argument it ends at once unless 善解 is enabled for that user. -->
+      <Component Id="CRun" Directory="InstallDir" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="Shanjie" Type="string" Value="&quot;[InstallDir]shanjie-host.exe&quot; --resident --logon" KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <!-- ===== Custom actions (the whole list; check-msi.ps1 compares every row) ===== -->
+    <Binary Id="InstallerCa" SourceFile="$(var.Bin)\installer-ca.dll" />
+
+    <!-- Basic or reduced UI uninstall: the TaskDialog. Cancel ends the uninstall; its own failure keeps both and goes on. -->
+    <CustomAction Id="AskKeep" BinaryKey="InstallerCa" DllEntry="AskKeep" Execute="immediate" Return="check" />
+    <SetProperty Id="KEEPSETTINGS" Value="1" After="AskKeep" Sequence="execute">KEEPSETTINGS&lt;&gt;"0"</SetProperty>
+    <SetProperty Id="KEEPMEMORY" Value="1" After="SetKEEPSETTINGS" Sequence="execute">KEEPMEMORY&lt;&gt;"0"</SetProperty>
+
+    <!-- TSF registration through the DLL's own DllRegisterServer, as SYSTEM. regsvr32 is a windows-subsystem program, always with /s. -->
+    <CustomAction Id="UnregisterRollback" Directory="InstallDir" ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[#FTipDll]&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="Unregister" Directory="InstallDir" ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[#FTipDll]&quot;" Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="RegisterRollback" Directory="InstallDir" ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[#FTipDll]&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="Register" Directory="InstallDir" ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[#FTipDll]&quot;" Execute="deferred" Impersonate="no" Return="check" />
+
+    <!-- Ends the running release hosts; its only parameter is the installed host's path. -->
+    <SetProperty Id="KillHost" Value="[#FHost]" Before="KillHost" Sequence="execute">REMOVE="ALL"</SetProperty>
+    <CustomAction Id="KillHost" BinaryKey="InstallerCa" DllEntry="KillHost" Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- As the user who uninstalls: HKCU\Software\Shanjie, only when KEEPSETTINGS is 0. -->
+    <CustomAction Id="DeleteSettings" BinaryKey="InstallerCa" DllEntry="DeleteSettings" Execute="deferred" Impersonate="yes" TerminalServerAware="yes" Return="ignore" />
+
+    <!-- Started by the exit dialog's Finish button only (as the user who ran the UI); not in any sequence. -->
+    <CustomAction Id="StartHost" Directory="InstallDir" ExeCommand="&quot;[#FHost]&quot; --resident --logon" Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <!-- After InstallValidate: there REMOVE is ALL also on Change, Remove (before it, the feature name). -->
+      <Custom Action="AskKeep" After="InstallValidate">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND NOT KEEPSETTINGS AND NOT KEEPMEMORY</Custom>
+      <Custom Action="UnregisterRollback" Before="Unregister">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="Unregister" Before="SetKillHost">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="KillHost" Before="RemoveFiles">REMOVE="ALL"</Custom>
+      <Custom Action="RegisterRollback" Before="Register">NOT Installed AND NOT WIX_UPGRADE_DETECTED</Custom>
+      <Custom Action="Register" After="InstallFiles">NOT REMOVE="ALL"</Custom>
+      <Custom Action="DeleteSettings" Before="InstallFinalize">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND KEEPSETTINGS="0"</Custom>
+    </InstallExecuteSequence>
+
+<?if $(var.Variant) = "T" ?>
+    <!-- Test package T only: a deferred action that fails when WIXFAILWHENDEFERRED=1, just before DeleteSettings, to see the rollbacks. -->
+    <Property Id="WIXFAILWHENDEFERRED" Secure="yes" />
+    <InstallExecuteSequence>
+      <Custom Action="WixFailWhenDeferred" Before="DeleteSettings">WIXFAILWHENDEFERRED=1</Custom>
+    </InstallExecuteSequence>
+<?endif ?>
+
+    <!-- ===== Dialogs: WiX's welcome, verify, progress, exit and maintenance-welcome pages, plus two of ours (the repair-or-remove page without a
+         Change button, and the keep page). No licence page, no folder or feature page, no FilesInUse / MsiRMFilesInUse (light -sice:ICE20).
+         WixUI_Common is not referenced: its custom actions (path validation, licence printing) and their DLL may not be in the package. The
+         bitmaps and icons the WiX pages name are ours instead (plain ones that build-msi.ps1 writes). ===== -->
+    <Binary Id="WixUI_Bmp_Banner" SourceFile="$(var.Gen)\banner.bmp" />
+    <Binary Id="WixUI_Bmp_Dialog" SourceFile="$(var.Gen)\dialog.bmp" />
+    <Binary Id="WixUI_Ico_Exclam" SourceFile="$(var.Gen)\blank.ico" />
+    <Binary Id="WixUI_Ico_Info" SourceFile="$(var.Gen)\blank.ico" />
+    <Binary Id="WixUI_Bmp_New" SourceFile="$(var.Gen)\blank.ico" />
+    <Binary Id="WixUI_Bmp_Up" SourceFile="$(var.Gen)\blank.ico" />
+    <!-- VerifyReadyDlg may read this WiX variable, whose default may sit in the left-out WixUI_Common (not checked against WiX 3.14): a fixed 0. -->
+    <WixVariable Id="WixUICostingPopupOptOut" Value="0" />
+
+    <UI Id="ShanjieDialogs">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Microsoft JhengHei UI" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Microsoft JhengHei UI" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Microsoft JhengHei UI" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+      <UIRef Id="WixUI_ErrorProgressText" />
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="WelcomeDlg" />
+
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="1">NOT Installed</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="RepairRemoveDlg" Order="2">Installed AND WixUI_InstallMode&lt;&gt;"Remove"</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="KeepDlg" Order="3">Installed AND WixUI_InstallMode="Remove"</Publish>
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="RepairRemoveDlg">1</Publish>
+      <!-- The one action a dialog starts. -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="StartHost" Order="1">NOT Installed</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+
+      <!-- The maintenance page: Repair and Remove only (there is no feature to change). -->
+      <Dialog Id="RepairRemoveDlg" Width="370" Height="270" Title="[ProductName] 安裝程式">
+        <Control Id="RepairButton" Type="PushButton" X="40" Y="65" Width="80" Height="17" Default="yes" Text="修復(&amp;R)">
+          <Publish Property="WixUI_InstallMode" Value="Repair">1</Publish>
+          <Publish Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+        </Control>
+        <Control Id="RepairText" Type="Text" X="60" Y="85" Width="280" Height="30" NoPrefix="yes" Text="重新安裝缺少或損壞的檔案與登錄項目。" />
+        <Control Id="RemoveButton" Type="PushButton" X="40" Y="118" Width="80" Height="17" Text="移除(&amp;M)">
+          <Publish Property="WixUI_InstallMode" Value="Remove">1</Publish>
+          <Publish Event="NewDialog" Value="KeepDlg">1</Publish>
+        </Control>
+        <Control Id="RemoveText" Type="Text" X="60" Y="138" Width="280" Height="20" NoPrefix="yes" Text="從這台電腦移除善解。" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="MaintenanceWelcomeDlg">1</Publish>
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Disabled="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}修復或移除" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="20" Transparent="yes" NoPrefix="yes" Text="選擇要對善解做的事。" />
+      </Dialog>
+
+      <!-- After Remove: one check box. Next writes an explicit 0 or 1 into KEEPSETTINGS. -->
+      <Dialog Id="KeepDlg" Width="370" Height="270" Title="[ProductName] 安裝程式">
+        <Control Id="KeepSettings" Type="CheckBox" X="25" Y="60" Width="320" Height="17" Property="KEEPBOX" CheckBoxValue="1" Text="保留設定" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="RepairRemoveDlg">1</Publish>
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Property="KEEPSETTINGS" Value="1" Order="1">KEEPBOX</Publish>
+          <Publish Property="KEEPSETTINGS" Value="0" Order="2">NOT KEEPBOX</Publish>
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Order="3">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}要保留什麼" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="20" Transparent="yes" NoPrefix="yes" Text="選擇移除之後要留在這台電腦上的東西。" />
+      </Dialog>
+    </UI>
+  </Product>
+</Wix>
