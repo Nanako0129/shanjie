@@ -21,8 +21,11 @@ so the checks at the end compare them: a link's text must equal the number shown
 Figures are TikZ, which pandoc drops: each one is cut out of PDF with `pdftocairo -svg` (one page, then the
 page is cropped to the box in FIGURES_TSV: id, file, page, x, y, width, height in PDF points, alt text).
 
+Two citation forms are refused rather than rewritten: \\citet of several keys (natbib prints one author group per
+key) and \\cite with a page or prefix argument (natbib prints it inside the brackets).
+
 Exits 1 when any check fails. Standard library only. `python3 scripts/paper_html.py --self-test` runs the
-numbering and the checks on a small synthetic paper (`make test-python` runs it).
+numbering and the checks on a small synthetic paper, and breaks each check once (`make test-python` runs it).
 """
 import html
 import json
@@ -121,10 +124,15 @@ def tex_counts(body):
     if dollars % 2:
         sys.exit("STOP: odd number of $ in the source")
     # Rows of each table's head: those between \toprule and the first \midrule (pandoc keeps only a one-row head).
+    # None when a table lacks either rule: its head cannot be read, and a check stops the build.
     heads = [len(re.findall(r"\\\\", t.split(r"\midrule")[0].split(r"\toprule")[-1]))
+             if r"\toprule" in t and r"\midrule" in t else None
              for t in re.findall(r"\\begin\{(?:tabular|longtable)\}.*?\\end\{(?:tabular|longtable)\}", body, flags=re.S)]
     cite_commands = len(re.findall(r"\\cite[tp]?\*?(?:\[[^\]]*\])*\{", body))
-    return sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered, cite_commands, heads
+    # natbib prints a page or prefix argument ([5, p. 3]); the rewrite to numbers does not carry it over.
+    cite_arguments = len(re.findall(r"\\cite[tp]?\*?\[", body))
+    return (sections, main, figures, cited, display + dollars // 2 + m.count(r"\("), numbered, cite_commands, heads,
+            cite_arguments)
 
 
 def crop_figure(pdf, page, box, dest):
@@ -140,73 +148,105 @@ def crop_figure(pdf, page, box, dest):
 
 
 def self_test():
-    """A two-section paper with one appendix, through main(): the checks pass, and fail when the aux file disagrees."""
-    tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \cite{k} \begin{equation}x\label{eq:x}\end{equation}"
+    """A two-section paper with one appendix, through main(): the checks pass on it, and each check fails on an input
+    made to break it (the STOP message must name that check)."""
+    tex = (r"\title{T}" "\n" r"\section{One}\label{sec:one} $a$ \cite{k} \cite{k} \citet{k}"
+           r" \begin{equation}x\label{eq:x}\end{equation}"
            "\n" r"\subsection{Sub}\label{sec:sub} \ref{app:a} \eqref{eq:x} \ref{tab:t}" "\n" r"\appendix"
            "\n" r"\section{App}\label{app:a}"
            "\n" r"\begin{tabular}{l}\toprule H \\ I \\ \midrule x \\ \end{tabular}")
-    global page, log
-    log = ""
     page = ('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n<li><a href="#app:a" id="toc-app:a">App</a></li>\n'
             '<section id="sec:one" class="level2">\n<h2>One</h2><math display="inline">a</math>'
             '<span class="citation" data-cites="k">(<a href="#ref-k" role="doc-biblioref">K 2020</a>)</span>'
             '<span\nclass="citation" data-cites="k">(<a href="#ref-k"\nrole="doc-biblioref"><span\nclass="nocase">k</span> 2020</a>)</span>'
+            '<span class="citation" data-cites="k"><em>K</em> (ROC) (<a href="#ref-k" role="doc-biblioref">2020</a>)</span>'
             '<math display="block"><annotation>x\\label{eq:x}</annotation></math>\n'
             '<section id="sec:sub" class="level3">\n<h3>Sub</h3>'
             '<a href="#app:a" data-reference-type="ref" data-reference="app:a">2</a>'
             '<a href="#eq:x" data-reference-type="eqref" data-reference="eq:x">[eq:x]</a>'
             '<a href="#tab:t" data-reference-type="ref" data-reference="tab:t">1</a>'
-            '<table id="tab:t">\n<caption>c</caption>\n<tbody>\n<tr>\n<td>H</td>\n</tr>\n<tr>\n<td>I</td>\n</tr>\n'
-            '<tr>\n<td>x</td>\n</tr>\n</tbody>\n</table></section></section>\n'
+            '<table id="tab:t">\n<caption>c</caption>\n<tbody>\n<tr>\n<td>H</td>\n</tr><tr class="even"><td>I</td></tr>'
+            '<tr class="odd"><td>x</td></tr>\n</tbody>\n</table></section></section>\n'
             '<section id="app:a" class="level2">\n<h2>App</h2>'
             '<div id="refs" class="references">\n<div id="ref-k" class="csl-entry" role="listitem">\nK\n</div>\n</div>\n'
             '</section>')
     aux = "".join(f"\\newlabel{{{k}}}{{{{{v}}}{{1}}}}\n" for k, v in
                   (("sec:one", "1"), ("eq:x", "1"), ("sec:sub", "1.1"), ("tab:t", "1"), ("app:a", "A")))
     aux += "\\bibcite{k}{{7}{2020}{{K}}{{}}}\n"
+    refs = '[{"id": "k", "note": "Seen at https://e.org/x"}, {"id": "u", "note": "n"}]'
     with tempfile.TemporaryDirectory() as tmp:
-        def run(aux_text):
-            for name, text in (("p.html", page), ("m.tex", tex), ("m.aux", aux_text), ("f.tsv", ""), ("log", log),
-                               ("r.json", '[{"id": "k", "note": "Seen at https://e.org/x"}, {"id": "u", "note": "n"}]')):
+        def run(page=page, tex=tex, aux=aux, tsv="", log="", refs=refs):
+            for name, text in (("p.html", page), ("m.tex", tex), ("m.aux", aux), ("f.tsv", tsv), ("log", log),
+                               ("r.json", refs)):
                 with open(f"{tmp}/{name}", "w", encoding="utf-8") as f:
                     f.write(text)
             sys.argv[1:] = [f"{tmp}/p.html", f"{tmp}/m.tex", f"{tmp}/m.aux", "", f"{tmp}/f.tsv", tmp, f"{tmp}/log",
                             f"{tmp}/r.json"]
             main()
             return open(f"{tmp}/p.html", encoding="utf-8").read()
-        out = run(aux)
+        out = run()
         assert '<a href="#app:a">A</a><a href="#eq:x">(1)</a><a href="#tab:t">1</a>' in out, out
-        assert '<span class="secno">附錄 A</span> App' in out and '<span class="secno">1.1</span> Sub' in out
+        assert '<span class="secno">A</span> App' in out and '<span class="secno">1.1</span> Sub' in out, out
+        assert 'id="toc-app:a"><span class="secno">附錄 A</span>' in out, out
         assert out.count('<span class="citation">[<a href="#ref-k">7</a>]</span>') == 2 and "2020" not in out, out
-        assert '<span class="citation">[<a href="#ref-k">7</a>]</span>' in out and '<span class="csl-num">[7]</span> K' in out, out
-        assert "<thead>\n<tr>\n<th>H</th>\n</tr>\n<tr>\n<th>I</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>x</td>" in out, out
+        assert '<span class="citation"><em>K</em> (ROC) [<a href="#ref-k">7</a>]</span>' in out, out
+        assert '<span class="csl-num">[7]</span> K' in out, out
+        assert ('<thead>\n<tr>\n<th>H</th>\n</tr>\n<tr class="even"><th>I</th></tr>\n</thead>\n<tbody>\n'
+                '<tr class="odd"><td>x</td></tr>\n</tbody>') in out, out
         nums = {"a": 3, "b": 4, "c": 5, "d": 9, "e": 10}
         assert re.sub(r"<[^>]+>", "", cite_numbers(["d", "b", "a", "c", "e"], nums)) == "[3–5, 9, 10]"
         assert 'K <span class="csl-note">Seen at <a href="https://e.org/x">https://e.org/x</a>.</span>' in out, out
         assert out.index('id="references"') < out.index('<section id="app:a"') and '表 1：' in out
-        good = page
-        one = "<h2>One</h2>"
-        for expect, bad_aux, bad_page, bad_log in (
-                ("labels whose visible number differs", aux.replace("{A}", "{B}"), good, ""),
-                ("load something from another site", aux, good.replace(one, one + '<script src="//h/x.js"></script>'), ""),
-                ("not an equation environment", aux, good.replace(one, one + '<math display="block">y</math>'), ""),
-                ("neither \\ref nor \\eqref", aux, good.replace(
-                    one, one + '<a href="#sec:one" data-reference-type="ref+label" data-reference="sec:one">1</a>'), ""),
-                ("links to an id that is not on the page", aux, good.replace(one, one + '<a href="#nope">x</a>'), ""),
-                ("table rows without any text", aux, good.replace("</table>", "<tr><td></td></tr></table>"), ""),
-                ("tables (numbered", aux, good.replace(one, one + "<table><tr><td>x</td></tr></table>"), ""),
-                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\pageref{sec:one}' at m.tex line 2\n"),
-                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\begin{tabular}' at m.tex line 2\n"),
-                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\centering64' at m.tex line 2\n"),
-                ("commands pandoc skipped", aux, good, "[INFO] Skipped '\\quad{text}' at m.tex line 2\n"),
-                ("reference notes", aux, good.replace('class="csl-entry"', 'class="csl-entry x"'), ""),
-                ("no number for", aux.replace("bibcite{k}", "bibcite{z}"), good, ""),
-                ("rewritten to numbers", aux, good.replace('class="citation"', 'class="cit"'), ""),
-                ("not rewritten whole", aux, good.replace('role="doc-biblioref">K 2020</a>',
-                                                          'role="doc-biblioref"><span\nclass="x">k</span> 2020</a>'), "")):
-            page, log = bad_page, bad_log
+        one, app, ref_k = "<h2>One</h2>", "<h2>App</h2>", '<div id="ref-k"'
+        tab = r"\begin{tabular}{l}\toprule H \\ I \\ \midrule x \\ \end{tabular}"
+        for expect, broken in (
+                ("commands pandoc skipped", dict(log="[INFO] Skipped '\\pageref{sec:one}' at m.tex line 2\n")),
+                ("commands pandoc skipped", dict(log="[INFO] Skipped '\\begin{tabular}' at m.tex line 2\n")),
+                ("commands pandoc skipped", dict(log="[INFO] Skipped '\\centering64' at m.tex line 2\n")),
+                ("commands pandoc skipped", dict(log="[INFO] Skipped '\\quad{text}' at m.tex line 2\n")),
+                ("table rows without any text", dict(page=page.replace("</table>", "<tr><td></td></tr></table>"))),
+                ("sections (", dict(tex=tex + "\n" + r"\section{Z}")),
+                ("math (", dict(page=page.replace(one, one + '<math display="inline">z</math>'))),
+                ("references (.csl-entry", dict(tex=tex.replace(r"\citet{k}", r"\citet{k} \cite{q}"))),
+                ("contents entries", dict(page=page.replace('<li><a href="#sec:one" id="toc-sec:one">One</a></li>\n', ""))),
+                ("display equations (numbered", dict(tex=tex + "\n" + r"\begin{equation}y\end{equation}")),
+                ("not an equation environment", dict(page=page.replace(one, one + '<math display="block">y</math>'))),
+                ("tables (numbered", dict(page=page.replace(one, one + "<table><tr><td>x</td></tr></table>"))),
+                ("tables (on the page", dict(tex=tex + "\n" + tab)),
+                ("not between \\toprule and \\midrule", dict(tex=tex.replace(r"\midrule ", ""))),
+                ("not between \\toprule and \\midrule", dict(tex=tex.replace(r"\toprule H \\ I \\ \midrule", r"\toprule \midrule H \\ I \\"))),
+                ("tables without a head", dict(page=page.replace("<tbody>", "").replace("</tbody>", ""))),
+                ("head rows differ", dict(page=page.replace("<tbody>\n<tr>\n<td>H</td>\n</tr>",
+                                                            "<thead>\n<tr>\n<th>H</th>\n</tr>\n</thead>\n<tbody>\n"))),
+                ("no body row", dict(tex=tex.replace(r"\midrule x \\", r"x \\ \midrule"))),
+                ("figures (", dict(tex=tex + "\n" + r"\begin{figure}\end{figure}")),
+                ("figures in the list", dict(tsv="fig:x\tx.svg\t1\t0\t0\t1\t1\talt\n")),
+                ("has no \\newlabel", dict(page=page.replace(
+                    one, one + '<a href="#sec:zz" data-reference-type="ref" data-reference="sec:zz">9</a>'))),
+                ("neither \\ref nor \\eqref", dict(page=page.replace(
+                    one, one + '<a href="#sec:one" data-reference-type="ref+label" data-reference="sec:one">1</a>'))),
+                ("links whose text differs", dict(aux=aux.replace("{A}", "{B}"))),
+                ("labels whose visible number differs", dict(aux=aux.replace("{A}", "{B}"))),
+                ("labels in the aux file without an element", dict(aux=aux + "\\newlabel{sec:ghost}{{9}{1}}\n")),
+                ("no number for", dict(aux=aux.replace("bibcite{k}", "bibcite{z}"))),
+                ("\\citet of several keys", dict(page=page.replace(
+                    'data-cites="k"><em>K</em> (ROC) (<a href="#ref-k" role="doc-biblioref">2020</a>)',
+                    'data-cites="k q">A and B (<a href="#ref-k" role="doc-biblioref">2020</a>; '
+                    '<a href="#ref-q" role="doc-biblioref">C 2021</a>)'))),
+                ("page or prefix argument", dict(tex=tex.replace(r"\citet{k}", r"\cite[p.~3]{k}"))),
+                ("not rewritten whole", dict(page=page.replace('role="doc-biblioref">K 2020</a>',
+                                                              'role="doc-biblioref"><span\nclass="x">k</span> 2020</a>'))),
+                ("author-year citation text left", dict(page=page.replace(one, one + '<a role="doc-biblioref">x</a>'))),
+                ("rewritten to numbers", dict(page=page.replace('class="citation"', 'class="cit"'))),
+                ("reference notes", dict(page=page.replace('class="csl-entry"', 'class="csl-entry x"'))),
+                ("reference entries without a number", dict(page=page.replace(
+                    ref_k, '<div id="ref-q" class="csl-entry" role="listitem">\nQ\n</div>\n' + ref_k))),
+                ("links to an id that is not on the page", dict(page=page.replace(one, one + '<a href="#nope">x</a>'))),
+                ("unresolved \\ref", dict(page=page.replace(app, app + "[sec:zz]"))),
+                ("load something from another site", dict(page=page.replace(one, one + '<script src="//h/x.js"></script>'))),
+                ("odd number of $", dict(tex=tex + " $"))):
             try:
-                run(bad_aux)
+                run(**broken)
             except SystemExit as e:
                 assert expect in str(e), (expect, str(e))
             else:
@@ -229,7 +269,8 @@ def main():
     page, tex, aux, pdf, tsv, figdir, log, refs_json = sys.argv[1:]
     s = open(page, encoding="utf-8").read()
     labels = aux_labels(aux)
-    n_sections, n_main, n_figures, cited, n_math, n_numbered, n_cite_commands, heads = tex_counts(tex_body(tex))
+    (n_sections, n_main, n_figures, cited, n_math, n_numbered, n_cite_commands, heads,
+     n_cite_arguments) = tex_counts(tex_body(tex))
     figs = {}
     for line in open(tsv, encoding="utf-8"):
         if line.strip() and not line.startswith("#"):
@@ -264,7 +305,7 @@ def main():
             state["sub"] = 0
             k = state["sec"]
             state["cur"] = str(k) if k <= n_main else LETTERS[k - n_main - 1]
-            label = state["cur"] if k <= n_main else f"附錄 {state['cur']}"
+            label = state["cur"]             # the PDF prints the appendix letter alone ("A"), as the contents do not
         elif level == 3:
             state["sub"] += 1
             state["cur"] = f"{state['cur'].split('.')[0]}.{state['sub']}"
@@ -318,20 +359,28 @@ def main():
     check("tables (numbered / <table)", count["tab"], s.count("<table"))
     check("tables (on the page / tabular and longtable environments)", count["tab"], len(heads))
 
+    # A head of no rows (\toprule right before \midrule) is refused too: the move below would take a data row.
+    check("tables whose head is not between \\toprule and \\midrule", sum(1 for h in heads if not h), 0)
+
     # A head of two rows comes out of pandoc as body rows: they are moved into <thead> as <th>.
     it = iter(heads)
 
     def head(m):
-        rows = next(it, 1)
-        if "<thead>" in m.group(0) or "<tbody>\n" not in m.group(0):
-            return m.group(0)
-        parts = re.split(r"(?<=</tr>)\n", m.group(0).split("<tbody>\n", 1)[1])
-        top = "\n".join(parts[:rows]).replace("<td", "<th").replace("</td>", "</th>")
-        return m.group(0).split("<tbody>\n", 1)[0] + "<thead>\n" + top + "\n</thead>\n<tbody>\n" + "\n".join(parts[rows:])
+        t, rows = m.group(0), next(it, None) or 1
+        if "<thead>" in t or "<tbody>" not in t:
+            return t
+        before, body = t.split("<tbody>", 1)
+        body, after = body.split("</tbody>", 1)
+        trs = re.findall(r"<tr\b.*?</tr>", body, flags=re.S)
+        top = "\n".join(trs[:rows]).replace("<td", "<th").replace("</td>", "</th>")
+        return f"{before}<thead>\n{top}\n</thead>\n<tbody>\n" + "\n".join(trs[rows:]) + f"\n</tbody>{after}"
 
     if len(heads) == count["tab"]:
         s = re.sub(r"<table.*?</table>", head, s, flags=re.S)
     check("tables without a head", s.count("<table") - s.count("<thead>"), 0)
+    on_page = [len(re.findall(r"<tr\b", t)) for t in re.findall(r"<thead>.*?</thead>", s, flags=re.S)]
+    check("tables whose head rows differ from the source", sum(1 for a, b in zip(on_page, heads) if b and a != b), 0)
+    check("tables with no body row", len(re.findall(r"<tbody>\s*</tbody>", s)), 0)
     s = s.replace("</table>", "</table>\n</div>")
 
     def figure(m):
@@ -382,22 +431,33 @@ def main():
     numbers = aux_bibcite(aux)
     unknown = set()
     truncated = []
+    several = []
 
     def citation(m):
         keys = m.group(1).split()
         if not m.group(2).rstrip().endswith(")") or "<span" in m.group(2):
             truncated.append(keys)                     # the match stopped at an inner </span>: text would be left over
             return m.group(0)
+        # the authors end at the parenthesis that holds the links, not at one inside a name ("Taiwan (ROC) Ministry")
+        authors = re.match(r"\s*(.*?)\s*\((?=\s*<a\b)", m.group(2), flags=re.S)
+        if not authors:
+            truncated.append(keys)
+            return m.group(0)
+        authors = authors.group(1)
+        if authors and len(keys) > 1:
+            several.append(keys)                       # natbib: "A and B [3], C [4]"; pandoc gives one author group
+            return m.group(0)
         unknown.update(k for k in keys if k not in numbers)
         if unknown:
             return m.group(0)
-        authors = re.match(r"\s*([^(<]*?)\s*\(", m.group(2)).group(1)
         return f'<span class="citation">{authors + " " if authors else ""}{cite_numbers(keys, numbers)}</span>'
 
     # pandoc may break a tag across lines (`<span\nclass="nocase">`): unwrapped first, so that citation spans do not nest
     s = re.sub(r'<span\s+class="nocase">(.*?)</span>', r"\1", s, flags=re.S)
     s, n_cites = re.subn(r'<span\s+class="citation"\s+data-cites="([^"]*)">(.*?)</span>', citation, s, flags=re.S)
     check("citations of a key the aux file has no number for", len(unknown), 0)
+    check("\\citet of several keys (not supported)", len(several), 0)
+    check("\\cite with a page or prefix argument (not supported)", n_cite_arguments, 0)
     check("citations not rewritten whole (an inner span ended the match)", len(truncated), 0)
     check("author-year citation text left on the page", len(re.findall(r'doc-biblioref|</a>\)</span>', s)), 0)
     check("citations (rewritten to numbers / \\cite commands in the source)", n_cites, n_cite_commands)
