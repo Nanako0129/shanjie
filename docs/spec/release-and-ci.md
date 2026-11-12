@@ -20,7 +20,7 @@
 - checkout 用 `fetch-depth: 0` 加 `filter: blob:none`：要完整歷史，不要檔案內容。
 - `scripts/ci-changes.sh` 的規則：
   - 只有下列路徑時 `run=false`：`docs/*`（含 `docs/spec/*`）、`site/*`（含 `site/data/*`）、`scripts/deploy-site.sh`、`*.md`、`eval/bench/results/*`、`eval/bench/kpi/*`。這些沒有任何建置或測試會讀（`eval/bench/results/` 只有 `tools/bench.py` 讀、`eval/bench/kpi/` 只有 `tools/kpi.py` 讀，CI 不跑它們；`site/data/*` 只有網站頁讀）。
-  - `LICENSES/*` 一律 `run=true`：它會被打包進 App（`scripts/build-app.sh`）。
+  - `LICENSES/*` 一律 `run=true`：它會被打包進 App（`scripts/build-app.sh`）與 Windows 安裝程式（`scripts/windows/build-msi.ps1`）。
   - 其他路徑一律 `run=true`。
   - 沒有輸入（空的或讀不到的 diff）時 `run=true`：不讓壞掉的 diff 略過測試。
 - 兩種情況直接 `run=true`：比較基準是全零（新分支），或基準 commit 不在歷史裡（force push）。
@@ -43,6 +43,7 @@
 | `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 20 分 |
 | `windows` | windows-2025 | 見 §3.3；`needs: changes`，和其他 job 同時開跑 | 45 分 |
 | `windows-cap` | windows-2025 | `core/tests/engine_cap.rs`（release），與 `windows` 並行（§3.3） | 30 分 |
+| `windows-msi` | windows-2025 | 正式版身分的測試；建 Windows 安裝程式（MSI）三份並核對；見 §3.7；`needs: changes`，略過條件與 `core` 相同，與 `windows` 並行 | 45 分 |
 | `rowstats` | ubuntu-24.04 | Linux 與 Windows 的六份 rowstats 逐位元組比對（§3.3）；`needs: [changes, debug, windows]` | 5 分 |
 | `python` | ubuntu-24.04 | 下載並核對模型；Python 工具與資料建置腳本的測試 | 20 分 |
 | `swift` | xcode-27 | 下載並核對模型；核心靜態庫；C 標頭冒煙測試；Swift 測試 | 30 分 |
@@ -54,7 +55,7 @@
 
 ### 2.1 工具鏈
 
-- 每個跑 cargo 的 job（`core`、`debug`、`windows`、`windows-cap`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。
+- 每個跑 cargo 的 job（`core`、`debug`、`windows`、`windows-cap`、`windows-msi`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。
 - repo 沒有 `rust-toolchain` 檔，工具鏈只靠這一步固定。理由：評測分數要與 Python 參考實作的 golden 逐位元組相同，編譯器的程式碼生成變動曾讓一個分數差 1 ulp（`powf` 被降成 `exp10`）。
 - `release.yml` 的 `build` 用同一個版本與同一個 action；改版本要兩個檔一起改。
 - 工作區的 debug 測試用 `[profile.test] opt-level = 1`（`Cargo.toml`），保留 debug assertions 與整數溢位檢查；完全不最佳化時，逐鍵的預測掃描讓 dev302 重播超過 20 分鐘的 job 上限。
@@ -138,6 +139,22 @@
 10. entitlements 與 Sparkle 的十種變造（`scripts/test-sandbox-mutations.sh`，只檢查變造後的副本，不啟動）。
 11. 安裝程式的檢查（`make installer`、`scripts/check-installer.sh`，只檢查不啟動）。
 12. Homebrew cask：`scripts/test-render-cask.sh`，再把 `scripts/render-cask.sh` 產生的 cask 放進 `Casks/` 目錄跑 `brew style`（brew 只在 `Casks/` 目錄下套 cask 規則）。
+
+### 3.7 `windows-msi`
+
+- `needs: changes`，被略過的條件與 `core` 相同；所有步驟用 pwsh（第一個下載模型的步驟用 bash）；`timeout-minutes: 45`；跑 cargo 之前和其他 job 一樣先裝 §2.1 規定的 Rust。
+- 內容：
+  1. 下載並核對模型（§2.2）；
+  2. 以 `--features release-ids` 跑 `shanjie-win-proto`、`shanjie-host`、`shanjie-tip` 的測試，再跑 `shanjie-installer-ca` 的測試（和 A 的建置同一個 `--target-dir`，核心只編一次）；
+  3. 建 A 與 C 的 DLL 與 exe（`scripts/windows/build-msi.ps1 binaries`；C 用另一個 `--target-dir` 與另一個 `SHANJIE_BUILD_ID`）；
+  4. 「簽章」步驟（空的、有名字，只印一行；憑證之後只放發版 workflow 的受保護環境，不進 `pull_request` 的 CI）；
+  5. 建三份 MSI（`build-msi.ps1 msi`）：A（出貨的一份，版號 `0.0.<run_number>`）、T（只給 VM 驗收用，A 加一個會失敗的自訂動作）、C（只給 VM 驗收用，版號 `0.0.<run_number + 1>`），並斷言 A、C 的 DLL 與 exe 位元組不同；
+  6. 第二個「簽章」步驟（簽 MSI，同樣是空的）；
+  7. `scripts/windows/check-msi.ps1` 核對 A；
+  8. 同一個 job 裡對五份改壞的 A 與 T 各跑一次核對，每一份都要失敗、失敗訊息要點到改壞的那一處（這一步在核對 A 失敗時也跑）；
+  9. 帶 `timing` 的建置，確認 DLL 與 exe 有 `SjMarkTiming` 標記（所以 A 裡沒有它才有意義）；
+  10. 印出 A 的 SHA-256 並寫成檔；上傳 artifact `windows-msi`（三份 MSI 與 A 的 SHA-256，保留 7 天；T、C 的檔名帶 `test`）。
+- 核對的內容、MSI 的規格與每個步驟的理由見 `docs/spec/windows-tip.md` §6.9。MSI 不放上 GitHub Release；發佈不在 `ci.yml`。
 
 ## 4. 取捨與已知限制
 
