@@ -58,9 +58,13 @@ fn oov_words(name: &str) -> Vec<String> {
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
 /// `--dump` and `--dump-words` (`dump` is true for either) are refused there; `--rowstats` holds numbers only and is allowed.
-fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
+fn check_lm_opts(set: Option<&str>, dump: bool, picks: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
         return Err("--dump and --dump-words are not allowed with --set holdout".into());
+    }
+    // `--picks` writes each row's chosen sentence, row content like the dumps: refused with the holdout too, before any file is read.
+    if set == Some("holdout") && picks {
+        return Err("--picks is not allowed with --set holdout".into());
     }
     // (--tinylm-scores with the holdout is refused in run_lm: its per-candidate record is what alpha and tau are tuned on.)
     if packs == 0 && packs_dir {
@@ -166,7 +170,7 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
 /// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/spec/decoder.md §7; empty when none, always present).
 /// With a fuzzy-sound bit (`--fuzzy`, docs/spec/decoder.md §6.5) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
 /// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
-/// `col` (`--colloquial-core`, only a row where the colloquial term ran: chat, the paired core and an `ll`) is the last key, one entry per pool candidate. See run_lm.
+/// `col` (`--colloquial-core`, only a row where the colloquial term ran: chat, the paired core or `--tinylm-paired`, and an `ll`) is the last key, one entry per pool candidate. See run_lm.
 /// `extra` (`--tinylm-scores-topk`) continues the `ll` list past the 8 the rerank scored: one entry per further candidate, `null` for a
 /// candidate the small model could not score (longer than its context); it is empty without the option, so the line is then unchanged.
 #[allow(clippy::too_many_arguments)]
@@ -225,6 +229,8 @@ struct RowOut {
     scores: String,
     dump: String,
     words: String,
+    /// `--picks`: `row\trank\tsentence` of the row (`row\t-\t` when it has no candidate).
+    picks: String,
 }
 
 /// LM mode (docs/spec/evaluation.md §1.4): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
@@ -243,11 +249,14 @@ struct RowOut {
 /// `--colloquial-core FILE.sjlm` (docs/spec/semantic-rerank.md §4.6): loads the colloquial table like the engine's
 /// `load_colloquial` (word sets of k from `data/lexicon` and the `--packs` rows) and decides per run, by the engine's conditions (chat
 /// profile, any rerank level (each with its own alpha, tau and delta: docs/spec/semantic-rerank.md §4.4), a `--tinylm` whose SHA-256 is the one
-/// the term was measured with), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
+/// the term was measured with, or any `--tinylm` with `--tinylm-paired`), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
 /// and the `--rerank-level`) or the plain `rerank`. It refuses no setting, so
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
 /// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
-/// On a row where the term is in effect (chat, paired `.sjtl`, an `ll`), `--tinylm-scores` ends with `"col": [...]`, the colloquial score of each
+/// `--tinylm-paired` (needs `--tinylm` and `--colloquial-core`) takes the loaded model as the paired one, so the term acts on it as it ships; the tag gains
+/// `+pair:<sha8 of the .sjtl>` after the colloquial one. `--picks FILE`: per row `row\trank\tsentence`, the sentence the row is scored on and its n-best
+/// index (the `--tinylm-scores` `c`; `row\t-\t` for a `--fuzzy` row with no candidate), in row order whatever `--threads`; refused with the holdout.
+/// On a row where the term is in effect (chat, paired `.sjtl` or `--tinylm-paired`, an `ll`), `--tinylm-scores` ends with `"col": [...]`, the colloquial score of each
 /// candidate in the line's order (`null` if not finite, then `c` is the plain pick), so the fused pick can be recomputed offline
 /// (`colloquial::fused_pick` with `colloquial::cell(level)`; tools/lib/fusegrid.py `fuse_pick`). Other lines (formal, no `--colloquial-core`) are unchanged.
 ///
@@ -295,6 +304,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
+    // `--tinylm-paired`: the loaded small model counts as the colloquial term's paired model (the SHA-256 condition of
+    // `colloquial::applies` is taken as met; chat and a loaded table still required). Evaluation only; the engine is unchanged.
+    let mut tinylm_paired = false;
+    // `--picks FILE`: per row `row\trank\tsentence`, the sentence the row is scored on (rank = its n-best index, `--tinylm-scores` `c`).
+    let mut picks = None::<String>;
     let mut first_unigram = false;
     let mut no_unseen_start = false;
     // docs/spec/decoder.md §6.1: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
@@ -352,6 +366,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
+            "--tinylm-paired" => tinylm_paired = true,
+            "--picks" => picks = Some(val()?),
             "--colloquial-first-unigram" => first_unigram = true,
             "--colloquial-no-unseen-start-unigram" => no_unseen_start = true,
             "--fuzzy-delta-sound" => {
@@ -365,7 +381,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
+    check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), picks.is_some(), packs, packs_dir.is_some())?;
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
     }
@@ -402,6 +418,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if no_unseen_start && colloquial_core.is_none() {
         return Err("--colloquial-no-unseen-start-unigram needs --colloquial-core".into());
+    }
+    // Without a small model or a table the override would silently do nothing.
+    if tinylm_paired && (tinylm.is_none() || colloquial_core.is_none()) {
+        return Err("--tinylm-paired needs --tinylm and --colloquial-core".into());
     }
     // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
     let xo = match &extra_overlay {
@@ -442,8 +462,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
         None => None,
     };
-    // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test.
-    let colloq_on = colloq.as_ref().filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m)));
+    // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test. `--tinylm-paired`
+    // takes its model condition (the paired SHA-256) as met and keeps the profile one, so the term acts on the given model as it ships.
+    let colloq_on = colloq
+        .as_ref()
+        .filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m) || (tinylm_paired && prof == Profile::Chat)));
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
@@ -522,11 +545,16 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create forms rowstats ({:?})", e.kind()))?),
         None => None,
     };
+    // Opened before decoding, like the dump.
+    let mut picks = match picks {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create picks ({:?})", e.kind()))?)),
+        None => None,
+    };
     let mut scores = match tinylm_scores {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
         None => None,
     };
-    let (want_scores, want_dump, want_words) = (scores.is_some(), dump.is_some(), dump_words.is_some());
+    let (want_scores, want_dump, want_words, want_picks) = (scores.is_some(), dump.is_some(), dump_words.is_some(), picks.is_some());
     // `--threads N`: the rows are decoded in blocks of BLOCK contiguous rows; no more workers than blocks.
     const BLOCK: usize = 32;
     let (nrows, nblocks) = (rows.len(), rows.len().div_ceil(BLOCK));
@@ -546,6 +574,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 if want_words {
                     let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
                     writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
+                }
+                if want_picks {
+                    writeln!(out.picks, "{}\t-\t", i + 1).unwrap();
                 }
                 return Ok(out);
             }
@@ -651,6 +682,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.iter().map(|w| w.0).collect::<Vec<_>>().join(" ")).unwrap();
             }
         }
+        if want_picks {
+            writeln!(out.picks, "{}\t{chosen}\t{}", i + 1, surf[chosen]).unwrap();
+        }
         out.first = surf.swap_remove(chosen);
         Ok(out)
     };
@@ -669,6 +703,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
         if let Some(d) = dump.as_mut() {
             d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
+        }
+        if let Some(d) = picks.as_mut() {
+            d.write_all(out.picks.as_bytes()).map_err(|_| "cannot write picks".to_string())?;
         }
         if let Some(d) = dump_words.as_mut() {
             d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
@@ -773,6 +810,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if let Some(mut d) = dump_words {
         d.flush().map_err(|_| "cannot write word dump".to_string())?;
     }
+    if let Some(mut d) = picks {
+        d.flush().map_err(|_| "cannot write picks".to_string())?;
+    }
     if let Some(mut f) = rowstats {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
@@ -788,7 +828,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" })), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())
 }
 
@@ -853,7 +893,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(None, false, packs, packs_dir.is_some())?;
+    check_lm_opts(None, false, false, packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let profile = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
@@ -1085,11 +1125,13 @@ mod tests {
     #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {
         // --rowstats is not an argument: it is allowed everywhere, holdout included.
-        assert!(check_lm_opts(Some("holdout"), false, 0, false).is_ok());
-        assert!(check_lm_opts(Some("holdout"), true, 0, false).is_err());
-        assert!(check_lm_opts(None, true, 0, false).is_ok());
-        assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
-        assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
+        assert!(check_lm_opts(Some("holdout"), false, false, 0, false).is_ok());
+        assert!(check_lm_opts(Some("holdout"), true, false, 0, false).is_err());
+        assert!(check_lm_opts(Some("holdout"), false, true, 0, false).is_err(), "--picks with the holdout");
+        assert!(check_lm_opts(None, false, true, 0, false).is_ok());
+        assert!(check_lm_opts(None, true, false, 0, false).is_ok());
+        assert!(check_lm_opts(None, false, false, 0, true).is_err(), "--packs-dir without --packs");
+        assert!(check_lm_opts(None, false, false, PACK_ACG, true).is_ok());
     }
 
     /// `--packs` takes acg, quotes, it, meme, beauty and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.
