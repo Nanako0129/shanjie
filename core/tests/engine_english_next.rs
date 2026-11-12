@@ -379,15 +379,18 @@ fn the_english_left_text_never_reaches_the_learning_file() {
     assert!(!with.to_ascii_lowercase().contains("joe"));
 }
 
-/// docs/spec/english-mixed.md §8: a left text ending in Han ("……好") decodes, shows, predicts and learns byte for byte as its Han tail alone ("好"):
-/// a re-pick in the candidate window, then Enter, with learning on.
+/// docs/spec/english-mixed.md §8: a left text ending in Han ("……好") learns byte for byte as its Han tail alone ("好"): the learning keys and the learning
+/// file see only the tail. With the context recurrence term off (docs/spec/decoder.md, the context recurrence section) it also decodes, shows and predicts
+/// byte for byte as the tail; with it on the decode may differ (the term reads the longer text's Han pairs), so that half is asserted with the term off.
+/// A re-pick in the candidate window, then Enter, with learning on.
 #[test]
 #[cfg(unix)] // learning_open fails on Windows for now (docs/spec/windows-tip.md §2.5)
 fn a_long_left_text_decodes_and_learns_as_its_han_tail() {
-    let session = |left: &str, tag: &str| {
-        let dir = std::env::temp_dir().join(format!("shanjie-english-next-tail-{}-{tag}", std::process::id()));
+    let session = |left: &str, tag: &str, recur: bool| {
+        let dir = std::env::temp_dir().join(format!("shanjie-english-next-tail-{}-{tag}-{recur}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut e = make(true, false);
+        e.set_recur(recur);
         e.set_today(Some(20_000));
         e.set_learning(true);
         e.learning_open(&dir).unwrap();
@@ -402,9 +405,16 @@ fn a_long_left_text_decodes_and_learns_as_its_han_tail() {
         std::fs::remove_dir_all(&dir).unwrap();
         (all, records, file)
     };
-    let (a, b) = (session("……好", "long"), session("好", "short"));
-    assert!(!a.1.is_empty(), "the re-pick was learned");
-    assert!(a == b);
-    let (c, d) = (session("我說 Joe 覺得這樣很好", "long2"), session("很好", "short2"));
-    assert!(c == d);
+    for recur in [false, true] {
+        let (a, b) = (session("……好", "long", recur), session("好", "short", recur));
+        assert!(!a.1.is_empty(), "the re-pick was learned");
+        let (c, d) = (session("我說 Joe 覺得這樣很好", "long2", recur), session("很好", "short2", recur));
+        // The learning keys and the learning file: always the tail's.
+        assert!(a.1 == b.1 && a.2 == b.2, "recur {recur}");
+        assert!(c.1 == d.1 && c.2 == d.2, "recur {recur}");
+        if !recur {
+            // Everything shown, too.
+            assert!(a == b && c == d);
+        }
+    }
 }

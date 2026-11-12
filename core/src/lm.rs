@@ -1268,31 +1268,26 @@ pub fn decode_segment_learned<'a>(
     decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None)
 }
 
-/// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/contracts/context-recurrence.md §1:
-/// longctx-1 and the chat sets were measured with 64).
+/// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/spec/decoder.md, the context
+/// recurrence section: the long-context set and the chat sets were measured with 64).
 pub const RECUR_CHARS: usize = 64;
-/// The weight (log10, the n-gram score's scale) of one recurring adjacent pair on a path. longctx-1's two halves chose 2 and 3 and the
-/// typo reports are 0/0 at 2 (docs/contracts/context-recurrence.md §1).
+/// The weight (log10, the n-gram score's scale) of one recurring adjacent pair on a path. The long-context set's two halves chose 2 and 3, and the
+/// typo reports are 0/0 at 2 (docs/spec/decoder.md, the context recurrence section).
 pub const RECUR_BETA: f64 = 2.0;
 
 /// The adjacent character pairs of the left context's last `RECUR_CHARS` characters (both characters Han). Private fields, no `Debug`/`Display`, no read
-/// access: only its size is observable.
+/// access: only its size is observable. `Default` is the empty set.
+#[derive(Default)]
 pub struct RecurGrams {
     pairs: HashSet<(char, char)>,
 }
 
 impl RecurGrams {
-    fn build(text: &str, keep: impl Fn(char, char) -> bool) -> RecurGrams {
-        let cs: Vec<char> = text.chars().rev().take(RECUR_CHARS).collect::<Vec<_>>().into_iter().rev().collect();
-        RecurGrams { pairs: cs.windows(2).filter(|w| keep(w[0], w[1])).map(|w| (w[0], w[1])).collect() }
-    }
-    /// The pairs of `text`'s last `RECUR_CHARS` characters of which both characters are Han.
+    /// The pairs of `text`'s last `RECUR_CHARS` characters of which both characters are Han (`learn::is_han`, the test `context_key` uses).
     pub fn from_text(text: &str) -> RecurGrams {
-        Self::build(text, |a, b| crate::learn::is_han(a) && crate::learn::is_han(b))
-    }
-    /// TEMPORARY, evaluation only: every adjacent pair, Han or not, to measure that the Han filter changes nothing. To be removed.
-    pub fn from_text_unfiltered(text: &str) -> RecurGrams {
-        Self::build(text, |_, _| true)
+        let cs: Vec<char> = text.chars().rev().take(RECUR_CHARS).collect::<Vec<_>>().into_iter().rev().collect();
+        let han = crate::learn::is_han;
+        RecurGrams { pairs: cs.windows(2).filter(|w| han(w[0]) && han(w[1])).map(|w| (w[0], w[1])).collect() }
     }
     pub fn len(&self) -> usize {
         self.pairs.len()
@@ -1494,7 +1489,7 @@ pub fn decode_segment_fuzzy<'a>(
                 let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
                 for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
                     let (wid, pb0) = (lex.model_id(lm, word), pow10(lp0));
-                    // Context recurrence (docs/contracts/context-recurrence.md §2.2): the pairs inside the word, once per word.
+                    // Context recurrence (docs/spec/decoder.md, the context recurrence section): the pairs inside the word, once per word.
                     let (in_word, first) = recur.map_or((0, None), |r| (r.hits(word), word.chars().next()));
                     // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
                     // `Engine::total_score` and the rerank job see the score the decoder used.
@@ -1851,7 +1846,6 @@ mod tests {
         assert_eq!(n("甲乙"), 1);
         // ASCII, digits, punctuation and an emoji break the pairs; a 4-byte Han character (U+20000) is one character.
         assert_eq!(n("甲a乙丙1丁，戊😀己\u{20000}庚"), 3, "乙丙, 己𠀀 and 𠀀庚");
-        assert_eq!(RecurGrams::from_text_unfiltered("甲a乙").len(), 2);
         // Only the last 64 characters are read: 64 distinct Han characters give at most 63 pairs, a first one outside them is not a pair.
         let han: String = (0..70).map(|i| char::from_u32(0x4E00 + i).unwrap()).collect();
         assert_eq!(n(&han), 63);
@@ -1877,6 +1871,12 @@ mod tests {
         let (a, b) = (RecurGrams::from_text("乙丁"), RecurGrams::from_text("甲丙"));
         assert_eq!(text(&decode(&within, &["ㄧ", "ㄨ"], Some(&a)))[0], "乙丁");
         assert_eq!(text(&decode(&within, &["ㄧ", "ㄨ"], Some(&b)))[0], "甲丙");
+        // A pair counts at every position it stands: 乙丁乙丁 gains two RECUR_BETA (丁乙 is not in the set).
+        let twice = decode(within, &["ㄧ", "ㄨ", "ㄧ", "ㄨ"], Some(&a));
+        let plain = decode(within, &["ㄧ", "ㄨ", "ㄧ", "ㄨ"], None);
+        assert_eq!(twice[0].1, "乙丁乙丁");
+        let gain = twice[0].0 - plain.iter().find(|x| x.1 == "乙丁乙丁").unwrap().0;
+        assert!((gain - 2.0 * RECUR_BETA).abs() < 1e-9, "two positions, two RECUR_BETA: {gain}");
         // Across a boundary only: one-syllable words, the pair (乙, 丙) joins two words.
         let across = "ㄧ 甲 -1.0\nㄧ 乙 -1.0\nㄨ 丙 -1.0\nㄨ 丁 -1.0\n";
         let g = RecurGrams::from_text("乙丙");

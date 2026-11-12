@@ -6,7 +6,7 @@ use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, eng
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
-use crate::lm::{decode_segment_fuzzy, history, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, Scored, Sinit, SinitLayer};
+use crate::lm::{decode_segment_fuzzy, history, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, RecurGrams, Scored, Sinit, SinitLayer};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
@@ -774,6 +774,17 @@ pub struct Engine {
     /// `left_full` holds the last L characters of a longer text (it was cut), so a word starting at its first character may be half
     /// of one.
     left_cut: bool,
+    /// The context recurrence set (docs/spec/decoder.md, the context recurrence section): the Han pairs of the last `lm::RECUR_CHARS` characters of the
+    /// text `set_left_context` was given, rebuilt (not added to) by every call. This engine's own, passed to the decoder as an argument: never in a
+    /// structure engines share (`Lm`, the lexicons), never in a `RerankJob`, never returned over the C ABI, written, logged or sent anywhere. Cleared with
+    /// `left` (`clear_left`).
+    recur: RecurGrams,
+    /// Whether the decoder gets `recur` (default on, the App's behavior). Off only from `set_recur`, an evaluation switch for
+    /// `shanjie-replay --no-recur`; not in shanjie.h.
+    recur_on: bool,
+    /// `set_left_context` ran since the last `key()`: the key that comes next may start a composition with that text. Taken by every `key()`;
+    /// a key on an empty composition without it clears the left text first (`key`).
+    left_fresh: bool,
     learning: bool,
     /// docs/spec/learning.md §8.1: learning was off at some point of this composition, so its commit learns no new word. Set by
     /// `set_learning(false)` while composing and by any key handled with learning off; cleared by `clear_all` and by
@@ -835,7 +846,7 @@ pub struct Engine {
     fuzzy_skips: usize,
     /// docs/spec/semantic-rerank.md §6.2: renewed from `GENERATION` only where decoding changes: every `refresh`, `clear_all`, the model and
     /// decoding settings (`load_lm`, `set_lm`, `load_tinylm`, `load_colloquial`, `set_rerank`, `set_rerank_level`, `set_profile`, `set_demote`,
-    /// learning open/clear, the evaluation-only `set_learn_guard` and `set_reading_decode`).
+    /// learning open/clear, the evaluation-only `set_learn_guard`, `set_reading_decode` and `set_recur`).
     generation: u64,
     /// The job of the last refresh, until `take_rerank_job` or the next change.
     rerank_job: Option<RerankJob>,
@@ -1170,6 +1181,9 @@ impl Engine {
             left: String::new(),
             left_full: String::new(),
             left_cut: false,
+            recur: RecurGrams::default(),
+            recur_on: true,
+            left_fresh: false,
             learning: false,
             paused: false,
             newword: true,
@@ -1240,7 +1254,8 @@ impl Engine {
     /// Keys that do not re-decode (cursor moves, unfinished symbols, entering the prediction row, pass-through) keep it.
     /// A setting that changes how the composition decodes, what the keys do or what the candidate window lists was set (docs/spec/english-mixed.md §6):
     /// the short-word mark goes. Every such setter calls this; the ones that do NOT, on purpose, are: `set_learning` and
-    /// `set_left_context` (the shell calls them before every key, so they would clear the mark of the key before), `set_punctuation`,
+    /// `set_left_context` (the shell calls `set_learning` before every key and `set_left_context` before a key that may start a composition, so they
+    /// would clear the mark of the key before), `set_punctuation`,
     /// `set_newword`, `set_newword_subspans`, `set_scan_gate`, `set_eps_global`, `set_today` and `set_english_next` (they change a table or
     /// a learning knob, not the composition or the short word's items), and the `load_*` functions and `learning_open`/`learning_clear`
     /// (they run when the engine is built, before the first key, and do not recompute the composition). Not `invalidate()` itself:
@@ -1273,7 +1288,8 @@ impl Engine {
     }
 
     /// Every change of the small model: `left_full` was cut for the model loaded at `set_left_context` (its L, or the English word without
-    /// one), so it goes with it; the next composition start sets it again (docs/spec/semantic-rerank.md §5.2).
+    /// one), so it goes with it; the next composition start sets it again (docs/spec/semantic-rerank.md §5.2). `left` and the recurrence set do not
+    /// depend on the model and stay.
     fn set_tinylm(&mut self, model: Option<Arc<TinyLm>>) {
         self.tinylm = model;
         self.left_full.clear();
@@ -1331,6 +1347,14 @@ impl Engine {
         if let Some(st) = &self.lm {
             st.capped.set_reading_active(on);
         }
+    }
+
+    /// Evaluation only (`shanjie-replay --no-recur`): with `false` the decoder does not get the context recurrence set (docs/spec/decoder.md, the context
+    /// recurrence section), the arithmetic without the term; the set itself is kept and cleared as before. The pending job is dropped like any decoding change.
+    pub fn set_recur(&mut self, on: bool) {
+        self.setting_changed();
+        self.invalidate();
+        self.recur_on = on;
     }
 
     /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>+rm`; empty without a model or with `set_reading_decode(false)`): what
@@ -1422,7 +1446,10 @@ impl Engine {
     // ---- S4 learning (docs/spec/learning.md §1) ----
 
     /// docs/spec/learning.md §2.1: keep only the last ≤ 2 consecutive Han characters of `text` (none: empty) for decoding, learning and the prediction row's
-    /// key. docs/spec/semantic-rerank.md §5.2: `left_full` keeps only what the small model or the English table can use (see the field).
+    /// key. docs/spec/semantic-rerank.md §5.2: `left_full` keeps only what the small model or the English table can use (see the field). The decoder also
+    /// reads the recurrence set, the Han pairs of the last `lm::RECUR_CHARS` characters (`recur`), rebuilt here; the text itself is not kept.
+    /// The C ABI passes "" for NULL and for text that is not UTF-8, so all three leave every one of them empty. A key that starts a composition on
+    /// an empty one without this call first clears them (`key`).
     pub fn set_left_context(&mut self, text: &str) {
         let k = context_key(text);
         self.left = if k == crate::learn::SENTINEL { String::new() } else { k };
@@ -1430,6 +1457,29 @@ impl Engine {
             Some(l) => (last_chars(text, l), text.chars().nth(l).is_some()),
             None => (english_tail(text).map_or_else(String::new, |(_, kept)| kept), false),
         };
+        self.recur = RecurGrams::from_text(text);
+        self.left_fresh = true;
+    }
+
+    /// Test hook: how many pairs the recurrence set holds (the pairs themselves are never handed out).
+    #[doc(hidden)]
+    pub fn recur_pairs(&self) -> usize {
+        self.recur.len()
+    }
+
+    /// Everything kept from the left text goes at once: `left`, `left_full`, `left_cut` and the recurrence set. The one place they are cleared
+    /// together (`clear_all`, the rule 22 pass-throughs, a key on an empty composition without a fresh left text); `set_tinylm` clears only `left_full`.
+    fn clear_left(&mut self) {
+        self.left.clear();
+        self.left_full.clear();
+        self.left_cut = false;
+        self.recur = RecurGrams::default();
+    }
+
+    /// The composition shows nothing (the shell's "not composing", `Output::preedit` empty): no unit, no English run, no unfinished symbol and no
+    /// open digit buffer (its keys can all show as digits while the other three are empty).
+    fn composition_empty(&self) -> bool {
+        self.syls.is_empty() && self.run.is_empty() && self.pending().is_empty() && self.drun.is_none()
     }
 
     /// Test hook: how many characters `left_full` holds (docs/spec/semantic-rerank.md §10; the text itself is never handed out).
@@ -2434,7 +2484,8 @@ impl Engine {
     /// and the part on the right restarts from (`<s>`, `<s>`), like after punctuation. Only the trigram level does this; without it the run is
     /// not a boundary here (the bigram total has never cut there). `total_score` then equals the top decode score of a single stretch, provided the decoder
     /// adds no reading term (docs/spec/decoder.md §5): it is not in `total_score`, so the equality holds after `set_reading_decode(false)` or with a
-    /// capped lexicon built without `with_reading`.
+    /// capped lexicon built without `with_reading`. The context recurrence gain (docs/spec/decoder.md, the context recurrence section) rides in the words'
+    /// deltas, so it is in `total_score` and not an exception.
     /// Slice A2 (b'): a stretch that starts from an unknown u (after a fixed word, or from the left context) and holds exactly one word closes
     /// with the bigram: its `eos`, or the transition into the next fixed word, takes u as unknown (`close_u`), as `decode_segment_learned` does.
     pub fn total_score(&self) -> Option<f64> {
@@ -2512,6 +2563,12 @@ impl Engine {
     }
 
     pub fn key(&mut self, k: Key) -> Result<Output, EngineError> {
+        // The shell reads the left text only before a key that may start a composition (a character key without modifiers or with Shift alone);
+        // other keys start one too (Ctrl+\ on an empty composition), and Backspace to empty or Esc on unfinished symbols alone leaves the text of an
+        // earlier composition, perhaps another app's. A key on an empty composition without a `set_left_context` since the last key forgets it.
+        if !std::mem::take(&mut self.left_fresh) && self.composition_empty() {
+            self.clear_left();
+        }
         self.pred_dirty = false;
         self.ld_now = self.last_digits.take();
         self.d_emitted = 0;
@@ -2886,9 +2943,7 @@ impl Engine {
     /// the prediction row) voids the job the refresh before it made.
     fn clear_all(&mut self) {
         self.invalidate();
-        self.left.clear();
-        self.left_full.clear();
-        self.left_cut = false;
+        self.clear_left();
         self.syls.clear();
         self.cursor = 0;
         self.clear_pend();
@@ -3082,7 +3137,7 @@ impl Engine {
                 });
                 let mut best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
-                    crate::fuzzy::DELTA_SOUND, None,
+                    crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur),
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let eligible = jobs && best.len() >= 2;
@@ -3102,7 +3157,7 @@ impl Engine {
                     let lift = Learn { sinit: Sinit::Lift, ..*ln };
                     let lifted = decode_segment_fuzzy(
                         &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&lift), self.demote, self.fuzzy,
-                        crate::fuzzy::DELTA_SOUND, None,
+                        crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur),
                     )
                     .map_err(|_| EngineError::Internal)?;
                     match sinit_swap(&mut best, &lifted, pool, &sinit_chars) {
@@ -3407,14 +3462,10 @@ impl Engine {
             }
             if self.pend.iter().any(Option::is_some) {
                 self.clear_pend();
-                self.left.clear(); // the app's text changes under the cursor, as at a rule 22 pass-through
-                self.left_full.clear();
-                self.left_cut = false;
+                self.clear_left(); // the app's text changes under the cursor, as at a rule 22 pass-through
                 return Ok(self.view(true, c.to_string()));
             }
-            self.left.clear();
-            self.left_full.clear();
-            self.left_cut = false;
+            self.clear_left();
             return self.passthrough(String::new());
         }
         // 2: punctuation.
@@ -3442,9 +3493,7 @@ impl Engine {
             }
             if self.pend.iter().any(Option::is_some) {
                 self.clear_pend();
-                self.left.clear();
-                self.left_full.clear();
-                self.left_cut = false;
+                self.clear_left();
                 return Ok(self.view(true, upper.to_string()));
             }
         }
@@ -3537,9 +3586,7 @@ impl Engine {
                 return self.insert_token(format!("{PUNCT_PREFIX}{mark}"), Some(mark.to_string()), None);
             }
             // docs/spec/semantic-rerank.md §5.2: the composition stays empty, and the app's text changes under the cursor.
-            self.left.clear();
-            self.left_full.clear();
-            self.left_cut = false;
+            self.clear_left();
             return self.passthrough(String::new()); // 22
         }
         let n = self.syls.len();

@@ -109,6 +109,9 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
 /// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it,meme,beauty
 /// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
 /// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
+/// `--no-recur`: the pins were taken before the context recurrence term (docs/spec/decoder.md, the context recurrence section). With the term, the default,
+/// every line's tag gains `+recur` and the chat n-gram line of the user-reported rows prints another `top1_sha256` (the same top1), so until the file is
+/// taken again with the default these lines pin the decoder without the term.
 #[test]
 fn shipping_default_matches_its_rust_only_pins() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));

@@ -295,8 +295,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // docs/spec/lexicon-and-packs.md §1.1, §3: the names layer is always on; `--no-names` (evaluation only: the per-layer breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
-    // `--no-recur` (evaluation only): leave the context-recurrence term out; `--recur-unfiltered` (temporary): build its set from every adjacent pair.
-    let (mut recur, mut recur_unfiltered) = (true, false);
+    // `--no-recur` (evaluation only): leave the context recurrence term out (docs/spec/decoder.md, the context recurrence section).
+    let mut recur = true;
     let mut forms_rowstats = None::<String>;
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut scores_topk = None::<usize>;
@@ -378,7 +378,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
             "--no-recur" => recur = false,
-            "--recur-unfiltered" => recur_unfiltered = true,
             "--no-reading-decode" => reading_decode = false,
             "--reading-table" => reading_table = Some(val()?),
             "--dump-reading-table" => dump_reading_table = Some(val()?),
@@ -572,7 +571,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let mut out = RowOut::default();
-        let grams = recur_on.then(|| if recur_unfiltered { RecurGrams::from_text_unfiltered(ctx) } else { RecurGrams::from_text(ctx) });
+        let grams = recur_on.then(|| RecurGrams::from_text(ctx));
         let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound, grams.as_ref()) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
@@ -834,7 +833,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if !recur_on { "" } else if recur_unfiltered { "+recur-unf" } else { "+recur" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { "+recur" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())
 }
 

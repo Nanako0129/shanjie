@@ -1290,8 +1290,14 @@ mod tests {
         }
         let dir = tiny_dir("panic", "ㄒㄧㄣ 鑫 -1.0\nㄅㄣ 犇 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
-        // docs/spec/semantic-rerank.md §5.2: the English word of the left text is held until the reset after code 4.
-        assert!(set_left(e, "Joe") == 0 && unsafe { &(*e).0 }.left_full_chars() == 3, "left text held");
+        // docs/spec/semantic-rerank.md §5.2: the English word of the left text is held until the reset after code 4, and so is the context recurrence
+        // set (docs/spec/decoder.md, the context recurrence section): one pair here.
+        let held = |e: *mut ShanjieEngine| {
+            // SAFETY: test-only read of a live handle.
+            let x = unsafe { &(*e).0 };
+            (x.left_full_chars(), x.recur_pairs())
+        };
+        assert!(set_left(e, "前文 Joe") == 0 && held(e) == (3, 1), "left text held");
         for c in ['v', 'u', 'p'] {
             assert!(send(e, key(CHAR, c)).0 == 0, "typing");
         }
@@ -1305,11 +1311,51 @@ mod tests {
         assert!(rc == 4, "panic maps to code 4");
         assert!(o.is_null(), "out is NULL after a panic");
         assert!(PAYLOAD.with(|p| p.borrow().contains(MARKER)), "payload carries the marker");
-        assert!(unsafe { &(*e).0 }.left_full_chars() == 0, "the left text went with the reset after code 4");
+        assert!(held(e) == (0, 0), "the left text went with the reset after code 4");
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit.is_empty(), "engine was reset after code 4");
         unsafe { shanjie_engine_free(e) };
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The context recurrence set (docs/spec/decoder.md, the context recurrence section) over the C ABI: NULL, "" and text that is not UTF-8 (code 2)
+    /// each empty it, with `left_full`, and ㄈㄢˇ ㄧㄥˋ then shows what it shows with no left text (反應); right after a left text holding 反映 it
+    /// shows 反映. The real lexicon and n-gram model.
+    #[test]
+    fn null_empty_and_non_utf8_left_texts_clear_the_recurrence_set() {
+        let e = new_engine(&root().join("data/lexicon"), 0);
+        let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
+        let held = || {
+            // SAFETY: test-only read of a live handle.
+            let x = unsafe { &(*e).0 };
+            (x.left_full_chars(), x.recur_pairs())
+        };
+        let shown = || {
+            let mut p = String::new();
+            for k in ["ㄈㄢˇ", "ㄧㄥˋ"].iter().flat_map(|s| keys_of(Layout::Standard, s)) {
+                let (rc, preedit, _) = send(e, k);
+                assert!(rc == 0, "typing");
+                p = preedit;
+            }
+            assert!(send(e, key(ESC, '\0')).0 == 0);
+            p
+        };
+        let with_a = "昨天看到的反映讓人在意，我說Joe";
+        assert!(set_left(e, with_a) == 0 && shown() == "反映", "premise: the left text decides");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        for what in ["NULL", "empty", "not UTF-8"] {
+            assert!(set_left(e, with_a) == 0 && held() == (3, crate::lm::RecurGrams::from_text(with_a).len()) && held().1 > 0, "{what}: premise, held");
+            let rc = match what {
+                "NULL" => unsafe { shanjie_engine_set_left_context(e, ptr::null()) },
+                "empty" => set_left(e, ""),
+                _ => unsafe { shanjie_engine_set_left_context(e, bad_utf8.as_ptr()) },
+            };
+            assert!(rc == if what == "not UTF-8" { SHANJIE_ERR_INVALID } else { SHANJIE_OK }, "{what}: code");
+            assert!(held() == (0, 0), "{what}: cleared");
+            assert!(shown() == "反應", "{what}: as with no left text");
+        }
+        unsafe { shanjie_engine_free(e) };
     }
 
     #[test]
