@@ -366,6 +366,9 @@ def build(cands, counts1, x_table, counts2, decode, readings=None, have=frozense
         if w in reading and any(k in keys(w, reading[w]) for k in keys(w, r)):
             # the extra row (or its 一/不 row) would repeat a key the main reading already writes: two rows of one (reading, word) with different scores
             raise SystemExit(f"extra readings: {w} {' '.join(r)} repeats a row of the word's main reading (its 一/不 variant)")
+        if any(k in keys(w, q) for q in ex[w] for k in keys(w, r)):
+            # the same between two extra readings of one word: one is the other's 一/不 row, or their 一/不 rows are the same
+            raise SystemExit(f"extra readings: {w} {' '.join(r)} repeats a row of another extra reading of the word (its 一/不 variant)")
         ex[w].append(r)
     reasons = collections.Counter(d[1] for d in dropped)
     # (b)：詞包詞搶走參考名單裡別的字串的第一名

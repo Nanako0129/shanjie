@@ -662,6 +662,12 @@ class Collisions(unittest.TestCase):
             self.run_build(fake_decoder(), words=("不但",), readings=rd, extra=[("不但", ["ㄅㄨˊ", "ㄉㄢˋ"])])
         self.assertIn("repeats a row of the word's main reading", str(e.exception))
 
+    def test_two_extra_readings_where_one_is_the_others_sandhi_row_stop(self):
+        rd = lambda ws: {w: (["x", "y"], False) for w in ws}
+        with self.assertRaises(SystemExit) as e:
+            self.run_build(fake_decoder(), words=("不但",), readings=rd, extra=[("不但", ["ㄅㄨˋ", "ㄉㄢˋ"]), ("不但", ["ㄅㄨˊ", "ㄉㄢˋ"])])
+        self.assertIn("repeats a row of another extra reading of the word", str(e.exception))
+
     def test_sandhi_rows_and_the_bonus_scores_come_from_the_shared_pack_rows(self):
         rd = lambda ws: {"不但": (["ㄅㄨˋ", "ㄉㄢˋ"], False)}
         files, *_ = self.run_build(fake_decoder(), words=("不但",), readings=rd)
