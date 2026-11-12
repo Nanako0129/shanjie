@@ -1374,18 +1374,25 @@ public final class Shell {
             // it works, and free it at once (build() keeps one engine at a time): if it fails too the cause is not a pack, both codes are logged
             // and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings order build with just
             // that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop works (two broken
-            // files), build the no-pack engine again. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
+            // files), build the no-pack engine again. With a single pack enabled there is no drop to try, and the probe is kept as the engine
+            // instead of being freed and built a third time. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
             let packCode = code
             built = 0
+            let drops = Shell.packTable.map(\.bit).filter { mask & $0 != 0 && mask & ~$0 != 0 }
             var noPackWorks = false
+            var keptProbe: CoreEngine?
             do {
                 let (probe, probeCode) = makeEngine(packsDir: nil, packs: 0)
                 noPackWorks = probe != nil
                 code = probeCode
-            }   // the probe engine is freed here
-            if noPackWorks {
+                if drops.isEmpty { keptProbe = probe }
+            }   // otherwise the probe engine is freed here, before any drop is built (one engine at a time)
+            if let probe = keptProbe {
+                made = probe
+                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask 0")
+            } else if noPackWorks {
                 var kept: UInt32 = 0
-                for bit in Shell.packTable.map(\.bit) where mask & bit != 0 && mask & ~bit != 0 {
+                for bit in drops {
                     let (dropped, _) = makeEngine(packsDir: packsDir, packs: mask & ~bit)
                     if let dropped {
                         made = dropped

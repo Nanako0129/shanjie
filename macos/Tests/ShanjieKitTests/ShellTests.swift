@@ -1033,9 +1033,10 @@ final class ShellTests: XCTestCase {
         }
     }
 
-    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore, beauty: MemoryBeautyPackStore = MemoryBeautyPackStore(false), meme: MemoryMemePackStore = MemoryMemePackStore(false)) -> Shell {
+    private func packShell(acg: MemoryAcgPackStore, it: MemoryItPackStore, beauty: MemoryBeautyPackStore = MemoryBeautyPackStore(false), meme: MemoryMemePackStore = MemoryMemePackStore(false),
+                           quote: MemoryQuotePackStore = MemoryQuotePackStore()) -> Shell {
         Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
-              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: acg, quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it, beautyPackStore: beauty, memePackStore: meme)
+              learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: acg, quotePackStore: quote, glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), itPackStore: it, beautyPackStore: beauty, memePackStore: meme)
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2, §4.3: the menu has one non-clickable line naming the packs the engine loaded, in the settings order; none loaded, no line.
@@ -1077,6 +1078,23 @@ final class ShellTests: XCTestCase {
         let rerank = try XCTUnwrap(menu.firstIndex { $0.title == MenuEntry.Text.rerank })
         XCTAssertEqual(menu[(rerank + 1)...].prefix(6).map { "\($0.kind):\($0.title)" },
                        ["separator:", "header:已開啟的詞包", "item:動漫與遊戲詞", "item:資訊與 AI 詞", "item:美妝與保養詞", "separator:"], "the section follows 語意校正")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.2, §7.2: the quote pack (off by default) is named when its switch is on, right after ACG (the settings order), and alone
+    /// when it is the only pack on; an off quote pack is not named although its file is there.
+    func testPackLineNamesTheQuotePackAfterAcg() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "ㄉㄧㄥˋ-ㄩㄢˊ-ㄊㄤˊ\t碇源堂\t-7.04116568\tacg\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        try "ㄋㄧˇ-ㄏㄠˇ\t擬好\t0.0\tquotes\n".write(to: packs.appendingPathComponent("quotes-add.tsv"), atomically: true, encoding: .utf8)
+        try TestData.itPackRow.write(to: packs.appendingPathComponent("it-add.tsv"), atomically: true, encoding: .utf8)
+        let line = { (acg: Bool, quote: Bool, it: Bool) -> [String]? in
+            let c = Controller(self.packShell(acg: MemoryAcgPackStore(acg), it: MemoryItPackStore(it), quote: MemoryQuotePackStore(quote)))
+            return c.session.menu.packLines
+        }
+        XCTAssertEqual(line(true, true, true), ["動漫與遊戲詞", "經典台詞", "資訊與 AI 詞"])
+        XCTAssertEqual(line(false, true, false), ["經典台詞"], "only quotes")
+        XCTAssertEqual(line(true, false, true), ["動漫與遊戲詞", "資訊與 AI 詞"], "quotes off, its file is there")
     }
 
     /// docs/spec/lexicon-and-packs.md §4.2, §9.3 (the menu test with four packs): all four on list in the settings order (ACG, IT, beauty, meme); the meme pack follows its own switch
@@ -1180,6 +1198,24 @@ final class ShellTests: XCTestCase {
         let c = Controller(shell)
         XCTAssertEqual(c.session.menu.packLines, ["動漫與遊戲詞", "資訊與 AI 詞"])
         XCTAssertTrue(shell.quotePackOn, "the stored choice is untouched")
+    }
+
+    /// docs/spec/lexicon-and-packs.md §4.3: with only one pack on and its file broken there is no single drop to try, so the no-pack probe is kept as the
+    /// engine: two builds (combined, no packs), not a third no-pack build; typing works and the menu names no pack.
+    func testOnlyPackBrokenKeepsTheProbeEngine() throws {
+        let packs = resources.appendingPathComponent("packs")
+        try FileManager.default.createDirectory(at: packs, withIntermediateDirectories: true)
+        try "not a row\n".write(to: packs.appendingPathComponent("acg-add.tsv"), atomically: true, encoding: .utf8)
+        let shell = packShell(acg: MemoryAcgPackStore(true), it: MemoryItPackStore(false))
+        XCTAssertEqual(shell.packMask, CoreEngine.packACG, "only the ACG switch is on")
+        XCTAssertNotNil(shell.engine)
+        XCTAssertEqual(shell.engineBuilds, 2, "combined, then the no-pack probe kept as the engine")
+        XCTAssertEqual(shell.loadedPackMask, 0)
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertNil(c.session.menu.packLines)
+        XCTAssertEqual(c.type("su3cl3"), Array(repeating: true, count: 6))
+        XCTAssertEqual(c.client.marked, "你好")
     }
 
     /// A build failure that is not a pack's (a broken overlay-add.tsv in the data directory): the combined build and the no-pack build both
