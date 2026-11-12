@@ -21,6 +21,8 @@ $ErrorActionPreference = 'Stop'
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $Msi = (Resolve-Path $Msi).Path
 if (-not $Work) { $Work = "$Msi.check" }
+# dark writes the extraction folder into each Source as given: a relative -Work gave relative paths (first CI runs), so always pass a full one
+$Work = [IO.Path]::GetFullPath($Work)
 if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force }
 New-Item -ItemType Directory -Force $Work | Out-Null
 

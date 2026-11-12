@@ -4,7 +4,8 @@
 
      Preprocessor variables (build-msi.ps1 passes all of them):
        Variant  A: the shipped package (C, the upgrade test, is the same source with other binaries and a higher version);
-                T: test only, A plus WixUtilExtension's WixFailWhenDeferred (fails when WIXFAILWHENDEFERRED=1), scheduled before DeleteSettings.
+                T: test only, A plus TestFail, a deferred action that fails when WIXFAILWHENDEFERRED=1 (it starts a file that does not exist),
+                   scheduled before DeleteSettings.
        Version  MAJOR.MINOR.PATCH, from SHANJIE_VERSION.
        Repo     the repository root (data files and licences).
        Bin      the folder of shanjie_tip.dll, shanjie-host.exe and installer-ca.dll (release identity, signed there when signing exists).
@@ -130,8 +131,11 @@
 <?if $(var.Variant) = "T" ?>
     <!-- Test package T only: a deferred action that fails when WIXFAILWHENDEFERRED=1, just before DeleteSettings, to see the rollbacks. -->
     <Property Id="WIXFAILWHENDEFERRED" Secure="yes" />
+    <!-- WixUtilExtension's WixFailWhenDeferred was tried first: the built package had neither the action nor its DLL (first CI runs).
+         Starting a file that does not exist fails the same way (error 1721) without another DLL and without a window. -->
+    <CustomAction Id="TestFail" Directory="InstallDir" ExeCommand="&quot;[InstallDir]no-such-file.exe&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <InstallExecuteSequence>
-      <Custom Action="WixFailWhenDeferred" Before="DeleteSettings">WIXFAILWHENDEFERRED=1</Custom>
+      <Custom Action="TestFail" Before="DeleteSettings">WIXFAILWHENDEFERRED=1</Custom>
     </InstallExecuteSequence>
 <?endif ?>
 

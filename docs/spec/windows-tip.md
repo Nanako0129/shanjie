@@ -816,7 +816,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
   - `msi -Bin <資料夾> -Out <檔> [-Variant A|T]`：印出並斷言 WiX 的版本（runner 內建的 WiX 3，至少 3.14.1），寫出產生的檔（署名檔、點陣圖與圖示），跑 `candle` 與 `light`。
 - CI 的 `windows-msi` job（windows-2025，`needs: changes`，略過條件同 `core`，逾時 45 分鐘，用 pwsh；先裝規定版本的 Rust）依序：下載並核對模型；以 `release-ids` 跑 `shanjie-win-proto`、`shanjie-host`、`shanjie-tip`、`shanjie-installer-ca` 的測試；建 A 與 C 的 DLL 與 exe（C 另一個 `--target-dir`、另一個 `SHANJIE_BUILD_ID`）；**簽章步驟（空的、有名字：只印「not signed in CI」，之後在這裡簽 `shanjie_tip.dll`、`shanjie-host.exe`、`installer-ca.dll`）**；建三份 MSI；**簽章步驟（簽 MSI）**；核對 A；核對改壞的複本與 T；帶 `timing` 的建置；A 的 SHA-256；上傳 artifact（保留 7 天）。憑證之後只放發版 workflow 的受保護環境，不進 `pull_request` 的 CI。
   - **A**：要出貨的那一份，版號 `0.0.<run_number>`，檔名 `shanjie-<版號>-x64.msi`。
-  - **T**：只給 VM 驗收用，版號同 A，多一個 WixUtilExtension 的 `WixFailWhenDeferred`（`WIXFAILWHENDEFERRED=1` 時才失敗，排在 `DeleteSettings` 之前），檔名 `…-x64-test-fail.msi`。
+  - **T**：只給 VM 驗收用，版號同 A，多一個延後動作 `TestFail`（`WIXFAILWHENDEFERRED=1` 時啟動一個不存在的檔案而失敗，排在 `DeleteSettings` 之前），檔名 `…-x64-test-fail.msi`。
   - **C**：只給 VM 驗收用，版號 `0.0.<run_number+1>`，DLL 與 exe 另建一次，位元組與 A 不同（job 印出兩組 SHA-256 並斷言不同），檔名 `…-x64-test-upgrade.msi`。
   - artifact `windows-msi`：三份 MSI 與 A 的 SHA-256 檔。
 - **`check-msi.ps1`**（對象是建好的 A）：用 WiX 的 `dark.exe` 反組譯成 `.wxs` 並解出檔案（`-x`），讀那份 XML，再用 `dumpbin` 看解出來的檔；每一列讀到的都印出來，任何一條不符就失敗，失敗的行以 `FAIL [<區域>]` 開頭。（量到：用 Windows Installer 的 COM 讀欄位，pwsh 7 丟 `DISP_E_TYPEMISMATCH`、Windows PowerShell 5.1 讀回空字串，所以改讀反組譯的結果。）核對的是：

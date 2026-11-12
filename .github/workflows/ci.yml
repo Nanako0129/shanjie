@@ -466,7 +466,7 @@ jobs:
           }
           $t = Fails "build/msi/out/shanjie-0.0.$env:RUN-x64-test-fail.msi"
           Write-Host "---- T: exit $($t.Rc)"; $t.Lines | ForEach-Object { Write-Host "  $_" }
-          if ($t.Rc -eq 0 -or -not ($t.Lines | Where-Object { $_.StartsWith('FAIL [CustomAction WixFailWhenDeferred]') })) { $bad += 'T: no failure for its extra action WixFailWhenDeferred' }
+          if ($t.Rc -eq 0 -or -not ($t.Lines | Where-Object { $_.StartsWith('FAIL [CustomAction TestFail]') })) { $bad += 'T: no failure for its extra action TestFail' }
           if ($bad.Count -gt 0) { $bad | ForEach-Object { Write-Host "error: $_" }; exit 1 }
 
       # A build with `timing` (its own target dir) carries the timing markers, so their absence in A means something.

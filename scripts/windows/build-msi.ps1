@@ -110,7 +110,6 @@ if ($attribution -match 'Sparkle') { throw 'the attribution text names Sparkle, 
 
 # ---- candle and light ----
 $ext = @('-ext', 'WixUIExtension')
-if ($Variant -eq 'T') { $ext += @('-ext', 'WixUtilExtension') }
 $wixobj = Join-Path $work 'shanjie.wixobj'
 Invoke-Checked $candle (@('-nologo', '-arch', 'x64') + $ext + @("-dVariant=$Variant", "-dVersion=$version", "-dRepo=$Repo", "-dBin=$binDir", "-dGen=$gen", '-out', $wixobj, $Source))
 $lightArgs = @('-nologo') + $ext + @('-cultures:zh-TW', '-sice:ICE20')
