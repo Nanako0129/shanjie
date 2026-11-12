@@ -23,7 +23,7 @@
         <choose>
           <if type="paper-conference chapter" match="any">
             <group prefix="In ">
-              <names variable="editor" suffix=", editors, "><name and="text" delimiter=", " delimiter-precedes-last="contextual"/></names>
+              <names variable="editor" suffix=", "><name and="text" delimiter=", " delimiter-precedes-last="contextual"/><label form="long" prefix=", "/></names>
               <text variable="container-title" font-style="italic" text-case="title"/>
             </group>
           </if>
