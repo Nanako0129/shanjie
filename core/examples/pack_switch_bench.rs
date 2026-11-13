@@ -1,4 +1,4 @@
-//! pack_switch_bench: the measurements of the pack switch (shared parts: docs/spec/c-abi.md §5.4; criteria: the pack-switch contract §6): what the new engine built from another engine's loaded
+//! pack_switch_bench: the measurements of the pack switch (shared parts: docs/spec/c-abi.md §5.4): what the new engine built from another engine's loaded
 //! parts (`Engine::share`, `Engine::new_shared`) costs the engine that keeps typing, how long it takes against building from the files, and what
 //! two engines alive at once hold. Public API only; it reads the repo's `data/lexicon`, `data/packs` and `data/lm`. CI builds it and does not run it.
 //!
@@ -19,7 +19,8 @@ const PREFIX: &str = "pack-switch bench:";
 /// The fixed sentence of `typing`: 12 syllables, then Enter.
 const SENTENCE: [&str; 12] = ["ㄐㄧㄣ", "ㄊㄧㄢ", "ㄊㄧㄢ", "ㄑㄧˋ", "ㄓㄣ", "ㄏㄠˇ", "ㄨㄛˇ", "ㄇㄣ˙", "ㄑㄩˋ", "ㄍㄨㄥ", "ㄩㄢˊ", "ㄨㄢˊ"];
 const IDLE_SENTENCES: usize = 200;
-/// Criteria of the pack-switch contract (§6, its 建置期間的每鍵延遲 row): a build must not slow the typing engine's p95 by more than this factor, nor push it to a frame.
+/// Criteria for `typing`: while a build runs on another thread, the typing engine's p95 per key must be at most this factor of its p95 without a build, and below one
+/// frame (`MAX_BUILDING_P95_US`).
 const MAX_RATIO: f64 = 1.25;
 const MAX_BUILDING_P95_US: f64 = 16000.0;
 /// A shared build must be at least this much faster than building from the files (model 278 + small model 44 + reading table 59, ms).
