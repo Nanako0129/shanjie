@@ -166,6 +166,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 ### 4.6 載入、打包、CLI 與重播
 
 - `Engine::load_colloquial(path)`：從引擎建立時的詞庫資料夾讀 `mcbpmf-data.txt` 與 `overlay-add.tsv`，詞包列用引擎自己留著的 `pack_text`（不另找詞包檔）；可在 `load_lm`、`load_tinylm` 之前或之後呼叫。失敗（沒有資料夾、檔案讀不到或格式錯）回 `LoadFailed`，原本的表（或沒有）保持不變，並作廢進行中的工作。載入常談表時尖峰記憶體多 16 至 21 MiB（Mac、3 次、`/usr/bin/time -l`）。
+- 表與詞集分開：讀進來的表（`ColloquialTable`，建好後不變）可以由多個引擎共用（`Arc`）；k 的詞集（`overlay_only`）依每個引擎自己的詞包列各建一份（`Colloquial::with_table`）。從另一個引擎的共用部分建引擎（`Engine::new_shared`，`docs/spec/c-abi.md` §5.4）時沿用來源引擎的表、重建詞集，和 `load_colloquial` 建詞集是同一段程式。
 - FFI `shanjie_engine_load_colloquial(engine, path)`：回傳碼同 `load_tinylm`（見 7）；子程序輸出不帶路徑。
 - App：殼的 `build()` 在 `load_tinylm` **成功之後**才載入 `Resources/colloquial.sjlm`；失敗只記一行（靜態字串加回傳碼），照沒有常談表重排。沒有獨立的設定開關：跟著語意校正開關與強度走。
 - selftest（8.4）要求常談在效：載入回 0，且在聊天、標準強度、前文「這間店的蛋糕很好吃」下打 dev302 第 108 列的讀音，第一次顯示是「你要不要嚐嚐看」（n-gram 與不帶常談的重排都是「你要不要常常看」）。

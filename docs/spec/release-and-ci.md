@@ -236,6 +236,7 @@
 | Homebrew cask 樣式 | 指令照 `ci.yml` 的「Homebrew cask」步驟：用佔位值產生 cask，放在某個 `Casks/` 資料夾下跑 `brew style`（`brew` 只在路徑含 `Casks/` 時套用 cask 規則） |
 | `make installer` ＋ `scripts/check-installer.sh` | 只接受正式 ID 的組建。把 `build/善解輸入法.app` 壓成 `build/shanjie-<版本>.zip`，組出 `build/安裝善解輸入法.app`，檢查結構、bundle ID、內附 zip 與 `install-ime.sh` 逐位元組相同、`Resources/` 沒有展開的 .app、App 圖示、沒有 entitlements、hardened runtime。安裝程式只檢查、不啟動 |
 | C 標頭冒煙測試、寬鬆比對一致性 | 指令照 `ci.yml` 的「C header smoke test」與「Lenient comparison parity」步驟 |
+| 詞包切換的量測程式 | `core/examples/pack_switch_bench.rs`（模式 `typing`、`build`、`memory`、`phases`，用法在檔頭）；`cargo test` 會順便編它，CI 只編不跑。兩個建詞庫改寫的計時是 `core/src/tests.rs` 的 `#[ignore]` 測試 `timing_variant_order_one_pass`、`timing_legal_once_per_syllable`（`cargo test --release --locked -p core --lib tests::<名稱> -- --ignored --nocapture --exact`）。都在閒置窗跑 |
 
 - 正式 ID 的組建（`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`）在本機永遠只建置、不執行；它的執行只在 CI（`scripts/test-sandbox-migration.sh` 與 `check-app.sh` check 6）。
 - 更新實機測試用的測試版：`SHANJIE_UPDATE_TEST_FEED=<網址> SHANJIE_UPDATE_TEST_KEY=<測試公鑰> scripts/build-app.sh`，檢查時 `scripts/check-app.sh` 也要帶同樣兩個變數，不帶的話測試版會被擋下。本機建置的 Info.plist `ShanjieUpdateBuild` 是 `local`（更新服務不啟動）；`release.yml` 的建置帶 `SHANJIE_RELEASE_BUILD=1` 寫成 `release`，要在本機檢查這種建置就讓 `check-app.sh` 也帶 `SHANJIE_RELEASE_BUILD=1`。

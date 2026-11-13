@@ -876,7 +876,7 @@ pub struct CappedLexicon {
     built_for: (u64, usize, usize),
     /// The reading term (docs/spec/decoder.md §5, `with_reading`): while `reading_active` the decoder adds it to the path score of every
     /// single-character word that learning did not lift. `None` for a lexicon built without it (unit tests, `CappedLexicon::new`), whose arithmetic is then untouched.
-    reading: Option<crate::reading::ReadingDecode>,
+    reading: Option<Arc<crate::reading::ReadingDecode>>,
     /// Evaluation switch (`set_reading_active`, `Engine::set_reading_decode`, the CLIs' `--no-reading-decode`): off, the decoder ignores `reading`.
     /// Atomic because the capped lexicon is shared (`Arc`) and the switch is flipped on a loaded model.
     reading_active: std::sync::atomic::AtomicBool,
@@ -910,9 +910,15 @@ impl CappedLexicon {
     /// Gives the decoder the reading term (docs/spec/decoder.md §5): `rd` is built by `engine::load_reading_decode` from this lexicon's
     /// merged `Lexicon` and the data directory, the one function the engine, the evaluation CLI and the replay all call. It is active from here
     /// (`set_reading_active` switches it).
-    pub fn with_reading(mut self, rd: crate::reading::ReadingDecode) -> CappedLexicon {
-        self.reading = Some(rd);
+    /// `rd` is shared, not copied: an engine built from another's loaded parts reuses the same table (`Engine::new_shared`).
+    pub fn with_reading(mut self, rd: impl Into<Arc<crate::reading::ReadingDecode>>) -> CappedLexicon {
+        self.reading = Some(rd.into());
         self
+    }
+
+    /// The reading table this lexicon decodes with, for an engine that shares it.
+    pub fn reading_table(&self) -> Option<&Arc<crate::reading::ReadingDecode>> {
+        self.reading.as_ref()
     }
 
     /// The summary-line tag of the table the decoder adds (`ReadingDecode::tag`), `None` without one or while it is switched off.

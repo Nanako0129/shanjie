@@ -1,7 +1,7 @@
 //! S3a key engine (docs/spec/keys-and-composition.md §4.1): key events in, preedit / commit / candidates out.
 //! R2: no input text in errors or panics; types holding input text do not derive Debug.
 
-use crate::colloquial::{self, Colloquial};
+use crate::colloquial::{self, Colloquial, ColloquialTable};
 use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, fine_key, mid_key, local_day, newword_score, next_key, record_key, Learner, Level, Record, NEXT_PREFIX, SENTINEL, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
@@ -717,6 +717,46 @@ struct LmState {
 /// A shadow entry: the keycap and its arrival rank (see `Engine::shadow_key`).
 type Shadow = (char, u8);
 
+/// What an engine hands over to build the next one without reading the model files again (docs/spec/c-abi.md §5.4, `Engine::share`,
+/// `Engine::new_shared`): the loaded n-gram model (the two trigram tables inside it are memory maps), the small model, the colloquial table,
+/// the reading table, the digit table and the English follower table, all `Arc`s, plus the data folder. It owns no user input and borrows
+/// nothing from the engine, so it outlives it, and it never changes after it is made.
+pub struct Shared {
+    data_dir: PathBuf,
+    lm: Arc<Lm>,
+    tinylm: Option<Arc<TinyLm>>,
+    colloquial: Option<Arc<ColloquialTable>>,
+    reading: Option<Arc<crate::reading::ReadingDecode>>,
+    /// The source engine's `pack_single`: its reading table counts the pack rows of its own mask.
+    src_pack_single: bool,
+    digit_table: Option<Arc<DigitTable>>,
+    en_table: Option<Arc<EnglishTable>>,
+}
+
+impl Shared {
+    /// The reading table the source engine decodes with (tests).
+    pub fn reading_table(&self) -> Option<&Arc<crate::reading::ReadingDecode>> {
+        self.reading.as_ref()
+    }
+}
+
+/// The addresses `Engine::part_ptrs` reports (0 for a part the engine has none of).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartPtrs {
+    pub lm: usize,
+    pub tinylm: usize,
+    pub colloquial: usize,
+    pub reading: usize,
+    pub digit_table: usize,
+    pub en_table: usize,
+}
+
+/// Whether any row of the packs' text reads one syllable (so a one-character word, or a one-syllable entry, that the reading table would see).
+/// Rows are `reading TAB word TAB score TAB tag`; a row that does not parse is the lexicon's error, not decided here.
+fn pack_has_single(pack_text: &str) -> bool {
+    pack_text.lines().any(|l| l.split('\t').next().is_some_and(|r| !r.is_empty() && !r.contains('-')))
+}
+
 pub struct Engine {
     lex: Arc<Lexicon>,
     /// Where `new` read the data from; `None` for `with_lexicon` engines (they cannot `load_lm`).
@@ -728,6 +768,9 @@ pub struct Engine {
     /// They are a prefix because `read_packs_split` reads the `PACK_OOV` packs first; a length, not a copy, so the engine holds the
     /// rows once.
     pack_oov_len: usize,
+    /// Whether the enabled packs hold a row with a one-syllable reading (`pack_has_single`): what decides if a reading table can be reused
+    /// (`Engine::new_shared`).
+    pack_single: bool,
     lm: Option<LmState>,
     profile: Profile,
     /// Whether the table applies (default on; `set_demote`).
@@ -1119,12 +1162,18 @@ impl Engine {
     /// the shell switches by building a new engine, like a layout change. Mask 0 / `None`: same as `new`.
     /// An unknown bit is `LoadFailed`.
     pub fn new_with_packs(data_dir: &Path, layout: Layout, packs: Option<(&Path, u32)>) -> Result<Engine, EngineError> {
+        Engine::build(data_dir, layout, packs, None)
+    }
+
+    /// `new_with_packs`; with `shared`, the digit table and the English follower table are the loaded ones, not read again.
+    fn build(data_dir: &Path, layout: Layout, packs: Option<(&Path, u32)>, shared: Option<&Shared>) -> Result<Engine, EngineError> {
         if packs.is_some_and(|(_, m)| m & !PACK_ALL != 0) {
             return Err(EngineError::LoadFailed);
         }
         let packs = packs.filter(|&(_, m)| m != 0);
         let (lex, pack_text, oov_len) = load_lexicon_split(data_dir, packs, None, true).map_err(|_| EngineError::LoadFailed)?;
         let mut e = Engine::with_lexicon(lex, layout);
+        e.pack_single = pack_has_single(&pack_text);
         e.pack_text = Some(pack_text).filter(|t| !t.is_empty());
         e.pack_oov_len = oov_len;
         // Required like the other data files, and every row must name an entry of the lexicon (docs/spec/decoder.md §2.4); `load_lm` reads it again to resolve it against the capped lexicon.
@@ -1134,19 +1183,71 @@ impl Engine {
         }
         e.data_dir = Some(data_dir.to_path_buf());
         // Optional (docs/spec/english-mixed.md §7.2, §7.8): a missing or malformed table leaves the digit feature off and says nothing.
-        e.digit_table = std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new);
+        e.digit_table = match shared {
+            Some(s) => s.digit_table.clone(),
+            None => std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new),
+        };
         // Optional (docs/spec/english-mixed.md §5.7): a missing table, or one with a row that breaks a rule, loads nothing and says nothing.
         if let Ok(t) = std::fs::read_to_string(data_dir.join("mixed-words.tsv")) {
             e.set_mixed_words(&t);
         }
         // Optional (docs/spec/english-mixed.md §8): absent leaves the feature off; a file that is there and does not parse is a load failure (a shipping error
         // must not switch the feature off unseen).
+        if let Some(s) = shared {
+            e.en_table = s.en_table.clone();
+            return Ok(e);
+        }
         match std::fs::read_to_string(data_dir.join("english-next.tsv")) {
             Ok(t) => e.en_table = Some(Arc::new(EnglishTable::parse(&t).map_err(|_| EngineError::LoadFailed)?)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(EngineError::LoadFailed), // there but unreadable (not UTF-8, permissions)
         }
         Ok(e)
+    }
+
+    /// The parts of this engine a new engine can reuse (docs/spec/c-abi.md §5.4): only `Arc`s are copied, nothing is read. `None` without a data
+    /// folder or an n-gram model (nothing to share). Owns no user input (no left context, composition, learner or candidates).
+    pub fn share(&self) -> Option<Shared> {
+        let (dir, st) = (self.data_dir.clone()?, self.lm.as_ref()?);
+        Some(Shared {
+            data_dir: dir,
+            lm: st.lm.clone(),
+            tinylm: self.tinylm.clone(),
+            colloquial: self.colloquial.as_ref().map(|c| c.table().clone()),
+            reading: st.capped.reading_table().cloned(),
+            src_pack_single: self.pack_single,
+            digit_table: self.digit_table.clone(),
+            en_table: self.en_table.clone(),
+        })
+    }
+
+    /// `new_with_packs` followed by `load_lm`, `load_tinylm` and `load_colloquial`, with the parts of `shared` in place of what those read
+    /// (docs/spec/c-abi.md §5.4). All or nothing: any step failing is `LoadFailed` and no engine is returned. The files the engine builds from
+    /// (lexicon and pack rows, `demote.tsv`, `variant-order.tsv`, `rerank-protect.tsv`, `std-exempt.tsv`, `mixed-words.tsv`) are read as
+    /// `new_with_packs` and `load_lm` read them. The output equals that of the engine built from the files.
+    pub fn new_shared(shared: &Shared, layout: Layout, packs: Option<(&Path, u32)>) -> Result<Engine, EngineError> {
+        let mut e = Engine::build(&shared.data_dir, layout, packs, Some(shared))?;
+        e.install_lm(shared.lm.clone(), Some(shared))?;
+        e.set_tinylm(shared.tinylm.clone());
+        if let Some(t) = &shared.colloquial {
+            let dir = e.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
+            e.colloquial = Some(Arc::new(e.colloquial_on(t.clone(), dir).map_err(|_| EngineError::LoadFailed)?));
+        }
+        Ok(e)
+    }
+
+    /// The identity of each part that `share` hands over, as addresses (0 for none): tests compare them with the source engine's to see what was
+    /// shared and what was built again.
+    pub fn part_ptrs(&self) -> PartPtrs {
+        let addr = |p: Option<*const ()>| p.map_or(0, |p| p as usize);
+        PartPtrs {
+            lm: addr(self.lm.as_ref().map(|s| Arc::as_ptr(&s.lm).cast())),
+            tinylm: addr(self.tinylm.as_ref().map(|t| Arc::as_ptr(t).cast())),
+            colloquial: addr(self.colloquial.as_ref().map(|c| Arc::as_ptr(c.table()).cast())),
+            reading: addr(self.lm.as_ref().and_then(|s| s.capped.reading_table()).map(|r| Arc::as_ptr(r).cast())),
+            digit_table: addr(self.digit_table.as_ref().map(|t| Arc::as_ptr(t).cast())),
+            en_table: addr(self.en_table.as_ref().map(|t| Arc::as_ptr(t).cast())),
+        }
     }
 
     /// Share an already-loaded lexicon (tests load the 131 MB file once).
@@ -1156,6 +1257,7 @@ impl Engine {
             data_dir: None,
             pack_text: None,
             pack_oov_len: 0,
+            pack_single: false,
             lm: None,
             profile: Profile::Chat,
             demote: true,
@@ -1303,11 +1405,19 @@ impl Engine {
     pub fn load_colloquial(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-        let mut co = Colloquial::load_from_dir(path, dir, self.pack_text.as_deref()).map_err(|_| EngineError::LoadFailed)?;
+        let table = Arc::new(ColloquialTable::load(path).map_err(|_| EngineError::LoadFailed)?);
+        self.colloquial = Some(Arc::new(self.colloquial_on(table, dir).map_err(|_| EngineError::LoadFailed)?));
+        Ok(())
+    }
+
+    /// The colloquial term on a loaded table: the word sets of k from `dir` and this engine's pack rows (`load_colloquial`, `new_shared`).
+    fn colloquial_on(&self, table: Arc<ColloquialTable>, dir: &Path) -> Result<Colloquial, colloquial::ColloquialError> {
+        let base = std::fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|_| colloquial::ColloquialError::Read)?;
+        let overlay = std::fs::File::open(dir.join("overlay-add.tsv")).map_err(|_| colloquial::ColloquialError::Read)?;
+        let mut co = Colloquial::with_table(table, &base, std::io::BufReader::new(overlay), self.pack_text.as_deref())?;
         // The shipping setting (docs/spec/semantic-rerank.md §4.4): a first word the table has no `<s>` bigram for is scored by the unigram estimate.
         co.set_unseen_start_unigram(true);
-        self.colloquial = Some(Arc::new(co));
-        Ok(())
+        Ok(co)
     }
 
     /// The loaded colloquial table, if any (tests).
@@ -1829,22 +1939,43 @@ impl Engine {
     /// the next change to it decodes with the new model.
     pub fn load_lm(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
+        if self.data_dir.is_none() {
+            return Err(EngineError::LoadFailed);
+        }
+        // Read after the small files in the old order too: every failure is the same `LoadFailed` and the state is set at the end only.
+        let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
+        self.install_lm(Arc::new(lm), None)
+    }
+
+    /// The part of `load_lm` after the model file: the capped lexicon, the reading term (`shared`: its table when it can be reused, else built),
+    /// the prediction index and the caches. Failure leaves the previous state.
+    fn install_lm(&mut self, lm: Arc<Lm>, shared: Option<&Shared>) -> Result<(), EngineError> {
+        self.invalidate();
         let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let overlay = capping_overlay(dir, self.pack_text.as_deref().unwrap_or(""))?;
         let demote = std::fs::read_to_string(dir.join("demote.tsv")).map_err(|_| EngineError::LoadFailed)?;
         let demote = Demote::parse(&demote).ok_or(EngineError::LoadFailed)?;
         // The table is already in `self.lex` (`new`); read again here so a file that went missing or bad since then fails the load too.
         VariantOrder::parse(&std::fs::read_to_string(dir.join(VARIANT_ORDER_FILE)).map_err(|_| EngineError::LoadFailed)?).map_err(|_| EngineError::LoadFailed)?;
-        let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
         let capped = CappedLexicon::with_packs(self.lex.clone(), &overlay, &self.pack_text.as_deref().unwrap_or("")[..self.pack_oov_len], &lm, Some(&demote))
             .ok_or(EngineError::LoadFailed)?;
         // The decoder's reading term (docs/spec/decoder.md §5): built from the merged lexicon and the data directory, always, so a missing
         // std-exempt.tsv fails here; `set_reading_decode(false)` only switches it off.
-        let capped = capped.with_reading(load_reading_decode(&self.lex, dir).map_err(|_| EngineError::LoadFailed)?);
+        let reuse = shared.and_then(|s| s.reading.as_ref().filter(|_| !s.src_pack_single && !self.pack_single));
+        let capped = match reuse {
+            // Reusable (docs/spec/decoder.md §5): the table reads only one-syllable readings, which no enabled pack adds to. The exemption list is
+            // still read and parsed, so a list gone bad fails the load as it does in `load_reading_decode`.
+            Some(rd) => {
+                let exempt = read_file(dir.join(READING_EXEMPT_FILE)).map_err(|_| EngineError::LoadFailed)?;
+                crate::reading::parse_exempt(&exempt).map_err(|_| EngineError::LoadFailed)?;
+                capped.with_reading(rd.clone())
+            }
+            None => capped.with_reading(load_reading_decode(&self.lex, dir).map_err(|_| EngineError::LoadFailed)?),
+        };
         capped.set_reading_active(self.reading_decode);
         // Built now, not at the first key: the index takes hundreds of ms (docs/spec/prediction.md §3.1).
         capped.predict_index(&lm);
-        self.lm = Some(LmState { lm: Arc::new(lm), capped: Arc::new(capped) });
+        self.lm = Some(LmState { lm, capped: Arc::new(capped) });
         self.set_tinylm(None); // Tuned for the previous model
         self.digit_cache = None;
         self.en_words = None;
@@ -4872,5 +5003,23 @@ mod english_table_tests {
         // The shipped files, one at a time: each is well formed alone, and each adds lines the other lacks.
         let (a, b) = (english_table_of(&ENGLISH_FILES[..1]).unwrap(), english_table_of(&ENGLISH_FILES[1..]).unwrap());
         assert!(a.len() > 200 && b.len() >= 5 && a.len() + b.len() == english_table().len());
+    }
+}
+
+/// The fields of `Shared`, listed with their types: it holds the loaded model and tables and the data folder, never the left context, a composition,
+/// the learner or the choice memory, nor anything built from user input. The pattern names every field, so adding one stops compiling here until
+/// the list (and docs/spec/privacy.md) is read again.
+#[cfg(test)]
+mod shared_fields {
+    use super::*;
+
+    #[test]
+    fn shared_holds_only_models_tables_and_the_data_folder() {
+        fn fields(s: Shared) {
+            let Shared { data_dir, lm, tinylm, colloquial, reading, src_pack_single, digit_table, en_table } = s;
+            let _: (PathBuf, Arc<Lm>, Option<Arc<TinyLm>>, Option<Arc<ColloquialTable>>) = (data_dir, lm, tinylm, colloquial);
+            let _: (Option<Arc<crate::reading::ReadingDecode>>, bool, Option<Arc<DigitTable>>, Option<Arc<EnglishTable>>) = (reading, src_pack_single, digit_table, en_table);
+        }
+        let _ = fields;
     }
 }

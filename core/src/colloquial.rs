@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io::BufRead;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Weight of lc (P4d registered cell).
 pub const MU: f64 = 0.5;
@@ -64,10 +65,26 @@ impl fmt::Display for ColloquialError {
 }
 impl std::error::Error for ColloquialError {}
 
-pub struct Colloquial {
+/// The loaded table file, read-only afterwards: what engines share (`Engine::share`); the word sets of k are per engine (`Colloquial`).
+pub struct ColloquialTable {
     lm: Lm,
     /// N + V + 1 of the table, V counting `<s>` and `</s>` (colloquial_ref.py `Table.n1`).
     n1: f64,
+}
+
+impl ColloquialTable {
+    /// The table at `path` read as a plain bigram (no classes, no Kneser-Ney, no trigram, whatever sits beside the file).
+    pub fn load(path: &Path) -> Result<ColloquialTable, ColloquialError> {
+        let lm = Lm::load_opts(path, false, false, &[]).map_err(|_: LmError| ColloquialError::Table)?;
+        // `Lm` has no vocabulary-size accessor: `identity().1` is V + 1 (the length of the word-offset table), so N + V + 1 is
+        // N + identity().1.
+        let n1 = (lm.total() + lm.identity().1 as u64) as f64;
+        Ok(ColloquialTable { lm, n1 })
+    }
+}
+
+pub struct Colloquial {
+    table: Arc<ColloquialTable>,
     /// The words of overlay-add.tsv and of the packs the engine was built with (not names-add.tsv, not sandhi-add.tsv) that mcbpmf-data.txt
     /// lacks: the only words k counts, so the two full sets are never kept (keeping them cost about 10 MiB more peak RSS on a Mac, measured
     /// with 3 runs of `/usr/bin/time -l`).
@@ -93,10 +110,11 @@ impl Colloquial {
     /// from `base_text`, and the 17 MB overlay file is never held as text (peak RSS with the table: +27 to +30 MiB on a Mac before this,
     /// +16 to +21 MiB after; 3 runs each, `/usr/bin/time -l`).
     pub fn load(table: &Path, base_text: &str, overlay: impl BufRead, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError> {
-        let lm = Lm::load_opts(table, false, false, &[]).map_err(|_: LmError| ColloquialError::Table)?;
-        // `Lm` has no vocabulary-size accessor: `identity().1` is V + 1 (the length of the word-offset table), so N + V + 1 is
-        // N + identity().1.
-        let n1 = (lm.total() + lm.identity().1 as u64) as f64;
+        Colloquial::with_table(Arc::new(ColloquialTable::load(table)?), base_text, overlay, pack_text)
+    }
+
+    /// `load` on a table already loaded: only the word sets of k are built (from `base_text`, `overlay` and `pack_text`, as `load` reads them).
+    pub fn with_table(table: Arc<ColloquialTable>, base_text: &str, overlay: impl BufRead, pack_text: Option<&str>) -> Result<Colloquial, ColloquialError> {
         let mut base: HashSet<&str> = HashSet::new();
         for l in base_text.lines() {
             let f: Vec<&str> = l.split_whitespace().collect();
@@ -117,7 +135,7 @@ impl Colloquial {
             take(&l.map_err(|_| ColloquialError::Read)?);
         }
         pack_text.unwrap_or("").lines().for_each(&mut take);
-        Ok(Colloquial { lm, n1, overlay_only, first_unigram: false, unseen_start_unigram: false })
+        Ok(Colloquial { table, overlay_only, first_unigram: false, unseen_start_unigram: false })
     }
 
     /// `load` with the base lexicon and the overlay read from `lexicon_dir` (`mcbpmf-data.txt`, `overlay-add.tsv`): the one place the engine
@@ -129,9 +147,14 @@ impl Colloquial {
         Colloquial::load(table, &base, std::io::BufReader::new(overlay), pack_text)
     }
 
+    /// The loaded table file, to share with another engine's `Colloquial` (`with_table`).
+    pub fn table(&self) -> &Arc<ColloquialTable> {
+        &self.table
+    }
+
     /// SHA-256 (hex) of the table file.
     pub fn sha256(&self) -> &str {
-        self.lm.sha256()
+        self.table.lm.sha256()
     }
 
     /// Turn the SR-TW-C first-word estimate on or off (`first_unigram`; off after `load`).
@@ -159,14 +182,15 @@ impl Colloquial {
     /// the first word's term is that back-off estimate (c(w) + 1) / (N + V + 1) itself, not P(w | `<s>`); with `unseen_start_unigram` the same
     /// holds only for a first word the table has no `<s>` bigram for (`Lm::has_bigram`). The other terms are unchanged.
     pub fn lc<S: AsRef<str>>(&self, words: &[S]) -> f64 {
+        let (lm, n1) = (&self.table.lm, self.table.n1);
         let (mut prev, mut tot) = ("<s>", 0.0);
         for (i, w) in words.iter().enumerate() {
             let w = w.as_ref();
-            let pb = (self.lm.count(w) + 1) as f64 / self.n1;
-            tot += if i == 0 && (self.first_unigram || (self.unseen_start_unigram && !self.lm.has_bigram(prev, w))) { pb } else { self.lm.prob(prev, w, pb) }.log10();
+            let pb = (lm.count(w) + 1) as f64 / n1;
+            tot += if i == 0 && (self.first_unigram || (self.unseen_start_unigram && !lm.has_bigram(prev, w))) { pb } else { lm.prob(prev, w, pb) }.log10();
             prev = w;
         }
-        tot + self.lm.eos(1.0, prev)
+        tot + lm.eos(1.0, prev)
     }
 
     /// k: words of the split in the overlay set and not in the base lexicon, repeats counted.

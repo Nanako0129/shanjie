@@ -243,6 +243,11 @@ impl Lexicon {
     /// `parse_with`, then the variant-order rows (docs/spec/decoder.md §2.3): before sorting, under each row's reading the score of
     /// `less` becomes min(its score, `more`'s score - `VARIANT_GAP`). A row naming a spelling the lexicon lacks under that reading is an error.
     pub fn parse_with_variants(text: &str, overlay: Option<&str>, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+        Self::parse_applying(text, overlay, variants, apply_variant_order)
+    }
+
+    /// `parse_with_variants` with the variant-order step given, so a test can build the lexicon with the step as it was written before.
+    fn parse_applying(text: &str, overlay: Option<&str>, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
         let mut b = Builder::default();
         for line in text.lines() {
             if matches!(line.chars().next(), Some('#') | Some('_')) {
@@ -276,37 +281,90 @@ impl Lexicon {
                 }
             }
         }
-        b.finish(base_n, bad_row, manual, variants)
+        b.finish(base_n, bad_row, manual, variants, apply)
     }
 }
 
+/// The variant-order step of `Builder::finish`: the rows of the table applied to the file-order rows (`raw`) in table order.
+type ApplyVariants = fn(&mut [Raw], &str, &[u32], &HashMap<String, u32>, &[(usize, VariantRow)]) -> Result<(), Error>;
+
+fn apply_variant_order(raw: &mut [Raw], words: &str, key_pool: &[u32], syl_ids: &HashMap<String, u32>, var_rows: &[(usize, VariantRow)]) -> Result<(), Error> {
+    // One pass over the rows collects, per distinct reading a variant row names, the rows under it (file order); the rows are then
+    // applied in table order, reading the scores as the earlier rows left them. (An unknown syllable is reported when its row's turn comes.)
+    let var_ids: Vec<Option<Vec<u32>>> = var_rows.iter().map(|(_, v)| v.reading.iter().map(|s| syl_ids.get(s).copied()).collect()).collect();
+    let mut bucket_of: HashMap<&[u32], usize> = HashMap::new();
+    for ids in var_ids.iter().flatten() {
+        let next = bucket_of.len();
+        bucket_of.entry(ids.as_slice()).or_insert(next);
+    }
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bucket_of.len()];
+    if !bucket_of.is_empty() {
+        for (f, r) in raw.iter().enumerate() {
+            if let Some(&bi) = bucket_of.get(&key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]) {
+                buckets[bi].push(f);
+            }
+        }
+    }
+    for ((line, v), ids) in var_rows.iter().zip(&var_ids) {
+        let bad = Error::BadVariantOrder { line: *line };
+        let Some(ids) = ids else { return Err(bad) };
+        let rows = &buckets[bucket_of[ids.as_slice()]];
+        let at = |w: &str| -> Vec<usize> {
+            rows.iter()
+                .copied()
+                .filter(|&f| {
+                    let r = &raw[f];
+                    r.ent.len as usize == w.len() && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
+                })
+                .collect()
+        };
+        let (less, more) = (at(&v.less), at(&v.more));
+        let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
+        if less.is_empty() || more.is_empty() {
+            return Err(bad);
+        }
+        for f in less {
+            raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
+        }
+    }
+    Ok(())
+}
+
+/// The step as it was before the one-pass rewrite (every variant row scanned all rows twice), kept for the test that builds both ways.
+#[cfg(test)]
+fn apply_variant_order_scanning(raw: &mut [Raw], words: &str, key_pool: &[u32], syl_ids: &HashMap<String, u32>, var_rows: &[(usize, VariantRow)]) -> Result<(), Error> {
+    let n = raw.len();
+    for (line, v) in var_rows {
+        let bad = Error::BadVariantOrder { line: *line };
+        let ids: Vec<u32> = v.reading.iter().map(|s| syl_ids.get(s).copied().ok_or(bad.clone())).collect::<Result<_, _>>()?;
+        let at = |w: &str| -> Vec<usize> {
+            (0..n)
+                .filter(|&f| {
+                    let r = &raw[f];
+                    r.ent.len as usize == w.len()
+                        && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
+                        && key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize] == ids[..]
+                })
+                .collect()
+        };
+        let (less, more) = (at(&v.less), at(&v.more));
+        let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
+        if less.is_empty() || more.is_empty() {
+            return Err(bad);
+        }
+        for f in less {
+            raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
+        }
+    }
+    Ok(())
+}
+
 impl Builder {
-    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
         let Builder { syl_ids, syl_names, key_pool, mut raw, words } = self;
         let n = raw.len();
         // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
-        for (line, v) in variants.map_or(&[][..], |v| &v.rows[..]) {
-            let bad = Error::BadVariantOrder { line: *line };
-            let ids: Vec<u32> = v.reading.iter().map(|s| syl_ids.get(s).copied().ok_or(bad.clone())).collect::<Result<_, _>>()?;
-            let at = |w: &str| -> Vec<usize> {
-                (0..n)
-                    .filter(|&f| {
-                        let r = &raw[f];
-                        r.ent.len as usize == w.len()
-                            && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
-                            && key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize] == ids[..]
-                    })
-                    .collect()
-            };
-            let (less, more) = (at(&v.less), at(&v.more));
-            let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
-            if less.is_empty() || more.is_empty() {
-                return Err(bad);
-            }
-            for f in less {
-                raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
-            }
-        }
+        apply(&mut raw, &words, &key_pool, &syl_ids, variants.map_or(&[][..], |v| &v.rows[..]))?;
         let key = |f: u32| {
             let r = &raw[f as usize];
             &key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]

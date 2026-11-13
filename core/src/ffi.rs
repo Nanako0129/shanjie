@@ -5,7 +5,7 @@
 #[cfg(panic = "abort")]
 compile_error!("C ABI requires panic=unwind");
 
-use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, RerankJob, RerankResult, ResetMode, PACK_ALL};
+use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, RerankJob, RerankResult, ResetMode, Shared, PACK_ALL};
 use crate::lm::Profile;
 use crate::tinylm::RerankLevel;
 use std::ffi::{c_char, CStr, CString};
@@ -68,6 +68,22 @@ const _: () = {
     #[allow(dead_code)]
     fn assertion() {
         send_sync::<ShanjieRerankJob>();
+    }
+};
+
+/// Opaque to C (docs/spec/c-abi.md §5.4): the parts of an engine a new engine can reuse (`shanjie_engine_share`, `shanjie_engine_new_shared`).
+/// Owned data only (no engine borrow, no user input), never changed after it is made, so it outlives the engine and several `new_shared`
+/// calls may read it. No `Debug`: it holds the data folder's path, which no log may carry.
+pub struct ShanjieShared(Shared);
+
+// Send and Sync from the field types (an `Arc` of the model and tables, a path), never from an `unsafe impl` of this crate's own.
+const _: () = {
+    fn send_sync<T: Send + Sync>() {}
+    fn send<T: Send>() {}
+    #[allow(dead_code)]
+    fn assertion() {
+        send_sync::<ShanjieShared>();
+        send::<Engine>();
     }
 };
 
@@ -236,6 +252,94 @@ pub unsafe extern "C" fn shanjie_engine_new_packs(
             Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
         }
     })
+}
+
+/// docs/spec/c-abi.md §5.4: takes the reusable parts of `engine` (only `Arc`s are copied, no file is read). Call it on the engine's own thread.
+/// 1 for NULL; 3 when the engine has no n-gram model loaded (nothing to share); `*out` is NULL on any non-zero code. The caller frees the handle
+/// with `shanjie_shared_free` exactly once.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_share(engine: *mut ShanjieEngine, out: *mut *mut ShanjieShared) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, on its own thread (docs/spec/c-abi.md §5.2).
+        let Some(s) = unsafe { &(*engine).0 }.share() else {
+            return SHANJIE_ERR_LOAD;
+        };
+        // SAFETY: `out` checked non-NULL above.
+        unsafe { *out = Box::into_raw(Box::new(ShanjieShared(s))) };
+        SHANJIE_OK
+    })
+}
+
+/// docs/spec/c-abi.md §5.4: `shanjie_engine_new_packs` (the data folder is the source engine's) followed by `load_lm`, `load_tinylm` and
+/// `load_colloquial`, with the parts of `shared` in place of what those read. Any thread. Every step must succeed: any failure returns
+/// non-zero with `*out` NULL and no engine. Codes as `shanjie_engine_new_packs` (1, 2, 3, 4).
+///
+/// # Safety
+/// `shared` is NULL or a handle from `shanjie_engine_share` not yet freed and not freed while this call runs; `packs_dir` is NULL (mask 0 only) or
+/// a NUL-terminated string; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_new_shared(
+    shared: *const ShanjieShared,
+    layout: u32,
+    packs_dir: *const c_char,
+    packs: u32,
+    out: *mut *mut ShanjieEngine,
+) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || shared.is_null() || (packs != 0 && packs_dir.is_null()) {
+            return SHANJIE_ERR_NULL;
+        }
+        let layout = match layout {
+            0 => Layout::Standard,
+            1 => Layout::Eten,
+            _ => return SHANJIE_ERR_INVALID,
+        };
+        if packs & !PACK_ALL != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
+        let pdir = if packs == 0 {
+            None
+        } else {
+            // SAFETY: non-NULL (checked above), NUL-terminated per the caller contract.
+            let Ok(p) = unsafe { CStr::from_ptr(packs_dir) }.to_str() else {
+                return SHANJIE_ERR_INVALID;
+            };
+            Some((Path::new(p), packs))
+        };
+        // SAFETY: live handle per the caller contract; a shared reference only.
+        match Engine::new_shared(unsafe { &(*shared).0 }, layout, pdir) {
+            Ok(e) => {
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
+                SHANJIE_OK
+            }
+            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
+            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
+        }
+    })
+}
+
+/// Any thread; NULL does nothing. Only after every `shanjie_engine_new_shared` that uses it has returned.
+///
+/// # Safety
+/// `shared` is NULL or a handle from `shanjie_engine_share` not yet freed, not in use by another call.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_shared_free(shared: *mut ShanjieShared) {
+    guard(|| {
+        if !shared.is_null() {
+            // SAFETY: allocated by `Box::into_raw` in `shanjie_engine_share`, freed once (header).
+            drop(unsafe { Box::from_raw(shared) });
+        }
+        SHANJIE_OK
+    });
 }
 
 /// # Safety
@@ -2883,5 +2987,162 @@ mod tests {
         let (ok, out, err) = run_child("child_rerank_panic", true);
         assert!(ok && out.contains("1 passed"), "default-hook child failed");
         assert!(err.contains(RERANK_NGRAM) && err.contains(LEFT_MARKER), "positive control: default hook did not print the text");
+    }
+    // ---- shared parts (docs/spec/c-abi.md §5.4): share, new_shared, shared_free ----
+
+    fn real_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    }
+    fn cpath(p: &Path) -> CString {
+        CString::new(p.to_str().unwrap()).unwrap()
+    }
+
+    /// A copy of the real data folder (files only), so a file can be taken out and put back.
+    fn data_copy(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("shanjie-ffi-share-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for f in std::fs::read_dir(real_root().join("data/lexicon")).unwrap() {
+            let f = f.unwrap();
+            if f.file_type().unwrap().is_file() {
+                std::fs::copy(f.path(), d.join(f.file_name())).unwrap();
+            }
+        }
+        d
+    }
+
+    /// 你好 typed on the standard layout; the preedit it leaves (the engine is reset after).
+    fn types_nihao(e: *mut ShanjieEngine) -> bool {
+        let mut last = String::new();
+        for (kind, c) in [(CHAR, 's'), (CHAR, 'u'), (CHAR, '3'), (CHAR, 'c'), (CHAR, 'l'), (CHAR, '3')] {
+            let (rc, preedit, _) = send(e, key(kind, c));
+            if rc != 0 {
+                return false;
+            }
+            last = preedit;
+        }
+        let mut o = ptr::null_mut();
+        let rc = unsafe { shanjie_engine_reset(e, 1, &mut o) };
+        unsafe { shanjie_output_free(o) };
+        rc == 0 && last == "你好"
+    }
+
+    /// An engine from the files, with the model: the source of every `share` below.
+    fn source_engine(dir: &Path, packs_dir: &Path, packs: u32) -> *mut ShanjieEngine {
+        let (d, p) = (cpath(dir), cpath(packs_dir));
+        let lm = cpath(&real_root().join("data/lm/bigram.sjlm"));
+        let mut e = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_new_packs(d.as_ptr(), 0, p.as_ptr(), packs, &mut e) } == 0, "source engine");
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "source load_lm");
+        e
+    }
+
+    #[test]
+    fn child_share() {
+        if !is_child("child_share") {
+            return;
+        }
+        let dir = data_copy("codes");
+        let packs = real_root().join("data/packs");
+        let (pk, pk_none) = (cpath(&packs), CString::new("/nonexistent/shanjie-packs").unwrap());
+        let mut sh: *mut ShanjieShared = sentinel_shared();
+        let mut ne: *mut ShanjieEngine = ptr::NonNull::dangling().as_ptr();
+
+        // share: NULL engine and NULL out are 1 (*out cleared when it can be); an engine without a model is 3, *out NULL.
+        assert!(unsafe { shanjie_engine_share(ptr::null_mut(), &mut sh) } == 1 && sh.is_null(), "share engine NULL");
+        let bare = new_engine(&dir, 0);
+        assert!(unsafe { shanjie_engine_share(bare, ptr::null_mut()) } == 1, "share out NULL");
+        sh = sentinel_shared();
+        assert!(unsafe { shanjie_engine_share(bare, &mut sh) } == 3 && sh.is_null(), "share without a model");
+        unsafe { shanjie_engine_free(bare) };
+
+        // The source, and one handle of it.
+        let src = source_engine(&dir, &packs, 29);
+        assert!(unsafe { shanjie_engine_share(src, &mut sh) } == 0 && !sh.is_null(), "share");
+
+        // new_shared: the argument codes, *out NULL on every non-zero.
+        let mut call = |shared: *const ShanjieShared, layout: u32, pdir: *const c_char, mask: u32| {
+            ne = ptr::NonNull::dangling().as_ptr();
+            let rc = unsafe { shanjie_engine_new_shared(shared, layout, pdir, mask, &mut ne) };
+            (rc, ne)
+        };
+        assert!(call(ptr::null(), 0, pk.as_ptr(), 1) == (1, ptr::null_mut()), "shared NULL");
+        assert!(call(sh, 0, ptr::null(), 1) == (1, ptr::null_mut()), "packs_dir NULL with a mask");
+        assert!(unsafe { shanjie_engine_new_shared(sh, 0, pk.as_ptr(), 1, ptr::null_mut()) } == 1, "out NULL");
+        assert!(call(sh, 2, pk.as_ptr(), 1) == (2, ptr::null_mut()), "layout 2");
+        assert!(call(sh, 0, pk.as_ptr(), 32) == (2, ptr::null_mut()), "an unknown mask bit");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        assert!(call(sh, 0, bad_utf8.as_ptr(), 1) == (2, ptr::null_mut()), "packs_dir not UTF-8");
+        // Mask 0 ignores packs_dir, even NULL.
+        let (rc, e0) = call(sh, 0, ptr::null(), 0);
+        assert!(rc == 0 && !e0.is_null() && types_nihao(e0), "mask 0, no packs_dir");
+        unsafe { shanjie_engine_free(e0) };
+        // A pack file that exists but is broken is 3; a missing one contributes nothing.
+        let bad_packs = std::env::temp_dir().join(format!("shanjie-ffi-share-{}-badpack", std::process::id()));
+        std::fs::create_dir_all(&bad_packs).unwrap();
+        std::fs::write(bad_packs.join("acg-add.tsv"), "not a pack row\n").unwrap();
+        let bp = cpath(&bad_packs);
+        assert!(call(sh, 0, bp.as_ptr(), 1) == (3, ptr::null_mut()), "a broken pack file");
+        let (rc, e1) = call(sh, 0, pk_none.as_ptr(), 31);
+        assert!(rc == 0 && types_nihao(e1), "no pack files at all is the engine without packs");
+        unsafe { shanjie_engine_free(e1) };
+        std::fs::remove_dir_all(&bad_packs).unwrap();
+
+        // The failure after the lexicon is built: the reading step (std-exempt.tsv gone). No engine, for mask 0 and for 29; once the file is
+        // back the same handle builds, and the engine types.
+        let exempt = dir.join(crate::engine::READING_EXEMPT_FILE);
+        let keep = std::fs::read(&exempt).unwrap();
+        std::fs::remove_file(&exempt).unwrap();
+        for mask in [0, 29] {
+            assert!(call(sh, 0, pk.as_ptr(), mask) == (3, ptr::null_mut()), "std-exempt.tsv gone, mask {mask}: code 3 and no engine");
+        }
+        std::fs::write(&exempt, keep).unwrap();
+        for mask in [0, 29] {
+            let (rc, e) = call(sh, 0, pk.as_ptr(), mask);
+            assert!(rc == 0 && !e.is_null() && types_nihao(e), "the file is back, mask {mask}");
+            unsafe { shanjie_engine_free(e) };
+        }
+
+        // Free the source: the handle still serves, and a free of NULL does nothing.
+        unsafe { shanjie_engine_free(src) };
+        let (rc, e) = call(sh, 0, pk.as_ptr(), 28);
+        assert!(rc == 0 && types_nihao(e), "after the source is freed");
+        unsafe { shanjie_engine_free(e) };
+        unsafe { shanjie_shared_free(ptr::null_mut()) };
+
+        // Another thread builds with the handle while this thread types on the source's successor.
+        let src2 = source_engine(&dir, &packs, 29);
+        let mut sh2 = sentinel_shared();
+        assert!(unsafe { shanjie_engine_share(src2, &mut sh2) } == 0);
+        let (shared_addr, pk2) = (sh2 as usize, pk.clone());
+        let built = std::thread::spawn(move || {
+            let mut out: *mut ShanjieEngine = ptr::null_mut();
+            let rc = unsafe { shanjie_engine_new_shared(shared_addr as *const ShanjieShared, 0, pk2.as_ptr(), 28, &mut out) };
+            (rc, out as usize)
+        });
+        for _ in 0..50 {
+            assert!(types_nihao(src2), "the source types while the other thread builds");
+        }
+        let (rc, addr) = built.join().unwrap();
+        let e = addr as *mut ShanjieEngine;
+        assert!(rc == 0 && !e.is_null() && types_nihao(e), "the engine built on another thread types here");
+        unsafe { shanjie_engine_free(e) };
+        unsafe { shanjie_engine_free(src2) };
+        unsafe { shanjie_shared_free(sh2) };
+        unsafe { shanjie_shared_free(sh) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn sentinel_shared() -> *mut ShanjieShared {
+        ptr::NonNull::dangling().as_ptr()
+    }
+
+    /// docs/spec/c-abi.md §5.4 through the C ABI: the codes, nothing half-built, the handle outliving the source, a build on another thread.
+    #[test]
+    fn share_and_new_shared_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_share", false);
+        assert!(ok, "shared parts child failed: {out}{err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }
 }

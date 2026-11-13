@@ -6,8 +6,11 @@
  *    other logging; never interpolate input text into fatalError / precondition / assert messages.
  *  - Copy every field you need into Swift `String`s in the same call that received the output, then
  *    call shanjie_output_free immediately. Do not keep ShanjieOutput pointers around.
- *  - A handle is not thread-safe: make every call on one thread (the IMK main thread). The exceptions are
- *    shanjie_rerank_run and shanjie_rerank_free, which take no engine (S7c-2a, below).
+ *  - An engine handle is not thread-safe: only one thread may use it at a time (in the shell, the IMK main thread). Creating one
+ *    (shanjie_engine_new*, shanjie_engine_new_shared) and the shanjie_engine_load_* calls may be done on another thread, then the
+ *    whole handle is given to the thread that uses it; the first thread does not touch it afterwards. shanjie_engine_free may be called
+ *    on any thread when no other call is using the handle. The calls that take no engine may run on any thread: shanjie_rerank_run
+ *    and shanjie_rerank_free (S7c-2a, below), and shanjie_engine_new_shared and shanjie_shared_free (parts shared between engines, below).
  *  - Any non-zero return of shanjie_engine_key / shanjie_engine_pick: treat the key as not handled (pass it
  *    through) and do not record it. The non-zero codes of shanjie_engine_rerank_take, shanjie_rerank_run and
  *    shanjie_engine_rerank_apply do NOT mean pass-through: they have no key.
@@ -109,7 +112,8 @@ int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine 
 //   SHANJIE_PACK_QUOTES = classic quotes, packs_dir/quotes-add.tsv; SHANJIE_PACK_IT = IT+AI, packs_dir/it-add.tsv; SHANJIE_PACK_MEME = meme, packs_dir/meme-add.tsv; SHANJIE_PACK_BEAUTY = beauty, packs_dir/beauty-add.tsv; the files are read
 //   in that order (ACG, quotes, IT, meme, beauty), the bits combine);
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
-//   off by freeing the engine and creating another, like a layout change. packs 0 ignores packs_dir (may be NULL)
+//   off by building another engine (shanjie_engine_new_shared below, on a background thread) and replacing the first with it when
+//   nothing is being composed, like a layout change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
 //   2 for a bit outside the mask (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT | SHANJIE_PACK_MEME | SHANJIE_PACK_BEAUTY) or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
 //   be read or parsed. The anime pack's words keep the pack file's score (not capped) and are unknown to the LM when decoding (pack-oov);
@@ -484,6 +488,31 @@ int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job
 //   the same job). Undefined behaviour: freeing a job twice, run or apply after free, freeing a pointer rerank_take did not hand
 //   out, and using one job from two threads at once (apply or free while run is still running).
 void    shanjie_rerank_free(ShanjieRerankJob *job);
+
+// Parts shared between engines (docs/spec/c-abi.md §5.4): a pack switch builds a new engine without reading the model files again.
+//   A ShanjieShared owns only data: the loaded n-gram model (the two trigram tables inside it are memory maps), the small model, the
+//   colloquial table, the digit table, the English follower table and the reading table when it can be reused (no enabled pack of
+//   either engine holds a one-syllable reading), plus the data folder's path. No user input is in it (no left context, composition,
+//   candidates or choice memory). It borrows nothing from the engine, so it stays valid after the engine is freed, and it never changes.
+//   The path is never written to a log.
+typedef struct ShanjieShared ShanjieShared;
+// share: on the engine's own thread; copies the references to the shareable parts, reads no file. 1 when engine or out is NULL;
+//   3 when the engine has no n-gram model loaded (nothing to share); *out is NULL on any non-zero code. Every handle it returns must be
+//   freed exactly once with shanjie_shared_free; one handle may serve several shanjie_engine_new_shared calls, one call at a time.
+int32_t shanjie_engine_share(ShanjieEngine *engine, ShanjieShared **out);
+// new_shared: callable on any thread. Equal to shanjie_engine_new_packs (the data folder is the source engine's) followed by
+//   shanjie_engine_load_lm, shanjie_engine_load_tinylm and shanjie_engine_load_colloquial, with the parts of shared used instead of
+//   reading them; the lexicon (with the pack rows), the capped lexicon, the prediction index, the digit and word tables and the files
+//   demote.tsv, variant-order.tsv, rerank-protect.tsv, std-exempt.tsv and mixed-words.tsv are read or built again. Every step must
+//   succeed: any failure returns non-zero with *out NULL and no engine (never one without a model). Codes as shanjie_engine_new_packs:
+//   1 shared or out NULL (or packs_dir NULL with a non-zero mask); 2 layout or packs out of range, or packs_dir not UTF-8; 3 a
+//   file cannot be read or parsed; 4 internal. The new engine is in the state new_packs plus the three load calls leave: default
+//   settings, no choice memory file open; the shell sends every setting again.
+int32_t shanjie_engine_new_shared(const ShanjieShared *shared, uint32_t layout, const char *packs_dir, uint32_t packs, ShanjieEngine **out);
+// shared_free(NULL) does nothing. Call it only after every shanjie_engine_new_shared that uses the handle has returned. Undefined
+//   behaviour (nothing checks): releasing a handle while a new_shared that uses it is running, releasing it twice, using it after it
+//   is released, and releasing a pointer shanjie_engine_share did not hand out.
+void    shanjie_shared_free(ShanjieShared *shared);
 
 #ifdef __cplusplus
 }
