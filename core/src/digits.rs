@@ -15,6 +15,11 @@ pub const ALPHABET: &str = "0123456789./-";
 pub const MAX_BUF: usize = 4;
 /// C's R2: a pure-Zhuyin split of a closed syllable is scored `theta` higher.
 pub const THETA: f64 = 3.0;
+/// docs/spec/english-mixed.md §7.3, §15: how much lower (log10) a reading with keys put in column order scores than the same syllable typed in order.
+/// A run's digit-alphabet keys can rejoin the syllable typed right behind them only at this price: lower and more numbers are eaten, higher and fewer hurried syllables are saved.
+pub const RHO: f64 = 8.0;
+/// `RHO` for a run that starts with `.` `/` `-` (a decimal point, a slash or a hyphen is a weaker start of a number: with 8 alone the hurried `. u 3` at a sentence start stayed `.以`).
+pub const RHO_SYM: f64 = 4.0;
 /// beta of P(D | C) and gamma of P(w | v, D) (docs/spec/english-mixed.md §7.2, §7.8, written in).
 const BETA: f64 = 1.0;
 const GAMMA: f64 = 1.0;
@@ -198,6 +203,23 @@ impl Legal {
     }
 }
 
+impl Legal {
+    /// `tail_units` of the tail with its symbol keys in column order (docs/spec/english-mixed.md §7.3): the keys but the last (the closing key) go one to a
+    /// column (initial, medial, final), a column asked twice or a key that is no symbol key makes it `None`, then the closing key.
+    pub fn tail_units_in_columns(&self, tail: &[char]) -> Option<Vec<Unit>> {
+        let (closing, body) = tail.split_last()?;
+        let mut cols: [Option<char>; 3] = [None; 3];
+        for &k in body {
+            let (c, _) = Layout::Standard.symbol_of(k)?;
+            if cols[c].replace(k).is_some() {
+                return None;
+            }
+        }
+        let sorted: Vec<char> = cols.iter().flatten().chain(std::iter::once(closing)).copied().collect();
+        self.tail_units(&sorted)
+    }
+}
+
 /// One way to read the buffer: the first `m` keys are digits, the next `t` keys (plus an extra key, when there is one) are the tail.
 pub struct Split {
     pub m: usize,
@@ -234,7 +256,7 @@ fn log10_sum(terms: impl Iterator<Item = f64>) -> Option<f64> {
 
 impl Scorer<'_> {
     /// lpD (docs/spec/english-mixed.md §7.3): 0 with no digit key; else log P(D | C) + log P_len(d | ended) + the log P_ch of the first d keys, in key order.
-    fn lp_d(&self, c: &str, dkeys: &[char], ended: bool) -> f64 {
+    pub(crate) fn lp_d(&self, c: &str, dkeys: &[char], ended: bool) -> f64 {
         if dkeys.is_empty() {
             return 0.0;
         }
@@ -244,7 +266,7 @@ impl Scorer<'_> {
 
     /// lpZ: log of the sum, over the words compatible with the tail (candidate order), of P(w | C') with C' the word context `c` (no digit
     /// before: the model's probability, not `word_by_id`'s blend) or the digit context (c, D).
-    fn lp_z(&self, c: &str, digit_ctx: bool, units: &[Unit]) -> f64 {
+    pub(crate) fn lp_z(&self, c: &str, digit_ctx: bool, units: &[Unit]) -> f64 {
         let ctx = self.lm.context_of(c);
         let mut tot = 0.0;
         for (w, lp, wid) in compat_words(self.idx, units) {
@@ -258,43 +280,101 @@ impl Scorer<'_> {
     /// `extra`: `None`, `Some(' ')`, or a non-alphabet symbol key (it always belongs to the tail). `emitted`: keys already flushed (digits).
     /// `prev_d`: digits displayed before this key (`None` at a run's first key). `closing`: the key just pressed is a tone key or Space,
     /// so a tail that ends in it closes a syllable. `complete`: tails that end in a tone key are allowed (false when only re-scoring the display).
-    pub fn decide(&self, c: &str, emitted: &[char], buf: &[char], extra: Option<char>, prev_d: Option<usize>, closing: bool, complete: bool) -> Decision {
+    ///
+    /// `reorder` is `Some((rho, rho_sym))` when the reversal guard is on (docs/spec/english-mixed.md §7.3): at a closing key (the tail ends in a tone key
+    /// or Space) a tail that is not a legal tail in the order typed is tried once more with its symbol keys in column order (each column at most once,
+    /// the closing key last); a legal result is one more split, scored `rho` lower (`rho_sym` when the run starts with `.` `/` `-`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn decide(&self, c: &str, emitted: &[char], buf: &[char], extra: Option<char>, prev_d: Option<usize>, closing: bool, complete: bool, reorder: Option<(f64, f64)>) -> Decision {
         let n = buf.len();
         let boundary = extra == Some(' ');
         // (m, t, units)
-        let mut cands: Vec<(usize, usize, Option<Vec<Unit>>)> = Vec::new();
+        let mut cands: Vec<(usize, usize, Option<Vec<Unit>>, f64)> = Vec::new();
         for m in (0..=n).rev() {
             let tail: Vec<char> = buf[m..].iter().copied().chain(extra).collect();
             if tail.is_empty() {
-                cands.push((m, 0, None));
+                cands.push((m, 0, None, 0.0));
             } else if tail.len() <= MAX_BUF {
                 let ends_closed = tone_mark_of_key(*tail.last().unwrap_or(&'x')).is_some() || tail.last() == Some(&' ');
                 if ends_closed && !complete {
                     continue;
                 }
                 if let Some(units) = self.legal.tail_units(&tail) {
-                    cands.push((m, tail.len(), Some(units)));
+                    cands.push((m, tail.len(), Some(units), 0.0));
+                } else if let (Some((rho, rho_sym)), true) = (reorder, ends_closed) {
+                    if let Some(units) = self.legal.tail_units_in_columns(&tail) {
+                        let sym = matches!(emitted.first().or(buf.first()), Some('.' | '/' | '-'));
+                        cands.push((m, tail.len(), Some(units), if sym { rho_sym } else { rho }));
+                    }
                 }
             }
         }
         if boundary {
-            cands.push((n, 0, None)); // all digits, the space is a boundary (the t = 0 split of buf + space)
+            cands.push((n, 0, None, 0.0)); // all digits, the space is a boundary (the t = 0 split of buf + space)
         }
         if cands.is_empty() {
             return Decision { splits: Vec::new(), pick: None };
         }
         let mut splits = Vec::with_capacity(cands.len());
-        for (m, t, units) in &cands {
+        for (m, t, units, rho) in &cands {
             let digits: Vec<char> = emitted.iter().chain(&buf[..*m]).copied().collect();
             let lpd = self.lp_d(c, &digits, *t > 0 || boundary);
             let lpz = match units {
                 Some(u) if *t > 0 => self.lp_z(c, !digits.is_empty(), u),
                 _ => 0.0,
             };
-            splits.push(Split { m: *m, t: *t, score: lpd + lpz });
+            splits.push(Split { m: *m, t: *t, score: lpd + lpz - rho });
         }
         let pick = Self::choose(&splits, emitted.len(), prev_d, closing, closing || extra.is_some());
         Decision { splits, pick: Some(pick) }
+    }
+
+    /// The rejoin test of the digit tokens a run just made (docs/spec/english-mixed.md §7.4 "待歸鍵"), at the closing key of the syllable typed right behind
+    /// them, with nothing of the engine's state: `ctx` is the run's context, `before` the run's digit keys before the late keys, `keys` the late keys
+    /// (one or two, typed order), `pend_keys` the unfinished syllable's keys in column order, `closing` its tone key or `' '`. For each suffix of `keys`
+    /// (the longer first) whose keys fill columns `pend_keys` leaves free and that, with the closing key, is a legal complete syllable: the score
+    /// `S_z` (`lpZ + THETA - rho` when no digit stays in front, else `lpD(digits before, ended) + lpZ(digit context) - rho`; `rho_sym` when `before`
+    /// plus `keys` start with `.` `/` `-`); the best (the longer one on a tie) is `take`. `merge`: the syllable as typed (late keys not taken) is no
+    /// complete Han syllable (`s_d` is `None`), or `s_z` is strictly higher than `s_d` = `lpD(all the digit keys, ended) + lpZ(as typed, digit context)`.
+    /// `(None, false, None, None)` when no suffix qualifies.
+    #[allow(clippy::too_many_arguments)]
+    pub fn late_decision(&self, ctx: &str, before: &[char], keys: &[char], pend_keys: &[char], closing: char, rho: f64, rho_sym: f64) -> (Option<usize>, bool, Option<f64>, Option<f64>) {
+        let k = keys.len();
+        let rho = if matches!(before.first().or(keys.first()), Some('.' | '/' | '-')) { rho_sym } else { rho };
+        let mut cols0: [Option<char>; 3] = [None; 3];
+        for &key in pend_keys {
+            if let Some((c, _)) = Layout::Standard.symbol_of(key) {
+                cols0[c] = Some(key);
+            }
+        }
+        let mut best: Option<(usize, f64)> = None;
+        for j in (1..=k).rev() {
+            let mut cols = cols0;
+            let mut ok = true;
+            for &key in &keys[k - j..] {
+                match Layout::Standard.symbol_of(key) {
+                    Some((c, _)) if cols[c].is_none() => cols[c] = Some(key),
+                    _ => ok = false,
+                }
+            }
+            let z_keys: Vec<char> = cols.iter().flatten().copied().chain([closing]).collect();
+            let Some(u_z) = self.legal.tail_units(&z_keys).filter(|_| ok) else { continue };
+            let digits: Vec<char> = before.iter().chain(&keys[..k - j]).copied().collect();
+            let s_z = if digits.is_empty() { self.lp_z(ctx, false, &u_z) + THETA } else { self.lp_d(ctx, &digits, true) + self.lp_z(ctx, true, &u_z) } - rho;
+            if best.is_none_or(|(_, b)| s_z > b) {
+                best = Some((j, s_z));
+            }
+        }
+        let Some((take, s_z)) = best else { return (None, false, None, None) };
+        let d_keys: Vec<char> = cols0.iter().flatten().copied().chain([closing]).collect();
+        match self.legal.tail_units(&d_keys) {
+            Some(u_d) => {
+                let all: Vec<char> = before.iter().chain(keys).copied().collect();
+                let s_d = self.lp_d(ctx, &all, true) + self.lp_z(ctx, true, &u_d);
+                (Some(take), s_z > s_d, Some(s_z), Some(s_d))
+            }
+            None => (Some(take), true, Some(s_z), None),
+        }
     }
 
     /// The pick among scored splits (docs/spec/english-mixed.md §7.3). `final`: the key decides on the spot (a closing key, or a Zhuyin key

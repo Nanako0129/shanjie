@@ -281,7 +281,11 @@ int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t ena
 //   in a column before one that is filled goes into its column (Apple Zhuyin), so trigger (b) of set_english never fires, whatever
 //   set_english_key_order says: `l s` Space is the Chinese ㄋㄠ, and a two-letter word only a reversal can type (`ls`, `mv`) needs 0
 //   (or Shift). It does not touch trigger (a) (set_english_overwrite) or trigger (c) (Space; a tone key under set_english_key_order).
-//   Call it after every engine creation, like set_english_key_order.
+//   It also governs two rules that read a hurried syllable as typed in order (docs/spec/english-mixed.md §7.3, §7.4, §4.2): the digit
+//   layer reads digit-alphabet keys of a syllable typed out of order as that syllable (`. u 3` is 有, not `.以`; needs set_english(1) and
+//   the digit table; not set_english_key_order), and a tone key pressed one place early that opened an English run by trigger (c)
+//   (`q 6` is `q6`) turns back into Zhuyin at the next Zhuyin key when that makes a lexicon syllable (`q 6 8` is 爬; needs
+//   set_english_key_order 1 too, which opens the run). Call it after every engine creation, like set_english_key_order.
 int32_t shanjie_engine_set_english_reversal_guard(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
 //   (docs/spec/keys-and-composition.md §9). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when

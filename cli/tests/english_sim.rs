@@ -207,8 +207,9 @@ fn a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on() {
 }
 
 /// `--keys` (the reversal-digits probe, docs/spec/english-mixed.md §13.3): the engine as the App builds it, three fixed lines, nine columns each.
-/// The lines: `.u3` (the digit layer reads `.` as a digit: `.以`), `8su06` after the prefix `ji3` (one unit before, then the digit and ㄋㄧㄢˊ), `wlu6`
-/// (a hurried ㄊㄧㄠˊ, which only the reversal guard keeps from becoming English).
+/// The lines: `.u3` (a hurried ㄧㄡˇ: the digit layer first reads `.` as a digit, one token, and the syllable takes it back at the tone key: `有`; the engine
+/// before the column-order rule gave `.以`), `8su06` after the prefix `ji3` (one unit before, then the digit and ㄋㄧㄢˊ), `wlu6` (a hurried ㄊㄧㄠˊ, which
+/// only the reversal guard keeps from becoming English).
 #[test]
 fn keys_probe_nine_columns() {
     let dir = std::env::temp_dir().join(format!("shanjie-english-sim-keys-{}", std::process::id()));
@@ -219,7 +220,7 @@ fn keys_probe_nine_columns() {
     let o = out.to_str().unwrap();
     let sha = run(&["--keys", input, "--out", o]);
     assert_eq!(sha, "a649b13673ecaf5af43fcbff500b2072c85b4e31cbffe6c12a381eabf0909db7\t3\n");
-    let want = "a1\t0\t_punct_. ㄧˇ\t\t0\t\t0\t1\t.以\na2\t1\t_punct_8 ㄋㄧㄢˊ\t\t0\t\t0\t1\t我8年\na3\t0\tㄊㄧㄠˊ\t\t0\t\t0\t0\t條\n";
+    let want = "a1\t0\tㄧㄡˇ\t\t0\t\t0\t1\t有\na2\t1\t_punct_8 ㄋㄧㄢˊ\t\t0\t\t0\t1\t我8年\na3\t0\tㄊㄧㄠˊ\t\t0\t\t0\t0\t條\n";
     assert_eq!(std::fs::read_to_string(&out).unwrap(), want);
     // An existing output is never overwritten.
     assert!(fails(&["--keys", input, "--out", o]));
@@ -231,4 +232,38 @@ fn keys_probe_nine_columns() {
     run(&["--keys", input, "--out", off.to_str().unwrap(), "--reversal-guard", "off"]);
     assert!(std::fs::read_to_string(&off).unwrap().ends_with("a3\t0\t\t\t4\t2:b\t0\t0\twlu6\n"));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--swap` and `--tone-early` (docs/spec/english-mixed.md §13.3): hurried syllables through the App's engine (`--digits`), one more column at the end, the hurried
+/// syllables after which the composition's last unit is not the syllable, per 1000 syllables of the rows (mean over the seeds). Four rows: 有 ㄧㄡˇ, 爬 ㄆㄚˊ,
+/// 頭 ㄊㄡˊ, 他 ㄊㄚ (tone 1: no tone key to press early). Every syllable swapped (`--swap 1`): all four come out as typed in order with the guard on, none with it off.
+/// Every tone key early (`--tone-early 1`, three syllables): 爬 and 頭 come back, 有 does not (ㄧˇ is a syllable of its own, so no English revert for the next key
+/// to undo): 250 per 1000. The columns before are the ones of `--digits`.
+#[test]
+fn hurried_syllables_column() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-hurried", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|有|ㄧㄡˇ\n|爬|ㄆㄚˊ\n|頭|ㄊㄡˊ\n|他|ㄊㄚ\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let sha = "9301720785562ee7cef6718d4e426bc93e6e11f4f74478b997593c3341ece987";
+    let go = |extra: &[&str]| {
+        let mut a = vec!["--rows", rows, "--digits", "--overwrite", "off", "--reversal-guard", "on", "--p", "0", "--repeat", "3"];
+        a.extend(extra);
+        run(&a)
+    };
+    let z = "0.000\t0.000";
+    // rows syllables keys typos | revert a, b, c, split, english_final | digits final, shown, extra | hurried_bad (each a mean and a max over the seeds)
+    assert_eq!(go(&["--swap", "1"]), format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t{z}\t{z}\t{z}\t{z}\t2000.000\t2000.000\t{z}\t0.000\n"));
+    assert_eq!(go(&["--tone-early", "1"]), format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t500.000\t500.000\t{z}\t{z}\t{z}\t{z}\t{z}\t250.000\n"));
+    assert_eq!(
+        go(&["--swap", "1", "--reversal-guard", "off"]),
+        format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t500.000\t500.000\t{z}\t{z}\t{z}\t2000.000\t2000.000\t{z}\t1000.000\n")
+    );
+    assert_eq!(go(&["--swap", "0.5", "--tone-early", "0.5"]), format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t166.667\t250.000\t{z}\t{z}\t{z}\t1333.333\t1500.000\t{z}\t0.000\n"));
+    // Without both options the line has no extra column; the options are for the typing mode and between 0 and 1.
+    assert_eq!(go(&[]).matches('\t').count(), 4 + 10 + 6);
+    assert!(fails(&["--words", LIST, "--recall", "--swap", "0.5"]));
+    assert!(fails(&["--rows", rows, "--swap", "1.5"]));
+    std::fs::remove_dir_all(std::path::Path::new(rows).parent().unwrap()).unwrap();
 }

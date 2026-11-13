@@ -12,7 +12,7 @@ use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
 use crate::mixed::MixedTable;
 mod digit_layer;
-use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent};
+use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent, Late, LateEvent};
 use crate::tinylm::{Learning, RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, ManualSet, NoLearning, VariantOrder, BEAM_S1};
 use std::collections::{HashMap, HashSet};
@@ -918,6 +918,15 @@ pub struct Engine {
     d_shown: usize,
     d_emitted: usize,
     dtrace: Option<Vec<DigitEvent>>,
+    /// docs/spec/english-mixed.md §7.4 "待歸鍵": the digit tokens a run just made that the syllable typed next may take back (`digit_layer::Late`). `late_in` is what the
+    /// current key saw of `late` (taken at the start of every `key()`, like `ld_now`); the key puts back what it did not use: rule 9 (`late_keep`), or a key
+    /// that changed nothing (not handled, nothing committed). Any other key leaves `late` empty.
+    late: Option<Late>,
+    late_in: Option<Late>,
+    /// The two penalties of the column-order reading (`digits::RHO`, `digits::RHO_SYM`); the tool hook `set_reorder_penalty` changes them.
+    reorder: (f64, f64),
+    /// Test and tool hook: the rejoin tests made.
+    ltrace: Option<Vec<LateEvent>>,
     /// docs/spec/keys-and-composition.md §5.3 step 3: the syllable ranges ⌘⌫ forgot an entry over in the latest `key()`; the head freeze leaves them alone, so
     /// a forget shows on screen at once. Cleared by `cap_snapshot`.
     forgot: Vec<(usize, usize)>,
@@ -1239,6 +1248,10 @@ impl Engine {
             d_shown: 0,
             d_emitted: 0,
             dtrace: None,
+            late: None,
+            late_in: None,
+            reorder: (crate::digits::RHO, crate::digits::RHO_SYM),
+            ltrace: None,
             forgot: Vec::new(),
             cap: None,
             free: Vec::new(),
@@ -2329,11 +2342,43 @@ impl Engine {
         Ok(())
     }
 
+    /// docs/spec/english-mixed.md §4.2 (tone moved up): the run is a revert (c) at a tone key, not changed since, and `ch` is a Zhuyin key of a column that revert left
+    /// free; when the columns with `ch` and that tone make a syllable of the lexicon, the Zhuyin comes back with `ch` in its column and the tone closes it. `None`
+    /// (nothing done) when any of that is not so. Only with the reversal guard on; the caller checks it.
+    fn tone_early(&mut self, ch: char) -> Result<Option<Output>, EngineError> {
+        let Some((col, sym)) = Layout::Standard.symbol_of(ch) else { return Ok(None) };
+        let Some((pend, shadow)) = self.revert_point else { return Ok(None) };
+        let Some(tone) = self.run.chars().last().and_then(|c| Layout::Standard.tone_of(c)) else { return Ok(None) };
+        if pend[col].is_some() || self.run.chars().count() != shadow.iter().flatten().count() + 1 {
+            return Ok(None);
+        }
+        let mut cols = pend;
+        cols[col] = Some(sym);
+        let mut syl: String = cols.iter().flatten().collect();
+        syl.push_str(TONE_MARKS[tone]);
+        if self.lex.entries(std::slice::from_ref(&syl)).is_empty() {
+            return Ok(None);
+        }
+        self.run.clear();
+        self.run_ascii = false;
+        self.run_zh = None;
+        self.revert_point = None;
+        (self.pend, self.shadow_key) = (pend, shadow);
+        self.shadow_push(ch, col);
+        self.pend[col] = Some(sym);
+        self.finish_syllable(tone, Vec::new()).map(Some)
+    }
+
     /// A key while the run is open (docs/spec/english-mixed.md §4.1, §4.2, §4.3, §4.5): letters and the Zhuyin keys that are not letters
     /// go on it, a tone key goes on it or splits it, Backspace and Esc take it off, Space ends it and is eaten, every other key ends it
     /// and is then handled as it would be. Esc on a run a revert opened, not changed since, brings the Zhuyin back instead.
     fn run_key(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
+        if self.english_reversal_guard && k.kind == KeyKind::Char && m == 0 {
+            if let Some(o) = self.tone_early(k.ch)? {
+                return Ok(o);
+            }
+        }
         if k.kind == KeyKind::Char && (m == 0 || m == MOD_SHIFT) && k.ch.is_ascii_alphabetic() {
             let c = if m == MOD_SHIFT { k.ch.to_ascii_uppercase() } else { k.ch.to_ascii_lowercase() };
             let commit = self.run_push(c)?;
@@ -2570,6 +2615,7 @@ impl Engine {
         }
         self.pred_dirty = false;
         self.ld_now = self.last_digits.take();
+        self.late_in = self.late.take();
         self.d_emitted = 0;
         self.d_shown = self.drun.as_ref().map_or(0, |r| r.emitted.len() + r.m);
         self.reverted = None; // the one place the tool hooks are cleared; the key sets them again below
@@ -2588,6 +2634,11 @@ impl Engine {
         }
         self.cap_snapshot();
         let mut r = self.dispatch(k).and_then(|mut o| self.cap_after(&mut o).map(|()| o));
+        // docs/spec/english-mixed.md §7.4: a key the engine passes on untouched (key-and-composition rule 1, rule 5q: not handled, nothing committed) leaves the late
+        // tokens as they were. Rule 9 put them back itself (`late_keep`); every other key lets them go.
+        if matches!(&r, Ok(o) if o.commit.is_empty() && !o.handled) {
+            self.late = self.late.take().or(self.late_in.take());
+        }
         // docs/spec/english-mixed.md §6: a key that changes nothing (a key passed on, or an arm that calls `nothing`) leaves the short word's
         // mark where it was. The one place; a new arm that does nothing calls `nothing` and needs no other line.
         if matches!(&r, Ok(o) if o.commit.is_empty() && (self.noop || !o.handled)) {
@@ -2957,6 +3008,8 @@ impl Engine {
         self.last_short = None;
         self.drun = None;
         self.last_digits = None;
+        self.late = None;
+        self.late_in = None;
         self.clear_pred();
         self.paused = false;
     }
@@ -3533,6 +3586,7 @@ impl Engine {
                 if self.pend[col].is_some() && self.abbr_active() {
                     self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
                 }
+                self.late_keep(col);
                 self.shadow_push(k.ch, col);
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
@@ -3858,6 +3912,9 @@ impl Engine {
 
     /// docs/spec/keys-and-composition.md §3.1: complete the pending syllable with tone 0..=4 (0 = space = tone 1).
     fn finish_syllable(&mut self, tone: usize, old: Vec<Pred>) -> Result<Output, EngineError> {
+        if let Some(l) = self.late_in.take() {
+            self.late_merge(l, tone)?; // docs/spec/english-mixed.md §7.4
+        }
         let mut syl = self.pending();
         // tone index 1..=4 -> marks[1..=4]; space (0) -> unmarked tone 1
         syl.push_str(TONE_MARKS[tone]);

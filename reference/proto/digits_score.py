@@ -58,6 +58,12 @@ def keys_of_syllable(syl):
     return keys if toned else keys + [SPACE]
 
 
+def column_of(key):
+    """0 initial, 1 medial, 2 final: the column of a symbol key (core engine.rs `Layout::symbol_of`)."""
+    i = KEYS_STANDARD.index(key)
+    return 0 if i < 21 else 1 if i < 24 else 2
+
+
 def is_han(c):
     """core/src/learn.rs is_han."""
     return any(a <= ord(c) <= b for a, b in L._HAN)
@@ -95,6 +101,19 @@ class Legal:
         if any(k not in KEY_SYMBOL for k in keys) or "".join(KEY_SYMBOL[k] for k in keys) not in self.prefixes:
             return None
         return P1.units_of([KEY_SYMBOL[k] for k in keys])
+
+    def tail_units_in_columns(self, tail):
+        """`tail_units` of the tail with its symbol keys in column order (docs/spec/english-mixed.md §7.3; core digits.rs `tail_units_in_columns`): the keys but the
+        last (the closing key) go one to a column (initial, medial, final); a column asked twice or a key that is no symbol key gives None."""
+        cols = [None, None, None]
+        for k in tail[:-1]:
+            if k not in KEY_SYMBOL:
+                return None
+            c = column_of(k)
+            if cols[c] is not None:
+                return None
+            cols[c] = k
+        return self.tail_units([k for k in cols if k is not None] + [tail[-1]])
 
 
 class Cache:
@@ -144,35 +163,41 @@ class Scorer:
             s = math.log10(x) if i == 0 else s + math.log10(x)
         return s
 
-    def decide(self, C, emitted, buf, extra, prev_d):
+    def decide(self, C, emitted, buf, extra, prev_d, reorder=None):
         """Splits of `buf` (the keys in the buffer, the key just pressed included when it is an alphabet or tone key) and the pick.
         extra: None, SPACE, or a non-alphabet symbol key (it always belongs to the tail). emitted: keys already flushed (they are digits).
         prev_d: digits displayed before this key (None at a run's first key). -> ([(m, t, score)], index of the pick or None).
-        m counts digits within buf; a candidate with t = 0 is "all digits" (with extra SPACE: digits, then the space as a boundary)."""
+        m counts digits within buf; a candidate with t = 0 is "all digits" (with extra SPACE: digits, then the space as a boundary).
+        reorder: None, or (rho, rho_sym) (docs/spec/english-mixed.md §7.3, reversal-digits): at a closing key (the tail ends in a tone key or the space bar) a tail that is no
+        legal tail in the order typed is read once more with its symbol keys in column order (`Legal.tail_units_in_columns`); a legal result is one more
+        split whose score is `rho` lower (`rho_sym` when the run starts with . / -). None: the output is what it was before this argument."""
         n, cands = len(buf), []
         boundary = extra == SPACE
         for m in range(n, -1, -1):
             tail = buf[m:] + ([extra] if extra is not None else [])
             if not tail:
-                cands.append([m, 0, None, None])
+                cands.append([m, 0, None, None, 0.0])
             elif len(tail) <= MAX_BUF:
-                units = self.legal.tail_units(tail)
+                units, rho = self.legal.tail_units(tail), 0.0
+                if units is None and reorder is not None and (tail[-1] == SPACE or tail[-1] in TONE_KEYS):
+                    units = self.legal.tail_units_in_columns(tail)
+                    rho = reorder[1] if (emitted + buf)[:1] and (emitted + buf)[0] in "./-" else reorder[0]
                 if units is not None:
-                    cands.append([m, len(tail), units, None])
+                    cands.append([m, len(tail), units, None, rho])
         if boundary:
-            cands.append([n, 0, None, None])   # all digits, the space is a boundary (the t = 0 split of buf + space)
+            cands.append([n, 0, None, None, 0.0])   # all digits, the space is a boundary (the t = 0 split of buf + space)
         if not cands:
             return [], None
         if self.mode == "structural":   # docs/spec/english-mixed.md §7.3 end: the largest legal tail wins
-            out = [(m, t, None) for m, t, _, _ in cands]
+            out = [(m, t, None) for m, t, _, _, _ in cands]
             return out, max(range(len(out)), key=lambda i: (out[i][1], -i))
         for c in cands:
-            m, t, units, _ = c
+            m, t, units, _, rho = c
             digits = emitted + buf[:m]
             lpd = self.lp_d(C, digits, ended=(t > 0 or boundary))
             lpz = self.lp_z(C, bool(digits), units) if t else 0.0
-            c[3] = lpd + lpz
-        out = [(m, t, s) for m, t, _, s in cands]
+            c[3] = lpd + lpz - rho
+        out = [(m, t, s) for m, t, _, s, _ in cands]
         closing = boundary or (extra is None and buf and buf[-1] in TONE_KEYS)
         zh = [i for i, c in enumerate(out) if c[1] > 0]
         dg = [i for i, c in enumerate(out) if c[1] == 0]
@@ -190,6 +215,47 @@ class Scorer:
         return out, keep[0] if keep else max(tied, key=lambda i: (out[i][1], -i))
 
 
+    def late_decision(self, ctx, before, keys, pend_keys, closing, rho, rho_sym):
+        """The rejoin test of the digit tokens a run just made (docs/spec/english-mixed.md §7.4 "待歸鍵"; core digits.rs `Scorer::late_decision` is this function). `ctx` the run's context
+        (history word, `<s>` for none), `before` the run's digit keys before the late keys (list), `keys` the late keys (1 or 2, typed order), `pend_keys` the
+        unfinished syllable's keys in column order, `closing` its tone key or the space bar; `rho`, `rho_sym` both given, the function picks one by
+        the first key of before + keys (. / - is `rho_sym`). For each suffix of `keys` (the longer first) that fills columns `pend_keys` leaves free and makes,
+        with the closing key, a legal complete syllable: S_z = lpZ(syllable | ctx, no digit) + theta - rho when no digit stays in front, else
+        lpD(digits in front, ended) + lpZ(syllable | digit context) - rho; the best (the longer on a tie) is `take`. merge: the syllable as typed (no late key
+        taken) is no legal complete syllable (s_d None), or S_z > S_d = lpD(all digits, ended) + lpZ(as typed | digit context).
+        -> (take, merge, s_z, s_d); no suffix qualifies: (None, False, None, None)."""
+        k = len(keys)
+        first = (before + keys)[0]
+        r = rho_sym if first in "./-" else rho
+        cols0 = [None, None, None]
+        for key in pend_keys:
+            cols0[column_of(key)] = key
+        best = None
+        for j in range(k, 0, -1):
+            cols, ok = list(cols0), True
+            for key in keys[k - j:]:
+                c = column_of(key) if key in KEY_SYMBOL else None
+                if c is None or cols[c] is not None:
+                    ok = False
+                else:
+                    cols[c] = key
+            units = self.legal.tail_units([x for x in cols if x is not None] + [closing]) if ok else None
+            if units is None:
+                continue
+            digits = before + keys[:k - j]
+            s_z = ((self.lp_z(ctx, False, units) + self.theta) if not digits else (self.lp_d(ctx, digits, True) + self.lp_z(ctx, True, units))) - r
+            if best is None or s_z > best[1]:
+                best = (j, s_z)
+        if best is None:
+            return None, False, None, None
+        take, s_z = best
+        u_d = self.legal.tail_units([x for x in cols0 if x is not None] + [closing])
+        if u_d is None:
+            return take, True, s_z, None
+        s_d = self.lp_d(ctx, before + keys, True) + self.lp_z(ctx, True, u_d)
+        return take, s_z > s_d, s_z, s_d
+
+
 class Run:
     def __init__(self, rid, ctx):
         self.rid, self.ctx = rid, ctx
@@ -200,8 +266,8 @@ class Sim:
     """One composition: feed key presses, read per-key logs and the class of every key ('D' digit, 'Z' zhuyin, 'S' space or other
     separator). `chars` are the characters a finished syllable shows (for the context of later runs); missing ones show as '?'."""
 
-    def __init__(self, scorer, history_fn, left="", chars=()):
-        self.sc, self.hist, self.shown, self.chars = scorer, history_fn, left, list(chars)
+    def __init__(self, scorer, history_fn, left="", chars=(), reorder=None):
+        self.sc, self.hist, self.shown, self.chars, self.reorder = scorer, history_fn, left, list(chars), reorder
         self.keys, self.cls, self.rid_of, self.log = [], [], [], []
         self.run, self.pend, self.next_rid = None, [], 0
 
@@ -269,7 +335,7 @@ class Sim:
 
     def _decide(self, run, extra, ev, prev_d):
         ev["ctx"], ev["buf"] = run.ctx, "".join(self._k(run.buf))   # what the splits refer to (the run may end with this key)
-        cands, pick = self.sc.decide(run.ctx, self._k(run.emitted), self._k(run.buf), extra, prev_d)
+        cands, pick = self.sc.decide(run.ctx, self._k(run.emitted), self._k(run.buf), extra, prev_d, self.reorder)
         ev["splits"], ev["choice"] = cands, (cands[pick][0], cands[pick][1]) if pick is not None else None
         return cands, pick
 
@@ -336,9 +402,9 @@ class Sim:
             self.cls[idx] = "S"
 
 
-def simulate(scorer, history_fn, keys, left="", chars=()):
-    """Feed `keys` then ENTER (every run is settled); -> Sim."""
-    sim = Sim(scorer, history_fn, left, chars)
+def simulate(scorer, history_fn, keys, left="", chars=(), reorder=None):
+    """Feed `keys` then ENTER (every run is settled); -> Sim. `reorder`: see `Scorer.decide`."""
+    sim = Sim(scorer, history_fn, left, chars, reorder)
     for k in keys:
         sim.feed(k)
     sim.feed(ENTER)
