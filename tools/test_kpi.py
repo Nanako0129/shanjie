@@ -554,7 +554,7 @@ open(opt("--rowstats"), "w").write("".join(f"{{i}}\\t{{int(i > bad)}}\\t0\\t3\\n
 sys.stderr.write(os.environ.get("FAKE_MODELS", {models!r}) + "\\n")
 if ("--no-colloquial" in a) != (not {co8!r}):  # the replay is told to leave the table out exactly when the version does not ship it
     sys.exit(3)
-tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + {rc!r} if {co8!r} else "") + {rd!r}
+tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + {rc!r} if {co8!r} else "") + {recur!r} + {rd!r}
 if os.environ.get("FAKE_TAG"): tag = os.environ["FAKE_TAG"]
 print("## " + os.path.basename(opt("--rows")) + "  " + tag + "  {{'n': %d, 'top1': %d, 'final_ok': %d, 'unfixable': 0, 'autocommits': 0, 'kyss': 0.9123, 'picks_per100': 1.5, 'rewrites': 3, 'top1_sha256': 'aa'}}" % (n, n - bad, n - bad))
 """
@@ -583,7 +583,7 @@ class ReplayRun(Tmp):
 
     def tag_parts(self):
         """The reading-channel mark (`rc`) and the reading term's marks (`rd`) the fake binary prints: a version before the decoder's reading term has `+rc`."""
-        return {"rc": "+rc", "rd": ""}
+        return {"rc": "+rc", "rd": "", "recur": ""}
 
     def replay(self, **env):
         a = types.SimpleNamespace(as_="v0.4.3")
@@ -663,7 +663,7 @@ class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
         return bench.sha_file(os.path.join(self.root, "data", "lexicon", "std-exempt.tsv"))[:8]
 
     def tag_parts(self):
-        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}+rm"}
+        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}+rm", "recur": ""}
 
     def test_the_old_tags_are_refused(self):
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
@@ -671,6 +671,27 @@ class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
         for tag in (base + "+rc", base, base + "+rc" + f"+rd+rx:{self.rx8()}+rm", base + "+rd+rx:00000000+rm", base + f"+rd+rx:{self.rx8()}"):
             with self.assertRaises(SystemExit, msg=tag):
                 self.replay(FAKE_TAG=tag)
+
+
+class ReplayRunWithTheRecurrenceTerm(ReplayRunWithTheReadingTerm):
+    """A version with `"recur": True` (docs/spec/decoder.md §4.6): the replay's tag has `+recur` right before the reading marks (copied from a
+    shanjie-replay summary line); the tag without it, or with it after the reading marks, is refused."""
+    SPEC = dict(ReplayRunWithTheReadingTerm.SPEC, recur=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "recur": "+recur"}
+
+    def test_the_tags_without_the_mark_or_with_it_in_the_wrong_place_are_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        base, rd = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}", f"+rd+rx:{self.rx8()}+rm"
+        for tag in (base + rd, base + rd + "+recur", base + "+recur"):
+            with self.assertRaises(SystemExit, msg=tag):
+                self.replay(FAKE_TAG=tag)
+
+    def test_the_version_without_the_key_does_not_take_the_mark(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        with mock.patch.dict(bench.VERSIONS2, {"v0.4.3": ReplayRunWithTheReadingTerm.SPEC}), self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+rd+rx:{self.rx8()}+rm")
 
 
 # ---------- run ----------

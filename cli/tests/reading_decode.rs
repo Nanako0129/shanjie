@@ -69,7 +69,8 @@ fn args<'a>(profile: &'a str, tinylm: bool, rows: &'a str) -> Vec<&'a str> {
 }
 
 /// `--no-reading-decode`: the summary line (tag, n, top1, oracle@64, top1_sha256) of eight settings is that of main before the term existed, and (macOS only:
-/// the f64 dump values round differently under the Linux libm) so is the dump of four. The tag has no `+rd`, `+rx` or `+rm`.
+/// the f64 dump values round differently under the Linux libm) so is the dump of four. The tag has no `+rd`, `+rx` or `+rm`. `--no-recur` too: main had
+/// no context recurrence term either (docs/spec/decoder.md §4.6).
 #[test]
 fn no_reading_decode_is_what_main_printed() {
     let dir = tmp("off");
@@ -77,7 +78,7 @@ fn no_reading_decode_is_what_main_printed() {
         let rows = format!("eval/bench/suite-v1/{set}.txt");
         let dump = dir.0.join(format!("{profile}-{set}-{tinylm}.dump")).to_string_lossy().into_owned();
         let mut a = args(profile, tinylm, &rows);
-        a.extend(["--dump", &dump, "--no-reading-decode"]);
+        a.extend(["--dump", &dump, "--no-reading-decode", "--no-recur"]);
         let o = run(&a);
         assert!(o.status.success(), "{}", text(&o.stderr));
         let line = text(&o.stdout);

@@ -313,7 +313,7 @@ fn an_output_that_is_the_rows_file_is_refused() {
     let text = "|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ\n";
     std::fs::write(&rows, text).unwrap();
     let alias = format!("{}/./rows.txt", dir.display());
-    for opt in ["--rowstats", "--keys", "--firsts"] {
+    for opt in ["--rowstats", "--keys", "--firsts", "--key-times"] {
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-replay")).args(["--rows", rows.to_str().unwrap(), opt, &alias]).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{opt}");
         assert_eq!(std::fs::read_to_string(&rows).unwrap(), text, "{opt}: the rows file is untouched");
@@ -452,6 +452,52 @@ fn reading_decode_replay_agrees_with_the_cli() {
     // the reading-channel switch is gone from the replay too
     let o = Command::new(replay).args(["--rows", rows, "--no-reading-channel"]).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The context recurrence term (docs/spec/decoder.md §4.6): the replay's engine builds the set from each row's context through
+/// `set_left_context`, so its choices are the CLI's with `--context` (equal `top1_sha256`), and `--no-recur` is the CLI's `--no-recur`. Premise: the term
+/// changes the CLI's choice among these rows (the left text holding 反映 shows 反映 for ㄈㄢˇ ㄧㄥˋ, 反應 without the term). The tag has `+recur` before the reading
+/// marks only with the term on. `--key-times` writes `c\t<µs>` per row and `k\t<µs>` per `Engine::key` call (each typing key and the Enter here), nothing else,
+/// and leaves the summary line as it was.
+#[test]
+fn recurrence_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-recur-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    let text = "昨天看到的反映讓人在意，|反映|ㄈㄢˇ ㄧㄥˋ\n昨天看到的反應讓人在意，|反應|ㄈㄢˇ ㄧㄥˋ\n|反應|ㄈㄢˇ ㄧㄥˋ\n除了|這個待辦還有哪些要做的我認為比較急|ㄓㄜˋ ㄍㄜ˙ ㄉㄞˋ ㄅㄢˋ ㄏㄞˊ ㄧㄡˇ ㄋㄚˇ ㄒㄧㄝ ㄧㄠˋ ㄗㄨㄛˋ ㄉㄜ˙ ㄨㄛˇ ㄖㄣˋ ㄨㄟˊ ㄅㄧˇ ㄐㄧㄠˋ ㄐㄧˊ\n";
+    std::fs::write(&rows, text).unwrap();
+    let rows = rows.to_str().unwrap();
+    let _g = slot();
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    for profile in ["chat", "formal"] {
+        let cli = |extra: &[&str]| {
+            let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", profile, "--context", "--packs", "acg,it,meme,beauty", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+            if profile == "chat" {
+                a.extend(["--colloquial-core", co.to_str().unwrap()]);
+            }
+            a.extend_from_slice(extra);
+            run(eval, &a)
+        };
+        let (on, off) = (cli(&[]), cli(&["--no-recur"]));
+        assert_ne!(sha_of(&on), sha_of(&off), "{profile}: premise, the term changes a choice among these rows");
+        let times = dir.join(format!("{profile}.times"));
+        let rep_on = run(replay, &["--rows", rows, "--profile", profile]);
+        let rep_off = run(replay, &["--rows", rows, "--profile", profile, "--no-recur", "--key-times", times.to_str().unwrap()]);
+        assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile}: the replay's engine decodes like the CLI");
+        assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile}: --no-recur");
+        assert!(on.contains("+ctx+recur") && !off.contains("+recur"), "{profile}: {on}{off}");
+        assert!(rep_on.contains("+recur+rd+rx:") && !rep_off.contains("+recur"), "{profile}: {rep_on}{rep_off}");
+        assert_eq!(rep_off, run(replay, &["--rows", rows, "--profile", profile, "--no-recur"]), "{profile}: --key-times leaves the summary as it was");
+        let b = std::fs::read(&times).unwrap();
+        assert!(b.iter().all(|c| c.is_ascii_digit() || b"ck\t\n".contains(c)), "{profile}: numbers only");
+        let lines: Vec<String> = String::from_utf8(b).unwrap().lines().map(String::from).collect();
+        let keys: usize = text.lines().map(|l| l.split('|').nth(2).unwrap().split(' ').map(|s| keys_of(s).unwrap().len()).sum::<usize>() + 1).sum();
+        assert_eq!(lines.iter().filter(|l| l.starts_with("c\t")).count(), 4, "{profile}: one line per row");
+        assert_eq!(lines.iter().filter(|l| l.starts_with("k\t")).count(), keys, "{profile}: one line per key");
+        assert!(lines[0].starts_with("c\t") && lines.iter().all(|l| l.split('\t').nth(1).is_some_and(|n| n.parse::<u64>().is_ok())), "{profile}");
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

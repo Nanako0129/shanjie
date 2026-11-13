@@ -8,9 +8,9 @@ fn run(args: &[&str]) -> String {
 
 /// `run` for the LM-mode goldens that the Python reference (`reference/proto/lm_eval.py`) produced: Python has no reading term
 /// (docs/spec/decoder.md §5), so they are compared with `--no-reading-decode`, the decoder it implements. The shipping default, which has the term,
-/// is pinned by `shipping_default_matches_its_rust_only_pins`.
+/// is pinned by `shipping_default_matches_its_rust_only_pins`. Python has no context-recurrence term either: `--no-recur`.
 fn run_py(args: &[&str]) -> String {
-    run(&[args, &["--no-reading-decode"]].concat())
+    run(&[args, &["--no-reading-decode", "--no-recur"]].concat())
 }
 
 #[test]
@@ -109,6 +109,8 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
 /// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it,meme,beauty
 /// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
 /// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
+/// The default has the context recurrence term (docs/spec/decoder.md §4.6), so every line's tag has `+recur` (the n-gram-only lines too: `--context` builds
+/// the set from the row's context column).
 #[test]
 fn shipping_default_matches_its_rust_only_pins() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));

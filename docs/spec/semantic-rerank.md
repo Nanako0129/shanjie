@@ -196,10 +196,12 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 `set_left_context(text)`（NULL 或空字串＝沒有；不是 UTF-8 回 2 並清空）：
 
 - `left` = `context_key(text)`：結尾連續的漢字最多 2 個（`MAX_CONTEXT`），沒有則空。n-gram 解碼的歷史詞、選字記憶的鍵、預測列、數字層都只看它，所以前文變長不改變這些。
+- `recur`（前文重現項的集合 G，`docs/spec/decoder.md` §4.6）：`text` 最後 64 個 Unicode 純量值裡兩個都是漢字的相鄰字元對的集合（至多 63 個，沒有原文）。每次 `set_left_context` 都從 `text` 重建（覆寫，不累加）；NULL、空字串、不是 UTF-8 時是空的。它是 `Engine` 自己的欄位，以參數傳給解碼，不放進 `Lm`、詞庫等引擎之間共用的結構，也不進 `RerankJob`；解碼 n-best 與重排的候選池因此含它的加分，重排工作本身不帶它。
 - `left_full` 只留用得到的長度（資料最小化）：載入的會意模型宣告了 L 時，`text` 的最後 L 個 Unicode 純量值（用 `chars()`，不切位元組）；否則，`text` 去掉最多一個結尾半形空白後，結尾是 2 至 32 個 ASCII 字母、且前一個字元不是 ASCII 數字（`english_tail`），就只留那個英文詞和它後面的一個空白；都不是則空。`left_cut` 記 `left_full` 是否截自更長的文字。
-- 清除：`clear_all`（送出、Esc、`reset`、回傳碼 4、自動送出都經過它）清 `left`、`left_full`、`left_cut`；空組字區上沒處理的字元鍵（規則 22 的直通）之後也清；換會意模型（`set_tinylm`）也清 `left_full`。只有未完成符號時按 Esc 走 `clear_pend`、不經 `clear_all`，`left` 與 `left_full` 留到下一次組字開始再被覆寫。
-- 不外流：`left_full` 不經 C ABI 回傳、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給網路功能；重排工作只帶最後 L 個字元（沒有宣告 L 時帶 `left`）。已經排進佇列的工作複本活到那次執行結束，Rust `String` 與 Swift 字串釋放時不清零。
-- `set_left_context` 不作廢進行中的工作（殼每個組字開始都呼叫它）。
+- 清除：`left`、`left_full`、`left_cut` 與 `recur` 共用一個清除函式（`clear_left`）。`clear_all`（送出、Esc、`reset`、回傳碼 4、自動送出、達 `MAX_SYLLABLES` 的候選列選字送出都經過它）呼叫它；空組字區上沒處理的字元鍵（規則 22 的直通）與另外三個直通點也呼叫它。換會意模型（`set_tinylm`）只清 `left_full` 與 `left_cut`（它們是照模型宣告的 L 截的）；`left` 與 `recur` 和模型無關，不清，所以組字中換模型不會讓前文重現項中途消失。
+- **沒有先設前文就開始組字的路**：殼只在「沒有修飾鍵或只有 Shift 的字元鍵」開始組字前重讀前文，Ctrl+\ 等鍵也會在空組字區開始組字，Backspace 刪到空、只有未完成符號時按 Esc 也不經 `clear_all`。所以 `key()` 進來時組字區是空的（沒有音節、沒有進行中的英文、沒有未完成符號，也沒有開著的數字緩衝：就是殼判斷「不在組字」的條件），而且上一個鍵之後沒有呼叫過 `set_left_context`（`key()` 結束時重置的旗標 `left_fresh`），就先清除 `left`、`left_full`、`left_cut` 與 `recur`：舊的前文（可能是另一個 App 的）不會用在新的組字上。組字中（有音節、英文、未完成符號或數字緩衝）從不清。
+- 不外流：`left_full` 與 `recur` 不經 C ABI 回傳、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給網路功能；重排工作只帶最後 L 個字元（沒有宣告 L 時帶 `left`），不帶 `recur`。已經排進佇列的工作複本活到那次執行結束，Rust `String` 與 Swift 字串釋放時不清零。
+- `set_left_context` 不作廢進行中的工作（殼在可能開始組字的鍵之前呼叫它，那時組字區是空的、沒有進行中的工作）。
 
 **會意的前文鍵**（`TinyLm::key_for(before)`，引擎與 CLI 共用）：`before` 是組字區這一段之前的全部文字（前文，加上前面各段選定後的字與中間的固定詞、標點）。宣告 L 的模型（版本 5）：`before` 的最後 L 個字元，原文，不經 `context_key`；版本 1 到 4：`context_key(before)`（結尾 ≤ 2 個漢字，沒有則 `SENTINEL`，在 3.2 變空字串）。`RerankJob::run` 依序處理各段，後一段的前文用前面各段**選定後**的字重算（不用 n-gram 第一名）。出貨的會意 SJ-SR-8-15M 沒有宣告 L，所以出貨行為是結尾 ≤ 2 個漢字；模型是否讀長前文取決於檔頭，不取決於殼傳了多少。
 
@@ -221,7 +223,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 ### 6.2 世代與作廢
 
-每個工作帶產生時的世代號（整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）。以下會換新號、作廢待處理與進行中的工作：每次重新解碼（`refresh`）、`clear_all`、`load_lm`、`set_lm`、`load_tinylm`、`load_colloquial`、`set_rerank`、`set_rerank_level`、`set_profile`、`set_demote`、學習開檔與清除、評測用的 `set_learn_guard` 與 `set_reading_decode`。
+每個工作帶產生時的世代號（整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）。以下會換新號、作廢待處理與進行中的工作：每次重新解碼（`refresh`）、`clear_all`、`load_lm`、`set_lm`、`load_tinylm`、`load_colloquial`、`set_rerank`、`set_rerank_level`、`set_profile`、`set_demote`、學習開檔與清除、評測用的 `set_learn_guard`、`set_reading_decode` 與 `set_recur`。
 
 不作廢：`set_learning`（不改解碼，只管選字要不要記下來）、`set_left_context`、游標移動、未完成的注音符號、進入預測列、直通鍵。這些之後算完的結果照樣套用，所以「打得快」時 Enter 送出的是重排後的字而不是 n-gram 的字。
 
@@ -308,11 +310,13 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
   - `core/tests/colloquial.rs`：`lc`、`k`、`col` 在合成表上的手算值、疊加層與基本詞表都有的詞不算 k、詞包列只在給定時算、`rerank_colloquial_fuses_with_the_levels_cell`、`a_non_finite_col_falls_back_to_the_levels_header_triple`。
   - `core/tests/engine_colloquial.rs`：`the_term_applies_only_under_its_conditions`、`applies_is_chat_and_the_paired_model`、`each_level_uses_its_own_cell`、`load_order_does_not_matter`、`load_colloquial_turns_the_first_word_estimate_on`、`a_failed_load_changes_nothing_but_the_job`、`k_counts_the_pack_words_the_engine_was_built_with`、`the_colloquial_term_stands_alone`。
   - `core/tests/engine_rerank.rs`：沒有模型或開關關掉時沒有工作且按鍵不變、套用顯示模型的選擇、過期丟棄、不重新解碼的鍵保留工作、`set_learning` 不作廢、後一段用前一段選定的字當前文、宣告的前文長度、英文前文不改解碼與重排輸入、換模型丟前文、兩個引擎不共用世代、工作套用一次且比引擎活得久、自動送出與英文 token 讓工作作廢、`demote_off_makes_no_job`、`new_ngram_model_drops_the_small_model`、預測列進入時 apply 無效、學習守門與 `learn_guard_off_reranks_the_learned_stretch`、`rerank_is_off_until_set_rerank`、`kneser_ney_side_file_refuses_the_model`、手動詞在最終檔上不被重排改掉、`replay_dev302_parity_and_measurements`（需要環境變數指到真的 `.sjtl`，沒給就略過：dev302 每列逐鍵打、每鍵後同步取算套用，送出的句子與 CLI 的第一名逐字相同）。
-  - `core/tests/engine_english_next.rs`：英文前文與英文詞結尾的規則、左文隨組字清除、只留英文詞、長前文只以漢字尾段解碼與學習。
+  - `core/tests/engine_english_next.rs`：英文前文與英文詞結尾的規則、左文隨組字清除、只留英文詞、長前文的學習只以漢字尾段（學習的鍵與學習檔不變；解碼相同的那一半在前文重現項關掉時斷言，開著時解碼本來就會因前文的字元對不同）。
+  - `core/tests/engine_recur.rs`（前文重現項，`docs/spec/decoder.md` §4.6）：前文空或只有一個字元時與關掉它逐列相同；同音詞跟著前文走（語意校正關與開各一次）；G 只含兩個都是漢字的字元對、至多 63 個、只看最後 64 個字元；每次設前文都覆寫；每一個清除點（送出、Esc、兩種 `reset`、回傳碼 4、自動送出、達 `MAX_SYLLABLES` 的候選列選字送出、四個直通點）同時清空 `left_full` 與 G，換會意模型只清 `left_full`、G 不變；沒有先設前文就開始組字的路（Backspace 刪到空、只有未完成符號時按 Esc、Ctrl+\ 之後）舊前文不再生效；組字中（進行中的英文、未完成符號、數字緩衝）不清；引擎與評測 CLI 解碼相同；兩個共用模型的引擎各有自己的 G；終端機類的結尾兩個漢字是一個字元對。`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk_with_a_recurring_left_text`：用會翻轉選字的 64 字前文做逐字改選，前文裡沒送出的漢字不在學習檔裡。
+  - `core/src/lm.rs` 與 `core/src/ffi.rs` 的單元測試：字元對集合與加分的算法（詞內與跨詞邊界、第一個詞沒有邊界、`None` 等於舊解碼）、C ABI 的 NULL、空字串、不是 UTF-8 都清空 G。
   - FFI 子程序測試（`core/src/ffi.rs`）：載入各錯誤碼且輸出不含路徑、沒有工作時 NULL、run → apply → free、apply 兩次、所有 NULL 組合、run 內 panic 回 4 且輸出不含內容、`load_tinylm` 不改重排開關；C 標頭冒煙測試 `core/tests/c/abi_smoke.c` 每個函式至少呼叫一次。
-- **CLI**（`cli/tests/tinylm.rs`、`cli/tests/colloquial.rs`、`cli/tests/replay.rs`、`cli/tests/measure_flags.rs`）：`--tinylm-paired` 與 `--picks` 的 `paired_flag_turns_the_term_on_for_another_model`、`paired_flag_changes_nothing_on_the_paired_model`、`picks_match_the_scores_the_dump_and_the_rowstats`、`picks_of_a_row_without_candidates`、`picks_threads_agree_on_the_whole_dev302`、`the_flags_are_refused_where_they_do_not_apply`；n-gram 不符被拒、壞檔與孤兒 `--tinylm-scores`、KN 側檔必須是記著的那一個、`sentinel_context_is_an_empty_k`、`rerank_level_uses_that_levels_set` 與 `rerank_level_refusals`、`summary_line_records_a_non_standard_level`、`a_declared_left_length_keys_cli_rows_like_the_engine`、`no_option_is_byte_identical_to_before`、`the_term_applies_at_every_strength`、`the_shipping_setting_applies_and_threads_agree`、`the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off`、`scores_carry_col_and_recompute_the_pick`、`colloquial_replay_agrees_with_the_cli`。
+- **CLI**（`cli/tests/tinylm.rs`、`cli/tests/colloquial.rs`、`cli/tests/recur.rs`、`cli/tests/replay.rs`、`cli/tests/measure_flags.rs`）：`recur.rs` 驗 `--context` 的前文空或一個字元時印的與 `--no-recur` 相同、前文有同音詞時選字翻轉；`replay.rs` 的 `recurrence_replay_agrees_with_the_cli` 驗重播的引擎與 CLI 選字相同、`--no-recur`、`--key-times` 只有數字且列數對；`--tinylm-paired` 與 `--picks` 的 `paired_flag_turns_the_term_on_for_another_model`、`paired_flag_changes_nothing_on_the_paired_model`、`picks_match_the_scores_the_dump_and_the_rowstats`、`picks_of_a_row_without_candidates`、`picks_threads_agree_on_the_whole_dev302`、`the_flags_are_refused_where_they_do_not_apply`；n-gram 不符被拒、壞檔與孤兒 `--tinylm-scores`、KN 側檔必須是記著的那一個、`sentinel_context_is_an_empty_k`、`rerank_level_uses_that_levels_set` 與 `rerank_level_refusals`、`summary_line_records_a_non_standard_level`、`a_declared_left_length_keys_cli_rows_like_the_engine`、`no_option_is_byte_identical_to_before`、`the_term_applies_at_every_strength`、`the_shipping_setting_applies_and_threads_agree`、`the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off`、`scores_carry_col_and_recompute_the_pick`、`colloquial_replay_agrees_with_the_cli`。
 - **Python**（`make test-python`）：`tools/test_export_sjtl.py`（不給 δ 時輸出與 golden 逐位元組相同、各版本寫出與讀回、壞值報錯而且不留檔）、`tools/gen_tinylm_tiny.py` 的 golden 可重產、`tools/test_build_attribution.py`（各來源加總與停止條件，合成輸入）。
-- **Swift**（`make test-swift`）：`macos/Tests/ShanjieKitTests/RerankTests.swift`（用真核心、真 n-gram、真小模型：按鍵後有工作交給 runner、完成且有改變才多一次 `setMarkedText`、過期不套用、free 的次數等於取到的工作數且沒有 free 兩次、開關預設、重建引擎仍送開關與等級、強度偏好與反灰）、`SelftestTests`、`LogTests`（前文放標記字串，驗證殼只記靜態文字與碼）、`LearningTests` 與 `LeftContextBenchTests`（前文讀取的邊界與延遲）。真佇列 runner 另有一個測試。
+- **Swift**（`make test-swift`）：`macos/Tests/ShanjieKitTests/RerankTests.swift`（用真核心、真 n-gram、真小模型：按鍵後有工作交給 runner、完成且有改變才多一次 `setMarkedText`、過期不套用、free 的次數等於取到的工作數且沒有 free 兩次、開關預設、重建引擎仍送開關與等級、強度偏好與反灰）、`SelftestTests`、`LogTests`（前文放標記字串，含 64 字前文裡的 ASCII 標記與漢字對標記，驗證殼只記靜態文字與碼）、`LearningTests` 與 `LeftContextBenchTests`（前文讀取的邊界與延遲）。真佇列 runner 另有一個測試。
 - **執行**：selftest 在 CI 的 `shell` job（`make selftest-bundled`）與 `scripts/check-app.sh` 跑。選字品質（出貨標準、判讀集、各檔的 α、τ、δ 怎麼選）見 `docs/spec/evaluation.md`。
 
 ## 11. 已知限制
@@ -322,7 +326,8 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - 小模型的視窗是 ctx 64：宣告 L 的模型看到的前文是 min(L, ctx − 1 − 候選字數) 個字元；出貨的模型沒有宣告 L，只看結尾 ≤ 2 個漢字。
 - 常談只在聊天設定、且只與會意 SJ-SR-8-15M 配對；書面設定與別的會意檔沒有常談項。
 - 書面設定教過一次的字詞，有時還會被重排蓋回去（學習守門只擋 n-gram 第一條路徑上有被加分詞的段，細節見 `docs/spec/learning.md`）。
-- 終端機類 App 之外的 App，殼傳 64 個 grapheme 的原文，但出貨的會意模型不使用；編輯器的內建終端機面板分不出來，照一般 App 處理。
-- `left_full` 與重排工作內的文字在釋放時不清零。
+- 終端機類 App 之外的 App，殼傳 64 個 grapheme 的原文，出貨的會意模型不使用（n-gram 解碼只另外用它最後 64 個字元的漢字對，§5.2）；編輯器的內建終端機面板分不出來，照一般 App 處理。
+- `left_full`、重排工作內的文字與 `recur` 在釋放時不清零（`recur` 沒有原文，但可以從它拼回前文裡大部分的漢字片段，所以照原文的等級對待）。
+- 前文重現項（`docs/spec/decoder.md` §4.6）看字元的原樣：前文裡留著的錯字或另一種寫法會被延續（前文寫「馬克斯」，之後同音的詞偏向「馬克斯」）；使用者改對一次之後，同一則訊息裡會跟著對。
 - 錯字回報集的「權限加好了」書面標準與積極兩檔仍選錯（聊天對）。
 - SJTL0005 沒有匯出工具，只有測試檔能產生。

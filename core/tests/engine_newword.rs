@@ -994,25 +994,50 @@ fn clear_removes_new_words() {
 #[test]
 #[cfg(unix)] // learning_open fails on Windows for now (docs/spec/windows-tip.md §2.5)
 fn r2_marker_characters_on_disk() {
-    r2_marker(false);
+    r2_marker(false, &format!("我說 {LEFT_MARKER} "), false);
 }
 /// The same under variant B: sub-spans lie inside the run, so the bound is unchanged.
 #[test]
 #[cfg(unix)] // learning_open fails on Windows for now (docs/spec/windows-tip.md §2.5)
 fn r2_marker_characters_on_disk_with_subspans() {
-    r2_marker(true);
+    r2_marker(true, &format!("我說 {LEFT_MARKER} "), false);
 }
-fn r2_marker(subspans: bool) {
-    let marker = "ㄐㄧㄚˇ 甲 -1.0\nㄐㄧㄚˇ 假 -1.5\nㄧˇ 乙 -1.0\nㄧˇ 以 -1.5\nㄉㄜ˙ 的 -1.0\nㄅㄧㄥˇ 丙 -1.0\nㄅㄧㄥˇ 餅 -1.5\nㄉㄧㄥ 丁 -1.0\nㄉㄧㄥ 叮 -1.5\nㄨˋ 戊 -1.0\nㄨˋ 物 -1.5\nㄌㄜ˙ 了 -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\nㄍㄥ 庚 -1.0\nㄍㄥ 耕 -1.5\n";
-    let reading = "ㄐㄧㄚˇ ㄧˇ ㄉㄜ˙ ㄅㄧㄥˇ ㄉㄧㄥ ㄨˋ ㄌㄜ˙ ㄐㄧˇ ㄍㄥ";
-    let dir = tmp_dir(if subspans { "r2-b" } else { "r2" });
+/// The same with a 64-character left text whose Han pairs the context recurrence term reads (docs/spec/decoder.md §4.6): it
+/// holds the marker pair 餅叮, which turns the decode of the marker string from 餅丁 to 餅叮, and Han characters typed nowhere (鑫犇淼焱垚). The
+/// pairs are never written: a Han character of the left text is on disk only where it is in the sent text (inside the allowed span), never otherwise.
+#[test]
+#[cfg(unix)] // learning_open fails on Windows for now (docs/spec/windows-tip.md §2.5)
+fn r2_marker_characters_on_disk_with_a_recurring_left_text() {
+    let tail = format!("餅叮，我說 {LEFT_MARKER} ");
+    let fill: String = "鑫犇淼焱垚".chars().cycle().take(64 - tail.chars().count()).collect();
+    let left = format!("{fill}{tail}");
+    assert_eq!(left.chars().count(), 64);
+    r2_marker(false, &left, true);
+}
+const LEFT_MARKER: &str = "Zqxjvk";
+const R2_LEXICON: &str = "ㄐㄧㄚˇ 甲 -1.0\nㄐㄧㄚˇ 假 -1.5\nㄧˇ 乙 -1.0\nㄧˇ 以 -1.5\nㄉㄜ˙ 的 -1.0\nㄅㄧㄥˇ 丙 -1.0\nㄅㄧㄥˇ 餅 -1.5\nㄉㄧㄥ 丁 -1.0\nㄉㄧㄥ 叮 -1.5\nㄨˋ 戊 -1.0\nㄨˋ 物 -1.5\nㄌㄜ˙ 了 -1.0\nㄐㄧˇ 己 -1.0\nㄐㄧˇ 幾 -1.5\nㄍㄥ 庚 -1.0\nㄍㄥ 耕 -1.5\n";
+const R2_READING: &str = "ㄐㄧㄚˇ ㄧˇ ㄉㄜ˙ ㄅㄧㄥˇ ㄉㄧㄥ ㄨˋ ㄌㄜ˙ ㄐㄧˇ ㄍㄥ";
+fn r2_marker(subspans: bool, left: &str, recurring: bool) {
+    let (marker, reading, left_marker) = (R2_LEXICON, R2_READING, LEFT_MARKER);
+    let dir = tmp_dir(match (subspans, recurring) {
+        (true, _) => "r2-b",
+        (false, false) => "r2",
+        (false, true) => "r2-recur",
+    });
     let mut e = tiny(marker);
     e.set_newword_subspans(subspans);
     e.learning_open(&dir).unwrap();
-    let left_marker = "Zqxjvk";
-    e.set_left_context(&format!("我說 {left_marker} "));
+    e.set_left_context(left);
     assert_eq!(e.left_full_chars(), left_marker.len() + 1, "premise: the marker word is held");
-    type_syls(&mut e, reading);
+    let shown = type_syls(&mut e, reading).preedit;
+    if recurring {
+        assert!(e.recur_pairs() > 0 && shown.contains("餅叮"), "premise: the left text's pair decides the display: {shown}");
+        let mut off = tiny(marker);
+        off.set_recur(false);
+        off.set_left_context(left);
+        let plain = type_syls(&mut off, reading).preedit;
+        assert!(!plain.contains("餅叮"), "premise: without the term the display has no 餅叮: {plain}");
+    }
     let at = 4;
     repick_char(&mut e, 9, at);
     let c: Vec<char> = e.key(k(KeyKind::Enter)).unwrap().commit.chars().collect();
@@ -1023,6 +1048,8 @@ fn r2_marker(subspans: bool) {
     let allowed: Vec<char> = c[2..6].to_vec();
     let text = raw(&dir);
     assert!(!text.to_ascii_lowercase().contains(&left_marker.to_ascii_lowercase()), "the left text's marker is on disk");
+    // A Han character of the left text that was not sent is nowhere on disk.
+    assert!(left.chars().filter(|ch| !distinct.contains(ch)).all(|ch| !text.contains(ch) || !('\u{4E00}'..='\u{9FFF}').contains(&ch)), "a left text character is on disk");
     for line in text.lines().skip(1) {
         let f: Vec<&str> = line.split('\t').collect();
         assert_eq!(f.len(), 5);
@@ -1040,6 +1067,7 @@ fn r2_marker(subspans: bool) {
     let after = raw(&dir);
     let added: Vec<&str> = after.lines().filter(|l| !lines_before.iter().any(|b| b == l)).collect();
     assert!(added.iter().all(|l| !l.chars().any(|ch| distinct.contains(&ch))), "a commit without a re-pick added a marker line");
+    assert!(left.chars().filter(|ch| !distinct.contains(ch)).all(|ch| !after.contains(ch) || !('\u{4E00}'..='\u{9FFF}').contains(&ch)), "a left text character is on disk");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -34,7 +34,7 @@ fn engine(flags: u32) -> Engine {
 fn nbest(syls: &[&str], flags: u32) -> Vec<(String, bool, f64)> {
     let s = shared();
     let v: Vec<String> = syls.iter().map(|x| x.to_string()).collect();
-    decode_from_fuzzy_scored(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND)
+    decode_from_fuzzy_scored(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND, None)
         .unwrap()
         .into_iter()
         .map(|(sc, ws)| (ws.iter().map(|w| w.0).collect(), ws.iter().any(|w| w.4), sc))

@@ -2492,7 +2492,7 @@ fn decode_with(e: &Engine, lexicon: &str, reading: &str, sinit: lm::Sinit, readi
     let capped = capped_over(lexicon);
     capped.set_reading_active(reading_term);
     let learn = lm::Learn { learner: e.learner(), before: "", after: None, today: DAY, eps_global: lm::LEARN_EPS_GLOBAL, sinit };
-    lm::decode_segment_fuzzy(&capped, &syls(reading), &s.lm, s.lm.scoring(lm::Profile::Chat), "<s>", lm::End::Eos, core::BEAM_S1, Some(&learn), true, 0, core::fuzzy::DELTA_SOUND)
+    lm::decode_segment_fuzzy(&capped, &syls(reading), &s.lm, s.lm.scoring(lm::Profile::Chat), "<s>", lm::End::Eos, core::BEAM_S1, Some(&learn), true, 0, core::fuzzy::DELTA_SOUND, None)
         .unwrap()
         .into_iter()
         .map(|(sc, ws)| (ws.iter().map(|w| w.0).collect::<String>(), sc, ws[0].1, ws[0].5))
