@@ -112,8 +112,8 @@ int32_t shanjie_engine_new(const char *data_dir, uint32_t layout, ShanjieEngine 
 //   SHANJIE_PACK_QUOTES = classic quotes, packs_dir/quotes-add.tsv; SHANJIE_PACK_IT = IT+AI, packs_dir/it-add.tsv; SHANJIE_PACK_MEME = meme, packs_dir/meme-add.tsv; SHANJIE_PACK_BEAUTY = beauty, packs_dir/beauty-add.tsv; the files are read
 //   in that order (ACG, quotes, IT, meme, beauty), the bits combine);
 //   the rows are parsed into the lexicon, so the set is fixed for the engine's life: the shell turns a pack on or
-//   off by building another engine (shanjie_engine_new_shared below, on a background thread) and replacing the first with it when
-//   nothing is being composed, like a layout change. packs 0 ignores packs_dir (may be NULL)
+//   off by creating another engine (shanjie_engine_new_shared below builds one from the first one's loaded parts), like a layout
+//   change. packs 0 ignores packs_dir (may be NULL)
 //   and is exactly shanjie_engine_new; a missing pack file contributes nothing (same engine as without it).
 //   2 for a bit outside the mask (SHANJIE_PACK_ACG | SHANJIE_PACK_QUOTES | SHANJIE_PACK_IT | SHANJIE_PACK_MEME | SHANJIE_PACK_BEAUTY) or a non-UTF-8 data_dir or packs_dir, 1 for a NULL packs_dir with a non-zero mask, 3 when a pack file exists but cannot
 //   be read or parsed. The anime pack's words keep the pack file's score (not capped) and are unknown to the LM when decoding (pack-oov);

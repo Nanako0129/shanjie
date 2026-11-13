@@ -76,10 +76,19 @@ fn file_rows(name: &str) -> Vec<Row> {
     three_field(&std::fs::read_to_string(root().join("eval/dev").join(name)).unwrap())
 }
 
+/// Smoke size (debug builds, Windows): the same checks on a handful of rows and two transitions. The sampled run below (about 100 rows, 7 transitions plus a
+/// chain, every profile and rerank setting) is the work of about three minutes in a release build and an order of magnitude more in a debug build, where the
+/// CI `debug` job's 20-minute limit and the Windows job's 45 minutes were both exceeded; those two only need to show that the shared path builds and
+/// agrees on a few rows. The full sampled run is the release build, which is what `make test-rust` (`cargo test --release`) and the CI `core` job use;
+/// the whole sets are `SHANJIE_SHARE_STRIDE=1` in a release build.
+fn smoke() -> bool {
+    cfg!(debug_assertions) || cfg!(windows)
+}
+
 /// Every `STRIDE`-th row of a set: the whole matrix of masks, profiles and rerank settings times every row of every set is the work of an hour, and
 /// the mask changes only the lexicon, so a row's behavior is as likely to differ in any of them. `STRIDE` 1 is the whole set (SHANJIE_SHARE_STRIDE=1).
 fn stride() -> usize {
-    std::env::var("SHANJIE_SHARE_STRIDE").ok().and_then(|s| s.parse().ok()).unwrap_or(8)
+    std::env::var("SHANJIE_SHARE_STRIDE").ok().and_then(|s| s.parse().ok()).unwrap_or(if smoke() { 60 } else { 8 })
 }
 fn every(rows: Vec<Row>, offset: usize) -> Vec<Row> {
     rows.into_iter().enumerate().filter(|(i, _)| (i + offset) % stride() == 0).map(|(_, r)| r).collect()
@@ -101,8 +110,9 @@ fn pack_rows() -> Vec<Row> {
         let text = std::fs::read_to_string(packs().join(f)).unwrap();
         let ls: Vec<&str> = text.lines().collect();
         assert!(ls.len() > 12, "{f} has rows");
-        let step = ls.len() / 6;
-        for l in ls.iter().step_by(step).take(6) {
+        let per_pack = if smoke() { 3 } else { 6 };
+        let step = ls.len() / per_pack;
+        for l in ls.iter().step_by(step).take(per_pack) {
             rows.push((String::new(), l.split('\t').next().unwrap().split('-').map(String::from).collect()));
         }
     }
@@ -185,12 +195,14 @@ fn assert_parts(src: &Engine, new: &Engine, reading_shared: bool, what: &str) {
 }
 
 const TRANSITIONS: [(u32, u32); 7] = [(29, 28), (28, 29), (29, 31), (31, 0), (0, 29), (29, 1), (1, 16)];
+const SMOKE_TRANSITIONS: [(u32, u32); 2] = [(29, 28), (31, 0)];
 
 #[test]
 fn the_shared_engine_equals_the_engine_built_from_the_files() {
     let rows = all_rows();
-    assert!(rows.len() >= 90, "the check rows: {}", rows.len());
-    for (a, b) in TRANSITIONS {
+    assert!(rows.len() >= if smoke() { 5 } else { 90 }, "the check rows: {}", rows.len());
+    let transitions: &[(u32, u32)] = if smoke() { &SMOKE_TRANSITIONS } else { &TRANSITIONS };
+    for &(a, b) in transitions {
         let src = from_files(&packs(), a);
         let mut shared = share_to(&src, &packs(), b);
         assert_parts(&src, &shared, true, &format!("{a}->{b}"));
@@ -203,7 +215,7 @@ fn the_shared_engine_equals_the_engine_built_from_the_files() {
 #[test]
 fn consecutive_switches_each_equal_the_engine_built_from_the_files() {
     let rows = all_rows();
-    let masks = [29, 28, 29, 31, 0, 29];
+    let masks: &[u32] = if smoke() { &[29, 28, 31] } else { &[29, 28, 29, 31, 0, 29] };
     let mut cur = from_files(&packs(), masks[0]);
     for w in masks.windows(2) {
         let mut next = share_to(&cur, &packs(), w[1]);
@@ -277,7 +289,7 @@ fn a_pack_with_a_one_syllable_reading_rebuilds_the_reading_table() {
         assert!(n.reading != src.part_ptrs().reading, "{a}->{b}: the reading table is built again");
         let mut files = from_files(&dir, b);
         let mut rows = vec![(String::new(), vec!["ㄌㄧˇ".to_string()]), (String::new(), vec!["ㄉㄧㄥˋ".into(), "ㄩㄢˊ".into(), "ㄊㄤˊ".into()])];
-        rows.extend(all_rows().into_iter().take(40));
+        rows.extend(all_rows().into_iter().take(if smoke() { 6 } else { 40 }));
         assert_same(&mut shared, &mut files, &rows, &format!("one-syllable pack {a}->{b}"));
     }
     // The premise: the table of the lexicon with that row differs from the table of the lexicon without it.
@@ -341,7 +353,7 @@ fn the_english_follower_table_is_shared() {
     let mut shared = share_to(&src, &packs(), 28);
     assert!(shared.part_ptrs().en_table == src.part_ptrs().en_table, "the table is the source's, not read again");
     let mut files = from_files_in(&dir, &packs(), 28);
-    let rows: Vec<Row> = all_rows().into_iter().take(30).collect();
+    let rows: Vec<Row> = all_rows().into_iter().take(if smoke() { 6 } else { 30 }).collect();
     assert_same(&mut shared, &mut files, &rows, "english table");
     let _ = std::fs::remove_dir_all(&dir);
 }

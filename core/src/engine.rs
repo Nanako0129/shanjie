@@ -1942,7 +1942,7 @@ impl Engine {
         if self.data_dir.is_none() {
             return Err(EngineError::LoadFailed);
         }
-        // Read after the small files in the old order too: every failure is the same `LoadFailed` and the state is set at the end only.
+        // The model is read first, then `install_lm` reads the small files; every failure is the same `LoadFailed` and the state is set at the end only.
         let lm = Lm::load(path).map_err(|_| EngineError::LoadFailed)?;
         self.install_lm(Arc::new(lm), None)
     }
