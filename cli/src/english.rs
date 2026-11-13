@@ -8,6 +8,7 @@
 //!               [--swap P] [--tone-early P]
 //!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
 //!   english-sim --keys FILE --out FILE [--lm FILE] [--profile chat|formal] [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
+//!               [--rho RHO,RHO_SYM]
 //!   english-sim --list-syllables
 //!
 //! `--overwrite` and `--key-order` (default on) are the engine's two switches; the third, the mixing switch, is on. With both off only
@@ -20,7 +21,8 @@
 //! loaded), its four English switches defaulting to the App's (mixing on, `--overwrite off`, `--key-order on`, `--reversal-guard on`, unlike the
 //! `--rows` mode). Input lines `id<TAB>left<TAB>prefix<TAB>keys` (`left` is the text before the cursor, may be empty; `prefix` and `keys`
 //! are keycaps: `_` Space, an upper-case letter Shift+letter, `<` Backspace; `prefix` is typed first and only `keys` is judged), the
-//! engine reset before each line. `--out` (refused when it exists) gets nine TAB columns a line:
+//! engine reset before each line. `--rho RHO,RHO_SYM` (two finite numbers, 0 or more) sets the two penalties of the column-order reading for the run instead of the constants
+//! `digits::RHO`, `digits::RHO_SYM` (`Engine::set_reorder_penalty`); `--rho 8,4` gives the bytes no `--rho` gives. `--out` (refused when it exists) gets nine TAB columns a line:
 //!   id  units_before  new_units(blank-separated, `_punct_SP` for a blank)  pending_symbols  run_utf16_len  reverts(`key:a|b|c`)
 //!   splits  digit_tokens  commit+preedit
 //! and stdout one line, `input_sha256<TAB>lines`. `--list-syllables` prints the lexicon's distinct reading syllables, one a line.
@@ -493,13 +495,16 @@ fn probe_key(c: char) -> Key {
 }
 
 /// `--keys`: see the module comment. The engine is the App's (`build_engine_packs`, `PACKS`, no small model), then the probe's switches.
-fn run_keys(root: &Path, keys: &Path, out: &Path, lm: &Path, profile: Profile, switches: Switches) -> Result<(), String> {
+fn run_keys(root: &Path, keys: &Path, out: &Path, lm: &Path, profile: Profile, switches: Switches, rho: Option<(f64, f64)>) -> Result<(), String> {
     let bytes = read(keys)?;
     let sha = sha256_hex(&bytes);
     let text = String::from_utf8(bytes).map_err(|_| "keys are not UTF-8")?;
     let mut e = cli::replay::build_engine_packs(root, lm, None, None, profile, false, true, cli::replay::PACKS)?;
     e.set_prediction(true).map_err(|_| "cannot set prediction")?;
     switches.apply(&mut e)?;
+    if let Some((rho, rho_sym)) = rho {
+        e.set_reorder_penalty(rho, rho_sym);
+    }
     let mut o = std::fs::OpenOptions::new().write(true).create_new(true).open(out).map_err(|e| format!("cannot create the output ({:?})", e.kind()))?;
     let mut buf = String::new();
     let mut lines = 0usize;
@@ -544,6 +549,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut digits, mut lm) = (false, None::<PathBuf>);
     let mut switches = Switches { overwrite: true, key_order: true, reversal_guard: false };
     let (mut keys, mut out, mut profile, mut list_syllables) = (None::<PathBuf>, None::<PathBuf>, Profile::Chat, false);
+    let mut rho = None::<(f64, f64)>;
     let (mut ov, mut ko, mut rg) = (None::<bool>, None::<bool>, None::<bool>);
     let (mut swap, mut early) = (0.0f64, 0.0f64);
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
@@ -557,6 +563,11 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--recall" => recall = true,
             "--digits" => digits = true,
             "--keys" => keys = Some(val()?.into()),
+            "--rho" => {
+                let v = val()?;
+                let ok = v.split_once(',').and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?))).filter(|(a, b)| a.is_finite() && b.is_finite() && *a >= 0.0 && *b >= 0.0);
+                rho = Some(ok.ok_or("--rho takes RHO,RHO_SYM: two finite numbers, 0 or more")?);
+            }
             "--out" => out = Some(val()?.into()),
             "--list-syllables" => list_syllables = true,
             "--profile" => {
@@ -604,7 +615,10 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             return Err("--keys is a mode of its own".into());
         }
         let sw = Switches { overwrite: ov.unwrap_or(false), key_order: ko.unwrap_or(true), reversal_guard: rg.unwrap_or(true) };
-        return run_keys(root, keys, out, &lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm")), profile, sw);
+        return run_keys(root, keys, out, &lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm")), profile, sw, rho);
+    }
+    if rho.is_some() {
+        return Err("--rho goes with --keys".into());
     }
     if let Some(v) = ov {
         switches.overwrite = v;

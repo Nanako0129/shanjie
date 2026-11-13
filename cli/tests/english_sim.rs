@@ -229,6 +229,18 @@ fn keys_probe_nine_columns() {
     let (spelled, off) = (dir.join("spelled.tsv"), dir.join("off.tsv"));
     run(&["--keys", input, "--out", spelled.to_str().unwrap(), "--overwrite", "off", "--key-order", "on", "--reversal-guard", "on"]);
     assert_eq!(std::fs::read_to_string(&spelled).unwrap(), want);
+    // `--rho` sets the two penalties: the constants (8, 4) give the bytes no option gives; with 0 the rejoin is free, and `8g4` (8是 with the constants) is read as ㄕㄚˋ
+    // (煞) with the 8 taken back; a bad value is refused.
+    let (rho84, rho0, one) = (dir.join("rho84.tsv"), dir.join("rho0.tsv"), dir.join("one.tsv"));
+    run(&["--keys", input, "--out", rho84.to_str().unwrap(), "--rho", "8,4"]);
+    assert_eq!(std::fs::read_to_string(&rho84).unwrap(), want, "--rho 8,4 is the constants");
+    std::fs::write(&one, "r1\t\t\t8g4\n").unwrap();
+    run(&["--keys", one.to_str().unwrap(), "--out", rho0.to_str().unwrap(), "--rho", "0,0"]);
+    assert_eq!(std::fs::read_to_string(&rho0).unwrap(), "r1\t0\tㄕㄚˋ\t\t0\t\t0\t1\t煞\n", "--rho 0,0");
+    for bad in ["8", "8,", "x,4", "-1,4", "8,inf", "8,4,2"] {
+        assert!(fails(&["--keys", input, "--out", dir.join("bad.tsv").to_str().unwrap(), "--rho", bad]), "--rho {bad}");
+    }
+    assert!(fails(&["--rows", input, "--rho", "8,4"]));
     run(&["--keys", input, "--out", off.to_str().unwrap(), "--reversal-guard", "off"]);
     assert!(std::fs::read_to_string(&off).unwrap().ends_with("a3\t0\t\t\t4\t2:b\t0\t0\twlu6\n"));
     std::fs::remove_dir_all(&dir).unwrap();
