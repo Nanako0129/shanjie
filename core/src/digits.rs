@@ -154,6 +154,33 @@ impl Legal {
     /// `readings`: every reading with its (word, score) list, as `CappedLexicon::readings` gives them.
     pub fn new<'a>(readings: impl Iterator<Item = (Vec<&'a str>, Vec<(&'a str, f64)>)>) -> Legal {
         let (mut prefixes, mut han) = (HashSet::new(), HashSet::new());
+        let mut seen: HashSet<&'a str> = HashSet::new();
+        for (syls, entries) in readings {
+            // The prefixes of a syllable are the same wherever it occurs: work them out the first time only.
+            for s in &syls {
+                if seen.insert(s) {
+                    let bare: Vec<char> = s.chars().filter(|c| !TONE_CHARS.contains(c)).collect();
+                    for i in 1..=bare.len() {
+                        prefixes.insert(bare[..i].iter().collect::<String>());
+                    }
+                }
+            }
+            // A complete syllable must occur in an entry with a Han character (not just the letter word "ㄅ").
+            if entries.iter().any(|(w, _)| w.chars().any(is_han)) {
+                for s in &syls {
+                    if !han.contains(*s) {
+                        han.insert(s.to_string());
+                    }
+                }
+            }
+        }
+        Legal { prefixes, han }
+    }
+
+    /// `new` as it was written before the syllable cache (each syllable's prefixes and string redone at every reading), kept for the test that builds both ways.
+    #[cfg(test)]
+    pub(crate) fn new_each<'a>(readings: impl Iterator<Item = (Vec<&'a str>, Vec<(&'a str, f64)>)>) -> Legal {
+        let (mut prefixes, mut han) = (HashSet::new(), HashSet::new());
         for (syls, entries) in readings {
             for s in &syls {
                 let bare: Vec<char> = s.chars().filter(|c| !TONE_CHARS.contains(c)).collect();
@@ -161,12 +188,17 @@ impl Legal {
                     prefixes.insert(bare[..i].iter().collect::<String>());
                 }
             }
-            // A complete syllable must occur in an entry with a Han character (not just the letter word "ㄅ").
             if entries.iter().any(|(w, _)| w.chars().any(is_han)) {
                 han.extend(syls.iter().map(|s| s.to_string()));
             }
         }
         Legal { prefixes, han }
+    }
+
+    /// The two sets (tests).
+    #[cfg(test)]
+    pub(crate) fn sets(&self) -> (&HashSet<String>, &HashSet<String>) {
+        (&self.prefixes, &self.han)
     }
 
     /// Whether `syl` (with its tone mark, none for tone 1) is a complete syllable of an entry with a Han character.

@@ -82,6 +82,7 @@
 
 - **按鍵與選取**（`shanjie_engine_key`、`shanjie_engine_pick`）：非 0 時殼當作「不處理」直通，而且不記錄這個按鍵。`pick` 回 2 時狀態不變。
 - **重排的三個函式**（`rerank_take`、`rerank_run`、`rerank_apply`）：它們沒有對應的按鍵，非 0 **不代表**按鍵直通。`rerank_run` 沒有引擎，碼 4 不重設任何東西。
+- **共用部分的三個函式**（`engine_share`、`engine_new_shared`、`shared_free`，§5.4）：`share` 回 1（NULL）或 3（引擎沒有載入 n-gram 模型，沒有東西可共用）；`new_shared` 的碼同 `new_packs`（1：`shared` 或 `out` 為 NULL、遮罩非 0 而 `packs_dir` 為 NULL；2：排列或遮罩超出範圍、`packs_dir` 不是 UTF-8；3：讀不了或解析不了某個檔；4：內部錯誤）。非 0 時 `*out` 一律是 NULL。
 - **回傳快照的設定函式**：碼 1、2、4，成功回 0 與快照（`handled` 1、`commit` 空，除非這次設定結束了一個英文段而讓組字區到達第 128 個單位，那時 `commit` 是送出的整串）。
 - **不回輸出的函式**（`set_punctuation`、`set_left_context`、`set_learning`、`learning_*`、`rerank_levels`）：只有碼，沒有快照。`set_left_context` 收到不是 UTF-8 的字串回 2 並清掉前文；NULL 或空字串表示沒有前文。核心拿前文做三件事：結尾 ≤ 2 個漢字當 n-gram 的歷史詞與學習的鍵；最後 64 個字元裡兩個都是漢字的相鄰字元對集合給解碼的前文重現項（`docs/spec/decoder.md` §4.6，不保存原文）；會意模型宣告的前文長度，或結尾的英文詞，給重排與英文表。這些都不經 C ABI 回傳。
 
@@ -96,13 +97,16 @@
 ### 5.1 輸出
 
 - 非 NULL 的 `ShanjieOutput*` 由呼叫端用 `shanjie_output_free` 釋放，恰好一次。輸出自己擁有字串與候選陣列的副本，有效期到釋放為止，不受之後的 `key`、`reset`、`set_*`、`load_lm`、`engine_free` 影響。
-- `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)`、`shanjie_rerank_free(NULL)` 什麼都不做。重複釋放、或釋放不是核心配置的指標，是未定義行為。
+- `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)`、`shanjie_rerank_free(NULL)`、`shanjie_shared_free(NULL)` 什麼都不做。重複釋放、或釋放不是核心配置的指標，是未定義行為。
 - 殼收到輸出後，在同一個呼叫裡複製成 Swift `String` 並立刻釋放，不保留輸出指標。
 
 ### 5.2 引擎
 
-- 引擎 handle 不是 thread-safe：所有呼叫都在同一個執行緒（IMK 主執行緒）。例外只有 `shanjie_rerank_run` 與 `shanjie_rerank_free`。
-- `shanjie_engine_free` 之後不得再用這個 handle。
+- 引擎 handle 不是 thread-safe：同一時間只能有一條執行緒在用它（殼裡是 IMK 主執行緒）。
+- 建立（`shanjie_engine_new*`、`shanjie_engine_new_shared`）與 `load_*` 可以在另一條執行緒做完，再把整個 handle 交給之後使用它的執行緒；交接之後原本的執行緒不再碰它。
+- `shanjie_engine_free` 可以在任何一條執行緒呼叫，只要沒有別的呼叫同時在用這個 handle；之後不得再用這個 handle。
+- 不帶引擎的呼叫可以在任何執行緒：`shanjie_rerank_run`、`shanjie_rerank_free`（§5.3），以及 `shanjie_engine_new_shared`、`shanjie_shared_free`（§5.4）。
+- 依據：`Engine` 是 `Send`（`ffi.rs` 與 `core/tests/engine_share.rs` 的編譯期斷言）；`core/tests/engine_share.rs` 與 `ffi.rs` 的 `share_and_new_shared_through_the_c_abi` 都在另一條執行緒建引擎、交回原本的執行緒打字。
 
 ### 5.3 重排工作
 
@@ -114,6 +118,19 @@
 - 過期：只有會重新解碼的改變讓結果作廢（完成音節、刪除、選字、預測列選字、標點、⌘⌫ 遺忘、改變解碼的設定、換模型、選字記憶的開檔與清除）；不重新解碼的鍵（游標移動、未完成的注音符號、進入預測列、直通鍵）和 `set_learning` 不讓結果作廢。送出時還沒套用的工作作廢。細節見 `docs/spec/semantic-rerank.md`。
 - 工作與結果內含候選文字：不寫進任何紀錄（含指標），`load_tinylm` 的路徑也不寫。
 
+### 5.4 共用部分的 handle
+
+- 用途：切換詞包時建新引擎不再重讀模型檔。`shanjie_engine_share` 在引擎自己的執行緒取出可共用的部分（只複製參照，不讀檔，微秒級）；`shanjie_engine_new_shared` 在任何執行緒用它建新引擎；`shanjie_shared_free` 釋放。做法和重排工作相同：取出在引擎的執行緒、使用在任何執行緒、handle 不借用引擎。
+- 內容（`engine::Shared`）：n-gram 模型（通語、辨類、承接，以及 mmap 的兩張連文表）、會意的小模型、常談的表、數字表、英文後接詞表（後四樣來源引擎有載入才有），讀音表，以及資料目錄的路徑。全部是建好後不變的資料，所以來源引擎釋放之後仍可使用；`Send + Sync` 來自欄位的型別，沒有新增 `unsafe impl`（連文表經既有的 `trigram::Mapped` 進到模型裡）。
+- 讀音表只在來源引擎與新引擎的詞包列都沒有單音節讀音的列時沿用（讀音表只讀單音節讀音下的單字詞，鍵是音節編號，詞包的音節編號接在基底之後）；否則照 `load_lm` 從詞庫與檔案重建。出貨的五個詞包都沒有單音節的列（`core/tests/engine_share.rs` 斷言）。
+- `new_shared` 等同 `new_packs`（資料目錄是來源引擎的）之後接 `load_lm`、`load_tinylm`、`load_colloquial`：詞庫（含詞包列）、封頂詞庫、預測索引、數字的合法表與詞、常談的詞集、中英混合詞表、降權表與重排保護詞照從檔案建的做法重建；`demote.tsv`、`variant-order.tsv`、`rerank-protect.tsv`、`mixed-words.tsv` 與 `std-exempt.tsv`（讀音表沿用時也讀一次並解析）照讀。不重讀的只有上面列的模型與表。
+- 全有或全無：每一步都成功才回 0；任何一步失敗回非 0、`*out` 是 NULL，已建好的部分全部丟掉，不會交出「有詞庫、沒有模型」的引擎。這一點和從檔案建不同（那條路的 `load_lm`、`load_tinylm`、`load_colloquial` 各自失敗時引擎仍留著）。所以回 0 時，handle 裡有的每一樣在新引擎上都算載入成功。
+- 新引擎的狀態和 `new_packs` ＋ 三個 `load_*` 都成功之後相同：設定都是核心預設值，選字記憶沒有開檔；殼照現在把每一個設定重送一遍。輸出（解碼、候選、預測）和同一個遮罩從檔案建的引擎逐鍵相同（`core/tests/engine_share.rs`）。
+- 所有權：`share` 交出的每個 handle 由呼叫端恰好 `shanjie_shared_free` 一次。同一個 handle 可以給好幾次 `new_shared` 用，一次一個呼叫。`shared_free` 只能在用它的每一個 `new_shared` 都返回之後呼叫。
+- 未定義行為（不做執行期檢查，和 §5.3 同一種寫法）：`new_shared` 還在進行時釋放它用的 handle、同一個 handle 釋放兩次、釋放之後再拿去 `new_shared`、釋放不是 `shanjie_engine_share` 交出的指標。
+- 裡面沒有使用者輸入：沒有前文、組字、選字記憶、候選文字；只有模型、表與資料目錄的路徑。路徑不寫進任何紀錄。
+- Rust API 同名：`Engine::share()`、`Engine::new_shared()`。評測 CLI 與重播不用它們。
+
 ## 6. 呼叫順序與預設值
 
 ### 6.1 順序約定
@@ -122,7 +139,7 @@
 - `load_colloquial`（常談表）與 `load_lm`、`load_tinylm` 的先後無關；它會讓進行中的重排工作作廢。
 - 語意校正強度（`set_rerank_level`）在沒有小模型時也記下；`load_lm`、`load_tinylm` 保留它。殼在每次建引擎、`load_tinylm` 之後送一次存起來的強度。
 - 設定函式在每次建立引擎之後都要呼叫一遍（重建的引擎一律從核心預設值開始）；`set_left_context` 在可能開始組字的鍵之前呼叫（沒有修飾鍵或只有 Shift 的字元鍵而且不在組字中；不是每個鍵），核心在送出、重設、碼 4、規則 22 直通之後自己清掉前文；沒有先呼叫就在空組字區開始組字時（例如 Ctrl+\、Backspace 刪到空之後），核心在這個鍵進來時把前文清掉，舊前文不會用在新的組字上；`set_learning` 由殼在每個按鍵之前取樣隱私閘門後呼叫。
-- 換排列、換詞包（建立時的參數）要釋放引擎再建一個；詞包的詞在建立時併入詞庫，所以開關在引擎生命期內固定。
+- 換排列、換詞包（建立時的參數）要建另一個引擎；詞包的詞在建立時併入詞庫，所以開關在引擎生命期內固定。換詞包時可以先在引擎的執行緒 `share`，在另一條執行緒 `new_shared`（§5.4），新引擎建好後再釋放舊的；`new_shared` 回 0 的引擎已經載入了模型、小模型與常談表（handle 裡有的），不必再呼叫 `load_*`，設定照樣要重送。
 - `set_profile` 在載入語言模型之前設定也會被記住，載入後生效。
 
 ### 6.2 建立時的預設值
@@ -171,10 +188,11 @@
   - 正向對照：同一個子行程改用預設 hook 時 stderr 必須看得到標記；看不到就代表測試沒測到東西。
   - 經 C ABI 的重播：子行程裡經 C ABI 跑完前 20 列（`c_abi_replay_20_rows_prints_only_harness_lines`），結果與按鍵重播測試相同；子行程的 stdout、stderr 除了 libtest 自己的 harness 行之外沒有其他內容，也不含任何一列的句子或讀音。
   - 兩個 free 函式傳 NULL 不崩潰；各種錯誤碼的情境回傳正確的碼且 `*out` 為 NULL。
+  - 共用部分（§5.4）：`share_and_new_shared_through_the_c_abi`（子行程；`share` 的碼 1、3，`new_shared` 的碼 1、2、3（壞的詞包檔）且 `*out` 為 NULL；資料目錄的複本上移走 `std-exempt.tsv` 之後遮罩 0 與 29 都回 3、沒有引擎，放回去之後同一個 handle 回 0 而且打得出字；來源引擎釋放之後仍建得出；另一條執行緒 `new_shared` 的同時來源引擎在原本的執行緒打字）。輸出和從檔案建的引擎逐鍵相同、哪幾樣共用、讀音表何時重建，見 `core/tests/engine_share.rs`。
   - 各族的碼：`child_lm`（`load_lm` 的碼 1、2、3，失敗時保留原本的模型，`reset` 保留模型與設定）、`rerank_codes_through_the_c_abi`（`load_tinylm`、`set_rerank`、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、同一個工作再 apply 回 5、apply 注入 panic 回 4、引擎釋放後工作仍可 run 與 free）、`r2_rerank_run_panic_is_silent`（第二次 run 在注入點 panic 回 4，不留結果，apply 回 5）、`rerank_level_through_the_c_abi`（強度的碼與遮罩）、`english_codes_through_the_c_abi`（含 `set_ascii`）、`fuzzy_codes_through_the_c_abi`、`candidate_vertical_through_the_c_abi`、`digits_through_the_c_abi`、`expand_and_pick_through_the_c_abi`。
 - **C 標頭冒煙測試**（`core/tests/c/abi_smoke.c`）：`cargo test` 只從 Rust 呼叫匯出函式，看不到標頭與 Rust 結構是否一致，所以要用 C 編譯器實際編譯、連結一次。驅動程式只 include `shanjie.h`，參數是資料目錄（第二個參數是語言模型路徑，第三個是學習資料夾）：
   - 兩種排列各做一次：`shanjie_engine_new` 回 0；依排列送出「你好」的按鍵（標準 `s u 3 c l 3`、倚天 `n e 3 h z 3`），每鍵都 `shanjie_output_free`；Enter 之後 `handled == 1`、`commit` 是「你好」、`preedit` 是空字串、`cursor_utf16 == 0`、`candidate_count == 0`、`candidates == NULL`、`candidate_selected == -1`；再送 `ㄋㄧˇ` 和空白鍵，候選已開（`candidate_count` 在 1–9、`candidates[0]` 不是 NULL、`candidate_selected == 0`）；`shanjie_engine_reset(e, 1, &o)` 之後 `commit`、`preedit` 都是空字串；`shanjie_engine_free(e)`，最後對 `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)` 各呼叫一次。
-  - 有語言模型的檢查（編號 301–317：`load_lm`、`set_profile`、`reset` 保留模型）、選字記憶（518–521，要第三個參數）、重排（901–918：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`rerank_free(NULL)`）、強度（951–960）、常談表（961–963）、模糊輸入（1101–1107：位元超出回 2 且 `*out` 為 NULL）。
+  - 有語言模型的檢查（編號 301–317：`load_lm`、`set_profile`、`reset` 保留模型）、選字記憶（518–521，要第三個參數）、重排（901–918：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`rerank_free(NULL)`）、強度（951–960）、常談表（961–963）、模糊輸入（1101–1107：位元超出回 2 且 `*out` 為 NULL）、共用部分（1201–1215：沒有模型時 `share` 回 3、NULL 回 1、`new_shared` 的碼 1 與 2 且 `*out` 為 NULL、來源引擎釋放後建出的引擎打得出「你好」、詞包檔不存在時照樣建成、`shared_free(NULL)`）。
   - 全部通過時 exit 0；任何一項不符時只印項目編號（不印任何字串內容）並 exit 1。
   - 指令（repo 根目錄，`$T` 是暫存目錄；CI 在 macOS runner 上做同樣的事，另加 `--locked`，並先檢查擷取的連結參數不是空的，因為 macOS 的 `cc` 不帶這些旗標也能連結）：
 
@@ -196,7 +214,7 @@
 
 - 沒有 ABI 版本號與功能探測；相容只靠同一次建置。
 - panic hook 是行程全域的；把核心嵌進別的宿主行程時會取代宿主的 hook。
-- 引擎 handle 不是 thread-safe，由呼叫端保證單執行緒；重排工作的未定義行為（§5.3）不做執行期檢查。
+- 引擎 handle 不是 thread-safe，由呼叫端保證同一時間只有一條執行緒在用；重排工作（§5.3）與共用部分 handle（§5.4）的未定義行為不做執行期檢查。
 - Windows 沒有選字記憶檔（`learning_open` 回 3）；選字照常，學習只在這次執行的記憶體裡，不寫檔。
 - 標頭是人讀的註解，沒有機器可讀的 ABI 描述；一致性靠 `ffi.rs` 的測試、C 冒煙測試與審查。
 - `ffi.rs` 的 `shanjie_engine_new_packs` 文件註解只寫了位元 0 與 2，漏了經典台詞（值 2）；以標頭為準。

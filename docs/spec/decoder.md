@@ -197,6 +197,7 @@
 - 學習加分的詞（`was_boosted`）不加讀音項：讀音項最多扣 `LAMBDA·CAP` = 8，學習加分最多 6，否則使用者教過的罕用讀音會被蓋掉。句首單字學習的「抬高」解碼同樣加讀音項（和不抬高的分數相同，抬高的增益才是兩者差）。
 - 模糊音容錯讀音的字，讀音項用它的詞庫讀音算。
 - 建表只有一個函式 `engine::load_reading_decode(lexicon, data_dir)`，讀 `mcbpmf-data.txt` 原文與 `std-exempt.tsv`；`Engine::load_lm`、評測 CLI、重播程式都只呼叫它。缺檔、讀不了或格式錯（不是「音節<TAB>單一字」）就是載入失敗（回傳 3），不會靜默沒有豁免。
+- 共用：表建好後不變，封頂詞庫以 `Arc` 持有它。從另一個引擎的共用部分建引擎（`Engine::new_shared`，`docs/spec/c-abi.md` §5.4）時，來源引擎與新引擎的詞包列都沒有單音節讀音的列（建詞庫時各記一個旗標），就沿用來源引擎的表、不重建；否則照上一條重建。理由：表只讀單音節讀音下的單字詞與基底原文，鍵是音節編號，詞包的音節編號接在基底之後、基底的編號不變。沿用時 `std-exempt.tsv` 仍讀一次並解析，壞了一樣回 3。驗證：`core/tests/engine_share.rs` 拿沒有詞包的引擎的表查遮罩 0、1、29、31 的詞庫，每一個（字, 讀音）的值與標記都和從檔案建的表相同；含單音節列的測試詞包檔則一定重建，輸出和從檔案建的引擎相同。
 - 開關：`Engine::set_reading_decode(false)`、CLI 與重播的 `--no-reading-decode` 只給評測用，不在 `shanjie.h`。關閉等於沒有讀音項的解碼器。
 - 摘要行：每個設定的標記最後都是 `+rd+rx:<std-exempt.tsv 的 SHA-256 前 8 碼>+rm`（`+rm` 是讀音質量規則）；`--no-reading-decode` 時都沒有。標記驗證工具（`tools/kpi.py`、`tools/bench.py`，以及不在本 repo 的研究工具）依版本判定尾端是否應有它。
 - 融合層沒有讀音通道項：`set_reading_channel`、`--no-reading-channel` 與標記 `+rc` 已不存在。

@@ -551,6 +551,46 @@ static int run_rerank_level(const char *dir, const char *lm) {
   return 0;
 }
 
+/* Shared parts (docs/spec/c-abi.md §5.4): share, new_shared and shared_free through the header. The failure after the lexicon is built
+ * (a file gone) is covered by ffi.rs `share_and_new_shared_through_the_c_abi`, which can copy the data folder; here: the codes, a build, and
+ * that the built engine types after the source is freed. */
+static int run_share(const char *dir, const char *lm) {
+  static char dummy; /* non-NULL sentinel, never dereferenced */
+  ShanjieEngine *src = 0, *ne = 0;
+  ShanjieShared *sh = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1201, shanjie_engine_new(dir, 0, &src) == 0 && src != 0);
+  sh = (ShanjieShared *)&dummy;
+  CHECK(1202, shanjie_engine_share(src, &sh) == 3 && sh == 0);          /* no n-gram model: nothing to share */
+  CHECK(1203, shanjie_engine_load_lm(src, lm) == 0);
+  sh = (ShanjieShared *)&dummy;
+  CHECK(1204, shanjie_engine_share(0, &sh) == 1 && sh == 0);
+  CHECK(1205, shanjie_engine_share(src, 0) == 1);
+  CHECK(1206, shanjie_engine_share(src, &sh) == 0 && sh != 0);
+  ne = (ShanjieEngine *)&dummy;
+  CHECK(1207, shanjie_engine_new_shared(0, 0, 0, 0, &ne) == 1 && ne == 0);
+  ne = (ShanjieEngine *)&dummy;
+  CHECK(1208, shanjie_engine_new_shared(sh, 0, 0, 1u, &ne) == 1 && ne == 0);   /* a mask with no packs_dir */
+  CHECK(1209, shanjie_engine_new_shared(sh, 0, 0, 0, 0) == 1);
+  ne = (ShanjieEngine *)&dummy;
+  CHECK(1210, shanjie_engine_new_shared(sh, 2, 0, 0, &ne) == 2 && ne == 0);    /* layout out of range */
+  ne = (ShanjieEngine *)&dummy;
+  CHECK(1211, shanjie_engine_new_shared(sh, 0, "/nonexistent/shanjie-packs", 32u, &ne) == 2 && ne == 0); /* an unknown pack bit */
+  ne = (ShanjieEngine *)&dummy;
+  CHECK(1212, shanjie_engine_new_shared(sh, 0, 0, 0, &ne) == 0 && ne != 0);
+  shanjie_engine_free(src);                                              /* the handle outlives the source */
+  CHECK(1213, type(ne, "su3cl3"));
+  CHECK(1214, shanjie_engine_key(ne, kind_key(3), &o) == 0 && o != 0 && str_eq(o->commit, "\xe4\xbd\xa0\xe5\xa5\xbd")); /* 你好 */
+  shanjie_output_free(o);
+  shanjie_engine_free(ne);
+  ne = 0;
+  CHECK(1215, shanjie_engine_new_shared(sh, 0, "/nonexistent/shanjie-packs", SHANJIE_PACK_ACG | SHANJIE_PACK_BEAUTY, &ne) == 0 && ne != 0); /* no pack files */
+  shanjie_engine_free(ne);
+  shanjie_shared_free(sh);
+  shanjie_shared_free(0);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3 && argc != 4) return 2;
@@ -566,6 +606,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_english(argv[1]);
   if (rc == 0) rc = run_digits(argv[1], argv[2]);
   if (rc == 0) rc = run_fuzzy(argv[1]);
+  if (rc == 0) rc = run_share(argv[1], argv[2]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

@@ -308,3 +308,175 @@ fn variant_order_names_a_spelling_the_lexicon_lacks_is_an_error() {
         assert_eq!(Lexicon::parse_with_variants(base, None, Some(&table)).err(), Some(Error::BadVariantOrder { line: 1 }), "{row:?}");
     }
 }
+
+// ---- pack-switch: the two rewrites that must not change a result (docs/spec/lexicon-and-packs.md §4.2) ----
+
+fn data_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+}
+
+/// Every field of two lexicons, the scores bit for bit.
+fn assert_same_lexicon(a: &Lexicon, b: &Lexicon, what: &str) {
+    assert_eq!(a.max_len, b.max_len, "{what}: max_len");
+    assert_eq!(a.syl_ids, b.syl_ids, "{what}: syl_ids");
+    assert_eq!(a.syl_names, b.syl_names, "{what}: syl_names");
+    assert_eq!(a.key_pool, b.key_pool, "{what}: key_pool");
+    assert_eq!(a.readings.len(), b.readings.len(), "{what}: reading count");
+    for (i, (x, y)) in a.readings.iter().zip(&b.readings).enumerate() {
+        assert_eq!((x.key_off, x.key_len, x.start), (y.key_off, y.key_len, y.start), "{what}: reading {i}");
+    }
+    assert_eq!(a.ents.len(), b.ents.len(), "{what}: entry count");
+    for (i, (x, y)) in a.ents.iter().zip(&b.ents).enumerate() {
+        assert_eq!((x.off, x.len, x.score.to_bits()), (y.off, y.len, y.score.to_bits()), "{what}: entry {i}");
+    }
+    assert_eq!(a.words, b.words, "{what}: words");
+    assert_eq!(a.by_word, b.by_word, "{what}: by_word");
+    assert_eq!(*a.manual, *b.manual, "{what}: manual set");
+    assert_eq!(a.variants, b.variants, "{what}: variant rows");
+}
+
+/// Both ways of the variant-order step on the same small texts: the same lexicon, or the same error.
+fn assert_variant_steps_agree(base: &str, table: &str) -> Result<Lexicon, Error> {
+    let t = VariantOrder::parse(table).unwrap();
+    let (new, old) = (Lexicon::parse_with_variants(base, None, Some(&t)), Lexicon::parse_applying(base, None, Some(&t), apply_variant_order_scanning));
+    match (&new, &old) {
+        (Ok(n), Ok(o)) => assert_same_lexicon(n, o, "small"),
+        (Err(n), Err(o)) => assert_eq!(n, o),
+        _ => panic!("one way failed, the other did not: {:?} / {:?}", new.as_ref().err(), old.as_ref().err()),
+    }
+    new
+}
+
+#[test]
+fn variant_order_one_pass_equals_the_scanning_step_on_small_tables() {
+    // Two rows under one reading (and a third under another): each keeps to its own `less`.
+    let l = assert_variant_steps_agree("a 甲 -1.0\na 乙 -0.5\na 丙 -0.2\na 丁 -4.0\nb 戊 -1\nb 甲 -3\n", "a\t乙\t甲\tt\na\t丙\t丁\tt\nb\t戊\t甲\tt\n").unwrap();
+    let es: Vec<(&str, f64)> = l.entries(&v(&["a"])).to_vec();
+    assert_eq!(es.iter().map(|e| e.0).collect::<Vec<_>>(), ["甲", "乙", "丁", "丙"], "{es:?}");
+    // `more` twice in the reading: its highest score counts, whichever row comes first in the file.
+    let l = assert_variant_steps_agree("a 甲 -3.0\na 甲 -1.0\na 乙 -0.5\n", "a\t乙\t甲\tt\n").unwrap();
+    assert_eq!(l.entries(&v(&["a"]))[0].0, "甲");
+    assert!((l.entries(&v(&["a"])).iter().find(|e| e.0 == "乙").unwrap().1 - (-1.0 - VARIANT_GAP)).abs() < 1e-12, "the gap is kept to the highest 甲");
+    // `less` under two readings, the table naming one: the other stays.
+    let l = assert_variant_steps_agree("a 甲 -1.0\na 乙 -0.5\nb 甲 -1.0\nb 乙 -0.5\n", "b\t乙\t甲\tt\n").unwrap();
+    assert_eq!(l.entries(&v(&["a"]))[0].0, "乙");
+    assert_eq!(l.entries(&v(&["b"]))[0].0, "甲");
+    // `less` twice in a reading: both rows are lowered.
+    assert_variant_steps_agree("a 甲 -1.0\na 乙 -0.5\na 乙 -0.4\n", "a\t乙\t甲\tt\n").unwrap();
+    // An unknown syllable, and a spelling not found under the reading: the same error and line as the scanning step.
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "z\t乙\t甲\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "a\t乙\t不在\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    // Both errors in one table: the row whose turn comes first is reported, in either order.
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "a\t乙\t不在\tt\nz\t乙\t甲\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "z\t乙\t甲\tt\na\t乙\t不在\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "a\t乙\t甲\tt\nz\t乙\t甲\tt\na\t丙\t不在\tt\n").err(), Some(Error::BadVariantOrder { line: 2 }));
+}
+
+/// The texts `Engine::new_with_packs` parses (docs/spec/c-abi.md §8): base, the overlay rows (overlay, sandhi, names, the packs of `mask`), the variant-order table.
+fn real_lexicon_texts(mask: u32) -> (String, String, VariantOrder, std::time::Duration) {
+    let t0 = std::time::Instant::now();
+    let (dir, packs) = (data_root().join("data/lexicon"), data_root().join("data/packs"));
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let mut overlay = read("overlay-add.tsv");
+    for part in [read("sandhi-add.tsv"), read("names-add.tsv"), engine::read_packs_detailed(&packs, mask).unwrap()] {
+        if !overlay.is_empty() && !overlay.ends_with('\n') {
+            overlay.push('\n');
+        }
+        overlay.push_str(&part);
+    }
+    (read("mcbpmf-data.txt"), overlay, VariantOrder::parse(&read("variant-order.tsv")).unwrap(), t0.elapsed())
+}
+
+#[test]
+fn variant_order_one_pass_equals_the_scanning_step_on_the_real_lexicon() {
+    for mask in [0, engine::PACK_ALL] {
+        let (base, overlay, table, _) = real_lexicon_texts(mask);
+        let new = Lexicon::parse_with_variants(&base, Some(&overlay), Some(&table)).unwrap();
+        let old = Lexicon::parse_applying(&base, Some(&overlay), Some(&table), apply_variant_order_scanning).unwrap();
+        assert!(new.variants.len() > 10, "the shipped table has rows");
+        assert_same_lexicon(&new, &old, &format!("mask {mask}"));
+    }
+}
+
+fn spread(mut ms: Vec<f64>) -> (f64, f64, f64) {
+    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (ms[0], ms[ms.len() / 2], ms[ms.len() - 1])
+}
+
+/// Release only (`#[ignore]`; docs/spec/lexicon-and-packs.md §4.2): the lexicon built from text, the step as it was and as it is, alternating in one process, 10 each.
+/// `cargo test --release --locked -p core --lib tests::timing_variant_order_one_pass -- --ignored --nocapture --exact`
+#[test]
+#[ignore]
+fn timing_variant_order_one_pass() {
+    for mask in [0, 29] {
+        let (base, overlay, table, load) = real_lexicon_texts(mask);
+        let (mut old, mut new) = (Vec::new(), Vec::new());
+        for _ in 0..10 {
+            let t = std::time::Instant::now();
+            let a = Lexicon::parse_applying(&base, Some(&overlay), Some(&table), apply_variant_order_scanning).unwrap();
+            old.push(t.elapsed().as_secs_f64() * 1e3);
+            let t = std::time::Instant::now();
+            let b = Lexicon::parse_with_variants(&base, Some(&overlay), Some(&table)).unwrap();
+            new.push(t.elapsed().as_secs_f64() * 1e3);
+            assert_eq!(a.ents.len(), b.ents.len());
+        }
+        let (o, n) = (spread(old), spread(new));
+        println!("pack-switch timing: variant_order mask {mask} old min/median/max {:.0}/{:.0}/{:.0} ms  new min/median/max {:.0}/{:.0}/{:.0} ms  (load {:.0} ms)", o.0, o.1, o.2, n.0, n.1, n.2, load.as_secs_f64() * 1e3);
+        assert!(n.1 <= o.1 * 0.85, "mask {mask}: the median must be at least 15% less (old {:.0}, new {:.0})", o.1, n.1);
+    }
+}
+
+/// The capped lexicon of the shipping masks, for `Legal::new`.
+fn real_capped(mask: u32) -> (lm::Lm, lm::CappedLexicon) {
+    let (dir, packs) = (data_root().join("data/lexicon"), data_root().join("data/packs"));
+    let (lex, pack_text) = engine::load_lexicon_packs(&dir, Some((&packs, mask))).unwrap();
+    let overlay = engine::capping_overlay(&dir, &pack_text).unwrap();
+    let demote = lm::Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
+    let lm = lm::Lm::load(&data_root().join("data/lm/bigram.sjlm")).unwrap();
+    let oov = engine::read_packs_detailed(&packs, mask & engine::PACK_OOV).unwrap();
+    let capped = lm::CappedLexicon::with_packs(lex, &overlay, &oov, &lm, Some(&demote)).unwrap();
+    (lm, capped)
+}
+
+#[test]
+fn legal_once_per_syllable_equals_the_each_reading_step() {
+    // Small: one syllable in several readings, a reading with no Han word (a letter word only), a toned and a toneless syllable.
+    let rows: Vec<(Vec<&str>, Vec<(&str, f64)>)> = vec![
+        (vec!["ㄅ"], vec![("ㄅ", -1.0)]),
+        (vec!["ㄆ", "ㄚˊ"], vec![("爬", -1.0)]),
+        (vec!["ㄚˊ"], vec![("牙", -1.0), ("a", -2.0)]),
+        (vec!["ㄚˊ", "ㄅ"], vec![("ab", -1.0)]),
+    ];
+    let (a, b) = (digits::Legal::new(rows.clone().into_iter()), digits::Legal::new_each(rows.into_iter()));
+    assert!(a.sets() == b.sets(), "small: the two sets differ");
+    assert!(a.has_han_syllable("ㄚˊ") && !a.has_han_syllable("ㄅ"), "premise: a letter-word reading does not count");
+    for mask in [0, 29] {
+        let (lm, capped) = real_capped(mask);
+        let (a, b) = (digits::Legal::new(capped.readings(&lm)), digits::Legal::new_each(capped.readings(&lm)));
+        assert!(a.sets().0.len() > 100 && a.sets().1.len() > 100, "mask {mask}: the sets are not empty");
+        assert!(a.sets() == b.sets(), "mask {mask}: the two sets differ");
+    }
+}
+
+/// Release only (`#[ignore]`): `Legal::new` on the capped lexicon of mask 29, as it was and as it is, alternating, 10 each.
+/// `cargo test --release --locked -p core --lib tests::timing_legal_once_per_syllable -- --ignored --nocapture --exact`
+#[test]
+#[ignore]
+fn timing_legal_once_per_syllable() {
+    let t0 = std::time::Instant::now();
+    let (lm, capped) = real_capped(29);
+    let load = t0.elapsed().as_secs_f64() * 1e3;
+    let (mut old, mut new) = (Vec::new(), Vec::new());
+    for _ in 0..10 {
+        let t = std::time::Instant::now();
+        let a = digits::Legal::new_each(capped.readings(&lm));
+        old.push(t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        let b = digits::Legal::new(capped.readings(&lm));
+        new.push(t.elapsed().as_secs_f64() * 1e3);
+        assert!(a.sets() == b.sets());
+    }
+    let (o, n) = (spread(old), spread(new));
+    println!("pack-switch timing: legal_new mask 29 old min/median/max {:.0}/{:.0}/{:.0} ms  new min/median/max {:.0}/{:.0}/{:.0} ms  (load {load:.0} ms)", o.0, o.1, o.2, n.0, n.1, n.2);
+    assert!(n.1 <= o.1 * 0.5, "the median must be at least 50% less (old {:.0}, new {:.0})", o.1, n.1);
+}

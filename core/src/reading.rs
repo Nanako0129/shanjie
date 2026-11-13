@@ -112,6 +112,22 @@ fn multi_rows(base: &str, keep: impl Fn(char) -> bool) -> Vec<(&str, &str, f64)>
     rows
 }
 
+/// The pairs of an exemption list (`ReadingDecode::with_exempt`); `Err` names the first bad line. `Engine::new_shared` calls it alone when it
+/// reuses a built table, so a list that went bad since the table was built still fails the load.
+pub(crate) fn parse_exempt(text: &str) -> Result<HashSet<(String, char)>, String> {
+    let mut exempt = HashSet::new();
+    for (i, l) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty() && !l.starts_with('#')) {
+        let mut f = l.split('\t');
+        let (Some(syl), Some(w), None) = (f.next(), f.next(), f.next()) else { return Err(format!("line {}: expected syllable<TAB>character", i + 1)) };
+        let mut cs = w.chars();
+        match (cs.next(), cs.next()) {
+            (Some(c), None) if !syl.is_empty() => exempt.insert((syl.to_string(), c)),
+            _ => return Err(format!("line {}: expected syllable<TAB>character", i + 1)),
+        };
+    }
+    Ok(exempt)
+}
+
 /// What the decoder needs for the reading term besides the lexicon: the mc values of the floor pairs. Built once from the lexicon and the text of
 /// `mcbpmf-data.txt`, read-only afterwards.
 pub struct ReadingDecode {
@@ -186,15 +202,7 @@ impl ReadingDecode {
     /// R1g: the pairs in `text` (`syllable<TAB>character` rows; blank lines and `#` lines skipped) cost 0, whatever the lexicon scores them.
     /// A row that is not a syllable and one character stops the run (`Err`); a pair the lexicon lacks stays harmless (`logp` is `None` for it).
     pub fn with_exempt(mut self, text: &str) -> Result<ReadingDecode, String> {
-        for (i, l) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty() && !l.starts_with('#')) {
-            let mut f = l.split('\t');
-            let (Some(syl), Some(w), None) = (f.next(), f.next(), f.next()) else { return Err(format!("line {}: expected syllable<TAB>character", i + 1)) };
-            let mut cs = w.chars();
-            match (cs.next(), cs.next()) {
-                (Some(c), None) if !syl.is_empty() => self.exempt.insert((syl.to_string(), c)),
-                _ => return Err(format!("line {}: expected syllable<TAB>character", i + 1)),
-            };
-        }
+        self.exempt = parse_exempt(text)?;
         self.exempt_sha8 = sha256_hex(text.as_bytes())[..8].to_string();
         Ok(self)
     }
