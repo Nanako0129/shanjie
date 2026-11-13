@@ -22,7 +22,7 @@
 //! `--rows` mode). Input lines `id<TAB>left<TAB>prefix<TAB>keys` (`left` is the text before the cursor, may be empty; `prefix` and `keys`
 //! are keycaps: `_` Space, an upper-case letter Shift+letter, `<` Backspace; `prefix` is typed first and only `keys` is judged), the
 //! engine reset before each line. `--rho RHO,RHO_SYM` (two finite numbers, 0 or more) sets the two penalties of the column-order reading for the run instead of the constants
-//! `digits::RHO`, `digits::RHO_SYM` (`Engine::set_reorder_penalty`); `--rho 8,4` gives the bytes no `--rho` gives. `--out` (refused when it exists) gets nine TAB columns a line:
+//! `digits::RHO`, `digits::RHO_SYM` (`Engine::set_reorder_penalty`); `--rho 7,4` gives the bytes no `--rho` gives. `--out` (refused when it exists) gets nine TAB columns a line:
 //!   id  units_before  new_units(blank-separated, `_punct_SP` for a blank)  pending_symbols  run_utf16_len  reverts(`key:a|b|c`)
 //!   splits  digit_tokens  commit+preedit
 //! and stdout one line, `input_sha256<TAB>lines`. `--list-syllables` prints the lexicon's distinct reading syllables, one a line.

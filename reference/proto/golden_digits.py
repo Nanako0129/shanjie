@@ -42,7 +42,7 @@ assert len(ROWS) == 31
 
 
 # docs/spec/english-mixed.md §7.3 (reversal-digits): the two penalties (core/src/digits.rs RHO, RHO_SYM; test_digits.py checks them against that source).
-RHO, RHO_SYM = 8.0, 4.0
+RHO, RHO_SYM = 7.0, 4.0
 # `decide` rows of digits-reorder.txt (the column-order reading at a closing key, all keys in the digit alphabet, the closing key inside the run): `0 1 4` (ㄢㄅˋ read
 # ㄅㄢˋ), the same with the space bar, `8 2 4`, `/ 5 4` (the run starts with a mark: rho_sym), `. 2 ␣`, `9 1 3`; the pairs that must not gain a split `1 8 4`
 # (ㄅㄚˋ is in order) and `2 0 2 6` (no closing key); and `1 2 8 4` (two keys in the initial column: reading by columns drops one, which is no reading).
@@ -61,7 +61,7 @@ LATE_ROWS = [
     ("", "2026", "8", "w", SP, "2 0 2 6 8 w " + SP), ("", "1", ".", "su", SP, "1 . u s " + SP), ("", "31", "8", "w", SP, None), ("下午", "3", "8", "w", SP, None),
     ("", "", "1.", "u", "3", None), ("", "", "1", "u", "3", None), ("", "", "1", "", "3", None), ("", "", "8", "q", "6", "8 q 6"),
     ("", "", "/", "j", "3", "/ j 3"), ("", "", ".", "h", "4", ". h 4"), ("", "", "-", "u", "4", "- u 4"), ("", "", "/", "rm", SP, None),
-    ("", "", "2", "0", "4", None), ("我", "", "0", "rm", "4", None),
+    ("", "", "02", "j", "4", None), ("", "", "5", "l", "6", None),
 ]
 LATE_PENALTIES = (RHO, RHO_SYM)
 

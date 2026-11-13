@@ -16,9 +16,10 @@ pub const MAX_BUF: usize = 4;
 /// C's R2: a pure-Zhuyin split of a closed syllable is scored `theta` higher.
 pub const THETA: f64 = 3.0;
 /// docs/spec/english-mixed.md §7.3, §15: how much lower (log10) a reading with keys put in column order scores than the same syllable typed in order.
+/// The value is the cell the grid of the research repo's experiments/reversal-digits chose (registration and results, 2026-11-14: (7, 4) of ρ in 6..10 by ρs in 4, 6).
 /// A run's digit-alphabet keys can rejoin the syllable typed right behind them only at this price: lower and more numbers are eaten, higher and fewer hurried syllables are saved.
-pub const RHO: f64 = 8.0;
-/// `RHO` for a run that starts with `.` `/` `-` (a decimal point, a slash or a hyphen is a weaker start of a number: with 8 alone the hurried `. u 3` at a sentence start stayed `.以`).
+pub const RHO: f64 = 7.0;
+/// `RHO` for a run that starts with `.` `/` `-` (a decimal point, a slash or a hyphen is a weaker start of a number: with `RHO` alone the hurried `. u 3` at a sentence start stayed `.以`).
 pub const RHO_SYM: f64 = 4.0;
 /// beta of P(D | C) and gamma of P(w | v, D) (docs/spec/english-mixed.md §7.2, §7.8, written in).
 const BETA: f64 = 1.0;

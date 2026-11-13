@@ -1240,7 +1240,7 @@ fn the_cursor_in_the_middle() {
 }
 
 /// docs/spec/english-mixed.md §13.1 again with the App's engine: no reversed key order of any lexicon syllable opens an English run or leaves an English
-/// token, and the numbers that the scores still choose stay under the bound the constants give (450 at `RHO` 8, `RHO_SYM` 4: measured 406, plus 10%).
+/// token, and the numbers that the scores still choose stay under the bound the constants give (410 at `RHO` 7, `RHO_SYM` 4: measured 372, plus 10% rounded up).
 /// The sibling of `every_reversed_key_order_of_every_syllable_is_never_english` in `engine_english.rs`, which has no digit layer.
 #[test]
 fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
@@ -1285,7 +1285,7 @@ fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
     println!("typed {typed} reversed orders; {} English, {digits} not the syllable (digits)", english.len());
     assert!(typed > 3000, "only {typed} reversed orders");
     assert!(english.is_empty(), "{} English, first {:?}", english.len(), &english[..english.len().min(8)]);
-    assert!(digits <= 450, "{digits} reversed orders stay numbers: the constants lost ground");
+    assert!(digits <= 410, "{digits} reversed orders stay numbers: the constants lost ground");
 }
 
 /// The tool hook `set_reorder_penalty`: not called, or called with the constants, every key is the same.
