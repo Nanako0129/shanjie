@@ -72,6 +72,18 @@ fn digit_table() -> Arc<core::digits::DigitTable> {
     static T: OnceLock<Arc<core::digits::DigitTable>> = OnceLock::new();
     T.get_or_init(|| Arc::new(core::digits::DigitTable::parse(&std::fs::read_to_string(root().join("data/lexicon/digits.tsv")).unwrap()).unwrap())).clone()
 }
+/// `SHANJIE_TIMING_OUT`: when set, the timing tests below append their raw per-key times to that file, one line `test<TAB>pass<TAB>row<TAB>key<TAB>microseconds`
+/// (names and numbers only, no key content); the reversal-digits measurement (the contract's §3.2 and §6.3.f) takes its p95 from these.
+fn timing_out(test: &str, times: &[(usize, usize, usize, Duration)]) {
+    let Some(path) = std::env::var_os("SHANJIE_TIMING_OUT") else { return };
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+    let mut buf = String::new();
+    for (pass, row, key, d) in times {
+        buf.push_str(&format!("{test}\t{pass}\t{row}\t{key}\t{}\n", d.as_micros()));
+    }
+    f.write_all(buf.as_bytes()).unwrap();
+}
 const L: Layout = Layout::Standard;
 const DAY: i64 = 20_000;
 
@@ -1076,20 +1088,73 @@ fn timing_digit_keys() {
     e.reset(ResetMode::Discard);
     let scripts = ["2026su06", "2026/10/15", "1984", "3.14", "101o4", "100m06", "1258901258", "84", "504"];
     let mut times = Vec::new();
-    for _ in 0..200 {
-        for sc in scripts {
+    let mut raw = Vec::new();
+    for pass in 0..200 {
+        for (row, sc) in scripts.iter().enumerate() {
             e.set_left_context("下午");
-            for c in sc.chars().chain(['\n']) {
+            for (ki, c) in sc.chars().chain(['\n']).enumerate() {
                 let k = if c == '\n' { kind(KeyKind::Enter) } else { Key::ch(c, 0) };
                 let t = Instant::now();
                 e.key(k).unwrap();
                 times.push(t.elapsed());
+                raw.push((pass, row, ki, *times.last().unwrap()));
             }
         }
     }
+    timing_out("timing_digit_keys", &raw);
     times.sort();
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
     println!("digit keys: {} keys p50 {:.3} ms p95 {:.3} ms max {:.3} ms", times.len(), ms(times[times.len() / 2]), ms(times[times.len() * 95 / 100]), ms(times[times.len() - 1]));
+    assert!(times[times.len() * 95 / 100] < Duration::from_millis(16), "p95 over 16 ms");
+}
+
+/// Keycaps of the reversal-digits probe (cli `english-sim --keys`): `_` Space, `<` Backspace, an upper-case letter Shift+letter.
+fn cap_key(c: char) -> Key {
+    match c {
+        '_' => Key::new(KeyKind::Space),
+        '<' => Key::new(KeyKind::Backspace),
+        c if c.is_ascii_uppercase() => Key::ch(c.to_ascii_lowercase(), MOD_SHIFT),
+        c => Key::ch(c, 0),
+    }
+}
+
+/// The keys of reversed syllables (the first 500 `perm-adj` lines of the reversal-digits set `z_rows.tsv`, `SHANJIE_TIMING_ROWS`): 200 passes, per key
+/// of the `keys` column (the `prefix` is typed first, untimed). The engine is the one of `timing_digit_keys`. Printed; the assertion is the spec's p95 < 16 ms.
+/// The variable unset: a NOTE and nothing else.
+#[test]
+#[ignore]
+fn timing_reversed_keys() {
+    let Some(path) = std::env::var_os("SHANJIE_TIMING_ROWS") else {
+        println!("NOTE: SHANJIE_TIMING_ROWS is not set (the reversal-digits `z_rows.tsv`); timing_reversed_keys skipped");
+        return;
+    };
+    let text = std::fs::read_to_string(path).unwrap();
+    let rows: Vec<Vec<&str>> = text.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f.len() == 4 && f[0].split('|').nth(2) == Some("perm-adj")).take(500).collect();
+    assert_eq!(rows.len(), 500, "fewer than 500 perm-adj lines");
+    let mut e = engine();
+    e.set_digit_table(Some(digit_table()));
+    e.set_english(true).unwrap();
+    e.key(Key::ch('2', 0)).unwrap();
+    e.reset(ResetMode::Discard);
+    let (mut times, mut raw) = (Vec::new(), Vec::new());
+    for pass in 0..200 {
+        for (row, f) in rows.iter().enumerate() {
+            e.reset(ResetMode::Discard);
+            e.set_left_context(f[1]);
+            f[2].chars().for_each(|c| drop(e.key(cap_key(c)).unwrap()));
+            for (ki, c) in f[3].chars().enumerate() {
+                let t = Instant::now();
+                e.key(cap_key(c)).unwrap();
+                let d = t.elapsed();
+                times.push(d);
+                raw.push((pass, row, ki, d));
+            }
+        }
+    }
+    timing_out("timing_reversed_keys", &raw);
+    times.sort();
+    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    println!("reversed keys: {} keys p50 {:.3} ms p95 {:.3} ms max {:.3} ms", times.len(), ms(times[times.len() / 2]), ms(times[times.len() * 95 / 100]), ms(times[times.len() - 1]));
     assert!(times[times.len() * 95 / 100] < Duration::from_millis(16), "p95 over 16 ms");
 }
 
@@ -1106,6 +1171,7 @@ fn time_typing76_with(dir: Option<&Path>, abbr: bool, digits: bool) {
     let text = std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap();
     let mut times: Vec<Duration> = Vec::new();
     let mut slow: Vec<(Duration, usize, usize, KeyKind)> = Vec::new();
+    let mut raw: Vec<(usize, usize, usize, Duration)> = Vec::new();
     let mut rows = 0;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let f: Vec<&str> = line.split('|').collect();
@@ -1131,6 +1197,7 @@ fn time_typing76_with(dir: Option<&Path>, abbr: bool, digits: bool) {
             let d = t.elapsed();
             times.push(d);
             slow.push((d, rows, ki, k.kind));
+            raw.push((0, rows, ki, d));
             ki += 1;
             o
         };
@@ -1143,6 +1210,9 @@ fn time_typing76_with(dir: Option<&Path>, abbr: bool, digits: bool) {
             keys.into_iter().for_each(|k| drop(timed(&mut e, k)));
         }
         rows += 1;
+    }
+    if digits && dir.is_none() && !abbr {
+        timing_out("timing_typing76_keys_digits", &raw);
     }
     times.sort();
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;

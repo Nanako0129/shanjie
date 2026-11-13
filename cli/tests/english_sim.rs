@@ -205,3 +205,30 @@ fn a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on() {
     assert!(ok && !stderr.contains("stopped") && stdout.split('\t').count() == 15, "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// `--keys` (the reversal-digits probe, docs/spec/english-mixed.md §13.3): the engine as the App builds it, three fixed lines, nine columns each.
+/// The lines: `.u3` (the digit layer reads `.` as a digit: `.以`), `8su06` after the prefix `ji3` (one unit before, then the digit and ㄋㄧㄢˊ), `wlu6`
+/// (a hurried ㄊㄧㄠˊ, which only the reversal guard keeps from becoming English).
+#[test]
+fn keys_probe_nine_columns() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-keys-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("keys.tsv");
+    std::fs::write(&input, "a1\t\t\t.u3\na2\t\tji3\t8su06\na3\t\t\twlu6\n").unwrap();
+    let (input, out) = (input.to_str().unwrap(), dir.join("out.tsv"));
+    let o = out.to_str().unwrap();
+    let sha = run(&["--keys", input, "--out", o]);
+    assert_eq!(sha, "a649b13673ecaf5af43fcbff500b2072c85b4e31cbffe6c12a381eabf0909db7\t3\n");
+    let want = "a1\t0\t_punct_. ㄧˇ\t\t0\t\t0\t1\t.以\na2\t1\t_punct_8 ㄋㄧㄢˊ\t\t0\t\t0\t1\t我8年\na3\t0\tㄊㄧㄠˊ\t\t0\t\t0\t0\t條\n";
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), want);
+    // An existing output is never overwritten.
+    assert!(fails(&["--keys", input, "--out", o]));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), want);
+    // The switches default to the App's: the same output with them spelled out, a different one with the guard off (`wlu6` reverts to English).
+    let (spelled, off) = (dir.join("spelled.tsv"), dir.join("off.tsv"));
+    run(&["--keys", input, "--out", spelled.to_str().unwrap(), "--overwrite", "off", "--key-order", "on", "--reversal-guard", "on"]);
+    assert_eq!(std::fs::read_to_string(&spelled).unwrap(), want);
+    run(&["--keys", input, "--out", off.to_str().unwrap(), "--reversal-guard", "off"]);
+    assert!(std::fs::read_to_string(&off).unwrap().ends_with("a3\t0\t\t\t4\t2:b\t0\t0\twlu6\n"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

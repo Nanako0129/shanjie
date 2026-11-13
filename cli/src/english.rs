@@ -6,11 +6,23 @@
 //!   english-sim --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--retries 3]
 //!               [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off] [--digits [--lm FILE]]
 //!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
+//!   english-sim --keys FILE --out FILE [--lm FILE] [--profile chat|formal] [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
+//!   english-sim --list-syllables
 //!
 //! `--overwrite` and `--key-order` (default on) are the engine's two switches; the third, the mixing switch, is on. With both off only
 //! the Space case (c) is left (a syllable the lexicon lacks, at Space). `--reversal-guard` defaults to off here so the arms keep the
 //! docs/spec/english-mixed.md §13.3 meaning, while the engine and the app default it on (zhen-reapply): with it on, (b) never fires, so the
 //! `revert_b_*` columns describe the guard-off setting, not what ships.
+//!
+//! `--keys` is the probe of docs/spec/english-mixed.md §13.3 (reversal-digits): key sequences through the engine as the App builds it
+//! (`cli::replay::build_engine_packs` with the App's default packs, no small model, no colloquial table; the digit table and the model
+//! loaded), its four English switches defaulting to the App's (mixing on, `--overwrite off`, `--key-order on`, `--reversal-guard on`, unlike the
+//! `--rows` mode). Input lines `id<TAB>left<TAB>prefix<TAB>keys` (`left` is the text before the cursor, may be empty; `prefix` and `keys`
+//! are keycaps: `_` Space, an upper-case letter Shift+letter, `<` Backspace; `prefix` is typed first and only `keys` is judged), the
+//! engine reset before each line. `--out` (refused when it exists) gets nine TAB columns a line:
+//!   id  units_before  new_units(blank-separated, `_punct_SP` for a blank)  pending_symbols  run_utf16_len  reverts(`key:a|b|c`)
+//!   splits  digit_tokens  commit+preedit
+//! and stdout one line, `input_sha256<TAB>lines`. `--list-syllables` prints the lexicon's distinct reading syllables, one a line.
 //!
 //! Output is one TSV line and no content text (R2). Typing mode:
 //!   rows_sha256  rows  syllables  keys  typos  revert_a_mean revert_a_max  revert_b_mean revert_b_max  revert_c_mean revert_c_max
@@ -62,9 +74,11 @@
 //!   revert at a tone key or Space (c) is not expected: the tone-key cost of (c) is not measured here (docs/spec/english-mixed.md §13.3).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
-use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, Revert, MAX_SYLLABLES};
+use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, Revert, MOD_SHIFT, MAX_SYLLABLES};
 use core::eval::{parse_rows, row_syllables, sha256_hex, usable};
+use core::lm::Profile;
 use core::Lexicon;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -404,10 +418,69 @@ fn on_off(v: String) -> Result<bool, String> {
     }
 }
 
+/// A keycap of the probe's input as a key: `_` Space, `<` Backspace, an upper-case letter Shift+letter, any other character itself.
+fn probe_key(c: char) -> Key {
+    match c {
+        '_' => Key::new(KeyKind::Space),
+        '<' => Key::new(KeyKind::Backspace),
+        c if c.is_ascii_uppercase() => Key::ch(c.to_ascii_lowercase(), MOD_SHIFT),
+        c => Key::ch(c, 0),
+    }
+}
+
+/// `--keys`: see the module comment. The engine is the App's (`build_engine_packs`, `PACKS`, no small model), then the probe's switches.
+fn run_keys(root: &Path, keys: &Path, out: &Path, lm: &Path, profile: Profile, switches: Switches) -> Result<(), String> {
+    let bytes = read(keys)?;
+    let sha = sha256_hex(&bytes);
+    let text = String::from_utf8(bytes).map_err(|_| "keys are not UTF-8")?;
+    let mut e = cli::replay::build_engine_packs(root, lm, None, None, profile, false, true, cli::replay::PACKS)?;
+    e.set_prediction(true).map_err(|_| "cannot set prediction")?;
+    switches.apply(&mut e)?;
+    let mut o = std::fs::OpenOptions::new().write(true).create_new(true).open(out).map_err(|e| format!("cannot create the output ({:?})", e.kind()))?;
+    let mut buf = String::new();
+    let mut lines = 0usize;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() != 4 {
+            return Err(format!("line {} does not have four columns", lines + 1));
+        }
+        e.reset(ResetMode::Discard);
+        e.set_left_context(f[1]);
+        for c in f[2].chars() {
+            e.key(probe_key(c)).map_err(|_| "key failed")?;
+        }
+        let before = e.syllables().len();
+        let (mut reverts, mut splits, mut dtok, mut run_len) = (String::new(), 0usize, 0usize, 0u32);
+        let (mut commit, mut preedit) = (String::new(), String::new());
+        for (i, c) in f[3].chars().enumerate() {
+            let out = e.key(probe_key(c)).map_err(|_| "key failed")?;
+            if let Some(r) = e.english_reverted() {
+                reverts.push_str(&format!("{i}:{} ", ["a", "b", "c"][r as usize]));
+            }
+            splits += e.english_split() as usize;
+            dtok += e.digits_emitted();
+            commit.push_str(&out.commit);
+            preedit = out.preedit;
+            run_len = out.english_run_utf16_len;
+        }
+        // The blank unit's reading ends in a blank: shown as `_punct_SP` so the units can be joined by blanks.
+        let units: Vec<String> = e.syllables().iter().map(|u| if u == "_punct_ " { "_punct_SP".to_string() } else { u.clone() }).collect();
+        let tail = if before <= units.len() { units[before..].join(" ") } else { format!("SHRUNK {}", units.join(" ")) };
+        let pend: String = e.english_columns().iter().flatten().collect();
+        buf.push_str(&format!("{}\t{before}\t{tail}\t{pend}\t{run_len}\t{}\t{splits}\t{dtok}\t{commit}{preedit}\n", f[0], reverts.trim_end()));
+        lines += 1;
+    }
+    o.write_all(buf.as_bytes()).map_err(|_| "cannot write the output")?;
+    println!("{sha}\t{lines}");
+    Ok(())
+}
+
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut words, mut rows, mut recall) = (None::<PathBuf>, None::<PathBuf>, false);
     let (mut digits, mut lm) = (false, None::<PathBuf>);
     let mut switches = Switches { overwrite: true, key_order: true, reversal_guard: false };
+    let (mut keys, mut out, mut profile, mut list_syllables) = (None::<PathBuf>, None::<PathBuf>, Profile::Chat, false);
+    let (mut ov, mut ko, mut rg) = (None::<bool>, None::<bool>, None::<bool>);
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut retries = MAX_RETRIES;
     let mut it = args.iter();
@@ -418,9 +491,19 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--rows" => rows = Some(val()?.into()),
             "--recall" => recall = true,
             "--digits" => digits = true,
-            "--overwrite" => switches.overwrite = on_off(val()?)?,
-            "--key-order" => switches.key_order = on_off(val()?)?,
-            "--reversal-guard" => switches.reversal_guard = on_off(val()?)?,
+            "--keys" => keys = Some(val()?.into()),
+            "--out" => out = Some(val()?.into()),
+            "--list-syllables" => list_syllables = true,
+            "--profile" => {
+                profile = match val()?.as_str() {
+                    "chat" => Profile::Chat,
+                    "formal" => Profile::Formal,
+                    _ => return Err("--profile must be chat or formal".into()),
+                }
+            }
+            "--overwrite" => ov = Some(on_off(val()?)?),
+            "--key-order" => ko = Some(on_off(val()?)?),
+            "--reversal-guard" => rg = Some(on_off(val()?)?),
             "--lm" => lm = Some(val()?.into()),
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
             "--repair" => {
@@ -435,6 +518,35 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--retries" => retries = val()?.parse().map_err(|_| "bad --retries")?,
             _ => return Err("unknown argument".into()),
         }
+    }
+    // The probe modes (`--keys`, `--list-syllables`) take the App's defaults for the switches; the other modes keep the tool's.
+    if list_syllables {
+        if keys.is_some() || out.is_some() || rows.is_some() || words.is_some() || recall {
+            return Err("--list-syllables goes alone".into());
+        }
+        let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
+        let seen: std::collections::BTreeSet<&str> = (0..lex.reading_count()).flat_map(|r| lex.reading_syllables(r)).collect();
+        for s in seen {
+            println!("{s}");
+        }
+        return Ok(());
+    }
+    if keys.is_some() || out.is_some() {
+        let (Some(keys), Some(out)) = (&keys, &out) else { return Err("--keys goes with --out".into()) };
+        if rows.is_some() || words.is_some() || recall || digits {
+            return Err("--keys is a mode of its own".into());
+        }
+        let sw = Switches { overwrite: ov.unwrap_or(false), key_order: ko.unwrap_or(true), reversal_guard: rg.unwrap_or(true) };
+        return run_keys(root, keys, out, &lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm")), profile, sw);
+    }
+    if let Some(v) = ov {
+        switches.overwrite = v;
+    }
+    if let Some(v) = ko {
+        switches.key_order = v;
+    }
+    if let Some(v) = rg {
+        switches.reversal_guard = v;
     }
     if !(0.0..=1.0).contains(&p) || repeat == 0 {
         return Err("--p must be in [0, 1] and --repeat at least 1".into());
