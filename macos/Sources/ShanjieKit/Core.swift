@@ -31,14 +31,58 @@ enum CoreResult {
     case failed(Int32)
 }
 
+/// An engine a background build made, on its way to the main thread (docs/spec/macos-shell.md §2.1, docs/spec/c-abi.md §5.2: an engine may be
+/// created on another thread and then handed to the one that uses it). Nothing calls the handle while it is in here. It frees the handle exactly once: when
+/// `CoreEngine.adopt` takes it, the engine's own deinit does; when the box is dropped first (a stale result, a `Shell` that is gone), this deinit does.
+/// `@unchecked Sendable` rests on that one hand-over: the box is filled on the build's thread, then only read on the main thread, never both at once.
+final class BuiltEngine: @unchecked Sendable {
+    fileprivate var handle: OpaquePointer?
+    fileprivate let free: @Sendable (OpaquePointer) -> Void
+
+    init(_ handle: OpaquePointer, free: @escaping @Sendable (OpaquePointer) -> Void) {
+        self.handle = handle
+        self.free = free
+    }
+
+    deinit { if let handle { free(handle) } }
+}
+
+/// The parts an engine shares with the engine the next pack switch builds (`shanjie_engine_share`, docs/spec/c-abi.md §5.4): data only, no
+/// user input, no borrow of the engine. Owned by one background build, which calls `release` after its last `shanjie_engine_new_shared`
+/// (so the handle is freed exactly once, after the calls that use it); the deinit is the net for a build that was dropped unrun.
+final class SharedParts: @unchecked Sendable {
+    private var handle: OpaquePointer?
+    private let free: @Sendable (OpaquePointer) -> Void
+
+    fileprivate init(_ handle: OpaquePointer, free: @escaping @Sendable (OpaquePointer) -> Void) {
+        self.handle = handle
+        self.free = free
+    }
+
+    var pointer: OpaquePointer? { handle }
+
+    func release() {
+        guard let h = handle else { return }
+        handle = nil
+        free(h)
+    }
+
+    deinit { release() }
+}
+
 /// Owns one `ShanjieEngine` handle. Every call is on the main thread (IMK's callback thread), as
-/// the handle is not thread-safe (docs/spec/c-abi.md §5.2).
+/// the handle is not thread-safe (docs/spec/c-abi.md §5.2): an engine made on a background thread is handed over whole (`BuiltEngine`)
+/// and only the main thread calls it afterwards.
 @MainActor
 final class CoreEngine {
     /// fileprivate, not private: only `RerankJob.apply(on:)` in this file reads it.
     fileprivate let handle: OpaquePointer
+    private let free: @Sendable (OpaquePointer) -> Void
 
-    private init(handle: OpaquePointer) { self.handle = handle }
+    private init(handle: OpaquePointer, free: @escaping @Sendable (OpaquePointer) -> Void) {
+        self.handle = handle
+        self.free = free
+    }
 
     /// The bits of the packs mask (`SHANJIE_PACK_*` in shanjie.h).
     static let packACG = UInt32(SHANJIE_PACK_ACG)
@@ -60,10 +104,26 @@ final class CoreEngine {
             code = shanjie_engine_new(dataDir, layout, &out)
         }
         guard code == 0, let out else { return (nil, code == 0 ? 4 : code) }
-        return (CoreEngine(handle: out), 0)
+        return (CoreEngine(handle: out, free: { shanjie_engine_free($0) }), 0)
     }
 
-    isolated deinit { shanjie_engine_free(handle) }
+    /// Takes the engine a background build made (`nil` when it made none or the box was taken before). From here the main thread owns it.
+    static func adopt(_ built: BuiltEngine?) -> CoreEngine? {
+        guard let built, let h = built.handle else { return nil }
+        built.handle = nil
+        return CoreEngine(handle: h, free: built.free)
+    }
+
+    /// `shanjie_engine_share` (docs/spec/c-abi.md §5.4), on the main thread, where the engine lives: only copies references, reads no file.
+    /// `(nil, code)` when the engine has no n-gram model (3) or on any other non-zero code.
+    func share(free: @escaping @Sendable (OpaquePointer) -> Void) -> (SharedParts?, Int32) {
+        var out: OpaquePointer?
+        let code = shanjie_engine_share(handle, &out)
+        guard code == 0, let out else { return (nil, code == 0 ? 4 : code) }
+        return (SharedParts(out, free: free), 0)
+    }
+
+    isolated deinit { free(handle) }
 
     func loadLM(path: String) -> Int32 { shanjie_engine_load_lm(handle, path) }
 

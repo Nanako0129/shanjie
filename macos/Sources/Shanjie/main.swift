@@ -321,7 +321,7 @@ func runServer() -> Never {
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(), quotePackStore: DefaultsQuotePackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
-        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), fuzzyStore: DefaultsFuzzyStore(),
+        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), packBuilder: QueuePackBuilder(), fuzzyStore: DefaultsFuzzyStore(),
         // 可省略韻母 does not ship in v0.4.0; see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.

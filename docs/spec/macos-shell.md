@@ -20,7 +20,7 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 | `ShanjieKitTests`、`ShanjieInstallTests`、`UpdateHostTests` | test | XCTest |
 
 - 連結核心：`Package.swift` 以 `#filePath` 算出 repo 根目錄，把 `target/release/libcore.a` 的完整路徑交給連結器，不用 `-lcore` 加搜尋路徑，所以搜尋路徑上別的 `libcore` 不可能被誤連。另連結 Accelerate（核心的小模型宣告了它的符號，Rust 的 `#[link(kind = "framework")]` 不會跟著靜態庫走）。
-- `ShanjieKit` 與測試用 Swift 6 嚴格模式，型別標 `@MainActor`；C ABI 只在主執行緒呼叫。
+- `ShanjieKit` 與測試用 Swift 6 嚴格模式，型別標 `@MainActor`；引擎 handle 的呼叫都在主執行緒。例外只有詞包切換的背景建置（§2.1）：建置佇列上呼叫 `shanjie_engine_new_shared`、`shanjie_shared_free`，以及從檔案建的那一串（`new_packs`、`load_lm`、`load_tinylm`、`load_colloquial`），建好的引擎整個交回主執行緒，之後只有主執行緒碰它（`docs/spec/c-abi.md` §5.2、§5.4）。
 - 唯一的外部相依是 Sparkle，釘死 2.10.0，`Package.resolved` 進版控，建置一律 `--force-resolved-versions`。Sparkle 只連進 `Shanjie` 與 `ShanjieUpdater`，`ShanjieKit` 與測試不碰它（更新的判斷放在 `ShanjieKit/Updates.swift`）。
 - 本機 `make` 的過期防護：`target/release/libcore.a` 比 Swift 執行檔新就刪執行檔強迫重連；`core/include/shanjie.h` 比較新就刪 module cache 與匯入它的目標的產物（SwiftPM 不追蹤這兩樣）。
 
@@ -87,12 +87,19 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 ### 2.1 引擎的建立與重建
 
 - `main.swift` 的 `runServer()` 先跑英文預設值的一次性重設（`docs/spec/english-mixed.md`），建 `NSApplication`、`IMKServer`（名稱取 `InputMethodConnectionName`），之後才建 `Shell`；`Shell` 持有行程唯一的引擎、候選窗與組字擁有者。接著建 `Updates`／`Updater`（`docs/spec/install-and-update.md`）與設定視窗，設好 `onOpenSettings`、`onOpenCandidateSettings`。
-- **同一時間只有一個引擎**（每個約 240 MB）。`Shell.init` 先讀鍵盤排列偏好，再呼叫唯一一次 `build()`；先建再切會建兩次。
-- `build()` 依序：釋放舊引擎；用目前的詞包遮罩建引擎（`shanjie_engine_new_packs`，沒有詞包用 `shanjie_engine_new`）；`load_lm(bigram.sjlm)`；成功才 `load_tinylm`，再成功才 `load_colloquial`（小模型與常談表載入失敗只記回傳碼，引擎照常，語意校正不啟用或不帶常談項）；然後把殼持有的每一個設定**每次重送一遍**（重建的引擎一律從核心預設值開始）：避免敏感字詞、即時預測、可省略韻母、中英混打與它的三個選項、ASCII 狀態、模糊輸入旗標、候選窗方向、語意校正與強度、聊天／書面、標點表、選字記憶資料夾。
-- 詞包載入失敗的退讓：合併建置失敗時，先建一個不帶詞包的引擎判斷是不是詞包的錯（只有一個啟用的詞包檔案在時沒有「少一個」可試，這個引擎成功就直接留下，`docs/spec/lexicon-and-packs.md` §4.3）；是，就對每個啟用中、檔案也在的詞包依設定順序各試「少這一個」，第一個成功的留下，其餘詞包照開；都不行就建不帶詞包的引擎。偏好值不動，也不顯示錯誤，下一次重建會再試。連不帶詞包的引擎都建不出來時記兩個回傳碼，結束。
-- 引擎建不出來：沒有引擎，所有按鍵直通（`Session.handle` 回傳 `false`）。載入 LM 失敗：沒有 LM 的引擎仍可打字，只記回傳碼。
-- 換鍵盤排列或切詞包會重建：先把組字送回擁有者（沒有擁有者就丟棄），再改設定，再 `build()`。重建在主執行緒阻塞約一秒以上，期間按鍵直通；排列很少切換，先接受。其餘設定（開關、強度、方向、聊天／書面）都不重建，直接送給現有的引擎。
-- 所有 C ABI 呼叫都在主執行緒。
+- **平常只有一個引擎**；切換詞包期間最多兩個：現行的，加上建置中或建好了還沒換上的。每個引擎的 footprint 量到 396 MiB，其中模型 256 MiB（2026-11-13，release 核心）；兩個引擎各載一份模型並存時 654–672 MiB，共用路徑不再有第二份模型（共用與各載一份兩條路徑並存時的數字由 `core/examples/pack_switch_bench.rs` 的 `memory` 模式量）。`Shell.init` 先讀鍵盤排列偏好，再呼叫唯一一次同步的 `build()`；先建再切會建兩次。
+- **同步的 `build()`**（第一次建置與換鍵盤排列，從檔案建）依序：釋放舊引擎；用目前的詞包遮罩建引擎（`shanjie_engine_new_packs`，沒有詞包用 `shanjie_engine_new`）；`load_lm(bigram.sjlm)`；成功才 `load_tinylm`，再成功才 `load_colloquial`（小模型與常談表載入失敗只記回傳碼，引擎照常，語意校正不啟用或不帶常談項）；然後把殼持有的每一個設定**每次重送一遍**（重建的引擎一律從核心預設值開始）：避免敏感字詞、即時預測、可省略韻母、中英混打與它的三個選項、ASCII 狀態、模糊輸入旗標、候選窗方向、語意校正與強度、聊天／書面、標點表、選字記憶資料夾。換鍵盤排列先把組字送回擁有者（沒有擁有者就丟棄），再改設定，再 `build()`，這一段在主執行緒阻塞約一秒以上，期間按鍵直通；排列很少切換，先接受。
+- 詞包載入失敗的退讓：合併建置失敗時，先建一個不帶詞包的引擎判斷是不是詞包的錯（只有一個啟用的詞包檔案在時沒有「少一個」可試，這個引擎成功就直接留下，`docs/spec/lexicon-and-packs.md` §4.3）；是，就對每個啟用中、檔案也在的詞包依設定順序各試「少這一個」，第一個成功的留下，其餘詞包照開；都不行就建不帶詞包的引擎。偏好值不動，也不顯示錯誤，下一次重建會再試。連不帶詞包的引擎都建不出來時記兩個回傳碼，結束。同步與背景兩條路徑用同一份退讓程式（`PackBuild.run`）。
+- 引擎建不出來：同步建置之後沒有引擎，所有按鍵直通（`Session.handle` 回傳 `false`）；詞包切換的背景建置建不出來則留在現行引擎（見下）。載入 LM 失敗：沒有 LM 的引擎仍可打字，只記回傳碼。
+- **切換詞包不卡**（`Shell.setAcgPack`、`setQuotePack`、`setItPack`、`setBeautyPack`、`setMemePack`）：值沒變什麼都不做；值變了就立刻改開關、寫入偏好、發 `didChangeSettings`，交給背景建置，馬上返回；不送出組字，現行引擎繼續處理按鍵。
+  - **建置器**：`PackBuilder` 協定，做法比照 `RerankRunner`：App 傳 `QueuePackBuilder`（固定標籤 `com.nyanako.inputmethod.shanjie.packbuild` 的序列 `.utility` 佇列，結果經 `DispatchQueue.main.async` 回主執行緒），測試傳手動完成的 `HeldPackBuilder`，沒有測詞包切換的測試台用預設的 `ImmediatePackBuilder`（在呼叫的執行緒做完並馬上回報）。背景那一段的輸入只有 `PackBuildPlan`（路徑、排列、遮罩、共用部分的 handle），不讀不寫 `Shell` 的任何狀態；輸出 `PackBuildResult`（引擎 handle 或沒有、實際載入的遮罩、建置次數、各步的回傳碼）。
+  - **兩條路徑**，在主執行緒決定：現行引擎存在，而且建它的時候模型、小模型、常談三個都載入成功，就在主執行緒呼叫 `shanjie_engine_share` 取出共用部分，背景用 `shanjie_engine_new_shared` 建（`new_shared` 全有或全無，回 0 的引擎三樣都已載入）；其他情形（沒有引擎、有一個沒載入成功、`share` 回非 0）背景照同步的順序從檔案建。共用路徑回非 0 時，退讓的每一次嘗試也用 `new_shared`（同一個共用部分 handle），不改走從檔案建；連不帶詞包的也失敗，這次建置沒有結果，留在現行引擎。
+  - **換上**（主執行緒）：結果當初**被要求的**（遮罩、排列）仍然等於現在想要的，而且組字區是空的（`composing` 為假，沒有開著的候選窗或已進入的預測列），才換；不成立就留著，等組字結束再換，不為了換引擎而送出打到一半的字。組字結束由 `composing` 變成假與 `hideCandidates()` 觸發，經 `DispatchQueue.main.async` 一跳再檢查，所以換上不會發生在處理那一鍵的呼叫裡面。步驟依序：隱藏沒有進入的預測列；釋放舊引擎；對新引擎重送殼持有的每一個設定（值取換上當下的）；開選字記憶檔；設成現行引擎並記下它是為哪一組要求的（`engineRequested`：遮罩、排列），更新 `loadedPackMask`（實際載入的遮罩，只給選單的「已開啟的詞包」用）、`rerankAvailable`、`rerankLevels`；發 `didChangeSettings`。
+  - **過期與再建一律比要求的**（遮罩、排列），不比 `loadedPackMask`：詞包缺檔或壞檔時實際載入的比要求的少，比它會把每個結果都當成過期、或換上之後一直重建。同一時間最多一個建置在進行；建置期間再切換，只記下最新想要的。切換的當下有建好、還在組字而沒換上的結果，就算過期，當場釋放，再看最新想要的和現行引擎被要求的是否相同，不同才建。建置完成時結果已過期：釋放它，同樣只在不同時再建一次。連續切換 N 次最多建兩次，任何時刻存活的引擎最多兩個。
+  - **失敗**：建不出任何引擎（連不帶詞包的都不行）時不換，現行引擎繼續用，只記回傳碼，偏好值就是切換時存的新值，不復原；之後不自動重試，下一次切換再試。
+  - **所有權**：共用部分 handle 歸背景工作持有，在它最後一個 `new_shared` 返回之後釋放（`SharedParts.release`，建置結束時）；主執行緒作廢一次建置時只把結果標成過期，不碰它的 handle，也不等它。背景建出來的引擎 handle 裝在 `BuiltEngine` 裡交回主執行緒，被換上就由 `CoreEngine` 接手，過期或 `Shell` 已經不在就隨結果釋放，恰好一次。
+- 換鍵盤排列仍是同步、從檔案建（舊引擎會用舊排列解讀按鍵）：建置進行中或有結果在等的話，那個結果作廢（等著的當場釋放，進行中的完成後釋放），同步建置用當下的遮罩。其餘設定（開關、強度、方向、聊天／書面）都不重建，直接送給現有的引擎。
+- 引擎 handle 的呼叫（按鍵、設定、重排、`share`）都在主執行緒；背景只呼叫上面列的那幾個，且在引擎交回主執行緒之前沒有別的執行緒碰它。
 
 ### 2.2 組字擁有者
 
@@ -444,12 +451,14 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 - `make test-swift`（`swift test --package-path macos`）：`ShanjieKitTests` 的測試資料由 `Support.swift` 的 `TestData.files` 列出（`data/lexicon/*` 與 `data/lm/*` 的符號連結拼成和 App 的 `Resources` 相同的資料夾）；缺檔就失敗並說明怎麼取得，不跳過（唯一的選用項目是 `testBenchmark`）。測試一律經過真正的 C 核心。
 - 殼層測試用 `FakeClient`（模擬文字框，`insertText` 會取代組字）與 `FakePanel`，`Controller` 是 `Session` 加 `FakeClient`，把它設成 `nil` 等於 IMK 釋放 controller。涵蓋：打字送出、候選顯示與數字選字、帶 Caps Lock 的鍵不處理、組字中按表外鍵先送出、`commitComposition`、回傳碼非 0 的路徑（之後核心的組字也是空的）、聊天與書面設定可觀察的差異、組字擁有者三種情形（A 組字中對 B 按鍵、擁有者被釋放後 B 按鍵、B 組字中 A 的 `deactivate` 晚到）、擁有者改變時重設設定、安全輸入時擁有者的 `deactivate` 丟棄組字、非擁有者的 `deactivate` 不碰共用候選窗；拿掉擁有者檢查或把 `shanjie_engine_key` 改成固定回傳非 0 時至少一個測試要失敗。
+- 詞包切換（`PackSwitchTests`，真的 `Resources`、真的核心、手動完成的 `HeldPackBuilder`；檢查用的詞是 ㄕㄣˊ ㄧㄡˊ ㄕˇ，有動漫詞包是「榊遊矢」）：切換返回時現行引擎不變、仍打得出詞包的字；完成後換上並移除（或加回）詞包、收到 `didChangeSettings`；組字中（注音、未完成符號、數字緩衝、英文）不換、不送出，組字結束才換；連續切換最多建兩次、存活引擎 ≤ 2、共用部分 handle 在 `new_shared` 完成之後才釋放；切回原值不再建；建置失敗（缺必要的詞庫檔，或後段才失敗的 `std-exempt.tsv`）留在現行引擎、`engineBuilds` 多 2、補回檔案後下一次切換換得上；壞詞包與缺檔的詞包照 `docs/spec/lexicon-and-packs.md` §4.3 退讓、`loadedPackMask` 與 `packMask` 不同照樣換上、之後不再建；換上時重送設定；換排列時作廢；每個引擎與共用部分 handle 恰好釋放一次（含 `Shell` 在建置中被釋放）；有小模型與常談才走共用路徑；等著換上的結果在下一次切換的當下釋放；`QueuePackBuilder` 真的在另一條執行緒建、主執行緒換上、之後打得出字。突變（逐一做、每個都要以斷言失敗）：`setAcgPack` 仍同步重建、換上時不檢查組字、不檢查過期、失敗時清掉現行引擎、換上時不重送設定、過期比 `loadedPackMask`、切換時不釋放等著換上的結果。
+- 詞包切換的主執行緒時間（`PackSwitchBenchTests.testBenchmarkPackSwitch`，沒有 `SHANJIE_BENCH=1` 就 `XCTSkip`）：用 App 的佇列建置器、真的 `Resources` 與 release 核心、測試自己產生的合成選字記憶檔（50,000 筆一般加 2,000 筆新詞），動漫詞包關開交替切 10 次，各量 `setAcgPack` 呼叫、換上那一步與切換到換上，印三行 `pack-switch bench:`，斷言呼叫最長 ≤ 5 ms、換上最長 ≤ 50 ms。指令：`make rust` 之後 `SHANJIE_BENCH=1 swift test -c release --package-path macos --filter testBenchmarkPackSwitch`（在閒置窗跑）。
 - `scripts/check-app.sh`（對建出來的 bundle）、`scripts/check-installer.sh`、`make selftest-bundled`：§1.2、§6.3。
 - 實機才看得到的：候選窗的玻璃樣子、深淺色、位置與動畫順不順、閃爍、直排預測列貼近螢幕下緣的行為、設定視窗的置中與夾回、VoiceOver。
 
 ## 12. 已知限制與設計取捨
 
-- 切換鍵盤排列、詞包要重建引擎，主執行緒阻塞約一秒以上，期間按鍵直通。取捨：排列很少切換；之後可在核心加 `set_layout`。
+- 切換鍵盤排列要重建引擎，主執行緒阻塞約一秒以上，期間按鍵直通。取捨：排列很少切換；之後可在核心加 `set_layout`。切換詞包不阻塞（§2.1），代價是切換之後約一秒才生效（在組字中則要等組字結束），期間打出來的字還是舊詞包的結果；建置期間多一個引擎的記憶體。
 - 安全輸入只在擁有者的 `deactivate` 檢查，其他送出路徑不檢查：`IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著時，點別處、切換排列或換擁有者都會悄悄丟掉打到一半的字。
 - 選取移動時，組字區不會像蘋果那樣即時換成選取的候選。
 - 橫排網格的第一個候選是多字詞時，候選窗對齊的是游標前一個字（§8.3）。

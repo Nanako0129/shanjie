@@ -247,7 +247,7 @@
 | 美妝與保養詞 | 16（`SHANJIE_PACK_BEAUTY`／`PACK_BEAUTY`） | `beauty-add.tsv` | `beauty` |
 
 - `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`：`packs` 是位元遮罩，遮罩 0 忽略 `packs_dir`（可為 NULL），等於 `shanjie_engine_new`。回傳碼：1 = `packs_dir` 是 NULL 而遮罩非 0（或其他空指標）、2 = 遮罩有未知的位元或路徑不是 UTF-8、3 = 詞包檔存在卻讀不了或解析失敗（也包括基底、疊加層、名單層、變調層載入失敗）。
-- 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼用「釋放引擎、再建一個」切換，和換鍵盤排列相同。遮罩內缺檔的詞包什麼都不貢獻。
+- 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼在背景建另一個引擎（現行引擎繼續處理按鍵，可沿用它已載入的模型與表，`docs/spec/macos-shell.md` §2.1），建好、組字區空了才換上舊的。遮罩內缺檔的詞包什麼都不貢獻。
 - 關掉的詞包不讀檔：選字結果、候選清單與預測和沒有那個詞包檔的引擎逐位元組相同。
 - 評測 CLI：`--packs acg|quotes|it|meme|beauty` 或逗號串列，`--packs-dir DIR`（預設 `data/packs`）。要求的詞包檔不存在時 CLI 報錯並印路徑（引擎不報錯，這是 CLI 與引擎的差別）；單用 `--packs-dir` 沒有 `--packs` 是錯誤；兩個檢查都在讀模型之前。摘要行在載入詞包時依序多 `+acg`、`+quotes`、`+it`、`+meme`、`+beauty` 標記，沒有詞包時一字不變。`PACKS=acg,it,meme,beauty`（`PACKS_DIR` 預設 `data/packs`）讓 `core/tests/engine_predict.rs` 的延遲測試載入出貨的遮罩，並斷言詞庫列數等於基底加所列詞包。
 - 驗證：`core/tests/engine_pack.rs`（`the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file`、`the_it_pack_has_its_own_bit_and_file`、`the_meme_pack_has_its_own_bit_and_file`、`an_unknown_pack_bit_is_refused`、`the_quote_bit_reads_quotes_add_tsv_only`、`the_names_layer_is_capped_on_the_engine_path`、`an_anime_pack_word_keeps_its_score_on_the_engine_path`）；`cli/tests/golden.rs` 的 `packs_options_fail_loudly`、`unreadable_pack_file_names_the_path_and_kind`、`unparsable_pack_is_a_parse_error`。
@@ -263,20 +263,20 @@
 | 迷因與實況用語 | `memePack` | 開 | 迷因與實況用語 |
 
 - 開關只在設定視窗「詞包」區塊，依序動漫、經典台詞、資訊、美妝、迷因；新詞包加在這一區。「動漫與遊戲詞」下方有一行灰字「資料更新至 YYYY-MM-DD（維基百科）」，日期取 `Resources/packs/acg.json` 的 `latest_source_revision`（UTC 日期，讀一次；檔案缺、欄位缺或讀不了就不顯示）；詞包關掉時照樣顯示。
-- 切換一個詞包：先把組字送出，再改設定並寫入偏好，再重建引擎（同值不做任何事）。
+- 切換一個詞包：改開關、寫入偏好、發 `didChangeSettings`，再交給背景建置（同值不做任何事）；不送出組字，現行引擎繼續用，新引擎建好、組字區空了才換上，換上之後選單才列新的組合（`docs/spec/macos-shell.md` §2.1）。
 - 輸入選單沒有詞包開關，只有一段不能點的「已開啟的詞包」：系統的選單小標題「已開啟的詞包」，下面依設定順序每個詞包一行，列引擎**實際載入**的詞包（`loadedPackMask`：照設定的遮罩建成功就是它，缺檔的詞包不算；退回後只含留下的詞包），前後各一條分隔線（`docs/spec/macos-shell.md` §7）。每個詞包各一行，不寫成一長行，選單不會隨詞包變多而變寬。一個都沒載入就整段不顯示。選單不讀偏好值。
 - 遮罩（`packMask`）= 各開關為開的位元；一個從沒動過任何開關的 App 建出遮罩 29（動漫、資訊、迷因、美妝）。
 
 ### 4.3 載入失敗的退回
 
-合併建置失敗時（`Shell.build`）：
+合併建置失敗時（同步的 `Shell.build` 與詞包切換的背景建置共用 `PackBuild.run`；背景建置走共用路徑時，每一次嘗試都是 `shanjie_engine_new_shared`，順序與次數相同）：
 
 1. 先建一個不帶詞包的引擎，只為判斷是不是詞包的錯，建完立刻釋放；只有一個啟用的詞包檔案在時（只開一個詞包，或其他開著的詞包缺檔）沒有「少一個」可試，這個引擎成功就直接留下當引擎（共建兩次），不釋放再建；
-2. 它也失敗：原因不是詞包，記兩個回傳碼，不再嘗試，沒有引擎（所有按鍵直通）；
+2. 它也失敗：原因不是詞包，記兩個回傳碼，不再嘗試；同步建置沒有引擎（所有按鍵直通），詞包切換的背景建置沒有結果、留在現行引擎；
 3. 它成功：對每個啟用、檔案也在的詞包依設定順序各試「少這一個」（`mask & ~bit`；缺檔的詞包本來就沒載入，拿掉它幫不上忙，不試），第一個成功的留下，其餘詞包照開，記一行含回傳碼與留下遮罩的日誌；
 4. 沒有任何一個少一個的組合成功（兩個以上的檔壞了）：建不帶詞包的引擎。
 
-偏好值不動，也不顯示錯誤，下一次重建會再試。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testOnlyPackBrokenKeepsTheProbeEngine`（只開一個詞包，引擎建置次數 2）、`testOnePresentPackBrokenWithAnotherFileMissingKeepsTheProbeEngine`（開兩個、一個缺檔，建置次數 2）、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testBrokenMemeFileKeepsTheOtherPacks`（引擎建置次數 6：合併、不帶詞包、少動漫、少資訊、少美妝、少迷因）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheMemePackLast`、`testPackLineNamesTheQuotePackAfterAcg`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testMemePackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
+偏好值不動，也不顯示錯誤，下一次重建會再試。背景建置換上的引擎若載入的詞包比要求的少（缺檔或壞檔），仍照樣換上，之後不會因為「載入的和要求的不同」而一直重建（殼比的是要求的遮罩與排列）。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testOnlyPackBrokenKeepsTheProbeEngine`（只開一個詞包，引擎建置次數 2）、`testOnePresentPackBrokenWithAnotherFileMissingKeepsTheProbeEngine`（開兩個、一個缺檔，建置次數 2）、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testBrokenMemeFileKeepsTheOtherPacks`（引擎建置次數 6：合併、不帶詞包、少動漫、少資訊、少美妝、少迷因）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheMemePackLast`、`testPackLineNamesTheQuotePackAfterAcg`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`PackSwitchTests` 的 `testBrokenPackIsDroppedInTheBackgroundAndSwapped`（同樣壞迷因檔，經切換、引擎建置次數 6、載入遮罩 21）、`testMissingPackFileSwapsWithOneBuild`（缺檔建置 1 次）、`testFailureKeepsTheCurrentEngine`、`testLateFailureOfTheSharedPathKeepsTheCurrentEngine`（沒有結果、留在現行引擎、建置多 2 次）；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testMemePackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
 
 ### 4.4 打包與自測
 

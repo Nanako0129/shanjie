@@ -719,12 +719,30 @@ public final class Shell {
     var rerankApply: (RerankJob, CoreEngine) -> CoreResult = { $0.apply(on: $1) }
     /// Every value `build()` passed to `setRerank`, in order (the tests read it: a nil store must send true, not nothing).
     private(set) var rerankSent: [Bool] = []
-    /// How many engines `build()` has tried to make (test hook, like `rerankSent`): the fall-back order is asserted by counting them.
+    /// How many engines the builds have tried to make (test hook, like `rerankSent`): the fall-back order is asserted by counting them.
     private(set) var engineBuilds = 0
-    private func makeEngine(packsDir: String?, packs: UInt32) -> (CoreEngine?, Int32) {
-        engineBuilds += 1
-        return CoreEngine.make(dataDir: resources.path, layout: mode.layout, packsDir: packsDir, packs: packs)
-    }
+    /// docs/spec/macos-shell.md §2.1, docs/spec/lexicon-and-packs.md §4.1: where a pack switch builds its engine, off the main thread. The app passes `QueuePackBuilder`, the tests
+    /// builders they complete by hand.
+    private let packBuilder: PackBuilder
+    /// A build is with the builder (at most one at a time).
+    private var buildInFlight = false
+    /// A finished build waiting for the composition to end (docs/spec/macos-shell.md §2.1); a switch or a layout change frees it.
+    private var ready: PackBuildResult?
+    /// What the current engine was asked for when it was built (the pack mask and the layout), not what it loaded: a pack whose file is missing or broken
+    /// makes the two differ, and the stale check and the decision to build again compare the asked-for values only. `nil` with no engine.
+    private var engineRequested: (mask: UInt32, layout: UInt32)?
+    /// Whether the current engine has the model, the small model and the colloquial table loaded: only then does a pack switch share them (`shanjie_engine_share`).
+    private var engineAllLoaded = false
+    /// Test hooks (like `rerankFree`): each engine's free and each shared-parts handle's free, and the core call that builds from the shared parts. Read when a build starts.
+    var engineFree: @Sendable (OpaquePointer) -> Void = { shanjie_engine_free($0) }
+    var sharedFree: @Sendable (OpaquePointer) -> Void = { shanjie_shared_free($0) }
+    var packBuildOps = PackBuildOps()
+    /// Engines made and freed so far, whichever thread did it; the tests assert that at most two live.
+    let engineCounter = EngineCounter()
+    /// For each finished build in order, whether it used the shared parts (test hook).
+    private(set) var packBuildShared: [Bool] = []
+    /// How long each swap took on the main thread, from its start to the new engine being the current one (nanoseconds; the benchmark and the tests read it).
+    private(set) var installNanos: [UInt64] = []
     /// Rerank strength (docs/spec/semantic-rerank.md §8.2): the stored level, sent to every engine `build()` makes and on every change.
     private(set) var rerankLevel: RerankLevel
     /// Every level code sent to an engine, by `build()` and by `setRerankLevel`, in order (the tests read it, as `rerankSent`).
@@ -806,8 +824,10 @@ public final class Shell {
     /// The owning session. "Still valid" means this weak reference is not nil; an address
     /// (ObjectIdentifier) is never used, as a freed controller's address can be reused.
     weak var owner: Session?
-    /// Whether the composition (as last applied to a client) is non-empty.
-    var composing = false
+    /// Whether the composition (as last applied to a client) is non-empty. Its end lets a finished pack build take over (`scheduleInstall`).
+    var composing = false {
+        didSet { if !composing && oldValue { scheduleInstall() } }
+    }
     /// The last `lineRect` answer and the preedit and cursor it was asked for. Asking the client is a
     /// synchronous IPC on the key path, so a pure selection move (same preedit and cursor) reuses it.
     /// Cleared whenever the panel hides: commit, reset, owner change.
@@ -860,6 +880,8 @@ public final class Shell {
     /// `QueueRerankRunner`, the tests a runner they complete by hand.
     /// `profileModeStore`, `appProfileStore`: how chat or formal is chosen and the per-app choices (docs/spec/macos-shell.md §5.2).
     /// Required, like `glassTintStore`.
+    /// `packBuilder`: builds the engine of a pack switch off the main thread (docs/spec/macos-shell.md §2.1). The default builds on the calling thread, for the
+    /// rigs that do not test it; the app passes `QueuePackBuilder`, the pack tests builders they complete by hand.
     /// `fuzzyStore`: the 模糊輸入 flags (docs/spec/decoder.md §6.1). The default (in memory, all off) is for the tests; the app passes its
     /// UserDefaults-backed store.
     /// `punctuationTable`: Apple's punctuation candidate table (s3e); tests pass another path.
@@ -878,6 +900,7 @@ public final class Shell {
                 glassTintStore: GlassTintStore, candidateOrientationStore: CandidateOrientationStore,
                 rerankStore: RerankStore, rerankRunner: RerankRunner,
                 profileModeStore: ProfileModeStore, appProfileStore: AppProfileStore,
+                packBuilder: PackBuilder = ImmediatePackBuilder(),
                 fuzzyStore: FuzzyStore = MemoryFuzzyStore(),
                 punctuationTable: URL = PunctuationTable.systemURL,
                 punctuationNames: URL = PunctuationNames.systemURL,
@@ -941,6 +964,7 @@ public final class Shell {
         rerankOn = rerankStore.rerank ?? true
         rerankLevel = rerankStore.rerankLevel.flatMap(RerankLevel.init(rawValue:)) ?? .standard
         self.rerankRunner = rerankRunner
+        self.packBuilder = packBuilder
         self.profileModeStore = profileModeStore
         profileMode = profileModeStore.profileMode.flatMap(ProfileMode.init(rawValue:)) ?? .auto
         self.appProfileStore = appProfileStore
@@ -1282,10 +1306,9 @@ public final class Shell {
     /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
         guard on != acgPackOn else { return }
-        commitThenRebuild {
-            acgPackOn = on
-            acgPackStore.acgPack = on
-        }
+        acgPackOn = on
+        acgPackStore.acgPack = on
+        packsChanged()
         changed()
         Log.shell.debug("word pack switched")
     }
@@ -1294,10 +1317,9 @@ public final class Shell {
     /// is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
     func setQuotePack(_ on: Bool) {
         guard on != quotePackOn else { return }
-        commitThenRebuild {
-            quotePackOn = on
-            quotePackStore.quotePack = on
-        }
+        quotePackOn = on
+        quotePackStore.quotePack = on
+        packsChanged()
         changed()
         Log.shell.debug("quote pack switched")
     }
@@ -1305,10 +1327,9 @@ public final class Shell {
     /// The settings switch (docs/spec/lexicon-and-packs.md §4.2, §4.3): the same as `setAcgPack` for the IT+AI pack.
     func setItPack(_ on: Bool) {
         guard on != itPackOn else { return }
-        commitThenRebuild {
-            itPackOn = on
-            itPackStore.itPack = on
-        }
+        itPackOn = on
+        itPackStore.itPack = on
+        packsChanged()
         changed()
         Log.shell.debug("it pack switched")
     }
@@ -1316,10 +1337,9 @@ public final class Shell {
     /// The settings switch (docs/spec/lexicon-and-packs.md §4.2, §8.3): the same as `setItPack` for the beauty and skincare pack.
     func setBeautyPack(_ on: Bool) {
         guard on != beautyPackOn else { return }
-        commitThenRebuild {
-            beautyPackOn = on
-            beautyPackStore.beautyPack = on
-        }
+        beautyPackOn = on
+        beautyPackStore.beautyPack = on
+        packsChanged()
         changed()
         Log.shell.debug("beauty pack switched")
     }
@@ -1327,10 +1347,9 @@ public final class Shell {
     /// The settings switch (docs/spec/lexicon-and-packs.md §4.2, §9.3): the same as `setBeautyPack` for the meme and livestream slang pack.
     func setMemePack(_ on: Bool) {
         guard on != memePackOn else { return }
-        commitThenRebuild {
-            memePackOn = on
-            memePackStore.memePack = on
-        }
+        memePackOn = on
+        memePackStore.memePack = on
+        packsChanged()
         changed()
         Log.shell.debug("meme pack switched")
     }
@@ -1355,79 +1374,54 @@ public final class Shell {
         changed()
     }
 
-    /// Creates the engine for the current mode, then loads the LM and the current profile. A
-    /// failure leaves an engine without the LM (still usable) or no engine (every key passes).
+    /// Creates the engine for the current mode on this thread, from the files, then loads the LM and the current profile (docs/spec/macos-shell.md §2.1: the first build and a layout change
+    /// stay synchronous, as the old engine would read the keys in the old layout). A failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
-        engine = nil  // free the old engine first: only one exists at a time
+        ready = nil  // a finished build waiting for the composition to end is for the old layout
+        engine = nil  // free the old engine first: the layout's build is the only one running
         rerankAvailable = false
         rerankLevels = 0
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         loadedPackMask = 0
-        let packsDir = resources.appendingPathComponent("packs").path
-        let mask = packMask
-        // A missing pack file contributes nothing (the core builds without it), so only bits whose file is there count as loaded.
-        let present = Shell.packTable.reduce(UInt32(0)) { FileManager.default.fileExists(atPath: packsDir + "/" + $1.file) ? $0 | $1.bit : $0 }
-        var built = mask & present
-        var (made, code) = makeEngine(packsDir: mask != 0 ? packsDir : nil, packs: mask)
-        if made == nil && mask != 0 {
-            // The combined build failed, so the first code alone does not say whose fault it is. (a) Build with no packs, only to learn whether
-            // it works, and free it at once (build() keeps one engine at a time): if it fails too the cause is not a pack, both codes are logged
-            // and these two builds are all there are. (b) Otherwise a pack is broken: for each enabled pack in the settings order build with just
-            // that pack dropped (mask & ~bit); the first success wins, so the healthy packs stay on. (c) If no single drop works (two broken
-            // files), build the no-pack engine again. Only packs whose file is there are tried (a missing file contributes nothing, so dropping it
-            // cannot help); with a single such pack there is no drop to try, and the probe is kept as the engine instead of being freed and built a
-            // third time. The stored choices are untouched and nothing is shown; the next rebuild tries the packs again.
-            let packCode = code
-            built = 0
-            let live = mask & present
-            let drops = Shell.packTable.map(\.bit).filter { live & $0 != 0 && live & ~$0 != 0 }
-            var noPackWorks = false
-            var keptProbe: CoreEngine?
-            do {
-                let (probe, probeCode) = makeEngine(packsDir: nil, packs: 0)
-                noPackWorks = probe != nil
-                code = probeCode
-                if drops.isEmpty { keptProbe = probe }
-            }   // otherwise the probe engine is freed here, before any drop is built (one engine at a time)
-            if let probe = keptProbe {
-                made = probe
-                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask 0")
-            } else if noPackWorks {
-                var kept: UInt32 = 0
-                for bit in drops {
-                    let (dropped, _) = makeEngine(packsDir: packsDir, packs: mask & ~bit)
-                    if let dropped {
-                        made = dropped
-                        built = mask & ~bit & present
-                        kept = mask & ~bit
-                        break
-                    }
-                }
-                if made == nil { (made, code) = makeEngine(packsDir: nil, packs: 0) }
-                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); built with packs mask \(kept)")
-            } else {
-                Log.shell.error("shanjie_engine_new_packs failed, code \(packCode); the build without packs failed too")
+        engineRequested = nil
+        engineAllLoaded = false
+        let result = PackBuild.run(makePlan(shared: nil))
+        engineBuilds += result.attempts
+        packBuildShared.append(false)
+        Shell.log(result.notes)
+        guard let e = CoreEngine.adopt(result.engine) else { return }
+        setUp(e, result)
+    }
+
+    private func makePlan(shared: SharedParts?) -> PackBuildPlan {
+        let counter = engineCounter, free = engineFree
+        return PackBuildPlan(
+            dataDir: resources.path, packsDir: resources.appendingPathComponent("packs").path, layout: mode.layout, mask: packMask,
+            packs: Shell.packTable.map { ($0.bit, $0.file) },
+            modelPath: resources.appendingPathComponent("bigram.sjlm").path, tinyPath: resources.appendingPathComponent(Shell.tinyLMFile).path,
+            colloquialPath: resources.appendingPathComponent(Shell.colloquialFile).path,
+            shared: shared, ops: packBuildOps, counter: counter, engineFree: { counter.freed(); free($0) })
+    }
+
+    private static func log(_ notes: [PackBuildNote]) {
+        for note in notes {
+            switch note {
+            case .packsFailed(let code, let kept): Log.shell.error("shanjie_engine_new_packs failed, code \(code); built with packs mask \(kept)")
+            case .noPackBuildFailedToo(let code): Log.shell.error("shanjie_engine_new_packs failed, code \(code); the build without packs failed too")
+            case .newFailed(let code): Log.shell.error("shanjie_engine_new failed, code \(code)")
+            case .loadLMFailed(let code): Log.shell.error("shanjie_engine_load_lm failed, code \(code)")
+            case .loadTinyFailed(let code): Log.shell.error("shanjie_engine_load_tinylm failed, code \(code); no rerank")
+            case .loadColloquialFailed(let code): Log.shell.error("shanjie_engine_load_colloquial failed, code \(code); rerank without the colloquial term")
             }
         }
-        guard let e = made else {
-            Log.shell.error("shanjie_engine_new failed, code \(code)")
-            return
-        }
-        loadedPackMask = built
-        let lm = e.loadLM(path: resources.appendingPathComponent("bigram.sjlm").path)
-        if lm != 0 { Log.shell.error("shanjie_engine_load_lm failed, code \(lm)") }
-        // docs/spec/semantic-rerank.md §8.2, §8.3: after load_lm (which drops a small model). Missing or failed: the n-gram alone, no rerank.
-        if lm == 0 {
-            let tiny = e.loadTinyLM(path: resources.appendingPathComponent(Shell.tinyLMFile).path)
-            if tiny != 0 { Log.shell.error("shanjie_engine_load_tinylm failed, code \(tiny); no rerank") }
-            rerankAvailable = tiny == 0
-            // docs/spec/semantic-rerank.md §4.6: after load_tinylm, and only when it loaded (the term applies to the small model's rerank, so there is
-            // nothing to load it for otherwise; "no rerank" is already logged above). A failure is logged (the code only) and the rerank runs without the term.
-            if tiny == 0 {
-                let colloquial = e.loadColloquial(path: resources.appendingPathComponent(Shell.colloquialFile).path)
-                if colloquial != 0 { Log.shell.error("shanjie_engine_load_colloquial failed, code \(colloquial); rerank without the colloquial term") }
-            }
-        }
+    }
+
+    /// Makes `e` (built by `result`) the current engine: what the build loaded, then every setting the shell holds, with the values of now (docs/spec/macos-shell.md §2.1).
+    private func setUp(_ e: CoreEngine, _ result: PackBuildResult) {
+        loadedPackMask = result.loadedMask
+        rerankAvailable = result.tinyLoaded
+        engineAllLoaded = result.allLoaded
+        engineRequested = (result.requestedMask, result.layout)
         if case .failed(let c) = e.setDemote(demoteOn) {
             Log.shell.error("shanjie_engine_set_demote failed, code \(c)")
         }
@@ -1498,6 +1492,66 @@ public final class Shell {
         engine = e
     }
 
+    // MARK: pack switches (docs/spec/macos-shell.md §2.1, docs/spec/lexicon-and-packs.md §4.1–§4.3)
+
+    /// A pack switch changed `packMask`: a finished build waiting for the composition to end is stale, and an engine is built for the new mask unless one is being built
+    /// (then it is built when that one is back) or the current engine was already asked for exactly this.
+    private func packsChanged() {
+        ready = nil
+        reconcile()
+    }
+
+    /// Builds the engine for what is wanted now (mask and layout) when the current one was asked for something else and no build is running.
+    private func reconcile() {
+        guard !buildInFlight else { return }
+        if let r = engineRequested, r.mask == packMask, r.layout == mode.layout { return }
+        // The shared parts are taken here, on the engine's own thread (a few reference copies); the build owns them from now on.
+        var shared: SharedParts?
+        if let engine, engineAllLoaded {
+            let free = sharedFree
+            shared = engine.share(free: free).0
+        }
+        buildInFlight = true
+        let plan = makePlan(shared: shared)
+        packBuilder.run({ PackBuild.run(plan) }, done: { [weak self] result in self?.buildDone(result) })
+    }
+
+    /// On the main thread, from the builder. A result asked for something other than what is wanted now is dropped (freed with it), and the newest wish is built.
+    /// A build that made no engine changes nothing: the current engine stays, the stored choices stay, and nothing tries again until the next switch.
+    private func buildDone(_ result: PackBuildResult) {
+        buildInFlight = false
+        engineBuilds += result.attempts
+        packBuildShared.append(result.usedShared)
+        Shell.log(result.notes)
+        guard result.requestedMask == packMask, result.layout == mode.layout else { return reconcile() }
+        guard result.engine != nil else { return }
+        ready = result
+        installIfReady()
+    }
+
+    /// Hops to the main queue so the swap never runs inside the key or menu call that ended the composition.
+    private func scheduleInstall() {
+        guard ready != nil else { return }
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.installIfReady() } }
+    }
+
+    /// The swap: only while the composition is empty and no candidate window or entered prediction row is open (nothing the person is typing is sent for it).
+    /// Hide the passive prediction row, free the old engine, send the settings, open the learning file, make the new engine the current one, tell the settings window.
+    func installIfReady() {
+        guard let result = ready, !composing, candidateSelected < 0 else { return }
+        ready = nil
+        let start = DispatchTime.now().uptimeNanoseconds
+        hideCandidates()
+        engine = nil
+        rerankAvailable = false
+        rerankLevels = 0
+        rerankPending = nil
+        guard let e = CoreEngine.adopt(result.engine) else { return }
+        setUp(e, result)
+        installNanos.append(DispatchTime.now().uptimeNanoseconds - start)
+        changed()
+    }
+
     /// docs/spec/macos-shell.md §2.2: commit the composition to its owner, free the engine, rebuild with the new
     /// layout, reload the LM and the current profile.
     func switchMode(to newMode: InputMode) {
@@ -1506,8 +1560,8 @@ public final class Shell {
         Log.shell.debug("input mode switched")
     }
 
-    /// What a setting that lives in the engine's construction (layout, word pack) does: commit the
-    /// composition to its owner (or drop an orphan), apply the change, build a new engine.
+    /// What a setting that lives in the engine's construction and needs the old engine gone first (the layout) does: commit the
+    /// composition to its owner (or drop an orphan), apply the change, build a new engine here and now. A word pack switch does not come through here (`packsChanged`).
     private func commitThenRebuild(_ apply: () -> Void) {
         if composing {
             if let o = owner { o.finish(mode: 0) } else { discardOrphan() }
