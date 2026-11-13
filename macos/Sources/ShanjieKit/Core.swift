@@ -35,7 +35,7 @@ enum CoreResult {
 /// created on another thread and then handed to the one that uses it). Nothing calls the handle while it is in here. It frees the handle exactly once: when
 /// `CoreEngine.adopt` takes it, the engine's own deinit does; when the box is dropped first (a stale result, a `Shell` that is gone), this deinit does.
 /// `@unchecked Sendable` rests on that one hand-over: the box is filled on the build's thread, then only read on the main thread, never both at once.
-final class BuiltEngine: @unchecked Sendable {
+public final class BuiltEngine: @unchecked Sendable {
     fileprivate var handle: OpaquePointer?
     fileprivate let free: @Sendable (OpaquePointer) -> Void
 

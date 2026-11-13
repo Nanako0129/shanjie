@@ -9,6 +9,10 @@ import Synchronization
 public protocol PackBuilder: AnyObject {
     /// `work` runs once on some thread (it reads and writes no `Shell` state), then `done` once on the main thread with its result.
     func run(_ work: @escaping @Sendable () -> PackBuildResult, done: @escaping @MainActor @Sendable (PackBuildResult) -> Void)
+
+    /// Takes over an engine the shell does not want (a stale result, a waiting one a switch replaced) and frees it off the main thread (`shanjie_engine_free` is
+    /// a few to some twenty milliseconds, which a switch call must not pay). The caller gives up its only reference; the engine is freed exactly once.
+    func dispose(_ engine: consuming BuiltEngine)
 }
 
 /// The app's builder: one serial `.utility` queue with a fixed label, like `QueueRerankRunner`. The result comes back through `DispatchQueue.main.async`.
@@ -23,6 +27,11 @@ public final class QueuePackBuilder: PackBuilder {
             DispatchQueue.main.async { done(result) }
         }
     }
+
+    public func dispose(_ engine: consuming BuiltEngine) {
+        let e = engine
+        queue.async { withExtendedLifetime(e) {} }
+    }
 }
 
 /// Does the work on the calling thread and calls `done` before `run` returns: the default of `Shell.init`, for the rigs that do not test the background
@@ -34,6 +43,8 @@ public final class ImmediatePackBuilder: PackBuilder {
         let result = work()
         MainActor.assumeIsolated { done(result) }
     }
+
+    public func dispose(_ engine: consuming BuiltEngine) {}
 }
 
 /// What one build did, in codes only (R2, docs/spec/macos-shell.md §6): the shell logs these on the main thread when it takes the result.
@@ -85,7 +96,13 @@ struct PackBuildPlan: Sendable {
 /// The outcome of one build, handed to the main thread whole.
 public final class PackBuildResult: @unchecked Sendable {
     /// nil when no engine could be made, not even without packs.
-    let engine: BuiltEngine?
+    private var engine: BuiltEngine?
+    /// Moves the engine out (once): to `CoreEngine.adopt`, or to `PackBuilder.dispose`.
+    func takeEngine() -> BuiltEngine? {
+        defer { engine = nil }
+        return engine
+    }
+    var hasEngine: Bool { engine != nil }
     /// What the build was asked for: the pack mask and the layout.
     let requestedMask: UInt32
     let layout: UInt32

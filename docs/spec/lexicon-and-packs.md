@@ -247,7 +247,7 @@
 | 美妝與保養詞 | 16（`SHANJIE_PACK_BEAUTY`／`PACK_BEAUTY`） | `beauty-add.tsv` | `beauty` |
 
 - `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`：`packs` 是位元遮罩，遮罩 0 忽略 `packs_dir`（可為 NULL），等於 `shanjie_engine_new`。回傳碼：1 = `packs_dir` 是 NULL 而遮罩非 0（或其他空指標）、2 = 遮罩有未知的位元或路徑不是 UTF-8、3 = 詞包檔存在卻讀不了或解析失敗（也包括基底、疊加層、名單層、變調層載入失敗）。
-- 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼在背景建另一個引擎（現行引擎繼續處理按鍵，可沿用它已載入的模型與表，`docs/spec/macos-shell.md` §2.1），建好、組字區空了才換上舊的。遮罩內缺檔的詞包什麼都不貢獻。
+- 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼在背景建另一個引擎（現行引擎繼續處理按鍵，可沿用它已載入的模型與表，`docs/spec/macos-shell.md` §2.1），建好、組字區空了才換掉舊的。遮罩內缺檔的詞包什麼都不貢獻。
 - 關掉的詞包不讀檔：選字結果、候選清單與預測和沒有那個詞包檔的引擎逐位元組相同。
 - 評測 CLI：`--packs acg|quotes|it|meme|beauty` 或逗號串列，`--packs-dir DIR`（預設 `data/packs`）。要求的詞包檔不存在時 CLI 報錯並印路徑（引擎不報錯，這是 CLI 與引擎的差別）；單用 `--packs-dir` 沒有 `--packs` 是錯誤；兩個檢查都在讀模型之前。摘要行在載入詞包時依序多 `+acg`、`+quotes`、`+it`、`+meme`、`+beauty` 標記，沒有詞包時一字不變。`PACKS=acg,it,meme,beauty`（`PACKS_DIR` 預設 `data/packs`）讓 `core/tests/engine_predict.rs` 的延遲測試載入出貨的遮罩，並斷言詞庫列數等於基底加所列詞包。
 - 驗證：`core/tests/engine_pack.rs`（`the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file`、`the_it_pack_has_its_own_bit_and_file`、`the_meme_pack_has_its_own_bit_and_file`、`an_unknown_pack_bit_is_refused`、`the_quote_bit_reads_quotes_add_tsv_only`、`the_names_layer_is_capped_on_the_engine_path`、`an_anime_pack_word_keeps_its_score_on_the_engine_path`）；`cli/tests/golden.rs` 的 `packs_options_fail_loudly`、`unreadable_pack_file_names_the_path_and_kind`、`unparsable_pack_is_a_parse_error`。

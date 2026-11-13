@@ -484,6 +484,13 @@ final class HeldPackBuilder: PackBuilder {
     private(set) var received = 0
     /// Builds not yet delivered.
     var pending: Int { held.count }
+    private var disposedEngines: [BuiltEngine] = []
+    /// Engines handed over to be freed and not freed yet (`flushDisposed` plays the builder's queue).
+    var disposed: Int { disposedEngines.count }
+
+    func dispose(_ engine: consuming BuiltEngine) { disposedEngines.append(engine) }
+
+    func flushDisposed() { disposedEngines.removeAll() }
 
     func run(_ work: @escaping @Sendable () -> PackBuildResult, done: @escaping @MainActor @Sendable (PackBuildResult) -> Void) {
         received += 1

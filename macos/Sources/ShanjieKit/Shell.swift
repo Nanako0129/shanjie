@@ -728,6 +728,8 @@ public final class Shell {
     private var buildInFlight = false
     /// A finished build waiting for the composition to end (docs/spec/macos-shell.md §2.1); a switch or a layout change frees it.
     private var ready: PackBuildResult?
+    /// Whether a finished build waits for the composition to end (test hook).
+    var hasReady: Bool { ready != nil }
     /// What the current engine was asked for when it was built (the pack mask and the layout), not what it loaded: a pack whose file is missing or broken
     /// makes the two differ, and the stale check and the decision to build again compare the asked-for values only. `nil` with no engine.
     private var engineRequested: (mask: UInt32, layout: UInt32)?
@@ -1302,8 +1304,8 @@ public final class Shell {
         }
     }
 
-    /// The settings switch (docs/spec/lexicon-and-packs.md §4.2; it is not in the menu): the pack is part of the lexicon, so like a layout change the
-    /// composition is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    /// The settings switch (docs/spec/lexicon-and-packs.md §4.2; it is not in the menu): the pack is part of the lexicon, so the engine is built again, in the
+    /// background (`packsChanged`); the choice is stored at once, the composition is left alone and the new engine takes over when it ends. Same value: nothing happens.
     func setAcgPack(_ on: Bool) {
         guard on != acgPackOn else { return }
         acgPackOn = on
@@ -1313,8 +1315,8 @@ public final class Shell {
         Log.shell.debug("word pack switched")
     }
 
-    /// The 經典台詞 switch (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2): like `setAcgPack`, the pack is part of the lexicon, so the composition
-    /// is committed and the engine rebuilt; the choice is stored. Same value: nothing happens.
+    /// The 經典台詞 switch (docs/spec/lexicon-and-packs.md §7.2, §4.1, §4.2): like `setAcgPack`, the pack is part of the lexicon, so the engine is
+    /// built again in the background and takes over when the composition ends; the choice is stored at once. Same value: nothing happens.
     func setQuotePack(_ on: Bool) {
         guard on != quotePackOn else { return }
         quotePackOn = on
@@ -1377,7 +1379,7 @@ public final class Shell {
     /// Creates the engine for the current mode on this thread, from the files, then loads the LM and the current profile (docs/spec/macos-shell.md §2.1: the first build and a layout change
     /// stay synchronous, as the old engine would read the keys in the old layout). A failure leaves an engine without the LM (still usable) or no engine (every key passes).
     private func build() {
-        ready = nil  // a finished build waiting for the composition to end is for the old layout
+        discardReady()  // a finished build waiting for the composition to end is for the old layout
         engine = nil  // free the old engine first: the layout's build is the only one running
         rerankAvailable = false
         rerankLevels = 0
@@ -1389,7 +1391,7 @@ public final class Shell {
         engineBuilds += result.attempts
         packBuildShared.append(false)
         Shell.log(result.notes)
-        guard let e = CoreEngine.adopt(result.engine) else { return }
+        guard let e = CoreEngine.adopt(result.takeEngine()) else { return }
         setUp(e, result)
     }
 
@@ -1497,8 +1499,15 @@ public final class Shell {
     /// A pack switch changed `packMask`: a finished build waiting for the composition to end is stale, and an engine is built for the new mask unless one is being built
     /// (then it is built when that one is back) or the current engine was already asked for exactly this.
     private func packsChanged() {
-        ready = nil
+        discardReady()
         reconcile()
+    }
+
+    /// Gives a finished build nobody will use to the builder to free (`PackBuilder.dispose`): the main thread never pays for `shanjie_engine_free` here.
+    private func discardReady() {
+        guard let r = ready else { return }
+        ready = nil
+        if let e = r.takeEngine() { packBuilder.dispose(consume e) }
     }
 
     /// Builds the engine for what is wanted now (mask and layout) when the current one was asked for something else and no build is running.
@@ -1516,15 +1525,18 @@ public final class Shell {
         packBuilder.run({ PackBuild.run(plan) }, done: { [weak self] result in self?.buildDone(result) })
     }
 
-    /// On the main thread, from the builder. A result asked for something other than what is wanted now is dropped (freed with it), and the newest wish is built.
+    /// On the main thread, from the builder. A result asked for something other than what is wanted now is dropped (its engine freed by the builder), and the newest wish is built.
     /// A build that made no engine changes nothing: the current engine stays, the stored choices stay, and nothing tries again until the next switch.
     private func buildDone(_ result: PackBuildResult) {
         buildInFlight = false
         engineBuilds += result.attempts
         packBuildShared.append(result.usedShared)
         Shell.log(result.notes)
-        guard result.requestedMask == packMask, result.layout == mode.layout else { return reconcile() }
-        guard result.engine != nil else { return }
+        guard result.requestedMask == packMask, result.layout == mode.layout else {
+            if let e = result.takeEngine() { packBuilder.dispose(consume e) }
+            return reconcile()
+        }
+        guard result.hasEngine else { return }
         ready = result
         installIfReady()
     }
@@ -1546,7 +1558,7 @@ public final class Shell {
         rerankAvailable = false
         rerankLevels = 0
         rerankPending = nil
-        guard let e = CoreEngine.adopt(result.engine) else { return }
+        guard let e = CoreEngine.adopt(result.takeEngine()) else { return }
         setUp(e, result)
         installNanos.append(DispatchTime.now().uptimeNanoseconds - start)
         changed()

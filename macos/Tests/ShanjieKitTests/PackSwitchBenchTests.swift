@@ -62,12 +62,13 @@ final class PackSwitchBenchTests: XCTestCase {
         let loadStart = load()
         var calls: [Double] = [], swaps: [Double] = [], toSwap: [Double] = []
         for i in 0..<Self.switches {
-            let before = shell.engine
+            weak var before = shell.engine   // weak: the old engine is released inside the swap, which is part of what is timed
             let on = i % 2 == 1   // the pack starts on: off, on, off, ...
             let start = ContinuousClock.now
             shell.setAcgPack(on)
             calls.append(ms(ContinuousClock.now - start))
             XCTAssertTrue(spin(timeout: 60) { shell.engine !== before && shell.installNanos.count == i + 1 }, "switch \(i) was swapped in")
+            XCTAssertNil(before, "switch \(i): the swap released the old engine")
             toSwap.append(ms(ContinuousClock.now - start))
             swaps.append(Double(shell.installNanos[i]) / 1e6)
         }

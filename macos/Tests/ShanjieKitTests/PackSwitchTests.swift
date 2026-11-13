@@ -189,7 +189,8 @@ final class PackSwitchTests: XCTestCase {
         weak var before = r.shell.engine
         let base = r.shell.engineBuilds
         var maxLive = 0
-        func note() { maxLive = max(maxLive, r.shell.engineCounter.live) }
+        // The builder's queue frees what it is handed before the next build starts (it is serial); the held builder frees on `flushDisposed`.
+        func note() { r.builder.flushDisposed(); maxLive = max(maxLive, r.shell.engineCounter.live) }
         r.shell.setAcgPack(false)
         note()
         r.shell.setItPack(false)
@@ -201,9 +202,10 @@ final class PackSwitchTests: XCTestCase {
         note()
         XCTAssertEqual(log.all, ["newShared", "sharedFree"], "freed after the new_shared that used it returned")
         r.builder.deliver()
-        note()
         XCTAssertEqual(r.builder.received, 2, "the stale result is dropped and the latest mask is built")
         XCTAssertTrue(r.shell.engine === before)
+        XCTAssertEqual(r.builder.disposed, 1, "the stale engine goes to the builder to free, not freed on the main thread")
+        note()
         XCTAssertEqual(r.shell.engineCounter.live, 1, "the stale engine is freed")
         r.builder.complete()
         note()
@@ -226,6 +228,7 @@ final class PackSwitchTests: XCTestCase {
         XCTAssertEqual(r.builder.pending, 0)
         XCTAssertEqual(r.builder.received, 1)
         XCTAssertEqual(r.shell.engineBuilds - base, 1)
+        r.builder.flushDisposed()
         XCTAssertEqual(r.shell.engineCounter.live, 1)
         settle()
         XCTAssertEqual(r.builder.received, 1)
@@ -355,6 +358,7 @@ final class PackSwitchTests: XCTestCase {
         XCTAssertTrue(r.shell.engine === current, "the stale result was freed, not swapped in")
         XCTAssertEqual(r.shell.engineBuilds - base, 2, "the layout's build and the stale one")
         XCTAssertEqual(r.builder.received, 1)
+        r.builder.flushDisposed()
         XCTAssertEqual(r.shell.engineCounter.live, 1)
     }
 
@@ -365,17 +369,63 @@ final class PackSwitchTests: XCTestCase {
             engines.release(using: { shanjie_engine_free($0) })
             shared.release(using: { shanjie_shared_free($0) })
         }
-        let r = try rig()
-        r.shell.engineFree = engines.free
-        r.shell.sharedFree = shared.free
-        r.shell.setAcgPack(false)
-        r.shell.setItPack(false)
-        r.builder.complete()   // stale: its engine is dropped
-        r.builder.complete()   // the latest mask: swapped, the old engine freed by the default free of its build
+        var r: Rig? = try rig()
+        let builder = try XCTUnwrap(r?.builder)
+        r?.shell.engineFree = engines.free
+        r?.shell.sharedFree = shared.free
+        r?.shell.setAcgPack(false)
+        r?.shell.setItPack(false)
+        builder.complete()   // stale: its engine goes to the builder
+        builder.flushDisposed()
+        builder.complete()   // the latest mask: swapped, the old engine freed by the default free of its build
         XCTAssertEqual(engines.freed, 1, "the stale build's engine")
         XCTAssertEqual(shared.freed, 2, "one shared handle per build")
         XCTAssertEqual(engines.doubleFrees + shared.doubleFrees, 0)
+        XCTAssertEqual(r?.shell.engineCounter.live, 1)
+        r = nil   // the shell frees the engine the swap installed, through the recording free too
+        XCTAssertEqual(engines.freed, 2, "the installed engine is freed with the shell")
+        XCTAssertEqual(engines.doubleFrees, 0)
+    }
+
+    /// Item of docs/spec/macos-shell.md §2.1: an engine nobody wants is not freed on the main thread inside the switching call.
+    func testSwitchWhileWaitingHandsTheEngineToTheBuilder() throws {
+        let engines = HandleFrees()
+        defer { engines.release(using: { shanjie_engine_free($0) }) }
+        let r = try rig()
+        r.shell.engineFree = engines.free
+        r.shell.setAcgPack(false)
+        r.controller.type(Self.word)
+        r.builder.complete()
+        XCTAssertTrue(r.shell.hasReady)
+        r.shell.setItPack(false)
+        XCTAssertFalse(r.shell.hasReady)
+        XCTAssertEqual(r.builder.disposed, 1, "handed to the builder")
+        XCTAssertEqual(engines.freed, 0, "not freed inside the switching call")
+        r.builder.flushDisposed()
+        XCTAssertEqual(engines.freed, 1, "freed once, by the builder")
+        XCTAssertEqual(engines.doubleFrees, 0)
         XCTAssertEqual(r.shell.engineCounter.live, 1)
+    }
+
+    /// The app's builder frees it on its own queue, not on the main thread.
+    func testQueueBuilderFreesTheDiscardedEngineOffTheMainThread() throws {
+        let dir = try resourcesWithPacks()
+        let where_ = OrderLog()
+        let shell = Shell(resources: dir, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                          dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(),
+                          englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(true), quotePackStore: MemoryQuotePackStore(),
+                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(),
+                          rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(),
+                          packBuilder: QueuePackBuilder(), spacingStore: MemorySpacingStore())
+        let c = Controller(shell)
+        c.session.activate()
+        shell.engineFree = { where_.add(Thread.isMainThread ? "main" : "queue"); shanjie_engine_free($0) }
+        shell.setAcgPack(false)
+        c.type(Self.word)   // a composition: the finished build has to wait
+        XCTAssertTrue(spin { shell.hasReady }, "the build finished and waits")
+        shell.setItPack(false)   // frees the waiting engine through the builder
+        XCTAssertTrue(spin { where_.all.count == 1 }, "the discarded engine was freed")
+        XCTAssertEqual(where_.all, ["queue"])
     }
 
     func testAShellFreedDuringABuildStillFreesBothHandlesOnce() throws {
@@ -428,7 +478,9 @@ final class PackSwitchTests: XCTestCase {
         XCTAssertEqual(r.shell.engineCounter.live, 2, "built, waiting for the composition to end")
         note()
         r.shell.setItPack(false)
-        XCTAssertEqual(r.shell.engineCounter.live, 1, "freed in the call, not when the next build is back")
+        XCTAssertEqual(r.builder.disposed, 1, "handed to the builder in the call, not kept until the next build is back")
+        r.builder.flushDisposed()
+        XCTAssertEqual(r.shell.engineCounter.live, 1)
         XCTAssertEqual(r.builder.pending, 1, "the newest mask is being built")
         note()
         r.controller.press(Keys.esc)
@@ -451,7 +503,9 @@ final class PackSwitchTests: XCTestCase {
         r.builder.complete()
         XCTAssertEqual(r.shell.engineCounter.live, 2)
         r.shell.setAcgPack(true)
-        XCTAssertEqual(r.shell.engineCounter.live, 1, "freed in the call")
+        XCTAssertEqual(r.builder.disposed, 1, "handed to the builder in the call")
+        r.builder.flushDisposed()
+        XCTAssertEqual(r.shell.engineCounter.live, 1)
         XCTAssertEqual(r.builder.pending, 0, "the current engine has what is wanted")
         r.controller.press(Keys.esc)
         settle()
