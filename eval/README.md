@@ -50,6 +50,7 @@
 | `accept/user-typing.tsv`（打字測驗，只有檔頭） | `23273e967af98fcaa85a6b1c7e092ff993d466749de292498611119b92c67516` |
 | `accept/user-reported.tsv`（錯字回報，2 列） | `e894cf96171c0cd0583fd9f8b6bfb409141e6a2d4c68e7e18a750c6a7e3b6004` |
 | `accept/dev302.doubt.tsv`（盲判認為正解有疑義的列，只列出來；判定不讀它） | `8e0105ac9104fae78525429b3425be9b9d4d11a2dd484c1e9050c23856672659` |
+| `accept/user-reported.doubt.tsv`（同上，錯字回報） | `3cf889c81f1eb54316f5b11e3f9c5e53fbe8dbeb751cb185822ff6797b59c4fe` |
 | `golden/judge-v2-accept-test.tsv`（測試專用的 dev302 可接受答案檔，`cli/tests/judge_v2.rs`；不是上面那三份） | `7eca449d662b278d9b2289a147a5806a7847dbb56af0862fb1f3cfe69c80c061` |
 
 ## 保留集雜湊（變動就代表被改過）
