@@ -45,7 +45,7 @@
 | 檔案 | SHA-256 |
 |---|---|
 | `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；`--forms-rowstats` 與 `--judge v2` 讀，`docs/spec/evaluation.md` §3） | `85f4e034817d14b3263223b19a0fadbb32fa734d3e5ded7d8ad3aee945a03130` |
-| `forms-extra.tsv`（審定詞對表，`tools/check_forms_extra.py` 檢查；`--judge v2` 讀） | `809c3a91621587bc5d02cd716dded58fc0b35f9c9ef5b577682edab17a56dfa7` |
+| `forms-extra.tsv`（審定詞對表，`tools/check_forms_extra.py` 檢查；`--judge v2` 讀） | `dbca4adb5d0c329b52fe9c685fea71bdc52cf1846232153a881ce92c90d169e4` |
 | `accept/dev302.tsv`（`--dev 302` 的逐列可接受答案，4 列） | `81ab55e39a44f298ef90cadc20e8aaa80d7571c1c7087897687210a14d757f30` |
 | `accept/user-typing.tsv`（打字測驗，只有檔頭） | `23273e967af98fcaa85a6b1c7e092ff993d466749de292498611119b92c67516` |
 | `accept/user-reported.tsv`（錯字回報，2 列） | `e894cf96171c0cd0583fd9f8b6bfb409141e6a2d4c68e7e18a750c6a7e3b6004` |

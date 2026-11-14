@@ -16,4 +16,5 @@ sed 's/\t[0-9a-f]\{64\}\t/\t0000000000000000000000000000000000000000000000000000
 if "$PY" reference/proto/lm_eval.py --profile chat --dev 302 --judge v2 --accept "$T/bad.tsv" --rowstats "$T/bad.rowstats" > /dev/null 2> "$T/bad.err"; then
   echo "FAIL: an accept file with a wrong row hash was accepted"; exit 1; fi
 [ ! -e "$T/bad.rowstats" ] || { echo "FAIL: an output file exists after a refused accept file"; exit 1; }
+grep -q 'does not match the rows' "$T/bad.err" || { echo "FAIL: the run stopped for another reason than the row hash"; exit 1; }
 echo "judge v2 (Python reference): dev302 goldens match, a wrong row hash is refused before any output"
