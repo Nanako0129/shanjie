@@ -50,7 +50,7 @@ REORDER_ROWS = [("", "014", ""), ("", "01" + SP, ""), ("", "824", ""), ("", "/54
                 ("", "184", ""), ("", "2026", ""), ("", "1284", "")]
 # `late_decision` rows (docs/spec/english-mixed.md §7.4): (left text, before, keys, pend in column order, closing, script or None). Inputs are written by hand; the
 # context is the history word of `left` (`<s>` for none). A row with a script is also typed into the App's engine by the Rust test, which compares what the engine
-# hands the function to these fields. The first rows are the named ones of the contract; then numbers glued to a syllable (what must stay numbers), a
+# hands the function to these fields. The first rows are the named ones of the contract; then numbers glued to a syllable (most stay numbers; `5 0 j 3` merges since RHO is 7), a
 # run of digits in front (`before`), two late keys of which one is taken, no candidate, a syllable as typed that is no reading (`s_d` is ∅), the marks `. / -`
 # at the start (`rho_sym`) and not, and the pairs of rows nearest to the flip of `merge` on each side for each penalty (scanned over the lexicon's syllables).
 LATE_ROWS = [
