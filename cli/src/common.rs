@@ -1,6 +1,6 @@
 //! Helpers `shanjie-eval` and `shanjie-replay` share: the repo root, the lenient table and the rowstats writer
 //! (docs/spec/evaluation.md §2.1). Moved out of cli/src/main.rs unchanged, so the eval output bytes stay what they were.
-use core::eval::{Forms, Lenient};
+use core::eval::{sha256_hex, Accept, Forms, Lenient};
 use core::Syls;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +31,30 @@ pub fn load_forms() -> Result<Forms, String> {
     Forms::parse(&text).map_err(|e| e.to_string())
 }
 
+/// docs/spec/evaluation.md §3.6: the forms-v2 table of `--judge v2`: forms.tsv (SHANJIE_FORMS, else the repo's) plus forms-extra.tsv
+/// (SHANJIE_FORMS_EXTRA, else the repo's `eval/forms-extra.tsv`). Returns the table and the first 8 hex of the SHA-256 of each file as read, the
+/// `+jv2:` tag's A and B. A missing or bad file is an error.
+pub fn load_forms_v2() -> Result<(Forms, String, String), String> {
+    let read = |var: &str, default: &str, what: &str| -> Result<(String, String), String> {
+        let p = std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| root().join(default));
+        let bytes = fs::read(p).map_err(|e| format!("cannot read {what} table ({:?})", e.kind()))?;
+        let sha8 = sha256_hex(&bytes)[..8].to_string();
+        Ok((String::from_utf8(bytes).map_err(|_| format!("{what} table is not UTF-8"))?, sha8))
+    };
+    let (forms, a) = read("SHANJIE_FORMS", "eval/forms.tsv", "forms")?;
+    let (extra, b) = read("SHANJIE_FORMS_EXTRA", "eval/forms-extra.tsv", "forms-extra")?;
+    Ok((Forms::parse(&forms).and_then(|f| f.with_extra(&extra)).map_err(|e| e.to_string())?, a, b))
+}
+
+/// `--accept FILE` (docs/spec/evaluation.md §3.7): the file parsed and tied to `rows` (their original text, one per row), and the first 8 hex of its SHA-256 (the tag's C).
+pub fn load_accept(path: &str, rows: &[String]) -> Result<(Accept, String), String> {
+    let bytes = fs::read(path).map_err(|e| format!("cannot read accept file ({:?})", e.kind()))?;
+    let text = String::from_utf8(bytes.clone()).map_err(|_| "accept file is not UTF-8".to_string())?;
+    let acc = Accept::parse(&text).map_err(|e| e.to_string())?;
+    acc.check(rows).map_err(|e| e.to_string())?;
+    Ok((acc, sha256_hex(&bytes)[..8].to_string()))
+}
+
 /// lm_eval.py `rows_of`: only lines with exactly three `|` fields (context|sentence|reading).
 /// Each row is (sentence, reading, context text).
 pub fn three_field_rows(text: &str) -> Vec<(String, Syls, String)> {
@@ -48,18 +72,47 @@ pub fn read_rows(path: &str) -> Result<Vec<(String, Syls, String)>, String> {
     Ok(three_field_rows(&text))
 }
 
-/// The rows of `--dev N`: the first N three-field rows of eval/dev/*.txt, files in name order.
-pub fn dev_rows(n: usize) -> Result<Vec<(String, Syls, String)>, String> {
+/// The texts of the files `--dev` reads: eval/dev/*.txt (top level only), in name order.
+fn dev_texts() -> Result<Vec<String>, String> {
     let mut files: Vec<PathBuf> = fs::read_dir(root().join("eval/dev"))
         .map_err(|e| format!("cannot read directory ({:?})", e.kind()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "txt"))
         .collect();
     files.sort();
+    files.iter().map(|f| fs::read_to_string(f).map_err(|e| format!("cannot read file ({:?})", e.kind()))).collect()
+}
+
+/// The rows of `--dev N`: the first N three-field rows of eval/dev/*.txt, files in name order.
+pub fn dev_rows(n: usize) -> Result<Vec<(String, Syls, String)>, String> {
     let mut rows = Vec::new();
-    for f in files {
-        let text = fs::read_to_string(&f).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
+    for text in dev_texts()? {
         rows.extend(three_field_rows(&text));
+    }
+    rows.truncate(n);
+    Ok(rows)
+}
+
+/// The original text of each three-field row (the lines `three_field_rows` keeps, without the line break), the input of an accept file's row SHA-256.
+fn three_field_lines(text: &str) -> Vec<String> {
+    text.lines().filter(|l| l.split('|').count() == 3).map(String::from).collect()
+}
+
+/// `read_rows`' rows as original text, for `--accept`'s row check; `limit` is `--limit`.
+pub fn read_rows_raw(path: &str, limit: Option<usize>) -> Result<Vec<String>, String> {
+    let text = fs::read_to_string(Path::new(path)).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
+    let mut rows = three_field_lines(&text);
+    if let Some(n) = limit.filter(|&n| n != 0) {
+        rows.truncate(n);
+    }
+    Ok(rows)
+}
+
+/// `dev_rows`' rows as original text.
+pub fn dev_rows_raw(n: usize) -> Result<Vec<String>, String> {
+    let mut rows = Vec::new();
+    for text in dev_texts()? {
+        rows.extend(three_field_lines(&text));
     }
     rows.truncate(n);
     Ok(rows)

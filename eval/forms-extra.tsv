@@ -1,0 +1,4 @@
+# 審定詞對表（docs/spec/evaluation.md §3.6）：判準 v2 的合法寫法表（forms-v2）是 forms.tsv 加上這張表的詞對。只放詞對，不放單字對。
+# 格式：word<TAB>寫法<TAB>標準形<TAB>讀音<TAB>次數<TAB>依據。讀音：列檔的寫法（音節以空白分開），只給收錄條件 1 用，判定時不看；次數：寫法的列數/標準形的列數；依據：辭典字條與第幾個 heteronym。
+# 次數的語料：兩份候選列檔（各約 60 萬列，論壇 A 與維基）句子欄含這個字串的列數，兩份相加；兩份檔的 SHA-256：論壇 A 候選列檔 649357cf95bfe60c716241d4cf5f31bc8e335cc2ea7f2158aaceb22aecbccd63，維基候選列檔 ec325297979b3cdead567e33db3e58c568d6f170c333b41deb9566d446465832。
+# 每一行都要過 tools/check_forms_extra.py 的六個收錄條件；詞對 0 個。
