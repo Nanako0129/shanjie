@@ -143,7 +143,7 @@
 ## 4. 取捨與已知限制
 
 - **為什麼拆成這些 job**：macOS runner 是 3 核、7 GiB；Rust 測試的執行檔一個接一個跑、每個執行檔內的測試同時跑，release 時平均同時約 2.4 個測試在跑，CPU 已接近滿載，同一個 job 裡再並行省不了多少，只能把工作分到別台機器或減少工作。所以：debug 與 Python 搬到 Linux，Swift 測試與 C 冒煙測試搬到 `swift`，最慢的 `core` 只剩 release 測試。
-- **`cli` 的整合測試不在 debug 跑**：Linux 沒有 Accelerate，小模型走可攜路徑，`cli` 的整合測試（重播、golden、常談、英文模擬、執行緒、小模型）在 Linux 上比 macOS 久。它們測的是評測工具（不出貨）與引擎在整份資料上的結果，只在 release 跑；引擎本身的 debug 檢查由 `core` 套件在 Linux 跑（含 dev302 重播）。`core/src` 與 `cli/src` 只有一個 `debug_assert!`。
+- **`cli` 的整合測試不在 debug 跑**：Linux 沒有 Accelerate，小模型走可攜路徑，`cli` 的整合測試（重播、golden、常談、英文模擬、執行緒、小模型）在 Linux 上比 macOS 久。它們測的是評測工具（不出貨）與引擎在整份資料上的結果，只在 release 跑；引擎本身的 debug 檢查由 `core` 套件在 Linux 跑（含 dev302 重播）。`core/src` 與 `cli/src` 有三個 `debug_assert!`（`lm.rs` 兩個、`tinylm.rs` 一個）。
 - **debug 看不到的兩塊**：只在 macOS 才編進去的分支（小模型的 Accelerate 呼叫、`learn_store.rs` 的 macOS 常數），以及上述兩個在 Linux 直接 `return` 的 f64 golden（在 Linux 的 debug 裡算通過但什麼都沒檢查）。它們在 macOS 的 release 測試照跑；Accelerate 呼叫前的長度檢查是 `assert!`，release 也檢查。
 - **`--parallel` 的代價**：一個測試殘留給下一個測試的狀態，在同一個程序內才會被看到；並行時每個方法一個程序，抓不到這種問題，只有序列的 `make test-swift` 抓得到。
 - **沒有 Rust 編譯快取**：沒有 `actions/cache` 步驟。編譯只佔各 job 的一小段，其餘是測試本身的執行時間。以 main 一次 push CI 的 log 為例：最慢的 `core`，`cargo test --release` 共 1017 秒，其中編譯 59.7 秒；`windows` 的核心測試編譯 56.3 秒，`shanjie-tip`、`shanjie-host` 的四次建置共 45 秒；`debug` 41.3 秒；模型下載每個 job 6–12 秒。快取命中時，每次合併幾乎都會改到的自己的 crate 照樣重編，省得到的只有相依套件那一段，不值得承擔快取留下錯誤建置的風險。
