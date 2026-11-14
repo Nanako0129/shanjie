@@ -12,6 +12,7 @@
 //! causal attention); `ll_many` is `tinylm.ll_many`. The file is written only by tools/lib/export_sjtl.py, whose
 //! docstring is the format (and the tensor order, which `parse` repeats).
 //! R2: errors carry a kind only, never text.
+#![deny(unsafe_op_in_unsafe_fn)]
 
 use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, last_chars, SENTINEL};
@@ -157,10 +158,45 @@ extern "C" {
     fn vvexpf(y: *mut f32, x: *const f32, n: *const i32);
 }
 
+/// The kernels of `Backend::Plain` (docs/spec/semantic-rerank.md §2.4). Every one computes the same numbers, bit for bit:
+/// - not transposed: c[i][j] takes a[i][p] * b[p][j] for p = 0, 1, ... in that order, one multiplication and one addition each (no FMA);
+/// - transposed: c[i][j] += dot(a[i], b[j]) with `dot` as `dot_scalar` defines it (16 partial sums, a fixed merge order, a scalar tail).
+/// The vector kernels only change how many elements one instruction handles, never the order of the operations on one element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kernel {
+    Scalar,
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+    #[cfg(target_arch = "x86_64")]
+    Avx512,
+}
+
+/// The kernel this CPU runs: decided by the standard library's runtime detection (cached there), never by the caller or the environment.
+fn selected_kernel() -> Kernel {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx512f") {
+            return Kernel::Avx512;
+        }
+        if std::arch::is_x86_feature_detected!("avx2") {
+            return Kernel::Avx2;
+        }
+    }
+    Kernel::Scalar
+}
+
+/// The length precondition of every matrix product here, checked in release too: the Accelerate call and the vector kernels' loads
+/// rely on it. `checked_mul`, so a product that wraps cannot pass.
+fn check_gemm(a: &[f32], b: &[f32], c: &[f32], (m, k, n): (usize, usize, usize)) {
+    assert!(
+        m.checked_mul(k) == Some(a.len()) && k.checked_mul(n) == Some(b.len()) && m.checked_mul(n) == Some(c.len()),
+        "gemm: matrix lengths do not match"
+    );
+}
+
 /// c (m x n) += a (m x k) . b, with b (k x n), or b (n x k) transposed when `trans_b`. All row-major.
 fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
-    // Checked in release too: the Accelerate call reads and writes through raw pointers with these lengths.
-    assert!(a.len() == m * k && b.len() == k * n && c.len() == m * n, "gemm: matrix lengths do not match");
+    check_gemm(a, b, c, (m, k, n));
     match be {
         #[cfg(target_os = "macos")]
         Backend::Accelerate => {
@@ -173,20 +209,292 @@ fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usi
                 );
             }
         }
-        Backend::Plain if trans_b => {
-            for i in 0..m {
-                for j in 0..n {
-                    c[i * n + j] += a[i * k..(i + 1) * k].iter().zip(&b[j * k..(j + 1) * k]).map(|(x, y)| x * y).sum::<f32>();
-                }
+        Backend::Plain => {
+            let ran = gemm_kernel(selected_kernel(), a, b, c, (m, k, n), trans_b);
+            debug_assert!(ran, "the selected kernel is one this CPU has");
+        }
+    }
+}
+
+/// Runs one kernel; false (and nothing computed) when this CPU does not have it. The one place the vector kernels are called from: it
+/// checks the lengths and the CPU feature itself, so no caller can run a vector kernel on a CPU without it.
+fn gemm_kernel(kernel: Kernel, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) -> bool {
+    check_gemm(a, b, c, (m, k, n));
+    match kernel {
+        Kernel::Scalar => scalar::gemm(a, b, c, (m, k, n), trans_b),
+        #[cfg(target_arch = "x86_64")]
+        Kernel::Avx2 => {
+            if !std::arch::is_x86_feature_detected!("avx2") {
+                return false;
+            }
+            // SAFETY: the CPU has AVX2 (checked on the line above).
+            unsafe { x86::gemm_avx2(a, b, c, (m, k, n), trans_b) }
+        }
+        #[cfg(target_arch = "x86_64")]
+        Kernel::Avx512 => {
+            if !std::arch::is_x86_feature_detected!("avx512f") {
+                return false;
+            }
+            // SAFETY: the CPU has AVX-512F (checked on the line above).
+            unsafe { x86::gemm_avx512(a, b, c, (m, k, n), trans_b) }
+        }
+    }
+    true
+}
+
+/// The reference kernel: plain Rust, the definition the vector kernels are compared with bit for bit, and what every target other than
+/// x86-64 (and an x86-64 CPU without AVX2) runs. The compiler vectorizes it with the target's baseline (SSE2, NEON).
+mod scalar {
+    /// dot(x, y): 16 partial sums over the whole blocks of 16 (element q goes to sum q mod 16), merged 16 -> 8 -> 4 -> 2 -> 1 by adding
+    /// sum l + half to sum l, then the tail (fewer than 16 elements) summed in order and added last.
+    #[inline]
+    pub(super) fn dot(x: &[f32], y: &[f32]) -> f32 {
+        let mut s = [0f32; 16];
+        let (xc, yc) = (x.chunks_exact(16), y.chunks_exact(16));
+        let (xr, yr) = (xc.remainder(), yc.remainder());
+        for (cx, cy) in xc.zip(yc) {
+            for l in 0..16 {
+                s[l] += cx[l] * cy[l];
             }
         }
-        Backend::Plain => {
+        for half in [8, 4, 2, 1] {
+            for l in 0..half {
+                s[l] += s[l + half];
+            }
+        }
+        let mut t = 0f32;
+        for (p, q) in xr.iter().zip(yr) {
+            t += p * q;
+        }
+        s[0] + t
+    }
+
+    pub(super) fn gemm(a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+        if trans_b {
+            for i in 0..m {
+                let ai = &a[i * k..][..k];
+                for (j, cj) in c[i * n..][..n].iter_mut().enumerate() {
+                    *cj += dot(ai, &b[j * k..][..k]);
+                }
+            }
+        } else {
             for i in 0..m {
                 for p in 0..k {
                     let av = a[i * k + p];
-                    for (cj, bj) in c[i * n..(i + 1) * n].iter_mut().zip(&b[p * n..(p + 1) * n]) {
+                    for (cj, bj) in c[i * n..][..n].iter_mut().zip(&b[p * n..][..n]) {
                         *cj += av * bj;
                     }
+                }
+            }
+        }
+    }
+}
+
+/// The AVX2 and AVX-512F kernels. Each is a safe `#[target_feature]` function: an intrinsic of a feature that is not enabled does not
+/// compile. `unsafe` is only the unaligned loads and stores, each on a slice of exactly the vector's length (`chunks_exact`, or a
+/// range of a checked slice), so no load or store can leave its slice; tails are scalar. No aligned access, no masked load, no pointer
+/// arithmetic on the matrices, no `get_unchecked`, no FMA (it rounds once where the definition rounds twice).
+#[cfg(target_arch = "x86_64")]
+mod x86 {
+    use std::arch::x86_64::*;
+
+    /// Rows of b per tile of the transposed product (32 rows of the model's width are 48 KiB; 128 rows measured no faster).
+    const TILE: usize = 32;
+    /// Rows of b per block of the product that is not transposed: a multiple of 4 (the row kernels take four rows at a time, so only the
+    /// last block has single rows). 4 rows of the widest layer (1,536 columns) are 24 KiB and stay in the first-level cache while every
+    /// row of c takes them. Measured on an i5-12600K (AVX2), 200 rows in one process: 4 rows 11.2-11.3 s, 8 rows 11.6-11.8 s, 16 rows
+    /// 12.4-12.6 s, 32 rows 12.7-12.9 s; the old loop 40.5-41.5 s.
+    const BLOCK: usize = 4;
+
+    /// The 8 sums `v` merged as `scalar::dot` merges its sums 0..8: 8 -> 4 -> 2 -> 1.
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    fn merge8(v: __m256) -> f32 {
+        let q = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps::<1>(v)); // s[l] += s[l + 4]
+        let d = _mm_add_ps(q, _mm_movehl_ps(q, q)); // s[l] += s[l + 2]
+        _mm_cvtss_f32(_mm_add_ss(d, _mm_shuffle_ps::<1>(d, d))) // s[0] += s[1]
+    }
+
+    #[inline]
+    fn tail(xr: &[f32], yr: &[f32]) -> f32 {
+        let mut t = 0f32;
+        for (p, q) in xr.iter().zip(yr) {
+            t += p * q;
+        }
+        t
+    }
+
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    fn dot_avx2(x: &[f32], y: &[f32]) -> f32 {
+        let (mut lo, mut hi) = (_mm256_setzero_ps(), _mm256_setzero_ps()); // sums 0..8 and 8..16
+        let (xc, yc) = (x.chunks_exact(16), y.chunks_exact(16));
+        let (xr, yr) = (xc.remainder(), yc.remainder());
+        for (cx, cy) in xc.zip(yc) {
+            let (x0, x1) = cx.split_at(8);
+            let (y0, y1) = cy.split_at(8);
+            // SAFETY: each of x0, x1, y0, y1 is a slice of exactly 8 f32; loadu reads 8 f32 and needs no alignment.
+            let (a0, a1, b0, b1) = unsafe { (_mm256_loadu_ps(x0.as_ptr()), _mm256_loadu_ps(x1.as_ptr()), _mm256_loadu_ps(y0.as_ptr()), _mm256_loadu_ps(y1.as_ptr())) };
+            lo = _mm256_add_ps(lo, _mm256_mul_ps(a0, b0));
+            hi = _mm256_add_ps(hi, _mm256_mul_ps(a1, b1));
+        }
+        merge8(_mm256_add_ps(lo, hi)) + tail(xr, yr) // s[l] += s[l + 8], then the rest of the merge, then the tail
+    }
+
+    #[inline]
+    #[target_feature(enable = "avx512f")]
+    fn dot_avx512(x: &[f32], y: &[f32]) -> f32 {
+        let mut s = _mm512_setzero_ps(); // the 16 sums
+        let (xc, yc) = (x.chunks_exact(16), y.chunks_exact(16));
+        let (xr, yr) = (xc.remainder(), yc.remainder());
+        for (cx, cy) in xc.zip(yc) {
+            // SAFETY: cx and cy are slices of exactly 16 f32; loadu reads 16 f32 and needs no alignment.
+            let (a, b) = unsafe { (_mm512_loadu_ps(cx.as_ptr()), _mm512_loadu_ps(cy.as_ptr())) };
+            s = _mm512_add_ps(s, _mm512_mul_ps(a, b));
+        }
+        // the upper 8 sums with AVX-512F only (extractf32x8 would need AVX-512DQ)
+        let hi = _mm256_castpd_ps(_mm512_extractf64x4_pd::<1>(_mm512_castps_pd(s)));
+        merge8(_mm256_add_ps(_mm512_castps512_ps256(s), hi)) + tail(xr, yr)
+    }
+
+    /// One row of the product that is not transposed: ci[j] takes ai[p] * b[p][j] for p in order, as the scalar kernel does; the
+    /// rows of b are read front to back, four at a time.
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    fn row_avx2(ai: &[f32], b: &[f32], ci: &mut [f32], n: usize) {
+        const W: usize = 8;
+        let whole = n - n % W;
+        let (cv, ct) = ci.split_at_mut(whole);
+        let mut p = 0;
+        // four rows of b per pass over the row of c: each element still takes its products one at a time, p in order
+        while p + 4 <= ai.len() {
+            let (a0, a1, a2, a3) = (_mm256_set1_ps(ai[p]), _mm256_set1_ps(ai[p + 1]), _mm256_set1_ps(ai[p + 2]), _mm256_set1_ps(ai[p + 3]));
+            let (b0, b1, b2, b3) = (&b[p * n..][..n], &b[(p + 1) * n..][..n], &b[(p + 2) * n..][..n], &b[(p + 3) * n..][..n]);
+            let rows = b0[..whole].chunks_exact(W).zip(b1[..whole].chunks_exact(W)).zip(b2[..whole].chunks_exact(W).zip(b3[..whole].chunks_exact(W)));
+            for (cc, ((x0, x1), (x2, x3))) in cv.chunks_exact_mut(W).zip(rows) {
+                // SAFETY: cc, x0, x1, x2 and x3 are slices of exactly 8 f32 (chunks_exact); the loads and the store need no alignment.
+                unsafe {
+                    let mut acc = _mm256_loadu_ps(cc.as_ptr());
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a0, _mm256_loadu_ps(x0.as_ptr())));
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a1, _mm256_loadu_ps(x1.as_ptr())));
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a2, _mm256_loadu_ps(x2.as_ptr())));
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a3, _mm256_loadu_ps(x3.as_ptr())));
+                    _mm256_storeu_ps(cc.as_mut_ptr(), acc);
+                }
+            }
+            for (q, cj) in ct.iter_mut().enumerate() {
+                let j = whole + q;
+                *cj += ai[p] * b0[j];
+                *cj += ai[p + 1] * b1[j];
+                *cj += ai[p + 2] * b2[j];
+                *cj += ai[p + 3] * b3[j];
+            }
+            p += 4;
+        }
+        while p < ai.len() {
+            let (av, va, brow) = (ai[p], _mm256_set1_ps(ai[p]), &b[p * n..][..n]);
+            for (cc, x) in cv.chunks_exact_mut(W).zip(brow[..whole].chunks_exact(W)) {
+                // SAFETY: cc and x are slices of exactly 8 f32 (chunks_exact).
+                unsafe { _mm256_storeu_ps(cc.as_mut_ptr(), _mm256_add_ps(_mm256_loadu_ps(cc.as_ptr()), _mm256_mul_ps(va, _mm256_loadu_ps(x.as_ptr())))) };
+            }
+            for (cj, bj) in ct.iter_mut().zip(&brow[whole..]) {
+                *cj += av * bj;
+            }
+            p += 1;
+        }
+    }
+
+    /// As `row_avx2` with 16-element vectors.
+    #[inline]
+    #[target_feature(enable = "avx512f")]
+    fn row_avx512(ai: &[f32], b: &[f32], ci: &mut [f32], n: usize) {
+        const W: usize = 16;
+        let whole = n - n % W;
+        let (cv, ct) = ci.split_at_mut(whole);
+        let mut p = 0;
+        // four rows of b per pass over the row of c: each element still takes its products one at a time, p in order
+        while p + 4 <= ai.len() {
+            let (a0, a1, a2, a3) = (_mm512_set1_ps(ai[p]), _mm512_set1_ps(ai[p + 1]), _mm512_set1_ps(ai[p + 2]), _mm512_set1_ps(ai[p + 3]));
+            let (b0, b1, b2, b3) = (&b[p * n..][..n], &b[(p + 1) * n..][..n], &b[(p + 2) * n..][..n], &b[(p + 3) * n..][..n]);
+            let rows = b0[..whole].chunks_exact(W).zip(b1[..whole].chunks_exact(W)).zip(b2[..whole].chunks_exact(W).zip(b3[..whole].chunks_exact(W)));
+            for (cc, ((x0, x1), (x2, x3))) in cv.chunks_exact_mut(W).zip(rows) {
+                // SAFETY: cc, x0, x1, x2 and x3 are slices of exactly 16 f32 (chunks_exact); the loads and the store need no alignment.
+                unsafe {
+                    let mut acc = _mm512_loadu_ps(cc.as_ptr());
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a0, _mm512_loadu_ps(x0.as_ptr())));
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a1, _mm512_loadu_ps(x1.as_ptr())));
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a2, _mm512_loadu_ps(x2.as_ptr())));
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a3, _mm512_loadu_ps(x3.as_ptr())));
+                    _mm512_storeu_ps(cc.as_mut_ptr(), acc);
+                }
+            }
+            for (q, cj) in ct.iter_mut().enumerate() {
+                let j = whole + q;
+                *cj += ai[p] * b0[j];
+                *cj += ai[p + 1] * b1[j];
+                *cj += ai[p + 2] * b2[j];
+                *cj += ai[p + 3] * b3[j];
+            }
+            p += 4;
+        }
+        while p < ai.len() {
+            let (av, va, brow) = (ai[p], _mm512_set1_ps(ai[p]), &b[p * n..][..n]);
+            for (cc, x) in cv.chunks_exact_mut(W).zip(brow[..whole].chunks_exact(W)) {
+                // SAFETY: cc and x are slices of exactly 16 f32 (chunks_exact).
+                unsafe { _mm512_storeu_ps(cc.as_mut_ptr(), _mm512_add_ps(_mm512_loadu_ps(cc.as_ptr()), _mm512_mul_ps(va, _mm512_loadu_ps(x.as_ptr())))) };
+            }
+            for (cj, bj) in ct.iter_mut().zip(&brow[whole..]) {
+                *cj += av * bj;
+            }
+            p += 1;
+        }
+    }
+
+    /// The caller has checked the lengths (`check_gemm`) and that the CPU has AVX2.
+    #[target_feature(enable = "avx2")]
+    pub(super) fn gemm_avx2(a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+        if trans_b {
+            // tiles of rows of b stay in the cache while every row of a passes over them; each c[i][j] is one independent dot product
+            for j0 in (0..n).step_by(TILE) {
+                let j1 = (j0 + TILE).min(n);
+                for i in 0..m {
+                    let ai = &a[i * k..][..k];
+                    for (j, cj) in (j0..j1).zip(&mut c[i * n + j0..i * n + j1]) {
+                        *cj += dot_avx2(ai, &b[j * k..][..k]);
+                    }
+                }
+            }
+        } else {
+            // blocks of BLOCK rows of b stay in the cache while every row of c takes them; an element still gets its products with p in order
+            for p0 in (0..k).step_by(BLOCK) {
+                let p1 = (p0 + BLOCK).min(k);
+                for i in 0..m {
+                    row_avx2(&a[i * k + p0..i * k + p1], &b[p0 * n..p1 * n], &mut c[i * n..][..n], n);
+                }
+            }
+        }
+    }
+
+    /// The caller has checked the lengths (`check_gemm`) and that the CPU has AVX-512F.
+    #[target_feature(enable = "avx512f")]
+    pub(super) fn gemm_avx512(a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+        if trans_b {
+            // tiles of rows of b stay in the cache while every row of a passes over them; each c[i][j] is one independent dot product
+            for j0 in (0..n).step_by(TILE) {
+                let j1 = (j0 + TILE).min(n);
+                for i in 0..m {
+                    let ai = &a[i * k..][..k];
+                    for (j, cj) in (j0..j1).zip(&mut c[i * n + j0..i * n + j1]) {
+                        *cj += dot_avx512(ai, &b[j * k..][..k]);
+                    }
+                }
+            }
+        } else {
+            // blocks of BLOCK rows of b stay in the cache while every row of c takes them; an element still gets its products with p in order
+            for p0 in (0..k).step_by(BLOCK) {
+                let p1 = (p0 + BLOCK).min(k);
+                for i in 0..m {
+                    row_avx512(&a[i * k + p0..i * k + p1], &b[p0 * n..p1 * n], &mut c[i * n..][..n], n);
                 }
             }
         }
@@ -1169,6 +1477,138 @@ mod tests {
             assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad, &[], &Default::default(), &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
         }
         assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0), &[], &Default::default(), &Default::default()).is_ok(), "an infinite tau is allowed: no threshold");
+    }
+
+    /// Every kernel of `Backend::Plain`, with the name the tests print.
+    fn kernels() -> Vec<(Kernel, &'static str)> {
+        #[allow(unused_mut)]
+        let mut v = vec![(Kernel::Scalar, "scalar")];
+        #[cfg(target_arch = "x86_64")]
+        v.extend([(Kernel::Avx2, "avx2"), (Kernel::Avx512, "avx512f")]);
+        v
+    }
+
+    /// The portable matrix product before the vector kernels (one running sum per element, the transposed dot product summed in order).
+    fn old_plain(a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+        for i in 0..m {
+            if trans_b {
+                for j in 0..n {
+                    c[i * n + j] += a[i * k..(i + 1) * k].iter().zip(&b[j * k..(j + 1) * k]).map(|(x, y)| x * y).sum::<f32>();
+                }
+            } else {
+                for p in 0..k {
+                    let av = a[i * k + p];
+                    for (cj, bj) in c[i * n..(i + 1) * n].iter_mut().zip(&b[p * n..(p + 1) * n]) {
+                        *cj += av * bj;
+                    }
+                }
+            }
+        }
+    }
+
+    const GUARD: u32 = 0xdead_beef;
+
+    /// One product on matrices that are the middle of larger buffers: `pad` elements on each side, NaN around a and b (a read outside
+    /// them makes the output NaN) and a fixed bit pattern around c (a write outside it changes the pattern). Returns c's bits, or None
+    /// when this CPU does not have the kernel.
+    fn guarded(kernel: Kernel, a: &[f32], b: &[f32], c0: &[f32], dims: (usize, usize, usize), trans_b: bool, pad: usize) -> Option<Vec<u32>> {
+        let wrap = |x: &[f32], fill: f32| -> Vec<f32> { [vec![fill; pad].as_slice(), x, vec![fill; pad].as_slice()].concat() };
+        let (ga, gb, mut gc) = (wrap(a, f32::NAN), wrap(b, f32::NAN), wrap(c0, f32::from_bits(GUARD)));
+        let ran = gemm_kernel(kernel, &ga[pad..pad + a.len()], &gb[pad..pad + b.len()], &mut gc[pad..pad + c0.len()], dims, trans_b);
+        if !ran {
+            return None;
+        }
+        assert!(gc[..pad].iter().chain(&gc[pad + c0.len()..]).all(|x| x.to_bits() == GUARD), "{kernel:?} wrote outside c");
+        let out = &gc[pad..pad + c0.len()];
+        assert!(out.iter().all(|x| !x.is_nan()), "{kernel:?} read outside a or b");
+        Some(out.iter().map(|x| x.to_bits()).collect())
+    }
+
+    /// docs/spec/semantic-rerank.md §2.4: every kernel this CPU has gives the scalar kernel's result bit for bit, on both products, over
+    /// the sizes around the vector widths and the model's, with the matrices at every alignment; the product that is not transposed is
+    /// also the old portable product bit for bit. Prints which kernels ran.
+    #[test]
+    fn kernels_agree_bit_for_bit() {
+        let sizes = [0usize, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 384, 1536];
+        let mut st = 7u64;
+        let mut ran = vec![0usize; kernels().len()];
+        let mut case = 0usize;
+        for trans_b in [false, true] {
+            for &m in &[0usize, 1, 2, 9] {
+                for &k in &sizes {
+                    for &n in &sizes {
+                        let a: Vec<f32> = (0..m * k).map(|_| rnd(&mut st, 1.0)).collect();
+                        let b: Vec<f32> = (0..k * n).map(|_| rnd(&mut st, 1.0)).collect();
+                        // c starts at -0.0 in one case of four: an empty sum must still turn it into +0.0 on every kernel
+                        let c0: Vec<f32> = (0..m * n).map(|q| if case % 4 == 0 && q % 3 == 0 { -0.0 } else { rnd(&mut st, 1.0) }).collect();
+                        let pad = 64 + case % 4; // the matrices start 0, 1, 2 or 3 elements off
+                        case += 1;
+                        let want = guarded(Kernel::Scalar, &a, &b, &c0, (m, k, n), trans_b, pad).unwrap();
+                        if !trans_b {
+                            let mut old = c0.clone();
+                            old_plain(&a, &b, &mut old, (m, k, n), false);
+                            assert!(old.iter().map(|x| x.to_bits()).eq(want.iter().copied()), "scalar vs the old product, m={m} k={k} n={n}");
+                        }
+                        for (q, (kernel, name)) in kernels().into_iter().enumerate() {
+                            if let Some(got) = guarded(kernel, &a, &b, &c0, (m, k, n), trans_b, pad) {
+                                assert!(got == want, "{name} vs scalar, trans_b={trans_b} m={m} k={k} n={n}");
+                                ran[q] += 1;
+                            }
+                        }
+                        // the dispatch itself (what `Backend::Plain` runs)
+                        let mut c = c0.clone();
+                        gemm(Backend::Plain, &a, &b, &mut c, (m, k, n), trans_b);
+                        assert!(c.iter().map(|x| x.to_bits()).eq(want.iter().copied()), "dispatch vs scalar, trans_b={trans_b} m={m} k={k} n={n}");
+                    }
+                }
+            }
+        }
+        for ((_, name), r) in kernels().into_iter().zip(&ran) {
+            if *r > 0 {
+                assert_eq!(*r, case, "{name} ran on some sizes only");
+                println!("ran {name} ({r} products)");
+            } else {
+                println!("skipped {name} (this CPU does not have it)");
+            }
+        }
+        println!("selected {:?}", selected_kernel());
+        assert!(kernels().into_iter().zip(&ran).any(|((kn, _), r)| kn == selected_kernel() && *r > 0), "the selected kernel ran");
+    }
+
+    /// The transposed dot product on an empty row adds +0.0: a -0.0 in c becomes +0.0.
+    #[test]
+    fn an_empty_dot_adds_positive_zero() {
+        for (kernel, _) in kernels() {
+            let mut c = [-0.0f32; 3];
+            if gemm_kernel(kernel, &[], &[], &mut c, (1, 0, 3), true) {
+                assert!(c.iter().all(|x| x.to_bits() == 0), "{kernel:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "gemm: matrix lengths do not match")]
+    fn a_short_a_is_refused() {
+        gemm_kernel(Kernel::Scalar, &[0.0; 5], &[0.0; 6], &mut [0.0; 4], (2, 3, 2), false);
+    }
+
+    #[test]
+    #[should_panic(expected = "gemm: matrix lengths do not match")]
+    fn a_short_b_is_refused() {
+        gemm_kernel(Kernel::Scalar, &[0.0; 6], &[0.0; 5], &mut [0.0; 4], (2, 3, 2), false);
+    }
+
+    #[test]
+    #[should_panic(expected = "gemm: matrix lengths do not match")]
+    fn a_short_c_is_refused() {
+        gemm(Backend::Plain, &[0.0; 6], &[0.0; 6], &mut [0.0; 3], (2, 3, 2), true);
+    }
+
+    #[test]
+    #[should_panic(expected = "gemm: matrix lengths do not match")]
+    fn a_product_of_sizes_that_wraps_is_refused() {
+        // m * k wraps to 0 = a.len(); without checked_mul the lengths would pass
+        gemm(Backend::DEFAULT, &[], &[], &mut [], (usize::MAX / 2 + 1, 2, 0), false);
     }
 
     /// docs/spec/semantic-rerank.md §2.4: the Accelerate path (macOS) and the plain path agree to 1e-5 in LL on random weights; on other targets both
