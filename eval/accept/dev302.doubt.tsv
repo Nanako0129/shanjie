@@ -1,0 +1,2 @@
+# dev302 裡盲判認為正解有疑義的列（docs/spec/evaluation.md §3.7）。每行：列號<TAB>列 SHA-256<TAB>結論。不改正解、不改分數，只列出來。
+134	89f947ec85b05c5b7e3eabbb386cf36a4e522a0163d7cc53f33fc94ddcb3dbfa	gold judged no

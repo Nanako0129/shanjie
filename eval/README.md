@@ -45,10 +45,11 @@
 | 檔案 | SHA-256 |
 |---|---|
 | `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；`--forms-rowstats` 與 `--judge v2` 讀，`docs/spec/evaluation.md` §3） | `85f4e034817d14b3263223b19a0fadbb32fa734d3e5ded7d8ad3aee945a03130` |
-| `forms-extra.tsv`（審定詞對表，`tools/check_forms_extra.py` 檢查；`--judge v2` 讀） | `3a82ca12710b2bcc9029a61e1563287746aa8103e073bbbc6857f1cb5d71b7e9` |
-| `accept/dev302.tsv`（`--dev 302` 的逐列可接受答案，只有檔頭） | `0277c125b3330f43af37a593da3795028d53030575f751c09adceee9c9d61841` |
+| `forms-extra.tsv`（審定詞對表，`tools/check_forms_extra.py` 檢查；`--judge v2` 讀） | `8a1707482cff59b837dbd12d7c31e33a4912b20c1e50d42ffde81011d867bcdf` |
+| `accept/dev302.tsv`（`--dev 302` 的逐列可接受答案，4 列） | `81ab55e39a44f298ef90cadc20e8aaa80d7571c1c7087897687210a14d757f30` |
 | `accept/user-typing.tsv`（打字測驗，只有檔頭） | `23273e967af98fcaa85a6b1c7e092ff993d466749de292498611119b92c67516` |
-| `accept/user-reported.tsv`（錯字回報，只有檔頭） | `39a2c0a4d5c1f56cdb4b2d851009d4240f7d467be297752fa6f27b5e25ba45a8` |
+| `accept/user-reported.tsv`（錯字回報，2 列） | `e894cf96171c0cd0583fd9f8b6bfb409141e6a2d4c68e7e18a750c6a7e3b6004` |
+| `accept/dev302.doubt.tsv`（盲判認為正解有疑義的列，只列出來；判定不讀它） | `8e0105ac9104fae78525429b3425be9b9d4d11a2dd484c1e9050c23856672659` |
 | `golden/judge-v2-accept-test.tsv`（測試專用的 dev302 可接受答案檔，`cli/tests/judge_v2.rs`；不是上面那三份） | `7eca449d662b278d9b2289a147a5806a7847dbb56af0862fb1f3cfe69c80c061` |
 
 ## 保留集雜湊（變動就代表被改過）

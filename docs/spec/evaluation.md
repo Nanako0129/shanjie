@@ -200,11 +200,14 @@ L1、L2 成立就是 c 與 g 經 L1、L2 之後相等，所以一次比較涵蓋
 - **檢查程式**：`python3 tools/check_forms_extra.py [--forms F] [--extra F] [--order F]`，每個違反印一行 `forms-extra.tsv line N: condition K: …`，有違反結束碼 1。條件 2、3、4、6 只需要 repo 裡的檔，CI 一定檢查；條件 1、5 需要辭典（環境變數 `SHANJIE_MOEDICT`，SHA-256 照 `tools/build_variants.py` 寫死的那一個，不符就停）：沒設時略過這兩條，印 `skipped: conditions 1, 5 (SHANJIE_MOEDICT not set)`、結束碼 0。
 - **改表的規則**：每一次改這張表（加行或改行）都在本機帶 `SHANJIE_MOEDICT` 跑一次檢查程式，輸出貼進 PR，輸出裡有 `skipped` 那一行就不能合併；表一改，標記的 B 段跟著變，`eval/README.md` 的雜湊也要改。
 
+- 這張表一改，dev302 的四份 v2 golden（`eval/golden/s2-lm-dev302-{chat,formal}-jv2.rowstats` 與 `…-jv2-accept.rowstats`）要用 Python 參考實作重產一次並和 repo 裡的檔比對（CI 的「Judge v2 (Python)」步驟就是這個比對）；`eval/README.md` 的雜湊一起換。
+
 ### 3.7 逐列可接受答案 `eval/accept/<集合>.tsv`
 
 - **適用的集合**：dev302（`--dev 302`）、打字測驗（`eval/dev/user-typing.txt`）、錯字回報（`eval/dev/user-reported.txt`）三個公開小集合，檔名依序是 `dev302.tsv`、`user-typing.tsv`、`user-reported.tsv`。其他集合（不進 repo 的公開集合、私人集合、保留集）只吃 L1、L2，這樣它們的句子不會被寫進 repo；寫法慣例的檢查集 `eval/dev/variant-order.txt` 只用 v1。
 - **格式**：`#` 開頭是說明行；每行 `列號<TAB>列 SHA-256<TAB>可接受的整句<TAB>依據`。列號從 1 起、依評測讀列的順序（`--dev`、`--rows` 的列號，`--limit` 之後的列）；列 SHA-256 是那一列在列檔裡的原文（`前文|句子|讀音` 一整行，不含換行）的 UTF-8 位元組的雜湊，小寫十六進位；依據寫辭典字條與釋義裡的原文片段。同一列可以有幾行（幾個可接受的句子），這幾行的列 SHA-256 要相同、句子不得重複。列號是不帶符號與前導 0 的十進位；欄數不對、SHA-256 格式不對、句子或依據是空的、重複都是壞檔（錯誤只帶行號）。
 - **只增不改**；同一列出現在兩個集合時（dev302 的最後幾列也是錯字回報的頭幾列），兩個檔各記一行、可接受的句子要相同。
+- **正解有疑義的列**：盲判認為正解本身不可以（或無法判斷）的列，記在 `eval/accept/<集合>.doubt.tsv`（每行 `列號<TAB>列 SHA-256<TAB>結論`）。判定不讀這個檔，正解與分數都不因它改變；它只是之後校對集合時的清單。
 - **加列的規則**：一次比較要用到可接受答案時，只有「關卡用到的比較」（回歸守門、出貨標準第 2 條、確認片）在這三個集合上互換的列（一邊對、一邊錯，以 L1、L2 判）才送盲判，一次超過 60 列就不盲判、那次比較只報 L1、L2 的數字；盲判的依據只有一種：辭典寫明兩種寫法的關係，格式與讀音條件同 3.6 條件 1。通過的才寫進檔案。判讀與關卡用加進之後的數字，加進之前的數字另報。
 
 ### 3.8 驗證
