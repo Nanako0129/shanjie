@@ -42,6 +42,7 @@ test-python:
 	python3 -W ignore -m unittest reference/proto/test_judge_v2.py
 	python3 -W ignore -m unittest tools/test_check_forms_extra.py
 	python3 tools/check_forms_extra.py
+	sh tools/check_judge_v2_py.sh
 	python3 -m unittest tools/test_build_acg_pack.py
 	python3 -m unittest tools/test_build_quote_pack.py
 	python3 -B -m unittest tools/test_pack_oov.py

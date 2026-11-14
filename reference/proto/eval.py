@@ -122,8 +122,9 @@ class Forms:
             else:
                 out.append(s[i])
                 i += 1
+        out = "".join(out)   # 每道替換等長，所以逐字位置和原句相同；下面比的是字數，不是塊數
         if len(out) != len(syls):
-            return "".join(out)
+            return out
         return "".join(self.chars[c][0] if c in self.chars and y in self.chars[c][1] else c for c, y in zip(out, syls))
 
 

@@ -93,6 +93,8 @@ class Conditions(unittest.TestCase):
 
     def test_condition_2_the_less_used_spelling_under_ten_percent(self):
         self.assertIn(2, conditions_of(row("分布", "分佈", "ㄈㄣ ㄅㄨˋ", counts="1/20")))
+        self.assertIn(2, conditions_of(row("分布", "分佈", "ㄈㄣ ㄅㄨˋ", counts="1/12")))     # 7.7%：介於 5% 與 10% 之間，把門檻從下面釘住
+        self.assertIn(0, conditions_of(row("佈", "布", "ㄅㄨˋ")))                            # 單字的行：這張表只收詞對
         self.assertIn(2, conditions_of(row("分布", "分佈", "ㄈㄣ ㄅㄨˋ", counts="0/50")))
         self.assertIn(2, conditions_of(row("分布", "分佈", "ㄈㄣ ㄅㄨˋ", counts="x/y")))
         self.assertNotIn(2, conditions_of(row("分布", "分佈", "ㄈㄣ ㄅㄨˋ", counts="2/18")), "exactly 10% is enough")

@@ -29,7 +29,7 @@ from build_variants import MOEDICT_SHA256  # noqa: E402
 
 EXCLUDED = set("的地得在再做作他她它牠那哪嗎嘛吧罷象像向")
 # 也作「Z」、亦作「Z」、通「Z」、同「Z」（「同」前面不是 如、等、相、不），或「Z」的異體字；Z 可以是以「、」分隔的幾個。
-RELATION = re.compile(r"(?:也作|亦作|通|(?<![如等相不])同)「([^」]+)」|「([^」]+)」的異體字")
+RELATION = re.compile(r"(?:也作|亦作|通|(?<![如等相不])同)「([^」]+(?:」、「[^」]+)*)」|「([^」]+)」的異體字")
 SKIPPED = "skipped: conditions 1, 5 (SHANJIE_MOEDICT not set)"
 
 
@@ -97,8 +97,8 @@ def check(forms_text, extra_text, order_text, entries=None):
             order.add(frozenset((f[1], f[2])))
     extra = []
     for ln, f in rows_of(extra_text):
-        if len(f) != 6 or f[0] != "word" or not all(f[1:]) or len(f[1]) != len(f[2]) or f[1] == f[2]:
-            bad.append((ln, 0, "not `word<TAB>spelling<TAB>canonical<TAB>reading<TAB>counts<TAB>basis` with two different spellings of one length"))
+        if len(f) != 6 or f[0] != "word" or not all(f[1:]) or len(f[1]) != len(f[2]) or f[1] == f[2] or len(f[1]) < 2:
+            bad.append((ln, 0, "not `word<TAB>spelling<TAB>canonical<TAB>reading<TAB>counts<TAB>basis` with two different spellings of one length (two characters or more: the table holds word pairs only)"))
             continue
         extra.append((ln, f))
     spell_seen = set(forms_words)

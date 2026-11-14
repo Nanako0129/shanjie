@@ -200,6 +200,7 @@ L1、L2 成立就是 c 與 g 經 L1、L2 之後相等，所以一次比較涵蓋
 - **檢查程式**：`python3 tools/check_forms_extra.py [--forms F] [--extra F] [--order F]`，每個違反印一行 `forms-extra.tsv line N: condition K: …`，有違反結束碼 1。條件 2、3、4、6 只需要 repo 裡的檔，CI 一定檢查；條件 1、5 需要辭典（環境變數 `SHANJIE_MOEDICT`，SHA-256 照 `tools/build_variants.py` 寫死的那一個，不符就停）：沒設時略過這兩條，印 `skipped: conditions 1, 5 (SHANJIE_MOEDICT not set)`、結束碼 0。
 - **改表的規則**：每一次改這張表（加行或改行）都在本機帶 `SHANJIE_MOEDICT` 跑一次檢查程式，輸出貼進 PR，輸出裡有 `skipped` 那一行就不能合併；表一改，標記的 B 段跟著變，`eval/README.md` 的雜湊也要改。
 
+- **詞對不看詞界**：L2 的詞對是字串的最長匹配，不知道句子怎麼斷詞。所以一個詞對只要它的寫法可能跨在兩個詞中間、而且換完是另一個常見的字串，就不收（例如一個含 `表`、`注`、`托` 的寫法會撞到別的詞）。另一個後果是兩個詞對在句子裡重疊時只有左邊那個會換（`雨水分布` 裡 `水分` 先比中，`分布` 就比不到），這只會讓可接受的寫法少算，不會讓錯的寫法算對。
 - 這張表一改，dev302 的四份 v2 golden（`eval/golden/s2-lm-dev302-{chat,formal}-jv2.rowstats` 與 `…-jv2-accept.rowstats`）要用 Python 參考實作重產一次並和 repo 裡的檔比對（CI 的「Judge v2 (Python)」步驟就是這個比對）；`eval/README.md` 的雜湊一起換。
 
 ### 3.7 逐列可接受答案 `eval/accept/<集合>.tsv`

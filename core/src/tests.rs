@@ -578,4 +578,10 @@ fn judge_v2_layers() {
     assert!(j.ok("泥他") && !j.ok("泥好"), "the acceptable sentence and the candidate both go through L1");
     // the gold sentence itself stays right, and a candidate that is only close is not
     assert!(j.ok("你好") && !j.ok("你"));
+    // a word pair and a single-character pair in one sentence: the character step still runs after a word pair matched
+    let f = Forms::parse("# h\nchar\t沈\t沉\tㄔㄣˊ\n").unwrap().with_extra("# h\nword\t串連\t串聯\tㄔㄨㄢˋ ㄌㄧㄢˊ\t3/7\t字條 0\n").unwrap();
+    let syls = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄔㄣˊ"]);
+    assert!(Judge2::new(&f, &l, "串聯沉", &syls, &[]).ok("串連沈"));
+    let other = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄕㄣˇ"]);
+    assert!(!Judge2::new(&f, &l, "串聯沉", &other, &[]).ok("串連沈"), "the character pair needs its reading");
 }

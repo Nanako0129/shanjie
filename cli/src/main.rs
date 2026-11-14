@@ -73,7 +73,6 @@ fn check_lm_opts(set: Option<&str>, dump: bool, picks: bool, packs: u32, packs_d
     Ok(())
 }
 
-/// `--packs acg|quotes|it|meme|beauty` or a comma list of them: sets the pack bits; anything else is refused.
 /// `--judge`, `--accept` and `--rejudge` combinations (docs/spec/evaluation.md §3.5), checked before any file is read. The acceptable-sentence
 /// file and the re-judging of picks are for rows that may be shown; the holdout refuses both (its `--judge v2 --rowstats` stays allowed: numbers only).
 fn check_judge_opts(set: Option<&str>, v2: bool, accept: bool, rejudge: bool) -> Result<(), String> {
@@ -163,6 +162,7 @@ fn load_judge(accept: Option<&str>, raw: Option<&[String]>) -> Result<JudgeV2, S
     Ok(JudgeV2 { forms, accept, tag: format!("+jv2:{a}:{b}:{c}") })
 }
 
+/// `--packs acg|quotes|it|meme|beauty` or a comma list of them: sets the pack bits; anything else is refused.
 fn pack_flag(v: &str) -> Result<u32, String> {
     v.split(',').try_fold(0, |bits, name| match name {
         "acg" => Ok(bits | PACK_ACG),

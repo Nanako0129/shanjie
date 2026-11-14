@@ -31,6 +31,14 @@ class FormsV2(unittest.TestCase):
         self.assertEqual(f.apply("濕", ["ㄒㄧˊ"]), "濕")
         self.assertEqual(forms("# header only\n").apply("甲乙", ["a", "b"]), "丙丁")
 
+    def test_a_word_pair_and_a_char_pair_in_one_sentence(self):
+        """詞對比中之後單字步驟照樣跑（比的是字數）：同一句裡先換詞對、再看讀音換單字。"""
+        f = E.Forms().parse("# h\nchar\t沈\t沉\tㄔㄣˊ\nchar\t濕\t溼\tㄕ\nword\t姐姐\t姊姊\n").add_extra("# h\nword\t串連\t串聯\tㄔㄨㄢˋ ㄌㄧㄢˊ\t3/7\t字條 0\n")
+        self.assertEqual(f.apply("串連沈", "ㄔㄨㄢˋ ㄌㄧㄢˊ ㄔㄣˊ".split()), "串聯沉")
+        self.assertEqual(f.apply("姐姐很濕", "ㄐㄧㄝˇ ㄐㄧㄝˇ ㄏㄣˇ ㄕ".split()), "姊姊很溼")
+        self.assertEqual(f.apply("串連沈", "ㄔㄨㄢˋ ㄌㄧㄢˊ ㄕㄣˇ".split()), "串聯沈")        # 讀音不符就不換單字
+        self.assertTrue(E.judge2(f, "串聯沉", "ㄔㄨㄢˋ ㄌㄧㄢˊ ㄔㄣˊ".split())("串連沈"))
+
     def test_bad_extra_lines(self):
         for bad in ["word\t甲\t乙\tㄧ\t1/1\n", "word\t甲\t乙乙\tㄧ\t1/1\t字條\n", "word\t甲\t乙\t\t1/1\t字條\n", "word\t甲\t乙\tㄧ\t1\t字條\n",
                     "word\t甲\t乙\tㄧ\ta/1\t字條\n", "word\t甲\t乙\tㄧ\t1/1\t\n", "char\t甲\t乙\tㄧ\t1/1\t字條\n", "word\t甲乙\t戊戊\tㄧ ㄧ\t1/1\t字條\n",
