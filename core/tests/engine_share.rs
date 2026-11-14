@@ -76,11 +76,11 @@ fn file_rows(name: &str) -> Vec<Row> {
     three_field(&std::fs::read_to_string(root().join("eval/dev").join(name)).unwrap())
 }
 
-/// Smoke size (Windows; unoptimized builds skip the row comparisons altogether, see below). The sampled run (about 100 rows, 7 transitions plus a chain,
-/// every profile and rerank setting) is the work of about three minutes in a release build on macOS. Unoptimized it is an order of magnitude more: even the
+/// Smoke size (Windows; the opt-level 1 debug build skips the row comparisons altogether, see below). The sampled run (about 100 rows, 7 transitions plus a chain,
+/// every profile and rerank setting) is the work of about three minutes in a release build on macOS. In the opt-level 1 debug build it is an order of magnitude more: even the
 /// smoke subset took 451 s in the CI `debug` job, whose whole 20-minute limit the core tests then used up, so in a debug build (`debug_assertions`) the tests
 /// that build engines from the files and compare rows are `#[ignore]`d (`cargo test -- --ignored` runs them); the cheap ones (the reading table, the
-/// one-syllable pack, the missing and bad file paths, the shared parts' addresses) still run. The Windows job runs the release build with this smoke subset.
+/// missing and bad file paths, the shared parts' addresses) and the one-syllable pack (slower, but kept in debug) still run. The Windows job runs the release build with this smoke subset.
 /// The full sampled comparison is the release build on macOS: `make test-rust` (`cargo test --release`) and the CI `core` job. The whole sets are
 /// `SHANJIE_SHARE_STRIDE=1` in a release build.
 fn smoke() -> bool {
@@ -200,7 +200,7 @@ const TRANSITIONS: [(u32, u32); 7] = [(29, 28), (28, 29), (29, 31), (31, 0), (0,
 const SMOKE_TRANSITIONS: [(u32, u32); 2] = [(29, 28), (31, 0)];
 
 #[test]
-#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow unoptimized; the release core job (macOS) and make test-rust run it")]
+#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow in an opt-level 1 debug build; the release core job (macOS) and make test-rust run it")]
 fn the_shared_engine_equals_the_engine_built_from_the_files() {
     let rows = all_rows();
     assert!(rows.len() >= if smoke() { 5 } else { 90 }, "the check rows: {}", rows.len());
@@ -216,7 +216,7 @@ fn the_shared_engine_equals_the_engine_built_from_the_files() {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow unoptimized; the release core job (macOS) and make test-rust run it")]
+#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow in an opt-level 1 debug build; the release core job (macOS) and make test-rust run it")]
 fn consecutive_switches_each_equal_the_engine_built_from_the_files() {
     let rows = all_rows();
     let masks: &[u32] = if smoke() { &[29, 28, 31] } else { &[29, 28, 29, 31, 0, 29] };
@@ -233,7 +233,7 @@ fn consecutive_switches_each_equal_the_engine_built_from_the_files() {
 /// Each pack's check word is the first candidate when its bit is on and not when off, so the rows above do test a pack switch (a shared engine that kept the
 /// old mask's words would fail here as well as above).
 #[test]
-#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow unoptimized; the release core job (macOS) and make test-rust run it")]
+#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow in an opt-level 1 debug build; the release core job (macOS) and make test-rust run it")]
 fn the_check_words_of_a_pack_follow_the_mask() {
     let src = from_files(&packs(), 31);
     let words = pack_rows();
@@ -350,7 +350,7 @@ fn a_missing_late_file_fails_the_whole_build_and_it_loads_again_once_the_file_is
 
 /// The English follower table (`english-next.tsv`, optional, not in the shipped data folder yet): shared when the source loaded one.
 #[test]
-#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow unoptimized; the release core job (macOS) and make test-rust run it")]
+#[cfg_attr(debug_assertions, ignore = "builds engines from the files and compares rows: far too slow in an opt-level 1 debug build; the release core job (macOS) and make test-rust run it")]
 fn the_english_follower_table_is_shared() {
     let dir = data_copy("english");
     std::fs::write(dir.join("english-next.tsv"), "E\tiphone\t10\nW\tiphone\t手機\t5\n").unwrap();
