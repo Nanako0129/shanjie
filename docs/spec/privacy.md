@@ -41,7 +41,7 @@
 - C ABI 的每個匯出函式都包 `catch_unwind`，並安裝靜音的 panic hook（`core/src/ffi.rs` 的 `guard`、`quiet_panics`）；panic 變成回傳碼 4（`SHANJIE_ERR_INTERNAL`），不印 payload。
 - `panic = "abort"` 時建置失敗（`compile_error!`）：靜音機制依賴 unwind。
 - 核心的所有 `Err` 與 panic 訊息只帶錯誤種類與長度，不含輸入的讀音、文字或路徑。
-- `unsafe` 只在這幾處：C ABI（`ffi.rs`）；trigram 表的唯讀映射（`trigram.rs` 的 `Mapped`：Unix 的 `mmap`／`munmap`，Windows 的 `CreateFileMappingW`／`MapViewOfFile`）與 `lm.rs` 開表的那一呼叫；學習檔的 `fcntl`（`F_BARRIERFSYNC`／`F_FULLFSYNC`）與 `geteuid`（`learn_store.rs`）；取本地日期的 `time`／`localtime_r`、Windows 的 `GetLocalTime`（`learn.rs`）；會意在 macOS 走 Accelerate 的 `cblas_sgemm`、`vvtanhf`／`vvexpf`（`tinylm.rs`）；`lm.rs` 延長預測索引生命期的一處 `transmute`。
+- `unsafe` 只在這幾處：C ABI（`ffi.rs`）；trigram 表的唯讀映射（`trigram.rs` 的 `Mapped`：Unix 的 `mmap`／`munmap`，Windows 的 `CreateFileMappingW`／`MapViewOfFile`）與 `lm.rs` 開表的那一呼叫；學習檔的 `fcntl`（`F_BARRIERFSYNC`／`F_FULLFSYNC`）與 `geteuid`（`learn_store.rs`）；取本地日期的 `time`／`localtime_r`、Windows 的 `GetLocalTime`（`learn.rs`）；會意在 macOS 走 Accelerate 的 `cblas_sgemm`、`vvtanhf`／`vvexpf`（`tinylm.rs`）；會意在 x86-64 的向量化矩陣乘法（`tinylm.rs`）：`#[target_feature(enable = "avx2")]`／`"avx512f"` 的核心函式只在 `is_x86_feature_detected!` 成立後呼叫，`unsafe` 只用在那個呼叫點和切片區塊上的未對齊載入與儲存（`_mm256_loadu_ps`／`_mm256_storeu_ps`、`_mm512_loadu_ps`／`_mm512_storeu_ps`），長度前提和 Accelerate 一樣在進入前用 `assert!`（release 也檢查）；`lm.rs` 延長預測索引生命期的一處 `transmute`。
 - 學習紀錄在送出之後的處理（`engine.rs` 中送出後學習的區塊）自己有 `catch_unwind`：學習失敗不影響已經送出的文字。
 
 ## 5. 隱私閘門（privacyGate）與前文

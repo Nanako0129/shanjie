@@ -108,7 +108,7 @@ jobs:
 
   # docs/spec/release-and-ci.md: the debug run (overflow checks and the standard library's debug-only checks) on Linux, beside the
   # release tests instead of on a second macOS runner. Linux runs the core package's tests faster than the macOS runner; the cli
-  # package's integration tests score with the small model, which has no Accelerate on Linux (2.4 times the macOS time), so they run
+  # package's integration tests score with the small model, which has no Accelerate on Linux (the portable kernels, slower than macOS), so they run
   # in release only (the `core` job) and here only the cli package's unit tests run. Not checked in debug any more: the macOS-only
   # branches (the small model's Accelerate calls, learn_store.rs's macOS constants) and the two f64 goldens in engine_digits.rs that
   # return early on Linux (row49_scores_match_the_python_golden_bit_for_bit, predict_digits_matches_the_python_golden_bit_for_bit);
@@ -316,7 +316,7 @@ jobs:
         run: cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host
 
   # docs/spec/windows-tip.md §2.9: core/tests/engine_cap.rs on x86_64-pc-windows-msvc in release, beside `windows`. It is a third to a half of
-  # the Windows core test time (no Accelerate on Windows: the small model's rerank runs in plain Rust for every key of 70-128 syllables), and it
+  # the Windows core test time (no Accelerate on Windows: the small model's rerank runs on the portable kernels for every key of 70-128 syllables), and it
   # has none of the per-key p95 tests. Skipped exactly when `core` is.
   windows-cap:
     needs: changes
