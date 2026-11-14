@@ -16,6 +16,7 @@
 | `reference/proto/lm_eval.py` | Python 參考實作；`--rowstats` 與 Rust 逐位元組相同 |
 | `tools/evalstats.py` | 讀兩份 rowstats，印配對比較的一行表格 |
 | `tools/build_forms.py`、`eval/forms.tsv` | 合法寫法表的產生器與產物 |
+| `eval/forms-extra.tsv`、`tools/check_forms_extra.py`、`eval/accept/` | 判準 v2 的審定詞對表、它的收錄條件檢查程式、逐列可接受答案檔（3.5–3.7） |
 | `tools/holdout_guard.py`、`tools/merge_guard_rows.py` | 保留集與調參集對訓練文字的包含比對、報告合併 |
 | `tools/bench.py`、`tools/bench/replay/` | 跨版本基準測試與其按鍵重播程式 |
 | `tools/kpi.py` | 每版 KPI 表 |
@@ -46,20 +47,20 @@
 
 `shanjie-eval --lm` 印一行：`## <名稱>  lm-<profile><設定標記>  {'n': N, 'top1': T, 'oracle@64': O, 'top1_sha256': '<64 位十六進位>'}`。
 
-- `top1`：寬鬆對照下，選出的那一句等於正解的列數。開了語意校正時，選出的那一句不一定是 n-gram 的第一名。
-- `oracle@64`：前 64 名裡有正解（寬鬆對照）的列數。
+- `top1`：判準下（預設 v1，寬鬆對照；`--judge v2` 見 3.5），選出的那一句等於正解的列數。開了語意校正時，選出的那一句不一定是 n-gram 的第一名。
+- `oracle@64`：前 64 名裡有正解（同一個判準）的列數。
 - `top1_sha256`：每列選出的那一句（原字串，不經寬鬆對照）以 `\n` 串接後的 SHA-256。
-- 設定標記依實際開的功能串起來（例如 `+ctx`、`+recur`、`+kn:<8 碼>:θ1:β1`、`+tl:<8 碼>`、`+acg+it`、`+tri:<8 碼>`、`+colloq:<8 碼>`、`+rd+rx:<8 碼>+rm`），讓結果對得回模型與旗標；基準測試用它守住「旗標漏帶」（見 7.3）。
+- 設定標記依實際開的功能串起來（`--judge v2` 時最後加 `+jv2:<A>:<B>:<C>`，見 3.5；例如 `+ctx`、`+recur`、`+kn:<8 碼>:θ1:β1`、`+tl:<8 碼>`、`+acg+it`、`+tri:<8 碼>`、`+colloq:<8 碼>`、`+rd+rx:<8 碼>+rm`），讓結果對得回模型與旗標；基準測試用它守住「旗標漏帶」（見 7.3）。
 - `--no-recur`（評測專用）：有 `--context` 時，解碼器預設會拿到每列前文欄的漢字對集合（前文重現項，`docs/spec/decoder.md` §4.6），摘要行標記在 `+ctx` 之後多一個 `+recur`；加 `--no-recur` 就不拿、也沒有這個標記，等於沒有這一項（逐位元組等於這一項加進來之前的輸出）。沒有 `--context` 時沒有前文，這一項不存在，也沒有 `+recur`。
 - `--threads N`（預設 1，只有 `--lm` 模式）：以每 32 列一塊分給 N 個執行緒、共用同一份模型；輸出檔與摘要行和 N = 1 逐位元組相同，stderr 的語意校正延遲行會註明是在競爭下量的。
-- 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許。`--rows` 沒有這道拒絕，見 5.3。
+- 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許，`--judge v2 --rowstats` 也是；`--accept` 與 `--rejudge` 拒絕（3.5）。`--rows` 沒有這道拒絕，見 5.3。
 
 ## 2. 逐列統計與配對比較
 
 ### 2.1 rowstats 檔
 
 - 每列一行 `列號\t對錯\t錯字數\t正解字數`；列號從 1 起、依評測檔順序；對錯是 `0` 或 `1`；後兩欄是非負整數。檔內只有 ASCII 數字、tab、換行，沒有任何文字。
-- 對錯：和摘要行的 top1 相同（寬鬆對照）。
+- 對錯：和摘要行的 top1 相同（預設是寬鬆對照；`--judge v2` 時照 v2，3.5）。
 - 錯字數：對的列是 0（寬鬆對照算對、但原字不同的列也是 0，例如正解「她」、第一名「他」）；錯的列是選出的那一句與正解句子（原字串，不經寬鬆對照）的 Levenshtein 距離，單位是 Unicode 純量值。正解字數是正解句子的 Unicode 純量值個數。
 - 每一行由一個純函式算出：Rust `row_stats(top1, gold, ok) -> (u32, u32)`、Python `row_stats(top1, gold, ok)`；整個檔也各只有一個寫出函式（Rust `format_rowstats`、Python `format_rowstats(rows)`），所有集合（含 `--set holdout`）、`shanjie-eval`、`shanjie-replay`、`lm_eval.py` 共用。
 
@@ -126,12 +127,14 @@
 - `check_lm_opts` 的單元測試（`cli/src/main.rs`）：保留集加 `--dump` 為錯，保留集加 `--rowstats` 為可。
 - 目前的樹上沒有任何測試以 `--set holdout` 執行 CLI。
 
-## 3. 合法寫法分數（forms）
+## 3. 判準（judge）與合法寫法表
 
-### 3.1 兩個分數
+### 3.1 判準與分數
 
-- **現行分數**：1.3 的寬鬆對照。出貨標準、判讀、已登記的實驗都只用它；forms 不改它的任何一位元組。
-- **合法寫法分數（forms）**：先做現行的寬鬆對照，再套 `eval/forms.tsv`（詞對、單字對）之後相等。兩個分數並列報，不取代彼此。報告裡「現行錯、forms 對」的列，就是只靠 forms.tsv 才算對的列（例如「姊姊」與「姐姐」、「潮溼」與「潮濕」）。
+- **判準 v1**（`--judge v1`，預設）：1.3 的寬鬆對照。不加 `--judge` 時每一個輸出檔與摘要行的位元組和 v1 一致。
+- **判準 v2**（`--judge v2`）：寬鬆對照、合法寫法表（forms.tsv 加審定詞對表 forms-extra.tsv）、逐列可接受答案三層，定義與旗標見 3.5。
+- **判讀與關卡用 v2，v1 並列報在旁邊**：出貨標準、確認片的判讀、探索片的淨值與精確 McNemar、小集合的回歸守門；保留集兩個半邊各回 v1、v2 一行。用法規則（不跨表比、登記要寫的雜湊）見 3.9。公開的基準測試（套件 v2）、KPI 表與網站的數字照舊用 v1。
+- **合法寫法分數（forms）**：先做現行的寬鬆對照，再套 `eval/forms.tsv`（詞對、單字對）之後相等；只在 `--forms-rowstats` 時算（3.3），只報不判。它只讀 forms.tsv，不受 `--judge`、forms-extra.tsv 與可接受答案檔影響。報告裡「v1 錯、forms 對」的列，就是只靠 forms.tsv 才算對的列（例如「姊姊」與「姐姐」、「潮溼」與「潮濕」）。
 
 ### 3.2 `eval/forms.tsv`（規則版本 `forms-v1`）與 `tools/build_forms.py`
 
@@ -151,7 +154,7 @@
 ### 3.3 `--forms-rowstats`
 
 - `shanjie-eval --lm … --forms-rowstats FILE`：格式同 `--rowstats`，判斷用 forms。可和 `--rowstats` 在同一次執行同時寫。
-- **只在加了這個旗標時**才讀 `forms.tsv`（路徑讀 `SHANJIE_FORMS`，沒設用 repo 的 `eval/forms.tsv`）；加了旗標而檔案不存在或格式錯就報錯結束，而且發生在建立任何輸出檔之前（既有的 `--rowstats` 檔不會被清空）。沒加旗標時完全不讀、不檢查這個檔。
+- **只在加了這個旗標時**才讀 `forms.tsv`（路徑讀 `SHANJIE_FORMS`，沒設用 repo 的 `eval/forms.tsv`）；加了旗標而檔案不存在或格式錯就報錯結束，而且發生在建立任何輸出檔之前（既有的 `--rowstats` 檔不會被清空）。沒加旗標時完全不讀、不檢查這個檔。這個旗標不讀 forms-extra.tsv 與可接受答案檔：`SHANJIE_FORMS_EXTRA` 設不設、指到哪裡，它的輸出都不變。
 - forms 是獨立的一張表（`core::eval::Forms`），在寬鬆對照之後才套，不併進 `Lenient`。順序固定：先現行寬鬆對照，再套詞對（最長匹配），最後套單字對；每道替換都等長，位置不變。
 - 單字對用列的讀音（依空白切成音節，和句子逐字對齊）；候選與正解用同一列的讀音。某一列的音節數和句子字數不同（例如含英文）時，這一列只套詞對、不套單字對，stderr 印 `forms: N rows without the single-character step …` 計數。
 - 解析規則：`word` 行的寫法與標準形等長，`char` 行的 X、Y 各恰好一個字、讀音條件不得有空項；重複的鍵或壞行是錯誤，錯誤只帶行號。
@@ -162,11 +165,68 @@
 - `core/src/tests.rs`：`forms_apply_order_and_reading_condition`（詞對先、單字對後，順序可觀察；每個位置各看自己的讀音條件；音節數不同時只跳過單字步驟；壞行與重複行只帶行號）、`forms_shipped_table_cases`（用真的 `eval/forms.tsv` 與 `variants.tsv`，依評分器的方式先 Lenient 再 Forms：姐姐＝姊姊、小姐≠小姊、濕在 `ㄒㄧˊ` 不換、沈在 `ㄕㄣˇ` 不換）。
 - `cli/tests/forms.rs`：潮濕與潮溼同時當正解時，現行分數剛好錯一列而 forms 兩列都對（同一次執行同時寫兩種 rowstats）；音節數不符的列被計數；不加旗標時不讀表（`SHANJIE_FORMS` 指向不存在的檔也成功），加旗標而表不存在時報錯、stdout 空、既有 `--rowstats` 檔保持原樣、forms 檔不被建立。
 - 加不加 `--forms-rowstats`，現行分數的 `--rowstats` 與摘要行逐位元組相同。
+- `cli/tests/judge_v2.rs`：`SHANJIE_FORMS_EXTRA` 指向一張含額外詞對的表時，`--forms-rowstats` 的輸出與沒有那張表時逐位元組相同（3.8）。
 
-### 3.5 範圍外
+### 3.5 判準 v2（`--judge v2`）
 
-- 人名、地名另外放寬（表只來自辭典，單字對有讀音條件）；「通「Y」」關係與有分工的單字（布佈、周週、了瞭等）；釋義寫在正文而不是整句的單字。
-- 出貨標準與判讀規則不因 forms 改變。
+「候選 c 對正解 g 算對」，依序三層，任一層成立就算對：
+
+1. **L1 寬鬆對照**：1.3，不改。
+2. **L2 合法寫法表 forms-v2**：兩邊各自先套 L1，再套 forms-v2 後相等。forms-v2 是 `eval/forms.tsv` 的全部行加 `eval/forms-extra.tsv`（3.6）的詞對；套法同 3.3（先詞對、由左至右最長匹配、單趟，再單字對、看該位置的讀音、音節數不同時只套詞對），兩張表的詞對合成一個集合再做最長匹配；單字對只來自 forms.tsv。
+3. **L3 逐列可接受答案**（只有 3.7 的三個集合有）：c 經 L1、L2 之後，等於那一列的可接受答案檔裡任何一句經 L1、L2 之後的結果。
+
+L1、L2 成立就是 c 與 g 經 L1、L2 之後相等，所以一次比較涵蓋三層（`core::eval::Judge2`；Python `eval.judge2`）。
+
+旗標（`shanjie-eval --lm`）：
+
+- `--judge v1|v2`，預設 v1；其他值報錯。
+- `--judge v2` 時：摘要行的 `top1` 與 `oracle@64`、`--rowstats`、`--tinylm-scores` 每個候選的 `ok` 欄都照 v2；`--tinylm-scores` 的 `ed` 欄照 `ok`（對的候選是 0）。摘要行的設定標記最後多一段 `+jv2:<A>:<B>:<C>`：A 是實際載入的 forms.tsv 的 SHA-256 前 8 碼，B 是 forms-extra.tsv 的前 8 碼，C 是 `--accept` 給的檔的前 8 碼或 `none`。三個檔任何一個換了標記就不同；「同一份 v2 的表」指三段都相同。
+- forms.tsv 的路徑讀 `SHANJIE_FORMS`，forms-extra.tsv 讀 `SHANJIE_FORMS_EXTRA`（空字串等於沒設），沒設就用 repo 的 `eval/forms.tsv`、`eval/forms-extra.tsv`。兩個檔只在 `--judge v2` 時讀；讀不到、不是 UTF-8 或格式錯就報錯結束，而且發生在建立任何輸出檔之前。
+- `--accept FILE`：這個集合的可接受答案檔（3.7），只在 `--judge v2` 時可用，要配 `--dev` 或 `--rows`（`--limit` 之後的列）。檔裡任何一行的列號不存在、或那一列原文的 SHA-256 與檔裡記的不同（集合改過），就報錯結束，同樣發生在建立任何輸出檔之前；錯誤只帶行號或列號。
+- `--rejudge PICKS`：不解碼、不載入模型，讀一份每列一句選出的句子的檔，照 `--judge` 與 `--accept` 重判，寫 `--rowstats`。列檔用 `--rows` 或 `--dev N`（`--set` 不可）；PICKS 的行數要等於列檔的列數。每行是 `--picks` 的輸出格式 `列號\t名次\t句子`（列號要等於行號），或只有句子。`--rejudge` 另外只接受 `--rowstats`、`--name`、`--judge`、`--accept` 與列檔旗標，不寫 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`、`--forms-rowstats`；其他解碼旗標不影響結果。摘要行是 `## <名稱>  rejudge<+jv2 標記>  {'n', 'top1', 'top1_sha256'}`（沒有 `oracle@64`；`top1_sha256` 是那些句子的，PICKS 是某次解碼的 `--picks` 時等於那次的值）。對那次解碼自己的 `--picks`，`--rejudge` 的 rowstats 等於直接解碼加同樣的 `--judge`、`--accept` 的 rowstats。
+- 保留集：`--set holdout --judge v2 --rowstats` 可以（只有數字）；`--accept` 與 `--rejudge` 對 `--set holdout` 拒絕，`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 照舊拒絕（5.3）。
+- Python 參考實作（`reference/proto/lm_eval.py`）有 `--judge v2` 與 `--accept`（沒有 `--rejudge`），規則與標記相同；dev302 兩種設定、有無可接受答案檔的 v2 rowstats 與 Rust 逐位元組相同。
+
+### 3.6 審定詞對表 `eval/forms-extra.tsv`
+
+- **格式**：`#` 開頭是說明行（記語料與兩份候選列檔的 SHA-256），其餘每行一個詞對，六欄 `word<TAB>寫法<TAB>標準形<TAB>讀音<TAB>次數<TAB>依據`：寫法與標準形等長；讀音是列檔的寫法（音節以空白分開），只給收錄條件 1 用，判定時詞對照字串匹配、不看讀音；次數是 `寫法的列數/標準形的列數`；依據寫辭典字條與第幾個 heteronym。只收詞對，不收單字對。載入時六欄、等長、讀音與依據非空、次數是兩個數字，寫法不得和 forms.tsv 或這張表另一行的寫法重複，否則整張表壞（錯誤只帶行號）。
+- **收錄條件**（每一條都要成立，`tools/check_forms_extra.py` 逐行檢查）：
+  1. 辭典關係：兩種寫法逐字對齊後不同的每個位置上，兩個字在教育部《重編國語辭典修訂本》裡，其中一個字的某個 heteronym 的某一條釋義（`def` 或 `link`）以「也作、亦作、同、通」連到另一個字（「同」前面不是「如、等、相、不」），或寫明「Z」的異體字，而且讀音欄在那個位置的音節在那個 heteronym 的讀音裡（讀音的拆法照 3.2）。
+  2. 兩種寫法都有人用：次數兩個都 ≥ 1，少的那個至少佔合計的 10%（檢查程式只核對這個算術）。
+  3. 差異字不在排除清單：`的 地 得 在 再 做 作 他 她 它 牠 那 哪 嗎 嘛 吧 罷 象 像 向`（靠句子才分得出來；清單寫在檢查程式裡）。
+  4. 不和產品的寫法慣例衝突：兩種寫法不是 `data/lexicon/variant-order.tsv` 裡的一對（少用寫法、常用寫法；檢查程式只比兩個寫法、不比讀音，所以同樣兩個寫法在那張表裡以別的讀音出現也擋）。
+  5. 不是兩個各自成條的詞：兩種寫法都是辭典詞條、而且兩個詞條的釋義（`def` 或 `link`，和條件 1 一樣）沒有任何一邊用「也作、亦作」連到對方的，不收；只有一個是詞條或兩個都不是時不受限。
+  6. 和現有的表合得起來（單趟最長匹配才不會判錯）：forms.tsv 的詞對與這張表的詞對聯集分組，每一行的標準形是它那組最小的字串、沒有任何標準形是另一行的寫法（沒有鏈）；每一行的寫法與標準形都等於自己套 L1 之後的結果（含 `臺` 的寫法因此不收）；寫法不和 forms.tsv 或這張表另一行重複。
+- **檢查程式**：`python3 tools/check_forms_extra.py [--forms F] [--extra F] [--order F]`，每個違反印一行 `forms-extra.tsv line N: condition K: …`，有違反結束碼 1。條件 2、3、4、6 只需要 repo 裡的檔，CI 一定檢查；條件 1、5 需要辭典（環境變數 `SHANJIE_MOEDICT`，SHA-256 照 `tools/build_variants.py` 寫死的那一個，不符就停）：沒設時略過這兩條，印 `skipped: conditions 1, 5 (SHANJIE_MOEDICT not set)`、結束碼 0。
+- **改表的規則**：每一次改這張表（加行或改行）都在本機帶 `SHANJIE_MOEDICT` 跑一次檢查程式，輸出貼進 PR，輸出裡有 `skipped` 那一行就不能合併；表一改，標記的 B 段跟著變，`eval/README.md` 的雜湊也要改。
+
+### 3.7 逐列可接受答案 `eval/accept/<集合>.tsv`
+
+- **適用的集合**：dev302（`--dev 302`）、打字測驗（`eval/dev/user-typing.txt`）、錯字回報（`eval/dev/user-reported.txt`）三個公開小集合，檔名依序是 `dev302.tsv`、`user-typing.tsv`、`user-reported.tsv`。其他集合（不進 repo 的公開集合、私人集合、保留集）只吃 L1、L2，這樣它們的句子不會被寫進 repo；寫法慣例的檢查集 `eval/dev/variant-order.txt` 只用 v1。
+- **格式**：`#` 開頭是說明行；每行 `列號<TAB>列 SHA-256<TAB>可接受的整句<TAB>依據`。列號從 1 起、依評測讀列的順序（`--dev`、`--rows` 的列號，`--limit` 之後的列）；列 SHA-256 是那一列在列檔裡的原文（`前文|句子|讀音` 一整行，不含換行）的 UTF-8 位元組的雜湊，小寫十六進位；依據寫辭典字條與釋義裡的原文片段。同一列可以有幾行（幾個可接受的句子），這幾行的列 SHA-256 要相同、句子不得重複。列號是不帶符號與前導 0 的十進位；欄數不對、SHA-256 格式不對、句子或依據是空的、重複都是壞檔（錯誤只帶行號）。
+- **只增不改**；同一列出現在兩個集合時（dev302 的最後幾列也是錯字回報的頭幾列），兩個檔各記一行、可接受的句子要相同。
+- **加列的規則**：一次比較要用到可接受答案時，只有「關卡用到的比較」（回歸守門、出貨標準第 2 條、確認片）在這三個集合上互換的列（一邊對、一邊錯，以 L1、L2 判）才送盲判，一次超過 60 列就不盲判、那次比較只報 L1、L2 的數字；盲判的依據只有一種：辭典寫明兩種寫法的關係，格式與讀音條件同 3.6 條件 1。通過的才寫進檔案。判讀與關卡用加進之後的數字，加進之前的數字另報。
+
+### 3.8 驗證
+
+- `core/src/tests.rs`：`forms_v2_extra_pairs_join_one_longest_match`（額外詞對與 forms.tsv 的詞對在同一次最長匹配、單字對仍是 forms.tsv 的、壞行與重複寫法只帶行號）、`accept_file_parse_and_check`（解析、各種壞行、列 SHA-256 與列數不符）、`judge_v2_layers`（L1、L2 的單字對與額外詞對、L3：可接受答案與候選各差一個 L1 的字也算對）。
+- `cli/tests/judge_v2.rs`（`make test-rust`、CI 都跑）：
+  - 預設是 v1：不加 `--judge` 與明寫 `--judge v1` 的摘要行與 rowstats 逐位元組相同，也沒有 `+jv2`；`SHANJIE_FORMS_EXTRA` 指向含額外詞對的表時，`--forms-rowstats` 與沒有那張表時逐位元組相同；`--judge v2` 讀那張表，兩種寫法都對。
+  - 標記：只換 forms.tsv、只換 forms-extra.tsv、只換可接受答案檔，`+jv2:` 各自只有對應的那一段改變（三段的值就是三個檔的 SHA-256 前 8 碼）。
+  - 錯誤發生在建立任何輸出檔之前：forms-extra.tsv 或 forms.tsv 讀不到或格式錯、可接受答案檔讀不到或格式錯、列 SHA-256 或列號不符；`--accept` 沒有 `--judge v2` 也拒絕；訊息不帶列的內容。
+  - `--rejudge`：對同一次執行自己的 `--picks`（含只有句子的格式），rowstats 等於直接解碼加 `--judge v2` 的 rowstats，摘要行的標記、`top1`、`top1_sha256` 相同；各種不能做的組合報錯。
+  - L3：測試專用的可接受答案檔 `eval/golden/judge-v2-accept-test.tsv`（不是 repo 裡那三份）讓 dev302 的指定幾列從錯變對、其餘列不動，含候選與可接受答案各差一個 L1 的字的列、與一列可接受答案不等於候選的列（維持錯）；列 SHA-256 被改掉時報錯、不建立任何輸出檔；dev302 兩種設定、有無這個檔的 v2 rowstats 等於 `eval/golden/s2-lm-dev302-{chat,formal}-jv2{,-accept}.rowstats`（Python 參考實作寫的），`--rejudge` 也等於直接解碼。
+  - repo 裡三個可接受答案檔與它們的集合對得上（空檔也解析得過）。
+- `cli/src/main.rs` 的單元測試：`--accept` 要 `--judge v2`、保留集拒絕 `--accept` 與 `--rejudge` 但允許 `--judge v2`；PICKS 兩種格式與行號檢查。
+- `reference/proto/test_judge_v2.py`：Python 一側的同一批案例（`make test-python`、CI）。CI 的 Python 步驟另外重產上面四個 v2 rowstats 並 `cmp`。
+- `tools/test_check_forms_extra.py`（`make test-python`、CI）：用一份迷你辭典，每個收錄條件各一個故意違反的列——條件 1 的讀音不在那個 heteronym 裡與沒有辭典關係、條件 2 少的寫法低於 10%（恰好 10% 通過）、條件 3 排除清單的字、條件 4 和寫法慣例衝突、條件 5 兩個各自成條而沒有互相連結、條件 6 的三寫法鏈、含 `臺` 的寫法、和 forms.tsv 或前一行重複的寫法；格式錯的行記成條件 0；「同」前面是如、等、相、不的不算；不帶辭典時只略過條件 1、5；repo 的表不帶辭典時印略過那一行、結束碼 0。有 `SHANJIE_MOEDICT` 時另跑真辭典：佈→布、佔→占、折→摺、念→唸、覆→復有關係，芽／牙、義／意沒有，`分佈`／`分布` 過條件 1，repo 的表逐條通過；沒設時 `make test-python` 印 NOTE、這幾個測試略過。
+
+### 3.9 規則與範圍外
+
+- **不跨表比**：一個 v2 的數字只和「標記的三段都相同」、用同一個判準重判出來的基準比。舊版本當基線時用 `--rejudge` 判舊版本選出的句子，不用舊版本的 CLI；舊版本的 CLI 沒有 `--picks` 時，從它的 `--dump` 與 `--tinylm-scores`（`c` 欄：選出的是第幾個候選）還原每列的選句，核對還原結果的 `top1_sha256` 等於那個版本的摘要行，相等才能用，還原不出來或不等的版本不能當 v2 的基線。
+- **事先登記的判讀**（確認片等）：登記要寫上當時的 forms.tsv、forms-extra.tsv 的雜湊與三個可接受答案檔的雜湊；結果出來之後唯一允許改變判定的是 3.7 的盲判（登記裡寫明會做）；看過結果之後才加進 forms-extra 的行，不用來判讀那一片。
+- 研究紀錄裡每一張用 v2 的表，表頭寫標記的三段。
+- 範圍外：人名、地名另外放寬（表只來自辭典，單字對有讀音條件）；「通「Y」」關係與有分工的單字（布佈、周週、了瞭等）在單字層不收，只在審定過的詞對層以 forms-extra.tsv 收；釋義寫在正文而不是整句的單字；改任何集合的正解或讀音；產品的選字行為（判準只改怎麼判，不改輸入法選什麼）。
 
 ## 4. 真引擎重播 `shanjie-replay`
 
@@ -310,7 +370,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 5.3 量法
 
 - 量的人是沒參與實作的 fresh 審查者。口語半邊：`--set holdout --profile chat --rowstats <自己的暫存檔>`。新聞半邊：`--rows <私人檔> --profile formal --rowstats <暫存檔>`。基準與新版各量一次，檔內只許 `[0-9\t\n]`，再 `tools/evalstats.py compare BASE CAND --net`，只回那一行，然後刪掉 rowstats。
-- `--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的審查者，指示裡明寫禁止 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`，只准 `--rowstats`（流程規則，不是技術防護）。
+- `--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的審查者，指示裡明寫禁止 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`，只准 `--rowstats`，可以加 `--judge v2`，不帶 `--accept`、`--rejudge`（流程規則，不是技術防護）。
 - 結果填進基準結果 JSON 的 `holdout.chat`（口語半邊）與 `holdout.formal`（新聞半邊），以及 KPI JSON 的 `holdout_talk_chat` 與 `holdout_news_formal`：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`（口語半邊是 `talk.txt` 的 SHA-256、新聞半邊是那個私人檔的 SHA-256）。`rows_sha256` 一定要填：兩個表依它分欄，沒填的數字在 `tools/bench.py` 只能依 n 分欄、在 `tools/kpi.py` 全放進同一欄。
 - `tools/bench.py` 與 `tools/kpi.py` 都不讀 `eval/holdout/` 底下的任何檔；`tools/kpi.py run` 拒絕位在 `eval/holdout/` 底下的列檔。
 - 基準結果 JSON 已有 `holdout` 欄位時，`tools/bench.py run --suite v2` 拒絕重跑同一個標籤（保留集的數字量一次就不重來）。
