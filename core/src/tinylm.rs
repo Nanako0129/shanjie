@@ -160,7 +160,7 @@ extern "C" {
 
 /// The kernels of `Backend::Plain` (docs/spec/semantic-rerank.md §2.4). Every one computes the same numbers, bit for bit:
 /// - not transposed: c[i][j] takes a[i][p] * b[p][j] for p = 0, 1, ... in that order, one multiplication and one addition each (no FMA);
-/// - transposed: c[i][j] += dot(a[i], b[j]) with `dot` as `dot_scalar` defines it (16 partial sums, a fixed merge order, a scalar tail).
+/// - transposed: c[i][j] += dot(a[i], b[j]) with `dot` as `scalar::dot` defines it (16 partial sums, a fixed merge order, a scalar tail).
 /// The vector kernels only change how many elements one instruction handles, never the order of the operations on one element.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kernel {
@@ -303,7 +303,7 @@ mod x86 {
     /// Rows of b per block of the product that is not transposed: a multiple of 4 (the row kernels take four rows at a time, so only the
     /// last block has single rows). 4 rows of the widest layer (1,536 columns) are 24 KiB and stay in the first-level cache while every
     /// row of c takes them. Measured on an i5-12600K (AVX2), 200 rows in one process: 4 rows 11.2-11.3 s, 8 rows 11.6-11.8 s, 16 rows
-    /// 12.4-12.6 s, 32 rows 12.7-12.9 s; the old loop 40.5-41.5 s.
+    /// 12.4-12.6 s, 32 rows 12.7-12.9 s; the old loop 40.1-41.7 s.
     const BLOCK: usize = 4;
 
     /// The 8 sums `v` merged as `scalar::dot` merges its sums 0..8: 8 -> 4 -> 2 -> 1.
