@@ -87,9 +87,14 @@ fn field<'a>(f: &'a [&str], name: &str) -> &'a str {
 
 /// (left, keys, rows of keys) of eval/golden/digits-score.txt.
 fn golden_score() -> Vec<(String, Vec<String>, Vec<GoldenKey>)> {
-    let text = std::fs::read_to_string(root().join("eval/golden/digits-score.txt")).unwrap();
+    golden_rows("digits-score.txt")
+}
+
+/// The `##` rows and key lines of a golden file (`L` lines are `late_decision` rows, read by `golden_late`).
+fn golden_rows(file: &str) -> Vec<(String, Vec<String>, Vec<GoldenKey>)> {
+    let text = std::fs::read_to_string(root().join("eval/golden").join(file)).unwrap();
     let mut rows: Vec<(String, Vec<String>, Vec<GoldenKey>)> = Vec::new();
-    for l in text.lines().filter(|l| !l.starts_with("# ")) {
+    for l in text.lines().filter(|l| !l.starts_with("# ") && !l.starts_with("L\t")) {
         let f: Vec<&str> = l.split('\t').collect();
         if f[0].starts_with("## ") {
             let keys = field(&f, "keys=").chars().map(String::from).collect();
@@ -138,6 +143,11 @@ fn row49_scores_match_the_python_golden_bit_for_bit() {
     }
     let rows = golden_score();
     assert_eq!(rows.len(), 31);
+    compare_scores(&rows, 90);
+}
+
+/// Every scoring call of the engine (`eng()`) on the rows, key by key, is the golden's: splits, score bits, pick, buffer, flushes, context. At least `least` calls.
+fn compare_scores(rows: &[(String, Vec<String>, Vec<GoldenKey>)], least: usize) {
     let mut compared = 0;
     let mut e = eng();
     e.set_digits_trace(true);
@@ -166,7 +176,7 @@ fn row49_scores_match_the_python_golden_bit_for_bit() {
         }
     }
     let want = rows.iter().flat_map(|r| &r.2).filter(|g| !g.splits.is_empty()).count();
-    assert!(want > 90 && compared == want, "compared {compared} of {want} scoring calls");
+    assert!(want > least && compared == want, "compared {compared} of {want} scoring calls");
 }
 
 
@@ -940,7 +950,7 @@ fn a12_shift_enter_sends_the_shown_string_and_passes_through() {
 #[test]
 fn digits_goldens_were_made_from_the_current_inputs() {
     let lexicon_files = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "variant-order.tsv"];
-    for g in ["digits-score.txt", "digits-pred.txt"] {
+    for g in ["digits-score.txt", "digits-pred.txt", "digits-reorder.txt"] {
         let text = std::fs::read_to_string(root().join("eval/golden").join(g)).unwrap();
         let mut seen = Vec::new();
         for line in text.lines().take_while(|l| l.starts_with('#')) {
@@ -951,8 +961,8 @@ fn digits_goldens_were_made_from_the_current_inputs() {
                 let got = core::eval::sha256_hex(&std::fs::read(root().join(dir).join(w[0])).unwrap());
                 assert_eq!(
                     got, want,
-                    "eval/golden/{g} was made from another {dir}/{}: remake both on macOS with `python3 reference/proto/golden_digits.py --table \
-                     data/lexicon/digits.tsv --theta 3 --out eval/golden/digits-score.txt` and the same with `--pred --out eval/golden/digits-pred.txt`",
+                    "eval/golden/{g} was made from another {dir}/{}: remake all three on macOS with `python3 reference/proto/golden_digits.py --table \
+                     data/lexicon/digits.tsv --theta 3 --out eval/golden/digits-score.txt`, the same with `--pred --out eval/golden/digits-pred.txt` and with `--reorder --out eval/golden/digits-reorder.txt`",
                     w[0]
                 );
                 seen.push(w[0].to_string());
@@ -962,4 +972,432 @@ fn digits_goldens_were_made_from_the_current_inputs() {
             assert!(seen.iter().any(|s| s == f), "eval/golden/{g}: the header records no hash of {f}");
         }
     }
+}
+
+// ---------- reversal-digits (docs/spec/english-mixed.md §4.2, §7.3, §7.4): the engine as the App builds it ----------
+//
+// The tests above build `Engine::with_lexicon` (no packs, nothing the App adds); these use `Engine::new` + `load_lm` and the App's defaults for English
+// mixing (mixing on, overwrite off, key order on, reversal guard on).
+
+fn app() -> Engine {
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
+    e.set_english(true).unwrap();
+    e.set_english_overwrite(false).unwrap();
+    e
+}
+
+/// What one key left on the screen: the preedit, then `｜`, then the composition's units (blank separated).
+fn shot(e: &Engine, o: &Output) -> String {
+    format!("{}｜{}", o.preedit, e.syllables().join(" "))
+}
+
+/// A fresh composition after `left` (the text before the cursor), the script's keys; the shot after each key.
+fn shots(e: &mut Engine, left: &str, script: &str) -> Vec<String> {
+    e.reset(ResetMode::Discard);
+    e.set_left_context(left);
+    let mut out = Vec::new();
+    for t in script.split_whitespace() {
+        let o = send(e, t);
+        out.push(shot(e, &o));
+    }
+    out
+}
+
+/// The preedits only, and everything committed along the way.
+fn screens(e: &mut Engine, left: &str, script: &str) -> (Vec<String>, String) {
+    e.reset(ResetMode::Discard);
+    e.set_left_context(left);
+    let (mut pre, mut commit) = (Vec::new(), String::new());
+    for t in script.split_whitespace() {
+        let o = send(e, t);
+        commit.push_str(&o.commit);
+        pre.push(o.preedit);
+    }
+    (pre, commit)
+}
+
+/// A hurried syllable (two keys swapped) that starts on a digit-alphabet key reads as the syllable the person meant, every key's screen included.
+/// Pinned, not wished away: the three at the sentence start that stay numbers (the next test).
+#[test]
+fn hurried_syllables_are_read_as_typed_in_order() {
+    let mut e = app();
+    for (left, keys, want, units) in [
+        ("", ". u 3", vec![".", ".ㄧ", "有"], "ㄧㄡˇ"),
+        ("我", ". u 3", vec!["ㄡ", ".ㄧ", "有"], "ㄧㄡˇ"),
+        ("", ". w 6", vec![".", ".ㄊ", "頭"], "ㄊㄡˊ"),
+        ("", "8 w _", vec!["8", "8ㄊ", "他"], "ㄊㄚ"),
+        ("", "5 / j _", vec!["ㄓ", "ㄓㄥ", "5/ㄨ", "中"], "ㄓㄨㄥ"),
+        ("", "/ 5 4", vec!["/", "/5", "正"], "ㄓㄥˋ"),
+        ("", "8 q 6", vec!["8", "8ㄆ", "爬"], "ㄆㄚˊ"),
+        ("", "2 i j 6", vec!["ㄉ", "2ㄛ", "2ㄨㄛ", "奪"], "ㄉㄨㄛˊ"),
+        ("", "q 6 8", vec!["ㄆ", "q6", "爬"], "ㄆㄚˊ"), // T: the tone key came a place early
+    ] {
+        let (pre, _) = screens(&mut e, left, keys);
+        assert_eq!(pre, want, "{keys} after {left:?}");
+        assert_eq!(e.syllables(), [units.to_string()], "{keys} after {left:?}");
+        assert!(e.english_reverted().is_none(), "{keys}: the last key reverted");
+    }
+    // After a syllable of the same composition (the text before the run is the composition's own).
+    let mut e = app();
+    let (pre, _) = screens(&mut e, "", "j i 3 . u 3");
+    assert_eq!(pre.last().unwrap(), "我有");
+    assert_eq!(e.syllables(), ["ㄨㄛˇ", "ㄧㄡˇ"]);
+}
+
+/// Known and pinned (docs/spec/english-mixed.md §14): at the sentence start the context says digits, the price of the column order is too high.
+#[test]
+fn hurried_syllables_that_stay_numbers_at_the_sentence_start() {
+    let mut e = app();
+    for (keys, last, units) in [("9 y 4", "9自", "_punct_9 ㄗˋ"), ("2 0 u 4", "20意", "_punct_2 _punct_0 ㄧˋ"), ("0 1 4", "014", "")] {
+        let (pre, _) = screens(&mut e, "", keys);
+        assert_eq!(pre.last().unwrap(), last, "{keys}");
+        assert_eq!(e.syllables().join(" "), units, "{keys}");
+    }
+}
+
+/// A number and the Chinese after it stay a number and Chinese (what the column order must not eat).
+#[test]
+fn a_number_before_chinese_stays_a_number() {
+    let mut e = app();
+    for (keys, text) in [
+        ("8 s u 0 6", "8年"), ("8 e k 7", "8個"), ("9 2 u 0 3", "9點"), ("2 0 2 6 s u 0 6", "2026年"), ("8 g 4", "8是"), ("9 h 4", "9次"), ("3 . 5", "3.5"),
+        ("9 5 5 k 6", "95折"), (". . .", "..."), ("- -", "--"), ("1 / 2", "1/2"),
+    ] {
+        let (pre, _) = screens(&mut e, "", keys);
+        assert_eq!(pre.last().unwrap(), text, "{keys}");
+    }
+    // The four keys of a year are still in the run's buffer; Enter sends them.
+    let (_, commit) = screens(&mut e, "", "1 9 8 4 Enter");
+    assert_eq!(commit, "1984");
+}
+
+/// A is the guard's: with `english_key_order` off and the guard on, `. u 3` and `8 w ␣` still read as the syllable; T needs the revert that the switch
+/// turns off, so `q 6 8` does what it did before (the fixture below holds that line).
+#[test]
+fn the_rejoin_does_not_depend_on_the_key_order_switch() {
+    let mut e = app();
+    e.set_english_key_order(false).unwrap();
+    for (keys, want) in [(". u 3", "有"), ("8 w _", "他")] {
+        let (pre, _) = screens(&mut e, "", keys);
+        assert_eq!(pre.last().unwrap(), want, "{keys} with the key-order switch off");
+    }
+}
+
+/// The baseline's outputs (the engine before this change) for the scripts of this feature, per key: `preedit|units|commit|candidates|run length`
+/// (`core/tests/fixtures/reversal-guard-off.tsv`, made at 98385de9 with the same `app()`). With the guard off every key is the baseline's, with the key order on
+/// and off; with the guard on and the key order off the `q 6 8` family (T needs the key-order revert, which that switch turns off); with both on the five
+/// lines T must not turn into Chinese (`q 6 g`, `q 6 m`, `S-A 3 o`, `c p ␣`, `q 6 z 8`).
+#[test]
+fn with_the_guard_off_every_key_is_the_baselines() {
+    let text = std::fs::read_to_string(root().join("core/tests/fixtures/reversal-guard-off.tsv")).unwrap();
+    let (mut lines, mut keys) = (0, 0);
+    let mut e = app();
+    for l in text.lines() {
+        let f: Vec<&str> = l.split('\t').collect();
+        let (guard, key_order) = match f[0] {
+            "guard_off_key_order_on" => (false, true),
+            "guard_off_key_order_off" => (false, false),
+            "guard_on_key_order_off" => (true, false),
+            "guard_on_key_order_on_t_negatives" => (true, true),
+            c => panic!("unknown configuration {c}"),
+        };
+        e.set_english_reversal_guard(guard).unwrap();
+        e.set_english_key_order(key_order).unwrap();
+        e.reset(ResetMode::Discard);
+        e.set_left_context(f[1]);
+        for (tok, want) in f[2].split_whitespace().zip(&f[3..]) {
+            let o = send(&mut e, tok);
+            let got = format!("{}|{}|{}|{}|{}", o.preedit, e.syllables().join(" "), o.commit, o.candidates.join(","), o.english_run_utf16_len);
+            assert_eq!(&got, want, "{} {:?} key {tok} of {}", f[0], f[1], f[2]);
+            keys += 1;
+        }
+        lines += 1;
+    }
+    assert!(lines > 50 && keys > 250, "{lines} lines, {keys} keys");
+}
+
+/// Rule 1 and rule 5q pass a key on without touching anything: the late tokens survive it, the syllable is read as if it had not been pressed.
+#[test]
+fn a_key_that_is_passed_on_keeps_the_late_tokens() {
+    let mut e = app();
+    let plain: Vec<Output> = {
+        e.reset(ResetMode::Discard);
+        ". u 3".split_whitespace().map(|t| send(&mut e, t)).collect()
+    };
+    let plain_last = line(plain.last().unwrap());
+    for pass in ["Cmd-c", "PgDn"] {
+        e.reset(ResetMode::Discard);
+        let mut outs: Vec<(Output, String)> = Vec::new();
+        for t in format!(". u {pass} 3").split_whitespace() {
+            let o = send(&mut e, t);
+            let s = shot(&e, &o);
+            outs.push((o, s));
+        }
+        assert_eq!(outs[1].1, ".ㄧ｜_punct_.", "{pass}");
+        let third = &outs[2];
+        assert!(!third.0.handled && third.0.commit.is_empty(), "{pass} is passed on");
+        assert_eq!(third.1, outs[1].1, "{pass}: the screen and the units are the second key's");
+        assert_eq!(line(&outs[3].0).split('|').skip(1).collect::<Vec<_>>(), plain_last.split('|').skip(1).collect::<Vec<_>>(), "{pass}: the fourth key");
+        assert_eq!(outs[3].1, "有｜ㄧㄡˇ", "{pass}");
+    }
+}
+
+/// Every other key lets the late tokens go: after the third key `late` is empty and the tone key reads what is on the screen. Each row is the keys of
+/// `. u X 3` and the screen and units after each (the baseline's, measured at 98385de9).
+#[test]
+fn any_other_key_makes_the_late_tokens_final() {
+    let mut e = app();
+    for (script, want) in [
+        (". u BS 3", vec![".｜", ".ㄧ｜_punct_.", ".｜_punct_.", ".3｜_punct_. _punct_3"]),
+        (". u Left Right 3", vec![".｜", ".ㄧ｜_punct_.", ".ㄧ｜_punct_.", ".ㄧ｜_punct_.", ".以｜_punct_. ㄧˇ"]),
+        (". u Esc 3", vec![".｜", ".ㄧ｜_punct_.", ".｜_punct_.", ".3｜_punct_. _punct_3"]),
+        (". u [ 3", vec![".｜", ".ㄧ｜_punct_.", ".「｜_punct_. _punct_「", ".「3｜_punct_. _punct_「 _punct_3"]),
+        (". u S-1 3", vec![".｜", ".ㄧ｜_punct_.", ".！｜_punct_. _punct_！", ".！3｜_punct_. _punct_！ _punct_3"]),
+        (". u S-A 3", vec![".｜", ".ㄧ｜_punct_.", ".uA｜_punct_.", ".uA3｜_punct_."]),
+        (". u @commit 3", vec![".｜", ".ㄧ｜_punct_.", "｜", "3｜_punct_3"]),
+    ] {
+        let got = shots(&mut e, "", script);
+        assert_eq!(got, want, "{script}");
+        // `late` is empty after the third key (the one before the tone key; for the arrow keys the key after the pair).
+        let mut f = app();
+        f.reset(ResetMode::Discard);
+        let toks: Vec<&str> = script.split_whitespace().collect();
+        for t in &toks[..toks.len() - 1] {
+            send(&mut f, t);
+        }
+        assert_eq!(f.late_keys(), "", "{script}: late tokens left");
+    }
+    // The run of an English letter keeps its length through the tone key (the engine's English run, not the digit layer).
+    let mut e = app();
+    e.reset(ResetMode::Discard);
+    let lens: Vec<u32> = ". u S-A 3".split_whitespace().map(|t| send(&mut e, t).english_run_utf16_len).collect();
+    assert_eq!(lens, [0, 0, 2, 3]);
+}
+
+/// Two late keys and the next key only hits the first one's column: `1 . u s ␣` (the baseline's last key gives `1.us`).
+#[test]
+fn two_late_keys_and_the_next_key_hits_one_column() {
+    let mut e = app();
+    let got = shots(&mut e, "", "1 . u s _");
+    assert_eq!(
+        got,
+        ["ㄅ｜", "1.｜", "1.ㄧ｜_punct_1 _punct_.", "1.ㄋㄧ｜_punct_1 _punct_.", "1妞｜_punct_1 ㄋㄧㄡ"]
+    );
+    // `late` after the `s`: only the `.` is left (the `1` is a digit for good).
+    e.reset(ResetMode::Discard);
+    for t in ["1", ".", "u"] {
+        send(&mut e, t);
+    }
+    assert_eq!(e.late_keys(), "1.");
+    send(&mut e, "s");
+    assert_eq!(e.late_keys(), ".");
+}
+
+/// 127 units in the composition and a late token that is the 128th unit: the key that makes it sends the whole composition, nothing is lost and the
+/// syllable is not rejoined (the token is no longer in the composition). 126 units: the rejoin works.
+#[test]
+fn the_128th_unit_is_sent_and_not_taken_back() {
+    let wo = |n: usize| vec!["j i 3"; n].join(" ");
+    for (keys, base, tail_units, tail) in [(". u 3", ".", ["ㄧˇ"], "以"), ("8 w _", "8", ["ㄊ"], "ㄊ")] {
+        let mut e = app();
+        e.reset(ResetMode::Discard);
+        let (mut sent, mut last) = (String::new(), String::new());
+        for t in format!("{} {keys}", wo(127)).split_whitespace() {
+            let o = send(&mut e, t);
+            sent.push_str(&o.commit);
+            last = o.preedit;
+        }
+        // Nothing lost: what was sent, then what is on the screen, is 127 times 我 and the keys as the syllable (not) rejoined.
+        assert_eq!(format!("{sent}{last}"), format!("{}{base}{tail}", "我".repeat(127)), "{keys}");
+        assert_eq!(e.syllables(), tail_units, "{keys}: the syllable is not rejoined");
+    }
+    // One unit fewer: the token is not the 128th and goes back into the syllable.
+    for (keys, unit) in [(". u 3", "ㄧㄡˇ"), ("8 w _", "ㄊㄚ")] {
+        let mut e = app();
+        e.reset(ResetMode::Discard);
+        for t in format!("{} {keys}", wo(126)).split_whitespace() {
+            send(&mut e, t);
+        }
+        assert_eq!(e.syllables().last().map(String::as_str), Some(unit), "{keys} after 126 units");
+        assert_eq!(e.syllables().len(), 127);
+    }
+}
+
+/// The cursor is in the middle of the composition: the digit run opens at the cursor, the tokens sit next to it, and the syllable is rejoined there
+/// (the right-hand `們` does not move). Screens and units are the measured ones; the baseline stops at `我.以們` and `我8ㄊ們`.
+#[test]
+fn the_cursor_in_the_middle() {
+    let mut e = app();
+    assert_eq!(
+        shots(&mut e, "", "j i 3 a p 7 Left . u 3")[6..],
+        ["我們｜ㄨㄛˇ ㄇㄣ˙", "我ㄡ們｜ㄨㄛˇ ㄇㄣ˙", "我.ㄧ們｜ㄨㄛˇ _punct_. ㄇㄣ˙", "我有們｜ㄨㄛˇ ㄧㄡˇ ㄇㄣ˙"]
+    );
+    assert_eq!(
+        shots(&mut e, "", "j i 3 a p 7 Left 8 w _")[6..],
+        ["我們｜ㄨㄛˇ ㄇㄣ˙", "我ㄚ們｜ㄨㄛˇ ㄇㄣ˙", "我8ㄊ們｜ㄨㄛˇ _punct_8 ㄇㄣ˙", "我他們｜ㄨㄛˇ ㄊㄚ ㄇㄣ˙"]
+    );
+}
+
+/// docs/spec/english-mixed.md §13.1 again with the App's engine: no reversed key order of any lexicon syllable opens an English run or leaves an English
+/// token, and the numbers that the scores still choose stay under the bound the constants give (410 at `RHO` 7, `RHO_SYM` 4: measured 372, plus 10% rounded up).
+/// The sibling of `every_reversed_key_order_of_every_syllable_is_never_english` in `engine_english.rs`, which has no digit layer.
+#[test]
+fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
+    let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
+    let mut e = app();
+    let seen: std::collections::BTreeSet<&str> = (0..lex.reading_count()).flat_map(|r| lex.reading_syllables(r)).collect();
+    let (mut typed, mut english, mut digits) = (0usize, Vec::new(), 0usize);
+    for syl in &seen {
+        let mut keys: Vec<String> = Vec::new();
+        let mut tone = "_".to_string();
+        for c in syl.chars() {
+            match Layout::Standard.key_of_tone(c) {
+                Some(t) => tone = t.to_string(),
+                None => match Layout::Standard.key_of_symbol(c) {
+                    Some(k) => keys.push(k.to_string()),
+                    None => keys.clear(),
+                },
+            }
+        }
+        let perms: Vec<Vec<usize>> = match keys.len() {
+            2 => vec![vec![1, 0]],
+            3 => vec![vec![0, 2, 1], vec![1, 0, 2], vec![1, 2, 0], vec![2, 0, 1], vec![2, 1, 0]],
+            _ => continue,
+        };
+        for p in perms {
+            let script = p.iter().map(|&i| keys[i].as_str()).chain([tone.as_str()]).collect::<Vec<_>>().join(" ");
+            e.reset(ResetMode::Discard);
+            let mut reverted = false;
+            for t in script.split_whitespace() {
+                send(&mut e, t);
+                reverted |= e.english_reverted().is_some();
+            }
+            typed += 1;
+            let units = e.syllables();
+            if reverted || units.iter().any(|u| u.starts_with("_punct_") && u.chars().count() > 8) {
+                english.push(format!("{syl}: {script}"));
+            } else if units != [syl.to_string()] {
+                digits += 1;
+            }
+        }
+    }
+    println!("typed {typed} reversed orders; {} English, {digits} not the syllable (digits)", english.len());
+    assert!(typed > 3000, "only {typed} reversed orders");
+    assert!(english.is_empty(), "{} English, first {:?}", english.len(), &english[..english.len().min(8)]);
+    assert!(digits <= 410, "{digits} reversed orders stay numbers: the constants lost ground");
+}
+
+/// The tool hook `set_reorder_penalty`: not called, or called with the constants, every key is the same.
+#[test]
+fn the_penalty_hook_with_the_constants_changes_nothing() {
+    for script in [". u 3", "8 w _", "8 g 4", "0 1 4", "5 / j _", "2 0 2 6 8 w _"] {
+        let (mut a, mut b) = (app(), app());
+        b.set_reorder_penalty(core::digits::RHO, core::digits::RHO_SYM);
+        assert_eq!(shots(&mut a, "", script), shots(&mut b, "", script), "{script}");
+    }
+}
+
+// ---------- the golden of the column-order reading and of the rejoin test (eval/golden/digits-reorder.txt) ----------
+
+struct LateRow {
+    ctx: String,
+    before: String,
+    keys: String,
+    pend: String,
+    closing: char,
+    rho: f64,
+    rho_sym: f64,
+    take: Option<usize>,
+    merge: bool,
+    s_z: Option<f64>,
+    s_d: Option<f64>,
+    left: Option<String>,
+    script: Option<String>,
+}
+
+fn golden_late() -> Vec<LateRow> {
+    let text = std::fs::read_to_string(root().join("eval/golden/digits-reorder.txt")).unwrap();
+    let none = |s: &str| if s == "∅" { String::new() } else { s.to_string() };
+    let opt = |s: &str| (s != "∅").then(|| s.to_string());
+    text.lines()
+        .filter(|l| l.starts_with("L\t"))
+        .map(|l| {
+            let f: Vec<&str> = l.split('\t').skip(1).collect();
+            let get = |name: &str| f.iter().find_map(|x| x.strip_prefix(name)).unwrap_or_else(|| panic!("no {name} in {l}"));
+            LateRow {
+                ctx: get("ctx=").to_string(),
+                before: none(get("before=")),
+                keys: get("keys=").to_string(),
+                pend: none(get("pend=")),
+                closing: if get("closing=") == "␣" { ' ' } else { get("closing=").chars().next().unwrap() },
+                rho: get("rho=").parse().unwrap(),
+                rho_sym: get("rho_sym=").parse().unwrap(),
+                take: opt(get("take=")).map(|t| t.parse().unwrap()),
+                merge: get("merge=") == "1",
+                s_z: opt(get("s_z=")).map(|t| t.parse().unwrap()),
+                s_d: opt(get("s_d=")).map(|t| t.parse().unwrap()),
+                left: f.iter().find_map(|x| x.strip_prefix("left=")).map(|x| none(x)),
+                script: f.iter().find_map(|x| x.strip_prefix("script=")).map(String::from),
+            }
+        })
+        .collect()
+}
+
+fn bits(a: Option<f64>) -> Option<u64> {
+    a.map(f64::to_bits)
+}
+
+/// The `decide` rows of the new golden (the reversal guard on: the column-order split) and the `late_decision` rows, both against Python's bits.
+/// macOS only, like the other f64 goldens.
+#[test]
+fn reorder_scores_match_the_python_golden_bit_for_bit() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let rows = golden_rows("digits-reorder.txt");
+    assert_eq!(rows.len(), 9);
+    compare_scores(&rows, 20);
+    let late = golden_late();
+    assert!(late.len() >= 26, "{} late rows", late.len());
+    let mut e = eng();
+    for (n, r) in late.iter().enumerate() {
+        let got = e.late_decision(&r.ctx, &r.before, &r.keys, &r.pend, r.closing, r.rho, r.rho_sym).expect("digit layer");
+        let at = format!("late row {n}: keys {} pend {} closing {:?} before {}", r.keys, r.pend, r.closing, r.before);
+        assert_eq!((got.0, got.1), (r.take, r.merge), "{at}: take, merge");
+        assert_eq!(bits(got.2), bits(r.s_z), "{at}: s_z {:?} vs {:?}", got.2, r.s_z);
+        assert_eq!(bits(got.3), bits(r.s_d), "{at}: s_d {:?} vs {:?}", got.3, r.s_d);
+    }
+}
+
+/// What the engine hands to `late_decision` is what the golden's rows say, for each row with a `script`: the context, the digits before, the late keys,
+/// the unfinished syllable in column order, the closing key and the two penalties; and what comes back. This is the test that stops a right function
+/// from being fed the wrong things.
+#[test]
+fn late_inputs_in_the_engine_are_the_golden_rows() {
+    let late = golden_late();
+    let mut seen = 0;
+    let mut e = app();
+    e.set_late_trace(true);
+    for (n, r) in late.iter().enumerate() {
+        let (Some(left), Some(script)) = (&r.left, &r.script) else { continue };
+        e.reset(ResetMode::Discard);
+        e.take_late_trace();
+        e.set_left_context(left);
+        for t in script.split_whitespace() {
+            send(&mut e, &t.replace('␣', "_"));
+        }
+        let ev = e.take_late_trace();
+        let at = format!("late row {n} (script {script})");
+        assert_eq!(ev.len(), 1, "{at}: one rejoin test");
+        let ev = &ev[0];
+        assert_eq!((ev.ctx.as_str(), ev.before.as_str(), ev.keys.as_str(), ev.pend.as_str(), ev.closing), (r.ctx.as_str(), r.before.as_str(), r.keys.as_str(), r.pend.as_str(), r.closing), "{at}: inputs");
+        assert_eq!((ev.rho, ev.rho_sym), (r.rho, r.rho_sym), "{at}: penalties");
+        assert_eq!((ev.result.0, ev.result.1), (r.take, r.merge), "{at}: take, merge");
+        if cfg!(target_os = "macos") {
+            assert_eq!((bits(ev.result.2), bits(ev.result.3)), (bits(r.s_z), bits(r.s_d)), "{at}: scores");
+        }
+        seen += 1;
+    }
+    assert!(seen >= 17, "{seen} rows with a script");
 }

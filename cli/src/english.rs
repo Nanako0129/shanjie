@@ -5,12 +5,27 @@
 //!
 //!   english-sim --rows FILE [--p 0.02] [--repair overwrite|backspace] [--seed 20261014] [--repeat 5] [--retries 3]
 //!               [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off] [--digits [--lm FILE]]
+//!               [--swap P] [--tone-early P]
 //!   english-sim --words FILE --recall [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
+//!   english-sim --keys FILE --out FILE [--lm FILE] [--profile chat|formal] [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off]
+//!               [--rho RHO,RHO_SYM]
+//!   english-sim --list-syllables
 //!
 //! `--overwrite` and `--key-order` (default on) are the engine's two switches; the third, the mixing switch, is on. With both off only
 //! the Space case (c) is left (a syllable the lexicon lacks, at Space). `--reversal-guard` defaults to off here so the arms keep the
 //! docs/spec/english-mixed.md §13.3 meaning, while the engine and the app default it on (zhen-reapply): with it on, (b) never fires, so the
 //! `revert_b_*` columns describe the guard-off setting, not what ships.
+//!
+//! `--keys` is the probe of docs/spec/english-mixed.md §13.3 (reversal-digits): key sequences through the engine as the App builds it
+//! (`cli::replay::build_engine_packs` with the App's default packs, no small model, no colloquial table; the digit table and the model
+//! loaded), its four English switches defaulting to the App's (mixing on, `--overwrite off`, `--key-order on`, `--reversal-guard on`, unlike the
+//! `--rows` mode). Input lines `id<TAB>left<TAB>prefix<TAB>keys` (`left` is the text before the cursor, may be empty; `prefix` and `keys`
+//! are keycaps: `_` Space, an upper-case letter Shift+letter, `<` Backspace; `prefix` is typed first and only `keys` is judged), the
+//! engine reset before each line. `--rho RHO,RHO_SYM` (two finite numbers, 0 or more) sets the two penalties of the column-order reading for the run instead of the constants
+//! `digits::RHO`, `digits::RHO_SYM` (`Engine::set_reorder_penalty`); `--rho 7,4` gives the bytes no `--rho` gives. `--out` (refused when it exists) gets nine TAB columns a line:
+//!   id  units_before  new_units(blank-separated, `_punct_SP` for a blank)  pending_symbols  run_utf16_len  reverts(`key:a|b|c`)
+//!   splits  digit_tokens  commit+preedit
+//! and stdout one line, `input_sha256<TAB>lines`. `--list-syllables` prints the lexicon's distinct reading syllables, one a line.
 //!
 //! Output is one TSV line and no content text (R2). Typing mode:
 //!   rows_sha256  rows  syllables  keys  typos  revert_a_mean revert_a_max  revert_b_mean revert_b_max  revert_c_mean revert_c_max
@@ -27,6 +42,13 @@
 //! engine reported (`none`: it never reverted, the keys became Chinese). Then one line `probe <word> token|中文|其他` for each of
 //! ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7 (a fixed public list): whether the keys ended as one English token, as
 //! Chinese syllables only, or as something else.
+//!
+//! With `--swap P` and/or `--tone-early P` (typing mode, any engine; the measurement of docs/spec/english-mixed.md §13.3's reversal rows is with `--digits
+//! --reversal-guard on`) a syllable is typed hurried: `--swap` with probability P a syllable of two symbols or more has two neighbouring symbol keys
+//! swapped (one pair), else `--tone-early` with probability P a syllable with a tone key and two symbols or more has the tone key pressed before its last
+//! symbol. A hurried syllable is typed without the model's slips and repairs below; one more column ends the line, `hurried_bad_mean`: per 1000 syllables
+//! of the rows, mean over the seeds, the hurried syllables after which the composition's last unit is not the syllable (the composition is then dropped, so a
+//! failure does not decide the next syllables). Without both options the line is as it was.
 //!
 //! With `--digits` (docs/spec/english-mixed.md §13.3) the engine is `Engine::new` on data/lexicon (digits.tsv read) with the model
 //! (`--lm`, default data/lm/bigram.sjlm), and six columns follow (mean and max over the seeds, per 1000 syllables of one seed):
@@ -62,9 +84,11 @@
 //!   revert at a tone key or Space (c) is not expected: the tone-key cost of (c) is not measured here (docs/spec/english-mixed.md §13.3).
 //! - Rows with a reading the lexicon lacks, or a symbol without a key, are skipped (their number goes to stderr).
 //! - Random numbers: splitmix64 from the seed (no crate); one draw decides a mistake, one more picks the neighbour.
-use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, Revert, MAX_SYLLABLES};
+use core::engine::{load_lexicon, Engine, Key, KeyKind, Layout, ResetMode, Revert, MOD_SHIFT, MAX_SYLLABLES};
 use core::eval::{parse_rows, row_syllables, sha256_hex, usable};
+use core::lm::Profile;
 use core::Lexicon;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -155,6 +179,11 @@ struct Sim {
     p: f64,
     repair: Repair,
     rng: Rng,
+    /// `--swap` and `--tone-early` (docs/spec/english-mixed.md §13.3): the chance a syllable is typed hurried, and how many were and did not come out as the syllable.
+    swap: f64,
+    early: f64,
+    hurried: u64,
+    hurried_bad: u64,
 }
 
 impl Sim {
@@ -181,7 +210,53 @@ impl Sim {
             p,
             repair,
             rng: Rng(seed),
+            swap: 0.0,
+            early: 0.0,
+            hurried: 0,
+            hurried_bad: 0,
         }
+    }
+
+    /// `--swap p`, `--tone-early p`: with probability `swap` a syllable of two symbols or more has two neighbouring symbol keys typed the other way round (one
+    /// pair, chosen by the generator); else with probability `early` a syllable with a tone key and two symbols or more has the tone key pressed one place
+    /// too early (before its last symbol). Such a syllable is typed without the model's slips and repairs: its keys go to the engine as they are (a revert
+    /// the engine reports is counted, not undone). After the last key, the syllable counts as bad when the composition's last unit is not the syllable; the
+    /// composition is then dropped, so one failure does not decide the syllables after it. `None`: this syllable is typed by the ordinary model.
+    fn hurry(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Option<Result<(), String>> {
+        let sym_keys: Vec<char> = syms.iter().map(|&(_, s)| LAYOUT.key_of_symbol(s).unwrap()).collect();
+        let end = match tone {
+            Some(mark) => Key::ch(LAYOUT.key_of_tone(mark).unwrap(), 0),
+            None => Key::new(KeyKind::Space),
+        };
+        let mut keys: Vec<Key> = Vec::new();
+        if self.swap > 0.0 && syms.len() >= 2 && self.rng.unit() < self.swap {
+            let mut order = sym_keys.clone();
+            let i = (self.rng.next() % (order.len() as u64 - 1)) as usize;
+            order.swap(i, i + 1);
+            keys.extend(order.into_iter().map(|k| Key::ch(k, 0)));
+            keys.push(end);
+        } else if self.early > 0.0 && tone.is_some() && syms.len() >= 2 && self.rng.unit() < self.early {
+            let n = sym_keys.len();
+            keys.extend(sym_keys[..n - 1].iter().map(|&k| Key::ch(k, 0)));
+            keys.push(end);
+            keys.push(Key::ch(sym_keys[n - 1], 0));
+        } else {
+            return None;
+        }
+        let want: String = syms.iter().map(|s| s.1).chain(tone).collect();
+        self.base_preedit = self.last_preedit.clone();
+        for k in keys {
+            if let Err(e) = self.raw(k) {
+                return Some(Err(e));
+            }
+        }
+        self.hurried += 1;
+        if self.engine.syllables().last() != Some(&want) {
+            self.hurried_bad += 1;
+            self.engine.reset(ResetMode::Discard);
+            self.last_preedit.clear();
+        }
+        Some(Ok(()))
     }
 
     /// One key to the engine, counted. What the engine reports about it (a revert, a split) is asked after every key, and counted
@@ -267,6 +342,11 @@ impl Sim {
 
     /// One syllable typed.
     fn syllable(&mut self, syms: &[(usize, char)], tone: Option<char>) -> Result<(), String> {
+        if self.swap > 0.0 || self.early > 0.0 {
+            if let Some(done) = self.hurry(syms, tone) {
+                return done;
+            }
+        }
         self.base_preedit = self.last_preedit.clone();
         for (i, &(col, sym)) in syms.iter().enumerate() {
             let key = LAYOUT.key_of_symbol(sym).unwrap();
@@ -404,10 +484,74 @@ fn on_off(v: String) -> Result<bool, String> {
     }
 }
 
+/// A keycap of the probe's input as a key: `_` Space, `<` Backspace, an upper-case letter Shift+letter, any other character itself.
+fn probe_key(c: char) -> Key {
+    match c {
+        '_' => Key::new(KeyKind::Space),
+        '<' => Key::new(KeyKind::Backspace),
+        c if c.is_ascii_uppercase() => Key::ch(c.to_ascii_lowercase(), MOD_SHIFT),
+        c => Key::ch(c, 0),
+    }
+}
+
+/// `--keys`: see the module comment. The engine is the App's (`build_engine_packs`, `PACKS`, no small model), then the probe's switches.
+fn run_keys(root: &Path, keys: &Path, out: &Path, lm: &Path, profile: Profile, switches: Switches, rho: Option<(f64, f64)>) -> Result<(), String> {
+    let bytes = read(keys)?;
+    let sha = sha256_hex(&bytes);
+    let text = String::from_utf8(bytes).map_err(|_| "keys are not UTF-8")?;
+    let mut e = cli::replay::build_engine_packs(root, lm, None, None, profile, false, true, cli::replay::PACKS)?;
+    e.set_prediction(true).map_err(|_| "cannot set prediction")?;
+    switches.apply(&mut e)?;
+    if let Some((rho, rho_sym)) = rho {
+        e.set_reorder_penalty(rho, rho_sym);
+    }
+    let mut o = std::fs::OpenOptions::new().write(true).create_new(true).open(out).map_err(|e| format!("cannot create the output ({:?})", e.kind()))?;
+    let mut buf = String::new();
+    let mut lines = 0usize;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() != 4 {
+            return Err(format!("line {} does not have four columns", lines + 1));
+        }
+        e.reset(ResetMode::Discard);
+        e.set_left_context(f[1]);
+        for c in f[2].chars() {
+            e.key(probe_key(c)).map_err(|_| "key failed")?;
+        }
+        let before = e.syllables().len();
+        let (mut reverts, mut splits, mut dtok, mut run_len) = (String::new(), 0usize, 0usize, 0u32);
+        let (mut commit, mut preedit) = (String::new(), String::new());
+        for (i, c) in f[3].chars().enumerate() {
+            let out = e.key(probe_key(c)).map_err(|_| "key failed")?;
+            if let Some(r) = e.english_reverted() {
+                reverts.push_str(&format!("{i}:{} ", ["a", "b", "c"][r as usize]));
+            }
+            splits += e.english_split() as usize;
+            dtok += e.digits_emitted();
+            commit.push_str(&out.commit);
+            preedit = out.preedit;
+            run_len = out.english_run_utf16_len;
+        }
+        // The blank unit's reading ends in a blank: shown as `_punct_SP` so the units can be joined by blanks.
+        let units: Vec<String> = e.syllables().iter().map(|u| if u == "_punct_ " { "_punct_SP".to_string() } else { u.clone() }).collect();
+        let tail = if before <= units.len() { units[before..].join(" ") } else { format!("SHRUNK {}", units.join(" ")) };
+        let pend: String = e.english_columns().iter().flatten().collect();
+        buf.push_str(&format!("{}\t{before}\t{tail}\t{pend}\t{run_len}\t{}\t{splits}\t{dtok}\t{commit}{preedit}\n", f[0], reverts.trim_end()));
+        lines += 1;
+    }
+    o.write_all(buf.as_bytes()).map_err(|_| "cannot write the output")?;
+    println!("{sha}\t{lines}");
+    Ok(())
+}
+
 pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     let (mut words, mut rows, mut recall) = (None::<PathBuf>, None::<PathBuf>, false);
     let (mut digits, mut lm) = (false, None::<PathBuf>);
     let mut switches = Switches { overwrite: true, key_order: true, reversal_guard: false };
+    let (mut keys, mut out, mut profile, mut list_syllables) = (None::<PathBuf>, None::<PathBuf>, Profile::Chat, false);
+    let mut rho = None::<(f64, f64)>;
+    let (mut ov, mut ko, mut rg) = (None::<bool>, None::<bool>, None::<bool>);
+    let (mut swap, mut early) = (0.0f64, 0.0f64);
     let (mut p, mut repair, mut seed, mut repeat) = (0.02f64, Repair::Overwrite, 20261014u64, 5u64);
     let mut retries = MAX_RETRIES;
     let mut it = args.iter();
@@ -418,11 +562,28 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             "--rows" => rows = Some(val()?.into()),
             "--recall" => recall = true,
             "--digits" => digits = true,
-            "--overwrite" => switches.overwrite = on_off(val()?)?,
-            "--key-order" => switches.key_order = on_off(val()?)?,
-            "--reversal-guard" => switches.reversal_guard = on_off(val()?)?,
+            "--keys" => keys = Some(val()?.into()),
+            "--rho" => {
+                let v = val()?;
+                let ok = v.split_once(',').and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?))).filter(|(a, b)| a.is_finite() && b.is_finite() && *a >= 0.0 && *b >= 0.0);
+                rho = Some(ok.ok_or("--rho takes RHO,RHO_SYM: two finite numbers, 0 or more")?);
+            }
+            "--out" => out = Some(val()?.into()),
+            "--list-syllables" => list_syllables = true,
+            "--profile" => {
+                profile = match val()?.as_str() {
+                    "chat" => Profile::Chat,
+                    "formal" => Profile::Formal,
+                    _ => return Err("--profile must be chat or formal".into()),
+                }
+            }
+            "--overwrite" => ov = Some(on_off(val()?)?),
+            "--key-order" => ko = Some(on_off(val()?)?),
+            "--reversal-guard" => rg = Some(on_off(val()?)?),
             "--lm" => lm = Some(val()?.into()),
             "--p" => p = val()?.parse().map_err(|_| "bad --p")?,
+            "--swap" => swap = val()?.parse().map_err(|_| "bad --swap")?,
+            "--tone-early" => early = val()?.parse().map_err(|_| "bad --tone-early")?,
             "--repair" => {
                 repair = match val()?.as_str() {
                     "overwrite" => Repair::Overwrite,
@@ -436,8 +597,46 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
+    // The probe modes (`--keys`, `--list-syllables`) take the App's defaults for the switches; the other modes keep the tool's.
+    if list_syllables {
+        if keys.is_some() || out.is_some() || rows.is_some() || words.is_some() || recall {
+            return Err("--list-syllables goes alone".into());
+        }
+        let lex = load_lexicon(&root.join("data/lexicon")).map_err(|_| "cannot load the lexicon")?;
+        let seen: std::collections::BTreeSet<&str> = (0..lex.reading_count()).flat_map(|r| lex.reading_syllables(r)).collect();
+        for s in seen {
+            println!("{s}");
+        }
+        return Ok(());
+    }
+    if keys.is_some() || out.is_some() {
+        let (Some(keys), Some(out)) = (&keys, &out) else { return Err("--keys goes with --out".into()) };
+        if rows.is_some() || words.is_some() || recall || digits {
+            return Err("--keys is a mode of its own".into());
+        }
+        let sw = Switches { overwrite: ov.unwrap_or(false), key_order: ko.unwrap_or(true), reversal_guard: rg.unwrap_or(true) };
+        return run_keys(root, keys, out, &lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm")), profile, sw, rho);
+    }
+    if rho.is_some() {
+        return Err("--rho goes with --keys".into());
+    }
+    if let Some(v) = ov {
+        switches.overwrite = v;
+    }
+    if let Some(v) = ko {
+        switches.key_order = v;
+    }
+    if let Some(v) = rg {
+        switches.reversal_guard = v;
+    }
     if !(0.0..=1.0).contains(&p) || repeat == 0 {
         return Err("--p must be in [0, 1] and --repeat at least 1".into());
+    }
+    if !(0.0..=1.0).contains(&swap) || !(0.0..=1.0).contains(&early) {
+        return Err("--swap and --tone-early must be in [0, 1]".into());
+    }
+    if (swap > 0.0 || early > 0.0) && (recall || keys.is_some()) {
+        return Err("--swap and --tone-early are for the typing mode".into());
     }
     if recall == rows.is_some() {
         return Err("give exactly one of --rows and --recall".into());
@@ -480,6 +679,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         return Err("no row to simulate".into());
     }
     let (mut keys, mut typos, mut stopped) = (0u64, 0u64, 0u64);
+    let mut bad_1000 = Vec::new(); // --swap / --tone-early
     let mut per_1000: [Vec<f64>; 5] = Default::default(); // a, b, c, split, english_final
     let (mut final_1000, mut shown_1000, mut extra_1000) = (Vec::new(), Vec::new(), Vec::new());
     let lm = lm.unwrap_or_else(|| root.join("data/lm/bigram.sjlm"));
@@ -488,6 +688,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         let mut sim = Sim::new(engine, p, repair, seed.wrapping_add(i));
         sim.digits = digits;
         sim.max_retries = retries;
+        (sim.swap, sim.early) = (swap, early);
         for (n, row) in parsed.iter().enumerate() {
             match sim.row(row) {
                 Ok(()) => {}
@@ -507,6 +708,7 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
         final_1000.push(per(sim.final_digits));
         shown_1000.push(per(sim.shown_keys));
         extra_1000.push(per(sim.extra_bs));
+        bad_1000.push(per(sim.hurried_bad));
         keys += sim.keys;
         typos += sim.typos;
     }
@@ -518,6 +720,9 @@ pub fn run(args: &[String], root: &Path) -> Result<(), String> {
     if digits {
         let ((fmean, fmax), (smean, smax), (emean, emax)) = (mean_max(&final_1000), mean_max(&shown_1000), mean_max(&extra_1000));
         cols += &format!("\t{fmean:.3}\t{fmax:.3}\t{smean:.3}\t{smax:.3}\t{emean:.3}\t{emax:.3}");
+    }
+    if swap > 0.0 || early > 0.0 {
+        cols += &format!("\t{:.3}", mean_max(&bad_1000).0);
     }
     if stopped > 0 {
         eprintln!("stopped {stopped} rows over {repeat} seeds (their counts so far stay in the figures, their English left is not counted)");

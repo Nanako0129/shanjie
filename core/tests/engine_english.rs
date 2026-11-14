@@ -1551,6 +1551,8 @@ fn every_syllable_alone_and_sampled_readings_never_revert() {
 /// docs/spec/english-mixed.md §13.1: with the default switches (the reversal guard on), every REVERSED key order of every distinct syllable of the
 /// lexicon (the symbol keys in any order but the column order, then the tone key or Space) is never English: no revert, no split, and the
 /// composition is the one the same keys make with English mixing off. `reversed` must be non-trivial, or the test proves nothing.
+/// This engine has no model and no digit table, so the digit layer is off; `every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on` in
+/// `engine_digits.rs` is the same claim for the engine the App builds, where `0 1 2 5 8 9 . / -` are also digit keys.
 #[test]
 fn every_reversed_key_order_of_every_syllable_is_never_english() {
     let lex = real();
@@ -2207,4 +2209,67 @@ fn reset_commit_sends_an_open_run_in_its_writing() {
     let mut e = eng();
     run(&mut e, "S-r u s t");
     assert_eq!(e.reset(ResetMode::Commit).commit, "Rust");
+}
+
+// ---------- tone moved up (docs/spec/english-mixed.md §2.2 of the reversal-digits contract; §4.2 "注音鍵" row) ----------
+
+/// The units after the script, the length of the English run and the preedit after its last key.
+fn units_after(e: &mut Engine, script: &str) -> (Vec<String>, u32, String) {
+    let o = run(e, script);
+    (e.syllables().to_vec(), o.english_run_utf16_len, o.preedit)
+}
+
+/// With the reversal guard on, a tone key pressed one place before the last symbol makes the revert (c) (`q 6` -> the English run `q6`); the next Zhuyin key,
+/// when the columns it fills and that tone are a syllable of the lexicon, turn the run back into Zhuyin: `q 6 8` is ㄆㄚˊ, not `q68`.
+#[test]
+fn a_tone_key_one_place_early_is_put_back_behind_the_next_zhuyin_key() {
+    let mut e = eng();
+    let (units, len, _) = units_after(&mut e, "q 6 8");
+    assert_eq!((units, len), (vec!["ㄆㄚˊ".to_string()], 0));
+    assert!(e.english_reverted().is_none());
+    // ㄊㄧˊ (提) is a syllable: `w 6 u` is it.
+    e.reset(ResetMode::Discard);
+    let (units, len, _) = units_after(&mut e, "w 6 u");
+    assert_eq!((units, len), (vec!["ㄊㄧˊ".to_string()], 0));
+    // The unfinished syllable is the one of the revert point: more keys go on from there as from any syllable.
+    e.reset(ResetMode::Discard);
+    run(&mut e, "q 6 8");
+    let (units, len, _) = units_after(&mut e, "j i 3");
+    assert_eq!((units, len), (vec!["ㄆㄚˊ".to_string(), "ㄨㄛˇ".to_string()], 0));
+    // Guard off: the run stays.
+    let mut e = eng();
+    e.set_english_reversal_guard(false).unwrap();
+    let (units, len, text) = units_after(&mut e, "q 6 8");
+    assert_eq!((units, len, text.as_str()), (Vec::<String>::new(), 3, "q68"));
+    // Key-order switch off: the revert (c) at the tone key is not made, so there is no run for T to undo (the baseline's outputs, kept by a fixture in engine_digits.rs).
+    let mut e = eng();
+    e.set_english_key_order(false).unwrap();
+    let (units, len, text) = units_after(&mut e, "q 6 8");
+    assert_eq!(len, 0, "no English run: {units:?}");
+    assert!(e.english_reverted().is_none());
+    let mut off = eng();
+    off.set_english_key_order(false).unwrap();
+    off.set_english_reversal_guard(false).unwrap();
+    assert_eq!(units_after(&mut off, "q 6 8"), (units, len, text), "the guard changes nothing here");
+}
+
+/// T must not turn into Chinese what is not a tone moved up. Each stays the English run it was, text and all (the baseline's outputs, equal in the fixture of
+/// engine_digits.rs): `q 6 g` (ㄕ is in the initial column that ㄆ fills: condition 3), `q 6 m` (ㄆㄩˊ is no syllable: condition 4), `S-A 3 o` and `S-A 3 g` (a run that
+/// Shift opened has no revert point; ㄕˇ is a syllable, so only the missing revert point keeps `g` from turning it into Chinese), `q 6 z 8` (a letter typed after the
+/// revert changes the run), `c p ␣` (a revert at Space becomes a token, there is no revert point).
+#[test]
+fn a_tone_moved_up_is_not_guessed_when_the_conditions_fail() {
+    for (script, text) in [("q 6 g", "q6g"), ("q 6 m", "q6m"), ("S-A 3 o", "A3o"), ("S-A 3 g", "A3g"), ("q 6 z 8", "q6z8")] {
+        let mut e = eng();
+        let (units, len, shown) = units_after(&mut e, script);
+        assert!(units.is_empty(), "{script}: {units:?}");
+        assert_eq!((len as usize, shown.as_str()), (text.len(), text), "{script}");
+        // The same keys with the guard off: the same output (the guard changes what T adds, nothing here).
+        let mut off = eng();
+        off.set_english_reversal_guard(false).unwrap();
+        assert_eq!(units_after(&mut off, script), (units, len, shown), "{script} with the guard off");
+    }
+    let mut e = eng();
+    let (units, len, _) = units_after(&mut e, "c p _");
+    assert_eq!((units, len), (vec!["_punct_cp".to_string()], 0), "c p ␣: a token");
 }

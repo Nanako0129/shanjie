@@ -23,6 +23,30 @@ pub(super) struct DRun {
     pub m: usize,
 }
 
+/// The digit tokens a run just made, right before the cursor, that the syllable typed behind them may take back at its closing key
+/// (docs/spec/english-mixed.md §7.4 "待歸鍵"). Lives for one key.
+pub(super) struct Late {
+    /// The keys of those tokens in typed order (the last is next to the cursor): at most two, each in a column of its own.
+    pub keys: Vec<char>,
+    /// The run's digit keys before them (already tokens, or made by the same key).
+    pub before: Vec<char>,
+    /// The run's context.
+    pub ctx: String,
+}
+
+/// One rejoin test the engine made at a closing key, for the golden test of the inputs (test and tool hook): what it handed to `Scorer::late_decision` and got back.
+#[derive(Clone, PartialEq)] // no Debug: holds input text (R2)
+pub struct LateEvent {
+    pub ctx: String,
+    pub before: String,
+    pub keys: String,
+    pub pend: String,
+    pub closing: char,
+    pub rho: f64,
+    pub rho_sym: f64,
+    pub result: (Option<usize>, bool, Option<f64>, Option<f64>),
+}
+
 /// What is built once per (lexicon, model): the legal tails and the best entry of every word the table can name.
 pub(super) struct DigitCache {
     key: (usize, (u64, usize, usize)),
@@ -64,6 +88,8 @@ pub(super) struct DigitEnv {
     pub table: Arc<DigitTable>,
     pub cache: Arc<DigitCache>,
     pub profile: Profile,
+    /// `Some((rho, rho_sym))` while the reversal guard is on: the tails read in column order and the rejoin of late keys (docs/spec/english-mixed.md §7.3, §7.4).
+    pub reorder: Option<(f64, f64)>,
 }
 
 impl DigitEnv {
@@ -135,17 +161,51 @@ impl Engine {
         self.dtrace.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
+    /// Test and tool hook: record (and take) the rejoin tests of the late tokens (what the engine handed to `Scorer::late_decision`, and what came back).
+    #[doc(hidden)]
+    pub fn set_late_trace(&mut self, on: bool) {
+        self.ltrace = on.then(Vec::new);
+    }
+
+    #[doc(hidden)]
+    pub fn take_late_trace(&mut self) -> Vec<LateEvent> {
+        self.ltrace.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Test hook: the keys of the late tokens the latest `key()` left (docs/spec/english-mixed.md §7.4), typed order; empty when there are none.
+    #[doc(hidden)]
+    pub fn late_keys(&self) -> String {
+        self.late.as_ref().map(|l| l.keys.iter().collect()).unwrap_or_default()
+    }
+
+    /// Test and tool hook: `Scorer::late_decision` on the engine's model, table and lexicon (the golden test calls it with the golden's inputs).
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn late_decision(&mut self, ctx: &str, before: &str, keys: &str, pend: &str, closing: char, rho: f64, rho_sym: f64) -> Option<(Option<usize>, bool, Option<f64>, Option<f64>)> {
+        let denv = self.digit_env()?;
+        let (b, k, p): (Vec<char>, Vec<char>, Vec<char>) = (before.chars().collect(), keys.chars().collect(), pend.chars().collect());
+        Some(denv.scorer().late_decision(ctx, &b, &k, &p, closing, rho, rho_sym))
+    }
+
+    /// Tool hook (the reversal-digits measurement's `--rho`): the two penalties of `decide`'s column-order reading and of the rejoin test, which are the constants
+    /// `digits::RHO` and `digits::RHO_SYM` in an engine nothing has set.
+    #[doc(hidden)]
+    pub fn set_reorder_penalty(&mut self, rho: f64, rho_sym: f64) {
+        self.reorder = (rho, rho_sym);
+    }
+
     /// The table, the model and what is built from them (once per lexicon and model); `None` when the feature has no data.
     pub(super) fn digit_env(&mut self) -> Option<DigitEnv> {
         let (st, table) = (self.lm.clone()?, self.digit_table.clone()?);
         let key = (Arc::as_ptr(&st.capped) as usize, st.lm.identity());
+        let reorder = self.english_reversal_guard.then_some(self.reorder);
         if let Some(c) = self.digit_cache.clone().filter(|c| c.key == key) {
-            return Some(DigitEnv { st, table, cache: c, profile: self.profile });
+            return Some(DigitEnv { st, table, cache: c, profile: self.profile, reorder });
         }
         let idx = st.capped.predict_index(&st.lm);
         let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings(&st.lm)), words: idx.digit_words(&table.all_words()) });
         self.digit_cache = Some(cache.clone());
-        Some(DigitEnv { st, table, cache, profile: self.profile })
+        Some(DigitEnv { st, table, cache, profile: self.profile, reorder })
     }
 
     /// The text before the cursor as the context sees it: the left context and the display up to the cursor.
@@ -272,7 +332,7 @@ impl Engine {
             return Ok(Some(self.view(true, commit)));
         }
         let mut run = DRun { ctx, emitted: Vec::new(), buf: vec![c], m: 0 };
-        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, None, None, false, true);
+        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, None, None, false, true, env.reorder);
         self.trace(&run, 0, &dec);
         run.m = Self::picked(&dec, 1).0;
         self.set_pend_from(&run.buf[run.m..]);
@@ -318,7 +378,7 @@ impl Engine {
         run.emitted.extend(&flushed);
         let commit = self.emit_tokens(&flushed)?;
         let tone = Layout::Standard.key_tone_mark(c).is_some();
-        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, None, Some(prev_d), tone, true);
+        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, None, Some(prev_d), tone, true, env.reorder);
         self.trace(&run, flushed.len(), &dec);
         let (m, t) = Self::picked(&dec, run.buf.len());
         if tone && t > 0 {
@@ -353,7 +413,7 @@ impl Engine {
     fn drun_space(&mut self, k: Key) -> Result<Output, EngineError> {
         let (Some(env), Some(run)) = (self.digit_env(), self.drun.take()) else { return self.handled() };
         let prev_d = run.emitted.len() + run.m;
-        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, Some(' '), Some(prev_d), true, true);
+        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, Some(' '), Some(prev_d), true, true, env.reorder);
         self.trace(&run, 0, &dec);
         let (m, t) = Self::picked(&dec, run.buf.len());
         if t > 0 {
@@ -374,7 +434,7 @@ impl Engine {
     fn drun_tail_key(&mut self, c: char) -> Result<Output, EngineError> {
         let (Some(env), Some(run)) = (self.digit_env(), self.drun.take()) else { return self.handled() };
         let prev_d = run.emitted.len() + run.m;
-        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, Some(c), Some(prev_d), false, true);
+        let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, Some(c), Some(prev_d), false, true, env.reorder);
         self.trace(&run, 0, &dec);
         self.pred_dirty = true;
         let Some(pick) = dec.pick else {
@@ -384,6 +444,7 @@ impl Engine {
             if let Some((col, sym)) = Layout::Standard.symbol_of(c) {
                 self.start_syllable(c, col, sym);
             }
+            self.note_late(&run, &run.buf, &[c]);
             return Ok(self.view(true, commit));
         };
         let m = dec.splits[pick].m;
@@ -391,7 +452,81 @@ impl Engine {
         self.d_shown = run.emitted.len() + m;
         let tail: Vec<char> = run.buf[m..].iter().copied().chain([c]).collect();
         self.set_pend_from(&tail);
+        self.note_late(&run, &run.buf[..m], &tail);
         Ok(self.view(true, commit))
+    }
+
+    /// docs/spec/english-mixed.md §7.4 "待歸鍵": a run ended by a key outside the alphabet made digit tokens of `emit` (the buffered keys that show as digits, or all
+    /// of them), and the syllable now being typed is `tail`. Remember the last two of `emit` at most, nearest the cursor first taken, as long as each sits in a
+    /// column of its own that `tail` and the keys already taken leave free: the next key may find them to be the front of that syllable. Only with the
+    /// reversal guard on (a digit-alphabet key is then a candidate for the syllable's column order).
+    fn note_late(&mut self, run: &DRun, emit: &[char], tail: &[char]) {
+        if !self.english_reversal_guard {
+            return;
+        }
+        let col = |k: char| Layout::Standard.symbol_of(k).map(|x| x.0);
+        let mut used: Vec<usize> = tail.iter().filter_map(|&k| col(k)).collect();
+        let mut n = 0;
+        for &k in emit.iter().rev().take(2) {
+            match col(k) {
+                Some(c) if !used.contains(&c) => {
+                    used.push(c);
+                    n += 1;
+                }
+                _ => break,
+            }
+        }
+        if n > 0 {
+            let cut = emit.len() - n;
+            self.late = Some(Late { keys: emit[cut..].to_vec(), before: run.emitted.iter().chain(&emit[..cut]).copied().collect(), ctx: run.ctx.clone() });
+        }
+    }
+
+    /// A symbol key goes into column `col` of the syllable behind the late tokens (rule 9, before it is put in): a late key of that column, and the ones before
+    /// it, are digits for good (they move to `before`); the others stay late. Without a hit nothing changes.
+    pub(super) fn late_keep(&mut self, col: usize) {
+        if let Some(mut l) = self.late_in.take() {
+            if let Some(i) = l.keys.iter().rposition(|&k| Layout::Standard.symbol_of(k).map(|x| x.0) == Some(col)) {
+                let gone: Vec<char> = l.keys.drain(..=i).collect();
+                l.before.extend(gone);
+            }
+            if !l.keys.is_empty() {
+                self.late = Some(l);
+            }
+        }
+    }
+
+    /// At the closing key (`tone` 0 is Space) of the syllable typed behind late tokens (docs/spec/english-mixed.md §7.4): if the tokens are still right before the cursor
+    /// (not sent in a `MAX_SYLLABLES` commit, no `pend_prev`), `Scorer::late_decision` says whether the last `take` of them rejoin the syllable; then
+    /// those tokens go and their keys are put back in the columns, and the caller makes the syllable as it makes any.
+    pub(super) fn late_merge(&mut self, l: Late, tone: usize) -> Result<(), EngineError> {
+        let k = l.keys.len();
+        if !(self.english_reversal_guard && self.digits_active()) || !self.pend_prev.is_empty() || self.cursor < k {
+            return Ok(());
+        }
+        if !(0..k).all(|i| digit_of(&self.syls[self.cursor - k + i]) == Some(l.keys[i])) {
+            return Ok(());
+        }
+        let Some(env) = self.digit_env() else { return Ok(()) };
+        let closing = if tone == 0 { ' ' } else { TONE_KEYS_STANDARD[tone - 1] };
+        let pend_keys: Vec<char> = self.pend.iter().flatten().filter_map(|&s| Layout::Standard.key_of_symbol(s)).collect();
+        let (rho, rho_sym) = self.reorder;
+        let result = env.scorer().late_decision(&l.ctx, &l.before, &l.keys, &pend_keys, closing, rho, rho_sym);
+        if let Some(t) = &mut self.ltrace {
+            t.push(LateEvent { ctx: l.ctx.clone(), before: l.before.iter().collect(), keys: l.keys.iter().collect(), pend: pend_keys.iter().collect(), closing, rho, rho_sym, result });
+        }
+        let (Some(take), true, _, _) = result else { return Ok(()) };
+        for _ in 0..take {
+            self.cursor -= 1;
+            self.remove_syllable(self.cursor)?;
+        }
+        for &key in &l.keys[k - take..] {
+            if let Some((col, sym)) = Layout::Standard.symbol_of(key) {
+                self.shadow_push(key, col); // ranked newest though typed first (docs/spec/english-mixed.md §14): it only orders the letters of a later revert to English
+                self.pend[col] = Some(sym);
+            }
+        }
+        Ok(())
     }
 
     /// Backspace takes the last buffered key and scores again; with nothing buffered the run ends and the key is the ordinary one (rules 11, 18).
@@ -407,7 +542,7 @@ impl Engine {
             self.clear_pend();
         } else {
             // Only the display is scored again: no tail may close a syllable (that is a key's job).
-            let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, None, None, false, false);
+            let dec = env.scorer().decide(&run.ctx, &run.emitted, &run.buf, None, None, false, false, None);
             self.trace(&run, 0, &dec);
             run.m = Self::picked(&dec, run.buf.len()).0;
             self.set_pend_from(&run.buf[run.m..]);

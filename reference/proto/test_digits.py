@@ -293,6 +293,79 @@ class Scoring(unittest.TestCase):
         self.assertEqual((c[p][0], c[p][1]), (0, 1))
 
 
+class Reorder(unittest.TestCase):
+    """docs/spec/english-mixed.md §7.3, §7.4 (reversal-digits): the tail read in column order and the rejoin test of late digit tokens."""
+
+    ROWS = LEX_ROWS + [("ㄧㄡˇ", "有", -2.0), ("ㄧˇ", "以", -2.0), ("ㄊㄚ", "他", -2.0)]
+
+    def world(self, rows=None):
+        lex = mklex(rows or self.ROWS)
+        return DS.Scorer(bd.Table(TABLE_TEXT), StubLM(), P1.Index(lex), DS.Legal(lex), theta=3.0)
+
+    def test_constants_match_digits_rs(self):
+        src = open(os.path.join(ROOT, "core", "src", "digits.rs"), encoding="utf-8").read()
+        self.assertIn(f"pub const RHO: f64 = {GD.RHO!r};", src)
+        self.assertIn(f"pub const RHO_SYM: f64 = {GD.RHO_SYM!r};", src)
+        self.assertIn("pub const THETA: f64 = 3.0;", src)    # late_decision's theta in the golden is 3.0
+
+    def test_tail_in_columns(self):
+        legal = DS.Legal(mklex(self.ROWS))
+        self.assertEqual(legal.tail_units_in_columns(list("82 ")), legal.tail_units(list("28 ")))   # ㄚㄉ typed, ㄉㄚ read
+        self.assertIsNotNone(legal.tail_units_in_columns(list("82 ")))
+        self.assertIsNone(legal.tail_units_in_columns(list("128 ")))     # two keys in the initial column
+        self.assertIsNone(legal.tail_units_in_columns(list("8s3")))      # s is ㄋ, ㄋㄚˇ is no syllable here
+        self.assertIsNone(legal.tail_units_in_columns(list("8 ")))       # already in order is not this function's case: ㄚ alone is no syllable
+        self.assertIsNone(legal.tail_units_in_columns(["3"]))            # nothing before the closing key
+
+    def test_none_changes_nothing_and_a_pair_adds_one_split(self):
+        sc = self.world()
+        base = sc.decide("<s>", [], ["8", "2"], " ", None)
+        self.assertEqual(sc.decide("<s>", [], ["8", "2"], " ", None, None), base)
+        cands, _ = sc.decide("<s>", [], ["8", "2"], " ", None, (8.0, 4.0))
+        self.assertEqual(len(cands), len(base[0]) + 1)
+        extra = [c for c in cands if c not in base[0]]
+        self.assertEqual([(m, t) for m, t, _ in extra], [(0, 3)])                      # all three keys, read ㄉㄚ with the space
+        self.assertEqual(extra[0][2], sc.lp_z("<s>", False, sc.legal.tail_units_in_columns(list("82 "))) - 8.0)
+        # not at a key that is no closing key: nothing is added
+        self.assertEqual(sc.decide("<s>", [], ["8", "2"], "u", None, (8.0, 4.0)), sc.decide("<s>", [], ["8", "2"], "u", None))
+
+    def test_rho_sym_is_for_a_run_that_starts_with_a_mark(self):
+        sc = self.world([("ㄧㄡˇ", "有", -2.0), ("ㄉㄚ", "搭", -3.0)])
+        a = sc.decide("<s>", [], list("u."), "3", None, (8.0, 4.0))[0]         # `u . 3` is in order already
+        b = sc.decide("<s>", [], list(".u"), "3", None, (8.0, 4.0))[0]
+        c = sc.decide("<s>", [], list("8w"), "3", None, (8.0, 4.0))[0]
+        self.assertEqual(len(a), len(sc.decide("<s>", [], list("u."), "3", None)[0]))   # already in order: nothing added
+        s_z = sc.lp_z("<s>", False, sc.legal.tail_units(list("u.3")))
+        self.assertEqual([x for x in b if x[:2] == (0, 3)][0][2], s_z - 4.0)
+        self.assertTrue(all(x[:2] != (0, 3) for x in c))                            # ㄚㄊˇ has no reading
+
+    def test_late_decision_by_hand(self):
+        sc = self.world()
+        # `. u 3`: the late key `.`, the syllable behind it ㄧ, closing 3: ㄧㄡˇ (有) when read in order; as typed ㄧˇ (以) is a syllable too
+        take, merge, s_z, s_d = sc.late_decision("<s>", [], ["."], ["u"], "3", 8.0, 4.0)
+        units = sc.legal.tail_units(["u", ".", "3"])
+        self.assertEqual(take, 1)
+        self.assertEqual(s_z, (sc.lp_z("<s>", False, units) + 3.0) - 4.0)           # nothing before: the word context and theta; the mark is a symbol start
+        self.assertEqual(s_d, sc.lp_d("<s>", ["."], True) + sc.lp_z("<s>", True, sc.legal.tail_units(["u", "3"])))
+        self.assertEqual(merge, s_z > s_d)
+        # the same keys after a digit: rho, not rho_sym when the first key of before + keys is a digit
+        _, _, s_z2, _ = sc.late_decision("<s>", ["8"], ["."], ["u"], "3", 8.0, 4.0)
+        self.assertEqual(s_z2, (sc.lp_d("<s>", ["8"], True) + sc.lp_z("<s>", True, units)) - 8.0)
+        # the syllable as typed is no syllable (ㄊ alone is a letter word only): merge without a score to beat
+        take, merge, s_z, s_d = sc.late_decision("<s>", [], ["8"], ["w"], " ", 8.0, 4.0)
+        self.assertEqual((take, merge, s_d), (1, True, None))
+        self.assertIsNotNone(s_z)
+
+    def test_late_decision_without_a_candidate_and_with_two_keys(self):
+        sc = self.world()
+        self.assertEqual(sc.late_decision("<s>", [], ["1"], ["u"], "3", 8.0, 4.0), (None, False, None, None))      # ㄅㄧˇ: not a syllable
+        self.assertEqual(sc.late_decision("<s>", [], ["1"], [], "3", 8.0, 4.0), (None, False, None, None))         # ㄅˇ: not a syllable
+        # two late keys, only the nearer one fits: `1 . u 3` is a digit `1`, a late `.` and ㄧ; `1` (ㄅ) and ㄧㄡˇ... ㄅ is an initial: ㄅㄡㄧ no
+        take, merge, s_z, s_d = sc.late_decision("<s>", [], ["1", "."], ["u"], "3", 8.0, 4.0)
+        self.assertEqual(take, 1)
+        self.assertEqual(s_z, sc.lp_d("<s>", ["1"], True) + sc.lp_z("<s>", True, sc.legal.tail_units(["u", ".", "3"])) - 8.0)   # the digit `1` stays in front
+
+
 class Simulation(unittest.TestCase):
     def test_fifth_key_flushes_the_oldest(self):
         for mode in ("score", "structural"):
