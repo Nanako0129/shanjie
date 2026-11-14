@@ -16,6 +16,8 @@
 --extra-overlay FILE：接在 ime.OVERLAYS 之後的疊加層檔，也併進封頂詞集合（預設關；Rust CLI 同名參數）；摘要行最後加 +xo:<檔案 SHA-256 前 8 碼>。
   名單層 data/lexicon/names-add.tsv 已在 ime.OVERLAYS 與封頂詞集合裡（docs/spec/lexicon-and-packs.md §1.1, §3），不要再用這個參數給它（重複的列是錯誤）。
 --rowstats FILE：每列一行 `列號\\t對錯\\t錯字數\\t正解字數`（只有數字，見 docs/spec/evaluation.md §2）。
+--judge v1|v2（預設 v1）：v2 時 top1、oracle@64 與 --rowstats 照 judge-v2（docs/spec/evaluation.md §3.5；forms.tsv 加 forms-extra.tsv，路徑讀 SHANJIE_FORMS、SHANJIE_FORMS_EXTRA），
+  摘要行最後加 +jv2:<forms.tsv>:<forms-extra.tsv>:<--accept 檔或 none>（各取 SHA-256 前 8 碼）。--accept FILE（只有 v2）：逐列可接受答案檔。
 --dump FILE：每列寫 `列號\\t名次\\tsurface\\t分數(repr)`，前 64 名，給逐分數比對（容許 1e-9 的浮點誤差）。
 用法：python3 reference/proto/lm_eval.py --lm data/lm/bigram.sjlm --profile chat|formal --rows <檔> [--limit N] [--name 名稱] [--dump FILE] [--context] [--no-demote] [--no-classes] [--kn FILE [--kn-beta β] | --no-kn] [--tri FILE | --no-tri] [--extra-overlay FILE]
   評測檔格式 `前文|句子|讀音`；dev 集要先依檔名排序串接（和 CLI 相同），可用 --dev 302 直接取開發集前 N 列。
@@ -32,7 +34,7 @@ sys.path.insert(0, HERE)
 import ime  # noqa: E402
 import lm as L  # noqa: E402
 
-from eval import lenient  # noqa: E402  單字對照＋異體詞表（§S2v）
+from eval import judge2, lenient, load_accept, load_forms_v2  # noqa: E402  單字對照＋異體詞表（§S2v）、judge-v2（evaluation.md §3.5）
 
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "tools", "lib"))  # build_counts，variant_classes 要用
@@ -47,6 +49,11 @@ def rows_of(paths):
             if len(p) == 3:
                 out.append((p[1], p[2].split(), p[0]))
     return out
+
+
+def raw_rows_of(paths):
+    """rows_of 留下的那些行的原文（不含換行），--accept 的列 SHA-256 以它為準。"""
+    return [line.rstrip("\n") for f in paths for line in open(f, encoding="utf-8") if len(line.rstrip("\n").split("|")) == 3]
 
 
 def kn_tag(path, beta=None):
@@ -106,13 +113,22 @@ def main():
     ap.add_argument("--kn"); ap.add_argument("--kn-beta", type=float); ap.add_argument("--no-kn", action="store_true")
     ap.add_argument("--tri"); ap.add_argument("--no-tri", action="store_true")
     ap.add_argument("--extra-overlay")
+    ap.add_argument("--judge", choices=["v1", "v2"], default="v1"); ap.add_argument("--accept")
     a = ap.parse_args()
+    if a.accept and a.judge != "v2":
+        ap.error("--accept needs --judge v2")
     if a.dev:
-        rows = rows_of(sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt"))))[:a.dev]
+        paths = sorted(glob.glob(os.path.join(ROOT, "eval", "dev", "*.txt")))
+        rows, raw = rows_of(paths)[:a.dev], raw_rows_of(paths)[:a.dev]
         name = a.name or f"dev{a.dev}"
     else:
-        rows = rows_of([a.rows])[:a.limit] if a.limit else rows_of([a.rows])
+        rows, raw = (rows_of([a.rows])[:a.limit], raw_rows_of([a.rows])[:a.limit]) if a.limit else (rows_of([a.rows]), raw_rows_of([a.rows]))
         name = a.name or os.path.basename(a.rows)
+    jtag = ""
+    if a.judge == "v2":
+        forms, fa, fb = load_forms_v2()
+        accept, fc = load_accept(a.accept, raw) if a.accept else ({}, "none")
+        jtag = f"+jv2:{fa}:{fb}:{fc}"
     if a.kn and a.no_kn:
         ap.error("--kn and --no-kn")
     if a.tri and a.no_tri:
@@ -139,10 +155,14 @@ def main():
         nb = decode3(lex, syls, tri_lm, a.profile, start=start, demote=not a.no_demote) if tri else L.decode(lex, syls, lm, a.profile, start=start, demote=not a.no_demote)
         surf = ["".join(ws) for _, ws in nb]
         firsts.append(surf[0])
-        ok = lenient(surf[0]) == lenient(t)
+        if a.judge == "v2":
+            is_ok = judge2(forms, t, syls, accept.get(i, ()))
+            ok, in64 = is_ok(surf[0]), any(is_ok(s) for s in surf)
+        else:
+            ok, in64 = lenient(surf[0]) == lenient(t), lenient(t) in {lenient(s) for s in surf}
         top1 += ok
         rs.append((ok, surf[0], t))
-        o64 += lenient(t) in {lenient(s) for s in surf}
+        o64 += in64
         if dump:
             for r, (sc, ws) in enumerate(nb, 1):
                 dump.write(f"{i}\t{r}\t{''.join(ws)}\t{sc!r}\n")
@@ -150,7 +170,7 @@ def main():
         with rsf:
             rsf.write(format_rowstats(rs))
     sha = hashlib.sha256("\n".join(firsts).encode("utf-8")).hexdigest()
-    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn else ''}{xo_tag(a.extra_overlay)}{'+tri:' + sha8(tri) if tri else ''}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
+    print(f"## {name}  lm-{a.profile}{'+ctx' if a.context else ''}{'-nodemote' if a.no_demote else ''}{'-noclasses' if a.no_classes else ''}{kn_tag(kn, lm.kn[0]) if kn else ''}{xo_tag(a.extra_overlay)}{'+tri:' + sha8(tri) if tri else ''}{jtag}  {{'n': {len(rows)}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}")
 
 
 if __name__ == "__main__":
