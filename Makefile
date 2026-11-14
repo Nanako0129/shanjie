@@ -38,8 +38,10 @@ test-python: export SHANJIE_TW_CLEAN = off
 test-python:
 	@if [ -z "$$SHANJIE_MOEDICT" ] || [ -z "$$SHANJIE_HETERO" ]; then echo "NOTE: SHANJIE_MOEDICT and SHANJIE_HETERO are not both set: the two real-CLI reading tests (test_build_acg_pack LiReading, test_build_quote_pack RealCli) will be skipped"; fi
 	python3 -m unittest tools/test_build_forms.py
-	# docs/spec/evaluation.md §3.5: the reference implementation of judge-v2.
+	# docs/spec/evaluation.md §3.5–§3.7: judge-v2 (the reference judge, the reviewed-pairs checker; without SHANJIE_MOEDICT the checker's real-dictionary tests are skipped with a NOTE).
 	python3 -W ignore -m unittest reference/proto/test_judge_v2.py
+	python3 -W ignore -m unittest tools/test_check_forms_extra.py
+	python3 tools/check_forms_extra.py
 	python3 -m unittest tools/test_build_acg_pack.py
 	python3 -m unittest tools/test_build_quote_pack.py
 	python3 -B -m unittest tools/test_pack_oov.py

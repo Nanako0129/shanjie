@@ -454,6 +454,23 @@ jobs:
             cmp "$T/$p.rowstats" "eval/golden/s2-lm-dev302-$p.rowstats"
           done
 
+      # docs/spec/evaluation.md §3.5–§3.7: judge-v2. The reference judge's rowstats of dev302 (without and with the test accept file) are the
+      # goldens the Rust CLI is compared with (cli/tests/judge_v2.rs); the checker of the reviewed-pairs table runs without the dictionary here
+      # (its output says which conditions were skipped).
+      - name: Judge v2 (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP"
+          python3 -W ignore -m unittest reference/proto/test_judge_v2.py tools/test_check_forms_extra.py
+          python3 tools/check_forms_extra.py
+          for p in chat formal; do
+            "$T/x0c-venv/bin/python" reference/proto/lm_eval.py --profile "$p" --dev 302 --judge v2 --rowstats "$T/$p-jv2.rowstats" > /dev/null
+            cmp "$T/$p-jv2.rowstats" "eval/golden/s2-lm-dev302-$p-jv2.rowstats"
+            "$T/x0c-venv/bin/python" reference/proto/lm_eval.py --profile "$p" --dev 302 --judge v2 --accept eval/golden/judge-v2-accept-test.tsv --rowstats "$T/$p-jv2a.rowstats" > /dev/null
+            cmp "$T/$p-jv2a.rowstats" "eval/golden/s2-lm-dev302-$p-jv2-accept.rowstats"
+          done
+
       # docs/spec/lexicon-and-packs.md §5.8: the pack builder against a fake API (dedupe, collision dispositions, ordering,
       # deterministic output) and the committed pack against the lexicon. Builds the evaluation CLI for the collision detection.
       - name: ACG pack builder (Python)
