@@ -1,6 +1,6 @@
 # 資料與模型授權清單
 
-每個檔一列：來源類型與規模／授權／署名。程式碼是 Apache-2.0。「隨 App 內附」指檔案或其衍生檔放進 App 的 `Resources/`；沒有寫的檔是建置輸入或評測資料，不隨 App 內附。
+每個檔一列：來源類型與規模／授權／署名。程式碼是 Apache-2.0。「隨 App 內附」指檔案或其衍生檔放進 macOS App 的 `Resources/`；Windows 安裝程式（MSI）帶哪些檔，見最後的「Windows 安裝程式」一節。兩邊都沒有帶的檔是建置輸入或評測資料，不隨安裝檔內附。
 
 通用的署名：Wikipedia 與 Wiktionary 貢獻者（CC BY-SA 4.0，https://creativecommons.org/licenses/by-sa/4.0/ ）。
 
@@ -98,5 +98,21 @@
 
 | 路徑 | 來源類型與規模 | 授權 | 署名 |
 |---|---|---|---|
-| `packaging/AppIcon.icon/`（App 與安裝程式的圖示） | 本專案的設計；圖層 `glyph.svg` 的「解」是 Noto Serif CJK TC Black（Adobe／Google）的字形外框，由 `scripts/make-app-icon.swift` 轉成路徑；字型檔不進 repo、不隨 App 內附 | 圖示：Apache-2.0（和專案程式一致）；字型：SIL Open Font License 1.1。OFL FAQ 1.1 允許把字型用在 logo 與設計，1.13 寫明用字型做出的圖不受 OFL 約束（https://openfontlicense.org/ofl-faq/ ） | Noto Serif CJK TC（Adobe／Google） |
+| `packaging/AppIcon.icon/`（macOS App 與 macOS 安裝程式的圖示） | 本專案的設計；圖層 `glyph.svg` 的「解」是 Noto Serif CJK TC Black（Adobe／Google）的字形外框，由 `scripts/make-app-icon.swift` 轉成路徑；字型檔不進 repo、不隨 App 內附 | 圖示：Apache-2.0（和專案程式一致）；字型：SIL Open Font License 1.1。OFL FAQ 1.1 允許把字型用在 logo 與設計，1.13 寫明用字型做出的圖不受 OFL 約束（https://openfontlicense.org/ofl-faq/ ） | Noto Serif CJK TC（Adobe／Google） |
 | 執行期模型（S5 起） | Gemma 4 E2B 等；不隨安裝檔散布，第一次啟用時下載並顯示授權 | 各自授權（Gemma 4：Apache-2.0） | — |
+
+## Windows 安裝程式（MSI）
+
+Windows 安裝程式裝在 `C:\Program Files\Shanjie\`。檔案本身和 macOS App 帶的是同一批，來源、授權、署名都以上面各列為準；這一節只列 MSI 帶哪些檔。清單的唯一來源是 `windows/installer/shanjie.wxs`，`scripts/windows/check-msi.ps1` 逐一核對（`docs/spec/windows-tip.md` §6.2、§6.9）。
+
+| 位置（相對於安裝資料夾） | 檔案 | 授權與署名 |
+|---|---|---|
+| 根 | `shanjie_tip.dll`、`shanjie-host.exe` | 程式碼 Apache-2.0；靜態連結進去的 Rust 標準函式庫與 `windows`、`windows-core`、`windows-sys` 等套件是 MIT 或 Apache-2.0，寫在署名檔（見下） |
+| 根 | `LICENSE` | Apache-2.0 |
+| `data\lexicon\` | `mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`、`mixed-words.tsv` | 各檔的列在「詞庫與詞包」 |
+| `data\packs\` | `acg-add.tsv`、`acg-sources.tsv`、`acg.json`、`it-add.tsv`、`it-sources.tsv`、`it.json` | 各檔的列在「詞庫與詞包」 |
+| `data\lm\` | `bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm` | 各檔的列在「模型檔」 |
+| `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`（本檔，原樣）、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`CC-BY-SA-4.0-attribution.txt` | 同 macOS App 的 `Resources/LICENSES/` 裡同名的檔 |
+
+- `LICENSES\CC-BY-SA-4.0-attribution.txt` 在建置時產生（`scripts/windows/build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段原樣，所以 CC BY-SA 4.0 檔案的清單與各來源的署名和 macOS App 相同；另加一段，點名靜態連結進 DLL 與 exe 的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0）；最後接 name-suggestion-index 的聲明全文。
+- 和 macOS App 的差別：沒有美妝詞包與經典台詞詞包（兩者都是 CC0）、沒有 Sparkle 的授權檔（Windows 版沒有 Sparkle）、沒有 `models.tsv`。

@@ -2,7 +2,7 @@
 
 這份寫的是現在的行為。
 
-範圍：核心（`core`）在 `x86_64-pc-windows-msvc` 上編譯與測試的做法、Windows 的 CI、TSF 文字服務 DLL（`windows/tip`，套件名 `shanjie-tip`）、常駐程序（`windows/host`）與兩者之間的線上格式（`windows/proto`）、以及微軟注音的量測參考（Windows 版按鍵與介面的對照依據）。按鍵規則本身見 `docs/spec/keys-and-composition.md`，核心的 C 介面見 `docs/spec/c-abi.md`，隱私規則見 `docs/spec/privacy.md`。
+範圍：核心（`core`）在 `x86_64-pc-windows-msvc` 上編譯與測試的做法、Windows 的 CI、TSF 文字服務 DLL（`windows/tip`，套件名 `shanjie-tip`）、常駐程序（`windows/host`）與兩者之間的線上格式（`windows/proto`）、安裝與解除安裝用的 MSI（`windows/installer`、`windows/installer-ca`，§6）、以及微軟注音的量測參考（Windows 版按鍵與介面的對照依據）。按鍵規則本身見 `docs/spec/keys-and-composition.md`，核心的 C 介面見 `docs/spec/c-abi.md`，隱私規則見 `docs/spec/privacy.md`。
 
 ## 1. 組成與現況
 
@@ -10,9 +10,10 @@
 
 - `core`：同一份核心程式碼，Windows 上加少量 `cfg`，行為與 macOS、Linux 相同（§2）。
 - `windows/host`：常駐程序 `shanjie-host.exe`，每個使用者的每個登入工作階段一支，只有它載入模型（§5）。
-- `windows/proto`：DLL 與常駐程序之間的線上格式，純 Rust、不分平台（§5.3）。
+- `windows/proto`：DLL 與常駐程序之間的線上格式，以及兩種身分（開發版、正式版）的名稱表 `ids.rs`，純 Rust、不分平台（§5.3、§6.1）。
 - `windows/tip`：TSF 文字服務 DLL，常駐程序的薄客戶端，不相依核心，自己用 Direct2D 與 DirectWrite 畫候選窗（§3.15）。`crate-type = ["cdylib", "rlib"]`（rlib 給單元測試），除了兩個純函式模組（`keys`、`candlayout`，各平台都編、都測）之外都在 `cfg(windows)` 裡，在 macOS 與 Linux 上其餘是空的，不影響既有的建置與測試。
-- CI 的 `windows` 與 `windows-cap` job，以及 `windows` 與 Linux `debug` job 的 rowstats 比對（`rowstats` job，§2.9）。
+- `windows/installer`、`windows/installer-ca`、`scripts/windows`：Windows 安裝程式（MSI）的定義、自訂動作 DLL 與建置、核對腳本（§6）。
+- CI 的 `windows` 與 `windows-cap` job，以及 `windows` 與 Linux `debug` job 的 rowstats 比對（`rowstats` job，§2.9）；`windows-msi` job 建並核對 MSI（§6.9）。
 - 微軟注音量測（§4）：只是參考資料，程式不讀它。
 
 ### 1.2 現況
@@ -21,8 +22,9 @@
 - TSF 文字服務可在測試 VM 的記事本與「執行」對話框打出一句注音並送出，送出的字和 Mac 上 `shanjie-replay --packs acg,it`（Windows 版的詞包，見 §3.4）用同一串鍵解出的字逐字相同。
 - 模型只在常駐程序裡載一份；DLL 每按一鍵經 named pipe 同步問常駐程序（§5）。
 - 組字中按空白鍵或 ↓ 開出直排候選窗（每頁 9 列、編號 1–9），數字鍵、Enter 選字，Esc 關窗；窗在 DLL 裡畫，所以開始功能表與 Windows 搜尋也看得到（§3.15）。
-- 按鍵預設照微軟注音（核心的按鍵習慣 1，§3.4；不照微軟的列在 §4.6）；登錄值 `KeyScheme` 設 0 改回 Mac 版的規則，還沒有設定頁。中英切換尚未實作（§3.14）。
-- 沒有預測列、候選窗的底部列與滑鼠操作、設定、學習檔、安裝程式與簽章（§3.14）。
+- 按鍵預設照微軟注音（核心的按鍵習慣 1，§3.4；不照微軟的列在 §4.6）；登錄值 `KeyScheme` 設 0 改回 Mac 版的規則，還沒有設定頁。中英切換不做（§3.14）。
+- 有安裝程式：一份每台機器安裝的 MSI，裝正式版身分，和開發版身分可以並存（§6）。真的 MSI 在測試 VM 驗收過大部分的路（§6 寫「真的 MSI」「測試 VM」的那些）；標「推論」與「待驗收」的還沒在真的 MSI 上量過。
+- 沒有預測列、候選窗的底部列與滑鼠操作、設定、學習檔、自動更新與簽章（§3.14）。
 
 ## 2. 核心在 Windows
 
@@ -119,13 +121,14 @@ Linux `debug` job 在既有步驟之後加三步：
 - COM 用 `windows` 0.62 與 `windows-core` 0.62（`#[implement]`），只開用到的 feature（候選窗另開 `Win32_Graphics_Direct2D`、`Win32_Graphics_Direct2D_Common`、`Win32_Graphics_DirectWrite`、`Win32_Graphics_Dxgi_Common`、`Win32_Graphics_Gdi`、`Win32_UI_Accessibility`、`Win32_UI_HiDpi`），放在 `[target.'cfg(windows)'.dependencies]`；這兩個以外沒有新相依，`Cargo.lock` 鎖版本。
 - 只出 x64（`x86_64-pc-windows-msvc`）。
 - cargo feature `timing`（預設關）：數字計時檔（§3.11），只用於 VM 量測，不用於給使用者的建置。
+- cargo feature `release-ids`（預設關，`shanjie-win-proto`、`shanjie-tip`、`shanjie-host` 各有一個同名的）：選正式版身分（§6.1）；不開就是開發版身分。
 - C 執行階段靜態連結：`.cargo/config.toml` 對 `cfg(all(windows, target_env = "msvc"))` 設 `-C target-feature=+crt-static`。理由：動態 CRT 會讓 DLL 與常駐程序相依 `VCRUNTIME140.dll`，沒裝 Visual C++ 可轉散發套件的乾淨 Windows 11 上 `LoadLibrary` 失敗（`regsvr32` 回 3）。這個設定套用到 workspace 裡所有 Windows MSVC 建置，評測 CLI 的輸出由 §2.9 的 rowstats 比對核對。每次建完 DLL 與常駐程序要用 `dumpbin /dependents` 核對沒有 `VCRUNTIME*`、`MSVCP*`、`api-ms-win-crt-*`、`ucrtbase` 相依。
 - 風格：`unsafe` 區塊都有 `// SAFETY:` 註解；`Drop` 只釋放資源（§3.9）。
 
 ### 3.2 COM 進入點與註冊
 
-- 匯出：`DllMain`（只記下模組的 `HINSTANCE`，什麼都不做）、`DllGetClassObject`（只認開發版 CLSID，其他回 `CLASS_E_CLASSNOTAVAILABLE`）、`DllCanUnloadNow`、`DllRegisterServer`、`DllUnregisterServer`。`IClassFactory` 不支援聚合（`CLASS_E_NOAGGREGATION`）。
-- GUID 全放在 `windows/tip/src/guids.rs`：開發版的 CLSID、設定檔 GUID、顯示屬性 GUID；語言 0x0404（zh-TW）；設定檔名稱「善解（開發版）」。正式版使用另一組。
+- 匯出：`DllMain`（只記下模組的 `HINSTANCE`，什麼都不做）、`DllGetClassObject`（只認這個建置的 CLSID，其他回 `CLASS_E_CLASSNOTAVAILABLE`）、`DllCanUnloadNow`、`DllRegisterServer`、`DllUnregisterServer`。`IClassFactory` 不支援聚合（`CLASS_E_NOAGGREGATION`）。
+- GUID 與名稱：值放在 `windows/proto/src/ids.rs` 的名稱表（開發版與正式版各一組，§6.1），`windows/tip/src/guids.rs` 取這個建置的那一組：CLSID、設定檔 GUID、顯示屬性 GUID，設定檔名稱（開發版「善解（開發版）」、正式版「善解」）；語言 0x0404（zh-TW）。
 - 註冊（`DllRegisterServer`，需要系統管理員）：
   - `HKLM\SOFTWARE\Classes\CLSID\{CLSID}`：預設值為設定檔名稱；`InprocServer32` 預設值為 DLL 的完整路徑，`ThreadingModel` 為 `Apartment`。
   - `ITfInputProcessorProfileMgr::RegisterProfile`（語言 0x0404，啟用）。
@@ -136,8 +139,8 @@ Linux `debug` job 在既有步驟之後加三步：
 
 ### 3.3 安裝位置與信任
 
-- TIP 會被載進每個程序（含提升權限的），所以 DLL、常駐程序 `shanjie-host.exe` 與資料放在同一個只有系統管理員能寫的資料夾（開發版為 `C:\Program Files\shanjie-dev\`），`regsvr32` 只註冊這個路徑上的 DLL。DLL、常駐程序或模型被一般使用者換掉就等於提權。
-- 常駐程序的路徑從 DLL 自己的位置推，資料路徑從常駐程序自己的位置推：`GetModuleFileNameW`（緩衝不夠就加倍重取，最多 65536 單位，仍放不下或取不到就回 `None`，不拿截斷的前綴去推資料夾），資料在常駐程序旁的 `data\`（`lexicon`、`packs`、`lm\bigram.sjlm`、`lm\tinylm.sjtl`、`lm\colloquial.sjlm`）；正式版不讀環境變數（只有帶 `timing` 的量測版讀一個開關，§5.2）。模型檔要與 `data/*.sha256` 相符。
+- TIP 會被載進每個程序（含提升權限的），所以 DLL、常駐程序 `shanjie-host.exe` 與資料放在同一個只有系統管理員能寫的資料夾（開發版身分為 `C:\Program Files\shanjie-dev\`，正式版身分為 `C:\Program Files\Shanjie\`，由 MSI 裝，§6.2），`regsvr32` 只註冊這個路徑上的 DLL。DLL、常駐程序或模型被一般使用者換掉就等於提權。
+- 常駐程序的路徑從 DLL 自己的位置推，資料路徑從常駐程序自己的位置推：`GetModuleFileNameW`（緩衝不夠就加倍重取，最多 65536 單位，仍放不下或取不到就回 `None`，不拿截斷的前綴去推資料夾），資料在常駐程序旁的 `data\`（`lexicon`、`packs`、`lm\bigram.sjlm`、`lm\tinylm.sjtl`、`lm\colloquial.sjlm`）；不帶 `timing` 的建置不讀環境變數（只有帶 `timing` 的量測版讀一個開關，§5.2）。模型檔要與 `data/*.sha256` 相符。
 - 執行期不載入別的 DLL。
 - 驗證：複製進 VM 後核對 DLL 與每個模型檔的雜湊；用 `Get-Acl` 核對 DLL 與整個資料夾樹，Users、Authenticated Users、Everyone、INTERACTIVE、ALL APPLICATION PACKAGES 都沒有寫入權（最多讀取與執行）。
 
@@ -149,7 +152,7 @@ Linux `debug` job 在既有步驟之後加三步：
   2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`（`load_lm` 一併讀同一資料夾的承接、trigram 與辨類檔，所以 `data\lm` 要放 `data/*.sha256` 列的全部模型）；
   3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(1)`（候選窗一律是直排，§3.15）、`set_key_scheme(<按鍵習慣>)`（見下一條）、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
   4. `set_learning(0)`。重排強度與設定檔類型用核心預設（標準、聊天）；不呼叫 `set_fuzzy`、`set_left_context`、`learning_open`。
-- **按鍵習慣**（`set_key_scheme`，`docs/spec/keys-and-composition.md` §4.1.1）：0 是核心現行的規則（Mac 版），1 是微軟注音的做法（`m` 規則，§4.6）；沒有設定值時是 1，Windows 版的預設照微軟注音。值在 `server::run` 讀一次（§5.2：`HKCU\Software\shanjie-dev\KeyScheme`），當參數傳給 `engine::load`，`engine::load` 本身不讀登錄，所以測試不受跑測試那台機器的登錄影響。所有按鍵行為都由核心算，Windows 這一側只把值經 `Welcome` 轉給 DLL，供 `OnTestKeyDown` 判斷（§3.6）。
+- **按鍵習慣**（`set_key_scheme`，`docs/spec/keys-and-composition.md` §4.1.1）：0 是核心現行的規則（Mac 版），1 是微軟注音的做法（`m` 規則，§4.6）；沒有設定值時是 1，Windows 版的預設照微軟注音。值在 `server::run` 讀一次（§5.2：`HKCU\<這個建置的設定機碼>\KeyScheme`，開發版 `Software\shanjie-dev`、正式版 `Software\Shanjie`），當參數傳給 `engine::load`，`engine::load` 本身不讀登錄，所以測試不受跑測試那台機器的登錄影響。所有按鍵行為都由核心算，Windows 這一側只把值經 `Welcome` 轉給 DLL，供 `OnTestKeyDown` 判斷（§3.6）。
 - 中英混打關，所以數字層（`digits.tsv`）也不開；`1`、`0` 鍵照注音處理，與 replay 相同。
 - 與 replay 的差別：`set_rerank(0)`，會意與常談表照樣載入，但不跑背景重排工作；replay 帶 `--no-tinylm` 時連會意與常談表都不載。兩者解出的字相同，因為會意與常談表只在重排工作裡起作用；另一個差別是凍結視窗 W（有沒有小模型時不同），只影響約 45 字以上的組字。
 - 載入失敗或引擎的鎖 poisoned：常駐程序結束（§5.2），不留任何錯誤文字（`shanjie.h` 規定不能記 LM 路徑）。
@@ -165,7 +168,7 @@ Linux `debug` job 在既有步驟之後加三步：
 - `ActivateEx`：記下 thread manager 與 client id；開計時檔（§3.11）；旗標有 `TF_TMAE_SECUREMODE` 時這個執行緒不動作（不載引擎、不註冊 sink）；否則註冊 sink（`AdviseKeyEventSink`、`ITfThreadMgrEventSink`、`ITfThreadFocusSink`），向 `ITfCategoryMgr::RegisterGUID` 取顯示屬性的 atom，把鍵盤隔間設成開。註冊 sink 失敗會撤銷已註冊的並回傳失敗。
 - `Deactivate`：結束自己的組字（§3.8）、撤銷 sink、清掉狀態，之後不動作。
 - 實作的 sink 與用途：`OnTestKeyDown`／`OnKeyDown`（`OnKeyUp`、`OnTestKeyUp`、`OnPreservedKey` 一律不吃）、`OnCompositionTerminated`、`ITfThreadMgrEventSink::OnSetFocus`（換文件時結束組字）、`ITfThreadFocusSink::OnKillThreadFocus`（換到別的執行緒時結束組字）。
-- **鍵盤開關隔間**（`GUID_COMPARTMENT_KEYBOARD_OPENCLOSE`）：`ActivateEx` 時設成開；每一份文件（document manager）**第一次**拿到焦點時（`OnSetFocus`、`OnSetThreadFocus`）也設成開，因為 Windows 的開關狀態跟著視窗走，新開的視窗可能是關的；之後回到同一份文件時保留當下的值，不覆蓋使用者自己改的狀態（例如在該視窗按 Ctrl+Space），與微軟注音的中英模式各視窗分開記一致。這個隔間為關時，`OnTestKeyDown`、`OnKeyDown` 一律直通。目前 TIP 沒有自己的中英切換，所以預設一直是中文模式。
+- **鍵盤開關隔間**（`GUID_COMPARTMENT_KEYBOARD_OPENCLOSE`）：`ActivateEx` 時設成開；每一份文件（document manager）**第一次**拿到焦點時（`OnSetFocus`、`OnSetThreadFocus`）也設成開，因為 Windows 的開關狀態跟著視窗走，新開的視窗可能是關的；之後回到同一份文件時保留當下的值，不覆蓋使用者自己改的狀態，與微軟注音的中英模式各視窗分開記一致。這個隔間為關時，`OnTestKeyDown`、`OnKeyDown` 一律直通。TIP 不做自己的中英切換（§3.14），所以預設一直是中文模式。
 - 停用的 context：`GUID_COMPARTMENT_KEYBOARD_DISABLED` 或 `GUID_COMPARTMENT_EMPTYCONTEXT` 為真時（例如密碼欄這類 context），`OnTestKeyDown`、`OnKeyDown` 都直通。輸入範圍含 `IS_PASSWORD` 的 context 不開候選窗（§3.15）；按鍵與組字的處理不變。
 - 這個實例未啟用（`ActivateEx` 之前、`Deactivate` 之後、安全模式）、或客戶端被擋住（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，或組字區空時連不上常駐程序，§5.4）時，同樣直通。
 
@@ -222,7 +225,7 @@ Linux `debug` job 在既有步驟之後加三步：
 - 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65、69–71 見 §5.8；66–68 見 §3.15。
 - 診斷事件（兩欄都是當下時間，除非另註）：40 `OnTestKeyDown` 回 TRUE（兩欄為 OS 執行緒 ID）；41–44 `OnTestKeyDown` 回 FALSE 的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空）；45 `OnKeyDown` 的同步 edit session 沒拿到（兩欄為 HRESULT）；47 `ActivateEx` 註冊 sink 失敗；48 `ActivateEx` 在安全模式；49 `ActivateEx` 進來的執行緒（兩欄為執行緒 ID）；50 進入 `OnKeyDown`（兩欄為執行緒 ID）；51–55 `OnKeyDown` 在送出之前就回不吃的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空、鍵沒有對應）；56 焦點換過來時鍵盤隔間讀到關、被 TIP 重新打開。都只有數字，不含任何按鍵或文字。
 - **只有完整性等級剛好是 Medium 的程序才寫**（程序 token 的 `TokenIntegrityLevel`，RID 0x2000）：High、Low 與 AppContainer 的程序一律不寫。理由：同一個使用者的一般程序改得了該使用者的資料夾（例如把中間的資料夾換成 junction），提升權限的程序照那條路徑建檔就是跨權限寫檔；限定 Medium 後寫入不跨權限。
-- 位置：目前使用者的 `%LOCALAPPDATA%\shanjie-dev\timing\timing-<pid>.txt`，資料夾路徑用 `SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_NO_PACKAGE_REDIRECTION)` 取，不讀環境變數。封裝的宿主（例如 MSIX 封裝的記事本）寫 AppData 可能被檔案系統虛擬化而導到 `%LOCALAPPDATA%\Packages\<套件>\LocalCache\Local\shanjie-dev\timing\`，讀取時兩個位置都要看。
+- 位置：目前使用者的 `%LOCALAPPDATA%\<計時資料夾>\timing\timing-<pid>.txt`（計時資料夾：開發版身分 `shanjie-dev`、正式版身分 `Shanjie`，§6.1；MSI 裝的建置不帶 `timing`，不會建它），資料夾路徑用 `SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_NO_PACKAGE_REDIRECTION)` 取，不讀環境變數。封裝的宿主（例如 MSIX 封裝的記事本）寫 AppData 可能被檔案系統虛擬化而導到 `%LOCALAPPDATA%\Packages\<套件>\LocalCache\Local\<計時資料夾>\timing\`，讀取時兩個位置都要看。
 - 資料夾由驅動腳本事先建立，TIP 不建；開檔用 `CREATE_NEW`（不開已存在的檔）。資料夾不存在、檔案已存在、開不了或程序不是 Medium 時，這個程序就不寫計時，`ActivateEx` 照常成功，不顯示、不記錄任何錯誤。
 - DLL 的檔案在第一次 `ActivateEx` 時開、常駐程序的在啟動時開（每個程序一次），每行寫完就 flush；DLL 寫入用 `try_lock`，鎖忙時那一行直接略過，常駐程序等鎖（§5.8）；寫入失敗則關閉該程序的計時。
 - 驗證：`timing::tests::a_line_has_three_numeric_columns`；VM 裡讀回每個計時檔，內容只有 `[0-9\t\n]`、每行三欄、事件代碼只有上面列出的、每行開始 ≤ 結束（事件 70、71 的兩欄不是時間，不套這一條）。
@@ -253,11 +256,11 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 3.14 已知限制與範圍外
 
-- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式、Caps Lock 開著時打字母的行為都尚未實作；組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母、Tab、Shift+Tab），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
+- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式都不做；Caps Lock 開著時打字母，核心照規則 1 直通（§3.6），實際結果待 VM 驗收量測（§6.10）。組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母、Tab、Shift+Tab），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
 - 沒有預測列、UILess（`ITfCandidateListUIElement`）、完整的 UIA 候選清單（候選窗只送 `EVENT_OBJECT_IME_*`）；候選窗沒有底部列（▲▼、兩個圖示）、捲動點、展開成三欄與滑鼠點選（§3.15、§4.6）。
 - 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。
-- 沒有安裝程式、更新與簽章；DLL 未簽章。給使用者的建置不能開 `timing`（每個按鍵的時間戳就是打字節奏），要用看得到的方式驗證（例如 feature 開著時多匯出一個符號，發佈流程檢查它不存在），而不是掃原始碼。
+- 安裝程式見 §6；沒有自動更新與簽章，DLL、常駐程序與 MSI 都未簽章（建置流程留了簽章步驟的位置，§6.9）。給使用者的建置不能開 `timing`（每個按鍵的時間戳就是打字節奏），要用看得到的方式驗證：feature 開著時多匯出一個符號（`SjMarkTiming`），`check-msi.ps1` 核對 MSI 裡的 DLL 與 exe 沒有它（§6.9），而不是掃原始碼。
 - 只出 x64；x86、ARM64 的 TIP、Chrome、Office、遊戲等其他宿主的相容性尚未驗證；CI 裡沒有離螢幕的 TSF 測試宿主。
 - 組字外觀的像素對照與「目前詞段」標示尚未實作。
 - 候選窗（§3.15）在測試 VM 沒量到的宿主：小算盤（AppContainer，切不到善解）、以系統管理員身分執行的記事本與密碼欄（量測時宿主沒有跑到前景）；密碼欄不開窗是程式的行為，在 VM 裡沒有核對到。
@@ -343,7 +346,7 @@ DLL 在 App 自己的程序裡畫候選窗：Win32 popup 加 Direct2D 與 Direct
 | Ctrl+Space | 切英文 | 清掉 ㄋ、切英文 | 切英文，組字留著 | 關窗、切英文，組字留著 |
 | Win+Space | 不動作（只有一個輸入法） | 不動作 | 不動作 | 不動作 |
 
-Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/keys-and-composition.md` §4.1.1 的 `m` 規則）。習慣 1 下不照微軟的只有 §4.6「不照微軟的列」那張表：S2 ↑ 與 ↓ 窗裡多字詞的排法、組字區上限、S3 Tab 與 → 的展開、S1 聲調鍵，加上還沒做的單按 Shift、Ctrl+Space（上表的「單按 Shift」「Ctrl+Space」兩列），以及候選窗的底部列、捲動點、三欄展開、滑鼠點選（§3.15）。把登錄值 `KeyScheme` 設成 0 時，Windows 版照核心現行的規則（Mac 版）：直排窗用規則 3v–5p（§4.6 的左右欄對照）。
+Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/keys-and-composition.md` §4.1.1 的 `m` 規則）。習慣 1 下不照微軟的只有 §4.6「不照微軟的列」那張表：S2 ↑ 與 ↓ 窗裡多字詞的排法、組字區上限、S3 Tab 與 → 的展開、S1 聲調鍵，加上不做的單按 Shift、Ctrl+Space（上表的「單按 Shift」「Ctrl+Space」兩列），以及候選窗的底部列、捲動點、三欄展開、滑鼠點選（§3.15）。把登錄值 `KeyScheme` 設成 0 時，Windows 版照核心現行的規則（Mac 版）：直排窗用規則 3v–5p（§4.6 的左右欄對照）。
 
 送出「你」之後（S4）和一般打字相同：空白、Enter、Tab、方向鍵、Home、End 交給記事本；注音鍵、數字鍵、`,` `.` 開新的組字；Shift+A、Shift+, Shift+. 直接送出；Ctrl+, 開組字放標點。
 
@@ -477,7 +480,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 | 組字區上限 | 31 個音節，第 32 個起把前段送出 | 128 個單位，到了整段送出（核心沒有「送出前段」的機制） |
 | S3 Tab、→ | 候選窗展開成三欄 | 吃掉、不動作，窗開著（展開成三欄在候選窗那一片，§3.15） |
 | S1 聲調鍵 | ㄋ＋聲調，整段反藍、不成字 | 照規則 10（完成音節，詞庫沒有的音節不收） |
-| 單按 Shift、Ctrl+Space | 切中英（各視窗各自記） | 還沒做（中英切換在之後一片）；Ctrl+Space 核心不處理（規則 1） |
+| 單按 Shift、Ctrl+Space | 切中英（各視窗各自記） | 不做 |
 | 候選窗底部列（▲▼、圖示）、捲動點、展開成三欄、滑鼠點選 | 有 | 都沒有（§3.15） |
 | 組字中或窗開著時的標點鍵（`[`、`]`、`\`、`'`、`=`、`` ` ``、Shift+/、Shift+1、Ctrl+\ 等，規則 2） | 沒有量 | 照規則 2：關窗（若有）、丟掉未完成音節，插入全形標點；與微軟注音是否相同沒有量 |
 
@@ -488,34 +491,37 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 ### 5.1 程式放哪裡
 
 - 三個 crate，都是 workspace 成員：
-  - `windows/proto`（`shanjie-win-proto`）：線上格式。純 Rust、不分平台、不相依 `windows` crate，三個平台的 CI 都編、都測。
+  - `windows/proto`（`shanjie-win-proto`）：線上格式與兩種身分的名稱表（`ids.rs`，§6.1）。純 Rust、不分平台、不相依 `windows` crate，三個平台的 CI 都編、都測。
   - `windows/host`（`shanjie-host`，產出 `shanjie-host.exe`）：pipe 伺服器、引擎、擁有者切換、計時檔。`#![cfg(windows)]` 包住主程式，macOS 與 Linux 上是空的 bin。相依 `shanjie_core`（§3.1 的改名寫法，只放在 `cfg(windows)`）、`shanjie-win-proto`、`windows`／`windows-core` 0.62。只呼叫核心的 C ABI。
   - `windows/tip`：不相依核心，改相依 `shanjie-win-proto`。`client.rs`（連線、伺服器核對、逾時、斷路器、啟動常駐程序）取代 DLL 內的引擎；`tip.rs`、`doc.rs`、`keys.rs` 只改呼叫引擎的地方。`pipeio.rs`（有期限的 overlapped I/O）、`token.rs`（權杖查詢）與 `timing.rs` 兩端共用，常駐程序以 `#[path]` 引入。
-- DLL、常駐程序、資料都在同一個安裝資料夾（開發版 `C:\Program Files\shanjie-dev\`，§3.3）；常駐程序從自己的 `GetModuleFileNameW` 推資料夾，資料在旁邊的 `data\`。
+- DLL、常駐程序、資料都在同一個安裝資料夾（開發版身分 `C:\Program Files\shanjie-dev\`、正式版身分 `C:\Program Files\Shanjie\`，§3.3、§6.2）；常駐程序從自己的 `GetModuleFileNameW` 推資料夾，資料在旁邊的 `data\`。
 - 只出 x64。
+- 安裝程式的自訂動作 DLL（`windows/installer-ca`）是第四個 crate，不在這條連線上（§6.8）。
 
 ### 5.2 程序模型
 
-- pipe 名稱 `\\.\pipe\shanjie-dev-<使用者 SID>-<工作階段 ID>`。名稱不帶協定版本：版本不同的兩端要碰得到彼此，才會走到 `Refuse { 1 }`。提升權限的 App 也連這一支（§5.5 第 5 點）。
+- pipe 名稱 `\\.\pipe\<前綴><使用者 SID>-<工作階段 ID>`，前綴開發版身分是 `shanjie-dev-`、正式版身分是 `shanjie-`（§6.1）。名稱不帶協定版本：版本不同的兩端要碰得到彼此，才會走到 `Refuse { 1 }`。提升權限的 App 也連這一支（§5.5 第 5 點）。
 - **實例**：啟動時一次建好全部 N＝64 個實例（`nMaxInstances = N`，第一個帶 `FILE_FLAG_FIRST_PIPE_INSTANCE`），之後以 `DisconnectNamedPipe`、`ConnectNamedPipe` 重複使用、永遠不關。第一個實例建不起來（已經有一支在跑）就結束。實例數已滿，誰都加不了實例，與 DACL 無關。不另外用具名 mutex。VM 驗收讀事件 65（同時連線數的最高值）核對 N。
 - **先建 pipe、再載模型**：載入期間收到 `Hello` 或 `Key` 立刻回 `NotReady`，客戶端直通。模型載入失敗、或引擎的鎖 poisoned，常駐程序就結束，讓下一個客戶端啟動新的一支。
-- **預熱**：模型載完之後、`install()` 之前，常駐程序用同一個引擎送一串固定的假按鍵（`a u / 6 w u 0 space y l 3 g ; 4`，ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ，不按 ↓、不開候選窗、不送出），讓第一個真的按鍵不必面對還沒進記憶體的模型頁面（這是推論，量測見 §5.8 的事件 69）；不論成敗，最後一律 `reset`（模式 1），所以引擎之後沒有組字、沒有前文，學習本來就關。預熱期間 `ready()` 仍是假，客戶端照 `NotReady` 直通。某一鍵被核心拒絕就停止預熱、記事件 70，照常 `install()`，不讓常駐程序起不來；`reset` 本身失敗時，這個引擎不放上線，釋放後重新載入一次（不再預熱），再失敗就照模型載入失敗結束。只有帶 `timing` 的量測版讀環境變數 `SHANJIE_HOST_NO_WARM=1` 來跳過預熱，正式版不讀、設定頁也沒有；DLL 啟動常駐程序時環境區塊只有 `SystemRoot`，使用者環境裡的這個變數傳不進產品的常駐程序。事件 2 的結束仍是載入完成的時刻（預熱之前），它在 `install()` 之後才寫。
-- **按鍵習慣**：載模型之前讀一次 `HKCU\Software\shanjie-dev\KeyScheme`（DWORD），用 `RegGetValueW(HKEY_CURRENT_USER, "Software\shanjie-dev", "KeyScheme", RRF_RT_REG_DWORD, …)` 讀進一個 `u32`：值是 0 或 1 就照用；沒有這個值、型別不對、`ERROR_MORE_DATA` 等任何錯誤、或值不是 0 與 1，一律當 1（Windows 預設照微軟注音）；夾完再傳給 `engine::load`，不讓 `set_key_scheme` 回 2 而讓常駐程序結束。`engine::load` 本身不讀登錄。值只在啟動時讀一次，改了要重新登入或結束常駐程序才生效；之後每條連線的 `Welcome` 帶這個值（§5.3）。信任：寫得進 `HKCU\Software` 的只有同一個使用者的 Medium 以上程序，它們本來就能影響常駐程序（§5.5 第 1、5 點已接受），所以這個值沒有跨過權限邊界。事件 71（§5.8）記讀到的結果。
+- **預熱**：模型載完之後、`install()` 之前，常駐程序用同一個引擎送一串固定的假按鍵（`a u / 6 w u 0 space y l 3 g ; 4`，ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ，不按 ↓、不開候選窗、不送出），讓第一個真的按鍵不必面對還沒進記憶體的模型頁面（這是推論，量測見 §5.8 的事件 69）；不論成敗，最後一律 `reset`（模式 1），所以引擎之後沒有組字、沒有前文，學習本來就關。預熱期間 `ready()` 仍是假，客戶端照 `NotReady` 直通。某一鍵被核心拒絕就停止預熱、記事件 70，照常 `install()`，不讓常駐程序起不來；`reset` 本身失敗時，這個引擎不放上線，釋放後重新載入一次（不再預熱），再失敗就照模型載入失敗結束。只有帶 `timing` 的量測版讀環境變數 `SHANJIE_HOST_NO_WARM=1` 來跳過預熱，不帶 `timing` 的建置（含 MSI 裝的）不讀、設定頁也沒有。DLL 啟動常駐程序時環境區塊只有 `SystemRoot`；Run 值與安裝程式完成頁啟動的常駐程序，環境區塊來自啟動它的程序（推論，待驗收：§6.4）；不帶 `timing` 的建置不讀這個變數，所以每一種啟動方式下，使用者環境裡的它都影響不了常駐程序。事件 2 的結束仍是載入完成的時刻（預熱之前），它在 `install()` 之後才寫。
+- **按鍵習慣**：載模型之前讀一次 `HKCU\<這個建置的設定機碼>\KeyScheme`（DWORD；開發版身分 `Software\shanjie-dev`、正式版身分 `Software\Shanjie`，路徑取自名稱表，`windows/host/src/startup.rs` 的 `settings_subkey`，§6.1），用 `RegGetValueW(HKEY_CURRENT_USER, <設定機碼>, "KeyScheme", RRF_RT_REG_DWORD, …)` 讀進一個 `u32`：值是 0 或 1 就照用；沒有這個值、型別不對、`ERROR_MORE_DATA` 等任何錯誤、或值不是 0 與 1，一律當 1（Windows 預設照微軟注音）；夾完再傳給 `engine::load`，不讓 `set_key_scheme` 回 2 而讓常駐程序結束。`engine::load` 本身不讀登錄。值只在啟動時讀一次，改了要重新登入或結束常駐程序才生效；之後每條連線的 `Welcome` 帶這個值（§5.3）。信任：寫得進 `HKCU\Software` 的只有同一個使用者的 Medium 以上程序，它們本來就能影響常駐程序（§5.5 第 1、5 點已接受），所以這個值沒有跨過權限邊界。事件 71（§5.8）記讀到的結果。
 - **誰啟動**：DLL 連線得到 `ERROR_FILE_NOT_FOUND`，而且呼叫端同時符合以下全部條件時，才 `CreateProcessW`；`ERROR_PIPE_BUSY` 不啟動、直通。
   - 呼叫端完整性剛好是 Medium、不是 AppContainer、不是提升權限、不是受限權杖、工作階段不是 0、使用者不是 SYSTEM／LocalService／NetworkService、沒有套件身分（`GetCurrentPackageFullName` 回 `APPMODEL_ERROR_NO_PACKAGE`；封裝 App 開的子程序會留在它的套件執行環境裡）。
   - 不等：送出 `CreateProcessW` 就讓這一鍵直通，不在 `OnKeyDown` 或 `ActivateEx` 裡等 pipe 出現。每個程序同時只啟動一次；啟動後 10 秒內不再啟動，期間的鍵直通。啟動 15 秒後、或它啟動的常駐程序已經結束，連線仍是 `ERROR_FILE_NOT_FOUND`，記一次「啟動後仍找不到」（事件 63 原因 5），照退避重試；永久直通只由 `Refuse { 1 }` 觸發。
   - `lpApplicationName` 是 DLL 旁的 `shanjie-host.exe` 的絕對路徑；命令列加引號、只有一個固定旗標 `--resident`，不帶任何從宿主取得的字串；工作目錄是安裝資料夾；環境區塊只有 `SystemRoot`。
   - 只繼承 NUL 的三個標準 handle（`EXTENDED_STARTUPINFO_PRESENT`、`STARTF_USESTDHANDLES`、`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`），啟動後關掉。旗標 `CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB | CREATE_UNICODE_ENVIRONMENT`；宿主的 Job 不准脫離時不啟動、這一鍵直通。
+- **安裝程式的兩種啟動**（命令列 `--resident --logon`，見下一條）：登入時由 HKLM 的 Run 值啟動，與安裝程式完成頁的「完成」鈕啟動（§6.4）。這兩種不經過上面 DLL 的條件，由 `--logon` 的檢查（見「自我檢查」）判斷要不要留下。
+- **命令列**：視窗子系統（`#![cfg_attr(not(test), windows_subsystem = "windows")]`；Run 值與安裝程式啟動它時不帶 `CREATE_NO_WINDOW`，主控台程式會在使用者桌面開出視窗；它不讀寫標準輸出入）。只認兩種：剛好 `--resident --logon`（`Launch::Logon`）；其他任何命令列，包括 `--resident`、沒有參數、順序相反或多出的參數，都當 `--resident`（`Launch::Resident`），不因多餘的參數結束、不印任何東西。
 - **生命週期**：活到登出，沒有連線也不自己結束（載入一次約 2 秒）。沒有看門狗：誰連不上、符合條件，誰啟動。
-- **已知限制**：登入時預先啟動屬於安裝程式；在那之前，只在有套件身分的 App（例如 Windows 11 的記事本）或 AppContainer 裡打字時不會啟動常駐程序，那些 App 只有英文，要有一個一般的桌面程式（例如「執行」對話框、多數 Win32 App）先打過字。
-- **自我檢查**（`main` 一開始）：權杖不是剛好 Medium、提升權限、AppContainer、受限權杖、工作階段 0、SYSTEM 或服務帳號、或有套件身分，就結束。接著 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`、`WerAddExcludedApplication`（寫 HKCU；失敗就結束：記憶體裡有所有 App 的組字，dump 不能落地），裝不印 payload 的 panic hook。
+- **已知限制**：登入時預先啟動由安裝程式的 Run 值做（§6.4）；沒有它的環境（開發版身分、用基本或無介面方式裝而還沒登出再登入），只在有套件身分的 App（例如 Windows 11 的記事本）或 AppContainer 裡打字時不會啟動常駐程序，那些 App 只有英文，要有一個一般的桌面程式（例如「執行」對話框、多數 Win32 App）先打過字。
+- **自我檢查**（`main` 一開始）：權杖不是剛好 Medium、提升權限、AppContainer、受限權杖、工作階段 0、SYSTEM 或服務帳號、或有套件身分，就結束。接著 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`；**命令列是 `--resident --logon` 時**再問 `ITfInputProcessorProfiles::IsEnabledLanguageProfile`（這個建置的 CLSID、0x0404、這個建置的設定檔 GUID，`server::profile_enabled`；COM 只在這一問期間存在這個執行緒）：回「沒啟用」或任何失敗（含 COM 初始化）就以結束碼 8 結束，不載模型、不建 pipe；只帶 `--resident` 的啟動不做這一步。之後是 `WerAddExcludedApplication`（寫 HKCU；以檔名 `shanjie-host.exe` 登記，開發版與正式版身分共用；失敗就結束：記憶體裡有所有 App 的組字，dump 不能落地），不印 payload 的 panic hook 在這一切之前就裝好了。`--logon` 的意思是「使用者自己把善解從輸入法清單拿掉了就不留」：註冊之後這位使用者的這個值是 1，拿掉之後是 0（測試 VM 量到，§6.3）。
 
 ### 5.3 線上格式（`windows/proto`）
 
 - 固定寬度、小端，不用自描述的序列化。每則：`u32 len`、`u16 proto`、`u16 type`、`u64 seq`，後面是型別專屬的內容。字串一律 UTF-16 長度加資料。
 - 客戶端 → 常駐程序：`Hello { build_hash, pid, tid }`（pid、tid 只是資訊，不拿來授權）；`Key { ctx, ShanjieKey }`；`Release { ctx }`；`Reset { ctx }`（DLL 接住 panic 之後；送出後客戶端關掉這條連線，因為 panic 可能發生在一次交換的中間）。
 - 常駐程序 → 客戶端：`Welcome { build_hash, key_scheme }`（`key_scheme` 是一個位元組，0 或 1：這支常駐程序引擎的按鍵習慣，§5.2；DLL 的 `OnTestKeyDown` 只從這裡得知，§3.6；其他值解碼就拒絕）；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected, candidate_first, candidate_total, candidates }`（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理；`candidates` 是直排候選窗**可見的列**，最多 9 項，`candidate_selected` 是可見列裡的位置，`candidate_first` 是第一列在全部清單裡的位置，`candidate_total` 是全部清單的長度；窗沒開時 `candidate_selected` 是 −1、`candidates` 為空、兩個數字都是 0）；預留 `Pushed`，客戶端收到就丟掉。
-- `proto` 不同 → `Refuse { 1 }`（`PROTO` 目前是 3：2 是 `Out` 加了 `candidate_first`、`candidate_total` 並填入 `candidates`，3 是 `Welcome` 加了 `key_scheme`）；`build_hash` 不同不拒絕、不記錄。PROTO 3 的 DLL 遇到還在跑的 PROTO 2 常駐程序（PROTO 2 的常駐程序對 PROTO 3 的 `Hello` 也回 `Refuse { 1 }`）會收到 `Refuse { 1 }`，那個 App 直通到重開；更新時要先結束舊的常駐程序（安裝與更新流程另寫，這一版沒有）。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
+- `proto` 不同 → `Refuse { 1 }`（`PROTO` 目前是 3：2 是 `Out` 加了 `candidate_first`、`candidate_total` 並填入 `candidates`，3 是 `Welcome` 加了 `key_scheme`）；`build_hash` 不同不拒絕、不記錄。PROTO 3 的 DLL 遇到還在跑的 PROTO 2 常駐程序（PROTO 2 的常駐程序對 PROTO 3 的 `Hello` 也回 `Refuse { 1 }`）會收到 `Refuse { 1 }`，那個 App 直通到重開；更新由安裝程式做：升級（或解除安裝）時 `KillHost` 結束舊的正式版常駐程序（§6.5、§6.7），已經載著舊 DLL 的 App 在協定版本有變的那一版會收到 `Refuse { 1 }`、只有英文，到重開 App 為止（到時寫進發版說明）。開發版身分沒有安裝程式，要先自己結束舊的常駐程序。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
 - **擁有者由常駐程序指定**：`owner = (連線 ID, ctx)`，連線 ID 單調遞增、不重用；客戶端只送自己的 `ctx`（`ITfContext` 的指標值），它只在自己那條連線裡有意義。換擁有者先 `reset(mode 1)`（§3.4 的那一套：一個引擎）；新擁有者的 `Out` 不帶舊擁有者的候選窗（reset 之後窗是關的）。`Release` 要 `(連線, ctx)` 完全相符才 reset；`Reset` 與斷線只看連線，是目前的擁有者才 reset 並清掉擁有者。
 - **解析規則**（兩端共用）：
   - 讀到 `len` 之後、配置記憶體之前，先檢查 16 ≤ `len` ≤ 64 KiB，而且等於這則訊息實際的位元組數。
@@ -545,7 +551,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
    - (b) 不是 AppContainer 的客戶端再查伺服器程序的權杖（`GetNamedPipeServerProcessId` → `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` → `OpenProcessToken(TOKEN_QUERY)`）：使用者相同、完整性剛好是 Medium、不是 AppContainer、不是受限權杖。
    - (c) 映像路徑（`QueryFullProcessImageNameW`，不分大小寫）必須等於 DLL 旁的 `shanjie-host.exe`，只當補充、查不到就拒絕；和 (b) 一樣只對非 AppContainer 客戶端做（AppContainer 開不了常駐程序的程序）。
    - 受限權杖的判斷直接讀 `TokenRestrictedSids` 的群組數，查詢失敗就拒絕。
-   - 邊界：同一個使用者、同為 Medium 的程式本來就能裝鍵盤鉤子或注入，對 Medium 客戶端這是縱深防禦。擋得住的是其他使用者冒充（擁有者 SID、工作階段不同），以及對非 AppContainer 客戶端的 Low／AppContainer 冒充者（伺服器權杖不是 Medium）。AppContainer 客戶端只做得到 (a)：同一個使用者的 Low 程序搶先建的 pipe，擁有者與工作階段都相同，(a) 分不出來，這是接受的殘餘風險（需要同一使用者的 Low 程式先在跑、搶在常駐程序之前）。任何本機使用者都能搶先佔用別人的 pipe 名稱讓對方只剩英文；登入時預先啟動會縮小這兩個空檔。
+   - 邊界：同一個使用者、同為 Medium 的程式本來就能裝鍵盤鉤子或注入，對 Medium 客戶端這是縱深防禦。擋得住的是其他使用者冒充（擁有者 SID、工作階段不同），以及對非 AppContainer 客戶端的 Low／AppContainer 冒充者（伺服器權杖不是 Medium）。AppContainer 客戶端只做得到 (a)：同一個使用者的 Low 程序搶先建的 pipe，擁有者與工作階段都相同，(a) 分不出來，這是接受的殘餘風險（需要同一使用者的 Low 程式先在跑、搶在常駐程序之前）。任何本機使用者都能搶先佔用別人的 pipe 名稱讓對方只剩英文；登入時預先啟動（安裝程式的 Run 值，§6.4）會縮小這兩個空檔。
    - 客戶端的使用者是 SYSTEM、LocalService、NetworkService，或完整性是 System 以上，一律不連線、直通。
 2. **SDDL**（程式裡一個常數）：`D:P(A;;0x12019F;;;<使用者 SID>)(A;;0x120083;;;AC)(A;;0x120083;;;S-1-15-2-2)S:(ML;;NW;;;LW)`。
    - 使用者 SID 那條是 `FILE_GENERIC_READ | FILE_GENERIC_WRITE`：留著建實例要的權限，沒有 `WRITE_DAC`、`WRITE_OWNER`、`DELETE`。
@@ -595,6 +601,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 ### 5.10 CI
 
 - `windows` job：建 `shanjie-tip`、`shanjie-host`（各自先帶 `timing`、再不帶，檢查的是不帶的那一份），`dumpbin /dependents` 核對 DLL 與 exe 都沒有 C 執行階段的匯入、DLL 的匯入表列得到 `d2d1.dll` 與 `dwrite.dll` 而且沒有 delay-load 的匯入，`dumpbin /exports` 核對 DLL 沒有 `shanjie_` 開頭的匯出（另核對 `DllGetClassObject` 在），`cargo tree -p shanjie-tip` 沒有 `core`，印出大小；跑三個 crate 的測試（線上格式、客戶端的模擬等級、對真的伺服器與引擎的兩條連線與限流、DLL 與常駐程序的 R2 行為測試）。
+- `windows-msi` job：正式版身分的測試、MSI 的建置與核對（§6.9）。
 - Linux `debug` job 跑 `shanjie-win-proto` 的測試；macOS 的 core job 跑整個 workspace。
 
 ### 5.11 驗證方式
@@ -619,7 +626,232 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 
 ### 5.12 範圍外
 
-- 登入時預先啟動的排程工作、安裝程式、更新流程、簽章。
+- 自動更新、簽章。安裝與解除安裝見 §6；登入時預先啟動用 Run 值，不用排程工作（§6.4）。
 - 學習檔（含 AppContainer 客戶端的學習政策，以及輸入範圍含 `IS_PRIVATE` 的 context 不學，§3.15）；背景重排與 `Pushed` 的實際使用；預測列；候選窗的底部列、捲動點、展開成三欄與滑鼠點選；聊天／書面、分級等設定。
 - x86、ARM64 的 DLL 與 ARM64 的常駐程序；每個客戶端一個引擎；可 mmap 的零拷貝模型格式；常駐程序在沒有連線時自己結束。
 - 之後新增送往常駐程序的資料（前文回傳、學習的查詢）時，要重審 §5.5 第 1、5 點與 AppContainer 客戶端的政策。
+
+## 6. 安裝與解除安裝（`windows/installer`、`windows/installer-ca`、`scripts/windows`）
+
+一份 MSI（Windows Installer 套件，WiX 3.14 建置）把 DLL、常駐程序、資料與授權檔裝進 `C:\Program Files\Shanjie\`、註冊文字服務、設定登入時預先啟動常駐程序，解除安裝時問要不要留設定。給使用者看的說明在 `docs/windows/install.md`。
+
+**證據的種類**：都在測試 VM（Windows 11，組建 26100 系列，UAC 預設，系統管理員帳號，主要輸入法微軟注音）量。寫「真的 MSI」「測試 VM 量到」或「新 MSI」的，是這份 MSI 的驗收；只寫「量到」的，是先前用一份假安裝檔量到的：它的結構與這份 MSI 相同（每台機器安裝、同樣的屬性、同樣的升級設定、同樣沒有授權頁與瀏覽頁的介面），只裝假 DLL 與假常駐程序，和這份 MSI 用同一個 WiX 版本建；兩者不同的地方在內文寫明（例如 `/passive` 的前景）。標「推論」的是從量到的行為或程式推出來的，標「待驗收」的還沒量。程式本身與 CI 核對的事（§6.9）不標。
+
+### 6.1 兩種身分
+
+同一個程式碼樹產出兩種身分的建置，名稱不共用，所以兩種可以同時裝：
+
+| 項目 | 開發版身分 | 正式版身分（MSI 裝的） |
+|---|---|---|
+| 安裝資料夾 | `C:\Program Files\shanjie-dev\`（手動複製） | `C:\Program Files\Shanjie\` |
+| CLSID、設定檔 GUID、顯示屬性 GUID | 一組 | 另一組 |
+| 設定檔名稱 | 善解（開發版） | 善解 |
+| pipe 名稱開頭 | `shanjie-dev-` | `shanjie-` |
+| 設定的登錄位置 | `HKCU\Software\shanjie-dev` | `HKCU\Software\Shanjie` |
+| 計時檔資料夾（只有帶 `timing` 的建置用，§3.11） | `%LOCALAPPDATA%\shanjie-dev\` | `%LOCALAPPDATA%\Shanjie\` |
+
+- 名稱表在 `windows/proto/src/ids.rs`（`DEV`、`RELEASE` 兩組常數，兩組永遠都編；這個建置用的是 `IDS`）。cargo feature `release-ids`（`shanjie-win-proto`、`shanjie-tip`、`shanjie-host` 各一個，開了其中一個會連動 `shanjie-win-proto` 的）選正式版身分；不開就是開發版身分。`shanjie-tip` 的 `guids.rs`、pipe 名稱（`shanjie_win_proto::pipe_name`）、常駐程序讀 `KeyScheme` 的路徑（`startup::settings_subkey`）、計時檔資料夾都從 `IDS` 取，程式裡沒有別的字面值。
+- 不屬於身分的：安裝資料夾（每個 exe 從自己的路徑找旁邊的檔，§3.3）與候選窗的視窗類別名（DLL 註冊的類別只屬於那個模組，兩個 DLL 在同一個程序裡不衝突）。
+- 標記符號：`release-ids` 開著時，DLL 與 exe 各多匯出一個 `SjMarkReleaseIds`；`timing` 開著時各多匯出 `SjMarkTiming`。DLL 用 `#[no_mangle]`；exe 預設不匯出任何符號，由 `windows/host/build.rs` 在 feature 開著時加連結器參數 `/EXPORT:<符號>`。名稱不以 `shanjie_` 開頭（§3.1 的匯出檢查看的是那個開頭）。CI 用 `dumpbin /exports` 看它們（§6.9）。
+- 測試：兩組名稱表互不相同（`ids::tests::the_two_identities_share_nothing`）；這個建置的值等於上表的字面值（`this_build_has_the_documented_literals`，`windows-msi` job 以 `--features release-ids` 跑正式版的那一半，`windows` job 跑開發版的一半）；常駐程序讀設定的路徑是名稱表的值（`startup::tests::the_key_scheme_is_read_from_this_builds_settings_key`）；`pipe_name` 的測試也分兩種身分。
+- MSI 只裝正式版身分、**不帶 `timing`** 的建置。
+- 兩種身分並存、解除安裝其中一個不影響另一個：待驗收（D1）。
+
+### 6.2 MSI 的內容
+
+- 產品名「善解」；每台機器安裝（`perMachine`，要 UAC）；只出 x64；只出 MSI，沒有 Burn 的 setup.exe。
+- 語言：一份 MSI，介面與自訂動作的文字只有繁體中文（`Language` 1028、`Codepage` 950，`light -cultures:zh-TW`）。
+- 版本號：唯一來源是建置時的環境變數 `SHANJIE_VERSION`（`MAJOR.MINOR.PATCH`，不超過 MSI 的上限 255.255.65535，和 Mac 版的 `build-app.sh` 同一個變數）；沒給或格式不對，`build-msi.ps1` 失敗。CI 給 `0.0.<run_number>`。
+- 升級：`UpgradeCode` 固定、`ProductCode` 每次建置都換（`Product Id="*"`）；`MajorUpgrade`，`Schedule="afterInstallInitialize"`、`AllowSameVersionUpgrades="yes"`；降版被拒絕，顯示固定的一句「這台電腦已經裝了較新版本的善解。」（`DowngradeErrorMessage`）。量到：新版先開始，接著巢狀跑舊版的移除（`REMOVE=ALL`、`UPGRADINGPRODUCTCODE` 有值），再回到新版裝檔與註冊（§6.5）；降版在 UAC 之前就被擋下，訊息框顯示那一句。
+  - CI 的核對不檢查 `RemoveExistingProducts` 的位置（`dark` 反組譯會把它併進 `MajorUpgrade`，而且排程寫錯）；程式審查直接讀建好的 MSI 的表核對過：`RemoveExistingProducts` 是 1501，緊接 `InstallInitialize`（1500）。
+- **檔案**（`[安裝資料夾]`；逐一列在 `windows/installer/shanjie.wxs`，每個檔一個元件、KeyPath 在安裝資料夾；`scripts/windows/check-msi.ps1` 裡另有一份預期清單，多一個或少一個都失敗，§6.9）：
+
+  | 位置 | 檔案 |
+  |---|---|
+  | 根 | `shanjie_tip.dll`、`shanjie-host.exe`、`LICENSE` |
+  | `data\lexicon\` | `mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`、`mixed-words.tsv` |
+  | `data\packs\` | `acg-add.tsv`、`acg-sources.tsv`、`acg.json`、`it-add.tsv`、`it-sources.tsv`、`it.json` |
+  | `data\lm\` | `data/models.tsv` 列的全部 7 個：`bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm` |
+  | `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`CC-BY-SA-4.0-attribution.txt` |
+
+  - 和 Mac 版 `scripts/build-app.sh` 的差別：沒有美妝與台詞詞包（§3.4：Windows 版只帶 `acg`、`it`）、沒有 Sparkle 的授權檔、沒有 `models.tsv`；`LICENSE` 在根而不在 `LICENSES\`。模型和 Mac 版一樣是全部 7 個：常駐程序載入 `bigram.sjlm` 時連旁邊的辨類、承接與兩個 trigram 表一起載，少了 `classes.sjc` 會載入失敗，少了其他的那一項會默默關掉，解碼結果就和量過的不同（§3.4）。`mixed-words.tsv` 核心有就讀。
+  - 模型與 `colloquial-attribution.tsv` 的 SHA-256 要符合 `data/*.sha256`（`check-msi.ps1` 核對）。
+  - `CC-BY-SA-4.0-attribution.txt` 是建置時產生的（`build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段，拿掉 Windows 版不帶的迷因詞包（第一段的三個檔名與 `packs/meme-add.tsv` 那一段；每一處都要剛好找到一次，否則建置失敗），在「Details: data.md.」那一行後面多一段，點名靜態連結進來的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0），最後接 name-suggestion-index 的聲明全文；文字裡出現 Sparkle 就失敗。`check-msi.ps1` 只解析第一段（到「are licensed」為止）的檔名，必須剛好是這 18 個（`check-msi.ps1` 寫死的清單，和 `build-app.sh` 那一段列的相同）。`LICENSES/data.md` 兩個平台共用。
+- **安裝位置不能改、只有系統管理員能寫**：安裝資料夾的目錄 Id 含小寫字母（私有屬性，命令列改不到），介面沒有「瀏覽」；帶 `TARGETDIR`、`ProgramFiles64Folder` 這類屬性也不改位置（待驗收，I1）。資料夾繼承 Program Files 的 ACL，安裝程式不改 ACL；因此只有系統管理員能寫是推論，要在 VM 用 §3.3 的 `Get-Acl` 方法核對（待驗收，I1）。已知限制：資料夾在安裝前就存在時，安裝程式不重設它的 ACL；只有系統管理員能預先建它。
+- **介面**：WiX 內建的歡迎、確認、進度、完成與維護歡迎頁，加兩頁自己的：「修復或移除」（只有「修復」「移除」，沒有「變更」：沒有功能可選）與「要保留什麼」（一個勾，§6.7）。不引用 `WixUI_Common`（它帶進來的自訂動作與 DLL 不能出現在套件裡），頁面用到的點陣圖與圖示是 WixUIExtension 內建的（WiX 的頁面自己會帶進來；套件自己定義會和它們重複，連結失敗）。沒有授權頁、選資料夾頁、功能樹、`MsiRMFilesInUse`（重新啟動管理員關著，用不到）。有 WiX 的 `FilesInUse` 頁（§6.5）。
+  - 連結時所有 ICE 驗證都跑。量到兩條警告：ICE61（同版號升級）是預期的，ICE63（有動作排在 `InstallInitialize` 與 `RemoveExistingProducts` 之間）不該出現，`build-msi.ps1` 在 `light` 輸出有 ICE63 時失敗。
+  - 完成頁的固定文字「善解已經裝好。已經開著的 App 切一次輸入法就能用。」只在 `NOT Installed`（全新安裝與升級）時顯示；同一頁在移除與修復結束時不顯示這句（WiX 的 `OptionalText` 控制項，`check-msi.ps1` 核對條件）。量到：註冊前就開著的記事本，在常駐程序已經跑著時，切到善解就打得出字；記事本是封裝 App，自己不會啟動常駐程序（§5.2）。完成頁文字與修復完成頁：待驗收（I1、U4）。
+- **不讓 MSI 自我修復、不留使用者可寫的入口**：沒有通告（advertised）捷徑；沒有 Class、Extension、SelfReg、Shortcut；每個元件的 KeyPath 在安裝資料夾或 HKLM；沒有 HKCU 的 Registry 項目；沒有安裝資料夾以外的 `RemoveFile`、`RemoveFolder`、`CreateFolder`。
+- **屬性與啟動條件**：`MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`（§6.5）；`KEEPSETTINGS`、`KEEPMEMORY` 公開且 Secure、Property 表沒有值（§6.7）；`SecureCustomProperties` 只有這兩個與升級用的屬性。啟動條件 `Installed OR MSIINSTALLPERUSER<>1`：擋下「只裝給目前使用者」（`ALLUSERS=2 MSIINSTALLPERUSER=1`），已安裝的產品永遠能修復或移除，訊息是「善解只能裝給這台電腦的所有使用者，不能只裝給目前的使用者。」帶 `ALLUSERS=""` 的結果：待驗收記錄（I1）。
+
+### 6.3 註冊與輸入法清單
+
+- 註冊：系統身分的延後動作，用 System32 的 `regsvr32 /s "<DLL>"` 對裝好的 DLL 呼叫 `DllRegisterServer`（§3.2）；解除安裝用 `regsvr32 /s /u`。不直接寫 TSF 的登錄；`regsvr32` 是視窗子系統程式，一律帶 `/s`。
+- **不替使用者加進輸入法清單**，不呼叫 `InstallLayoutOrTip`。量到（開發版 DLL 以系統管理員身分 `regsvr32`，設定檔註冊成預設啟用）：
+
+  | 時點 | `IsEnabledLanguageProfile` | `GetProfile` 的旗標 | `EnumEnabledLayoutOrTip` 那一列的旗標 | 切換清單 |
+  |---|---|---|---|---|
+  | 只註冊 | 1 | 0x2 | 0x0 | 有 |
+  | `InstallLayoutOrTip` 加入後 | 1 | 0x3 | 0x0 | 有 |
+  | `InstallLayoutOrTip` 拿掉後 | 0 | 0x3 | 0x2 | 沒有 |
+
+  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同：推論，待驗收（I1、I3）；不成立就停下回報。其他使用者的清單裡有沒有善解：沒量，待驗收（U7 的第二個使用者）。安裝程式不碰任何使用者的清單；取消註冊後它從清單消失：待驗收（U6）。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
+
+### 6.4 登入時預先啟動，與裝完不用登出
+
+- **Run 值**：`HKLM\Software\Microsoft\Windows\CurrentVersion\Run` 的值 `Shanjie`，內容 `"C:\Program Files\Shanjie\shanjie-host.exe" --resident --logon`（MSI 的 Registry 表，KeyPath 在 HKLM）。量到：重開機後由 Explorer 以登入者、Medium 啟動，父程序 Explorer，約在開機後 13 秒。安裝後 Windows 自己跳一則通知「現在已設定 probe-host 以在您登入時執行…」，顯示的是 exe 的檔名；真的 MSI 顯示的是 `shanjie-host`（推論，待驗收）。
+- **`--logon`**（§5.2）：先問這位使用者的輸入法清單有沒有善解，沒有就直接結束，不載模型、不建 pipe。註冊之後這個值是 1，用 `InstallLayoutOrTip` 把善解從清單拿掉後是 0（量到，§6.3）；使用者在設定頁拿掉也一樣：推論，待驗收（I3）。所以意思是「使用者自己拿掉了就不留」；沒拿掉的每位使用者，每次登入都有一支常駐程序（私有記憶體約 300 MB，§5.11）。
+- **完成頁啟動**：完成頁的「完成」鈕啟動常駐程序，裝完不用登出。
+  - 動作 `StartHost`：執行檔型（type 34）自訂動作，`Directory` 是安裝資料夾，命令列 `"[#FHost]" --resident --logon`，`Return="asyncNoWait"`，不排進任何序列；只由 `ExitDialog` 的 `Finish` 鈕的 `DoAction` 觸發，條件 `NOT Installed`（全新安裝與升級成立；修復與維護模式不成立；失敗與取消走別的頁）。
+  - 量到：完成頁觸發的 DLL 型動作直接啟動程序，雙擊安裝與完整介面升級時是登入者、Medium。執行檔型動作在同一條路上也是這樣：推論，待驗收（I2：父程序、完整性等級、工作目錄、沒有視窗、繼承的 handle 與所屬 Job）。
+  - 從已提升的命令列跑完整介面時，啟動出來的程序是 High，常駐程序的自我檢查（§5.2）讓它結束：推論，待驗收（I4）。量到的是立即動作與模擬動作直接啟動，在已提升的 `/qn`、`/passive`（工作階段 0）下是 High、工作階段 0。
+  - 基本介面與無介面的安裝（`/qb`、`/passive`、`/qn`、部署工具）沒有完成頁，不啟動：下次登入由 Run 值啟動；在那之前，一般的桌面程式第一次打字時會啟動它（§5.2）。
+  - 不做「請桌面的 Explorer 代為啟動」：量到那樣啟動出來的程序在每條路上都是登入者、Medium，但它讓提升權限的程序使用一般權限程序回傳的 COM 物件。
+- UAC 關掉（`EnableLUA=0`）的機器上每個程序都是 High，常駐程序的自我檢查會讓它結束，善解在那樣的機器上不能用（推論，已知限制）。
+
+### 6.5 檔案被占用，與升級
+
+DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`；Dialog 表有 WiX 的 `FilesInUse`、沒有 `MsiRMFilesInUse`。
+
+**有視窗的 App 載著 DLL 時，Windows 會跳出它內建的「檔案使用中」視窗**（真的 MSI，測試 VM 量到：從設定頁解除安裝、記事本打過字）：標題「善解」，內文「繼續安裝之前應先關閉下列應用程式:」，清單列出那個 App（例如「*測試 - 記事本」），按鈕「取消」「重試」「略過」。原因：`MSIRESTARTMANAGERCONTROL=Disable` 讓 Windows Installer 改用它內建的檢查（verbose log：`RESTART MANAGER: Disabled by MSIRESTARTMANAGERCONTROL property; Windows Installer will use the built-in FilesInUse functionality.`），它列出用到善解、找得到視窗的程序。按「略過」照常繼續：不關任何程式，被占用的檔案照下面的方式處理。這個視窗是預期的行為，安裝說明教使用者按「略過」。
+
+- 基本介面（`/qb`、`/passive`、設定頁的解除安裝）用 Windows 自己畫的那個框；完整介面（雙擊安裝或升級、維護精靈）改用套件裡名為 `FilesInUse` 的頁，所以套件放了 WiX 的那一頁（標題「檔案使用中」，按鈕「結束」「忽略」「重試」；按「忽略」照常繼續）。量到（測試 VM，新 MSI）：雙擊升級與維護精靈的移除都出現這一頁，升級時兩次，log 沒有 2803。量到（測試 VM）：套件沒有這一頁時，完整介面在同樣情況下跳兩次「錯誤碼為 2803」（log：`Dialog View did not find a record for the dialog`），按確定後照常完成。
+- 升級也會跳：`/qb` 升級時跳兩次（裝新版一次、移除舊版一次），略過兩次後照常完成（結束碼 0）。沒有視窗的程序（例如 explorer）載著 DLL 時不跳。
+- 修復也會跳（完整介面修復走的是基本介面的進度框，跳的是 Windows 自己的框）。
+
+量到（假安裝檔；占用檔案的是沒有視窗的 `rundll32`，所以上面那個視窗沒有出現；載著 DLL 的程序在每一列都還在、PID 不變）：
+
+| 動作 | 對話框 | 結果 | 結束碼 |
+|---|---|---|---|
+| 解除安裝：基本介面 | 沒有 | 安裝資料夾當場不見 | — |
+| 解除安裝：`/x /qn` | 沒有 | 同上；機器沒有自己重開 | **0**（不是 3010） |
+| 解除安裝：完整介面「修改 → 移除」 | 沒有；完成頁沒有重開機提示 | 同上 | — |
+| 升級：`/i 新版 /qn` | 沒有 | 只有一筆新版本；**磁碟上的 DLL 當場就是新版** | 0 |
+| 升級：完整介面 | 沒有 | 同上 | — |
+
+- 被占用的檔被搬到 `C:\Config.Msi\*.rbf`，重開機時（`PendingFileRenameOperations`）刪的是那個搬走的檔，不是安裝路徑。所以：安裝資料夾當場清空；新開的 App 載到新版；解除安裝後不重開機就重裝沒有問題（量到：重裝再重開機後，檔案、註冊、Run 值都在）。
+- **無介面解除安裝在檔案被占用時結束碼是 0，不是 3010**（量到：上表）。
+- 有視窗的 App（記事本）占用檔案時也一樣：推論，待驗收（U6、U7）。基本介面的升級沒量，待驗收（U7）。
+- 已經載著舊 DLL 的 App 用舊的，直到它重開。線上協定版本有變的那一版，這些 App 會收到 `Refuse { 1 }`、只有英文，到重開 App 為止（§5.3、§5.6）。
+- 升級時不取消註冊（新版用同一組 GUID 與路徑重新註冊）：量到巢狀的舊版移除裡取消註冊沒跑、新版有註冊。修復或升級失敗還原時也不取消註冊（`RegisterRollback` 的條件）。
+- 升級時舊版常駐程序由 `KillHost` 結束（§6.7）；還載著 DLL 的 App 可能在它之後又把常駐程序啟動起來，那一支活到登出，exe 照「檔案被占用」處理：待驗收記錄（U6、U7：有沒有發生、那支程序的映像路徑）。
+
+### 6.6 自訂動作
+
+出貨的 MSI 裡就是這些，一列不多一列不少（`check-msi.ps1` 逐列比對，§6.9）：
+
+| Id | 種類 | 排在 | 條件 | 失敗時 |
+|---|---|---|---|---|
+| `AskKeep` | DLL `installer-ca`，立即 | `InstallValidate` 之後 | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND (UILevel=3 OR UILevel=4) AND KEEPSETTINGS="" AND KEEPMEMORY=""` | 中止（只有使用者按取消時；自己出錯不算失敗，§6.8） |
+| `SetKEEPSETTINGS` | 設定屬性（值 `1`） | `AskKeep` 之後 | `KEEPSETTINGS<>"0"` | — |
+| `SetKEEPMEMORY` | 設定屬性（值 `1`） | `SetKEEPSETTINGS` 之後 | `KEEPMEMORY<>"0"` | — |
+| `UnregisterRollback` | `regsvr32 /s "[#DLL]"`，rollback，系統 | `Unregister` 之前 | 同 `Unregister` | 忽略 |
+| `Unregister` | `regsvr32 /s /u "[#DLL]"`，延後，系統 | `RemoveFiles` 之前 | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE` | 忽略（取消註冊失敗不該讓產品移除不掉） |
+| `SetKillHost` | 設定屬性（值 `[#常駐程序]`，給 `KillHost` 當參數） | `KillHost` 之前 | 同 `KillHost` | — |
+| `KillHost` | DLL，延後，系統 | `Unregister` 之後、`RemoveFiles` 之前 | `REMOVE="ALL" OR REINSTALL<>""`（升級移除舊版時、修復時也做） | 忽略 |
+| `RegisterRollback` | `regsvr32 /s /u "[#DLL]"`，rollback，系統 | `Register` 之前 | `NOT Installed AND NOT WIX_UPGRADE_DETECTED` | 忽略 |
+| `Register` | `regsvr32 /s "[#DLL]"`，延後，系統 | `InstallFiles` 之後 | `NOT REMOVE="ALL"`（安裝、修復、升級裝新版時） | **中止並 rollback**（註冊失敗而安裝照樣成功，就是裝了卻沒有輸入法） |
+| `DeleteSettings` | DLL，延後，模擬、`TerminalServerAware` | `InstallFinalize` 之前（最後一個延後動作） | `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE AND KEEPSETTINGS="0"` | 忽略 |
+| `StartHost` | 執行檔型（type 34），不等待 | 不在序列裡；只由完成頁的「完成」鈕觸發（§6.4） | `NOT Installed` | 忽略（不等待） |
+
+- 序列裡這幾段各自連續：`InstallValidate`、`AskKeep`、`SetKEEPSETTINGS`、`SetKEEPMEMORY`；`UnregisterRollback`、`Unregister`、`SetKillHost`、`KillHost`、`RemoveFiles`；`InstallFiles`、`RegisterRollback`、`Register`；`DeleteSettings`、`InstallFinalize`（`check-msi.ps1` 核對）。
+- **都排在 `InstallValidate` 之後**：量到走「修改 → 移除」時，`InstallValidate` 之前 `REMOVE` 是功能名（`Main`），之後才是 `ALL`。
+- `regsvr32` 的路徑是 `"[System64Folder]regsvr32.exe"`；`[#檔案 Id]` 在移除時解得出路徑（量到：移除時 `DllUnregisterServer` 有被呼叫）。
+- `KillHost` 沒有 rollback：解除安裝失敗還原後，一般桌面程式下一鍵會重新啟動常駐程序；有套件身分的 App 要等重新登入。已知限制。
+- `DeleteSettings` 沒有 rollback：它是最後一個延後動作；不用 commit 型動作（系統政策關掉 rollback 時 commit 動作不會跑）。
+- **通則**：
+  - 任何自訂動作都不執行主控台程式。
+  - 系統身分的動作不讀、不寫、不刪使用者可寫的位置。
+  - 除了 `StartHost`（由完成頁的一個按鈕觸發）之外，自訂動作只排在 `InstallExecuteSequence`；`InstallUISequence` 沒有自訂動作。
+  - 延後動作的參數只有安裝好的檔案路徑；不帶其他路徑或鍵名。
+  - 「模擬」的動作實際是誰，看誰啟動安裝（量到：雙擊安裝、`/qb`、`/passive`、修復是使用者、Medium；設定頁「解除安裝」與已提升的命令列是使用者、High；系統身分的排程工作是 SYSTEM；模擬動作沒有執行緒權杖，跑在以使用者權杖啟動的自訂動作宿主裡，`RegOpenCurrentUser` 寫到互動使用者的 hive）。所以 `DeleteSettings` 發現自己的權杖是 SYSTEM、LocalService 或 NetworkService 時什麼都不做。
+  - 自訂動作 DLL 在執行序列從 `C:\Windows\Installer\MSI*.tmp` 載入（量到），在介面序列從 `%TEMP%` 載入（量到）。
+
+### 6.7 解除安裝的兩個選項
+
+- 屬性 `KEEPSETTINGS`、`KEEPMEMORY`（公開、Secure），值只認 `0` 與 `1`。Property 表不寫預設值：沒定義＝命令列沒給。問完（或沒問）之後，`SetKEEPSETTINGS`、`SetKEEPMEMORY` 把不是 `0` 的設成 `1`（量到：`abc` → 1、`0` → 0、沒給 → 1；Property 表不放預設值時，「沒給」和「給了 1」分得出來）。
+- 完整介面的頁面按「下一步」時明確寫入 `0` 或 `1`；MSI 的勾選框沒勾是「沒定義」，所以勾選框綁另一個屬性（`KEEPBOX`）。量到：這樣寫的值帶得到延後動作。
+- 還沒有學習檔，所以只問「保留設定」一個勾（預設勾著）；`KEEPMEMORY` 照樣接受與正規化，沒有東西可留或可刪。
+- **問的地方，共兩處**：
+  1. 完整介面的「修改 → 移除」：維護精靈多一頁「要保留什麼」，放勾選框；`AskKeep` 不跑（`UILevel` 5）。
+  2. 基本或精簡介面的解除安裝：`AskKeep` 問一次，按「取消」就中止解除安裝。
+- **每條路問不問**：
+
+  | 路 | 問不問 | 依據 |
+  |---|---|---|
+  | 設定頁的「解除安裝」；未提升的 `/x /qb` | 問（`UILevel` 3） | 量到 |
+  | 程式和功能的「解除安裝」 | 問（`UILevel` 3；用戶端是 explorer） | 真的 MSI 量到（先「您確定要從電腦解除安裝」，再 UAC） |
+  | 不帶介面參數的 `msiexec /x` | 問（`UILevel` 3；先 Windows Installer 的「您確定要解除安裝這個產品嗎？」，再 UAC） | 真的 MSI 量到 |
+  | 未提升的 `/x /passive` | 問（`UILevel` 也是 3，和 `/qb` 分不出來）；要無人值守用 `/qn` | 量到（真的 MSI 也是） |
+  | 已提升的 `/x /qn`；沒有互動桌面的 `/passive`、`/qb`（例如系統身分的排程工作） | 不問（`UILevel` 2），都保留 | 量到 |
+  | 命令列給了 `KEEPSETTINGS` 或 `KEEPMEMORY` | 不問，照給的值 | 真的 MSI 量到（`/passive KEEPSETTINGS=1` 保留、`/qb KEEPSETTINGS=0` 刪掉、`/qn KEEPSETTINGS=abc` 保留） |
+  | 完整介面帶 `REMOVE=ALL`（`msiexec /i <msi> REMOVE=ALL`） | 推論：不問、保留（`UILevel` 5 不跑 `AskKeep`，顯示的是 WiX 的 `ResumeDlg` 而不是維護精靈） | 沒量 |
+  | 升級時移除舊版 | 不問，都保留 | 量到（`UPGRADINGPRODUCTCODE` 有值） |
+  | 「修改 → 移除」 | 在多的那一頁問 | 量到（取消勾 → `KEEPSETTINGS=0` 帶到延後動作） |
+  | 精簡介面（`/qr`，`UILevel` 4） | 條件有涵蓋 | 沒量、這一版也不驗；`AskKeep` 出錯時照都保留處理 |
+
+  winget 用哪一種沒量（推論：winget 對 MSI 的預設是 `/passive`，那樣 `winget uninstall` 會停在問話視窗等人按）。完整介面的「要保留什麼」頁的勾預設勾著，會蓋掉命令列給的 `KEEPSETTINGS`（推論，沒量）。
+- **「保留設定」的效果**：值是 `0` 時，`DeleteSettings` 刪掉執行解除安裝的那個使用者的 `HKCU\Software\Shanjie`（目前只有按鍵習慣 `KeyScheme` 一個值，§5.2）；值是 `1` 時留著。其他使用者的設定碰不到，留著。一般帳號請另一個管理員帳號按 UAC 時，刪到的是誰的：待驗收記錄（O1）。
+- **不論哪個選項，解除安裝一律清掉**：檔案與資料夾、TSF 註冊、Run 值、正在跑的正式版常駐程序（`KillHost`）。
+- **不刪**：`%LOCALAPPDATA%\Shanjie\`（MSI 裝的建置不帶 `timing`，不會建它）、常駐程序在 HKCU 留下的 WER 排除項（以檔名 `shanjie-host.exe` 登記，§5.2）。
+- **`KillHost`**（常駐程序沒有結束指令，會活到登出）：結束映像完整路徑（`QueryFullProcessImageNameW`，ASCII 字母不分大小寫）等於參數那個路徑的每一個程序，所有工作階段都算；不用檔名比對，因為開發版身分的常駐程序也叫 `shanjie-host.exe`。查路徑與結束用同一個 handle（`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`）。查映像路徑的緩衝是 1024 個 UTF-16 單位，更長的路徑查不到、不結束。修復時也跑：修復會把執行中的 `shanjie-host.exe` 搬到 `C:\Config.Msi` 再放新檔，之後那支程序的映像路徑變成搬過去的名字，解除安裝時就比對不到。量到（測試 VM，修復時只在移除時跑的那一版）：常駐程序在跑時修復（結束碼 3010）再解除安裝，`KillHost` 記 `ended 0`，產品移除了、常駐程序還在（只放英文直通），安裝資料夾留到重開機後剩一個空資料夾。
+
+### 6.8 `installer-ca`（自訂動作的 DLL）
+
+Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
+
+| 匯出 | 做什麼 | 參數 |
+|---|---|---|
+| `AskKeep` | 問話，寫 `KEEPSETTINGS` | 沒有（讀寫 MSI 屬性） |
+| `KillHost` | 結束正式版的常駐程序 | 常駐程序的完整路徑（`CustomActionData`，必須是 `X:\…\shanjie-host.exe`，否則什麼都不結束） |
+| `DeleteSettings` | 刪 `HKCU\Software\Shanjie` | 沒有 |
+
+- 每個匯出函式都包 `catch_unwind`，panic hook 在第一次進入時裝（什麼都不印；DLL 沒有 `DllMain`）。`KillHost`、`DeleteSettings` 出錯時記進 MSI 的 log、回成功，不讓解除安裝因為它們失敗；代價是設定可能沒刪掉而使用者不知道。log 只有固定的 ASCII 字與數字。
+- **本機驗證**：這個 crate 是 workspace 成員，在 macOS 與 Linux 上編成空的（和 `shanjie-host` 同一個做法），純規則（對話框的回答、路徑比較、設定機碼的層）的測試各平台都跑；`windows-msi` job 另跑 Windows 的那一份。
+- **`AskKeep`**：
+  - 用 TaskDialog（系統原生，`TaskDialogIndirect`）：標題「善解」、主要說明「要解除安裝善解嗎？」、內文「開著的 App 如果還在用善解，要等那些 App 重新開啟之後，善解才會完全移除。」、一個勾「保留設定」（預設勾著）、兩個按鈕「解除安裝」「取消」。只有固定文字，沒有連結、展開區、說明按鈕、輸入框，不呼叫 `ShellExecute`，沒有擁有者視窗。基本介面不顯示 Windows Installer 的對話框，所以不能用它們；之後有兩個勾時 TaskDialog 不夠（只有一個勾），要換成自己做、接近原生的視窗，這一版不做。
+  - comctl32 第 6 版：DLL 帶自己的 manifest（資源 2，`build.rs` 嵌入），呼叫前建並啟用自己的啟用內容，從那個內容取 `TaskDialogIndirect`，呼叫後停用；這是唯一的執行時載入。量到：這樣成立，`hr=0`，comctl32 從 WinSxS 的第 6 版載入，勾的值帶到延後動作。
+  - 建立時關掉對話框的輸入法（`ImmAssociateContextEx(…, NULL, IACE_CHILDREN)`），設成置頂並要求前景。量到（那時沒有關輸入法）：注音在中文模式時空白鍵切不動勾選框，Ctrl+Space 切到英數後可以；關掉輸入法後的效果待驗收（U1）。
+    - 第一次計時器通知時（`TDF_CALLBACK_TIMER`，只做一次）：對話框還不是前景，而且前景視窗屬於這次安裝的用戶端程序（Windows Installer 的 `CLIENTPROCESSID`：從命令列或設定頁是 msiexec.exe，從「程式和功能」是 explorer.exe；不用類別或標題找視窗），對話框的執行緒暫時把輸入接到前景視窗的執行緒（`AttachThreadInput`），`BringWindowToTop`＋`SetForegroundWindow` 一次後解開；接之前先送 `WM_NULL`（`SendMessageTimeoutW`，`SMTO_ABORTIFHUNG | SMTO_BLOCK`，500 ms）確認前景執行緒在處理訊息：接上之後，換前景時會同步送訊息給它，不處理訊息的執行緒（例如在 `MsiConfigureProduct` 裡等的 explorer 執行緒）會卡住解除安裝。前景是別的程式、沒有用戶端 PID 或探測失敗時只要求前景。MSI log 記一行：`AskKeep: front attach=1 set=…`，或 `front attach=0 client=none|client=other|busy set=…`，已是前景時 `front already`。已知限制：探測之後才停止處理訊息的執行緒仍會卡住。量到（測試 VM）：按過 Windows 的「檔案使用中」視窗之後，建立時的要求只讓對話框置頂、鍵盤不在它身上（前景留在用戶端的進度框）；接輸入之後設定頁的解除安裝、不帶參數的 `/x` 記 `attach=1 set=1`，焦點在「解除安裝」鈕。只比對 msiexec.exe 的那一版在「程式和功能」記 `attach=0 set=0`（用戶端是 explorer），所以改成比對 `CLIENTPROCESSID`。量到（加了探測的這一版）：「程式和功能」（用戶端 explorer）與設定頁（用戶端 msiexec）按過「檔案使用中」之後都記 `attach=1 set=1`，焦點在「解除安裝」鈕。已知限制：前景的執行緒卡住時，接輸入可能跟著等。
+  - 量到：設定頁「解除安裝」與 `/x /qb` 的對話框是 High、拿到前景；`/x /passive`：假安裝檔量到對話框是 Medium、出現在 UAC 之前、沒有拿到前景；真的 MSI（測試 VM）量到 UAC 在前、對話框是 High、一出來就是前景（`front already`）。Medium 的程式對 High 的對話框送滑鼠點擊無效（UIPI）。
+  - 權杖是 SYSTEM、LocalService、NetworkService，在工作階段 0，或視窗站不是互動的：不顯示，都保留。自己出錯（`TaskDialogIndirect` 回錯誤、panic）：照沒有畫面處理（都保留）、繼續解除安裝、記進 MSI 的 log。只有使用者按「取消」才回「使用者取消」。讀寫的只有 MSI 的屬性。
+- **`DeleteSettings`**：用 `RegOpenCurrentUser` 開使用者的 hive，路徑是名稱表的常數（`Software\Shanjie`）；不跟隨登錄連結：每一層都用 `REG_OPTION_OPEN_LINK` 開出 handle，是連結就只刪連結本身；往下列舉與刪除（`NtDeleteKey`）都經過同一個 handle，不先查名稱再刪；不用 `RegDeleteTree`。往下最多 32 層、每層最多 4096 個子機碼，超過的留著、log 記「not all deleted」（程式只寫一層）。行程權杖或（若有）執行緒權杖是 SYSTEM、LocalService、NetworkService，或查不到權杖時，什麼都不做（量到：SYSTEM 身分的排程工作裡，模擬動作就是 SYSTEM，§6.6）。連結的行為：待驗收（L1）。
+- **載入 DLL 的規則**：沒有 delay-load；不呼叫 `SetDefaultDllDirectories`（它改的是自訂動作宿主整個程序的狀態）；除了 comctl32 沒有別的執行時載入。靜態匯入只能是 msi、kernel32、user32、advapi32、imm32、ntdll 與 API set（`check-msi.ps1` 寫死這份名單）。
+
+### 6.9 建置與 CI 的核對
+
+- 建置在一支腳本 `scripts/windows/build-msi.ps1`（CI 與之後的發版 workflow 都呼叫；它與 `check-msi.ps1` 存成 UTF-8 加 BOM、用 pwsh 7 跑），兩個階段，中間留給簽章：
+  - `binaries -Out <資料夾> [-Timing]`：一次 cargo 呼叫以 `release-ids` 建 `shanjie-tip`、`shanjie-host`、`shanjie-installer-ca`（`-Timing` 多開 `timing`，只用來看標記符號，不做套件），放在自己的 `--target-dir`，把三個檔複製成 `shanjie_tip.dll`、`shanjie-host.exe`、`installer-ca.dll`。`SHANJIE_BUILD_ID`（呼叫端設）是 `shanjie-win-proto` 的 `BUILD_HASH`（§5.3）的來源，所以另一個值會產出位元組不同的 DLL 與 exe。
+  - `msi -Bin <資料夾> -Out <檔> [-Variant A|T]`：印出並斷言 WiX 的版本（runner 內建的 WiX 3，至少 3.14.1），寫出產生的檔（署名檔），跑 `candle` 與 `light`。
+- CI 的 `windows-msi` job（windows-2025，`needs: changes`，略過條件同 `core`，逾時 45 分鐘，用 pwsh；先裝規定版本的 Rust）依序：下載並核對模型；以 `release-ids` 跑 `shanjie-win-proto`、`shanjie-host`、`shanjie-tip`、`shanjie-installer-ca` 的測試；建 A 與 C 的 DLL 與 exe（C 另一個 `--target-dir`、另一個 `SHANJIE_BUILD_ID`）；**簽章步驟（空的、有名字：只印「not signed in CI」，之後在這裡簽 `shanjie_tip.dll`、`shanjie-host.exe`、`installer-ca.dll`）**；建三份 MSI；**簽章步驟（簽 MSI）**；核對 A；核對改壞的複本與 T；帶 `timing` 的建置；A 的 SHA-256；上傳 artifact（保留 7 天）。憑證之後只放發版 workflow 的受保護環境，不進 `pull_request` 的 CI。
+  - **A**：要出貨的那一份，版號 `0.0.<run_number>`，檔名 `shanjie-<版號>-x64.msi`。
+  - **T**：只給 VM 驗收用，版號同 A，多一個延後動作 `TestFail`（`WIXFAILWHENDEFERRED=1` 時啟動一個不存在的檔案而失敗，排在 `DeleteSettings` 之前），檔名 `…-x64-test-fail.msi`。
+  - **C**：只給 VM 驗收用，版號 `0.0.<run_number+1>`，DLL 與 exe 另建一次，位元組與 A 不同（job 印出兩組 SHA-256 並斷言不同），檔名 `…-x64-test-upgrade.msi`。
+  - artifact `windows-msi`：三份 MSI 與 A 的 SHA-256 檔。
+- **`check-msi.ps1`**（對象是建好的 A）：用 WiX 的 `dark.exe` 反組譯成 `.wxs` 並解出檔案（`-x`），讀那份 XML，再用 `dumpbin` 看解出來的檔；每一列讀到的都印出來，任何一條不符就失敗，失敗的行以 `FAIL [<區域>]` 開頭。（量到：用 Windows Installer 的 COM 讀欄位，pwsh 7 丟 `DISP_E_TYPEMISMATCH`、Windows PowerShell 5.1 讀回空字串，所以改讀反組譯的結果。）核對的是：
+  - 檔案清單與 §6.2 的表完全相同；模型與 `colloquial-attribution.tsv` 的雜湊符合 `data/*.sha256`；署名檔第一段的檔名剛好是 `build-app.sh` 那一段列的那些、去掉迷因詞包的三個。
+  - DLL 與 exe 沒有 C 執行階段的匯入；exe 是視窗子系統（`dumpbin /headers`）；`SjMarkTiming` 不存在、`SjMarkReleaseIds` 在 DLL 與 exe 都存在。
+  - `installer-ca.dll` 是 Binary 表裡唯一的 DLL；靜態匯入在 §6.8 的名單內、沒有 delay-load；三個匯出都在。
+  - 自訂動作：Id、種類、命令列或匯出名、執行方式（立即、延後、rollback、模擬、`TerminalServerAware`、不等待）、失敗時、排的位置與條件，逐列等於 §6.6 的表；沒有表以外的自訂動作；從對話框觸發的動作剛好一個（`ExitDialog`、`Finish`、`DoAction`、`StartHost`、條件 `NOT Installed`）；`InstallUISequence` 等其他序列沒有自訂動作。
+  - 安裝資料夾的目錄 Id 含小寫；對話框有 `FilesInUse`；沒有授權頁、瀏覽、功能樹、`MsiRMFilesInUse`、`MaintenanceTypeDlg`，沒有 `SelectionTree` 等控制項；完成頁那句只在 `NOT Installed` 時顯示。
+  - 沒有 Class、Extension、Shortcut、RemoveFile、RemoveFolder、CreateFolder、RemoveRegistry*；Registry 只有 HKLM 的 Run 值那一列，內容相符。
+  - Property：有 `MSIRESTARTMANAGERCONTROL=Disable`、`REBOOT=ReallySuppress`；兩個 KEEP 屬性沒有值；`SecureCustomProperties` 只有兩個 KEEP 屬性與升級用的屬性；啟動條件在。
+- **核對腳本自己會不會失敗**：同一個 job 做五份改壞的 A（改 `.wxs` 再用 `light -sval` 建）：多一列 HKCU 的 Registry；把 `DeleteSettings` 改成不模擬；拿掉 `StartHost` 的條件；把 `StartHost` 排進 `InstallUISequence`；把 `Register` 改成失敗時忽略。腳本對五份都要失敗，失敗訊息要點到埋進去的那一處，而且不能有那一處以外的新失敗。對 T 也要失敗（多一個自訂動作）。這一步在核對 A 失敗時也會跑，讓一個 run 看得到兩邊。
+- 同一個 job 另建一次帶 `timing` 的版本（另一個 `--target-dir`），用 `dumpbin /exports` 確認 DLL 與 exe 有 `SjMarkTiming`，所以 A 裡沒有它是有意義的。
+- job 名稱不影響發版關卡（`check-ci-gate.sh` 只看整個 run 的結論）。MSI 不放上 GitHub Release，也不放網站；簽章與憑證不在 CI。
+
+### 6.10 怎麼打英文
+
+善解是目前輸入法時怎麼打英文（Win+Space 切到別的輸入法、Ctrl+Space、Caps Lock 開著打字母）：待 VM 驗收量測（E 項，記錄項），量完照結果寫在這裡。Ctrl+Space 與單按 Shift 的切換不做（§3.14）。
+
+### 6.11 已知限制
+
+- UAC 關掉（`EnableLUA=0`）的機器不能用（§6.4）。
+- 開著 Smart App Control 或 WDAC 的機器可能擋下未簽章的檔：沒量。
+- 只量了 Windows 11 x64；Windows 10 沒量。沒有繁體中文語言的帳號沒量；別的管理員帳號按 UAC 時完成頁啟動的常駐程序、清單與被刪的 `HKCU` 屬於誰：待驗收記錄（O1）。
+- 資料夾在安裝前就存在時，安裝程式不重設它的 ACL（§6.2）。
+- 已經載著舊 DLL 的 App 用舊的，直到重開 App；線上協定版本有變時只有英文（§6.5）。
+- `KillHost` 沒有 rollback；升級、修復與解除安裝時所有工作階段（含其他登入者）的正式版常駐程序都被結束；還載著 DLL 的 App 可能再把它啟動起來（§6.5、§6.6）。修復時 `KillHost` 到 `InstallFiles` 之間、解除安裝時 `KillHost` 到 `RemoveFiles` 之間，有 App 收到一個鍵就可能從舊的 exe 再啟動常駐程序；接著 exe 被搬到 `C:\Config.Msi`，那一支之後的解除安裝比對不到，活到登出（推論，空檔多長沒量）。
+- `DeleteSettings` 只刪執行解除安裝的那個使用者的設定；`KillHost`、`DeleteSettings` 出錯時解除安裝照常完成，只記進 MSI 的 log（§6.8）。
+- 常駐程序在 HKCU 留下的 WER 排除項，解除安裝後留著（§6.7）。
+- MSI 未簽章：使用者會看到 SmartScreen 的攔阻與 UAC 的「發行者: 未知」（UAC 的畫面量到）。SmartScreen 的畫面沒量。

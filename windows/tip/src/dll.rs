@@ -1,6 +1,6 @@
 //! COM entry points and the development registration (docs/spec/windows-tip.md §3.2). `DllMain` only records the module handle.
 use crate::guard;
-use crate::guids::{CLSID_SHANJIE_DEV, LANGID_ZH_TW, PROFILE_NAME, PROFILE_SHANJIE_DEV};
+use crate::guids::{CLSID_SHANJIE, LANGID_ZH_TW, PROFILE_NAME, PROFILE_SHANJIE};
 use crate::tip::TextService;
 use std::ffi::{c_void, OsString};
 use std::os::windows::ffi::OsStringExt;
@@ -33,6 +33,16 @@ pub extern "system" fn DllMain(hinst: HINSTANCE, _reason: u32, _reserved: *mut c
     MODULE.store(hinst.0 as isize, Ordering::Relaxed);
     TRUE
 }
+
+/// Marker exports for the build's CI check (`dumpbin /exports`): present exactly when the feature is on. Not `shanjie_`-prefixed (the CI check
+/// that the DLL exports no core symbol looks for that prefix).
+#[cfg(feature = "release-ids")]
+#[no_mangle]
+pub extern "C" fn SjMarkReleaseIds() {}
+
+#[cfg(feature = "timing")]
+#[no_mangle]
+pub extern "C" fn SjMarkTiming() {}
 
 /// This DLL's module handle (the window class of the candidate window is its own).
 pub fn module() -> HMODULE {
@@ -103,7 +113,7 @@ pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *cons
         // SAFETY: checked non-null above.
         unsafe {
             *ppv = std::ptr::null_mut();
-            if *rclsid != CLSID_SHANJIE_DEV {
+            if *rclsid != CLSID_SHANJIE {
                 return Err(err(CLASS_E_CLASSNOTAVAILABLE));
             }
             let f: IClassFactory = Factory.into();
@@ -123,7 +133,7 @@ pub extern "system" fn DllCanUnloadNow() -> HRESULT {
 // ---- registration (development only; needs an administrator) ----
 
 fn clsid_key() -> String {
-    format!("SOFTWARE\\Classes\\CLSID\\{{{:?}}}", CLSID_SHANJIE_DEV)
+    format!("SOFTWARE\\Classes\\CLSID\\{{{:?}}}", CLSID_SHANJIE)
 }
 
 fn wide_nul(s: &str) -> Vec<u16> {
@@ -182,10 +192,10 @@ fn register_tsf() -> Result<()> {
         // SAFETY: plain COM calls with live arguments.
         unsafe {
             let profiles: ITfInputProcessorProfileMgr = CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
-            profiles.RegisterProfile(&CLSID_SHANJIE_DEV, LANGID_ZH_TW, &PROFILE_SHANJIE_DEV, &desc, &[], 0, HKL::default(), 0, true, 0)?;
+            profiles.RegisterProfile(&CLSID_SHANJIE, LANGID_ZH_TW, &PROFILE_SHANJIE, &desc, &[], 0, HKL::default(), 0, true, 0)?;
             let cats: ITfCategoryMgr = CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)?;
             for c in &CATEGORIES {
-                cats.RegisterCategory(&CLSID_SHANJIE_DEV, c, &CLSID_SHANJIE_DEV)?;
+                cats.RegisterCategory(&CLSID_SHANJIE, c, &CLSID_SHANJIE)?;
             }
         }
         Ok(())
@@ -207,10 +217,10 @@ fn unregister_all() -> Result<()> {
         unsafe {
             let cats: ITfCategoryMgr = CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)?;
             for c in &CATEGORIES {
-                let _ = cats.UnregisterCategory(&CLSID_SHANJIE_DEV, c, &CLSID_SHANJIE_DEV);
+                let _ = cats.UnregisterCategory(&CLSID_SHANJIE, c, &CLSID_SHANJIE);
             }
             let profiles: ITfInputProcessorProfileMgr = CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
-            let _ = profiles.UnregisterProfile(&CLSID_SHANJIE_DEV, LANGID_ZH_TW, &PROFILE_SHANJIE_DEV, 0);
+            let _ = profiles.UnregisterProfile(&CLSID_SHANJIE, LANGID_ZH_TW, &PROFILE_SHANJIE, 0);
         }
         Ok(())
     }));

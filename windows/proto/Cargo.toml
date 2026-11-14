@@ -6,3 +6,8 @@ publish = false
 
 # docs/spec/windows-tip.md §5.3: the wire format between the TSF client DLL and the resident host. Pure Rust, no
 # platform code and no dependencies, so it is built and tested on every CI platform.
+
+[features]
+# The identity of the installer's build (ids.rs): another COM class, profile, pipe, settings key and timing folder, so it installs beside the
+# development build. Off: the development identity.
+release-ids = []
