@@ -37,6 +37,9 @@ pub enum Error {
     OverlayDuplicate { word_len: usize },
     BadVariants { line: usize },
     BadForms { line: usize },
+    BadFormsExtra { line: usize },
+    BadAccept { line: usize },
+    AcceptMismatch { row: usize },
     BadVariantOrder { line: usize },
 }
 
@@ -55,6 +58,9 @@ impl fmt::Display for Error {
             }
             Error::BadVariants { line } => write!(f, "bad variants table (line {line})"),
             Error::BadForms { line } => write!(f, "bad forms table (line {line})"),
+            Error::BadFormsExtra { line } => write!(f, "bad forms-extra table (line {line})"),
+            Error::BadAccept { line } => write!(f, "bad accept file (line {line})"),
+            Error::AcceptMismatch { row } => write!(f, "accept file does not match the rows (row {row})"),
             Error::BadVariantOrder { line } => write!(f, "bad variant-order table (line {line})"),
         }
     }

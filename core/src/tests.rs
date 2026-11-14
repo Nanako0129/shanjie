@@ -480,3 +480,108 @@ fn timing_legal_once_per_syllable() {
     println!("pack-switch timing: legal_new mask 29 old min/median/max {:.0}/{:.0}/{:.0} ms  new min/median/max {:.0}/{:.0}/{:.0} ms  (load {load:.0} ms)", o.0, o.1, o.2, n.0, n.1, n.2);
     assert!(n.1 <= o.1 * 0.5, "the median must be at least 50% less (old {:.0}, new {:.0})", o.1, n.1);
 }
+
+/// docs/spec/evaluation.md §3.6: forms-v2 puts the extra table's word pairs and forms.tsv's in one set, so one longest-match pass sees both.
+#[test]
+fn forms_v2_extra_pairs_join_one_longest_match() {
+    let base = || Forms::parse("# h\nword\t甲乙\t丙丁\nchar\t濕\t溼\tㄕ\n").unwrap();
+    let extra = "# h\nword\t甲乙戊\t己己己\tㄧ ㄧ ㄧ\t3/7\t字條 0\n";
+    let f = base().with_extra(extra).unwrap();
+    // the longer extra pair wins over the shorter forms.tsv pair on the same start; the shorter one still applies elsewhere
+    assert_eq!(f.apply("甲乙戊", &v(&["a", "b", "c"])), "己己己");
+    assert_eq!(f.apply("甲乙", &v(&["a", "b"])), "丙丁");
+    assert_eq!(base().apply("甲乙戊", &v(&["a", "b", "c"])), "丙丁戊", "without the extra table forms.tsv alone applies");
+    // the single-character pairs are forms.tsv's, with their reading condition
+    assert_eq!(f.apply("濕", &v(&["ㄕ"])), "溼");
+    assert_eq!(f.apply("濕", &v(&["ㄒㄧˊ"])), "濕");
+    // an empty extra table (only the header) changes nothing
+    assert_eq!(base().with_extra("# header only\n").unwrap().apply("甲乙", &v(&["a", "b"])), "丙丁");
+    // malformed lines, duplicate spellings and spellings already in forms.tsv are errors carrying only the line number
+    for bad in [
+        "word\t甲\t乙\tㄧ\t1/1\n", // five fields
+        "word\t甲\t乙乙\tㄧ\t1/1\t字條\n",
+        "word\t甲\t乙\t\t1/1\t字條\n",
+        "word\t甲\t乙\tㄧ\t1\t字條\n",
+        "word\t甲\t乙\tㄧ\ta/1\t字條\n",
+        "word\t甲\t乙\tㄧ\t1/1\t\n",
+        "char\t甲\t乙\tㄧ\t1/1\t字條\n",
+        "word\t甲乙\t戊戊\tㄧ ㄧ\t1/1\t字條\n",
+        "word\t甲\t乙\tㄧ\t1/1\t字條\nword\t甲\t丙\tㄧ\t1/1\t字條\n",
+        "\n",
+    ] {
+        assert!(matches!(base().with_extra(bad), Err(Error::BadFormsExtra { .. })), "{bad:?}");
+    }
+    assert_eq!(base().with_extra("# h\nword\t甲乙\t戊戊\tㄧ ㄧ\t1/1\t字條\n").err(), Some(Error::BadFormsExtra { line: 2 }));
+}
+
+/// docs/spec/evaluation.md §3.7: the accept file's lines, and its tie to the rows' original text.
+#[test]
+fn accept_file_parse_and_check() {
+    let rows = ["|你好|ㄋㄧˇ ㄏㄠˇ".to_string(), "|再見|ㄗㄞˋ ㄐㄧㄢˋ".to_string()];
+    let sha = |i: usize| sha256_hex(rows[i].as_bytes());
+    let text = format!("# h\n2\t{}\t再建\t字條 0\n2\t{}\t在見\t字條 1\n1\t{}\t妳好\t字條 2\n", sha(1), sha(1), sha(0));
+    let a = Accept::parse(&text).unwrap();
+    assert_eq!(a.get(1), ["再建".to_string(), "在見".to_string()]);
+    assert_eq!(a.get(0), ["妳好".to_string()]);
+    assert!(a.get(2).is_empty());
+    assert!(a.check(&rows).is_ok());
+    // a row changed, or the set got shorter: the file does not belong to these rows
+    let changed = ["|你好嗎|ㄋㄧˇ ㄏㄠˇ ˙ㄇㄚ".to_string(), rows[1].clone()];
+    assert_eq!(a.check(&changed).err(), Some(Error::AcceptMismatch { row: 1 }));
+    assert_eq!(a.check(&rows[..1]).err(), Some(Error::AcceptMismatch { row: 2 }));
+    // an empty file (only a header) is valid and ties to nothing
+    assert!(Accept::parse("# only\n").unwrap().check(&[]).is_ok());
+    // malformed lines carry only the line number
+    let s = sha(0);
+    for bad in [
+        format!("1\t{s}\t妳好\n"),
+        format!("0\t{s}\t妳好\t字條\n"),
+        format!("01\t{s}\t妳好\t字條\n"),
+        format!("+1\t{s}\t妳好\t字條\n"),
+        format!("x\t{s}\t妳好\t字條\n"),
+        format!("1\t{}\t妳好\t字條\n", s.to_uppercase()),
+        format!("1\t{}\t妳好\t字條\n", &s[..63]),
+        format!("1\t{s}\t\t字條\n"),
+        format!("1\t{s}\t妳好\t\n"),
+        format!("1\t{s}\t妳好\t字條\n1\t{s}\t妳好\t字條\n"),
+        format!("1\t{s}\t妳好\t字條\n1\t{}\t你好嗎\t字條\n", sha(1)),
+    ] {
+        assert!(matches!(Accept::parse(&bad), Err(Error::BadAccept { .. })), "{bad:?}");
+    }
+    assert_eq!(Accept::parse(&format!("# h\n1\t{s}\t妳好\t字條\nbad\n")).err(), Some(Error::BadAccept { line: 3 }));
+}
+
+/// docs/spec/evaluation.md §3.5: the three layers of judge-v2. 她/他 are one character after L1; 潮溼/潮濕 only meet in forms; the acceptable
+/// sentence of L3 matches a candidate only after both layers have been put through it too.
+#[test]
+fn judge_v2_layers() {
+    let l = Lenient::parse("# h\n").unwrap();
+    let f = Forms::parse("# h\nchar\t濕\t溼\tㄕ\n").unwrap().with_extra("# h\nword\t布局\t佈局\tㄅㄨˋ ㄐㄩˊ\t30/70\t字條 0\n").unwrap();
+    let syls = v(&["ㄔㄠˊ", "ㄕ"]);
+    // L1: 她 -> 他
+    let ta = v(&["ㄊㄚ", "ㄏㄣˇ", "ㄏㄠˇ"]);
+    let j = Judge2::new(&f, &l, "她很好", &ta, &[]);
+    assert!(j.ok("他很好") && !j.ok("他很壞"));
+    // L2: the single-character pair at its reading, and an extra word pair
+    let j = Judge2::new(&f, &l, "潮濕", &syls, &[]);
+    assert!(j.ok("潮溼") && j.ok("潮濕") && !j.ok("朝濕"));
+    let bu = v(&["ㄅㄨˋ", "ㄐㄩˊ"]);
+    let j = Judge2::new(&f, &l, "佈局", &bu, &[]);
+    assert!(j.ok("布局") && !j.ok("佈居"));
+    // L3: wrong under L1 and L2, right only against the acceptable sentence; the acceptable sentence differs from the candidate by an L1 character
+    let syls = v(&["ㄋㄧˇ", "ㄏㄠˇ"]);
+    assert!(!Judge2::new(&f, &l, "你好", &syls, &[]).ok("泥好"));
+    let acc = ["泥好".to_string()];
+    assert!(Judge2::new(&f, &l, "你好", &syls, &acc).ok("泥好"));
+    let acc = ["妳好嗎".to_string(), "泥她".to_string()];
+    let j = Judge2::new(&f, &l, "你好", &syls, &acc);
+    assert!(j.ok("泥他") && !j.ok("泥好"), "the acceptable sentence and the candidate both go through L1");
+    // the gold sentence itself stays right, and a candidate that is only close is not
+    assert!(j.ok("你好") && !j.ok("你"));
+    // a word pair and a single-character pair in one sentence: the character step still runs after a word pair matched
+    let f = Forms::parse("# h\nchar\t沈\t沉\tㄔㄣˊ\n").unwrap().with_extra("# h\nword\t串連\t串聯\tㄔㄨㄢˋ ㄌㄧㄢˊ\t3/7\t字條 0\n").unwrap();
+    let syls = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄔㄣˊ"]);
+    assert!(Judge2::new(&f, &l, "串聯沉", &syls, &[]).ok("串連沈"));
+    let other = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄕㄣˇ"]);
+    assert!(!Judge2::new(&f, &l, "串聯沉", &other, &[]).ok("串連沈"), "the character pair needs its reading");
+}

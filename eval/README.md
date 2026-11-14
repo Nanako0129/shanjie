@@ -38,11 +38,19 @@
 - 保留集合併後做過兩次盲處理（只印數量）：一／不 變調改本調（0 列需要改）；刪掉與開發集重複的 2 句（229 → 227）。
 - 開發集與保留集零重疊（程式檢查）。
 
-## 合法寫法表雜湊
+## 合法寫法表與可接受答案檔雜湊
+
+判準 v2（`docs/spec/evaluation.md` §3.5）讀的三組檔；摘要行 `+jv2:<A>:<B>:<C>` 的三段就是 forms.tsv、forms-extra.tsv、`--accept` 檔的 SHA-256 前 8 碼。改了其中一個，這張表的雜湊要一起換。
 
 | 檔案 | SHA-256 |
 |---|---|
-| `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；只在 `--forms-rowstats` 時讀，`docs/spec/evaluation.md` §3） | `85f4e034817d14b3263223b19a0fadbb32fa734d3e5ded7d8ad3aee945a03130` |
+| `forms.tsv`（`forms-v1`，`tools/build_forms.py --check` 重建並比對；`--forms-rowstats` 與 `--judge v2` 讀，`docs/spec/evaluation.md` §3） | `85f4e034817d14b3263223b19a0fadbb32fa734d3e5ded7d8ad3aee945a03130` |
+| `forms-extra.tsv`（審定詞對表，`tools/check_forms_extra.py` 檢查；`--judge v2` 讀） | `dbca4adb5d0c329b52fe9c685fea71bdc52cf1846232153a881ce92c90d169e4` |
+| `accept/dev302.tsv`（`--dev 302` 的逐列可接受答案，4 列） | `81ab55e39a44f298ef90cadc20e8aaa80d7571c1c7087897687210a14d757f30` |
+| `accept/user-typing.tsv`（打字測驗，只有檔頭） | `23273e967af98fcaa85a6b1c7e092ff993d466749de292498611119b92c67516` |
+| `accept/user-reported.tsv`（錯字回報，2 列） | `e894cf96171c0cd0583fd9f8b6bfb409141e6a2d4c68e7e18a750c6a7e3b6004` |
+| `accept/dev302.doubt.tsv`（盲判認為正解有疑義的列，只列出來；判定不讀它） | `8e0105ac9104fae78525429b3425be9b9d4d11a2dd484c1e9050c23856672659` |
+| `golden/judge-v2-accept-test.tsv`（測試專用的 dev302 可接受答案檔，`cli/tests/judge_v2.rs`；不是上面那三份） | `7eca449d662b278d9b2289a147a5806a7847dbb56af0862fb1f3cfe69c80c061` |
 
 ## 保留集雜湊（變動就代表被改過）
 

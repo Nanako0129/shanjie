@@ -165,6 +165,104 @@ impl Forms {
     }
 }
 
+impl Forms {
+    /// forms-v2 (docs/spec/evaluation.md §3.6): adds the word pairs of `eval/forms-extra.tsv` to this table's. The two tables' pairs are one set,
+    /// so the one longest-match pass sees both; the single-character pairs stay those of forms.tsv. A line is `word`, spelling, canonical
+    /// form, reading, `a/b` counts and basis (six fields, spelling and canonical form of the same length); a spelling already in either table is an error
+    /// (only the line number is reported).
+    pub fn with_extra(mut self, text: &str) -> Result<Forms, Error> {
+        for (i, line) in text.lines().enumerate() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let bad = Error::BadFormsExtra { line: i + 1 };
+            let f: Vec<&str> = line.split('\t').collect();
+            let counts_ok = |c: &str| c.split_once('/').is_some_and(|(a, b)| [a, b].iter().all(|x| !x.is_empty() && x.bytes().all(|d| d.is_ascii_digit())));
+            match f.as_slice() {
+                ["word", v, c, reading, counts, basis]
+                    if !v.is_empty() && v.chars().count() == c.chars().count() && !reading.is_empty() && counts_ok(counts) && !basis.is_empty() =>
+                {
+                    if self.words.insert(v.to_string(), c.to_string()).is_some() {
+                        return Err(bad);
+                    }
+                }
+                _ => return Err(bad),
+            }
+        }
+        self.longest = self.words.keys().map(|k| k.chars().count()).max().unwrap_or(0);
+        Ok(self)
+    }
+}
+
+/// The acceptable whole sentences of some rows (docs/spec/evaluation.md §3.7): `row TAB row-sha256 TAB sentence TAB basis`, a row may have several lines.
+/// `check` ties the file to the rows it was written for.
+pub struct Accept {
+    rows: std::collections::BTreeMap<usize, (String, Vec<String>)>,
+}
+
+impl Accept {
+    pub fn parse(text: &str) -> Result<Accept, Error> {
+        let mut rows: std::collections::BTreeMap<usize, (String, Vec<String>)> = Default::default();
+        for (i, line) in text.lines().enumerate() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let bad = Error::BadAccept { line: i + 1 };
+            let f: Vec<&str> = line.split('\t').collect();
+            let [row, sha, sent, basis] = f.as_slice() else { return Err(bad) };
+            // Plain decimal digits, no sign and no leading zero, from 1.
+            let row = (row.bytes().all(|b| b.is_ascii_digit()) && !row.starts_with('0')).then(|| row.parse::<usize>().ok()).flatten().ok_or(bad.clone())?;
+            if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || sent.is_empty() || basis.is_empty() {
+                return Err(bad);
+            }
+            let e = rows.entry(row).or_insert_with(|| (sha.to_string(), Vec::new()));
+            if e.0 != *sha || e.1.iter().any(|s| s == sent) {
+                return Err(bad);
+            }
+            e.1.push(sent.to_string());
+        }
+        Ok(Accept { rows })
+    }
+
+    /// Every listed row exists in `rows` (the rows' original text, one per row) and hashes to the recorded SHA-256; otherwise the set changed.
+    pub fn check(&self, rows: &[String]) -> Result<(), Error> {
+        for (&row, (sha, _)) in &self.rows {
+            if rows.get(row - 1).map(|r| sha256_hex(r.as_bytes())).as_deref() != Some(sha.as_str()) {
+                return Err(Error::AcceptMismatch { row });
+            }
+        }
+        Ok(())
+    }
+
+    /// The acceptable sentences of row `i` (0-based); empty for a row the file does not list.
+    pub fn get(&self, i: usize) -> &[String] {
+        self.rows.get(&(i + 1)).map_or(&[], |(_, s)| s.as_slice())
+    }
+}
+
+/// judge-v2 for one row (docs/spec/evaluation.md §3.5): a candidate is right when, after the lenient comparison (L1) and the forms-v2 table (L2),
+/// it equals the gold sentence or one of the row's acceptable sentences (L3), each put through the same L1 and L2 with the row's reading.
+/// L1 alone is the first step of that chain: two sentences equal after L1 are equal after L2 too, so one comparison covers the three layers.
+pub struct Judge2<'a> {
+    forms: &'a Forms,
+    len: &'a Lenient,
+    syls: &'a [String],
+    gold: String,
+    accepted: Vec<String>,
+}
+
+impl<'a> Judge2<'a> {
+    pub fn new(forms: &'a Forms, len: &'a Lenient, gold: &str, syls: &'a [String], accept: &[String]) -> Judge2<'a> {
+        let l2 = |s: &str| forms.apply(&len.apply(s), syls);
+        Judge2 { forms, len, syls, gold: l2(gold), accepted: accept.iter().map(|a| l2(a)).collect() }
+    }
+
+    pub fn ok(&self, cand: &str) -> bool {
+        let c = self.forms.apply(&self.len.apply(cand), self.syls);
+        c == self.gold || self.accepted.contains(&c)
+    }
+}
+
 /// Python round(x, k) then repr(): exact decimal rounding, shortest round-trip, `1.0` not `1`.
 pub fn pyround(x: f64, k: usize) -> String {
     let r: f64 = format!("{x:.k$}").parse().unwrap();

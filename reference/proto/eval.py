@@ -4,6 +4,7 @@
   .venv/bin/python eval.py                      # 只跑 unigram 與學習模擬
   .venv/bin/python eval.py Qwen/Qwen3-0.6B-Base  # 再加上一或多個模型的重排
 """
+import hashlib
 import json
 import os
 import random
@@ -61,6 +62,105 @@ def lenient(s):
             out.append(s[i])
             i += 1
     return "".join(out)
+
+
+# --- judge-v2（docs/spec/evaluation.md §3.5–§3.7；core/src/eval.rs 的 Forms、Accept、Judge2 的對照實作）---
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(HERE)))
+FORMS = os.environ.get("SHANJIE_FORMS") or os.path.join(ROOT, "eval", "forms.tsv")
+FORMS_EXTRA = os.environ.get("SHANJIE_FORMS_EXTRA") or os.path.join(ROOT, "eval", "forms-extra.tsv")
+
+
+def _lines(text):
+    """和 Rust 的 str::lines 一樣只在 \\n 切行（結尾的換行不多出一個空行）。"""
+    lines = text.split("\n")
+    return lines[:-1] if lines[-1] == "" else lines
+
+
+class Forms:
+    """合法寫法表：詞對（由左到右最長匹配、單趟）再單字對（看該位置的讀音）。每道替換等長。"""
+
+    def __init__(self):
+        self.words, self.chars = {}, {}
+
+    def parse(self, text):
+        for i, line in enumerate(_lines(text), 1):
+            if line.startswith("#"):
+                continue
+            f = line.split("\t")
+            if len(f) == 3 and f[0] == "word" and f[1] and len(f[1]) == len(f[2]) and f[1] not in self.words:
+                self.words[f[1]] = f[2]
+            elif len(f) == 4 and f[0] == "char" and len(f[1]) == 1 and len(f[2]) == 1 and "" not in f[3].split(",") and f[1] not in self.chars:
+                self.chars[f[1]] = (f[2], f[3].split(","))
+            else:
+                raise ValueError(f"forms table: bad line {i}")
+        return self
+
+    def add_extra(self, text):
+        """forms-extra.tsv：六欄 word 寫法 標準形 讀音 次數(a/b) 依據；詞對併進同一個集合，寫法不可重複。"""
+        for i, line in enumerate(_lines(text), 1):
+            if line.startswith("#"):
+                continue
+            f = line.split("\t")
+            ok = len(f) == 6 and f[0] == "word" and f[1] and len(f[1]) == len(f[2]) and f[3] and f[5]
+            a, _, b = f[4].partition("/") if len(f) == 6 else ("", "", "")
+            ok = ok and a.isascii() and a.isdigit() and b.isascii() and b.isdigit()
+            if not ok or f[1] in self.words:
+                raise ValueError(f"forms-extra table: bad line {i}")
+            self.words[f[1]] = f[2]
+        return self
+
+    def apply(self, s, syls):
+        longest = max(map(len, self.words), default=0)
+        out, i = [], 0
+        while i < len(s):
+            for n in range(min(longest, len(s) - i), 0, -1):
+                c = self.words.get(s[i:i + n])
+                if c is not None:
+                    out.append(c)
+                    i += n
+                    break
+            else:
+                out.append(s[i])
+                i += 1
+        out = "".join(out)   # 每道替換等長，所以逐字位置和原句相同；下面比的是字數，不是塊數
+        if len(out) != len(syls):
+            return out
+        return "".join(self.chars[c][0] if c in self.chars and y in self.chars[c][1] else c for c, y in zip(out, syls))
+
+
+def load_forms_v2():
+    """forms-v2：forms.tsv 加 forms-extra.tsv。回傳 (Forms, forms.tsv 的 SHA-256 前 8 碼, forms-extra.tsv 的前 8 碼)（摘要行 +jv2: 的 A、B 段）。"""
+    fb, eb = open(FORMS, "rb").read(), open(FORMS_EXTRA, "rb").read()
+    f = Forms().parse(fb.decode("utf-8")).add_extra(eb.decode("utf-8"))
+    return f, hashlib.sha256(fb).hexdigest()[:8], hashlib.sha256(eb).hexdigest()[:8]
+
+
+def load_accept(path, raw_rows):
+    """逐列可接受答案檔：每行 列號 列SHA-256 整句 依據；回傳 ({列號: [句子]}, 檔案 SHA-256 前 8 碼)。列號那一列（raw_rows 是各列原文）的雜湊不符就 ValueError。"""
+    raw = open(path, "rb").read()
+    got, shas = {}, {}
+    for i, line in enumerate(_lines(raw.decode("utf-8")), 1):
+        if line.startswith("#"):
+            continue
+        f = line.split("\t")
+        row = f[0]
+        ok = len(f) == 4 and row.isascii() and row.isdigit() and not row.startswith("0")
+        ok = ok and len(f[1]) == 64 and all(c in "0123456789abcdef" for c in f[1]) and f[2] and f[3]
+        ok = ok and shas.setdefault(int(row), f[1]) == f[1] and f[2] not in got.get(int(row), [])
+        if not ok:
+            raise ValueError(f"accept file: bad line {i}")
+        got.setdefault(int(row), []).append(f[2])
+    for row, sha in shas.items():
+        if row > len(raw_rows) or hashlib.sha256(raw_rows[row - 1].encode("utf-8")).hexdigest() != sha:
+            raise ValueError(f"accept file does not match the rows (row {row})")
+    return got, hashlib.sha256(raw).hexdigest()[:8]
+
+
+def judge2(forms, gold, syls, accepted=()):
+    """一列的 judge-v2 判定函式：候選與正解（與每個可接受答案）各自先 lenient（L1）再套 forms-v2（L2）後相等，就是對（L3 是可接受答案那一支）。"""
+    l2 = lambda x: forms.apply(lenient(x), syls)
+    ok_set = {l2(gold)} | {l2(a) for a in accepted}
+    return lambda cand: l2(cand) in ok_set
 
 
 def load_rows(name):

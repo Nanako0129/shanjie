@@ -1,0 +1,4 @@
+# user-reported（錯字回報）的逐列可接受答案（docs/spec/evaluation.md §3.7）。每行：列號<TAB>列 SHA-256<TAB>可接受的整句<TAB>依據。只增不改。
+# 列號從 1 起，依評測讀列的順序；列 SHA-256 是那一列的原文（不含換行）的 UTF-8 位元組的雜湊。
+35	65f07c2a48f49756d3c2aee3326b70271250b3cfb11bb28a9da537e5e6bb2adc	的市占這麼低了嗎	佔#0:同「占」
+126	781592449a1e239cd04c09080e085acbed558f9bf44ffd736bd0336e7ab8efb4	影片同時作	作#0:同「做」

@@ -73,6 +73,8 @@
 | `eval/sets/moedict.txt` | 教育部《重編國語辭典修訂本》例句抽樣（經 g0v/moedict-data） | CC BY-ND 3.0 TW；**只用於評測，不得用來建詞庫或改作** | 教育部 |
 | `eval/variants.tsv` | 教育部《重編國語辭典修訂本》釋義中的「也作／亦作」詞對（經 g0v/moedict-data，commit a6dc997）；每一欄都是辭典原有的詞條字串，詞對是辭典記載的事實，不含釋義文字；由 `tools/build_variants.py` 產生 | CC BY-ND 3.0 TW；**只用於評測** | 教育部 |
 | `eval/forms.tsv` | 教育部《重編國語辭典修訂本》釋義中的「也作／亦作」詞對與單字異體（經 g0v/moedict-data，commit a6dc997）；每一欄都是辭典原有的詞條字串與讀音，字對是辭典記載的事實，不含釋義文字；由 `tools/build_forms.py` 產生 | CC BY-ND 3.0 TW；**只用於評測** | 教育部 |
+| `eval/forms-extra.tsv` | 審定詞對表：每一行是兩種寫法等長、教育部《重編國語辭典修訂本》記載其差異字有「也作／亦作／同／通」關係的詞對（經 g0v/moedict-data，commit a6dc997），欄位是詞條字串、讀音與計數；由 `tools/check_forms_extra.py` 檢查收錄條件 | CC BY-ND 3.0 TW；**只用於評測** | 教育部 |
+| `eval/accept/*.tsv` | 公開評測集（dev302、打字測驗、錯字回報）逐列可接受的整句：句子是本專案寫的，依據欄引用教育部《重編國語辭典修訂本》釋義的片段 | 句子 CC0；依據欄的辭典片段 CC BY-ND 3.0 TW，**只用於評測** | 教育部 |
 | `eval/probe/s2r-probe.txt` | 由 `tools/build_probe.py` 從 `eval/dev/` 的句子產生（換「一」「不」的讀音） | CC0 | — |
 | `eval/rerank/s7e-function-words.txt` | 本專案自寫 | CC0 | — |
 | `eval/dev/*.txt`、`eval/dev/holdout-2026-10-03/*`、`eval/holdout/.gitkeep`、`eval/learn/cases.tsv` | 本專案自寫 | CC0 | — |

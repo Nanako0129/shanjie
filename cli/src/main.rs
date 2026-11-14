@@ -1,4 +1,4 @@
-use cli::common::{dev_rows, format_rowstats, levenshtein, load_forms, load_lenient, read_rows, root, three_field_rows};
+use cli::common::{dev_rows, dev_rows_raw, format_rowstats, levenshtein, load_accept, load_forms, load_forms_v2, load_lenient, read_rows, read_rows_raw, root, three_field_rows};
 use core::colloquial::{self, Colloquial};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_MEME, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
@@ -71,6 +71,95 @@ fn check_lm_opts(set: Option<&str>, dump: bool, picks: bool, packs: u32, packs_d
         return Err("--packs-dir needs --packs".into());
     }
     Ok(())
+}
+
+/// `--judge`, `--accept` and `--rejudge` combinations (docs/spec/evaluation.md §3.5), checked before any file is read. The acceptable-sentence
+/// file and the re-judging of picks are for rows that may be shown; the holdout refuses both (its `--judge v2 --rowstats` stays allowed: numbers only).
+fn check_judge_opts(set: Option<&str>, v2: bool, accept: bool, rejudge: bool) -> Result<(), String> {
+    if accept && !v2 {
+        return Err("--accept needs --judge v2".into());
+    }
+    if set == Some("holdout") && accept {
+        return Err("--accept is not allowed with --set holdout".into());
+    }
+    if set == Some("holdout") && rejudge {
+        return Err("--rejudge is not allowed with --set holdout".into());
+    }
+    Ok(())
+}
+
+/// `--rejudge PICKS` input: one line per row, either a `--picks` line (`row TAB rank TAB sentence`, the row number checked) or the bare sentence.
+fn parse_picks(text: &str, n: usize) -> Result<Vec<String>, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() != n {
+        return Err(format!("--rejudge: the picks file has {} lines for {n} rows", lines.len()));
+    }
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| match l.split('\t').collect::<Vec<_>>().as_slice() {
+            [_] => Ok(l.to_string()),
+            [row, _, sent] if row.parse::<usize>() == Ok(i + 1) => Ok(sent.to_string()),
+            _ => Err(format!("--rejudge: picks line {} is not a pick of row {}", i + 1, i + 1)),
+        })
+        .collect()
+}
+
+/// `--rejudge PICKS` (docs/spec/evaluation.md §3.5): no decoding and no model: the sentence picked for each row is judged again under `--judge` and
+/// `--accept`, and written as `--rowstats`. The summary line has the rows, the top1 and `top1_sha256` of the picks (the decoding run's own value
+/// when the picks are its `--picks`), tagged `rejudge` and the judge's `+jv2:` tag.
+#[allow(clippy::too_many_arguments)]
+fn run_rejudge(picks: &str, dev: Option<usize>, rows_file: Option<String>, limit: Option<usize>, name: Option<String>, rowstats: Option<String>, v2: bool, accept: Option<String>, len: &Lenient) -> Result<(), String> {
+    let (default_name, rows, raw) = match (dev, &rows_file) {
+        (Some(n), None) => (format!("dev{n}"), dev_rows(n)?, accept.as_ref().map(|_| dev_rows_raw(n)).transpose()?),
+        (None, Some(f)) => {
+            let mut rows = read_rows(f)?;
+            if let Some(n) = limit.filter(|&n| n != 0) {
+                rows.truncate(n);
+            }
+            (Path::new(f).file_name().map_or(String::new(), |s| s.to_string_lossy().into_owned()), rows, accept.as_ref().map(|_| read_rows_raw(f, limit)).transpose()?)
+        }
+        _ => return Err("--rejudge needs exactly one of --dev, --rows".into()),
+    };
+    let judge = if v2 { Some(load_judge(accept.as_deref(), raw.as_deref())?) } else { None };
+    let text = fs::read_to_string(picks).map_err(|e| format!("--rejudge: cannot read the picks file ({:?})", e.kind()))?;
+    let picked = parse_picks(&text, rows.len())?;
+    let rowstats = match rowstats {
+        Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
+        None => None,
+    };
+    let mut rs = Vec::new();
+    for (i, ((truth, syls, _), pick)) in rows.iter().zip(&picked).enumerate() {
+        let ok = match &judge {
+            Some(j) => Judge2::new(&j.forms, len, truth, syls, j.accept.as_ref().map_or(&[][..], |a| a.get(i))).ok(pick),
+            None => len.apply(pick) == len.apply(truth),
+        };
+        rs.push((ok, pick.clone(), truth.clone()));
+    }
+    if let Some(mut f) = rowstats {
+        f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
+    }
+    let sha = sha256_hex(picked.join("\n").as_bytes());
+    println!("## {}  rejudge{}  {{'n': {}, 'top1': {}, 'top1_sha256': '{sha}'}}", name.unwrap_or(default_name), judge.as_ref().map_or(String::new(), |j| j.tag.clone()), rows.len(), rs.iter().filter(|r| r.0).count());
+    Ok(())
+}
+
+/// What `--judge v2` loads: the forms-v2 table, the row's acceptable sentences when `--accept` is given, and the summary tag `+jv2:<A>:<B>:<C>` (the
+/// first 8 hex of forms.tsv, forms-extra.tsv and the accept file; `none` without one).
+struct JudgeV2 {
+    forms: Forms,
+    accept: Option<Accept>,
+    tag: String,
+}
+
+/// Loads the judge-v2 tables and the accept file (tied to `raw`, the rows' original text), before any output file is created.
+fn load_judge(accept: Option<&str>, raw: Option<&[String]>) -> Result<JudgeV2, String> {
+    let (forms, a, b) = load_forms_v2()?;
+    let (accept, c) = match (accept, raw) {
+        (Some(f), Some(rows)) => load_accept(f, rows).map(|(acc, c)| (Some(acc), c))?,
+        _ => (None, "none".to_string()),
+    };
+    Ok(JudgeV2 { forms, accept, tag: format!("+jv2:{a}:{b}:{c}") })
 }
 
 /// `--packs acg|quotes|it|meme|beauty` or a comma list of them: sets the pack bits; anything else is refused.
@@ -298,6 +387,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // `--no-recur` (evaluation only): leave the context recurrence term out (docs/spec/decoder.md §4.6).
     let mut recur = true;
     let mut forms_rowstats = None::<String>;
+    // docs/spec/evaluation.md §3.5: `--judge v1|v2` (default v1), `--accept FILE` (v2 only), `--rejudge PICKS` (no decoding).
+    let (mut judge_v2, mut accept, mut rejudge) = (false, None::<String>, None::<String>);
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut scores_topk = None::<usize>;
     let mut level = None::<RerankLevel>;
@@ -344,6 +435,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--dump-words" => dump_words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
             "--forms-rowstats" => forms_rowstats = Some(val()?),
+            "--judge" => {
+                judge_v2 = match val()?.as_str() {
+                    "v1" => false,
+                    "v2" => true,
+                    _ => return Err("--judge must be v1 or v2".into()),
+                }
+            }
+            "--accept" => accept = Some(val()?),
+            "--rejudge" => rejudge = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
             "--tinylm-scores-topk" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
@@ -385,6 +485,17 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
     }
     check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), picks.is_some(), packs, packs_dir.is_some())?;
+    check_judge_opts(set.as_deref(), judge_v2, accept.is_some(), rejudge.is_some())?;
+    if let Some(pk) = &rejudge {
+        // No decoding: only --rowstats has anything to write.
+        if dump.is_some() || dump_words.is_some() || picks.is_some() || tinylm_scores.is_some() || forms_rowstats.is_some() {
+            return Err("--rejudge writes only --rowstats".into());
+        }
+        if set.is_some() {
+            return Err("--rejudge takes the rows from --rows or --dev, not --set".into());
+        }
+        return run_rejudge(pk, dev, rows_file, limit, name, rowstats, judge_v2, accept, len);
+    }
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
     }
@@ -503,6 +614,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         (capped, String::new())
     };
 
+    // `--accept` ties to the rows' original text; read here, where `dev` and `rows_file` are still whole (the holdout was refused above).
+    let raw_rows = match (&accept, dev, &rows_file) {
+        (Some(_), Some(n), None) => Some(dev_rows_raw(n)?),
+        (Some(_), None, Some(f)) => Some(read_rows_raw(f, limit)?),
+        _ => None,
+    };
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
         (Some(n), None, None) => (format!("dev{n}"), dev_rows(n)?),
@@ -531,6 +648,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(_) => Some(load_forms()?),
         None => None,
     };
+    // `--judge v2`: forms.tsv, forms-extra.tsv and the accept file are read (and the accept file checked against the rows) here, also before any output file.
+    let v2 = if judge_v2 { Some(load_judge(accept.as_deref(), raw_rows.as_deref())?) } else { None };
+    let jtag = v2.as_ref().map_or(String::new(), |j| j.tag.clone());
     let mut dump = match dump {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
@@ -589,6 +709,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         };
         let mut surf: Vec<String> = scored.iter().map(|(_, ws)| ws.iter().map(|w| w.0).collect()).collect();
         let t = len.apply(truth);
+        // The judgment of a candidate: v1 is the lenient comparison, v2 the judge of docs/spec/evaluation.md §3.5.
+        let judge = v2.as_ref().map(|j| Judge2::new(&j.forms, len, truth, syls, j.accept.as_ref().map_or(&[][..], |a| a.get(i))));
+        let ok = |s: &str| match &judge {
+            Some(j) => j.ok(s),
+            None => len.apply(s) == t,
+        };
         // The row's chosen candidate: the first, or the small model's pick among the pool (below; the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
@@ -658,7 +784,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             if want_scores {
                 // The engine's col, the one `rerank_colloquial` fused (same words, same table); only where it ran with an `ll`.
                 let col: Option<Vec<f64>> = colloq_on.filter(|_| ll.is_some()).map(|co| pool.iter().map(|&p| co.col(&scored[p].1.iter().map(|w| w.0).collect::<Vec<_>>())).collect());
-                let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
+                let oks: Vec<bool> = top.iter().map(|s| ok(s)).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
                 // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
                 // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
@@ -667,14 +793,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
         }
         let pick = len.apply(&surf[chosen]);
-        out.ok = pick == t;
+        out.ok = ok(&surf[chosen]);
         if let Some(fm) = &forms {
             // Lenient first, then the forms table (a fixed order, docs/spec/evaluation.md §3); both sides use the row's own reading.
             let ((p, p_ran), (g, g_ran)) = (fm.apply_checked(&pick, syls), fm.apply_checked(&t, syls));
             out.forms_ok = p == g;
             out.forms_no_char_step = !(p_ran && g_ran);
         }
-        out.in64 = surf.iter().any(|s| len.apply(s) == t);
+        out.in64 = surf.iter().any(|s| ok(s));
         if want_dump {
             for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
                 writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
@@ -833,7 +959,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Aggressive => "+rl:aggressive",
     };
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { "+recur" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { "+recur" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())
 }
 
@@ -1137,6 +1263,26 @@ mod tests {
         assert!(check_lm_opts(None, true, false, 0, false).is_ok());
         assert!(check_lm_opts(None, false, false, 0, true).is_err(), "--packs-dir without --packs");
         assert!(check_lm_opts(None, false, false, PACK_ACG, true).is_ok());
+    }
+
+    #[test]
+    fn judge_opts_accept_needs_v2_and_the_holdout_refuses_accept_and_rejudge() {
+        assert!(check_judge_opts(None, false, false, false).is_ok());
+        assert!(check_judge_opts(None, true, true, false).is_ok());
+        assert!(check_judge_opts(None, false, true, false).is_err(), "--accept without --judge v2");
+        assert!(check_judge_opts(Some("holdout"), true, false, false).is_ok(), "--judge v2 --rowstats on the holdout stays allowed");
+        assert!(check_judge_opts(Some("holdout"), true, true, false).is_err(), "--accept with --set holdout");
+        assert!(check_judge_opts(Some("holdout"), true, false, true).is_err(), "--rejudge with --set holdout");
+        assert!(check_judge_opts(None, true, false, true).is_ok());
+    }
+
+    #[test]
+    fn picks_file_takes_picks_lines_and_bare_sentences() {
+        assert_eq!(parse_picks("1\t0\t你好\n2\t-\t\n", 2), Ok(vec!["你好".to_string(), String::new()]));
+        assert_eq!(parse_picks("你好\n再見\n", 2), Ok(vec!["你好".to_string(), "再見".to_string()]));
+        assert!(parse_picks("你好\n", 2).is_err(), "row count");
+        assert!(parse_picks("2\t0\t你好\n", 1).is_err(), "row number");
+        assert!(parse_picks("1\t0\t你好\t多\n", 1).is_err(), "four fields");
     }
 
     /// `--packs` takes acg, quotes, it, meme, beauty and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.
