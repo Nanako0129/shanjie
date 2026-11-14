@@ -44,7 +44,7 @@
 ### 2.3 小模型與其他檔案讀取
 
 - `core/src/tinylm.rs`：`O_NONBLOCK` 與它的使用只在 `cfg(unix)`（Linux 0o4000，其他 Unix 0x0004）。Windows 的 `read_bounded` 用一般的 `File::open`，同樣先開檔、再檢查「是一般檔且不超過上限」、再從同一個 handle 讀到上限為止。
-- Accelerate 只在 macOS；Windows 與 Linux 一樣走 Plain 路徑。
+- Accelerate 只在 macOS；Windows 與 Linux 一樣走 Plain 路徑（x86-64 上依執行期偵測用 AVX2 或 AVX-512F 的核心函式，結果和純量逐位元相同；`docs/spec/semantic-rerank.md` §2.4）。
 
 ### 2.4 當地日期
 

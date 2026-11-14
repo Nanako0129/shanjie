@@ -48,7 +48,7 @@
 - `TinyLm::load` 與 `load_paired` 只讀一般檔案（先開檔、再檢查同一個 handle；開檔時用 `O_NONBLOCK`，所以 FIFO 不會卡住）且不超過 `MAX_FILE`（64 MiB）；不是一般檔案回 `Io`，超過上限回 `Format`；最多讀上限加 1 個 byte。
 - 檔頭上限（讓前向計算的配置有上界）：V ≤ 65,536、ctx ≤ 1,024、d ≤ 2,048、n_layer ≤ 64；另要求權重型別 ≤ 1、n_layer 與 n_head 不為 0、d 能被 n_head 整除、ctx ≥ 2、V ≥ 3。
 - 字表碼位必須是合法 Unicode 純量值且不重複；int8 還原後與 f32 權重都必須是有限值（縮放有限但乘上 127 仍可能溢位為 inf，一樣拒絕）。
-- Accelerate 的矩陣乘法前，長度前提用 `assert!` 檢查（release 也檢查），因為呼叫用原始指標。
+- 每一個矩陣乘法前，三個矩陣的長度前提用 `assert!` 檢查（release 也檢查；用 `checked_mul`，乘積溢位也擋）：Accelerate 的呼叫用原始指標，可攜路徑的向量版用未對齊的載入與儲存，都靠這個前提。
 
 ### 2.3 配對
 
@@ -65,7 +65,14 @@
 
 模型是 `tools/lib/tinylm.py` 的 `NumpyLM`：pre-LN 解碼器、輸入與輸出共用嵌入、學得的位置嵌入、GELU（tanh 形式，常數 0.7978845608028654 與 0.044715）、因果遮罩、LayerNorm eps 1e-5，f32 計算。
 
-- macOS 的矩陣乘法走 Accelerate（`cblas_sgemm`；tanh、exp 用 vForce），其他平台用純 Rust 版；兩者的 LL 差小於 1e-5（核心單元測試用隨機權重斷言）。核心沒有外部 crate 相依。`macos/Package.swift` 的 `ShanjieKit` 因此連結 Accelerate framework（Rust 的 `#[link(kind = "framework")]` 不會帶進靜態庫）。
+- macOS 的矩陣乘法走 Accelerate（`cblas_sgemm`；tanh、exp 用 vForce），其他平台走可攜路徑（`Backend::Plain`，純 Rust）；兩者的 LL 差小於 1e-5（核心單元測試用隨機權重斷言）。核心除了 Windows 上的 `windows-sys` 沒有外部 crate 相依。
+- **可攜路徑的矩陣乘法**（`tinylm.rs` 的 `gemm_kernel`）在每一種 CPU、每一個平台算出逐位元相同的結果：
+  - 不轉置的乘法（各層的線性層）：`c[i][j]` 依 `p = 0, 1, …` 的順序各加一次 `a[i][p] * b[p][j]`，乘與加分開做。
+  - 轉置的乘法（logits：每個位置對整張嵌入表做內積）：內積用 16 個部分和（第 `q` 個元素加進第 `q mod 16` 個），整塊 16 個之後依 16 → 8 → 4 → 2 → 1 合併（第 `l + 一半` 個加進第 `l` 個），不滿 16 個的尾段依序另外加總、最後加上去。
+  - 核心函式三份：純量參考實作（x86-64 以外的平台，以及沒有 AVX2 的 x86-64；由編譯器用基線指令集向量化）、AVX2、AVX-512F。x86-64 上每次呼叫用標準函式庫的執行期偵測選一份（有 AVX-512F 用它，否則有 AVX2 用它，否則純量）；路徑只在這裡選，沒有公開的選擇、不讀環境變數。向量版只改一個指令處理幾個元素，不改任何一個元素上運算的順序。
+  - 不用 FMA：它把乘與加合成一次捨入，結果和分開做不同，沒有 FMA 的 CPU 算不出同一個值。換來的是每台電腦的分數與選字相同，CI 的 Linux 對 Windows 逐位元組比對也不隨 runner 的 CPU 變。
+  - 向量版是安全的 `#[target_feature]` 函式（用到沒有啟用的指令集編不過）；`unsafe` 只有分派處的呼叫，以及對長度剛好的切片區塊做的未對齊載入與儲存；尾段用純量。
+  - 驗證：`tinylm::tests::kernels_agree_bit_for_bit`（這台 CPU 有的每一份核心函式對純量參考實作逐位元相同；不轉置的乘法另對向量化之前的寫法逐位元相同；矩陣放在較大緩衝區的中段，兩側放 NaN 與固定的位元型樣，抓越界的讀寫；印出跑了哪幾份）、`an_empty_dot_adds_positive_zero`、四個長度不符的 `should_panic`。i686 與 aarch64 的 Windows 在 CI 只有建置、沒有跑測試，走的是純量參考實作。`macos/Package.swift` 的 `ShanjieKit` 因此連結 Accelerate framework（Rust 的 `#[link(kind = "framework")]` 不會帶進靜態庫）。
 - 每批最多 `BATCH`（8）個候選，右側補 PAD；因果遮罩讓 PAD 不影響前面的位置。
 
 ### 2.5 匯出工具與小模型 golden
