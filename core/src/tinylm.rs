@@ -298,6 +298,14 @@ mod scalar {
 mod x86 {
     use std::arch::x86_64::*;
 
+    /// Rows of b per tile of the transposed product (32 rows of the model's width are 48 KiB; 128 rows measured no faster).
+    const TILE: usize = 32;
+    /// Rows of b per block of the product that is not transposed: a multiple of 4 (the row kernels take four rows at a time, so only the
+    /// last block has single rows). 4 rows of the widest layer (1,536 columns) are 24 KiB and stay in the first-level cache while every
+    /// row of c takes them. Measured on an i5-12600K (AVX2), 200 rows in one process: 4 rows 11.2-11.3 s, 8 rows 11.6-11.8 s, 16 rows
+    /// 12.4-12.6 s, 32 rows 12.7-12.9 s; the old loop 40.5-41.5 s.
+    const BLOCK: usize = 4;
+
     /// The 8 sums `v` merged as `scalar::dot` merges its sums 0..8: 8 -> 4 -> 2 -> 1.
     #[inline]
     #[target_feature(enable = "avx2")]
@@ -349,53 +357,50 @@ mod x86 {
         merge8(_mm256_add_ps(_mm512_castps512_ps256(s), hi)) + tail(xr, yr)
     }
 
-    /// One row of the product that is not transposed: ci[j] takes ai[p] * b[p][j] for p in order. Tiles of 8 vectors keep their running
-    /// sums in registers over the whole p loop; the order of the operations on one element is the scalar kernel's.
+    /// One row of the product that is not transposed: ci[j] takes ai[p] * b[p][j] for p in order, as the scalar kernel does; the
+    /// rows of b are read front to back, four at a time.
     #[inline]
     #[target_feature(enable = "avx2")]
     fn row_avx2(ai: &[f32], b: &[f32], ci: &mut [f32], n: usize) {
         const W: usize = 8;
-        const T: usize = 8 * W;
-        let mut j0 = 0;
-        while j0 + T <= n {
-            let tile = &mut ci[j0..j0 + T];
-            let mut acc = [_mm256_setzero_ps(); 8];
-            for (r, ch) in tile.chunks_exact(W).enumerate() {
-                // SAFETY: ch is a slice of exactly 8 f32.
-                acc[r] = unsafe { _mm256_loadu_ps(ch.as_ptr()) };
-            }
-            for (p, &av) in ai.iter().enumerate() {
-                let va = _mm256_set1_ps(av);
-                let brow = &b[p * n + j0..][..T];
-                for (r, ch) in brow.chunks_exact(W).enumerate() {
-                    // SAFETY: ch is a slice of exactly 8 f32.
-                    let vb = unsafe { _mm256_loadu_ps(ch.as_ptr()) };
-                    acc[r] = _mm256_add_ps(acc[r], _mm256_mul_ps(va, vb));
+        let whole = n - n % W;
+        let (cv, ct) = ci.split_at_mut(whole);
+        let mut p = 0;
+        // four rows of b per pass over the row of c: each element still takes its products one at a time, p in order
+        while p + 4 <= ai.len() {
+            let (a0, a1, a2, a3) = (_mm256_set1_ps(ai[p]), _mm256_set1_ps(ai[p + 1]), _mm256_set1_ps(ai[p + 2]), _mm256_set1_ps(ai[p + 3]));
+            let (b0, b1, b2, b3) = (&b[p * n..][..n], &b[(p + 1) * n..][..n], &b[(p + 2) * n..][..n], &b[(p + 3) * n..][..n]);
+            let rows = b0[..whole].chunks_exact(W).zip(b1[..whole].chunks_exact(W)).zip(b2[..whole].chunks_exact(W).zip(b3[..whole].chunks_exact(W)));
+            for (cc, ((x0, x1), (x2, x3))) in cv.chunks_exact_mut(W).zip(rows) {
+                // SAFETY: cc, x0, x1, x2 and x3 are slices of exactly 8 f32 (chunks_exact); the loads and the store need no alignment.
+                unsafe {
+                    let mut acc = _mm256_loadu_ps(cc.as_ptr());
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a0, _mm256_loadu_ps(x0.as_ptr())));
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a1, _mm256_loadu_ps(x1.as_ptr())));
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a2, _mm256_loadu_ps(x2.as_ptr())));
+                    acc = _mm256_add_ps(acc, _mm256_mul_ps(a3, _mm256_loadu_ps(x3.as_ptr())));
+                    _mm256_storeu_ps(cc.as_mut_ptr(), acc);
                 }
             }
-            for (r, ch) in tile.chunks_exact_mut(W).enumerate() {
-                // SAFETY: ch is a slice of exactly 8 f32.
-                unsafe { _mm256_storeu_ps(ch.as_mut_ptr(), acc[r]) };
+            for (q, cj) in ct.iter_mut().enumerate() {
+                let j = whole + q;
+                *cj += ai[p] * b0[j];
+                *cj += ai[p + 1] * b1[j];
+                *cj += ai[p + 2] * b2[j];
+                *cj += ai[p + 3] * b3[j];
             }
-            j0 += T;
+            p += 4;
         }
-        while j0 + W <= n {
-            let ch = &mut ci[j0..j0 + W];
-            // SAFETY: ch is a slice of exactly 8 f32, here and at the store below; so is each slice of b loaded in the loop.
-            let mut acc = unsafe { _mm256_loadu_ps(ch.as_ptr()) };
-            for (p, &av) in ai.iter().enumerate() {
-                let vb = unsafe { _mm256_loadu_ps(b[p * n + j0..][..W].as_ptr()) };
-                acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_set1_ps(av), vb));
+        while p < ai.len() {
+            let (av, va, brow) = (ai[p], _mm256_set1_ps(ai[p]), &b[p * n..][..n]);
+            for (cc, x) in cv.chunks_exact_mut(W).zip(brow[..whole].chunks_exact(W)) {
+                // SAFETY: cc and x are slices of exactly 8 f32 (chunks_exact).
+                unsafe { _mm256_storeu_ps(cc.as_mut_ptr(), _mm256_add_ps(_mm256_loadu_ps(cc.as_ptr()), _mm256_mul_ps(va, _mm256_loadu_ps(x.as_ptr())))) };
             }
-            unsafe { _mm256_storeu_ps(ch.as_mut_ptr(), acc) };
-            j0 += W;
-        }
-        for j in j0..n {
-            let mut v = ci[j];
-            for (p, &av) in ai.iter().enumerate() {
-                v += av * b[p * n + j];
+            for (cj, bj) in ct.iter_mut().zip(&brow[whole..]) {
+                *cj += av * bj;
             }
-            ci[j] = v;
+            p += 1;
         }
     }
 
@@ -404,61 +409,68 @@ mod x86 {
     #[target_feature(enable = "avx512f")]
     fn row_avx512(ai: &[f32], b: &[f32], ci: &mut [f32], n: usize) {
         const W: usize = 16;
-        const T: usize = 8 * W;
-        let mut j0 = 0;
-        while j0 + T <= n {
-            let tile = &mut ci[j0..j0 + T];
-            let mut acc = [_mm512_setzero_ps(); 8];
-            for (r, ch) in tile.chunks_exact(W).enumerate() {
-                // SAFETY: ch is a slice of exactly 16 f32.
-                acc[r] = unsafe { _mm512_loadu_ps(ch.as_ptr()) };
-            }
-            for (p, &av) in ai.iter().enumerate() {
-                let va = _mm512_set1_ps(av);
-                let brow = &b[p * n + j0..][..T];
-                for (r, ch) in brow.chunks_exact(W).enumerate() {
-                    // SAFETY: ch is a slice of exactly 16 f32.
-                    let vb = unsafe { _mm512_loadu_ps(ch.as_ptr()) };
-                    acc[r] = _mm512_add_ps(acc[r], _mm512_mul_ps(va, vb));
+        let whole = n - n % W;
+        let (cv, ct) = ci.split_at_mut(whole);
+        let mut p = 0;
+        // four rows of b per pass over the row of c: each element still takes its products one at a time, p in order
+        while p + 4 <= ai.len() {
+            let (a0, a1, a2, a3) = (_mm512_set1_ps(ai[p]), _mm512_set1_ps(ai[p + 1]), _mm512_set1_ps(ai[p + 2]), _mm512_set1_ps(ai[p + 3]));
+            let (b0, b1, b2, b3) = (&b[p * n..][..n], &b[(p + 1) * n..][..n], &b[(p + 2) * n..][..n], &b[(p + 3) * n..][..n]);
+            let rows = b0[..whole].chunks_exact(W).zip(b1[..whole].chunks_exact(W)).zip(b2[..whole].chunks_exact(W).zip(b3[..whole].chunks_exact(W)));
+            for (cc, ((x0, x1), (x2, x3))) in cv.chunks_exact_mut(W).zip(rows) {
+                // SAFETY: cc, x0, x1, x2 and x3 are slices of exactly 16 f32 (chunks_exact); the loads and the store need no alignment.
+                unsafe {
+                    let mut acc = _mm512_loadu_ps(cc.as_ptr());
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a0, _mm512_loadu_ps(x0.as_ptr())));
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a1, _mm512_loadu_ps(x1.as_ptr())));
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a2, _mm512_loadu_ps(x2.as_ptr())));
+                    acc = _mm512_add_ps(acc, _mm512_mul_ps(a3, _mm512_loadu_ps(x3.as_ptr())));
+                    _mm512_storeu_ps(cc.as_mut_ptr(), acc);
                 }
             }
-            for (r, ch) in tile.chunks_exact_mut(W).enumerate() {
-                // SAFETY: ch is a slice of exactly 16 f32.
-                unsafe { _mm512_storeu_ps(ch.as_mut_ptr(), acc[r]) };
+            for (q, cj) in ct.iter_mut().enumerate() {
+                let j = whole + q;
+                *cj += ai[p] * b0[j];
+                *cj += ai[p + 1] * b1[j];
+                *cj += ai[p + 2] * b2[j];
+                *cj += ai[p + 3] * b3[j];
             }
-            j0 += T;
+            p += 4;
         }
-        while j0 + W <= n {
-            let ch = &mut ci[j0..j0 + W];
-            // SAFETY: ch is a slice of exactly 16 f32, here and at the store below; so is each slice of b loaded in the loop.
-            let mut acc = unsafe { _mm512_loadu_ps(ch.as_ptr()) };
-            for (p, &av) in ai.iter().enumerate() {
-                let vb = unsafe { _mm512_loadu_ps(b[p * n + j0..][..W].as_ptr()) };
-                acc = _mm512_add_ps(acc, _mm512_mul_ps(_mm512_set1_ps(av), vb));
+        while p < ai.len() {
+            let (av, va, brow) = (ai[p], _mm512_set1_ps(ai[p]), &b[p * n..][..n]);
+            for (cc, x) in cv.chunks_exact_mut(W).zip(brow[..whole].chunks_exact(W)) {
+                // SAFETY: cc and x are slices of exactly 16 f32 (chunks_exact).
+                unsafe { _mm512_storeu_ps(cc.as_mut_ptr(), _mm512_add_ps(_mm512_loadu_ps(cc.as_ptr()), _mm512_mul_ps(va, _mm512_loadu_ps(x.as_ptr())))) };
             }
-            unsafe { _mm512_storeu_ps(ch.as_mut_ptr(), acc) };
-            j0 += W;
-        }
-        for j in j0..n {
-            let mut v = ci[j];
-            for (p, &av) in ai.iter().enumerate() {
-                v += av * b[p * n + j];
+            for (cj, bj) in ct.iter_mut().zip(&brow[whole..]) {
+                *cj += av * bj;
             }
-            ci[j] = v;
+            p += 1;
         }
     }
 
     /// The caller has checked the lengths (`check_gemm`) and that the CPU has AVX2.
     #[target_feature(enable = "avx2")]
     pub(super) fn gemm_avx2(a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
-        for i in 0..m {
-            let (ai, ci) = (&a[i * k..][..k], &mut c[i * n..][..n]);
-            if trans_b {
-                for (j, cj) in ci.iter_mut().enumerate() {
-                    *cj += dot_avx2(ai, &b[j * k..][..k]);
+        if trans_b {
+            // tiles of rows of b stay in the cache while every row of a passes over them; each c[i][j] is one independent dot product
+            for j0 in (0..n).step_by(TILE) {
+                let j1 = (j0 + TILE).min(n);
+                for i in 0..m {
+                    let ai = &a[i * k..][..k];
+                    for (j, cj) in (j0..j1).zip(&mut c[i * n + j0..i * n + j1]) {
+                        *cj += dot_avx2(ai, &b[j * k..][..k]);
+                    }
                 }
-            } else {
-                row_avx2(ai, b, ci, n);
+            }
+        } else {
+            // blocks of BLOCK rows of b stay in the cache while every row of c takes them; an element still gets its products with p in order
+            for p0 in (0..k).step_by(BLOCK) {
+                let p1 = (p0 + BLOCK).min(k);
+                for i in 0..m {
+                    row_avx2(&a[i * k + p0..i * k + p1], &b[p0 * n..p1 * n], &mut c[i * n..][..n], n);
+                }
             }
         }
     }
@@ -466,14 +478,24 @@ mod x86 {
     /// The caller has checked the lengths (`check_gemm`) and that the CPU has AVX-512F.
     #[target_feature(enable = "avx512f")]
     pub(super) fn gemm_avx512(a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
-        for i in 0..m {
-            let (ai, ci) = (&a[i * k..][..k], &mut c[i * n..][..n]);
-            if trans_b {
-                for (j, cj) in ci.iter_mut().enumerate() {
-                    *cj += dot_avx512(ai, &b[j * k..][..k]);
+        if trans_b {
+            // tiles of rows of b stay in the cache while every row of a passes over them; each c[i][j] is one independent dot product
+            for j0 in (0..n).step_by(TILE) {
+                let j1 = (j0 + TILE).min(n);
+                for i in 0..m {
+                    let ai = &a[i * k..][..k];
+                    for (j, cj) in (j0..j1).zip(&mut c[i * n + j0..i * n + j1]) {
+                        *cj += dot_avx512(ai, &b[j * k..][..k]);
+                    }
                 }
-            } else {
-                row_avx512(ai, b, ci, n);
+            }
+        } else {
+            // blocks of BLOCK rows of b stay in the cache while every row of c takes them; an element still gets its products with p in order
+            for p0 in (0..k).step_by(BLOCK) {
+                let p1 = (p0 + BLOCK).min(k);
+                for i in 0..m {
+                    row_avx512(&a[i * k + p0..i * k + p1], &b[p0 * n..p1 * n], &mut c[i * n..][..n], n);
+                }
             }
         }
     }
