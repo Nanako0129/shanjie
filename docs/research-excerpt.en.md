@@ -11,6 +11,10 @@ the paragraphs the paper cites, each in full. It is a translation of the Chinese
   only their statistics. A few passages are reworded to state the rule or the fact itself.
 - The anchor before each paragraph (for example `rl-012`) is where the paper cites it. Paragraphs and anchors match the
   Chinese version one to one, with the same numbers.
+- Each paragraph states the rule of its time. "The legitimate-spelling score is reported only; judging uses the loose-matching
+  top-1 alone" holds up to v0.7.0; after v0.7.0, judging and gates use judge v2 (spellings recorded in the dictionary and
+  reviewed word pairs count as right), defined in section 3 of `docs/spec/evaluation.md`. Every number in this excerpt is
+  under judge v1.
 - Final as of 2026-11-09. Four paragraphs of the plan (`plan-019` to `plan-022`) were added on 2026-11-11; the existing
   paragraphs and anchors are unchanged.
 
