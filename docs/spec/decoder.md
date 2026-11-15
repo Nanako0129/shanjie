@@ -182,8 +182,9 @@
 - **做在哪一層**：加分放在每個詞的 δ 裡（負的 δ，和模糊音的容錯扣分同一個管道）：詞內的字元對在放進那個詞時加，跨詞邊界的在接上前一個詞時加（解碼本來就記著前一個詞）。所以它在路徑分數裡：光束的剪枝、n-best 的順序、語意校正的候選池與它的把握閘門（n-gram 分差）、融合用的 n-gram 分數都含它；`Engine::total_score` 仍等於解碼第一名的分數（§4.5）。句首單字紀錄的兩次解碼（不抬高與抬高）和被學習加分的詞都帶這一項；讀音輸入、候選窗、預測列的前文鍵、學習的鍵都不變。
 - **只用已經在 App 裡的文字**：組字區裡還沒送出的字不進 G，免得解碼器自己猜的字回頭加強自己。前文的原文不為這一項保存，核心只留 G（保存與清除見 `docs/spec/semantic-rerank.md` §5.2 與 `docs/spec/privacy.md` §5.2）。
 - G 是空的（沒有前文、前文裡沒有兩個相鄰的漢字、隱私閘門擋住）時，這一項恆為 0，解碼與選字和沒有這一項逐位元組相同。終端機類 App 只傳結尾 ≤ 2 個漢字，G 至多一個字元對：這一項在終端機裡最多用到游標前緊接的兩個漢字，只有那兩個字剛好是候選路徑裡相鄰的兩個字時才加分（游標前是「反映」時，ㄈㄢˇ ㄧㄥˋ 的第一名從「反應」變成「反映」）；游標前是標點、英數或只有一個漢字，或那兩個字不是候選路徑裡相鄰的兩個字時，和沒有這一項相同。
-- 評測開關：`Engine::set_recur(false)`（只有 Rust API，不在 `shanjie.h`，換世代號）、評測 CLI 與重播的 `--no-recur` 讓解碼器不拿到 G，等於沒有這一項；G 照舊保存與清除。評測 CLI 不建 `Engine`，有 `--context` 時從每列的前文欄呼叫同一個 `RecurGrams::from_text` 建 G，傳給 `decode_from_fuzzy_scored`；沒有 `--context` 就沒有前文，這一項不存在。摘要行標記見 §9。
+- 評測開關：`Engine::set_recur(false)`（只有 Rust API，不在 `shanjie.h`，換世代號）、評測 CLI 與重播的 `--no-recur` 讓解碼器不拿到 G，等於沒有這一項（候選池的加重也跟著不生效）；G 照舊保存與清除。`Engine::set_pool_recur(false)` 與 `--no-pool-recur` 只關候選池的加重（`docs/spec/semantic-rerank.md` §3.1.1）。評測 CLI 不建 `Engine`，有 `--context` 時從每列的前文欄呼叫同一個 `RecurGrams::from_text` 建 G，傳給 `decode_from_fuzzy_scored`；沒有 `--context` 就沒有前文，這一項不存在。摘要行標記見 §9。
 - 取捨：不放進融合分數，因為語意校正關著時融合不執行，這一項就消失；做進路徑分數，三種強度與語意校正開關都生效。
+- 語意校正執行時，候選池另外照同一個 G 再加一次重（每個字元對 `POOL_RECUR_GAMMA` = 2，前文截到 64 之後至少 32 個純量值才加），重排後再選字：規則見 `docs/spec/semantic-rerank.md` §3.1.1。解碼器這一項（`RECUR_BETA`）不變。
 
 ## 5. 讀音項
 
@@ -248,8 +249,9 @@
 
 ## 7. 手動詞保護
 
-- 手動詞＝`overlay-add.tsv` 第 4 欄標籤是 `manual` 的列（由 `tools/build_overlay.py` 從 `overlay-manual.tsv` 接在後面，分數為該字數的 `S_len + MANUAL_BONUS`，`MANUAL_BONUS` = 0.75）。`Lexicon` 讀疊加層時收成 `ManualSet`（詞的字，讀音音節序列）；字數不等於音節數的列不收；其他標籤不收。另外 `data/lexicon/rerank-protect.tsv` 的詞（`docs/spec/lexicon-and-packs.md` §2.12，基底詞也可以）在載入詞庫時併進同一份 `ManualSet`，所以保護集合 = 手動詞加上重排保護詞；它們不改分數也不加詞條。引擎與評測 CLI 共用同一份，重排工作帶它（`Arc` 共用）。
-- 規則：語意校正某一段的 n-gram 第一名若在某個位置以那個手動詞的音節序列、字面上含有該手動詞，這一段就保護它；候選若沒有在同樣位置保有每一個被保護的手動詞，就在選擇時被遮掉（不能被選）。門檻（τ）與所有分數仍用完整清單算；第一名永遠保有，所以至少有一個可選。遮罩函式只有一個：`tinylm::manual_mask`（`TinyLm::rerank`、`rerank_colloquial`、`guarded_pick` 的退回路徑與評測 CLI 的 `--tinylm-scores` 都呼叫它；退回時也只能退到保有的候選）。
+- 手動詞＝`overlay-add.tsv` 第 4 欄標籤是 `manual` 的列（由 `tools/build_overlay.py` 從 `overlay-manual.tsv` 接在後面，分數為該字數的 `S_len + MANUAL_BONUS`，`MANUAL_BONUS` = 0.75）。`Lexicon` 讀疊加層時收成 `ManualSet`（詞的字，讀音音節序列）；字數不等於音節數的列不收；其他標籤不收。另外 `data/lexicon/rerank-protect.tsv` 的詞（`docs/spec/lexicon-and-packs.md` §2.12，基底詞也可以）在載入詞庫時併進同一份 `ManualSet`，所以保護集合 = 手動詞加上重排保護詞；它們不改分數也不加詞條。引擎與評測 CLI 共用同一份。
+- 規則：語意校正某一段的 n-gram 第一名若在某個位置以那個手動詞的音節序列、字面上含有該手動詞，這一段就保護它；候選若沒有在同樣位置保有每一個被保護的手動詞，就在選擇時被遮掉（不能被選）。門檻（τ）與所有分數仍用完整清單算；第一名永遠保有，所以至少有一個可選。遮罩函式只有一個：`tinylm::manual_mask`，由引擎建重排工作時與評測 CLI 建池時各呼叫一次（照解碼器的順序、以解碼器的第一名為保護的基準），結果交給重排函式（`TinyLm::rerank`、`rerank_colloquial`，含 `guarded_pick` 的退回路徑；退回時也只能退到保有的候選），評測 CLI 的 `--tinylm-scores` 寫的也是它。
+- 前文重現的加重（`docs/spec/semantic-rerank.md` §3.1.1）不重排會拿掉它們的候選到第一名：遮罩照舊對解碼器的第一名算，重排時跟著候選換位置；重排後的第一名是會被遮罩的候選時，那一段不重排。所以前文的加分不會推翻手動詞與重排保護詞的保證。
 - 音節序列用第一名路徑實際用的讀音（`Lexicon::path_readings`）：鄰鍵輸入把詞庫沒有的音節讀成替代讀音時，用那個詞庫讀音，所以手動詞經由容錯成為第一名時也受保護。
 - 沒有手動詞時完全照舊；`--tinylm-scores` 每列多一個欄位列出被遮掉的候選索引（沒有就是空）。
 - 重排的其餘部分（融合、τ、δ）見 `docs/spec/semantic-rerank.md`。
@@ -323,16 +325,16 @@
 ## 9. Python 參考實作與 CLI
 
 - `reference/proto/lm.py`、`trigram.py`、`ime.py` 實作 bigram、詞類、KN、trigram、異體排序表（`ime.py` 的 `load_variant_order`、`lm.py` 的 `cap_overlay`）、降權表（`load_demote`）、詞包詞當未知詞與前後同樣的合併規則，與 Rust 逐位元組相同；`fuzzy_ref.py` 是容錯表的對照。Python **不實作**讀音項、模糊輸入的解碼、學習。golden 由 Python 產生、Rust 比對。
-- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--fuzzy`、`--fuzzy-delta-sound`、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
-- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm`。
-- 重播程式（`shanjie-replay`）走引擎的 `load_lm`，標記與模型列同 CLI（`+recur` 在讀音項標記之前，`--no-recur` 時沒有），另列出實際載入的每個模型檔。
+- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--no-pool-recur`、`--pool-mask-diff`、`--fuzzy`、`--fuzzy-delta-sound`、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
+- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後；有 `--tinylm` 而且沒有 `--no-pool-recur` 時是 `+recur+pr`，`docs/spec/semantic-rerank.md` §3.1.1）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm`。
+- 重播程式（`shanjie-replay`）走引擎的 `load_lm`，標記與模型列同 CLI（`+recur` 在讀音項標記之前，有小模型時是 `+recur+pr`，`--no-pool-recur` 時只有 `+recur`，`--no-recur` 時都沒有），另列出實際載入的每個模型檔。
 
 ## 10. 驗證
 
 - 單元與整合：`make test-rust`（`core/src/lm.rs` 內的 trigram 公式、遮罩、容錯、`core/src/tests.rs` 的異體排序，`core/tests/kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`、`engine_pack.rs`、`engine_demote.rs`、`engine_fuzzy.rs`、`engine_fuzzy_rerank.rs`、`engine_lm.rs`、`engine_rerank.rs`、`engine_recur.rs`、`reading_decode.rs`，`cli/tests/golden.rs`、`fuzzy.rs`、`fuzzy_rerank.rs`、`reading_decode.rs`、`recur.rs`、`replay.rs`）；`make test-python`（`reference/proto/test_recombine.py`、`test_demote.py`、`test_variant_order.py`、`test_fuzzy_ref.py`，`tools/test_build_trigram.py`、`test_kn_cont.py`、`test_build_classes.py`、`test_build_sandhi.py`、`test_build_overlay.py`、`test_build_acg_pack.py`、`test_pack_oov.py`、`test_std_exempt.py`）；`make test-swift`（設定存取、旗標送出）；`make test-golden`。
 - 跨語言 golden：玩具模型加玩具側檔／表由 Python 產生（`tools/gen_kn_tiny.py`、`gen_tri_tiny.py`、`gen_pack_oov.py`），Rust 逐位元組比對（`kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`）；真模型的 `eval/golden/` 由 `reference/proto/lm_eval.py` 重產，Rust CLI 逐位元組相同，指令見 `docs/spec/evaluation.md`。
 - 規則壞了就要失敗的測試（每條規則至少一個）：合併鍵（沒有合併修正時留下錯的路徑、修正後留下 `下｜來`，用合成小詞庫與模型）、KN 替換與 id ≥ 2 條件、trigram 公式四種情形與下限生效／不生效、單詞段落收尾、壞檔各回對應錯誤、`load_opts` 載入的表確實是映射、強制詞當未知詞且不封頂／非強制詞照封頂、降權只在指定讀音生效與 `*`、`set_demote(0)` 等於沒有表、異體排序的格式與順序與封頂後再套一次、容錯標記（降權後 δ 剛好 2.5 的打的讀音詞不是容錯詞）、遮罩與其退回路徑、學習抬高的字不被讀音項推翻。
-- 前文重現項：前文放其中一個同音詞，同音候選第一名是前文那一個，換成另一個就反過來（語意校正開、關各一次）；前文空或只有一個字元時與關掉它逐列相同（`core/tests/engine_recur.rs`、`cli/tests/recur.rs`，見 `docs/spec/semantic-rerank.md` §10）。
+- 前文重現項：前文放其中一個同音詞，同音候選第一名是前文那一個，換成另一個就反過來（語意校正開、關各一次）；前文空或只有一個字元時與關掉它逐列相同（`core/tests/engine_recur.rs`、`cli/tests/recur.rs`，見 `docs/spec/semantic-rerank.md` §10）。候選池的加重：`core/tests/engine_pool_recur.rs`、`cli/tests/replay.rs` 的 `pool_weight_replay_agrees_with_the_cli`（見 `docs/spec/semantic-rerank.md` §10）。
 - 看到它有效：書面、句首 `ㄒㄧㄚˋ ㄌㄞˊ ㄈㄣ ㄒㄧ` 第一名是 `下來分析`；`ㄍㄠˇ ㄨㄢˊ ㄓㄜˋ ㄅㄛ` 開降權是「搞完這波」、關閉是「睪丸這波」；書面打「以敵偽人員的名字命名」的注音整句對（讀音項關閉時是「以狄為…」）；`ㄐㄧㄝˊ ㄓㄚ` 得到「結紮」；`ㄅㄨˋ ㄕˋ` 與 `ㄅㄨˊ ㄕˋ` 都得到「不是」、`ㄎㄢˋ ㄧ ㄒㄧㄚˋ` 得到「看一下」、`ㄈㄚˇ ㄍㄨㄛˊ` 得到「法國」；模糊音開 ㄓ/ㄗ 打 `ㄗ ㄉㄠˋ` 第一名是「知道」；「好」送出後打 `ㄅㄚ˙` 得到「吧」。
 - 選字結果改變的改動，出貨前依 `docs/spec/evaluation.md` 的出貨標準（私人的聊天集合、dev302、打字測驗、錯字回報、調參集）量；調參集與私人集合不公開。
 
