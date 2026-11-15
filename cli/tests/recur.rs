@@ -30,8 +30,8 @@ fn run(args: &[&str]) -> String {
 }
 
 /// The first 40 rows of eval/dev/user-reported.txt (public, CC0) under the contexts "", 1 Han character, 1 ASCII letter and 1 emoji: the dump (all candidates
-/// and their path scores), the rowstats and the summary line with the term are those of `--no-recur`, except `+recur` in the tag; chat and formal, the n-gram
-/// alone and with the small model.
+/// and their path scores), the rowstats and the summary line with the term are those of `--no-recur`, except `+recur` in the tag (`+recur+pr` with the small
+/// model: the pool weight of docs/spec/semantic-rerank.md §3.1.1 is on); chat and formal, the n-gram alone and with the small model.
 #[test]
 fn an_empty_or_one_character_context_prints_what_no_recur_prints() {
     let d = tmp("short");
@@ -60,8 +60,9 @@ fn an_empty_or_one_character_context_prints_what_no_recur_prints() {
                 (line, std::fs::read(dump).unwrap(), std::fs::read(rs).unwrap())
             };
             let (on, off) = (out(false), out(true));
-            assert!(on.0.contains("+ctx+recur") && !off.0.contains("+recur"), "{}{}", on.0, off.0);
-            assert_eq!(on.0.replacen("+recur", "", 1), off.0, "{profile} {tinylm}");
+            let mark = if tinylm { "+recur+pr" } else { "+recur" };
+            assert!(on.0.contains(&format!("+ctx{mark}+kn")) && !off.0.contains("+recur") && !off.0.contains("+pr"), "{}{}", on.0, off.0);
+            assert_eq!(on.0.replacen(mark, "", 1), off.0, "{profile} {tinylm}");
             assert!(on.1 == off.1 && !on.1.is_empty(), "{profile} {tinylm}: the dump");
             assert_eq!(on.2, off.2, "{profile} {tinylm}: the rowstats");
         }
@@ -84,4 +85,58 @@ fn a_context_with_the_homophone_turns_the_choice() {
         let plain = with(&[]);
         assert!(!top1(&plain) && !plain.contains("+recur"), "{profile}: {plain}");
     }
+}
+
+/// The context recurrence weight on the pool (docs/spec/semantic-rerank.md §3.1.1) in the CLI, on a hand-written row whose left text holds 44 characters,
+/// 語義 and 錯字: `+recur+pr` with `--context` and `--tinylm`, none with `--no-pool-recur`, `--no-recur` or no `--context`; without `--tinylm` there is no
+/// pool and the option changes nothing (byte for byte). The reordered row's `--tinylm-scores` lists the pool as the rerank saw it (`idx`, the n-best index
+/// of each entry; `ng` the decoder's score plus the weight, best first); `--pool-mask-diff` writes numbers only and the summary counts them.
+#[test]
+fn the_pool_weight_marks_and_records() {
+    let d = tmp("pool");
+    let file = d.0.join("rows.txt");
+    std::fs::write(&file, "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（|語意也錯字|ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ\n").unwrap();
+    let file = file.to_str().unwrap();
+    let path = |n: &str| d.0.join(n).to_str().unwrap().to_string();
+    let base = ["--lm", "data/lm/bigram.sjlm", "--profile", "formal", "--rows", file];
+    let with = |extra: &[&str]| run(&[&base[..], extra].concat());
+    let tl = ["--context", "--tinylm", "data/lm/tinylm.sjtl"];
+    let on = with(&tl);
+    let off = with(&[&tl[..], &["--no-pool-recur"]].concat());
+    assert!(on.contains("+ctx+recur+pr+kn") && off.contains("+ctx+recur+kn"), "{on}{off}");
+    assert_ne!(on.replacen("+pr", "", 1), off, "premise: the weight changes the choice");
+    assert!(with(&[&tl[..], &["--no-recur"]].concat()).contains("lm-formal+ctx+kn"));
+    let plain = with(&["--tinylm", "data/lm/tinylm.sjtl"]);
+    assert!(!plain.contains("+recur") && !plain.contains("+pr"), "{plain}");
+    // Without a small model: no pool, so no weight and no mark; the option changes no byte of the summary, the dump or the rowstats.
+    let ngram = |extra: &[&str], tag: &str| {
+        let (dump, rs) = (path(&format!("{tag}.dump")), path(&format!("{tag}.rs")));
+        let line = with(&[&["--context", "--dump", &dump, "--rowstats", &rs][..], extra].concat());
+        (line, std::fs::read(dump).unwrap(), std::fs::read(rs).unwrap())
+    };
+    let (a, b) = (ngram(&[], "a"), ngram(&["--no-pool-recur"], "b"));
+    assert!(a == b && a.0.contains("+ctx+recur+kn"), "{}{}", a.0, b.0);
+    // The scoring record of the reordered row, against the dump's scores.
+    let (scores, dump, md) = (path("s.jsonl"), path("s.dump"), path("md.txt"));
+    let line = with(&[&tl[..], &["--tinylm-scores", &scores, "--dump", &dump, "--pool-mask-diff", &md]].concat());
+    assert!(line.ends_with(", 'pool_mask_diff': 0}\n"), "{line}");
+    assert!(std::fs::read(&md).unwrap().is_empty());
+    let rec = std::fs::read_to_string(&scores).unwrap();
+    let list = |key: &str| -> Vec<f64> {
+        let at = rec.find(&format!("\"{key}\": [")).unwrap_or_else(|| panic!("{key} in {rec}")) + key.len() + 5;
+        rec[at..at + rec[at..].find(']').unwrap()].split(", ").map(|x| x.parse().unwrap()).collect()
+    };
+    let (ng, idx) = (list("ng"), list("idx"));
+    let nbest: Vec<f64> = std::fs::read_to_string(&dump).unwrap().lines().map(|l| l.rsplit('\t').next().unwrap().parse().unwrap()).collect();
+    assert!(idx[0] != 0.0 && ng.windows(2).all(|w| w[0] >= w[1]), "{rec}");
+    let gains: Vec<f64> = ng.iter().zip(&idx).map(|(s, &i)| s - nbest[i as usize]).collect();
+    assert!(gains.iter().all(|g| (g / 2.0 - (g / 2.0).round()).abs() < 1e-9 && *g >= 0.0) && gains.iter().any(|&g| g > 0.0), "{gains:?}");
+    assert!(rec.contains(&format!("\"c\": {}", idx[0] as usize)), "c is the n-best index of the pick: {rec}");
+    // Without the weight: the record of before (no idx without a sound bit, the decoder's scores).
+    with(&[&tl[..], &["--no-pool-recur", "--tinylm-scores", &scores]].concat());
+    let rec = std::fs::read_to_string(&scores).unwrap();
+    assert!(!rec.contains("\"idx\""), "{rec}");
+    // Refused without a small model.
+    let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args([&base[..], &["--context", "--pool-mask-diff", &md]].concat()).current_dir(root()).output().unwrap();
+    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("--pool-mask-diff needs --tinylm"));
 }

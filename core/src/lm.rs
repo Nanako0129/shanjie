@@ -1279,12 +1279,22 @@ pub const RECUR_CHARS: usize = 64;
 /// The weight (log10, the n-gram score's scale) of one recurring adjacent pair on a path. The long-context set's two halves chose 2 and 3, and the
 /// typo reports are 0/0 at 2 (docs/spec/decoder.md §4.6).
 pub const RECUR_BETA: f64 = 2.0;
+/// The extra weight (log10, the n-gram score's scale) of one recurring pair on the n-gram score of a semantic correction pool candidate
+/// (docs/spec/semantic-rerank.md §3.1.1); with the decoder's `RECUR_BETA` a pair weighs 4 there. The exploration slice recur-rerank (research
+/// repository) measured 2 on both long-context development sets.
+pub const POOL_RECUR_GAMMA: f64 = 2.0;
+/// The pool weight applies only when the left context holds at least this many Unicode scalar values after the `RECUR_CHARS` cut
+/// (docs/spec/semantic-rerank.md §3.1.1): at 32 the typo reports were row for row unchanged in the same exploration slice.
+pub const POOL_RECUR_MIN_CHARS: usize = 32;
 
-/// The adjacent character pairs of the left context's last `RECUR_CHARS` characters (both characters Han). Private fields, no `Debug`/`Display`, no read
-/// access: only its size is observable. `Default` is the empty set.
+/// The adjacent character pairs of the left context's last `RECUR_CHARS` characters (both characters Han), and how many scalar values that cut
+/// held. Private fields, no `Debug`/`Display`, no read access to either: what is observable is the number of pairs (`len`) and the pool weight of one
+/// string (`pool_bonus`). `Default` is the empty set of a context of 0 characters.
 #[derive(Default)]
 pub struct RecurGrams {
     pairs: HashSet<(char, char)>,
+    /// The scalar values of the context after the `RECUR_CHARS` cut (0 to `RECUR_CHARS`); `pool_bonus` compares it with `POOL_RECUR_MIN_CHARS`.
+    chars: usize,
 }
 
 impl RecurGrams {
@@ -1292,7 +1302,16 @@ impl RecurGrams {
     pub fn from_text(text: &str) -> RecurGrams {
         let cs: Vec<char> = text.chars().rev().take(RECUR_CHARS).collect::<Vec<_>>().into_iter().rev().collect();
         let han = crate::learn::is_han;
-        RecurGrams { pairs: cs.windows(2).filter(|w| han(w[0]) && han(w[1])).map(|w| (w[0], w[1])).collect() }
+        RecurGrams { pairs: cs.windows(2).filter(|w| han(w[0]) && han(w[1])).map(|w| (w[0], w[1])).collect(), chars: cs.len() }
+    }
+    /// docs/spec/semantic-rerank.md §3.1.1: what a pool candidate whose shown text is `surface` gains on its n-gram score,
+    /// `POOL_RECUR_GAMMA` times the positions of `surface` whose adjacent pair is in the set, when the context held at least `POOL_RECUR_MIN_CHARS`
+    /// scalar values after the cut; else 0 (an empty set gives 0 too).
+    pub fn pool_bonus(&self, surface: &str) -> f64 {
+        if self.chars < POOL_RECUR_MIN_CHARS {
+            return 0.0;
+        }
+        POOL_RECUR_GAMMA * self.hits(surface) as f64
     }
     pub fn len(&self) -> usize {
         self.pairs.len()
@@ -1311,6 +1330,30 @@ impl RecurGrams {
         })
         .count()
     }
+}
+
+/// docs/spec/semantic-rerank.md §3.1.1: the order of a semantic correction pool after the context recurrence weight. `ng` are the pool's n-gram
+/// scores and `bonus` each candidate's `RecurGrams::pool_bonus`, both in the decoder's order; `masked` is `tinylm::manual_mask` of that same order
+/// (made with the decoder's first candidate as the base; a missing entry is false). `None` (keep the pool as it is) when there are fewer than two
+/// candidates, every bonus is 0, the two lists differ in length, any `ng + bonus` is not finite, or the new first candidate is masked (the weight
+/// never puts a candidate that takes out a manual or protected word first). Else the indices into the decoder's order, best first (`ng + bonus`
+/// descending, ties in the decoder's order: `f64::total_cmp`, then the index, a total order), and the scores `ng + bonus` in that order. The
+/// engine's rerank job and the evaluation CLI both call this one function.
+pub fn pool_order(ng: &[f64], bonus: &[f64], masked: &[bool]) -> Option<(Vec<usize>, Vec<f64>)> {
+    if ng.len() < 2 || ng.len() != bonus.len() || bonus.iter().all(|&b| b == 0.0) {
+        return None;
+    }
+    let s: Vec<f64> = ng.iter().zip(bonus).map(|(a, b)| a + b).collect();
+    if !s.iter().all(|x| x.is_finite()) {
+        return None;
+    }
+    let mut order: Vec<usize> = (0..s.len()).collect();
+    order.sort_by(|&a, &b| s[b].total_cmp(&s[a]).then(a.cmp(&b)));
+    if masked.get(order[0]) == Some(&true) {
+        return None;
+    }
+    let scores = order.iter().map(|&i| s[i]).collect();
+    Some((order, scores))
 }
 
 /// One reading a span's words are looked up under (fuzzy input, docs/spec/decoder.md §6.2).
@@ -1856,6 +1899,57 @@ mod tests {
         assert_eq!(n(&han), 63);
         let g = RecurGrams::from_text(&han);
         assert!(!g.pairs.contains(&('\u{4E00}', '\u{4E01}')) && g.pairs.contains(&('\u{4E06}', '\u{4E07}')));
+    }
+
+    /// docs/spec/semantic-rerank.md §3.1.1: the pool weight is `POOL_RECUR_GAMMA` per recurring position of the string, only for a context of at least
+    /// `POOL_RECUR_MIN_CHARS` scalar values after the `RECUR_CHARS` cut (counted in scalar values: an emoji of five is five); an empty set gives 0.
+    #[test]
+    fn pool_bonus_needs_32_scalar_values_and_counts_positions() {
+        let ctx = |n: usize| RecurGrams::from_text(&format!("{}甲乙", "a".repeat(n - 2)));
+        assert_eq!((POOL_RECUR_GAMMA, POOL_RECUR_MIN_CHARS), (2.0, 32));
+        assert_eq!(ctx(31).pool_bonus("甲乙"), 0.0, "31 scalar values");
+        assert_eq!(ctx(32).pool_bonus("甲乙"), POOL_RECUR_GAMMA);
+        assert_eq!(ctx(32).pool_bonus("甲乙甲乙"), 2.0 * POOL_RECUR_GAMMA, "two positions (乙甲 is not in the set)");
+        assert_eq!(ctx(32).pool_bonus("丙丁"), 0.0);
+        assert_eq!(ctx(32).pool_bonus(""), 0.0);
+        // A long text: only the last 64 count, and they are 64 >= 32.
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}", "丙".repeat(70))).pool_bonus("甲乙"), 0.0, "the pair was cut off");
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}", "a".repeat(62))).pool_bonus("甲乙"), POOL_RECUR_GAMMA, "64 after the cut");
+        // An empty set, however long the context.
+        let ascii = RecurGrams::from_text(&"a".repeat(40));
+        assert!(ascii.is_empty());
+        assert_eq!(ascii.pool_bonus("甲乙"), 0.0);
+        assert_eq!(RecurGrams::default().pool_bonus("甲乙"), 0.0);
+        // Scalar values, not grapheme clusters: a family emoji (man ZWJ woman ZWJ girl) is five.
+        let fam = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        assert_eq!(fam.chars().count(), 5);
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}", fam.repeat(6))).pool_bonus("甲乙"), POOL_RECUR_GAMMA, "2 + 30");
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}aaaa", fam.repeat(5))).pool_bonus("甲乙"), 0.0, "2 + 29");
+    }
+
+    /// `pool_order`: by `ng + bonus` descending, ties in the decoder's order; `None` for every case the pool stays as it is, never a panic.
+    #[test]
+    fn pool_order_sorts_stably_and_refuses_what_it_cannot_order() {
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[]), Some((vec![1, 0, 2], vec![0.0, -1.0, -3.0])));
+        // Ties keep the decoder's order (2 and 0 tie at -1, 1 and 3 at -2).
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0, -2.0], &[0.0, 0.0, 2.0, 0.0], &[]).unwrap().0, [0, 2, 1, 3]);
+        // A weight that leaves the order as it is still gives the new scores.
+        assert_eq!(pool_order(&[-1.0, -2.0], &[2.0, 0.0], &[]), Some((vec![0, 1], vec![1.0, -2.0])));
+        assert_eq!(pool_order(&[-1.0, -2.0], &[0.0, 0.0], &[]), None, "every weight 0");
+        assert_eq!(pool_order(&[-1.0, -2.0], &[-0.0, 0.0], &[]), None, "-0 is 0");
+        assert_eq!(pool_order(&[-1.0], &[2.0], &[]), None, "one candidate");
+        assert_eq!(pool_order(&[], &[], &[]), None);
+        assert_eq!(pool_order(&[-1.0, -2.0], &[0.0, 2.0, 0.0], &[]), None, "lengths differ");
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0], &[]), None, "lengths differ");
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(pool_order(&[-1.0, bad, -3.0], &[0.0, 2.0, 0.0], &[]), None, "ng {bad}");
+            assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, bad, 0.0], &[]), None, "bonus {bad}");
+        }
+        assert_eq!(pool_order(&[f64::MAX, -2.0], &[f64::MAX, 0.0], &[]), None, "overflows to infinity");
+        // The new first is masked: not reordered. A masked candidate elsewhere does not matter.
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[false, true, false]), None);
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[false, false, true]).unwrap().0, [1, 0, 2]);
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[false]).unwrap().0, [1, 0, 2], "a missing entry is false");
     }
 
     /// The recurrence term: a pair inside a word or across a word boundary of the path counts, the first word of a segment has no boundary,

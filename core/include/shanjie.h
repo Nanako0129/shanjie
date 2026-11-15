@@ -319,8 +319,11 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 //   shell calls it before a key that may start a composition (a character key with no modifier but Shift
 //   while not composing), not before every key. What the core keeps from it: the last <= 2 consecutive Han
 //   characters (the history word of the n-gram decoder and the key of learning, docs/spec/learning.md §2.1,
-//   §6.1); the set of adjacent Han character pairs of its last 64 characters, which the decoder looks up
-//   (context recurrence, docs/spec/decoder.md §4.6; the text itself is not kept); and, for the small model and
+//   §6.1); the set of adjacent Han character pairs of its last 64 characters and one number, how many Unicode
+//   scalar values those were (0-64): the decoder looks the pairs up (context recurrence, docs/spec/decoder.md
+//   §4.6), and with 32 or more the rerank also weighs each candidate of the semantic correction's pool by them
+//   (docs/spec/semantic-rerank.md §3.1.1; a rerank job carries only those weights and the order they give, never
+//   the set; the text itself is not kept); and, for the small model and
 //   the English table, only the declared left-context length of the small model (SJTL0005), or else the
 //   trailing English word. None of it is returned or written. NULL or "" means none. Not UTF-8: returns 2
 //   and clears. Cleared by the core after every commit, reset, code 4 and rule 22 pass-through, and when a

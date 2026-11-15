@@ -4,7 +4,7 @@
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-decode] [--rowstats FILE] [--keys FILE]
 //!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--sinit-stretches FILE]
-//!                [--no-recur] [--key-times FILE]
+//!                [--no-recur] [--no-pool-recur] [--key-times FILE]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
 //! `--rerank-level` (default standard, the App's) is evaluation only (`EPS_SINIT_FINE` 4, `EPS_SINIT_MID` 4 and `EPS_SINIT_COARSE` 2 are constants: docs/spec/learning.md §7.4);
@@ -23,7 +23,9 @@
 //!
 //! The decoder also adds the context recurrence term (docs/spec/decoder.md §4.6), from each row's context through
 //! `Engine::set_left_context`; the tag then has `+recur` before the reading marks. `--no-recur` (evaluation only, `Engine::set_recur(false)`) leaves it out
-//! and the mark with it. `--key-times FILE` writes the microseconds of every `Engine::key` call and of each row's `set_left_context`
+//! and the mark with it. With the small model on, the rerank jobs also weigh the context recurrence on the pool (docs/spec/semantic-rerank.md §3.1.1) and the
+//! tag reads `+recur+pr`; `--no-pool-recur` (evaluation only, `Engine::set_pool_recur(false)`) leaves that weight out and the tag reads `+recur`
+//! (`--no-recur` turns both off). `--key-times FILE` writes the microseconds of every `Engine::key` call and of each row's `set_left_context`
 //! (`cli::replay::format_key_times`); the summary line does not change.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine_packs, format_key_times, format_keys, format_sinit_stretches, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
@@ -70,6 +72,7 @@ fn run() -> Result<(), String> {
     let (mut tl, mut learn, mut cfg) = (true, false, Cfg { correct: false, rerank: Rerank::Each, strict: false });
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
     let (mut sinit_stretches, mut key_times, mut recur) = (None::<String>, None::<String>, true);
+    let mut pool_recur = true;
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_decode) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
@@ -110,6 +113,7 @@ fn run() -> Result<(), String> {
             "--no-colloquial" => no_colloquial = true,
             "--no-reading-decode" => reading_decode = false,
             "--no-recur" => recur = false,
+            "--no-pool-recur" => pool_recur = false,
             "--key-times" => key_times = Some(val()?),
             "--rerank-level" => {
                 level = Some(match val()?.as_str() {
@@ -212,6 +216,7 @@ fn run() -> Result<(), String> {
     e.set_learn_guard(guard);
     e.set_reading_decode(reading_decode);
     e.set_recur(recur);
+    e.set_pool_recur(pool_recur);
     let tag = format!(
         "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
@@ -226,7 +231,12 @@ fn run() -> Result<(), String> {
             Some(RerankLevel::Aggressive) => "+level:aggressive",
             _ => "",
         },
-        if recur { "+recur" } else { "" },
+        // docs/spec/semantic-rerank.md §3.1.1: the CLI's rule, `+pr` only where the pool weight acts (the decoder's term and a small model).
+        match (recur, pool_recur && tl) {
+            (false, _) => "",
+            (true, false) => "+recur",
+            (true, true) => "+recur+pr",
+        },
         e.reading_tag(),
     );
     let tag = if cfg.strict { format!("{tag}+strict") } else { tag };

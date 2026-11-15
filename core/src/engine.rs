@@ -6,14 +6,14 @@ use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, eng
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
 use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
-use crate::lm::{decode_segment_fuzzy, history, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, RecurGrams, Scored, Sinit, SinitLayer};
+use crate::lm::{decode_segment_fuzzy, history, pool_order, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, RecurGrams, Scored, Sinit, SinitLayer};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
 use crate::mixed::MixedTable;
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent, Late, LateEvent};
-use crate::tinylm::{Learning, RerankLevel, TinyLm, TOPK};
+use crate::tinylm::{manual_mask, Learning, RerankLevel, TinyLm, TOPK};
 use crate::{decode_beam, Lexicon, ManualSet, NoLearning, VariantOrder, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -78,6 +78,17 @@ fn sinit_swap<'a>(best: &mut Vec<Scored<'a>>, lifted: &[Scored<'a>], pool: &mut 
     }
 }
 
+/// docs/spec/decoder.md §7 and docs/spec/semantic-rerank.md §3.1.1: what a job's stretch keeps of its pool `cands` (the decoder's order, after
+/// `sinit_swap`) with the n-gram scores `ng`: the manual mask with `cands[0]` (the decoder's first) as the base (`used`, the readings that path used, is
+/// asked for only when `manual` has words), each candidate's pool weight (`RecurGrams::pool_bonus`; all 0 without `recur`), and `lm::pool_order` of the
+/// three (empty: not reordered).
+fn pool_lists(cands: &[&str], ng: &[f64], used: impl FnOnce() -> Vec<String>, manual: &ManualSet, recur: Option<&RecurGrams>) -> (Vec<bool>, Vec<f64>, Vec<usize>) {
+    let masked = if manual.is_empty() { vec![false; cands.len()] } else { manual_mask(&used(), cands, manual) };
+    let bonus: Vec<f64> = cands.iter().map(|c| recur.map_or(0.0, |r| r.pool_bonus(c))).collect();
+    let order = pool_order(ng, &bonus, &masked).map_or_else(Vec::new, |(o, _)| o);
+    (masked, bonus, order)
+}
+
 /// What the sentence-start single-character learning (SINIT, docs/spec/learning.md §7) did in the current decode, counted for the
 /// evaluation replay only (`Engine::sinit_stats`): reset with the job.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,24 +104,29 @@ pub struct SinitStats {
     pub tau_opened: usize,
 }
 
-/// One free stretch of a rerank job (docs/spec/semantic-rerank.md §6.1). Owned data only.
+/// One free stretch of a rerank job (docs/spec/semantic-rerank.md §6.1). Owned data only. Every per-candidate list is in the decoder's order
+/// (the pool after `sinit_swap`); `order` says how the rerank sees them.
 struct Stretch {
     /// Index in `Engine::path` of the stretch's first word.
     at: usize,
     /// The first `TOPK` paths of the n-best: (word, lp, demotion delta, syllables, SINIT marker), as `path` holds them. `paths[0]` is what `path` holds at
     /// `at..at + len` when the job is made; apply checks that it still does (docs/spec/semantic-rerank.md §6.2).
     paths: Vec<Vec<JobWord>>,
-    /// Their n-gram scores.
+    /// Their n-gram scores (the decoder's, without `bonus`).
     ng: Vec<f64>,
+    /// docs/spec/semantic-rerank.md §3.1.1: each path's context recurrence weight on the pool (`RecurGrams::pool_bonus` of its text; all 0 when the
+    /// term does not apply). Numbers made from the recurrence set when the job is made; the set itself never goes into a job.
+    bonus: Vec<f64>,
+    /// `lm::pool_order` of `ng`, `bonus` and `masked`: the index in `paths` of the rerank's k-th candidate. Empty: the rerank sees the decoder's order.
+    order: Vec<usize>,
+    /// `tinylm::manual_mask` of the paths with `paths[0]` as the base (docs/spec/decoder.md §7), made once when the job is made.
+    masked: Vec<bool>,
     /// Their SINIT weights `b_i = w / (w + 1)` (docs/spec/learning.md §7.4): the record weight of the sentence-start single character the candidate starts with, else 0,
     /// of the records of `layer`. All 0 for almost every stretch.
     b: Vec<f64>,
     /// The longest layer the stretch has a record under (fine `^>` plus the next three syllables, mid the next two, coarse the next one), so `b` is that layer's
     /// (docs/spec/learning.md §7.4; the layers are never added).
     layer: SinitLayer,
-    /// The readings the n-gram's first path used over those syllables (`Lexicon::path_readings`: a syllable typed with an adjacent key is the
-    /// lexicon syllable the word was read through), what `manual_mask` matches the manual words against; empty when the lexicon has no manual word.
-    used: Vec<String>,
     /// The shown text between the previous stretch of the job (or the composition's start) and this one: fixed words, and the
     /// n-gram text of stretches left out of the job.
     gap: String,
@@ -130,9 +146,6 @@ pub struct RerankJob {
     /// The engine's rerank level when the job was made (docs/spec/semantic-rerank.md §4.4): the colloquial term uses that
     /// level's (alpha, tau, delta), and its fallback the header triple of that level. Copy, like `params`.
     level: RerankLevel,
-    /// The `manual` words of the engine's lexicon (docs/spec/decoder.md §7), shared with the lexicon: the rerank of either profile
-    /// and either path never chooses a candidate that takes one out of the n-gram's first choice (`tinylm::manual_mask`).
-    manual: Arc<ManualSet>,
     /// 1, or the tests' override (`Engine::set_eps_sinit`) when the job was made: the factor on `EPS_SINIT_FINE`, `EPS_SINIT_MID` and `EPS_SINIT_COARSE`, the sizes of the learning term of the fused score.
     eps_sinit: f64,
     /// The engine's left context when the job was made: its Han tail (`Engine::left`), or for a model declaring a left-context length L
@@ -169,6 +182,11 @@ impl RerankJob {
     /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before). A model declaring a
     /// left-context length L (SJTL0005) gets the last L characters of that same text instead, not through `context_key`
     /// (`TinyLm::key_for`, docs/spec/semantic-rerank.md §5.2).
+    ///
+    /// docs/spec/semantic-rerank.md §3.1.1: with a non-empty `order` the rerank sees the candidates, words, scores `ng + bonus`, `b` and `masked` in that
+    /// order (put together here, once per stretch): the gate, the colloquial term, the fusion, delta and the learning term all take the new first
+    /// candidate as the anchor, and the chosen position is mapped back to a `paths` index (a position outside `order` is no choice: the new first).
+    /// An error of the small model keeps `paths[0]`, the decoder's first, before any mapping. With an empty `order` every list is the stretch's own.
     pub fn run(&self) -> RerankResult {
         let mut before = self.left.clone();
         let choices = self
@@ -178,31 +196,53 @@ impl RerankJob {
                 before.push_str(&s.gap);
                 let key = self.model.key_for(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
-                let cands: Vec<&str> = surfaces.iter().map(String::as_str).collect();
-                let learn = Learning { layer: s.layer, b: s.b.clone(), scale: self.eps_sinit };
+                // The rerank's view: `paths` indices in the order the rerank sees them, and the lists in that order.
+                let view: Vec<usize> = if s.order.is_empty() { (0..s.paths.len()).collect() } else { s.order.clone() };
+                let ng: Vec<f64> = if s.order.is_empty() { s.ng.clone() } else { view.iter().map(|&i| s.ng[i] + s.bonus[i]).collect() };
+                let b: Vec<f64> = view.iter().map(|&i| s.b.get(i).copied().unwrap_or(0.0)).collect();
+                let masked: Vec<bool> = view.iter().map(|&i| s.masked.get(i).copied().unwrap_or(false)).collect();
+                let cands: Vec<&str> = view.iter().map(|&i| surfaces[i].as_str()).collect();
+                let learn = Learning { layer: s.layer, b: b.clone(), scale: self.eps_sinit };
                 let alpha = if self.colloquial.is_some() { colloquial::cell(self.level).0 } else { self.params.0 };
                 let picked = match &self.colloquial {
                     Some(co) => {
-                        let words: Vec<Vec<&str>> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
-                        self.model.rerank_colloquial(&s.ng, &cands, &words, &key, co, self.level, &s.used, &self.manual, &learn)
+                        let words: Vec<Vec<&str>> = view.iter().map(|&i| s.paths[i].iter().map(|w| w.0.as_str()).collect()).collect();
+                        self.model.rerank_colloquial(&ng, &cands, &words, &key, co, self.level, &masked, &learn)
                     }
-                    None => self.model.rerank(&s.ng, &cands, &key, self.params, &s.used, &self.manual, &learn),
-                }
-                .map_or((0, None), |r| r);
-                let (pick, ll) = picked;
+                    None => self.model.rerank(&ng, &cands, &key, self.params, &masked, &learn),
+                };
+                // (`paths` index, position in the view, the LLs); an error keeps the decoder's first and is no choice of the model.
+                let (pick, at, ll) = match picked {
+                    Ok((p, ll)) => match view.get(p) {
+                        Some(&i) => (i, p, ll),
+                        None => (view[0], 0, ll),
+                    },
+                    Err(_) => (0, 0, None),
+                };
                 let sinit_diag = ll.as_ref().and_then(|ll| {
-                    let i = s.b.iter().position(|&b| b > 0.0)?;
-                    Some((s.ng[0] - s.ng[i], alpha * (ll[0] - ll[i])))
+                    let i = b.iter().position(|&b| b > 0.0)?;
+                    Some((ng[0] - ng[i], alpha * (ll[0] - ll[i])))
                 });
                 let pick = if pick < s.paths.len() { pick } else { 0 };
                 before.push_str(&surfaces[pick]);
                 let words = if pick == 0 { Vec::new() } else { s.paths[pick].clone() };
                 let expect = s.paths[0].iter().map(|w| w.0.clone()).collect();
-                let overturned = s.b.first().is_some_and(|&b0| b0 > 0.0) && s.b[pick] == 0.0;
+                let overturned = b.first().is_some_and(|&b0| b0 > 0.0) && b[at] == 0.0;
                 Choice { at: s.at, expect, pick, words, key, overturned, sinit_diag }
             })
             .collect();
         RerankResult { generation: self.generation, choices }
+    }
+
+    /// Test hook: every stretch's `lm::pool_order` (indices into the candidates of `candidates()`, the rerank's first candidate first; empty when the
+    /// pool is not reordered). Rust only, not in shanjie.h.
+    pub fn pool_order(&self) -> Vec<Vec<usize>> {
+        self.stretches.iter().map(|s| s.order.clone()).collect()
+    }
+
+    /// Test hook: every stretch's context recurrence weight on the pool (`RecurGrams::pool_bonus`), in the candidates' order. Rust only, not in shanjie.h.
+    pub fn pool_bonus(&self) -> Vec<Vec<f64>> {
+        self.stretches.iter().map(|s| s.bonus.clone()).collect()
     }
 
     /// Every stretch's candidate texts, in the job's order (the n-gram first, then the rest of the pool): what the small model is asked
@@ -818,13 +858,17 @@ pub struct Engine {
     /// of one.
     left_cut: bool,
     /// The context recurrence set (docs/spec/decoder.md §4.6): the Han pairs of the last `lm::RECUR_CHARS` characters of the
-    /// text `set_left_context` was given, rebuilt (not added to) by every call. This engine's own, passed to the decoder as an argument: never in a
-    /// structure engines share (`Lm`, the lexicons), never in a `RerankJob`, never returned over the C ABI, written, logged or sent anywhere. Cleared with
-    /// `left` (`clear_left`).
+    /// text `set_left_context` was given, rebuilt (not added to) by every call, with the number of scalar values that cut held. This engine's own, passed
+    /// to the decoder as an argument: never in a structure engines share (`Lm`, the lexicons), never in a `RerankJob` (a job carries only the pool
+    /// weights `RecurGrams::pool_bonus` made from it and the order they give, docs/spec/semantic-rerank.md §3.1.1), never returned over the C ABI,
+    /// written, logged or sent anywhere. Cleared with `left` (`clear_left`).
     recur: RecurGrams,
     /// Whether the decoder gets `recur` (default on, the App's behavior). Off only from `set_recur`, an evaluation switch for
-    /// `shanjie-replay --no-recur`; not in shanjie.h.
+    /// `shanjie-replay --no-recur`; not in shanjie.h. Off also turns the pool weight off.
     recur_on: bool,
+    /// Whether the rerank jobs get the pool weight of docs/spec/semantic-rerank.md §3.1.1 (default on, the App's behavior). Off only from
+    /// `set_pool_recur`, an evaluation switch for `shanjie-replay --no-pool-recur`; not in shanjie.h.
+    pool_recur_on: bool,
     /// `set_left_context` ran since the last `key()`: the key that comes next may start a composition with that text. Taken by every `key()`;
     /// a key on an empty composition without it clears the left text first (`key`).
     left_fresh: bool,
@@ -1294,6 +1338,7 @@ impl Engine {
             left_cut: false,
             recur: RecurGrams::default(),
             recur_on: true,
+            pool_recur_on: true,
             left_fresh: false,
             learning: false,
             paused: false,
@@ -1477,6 +1522,15 @@ impl Engine {
         self.setting_changed();
         self.invalidate();
         self.recur_on = on;
+    }
+
+    /// Evaluation only (`shanjie-replay --no-pool-recur`): with `false` the rerank jobs do not get the context recurrence weight on the pool
+    /// (docs/spec/semantic-rerank.md §3.1.1), the jobs of the engine before it; the decoder's term (`set_recur`) is unchanged. Not in shanjie.h. The pending
+    /// job is dropped like any decoding change.
+    pub fn set_pool_recur(&mut self, on: bool) {
+        self.setting_changed();
+        self.invalidate();
+        self.pool_recur_on = on;
     }
 
     /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>+rm`; empty without a model or with `set_reading_decode(false)`): what
@@ -3272,8 +3326,10 @@ impl Engine {
         let (mut out, mut path) = (String::new(), Vec::new());
         // docs/spec/semantic-rerank.md §6.1: alpha and tau hold only for the scores with the demotion table on.
         let jobs = self.jobs_on();
-        // The stretches also keep the readings of their first path when the lexicon has `manual` words, which the rerank matches against them.
-        let keep_used = !self.lex.manual().is_empty();
+        // docs/spec/decoder.md §7: the manual mask needs the readings of the first path only when the lexicon has `manual` words.
+        let manual = self.lex.manual().clone();
+        // docs/spec/semantic-rerank.md §3.1.1: the pool weight needs the decoder's term too.
+        let pool_recur = self.recur_on && self.pool_recur_on;
         let mut stretches = Vec::new();
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
@@ -3356,13 +3412,22 @@ impl Engine {
                     if let Some(o) = cut_out.filter(|&o| o >= job_end) {
                         gap_text.insert_str(o - job_end, &self.run); // the model sees the run between the Chinese on its two sides
                     }
+                    // The decoder's order (the pool after `sinit_swap`): the mask with the decoder's first path as the base, each path's pool weight,
+                    // and the order they give (docs/spec/decoder.md §7, docs/spec/semantic-rerank.md §3.1.1).
+                    let texts: Vec<String> = top.iter().map(|(_, ws)| text_of(ws)).collect();
+                    let cands: Vec<&str> = texts.iter().map(String::as_str).collect();
+                    let ng: Vec<f64> = top.iter().map(|(score, _)| *score).collect();
+                    let used = || self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3)));
+                    let (masked, bonus, order) = pool_lists(&cands, &ng, used, &manual, pool_recur.then_some(&self.recur));
                     stretches.push(Stretch {
                         at: path.len(),
                         paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _, sinit)| (w.to_string(), lp, delta, l, sinit.is_some())).collect()).collect(),
-                        ng: top.iter().map(|(score, _)| *score).collect(),
+                        ng,
+                        bonus,
+                        order,
+                        masked,
                         b: top.iter().map(|(_, ws)| sinit_b(ws, &sinit_chars)).collect(),
                         layer: sinit_layer,
-                        used: if keep_used { self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3))) } else { Vec::new() },
                         gap: gap_text,
                     });
                 }
@@ -3392,7 +3457,7 @@ impl Engine {
             // The conditions of docs/spec/semantic-rerank.md §4: a table is loaded, and `colloquial::applies` (chat, the
             // measured small model; any strength, docs/spec/semantic-rerank.md §4.4).
             let colloquial = self.colloquial.clone().filter(|_| colloquial::applies(self.profile, model));
-            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, manual: self.lex.manual().clone(), eps_sinit: self.eps_sinit, left, stretches });
+            self.rerank_job = Some(RerankJob { generation: self.generation, model: model.clone(), params, colloquial, level: self.rerank_level, eps_sinit: self.eps_sinit, left, stretches });
         }
         Ok(())
     }
@@ -5078,5 +5143,186 @@ mod shared_fields {
             let _: (Option<Arc<crate::reading::ReadingDecode>>, bool, Option<Arc<DigitTable>>, Option<Arc<EnglishTable>>) = (reading, src_pack_single, digit_table, en_table);
         }
         let _ = fields;
+    }
+}
+
+/// docs/spec/semantic-rerank.md §3.1.1 on `RerankJob::run`: hand-made stretches (one-word paths, given n-gram scores and SINIT weights, the context
+/// recurrence set of a ≥ 32-character context holding the pairs named) on the toy small model of eval/golden/tinylm-tiny; the stretch lists are made by
+/// `pool_lists`, the function `refresh_lm` makes them with.
+#[cfg(test)]
+mod pool_recur_tests {
+    use super::*;
+    use crate::lm::EPS_SINIT_FINE;
+
+    fn toy() -> Arc<TinyLm> {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/tinylm-tiny/tiny-int8.sjtl");
+        Arc::new(TinyLm::parse(&std::fs::read(p).unwrap()).unwrap())
+    }
+    /// The recurrence set of `pairs` behind 32 ASCII letters: a context of at least `POOL_RECUR_MIN_CHARS` scalar values.
+    fn grams(pairs: &str) -> RecurGrams {
+        RecurGrams::from_text(&format!("{}{pairs}", "a".repeat(32)))
+    }
+    /// The toy model's LL of each text under the empty key (what a job with no left text scores with).
+    fn ll(texts: &[&str]) -> Vec<f64> {
+        toy().ll_many(&texts.iter().map(|t| ("", *t)).collect::<Vec<_>>()).unwrap()
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn stretch(texts: &[&str], ng: &[f64], b: &[f64], layer: SinitLayer, used: &[&str], manual: &ManualSet, g: Option<&RecurGrams>) -> Stretch {
+        let (masked, bonus, order) = pool_lists(texts, ng, || used.iter().map(|s| s.to_string()).collect(), manual, g);
+        Stretch {
+            at: 0,
+            paths: texts.iter().map(|t| vec![(t.to_string(), 0.0, 0.0, t.chars().count(), false)]).collect(),
+            ng: ng.to_vec(),
+            bonus,
+            order,
+            masked,
+            b: b.to_vec(),
+            layer,
+            gap: String::new(),
+        }
+    }
+    fn job(s: Stretch, params: (f64, f64, f64)) -> RerankJob {
+        RerankJob { generation: 1, model: toy(), params, colloquial: None, level: RerankLevel::Standard, eps_sinit: 1.0, left: String::new(), stretches: vec![s] }
+    }
+    fn none() -> ManualSet {
+        ManualSet::default()
+    }
+
+    /// The pool 我們, 你好, 我好 (n-gram -1, -2, -3) with 你好 recurring: 你好 gains 2 and leads. The accessors keep the decoder's order; `pool_order` is
+    /// the permutation. When sure (margin 1 against tau 0.5) the rerank keeps its first, 你好 (paths index 1); never sure, the candidate whose fused score
+    /// wins by delta is chosen and mapped back to its paths index.
+    #[test]
+    fn a_reordered_pool_keeps_its_first_when_sure_and_takes_a_winner_by_delta() {
+        let texts = ["我們", "你好", "我好"];
+        let g = grams("你好");
+        let make = |params| job(stretch(&texts, &[-1.0, -2.0, -3.0], &[0.0; 3], SinitLayer::Coarse, &[], &none(), Some(&g)), params);
+        let j = make((0.0, 0.5, 0.0));
+        assert_eq!(j.pool_order(), [vec![1, 0, 2]]);
+        assert_eq!(j.pool_bonus(), [vec![0.0, 2.0, 0.0]]);
+        assert_eq!(j.ng_scores(), [vec![-1.0, -2.0, -3.0]], "the decoder's scores, in its order");
+        assert_eq!(j.candidates(), [texts.map(String::from).to_vec()]);
+        assert_eq!(j.sinit_weights(), [vec![0.0; 3]]);
+        assert_eq!(j.run().picks(), [1], "sure: the reordered first, not paths[0]");
+        // Never sure: 我好 (paths 2) wins when its LL is the highest of the three and alpha makes the gain larger than every n-gram gap.
+        let l = ll(&texts);
+        assert!(l[2] > l[0] && l[2] > l[1], "premise: the toy model likes 我好 best {l:?}");
+        let alpha = 10.0 / (l[2] - l[0].max(l[1]));
+        assert_eq!(make((alpha, f64::INFINITY, 1.0)).run().picks(), [2], "by delta, mapped back to its paths index");
+        // A delta it does not reach: the reordered first, 你好.
+        let gain = (-3.0 + alpha * l[2]) - (0.0 + alpha * l[1]);
+        assert_eq!(make((alpha, f64::INFINITY, gain + 1.0)).run().picks(), [1]);
+        // Without the set nothing is reordered: the same job picks among the decoder's order (sure keeps paths[0]).
+        let plain = job(stretch(&texts, &[-1.0, -2.0, -3.0], &[0.0; 3], SinitLayer::Coarse, &[], &none(), None), (0.0, 0.5, 0.0));
+        assert_eq!((plain.pool_order(), plain.pool_bonus(), plain.run().picks()), (vec![vec![]], vec![vec![0.0; 3]], vec![0]));
+    }
+
+    /// The mask is the decoder's, permuted with the order: 我們好 (holds the manual word 我們), 我都好 (does not: masked), 我們他 (holds it, gains 2 from
+    /// 們他 and leads). Without the manual word the toy model's favourite 我都好 is chosen; with it, it never is.
+    #[test]
+    fn the_mask_follows_the_order() {
+        let texts = ["我們好", "我都好", "我們他"];
+        let used = ["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"];
+        let manual = ManualSet::from_pairs([("我們", "ㄨㄛˇ-ㄇㄣ˙")]);
+        let g = grams("們他");
+        let l = ll(&texts);
+        assert!(l[1] > l[0] && l[1] > l[2], "premise: the toy model likes 我都好 best {l:?}");
+        let alpha = 10.0 / (l[1] - l[0].max(l[2]));
+        let run = |manual: &ManualSet| {
+            let j = job(stretch(&texts, &[-1.0, -1.5, -2.0], &[0.0; 3], SinitLayer::Coarse, &used, manual, Some(&g)), (alpha, f64::INFINITY, 0.0));
+            (j.pool_order(), j.run().picks())
+        };
+        assert_eq!(run(&none()), (vec![vec![2, 0, 1]], vec![1]), "premise: unmasked, 我都好 wins");
+        let (order, picks) = run(&manual);
+        assert_eq!(order, [vec![2, 0, 1]]);
+        assert_ne!(picks, [1], "the masked candidate is never chosen after the reorder");
+    }
+
+    /// The learning term takes the reordered first as the anchor: 照甲 (learned, b 0.5), 趙甲, 兆甲 with 趙甲 recurring (it leads, b 0). Sure (margin 1.5
+    /// against tau 1), so only a taught candidate may replace it: 照甲 is taught relative to the anchor (term EPS_SINIT_FINE * 0.5 = 2) and wins
+    /// (-1 + 2 against 0.5); the anchor did not hold the learning, so nothing is overturned; `sinit_diag` reads the reordered lists.
+    #[test]
+    fn the_learning_term_follows_the_order() {
+        let texts = ["照甲", "趙甲", "兆甲"];
+        assert_eq!(EPS_SINIT_FINE * 0.5, 2.0);
+        let g = grams("趙甲");
+        let j = job(stretch(&texts, &[-1.0, -1.5, -5.0], &[0.5, 0.0, 0.0], SinitLayer::Fine, &[], &none(), Some(&g)), (0.0, 1.0, 0.0));
+        assert_eq!(j.pool_order(), [vec![1, 0, 2]]);
+        assert_eq!(j.sinit_weights(), [vec![0.5, 0.0, 0.0]], "the decoder's order");
+        let r = j.run();
+        assert_eq!(r.picks(), [0]);
+        assert_eq!(r.sinit_overturned(), 0);
+        let d = r.sinit_diag();
+        assert!(d.len() == 1 && (d[0].0 - 1.5).abs() < 1e-12 && d[0].1 == 0.0, "(ng'[0] - ng'[1], alpha * ...) of the learned candidate at position 1: {d:?}");
+    }
+
+    /// A learned path `sinit_swap` put last (你好, b 0.5) leads after the reorder (你好 recurring). Sure: it is kept (paths index 2), nothing overturned,
+    /// `sinit_diag` is its own (0, 0). Never sure with alpha favouring 我好 (paths[0], b 0; the coarse layer adds no term): 我好 is chosen and the
+    /// learned anchor is overturned.
+    #[test]
+    fn a_swapped_in_learned_path_that_leads_is_the_anchor() {
+        let texts = ["我好", "他去", "你好"];
+        let g = grams("你好");
+        let make = |params| job(stretch(&texts, &[-1.0, -2.0, -2.5], &[0.0, 0.0, 0.5], SinitLayer::Coarse, &[], &none(), Some(&g)), params);
+        let j = make((0.0, 0.4, 0.0));
+        assert_eq!(j.pool_order(), [vec![2, 0, 1]]);
+        let r = j.run();
+        assert_eq!((r.picks(), r.sinit_overturned(), r.sinit_diag()), (vec![2], 0, vec![(0.0, 0.0)]));
+        let l = ll(&texts);
+        assert!(l[0] != l[2], "premise: the toy model tells 我好 from 你好 {l:?}");
+        let alpha = 10.0 / (l[0] - l[2]);
+        assert!((-1.0 + alpha * l[0]) > (-2.0 + alpha * l[1]), "premise: 我好 beats 他去 too");
+        let r = make((alpha, f64::INFINITY, 0.0)).run();
+        assert_eq!((r.picks(), r.sinit_overturned()), (vec![0], 1));
+        let d = r.sinit_diag();
+        assert!(d.len() == 1 && d[0].0 == 0.0 && d[0].1 == 0.0, "the anchor is the learned candidate: {d:?}");
+    }
+
+    /// A small model error (a candidate over its context: `TooLong`) keeps paths[0], the decoder's first, even when the pool was reordered.
+    #[test]
+    fn a_small_model_error_keeps_the_decoders_first() {
+        let long = "丙".repeat(toy().ctx() + 1);
+        let texts = ["甲乙", long.as_str()];
+        let j = job(stretch(&texts, &[-1.0, -2.0], &[0.0; 2], SinitLayer::Coarse, &[], &none(), Some(&grams("丙丙"))), (0.0, f64::INFINITY, 0.0));
+        assert_eq!(j.pool_order(), [vec![1, 0]], "premise: the long candidate leads");
+        assert_eq!(j.run().picks(), [0]);
+    }
+
+    /// The decoder's first 我們好 holds the manual word 我們; 我都好 does not and would lead on its recurring 我都: the pool is not reordered, and the job
+    /// chooses as the job without the set does.
+    #[test]
+    fn the_weight_never_puts_a_masked_candidate_first() {
+        let texts = ["我們好", "我都好", "我們他"];
+        let used = ["ㄨㄛˇ", "ㄇㄣ˙", "ㄏㄠˇ"];
+        let manual = ManualSet::from_pairs([("我們", "ㄨㄛˇ-ㄇㄣ˙")]);
+        let g = grams("我都");
+        let ng = [-1.0, -1.5, -2.0];
+        let unmasked = job(stretch(&texts, &ng, &[0.0; 3], SinitLayer::Coarse, &used, &none(), Some(&g)), (0.5, 2.0, 0.0));
+        assert_eq!(unmasked.pool_order(), [vec![1, 0, 2]], "premise: without the manual word 我都好 would lead");
+        for params in [(0.5, 2.0, 0.0), (5.0, f64::INFINITY, 0.0), (-5.0, f64::INFINITY, 0.0)] {
+            let with = job(stretch(&texts, &ng, &[0.0; 3], SinitLayer::Coarse, &used, &manual, Some(&g)), params);
+            let without = job(stretch(&texts, &ng, &[0.0; 3], SinitLayer::Coarse, &used, &manual, None), params);
+            assert_eq!(with.pool_order(), [Vec::<usize>::new()]);
+            assert_eq!(with.run().picks(), without.run().picks(), "{params:?}");
+        }
+    }
+
+    /// The mask's base is the decoder's first D (我們他去, holds the manual word 我們), not the reordered first R (我們你好, holds 我們 and the manual word
+    /// 你好, which D does not): D is not masked, and when D's fused score beats R's by delta D is chosen. A mask made with R as the base (the exploration
+    /// patch's) masks D, so this test fails for it.
+    #[test]
+    fn the_mask_is_made_with_the_decoders_first() {
+        let (d, r) = ("我們他去", "我們你好");
+        let used = ["ㄨㄛˇ", "ㄇㄣ˙", "ㄋㄧˇ", "ㄏㄠˇ"];
+        let manual = ManualSet::from_pairs([("我們", "ㄨㄛˇ-ㄇㄣ˙"), ("你好", "ㄋㄧˇ-ㄏㄠˇ")]);
+        let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(manual_mask(&strs(&used), &[r, d], &manual), [false, true], "premise: with R as the base D is masked");
+        let l = ll(&[d, r]);
+        assert!(l[0] != l[1], "premise: the toy model tells D from R {l:?}");
+        // R leads by 1 after its gain of 2; D's fused score beats it by 9 >= delta 0.5.
+        let alpha = 10.0 / (l[0] - l[1]);
+        let j = job(stretch(&[d, r], &[-1.0, -2.0], &[0.0; 2], SinitLayer::Coarse, &used, &manual, Some(&grams("你好"))), (alpha, f64::INFINITY, 0.5));
+        assert_eq!(j.pool_order(), [vec![1, 0]]);
+        assert_eq!(j.stretches[0].masked, [false, false], "D is not masked");
+        assert_eq!(j.run().picks(), [0], "D is chosen");
     }
 }
