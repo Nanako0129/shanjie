@@ -52,9 +52,9 @@
 - `top1_sha256`：每列選出的那一句（原字串，不經寬鬆對照）以 `\n` 串接後的 SHA-256。
 - 設定標記依實際開的功能串起來（`--judge v2` 時最後加 `+jv2:<A>:<B>:<C>`，見 3.5；例如 `+ctx`、`+recur`（有語意校正的候選池加重時 `+recur+pr`）、`+kn:<8 碼>:θ1:β1`、`+tl:<8 碼>`、`+acg+it`、`+tri:<8 碼>`、`+colloq:<8 碼>`、`+rd+rx:<8 碼>+rm`），讓結果對得回模型與旗標；基準測試用它守住「旗標漏帶」（見 7.3）。
 - `--no-recur`（評測專用）：有 `--context` 時，解碼器預設會拿到每列前文欄的漢字對集合（前文重現項，`docs/spec/decoder.md` §4.6），摘要行標記在 `+ctx` 之後多一個 `+recur`；加 `--no-recur` 就不拿、也沒有這個標記，等於沒有這一項（逐位元組等於這一項加進來之前的輸出）。沒有 `--context` 時沒有前文，這一項不存在，也沒有 `+recur`。
-- `--no-pool-recur`（評測專用）：有 `--context` 與 `--tinylm` 時，語意校正的候選池預設照同一個集合再加重、重排（`docs/spec/semantic-rerank.md` §3.1.1），標記是 `+recur+pr`；加 `--no-pool-recur` 只關這一項、標記回到 `+recur`，選字等於這一項加進來之前的預設。`--no-recur` 兩者都關。沒有 `--tinylm` 時沒有候選池，這一項不存在，也沒有 `+pr`（輸出和 `--no-pool-recur` 逐位元組相同）。`--pool-mask-diff FILE`（評測專用，需要 `--tinylm`）把「遮罩不同的列」的列號寫進檔（只有數字），摘要行的字典最後多 `'pool_mask_diff': <列數>`；定義見 `docs/spec/semantic-rerank.md` §9。
+- `--no-pool-recur`（評測專用）：有 `--context` 與 `--tinylm` 時，語意校正的候選池預設照同一個集合再加重、重排（`docs/spec/semantic-rerank.md` §3.1.1），標記是 `+recur+pr`；加 `--no-pool-recur` 只關這一項、標記回到 `+recur`，選字等於這一項加進來之前的預設。`--no-recur` 兩者都關。沒有 `--tinylm` 時沒有候選池，這一項不存在，也沒有 `+pr`（輸出和 `--no-pool-recur` 逐位元組相同）。`--pool-mask-diff FILE`（評測專用，需要 `--context` 與 `--tinylm`、不能和 `--no-recur`／`--no-pool-recur` 或 `--set holdout` 並用，否則用法錯誤）把「遮罩不同的列」的列號寫進檔（只有數字），摘要行的字典最後多 `'pool_mask_diff': <列數>`；定義見 `docs/spec/semantic-rerank.md` §9。
 - `--threads N`（預設 1，只有 `--lm` 模式）：以每 32 列一塊分給 N 個執行緒、共用同一份模型；輸出檔與摘要行和 N = 1 逐位元組相同，stderr 的語意校正延遲行會註明是在競爭下量的。
-- 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許，`--judge v2 --rowstats` 也是；`--accept` 與 `--rejudge` 拒絕（3.5）。`--rows` 沒有這道拒絕，見 5.3。
+- 保留集（`--set holdout`）只許印指標：`--dump`、`--dump-words`、`--picks`、`--tinylm-scores`、`--pool-mask-diff` 都拒絕（`check_lm_opts` 與 `run_lm` 在讀任何檔之前檢查）；`--rowstats` 只有數字，允許，`--judge v2 --rowstats` 也是；`--accept` 與 `--rejudge` 拒絕（3.5）。`--rows` 沒有這道拒絕，見 5.3。
 
 ## 2. 逐列統計與配對比較
 
@@ -185,7 +185,7 @@ L1、L2 成立就是 c 與 g 經 L1、L2 之後相等，所以一次比較涵蓋
 - forms.tsv 的路徑讀 `SHANJIE_FORMS`，forms-extra.tsv 讀 `SHANJIE_FORMS_EXTRA`（空字串等於沒設），沒設就用 repo 的 `eval/forms.tsv`、`eval/forms-extra.tsv`。兩個檔只在 `--judge v2` 時讀；讀不到、不是 UTF-8 或格式錯就報錯結束，而且發生在建立任何輸出檔之前。
 - `--accept FILE`：這個集合的可接受答案檔（3.7），只在 `--judge v2` 時可用，要配 `--dev` 或 `--rows`（`--limit` 之後的列）。檔裡任何一行的列號不存在、或那一列原文的 SHA-256 與檔裡記的不同（集合改過），就報錯結束，同樣發生在建立任何輸出檔之前；錯誤只帶行號或列號。
 - `--rejudge PICKS`：不解碼、不載入模型，讀一份每列一句選出的句子的檔，照 `--judge` 與 `--accept` 重判，寫 `--rowstats`。列檔用 `--rows` 或 `--dev N`（`--set` 不可）；PICKS 的行數要等於列檔的列數。每行是 `--picks` 的輸出格式 `列號\t名次\t句子`（列號要等於行號），或只有句子。`--rejudge` 另外只接受 `--rowstats`、`--name`、`--judge`、`--accept` 與列檔旗標，不寫 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`、`--forms-rowstats`；其他解碼旗標不影響結果。摘要行是 `## <名稱>  rejudge<+jv2 標記>  {'n', 'top1', 'top1_sha256'}`（沒有 `oracle@64`；`top1_sha256` 是那些句子的，PICKS 是某次解碼的 `--picks` 時等於那次的值）。對那次解碼自己的 `--picks`，`--rejudge` 的 rowstats 等於直接解碼加同樣的 `--judge`、`--accept` 的 rowstats。
-- 保留集：`--set holdout --judge v2 --rowstats` 可以（只有數字）；`--accept` 與 `--rejudge` 對 `--set holdout` 拒絕，`--dump`、`--dump-words`、`--picks`、`--tinylm-scores` 照舊拒絕（5.3）。
+- 保留集：`--set holdout --judge v2 --rowstats` 可以（只有數字）；`--accept` 與 `--rejudge` 對 `--set holdout` 拒絕，`--dump`、`--dump-words`、`--picks`、`--tinylm-scores`、`--pool-mask-diff` 照舊拒絕（5.3）。
 - Python 參考實作（`reference/proto/lm_eval.py`）有 `--judge v2` 與 `--accept`（沒有 `--rejudge`），規則與標記相同；dev302 兩種設定、有無可接受答案檔的 v2 rowstats 與 Rust 逐位元組相同。
 
 ### 3.6 審定詞對表 `eval/forms-extra.tsv`
@@ -338,7 +338,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - `a_pick_that_changes_nothing_ends_the_repicking`：沒有進展的改選結束改選。
 - `an_output_that_is_the_rows_file_is_refused`：輸出等於列檔時結束碼 2、列檔不變（`./` 別名也算）；列檔讀失敗時（結束碼 1）不建立輸出檔。
 - `outputs_are_numbers_only_and_the_rowstats_are_the_clis`：`--rowstats`、`--keys` 只有 `[0-9\t\n]`，`--rowstats` 逐位元組等於 CLI 對同一份列檔的輸出，`--keys` 每列六欄。
-- `recurrence_replay_agrees_with_the_cli`：前文重現項開著時重播的選字等於 CLI（`--context`，`top1_sha256` 相同），`--no-recur` 等於 CLI 的 `--no-recur`，標記有無 `+recur`；`--key-times` 只有數字、每列一行 `c`、每個 `Engine::key()` 呼叫一行 `k`，不改摘要行。`cli/tests/recur.rs` 驗 CLI 一側。
+- `recurrence_replay_agrees_with_the_cli`：前文重現項開著時重播的選字等於 CLI（`--context`，`top1_sha256` 相同），`--no-recur` 等於 CLI 的 `--no-recur`；標記預設是 `+recur+pr+rd+rx:`（小模型開著，候選池加重也生效），`--no-recur` 時沒有 `+recur` 也沒有 `+pr`；`--key-times` 只有數字、每列一行 `c`、每個 `Engine::key()` 呼叫一行 `k`，不改摘要行。`cli/tests/recur.rs` 驗 CLI 一側。
 - `pool_weight_replay_agrees_with_the_cli`：語意校正的候選池加重在手寫列（前文 ≥ 32 個純量值、含重現的字對，聊天與書面）上，CLI 預設與 `--no-pool-recur` 選字不同（前提），重播的預設與 `--no-pool-recur` 各等於 CLI 的同一個設定；前文 31 個純量值的列四者相同；標記 `+recur+pr` 與 `+recur`。
 - `colloquial_replay_agrees_with_the_cli`、`reading_decode_replay_agrees_with_the_cli`：預設的口語表與讀音項下，選字等於 CLI（`top1_sha256` 相同）；`--colloquial FILE`、`--no-colloquial`、`--no-reading-decode` 的標記與行為。
 - `learn_file_changes_the_choice_and_the_source_is_untouched`、`a_corrupt_learn_file_is_an_error`、`an_output_that_is_the_learn_file_is_refused`（含硬連結）：`--learn-file` 的各條規則。
@@ -376,7 +376,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 5.3 量法
 
 - 量的人是沒參與實作的 fresh 審查者。口語半邊：`--set holdout --profile chat --rowstats <自己的暫存檔>`。新聞半邊：`--rows <私人檔> --profile formal --rowstats <暫存檔>`。基準與新版各量一次，檔內只許 `[0-9\t\n]`，再 `tools/evalstats.py compare BASE CAND --net`，只回那一行，然後刪掉 rowstats。
-- `--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的審查者，指示裡明寫禁止 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`，只准 `--rowstats`，可以加 `--judge v2`，不帶 `--accept`、`--rejudge`（流程規則，不是技術防護）。
+- `--rows` 不像 `--set holdout` 會拒絕逐列輸出，所以量新聞半邊的審查者，指示裡明寫禁止 `--dump`、`--dump-words`、`--picks`、`--tinylm-scores`、`--pool-mask-diff`，只准 `--rowstats`，可以加 `--judge v2`，不帶 `--accept`、`--rejudge`（流程規則，不是技術防護）。
 - 結果填進基準結果 JSON 的 `holdout.chat`（口語半邊）與 `holdout.formal`（新聞半邊），以及 KPI JSON 的 `holdout_talk_chat` 與 `holdout_news_formal`：`n`、`top1`、`fixed`、`broken`、`p`，另加那個檔案的 `rows_sha256`（口語半邊是 `talk.txt` 的 SHA-256、新聞半邊是那個私人檔的 SHA-256）。`rows_sha256` 一定要填：兩個表依它分欄，沒填的數字在 `tools/bench.py` 只能依 n 分欄、在 `tools/kpi.py` 全放進同一欄。
 - `tools/bench.py` 與 `tools/kpi.py` 都不讀 `eval/holdout/` 底下的任何檔；`tools/kpi.py run` 拒絕位在 `eval/holdout/` 底下的列檔。
 - 基準結果 JSON 已有 `holdout` 欄位時，`tools/bench.py run --suite v2` 拒絕重跑同一個標籤（保留集的數字量一次就不重來）。

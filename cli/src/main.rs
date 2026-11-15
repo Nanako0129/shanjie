@@ -548,6 +548,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
+    // The holdout prints numbers only through --rowstats; the row numbers of --pool-mask-diff are per-row output like --tinylm-scores.
+    if pool_mask_diff.is_some() && set.as_deref() == Some("holdout") {
+        return Err("--pool-mask-diff is not allowed with --set holdout".into());
+    }
+    // Without the pool weight (no --context, --no-recur or --no-pool-recur) no row is reordered: the file would silently stay empty.
+    if pool_mask_diff.is_some() && !(ctx_mode && recur && pool_recur) {
+        return Err("--pool-mask-diff needs --context and the pool weight (not --no-recur or --no-pool-recur)".into());
+    }
     if (reading_table.is_some() || dump_reading_table.is_some()) && !reading_decode {
         return Err("--reading-table and --dump-reading-table need the reading term (not --no-reading-decode)".into());
     }

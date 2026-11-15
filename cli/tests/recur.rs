@@ -136,7 +136,32 @@ fn the_pool_weight_marks_and_records() {
     with(&[&tl[..], &["--no-pool-recur", "--tinylm-scores", &scores]].concat());
     let rec = std::fs::read_to_string(&scores).unwrap();
     assert!(!rec.contains("\"idx\""), "{rec}");
-    // Refused without a small model.
-    let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args([&base[..], &["--context", "--pool-mask-diff", &md]].concat()).current_dir(root()).output().unwrap();
-    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("--pool-mask-diff needs --tinylm"));
+    // Refused where the file would stay empty: without a small model, without --context, with --no-recur or --no-pool-recur.
+    let refused = |args: &[&str], why: &str| {
+        let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(args).current_dir(root()).output().unwrap();
+        assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains(why), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    };
+    refused(&[&base[..], &["--context", "--pool-mask-diff", &md]].concat(), "--pool-mask-diff needs --tinylm");
+    let needs = "--pool-mask-diff needs --context and the pool weight";
+    refused(&[&base[..], &["--tinylm", "data/lm/tinylm.sjtl", "--pool-mask-diff", &md]].concat(), needs);
+    for off in ["--no-recur", "--no-pool-recur"] {
+        refused(&[&base[..], &tl[..], &[off, "--pool-mask-diff", &md]].concat(), needs);
+    }
+}
+
+/// `--pool-mask-diff` writes per-row numbers, so it is refused with the holdout like `--tinylm-scores`, before anything is read. The model path does not
+/// exist, so if the refusal ever moved after the loading the run would stop at the model, never reaching the holdout rows.
+#[test]
+fn the_pool_mask_diff_is_refused_with_the_holdout() {
+    let d = tmp("holdout");
+    let md = d.0.join("md.txt");
+    let missing = d.0.join("no-such-model.sjlm");
+    let o = Command::new(env!("CARGO_BIN_EXE_shanjie-eval"))
+        .args(["--lm", missing.to_str().unwrap(), "--profile", "chat", "--set", "holdout", "--context", "--tinylm", "data/lm/tinylm.sjtl", "--pool-mask-diff", md.to_str().unwrap()])
+        .current_dir(root())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success() && err.contains("--pool-mask-diff is not allowed with --set holdout"), "{err}");
+    assert!(!md.exists(), "no file is created");
 }

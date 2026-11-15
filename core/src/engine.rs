@@ -5306,6 +5306,59 @@ mod pool_recur_tests {
         }
     }
 
+    /// Two stretches: the first one's choice is the second one's key (`context_key` of the text before it). Stretch 1 is 我們 / 你好 (n-gram -1, -2; 你好
+    /// recurs and leads with the weight), stretch 2 is 人去 / 的嗎 (no recurring pair, tied n-gram scores). Never sure, alpha 1, delta 0: with the weight
+    /// stretch 1 keeps 你好 (paths 1), its key 你好 makes the toy model prefer 人去 (paths 0); without it stretch 1 keeps 我們 (paths 0) and the key 我們
+    /// makes it prefer 的嗎 (paths 1). `apply_rerank` splices the paths indices right to left into an engine whose path holds the decoder's first words.
+    #[test]
+    fn the_first_stretchs_reordered_choice_is_the_second_ones_key() {
+        let toy = toy();
+        let ll = |k: &str, t: &str| toy.ll_many(&[(k, t)]).unwrap()[0];
+        assert!(ll("我們", "的嗎") > ll("我們", "人去") && ll("你好", "人去") > ll("你好", "的嗎"), "premise: the key flips the toy model's choice");
+        let run = |g: Option<&RecurGrams>| {
+            let mut e = Engine::with_lexicon(Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap()), Layout::Standard);
+            let word = |w: &str| PathWord { word: w.to_string(), lp: 0.0, sinit: false, is_punct: false, delta: 0.0, syllables: 2 };
+            e.path = vec![word("我們"), word("人去")];
+            e.display = "我們人去".to_string();
+            let mut s1 = stretch(&["我們", "你好"], &[-1.0, -2.0], &[0.0; 2], SinitLayer::Coarse, &[], &none(), g);
+            let mut s2 = stretch(&["人去", "的嗎"], &[-1.0, -1.0], &[0.0; 2], SinitLayer::Coarse, &[], &none(), g);
+            (s1.at, s2.at) = (0, 1);
+            let mut j = job(s1, (1.0, f64::INFINITY, 0.0));
+            j.stretches.push(s2);
+            j.generation = e.generation;
+            let (orders, r) = (j.pool_order(), j.run());
+            let (picks, keys) = (r.picks(), r.keys());
+            let shown = e.apply_rerank(r).unwrap().map(|o| o.preedit);
+            (orders, picks, keys, shown, e.display.clone())
+        };
+        let g = grams("你好");
+        let (orders, picks, keys, shown, display) = run(Some(&g));
+        assert_eq!(orders, [vec![1, 0], vec![]], "only stretch 1 is reordered");
+        assert_eq!((picks, keys), (vec![1, 0], vec![SENTINEL.to_string(), "你好".to_string()]));
+        assert_eq!((shown.as_deref(), display.as_str()), (Some("你好人去"), "你好人去"));
+        let (orders, picks, keys, shown, display) = run(None);
+        assert_eq!(orders, [Vec::<usize>::new(), vec![]]);
+        assert_eq!((picks, keys), (vec![0, 1], vec![SENTINEL.to_string(), "我們".to_string()]), "premise: without the weight both stretches choose otherwise");
+        assert_eq!((shown.as_deref(), display.as_str()), (Some("我們的嗎"), "我們的嗎"));
+    }
+
+    /// docs/spec/privacy.md §5.2: the context recurrence set never goes into a rerank job, only the numbers made from it (`Stretch::bonus`, `order`). The
+    /// patterns name every field of `RerankJob` and `Stretch` with its type, so adding a field (a `RecurGrams`, a pointer to one, its length) stops compiling
+    /// here until this list and the privacy rule are read again.
+    #[test]
+    fn a_job_holds_no_recurrence_set() {
+        fn job_fields(j: RerankJob) {
+            let RerankJob { generation, model, params, colloquial, level, eps_sinit, left, stretches } = j;
+            let _: (u64, Arc<TinyLm>, (f64, f64, f64), Option<Arc<Colloquial>>, RerankLevel, f64, String, Vec<Stretch>) =
+                (generation, model, params, colloquial, level, eps_sinit, left, stretches);
+        }
+        fn stretch_fields(s: Stretch) {
+            let Stretch { at, paths, ng, bonus, order, masked, b, layer, gap } = s;
+            let _: (usize, Vec<Vec<JobWord>>, Vec<f64>, Vec<f64>, Vec<usize>, Vec<bool>, Vec<f64>, SinitLayer, String) = (at, paths, ng, bonus, order, masked, b, layer, gap);
+        }
+        let _ = (job_fields, stretch_fields);
+    }
+
     /// The mask's base is the decoder's first D (我們他去, holds the manual word 我們), not the reordered first R (我們你好, holds 我們 and the manual word
     /// 你好, which D does not): D is not masked, and when D's fused score beats R's by delta D is chosen. A mask made with R as the base (the exploration
     /// patch's) masks D, so this test fails for it.
