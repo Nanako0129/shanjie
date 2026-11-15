@@ -694,6 +694,39 @@ class ReplayRunWithTheRecurrenceTerm(ReplayRunWithTheReadingTerm):
             self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+rd+rx:{self.rx8()}+rm")
 
 
+class ReplayRunWithThePoolWeight(ReplayRunWithTheRecurrenceTerm):
+    """A version with `"pool_recur": True` besides `"recur": True` (docs/spec/semantic-rerank.md §3.1.1): with the small model the replay's tag reads `+recur+pr`
+    before the reading marks; `+recur` alone, or `+pr` elsewhere, is refused, and a version with only `"recur"` refuses `+recur+pr`."""
+    SPEC = dict(ReplayRunWithTheRecurrenceTerm.SPEC, pool_recur=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "recur": "+recur+pr"}
+
+    def test_the_tags_without_the_mark_or_with_it_in_the_wrong_place_are_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        base, rd = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}", f"+rd+rx:{self.rx8()}+rm"
+        for tag in (base + "+recur" + rd, base + rd, base + "+pr+recur" + rd, base + "+recur" + rd + "+pr"):
+            with self.assertRaises(SystemExit, msg=tag):
+                self.replay(FAKE_TAG=tag)
+
+    def test_the_version_without_the_key_does_not_take_the_mark(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        with mock.patch.dict(bench.VERSIONS2, {"v0.4.3": ReplayRunWithTheRecurrenceTerm.SPEC}), self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}+rm")
+
+    def test_without_the_small_model_the_mark_is_recur_alone(self):
+        """No small model (and so no colloquial table): no pool to weigh, so `replay_cell` wants `+recur` alone. The fake run reports 0 rows, so the call
+        fails at the row count, the check after the tag's; `+recur+pr` fails at the tag."""
+        models = {k: v for k, v in self.models.items() if k not in ("tinylm.sjtl", "colloquial.sjlm")}
+        lm8, rows = models["bigram.sjlm"][:8], self.rows["user-reported"][0]
+        for mark, at in (("+recur", "replay scored"), ("+recur+pr", "setting tag")):
+            out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}-notinylm+correct{mark}+rd+rx:{self.rx8()}+rm  {{'n': 0}}"
+            with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(models), stdout=out)):
+                with self.assertRaises(RuntimeError) as e:
+                    kpi.replay_cell("b", self.root, rows, models, False, os.path.join(self.td, "rs"), "+acg", True, True, True)
+            self.assertIn(at, str(e.exception), mark)
+
+
 # ---------- run ----------
 CLI = """#!{py}
 import os, sys
