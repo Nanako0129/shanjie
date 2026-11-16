@@ -782,6 +782,33 @@ class SuiteV2(Tmp):
                 bench.run_cell2(self.ctx, v, "pub", "chat", False)
         self.assertNotIn("recur", bench.VERSIONS2["v0.7.0"])
 
+    def test_pool_recur_version_marks_recur_pr_where_the_small_model_runs(self):
+        """docs/spec/semantic-rerank.md §3.1.1: a version with `"pool_recur": True` (and `"recur": True`) ships the weight on the semantic correction's pool. The
+        CLI prints `+recur+pr` in every cell that runs the small model (chat, formal, the anchor run); a version without a small model, and the
+        replay-setting cell, get no `+pr`; a version with only `"recur"` keeps `+recur`."""
+        spec = {"release": "vP", "flags": ["--context", "--packs", "acg"], "tinylm": True, "recur": True, "pool_recur": True, "tag": "+ctx+tl:{tl8}+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vP": spec}):
+            v = self.stage_models("vP", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+recur+pr+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+recur+pr+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+recur+pr+tl:7e73ef67")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")
+            self.fake_cli("lm-chat+ctx+recur+pr+tl:7e73ef67+acg", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+recur+pr+tl:7e73ef67+acg")
+            self.fake_cli("lm-chat+ctx+recur+tl:7e73ef67+acg", [True, True], ("你好", "世界"))   # the tag without +pr is not this version's setting
+            with self.assertRaises(RuntimeError):
+                bench.run_cell2(self.ctx, v, "pub", "chat", False)
+            # Without a small model (no `--tinylm` in the cell) there is no pool: `+recur` alone.
+            v.tl = None
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+recur+tl:7e73ef67+acg")
+        for k in bench.VERSIONS2.values():
+            self.assertFalse(k.get("pool_recur") and not k.get("recur"), "pool_recur needs recur")
+        self.assertNotIn("pool_recur", bench.VERSIONS2["v0.7.0"])
+
     def test_a_version_without_the_key_never_gets_the_table(self):
         """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""
         HEX["colloquial.sjlm"] = "2984eeb5" + "d" * 56

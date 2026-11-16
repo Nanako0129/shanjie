@@ -919,6 +919,9 @@ PROFILES2 = ["chat", "formal"]
 # A version that ships the context recurrence term (docs/spec/decoder.md §4.6) has `"recur": True`: with `--context` the CLI marks every cell's tag `+recur` right after
 # `+ctx` (the anchor run too; the replay-setting cell has no `--context`, so no mark), and the replay's tag has it before the reading marks. The row of the new version is added at its
 # release; a version without the key has no mark (its binary has no such term).
+# A version that also ships the context recurrence weight on the semantic correction's pool (docs/spec/semantic-rerank.md §3.1.1) has `"pool_recur": True`
+# besides `"recur": True`: the CLI then marks `+recur+pr` instead of `+recur` in every cell that has the small model (`--tinylm`; a cell without it has no
+# pool, so `+recur` alone), and the replay's tag reads `+recur+pr` with the small model. A version without the key keeps `+recur`.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -1035,8 +1038,9 @@ def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
     t = t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", ""))
-    if ver.spec.get("recur"):   # the CLI prints `+recur` after `+ctx` (docs/spec/decoder.md §4.6)
-        t = t.replace("+ctx", "+ctx+recur", 1)
+    if ver.spec.get("recur"):   # the CLI prints `+recur` after `+ctx` (docs/spec/decoder.md §4.6), `+recur+pr` with the pool weight and a small model
+        pr = "+pr" if ver.spec.get("pool_recur") and getattr(ver, "tl", None) else ""
+        t = t.replace("+ctx", "+ctx+recur" + pr, 1)
     return t + colloq_tag(ver, prof) + reading_tag(ver)
 
 

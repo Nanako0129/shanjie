@@ -457,8 +457,8 @@ fn reading_decode_replay_agrees_with_the_cli() {
 
 /// The context recurrence term (docs/spec/decoder.md §4.6): the replay's engine builds the set from each row's context through
 /// `set_left_context`, so its choices are the CLI's with `--context` (equal `top1_sha256`), and `--no-recur` is the CLI's `--no-recur`. Premise: the term
-/// changes the CLI's choice among these rows (the left text holding 反映 shows 反映 for ㄈㄢˇ ㄧㄥˋ, 反應 without the term). The tag has `+recur` before the reading
-/// marks only with the term on. `--key-times` writes `c\t<µs>` per row and `k\t<µs>` per `Engine::key` call (each typing key and the Enter here), nothing else,
+/// changes the CLI's choice among these rows (the left text holding 反映 shows 反映 for ㄈㄢˇ ㄧㄥˋ, 反應 without the term). The tag has `+recur+pr` (the small model is
+/// on, so the pool weight too) before the reading marks only with the term on. `--key-times` writes `c\t<µs>` per row and `k\t<µs>` per `Engine::key` call (each typing key and the Enter here), nothing else,
 /// and leaves the summary line as it was.
 #[test]
 fn recurrence_replay_agrees_with_the_cli() {
@@ -488,7 +488,7 @@ fn recurrence_replay_agrees_with_the_cli() {
         assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile}: the replay's engine decodes like the CLI");
         assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile}: --no-recur");
         assert!(on.contains("+ctx+recur") && !off.contains("+recur"), "{profile}: {on}{off}");
-        assert!(rep_on.contains("+recur+rd+rx:") && !rep_off.contains("+recur"), "{profile}: {rep_on}{rep_off}");
+        assert!(rep_on.contains("+recur+pr+rd+rx:") && !rep_off.contains("+recur") && !rep_off.contains("+pr"), "{profile}: {rep_on}{rep_off}");
         assert_eq!(rep_off, run(replay, &["--rows", rows, "--profile", profile, "--no-recur"]), "{profile}: --key-times leaves the summary as it was");
         let b = std::fs::read(&times).unwrap();
         assert!(b.iter().all(|c| c.is_ascii_digit() || b"ck\t\n".contains(c)), "{profile}: numbers only");
@@ -497,6 +497,47 @@ fn recurrence_replay_agrees_with_the_cli() {
         assert_eq!(lines.iter().filter(|l| l.starts_with("c\t")).count(), 4, "{profile}: one line per row");
         assert_eq!(lines.iter().filter(|l| l.starts_with("k\t")).count(), keys, "{profile}: one line per key");
         assert!(lines[0].starts_with("c\t") && lines.iter().all(|l| l.split('\t').nth(1).is_some_and(|n| n.parse::<u64>().is_ok())), "{profile}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The context recurrence weight on the pool (docs/spec/semantic-rerank.md §3.1.1): the replay's engine and the CLI call the same `lm::pool_order`, so on rows
+/// whose left text holds at least 32 characters and a pair that recurs in a pool candidate the replay picks what the CLI picks, with the weight and with
+/// `--no-pool-recur` (premise: the weight changes the CLI's choice among these rows), and on rows of 31 characters all four agree. Hand-written rows, chat
+/// and formal; tags `+recur+pr` with the weight, `+recur` without.
+#[test]
+fn pool_weight_replay_agrees_with_the_cli() {
+    let dir = std::env::temp_dir().join(format!("shanjie-replay-poolrecur-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let left = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（";
+    let cut: String = left.chars().skip(left.chars().count() - 31).collect();
+    let line = |ctx: &str| format!("{ctx}|語意也錯字|ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ\n");
+    let long = dir.join("long.txt");
+    std::fs::write(&long, line(left) + &line(&format!("語義{}", "a".repeat(30))) + "|反應|ㄈㄢˇ ㄧㄥˋ\n").unwrap();
+    let short = dir.join("short.txt");
+    std::fs::write(&short, line(&cut) + &line(&format!("語義{}", "a".repeat(29)))).unwrap();
+    let _g = slot();
+    let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
+    let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));
+    for profile in ["chat", "formal"] {
+        for (rows, acts) in [(long.to_str().unwrap(), true), (short.to_str().unwrap(), false)] {
+            let cli = |extra: &[&str]| {
+                let mut a = vec!["--lm", lm.to_str().unwrap(), "--profile", profile, "--context", "--packs", "acg,it,meme,beauty", "--tinylm", tl.to_str().unwrap(), "--rows", rows];
+                if profile == "chat" {
+                    a.extend(["--colloquial-core", co.to_str().unwrap()]);
+                }
+                a.extend_from_slice(extra);
+                run(eval, &a)
+            };
+            let (on, off) = (cli(&[]), cli(&["--no-pool-recur"]));
+            assert_eq!(sha_of(&on) != sha_of(&off), acts, "{profile} {rows}: premise, the weight changes a choice only among the long rows");
+            let rep_on = run(replay, &["--rows", rows, "--profile", profile]);
+            let rep_off = run(replay, &["--rows", rows, "--profile", profile, "--no-pool-recur"]);
+            assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile} {rows}: the replay picks what the CLI picks");
+            assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile} {rows}: --no-pool-recur");
+            assert!(on.contains("+ctx+recur+pr+kn") && off.contains("+ctx+recur+kn"), "{profile}: {on}{off}");
+            assert!(rep_on.contains("+recur+pr+rd+rx:") && rep_off.contains("+recur+rd+rx:"), "{profile}: {rep_on}{rep_off}");
+        }
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -110,7 +110,8 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
 /// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
 /// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
 /// The default has the context recurrence term (docs/spec/decoder.md §4.6), so every line's tag has `+recur` (the n-gram-only lines too: `--context` builds
-/// the set from the row's context column).
+/// the set from the row's context column), and the shipping lines also its pool weight (docs/spec/semantic-rerank.md §3.1.1: `+recur+pr`, which picks the
+/// same rows here: no context of these sets reaches 32 characters with a recurring pair in a pool).
 #[test]
 fn shipping_default_matches_its_rust_only_pins() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));

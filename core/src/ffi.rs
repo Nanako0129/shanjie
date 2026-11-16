@@ -1462,6 +1462,104 @@ mod tests {
         unsafe { shanjie_engine_free(e) };
     }
 
+    /// docs/spec/semantic-rerank.md §3.1.1 over the C ABI: the real lexicon, n-gram model, small model and colloquial table, rerank on. The fixture of
+    /// core/tests/engine_pool_recur.rs: after its 44-character left text the jobs of ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ carry a pool weight and 語義也錯字 stays;
+    /// with no left text they carry none.
+    const POOL_LEFT: &str = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（";
+    const POOL_READING: [&str; 5] = ["ㄩˇ", "ㄧˋ", "ㄧㄝˇ", "ㄘㄨㄛˋ", "ㄗˋ"];
+
+    fn pool_engine() -> *mut ShanjieEngine {
+        let e = new_engine(&root().join("data/lexicon"), 0);
+        let path = |f: &str| CString::new(root().join("data/lm").join(f).to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, path("bigram.sjlm").as_ptr()) } == 0, "load_lm");
+        assert!(unsafe { shanjie_engine_load_tinylm(e, path("tinylm.sjtl").as_ptr()) } == 0, "load_tinylm");
+        assert!(unsafe { shanjie_engine_load_colloquial(e, path("colloquial.sjlm").as_ptr()) } == 0, "load_colloquial");
+        assert!(set_rerank(e, 1).0 == 0, "rerank on");
+        e
+    }
+
+    /// Types `syls` through the C ABI, running and applying every job; (the preedit, whether any job carried a pool weight).
+    fn pool_type(e: *mut ShanjieEngine, syls: &[&str]) -> (String, bool) {
+        let (mut shown, mut weighted) = (String::new(), false);
+        for k in syls.iter().flat_map(|s| keys_of(Layout::Standard, s)) {
+            let (rc, preedit, _) = send(e, k);
+            assert!(rc == 0, "typing");
+            shown = preedit;
+            let (rc, j) = take(e);
+            assert!(rc == 0, "take");
+            if !j.is_null() {
+                // SAFETY: test-only read of a live job.
+                weighted |= unsafe { &(*j).job }.pool_bonus().iter().flatten().any(|&b| b != 0.0);
+                assert!(unsafe { shanjie_rerank_run(j) } == 0, "run");
+                let (rc, p) = apply(e, j);
+                if rc == 0 {
+                    shown = p;
+                }
+                unsafe { shanjie_rerank_free(j) };
+            }
+        }
+        (shown, weighted)
+    }
+
+    /// NULL, "" and text that is not UTF-8 each leave the next composition without the pool weight (its jobs carry none, and it shows what it shows with
+    /// no left text); right after the long left text the weight acts.
+    #[test]
+    fn null_empty_and_non_utf8_left_texts_turn_the_pool_weight_off() {
+        let e = pool_engine();
+        let none = pool_type(e, &POOL_READING);
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(!none.1, "no left text, no weight");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        for what in ["NULL", "empty", "not UTF-8"] {
+            assert!(set_left(e, POOL_LEFT) == 0);
+            let on = pool_type(e, &POOL_READING);
+            assert!(send(e, key(ESC, '\0')).0 == 0);
+            assert!(on.1 && on.0 == "語義也錯字" && on.0 != none.0, "{what}: premise, the weight acts");
+            assert!(set_left(e, POOL_LEFT) == 0);
+            let rc = match what {
+                "NULL" => unsafe { shanjie_engine_set_left_context(e, ptr::null()) },
+                "empty" => set_left(e, ""),
+                _ => unsafe { shanjie_engine_set_left_context(e, bad_utf8.as_ptr()) },
+            };
+            assert!(rc == if what == "not UTF-8" { SHANJIE_ERR_INVALID } else { SHANJIE_OK }, "{what}: code");
+            assert!(pool_type(e, &POOL_READING) == none, "{what}: as with no left text");
+            assert!(send(e, key(ESC, '\0')).0 == 0);
+        }
+        unsafe { shanjie_engine_free(e) };
+    }
+
+    /// Code 4 (an injected panic in a key) resets the engine: the composition after it carries no pool weight and shows what it shows with no left
+    /// text; the same engine with the left text set again weighs the pool.
+    #[test]
+    fn child_panic_pool_weight() {
+        if !is_child("child_panic_pool_weight") {
+            return;
+        }
+        let e = pool_engine();
+        let none = pool_type(e, &POOL_READING);
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_left(e, POOL_LEFT) == 0);
+        pool_type(e, &POOL_READING[..2]);
+        ARMED.with(|a| a.set(true));
+        let mut o: *mut ShanjieOutput = ptr::NonNull::dangling().as_ptr();
+        let k = keys_of(Layout::Standard, POOL_READING[2])[0];
+        assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 4 && o.is_null(), "panic maps to code 4");
+        let after = pool_type(e, &POOL_READING);
+        assert!(after == none && !after.1, "no weight after code 4");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_left(e, POOL_LEFT) == 0);
+        let again = pool_type(e, &POOL_READING);
+        assert!(again.1 && again.0 == "語義也錯字", "premise: the left text set again acts");
+        unsafe { shanjie_engine_free(e) };
+    }
+
+    #[test]
+    fn pool_weight_after_code_4() {
+        let (ok, out, err) = run_child("child_panic_pool_weight", false);
+        assert!(ok, "pool weight child failed: {err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+    }
+
     #[test]
     fn r2_panic_marker_never_reaches_stdout_or_stderr() {
         let (ok, out, err) = run_child("child_panic", false);

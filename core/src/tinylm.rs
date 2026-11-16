@@ -828,11 +828,11 @@ impl TinyLm {
     /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
     /// L characters as they are ("^" included; docs/spec/semantic-rerank.md §5.2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
     /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
-    /// `syl` are the readings the n-gram's first candidate used over the stretch (`Lexicon::path_readings`; the typed syllables unless an adjacent-key
-    /// slip was read through another syllable) and `manual` the hand-added words (`manual_mask`): a candidate that takes out a manual word the
-    /// n-gram's first choice holds there cannot be chosen (docs/spec/decoder.md §7); the threshold and the scores still use the whole list.
+    /// `masked` (same order as `cands`; empty, or a missing entry, is false) marks the candidates that cannot be chosen: the caller's
+    /// `manual_mask`, made once with the decoder's first candidate as the base (docs/spec/decoder.md §7); the threshold and the scores still use the
+    /// whole list.
     pub fn rerank(
-        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), syl: &[String], manual: &ManualSet, learn: &Learning,
+        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), masked: &[bool], learn: &Learning,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
         if !valid_params(params) {
@@ -841,9 +841,8 @@ impl TinyLm {
         let n = cands.len().min(ng.len()).min(TOPK);
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let (alpha, tau, delta) = params;
-        let masked = manual_mask(syl, &cands[..n], manual);
         let term = learn.term(&ll);
-        Ok((pick_masked(&ng[..n], &ll, alpha, tau, delta, &masked, &term), Some(ll)))
+        Ok((pick_masked(&ng[..n], &ll, alpha, tau, delta, masked, &term), Some(ll)))
     }
 
     /// What `rerank` and `rerank_colloquial` share: the LLs of the (already cut to `TOPK`) candidates under the key (`key_for`; for versions
@@ -861,20 +860,19 @@ impl TinyLm {
     /// `rerank` with the colloquial term (docs/spec/semantic-rerank.md §4, §4.4): the same first `TOPK`
     /// candidates and `ll_many`, then col_i = `co.col(words[i])` for the word split of each candidate, ll_eff = `colloquial::fuse(ll, col, alpha)`, and
     /// `pick` with `colloquial::cell(level)`, the level's registered alpha, tau and delta, not the file's. A col that is not finite drops the term for this call: the plain `pick` with the file's chat triple of the same
-    /// `level` (`colloquial::guarded_pick`). `syl` and `manual` mask the candidates as in `rerank`, in the fused pick and in its fallback. The engine
+    /// `level` (`colloquial::guarded_pick`). `masked` masks the candidates as in `rerank`, in the fused pick and in its fallback. The engine
     /// and the evaluation CLI both call this one function. Returns the chosen index and the raw LLs, as `rerank` does.
     #[allow(clippy::too_many_arguments)]
     pub fn rerank_colloquial(
         &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, level: RerankLevel,
-        syl: &[String], manual: &ManualSet, learn: &Learning,
+        masked: &[bool], learn: &Learning,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         let n = cands.len().min(ng.len()).min(words.len()).min(TOPK);
         let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let col: Vec<f64> = words[..n].iter().map(|w| co.col(w)).collect();
         let plain = self.params(Profile::Chat, level);
-        let masked = manual_mask(syl, &cands[..n], manual);
         let term = learn.term(&ll);
-        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, colloquial::cell(level), plain, &masked, &term), Some(ll)))
+        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, colloquial::cell(level), plain, masked, &term), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
@@ -1015,8 +1013,9 @@ fn gelu(be: Backend, x: &mut [f32]) {
 /// Which of `cands` (the n-gram's first candidates of one stretch; `syl` are the readings its first one used, `Lexicon::path_readings`) the rerank must not choose (docs/spec/decoder.md §3.6
 /// docs/spec/decoder.md §7): the hand-added words (`ManualSet`) that the first candidate holds on their syllables are protected, and a candidate that does not hold
 /// every one of them at the same place is masked. A manual word on other syllables, or that the first candidate does not hold, protects nothing; with nothing
-/// protected no candidate is masked. The first candidate holds all it protects, so it is never masked. The one place this is decided: `rerank`,
-/// `rerank_colloquial` and the evaluation CLI's `--tinylm-scores` all call it.
+/// protected no candidate is masked. The first candidate holds all it protects, so it is never masked. The one place this is decided: the engine calls it
+/// once when it makes a rerank job and the evaluation CLI once per row, always with the decoder's order (its first candidate the base), and hand the result to
+/// `rerank` / `rerank_colloquial` (permuted with the pool order of docs/spec/semantic-rerank.md §3.1.1 when that applies).
 pub fn manual_mask(syl: &[String], cands: &[&str], manual: &ManualSet) -> Vec<bool> {
     let mut masked = vec![false; cands.len()];
     let Some(first) = cands.first().filter(|_| !manual.is_empty()) else { return masked };
@@ -1299,8 +1298,8 @@ mod tests {
         // the real rerank: the toy model scores, the mask follows `manual_mask`
         let toy = TinyLm::parse(&std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/tinylm-tiny/tiny-int8.sjtl")).unwrap()).unwrap();
         let cands = ["米雅歌", "米亞哥", "米雅歌"];
-        let (a, b) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &mia(), &Default::default()).unwrap();
-        let (c, _) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &strs(&MIA), &ManualSet::default(), &Default::default()).unwrap();
+        let (a, b) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &manual_mask(&strs(&MIA), &cands, &mia()), &Default::default()).unwrap();
+        let (c, _) = toy.rerank(&[0.0, -0.5, -3.0], &cands, "", (100.0, f64::INFINITY, 0.0), &manual_mask(&strs(&MIA), &cands, &ManualSet::default()), &Default::default()).unwrap();
         let ll = b.unwrap();
         assert_eq!(c, pick(&[0.0, -0.5, -3.0], &ll, 100.0, f64::INFINITY, 0.0));
         assert_eq!(a, pick_masked(&[0.0, -0.5, -3.0], &ll, 100.0, f64::INFINITY, 0.0, &[false, true, false], &[]));
@@ -1463,20 +1462,20 @@ mod tests {
         let with = |k: &str| m.ll_many(&cands[..TOPK].iter().map(|c| (k, *c)).collect::<Vec<_>>()).unwrap();
         let key = "\u{4e01}\u{4e02}";
         let chat = m.alpha_tau_delta(Profile::Chat);
-        let (chosen, ll) = m.rerank(&ng, &cands, key, chat, &[], &Default::default(), &Default::default()).unwrap();
+        let (chosen, ll) = m.rerank(&ng, &cands, key, chat, &[], &Default::default()).unwrap();
         let ll = ll.unwrap();
         assert_eq!(ll, with(key));
         assert_ne!(ll, with(""), "the key is the model's context");
         assert_eq!(m.alpha_tau_delta(Profile::Chat), (0.7, 2.0, 0.0), "a version 1 file");
         assert_eq!(chosen, pick(&ng[..TOPK], &ll, 0.7, 2.0, 0.0));
-        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat, &[], &Default::default(), &Default::default()).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
-        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat, &[], &Default::default(), &Default::default()).unwrap(), (0, None));
+        assert_eq!(m.rerank(&ng, &cands, SENTINEL, chat, &[], &Default::default()).unwrap().1.unwrap(), with(""), "SENTINEL is the empty k");
+        assert_eq!(m.rerank(&ng[..1], &cands[..1], key, chat, &[], &Default::default()).unwrap(), (0, None));
         // params the header check would refuse are refused here too, even when fewer than two candidates would run nothing
         for bad in [(f64::NAN, 2.0, 0.0), (f64::INFINITY, 2.0, 0.0), (0.7, f64::NAN, 0.0), (0.7, 2.0, -0.25), (0.7, 2.0, f64::NAN), (0.7, 2.0, MAX_DELTA + 1.0)] {
-            assert_eq!(m.rerank(&ng, &cands, key, bad, &[], &Default::default(), &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
-            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad, &[], &Default::default(), &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng, &cands, key, bad, &[], &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
+            assert_eq!(m.rerank(&ng[..1], &cands[..1], key, bad, &[], &Default::default()).unwrap_err(), TinyLmError::Format, "{bad:?}");
         }
-        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0), &[], &Default::default(), &Default::default()).is_ok(), "an infinite tau is allowed: no threshold");
+        assert!(m.rerank(&ng, &cands, key, (0.7, f64::INFINITY, 0.0), &[], &Default::default()).is_ok(), "an infinite tau is allowed: no threshold");
     }
 
     /// Every kernel of `Backend::Plain`, with the name the tests print.

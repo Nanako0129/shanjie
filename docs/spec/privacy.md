@@ -64,8 +64,8 @@
 - 一般 App：向 App 要最多 256 個 UTF-16 單位，回傳的字串更長時只取最後 256 個並視為被截過；被截過時先去掉開頭可能被切斷的第一個 grapheme；從最後一個換行（Swift `Character.isNewline`）或 NUL 之後開始（NUL 當換行，不刪除）；留最後 64 個 grapheme，標點、空白、英文、emoji 都保留（同一則訊息、跨標點）。
 - 終端機類 App（`com.apple.Terminal`、`com.googlecode.iterm2`、`dev.warp.Warp-Stable`、`net.kovidgoyal.kitty`、`com.github.wez.wezterm`、`org.alacritty`、`co.zeit.hyper`、`com.mitchellh.ghostty`）只傳結尾 ≤ 2 個漢字，因為終端機的一行裡有指令與輸出。內建終端機面板的編輯器與編輯區是同一個 bundle ID，不在清單內（已知限制）。清單裡只有前兩個核對過 Info.plist 的 `CFBundleIdentifier`，其餘依公開資料整理。
 - 核心只留用得到的長度：`self.left` 是結尾 ≤ 2 個漢字；`left_full` 是載入的會意模型宣告的前文長度 L 個字元，或（模型沒宣告 L 時）結尾 2–32 個 ASCII 字母的英文詞加一個空白，否則空。`left_full` 不經 C ABI 回傳、不寫學習檔、不跨程序、不給任何網路功能；會意工作只帶最後 L 個字元。
-- 前文重現項（`docs/spec/decoder.md` §4.6）另外多保存一個集合：前文最後 64 個字元裡兩個都是漢字的相鄰字元對（至多 63 個）。它不是原文，但從它可以拼回前文裡大部分的漢字片段，所以照原文的等級對待；英數與標點的字元對不收，密碼、網址、指令這類內容不進集合。它是引擎自己的欄位，只在記憶體；每次設前文都從新的前文重建；不經 C ABI 回傳（沒有讀出內容的函式，只有個數給測試用）、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給任何網路功能、不進重排工作，也不在引擎之間共用的結構裡。學習照舊：使用者接受的字可能被學習記下，鍵仍只有 ≤ 2 個漢字。
-- 送出、Esc、重置、回傳碼 4、自動送出、規則 22 的直通都清掉前文（`left`、`left_full` 與漢字對集合一起清）；換會意模型只清 `left_full`。不重讀前文的組字開始（Ctrl+\ 等在空組字區開始組字的鍵）：`key()` 進來時組字區是空的、而且上一個鍵之後沒有設過前文，核心先清掉前文，所以 Backspace 刪到空、只有未完成符號時按 Esc 之後，舊前文不會用在下一次組字上。接受的殘留：已排進佇列的重排工作複本活到那次執行結束；Rust `String`、`HashSet` 與 Swift 字串釋放時不清零。
+- 前文重現項（`docs/spec/decoder.md` §4.6）另外多保存一個集合：前文最後 64 個字元裡兩個都是漢字的相鄰字元對（至多 63 個）。它不是原文，但從它可以拼回前文裡大部分的漢字片段，所以照原文的等級對待；英數與標點的字元對不收，密碼、網址、指令這類內容不進集合。它是引擎自己的欄位，只在記憶體；每次設前文都從新的前文重建；不經 C ABI 回傳（沒有讀出內容的函式，只有個數給測試用）、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給任何網路功能，也不在引擎之間共用的結構裡。字對集合本身不進重排工作；工作帶每條候選的加分與重排索引（`docs/spec/semantic-rerank.md` §3.1.1），是建工作時從它算出來的數字。和集合一起多記一個數：前文截到 64 之後的純量值個數（0–64，決定候選池的加重要不要生效），和集合同時重建、同時清除，同樣沒有讀出它的函式。學習照舊：使用者接受的字可能被學習記下，鍵仍只有 ≤ 2 個漢字。
+- 送出、Esc、重置、回傳碼 4、自動送出、規則 22 的直通都清掉前文（`left`、`left_full` 與漢字對集合一起清）；換會意模型只清 `left_full`。不重讀前文的組字開始（Ctrl+\ 等在空組字區開始組字的鍵）：`key()` 進來時組字區是空的、而且上一個鍵之後沒有設過前文，核心先清掉前文，所以 Backspace 刪到空、只有未完成符號時按 Esc 之後，舊前文不會用在下一次組字上。接受的殘留：已排進佇列的重排工作複本活到那次執行結束；Rust `String`、`HashSet` 與 Swift 字串釋放時不清零；工作複本裡的加分與重排索引釋放時也不清零。
 
 ## 6. 學習檔
 
@@ -108,7 +108,7 @@
 ## 10. 驗證
 
 - 日誌：`macos/Tests/ShanjieKitTests/LogTests.swift` 的 `testShellLogsNothingButStaticTextAndCodes`。另起 `/usr/bin/log stream --level debug --style ndjson`，只依行程過濾，同時擷取該行程的 stdout／stderr；先確認起始標記看得到，再重播帶標記的字串、bundle ID、路徑與左文，走過打字、滑鼠選字、非 0 回傳碼、重排、清除、備份、App 設定切換、設定視窗與缺檔的錯誤路徑，最後確認擷取內容與 stdout／stderr 都找不到任何標記，也沒有 `<private>`；並確認外殼自己的錯誤日誌（固定字串加回傳碼）確實進了擷取（正向對照）。verifier 在套用路徑加一行 `.public` 或 `NSLog` 時這個測試必須失敗。zsh 的 `log` 是內建指令，要寫 `/usr/bin/log`。
-- 前文的清除與不外流：`core/tests/engine_recur.rs`（集合只含兩個都是漢字的字元對且至多 63 個、每次設前文覆寫而非累加、NULL／空字串／不是 UTF-8 歸零、每一個清除點同時清空 `left_full` 與集合、換會意模型只清 `left_full`、Backspace 刪到空與 Esc 之後不留舊前文、組字中不清、兩個共用模型的引擎各有自己的集合），`core/src/ffi.rs` 的 C ABI 測試；`LogTests` 另帶 64 字前文（含 ASCII 標記與漢字對標記）跑一輪，標記不出現在 log。
+- 前文的清除與不外流：`core/tests/engine_recur.rs`（集合只含兩個都是漢字的字元對且至多 63 個、每次設前文覆寫而非累加、NULL／空字串／不是 UTF-8 歸零、每一個清除點同時清空 `left_full` 與集合、換會意模型只清 `left_full`、Backspace 刪到空與 Esc 之後不留舊前文、組字中不清、兩個共用模型的引擎各有自己的集合），`core/src/ffi.rs` 的 C ABI 測試；候選池的加重在每個清除點、NULL／空字串／不是 UTF-8 與回傳碼 4 之後不生效（`core/tests/engine_pool_recur.rs`、`core/src/ffi.rs` 的 `null_empty_and_non_utf8_left_texts_turn_the_pool_weight_off`、`pool_weight_after_code_4`）；`LogTests` 另帶 64 字前文（含 ASCII 標記與漢字對標記）跑一輪，標記不出現在 log。
 - 核心的靜音 hook：`core/src/ffi.rs` 內的測試，含用預設 hook 時看得到訊息的正向對照。
 - 引擎間共用部分的 handle（`ShanjieShared`，`docs/spec/c-abi.md` §5.4）不含使用者輸入：只有模型、表與資料目錄的路徑，沒有前文、組字、候選或選字記憶；`core/src/engine.rs` 的 `shared_holds_only_models_tables_and_the_data_folder` 逐一列出欄位與型別，新增欄位就編譯不過、要重看這一條。路徑不寫進任何紀錄（`ffi.rs` 的子行程測試斷言輸出不含暫存資料夾的路徑）。
 - 學習檔：`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk`、`r2_marker_characters_on_disk_with_subspans`、`r2_marker_characters_on_disk_with_a_recurring_left_text`（逐字改選一個標記字串後，標記字元只出現在含改選字的 ≤ 4 字段與前面 ≤ 2 字；沒有改選的送出不新增含標記的列；游標前的英文標記詞不出現在檔案裡；最後一個測試用會翻轉選字的 64 字前文，前文裡沒送出的漢字不在檔案裡）；`core/tests/learn_store.rs`（讀寫、損壞檔、權限；斷言失敗時不印紀錄內容）；`core/tests/engine_learn.rs` 的 `learning_panic_keeps_the_commit`。

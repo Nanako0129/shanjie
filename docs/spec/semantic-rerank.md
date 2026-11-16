@@ -11,9 +11,9 @@
 1. 每次組字區重新解碼（`Engine::refresh`），對每一段自由段（兩個固定詞或標點之間）取 n-gram 的 n-best，從中挑出前 `TOPK`（8）條沒有模糊音詞的路徑當候選池。
 2. 引擎把候選的文字、n-gram 分數、前文、設定打包成一個重排工作（`RerankJob`，只含自己擁有的資料，不借用引擎），組字區先顯示 n-gram 的第一名。
 3. 殼用 `take` 取走工作，在背景執行緒 `run`（算會意的對數似然，聊天設定再加常談項，用 `pick` 選一個），回主執行緒 `apply`；若期間組字有重新解碼，結果作廢，否則把選中的路徑換進組字區，字可能換一次。
-4. 評測用的命令列工具（`shanjie-eval`）與重播工具（`shanjie-replay`）呼叫同一組函式（`TinyLm::rerank`、`TinyLm::rerank_colloquial`、`colloquial::applies`、`rerank_pool`、`manual_mask`），所以引擎與評測的選字相同。例外是評測 CLI 的 `--tinylm-paired`（4.6）：它把 `colloquial::applies` 的模型雜湊條件當成成立，只用在量測換會意模型時常談項照出貨方式作用的情形。
+4. 評測用的命令列工具（`shanjie-eval`）與重播工具（`shanjie-replay`）呼叫同一組函式（`TinyLm::rerank`、`TinyLm::rerank_colloquial`、`colloquial::applies`、`rerank_pool`、`manual_mask`、`lm::pool_order`），所以引擎與評測的選字相同。例外是評測 CLI 的 `--tinylm-paired`（4.6）：它把 `colloquial::applies` 的模型雜湊條件當成成立，只用在量測換會意模型時常談項照出貨方式作用的情形。
 
-層次：n-gram 分數（`ng`）由 Rust 核心的解碼器算好再傳進來，重排不重算；會意的對數似然 `ll` 在重排時算；常談項、學習項與手動詞遮罩是同一次 `pick` 裡的修正，不在解碼器裡。
+層次：n-gram 分數（`ng`）由 Rust 核心的解碼器算好再傳進來，重排不重算；會意的對數似然 `ll` 在重排時算；常談項、學習項與手動詞遮罩是同一次 `pick` 裡的修正，不在解碼器裡；前文重現的加重（3.1.1）在建工作時算好（每條的加分與重排索引），重排時照它排列候選與 `ng`。
 
 ### 1.2 預設值與開關
 
@@ -88,6 +88,18 @@
 - 引擎與 CLI 的候選池都是 `lm::rerank_pool(best, TOPK)`：n-best 的前 `TOPK` 條**沒有模糊音詞**的路徑，保持 n-best 順序；n-gram 第一名本身有模糊音詞時回 `None`（這段不重排，顯示 n-gram 的結果）。沒有模糊音位元時就是前 8 條。池少於 2 條的段不產生工作。
 - 重排時 `n = min(候選數, ng 長度, TOPK)`。
 
+#### 3.1.1 前文重現的加重
+
+- 作用：前文裡出現過的字對（`docs/spec/decoder.md` §4.6 的 G），在語意校正的候選池裡再加一次重，重排後再照 3.3 選字。只在語意校正執行時生效；語意校正沒有執行的情形（關閉、沒有小模型、池少於 2 條、n-gram 第一名是模糊音路徑、候選太長、學習守門跳過）與沒有這一項時逐位元組相同。
+- 常數（`lm.rs`）：`POOL_RECUR_GAMMA` = 2.0（log10，和 n-gram 分數同一個尺度；和解碼器的 `RECUR_BETA` 2 合起來，每個字對在池裡是 4）、`POOL_RECUR_MIN_CHARS` = 32。兩個值是探索片 recur-rerank（研究 repo）在兩份長前文開發集量到的：γ = 2 時兩份都有方向，門檻 32 時錯字回報逐列相同。三檔（保守、標準、積極）共用同一個 γ 與門檻，各檔照自己的 (α, τ, δ)；聊天與書面相同。沒有使用者開關。
+- 次數：一條候選的次數＝它的顯示文字（那一段的各詞接起來）裡相鄰兩個字元落在 G 的位置數，算法同解碼器（`RecurGrams::pool_bonus`）；一段的第一個詞和它前面的文字之間不算邊界。一次組字有幾段時，每一段各自用同一個 G 數自己候選的次數。
+- 生效條件：這一段有候選池（至少 2 條）、解碼器拿得到 G（`set_recur` 沒有關掉）、G 不是空的、而且建 G 的那段前文截到 64 之後有 ≥ 32 個純量值（`RecurGrams` 和 G 一起記這個數）。任何一條不成立，池與分數原樣。
+- 生效時：池裡第 i 條的分數 `ng'_i = ng_i + POOL_RECUR_GAMMA × 次數_i`，池照 `ng'` 由大到小重排，同分保持 n-best 順序（`lm::pool_order`：`f64::total_cmp` 再比原索引，是全序）。重排後的第一名當成這一段的「n-gram 第一名」：把握閘門 `ng'[0] − ng'[1] ≥ τ`、常談的 `col_i − col_0` 與閘門 g_i、融合分數與 δ、學習項 b 與「被教過」的判斷，都照重排後的順序做。選中的候選對回原本的 n-best 索引。沒有選到別的候選時（`sure` 或沒有候選贏過 δ），結果是重排後的第一名，它可以不是解碼器的第一名；組字區在重排工作回來之前顯示的仍是解碼器的第一名。
+- 手動詞與重排保護詞（3.4、`docs/spec/decoder.md` §7）：遮罩照舊對解碼器的第一名算（候選照解碼器順序），算一次，重排時跟著候選一起換位置；重排後的第一名是會被遮罩的候選時，這一段不重排。所以前文的加分不會推翻使用者設定的保護。
+- 異常輸入不重排：任何一個 `ng + 加分` 不是有限值、或分數與加分的個數不同時，`pool_order` 回 `None`，這一段不重排（照解碼器的順序），不 panic。小模型回錯誤（含 `TooLong`）時結果是解碼器的第一名（`paths[0]`）。
+- 引擎與評測 CLI 只呼叫同一個 `lm::pool_order`；評測開關 `Engine::set_pool_recur(false)`、`--no-pool-recur` 只關這一項，`set_recur(false)`、`--no-recur` 也讓它不生效（9、`docs/spec/evaluation.md`）。
+- 取捨：這一項不照「分級只管語意校正、其他改進放底層」的原則，只在語意校正執行時生效。放在解碼器（底層）時語意校正關的聊天調參集少對 5 列；放在池上時語意校正關逐列不變，開的時候進步相近。
+
 ### 3.2 對數似然
 
 `ll_many(k, c)`：序列 `[BOS] + k + c`，對 c 的每個字元加總 log10 P；字表外的字算 UNK；`[BOS] + k + c` 超過 ctx 時從 k 最舊的字開始丟（模型實際看到 k 的最後 min(|k|, ctx − 1 − |c|) 個字元）；c 本身超過 ctx − 1 個字元是 `TooLong`；空的 c 為 0。引擎遇到 `TooLong` 或其他錯誤時這一段保留 n-gram 第一名；CLI 計數並保留第一名。少於 2 個候選時模型不跑。
@@ -105,11 +117,11 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 第 0 名永遠不被遮罩，所以一定有候選可選。τ 與全部分數用的是整張候選表，不因遮罩而變。
 
-`rerank(ng, cands, key, params, syl, manual, learn)`：取前 `TOPK`，算 `ll`，`pick_masked`；回傳選中的索引與 `ll`（少於 2 個候選回 `(0, None)`）。任何呼叫者給的 `params` 都先過 2.1 的檢查（不合回 `Format`）。
+`rerank(ng, cands, key, params, masked, learn)`：取前 `TOPK`，算 `ll`，`pick_masked`；回傳選中的索引與 `ll`（少於 2 個候選回 `(0, None)`）。`masked` 是呼叫端算好的遮罩（3.4，和候選同順序；空的代表沒有遮罩）。任何呼叫者給的 `params` 都先過 2.1 的檢查（不合回 `Format`）。`rerank_colloquial(ng, cands, words, key, co, level, masked, learn)` 收同一個 `masked`。
 
 ### 3.4 遮罩與學習項
 
-- **手動詞遮罩**（`manual_mask`，詞庫的 `manual` 詞加上重排保護詞，見 `docs/spec/lexicon-and-packs.md`）：n-gram 第一名在某些音節上用了手動詞（或 `data/lexicon/rerank-protect.tsv` 的重排保護詞，`docs/spec/lexicon-and-packs.md` §2.12）時，這些詞受保護；沒有把每個受保護詞留在同一位置的候選不可選。手動詞在別的音節上、或第一名沒用它，就不保護任何東西；沒有受保護的詞就沒有遮罩。書面與聊天、一般與常談兩條路都套用。判斷用的是第一名實際使用的讀音（相鄰鍵誤觸時是詞所經過的詞庫音節）。
+- **手動詞遮罩**（`manual_mask`，詞庫的 `manual` 詞加上重排保護詞，見 `docs/spec/lexicon-and-packs.md`）：n-gram 第一名在某些音節上用了手動詞（或 `data/lexicon/rerank-protect.tsv` 的重排保護詞，`docs/spec/lexicon-and-packs.md` §2.12）時，這些詞受保護；沒有把每個受保護詞留在同一位置的候選不可選。手動詞在別的音節上、或第一名沒用它，就不保護任何東西；沒有受保護的詞就沒有遮罩。書面與聊天、一般與常談兩條路都套用。判斷用的是第一名實際使用的讀音（相鄰鍵誤觸時是詞所經過的詞庫音節）。遮罩不在重排函式裡算：引擎建重排工作時、評測 CLI 建池時，照解碼器的順序、以解碼器的第一名為基準呼叫一次 `manual_mask`，有前文重現的加重時照 `order` 排列後交給 `rerank`／`rerank_colloquial`（3.1.1）。
 - **學習項**（句首單字的紀錄，見 `docs/spec/learning.md`）：`Learning::term(ll)` 給每個候選一個相對第一名的加分：細鍵層 `EPS_SINIT_FINE·(b_i − b_0)`（兩個方向）；中鍵、粗鍵層 `EPS_SINIT_MID`、`EPS_SINIT_COARSE` 乘 `max(b_i − b_0, 0)`，且只在 `ll_i > ll_0` 時；`b` 是紀錄權重 w / (w + 1)。三層只用命中的最長一層，不相加。三檔強度共用同一組常數（學習不屬於強度）。
 - **學習守門**：某段 n-gram 第一條路徑有任何一個詞被學習加分（lp 高於該詞在該讀音下不加分時的最佳 lp）時，這段不放進工作，使用者教過的選擇不被重排改掉。句首單字紀錄（SINIT）不算加分；相鄰鍵誤觸的詞不算被教過；詞庫沒有的學到的新詞算被教過。只給評測用的 `set_learn_guard(false)`（`shanjie-replay --learn-guard off`）關閉，App 不呼叫。
 
@@ -150,7 +162,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - 任何一個 col 不是有限值（`inf`、NaN）時，這一次呼叫整個不加常談項，用同一檔的檔頭 (α, τ, δ) 做原本的 `pick_masked`（`colloquial::guarded_pick`），不讓無限大或 NaN 左右選字；遮罩與學習項在退路上照樣套用。
 - 取捨：常談項只放在重排裡、n-gram 第一名固定當錨點，因為量過 n-gram 分差 ≥ τ 的列不會少任何改對，不必動解碼器。
 
-`TinyLm::rerank_colloquial(ng, cands, words, key, co, level, syl, manual, learn)` 是引擎與 CLI 共用的唯一入口，回傳選中的索引與原始的 ll。
+`TinyLm::rerank_colloquial(ng, cands, words, key, co, level, masked, learn)` 是引擎與 CLI 共用的唯一入口（`masked` 由呼叫端算好，3.4），回傳選中的索引與原始的 ll。
 
 ### 4.3 生效條件
 
@@ -204,11 +216,11 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 `set_left_context(text)`（NULL 或空字串＝沒有；不是 UTF-8 回 2 並清空）：
 
 - `left` = `context_key(text)`：結尾連續的漢字最多 2 個（`MAX_CONTEXT`），沒有則空。n-gram 解碼的歷史詞、選字記憶的鍵、預測列、數字層都只看它，所以前文變長不改變這些。
-- `recur`（前文重現項的集合 G，`docs/spec/decoder.md` §4.6）：`text` 最後 64 個 Unicode 純量值裡兩個都是漢字的相鄰字元對的集合（至多 63 個，沒有原文）。每次 `set_left_context` 都從 `text` 重建（覆寫，不累加）；NULL、空字串、不是 UTF-8 時是空的。它是 `Engine` 自己的欄位，以參數傳給解碼，不放進 `Lm`、詞庫等引擎之間共用的結構，也不進 `RerankJob`；解碼 n-best 與重排的候選池因此含它的加分，重排工作本身不帶它。
+- `recur`（前文重現項的集合 G，`docs/spec/decoder.md` §4.6）：`text` 最後 64 個 Unicode 純量值裡兩個都是漢字的相鄰字元對的集合（至多 63 個，沒有原文）。每次 `set_left_context` 都從 `text` 重建（覆寫，不累加）；NULL、空字串、不是 UTF-8 時是空的。它和一個數（`text` 截到 64 之後的純量值個數，3.1.1 的門檻用）一起建、一起清。它是 `Engine` 自己的欄位，以參數傳給解碼，不放進 `Lm`、詞庫等引擎之間共用的結構；解碼 n-best 與重排的候選池因此含它的加分。字對集合本身不進重排工作；工作帶每條候選的加分與重排索引（3.1.1、6.1），是建工作時從它算出來的數字。
 - `left_full` 只留用得到的長度（資料最小化）：載入的會意模型宣告了 L 時，`text` 的最後 L 個 Unicode 純量值（用 `chars()`，不切位元組）；否則，`text` 去掉最多一個結尾半形空白後，結尾是 2 至 32 個 ASCII 字母、且前一個字元不是 ASCII 數字（`english_tail`），就只留那個英文詞和它後面的一個空白；都不是則空。`left_cut` 記 `left_full` 是否截自更長的文字。
 - 清除：`left`、`left_full`、`left_cut` 與 `recur` 共用一個清除函式（`clear_left`）。`clear_all`（送出、Esc、`reset`、回傳碼 4、自動送出、達 `MAX_SYLLABLES` 的候選列選字送出都經過它）呼叫它；空組字區上沒處理的字元鍵（規則 22 的直通）與另外三個直通點也呼叫它。換會意模型（`set_tinylm`）只清 `left_full` 與 `left_cut`（它們是照模型宣告的 L 截的）；`left` 與 `recur` 和模型無關，不清，所以組字中換模型不會讓前文重現項中途消失。
 - **沒有先設前文就開始組字的路**：殼只在「沒有修飾鍵或只有 Shift 的字元鍵」開始組字前重讀前文，Ctrl+\ 等鍵也會在空組字區開始組字，Backspace 刪到空、只有未完成符號時按 Esc 也不經 `clear_all`。所以 `key()` 進來時組字區是空的（沒有音節、沒有進行中的英文、沒有未完成符號，也沒有開著的數字緩衝：就是殼判斷「不在組字」的條件），而且上一個鍵之後沒有呼叫過 `set_left_context`（`key()` 結束時重置的旗標 `left_fresh`），就先清除 `left`、`left_full`、`left_cut` 與 `recur`：舊的前文（可能是另一個 App 的）不會用在新的組字上。組字中（有音節、英文、未完成符號或數字緩衝）從不清。
-- 不外流：`left_full` 與 `recur` 不經 C ABI 回傳、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給網路功能；重排工作只帶最後 L 個字元（沒有宣告 L 時帶 `left`），不帶 `recur`。已經排進佇列的工作複本活到那次執行結束，Rust `String` 與 Swift 字串釋放時不清零。
+- 不外流：`left_full` 與 `recur` 不經 C ABI 回傳、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給網路功能；重排工作只帶最後 L 個字元（沒有宣告 L 時帶 `left`），不帶 `recur`（也不帶它的指標或那個數），只帶從它算出來的每條候選的加分與重排索引。已經排進佇列的工作複本活到那次執行結束，Rust `String` 與 Swift 字串、工作複本裡的加分與索引釋放時不清零。
 - `set_left_context` 不作廢進行中的工作（殼在可能開始組字的鍵之前呼叫它，那時組字區是空的、沒有進行中的工作）。
 
 **會意的前文鍵**（`TinyLm::key_for(before)`，引擎與 CLI 共用）：`before` 是組字區這一段之前的全部文字（前文，加上前面各段選定後的字與中間的固定詞、標點）。宣告 L 的模型（版本 5）：`before` 的最後 L 個字元，原文，不經 `context_key`；版本 1 到 4：`context_key(before)`（結尾 ≤ 2 個漢字，沒有則 `SENTINEL`，在 3.2 變空字串）。`RerankJob::run` 依序處理各段，後一段的前文用前面各段**選定後**的字重算（不用 n-gram 第一名）。出貨的會意 SJ-SR-8-15M 沒有宣告 L，所以出貨行為是結尾 ≤ 2 個漢字；模型是否讀長前文取決於檔頭，不取決於殼傳了多少。
@@ -227,17 +239,17 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 2. 通過學習守門（3.4）；
 3. 句首單字紀錄（SINIT）：有紀錄的段，候選池、n-gram 分數、第一條與守門看的路徑都用不看句首單字紀錄的解碼；另一次抬升的解碼只用來找含學到的字的路徑，那條路徑以不抬升的 lp 與分數換進池（取代池的最後一條，不取代第一條）。偏好由融合分數的學習項帶出（3.4）。
 
-一個工作含：世代號、`Arc<TinyLm>`、該檔的 (α, τ, δ)（`model.params(profile, level)`）、常談表（`applies` 成立才帶）、強度、`manual` 詞集合（與詞庫共用）、學習項的倍率（出貨為 1）、前文（宣告 L 的模型：`left_full`；否則 `left`）、各段（在 `path` 裡的起點、候選路徑 `(詞, lp, 降權 δ, 音節數, 是否 SINIT 標記)`、n-gram 分數、`b`、層、第一名實際用的讀音、這一段與前一段之間的顯示文字 `gap`）。沒有任何一段可重排時不產生工作。只有最新一次的工作留著；`take_rerank_job` 交出一次。
+一個工作含：世代號、`Arc<TinyLm>`、該檔的 (α, τ, δ)（`model.params(profile, level)`）、常談表（`applies` 成立才帶）、強度、學習項的倍率（出貨為 1）、前文（宣告 L 的模型：`left_full`；否則 `left`）、各段（在 `path` 裡的起點、候選路徑 `(詞, lp, 降權 δ, 音節數, 是否 SINIT 標記)`、n-gram 分數、`b`、層、手動詞遮罩 `masked`、前文重現的加分 `bonus`、重排索引 `order`、這一段與前一段之間的顯示文字 `gap`）。各段的每一欄都照解碼器的順序存（池在 `sinit_swap` 之後的順序；`paths[0]` 是顯示中的那條，`ng` 是解碼器的分數、不含加分）：`masked` 是建工作時對 `paths[0]` 與它實際用的讀音算的 `manual_mask`，`bonus` 是每條的 `RecurGrams::pool_bonus`（這一項不生效時全 0），`order` 是 `lm::pool_order` 給的重排後第 k 名在 `paths` 裡的索引（不重排時是空的）。字對集合、它的指標與那個數都不進工作（3.1.1、5.2）。沒有任何一段可重排時不產生工作。只有最新一次的工作留著；`take_rerank_job` 交出一次。
 
 ### 6.2 世代與作廢
 
-每個工作帶產生時的世代號（整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）。以下會換新號、作廢待處理與進行中的工作：每次重新解碼（`refresh`）、`clear_all`、`load_lm`、`set_lm`、`load_tinylm`、`load_colloquial`、`set_rerank`、`set_rerank_level`、`set_profile`、`set_demote`、學習開檔與清除、評測用的 `set_learn_guard`、`set_reading_decode` 與 `set_recur`。
+每個工作帶產生時的世代號（整個程序共用的 `AtomicU64` 取號，重建的引擎不會重用號碼）。以下會換新號、作廢待處理與進行中的工作：每次重新解碼（`refresh`）、`clear_all`、`load_lm`、`set_lm`、`load_tinylm`、`load_colloquial`、`set_rerank`、`set_rerank_level`、`set_profile`、`set_demote`、學習開檔與清除、評測用的 `set_learn_guard`、`set_reading_decode`、`set_recur` 與 `set_pool_recur`。
 
 不作廢：`set_learning`（不改解碼，只管選字要不要記下來）、`set_left_context`、游標移動、未完成的注音符號、進入預測列、直通鍵。這些之後算完的結果照樣套用，所以「打得快」時 Enter 送出的是重排後的字而不是 n-gram 的字。
 
 ### 6.3 執行
 
-`RerankJob::run` 只用工作裡的資料，不碰引擎，可在任何執行緒；`RerankJob`、`RerankResult` 是 `Send`（編譯期斷言，沒有 `unsafe impl`）。依序處理各段：`before` = 前文 + `gap` + 前面各段選定的字；`key = model.key_for(before)`；聊天且 `applies`（工作建立時已判斷）用 `rerank_colloquial`，否則用 `rerank`；錯誤（含 `TooLong`）選 0。每段記下起點、預期的詞列（n-gram 第一條）、選中的索引、選中路徑、用的 key。工作與結果含候選文字，沒有 `Debug`、不寫進任何紀錄。
+`RerankJob::run` 只用工作裡的資料，不碰引擎，可在任何執行緒；`RerankJob`、`RerankResult` 是 `Send`（編譯期斷言，沒有 `unsafe impl`）。依序處理各段：`before` = 前文 + `gap` + 前面各段選定的字；`key = model.key_for(before)`；聊天且 `applies`（工作建立時已判斷）用 `rerank_colloquial`，否則用 `rerank`；錯誤（含 `TooLong`）選 0（`paths[0]`）。`order` 不是空的時，候選、詞、`ng'`（`ng + bonus`）、`b` 與 `masked` 照 `order` 組一次再交給重排函式，選中的位置 p 先檢查 `p < order.len()`（超出就當成沒有選到別的候選，也就是重排後的第一名）再對回 `paths` 的索引；`overturned` 與 `sinit_diag` 在重排後的陣列上算（錨點是重排後的第一名）。`order` 是空的時和沒有這一項的時候相同。每段記下起點、預期的詞列（n-gram 第一條）、選中的索引（一律是 `paths` 的索引，0＝不換）、選中路徑、用的 key。測試介面 `candidates()`、`ng_scores()`、`sinit_weights()` 回解碼器順序，`pool_order()`、`pool_bonus()` 回 `order` 與 `bonus`（都只有 Rust API，不在 `shanjie.h`）。工作與結果含候選文字，沒有 `Debug`、不寫進任何紀錄。
 
 ### 6.4 套用
 
@@ -304,11 +316,12 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 - `--tinylm FILE.sjtl`：用 `load_paired` 載入；n-gram 雜湊不符、KN 側檔不符、`--no-classes`、`--no-demote` 都是錯誤（α、τ 只對辨類與降權表開著的分數成立）。每列取候選池（3.1）的前 8 名重排，top1、`--rowstats`、摘要行都用重排後的第一名；前文鍵用 `tl.key_for(ctx)`（`--context` 時；不加 `--context` 時為空）。摘要行設定標記加 `+tl:<檔 SHA-256 前 8 碼>`。
 - `--rerank-level conservative|standard|aggressive`（預設 standard）：需要 `--tinylm`（沒有 `--tinylm` 時任何值都是用法錯誤）；用在版本 1、2 的檔且不是 standard 時結束碼 2 並說明；不是 standard 時摘要行在 `+tl:…` 後加 `+rl:conservative` 或 `+rl:aggressive`。`tools/bench.py` 與不在本 repo 的研究工具因此把它當作不是出貨設定。
-- `--tinylm-scores OUT`：每列一行 JSON，只有數字沒有文字：`i`、`n`、`ng`、`ok`、`ed`、`glen`、`c`（選中的索引，沒重排為 0）、`ll`（n ≥ 2 的列）、`masked`（手動詞遮罩擋掉的索引，空也寫）；有 `--colloquial-core` 且常談實際跑過的列最後多 `col`（4.6）。有模糊音位元時 `n`、`ng`、`ok`、`ed`、`ll`、`masked` 列的是候選池，`c` 仍是 n-best 的索引。`--tinylm-scores-topk N`（研究用，N ≥ 8）把 `ll` 延伸到前 N 個候選，不改其他欄位；需要 `--tinylm-scores`，不能與 `--fuzzy` 並用。`--tinylm-scores` 與 `--set holdout` 不能並用（逐候選記錄是調 α、τ 的資料）。
+- `--tinylm-scores OUT`：每列一行 JSON，只有數字沒有文字：`i`、`n`、`ng`、`ok`、`ed`、`glen`、`c`（選中的索引，沒重排為 0）、`ll`（n ≥ 2 的列）、`masked`（手動詞遮罩擋掉的索引，空也寫）；有 `--colloquial-core` 且常談實際跑過的列最後多 `col`（4.6）。有模糊音位元時 `n`、`ng`、`ok`、`ed`、`ll`、`masked` 列的是候選池，`c` 仍是 n-best 的索引。前文重現的加重（3.1.1）重排過的列：各欄照重排後的順序，`ng` 寫加分後的 `ng'`，`idx` 是各項對應的 n-best 索引（紀錄裡只有一個 `idx`），`c` 仍是 n-best 索引，`masked` 是對解碼器第一名算、照重排排列的遮罩；沒有重排的列和以前相同。`--tinylm-scores-topk N`（研究用，N ≥ 8）把 `ll` 延伸到前 N 個候選，不改其他欄位；需要 `--tinylm-scores`，不能與 `--fuzzy` 並用。`--tinylm-scores` 與 `--set holdout` 不能並用（逐候選記錄是調 α、τ 的資料）。
 - `--tinylm-paired`：見 4.6；常談項對 `--tinylm` 給的模型照出貨方式作用，`col` 欄也在這種列出現。
+- 前文重現的加重（3.1.1）：有 `--context` 與 `--tinylm` 時預設生效，摘要行標記是 `+recur+pr`；`--no-pool-recur`（評測專用）只關這一項（標記 `+recur`），`--no-recur` 兩者都關（沒有 `+recur`）；沒有 `--tinylm` 時沒有候選池，這一項不存在、輸出和 `--no-pool-recur` 逐位元組相同。`--pool-mask-diff FILE`（評測專用，需要 `--context` 與 `--tinylm`；和 `--no-recur`、`--no-pool-recur` 並用時檔案一定是空的，所以拒絕；檔案是逐列的輸出，和 `--set holdout` 並用也拒絕）：把「遮罩不同的列」的列號寫進檔（只有數字），摘要行的字典最後多 `'pool_mask_diff': <列數>`（沒有這個旗標時不出現）。遮罩不同的列：這一列有重排，而且探索片的算法（以重排後第一名為保護基準、讀音取它的路徑）算出的遮罩和這一片的遮罩（對解碼器第一名算、照 `order` 排列）在任何位置不同；或這一列因為重排後第一名被遮罩而沒有重排。
 - `--picks FILE`（有沒有 `--tinylm` 都可用）：每列一行 `列號\t名次\t句子`，行數等於 rowstats，照列號順序（`--threads` 時也是）。名次是送出的那一句在這一列 n-best 的索引（0 是 n-gram 第一名，和 `--tinylm-scores` 的 `c` 同一個索引）；句子是這一列算對錯用的那一句（`top1_sha256` 用的同一份）。`--fuzzy` 時沒有任何讀音覆蓋的列寫 `列號\t-\t`。檔裡有列的內容，所以和 `--dump` 一樣在 `--set holdout` 時拒絕（讀任何檔之前）；rowstats 不變。
 - 候選比 ctx − 1 長的列保留第一名並在 stderr 計數；stderr 另印每列重排時間 p50、p95 與載入時間、載入前後的記憶體。
-- `shanjie-replay` 的重排選項：`--rerank each|final`、`--no-tinylm`、`--learn-guard on|off`、`--rerank-level`、`--colloquial`、`--no-colloquial`；引擎照 App 建（降權開、重排開、標準強度、載入常談表），所以重播的選字與 CLI 在同條件下相同。詳見 `docs/spec/evaluation.md`。
+- `shanjie-replay` 的重排選項：`--rerank each|final`、`--no-tinylm`、`--learn-guard on|off`、`--rerank-level`、`--colloquial`、`--no-colloquial`、`--no-pool-recur`（`Engine::set_pool_recur(false)`；標記規則同 CLI：有小模型時 `+recur+pr`）；引擎照 App 建（降權開、重排開、標準強度、載入常談表），所以重播的選字與 CLI 在同條件下相同。詳見 `docs/spec/evaluation.md`。
 
 ## 10. 驗證
 
@@ -321,8 +334,9 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
   - `core/tests/engine_english_next.rs`：英文前文與英文詞結尾的規則、左文隨組字清除、只留英文詞、長前文的學習只以漢字尾段（學習的鍵與學習檔不變；解碼相同的那一半在前文重現項關掉時斷言，開著時解碼本來就會因前文的字元對不同）。
   - `core/tests/engine_recur.rs`（前文重現項，`docs/spec/decoder.md` §4.6）：前文空或只有一個字元時與關掉它逐列相同；同音詞跟著前文走（語意校正關與開各一次）；G 只含兩個都是漢字的字元對、至多 63 個、只看最後 64 個字元；每次設前文都覆寫；每一個清除點（送出、Esc、兩種 `reset`、回傳碼 4、自動送出、達 `MAX_SYLLABLES` 的候選列選字送出、四個直通點）同時清空 `left_full` 與 G，換會意模型只清 `left_full`、G 不變；沒有先設前文就開始組字的路（Backspace 刪到空、只有未完成符號時按 Esc、Ctrl+\ 之後）舊前文不再生效；組字中（進行中的英文、未完成符號、數字緩衝）不清；引擎與評測 CLI 解碼相同；兩個共用模型的引擎各有自己的 G；終端機類的結尾兩個漢字是一個字元對。`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk_with_a_recurring_left_text`：用會翻轉選字的 64 字前文做逐字改選，前文裡沒送出的漢字不在學習檔裡。
   - `core/src/lm.rs` 與 `core/src/ffi.rs` 的單元測試：字元對集合與加分的算法（詞內與跨詞邊界、第一個詞沒有邊界、`None` 等於舊解碼）、C ABI 的 NULL、空字串、不是 UTF-8 都清空 G。
+  - 前文重現的加重（3.1.1）：`core/src/lm.rs` 的 `pool_bonus_needs_32_scalar_values_and_counts_positions`（31 回 0、32 回 γ × 次數、G 空回 0、純量值不是字形）、`pool_order_sorts_stably_and_refuses_what_it_cannot_order`（穩定排序、全 0、NaN、正負無限大、個數不同、重排後第一名被遮罩都回 `None`）；`core/src/engine.rs` 的 `pool_recur_tests`（手做的分數與 golden 小模型：重排後第一名不是 `paths[0]` 時 sure 選它、另一個候選贏過 δ 選那一個並對回索引、遮罩與學習項照重排後的順序、換進池的學到路徑排到第一時的選字與 `overturned`、`sinit_diag`、`TooLong` 選 `paths[0]`、手動詞擋住重排、遮罩的基準是解碼器的第一名、兩段的工作裡前一段重排後的選字是後一段的前文鍵且套用時照 `paths` 的索引換字，以及 `a_job_holds_no_recurrence_set`：`RerankJob` 與 `Stretch` 的欄位逐一列在解構裡，多加欄位就編譯不過）；`core/tests/engine_pool_recur.rs`（真模型：四種不生效的情形等於合併基準記下的選字常數、門檻數的是純量值、覆寫、每個清除點與沒有新前文的組字、組字中換模型照舊生效、工作的欄位照解碼器順序）；`core/src/ffi.rs` 的 `null_empty_and_non_utf8_left_texts_turn_the_pool_weight_off` 與 `pool_weight_after_code_4`。
   - FFI 子程序測試（`core/src/ffi.rs`）：載入各錯誤碼且輸出不含路徑、沒有工作時 NULL、run → apply → free、apply 兩次、所有 NULL 組合、run 內 panic 回 4 且輸出不含內容、`load_tinylm` 不改重排開關；C 標頭冒煙測試 `core/tests/c/abi_smoke.c` 每個函式至少呼叫一次。
-- **CLI**（`cli/tests/tinylm.rs`、`cli/tests/colloquial.rs`、`cli/tests/recur.rs`、`cli/tests/replay.rs`、`cli/tests/measure_flags.rs`）：`recur.rs` 驗 `--context` 的前文空或一個字元時印的與 `--no-recur` 相同、前文有同音詞時選字翻轉；`replay.rs` 的 `recurrence_replay_agrees_with_the_cli` 驗重播的引擎與 CLI 選字相同、`--no-recur`、`--key-times` 只有數字且列數對；`--tinylm-paired` 與 `--picks` 的 `paired_flag_turns_the_term_on_for_another_model`、`paired_flag_changes_nothing_on_the_paired_model`、`picks_match_the_scores_the_dump_and_the_rowstats`、`picks_of_a_row_without_candidates`、`picks_threads_agree_on_the_whole_dev302`、`the_flags_are_refused_where_they_do_not_apply`；n-gram 不符被拒、壞檔與孤兒 `--tinylm-scores`、KN 側檔必須是記著的那一個、`sentinel_context_is_an_empty_k`、`rerank_level_uses_that_levels_set` 與 `rerank_level_refusals`、`summary_line_records_a_non_standard_level`、`a_declared_left_length_keys_cli_rows_like_the_engine`、`no_option_is_byte_identical_to_before`、`the_term_applies_at_every_strength`、`the_shipping_setting_applies_and_threads_agree`、`the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off`、`scores_carry_col_and_recompute_the_pick`、`colloquial_replay_agrees_with_the_cli`。
+- **CLI**（`cli/tests/tinylm.rs`、`cli/tests/colloquial.rs`、`cli/tests/recur.rs`、`cli/tests/replay.rs`、`cli/tests/measure_flags.rs`）：`recur.rs` 驗 `--context` 的前文空或一個字元時印的與 `--no-recur` 相同、前文有同音詞時選字翻轉；`replay.rs` 的 `recurrence_replay_agrees_with_the_cli` 驗重播的引擎與 CLI 選字相同、`--no-recur`、`--key-times` 只有數字且列數對；`pool_weight_replay_agrees_with_the_cli` 驗前文重現的加重在手寫列上：CLI 預設與 `--no-pool-recur` 選字不同（前提）、重播兩者各等於 CLI，31 個純量值的列四者相同；`recur.rs` 的 `the_pool_weight_marks_and_records` 驗標記、沒有 `--tinylm` 時逐位元組相同、重排過的列的 `--tinylm-scores` 與 `--pool-mask-diff`（以及它在沒有 `--tinylm`、沒有 `--context`、`--no-recur`、`--no-pool-recur` 時被拒），`the_pool_mask_diff_is_refused_with_the_holdout` 驗它和 `--set holdout` 並用時在讀任何檔之前被拒；`--tinylm-paired` 與 `--picks` 的 `paired_flag_turns_the_term_on_for_another_model`、`paired_flag_changes_nothing_on_the_paired_model`、`picks_match_the_scores_the_dump_and_the_rowstats`、`picks_of_a_row_without_candidates`、`picks_threads_agree_on_the_whole_dev302`、`the_flags_are_refused_where_they_do_not_apply`；n-gram 不符被拒、壞檔與孤兒 `--tinylm-scores`、KN 側檔必須是記著的那一個、`sentinel_context_is_an_empty_k`、`rerank_level_uses_that_levels_set` 與 `rerank_level_refusals`、`summary_line_records_a_non_standard_level`、`a_declared_left_length_keys_cli_rows_like_the_engine`、`no_option_is_byte_identical_to_before`、`the_term_applies_at_every_strength`、`the_shipping_setting_applies_and_threads_agree`、`the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off`、`scores_carry_col_and_recompute_the_pick`、`colloquial_replay_agrees_with_the_cli`。
 - **Python**（`make test-python`）：`tools/test_export_sjtl.py`（不給 δ 時輸出與 golden 逐位元組相同、各版本寫出與讀回、壞值報錯而且不留檔）、`tools/gen_tinylm_tiny.py` 的 golden 可重產、`tools/test_build_attribution.py`（各來源加總與停止條件，合成輸入）。
 - **Swift**（`make test-swift`）：`macos/Tests/ShanjieKitTests/RerankTests.swift`（用真核心、真 n-gram、真小模型：按鍵後有工作交給 runner、完成且有改變才多一次 `setMarkedText`、過期不套用、free 的次數等於取到的工作數且沒有 free 兩次、開關預設、重建引擎仍送開關與等級、強度偏好與反灰）、`SelftestTests`、`LogTests`（前文放標記字串，含 64 字前文裡的 ASCII 標記與漢字對標記，驗證殼只記靜態文字與碼）、`LearningTests` 與 `LeftContextBenchTests`（前文讀取的邊界與延遲）。真佇列 runner 另有一個測試。
 - **執行**：selftest 在 CI 的 `shell` job（`make selftest-bundled`）與 `scripts/check-app.sh` 跑。選字品質（出貨標準、判讀集、各檔的 α、τ、δ 怎麼選）見 `docs/spec/evaluation.md`。
