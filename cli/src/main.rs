@@ -383,7 +383,7 @@ struct RowOut {
 /// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
 ///
 /// The reading term (docs/spec/decoder.md §5): the n-gram decoder adds `core::reading`'s term
-/// (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words, the 12 pairs of
+/// (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words, the 16 pairs of
 /// `data/lexicon/std-exempt.tsv` free) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
 /// `--tinylm-scores` `ng` and the pick all see it. The table is built by `core::engine::load_reading_decode` from the merged lexicon and the data folder, the one
 /// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>+rm` in every setting (`+rm`: the reading-mass rule). `--no-reading-decode`

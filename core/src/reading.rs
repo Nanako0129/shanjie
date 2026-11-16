@@ -1,7 +1,7 @@
 //! Reading decode (docs/spec/decoder.md §5): the n-gram decoder adds a
 //! reading term to the path score of every single-character word, `LAMBDA * max(t(r, w), -CAP)`, t being P5's reading term
-//! (the reading-channel research's `lex_logp`) with the sandhi exemption and the `floor_mc` floor and the 12 pairs of
-//! `data/lexicon/std-exempt.tsv` (R1g), the registered arm B-f of section R1c. The table is built by `engine::load_reading_decode` from the merged
+//! (the reading-channel research's `lex_logp`) with the sandhi exemption and the `floor_mc` floor and the 16 pairs of
+//! `data/lexicon/std-exempt.tsv` (R1g, and the only-reading pairs of tools/std_exempt.py's second rule), the registered arm B-f of section R1c. The table is built by `engine::load_reading_decode` from the merged
 //! lexicon and the data directory, and handed to the decoder by `CappedLexicon::with_reading`; the engine (`load_lm`), the evaluation CLI and the replay
 //! all call that one function. A lexicon built without it decodes as before. Last of all `with_mass` (reading-counts B, variant T3b) lets the
 //! multi-character words tell apart the readings of a character whose single-character scores tie.

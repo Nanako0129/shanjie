@@ -115,7 +115,7 @@ fn every_setting_ends_its_tag_with_rd_and_rx() {
 
 /// The effect on a public row, through the CLI (main's sentence, after wikitune): 以敵偽人員的名字命名 has the decoder first 以狄為… without the term in the written
 /// setting (formal; chat has it right already) and the right sentence with it; the scores file's `ng` of the first candidate is the decoder's path score with the term in it, the dump's (not the score without). 搞完這波 (row 37
-/// of eval/dev/user-reported.txt) keeps 波 as the first: ㄅㄛ 波 is one of the 12 exempt pairs.
+/// of eval/dev/user-reported.txt) keeps 波 as the first: ㄅㄛ 波 is one of the exempt pairs.
 #[test]
 fn the_default_decoder_first_carries_the_term_and_ng_is_its_score() {
     let dir = tmp("on");
@@ -147,6 +147,32 @@ fn the_default_decoder_first_carries_the_term_and_ng_is_its_score() {
         // chat has the right sentence either way, and its words all read standard readings (term 0): the same score; formal's first path changed
         assert_eq!(on[0].1 != off[0].1, profile == "formal", "{profile}: the term is in the score");
         assert_eq!((off[1].0.as_str(), on[1].0.as_str()), ("搞完這波", "搞完這波"), "{profile}: the exempt pair keeps 波");
+    }
+}
+
+/// The only-reading pairs (tools/std_exempt.py's second rule): ㄏㄞ ㄏㄞ (row 188 of eval/dev/user-reported.txt) is 嗨嗨 for the n-gram decoder alone in both
+/// settings. The lexicon scores 嗨's only dictionary reading ㄏㄞ at the floor, so the term charged each 嗨 and the overlay's 咍咍 was first in chat by 3.3
+/// (above the rerank's τ, so the semantic correction never saw it); `ㄏㄞ 嗨` in std-exempt.tsv costs nothing. Without the term 咍咍 is not first either
+/// (premise: the charge was the cause, not the overlay word alone).
+#[test]
+fn the_only_dictionary_reading_of_a_character_is_not_charged() {
+    let dir = tmp("sole");
+    let rows = dir.0.join("rows.txt");
+    std::fs::write(&rows, format!("{}\n", std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap().lines().nth(187).unwrap())).unwrap();
+    let rows = rows.to_string_lossy().into_owned();
+    for profile in ["chat", "formal"] {
+        for off in [false, true] {
+            let d = dir.0.join(format!("{profile}-{off}.dump")).to_string_lossy().into_owned();
+            let mut a = args(profile, false, &rows);
+            a.extend(["--dump", &d]);
+            if off {
+                a.push("--no-reading-decode");
+            }
+            let o = run(&a);
+            assert!(o.status.success(), "{}", text(&o.stderr));
+            let dump = std::fs::read_to_string(d).unwrap();
+            assert_eq!(dump.lines().next().unwrap().split('\t').nth(2), Some("嗨嗨"), "{profile}, term off {off}");
+        }
     }
 }
 

@@ -289,9 +289,10 @@ demote.tsv: written for this project; no third-party data.
 variant-order.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. It is not part of the CC BY-SA list above.
 rerank-protect.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. The words the semantic rerank may not
   take out of the n-gram's first choice. It is not part of the CC BY-SA list above.
-std-exempt.tsv: the 12 (reading, character) pairs the decoder's reading term does not charge. Chosen by comparing the readings of
-  mcbpmf-data.txt with the first reading of each character in the Ministry of Education's 《國語辭典簡編本》
-  (CC BY-ND 3.0 Taiwan; only used to decide these readings, none of its data is in the file or distributed).
+std-exempt.tsv: the 16 (reading, character) pairs the decoder's reading term does not charge. Chosen by comparing the readings of
+  mcbpmf-data.txt with the first reading of each character in the Ministry of Education's 《國語辭典簡編本》 (12 pairs) and with
+  the characters its 《重編國語辭典修訂本》 gives a single reading (4 pairs)
+  (both CC BY-ND 3.0 Taiwan; only used to decide these readings, none of their data is in the file or distributed).
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
   sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic sentences,
   public messages of the g0v Slack #rand0m channel (CC0) and articles and
