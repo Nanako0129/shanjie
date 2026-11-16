@@ -1206,6 +1206,11 @@ def measure_speed2(ctx, vers):
                          "p95_us": statistics.median(x["p95_us"] for x in r), "max_us": max(x["max_us"] for x in r),
                          "load_ms": statistics.median(x["load_ms"] for x in r), "rss_mb": max(x["rss_mb"] for x in r)}
         out[v.sha] = {**res["chat"], "formal": res["formal"]}
+        # every round's raw values, kept beside the medians above (which are computed from the same numbers and mean what they always did)
+        out[v.sha]["speed_rounds"] = {
+            **{prof: [{k: x[k] for k in ("p95_us", "max_us", "load_ms", "rss_mb")} for x in runs[v.sha, prof]]
+               for prof in PROFILES2 if (v.sha, prof) not in errs},
+            "rerank_ms": [{"p50": a, "p95": b} for a, b in rr[v.sha]]}
         if rr[v.sha] and "error" not in res["chat"]:
             out[v.sha]["rerank_p50_ms"] = statistics.median(a for a, _ in rr[v.sha])
             out[v.sha]["rerank_p95_ms"] = statistics.median(b for _, b in rr[v.sha])

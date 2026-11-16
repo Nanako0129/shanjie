@@ -1,6 +1,6 @@
 """Tests for tools/bench.py's reference row, static table check, legacy export, table rendering and site data (docs/spec/evaluation.md §7).
 Run: python3 -m unittest tools/test_bench.py   (from the repo root). No network, no private data, no real builds."""
-import argparse, contextlib, hashlib, io, json, os, re, stat, subprocess, sys, tempfile, types, unittest
+import argparse, contextlib, hashlib, io, json, os, re, stat, statistics, subprocess, sys, tempfile, types, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -601,6 +601,20 @@ class SuiteV2(Tmp):
         self.assertEqual(s["formal"]["rounds"], 3)
         # chat rounds call the replay exactly as before (no 5th argument); the formal rounds pass `formal`
         self.assertEqual(open(os.path.join(self.td, "replay.args")).read().split("\n")[:-1], ["", "formal"] * 3)
+
+    def test_every_round_is_kept_beside_the_medians(self):
+        """docs/spec/evaluation.md §7.5: `speed_rounds` holds each round's p95, max, load and RSS per setting (and the rerank timings); the medians keep their meaning."""
+        s = self.speed(("你好", "世界"))
+        rounds = s["speed_rounds"]
+        for prof, top in (("chat", s), ("formal", s["formal"])):
+            self.assertEqual(len(rounds[prof]), 3)
+            self.assertEqual({tuple(sorted(r)) for r in rounds[prof]}, {("load_ms", "max_us", "p95_us", "rss_mb")})
+            self.assertEqual(top["p95_us"], statistics.median(r["p95_us"] for r in rounds[prof]))
+            self.assertEqual(top["max_us"], max(r["max_us"] for r in rounds[prof]))
+            self.assertEqual(top["load_ms"], statistics.median(r["load_ms"] for r in rounds[prof]))
+            self.assertEqual(top["rss_mb"], max(r["rss_mb"] for r in rounds[prof]))
+        self.assertEqual(rounds["rerank_ms"], [])   # the fake version ships no small model
+        self.assertNotIn("speed_rounds", bench.site_speed(s))   # not on the website
 
     def test_formal_replay_row_fails_on_its_own(self):
         v = fake_ver("v0.4.0", self.td)
