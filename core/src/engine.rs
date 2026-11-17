@@ -11,6 +11,9 @@ use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
 use crate::english_next::EnglishTable;
 use crate::mixed::MixedTable;
+mod auto_english;
+pub use auto_english::AutoEvent;
+use crate::english_auto::{AutoTable, Params as AutoParams};
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent, Late, LateEvent};
 use crate::tinylm::{manual_mask, Learning, RerankLevel, TinyLm, TOPK};
@@ -464,6 +467,8 @@ pub enum Revert {
     Order,
     /// (c) a space or tone key that completes a syllable the lexicon lacks.
     Missing,
+    /// The closing key of a syllable the lexicon has, read as English by the comparison of docs/spec/english-mixed.md §16.
+    Auto,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -784,6 +789,7 @@ pub struct Shared {
     src_pack_single: bool,
     digit_table: Option<Arc<DigitTable>>,
     en_table: Option<Arc<EnglishTable>>,
+    auto_table: Option<Arc<AutoTable>>,
 }
 
 impl Shared {
@@ -985,6 +991,21 @@ pub struct Engine {
     /// current key saw of it (`ls_now`, like `ld_now`). Taken at the start of every `key()`; a key that changes nothing puts it back.
     last_short: Option<(usize, String)>,
     ls_now: Option<(usize, String)>,
+    /// docs/spec/english-mixed.md §16: the core switch of the English-or-Zhuyin comparison (default on; nothing happens without the table and a model).
+    auto_on: bool,
+    auto_table: Option<Arc<AutoTable>>,
+    auto_params: AutoParams,
+    /// Of the unfinished syllable: keys replaced by the same keycap, whether the reversal guard took a key out of column order, and whether it is
+    /// not a decision point at all (Esc brought it back as Zhuyin). They go with the shadow.
+    pend_dup: u32,
+    pend_rev: bool,
+    pend_plain: bool,
+    /// The token the comparison made at Space, for the Esc right after it: (position, the keys typed, the syllable they are today). Lives as `last_short` does.
+    last_auto: Option<(usize, String, String)>,
+    la_now: Option<(usize, String, String)>,
+    /// Tool hooks, cleared at every `key()`: (n_ow, n_dup, n_rev) when the key closed a syllable at a decision point; the comparison when one was made.
+    auto_point: Option<(u32, u32, u32)>,
+    auto_event: Option<AutoEvent>,
     /// Set by the arms of `dispatch` that change nothing (`Engine::nothing`, `mark_noop`), only when the arm runs in the outermost
     /// `dispatch` of the key (`depth` 1); `key()` reads it once, after the key, to give the short-word mark back. The one place that
     /// rule lives (docs/spec/english-mixed.md §6).
@@ -1258,6 +1279,11 @@ impl Engine {
             Some(s) => s.digit_table.clone(),
             None => std::fs::read_to_string(data_dir.join("digits.tsv")).ok().and_then(|t| DigitTable::parse(&t)).map(Arc::new),
         };
+        // Optional (docs/spec/english-mixed.md §16.5): a missing or malformed table leaves the comparison off and says nothing.
+        e.auto_table = match shared {
+            Some(s) => s.auto_table.clone(),
+            None => std::fs::read_to_string(data_dir.join("english.tsv")).ok().and_then(|t| AutoTable::parse(&t)).map(Arc::new),
+        };
         // Optional (docs/spec/english-mixed.md §5.7): a missing table, or one with a row that breaks a rule, loads nothing and says nothing.
         if let Ok(t) = std::fs::read_to_string(data_dir.join("mixed-words.tsv")) {
             e.set_mixed_words(&t);
@@ -1289,6 +1315,7 @@ impl Engine {
             src_pack_single: self.pack_single,
             digit_table: self.digit_table.clone(),
             en_table: self.en_table.clone(),
+            auto_table: self.auto_table.clone(),
         })
     }
 
@@ -1397,6 +1424,16 @@ impl Engine {
             revert_point: None,
             last_short: None,
             ls_now: None,
+            auto_on: true,
+            auto_table: None,
+            auto_params: AutoParams::default(),
+            pend_dup: 0,
+            pend_rev: false,
+            pend_plain: false,
+            last_auto: None,
+            la_now: None,
+            auto_point: None,
+            auto_event: None,
             noop: false,
             depth: 0,
             fuzzy: 0,
@@ -1441,6 +1478,7 @@ impl Engine {
     /// `refresh()` calls that inside a key.
     fn setting_changed(&mut self) {
         self.last_short = None;
+        self.last_auto = None;
     }
 
     fn invalidate(&mut self) {
@@ -2336,6 +2374,7 @@ impl Engine {
     fn clear_shadow(&mut self) {
         self.shadow_key = [None; 3];
         self.typed.clear();
+        (self.pend_dup, self.pend_rev, self.pend_plain) = (0, false, false);
     }
 
     /// Where the reverts become possible with a syllable half typed (the switch turned on, the abbreviation composer off), the shadow
@@ -2346,6 +2385,7 @@ impl Engine {
                 self.shadow_key[col] = self.pend[col].and_then(|sym| self.layout.key_of_symbol(sym)).map(|k| (k, col as u8));
             }
             self.typed = self.shadow_text(); // docs/spec/english-mixed.md §3.1: the record is what the shadow knows
+            (self.pend_dup, self.pend_rev) = (0, false);
         }
     }
 
@@ -2627,7 +2667,7 @@ impl Engine {
         self.typed = self.shadow_text(); // the keys a later key replaced are forgotten: the syllable is read as Zhuyin
         self.shadow_push(ch, col);
         self.pend[col] = Some(sym);
-        self.finish_syllable(tone, Vec::new()).map(Some)
+        self.finish_syllable(tone, Vec::new(), false).map(Some)
     }
 
     /// A key while the run is open (docs/spec/english-mixed.md §4.1, §4.2, §4.3, §4.5): letters and the Zhuyin keys that are not letters
@@ -2677,6 +2717,8 @@ impl Engine {
                         commit.push_str(&self.insert_token(syl, None, None)?.commit); // rule 10
                     }
                     (self.pend, self.shadow_key, self.typed) = (r.pend, r.shadow, r.typed);
+                    // docs/spec/english-mixed.md §16.1: Esc asked for the Zhuyin; the closing key of the syllable it left unfinished is not a decision point.
+                    self.pend_plain = self.pend.iter().any(Option::is_some);
                 }
                 self.run_closed()?;
                 Ok(self.view(true, commit))
@@ -2891,6 +2933,9 @@ impl Engine {
         self.depth = 0;
         let short = self.last_short.take();
         self.ls_now = short.clone();
+        let auto = self.last_auto.take();
+        self.la_now = auto.clone();
+        (self.auto_point, self.auto_event) = (None, None);
         // docs/spec/learning.md §8.1: `paused` marks a composition with a key handled while learning was off. A key on an empty
         // composition starts a new one (however the last one emptied: commit, Esc, Backspace), so the mark goes first.
         if self.syls.is_empty() && self.run.is_empty() && self.pending().is_empty() {
@@ -2910,6 +2955,7 @@ impl Engine {
         // mark where it was. The one place; a new arm that does nothing calls `nothing` and needs no other line.
         if matches!(&r, Ok(o) if o.commit.is_empty() && (self.noop || !o.handled)) {
             self.last_short = self.last_short.take().or(short);
+            self.last_auto = self.last_auto.take().or(auto);
         }
         match &mut r {
             Err(_) => self.clear_all(),
@@ -3273,6 +3319,7 @@ impl Engine {
         self.run_rev = false;
         self.revert_point = None;
         self.last_short = None;
+        self.last_auto = None;
         self.drun = None;
         self.last_digits = None;
         self.late = None;
@@ -3865,12 +3912,18 @@ impl Engine {
                     self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
                 }
                 self.late_keep(col);
+                if self.shadow_on() {
+                    // docs/spec/english-mixed.md §16.1: what the closing key's comparison counts.
+                    let later = self.pend[col + 1..].iter().any(Option::is_some);
+                    self.pend_dup += u32::from(self.shadow_key[col].is_some_and(|(key, _)| key == k.ch));
+                    self.pend_rev |= self.pend[col].is_none() && later && self.english_key_order && self.english_reversal_guard;
+                }
                 self.shadow_push(k.ch, col);
                 self.pend[col] = Some(sym);
                 self.pred_dirty = true;
             } else if let Some(t) = tone {
                 if self.pend_prev.is_empty() {
-                    return self.finish_syllable(t, old);
+                    return self.finish_syllable(t, old, true);
                 }
                 self.nothing(old); // two or more units: tone and space do nothing (docs/spec/prediction.md §6)
             } else if k.kind == KeyKind::Backspace {
@@ -3880,6 +3933,7 @@ impl Engine {
                     self.pend[col] = None;
                     self.shadow_key[col] = None; // docs/spec/english-mixed.md §3.1: the column's key goes with its symbol
                     self.typed = self.shadow_text(); // and the record forgets the replaced keys: Backspace is mending Zhuyin
+                    (self.pend_dup, self.pend_rev) = (0, false); // docs/spec/english-mixed.md §16.1: and the counts with them
                 }
                 if self.pend.iter().all(Option::is_none) {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
@@ -3972,7 +4026,13 @@ impl Engine {
                 return Ok(self.view(true, commit));
             }
             KeyKind::Enter => return self.commit_enter(m), // 19, 19a
-            KeyKind::Esc => self.clear_all(),
+            KeyKind::Esc => {
+                // docs/spec/english-mixed.md §16.6: right after the token the comparison made at Space, Esc is the syllable those keys are today.
+                if let Some((i, e, syl)) = self.la_now.take().filter(|(i, e, _)| self.cursor == i + 1 && english_of(&self.syls[*i]) == Some(e.as_str())) {
+                    return self.auto_undo(i, e, syl);
+                }
+                self.clear_all()
+            }
             _ => {
                 let commit = self.take_commit(); // 21
                 return self.passthrough(commit);
@@ -4164,6 +4224,7 @@ impl Engine {
             }
             self.last_digits = None; // docs/spec/english-mixed.md §7.7: the next state-changing key clears the other reading of the syllable that closed
             self.last_short = None;
+            self.last_auto = None;
             let r = self.choose_pred(index).and_then(|mut o| self.cap_after(&mut o).map(|()| o));
             if r.is_err() {
                 self.clear_all();
@@ -4190,9 +4251,11 @@ impl Engine {
     }
 
     /// docs/spec/keys-and-composition.md §3.1: complete the pending syllable with tone 0..=4 (0 = space = tone 1).
-    fn finish_syllable(&mut self, tone: usize, old: Vec<Pred>) -> Result<Output, EngineError> {
+    /// `auto`: the key is rule 10's own closing key (not the digit layer's tail, not the tone moved up), so it may be a decision point of
+    /// docs/spec/english-mixed.md §16.
+    fn finish_syllable(&mut self, tone: usize, old: Vec<Pred>, mut auto: bool) -> Result<Output, EngineError> {
         if let Some(l) = self.late_in.take() {
-            self.late_merge(l, tone)?; // docs/spec/english-mixed.md §7.4
+            auto &= !self.late_merge(l, tone)?; // docs/spec/english-mixed.md §7.4; a syllable that took late keys back is the digit layer's
         }
         let mut syl = self.pending();
         // tone index 1..=4 -> marks[1..=4]; space (0) -> unmarked tone 1
@@ -4205,6 +4268,15 @@ impl Engine {
             }
             self.nothing(old); // A syllable the lexicon lacks changes nothing
             return self.handled();
+        }
+        // docs/spec/english-mixed.md §16: a syllable the lexicon has, typed with a replaced key or a key out of column order, is English when the comparison says so.
+        if auto && !missing {
+            self.auto_point = self.auto_point_of(&syl);
+            if let Some(n) = self.auto_point {
+                if let Some(o) = self.auto_english(tone, &syl, n)? {
+                    return Ok(o);
+                }
+            }
         }
         // docs/spec/english-mixed.md §6: the keys of a short word (in the lexicon, so no revert), or of a syllable some key of which
         // replaced another (the record is not the shadow), that the candidate list adds the English of.
@@ -5222,7 +5294,8 @@ mod shared_fields {
     #[test]
     fn shared_holds_only_models_tables_and_the_data_folder() {
         fn fields(s: Shared) {
-            let Shared { data_dir, lm, tinylm, colloquial, reading, src_pack_single, digit_table, en_table } = s;
+            let Shared { data_dir, lm, tinylm, colloquial, reading, src_pack_single, digit_table, en_table, auto_table } = s;
+            let _: Option<Arc<AutoTable>> = auto_table;
             let _: (PathBuf, Arc<Lm>, Option<Arc<TinyLm>>, Option<Arc<ColloquialTable>>) = (data_dir, lm, tinylm, colloquial);
             let _: (Option<Arc<crate::reading::ReadingDecode>>, bool, Option<Arc<DigitTable>>, Option<Arc<EnglishTable>>) = (reading, src_pack_single, digit_table, en_table);
         }

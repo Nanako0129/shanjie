@@ -951,6 +951,41 @@ pub unsafe extern "C" fn shanjie_engine_set_english_reversal_guard(
     rc
 }
 
+/// docs/spec/english-mixed.md §16.7. `enabled` 0 or 1 (default 1): while 1, and with the table `english.tsv` and a model loaded, the closing
+/// key of a syllable typed with a replaced key or a key out of column order is English when the comparison of §16 says so; 0 is the engine
+/// without that comparison. Returns the snapshot like `set_english_reversal_guard`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_auto(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_auto(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// docs/spec/keys-and-composition.md §9.3: the ASCII state of the shell's per-app Shift toggle. `on` 0 or 1 (2 otherwise, state unchanged). With 1 the
 /// open window or row closes, the digit run flushes and the unfinished syllable's keys open the English run; every printable ASCII
 /// character after it goes on the run as typed. With 0 the run ends as a token. Returns the snapshot like `set_english` (`commit` may
@@ -2476,6 +2511,19 @@ mod tests {
         let (_, _, preedit) = type_out(e, "ls_");
         assert!(preedit == "ls", "guard off: the English token");
         assert!(send(e, key(ESC, '\0')).0 == 0);
+        // set_english_auto (docs/spec/english-mixed.md §16.7): the same codes; no table is loaded here, so the switch changes no key.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_auto(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "auto engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_auto(e, 1, ptr::null_mut()) } == 1, "auto out NULL");
+        for v in [2, u32::MAX, 0, 1] {
+            let mut o: *mut ShanjieOutput = sentinel();
+            let rc = unsafe { shanjie_engine_set_english_auto(e, v, &mut o) };
+            assert!(rc == if v > 1 { 2 } else { 0 } && o.is_null() == (v > 1), "auto codes");
+            if rc == 0 {
+                assert!(unsafe { (*o).handled } == 1);
+                unsafe { shanjie_output_free(o) };
+            }
+        }
         // The key-order cases below are trigger (b) itself, so the guard stays off for them.
         // set_english_key_order (docs/spec/english-mixed.md §11): the codes of set_english_overwrite, then the switch through the C ABI. On
         // (the default), `p v` is out of column order and reverts; off, the symbol goes into its column.

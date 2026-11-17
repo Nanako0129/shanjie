@@ -225,6 +225,7 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   ends it first. A token
 //   that Space made at once (trigger (c) at Space: `c u p` Space) is a finished token: Esc then does what it
 //   does after any English token (clears the composition); Backspace takes one letter of it.
+//   The one exception is the Space token of set_english_auto (below): Esc right after it puts the syllable back.
 //   An English token is one unit like a punctuation mark in the composition (the arrow keys take it whole, the next word starts a new
 //   sentence, it is learned under the neighbour key `^>_punct_en`). Its reading keeps the text as typed; what it shows and sends is the
 //   text's writing (docs/spec/english-mixed.md §4.4): typed all lower case or with only its first letter upper case, a word of the built-in
@@ -297,6 +298,18 @@ int32_t shanjie_engine_set_english_key_order(ShanjieEngine *engine, uint32_t ena
 //   (`q 6` is `q6`) turns back into Zhuyin at the next Zhuyin key when that makes a lexicon syllable (`q 6 8` is 爬; needs
 //   set_english_key_order 1 too, which opens the run). Call it after every engine creation, like set_english_key_order.
 int32_t shanjie_engine_set_english_reversal_guard(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_english_auto 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation, like set_english_reversal_guard in its codes
+//   and its snapshot (handled 1, commit ""); 1 when engine or out is NULL (docs/spec/english-mixed.md §16). With 1, set_english(1), a
+//   model and the table english.tsv in the data folder (absent: nothing changes, no error), Space or a tone key that completes a
+//   syllable the lexicon has is a decision point when a key of that syllable replaced another in its column, or went into a column
+//   before a filled one under set_english_reversal_guard 1: the keys typed are scored as an English word (the table) against the
+//   syllable (the model), and when English wins the key does exactly what trigger (c) of set_english does at that key: Space makes one
+//   English token of every key typed, with the Chinese item as its list's last item (`s p e e c h` Space is `speech`); a tone key
+//   opens the run with the tone digit on it. Esc right after such a Space token (no key that changes the state in between) takes
+//   the token back and puts the syllable those keys are without this rule in its place, with the two English items at the end of its
+//   list; after any other key, Esc clears the composition as after any token. With 0 every key is the key of the engine without the
+//   comparison. A quality switch for measurements; the shell keeps the default.
+int32_t shanjie_engine_set_english_auto(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
 //   (docs/spec/keys-and-composition.md §9). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
 //   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes
