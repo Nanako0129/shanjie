@@ -14,7 +14,7 @@ public enum LearningPause: Equatable, Sendable {
 }
 
 /// docs/spec/learning.md §2.2: the left context the shell may pass to the core (docs/spec/semantic-rerank.md §5.1: the raw text of the
-/// same message, at most `maxGraphemes`; terminal apps only the Han tail).
+/// same line (after the last line break), at most `maxGraphemes`; terminal apps only the Han tail).
 enum LeftContext {
     /// UTF-16 units requested before the insertion point, and the most of a reply that is looked at (docs/spec/semantic-rerank.md §5.1). A CJK
     /// or ASCII character is one unit (𠮷 two), so 256 units hold more than 64 of them; emoji are longer and fewer fit: 256 units hold

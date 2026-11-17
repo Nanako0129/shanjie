@@ -314,7 +314,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 // S4 (docs/spec/learning.md §1): learning from candidate-window re-picks. Every function returns 1
 // when engine (or a required pointer) is NULL. None of them changes the current display, except that
 // learning_clear and a forget may re-decode on the next key.
-// set_left_context: copies the text before the insertion point: the raw text of the same message, at most
+// set_left_context: copies the text before the insertion point: the raw text of the same line (after the last line break), at most
 //   64 graphemes (docs/spec/semantic-rerank.md §5; terminal apps: only the trailing Han characters). The
 //   shell calls it before a key that may start a composition (a character key with no modifier but Shift
 //   while not composing), not before every key. What the core keeps from it: the last <= 2 consecutive Han
