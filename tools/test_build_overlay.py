@@ -728,5 +728,71 @@ class SlangBehind(unittest.TestCase):
         got = [float(r.split("\t")[2]) for r in B.slang_behind(rows)]
         self.assertEqual(got, [-5.0, -5.0 - B.SLANG_BEHIND, -5.0, -5.0 - 2 * B.SLANG_BEHIND])
 
+
+class LateRemovals(unittest.TestCase):
+    """docs/spec/lexicon-and-packs.md §2.3: whole-word Simplified forms written with characters Taiwan also uses (松散), and the reviewed drop list
+    of typo forms (好高鶩遠). Neither was caught before: the sentence test only counts S and marker characters, and no table pairs 鶩 with 騖."""
+    def test_phrase_twin(self):
+        phrase = {"松散": "鬆散", "干涉": "干涉", "花卷": "花捲", "谷城": "穀城", "面條": "麵條"}
+        words, heads = {"鬆散", "干涉", "花捲", "麵條"}, {"面條"}
+        self.assertEqual(B.phrase_twin("松散", phrase, words, heads), "鬆散")
+        self.assertIsNone(B.phrase_twin("干涉", phrase, words, heads), "an identity entry is not a twin")
+        self.assertIsNone(B.phrase_twin("花卷市", phrase, words, heads), "only the whole word is looked up, never a part of it")
+        self.assertIsNone(B.phrase_twin("谷城", phrase, words, heads), "the target has to be a base word")
+        self.assertIsNone(B.phrase_twin("面條", phrase, words, heads), "a dictionary headword stays")
+        self.assertIsNone(B.phrase_twin("鬆散", phrase, words, heads))
+
+    def test_prune_takes_every_row_of_the_word_and_records_the_landing(self):
+        rows = ["ㄅㄨˋ-a\t甲\t-7.0\twikt\n", "ㄅㄨˊ-a\t甲\t-7.5\twikt\n", "b\t乙\t-7.0\twikt\n"]
+        kept, gone = B.prune(rows, {"甲": "丙"}.get)
+        self.assertEqual(kept, rows[2:])
+        self.assertEqual(gone, ["甲\t丙\tㄅㄨˋ-a\n", "甲\t丙\tㄅㄨˊ-a\n"])
+
+    def drops(self, text, words=frozenset({"好高騖遠"})):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "drop.tsv")
+            open(path, "w", encoding="utf-8").write(text)
+            return B.drop_list(set(words), path)
+
+    def test_drop_list_rows(self):
+        self.assertEqual(self.drops("# note\n\n好高鶩遠\t好高騖遠\t錯字\n"), {"好高鶩遠": "好高騖遠"})
+        self.assertEqual(B.drop_list(set(), os.path.join(tempfile.gettempdir(), "no-such-overlay-drop.tsv")), {}, "no file, no rows")
+        for bad in ("好高鶩遠\t好高騖遠\n",                      # two fields
+                    "好高鶩遠\t沒有這個詞\t錯字\n",               # the right form is not a base word
+                    "好高騖遠\t好高騖遠\t錯字\n",                 # the word itself is a base word
+                    "好高鶩遠\t好高騖遠\ta\n好高鶩遠\t好高騖遠\tb\n"):   # twice
+            with self.assertRaises(SystemExit, msg=bad):
+                self.drops(bad)
+
+    def test_a_full_build_applies_both(self):
+        b = BuildFlags("test_default_is_the_old_method"); BuildFlags.setUpClass()
+        target = next(w for w in b.base.by_word if len(w) == 2)
+        (rows, removed, variant_removed, _), _ = b.build()
+        self.assertTrue(b.row(rows, b.title) and b.row(rows, b.other))
+        with mock.patch.object(B, "phrase_twin", lambda w, *a: target if w == b.title else None), mock.patch.object(B, "drop_list", lambda words: {b.other: target}):
+            (rows, removed, variant_removed, _), _ = b.build()
+        self.assertEqual((b.row(rows, b.title), b.row(rows, b.other)), ([], []))
+        self.assertEqual([r.split("\t")[:2] for r in removed], [[b.title, target]])
+        self.assertEqual([r.split("\t")[:2] for r in variant_removed], [[b.other, target]])
+
+    def test_the_shipped_overlay_has_none_of_them(self):
+        """The committed file: no row of a drop-list word (so editing overlay-drop.tsv without `--tails-only` fails here and in ShippedOverlay), and,
+        where the OpenCC tables and the dictionary are on this machine (not in CI), no generated row that phrase_twin would remove."""
+        base = set(ime.Lexicon(B.BASE).by_word)
+        with open(B.OUT, encoding="utf-8") as f:
+            gen = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")}
+        drop = B.drop_list(base)
+        self.assertIn("好高鶩遠", drop)
+        self.assertEqual(gen & (set(drop) | {"松散", "好高鶩遠"}), set())
+        moedict = os.environ.get("SHANJIE_MOEDICT")
+        if not (moedict and os.path.isfile(moedict) and os.path.isfile(os.path.join(bc.SRC, "opencc", "STPhrases.txt"))):
+            print("NOTE: no OpenCC tables or SHANJIE_MOEDICT here: the whole-word Simplified rule is not checked against the shipped overlay", file=sys.stderr)
+            return
+        with mock.patch.dict(os.environ, {"SHANJIE_TW_CLEAN": "off"}), contextlib.redirect_stderr(io.StringIO()):
+            phrase = bc.load_conv()[0]
+        heads = B.moe_titles()
+        self.assertEqual(sorted(w for w in gen if B.phrase_twin(w, phrase, base, heads)), [])
+
+
 if __name__ == "__main__":
     unittest.main()
