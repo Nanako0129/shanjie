@@ -156,6 +156,7 @@
 | `set_english_overwrite` | 1 |
 | `set_english_key_order` | 1 |
 | `set_english_reversal_guard` | 1 |
+| `set_english_auto` | 1（沒有 `english.tsv` 時不生效） |
 | `set_fuzzy` | 0 |
 | `set_ascii` | 0 |
 | `set_rerank` | 0 |
