@@ -307,7 +307,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 摘要行（stdout 一行）：`## <名稱>  <設定標記>  {'n', 'top1', 'final_ok', 'unfixable', 'autocommits', 'kyss', 'picks_per100', 'rewrites', 'guard_skips', 'guard_rows', 'top1_sha256'}`。
   - `top1`：第一次顯示的第一名正確列數；`autocommits`：中途有送出（例如組字達到 128 音節的上限）的列數；`kyss` 四位小數；`picks_per100` ＝ 改選次數 × 100 ÷ 正解字數（不計標點）；`top1_sha256`＝第一次顯示以 `\n` 串接的 SHA-256，算法同 `shanjie-eval`。
   - `guard_skips`：每列打完最後一鍵時（第一次顯示之前、`final` 套用之前），最近一次解碼裡「本來會送語意校正（語意校正開、模型已載入、那段的候選至少 2）而被學習守門擋下」的段數，全部列加總；`guard_rows` 是其中段數至少 1 的列數。沒有學習資料或 `--no-tinylm` 時恆為 0。最後一鍵觸發自動送出時，工作隨送出作廢，那一列計 0。
-  - 設定標記：`replay-<profile>+ctx<詞包>+nopred+noen+lm:<8 碼>`，接 `+tl:<8 碼>`（沒有小模型時 `-notinylm`）、`+learn`、`+rerank:final`、`+correct`、`+learnfile`、`+noguard`、`+colloq:<8 碼>`、`+level:…`、`+recur`（候選池加重生效時 `+recur+pr`）、`+rd+rx:<8 碼>+rm`，最後（有 `--strict` 時）`+strict`。
+  - 設定標記：`replay-<profile>+ctx<詞包>+nopred+noen+lm:<8 碼>`，接 `+tl:<8 碼>`（沒有小模型時 `-notinylm`）、`+learn`、`+rerank:final`、`+correct`、`+learnfile`、`+noguard`、`+colloq:<8 碼>`、`+level:…`、`+recur`（候選池加重生效時 `+recur+pr`）、`+rd+rx:<8 碼>+rm+rn`，最後（有 `--strict` 時）`+strict`。
 - 「學了之後本來對的變錯」：同一份列檔跑 `--learn off` 與 `--learn on` 各一次（都 `--correct`），兩個 `--rowstats` 用 `evalstats compare`，改壞數就是這個數字；工具本身不另算。
 
 ### 4.7 `--learn-file`（唯讀載入學習檔）
@@ -547,7 +547,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
   - 已追蹤的檔有改動就拒絕（未追蹤的結果檔不算）；`VERSION` 的 tag 已存在時它指的 commit 必須就是 HEAD；
   - `data/lm/` 的模型必須恰好是 `VERSIONS2[VERSION]` 出貨的那一組（`bigram.sjlm`、`classes.sjc`，以及該列要求的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm`）、每個都和 `data/*.sha256` 相符、`data/lm/` 不能多出不在這組裡的模型檔；
   - 兩份列檔（`eval/bench/suite-v2/user-reported.txt`、`eval/bench/suite-v1/dev302.txt`）的 SHA-256 相符。
-  - 然後 `cargo build --release --locked -p cli --bin shanjie-replay --message-format=json`（執行檔路徑取編譯器回報的），跑：錯字回報（聊天、`--correct`，學習關與開各一次）與 dev302（聊天、`--correct`，學習關）。版本不出貨小模型時加 `--no-tinylm`，不出貨口語表時加 `--no-colloquial`。每次跑都核對：stderr 的 `models:` 行等於由 `data/*.sha256` 推出的那一行、摘要行恰好一行、設定標記等於預期（含詞包部分，依該列的 `--packs`；有 `reading` 鍵的版本以 `+rd+rx:<8 碼>+rm` 結尾）、列數等於集合列數、rowstats 的 top1 等於摘要行。
+  - 然後 `cargo build --release --locked -p cli --bin shanjie-replay --message-format=json`（執行檔路徑取編譯器回報的），跑：錯字回報（聊天、`--correct`，學習關與開各一次）與 dev302（聊天、`--correct`，學習關）。版本不出貨小模型時加 `--no-tinylm`，不出貨口語表時加 `--no-colloquial`。每次跑都核對：stderr 的 `models:` 行等於由 `data/*.sha256` 推出的那一行、摘要行恰好一行、設定標記等於預期（含詞包部分，依該列的 `--packs`；有 `reading` 鍵的版本以 `+rd+rx:<8 碼>+rm` 結尾，另有 `reading_norm` 鍵的以 `+rd+rx:<8 碼>+rm+rn` 結尾）、列數等於集合列數、rowstats 的 top1 等於摘要行。
   - 寫入同一個 JSON 的 `replay` 欄：`sha`、`models`、`variants_sha256`，以及 `user-reported` 與 `dev302` 各自的 `rows_sha256`、`n`、`off`（學習關的摘要行數字）；`user-reported` 另有 `on` 與 `learn_fixed`／`learn_broken`（學習開對學習關，由兩份 rowstats 算）。
   - 含 `shanjie-replay` 之前的版本不回填（舊引擎沒有這個工具，用新工具重播舊模型不等於舊版的行為）。
 - `table [--results DIR] [--kpi DIR] [--out FILE] [--json FILE]`：讀 `eval/bench/results/v2-*.json` 與 `eval/bench/kpi/*.json`，寫 `site/data/kpi.json`（8.4）與完整表（不手改；兩次輸出逐位元組相同；`--out FILE` 或 `$SHANJIE_TABLES/kpi.md`，規則同 7.11）。
