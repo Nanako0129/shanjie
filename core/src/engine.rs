@@ -342,6 +342,9 @@ pub const PREDICT_MAX: usize = PAGE_SIZE;
 pub const PREDICT_SCAN: usize = 27;
 /// Most characters an English run holds (docs/spec/english-mixed.md §4.1); the next one ends the run and starts another.
 pub const ENGLISH_RUN_MAX: usize = 32;
+/// docs/spec/english-mixed.md §2: the key record holds at most this many keys, so the record and the key or tone digit that reverts
+/// it never exceed a run.
+pub const ENGLISH_RECORD_MAX: usize = ENGLISH_RUN_MAX - 1;
 /// docs/spec/english-mixed.md §6: the short words that can be typed in column order and whose one-tone syllable is in the lexicon, so no
 /// trigger ever reverts them; the candidate list adds their lower and upper case at its end. Each was checked with `Lexicon::entries`
 /// (test `english_short_is_as_documented`). `go`, `cp`, `so`, `to`, `do`, `hi`, `am`, `zi` and `cup` are not here: their syllable is
@@ -754,6 +757,16 @@ struct LmState {
     capped: Arc<CappedLexicon>,
 }
 
+/// docs/spec/english-mixed.md §2: a Zhuyin replay (`Engine::replay`): the syllables completed, then the unfinished syllable's columns,
+/// shadow and key record.
+#[derive(Default)]
+struct Replay {
+    done: Vec<String>,
+    pend: [Option<char>; 3],
+    shadow: [Option<Shadow>; 3],
+    typed: String,
+}
+
 /// A shadow entry: the keycap and its arrival rank (see `Engine::shadow_key`).
 type Shadow = (char, u8);
 
@@ -944,6 +957,10 @@ pub struct Engine {
     /// the order typed, not the column order; a key that replaces a column's key is the newest). Recorded only where `shadow_on`, so it
     /// always matches `pend`; empty (all `None`) otherwise. Cleared with `clear_pend`.
     shadow_key: [Option<Shadow>; 3],
+    /// docs/spec/english-mixed.md §2: the key record: every Zhuyin key of the unfinished syllable in the order typed, the keys a later
+    /// key replaced in its column included (at most `ENGLISH_RECORD_MAX`). The English text of every revert, Shift+letter and ASCII
+    /// run. Recorded and cleared with the shadow; Backspace on the syllable resets it to the shadow's keys.
+    typed: String,
     /// docs/spec/english-mixed.md §1.1, §1.2, §3.2: the triggers of the direct revert (a key over the same column: `set_english_overwrite`; a key out of
     /// column order and a tone key that makes a syllable the lexicon lacks: `set_english_key_order`). Both default on. The
     /// out-of-order trigger (b) fires only while `english_key_order` is on and `english_reversal_guard` is off.
@@ -961,9 +978,9 @@ pub struct Engine {
     /// `english_reverted`, `english_split`); cleared at the start of `key()` and nowhere else.
     reverted: Option<Revert>,
     split: bool,
-    /// docs/spec/english-mixed.md §3.2: what the unfinished syllable was before the revert that opened the English run (columns and
-    /// shadow), for Esc; dropped by anything that changes the run.
-    revert_point: Option<([Option<char>; 3], [Option<Shadow>; 3])>,
+    /// docs/spec/english-mixed.md §3.3, §4.2: what the unfinished syllable was before the revert (c) at a tone key that opened the
+    /// English run (columns, shadow and key record), for the tone moved up; dropped by anything that changes the run.
+    revert_point: Option<([Option<char>; 3], [Option<Shadow>; 3], String)>,
     /// docs/spec/english-mixed.md §6: the position and text of the syllable that was just made from a short word's keys, and what the
     /// current key saw of it (`ls_now`, like `ld_now`). Taken at the start of every `key()`; a key that changes nothing puts it back.
     last_short: Option<(usize, String)>,
@@ -985,9 +1002,10 @@ pub struct Engine {
     /// Backspace reopened from a token whose text the table did not write (the user picked it, or typed it in the ASCII state).
     /// False whenever there is no run.
     run_ascii: bool,
-    /// docs/spec/english-mixed.md §4.4, §5.3: a token reopened as the run, with the Chinese item it had; it comes back when the run ends with
-    /// the same letters.
-    run_zh: Option<(String, String, String)>,
+    /// docs/spec/english-mixed.md §3.3, §4.5, §5.3: the run was opened by a revert ((a), (b), (c)), or reopened from a token that has a
+    /// Chinese item. Esc replays such a run as Zhuyin and its token carries the Chinese item of its characters. False whenever there
+    /// is no run.
+    run_rev: bool,
     /// Digits (docs/spec/english-mixed.md §7): the count table (`digits.tsv`, optional), what is built from it and the model once, the run
     /// of digit-alphabet keys being typed, the keys of the syllable that just closed (docs/spec/english-mixed.md §7.7; `ld_now` is what the current key saw), and
     /// the counters and trace of the simulator and the golden test. All idle unless `digits_active`.
@@ -1368,6 +1386,7 @@ impl Engine {
             rerank_job: None,
             english: false,
             shadow_key: [None; 3],
+            typed: String::new(),
             english_overwrite: true,
             english_key_order: true,
             english_reversal_guard: true,
@@ -1383,7 +1402,7 @@ impl Engine {
             fuzzy: 0,
             run: String::new(),
             run_ascii: false,
-            run_zh: None,
+            run_rev: false,
             digit_table: None,
             mixed: None,
             digit_cache: None,
@@ -2253,12 +2272,10 @@ impl Engine {
         self.clear_pred();
         let (commit, _) = self.digit_flush()?;
         if self.pend.iter().any(Option::is_some) {
-            let keep = self.shadow_text();
+            let keep = std::mem::take(&mut self.typed);
             self.clear_pend();
             self.run = keep;
             self.run_ascii = true;
-            self.run_zh = None;
-            self.revert_point = None;
             if self.cursor < self.syls.len() {
                 self.refresh()?;
             }
@@ -2292,6 +2309,18 @@ impl Engine {
         self.shadow_text()
     }
 
+    /// The key record (test and tool hook; docs/spec/english-mixed.md §2): every key of the unfinished syllable in the order typed.
+    #[doc(hidden)]
+    pub fn english_record(&self) -> &str {
+        &self.typed
+    }
+
+    /// The Zhuyin replay of `keys` (test hook; docs/spec/english-mixed.md §2): the syllables it completes and the columns left.
+    #[doc(hidden)]
+    pub fn english_replay(&self, keys: &str) -> Option<(Vec<String>, [Option<char>; 3])> {
+        self.replay(keys).map(|r| (r.done, r.pend))
+    }
+
     /// The unfinished syllable's columns, for the typing simulator (tool hook; no letters, no tone).
     #[doc(hidden)]
     pub fn english_columns(&self) -> [Option<char>; 3] {
@@ -2306,6 +2335,7 @@ impl Engine {
 
     fn clear_shadow(&mut self) {
         self.shadow_key = [None; 3];
+        self.typed.clear();
     }
 
     /// Where the reverts become possible with a syllable half typed (the switch turned on, the abbreviation composer off), the shadow
@@ -2315,6 +2345,7 @@ impl Engine {
             for col in 0..3 {
                 self.shadow_key[col] = self.pend[col].and_then(|sym| self.layout.key_of_symbol(sym)).map(|k| (k, col as u8));
             }
+            self.typed = self.shadow_text(); // docs/spec/english-mixed.md §3.1: the record is what the shadow knows
         }
     }
 
@@ -2335,7 +2366,55 @@ impl Engine {
     fn shadow_push(&mut self, ch: char, col: usize) {
         if self.shadow_on() {
             self.shadow_key[col] = Some(Self::shadow_entry(&self.shadow_key, ch));
+            if self.typed.len() < ENGLISH_RECORD_MAX {
+                self.typed.push(ch);
+            }
         }
+    }
+
+    /// docs/spec/english-mixed.md §2 (Zhuyin replay): what `keys` make when typed from nothing with English mixing off: a Zhuyin key
+    /// goes into its column (replacing what is there), a tone key completes the syllable when the lexicon has it and is ignored
+    /// otherwise (rule 10; no adjacent-key acceptance). The shadow and the key record are those of the syllable left unfinished.
+    /// `None`: a character that is neither (an upper-case letter, any other character), or a tone key before any Zhuyin key.
+    fn replay(&self, keys: &str) -> Option<Replay> {
+        let mut r = Replay::default();
+        for ch in keys.chars() {
+            if let Some((col, sym)) = Layout::Standard.symbol_of(ch) {
+                r.shadow[col] = Some(Self::shadow_entry(&r.shadow, ch));
+                r.pend[col] = Some(sym);
+                if r.typed.len() < ENGLISH_RECORD_MAX {
+                    r.typed.push(ch);
+                }
+                continue;
+            }
+            let tone = Layout::Standard.tone_of(ch)?;
+            let mut syl: String = r.pend.iter().flatten().collect();
+            if syl.is_empty() {
+                if r.done.is_empty() {
+                    return None; // on an empty composition a tone key types its mark (rule 22a): not a replay
+                }
+                continue; // after a completed syllable a tone key does nothing
+            }
+            syl.push_str(TONE_MARKS[tone]);
+            if !self.lex.entries(std::slice::from_ref(&syl)).is_empty() {
+                r = Replay { done: std::mem::take(&mut r.done), ..Replay::default() };
+                r.done.push(syl);
+            }
+        }
+        Some(r)
+    }
+
+    /// docs/spec/english-mixed.md §2 (Chinese item): the one syllable the replay of `keys` makes (unfinished: with tone 1), when it
+    /// makes exactly one and the lexicon has it.
+    fn replay_chinese(&self, keys: &str) -> Option<String> {
+        let r = self.replay(keys)?;
+        let rest: String = r.pend.iter().flatten().collect();
+        let syl = match (r.done.as_slice(), rest.is_empty()) {
+            ([], false) => rest,
+            ([one], true) => one.clone(),
+            _ => return None,
+        };
+        (!self.lex.entries(std::slice::from_ref(&syl)).is_empty()).then_some(syl)
     }
 
     // (`english_writing` is a free function below the impl: the CLI asks it too.)
@@ -2375,7 +2454,8 @@ impl Engine {
         letters.pop();
         self.run = letters;
         self.run_ascii = (self.ascii || !by_table) && !self.run.is_empty();
-        self.run_zh = None;
+        // docs/spec/english-mixed.md §5.3: a token with a Chinese item reopens as a run a revert opened.
+        self.run_rev = !self.run.is_empty() && self.fixed.iter().any(|f| f.start == at && f.zh.is_some());
         self.revert_point = None;
         self.cursor = at;
         self.remove_syllable(at)?;
@@ -2393,12 +2473,12 @@ impl Engine {
     // ---- docs/spec/english-mixed.md §3.2: the reverts ----
 
     /// The unfinished syllable goes and an English run holding `text` opens at the cursor (the output shows it with the run's
-    /// underline). `point`: the columns and shadow Esc brings back; `zh`: the Chinese syllable the keys made, when the lexicon has it.
-    fn revert_to(&mut self, kind: Revert, text: String, point: ([Option<char>; 3], [Option<Shadow>; 3]), zh: Option<String>) -> Result<Output, EngineError> {
+    /// underline). `point`: what the tone moved up brings back (docs/spec/english-mixed.md §4.2), for (c) at a tone key.
+    fn revert_to(&mut self, kind: Revert, text: String, point: Option<([Option<char>; 3], [Option<Shadow>; 3], String)>) -> Result<Output, EngineError> {
         self.clear_pend();
-        self.run_zh = zh.map(|zh| (text.clone(), zh, format!("{PUNCT_PREFIX}{text}")));
         self.run = text;
-        self.revert_point = Some(point);
+        self.run_rev = true;
+        self.revert_point = point;
         self.reverted = Some(kind);
         self.pred_dirty = true;
         if self.cursor < self.syls.len() {
@@ -2408,15 +2488,10 @@ impl Engine {
     }
 
     /// Rule 9 with a trigger (a) or (b): the Zhuyin key `ch` (symbol `sym` for column `col`) does not go into the columns; the
-    /// run is the shadow in typed order and this key. The Chinese item is the syllable the key would have made (docs/spec/english-mixed.md §3.2).
-    fn revert_keys(&mut self, kind: Revert, ch: char, col: usize, sym: char) -> Result<Output, EngineError> {
-        let text = format!("{}{ch}", self.shadow_text());
-        let (mut pend, mut shadow) = (self.pend, self.shadow_key);
-        pend[col] = Some(sym);
-        shadow[col] = Some(Self::shadow_entry(&shadow, ch));
-        let syl: String = pend.iter().flatten().collect();
-        let zh = (!self.lex.entries(std::slice::from_ref(&syl)).is_empty()).then_some(syl);
-        self.revert_to(kind, text, (pend, shadow), zh)
+    /// run is the key record and this key (docs/spec/english-mixed.md §3.2).
+    fn revert_keys(&mut self, kind: Revert, ch: char) -> Result<Output, EngineError> {
+        let text = format!("{}{ch}", self.typed);
+        self.revert_to(kind, text, None)
     }
 
     /// Rule 10 with trigger (c): the syllable the lexicon lacks (and no adjacent key rescued it) reverts. Space (`tone` 0) needs only
@@ -2426,17 +2501,18 @@ impl Engine {
         if !self.shadow_on() || (tone > 0 && !self.english_key_order) {
             return Ok(None);
         }
-        let mut text = self.shadow_text();
-        let point = (self.pend, self.shadow_key);
+        let mut text = self.typed.clone();
+        let point = (self.pend, self.shadow_key, text.clone());
         if tone == 0 {
             self.clear_pend();
             self.run = text;
+            self.run_rev = true;
             self.reverted = Some(Revert::Missing);
             let commit = self.end_run()?;
             return Ok(Some(self.view(true, commit)));
         }
         text.push(TONE_KEYS_STANDARD[tone - 1]);
-        self.revert_to(Revert::Missing, text, point, None).map(Some)
+        self.revert_to(Revert::Missing, text, Some(point)).map(Some)
     }
 
     /// docs/spec/english-mixed.md §4.2, §4.3, §4.5: a tone key on the open run. The tail syllable of two or more symbols that the tone makes a
@@ -2464,7 +2540,7 @@ impl Engine {
         self.run.clear();
         // docs/spec/english-mixed.md §4.4, §5.3: the head is a token in its writing, as typed when the run keeps its text (`end_run`).
         let writing = if std::mem::take(&mut self.run_ascii) { head.clone() } else { english_writing(&head) };
-        self.run_zh = None;
+        self.run_rev = false;
         self.revert_point = None;
         self.split = true;
         let mut commit = if head.is_empty() { String::new() } else { self.put_english(format!("{PUNCT_PREFIX}{head}"), writing, None)? };
@@ -2476,16 +2552,15 @@ impl Engine {
     // ---- docs/spec/english-mixed.md §4.1: the English run ----
 
     /// Ends the run: its text becomes an English token at the cursor (reading `PUNCT_PREFIX` + the text as typed). Returns what the unit
-    /// that reaches `MAX_SYLLABLES` sent, if it did. A run a revert opened and nobody changed keeps its Chinese item (docs/spec/english-mixed.md §3.2).
+    /// that reaches `MAX_SYLLABLES` sent, if it did. The token of a run a revert opened carries the Chinese item of its characters
+    /// (docs/spec/english-mixed.md §3.3).
     fn end_run(&mut self) -> Result<String, EngineError> {
         let word = std::mem::take(&mut self.run);
         // docs/spec/english-mixed.md §4.4: the token shows the word's writing; a run typed in the ASCII state stays as typed.
         let writing = if std::mem::take(&mut self.run_ascii) { word.clone() } else { english_writing(&word) };
         self.revert_point = None;
-        if let Some((_, zh, reading)) = self.run_zh.take().filter(|(w, _, _)| *w == word) {
-            return self.put_english(reading, writing, Some(zh));
-        }
-        self.put_english(format!("{PUNCT_PREFIX}{word}"), writing, None)
+        let zh = if std::mem::take(&mut self.run_rev) { self.replay_chinese(&word) } else { None };
+        self.put_english(format!("{PUNCT_PREFIX}{word}"), writing, zh)
     }
 
     /// A character on the run; the 33rd ends it and starts the next one. Returns what ending sent, if it sent anything.
@@ -2493,8 +2568,7 @@ impl Engine {
         let commit = if self.run.len() == ENGLISH_RUN_MAX { self.end_run()? } else { String::new() };
         self.run.push(c);
         self.run_ascii |= self.ascii;
-        self.run_zh = None; // the run was changed: no Chinese item, no Esc back to the Zhuyin
-        self.revert_point = None;
+        self.revert_point = None; // the run was changed: no tone moved up
         Ok(commit)
     }
 
@@ -2504,10 +2578,10 @@ impl Engine {
         Ok(self.view(true, commit))
     }
 
-    /// Shift+letter with English mixing on: the shadow's keys (every one is a Zhuyin key, and a run takes all of them, docs/spec/english-mixed.md §4.2) and
+    /// Shift+letter with English mixing on: the key record (every key is a Zhuyin key, and a run takes all of them, docs/spec/english-mixed.md §4.2) and
     /// `upper` open a run. An open window closes with it.
     fn start_run(&mut self, upper: char) -> Result<Output, EngineError> {
-        let keep = self.shadow_text();
+        let keep = std::mem::take(&mut self.typed);
         self.cands = None;
         self.clear_pend();
         self.run = keep;
@@ -2532,9 +2606,10 @@ impl Engine {
     /// (nothing done) when any of that is not so. Only with the reversal guard on; the caller checks it.
     fn tone_early(&mut self, ch: char) -> Result<Option<Output>, EngineError> {
         let Some((col, sym)) = Layout::Standard.symbol_of(ch) else { return Ok(None) };
-        let Some((pend, shadow)) = self.revert_point else { return Ok(None) };
+        let Some((pend, shadow, record)) = &self.revert_point else { return Ok(None) };
+        let (pend, shadow) = (*pend, *shadow);
         let Some(tone) = self.run.chars().last().and_then(|c| Layout::Standard.tone_of(c)) else { return Ok(None) };
-        if pend[col].is_some() || self.run.chars().count() != shadow.iter().flatten().count() + 1 {
+        if pend[col].is_some() || self.run.chars().count() != record.chars().count() + 1 {
             return Ok(None);
         }
         let mut cols = pend;
@@ -2546,9 +2621,10 @@ impl Engine {
         }
         self.run.clear();
         self.run_ascii = false;
-        self.run_zh = None;
+        self.run_rev = false;
         self.revert_point = None;
         (self.pend, self.shadow_key) = (pend, shadow);
+        self.typed = self.shadow_text(); // the keys a later key replaced are forgotten: the syllable is read as Zhuyin
         self.shadow_push(ch, col);
         self.pend[col] = Some(sym);
         self.finish_syllable(tone, Vec::new()).map(Some)
@@ -2556,7 +2632,7 @@ impl Engine {
 
     /// A key while the run is open (docs/spec/english-mixed.md §4.1, §4.2, §4.3, §4.5): letters and the Zhuyin keys that are not letters
     /// go on it, a tone key goes on it or splits it, Backspace and Esc take it off, Space ends it and is eaten, every other key ends it
-    /// and is then handled as it would be. Esc on a run a revert opened, not changed since, brings the Zhuyin back instead.
+    /// and is then handled as it would be. Esc on a run a revert opened puts the Zhuyin replay of its characters in its place.
     fn run_key(&mut self, k: Key) -> Result<Output, EngineError> {
         let m = k.modifiers;
         if self.english_reversal_guard && k.kind == KeyKind::Char && m == 0 {
@@ -2582,22 +2658,28 @@ impl Engine {
             KeyKind::Backspace => {
                 self.run.pop();
                 self.run_ascii &= !self.run.is_empty();
-                self.run_zh = None;
+                self.run_rev &= !self.run.is_empty();
                 self.revert_point = None;
                 self.pred_dirty = true;
                 self.run_closed()?;
                 self.handled()
             }
             KeyKind::Esc => {
-                self.run.clear();
+                let text = std::mem::take(&mut self.run);
                 self.run_ascii = false;
-                self.run_zh = None;
-                if let Some((pend, shadow)) = self.revert_point.take() {
-                    (self.pend, self.shadow_key) = (pend, shadow); // docs/spec/english-mixed.md §4.2: back to the Zhuyin the key would have made
-                }
+                self.revert_point = None;
+                // docs/spec/english-mixed.md §4.5: a run a revert opened becomes the Zhuyin its characters replay to; any other run just goes.
+                let replay = if std::mem::take(&mut self.run_rev) { self.replay(&text) } else { None };
                 self.pred_dirty = true;
+                let mut commit = String::new();
+                if let Some(r) = replay {
+                    for syl in r.done {
+                        commit.push_str(&self.insert_token(syl, None, None)?.commit); // rule 10
+                    }
+                    (self.pend, self.shadow_key, self.typed) = (r.pend, r.shadow, r.typed);
+                }
                 self.run_closed()?;
-                self.handled()
+                Ok(self.view(true, commit))
             }
             KeyKind::Space => {
                 let commit = self.end_run()?;
@@ -3188,7 +3270,7 @@ impl Engine {
         self.cands = None;
         self.run.clear();
         self.run_ascii = false;
-        self.run_zh = None;
+        self.run_rev = false;
         self.revert_point = None;
         self.last_short = None;
         self.drun = None;
@@ -3635,7 +3717,7 @@ impl Engine {
             self.clear_pred();
             let opened = self.run.is_empty();
             if opened {
-                self.run = self.shadow_text();
+                self.run = std::mem::take(&mut self.typed);
                 self.run_ascii = !self.run.is_empty();
                 self.clear_pend();
             }
@@ -3772,10 +3854,10 @@ impl Engine {
                     let occupied = self.pend[col].is_some();
                     let later = self.pend[col + 1..].iter().any(Option::is_some);
                     if occupied && self.english_overwrite {
-                        return self.revert_keys(Revert::Overwrite, k.ch, col, sym);
+                        return self.revert_keys(Revert::Overwrite, k.ch);
                     }
                     if !occupied && later && self.english_key_order && !self.english_reversal_guard {
-                        return self.revert_keys(Revert::Order, k.ch, col, sym);
+                        return self.revert_keys(Revert::Order, k.ch);
                     }
                 }
                 // docs/spec/prediction.md §6: an occupied column opens the next unit instead of being replaced.
@@ -3797,6 +3879,7 @@ impl Engine {
                 if let Some(col) = (0..3).rev().find(|&c| self.pend[c].is_some()) {
                     self.pend[col] = None;
                     self.shadow_key[col] = None; // docs/spec/english-mixed.md §3.1: the column's key goes with its symbol
+                    self.typed = self.shadow_text(); // and the record forgets the replaced keys: Backspace is mending Zhuyin
                 }
                 if self.pend.iter().all(Option::is_none) {
                     self.pend_prev.pop().into_iter().for_each(|u| self.pend = u); // an emptied unit goes
@@ -4123,16 +4206,17 @@ impl Engine {
             self.nothing(old); // A syllable the lexicon lacks changes nothing
             return self.handled();
         }
-        // docs/spec/english-mixed.md §6: the keys of a short word (in the lexicon, so no revert) that the candidate list adds the English of.
+        // docs/spec/english-mixed.md §6: the keys of a short word (in the lexicon, so no revert), or of a syllable some key of which
+        // replaced another (the record is not the shadow), that the candidate list adds the English of.
         let short = (!missing && self.shadow_on()).then(|| {
-            let mut keys = self.shadow_text();
+            let mut keys = self.typed.clone();
             keys.extend((tone > 0).then(|| TONE_KEYS_STANDARD[tone - 1]));
-            keys
+            (self.typed != self.shadow_text(), keys)
         });
         self.clear_pend();
         self.pred_dirty = true;
         let o = self.insert_token(syl, None, None)?;
-        if let Some(word) = short.filter(|w| ENGLISH_SHORT.contains(&w.as_str())).filter(|_| o.commit.is_empty()) {
+        if let Some((_, word)) = short.filter(|(over, w)| *over || ENGLISH_SHORT.contains(&w.as_str())).filter(|_| o.commit.is_empty()) {
             self.last_short = Some((self.cursor - 1, word));
         }
         Ok(o)

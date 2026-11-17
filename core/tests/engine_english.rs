@@ -1197,15 +1197,22 @@ fn chinese_item_follows_the_revert() {
     // Choosing it turns the token into the syllable ㄜ with that character fixed, and nothing is learned.
     let o = run(&mut e, "4");
     assert!(o.preedit == zh && e.syllables() == ["ㄜ"], "{} {:?}", o.preedit, e.syllables());
-    // Another letter or Backspace on the run drops the Chinese item.
+    // Another letter or Backspace on the run: the item is the syllable all the run's characters replay to (`o k s`: ㄋ, then ㄜ over ㄟ).
+    let zh = first_entry("ㄋㄜ");
     let mut e = eng();
-    run(&mut e, "o k s _ Down");
-    assert!(run(&mut e, "Esc").candidates.is_empty());
+    assert!(run(&mut e, "o k s _ Down").candidates == ["oks", "Oks", "OKS", zh.as_str()]);
+    let zh = first_entry("ㄟ");
     let mut e = eng();
-    assert!(run(&mut e, "o k s _ Down").candidates == ["oks", "Oks", "OKS"]);
-    // ㄋㄧ is not in the lexicon: no Chinese item.
+    assert!(run(&mut e, "o k BS _ Down").candidates == ["o", "O", zh.as_str()]);
+    // ㄋㄧ is not in the lexicon: no Chinese item. Nor when the replay makes more than one syllable (`r u 3`: 幾, then ㄋ).
     let mut e = eng();
     assert!(run(&mut e, "r u s _ Down").candidates == ["rus", "Rus", "RUS"]);
+    // `r u s 3` replays to the one syllable ㄋㄧˇ, closed by its tone key: that is the item.
+    let zh = first_entry("ㄋㄧˇ");
+    let mut e = eng();
+    assert!(run(&mut e, "r u s 3 _ Down").candidates == ["rus3", "Rus3", "RUS3", zh.as_str()]);
+    let mut e = eng();
+    assert!(run(&mut e, "r u s 3 x _ Down").candidates == ["rus3x", "Rus3x", "RUS3X"]);
     // Not learned: the character is fixed with no pending learn.
     let mut e = lm_eng();
     run(&mut e, "o k _ Down 4");
@@ -1252,9 +1259,14 @@ fn backspace_and_escape_on_a_reverted_run() {
     assert!(o.preedit == "gt" && fields(&o) == (0, 2));
     let o = run(&mut e, "Esc");
     assert!(o.preedit == "ㄔ" && fields(&o) == (0, 0) && e.english_columns() == [Some('ㄔ'), None, None] && e.english_shadow() == "t", "{}", o.preedit);
-    // After the run was changed (a typed key), Esc takes the whole run.
+    // After the run was changed (a typed key), Esc is still the Zhuyin all its characters replay to: ㄇ over ㄔ over ㄕ.
     let mut e = eng();
     run(&mut e, "g t a");
+    let o = run(&mut e, "Esc");
+    assert!(o.preedit == "ㄇ" && e.english_columns() == [Some('ㄇ'), None, None] && e.english_shadow() == "a" && e.english_record() == "gta", "{}", o.preedit);
+    // A character the replay cannot read (an upper-case letter): Esc takes the whole run.
+    let mut e = eng();
+    run(&mut e, "g t S-a");
     assert!(run(&mut e, "Esc").preedit.is_empty() && is_empty(&mut e));
     // `r u s` Esc `3` is 你: the Zhuyin the key would have made, then the tone.
     let mut e = eng();
@@ -1271,12 +1283,13 @@ fn backspace_and_escape_on_a_reverted_run() {
     run(&mut e, "s 7");
     let o = run(&mut e, "Esc");
     assert!(o.preedit == "ㄋ" && e.english_columns() == [Some('ㄋ'), None, None], "{}", o.preedit);
-    // After Esc the next key is judged again: ㄜ is in the final column, so `k` over it reverts again (the shadow holds the first `k`).
+    // After Esc the next key is judged again: ㄜ is in the final column, so `k` over it reverts again. The shadow holds the first `k`;
+    // the key record still has the `o` it replaced, so the run is every key typed.
     let mut e = eng();
     run(&mut e, "o k Esc");
-    assert!(e.english_columns() == [None, None, Some('ㄜ')] && e.english_shadow() == "k");
+    assert!(e.english_columns() == [None, None, Some('ㄜ')] && e.english_shadow() == "k" && e.english_record() == "ok");
     let o = run(&mut e, "k");
-    assert!(o.preedit == "kk" && e.english_reverted() == Some(Revert::Overwrite), "{}", o.preedit);
+    assert!(o.preedit == "okk" && e.english_reverted() == Some(Revert::Overwrite), "{}", o.preedit);
 }
 
 #[test]
@@ -1416,7 +1429,8 @@ fn english_token_definition_covers_digits() {
     assert!(o.preedit == "gta" && fields(&o) == (0, 3), "{}", o.preedit);
     let mut e = eng();
     let o = run(&mut e, "g t a 6 _ Down");
-    assert!(o.candidates == ["gta6", "Gta6", "GTA6"], "{:?}", o.candidates);
+    // The Chinese item of its characters: `g t a` leaves ㄇ, and the tone key that makes no syllable is ignored.
+    assert!(o.candidates == ["gta6", "Gta6", "GTA6", first_entry("ㄇ").as_str()], "{:?}", o.candidates);
     // The learning key of a neighbour is the English one, as for `rust`.
     let dir = tmp_dir("gta6-key");
     let mut e = lm_eng_lexicon();
@@ -1630,11 +1644,11 @@ fn reversal_guard_keeps_the_typed_order_in_every_run() {
     let mut e = eng();
     let o = run(&mut e, "m e S-x");
     assert!(o.preedit == "meX", "{}", o.preedit);
-    // Overwrite off: `d` (ㄎ) replaces `e` (ㄍ) in the first column; the replaced key leaves and `d` is the newest, so the run is `kd`.
+    // Overwrite off: `d` (ㄎ) replaces `e` (ㄍ) in the first column; the key record keeps the replaced key, so the run is every key typed.
     let mut e = eng();
     e.set_english_overwrite(false).unwrap();
     let o = run(&mut e, "e k d S-x");
-    assert!(o.preedit == "kdX", "replaced key: {}", o.preedit);
+    assert!(o.preedit == "ekdX" && fields(&o) == (0, 4), "replaced key: {}", o.preedit);
     let mut e = eng();
     run(&mut e, "m e");
     let o = e.set_ascii(true).unwrap();
@@ -2071,7 +2085,10 @@ fn a_word_of_the_table_takes_its_writing() {
         let mut e = eng();
         let o = run(&mut e, script);
         assert!(o.preedit == "ChatGPT" && o.commit.is_empty(), "{script}: {}", o.preedit);
-        assert!(run(&mut e, "Down").candidates == ["ChatGPT", "chatgpt", "Chatgpt", "CHATGPT"], "{script}");
+        // The reverted run's token adds the Chinese item of its characters (ㄔ over the initials, ㄣ: ㄔㄣ).
+        let mut list = vec!["ChatGPT".to_string(), "chatgpt".to_string(), "Chatgpt".to_string(), "CHATGPT".to_string()];
+        list.extend((!script.starts_with("S-")).then(|| first_entry("ㄔㄣ")));
+        assert!(run(&mut e, "Down").candidates == list, "{script}");
         run(&mut e, "Esc");
         let mut e = eng();
         run(&mut e, script);
@@ -2272,4 +2289,367 @@ fn a_tone_moved_up_is_not_guessed_when_the_conditions_fail() {
     let mut e = eng();
     let (units, len, _) = units_after(&mut e, "c p _");
     assert_eq!((units, len), (vec!["_punct_cp".to_string()], 0), "c p ␣: a token");
+}
+
+// ---- docs/spec/english-mixed.md §2, §3.3, §4.5, §6: the key record, the Zhuyin replay, the Chinese item, the English of an overwritten syllable ----
+
+/// The App's switches: mixing on, "a key over the same column is English" off, key order on, the reversal guard on.
+fn app() -> Engine {
+    let mut e = eng();
+    e.set_english_overwrite(false).unwrap();
+    e
+}
+/// The comparison engine of the Zhuyin replay: English mixing off, no abbreviation, no fuzzy input, no model.
+fn zhuyin() -> Engine {
+    Engine::with_lexicon(real(), Layout::Standard)
+}
+fn spaced(word: &str) -> String {
+    word.chars().map(String::from).collect::<Vec<_>>().join(" ")
+}
+/// Every item of the window the script's last key opened, in order (the selection walks the pages).
+fn whole_list(e: &mut Engine, script: &str) -> Vec<String> {
+    let mut o = run(e, script);
+    let mut items = Vec::new();
+    for _ in 0..o.total {
+        items.push(o.candidates[o.selected.unwrap()].clone());
+        o = run(e, "Right");
+    }
+    items
+}
+fn last_two(list: &[String]) -> [&str; 2] {
+    [list[list.len() - 2].as_str(), list[list.len() - 1].as_str()]
+}
+
+/// The user's report: with the App's switches a mistyped word reverts at Space (c) to every key typed, not to the keys left in the columns.
+#[test]
+fn the_english_of_a_revert_is_every_key_typed() {
+    for word in ["meeting", "trigger", "hello", "paper"] {
+        let mut e = app();
+        let o = run(&mut e, &format!("{} _", spaced(word)));
+        assert!(o.preedit == word && e.syllables() == [format!("_punct_{word}")], "{word}: {} {:?}", o.preedit, e.syllables());
+        assert!(e.english_reverted() == Some(Revert::Missing) && fields(&o) == (0, 0), "{word}");
+    }
+    // The shadow is still one key a column: `m e e t i n g` leaves `mig` there, and the record has all seven.
+    let mut e = app();
+    run(&mut e, "m e e t i n g");
+    assert!(e.english_shadow() == "mig" && e.english_record() == "meeting", "{} {}", e.english_shadow(), e.english_record());
+    // Backspace on the syllable is mending Zhuyin: the record forgets the replaced keys.
+    run(&mut e, "BS");
+    assert!(e.english_shadow() == "mg" && e.english_record() == "mg", "{} {}", e.english_shadow(), e.english_record());
+    // Shift+letter and the ASCII state take the record too.
+    let mut e = app();
+    assert_eq!(run(&mut e, "m e e t S-x").preedit, "meetX");
+    let mut e = app();
+    run(&mut e, "m e e t");
+    assert_eq!(e.set_ascii(true).unwrap().preedit, "meet");
+    let mut e = app();
+    e.set_ascii(true).unwrap();
+    e.set_ascii(false).unwrap();
+    run(&mut e, "m e e t");
+    e.set_ascii(true).unwrap();
+    assert_eq!(run(&mut e, "1").preedit, "meet1");
+}
+
+/// docs/spec/english-mixed.md §6: a syllable some key of which replaced another, completed as Chinese, lists its keys in lower and upper case last.
+#[test]
+fn an_overwritten_syllable_lists_the_english_of_its_keys() {
+    // `s p e e c h ␣`: ㄘㄣ is a syllable, so it is Chinese, and the list ends with what was typed.
+    let mut e = app();
+    let o = run(&mut e, "s p e e c h _");
+    assert!(e.syllables() == ["ㄘㄣ"] && o.preedit == shows("ㄘㄣ") && e.english_reverted().is_none(), "{} {:?}", o.preedit, e.syllables());
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["speech", "SPEECH"] && list[0] == first_entry("ㄘㄣ"), "{list:?}");
+    let mut e = app();
+    run(&mut e, "s p e e c h _ Down");
+    select_in_window(&mut e, "speech");
+    assert!(e.syllables() == ["_punct_speech"], "{:?}", e.syllables());
+    assert_eq!(run(&mut e, "Enter").commit, "speech");
+    // `t e s t ␣` is ㄔ (吃); after another Zhuyin key the mark is gone, back at that unit the list has no `test`.
+    let mut e = app();
+    run(&mut e, "t e s t _");
+    assert!(e.syllables() == ["ㄔ"]);
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["test", "TEST"], "{list:?}");
+    let mut e = app();
+    run(&mut e, "t e s t _ a BS");
+    let list = whole_list(&mut e, "Down");
+    assert!(!list.is_empty() && !list.iter().any(|w| w.eq_ignore_ascii_case("test")), "{list:?}");
+    // A tone key closes the syllable: its digit is on the word (`t e s t 6` is ㄔˊ).
+    let mut e = app();
+    run(&mut e, "t e s t 6");
+    assert!(e.syllables() == ["ㄔˊ"]);
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["test6", "TEST6"], "{list:?}");
+    // A short word's keys after a replaced key: only the record's item (`q a i`: the shadow is `ai`).
+    let mut e = app();
+    run(&mut e, "q a i _");
+    assert!(e.syllables() == ["ㄇㄛ"]);
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["qai", "QAI"] && !list.iter().any(|w| w == "ai" || w == "AI"), "{list:?}");
+    // Two digit keys over each other (no digit layer without a model): the two items are the same text.
+    let mut e = app();
+    run(&mut e, "1 1 _");
+    assert!(e.syllables() == ["ㄅ"], "{:?}", e.syllables());
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["11", "11"], "{list:?}");
+    // Nothing replaced: no item (the short words keep theirs).
+    let mut e = app();
+    run(&mut e, "g _");
+    let list = whole_list(&mut e, "Down");
+    assert!(!list.iter().any(|w| w.is_ascii()), "{list:?}");
+    // Mixing off: no record, no item.
+    let mut e = zhuyin();
+    run(&mut e, "t e s t _");
+    let list = whole_list(&mut e, "Down");
+    assert!(!list.iter().any(|w| w.is_ascii()), "{list:?}");
+}
+
+/// docs/spec/english-mixed.md §4.5: Esc on a run a revert opened, typed on or not, is the Zhuyin replay of its characters.
+#[test]
+fn esc_on_a_reverted_run_is_the_zhuyin_replay() {
+    // Overwrite on: `s p e` reverts at `e` (a); the rest goes on the run.
+    let mut e = eng();
+    let o = run(&mut e, "s p e");
+    assert!(o.preedit == "spe" && e.english_reverted() == Some(Revert::Overwrite));
+    assert_eq!(run(&mut e, "e c h").preedit, "speech");
+    let o = run(&mut e, "Esc");
+    assert!(o.preedit == "ㄘㄣ" && fields(&o) == (0, 0) && e.english_columns() == [Some('ㄘ'), None, Some('ㄣ')], "{}", o.preedit);
+    assert!(e.english_shadow() == "ph" && e.english_record() == "speech", "{} {}", e.english_shadow(), e.english_record());
+    let mut plain = zhuyin();
+    let want = run(&mut plain, "s p e e c h _");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == want.preedit && e.syllables() == plain.syllables() && e.syllables() == ["ㄘㄣ"], "{} / {}", o.preedit, want.preedit);
+    // Syllables the replay completes go in as rule 10 puts them; what is left is the unfinished syllable. `r u s 3 x` -> 你 and ㄌ.
+    let mut e = eng();
+    run(&mut e, "r u s 3 x");
+    let o = run(&mut e, "Esc");
+    assert!(e.syllables() == ["ㄋㄧˇ"] && e.english_columns() == [Some('ㄌ'), None, None] && e.english_record() == "x", "{} {:?}", o.preedit, e.syllables());
+    assert_eq!(o.preedit, format!("{}ㄌ", shows("ㄋㄧˇ")));
+    // In front of units the replay goes in at the cursor.
+    let mut e = eng();
+    syllable(&mut e, "ㄨㄛˇ");
+    syllable(&mut e, "ㄕˋ");
+    run(&mut e, "Left r u s 3");
+    run(&mut e, "Esc");
+    assert!(e.syllables() == ["ㄨㄛˇ", "ㄋㄧˇ", "ㄕˋ"], "{:?}", e.syllables());
+    // A token reopened with Backspace: with a Chinese item it is a reverted run again, without one Esc takes the run.
+    let mut e = eng();
+    run(&mut e, "o k _ BS");
+    let o = run(&mut e, "Esc");
+    assert!(o.preedit == "ㄟ" && e.english_columns() == [None, None, Some('ㄟ')], "{}", o.preedit);
+    let mut e = eng();
+    run(&mut e, "r u s _ BS");
+    assert!(run(&mut e, "Esc").preedit.is_empty() && is_empty(&mut e));
+    // The 33rd character starts a run that no revert opened.
+    let mut e = eng();
+    run(&mut e, "o k");
+    run(&mut e, &"a ".repeat(31));
+    assert!(run(&mut e, "Esc").preedit == format!("ok{}", "a".repeat(30)) && e.syllables().len() == 1, "{:?}", e.syllables());
+}
+
+/// docs/spec/english-mixed.md §3.3, §5.2: the token of a reverted run carries the Chinese item of all its characters.
+#[test]
+fn the_token_of_a_reverted_run_has_the_chinese_item_of_its_characters() {
+    let zh = first_entry("ㄘㄣ");
+    let mut e = eng();
+    let o = run(&mut e, "s p e e c h _");
+    assert!(o.preedit == "speech" && e.syllables() == ["_punct_speech"]);
+    let o = run(&mut e, "Down");
+    assert!(o.candidates == ["speech", "Speech", "SPEECH", zh.as_str()], "{:?}", o.candidates);
+    select_in_window(&mut e, &zh);
+    assert!(e.syllables() == ["ㄘㄣ"], "{:?}", e.syllables());
+    assert_eq!(run(&mut e, "Enter").commit, zh);
+    // A run Shift opened has none, whatever its characters.
+    let mut e = eng();
+    assert!(run(&mut e, "s S-p _ Down").candidates == ["sP", "sp", "Sp", "SP"]);
+    // Nor has the head of a tone split (`o k j i 3`: the token `ok` and ㄨㄛˇ), though a revert opened the run.
+    let mut e = eng();
+    run(&mut e, "o k j i 3");
+    assert!(e.syllables() == ["_punct_ok", "ㄨㄛˇ"] && e.english_split(), "{:?}", e.syllables());
+    assert!(run(&mut e, "Left Down").candidates == ["ok", "Ok", "OK"]);
+}
+
+/// docs/spec/english-mixed.md §4.2: the tone moved up reads the record: a replaced key does not stop it.
+#[test]
+fn a_tone_moved_up_after_a_replaced_key() {
+    let mut e = app();
+    let o = run(&mut e, "a q 6");
+    assert!(o.preedit == "aq6" && e.english_reverted() == Some(Revert::Missing), "{}", o.preedit);
+    let o = run(&mut e, "8");
+    assert!(e.syllables() == ["ㄆㄚˊ"] && o.preedit == shows("ㄆㄚˊ") && fields(&o) == (0, 0), "{} {:?}", o.preedit, e.syllables());
+    // The record was reset to the keys in the columns: the syllable has no English item.
+    let list = whole_list(&mut e, "Down");
+    assert!(!list.iter().any(|w| w.is_ascii()), "{list:?}");
+}
+
+/// docs/spec/english-mixed.md §3.1: the shadow catching up with the columns sets the record.
+#[test]
+fn the_record_follows_the_shadow_when_it_catches_up() {
+    let mut e = zhuyin();
+    run(&mut e, "r u");
+    e.set_english(true).unwrap();
+    assert!(e.english_record() == "ru");
+    let o = run(&mut e, "s");
+    assert!(o.preedit == "rus" && e.english_reverted() == Some(Revert::Overwrite), "{}", o.preedit);
+    let mut e = zhuyin();
+    e.set_english_overwrite(false).unwrap();
+    run(&mut e, "t e");
+    e.set_english(true).unwrap();
+    assert!(e.english_shadow() == "e" && e.english_record() == "e", "{} {}", e.english_shadow(), e.english_record());
+    run(&mut e, "s t _");
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["est", "EST"], "{list:?}");
+    assert!(list.iter().all(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit())), "{list:?}");
+    // Two keys in the shadow when it catches up (`t j`: ㄔㄨ), then `s` and `t` over the first: the record is the shadow's keys and those.
+    let mut e = zhuyin();
+    e.set_english_overwrite(false).unwrap();
+    run(&mut e, "t j");
+    e.set_english(true).unwrap();
+    assert!(e.english_shadow() == "tj" && e.english_record() == "tj");
+    run(&mut e, "s t _");
+    assert!(e.syllables() == ["ㄔㄨ"], "{:?}", e.syllables());
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["tjst", "TJST"], "{list:?}");
+    assert!(list.iter().all(|w| !w.is_empty() && !w.chars().all(|c| c.is_ascii_digit())), "{list:?}");
+}
+
+/// docs/spec/english-mixed.md §4.5: after Esc the record is the keys after the last one that completed a syllable, without the tone digits the
+/// replay ignored. `a q 6`: ㄆ over ㄇ, ㄆˊ is no syllable, so (c) at the tone key; Esc; Space.
+#[test]
+fn the_record_after_esc_drops_the_ignored_tone() {
+    let mut e = app();
+    assert_eq!(run(&mut e, "a q 6").preedit, "aq6");
+    let o = run(&mut e, "Esc");
+    assert!(o.preedit == "ㄆ" && e.english_record() == "aq" && e.english_shadow() == "q", "{} {}", o.preedit, e.english_record());
+    let mut plain = zhuyin();
+    let want = run(&mut plain, "a q 6 _");
+    let o = run(&mut e, "_");
+    assert!(o.preedit == want.preedit && e.syllables() == plain.syllables(), "{} / {}", o.preedit, want.preedit);
+    // ㄆ alone is a syllable of the lexicon: the unit is Chinese and lists `aq`, `AQ`.
+    assert!(e.syllables() == ["ㄆ"], "{:?}", e.syllables());
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["aq", "AQ"], "{list:?}");
+}
+
+/// docs/spec/english-mixed.md §2: the record holds 31 keys however it is set, so no revert makes more than a run's 32 characters.
+#[test]
+fn the_record_is_capped_so_a_revert_fits_a_run() {
+    let lens = |e: &Engine, o: &Output| -> Vec<usize> {
+        let mut v: Vec<usize> = e.syllables().iter().filter_map(|s| s.strip_prefix("_punct_")).map(str::len).collect();
+        v.push(o.english_run_utf16_len as usize);
+        v
+    };
+    // 32 keys over the same column, then a tone key that makes no syllable: (c) with the first 31 and the digit.
+    let mut e = app();
+    run(&mut e, &"a q ".repeat(16));
+    assert!(e.english_record().len() == 31 && e.english_shadow() == "q");
+    let o = run(&mut e, "6");
+    assert!(e.english_reverted() == Some(Revert::Missing) && lens(&e, &o) == [32] && o.preedit == format!("{}a6", "aq".repeat(15)), "{}", o.preedit);
+    let o = run(&mut e, "x");
+    assert!(lens(&e, &o) == [32, 1], "the 33rd character starts the next run: {:?}", lens(&e, &o));
+    // Shift+letter and Space (c) with a full record.
+    let mut e = app();
+    run(&mut e, &"a q ".repeat(16));
+    let o = run(&mut e, "S-x");
+    assert!(lens(&e, &o) == [32], "{:?}", lens(&e, &o));
+    let mut e = app();
+    run(&mut e, &"a z ".repeat(16));
+    e.set_ascii(true).unwrap();
+    let o = run(&mut e, "1 1");
+    assert!(lens(&e, &o) == [32, 1], "{:?}", lens(&e, &o));
+    // Through Esc: (a) opens the run, letters fill it to 32, Esc replays them: the record is the first 31.
+    for (next, kind) in [("a", Revert::Overwrite), ("6", Revert::Missing)] {
+        let mut e = eng();
+        run(&mut e, "a q");
+        let o = run(&mut e, &"a q ".repeat(15));
+        assert!(lens(&e, &o) == [32], "{:?}", lens(&e, &o));
+        let o = run(&mut e, "Esc");
+        assert!(o.preedit == "ㄆ" && e.english_record().len() == 31 && e.english_shadow() == "q", "{}", o.preedit);
+        // (i) a key over the column, (ii) a tone key that makes no syllable: the run is 32 characters, and the next letter starts another.
+        let o = run(&mut e, next);
+        assert!(e.english_reverted() == Some(kind) && lens(&e, &o) == [32], "{next}: {:?}", lens(&e, &o));
+        let o = run(&mut e, "x");
+        assert!(lens(&e, &o) == [32, 1], "{next}: {:?}", lens(&e, &o));
+        let o = run(&mut e, "_");
+        assert!(lens(&e, &o) == [32, 1, 0] && e.syllables().iter().all(|s| s.len() <= "_punct_".len() + 32), "{next}: {:?}", e.syllables());
+    }
+}
+
+/// docs/spec/english-mixed.md §2: the Zhuyin replay is, item for item, what the comparison engine (mixing off, no fuzzy input, no model) makes of
+/// the same keys from an empty composition: the completed syllables and the unfinished one. Two classes of input, fixed seed.
+#[test]
+fn the_zhuyin_replay_is_the_engine_with_mixing_off() {
+    const SEED: u64 = 20261117;
+    const EACH: usize = 2500;
+    let lex = real();
+    let e = eng();
+    let mut plain = zhuyin();
+    let mut state = SEED;
+    let mut next = move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let (mut done, mut earlier, mut ignored, mut after) = (0usize, 0usize, 0usize, 0usize);
+    let mut check = |keys: &str| {
+        plain.reset(ResetMode::Discard);
+        let mut cols = [false; 3];
+        for c in keys.chars() {
+            let before = plain.syllables().len();
+            let pending = plain.english_columns().iter().any(Option::is_some);
+            plain.key(Key::ch(c, 0)).unwrap();
+            // What the input covers: a key into an empty column before a filled one, a tone key ignored, a tone key after a completed syllable.
+            match Layout::Standard.symbol_of(c) {
+                Some((col, _)) => {
+                    earlier += usize::from(!cols[col] && cols[col + 1..].iter().any(|&f| f));
+                    cols[col] = true;
+                }
+                None if plain.syllables().len() > before => cols = [false; 3],
+                None if pending => ignored += 1,
+                None => after += 1,
+            }
+        }
+        let got = e.english_replay(keys).unwrap_or_else(|| panic!("no replay of {keys}"));
+        assert!(got.0 == plain.syllables() && got.1 == plain.english_columns(), "{keys}: {got:?} / {:?} {:?}", plain.syllables(), plain.english_columns());
+        done += got.0.len();
+    };
+    for word in ["speech", "meeting", "trigger", "hello", "paper"] {
+        check(word);
+    }
+    // (1) Readings of the lexicon typed in column order, with overwriting keys put in at random; a syllable of tone 1 ends the keys (a run holds no Space).
+    let zhuyin_keys: Vec<char> = "1qaz2wsxedcrfv5tgbyhnujm8ik,9ol.0p;/-".chars().collect();
+    let n = lex.reading_count();
+    for _ in 0..EACH {
+        let mut keys = String::new();
+        for syl in lex.reading_syllables((next() % n as u64) as usize) {
+            let mut part: Vec<char> = syl.chars().filter_map(|c| Layout::Standard.key_of_symbol(c)).collect();
+            for _ in 0..next() % 3 {
+                let at = (next() % (part.len() as u64 + 1)) as usize;
+                part.insert(at, zhuyin_keys[(next() % zhuyin_keys.len() as u64) as usize]);
+            }
+            keys.extend(part);
+            match syl.chars().last().and_then(|c| Layout::Standard.key_of_tone(c)) {
+                Some(tone) => keys.push(tone),
+                None => break,
+            }
+        }
+        check(&keys);
+    }
+    // (2) What a run can hold: 1-32 characters of [a-z0-9,.;/-], the first a Zhuyin key; the tone keys are a third of the rest so that
+    // syllables complete and tone keys follow tone keys.
+    let any: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789,.;/-".chars().collect();
+    for _ in 0..EACH {
+        let len = 1 + (next() % 32) as usize;
+        let mut keys = String::from(zhuyin_keys[(next() % zhuyin_keys.len() as u64) as usize]);
+        while keys.len() < len {
+            keys.push(if next() % 3 == 0 { ['3', '4', '6', '7'][(next() % 4) as usize] } else { any[(next() % any.len() as u64) as usize] });
+        }
+        check(&keys);
+    }
+    println!("replayed {} strings: {done} syllables completed, {earlier} keys into an earlier empty column, {ignored} tone keys ignored, {after} after a completed syllable", 2 * EACH + 5);
+    assert!(done > 2000 && earlier > 500 && ignored > 500 && after > 100, "the test saw enough");
+    // Not a replay: a tone key first, an upper-case letter, any other character.
+    assert!(e.english_replay("3a").is_none() && e.english_replay("aB").is_none() && e.english_replay("a!").is_none());
 }
