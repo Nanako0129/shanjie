@@ -475,6 +475,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 重播不載詞包、沒有前文、沒有語意校正（重播是同步打鍵，語意校正是非同步、不在按鍵路徑上）。每版兩列：聊天，與書面（重播程式的第五個參數 `formal`；有 trigram 表的版本兩列都把表載進記憶體）。舊的結果 JSON 沒有書面列時，表上顯示「—」。
 - **同場量測**：各版本輪流跑 3 輪，每版取三輪 p95 的中位數、max 取最大、載入時間取中位數、RSS 取最大；記下機型、macOS 版本與開始、結束時的 load average（結果檔 `env` 的 `machine`、`macos`、`cargo`、`load_avg_start`、`load_avg_end`）。語意校正的每列耗時取 CLI 在 stderr 印的 `tinylm: rerank n=… p50=… p95=…` 行，在三輪重播都跑完之後再跑三次、取中位數，且不和其他格同時跑。
 - **速度段前後的狀態**（`speed_window`）：速度量測排在準確率格之後、整輪的最後；`bench.py` 在它開始前與結束後各讀一次 1 分鐘負載與 Time Machine 是否正在備份，寫進 `env` 的四個欄位 `speed_load_before`、`speed_tm_before`、`speed_load_after`、`speed_tm_after`（四個一起寫；沒有 dev302、不量速度時都不寫）。備份狀態由 `tm_running()` 讀：只在 macOS 上執行 `tmutil status`（逾時 30 秒），輸出有 `Running = 1` 是 `true`、沒有是 `false`；不是 macOS、指令失敗或逾時是 `null`。開始前的負載會帶著前面準確率格（多核心）的殘留。這四欄只有加入之後量的結果檔才有，舊檔不回填；KPI 表用它們判斷速度算不算數（§8.2）。
+- **每一輪的原始值**：結果檔每版的 `speed` 底下有 `speed_rounds`，存每一輪的原始值：`chat`、`formal`（兩個設定各是每輪一筆 `p95_us`、`max_us`、`load_ms`、`rss_mb`）與 `rerank_ms`（每輪一筆 `p50`、`p95`，單位毫秒）。`speed` 裡其餘欄位（中位數與最大值）照舊由同樣的數字算出；網站不讀 `speed_rounds`。
 - 速度只報、不設門檻；數字只在同一次執行、同一台機器裡比較才有意義。
 
 ### 7.6 保留集欄
