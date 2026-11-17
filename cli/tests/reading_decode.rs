@@ -57,7 +57,8 @@ const DUMP_BEFORE: [(&str, &str, &str); 4] = [
     ("chat", "dev302", "0ee1bb923a6729b5f74c02d7e4a0c75e1e1c1fe1913e6b455eb5b89b33f6e90f"),
     ("chat", "typing76", "cb58ab34d6319882e7e1b448236895bf75e9bbd5f503254109b14b2af92842d5"),
     ("formal", "dev302", "aab77cf71ad8f0ee3676db9458b26008aad0f6d5d093b07d273d8fb625322047"),
-    ("formal", "typing76", "fb7dcfce1892466c26af8f48bb4b2f807149d3cccd3bd5adb9e533311b074710"),
+    // Remade when the overlay lost its whole-word Simplified forms (docs/spec/lexicon-and-packs.md §2.3): row 66 held a candidate with 想象 (was fb7dcfce…); every first candidate is unchanged.
+    ("formal", "typing76", "8cefd23c0ad0fa750b0f11ea690e5910170b838a999c50714b0f99dd23d98b59"),
 ];
 
 fn args<'a>(profile: &'a str, tinylm: bool, rows: &'a str) -> Vec<&'a str> {

@@ -872,6 +872,10 @@ pub struct CappedLexicon {
     /// without a pack.
     overlay_bits: Vec<u64>,
     pack_bits: Vec<u64>,
+    /// The unseen ceiling (`with_packs_ceil`): the count, and one bit per entry position whose word is in a generated overlay row
+    /// (kept beside `overlay_bits` so `readings` redoes the same capping). `None` and empty without it: today's scores.
+    unseen_ceil: Option<f64>,
+    ceil_bits: Vec<u64>,
     /// `Lm::identity` of the model the lexicon was capped with: `readings` must get the same one.
     built_for: (u64, usize, usize),
     /// The reading term (docs/spec/decoder.md §5, `with_reading`): while `reading_active` the decoder adds it to the path score of every
@@ -887,10 +891,21 @@ pub struct CappedLexicon {
 pub const PACK_OOV_TAG: &str = "acg-oov";
 
 /// An overlay word's score capped at its corpus frequency, or lowered by the unseen penalty when the model never saw it.
-fn capped_score(lm: &Lm, score: f64, w: &str) -> f64 {
+/// `ceil` (`with_packs_ceil`, evaluation only): for a never-seen word of a generated overlay source the count it may at most be scored as.
+fn capped_score(lm: &Lm, score: f64, w: &str, ceil: Option<f64>) -> f64 {
     let c = lm.count(w);
-    if c != 0 { score.min((c as f64 / lm.n as f64).log10()) } else { score - UNSEEN_OVERLAY_PENALTY }
+    if c != 0 {
+        score.min((c as f64 / lm.n as f64).log10())
+    } else {
+        let s = score - UNSEEN_OVERLAY_PENALTY;
+        ceil.map_or(s, |k| s.min((k / lm.n as f64).log10()))
+    }
 }
+
+/// Column 4 of the overlay rows built from title lists and dictionary headwords without any usage count (tools/build_overlay.py:
+/// wiki titles and the dictionary supplement). Only their words take the unseen ceiling; hand-kept rows (manual, slang), the names layer
+/// and the packs carry a deliberate bonus and keep today's rule.
+pub const GENERATED_OVERLAY_TAGS: [&str; 3] = ["wikt", "zhwiki", "萌典補詞"];
 
 /// Best first, the one order both the decoder's entries and `readings` sort by (stable, NaN as equal).
 fn desc(a: f64, b: f64) -> std::cmp::Ordering {
@@ -970,6 +985,18 @@ impl CappedLexicon {
     /// no unseen penalty) and score as unknown to the model (`model_id`); the other pack words are capped as in main, except that a word
     /// the model never saw keeps the pack's score instead of losing `UNSEEN_OVERLAY_PENALTY`. An empty `pack_text` is `new`.
     pub fn with_packs(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
+        Self::with_packs_ceil(base, overlay, pack_text, lm, demote, None)
+    }
+
+    /// `with_packs` with the unseen ceiling (evaluation only, `shanjie-eval --unseen-ceiling K`; the engine passes `None`): a word of a
+    /// generated overlay row (`GENERATED_OVERLAY_TAGS`) that the model never saw is scored `min(score − UNSEEN_OVERLAY_PENALTY, log10(K / N))`,
+    /// so with K < 1 it sits below every word the corpus saw once. The flat score of those rows minus the penalty is otherwise the score of
+    /// a word seen about 4 (2 characters) to 15 (4 characters) times. `None` is `with_packs`, bit for bit.
+    pub fn with_packs_ceil(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>, unseen_ceil: Option<f64>) -> Option<CappedLexicon> {
+        let generated: HashSet<&str> = match unseen_ceil {
+            Some(_) => overlay.lines().filter(|l| l.split('\t').nth(3).is_some_and(|t| GENERATED_OVERLAY_TAGS.contains(&t))).filter_map(|l| l.split('\t').nth(1)).collect(),
+            None => HashSet::new(),
+        };
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let forced: HashSet<&str> = pack_text.lines().filter(|l| l.split('\t').nth(3) == Some(PACK_OOV_TAG)).filter_map(|l| l.split('\t').nth(1)).collect();
@@ -977,6 +1004,7 @@ impl CappedLexicon {
         let mut ents = base.ents.clone();
         let bits = if pack.is_empty() { 0 } else { ents.len().div_ceil(64) };
         let (mut overlay_bits, mut pack_bits) = (vec![0u64; bits], vec![0u64; bits]);
+        let mut ceil_bits = vec![0u64; if unseen_ceil.is_some() { bits } else { 0 }];
         for i in 0..base.readings.len() {
             let range = base.range(i);
             for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
@@ -987,10 +1015,14 @@ impl CappedLexicon {
                     overlay_bits[p / 64] |= (in_overlay as u64) << (p % 64);
                     pack_bits[p / 64] |= ((in_forced || unseen_pack) as u64) << (p % 64);
                 }
+                let ceil = unseen_ceil.filter(|_| generated.contains(w));
+                if ceil.is_some() && !ceil_bits.is_empty() {
+                    ceil_bits[p / 64] |= 1 << (p % 64);
+                }
                 if in_forced {
                     packs.push((e.off, e.len));
                 } else if in_overlay && !unseen_pack {
-                    e.score = capped_score(lm, e.score, w);
+                    e.score = capped_score(lm, e.score, w, ceil);
                 }
             }
             ents[range].sort_by(|a, b| desc(a.score, b.score));
@@ -1014,7 +1046,7 @@ impl CappedLexicon {
         };
         packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
         packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, built_for: lm.identity(), reading: None, reading_active: std::sync::atomic::AtomicBool::new(true) })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, unseen_ceil, ceil_bits, built_for: lm.identity(), reading: None, reading_active: std::sync::atomic::AtomicBool::new(true) })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -1070,7 +1102,7 @@ impl CappedLexicon {
                 let mut l: Vec<(&str, f64)> = range
                     .map(|p| {
                         let (b, w) = (&self.base.ents[p], self.word_of(&self.base.ents[p]));
-                        (w, if bit(&self.overlay_bits, p) { capped_score(lm, b.score, w) } else { b.score })
+                        (w, if bit(&self.overlay_bits, p) { capped_score(lm, b.score, w, self.unseen_ceil.filter(|_| bit(&self.ceil_bits, p))) } else { b.score })
                     })
                     .collect();
                 l.sort_by(|a, b| desc(a.1, b.1));

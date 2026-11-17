@@ -105,6 +105,13 @@
 
 候選詞若只是別的寫法（簡體寫法轉成繁體後的詞、台灣字形摺疊後與基底或已留下的疊加層詞同讀音同字串的異體），就不寫進檔案；被拿掉的詞與它的落點寫到 `build/overlay/overlay-removed.tsv`、`overlay-variant-removed.tsv`（不進版控）。規則的內容（簡繁判斷、`MERGE` 摺疊表、落點分兩階段判定）見 `docs/spec/decoder.md`。粵語詞在候選階段就拿掉，所以這兩條規則看不到它們。
 
+上面兩條之後，產生的列（維基來源、`萌典補詞`、`lexgap`）再過兩道，被拿掉的詞每一列都拿掉（含變調列）：
+
+- **整詞的簡體寫法**（`phrase_twin`）：詞整個是簡繁詞組表（OpenCC `STPhrases` 加 `tw-conv.tsv` 選定的值）的鍵、值是另一個寫法、那個寫法在基底，而且詞不是萌典詞目，就拿掉（松散→鬆散、取舍→取捨、船只→船隻）；記進 `overlay-removed.tsv`。上一條的簡體判斷（`is_simplified`）只數簡體專用字與標記字，這些詞的每個字台灣也用，句子判成繁體，詞組表就沒被查到。只查整詞的鍵（最長比對會把「花卷市」改成「花捲市」）；目標只在疊加層、不在基底的不動。
+- **審過的錯字寫法**（`data/lexicon/overlay-drop.tsv`，CC0）：每列 `詞<TAB>基底的正確寫法<TAB>備註`，`#` 與空行略過；詞不能在基底、正確寫法要在基底、同一個詞只能一列，不符就中止並指出行號。清單裡的詞不寫，記進 `overlay-variant-removed.tsv`。錯字寫法沒有表可查（「好高鶩遠」的「鶩」與「騖」不是異體字，讀音又和基底的「好高騖遠」不同列），所以是清單，不是規則。
+
+`--tails-only` 也套用清單（清單在 repo 裡，不必有 dump）；`--tails-only --refilter` 另外把整詞的簡體寫法規則套到留著的列（要 OpenCC 表與 `SHANJIE_MOEDICT`，缺了就中止），給沒有 dump 的機器用。測試：`tools/test_build_overlay.py` 的 `LateRemovals`（真值表、清單格式、完整建置兩道都走、已提交的檔裡沒有清單的詞；有 OpenCC 表與萌典的機器另外核對已提交的檔沒有任何一列會被整詞規則拿掉，沒有時印 NOTE）。
+
 ### 2.4 讀音
 
 - 預設：`ime.Lexicon.to_syllables`（把詞切成基底詞，每段取分數最高的讀音），轉不出讀音的詞略過；不做人工確認。
@@ -155,7 +162,7 @@
 
 - `python3 tools/build_overlay.py`：產生並寫入（需要 dump；萌典補詞需要 `--moedict-supplement` 給語料檔；§2.7、§2.8 與 `--lexgap`（§2.1）的旗標預設關，不帶旗標的輸出只含維基來源的列，所以和含 `萌典補詞` 列的提交檔不同）。
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
-- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞或網路用語時用。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
+- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞、網路用語或 `overlay-drop.tsv` 時用（`--refilter` 見 §2.3）。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
 
 ### 2.12 重排保護詞（`data/lexicon/rerank-protect.tsv`）
