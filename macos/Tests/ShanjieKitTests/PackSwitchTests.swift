@@ -171,6 +171,13 @@ final class PackSwitchTests: XCTestCase {
             XCTAssertTrue(r.shell.engine === before, "\(keys): not swapped")
             XCTAssertEqual(r.controller.client.marked, marked, "\(keys): the composition is unchanged")
             r.controller.press(Keys.esc)
+            if keys == "hello" {
+                // docs/spec/english-mixed.md §4.5: Esc on a run a revert opened gives back the Zhuyin its keys make, which is still a
+                // composition (no swap yet); a second Esc clears it.
+                XCTAssertTrue(r.shell.composing, "hello: Esc turned the English run back into Zhuyin")
+                XCTAssertTrue(r.shell.engine === before, "hello: not swapped while the Zhuyin is open")
+                r.controller.press(Keys.esc)
+            }
             XCTAssertTrue(spin { r.shell.engine !== before }, "\(keys): swapped after the composition ended")
         }
     }
