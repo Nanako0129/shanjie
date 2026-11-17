@@ -950,6 +950,11 @@ VERSIONS2 = {
     "v0.7.0": {"release": "v0.7.0", "flags": ["--context", "--packs", "acg,it,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "reading": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+beauty+tri:{tri8}"},
+    # v0.8.0: v0.7.0's models, the meme pack on by default too (Shell.swift memePackOn = true, packs acg,it,meme,beauty), the context recurrence term (docs/spec/decoder.md §4.6)
+    # and its weight on the semantic correction's pool (semantic-rerank.md §3.1.1): `"recur"` and `"pool_recur"` make the tag `+ctx+recur+pr` (copied from CLI summary lines on typing76).
+    "v0.8.0": {"release": "v0.8.0", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "reading": True, "recur": True, "pool_recur": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+meme+beauty+tri:{tri8}"},
 }
 # Anchor (docs/spec/evaluation.md §7.7): S7h's measurement, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
@@ -1201,6 +1206,11 @@ def measure_speed2(ctx, vers):
                          "p95_us": statistics.median(x["p95_us"] for x in r), "max_us": max(x["max_us"] for x in r),
                          "load_ms": statistics.median(x["load_ms"] for x in r), "rss_mb": max(x["rss_mb"] for x in r)}
         out[v.sha] = {**res["chat"], "formal": res["formal"]}
+        # every round's raw values, kept beside the medians above (which are computed from the same numbers and mean what they always did)
+        out[v.sha]["speed_rounds"] = {
+            **{prof: [{k: x[k] for k in ("p95_us", "max_us", "load_ms", "rss_mb")} for x in runs[v.sha, prof]]
+               for prof in PROFILES2 if (v.sha, prof) not in errs},
+            "rerank_ms": [{"p50": a, "p95": b} for a, b in rr[v.sha]]}
         if rr[v.sha] and "error" not in res["chat"]:
             out[v.sha]["rerank_p50_ms"] = statistics.median(a for a, _ in rr[v.sha])
             out[v.sha]["rerank_p95_ms"] = statistics.median(b for _, b in rr[v.sha])
