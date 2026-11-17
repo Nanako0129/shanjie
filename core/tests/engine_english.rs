@@ -2386,6 +2386,12 @@ fn an_overwritten_syllable_lists_the_english_of_its_keys() {
     assert!(e.syllables() == ["ㄇㄛ"]);
     let list = whole_list(&mut e, "Down");
     assert!(last_two(&list) == ["qai", "QAI"] && !list.iter().any(|w| w == "ai" || w == "AI"), "{list:?}");
+    // Two digit keys over each other (no digit layer without a model): the two items are the same text.
+    let mut e = app();
+    run(&mut e, "1 1 _");
+    assert!(e.syllables() == ["ㄅ"], "{:?}", e.syllables());
+    let list = whole_list(&mut e, "Down");
+    assert!(last_two(&list) == ["11", "11"], "{list:?}");
     // Nothing replaced: no item (the short words keep theirs).
     let mut e = app();
     run(&mut e, "g _");
@@ -2456,6 +2462,11 @@ fn the_token_of_a_reverted_run_has_the_chinese_item_of_its_characters() {
     // A run Shift opened has none, whatever its characters.
     let mut e = eng();
     assert!(run(&mut e, "s S-p _ Down").candidates == ["sP", "sp", "Sp", "SP"]);
+    // Nor has the head of a tone split (`o k j i 3`: the token `ok` and ㄨㄛˇ), though a revert opened the run.
+    let mut e = eng();
+    run(&mut e, "o k j i 3");
+    assert!(e.syllables() == ["_punct_ok", "ㄨㄛˇ"] && e.english_split(), "{:?}", e.syllables());
+    assert!(run(&mut e, "Left Down").candidates == ["ok", "Ok", "OK"]);
 }
 
 /// docs/spec/english-mixed.md §4.2: the tone moved up reads the record: a replaced key does not stop it.

@@ -224,7 +224,7 @@
 - **串**（`DRun`）：從第一個進字母表的注音鍵起、連續的字母表鍵；記串開始時的歷史詞 C（`lm::history(context_key(左文＋串前的顯示字串))`，沒有漢字就是 `<s>`）。串在邊界鍵、尾段收進非字母表鍵、或尾段完成音節時結束。
 - **緩衝**：串裡還沒變成 token 的鍵，最多 4 個（`MAX_BUF`；音節最多三個符號加一個聲調，更早的鍵一定不屬於任何音節），第 5 個起最舊的鍵立刻吐成 token。
 - **切分**：緩衝的 n 個鍵分成「前 m 個是數字、後 t 個是音節尾段」（m＋t＝n，t ≤ 4）。尾段要**合法**：符號照聲介韻順序，是詞庫某個去聲調音節的前綴；尾段最後一個鍵是聲調鍵或空白時，必須是詞庫裡的完整音節，而且那個音節至少有一個詞條含漢字（注音字母詞如「ㄅ」不算）。t＝0（全數字）永遠合法。
-- **顯示**：被選中的切分，前 m 個鍵顯示成半形數字，尾段顯示成注音欄位；尾段鏡射進 `pend` 與影子，所以預測列等讀未完成音節的地方不必特別處理。
+- **顯示**：被選中的切分，前 m 個鍵顯示成半形數字，尾段顯示成注音欄位；尾段鏡射進 `pend`、影子與按鍵紀錄，所以預測列等讀未完成音節的地方不必特別處理。
 
 ### 7.2 評分用的機率
 
@@ -367,7 +367,7 @@
 - 輸出結構末尾的 `english_run_utf16_start`、`english_run_utf16_len` 見 §4.6。
 - 沒有載入單字表的函式（早期的英文單字表已移除）。`set_left_context` 的前文用途見 §8。
 - 工具鉤子（`#[doc(hidden)]`，不進 C ABI）：`english_reverted() -> Option<Revert>`（`Revert::{Overwrite, Order, Missing}`，最近一次 `key()` 是否回退、哪一種）、`english_split()`、`english_shadow()`（影子的鍵）、`english_record()`（按鍵紀錄）、`english_replay(keys)`（注音重播完成的音節與剩下的三欄）、`english_columns()`、`digits_shown()`／`digits_emitted()`／`digits_typed()`、`set_digits_trace`、`set_late_trace`／`take_late_trace`（待歸鍵的重判：引擎交給 `late_decision` 的輸入與結果）、`late_keys()`、`late_decision(…)`（`Scorer::late_decision` 在引擎的模型上直接呼叫）、`set_reorder_penalty(rho, rho_sym)`（量測用：只改這個引擎的 ρ，不改常數）、`set_digit_table`／`load_digits`、`set_english_next`／`load_english_next`。每次 `key()` 開頭清除 `reverted`／`split`。
-- 所有英文、影子、數字的內容不進訊息與紀錄，錯誤只有碼。
+- 所有英文、影子、按鍵紀錄、數字的內容不進訊息與紀錄，錯誤只有碼。
 
 ## 13. 驗證
 
@@ -393,7 +393,7 @@
 
 - 驅動真的引擎，量「照順序打中文時回退誤觸的頻率」：`--rows FILE`（`前文|句子|讀音`）、`--p`（每個注音鍵的錯打機率，0＝無錯打）、`--repair overwrite|backspace`、`--seed`（預設 20261014）、`--repeat`（預設 5 個種子）、`--overwrite on|off`、`--key-order on|off`（預設 on）、`--reversal-guard on|off`（工具預設 off，好讓 `revert_b_*` 欄描述關著顛倒保護時的 (b)，與引擎和 App 的預設 on 不同）、`--digits [--lm FILE]`。輸出一行 TSV、不含任何內容文字：`rows_sha256 rows syllables keys typos` 加 `revert_a/b/c`、`split`、`english_final` 各 mean／max（每千音節、跨種子）；`--digits` 再接六欄（最後數字 token 數、瞬間顯示成數字的鍵數、因數字多按的 Backspace，各 mean／max）。
 - 錯打模型固定：只對有鄰鍵的注音鍵（同一列左右各一，只留標準排列的注音鍵）以機率 `p` 錯打，一個或兩個鄰鍵均勻抽；聲調鍵、空白鍵、Backspace 與修正的鍵不錯打；修正 `overwrite` 在錯鍵與對鍵同欄時直接按對鍵一次、否則退回 `backspace`（按 Backspace 到欄位是預期的前綴再補打）。回退發生後模擬器照使用者會做的事復原（Esc 還原、再 Esc 清掉未完成音節，或 Space 直接成 token 時 Backspace 再 Esc），再把這個音節不含錯打地從頭重打；重打又回退則再計、再復原，`--retries`（預設 3）次後中止那一列。`--digits` 時 `backspace` 修正改看引擎實際的 preedit（使用者看得到 ㄅ ㄉ ㄓ 後面鄰鍵打錯而前面多出的數字，會多按一次 Backspace）。
-- `--words FILE --recall`：每個詞新引擎、逐字母、空白，印分類（回退 (a)／(b)／(c)、沒有回退）與固定公開清單 `ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7` 的 `probe` 行（token／中文／其他）。「成為英文 token」要畫面上是那個詞的寫法（§4.4；清單裡的 `google` 顯示成 `Google` 也算）。
+- `--words FILE --recall`：每個詞新引擎、逐字母、空白，印「成為英文 token」的詞數與分類（回退 (a)／(b)／(c)、沒有回退；兩個開關都關時，在空白鍵 (c) 回退的詞是打的整個詞，因為 token 取按鍵紀錄）與固定公開清單 `ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7` 的 `probe` 行（token／中文／其他）。「成為英文 token」要畫面上是那個詞的寫法（§4.4；清單裡的 `google` 顯示成 `Google` 也算）。
 - 出貨前的檢查（照順序、不打錯）：所有集合與開關組合的 `revert_*`、`split`、`english_final` 全部為 0；數字的最後 token 在 `--p 0` 與 `--p 0.02 --repair backspace` 也是 0。用覆寫改錯的 `--p 0.02 --repair overwrite` 只報、不擋——那就是「重打同一個位置算英文」的代價。
 - 測試：`cli/tests/english_sim.rs` 的固定種子數字（`fixed_seed_numbers`、`the_switches_take_on_or_off`、`reversal_guard_stops_trigger_b`、`recall_counts_the_classes_and_the_probes`、`digits_columns`、`digits_backspace_repair_reads_the_screen`、`a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on`）；改錯打模型要同時改這些數字。
 - `--swap P`、`--tone-early P`（打字模式；量顛倒的音節鍵序用 `--digits --reversal-guard on`）：一個音節以機率 P 在兩個以上符號時內部相鄰兩鍵對調一次（`--swap`），否則以機率 P 在有聲調鍵、兩個以上符號時聲調鍵提前一位（`--tone-early`）；這樣的音節不套用上面的錯打與修正，鍵原樣送給引擎。輸出多最後一欄 `hurried_bad_mean`：這些音節打完後組字區最後一個單位不是該音節的，每千音節（跨種子的平均）；失敗後組字區丟掉，一次失敗不決定後面的音節。兩個選項都沒給時輸出和原來相同。測試 `hurried_syllables_column`。
