@@ -70,6 +70,10 @@ test-python:
 	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
 	cd reference/proto && python3 -W ignore -m unittest test_digits
+	# docs/spec/english-mixed.md §16: the English table's builder, the probes, the cell choice, and the scores' Python baseline with its golden.
+	python3 -W ignore -m unittest tools/test_build_english.py
+	python3 -W ignore -m unittest reference/proto/test_english_score.py
+	python3 reference/proto/english_score.py --check
 	python3 -W ignore -m unittest tools/test_build_classes.py
 	cd reference/proto && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	python3 -W ignore -m unittest reference/proto/test_fuzzy_ref.py
