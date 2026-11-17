@@ -140,6 +140,11 @@ pub struct ReadingDecode {
     mass: HashMap<(u32, char), f64>,
     /// Whether `with_mass` ran, for the summary tag.
     mass_built: bool,
+    /// The syllable normalisation (`with_syllable_norm`): per syllable id, k = the largest t among the syllable's counted single characters, for the
+    /// syllables where that k is below 0; `logp` then answers `min(0, t - k)` for every single character of the syllable. Empty until then.
+    norm: HashMap<u32, f64>,
+    /// Whether `with_syllable_norm` ran, for the summary tag.
+    norm_built: bool,
     /// Evaluation only (`with_table`, the CLI's `--reading-table`): replaces the whole of `logp` for the pairs of the lexicon; a pair the table lacks
     /// is 0. Keyed by (syllable id, character). `None` in the engine and in every shipping path.
     table: Option<HashMap<(u32, char), f64>>,
@@ -147,7 +152,7 @@ pub struct ReadingDecode {
 
 impl ReadingDecode {
     pub fn new(lex: &Lexicon, base_text: &str) -> ReadingDecode {
-        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new(), mass: HashMap::new(), mass_built: false, table: None }
+        ReadingDecode { floor_mc: build_floor_mc(lex, base_text), exempt: HashSet::new(), exempt_sha8: String::new(), mass: HashMap::new(), mass_built: false, norm: HashMap::new(), norm_built: false, table: None }
     }
 
     /// Evaluation only: replaces the built-in t by `text`, one `character TAB reading TAB t` row per line (the format of `dump_table`), t being the value
@@ -266,16 +271,59 @@ impl ReadingDecode {
         self
     }
 
+    /// The syllable normalisation (docs/spec/decoder.md §5); runs last, after `with_exempt` and `with_mass`, whose t it reads. The term ranks the single
+    /// characters of one typed syllable; a deduction every counted character of the syllable shares tells none of them apart and only makes the
+    /// syllable's single characters lose to multi-character words (which pay no term) and to characters without a count. So, per one-syllable reading r:
+    /// among the single characters under r whose lexicon score (largest over duplicate rows) is above the lexicon's no-count score (the score most
+    /// single-character pairs share), k(r) = the largest t; when k(r) < 0 every single character under r answers `min(0, t - k(r))` from `logp`.
+    /// A syllable with an uncharged counted character, or with no counted character, is unchanged.
+    pub fn with_syllable_norm(mut self, lex: &Lexicon) -> ReadingDecode {
+        self.norm.clear();
+        let mut by_syl: HashMap<u32, Vec<(char, f64)>> = HashMap::new();
+        for (r, rd) in lex.readings.iter().enumerate() {
+            if rd.key_len != 1 {
+                continue;
+            }
+            let v = by_syl.entry(lex.key_pool[rd.key_off as usize]).or_default();
+            for p in lex.range(r) {
+                let mut cs = lex.word(p).chars();
+                if let (Some(c), None) = (cs.next(), cs.next()) {
+                    let s = lex.ents[p].score;
+                    match v.iter_mut().find(|(x, _)| *x == c) {
+                        Some(e) => e.1 = e.1.max(s),
+                        None => v.push((c, s)),
+                    }
+                }
+            }
+        }
+        // The no-count score: the one most single-character pairs share (ties: the larger bit pattern, a fixed choice).
+        let mut pairs: HashMap<u64, usize> = HashMap::new();
+        for &(_, s) in by_syl.values().flatten() {
+            *pairs.entry(s.to_bits()).or_default() += 1;
+        }
+        self.norm_built = true;
+        let Some(no_count) = pairs.iter().max_by_key(|&(&bits, &n)| (n, bits)).map(|(&bits, _)| f64::from_bits(bits)) else { return self };
+        for (syl, cs) in &by_syl {
+            let name = &lex.syl_names[*syl as usize];
+            let k = cs.iter().filter(|&&(_, s)| s > no_count).filter_map(|&(c, _)| self.logp(lex, name, &c.to_string())).fold(f64::NEG_INFINITY, f64::max);
+            if k.is_finite() && k < 0.0 {
+                self.norm.insert(*syl, k);
+            }
+        }
+        self
+    }
+
     /// The summary-line tag of a run that decodes with this table: `+rd`, then `+rx:<sha8 of the exempt list>` once `with_exempt` gave one, then `+rm`
-    /// once `with_mass` ran (the CLI and the replay print it at the end of every setting's tag).
+    /// once `with_mass` ran, then `+rn` once `with_syllable_norm` ran (the CLI and the replay print it at the end of every setting's tag).
     pub fn tag(&self) -> String {
         let rx = if self.exempt_sha8.is_empty() { String::new() } else { format!("+rx:{}", self.exempt_sha8) };
-        format!("+rd{rx}{}", if self.mass_built { "+rm" } else { "" })
+        format!("+rd{rx}{}{}", if self.mass_built { "+rm" } else { "" }, if self.norm_built { "+rn" } else { "" })
     }
 
     /// log10 P(reading | word) of the single-character word `word` read `syl`, relative to the word's best reading (<= 0): the lexicon's score
     /// minus the word's best score (the research's `lex_logp`), 0 for a `SANDHI` reading, the mc value for a pair at `LEX_FLOOR`, the mass value for a pair
-    /// `with_mass` adopted (never an exempt or `SANDHI` pair, which stay 0), and 0 again for an exempt pair. `None` when the
+    /// `with_mass` adopted (never an exempt or `SANDHI` pair, which stay 0), and 0 again for an exempt pair; last, on a syllable `with_syllable_norm`
+    /// recorded a k for, `min(0, t - k)`. `None` when the
     /// lexicon has no such pair. The scores are the raw lexicon's (largest over duplicate rows), before capping, demotion and learning.
     pub fn logp(&self, lex: &Lexicon, syl: &str, word: &str) -> Option<f64> {
         if let Some(tb) = &self.table {
@@ -301,6 +349,9 @@ impl ReadingDecode {
         }
         if word.chars().next().is_some_and(|c| self.exempt.contains(&(syl.to_string(), c))) {
             t = 0.0;
+        }
+        if let Some(k) = lex.syl_ids.get(syl).and_then(|id| self.norm.get(id)).filter(|_| word.chars().count() == 1) {
+            t = (t - k).min(0.0);
         }
         Some(t)
     }
@@ -467,14 +518,63 @@ mod tests {
         }
     }
 
-    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text (`+rm` follows once `with_mass` ran; this table has no mass step).
+    /// The tag names the exempt list: `+rd+rx:` and the first 8 hex of the SHA-256 of its text; `+rm` follows once `with_mass` ran and `+rn` once
+    /// `with_syllable_norm` ran (the loader runs both; the hand-built tables below run neither).
     #[test]
     fn the_tag_carries_the_exempt_lists_hash() {
         let (_, rd) = built(LEX, None, "b\t甲\n");
-        assert_eq!(rd.tag(), format!("+rd+rx:{}+rm", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
+        assert_eq!(rd.tag(), format!("+rd+rx:{}+rm+rn", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
         let plain = ReadingDecode::new(&Lexicon::parse(LEX).unwrap(), LEX);
         assert_eq!(plain.tag(), "+rd");
         assert_eq!(plain.with_exempt("b\t甲\n").unwrap().tag(), format!("+rd+rx:{}", &crate::eval::sha256_hex("b\t甲\n".as_bytes())[..8]));
+    }
+
+    /// The no-count score is -9 (three pairs share it). x: 甲 (-3 under its best) and 乙 (-4.9 under its best) are the counted ones and both are charged,
+    /// so the best of them is freed and the other keeps the difference; 丙 has no count and stays 0. y: 甲 is counted and uncharged there, so 丁 keeps
+    /// its deduction. z: 戊's only uncharged companion 己 has no count, so 戊 is freed. w: no counted character, so the uncounted 辛 keeps its deduction.
+    const NORM: &str = "a 甲 -1.0\nx 甲 -4.0\ny 甲 -1.0\nb 乙 -1.1\nx 乙 -6.0\nx 丙 -9.0\nc 丁 -1.2\ny 丁 -3.5\nd 戊 -1.3\nz 戊 -2.5\nz 己 -9.0\n\
+        e 庚 -9.0\nf 辛 -8.0\nf 辛 -9.5\nw 辛 -9.5\n";
+
+    /// The syllable normalisation: a syllable whose every counted single character is charged stops charging its best one, and nothing else moves.
+    #[test]
+    fn syllable_norm_frees_the_best_character_of_a_syllable_whose_counted_characters_are_all_charged() {
+        let lex = Lexicon::parse(NORM).unwrap();
+        let before = ReadingDecode::new(&lex, NORM).with_exempt("").unwrap().with_mass(&lex, NORM);
+        close(before.logp(&lex, "x", "甲").unwrap(), -3.0);
+        close(before.logp(&lex, "x", "乙").unwrap(), -4.9);
+        close(before.logp(&lex, "z", "戊").unwrap(), -1.2);
+        assert!(!before.tag().ends_with("+rn"));
+        let (lex, rd) = mk(NORM);
+        assert!(rd.tag().ends_with("+rm+rn"), "{}", rd.tag());
+        close(rd.logp(&lex, "x", "甲").unwrap(), 0.0);
+        close(rd.logp(&lex, "x", "乙").unwrap(), -1.9);
+        close(rd.term(&lex, "x", "乙"), -LAMBDA * 1.9);
+        close(rd.logp(&lex, "x", "丙").unwrap(), 0.0);
+        close(rd.logp(&lex, "z", "戊").unwrap(), 0.0);
+        close(rd.logp(&lex, "z", "己").unwrap(), 0.0);
+        for syl_w in [("a", "甲"), ("y", "甲"), ("b", "乙"), ("c", "丁"), ("y", "丁"), ("d", "戊"), ("e", "庚"), ("f", "辛"), ("w", "辛")] {
+            assert_eq!(rd.logp(&lex, syl_w.0, syl_w.1).map(f64::to_bits), before.logp(&lex, syl_w.0, syl_w.1).map(f64::to_bits), "{syl_w:?}");
+        }
+    }
+
+    /// A syllable with an uncharged counted character is left alone, and so is one without any counted character.
+    #[test]
+    fn syllable_norm_leaves_a_syllable_with_an_uncharged_counted_character_alone() {
+        let (lex, rd) = mk(NORM);
+        close(rd.logp(&lex, "y", "甲").unwrap(), 0.0);
+        close(rd.logp(&lex, "y", "丁").unwrap(), -2.3);
+        close(rd.logp(&lex, "w", "辛").unwrap(), -1.5);
+    }
+
+    /// An exempt pair is 0 before the rule, so it is the uncharged counted character of its syllable: it stays 0 and the syllable's other characters
+    /// keep their deductions (x: 乙 is exempt, so 甲 stays at -3). Without the exemption the same syllable is normalised (the test above).
+    #[test]
+    fn syllable_norm_keeps_an_exempt_pair_at_zero_and_its_syllable_unchanged() {
+        let (lex, rd) = built(NORM, None, "x\t乙\n");
+        close(rd.logp(&lex, "x", "乙").unwrap(), 0.0);
+        close(rd.logp(&lex, "x", "甲").unwrap(), -3.0);
+        close(rd.logp(&lex, "x", "丙").unwrap(), 0.0);
+        close(rd.logp(&lex, "z", "戊").unwrap(), 0.0);
     }
 
     /// Singles tie at -1 for every character below; the multi-character words give the masses. 甲 (a, b): m(a) = 10^-1, m(b) = 10^-3, so t(b) = -2 and

@@ -18,7 +18,7 @@
 //! summary tag name it (`colloquial.sjlm:<sha8>`, `+colloq:<sha8>`).
 //!
 //! The engine's n-gram decoder carries the reading term (docs/spec/decoder.md §5), built by `Engine::load_lm`; the summary tag of every setting ends
-//! `+rd+rx:<sha8 of std-exempt.tsv>+rm` (the table the engine really loaded; `+rm` is the reading-mass rule). `--no-reading-decode` (research only,
+//! `+rd+rx:<sha8 of std-exempt.tsv>+rm+rn` (the table the engine really loaded; `+rm` is the reading-mass rule). `--no-reading-decode` (research only,
 //! `Engine::set_reading_decode(false)`) leaves the term out and the tag without these marks. There is no reading-channel term in the fusion any more.
 //!
 //! The decoder also adds the context recurrence term (docs/spec/decoder.md §4.6), from each row's context through

@@ -196,11 +196,12 @@ def pack_tag(spec):
     return "".join("+" + p for p in f[f.index("--packs") + 1].split(",")) if "--packs" in f else ""
 
 
-def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=False, recur=False, pool_recur=False):
+def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=False, recur=False, pool_recur=False, reading_norm=False):
     """One shanjie-replay run (chat, --correct); checks its models line, setting tag and row count. -> the summary dict.
     The replay loads data/lm/colloquial.sjlm by default, as the App does: a version that ships the table (it is in `models`) runs as is and its tag
     ends in +colloq:<sha8>+rc (the reading-channel term rides on the colloquial term, chat); one that does not ships no data/lm/colloquial.sjlm, and `--no-colloquial` keeps the replay from loading another.
-    A version with `"reading": True` in VERSIONS2 (the decoder's reading term, docs/spec/decoder.md §5) has no `+rc` and ends its tag in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>+rm` (`+rm`: the reading-mass rule).
+    A version with `"reading": True` in VERSIONS2 (the decoder's reading term, docs/spec/decoder.md §5) has no `+rc` and ends its tag in `+rd+rx:<sha8 of its data/lexicon/std-exempt.tsv>+rm` (`+rm`: the reading-mass rule),
+    `+rm+rn` when it also has `"reading_norm": True` (the syllable normalisation); each refuses the other form.
     A version with `"recur": True` (the context recurrence term, docs/spec/decoder.md §4.6) has `+recur` before the reading marks, `+recur+pr` when it also has
     `"pool_recur": True` (the weight on the semantic correction's pool, docs/spec/semantic-rerank.md §3.1.1) and the replay runs the small model."""
     cmd = [binary, "--rows", rows, "--profile", "chat", "--correct", "--learn", "on" if learn else "off", "--rowstats", rowstats]
@@ -224,7 +225,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=Fals
     if recur:
         want += "+recur" + ("+pr" if pool_recur and tl8 else "")
     if reading:
-        want += f"+rd+rx:{bench.sha_file(os.path.join(root, 'data', 'lexicon', 'std-exempt.tsv'))[:8]}+rm"
+        want += f"+rd+rx:{bench.sha_file(os.path.join(root, 'data', 'lexicon', 'std-exempt.tsv'))[:8]}+rm" + ("+rn" if reading_norm else "")
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")
     n = len(bench.truths(rows))
@@ -258,7 +259,7 @@ def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
         def cell(name, learn):
             rs = os.path.join(td, f"{name}.{'on' if learn else 'off'}.rs")
             try:
-                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs, pack_tag(bench.VERSIONS2[label]), bool(bench.VERSIONS2[label].get("reading")), bool(bench.VERSIONS2[label].get("recur")), bool(bench.VERSIONS2[label].get("pool_recur"))), rs
+                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs, pack_tag(bench.VERSIONS2[label]), bool(bench.VERSIONS2[label].get("reading")), bool(bench.VERSIONS2[label].get("recur")), bool(bench.VERSIONS2[label].get("pool_recur")), bool(bench.VERSIONS2[label].get("reading_norm"))), rs
             except RuntimeError as e:
                 die(f"{name}: {e}")
         for name in ("user-reported", "dev302"):

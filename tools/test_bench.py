@@ -775,6 +775,33 @@ class SuiteV2(Tmp):
         # the previous release is unchanged
         self.assertNotIn("reading", bench.VERSIONS2["v0.6.1"])
 
+    def test_reading_norm_version_ends_every_tag_with_rn_and_the_others_do_not(self):
+        """docs/spec/decoder.md §5: a version with `"reading_norm": True` ships the syllable normalisation and ends every tag in `+rm+rn`; one without the
+        key (v0.7.0, v0.8.0) ends in `+rm`. A cell is scored against its own form only: each refuses the other."""
+        base = {"release": "vN", "flags": ["--context", "--packs", "acg"], "tinylm": True, "reading": True, "tag": "+ctx+tl:{tl8}+acg"}
+        for spec, own, other in ((dict(base, reading_norm=True), "+rm+rn", "+rm"), (base, "+rm", "+rm+rn")):
+            label = "vN" + own.replace("+", "")
+            with self.subTest(own=own), mock.patch.dict(bench.VERSIONS2, {label: spec}):
+                v = self.stage_models(label, HEX)
+                for n in HEX:
+                    self.put_model(n)
+                os.makedirs(os.path.join(v.dir, "data", "lexicon"), exist_ok=True)
+                with open(os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv"), "w", encoding="utf-8") as f:
+                    f.write("ㄅㄛ\t波\n")
+                with mock_hash():
+                    bench.setup_models(v, spec, os.path.join(self.td, "mfn" + str(len(own))))
+                for prof in ("chat", "formal"):
+                    self.assertEqual(bench.expected_tag(v, prof, False), f"lm-{prof}+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{v.rx8}{own}")
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}", [True, True], ("你好", "世界"))
+                self.assertTrue(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"].endswith(own))
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        for label in ("v0.7.0", "v0.8.0"):
+            self.assertNotIn("reading_norm", bench.VERSIONS2[label])
+
     def test_recur_version_marks_every_context_tag_after_ctx(self):
         """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
         cell run with `--context` (chat, formal, the anchor run); the replay-setting cell has no `--context`, so no mark; a version without the key has none."""

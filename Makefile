@@ -63,6 +63,8 @@ test-python:
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
 	python3 -W ignore -m unittest tools/test_readings.py
+	# docs/spec/evaluation.md: the syllable-normalisation probe is what the tool generates from the shipping lexicon, model and pin file.
+	python3 tools/reading_norm_probe.py --check
 	python3 -W ignore -m unittest tools/test_holdout_guard.py tools/test_merge_guard_rows.py
 	python3 -W ignore -m unittest tools/test_build_attribution.py
 	python3 -W ignore -m unittest tools/test_build_trigram.py

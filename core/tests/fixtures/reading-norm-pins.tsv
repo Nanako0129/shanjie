@@ -1,0 +1,67 @@
+# The pairs the reading term's syllable normalisation (core/src/reading.rs `ReadingDecode::with_syllable_norm`, docs/spec/decoder.md §5) moves on the
+# shipping lexicon: `character TAB reading TAB t`, t after the rule and before the `LAMBDA * max(t, -CAP)` step. 61 rows on 59 syllables, sorted by
+# character then reading; every other pair of the dump equals the table before the rule (core/tests/reading_mass.rs).
+#
+# Made from the evaluation CLI's reading-table dump (`shanjie-eval --lm data/lm/bigram.sjlm --profile chat --dump-reading-table FILE`): the rows whose t
+# differs from the same dump of the build before the rule. tools/reading_norm_probe.py reads the pairs to build eval/dev/reading-norm/context.txt.
+作	ㄗㄨㄛ	0.0
+價	ㄍㄚ˙	0.0
+勒	ㄌㄟ	0.0
+匙	ㄕ˙	0.0
+卡	ㄑㄧㄚˇ	0.0
+參	ㄘㄣ	0.0
+叔	ㄕㄨ˙	0.0
+吹	ㄔㄨㄟˋ	-0.7507672825398242
+呢	ㄋㄜ˙	0.0
+和	ㄏㄨㄛ˙	0.0
+哄	ㄏㄨㄥˇ	0.0
+哈	ㄏㄚˇ	0.0
+哩	ㄌㄧ˙	0.0
+哪	ㄋㄚ˙	0.0
+啦	ㄌㄚ˙	0.0
+堆	ㄗㄨㄟ	0.0
+太	ㄊㄞ˙	0.0
+夫	ㄈㄨ˙	0.0
+奶	ㄋㄞ˙	0.0
+姊	ㄐㄧㄝ˙	0.0
+姥	ㄌㄠ˙	0.0
+娃	ㄨㄚ˙	0.0
+子	ㄗ˙	0.0
+尋	ㄒㄧㄣˊ	0.0
+弄	ㄌㄨㄥˋ	0.0
+得	ㄉㄟˇ	0.0
+忸	ㄋㄩˋ	0.0
+思	ㄙ˙	0.0
+意	ㄧ˙	0.0
+意	ㄧㄜˋ	0.0
+扔	ㄖㄥˇ	0.0
+抓	ㄔㄨㄚˇ	0.0
+拽	ㄓㄨㄞ	0.0
+掄	ㄌㄨㄣ	0.0
+掇	ㄉㄨㄛ˙	0.0
+摟	ㄌㄡ	0.0
+撩	ㄌㄧㄠ	0.0
+擰	ㄋㄧㄥˇ	0.0
+橫	ㄏㄥˋ	0.0
+欸	ㄟˋ	0.0
+汆	ㄊㄨㄣˇ	0.0
+混	ㄏㄨㄣˇ	0.0
+濘	ㄋㄥˋ	0.0
+炊	ㄔㄨㄟˋ	0.0
+碌	ㄌㄨ˙	0.0
+窘	ㄐㄩㄣˇ	0.0
+簍	ㄌㄡ˙	0.0
+聽	ㄊㄧㄥˋ	0.0
+舀	ㄨㄞˇ	0.0
+著	ㄓㄠˊ	0.0
+誰	ㄕㄨㄟˊ	0.0
+謝	ㄒㄧㄝ˙	0.0
+這	ㄓㄟˋ	0.0
+那	ㄋㄚ	0.0
+阿	ㄚˋ	0.0
+難	ㄋㄢˋ	0.0
+頭	ㄊㄡ˙	0.0
+骨	ㄍㄨˊ	0.0
+鶻	ㄍㄨˊ	-1.3853469624805013
+麼	ㄇㄛ˙	0.0
+黑	ㄏㄟˇ	0.0
