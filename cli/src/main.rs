@@ -436,6 +436,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_given = false;
     let mut reading_decode = true;
     let (mut reading_table, mut dump_reading_table) = (None::<String>, None::<String>);
+    // `--unseen-ceiling K` (evaluation only, `CappedLexicon::with_packs_ceil`): a generated overlay word the model never saw is scored at most
+    // log10(K / N). The summary line gets `+uc:K`; without the option the output is unchanged.
+    let mut unseen_ceil = None::<f64>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -506,6 +509,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--pool-mask-diff" => pool_mask_diff = Some(val()?),
             "--no-reading-decode" => reading_decode = false,
             "--reading-table" => reading_table = Some(val()?),
+            "--unseen-ceiling" => unseen_ceil = Some(val()?.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0).ok_or("--unseen-ceiling takes a positive count")?),
             "--dump-reading-table" => dump_reading_table = Some(val()?),
             _ => return Err("unknown argument".into()),
         }
@@ -625,7 +629,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
     // The rows of the pack-oov packs (not `--extra-overlay`, not other packs): their words are unknown to the model and keep the pack's score (docs/spec/decoder.md §2.5).
     let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
-    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    let capped = CappedLexicon::with_packs_ceil(lex.clone(), &overlay, &pack_rows, &lm, Some(&table), unseen_ceil).ok_or("bad demote.tsv")?;
     // The reading term: the engine's own table (mcbpmf-data.txt for the mc estimate of the floor readings, std-exempt.tsv for the exemptions) and its tag.
     let (capped, rd_tag) = if reading_decode {
         let rd = load_reading_decode(&lex, &dir).map_err(|e| e.to_string())?;
@@ -1034,6 +1038,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     // `--pool-mask-diff`: the number of rows it wrote, the last key of the summary (absent without the option).
     let md = if want_mask_diff { format!(", 'pool_mask_diff': {mask_diffs}") } else { String::new() };
+    let rd_tag = format!("{rd_tag}{}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
     println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())

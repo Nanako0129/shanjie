@@ -36,6 +36,7 @@
 
 - 疊加層（`overlay-add.tsv`、`names-add.tsv`、詞包）裡的詞，不論它是疊加層新增或和基底同詞，分數都封頂到語料頻率：`min(分數, log10(次數 / N))`；通語沒看過的（次數 0）扣 `UNSEEN_OVERLAY_PENALTY` = 1.0。封頂後每個讀音重新排序。
 - 例外只有選用詞包，見 §2.5。`sandhi-add.tsv` 的列不在封頂清單裡（它們是基底詞的讀音變體）。
+- 評測專用的 `shanjie-eval --unseen-ceiling K`（`CappedLexicon::with_packs_ceil`，引擎不用、預設關、不帶時輸出不變）：產生的疊加層列（標籤 `wikt`、`zhwiki`、`萌典補詞`，`GENERATED_OVERLAY_TAGS`）裡通語沒看過的詞，分數改成 `min(分數 − 1.0, log10(K / N))`；手動詞、網路用語、名單層、詞包照舊。摘要行加 `+uc:K`。背景：這些列的分數是固定的 `S_len`，扣 1.0 之後相當於語料出現 4.2 次（2 字）、5.6 次（3 字）、15.2 次（4 字）的詞（N = 617,862,688），比出現過 1 次的詞還高；K < 1 時沒看過的詞排在所有看過的詞之下。測試：`core/tests/pack_oov.rs` 的 `unseen_ceiling_takes_only_never_seen_words_of_generated_rows`。
 - `CappedLexicon::readings()`（預測列與數字層用）重建出和「沒有詞包例外」時相同的封頂清單，所以詞包的分數規則不影響預測與數字層。
 
 ### 2.3 異體排序表（`variant-order.tsv`）
