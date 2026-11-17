@@ -1207,7 +1207,7 @@ pub fn load_reading_decode(lex: &Lexicon, data_dir: &Path) -> Result<crate::read
     let rd = crate::reading::ReadingDecode::new(lex, &base)
         .with_exempt(&exempt)
         .map_err(|detail| LoadError::Parse { path: data_dir.join(READING_EXEMPT_FILE), detail })?;
-    Ok(rd.with_mass(lex, &base))
+    Ok(rd.with_mass(lex, &base).with_syllable_norm(lex))
 }
 
 /// The overlay text the lexicon is parsed with: `overlay-add.tsv` then `sandhi-add.tsv`, with a line
@@ -1552,7 +1552,7 @@ impl Engine {
         self.pool_recur_on = on;
     }
 
-    /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>+rm`; empty without a model or with `set_reading_decode(false)`): what
+    /// The summary tag of the reading table the decoder uses now (`+rd+rx:<sha8>+rm+rn`; empty without a model or with `set_reading_decode(false)`): what
     /// `shanjie-replay` prints, so the tag names the table the engine really loaded.
     pub fn reading_tag(&self) -> String {
         self.lm.as_ref().and_then(|st| st.capped.reading_tag()).unwrap_or_default()

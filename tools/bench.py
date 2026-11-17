@@ -916,6 +916,9 @@ PROFILES2 = ["chat", "formal"]
 # A version that ships the decoder's reading term (docs/spec/decoder.md §5; its data/lexicon/std-exempt.tsv is in the export) has `"reading": True`: the CLI
 # then ends EVERY setting's tag (chat, formal, the anchor run, the replay-setting cell) with `+rd+rx:{rx8}+rm` (the first 8 hex of that file, then the reading-mass rule's mark) and no longer marks the colloquial
 # tag with `+rc` (the reading-channel term was removed with it). The row of the new version is added at its release (a checkout that has the reading-mass rule, docs/spec/decoder.md §5); a version without the key keeps `+rc` and no `+rd`.
+# A version that ships the reading term's syllable normalisation (docs/spec/decoder.md §5) has `"reading_norm": True` besides `"reading": True`: the CLI then ends
+# every tag with `+rd+rx:{rx8}+rm+rn`. The row of the new version is added at its release; a version without the key (v0.7.0, v0.8.0) ends in `+rm`, and each
+# refuses the other form (the current checkout's replay prints `+rn`, so tools/kpi.py cannot backfill a version without the key, docs/spec/evaluation.md §7).
 # A version that ships the context recurrence term (docs/spec/decoder.md §4.6) has `"recur": True`: with `--context` the CLI marks every cell's tag `+recur` right after
 # `+ctx` (the anchor run too; the replay-setting cell has no `--context`, so no mark), and the replay's tag has it before the reading marks. The row of the new version is added at its
 # release; a version without the key has no mark (its binary has no such term).
@@ -1057,8 +1060,9 @@ def colloq_tag(ver, prof):
 
 
 def reading_tag(ver):
-    """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule), else ""."""
-    return f"+rd+rx:{ver.rx8}+rm" if getattr(ver, "rx8", "") else ""
+    """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule),
+    then `+rn` for a `"reading_norm"` version (the syllable normalisation), else ""."""
+    return f"+rd+rx:{ver.rx8}+rm" + ("+rn" if ver.spec.get("reading_norm") else "") if getattr(ver, "rx8", "") else ""
 
 
 def expected_tag(ver, prof, anchor):

@@ -727,6 +727,32 @@ class ReplayRunWithThePoolWeight(ReplayRunWithTheRecurrenceTerm):
             self.assertIn(at, str(e.exception), mark)
 
 
+class ReplayRunWithTheSyllableNorm(ReplayRunWithThePoolWeight):
+    """A version with `"reading_norm": True` (the reading term's syllable normalisation, docs/spec/decoder.md §5): its replay tag ends in `+rm+rn` (the
+    inherited runs accept it) and `+rm` alone is refused; a version without the key ends in `+rm` (the classes above) and refuses `+rm+rn`."""
+    SPEC = dict(ReplayRunWithThePoolWeight.SPEC, reading_norm=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "rd": f"+rd+rx:{self.rx8()}+rm+rn"}
+
+    def test_each_form_passes_the_tag_check_of_its_own_version_only(self):
+        """`replay_cell` directly (the run through `cmd_replay` replaces VERSIONS2 with this class's SPEC). The fake run reports 0 rows, so a call
+        whose tag is accepted fails at the row count, the check after the tag's; the other form fails at the tag."""
+        lm8, tl8, co8, rows = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8], self.rows["user-reported"][0]
+        for norm in (True, False):
+            for tail in ("+rm+rn", "+rm"):
+                out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}{tail}  {{'n': 0}}"
+                with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(self.models), stdout=out)):
+                    with self.assertRaises(RuntimeError) as e:
+                        kpi.replay_cell("b", self.root, rows, self.models, False, os.path.join(self.td, "rs"), "+acg", True, True, True, norm)
+                self.assertIn("replay scored" if norm == (tail == "+rm+rn") else "setting tag", str(e.exception), (norm, tail))
+
+    def test_the_run_passes_the_versions_key_on(self):
+        self.replay()                                   # the fake binary prints `+rm+rn`: accepted with the key
+        with mock.patch.object(self, "SPEC", ReplayRunWithThePoolWeight.SPEC), self.assertRaises(SystemExit):
+            self.replay()                               # the same binary under a version without the key: refused
+
+
 # ---------- run ----------
 CLI = """#!{py}
 import os, sys
