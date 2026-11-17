@@ -387,7 +387,7 @@ struct RowOut {
 /// `data/lexicon/std-exempt.tsv` free) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
 /// `--tinylm-scores` `ng` and the pick all see it. The table is built by `core::engine::load_reading_decode` from the merged lexicon and the data folder, the one
 /// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>+rm+rn` in every setting (`+rm`: the reading-mass rule). `--no-reading-decode`
-/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has no `+rd`, `+rx` or `+rm`. There is no reading-channel term in the
+/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has no `+rd`, `+rx`, `+rm` or `+rn`. There is no reading-channel term in the
 /// fusion (docs/spec/decoder.md §5; no `+rc` tag), so the colloquial tag is just `+colloq:<sha8>`.
 ///
 /// `--reading-table FILE` (evaluation only; experiments/reading-counts-b3 in the research repository; not in the engine or the C ABI): the reading term's t comes from
