@@ -76,7 +76,9 @@ fn the_switches_take_on_or_off() {
 /// Recall mode: every word of eval/golden/english-tiny.txt typed letter by letter on an engine of its own, then Space. The first revert of
 /// the six words is (a) four times (google, dip, hello, rust: a key over a symbol in its column), (b) once (law: `a`, the initial, after the
 /// final `l`) and (c) once (cup: typed in order, and the syllable ㄏㄧㄣ is missing at Space); every one ends as one English token equal
-/// to the word. With both switches off only (c) is left, and `cup` is the one word that ends as a token.
+/// to the word. With both switches off only (c) is left: four words revert at Space (their columns make no syllable) and each is the whole
+/// word, because the token is the key record, the replaced keys included (docs/spec/english-mixed.md §2; it was 1, `cup`, while the token
+/// was the keys left in the columns); the other two end as Chinese.
 #[test]
 fn recall_counts_the_classes_and_the_probes() {
     let sha = "d4907dc4b4fffa8c0f450e3321b0837d90447af45747ef0cb49fee12fd9cbd80";
@@ -96,7 +98,7 @@ fn recall_counts_the_classes_and_the_probes() {
         assert_eq!(*line, format!("probe\t{w}\t{what}"));
     }
     let off = run(&["--words", LIST, "--recall", "--overwrite", "off", "--key-order", "off"]);
-    assert_eq!(off.lines().next().unwrap(), format!("{sha}\t6\t1\t0\t0\t4\t2"));
+    assert_eq!(off.lines().next().unwrap(), format!("{sha}\t6\t4\t0\t0\t4\t2"));
     assert!(off.contains("probe\tcup\ttoken\n") && off.contains("probe\tgo\ttoken\n") && off.contains("probe\tok\t中文\n"), "{off}");
 }
 

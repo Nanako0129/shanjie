@@ -207,25 +207,31 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   standard layout and the abbreviation composer off, the engine reverts to the raw keys the moment the
 //   unfinished syllable cannot be what was meant (docs/spec/english-mixed.md §3): the unfinished Zhuyin goes and an English run (the
 //   run of docs/spec/english-mixed.md §4.1, underlined by the output's english_run_utf16_start / english_run_utf16_len)
-//   holds the keys as typed, in the composition at the cursor. Three triggers: (a) a Zhuyin key over the symbol already in its
+//   holds every key typed for that syllable, in the order typed and with the keys a later key replaced in its column (the key record,
+//   31 keys at most), in the composition at the cursor. Three triggers: (a) a Zhuyin key over the symbol already in its
 //   column (`o k` is `ok`; the switch set_english_overwrite), (b) a Zhuyin key in a column before one that is filled (`l s` is
 //   `ls`; only with set_english_key_order 1 and set_english_reversal_guard 0, so not by default), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
 //   `cup`, `s 7` is `s7`; Space under set_english alone, a tone key under set_english_key_order), except when the adjacent-key rule
 //   of set_fuzzy (bit 4) accepts the syllable. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
 //   never reverts: the candidate list opened right after it adds its lower and upper case as its last two items, and choosing one
-//   swaps that one syllable for an English token.
+//   swaps that one syllable for an English token. A syllable that completes as Chinese after some key replaced another in its column
+//   (set_english_overwrite 0: `s p e e c h` Space is ㄘㄣ) gets the same two items for every key typed (`speech`, `SPEECH`).
 //   Keys on the run: letters, and the Zhuyin keys that are not letters (1 2 5 8 9 0 , . ; / -), go on it; a tone key (3 4 6 7) splits it when
 //   the run ends in two or more symbols, in column order, that the tone makes a syllable the lexicon has (`o k j i 3` is the English
 //   `ok` and the syllable ㄨㄛˇ), else goes on it; Space ends it (the space is eaten) as one English token; Backspace takes one key; Esc
-//   right after a revert that nothing changed brings the Zhuyin back, else takes the whole run; every other key ends it first. A token
-//   that Space made at once (trigger (c) at Space: `c u p` Space) is a finished token with nothing to bring back: Esc then does what it
+//   on a run a revert opened, typed on or not, puts the Zhuyin replay of its characters in its place (the keys typed again as Zhuyin with
+//   English mixing off: completed syllables go in at the cursor, the rest is the unfinished syllable; `commit` holds what a 128th unit
+//   sent), and takes the whole run when it was opened another way or holds a character that is no Zhuyin or tone key; every other key
+//   ends it first. A token
+//   that Space made at once (trigger (c) at Space: `c u p` Space) is a finished token: Esc then does what it
 //   does after any English token (clears the composition); Backspace takes one letter of it.
 //   An English token is one unit like a punctuation mark in the composition (the arrow keys take it whole, the next word starts a new
 //   sentence, it is learned under the neighbour key `^>_punct_en`). Its reading keeps the text as typed; what it shows and sends is the
 //   text's writing (docs/spec/english-mixed.md §4.4): typed all lower case or with only its first letter upper case, a word of the built-in
 //   table of official writings takes the table's line (`chatgpt`, `Chatgpt` -> `ChatGPT`), anything else stays as typed; a run typed in the
-//   ASCII state stays as typed. A token a revert made keeps, as the last item of its writings list
-//   (Down right after it), the Chinese item of the syllable the keys would have made when the lexicon has it. With the cursor at
+//   ASCII state stays as typed. The token of a run a revert opened keeps, as the last item of its writings list
+//   (Down right after it), the Chinese item: the first lexicon entry of the syllable all the run's characters replay to, when they
+//   replay to exactly one syllable and the lexicon has it. With the cursor at
 //   the end, an English token and the syllables after it that the table `mixed-words.tsv` (in data_dir, optional: absent or bad,
 //   nothing is added) has as one word (`cp` + ㄓˊ = `CP值`) put that word first in the candidate list Down or Space opens, which
 //   then carries no prediction row items; choosing it puts one punctuation-kind token (not learned, removed whole) in place of the
@@ -236,7 +242,7 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //     table put there reopens from the text as typed, `ChatGPT` as `Chatgp`; any other text reopens as it stands and keeps its casing
 //     when that run ends). Space
 //     units and punctuation tokens still go whole.
-//   - Shift+letter starts a run too (every key of the unfinished syllable's shadow in the order typed, then the shifted letter); the output
+//   - Shift+letter starts a run too (the unfinished syllable's key record, then the shifted letter); the output
 //     fields mark the run in preedit (0 and 0 otherwise). Without set_english the Shift rules (docs/spec/keys-and-composition.md §4.1 rules 13, 21, 22) are unchanged.
 //   - With the cursor right after an English token or a space unit, no unfinished syllable and no window open, Space inserts
 //     a half-width space as one unit (like a punctuation mark): the first Space after a run ends it, the second types a space.
@@ -294,8 +300,8 @@ int32_t shanjie_engine_set_english_reversal_guard(ShanjieEngine *engine, uint32_
 // set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
 //   (docs/spec/keys-and-composition.md §9). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
 //   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes
-//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's keys (in the order typed)
-//   open the English run, as Shift+letter does (`c` stays `c`); with no syllable the run opens with the first character. Where the
+//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's key record (every key in the order typed)
+//   opens the English run, as Shift+letter does (`c` stays `c`); with no syllable the run opens with the first character. Where the
 //   core has no English run to keep a composition in (the ETen layout, the abbreviation composer, set_english 0) 1 only records the
 //   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first). From then
 //   on a CHAR key without modifier bits whose ch is 0x21-0x7E is handled right after rule 1 (Caps Lock / Option / Command / Control

@@ -74,7 +74,8 @@
 //! - A syllable ends with its tone key, or Space for tone 1.
 //! - A revert (docs/spec/english-mixed.md §13.3): the engine reports it after the key; it is counted by kind and undone: Esc (it brings the Zhuyin
 //!   back), Esc again (the unfinished syllable goes; the composition is as before the syllable), or, when the key was the Space that made a
-//!   token at once, Backspace and then Esc (the token becomes a run, the run goes) - except that a one-letter token is taken whole by the
+//!   token at once, Backspace and then Esc (the token becomes a run, the run goes: that token has no Chinese item, so the run is not one a
+//!   revert opened and Esc does not replay it) - except that a one-letter token is taken whole by the
 //!   Backspace, so no Esc follows (it would clear the earlier syllables too: the simulator reads the output's run length). The syllable is then typed again from the start without a
 //!   mistake, so the row goes on as if the mistake had been caught in time. A retyping that reverts again is counted and undone again
 //!   (it cannot happen without a wrong key; after `--retries` tries (default 3) the ROW is stopped, docs/spec/english-mixed.md §13.3: it is counted, one stderr
