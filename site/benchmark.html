@@ -72,6 +72,39 @@
 <p class="note">外部模型和善解的語意校正在同一批候選（善解整句解碼的前幾名）上重排，用同一種選值方法；不是外部輸入法本身的成績。</p>
 <div data-fill="external"></div>
 
+<h3 id="oc-v2">和 0c 選字模型 v2 比</h3>
+<p class="note">0c 靈犀注音在 2026 年 11 月公開了選字模型 v2（MIT 授權）。它是一個候選重排模型：別人給它候選，它替每個候選打分。我們把它放在善解的候選上，和善解自己的選字比。0c 的分數和善解的 n-gram 分數相加後選第一名（0c 模型卡建議的用法），相加的比重在另一份調參用的句子上選好，再拿來量下面的集合。在 v0.8.0 的出貨 commit 上量。上面那張外部模型表是 2026-10-13 量的，候選池、判分與相加方式都是當時的，所以同一個 0c v1 在兩張表的數字不同。</p>
+<div class="table">
+<table>
+<thead><tr><th></th><th>讀到的前文</th><th>讀音</th><th>候選從哪裡來</th></tr></thead>
+<tbody>
+<tr><td>0c v1、v2</td><td>游標前最多 64 個字</td><td>每個音節的注音都給模型</td><td>v0.8.0 的 n-gram 解碼前 8 名（候選池的前文加重關掉）</td></tr>
+<tr><td>善解</td><td>語意校正的模型讀游標前最多 2 個字；v0.8.0 另外會把前文（最多 64 字）裡出現過的字加重</td><td>讀音在 n-gram 解碼時就用掉了</td><td>各版自己的 n-gram 解碼前 8 名（v0.8.0 的候選池開著前文加重）</td></tr>
+</tbody>
+</table>
+</div>
+<div class="table">
+<table>
+<thead><tr><th>公開句子上的第一名正確率</th><th class="num">只用 n-gram</th><th class="num">0c v1</th><th class="num">0c v2</th><th class="num">善解 v0.7.0</th><th class="num">善解 v0.8.0</th></tr></thead>
+<tbody>
+<tr><td>口語句（Common Voice，2,992 句）</td><td class="num">88.7%</td><td class="num">90.6%</td><td class="num">90.8%</td><td class="num">93.1%</td><td class="num">93.1%</td></tr>
+<tr><td>長前文，聊天設定（維基討論頁與條目，3,944 句）</td><td class="num">76.4%</td><td class="num">79.7%</td><td class="num">80.1%</td><td class="num">80.0%</td><td class="num">82.0%</td></tr>
+<tr><td>長前文，書面設定（同一批句子）</td><td class="num">79.1%</td><td class="num">81.7%</td><td class="num">81.6%</td><td class="num">81.3%</td><td class="num">83.3%</td></tr>
+<tr><td>開發句（302 句，聊天設定）</td><td class="num">83.4%</td><td class="num">88.4%</td><td class="num">88.1%</td><td class="num">94.0%</td><td class="num">94.0%</td></tr>
+<tr><td>使用者回報的錯字（189 句，聊天設定）</td><td class="num">55.6%</td><td class="num">64.0%</td><td class="num">66.1%</td><td class="num">76.7%</td><td class="num">77.2%</td></tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>0c 放上去之後比只用 n-gram 好，每個集合都是。</li>
+<li>口語句上善解比 0c v2 多對 68 句（2.3 個百分點）。</li>
+<li>長前文的句子上，0c 讀得到 64 個字的前文，和善解 v0.7.0 差不多；善解 v0.8.0 加了前文加重之後，比 0c v2 多對 74 句（聊天設定，1.9 個百分點）。</li>
+<li>0c v2 和 v1 在有聲調的輸入下差不多，每個集合的差都在幾句到十幾句之內。</li>
+<li>私人集合只寫方向：聊天訊息上善解比 0c v2 好，兩份聊天集合都是；新聞上 0c v2 比善解好（比重照調參句上對最多的選法；改用限制改壞的保守選法時，換成善解較好）。0c 的訓練資料以新聞為主，我們無法確認裡面有沒有和這份新聞句子相近的文章。</li>
+<li>0c v2 新增了「聲調沒打」的輸入。善解要打聲調，沒有對應的模式，所以這一項只比 0c 自己的兩版：同一批候選下，v2 不給聲調時比 v1 不給聲調好，公開的口語句上多對 24 句。</li>
+</ul>
+<p class="note">這張表每一欄都用 v0.8.0 起的新判分（judge v2：除了寫法變體表，每一句另外列出其他也算對的寫法）。上面的套件 v2 為了讓各版本能互相比，沿用凍結的舊判分，所以同一批開發句、同樣的選字結果，善解 v0.8.0 在那裡是 93.4%（282 句），在這裡是 94.0%（284 句），差的 2 句是新判分多認的寫法。錯字回報在套件 v2 裡是凍結的前 80 句，這裡是全部 189 句，兩邊不是同一批句子。這個比較只量了「0c 的分數加 n-gram 分數」這一種用法，沒有把 0c 接在善解的語意校正後面，也沒有量 0c 的 4-bit 量化版；候選都是善解解出來的，0c 在它自己的輸入法裡用的候選不同，這裡的數字不代表 0c 靈犀注音整體的正確率。</p>
+
 <h2 id="static" data-fill-title="static">實打對照</h2>
 <p class="note">當天用自動打字在三套輸入法實際打同一批句子，數錯的句數與錯字數。蘋果注音在測驗中會學習，條件和上面的版本列不同，不做統計比較。</p>
 <div data-fill="static"></div>
