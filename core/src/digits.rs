@@ -150,13 +150,32 @@ fn tone_mark_of_key(k: char) -> Option<char> {
     Layout::Standard.key_tone_mark(k)
 }
 
+/// What `Legal::tail_units_t3` is asked with: third-tone sandhi on, and whether an unaccepted neutral tail may stand here (the syllable before the tail is a
+/// second tone: no digit between them).
+#[derive(Clone, Copy)]
+pub struct Sandhi {
+    pub on: bool,
+    pub tail: bool,
+    /// Only a real syllable counts: one with a one-syllable entry. A syllable of the sandhi map (Xˊ or X˙ that stands only inside longer words, or nowhere)
+    /// is refused; what "all the keys make a real syllable" asks (docs/spec/english-mixed.md §7.1).
+    pub real: bool,
+}
+
+impl Sandhi {
+    pub const OFF: Sandhi = Sandhi { on: false, tail: false, real: false };
+    pub const REAL: Sandhi = Sandhi { on: false, tail: false, real: true };
+}
+
 /// The legal-tail test (docs/spec/english-mixed.md §7.1, "切分"), built from the lexicon's readings.
 pub struct Legal {
     prefixes: HashSet<String>,
     han: HashSet<String>,
-    /// Third-tone sandhi (docs/spec/english-mixed.md §7.1): an unaccepted syllable Xˊ (no one-syllable reading, Xˇ has one and is a Han syllable) -> Xˇ, the
-    /// complete syllable it is legal and scored as while the switch is on (`tail_units_t3`).
+    /// Third-tone sandhi (docs/spec/english-mixed.md §7.1): an unaccepted syllable Xˊ, or an unaccepted neutral tail X˙ (no one-syllable reading, Xˇ has one and
+    /// is a Han syllable) -> Xˇ, the complete syllable it is legal and scored as while the switch is on (`tail_units_t3`; the tail only after a second tone).
     tone3: std::collections::HashMap<String, String>,
+    /// A neutral X˙ that has a one-syllable entry of its own and whose Xˇ has one too (ㄉㄚ˙, ㄐㄧㄝ˙) -> Xˇ: after a second tone it is a neutral tail of the
+    /// sandhi table as well (docs/spec/decoder.md §6.6), so its tail is scored as the better of the two readings (`neutral_alt`).
+    tails: std::collections::HashMap<String, String>,
 }
 
 impl Legal {
@@ -189,10 +208,16 @@ impl Legal {
         }
         let tone3 = singles
             .iter()
-            .filter_map(|t| Some((format!("{}ˊ", t.strip_suffix('ˇ')?), t.to_string())))
+            .filter_map(|t| t.strip_suffix('ˇ').map(|x| (x, t.to_string())))
+            .flat_map(|(x, t)| [(format!("{x}ˊ"), t.clone()), (format!("{x}˙"), t)])
             .filter(|(r, t)| !singles.contains(r.as_str()) && han.contains(t))
             .collect();
-        Legal { prefixes, han, tone3 }
+        let tails = singles
+            .iter()
+            .filter_map(|t| t.strip_suffix('ˇ').map(|x| (format!("{x}˙"), t.to_string())))
+            .filter(|(r, t)| singles.contains(r.as_str()) && han.contains(t))
+            .collect();
+        Legal { prefixes, han, tone3, tails }
     }
 
     /// `new` as it was written before the syllable cache (each syllable's prefixes and string redone at every reading), kept for the test that builds both ways.
@@ -210,7 +235,7 @@ impl Legal {
                 han.extend(syls.iter().map(|s| s.to_string()));
             }
         }
-        Legal { prefixes, han, tone3: Default::default() }
+        Legal { prefixes, han, tone3: Default::default(), tails: Default::default() }
     }
 
     /// The two sets (tests).
@@ -227,12 +252,22 @@ impl Legal {
     /// Keys -> units when they form a legal tail, else `None`. Last key a tone key or Space: a complete syllable that exists in the
     /// lexicon with a Han entry; otherwise symbols only, a prefix of some toneless syllable (this also fixes the initial-medial-final order).
     pub fn tail_units(&self, keys: &[char]) -> Option<Vec<Unit>> {
-        self.tail_units_t3(keys, false)
+        self.tail_units_t3(keys, Sandhi::OFF)
+    }
+
+    /// The units of Xˇ for a tail that closes the neutral syllable X˙ of `tails` (the key `7` last), else `None`.
+    pub fn neutral_alt(&self, keys: &[char]) -> Option<Vec<Unit>> {
+        let (last, body) = keys.split_last()?;
+        let mark = tone_mark_of_key(*last).filter(|m| *m == '˙')?;
+        let mut full: String = body.iter().map(|&k| symbol_of_key(k)).collect::<Option<String>>()?;
+        full.push(mark);
+        self.tails.get(&full).map(|t| units_of(t))
     }
 
     /// `tail_units` with third-tone sandhi on or off (docs/spec/english-mixed.md §7.1): on, a tail that ends in the second-tone key and makes an unaccepted
     /// syllable Xˊ is a legal complete syllable whose units are Xˇ's, so lpZ is scored as Xˇ.
-    pub fn tail_units_t3(&self, keys: &[char], t3: bool) -> Option<Vec<Unit>> {
+    /// An unaccepted neutral tail X˙ (the key `7`) is one only where `t3.tail` says the syllable before it is a second tone.
+    pub fn tail_units_t3(&self, keys: &[char], t3: Sandhi) -> Option<Vec<Unit>> {
         let last = *keys.last()?;
         if last == ' ' || tone_mark_of_key(last).is_some() {
             let body = &keys[..keys.len() - 1];
@@ -243,9 +278,18 @@ impl Legal {
             let mark = tone_mark_of_key(last);
             let mut full = s.clone();
             full.extend(mark);
+            // A syllable of the sandhi map has no one-syllable entry (`finish_syllable` does not take it as it stands, even when it occurs inside a longer
+            // Han word and so is in `han`): with sandhi on it is read as Xˇ.
+            if let Some(third) = self.tone3.get(&full) {
+                if t3.on && (t3.tail || !full.ends_with('˙')) {
+                    return Some(units_of(third));
+                }
+                if t3.real {
+                    return None;
+                }
+            }
             if !self.han.contains(&full) {
-                let third = self.tone3.get(&full).filter(|_| t3)?;
-                return Some(units_of(third));
+                return None;
             }
             s.push(mark.unwrap_or(' '));
             return Some(units_of(&s));
@@ -259,11 +303,11 @@ impl Legal {
     /// `tail_units` of the tail with its symbol keys in column order (docs/spec/english-mixed.md §7.3): the keys but the last (the closing key) go one to a
     /// column (initial, medial, final), a column asked twice or a key that is no symbol key makes it `None`, then the closing key.
     pub fn tail_units_in_columns(&self, tail: &[char]) -> Option<Vec<Unit>> {
-        self.tail_units_in_columns_t3(tail, false)
+        self.tail_units_in_columns_t3(tail, Sandhi::OFF)
     }
 
     /// `tail_units_in_columns` through `tail_units_t3`.
-    pub fn tail_units_in_columns_t3(&self, tail: &[char], t3: bool) -> Option<Vec<Unit>> {
+    pub fn tail_units_in_columns_t3(&self, tail: &[char], t3: Sandhi) -> Option<Vec<Unit>> {
         let (closing, body) = tail.split_last()?;
         let mut cols: [Option<char>; 3] = [None; 3];
         for &k in body {
@@ -300,6 +344,8 @@ pub struct Scorer<'a> {
     pub cfg: Scoring,
     /// Third-tone sandhi on (docs/spec/english-mixed.md §7.1, §7.3, §7.4): an unaccepted syllable is a legal tail, scored as its third tone.
     pub tone3: bool,
+    /// The syllable before the run is a second tone: an unaccepted neutral tail is a legal tail too, when no digit of the run stands before it.
+    pub prev_rise: bool,
 }
 
 fn log10_sum(terms: impl Iterator<Item = f64>) -> Option<f64> {
@@ -374,7 +420,7 @@ impl Scorer<'_> {
             && emitted.is_empty()
             && whole.len() <= MAX_BUF
             && whole.last().is_some_and(|&k| k == ' ' || tone_mark_of_key(k).is_some())
-            && (self.legal.tail_units(&whole).is_some() || (reorder.is_some() && self.legal.tail_units_in_columns(&whole).is_some()));
+            && (self.legal.tail_units_t3(&whole, Sandhi::REAL).is_some() || (reorder.is_some() && self.legal.tail_units_in_columns_t3(&whole, Sandhi::REAL).is_some()));
         let tone3 = self.tone3 && !real;
         // (m, t, units)
         let mut cands: Vec<(usize, usize, Option<Vec<Unit>>, f64)> = Vec::new();
@@ -387,10 +433,11 @@ impl Scorer<'_> {
                 if ends_closed && !complete {
                     continue;
                 }
-                if let Some(units) = self.legal.tail_units_t3(&tail, tone3) {
+                let t3 = Sandhi { on: tone3, tail: self.prev_rise && emitted.is_empty() && m == 0, real: false };
+                if let Some(units) = self.legal.tail_units_t3(&tail, t3) {
                     cands.push((m, tail.len(), Some(units), 0.0));
                 } else if let (Some((rho, rho_sym)), true) = (reorder, ends_closed) {
-                    if let Some(units) = self.legal.tail_units_in_columns_t3(&tail, tone3) {
+                    if let Some(units) = self.legal.tail_units_in_columns_t3(&tail, t3) {
                         let sym = matches!(emitted.first().or(buf.first()), Some('.' | '/' | '-'));
                         cands.push((m, tail.len(), Some(units), if sym { rho_sym } else { rho }));
                     }
@@ -407,8 +454,13 @@ impl Scorer<'_> {
         for (m, t, units, rho) in &cands {
             let digits: Vec<char> = emitted.iter().chain(&buf[..*m]).copied().collect();
             let lpd = self.lp_d(c, &digits, *t > 0 || boundary);
+            // A neutral tail right after a second tone (no digit of the run before it) is scored as the better of X˙ and Xˇ (docs/spec/english-mixed.md §7.1).
+            let alt = (self.tone3 && self.prev_rise && digits.is_empty() && *t > 0 && extra.is_none())
+                .then(|| self.legal.neutral_alt(&buf[*m..]))
+                .flatten()
+                .map(|u| self.lp_z(c, false, &u));
             let lpz = match units {
-                Some(u) if *t > 0 => self.lp_z(c, !digits.is_empty(), u),
+                Some(u) if *t > 0 => alt.map_or(self.lp_z(c, !digits.is_empty(), u), |a| a.max(self.lp_z(c, !digits.is_empty(), u))),
                 _ => 0.0,
             };
             splits.push(Split { m: *m, t: *t, score: lpd + lpz - rho });
@@ -448,7 +500,7 @@ impl Scorer<'_> {
             });
             ok.then(|| cols.iter().flatten().copied().chain([closing]).collect::<Vec<char>>())
         };
-        let real = self.tone3 && (1..=k).any(|j| z_of(j).is_some_and(|z| self.legal.tail_units(&z).is_some()));
+        let real = self.tone3 && (1..=k).any(|j| z_of(j).is_some_and(|z| self.legal.tail_units_t3(&z, Sandhi::REAL).is_some()));
         let tone3 = self.tone3 && !real;
         let mut best: Option<(usize, f64)> = None;
         for j in (1..=k).rev() {
@@ -461,7 +513,8 @@ impl Scorer<'_> {
                 }
             }
             let z_keys: Vec<char> = cols.iter().flatten().copied().chain([closing]).collect();
-            let Some(u_z) = self.legal.tail_units_t3(&z_keys, tone3).filter(|_| ok) else { continue };
+            // ponytail: no unaccepted neutral tail in the rejoin test (the late keys are digit tokens between it and the syllable before); add it when a report shows the case.
+            let Some(u_z) = self.legal.tail_units_t3(&z_keys, Sandhi { on: tone3, tail: false, real: false }).filter(|_| ok) else { continue };
             let digits: Vec<char> = before.iter().chain(&keys[..k - j]).copied().collect();
             let s_z = if digits.is_empty() { self.lp_z(ctx, false, &u_z) + THETA } else { self.lp_d(ctx, &digits, true) + self.lp_z(ctx, true, &u_z) } - rho;
             if best.is_none_or(|(_, b)| s_z > b) {
@@ -470,7 +523,7 @@ impl Scorer<'_> {
         }
         let Some((take, s_z)) = best else { return (None, false, None, None) };
         let d_keys: Vec<char> = cols0.iter().flatten().copied().chain([closing]).collect();
-        match self.legal.tail_units_t3(&d_keys, tone3) {
+        match self.legal.tail_units_t3(&d_keys, Sandhi { on: tone3, tail: false, real: false }) {
             Some(u_d) => {
                 let all: Vec<char> = before.iter().chain(keys).copied().collect();
                 let s_d = self.lp_d(ctx, &all, true) + self.lp_z(ctx, true, &u_d);

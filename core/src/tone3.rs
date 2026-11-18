@@ -6,9 +6,9 @@
 
 use crate::Lexicon;
 
-/// Taken once off the score of a word found through the sandhi source (log10, as `fuzzy::DELTA_SOUND`). 暫定，待 §3.2 格點
-/// (contract tone3-sandhi §3.2: the grid {0.5, 1.0, 1.5, 2.0, 2.5, 3.0} picks the shipping value).
-pub const DELTA_TONE3: f64 = 2.0;
+/// Taken once off the score of a word found through the sandhi source (log10, as `fuzzy::DELTA_SOUND`).
+/// tone3-sandhi §3.2 格點（{0.5,1.0,1.5,2.0,2.5,3.0}），只有 3.0 讓 wikitune-clean-tw0 原讀音不退步；量測 commit 3354810e
+pub const DELTA_TONE3: f64 = 3.0;
 /// The most subsets of a span's sandhi positions that are looked up (smallest first, then left to right): with k ≤ 4 positions that is all of them
 /// (2^4 − 1 = 15); 營養品 typed ㄧㄥˊ ㄧㄤˊ ㄆㄧㄣˇ needs {ㄧㄤˊ} and 展覽館 needs {ㄓㄢˊ, ㄌㄢˊ}, both among the first 15 (contract tone3-sandhi §2 C).
 pub const TONE3_MAX_SUBSETS: usize = 15;

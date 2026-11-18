@@ -1429,7 +1429,8 @@ impl CappedLexicon {
             let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
             // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
             // capped scores and the cap per key.
-            let (readings, words) = base.tolerant_pick(ids, span, fuzzy, PER_KEY, PER_KEY, entry);
+            // An unaccepted syllable of the sandhi table has no adjacent reading (docs/spec/decoder.md §6.6): it is read through the sandhi source only.
+            let (readings, words) = base.tolerant_pick(ids, span, fuzzy, tone3.map_or(&[][..], |t| t.0), PER_KEY, PER_KEY, entry);
             put(readings, words, pen, !ids.contains(&u32::MAX));
         }
         if let Some((t3, delta)) = tone3 {

@@ -197,7 +197,7 @@ mod tests {
         let name = |r: &[u32]| r.iter().map(|&i| l.syl_names[i as usize].as_str()).collect::<Vec<_>>().join("-");
         let readings = |v: &[&str], flags: u32| {
             let syls = s(v);
-            l.tolerant_readings(&l.ids(&syls), &syls, flags).iter().map(|r| name(r)).collect::<Vec<_>>()
+            l.tolerant_readings(&l.ids(&syls), &syls, flags, &[]).iter().map(|r| name(r)).collect::<Vec<_>>()
         };
         // ㄅㄩ is not a lexicon syllable (ㄅㄝ typed with ㄝ as its neighbour ㄩ); ㄗ beside it is legal and stays, even with every flag on.
         assert_eq!(readings(&["ㄅㄩ", "ㄗ"], FUZZY_ALL), ["ㄅㄝ-ㄗ"]);

@@ -92,11 +92,13 @@ pub(super) struct DigitEnv {
     pub reorder: Option<(f64, f64)>,
     /// Third-tone sandhi on (`Engine::set_tone3`): an unaccepted syllable is a legal tail (docs/spec/english-mixed.md §7.1).
     pub tone3: bool,
+    /// The syllable right before the cursor is a second tone (an unaccepted neutral tail may follow it, docs/spec/english-mixed.md §7.1).
+    pub prev_rise: bool,
 }
 
 impl DigitEnv {
     pub fn scorer(&self) -> Scorer<'_> {
-        Scorer { table: &self.table, lm: &self.st.lm, idx: self.st.capped.predict_index(&self.st.lm), legal: &self.cache.legal, cfg: self.st.lm.scoring(self.profile), tone3: self.tone3 }
+        Scorer { table: &self.table, lm: &self.st.lm, idx: self.st.capped.predict_index(&self.st.lm), legal: &self.cache.legal, cfg: self.st.lm.scoring(self.profile), tone3: self.tone3, prev_rise: self.prev_rise }
     }
 }
 
@@ -201,13 +203,14 @@ impl Engine {
         let (st, table) = (self.lm.clone()?, self.digit_table.clone()?);
         let key = (Arc::as_ptr(&st.capped) as usize, st.lm.identity());
         let reorder = self.english_reversal_guard.then_some(self.reorder);
+        let prev_rise = self.cursor.checked_sub(1).and_then(|i| self.syls.get(i)).is_some_and(|p| p.ends_with('ˊ') && !p.starts_with(PUNCT_PREFIX));
         if let Some(c) = self.digit_cache.clone().filter(|c| c.key == key) {
-            return Some(DigitEnv { st, table, cache: c, profile: self.profile, reorder, tone3: self.tone3 });
+            return Some(DigitEnv { st, table, cache: c, profile: self.profile, reorder, tone3: self.tone3, prev_rise });
         }
         let idx = st.capped.predict_index(&st.lm);
         let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings(&st.lm)), words: idx.digit_words(&table.all_words()) });
         self.digit_cache = Some(cache.clone());
-        Some(DigitEnv { st, table, cache, profile: self.profile, reorder, tone3: self.tone3 })
+        Some(DigitEnv { st, table, cache, profile: self.profile, reorder, tone3: self.tone3, prev_rise })
     }
 
     /// The text before the cursor as the context sees it: the left context and the display up to the cursor.

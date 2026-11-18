@@ -279,9 +279,86 @@ fn a_sandhi_first_path_is_reranked_not_skipped() {
     let mut e = app(true);
     e.load_tinylm(&root().join("data/lm/tinylm.sjtl")).unwrap();
     e.set_rerank(true).unwrap();
-    let o = keys(&mut e, &["ㄓㄚˊ", "ㄧㄢˇ"]);
-    assert_eq!(o.preedit, "眨眼", "premise: the n-gram first is the sandhi word");
+    let o = keys(&mut e, &["ㄨㄛˊ", "ㄒㄧㄤˇ"]);
+    assert_eq!(o.preedit, "我想", "premise: the n-gram first is read through sandhi (ㄨㄛˊ has no other reading)");
     assert_eq!(e.fuzzy_skips(), 0);
     let job = e.take_rerank_job().expect("a rerank job");
-    assert!(job.candidates().iter().any(|c| c.first().is_some_and(|f| f == "眨眼")), "the stretch is in the job, 眨眼 first");
+    assert!(job.candidates().iter().any(|c| c.first().is_some_and(|f| f == "我想")), "the stretch is in the job, 我想 first");
+}
+
+/// Every unaccepted second-tone syllable of the shipped lexicon (the App's packs): Xˊ for each one-syllable reading Xˇ, without a one-syllable entry itself.
+fn unaccepted_all() -> Vec<String> {
+    let lex = load_lexicon_packs(&root().join("data/lexicon"), Some((&root().join("data/packs"), APP_PACKS))).unwrap().0;
+    let mut v: Vec<String> = lex.syllables().iter().filter_map(|t| Some(format!("{}ˊ", t.strip_suffix('ˇ')?))).filter(|s| core::tone3::unaccepted(&lex, s)).collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.3: an unaccepted syllable is read as Xˇ only, never through its adjacent-key readings, with
+/// the adjacent bit off or on. Every unaccepted second-tone syllable of the shipped lexicon, typed alone, shows a one-syllable word of its Xˇ (before the fix
+/// 45 of them showed an adjacent-key guess: ㄗㄡˊ was 由).
+#[test]
+fn every_unaccepted_syllable_alone_shows_a_word_of_its_third_tone() {
+    let lex = load_lexicon_packs(&root().join("data/lexicon"), Some((&root().join("data/packs"), APP_PACKS))).unwrap().0;
+    let all = unaccepted_all();
+    assert!(all.len() > 100 && all.iter().any(|s| s == "ㄗㄡˊ"), "premise: {} unaccepted syllables", all.len());
+    for flags in [0, core::fuzzy::FUZZY_ADJACENT] {
+        let mut e = app(true);
+        e.set_fuzzy(flags).unwrap();
+        let mut wrong = Vec::new();
+        for s in &all {
+            let o = keys(&mut e, &[s]);
+            let third = core::tone3::third(s).unwrap();
+            if !(e.syllables() == [s.clone()] && lex.entries(&[third]).iter().any(|(w, _)| *w == o.preedit)) {
+                wrong.push(format!("{s}:{}", o.preedit));
+            }
+            press(&mut e, KeyKind::Enter);
+        }
+        eprintln!("flags {flags}: {} unaccepted second-tone syllables, {} show a word of Xˇ", all.len(), all.len() - wrong.len());
+        assert!(wrong.is_empty(), "flags {flags}: {wrong:?}");
+    }
+}
+
+/// The same in a sentence: ㄙㄢˊ ㄏㄣˊ ㄏㄠˇ is 傘很好, and ㄕㄤˊ ㄧㄢˇ starts with a word of ㄕㄤˇ (it was 藏眼, an adjacent-key guess). A syllable the lexicon
+/// lacks that is no unaccepted one is still read through its adjacent keys once accepted (the adjacent bit on).
+#[test]
+fn unaccepted_syllables_in_a_sentence_read_as_their_third_tone() {
+    let lex = &*toy::shared().lex;
+    let mut e = app(true);
+    assert_eq!(keys(&mut e, &["ㄙㄢˊ", "ㄏㄣˊ", "ㄏㄠˇ"]).preedit, "傘很好");
+    press(&mut e, KeyKind::Enter);
+    let o = keys(&mut e, &["ㄕㄤˊ", "ㄧㄢˇ"]);
+    let first = o.preedit.chars().next().unwrap().to_string();
+    assert!(lex.entries(&["ㄕㄤˇ".to_string()]).iter().any(|(w, _)| *w == first), "{}", o.preedit);
+    press(&mut e, KeyKind::Enter);
+    // ㄅㄩ: no lexicon syllable, not unaccepted (no tone to swap), with an adjacent reading.
+    assert!(!lex.has_syllable("ㄅㄩ") && !lex.adjacent_alts("ㄅㄩ").is_empty(), "premise");
+    e.set_english(false).unwrap(); // ㄅ is the key 1: without the digit layer
+    e.set_fuzzy(core::fuzzy::FUZZY_ADJACENT).unwrap();
+    let o = keys(&mut e, &["ㄅㄩ"]);
+    assert_eq!(e.syllables(), ["ㄅㄩ".to_string()]);
+    assert!(!o.preedit.is_empty() && !o.preedit.contains('ㄅ'), "read through an adjacent key: {}", o.preedit);
+}
+
+/// docs/spec/english-mixed.md §7.1: a neutral tail right after a second tone is Zhuyin in the digit layer too. An unaccepted one (ㄓㄢ˙, `5 0 7`) is a legal
+/// complete syllable scored as Xˇ; one with an entry of its own (ㄉㄚ˙, `2 8 7`) is scored as the better of X˙ and Xˇ, so `2 8 6` `2 8 7` and `j i 6` `2 8 7`
+/// stay Zhuyin (it was 達287); a real neutral (`1 8 7`, ㄅㄚ˙ 吧) is as ever; off, the tail is digits as before.
+#[test]
+fn an_unaccepted_neutral_tail_of_digit_keys_is_zhuyin() {
+    for (typed, want) in [("286287", vec!["ㄉㄚˊ", "ㄉㄚ˙"]), ("506507", vec!["ㄓㄢˊ", "ㄓㄢ˙"]), ("ji6287", vec!["ㄨㄛˊ", "ㄉㄚ˙"]), ("286187", vec!["ㄉㄚˊ", "ㄅㄚ˙"])] {
+        let mut e = app(true);
+        let o = caps(&mut e, typed);
+        assert_eq!(syls(&e), want, "{typed}");
+        assert!(o.preedit.chars().count() == 2 && !o.preedit.chars().any(|c| c.is_ascii_digit()), "{typed}: {}", o.preedit);
+    }
+    let mut off = app(false);
+    assert_eq!(caps(&mut off, "286287").preedit, "達287");
+    let mut off = app(false);
+    assert_eq!(syls_after(&mut off, "286187"), ["ㄉㄚˊ", "ㄅㄚ˙"], "off: the real neutral is as ever");
+}
+
+fn syls_after(e: &mut Engine, typed: &str) -> Vec<String> {
+    caps(e, typed);
+    e.syllables().to_vec()
 }

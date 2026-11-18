@@ -573,7 +573,10 @@ impl Lexicon {
     /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
     /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
     /// Order: position, then alternative name. The exact reading itself is never among them.
-    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32) -> Vec<Vec<u32>> {
+    ///
+    /// `t3` is the span's slice of the sandhi position table (docs/spec/decoder.md §6.6; empty for none): an unknown syllable the table marks unaccepted (or an
+    /// unaccepted tail) was accepted by the sandhi rule, not as a slip, so it has no adjacent reading here, whatever the adjacent bit says: it is read as Xˇ only.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos]) -> Vec<Vec<u32>> {
         let mut out = Vec::new();
         let mut put = |j: usize, alts: &[u32]| {
             for &a in alts {
@@ -584,6 +587,7 @@ impl Lexicon {
         };
         let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
         match unknown[..] {
+            [j] if t3.get(j).is_some_and(|p| p.unaccepted) => {}
             [j] => put(j, self.tol().adjacent(&syls[j])),
             [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
             _ => {}
@@ -602,6 +606,7 @@ impl Lexicon {
         ids: &[u32],
         syls: &[String],
         flags: u32,
+        t3: &[tone3::Pos],
         per_reading: usize,
         total: usize,
         entry: impl Fn(usize) -> (&'a str, f64),
@@ -609,7 +614,7 @@ impl Lexicon {
         if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return (Vec::new(), Vec::new());
         }
-        self.pick(self.tolerant_readings(ids, syls, flags), ids, per_reading, total, entry)
+        self.pick(self.tolerant_readings(ids, syls, flags, t3), ids, per_reading, total, entry)
     }
 
     /// The sandhi source of a span (docs/spec/decoder.md §6.6): `tolerant_pick` over the readings `tone3::readings` gives for the span's slice `t3` of the
@@ -671,7 +676,7 @@ impl Lexicon {
         let ids = self.ids(key);
         let entry = |p: usize| (self.word(p), self.ents[p].score);
         let name = |r: &[u32]| r.iter().map(|&i| self.syl_names[i as usize].clone()).collect::<Vec<String>>();
-        let (readings, words) = self.tolerant_pick(&ids, key, flags, usize::MAX, usize::MAX, entry);
+        let (readings, words) = self.tolerant_pick(&ids, key, flags, t3, usize::MAX, usize::MAX, entry);
         let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
         let (readings, words) = self.tone3_pick(&ids, t3, usize::MAX, usize::MAX, entry);
         for (w, _, _, a) in words {
@@ -694,8 +699,8 @@ impl Lexicon {
         for (w, l) in words {
             let at = out.len();
             let Some(span) = syls.get(at..at + l) else { return syls.to_vec() };
-            let tolerated = self.ids(span).contains(&u32::MAX).then(|| self.tolerant_words(span, 0, &[]).into_iter().find(|(tw, _)| *tw == w)).flatten();
-            let tolerated = tolerated.or_else(|| self.tone3_reading(span, t3.get(at..at + l).unwrap_or(&[]), w).map(|r| (w, r)));
+            // `tolerant_words` with the table: the adjacent readings of an unknown syllable that is no unaccepted one, then the sandhi readings.
+            let tolerated = self.tolerant_words(span, 0, t3.get(at..at + l).unwrap_or(&[])).into_iter().find(|(tw, _)| *tw == w);
             match tolerated {
                 Some((_, reading)) => out.extend(reading),
                 None => out.extend_from_slice(span),
