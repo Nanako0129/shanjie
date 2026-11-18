@@ -250,10 +250,10 @@ fn overlay_bad_rows_report_length_only() {
 fn tolerance_tables_are_built_on_first_use() {
     let l = lex("ㄓ 之 -1.0\nㄗ 子 -1.0\nㄅㄝ 憋 -1.0\n");
     assert!(l.tol.get().is_none(), "parsing builds nothing");
-    assert!(l.tolerant_words(&v(&["ㄗ"]), 0).is_empty());
-    assert!(l.tolerant_words(&v(&["ㄗ"]), fuzzy::FUZZY_ADJACENT).is_empty(), "bit 4 alone tolerates no known syllable");
+    assert!(l.tolerant_words(&v(&["ㄗ"]), 0, &[]).is_empty());
+    assert!(l.tolerant_words(&v(&["ㄗ"]), fuzzy::FUZZY_ADJACENT, &[]).is_empty(), "bit 4 alone tolerates no known syllable");
     assert!(l.tol.get().is_none(), "flags 0 (or the adjacent bit) and known syllables: no table");
-    assert_eq!(l.tolerant_words(&v(&["ㄗ"]), 0b10).iter().map(|x| x.0).collect::<Vec<_>>(), ["之"]);
+    assert_eq!(l.tolerant_words(&v(&["ㄗ"]), 0b10, &[]).iter().map(|x| x.0).collect::<Vec<_>>(), ["之"]);
     assert!(l.tol.get().is_some(), "a sound pair needs them");
 }
 

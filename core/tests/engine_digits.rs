@@ -37,11 +37,13 @@ fn shared() -> &'static Shared {
     })
 }
 
-/// Standard layout, the model and the switch on, and the count table (`with_table`).
+/// Standard layout, the model and the switch on, and the count table (`with_table`). Third-tone sandhi off: these rows are the Python baseline's
+/// (reference/proto/digits_score.py has no sandhi; docs/spec/decoder.md §6.6).
 fn make(with_table: bool, english: bool) -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
+    e.set_tone3(false).unwrap();
     if with_table {
         e.set_digit_table(Some(s.table.clone()));
     }
@@ -987,6 +989,13 @@ fn app() -> Engine {
     e
 }
 
+/// `app` with third-tone sandhi off (docs/spec/decoder.md §6.6): the rows pinned from the Python baseline and from the engine before sandhi.
+fn app_off() -> Engine {
+    let mut e = app();
+    e.set_tone3(false).unwrap();
+    e
+}
+
 /// What one key left on the screen: the preedit, then `｜`, then the composition's units (blank separated).
 fn shot(e: &Engine, o: &Output) -> String {
     format!("{}｜{}", o.preedit, e.syllables().join(" "))
@@ -1019,9 +1028,10 @@ fn screens(e: &mut Engine, left: &str, script: &str) -> (Vec<String>, String) {
 
 /// A hurried syllable (two keys swapped) that starts on a digit-alphabet key reads as the syllable the person meant, every key's screen included.
 /// Pinned, not wished away: the three at the sentence start that stay numbers (the next test).
+/// Pinned with third-tone sandhi off (the behaviour from before it); with it on, `2 i j 6` differs: see `sandhi_makes_2ij6_a_digit_and_wo`.
 #[test]
 fn hurried_syllables_are_read_as_typed_in_order() {
-    let mut e = app();
+    let mut e = app_off();
     for (left, keys, want, units) in [
         ("", ". u 3", vec![".", ".ㄧ", "有"], "ㄧㄡˇ"),
         ("我", ". u 3", vec!["ㄡ", ".ㄧ", "有"], "ㄧㄡˇ"),
@@ -1092,7 +1102,7 @@ fn the_rejoin_does_not_depend_on_the_key_order_switch() {
 fn with_the_guard_off_every_key_is_the_baselines() {
     let text = std::fs::read_to_string(root().join("core/tests/fixtures/reversal-guard-off.tsv")).unwrap();
     let (mut lines, mut keys) = (0, 0);
-    let mut e = app();
+    let mut e = app_off();
     for l in text.lines() {
         let f: Vec<&str> = l.split('\t').collect();
         let (guard, key_order) = match f[0] {
@@ -1391,7 +1401,7 @@ fn reorder_scores_match_the_python_golden_bit_for_bit() {
 fn late_inputs_in_the_engine_are_the_golden_rows() {
     let late = golden_late();
     let mut seen = 0;
-    let mut e = app();
+    let mut e = app_off();
     e.set_late_trace(true);
     for (n, r) in late.iter().enumerate() {
         let (Some(left), Some(script)) = (&r.left, &r.script) else { continue };
@@ -1414,4 +1424,15 @@ fn late_inputs_in_the_engine_are_the_golden_rows() {
         seen += 1;
     }
     assert!(seen >= 17, "{seen} rows with a script");
+}
+
+/// Third-tone sandhi on (the App default, docs/spec/decoder.md §6.6, docs/spec/english-mixed.md §7.1): ㄨㄛˊ is an unaccepted syllable, so `i j 6` is a legal tail
+/// scored as ㄨㄛˇ, and the hurried `2 i j 6` (ㄉㄨㄛˊ, 奪, with sandhi off) reads as the digit 2 and 我. Pinned as measured, a consequence of the contract's digit-layer
+/// rule that is reported for a decision, not chosen here.
+#[test]
+fn sandhi_makes_2ij6_a_digit_and_wo() {
+    let mut e = app();
+    let (pre, _) = screens(&mut e, "", "2 i j 6");
+    assert_eq!(pre, ["ㄉ", "2ㄛ", "2ㄨㄛ", "2我"]);
+    assert_eq!(e.syllables(), ["_punct_2".to_string(), "ㄨㄛˊ".to_string()]);
 }

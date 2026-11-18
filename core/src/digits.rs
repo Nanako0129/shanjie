@@ -154,6 +154,9 @@ fn tone_mark_of_key(k: char) -> Option<char> {
 pub struct Legal {
     prefixes: HashSet<String>,
     han: HashSet<String>,
+    /// Third-tone sandhi (docs/spec/english-mixed.md §7.1): an unaccepted syllable Xˊ (no one-syllable reading, Xˇ has one and is a Han syllable) -> Xˇ, the
+    /// complete syllable it is legal and scored as while the switch is on (`tail_units_t3`).
+    tone3: std::collections::HashMap<String, String>,
 }
 
 impl Legal {
@@ -161,7 +164,11 @@ impl Legal {
     pub fn new<'a>(readings: impl Iterator<Item = (Vec<&'a str>, Vec<(&'a str, f64)>)>) -> Legal {
         let (mut prefixes, mut han) = (HashSet::new(), HashSet::new());
         let mut seen: HashSet<&'a str> = HashSet::new();
+        let mut singles: HashSet<&'a str> = HashSet::new();
         for (syls, entries) in readings {
+            if let [one] = syls[..] {
+                singles.insert(one);
+            }
             // The prefixes of a syllable are the same wherever it occurs: work them out the first time only.
             for s in &syls {
                 if seen.insert(s) {
@@ -180,7 +187,12 @@ impl Legal {
                 }
             }
         }
-        Legal { prefixes, han }
+        let tone3 = singles
+            .iter()
+            .filter_map(|t| Some((format!("{}ˊ", t.strip_suffix('ˇ')?), t.to_string())))
+            .filter(|(r, t)| !singles.contains(r.as_str()) && han.contains(t))
+            .collect();
+        Legal { prefixes, han, tone3 }
     }
 
     /// `new` as it was written before the syllable cache (each syllable's prefixes and string redone at every reading), kept for the test that builds both ways.
@@ -198,7 +210,7 @@ impl Legal {
                 han.extend(syls.iter().map(|s| s.to_string()));
             }
         }
-        Legal { prefixes, han }
+        Legal { prefixes, han, tone3: Default::default() }
     }
 
     /// The two sets (tests).
@@ -215,6 +227,12 @@ impl Legal {
     /// Keys -> units when they form a legal tail, else `None`. Last key a tone key or Space: a complete syllable that exists in the
     /// lexicon with a Han entry; otherwise symbols only, a prefix of some toneless syllable (this also fixes the initial-medial-final order).
     pub fn tail_units(&self, keys: &[char]) -> Option<Vec<Unit>> {
+        self.tail_units_t3(keys, false)
+    }
+
+    /// `tail_units` with third-tone sandhi on or off (docs/spec/english-mixed.md §7.1): on, a tail that ends in the second-tone key and makes an unaccepted
+    /// syllable Xˊ is a legal complete syllable whose units are Xˇ's, so lpZ is scored as Xˇ.
+    pub fn tail_units_t3(&self, keys: &[char], t3: bool) -> Option<Vec<Unit>> {
         let last = *keys.last()?;
         if last == ' ' || tone_mark_of_key(last).is_some() {
             let body = &keys[..keys.len() - 1];
@@ -226,7 +244,8 @@ impl Legal {
             let mut full = s.clone();
             full.extend(mark);
             if !self.han.contains(&full) {
-                return None;
+                let third = self.tone3.get(&full).filter(|_| t3)?;
+                return Some(units_of(third));
             }
             s.push(mark.unwrap_or(' '));
             return Some(units_of(&s));
@@ -240,6 +259,11 @@ impl Legal {
     /// `tail_units` of the tail with its symbol keys in column order (docs/spec/english-mixed.md §7.3): the keys but the last (the closing key) go one to a
     /// column (initial, medial, final), a column asked twice or a key that is no symbol key makes it `None`, then the closing key.
     pub fn tail_units_in_columns(&self, tail: &[char]) -> Option<Vec<Unit>> {
+        self.tail_units_in_columns_t3(tail, false)
+    }
+
+    /// `tail_units_in_columns` through `tail_units_t3`.
+    pub fn tail_units_in_columns_t3(&self, tail: &[char], t3: bool) -> Option<Vec<Unit>> {
         let (closing, body) = tail.split_last()?;
         let mut cols: [Option<char>; 3] = [None; 3];
         for &k in body {
@@ -249,7 +273,7 @@ impl Legal {
             }
         }
         let sorted: Vec<char> = cols.iter().flatten().chain(std::iter::once(closing)).copied().collect();
-        self.tail_units(&sorted)
+        self.tail_units_t3(&sorted, t3)
     }
 }
 
@@ -274,6 +298,8 @@ pub struct Scorer<'a> {
     pub legal: &'a Legal,
     /// The profile's scoring: its Kneser-Ney beta is the one `lp_z` blends with (`Lm::unigram_back`).
     pub cfg: Scoring,
+    /// Third-tone sandhi on (docs/spec/english-mixed.md §7.1, §7.3, §7.4): an unaccepted syllable is a legal tail, scored as its third tone.
+    pub tone3: bool,
 }
 
 fn log10_sum(terms: impl Iterator<Item = f64>) -> Option<f64> {
@@ -351,10 +377,10 @@ impl Scorer<'_> {
                 if ends_closed && !complete {
                     continue;
                 }
-                if let Some(units) = self.legal.tail_units(&tail) {
+                if let Some(units) = self.legal.tail_units_t3(&tail, self.tone3) {
                     cands.push((m, tail.len(), Some(units), 0.0));
                 } else if let (Some((rho, rho_sym)), true) = (reorder, ends_closed) {
-                    if let Some(units) = self.legal.tail_units_in_columns(&tail) {
+                    if let Some(units) = self.legal.tail_units_in_columns_t3(&tail, self.tone3) {
                         let sym = matches!(emitted.first().or(buf.first()), Some('.' | '/' | '-'));
                         cands.push((m, tail.len(), Some(units), if sym { rho_sym } else { rho }));
                     }
@@ -410,7 +436,7 @@ impl Scorer<'_> {
                 }
             }
             let z_keys: Vec<char> = cols.iter().flatten().copied().chain([closing]).collect();
-            let Some(u_z) = self.legal.tail_units(&z_keys).filter(|_| ok) else { continue };
+            let Some(u_z) = self.legal.tail_units_t3(&z_keys, self.tone3).filter(|_| ok) else { continue };
             let digits: Vec<char> = before.iter().chain(&keys[..k - j]).copied().collect();
             let s_z = if digits.is_empty() { self.lp_z(ctx, false, &u_z) + THETA } else { self.lp_d(ctx, &digits, true) + self.lp_z(ctx, true, &u_z) } - rho;
             if best.is_none_or(|(_, b)| s_z > b) {
@@ -419,7 +445,7 @@ impl Scorer<'_> {
         }
         let Some((take, s_z)) = best else { return (None, false, None, None) };
         let d_keys: Vec<char> = cols0.iter().flatten().copied().chain([closing]).collect();
-        match self.legal.tail_units(&d_keys) {
+        match self.legal.tail_units_t3(&d_keys, self.tone3) {
             Some(u_d) => {
                 let all: Vec<char> = before.iter().chain(keys).copied().collect();
                 let s_d = self.lp_d(ctx, &all, true) + self.lp_z(ctx, true, &u_d);

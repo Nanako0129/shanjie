@@ -925,6 +925,8 @@ PROFILES2 = ["chat", "formal"]
 # A version that also ships the context recurrence weight on the semantic correction's pool (docs/spec/semantic-rerank.md §3.1.1) has `"pool_recur": True`
 # besides `"recur": True`: the CLI then marks `+recur+pr` instead of `+recur` in every cell that has the small model (`--tinylm`; a cell without it has no
 # pool, so `+recur` alone), and the replay's tag reads `+recur+pr` with the small model. A version without the key keeps `+recur`.
+# A version that ships third-tone sandhi (docs/spec/decoder.md §6.6) has `"tone3": True`: the CLI (with the switch on, its default) then ends every tag, the replay-setting
+# cell's included, with `+t3` after the reading marks. A version without the key has no mark, and each refuses the other form.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -1061,8 +1063,9 @@ def colloq_tag(ver, prof):
 
 def reading_tag(ver):
     """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule),
-    then `+rn` for a `"reading_norm"` version (the syllable normalisation), else ""."""
-    return f"+rd+rx:{ver.rx8}+rm" + ("+rn" if ver.spec.get("reading_norm") else "") if getattr(ver, "rx8", "") else ""
+    then `+rn` for a `"reading_norm"` version (the syllable normalisation), else ""; then `+t3` for a `"tone3"` version (third-tone sandhi, docs/spec/decoder.md §6.6)."""
+    rd = f"+rd+rx:{ver.rx8}+rm" + ("+rn" if ver.spec.get("reading_norm") else "") if getattr(ver, "rx8", "") else ""
+    return rd + ("+t3" if ver.spec.get("tone3") else "")
 
 
 def expected_tag(ver, prof, anchor):

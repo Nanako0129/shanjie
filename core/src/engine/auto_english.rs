@@ -85,7 +85,8 @@ impl Engine {
 
     /// docs/spec/english-mixed.md §16.2, §16.3: at a decision point, English when lpE > lpZ + theta. `Some`: the output of the key as English (Space: one
     /// token, as revert (c) at Space, marked for Esc; a tone key: an open run with the restore point, as revert (c) at a tone key). `None`: Zhuyin, as today.
-    pub(super) fn auto_english(&mut self, tone: usize, syl: &str, n: (u32, u32, u32)) -> Result<Option<Output>, EngineError> {
+    /// `score` is the syllable the Zhuyin side is scored as: `syl` itself, or the third tone of an unaccepted syllable (docs/spec/english-mixed.md §16.1).
+    pub(super) fn auto_english(&mut self, tone: usize, syl: &str, score: &str, n: (u32, u32, u32)) -> Result<Option<Output>, EngineError> {
         if !self.auto_on {
             return Ok(None);
         }
@@ -101,10 +102,10 @@ impl Engine {
             return Ok(None); // nothing to compare: Zhuyin wins any tie
         }
         // The syllable as `Legal::tail_units` hands it to the scorer: its symbols, then the tone mark or a space.
-        let units = units_of(&if tone == 0 { format!("{syl} ") } else { syl.to_string() });
+        let units = units_of(&if tone == 0 { format!("{score} ") } else { score.to_string() });
         let (sum, best) = lp_z_words(&st.lm, st.capped.predict_index(&st.lm), st.lm.scoring(self.profile), &ctx, &units);
         let term = match (best, st.capped.reading_table().filter(|_| self.reading_decode)) {
-            (Some(w), Some(rd)) => rd.term(&self.lex, syl, w),
+            (Some(w), Some(rd)) => rd.term(&self.lex, score, w),
             _ => 0.0,
         };
         let z = lp_z(sum, term, n.0, n.1, n.2, &self.auto_params);

@@ -31,6 +31,7 @@ fn engine_off() -> Engine {
     let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
     e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
     e.set_english(false).unwrap();
+    e.set_tone3(false).unwrap(); // the base commit's engine had no third-tone sandhi (docs/spec/decoder.md §6.6)
     e
 }
 

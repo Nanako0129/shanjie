@@ -221,6 +221,12 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
     }
 
+    /// Third-tone sandhi (docs/spec/decoder.md §6.6; the core's default is on); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    func setTone3(_ on: Bool) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_tone3(handle, on ? 1 : 0, &out), out)
+    }
+
     /// zhen-revert: whether a key typed over the symbol already in its column reverts the unfinished syllable to the raw keys as
     /// English (the core's default is true); returns the snapshot. Sent to every engine `Shell.build()` makes.
     func setEnglishOverwrite(_ on: Bool) -> CoreResult {

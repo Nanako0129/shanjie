@@ -90,11 +90,13 @@ pub(super) struct DigitEnv {
     pub profile: Profile,
     /// `Some((rho, rho_sym))` while the reversal guard is on: the tails read in column order and the rejoin of late keys (docs/spec/english-mixed.md §7.3, §7.4).
     pub reorder: Option<(f64, f64)>,
+    /// Third-tone sandhi on (`Engine::set_tone3`): an unaccepted syllable is a legal tail (docs/spec/english-mixed.md §7.1).
+    pub tone3: bool,
 }
 
 impl DigitEnv {
     pub fn scorer(&self) -> Scorer<'_> {
-        Scorer { table: &self.table, lm: &self.st.lm, idx: self.st.capped.predict_index(&self.st.lm), legal: &self.cache.legal, cfg: self.st.lm.scoring(self.profile) }
+        Scorer { table: &self.table, lm: &self.st.lm, idx: self.st.capped.predict_index(&self.st.lm), legal: &self.cache.legal, cfg: self.st.lm.scoring(self.profile), tone3: self.tone3 }
     }
 }
 
@@ -200,12 +202,12 @@ impl Engine {
         let key = (Arc::as_ptr(&st.capped) as usize, st.lm.identity());
         let reorder = self.english_reversal_guard.then_some(self.reorder);
         if let Some(c) = self.digit_cache.clone().filter(|c| c.key == key) {
-            return Some(DigitEnv { st, table, cache: c, profile: self.profile, reorder });
+            return Some(DigitEnv { st, table, cache: c, profile: self.profile, reorder, tone3: self.tone3 });
         }
         let idx = st.capped.predict_index(&st.lm);
         let cache = Arc::new(DigitCache { key, legal: Legal::new(st.capped.readings(&st.lm)), words: idx.digit_words(&table.all_words()) });
         self.digit_cache = Some(cache.clone());
-        Some(DigitEnv { st, table, cache, profile: self.profile, reorder })
+        Some(DigitEnv { st, table, cache, profile: self.profile, reorder, tone3: self.tone3 })
     }
 
     /// The text before the cursor as the context sees it: the left context and the display up to the cursor.

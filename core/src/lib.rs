@@ -16,6 +16,7 @@ pub mod mixed;
 pub mod predict;
 pub mod reading;
 pub mod tinylm;
+pub mod tone3;
 mod trigram;
 
 use std::collections::{HashMap, HashSet};
@@ -540,6 +541,16 @@ impl Lexicon {
         self.syl_ids.contains_key(syl)
     }
 
+    /// The interned id of `syl`, `None` for a syllable of no reading.
+    pub fn syl_id(&self, syl: &str) -> Option<u32> {
+        self.syl_ids.get(syl).copied()
+    }
+
+    /// Whether the lexicon has a one-syllable entry under `syl`: what `finish_syllable` calls "the lexicon has this syllable".
+    pub fn has_single(&self, syl: &str) -> bool {
+        self.syl_ids.get(syl).is_some_and(|&id| self.find(&[id]).is_some())
+    }
+
     /// Every interned syllable (any reading of any entry).
     pub fn syllables(&self) -> &[String] {
         &self.syl_names
@@ -598,7 +609,35 @@ impl Lexicon {
         if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return (Vec::new(), Vec::new());
         }
-        let readings: Vec<(usize, Vec<u32>)> = self.tolerant_readings(ids, syls, flags).into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
+        self.pick(self.tolerant_readings(ids, syls, flags), ids, per_reading, total, entry)
+    }
+
+    /// The sandhi source of a span (docs/spec/decoder.md §6.6): `tolerant_pick` over the readings `tone3::readings` gives for the span's slice `t3` of the
+    /// position table, instead of the fuzzy ones. Nothing is looked up when the span has no replacement.
+    pub(crate) fn tone3_pick<'a>(
+        &self,
+        ids: &[u32],
+        t3: &[tone3::Pos],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        if !t3.iter().any(|p| p.alt.is_some()) {
+            return (Vec::new(), Vec::new());
+        }
+        self.pick(tone3::readings(ids, t3), ids, per_reading, total, entry)
+    }
+
+    /// The pick of `tolerant_pick` over the candidate readings `cands` (syllable ids; those that are no lexicon reading are dropped).
+    fn pick<'a>(
+        &self,
+        cands: Vec<Vec<u32>>,
+        ids: &[u32],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        let readings: Vec<(usize, Vec<u32>)> = cands.into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
         let exact: HashSet<&str> = self.find(ids).into_iter().flat_map(|r| self.range(r)).map(|p| entry(p).0).collect();
         let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
@@ -626,26 +665,55 @@ impl Lexicon {
     /// Fuzzy input, candidate window: the words of the tolerant readings of `key` (see `tolerant_readings`) that are not words of
     /// the typed reading, each at its best score, best first, with the lexicon reading each was found under. The same choice as the
     /// decoder's (`tolerant_pick`), without the decoder's cap per reading: the window lists them all.
-    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32) -> Vec<(&str, Vec<String>)> {
-        let (readings, words) = self.tolerant_pick(&self.ids(key), key, flags, usize::MAX, usize::MAX, |p| (self.word(p), self.ents[p].score));
-        words.into_iter().map(|(w, _, _, a)| (w, readings[a].1.iter().map(|&i| self.syl_names[i as usize].clone()).collect())).collect()
+    /// The words of the sandhi source (`tone3_pick`, docs/spec/decoder.md §6.6) come after them, those not listed already: `t3` is the position table's slice
+    /// for `key` (empty, or all empty positions, adds nothing).
+    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32, t3: &[tone3::Pos]) -> Vec<(&str, Vec<String>)> {
+        let ids = self.ids(key);
+        let entry = |p: usize| (self.word(p), self.ents[p].score);
+        let name = |r: &[u32]| r.iter().map(|&i| self.syl_names[i as usize].clone()).collect::<Vec<String>>();
+        let (readings, words) = self.tolerant_pick(&ids, key, flags, usize::MAX, usize::MAX, entry);
+        let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
+        let (readings, words) = self.tone3_pick(&ids, t3, usize::MAX, usize::MAX, entry);
+        for (w, _, _, a) in words {
+            if !out.iter().any(|(x, _)| *x == w) {
+                out.push((w, name(&readings[a].1)));
+            }
+        }
+        out
     }
 
     /// The readings a decoded path used over the typed syllables `syls`: `words` are its (word, syllable count) in order. A word read through an
     /// adjacent-key alternative of an unknown syllable (`tolerant_words`) is given under the lexicon reading it was found under, every other word under
     /// the typed syllables. What `tinylm::manual_mask` matches the manual words against, so a manual word the n-gram's first choice holds through a
     /// tolerated reading is protected too (docs/spec/decoder.md §7). `syls` itself when the words do not cover it.
-    pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>) -> Vec<String> {
+    ///
+    /// `t3` is the position table of `syls` (`tone3::positions`, docs/spec/decoder.md §6.6): a word read through the sandhi source is given under the lexicon
+    /// reading it was found under too. An empty `t3` (or all empty positions) is the table of the switch off.
+    pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos]) -> Vec<String> {
         let mut out: Vec<String> = Vec::with_capacity(syls.len());
         for (w, l) in words {
-            let Some(span) = syls.get(out.len()..out.len() + l) else { return syls.to_vec() };
-            let tolerated = self.ids(span).contains(&u32::MAX).then(|| self.tolerant_words(span, 0).into_iter().find(|(tw, _)| *tw == w)).flatten();
+            let at = out.len();
+            let Some(span) = syls.get(at..at + l) else { return syls.to_vec() };
+            let tolerated = self.ids(span).contains(&u32::MAX).then(|| self.tolerant_words(span, 0, &[]).into_iter().find(|(tw, _)| *tw == w)).flatten();
+            let tolerated = tolerated.or_else(|| self.tone3_reading(span, t3.get(at..at + l).unwrap_or(&[]), w).map(|r| (w, r)));
             match tolerated {
                 Some((_, reading)) => out.extend(reading),
                 None => out.extend_from_slice(span),
             }
         }
         if out.len() == syls.len() { out } else { syls.to_vec() }
+    }
+
+    /// The lexicon reading `word` was found under through the sandhi source of `span` (`t3` its slice of the position table): `None` when the typed reading
+    /// has the word, or no sandhi reading of the span has it. The first such reading in subset order.
+    pub fn tone3_reading(&self, span: &[String], t3: &[tone3::Pos], word: &str) -> Option<Vec<String>> {
+        if !t3.iter().any(|p| p.alt.is_some()) || self.has(span, word) {
+            return None;
+        }
+        tone3::readings(&self.ids(span), t3)
+            .into_iter()
+            .find(|k| self.find(k).is_some_and(|r| self.range(r).any(|p| self.word(p) == word)))
+            .map(|k| k.iter().map(|&i| self.syl_names[i as usize].clone()).collect())
     }
 
     pub fn reading_count(&self) -> usize {

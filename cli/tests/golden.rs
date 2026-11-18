@@ -8,9 +8,10 @@ fn run(args: &[&str]) -> String {
 
 /// `run` for the LM-mode goldens that the Python reference (`reference/proto/lm_eval.py`) produced: Python has no reading term
 /// (docs/spec/decoder.md §5), so they are compared with `--no-reading-decode`, the decoder it implements. The shipping default, which has the term,
-/// is pinned by `shipping_default_matches_its_rust_only_pins`. Python has no context-recurrence term either: `--no-recur`.
+/// is pinned by `shipping_default_matches_its_rust_only_pins`. Python has no context-recurrence term either: `--no-recur`; nor third-tone sandhi
+/// (docs/spec/decoder.md §6.6): `--no-tone3`.
 fn run_py(args: &[&str]) -> String {
-    run(&[args, &["--no-reading-decode", "--no-recur"]].concat())
+    run(&[args, &["--no-reading-decode", "--no-recur", "--no-tone3"]].concat())
 }
 
 #[test]
@@ -360,8 +361,8 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     let (lm, rows) = (format!("{root}/eval/golden/kn-tiny/bigram.sjlm"), std::env::temp_dir().join(format!("shanjie-kn-rows-{}.txt", std::process::id())));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let args = |extra: &[&'static str]| {
-        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5)
-        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode"];
+        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5), no third-tone sandhi (§6.6)
+        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode", "--no-tone3"];
         a.extend(extra);
         run(&a)
     };
@@ -388,8 +389,8 @@ fn each_profile_reads_only_its_own_trigram_table() {
     let (lm, rows) = (dir.join("bigram.sjlm"), dir.join("rows.txt"));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let go = |extra: &[&str]| {
-        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5)
-        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode"];
+        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5), no third-tone sandhi (§6.6)
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode", "--no-tone3"];
         a.extend(extra);
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(&a).output().unwrap();
         (out.status.success(), String::from_utf8(out.stdout).unwrap())

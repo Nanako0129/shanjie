@@ -475,6 +475,25 @@ static int run_fuzzy(const char *dir) {
   return 0;
 }
 
+/* third-tone sandhi (docs/spec/decoder.md §6.6): the codes of set_tone3 through the header; the behaviour is in core/tests/engine_tone3.rs. */
+static int run_tone3(const char *dir) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  CHECK(1301, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  CHECK(1302, shanjie_engine_set_tone3(0, 1, &o) == 1 && o == 0);
+  CHECK(1303, shanjie_engine_set_tone3(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(1304, shanjie_engine_set_tone3(e, 2, &o) == 2 && o == 0);
+  CHECK(1305, shanjie_engine_set_tone3(e, 0, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1306, shanjie_engine_set_tone3(e, 1, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 /* acg-pack: argument checks of shanjie_engine_new_packs. The behaviour with a pack is in core/tests/engine_pack.rs. */
 static int run_packs(const char *dir) {
   ShanjieEngine *e = 0;
@@ -617,6 +636,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_english(argv[1]);
   if (rc == 0) rc = run_digits(argv[1], argv[2]);
   if (rc == 0) rc = run_fuzzy(argv[1]);
+  if (rc == 0) rc = run_tone3(argv[1]);
   if (rc == 0) rc = run_share(argv[1], argv[2]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
