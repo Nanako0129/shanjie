@@ -341,19 +341,31 @@ fn unaccepted_syllables_in_a_sentence_read_as_their_third_tone() {
     assert!(!o.preedit.is_empty() && !o.preedit.contains('ㄅ'), "read through an adjacent key: {}", o.preedit);
 }
 
-/// docs/spec/english-mixed.md §7.1: a neutral tail right after a second tone is Zhuyin in the digit layer too. An unaccepted one (ㄓㄢ˙, `5 0 7`) is a legal
-/// complete syllable scored as Xˇ; one with an entry of its own (ㄉㄚ˙, `2 8 7`) is scored as the better of X˙ and Xˇ, so `2 8 6` `2 8 7` and `j i 6` `2 8 7`
-/// stay Zhuyin (it was 達287); a real neutral (`1 8 7`, ㄅㄚ˙ 吧) is as ever; off, the tail is digits as before.
+/// docs/spec/english-mixed.md §7.1: an unaccepted neutral tail (X˙ without a one-syllable entry, Xˇ with one) right after a second tone is a legal complete
+/// syllable in the digit layer too, scored as Xˇ: ㄓㄢ˙ typed `5 0 7` after ㄓㄢˊ (`5 0 6`) or after ㄨㄛˊ (`j i 6`) stays Zhuyin. A neutral with an entry of its
+/// own is not this rule's: ㄉㄚ˙ (`2 8 7`) after ㄉㄚˊ is 達287 with the switch on as with it off, and a real neutral (`1 8 7`, ㄅㄚ˙ 吧) is as ever.
 #[test]
 fn an_unaccepted_neutral_tail_of_digit_keys_is_zhuyin() {
-    for (typed, want) in [("286287", vec!["ㄉㄚˊ", "ㄉㄚ˙"]), ("506507", vec!["ㄓㄢˊ", "ㄓㄢ˙"]), ("ji6287", vec!["ㄨㄛˊ", "ㄉㄚ˙"]), ("286187", vec!["ㄉㄚˊ", "ㄅㄚ˙"])] {
+    let lex = &*toy::shared().lex;
+    assert!(core::tone3::unaccepted_tail(lex, "ㄓㄢ˙") && lex.has_single("ㄉㄚ˙") && lex.has_single("ㄅㄚ˙"), "premise");
+    for (typed, want) in [("506507", vec!["ㄓㄢˊ", "ㄓㄢ˙"]), ("ji6507", vec!["ㄨㄛˊ", "ㄓㄢ˙"]), ("286187", vec!["ㄉㄚˊ", "ㄅㄚ˙"])] {
         let mut e = app(true);
         let o = caps(&mut e, typed);
         assert_eq!(syls(&e), want, "{typed}");
         assert!(o.preedit.chars().count() == 2 && !o.preedit.chars().any(|c| c.is_ascii_digit()), "{typed}: {}", o.preedit);
     }
+    // Off, the unaccepted tail is digits, as before the feature.
     let mut off = app(false);
-    assert_eq!(caps(&mut off, "286287").preedit, "達287");
+    assert!(caps(&mut off, "vu;6507").preedit.ends_with("507"));
+    // ㄉㄚ˙ has an entry: on is off, key for key.
+    let (mut on, mut off) = (app(true), app(false));
+    for c in "286287".chars() {
+        let (a, b) = (on.key(Key::ch(c, 0)).unwrap(), off.key(Key::ch(c, 0)).unwrap());
+        assert!(a == b, "286287: key {c}");
+        if c == '7' {
+            assert_eq!(a.preedit, "達287");
+        }
+    }
     let mut off = app(false);
     assert_eq!(syls_after(&mut off, "286187"), ["ㄉㄚˊ", "ㄅㄚ˙"], "off: the real neutral is as ever");
 }
