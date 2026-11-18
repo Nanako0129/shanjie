@@ -13,7 +13,7 @@
 | `data/lexicon/overlay-manual.tsv` | 手動加的詞（詞、讀音、備註），建置輸入，接在 `overlay-add.tsv` 檔尾 | CC0；併入 `overlay-add.tsv` 後隨該檔以 CC BY-SA 4.0 散布 | — |
 | `data/lexicon/overlay-drop.tsv` | 疊加層不寫的錯字寫法（詞、基底的正確寫法、備註），建置輸入，不隨 App 內附 | CC0 | — |
 | `data/lexicon/slang-add.tsv` | 網路用語詞表（詞、讀音、來源，部分列有第四欄加分）。詞取自中文維基的網路用語與流行語列表、中英文維基詞典的分類（MediaWiki API）、Fandom 上 PTT 鄉民百科與迷因 Wiki 的分類標題、台灣公開論壇的用量（只取詞，不含原文）、Muse（Meta 平台的流行語建議，收錄前都用論壇用量確認，只取詞）、Discord 提供的詞；建置輸入，由 `tools/build_overlay.py` 接進 `overlay-add.tsv` | **CC BY-SA 4.0**；PTT 鄉民百科與迷因 Wiki 的文字是 CC BY-SA 3.0，依 3.0 的「後續版本」條款以 4.0 散布；Discord 提供的詞 CC0 | Wikipedia 與 Wiktionary 貢獻者、PTT 鄉民百科 contributors（Fandom）、Fandom 迷因 Wiki 貢獻者 |
-| `data/lexicon/sandhi-add.tsv` | 由 `tools/build_sandhi.py` 從 `mcbpmf-data.txt` 的多字詞產生：「一」「不」的另一種合規讀音（本調↔變調）、「法」的 ㄈㄚˋ 改成 ㄈㄚˇ、「紮」的口語讀音 ㄓㄚ、基底輕聲詞的本調讀音列（標籤 `neutral`）。規則依據教育部《國語辭典簡編本》〈單一音讀〉與 88 年《國語一字多音審訂表》；規則是事實，檔案不含教育部資料。隨 App 內附 | MIT（小麥基底的衍生；全文 `LICENSES/McBopomofo-MIT.txt`） | 小麥注音 |
+| `data/lexicon/sandhi-add.tsv` | 由 `tools/build_sandhi.py` 從 `mcbpmf-data.txt` 的多字詞產生：「一」「不」的另一種合規讀音（本調↔變調）、「法」的 ㄈㄚˋ 改成 ㄈㄚˇ、「紮」的口語讀音 ㄓㄚ、詞首「這／那／哪」接量詞的合音讀音（標籤 `fusion`）、基底輕聲詞的本調讀音列（標籤 `neutral`）。規則依據教育部《國語辭典簡編本》〈單一音讀〉與 88 年《國語一字多音審訂表》；規則是事實，檔案不含教育部資料。隨 App 內附 | MIT（小麥基底的衍生；全文 `LICENSES/McBopomofo-MIT.txt`） | 小麥注音 |
 | `data/lexicon/variant-order.tsv` | 本專案自寫的異體寫法排序表（溼／濕、姐／姊等 35 組），依台灣公開論壇與 g0v 打字文字的次數排序；不含任何第三方資料，收錄規則寫在檔頭 | **CC0 1.0** | — |
 | `data/lexicon/demote.tsv` | 本專案自寫的降權表（目前一行），來源是使用者回報與探針 `eval/sw/sensitive-reading.txt`；不含第三方資料，收錄條件寫在檔頭 | **CC BY-SA 4.0**（與專案其他資料一致） | — |
 | `data/lexicon/names-english.txt` | 本專案自寫的名單層英文寫法（名字的英文大小寫）；不含第三方資料，格式寫在檔頭。編進核心，和 `data/english-extra.txt` 合成一張表（`docs/spec/english-mixed.md` §4.4） | **CC0 1.0** | — |
