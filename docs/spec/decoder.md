@@ -274,7 +274,7 @@
 - **語意校正**（§6.5）：變調詞不是容錯詞，不設記號、不計 `fuzzy_skips`，照常進候選池；學習守門（`boosted`）在變調詞的詞庫讀音下比較，沒有學習加分就不算被加分。
 - **手動詞保護**（§7）：`path_readings` 回傳變調詞的詞庫讀音。
 - **讀音項**（§5）：變調詞的單字讀音項用詞庫讀音（ˇ）算，變調本身只扣 `DELTA_TONE3`。
-- **收下音節**：未收音節（以及前一個音節是陽平的未收輕聲尾）由 `finish_syllable` 收下，見 `docs/spec/keys-and-composition.md` §3.3；中英混打與數字層把它當成以 Xˇ 算分的詞庫音節，見 `docs/spec/english-mixed.md` §3.4、§7.1、§16.1。
+- **收下音節**：未收音節（以及前一個音節是陽平的未收輕聲尾）由 `finish_syllable` 收下，見 `docs/spec/keys-and-composition.md` §3.3；中英混打把它當成以 Xˇ 算分的詞庫音節，見 `docs/spec/english-mixed.md` §3.4、§16.1；數字層不收變調音節（同檔 §7.1）。
 - **開關**：`Engine::set_tone3`、C ABI `shanjie_engine_set_tone3(engine, on, out)`（0 或 1，其他值回 2、狀態不變；重算組字區並回傳快照，回傳碼同 `set_fuzzy`；預設 1）。關掉時，組字區裡不在固定詞底下的未收音節與未收輕聲尾改存成 Xˇ（照候選窗換讀音的做法），所以照樣有解碼路徑、不清空。macOS 設定頁「模糊輸入」那一區的原生勾選框「三聲變調」，存在 UserDefaults 的布林鍵 `tone3Sandhi`（沒有值＝開），每次建引擎與設定改變時送一次。Windows 殼照核心預設（開）。
 - **評測**：`shanjie-eval` 與 `shanjie-replay` 的 `--no-tone3`；摘要行在開著時多一段 `+t3`（在讀音項標記之後），`shanjie-eval --tone3-delta D`（只給評測，D ≥ 0）不等於預設時是 `+t3:dD`。Python 參考實作不實作變調，和 Python 逐位元組比對的 golden 帶 `--no-tone3`。
 

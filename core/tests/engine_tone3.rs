@@ -165,19 +165,59 @@ fn a_second_tone_known_only_inside_words_shows_its_third_tone() {
     assert_eq!(o.preedit, lex.entries(&["ㄗˇ".to_string()])[0].0, "the first word of ㄗˇ");
 }
 
-/// Contract tone3-sandhi §5 (and §2 B, docs/spec/english-mixed.md §7): with the digit layer on, an unaccepted syllable typed with digit-alphabet keys only
-/// (ㄓㄢˊ `5 0 6`) is Zhuyin; off, it stays the digits 506, as before.
+/// docs/spec/english-mixed.md §7.1 "數字層不收變調音節": with the digit layer on (the App's engine) every key's output is the same with sandhi on and off for
+/// these inputs, among them the unaccepted syllables and tails typed with digit keys (`5 0 6` ㄓㄢˊ, `5 0 7`, `1 0 7` ㄅㄢ˙, `2 0 6`, `2 0 7`) after second
+/// tones, a phone number, and the hurried `2 i j 6` (奪). Each part is syllables (typed by their keys) or keycaps; Enter ends every input.
 #[test]
-fn an_unaccepted_syllable_of_digit_keys_is_zhuyin() {
-    let lex = &*toy::shared().lex;
-    assert!(core::tone3::unaccepted(lex, "ㄓㄢˊ"), "premise");
-    let mut e = app(true);
-    let o = caps(&mut e, "506");
-    assert_eq!(syls(&e), ["ㄓㄢˊ"]);
-    assert!(lex.entries(&["ㄓㄢˇ".to_string()]).iter().any(|(w, _)| *w == o.preedit), "{}", o.preedit);
-    let mut off = app(false);
-    let o = caps(&mut off, "506");
-    assert_eq!(o.preedit, "506");
+fn the_digit_layer_is_the_same_with_sandhi_on_and_off() {
+    let inputs: [&[&str]; 8] = [
+        &["506"],
+        &["506", "507"],
+        &["ㄇㄧㄣˊ", "ㄍㄨㄛˊ", "107", "ㄋㄧㄢˊ"],
+        &["ㄈㄤˊ", "ㄐㄧㄢ", "506"],
+        &["ㄉㄧˋ", "206"],
+        &["ㄇㄣˊ", "ㄆㄞˊ", "207"],
+        &["0912106789"],
+        &["2ij6"],
+    ];
+    for parts in inputs {
+        let (mut on, mut off) = (app(true), app(false));
+        let mut ks: Vec<Key> = Vec::new();
+        for p in parts {
+            if p.is_ascii() {
+                ks.extend(p.chars().map(|c| Key::ch(c, 0)));
+            } else {
+                ks.extend(keys_of(Layout::Standard, p));
+            }
+        }
+        ks.push(Key::new(KeyKind::Enter));
+        let mut sent = String::new();
+        for (i, k) in ks.into_iter().enumerate() {
+            let (a, b) = (on.key(k).unwrap(), off.key(k).unwrap());
+            assert!(a == b, "{parts:?}: key {i} differs");
+            sent.push_str(&a.commit);
+        }
+        assert!(!sent.is_empty(), "{parts:?}");
+        match parts {
+            ["506"] => assert_eq!(sent, "506"),
+            ["0912106789"] => assert_eq!(sent, "0912106789"),
+            ["2ij6"] => assert_eq!(sent, "奪"),
+            [.., "107", _] => assert!(sent.contains("107"), "{sent}"),
+            _ => {}
+        }
+    }
+}
+
+/// Without the digit layer (English mixing off) the same keys are syllables `finish_syllable` accepts: `5 0 6` (ㄓㄢˊ) shows 展 and `j i 6` (ㄨㄛˊ) shows 我.
+#[test]
+fn without_the_digit_layer_digit_key_syllables_are_accepted() {
+    for (typed, syl, want) in [("506", "ㄓㄢˊ", "展"), ("ji6", "ㄨㄛˊ", "我")] {
+        let mut e = app(true);
+        e.set_english(false).unwrap();
+        let o = caps(&mut e, typed);
+        assert_eq!(syls(&e), [syl], "{typed}");
+        assert_eq!(o.preedit, want, "{typed}");
+    }
 }
 
 /// Contract tone3-sandhi §5 "候選窗": the list of ㄓㄚˊ ㄧㄢˇ holds 眨眼 (after the exact words); picking it makes the span ㄓㄚˇ ㄧㄢˇ. Off, it is not listed.
@@ -297,7 +337,7 @@ fn unaccepted_all() -> Vec<String> {
 
 /// docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.3: an unaccepted syllable is read as Xˇ only, never through its adjacent-key readings, with
 /// the adjacent bit off or on. Every unaccepted second-tone syllable of the shipped lexicon, typed alone, shows a one-syllable word of its Xˇ (before the fix
-/// 45 of them showed an adjacent-key guess: ㄗㄡˊ was 由).
+/// 45 of them showed an adjacent-key guess: ㄗㄡˊ was 由). English mixing is off here so that the digit layer does not take the ones typed with digit keys.
 #[test]
 fn every_unaccepted_syllable_alone_shows_a_word_of_its_third_tone() {
     let lex = load_lexicon_packs(&root().join("data/lexicon"), Some((&root().join("data/packs"), APP_PACKS))).unwrap().0;
@@ -305,6 +345,8 @@ fn every_unaccepted_syllable_alone_shows_a_word_of_its_third_tone() {
     assert!(all.len() > 100 && all.iter().any(|s| s == "ㄗㄡˊ"), "premise: {} unaccepted syllables", all.len());
     for flags in [0, core::fuzzy::FUZZY_ADJACENT] {
         let mut e = app(true);
+        // Without the digit layer: with it, the seven typed with digit keys only (ㄓㄢˊ `5 0 6` ...) stay digits (docs/spec/english-mixed.md §7.1).
+        e.set_english(false).unwrap();
         e.set_fuzzy(flags).unwrap();
         let mut wrong = Vec::new();
         for s in &all {
@@ -341,36 +383,3 @@ fn unaccepted_syllables_in_a_sentence_read_as_their_third_tone() {
     assert!(!o.preedit.is_empty() && !o.preedit.contains('ㄅ'), "read through an adjacent key: {}", o.preedit);
 }
 
-/// docs/spec/english-mixed.md §7.1: an unaccepted neutral tail (X˙ without a one-syllable entry, Xˇ with one) right after a second tone is a legal complete
-/// syllable in the digit layer too, scored as Xˇ: ㄓㄢ˙ typed `5 0 7` after ㄓㄢˊ (`5 0 6`) or after ㄨㄛˊ (`j i 6`) stays Zhuyin. A neutral with an entry of its
-/// own is not this rule's: ㄉㄚ˙ (`2 8 7`) after ㄉㄚˊ is 達287 with the switch on as with it off, and a real neutral (`1 8 7`, ㄅㄚ˙ 吧) is as ever.
-#[test]
-fn an_unaccepted_neutral_tail_of_digit_keys_is_zhuyin() {
-    let lex = &*toy::shared().lex;
-    assert!(core::tone3::unaccepted_tail(lex, "ㄓㄢ˙") && lex.has_single("ㄉㄚ˙") && lex.has_single("ㄅㄚ˙"), "premise");
-    for (typed, want) in [("506507", vec!["ㄓㄢˊ", "ㄓㄢ˙"]), ("ji6507", vec!["ㄨㄛˊ", "ㄓㄢ˙"]), ("286187", vec!["ㄉㄚˊ", "ㄅㄚ˙"])] {
-        let mut e = app(true);
-        let o = caps(&mut e, typed);
-        assert_eq!(syls(&e), want, "{typed}");
-        assert!(o.preedit.chars().count() == 2 && !o.preedit.chars().any(|c| c.is_ascii_digit()), "{typed}: {}", o.preedit);
-    }
-    // Off, the unaccepted tail is digits, as before the feature.
-    let mut off = app(false);
-    assert!(caps(&mut off, "vu;6507").preedit.ends_with("507"));
-    // ㄉㄚ˙ has an entry: on is off, key for key.
-    let (mut on, mut off) = (app(true), app(false));
-    for c in "286287".chars() {
-        let (a, b) = (on.key(Key::ch(c, 0)).unwrap(), off.key(Key::ch(c, 0)).unwrap());
-        assert!(a == b, "286287: key {c}");
-        if c == '7' {
-            assert_eq!(a.preedit, "達287");
-        }
-    }
-    let mut off = app(false);
-    assert_eq!(syls_after(&mut off, "286187"), ["ㄉㄚˊ", "ㄅㄚ˙"], "off: the real neutral is as ever");
-}
-
-fn syls_after(e: &mut Engine, typed: &str) -> Vec<String> {
-    caps(e, typed);
-    e.syllables().to_vec()
-}

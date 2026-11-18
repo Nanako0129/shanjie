@@ -212,7 +212,8 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   column (`o k` is `ok`; the switch set_english_overwrite), (b) a Zhuyin key in a column before one that is filled (`l s` is
 //   `ls`; only with set_english_key_order 1 and set_english_reversal_guard 0, so not by default), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
 //   `cup`, `s 7` is `s7`; Space under set_english alone, a tone key under set_english_key_order), except when the adjacent-key rule
-//   of set_fuzzy (bit 4) or third-tone sandhi (set_tone3: Xˊ without a one-syllable entry whose Xˇ has one, ㄨㄛˊ) accepts the syllable. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
+//   of set_fuzzy (bit 4) or third-tone sandhi (set_tone3: Xˊ without a one-syllable entry whose Xˇ has one, ㄨㄛˊ; or X˙ without one whose Xˇ has one, right after a
+//   second-tone syllable) accepts the syllable. The digit row never reads such a syllable from digit keys: `5 0 6` stays 506 whatever set_tone3 says. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
 //   never reverts: the candidate list opened right after it adds its lower and upper case as its last two items, and choosing one
 //   swaps that one syllable for an English token. A syllable that completes as Chinese after some key replaced another in its column
 //   (set_english_overwrite 0: `s p e e c h` Space is ㄘㄣ) gets the same two items for every key typed (`speech`, `SPEECH`).

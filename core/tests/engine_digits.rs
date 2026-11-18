@@ -37,13 +37,11 @@ fn shared() -> &'static Shared {
     })
 }
 
-/// Standard layout, the model and the switch on, and the count table (`with_table`). Third-tone sandhi off: these rows are the Python baseline's
-/// (reference/proto/digits_score.py has no sandhi; docs/spec/decoder.md §6.6).
+/// Standard layout, the model and the switch on, and the count table (`with_table`).
 fn make(with_table: bool, english: bool) -> Engine {
     let s = shared();
     let mut e = Engine::with_lexicon(s.lex.clone(), Layout::Standard);
     e.set_lm(s.lm.clone(), s.capped.clone());
-    e.set_tone3(false).unwrap();
     if with_table {
         e.set_digit_table(Some(s.table.clone()));
     }
@@ -989,13 +987,6 @@ fn app() -> Engine {
     e
 }
 
-/// `app` with third-tone sandhi off (docs/spec/decoder.md §6.6): the rows pinned from the Python baseline and from the engine before sandhi.
-fn app_off() -> Engine {
-    let mut e = app();
-    e.set_tone3(false).unwrap();
-    e
-}
-
 /// What one key left on the screen: the preedit, then `｜`, then the composition's units (blank separated).
 fn shot(e: &Engine, o: &Output) -> String {
     format!("{}｜{}", o.preedit, e.syllables().join(" "))
@@ -1101,7 +1092,9 @@ fn the_rejoin_does_not_depend_on_the_key_order_switch() {
 fn with_the_guard_off_every_key_is_the_baselines() {
     let text = std::fs::read_to_string(root().join("core/tests/fixtures/reversal-guard-off.tsv")).unwrap();
     let (mut lines, mut keys) = (0, 0);
-    let mut e = app_off();
+    let mut e = app();
+    // The baselines are the engine's before third-tone sandhi: with it on, `finish_syllable` accepts ㄨㄛˊ typed `i j 6` after the digit 2 (docs/spec/keys-and-composition.md §3.3).
+    e.set_tone3(false).unwrap();
     for l in text.lines() {
         let f: Vec<&str> = l.split('\t').collect();
         let (guard, key_order) = match f[0] {
@@ -1400,7 +1393,7 @@ fn reorder_scores_match_the_python_golden_bit_for_bit() {
 fn late_inputs_in_the_engine_are_the_golden_rows() {
     let late = golden_late();
     let mut seen = 0;
-    let mut e = app_off();
+    let mut e = app();
     e.set_late_trace(true);
     for (n, r) in late.iter().enumerate() {
         let (Some(left), Some(script)) = (&r.left, &r.script) else { continue };
@@ -1423,16 +1416,4 @@ fn late_inputs_in_the_engine_are_the_golden_rows() {
         seen += 1;
     }
     assert!(seen >= 17, "{seen} rows with a script");
-}
-
-/// Third-tone sandhi on (the App default, docs/spec/decoder.md §6.6) and the real syllable first (docs/spec/english-mixed.md §7.1): ㄨㄛˊ is an unaccepted
-/// syllable, but all the keys of the hurried `2 i j 6` make the real syllable ㄉㄨㄛˊ, so the unaccepted reading takes no part and the result is the one with
-/// sandhi off, key for key: 奪, not the digit 2 and 我.
-#[test]
-fn sandhi_makes_2ij6_a_digit_and_wo() {
-    let (mut on, mut off) = (app(), app_off());
-    let (pre, _) = screens(&mut on, "", "2 i j 6");
-    assert_eq!(pre, ["ㄉ", "2ㄛ", "2ㄨㄛ", "奪"]);
-    assert_eq!(on.syllables(), ["ㄉㄨㄛˊ".to_string()]);
-    assert_eq!(screens(&mut off, "", "2 i j 6").0, pre, "as with sandhi off");
 }

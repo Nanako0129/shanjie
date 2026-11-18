@@ -2,7 +2,7 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/spec/decoder.md §6.6 (Swift): the 三聲變調 checkbox is stored under `tone3Sandhi` (absent is on), sent to every engine the shell builds, and the
-/// checkbox reaches the core (typing ㄓㄚˊ ㄧㄢˇ shows 眨眼 only while it is on).
+/// checkbox reaches the core (typing ㄨㄛˊ ㄒㄧㄤˇ shows 我想 only while it is on).
 @MainActor
 final class Tone3ShellTests: XCTestCase {
     private var resources: URL!
@@ -39,15 +39,20 @@ final class Tone3ShellTests: XCTestCase {
         XCTAssertEqual(makeShell(MemoryFuzzyStore(tone3Sandhi: false)).tone3Sent, [false], "a stored off is sent to the first engine")
     }
 
-    /// The checkbox reaches the running engine: ㄓㄚˊ ㄧㄢˇ shows 眨眼 while it is on, and the composition is recomputed when it is turned off.
+    /// The switch reaches the core: ㄨㄛˊ ㄒㄧㄤˇ shows 我想 while it is on (ㄨㄛˊ has no word of its own: read as ㄨㄛˇ), and with a stored off the same keys
+    /// do not (ㄨㄛˊ is not accepted). Turned off from the window in the middle of a composition, the accepted syllable is kept as ㄨㄛˇ, so 我想 stays.
     func testTheCheckboxChangesWhatTheCoreShows() {
         let shell = makeShell(MemoryFuzzyStore())
         let model = SettingsModel(shell: shell)
         let c = Controller(shell)
         c.session.activate()
-        c.type(Layouts.keys("ㄓㄚˊ ㄧㄢˇ", eten: false))
-        XCTAssertEqual(c.client.marked, "眨眼")
+        c.type(Layouts.keys("ㄨㄛˊ ㄒㄧㄤˇ", eten: false))
+        XCTAssertEqual(c.client.marked, "我想")
         model.setTone3(false)
-        XCTAssertNotEqual(c.client.marked, "眨眼", "the composition is recomputed without the sandhi readings")
+        XCTAssertEqual(c.client.marked, "我想", "the composition keeps a path: the syllable is stored as its third tone")
+        let off = Controller(makeShell(MemoryFuzzyStore(tone3Sandhi: false)))
+        off.session.activate()
+        off.type(Layouts.keys("ㄨㄛˊ ㄒㄧㄤˇ", eten: false))
+        XCTAssertNotEqual(off.client.marked, "我想", "off: ㄨㄛˊ is not accepted")
     }
 }
