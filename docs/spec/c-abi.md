@@ -30,7 +30,7 @@
 
 - **新增函式**：加在標頭與 `ffi.rs`，不改既有函式的簽名與意義。
 - **輸出結構新增欄位**：只加在 `ShanjieOutput` 的尾端（`candidate_vertical`、`english_run_utf16_start`、`english_run_utf16_len` 就是這樣加的）；既有欄位的位置、型別、意義不改。輸出由核心配置、殼只讀，尾端新欄位不會破壞只讀前面欄位的程式，但殼仍要用新標頭重編，不混用。
-- **新設定**：預設值要讓引擎和沒有這個功能時逐位元相同（例如 `set_fuzzy` 的 0 什麼都不改）。殼在每次建引擎後把所有設定重送一遍，因為重建的引擎一律從核心預設值開始（§6）。
+- **新設定**：預設值要讓引擎和沒有這個功能時逐位元相同（例如 `set_fuzzy` 的 0 什麼都不改）；例外是 `set_tone3`，預設開（`docs/spec/decoder.md` §6.6），0 才和沒有這個功能時相同。殼在每次建引擎後把所有設定重送一遍，因為重建的引擎一律從核心預設值開始（§6）。
 - **位元遮罩**：未定義的位元回 2 且狀態不變（`new_packs` 的 `packs`、`set_fuzzy` 的 `flags`）；新增位元就是延伸可接受的遮罩。
 - **移除或改簽名**：核心與殼在同一個改動裡改（舊的 `set_english_inline` 就是被 `set_english_overwrite` 取代後刪除，單字表的載入函式也是）。
 - **改按鍵行為**：`docs/spec/keys-and-composition.md` 的規則表與 `shanjie.h` 在同一個改動裡一起改。
@@ -158,6 +158,7 @@
 | `set_english_reversal_guard` | 1 |
 | `set_english_auto` | 1（沒有 `english.tsv` 時不生效） |
 | `set_fuzzy` | 0 |
+| `set_tone3` | 1（三聲變調，`docs/spec/decoder.md` §6.6） |
 | `set_ascii` | 0 |
 | `set_rerank` | 0 |
 | `set_rerank_level` | 1（標準） |
