@@ -1028,10 +1028,9 @@ fn screens(e: &mut Engine, left: &str, script: &str) -> (Vec<String>, String) {
 
 /// A hurried syllable (two keys swapped) that starts on a digit-alphabet key reads as the syllable the person meant, every key's screen included.
 /// Pinned, not wished away: the three at the sentence start that stay numbers (the next test).
-/// Pinned with third-tone sandhi off (the behaviour from before it); with it on, `2 i j 6` differs: see `sandhi_makes_2ij6_a_digit_and_wo`.
 #[test]
 fn hurried_syllables_are_read_as_typed_in_order() {
-    let mut e = app_off();
+    let mut e = app();
     for (left, keys, want, units) in [
         ("", ". u 3", vec![".", ".ㄧ", "有"], "ㄧㄡˇ"),
         ("我", ". u 3", vec!["ㄡ", ".ㄧ", "有"], "ㄧㄡˇ"),
@@ -1426,13 +1425,14 @@ fn late_inputs_in_the_engine_are_the_golden_rows() {
     assert!(seen >= 17, "{seen} rows with a script");
 }
 
-/// Third-tone sandhi on (the App default, docs/spec/decoder.md §6.6, docs/spec/english-mixed.md §7.1): ㄨㄛˊ is an unaccepted syllable, so `i j 6` is a legal tail
-/// scored as ㄨㄛˇ, and the hurried `2 i j 6` (ㄉㄨㄛˊ, 奪, with sandhi off) reads as the digit 2 and 我. Pinned as measured, a consequence of the contract's digit-layer
-/// rule that is reported for a decision, not chosen here.
+/// Third-tone sandhi on (the App default, docs/spec/decoder.md §6.6) and the real syllable first (docs/spec/english-mixed.md §7.1): ㄨㄛˊ is an unaccepted
+/// syllable, but all the keys of the hurried `2 i j 6` make the real syllable ㄉㄨㄛˊ, so the unaccepted reading takes no part and the result is the one with
+/// sandhi off, key for key: 奪, not the digit 2 and 我.
 #[test]
 fn sandhi_makes_2ij6_a_digit_and_wo() {
-    let mut e = app();
-    let (pre, _) = screens(&mut e, "", "2 i j 6");
-    assert_eq!(pre, ["ㄉ", "2ㄛ", "2ㄨㄛ", "2我"]);
-    assert_eq!(e.syllables(), ["_punct_2".to_string(), "ㄨㄛˊ".to_string()]);
+    let (mut on, mut off) = (app(), app_off());
+    let (pre, _) = screens(&mut on, "", "2 i j 6");
+    assert_eq!(pre, ["ㄉ", "2ㄛ", "2ㄨㄛ", "奪"]);
+    assert_eq!(on.syllables(), ["ㄉㄨㄛˊ".to_string()]);
+    assert_eq!(screens(&mut off, "", "2 i j 6").0, pre, "as with sandhi off");
 }

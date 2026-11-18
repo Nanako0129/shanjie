@@ -366,6 +366,16 @@ impl Scorer<'_> {
     pub fn decide(&self, c: &str, emitted: &[char], buf: &[char], extra: Option<char>, prev_d: Option<usize>, closing: bool, complete: bool, reorder: Option<(f64, f64)>) -> Decision {
         let n = buf.len();
         let boundary = extra == Some(' ');
+        // Third-tone sandhi, real syllable first (docs/spec/english-mixed.md §7.1): when all the keys of the run, the ones shown as digits included, make a
+        // real lexicon syllable by today's rules (in the order typed, or in column order under the reversal guard), no unaccepted syllable is a tail here,
+        // and the result is the one with sandhi off (`2 i j 6` is ㄉㄨㄛˊ, not 2 and ㄨㄛˊ).
+        let whole: Vec<char> = buf.iter().copied().chain(extra).collect();
+        let real = self.tone3
+            && emitted.is_empty()
+            && whole.len() <= MAX_BUF
+            && whole.last().is_some_and(|&k| k == ' ' || tone_mark_of_key(k).is_some())
+            && (self.legal.tail_units(&whole).is_some() || (reorder.is_some() && self.legal.tail_units_in_columns(&whole).is_some()));
+        let tone3 = self.tone3 && !real;
         // (m, t, units)
         let mut cands: Vec<(usize, usize, Option<Vec<Unit>>, f64)> = Vec::new();
         for m in (0..=n).rev() {
@@ -377,10 +387,10 @@ impl Scorer<'_> {
                 if ends_closed && !complete {
                     continue;
                 }
-                if let Some(units) = self.legal.tail_units_t3(&tail, self.tone3) {
+                if let Some(units) = self.legal.tail_units_t3(&tail, tone3) {
                     cands.push((m, tail.len(), Some(units), 0.0));
                 } else if let (Some((rho, rho_sym)), true) = (reorder, ends_closed) {
-                    if let Some(units) = self.legal.tail_units_in_columns_t3(&tail, self.tone3) {
+                    if let Some(units) = self.legal.tail_units_in_columns_t3(&tail, tone3) {
                         let sym = matches!(emitted.first().or(buf.first()), Some('.' | '/' | '-'));
                         cands.push((m, tail.len(), Some(units), if sym { rho_sym } else { rho }));
                     }
@@ -425,6 +435,21 @@ impl Scorer<'_> {
                 cols0[c] = Some(key);
             }
         }
+        // Real syllable first (docs/spec/english-mixed.md §7.1, §7.4): when some suffix of the late keys rejoins into a real lexicon syllable, the unaccepted
+        // syllable's reading takes no part (neither as a rejoined syllable nor as the syllable as typed), as with sandhi off.
+        let z_of = |j: usize| {
+            let mut cols = cols0;
+            let ok = keys[k - j..].iter().all(|&key| match Layout::Standard.symbol_of(key) {
+                Some((c, _)) if cols[c].is_none() => {
+                    cols[c] = Some(key);
+                    true
+                }
+                _ => false,
+            });
+            ok.then(|| cols.iter().flatten().copied().chain([closing]).collect::<Vec<char>>())
+        };
+        let real = self.tone3 && (1..=k).any(|j| z_of(j).is_some_and(|z| self.legal.tail_units(&z).is_some()));
+        let tone3 = self.tone3 && !real;
         let mut best: Option<(usize, f64)> = None;
         for j in (1..=k).rev() {
             let mut cols = cols0;
@@ -436,7 +461,7 @@ impl Scorer<'_> {
                 }
             }
             let z_keys: Vec<char> = cols.iter().flatten().copied().chain([closing]).collect();
-            let Some(u_z) = self.legal.tail_units_t3(&z_keys, self.tone3).filter(|_| ok) else { continue };
+            let Some(u_z) = self.legal.tail_units_t3(&z_keys, tone3).filter(|_| ok) else { continue };
             let digits: Vec<char> = before.iter().chain(&keys[..k - j]).copied().collect();
             let s_z = if digits.is_empty() { self.lp_z(ctx, false, &u_z) + THETA } else { self.lp_d(ctx, &digits, true) + self.lp_z(ctx, true, &u_z) } - rho;
             if best.is_none_or(|(_, b)| s_z > b) {
@@ -445,7 +470,7 @@ impl Scorer<'_> {
         }
         let Some((take, s_z)) = best else { return (None, false, None, None) };
         let d_keys: Vec<char> = cols0.iter().flatten().copied().chain([closing]).collect();
-        match self.legal.tail_units_t3(&d_keys, self.tone3) {
+        match self.legal.tail_units_t3(&d_keys, tone3) {
             Some(u_d) => {
                 let all: Vec<char> = before.iter().chain(keys).copied().collect();
                 let s_d = self.lp_d(ctx, &all, true) + self.lp_z(ctx, true, &u_d);
