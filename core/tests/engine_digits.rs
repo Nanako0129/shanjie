@@ -1246,7 +1246,7 @@ fn the_cursor_in_the_middle() {
 /// docs/spec/english-mixed.md §16: a reversed order is a decision point, and with an English table in the data folder the comparison may read one as the
 /// English word its keys spell (`l s` Space as `ls`): that is the comparison's choice (`Revert::Auto`), counted and printed here, not a trigger of the
 /// guard's. Without a table there is no comparison and the count must be 0.
-const AUTO_REVERSED_MAX: usize = 31;
+const AUTO_REVERSED_MAX: usize = 55;
 
 #[test]
 fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
@@ -1293,9 +1293,9 @@ fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
     }
     println!("typed {typed} reversed orders; {} English, {digits} not the syllable (digits), {auto} English by the comparison", english.len());
     assert!(auto == 0 || root().join("data/lexicon/english.tsv").exists(), "{auto} comparisons without a table");
-    // Pinned (decision 2026-11-17): 31 measured with english.tsv sha256 86ca1ac5... at the default constants (theta 3, kappa 1,
-    // kappa_dup 0). More means the table or the constants now read more reversed orders as English: look at the new ones, then
-    // re-pin. Re-pin to the value measured at the cell the grid chooses.
+    // Pinned: 55 measured with english.tsv sha256 86ca1ac5... at the cell the grid chose (theta 1, kappa 2, kappa_dup 3), on main
+    // with the per-syllable reading normalisation (+rn); the first cell (theta 3, kappa 1, kappa_dup 0) gave 26 there. More means the
+    // table or the constants now read more reversed orders as English: look at the new ones, then re-pin.
     assert!(auto <= AUTO_REVERSED_MAX, "{auto} reversed orders read as English by the comparison, pinned at most {AUTO_REVERSED_MAX}");
     assert!(typed > 3000, "only {typed} reversed orders");
     assert!(english.is_empty(), "{} English, first {:?}", english.len(), &english[..english.len().min(8)]);

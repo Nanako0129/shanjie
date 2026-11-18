@@ -319,9 +319,9 @@ fn auto_english_columns() {
     assert_eq!((&off[21..23], &off[23]), (&["0.000".to_string(), "0.000".to_string()][..], &forced[23]), "{off:?}");
     let (_, none) = go(&["--auto-theta", "-100", "--auto-english", "off"]);
     assert_eq!(none[5..], off[5..], "the switch off is the engine without a table");
-    // The constants (core/src/english_auto.rs: theta 3, kappa 1, kappa_dup 0) as options change no byte.
+    // The constants (core/src/english_auto.rs: theta 1, kappa 2, kappa_dup 3) as options change no byte.
     let (plain, _) = go(&["--auto-table", table]);
-    let (spelled, _) = go(&["--auto-table", table, "--auto-english", "on", "--auto-theta", "3", "--auto-kappa", "1", "--auto-kappa-dup", "0"]);
+    let (spelled, _) = go(&["--auto-table", table, "--auto-english", "on", "--auto-theta", "1", "--auto-kappa", "2", "--auto-kappa-dup", "3"]);
     assert_eq!(plain, spelled);
     // The options need the engine with a model, a finite number, on or off, and a table that parses.
     assert!(fails(&["--rows", rows, "--auto-theta", "1"]));

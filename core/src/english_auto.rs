@@ -4,12 +4,11 @@
 
 use std::collections::HashMap;
 
-/// The shipping cell of the grid theta in {1, 2, 3} by kappa in {1, 1.5, 2} by kappa_dup in {0, 3} (docs/spec/english-mixed.md §16.4). Until the
-/// grid's measurement picks one this is the cell that takes English least often: the highest theta and the lowest penalties (a penalty lowers
-/// lpZ, so a larger kappa means more English, not less).
-pub const THETA: f64 = 3.0;
-pub const KAPPA: f64 = 1.0;
-pub const KAPPA_DUP: f64 = 0.0;
+/// The shipping cell of the grid theta in {1, 2, 3} by kappa in {1, 1.5, 2} by kappa_dup in {0, 3} (docs/spec/english-mixed.md §16.4): the cell
+/// the registered rule picked (every cell was feasible; this one has the highest English first-place rate on the tuning probe).
+pub const THETA: f64 = 1.0;
+pub const KAPPA: f64 = 2.0;
+pub const KAPPA_DUP: f64 = 3.0;
 /// Not in the grid: a key the reversal guard took out of column order.
 pub const KAPPA_REV: f64 = 2.0;
 /// beta of P(E | C).

@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 # Copied from core/src/english_auto.rs; test_english_score.py checks them against that source.
-THETA, KAPPA, KAPPA_DUP, KAPPA_REV = 3.0, 1.0, 0.0, 2.0
+THETA, KAPPA, KAPPA_DUP, KAPPA_REV = 1.0, 2.0, 3.0, 2.0
 BETA = 1.0
 MAX_LEN, UNSEEN_MIN = 32, 5
 TRI_ADD, TRI_KINDS = 0.5, 27.0
