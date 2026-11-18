@@ -390,6 +390,9 @@ struct RowOut {
 /// (evaluation only) leaves the term out: the decoder is the one without it and the tag has no `+rd`, `+rx`, `+rm` or `+rn`. There is no reading-channel term in the
 /// fusion (docs/spec/decoder.md §5; no `+rc` tag), so the colloquial tag is just `+colloq:<sha8>`.
 ///
+/// `--auto-english on|off`, `--auto-theta F`, `--auto-kappa F`, `--auto-kappa-dup F` (docs/spec/english-mixed.md §16.4) are accepted and checked (on or off; a finite
+/// number) and change nothing here: the comparison happens at a closing key, and this tool decodes readings. `english-sim` is where they act.
+///
 /// `--reading-table FILE` (evaluation only; experiments/reading-counts-b3 in the research repository; not in the engine or the C ABI): the reading term's t comes from
 /// the file's `character TAB reading TAB t` rows (t before the `lambda * max(t, -c)` step) instead of the built-in table; a pair of the lexicon the file lacks
 /// reads t = 0, and a malformed row, a character or reading the lexicon has no single-character pair for, or a pair twice stops the run naming the line. The tag
@@ -511,6 +514,16 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--reading-table" => reading_table = Some(val()?),
             "--unseen-ceiling" => unseen_ceil = Some(val()?.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0).ok_or("--unseen-ceiling takes a positive count")?),
             "--dump-reading-table" => dump_reading_table = Some(val()?),
+            // docs/spec/english-mixed.md §16.4: the comparison's options, taken and checked so one option list serves this tool and `english-sim`. Decoding rows from
+            // their readings has no closing key, so they change no byte of the output here.
+            "--auto-english" => {
+                if !matches!(val()?.as_str(), "on" | "off") {
+                    return Err("--auto-english takes on or off".into());
+                }
+            }
+            "--auto-theta" | "--auto-kappa" | "--auto-kappa-dup" => {
+                val()?.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or("--auto-theta, --auto-kappa and --auto-kappa-dup take a finite number")?;
+            }
             _ => return Err("unknown argument".into()),
         }
     }

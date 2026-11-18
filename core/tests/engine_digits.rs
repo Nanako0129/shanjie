@@ -1242,12 +1242,18 @@ fn the_cursor_in_the_middle() {
 /// docs/spec/english-mixed.md §13.1 again with the App's engine: no reversed key order of any lexicon syllable opens an English run or leaves an English
 /// token, and the numbers that the scores still choose stay under the bound the constants give (410 at `RHO` 7, `RHO_SYM` 4: measured 372, plus 10% rounded up).
 /// The sibling of `every_reversed_key_order_of_every_syllable_is_never_english` in `engine_english.rs`, which has no digit layer.
+///
+/// docs/spec/english-mixed.md §16: a reversed order is a decision point, and with an English table in the data folder the comparison may read one as the
+/// English word its keys spell (`l s` Space as `ls`): that is the comparison's choice (`Revert::Auto`), counted and printed here, not a trigger of the
+/// guard's. Without a table there is no comparison and the count must be 0.
+const AUTO_REVERSED_MAX: usize = 55;
+
 #[test]
 fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
     let lex = load_lexicon(&root().join("data/lexicon")).unwrap();
     let mut e = app();
     let seen: std::collections::BTreeSet<&str> = (0..lex.reading_count()).flat_map(|r| lex.reading_syllables(r)).collect();
-    let (mut typed, mut english, mut digits) = (0usize, Vec::new(), 0usize);
+    let (mut typed, mut english, mut digits, mut auto) = (0usize, Vec::new(), 0usize, 0usize);
     for syl in &seen {
         let mut keys: Vec<String> = Vec::new();
         let mut tone = "_".to_string();
@@ -1268,21 +1274,29 @@ fn every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on() {
         for p in perms {
             let script = p.iter().map(|&i| keys[i].as_str()).chain([tone.as_str()]).collect::<Vec<_>>().join(" ");
             e.reset(ResetMode::Discard);
-            let mut reverted = false;
+            let (mut reverted, mut compared) = (false, false);
             for t in script.split_whitespace() {
                 send(&mut e, t);
-                reverted |= e.english_reverted().is_some();
+                compared |= e.english_reverted() == Some(Revert::Auto);
+                reverted |= e.english_reverted().is_some_and(|r| r != Revert::Auto);
             }
             typed += 1;
             let units = e.syllables();
-            if reverted || units.iter().any(|u| u.starts_with("_punct_") && u.chars().count() > 8) {
+            if compared && !reverted {
+                auto += 1;
+            } else if reverted || units.iter().any(|u| u.starts_with("_punct_") && u.chars().count() > 8) {
                 english.push(format!("{syl}: {script}"));
             } else if units != [syl.to_string()] {
                 digits += 1;
             }
         }
     }
-    println!("typed {typed} reversed orders; {} English, {digits} not the syllable (digits)", english.len());
+    println!("typed {typed} reversed orders; {} English, {digits} not the syllable (digits), {auto} English by the comparison", english.len());
+    assert!(auto == 0 || root().join("data/lexicon/english.tsv").exists(), "{auto} comparisons without a table");
+    // Pinned: 55 measured with english.tsv sha256 86ca1ac5... at the cell the grid chose (theta 1, kappa 2, kappa_dup 3), on main
+    // with the per-syllable reading normalisation (+rn); the first cell (theta 3, kappa 1, kappa_dup 0) gave 26 there. More means the
+    // table or the constants now read more reversed orders as English: look at the new ones, then re-pin.
+    assert!(auto <= AUTO_REVERSED_MAX, "{auto} reversed orders read as English by the comparison, pinned at most {AUTO_REVERSED_MAX}");
     assert!(typed > 3000, "only {typed} reversed orders");
     assert!(english.is_empty(), "{} English, first {:?}", english.len(), &english[..english.len().min(8)]);
     assert!(digits <= 410, "{digits} reversed orders stay numbers: the constants lost ground");

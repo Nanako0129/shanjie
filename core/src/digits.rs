@@ -287,6 +287,22 @@ fn log10_sum(terms: impl Iterator<Item = f64>) -> Option<f64> {
     Some(s)
 }
 
+/// `Scorer::lp_z` in the word context `c` (no digit before): log10 of the sum, over the words compatible with `units` (candidate order), of the
+/// model's P(w | c); and the word with the highest P(w | c) (the first of equals), which the English-or-Zhuyin comparison reads the reading term
+/// of (docs/spec/english-mixed.md §16.3). Needs no digit table.
+pub fn lp_z_words<'i>(lm: &Lm, idx: &'i Index, cfg: Scoring, c: &str, units: &[Unit]) -> (f64, Option<&'i str>) {
+    let ctx = lm.context_of(c);
+    let (mut tot, mut best) = (0.0, None::<(&str, f64)>);
+    for (w, lp, wid) in compat_words(idx, units) {
+        let p = lm.prob_back(ctx, wid, lm.unigram_back(cfg, wid, lp));
+        tot += p;
+        if best.is_none_or(|(_, b)| p > b) {
+            best = Some((w, p));
+        }
+    }
+    (if tot > 0.0 { tot.log10() } else { f64::NEG_INFINITY }, best.map(|(w, _)| w))
+}
+
 impl Scorer<'_> {
     /// lpD (docs/spec/english-mixed.md §7.3): 0 with no digit key; else log P(D | C) + log P_len(d | ended) + the log P_ch of the first d keys, in key order.
     pub(crate) fn lp_d(&self, c: &str, dkeys: &[char], ended: bool) -> f64 {
@@ -300,6 +316,9 @@ impl Scorer<'_> {
     /// lpZ: log of the sum, over the words compatible with the tail (candidate order), of P(w | C') with C' the word context `c` (no digit
     /// before: the model's probability, not `word_by_id`'s blend) or the digit context (c, D).
     pub(crate) fn lp_z(&self, c: &str, digit_ctx: bool, units: &[Unit]) -> f64 {
+        if !digit_ctx {
+            return lp_z_words(self.lm, self.idx, self.cfg, c, units).0;
+        }
         let ctx = self.lm.context_of(c);
         let mut tot = 0.0;
         for (w, lp, wid) in compat_words(self.idx, units) {

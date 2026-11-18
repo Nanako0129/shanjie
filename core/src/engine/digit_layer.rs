@@ -222,7 +222,7 @@ impl Engine {
     }
 
     /// The run's context when it starts at the cursor.
-    fn run_ctx(&self, st: &LmState) -> String {
+    pub(super) fn run_ctx(&self, st: &LmState) -> String {
         self.history_of(st, &self.text_before(self.cursor))
     }
 
@@ -401,7 +401,7 @@ impl Engine {
         self.d_shown = run.emitted.len() + m;
         self.set_pend_from(symbols);
         let tail_keys: String = run.buf[m..].iter().collect();
-        let mut o = self.finish_syllable(tone_no, Vec::new())?;
+        let mut o = self.finish_syllable(tone_no, Vec::new(), false)?;
         // docs/spec/english-mixed.md §7.7: the keys stay available as the other reading of this syllable, unless the syllable went out with a `MAX_SYLLABLES`-unit commit.
         if o.commit.is_empty() {
             self.last_digits = Some(tail_keys);
@@ -499,15 +499,15 @@ impl Engine {
     /// At the closing key (`tone` 0 is Space) of the syllable typed behind late tokens (docs/spec/english-mixed.md §7.4): if the tokens are still right before the cursor
     /// (not sent in a `MAX_SYLLABLES` commit, no `pend_prev`), `Scorer::late_decision` says whether the last `take` of them rejoin the syllable; then
     /// those tokens go and their keys are put back in the columns, and the caller makes the syllable as it makes any.
-    pub(super) fn late_merge(&mut self, l: Late, tone: usize) -> Result<(), EngineError> {
+    pub(super) fn late_merge(&mut self, l: Late, tone: usize) -> Result<bool, EngineError> {
         let k = l.keys.len();
         if !(self.english_reversal_guard && self.digits_active()) || !self.pend_prev.is_empty() || self.cursor < k {
-            return Ok(());
+            return Ok(false);
         }
         if !(0..k).all(|i| digit_of(&self.syls[self.cursor - k + i]) == Some(l.keys[i])) {
-            return Ok(());
+            return Ok(false);
         }
-        let Some(env) = self.digit_env() else { return Ok(()) };
+        let Some(env) = self.digit_env() else { return Ok(false) };
         let closing = if tone == 0 { ' ' } else { TONE_KEYS_STANDARD[tone - 1] };
         let pend_keys: Vec<char> = self.pend.iter().flatten().filter_map(|&s| Layout::Standard.key_of_symbol(s)).collect();
         let (rho, rho_sym) = self.reorder;
@@ -515,7 +515,7 @@ impl Engine {
         if let Some(t) = &mut self.ltrace {
             t.push(LateEvent { ctx: l.ctx.clone(), before: l.before.iter().collect(), keys: l.keys.iter().collect(), pend: pend_keys.iter().collect(), closing, rho, rho_sym, result });
         }
-        let (Some(take), true, _, _) = result else { return Ok(()) };
+        let (Some(take), true, _, _) = result else { return Ok(false) };
         for _ in 0..take {
             self.cursor -= 1;
             self.remove_syllable(self.cursor)?;
@@ -526,7 +526,7 @@ impl Engine {
                 self.pend[col] = Some(sym);
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Backspace takes the last buffered key and scores again; with nothing buffered the run ends and the key is the ordinary one (rules 11, 18).
