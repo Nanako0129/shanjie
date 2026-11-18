@@ -1,6 +1,7 @@
 //! docs/spec/english-mixed.md §16: English or Zhuyin at the closing key. The engine as the App builds it (`Engine::new` + `load_lm`, mixing on,
 //! overwrite off, key order on, reversal guard on) with the synthetic table core/tests/fixtures/english-tiny.tsv loaded through the tool hook
-//! (the data folder has no english.tsv of its own in these tests' premise: `the_data_folder_decides_what_ships` says which it is).
+//! (the tests build their engines on a temporary data folder with the tiny table, not on data/lexicon, which ships english.tsv:
+//! `the_data_folder_decides_what_ships` checks that one).
 
 use core::engine::{Engine, Key, KeyKind, Layout, Output, Revert};
 use core::english_auto::{lp_z, takes_english, AutoTable, Params, KAPPA, KAPPA_DUP, KAPPA_REV, THETA};

@@ -318,7 +318,7 @@ fn auto_english_columns() {
     let (_, off) = go(&["--auto-table", table, "--auto-theta", "-100", "--auto-english", "off"]);
     assert_eq!((&off[21..23], &off[23]), (&["0.000".to_string(), "0.000".to_string()][..], &forced[23]), "{off:?}");
     let (_, none) = go(&["--auto-theta", "-100", "--auto-english", "off"]);
-    assert_eq!(none[5..], off[5..], "the switch off is the engine without a table");
+    assert_eq!(none[5..], off[5..], "the switch off is the same with or without --auto-table (the data folder's own table is loaded but off)");
     // The constants (core/src/english_auto.rs: theta 1, kappa 2, kappa_dup 3) as options change no byte.
     let (plain, _) = go(&["--auto-table", table]);
     let (spelled, _) = go(&["--auto-table", table, "--auto-english", "on", "--auto-theta", "1", "--auto-kappa", "2", "--auto-kappa-dup", "3"]);

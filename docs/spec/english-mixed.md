@@ -364,7 +364,7 @@
 
 ## 12. 核心設定函式與 C ABI
 
-- `shanjie_engine_set_english`、`_set_english_overwrite`、`_set_english_key_order`、`_set_english_reversal_guard`、`_set_english_auto`（§16.7）：參數 `enabled` 為 0 或 1，其他值回 2 且狀態不變；engine 或 out 為 NULL 回 1；成功回 0 並回快照（`handled` 1，`commit` 空，唯一例外：`set_english(0)` 結束開著的英文段或數字緩衝時，若第 128 個單位使組字區整串送出，`commit` 為那串文字）。`set_english` 預設 0，其餘四個預設 1。每次建引擎後都要呼叫（殼在 `build()` 裡送）。
+- `shanjie_engine_set_english`、`_set_english_overwrite`、`_set_english_key_order`、`_set_english_reversal_guard`、`_set_english_auto`（§16.7）：參數 `enabled` 為 0 或 1，其他值回 2 且狀態不變；engine 或 out 為 NULL 回 1；成功回 0 並回快照（`handled` 1，`commit` 空，唯一例外：`set_english(0)` 結束開著的英文段或數字緩衝時，若第 128 個單位使組字區整串送出，`commit` 為那串文字）。`set_english` 預設 0，其餘四個預設 1。前四個每次建引擎後都要呼叫（殼在 `build()` 裡送）；`_set_english_auto` 殼不呼叫，用預設值（§16.7）。
 - 輸出結構末尾的 `english_run_utf16_start`、`english_run_utf16_len` 見 §4.6。
 - 沒有載入單字表的函式（早期的英文單字表已移除）。`set_left_context` 的前文用途見 §8。
 - 工具鉤子（`#[doc(hidden)]`，不進 C ABI）：`english_reverted() -> Option<Revert>`（`Revert::{Overwrite, Order, Missing, Auto}`，最近一次 `key()` 是否回退、哪一種；`Auto` 是 §16 的比較取了英文）、`english_split()`、`english_shadow()`（影子的鍵）、`english_record()`（按鍵紀錄）、`english_replay(keys)`（注音重播完成的音節與剩下的三欄）、`english_columns()`、`digits_shown()`／`digits_emitted()`／`digits_typed()`、`set_digits_trace`、`set_late_trace`／`take_late_trace`（待歸鍵的重判：引擎交給 `late_decision` 的輸入與結果）、`late_keys()`、`late_decision(…)`（`Scorer::late_decision` 在引擎的模型上直接呼叫）、`set_reorder_penalty(rho, rho_sym)`（量測用：只改這個引擎的 ρ，不改常數）、`set_digit_table`／`load_digits`、`set_english_next`／`load_english_next`。每次 `key()` 開頭清除 `reverted`／`split`。
@@ -527,7 +527,7 @@
 
 ### 16.5 英文表 `data/lexicon/english.tsv`
 
-- 可有可無：`Engine::new` 從資料夾讀它（和 `digits.tsv` 同一處），缺檔或格式不對時不回錯誤、這一節的規則不生效，每個鍵和沒有這條規則時逐位元相同。`share`／`new_shared` 帶著同一張表。這棵樹目前沒有這個檔。
+- 可有可無：`Engine::new` 從資料夾讀它（和 `digits.tsv` 同一處），缺檔或格式不對時不回錯誤、這一節的規則不生效，每個鍵和沒有這條規則時逐位元相同。`share`／`new_shared` 帶著同一張表。App 內附這張表（`scripts/build-app.sh` 放進 `Resources/`；`scripts/check-app.sh` 要求它存在並和 `data/lexicon/english.tsv` 逐位元組相同，因為缺表時功能無聲消失）。
 - 格式：UTF-8、LF、`#` 開頭的檔頭行（工具版本、k、輸入與通語模型的雜湊）、其餘每行 tab 分欄、依位元組排序。列：`T N`（單位總數）、`N N(E)`（`E` 列的計數合計）、`A N`（被大小門檻剪掉的計數）、`D v N(v→E) N(v)`、`E e N(e)`、`G xyz N`（字母三元組的詞型計數，字元是 `^`、`a–z`、`$`）、`L n N`（長度 n 的詞型數，5–32）。必須有 T、N > 0；數字只收十進位數字；`E` 的 e 要符合 §16.1 的字串規則且不重複；未知的列首字、重複的 `G` 列、範圍外的 `L` 都是格式錯誤（整張表不載入）。
 - **建置** `tools/build_english.py`（照 `tools/build_digits.py`）：讀通語的語料與權重（`docs/spec/models.md` §4.1：維基前 200,000 篇 ×1、口語池 ×5、g0v ×5、台灣公開論壇的推文 ×5 與內文 ×1），含保留集守門（有保留句的漢字段不計數、不當前文，同一句的英文也不計）。
   - **文件切分**（`tools/lib/english_tokens.py`，建表與探針共用）：每一篇文件（論壇的一篇文章含推文、維基的一個條目、g0v 的一則訊息、口語池的一句）以 `sha256(來源代號 + "\t" + 文件 id)` 的第一個位元組 mod 10 分桶；桶 0–7 建表，桶 8 是調參探針，桶 9 是確認探針。
