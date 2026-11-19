@@ -370,7 +370,7 @@ fn the_engine_and_the_cli_decode_alike() {
     let start = history(if k == SENTINEL { "" } else { &k }, &s.lm);
     let syls: Vec<String> = reading.split(' ').map(String::from).collect();
     let cli = |g: Option<&RecurGrams>| {
-        let nb = decode_from_fuzzy_scored(&s.capped, &syls, &s.lm, Profile::Chat, BEAM_S1, start, true, 0, core::fuzzy::DELTA_SOUND, g).unwrap();
+        let nb = decode_from_fuzzy_scored(&s.capped, &syls, &s.lm, Profile::Chat, BEAM_S1, start, true, 0, core::fuzzy::DELTA_SOUND, g, None).unwrap();
         (nb[0].0, nb[0].1.iter().map(|w| w.0).collect::<String>())
     };
     let (score, text) = cli(Some(&g));

@@ -48,6 +48,7 @@ test-python:
 	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
 	python3 -m unittest tools/test_build_sandhi.py
+	python3 -W ignore -m unittest tools/test_build_probe.py
 	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
 	python3 -W ignore -m unittest tools/test_build_meme_pack.py
 	python3 -W ignore -m unittest tools/test_build_beauty_pack.py

@@ -4,7 +4,7 @@
 //! shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--learn off|on] [--rerank each|final]
 //!                [--learn-file FILE] [--learn-guard on|off] [--correct] [--colloquial FILE | --no-colloquial] [--no-reading-decode] [--rowstats FILE] [--keys FILE]
 //!                [--firsts FILE] [--packs LIST] [--rerank-level conservative|standard|aggressive] [--sinit-stretches FILE]
-//!                [--no-recur] [--no-pool-recur] [--key-times FILE]
+//!                [--no-recur] [--no-pool-recur] [--no-tone3] [--key-times FILE]
 //!
 //! A row's reading may hold the marks `，。？！：、` as tokens of their own (sent as the App sends them, so the mark stays in the composition).
 //! `--rerank-level` (default standard, the App's) is evaluation only (`EPS_SINIT_FINE` 4, `EPS_SINIT_MID` 4 and `EPS_SINIT_COARSE` 2 are constants: docs/spec/learning.md §7.4);
@@ -27,6 +27,9 @@
 //! tag reads `+recur+pr`; `--no-pool-recur` (evaluation only, `Engine::set_pool_recur(false)`) leaves that weight out and the tag reads `+recur`
 //! (`--no-recur` turns both off). `--key-times FILE` writes the microseconds of every `Engine::key` call and of each row's `set_left_context`
 //! (`cli::replay::format_key_times`); the summary line does not change.
+//!
+//! Third-tone sandhi (docs/spec/decoder.md §6.6) is on, as in the App, and the tag ends `+t3` after the reading marks; `--no-tone3` (evaluation only,
+//! `Engine::set_tone3(false)`) turns it off and leaves the mark out.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine_packs, format_key_times, format_keys, format_sinit_stretches, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
 use core::engine::{PACK_ACG, PACK_BEAUTY, PACK_IT, PACK_MEME, PACK_QUOTES};
@@ -73,6 +76,7 @@ fn run() -> Result<(), String> {
     let (mut rowstats, mut keys, mut firsts) = (None::<String>, None::<String>, None::<String>);
     let (mut sinit_stretches, mut key_times, mut recur) = (None::<String>, None::<String>, true);
     let mut pool_recur = true;
+    let mut tone3 = true;
     let (mut learn_file, mut guard) = (None::<String>, true);
     let (mut colloquial, mut no_colloquial, mut reading_decode) = (None::<String>, false, true);
     let (mut packs_mask, mut packs_given) = (cli::replay::PACKS, false);
@@ -114,6 +118,7 @@ fn run() -> Result<(), String> {
             "--no-reading-decode" => reading_decode = false,
             "--no-recur" => recur = false,
             "--no-pool-recur" => pool_recur = false,
+            "--no-tone3" => tone3 = false,
             "--key-times" => key_times = Some(val()?),
             "--rerank-level" => {
                 level = Some(match val()?.as_str() {
@@ -217,8 +222,9 @@ fn run() -> Result<(), String> {
     e.set_reading_decode(reading_decode);
     e.set_recur(recur);
     e.set_pool_recur(pool_recur);
+    e.set_tone3(tone3).map_err(|_| "set_tone3 failed")?;
     let tag = format!(
-        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}",
+        "replay-{profile_name}+ctx{packs}+nopred+noen+lm:{lm8}{}{}{}{}{}{}{}{}{}{}{}",
         tl8.as_ref().map_or("-notinylm".to_string(), |h| format!("+tl:{h}")),
         if learn { "+learn" } else { "" },
         if cfg.rerank == Rerank::Final { "+rerank:final" } else { "" },
@@ -238,6 +244,7 @@ fn run() -> Result<(), String> {
             (true, true) => "+recur+pr",
         },
         e.reading_tag(),
+        if tone3 { "+t3" } else { "" },
     );
     let tag = if cfg.strict { format!("{tag}+strict") } else { tag };
     if let Some(l) = level {

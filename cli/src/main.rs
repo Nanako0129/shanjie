@@ -399,6 +399,11 @@ struct RowOut {
 /// gains `+rt:<first 8 hex of the file's SHA-256>` after `+rd+rx:...+rm+rn`. `--dump-reading-table FILE` writes the built-in table (every (character, reading) pair of
 /// a character with at least two single-character readings, t as the term's input, sorted, shortest round-trip float text) and stops, printing nothing; it refuses
 /// to overwrite. A run with the file it wrote gives the picks and `top1_sha256` of a run without `--reading-table`. Both need the reading term (no `--no-reading-decode`).
+///
+/// Third-tone sandhi (docs/spec/decoder.md §6.6) is on: each row's position table is `tone3::positions` over its syllables, the decoder reads the sandhi source and
+/// `path_readings` maps a sandhi word to its lexicon reading; the tag ends `+t3` after the reading marks (`+uc` too). `--no-tone3` (evaluation only) hands the switch off
+/// to the table function and leaves the mark out: the output is byte for byte that of the tree before the feature. `--tone3-delta D` (evaluation only, D >= 0, not with
+/// `--no-tone3`) replaces `DELTA_TONE3`; off the default the mark is `+t3:dD`.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -438,6 +443,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut delta_given = false;
     let mut reading_decode = true;
+    // docs/spec/decoder.md §6.6: third-tone sandhi is on unless `--no-tone3`; the summary tag then ends `+t3` (`+t3:dD` with `--tone3-delta D`, evaluation only,
+    // not the default `tone3::DELTA_TONE3`).
+    let (mut tone3, mut delta_t3, mut delta_t3_given) = (true, core::tone3::DELTA_TONE3, false);
     let (mut reading_table, mut dump_reading_table) = (None::<String>, None::<String>);
     // `--unseen-ceiling K` (evaluation only, `CappedLexicon::with_packs_ceil`): a generated overlay word the model never saw is scored at most
     // log10(K / N). The summary line gets `+uc:K`; without the option the output is unchanged.
@@ -511,6 +519,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--no-pool-recur" => pool_recur = false,
             "--pool-mask-diff" => pool_mask_diff = Some(val()?),
             "--no-reading-decode" => reading_decode = false,
+            "--no-tone3" => tone3 = false,
+            "--tone3-delta" => {
+                delta_t3 = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d >= 0.0).ok_or("--tone3-delta takes a number of at least 0")?;
+                delta_t3_given = true;
+            }
             "--reading-table" => reading_table = Some(val()?),
             "--unseen-ceiling" => unseen_ceil = Some(val()?.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0).ok_or("--unseen-ceiling takes a positive count")?),
             "--dump-reading-table" => dump_reading_table = Some(val()?),
@@ -549,6 +562,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // docs/spec/semantic-rerank.md §9: without a small model a level (standard included) would silently measure the n-gram alone.
     if level.is_some() && tinylm.is_none() {
         return Err("--rerank-level needs --tinylm".into());
+    }
+    // Without the sandhi source the penalty would silently change nothing.
+    if delta_t3_given && !tone3 {
+        return Err("--tone3-delta cannot be combined with --no-tone3".into());
     }
     // The sound penalty only exists on a fuzzy-sound bit; without one the option would silently change nothing.
     if delta_given && fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND == 0 {
@@ -754,7 +771,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let mut out = RowOut::default();
         let grams = recur_on.then(|| RecurGrams::from_text(ctx));
-        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound, grams.as_ref()) {
+        // docs/spec/decoder.md §6.6: the engine's position table (`tone3::positions`) over the row's syllables; empty with `--no-tone3`.
+        let t3 = core::tone3::positions(syls, &lex, tone3);
+        let t3_arg = tone3.then_some((t3.as_slice(), delta_t3));
+        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound, grams.as_ref(), t3_arg) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
             Err(Error::NoPath { .. }) if fuzzy.is_some() => {
@@ -793,7 +813,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let key = key.as_str();
             // The manual mask, once, in the decoder's order with its first path as the base (the engine's `Stretch::masked`; docs/spec/decoder.md §7):
             // `manual_mask` matches the manual words against the readings that path used.
-            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3))) };
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3)), &t3) };
             let masked0 = manual_mask(&used, &top0, lex.manual());
             // docs/spec/semantic-rerank.md §3.1.1: the pool weight and the order it gives (`lm::pool_order`, the engine's function); `view` holds the
             // pool positions in the order the rerank sees them (the pool's own when the weight does not apply).
@@ -801,7 +821,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let reordered = pool_order(&ng0, &bonus, &masked0);
             if want_mask_diff && pool_on {
                 out.mask_diff = mask_differs(&reordered, pool_order(&ng0, &bonus, &[]).is_some(), &masked0, &top0, || {
-                    lex.path_readings(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)))
+                    lex.path_readings(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)), &t3)
                 }, lex.manual());
             }
             let (view, ng): (Vec<usize>, Vec<f64>) = match &reordered {
@@ -1051,7 +1071,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     // `--pool-mask-diff`: the number of rows it wrote, the last key of the summary (absent without the option).
     let md = if want_mask_diff { format!(", 'pool_mask_diff': {mask_diffs}") } else { String::new() };
-    let rd_tag = format!("{rd_tag}{}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
+    let t3_tag = match (tone3, delta_t3 == core::tone3::DELTA_TONE3) {
+        (false, _) => String::new(),
+        (true, true) => "+t3".to_string(),
+        (true, false) => format!("+t3:d{delta_t3}"),
+    };
+    let rd_tag = format!("{rd_tag}{}{t3_tag}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
     println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())

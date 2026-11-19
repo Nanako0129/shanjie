@@ -880,6 +880,40 @@ pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
     rc
 }
 
+/// Third-tone sandhi (docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.2): `on` 0 or 1 (default 1); any other value is 2 with the state
+/// unchanged. Codes and snapshot as `shanjie_engine_set_fuzzy`; turning it off stores every unaccepted syllable of the composition as its third tone.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_tone3(
+    engine: *mut ShanjieEngine,
+    on: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if on > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_tone3(on == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// docs/spec/english-mixed.md §11 as zhen-revert changes it. `enabled` 0 or 1 (default 1): whether a Zhuyin key out of column order, and a
 /// tone key that completes a syllable the lexicon lacks, revert to the raw keys as English (`ls` is `ls` only with the reversal guard off,
 /// `s 7` is `s7`). Returns the

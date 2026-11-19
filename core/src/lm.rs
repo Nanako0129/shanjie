@@ -1303,7 +1303,7 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None)
+    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None, None)
 }
 
 /// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/spec/decoder.md §4.6: the long-context set and the chat sets were measured with 64).
@@ -1407,23 +1407,35 @@ impl CappedLexicon {
     /// The readings the words of one span are looked up under: the typed reading, then (a span with an unknown syllable, or the
     /// sound pairs in `fuzzy` on) the tolerant ones: words of a reading with one syllable replaced, not already words of the typed
     /// reading, each word at its best score, the best `PER_KEY` over all of them (the research's `tolerant_entries`).
-    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64) -> Vec<Source> {
+    ///
+    /// Then the sandhi source (docs/spec/decoder.md §6.6) when `tone3` holds the span's slice of the position table with a replacement in it: the words of the
+    /// span's sandhi readings (`Lexicon::tone3_pick`), at most `PER_KEY` per reading and `PER_KEY` over all of them, counted apart from the fuzzy ones, each
+    /// `delta` lower once. They are no fuzzy words (`sound` false).
+    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64, tone3: Option<(&[crate::tone3::Pos], f64)>) -> Vec<Source> {
         let base = &*self.base;
         let exact = base.find(ids);
         let mut out = vec![Source { r: exact, pen: 0.0, names: None, sound: false, picked: Vec::new() }];
-        if fuzzy & crate::fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
-            return out;
-        }
-        let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
-        // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
-        // capped scores and the cap per key.
-        let (readings, words) = base.tolerant_pick(ids, span, fuzzy, PER_KEY, PER_KEY, |p| (self.word_of(&self.ents[p]), self.ents[p].score));
-        for (a, (r, k)) in readings.iter().enumerate() {
-            let picked: Vec<usize> = words.iter().filter(|w| w.3 == a).map(|w| w.2).collect();
-            if !picked.is_empty() {
-                let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
-                out.push(Source { r: Some(*r), pen, names: Some(names), sound: !ids.contains(&u32::MAX), picked });
+        let entry = |p: usize| (self.word_of(&self.ents[p]), self.ents[p].score);
+        let mut put = |readings: Vec<(usize, Vec<u32>)>, words: Vec<(&str, f64, usize, usize)>, pen: f64, sound: bool| {
+            for (a, (r, k)) in readings.iter().enumerate() {
+                let picked: Vec<usize> = words.iter().filter(|w| w.3 == a).map(|w| w.2).collect();
+                if !picked.is_empty() {
+                    let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
+                    out.push(Source { r: Some(*r), pen, names: Some(names), sound, picked });
+                }
             }
+        };
+        if fuzzy & crate::fuzzy::FUZZY_SOUND != 0 || ids.contains(&u32::MAX) {
+            let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
+            // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
+            // capped scores and the cap per key.
+            // An unaccepted syllable of the sandhi table has no adjacent reading (docs/spec/decoder.md §6.6): it is read through the sandhi source only.
+            let (readings, words) = base.tolerant_pick(ids, span, fuzzy, tone3.map_or(&[][..], |t| t.0), PER_KEY, PER_KEY, entry);
+            put(readings, words, pen, !ids.contains(&u32::MAX));
+        }
+        if let Some((t3, delta)) = tone3 {
+            let (readings, words) = base.tone3_pick(ids, t3, PER_KEY, PER_KEY, entry);
+            put(readings, words, delta, false);
         }
         out
     }
@@ -1449,6 +1461,7 @@ pub fn decode_segment_fuzzy<'a>(
     fuzzy: u32,
     delta_sound: f64,
     recur: Option<&RecurGrams>,
+    tone3: Option<(&[crate::tone3::Pos], f64)>,
 ) -> Result<Vec<Scored<'a>>, Error> {
     let recur = recur.filter(|r| !r.is_empty());
     let base = &*lex.base;
@@ -1488,7 +1501,8 @@ pub fn decode_segment_fuzzy<'a>(
             if hyps[i - l].is_empty() {
                 continue;
             }
-            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound) {
+            let t3 = tone3.and_then(|(t, d)| Some((t.get(i - l..i)?, d)));
+            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound, t3) {
                 let found = src.r;
                 // A tolerant source is learned under its lexicon reading (docs/spec/decoder.md §6.2): a pick of its word was recorded there.
                 let span = src.names.as_deref().unwrap_or(&syls[i - l..i]);
@@ -1736,7 +1750,7 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND, None)?
+    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND, None, None)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
@@ -1744,7 +1758,8 @@ pub fn decode_from(
 
 /// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`) and its fuzzy-sound penalty `delta_sound`
 /// (the CLI's evaluation-only `--fuzzy-delta-sound`; `fuzzy::DELTA_SOUND` by default), and the paths as the decoder has them, fuzzy-word
-/// markers included (what `rerank_pool` reads).
+/// markers included (what `rerank_pool` reads). `tone3`: the position table of `syls` (`tone3::positions`) and the sandhi penalty (`tone3::DELTA_TONE3`
+/// unless the CLI's evaluation-only option changes it), `None` for the switch off (docs/spec/decoder.md §6.6).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_from_fuzzy_scored<'a>(
     lex: &'a CappedLexicon,
@@ -1757,8 +1772,9 @@ pub fn decode_from_fuzzy_scored<'a>(
     fuzzy: u32,
     delta_sound: f64,
     recur: Option<&RecurGrams>,
+    tone3: Option<(&[crate::tone3::Pos], f64)>,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound, recur)
+    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound, recur, tone3)
 }
 
 #[cfg(test)]
@@ -1993,7 +2009,7 @@ mod tests {
             let lex = Arc::new(Lexicon::parse(lex).unwrap());
             let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
             let syls: Vec<String> = syls.iter().map(|s| s.to_string()).collect();
-            let r = decode_segment_fuzzy(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true, 0, crate::fuzzy::DELTA_SOUND, g).unwrap();
+            let r = decode_segment_fuzzy(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true, 0, crate::fuzzy::DELTA_SOUND, g, None).unwrap();
             r.into_iter().map(|(s, ws)| (s, ws.iter().map(|w| w.0.to_string()).collect::<String>(), ws.iter().map(|w| w.2).sum::<f64>())).collect::<Vec<_>>()
         };
         let text = |r: &[(f64, String, f64)]| -> Vec<String> { r.iter().map(|x| x.1.clone()).collect() };
@@ -2501,7 +2517,7 @@ mod tests {
         let lm = Lm::parse(&tiny()).unwrap();
         let lex = Arc::new(Lexicon::parse(lex_text).unwrap());
         let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse(demote).unwrap())).unwrap();
-        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND, None)
+        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND, None, None)
             .unwrap()
             .into_iter()
             .map(|(_, ws)| (ws[0].0.to_string(), ws[0].2, ws[0].4))
@@ -2543,11 +2559,11 @@ mod tests {
         let lex = Arc::new(Lexicon::parse(&text).unwrap());
         let capped = CappedLexicon::new(lex.clone(), "", &lm, None).unwrap();
         let syls = vec!["ㄗ".to_string()];
-        let window: Vec<&str> = lex.tolerant_words(&syls, 0b0010).into_iter().map(|(w, _)| w).collect();
+        let window: Vec<&str> = lex.tolerant_words(&syls, 0b0010, &[]).into_iter().map(|(w, _)| w).collect();
         assert_eq!(window.len(), 14, "the window lists every tolerant word: {window:?}");
         assert!(!window.contains(&"乙"), "a word of the typed reading is not a tolerant one");
         let picked: Vec<&str> = capped
-            .sources(&lex.ids(&syls), &syls, 0b0010, crate::fuzzy::DELTA_SOUND)
+            .sources(&lex.ids(&syls), &syls, 0b0010, crate::fuzzy::DELTA_SOUND, None)
             .iter()
             .flat_map(|src| src.picked.iter().map(|&p| capped.word_of(&capped.ents[p])))
             .collect();

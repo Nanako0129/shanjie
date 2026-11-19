@@ -1093,6 +1093,8 @@ fn with_the_guard_off_every_key_is_the_baselines() {
     let text = std::fs::read_to_string(root().join("core/tests/fixtures/reversal-guard-off.tsv")).unwrap();
     let (mut lines, mut keys) = (0, 0);
     let mut e = app();
+    // The baselines are the engine's before third-tone sandhi: with it on, `finish_syllable` accepts ㄨㄛˊ typed `i j 6` after the digit 2 (docs/spec/keys-and-composition.md §3.3).
+    e.set_tone3(false).unwrap();
     for l in text.lines() {
         let f: Vec<&str> = l.split('\t').collect();
         let (guard, key_order) = match f[0] {

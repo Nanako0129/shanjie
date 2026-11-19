@@ -1015,6 +1015,8 @@ pub struct Engine {
     depth: u32,
     /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips.
     fuzzy: u32,
+    /// Third-tone sandhi (`set_tone3`, default on; docs/spec/decoder.md §6.6): the switch handed to `tone3::positions`.
+    tone3: bool,
     /// docs/spec/english-mixed.md §4.1: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
     /// unit. Empty = no run. Never together with an unfinished syllable or a window.
     run: String,
@@ -1437,6 +1439,7 @@ impl Engine {
             noop: false,
             depth: 0,
             fuzzy: 0,
+            tone3: true,
             run: String::new(),
             run_ascii: false,
             run_rev: false,
@@ -2259,6 +2262,43 @@ impl Engine {
             return Err(e);
         }
         self.handled()
+    }
+
+    /// Third-tone sandhi (docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.2): on (the default), `finish_syllable` accepts an unaccepted
+    /// syllable and the decoder and the window read the sandhi source. Off, the position table is empty, and every unaccepted syllable or neutral tail the
+    /// composition holds (not under a fixed word) is stored as its third tone Xˇ, as a window pick rewrites a span to the lexicon reading, so the composition
+    /// keeps a path. Recomputes the composition and returns the snapshot, like `set_fuzzy`; on a decode failure the engine resets itself.
+    pub fn set_tone3(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
+        self.invalidate();
+        if self.tone3 && !on {
+            for i in 0..self.syls.len() {
+                let s = &self.syls[i];
+                let fixed = self.fixed.iter().any(|f| f.start <= i && i < f.end);
+                if !fixed && (crate::tone3::unaccepted(&self.lex, s) || crate::tone3::unaccepted_tail(&self.lex, s)) {
+                    if let Some(t) = crate::tone3::third(s) {
+                        self.syls[i] = t;
+                    }
+                }
+            }
+        }
+        self.tone3 = on;
+        self.clear_pred();
+        if let Err(e) = self.refresh() {
+            self.clear_all();
+            return Err(e);
+        }
+        self.handled()
+    }
+
+    /// Whether third-tone sandhi is on (`set_tone3`).
+    pub fn tone3(&self) -> bool {
+        self.tone3
+    }
+
+    /// The position table of the composition (docs/spec/decoder.md §6.6), the one function the evaluation CLI calls too.
+    fn t3(&self) -> Vec<crate::tone3::Pos> {
+        crate::tone3::positions(&self.syls, &self.lex, self.tone3)
     }
 
     /// docs/spec/english-mixed.md §1.1, §1.2, §3.2: the switch "a key over a symbol already in its column is English" (rule 9; default on). Only where
@@ -3460,6 +3500,9 @@ impl Engine {
         // docs/spec/semantic-rerank.md §3.1.1: the pool weight needs the decoder's term too.
         let pool_recur = self.recur_on && self.pool_recur_on;
         let mut stretches = Vec::new();
+        // docs/spec/decoder.md §6.6: the position table over the whole composition, sliced per stretch.
+        let t3 = self.t3();
+        let t3_on = self.tone3.then_some(());
         self.free.clear();
         // Byte offset in `out` after the last stretch put into the job: the text from there on is the next stretch's `gap`.
         let mut job_end = 0;
@@ -3503,9 +3546,10 @@ impl Engine {
                 let learn = (!self.learner.is_empty()).then(|| Learn {
                     learner: &self.learner, before: &before, after, today, eps_global: self.eps_global, sinit: Sinit::Off,
                 });
+                let tone3 = t3_on.map(|_| (&t3[start..stop], crate::tone3::DELTA_TONE3));
                 let mut best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
-                    crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur),
+                    crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let eligible = jobs && best.len() >= 2;
@@ -3514,7 +3558,7 @@ impl Engine {
                 self.fuzzy_skips += usize::from(eligible && pool.is_none());
                 // A pool of fewer than 2 paths has nothing to choose among: no job, and not the guard's doing, so it is not counted.
                 let pool = pool.filter(|p| p.len() >= 2);
-                let guarded = pool.is_some() && self.learn_guard && self.boosted(st, start, &best[0].1);
+                let guarded = pool.is_some() && self.learn_guard && self.boosted(st, start, &best[0].1, &t3);
                 self.guard_skips += usize::from(guarded);
                 let pool = pool.filter(|_| !guarded);
                 // docs/spec/learning.md §7.3 and §7.4: the learned sentence-start characters of the stretch, and the pool with a learned path in it.
@@ -3525,7 +3569,7 @@ impl Engine {
                     let lift = Learn { sinit: Sinit::Lift, ..*ln };
                     let lifted = decode_segment_fuzzy(
                         &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&lift), self.demote, self.fuzzy,
-                        crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur),
+                        crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3,
                     )
                     .map_err(|_| EngineError::Internal)?;
                     match sinit_swap(&mut best, &lifted, pool, &sinit_chars) {
@@ -3546,7 +3590,7 @@ impl Engine {
                     let texts: Vec<String> = top.iter().map(|(_, ws)| text_of(ws)).collect();
                     let cands: Vec<&str> = texts.iter().map(String::as_str).collect();
                     let ng: Vec<f64> = top.iter().map(|(score, _)| *score).collect();
-                    let used = || self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3)));
+                    let used = || self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3)), &t3[start..stop]);
                     let (masked, bonus, order) = pool_lists(&cands, &ng, used, &manual, pool_recur.then_some(&self.recur));
                     stretches.push(Stretch {
                         at: path.len(),
@@ -3630,7 +3674,9 @@ impl Engine {
     /// A rule 10 record (SINIT, docs/spec/learning.md §7.2) is no boost here: with a job the stretch is decoded with `Sinit::Off`, so
     /// the first path is the n-gram's without it and its rule 10 character has the lp of its own entry; the learned candidate comes into the pool
     /// from the lifted decode and the learning term in the fused score. The records of the other rules boost as ever and keep the guard.
-    fn boosted(&self, st: &LmState, from: usize, words: &[DecodedWord]) -> bool {
+    /// A word read through the sandhi source (docs/spec/decoder.md §6.6; `t3` is the composition's position table) is compared under the lexicon reading it was
+    /// found under, so it is boosted only when learning lifted it there.
+    fn boosted(&self, st: &LmState, from: usize, words: &[DecodedWord], t3: &[crate::tone3::Pos]) -> bool {
         if self.learner.is_empty() {
             return false;
         }
@@ -3648,7 +3694,11 @@ impl Engine {
             // no learner, reranks it too). (A fuzzy-sound word never gets here: a first path with one is no rerank candidate at all,
             // `rerank_pool`.)
             // A word the capped lexicon lacks under its reading is a learned new word (docs/spec/learning.md §8.4): taught, so boosted.
-            span.is_none_or(|s| !s.iter().any(|x| !self.lex.has_syllable(x)) && st.capped.best_lp(s, w).is_none_or(|best| lp > best))
+            let sandhi = |s: &[String]| self.lex.tone3_reading(s, t3.get(at - n..at).unwrap_or(&[]), w);
+            span.is_none_or(|s| {
+                let s = sandhi(s).unwrap_or_else(|| s.to_vec());
+                !s.iter().any(|x| !self.lex.has_syllable(x)) && st.capped.best_lp(&s, w).is_none_or(|best| lp > best)
+            })
         })
     }
 
@@ -4261,7 +4311,11 @@ impl Engine {
         // tone index 1..=4 -> marks[1..=4]; space (0) -> unmarked tone 1
         syl.push_str(TONE_MARKS[tone]);
         let missing = self.lex.entries(std::slice::from_ref(&syl)).is_empty();
-        if missing && !self.adjacent_accepts(&syl) {
+        // docs/spec/keys-and-composition.md §3.2 (2): an unaccepted syllable (or an unaccepted neutral tail right after a second tone) is accepted as typed
+        // and goes on as a syllable of the lexicon, scored as its third tone (`score`) wherever a score is read here.
+        let sandhi = if missing { self.tone3_accepts(&syl) } else { None };
+        let known = !missing || sandhi.is_some();
+        if !known && !self.adjacent_accepts(&syl) {
             // docs/spec/english-mixed.md §3.4: the adjacent-key rule above had its turn; what it did not take reverts (c).
             if let Some(o) = self.revert_missing(tone)? {
                 return Ok(o);
@@ -4270,17 +4324,18 @@ impl Engine {
             return self.handled();
         }
         // docs/spec/english-mixed.md §16: a syllable the lexicon has, typed with a replaced key or a key out of column order, is English when the comparison says so.
-        if auto && !missing {
-            self.auto_point = self.auto_point_of(&syl);
+        let score = sandhi.unwrap_or_else(|| syl.clone());
+        if auto && known {
+            self.auto_point = self.auto_point_of(&score);
             if let Some(n) = self.auto_point {
-                if let Some(o) = self.auto_english(tone, &syl, n)? {
+                if let Some(o) = self.auto_english(tone, &syl, &score, n)? {
                     return Ok(o);
                 }
             }
         }
         // docs/spec/english-mixed.md §6: the keys of a short word (in the lexicon, so no revert), or of a syllable some key of which
         // replaced another (the record is not the shadow), that the candidate list adds the English of.
-        let short = (!missing && self.shadow_on()).then(|| {
+        let short = (known && self.shadow_on()).then(|| {
             let mut keys = self.typed.clone();
             keys.extend((tone > 0).then(|| TONE_KEYS_STANDARD[tone - 1]));
             (self.typed != self.shadow_text(), keys)
@@ -4292,6 +4347,17 @@ impl Engine {
             self.last_short = Some((self.cursor - 1, word));
         }
         Ok(o)
+    }
+
+    /// Third-tone sandhi (docs/spec/keys-and-composition.md §3.2 (2), docs/spec/decoder.md §6.6): with the switch on and a model loaded, an unaccepted syllable,
+    /// or an unaccepted neutral tail right after a second-tone syllable, is accepted. `Some(Xˇ)`, the reading it is scored as; `None`: not this rule's.
+    fn tone3_accepts(&self, syl: &str) -> Option<String> {
+        if !self.tone3 || self.lm.is_none() {
+            return None;
+        }
+        let prev_rises = self.cursor.checked_sub(1).and_then(|i| self.syls.get(i)).is_some_and(|p| p.ends_with('ˊ') && !p.starts_with(PUNCT_PREFIX));
+        let ok = crate::tone3::unaccepted(&self.lex, syl) || (prev_rises && crate::tone3::unaccepted_tail(&self.lex, syl));
+        ok.then(|| crate::tone3::third(syl)).flatten()
     }
 
     /// Fuzzy input, bit 4 (docs/spec/decoder.md §6.2): a syllable the lexicon lacks is accepted when it has a lexicon
@@ -4576,10 +4642,13 @@ impl Engine {
         self.variant_move(&mut list, &mut rows);
         // Fuzzy input (docs/spec/decoder.md §6.2): after every exact word, the words found through one tolerant
         // syllable, longer readings first, each reading's by score. Nothing is added with the flags 0 and only known syllables.
+        // Third-tone sandhi (docs/spec/decoder.md §6.6): the sandhi words of the same span after them, from the composition's position table.
         let mut alt = HashMap::new();
+        let t3 = self.t3();
         for l in (1..=self.lex.max_len.min(self.avail())).rev() {
-            let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
-            for (w, reading) in self.lex.tolerant_words(key, self.fuzzy) {
+            let (from, to) = if a == 0 { (0, l) } else { (a - l, a) };
+            let key = &self.syls[from..to];
+            for (w, reading) in self.lex.tolerant_words(key, self.fuzzy, &t3[from..to]) {
                 if seen.insert(w.to_string()) {
                     alt.insert(list.len(), reading);
                     list.push((w.to_string(), l));

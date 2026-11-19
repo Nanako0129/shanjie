@@ -802,6 +802,33 @@ class SuiteV2(Tmp):
         for label in ("v0.7.0", "v0.8.0"):
             self.assertNotIn("reading_norm", bench.VERSIONS2[label])
 
+    def test_tone3_version_ends_every_tag_with_t3_and_the_others_do_not(self):
+        """docs/spec/decoder.md §6.6: a version with `"tone3": True` ships third-tone sandhi and ends every tag (the replay-setting cell's too) in `+t3` after the
+        reading marks; one without the key has no mark. A cell is scored against its own form only: each refuses the other."""
+        base = {"release": "vN", "flags": ["--context", "--packs", "acg"], "tinylm": True, "reading": True, "reading_norm": True, "tag": "+ctx+tl:{tl8}+acg"}
+        for spec, own, other in ((dict(base, tone3=True), "+rm+rn+t3", "+rm+rn"), (base, "+rm+rn", "+rm+rn+t3")):
+            label = "vT" + own.replace("+", "")
+            with self.subTest(own=own), mock.patch.dict(bench.VERSIONS2, {label: spec}):
+                v = self.stage_models(label, HEX)
+                for n in HEX:
+                    self.put_model(n)
+                os.makedirs(os.path.join(v.dir, "data", "lexicon"), exist_ok=True)
+                with open(os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv"), "w", encoding="utf-8") as f:
+                    f.write("ㄅㄛ\t波\n")
+                with mock_hash():
+                    bench.setup_models(v, spec, os.path.join(self.td, "mft" + str(len(own))))
+                for prof in ("chat", "formal"):
+                    self.assertEqual(bench.expected_tag(v, prof, False), f"lm-{prof}+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{v.rx8}{own}")
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}", [True, True], ("你好", "世界"))
+                self.assertTrue(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"].endswith(own))
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        for label in bench.VERSIONS2:
+            self.assertNotIn("tone3", bench.VERSIONS2[label], "no released version ships it yet")
+
     def test_recur_version_marks_every_context_tag_after_ctx(self):
         """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
         cell run with `--context` (chat, formal, the anchor run); the replay-setting cell has no `--context`, so no mark; a version without the key has none."""

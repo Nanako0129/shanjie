@@ -235,16 +235,22 @@ public final class MemoryEnglishStore: EnglishStore {
 
 /// Where the 模糊輸入 flags are kept (docs/spec/decoder.md §6.1): bits 0-3 the four sound pairs, bit 4 the adjacent-key
 /// slips, as `shanjie_engine_set_fuzzy`; `nil` means never chosen, which is 0 (all off). Same arrangement as `PredictionStore`.
+/// The same store keeps the 三聲變調 switch of the same settings section (docs/spec/decoder.md §6.6): `nil` means never chosen, which is on.
 @MainActor
 public protocol FuzzyStore: AnyObject {
     var fuzzyFlags: UInt32? { get set }
+    var tone3Sandhi: Bool? { get set }
 }
 
 /// The in-memory FuzzyStore.
 @MainActor
 public final class MemoryFuzzyStore: FuzzyStore {
     public var fuzzyFlags: UInt32?
-    public init(_ fuzzyFlags: UInt32? = nil) { self.fuzzyFlags = fuzzyFlags }
+    public var tone3Sandhi: Bool?
+    public init(_ fuzzyFlags: UInt32? = nil, tone3Sandhi: Bool? = nil) {
+        self.fuzzyFlags = fuzzyFlags
+        self.tone3Sandhi = tone3Sandhi
+    }
 }
 
 /// Where the "動漫與遊戲詞" switch is kept (docs/spec/lexicon-and-packs.md §4.1, §4.2): `nil` means never chosen, which is on. Same arrangement as `PredictionStore`.
@@ -603,6 +609,10 @@ public final class Shell {
     private(set) var fuzzyFlags: UInt32 = 0
     /// What `build()` sent to each engine it made, in order (test hook, like `rerankSent`).
     private(set) var fuzzySent: [UInt32] = []
+    /// docs/spec/decoder.md §6.6: the 三聲變調 switch (default true: `UserDefaults` key `tone3Sandhi`, absent is true); sent to every engine `build()` makes.
+    private(set) var tone3On = true
+    /// What `build()` sent to each engine it made, in order (test hook, like `fuzzySent`).
+    private(set) var tone3Sent: [Bool] = []
     private let acgPackStore: AcgPackStore
     /// The ACG word pack (default on): parsed into the lexicon, so a change rebuilds the engine like a layout change.
     private(set) var acgPackOn = true
@@ -956,6 +966,7 @@ public final class Shell {
         englishReversalGuardOn = englishStore.englishReversalGuard ?? true
         self.fuzzyStore = fuzzyStore
         fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
+        tone3On = fuzzyStore.tone3Sandhi ?? true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
         self.quotePackStore = quotePackStore
@@ -1048,6 +1059,10 @@ public final class Shell {
 
     func applyFuzzy(_ flags: UInt32) {
         if let o = owner { o.applyFuzzy(flags) } else { dropOnFailure(setFuzzy(flags)) }
+    }
+
+    func applyTone3(_ on: Bool) {
+        if let o = owner { o.applyTone3(on) } else { dropOnFailure(setTone3(on)) }
     }
 
     func applyCandidateVertical(_ on: Bool) {
@@ -1188,6 +1203,15 @@ public final class Shell {
         fuzzyStore.fuzzyFlags = fuzzyFlags
         defer { changed() }
         return engine?.setFuzzy(fuzzyFlags)
+    }
+
+    /// The settings window's 三聲變調 switch (docs/spec/decoder.md §6.6): stored, and sent to the engine, which recomputes the composition (turned off, the
+    /// syllables it accepted are stored as their third tone); the snapshot is for the caller to show.
+    func setTone3(_ on: Bool) -> CoreResult? {
+        tone3On = on
+        fuzzyStore.tone3Sandhi = on
+        defer { changed() }
+        return engine?.setTone3(on)
     }
 
     /// The settings window's 重打同一個位置算英文 choice (docs/spec/english-mixed.md §11): stored, and sent to the engine; the snapshot is for the
@@ -1460,6 +1484,11 @@ public final class Shell {
         fuzzySent.append(fuzzyFlags)
         if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
             Log.shell.error("shanjie_engine_set_fuzzy failed, code \(c)")
+        }
+        // And the 三聲變調 switch (docs/spec/decoder.md §6.6), every time.
+        tone3Sent.append(tone3On)
+        if case .failed(let c) = e.setTone3(tone3On) {
+            Log.shell.error("shanjie_engine_set_tone3 failed, code \(c)")
         }
         // Same for the candidate window's orientation (docs/spec/macos-shell.md §8.6.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
@@ -1947,6 +1976,15 @@ public final class Session {
     /// The settings window's 模糊輸入 flags: the snapshot is shown, if this session owns the composition.
     func applyFuzzy(_ flags: UInt32) {
         switch shell.setFuzzy(flags) {
+        case .ok(let o)? where shell.owner === self: apply(o)
+        case .failed(let c)?: _ = fail(c)
+        default: break
+        }
+    }
+
+    /// The settings window's 三聲變調 switch: the snapshot is shown, if this session owns the composition.
+    func applyTone3(_ on: Bool) {
+        switch shell.setTone3(on) {
         case .ok(let o)? where shell.owner === self: apply(o)
         case .failed(let c)?: _ = fail(c)
         default: break

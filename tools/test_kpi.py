@@ -753,6 +753,30 @@ class ReplayRunWithTheSyllableNorm(ReplayRunWithThePoolWeight):
             self.replay()                               # the same binary under a version without the key: refused
 
 
+class ReplayRunWithTone3(ReplayRunWithTheSyllableNorm):
+    """A version with `"tone3": True` (third-tone sandhi, docs/spec/decoder.md §6.6): its replay tag ends in `+t3` after the reading marks (the inherited runs
+    accept it) and the tag without it is refused; a version without the key refuses `+t3`."""
+    SPEC = dict(ReplayRunWithTheSyllableNorm.SPEC, tone3=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "rd": f"+rd+rx:{self.rx8()}+rm+rn+t3"}
+
+    def test_each_form_passes_the_tag_check_of_its_own_version_only(self):
+        lm8, tl8, co8, rows = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8], self.rows["user-reported"][0]
+        for t3 in (True, False):
+            for tail in ("+rm+rn+t3", "+rm+rn"):
+                out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}{tail}  {{'n': 0}}"
+                with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(self.models), stdout=out)):
+                    with self.assertRaises(RuntimeError) as e:
+                        kpi.replay_cell("b", self.root, rows, self.models, False, os.path.join(self.td, "rs"), "+acg", True, True, True, True, t3)
+                self.assertIn("replay scored" if t3 == (tail == "+rm+rn+t3") else "setting tag", str(e.exception), (t3, tail))
+
+    def test_the_run_passes_the_versions_key_on(self):
+        self.replay()                                   # the fake binary prints `+t3`: accepted with the key
+        with mock.patch.object(self, "SPEC", ReplayRunWithTheSyllableNorm.SPEC), self.assertRaises(SystemExit):
+            self.replay()                               # the same binary under a version without the key: refused
+
+
 # ---------- run ----------
 CLI = """#!{py}
 import os, sys
