@@ -134,6 +134,44 @@ fn paired_flag_changes_nothing_on_the_paired_model() {
     assert_eq!(paired.stdout.replacen(&tag, "", 1), plain.stdout);
 }
 
+/// Contract colloq-off-tag: in chat a table that is loaded but whose term is off (no `--tinylm`, or an unpaired one without
+/// `--tinylm-paired`) is tagged `-colloq:<sha8>` (no `+colloq:` in the line) and named on stderr; the term in effect and formal keep `+colloq:`.
+#[test]
+fn a_loaded_table_whose_term_is_off_is_tagged_and_said() {
+    let (r, x) = (tmp("o-rows"), tmp("o-x"));
+    let all = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
+    let rows = r.join("rows.txt");
+    std::fs::write(&rows, all.lines().take(5).collect::<Vec<_>>().join("\n") + "\n").unwrap();
+    let rows = rows.to_string_lossy().into_owned();
+    let other = flipped(&x);
+    let t8 = sha8(TABLE);
+    let go = |profile: &str, model: Option<&str>, extra: &[&str]| {
+        let mut a = s(&["--lm", "data/lm/bigram.sjlm", "--profile", profile, "--context", "--rows", &rows, "--colloquial-core", TABLE]);
+        if let Some(m) = model {
+            a.extend(s(&["--tinylm", m]));
+        }
+        a.extend(s(extra));
+        let o = run(&a);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        (text(&o.stdout), text(&o.stderr))
+    };
+    let warned = |e: &str| e.contains("the colloquial term is off");
+    // Off: an unpaired model, and no model at all.
+    for (model, why) in [(Some(other.as_str()), "not the one the term is paired with"), (None, "no --tinylm is loaded")] {
+        let (out, err) = go("chat", model, &[]);
+        assert!(out.contains(&format!("-colloq:{t8}")) && !out.contains("+colloq:"), "{out}");
+        assert!(warned(&err) && err.contains(why), "{err}");
+    }
+    // On: the paired model, and an unpaired one with --tinylm-paired.
+    let (out, err) = go("chat", Some(MODEL), &[]);
+    assert!(out.contains(&format!("+colloq:{t8}")) && !out.contains("-colloq:") && !warned(&err), "{out}{err}");
+    let (out, err) = go("chat", Some(&other), &["--tinylm-paired"]);
+    assert!(out.contains(&format!("+colloq:{t8}+pair:")) && !out.contains("-colloq:") && !warned(&err), "{out}{err}");
+    // Formal never applies the term: the tag is the one it always was.
+    let (out, err) = go("formal", Some(&other), &[]);
+    assert!(out.contains(&format!("+colloq:{t8}")) && !out.contains("-colloq:") && !warned(&err), "{out}{err}");
+}
+
 /// §4.3: the rank is the scores' `c` on every reranked row (row 25 has c 1, so "rank is always 0" fails), the sentence is the dump's line
 /// at rank + 1, the rowstats recomputed from the picks' sentences equal the rowstats, and there is one line per row.
 #[test]

@@ -361,7 +361,8 @@ struct RowOut {
 /// the term was measured with, or any `--tinylm` with `--tinylm-paired`), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
 /// and the `--rerank-level`) or the plain `rerank`. It refuses no setting, so
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
-/// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
+/// line gains `+colloq:<sha8 of the table>`; in chat, when the term is not in effect (no `--tinylm`, or an unpaired one without `--tinylm-paired`), it is
+/// `-colloq:<sha8>` instead (no `+colloq:` in the line) and stderr says why; formal keeps `+colloq:<sha8>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
 /// `--tinylm-paired` (needs `--tinylm` and `--colloquial-core`) takes the loaded model as the paired one, so the term acts on it as it ships; the tag gains
 /// `+pair:<sha8 of the .sjtl>` after the colloquial one. `--picks FILE`: per row `row\trank\tsentence`, the sentence the row is scored on and its n-best
 /// index (the `--tinylm-scores` `c`; `row\t-\t` for a `--fuzzy` row with no candidate), in row order whatever `--threads`; refused with the holdout.
@@ -653,6 +654,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let colloq_on = colloq
         .as_ref()
         .filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m) || (tinylm_paired && prof == Profile::Chat)));
+    // A table loaded in chat whose term is not in effect is tagged `-colloq:` and named on stderr, so a check for `+colloq:` cannot
+    // take it for the shipping setting (contract colloq-off-tag). Formal never applies the term, so its tag is left as it was.
+    let colloq_off = prof == Profile::Chat && colloq.is_some() && colloq_on.is_none();
+    if colloq_off {
+        let why = if tl.is_none() { "no --tinylm is loaded" } else { "the --tinylm model is not the one the term is paired with" };
+        eprintln!("warning: --colloquial-core is loaded but the colloquial term is off ({why}); the tag says -colloq:. To measure the term as it ships on this model, add --tinylm-paired.");
+    }
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
@@ -1078,7 +1086,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let rd_tag = format!("{rd_tag}{}{t3_tag}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("{}colloq:{}{}", if colloq_off { "-" } else { "+" }, &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())
 }
 

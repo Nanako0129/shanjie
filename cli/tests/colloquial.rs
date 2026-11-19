@@ -72,9 +72,9 @@ fn full_run(dir: &Path, base: &[&str], set: &[&str], extra: &[&str]) -> Out {
     Out { stdout: text(&o.stdout), dump: rd("dump"), words: rd("words"), rs: rd("rs"), sc: rd("sc") }
 }
 
-/// The summary line without the tag the option adds.
+/// The summary line without the tag the option adds (`+colloq:`, or `-colloq:` in chat when the term is off: contract colloq-off-tag).
 fn untagged(out: &str) -> String {
-    let i = out.find("+colloq:").expect("the tag");
+    let i = out.find("+colloq:").or_else(|| out.find("-colloq:")).expect("the tag");
     format!("{}{}", &out[..i], &out[i + "+colloq:".len() + 8..])
 }
 
@@ -167,17 +167,19 @@ fn nothing_changes_elsewhere() {
     let other = ["--lm", "data/lm/bigram.sjlm", "--profile", "chat", "--context", "--packs", "acg", "--tinylm", &flipped];
     let rows_dir = tmp("elrows");
     let rows = rows_with_the_term_rows(&rows_dir);
-    let cases: [(&str, &[&str], &[&str]); 3] = [
-        ("formal", &formal, &[]),
-        ("no small model", &no_tl, &[]),
-        ("another small model", &other, &[]),
+    // The sign of the tag: formal keeps `+colloq:`; chat with the term off is `-colloq:` (contract colloq-off-tag).
+    let cases: [(&str, &[&str], &[&str], &str); 3] = [
+        ("formal", &formal, &[], "+colloq:"),
+        ("no small model", &no_tl, &[], "-colloq:"),
+        ("another small model", &other, &[], "-colloq:"),
     ];
-    for (i, (what, base, extra)) in cases.iter().enumerate() {
+    for (i, (what, base, extra, sign)) in cases.iter().enumerate() {
         let (a, b) = (tmp(&format!("el{i}a")), tmp(&format!("el{i}b")));
         let plain = full_run(&a, base, &["--rows", &rows], extra);
         let mut with: Vec<&str> = extra.to_vec();
         with.extend(["--colloquial-core", TABLE]);
         let tagged = full_run(&b, base, &["--rows", &rows], &with);
+        assert!(tagged.stdout.contains(&format!("{sign}81c2470d")), "{what}: {}", tagged.stdout);
         same_outputs(&tagged, &plain, what);
     }
 }
