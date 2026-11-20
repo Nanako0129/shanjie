@@ -373,6 +373,21 @@ const SHIFT_PUNCT: [(char, char); 13] = [
 /// Unshifted key -> punctuation, from the same probe: [ 「, ] 」, \ 、, ' ‘, = ＝, ` ·. Only when the key is
 /// neither a Zhuyin nor a tone key in the current layout (Eten uses ' and = for Zhuyin).
 const PLAIN_PUNCT: [(char, char); 6] = [('[', '「'), (']', '」'), ('\\', '、'), ('\'', '‘'), ('=', '＝'), ('`', '·')];
+/// Option + key and Option + Shift + key -> the character rule 1o puts into the composition (docs/spec/keys-and-composition.md §8.1), position by position
+/// the keys of `OPTION_KEYS`. Apple's Zhuyin, measured 2026-11-20 in a VM (macOS 26.6.2) with HID-level key events, every cell.
+const OPTION_KEYS: &str = "`1234567890-=[]\\;',./";
+const OPTION_PLAIN: &str = "｀１２３４５６７８９０—＝「」、；‘，．／";
+const OPTION_SHIFT: &str = "～！＠＃＄％＾＆＊（）＿＋『』｜：“《》？";
+
+/// Rule 1o's character for the keycap `ch` (as the shell sends it: US, unshifted), or none for a key outside the rule. Letters give the full-width
+/// lower-case letter, with Shift the upper-case one (measured for a and u; the other letters follow the same pattern, not measured).
+fn option_char(ch: char, shift: bool) -> Option<char> {
+    if ch.is_ascii_lowercase() {
+        return char::from_u32(ch as u32 - 'a' as u32 + if shift { 0xFF21 } else { 0xFF41 });
+    }
+    let i = OPTION_KEYS.chars().position(|c| c == ch)?;
+    (if shift { OPTION_SHIFT } else { OPTION_PLAIN }).chars().nth(i)
+}
 
 /// docs/spec/keys-and-composition.md §8.3: built-in punctuation alternatives, used until `set_punctuation` succeeds. From
 /// data/lexicon/mcbpmf-data.txt (McBopomofo, MIT): ， `_punctuation_Standard_<` lines 1093-1097;
@@ -1010,6 +1025,9 @@ pub struct Engine {
     /// `dispatch` of the key (`depth` 1); `key()` reads it once, after the key, to give the short-word mark back. The one place that
     /// rule lives (docs/spec/english-mixed.md §6).
     noop: bool,
+    /// Set by rule 1o when it eats the key (docs/spec/keys-and-composition.md §4.1): handled, and nothing changes. `key()` reads it once, after the key, to put back
+    /// what it took at its top for the key to see (`late`, `last_digits`); the short-word marks come back through `noop`.
+    eaten: bool,
     /// How many `dispatch` calls the running key is inside: a key that ends a run or a digit buffer first and then dispatches itself again
     /// calls `dispatch` a second time, and whatever the inner call does nothing about, the key as a whole changed something.
     depth: u32,
@@ -1437,6 +1455,7 @@ impl Engine {
             auto_point: None,
             auto_event: None,
             noop: false,
+            eaten: false,
             depth: 0,
             fuzzy: 0,
             tone3: true,
@@ -2970,6 +2989,7 @@ impl Engine {
         self.reverted = None; // the one place the tool hooks are cleared; the key sets them again below
         self.split = false;
         self.noop = false;
+        self.eaten = false;
         self.depth = 0;
         let short = self.last_short.take();
         self.ls_now = short.clone();
@@ -2987,9 +3007,13 @@ impl Engine {
         self.cap_snapshot();
         let mut r = self.dispatch(k).and_then(|mut o| self.cap_after(&mut o).map(|()| o));
         // docs/spec/english-mixed.md §7.4: a key the engine passes on untouched (key-and-composition rule 1, rule 5q: not handled, nothing committed) leaves the late
-        // tokens as they were. Rule 9 put them back itself (`late_keep`); every other key lets them go.
-        if matches!(&r, Ok(o) if o.commit.is_empty() && !o.handled) {
+        // tokens as they were, and so does a key rule 1o ate. Rule 9 put them back itself (`late_keep`); every other key lets them go.
+        if matches!(&r, Ok(o) if o.commit.is_empty() && (self.eaten || !o.handled)) {
             self.late = self.late.take().or(self.late_in.take());
+        }
+        // Rule 1o, eaten: the other reading of the syllable that just closed (docs/spec/english-mixed.md §7.7) stays for the next key too.
+        if self.eaten && r.is_ok() {
+            self.last_digits = self.last_digits.take().or(self.ld_now.take());
         }
         // docs/spec/english-mixed.md §6: a key that changes nothing (a key passed on, or an arm that calls `nothing`) leaves the short word's
         // mark where it was. The one place; a new arm that does nothing calls `nothing` and needs no other line.
@@ -3785,6 +3809,22 @@ impl Engine {
         if ms && is_char && m == MOD_CONTROL && (k.ch == ',' || k.ch == '.') && self.run.is_empty() && self.drun.is_none() && !self.ascii {
             self.clear_pred();
             return self.insert_punct(if k.ch == ',' { '，' } else { '。' });
+        }
+        // 1o (docs/spec/keys-and-composition.md §4.1, step 3, before rule 1): Option, or Option+Shift, with a key of the main block, outside the ASCII state. Apple's
+        // Zhuyin (measured 2026-11-20): the full-width character goes into the composition as rule 2 puts a mark in; behind an unfinished syllable the key does
+        // nothing. Here it is also eaten with a window open, the prediction row entered, or an English run or digit run open (not measured). Eaten: handled, and
+        // every later output is what it would be without the key (`eaten`, `mark_noop`; the row, the Up run and all else are left as rule 1 leaves them).
+        if !self.ascii && is_char && m & !MOD_SHIFT == MOD_OPTION {
+            if let Some(p) = option_char(k.ch, m & MOD_SHIFT != 0) {
+                if self.pend.iter().any(Option::is_some) || !self.pend_prev.is_empty() || self.cands.is_some() || self.pred_sel.is_some() || !self.run.is_empty() || self.drun.is_some() {
+                    self.eaten = true;
+                    self.mark_noop();
+                    return self.handled();
+                }
+                self.up_run = None;
+                self.clear_pred(); // as rule 2: the row goes, `insert_token` says when it is computed again
+                return self.insert_punct(p);
+            }
         }
         // 1: pass through, no state change.
         if m & (MOD_OPTION | MOD_COMMAND | MOD_CAPSLOCK) != 0 || (m & MOD_CONTROL != 0 && !ctrl_bs) {

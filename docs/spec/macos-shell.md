@@ -130,10 +130,11 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - `modifiers`：bit0 Shift、bit1 Control、bit2 Option、bit3 Command、bit4 Caps Lock。
 - **表外的鍵**（數字鍵盤、功能鍵等）與 IMK 傳入的 `nil` 事件不送進核心：組字區有字時先 `finish(mode: 0)` 送出，再回傳「不處理」；組字區空時直接回傳「不處理」。
 - **例外：Page Up／Down**。`KeyMap.pageKeys` 把 `kVK_PageUp`（116）、`kVK_PageDown`（121）對到 14／15，但 `KeyMap.translate` 不含它們；`Session.handle` 只在直排候選窗開著（最後套用的輸出 `candidate_vertical` 為 1）而且沒有任何修飾鍵（Shift、Control、Option、Command、Caps Lock）時才轉送，其餘情況（橫排候選、網格、組字中、未完成音節、預測列、組字區空、帶修飾鍵）都走上一條的表外鍵路徑，行為和沒有這個功能時完全相同。核心收到 14／15 而當下不是直排候選窗時不處理、不改狀態、不送出（`handled` 0）。
-- 英文狀態（單按 Shift 切換）下組字區空時，所有按鍵直接交給 App，不經過核心；組字中且核心有影子時以 `event.characters` 產生字元鍵。見 `docs/spec/english-mixed.md`。
+- 英文狀態（單按 Shift 切換）下組字區空時，按鍵直接交給 App，不經過核心；組字中且核心有影子時以 `event.characters` 產生字元鍵。例外是帶 Option 的字元鍵（規則 1o 的那些鍵）：字元用 `event.characters(byApplyingModifiers:)` 只套事件的 Shift 取（不用 `charactersIgnoringModifiers`，它在 Option 與 Shift 同時按著時不帶 Shift），組字區空時殼自己送出並吃掉這一鍵，組字中且核心有影子時當字元鍵送進核心，組字中而核心沒有影子時吃掉。見 `docs/spec/keys-and-composition.md` §9.2 與 `docs/spec/english-mixed.md`。
+- 中文狀態下帶 Option 的字元鍵照上面的表送進核心（`ch` 是鍵位不按 Shift 的字元，`modifiers` 帶 bit2，有 Shift 再帶 bit0），由核心的規則 1o 處理（`docs/spec/keys-and-composition.md` §4.1、§8.1）。
 - 按 Enter 時（候選窗沒開），送進核心前先讓畫面上的組字追上正在跑的語意校正（最多等 `ENTER_RERANK_WAIT_MS`），見 `docs/spec/semantic-rerank.md`。
 
-驗證：`KeyMapTests`（`testEveryAnsiKeyIsItsUnshiftedCharacter`、`testSpecialKeys`、`testModifierBits`、`testKeysOutsideTheTablesAreNotTranslated`、`testBothLayoutsThroughTheCore`；特殊鍵碼另對 Carbon 的 `kVK_*` 交叉核對）。
+驗證：`KeyMapTests`（`testEveryAnsiKeyIsItsUnshiftedCharacter`、`testSpecialKeys`、`testModifierBits`、`testOptionShiftKeepsTheKeycapAndBothBits`、`testKeysOutsideTheTablesAreNotTranslated`、`testBothLayoutsThroughTheCore`；特殊鍵碼另對 Carbon 的 `kVK_*` 交叉核對）。
 
 ## 4. 輸出套用
 

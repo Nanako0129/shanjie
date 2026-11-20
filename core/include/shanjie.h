@@ -126,6 +126,15 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   shown, unfinished zhuyin symbols included (rules 12a, 19), and SHIFT+ENTER commits the same and then passes the
 //   key on (handled = 0, commit non-empty; rules 12b, 19a), so the app gets its line break. COMMAND, OPTION and
 //   CONTROL+ENTER pass through unchanged (rule 1).
+// OPTION (docs/spec/keys-and-composition.md §4.1 rules 1 and 1o, §8.1): a key with OPTION, COMMAND or CAPSLOCK, or with CONTROL other than
+//   CONTROL+\, passes through (handled = 0, commit empty) and changes no state at all (rule 1). The exception is rule 1o, outside the
+//   ASCII state (set_ascii 0): a CHAR key with OPTION, or OPTION+SHIFT, and none of COMMAND, CONTROL, CAPSLOCK, whose ch is one of
+//   ` 1-0 - = [ ] \ ; ' , . / or a-z (the unshifted US keycap; SHIFT is the modifier bit). With no unfinished syllable, no open
+//   candidate window, the prediction row not entered and no English run or digit run open, the key's full-width character (the table
+//   of §8.1: OPTION+; is U+FF1B, OPTION+SHIFT+; is U+FF1A, a letter is the full-width letter) goes into the composition as a
+//   punctuation unit, as rule 2 puts one in (handled = 1, commit empty). In every other state the key is eaten: handled = 1, commit
+//   empty, the other output fields are those of the output before, and no state changes (any number of such keys in a key sequence
+//   leave every later output as it would be without them).
 // s3b2 (docs/spec/macos-shell.md §8.1): mouse pick. index is a position in the last
 //   output's candidates; the core chooses candidate_first + index through the same path as ENTER, so
 //   learning behaves identically (a candidate pick also keeps the words outside its span as they were shown:
@@ -327,7 +336,7 @@ int32_t shanjie_engine_set_english_auto(ShanjieEngine *engine, uint32_t enabled,
 //   core has no English run to keep a composition in (the ETen layout, the abbreviation composer, set_english 0) 1 only records the
 //   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first). From then
 //   on a CHAR key without modifier bits whose ch is 0x21-0x7E is handled right after rule 1 (Caps Lock / Option / Command / Control
-//   pass through), before the prediction row, the digit run, the English run and the window: a letter, digit or one of `,.;/-` goes
+//   pass through; rule 1o does not apply in this state, the shell turns an Option key into the character without Option first), before the prediction row, the digit run, the English run and the window: a letter, digit or one of `,.;/-` goes
 //   on the English run as it is (no lower case, no tone key, no punctuation or Zhuyin meaning, no revert or split, at most 32
 //   characters a run, `1` is a character, never a pick); any other character settles the open run as a token (no space) and goes in
 //   as its own half-width punctuation unit. Every other key keeps its rule (Space ends an open run as a token, and with no open run

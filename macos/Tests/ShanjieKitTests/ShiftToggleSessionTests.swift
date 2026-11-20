@@ -256,8 +256,8 @@ final class ShiftToggleSessionTests: XCTestCase {
         XCTAssertEqual(Session.asciiKey(bang)?.ch, UInt32(UnicodeScalar("!").value))
         XCTAssertEqual(Session.asciiKey(bang)?.modifiers, 0)
         XCTAssertTrue(c.session.handle(bang))
-        // The Command / Control / Option / Caps Lock keys never take the ASCII road.
-        for flags: NSEvent.ModifierFlags in [.command, .control, .option, .capsLock] {
+        // The Command / Control / Caps Lock keys never take the ASCII road, with Option held too.
+        for flags: NSEvent.ModifierFlags in [.command, .control, .capsLock, [.command, .option], [.control, .option], [.capsLock, .option]] {
             XCTAssertNil(Session.asciiKey(Keys.event(0, flags: flags, characters: "a")))
         }
         XCTAssertNil(Session.asciiKey(Keys.event(49, characters: " ")), "the space bar keeps its rule")
@@ -457,6 +457,90 @@ final class ShiftToggleSessionTests: XCTestCase {
         shell.applyAbbreviation(true)
         XCTAssertTrue(c.session.handle(Keys.event(Keys.code(for: "1"), flags: .shift, characters: "!")))
         XCTAssertEqual(c.client.marked, "你好！")
+    }
+
+    // MARK: Option in the English state (docs/spec/keys-and-composition.md §9.2, rule 1o)
+
+    /// Option (and Shift) with a key of the main block, as the system sends it on the US layout (measured in a VM with HID-level events): `characters` is
+    /// the Option character, `charactersIgnoringModifiers` the key's character with neither Option nor Shift (`;` for Option+Shift+;). The shell reads
+    /// neither: it asks the event for the character with Shift alone (`characters(byApplyingModifiers:)`, which goes by the key code and the keyboard
+    /// layout of the machine the test runs on; the expectations are the US layout's).
+    private func option(_ key: Character, shift: Bool = false, extra: NSEvent.ModifierFlags = [], characters: String) -> NSEvent {
+        Keys.event(Keys.code(for: key), flags: NSEvent.ModifierFlags.option.union(shift ? .shift : []).union(extra), characters: characters, ignoring: String(key))
+    }
+
+    func testOptionInEnglishWithNothingComposedTypesTheKeyWithoutOption() {
+        let c = Controller(makeShell(hint: FakeShiftHint()))
+        c.session.activate()
+        tap(c)
+        XCTAssertTrue(c.session.handle(option(";", shift: true, characters: "Ú")), "eaten")
+        XCTAssertEqual(c.client.text, ":")
+        XCTAssertTrue(c.session.handle(option(";", characters: "…")))
+        XCTAssertTrue(c.session.handle(option("a", characters: "å")))
+        XCTAssertEqual(c.client.text, ":;a")
+        XCTAssertEqual(c.client.marked, "", "sent, not composed")
+        XCTAssertEqual(c.client.calls, [.insert(":"), .insert(";"), .insert("a")])
+        // Outside the rule: with Command, Control or Caps Lock, a key outside the main block, a result that is not one ASCII character.
+        for extra: NSEvent.ModifierFlags in [.command, .control, .capsLock] {
+            XCTAssertFalse(c.session.handle(option(";", extra: extra, characters: "…")))
+        }
+        XCTAssertFalse(c.session.handle(Keys.event(123, flags: .option, characters: "\u{F702}")), "Option+Left")
+        XCTAssertFalse(c.session.handle(Keys.event(Keys.space, flags: .option, characters: "\u{A0}", ignoring: " ")), "Option+Space")
+        XCTAssertTrue(c.session.handle(option(",", shift: true, characters: "¯")))
+        XCTAssertTrue(c.session.handle(option("a", shift: true, characters: "Å")))
+        XCTAssertEqual(c.client.text, ":;a<A")
+        XCTAssertFalse(c.session.handle(Keys.event(Keys.keypad0, flags: .option, characters: "0")), "a keypad digit")
+        XCTAssertFalse(c.session.handle(Keys.event(Keys.code(for: ";"), characters: ";")), "the same key without Option is passed on as before")
+        XCTAssertEqual(c.client.text, ":;a<A")
+    }
+
+    func testOptionInEnglishWithACompositionSendsTheCharacterToTheCore() {
+        let c = Controller(makeShell(hint: FakeShiftHint()))
+        c.session.activate()
+        c.type("su3cl3")
+        tap(c)
+        let colon = option(";", shift: true, characters: "Ú")
+        XCTAssertEqual(Session.asciiKey(colon)?.kind, KeyMap.char)
+        XCTAssertEqual(Session.asciiKey(colon)?.ch, UInt32(UnicodeScalar(":").value))
+        XCTAssertEqual(Session.asciiKey(colon)?.modifiers, 0)
+        XCTAssertEqual(Session.asciiKey(option(";", characters: "…"))?.ch, UInt32(UnicodeScalar(";").value))
+        XCTAssertNil(Session.asciiKey(Keys.event(123, flags: .option, characters: "\u{F702}")), "Option+Left is not a key of the rule")
+        XCTAssertTrue(c.session.handle(colon))
+        XCTAssertEqual(c.client.marked, "你好:")
+        XCTAssertTrue(c.session.handle(option("a", characters: "å")))
+        XCTAssertEqual(c.client.marked, "你好:a")
+        XCTAssertEqual(c.client.text, "")
+    }
+
+    func testOptionInEnglishWithoutAShadowIsEatenAndChangesNothing() {
+        let shell = makeShell(hint: FakeShiftHint())
+        let c = Controller(shell)
+        c.session.activate()
+        c.type("su3")
+        tap(c)
+        shell.applyAbbreviation(true)
+        XCTAssertTrue(shell.engineAscii && !shell.shadowOn && shell.composing, "the state the rule is about")
+        let before = c.client.calls
+        XCTAssertTrue(c.session.handle(option(";", characters: "…")))
+        XCTAssertTrue(c.session.handle(option(";", shift: true, characters: "Ú")))
+        XCTAssertEqual(c.client.calls, before, "nothing sent, nothing marked")
+        XCTAssertEqual(c.client.marked, "你")
+        XCTAssertEqual(c.client.text, "")
+        XCTAssertTrue(c.press(Keys.enter))
+        XCTAssertEqual(c.client.text, "你")
+    }
+
+    /// Chinese state: the key goes to the core as its keycap with the Option bit (rule 1o), and the full-width character is composed.
+    func testOptionInChineseComposesTheFullWidthCharacter() {
+        let c = Controller(makeShell(hint: FakeShiftHint()))
+        c.session.activate()
+        XCTAssertTrue(c.session.handle(option(";", shift: true, characters: "Ú")))
+        XCTAssertEqual(c.client.marked, "：")
+        XCTAssertTrue(c.session.handle(option(";", characters: "…")))
+        XCTAssertEqual(c.client.marked, "：；")
+        XCTAssertEqual(c.client.text, "")
+        XCTAssertTrue(c.press(Keys.enter))
+        XCTAssertEqual(c.client.text, "：；")
     }
 
     func testARightShiftTapSwitchesToo() {
