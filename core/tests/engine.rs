@@ -105,7 +105,9 @@ fn layout_eten_covers_37_symbols_and_5_tones() {
 fn row1_passthrough_keys_leave_no_trace() {
     let junk = [
         Key::ch('a', MOD_COMMAND),
-        Key::ch('s', MOD_OPTION),
+        // Option with a key of the main block is rule 1o (`engine_option.rs`); with another modifier, or another key, it is still rule 1.
+        Key::ch('s', MOD_OPTION | MOD_COMMAND),
+        Key { kind: KeyKind::Backspace, ch: '\0', modifiers: MOD_OPTION },
         Key::ch('s', MOD_CAPSLOCK),
         Key::ch('a', MOD_CONTROL),
         Key::ch('\\', MOD_CONTROL | MOD_SHIFT),

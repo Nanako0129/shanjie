@@ -281,14 +281,14 @@ enum Keys {
     }
 
     static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown, time: TimeInterval = 0,
-                      characters: String = "") -> NSEvent {
+                      characters: String = "", ignoring: String? = nil) -> NSEvent {
         if type == .flagsChanged {
             return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
                                     context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
                                     keyCode: code) ?? event(code, flags: flags)
         }
         return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
-                                context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+                                context: nil, characters: characters, charactersIgnoringModifiers: ignoring ?? characters, isARepeat: false,
                                 keyCode: code)!
     }
 }

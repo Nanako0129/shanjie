@@ -1,5 +1,5 @@
 //! Key scripts shared by the digits tests (docs/spec/english-mixed.md §13.1): `engine_digits.rs` and `engine_digits_off.rs`. A token is a keycap, `_`
-//! Space, `Enter`, `Esc`, `BS`, `Left`, `Right`, `Down`, `Tab`, `C-\` (Control+backslash), `Cmd-c` (Command+c), `PgDn`, `PgUp`, `S-x` (Shift), or `@commit` (`reset(Commit)`).
+//! Space, `Enter`, `Esc`, `BS`, `Left`, `Right`, `Down`, `Tab`, `C-\` (Control+backslash), `Cmd-c` (Command+c), `PgDn`, `PgUp`, `S-x` (Shift), `O-x` (Option), `OS-x` (Option+Shift), or `@commit` (`reset(Commit)`).
 #![allow(dead_code)]
 use core::engine::*;
 
@@ -19,6 +19,8 @@ pub fn key_of(tok: &str) -> Key {
         "Cmd-c" => Key::ch('c', MOD_COMMAND),
         "PgDn" => Key::new(KeyKind::PageDown),
         "PgUp" => Key::new(KeyKind::PageUp),
+        t if t.starts_with("OS-") => Key::ch(t[3..].chars().next().unwrap(), MOD_OPTION | MOD_SHIFT),
+        t if t.starts_with("O-") => Key::ch(t[2..].chars().next().unwrap(), MOD_OPTION),
         t if t.starts_with("S-") => Key::ch(t[2..].chars().next().unwrap(), MOD_SHIFT),
         t => {
             assert!(t.chars().count() == 1, "unknown token {t}");

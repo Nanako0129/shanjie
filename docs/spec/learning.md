@@ -38,7 +38,7 @@
 
 ### 2.2 殼讀前文
 
-- **讀一次**：每次組字開始、第一次 `setMarkedText` 之前讀；只有「不帶 Control、Option、Command、Caps Lock 的字元鍵」且殼目前不在組字中時才讀。組字期間與送出前不再讀。
+- **讀一次**：每次組字開始、第一次 `setMarkedText` 之前讀；只有「不帶 Control、Option、Command、Caps Lock 的字元鍵」且殼目前不在組字中時才讀（Ctrl+\ 與規則 1o 的 Option 鍵在空的組字區開的組字不讀，沒有前文）。組字期間與送出前不再讀。
 - **什麼時候算沒有前文**：`selectedRange` 是 `NSNotFound`；或 client 還有 marked text（`markedRange` 長度大於 0，且位置不是 `NSNotFound`）；或讀取回傳 nil；或隱私閘門擋住（擋時不讀，傳 NULL）。`markedRange` 長度是 0 時不論位置都算沒有 marked text，照樣讀：實機上 VS Code、Chrome、Finder 搜尋框回 `{插入點, 0}`，有的 App 回 `{NSNotFound, NSNotFound}`。
 - **範圍**：最多請求插入點前 256 個 UTF-16 單位（`LeftContext.maxUTF16`）；App 回傳更長時先夾到最後 256 個單位。範圍被截過（起點大於 0 或回傳被夾）時丟掉第一個 grapheme，避免切到代理對或 grapheme 中間。
 - **送給核心的內容**：從最後一個換行（`Character.isNewline`）或 NUL 之後取起（NUL 是斷點，不是刪掉），保留最後 64 個 grapheme 的原文（`LeftContext.maxGraphemes`）。終端機類 App（`LeftContext.terminals`）只傳尾端連續的漢字、最多 2 字，因為終端機的一行裡是指令與輸出。

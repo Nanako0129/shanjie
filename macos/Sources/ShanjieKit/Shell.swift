@@ -1776,7 +1776,17 @@ public final class Session {
         }
         defer { if showModeHint { showShiftHint(shell.engineAscii ? "英" : "中") } }
         // docs/spec/keys-and-composition.md §9.2: English state with nothing composed: every key goes to the app untouched, not through the core.
-        if shell.engineAscii && !shell.composing { return false }
+        // Rule 1o there (docs/spec/keys-and-composition.md §9.2): Option with a key of the main block types the character the key gives without Option, as Apple
+        // Zhuyin's half-width mode does (measured 2026-11-20); the shell sends it itself and eats the key.
+        if shell.engineAscii && !shell.composing {
+            guard let event, event.modifierFlags.contains(.option), let key = Self.asciiKey(event), let c = UnicodeScalar(key.ch) else { return false }
+            spacingPrev = nil  // as after any key this state passes on
+            client.insertText(String(Character(c)), replacementRange: NSRange(location: NSNotFound, length: 0))
+            return true
+        }
+        // The same key with a composition the core cannot keep an English run in (`shadowOn` false; reached only when the setting or the app changed under an
+        // open composition): eaten, nothing typed, the composition stays. Not measured: Apple Zhuyin has no such state.
+        if let event, shell.engineAscii, !shell.shadowOn, event.modifierFlags.contains(.option), Self.asciiKey(event) != nil { return true }
         // docs/spec/macos-shell.md §8.6.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
@@ -1796,12 +1806,16 @@ public final class Session {
     }
 
     /// docs/spec/keys-and-composition.md §9.2: with a composition open in the English state, a printable key is sent as the character the keyboard
-    /// layout made of it (`event.characters`: Shift+1 is `!`), with no modifier bits. `nil` for anything else (Control, Option,
-    /// Command and Caps Lock keys, a non-ASCII or multi-character result, the space bar): those take the usual table.
+    /// layout made of it (`event.characters`: Shift+1 is `!`), with no modifier bits. With Option held (rule 1o, docs/spec/keys-and-composition.md §9.2), for the keys
+    /// of the main block (`KeyMap.ansi`), the character is the one the layout gives with Shift alone applied (`characters(byApplyingModifiers:)` with
+    /// the event's Shift bit: Option+Shift+; is `:`). Not `charactersIgnoringModifiers`: measured in a VM with HID-level events (2026-11-21), with Option and
+    /// Shift held it carries no Shift either (`;`). `nil` for anything else (Control, Command and Caps Lock keys, Option with any other key, a non-ASCII or multi-character
+    /// result, the space bar): those take the usual table.
     static func asciiKey(_ event: NSEvent) -> ShanjieKey? {
         let flags = event.modifierFlags
-        guard flags.isDisjoint(with: [.control, .option, .command, .capsLock]),
-              let chars = event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
+        let option = flags.contains(.option)
+        guard flags.isDisjoint(with: [.control, .command, .capsLock]), !option || KeyMap.ansi[event.keyCode] != nil,
+              let chars = option ? event.characters(byApplyingModifiers: flags.intersection(.shift)) : event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
               (0x21...0x7E).contains(c.value) else { return nil }
         return ShanjieKey(kind: KeyMap.char, ch: c.value, modifiers: 0)
     }
@@ -1847,10 +1861,11 @@ public final class Session {
         shell.diag.record(.toggle(bundle: DiagLog.clean(bundle), english: on, hintShown: shown))
     }
 
-    /// docs/spec/english-mixed.md §11: a key that types: what `asciiKey` takes (no Control, Option, Command or Caps Lock, one character
+    /// docs/spec/english-mixed.md §11: a key that types: what `asciiKey` takes without Option (no Control, Option, Command or Caps Lock, one character
     /// `!` to `~`; arrow and function keys carry private-use characters, so they do not count), or a plain space.
     static func isTypingKey(_ event: NSEvent) -> Bool {
-        asciiKey(event) != nil || (event.characters == " " && event.modifierFlags.isDisjoint(with: [.control, .option, .command]))
+        let flags = event.modifierFlags
+        return !flags.contains(.option) && asciiKey(event) != nil || (event.characters == " " && flags.isDisjoint(with: [.control, .option, .command]))
     }
 
     /// Hands the state of the app being typed into to the core (activate, owner change, switch, setting off).

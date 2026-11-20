@@ -59,6 +59,17 @@ final class KeyMapTests: XCTestCase {
         }
     }
 
+    /// Rule 1o (docs/spec/keys-and-composition.md §4.1): Option+Shift+; reaches the core as the keycap `;` with the Shift and Option bits, whatever
+    /// `characters` the event carries.
+    func testOptionShiftKeepsTheKeycapAndBothBits() {
+        let event = Keys.event(UInt16(kVK_ANSI_Semicolon), flags: [.option, .shift], characters: "Ú", ignoring: ";")
+        let k = KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
+        XCTAssertEqual(k?.kind, KeyMap.char)
+        XCTAssertEqual(k?.ch, UInt32(UnicodeScalar(";").value))
+        XCTAssertEqual(k?.modifiers, 1 | 4)
+        XCTAssertEqual(KeyMap.translate(keyCode: UInt16(kVK_ANSI_Semicolon), flags: .option)?.modifiers, 4)
+    }
+
     func testKeysOutsideTheTablesAreNotTranslated() {
         for code in [kVK_ANSI_Keypad0, kVK_ANSI_Keypad5, kVK_ANSI_KeypadPlus, kVK_ANSI_KeypadDecimal,
                      kVK_F1, kVK_F12, kVK_PageUp, kVK_PageDown, kVK_Help, kVK_ISO_Section, kVK_JIS_Yen] {
