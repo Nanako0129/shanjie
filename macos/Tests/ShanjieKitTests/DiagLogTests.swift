@@ -121,7 +121,7 @@ final class DiagLogTests: XCTestCase {
         pattern: #"^shanjie [A-Za-z0-9._-]+ macOS [0-9]+\.[0-9]+\.[0-9]+ exported [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"#)
     private static let eventLine = try! NSRegularExpression(pattern: "^-[0-9]+\\.[0-9]{3} (shift (left|right) \(outcomePattern)"
         + "|toggle \(bundlePattern) (en|zh) (hint|nohint)|(activate|deactivate) \(bundlePattern) (owner|notowner) (en|zh)"
-        + "|owner \(bundlePattern)|ascii \(bundlePattern) (en|zh))$")
+        + "|owner \(bundlePattern)|ascii \(bundlePattern) (en|zh)|flags \(bundlePattern) (all|some|none))$")
 
     private static func matches(_ re: NSRegularExpression, _ s: String) -> Bool {
         re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
@@ -538,6 +538,235 @@ final class DiagLogTests: XCTestCase {
         model.setDiagLog(false)
         XCTAssertTrue(model.diagLogEmpty)
         XCTAssertFalse(model.diagLog)
+    }
+
+    // MARK: l. flags (docs/spec/macos-shell.md §13.1): were the modifier events delivered
+
+    /// What the injected system counter returns.
+    private var system: UInt32 = 0
+    private var secure = false
+
+    private func flagsShell(shiftToggle: Bool = true, store: DiagLogStore = MemoryDiagLogStore(), resources: URL? = nil) -> Shell {
+        let shell = Shell(resources: resources ?? self.resources, panel: FakePanel(), isSecureInput: { [unowned self] in self.secure },
+                          layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                          dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+                          quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(),
+                          candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(),
+                          profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(),
+                          shiftToggleStore: MemoryShiftToggleStore(shiftToggle), diagLogStore: store,
+                          flagsCounter: { [unowned self] in self.system })
+        shell.mouseAgo = { 1000 }
+        shell.uptime = { [unowned self] in self.uptimeNow }
+        return shell
+    }
+
+    /// `n` modifier events that are no Shift tap (Control down), given to `c`'s session.
+    private func mods(_ c: Controller, _ n: Int) {
+        for _ in 0..<n { flags(c, 59, 0, extra: .control) }
+    }
+
+    /// The `flags` lines, after checking every line against the closed grammar.
+    private func flagLines(_ shell: Shell, file: StaticString = #filePath, line: UInt = #line) -> [String] {
+        for l in lines(shell).dropFirst() { XCTAssertTrue(Self.matches(Self.eventLine, l), l, file: file, line: line) }
+        return events(shell).filter { $0.hasPrefix("flags ") }
+    }
+
+    /// One interval of a fresh shell (its first activate to its deactivate): the system counts `counted`, the input method gets `seen`.
+    private func oneInterval(counted: UInt32, seen: Int) -> [String] {
+        let shell = flagsShell()
+        let c = Controller(shell, bundle: "com.example.A")
+        c.session.activate()
+        system &+= counted
+        mods(c, seen)
+        c.session.deactivate()
+        return flagLines(shell)
+    }
+
+    func testFlagsComparesTheSystemCountWithTheEventsReceived() {
+        system = 1000  // the counter is already running when the process starts: the first interval is recorded like any other
+        XCTAssertEqual(oneInterval(counted: 6, seen: 6), ["flags com.example.A all"])
+        XCTAssertEqual(oneInterval(counted: 6, seen: 0), ["flags com.example.A none"])
+        XCTAssertEqual(oneInterval(counted: 6, seen: 2), ["flags com.example.A some"])
+        XCTAssertEqual(oneInterval(counted: 6, seen: 9), ["flags com.example.A all"], "more received than counted (a repeated delivery)")
+        XCTAssertEqual(oneInterval(counted: 0, seen: 0), [], "the system saw none")
+        XCTAssertEqual(oneInterval(counted: 0, seen: 3), [], "the system saw none")
+        XCTAssertEqual(DiagLog.Event.flags(bundle: "-", delivery: .nothing).line, "flags - none")
+    }
+
+    func testFlagsCountsAcrossAWrapOfTheCounter() {
+        for (seen, expected) in [(6, "all"), (5, "some")] {
+            system = UInt32.max - 1
+            let shell = flagsShell()
+            let c = Controller(shell, bundle: "com.example.A")
+            c.session.activate()
+            system = 4  // six later
+            mods(c, seen)
+            c.session.deactivate()
+            XCTAssertEqual(flagLines(shell), ["flags com.example.A \(expected)"])
+        }
+        XCTAssertEqual(DiagLog.delivery(system: 4 &- (UInt32.max - 1), seen: 2 &- (UInt32.max - 3)), .all, "both wrapped: 6 and 6")
+    }
+
+    /// The `flags` line comes right after its `deactivate` line, with the same time and bundle.
+    func testFlagsIsRecordedAtTheMomentOfTheDeactivate() {
+        let shell = flagsShell()
+        var t = 0.0
+        shell.diag.clock = { t += 1; return t }  // every reading differs
+        let c = Controller(shell, bundle: "com.example.A")
+        c.session.activate()
+        system += 2
+        mods(c, 2)
+        c.session.deactivate()
+        let last = Array(lines(shell).suffix(2))
+        XCTAssertEqual(last.map { String($0.drop(while: { $0 != " " }).dropFirst()) }, ["deactivate com.example.A owner zh", "flags com.example.A all"])
+        XCTAssertEqual(last[0].prefix(while: { $0 != " " }), last[1].prefix(while: { $0 != " " }), "one moment, not two")
+    }
+
+    /// IMK can activate B before it deactivates A: each closes its own interval, and the differences are the whole process's.
+    func testOverlappingIntervalsEachCloseWithProcessWideCounts() {
+        let shell = flagsShell()
+        let a = Controller(shell, bundle: "com.example.A"), b = Controller(shell, bundle: "com.example.B")
+        a.session.activate()
+        system += 4; mods(a, 4)
+        b.session.activate()
+        system += 2; mods(b, 2)  // in both intervals
+        a.session.deactivate()   // not the owner any more: still closes its interval
+        XCTAssertEqual(flagLines(shell), ["flags com.example.A all"], "6 counted, 6 received by the process (4 of them by A)")
+        system += 2
+        b.session.deactivate()
+        XCTAssertEqual(flagLines(shell), ["flags com.example.A all", "flags com.example.B some"], "4 counted, 2 received")
+    }
+
+    func testASecondActivateKeepsTheFirstStart() {
+        let shell = flagsShell()
+        let c = Controller(shell, bundle: "com.example.A")
+        c.session.activate()
+        system += 4; mods(c, 4)
+        c.session.activate()
+        system += 2
+        c.session.deactivate()
+        XCTAssertEqual(flagLines(shell), ["flags com.example.A some"], "6 counted and 4 received since the first activate (2 and 0 since the second)")
+    }
+
+    func testADeactivateWithoutAnIntervalRecordsNoFlags() {
+        let shell = flagsShell()
+        let c = Controller(shell, bundle: "com.example.A")
+        system += 6
+        c.session.deactivate()
+        XCTAssertEqual(flagLines(shell), [], "no activate before it")
+        c.session.activate()
+        system += 6; mods(c, 6)
+        c.session.deactivate()
+        system += 6
+        c.session.deactivate()
+        XCTAssertEqual(flagLines(shell), ["flags com.example.A all"], "the repeated deactivate adds none")
+    }
+
+    /// Secure input seen at any observation point of the interval voids it; the next interval is recorded again.
+    func testNoFlagsForAnIntervalThatSawSecureInput() {
+        let points: [(String, (Controller, Controller) -> Void, (Controller) -> Void)] = [
+            ("at the activate", { a, _ in self.secure = true; a.session.activate(); self.secure = false }, { _ in }),
+            ("at the deactivate", { a, _ in a.session.activate() }, { _ in self.secure = true }),
+            ("at a key in between", { a, _ in a.session.activate(); self.secure = true; a.press(Keys.code(for: "a")); self.secure = false }, { _ in }),
+            ("at a modifier event in between", { a, _ in a.session.activate(); self.secure = true; self.mods(a, 1); self.secure = false }, { _ in }),
+            ("at another session's activate", { a, b in a.session.activate(); self.secure = true; b.session.activate(); self.secure = false }, { _ in }),
+            ("at another session's deactivate", { a, b in a.session.activate(); self.secure = true; b.session.deactivate(); self.secure = false }, { _ in }),
+        ]
+        for (name, begin, beforeEnd) in points {
+            secure = false
+            let shell = flagsShell()
+            let a = Controller(shell, bundle: "com.example.A"), b = Controller(shell, bundle: "com.example.B")
+            begin(a, b)
+            system += 6; mods(a, 6)
+            beforeEnd(a)
+            a.session.deactivate()
+            b.session.deactivate()
+            XCTAssertEqual(flagLines(shell), [], name)
+            secure = false
+            a.session.activate()
+            system += 6; mods(a, 6)
+            a.session.deactivate()
+            XCTAssertEqual(flagLines(shell), ["flags com.example.A all"], "\(name): positive control, the next interval is recorded")
+        }
+    }
+
+    func testNoFlagsWhileTheLogIsOffAndNoStartIsKept() {
+        let store = MemoryDiagLogStore(false)
+        let shell = flagsShell(store: store)
+        let c = Controller(shell, bundle: "com.example.A")
+        c.session.activate()
+        system += 3; mods(c, 3)
+        shell.diag.enabled = true  // on from here: the activate above left no start
+        system += 3; mods(c, 3)
+        c.session.deactivate()
+        XCTAssertEqual(flagLines(shell), [])
+        XCTAssertTrue(events(shell).contains("deactivate com.example.A owner zh"), "positive control: the deactivate itself is recorded")
+    }
+
+    /// Off and on again in the middle of an interval, by each way the switch can change: that interval is not recorded, the next is.
+    func testNoFlagsForAnIntervalTheSwitchChangedIn() {
+        let changes: [(String, (MemoryDiagLogStore, Shell, Controller) -> Void)] = [
+            ("the settings window", { _, shell, _ in shell.diag.enabled = false; shell.diag.enabled = true }),
+            ("the change notification", { store, shell, _ in store.diagLog = false; shell.diag.storeChanged(); store.diagLog = true; shell.diag.storeChanged() }),
+            ("off and on before the notification", { store, shell, _ in store.diagLog = false; store.diagLog = true; shell.diag.storeChanged() }),
+            ("the store alone, an event while off", { store, _, c in store.diagLog = false; self.mods(c, 1); store.diagLog = true }),
+        ]
+        for (name, change) in changes {
+            let store = MemoryDiagLogStore()
+            let shell = flagsShell(store: store)
+            let c = Controller(shell, bundle: "com.example.A")
+            c.session.activate()
+            system += 3; mods(c, 3)
+            change(store, shell, c)
+            system += 3; mods(c, 3)
+            c.session.deactivate()
+            XCTAssertEqual(flagLines(shell), [], name)
+            c.session.activate()
+            system += 6; mods(c, 6)
+            c.session.deactivate()
+            XCTAssertEqual(flagLines(shell), ["flags com.example.A all"], "\(name): positive control, the next interval is recorded")
+        }
+    }
+
+    func testNoFlagsWhileTheShiftToggleIsOff() {
+        let off = flagsShell(shiftToggle: false)
+        let c = Controller(off, bundle: "com.example.A")
+        c.session.activate()
+        system += 6; mods(c, 6)
+        c.session.deactivate()
+        XCTAssertEqual(flagLines(off), [], "off throughout")
+        XCTAssertEqual(off.flagsSeen, 6, "counted all the same, before the toggle is looked at")
+
+        let offAtTheEnd = flagsShell()
+        let d = Controller(offAtTheEnd, bundle: "com.example.A")
+        d.session.activate()
+        system += 6; mods(d, 6)
+        offAtTheEnd.applyShiftToggle(false)
+        d.session.deactivate()
+        XCTAssertEqual(flagLines(offAtTheEnd), [], "off at the deactivate")
+
+        let offAtTheStart = flagsShell(shiftToggle: false)
+        let e = Controller(offAtTheStart, bundle: "com.example.A")
+        e.session.activate()
+        offAtTheStart.applyShiftToggle(true)
+        system += 6; mods(e, 6)
+        e.session.deactivate()
+        XCTAssertEqual(flagLines(offAtTheStart), [], "off at the activate")
+    }
+
+    /// A `flagsChanged` event is counted in the first line of `handle`: with no engine too.
+    func testFlagsChangedIsCountedBeforeTheEngineExists() {
+        let shell = flagsShell(resources: resources.appendingPathComponent("missing"))
+        XCTAssertNil(shell.engine)
+        let c = Controller(shell, bundle: "com.example.A")
+        c.session.activate()
+        system += 2; mods(c, 2)
+        XCTAssertEqual(shell.flagsSeen, 2)
+        c.press(Keys.code(for: "a"))
+        XCTAssertEqual(shell.flagsSeen, 2, "a key is not a modifier event")
+        c.session.deactivate()
+        XCTAssertEqual(flagLines(shell), ["flags com.example.A all"])
     }
 }
 

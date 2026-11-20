@@ -666,6 +666,56 @@ public final class Shell {
     var shiftTap = ShiftTap()
     /// docs/spec/macos-shell.md §13: the in-memory diagnostic log of the Shift toggle.
     public let diag: DiagLog
+    /// docs/spec/macos-shell.md §13.1 (`flags`): the system's running count of `flagsChanged` events in this login session
+    /// (`CGEventSource.counterForEventType`, no permission needed), passed by the app. The default 0 never moves, so a shell built
+    /// without it (every test but the `flags` ones) records no `flags` line.
+    let flagsCounter: () -> UInt32
+    /// How many `flagsChanged` events any session's `handle` was given, wrapping. Only ever compared with `flagsCounter` into the
+    /// three values of a `flags` line; never logged, printed or exported.
+    private(set) var flagsSeen: UInt32 = 0
+    /// One entry per session between its `activate` and its `deactivate`: the two counts at the activate, and whether secure input
+    /// was seen since (then no `flags` line). The differences are process-wide: overlapping intervals count the same events.
+    /// Emptied when the diagnostic log is (`DiagLog.onClear`) or is found off.
+    private var flagsIntervals: [FlagsInterval] = []
+    private struct FlagsInterval {
+        weak var session: Session?
+        let system: UInt32
+        let seen: UInt32
+        var void: Bool
+    }
+
+    /// Called first by every `Session.handle`.
+    func flagsHandle(_ event: NSEvent?) {
+        if event?.type == .flagsChanged { flagsSeen &+= 1 }
+        flagsObserve()
+    }
+
+    /// One observation point (any session's handle, activate, deactivate): the log off drops every interval; secure input voids every
+    /// open one. Asks `isSecureInput` only while an interval is open.
+    private func flagsObserve() {
+        guard !flagsIntervals.isEmpty else { return }
+        guard diag.enabled else { flagsIntervals = []; return }
+        if isSecureInput() { for i in flagsIntervals.indices { flagsIntervals[i].void = true } }
+    }
+
+    /// `session` was activated: its interval starts here unless it already has one (a second activate keeps the first start).
+    func flagsBegin(_ session: Session) {
+        flagsIntervals.removeAll { $0.session == nil }  // sessions released without a deactivate
+        if diag.enabled, !flagsIntervals.contains(where: { $0.session === session }) {
+            flagsIntervals.append(FlagsInterval(session: session, system: flagsCounter(), seen: flagsSeen, void: !shiftToggleOn))
+        }
+        flagsObserve()
+    }
+
+    /// `session` was deactivated: ends its interval, if it has one, and gives what to record: `nil` for no interval, a void one, the
+    /// log or the Shift toggle off, or a system count that did not move.
+    func flagsEnd(_ session: Session) -> DiagLog.Delivery? {
+        flagsObserve()
+        guard let i = flagsIntervals.firstIndex(where: { $0.session === session }) else { return nil }
+        let start = flagsIntervals.remove(at: i)
+        guard !start.void, shiftToggleOn else { return nil }
+        return DiagLog.delivery(system: flagsCounter() &- start.system, seen: flagsSeen &- start.seen)
+    }
     /// Seconds since the latest mouse-button press (left, right, other) in this login session; a test replaces it. No permission needed.
     var mouseAgo: () -> TimeInterval = {
         [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -903,6 +953,7 @@ public final class Shell {
     /// `shiftToggleStore`, `shiftHint`: the 單按 Shift 切換中英 switch and its 英/中 hint window (docs/spec/keys-and-composition.md §9.1, §9.4). The defaults (in
     /// memory, no window) are for the tests; the app passes its own.
     /// `diagLogStore`: the 記錄偶發問題的診斷資料 switch (docs/spec/macos-shell.md §13); the default (in memory, on) is for the tests.
+    /// `flagsCounter`: the system's count of `flagsChanged` events (docs/spec/macos-shell.md §13.1); the default (always 0) is for the tests.
     /// `englishNoticeStore`, `englishNotice`: the one-time explanation window of the English defaults change and whether it is still owed
     /// (docs/spec/english-mixed.md §10.3). The defaults (in memory, not owed, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
@@ -926,9 +977,11 @@ public final class Shell {
                 shiftHint: ShiftHintPanel? = nil,
                 englishNoticeStore: EnglishNoticeStore = MemoryEnglishNoticeStore(),
                 englishNotice: EnglishNoticePanel? = nil,
-                diagLogStore: DiagLogStore = MemoryDiagLogStore()) {
+                diagLogStore: DiagLogStore = MemoryDiagLogStore(),
+                flagsCounter: @escaping () -> UInt32 = { 0 }) {
         self.resources = resources
         diag = DiagLog(store: diagLogStore)
+        self.flagsCounter = flagsCounter
         self.shiftToggleStore = shiftToggleStore
         shiftToggleOn = shiftToggleStore.shiftToggle ?? false // docs/spec/english-mixed.md §10.1: was true
         self.shiftHint = shiftHint
@@ -996,6 +1049,7 @@ public final class Shell {
         mode = layoutStore.layout.flatMap(InputMode.init(rawValue:)) ?? .standard
         build()
         panel.onSelect = { [weak self] i in self?.owner?.candidateSelected(at: i) }
+        diag.onClear = { [weak self] in self?.flagsIntervals = [] }
     }
 
     /// The current layout (the menu's checkmark).
@@ -1692,6 +1746,7 @@ public final class Session {
 
     /// Returns whether the key was consumed. `event` is nil when IMK passes nil.
     public func handle(_ event: NSEvent?) -> Bool {
+        shell.flagsHandle(event)  // docs/spec/macos-shell.md §13.1: counted before anything can return, with no engine and with the Shift toggle off too
         guard shell.engine != nil else { return false }
         if let event, event.type == .flagsChanged { return handleFlags(event) }
         guard event == nil || event?.type == .keyDown else { return false }
@@ -1849,6 +1904,7 @@ public final class Session {
         applyProfile(bundle: bundle)
         syncAscii(bundle: bundle)
         shell.diag.record(.activate(bundle: DiagLog.clean(bundle), owner: shell.owner === self, english: shell.engineAscii))
+        shell.flagsBegin(self)
         shell.lastTypingAt = nil  // docs/spec/english-mixed.md §11: the next typing key shows the mode (only while the toggle is on)
         shell.armEnglishNotice()  // docs/spec/english-mixed.md §10.3
     }
@@ -1858,7 +1914,13 @@ public final class Session {
         spacingPrev = nil
         shell.hideEnglishNotice()  // docs/spec/english-mixed.md §10.3: any deactivate, owner or not, only hides the window
         // docs/spec/macos-shell.md §13.1: no bundle read here; the one this session last read.
-        shell.diag.record(.deactivate(bundle: DiagLog.clean(bundle), owner: shell.owner === self, english: shell.engineAscii))
+        let left = DiagLog.Event.deactivate(bundle: DiagLog.clean(bundle), owner: shell.owner === self, english: shell.engineAscii)
+        // `flags` right after the deactivate line, at the same moment and with the same bundle; any session, owner or not.
+        if let delivery = shell.flagsEnd(self) {
+            shell.diag.record(left, .flags(bundle: DiagLog.clean(bundle), delivery: delivery))
+        } else {
+            shell.diag.record(left)
+        }
         guard shell.owner === self else { return }
         // Never send the composition into a field that has just turned secure.
         if shell.composing { finish(mode: shell.isSecureInput() ? 1 : 0) }
