@@ -497,7 +497,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
   - 診斷開關關著：不記，也不保留起點；開關關掉、打開或 `storeChanged()`（緩衝清空，`DiagLog.onClear`）時，所有 session 的起點都捨棄，那一段不記。
   - 「單按 Shift 切換中英」在這段的 `activate` 或 `deactivate` 時是關的：不記。
   - 安全輸入：區間中任何一個觀察點 `isSecureInput()` 為真，這一段就作廢、不記。觀察點是任何 session 的 `handle`（每一次按鍵與修飾鍵事件）、`activate` 與 `deactivate`，作廢記在當時每一段開著的區間上；沒有區間開著時不問 `isSecureInput()`。殘留的風險：安全輸入期間輸入法如果完全收不到事件，也沒有任何 session `activate` 或 `deactivate`，就觀察不到那段安全輸入（`docs/spec/privacy.md` §11）。
-- **原始計數不離開記憶體**：起點與 `flagsSeen` 只以 `UInt32` 存在 `Shell` 裡，區間結束、開關改變時捨棄；不進 `Logger`、`print` 與匯出，也不參與三值以外的任何計算。
+- **原始計數不離開記憶體**：起點只以 `UInt32` 存在 `Shell` 裡，區間結束、開關改變時捨棄；`flagsSeen` 是累計數，留在記憶體裡到程序結束。兩者都不進 `Logger`、`print` 與匯出，也不參與三值以外的任何計算。
 - **判讀**：
   - `none`：這個 App 的這段期間，系統有修飾鍵事件，輸入法一個都沒收到。這是「沒送到」最強的訊號。
   - `some`：有一部分沒收到。常見而無害的來源：用 ⌘Tab 換 App 時 Cmd 的放開落在區間外（虛擬機實測：單按 Shift 三次後用 ⌘Tab 換 App 記成 `some`）；Caps Lock、Fn；其他軟體合成的修飾鍵事件（自動化工具、改鍵工具的虛擬鍵盤）；剛按完就換 App 時事件還沒送到〔推論〕。所以單看一筆 `some` 不能斷定 Shift 沒送到，要看分布：同一個 App 大多是 `some` 或 `none`、其他 App 大多是 `all`，才指向那個 App。
