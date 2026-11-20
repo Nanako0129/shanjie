@@ -332,7 +332,9 @@ func runServer() -> Never {
         // device check confirms the menu has no 可省略韻母.
         showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), beautyPackStore: DefaultsBeautyPackStore(), memePackStore: DefaultsMemePackStore(),
         shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
-        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore())
+        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore(),
+        // docs/spec/macos-shell.md §13.1: the only place the real counter is passed; no permission needed.
+        flagsCounter: { CGEventSource.counterForEventType(.combinedSessionState, eventType: .flagsChanged) })
     // docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)

@@ -470,7 +470,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 ## 13. 診斷紀錄
 
-偶發問題（例如單按 Shift 偶爾卡在英文）在測試裡重現不了，所以殼在記憶體裡記一份切換與換 App 的紀錄，由使用者自己複製、自己貼給開發者。善解不自動送出，也不新增任何連線。程式在 `ShanjieKit/DiagLog.swift`。
+偶發問題（例如單按 Shift 偶爾卡在英文、偶爾完全沒反應）在測試裡重現不了，所以殼在記憶體裡記一份切換、換 App 與修飾鍵事件有沒有送到輸入法的紀錄，由使用者自己複製、自己貼給開發者。善解不自動送出，也不新增任何連線。程式在 `ShanjieKit/DiagLog.swift`。
 
 ### 13.1 記什麼
 
@@ -483,12 +483,30 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | `activate`、`deactivate` | `activate` 讀過 bundle 之後；`deactivate` 每一次，不是擁有者的也記 | bundle ID（`activate` 讀的那一次；`deactivate` 不讀，用 session 記住的 `bundle`）、這個 session 是不是擁有者、當下的 `engineAscii` |
 | `owner` | `claim()` 回 true、呼叫處讀完 bundle 之後（`activate`、`handle`、`toggleAscii`、`toggleAppChat`） | 新擁有者的 bundle ID（呼叫處讀的那一次） |
 | `ascii` | `pushAscii` 真的改了狀態；`applyShiftToggle` 關掉開關、沒有擁有者時直接改 `engineAscii` 的那一支 | bundle ID（session 的 `knownBundle`；沒有擁有者時 `-`）、新狀態 |
+| `flags` | 緊接在同一次 `deactivate` 那一行之後、同一個時刻；只在這個 session 有一段沒作廢的區間、系統的修飾鍵事件數有增加時記（見下面「`flags`」） | bundle ID（同 `deactivate` 那一行：session 記住的 `bundle`）、`all`／`some`／`none` |
 
 `ShiftTap.Outcome`：`toggled`，或不算的原因，每條退出路徑一個值。放開時依序判斷，幾個同時成立時取第一個：(1) 沒看到按下（`noPress`）；(2) 放開的是另一側的鍵（`otherKeyReleased`）；(3) 按下時記下的原因：其他修飾鍵（`modifierAtPress`）先於 Caps Lock（`capsLockAtPress`）；(4) 按下之後另一個修飾鍵動了（`modifierBetween`，只在按下時沒有原因時記）；(5) 另一側 Shift 的狀態和按下時不同（`otherSideChanged`）；(6) Control／Option／Command／Fn 按著（`modifierAtRelease`）；(7) Caps Lock 開著（`capsLockAtRelease`）；(8) 超過 `SHIFT_TAP_MAX`（`tooLong`）；(9) 之間有滑鼠按鍵（`mouse`）。沒看到按下是 `ShiftTap` 被重設，或啟用時 Shift 已按著；兩個 Shift 先後按下時第二次按下取代第一次的紀錄，結果是 `otherKeyReleased` 再 `noPress`。被 `keyDown` 打斷優先於任何原因：打斷了就不記。切換與否和加紀錄之前完全相同（「打過鍵」的標記只決定記不記，不影響切換）。
 
-- **不新增客戶端讀取**：bundle ID 只用呼叫處已經讀到的值或 session 記住的值，提示的位置只讀一次。
+**`flags`：修飾鍵事件有沒有送到輸入法。** 單按 Shift 完全沒反應時，上面的事件一筆都沒有，分不出是輸入法沒收到那次 Shift，還是收到了卻走了不留紀錄的路徑；`flags` 把系統的 `flagsChanged` 累計數和輸入法收到的數量比成三個值。
+
+- **兩個計數**：系統的累計數經注入的 `Shell.flagsCounter` 讀（App 傳 `CGEventSource.counterForEventType(.combinedSessionState, eventType: .flagsChanged)`，不需要權限（虛擬機實測：沒有任何隱私權限的一般程序與沙盒裡的輸入法程序都讀得到，單按 Shift 三次後用 `open -a` 換 App 記成 `all`）；`Shell.init` 的預設值永遠回 0，所以測試建的殼不記 `flags`）。收到的數量是 `Shell.flagsSeen`：任何 session 的 `handle` 收到 `flagsChanged` 就加一，在 `handle` 的第一行，早於「引擎還沒建好」與「單按 Shift 切換中英」開關的判斷。兩個都是 `UInt32`，會繞回，增量用無號減法。
+- **區間**：每個 session 從 `activate` 到它自己的 `deactivate` 是一段。`activate` 時這個 session 沒有區間才記下起點（兩個計數當下的值）；已經有（沒有 `deactivate` 就再 `activate`）就保留原本的起點。`deactivate` 時有區間才結算，然後捨棄起點；沒有區間的 `deactivate`（重複的、程序啟動前就啟用的）什麼都不記。不是擁有者的 session 照樣結算自己的區間。程序剛啟動沒有特別處理：第一個 `activate` 就是第一段的起點。兩個 session 之間沒有 session 啟用的空窗不記。
+- **增量是整個程序的**：兩個 session 的區間可以重疊（IMK 可能先送下一個 App 的 `activate` 才送上一個的 `deactivate`），重疊那段的事件兩段都算進去。所以這一行的意思是「這個 App 的這段期間，整個輸入法程序收到的修飾鍵事件和系統的比較」，不是「送給這個 session 的」。
+- **三個值**：系統增量是 0 時不記；收到的增量 ≥ 系統增量記 `all`（重複送達會讓收到的比系統多，也算 `all`）；收到的增量是 0 記 `none`；其餘記 `some`（`DiagLog.delivery`）。
+- **不記的情形**：
+  - 診斷開關關著：不記，也不保留起點；開關關掉、打開或 `storeChanged()`（緩衝清空，`DiagLog.onClear`）時，所有 session 的起點都捨棄，那一段不記。
+  - 「單按 Shift 切換中英」在這段的 `activate` 或 `deactivate` 時是關的：不記。
+  - 安全輸入：區間中任何一個觀察點 `isSecureInput()` 為真，這一段就作廢、不記。觀察點是任何 session 的 `handle`（每一次按鍵與修飾鍵事件）、`activate` 與 `deactivate`，作廢記在當時每一段開著的區間上；沒有區間開著時不問 `isSecureInput()`。殘留的風險：安全輸入期間輸入法如果完全收不到事件，也沒有任何 session `activate` 或 `deactivate`，就觀察不到那段安全輸入（`docs/spec/privacy.md` §11）。
+- **原始計數不離開記憶體**：起點與 `flagsSeen` 只以 `UInt32` 存在 `Shell` 裡，區間結束、開關改變時捨棄；不進 `Logger`、`print` 與匯出，也不參與三值以外的任何計算。
+- **判讀**：
+  - `none`：這個 App 的這段期間，系統有修飾鍵事件，輸入法一個都沒收到。這是「沒送到」最強的訊號。
+  - `some`：有一部分沒收到。常見而無害的來源：用 ⌘Tab 換 App 時 Cmd 的放開落在區間外（虛擬機實測：單按 Shift 三次後用 ⌘Tab 換 App 記成 `some`）；Caps Lock、Fn；其他軟體合成的修飾鍵事件（自動化工具、改鍵工具的虛擬鍵盤）；剛按完就換 App 時事件還沒送到〔推論〕。所以單看一筆 `some` 不能斷定 Shift 沒送到，要看分布：同一個 App 大多是 `some` 或 `none`、其他 App 大多是 `all`，才指向那個 App。
+  - `all`：這段期間的修飾鍵事件都送到了。那段期間如果有一次 Shift 沒反應，原因就在輸入法收到之後，例如不留紀錄的判斷路徑。
+- `flags` 放在「其他事件」的緩衝，每次換 App 最多多一行〔推論：換 App 的紀錄能涵蓋的時間約縮短兩成〕。切換、組字、選字的行為和加這個事件之前完全相同。
+
+- **不新增客戶端讀取**：bundle ID 只用呼叫處已經讀到的值或 session 記住的值（`flags` 沿用 `deactivate` 那一行的），提示的位置只讀一次。
 - **bundle ID 先清理**（`DiagLog.clean`）：1–255 個 `[A-Za-z0-9._-]` 照記；其他的記 `?`；nil 或空字串記 `-`。這是唯一的字串欄位，其他都是列舉或布林。
-- **永遠不記**：打的字、組字、候選、預測列、前文、學習內容、按鍵的字元或鍵碼（Shift 的左右除外）、視窗標題、網址、文件內容。
+- **永遠不記**：打的字、組字、候選、預測列、前文、學習內容、按鍵的字元或鍵碼（Shift 的左右除外）、修飾鍵事件的次數（`flags` 只記三個值，不記是哪個修飾鍵）、視窗標題、網址、文件內容。
 - **只在記憶體**：不寫檔、不用 `Logger`、`print` 或檔案 I/O，不進學習檔；輸入法程序結束就沒了。
 
 ### 13.2 匯出格式
@@ -500,15 +518,16 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 -12.345 ascii com.apple.TextEdit en
 -12.345 toggle com.apple.TextEdit en hint
 -3.000 deactivate com.apple.TextEdit owner en
+-3.000 flags com.apple.TextEdit all
 -2.900 owner com.apple.Safari
 -2.900 activate com.apple.Safari owner zh
 ```
 
-每一行都在一個封閉的文法裡：事件名稱、固定的列舉值（`left`／`right`、`Outcome` 的值、`en`／`zh`、`hint`／`nohint`、`owner`／`notowner`）與清理過的 bundle ID。
+每一行都在一個封閉的文法裡：事件名稱、固定的列舉值（`left`／`right`、`Outcome` 的值、`en`／`zh`、`hint`／`nohint`、`owner`／`notowner`、`all`／`some`／`none`）與清理過的 bundle ID。`flags` 那一行是 `flags <bundle> all|some|none`，沒有數字欄位。
 
 ### 13.3 設定與複製
 
-- 設定視窗的「診斷」頁（§9.2）：開關「記錄偶發問題的診斷資料」，預設開，UserDefaults 鍵 `diagLog`（沒存過算開）；灰字說明「只存在這台 Mac 的記憶體裡，不會自動送出。會記下放開 Shift 時算不算單按（按著 Shift 打字時不記）、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift，切換中英照記。」關掉時兩個緩衝都清空、之後不再記；打開時也清空，從空的開始。在設定視窗以外改這個鍵（`defaults write` 寫容器的偏好檔）時，殼經 KVO 收到 UserDefaults 的變更通知（`DefaultsDiagLogStore`），不看新值、一律清空兩個緩衝（`DiagLog.storeChanged()`；關了又馬上打開，兩次寫入可能都在處理通知之前落地）；通知處理之前，關著就算空的（不匯出、按鈕反灰）。預覽開著時緩衝被清空過（`DiagLog.clears` 和開預覽時不同），按「複製」不寫剪貼簿、直接關掉。收不到通知的情形，舊紀錄會留到下一次清空：系統把「關再開」合併成沒有變更、直接改偏好檔而不經 `cfprefsd`、`defaults write <bundle id>` 寫到容器以外的一般網域（輸入法讀不到）。
+- 設定視窗的「診斷」頁（§9.2）：開關「記錄偶發問題的診斷資料」，預設開，UserDefaults 鍵 `diagLog`（沒存過算開）；灰字說明「只存在這台 Mac 的記憶體裡，不會自動送出。會記下放開 Shift 時算不算單按（按著 Shift 打字時不記）、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），以及每段期間 Shift 等修飾鍵是否都送到了輸入法（和系統的總次數比對，只記全部、部分或沒有，不記次數與哪個鍵），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift；輸入法察覺到安全輸入的那一段，這一項也不記；切換中英照記。」關掉時兩個緩衝都清空、之後不再記；打開時也清空，從空的開始。在設定視窗以外改這個鍵（`defaults write` 寫容器的偏好檔）時，殼經 KVO 收到 UserDefaults 的變更通知（`DefaultsDiagLogStore`），不看新值、一律清空兩個緩衝（`DiagLog.storeChanged()`；關了又馬上打開，兩次寫入可能都在處理通知之前落地）；通知處理之前，關著就算空的（不匯出、按鈕反灰）。預覽開著時緩衝被清空過（`DiagLog.clears` 和開預覽時不同），按「複製」不寫剪貼簿、直接關掉。收不到通知的情形，舊紀錄會留到下一次清空：系統把「關再開」合併成沒有變更、直接改偏好檔而不經 `cfprefsd`、`defaults write <bundle id>` 寫到容器以外的一般網域（輸入法讀不到）。
 - 按鈕「複製診斷紀錄…」：先用 sheet 顯示要複製的全文（唯讀、不能選取的文字：選取後按 ⌘C 會走一般的複製、繞過下面兩項保護；加「取消」「複製」），按「複製」才把**同一份文字**寫進剪貼簿。緩衝是空的時按鈕反灰（緩衝沒有變更通知，空不空在開窗、視窗成為 key window 與切換開關時讀）。
 - 寫剪貼簿：`prepareForNewContents(with: .currentHostOnly)`（不經通用剪貼板同步到其他裝置），再用一次 `writeObjects` 寫一個同時帶純文字與 `org.nspasteboard.TransientType`（剪貼簿管理程式的慣例：不記進歷史）的項目，讀剪貼簿的程式不會先看到沒有標記的文字。之後由剪貼簿處理；系統自己的剪貼簿歷史（macOS 26 Spotlight）是否理會這個標記沒有文件，也沒有量過。
 - 介面都是系統元件（`Toggle`、`Button`、`sheet`、`NSPasteboard`）。不用存檔面板：那要多一個沙盒權限（`docs/spec/privacy.md` §2），剪貼簿不用。
@@ -519,6 +538,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - `testRecordingAddsNoClientRead`：`activate`、`deactivate`、`commitComposition`、Shift 切換、`toggleAppChat` 與按鍵各一步，在 Shift 切換開與關兩種設定下，bundle ID、文字讀取（`selectedRange`、`markedRange`、`attributedSubstring`）、游標位置與行位置的讀取次數等於加紀錄之前量到的常數。
 - 緩衝上限、每種事件的格式、幾個原因同時成立時取第一個、預覽之後的事件不在複製的內容裡、開關（含重建 Shell 仍是關、只改 store 關掉時算空的、經設定或 `storeChanged()` 再打開仍是空的、預覽之後被清空就不複製）、兩個 Shift 交疊或 Shift 早已按著時打字不記 `shift`、另一側位元殘留時乾淨的單按之後照記、一次單按記 `shift` 與 `toggle`（提示畫不出來記 `nohint`）、每一個不算的原因各一個序列、安全輸入時不記 `shift` 但 `toggle` 照記、被按鍵打斷的不記、bundle 清理、剪貼簿的呼叫、預覽與複製逐位元組相同與空緩衝反灰。
 - 打字不進紀錄：標記字串在中文組字送出、英文狀態的 `asciiKey` 路徑、`commitComposition` 三條路徑各打一次，匯出不含標記的任何 4 個以上字母的片段、不含注音符號，每一行都符合 §13.2 的文法，打字不新增事件。
+- `flags`（系統計數、`isSecureInput` 與開關都經注入或設定控制）：系統 +6 時收到 6、0、2 各記 `all`、`none`、`some`；系統 +0 不記；收到比系統多記 `all`；計數繞回（起點 `UInt32.max - 1`、終點 4）算成 6；`flags` 緊接在 `deactivate` 之後、同一個時刻；B 的 `activate` 先於 A 的 `deactivate` 時 A、B 各一行、增量是整個程序的；連續兩次 `activate` 用第一次的起點；沒有 `activate` 的 `deactivate` 與重複的 `deactivate` 不記；殼剛建好的第一段照記；區間開頭、結尾、中途的 `handle`、中途另一個 session 的 `activate` 是安全輸入時不記；診斷開關關著、中途關掉再打開（經設定與經 `storeChanged()`）、「單按 Shift 切換中英」關著時不記；引擎沒建好與 Shift 切換關著時收到的 `flagsChanged` 照算進 `flagsSeen`；每一行都符合 §13.2 的文法。
 - `LogTests.testShellLogsNothingButStaticTextAndCodes`（§6.1）：用標記 bundle ID 啟用、單按 Shift 切換、經假剪貼簿複製，標記不出現在整個程序的日誌與 stdout／stderr，紀錄的事件行不出現在殼的 subsystem。
 
-實機（要真人或虛擬機）：設定頁、預覽 sheet、剪貼簿內容，以及終端機開著「加密的鍵盤輸入」時單按 Shift 只多 `toggle`、沒有 `shift`。
+實機（要真人或虛擬機）：設定頁、預覽 sheet、剪貼簿內容，終端機開著「加密的鍵盤輸入」時單按 Shift 只多 `toggle`、沒有 `shift`，以及 `flags`：沙盒裡的輸入法讀得到系統計數（單按 Shift 幾次後用 `open -a` 換 App，匯出有那個 App 的 `flags … all`）、在密碼欄打字的那一段沒有 `flags` 行。
