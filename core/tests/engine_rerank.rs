@@ -375,6 +375,40 @@ fn a_declared_left_length_keys_with_the_last_l_characters() {
     assert_eq!(r.picks(), vec![left.pick, right.pick]);
 }
 
+/// docs/spec/semantic-rerank.md §5.2 (sep-longkey): a version 6 boundary-format model (L 8, K 1) keeps only its L characters, like version 5,
+/// and keys every stretch with `TinyLm::key_for_len` of the last L characters of the text before it and of the longest candidate the
+/// rerank scores (the stretch's pool): the boundary-format key, [SEP] as NUL, never the version 5 key. The characters before the
+/// window never reach the key, and the job is the same for a longer text with the same last 8 characters.
+#[test]
+fn a_boundary_model_keys_each_stretch_with_key_for_len() {
+    let v1 = rerank_model();
+    let v6 = upgraded_boundary(&v1, 8, 1);
+    let tl = TinyLm::load(&v6).unwrap();
+    assert_eq!((tl.left_len(), tl.boundary_k()), (Some(8), Some(1)));
+    let text = "昨天我們去看了Joe的表演，";
+    let syls = row(16);
+    let (b, word) = (4, "打");
+    let run = |text: &str| {
+        let mut e = engine_with(Some(&v6));
+        e.set_left_context(text);
+        assert_eq!(e.left_full_chars(), 8, "only the declared length is kept");
+        fix_word(&mut e, &syls, b, word);
+        let job = e.take_rerank_job().unwrap();
+        let cands = job.candidates();
+        (cands, job.run())
+    };
+    let (cands, r) = run(text);
+    let longest = |c: &[String]| c.iter().take(TOPK).map(|s| s.chars().count()).max().unwrap();
+    let key0 = tl.key_for_len(text, longest(&cands[0]));
+    assert!(key0.contains(' ') && key0 != tl.key_for(text), "premise: a boundary key, not version 5's: {key0:?}");
+    let before1 = format!("{text}{}{word}", cands[0][r.picks()[0]]);
+    let key1 = tl.key_for_len(&before1, longest(&cands[1]));
+    assert_eq!(r.keys(), vec![key0, key1]);
+    // the same last 8 characters behind a longer text: the same keys and picks
+    let (_, r2) = run(&format!("今天的天氣真好，我們出去玩Hello World。{text}"));
+    assert_eq!((r2.keys(), r2.picks()), (r.keys(), r.picks()));
+}
+
 /// docs/spec/semantic-rerank.md §10: with a model that declares no length, a left text ending in an English word ("我說Joe", whose Han
 /// tail the shell never sent: no Han character at its end) decodes, shows and reranks byte for byte as no left text ("").
 #[test]

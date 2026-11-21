@@ -622,3 +622,154 @@ fn a_long_candidate_sees_only_the_tail_of_a_declared_key() {
     assert_ne!(got, ranked("說要來我你你好嗎"), "the 3rd is");
     assert_ne!(got, with("好嗎"), "not only 2");
 }
+
+
+// ---------- sep-longkey: SJTL0006, the boundary format (docs/spec/semantic-rerank.md §2.1, §5.2) ----------
+
+const V6: &str = "tiny-int8-v6.sjtl";
+/// The flags (u32) are at 248, K (u32) at 252 of a version 6 file.
+const FLAGS_AT: usize = 248;
+
+/// A version 6 file with its flags, K and L patched (L at 244).
+fn v6_with(flags: u32, k: u32, l: u32) -> Vec<u8> {
+    let mut b = bytes(V6);
+    b[244..248].copy_from_slice(&l.to_le_bytes());
+    b[FLAGS_AT..FLAGS_AT + 4].copy_from_slice(&flags.to_le_bytes());
+    b[FLAGS_AT + 4..FLAGS_AT + 8].copy_from_slice(&k.to_le_bytes());
+    b
+}
+
+/// The version 4 body (V - 3 characters) under a version 6 header with flag bit 0 clear and K 0: version 5's behaviour.
+fn v6_plain(l: u32) -> Vec<u8> {
+    let b = bytes(V4);
+    relabel(&[&b[..244], &l.to_le_bytes(), &0u32.to_le_bytes(), &0u32.to_le_bytes(), &b[244..]].concat(), b'6', 6)
+}
+
+#[test]
+fn v6_declares_the_boundary_format_and_k() {
+    let (v4, m) = (TinyLm::parse(&bytes(V4)).unwrap(), TinyLm::parse(&bytes(V6)).unwrap());
+    assert_eq!((m.left_len(), m.boundary_k(), m.ctx()), (Some(62), Some(4), 64));
+    for p in [Profile::Chat, Profile::Formal] {
+        for level in [RerankLevel::Conservative, RerankLevel::Standard, RerankLevel::Aggressive] {
+            assert_eq!(m.params(p, level), v4.params(p, level));
+        }
+    }
+    assert_eq!((m.ngram_sha256(), m.kn_sha256(), m.has_levels()), (v4.ngram_sha256(), v4.kn_sha256(), true));
+    for f in ["tiny-int8.sjtl", "tiny-int8-v2.sjtl", V3, V4] {
+        assert_eq!(TinyLm::parse(&bytes(f)).unwrap().boundary_k(), None, "{f}");
+    }
+    assert_eq!(TinyLm::parse(&v5(8)).unwrap().boundary_k(), None);
+    // K: 1 <= K <= ctx - 2 with bit 0; flags 0 needs K 0 (and the version 5 vocabulary length); no other flag bit
+    for k in [1, 2, 62] {
+        assert_eq!(TinyLm::parse(&v6_with(1, k, 62)).unwrap().boundary_k(), Some(k as usize), "K {k}");
+    }
+    for k in [0, 63, 64, u32::MAX] {
+        assert!(is_format(&v6_with(1, k, 62)), "K {k}");
+    }
+    for flags in [2, 3, 0x8000_0001, u32::MAX] {
+        assert!(is_format(&v6_with(flags, 4, 62)), "flags {flags:#x}");
+    }
+    assert!(is_format(&v6_with(0, 4, 62)), "bit 0 clear but K set");
+    assert!(is_format(&v6_with(0, 0, 62)), "bit 0 clear on a boundary vocabulary: the vocabulary list is a character short");
+    for l in [0, 63, 64, u32::MAX] {
+        assert!(is_format(&v6_with(1, 4, l)), "L {l}");
+    }
+    let plain = TinyLm::parse(&v6_plain(8)).unwrap();
+    assert_eq!((plain.left_len(), plain.boundary_k()), (Some(8), None), "version 6, bit 0 clear: version 5");
+    let mut bad = v6_plain(8);
+    bad[FLAGS_AT + 4] = 4;
+    assert!(is_format(&bad), "bit 0 clear with K 4");
+    let mut bad = v6_plain(8);
+    bad[FLAGS_AT] = 1;
+    bad[FLAGS_AT + 4] = 4;
+    assert!(is_format(&bad), "bit 0 set on a version 5 vocabulary: a character too many");
+    let good = bytes(V6);
+    for n in 0..=256 {
+        assert!(is_format(&good[..n]), "prefix of {n} bytes");
+    }
+    assert!(is_format(&[&good[..], &[0][..]].concat()), "trailing byte");
+    assert!(is_format(&relabel(&good, b'6', 5)), "SJTL0006 + 5");
+    assert!(is_format(&relabel(&good, b'5', 6)), "SJTL0005 + 6");
+    assert!(is_format(&relabel(&good, b'6', 4)), "SJTL0006 + 4");
+    assert!(is_format(&relabel(&v5(8), b'6', 6)), "a version 5 file under a version 6 header");
+}
+
+/// items-v6.tsv: `before, n, candidate, key (| for the boundary), LL`. The key `key_for_len` builds is the one written, and the LL
+/// of that key (boundary read as [SEP]) equals numpy's, on both backends.
+#[test]
+fn v6_matches_numpy_on_the_boundary_format() {
+    let m = TinyLm::parse(&bytes(V6)).unwrap();
+    let text = String::from_utf8(bytes("items-v6.tsv")).unwrap();
+    let (mut worst, mut spread, mut rows) = (0f64, 0f64, 0);
+    for l in text.lines() {
+        let f: Vec<&str> = l.split('\t').collect();
+        let (before, n, cand, want_key, want) = (f[0], f[1].parse::<usize>().unwrap(), f[2], f[3], f[4].parse::<f64>().unwrap());
+        let key = m.key_for_len(before, n);
+        assert_eq!(key.replace('\0', "|"), want_key, "key of {before:?}");
+        let (a, p) = (m.ll_many_with(Backend::DEFAULT, &[(&key, cand)]).unwrap()[0], m.ll_many_with(Backend::Plain, &[(&key, cand)]).unwrap()[0]);
+        for got in [a, p] {
+            assert!((got - want).abs() < 1e-4, "{before:?}: {got} vs {want}");
+            worst = worst.max((got - want).abs());
+        }
+        spread = spread.max((a - p).abs());
+        rows += 1;
+    }
+    assert!(rows >= 10 && spread < 1e-4);
+    eprintln!("v6: {rows} rows, max |dLL| vs numpy {worst:.3e}; default backend vs plain {spread:.3e}");
+}
+
+/// A key's NUL is [SEP] (id V - 1) only in the key's position and only in a boundary-format model: a candidate's NUL is UNK, and a model
+/// without the flag (version 6 with bit 0 clear) reads a NUL anywhere as UNK.
+#[test]
+fn only_a_boundary_models_key_reads_nul_as_sep() {
+    let m = TinyLm::parse(&bytes(V6)).unwrap();
+    let v = u32::from_le_bytes(bytes(V6)[32..36].try_into().unwrap());
+    let (seq, st) = m.sequence("我\0你", "好\0").unwrap();
+    assert_eq!((seq.len(), st, seq[2], *seq.last().unwrap()), (6, 4, v - 1, 1), "{seq:?}");
+    let plain = TinyLm::parse(&v6_plain(8)).unwrap();
+    assert_eq!(plain.sequence("我\0你", "好").unwrap().0[2], 1, "bit 0 clear: UNK");
+}
+
+/// eval/golden/sep-keys/keys.tsv (tools/gen_sep_keys.py): for every row, a version 6 model with the row's L and K patched into its header
+/// builds the written key and the written id sequence. The hex columns are code points (the text holds NUL, line breaks and the like).
+#[test]
+fn the_sep_key_golden() {
+    let text = String::from_utf8(std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/sep-keys/keys.tsv")).unwrap()).unwrap();
+    let unhex = |s: &str| -> String { s.split(',').filter(|x| !x.is_empty()).map(|x| char::from_u32(u32::from_str_radix(x, 16).unwrap()).unwrap()).collect() };
+    let mut models: std::collections::HashMap<(u32, u32), TinyLm> = Default::default();
+    let mut rows = 0;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        assert_eq!(f.len(), 8, "{line}");
+        let (note, l, k, n) = (f[0], f[1].parse::<u32>().unwrap(), f[2].parse::<u32>().unwrap(), f[3].parse::<usize>().unwrap());
+        let (before, cand) = (unhex(f[4]), unhex(f[5]));
+        let want_ids: Vec<u32> = f[7].split(',').map(|x| x.parse().unwrap()).collect();
+        let m = models.entry((l, k)).or_insert_with(|| TinyLm::parse(&v6_with(1, k, l)).unwrap());
+        let key = m.key_for_len(&before, n);
+        assert_eq!(key.replace('\0', "|"), f[6], "{note}: key");
+        let (ids, st) = m.sequence(&key, &cand).unwrap();
+        assert_eq!(ids, want_ids, "{note}: ids");
+        assert_eq!(st, ids.len() - cand.chars().count(), "{note}: the candidate starts after the key");
+        rows += 1;
+    }
+    assert!(rows >= 60, "{rows} rows");
+}
+
+/// Versions 1 to 5 (and version 6 with bit 0 clear): `key_for_len(before, n)` is `key_for(before)` for every n, the shipped rules unchanged.
+#[test]
+fn key_for_len_is_key_for_without_the_boundary_flag() {
+    let models: Vec<(String, TinyLm)> = ["tiny-int8.sjtl", "tiny-int8-v2.sjtl", V3, V4]
+        .iter()
+        .map(|f| (f.to_string(), TinyLm::parse(&bytes(f)).unwrap()))
+        .chain([("v5".to_string(), TinyLm::parse(&v5(8)).unwrap()), ("v6 plain".to_string(), TinyLm::parse(&v6_plain(8)).unwrap())])
+        .collect();
+    let long = "不".repeat(90);
+    let befores = ["", "我們說了一些話Joe的表演，", "你好嗎", "，，A1 好", "我\0你", "好）。「今天", long.as_str(), "我們都說，你好嗎？他說：要去。"];
+    for (name, m) in &models {
+        for b in befores {
+            for n in [0, 1, 2, 7, 62, 63, 64, 100] {
+                assert_eq!(m.key_for_len(b, n), m.key_for(b), "{name} {b:?} n {n}");
+            }
+        }
+    }
+}

@@ -177,7 +177,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 - `build_trigram.py --src-lm … --tri … --dst-lm … --out …` 把一張表改綁到另一個通語（詞用字串對應、前文重新排序、次數與剪枝前總數照抄）；來源詞不在目的詞彙裡預設停止，`--drop-missing` 才丟掉那些詞與含它們的前文與條目。寫檔先寫暫存檔再 rename，因為舊檔可能正被映射。
 - 連文項如何參與解碼（地板、回退）見 `docs/spec/decoder.md`。
 
-### 3.5 會意（`SJTL0001`～`SJTL0005`）
+### 3.5 會意（`SJTL0001`～`SJTL0006`）
 
 `tools/lib/export_sjtl.py` 寫，`core/src/tinylm.rs` 讀。魔術字串與版本欄一起選定標頭長度與有哪些欄位，檔案必須完整含有標頭才讀任何版本欄之後的欄位：
 
@@ -188,11 +188,12 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | 3 | 212 | 四組 (α, τ, δ) f64：聊天保守 116、聊天積極 140、書面保守 164、書面積極 188 |
 | 4 | 244 | 位移 212 的 32 bytes：調參時用的 `kn.sjkn` 的 SHA-256，全 0 表示沒有開 KN 時調的；版本 1～3 視為全 0 |
 | 5 | 248 | 位移 244 的 u32：模型讀的左側前文字數 L，必須 1 ≤ L ≤ 前文長 − 2，超出範圍整個檔拒絕 |
+| 6 | 256 | 位移 248 的 u32 格式旗標（bit 0＝邊界格式，其他位元必須是 0）、位移 252 的 u32 政策鍵門檻 K（有 bit 0 時 1 ≤ K ≤ 前文長 − 2，否則 0）；有 bit 0 時字表是 V − 4 個碼位，id V − 1 是 `[SEP]`。細節見 `docs/spec/semantic-rerank.md` §2.1、§5.2 |
 
-- 標頭之後：字表 (V − 3) 個 u32 碼位（id 0、1、2 是 PAD、UNK、BOS），然後依固定順序的張量（`emb`、`pos`、`lnf_w`、`lnf_b`，再每層 `ln1_w`、`ln1_b`、`qkv_w`、`qkv_b`、`proj_w`、`proj_b`、`ln2_w`、`ln2_b`、`fc1_w`、`fc1_b`、`fc2_w`、`fc2_b`），沒有逐張量標頭。二維矩陣是 f32 列主序，或 int8 列主序後接每列一個 f32 縮放（每列對稱量化，縮放 = max(|列|, 1e-12) ÷ 127，還原 = q × 縮放）；一維向量一律 f32。
+- 標頭之後：字表 (V − 3) 個 u32 碼位（id 0、1、2 是 PAD、UNK、BOS；版本 6 的邊界格式是 V − 4 個，最後一個 id 是 `[SEP]`），然後依固定順序的張量（`emb`、`pos`、`lnf_w`、`lnf_b`，再每層 `ln1_w`、`ln1_b`、`qkv_w`、`qkv_b`、`proj_w`、`proj_b`、`ln2_w`、`ln2_b`、`fc1_w`、`fc1_b`、`fc2_w`、`fc2_b`），沒有逐張量標頭。二維矩陣是 f32 列主序，或 int8 列主序後接每列一個 f32 縮放（每列對稱量化，縮放 = max(|列|, 1e-12) ÷ 127，還原 = q × 縮放）；一維向量一律 f32。
 - 載入限制：檔案 ≤ 64 MiB、一般檔案；權重型別 ≤ 1；層數 ≥ 1 且 ≤ 64、頭數 ≥ 1 且整除寬度、寬度 ≤ 2,048、前文長 ≥ 2 且 ≤ 1,024、字表 ≥ 3 且 ≤ 65,536；長度必須剛好；還原後的權重必須有限。
 - 每組 (α, τ, δ) 的檢查：α 有限、τ 不是 NaN、δ ∈ [0, 1000]。這三個值如何用在融合與強度，見 `docs/spec/semantic-rerank.md`。
-- 寫檔：`export_sjtl.py` 只寫版本 1～4。命令列給 `--levels` 就寫版本 4（沒給 `--kn-side` 時 32 bytes 全 0）；沒給 `--levels` 照舊寫版本 1 或 2；只給 `--kn-side` 是用法錯誤。`--kn-side` 的檔必須是 `SJKN0002` 而且記的通語雜湊等於 `--ngram-model`，寫檔前先驗證。版本 3 只由函式 `export` 在有 `levels` 而沒有 `kn_sha` 時寫（測試用的黃金檔）。
+- 寫檔：`export_sjtl.py` 寫版本 1～6（版本 5 加 `--left-len`，版本 6 再加 `--boundary K`，都要 `--levels`；見 `docs/spec/semantic-rerank.md` §2.5）。命令列給 `--levels` 就寫版本 4（沒給 `--kn-side` 時 32 bytes 全 0）；沒給 `--levels` 照舊寫版本 1 或 2；只給 `--kn-side` 是用法錯誤。`--kn-side` 的檔必須是 `SJKN0002` 而且記的通語雜湊等於 `--ngram-model`，寫檔前先驗證。版本 3 只由函式 `export` 在有 `levels` 而沒有 `kn_sha` 時寫（測試用的黃金檔）。
 - 驗證：`core/tests/tinylm_tiny.rs`（`header_fields_are_read`、`bad_files_are_format_errors`、`v2_reads_delta_and_otherwise_equals_v1`、`v3_reads_levels_and_otherwise_equals_v2`、`v4_reads_levels_and_the_kn_hash_and_otherwise_equals_v3`、`v4_bad_files_are_format_errors`、`v5_declares_the_left_context_length`）；`tools/test_export_sjtl.py`（`test_levels_write_version_3`、`test_levels_with_kn_side_write_version_4_with_its_hash`、`test_levels_without_kn_side_write_version_4_all_zero`、`test_without_levels_the_output_is_version_1_or_2_as_before`、`test_kn_side_alone_and_bad_side_files_write_nothing`、`test_committed_v4_golden_records_hashlib_of_kn_tiny`）。
 
 ## 4. 通語的建置

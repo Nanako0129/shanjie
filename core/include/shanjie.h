@@ -361,7 +361,7 @@ int32_t shanjie_engine_set_punctuation(ShanjieEngine *engine, const char *table)
 //   §4.6), and with 32 or more the rerank also weighs each candidate of the semantic correction's pool by them
 //   (docs/spec/semantic-rerank.md §3.1.1; a rerank job carries only those weights and the order they give, never
 //   the set; the text itself is not kept); and, for the small model and
-//   the English table, only the declared left-context length of the small model (SJTL0005), or else the
+//   the English table, only the declared left-context length of the small model (SJTL0005 and SJTL0006), or else the
 //   trailing English word. None of it is returned or written. NULL or "" means none. Not UTF-8: returns 2
 //   and clears. Cleared by the core after every commit, reset, code 4 and rule 22 pass-through, and when a
 //   key arrives on an empty composition without a set_left_context since the previous key (a composition

@@ -298,5 +298,131 @@ class TestExport(unittest.TestCase):
         self.assertEqual(ex.read_sjtl(os.path.join(g, "tinylm-tiny", "tiny-int8-v4.sjtl"))[0]["kn_sha"], hashlib.sha256(side).digest())
 
 
+LV = (0.3, 2.0, 0.25, 0.5, 1.0, 1.5, 0.5, 1.0, 0.25, 0.7, 2.0, 2.0)   # --levels values (12): any valid ones
+
+
+class TestBoundaryVersions(unittest.TestCase):
+    """sep-longkey: versions 5 and 6 (docs/spec/semantic-rerank.md §2.1)."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.plain = os.path.join(self.td.name, "plain.npz")
+        self.sep = os.path.join(self.td.name, "sep.npz")
+        tinylm.save_params(self.plain, tinylm.random_params(list(CHARS), n_layer=2, d=8, n_head=2, seed=3), CHARS, n_layer=2, n_head=2)
+        tinylm.save_params(self.sep, tinylm.random_params(list(CHARS), n_layer=2, d=8, n_head=2, seed=3, n_extra=1), CHARS, n_layer=2,
+                           n_head=2, extra_tokens=["[SEP]"])
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def write(self, npz, name, **kw):
+        out = os.path.join(self.td.name, name)
+        ex.export(npz, out, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), SHA, LV, bytes(32), **kw)
+        return out
+
+    def test_version_5_and_6_round_trip(self):
+        v5 = self.write(self.plain, "v5.sjtl", left_len=62)
+        h, chars, p5 = ex.read_sjtl(v5)
+        self.assertEqual((h["version"], h["left_len"], h["flags"], h["boundary_k"], "".join(chars), h["V"]), (5, 62, 0, None, CHARS, 11))
+        self.assertEqual(open(v5, "rb").read()[:8], b"SJTL0005")
+        v6 = self.write(self.sep, "v6.sjtl", left_len=62, boundary_k=4)
+        h, chars, p6 = ex.read_sjtl(v6)
+        self.assertEqual((h["version"], h["left_len"], h["flags"], h["boundary_k"], "".join(chars), h["V"]), (6, 62, 1, 4, CHARS, 12))
+        raw = open(v6, "rb").read()
+        self.assertEqual(struct.unpack_from("<4I", raw, 244), (62, 1, 4, ord(CHARS[0])))      # L, flags, K, then the first character
+        self.assertEqual(p6["emb"].shape, (12, 8))
+        self.assertEqual(h["levels"], LV)
+        # the weights read back are the shared int8 quantizer's restore of the npz
+        q = os.path.join(self.td.name, "q.npz")
+        latency.quantize_int8(self.sep, q)
+        z = np.load(q)
+        np.testing.assert_array_equal(p6["emb"], z["emb"].astype(np.float32) * z["emb.scale"])
+
+    def test_usage_and_range_errors_write_nothing(self):
+        out = os.path.join(self.td.name, "bad.sjtl")
+        base = ((0.7, 2.0, 0.25), (0.5, 1.0, 2.0), SHA)
+        bad = [
+            (self.plain, dict(levels=None, kn_sha=None, left_len=62)),                  # no --levels
+            (self.plain, dict(levels=LV, kn_sha=bytes(32), left_len=0)),
+            (self.plain, dict(levels=LV, kn_sha=bytes(32), left_len=63)),               # ctx - 2 = 62
+            (self.sep, dict(levels=LV, kn_sha=bytes(32), left_len=62, boundary_k=0)),
+            (self.sep, dict(levels=LV, kn_sha=bytes(32), left_len=62, boundary_k=63)),
+            (self.sep, dict(levels=LV, kn_sha=bytes(32), boundary_k=4)),                # --boundary without --left-len
+            (self.plain, dict(levels=LV, kn_sha=bytes(32), left_len=62, boundary_k=4)),  # no extra_tokens in the npz
+            (self.sep, dict(levels=LV, kn_sha=bytes(32), left_len=62)),                 # extra_tokens without --boundary
+        ]
+        for npz, kw in bad:
+            with self.assertRaises(ValueError, msg=kw):
+                ex.export(npz, out, "int8", *base[:2], base[2], **kw)
+            self.assertFalse(os.path.exists(out), kw)
+        wrong = os.path.join(self.td.name, "wrong.npz")
+        tinylm.save_params(wrong, tinylm.random_params(list(CHARS), n_layer=2, d=8, n_head=2, seed=3, n_extra=1), CHARS, n_layer=2, n_head=2,
+                           extra_tokens=["[RD]"])
+        with self.assertRaises(ValueError):
+            ex.export(wrong, out, "int8", *base[:2], base[2], levels=LV, kn_sha=bytes(32), left_len=62, boundary_k=4)
+        self.assertFalse(os.path.exists(out))
+
+    def test_command_line(self):
+        ng = os.path.join(self.td.name, "bigram.sjlm")
+        open(ng, "wb").write(b"ngram model")
+        out = os.path.join(self.td.name, "cli.sjtl")
+        argv = ["--npz", self.sep, "--out", out, "--type", "int8", "--ngram-model", ng, "--chat", "0.7", "2", "0.25", "--formal", "0.5", "1", "2",
+                "--levels", *map(str, LV)]
+        with contextlib.redirect_stdout(io.StringIO()) as so:
+            ex.main(argv + ["--left-len", "62", "--boundary", "4"])
+        self.assertIn("version 6", so.getvalue())
+        self.assertIn("boundary K 4", so.getvalue())
+        self.assertEqual(ex.read_sjtl(out)[0]["boundary_k"], 4)
+        for extra in (["--boundary", "4"], ["--left-len", "62", "--boundary", "99"]):
+            if os.path.exists(out):
+                os.remove(out)
+            with self.assertRaises((SystemExit, ValueError)), contextlib.redirect_stderr(io.StringIO()):
+                ex.main(argv + extra)
+            self.assertFalse(os.path.exists(out), extra)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):       # --left-len without --levels
+            ex.main(argv[:argv.index("--levels")] + ["--left-len", "62"])
+
+
+class TestSepKeys(unittest.TestCase):
+    """The numpy reference reads [SEP]; the committed goldens (items-v6.tsv, sep-keys/keys.tsv) are what the generators write again."""
+
+    def test_committed_goldens_are_what_the_generators_write(self):
+        import gen_sep_keys
+        g = os.path.join(tinylm.ROOT, "eval", "golden")
+        for name, b in gen_tinylm_tiny.build().items():
+            if name.endswith("v6.tsv") or name.endswith("v6.sjtl"):
+                self.assertEqual(b, open(os.path.join(g, "tinylm-tiny", name), "rb").read(), name)
+        for name, b in gen_sep_keys.build().items():
+            self.assertEqual(b, open(os.path.join(g, "sep-keys", name), "rb").read(), name)
+
+    def test_key_b_definitions(self):
+        han = lambda c: c in "好熱今天真"   # noqa: E731
+        key = lambda b, n=1, L=62, K=1: tinylm.key_b(b, n, L, K, han).replace("\0", "|")   # noqa: E731
+        self.assertEqual(key("今天好熱。"), "今天好熱|")
+        self.assertEqual(key("好熱，今天真", K=1), "好熱|今天真")
+        self.assertEqual(key("，，A1 好"), "好")
+        self.assertEqual(key("「」"), "")
+        self.assertEqual(key("好熱，今天真", K=9), "天真")                  # the shipped key: the last 2 Han
+        self.assertEqual(key("好熱，今天真，", K=9), "")                    # ... empty after punctuation
+        self.assertEqual(key("好，" * 31, n=2), "好|" * 30)                  # 61 tokens kept, a leading | dropped
+        self.assertEqual(key("好熱", n=63), "")
+        self.assertEqual(key("好好好好好A好熱", L=3), "好熱")                 # only the last L characters count: "A好熱" -> the leading | dropped
+        self.assertEqual(tinylm.key_b("好\0熱", 1, 62, 1, han), "好\0熱")       # NUL in the text is a boundary, one
+        # the 64-token window: [BOS] + key + candidate never exceeds the context for n = len(candidate)
+        for n in (1, 5, 40, 62):
+            self.assertLessEqual(1 + len(tinylm.key_b("好熱，" * 40, n, 62, 1, han)) + n, 64)
+
+    def test_ll_key_b_reads_nul_as_sep_only_in_the_key(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        npz = os.path.join(td.name, "m.npz")
+        tinylm.save_params(npz, tinylm.random_params(list(CHARS), 1, 8, 2, seed=5, n_extra=1), CHARS, 1, 2, extra_tokens=["[SEP]"])
+        m = tinylm.NumpyLM(npz)
+        self.assertEqual(m.vocab.sep_id, len(CHARS) + 3)
+        a = tinylm.ll_key_b(m, "甲\0乙", "丙")
+        self.assertNotEqual(a, tinylm.ll_many(m, [("甲\0乙", "丙")])[0])     # without sep_keys a NUL in the key is UNK
+        self.assertEqual(tinylm.ll_many(m, [("", "丙\0")], sep_keys=True)[0], tinylm.ll_many(m, [("", "丙\0")])[0])   # a candidate's NUL: UNK
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use crate::colloquial::{self, Colloquial};
-use crate::learn::{context_key, last_chars, SENTINEL};
+use crate::learn::{context_key, is_han, last_chars, SENTINEL};
 use crate::lm::{Lm, Profile, SinitLayer, EPS_SINIT_COARSE, EPS_SINIT_FINE, EPS_SINIT_MID};
 use crate::ManualSet;
 use std::collections::HashMap;
@@ -46,6 +46,14 @@ const VERSION_V4: u32 = 4;
 const MAGIC_V5: &[u8; 8] = b"SJTL0005";
 const HEADER_V5: usize = 248;
 const VERSION_V5: u32 = 5;
+/// docs/spec/semantic-rerank.md §2.1, §5.2: version 6 is version 5's 248 header bytes (magic and version field changed) plus, at 248, a u32 of
+/// format flags (bit 0: the boundary format; every other bit must be 0) and, at 252, a u32 policy-key threshold K (Han characters,
+/// 1 <= K <= ctx - 2 with bit 0 set, else 0). With bit 0 the vocabulary is V - 4 characters, then [SEP] as id V - 1 (not in the code point list).
+const MAGIC_V6: &[u8; 8] = b"SJTL0006";
+const HEADER_V6: usize = 256;
+const VERSION_V6: u32 = 6;
+/// The boundary of a key string (`TinyLm::key_for_len`): U+0000 stands for [SEP]; every other non-Han character is merged into it first.
+const SEP_CHAR: char = '\0';
 /// docs/spec/semantic-rerank.md §2.1: a guard on delta, far above the S7e grid (at most 4).
 const MAX_DELTA: f64 = 1000.0;
 const PAD: u32 = 0;
@@ -554,6 +562,8 @@ pub struct TinyLm {
     kn_sha: Option<[u8; 32]>,
     /// Version 5: the declared left-context length L (characters); `None` for versions 1 to 4.
     left_len: Option<usize>,
+    /// Version 6 with the boundary flag: the policy-key threshold K (Han characters); `None` otherwise. [SEP] is then id V - 1.
+    boundary_k: Option<usize>,
     ids: HashMap<char, u32>,
     emb: Vec<f32>,
     pos: Vec<f32>,
@@ -675,6 +685,7 @@ impl TinyLm {
             (m, VERSION_V3) if m == MAGIC_V3 => (HEADER_V3, true, true, false),
             (m, VERSION_V4) if m == MAGIC_V4 => (HEADER_V4, true, true, true),
             (m, VERSION_V5) if m == MAGIC_V5 => (HEADER_V5, true, true, true),
+            (m, VERSION_V6) if m == MAGIC_V6 => (HEADER_V6, true, true, true),
             _ => return Err(bad),
         };
         if bytes.len() < header {
@@ -705,25 +716,37 @@ impl TinyLm {
             return Err(bad);
         }
         // docs/spec/semantic-rerank.md §5.2: 1 <= L <= ctx - 2 (ctx >= 2 was checked above).
-        let left_len = (header == HEADER_V5).then(|| u32_at(HEADER_V4) as usize);
+        let left_len = (header >= HEADER_V5).then(|| u32_at(HEADER_V4) as usize);
         if left_len.is_some_and(|l| l == 0 || l > ctx - 2) {
             return Err(bad);
         }
+        // docs/spec/semantic-rerank.md §2.1: version 6's flags (bit 0 only) and K (1 <= K <= ctx - 2 with bit 0, else 0).
+        let boundary_k = if header == HEADER_V6 {
+            let (flags, k) = (u32_at(HEADER_V5), u32_at(HEADER_V5 + 4) as usize);
+            match flags {
+                0 if k == 0 => None,
+                1 if (1..=ctx - 2).contains(&k) => Some(k),
+                _ => return Err(bad),
+            }
+        } else {
+            None
+        };
+        let n_chars = v - 3 - boundary_k.is_some() as usize;
         let int8 = wtype == 1;
         let mat = |r: usize, c: usize| if int8 { r * c + 4 * r } else { 4 * r * c };
         let layer_bytes = 4 * 4 * d + mat(d, 3 * d) + 4 * 3 * d + mat(d, d) + 4 * d + mat(d, 4 * d) + 4 * 4 * d + mat(4 * d, d) + 4 * d;
-        let want = header + 4 * (v - 3) + mat(v, d) + mat(ctx, d) + 4 * 2 * d + n_layer * layer_bytes;
+        let want = header + 4 * n_chars + mat(v, d) + mat(ctx, d) + 4 * 2 * d + n_layer * layer_bytes;
         if bytes.len() != want {
             return Err(bad);
         }
         let mut ids = HashMap::new();
-        for i in 0..v - 3 {
+        for i in 0..n_chars {
             let c = char::from_u32(u32_at(header + 4 * i)).ok_or(bad)?;
             if ids.insert(c, i as u32 + 3).is_some() {
                 return Err(bad);
             }
         }
-        let mut r = Cursor { b: bytes, at: header + 4 * (v - 3), int8, ok: true };
+        let mut r = Cursor { b: bytes, at: header + 4 * n_chars, int8, ok: true };
         // The tensor order of export_sjtl.py: emb, pos, lnf_w, lnf_b, then for each layer ln1_w, ln1_b, qkv_w, qkv_b, proj_w, proj_b,
         // ln2_w, ln2_b, fc1_w, fc1_b, fc2_w, fc2_b (tinylm.LAYER_KEYS). Struct fields evaluate in source order.
         let (emb, pos, lnf_w, lnf_b) = (r.mat(v, d), r.mat(ctx, d), r.f32s(d), r.f32s(d));
@@ -757,6 +780,7 @@ impl TinyLm {
             file_sha: String::new(),
             kn_sha,
             left_len,
+            boundary_k,
             ids,
             emb,
             pos,
@@ -811,6 +835,43 @@ impl TinyLm {
             Some(l) => last_chars(before, l),
             None => context_key(before),
         }
+    }
+
+    /// The policy-key threshold K of a version 6 file with the boundary flag; `None` for every other file.
+    pub fn boundary_k(&self) -> Option<usize> {
+        self.boundary_k
+    }
+
+    /// The key a stretch is scored with when the longest candidate of its pool has `n` characters (docs/spec/semantic-rerank.md §5.2). Versions
+    /// 1 to 5 and a version 6 without the boundary flag ignore `n`: `key_for`. With the boundary flag (the research side's
+    /// `keys.policy_key_b(before[-L:], n, K)`): the last L characters of `before`, each run of non-Han characters one `SEP_CHAR`
+    /// (a leading one dropped), cut to the last 63 - n tokens (then a leading `SEP_CHAR` dropped; empty when n >= 63); when that holds at
+    /// least K Han characters it is the key, else the shipped key (`context_key` of those L characters, `SENTINEL` being empty) cut the same way.
+    pub fn key_for_len(&self, before: &str, n: usize) -> String {
+        let (Some(k), Some(l)) = (self.boundary_k, self.left_len) else { return self.key_for(before) };
+        let raw = last_chars(before, l);
+        let fit = |mut t: Vec<char>| -> Vec<char> {
+            let keep = (self.ctx - 1).saturating_sub(n);
+            t.drain(..t.len().saturating_sub(keep));
+            if t.first() == Some(&SEP_CHAR) {
+                t.remove(0);
+            }
+            t
+        };
+        let mut long: Vec<char> = Vec::new();
+        for c in raw.chars() {
+            if is_han(c) {
+                long.push(c);
+            } else if !long.is_empty() && long.last() != Some(&SEP_CHAR) {
+                long.push(SEP_CHAR);
+            }
+        }
+        let long = fit(long);
+        if long.iter().filter(|&&c| c != SEP_CHAR).count() >= k {
+            return long.into_iter().collect();
+        }
+        let ship = context_key(&raw);
+        fit(if ship == SENTINEL { Vec::new() } else { ship.chars().collect() }).into_iter().collect()
     }
 
     /// SHA-256 (hex) of the `.sjtl` bytes `load_paired` parsed (empty for `parse` and `load`).
@@ -883,20 +944,25 @@ impl TinyLm {
         self.ll_many_with(Backend::DEFAULT, items)
     }
 
+    /// The token sequence `ll_many` scores for (k, c): ([BOS] + k + c, index of the first token of c). A version 6 boundary-format model reads
+    /// `SEP_CHAR` in k (and only in k) as [SEP], id V - 1; every character outside the table, a candidate's NUL included, is UNK. The oldest
+    /// tokens of k are dropped when the whole exceeds the context; a c longer than ctx - 1 is `TooLong`.
+    pub fn sequence(&self, k: &str, c: &str) -> Result<(Vec<u32>, usize), TinyLmError> {
+        let sep = self.boundary_k.map(|_| (self.emb.len() / self.d - 1) as u32);
+        let id = |c: char| self.ids.get(&c).copied().unwrap_or(UNK);
+        let c: Vec<u32> = c.chars().map(id).collect();
+        if c.len() > self.ctx - 1 {
+            return Err(TinyLmError::TooLong);
+        }
+        let k: Vec<u32> = k.chars().map(|ch| match sep { Some(sep) if ch == SEP_CHAR => sep, _ => id(ch) }).collect();
+        let k = &k[k.len().saturating_sub(self.ctx - 1 - c.len())..];
+        Ok(([&[BOS], k, &c[..]].concat(), 1 + k.len()))
+    }
+
     pub fn ll_many_with(&self, be: Backend, items: &[(&str, &str)]) -> Result<Vec<f64>, TinyLmError> {
-        let enc = |s: &str| s.chars().map(|c| self.ids.get(&c).copied().unwrap_or(UNK)).collect::<Vec<u32>>();
         let mut out = Vec::with_capacity(items.len());
         for chunk in items.chunks(BATCH) {
-            // ([BOS] + k + c, index of the first token of c)
-            let mut seqs = Vec::with_capacity(chunk.len());
-            for (k, c) in chunk {
-                let (k, c) = (enc(k), enc(c));
-                if c.len() > self.ctx - 1 {
-                    return Err(TinyLmError::TooLong);
-                }
-                let k = &k[k.len().saturating_sub(self.ctx - 1 - c.len())..];
-                seqs.push(([&[BOS], k, &c[..]].concat(), 1 + k.len()));
-            }
+            let seqs = chunk.iter().map(|(k, c)| self.sequence(k, c)).collect::<Result<Vec<_>, _>>()?;
             out.extend(self.ll_batch(be, &seqs));
         }
         Ok(out)

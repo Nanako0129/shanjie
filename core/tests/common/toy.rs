@@ -137,6 +137,18 @@ pub fn upgraded(v1: &Path, left: Option<u32>) -> TempFile {
     temp([h.as_slice(), &b[100..]].concat())
 }
 
+/// A version 1 toy file as version 6 with the boundary flag (docs/spec/semantic-rerank.md §2.1): `upgraded` with L, then flags 1 and K, and the
+/// vocabulary's last character given up for [SEP] (the toy's V stays; its last embedding row is [SEP]'s, id V - 1).
+pub fn upgraded_boundary(v1: &Path, l: u32, k: u32) -> TempFile {
+    let b = std::fs::read(&*upgraded(v1, Some(l))).unwrap();
+    let v = u32::from_le_bytes(b[32..36].try_into().unwrap()) as usize - 3;
+    let (head, vocab_end) = (&b[..248], 248 + 4 * v);
+    let mut out = [head, &1u32.to_le_bytes(), &k.to_le_bytes(), &b[248..vocab_end - 4], &b[vocab_end..]].concat();
+    out[7] = b'6';
+    out[8..12].copy_from_slice(&6u32.to_le_bytes());
+    temp(out)
+}
+
 /// The keys of one syllable: its symbols, then a tone key or Space.
 pub fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
     let mut v = Vec::new();

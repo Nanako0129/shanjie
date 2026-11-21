@@ -43,29 +43,33 @@ def row_key(prefix, n=2):
 class Vocab:
     """ids 0 / 1 / 2 are PAD / UNK / BOS; characters follow from id 3. Characters outside the table map to UNK."""
 
-    def __init__(self, chars):
+    def __init__(self, chars, extra_tokens=()):
         self.chars = list(chars)
         assert len(set(self.chars)) == len(self.chars) and all(len(c) == 1 for c in self.chars)
         self.ids = {c: i + 3 for i, c in enumerate(self.chars)}
-        self.size = len(self.chars) + 3
+        self.extra_tokens = list(extra_tokens)      # ids len(chars) + 3 on, never looked up by character (SJTL0006: ["[SEP]"])
+        self.size = len(self.chars) + 3 + len(self.extra_tokens)
+        self.sep_id = self.size - 1 if self.extra_tokens == ["[SEP]"] else None
 
     def enc(self, s):
         return [self.ids.get(c, UNK) for c in s]
 
 
 # ------------------------------------------------------------------ the .npz format (the only definition of it)
-def save_params(path, params, chars, n_layer, n_head, ctx=CTX):
+def save_params(path, params, chars, n_layer, n_head, ctx=CTX, extra_tokens=None):
     """params: dict of float arrays with keys emb, pos, lnf_w, lnf_b and l{i}.{LAYER_KEYS}; weights are (in, out) so y = x @ W + b."""
     d = {k: np.asarray(v, dtype=np.float32) for k, v in params.items()}
     d["cfg"] = np.array([n_layer, n_head, ctx], dtype=np.int64)
     d["chars"] = np.array(list(chars), dtype="<U1")
+    if extra_tokens is not None:
+        d["extra_tokens"] = np.array(list(extra_tokens), dtype="<U8")
     np.savez(path, **d)
 
 
-def random_params(chars, n_layer, d, n_head, seed=0, ctx=CTX):
+def random_params(chars, n_layer, d, n_head, seed=0, ctx=CTX, n_extra=0):
     """Random (non-trivial LayerNorm / bias) weights, for tests and for exercising the numpy forward without torch."""
     rng = np.random.default_rng(seed)
-    V = len(chars) + 3
+    V = len(chars) + 3 + n_extra
 
     def w(*shape, s=0.2):
         return rng.normal(0, s, shape).astype(np.float32)
@@ -98,9 +102,9 @@ class NumpyLM:
         # from the parity gate (torch's own float32 rounding is what remains); latency.py also measures float32.
         z = np.load(path, allow_pickle=False)
         self.n_layer, self.n_head, self.ctx = (int(x) for x in z["cfg"])
-        self.vocab = Vocab([str(c) for c in z["chars"]])
+        self.vocab = Vocab([str(c) for c in z["chars"]], [str(t) for t in z["extra_tokens"]] if "extra_tokens" in z.files else ())
         self.dtype = dtype
-        self.p = {k: z[k].astype(dtype) for k in z.files if k not in ("cfg", "chars")}
+        self.p = {k: z[k].astype(dtype) for k in z.files if k not in ("cfg", "chars", "extra_tokens")}
         assert self.p["emb"].shape[0] == self.vocab.size, "emb rows != vocabulary size"
         self.d = self.p["emb"].shape[1]
 
@@ -132,8 +136,8 @@ class NumpyLM:
 
 
 # ------------------------------------------------------------------ LL: the one scoring function
-def ll_many(model, items, bs=64):
-    """items: [(k, c)]. LL = sum over the positions of c of log10 P(c_i | [BOS] + k + c_<i), UNK for characters outside the table.
+def ll_many(model, items, bs=64, sep_keys=False):
+    """items: [(k, c)]. With `sep_keys` (SJTL0006's boundary format) a NUL in k is the [SEP] token (id V - 1); a candidate is never read that way. LL = sum over the positions of c of log10 P(c_i | [BOS] + k + c_<i), UNK for characters outside the table.
     model: .vocab (Vocab) and .logp10(ids (B, T) int64, right-padded with PAD) -> (B, T, V). Used for candidates AND perplexity."""
     voc = model.vocab
     out = np.zeros(len(items))
@@ -143,7 +147,8 @@ def ll_many(model, items, bs=64):
             if len(c) > CTX - 1:
                 raise ValueError(f"candidate of {len(c)} characters does not fit the context {CTX}")
             k = k[max(0, len(k) - (CTX - 1 - len(c))):]   # only when [BOS] + k + c would exceed the context: drop the oldest context characters
-            seqs.append(([BOS] + voc.enc(k) + voc.enc(c), 1 + len(k)))
+            kid = [voc.sep_id if sep_keys and ch == SEP_CHAR else voc.ids.get(ch, UNK) for ch in k]
+            seqs.append(([BOS] + kid + voc.enc(c), 1 + len(k)))
         T = max(len(q) for q, _ in seqs)
         ids = np.full((len(seqs), T), PAD, dtype=np.int64)
         for b, (q, _) in enumerate(seqs):
@@ -157,3 +162,45 @@ def ll_many(model, items, bs=64):
 
 def ll(model, k, c):
     return float(ll_many(model, [(k, c)])[0])
+
+
+# ------------------------------------------------------------------ the boundary-format key (SJTL0006; docs/spec/semantic-rerank.md §5.2)
+SEP_CHAR = "\0"   # [SEP] in a key string; any NUL in the text is a non-Han character and so merges into a boundary first
+
+
+def _is_han(c):
+    return any(a <= ord(c) <= b for a, b in _HAN)
+
+
+def key_b(before, n, L, K, is_han=_is_han):
+    """The key core's `TinyLm::key_for_len` builds: the last L characters of `before`, each run of non-Han characters one SEP_CHAR (a leading
+    one dropped), cut to the last 63 - n tokens (a leading SEP_CHAR dropped, "" when n >= 63); the long key when it holds >= K Han characters,
+    else the shipped key (`context_key` of those L characters) cut the same way. n = the longest candidate of the pool, in characters."""
+    raw = before[max(0, len(before) - L):]
+    keep = CTX - 1 - n
+
+    def fit(t):
+        return t[-keep:].lstrip(SEP_CHAR) if keep > 0 else ""
+
+    long, run = [], False
+    for c in raw:
+        if is_han(c):
+            long.append(c)
+            run = False
+        elif long and not run:
+            long.append(SEP_CHAR)
+            run = True
+    long = fit("".join(long))
+    if len(long) - long.count(SEP_CHAR) >= K:
+        return long
+    tail = []
+    for c in reversed(raw):
+        if not is_han(c) or len(tail) == 2:
+            break
+        tail.append(c)
+    return fit("".join(reversed(tail)))
+
+
+def ll_key_b(model, key, cand):
+    """LL of `cand` under a `key_b` key (SEP_CHAR = [SEP])."""
+    return float(ll_many(model, [(key, cand)], sep_keys=True)[0])
