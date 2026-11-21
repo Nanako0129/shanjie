@@ -683,6 +683,22 @@ fn v6_declares_the_boundary_format_and_k() {
     bad[FLAGS_AT] = 1;
     bad[FLAGS_AT + 4] = 4;
     assert!(is_format(&bad), "bit 0 set on a version 5 vocabulary: a character too many");
+    // V = 3 with the boundary flag has no room for [SEP]: Format, not a wrapped vocabulary length (f32, 1 layer, d 1, ctx 3; the file is as long
+    // as the wrapped length formula says, so only the vocabulary check can refuse it)
+    let mut tiny = bytes(V6)[..256].to_vec();
+    for (at, v) in [(12, 0u32), (16, 1), (20, 1), (24, 1), (28, 3), (32, 3), (244, 1), (248, 1), (252, 1)] {
+        tiny[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    let (d, mat) = (1usize, |r: usize, c: usize| 4 * r * c);
+    let layer = 4 * 4 * d + mat(d, 3 * d) + 4 * 3 * d + mat(d, d) + 4 * d + mat(d, 4 * d) + 4 * 4 * d + mat(4 * d, d) + 4 * d;
+    let want = 256 - 4 + mat(3, d) + mat(3, d) + 8 * d + layer;
+    tiny.extend((0..(want - 256) / 4).flat_map(|i| (0x4E00 + i as u32).to_le_bytes()));
+    assert_eq!(tiny.len(), want);
+    assert!(is_format(&tiny), "V 3 with the boundary flag");
+    tiny[32..36].copy_from_slice(&4u32.to_le_bytes());
+    tiny[248..252].copy_from_slice(&0u32.to_le_bytes());
+    tiny[252..256].copy_from_slice(&0u32.to_le_bytes());
+    assert!(is_format(&tiny), "V 4, no flag, wrong length: still Format");
     let good = bytes(V6);
     for n in 0..=256 {
         assert!(is_format(&good[..n]), "prefix of {n} bytes");

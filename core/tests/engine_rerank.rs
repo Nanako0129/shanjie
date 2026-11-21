@@ -400,7 +400,7 @@ fn a_boundary_model_keys_each_stretch_with_key_for_len() {
     let (cands, r) = run(text);
     let longest = |c: &[String]| c.iter().take(TOPK).map(|s| s.chars().count()).max().unwrap();
     let key0 = tl.key_for_len(text, longest(&cands[0]));
-    assert!(key0.contains(' ') && key0 != tl.key_for(text), "premise: a boundary key, not version 5's: {key0:?}");
+    assert!(key0.contains('\0') && key0 != tl.key_for(text), "premise: a boundary key, not version 5's: {key0:?}");
     let before1 = format!("{text}{}{word}", cands[0][r.picks()[0]]);
     let key1 = tl.key_for_len(&before1, longest(&cands[1]));
     assert_eq!(r.keys(), vec![key0, key1]);
@@ -797,6 +797,11 @@ fn load_tinylm_errors_and_the_switch() {
     assert!(e.load_tinylm(Path::new("/nonexistent/x.sjtl")).is_err());
     type_syls(&mut e, &syls);
     assert!(e.take_rerank_job().is_some(), "old model kept");
+    e.key(k(KeyKind::Esc)).unwrap();
+    // A boundary-format header with V = 3 is a refused file (not a panic), and the loaded model stays.
+    assert!(e.load_tinylm(&v6_without_room_for_sep()).is_err());
+    type_syls(&mut e, &syls);
+    assert!(e.take_rerank_job().is_some(), "old model kept after the V 3 boundary file");
     e.key(k(KeyKind::Esc)).unwrap();
     // The switch survives a load.
     e.set_rerank(false).unwrap();

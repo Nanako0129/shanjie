@@ -149,6 +149,20 @@ pub fn upgraded_boundary(v1: &Path, l: u32, k: u32) -> TempFile {
     temp(out)
 }
 
+/// A version 6 header with the boundary flag and V = 3 (no room for [SEP]), as long as the wrapped length formula says: a loader that
+/// subtracts before checking would read its vocabulary off the end of the file (f32, 1 layer, d 1, ctx 3).
+pub fn v6_without_room_for_sep() -> TempFile {
+    let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8-v6.sjtl")).unwrap()[..256].to_vec();
+    for (at, v) in [(12, 0u32), (16, 1), (20, 1), (24, 1), (28, 3), (32, 3), (244, 1), (248, 1), (252, 1)] {
+        b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    let d = 1usize;
+    let layer = 4 * 4 * d + 12 * d + 4 * 3 * d + 4 * d * d + 4 * d + 16 * d * d + 4 * 4 * d + 16 * d * d + 4 * d;
+    let want = 256 - 4 + 12 * d + 12 * d + 8 * d + layer;
+    b.extend((0..(want - 256) / 4).flat_map(|i| (0x4E00 + i as u32).to_le_bytes()));
+    temp(b)
+}
+
 /// The keys of one syllable: its symbols, then a tone key or Space.
 pub fn keys_of(layout: Layout, syl: &str) -> Vec<Key> {
     let mut v = Vec::new();

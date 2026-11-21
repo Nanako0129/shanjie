@@ -731,7 +731,12 @@ impl TinyLm {
         } else {
             None
         };
-        let n_chars = v - 3 - boundary_k.is_some() as usize;
+        // PAD, UNK, BOS and (boundary format) [SEP] are ids too: fewer than that cannot even hold the specials.
+        let specials = 3 + boundary_k.is_some() as usize;
+        if v < specials {
+            return Err(bad);
+        }
+        let n_chars = v - specials;
         let int8 = wtype == 1;
         let mat = |r: usize, c: usize| if int8 { r * c + 4 * r } else { 4 * r * c };
         let layer_bytes = 4 * 4 * d + mat(d, 3 * d) + 4 * 3 * d + mat(d, d) + 4 * d + mat(d, 4 * d) + 4 * 4 * d + mat(4 * d, d) + 4 * d;
