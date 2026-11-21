@@ -655,7 +655,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 - 標記符號：`release-ids` 開著時，DLL 與 exe 各多匯出一個 `SjMarkReleaseIds`；`timing` 開著時各多匯出 `SjMarkTiming`。DLL 用 `#[no_mangle]`；exe 預設不匯出任何符號，由 `windows/host/build.rs` 在 feature 開著時加連結器參數 `/EXPORT:<符號>`。名稱不以 `shanjie_` 開頭（§3.1 的匯出檢查看的是那個開頭）。CI 用 `dumpbin /exports` 看它們（§6.9）。
 - 測試：兩組名稱表互不相同（`ids::tests::the_two_identities_share_nothing`）；這個建置的值等於上表的字面值（`this_build_has_the_documented_literals`，`windows-msi` job 以 `--features release-ids` 跑正式版的那一半，`windows` job 跑開發版的一半）；常駐程序讀設定的路徑是名稱表的值（`startup::tests::the_key_scheme_is_read_from_this_builds_settings_key`）；`pipe_name` 的測試也分兩種身分。
 - MSI 只裝正式版身分、**不帶 `timing`** 的建置。
-- 兩種身分並存、解除安裝其中一個不影響另一個：待驗收（D1）。
+- 兩種身分並存、解除安裝其中一個不影響另一個（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，D1）：開發版身分（`regsvr32` 手動註冊）與 MSI 裝的正式版同時在，兩個設定檔都註冊著；兩支常駐程序同時在跑（映像路徑各在自己的安裝資料夾、都是 Medium、都沒有視窗），Explorer 同時載著兩個 DLL；開發版在「執行」對話框與記事本都打得出「測試」。無介面解除安裝正式版之後，正式版的資料夾、註冊、Run 值、常駐程序都不在，開發版常駐程序的 PID 不變、照樣打得出字；重開機後正式版仍都不在、開發版的註冊還在。沒拍到的一格：兩版並存時用正式版打字的讀回（正式版的常駐程序有被 Explorer 啟動）。
 
 ### 6.2 MSI 的內容
 
@@ -695,7 +695,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   | `InstallLayoutOrTip` 加入後 | 1 | 0x3 | 0x0 | 有 |
   | `InstallLayoutOrTip` 拿掉後 | 0 | 0x3 | 0x2 | 沒有 |
 
-  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同（真的 MSI，測試 VM 驗收符合：裝完切換清單有善解，重新登入後直接打得出字；I1、I3）。其他使用者的清單裡有沒有善解：沒量，待驗收（U7 的第二個使用者）。安裝程式不碰任何使用者的清單；取消註冊後它從清單消失：待驗收（U6）。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
+  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同（真的 MSI，測試 VM 驗收符合：裝完切換清單有善解，重新登入後直接打得出字；I1、I3）。其他使用者也一樣（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，U7）：裝好之後才第一次登入的第二個帳號（一般使用者），按一次 Win+Space 就切到善解（工作列從微軟注音的「英 ㄅ」變成「繁體」），在「執行」對話框打得出「測試」；完整介面升級之後再登入，同樣切得過去、打得出字。安裝程式不碰任何使用者的清單。解除安裝後正式版的 TSF 註冊不在，重開機後也不在（同一時段，D1）；切換清單本身沒有直接讀到：驗收工具讀的兩個值（`Get-WinUserLanguageList` 的清單裡有沒有這個設定檔、`IsEnabledLanguageProfile`）在沒裝的乾淨機器、裝好之後、連從沒註冊過的設定檔都是同一組答案（不在清單、enabled=1），分不出裝了沒有，所以清單以 Win+Space 切得過去、打得出字為準。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
 
 ### 6.4 登入時預先啟動，與裝完不用登出
 
@@ -731,10 +731,10 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
 
 - 被占用的檔被搬到 `C:\Config.Msi\*.rbf`，重開機時（`PendingFileRenameOperations`）刪的是那個搬走的檔，不是安裝路徑。所以：安裝資料夾當場清空；新開的 App 載到新版；解除安裝後不重開機就重裝沒有問題（量到：重裝再重開機後，檔案、註冊、Run 值都在）。
 - **無介面解除安裝在檔案被占用時結束碼是 0，不是 3010**（量到：上表）。
-- 有視窗的 App（記事本）占用檔案時也一樣：推論，待驗收（U6、U7）。基本介面的升級沒量，待驗收（U7）。
+- 有視窗的 App（記事本）占用檔案時也一樣（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，U7）：記事本載著 DLL 時雙擊升級，「檔案使用中」頁出現兩次，各按「忽略」；升級後「程式和功能」只有一筆新版，磁碟上的 DLL 與 exe 當場是新版那一組的雜湊，記事本的 PID 不變、沒存檔的字還在，機器沒有重開，設定的測試值還在，沒有出現保留設定的問話。降版：UAC 之前就跳出「這台電腦已經裝了較新版本的善解。」，新版還在。基本介面的升級見上（跳兩次 Windows 自己的框）。
 - 已經載著舊 DLL 的 App 用舊的，直到它重開。線上協定版本有變的那一版，這些 App 會收到 `Refuse { 1 }`、只有英文，到重開 App 為止（§5.3、§5.6）。
 - 升級時不取消註冊（新版用同一組 GUID 與路徑重新註冊）：量到巢狀的舊版移除裡取消註冊沒跑、新版有註冊。修復或升級失敗還原時也不取消註冊（`RegisterRollback` 的條件）。
-- 升級時舊版常駐程序由 `KillHost` 結束（§6.7）；還載著 DLL 的 App 可能在它之後又把常駐程序啟動起來，那一支活到登出，exe 照「檔案被占用」處理：待驗收記錄（U6、U7：有沒有發生、那支程序的映像路徑）。
+- 升級時舊版常駐程序由 `KillHost` 結束（§6.7）；還載著 DLL 的 App 可能在它之後又把常駐程序啟動起來，那一支活到登出，exe 照「檔案被占用」處理。量到的兩次都沒有發生（測試 VM，2026-11-21，MSI 0.0.261／0.0.262）：記事本載著 DLL 時完整介面升級，按「完成」之前沒有常駐程序，按了之後是完成頁啟動的那一支新的（Medium，父程序是安裝的 msiexec）；Explorer 載著 DLL 時無介面解除安裝，之後沒有正式版的常駐程序。
 
 ### 6.6 自訂動作
 
@@ -765,7 +765,7 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
   - 除了 `StartHost`（由完成頁的一個按鈕觸發）之外，自訂動作只排在 `InstallExecuteSequence`；`InstallUISequence` 沒有自訂動作。
   - 延後動作的參數只有安裝好的檔案路徑；不帶其他路徑或鍵名。
   - 「模擬」的動作實際是誰，看誰啟動安裝（量到：雙擊安裝、`/qb`、`/passive`、修復是使用者、Medium；設定頁「解除安裝」與已提升的命令列是使用者、High；系統身分的排程工作是 SYSTEM；模擬動作沒有執行緒權杖，跑在以使用者權杖啟動的自訂動作宿主裡，`RegOpenCurrentUser` 寫到互動使用者的 hive）。所以 `DeleteSettings` 發現自己的權杖是 SYSTEM、LocalService 或 NetworkService 時什麼都不做。
-  - 自訂動作 DLL 在執行序列從 `C:\Windows\Installer\MSI*.tmp` 載入（量到），在介面序列從 `%TEMP%` 載入（量到）。
+  - 自訂動作 DLL 在執行序列從 `C:\Windows\Installer\MSI*.tmp` 載入（量到），在介面序列從 `%TEMP%` 載入（量到）。真的 MSI（測試 VM，2026-11-21，MSI 0.0.261／0.0.262，S1）：未提升的 `/x /passive` 問話出現時，載著自訂動作 DLL 的是使用者身分、High 的 msiexec，DLL 在 `C:\Windows\Installer\MSI*.tmp`，那個程序沒有載入 `shanjie_tip.dll`；log 記 `AskKeep: front already`，勾著不動解除安裝，結束碼 0、設定保留。
 
 ### 6.7 解除安裝的兩個選項
 
@@ -791,7 +791,7 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
   | 精簡介面（`/qr`，`UILevel` 4） | 條件有涵蓋 | 沒量、這一版也不驗；`AskKeep` 出錯時照都保留處理 |
 
   winget 用哪一種沒量（推論：winget 對 MSI 的預設是 `/passive`，那樣 `winget uninstall` 會停在問話視窗等人按）。完整介面的「要保留什麼」頁的勾預設勾著，會蓋掉命令列給的 `KEEPSETTINGS`（推論，沒量）。
-- **「保留設定」的效果**：值是 `0` 時，`DeleteSettings` 刪掉執行解除安裝的那個使用者的 `HKCU\Software\Shanjie`（目前只有按鍵習慣 `KeyScheme` 一個值，§5.2）；值是 `1` 時留著。其他使用者的設定碰不到，留著。一般帳號請另一個管理員帳號按 UAC 時，刪到的是誰的：待驗收記錄（O1）。
+- **「保留設定」的效果**：值是 `0` 時，`DeleteSettings` 刪掉執行解除安裝的那個使用者的 `HKCU\Software\Shanjie`（目前只有按鍵習慣 `KeyScheme` 一個值，§5.2）；值是 `1` 時留著。其他使用者的設定碰不到，留著。一般帳號請另一個管理員帳號過 UAC 時（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，O1）：一般帳號執行 `/x /qb KEEPSETTINGS=0`、在 UAC 輸入管理員的密碼，結束碼 0，被刪的是**那個一般帳號**的 `HKCU\Software\Shanjie`，管理員帳號的還在。量的時候管理員帳號沒有登入桌面。
 - **不論哪個選項，解除安裝一律清掉**：檔案與資料夾、TSF 註冊、Run 值、正在跑的正式版常駐程序（`KillHost`）。
 - **不刪**：`%LOCALAPPDATA%\Shanjie\`（MSI 裝的建置不帶 `timing`，不會建它）、常駐程序在 HKCU 留下的 WER 排除項（以檔名 `shanjie-host.exe` 登記，§5.2）。
 - **`KillHost`**（常駐程序沒有結束指令，會活到登出）：結束映像完整路徑（`QueryFullProcessImageNameW`，ASCII 字母不分大小寫）等於參數那個路徑的每一個程序，所有工作階段都算；不用檔名比對，因為開發版身分的常駐程序也叫 `shanjie-host.exe`。查路徑與結束用同一個 handle（`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`）。查映像路徑的緩衝是 1024 個 UTF-16 單位，更長的路徑查不到、不結束。修復時也跑：修復會把執行中的 `shanjie-host.exe` 搬到 `C:\Config.Msi` 再放新檔，之後那支程序的映像路徑變成搬過去的名字，解除安裝時就比對不到。量到（測試 VM，修復時只在移除時跑的那一版）：常駐程序在跑時修復（結束碼 3010）再解除安裝，`KillHost` 記 `ended 0`，產品移除了、常駐程序還在（只放英文直通），安裝資料夾留到重開機後剩一個空資料夾。
@@ -848,7 +848,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
 
 - UAC 關掉（`EnableLUA=0`）的機器不能用（§6.4）。
 - 開著 Smart App Control 或 WDAC 的機器可能擋下未簽章的檔：沒量。
-- 只量了 Windows 11 x64；Windows 10 沒量。沒有繁體中文語言的帳號沒量；別的管理員帳號按 UAC 時完成頁啟動的常駐程序、清單與被刪的 `HKCU` 屬於誰：待驗收記錄（O1）。
+- 只量了 Windows 11 x64；Windows 10 沒量。沒有繁體中文語言的帳號沒量；別的管理員帳號過 UAC 時（量到，O1，§6.7）：完成頁啟動的常駐程序屬於執行安裝的那個一般帳號（Medium、它的工作階段），解除安裝刪的也是它的 `HKCU`；那時管理員帳號沒有登入桌面，兩個帳號同時登入的情況沒量。
 - 資料夾在安裝前就存在時，安裝程式不重設它的 ACL（§6.2）。
 - 已經載著舊 DLL 的 App 用舊的，直到重開 App；線上協定版本有變時只有英文（§6.5）。
 - `KillHost` 沒有 rollback；升級、修復與解除安裝時所有工作階段（含其他登入者）的正式版常駐程序都被結束；還載著 DLL 的 App 可能再把它啟動起來（§6.5、§6.6）。修復時 `KillHost` 到 `InstallFiles` 之間、解除安裝時 `KillHost` 到 `RemoveFiles` 之間，有 App 收到一個鍵就可能從舊的 exe 再啟動常駐程序；接著 exe 被搬到 `C:\Config.Msi`，那一支之後的解除安裝比對不到，活到登出（推論，空檔多長沒量）。
