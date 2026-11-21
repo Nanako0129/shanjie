@@ -874,7 +874,11 @@ def cmd_table(a):
     ref, static = load(os.path.join(RESULTS, REFERENCE)), load(STATIC)
     write_json(os.path.join(ROOT, "site/data/bench.json"), site_bench(results, ref, static, v2, ext))
     if md:
-        write_md(md, render_table(results, ref, static) + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else ""))
+        # eval/bench/external/*.md: hand-written sections whose tables the site carries as static HTML (the 0c v2 comparison). Appended as
+        # they are, so each starts at `###` and sits under the external chapter; the site check compares the page tables with them.
+        notes = "".join("\n" + open(os.path.join(EXTERNAL, f), encoding="utf-8").read() for f in sorted(os.listdir(EXTERNAL)) if f.endswith(".md")) \
+            if os.path.isdir(EXTERNAL) else ""
+        write_md(md, render_table(results, ref, static) + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else "") + notes)
 
 
 # ---------- suite v2 (docs/spec/evaluation.md §7): each version with its shipped settings ----------
@@ -959,6 +963,11 @@ VERSIONS2 = {
     # and its weight on the semantic correction's pool (semantic-rerank.md §3.1.1): `"recur"` and `"pool_recur"` make the tag `+ctx+recur+pr` (copied from CLI summary lines on typing76).
     "v0.8.0": {"release": "v0.8.0", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "reading": True, "recur": True, "pool_recur": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+meme+beauty+tri:{tri8}"},
+    # v0.9.0: v0.8.0's models, packs and context terms, with the reading term's syllable normalisation (docs/spec/decoder.md §5: `"reading_norm"`, the tags end +rm+rn) and
+    # third-tone sandhi on by default (docs/spec/decoder.md §6.6, Shell.swift tone3On = true: `"tone3"`, +t3 after the reading marks) (copied from CLI summary lines on typing76).
+    "v0.9.0": {"release": "v0.9.0", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "reading": True, "reading_norm": True, "recur": True, "pool_recur": True, "tone3": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+meme+beauty+tri:{tri8}"},
 }
 # Anchor (docs/spec/evaluation.md §7.7): S7h's measurement, `--override-packs off`, chat, the CLI's own variants table.

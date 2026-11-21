@@ -3199,6 +3199,258 @@
      "p": 1.0
     }
    }
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 282
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 280
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 178
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 176
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 79
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 78
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 70
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 69
+    }
+   },
+   "date": "2026-11-21",
+   "holdout_chat": {
+    "commit": "5409c526bfdb0731b4df5432c5bd7f0d01a5eb86",
+    "n": 150,
+    "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e",
+    "top1": 132
+   },
+   "label": "v0.8.0+v0.9.0",
+   "load_avg_end": 2.92529296875,
+   "load_avg_start": 1.97900390625,
+   "machine": "Mac18,1",
+   "macos": "27.0",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "tinylm.sjtl": "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+   },
+   "ref": "v0.8.0",
+   "sha": "5409c526bfdb0731b4df5432c5bd7f0d01a5eb86",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 1059.9,
+     "max_us": 8593.8,
+     "p95_us": 2416.3,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 489.0625
+    },
+    "keys": 8336,
+    "load_ms": 1042.4,
+    "max_us": 10799.3,
+    "p95_us": 2282.9,
+    "rerank_p50_ms": 5.951,
+    "rerank_p95_ms": 8.284,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 490.296875
+   },
+   "version": "v0.8.0"
+  },
+  {
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 282
+    },
+    "dev302/formal": {
+     "n": 302,
+     "oracle64": 300,
+     "top1": 280
+    },
+    "fw/chat": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 178
+    },
+    "fw/formal": {
+     "n": 186,
+     "oracle64": 186,
+     "top1": 176
+    },
+    "probe/chat": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 79
+    },
+    "probe/formal": {
+     "n": 83,
+     "oracle64": 82,
+     "top1": 78
+    },
+    "typing76/chat": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "typing76/formal": {
+     "n": 76,
+     "oracle64": 75,
+     "top1": 74
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 70
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "oracle64": 78,
+     "top1": 69
+    }
+   },
+   "date": "2026-11-21",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+    "fixed": 0,
+    "n": 150,
+    "p": 1.0,
+    "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e",
+    "top1": 132
+   },
+   "label": "v0.8.0+v0.9.0",
+   "load_avg_end": 2.92529296875,
+   "load_avg_start": 1.97900390625,
+   "machine": "Mac18,1",
+   "macos": "27.0",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "tinylm.sjtl": "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
+   },
+   "ref": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+   "sha": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+   "speed": {
+    "formal": {
+     "keys": 8336,
+     "load_ms": 965.7,
+     "max_us": 8956.2,
+     "p95_us": 2253.3,
+     "rounds": 3,
+     "rows_match": "302/302",
+     "rss_mb": 495.453125
+    },
+    "keys": 8336,
+    "load_ms": 956.8,
+    "max_us": 9920.5,
+    "p95_us": 2342.4,
+    "rerank_p50_ms": 5.947,
+    "rerank_p95_ms": 9.076,
+    "rounds": 3,
+    "rows_match": "302/302",
+    "rss_mb": 495.78125
+   },
+   "version": "v0.9.0",
+   "vs": "v0.8.0",
+   "vs_prev": {
+    "dev302/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "broken": 0,
+     "fixed": 0,
+     "p": 1.0
+    }
+   }
   }
  ]
 }

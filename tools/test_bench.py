@@ -826,8 +826,8 @@ class SuiteV2(Tmp):
                 self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
                 with self.assertRaises(RuntimeError):
                     bench.run_cell2(self.ctx, v, "pub", "chat", False)
-        for label in bench.VERSIONS2:
-            self.assertNotIn("tone3", bench.VERSIONS2[label], "no released version ships it yet")
+        for label in bench.VERSIONS2:   # v0.9.0 is the first release with it
+            self.assertEqual("tone3" in bench.VERSIONS2[label], label == "v0.9.0")
 
     def test_recur_version_marks_every_context_tag_after_ctx(self):
         """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
@@ -1037,6 +1037,14 @@ class SiteData(Tmp):
 
     def written(self):
         return sorted(os.path.relpath(os.path.join(d, f), self.td) for d, _, fs in os.walk(self.td) for f in fs if f.endswith((".md", "bench.json")))
+
+    def test_hand_written_external_sections_end_the_full_table_and_stay_out_of_the_json(self):
+        md0, js0 = self.table()
+        with open(os.path.join(bench.EXTERNAL, "note.md"), "w", encoding="utf-8") as f:
+            f.write("### 手寫的一節\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+        md1, js1 = self.table()
+        self.assertEqual(md1.decode(), md0.decode() + "\n### 手寫的一節\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+        self.assertEqual(js1, js0)
 
     def test_without_a_path_only_the_json_is_written(self):
         err = io.StringIO()
