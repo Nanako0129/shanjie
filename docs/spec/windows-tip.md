@@ -256,7 +256,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 ### 3.14 已知限制與範圍外
 
-- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式都不做；Caps Lock 開著時打字母，核心照規則 1 直通（§3.6），實際結果待 VM 驗收量測（§6.10）。組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母、Tab、Shift+Tab），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
+- 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式都不做；Caps Lock 開著時打字母，核心照規則 1 直通（§3.6）；測試 VM 量到大寫字母直通（§6.10，E 項）。組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母、Tab、Shift+Tab），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
 - 沒有預測列、UILess（`ITfCandidateListUIElement`）、完整的 UIA 候選清單（候選窗只送 `EVENT_OBJECT_IME_*`）；候選窗沒有底部列（▲▼、兩個圖示）、捲動點、展開成三欄與滑鼠點選（§3.15、§4.6）。
 - 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。

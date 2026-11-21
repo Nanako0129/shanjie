@@ -116,5 +116,5 @@ Windows 安裝程式裝在 `C:\Program Files\Shanjie\`。檔案本身和 macOS A
 | `data\lm\` | `bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm` | 各檔的列在「模型檔」 |
 | `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`（本檔，原樣）、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`CC-BY-SA-4.0-attribution.txt` | 同 macOS App 的 `Resources/LICENSES/` 裡同名的檔 |
 
-- `LICENSES\CC-BY-SA-4.0-attribution.txt` 在建置時產生（`scripts/windows/build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段原樣，所以 CC BY-SA 4.0 檔案的清單與各來源的署名和 macOS App 相同；另加一段，點名靜態連結進 DLL 與 exe 的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0）；最後接 name-suggestion-index 的聲明全文。
-- 和 macOS App 的差別：沒有美妝詞包與經典台詞詞包（兩者都是 CC0）、沒有 Sparkle 的授權檔（Windows 版沒有 Sparkle）、沒有 `models.tsv`。
+- `LICENSES\CC-BY-SA-4.0-attribution.txt` 在建置時產生（`scripts/windows/build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段，拿掉 Windows 版沒有的檔（迷因詞包的三個檔名與它那一段、`english.tsv`），其餘的檔案清單與各來源的署名和 macOS App 相同；另加一段，點名靜態連結進 DLL 與 exe 的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0）；最後接 name-suggestion-index 的聲明全文。
+- 和 macOS App 的差別：沒有美妝詞包與經典台詞詞包（兩者都是 CC0）、沒有迷因詞包、沒有 `english.tsv`（Windows 版的常駐程序不開英文比較）、沒有 Sparkle 的授權檔（Windows 版沒有 Sparkle）、沒有 `models.tsv`。
