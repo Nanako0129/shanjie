@@ -446,7 +446,7 @@ fn reading_decode_replay_agrees_with_the_cli() {
         let (rep_on, rep_off) = (run(replay, &["--rows", rows, "--profile", profile]), run(replay, &["--rows", rows, "--profile", profile, "--no-reading-decode"]));
         assert_eq!(sha_of(&on), sha_of(&rep_on), "{profile}: the replay's engine decodes like the CLI");
         assert_eq!(sha_of(&off), sha_of(&rep_off), "{profile}: --no-reading-decode");
-        assert!(on.contains(&format!("+rd+rx:{sha8}+rm+rn+t3  {{")) && rep_on.contains(&format!("+rd+rx:{sha8}+rm+rn+t3  {{")), "{profile}: {on}{rep_on}");
+        assert!(on.contains(&format!("+rd+rx:{sha8}+rm+rn+t3c  {{")) && rep_on.contains(&format!("+rd+rx:{sha8}+rm+rn+t3c  {{")), "{profile}: {on}{rep_on}");
         assert!(!off.contains("+rd") && !rep_off.contains("+rd") && !rep_off.contains("+rx"), "{profile}: {off}{rep_off}");
     }
     // the reading-channel switch is gone from the replay too

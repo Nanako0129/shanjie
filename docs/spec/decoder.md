@@ -151,7 +151,7 @@
 
 - `P` 依 §3：有 trigram 表時用 `P3`（前文 = 路徑最後兩詞），否則 `P(w|v)`；被學習加分的詞改用 `prob_learned`（§3.3）。
 - `lp` 是該詞在這個讀音下的封頂分數；學習加分把它抬到 `該讀音最高分 + ε·w/(w+1)`（ε 與層級的細節見 `docs/spec/learning.md`），抬高後 `pb` 重算。
-- `δ` = 降權表的 δ（降權開時，§2.4）＋模糊輸入的容錯扣分（§6）＋三聲變調的扣分（§6.6）。δ 和學習加分都只動分數，不改「試哪些詞條」。
+- `δ` = 降權表的 δ（降權開時，§2.4）＋模糊輸入的容錯扣分（§6）＋三聲變調與輕聲來源的扣分（§6.6）。δ 和學習加分都只動分數，不改「試哪些詞條」。
 - 讀音項見 §5，只加在「單字詞、來自詞庫條目、沒被學習加分」的詞上。
 - 前文重現項見 §4.6，放在這個詞的 δ 裡（負的 δ），每個詞都可能有，包含被學習加分的詞與新詞。
 
@@ -198,7 +198,7 @@
   - 音節歸零（`ReadingDecode::with_syllable_norm`，最後建，因為它讀免扣清單與讀音質量之後的 t）：對每個單音節讀音 r，取 r 底下「有計數」的單字，也就是詞庫分數（重複列取最大值）高於單字無計數分數的字；無計數分數是單字的（讀音, 字）裡最多對共用的那個分數，載入時算（同數時取位元樣式較大的，出貨詞庫上是 −7.90389321）。`k(r)` ＝ 這些字的 t 的最大值；`k(r) < 0` 時，r 底下每個單字的 t 改成 `min(0, t − k(r))`，否則不動（底下有不扣分的有計數字，或沒有有計數字的音節都不動）。理由：讀音項是在同一個音節的單字之間排高下；一個音節底下有計數的單字全被扣時，這個扣分分不出其中任何兩個字，只讓這個音節的單字輸給同讀音的多字詞（不加讀音項）與沒有計數的字（例：ㄊㄚ ㄌㄚ˙ 的「啦」、ㄓㄟˋ 的「這」、ㄑㄧㄚˇ 的「卡」）。`LAMBDA`、`CAP`、免扣清單、`SANDHI`、讀音質量規則都不變。出貨詞庫上動到 59 個音節的 61 對（59 對變成 0，2 對留下較小的扣分；其中 11 對是讀音質量規則設的），其他對不變（`core/tests/fixtures/reading-norm-pins.tsv`，`core/tests/reading_mass.rs` 逐對斷言）。句中的檢查集是 `eval/dev/reading-norm/`（`docs/spec/evaluation.md` §1.1）。
   - 字或讀音在詞庫裡查不到的組合、以及字數 ≠ 1 的詞，項為 0。
 - 學習加分的詞（`was_boosted`）不加讀音項：讀音項最多扣 `LAMBDA·CAP` = 8，學習加分最多 6，否則使用者教過的罕用讀音會被蓋掉。句首單字學習的「抬高」解碼同樣加讀音項（和不抬高的分數相同，抬高的增益才是兩者差）。
-- 模糊音容錯讀音的字、三聲變調讀到的字（§6.6），讀音項用它的詞庫讀音算。
+- 模糊音容錯讀音的字、三聲變調讀到的字、輕聲音節經替代讀音讀到的單字（§6.6），讀音項用它的詞庫讀音算。`colloq` 列（§8.7）都是多字詞，沒有讀音項。
 - 建表只有一個函式 `engine::load_reading_decode(lexicon, data_dir)`，讀 `mcbpmf-data.txt` 原文與 `std-exempt.tsv`；`Engine::load_lm`、評測 CLI、重播程式都只呼叫它。缺檔、讀不了或格式錯（不是「音節<TAB>單一字」）就是載入失敗（回傳 3），不會靜默沒有豁免。
 - 共用：表建好後不變，封頂詞庫以 `Arc` 持有它。從另一個引擎的共用部分建引擎（`Engine::new_shared`，`docs/spec/c-abi.md` §5.4）時，來源引擎與新引擎的詞包列都沒有單音節讀音的列（建詞庫時各記一個旗標），就沿用來源引擎的表、不重建；否則照上一條重建。理由：表只讀單音節讀音下的單字詞與基底原文，鍵是音節編號，詞包的音節編號接在基底之後、基底的編號不變。沿用時 `std-exempt.tsv` 仍讀一次並解析，壞了一樣回 3。驗證：`core/tests/engine_share.rs` 拿沒有詞包的引擎的表查遮罩 0、1、29、31 的詞庫，每一個（字, 讀音）的值與標記都和從檔案建的表相同；含單音節列的測試詞包檔則一定重建，輸出和從檔案建的引擎相同。
 - 開關：`Engine::set_reading_decode(false)`、CLI 與重播的 `--no-reading-decode` 只給評測用，不在 `shanjie.h`。關閉等於沒有讀音項的解碼器。
@@ -232,7 +232,7 @@
 
 - 每個區段（長度 l 的音節範圍）除了完全吻合的詞庫讀音，另外有「來源」：
   - 區段全是詞庫音節且啟用了模糊音位元：區段裡每個音節輪流換成它的模糊音替代讀音各查一次（每個詞最多一個音節用容錯），查到、且不是完全吻合讀音的詞，用該詞在各替代讀音中最好的分數，每個替代讀音最多 12 個、合計最多 12 個，減 `DELTA_SOUND`。
-  - 區段含詞庫沒有的音節（恰好一個）：**一律**（不看鄰鍵位元）用它的鄰鍵替代讀音查，減 `DELTA_ADJACENT`；三聲變調的未收音節例外，只走變調來源（§6.6）。位元只管「收不收這個音節」，所以收下之後再關掉鄰鍵，已收下的音節照樣解得出來，不會進內部錯誤。含兩個以上詞庫沒有的音節的區段沒有容錯來源。
+  - 區段含詞庫沒有的音節（恰好一個）：**一律**（不看鄰鍵位元）用它的鄰鍵替代讀音查，減 `DELTA_ADJACENT`；三聲變調的未收音節與口語讀音的輕聲音節例外，只走變調來源與單字替代讀音（§6.6）。位元只管「收不收這個音節」，所以收下之後再關掉鄰鍵，已收下的音節照樣解得出來，不會進內部錯誤。含兩個以上詞庫沒有的音節的區段沒有容錯來源。
   - 模糊音只用在全是詞庫音節的區段。
   - **變調**（預設開，不看模糊音位元）：區段裡的可變調位置與輕聲尾換成上聲的讀音查詞，減 `DELTA_TONE3`；規則、子集順序與上限見 §6.6。
 - 挑哪些詞、各自在哪個讀音，和候選窗用同一個函式（`Lexicon::tolerant_pick`）；差別只在解碼器每個替代讀音設 `PER_KEY` 上限，窗不設上限。
@@ -250,9 +250,9 @@
 - `lm::rerank_pool(best, topk)`（引擎的重排工作與評測 CLI 共用）：n-gram 第一名是容錯路徑（救回）→ 該段不送語意校正，組字區照 n-gram 第一名，並計入 `fuzzy_skips`；否則候選＝n-best 依原順序跳過容錯路徑後的前 `TOPK` 條，不足就全部；池子少於 2 條就不做重排工作（不計 `guard_skips`）。錨點仍是 n-gram 第一名。沒有模糊音位元時沒有任何容錯詞，等於前 `TOPK` 條。
 - 取捨：重排看不到讀音，所以不讓它把容錯詞換上去（只從打的讀音解出的路徑重排）；δ 取 2.5 是用出貨設定重選的，原本的 1 是在沒有詞包、小模型與 KN 的條件下選的，會讓容錯的常用字蓋過打對的讀音（打 ㄙㄨ 的「蘇」被容錯的「書」蓋掉）。
 
-### 6.6 三聲變調（來源「變調」）
+### 6.6 三聲變調與口語變調（來源「變調」「輕聲」）
 
-照實際讀音打的上聲變調（眨眼打 ㄓㄚˊ ㄧㄢˇ、展覽館打 ㄓㄢˊ ㄌㄢˊ ㄍㄨㄢˇ、小姐打 ㄒㄧㄠˊ ㄐㄧㄝ˙）也解得出詞庫讀音是上聲的詞。預設開，不看模糊音位元。實作在 `core/src/tone3.rs`（位置表與子集）、`core/src/lib.rs`（`Lexicon::tone3_pick`、`tone3_reading`）、`core/src/lm.rs`（`CappedLexicon::sources`）。
+照實際讀音打的上聲變調（眨眼打 ㄓㄚˊ ㄧㄢˇ、展覽館打 ㄓㄢˊ ㄌㄢˊ ㄍㄨㄢˇ、小姐打 ㄒㄧㄠˊ ㄐㄧㄝ˙）也解得出詞庫讀音是上聲的詞。預設開，不看模糊音位元。同一個開關也管口語變調：打輕聲的口語讀音（厲害打 ㄌㄧˋ ㄏㄞ˙、知道打 ㄓ ㄉㄠ˙）解得出詞庫讀音是本調的詞，疊字陰平化的口語讀音（熱騰騰打 ㄖㄜˋ ㄊㄥ ㄊㄥ）由資料列解（§8.7）。實作在 `core/src/tone3.rs`（位置表、子集、輕聲的替代讀音）、`core/src/lib.rs`（`Lexicon::tone3_pick`、`single_pick`、`neutral_pick`、`tone3_reading`、`colloq_range`）、`core/src/lm.rs`（`CappedLexicon::sources`）。
 
 **位置表**（`tone3::positions(音節串, 詞庫, 開關)`，唯一的實作；引擎的解碼、候選窗、`path_readings`、學習守門，評測 CLI 的解碼與 `path_readings`，`shanjie-replay` 經引擎，都呼叫它）：對組字區（CLI 是整列）**整串已完成的音節**算一次，不分詞、不看固定詞與分段；標點與英文 token 不是音節（它們和任何非陽平的音節一樣結束一段陽平）。「有單字詞條」＝詞庫（含詞包、名單）有這個讀音的單音節詞條（`Lexicon::has_single`，和 `finish_syllable` 的「詞庫有這個音節」同一個判斷）。
 
@@ -261,6 +261,8 @@
 - **輕聲尾**：X˙ 的前一個音節是陽平，而且 Xˇ 有單字詞條；或任何位置上的未收輕聲尾（收下之後前一個音節被改選、刪掉或中間插了別的音節，它照樣有替代讀音）。
 - **可變調位置**：陽平的音節 i，i 之後第一個不是陽平的音節是上聲或輕聲尾；或任何位置上的未收音節。雙單 ˊˊˇ、單雙 ˇˊˇ、四五個上聲的各種斷法、ˊˊ˙ 的每個陽平都符合；最後一個音節（未收音節除外）不是。
 - **替代讀音**：可變調位置的 ˊ 換成 ˇ，輕聲尾的 X˙ 換成 Xˇ；換後的讀音不是詞庫的音節時那個位置沒有替代讀音（查不到詞，不出錯）。
+- **輕聲音節的單字替代讀音**（K）：打的是輕聲 X˙、X˙ 沒有單字詞條，不論它在哪個位置（整串的第一個也算）：X、Xˊ、Xˇ、Xˋ 裡有單字詞條的每一個，依這個順序。它讓 `finish_syllable` 收下的輕聲音節（`docs/spec/keys-and-composition.md` §3.3）一定有解碼路徑。這些替代讀音**只查單字詞**，不進任何多字詞的讀音；上面的表不因它改變（它不算輕聲尾，前面的陽平不因它成為可變調位置；本來就是未收輕聲尾的，Xˇ 照上面的做法，這裡多出來的是其餘三個）。
+- **輕聲位置**（來源「輕聲」）：打的是輕聲 X˙（有沒有單字詞條都算），而且它前面有音節（不是整串的第一個音節；標點與英文 token 不算音節）：X、Xˊ、Xˇ、Xˋ 裡是詞庫音節的每一個，依這個順序。它們只查多字詞。
 - 開關關掉時位置表全空。
 
 **查詞**（`tone3::readings`）：一個區段裡有替代讀音的位置 k 個時，依「子集大小由小到大、同大小依位置由左到右」逐一把子集的位置換成替代讀音查詞；輕聲尾只和它前一個位置（同一區段裡的可變調位置）一起換，前一個位置不在區段裡時單獨換。最多查 `TONE3_MAX_SUBSETS` = 15 個子集（k ≤ 4 時全部子集）。查到、且不是完全吻合讀音的詞，分數減 `DELTA_TONE3`（每個詞扣一次，不論換了幾個位置），每個讀音最多 12 個、這個來源每個區段合計最多 12 個，和模糊音、鄰鍵的上限分開算；同一個詞不同時用變調與模糊音或鄰鍵。區段含未收音節時，含它的子集讀音才查得到詞，所以照樣有路徑。位置表標成未收音節或未收輕聲尾的音節只走變調來源：不論鄰鍵位元開或關，§6.3 的鄰鍵來源都不查它（它是變調規則收下的，不是打錯），所以畫面上是經 Xˇ 解出的字；不是未收音節的「詞庫沒有的音節」照舊走鄰鍵。出貨詞庫（含 App 預設詞包）有 112 個未收的陽平音節，各自單打的第一名都是 Xˇ 的單字詞條（`core/tests/engine_tone3.rs` 的 `every_unaccepted_syllable_alone_shows_a_word_of_its_third_tone`，鄰鍵位元關與開各一次）。
@@ -269,14 +271,23 @@
 |---|---|---|
 | `DELTA_TONE3` | 3.0 | 經變調讀音讀到的詞減這麼多（log10）。格點 {0.5, 1.0, 1.5, 2.0, 2.5, 3.0} 裡只有 3.0 讓 wikitune-clean-tw0 的原讀音不退步 |
 | `TONE3_MAX_SUBSETS` | 15 | 一個區段最多查幾個子集 |
+| `DELTA_NEUTRAL` | 4.0 | 經輕聲來源讀到的多字詞、經輕聲音節的單字替代讀音讀到的單字減這麼多（log10）；`colloq` 列（§8.7）的分數也比原列低這麼多。格點 {1.0, 2.0, 3.0, 4.0} 裡 3.0 與 4.0 讓 cvtune-clean-tw0、wikitune-clean-tw0 的原讀音都不退步，兩格的探針 top1 相同，取大的 |
+| `NEUTRAL_MAX_READINGS` | 15 | 輕聲來源一個區段最多查幾個讀音 |
 
-- **候選窗**：完全吻合的詞、模糊音與鄰鍵的詞之後，接變調的詞（同一個 `Lexicon::tolerant_words`，加位置表當參數），去重。選了變調詞，那一段的音節換成詞庫讀音（ˇ），再照一般選詞固定；學習記錄寫詞庫讀音。
-- **語意校正**（§6.5）：變調詞不是容錯詞，不設記號、不計 `fuzzy_skips`，照常進候選池；學習守門（`boosted`）在變調詞的詞庫讀音下比較，沒有學習加分就不算被加分。
-- **手動詞保護**（§7）：`path_readings` 回傳變調詞的詞庫讀音。
-- **讀音項**（§5）：變調詞的單字讀音項用詞庫讀音（ˇ）算，變調本身只扣 `DELTA_TONE3`。
-- **收下音節**：未收音節（以及前一個音節是陽平的未收輕聲尾）由 `finish_syllable` 收下，見 `docs/spec/keys-and-composition.md` §3.3；中英混打把它當成以 Xˇ 算分的詞庫音節，見 `docs/spec/english-mixed.md` §3.4、§16.1；數字層不收變調音節（同檔 §7.1）。
-- **開關**：`Engine::set_tone3`、C ABI `shanjie_engine_set_tone3(engine, on, out)`（0 或 1，其他值回 2、狀態不變；重算組字區並回傳快照，回傳碼同 `set_fuzzy`；預設 1）。關掉時，組字區裡不在固定詞底下的未收音節與未收輕聲尾改存成 Xˇ（照候選窗換讀音的做法），所以照樣有解碼路徑、不清空。macOS 設定頁「模糊輸入」那一區的原生勾選框「三聲變調」，存在 UserDefaults 的布林鍵 `tone3Sandhi`（沒有值＝開），每次建引擎與設定改變時送一次。Windows 殼照核心預設（開）。
-- **評測**：`shanjie-eval` 與 `shanjie-replay` 的 `--no-tone3`；摘要行在開著時多一段 `+t3`（在讀音項標記之後），`shanjie-eval --tone3-delta D`（只給評測，D ≥ 0）不等於預設時是 `+t3:dD`。Python 參考實作不實作變調，和 Python 逐位元組比對的 golden 帶 `--no-tone3`。
+**輕聲音節與輕聲來源的查詞**（`tone3::singles`、`tone3::neutral_readings`；`Lexicon::single_pick`、`neutral_pick`），和上面的子集列舉分開做，那一套（含 15 個子集的上限）不變：
+
+- **單字**（K）：只有一個音節的區段、那個位置有單字替代讀音時，依 X、Xˊ、Xˇ、Xˋ 的順序查單字詞，查到的詞減 `DELTA_NEUTRAL` 一次；上面的變調來源已經用 Xˇ 讀到的詞照那邊的做法（扣 `DELTA_TONE3`），這裡不重複列、不重複扣。每個讀音最多 12 個、合計最多 12 個。
+- **多字詞**（輕聲來源）：兩個音節以上的區段裡有 m 個輕聲位置時，把**每一個**輕聲位置各換成一個替代讀音去查（可變調位置不動，所以同時要換兩種位置的詞讀不到）；每個位置依 X、Xˊ、Xˇ、Xˋ 的順序，m ≥ 2 時依位置由左到右的字典序組合，一個區段最多查 `NEUTRAL_MAX_READINGS` = 15 個讀音。查到、且不是完全吻合讀音的詞，分數減 `DELTA_NEUTRAL`，每個詞扣一次；每個讀音最多 12 個、這個來源每個區段合計最多 12 個。例：ㄌㄧˋ ㄏㄞ˙ 讀到 ㄌㄧˋ ㄏㄞˋ 的「厲害」、ㄓ ㄉㄠ˙ 讀到「知道」、ㄆㄟˊ ㄅㄨˊ ㄕ˙ 讀到「賠不是」。這個來源不用辭典資料，疊加層、名單、詞包的詞一樣讀得到；代價是打輕聲時多出同音節其他聲調的多字詞候選（有扣分）。
+- 位置表有單字替代讀音的音節和未收音節一樣只走這裡的來源：§6.3 的鄰鍵來源不查它。
+- **`colloq` 列**（§8.7）：開關開著時，區段打的讀音底下的 `colloq` 列也是這個區段的詞條（分數是列上寫的，不另外扣），和完全吻合的詞條分開各取最多 12 個；關掉時不讀。
+
+- **候選窗**：完全吻合的詞（開關開著時含那個讀音的 `colloq` 列）、模糊音與鄰鍵的詞之後，接變調的詞，再接輕聲音節的單字與輕聲來源的詞（同一個 `Lexicon::tolerant_words`，加位置表當參數），去重。選了變調詞或輕聲來源的詞，那一段的音節換成詞庫讀音，再照一般選詞固定；學習記錄寫詞庫讀音。選了 `colloq` 列的詞，音節照打的留著（它是那個讀音的詞條）。
+- **語意校正**（§6.5）：變調詞、輕聲來源的詞與 `colloq` 列的詞都不是容錯詞，不設記號、不計 `fuzzy_skips`，照常進候選池；學習守門（`boosted`）在變調詞的詞庫讀音下比較，沒有學習加分就不算被加分。
+- **手動詞保護**（§7）：`path_readings` 回傳變調詞與輕聲來源的詞的詞庫讀音。
+- **讀音項**（§5）：變調詞的單字讀音項用詞庫讀音（ˇ）算，變調本身只扣 `DELTA_TONE3`；輕聲音節經替代讀音讀到的單字用那個替代讀音算，另扣 `DELTA_NEUTRAL`。
+- **收下音節**：未收音節（以及前一個音節是陽平的未收輕聲尾）由 `finish_syllable` 收下，口語讀音的輕聲音節（X˙ 沒有單字詞條、前面已有音節、四個聲調裡有一個有單字詞條）也是，見 `docs/spec/keys-and-composition.md` §3.3；中英混打把前者當成以 Xˇ 算分的詞庫音節、後者以分數最高的替代讀音算分，見 `docs/spec/english-mixed.md` §3.4、§16.1；數字層都不收（同檔 §7.1）。
+- **開關**：`Engine::set_tone3`、C ABI `shanjie_engine_set_tone3(engine, on, out)`（0 或 1，其他值回 2、狀態不變；重算組字區並回傳快照，回傳碼同 `set_fuzzy`；預設 1）。一個開關管三聲變調與口語變調：關掉時位置表全空（輕聲音節不收、輕聲來源不查），核心也不讀 `colloq` 列（§8.7；基底與疊加層的都算，`neutral`、`fusion`、`sandhi` 列照舊常開）。關掉時，組字區裡不在固定詞底下的未收音節與未收輕聲尾改存成 Xˇ（照候選窗換讀音的做法），其他收下的輕聲音節改存成 X、Xˊ、Xˇ、Xˋ 裡單字詞條分數最高的那個，只有 `colloq` 列才有的固定詞解除固定，所以照樣有解碼路徑、不清空。macOS 設定頁「模糊輸入」那一區的原生勾選框「變調與口語讀音」，存在 UserDefaults 的布林鍵 `tone3Sandhi`（沒有值＝開），每次建引擎與設定改變時送一次。Windows 殼照核心預設（開）。
+- **評測**：`shanjie-eval` 與 `shanjie-replay` 的 `--no-tone3`；摘要行在開著時多一段 `+t3c`（在讀音項標記之後；只有三聲變調的那一代是 `+t3`），`shanjie-eval --tone3-delta D`（只給評測，D ≥ 0）不等於預設時是 `+t3c:dD`，`--neutral-delta D`（只給評測，D ≥ 0；換掉 `DELTA_NEUTRAL`，`colloq` 列的分數在載入時跟著移）不等於預設時再接 `:nD`。Python 參考實作不實作變調、輕聲來源，也不讀 `colloq` 列（`reference/proto/ime.py` 略過這個標籤），和 Python 逐位元組比對的 golden 帶 `--no-tone3`。
 
 ## 7. 手動詞保護
 
@@ -306,12 +317,12 @@
 
 - R1–R3、R5、R7 只處理多字列（單字的變調讀音本來就在基底）；R6 也處理單字列。
 - R7 的合音是「這一」「那一」「哪一」縮成的，所以只限指示代詞在詞首、直接接量詞；不限位置會把音譯詞也改掉（波札那、地拉那、那霸、莫那魯道）。量詞表是 `build_sandhi.py` 的 `CLASSIFIERS`（90 個字）：些 件 份 位 個 具 冊 匹 區 口 句 台 名 回 堂 堆 場 塊 夜 天 套 季 家 封 對 局 層 席 幀 年 張 戶 扇 批 支 期 本 枝 架 株 格 條 棟 棵 樁 檔 次 款 步 段 炷 片 班 番 盒 盞 種 站 筆 箱 節 篇 籃 粒 組 群 股 艘 課 趟 輛 輩 道 部 針 鍋 門 間 陣 隻 集 雙 頁 頂 項 頓 顆 類 首 點。「麼 裡 兒 邊 樣 方 時 會 就 是 一 幾」不是量詞，不在表裡（「這一」「這幾」本身就不讀合音）。單字的 ㄓㄟˋ 這、ㄋㄟˋ 那、ㄋㄟˇ 哪本來就在基底。
-- 「不」在去聲變來的輕聲前讀 ㄅㄨˊ（不是 ㄅㄨˊ ˙ㄕ）不是規則：基底裡「不」接輕聲的列，輕聲字的本調都不是去聲；名詞「不是」（賠不是）的 ㄅㄨˊ ˙ㄕ 是逐詞的口語輕聲，不在這裡收。
+- 「不」在去聲變來的輕聲前讀 ㄅㄨˊ（不是 ㄅㄨˊ ˙ㄕ）不是規則：基底裡「不」接輕聲的列，輕聲字的本調都不是去聲；名詞「不是」（賠不是）的 ㄅㄨˊ ˙ㄕ 是逐詞的口語輕聲，不在這裡收，由解碼器的輕聲來源讀到（§6.6）。
 - 下一音節的聲調看讀音最後的聲調符號（無符號＝陰平）；下一個字是「不」時視為去聲，是「一」時視為陰平，是「個」而讀輕聲時視為去聲（審訂表「個」不取輕聲）；詞尾沒有下一音節。
 - R1 的排除（「一」只用本調）：前一字是「第」或數字字（零〇一二三四五六七八九十百千萬億兆兩廿卅佰仟）；後一字是數字字或「月」；詞尾；前一字等於後一字（疊字動詞中間，問一問）；詞中的詞尾（基底裡以「一」結尾、每個讀音都讀 ㄧ、且基底沒有任何一列在它後面接字時把這個「一」變調的詞，如統一、唯一、國一）；以及 `LISTED` 清單上的序詞與專名子字串（校名、年級、編號、路線、審級、世代，以及教育部沒有規則的人名品牌，如一女中、核一廠、同一性、弘一大師）。
 - 自我檢查（`--check` 會先跑）：「真不一般」的「不」不變調、「一不做二不休」第一個「一」是 ㄧˊ、「不一會」的「不」不變 ㄅㄨˊ、R6 兩例；拿掉 `next_tone` 的「一→陰平」會讓它失敗。
 - 評測用的讀音翻轉探針（`tools/build_probe.py`）把句中「一」「不」換成另一種合規讀音；探針與基底讀音比較用同一個 `other_reading`。
-- 出貨的 `sandhi-add.tsv` 有 1,331 列 `sandhi`（R1 284、R2 976、R3 14、R5 28、R6 29，每列歸給第一個產生它的規則）、179 列 `fusion`（R7）和 1,501 列 `neutral`（§8.3），共 3,011 列；生成器在標準錯誤印出每條規則的列數。
+- 出貨的 `sandhi-add.tsv` 有 1,331 列 `sandhi`（R1 284、R2 976、R3 14、R5 28、R6 29，每列歸給第一個產生它的規則）、179 列 `fusion`（R7）、1,501 列 `neutral`（§8.3）和 10 列 `colloq`（§8.7），共 3,021 列；生成器在標準錯誤印出每條規則的列數。
 - 驗證：`tools/test_build_sandhi.py` 的 `Fusion`（詞首接量詞才產生、量詞表外與音譯詞不產生、已存在不寫）；`--check` 的自我檢查含「那個」產生、「那霸」「那麼」不產生；出貨設定的評測 CLI 打 ㄋㄟˋ ㄍㄜ˙ 第一名「那個」、ㄋㄟˇ ㄍㄜ˙ 第一名「哪個」（聊天與書面）。
 - 載入：`sandhi-add.tsv` 在每個載入點（引擎、評測 CLI、Python `ime.Lexicon`）都接在 `overlay-add.tsv` 之後；缺檔載入失敗。`tools/readings.py` 只載入基底，不要讓它載入這個檔，否則它對「一」「不」選本調的規則會改掉評測集的讀音。
 
@@ -366,23 +377,34 @@
 | 上聲＋上聲 → 前字陽平（跨詞也變）；三個以上依結構分組（雙單、單雙、四五個的各種斷法）；上聲＋本調上聲的輕聲 → 陽平＋輕聲（小姐、想想） | 解碼器的「變調」來源（§6.6），不加資料列 |
 | 「一」「不」的變調 | §8.1 R1–R3 |
 | 「這」「那」「哪」接量詞的合音 ㄓㄟˋ、ㄋㄟˋ、ㄋㄟˇ | §8.1 R7 |
-| 「不」在去聲變來的輕聲前（名詞「不是」ㄅㄨˊ ˙ㄕ） | 不做：逐詞的口語輕聲，基底沒有符合規則的列 |
+| 「不」在去聲變來的輕聲前（名詞「不是」ㄅㄨˊ ˙ㄕ） | 解碼器的「輕聲」來源（§6.6），不加資料列 |
 | 固定輕聲、辨義輕聲 | §8.3（`neutral`） |
 | 「七」「八」在去聲前讀陽平 | 不做：《簡編本》字條「今多不變調」 |
-| 輕聲變調、疊字陰平化與其他逐詞的口語變調 | 不做：要逐詞的資料 |
+| 輕聲變調（本調詞在口語讀輕聲：厲害、知道、早上） | 解碼器的「輕聲」來源（§6.6），不加資料列 |
+| 疊字陰平化（熱騰騰、迷迷糊糊） | §8.7（`colloq`），逐詞的資料列 |
+| 台灣口語的 ˇˊ 稱謂讀法（爸爸 ㄅㄚˇ ㄅㄚˊ）、其他逐詞的口語變調 | 不做 |
 | 陽平居中變陰平 | 不做 |
 | 半上、去去連讀、兒化的韻母變讀、「啊」的音變 | 不影響打的注音 |
+
+### 8.7 疊字陰平化的口語讀音（`colloq`）
+
+- 起因：ABB、AABB 的疊字音節在口語讀陰平（熱騰騰 ㄖㄜˋ ㄊㄥ ㄊㄥ、迷迷糊糊 ㄇㄧˊ ˙ㄇㄧ ㄏㄨ ㄏㄨ），詞庫只有本調，照口語打得到別的字（熱鼟鼟、米米呼呼）。這一類規則分不出來（基底的 ABB 詞裡，馬友友、大拜拜、老太太的疊字音節不讀陰平），所以逐詞收；改讀輕聲的那一類不用資料，由輕聲來源照規則讀到（§6.6）。
+- 詞表：`tools/colloq-words.tsv`（詞、位置（從 1 起）、改法 `level` 或 `neutral`、來源），由 `tools/colloq_words.py` 產生、進版控。來源是教育部《重編國語辭典修訂本》（版本 `dict_revised_2015_20260625`，釘試算表的 SHA-256）變體類型「變」、變體注音不含「ㄦ」的列：逐音節比主讀音與變體，變體是同韻的陰平記 `level`、是同韻的輕聲記 `neutral`（「一」「不」只差聲調的位置不算），有其他差異的列不收；只留有 `level` 位置、詞庫（基底或疊加層）有的詞，共 13 個（基底 10、疊加層 3）。辭典只用來決定哪些詞的哪個位置有口語讀音，注音字串與釋義不在檔內（授權與標示見 `LICENSES/data.md`，使用說明全文在 `LICENSES/MOE-dict-revised-terms.txt`）。沒有辭典檔的機器不能重產，`tools/test_colloq_words.py` 只核對已提交的檔的格式（有辭典檔時逐位元組比對）。
+- 規則：`build_sandhi.py` 對詞表裡的詞，拿它在基底的每個讀音，把 `level` 位置的聲調符號去掉、`neutral` 位置的聲調符號換成 `˙`，寫一列，標籤 `colloq`；疊加層的詞由 `build_overlay.py` 的 `colloq_rows` 對疊加層自己的每一列做同一件事，接在產生的列之後、手動詞之前。分數＝原列分數減 `COLLOQ_PENALTY` = 4.0（和核心的 `DELTA_NEUTRAL` 是同一個值，`tools/test_build_sandhi.py` 核對）；已存在（任何一層或前面規則）的（讀音, 詞）不寫，幾列得到同一個新讀音時取分數高的。出貨 10 列（`sandhi-add.tsv`）加 3 列（`overlay-add.tsv`）。
+- 載入：核心把標籤 `colloq` 的列和其他列分開存（`Lexicon::colloq_range`），詞庫的其他查詢都看不到它們，所以關掉開關（§6.6）就等於沒有這些列；開著時它們是打的那個讀音的詞條。`colloq` 列不增加新的詞字串，不改模型的計數詞表。
+- 同一個讀音已經有別的詞時，那個詞照舊排前面：ㄏㄨㄥˊ ㄊㄨㄥ ㄊㄨㄥ 的第一名仍是詞庫本來就有的「紅通通」，「紅彤彤」排在它後面。
+- 驗證：`tools/test_build_sandhi.py` 的 `Colloq`（規則真值表、分數與標籤、已存在不寫、出貨檔的列數）、`tools/test_colloq_words.py`（規則的真值表、兩份詞表的格式）、`tools/test_build_overlay.py` 的 `ColloqRows`；`cli/tests/colloq.rs`（聊天與書面第一名、`--no-tone3` 時不讀）；`core/tests/engine_colloq.rs`（候選窗、關掉開關時解除固定）。
 
 ## 9. Python 參考實作與 CLI
 
 - `reference/proto/lm.py`、`trigram.py`、`ime.py` 實作 bigram、詞類、KN、trigram、異體排序表（`ime.py` 的 `load_variant_order`、`lm.py` 的 `cap_overlay`）、降權表（`load_demote`）、詞包詞當未知詞與前後同樣的合併規則，與 Rust 逐位元組相同；`fuzzy_ref.py` 是容錯表的對照。Python **不實作**讀音項、模糊輸入的解碼、學習。golden 由 Python 產生、Rust 比對。
-- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--no-pool-recur`、`--pool-mask-diff`、`--fuzzy`、`--fuzzy-delta-sound`、`--no-tone3`、`--tone3-delta`（§6.6）、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
-- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後；有 `--tinylm` 而且沒有 `--no-pool-recur` 時是 `+recur+pr`，`docs/spec/semantic-rerank.md` §3.1.1）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm+rn`、`+t3[:d<δ>]`（三聲變調開著時，在讀音項標記之後；§6.6）。
-- 重播程式（`shanjie-replay`）走引擎的 `load_lm`（三聲變調照引擎預設開，`--no-tone3` 關），標記與模型列同 CLI（`+recur` 在讀音項標記之前，有小模型時是 `+recur+pr`，`--no-pool-recur` 時只有 `+recur`，`--no-recur` 時都沒有），另列出實際載入的每個模型檔。
+- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--no-pool-recur`、`--pool-mask-diff`、`--fuzzy`、`--fuzzy-delta-sound`、`--no-tone3`、`--tone3-delta`、`--neutral-delta`（§6.6）、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
+- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後；有 `--tinylm` 而且沒有 `--no-pool-recur` 時是 `+recur+pr`，`docs/spec/semantic-rerank.md` §3.1.1）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm+rn`、`+t3c[:d<δ>][:n<δ>]`（三聲變調與口語變調開著時，在讀音項標記之後；§6.6）。
+- 重播程式（`shanjie-replay`）走引擎的 `load_lm`（三聲變調與口語變調照引擎預設開，`--no-tone3` 關），標記與模型列同 CLI（`+recur` 在讀音項標記之前，有小模型時是 `+recur+pr`，`--no-pool-recur` 時只有 `+recur`，`--no-recur` 時都沒有），另列出實際載入的每個模型檔。
 
 ## 10. 驗證
 
-- 單元與整合：`make test-rust`（`core/src/lm.rs` 內的 trigram 公式、遮罩、容錯、`core/src/tests.rs` 的異體排序，`core/tests/kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`、`engine_pack.rs`、`engine_demote.rs`、`engine_fuzzy.rs`、`engine_fuzzy_rerank.rs`、`engine_lm.rs`、`engine_rerank.rs`、`engine_recur.rs`、`reading_decode.rs`、`engine_tone3.rs`，`core/src/tone3.rs` 的位置表與子集，`cli/tests/golden.rs`、`tone3.rs`、`fuzzy.rs`、`fuzzy_rerank.rs`、`reading_decode.rs`、`recur.rs`、`replay.rs`）；`make test-python`（`reference/proto/test_recombine.py`、`test_demote.py`、`test_variant_order.py`、`test_fuzzy_ref.py`，`tools/test_build_trigram.py`、`test_kn_cont.py`、`test_build_classes.py`、`test_build_sandhi.py`、`test_build_overlay.py`、`test_build_acg_pack.py`、`test_pack_oov.py`、`test_std_exempt.py`）；`make test-swift`（設定存取、旗標送出）；`make test-golden`。
+- 單元與整合：`make test-rust`（`core/src/lm.rs` 內的 trigram 公式、遮罩、容錯、`core/src/tests.rs` 的異體排序，`core/tests/kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`、`engine_pack.rs`、`engine_demote.rs`、`engine_fuzzy.rs`、`engine_fuzzy_rerank.rs`、`engine_lm.rs`、`engine_rerank.rs`、`engine_recur.rs`、`reading_decode.rs`、`engine_tone3.rs`、`engine_colloq.rs`，`core/src/tone3.rs` 的位置表、子集與輕聲的替代讀音，`cli/tests/golden.rs`、`tone3.rs`、`colloq.rs`、`fuzzy.rs`、`fuzzy_rerank.rs`、`reading_decode.rs`、`recur.rs`、`replay.rs`）；`make test-python`（`reference/proto/test_recombine.py`、`test_demote.py`、`test_variant_order.py`、`test_fuzzy_ref.py`，`tools/test_build_trigram.py`、`test_kn_cont.py`、`test_build_classes.py`、`test_build_sandhi.py`、`test_build_overlay.py`、`test_build_acg_pack.py`、`test_pack_oov.py`、`test_std_exempt.py`）；`make test-swift`（設定存取、旗標送出）；`make test-golden`。
 - 跨語言 golden：玩具模型加玩具側檔／表由 Python 產生（`tools/gen_kn_tiny.py`、`gen_tri_tiny.py`、`gen_pack_oov.py`），Rust 逐位元組比對（`kn_tiny.rs`、`tri_tiny.rs`、`pack_oov.rs`）；真模型的 `eval/golden/` 由 `reference/proto/lm_eval.py` 重產，Rust CLI 逐位元組相同，指令見 `docs/spec/evaluation.md`。
 - 規則壞了就要失敗的測試（每條規則至少一個）：合併鍵（沒有合併修正時留下錯的路徑、修正後留下 `下｜來`，用合成小詞庫與模型）、KN 替換與 id ≥ 2 條件、trigram 公式四種情形與下限生效／不生效、單詞段落收尾、壞檔各回對應錯誤、`load_opts` 載入的表確實是映射、強制詞當未知詞且不封頂／非強制詞照封頂、降權只在指定讀音生效與 `*`、`set_demote(0)` 等於沒有表、異體排序的格式與順序與封頂後再套一次、容錯標記（降權後 δ 剛好 2.5 的打的讀音詞不是容錯詞）、遮罩與其退回路徑、學習抬高的字不被讀音項推翻。
 - 前文重現項：前文放其中一個同音詞，同音候選第一名是前文那一個，換成另一個就反過來（語意校正開、關各一次）；前文空或只有一個字元時與關掉它逐列相同（`core/tests/engine_recur.rs`、`cli/tests/recur.rs`，見 `docs/spec/semantic-rerank.md` §10）。候選池的加重：`core/tests/engine_pool_recur.rs`、`cli/tests/replay.rs` 的 `pool_weight_replay_agrees_with_the_cli`（見 `docs/spec/semantic-rerank.md` §10）。
@@ -397,6 +419,7 @@
 - 模糊音：換出詞庫沒有的音節（例如 ㄓㄨㄚ 打成 ㄗㄨㄚ）時，只有鄰鍵開著才可能收下，而且只走鄰鍵；多於一個音節用容錯的詞不支援；鄰鍵只限標準排列，只容錯詞庫沒有的音節（打錯成另一個合法音節不救）。
 - 讀音項的 `SANDHI` 免扣不檢查下一個音節是否真的需要變調；讀音項不納入 `total_score`。
 - 三聲變調（§6.6）只看調號、不看詞的結構：照本調打的陽平後面接上聲時，也多一個上聲的讀法（扣 `DELTA_TONE3`）；一個區段最多查 15 個子集；未收輕聲尾只在前一個音節是陽平時收下；位置表以整串組字算，中間的標點與英文會切開一段陽平。
+- 口語變調（§6.6、§8.7）：輕聲來源只看調號，打輕聲時同音節其他聲調的多字詞都成為候選（扣 `DELTA_NEUTRAL`）；整串第一個音節的輕聲不查；一個區段最多查 15 個讀音；同一個讀音已有別的詞時疊字陰平化的詞不是第一名（紅彤彤）；全用數字鍵的輕聲音節（ㄓㄚ˙ `5 8 7`）在數字層開著時是數字，要打那個詞得照本調打或關掉中英混打；台灣口語的 ˇˊ 稱謂讀法不做。
 - 強制詞（`acg-oov`）不經通語統計：當成未知詞，所以它們不會從通語的二元組得到上下文加分，也不會被當成下一個詞的上下文。
 - trigram 表的 D 固定 0.75、下限 F 固定 0.5；映射期間表檔不可原地改寫。
 - 輸入框前文只有結尾至多 2 個漢字當 n-gram 的歷史詞（前文重現項另外查最後 64 個字元的漢字對，§4.6）；英文段只在有 trigram 表時當總分的邊界。

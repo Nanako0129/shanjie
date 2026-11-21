@@ -96,7 +96,9 @@ class Lexicon:
         # overlay 可以是單一路徑或路徑清單（S2r：overlay-add.tsv 之後接 sandhi-add.tsv，順序和核心相同）。
         paths = [overlay] if isinstance(overlay, str) else list(overlay or ())
         for line in (l for p in paths for l in open(p, encoding="utf-8")):
-            reading, word, score, _ = line.rstrip("\n").split("\t")
+            reading, word, score, tag = line.rstrip("\n").split("\t")
+            if tag == "colloq":   # 口語變調列（docs/spec/decoder.md §8.7）：核心只在開關開著時讀；參考實作沒有這個開關（golden 帶 --no-tone3），不讀
+                continue
             syls, score = tuple(reading.split("-")), float(score)
             if any(w == word for w, _ in self.by_reading[syls]):
                 raise ValueError("overlay duplicates a base entry")

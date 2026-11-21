@@ -880,8 +880,9 @@ pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
     rc
 }
 
-/// Third-tone sandhi (docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.2): `on` 0 or 1 (default 1); any other value is 2 with the state
-/// unchanged. Codes and snapshot as `shanjie_engine_set_fuzzy`; turning it off stores every unaccepted syllable of the composition as its third tone.
+/// Third-tone and colloquial sandhi, one switch (docs/spec/decoder.md §6.6, §8.7, docs/spec/keys-and-composition.md §3.2): `on` 0 or 1 (default 1); any other
+/// value is 2 with the state unchanged. Codes and snapshot as `shanjie_engine_set_fuzzy`; turning it off stores every unaccepted syllable of the composition
+/// as its third tone, and every neutral syllable K accepted as the best-scoring of its alternatives.
 ///
 /// # Safety
 /// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.

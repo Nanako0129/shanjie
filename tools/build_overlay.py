@@ -309,6 +309,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
     variant_removed += gone
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
+    rows += colloq_rows(rows)
     rows += tail_rows(words | overlay_words, length_scores(base), syllables)
     if pick:
         print(f"--moedict-readings: {len(kept_old)} words keep their reading because readings.py marks them CHECK or GAP"
@@ -366,7 +367,7 @@ def prune(rows, twin):
 def rebuild_tails(out=OUT, refilter=False):
     """overlay-add.tsv 產生的列（標籤不是 manual、slang）照舊，檔尾照 tail_rows 重算；給只改了手動詞或網路用語的時候用，不必有 dump。"""
     with open(out, encoding="utf-8") as f:
-        kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")]
+        kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang", "colloq")]
     base = ime.Lexicon(BASE)
     words = set(base.by_word)
     kept, _ = prune(kept, drop_list(words).get)     # 清單是 repo 裡的檔，不必有 dump：改了清單用 --tails-only 就生效
@@ -374,7 +375,23 @@ def rebuild_tails(out=OUT, refilter=False):
         phrase, moe = bc.load_conv()[0], moe_titles()
         kept, gone = prune(kept, lambda w: phrase_twin(w, phrase, words, moe))
         print(f"--refilter: {len(gone)} rows of {len({g.split(chr(9))[0] for g in gone})} words are whole-word Simplified forms of a base word")
-    return kept + tail_rows(words | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base))
+    return kept + colloq_rows(kept) + tail_rows(words | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base))
+
+
+def colloq_rows(rows, table=None, penalty=None):
+    """口語變調的疊字陰平化（docs/spec/decoder.md §8.7）：rows（產生的列）裡 tools/colloq-words.tsv 有的詞，每一列照 build_sandhi.colloq_variant 改讀音，
+    分數 − COLLOQ_PENALTY，標籤 colloq，接在產生的列後面、手動列前面；已存在的（讀音, 詞）不寫，同一個新讀音取分數高的。"""
+    table = build_sandhi.colloq_table() if table is None else table
+    penalty = build_sandhi.COLLOQ_PENALTY if penalty is None else penalty
+    existing = {tuple(r.split("\t")[:2]) for r in rows}
+    best = {}
+    for r in rows:
+        reading, w, score, _ = r.rstrip("\n").split("\t")
+        new = build_sandhi.colloq_variant(reading.split("-"), table[w]) if w in table else None
+        key = ("-".join(new), w) if new else None
+        if key and key not in existing and (key not in best or float(score) - penalty > best[key]):
+            best[key] = float(score) - penalty
+    return [f"{k[0]}\t{k[1]}\t{round(sc, 8)!r}\tcolloq\n" for k, sc in best.items()]
 
 
 def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG):

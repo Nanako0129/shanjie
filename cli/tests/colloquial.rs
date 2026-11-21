@@ -222,7 +222,7 @@ fn the_term_applies_at_every_strength() {
         let new = full_run(&a, &BASE[..9], &set, &[&extra[..], &["--colloquial-core", TABLE]].concat());
         assert_eq!(chosen(&new.sc), with, "{level}: the level's own cell");
         let rl = if level == "standard" { String::new() } else { format!("+rl:{level}") };
-        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3  {{")), "{level}: {}", new.stdout);
+        assert!(new.stdout.contains(&format!("{rl}+acg+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3c  {{")), "{level}: {}", new.stdout);
         if let Some(plain) = without {
             let old = full_run(&b, &BASE[..9], &set, &extra);
             assert_eq!(chosen(&old.sc), plain, "{level}: the header triple, no term");
@@ -296,7 +296,7 @@ fn the_colloquial_term_stands_alone() {
     for out in [&with.stdout, &off.stdout] {
         assert!(out.contains("+colloq:81c2470d") && !out.contains("+rc"), "{out}");
     }
-    assert!(with.stdout.contains("+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3  {") && off.stdout.contains("+colloq:81c2470d+t3  {"), "{}{}", with.stdout, off.stdout);
+    assert!(with.stdout.contains("+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3c  {") && off.stdout.contains("+colloq:81c2470d+t3c  {"), "{}{}", with.stdout, off.stdout);
     let mut args: Vec<String> = BASE[..9].iter().map(|s| s.to_string()).collect();
     args.extend(["--rows".to_string(), rows.clone(), "--colloquial-core".to_string(), TABLE.to_string(), "--no-reading-channel".to_string()]);
     let o = run(&args);

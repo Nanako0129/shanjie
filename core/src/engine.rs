@@ -1033,7 +1033,7 @@ pub struct Engine {
     depth: u32,
     /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips.
     fuzzy: u32,
-    /// Third-tone sandhi (`set_tone3`, default on; docs/spec/decoder.md §6.6): the switch handed to `tone3::positions`.
+    /// Third-tone and colloquial sandhi (`set_tone3`, default on; docs/spec/decoder.md §6.6): the switch handed to `tone3::positions`, and whether the `colloq` rows are read.
     tone3: bool,
     /// docs/spec/english-mixed.md §4.1: the English run being typed (Shift+letter starts it): letters shown at the cursor, not yet a
     /// unit. Empty = no run. Never together with an unfinished syllable or a window.
@@ -1978,13 +1978,13 @@ impl Engine {
     /// packs this engine was built with, at their file scores (before capping and demotion). The new-word rules (docs/spec/learning.md §8.2 items 2 and 5), the shadow
     /// gate, the decoder's "the lexicon has it" check all use it.
     fn in_lexicon(&self, reading: &[String], word: &str) -> bool {
-        self.lex.has(reading, word)
+        self.lex.has_with(reading, word, self.colloq_on())
     }
 
     /// docs/spec/learning.md §8.2 item 2: the reading leaves room for a new word, i.e. no lexicon word under it scores above
     /// `NEWWORD_SHADOW` (no word at all also does).
     fn room_for_new_word(&self, reading: &[String]) -> bool {
-        self.lex.entries(reading).iter().all(|&(_, score)| score <= NEWWORD_SHADOW)
+        self.lex.entries_with(reading, self.colloq_on()).iter().all(|&(_, score)| score <= NEWWORD_SHADOW)
     }
 
     /// docs/spec/learning.md §8.2: the runs of single Han characters on the path at commit (split at punctuation, non-Han and
@@ -2027,7 +2027,7 @@ impl Engine {
                             continue;
                         }
                         let r = self.syls[sub[0].0..sub[sub.len() - 1].0 + 1].to_vec();
-                        if self.lex.entries(&r).is_empty() {
+                        if self.lex.entries_with(&r, self.colloq_on()).is_empty() {
                             out.push((r, sub.iter().map(|x| x.1).collect()));
                         }
                     }
@@ -2283,21 +2283,37 @@ impl Engine {
         self.handled()
     }
 
-    /// Third-tone sandhi (docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.2): on (the default), `finish_syllable` accepts an unaccepted
-    /// syllable and the decoder and the window read the sandhi source. Off, the position table is empty, and every unaccepted syllable or neutral tail the
-    /// composition holds (not under a fixed word) is stored as its third tone Xˇ, as a window pick rewrites a span to the lexicon reading, so the composition
-    /// keeps a path. Recomputes the composition and returns the snapshot, like `set_fuzzy`; on a decode failure the engine resets itself.
+    /// Third-tone and colloquial sandhi (docs/spec/decoder.md §6.6, §8.7, docs/spec/keys-and-composition.md §3.2): on (the default), `finish_syllable` accepts
+    /// an unaccepted syllable and a neutral syllable K takes, the decoder and the window read the sandhi and the neutral source, and the `colloq` rows of the
+    /// lexicon are read. Off, the position table is empty and those rows are not read; every unaccepted syllable or neutral tail the composition holds (not
+    /// under a fixed word) is stored as its third tone Xˇ, as a window pick rewrites a span to the lexicon reading, any other neutral syllable K took as the
+    /// best-scoring of X, Xˊ, Xˇ, Xˋ, and a fixed word only the `colloq` rows have is unfixed, so the composition keeps a path. Recomputes the composition and
+    /// returns the snapshot, like `set_fuzzy`; on a decode failure the engine resets itself.
     pub fn set_tone3(&mut self, on: bool) -> Result<Output, EngineError> {
         self.setting_changed();
         self.invalidate();
         if self.tone3 && !on {
+            // A fixed word only the colloquial rows have under its reading (docs/spec/decoder.md §8.7) is no word of the lexicon read with the switch off: unfixed,
+            // so its syllables are free like the rest.
+            let (syls, lex) = (&self.syls, &self.lex);
+            self.fixed.retain(|f| {
+                let r = &syls[f.start..f.end];
+                lex.has(r, &f.word) || !lex.has_with(r, &f.word, true)
+            });
             for i in 0..self.syls.len() {
                 let s = &self.syls[i];
                 let fixed = self.fixed.iter().any(|f| f.start <= i && i < f.end);
-                if !fixed && (crate::tone3::unaccepted(&self.lex, s) || crate::tone3::unaccepted_tail(&self.lex, s)) {
+                if fixed {
+                    continue;
+                }
+                // The neutral tail the sandhi rule took (after a second tone) is stored as Xˇ, as before K; any other neutral syllable K took as its best alternative.
+                let prev_rises = i.checked_sub(1).is_some_and(|j| self.syls[j].ends_with('ˊ') && !self.syls[j].starts_with(PUNCT_PREFIX));
+                if crate::tone3::unaccepted(&self.lex, s) || (prev_rises && crate::tone3::unaccepted_tail(&self.lex, s)) {
                     if let Some(t) = crate::tone3::third(s) {
                         self.syls[i] = t;
                     }
+                } else if let Some(t) = self.neutral_best(s) {
+                    self.syls[i] = t;
                 }
             }
         }
@@ -2313,6 +2329,27 @@ impl Engine {
     /// Whether third-tone sandhi is on (`set_tone3`).
     pub fn tone3(&self) -> bool {
         self.tone3
+    }
+
+    /// Whether the colloquial rows are read (docs/spec/decoder.md §8.7): the switch on and a model loaded, as the decoder reads them.
+    fn colloq_on(&self) -> bool {
+        self.tone3 && self.lm.is_some()
+    }
+
+    /// K (docs/spec/keys-and-composition.md §3.2 (2)): for ˙X without a one-syllable entry, the one of X, Xˊ, Xˇ, Xˋ whose best one-syllable entry scores
+    /// highest (the earlier one on a tie); `None` when `syl` is no such syllable.
+    fn neutral_best(&self, syl: &str) -> Option<String> {
+        if !crate::tone3::neutral_single(&self.lex, syl) {
+            return None;
+        }
+        let top = |t: &String| self.lex.entries(std::slice::from_ref(t)).first().map(|e| e.1);
+        let mut best: Option<(f64, String)> = None;
+        for t in crate::tone3::four(syl)? {
+            if let Some(sc) = top(&t).filter(|&sc| best.as_ref().is_none_or(|b| sc > b.0)) {
+                best = Some((sc, t));
+            }
+        }
+        best.map(|b| b.1)
     }
 
     /// The position table of the composition (docs/spec/decoder.md §6.6), the one function the evaluation CLI calls too.
@@ -2941,7 +2978,7 @@ impl Engine {
             // docs/spec/decoder.md §3.3 (the learned-boost exception): a word the learner boosted (lp above its best capped lp under its reading, the test of
             // `boosted`) was scored by the decoder without the Kneser-Ney substitution; score it the same way here.
             // A word that matched a rule 10 record (`sinit`) is not one of those; its lp is its own entry's (docs/spec/learning.md §7.2, the pool is unlifted).
-            let learned = !sinit && self.syls.get(at..at + n).and_then(|s| st.capped.best_lp(s, w)).is_some_and(|best| *lp > best);
+            let learned = !sinit && self.syls.get(at..at + n).and_then(|s| st.capped.best_lp_with(s, w, self.tone3)).is_some_and(|best| *lp > best);
             // A learned word is scored by P2 alone (no Kneser-Ney substitution, no table), as in the decoder.
             // A fixed word is the right neighbour that closes the stretch before it (`End::Next`), so (b') applies to its term.
             let fixed_here = self.fixed.iter().any(|f| f.start == at);
@@ -3129,7 +3166,7 @@ impl Engine {
                 let Some(&(a, b, word)) = old.iter().find(|o| o.0 == next) else { break };
                 let put_back = snap.frozen.contains(&(a, b));
                 let fits = b <= to.min(lcp) && (put_back || b + CAP_EDGE <= lcp) && !self.forgot.iter().any(|&(x, y)| a < y && x < b);
-                if !fits || st.capped.best_lp_delta(&self.syls[a..b], word).is_none() {
+                if !fits || st.capped.best_lp_delta_with(&self.syls[a..b], word, self.tone3).is_none() {
                     break;
                 }
                 frozen.push(Fixed::frozen(a, b, word.clone()));
@@ -3492,12 +3529,12 @@ impl Engine {
         // docs/spec/learning.md §8.4: a fixed word the lexicon lacks is a new word picked in the window; once its record is
         // gone (forgotten, cleared) the span is unfixed and decoded again, never an error.
         if self.fixed.iter().any(|f| f.end - f.start >= NEWWORD_MIN) {
-            let (syls, learner, lex) = (&self.syls, &self.learner, &self.lex);
+            let (syls, learner, lex, colloq) = (&self.syls, &self.learner, &self.lex, self.tone3);
             self.fixed.retain(|f| {
                 let r = &syls[f.start..f.end];
                 syls[f.start].starts_with(PUNCT_PREFIX)
                     || learner.new_word_day(r, &f.word).is_some()
-                    || lex.has(r, &f.word)
+                    || lex.has_with(r, &f.word, colloq)
             });
         }
         let mut lp_fixed = Vec::with_capacity(self.fixed.len());
@@ -3507,7 +3544,7 @@ impl Engine {
             let r = &self.syls[f.start..f.end];
             let (lp, delta) = if self.is_punct(f.start) {
                 (0.0, 0.0)
-            } else if let Some(x) = st.capped.best_lp_delta(r, &f.word) {
+            } else if let Some(x) = st.capped.best_lp_delta_with(r, &f.word, self.tone3) {
                 x
             } else {
                 // A fixed new word scores S(w) of its record, below ACTIVE too (docs/spec/learning.md §8.4).
@@ -3721,7 +3758,7 @@ impl Engine {
             let sandhi = |s: &[String]| self.lex.tone3_reading(s, t3.get(at - n..at).unwrap_or(&[]), w);
             span.is_none_or(|s| {
                 let s = sandhi(s).unwrap_or_else(|| s.to_vec());
-                !s.iter().any(|x| !self.lex.has_syllable(x)) && st.capped.best_lp(&s, w).is_none_or(|best| lp > best)
+                !s.iter().any(|x| !self.lex.has_syllable(x)) && st.capped.best_lp_with(&s, w, self.tone3).is_none_or(|best| lp > best)
             })
         })
     }
@@ -4389,15 +4426,22 @@ impl Engine {
         Ok(o)
     }
 
-    /// Third-tone sandhi (docs/spec/keys-and-composition.md §3.2 (2), docs/spec/decoder.md §6.6): with the switch on and a model loaded, an unaccepted syllable,
-    /// or an unaccepted neutral tail right after a second-tone syllable, is accepted. `Some(Xˇ)`, the reading it is scored as; `None`: not this rule's.
+    /// Sandhi (docs/spec/keys-and-composition.md §3.2 (2), docs/spec/decoder.md §6.6): with the switch on and a model loaded, an unaccepted syllable, or an
+    /// unaccepted neutral tail right after a second-tone syllable, is accepted: `Some(Xˇ)`, the reading it is scored as. So is, after any syllable of the
+    /// composition, a neutral syllable without a one-syllable entry one of whose four tones has one (K): `Some` of the best-scoring of them. `None`: not this rule's.
     fn tone3_accepts(&self, syl: &str) -> Option<String> {
         if !self.tone3 || self.lm.is_none() {
             return None;
         }
         let prev_rises = self.cursor.checked_sub(1).and_then(|i| self.syls.get(i)).is_some_and(|p| p.ends_with('ˊ') && !p.starts_with(PUNCT_PREFIX));
         let ok = crate::tone3::unaccepted(&self.lex, syl) || (prev_rises && crate::tone3::unaccepted_tail(&self.lex, syl));
-        ok.then(|| crate::tone3::third(syl)).flatten()
+        if ok {
+            return crate::tone3::third(syl);
+        }
+        // K (docs/spec/keys-and-composition.md §3.2 (2)): a neutral syllable without a one-syllable entry, after some syllable of the composition (punctuation
+        // and English tokens are none), when one of X, Xˊ, Xˇ, Xˋ has an entry: scored as the best of them.
+        let after_syllable = self.syls[..self.cursor.min(self.syls.len())].iter().any(|p| !p.starts_with(PUNCT_PREFIX));
+        after_syllable.then(|| self.neutral_best(syl)).flatten()
     }
 
     /// Fuzzy input, bit 4 (docs/spec/decoder.md §6.2): a syllable the lexicon lacks is accepted when it has a lexicon
@@ -4664,7 +4708,7 @@ impl Engine {
         let today = if self.learner.has_new_words() { self.today() } else { 0 };
         for l in (1..=self.lex.max_len.max(NEWWORD_MAX).min(self.avail())).rev() {
             let key = if a == 0 { &self.syls[..l] } else { &self.syls[a - l..a] };
-            let lexicon = self.lex.entries(key);
+            let lexicon = self.lex.entries_with(key, self.colloq_on());
             // docs/spec/learning.md §8.4: new words first among the same length, so ⌘⌫ reaches them (any weight: a record
             // under ACTIVE is still on disk); one the lexicon has is listed where the lexicon puts it.
             let new = if (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) { self.learner.new_words_all(key, today) } else { Vec::new() };
@@ -5026,7 +5070,7 @@ impl Engine {
                 // A word the typed reading does not have (one read through a tolerant syllable: fuzzy input, docs/spec/decoder.md §6.2) cannot be
                 // fixed: `refresh_lm` scores a fixed word under the reading it stands over. As `pieces` and `cap_refreeze` do, it is
                 // left to the decoder. (A punctuation token, a learned new word and every lexicon word pass, as ever.)
-                let held = || self.is_punct(p) || st.capped.best_lp_delta(&self.syls[p..q], word).is_some() || self.learner.new_word_day(&self.syls[p..q], word).is_some();
+                let held = || self.is_punct(p) || st.capped.best_lp_delta_with(&self.syls[p..q], word, self.tone3).is_some() || self.learner.new_word_day(&self.syls[p..q], word).is_some();
                 if !self.fixed.iter().any(|f| f.start == p && f.end == q) && held() {
                     out.push(Fixed::frozen(p, q, word.clone()));
                 }

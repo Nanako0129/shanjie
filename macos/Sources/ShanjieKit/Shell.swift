@@ -235,7 +235,7 @@ public final class MemoryEnglishStore: EnglishStore {
 
 /// Where the 模糊輸入 flags are kept (docs/spec/decoder.md §6.1): bits 0-3 the four sound pairs, bit 4 the adjacent-key
 /// slips, as `shanjie_engine_set_fuzzy`; `nil` means never chosen, which is 0 (all off). Same arrangement as `PredictionStore`.
-/// The same store keeps the 三聲變調 switch of the same settings section (docs/spec/decoder.md §6.6): `nil` means never chosen, which is on.
+/// The same store keeps the 變調與口語讀音 switch of the same settings section (docs/spec/decoder.md §6.6): `nil` means never chosen, which is on.
 @MainActor
 public protocol FuzzyStore: AnyObject {
     var fuzzyFlags: UInt32? { get set }
@@ -609,7 +609,7 @@ public final class Shell {
     private(set) var fuzzyFlags: UInt32 = 0
     /// What `build()` sent to each engine it made, in order (test hook, like `rerankSent`).
     private(set) var fuzzySent: [UInt32] = []
-    /// docs/spec/decoder.md §6.6: the 三聲變調 switch (default true: `UserDefaults` key `tone3Sandhi`, absent is true); sent to every engine `build()` makes.
+    /// docs/spec/decoder.md §6.6: the 變調與口語讀音 switch (default true: `UserDefaults` key `tone3Sandhi`, absent is true); sent to every engine `build()` makes.
     private(set) var tone3On = true
     /// What `build()` sent to each engine it made, in order (test hook, like `fuzzySent`).
     private(set) var tone3Sent: [Bool] = []
@@ -1259,7 +1259,7 @@ public final class Shell {
         return engine?.setFuzzy(fuzzyFlags)
     }
 
-    /// The settings window's 三聲變調 switch (docs/spec/decoder.md §6.6): stored, and sent to the engine, which recomputes the composition (turned off, the
+    /// The settings window's 變調與口語讀音 switch (docs/spec/decoder.md §6.6): stored, and sent to the engine, which recomputes the composition (turned off, the
     /// syllables it accepted are stored as their third tone); the snapshot is for the caller to show.
     func setTone3(_ on: Bool) -> CoreResult? {
         tone3On = on
@@ -1539,7 +1539,7 @@ public final class Shell {
         if case .failed(let c) = e.setFuzzy(fuzzyFlags) {
             Log.shell.error("shanjie_engine_set_fuzzy failed, code \(c)")
         }
-        // And the 三聲變調 switch (docs/spec/decoder.md §6.6), every time.
+        // And the 變調與口語讀音 switch (docs/spec/decoder.md §6.6), every time.
         tone3Sent.append(tone3On)
         if case .failed(let c) = e.setTone3(tone3On) {
             Log.shell.error("shanjie_engine_set_tone3 failed, code \(c)")
@@ -2059,7 +2059,7 @@ public final class Session {
         }
     }
 
-    /// The settings window's 三聲變調 switch: the snapshot is shown, if this session owns the composition.
+    /// The settings window's 變調與口語讀音 switch: the snapshot is shown, if this session owns the composition.
     func applyTone3(_ on: Bool) {
         switch shell.setTone3(on) {
         case .ok(let o)? where shell.owner === self: apply(o)

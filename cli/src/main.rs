@@ -402,9 +402,11 @@ struct RowOut {
 /// to overwrite. A run with the file it wrote gives the picks and `top1_sha256` of a run without `--reading-table`. Both need the reading term (no `--no-reading-decode`).
 ///
 /// Third-tone sandhi (docs/spec/decoder.md §6.6) is on: each row's position table is `tone3::positions` over its syllables, the decoder reads the sandhi source and
-/// `path_readings` maps a sandhi word to its lexicon reading; the tag ends `+t3` after the reading marks (`+uc` too). `--no-tone3` (evaluation only) hands the switch off
+/// `path_readings` maps a sandhi word to its lexicon reading; the tag ends `+t3c` after the reading marks (`+uc` too). `--no-tone3` (evaluation only) hands the switch off
 /// to the table function and leaves the mark out: the output is byte for byte that of the tree before the feature. `--tone3-delta D` (evaluation only, D >= 0, not with
-/// `--no-tone3`) replaces `DELTA_TONE3`; off the default the mark is `+t3:dD`.
+/// `--no-tone3`) replaces `DELTA_TONE3`; off the default the mark is `+t3c:dD`.
+/// Colloquial sandhi (docs/spec/decoder.md §6.6, §8.7) rides the same switch, hence the `c` of the mark: the position table carries the neutral syllables too, and the
+/// `colloq` rows are read. `--neutral-delta D` (evaluation only, D >= 0, not with `--no-tone3`) replaces `DELTA_NEUTRAL`; off the default the mark gets `:nD`.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -444,9 +446,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut delta_given = false;
     let mut reading_decode = true;
-    // docs/spec/decoder.md §6.6: third-tone sandhi is on unless `--no-tone3`; the summary tag then ends `+t3` (`+t3:dD` with `--tone3-delta D`, evaluation only,
+    // docs/spec/decoder.md §6.6: third-tone sandhi is on unless `--no-tone3`; the summary tag then ends `+t3c` (`+t3c:dD` with `--tone3-delta D`, evaluation only,
     // not the default `tone3::DELTA_TONE3`).
     let (mut tone3, mut delta_t3, mut delta_t3_given) = (true, core::tone3::DELTA_TONE3, false);
+    // `--neutral-delta D` (evaluation only, D >= 0, not with `--no-tone3`): replaces `tone3::DELTA_NEUTRAL`, for the neutral source and the `colloq` rows alike.
+    let mut neutral_delta = None::<f64>;
     let (mut reading_table, mut dump_reading_table) = (None::<String>, None::<String>);
     // `--unseen-ceiling K` (evaluation only, `CappedLexicon::with_packs_ceil`): a generated overlay word the model never saw is scored at most
     // log10(K / N). The summary line gets `+uc:K`; without the option the output is unchanged.
@@ -525,6 +529,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 delta_t3 = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d >= 0.0).ok_or("--tone3-delta takes a number of at least 0")?;
                 delta_t3_given = true;
             }
+            "--neutral-delta" => neutral_delta = Some(val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d >= 0.0).ok_or("--neutral-delta takes a number of at least 0")?),
             "--reading-table" => reading_table = Some(val()?),
             "--unseen-ceiling" => unseen_ceil = Some(val()?.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0).ok_or("--unseen-ceiling takes a positive count")?),
             "--dump-reading-table" => dump_reading_table = Some(val()?),
@@ -568,6 +573,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if delta_t3_given && !tone3 {
         return Err("--tone3-delta cannot be combined with --no-tone3".into());
     }
+    if neutral_delta.is_some() && !tone3 {
+        return Err("--neutral-delta cannot be combined with --no-tone3".into());
+    }
+    // Before the lexicon is loaded: the `colloq` rows' scores move with it.
+    core::tone3::set_neutral_delta(neutral_delta);
     // The sound penalty only exists on a fuzzy-sound bit; without one the option would silently change nothing.
     if delta_given && fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND == 0 {
         return Err("--fuzzy-delta-sound needs --fuzzy with a sound bit (0-3)".into());
@@ -1079,10 +1089,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     // `--pool-mask-diff`: the number of rows it wrote, the last key of the summary (absent without the option).
     let md = if want_mask_diff { format!(", 'pool_mask_diff': {mask_diffs}") } else { String::new() };
+    // `+t3c`: third-tone and colloquial sandhi; `:dD` and `:nD` for a `DELTA_TONE3` and a `DELTA_NEUTRAL` that are not the defaults.
+    let n_tag = neutral_delta.filter(|d| *d != core::tone3::DELTA_NEUTRAL).map_or(String::new(), |d| format!(":n{d}"));
     let t3_tag = match (tone3, delta_t3 == core::tone3::DELTA_TONE3) {
         (false, _) => String::new(),
-        (true, true) => "+t3".to_string(),
-        (true, false) => format!("+t3:d{delta_t3}"),
+        (true, true) => format!("+t3c{n_tag}"),
+        (true, false) => format!("+t3c:d{delta_t3}{n_tag}"),
     };
     let rd_tag = format!("{rd_tag}{}{t3_tag}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });

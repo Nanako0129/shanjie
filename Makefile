@@ -48,6 +48,8 @@ test-python:
 	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
 	python3 -m unittest tools/test_build_sandhi.py
+	# docs/spec/decoder.md §8.7: the colloquial word lists; without SHANJIE_REVISED and the concised zip the real-dictionary test is skipped and says so.
+	python3 -W ignore -m unittest tools/test_colloq_words.py
 	python3 -W ignore -m unittest tools/test_build_probe.py
 	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
 	python3 -W ignore -m unittest tools/test_build_meme_pack.py

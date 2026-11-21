@@ -103,7 +103,7 @@ fn exempt_sha8() -> String {
 /// other rows, see the next test).
 #[test]
 fn every_setting_ends_its_tag_with_rd_and_rx() {
-    let want = format!("+rd+rx:{}+rm+rn+t3  {{'n': ", exempt_sha8());
+    let want = format!("+rd+rx:{}+rm+rn+t3c  {{'n': ", exempt_sha8());
     for (profile, tinylm, set, _n, _top1, _o64, sha) in BEFORE {
         let rows = format!("eval/bench/suite-v1/{set}.txt");
         let o = run(&args(profile, tinylm, &rows));
@@ -209,7 +209,7 @@ fn a_reading_table_of_the_built_in_values_changes_nothing() {
             (text(&o.stdout), std::fs::read(d).unwrap(), std::fs::read(r).unwrap())
         };
         let (off, on) = (go(false), go(true));
-        assert!(!off.0.contains("+rt") && on.0.contains(&format!("+rd+rx:{}+rm+rn+rt:{sha8}+t3  {{", exempt_sha8())), "{}", on.0);
+        assert!(!off.0.contains("+rt") && on.0.contains(&format!("+rd+rx:{}+rm+rn+rt:{sha8}+t3c  {{", exempt_sha8())), "{}", on.0);
         assert_eq!(on.0.replace(&format!("+rt:{sha8}"), ""), off.0, "{profile} {tinylm} {set}: summary");
         assert!(on.1 == off.1 && on.2 == off.2, "{profile} {tinylm} {set}: dump / rowstats");
     }
