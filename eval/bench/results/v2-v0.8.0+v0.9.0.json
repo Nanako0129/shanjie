@@ -1,0 +1,708 @@
+{
+ "label": "v0.8.0+v0.9.0",
+ "suite": "v2",
+ "date": "2026-11-21",
+ "variants_sha256": "50cb44bd0f1fa33c48624bc0185d03d4e87e99107bc15971d638528bcf69cdb3",
+ "sets": {
+  "dev302": {
+   "sha256": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+   "private": false
+  },
+  "typing76": {
+   "sha256": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+   "private": false
+  },
+  "probe": {
+   "sha256": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+   "private": false
+  },
+  "user-reported": {
+   "sha256": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a",
+   "private": false
+  },
+  "fw": {
+   "sha256": "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d",
+   "private": false
+  },
+  "cvtune": {
+   "sha256": "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51",
+   "private": false
+  },
+  "wikitune": {
+   "sha256": "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2",
+   "private": false
+  },
+  "lytune": {
+   "sha256": "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96",
+   "private": false
+  },
+  "wikitypo": {
+   "sha256": "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47",
+   "private": false
+  },
+  "discordtune": {
+   "sha256": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775",
+   "private": true
+  }
+ },
+ "versions": [
+  {
+   "ref": "v0.8.0",
+   "version": "v0.8.0",
+   "sha": "5409c526bfdb0731b4df5432c5bd7f0d01a5eb86",
+   "lexicon_sha256": "e86628ba17f3c2f69c93edb232b27c1753c6da272400520ab52d981713c3c225",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "tinylm.sjtl": "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4"
+   },
+   "flags": [
+    "--context",
+    "--packs",
+    "acg,it,meme,beauty",
+    "--tinylm",
+    "<file>",
+    "--colloquial-core",
+    "<file>"
+   ],
+   "tag": "+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm",
+   "formal_tag": "+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm",
+   "fingerprints": {
+    "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+    "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+    "probe": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+    "user-reported": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a",
+    "fw": "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d",
+    "cvtune": "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51",
+    "wikitune": "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2",
+    "lytune": "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96",
+    "wikitypo": "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47",
+    "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775"
+   },
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "top1": 282,
+     "oracle64": 300,
+     "top1_sha256": "116dba4d30038c4e1bdf39d5571df1fa0552e6ad08aac36010438fd515e397b6",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "dev302/formal": {
+     "n": 302,
+     "top1": 280,
+     "oracle64": 300,
+     "top1_sha256": "c45111c843f5ab0ee085217e36cc9b005c16bc37da1a511151e4733d4e7ff003",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "typing76/chat": {
+     "n": 76,
+     "top1": 74,
+     "oracle64": 75,
+     "top1_sha256": "18cc1a1c71f6096a1383168226abdd8539043a3b30739adb679e749c455defd2",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "typing76/formal": {
+     "n": 76,
+     "top1": 74,
+     "oracle64": 75,
+     "top1_sha256": "c6f729c37ffc6096151ab4acdbfd8f55457b6045cb5ea9e8186da7ba57dc8e9d",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "probe/chat": {
+     "n": 83,
+     "top1": 79,
+     "oracle64": 82,
+     "top1_sha256": "def5e5a1f2430491bab996b4de601c9d32c080e70b52a5ff6e1acd2c6311da50",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "probe/formal": {
+     "n": 83,
+     "top1": 78,
+     "oracle64": 82,
+     "top1_sha256": "d87f0a0da8815f130eac9928a587cfbb4b995c5edcb75af7d51054c2c2b80cf9",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "top1": 70,
+     "oracle64": 78,
+     "top1_sha256": "c7fd93b1589c526b8416daafc3f9fac93d95217051936f45671d4ec5f17fe8e6",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "top1": 69,
+     "oracle64": 78,
+     "top1_sha256": "a1405df170d4d9888140e878b66480b82c0383d53bc039298d04f873e0a086f0",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "fw/chat": {
+     "n": 186,
+     "top1": 178,
+     "oracle64": 186,
+     "top1_sha256": "2d9fe344e1e8ee775b786e059e6e398ddc6676d80e128ca97cef5d953afd4440",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "fw/formal": {
+     "n": 186,
+     "top1": 176,
+     "oracle64": 186,
+     "top1_sha256": "e13c912fb839d72c830f744a491ad5677001420768f974cbbcd995c72ad81ddf",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "cvtune/chat": {
+     "n": 3791,
+     "top1": 3536,
+     "oracle64": 3774,
+     "top1_sha256": "dcc3ecdd3fef39ec147290c610846333b8880d52d86ae373e9a1b8f3e80faaad",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "cvtune/formal": {
+     "n": 3791,
+     "top1": 3564,
+     "oracle64": 3774,
+     "top1_sha256": "a058c8155bdcc439a7e536b0c362fe4d96e610e5b2a070c877d1bcfbfa32f964",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "wikitune/chat": {
+     "n": 2827,
+     "top1": 2186,
+     "oracle64": 2671,
+     "top1_sha256": "d0f15da2329502043f5ea10d262d32c75b86adc1c7515f2648bb5f498c683121",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "wikitune/formal": {
+     "n": 2827,
+     "top1": 2303,
+     "oracle64": 2708,
+     "top1_sha256": "6a94bcd9344b12ca69c675cdf445663e0a7e81daad927c259550b067bf75dcb6",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "lytune/chat": {
+     "n": 4811,
+     "top1": 4408,
+     "oracle64": 4801,
+     "top1_sha256": "581bd0ad25a175788127e8e4186a1799d2d1a59ac5e0f21213df543bad699360",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "lytune/formal": {
+     "n": 4811,
+     "top1": 4414,
+     "oracle64": 4803,
+     "top1_sha256": "3c94401df743e864630b42a2d7fcec28cec7e8db21e3de60379775169d18a8fa",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "wikitypo/chat": {
+     "n": 155,
+     "top1": 134,
+     "oracle64": 151,
+     "top1_sha256": "5c2170c2bd9c6338600435b413f27039ec2c72380bc8db7bef65015843b909bd",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "wikitypo/formal": {
+     "n": 155,
+     "top1": 131,
+     "oracle64": 153,
+     "top1_sha256": "2be6342f3661b16c21ab3893688261731799661c7404ac1cea3e2ea863af3143",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    },
+    "discordtune/chat": {
+     "n": 4958,
+     "top1": 4667,
+     "oracle64": 4948,
+     "top1_sha256": "e47ba9c2819ec9ffa186adf312255b4f7cc862d56caebd7788966722e97de1cc",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm"
+    },
+    "discordtune/formal": {
+     "n": 4958,
+     "top1": 4649,
+     "oracle64": 4948,
+     "top1_sha256": "dfaad5a80333e0bb994c9a45bface80e2535f83e1e0c9e382a63ebb0e533783b",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm"
+    }
+   },
+   "speed": {
+    "rows_match": "302/302",
+    "keys": 8336,
+    "rounds": 3,
+    "p95_us": 2282.9,
+    "max_us": 10799.3,
+    "load_ms": 1042.4,
+    "rss_mb": 490.296875,
+    "formal": {
+     "rows_match": "302/302",
+     "keys": 8336,
+     "rounds": 3,
+     "p95_us": 2416.3,
+     "max_us": 8593.8,
+     "load_ms": 1059.9,
+     "rss_mb": 489.0625
+    },
+    "speed_rounds": {
+     "chat": [
+      {
+       "p95_us": 2282.9,
+       "max_us": 10799.3,
+       "load_ms": 1081.4,
+       "rss_mb": 490.296875
+      },
+      {
+       "p95_us": 2349.2,
+       "max_us": 9199.2,
+       "load_ms": 926.2,
+       "rss_mb": 489.484375
+      },
+      {
+       "p95_us": 2234.3,
+       "max_us": 8526.5,
+       "load_ms": 1042.4,
+       "rss_mb": 489.1875
+      }
+     ],
+     "formal": [
+      {
+       "p95_us": 2324.9,
+       "max_us": 8509.2,
+       "load_ms": 1127.9,
+       "rss_mb": 488.015625
+      },
+      {
+       "p95_us": 2459.9,
+       "max_us": 8458.3,
+       "load_ms": 1034.8,
+       "rss_mb": 489.0625
+      },
+      {
+       "p95_us": 2416.3,
+       "max_us": 8593.8,
+       "load_ms": 1059.9,
+       "rss_mb": 488.828125
+      }
+     ],
+     "rerank_ms": [
+      {
+       "p50": 5.951,
+       "p95": 9.941
+      },
+      {
+       "p50": 5.911,
+       "p95": 7.494
+      },
+      {
+       "p50": 5.953,
+       "p95": 8.284
+      }
+     ]
+    },
+    "rerank_p50_ms": 5.951,
+    "rerank_p95_ms": 8.284
+   },
+   "holdout": {
+    "commit": "5409c526bfdb0731b4df5432c5bd7f0d01a5eb86",
+    "chat": {
+     "n": 150,
+     "top1": 132,
+     "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e"
+    },
+    "formal": {
+     "n": 150,
+     "top1": 127,
+     "rows_sha256": "637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38"
+    }
+   }
+  },
+  {
+   "ref": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+   "version": "v0.9.0",
+   "sha": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+   "lexicon_sha256": "2628ac5bcde6b0f464b1ce94d560e00e09f22bb0b569ed4929a1cab4c772dd31",
+   "models": {
+    "bigram.sjlm": "e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a",
+    "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
+    "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
+    "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb",
+    "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
+    "tinylm.sjtl": "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de",
+    "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4"
+   },
+   "flags": [
+    "--context",
+    "--packs",
+    "acg,it,meme,beauty",
+    "--tinylm",
+    "<file>",
+    "--colloquial-core",
+    "<file>"
+   ],
+   "tag": "+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3",
+   "formal_tag": "+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3",
+   "fingerprints": {
+    "dev302": "603850e444efee38b8c121e3d666d6c540acd3a27d5a6a5070a78a962dd98456",
+    "typing76": "c061f66dfade21996803137320aa986a81a3e72e3e4e1dd559abd5dc04b68d08",
+    "probe": "75aac33877ddd7907cdd6789c6da6a0f3b7c775c8c6dfa6c752a5f3e87ab6801",
+    "user-reported": "9fd08e50f13eccea94a76faf5260e7edcf49826bd3dcf7ba4e2cf6de17bcce9a",
+    "fw": "6b853a329aee569ad51c731d6f188541b9670e9617838725f45a26d57845d18d",
+    "cvtune": "31de456d66ece98eb5d00154a31c3f7e9c9b38240690f7f76203485ca82acc51",
+    "wikitune": "8dcfe40c74cce73e0a070b49e166636580ef955da8555ea9ffbd65af20c998f2",
+    "lytune": "0e0fdbed0728a4c3b359995beb03040c6834eb091e4028c9dc1ec104b6eeca96",
+    "wikitypo": "50f4ceb89b6a3d021c0fe273e8512c7b0af7d20f6ffd5c2f145a7c3a251a2d47",
+    "discordtune": "77e1c90a507fa7e6085c3fca7d377abfd527a5146f43f8c4388e72342627a775"
+   },
+   "accuracy": {
+    "dev302/chat": {
+     "n": 302,
+     "top1": 282,
+     "oracle64": 300,
+     "top1_sha256": "116dba4d30038c4e1bdf39d5571df1fa0552e6ad08aac36010438fd515e397b6",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "dev302/formal": {
+     "n": 302,
+     "top1": 280,
+     "oracle64": 300,
+     "top1_sha256": "c45111c843f5ab0ee085217e36cc9b005c16bc37da1a511151e4733d4e7ff003",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "typing76/chat": {
+     "n": 76,
+     "top1": 74,
+     "oracle64": 75,
+     "top1_sha256": "18cc1a1c71f6096a1383168226abdd8539043a3b30739adb679e749c455defd2",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "typing76/formal": {
+     "n": 76,
+     "top1": 74,
+     "oracle64": 75,
+     "top1_sha256": "c6f729c37ffc6096151ab4acdbfd8f55457b6045cb5ea9e8186da7ba57dc8e9d",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "probe/chat": {
+     "n": 83,
+     "top1": 79,
+     "oracle64": 82,
+     "top1_sha256": "def5e5a1f2430491bab996b4de601c9d32c080e70b52a5ff6e1acd2c6311da50",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "probe/formal": {
+     "n": 83,
+     "top1": 78,
+     "oracle64": 82,
+     "top1_sha256": "d87f0a0da8815f130eac9928a587cfbb4b995c5edcb75af7d51054c2c2b80cf9",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "user-reported/chat": {
+     "n": 80,
+     "top1": 70,
+     "oracle64": 78,
+     "top1_sha256": "c7fd93b1589c526b8416daafc3f9fac93d95217051936f45671d4ec5f17fe8e6",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "user-reported/formal": {
+     "n": 80,
+     "top1": 69,
+     "oracle64": 78,
+     "top1_sha256": "a1405df170d4d9888140e878b66480b82c0383d53bc039298d04f873e0a086f0",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "fw/chat": {
+     "n": 186,
+     "top1": 178,
+     "oracle64": 186,
+     "top1_sha256": "2d9fe344e1e8ee775b786e059e6e398ddc6676d80e128ca97cef5d953afd4440",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "fw/formal": {
+     "n": 186,
+     "top1": 176,
+     "oracle64": 186,
+     "top1_sha256": "e13c912fb839d72c830f744a491ad5677001420768f974cbbcd995c72ad81ddf",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "cvtune/chat": {
+     "n": 3791,
+     "top1": 3536,
+     "oracle64": 3774,
+     "top1_sha256": "dcc3ecdd3fef39ec147290c610846333b8880d52d86ae373e9a1b8f3e80faaad",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "cvtune/formal": {
+     "n": 3791,
+     "top1": 3564,
+     "oracle64": 3774,
+     "top1_sha256": "a058c8155bdcc439a7e536b0c362fe4d96e610e5b2a070c877d1bcfbfa32f964",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "wikitune/chat": {
+     "n": 2827,
+     "top1": 2185,
+     "oracle64": 2671,
+     "top1_sha256": "5ab6beec34dd5bd453606ce162875423bf41e84deb822f0bea46c0246336bcb0",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "wikitune/formal": {
+     "n": 2827,
+     "top1": 2302,
+     "oracle64": 2708,
+     "top1_sha256": "7c92d1cbb5d4d231ebf0aecfbbb46dc57a87d582149d69a9f7151641e4dfd13a",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "lytune/chat": {
+     "n": 4811,
+     "top1": 4408,
+     "oracle64": 4801,
+     "top1_sha256": "581bd0ad25a175788127e8e4186a1799d2d1a59ac5e0f21213df543bad699360",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "lytune/formal": {
+     "n": 4811,
+     "top1": 4414,
+     "oracle64": 4803,
+     "top1_sha256": "3c94401df743e864630b42a2d7fcec28cec7e8db21e3de60379775169d18a8fa",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "wikitypo/chat": {
+     "n": 155,
+     "top1": 134,
+     "oracle64": 150,
+     "top1_sha256": "5c2170c2bd9c6338600435b413f27039ec2c72380bc8db7bef65015843b909bd",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "wikitypo/formal": {
+     "n": 155,
+     "top1": 131,
+     "oracle64": 152,
+     "top1_sha256": "2be6342f3661b16c21ab3893688261731799661c7404ac1cea3e2ea863af3143",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "discordtune/chat": {
+     "n": 4958,
+     "top1": 4663,
+     "oracle64": 4948,
+     "top1_sha256": "783fcc5bbcc7b33cbe19316ff4a170c1222db5215ca7afc117c598cf5557930d",
+     "tag": "lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:356a37be+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3"
+    },
+    "discordtune/formal": {
+     "n": 4958,
+     "top1": 4647,
+     "oracle64": 4948,
+     "top1_sha256": "4063874d6b8f2672dc732bd17d0bcb8449ed3df72efbee7414f70db463748660",
+     "tag": "lm-formal+ctx+recur+pr+kn:880ee87c:θ1:β0.75+tl:356a37be+acg+it+meme+beauty+tri:34305a2d+rd+rx:d96f1e8f+rm+rn+t3"
+    }
+   },
+   "vs": "v0.8.0",
+   "vs_prev": {
+    "dev302/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "dev302/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "typing76/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "typing76/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "probe/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "probe/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "user-reported/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "user-reported/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "fw/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "fw/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "cvtune/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "cvtune/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "wikitune/chat": {
+     "fixed": 0,
+     "broken": 1,
+     "p": 1.0
+    },
+    "wikitune/formal": {
+     "fixed": 0,
+     "broken": 1,
+     "p": 1.0
+    },
+    "lytune/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "lytune/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "wikitypo/chat": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "wikitypo/formal": {
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0
+    },
+    "discordtune/chat": {
+     "fixed": 0,
+     "broken": 4,
+     "p": 0.125
+    },
+    "discordtune/formal": {
+     "fixed": 0,
+     "broken": 2,
+     "p": 0.5
+    }
+   },
+   "speed": {
+    "rows_match": "302/302",
+    "keys": 8336,
+    "rounds": 3,
+    "p95_us": 2342.4,
+    "max_us": 9920.5,
+    "load_ms": 956.8,
+    "rss_mb": 495.78125,
+    "formal": {
+     "rows_match": "302/302",
+     "keys": 8336,
+     "rounds": 3,
+     "p95_us": 2253.3,
+     "max_us": 8956.2,
+     "load_ms": 965.7,
+     "rss_mb": 495.453125
+    },
+    "speed_rounds": {
+     "chat": [
+      {
+       "p95_us": 2342.4,
+       "max_us": 7199.5,
+       "load_ms": 1077.4,
+       "rss_mb": 495.78125
+      },
+      {
+       "p95_us": 2174.2,
+       "max_us": 7573.2,
+       "load_ms": 899.4,
+       "rss_mb": 495.65625
+      },
+      {
+       "p95_us": 2350.7,
+       "max_us": 9920.5,
+       "load_ms": 956.8,
+       "rss_mb": 495.125
+      }
+     ],
+     "formal": [
+      {
+       "p95_us": 2451.8,
+       "max_us": 7972.7,
+       "load_ms": 922.1,
+       "rss_mb": 495.453125
+      },
+      {
+       "p95_us": 2253.3,
+       "max_us": 8956.2,
+       "load_ms": 965.7,
+       "rss_mb": 495.21875
+      },
+      {
+       "p95_us": 2228.1,
+       "max_us": 8214.2,
+       "load_ms": 1064.3,
+       "rss_mb": 494.703125
+      }
+     ],
+     "rerank_ms": [
+      {
+       "p50": 5.947,
+       "p95": 9.076
+      },
+      {
+       "p50": 6.095,
+       "p95": 9.601
+      },
+      {
+       "p50": 5.815,
+       "p95": 7.796
+      }
+     ]
+    },
+    "rerank_p50_ms": 5.947,
+    "rerank_p95_ms": 9.076
+   },
+   "holdout": {
+    "commit": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+    "chat": {
+     "n": 150,
+     "top1": 132,
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0,
+     "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e"
+    },
+    "formal": {
+     "n": 150,
+     "top1": 127,
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0,
+     "rows_sha256": "637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38"
+    }
+   }
+  }
+ ],
+ "env": {
+  "machine": "Mac18,1",
+  "macos": "27.0",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Homebrew)",
+  "load_avg_start": 1.97900390625,
+  "load_avg_end": 2.92529296875,
+  "speed_load_before": 4.19287109375,
+  "speed_tm_before": false,
+  "speed_load_after": 2.92529296875,
+  "speed_tm_after": false
+ }
+}
