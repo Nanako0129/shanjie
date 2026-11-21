@@ -1,7 +1,7 @@
 //! Startup and the pipe server of the resident host (docs/spec/windows-tip.md §5.2, §5.4, §5.5, §5.6 and §5.8).
 //!
 //! - `run`: the self-check (exactly Medium, no AppContainer, not restricted, not elevated, not session 0, not a service account, no
-//!   package identity), `SetDefaultDllDirectories(SYSTEM32)`, the WER exclusion, then all pipe instances, then the model. Any failure
+//!   package identity), `SetDefaultDllDirectories(SYSTEM32)`, with `--logon` the profile check (`profile_enabled`), the WER exclusion, then all pipe instances, then the model. Any failure
 //!   ends the process with a numeric exit code; the next client that may start a host starts a new one.
 //! - All `INSTANCES` instances are created at start (the first with `FILE_FLAG_FIRST_PIPE_INSTANCE`: a name someone else holds ends
 //!   this process) and reused forever; each has its own thread, and each connection runs inside `guard::run`.
@@ -13,8 +13,10 @@
 use crate::engine::{self, Answer, Owner};
 use crate::guard;
 use crate::pipeio::{self, Pipe};
+use crate::startup::{self, Launch};
 use crate::timing;
 use crate::token::{self, Facts};
+use shanjie_win_proto::ids::IDS;
 use shanjie_win_proto::{self as proto, Accept, ClientMsg, HostSession, ServerMsg};
 use std::collections::BTreeMap;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -22,11 +24,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
-use windows::core::{w, PCWSTR};
+use windows::core::{w, GUID, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, LocalFree, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, HANDLE, HLOCAL, INVALID_HANDLE_VALUE};
 use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
 use windows::Win32::Security::{RevertToSelf, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY};
 use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
 use windows::Win32::System::ErrorReporting::WerAddExcludedApplication;
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_SYSTEM32};
@@ -36,6 +39,7 @@ use windows::Win32::System::Pipes::{
 };
 use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken, ResetEvent, WaitForSingleObject, INFINITE};
+use windows::Win32::UI::TextServices::{CLSID_TF_InputProcessorProfiles, ITfInputProcessorProfiles};
 
 /// §5.2: N, checked against the high mark of event 65 in the VM run.
 pub const INSTANCES: u32 = 64;
@@ -55,6 +59,10 @@ pub const EXIT_PIPE: i32 = 4;
 pub const EXIT_LOAD: i32 = 5;
 pub const EXIT_POISONED: i32 = 6;
 pub const EXIT_REVERT: i32 = 7;
+/// `--logon` and this build's profile is not enabled for the user (or the question could not be asked): no model, no pipe.
+pub const EXIT_NOT_ENABLED: i32 = 8;
+/// The language of the profile (zh-TW).
+const LANGID_ZH_TW: u16 = 0x0404;
 
 pub fn exit(code: i32) -> ! {
     std::process::exit(code)
@@ -96,7 +104,7 @@ fn self_check(f: &Facts) -> bool {
     f.integrity == token::MEDIUM_RID && f.app_container.is_none() && !f.restricted && !f.elevated && f.session != 0 && !token::is_service_account(&f.user) && !token::has_package()
 }
 
-/// `HKCU\Software\shanjie-dev\KeyScheme` (a DWORD): the key scheme this host gives the core, and where it came from (event 71): 0 no value, 1 a valid
+/// `HKCU\<this build's settings key>\KeyScheme` (a DWORD; `Software\shanjie-dev` or `Software\Shanjie`, `startup::settings_subkey`): the key scheme this host gives the core, and where it came from (event 71): 0 no value, 1 a valid
 /// value (0 or 1), 2 an invalid one. A missing value is 1 (the Windows default follows Microsoft Zhuyin); so is every other error (a value of another type,
 /// `ERROR_MORE_DATA`) and every DWORD other than 0 or 1: the host never passes the core a value it refuses (that would end the process). Only a process of this
 /// user at Medium integrity or above can write the value, and such a process can already influence this host (docs/spec/windows-tip.md §5.5).
@@ -114,11 +122,12 @@ pub fn key_scheme_from(rc: u32, data: u32) -> (u32, u64) {
 fn read_key_scheme() -> (u32, u64) {
     let mut data = 0u32;
     let mut size = std::mem::size_of::<u32>() as u32;
-    // SAFETY: `data` and `size` are live locals sized for one DWORD; the strings are NUL-terminated literals. `RRF_RT_REG_DWORD` refuses any other type.
+    let subkey: Vec<u16> = startup::settings_subkey().encode_utf16().chain([0]).collect();
+    // SAFETY: `data` and `size` are live locals sized for one DWORD; the strings are NUL-terminated. `RRF_RT_REG_DWORD` refuses any other type.
     let rc = unsafe {
         RegGetValueW(
             HKEY_CURRENT_USER,
-            w!(r"Software\shanjie-dev"),
+            PCWSTR(subkey.as_ptr()),
             w!("KeyScheme"),
             RRF_RT_REG_DWORD,
             None,
@@ -129,11 +138,31 @@ fn read_key_scheme() -> (u32, u64) {
     key_scheme_from(rc.0, data)
 }
 
-pub fn run() -> ! {
+/// The `--logon` question: is this build's profile (CLSID, zh-TW, profile GUID) enabled for the user? Any failure, COM initialisation included,
+/// is "no". COM lives on this thread only for the question.
+fn profile_enabled() -> bool {
+    // SAFETY: plain COM calls with live arguments; `CoUninitialize` pairs the successful `CoInitializeEx` (S_FALSE, already initialised, counts too).
+    unsafe {
+        if CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_err() {
+            return false;
+        }
+        let (clsid, profile) = (GUID::from_u128(IDS.clsid), GUID::from_u128(IDS.profile));
+        let profiles: windows::core::Result<ITfInputProcessorProfiles> = CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER);
+        let answer = profiles.and_then(|p| p.IsEnabledLanguageProfile(&clsid, LANGID_ZH_TW, &profile)).is_ok_and(|b| b.as_bool());
+        CoUninitialize();
+        answer
+    }
+}
+
+pub fn run(launch: Launch) -> ! {
     guard::install_hook();
     let me = token::process_facts().filter(self_check).unwrap_or_else(|| exit(EXIT_SELF_CHECK));
     // SAFETY: plain calls with live arguments.
     unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) }.unwrap_or_else(|_| exit(EXIT_SETUP));
+    // A logon start (the installer's Run value) is only for a user who has the profile: it loads no model and opens no pipe otherwise.
+    if launch == Launch::Logon && !profile_enabled() {
+        exit(EXIT_NOT_ENABLED);
+    }
     let exe = exe_path().unwrap_or_else(|| exit(EXIT_SETUP));
     // A dump of this process would hold every app's composition: WER leaves it out (HKCU, no administrator needed), named by the
     // executable's file name. Failing to exclude ends the process (no host is better than dumps with compositions).
