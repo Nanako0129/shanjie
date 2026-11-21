@@ -481,3 +481,48 @@ fn a_declared_left_length_keys_cli_rows_like_the_engine() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// docs/spec/semantic-rerank.md §5.2 (sep-longkey): with `--context` the CLI keys a boundary-format model (SJTL0006) with `TinyLm::key_for_len`
+/// of the row's context and the longest candidate of the row's pool, the one function the engine calls, and the summary line says `+sep:K`
+/// (only for such a model).
+#[test]
+fn a_boundary_model_keys_cli_rows_with_key_for_len() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("v6", Path::new(&lm));
+    let v5file = dir.join("m5.sjtl");
+    std::fs::write(&v5file, upgraded(&std::fs::read(&sjtl).unwrap(), Some(8))).unwrap();
+    let mut b = std::fs::read(root().join("eval/golden/tinylm-tiny/tiny-int8-v6.sjtl")).unwrap();
+    b[HASH_AT..HASH_AT + 32].copy_from_slice(&sha_bytes(Path::new(&lm)));
+    b[212..244].fill(0); // tuned without a side file (the CLI loads none here)
+    let v6file = dir.join("m6.sjtl");
+    std::fs::write(&v6file, b).unwrap();
+    let rows = dir.join("rows.txt");
+    let ctxs = ["昨天我們去看了Joe的表演，", "我們都說，你好嗎？他說：", "", "我們"];
+    std::fs::write(&rows, ctxs.iter().map(|c| format!("{c}|你好嗎|ㄋㄧˇ ㄏㄠˇ ㄇㄚ˙\n")).collect::<String>()).unwrap();
+    let dump = dir.join("ctx.dump");
+    let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--context", "--dump", dump.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let dump = std::fs::read_to_string(&dump).unwrap();
+    let cands = |row: &str| -> Vec<String> {
+        dump.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); (f[0] == row && f[1].parse::<usize>().unwrap() <= 8).then(|| f[2].to_string()) }).collect()
+    };
+    let out = dir.join("s.jsonl");
+    let o = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--context", "--tinylm", v6file.to_str().unwrap(),
+        "--tinylm-scores", out.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(text(&o.stdout).contains("+sep:4"), "{}", text(&o.stdout));
+    let o5 = run(&["--lm", &lm, "--profile", "chat", "--rows", rows.to_str().unwrap(), "--context", "--tinylm", v5file.to_str().unwrap()]);
+    assert!(o5.status.success() && !text(&o5.stdout).contains("+sep:"), "{}", text(&o5.stdout));
+    let model = core::tinylm::TinyLm::load(&v6file).unwrap();
+    assert_eq!(model.boundary_k(), Some(4));
+    let mut sep_rows = 0;
+    for (i, line) in std::fs::read_to_string(&out).unwrap().lines().enumerate() {
+        let c = cands(&(i + 1).to_string());
+        let key = model.key_for_len(ctxs[i], c.iter().map(|s| s.chars().count()).max().unwrap());
+        sep_rows += key.contains('\0') as usize;
+        let want = model.ll_many(&c.iter().map(|c| (key.as_str(), c.as_str())).collect::<Vec<_>>()).unwrap();
+        assert_eq!(list_of(line, "ll"), want, "row {}", i + 1);
+    }
+    assert!(sep_rows >= 1, "the rows must reach a key with [SEP]");
+    std::fs::remove_dir_all(dir).unwrap();
+}

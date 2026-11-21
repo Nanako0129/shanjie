@@ -817,7 +817,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             // context key for versions 1 to 4 (its SENTINEL is the empty k, in TinyLm::rerank), the last L characters as they are for
             // a model declaring L (docs/spec/semantic-rerank.md §5.2); without --context, no key.
             let t0 = Instant::now();
-            let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
+            let key = if ctx_mode { tl.key_for_len(ctx, top0.iter().take(TOPK).map(|c| c.chars().count()).max().unwrap_or(0)) } else { String::new() };
             let key = key.as_str();
             // The manual mask, once, in the decoder's order with its first path as the base (the engine's `Stretch::masked`; docs/spec/decoder.md §7):
             // `manual_mask` matches the manual words against the readings that path used.
@@ -1086,7 +1086,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     };
     let rd_tag = format!("{rd_tag}{}{t3_tag}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("{}colloq:{}{}", if colloq_off { "-" } else { "+" }, &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(m, _, sha8)| format!("+tl:{sha8}{}", m.boundary_k().map_or(String::new(), |k| format!("+sep:{k}")))), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("{}colloq:{}{}", if colloq_off { "-" } else { "+" }, &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())
 }
 
