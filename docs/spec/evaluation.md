@@ -517,6 +517,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 ### 7.11 網站資料 `site/data/bench.json`
 
 - `tools/bench.py table [--md FILE]` 一次讀入所有結果檔，寫 `site/data/bench.json` 與完整表：兩個檔從同一份資料產生，工具不另外讀第二次。完整表含私人集合的欄，寫到 `--md FILE`，沒給時寫 `$SHANJIE_TABLES/benchmark.md`，兩者都沒有時不寫（stderr 說明）；路徑解析後在公開 repo 裡就在寫任何檔之前以 1 結束。`json.dumps(…, ensure_ascii=False, indent=1, sort_keys=True)` 加結尾換行，同樣的輸入兩次輸出逐位元組相同。
+- `eval/bench/external/*.md` 是手寫的章節（例如「和 0c 選字模型 v2 比」）：`table` 把它們照檔名順序原樣接在完整表的最後，不進 `site/data/bench.json`。每個檔從 `###` 標題開始，一個標題底下一張表；網站 /benchmark 上對應的表是寫在頁面裡的靜態表，用 `data-md` 指到這裡的標題路徑，和其他表一樣由網站數字核對逐格比。
 - **只放公開集合**：dev302、typing76（打字測驗）、probe、fw、錯字回報（`user-reported`）兩種設定的格，保留集口語半邊（`holdout_chat`，不寫新聞半邊），速度與記憶體，實打對照（`local_only` 以外的組），外部模型對照（`eval/bench/external/*.json`）裡這幾個公開集合的列。名單寫在 `tools/bench.py` 的 `PUBLIC_SETS`、`PUBLIC_EXTERNAL_SETS`，用名稱挑，所以之後新增的集合在列進名單之前不會出現；私人集合與調參集的鍵一個都不寫。失敗的格寫 `{"failed": true}`，沒量的格寫 `{"missing": true}`，都不帶錯誤文字。`holdout_chat` 取結果檔 `holdout.chat` 的那一塊：2026-10-29 以前量的列（沒有 `rows_sha256`，n 227 或 300）是當時的保留集，不是現在的口語半邊；網站要分開呈現時看 `rows_sha256`。
 - 頂層鍵：
   - `suite_v1`：陣列，每個結果檔的每一版一列（`results/*.json` 排序後的順序）。

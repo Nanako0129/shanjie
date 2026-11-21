@@ -874,7 +874,11 @@ def cmd_table(a):
     ref, static = load(os.path.join(RESULTS, REFERENCE)), load(STATIC)
     write_json(os.path.join(ROOT, "site/data/bench.json"), site_bench(results, ref, static, v2, ext))
     if md:
-        write_md(md, render_table(results, ref, static) + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else ""))
+        # eval/bench/external/*.md: hand-written sections whose tables the site carries as static HTML (the 0c v2 comparison). Appended as
+        # they are, so each starts at `###` and sits under the external chapter; the site check compares the page tables with them.
+        notes = "".join("\n" + open(os.path.join(EXTERNAL, f), encoding="utf-8").read() for f in sorted(os.listdir(EXTERNAL)) if f.endswith(".md")) \
+            if os.path.isdir(EXTERNAL) else ""
+        write_md(md, render_table(results, ref, static) + (render_v2(v2) if v2 else "") + (render_external(ext) if ext else "") + notes)
 
 
 # ---------- suite v2 (docs/spec/evaluation.md §7): each version with its shipped settings ----------
