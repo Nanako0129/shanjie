@@ -76,7 +76,7 @@
 - 必須在 release 與 macOS 上跑的原因：
   - 重播測試的逐鍵 p95 < 16 ms 斷言只有 release 才有意義；
   - 兩個 f64 golden（`core/tests/engine_digits.rs` 的 `row49_scores_match_the_python_golden_bit_for_bit`、`predict_digits_matches_the_python_golden_bit_for_bit`）在 Linux 的 libm 末位不同，只有 macOS 實際比對；
-  - 小模型在 macOS 走 Accelerate，在 Linux 走純 Rust 矩陣乘法。
+  - 小模型在 macOS 走 Accelerate，在 Linux 走可攜路徑（純 Rust，x86-64 上依執行期偵測用 AVX2 或 AVX-512F；`docs/spec/semantic-rerank.md` §2.4）。
 
 ### 3.2 `debug`（Linux）
 
@@ -96,7 +96,7 @@
   5. 核心也為 `i686-pc-windows-msvc`、`aarch64-pc-windows-msvc` 編譯（只建置，不跑測試）；
   6. `shanjie-tip`（Windows 文字服務 DLL）與 `shanjie-host`（常駐程序）以 release 建置，各帶與不帶 `timing` 功能一次；核對兩者都沒有 C 執行階段的匯入、DLL 沒有 `shanjie_` 匯出也不相依核心；再跑 `shanjie-win-proto`、`shanjie-tip`、`shanjie-host` 的測試（`docs/spec/windows-tip.md` §5.10）。
 - 比對在另一個 job `rowstats`（ubuntu-24.04，逾時 5 分，不 checkout）：`needs: [changes, debug, windows]`，下載兩邊的 artifact，逐檔 `cmp`，兩邊都必須剛好 6 份。拆成自己的 job，是為了讓 `windows` 不必等 `debug` 跑完才開始（以前最長的一條是 `debug` 加 `windows`）。`debug` 與 `windows` 都成功時它一定會跑；其中一個失敗時它被略過，但整個 run 照樣是 failure，所以比對只會跟著 `changes` 判定整趟不跑而略過。
-- `core/tests/engine_cap.rs` 在另一個 job `windows-cap`（windows-2025，逾時 30 分，`needs: changes`，略過條件與 `core` 相同）用 release 跑，與 `windows` 並行。它沒有逐鍵 p95 的測試。拆出來的理由：Windows 沒有 Accelerate，小模型的重排走純 Rust，而這個檔每個測試打 70–128 個音節、每一鍵都重排，在三次 run 裡占了 `windows` 核心測試時間的 33–52%（302／589／463 秒；同一個檔在 macOS 是 56–83 秒），runner 的快慢差也主要出在它。
+- `core/tests/engine_cap.rs` 在另一個 job `windows-cap`（windows-2025，逾時 30 分，`needs: changes`，略過條件與 `core` 相同）用 release 跑，與 `windows` 並行。它沒有逐鍵 p95 的測試。拆出來的理由：Windows 沒有 Accelerate，小模型的重排走可攜路徑，而這個檔每個測試打 70–128 個音節、每一鍵都重排，是 `windows` 核心測試裡最久的一個檔，runner 的快慢差也主要出在它。
 - Windows 版本身的規格見 `docs/spec/windows-tip.md`。
 
 ### 3.4 `python`（Linux）
@@ -108,6 +108,7 @@
   2. 變調列（sandhi）、公開探針與 unigram overlay 的重建與比對；
   3. 在拋棄式 venv 裝 `numpy==2.5.4`（需要 numpy 的步驟用；其餘步驟用 runner 的 `python3`）；
   4. 評測統計（`tools.test_evalstats`），與 Python 版 dev302 rowstats 逐位元組等於 `eval/golden/s2-lm-dev302-{chat,formal}.rowstats`（書面那一份讀三元表，所以在 numpy venv 裡跑）；
+  4a. 判準 v2（`reference/proto/test_judge_v2.py`、`tools/test_check_forms_extra.py`、不帶辭典的 `tools/check_forms_extra.py`），與 Python 版 dev302 的 v2 rowstats（有無測試用可接受答案檔）逐位元組等於 `eval/golden/s2-lm-dev302-{chat,formal}-jv2{,-accept}.rowstats`（同樣在 numpy venv 裡跑；`docs/spec/evaluation.md` §3.8）；
   5. 詞包與詞庫建置腳本的測試（動漫與遊戲詞包、資訊與 AI 詞包、迷因與實況用語詞包、美妝詞包、人名詞庫、變調建置、`pack-oov` golden 的 Python 一半）；
   6. 模型建置腳本（`tools/test_build_lm.py`、`tools/test_extra_lexicon.py`）、承接檔（`tools/test_kn_cont.py`）、基準測試工具（`tools/test_bench.py`）、讀音解碼豁免表、KPI 表工具、英文詞表建置、覆蓋詞與讀音、常談署名表、保留集守衛、三元表（`tools/test_build_trigram.py`，需要 numpy venv）。
 - 如果出現只在 macOS 才成立的 golden，把那一步移回 macOS 的 job。
@@ -159,7 +160,7 @@
 ## 4. 取捨與已知限制
 
 - **為什麼拆成這些 job**：macOS runner 是 3 核、7 GiB；Rust 測試的執行檔一個接一個跑、每個執行檔內的測試同時跑，release 時平均同時約 2.4 個測試在跑，CPU 已接近滿載，同一個 job 裡再並行省不了多少，只能把工作分到別台機器或減少工作。所以：debug 與 Python 搬到 Linux，Swift 測試與 C 冒煙測試搬到 `swift`，最慢的 `core` 只剩 release 測試。
-- **`cli` 的整合測試不在 debug 跑**：Linux 沒有 Accelerate，小模型走純 Rust 矩陣乘法，`cli` 的整合測試（重播、golden、常談、英文模擬、執行緒、小模型）在 Linux 上是 macOS 的 2.4 倍以上（opt-level 3 也一樣）。它們測的是評測工具（不出貨）與引擎在整份資料上的結果，只在 release 跑；引擎本身的 debug 檢查由 `core` 套件在 Linux 跑（含 dev302 重播）。`core/src` 與 `cli/src` 只有一個 `debug_assert!`。
+- **`cli` 的整合測試不在 debug 跑**：Linux 沒有 Accelerate，小模型走可攜路徑，`cli` 的整合測試（重播、golden、常談、英文模擬、執行緒、小模型）在 Linux 上比 macOS 久。它們測的是評測工具（不出貨）與引擎在整份資料上的結果，只在 release 跑；引擎本身的 debug 檢查由 `core` 套件在 Linux 跑（含 dev302 重播）。`core/src` 與 `cli/src` 有三個 `debug_assert!`（`lm.rs` 兩個、`tinylm.rs` 一個）。
 - **debug 看不到的兩塊**：只在 macOS 才編進去的分支（小模型的 Accelerate 呼叫、`learn_store.rs` 的 macOS 常數），以及上述兩個在 Linux 直接 `return` 的 f64 golden（在 Linux 的 debug 裡算通過但什麼都沒檢查）。它們在 macOS 的 release 測試照跑；Accelerate 呼叫前的長度檢查是 `assert!`，release 也檢查。
 - **`--parallel` 的代價**：一個測試殘留給下一個測試的狀態，在同一個程序內才會被看到；並行時每個方法一個程序，抓不到這種問題，只有序列的 `make test-swift` 抓得到。
 - **沒有 Rust 編譯快取**：沒有 `actions/cache` 步驟。編譯只佔各 job 的一小段，其餘是測試本身的執行時間。以 main 一次 push CI 的 log 為例：最慢的 `core`，`cargo test --release` 共 1017 秒，其中編譯 59.7 秒；`windows` 的核心測試編譯 56.3 秒，`shanjie-tip`、`shanjie-host` 的四次建置共 45 秒；`debug` 41.3 秒；模型下載每個 job 6–12 秒。快取命中時，每次合併幾乎都會改到的自己的 crate 照樣重編，省得到的只有相依套件那一段，不值得承擔快取留下錯誤建置的風險。
@@ -253,6 +254,7 @@
 | Homebrew cask 樣式 | 指令照 `ci.yml` 的「Homebrew cask」步驟：用佔位值產生 cask，放在某個 `Casks/` 資料夾下跑 `brew style`（`brew` 只在路徑含 `Casks/` 時套用 cask 規則） |
 | `make installer` ＋ `scripts/check-installer.sh` | 只接受正式 ID 的組建。把 `build/善解輸入法.app` 壓成 `build/shanjie-<版本>.zip`，組出 `build/安裝善解輸入法.app`，檢查結構、bundle ID、內附 zip 與 `install-ime.sh` 逐位元組相同、`Resources/` 沒有展開的 .app、App 圖示、沒有 entitlements、hardened runtime。安裝程式只檢查、不啟動 |
 | C 標頭冒煙測試、寬鬆比對一致性 | 指令照 `ci.yml` 的「C header smoke test」與「Lenient comparison parity」步驟 |
+| 詞包切換的量測程式 | `core/examples/pack_switch_bench.rs`（模式 `typing`、`build`、`memory`、`phases`，用法在檔頭）；`cargo test` 會順便編它，CI 只編不跑。兩個建詞庫改寫的計時是 `core/src/tests.rs` 的 `#[ignore]` 測試 `timing_variant_order_one_pass`、`timing_legal_once_per_syllable`（`cargo test --release --locked -p core --lib tests::<名稱> -- --ignored --nocapture --exact`）。都在閒置窗跑 |
 
 - 正式 ID 的組建（`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`）在本機永遠只建置、不執行；它的執行只在 CI（`scripts/test-sandbox-migration.sh` 與 `check-app.sh` check 6）。
 - 更新實機測試用的測試版：`SHANJIE_UPDATE_TEST_FEED=<網址> SHANJIE_UPDATE_TEST_KEY=<測試公鑰> scripts/build-app.sh`，檢查時 `scripts/check-app.sh` 也要帶同樣兩個變數，不帶的話測試版會被擋下。本機建置的 Info.plist `ShanjieUpdateBuild` 是 `local`（更新服務不啟動）；`release.yml` 的建置帶 `SHANJIE_RELEASE_BUILD=1` 寫成 `release`，要在本機檢查這種建置就讓 `check-app.sh` 也帶 `SHANJIE_RELEASE_BUILD=1`。

@@ -20,7 +20,7 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 | `ShanjieKitTests`、`ShanjieInstallTests`、`UpdateHostTests` | test | XCTest |
 
 - 連結核心：`Package.swift` 以 `#filePath` 算出 repo 根目錄，把 `target/release/libcore.a` 的完整路徑交給連結器，不用 `-lcore` 加搜尋路徑，所以搜尋路徑上別的 `libcore` 不可能被誤連。另連結 Accelerate（核心的小模型宣告了它的符號，Rust 的 `#[link(kind = "framework")]` 不會跟著靜態庫走）。
-- `ShanjieKit` 與測試用 Swift 6 嚴格模式，型別標 `@MainActor`；C ABI 只在主執行緒呼叫。
+- `ShanjieKit` 與測試用 Swift 6 嚴格模式，型別標 `@MainActor`；引擎 handle 的呼叫都在主執行緒。例外只有詞包切換的背景建置（§2.1）：建置佇列上呼叫 `shanjie_engine_new_shared`、`shanjie_shared_free`，從檔案建的那一串（`shanjie_engine_new`（遮罩 0）、`new_packs`、`load_lm`、`load_tinylm`、`load_colloquial`），退讓探測引擎的 `shanjie_engine_free`，以及建置器佇列釋放用不到的引擎（`PackBuilder.dispose`，§2.1）的 `shanjie_engine_free`；建好要用的引擎整個交回主執行緒，之後只有主執行緒碰它（`docs/spec/c-abi.md` §5.2、§5.4）。
 - 唯一的外部相依是 Sparkle，釘死 2.10.0，`Package.resolved` 進版控，建置一律 `--force-resolved-versions`。Sparkle 只連進 `Shanjie` 與 `ShanjieUpdater`，`ShanjieKit` 與測試不碰它（更新的判斷放在 `ShanjieKit/Updates.swift`）。
 - 本機 `make` 的過期防護：`target/release/libcore.a` 比 Swift 執行檔新就刪執行檔強迫重連；`core/include/shanjie.h` 比較新就刪 module cache 與匯入它的目標的產物（SwiftPM 不追蹤這兩樣）。
 
@@ -29,7 +29,7 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 `scripts/build-app.sh` 組出 `<資料夾>.app`（資料夾與名稱見 §1.3），內容：
 
 - `Contents/MacOS/shanjie`：執行檔。
-- `Contents/Resources/`：詞庫與資料檔（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`、`mixed-words.tsv`，見 `docs/spec/lexicon-and-packs.md`）、`packs/`（詞包）、`data/models.tsv` 列的每個模型檔加 `models.tsv`（見 `docs/spec/models.md`，§10）、`shanjie.tiff`（選單列圖示）、`Assets.car` 與 `AppIcon.icns`（App 圖示）、`zh-Hant.lproj` 與 `en.lproj` 的 `InfoPlist.strings`、`LICENSES/`。只有出貨的 bundle ID 另帶 `container-migration.plist`。
+- `Contents/Resources/`：詞庫與資料檔（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`、`mixed-words.tsv`、`english.tsv`，見 `docs/spec/lexicon-and-packs.md`、`docs/spec/english-mixed.md` §16.5）、`packs/`（詞包）、`data/models.tsv` 列的每個模型檔加 `models.tsv`（見 `docs/spec/models.md`，§10）、`shanjie.tiff`（選單列圖示）、`Assets.car` 與 `AppIcon.icns`（App 圖示）、`zh-Hant.lproj` 與 `en.lproj` 的 `InfoPlist.strings`、`LICENSES/`。只有出貨的 bundle ID 另帶 `container-migration.plist`。
 - `Contents/Frameworks/Updater/Sparkle.framework`（沒有 XPC 服務）與 `Contents/Helpers/善解更新.app`，見 `docs/spec/install-and-update.md`。
 - 簽章帶三個 entitlements：App 沙盒、網路用戶端、以 `<bundle ID>_Connection` 為名的 mach-register 例外；沒有 `get-task-allow` 與 `disable-library-validation`。細節與檢查見 `docs/spec/install-and-update.md`、`docs/spec/release-and-ci.md`。
 
@@ -87,12 +87,20 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 ### 2.1 引擎的建立與重建
 
 - `main.swift` 的 `runServer()` 先跑英文預設值的一次性重設（`docs/spec/english-mixed.md`），建 `NSApplication`、`IMKServer`（名稱取 `InputMethodConnectionName`），之後才建 `Shell`；`Shell` 持有行程唯一的引擎、候選窗與組字擁有者。接著建 `Updates`／`Updater`（`docs/spec/install-and-update.md`）與設定視窗，設好 `onOpenSettings`、`onOpenCandidateSettings`。
-- **同一時間只有一個引擎**（每個約 240 MB）。`Shell.init` 先讀鍵盤排列偏好，再呼叫唯一一次 `build()`；先建再切會建兩次。
-- `build()` 依序：釋放舊引擎；用目前的詞包遮罩建引擎（`shanjie_engine_new_packs`，沒有詞包用 `shanjie_engine_new`）；`load_lm(bigram.sjlm)`；成功才 `load_tinylm`，再成功才 `load_colloquial`（小模型與常談表載入失敗只記回傳碼，引擎照常，語意校正不啟用或不帶常談項）；然後把殼持有的每一個設定**每次重送一遍**（重建的引擎一律從核心預設值開始）：避免敏感字詞、即時預測、可省略韻母、中英混打與它的三個選項、ASCII 狀態、模糊輸入旗標、候選窗方向、語意校正與強度、聊天／書面、標點表、選字記憶資料夾。
-- 詞包載入失敗的退讓：合併建置失敗時，先建一個不帶詞包的引擎只為判斷是不是詞包的錯；是，就對每個啟用中的詞包依設定順序各試「少這一個」，第一個成功的留下，其餘詞包照開；都不行就建不帶詞包的引擎。偏好值不動，也不顯示錯誤，下一次重建會再試。連不帶詞包的引擎都建不出來時記兩個回傳碼，結束。
-- 引擎建不出來：沒有引擎，所有按鍵直通（`Session.handle` 回傳 `false`）。載入 LM 失敗：沒有 LM 的引擎仍可打字，只記回傳碼。
-- 換鍵盤排列或切詞包會重建：先把組字送回擁有者（沒有擁有者就丟棄），再改設定，再 `build()`。重建在主執行緒阻塞約一秒以上，期間按鍵直通；排列很少切換，先接受。其餘設定（開關、強度、方向、聊天／書面）都不重建，直接送給現有的引擎。
-- 所有 C ABI 呼叫都在主執行緒。
+- **平常只有一個引擎**；切換詞包期間最多兩個：現行的，加上建置中或建好了還沒換上的。每個引擎的 footprint 量到 396 MiB，其中模型 256 MiB（2026-11-13，release 核心）；兩個引擎各載一份模型並存時 654–672 MiB，共用路徑不再有第二份模型（共用與各載一份兩條路徑並存時的數字由 `core/examples/pack_switch_bench.rs` 的 `memory` 模式量）。`Shell.init` 先讀鍵盤排列偏好，再呼叫唯一一次同步的 `build()`；先建再切會建兩次。
+- **同步的 `build()`**（第一次建置與換鍵盤排列，從檔案建）依序：釋放舊引擎；用目前的詞包遮罩建引擎（`shanjie_engine_new_packs`，沒有詞包用 `shanjie_engine_new`）；`load_lm(bigram.sjlm)`；成功才 `load_tinylm`，再成功才 `load_colloquial`（小模型與常談表載入失敗只記回傳碼，引擎照常，語意校正不啟用或不帶常談項）；然後把殼持有的每一個設定**每次重送一遍**（重建的引擎一律從核心預設值開始）：避免敏感字詞、即時預測、可省略韻母、中英混打與它的三個選項、ASCII 狀態、模糊輸入旗標、候選窗方向、語意校正與強度、聊天／書面、標點表、選字記憶資料夾。換鍵盤排列先把組字送回擁有者（沒有擁有者就丟棄），再改設定，再 `build()`，這一段在主執行緒阻塞約一秒以上，期間按鍵直通；排列很少切換，先接受。
+- 詞包載入失敗的退讓：合併建置失敗時，先建一個不帶詞包的引擎判斷是不是詞包的錯（只有一個啟用的詞包檔案在時沒有「少一個」可試，這個引擎成功就直接留下，`docs/spec/lexicon-and-packs.md` §4.3）；是，就對每個啟用中、檔案也在的詞包依設定順序各試「少這一個」，第一個成功的留下，其餘詞包照開；都不行就建不帶詞包的引擎。偏好值不動，也不顯示錯誤，下一次重建會再試。連不帶詞包的引擎都建不出來時記兩個回傳碼，結束。同步與背景兩條路徑用同一份退讓程式（`PackBuild.run`）。
+- 引擎建不出來：同步建置之後沒有引擎，所有按鍵直通（`Session.handle` 回傳 `false`）；詞包切換的背景建置建不出來則留在現行引擎（見下）。載入 LM 失敗：沒有 LM 的引擎仍可打字，只記回傳碼。
+- **切換詞包不卡**（`Shell.setAcgPack`、`setQuotePack`、`setItPack`、`setBeautyPack`、`setMemePack`）：值沒變什麼都不做；值變了就立刻改開關、寫入偏好、發 `didChangeSettings`，交給背景建置，馬上返回；不送出組字，現行引擎繼續處理按鍵。
+  - **建置器**：`PackBuilder` 協定，做法比照 `RerankRunner`：App 傳 `QueuePackBuilder`（固定標籤 `com.nyanako.inputmethod.shanjie.packbuild` 的序列 `.utility` 佇列，結果經 `DispatchQueue.main.async` 回主執行緒），測試傳手動完成的 `HeldPackBuilder`，沒有測詞包切換的測試台用預設的 `ImmediatePackBuilder`（在呼叫的執行緒做完並馬上回報）。背景那一段的輸入只有 `PackBuildPlan`（路徑、排列、遮罩、共用部分的 handle），不讀不寫 `Shell` 的任何狀態；輸出 `PackBuildResult`（引擎 handle 或沒有、實際載入的遮罩、建置次數、各步的回傳碼）。
+  - **兩條路徑**，在主執行緒決定：現行引擎存在，而且建它的時候模型、小模型、常談三個都載入成功，就在主執行緒呼叫 `shanjie_engine_share` 取出共用部分，背景用 `shanjie_engine_new_shared` 建（`new_shared` 全有或全無，回 0 的引擎三樣都已載入）；其他情形（沒有引擎、有一個沒載入成功、`share` 回非 0）背景照同步的順序從檔案建。共用路徑回非 0 時，退讓的每一次嘗試也用 `new_shared`（同一個共用部分 handle），不改走從檔案建；連不帶詞包的也失敗，這次建置沒有結果，留在現行引擎。
+  - **換上**（主執行緒）：結果當初**被要求的**（遮罩、排列）仍然等於現在想要的，而且組字區是空的（`composing` 為假，沒有開著的候選窗或已進入的預測列），才換；不成立就留著，等組字結束再換，不為了換引擎而送出打到一半的字。組字結束由 `composing` 變成假觸發，經 `DispatchQueue.main.async` 一跳再檢查，所以換上不會發生在處理那一鍵的呼叫裡面。步驟依序：隱藏沒有進入的預測列；釋放舊引擎；對新引擎重送殼持有的每一個設定（值取換上當下的）；開選字記憶檔；設成現行引擎並記下它是為哪一組要求的（`engineRequested`：遮罩、排列），更新 `loadedPackMask`（實際載入的遮罩，只給選單的「已開啟的詞包」用）、`rerankAvailable`、`rerankLevels`；發 `didChangeSettings`。
+  - **過期與再建一律比要求的**（遮罩、排列），不比 `loadedPackMask`：詞包缺檔或壞檔時實際載入的比要求的少，比它會把每個結果都當成過期、或換上之後一直重建。同一時間最多一個建置在進行；建置期間再切換，只記下最新想要的。切換的當下有建好、還在組字而沒換上的結果，就算過期，當場交給建置器的佇列（下一次建置開始之前釋放），再看最新想要的和現行引擎被要求的是否相同，不同才建。建置完成時結果已過期：交給建置器的佇列釋放，同樣只在不同時再建一次。連續切換 N 次最多建兩次，任何時刻存活的引擎最多兩個。
+  - **失敗**：建不出任何引擎（連不帶詞包的都不行）時不換，現行引擎繼續用，只記回傳碼，偏好值就是切換時存的新值，不復原；之後不自動重試，下一次切換再試。
+  - **所有權**：共用部分 handle 歸背景工作持有，在它最後一個 `new_shared` 返回之後釋放（`SharedParts.release`，建置結束時）；主執行緒作廢一次建置時只把結果標成過期，不碰它的 handle，也不等它。背景建出來的引擎 handle 裝在 `BuiltEngine` 裡交回主執行緒，被換上就由 `CoreEngine` 接手，過期或被取代就交給建置器佇列釋放（`PackBuilder.dispose`），`Shell` 已經不在就隨結果釋放，恰好一次。
+- 換鍵盤排列仍是同步、從檔案建（舊引擎會用舊排列解讀按鍵）：建置進行中或有結果在等的話，那個結果作廢（等著的當場交給建置器的佇列，進行中的完成後交給它；都在下一次建置開始之前釋放），同步建置用當下的遮罩。其餘設定（開關、強度、方向、聊天／書面）都不重建，直接送給現有的引擎。
+- 引擎 handle 的呼叫（按鍵、設定、重排、`share`）都在主執行緒；背景只呼叫 §1.1 列的那幾個，且在引擎交回主執行緒之前沒有別的執行緒碰它。
+- 沒人要的建好引擎（過期的結果、切換時等著換上而被取代的）不在主執行緒釋放（`shanjie_engine_free` 約 4.5–18 ms，會讓切換的呼叫超過 5 ms）：`PackBuilder.dispose` 把它交給建置器佇列（序列佇列，所以在下一次建置開始之前就釋放，存活引擎仍最多兩個），呼叫端只交出唯一的參照，恰好釋放一次。被換下的舊引擎照契約在換上那一步於主執行緒釋放。
 
 ### 2.2 組字擁有者
 
@@ -122,10 +130,11 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - `modifiers`：bit0 Shift、bit1 Control、bit2 Option、bit3 Command、bit4 Caps Lock。
 - **表外的鍵**（數字鍵盤、功能鍵等）與 IMK 傳入的 `nil` 事件不送進核心：組字區有字時先 `finish(mode: 0)` 送出，再回傳「不處理」；組字區空時直接回傳「不處理」。
 - **例外：Page Up／Down**。`KeyMap.pageKeys` 把 `kVK_PageUp`（116）、`kVK_PageDown`（121）對到 14／15，但 `KeyMap.translate` 不含它們；`Session.handle` 只在直排候選窗開著（最後套用的輸出 `candidate_vertical` 為 1）而且沒有任何修飾鍵（Shift、Control、Option、Command、Caps Lock）時才轉送，其餘情況（橫排候選、網格、組字中、未完成音節、預測列、組字區空、帶修飾鍵）都走上一條的表外鍵路徑，行為和沒有這個功能時完全相同。核心收到 14／15 而當下不是直排候選窗時不處理、不改狀態、不送出（`handled` 0）。
-- 英文狀態（單按 Shift 切換）下組字區空時，所有按鍵直接交給 App，不經過核心；組字中且核心有影子時以 `event.characters` 產生字元鍵。見 `docs/spec/english-mixed.md`。
+- 英文狀態（單按 Shift 切換）下組字區空時，按鍵直接交給 App，不經過核心；組字中且核心有影子時以 `event.characters` 產生字元鍵。例外是帶 Option 的字元鍵（規則 1o 的那些鍵）：字元用 `event.characters(byApplyingModifiers:)` 只套事件的 Shift 取（不用 `charactersIgnoringModifiers`，它在 Option 與 Shift 同時按著時不帶 Shift），組字區空時殼自己送出並吃掉這一鍵，組字中且核心有影子時當字元鍵送進核心，組字中而核心沒有影子時吃掉。見 `docs/spec/keys-and-composition.md` §9.2 與 `docs/spec/english-mixed.md`。
+- 中文狀態下帶 Option 的字元鍵照上面的表送進核心（`ch` 是鍵位不按 Shift 的字元，`modifiers` 帶 bit2，有 Shift 再帶 bit0），由核心的規則 1o 處理（`docs/spec/keys-and-composition.md` §4.1、§8.1）。
 - 按 Enter 時（候選窗沒開），送進核心前先讓畫面上的組字追上正在跑的語意校正（最多等 `ENTER_RERANK_WAIT_MS`），見 `docs/spec/semantic-rerank.md`。
 
-驗證：`KeyMapTests`（`testEveryAnsiKeyIsItsUnshiftedCharacter`、`testSpecialKeys`、`testModifierBits`、`testKeysOutsideTheTablesAreNotTranslated`、`testBothLayoutsThroughTheCore`；特殊鍵碼另對 Carbon 的 `kVK_*` 交叉核對）。
+驗證：`KeyMapTests`（`testEveryAnsiKeyIsItsUnshiftedCharacter`、`testSpecialKeys`、`testModifierBits`、`testOptionShiftKeepsTheKeycapAndBothBits`、`testKeysOutsideTheTablesAreNotTranslated`、`testBothLayoutsThroughTheCore`；特殊鍵碼另對 Carbon 的 `kVK_*` 交叉核對）。
 
 ## 4. 輸出套用
 
@@ -444,12 +453,14 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 - `make test-swift`（`swift test --package-path macos`）：`ShanjieKitTests` 的測試資料由 `Support.swift` 的 `TestData.files` 列出（`data/lexicon/*` 與 `data/lm/*` 的符號連結拼成和 App 的 `Resources` 相同的資料夾）；缺檔就失敗並說明怎麼取得，不跳過（唯一的選用項目是 `testBenchmark`）。測試一律經過真正的 C 核心。
 - 殼層測試用 `FakeClient`（模擬文字框，`insertText` 會取代組字）與 `FakePanel`，`Controller` 是 `Session` 加 `FakeClient`，把它設成 `nil` 等於 IMK 釋放 controller。涵蓋：打字送出、候選顯示與數字選字、帶 Caps Lock 的鍵不處理、組字中按表外鍵先送出、`commitComposition`、回傳碼非 0 的路徑（之後核心的組字也是空的）、聊天與書面設定可觀察的差異、組字擁有者三種情形（A 組字中對 B 按鍵、擁有者被釋放後 B 按鍵、B 組字中 A 的 `deactivate` 晚到）、擁有者改變時重設設定、安全輸入時擁有者的 `deactivate` 丟棄組字、非擁有者的 `deactivate` 不碰共用候選窗；拿掉擁有者檢查或把 `shanjie_engine_key` 改成固定回傳非 0 時至少一個測試要失敗。
+- 詞包切換（`PackSwitchTests`，真的 `Resources`、真的核心、手動完成的 `HeldPackBuilder`；檢查用的詞是 ㄕㄣˊ ㄧㄡˊ ㄕˇ，有動漫詞包是「榊遊矢」）：切換返回時現行引擎不變、仍打得出詞包的字；完成後換上並移除（或加回）詞包、收到 `didChangeSettings`；組字中（注音、未完成符號、數字緩衝、英文）不換、不送出，組字結束才換；連續切換最多建兩次、存活引擎 ≤ 2、共用部分 handle 在 `new_shared` 完成之後才釋放；切回原值不再建；建置失敗（缺必要的詞庫檔，或後段才失敗的 `std-exempt.tsv`）留在現行引擎、`engineBuilds` 多 2、補回檔案後下一次切換換得上；壞詞包與缺檔的詞包照 `docs/spec/lexicon-and-packs.md` §4.3 退讓、`loadedPackMask` 與 `packMask` 不同照樣換上、之後不再建；換上時重送設定；換排列時作廢；每個引擎與共用部分 handle 恰好釋放一次（含 `Shell` 在建置中被釋放）；沒人要的引擎交給建置器佇列釋放、不在切換的呼叫裡釋放；有小模型與常談才走共用路徑；等著換上的結果在下一次切換的當下交給建置器（交出計數加 1、flush 後釋放恰好一次）；`QueuePackBuilder` 真的在另一條執行緒建、主執行緒換上、之後打得出字。突變（逐一做、每個都要以斷言失敗）：`setAcgPack` 仍同步重建、換上時不檢查組字、不檢查過期、失敗時清掉現行引擎、換上時不重送設定、過期比 `loadedPackMask`、切換時不釋放等著換上的結果。
+- 詞包切換的主執行緒時間（`PackSwitchBenchTests.testBenchmarkPackSwitch`，沒有 `SHANJIE_BENCH=1` 就 `XCTSkip`）：用 App 的佇列建置器、真的 `Resources` 與 release 核心、測試自己產生的合成選字記憶檔（50,000 筆一般加 2,000 筆新詞），動漫詞包關開交替切 10 次，各量 `setAcgPack` 呼叫、換上那一步與切換到換上，印三行 `pack-switch bench:`，斷言呼叫最長 ≤ 5 ms、換上最長 ≤ 50 ms。指令：`make rust` 之後 `SHANJIE_BENCH=1 swift test -c release --package-path macos --filter testBenchmarkPackSwitch`（在閒置窗跑）。
 - `scripts/check-app.sh`（對建出來的 bundle）、`scripts/check-installer.sh`、`make selftest-bundled`：§1.2、§6.3。
 - 實機才看得到的：候選窗的玻璃樣子、深淺色、位置與動畫順不順、閃爍、直排預測列貼近螢幕下緣的行為、設定視窗的置中與夾回、VoiceOver。
 
 ## 12. 已知限制與設計取捨
 
-- 切換鍵盤排列、詞包要重建引擎，主執行緒阻塞約一秒以上，期間按鍵直通。取捨：排列很少切換；之後可在核心加 `set_layout`。
+- 切換鍵盤排列要重建引擎，主執行緒阻塞約一秒以上，期間按鍵直通。取捨：排列很少切換；之後可在核心加 `set_layout`。切換詞包不阻塞（§2.1），代價是切換之後約一秒才生效（在組字中則要等組字結束），期間打出來的字還是舊詞包的結果；建置期間多一個引擎的記憶體。
 - 安全輸入只在擁有者的 `deactivate` 檢查，其他送出路徑不檢查：`IsSecureEventInputEnabled()` 是全系統旗標，任何 App 開著時，點別處、切換排列或換擁有者都會悄悄丟掉打到一半的字。
 - 選取移動時，組字區不會像蘋果那樣即時換成選取的候選。
 - 橫排網格的第一個候選是多字詞時，候選窗對齊的是游標前一個字（§8.3）。
@@ -460,7 +471,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 ## 13. 診斷紀錄
 
-偶發問題（例如單按 Shift 偶爾卡在英文）在測試裡重現不了，所以殼在記憶體裡記一份切換與換 App 的紀錄，由使用者自己複製、自己貼給開發者。善解不自動送出，也不新增任何連線。程式在 `ShanjieKit/DiagLog.swift`。
+偶發問題（例如單按 Shift 偶爾卡在英文、偶爾完全沒反應）在測試裡重現不了，所以殼在記憶體裡記一份切換、換 App 與修飾鍵事件有沒有送到輸入法的紀錄，由使用者自己複製、自己貼給開發者。善解不自動送出，也不新增任何連線。程式在 `ShanjieKit/DiagLog.swift`。
 
 ### 13.1 記什麼
 
@@ -473,12 +484,30 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | `activate`、`deactivate` | `activate` 讀過 bundle 之後；`deactivate` 每一次，不是擁有者的也記 | bundle ID（`activate` 讀的那一次；`deactivate` 不讀，用 session 記住的 `bundle`）、這個 session 是不是擁有者、當下的 `engineAscii` |
 | `owner` | `claim()` 回 true、呼叫處讀完 bundle 之後（`activate`、`handle`、`toggleAscii`、`toggleAppChat`） | 新擁有者的 bundle ID（呼叫處讀的那一次） |
 | `ascii` | `pushAscii` 真的改了狀態；`applyShiftToggle` 關掉開關、沒有擁有者時直接改 `engineAscii` 的那一支 | bundle ID（session 的 `knownBundle`；沒有擁有者時 `-`）、新狀態 |
+| `flags` | 緊接在同一次 `deactivate` 那一行之後、同一個時刻；只在這個 session 有一段沒作廢的區間、系統的修飾鍵事件數有增加時記（見下面「`flags`」） | bundle ID（同 `deactivate` 那一行：session 記住的 `bundle`）、`all`／`some`／`none` |
 
 `ShiftTap.Outcome`：`toggled`，或不算的原因，每條退出路徑一個值。放開時依序判斷，幾個同時成立時取第一個：(1) 沒看到按下（`noPress`）；(2) 放開的是另一側的鍵（`otherKeyReleased`）；(3) 按下時記下的原因：其他修飾鍵（`modifierAtPress`）先於 Caps Lock（`capsLockAtPress`）；(4) 按下之後另一個修飾鍵動了（`modifierBetween`，只在按下時沒有原因時記）；(5) 另一側 Shift 的狀態和按下時不同（`otherSideChanged`）；(6) Control／Option／Command／Fn 按著（`modifierAtRelease`）；(7) Caps Lock 開著（`capsLockAtRelease`）；(8) 超過 `SHIFT_TAP_MAX`（`tooLong`）；(9) 之間有滑鼠按鍵（`mouse`）。沒看到按下是 `ShiftTap` 被重設，或啟用時 Shift 已按著；兩個 Shift 先後按下時第二次按下取代第一次的紀錄，結果是 `otherKeyReleased` 再 `noPress`。被 `keyDown` 打斷優先於任何原因：打斷了就不記。切換與否和加紀錄之前完全相同（「打過鍵」的標記只決定記不記，不影響切換）。
 
-- **不新增客戶端讀取**：bundle ID 只用呼叫處已經讀到的值或 session 記住的值，提示的位置只讀一次。
+**`flags`：修飾鍵事件有沒有送到輸入法。** 單按 Shift 完全沒反應時，上面的事件一筆都沒有，分不出是輸入法沒收到那次 Shift，還是收到了卻走了不留紀錄的路徑；`flags` 把系統的 `flagsChanged` 累計數和輸入法收到的數量比成三個值。
+
+- **兩個計數**：系統的累計數經注入的 `Shell.flagsCounter` 讀（App 傳 `CGEventSource.counterForEventType(.combinedSessionState, eventType: .flagsChanged)`，不需要權限（虛擬機實測：沒有任何隱私權限的一般程序與沙盒裡的輸入法程序都讀得到，單按 Shift 三次後用 `open -a` 換 App 記成 `all`）；`Shell.init` 的預設值永遠回 0，所以測試建的殼不記 `flags`）。收到的數量是 `Shell.flagsSeen`：任何 session 的 `handle` 收到 `flagsChanged` 就加一，在 `handle` 的第一行，早於「引擎還沒建好」與「單按 Shift 切換中英」開關的判斷。兩個都是 `UInt32`，會繞回，增量用無號減法。
+- **區間**：每個 session 從 `activate` 到它自己的 `deactivate` 是一段。`activate` 時這個 session 沒有區間才記下起點（兩個計數當下的值）；已經有（沒有 `deactivate` 就再 `activate`）就保留原本的起點。`deactivate` 時有區間才結算，然後捨棄起點；沒有區間的 `deactivate`（重複的、程序啟動前就啟用的）什麼都不記。不是擁有者的 session 照樣結算自己的區間。程序剛啟動沒有特別處理：第一個 `activate` 就是第一段的起點。兩個 session 之間沒有 session 啟用的空窗不記。
+- **增量是整個程序的**：兩個 session 的區間可以重疊（IMK 可能先送下一個 App 的 `activate` 才送上一個的 `deactivate`），重疊那段的事件兩段都算進去。所以這一行的意思是「這個 App 的這段期間，整個輸入法程序收到的修飾鍵事件和系統的比較」，不是「送給這個 session 的」。
+- **三個值**：系統增量是 0 時不記；收到的增量 ≥ 系統增量記 `all`（重複送達會讓收到的比系統多，也算 `all`）；收到的增量是 0 記 `none`；其餘記 `some`（`DiagLog.delivery`）。
+- **不記的情形**：
+  - 診斷開關關著：不記，也不保留起點；開關關掉、打開或 `storeChanged()`（緩衝清空，`DiagLog.onClear`）時，所有 session 的起點都捨棄，那一段不記。
+  - 「單按 Shift 切換中英」在這段的 `activate` 或 `deactivate` 時是關的：不記。
+  - 安全輸入：區間中任何一個觀察點 `isSecureInput()` 為真，這一段就作廢、不記。觀察點是任何 session 的 `handle`（每一次按鍵與修飾鍵事件）、`activate` 與 `deactivate`，作廢記在當時每一段開著的區間上；沒有區間開著時不問 `isSecureInput()`。殘留的風險：安全輸入期間輸入法如果完全收不到事件，也沒有任何 session `activate` 或 `deactivate`，就觀察不到那段安全輸入（`docs/spec/privacy.md` §11）。
+- **原始計數不離開記憶體**：起點只以 `UInt32` 存在 `Shell` 裡，區間結束、開關改變時捨棄；`flagsSeen` 是累計數，留在記憶體裡到程序結束。兩者都不進 `Logger`、`print` 與匯出，也不參與三值以外的任何計算。
+- **判讀**：
+  - `none`：這個 App 的這段期間，系統有修飾鍵事件，輸入法一個都沒收到。這是「沒送到」最強的訊號。
+  - `some`：有一部分沒收到。常見而無害的來源：用 ⌘Tab 換 App 時 Cmd 的放開落在區間外（虛擬機實測：單按 Shift 三次後用 ⌘Tab 換 App 記成 `some`）；Caps Lock、Fn；其他軟體合成的修飾鍵事件（自動化工具、改鍵工具的虛擬鍵盤）；剛按完就換 App 時事件還沒送到〔推論〕。所以單看一筆 `some` 不能斷定 Shift 沒送到，要看分布：同一個 App 大多是 `some` 或 `none`、其他 App 大多是 `all`，才指向那個 App。
+  - `all`：這段期間的修飾鍵事件都送到了。那段期間如果有一次 Shift 沒反應，原因就在輸入法收到之後，例如不留紀錄的判斷路徑。
+- `flags` 放在「其他事件」的緩衝，每次換 App 最多多一行〔推論：換 App 的紀錄能涵蓋的時間約縮短兩成〕。切換、組字、選字的行為和加這個事件之前完全相同。
+
+- **不新增客戶端讀取**：bundle ID 只用呼叫處已經讀到的值或 session 記住的值（`flags` 沿用 `deactivate` 那一行的），提示的位置只讀一次。
 - **bundle ID 先清理**（`DiagLog.clean`）：1–255 個 `[A-Za-z0-9._-]` 照記；其他的記 `?`；nil 或空字串記 `-`。這是唯一的字串欄位，其他都是列舉或布林。
-- **永遠不記**：打的字、組字、候選、預測列、前文、學習內容、按鍵的字元或鍵碼（Shift 的左右除外）、視窗標題、網址、文件內容。
+- **永遠不記**：打的字、組字、候選、預測列、前文、學習內容、按鍵的字元或鍵碼（Shift 的左右除外）、修飾鍵事件的次數（`flags` 只記三個值，不記是哪個修飾鍵）、視窗標題、網址、文件內容。
 - **只在記憶體**：不寫檔、不用 `Logger`、`print` 或檔案 I/O，不進學習檔；輸入法程序結束就沒了。
 
 ### 13.2 匯出格式
@@ -490,15 +519,16 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 -12.345 ascii com.apple.TextEdit en
 -12.345 toggle com.apple.TextEdit en hint
 -3.000 deactivate com.apple.TextEdit owner en
+-3.000 flags com.apple.TextEdit all
 -2.900 owner com.apple.Safari
 -2.900 activate com.apple.Safari owner zh
 ```
 
-每一行都在一個封閉的文法裡：事件名稱、固定的列舉值（`left`／`right`、`Outcome` 的值、`en`／`zh`、`hint`／`nohint`、`owner`／`notowner`）與清理過的 bundle ID。
+每一行都在一個封閉的文法裡：事件名稱、固定的列舉值（`left`／`right`、`Outcome` 的值、`en`／`zh`、`hint`／`nohint`、`owner`／`notowner`、`all`／`some`／`none`）與清理過的 bundle ID。`flags` 那一行是 `flags <bundle> all|some|none`，沒有數字欄位。
 
 ### 13.3 設定與複製
 
-- 設定視窗的「診斷」頁（§9.2）：開關「記錄偶發問題的診斷資料」，預設開，UserDefaults 鍵 `diagLog`（沒存過算開）；灰字說明「只存在這台 Mac 的記憶體裡，不會自動送出。會記下放開 Shift 時算不算單按（按著 Shift 打字時不記）、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift，切換中英照記。」關掉時兩個緩衝都清空、之後不再記；打開時也清空，從空的開始。在設定視窗以外改這個鍵（`defaults write` 寫容器的偏好檔）時，殼經 KVO 收到 UserDefaults 的變更通知（`DefaultsDiagLogStore`），不看新值、一律清空兩個緩衝（`DiagLog.storeChanged()`；關了又馬上打開，兩次寫入可能都在處理通知之前落地）；通知處理之前，關著就算空的（不匯出、按鈕反灰）。預覽開著時緩衝被清空過（`DiagLog.clears` 和開預覽時不同），按「複製」不寫剪貼簿、直接關掉。收不到通知的情形，舊紀錄會留到下一次清空：系統把「關再開」合併成沒有變更、直接改偏好檔而不經 `cfprefsd`、`defaults write <bundle id>` 寫到容器以外的一般網域（輸入法讀不到）。
+- 設定視窗的「診斷」頁（§9.2）：開關「記錄偶發問題的診斷資料」，預設開，UserDefaults 鍵 `diagLog`（沒存過算開）；灰字說明「只存在這台 Mac 的記憶體裡，不會自動送出。會記下放開 Shift 時算不算單按（按著 Shift 打字時不記）、切換中英、換 App 的時間與 App 的識別碼（例如 com.apple.TextEdit），以及每段期間 Shift 等修飾鍵是否都送到了輸入法（和系統的總次數比對，只記全部、部分或沒有，不記次數與哪個鍵），不記你打的字。紀錄留到輸入法結束，可能涵蓋好幾天；安全輸入時不記 Shift；輸入法察覺到安全輸入的那一段，這一項也不記；切換中英照記。」關掉時兩個緩衝都清空、之後不再記；打開時也清空，從空的開始。在設定視窗以外改這個鍵（`defaults write` 寫容器的偏好檔）時，殼經 KVO 收到 UserDefaults 的變更通知（`DefaultsDiagLogStore`），不看新值、一律清空兩個緩衝（`DiagLog.storeChanged()`；關了又馬上打開，兩次寫入可能都在處理通知之前落地）；通知處理之前，關著就算空的（不匯出、按鈕反灰）。預覽開著時緩衝被清空過（`DiagLog.clears` 和開預覽時不同），按「複製」不寫剪貼簿、直接關掉。收不到通知的情形，舊紀錄會留到下一次清空：系統把「關再開」合併成沒有變更、直接改偏好檔而不經 `cfprefsd`、`defaults write <bundle id>` 寫到容器以外的一般網域（輸入法讀不到）。
 - 按鈕「複製診斷紀錄…」：先用 sheet 顯示要複製的全文（唯讀、不能選取的文字：選取後按 ⌘C 會走一般的複製、繞過下面兩項保護；加「取消」「複製」），按「複製」才把**同一份文字**寫進剪貼簿。緩衝是空的時按鈕反灰（緩衝沒有變更通知，空不空在開窗、視窗成為 key window 與切換開關時讀）。
 - 寫剪貼簿：`prepareForNewContents(with: .currentHostOnly)`（不經通用剪貼板同步到其他裝置），再用一次 `writeObjects` 寫一個同時帶純文字與 `org.nspasteboard.TransientType`（剪貼簿管理程式的慣例：不記進歷史）的項目，讀剪貼簿的程式不會先看到沒有標記的文字。之後由剪貼簿處理；系統自己的剪貼簿歷史（macOS 26 Spotlight）是否理會這個標記沒有文件，也沒有量過。
 - 介面都是系統元件（`Toggle`、`Button`、`sheet`、`NSPasteboard`）。不用存檔面板：那要多一個沙盒權限（`docs/spec/privacy.md` §2），剪貼簿不用。
@@ -509,6 +539,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - `testRecordingAddsNoClientRead`：`activate`、`deactivate`、`commitComposition`、Shift 切換、`toggleAppChat` 與按鍵各一步，在 Shift 切換開與關兩種設定下，bundle ID、文字讀取（`selectedRange`、`markedRange`、`attributedSubstring`）、游標位置與行位置的讀取次數等於加紀錄之前量到的常數。
 - 緩衝上限、每種事件的格式、幾個原因同時成立時取第一個、預覽之後的事件不在複製的內容裡、開關（含重建 Shell 仍是關、只改 store 關掉時算空的、經設定或 `storeChanged()` 再打開仍是空的、預覽之後被清空就不複製）、兩個 Shift 交疊或 Shift 早已按著時打字不記 `shift`、另一側位元殘留時乾淨的單按之後照記、一次單按記 `shift` 與 `toggle`（提示畫不出來記 `nohint`）、每一個不算的原因各一個序列、安全輸入時不記 `shift` 但 `toggle` 照記、被按鍵打斷的不記、bundle 清理、剪貼簿的呼叫、預覽與複製逐位元組相同與空緩衝反灰。
 - 打字不進紀錄：標記字串在中文組字送出、英文狀態的 `asciiKey` 路徑、`commitComposition` 三條路徑各打一次，匯出不含標記的任何 4 個以上字母的片段、不含注音符號，每一行都符合 §13.2 的文法，打字不新增事件。
+- `flags`（系統計數、`isSecureInput` 與開關都經注入或設定控制）：系統 +6 時收到 6、0、2 各記 `all`、`none`、`some`；系統 +0 不記；收到比系統多記 `all`；計數繞回（起點 `UInt32.max - 1`、終點 4）算成 6；`flags` 緊接在 `deactivate` 之後、同一個時刻；B 的 `activate` 先於 A 的 `deactivate` 時 A、B 各一行、增量是整個程序的；連續兩次 `activate` 用第一次的起點；沒有 `activate` 的 `deactivate` 與重複的 `deactivate` 不記；殼剛建好的第一段照記；區間開頭、結尾、中途的 `handle`、中途另一個 session 的 `activate` 是安全輸入時不記；診斷開關關著、中途關掉再打開（經設定與經 `storeChanged()`）、「單按 Shift 切換中英」關著時不記；引擎沒建好與 Shift 切換關著時收到的 `flagsChanged` 照算進 `flagsSeen`；每一行都符合 §13.2 的文法。
 - `LogTests.testShellLogsNothingButStaticTextAndCodes`（§6.1）：用標記 bundle ID 啟用、單按 Shift 切換、經假剪貼簿複製，標記不出現在整個程序的日誌與 stdout／stderr，紀錄的事件行不出現在殼的 subsystem。
 
-實機（要真人或虛擬機）：設定頁、預覽 sheet、剪貼簿內容，以及終端機開著「加密的鍵盤輸入」時單按 Shift 只多 `toggle`、沒有 `shift`。
+實機（要真人或虛擬機）：設定頁、預覽 sheet、剪貼簿內容，終端機開著「加密的鍵盤輸入」時單按 Shift 只多 `toggle`、沒有 `shift`，以及 `flags`：沙盒裡的輸入法讀得到系統計數（單按 Shift 幾次後用 `open -a` 換 App，匯出有那個 App 的 `flags … all`）、在密碼欄打字的那一段沒有 `flags` 行。

@@ -50,6 +50,7 @@ import readings  # noqa: E402  萌典路徑
 
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
+DROP = os.path.join(ROOT, "data", "lexicon", "overlay-drop.tsv")   # docs/spec/lexicon-and-packs.md §2.3：審過的錯字寫法（詞、基底的正確寫法、備註），產生的列裡不寫
 MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 手動加的詞，接在產生的列後面（來源 manual）
 SLANG = os.path.join(ROOT, "data", "lexicon", "slang-add.tsv")   # 網路用語（docs/spec/lexicon-and-packs.md §2.10），接在手動詞後面（來源 slang）；沒有這個檔時輸出和以前相同
 PACKS = os.path.join(ROOT, "data", "packs")
@@ -301,6 +302,11 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
     if lexgap:
         rows += lexgap_rows(lexgap, words | {r.split("\t")[1] for r in rows} | other_layers(), length_scores(base), syllables, base.by_reading, fold_w,
                             [r.split("\t")[:2] for r in rows])
+    phrase = conv[0] if conv else {}
+    rows, gone = prune(rows, lambda w: phrase_twin(w, phrase, words, moe))   # 整詞的簡體寫法（每個字台灣也用，S2n 的句子判斷看不到）
+    removed += gone
+    rows, gone = prune(rows, drop_list(words).get)   # 審過的錯字寫法
+    variant_removed += gone
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
     rows += tail_rows(words | overlay_words, length_scores(base), syllables)
@@ -319,12 +325,56 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
 
 
 
-def rebuild_tails(out=OUT):
+def phrase_twin(w, phrase, words, headwords):
+    """docs/spec/lexicon-and-packs.md §2.3：w 整個詞是簡繁詞組表（STPhrases 加 tw-conv.tsv 選定的值）的鍵、值是另一個寫法、那個寫法在基底，而且 w 不是
+    萌典詞目 → 回那個寫法，否則 None。is_simplified 只看字（S 與標記字），「松散」「取舍」「船只」每個字台灣也用，句子判成繁體，表裡的 松散→鬆散 就沒人查。
+    只查整詞的鍵：最長比對會把 花卷市 改成 花捲市。目標要在基底（人工整理過的詞庫），目標只在疊加層的不動。"""
+    w2 = phrase.get(w)
+    return w2 if w2 and w2 != w and w2 in words and w not in headwords else None
+
+
+def drop_list(words, path=DROP):
+    """overlay-drop.tsv → {錯字寫法: 基底的正確寫法}。每列三欄（詞、正確寫法、備註；# 與空行略過）；詞不在基底、正確寫法在基底、同一個詞只能一列，不符就中止並指出行號。
+    沒有這個檔是空表。錯字寫法沒有表可查（好高鶩遠 的 鶩 與 騖 不是異體字），所以是審過的清單，不是規則。"""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding="utf-8-sig") as f:
+        for n, line in enumerate(f.read().splitlines(), 1):
+            if line.startswith("#") or not line.strip():
+                continue
+            p = line.split("\t")
+            if len(p) != 3 or p[0] in words or p[1] not in words or p[0] in out:
+                raise SystemExit(f"{path}:{n}: bad drop row")
+            out[p[0]] = p[1]
+    return out
+
+
+def prune(rows, twin):
+    """rows 裡 twin(詞) 有回值的列都拿掉（一個詞的每一列，含變調列）。回 (留下的列, 被拿掉的紀錄「詞、落點、讀音」)。"""
+    kept, gone = [], []
+    for r in rows:
+        key, w = r.split("\t")[:2]
+        to = twin(w)
+        if to:
+            gone.append(f"{w}\t{to}\t{key}\n")
+        else:
+            kept.append(r)
+    return kept, gone
+
+
+def rebuild_tails(out=OUT, refilter=False):
     """overlay-add.tsv 產生的列（標籤不是 manual、slang）照舊，檔尾照 tail_rows 重算；給只改了手動詞或網路用語的時候用，不必有 dump。"""
     with open(out, encoding="utf-8") as f:
         kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")]
     base = ime.Lexicon(BASE)
-    return kept + tail_rows(set(base.by_word) | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base))
+    words = set(base.by_word)
+    kept, _ = prune(kept, drop_list(words).get)     # 清單是 repo 裡的檔，不必有 dump：改了清單用 --tails-only 就生效
+    if refilter:                                    # --refilter：完整建置才有的整詞簡體規則也套到留著的列（要 OpenCC 表與萌典，缺了就中止）
+        phrase, moe = bc.load_conv()[0], moe_titles()
+        kept, gone = prune(kept, lambda w: phrase_twin(w, phrase, words, moe))
+        print(f"--refilter: {len(gone)} rows of {len({g.split(chr(9))[0] for g in gone})} words are whole-word Simplified forms of a base word")
+    return kept + tail_rows(words | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base))
 
 
 def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG):
@@ -774,6 +824,7 @@ def main():
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
+    ap.add_argument("--refilter", action="store_true", help="（搭配 --tails-only）留著的列也套整詞簡體規則；要 OpenCC 表與 SHANJIE_MOEDICT")
     ap.add_argument("--moedict-readings", action="store_true")
     ap.add_argument("--reading-report", metavar="PATH")
     ap.add_argument("--moedict-supplement", nargs="+", metavar="FILE")
@@ -786,8 +837,10 @@ def main():
         ap.error("--lexgap needs a file")
     if a.lexgap and a.tails_only:
         ap.error("--lexgap needs a full build, not --tails-only")
+    if a.refilter and not a.tails_only:
+        ap.error("--refilter needs --tails-only (a full build applies the rule itself)")
     if a.tails_only:
-        rows = rebuild_tails()
+        rows = rebuild_tails(refilter=a.refilter)
         with open(OUT + ".tmp", "w", encoding="utf-8") as f:
             f.writelines(rows)
         os.replace(OUT + ".tmp", OUT)

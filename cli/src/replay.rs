@@ -69,6 +69,10 @@ pub struct RowOut {
     pub sinit_overturned: usize,
     /// (`ng[anchor] - ng[learned]`, `alpha * (ll[anchor] - ll[learned])`) of each rule 10 stretch of the last reading key's job (`RerankResult::sinit_diag`).
     pub sinit_diag: Vec<(f64, f64)>,
+    /// Wall-clock microseconds of the row's `Engine::set_left_context` call and of every `Engine::key` call the replay made, in order (typing keys,
+    /// the re-pick search and Enter); a rerank job's `run` is not in them (`--key-times`).
+    pub ctx_micros: u128,
+    pub key_micros: Vec<u128>,
 }
 
 /// The punctuation marks a reading token may be, with the key the App sends for each (`core/src/engine.rs` `SHIFT_PUNCT` / `PLAIN_PUNCT`, standard
@@ -178,6 +182,7 @@ struct Session<'a> {
     diag: Vec<(f64, f64)>,
     cursor: usize,
     n: usize,
+    key_micros: Vec<u128>,
 }
 
 impl Session<'_> {
@@ -187,7 +192,10 @@ impl Session<'_> {
 
     /// One key into the engine; only `counted` keys are part of `actual` (a scanning key is the tool looking, not the user typing).
     fn press(&mut self, k: Key, counted: bool) -> Result<(), String> {
-        let o = self.e.key(k).map_err(|_| "engine error on a key".to_string())?;
+        let t = std::time::Instant::now();
+        let o = self.e.key(k);
+        self.key_micros.push(t.elapsed().as_micros());
+        let o = o.map_err(|_| "engine error on a key".to_string())?;
         if k.kind != KeyKind::Enter {
             self.committed.push_str(&o.commit);
         }
@@ -307,9 +315,11 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
     if typed.is_empty() {
         return Err("a row without a reading".into());
     }
+    let t = std::time::Instant::now();
     e.set_left_context(ctx);
+    let ctx_micros = t.elapsed().as_micros();
     let max_len = e.max_window_len();
-    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, overturned: 0, diag: Vec::new(), cursor: syls.len(), n: syls.len() };
+    let mut s = Session { e, cur: None, committed: String::new(), max_len, keys: 0, rewrites: 0, overturned: 0, diag: Vec::new(), cursor: syls.len(), n: syls.len(), key_micros: Vec::new() };
     let (mut out, last) = (RowOut { ideal: typed.len() + 1, ..RowOut::default() }, typed.len() - 1);
     let mut committed_syls = 0; // syllables complete when the engine last committed
     for (k, key) in typed.into_iter().enumerate() {
@@ -348,6 +358,7 @@ pub fn replay_row(e: &mut Engine, ctx: &str, syls: &[String], gold: &str, len: &
     out.final_ok = len.apply(&out.committed) == len.apply(gold);
     out.unfixable = cfg.correct && !out.final_ok;
     (out.actual, out.rewrites) = (s.keys, s.rewrites);
+    (out.ctx_micros, out.key_micros) = (ctx_micros, s.key_micros);
     Ok(out)
 }
 
@@ -383,6 +394,19 @@ pub fn format_sinit_stretches(outs: &[RowOut]) -> String {
         }
         for _ in 0..o.sinit.missing {
             text += &format!("{}\t0\t\t\n", i + 1);
+        }
+    }
+    text
+}
+
+/// `--key-times` file (the per-key latency, docs/spec/evaluation.md §4): per row a line `c\t<µs of set_left_context>`, then a line `k\t<µs>` for every
+/// `Engine::key` call of the row (`RowOut::key_micros`). Rows in order, unnumbered; the bytes are `c`, `k`, digits, tabs and newlines only.
+pub fn format_key_times(outs: &[RowOut]) -> String {
+    let mut text = String::new();
+    for o in outs {
+        text += &format!("c\t{}\n", o.ctx_micros);
+        for us in &o.key_micros {
+            text += &format!("k\t{us}\n");
         }
     }
     text

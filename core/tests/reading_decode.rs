@@ -298,5 +298,5 @@ fn load_lm_needs_std_exempt() {
     assert!(new().load_lm(&lm_file("bigram.sjlm")).is_ok(), "an empty list loads");
     // and the shipped list is the one the data directory holds
     let shipped = std::fs::read_to_string(root().join("data/lexicon").join(READING_EXEMPT_FILE)).unwrap();
-    assert_eq!(shipped.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()).count(), 12, "the 12 pairs of R1g");
+    assert_eq!(shipped.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()).count(), 16, "the 12 pairs of R1g and the 4 only-reading pairs");
 }

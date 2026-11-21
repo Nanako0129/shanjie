@@ -21,6 +21,7 @@ enum TestData {
         ("std-exempt.tsv", "data/lexicon/std-exempt.tsv"),  // reading-decode-2: load_lm reads it (the decoder's reading term); missing, the load fails
         ("rerank-protect.tsv", "data/lexicon/rerank-protect.tsv"),  // docs/spec/lexicon-and-packs.md §2.12: required by the core (engine creation fails with 3 without it)
         ("digits.tsv", "data/lexicon/digits.tsv"),  // docs/spec/english-mixed.md §7.2, §7.8: optional for the core, but the app bundles it
+        ("english.tsv", "data/lexicon/english.tsv"),  // docs/spec/english-mixed.md §16.5: optional for the core like digits.tsv; the app bundles it
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records
@@ -280,14 +281,14 @@ enum Keys {
     }
 
     static func event(_ code: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown, time: TimeInterval = 0,
-                      characters: String = "") -> NSEvent {
+                      characters: String = "", ignoring: String? = nil) -> NSEvent {
         if type == .flagsChanged {
             return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
                                     context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
                                     keyCode: code) ?? event(code, flags: flags)
         }
         return NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: 0,
-                                context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+                                context: nil, characters: characters, charactersIgnoringModifiers: ignoring ?? characters, isARepeat: false,
                                 keyCode: code)!
     }
 }
@@ -467,4 +468,60 @@ enum DeviceRow {
     static let standardKeys = Layouts.keys(zhuyin, eten: false)
     static let ngram = "執行這個城市"
     static let reranked = "執行這個程式"
+}
+
+/// docs/spec/macos-shell.md §2.1: a pack builder that never runs on its own. It holds each build until the test runs its work (on the test's thread) and delivers its
+/// result (the `DispatchQueue.main.async` hop of `QueuePackBuilder`), so a result never lands at a time the test did not choose, and the moment between the
+/// work and the delivery is a place a test can stand in.
+@MainActor
+final class HeldPackBuilder: PackBuilder {
+    private struct Held {
+        let work: @Sendable () -> PackBuildResult
+        let done: @MainActor @Sendable (PackBuildResult) -> Void
+        var result: PackBuildResult?
+    }
+    private var held: [Held] = []
+    /// Builds handed over so far.
+    private(set) var received = 0
+    /// Builds not yet delivered.
+    var pending: Int { held.count }
+    private var disposedEngines: [BuiltEngine] = []
+    /// Engines handed over to be freed and not freed yet (`flushDisposed` plays the builder's queue).
+    var disposed: Int { disposedEngines.count }
+
+    func dispose(_ engine: consuming BuiltEngine) { disposedEngines.append(engine) }
+
+    func flushDisposed() { disposedEngines.removeAll() }
+
+    func run(_ work: @escaping @Sendable () -> PackBuildResult, done: @escaping @MainActor @Sendable (PackBuildResult) -> Void) {
+        received += 1
+        held.append(Held(work: work, done: done))
+    }
+
+    /// Runs the oldest build's work now, without delivering it.
+    func runWork(file: StaticString = #filePath, line: UInt = #line) {
+        guard let i = held.firstIndex(where: { $0.result == nil }) else { return XCTFail("no build is waiting to run", file: file, line: line) }
+        held[i].result = held[i].work()
+    }
+
+    /// Delivers the oldest build's result (running its work first if that did not happen yet).
+    func deliver(file: StaticString = #filePath, line: UInt = #line) {
+        guard !held.isEmpty else { return XCTFail("no build is held", file: file, line: line) }
+        if held[0].result == nil { runWork(file: file, line: line) }
+        let h = held.removeFirst()
+        h.done(h.result!)
+    }
+
+    func complete(file: StaticString = #filePath, line: UInt = #line) {
+        runWork(file: file, line: line)
+        deliver(file: file, line: line)
+    }
+}
+
+/// Runs the main run loop until `condition` holds or `timeout` passes; returns whether it held. The queue builder's result and `Shell.scheduleInstall` arrive through it.
+@MainActor
+func spin(timeout: TimeInterval = 30, until condition: () -> Bool = { false }) -> Bool {
+    let end = Date(timeIntervalSinceNow: timeout)
+    while !condition() && Date() < end { RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005)) }
+    return condition()
 }

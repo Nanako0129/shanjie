@@ -1,6 +1,6 @@
 """Tests for tools/bench.py's reference row, static table check, legacy export, table rendering and site data (docs/spec/evaluation.md §7).
 Run: python3 -m unittest tools/test_bench.py   (from the repo root). No network, no private data, no real builds."""
-import argparse, contextlib, hashlib, io, json, os, re, stat, subprocess, sys, tempfile, types, unittest
+import argparse, contextlib, hashlib, io, json, os, re, stat, statistics, subprocess, sys, tempfile, types, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -602,6 +602,20 @@ class SuiteV2(Tmp):
         # chat rounds call the replay exactly as before (no 5th argument); the formal rounds pass `formal`
         self.assertEqual(open(os.path.join(self.td, "replay.args")).read().split("\n")[:-1], ["", "formal"] * 3)
 
+    def test_every_round_is_kept_beside_the_medians(self):
+        """docs/spec/evaluation.md §7.5: `speed_rounds` holds each round's p95, max, load and RSS per setting (and the rerank timings); the medians keep their meaning."""
+        s = self.speed(("你好", "世界"))
+        rounds = s["speed_rounds"]
+        for prof, top in (("chat", s), ("formal", s["formal"])):
+            self.assertEqual(len(rounds[prof]), 3)
+            self.assertEqual({tuple(sorted(r)) for r in rounds[prof]}, {("load_ms", "max_us", "p95_us", "rss_mb")})
+            self.assertEqual(top["p95_us"], statistics.median(r["p95_us"] for r in rounds[prof]))
+            self.assertEqual(top["max_us"], max(r["max_us"] for r in rounds[prof]))
+            self.assertEqual(top["load_ms"], statistics.median(r["load_ms"] for r in rounds[prof]))
+            self.assertEqual(top["rss_mb"], max(r["rss_mb"] for r in rounds[prof]))
+        self.assertEqual(rounds["rerank_ms"], [])   # the fake version ships no small model
+        self.assertNotIn("speed_rounds", bench.site_speed(s))   # not on the website
+
     def test_formal_replay_row_fails_on_its_own(self):
         v = fake_ver("v0.4.0", self.td)
         v.replay = self.replay_script("你好\n世界\n")
@@ -760,6 +774,108 @@ class SuiteV2(Tmp):
                     bench.run_cell2(self.ctx, v, "pub", "chat", False)
         # the previous release is unchanged
         self.assertNotIn("reading", bench.VERSIONS2["v0.6.1"])
+
+    def test_reading_norm_version_ends_every_tag_with_rn_and_the_others_do_not(self):
+        """docs/spec/decoder.md §5: a version with `"reading_norm": True` ships the syllable normalisation and ends every tag in `+rm+rn`; one without the
+        key (v0.7.0, v0.8.0) ends in `+rm`. A cell is scored against its own form only: each refuses the other."""
+        base = {"release": "vN", "flags": ["--context", "--packs", "acg"], "tinylm": True, "reading": True, "tag": "+ctx+tl:{tl8}+acg"}
+        for spec, own, other in ((dict(base, reading_norm=True), "+rm+rn", "+rm"), (base, "+rm", "+rm+rn")):
+            label = "vN" + own.replace("+", "")
+            with self.subTest(own=own), mock.patch.dict(bench.VERSIONS2, {label: spec}):
+                v = self.stage_models(label, HEX)
+                for n in HEX:
+                    self.put_model(n)
+                os.makedirs(os.path.join(v.dir, "data", "lexicon"), exist_ok=True)
+                with open(os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv"), "w", encoding="utf-8") as f:
+                    f.write("ㄅㄛ\t波\n")
+                with mock_hash():
+                    bench.setup_models(v, spec, os.path.join(self.td, "mfn" + str(len(own))))
+                for prof in ("chat", "formal"):
+                    self.assertEqual(bench.expected_tag(v, prof, False), f"lm-{prof}+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{v.rx8}{own}")
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}", [True, True], ("你好", "世界"))
+                self.assertTrue(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"].endswith(own))
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        for label in ("v0.7.0", "v0.8.0"):
+            self.assertNotIn("reading_norm", bench.VERSIONS2[label])
+
+    def test_tone3_version_ends_every_tag_with_t3_and_the_others_do_not(self):
+        """docs/spec/decoder.md §6.6: a version with `"tone3": True` ships third-tone sandhi and ends every tag (the replay-setting cell's too) in `+t3` after the
+        reading marks; one without the key has no mark. A cell is scored against its own form only: each refuses the other."""
+        base = {"release": "vN", "flags": ["--context", "--packs", "acg"], "tinylm": True, "reading": True, "reading_norm": True, "tag": "+ctx+tl:{tl8}+acg"}
+        for spec, own, other in ((dict(base, tone3=True), "+rm+rn+t3", "+rm+rn"), (base, "+rm+rn", "+rm+rn+t3")):
+            label = "vT" + own.replace("+", "")
+            with self.subTest(own=own), mock.patch.dict(bench.VERSIONS2, {label: spec}):
+                v = self.stage_models(label, HEX)
+                for n in HEX:
+                    self.put_model(n)
+                os.makedirs(os.path.join(v.dir, "data", "lexicon"), exist_ok=True)
+                with open(os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv"), "w", encoding="utf-8") as f:
+                    f.write("ㄅㄛ\t波\n")
+                with mock_hash():
+                    bench.setup_models(v, spec, os.path.join(self.td, "mft" + str(len(own))))
+                for prof in ("chat", "formal"):
+                    self.assertEqual(bench.expected_tag(v, prof, False), f"lm-{prof}+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{v.rx8}{own}")
+                self.assertEqual(bench.replay_tag(v, "chat"), f"lm-chat+rd+rx:{v.rx8}{own}")
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}", [True, True], ("你好", "世界"))
+                self.assertTrue(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"].endswith(own))
+                self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
+                with self.assertRaises(RuntimeError):
+                    bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        for label in bench.VERSIONS2:
+            self.assertNotIn("tone3", bench.VERSIONS2[label], "no released version ships it yet")
+
+    def test_recur_version_marks_every_context_tag_after_ctx(self):
+        """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
+        cell run with `--context` (chat, formal, the anchor run); the replay-setting cell has no `--context`, so no mark; a version without the key has none."""
+        spec = {"release": "vR", "flags": ["--context", "--packs", "acg"], "tinylm": True, "recur": True, "tag": "+ctx+tl:{tl8}+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vR": spec}):
+            v = self.stage_models("vR", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+recur+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+recur+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+recur+tl:7e73ef67")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")
+            self.fake_cli("lm-chat+ctx+recur+tl:7e73ef67+acg", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+recur+tl:7e73ef67+acg")
+            self.fake_cli("lm-chat+ctx+tl:7e73ef67+acg", [True, True], ("你好", "世界"))   # the tag without the mark is not this version's setting
+            with self.assertRaises(RuntimeError):
+                bench.run_cell2(self.ctx, v, "pub", "chat", False)
+        self.assertNotIn("recur", bench.VERSIONS2["v0.7.0"])
+
+    def test_pool_recur_version_marks_recur_pr_where_the_small_model_runs(self):
+        """docs/spec/semantic-rerank.md §3.1.1: a version with `"pool_recur": True` (and `"recur": True`) ships the weight on the semantic correction's pool. The
+        CLI prints `+recur+pr` in every cell that runs the small model (chat, formal, the anchor run); a version without a small model, and the
+        replay-setting cell, get no `+pr`; a version with only `"recur"` keeps `+recur`."""
+        spec = {"release": "vP", "flags": ["--context", "--packs", "acg"], "tinylm": True, "recur": True, "pool_recur": True, "tag": "+ctx+tl:{tl8}+acg"}
+        with mock.patch.dict(bench.VERSIONS2, {"vP": spec}):
+            v = self.stage_models("vP", HEX)
+            for n in HEX:
+                self.put_model(n)
+            with mock_hash():
+                bench.setup_models(v, spec, os.path.join(self.td, "mf"))
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+recur+pr+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "formal", False), "lm-formal+ctx+recur+pr+tl:7e73ef67+acg")
+            self.assertEqual(bench.expected_tag(v, "chat", True), "lm-chat+ctx+recur+pr+tl:7e73ef67")
+            self.assertEqual(bench.replay_tag(v, "chat"), "lm-chat")
+            self.fake_cli("lm-chat+ctx+recur+pr+tl:7e73ef67+acg", [True, True], ("你好", "世界"))
+            self.assertEqual(bench.run_cell2(self.ctx, v, "pub", "chat", False)[0]["tag"], "lm-chat+ctx+recur+pr+tl:7e73ef67+acg")
+            self.fake_cli("lm-chat+ctx+recur+tl:7e73ef67+acg", [True, True], ("你好", "世界"))   # the tag without +pr is not this version's setting
+            with self.assertRaises(RuntimeError):
+                bench.run_cell2(self.ctx, v, "pub", "chat", False)
+            # Without a small model (no `--tinylm` in the cell) there is no pool: `+recur` alone.
+            v.tl = None
+            self.assertEqual(bench.expected_tag(v, "chat", False), "lm-chat+ctx+recur+tl:7e73ef67+acg")
+        for k in bench.VERSIONS2.values():
+            self.assertFalse(k.get("pool_recur") and not k.get("recur"), "pool_recur needs recur")
+        self.assertNotIn("pool_recur", bench.VERSIONS2["v0.7.0"])
 
     def test_a_version_without_the_key_never_gets_the_table(self):
         """data/colloquial.sjlm.sha256 in the export does not matter: the VERSIONS2 row decides (as in tools/kpi.py)."""

@@ -24,7 +24,7 @@ import urllib.request
 
 CACHE_ROOT = os.path.expanduser(os.environ.get("SHANJIE_CACHE", "~/.cache/shanjie"))   # SHANJIE_CACHE: the cache folder (default ~/.cache/shanjie)
 CACHE = os.path.join(CACHE_ROOT, "sources", "it")
-UA = "shanjie-it-pack/1.0 (https://github.com/Nanako0129/shanjie; build tool for an optional word pack; contact via the repository)"
+UA = "word-pack-builder/1.0 (build tool for an optional input-method word pack; one request per second)"
 HOSTS = {"data.gov.tw", "opendata.naer.edu.tw", "zh.wikipedia.org", "query.wikidata.org"}
 WIKI = "https://zh.wikipedia.org/w/api.php"
 DATASETS = {"15416": "https://data.gov.tw/api/v2/rest/dataset/15416", "15275": "https://data.gov.tw/api/v2/rest/dataset/15275"}

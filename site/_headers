@@ -1,0 +1,5 @@
+# Cloudflare Pages response headers.
+# The production deployment is also served at shanjie.pages.dev with the same pages; search engines
+# index only the custom domain. Preview deployments (<hash>.shanjie.pages.dev) already get this header from Pages.
+https://shanjie.pages.dev/*
+  X-Robots-Tag: noindex

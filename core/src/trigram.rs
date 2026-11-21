@@ -16,8 +16,8 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::OnceLock;
 
-// <sys/mman.h>: PROT_READ and MAP_PRIVATE have the same values on macOS and x86_64 Linux (learn_store.rs has no other values; this block is Unix only);
-// `off_t` is 64 bits on both. std has no names for them and the crate has no libc dependency.
+// <sys/mman.h>: PROT_READ and MAP_PRIVATE have the same values on macOS, x86_64 Linux and aarch64 Linux (the generic values; this block is Unix only);
+// `off_t` is 64 bits on all three. std has no names for them and the crate has no libc dependency.
 #[cfg(unix)]
 const PROT_READ: i32 = 1;
 #[cfg(unix)]

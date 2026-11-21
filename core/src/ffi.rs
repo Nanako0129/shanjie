@@ -5,7 +5,7 @@
 #[cfg(panic = "abort")]
 compile_error!("C ABI requires panic=unwind");
 
-use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, RerankJob, RerankResult, ResetMode, PACK_ALL};
+use crate::engine::{Engine, EngineError, Key, KeyKind, Layout, Output, RerankJob, RerankResult, ResetMode, Shared, PACK_ALL};
 use crate::lm::Profile;
 use crate::tinylm::RerankLevel;
 use std::ffi::{c_char, CStr, CString};
@@ -68,6 +68,22 @@ const _: () = {
     #[allow(dead_code)]
     fn assertion() {
         send_sync::<ShanjieRerankJob>();
+    }
+};
+
+/// Opaque to C (docs/spec/c-abi.md §5.4): the parts of an engine a new engine can reuse (`shanjie_engine_share`, `shanjie_engine_new_shared`).
+/// Owned data only (no engine borrow, no user input), never changed after it is made, so it outlives the engine and several `new_shared`
+/// calls may read it. No `Debug`: it holds the data folder's path, which no log may carry.
+pub struct ShanjieShared(Shared);
+
+// Send and Sync from the field types (an `Arc` of the model and tables, a path), never from an `unsafe impl` of this crate's own.
+const _: () = {
+    fn send_sync<T: Send + Sync>() {}
+    fn send<T: Send>() {}
+    #[allow(dead_code)]
+    fn assertion() {
+        send_sync::<ShanjieShared>();
+        send::<Engine>();
     }
 };
 
@@ -236,6 +252,94 @@ pub unsafe extern "C" fn shanjie_engine_new_packs(
             Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
         }
     })
+}
+
+/// docs/spec/c-abi.md §5.4: takes the reusable parts of `engine` (only `Arc`s are copied, no file is read). Call it on the engine's own thread.
+/// 1 for NULL; 3 when the engine has no n-gram model loaded (nothing to share); `*out` is NULL on any non-zero code. The caller frees the handle
+/// with `shanjie_shared_free` exactly once.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_share(engine: *mut ShanjieEngine, out: *mut *mut ShanjieShared) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, on its own thread (docs/spec/c-abi.md §5.2).
+        let Some(s) = unsafe { &(*engine).0 }.share() else {
+            return SHANJIE_ERR_LOAD;
+        };
+        // SAFETY: `out` checked non-NULL above.
+        unsafe { *out = Box::into_raw(Box::new(ShanjieShared(s))) };
+        SHANJIE_OK
+    })
+}
+
+/// docs/spec/c-abi.md §5.4: `shanjie_engine_new_packs` (the data folder is the source engine's) followed by `load_lm`, `load_tinylm` and
+/// `load_colloquial`, with the parts of `shared` in place of what those read. Any thread. Every step must succeed: any failure returns
+/// non-zero with `*out` NULL and no engine. Codes as `shanjie_engine_new_packs` (1, 2, 3, 4).
+///
+/// # Safety
+/// `shared` is NULL or a handle from `shanjie_engine_share` not yet freed and not freed while this call runs; `packs_dir` is NULL (mask 0 only) or
+/// a NUL-terminated string; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_new_shared(
+    shared: *const ShanjieShared,
+    layout: u32,
+    packs_dir: *const c_char,
+    packs: u32,
+    out: *mut *mut ShanjieEngine,
+) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || shared.is_null() || (packs != 0 && packs_dir.is_null()) {
+            return SHANJIE_ERR_NULL;
+        }
+        let layout = match layout {
+            0 => Layout::Standard,
+            1 => Layout::Eten,
+            _ => return SHANJIE_ERR_INVALID,
+        };
+        if packs & !PACK_ALL != 0 {
+            return SHANJIE_ERR_INVALID;
+        }
+        let pdir = if packs == 0 {
+            None
+        } else {
+            // SAFETY: non-NULL (checked above), NUL-terminated per the caller contract.
+            let Ok(p) = unsafe { CStr::from_ptr(packs_dir) }.to_str() else {
+                return SHANJIE_ERR_INVALID;
+            };
+            Some((Path::new(p), packs))
+        };
+        // SAFETY: live handle per the caller contract; a shared reference only.
+        match Engine::new_shared(unsafe { &(*shared).0 }, layout, pdir) {
+            Ok(e) => {
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { *out = Box::into_raw(Box::new(ShanjieEngine(e))) };
+                SHANJIE_OK
+            }
+            Err(EngineError::LoadFailed) => SHANJIE_ERR_LOAD,
+            Err(EngineError::Internal) => SHANJIE_ERR_INTERNAL,
+        }
+    })
+}
+
+/// Any thread; NULL does nothing. Only after every `shanjie_engine_new_shared` that uses it has returned.
+///
+/// # Safety
+/// `shared` is NULL or a handle from `shanjie_engine_share` not yet freed, not in use by another call.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_shared_free(shared: *mut ShanjieShared) {
+    guard(|| {
+        if !shared.is_null() {
+            // SAFETY: allocated by `Box::into_raw` in `shanjie_engine_share`, freed once (header).
+            drop(unsafe { Box::from_raw(shared) });
+        }
+        SHANJIE_OK
+    });
 }
 
 /// # Safety
@@ -776,6 +880,40 @@ pub unsafe extern "C" fn shanjie_engine_set_fuzzy(
     rc
 }
 
+/// Third-tone sandhi (docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.2): `on` 0 or 1 (default 1); any other value is 2 with the state
+/// unchanged. Codes and snapshot as `shanjie_engine_set_fuzzy`; turning it off stores every unaccepted syllable of the composition as its third tone.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_tone3(
+    engine: *mut ShanjieEngine,
+    on: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if on > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_tone3(on == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// docs/spec/english-mixed.md §11 as zhen-revert changes it. `enabled` 0 or 1 (default 1): whether a Zhuyin key out of column order, and a
 /// tone key that completes a syllable the lexicon lacks, revert to the raw keys as English (`ls` is `ls` only with the reversal guard off,
 /// `s 7` is `s7`). Returns the
@@ -835,6 +973,41 @@ pub unsafe extern "C" fn shanjie_engine_set_english_reversal_guard(
         // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
         let e = unsafe { &mut (*engine).0 };
         match e.set_english_reversal_guard(enabled == 1) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(o) => unsafe { emit(o, out) },
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// docs/spec/english-mixed.md §16.7. `enabled` 0 or 1 (default 1): while 1, and with the table `english.tsv` and a model loaded, the closing
+/// key of a syllable typed with a replaced key or a key out of column order is English when the comparison of §16 says so; 0 is the engine
+/// without that comparison. Returns the snapshot like `set_english_reversal_guard`; any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_english_auto(
+    engine: *mut ShanjieEngine,
+    enabled: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if enabled > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_english_auto(enabled == 1) {
             // SAFETY: `out` checked non-NULL above.
             Ok(o) => unsafe { emit(o, out) },
             Err(_) => SHANJIE_ERR_INTERNAL,
@@ -1290,8 +1463,14 @@ mod tests {
         }
         let dir = tiny_dir("panic", "ㄒㄧㄣ 鑫 -1.0\nㄅㄣ 犇 -1.0\n".as_bytes());
         let e = new_engine(&dir, 0);
-        // docs/spec/semantic-rerank.md §5.2: the English word of the left text is held until the reset after code 4.
-        assert!(set_left(e, "Joe") == 0 && unsafe { &(*e).0 }.left_full_chars() == 3, "left text held");
+        // docs/spec/semantic-rerank.md §5.2: the English word of the left text is held until the reset after code 4, and so is the context recurrence
+        // set (docs/spec/decoder.md §4.6): one pair here.
+        let held = |e: *mut ShanjieEngine| {
+            // SAFETY: test-only read of a live handle.
+            let x = unsafe { &(*e).0 };
+            (x.left_full_chars(), x.recur_pairs())
+        };
+        assert!(set_left(e, "前文 Joe") == 0 && held(e) == (3, 1), "left text held");
         for c in ['v', 'u', 'p'] {
             assert!(send(e, key(CHAR, c)).0 == 0, "typing");
         }
@@ -1305,11 +1484,149 @@ mod tests {
         assert!(rc == 4, "panic maps to code 4");
         assert!(o.is_null(), "out is NULL after a panic");
         assert!(PAYLOAD.with(|p| p.borrow().contains(MARKER)), "payload carries the marker");
-        assert!(unsafe { &(*e).0 }.left_full_chars() == 0, "the left text went with the reset after code 4");
+        assert!(held(e) == (0, 0), "the left text went with the reset after code 4");
         let (rc, preedit, _) = send(e, key(LEFT, '\0'));
         assert!(rc == 0 && preedit.is_empty(), "engine was reset after code 4");
         unsafe { shanjie_engine_free(e) };
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The context recurrence set (docs/spec/decoder.md §4.6) over the C ABI: NULL, "" and text that is not UTF-8 (code 2)
+    /// each empty it, with `left_full`, and ㄈㄢˇ ㄧㄥˋ then shows what it shows with no left text (反應); right after a left text holding 反映 it
+    /// shows 反映. The real lexicon and n-gram model.
+    #[test]
+    fn null_empty_and_non_utf8_left_texts_clear_the_recurrence_set() {
+        let e = new_engine(&root().join("data/lexicon"), 0);
+        let lm = CString::new(root().join("data/lm/bigram.sjlm").to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "load_lm");
+        let held = || {
+            // SAFETY: test-only read of a live handle.
+            let x = unsafe { &(*e).0 };
+            (x.left_full_chars(), x.recur_pairs())
+        };
+        let shown = || {
+            let mut p = String::new();
+            for k in ["ㄈㄢˇ", "ㄧㄥˋ"].iter().flat_map(|s| keys_of(Layout::Standard, s)) {
+                let (rc, preedit, _) = send(e, k);
+                assert!(rc == 0, "typing");
+                p = preedit;
+            }
+            assert!(send(e, key(ESC, '\0')).0 == 0);
+            p
+        };
+        let with_a = "昨天看到的反映讓人在意，我說Joe";
+        assert!(set_left(e, with_a) == 0 && shown() == "反映", "premise: the left text decides");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        for what in ["NULL", "empty", "not UTF-8"] {
+            assert!(set_left(e, with_a) == 0 && held() == (3, crate::lm::RecurGrams::from_text(with_a).len()) && held().1 > 0, "{what}: premise, held");
+            let rc = match what {
+                "NULL" => unsafe { shanjie_engine_set_left_context(e, ptr::null()) },
+                "empty" => set_left(e, ""),
+                _ => unsafe { shanjie_engine_set_left_context(e, bad_utf8.as_ptr()) },
+            };
+            assert!(rc == if what == "not UTF-8" { SHANJIE_ERR_INVALID } else { SHANJIE_OK }, "{what}: code");
+            assert!(held() == (0, 0), "{what}: cleared");
+            assert!(shown() == "反應", "{what}: as with no left text");
+        }
+        unsafe { shanjie_engine_free(e) };
+    }
+
+    /// docs/spec/semantic-rerank.md §3.1.1 over the C ABI: the real lexicon, n-gram model, small model and colloquial table, rerank on. The fixture of
+    /// core/tests/engine_pool_recur.rs: after its 44-character left text the jobs of ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ carry a pool weight and 語義也錯字 stays;
+    /// with no left text they carry none.
+    const POOL_LEFT: &str = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（";
+    const POOL_READING: [&str; 5] = ["ㄩˇ", "ㄧˋ", "ㄧㄝˇ", "ㄘㄨㄛˋ", "ㄗˋ"];
+
+    fn pool_engine() -> *mut ShanjieEngine {
+        let e = new_engine(&root().join("data/lexicon"), 0);
+        let path = |f: &str| CString::new(root().join("data/lm").join(f).to_str().unwrap()).unwrap();
+        assert!(unsafe { shanjie_engine_load_lm(e, path("bigram.sjlm").as_ptr()) } == 0, "load_lm");
+        assert!(unsafe { shanjie_engine_load_tinylm(e, path("tinylm.sjtl").as_ptr()) } == 0, "load_tinylm");
+        assert!(unsafe { shanjie_engine_load_colloquial(e, path("colloquial.sjlm").as_ptr()) } == 0, "load_colloquial");
+        assert!(set_rerank(e, 1).0 == 0, "rerank on");
+        e
+    }
+
+    /// Types `syls` through the C ABI, running and applying every job; (the preedit, whether any job carried a pool weight).
+    fn pool_type(e: *mut ShanjieEngine, syls: &[&str]) -> (String, bool) {
+        let (mut shown, mut weighted) = (String::new(), false);
+        for k in syls.iter().flat_map(|s| keys_of(Layout::Standard, s)) {
+            let (rc, preedit, _) = send(e, k);
+            assert!(rc == 0, "typing");
+            shown = preedit;
+            let (rc, j) = take(e);
+            assert!(rc == 0, "take");
+            if !j.is_null() {
+                // SAFETY: test-only read of a live job.
+                weighted |= unsafe { &(*j).job }.pool_bonus().iter().flatten().any(|&b| b != 0.0);
+                assert!(unsafe { shanjie_rerank_run(j) } == 0, "run");
+                let (rc, p) = apply(e, j);
+                if rc == 0 {
+                    shown = p;
+                }
+                unsafe { shanjie_rerank_free(j) };
+            }
+        }
+        (shown, weighted)
+    }
+
+    /// NULL, "" and text that is not UTF-8 each leave the next composition without the pool weight (its jobs carry none, and it shows what it shows with
+    /// no left text); right after the long left text the weight acts.
+    #[test]
+    fn null_empty_and_non_utf8_left_texts_turn_the_pool_weight_off() {
+        let e = pool_engine();
+        let none = pool_type(e, &POOL_READING);
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(!none.1, "no left text, no weight");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        for what in ["NULL", "empty", "not UTF-8"] {
+            assert!(set_left(e, POOL_LEFT) == 0);
+            let on = pool_type(e, &POOL_READING);
+            assert!(send(e, key(ESC, '\0')).0 == 0);
+            assert!(on.1 && on.0 == "語義也錯字" && on.0 != none.0, "{what}: premise, the weight acts");
+            assert!(set_left(e, POOL_LEFT) == 0);
+            let rc = match what {
+                "NULL" => unsafe { shanjie_engine_set_left_context(e, ptr::null()) },
+                "empty" => set_left(e, ""),
+                _ => unsafe { shanjie_engine_set_left_context(e, bad_utf8.as_ptr()) },
+            };
+            assert!(rc == if what == "not UTF-8" { SHANJIE_ERR_INVALID } else { SHANJIE_OK }, "{what}: code");
+            assert!(pool_type(e, &POOL_READING) == none, "{what}: as with no left text");
+            assert!(send(e, key(ESC, '\0')).0 == 0);
+        }
+        unsafe { shanjie_engine_free(e) };
+    }
+
+    /// Code 4 (an injected panic in a key) resets the engine: the composition after it carries no pool weight and shows what it shows with no left
+    /// text; the same engine with the left text set again weighs the pool.
+    #[test]
+    fn child_panic_pool_weight() {
+        if !is_child("child_panic_pool_weight") {
+            return;
+        }
+        let e = pool_engine();
+        let none = pool_type(e, &POOL_READING);
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_left(e, POOL_LEFT) == 0);
+        pool_type(e, &POOL_READING[..2]);
+        ARMED.with(|a| a.set(true));
+        let mut o: *mut ShanjieOutput = ptr::NonNull::dangling().as_ptr();
+        let k = keys_of(Layout::Standard, POOL_READING[2])[0];
+        assert!(unsafe { shanjie_engine_key(e, k, &mut o) } == 4 && o.is_null(), "panic maps to code 4");
+        let after = pool_type(e, &POOL_READING);
+        assert!(after == none && !after.1, "no weight after code 4");
+        assert!(send(e, key(ESC, '\0')).0 == 0);
+        assert!(set_left(e, POOL_LEFT) == 0);
+        let again = pool_type(e, &POOL_READING);
+        assert!(again.1 && again.0 == "語義也錯字", "premise: the left text set again acts");
+        unsafe { shanjie_engine_free(e) };
+    }
+
+    #[test]
+    fn pool_weight_after_code_4() {
+        let (ok, out, err) = run_child("child_panic_pool_weight", false);
+        assert!(ok, "pool weight child failed: {err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
     }
 
     #[test]
@@ -2228,6 +2545,19 @@ mod tests {
         let (_, _, preedit) = type_out(e, "ls_");
         assert!(preedit == "ls", "guard off: the English token");
         assert!(send(e, key(ESC, '\0')).0 == 0);
+        // set_english_auto (docs/spec/english-mixed.md §16.7): the same codes; no table is loaded here, so the switch changes no key.
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_english_auto(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "auto engine NULL");
+        assert!(unsafe { shanjie_engine_set_english_auto(e, 1, ptr::null_mut()) } == 1, "auto out NULL");
+        for v in [2, u32::MAX, 0, 1] {
+            let mut o: *mut ShanjieOutput = sentinel();
+            let rc = unsafe { shanjie_engine_set_english_auto(e, v, &mut o) };
+            assert!(rc == if v > 1 { 2 } else { 0 } && o.is_null() == (v > 1), "auto codes");
+            if rc == 0 {
+                assert!(unsafe { (*o).handled } == 1);
+                unsafe { shanjie_output_free(o) };
+            }
+        }
         // The key-order cases below are trigger (b) itself, so the guard stays off for them.
         // set_english_key_order (docs/spec/english-mixed.md §11): the codes of set_english_overwrite, then the switch through the C ABI. On
         // (the default), `p v` is out of column order and reverts; off, the symbol goes into its column.
@@ -2837,5 +3167,162 @@ mod tests {
         let (ok, out, err) = run_child("child_rerank_panic", true);
         assert!(ok && out.contains("1 passed"), "default-hook child failed");
         assert!(err.contains(RERANK_NGRAM) && err.contains(LEFT_MARKER), "positive control: default hook did not print the text");
+    }
+    // ---- shared parts (docs/spec/c-abi.md §5.4): share, new_shared, shared_free ----
+
+    fn real_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    }
+    fn cpath(p: &Path) -> CString {
+        CString::new(p.to_str().unwrap()).unwrap()
+    }
+
+    /// A copy of the real data folder (files only), so a file can be taken out and put back.
+    fn data_copy(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("shanjie-ffi-share-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for f in std::fs::read_dir(real_root().join("data/lexicon")).unwrap() {
+            let f = f.unwrap();
+            if f.file_type().unwrap().is_file() {
+                std::fs::copy(f.path(), d.join(f.file_name())).unwrap();
+            }
+        }
+        d
+    }
+
+    /// 你好 typed on the standard layout; the preedit it leaves (the engine is reset after).
+    fn types_nihao(e: *mut ShanjieEngine) -> bool {
+        let mut last = String::new();
+        for (kind, c) in [(CHAR, 's'), (CHAR, 'u'), (CHAR, '3'), (CHAR, 'c'), (CHAR, 'l'), (CHAR, '3')] {
+            let (rc, preedit, _) = send(e, key(kind, c));
+            if rc != 0 {
+                return false;
+            }
+            last = preedit;
+        }
+        let mut o = ptr::null_mut();
+        let rc = unsafe { shanjie_engine_reset(e, 1, &mut o) };
+        unsafe { shanjie_output_free(o) };
+        rc == 0 && last == "你好"
+    }
+
+    /// An engine from the files, with the model: the source of every `share` below.
+    fn source_engine(dir: &Path, packs_dir: &Path, packs: u32) -> *mut ShanjieEngine {
+        let (d, p) = (cpath(dir), cpath(packs_dir));
+        let lm = cpath(&real_root().join("data/lm/bigram.sjlm"));
+        let mut e = ptr::null_mut();
+        assert!(unsafe { shanjie_engine_new_packs(d.as_ptr(), 0, p.as_ptr(), packs, &mut e) } == 0, "source engine");
+        assert!(unsafe { shanjie_engine_load_lm(e, lm.as_ptr()) } == 0, "source load_lm");
+        e
+    }
+
+    #[test]
+    fn child_share() {
+        if !is_child("child_share") {
+            return;
+        }
+        let dir = data_copy("codes");
+        let packs = real_root().join("data/packs");
+        let (pk, pk_none) = (cpath(&packs), CString::new("/nonexistent/shanjie-packs").unwrap());
+        let mut sh: *mut ShanjieShared = sentinel_shared();
+        let mut ne: *mut ShanjieEngine = ptr::NonNull::dangling().as_ptr();
+
+        // share: NULL engine and NULL out are 1 (*out cleared when it can be); an engine without a model is 3, *out NULL.
+        assert!(unsafe { shanjie_engine_share(ptr::null_mut(), &mut sh) } == 1 && sh.is_null(), "share engine NULL");
+        let bare = new_engine(&dir, 0);
+        assert!(unsafe { shanjie_engine_share(bare, ptr::null_mut()) } == 1, "share out NULL");
+        sh = sentinel_shared();
+        assert!(unsafe { shanjie_engine_share(bare, &mut sh) } == 3 && sh.is_null(), "share without a model");
+        unsafe { shanjie_engine_free(bare) };
+
+        // The source, and one handle of it.
+        let src = source_engine(&dir, &packs, 29);
+        assert!(unsafe { shanjie_engine_share(src, &mut sh) } == 0 && !sh.is_null(), "share");
+
+        // new_shared: the argument codes, *out NULL on every non-zero.
+        let mut call = |shared: *const ShanjieShared, layout: u32, pdir: *const c_char, mask: u32| {
+            ne = ptr::NonNull::dangling().as_ptr();
+            let rc = unsafe { shanjie_engine_new_shared(shared, layout, pdir, mask, &mut ne) };
+            (rc, ne)
+        };
+        assert!(call(ptr::null(), 0, pk.as_ptr(), 1) == (1, ptr::null_mut()), "shared NULL");
+        assert!(call(sh, 0, ptr::null(), 1) == (1, ptr::null_mut()), "packs_dir NULL with a mask");
+        assert!(unsafe { shanjie_engine_new_shared(sh, 0, pk.as_ptr(), 1, ptr::null_mut()) } == 1, "out NULL");
+        assert!(call(sh, 2, pk.as_ptr(), 1) == (2, ptr::null_mut()), "layout 2");
+        assert!(call(sh, 0, pk.as_ptr(), 32) == (2, ptr::null_mut()), "an unknown mask bit");
+        let bad_utf8 = CString::new(vec![0xffu8, 0xfe]).unwrap();
+        assert!(call(sh, 0, bad_utf8.as_ptr(), 1) == (2, ptr::null_mut()), "packs_dir not UTF-8");
+        // Mask 0 ignores packs_dir, even NULL.
+        let (rc, e0) = call(sh, 0, ptr::null(), 0);
+        assert!(rc == 0 && !e0.is_null() && types_nihao(e0), "mask 0, no packs_dir");
+        unsafe { shanjie_engine_free(e0) };
+        // A pack file that exists but is broken is 3; a missing one contributes nothing.
+        let bad_packs = std::env::temp_dir().join(format!("shanjie-ffi-share-{}-badpack", std::process::id()));
+        std::fs::create_dir_all(&bad_packs).unwrap();
+        std::fs::write(bad_packs.join("acg-add.tsv"), "not a pack row\n").unwrap();
+        let bp = cpath(&bad_packs);
+        assert!(call(sh, 0, bp.as_ptr(), 1) == (3, ptr::null_mut()), "a broken pack file");
+        let (rc, e1) = call(sh, 0, pk_none.as_ptr(), 31);
+        assert!(rc == 0 && types_nihao(e1), "no pack files at all is the engine without packs");
+        unsafe { shanjie_engine_free(e1) };
+        std::fs::remove_dir_all(&bad_packs).unwrap();
+
+        // The failure after the lexicon is built: the reading step (std-exempt.tsv gone). No engine, for mask 0 and for 29; once the file is
+        // back the same handle builds, and the engine types.
+        let exempt = dir.join(crate::engine::READING_EXEMPT_FILE);
+        let keep = std::fs::read(&exempt).unwrap();
+        std::fs::remove_file(&exempt).unwrap();
+        for mask in [0, 29] {
+            assert!(call(sh, 0, pk.as_ptr(), mask) == (3, ptr::null_mut()), "std-exempt.tsv gone, mask {mask}: code 3 and no engine");
+        }
+        std::fs::write(&exempt, keep).unwrap();
+        for mask in [0, 29] {
+            let (rc, e) = call(sh, 0, pk.as_ptr(), mask);
+            assert!(rc == 0 && !e.is_null() && types_nihao(e), "the file is back, mask {mask}");
+            unsafe { shanjie_engine_free(e) };
+        }
+
+        // Free the source: the handle still serves, and a free of NULL does nothing.
+        unsafe { shanjie_engine_free(src) };
+        let (rc, e) = call(sh, 0, pk.as_ptr(), 28);
+        assert!(rc == 0 && types_nihao(e), "after the source is freed");
+        unsafe { shanjie_engine_free(e) };
+        unsafe { shanjie_shared_free(ptr::null_mut()) };
+
+        // Another thread builds with the handle while this thread types on the source's successor.
+        let src2 = source_engine(&dir, &packs, 29);
+        let mut sh2 = sentinel_shared();
+        assert!(unsafe { shanjie_engine_share(src2, &mut sh2) } == 0);
+        let (shared_addr, pk2) = (sh2 as usize, pk.clone());
+        let built = std::thread::spawn(move || {
+            let mut out: *mut ShanjieEngine = ptr::null_mut();
+            let rc = unsafe { shanjie_engine_new_shared(shared_addr as *const ShanjieShared, 0, pk2.as_ptr(), 28, &mut out) };
+            (rc, out as usize)
+        });
+        for _ in 0..50 {
+            assert!(types_nihao(src2), "the source types while the other thread builds");
+        }
+        let (rc, addr) = built.join().unwrap();
+        let e = addr as *mut ShanjieEngine;
+        assert!(rc == 0 && !e.is_null() && types_nihao(e), "the engine built on another thread types here");
+        unsafe { shanjie_engine_free(e) };
+        unsafe { shanjie_engine_free(src2) };
+        unsafe { shanjie_shared_free(sh2) };
+        unsafe { shanjie_shared_free(sh) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn sentinel_shared() -> *mut ShanjieShared {
+        ptr::NonNull::dangling().as_ptr()
+    }
+
+    /// docs/spec/c-abi.md §5.4 through the C ABI: the codes, nothing half-built, the handle outliving the source, a build on another thread.
+    #[test]
+    fn share_and_new_shared_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_share", false);
+        assert!(ok, "shared parts child failed: {out}{err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }
 }

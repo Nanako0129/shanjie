@@ -554,7 +554,7 @@ open(opt("--rowstats"), "w").write("".join(f"{{i}}\\t{{int(i > bad)}}\\t0\\t3\\n
 sys.stderr.write(os.environ.get("FAKE_MODELS", {models!r}) + "\\n")
 if ("--no-colloquial" in a) != (not {co8!r}):  # the replay is told to leave the table out exactly when the version does not ship it
     sys.exit(3)
-tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + {rc!r} if {co8!r} else "") + {rd!r}
+tag = "replay-chat+ctx+acg+nopred+noen+lm:" + {lm8!r} + "+tl:" + {tl8!r} + ("+learn" if learn else "") + "+correct" + ("+colloq:" + {co8!r} + {rc!r} if {co8!r} else "") + {recur!r} + {rd!r}
 if os.environ.get("FAKE_TAG"): tag = os.environ["FAKE_TAG"]
 print("## " + os.path.basename(opt("--rows")) + "  " + tag + "  {{'n': %d, 'top1': %d, 'final_ok': %d, 'unfixable': 0, 'autocommits': 0, 'kyss': 0.9123, 'picks_per100': 1.5, 'rewrites': 3, 'top1_sha256': 'aa'}}" % (n, n - bad, n - bad))
 """
@@ -583,7 +583,7 @@ class ReplayRun(Tmp):
 
     def tag_parts(self):
         """The reading-channel mark (`rc`) and the reading term's marks (`rd`) the fake binary prints: a version before the decoder's reading term has `+rc`."""
-        return {"rc": "+rc", "rd": ""}
+        return {"rc": "+rc", "rd": "", "recur": ""}
 
     def replay(self, **env):
         a = types.SimpleNamespace(as_="v0.4.3")
@@ -663,7 +663,7 @@ class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
         return bench.sha_file(os.path.join(self.root, "data", "lexicon", "std-exempt.tsv"))[:8]
 
     def tag_parts(self):
-        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}+rm"}
+        return {"rc": "", "rd": f"+rd+rx:{self.rx8()}+rm", "recur": ""}
 
     def test_the_old_tags_are_refused(self):
         lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
@@ -671,6 +671,110 @@ class ReplayRunWithTheReadingTerm(ReplayRunWithTheColloquialTable):
         for tag in (base + "+rc", base, base + "+rc" + f"+rd+rx:{self.rx8()}+rm", base + "+rd+rx:00000000+rm", base + f"+rd+rx:{self.rx8()}"):
             with self.assertRaises(SystemExit, msg=tag):
                 self.replay(FAKE_TAG=tag)
+
+
+class ReplayRunWithTheRecurrenceTerm(ReplayRunWithTheReadingTerm):
+    """A version with `"recur": True` (docs/spec/decoder.md §4.6): the replay's tag has `+recur` right before the reading marks (copied from a
+    shanjie-replay summary line); the tag without it, or with it after the reading marks, is refused."""
+    SPEC = dict(ReplayRunWithTheReadingTerm.SPEC, recur=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "recur": "+recur"}
+
+    def test_the_tags_without_the_mark_or_with_it_in_the_wrong_place_are_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        base, rd = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}", f"+rd+rx:{self.rx8()}+rm"
+        for tag in (base + rd, base + rd + "+recur", base + "+recur"):
+            with self.assertRaises(SystemExit, msg=tag):
+                self.replay(FAKE_TAG=tag)
+
+    def test_the_version_without_the_key_does_not_take_the_mark(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        with mock.patch.dict(bench.VERSIONS2, {"v0.4.3": ReplayRunWithTheReadingTerm.SPEC}), self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+rd+rx:{self.rx8()}+rm")
+
+
+class ReplayRunWithThePoolWeight(ReplayRunWithTheRecurrenceTerm):
+    """A version with `"pool_recur": True` besides `"recur": True` (docs/spec/semantic-rerank.md §3.1.1): with the small model the replay's tag reads `+recur+pr`
+    before the reading marks; `+recur` alone, or `+pr` elsewhere, is refused, and a version with only `"recur"` refuses `+recur+pr`."""
+    SPEC = dict(ReplayRunWithTheRecurrenceTerm.SPEC, pool_recur=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "recur": "+recur+pr"}
+
+    def test_the_tags_without_the_mark_or_with_it_in_the_wrong_place_are_refused(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        base, rd = f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}", f"+rd+rx:{self.rx8()}+rm"
+        for tag in (base + "+recur" + rd, base + rd, base + "+pr+recur" + rd, base + "+recur" + rd + "+pr"):
+            with self.assertRaises(SystemExit, msg=tag):
+                self.replay(FAKE_TAG=tag)
+
+    def test_the_version_without_the_key_does_not_take_the_mark(self):
+        lm8, tl8, co8 = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8]
+        with mock.patch.dict(bench.VERSIONS2, {"v0.4.3": ReplayRunWithTheRecurrenceTerm.SPEC}), self.assertRaises(SystemExit):
+            self.replay(FAKE_TAG=f"replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}+rm")
+
+    def test_without_the_small_model_the_mark_is_recur_alone(self):
+        """No small model (and so no colloquial table): no pool to weigh, so `replay_cell` wants `+recur` alone. The fake run reports 0 rows, so the call
+        fails at the row count, the check after the tag's; `+recur+pr` fails at the tag."""
+        models = {k: v for k, v in self.models.items() if k not in ("tinylm.sjtl", "colloquial.sjlm")}
+        lm8, rows = models["bigram.sjlm"][:8], self.rows["user-reported"][0]
+        for mark, at in (("+recur", "replay scored"), ("+recur+pr", "setting tag")):
+            out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}-notinylm+correct{mark}+rd+rx:{self.rx8()}+rm  {{'n': 0}}"
+            with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(models), stdout=out)):
+                with self.assertRaises(RuntimeError) as e:
+                    kpi.replay_cell("b", self.root, rows, models, False, os.path.join(self.td, "rs"), "+acg", True, True, True)
+            self.assertIn(at, str(e.exception), mark)
+
+
+class ReplayRunWithTheSyllableNorm(ReplayRunWithThePoolWeight):
+    """A version with `"reading_norm": True` (the reading term's syllable normalisation, docs/spec/decoder.md §5): its replay tag ends in `+rm+rn` (the
+    inherited runs accept it) and `+rm` alone is refused; a version without the key ends in `+rm` (the classes above) and refuses `+rm+rn`."""
+    SPEC = dict(ReplayRunWithThePoolWeight.SPEC, reading_norm=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "rd": f"+rd+rx:{self.rx8()}+rm+rn"}
+
+    def test_each_form_passes_the_tag_check_of_its_own_version_only(self):
+        """`replay_cell` directly (the run through `cmd_replay` replaces VERSIONS2 with this class's SPEC). The fake run reports 0 rows, so a call
+        whose tag is accepted fails at the row count, the check after the tag's; the other form fails at the tag."""
+        lm8, tl8, co8, rows = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8], self.rows["user-reported"][0]
+        for norm in (True, False):
+            for tail in ("+rm+rn", "+rm"):
+                out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}{tail}  {{'n': 0}}"
+                with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(self.models), stdout=out)):
+                    with self.assertRaises(RuntimeError) as e:
+                        kpi.replay_cell("b", self.root, rows, self.models, False, os.path.join(self.td, "rs"), "+acg", True, True, True, norm)
+                self.assertIn("replay scored" if norm == (tail == "+rm+rn") else "setting tag", str(e.exception), (norm, tail))
+
+    def test_the_run_passes_the_versions_key_on(self):
+        self.replay()                                   # the fake binary prints `+rm+rn`: accepted with the key
+        with mock.patch.object(self, "SPEC", ReplayRunWithThePoolWeight.SPEC), self.assertRaises(SystemExit):
+            self.replay()                               # the same binary under a version without the key: refused
+
+
+class ReplayRunWithTone3(ReplayRunWithTheSyllableNorm):
+    """A version with `"tone3": True` (third-tone sandhi, docs/spec/decoder.md §6.6): its replay tag ends in `+t3` after the reading marks (the inherited runs
+    accept it) and the tag without it is refused; a version without the key refuses `+t3`."""
+    SPEC = dict(ReplayRunWithTheSyllableNorm.SPEC, tone3=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "rd": f"+rd+rx:{self.rx8()}+rm+rn+t3"}
+
+    def test_each_form_passes_the_tag_check_of_its_own_version_only(self):
+        lm8, tl8, co8, rows = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8], self.rows["user-reported"][0]
+        for t3 in (True, False):
+            for tail in ("+rm+rn+t3", "+rm+rn"):
+                out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}{tail}  {{'n': 0}}"
+                with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(self.models), stdout=out)):
+                    with self.assertRaises(RuntimeError) as e:
+                        kpi.replay_cell("b", self.root, rows, self.models, False, os.path.join(self.td, "rs"), "+acg", True, True, True, True, t3)
+                self.assertIn("replay scored" if t3 == (tail == "+rm+rn+t3") else "setting tag", str(e.exception), (t3, tail))
+
+    def test_the_run_passes_the_versions_key_on(self):
+        self.replay()                                   # the fake binary prints `+t3`: accepted with the key
+        with mock.patch.object(self, "SPEC", ReplayRunWithTheSyllableNorm.SPEC), self.assertRaises(SystemExit):
+            self.replay()                               # the same binary under a version without the key: refused
 
 
 # ---------- run ----------

@@ -8,9 +8,10 @@ fn run(args: &[&str]) -> String {
 
 /// `run` for the LM-mode goldens that the Python reference (`reference/proto/lm_eval.py`) produced: Python has no reading term
 /// (docs/spec/decoder.md §5), so they are compared with `--no-reading-decode`, the decoder it implements. The shipping default, which has the term,
-/// is pinned by `shipping_default_matches_its_rust_only_pins`.
+/// is pinned by `shipping_default_matches_its_rust_only_pins`. Python has no context-recurrence term either: `--no-recur`; nor third-tone sandhi
+/// (docs/spec/decoder.md §6.6): `--no-tone3`.
 fn run_py(args: &[&str]) -> String {
-    run(&[args, &["--no-reading-decode"]].concat())
+    run(&[args, &["--no-reading-decode", "--no-recur", "--no-tone3"]].concat())
 }
 
 #[test]
@@ -109,6 +110,9 @@ fn lm_context_mode_matches_golden_byte_for_byte() {
 /// the user-reported rows, in both profiles: first the s2h arguments (`--context`, the n-gram alone), then the shipping flags (`--context --packs acg,it,meme,beauty
 /// --tinylm data/lm/tinylm.sjtl`, chat also `--colloquial-core data/lm/colloquial.sjlm`, with `--name <set>-ship`). Regenerate with the same loop when a row is
 /// added to eval/dev/user-reported.txt (CONTRIBUTING.md, "Reported typos") or a model file changes: eval/golden/reading-decode-shipping.txt.
+/// The default has the context recurrence term (docs/spec/decoder.md §4.6), so every line's tag has `+recur` (the n-gram-only lines too: `--context` builds
+/// the set from the row's context column), and the shipping lines also its pool weight (docs/spec/semantic-rerank.md §3.1.1: `+recur+pr`, which picks the
+/// same rows here: no context of these sets reaches 32 characters with a recurring pair in a pool).
 #[test]
 fn shipping_default_matches_its_rust_only_pins() {
     let (lm, root) = (lm_path(), concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
@@ -357,8 +361,8 @@ fn kn_side_file_beside_the_model_is_announced_and_can_be_turned_off() {
     let (lm, rows) = (format!("{root}/eval/golden/kn-tiny/bigram.sjlm"), std::env::temp_dir().join(format!("shanjie-kn-rows-{}.txt", std::process::id())));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let args = |extra: &[&'static str]| {
-        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5)
-        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode"];
+        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5), no third-tone sandhi (§6.6)
+        let mut a = vec!["--lm", lm.as_str(), "--profile", "chat", "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode", "--no-tone3"];
         a.extend(extra);
         run(&a)
     };
@@ -385,8 +389,8 @@ fn each_profile_reads_only_its_own_trigram_table() {
     let (lm, rows) = (dir.join("bigram.sjlm"), dir.join("rows.txt"));
     std::fs::write(&rows, "|他占|ㄊㄚ ㄓㄢˋ\n").unwrap();
     let go = |extra: &[&str]| {
-        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5)
-        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode"];
+        // the tags are lm_eval.py's: no reading term (docs/spec/decoder.md §5), no third-tone sandhi (§6.6)
+        let mut a = vec!["--lm", lm.to_str().unwrap(), "--rows", rows.to_str().unwrap(), "--name", "t", "--no-reading-decode", "--no-tone3"];
         a.extend(extra);
         let out = Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(&a).output().unwrap();
         (out.status.success(), String::from_utf8(out.stdout).unwrap())

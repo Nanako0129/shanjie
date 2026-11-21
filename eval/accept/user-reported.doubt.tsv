@@ -1,0 +1,2 @@
+# 錯字回報裡盲判認為正解有疑義的列（docs/spec/evaluation.md §3.7）。每行：列號<TAB>列 SHA-256<TAB>結論。不改正解、不改分數，只列出來。
+152	51640b7de7091eeea0134c2eb748ada254c98bbe0d0e59a85836cace39bab132	gold judged unknown

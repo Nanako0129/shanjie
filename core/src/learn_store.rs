@@ -61,16 +61,20 @@ const ELOOP: i32 = 62;
 const F_FULLFSYNC: i32 = 51;
 #[cfg(target_os = "macos")]
 const F_BARRIERFSYNC: i32 = 85;
-// Linux (x86_64) values, only so the test suite can run off the Mac (the Windows box's WSL); nothing
-// ships for Linux. The same symlink and FIFO tests check them there.
+// Linux values, only so the test suite and the evaluation tools run off the Mac (the Windows box's WSL, x86_64 and Graviton cloud
+// machines); nothing ships for Linux. The same symlink and FIFO tests check them there. O_NOFOLLOW is per architecture: x86_64 takes
+// the generic <asm-generic/fcntl.h> value, arm64 overrides it in <asm/fcntl.h> (O_DIRECTORY 040000, O_NOFOLLOW 0100000);
+// O_NONBLOCK and ELOOP are the generic values on both.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const O_NOFOLLOW: i32 = 0o400000;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const O_NOFOLLOW: i32 = 0o100000;
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 const O_NONBLOCK: i32 = 0o4000;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 const ELOOP: i32 = 40;
-#[cfg(all(target_os = "linux", not(target_arch = "x86_64")))]
-compile_error!("learn_store.rs has <fcntl.h> values only for macOS and x86_64 Linux (O_NOFOLLOW differs by architecture)");
+#[cfg(all(target_os = "linux", not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+compile_error!("learn_store.rs has <fcntl.h> values only for macOS, x86_64 Linux and aarch64 Linux (O_NOFOLLOW differs by architecture)");
 
 #[cfg(unix)]
 extern "C" {

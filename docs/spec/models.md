@@ -339,7 +339,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 
 ### 8.3 常談配對
 
-- 常談（`colloquial.sjlm`）只在聊天設定、載入的會意檔的 SHA-256 等於 `core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256`（`356a37be…0a97c5de`）時生效（`colloquial::applies`）；其他情形核心的行為與沒有常談表時相同。換了會意檔卻沒換這個常數，常談會悄悄關掉，所以兩者要在同一個變更裡一起改，並用 CLI 聊天三檔的摘要行都有 `+colloq:81c2470d` 與新的 `+tl:<會意前 8 碼>` 確認。
+- 常談（`colloquial.sjlm`）只在聊天設定、載入的會意檔的 SHA-256 等於 `core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256`（`356a37be…0a97c5de`）時生效（`colloquial::applies`）；其他情形核心的行為與沒有常談表時相同。（評測 CLI 的 `--tinylm-paired` 量測時略過這個雜湊條件，`docs/spec/semantic-rerank.md` §4.6；出貨的判斷不變）。換了會意檔卻沒換這個常數，常談會悄悄關掉，所以兩者要在同一個變更裡一起改，並用 CLI 聊天三檔的摘要行都有 `+colloq:81c2470d` 與新的 `+tl:<會意前 8 碼>` 確認。
 - 常談表的內容與融合：見 `docs/spec/semantic-rerank.md`。常談表只有口語計數（詞彙 69,457、二元組合 365,888 條），用通語的計數詞表重數：口語計數檔 ×1 加公開口語池 ×1，繁體句不套 `TWPhrases`，剪枝門檻 2；不含 g0v 與論壇語料（含了之後記憶體超過預算，保守檔在私人的聊天集合上顯著變差）。
 - 常談表的署名清單 `colloquial-attribution.tsv` 與常談表同一次建置，每列有來源與句數，不含句子文字；`data/lm/colloquial-attribution.tsv` 的雜湊記在 `data/colloquial-attribution.tsv.sha256`，App 打包進 `Resources/LICENSES/`。
 

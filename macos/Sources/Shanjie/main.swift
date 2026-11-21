@@ -114,6 +114,11 @@ final class DefaultsFuzzyStore: FuzzyStore {
         get { (UserDefaults.standard.object(forKey: "fuzzyFlags") as? Int).flatMap { UInt32(exactly: $0) } }
         set { UserDefaults.standard.set(newValue.map { Int($0) }, forKey: "fuzzyFlags") }
     }
+    /// The 三聲變調 switch (docs/spec/decoder.md §6.6), key `tone3Sandhi`; absent means true.
+    var tone3Sandhi: Bool? {
+        get { UserDefaults.standard.object(forKey: "tone3Sandhi") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "tone3Sandhi") }
+    }
 }
 
 /// The "動漫與遊戲詞" switch (docs/spec/lexicon-and-packs.md §4.1, §4.2), key `acgPack` in the same domain; absent means on.
@@ -321,13 +326,15 @@ func runServer() -> Never {
         learningDirectory: Shell.learningURL(), dialogs: AlertDialogs(), demoteStore: DefaultsDemoteStore(), predictionStore: DefaultsPredictionStore(), abbreviationStore: DefaultsAbbreviationStore(), englishStore: DefaultsEnglishStore(), acgPackStore: DefaultsAcgPackStore(), quotePackStore: DefaultsQuotePackStore(),
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
-        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), fuzzyStore: DefaultsFuzzyStore(),
+        profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), packBuilder: QueuePackBuilder(), fuzzyStore: DefaultsFuzzyStore(),
         // 可省略韻母 does not ship in v0.4.0; see Shell.showsAbbreviation. Flip to true to offer it again.
         // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
         // device check confirms the menu has no 可省略韻母.
         showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), beautyPackStore: DefaultsBeautyPackStore(), memePackStore: DefaultsMemePackStore(),
         shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
-        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore())
+        englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore(),
+        // docs/spec/macos-shell.md §13.1: the only place the real counter is passed; no permission needed.
+        flagsCounter: { CGEventSource.counterForEventType(.combinedSessionState, eventType: .flagsChanged) })
     // docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)

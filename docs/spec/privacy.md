@@ -9,6 +9,7 @@
 - 輸入法程序（`善解輸入法.app/Contents/MacOS/shanjie`）會碰到的使用者資料只有：組字與候選、游標前的文字、前景 App 的 bundle ID、學習檔、偏好設定。
 - 目前的程式裡沒有任何雲端功能、帳號、遙測，也不讀剪貼簿、不發 Apple events、不建 XPC 連線、不啟動子程序、不用鑰匙圈。核心（Rust）沒有網路程式碼。
 - 唯一的對外連線是更新探測（§8）。
+- 殼不需要任何權限，會讀兩個系統層級的數值：距離上一次滑鼠按下的時間（判斷 Shift 是不是單按，`Shell.mouseAgo`），以及修飾鍵事件的累計數（診斷紀錄 §11，只在記憶體裡和輸入法收到的數量比成「全部、部分、沒有」三個值）。兩者都不含按了哪個鍵、打了什麼字。
 - 診斷紀錄（§11）只在輸入法程序的記憶體裡；只有使用者按「複製診斷紀錄…」、看過全文、按「複製」時才寫進剪貼簿。
 - 組字、候選、前文、送出的文字、路徑、bundle ID 不進任何日誌、錯誤訊息、當機報告（§3、§4）。診斷紀錄（§11）不是日誌：它在記憶體裡記 bundle ID，只經使用者的複製離開程序。
 - 寫到磁碟的使用者內容只有學習檔（§6）與偏好設定（§7）；兩者都只在使用者本機，不上傳。
@@ -41,7 +42,7 @@
 - C ABI 的每個匯出函式都包 `catch_unwind`，並安裝靜音的 panic hook（`core/src/ffi.rs` 的 `guard`、`quiet_panics`）；panic 變成回傳碼 4（`SHANJIE_ERR_INTERNAL`），不印 payload。
 - `panic = "abort"` 時建置失敗（`compile_error!`）：靜音機制依賴 unwind。
 - 核心的所有 `Err` 與 panic 訊息只帶錯誤種類與長度，不含輸入的讀音、文字或路徑。
-- `unsafe` 只在這幾處：C ABI（`ffi.rs`）；trigram 表的唯讀映射（`trigram.rs` 的 `Mapped`：Unix 的 `mmap`／`munmap`，Windows 的 `CreateFileMappingW`／`MapViewOfFile`）與 `lm.rs` 開表的那一呼叫；學習檔的 `fcntl`（`F_BARRIERFSYNC`／`F_FULLFSYNC`）與 `geteuid`（`learn_store.rs`）；取本地日期的 `time`／`localtime_r`、Windows 的 `GetLocalTime`（`learn.rs`）；會意在 macOS 走 Accelerate 的 `cblas_sgemm`、`vvtanhf`／`vvexpf`（`tinylm.rs`）；`lm.rs` 延長預測索引生命期的一處 `transmute`。
+- `unsafe` 只在這幾處：C ABI（`ffi.rs`）；trigram 表的唯讀映射（`trigram.rs` 的 `Mapped`：Unix 的 `mmap`／`munmap`，Windows 的 `CreateFileMappingW`／`MapViewOfFile`）與 `lm.rs` 開表的那一呼叫；學習檔的 `fcntl`（`F_BARRIERFSYNC`／`F_FULLFSYNC`）與 `geteuid`（`learn_store.rs`）；取本地日期的 `time`／`localtime_r`、Windows 的 `GetLocalTime`（`learn.rs`）；會意在 macOS 走 Accelerate 的 `cblas_sgemm`、`vvtanhf`／`vvexpf`（`tinylm.rs`）；會意在 x86-64 的向量化矩陣乘法（`tinylm.rs`）：`#[target_feature(enable = "avx2")]`／`"avx512f"` 的核心函式只在 `is_x86_feature_detected!` 成立後呼叫，`unsafe` 只用在那個呼叫點和切片區塊上的未對齊載入與儲存（`_mm256_loadu_ps`／`_mm256_storeu_ps`、`_mm512_loadu_ps`／`_mm512_storeu_ps`），長度前提和 Accelerate 一樣在進入前用 `assert!`（release 也檢查）；`lm.rs` 延長預測索引生命期的一處 `transmute`。
 - 學習紀錄在送出之後的處理（`engine.rs` 中送出後學習的區塊）自己有 `catch_unwind`：學習失敗不影響已經送出的文字。
 
 ## 5. 隱私閘門（privacyGate）與前文
@@ -54,17 +55,18 @@
   - 讀不到 bundle ID（空值也算）。判斷不了就擋。
 - 拒絕清單只在殼裡查表，不傳給核心、不記日誌、不存檔；使用者的「這個 App 用聊天設定」選擇不影響它。清單裡的 bundle ID 是依公開資料整理，沒有逐一在本機核對。
 - 閘門在每次可能學習的核心呼叫之前取樣，並且每次都傳給核心（重建後的引擎預設是停用）。選單在閘門生效時顯示一列不可點的「學習已暫停（安全輸入）」或「學習已暫停（此 App）」，固定字串，不含 App 名稱。
-- 英數直通（Command、Option、Control、Caps Lock 組合鍵與英文輸入）不暫存也不學，所以密碼與 `sudo` 不進任何狀態。
+- 英數直通（Command、Control、Caps Lock 組合鍵與英文輸入）不暫存也不學，所以密碼與 `sudo` 不進任何狀態。帶 Option 的組合鍵也直通，例外是中文模式下 Option 或 Option+Shift 加主鍵區的鍵（`docs/spec/keys-and-composition.md` 規則 1o）：那個鍵的全形字元像標點一樣進組字區，Enter 才送出；它是標點單位，不學。英數模式下這些鍵出的是不帶 Option 的字元，組字區空時由殼直接送給 App，不經核心、不暫存。
 - 終端機類 App 的學習照常開（使用者常在終端機打中文）；學習只收「注音模式下在候選窗改選、或從預測列選取的中文詞」與逐字改選處附近的連續漢字。
 
 ### 5.2 前文（游標前的文字）
 
 - 殼在組字開始時讀一次，只在記憶體：不寫檔、不寫偏好、不記日誌、不經 C ABI 回傳。
 - 不讀的情形：閘門生效；沒有插入點；組字區有 marked text（marked range 長度為 0 或 `NSNotFound` 才算沒有）。
-- 一般 App：向 App 要最多 256 個 UTF-16 單位，回傳的字串更長時只取最後 256 個並視為被截過；被截過時先去掉開頭可能被切斷的第一個 grapheme；從最後一個換行（Swift `Character.isNewline`）或 NUL 之後開始（NUL 當換行，不刪除）；留最後 64 個 grapheme，標點、空白、英文、emoji 都保留（同一則訊息、跨標點）。
+- 一般 App：向 App 要最多 256 個 UTF-16 單位，回傳的字串更長時只取最後 256 個並視為被截過；被截過時先去掉開頭可能被切斷的第一個 grapheme；從最後一個換行（Swift `Character.isNewline`）或 NUL 之後開始（NUL 當換行，不刪除）；留最後 64 個 grapheme，標點、空白、英文、emoji 都保留（同一行、跨標點）。
 - 終端機類 App（`com.apple.Terminal`、`com.googlecode.iterm2`、`dev.warp.Warp-Stable`、`net.kovidgoyal.kitty`、`com.github.wez.wezterm`、`org.alacritty`、`co.zeit.hyper`、`com.mitchellh.ghostty`）只傳結尾 ≤ 2 個漢字，因為終端機的一行裡有指令與輸出。內建終端機面板的編輯器與編輯區是同一個 bundle ID，不在清單內（已知限制）。清單裡只有前兩個核對過 Info.plist 的 `CFBundleIdentifier`，其餘依公開資料整理。
 - 核心只留用得到的長度：`self.left` 是結尾 ≤ 2 個漢字；`left_full` 是載入的會意模型宣告的前文長度 L 個字元，或（模型沒宣告 L 時）結尾 2–32 個 ASCII 字母的英文詞加一個空白，否則空。`left_full` 不經 C ABI 回傳、不寫學習檔、不跨程序、不給任何網路功能；會意工作只帶最後 L 個字元。
-- 送出、Esc、重置、回傳碼 4、自動送出都清掉前文。接受的殘留：已排進佇列的重排工作複本活到那次執行結束；Rust `String` 與 Swift 字串釋放時不清零；只有未完成符號時按 Esc 不經清除，前文留到下一次組字開始。
+- 前文重現項（`docs/spec/decoder.md` §4.6）另外多保存一個集合：前文最後 64 個字元裡兩個都是漢字的相鄰字元對（至多 63 個）。它不是原文，但從它可以拼回前文裡大部分的漢字片段，所以照原文的等級對待；英數與標點的字元對不收，密碼、網址、指令這類內容不進集合。它是引擎自己的欄位，只在記憶體；每次設前文都從新的前文重建；不經 C ABI 回傳（沒有讀出內容的函式，只有個數給測試用）、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給任何網路功能，也不在引擎之間共用的結構裡。字對集合本身不進重排工作；工作帶每條候選的加分與重排索引（`docs/spec/semantic-rerank.md` §3.1.1），是建工作時從它算出來的數字。和集合一起多記一個數：前文截到 64 之後的純量值個數（0–64，決定候選池的加重要不要生效），和集合同時重建、同時清除，同樣沒有讀出它的函式。學習照舊：使用者接受的字可能被學習記下，鍵仍只有 ≤ 2 個漢字。
+- 送出、Esc、重置、回傳碼 4、自動送出、規則 22 的直通都清掉前文（`left`、`left_full` 與漢字對集合一起清）；換會意模型只清 `left_full`。不重讀前文的組字開始（Ctrl+\ 等在空組字區開始組字的鍵）：`key()` 進來時組字區是空的、而且上一個鍵之後沒有設過前文，核心先清掉前文，所以 Backspace 刪到空、只有未完成符號時按 Esc 之後，舊前文不會用在下一次組字上。接受的殘留：已排進佇列的重排工作複本活到那次執行結束；Rust `String`、`HashSet` 與 Swift 字串釋放時不清零；工作複本裡的加分與重排索引釋放時也不清零。
 
 ## 6. 學習檔
 
@@ -75,7 +77,7 @@
 - 什麼會被學：
   - 只有在候選窗改選、或從預測列選取，才學；沒有改選的送出不新增任何字，只更新既有新詞的權重與日期。
   - 逐字改選學到的新詞，是送出文字裡含改選字的一段 2–4 個連續漢字（遇標點、非漢字、功能字切開，其中最多 3 字沒被改選），所以每次逐字改選，檔案裡最多出現改選處附近連續 6 個漢字（改選的那一段 ≤ 4 字，加前面 ≤ 2 字的前文鍵）。
-  - 學習檔不含沒被改選、也沒從預測列選過的內容；不含前文的原文（`left_full` 不落地）。
+  - 學習檔不含沒被改選、也沒從預測列選過的內容；不含前文的原文（`left_full` 與漢字對集合不落地）。
 - **清除**：選單「清除選字記憶…」先跳 `NSAlert`（不在選單裡二次確認，也不阻塞輸入法）。確認後刪除記憶、尚未寫入的學習，以及 `learning.tsv`、`learning.tsv.tmp`、`learning.tsv.corrupt` 三個檔；資料夾與不備份旗標保留。刪除失敗時顯示「清除選字記憶失敗」，不假裝成功。提示窗文字說明：清除只刪本機檔案，已進 Time Machine 備份或本機快照的副本不受影響。沒有成功開過學習檔（沒有 store）時清除回報失敗。
 - **備份**：預設會被 Time Machine 備份；選單「不要備份選字記憶」在資料夾上設 `isExcludedFromBackup`（設在資料夾，不設在檔案，因為清除會刪檔）；失敗時旗標與勾選不變。
 - 學習檔無法開啟或核心回報寫入失敗時，選單多一列不可點的「選字記憶無法存檔」。
@@ -107,8 +109,10 @@
 ## 10. 驗證
 
 - 日誌：`macos/Tests/ShanjieKitTests/LogTests.swift` 的 `testShellLogsNothingButStaticTextAndCodes`。另起 `/usr/bin/log stream --level debug --style ndjson`，只依行程過濾，同時擷取該行程的 stdout／stderr；先確認起始標記看得到，再重播帶標記的字串、bundle ID、路徑與左文，走過打字、滑鼠選字、非 0 回傳碼、重排、清除、備份、App 設定切換、設定視窗與缺檔的錯誤路徑，最後確認擷取內容與 stdout／stderr 都找不到任何標記，也沒有 `<private>`；並確認外殼自己的錯誤日誌（固定字串加回傳碼）確實進了擷取（正向對照）。verifier 在套用路徑加一行 `.public` 或 `NSLog` 時這個測試必須失敗。zsh 的 `log` 是內建指令，要寫 `/usr/bin/log`。
+- 前文的清除與不外流：`core/tests/engine_recur.rs`（集合只含兩個都是漢字的字元對且至多 63 個、每次設前文覆寫而非累加、NULL／空字串／不是 UTF-8 歸零、每一個清除點同時清空 `left_full` 與集合、換會意模型只清 `left_full`、Backspace 刪到空與 Esc 之後不留舊前文、組字中不清、兩個共用模型的引擎各有自己的集合），`core/src/ffi.rs` 的 C ABI 測試；候選池的加重在每個清除點、NULL／空字串／不是 UTF-8 與回傳碼 4 之後不生效（`core/tests/engine_pool_recur.rs`、`core/src/ffi.rs` 的 `null_empty_and_non_utf8_left_texts_turn_the_pool_weight_off`、`pool_weight_after_code_4`）；`LogTests` 另帶 64 字前文（含 ASCII 標記與漢字對標記）跑一輪，標記不出現在 log。
 - 核心的靜音 hook：`core/src/ffi.rs` 內的測試，含用預設 hook 時看得到訊息的正向對照。
-- 學習檔：`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk`、`r2_marker_characters_on_disk_with_subspans`（逐字改選一個標記字串後，標記字元只出現在含改選字的 ≤ 4 字段與前面 ≤ 2 字；沒有改選的送出不新增含標記的列；游標前的英文標記詞不出現在檔案裡）；`core/tests/learn_store.rs`（讀寫、損壞檔、權限；斷言失敗時不印紀錄內容）；`core/tests/engine_learn.rs` 的 `learning_panic_keeps_the_commit`。
+- 引擎間共用部分的 handle（`ShanjieShared`，`docs/spec/c-abi.md` §5.4）不含使用者輸入：只有模型、表與資料目錄的路徑，沒有前文、組字、候選或選字記憶；`core/src/engine.rs` 的 `shared_holds_only_models_tables_and_the_data_folder` 逐一列出欄位與型別，新增欄位就編譯不過、要重看這一條。路徑不寫進任何紀錄（`ffi.rs` 的子行程測試斷言輸出不含暫存資料夾的路徑）。
+- 學習檔：`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk`、`r2_marker_characters_on_disk_with_subspans`、`r2_marker_characters_on_disk_with_a_recurring_left_text`（逐字改選一個標記字串後，標記字元只出現在含改選字的 ≤ 4 字段與前面 ≤ 2 字；沒有改選的送出不新增含標記的列；游標前的英文標記詞不出現在檔案裡；最後一個測試用會翻轉選字的 64 字前文，前文裡沒送出的漢字不在檔案裡）；`core/tests/learn_store.rs`（讀寫、損壞檔、權限；斷言失敗時不印紀錄內容）；`core/tests/engine_learn.rs` 的 `learning_panic_keeps_the_commit`。
 - 閘門與清除：`macos/Tests/ShanjieKitTests/LearningTests.swift` 的 `testGatePausesOnSecureInputDenylistAndUnknownApps`、`testResetPathsWithSecureInputStoreNothing`、`testClearAsksInAWindowFirst`、`testClearRemovesFilesKeepsDirectoryAndFlag`、`testCoreClearFailureIsShown`、`testBackupIsOnByDefaultAndTheExclusionSurvivesAClear`。
 - 更新：`macos/Tests/ShanjieKitTests/UpdatesTests.swift` 的 `testShouldCheckDecision`；`macos/Tests/UpdateHostTests/UpdateHostTests.swift` 的 `testFeedURLFromInfoPlist`、`testWhichChecksMayRun`。
 - entitlements：CI `shell` job 的 entitlements 與 Sparkle 變造測試（`scripts/test-sandbox-mutations.sh`）與 `scripts/check-app.sh`。
@@ -118,9 +122,10 @@
 ## 11. 診斷紀錄
 
 規格在 `docs/spec/macos-shell.md` §13。隱私上的規則：
-- 欄位只有列舉、布林與清理過的 bundle ID（1–255 個 `[A-Za-z0-9._-]`，其他記 `?`）；不記打的字、組字、候選、前文、按鍵字元或鍵碼。
+- 欄位只有列舉、布林與清理過的 bundle ID（1–255 個 `[A-Za-z0-9._-]`，其他記 `?`）；不記打的字、組字、候選、前文、按鍵字元或鍵碼、修飾鍵事件的次數。
 - 只在記憶體：Shift 最多 200 筆、其他最多 800 筆；不寫檔、不用 `Logger`／`print`／檔案 I/O；程序結束就沒了。
 - 安全輸入期間不記 Shift（逐次的 Shift 會透露密碼裡有幾個要按 Shift 的字、用哪一側）；切換中英、換 App 這類狀態照記，所以安全輸入時的單按 Shift 仍留下一筆 `toggle`。不在安全輸入時，有 Shift 按著時打過鍵（大寫），到兩個 Shift 都放開、或下一次乾淨的按放為止只記真的切換；乾淨的按放之後的紀錄和更早打的鍵無關（`ShiftTapTests` 窮舉長度 7 以內的按鍵序列；理由是乾淨的按放之後狀態整個歸零）。
+- `flags` 事件（每個 App 的每段啟用期間，修飾鍵事件有沒有都送到輸入法）只記 `all`、`some`、`none` 三個值：不記次數、不記是哪個修飾鍵。每一段的兩個起點（系統的累計數與輸入法收到的數量當下的值）只以整數存在記憶體裡，區間結束、開關關掉或改變時捨棄；輸入法收到的累計數本身留在記憶體裡到程序結束。這些數字都不進日誌與匯出，也不參與三值以外的計算。「單按 Shift 切換中英」關著時不記。輸入法在那段期間的任何一個觀察點（任何 session 的每一次按鍵與修飾鍵事件、啟用、停用）看到安全輸入，那一段就不記。殘留的風險：安全輸入期間輸入法如果完全收不到事件，也沒有任何啟用或停用，就察覺不到那段安全輸入，那一段的修飾鍵活動仍會被比成三值之一（一段期間一個值，不含次數）。
 - 時間是匯出前幾秒，加上第一行的匯出時刻就能換算成時刻；紀錄留到輸入法結束，可能涵蓋好幾天，說明文字照寫。
 - 記錄不新增任何 IMK 讀取。
 - 不自動送出：複製前先顯示全文（不能選取，免得 ⌘C 走一般的複製）；剪貼簿用 `.currentHostOnly`，一次寫入同時帶 `org.nspasteboard.TransientType` 的項目。預設開，設定→診斷可關，關掉、打開都清空；在設定以外改這個開關時，收到 UserDefaults 的變更通知就清空，預覽開著時被清空就不複製（收不到通知的情形見 `docs/spec/macos-shell.md` §13.3）。

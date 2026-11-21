@@ -250,10 +250,10 @@ fn overlay_bad_rows_report_length_only() {
 fn tolerance_tables_are_built_on_first_use() {
     let l = lex("ㄓ 之 -1.0\nㄗ 子 -1.0\nㄅㄝ 憋 -1.0\n");
     assert!(l.tol.get().is_none(), "parsing builds nothing");
-    assert!(l.tolerant_words(&v(&["ㄗ"]), 0).is_empty());
-    assert!(l.tolerant_words(&v(&["ㄗ"]), fuzzy::FUZZY_ADJACENT).is_empty(), "bit 4 alone tolerates no known syllable");
+    assert!(l.tolerant_words(&v(&["ㄗ"]), 0, &[]).is_empty());
+    assert!(l.tolerant_words(&v(&["ㄗ"]), fuzzy::FUZZY_ADJACENT, &[]).is_empty(), "bit 4 alone tolerates no known syllable");
     assert!(l.tol.get().is_none(), "flags 0 (or the adjacent bit) and known syllables: no table");
-    assert_eq!(l.tolerant_words(&v(&["ㄗ"]), 0b10).iter().map(|x| x.0).collect::<Vec<_>>(), ["之"]);
+    assert_eq!(l.tolerant_words(&v(&["ㄗ"]), 0b10, &[]).iter().map(|x| x.0).collect::<Vec<_>>(), ["之"]);
     assert!(l.tol.get().is_some(), "a sound pair needs them");
 }
 
@@ -307,4 +307,281 @@ fn variant_order_names_a_spelling_the_lexicon_lacks_is_an_error() {
         let table = VariantOrder::parse(row).unwrap();
         assert_eq!(Lexicon::parse_with_variants(base, None, Some(&table)).err(), Some(Error::BadVariantOrder { line: 1 }), "{row:?}");
     }
+}
+
+// ---- pack-switch: the two rewrites that must not change a result (docs/spec/lexicon-and-packs.md §4.2) ----
+
+fn data_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+}
+
+/// Every field of two lexicons, the scores bit for bit.
+fn assert_same_lexicon(a: &Lexicon, b: &Lexicon, what: &str) {
+    assert_eq!(a.max_len, b.max_len, "{what}: max_len");
+    assert_eq!(a.syl_ids, b.syl_ids, "{what}: syl_ids");
+    assert_eq!(a.syl_names, b.syl_names, "{what}: syl_names");
+    assert_eq!(a.key_pool, b.key_pool, "{what}: key_pool");
+    assert_eq!(a.readings.len(), b.readings.len(), "{what}: reading count");
+    for (i, (x, y)) in a.readings.iter().zip(&b.readings).enumerate() {
+        assert_eq!((x.key_off, x.key_len, x.start), (y.key_off, y.key_len, y.start), "{what}: reading {i}");
+    }
+    assert_eq!(a.ents.len(), b.ents.len(), "{what}: entry count");
+    for (i, (x, y)) in a.ents.iter().zip(&b.ents).enumerate() {
+        assert_eq!((x.off, x.len, x.score.to_bits()), (y.off, y.len, y.score.to_bits()), "{what}: entry {i}");
+    }
+    assert_eq!(a.words, b.words, "{what}: words");
+    assert_eq!(a.by_word, b.by_word, "{what}: by_word");
+    assert_eq!(*a.manual, *b.manual, "{what}: manual set");
+    assert_eq!(a.variants, b.variants, "{what}: variant rows");
+}
+
+/// Both ways of the variant-order step on the same small texts: the same lexicon, or the same error.
+fn assert_variant_steps_agree(base: &str, table: &str) -> Result<Lexicon, Error> {
+    let t = VariantOrder::parse(table).unwrap();
+    let (new, old) = (Lexicon::parse_with_variants(base, None, Some(&t)), Lexicon::parse_applying(base, None, Some(&t), apply_variant_order_scanning));
+    match (&new, &old) {
+        (Ok(n), Ok(o)) => assert_same_lexicon(n, o, "small"),
+        (Err(n), Err(o)) => assert_eq!(n, o),
+        _ => panic!("one way failed, the other did not: {:?} / {:?}", new.as_ref().err(), old.as_ref().err()),
+    }
+    new
+}
+
+#[test]
+fn variant_order_one_pass_equals_the_scanning_step_on_small_tables() {
+    // Two rows under one reading (and a third under another): each keeps to its own `less`.
+    let l = assert_variant_steps_agree("a 甲 -1.0\na 乙 -0.5\na 丙 -0.2\na 丁 -4.0\nb 戊 -1\nb 甲 -3\n", "a\t乙\t甲\tt\na\t丙\t丁\tt\nb\t戊\t甲\tt\n").unwrap();
+    let es: Vec<(&str, f64)> = l.entries(&v(&["a"])).to_vec();
+    assert_eq!(es.iter().map(|e| e.0).collect::<Vec<_>>(), ["甲", "乙", "丁", "丙"], "{es:?}");
+    // `more` twice in the reading: its highest score counts, whichever row comes first in the file.
+    let l = assert_variant_steps_agree("a 甲 -3.0\na 甲 -1.0\na 乙 -0.5\n", "a\t乙\t甲\tt\n").unwrap();
+    assert_eq!(l.entries(&v(&["a"]))[0].0, "甲");
+    assert!((l.entries(&v(&["a"])).iter().find(|e| e.0 == "乙").unwrap().1 - (-1.0 - VARIANT_GAP)).abs() < 1e-12, "the gap is kept to the highest 甲");
+    // `less` under two readings, the table naming one: the other stays.
+    let l = assert_variant_steps_agree("a 甲 -1.0\na 乙 -0.5\nb 甲 -1.0\nb 乙 -0.5\n", "b\t乙\t甲\tt\n").unwrap();
+    assert_eq!(l.entries(&v(&["a"]))[0].0, "乙");
+    assert_eq!(l.entries(&v(&["b"]))[0].0, "甲");
+    // `less` twice in a reading: both rows are lowered.
+    assert_variant_steps_agree("a 甲 -1.0\na 乙 -0.5\na 乙 -0.4\n", "a\t乙\t甲\tt\n").unwrap();
+    // An unknown syllable, and a spelling not found under the reading: the same error and line as the scanning step.
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "z\t乙\t甲\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "a\t乙\t不在\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    // Both errors in one table: the row whose turn comes first is reported, in either order.
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "a\t乙\t不在\tt\nz\t乙\t甲\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "z\t乙\t甲\tt\na\t乙\t不在\tt\n").err(), Some(Error::BadVariantOrder { line: 1 }));
+    assert_eq!(assert_variant_steps_agree("a 甲 -1\na 乙 -2\n", "a\t乙\t甲\tt\nz\t乙\t甲\tt\na\t丙\t不在\tt\n").err(), Some(Error::BadVariantOrder { line: 2 }));
+}
+
+/// The texts `Engine::new_with_packs` parses (docs/spec/c-abi.md §8): base, the overlay rows (overlay, sandhi, names, the packs of `mask`), the variant-order table.
+fn real_lexicon_texts(mask: u32) -> (String, String, VariantOrder, std::time::Duration) {
+    let t0 = std::time::Instant::now();
+    let (dir, packs) = (data_root().join("data/lexicon"), data_root().join("data/packs"));
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let mut overlay = read("overlay-add.tsv");
+    for part in [read("sandhi-add.tsv"), read("names-add.tsv"), engine::read_packs_detailed(&packs, mask).unwrap()] {
+        if !overlay.is_empty() && !overlay.ends_with('\n') {
+            overlay.push('\n');
+        }
+        overlay.push_str(&part);
+    }
+    (read("mcbpmf-data.txt"), overlay, VariantOrder::parse(&read("variant-order.tsv")).unwrap(), t0.elapsed())
+}
+
+#[test]
+fn variant_order_one_pass_equals_the_scanning_step_on_the_real_lexicon() {
+    for mask in [0, engine::PACK_ALL] {
+        let (base, overlay, table, _) = real_lexicon_texts(mask);
+        let new = Lexicon::parse_with_variants(&base, Some(&overlay), Some(&table)).unwrap();
+        let old = Lexicon::parse_applying(&base, Some(&overlay), Some(&table), apply_variant_order_scanning).unwrap();
+        assert!(new.variants.len() > 10, "the shipped table has rows");
+        assert_same_lexicon(&new, &old, &format!("mask {mask}"));
+    }
+}
+
+fn spread(mut ms: Vec<f64>) -> (f64, f64, f64) {
+    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (ms[0], ms[ms.len() / 2], ms[ms.len() - 1])
+}
+
+/// Release only (`#[ignore]`; docs/spec/lexicon-and-packs.md §4.2): the lexicon built from text, the step as it was and as it is, alternating in one process, 10 each.
+/// `cargo test --release --locked -p core --lib tests::timing_variant_order_one_pass -- --ignored --nocapture --exact`
+#[test]
+#[ignore]
+fn timing_variant_order_one_pass() {
+    for mask in [0, 29] {
+        let (base, overlay, table, load) = real_lexicon_texts(mask);
+        let (mut old, mut new) = (Vec::new(), Vec::new());
+        for _ in 0..10 {
+            let t = std::time::Instant::now();
+            let a = Lexicon::parse_applying(&base, Some(&overlay), Some(&table), apply_variant_order_scanning).unwrap();
+            old.push(t.elapsed().as_secs_f64() * 1e3);
+            let t = std::time::Instant::now();
+            let b = Lexicon::parse_with_variants(&base, Some(&overlay), Some(&table)).unwrap();
+            new.push(t.elapsed().as_secs_f64() * 1e3);
+            assert_eq!(a.ents.len(), b.ents.len());
+        }
+        let (o, n) = (spread(old), spread(new));
+        println!("pack-switch timing: variant_order mask {mask} old min/median/max {:.0}/{:.0}/{:.0} ms  new min/median/max {:.0}/{:.0}/{:.0} ms  (load {:.0} ms)", o.0, o.1, o.2, n.0, n.1, n.2, load.as_secs_f64() * 1e3);
+        assert!(n.1 <= o.1 * 0.85, "mask {mask}: the median must be at least 15% less (old {:.0}, new {:.0})", o.1, n.1);
+    }
+}
+
+/// The capped lexicon of the shipping masks, for `Legal::new`.
+fn real_capped(mask: u32) -> (lm::Lm, lm::CappedLexicon) {
+    let (dir, packs) = (data_root().join("data/lexicon"), data_root().join("data/packs"));
+    let (lex, pack_text) = engine::load_lexicon_packs(&dir, Some((&packs, mask))).unwrap();
+    let overlay = engine::capping_overlay(&dir, &pack_text).unwrap();
+    let demote = lm::Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
+    let lm = lm::Lm::load(&data_root().join("data/lm/bigram.sjlm")).unwrap();
+    let oov = engine::read_packs_detailed(&packs, mask & engine::PACK_OOV).unwrap();
+    let capped = lm::CappedLexicon::with_packs(lex, &overlay, &oov, &lm, Some(&demote)).unwrap();
+    (lm, capped)
+}
+
+#[test]
+fn legal_once_per_syllable_equals_the_each_reading_step() {
+    // Small: one syllable in several readings, a reading with no Han word (a letter word only), a toned and a toneless syllable.
+    let rows: Vec<(Vec<&str>, Vec<(&str, f64)>)> = vec![
+        (vec!["ㄅ"], vec![("ㄅ", -1.0)]),
+        (vec!["ㄆ", "ㄚˊ"], vec![("爬", -1.0)]),
+        (vec!["ㄚˊ"], vec![("牙", -1.0), ("a", -2.0)]),
+        (vec!["ㄚˊ", "ㄅ"], vec![("ab", -1.0)]),
+    ];
+    let (a, b) = (digits::Legal::new(rows.clone().into_iter()), digits::Legal::new_each(rows.into_iter()));
+    assert!(a.sets() == b.sets(), "small: the two sets differ");
+    assert!(a.has_han_syllable("ㄚˊ") && !a.has_han_syllable("ㄅ"), "premise: a letter-word reading does not count");
+    for mask in [0, 29] {
+        let (lm, capped) = real_capped(mask);
+        let (a, b) = (digits::Legal::new(capped.readings(&lm)), digits::Legal::new_each(capped.readings(&lm)));
+        assert!(a.sets().0.len() > 100 && a.sets().1.len() > 100, "mask {mask}: the sets are not empty");
+        assert!(a.sets() == b.sets(), "mask {mask}: the two sets differ");
+    }
+}
+
+/// Release only (`#[ignore]`): `Legal::new` on the capped lexicon of mask 29, as it was and as it is, alternating, 10 each.
+/// `cargo test --release --locked -p core --lib tests::timing_legal_once_per_syllable -- --ignored --nocapture --exact`
+#[test]
+#[ignore]
+fn timing_legal_once_per_syllable() {
+    let t0 = std::time::Instant::now();
+    let (lm, capped) = real_capped(29);
+    let load = t0.elapsed().as_secs_f64() * 1e3;
+    let (mut old, mut new) = (Vec::new(), Vec::new());
+    for _ in 0..10 {
+        let t = std::time::Instant::now();
+        let a = digits::Legal::new_each(capped.readings(&lm));
+        old.push(t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        let b = digits::Legal::new(capped.readings(&lm));
+        new.push(t.elapsed().as_secs_f64() * 1e3);
+        assert!(a.sets() == b.sets());
+    }
+    let (o, n) = (spread(old), spread(new));
+    println!("pack-switch timing: legal_new mask 29 old min/median/max {:.0}/{:.0}/{:.0} ms  new min/median/max {:.0}/{:.0}/{:.0} ms  (load {load:.0} ms)", o.0, o.1, o.2, n.0, n.1, n.2);
+    assert!(n.1 <= o.1 * 0.5, "the median must be at least 50% less (old {:.0}, new {:.0})", o.1, n.1);
+}
+
+/// docs/spec/evaluation.md §3.6: forms-v2 puts the extra table's word pairs and forms.tsv's in one set, so one longest-match pass sees both.
+#[test]
+fn forms_v2_extra_pairs_join_one_longest_match() {
+    let base = || Forms::parse("# h\nword\t甲乙\t丙丁\nchar\t濕\t溼\tㄕ\n").unwrap();
+    let extra = "# h\nword\t甲乙戊\t己己己\tㄧ ㄧ ㄧ\t3/7\t字條 0\n";
+    let f = base().with_extra(extra).unwrap();
+    // the longer extra pair wins over the shorter forms.tsv pair on the same start; the shorter one still applies elsewhere
+    assert_eq!(f.apply("甲乙戊", &v(&["a", "b", "c"])), "己己己");
+    assert_eq!(f.apply("甲乙", &v(&["a", "b"])), "丙丁");
+    assert_eq!(base().apply("甲乙戊", &v(&["a", "b", "c"])), "丙丁戊", "without the extra table forms.tsv alone applies");
+    // the single-character pairs are forms.tsv's, with their reading condition
+    assert_eq!(f.apply("濕", &v(&["ㄕ"])), "溼");
+    assert_eq!(f.apply("濕", &v(&["ㄒㄧˊ"])), "濕");
+    // an empty extra table (only the header) changes nothing
+    assert_eq!(base().with_extra("# header only\n").unwrap().apply("甲乙", &v(&["a", "b"])), "丙丁");
+    // malformed lines, duplicate spellings and spellings already in forms.tsv are errors carrying only the line number
+    for bad in [
+        "word\t甲\t乙\tㄧ\t1/1\n", // five fields
+        "word\t甲\t乙乙\tㄧ\t1/1\t字條\n",
+        "word\t甲\t乙\t\t1/1\t字條\n",
+        "word\t甲\t乙\tㄧ\t1\t字條\n",
+        "word\t甲\t乙\tㄧ\ta/1\t字條\n",
+        "word\t甲\t乙\tㄧ\t1/1\t\n",
+        "char\t甲\t乙\tㄧ\t1/1\t字條\n",
+        "word\t甲乙\t戊戊\tㄧ ㄧ\t1/1\t字條\n",
+        "word\t甲\t乙\tㄧ\t1/1\t字條\nword\t甲\t丙\tㄧ\t1/1\t字條\n",
+        "\n",
+    ] {
+        assert!(matches!(base().with_extra(bad), Err(Error::BadFormsExtra { .. })), "{bad:?}");
+    }
+    assert_eq!(base().with_extra("# h\nword\t甲乙\t戊戊\tㄧ ㄧ\t1/1\t字條\n").err(), Some(Error::BadFormsExtra { line: 2 }));
+}
+
+/// docs/spec/evaluation.md §3.7: the accept file's lines, and its tie to the rows' original text.
+#[test]
+fn accept_file_parse_and_check() {
+    let rows = ["|你好|ㄋㄧˇ ㄏㄠˇ".to_string(), "|再見|ㄗㄞˋ ㄐㄧㄢˋ".to_string()];
+    let sha = |i: usize| sha256_hex(rows[i].as_bytes());
+    let text = format!("# h\n2\t{}\t再建\t字條 0\n2\t{}\t在見\t字條 1\n1\t{}\t妳好\t字條 2\n", sha(1), sha(1), sha(0));
+    let a = Accept::parse(&text).unwrap();
+    assert_eq!(a.get(1), ["再建".to_string(), "在見".to_string()]);
+    assert_eq!(a.get(0), ["妳好".to_string()]);
+    assert!(a.get(2).is_empty());
+    assert!(a.check(&rows).is_ok());
+    // a row changed, or the set got shorter: the file does not belong to these rows
+    let changed = ["|你好嗎|ㄋㄧˇ ㄏㄠˇ ˙ㄇㄚ".to_string(), rows[1].clone()];
+    assert_eq!(a.check(&changed).err(), Some(Error::AcceptMismatch { row: 1 }));
+    assert_eq!(a.check(&rows[..1]).err(), Some(Error::AcceptMismatch { row: 2 }));
+    // an empty file (only a header) is valid and ties to nothing
+    assert!(Accept::parse("# only\n").unwrap().check(&[]).is_ok());
+    // malformed lines carry only the line number
+    let s = sha(0);
+    for bad in [
+        format!("1\t{s}\t妳好\n"),
+        format!("0\t{s}\t妳好\t字條\n"),
+        format!("01\t{s}\t妳好\t字條\n"),
+        format!("+1\t{s}\t妳好\t字條\n"),
+        format!("x\t{s}\t妳好\t字條\n"),
+        format!("1\t{}\t妳好\t字條\n", s.to_uppercase()),
+        format!("1\t{}\t妳好\t字條\n", &s[..63]),
+        format!("1\t{s}\t\t字條\n"),
+        format!("1\t{s}\t妳好\t\n"),
+        format!("1\t{s}\t妳好\t字條\n1\t{s}\t妳好\t字條\n"),
+        format!("1\t{s}\t妳好\t字條\n1\t{}\t你好嗎\t字條\n", sha(1)),
+    ] {
+        assert!(matches!(Accept::parse(&bad), Err(Error::BadAccept { .. })), "{bad:?}");
+    }
+    assert_eq!(Accept::parse(&format!("# h\n1\t{s}\t妳好\t字條\nbad\n")).err(), Some(Error::BadAccept { line: 3 }));
+}
+
+/// docs/spec/evaluation.md §3.5: the three layers of judge-v2. 她/他 are one character after L1; 潮溼/潮濕 only meet in forms; the acceptable
+/// sentence of L3 matches a candidate only after both layers have been put through it too.
+#[test]
+fn judge_v2_layers() {
+    let l = Lenient::parse("# h\n").unwrap();
+    let f = Forms::parse("# h\nchar\t濕\t溼\tㄕ\n").unwrap().with_extra("# h\nword\t布局\t佈局\tㄅㄨˋ ㄐㄩˊ\t30/70\t字條 0\n").unwrap();
+    let syls = v(&["ㄔㄠˊ", "ㄕ"]);
+    // L1: 她 -> 他
+    let ta = v(&["ㄊㄚ", "ㄏㄣˇ", "ㄏㄠˇ"]);
+    let j = Judge2::new(&f, &l, "她很好", &ta, &[]);
+    assert!(j.ok("他很好") && !j.ok("他很壞"));
+    // L2: the single-character pair at its reading, and an extra word pair
+    let j = Judge2::new(&f, &l, "潮濕", &syls, &[]);
+    assert!(j.ok("潮溼") && j.ok("潮濕") && !j.ok("朝濕"));
+    let bu = v(&["ㄅㄨˋ", "ㄐㄩˊ"]);
+    let j = Judge2::new(&f, &l, "佈局", &bu, &[]);
+    assert!(j.ok("布局") && !j.ok("佈居"));
+    // L3: wrong under L1 and L2, right only against the acceptable sentence; the acceptable sentence differs from the candidate by an L1 character
+    let syls = v(&["ㄋㄧˇ", "ㄏㄠˇ"]);
+    assert!(!Judge2::new(&f, &l, "你好", &syls, &[]).ok("泥好"));
+    let acc = ["泥好".to_string()];
+    assert!(Judge2::new(&f, &l, "你好", &syls, &acc).ok("泥好"));
+    let acc = ["妳好嗎".to_string(), "泥她".to_string()];
+    let j = Judge2::new(&f, &l, "你好", &syls, &acc);
+    assert!(j.ok("泥他") && !j.ok("泥好"), "the acceptable sentence and the candidate both go through L1");
+    // the gold sentence itself stays right, and a candidate that is only close is not
+    assert!(j.ok("你好") && !j.ok("你"));
+    // a word pair and a single-character pair in one sentence: the character step still runs after a word pair matched
+    let f = Forms::parse("# h\nchar\t沈\t沉\tㄔㄣˊ\n").unwrap().with_extra("# h\nword\t串連\t串聯\tㄔㄨㄢˋ ㄌㄧㄢˊ\t3/7\t字條 0\n").unwrap();
+    let syls = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄔㄣˊ"]);
+    assert!(Judge2::new(&f, &l, "串聯沉", &syls, &[]).ok("串連沈"));
+    let other = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄕㄣˇ"]);
+    assert!(!Judge2::new(&f, &l, "串聯沉", &other, &[]).ok("串連沈"), "the character pair needs its reading");
 }

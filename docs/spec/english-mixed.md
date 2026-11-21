@@ -2,7 +2,7 @@
 
 這份寫的是現在的行為。
 
-範圍：在注音組字裡不切換輸入法就能打出的英文與數字（直接回退、英文段、英文 token、短詞清單、數字列的評分切分）、英文詞後面的中文預測、送出文字的「中英文之間自動加空格」，以及英打設定的預設值、一次性重設與說明視窗。按鍵規則總表見 `docs/spec/keys-and-composition.md`，預測列的共同機制見 `docs/spec/prediction.md`，學習鍵見 `docs/spec/learning.md`，C ABI 全表見 `docs/spec/c-abi.md`，輸入法殼的其餘部分見 `docs/spec/macos-shell.md`。
+範圍：在注音組字裡不切換輸入法就能打出的英文與數字（直接回退、英文段、英文 token、短詞清單與覆寫過的音節的英文項、完成鍵上英文或注音的比較、數字列的評分切分）、英文詞後面的中文預測、送出文字的「中英文之間自動加空格」，以及英打設定的預設值、一次性重設與說明視窗。按鍵規則總表見 `docs/spec/keys-and-composition.md`，預測列的共同機制見 `docs/spec/prediction.md`，學習鍵見 `docs/spec/learning.md`，C ABI 全表見 `docs/spec/c-abi.md`，輸入法殼的其餘部分見 `docs/spec/macos-shell.md`。
 
 ## 1. 開關與生效條件
 
@@ -17,15 +17,20 @@
 | 依按鍵順序判斷英文 | `set_english_key_order`（開） | `englishKeyOrder`（開） | 依按鍵順序判斷英文 |
 | 快打時鍵序顛倒不當英文 | `set_english_reversal_guard`（開） | `englishReversalGuard`（開） | 快打時鍵序顛倒不當英文 |
 
+「快打時鍵序顛倒不當英文」管三件事：(b) 不回退（§3.2）、數字列把顛倒的音節鍵序讀回音節（§7.3 的顛倒尾段、§7.4 的待歸鍵）、聲調提前時變回注音（§3.2、§4.2）。核心預設不變。
+
 - 總開關同時是數字列的開關（見 §7），沒有另外的數字開關。
+- 完成鍵上「英文或注音」的比較（§16）另有一個核心開關 `set_english_auto`（預設開），殼沒有對應的設定；沒有英文表 `english.tsv` 時它不生效。
 - 核心的預設與殼的預設不同：殼的預設值依 §10 調整，核心的預設不變。
 - 「單按 Shift 切換中英」是另一個開關（殼的鍵 `shiftToggle`，預設關），規則見 `docs/spec/keys-and-composition.md`；它借用英文段（§4.1），所以在這裡提到。
 - 「中英文之間自動加空格」（鍵 `cjkSpacing`，預設關）只在殼，核心不知道（§9）。
 
 ### 1.2 生效條件
 
-- **影子與三種回退觸發**（`shadow_on`）：總開關開、縮寫（可省略韻母）關、標準排列。倚天排列、可省略韻母、總開關關著時，影子不記、三種觸發都不發生、英文段的新規則（§4.2、§4.3）也不生效，行為與沒有這個功能的引擎逐位元相同（Shift＋字母照 `docs/spec/keys-and-composition.md` 的舊規則）。
+- **影子與三種回退觸發**（`shadow_on`）：總開關開、縮寫（可省略韻母）關、標準排列。倚天排列、可省略韻母、總開關關著時，影子與按鍵紀錄不記、三種觸發都不發生、英文段的新規則（§4.2、§4.3）也不生效，行為與沒有這個功能的引擎逐位元相同（Shift＋字母照 `docs/spec/keys-and-composition.md` 的舊規則）。
 - **數字列**（`digits_active`）：總開關開、縮寫關、標準排列，而且語言模型與數字表 `digits.tsv` 都已載入。沒有表或沒有模型時數字功能不生效，也不回錯誤碼。
+- **顛倒的音節鍵序讀回音節**（A：§7.3 的顛倒尾段與 §7.4 的待歸鍵）：`digits_active`，而且「快打時鍵序顛倒不當英文」開著。和「依按鍵順序判斷英文」無關：後者關著、前者開著時 `. u 3` 照樣是「有」。保護關著時 A 全部不做，每鍵輸出和沒有這條規則時逐位元相同。倚天排列與可省略韻母沒有數字列，不受影響。
+- **聲調提前**（T：§3.2、§4.2）：`shadow_on`、「依按鍵順序判斷英文」開（它開著，聲調鍵才會回退成英文，T 才有英文段可改回）、而且「快打時鍵序顛倒不當英文」開。關著任何一個，`q 6 8` 照舊停在英文段 `q68`。
 - **英文後預測**（§8）：模型已載入、預測列開，並且載入了英文前文表；沒有表時預測列與沒有這個功能的引擎逐項相同。
 - 游標不在組字區尾端時，回退與英文段照樣生效：英文段開在游標處，兩邊的字分開解碼（§4.7）。
 - 數字列的串開著時，鍵先進數字層（§7.4），不經過回退規則；英文段開著時，數字層不介入，數字鍵接在英文段後面。
@@ -33,8 +38,11 @@
 ## 2. 名詞
 
 - **欄位**：未完成音節的三欄，0 聲母、1 介音、2 韻母。標準排列的字母鍵：聲母 `q a z w s x e d c r f v t g b y h n`、介音 `u j m`、韻母 `i k o l p`；數字鍵：聲母 `1 2 5`、韻母 `8 9 0`；韻母另有 `, . ; / -`；聲調鍵 `3 4 6 7`，空白鍵是一聲。
-- **影子**：現在放在每一欄的符號是哪個鍵打的（鍵帽字元，不含 Shift），另帶這個鍵到達的順序。所以影子最多 3 個鍵、永遠和畫面上的欄位一致；以到達順序排列的字串就是「照打的順序」。
-- **回退**：丟掉未完成音節，在游標處開一個英文段，內容是影子照打的順序，後面接觸發的那個鍵。
+- **影子**：現在放在每一欄的符號是哪個鍵打的（鍵帽字元，不含 Shift），另帶這個鍵到達的順序。所以影子最多 3 個鍵、永遠和畫面上的欄位一致；以到達順序排列的字串是「影子的鍵」。
+- **按鍵紀錄**：未完成音節所有注音鍵照打的順序，含被後來的鍵覆寫掉的鍵，最多 31 個鍵（`ENGLISH_RECORD_MAX`）。影子和按鍵紀錄並存：影子說明畫面上每一欄是哪個鍵，按鍵紀錄是使用者實際打的字串，所有變成英文的地方都取按鍵紀錄。沒有覆寫時兩者是同一串。
+- **回退**：丟掉未完成音節，在游標處開一個英文段，內容是按鍵紀錄，後面接觸發的那個鍵。
+- **注音重播**：一串鍵帽字元照「中英混打關著」的規則從頭打一遍的結果：注音鍵放進它的欄位（那一欄已有符號就取代），聲調鍵 `3 4 6 7` 在「欄位加這個聲調」在詞庫裡時完成音節、否則被忽略（按鍵規則表第 10 條），完成音節之後、下一個注音鍵之前的聲調鍵也被忽略。結果是完成的音節加一個未完成音節（三欄、影子、按鍵紀錄）。純函式（`Engine::replay`），不改引擎狀態。字串裡有大寫字母、或注音鍵與聲調鍵以外的字元、或第一個字元是聲調鍵時沒有結果。和**比對引擎**（`Engine::with_lexicon`、標準排列、中英混打關、可省略韻母關、模糊輸入全關、不載入模型，從空的組字區打同一串鍵）逐項相同（§13.1）。唯一的差別：注音重播不套用鄰鍵收下（§3.4），所以使用者開著鄰鍵位元且載入模型時，重播的結果可能和他關掉中英混打打同一串鍵不同。
+- **中文項**：注音重播只產生一個音節（沒有完成的音節、只剩未完成音節，取它加一聲；或恰好完成一個音節、沒有未完成音節），而且那個音節在詞庫裡時，就是那個音節；清單顯示的是詞庫對它的第一個詞條。其他情形（多個音節、詞庫沒有、不能重播）沒有中文項。
 - **英文段**（`run`）：組字區裡游標處一段正在輸入的英文，最多 32 個字元，尚未成為單位。
 - **英文 token**：一個組字單位，讀音是 `_punct_` 加照打的文字，固定詞（顯示與送出的文字）是它的寫法（§4.4）：多半就是照打的文字，正式寫法表裡的字是表的寫法。
 - **空白單位**：讀音 `_punct_ `（一個半形空白）的單位。
@@ -42,14 +50,15 @@
 
 ## 3. 直接回退
 
-每個注音鍵同時進「試組的注音」與「影子」；注音不可能是使用者要的時候，整段直接回退成原始按鍵，當英文。不查英文單字表。
+每個注音鍵同時進「試組的注音」、「影子」與「按鍵紀錄」；注音不可能是使用者要的時候，整段直接回退成原始按鍵，當英文。不查英文單字表。
 
-### 3.1 影子
+### 3.1 影子與按鍵紀錄
 
-- 第一個鍵開新音節、其餘鍵放進欄位時，`shadow_key[欄] = 鍵帽字元`，到達順序是目前影子裡最大順序加一。
-- Backspace 刪掉顯示順序最後一個符號時，那一欄的影子一起清掉；`clear_pend` 清空三欄。
-- 影子只在 `shadow_on` 成立時記；不成立時三欄一律 `None`。總開關在半個音節時打開，影子會對齊目前欄位（每個符號取它的鍵帽）。
-- 開關關閉（`set_english(0)`）時影子清掉，開著的英文段留成 token。
+- 第一個鍵開新音節、其餘鍵放進欄位時，`shadow_key[欄] = 鍵帽字元`，到達順序是目前影子裡最大順序加一；同一個鍵接在按鍵紀錄後面（已有 31 個鍵時不再記）。覆寫（「重打同一個位置算英文」關著時取代那一欄）只換掉影子的那一欄，按鍵紀錄兩個鍵都留著：預設設定下打 `m e e t i n g`，影子是 `mig`，按鍵紀錄是 `meeting`。
+- Backspace 刪掉顯示順序最後一個符號時，那一欄的影子一起清掉，按鍵紀錄重設為影子的鍵（被覆寫掉的鍵一起忘掉：用 Backspace 改的人是在修注音）；`clear_pend` 清空三欄與按鍵紀錄。
+- 影子與按鍵紀錄只在 `shadow_on` 成立時記；不成立時影子三欄一律 `None`、按鍵紀錄是空的。總開關在半個音節時打開（或可省略韻母在半個音節時關掉），影子會對齊目前欄位（每個符號取它的鍵帽），按鍵紀錄＝影子的鍵。
+- 音節完成、回退（內容移進英文段）、Esc 清掉未完成音節時，影子與按鍵紀錄一起清空。按鍵紀錄每一種設定方式都只留前 31 個鍵，所以回退的英文段（按鍵紀錄加觸發的鍵或聲調數字）不超過英文段的 32 個字元。除了這個上限，按鍵紀錄永遠包含影子裡的每一個鍵。
+- 開關關閉（`set_english(0)`）時影子與按鍵紀錄清掉，開著的英文段留成 token。
 
 ### 3.2 三種觸發
 
@@ -57,24 +66,28 @@
 
 | 鍵 | 條件 | 行為 |
 |---|---|---|
-| 注音鍵 | (a) 那一欄已有符號，且「重打同一個位置算英文」開 | 回退：英文段＝影子（照打的順序）＋這個鍵。開關關：取代那一欄（舊行為） |
+| 注音鍵 | (a) 那一欄已有符號，且「重打同一個位置算英文」開 | 回退：英文段＝按鍵紀錄＋這個鍵。開關關：取代那一欄（舊行為；被取代的鍵留在按鍵紀錄裡） |
 | 注音鍵 | (b) 那一欄是空的、更後面的欄已有符號，且「依按鍵順序判斷英文」開、「快打時鍵序顛倒不當英文」關 | 回退，同上。否則放進欄位（舊行為，與蘋果注音相同） |
-| 空白鍵 | (c) 三欄加一聲不在詞庫，且鄰鍵沒有收下（§3.4） | 回退，英文段＝影子；這個空白鍵立刻結束英文段（被吃掉），所以一次輸出就是一個英文 token。只要總開關開就生效 |
-| 聲調鍵 `3 4 6 7` | (c) 三欄加這個聲調不在詞庫，且鄰鍵沒有收下 | 回退，英文段＝影子＋這個數字，英文段留著開。要「依按鍵順序判斷英文」開；關著時這個鍵什麼都不做（Backspace 可修） |
-| 空白鍵、聲調鍵 | 音節在詞庫裡 | 照按鍵規則表（`docs/spec/keys-and-composition.md` §4.1）第 10 條完成音節；§6 的短詞清單在這裡記 |
+| 空白鍵 | (c) 三欄加一聲不在詞庫，且鄰鍵沒有收下（§3.4） | 回退，英文段＝按鍵紀錄；這個空白鍵立刻結束英文段（被吃掉），所以一次輸出就是一個英文 token。只要總開關開就生效 |
+| 聲調鍵 `3 4 6 7` | (c) 三欄加這個聲調不在詞庫，且鄰鍵沒有收下 | 回退，英文段＝按鍵紀錄＋這個數字，英文段留著開。要「依按鍵順序判斷英文」開；關著時這個鍵什麼都不做（Backspace 可修） |
+| 空白鍵、聲調鍵 | 音節在詞庫裡 | 判斷點（§16.1）先比較英文與注音，英文贏就照 (c) 在這個鍵的做法變成英文（§16.3）；否則照按鍵規則表（`docs/spec/keys-and-composition.md` §4.1）第 10 條完成音節；§6 的短詞清單與覆寫過的音節的英文項在這裡記 |
+| 注音鍵 | 英文段開著，是 (c) 在聲調鍵開的、之後沒改過（英文段仍是那時的按鍵紀錄加聲調數字），而且「快打時鍵序顛倒不當英文」開 | **聲調提前**：條件與結果見 §4.2 |
 
-- 「快打時鍵序顛倒不當英文」只管 (b)；(a) 與 (c) 不受影響。它開著時，快打常見的同音節鍵序顛倒（例如「個」`e k 7` 打成 `k e 7`）照注音處理。
+- 「快打時鍵序顛倒不當英文」對 (b) 的作用：它開著時 (b) 不回退，快打常見的同音節鍵序顛倒（例如「個」`e k 7` 打成 `k e 7`）照注音處理；(a) 與 (c) 的觸發不受影響。它還有兩個作用（§1.1）：數字列的 A（§7.3、§7.4），與 (c) 在聲調鍵之後的**聲調提前**（§4.2）。保護開或關，(b) 的行為都和這一節一樣，這兩個作用另算。
+- 預設設定（「重打同一個位置算英文」關）下打錯的英文字：每個覆寫都取代欄位，空白時欄位不成字的走 (c)，英文 token 是使用者打的整串（`meeting ␣` 是 `meeting`，不是欄位裡剩下的 `mig`；`trigger`、`hello`、`paper` 同理）；欄位剛好成字的（`speech ␣` 的 ㄘㄣ）在沒有英文表時是中文，照打的英文在 ↓ 清單最後（§6）；有英文表時由 §16 的比較決定。
 - 窮舉測試保證：詞庫每個音節單獨照欄位順序打、再加取樣的整個讀音，三個開關全開時一次都不回退、不切分，最後的音節與總開關關著的引擎逐項相同（§13.1）。
 
-### 3.3 還原點與中文項
+### 3.3 「由回退開的」標記、中文項與還原點
 
-- 回退時記下還原點：(a)、(b) 是「這個鍵照舊規則放進欄位之後的三欄與影子」，(c) 在聲調鍵是「按聲調前的三欄與影子」。英文段被改過（再打字、Backspace）就丟掉還原點。(c) 在空白鍵直接成 token，沒有還原點。
-- (a)、(b) 另記一個**中文項**：放進欄位之後的三欄加一聲若在詞庫裡，記下這個音節。英文段沒改過字母就結束（空白、標點、Enter、不是字母的注音鍵…）時，產生的 token 帶這個中文項，之後 ↓ 的寫法清單最後多一項：詞庫對那個一聲音節的第一個詞條（§5.2）。英文段裡又打了字或按了 Backspace 就丟掉。(c) 沒有中文項。
+- 英文段記一個布林「由回退開的」：(a)、(b)、(c)（聲調鍵與空白鍵）開的為真，Shift＋字母與英數狀態開的為假；之後再打字或 Backspace 不改它，Backspace 刪光、結束成 token（含第 33 個字元把前一段結束）、聲調鍵切分、聲調提前時清掉。Esc 變回注音（§4.5）與 token 的中文項只看這個標記。
+- **中文項**：由回退開的英文段結束成 token 時（含 (c) 在空白鍵直接成 token），用英文段全部字元的注音重播算中文項（§2），有就記在 token 上；之後 ↓ 的寫法清單最後多一項（§5.2）。所以回退之後再打字或 Backspace 的英文段照樣有中文項，算的是結束時的字串：`o k ␣` 是 ㄜ 的第一個詞條，`o k s ␣` 是 ㄋㄜ 的，`r u s 3 ␣`（`rus3`）是 ㄋㄧˇ 的；`r u s ␣`（ㄋㄧ 不在詞庫）與 `r u s 3 x ␣`（兩個音節）沒有。(c) 在空白鍵的 token 是按鍵紀錄本身，它的欄位加一聲不在詞庫，所以沒有中文項。聲調鍵切分出來的英文 token（§4.3）沒有中文項。
+- **還原點**只給聲調提前（§4.2）用：(c) 在聲調鍵回退時記下「按聲調前的三欄、影子與按鍵紀錄」。英文段被改過（再打字、Backspace）就丟掉。(a)、(b) 與 (c) 在空白鍵沒有還原點。
 
 ### 3.4 與鄰鍵打錯的先後
 
 - 「模糊輸入」的鄰鍵位元（`set_fuzzy` 位元 4，預設關）在 `finish_syllable` 對詞庫沒有的音節有一條例外：開著、模型已載入、標準排列、詞庫沒有這個音節而有同一列左右鄰鍵換出的音節時，收下。
 - 順序固定：先問鄰鍵，收下就是中文，(c) 不發生；沒收下才輪到 (c)。所以鄰鍵開著時，`go`、`cup`、`cp` 這類 (c) 才能打出的字會被收成中文；要英文就用 Shift 或關掉鄰鍵。(a)、(b) 與鄰鍵無關。
+- **三聲變調**（`set_tone3`，預設開；`docs/spec/decoder.md` §6.6、`docs/spec/keys-and-composition.md` §3.3）在鄰鍵之前：模型已載入時，**未收音節**（陽平 Xˊ 沒有單字詞條、Xˇ 有，例如 `j i 6` 的 ㄨㄛˊ）與前一個音節是陽平的**未收輕聲尾**（例如 ㄒㄧㄤˊ 之後的 `v u ; 7`）在 `finish_syllable` 收下，不看鄰鍵位元；收下的音節照「詞庫裡的音節」走 §16 的判斷點（注音分數用 Xˇ 算），所以不會在 (c) 回退，除非判斷點判英文。Xˇ 也沒有單字詞條的陽平音節照舊走鄰鍵與 (c)。
 
 ### 3.5 回退當下的輸出
 
@@ -86,8 +99,8 @@
 ### 4.1 怎麼開
 
 - **回退**（§3.2）。
-- **Shift＋英文字母**（總開關開、標準排列）：不再照舊規則忽略或送出，而是把「未完成音節的影子的每個鍵照打的順序」加上大寫字母開成英文段，清掉未完成音節；候選窗開著就先關。組字區空的、或只有字沒有未完成音節時，英文段就只有這個大寫字母。總開關關著或倚天排列時，Shift＋字母照 `docs/spec/keys-and-composition.md` 的舊規則。
-- **單按 Shift 切換成英數狀態**（`set_ascii(1)`）：未完成音節的鍵（照打的順序）成為英文段，之後沒有修飾鍵的可印字元（`0x21`–`0x7E`）中，字母、數字與 `, . ; / -` 照打的樣子接在英文段後面（不轉小寫、不當聲調或標點、不回退不切分，`1` 是字元不是選字）；其他可印字元先結束英文段（不加空白），再各自成為一個半形標點單位；細節見 `docs/spec/keys-and-composition.md`。
+- **Shift＋英文字母**（總開關開、標準排列）：不再照舊規則忽略或送出，而是把未完成音節的按鍵紀錄加上大寫字母開成英文段，清掉未完成音節；候選窗開著就先關。組字區空的、或只有字沒有未完成音節時，英文段就只有這個大寫字母。總開關關著或倚天排列時，Shift＋字母照 `docs/spec/keys-and-composition.md` 的舊規則。
+- **單按 Shift 切換成英數狀態**（`set_ascii(1)`）：未完成音節的按鍵紀錄成為英文段，之後沒有修飾鍵的可印字元（`0x21`–`0x7E`）中，字母、數字與 `, . ; / -` 照打的樣子接在英文段後面（不轉小寫、不當聲調或標點、不回退不切分，`1` 是字元不是選字）；其他可印字元先結束英文段（不加空白），再各自成為一個半形標點單位；細節見 `docs/spec/keys-and-composition.md`。
 
 ### 4.2 段內的鍵
 
@@ -98,12 +111,15 @@
 | 英文字母（有無 Shift 都算） | 接在英文段後面；有 Shift 為大寫，否則小寫。段已有 32 個字元時，先結束這一段（成為 token），第 33 個字元開新的一段 |
 | 注音鍵裡不是字母的：`1 2 5 8 9 0 , . ; / -` | 接在英文段後面（`gta6`、`rdr2`、`win11`、`e.g` 可一口氣打完），同樣受 32 字元限制 |
 | 聲調鍵 `3 4 6 7` | 見 §4.3 |
+| 無修飾的注音鍵（標準排列、有欄位），英文段是聲調提前的情形（下方） | **聲調提前**：英文段清掉（不留 token），未完成音節還原成還原點，這個鍵放進它的欄位，以那個聲調完成音節（照第 10 條，短詞記號與 128 單位照常）。條件不成立就照上面兩列處理 |
 | 空白鍵 | 結束英文段成為 token，空白被吃掉（再按一下才是空白單位，§5.4）。不切分 |
 | Backspace | 刪段的最後一個字元；刪光就關掉英文段（然後組字區重新整體解碼） |
 | Esc | 見 §4.5 |
 | 標點、Enter、Shift＋Enter、Tab、方向鍵、Home／End、Delete、其他 | 先結束英文段（成為 token），再照原本規則處理這個鍵；結束時若第 128 個單位使組字區整串送出，送出的文字放在這個鍵的輸出的 `commit`；Enter 遇到這種情況就到此為止 |
 
 - 英文段開著時，預測列清空，Tab 因此先結束英文段，沒有預測列可進。
+- **聲調提前**（T，同時成立才轉）：(1) 「快打時鍵序顛倒不當英文」開；(2) 這個英文段是 (c) 在聲調鍵開的、之後沒被改過：有還原點（§3.3），英文段最後一個字元是聲調鍵，英文段長度＝還原點的按鍵紀錄長度加 1（有覆寫的音節照樣成立：`a q 6 8`，ㄆ 蓋掉 ㄇ、ㄆˊ 不成字、再補 ㄚ，是「爬」）；(3) 還原點的這一欄是空的（這個鍵補的是聲調提前時還沒打的那一欄）；(4) 還原點的欄位加這個鍵的符號、再加那個聲調，是詞庫有的音節（`q 6 8`：ㄆ、ㄚ、ˊ＝ㄆㄚˊ「爬」）。只處理聲調鍵；空白鍵的 (c) 已經成 token（沒有還原點），不涵蓋。英文段多打了字或 Backspace 過，還原點就丟了，條件 (2) 不成立。還原時按鍵紀錄重設為還原點的影子的鍵加這一鍵（被覆寫掉的鍵忘掉，所以這個音節沒有 §6 的英文項）。
+  - 代價：不按 Shift、打「字母＋聲調數字＋字母」，而且前兩個字元能成注音時，會變成中文（`a3o` 變「美」）。要英文用 Shift 開頭，或先按空白。量到的比例見 §14。
 
 ### 4.3 聲調鍵切分
 
@@ -120,15 +136,20 @@
 - **系統送出**：`reset` 模式 0（失焦、切換 App 時殼送出整個組字區）遇到開著的英文段，送出的那一段是它的寫法，和先按 Enter 相同；英數狀態下打的照打的送出。英文段開著時畫面上仍是照打的字。
 - 短詞清單的兩項（§6）、數字串與寫法清單的選擇不經過寫法：它們不是英文段結束，清單的選擇是使用者自己挑的。
 - 英文本身不學；結束時若第 128 個單位使組字區整串送出，送出的文字放在觸發結束的那個鍵（或那次設定／選字呼叫）的輸出的 `commit`，不留到之後的輸出。
-- 回退開的、還沒被改過的英文段結束時，token 帶中文項與原讀音（§3.3）。
+- 由回退開的英文段結束時，token 帶它全部字元算出的中文項（§3.3），讀音照舊是 `_punct_` 加照打的文字。
 - 「中英混打」被關掉，或縮寫開啟時，開著的英文段留成 token（若是第 128 個單位則整串放進該次設定呼叫的快照的 `commit`）。
 
 ### 4.5 Esc 與 Backspace
 
 - Esc：
-  - 回退開的、回退之後還沒改過（沒再打字、沒 Backspace）的英文段：拿掉英文段，把未完成音節**還原**成還原點（§3.3）並重設影子——(a)、(b) 是這個鍵照舊規則放進欄位之後的三欄（`r u s`＋Esc＋`3` 是「你」）；(c) 在聲調鍵是按聲調前的三欄（接著用 Backspace 改錯的符號）。還原之後照舊規則繼續，再打下一個鍵才重新判斷回退。
-  - 其他英文段（Shift 開的、回退後改過的）：整段拿掉，組字區其他部分不變。
-  - (c) 在空白鍵已經成 token 的：沒有英文段也沒有還原點，Esc 就是任何英文 token 之後的 Esc，清掉整個組字區。
+  - 由回退開的英文段（§3.3 的標記；回退之後有沒有再打字或 Backspace 都一樣）：拿掉英文段，換成它全部字元的**注音重播**（§2）——完成的音節照按鍵規則表第 10 條在游標處插入（第 128 個單位使組字區整串送出時，文字放在這個 Esc 的輸出的 `commit`），剩下的成為未完成音節，影子與按鍵紀錄是重播的結果。之後照舊規則繼續，再打下一個鍵才重新判斷回退。
+    - 回退之後沒改過的英文段：(a)、(b) 是這個鍵照舊規則放進欄位之後的三欄（`r u s`＋Esc＋`3` 是「你」）；(c) 在聲調鍵是按聲調前的三欄（接著用 Backspace 改錯的符號）。
+    - 改過的：`s p e`（(a) 在 `e`）接著打 `e c h`，Esc 之後是未完成音節 ㄘㄣ，再按空白和中英混打關著打 `speech ␣` 相同；`r u s 3 x`＋Esc 是「你」加未完成的 ㄌ。
+    - Esc 之後的按鍵紀錄＝英文段裡最後一個「在重播中完成音節的字元」之後的字元，保留被覆寫掉的注音鍵、拿掉被忽略的聲調數字、只留前 31 個鍵（`a q 6`＋Esc：按鍵紀錄 `aq`）；影子＝重播後每一欄最後放進去的那個鍵。所以 `o k`＋Esc＋`k` 再回退時英文段是 `okk`。
+    - 英文段裡有注音重播處理不了的字元（大寫字母等，§2）時整段拿掉，和下一條相同。
+  - 其他英文段（Shift 開的、英數狀態開的、第 33 個字元開的下一段、從沒有中文項的 token 用 Backspace 重開的）：整段拿掉，組字區其他部分不變。
+  - (c) 在空白鍵已經成 token 的：沒有英文段，Esc 就是任何英文 token 之後的 Esc，清掉整個組字區。例外是 §16 的比較在空白鍵做出的 token：緊接著按 Esc 會換回音節（§16.6）。
+  - 聲調提前（§4.2）把英文段改回注音之後，英文段與還原點都不在了，Esc 是平常的 Esc。
 - Backspace 刪段尾一個字元，見 §4.2。
 
 ### 4.6 畫面回饋
@@ -151,12 +172,12 @@
 ### 5.2 寫法清單與中文項
 
 - 游標緊接在英文 token 後面、沒有未完成音節、沒有開著的窗時，↓ 開寫法清單：token 目前的文字在前（表換過的就是正式寫法），再接小寫、首字大寫、全大寫，去掉重複；不查標點替代表。選了就把 token 換成那一項。表只換全小寫與首字大寫的字，所以照打的那一種一定在清單裡。
-- 回退開的 token 帶中文項（§3.3）時，清單最後多一項：詞庫對那個一聲音節的第一個詞條（`Lexicon::entries` 的第一項）。選它：token 換成那個中文詞（照按鍵規則表（`docs/spec/keys-and-composition.md` §4.1）第 10 條插入、固定那個詞、不學）。
-- 短詞清單的兩項（§6）是另一條路，只出現在剛由短詞的鍵完成的音節上。
+- token 帶中文項（§3.3：由回退開的英文段結束時，從它全部的字元算）時，清單最後多一項：詞庫對那個音節的第一個詞條（`Lexicon::entries` 的第一項）。選它：token 換成那個中文詞（照按鍵規則表（`docs/spec/keys-and-composition.md` §4.1）第 10 條插入、固定那個詞、不學）。
+- 短詞清單與覆寫過的音節的兩項（§6）是另一條路，只出現在剛完成的那個音節上。
 
 ### 5.3 Backspace 逐字母刪除
 
-- 游標緊接在英文 token 後面（沒有未完成音節、沒有英文段、沒有窗）按 Backspace：拿掉那個 token 單位，在原位開英文段，內容是 token 目前的文字去掉最後一個字母；單一字母的 token 就整個拿掉、不開英文段。來源（回退、Shift 段、短詞項目）不論。例外：token 的文字是表換上的寫法（文字和讀音裡照打的字不同，而且正是照打的字的寫法）時，用照打的字去掉最後一個字母，`ChatGPT`（照打 `Chatgpt`）重開成 `Chatgp`，補回 `t` 再結束又是 `ChatGPT`。文字和「照打的文字的寫法」不同的 token 是使用者自己選的（從清單挑的其他寫法，或英數狀態下打、沒被換成表的寫法的表內字）：照目前的文字重開，這一段結束時也不換寫法，不論是英文段結束還是聲調鍵切分（挑回 `Chatgpt` 的 token 刪一個字母再補回來仍是 `Chatgpt`）。文字已經等於那個寫法的 token（表裡沒有的字，含英數狀態下打的）和一般英文段相同。空白單位與標點 token 仍一次刪掉整個單位。這條只在 `shadow_on` 成立時適用；中英混打關著時英文 token 一次刪掉。
+- 游標緊接在英文 token 後面（沒有未完成音節、沒有英文段、沒有窗）按 Backspace：拿掉那個 token 單位，在原位開英文段，內容是 token 目前的文字去掉最後一個字母；單一字母的 token 就整個拿掉、不開英文段。來源（回退、Shift 段、短詞項目）不論。例外：token 的文字是表換上的寫法（文字和讀音裡照打的字不同，而且正是照打的字的寫法）時，用照打的字去掉最後一個字母，`ChatGPT`（照打 `Chatgpt`）重開成 `Chatgp`，補回 `t` 再結束又是 `ChatGPT`。文字和「照打的文字的寫法」不同的 token 是使用者自己選的（從清單挑的其他寫法，或英數狀態下打、沒被換成表的寫法的表內字）：照目前的文字重開，這一段結束時也不換寫法，不論是英文段結束還是聲調鍵切分（挑回 `Chatgpt` 的 token 刪一個字母再補回來仍是 `Chatgpt`）。文字已經等於那個寫法的 token（表裡沒有的字，含英數狀態下打的）和一般英文段相同。重開的英文段「由回退開的」標記（§3.3）：token 帶中文項時為真（Esc 是注音重播、再結束時重算中文項），否則為假（Esc 整段拿掉）。空白單位與標點 token 仍一次刪掉整個單位。這條只在 `shadow_on` 成立時適用；中英混打關著時英文 token 一次刪掉。
 
 ### 5.4 空白鍵
 
@@ -187,11 +208,11 @@
 - 不讓解碼器自己選混合詞：沒有從清單選它的話，任何按鍵序列的組字區與送出文字都和沒有這張表時相同。
 - 限制：英文要先成為 token（Shift 開頭打，或回退成英文）；照欄位順序剛好是合法注音的英文（短詞清單的字）與鄰鍵打錯開著時被收成中文的（§3.4）不會成為 token。只收英文在前、中文在後的詞。Windows 版中英混打關著，沒有這個功能。
 
-## 6. 短詞清單
+## 6. 短詞清單與覆寫過的音節的英文項
 
 - 核心常數 `ENGLISH_SHORT`：`ai ui up co hp jp mp mp3 np rm xl`。這些字照欄位順序就能打出來，而且一聲（`mp3` 是三聲）音節在詞庫裡，所以三種觸發都不會回退它們；另給一條路。`go cp so to do hi am zi cup` 的音節不在詞庫，靠 (c) 在空白鍵就打得出來，不在清單裡。測試 `english_short_is_as_documented` 逐字核對詞庫。
-- **記錄**：完成音節時（空白或聲調鍵，音節在詞庫裡、回退生效），影子照打的順序接上聲調鍵（空白不接）正好等於清單的一個字，且這次輸出沒有送出（`commit` 為空），記 `last_short = (音節位置 i, 字)`。下一個改變狀態的鍵清掉它（注音鍵、Backspace、方向鍵、Esc、送出、`reset`、會重算組字區的設定函式）；什麼都不改的鍵（直通、↑、不起作用的聲調鍵）不清，且把標記還回去。先結束英文段或數字緩衝再重送自己的鍵算有改變。`set_learning`、`set_left_context`、`set_punctuation`、`set_newword*`、`set_scan_gate`、`set_eps_global`、`set_today`、`set_english_next` 與所有 `load_*`、`learning_open`、`learning_clear` 不清。
-- **清單項目**：`last_short` 有值、開窗那一刻 `cursor == i + 1`、候選清單非空、而且沒有同時有數字項時，第 15 條的 ↓ 或空白開的候選窗在清單**最後面**加兩項：那個字的小寫與全大寫（`ai`／`AI`、`mp3`／`MP3`），第一個候選與其他候選不變。與前面有幾個音節、候選範圍跨幾個音節無關，這兩項永遠只對應位置 `i` 那一個音節。
+- **記錄**：完成音節時（空白或聲調鍵，音節在詞庫裡、回退生效），按鍵紀錄接上聲調鍵（空白不接）得到一個字；(i) 按鍵紀錄和影子的鍵不同（打的過程有覆寫），或 (ii) 這個字正好等於清單的一個字，而且這次輸出沒有送出（`commit` 為空）時，記 `last_short = (音節位置 i, 字)`。(i) 的字不必在清單裡：預設設定下 `s p e e c h ␣` 是 ㄘㄣ，記 `speech`；`t e s t 6` 記 `test6`。兩者同時成立時只記這一個字（`q a i ␣`：影子的鍵是 `ai`、按鍵紀錄是 `qai`，記 `qai`，清單不加 `ai`）。鄰鍵收下的音節（§3.4）不記。下一個改變狀態的鍵清掉它（注音鍵、Backspace、方向鍵、Esc、送出、`reset`、會重算組字區的設定函式）；什麼都不改的鍵（直通、↑、不起作用的聲調鍵）不清，且把標記還回去。先結束英文段或數字緩衝再重送自己的鍵算有改變。`set_learning`、`set_left_context`、`set_punctuation`、`set_newword*`、`set_scan_gate`、`set_eps_global`、`set_today`、`set_english_next` 與所有 `load_*`、`learning_open`、`learning_clear` 不清。
+- **清單項目**：`last_short` 有值、開窗那一刻 `cursor == i + 1`、候選清單非空、而且沒有同時有數字項時，第 15 條的 ↓ 或空白開的候選窗在清單**最後面**加兩項：那個字的小寫與全大寫（`ai`／`AI`、`mp3`／`MP3`、`speech`／`SPEECH`），第一個候選與其他候選不變。與前面有幾個音節、候選範圍跨幾個音節無關，這兩項永遠只對應位置 `i` 那一個音節。
 - **選了**：只拿掉位置 `i` 的那個音節，在原位插入英文 token（讀音 `_punct_` 加選的那項、固定詞同），前面的音節與固定詞不動；之後和任何英文 token 一樣；不學。⌘⌫ 對這兩項什麼都不忘記。
 
 ## 7. 數字列
@@ -204,8 +225,8 @@
 - **數字串 token**：一個字一個 token，讀音 `_punct_` 加那個半形字（`_punct_2`、`_punct_.`…），固定詞是那個字。`_punct_` 後恰一個 A 裡的字元才算（`learn::digit_of`）。Backspace、方向鍵、128 單位上限、解碼與重排的切段都沿用標點 token。
 - **串**（`DRun`）：從第一個進字母表的注音鍵起、連續的字母表鍵；記串開始時的歷史詞 C（`lm::history(context_key(左文＋串前的顯示字串))`，沒有漢字就是 `<s>`）。串在邊界鍵、尾段收進非字母表鍵、或尾段完成音節時結束。
 - **緩衝**：串裡還沒變成 token 的鍵，最多 4 個（`MAX_BUF`；音節最多三個符號加一個聲調，更早的鍵一定不屬於任何音節），第 5 個起最舊的鍵立刻吐成 token。
-- **切分**：緩衝的 n 個鍵分成「前 m 個是數字、後 t 個是音節尾段」（m＋t＝n，t ≤ 4）。尾段要**合法**：符號照聲介韻順序，是詞庫某個去聲調音節的前綴；尾段最後一個鍵是聲調鍵或空白時，必須是詞庫裡的完整音節，而且那個音節至少有一個詞條含漢字（注音字母詞如「ㄅ」不算）。t＝0（全數字）永遠合法。
-- **顯示**：被選中的切分，前 m 個鍵顯示成半形數字，尾段顯示成注音欄位；尾段鏡射進 `pend` 與影子，所以預測列等讀未完成音節的地方不必特別處理。
+- **切分**：緩衝的 n 個鍵分成「前 m 個是數字、後 t 個是音節尾段」（m＋t＝n，t ≤ 4）。尾段要**合法**：符號照聲介韻順序，是詞庫某個去聲調音節的前綴；尾段最後一個鍵是聲調鍵或空白時，必須是詞庫裡的完整音節，而且那個音節至少有一個詞條含漢字（注音字母詞如「ㄅ」不算）。t＝0（全數字）永遠合法。**數字層不收變調音節**：三聲變調（`docs/spec/decoder.md` §6.6）不改數字層的任何判斷，合法尾段、§7.3 的分數、§7.4 的收尾鍵重判都和關掉變調時逐位元相同。全用數字字母表的鍵打出的未收音節或未收輕聲尾（ㄓㄢˊ `5 0 6`、ㄅㄢ˙ `1 0 7`）在數字層開著時照舊是數字，要打本調（`5 0 3`）才是字；所以「民國」後面的 `107`、門牌的 `207`、電話號碼裡的 `106` 不會變成字。這裡說的是數字層的切分與判斷：數字段已經結束、畫面顯示成注音尾段之後（例如 `5 0` 顯示 ㄓㄢ，接著按 ↓ 收尾、再按 Esc 關掉候選窗，或打了字母表以外的鍵；只按 ↓ 時候選窗開著，接著的 `6` 是選第 6 個候選），之後的聲調鍵走 `finish_syllable`，未收音節照它收下（`5 0` ↓ Esc `6` 是「展」）。不在數字字母表的鍵打出的未收音節（ㄨㄛˊ `j i 6`）不經數字層的切分，照 `finish_syllable` 收下；數字層關著時（中英混打關、倚天排列、可省略韻母開、沒有數字表）`5 0 6` 也照 `finish_syllable` 收下、顯示「展」。測試：`core/tests/engine_tone3.rs` 的 `the_digit_layer_is_the_same_with_sandhi_on_and_off`、`without_the_digit_layer_digit_key_syllables_are_accepted`。
+- **顯示**：被選中的切分，前 m 個鍵顯示成半形數字，尾段顯示成注音欄位；尾段鏡射進 `pend`、影子與按鍵紀錄，所以預測列等讀未完成音節的地方不必特別處理。
 
 ### 7.2 評分用的機率
 
@@ -222,6 +243,7 @@
   - lpD：d＝0 → 0；否則 log P(D | C) ＋ log P_len(d | 結束或未結束) ＋ 串的前 d 個鍵的 Σ log P_ch；t > 0 或這是邊界時用「結束」。相加順序：P(D | C)、P_len、再依鍵序加 P_ch。
   - lpZ：t＝0 → 0；否則 log Σ_{w 與尾段相容} P(w | C′)。d＝0 時 C′ 是詞語境 C，用機率 `lm.prob(C, w, pb)`（不是 λ 混合分數：lpD 與數字語境都是機率，同一鍵的各切分才可比）；d ≥ 1 時 C′ 是數字語境 (v＝C, D)，用 §7.2。「相容」與 `predict` 同一套（桶、`compat_prefix`，每個詞取最佳相容讀音的 lp 算 P(w)）。尾段是完成的音節時，「相容」＝讀音以那個完整音節開頭。
 - **θ ＝ 3**：尾段是完成的音節（聲調或空白）時，不含任何數字（d＝0）的注音切分分數加 θ 再比，含數字的注音切分不加；全數字切分的分數要**嚴格大於**最好的注音切分（加過 θ）才贏，否則取最好的注音切分（注音之間平手取尾段較長）。θ 只保護「整串都當注音」的讀法；串裡已經有數字時只是在判定數字串在哪裡結束。不在字母表的注音鍵（`u j m i k , o l p ;` 與字母）當場判定、之後改不回來，所以也算「完成」，同樣套 θ。
+- **顛倒的尾段**（`decide` 的參數 `reorder`，保護開著時由引擎傳 `Some((RHO, RHO_SYM))`，關著傳 `None`；只在 closing，也就是聲調鍵或空白）：尾段照打的順序不是合法尾段時，把尾段收尾鍵以外的鍵照欄位排（每欄至多一鍵，同欄兩鍵、不是符號鍵都不成立）、收尾鍵放最後，再問一次合法性；成立就多一個切分，分數扣 ρ。`RHO` ＝ 7、`RHO_SYM` ＝ 4（用於這一串的第一個鍵——已吐出的第一個，否則緩衝的第一個——是 `.` `/` `-` 時）；常數在 `core/src/digits.rs`，為什麼是這兩個值見 §15。其餘切分、θ 的套用、選擇規則不變。`reorder` 為 `None` 時輸出與沒有這條規則時逐位元相同。
 - **其他鍵**：分數最大的切分。平手：目前顯示的數字總數不變的優先，沒有就取 t 較大者（偏注音）；串的第一個鍵沒有「目前顯示」，平手取注音。
 - 同一串每鍵重算、可以翻轉（「ㄅㄞ」→「198」→「1984」）；翻轉只影響緩衝，已吐出的 token 不動。每鍵最多 5 個切分，各一次相容掃描，只在緩衝非空時。
 
@@ -247,8 +269,14 @@
 | 數字後 | ↓ | 開候選窗：數字語境預測項在前；再接那個半形字與它的全形（`０–９ ．／－`，寫死在引擎，不走標點表）；再接 §7.7 的注音讀法項 |
 | 數字後 | 空白鍵 | 插入一個空白單位（§5.4）；不要求其他條件，數字功能生效就成立 |
 | 任何 | `reset(Discard)` | 緩衝與串一起丟 |
-| 任何 | 數字鍵盤、預測列與候選窗的 1–9、Shift＋數字的標點、Option＋數字 | 不變 |
+| 任何 | 數字鍵盤、預測列與候選窗的 1–9、Shift＋數字的標點 | 不變 |
+| 任何 | Option＋數字（含再加 Shift） | 照按鍵規則表第 1o 條：數字串開著（緩衝有鍵，或剛吐完 token、串還開著）時吃掉、什麼都不改；沒有數字串、沒有未完成音節時插入全形字元（１、！…），那是標點單位，不是數字串 token，不開串 |
 
+- **待歸鍵**（A，只在保護開著時）：
+  - **記下**：串被不在字母表的注音鍵結束，緩衝裡顯示成數字的鍵吐成 token 時，從最靠近游標的鍵往前取至多 2 個，條件是每個鍵在標準排列有欄位、欄位互不相同、也不在尾段（緩衝剩下的鍵加這個鍵）已佔的欄位。取不到就不記。記 `keys`（打的順序）、`before`（同一串在它們之前的數字，含已吐出與同次吐出的）、`ctx`（串的前文）。只活到下一個鍵。
+  - **保留或作廢**（按鍵規則表第 9 條把鍵放進欄位之前）：下一個注音鍵若落在某個待歸鍵的欄位，那個鍵和它之前的待歸鍵移到 `before`（確定是數字，例如 `8 s u 0 6`：`0` 佔了 `8` 的欄，所以是「8年」）；剩下的繼續保留。第 1 條（帶 Option、Command、Caps Lock，或帶 Control 而不是 Ctrl+\）與第 5q 條（Page Down、Page Up）的鍵直通、不改任何狀態，記錄原樣保留；第 1o 條吃掉的鍵（Option 加主鍵區的鍵；待歸鍵在時一定有未完成音節，所以一定是吃掉）已處理、同樣不改任何狀態，記錄也原樣保留；其他任何鍵（Backspace、Esc、標點、英文字母、Shift 組合、方向鍵、Home、End、Delete、Tab 等，包含「已處理、不動作」的）都讓記錄消失。
+  - **收尾鍵重判**（第 10 條完成音節之前）：先確認待歸鍵對應的 token 還緊貼游標左邊、沒有 `pend_prev`（可省略韻母的前一個單位），否則不做事。再問 `Scorer::late_decision`（`reference/proto/digits_score.py` 有逐位元相同的 Python 版）：對待歸鍵的每個後綴（長的先），把後綴的鍵放進欄位（欄位已被未完成音節佔的不成立），加上收尾鍵，要是詞庫某個含漢字的音節才算候選；候選取 `S_z` 最高者（平手取較長的）。前面沒有數字（`before` 與這個後綴之前的待歸鍵合起來是空）：`S_z = lpZ(併回的音節｜詞語境) + θ − ρ`；否則 `S_z = lpD(前面的數字, 結束) + lpZ(併回的音節｜數字語境) − ρ`。照打的讀法（待歸鍵不併、未完成音節加收尾鍵）若不是含漢字的音節（包含詞庫只有注音字母的情形，例如 ㄊ），併回，不比分數；否則比 `S_d = lpD(全部數字, 結束) + lpZ(照打的音節｜數字語境)`，`S_z` **嚴格較大**才併回。併回＝刪掉那幾個數字 token，把鍵放回欄位（`pend`、影子與按鍵紀錄），再照原本的 `finish_syllable` 往下走。
+  - 併回後的 ↓ 清單不含「照打的讀法」，沒併回時也不含併回的字（§7.7 沿用現狀；§14）。游標在中間照常併回（token 緊貼游標）。
 - 128 單位：吐 token 碰到第 128 個單位時送出整串，文字放在這個鍵的輸出的 `commit`，與重送那個鍵的輸出合併；送出時先清掉上一鍵的尾段，不把未完成音節帶進 `commit`。Enter 在這種情況下，只在組字區已空時停在送出，否則照按鍵規則表（`docs/spec/keys-and-composition.md` §4.1）第 12a 條全部送出。
 - 總開關關閉或縮寫開啟時，緩衝全吐成 token（快照的 `commit` 可能非空），`last_digits` 清掉。
 - 學習：數字串 token 的固定詞不學；`learn::next_key` 把它正規化成 `^>_punct_num`。語意校正、trigram、重排：token 切開 stretch，同英文 token。
@@ -271,6 +299,7 @@
 
 - **音節剛由字母表鍵完成**（聲調或空白、注音贏）：記住尾段的鍵（`last_digits`，下一個改狀態的鍵清掉）。這時 ↓（或空白）開的清單＝預測項目＋詞庫項目＋**最後一項那串數字**（例：句首 `8 4` → 啊；↓ 最後是「84」）；選它：拿掉那個音節，在原位逐字插入數字串 token。音節隨 128 單位整串送出時不記。
 - **緩衝剛吐成 token**（數字贏或邊界吐出）且最後 ≤ 4 個 token 的鍵能組成含漢字詞條的完整音節（最後一鍵為聲調）：↓ 的清單在全形項之後加**那個音節的第一個詞條**（例：下午 `2 0 3` 判成數字後 ↓ 最後是「膽」）；選它：拿掉那幾個 token，插入那個音節並固定那個詞（不學）。取最長的符合者。
+- 待歸鍵併回音節（§7.4）之後，清單不加另一種讀法（照打的 `.以`）；沒有併回時，清單也不加「併回的字」（`8 2 4` 的 ↓ 清單不加「大」）。`digit_syllable_alt` 只看照打的順序（§14）。
 - 兩種都以「索引在清單的哪一段」判斷，不用長度欄位。⌘⌫ 忘掉預測項目後重建清單時，把這個尾項接回去；滑鼠點預測列會清掉 `last_digits`。
 
 ### 7.8 數字表 `data/lexicon/digits.tsv`
@@ -326,35 +355,36 @@
 
 - 選單「中英混打（實驗）」緊接在「即時預測」（以及顯示時的「可省略韻母」）之後、「語意校正」之前，預設打勾，倚天排列時反灰（勾選狀態仍顯示）。切換時有組字擁有者就顯示快照。選單不為其他英打選項加項目。
 - 設定頁「選字」區塊，由上而下：即時預測、瀏覽器第一字不顯示預測、（可省略韻母）、**中英混打（實驗）**（下方一行說明）、**快打時鍵序顛倒不當英文**、**依按鍵順序判斷英文**、**重打同一個位置算英文**（各有一行說明）、**單按 Shift 切換中英**、**中英文之間自動加空格**、語意校正等。
-  - 反灰條件：中英混打跟隨排列（只有標準排列可用）；「重打同一個位置算英文」與「依按鍵順序判斷英文」在中英混打反灰或關著時反灰；「快打時鍵序顛倒不當英文」在「依按鍵順序判斷英文」反灰或關著時反灰（因為 (b) 需要後者開著）。反灰時存值保留。「單按 Shift 切換中英」與「中英文之間自動加空格」永遠可操作。
+  - 反灰條件（反灰時存值仍然決定數字列的 A，§1.2）：中英混打跟隨排列（只有標準排列可用）；「重打同一個位置算英文」與「依按鍵順序判斷英文」在中英混打反灰或關著時反灰；「快打時鍵序顛倒不當英文」在「依按鍵順序判斷英文」反灰或關著時反灰（因為 (b) 需要後者開著）。反灰時存值保留。「單按 Shift 切換中英」與「中英文之間自動加空格」永遠可操作。
   - 說明文字（`MenuEntry.Text`）：
     - 中英混打：「打英文不用切換輸入法：打的字不可能是注音時直接變成英文，留在組字區；按空白才發現音節不存在（例如 so）也一樣，那一種要用 Backspace 修，不能按 Esc 變回注音；數字列的鍵也會打出數字（例如 2026年、3.14）。」
     - 快打時鍵序顛倒不當英文：「快打時，同一個字的注音鍵先後顛倒（例如 ㄍㄜˋ 打成 ㄜㄍˋ）照注音處理，不會變成英文。關掉而且「依按鍵順序判斷英文」開著時，ls、mv 這類字不用按 Shift，但快打容易誤觸。」
     - 依按鍵順序判斷英文：「打了聲調鍵才發現音節不存在時，整段變成英文（馬上按 Esc 變回注音）；「快打時鍵序顛倒不當英文」關著時，注音鍵沒照順序也會變成英文。」
     - 重打同一個位置算英文：「ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。」
     - 中英文之間自動加空格：「在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。」
-- **換 App 或停打後的模式提示**（`shiftToggle` 開著時）：輸入法被啟用、組字擁有者換手（沒有 `activate` 就收到鍵），或距離上一個「打字的鍵」達到 30 秒（`Shell.modeHintIdleSeconds`，含睡眠時間的單調時鐘，可由測試替換），之後的第一個打字的鍵處理完，且當時組字區是空的，就在游標旁顯示一次「英」或「中」（同單按 Shift 切換時的提示），然後記下時間。「打字的鍵」＝沒有 Control、Option、Command、Caps Lock 的一個可印字元鍵（`asciiKey`），或沒有 Command／Control／Option 的空白鍵；方向鍵、Delete、Esc、Return、快捷鍵都不算也不清除待提示。單按 Shift 顯示提示時也把時間設成現在，不連續顯示兩次。提示只含模式，不含任何輸入內容。
+- **換 App 或停打後的模式提示**（`shiftToggle` 開著時）：輸入法被啟用、組字擁有者換手（沒有 `activate` 就收到鍵），或距離上一個「打字的鍵」達到 30 秒（`Shell.modeHintIdleSeconds`，含睡眠時間的單調時鐘，可由測試替換），之後的第一個打字的鍵處理完，且當時組字區是空的，就在游標旁顯示一次「英」或「中」（同單按 Shift 切換時的提示），然後記下時間。「打字的鍵」＝沒有 Control、Option、Command、Caps Lock 的一個可印字元鍵（`asciiKey` 在不帶 Option 時收的鍵），或沒有 Command／Control／Option 的空白鍵；方向鍵、Delete、Esc、Return、快捷鍵都不算也不清除待提示。單按 Shift 顯示提示時也把時間設成現在，不連續顯示兩次。提示只含模式，不含任何輸入內容。
 
 ## 12. 核心設定函式與 C ABI
 
-- `shanjie_engine_set_english`、`_set_english_overwrite`、`_set_english_key_order`、`_set_english_reversal_guard`：參數 `enabled` 為 0 或 1，其他值回 2 且狀態不變；engine 或 out 為 NULL 回 1；成功回 0 並回快照（`handled` 1，`commit` 空，唯一例外：`set_english(0)` 結束開著的英文段或數字緩衝時，若第 128 個單位使組字區整串送出，`commit` 為那串文字）。`set_english` 預設 0，其餘三個預設 1。每次建引擎後都要呼叫（殼在 `build()` 裡送）。
+- `shanjie_engine_set_english`、`_set_english_overwrite`、`_set_english_key_order`、`_set_english_reversal_guard`、`_set_english_auto`（§16.7）：參數 `enabled` 為 0 或 1，其他值回 2 且狀態不變；engine 或 out 為 NULL 回 1；成功回 0 並回快照（`handled` 1，`commit` 空，唯一例外：`set_english(0)` 結束開著的英文段或數字緩衝時，若第 128 個單位使組字區整串送出，`commit` 為那串文字）。`set_english` 預設 0，其餘四個預設 1。前四個每次建引擎後都要呼叫（殼在 `build()` 裡送）；`_set_english_auto` 殼不呼叫，用預設值（§16.7）。
 - 輸出結構末尾的 `english_run_utf16_start`、`english_run_utf16_len` 見 §4.6。
 - 沒有載入單字表的函式（早期的英文單字表已移除）。`set_left_context` 的前文用途見 §8。
-- 工具鉤子（`#[doc(hidden)]`，不進 C ABI）：`english_reverted() -> Option<Revert>`（`Revert::{Overwrite, Order, Missing}`，最近一次 `key()` 是否回退、哪一種）、`english_split()`、`english_shadow()`（影子照打的順序）、`english_columns()`、`digits_shown()`／`digits_emitted()`／`digits_typed()`、`set_digits_trace`、`set_digit_table`／`load_digits`、`set_english_next`／`load_english_next`。每次 `key()` 開頭清除 `reverted`／`split`。
-- 所有英文、影子、數字的內容不進訊息與紀錄，錯誤只有碼。
+- 工具鉤子（`#[doc(hidden)]`，不進 C ABI）：`english_reverted() -> Option<Revert>`（`Revert::{Overwrite, Order, Missing, Auto}`，最近一次 `key()` 是否回退、哪一種；`Auto` 是 §16 的比較取了英文）、`english_split()`、`english_shadow()`（影子的鍵）、`english_record()`（按鍵紀錄）、`english_replay(keys)`（注音重播完成的音節與剩下的三欄）、`english_columns()`、`digits_shown()`／`digits_emitted()`／`digits_typed()`、`set_digits_trace`、`set_late_trace`／`take_late_trace`（待歸鍵的重判：引擎交給 `late_decision` 的輸入與結果）、`late_keys()`、`late_decision(…)`（`Scorer::late_decision` 在引擎的模型上直接呼叫）、`set_reorder_penalty(rho, rho_sym)`（量測用：只改這個引擎的 ρ，不改常數）、`set_digit_table`／`load_digits`、`set_english_next`／`load_english_next`。每次 `key()` 開頭清除 `reverted`／`split`。
+- 所有英文、影子、按鍵紀錄、數字的內容不進訊息與紀錄，錯誤只有碼。
 
 ## 13. 驗證
 
 ### 13.1 核心與 CLI 測試（`make test-rust`）
 
-- `core/tests/engine_english.rs`（真實詞庫、標準排列）：回退——`overwrite_reverts_to_the_keys`、`order_reverts_to_the_keys`、`missing_syllable_on_space_is_one_token`、`missing_syllable_on_tone_opens_a_run`、`missing_syllable_on_tone_needs_key_order`、`missing_syllable_defers_to_adjacent_key_fuzzy`、`overwrite_switch_off_is_today`、`key_order_switch_off_is_today`、`eten_abbreviation_and_off_are_bitwise_today`、`revert_hook_describes_only_the_latest_key`、`backspace_before_a_revert_clears_the_column_key`；英文段——`letters_and_digits_go_on_the_run`、`tone_splits_a_two_symbol_tail`、`tone_does_not_split_one_symbol`、`tone_split_needs_the_lexicon`、`space_never_splits`、`shift_run_takes_digits_too`、`run_takes_the_shadow_letters_and_the_shift_letter`、`run_keeps_every_unfinished_key_a_run_accepts`、`run_is_32_letters_and_the_33rd_starts_the_next`、`run_backspace_and_escape`、`backspace_and_escape_on_a_reverted_run`、`other_keys_end_the_run_first`、`run_at_the_unit_limit_sends_in_the_output_of_the_ending_key`、`run_fields_point_at_the_run`、`a_run_in_the_middle_decodes_its_two_sides_apart`、`revert_in_the_middle_decodes_apart`、`esc_after_a_space_token_is_esc_after_any_token`；token——`chinese_item_follows_the_revert`、`english_token_definition_covers_digits`、`down_after_the_token_lists_its_three_writings_and_space_types_a_space`、`space_twice_types_a_space_unit_and_one_backspace_takes_it`、`a_space_unit_has_no_list_and_space_in_front_of_a_token_opens_nothing`、`backspace_after_an_english_token_deletes_one_letter_at_a_time`、`token_next_key_is_the_fixed_en_for_learning_and_lookup`；短詞——`english_short_is_as_documented`、`short_list_adds_two_items_at_the_end`、`short_list_after_preceding_syllables`、`short_list_is_only_for_the_syllable_just_made`、`short_list_never_reverts`、`every_setting_clears_the_short_word_mark`、`keys_that_change_nothing_keep_the_short_word_mark`；窮舉——`every_syllable_alone_and_sampled_readings_never_revert`（取樣 40,000 個讀音，固定種子）、`every_reversed_key_order_of_every_syllable_is_never_english`、`reversal_guard_chinese_in_a_hurry_english_words_still_come`、`reversal_guard_keeps_the_typed_order_in_every_run`；單按 Shift 的英數狀態——`ascii_*`；正式寫法（§4.4、§5.3）——`a_word_of_the_table_takes_its_writing`、`a_name_of_the_names_layer_takes_its_writing`、`other_casings_stay_as_typed`、`the_chinese_item_stays_after_the_writing`、`the_head_of_a_tone_split_takes_its_writing`、`backspace_reopens_what_was_typed`、`a_run_typed_in_the_ascii_state_stays_as_typed`、`reset_commit_sends_an_open_run_in_its_writing`。表本身的檢查在 `core/src/engine.rs` 的 `english_table_tests`（兩份檔都載入、壞行與同一份或兩份之間的重複被拒絕）。
+- `core/tests/engine_english.rs`（真實詞庫、標準排列）：回退——`overwrite_reverts_to_the_keys`、`order_reverts_to_the_keys`、`missing_syllable_on_space_is_one_token`、`missing_syllable_on_tone_opens_a_run`、`missing_syllable_on_tone_needs_key_order`、`missing_syllable_defers_to_adjacent_key_fuzzy`、`overwrite_switch_off_is_today`、`key_order_switch_off_is_today`、`eten_abbreviation_and_off_are_bitwise_today`、`revert_hook_describes_only_the_latest_key`、`backspace_before_a_revert_clears_the_column_key`；英文段——`letters_and_digits_go_on_the_run`、`tone_splits_a_two_symbol_tail`、`tone_does_not_split_one_symbol`、`tone_split_needs_the_lexicon`、`space_never_splits`、`shift_run_takes_digits_too`、`run_takes_the_shadow_letters_and_the_shift_letter`、`run_keeps_every_unfinished_key_a_run_accepts`、`run_is_32_letters_and_the_33rd_starts_the_next`、`run_backspace_and_escape`、`backspace_and_escape_on_a_reverted_run`、`other_keys_end_the_run_first`、`run_at_the_unit_limit_sends_in_the_output_of_the_ending_key`、`run_fields_point_at_the_run`、`a_run_in_the_middle_decodes_its_two_sides_apart`、`revert_in_the_middle_decodes_apart`、`esc_after_a_space_token_is_esc_after_any_token`；token——`chinese_item_follows_the_revert`、`english_token_definition_covers_digits`、`down_after_the_token_lists_its_three_writings_and_space_types_a_space`、`space_twice_types_a_space_unit_and_one_backspace_takes_it`、`a_space_unit_has_no_list_and_space_in_front_of_a_token_opens_nothing`、`backspace_after_an_english_token_deletes_one_letter_at_a_time`、`token_next_key_is_the_fixed_en_for_learning_and_lookup`；短詞——`english_short_is_as_documented`、`short_list_adds_two_items_at_the_end`、`short_list_after_preceding_syllables`、`short_list_is_only_for_the_syllable_just_made`、`short_list_never_reverts`、`every_setting_clears_the_short_word_mark`、`keys_that_change_nothing_keep_the_short_word_mark`；窮舉——`every_syllable_alone_and_sampled_readings_never_revert`（取樣 40,000 個讀音，固定種子）、`every_reversed_key_order_of_every_syllable_is_never_english`、`reversal_guard_chinese_in_a_hurry_english_words_still_come`、`reversal_guard_keeps_the_typed_order_in_every_run`；聲調提前（§4.2）——`a_tone_key_one_place_early_is_put_back_behind_the_next_zhuyin_key`、`a_tone_moved_up_is_not_guessed_when_the_conditions_fail`（`q 6 g`、`q 6 m`、`S-A 3 o`、`q 6 z 8`、`c p ␣`）、`a_tone_moved_up_after_a_replaced_key`（`a q 6 8`）；按鍵紀錄、注音重播與中文項——`the_english_of_a_revert_is_every_key_typed`（預設設定的 `meeting`、`trigger`、`hello`、`paper`）、`an_overwritten_syllable_lists_the_english_of_its_keys`（`speech`、`test`、`qai`）、`esc_on_a_reverted_run_is_the_zhuyin_replay`、`the_token_of_a_reverted_run_has_the_chinese_item_of_its_characters`、`the_record_follows_the_shadow_when_it_catches_up`、`the_record_after_esc_drops_the_ignored_tone`、`the_record_is_capped_so_a_revert_fits_a_run`、`the_zhuyin_replay_is_the_engine_with_mixing_off`（注音重播與比對引擎逐項相同：詞庫取樣的讀音加隨機覆寫鍵 2,500 串、英文段可能裝的字元的隨機串 2,500 串、五個固定例，固定種子）；單按 Shift 的英數狀態——`ascii_*`；正式寫法（§4.4、§5.3）——`a_word_of_the_table_takes_its_writing`、`a_name_of_the_names_layer_takes_its_writing`、`other_casings_stay_as_typed`、`the_chinese_item_stays_after_the_writing`、`the_head_of_a_tone_split_takes_its_writing`、`backspace_reopens_what_was_typed`、`a_run_typed_in_the_ascii_state_stays_as_typed`、`reset_commit_sends_an_open_run_in_its_writing`。表本身的檢查在 `core/src/engine.rs` 的 `english_table_tests`（兩份檔都載入、壞行與同一份或兩份之間的重複被拒絕）。
 - `core/tests/engine_mixed.rs`（真實詞庫與模型、測試用小表）：§5.7 的每一條——`revert_token_then_syllable_lists_the_mixed_word`、`shift_token_then_syllables`、`pick_makes_one_token`、`pick_then_more_syllables_decode_alone`、`pick_is_not_learned`、`edit_after_pick`、`down_and_space_after_pick`、`forget_on_mixed_item_does_nothing`、`forgetting_a_new_word_leaves_the_mixed_item`、`middle_cursor_no_table_and_no_match_are_today`、`bad_table_is_not_loaded`、`mixed_item_sits_before_the_short_items`、`the_mixed_word_is_first_with_a_prediction_row_showing`、`key_scheme_1_keeps_the_mixed_word_first`、`the_table_comes_with_the_data_folder`、`the_learning_context_after_the_mixed_word`；`every_check_set_word_is_listed` 用出貨的表逐列打檢查集 `eval/dev/mixed-words/words.txt`（英文第一個字母按 Shift），每一列都要在清單裡，檢查集與表逐列相同。
 - `core/tests/engine_digits.rs`：`row01`–`row47`（每一列對應一個按鍵序列的預期，句首語境下的評分列斷言最後的 `syls` 與 golden 記的每鍵顯示，不是手寫的直覺）、`a12_*`（↓／Enter 照畫面）、`review_p2_*`／`p3_*`／`p4_*`（128 單位送出不帶舊尾段、Enter 送出剩餘緩衝、⌘⌫ 後保留數字項、點預測列清 `last_digits`、設定函式清 `last_digits`、↑ 不吐 token）。`row49_scores_match_the_python_golden_bit_for_bit` 與 `predict_digits_matches_the_python_golden_bit_for_bit` 把每鍵的切分與分數（解析成 f64 比位元）、預測列與 `reference/proto/digits_score.py` 產生的 `eval/golden/digits-score.txt`、`digits-pred.txt` 比對；golden 在 macOS 產生，Linux 的 libm 末位不同，這兩個測試只在 macOS 的 CI 跑（Linux／WSL 跳過）。`goldens_name_the_files_they_were_made_with` 核對 golden 檔頭記的表、模型與詞庫雜湊。
+- `core/tests/engine_digits.rs` 的第二部分（用 App 的建法：`Engine::new` ＋ `load_lm`，英打開關是 App 的預設，所以和上面的 `row*` 分開）：`hurried_syllables_are_read_as_typed_in_order`（`. u 3` 句首與接在「我」後、`. w 6`、`8 w ␣`、`5 / j ␣`、`/ 5 4`、`8 q 6`、`2 i j 6`、`q 6 8`，每鍵的畫面都斷言）、`hurried_syllables_that_stay_numbers_at_the_sentence_start`（句首 `9 y 4`、`2 0 u 4`、`0 1 4` 仍是數字，§14）、`a_number_before_chinese_stays_a_number`（`8 s u 0 6`、`8 e k 7`、`9 2 u 0 3`、`2 0 2 6 s u 0 6`、`8 g 4`、`9 h 4`、`3 . 5`、`9 5 5 k 6`、`1 9 8 4 ⏎`、`. . .`、`- -`、`1 / 2`）、`the_rejoin_does_not_depend_on_the_key_order_switch`、`with_the_guard_off_every_key_is_the_baselines`（fixture `core/tests/fixtures/reversal-guard-off.tsv`：基準 `98385de9` 的每鍵輸出，保護關著時兩種「依按鍵順序」設定、保護開著而它關著的 `q 6 8`、以及 T 不該轉的五串）、`a_key_that_is_passed_on_keeps_the_late_tokens`（第 1、5q 條的直通鍵）、`any_other_key_makes_the_late_tokens_final`（Backspace、←→、Esc、標點、Shift＋1、Shift＋A、`reset(Commit)` 七條，每鍵的畫面與單位）、`two_late_keys_and_the_next_key_hits_one_column`（`1 . u s ␣`）、`the_128th_unit_is_sent_and_not_taken_back`（127 個單位之後不併回、126 個併回）、`the_cursor_in_the_middle`、`every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on`（詞庫每個音節的每種顛倒鍵序，3,457 種：英文＝0，仍是數字的種數 ≤ 410；實測 372）、`the_penalty_hook_with_the_constants_changes_nothing`、`reorder_scores_match_the_python_golden_bit_for_bit`（`eval/golden/digits-reorder.txt` 的 `decide` 列與 `late_decision` 列，Python 的位元）、`late_inputs_in_the_engine_are_the_golden_rows`（引擎在收尾鍵交給 `late_decision` 的輸入逐欄等於 golden 帶 `script=` 的列）。golden 檔頭的雜湊由 `digits_goldens_were_made_from_the_current_inputs` 核對（三個檔）。
 - `core/tests/engine_digits_off.rs`：總開關關著、或開著而沒有數字表時，`digits-off.txt`／`digits-off-en.txt` 兩個 fixture 逐欄與沒有數字功能的引擎相同（fixture 是功能加入前的程式產生的輸出，不是和自己比）。
 - `core/tests/engine_english_next.rs`：`the_key_sequence_makes_an_english_token`、`the_row_behind_joe`、`no_table_or_no_row_for_the_word_is_today`、`a_table_that_does_not_parse_is_an_error`、`the_cache_follows_the_table`、`prediction_off_has_no_effect`、`the_digit_context_comes_first`、`decoding_is_the_same_with_and_without_the_table`、`the_row_behind_an_english_left_text`、`the_english_left_text_never_reaches_the_learning_file`。
-- `core/tests/engine_replay.rs`：dev302 的 302 列在總開關開、各開關開著時 302／302 相同、全程沒有回退或切分，release 每鍵 p95 < 16 ms。
+- `core/tests/engine_replay.rs`：dev302 的 302 列在總開關開、各開關開著時 302／302 相同、全程沒有回退或切分，release 每鍵 p95 < 16 ms；`replay_with_english_and_digits_on_the_apps_engine` 用 App 的建法（模型與數字表都載入）再跑一遍。
 - `core/src/ffi.rs` 子行程測試與 `core/tests/c/abi_smoke.c`：四個設定函式的回傳碼 0／1／2 與 NULL；經 C ABI 打 `o k ␣` 得 `preedit` `ok`、無候選；數字（`digits.tsv` 小表加小模型）`2 0 2 6 ⏎` 得 `commit` `2026`；輸出不含按鍵字串。
-- 突變驗證：每條規則至少有一個讓某個測試以斷言失敗的突變（看結束碼與斷言數，不是編譯錯誤）：例如覆寫不回退、逆序不回退、(c) 空白不回退、數字鍵結束英文段、空白也切分、單一符號也切、切分不查詞庫、(c) 排在鄰鍵之前、短詞項目對整個候選範圍、θ 不套用、缺表回錯誤碼。
+- 突變驗證：每條規則至少有一個讓某個測試以斷言失敗的突變（看結束碼與斷言數，不是編譯錯誤）：例如注音重播忽略放進前面空欄的鍵、覆寫不回退、逆序不回退、(c) 空白不回退、數字鍵結束英文段、空白也切分、單一符號也切、切分不查詞庫、(c) 排在鄰鍵之前、短詞項目對整個候選範圍、θ 不套用、缺表回錯誤碼。顛倒的音節鍵序的 15 個：不記待歸鍵、撞欄就整筆作廢、不確認待歸鍵還在游標左邊、不查含漢字、`RHO` 設 0、`RHO_SYM` 設成 `RHO`、保護關著仍併回、顛倒的尾段不扣 ρ、顛倒的尾段不查每欄一鍵、聲調提前不查還原點、不查欄位是空的、不查詞庫、保護關著仍轉、交給 `late_decision` 的輸入錯（未完成音節照打的順序、`before` 漏掉先前已吐出的數字）、直通的鍵也清記錄。
 
 ### 13.2 殼測試（`make test-swift`）
 
@@ -364,11 +394,13 @@
 
 ### 13.3 `english-sim`（`cargo run --release -q -p cli -- english-sim`）
 
-- 驅動真的引擎，量「照順序打中文時回退誤觸的頻率」：`--rows FILE`（`前文|句子|讀音`）、`--p`（每個注音鍵的錯打機率，0＝無錯打）、`--repair overwrite|backspace`、`--seed`（預設 20261014）、`--repeat`（預設 5 個種子）、`--overwrite on|off`、`--key-order on|off`（預設 on）、`--reversal-guard on|off`（工具預設 off，好讓 `revert_b_*` 欄描述關著顛倒保護時的 (b)，與引擎和 App 的預設 on 不同）、`--digits [--lm FILE]`。輸出一行 TSV、不含任何內容文字：`rows_sha256 rows syllables keys typos` 加 `revert_a/b/c`、`split`、`english_final` 各 mean／max（每千音節、跨種子）；`--digits` 再接六欄（最後數字 token 數、瞬間顯示成數字的鍵數、因數字多按的 Backspace，各 mean／max）。
+- 驅動真的引擎，量「照順序打中文時回退誤觸的頻率」：`--rows FILE`（`前文|句子|讀音`）、`--p`（每個注音鍵的錯打機率，0＝無錯打）、`--repair overwrite|backspace`、`--seed`（預設 20261014）、`--repeat`（預設 5 個種子）、`--overwrite on|off`、`--key-order on|off`（預設 on）、`--reversal-guard on|off`（工具預設 off，好讓 `revert_b_*` 欄描述關著顛倒保護時的 (b)，與引擎和 App 的預設 on 不同）、`--digits [--lm FILE]`。輸出一行 TSV、不含任何內容文字：`rows_sha256 rows syllables keys typos` 加 `revert_a/b/c`、`split`、`english_final` 各 mean／max（每千音節、跨種子）；`--digits` 再接六欄（最後數字 token 數、瞬間顯示成數字的鍵數、因數字多按的 Backspace，各 mean／max），行尾再接 §16.8 的三欄（`--swap`／`--tone-early` 的那一欄在它們之前）。
 - 錯打模型固定：只對有鄰鍵的注音鍵（同一列左右各一，只留標準排列的注音鍵）以機率 `p` 錯打，一個或兩個鄰鍵均勻抽；聲調鍵、空白鍵、Backspace 與修正的鍵不錯打；修正 `overwrite` 在錯鍵與對鍵同欄時直接按對鍵一次、否則退回 `backspace`（按 Backspace 到欄位是預期的前綴再補打）。回退發生後模擬器照使用者會做的事復原（Esc 還原、再 Esc 清掉未完成音節，或 Space 直接成 token 時 Backspace 再 Esc），再把這個音節不含錯打地從頭重打；重打又回退則再計、再復原，`--retries`（預設 3）次後中止那一列。`--digits` 時 `backspace` 修正改看引擎實際的 preedit（使用者看得到 ㄅ ㄉ ㄓ 後面鄰鍵打錯而前面多出的數字，會多按一次 Backspace）。
-- `--words FILE --recall`：每個詞新引擎、逐字母、空白，印分類（回退 (a)／(b)／(c)、沒有回退）與固定公開清單 `ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7` 的 `probe` 行（token／中文／其他）。「成為英文 token」要畫面上是那個詞的寫法（§4.4；清單裡的 `google` 顯示成 `Google` 也算）。
+- `--words FILE --recall`：每個詞新引擎、逐字母、空白，印「成為英文 token」的詞數與分類（回退 (a)／(b)／(c)、沒有回退；兩個開關都關時，在空白鍵 (c) 回退的詞是打的整個詞，因為 token 取按鍵紀錄）與固定公開清單 `ok ls cd mv pr ai ui go cp cup npm gta6 rdr2 poe2 mp3 a4 i7 s7` 的 `probe` 行（token／中文／其他）。「成為英文 token」要畫面上是那個詞的寫法（§4.4；清單裡的 `google` 顯示成 `Google` 也算）。
 - 出貨前的檢查（照順序、不打錯）：所有集合與開關組合的 `revert_*`、`split`、`english_final` 全部為 0；數字的最後 token 在 `--p 0` 與 `--p 0.02 --repair backspace` 也是 0。用覆寫改錯的 `--p 0.02 --repair overwrite` 只報、不擋——那就是「重打同一個位置算英文」的代價。
 - 測試：`cli/tests/english_sim.rs` 的固定種子數字（`fixed_seed_numbers`、`the_switches_take_on_or_off`、`reversal_guard_stops_trigger_b`、`recall_counts_the_classes_and_the_probes`、`digits_columns`、`digits_backspace_repair_reads_the_screen`、`a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on`）；改錯打模型要同時改這些數字。
+- `--swap P`、`--tone-early P`（打字模式；量顛倒的音節鍵序用 `--digits --reversal-guard on`）：一個音節以機率 P 在兩個以上符號時內部相鄰兩鍵對調一次（`--swap`），否則以機率 P 在有聲調鍵、兩個以上符號時聲調鍵提前一位（`--tone-early`）；這樣的音節不套用上面的錯打與修正，鍵原樣送給引擎。輸出多最後一欄 `hurried_bad_mean`：這些音節打完後組字區最後一個單位不是該音節的，每千音節（跨種子的平均）；失敗後組字區丟掉，一次失敗不決定後面的音節。兩個選項都沒給時輸出和原來相同。測試 `hurried_syllables_column`。
+- `--keys FILE --out FILE [--lm FILE] [--profile chat|formal] [--overwrite on|off] [--key-order on|off] [--reversal-guard on|off] [--rho RHO,RHO_SYM]`：量測用的探針（顛倒的音節鍵序的量測）。引擎是 App 的建法（`cli::replay::build_engine_packs`、預設詞包、不載入會意與常談、預測開、數字表與模型載入），四個英打開關預設是 App 的預設（中英混打開、`--overwrite off`、`--key-order on`、`--reversal-guard on`，和 `--rows` 模式的工具預設不同）。輸入每行 `id<TAB>left<TAB>prefix<TAB>keys`（鍵帽字元，`_` 是空白、大寫字母是 Shift＋字母、`<` 是 Backspace）；每行開始前重設引擎，先打 `prefix`，只判 `keys`。`--out` 已存在就拒絕；每行十欄（`keys` 之前的單位數、之後新增的單位、未完成的符號、英文段長度、回退、切分次數、吐出的數字 token 數、`commit` 加最後的組字區、判斷點（§16.8）），stdout 只印輸入檔的 sha256 與行數。`--rho RHO,RHO_SYM`（兩個 0 以上的有限小數）只改這一趟的兩個 ρ（`Engine::set_reorder_penalty`），不改常數；`--rho 7,4` 的輸出與不帶 `--rho` 逐位元組相同。`--list-syllables` 印詞庫讀音的所有相異音節。測試 `keys_probe_columns`。
 - 這個工具不看選字結果，所以量不到 (c) 在聲調鍵的代價（模擬器在錯鍵之後立刻修正，聲調鍵到的時候欄位已是對的）。
 
 ### 13.4 `--english-next`（量測 CLI）
@@ -383,7 +415,7 @@
 ## 14. 已知限制
 
 - 輸入法選單與設定只有標準排列可以用英打；倚天排列與可省略韻母開著時整套規則不生效。
-- 回退 (c) 在聲調鍵的代價量不到（§13.3），只靠實機回饋；空白鍵的 (c) 做出來的是完成的 token，沒有還原點，Esc 不能變回注音，要用 Backspace 修。
+- 回退 (c) 在聲調鍵的代價量不到（§13.3），只靠實機回饋；空白鍵的 (c) 做出來的是完成的 token，Esc 不能變回注音（Esc 清掉整個組字區），要用 Backspace 修。
 - 英文後面接一聲的字（`ok他`）要多按一下空白結束英文段（空白不切分，因為 `feel`、`real`、`keep` 等字的最後兩鍵剛好是詞庫裡的一聲音節）；後面接二、三、四聲且尾音節至少兩個符號時，聲調鍵會切分（`ok我`、`ok吧`、`rust編譯`）。單一符號的尾音節不切，所以 `ok是`（`okg4`）要先按空白。
 - 鄰鍵打錯開著時，`go`、`cup`、`cp` 會被收成中文，不會變英文（§3.4）。
 - 短詞清單只涵蓋一聲音節在詞庫裡的字；只能靠逆序打出的字（`ls`、`mv`）在「快打時鍵序顛倒不當英文」開著（預設）時要用 Shift 打。
@@ -393,6 +425,23 @@
   - 用滑鼠移動游標，殼收不到通知；之後若沒有再開始組字就直接從預測列送出，p 可能是舊的。
   - 開頭判斷靠 App 回報的游標前文字；回報不可靠的 App（部分瀏覽器與程式編輯器）可能多一個或少一個開頭空白。
 - 模式提示（§11）在 Google 文件等游標位置回報不準的 App 可能落在視窗左上角；英數狀態下在終端機翻頁，每次停 30 秒以上再按鍵都會閃一次「英」。時鐘依 `clock_gettime(CLOCK_MONOTONIC)` 的文件行為會計入睡眠時間，沒有在實機睡眠後量過。
+- 顛倒的音節鍵序（§7.3、§7.4、§4.2）：
+  - 句首純數字鍵開頭的顛倒仍可能留成數字：`9 y 4` 是 `9自`、`2 0 u 4` 是 `20意`、`0 1 4` 是 `014`（句首的語境偏數字，ρ＝7 救不回來，實測 `9 y 4` 的併回邊際是 −0.245（log10，正才併回）；調低 ρ 救它們，數字被吃掉的例子會快速增加）。
+  - 數字緊接沒有韻母的音節（N0億、8時、0度）有一小部分被讀成注音；合成數字集（57,140 例）量到改壞 93 例（約 0.16%）、修好 85 例。
+  - `. u` 這一鍵仍顯示 `.ㄧ`，聲調鍵（或空白）才變成「有」；要在打字途中顯示 ㄧㄡ，得把顯示也接上評分。
+  - 聲調提前的代價：不按 Shift、打「字母＋聲調數字＋字母」且前兩個字元能成注音時變成中文（`a3o` 變「美」、`c3po` 變「很ㄟ」）；專門建的 2,704 種組合，基準成為英文 token 的 1,716 種有 216 種（12.6%）變中文；75 個真實寫法裡基準正確的 41 個有 1 個改壞（`c3po`）。
+  - `8 s ␣` 這類尾端單獨一個聲母的收尾，併回的是罕用字，不是 `8ㄋ`。
+  - 併回後的 ↓ 清單不含照打的讀法，沒併回時不含併回的字（§7.7）。
+  - 待歸鍵的 token 若是第 128 個單位，整串在那個鍵送出，之後的收尾鍵不併回（與沒有這條規則時的輸出相同）；有 `pend_prev`（可省略韻母）時也不併回。
+  - 併回的鍵放進影子與按鍵紀錄時排在最後（實際最早打），只影響之後再回退成英文時的字母順序。
+  - 設定頁在「依按鍵順序判斷英文」關著時把「快打時鍵序顛倒不當英文」反灰，使用者那時關不掉 A（存值預設是開，§11）。
+  - 空白鍵的 (c) 已成為 token，聲調提前不涵蓋；聲調提前的另兩類（前半成字、後一鍵變數字或符號；前半成字、後一鍵留成未完成符號）沒有不看語意就能分辨的規則，不處理。
+- 按鍵紀錄與中文項：
+  - 按鍵紀錄最多 31 個鍵；同一個音節打了更多鍵時，回退的英文只有前 31 個鍵（加觸發的鍵）。
+  - 多音節的英文段（注音重播出兩個以上音節）沒有中文項，只有 Esc 這條路。
+  - 注音重播不套用鄰鍵收下（§2），鄰鍵開著時 Esc 的結果可能和關掉中英混打重打一遍不同。
+  - 中文項取詞庫的第一個詞條，詞庫把單獨一個注音符號也收成詞條，所以 `gta6` 的中文項是「ㄇ」。
+  - 覆寫過的音節的英文項只在剛完成的那個音節上（§6）；按了別的鍵之後要英文，得刪掉重打。兩個鍵都是數字鍵（沒有數字列時的 `1 1 ␣`）時兩項相同。
 - 數字列：畫面顯示「ㄅ」（或 ㄉ ㄓ ㄚ ㄞ ㄢ ㄦ ㄡ ㄥ 開頭的單一鍵）時按 Enter 送出的是「ㄅ」，不是「1」（§7.5）；ㄅ、ㄉ、ㄓ 開頭的音節第二個鍵打錯成不合法的組合時，前面的鍵會先變成數字，要多按一次 Backspace。
 - 說明視窗：游標位置未知時視窗放在上半部（§10.3）；游標在螢幕正中線時算上半部。
 
@@ -400,8 +449,9 @@
 
 - 不查英文單字表：「注音不可能是使用者要的」這個判斷只看鍵序與詞庫，零成本、不挑詞；`gta6`、`rdr2`、`ok`、`ls` 含數字或只有兩個字母，本來就不在三個字母以上的字母詞表裡，而且詞表要打包並附授權。
 - 空白鍵不切分、聲調鍵才切分且要至少兩個符號：空白是最常見的英文結束，`feel`、`real`、`keep`、`final`、`email`、`model`、`social` 的最後兩鍵都是詞庫裡的一聲音節，空白若切，這些字全部斷成「英文加一個漢字」。單一符號不切，因為 ㄓˊ、ㄔ、ㄕˋ 都在詞庫裡，不設下限的話 `A12345 6` 會切成 `A1234`＋直。
-- 影子每欄一鍵而不是記整串按鍵：影子永遠和畫面欄位一致，Backspace 與覆寫不會讓兩者分歧，也不需要「第 33 個鍵」之類的上限。
-- 回退的文字取「照打的順序」而不是欄位順序：顛倒保護關著時 (b) 的英文段才會是使用者打的順序（`ls` 而不是 `sl`）。
+- 影子每欄一鍵、按鍵紀錄記整串，兩者並存：影子永遠和畫面欄位一致（Backspace 刪哪一欄、哪個鍵在哪一欄都問它）；變成英文時要的是使用者打的整串，只有影子時被覆寫掉的鍵拿不回來（預設設定下 `meeting ␣` 會成為 `mig`）。按鍵紀錄上限 31 個鍵，回退加上觸發的鍵剛好不超過英文段的 32 個字元。Backspace 把按鍵紀錄重設成影子的鍵：用 Backspace 改的人是在修注音，之前打錯的鍵不該再回到英文裡。
+- Esc 用注音重播而不是存還原點：英文段是文字，再打字、Backspace 之後仍然能從它的字元算回注音，不必另存狀態；沒改過的英文段重播的結果就是回退當下的欄位。中文項同理，從 token 結束時的字元算。
+- 回退的文字取照打的順序（按鍵紀錄）而不是欄位順序：顛倒保護關著時 (b) 的英文段才會是使用者打的順序（`ls` 而不是 `sl`）。
 - (c) 在空白鍵只看總開關、在聲調鍵看「依按鍵順序判斷英文」：空白鍵上這個動作原本什麼都不做，所以零成本；聲調鍵上「我打錯了一個符號、按到聲調才發現」的人原本只要 Backspace，現在要 Esc 重打，與 (b) 是同一類代價。
 - 鄰鍵先於 (c)：鄰鍵打錯是更常見的原因，兩者共用「詞庫沒有的音節」這個入口，先救得回來的。
 - token 的文字與讀音分開存：讀音留著照打的字，文字是寫法（`english_writing`，一個函式，英文段結束、聲調鍵切分、系統送出三處共用），所以換寫法不動解碼、學習與英文後預測，寫法清單第一項就是 token 目前的文字。
@@ -412,3 +462,116 @@
 - 英文前文表缺檔無聲關閉、讀不懂卻是錯誤：缺檔是可選功能不在，讀不懂是出貨錯誤，不能悄悄關掉。
 - 中英文空格只在殼、只動送出的文字：核心的送出、學習、前文字串不變，所以學習與預測不受影響；p 存在 `Session` 而不是共用的 `Shell`，因為游標前文是每個輸入 client 自己的。結尾不補空白，因為不知道接下來會打什麼。
 - 兩個英打開關預設關並一次性重設：「重打同一個位置算英文」會把習慣性的覆寫改錯當成英文，`english-sim --repair overwrite` 量到的誤觸只報、不設上限；單按 Shift 一碰到就無聲切走輸入狀態。兩者預設關，需要的人到設定打開。
+- 顛倒的鍵序用兩個 ρ、待歸鍵只留兩個且只活一鍵：單用一個 ρ 時，句首的 `. u 3` 仍是 `.以`（原型單用 ρ＝8 量到 49 例裡 8 例）；單用 4 時數字被改壞多很多。`.` `/` `-` 開頭的串比數字開頭的更可能是注音，所以用較小的 ρ。一個音節最多三個符號，所以待歸鍵最多兩個就夠（第三個一定落在已佔的欄位）；活過一鍵以上，中間隔了別的鍵，原本的順序已經不能讀成顛倒。
+- `RHO` ＝ 7、`RHO_SYM` ＝ 4：格點是 ρ ∈ {6, 7, 8, 9, 10} × ρs ∈ {4, 6}（研究 repo `experiments/reversal-digits` 的登記與結果，2026-11-14），在聊天設定以公開列相鄰對調沒打成原字的行數（5,371 列，基準 1,177）最小者為準；ρ＝6 的兩格數字改壞超過 0.20% 淘汰，ρ＝10 的兩格有具名列不過。(7, 4) 剩 175 列沒打成原字（修好 1,002、改壞 0），原型的 (8, 4) 剩 220（修好 957、改壞 0）；合成數字集 57,140 例的改壞 (7, 4) 是 93、(8, 4) 是 73。詞庫窮舉的顛倒鍵序 3,457 種，仍是數字的 372 種（(8, 4) 是 406）。
+- 不做 D（`.` `/` `-` 不開串）：會讓 `...` 打不出來，84 行標點串裡有 40 行輸出改變。不做 C（顛倒的尾段一律併回）：數字被吃掉 4,494 例。
+
+## 16. 英文或注音：完成鍵上的比較
+
+預設設定（「重打同一個位置算英文」關）下，留在欄位裡的注音拼得出字就是中文：`s p e e c h ␣` 是 ㄘㄣ，照打的英文只在 ↓ 清單最後（§6）。這一節的規則在完成音節的那個鍵上，把「打了好幾個鍵才落到一個音節」的情形拿去和英文比機率，英文明顯較可能才改成英文。只在完成鍵決定一次；打字途中的顯示不變。
+
+### 16.1 判斷點
+
+- **判斷點**：未完成音節用空白或聲調鍵（`3 4 6 7`）完成，照現行規則會成為中文（三欄加聲調在詞庫裡，而且那個音節至少有一個含漢字的詞條；三聲變調收下的未收音節與未收輕聲尾當成詞庫裡的音節，含漢字的判斷與下面的注音分數都用它的 Xˇ，`docs/spec/decoder.md` §6.6），並且這個音節有下列**結構異常**之一：
+  - **覆寫**：按鍵紀錄的鍵數多於影子的鍵數（至少一個鍵被同欄的鍵蓋掉）；
+  - **鍵序顛倒**：打的過程至少一次「顛倒保護收下」：一個注音鍵落在空的欄位、那一欄之後的欄位已經有鍵，而且「依按鍵順序判斷英文」與「快打時鍵序顛倒不當英文」都開著（後者關著時這是回退 (b)；前者關著時 (b) 不存在，也就沒有這種判斷點）。蓋掉已經有鍵的欄位不算顛倒。
+- 計數：**n_ow**＝按鍵紀錄的鍵數減影子的鍵數；**n_dup**＝被蓋掉的鍵當中，蓋它的鍵和它是同一個鍵帽的個數；**n_rev**＝發生過顛倒保護收下為 1，否則 0。
+- 例（標準排列，App 的開關）：
+
+  | 鍵 | 過程 | 音節 | (n_ow, n_dup, n_rev) |
+  |---|---|---|---|
+  | `s p e e c h ␣` | ㄋ、ㄣ、ㄍ 蓋 ㄋ、ㄍ 蓋 ㄍ、ㄏ 蓋 ㄍ、ㄘ 蓋 ㄏ | ㄘㄣ | (4, 1, 0) |
+  | `k d l ␣` | ㄜ、ㄎ 落在空的聲母欄（顛倒）、ㄠ 蓋 ㄜ | ㄎㄠ | (1, 0, 1) |
+  | `l s ␣` | ㄠ、ㄋ 落在空的聲母欄（顛倒） | ㄋㄠ | (0, 0, 1) |
+  | `d e k ␣` | ㄎ、ㄍ 蓋 ㄎ、ㄜ | ㄍㄜ | (1, 0, 0) |
+
+- **不是判斷點**（和沒有這條規則時逐位元相同）：
+  - 照欄位順序打、沒有覆寫的音節（`a i ␣`）；
+  - 數字層完成的尾段（§7.4）、待歸鍵併回的音節（§7.4）、第一個鍵是數字字母表鍵的音節（由數字層放進欄位）；
+  - 聲調提前 T 完成的音節（§4.2）、鄰鍵收下的音節（§3.4；詞庫沒有的音節輪不到這條規則）；
+  - 用 Backspace 改過的音節：Backspace 把按鍵紀錄重設成影子的鍵（§3.1），三個計數一起歸零；
+  - Esc 變回注音（§4.5）留下的未完成音節：使用者已經說了要注音，它的完成鍵不再比較（按鍵紀錄仍保留被覆寫的鍵，§6 的英文項照舊）；
+  - 英文段或 Shift 段裡的鍵；中英混打關著、倚天排列、可省略韻母開著（`shadow_on` 不成立）。
+- **e（英文字串）**：按鍵紀錄（照打的鍵帽字元），聲調鍵完成時接上那個聲調數字，空白完成不接。e 必須符合 `[a-z][a-z0-9]{0,31}`，否則不比較（照舊中文）。
+
+### 16.2 英文分數
+
+前文 C＝`lm::history(context_key(左文＋這個音節前的顯示字串))`，與數字列（§7.2）、建表時是同一個函式。全部用 log10。
+
+- `lpE ＝ log10 P(E | C) ＋ log10 P(e | E)`。
+- `P(E | C) ＝ (N(C→E) ＋ β·P(E)) ／ (N(C) ＋ β)`，`P(E) ＝ N(E)／T`；表裡沒有 C 的 `D` 列時＝P(E)；β＝1。
+- `P(e | E)`，每一種 e 只有一個值：
+  1. e 在表的 `E` 列：`N(e) ／ (N(E) ＋ A)`（A＝表裡記的、被大小門檻剪掉的計數）。
+  2. e 不在表裡、全是字母、5 到 32 個、而且 A > 0：`A ／ (N(E) ＋ A) × P_char(e)`。
+     - `P_char(e) ＝ P_L(|e|) × Π P(x_i | x_{i-2} x_{i-1})`，x 是 e 的字母前面補兩個 `^`、後面補一個 `$`（共 |e|＋1 個條件機率）。
+     - `P(z | xy) ＝ (G(xyz) ＋ 0.5) ／ (G(xy·) ＋ 0.5 × 27)`，G 是字母三元組的**詞型**計數（`G` 列），`G(xy·)` 是同一個前兩字的各列加總。
+     - `P_L(n) ＝ (L(n) ＋ 1) ／ (Σ L ＋ 28)`，L 是詞型的長度分布（`L` 列，5 到 32）。
+     - 相加順序：`log10(A／(N(E)＋A))`，加上〔`log10 P_L`，再由左到右加每個三元組的 log10〕。沒見過的三元組也有限值。
+  3. 其他（不在表裡而且長度 ≤ 4、或含數字、或 A＝0）：lpE＝−∞，不比較，照舊中文。
+
+### 16.3 注音分數、規則與結果
+
+- `lpZ ＝ S ＋ t(s, w*) − κ·n_ow − κ_dup·n_dup − κ_rev·n_rev`（照這個順序相減）。
+  - s＝照現行規則完成的音節（三聲變調收下的音節是它的 Xˇ）；`S ＝ log10 Σ P(w | C)`，對讀音以 s 開頭的每個詞 w 求和，P(w | C) 是模型的機率（不是 λ 混合分數）：和數字列 `Scorer::lp_z` 在「完成的音節、前面沒有數字」那一支是同一段程式（`digits::lp_z_words`，候選順序、逐項相加）。
+  - w*＝其中 P(w | C) 最大的詞（相同時取候選順序在前的）；t(s, w*) 是讀音項（`core/src/reading.rs` 的 `term`；讀音解碼關著時為 0）。
+- **規則**：`lpE > lpZ ＋ θ` 才取英文（嚴格大於；平手取注音）。
+- **取英文**，和回退 (c) 在同一個鍵的行為完全相同（§3.2、§3.3）：
+  - 空白：英文段＝e，立刻結束成一個英文 token（空白被吃掉），token 帶中文項（§3.3：e 的注音重播就是 s），另記「自動判斷」標記給 Esc（§16.6）。第 128 個單位使組字區整串送出時不記標記。
+  - 聲調鍵：開英文段（內容＝e，含聲調數字），記還原點，聲調提前 T 照 §4.2 照常可以觸發；Esc 照 §4.5（注音重播，因為 s 在詞庫裡，重播的結果是完成的音節 s）。不另外要求「依按鍵順序判斷英文」開著（它只影響有沒有鍵序顛倒這種判斷點）。
+  - `english_reverted()` 回 `Revert::Auto`。
+- **取注音**：和沒有這條規則時相同，↓ 最後有照打的英文（§6）。
+
+### 16.4 參數、格點與量測用的旗標
+
+- 常數在 `core/src/english_auto.rs`：`THETA` ＝ 1、`KAPPA` ＝ 2、`KAPPA_DUP` ＝ 3、`KAPPA_REV` ＝ 2。前三個是登記格點 θ ∈ {1, 2, 3} × κ ∈ {1, 1.5, 2} × κ_dup ∈ {0, 3}（18 格）裡照選格規則選出的一格（測試 `the_data_folder_decides_what_ships` 只允許格點裡的值）：18 格都可行（四趟調參負例的 `auto_english_max` 最高 0.468，在 θ＝1 的六格），這一格的調參探針英文第一名率最高（71.1%，1,062 列；θ＝3、κ＝1、κ_dup＝0 是 21.5%）。κ 是從注音分數扣掉的，κ 越大越容易取英文。κ_rev 不進格點：數字層的 ρ＝7（§7.3）是在「數字或注音」之間，這裡是「英文或注音」，取較小的定值。
+- **選格規則**（`tools/select_english_cell.py pick`）：每一格量 (i) 調參探針判斷點類別的英文第一名率（§16.8），(ii) 四趟調參負例的 `auto_english_max`。可行格＝四趟都 ≤ 0.5；在可行格裡取 (i) 最高的一格；平手依序取 θ 較大、κ 較大、κ_dup 較大。沒有可行格時不選（結束碼 3）。
+- **CLI 旗標**（只改這一趟、不改常數）：`english-sim` 的 `--auto-english on|off`（核心開關）、`--auto-theta F`、`--auto-kappa F`、`--auto-kappa-dup F`（有限的小數）、`--auto-table FILE`（改讀這張表，不讀資料夾裡的那一份）。帶常數的值與不帶逐位元組相同。它們只在引擎有模型的模式生效（`--digits`、`--keys`），其他模式帶了就是用法錯誤。`shanjie-eval` 的主模式也收前四個旗標並檢查格式，但它從讀音解碼、沒有完成鍵，輸出不變。
+
+### 16.5 英文表 `data/lexicon/english.tsv`
+
+- 可有可無：`Engine::new` 從資料夾讀它（和 `digits.tsv` 同一處），缺檔或格式不對時不回錯誤、這一節的規則不生效，每個鍵和沒有這條規則時逐位元相同。`share`／`new_shared` 帶著同一張表。App 內附這張表（`scripts/build-app.sh` 放進 `Resources/`；`scripts/check-app.sh` 要求它存在並和 `data/lexicon/english.tsv` 逐位元組相同，因為缺表時功能無聲消失）。
+- 格式：UTF-8、LF、`#` 開頭的檔頭行（工具版本、k、輸入與通語模型的雜湊）、其餘每行 tab 分欄、依位元組排序。列：`T N`（單位總數）、`N N(E)`（`E` 列的計數合計）、`A N`（被大小門檻剪掉的計數）、`D v N(v→E) N(v)`、`E e N(e)`、`G xyz N`（字母三元組的詞型計數，字元是 `^`、`a–z`、`$`）、`L n N`（長度 n 的詞型數，5–32）。必須有 T、N > 0；數字只收十進位數字；`E` 的 e 要符合 §16.1 的字串規則且不重複；未知的列首字、重複的 `G` 列、範圍外的 `L` 都是格式錯誤（整張表不載入）。
+- **建置** `tools/build_english.py`（照 `tools/build_digits.py`）：讀通語的語料與權重（`docs/spec/models.md` §4.1：維基前 200,000 篇 ×1、口語池 ×5、g0v ×5、台灣公開論壇的推文 ×5 與內文 ×1），含保留集守門（有保留句的漢字段不計數、不當前文，同一句的英文也不計）。
+  - **文件切分**（`tools/lib/english_tokens.py`，建表與探針共用）：每一篇文件（論壇的一篇文章含推文、維基的一個條目、g0v 的一則訊息、口語池的一句）以 `sha256(來源代號 + "\t" + 文件 id)` 的第一個位元組 mod 10 分桶；桶 0–7 建表，桶 8 是調參探針，桶 9 是確認探針。
+  - **只數夾在中文旁的英文**：只看含漢字的句子；token 是由字母開頭、最長 32 個字元的英數字串（轉小寫），左右至少一邊（略過空白）是漢字或句子邊界。
+  - **排除**：緊鄰 `@ . / : #` 的字串（`://` 由 `:` 與 `/` 涵蓋）；推文單位裡行首格式（「推／噓／→」加帳號、可有冒號）裡的字串；文件頻次 < 3 的 token（它們不算英文單位，不進 `A`）。
+  - **推文帳號**：§4.1 的推文單位本身不帶推文者帳號（清理工具把帳號與內文當成網頁上兩個欄位分開讀，只寫出內文；帳號只用來把同一人相鄰的推文接起來）。行首格式那條規則是給仍帶行首的推文文字用的，由合成輸入的測試鎖住（`test_the_account_of_a_push_is_not_english`）。
+  - 前文 v 與評分時相同；token 前面的空白先略過（`我用 ok` 記在「用」底下，因為打字時不會先打那個空白）。
+  - 大小：超過 2,000,000 位元組時 k 依序放大（1 2 3 5 10 20 30 50 100 200 500 1000）：`E` 列要 N(e) ≥ k，`D` 列要 N(v→E) ≥ k（`<s>` 列與 N(v) ≥ 1000 的列不受限）；被剪掉的 token 不再算單位，計數記進 `A`。`G`、`L` 在剪之前算（文件頻次 ≥ 3 的全字母 token 各算一次）。最後一級還放不下就停。同一組輸入的輸出逐位元組相同。
+  - `--review FILE` 寫出出貨前要人工看的清單：最常見的 200 個 token 加隨機 200 個（`random.Random(20261117)`），只有 token 本身。
+- Python 參考 `reference/proto/english_score.py`（表與分數），golden `eval/golden/english-score.txt`（由合成的小表 `core/tests/fixtures/english-tiny.tsv` 產生）；Rust 逐位元比對。
+
+### 16.6 Esc
+
+- 自動判斷在空白鍵做出的 token，之後沒有任何改變狀態的鍵（標記的生命週期同 §6 的 `last_short`：什麼都不改的鍵把標記還回去，設定函式、選字、其他鍵清掉它）時，Esc 拿掉那個 token，在原位照按鍵規則表第 10 條插入音節 s（就是「按鍵紀錄＋空白」的注音重播、沒有這條規則時會得到的音節），游標在它後面；同時記 `last_short`，所以 ↓ 最後兩項是 e 的小寫與全大寫。組字區其他單位不動。
+- 其他 token（手打的、回退 (a)(b)(c) 的、標記已經清掉的）的 Esc 照舊清掉整個組字區（§4.5）。
+- 聲調鍵開的英文段的 Esc 是 §4.5 的注音重播。
+
+### 16.7 核心開關與生效條件
+
+- `Engine::set_english_auto`（C ABI `shanjie_engine_set_english_auto`，參數與回傳碼同 `set_english_reversal_guard`；預設開）。關著時每個鍵和沒有這條規則的引擎逐位元相同。App 沒有對應的設定項，也不呼叫它（用預設值）。
+- 生效條件：`shadow_on`（§1.2）、語言模型已載入、英文表已載入、核心開關開。判斷點本身（`english_auto_point()`）只看 `shadow_on` 與詞庫，量測工具在開關關著時也讀得到。
+- 工具鉤子（`#[doc(hidden)]`，不進 C ABI）：`english_auto_point() -> Option<(n_ow, n_dup, n_rev)>`、`english_auto_event()`（這一鍵做的比較：C、e、計數、lpE、S、t、lpZ、結果）、`set_auto_table`／`load_auto_english`／`auto_table_loaded`、`set_auto_params`。每次 `key()` 開頭清除。
+
+### 16.8 探針與量測
+
+- **探針** `tools/build_english_probe.py`：從桶 8、桶 9 取英文 token 出現處（token 規則與排除和建表呼叫同一個函式；文件頻次那條不套用；有保留句的句子不取），每列 `id|左文|鍵`：左文是 token 前同一句緊鄰的漢字（先略過空白，最多 16 個），鍵是 token 的鍵帽字元加 `_`。每份用 `random.Random(20261117)` 抽 5,000 列（不足就全收），再用核心開關關著的 `english-sim --keys` 篩出**判斷點類別**：鍵打完全部是中文音節（沒有 token、沒有未完成的符號、沒有英文段），而且最後一鍵（空白）在判斷點完成音節。輸出 `tune.keys`、`confirm.keys`（`--keys` 的輸入格式）。探針列含不能散布的來源文字，只放 repo 外（預設 `~/.cache/shanjie/english-probe/`），工具只印列數與 SHA-256。
+- **英文第一名率**（`tools/select_english_cell.py rate KEYS OUT`）：判斷點類別裡，`keys` 之後新增的單位恰好是一個英文 token、而且它的小寫文字等於探針的 token 的列數 ÷ 類別的列數。
+- **`english-sim` 的欄位**：`--rows --digits` 的輸出最後多三欄 `auto_english_mean`、`auto_english_max`（每千音節、跨種子：引擎回報 `Revert::Auto` 的鍵數，空白成 token 與聲調鍵開段都算，在模擬器復原之前計）與 `auto_points`（判斷點數，跨種子加總，核心開關關著也照計）。模擬器遇到自動判斷的英文照使用者會做的事復原：按一次 Esc（音節回來，已完成）。`--recall --digits` 用同一個引擎打字表，`none` 之後多一欄自動判斷的詞數。`--keys` 的回退欄多一種 `e`，並多第十欄 `points`：`鍵序:n_ow,n_dup,n_rev`。
+- **負例**（中文改錯，不想打出英文）：`english-sim --rows <集合> --digits --p 0.02 --repair overwrite --repeat 5 --overwrite off --key-order on --reversal-guard on` 與同樣開關的 `--swap 0.05 --repeat 5`，看 `auto_english_max`。
+
+### 16.9 測試
+
+- `core/tests/engine_auto_english.rs`（App 的建法加合成小表）：`the_worked_examples_and_their_counts`（§16.1 四個例子的計數；核心開關關著時是中文音節；沒有模型的引擎也回報同樣的判斷點；「依按鍵順序判斷英文」關著時 `l s` 不是判斷點）、`what_is_no_decision_point`、`the_scores_are_the_formula`（引擎做的比較逐位元等於表、模型的和與讀音項代進公式；讀音解碼關著時 t＝0）、`space_makes_the_token_and_esc_right_after_brings_the_syllable_back`（token 與中文項；Esc 後是音節 s、游標在後、↓ 最後兩項；組字區中間；不改狀態的鍵保留標記、其他鍵與設定函式清掉後 Esc 清空組字區）、`a_tone_key_opens_the_run`（英文段、Esc 是注音重播、空白成 token 帶中文項、聲調提前照常）、`the_switch_off_and_no_table_are_the_engine_before`（每鍵輸出相同）、`the_table_comes_with_the_data_folder`（資料夾的表、壞表不載入、`new_shared`）、`the_data_folder_decides_what_ships`、`scores_match_the_python_golden_bit_for_bit`（只在 macOS）。`core/src/english_auto.rs` 的單元測試：字串規則、`P(e | E)` 三種情形、壞表、平手取注音。
+- `cli/tests/english_sim.rs`：`auto_english_columns`（固定種子，強迫格 θ＝−100 時 `auto_english` > 0、`--auto-english off` 為 0 而判斷點數相同、每個英文都被復原、帶常數的旗標與不帶逐位元組相同、壞旗標被拒絕）、`keys_probe_auto_english`、`the_main_mode_takes_the_options_and_changes_nothing`。
+- `core/src/ffi.rs` 與 `core/tests/c/abi_smoke.c`：`set_english_auto` 的回傳碼。
+- `make test-python`：`tools/test_build_english.py`（token 規則與排除、推文帳號、文件頻次、手算的列、桶的切分與三份輸出沒有交集、大小門檻與 `A`、排序與重現、探針的抽樣與判斷點類別、英文第一名率、可行集合與平手規則）、`reference/proto/test_english_score.py`（常數與核心相同、公式手算、壞表、golden 檔就是腳本的輸出）。
+
+### 16.10 限制
+
+- 照順序打、完全是正常注音的短字（`ai`、`up`、`no`、`so`）沒有結構異常，不是判斷點，照舊留在 ↓ 清單。
+- 只在完成鍵決定一次，打字中途的顯示不變；含數字的英文在聲調鍵上只比最後一個音節的鍵（多音節不重播）；不做英文與中文的聯合切分、不看右側前文、不學使用者自己的英文。
+- 不在表裡的 e 要全是字母而且至少 5 個才有分數；更短的、含數字的照舊中文。
+- 按鍵紀錄最多 31 個鍵（§2）：同一個音節打了更多鍵時，e 只有前 31 個鍵。
+- 鄰鍵打錯開著時，詞庫沒有的音節先被鄰鍵收下（§3.4），不經過這條規則。
+- 鍵序顛倒是判斷點，所以有英文表時，顛倒的鍵序剛好拼成表裡的英文字、而且比較取英文的音節會變成英文（例如 ㄋㄠ 打成 `l s ␣`）。這是這條規則要的結果（`ls` 不用按 Shift），代價由 §16.8 的 `--swap` 負例量；`every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on` 把這種情形另外計數並印出（沒有表時必須是 0），其餘的顛倒鍵序照舊不得是英文。

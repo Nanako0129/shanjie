@@ -4,6 +4,7 @@
 pub mod colloquial;
 pub mod digits;
 pub mod engine;
+pub mod english_auto;
 pub mod english_next;
 pub mod eval;
 pub mod ffi;
@@ -15,6 +16,7 @@ pub mod mixed;
 pub mod predict;
 pub mod reading;
 pub mod tinylm;
+pub mod tone3;
 mod trigram;
 
 use std::collections::{HashMap, HashSet};
@@ -37,6 +39,9 @@ pub enum Error {
     OverlayDuplicate { word_len: usize },
     BadVariants { line: usize },
     BadForms { line: usize },
+    BadFormsExtra { line: usize },
+    BadAccept { line: usize },
+    AcceptMismatch { row: usize },
     BadVariantOrder { line: usize },
 }
 
@@ -55,6 +60,9 @@ impl fmt::Display for Error {
             }
             Error::BadVariants { line } => write!(f, "bad variants table (line {line})"),
             Error::BadForms { line } => write!(f, "bad forms table (line {line})"),
+            Error::BadFormsExtra { line } => write!(f, "bad forms-extra table (line {line})"),
+            Error::BadAccept { line } => write!(f, "bad accept file (line {line})"),
+            Error::AcceptMismatch { row } => write!(f, "accept file does not match the rows (row {row})"),
             Error::BadVariantOrder { line } => write!(f, "bad variant-order table (line {line})"),
         }
     }
@@ -243,6 +251,11 @@ impl Lexicon {
     /// `parse_with`, then the variant-order rows (docs/spec/decoder.md §2.3): before sorting, under each row's reading the score of
     /// `less` becomes min(its score, `more`'s score - `VARIANT_GAP`). A row naming a spelling the lexicon lacks under that reading is an error.
     pub fn parse_with_variants(text: &str, overlay: Option<&str>, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+        Self::parse_applying(text, overlay, variants, apply_variant_order)
+    }
+
+    /// `parse_with_variants` with the variant-order step given, so a test can build the lexicon with the step as it was written before.
+    fn parse_applying(text: &str, overlay: Option<&str>, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
         let mut b = Builder::default();
         for line in text.lines() {
             if matches!(line.chars().next(), Some('#') | Some('_')) {
@@ -276,37 +289,90 @@ impl Lexicon {
                 }
             }
         }
-        b.finish(base_n, bad_row, manual, variants)
+        b.finish(base_n, bad_row, manual, variants, apply)
     }
 }
 
+/// The variant-order step of `Builder::finish`: the rows of the table applied to the file-order rows (`raw`) in table order.
+type ApplyVariants = fn(&mut [Raw], &str, &[u32], &HashMap<String, u32>, &[(usize, VariantRow)]) -> Result<(), Error>;
+
+fn apply_variant_order(raw: &mut [Raw], words: &str, key_pool: &[u32], syl_ids: &HashMap<String, u32>, var_rows: &[(usize, VariantRow)]) -> Result<(), Error> {
+    // One pass over the rows collects, per distinct reading a variant row names, the rows under it (file order); the rows are then
+    // applied in table order, reading the scores as the earlier rows left them. (An unknown syllable is reported when its row's turn comes.)
+    let var_ids: Vec<Option<Vec<u32>>> = var_rows.iter().map(|(_, v)| v.reading.iter().map(|s| syl_ids.get(s).copied()).collect()).collect();
+    let mut bucket_of: HashMap<&[u32], usize> = HashMap::new();
+    for ids in var_ids.iter().flatten() {
+        let next = bucket_of.len();
+        bucket_of.entry(ids.as_slice()).or_insert(next);
+    }
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bucket_of.len()];
+    if !bucket_of.is_empty() {
+        for (f, r) in raw.iter().enumerate() {
+            if let Some(&bi) = bucket_of.get(&key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]) {
+                buckets[bi].push(f);
+            }
+        }
+    }
+    for ((line, v), ids) in var_rows.iter().zip(&var_ids) {
+        let bad = Error::BadVariantOrder { line: *line };
+        let Some(ids) = ids else { return Err(bad) };
+        let rows = &buckets[bucket_of[ids.as_slice()]];
+        let at = |w: &str| -> Vec<usize> {
+            rows.iter()
+                .copied()
+                .filter(|&f| {
+                    let r = &raw[f];
+                    r.ent.len as usize == w.len() && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
+                })
+                .collect()
+        };
+        let (less, more) = (at(&v.less), at(&v.more));
+        let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
+        if less.is_empty() || more.is_empty() {
+            return Err(bad);
+        }
+        for f in less {
+            raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
+        }
+    }
+    Ok(())
+}
+
+/// The step as it was before the one-pass rewrite (every variant row scanned all rows twice), kept for the test that builds both ways.
+#[cfg(test)]
+fn apply_variant_order_scanning(raw: &mut [Raw], words: &str, key_pool: &[u32], syl_ids: &HashMap<String, u32>, var_rows: &[(usize, VariantRow)]) -> Result<(), Error> {
+    let n = raw.len();
+    for (line, v) in var_rows {
+        let bad = Error::BadVariantOrder { line: *line };
+        let ids: Vec<u32> = v.reading.iter().map(|s| syl_ids.get(s).copied().ok_or(bad.clone())).collect::<Result<_, _>>()?;
+        let at = |w: &str| -> Vec<usize> {
+            (0..n)
+                .filter(|&f| {
+                    let r = &raw[f];
+                    r.ent.len as usize == w.len()
+                        && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
+                        && key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize] == ids[..]
+                })
+                .collect()
+        };
+        let (less, more) = (at(&v.less), at(&v.more));
+        let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
+        if less.is_empty() || more.is_empty() {
+            return Err(bad);
+        }
+        for f in less {
+            raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
+        }
+    }
+    Ok(())
+}
+
 impl Builder {
-    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
         let Builder { syl_ids, syl_names, key_pool, mut raw, words } = self;
         let n = raw.len();
         // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
-        for (line, v) in variants.map_or(&[][..], |v| &v.rows[..]) {
-            let bad = Error::BadVariantOrder { line: *line };
-            let ids: Vec<u32> = v.reading.iter().map(|s| syl_ids.get(s).copied().ok_or(bad.clone())).collect::<Result<_, _>>()?;
-            let at = |w: &str| -> Vec<usize> {
-                (0..n)
-                    .filter(|&f| {
-                        let r = &raw[f];
-                        r.ent.len as usize == w.len()
-                            && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
-                            && key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize] == ids[..]
-                    })
-                    .collect()
-            };
-            let (less, more) = (at(&v.less), at(&v.more));
-            let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
-            if less.is_empty() || more.is_empty() {
-                return Err(bad);
-            }
-            for f in less {
-                raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
-            }
-        }
+        apply(&mut raw, &words, &key_pool, &syl_ids, variants.map_or(&[][..], |v| &v.rows[..]))?;
         let key = |f: u32| {
             let r = &raw[f as usize];
             &key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]
@@ -475,6 +541,16 @@ impl Lexicon {
         self.syl_ids.contains_key(syl)
     }
 
+    /// The interned id of `syl`, `None` for a syllable of no reading.
+    pub fn syl_id(&self, syl: &str) -> Option<u32> {
+        self.syl_ids.get(syl).copied()
+    }
+
+    /// Whether the lexicon has a one-syllable entry under `syl`: what `finish_syllable` calls "the lexicon has this syllable".
+    pub fn has_single(&self, syl: &str) -> bool {
+        self.syl_ids.get(syl).is_some_and(|&id| self.find(&[id]).is_some())
+    }
+
     /// Every interned syllable (any reading of any entry).
     pub fn syllables(&self) -> &[String] {
         &self.syl_names
@@ -497,7 +573,10 @@ impl Lexicon {
     /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
     /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
     /// Order: position, then alternative name. The exact reading itself is never among them.
-    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32) -> Vec<Vec<u32>> {
+    ///
+    /// `t3` is the span's slice of the sandhi position table (docs/spec/decoder.md §6.6; empty for none): an unknown syllable the table marks unaccepted (or an
+    /// unaccepted tail) was accepted by the sandhi rule, not as a slip, so it has no adjacent reading here, whatever the adjacent bit says: it is read as Xˇ only.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos]) -> Vec<Vec<u32>> {
         let mut out = Vec::new();
         let mut put = |j: usize, alts: &[u32]| {
             for &a in alts {
@@ -508,6 +587,7 @@ impl Lexicon {
         };
         let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
         match unknown[..] {
+            [j] if t3.get(j).is_some_and(|p| p.unaccepted) => {}
             [j] => put(j, self.tol().adjacent(&syls[j])),
             [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
             _ => {}
@@ -526,6 +606,7 @@ impl Lexicon {
         ids: &[u32],
         syls: &[String],
         flags: u32,
+        t3: &[tone3::Pos],
         per_reading: usize,
         total: usize,
         entry: impl Fn(usize) -> (&'a str, f64),
@@ -533,7 +614,35 @@ impl Lexicon {
         if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return (Vec::new(), Vec::new());
         }
-        let readings: Vec<(usize, Vec<u32>)> = self.tolerant_readings(ids, syls, flags).into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
+        self.pick(self.tolerant_readings(ids, syls, flags, t3), ids, per_reading, total, entry)
+    }
+
+    /// The sandhi source of a span (docs/spec/decoder.md §6.6): `tolerant_pick` over the readings `tone3::readings` gives for the span's slice `t3` of the
+    /// position table, instead of the fuzzy ones. Nothing is looked up when the span has no replacement.
+    pub(crate) fn tone3_pick<'a>(
+        &self,
+        ids: &[u32],
+        t3: &[tone3::Pos],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        if !t3.iter().any(|p| p.alt.is_some()) {
+            return (Vec::new(), Vec::new());
+        }
+        self.pick(tone3::readings(ids, t3), ids, per_reading, total, entry)
+    }
+
+    /// The pick of `tolerant_pick` over the candidate readings `cands` (syllable ids; those that are no lexicon reading are dropped).
+    fn pick<'a>(
+        &self,
+        cands: Vec<Vec<u32>>,
+        ids: &[u32],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        let readings: Vec<(usize, Vec<u32>)> = cands.into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
         let exact: HashSet<&str> = self.find(ids).into_iter().flat_map(|r| self.range(r)).map(|p| entry(p).0).collect();
         let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
@@ -561,26 +670,55 @@ impl Lexicon {
     /// Fuzzy input, candidate window: the words of the tolerant readings of `key` (see `tolerant_readings`) that are not words of
     /// the typed reading, each at its best score, best first, with the lexicon reading each was found under. The same choice as the
     /// decoder's (`tolerant_pick`), without the decoder's cap per reading: the window lists them all.
-    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32) -> Vec<(&str, Vec<String>)> {
-        let (readings, words) = self.tolerant_pick(&self.ids(key), key, flags, usize::MAX, usize::MAX, |p| (self.word(p), self.ents[p].score));
-        words.into_iter().map(|(w, _, _, a)| (w, readings[a].1.iter().map(|&i| self.syl_names[i as usize].clone()).collect())).collect()
+    /// The words of the sandhi source (`tone3_pick`, docs/spec/decoder.md §6.6) come after them, those not listed already: `t3` is the position table's slice
+    /// for `key` (empty, or all empty positions, adds nothing).
+    pub(crate) fn tolerant_words(&self, key: &[String], flags: u32, t3: &[tone3::Pos]) -> Vec<(&str, Vec<String>)> {
+        let ids = self.ids(key);
+        let entry = |p: usize| (self.word(p), self.ents[p].score);
+        let name = |r: &[u32]| r.iter().map(|&i| self.syl_names[i as usize].clone()).collect::<Vec<String>>();
+        let (readings, words) = self.tolerant_pick(&ids, key, flags, t3, usize::MAX, usize::MAX, entry);
+        let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
+        let (readings, words) = self.tone3_pick(&ids, t3, usize::MAX, usize::MAX, entry);
+        for (w, _, _, a) in words {
+            if !out.iter().any(|(x, _)| *x == w) {
+                out.push((w, name(&readings[a].1)));
+            }
+        }
+        out
     }
 
     /// The readings a decoded path used over the typed syllables `syls`: `words` are its (word, syllable count) in order. A word read through an
     /// adjacent-key alternative of an unknown syllable (`tolerant_words`) is given under the lexicon reading it was found under, every other word under
     /// the typed syllables. What `tinylm::manual_mask` matches the manual words against, so a manual word the n-gram's first choice holds through a
     /// tolerated reading is protected too (docs/spec/decoder.md §7). `syls` itself when the words do not cover it.
-    pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>) -> Vec<String> {
+    ///
+    /// `t3` is the position table of `syls` (`tone3::positions`, docs/spec/decoder.md §6.6): a word read through the sandhi source is given under the lexicon
+    /// reading it was found under too. An empty `t3` (or all empty positions) is the table of the switch off.
+    pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos]) -> Vec<String> {
         let mut out: Vec<String> = Vec::with_capacity(syls.len());
         for (w, l) in words {
-            let Some(span) = syls.get(out.len()..out.len() + l) else { return syls.to_vec() };
-            let tolerated = self.ids(span).contains(&u32::MAX).then(|| self.tolerant_words(span, 0).into_iter().find(|(tw, _)| *tw == w)).flatten();
+            let at = out.len();
+            let Some(span) = syls.get(at..at + l) else { return syls.to_vec() };
+            // `tolerant_words` with the table: the adjacent readings of an unknown syllable that is no unaccepted one, then the sandhi readings.
+            let tolerated = self.tolerant_words(span, 0, t3.get(at..at + l).unwrap_or(&[])).into_iter().find(|(tw, _)| *tw == w);
             match tolerated {
                 Some((_, reading)) => out.extend(reading),
                 None => out.extend_from_slice(span),
             }
         }
         if out.len() == syls.len() { out } else { syls.to_vec() }
+    }
+
+    /// The lexicon reading `word` was found under through the sandhi source of `span` (`t3` its slice of the position table): `None` when the typed reading
+    /// has the word, or no sandhi reading of the span has it. The first such reading in subset order.
+    pub fn tone3_reading(&self, span: &[String], t3: &[tone3::Pos], word: &str) -> Option<Vec<String>> {
+        if !t3.iter().any(|p| p.alt.is_some()) || self.has(span, word) {
+            return None;
+        }
+        tone3::readings(&self.ids(span), t3)
+            .into_iter()
+            .find(|k| self.find(k).is_some_and(|r| self.range(r).any(|p| self.word(p) == word)))
+            .map(|k| k.iter().map(|&i| self.syl_names[i as usize].clone()).collect())
     }
 
     pub fn reading_count(&self) -> usize {

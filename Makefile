@@ -38,11 +38,17 @@ test-python: export SHANJIE_TW_CLEAN = off
 test-python:
 	@if [ -z "$$SHANJIE_MOEDICT" ] || [ -z "$$SHANJIE_HETERO" ]; then echo "NOTE: SHANJIE_MOEDICT and SHANJIE_HETERO are not both set: the two real-CLI reading tests (test_build_acg_pack LiReading, test_build_quote_pack RealCli) will be skipped"; fi
 	python3 -m unittest tools/test_build_forms.py
+	# docs/spec/evaluation.md §3.5–§3.7: judge-v2 (the reference judge, the reviewed-pairs checker; without SHANJIE_MOEDICT the checker's real-dictionary tests are skipped with a NOTE).
+	python3 -W ignore -m unittest reference/proto/test_judge_v2.py
+	python3 -W ignore -m unittest tools/test_check_forms_extra.py
+	python3 tools/check_forms_extra.py
+	sh tools/check_judge_v2_py.sh
 	python3 -m unittest tools/test_build_acg_pack.py
 	python3 -m unittest tools/test_build_quote_pack.py
 	python3 -B -m unittest tools/test_pack_oov.py
 	python3 -m unittest tools/test_build_names.py
 	python3 -m unittest tools/test_build_sandhi.py
+	python3 -W ignore -m unittest tools/test_build_probe.py
 	python3 -W ignore -m unittest tools/test_it_sources.py tools/test_it_wiki_counts.py tools/test_build_it_pack.py
 	python3 -W ignore -m unittest tools/test_build_meme_pack.py
 	python3 -W ignore -m unittest tools/test_build_beauty_pack.py
@@ -58,11 +64,17 @@ test-python:
 	python3 -m unittest tools/test_build_english_words.py
 	python3 -m unittest tools/test_build_overlay.py
 	python3 -W ignore -m unittest tools/test_readings.py
+	# docs/spec/evaluation.md: the syllable-normalisation probe is what the tool generates from the shipping lexicon, model and pin file.
+	python3 tools/reading_norm_probe.py --check
 	python3 -W ignore -m unittest tools/test_holdout_guard.py tools/test_merge_guard_rows.py
 	python3 -W ignore -m unittest tools/test_build_attribution.py
 	python3 -W ignore -m unittest tools/test_build_trigram.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
 	cd reference/proto && python3 -W ignore -m unittest test_digits
+	# docs/spec/english-mixed.md §16: the English table's builder, the probes, the cell choice, and the scores' Python baseline with its golden.
+	python3 -W ignore -m unittest tools/test_build_english.py
+	python3 -W ignore -m unittest reference/proto/test_english_score.py
+	python3 reference/proto/english_score.py --check
 	python3 -W ignore -m unittest tools/test_build_classes.py
 	cd reference/proto && python3 -W ignore -m unittest test_predict test_predict2 test_predict3
 	python3 -W ignore -m unittest reference/proto/test_fuzzy_ref.py

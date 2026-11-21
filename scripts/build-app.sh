@@ -84,7 +84,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/spec/models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/mixed-words.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/mixed-words.tsv data/lexicon/english.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -199,6 +199,9 @@ cp data/lexicon/digits.tsv "$RES/"
 # mixed-words.tsv: the English+Chinese words of the candidate list (docs/spec/english-mixed.md §5.7). Optional for the core like digits.tsv,
 # so check-app.sh requires it and compares it with this file.
 cp data/lexicon/mixed-words.tsv "$RES/"
+# english.tsv: the count table of "English or Zhuyin at the closing key" (docs/spec/english-mixed.md §16.5). Optional for the core like digits.tsv
+# (a missing table turns the comparison off without a word), so check-app.sh requires it and compares it with this file.
+cp data/lexicon/english.tsv "$RES/"
 # The optional word packs (docs/spec/lexicon-and-packs.md §4.1, §4.2): the runtime files only, not the build inputs
 # (acg-groups.tsv, acg-collisions.tsv, acg-exclude.tsv, acg-manual.tsv, quotes-manual.tsv). The shell passes Resources/packs to shanjie_engine_new_packs.
 mkdir -p "$RES/packs"
@@ -208,7 +211,7 @@ cp data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json "$RES/pack
 # The beauty pack (docs/spec/lexicon-and-packs.md §4.4, §8.3), same arrangement (build inputs beauty-exclude.tsv, beauty-collisions.tsv, beauty-readings.tsv stay out).
 # CC0, so there is no paragraph for it in the CC BY-SA attribution file below.
 cp data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json "$RES/packs/"
-# The meme pack (docs/spec/lexicon-and-packs.md §4.4, §9.3), same arrangement (build input meme-collisions.tsv stays out). CC BY-SA 4.0: its paragraph is in the attribution file below.
+# The meme pack (docs/spec/lexicon-and-packs.md §4.4, §9.3), same arrangement (build inputs meme-allow.tsv, meme-collisions.tsv and meme-extra-readings.tsv stay out). CC BY-SA 4.0: its paragraph is in the attribution file below.
 cp data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json "$RES/packs/"
 while IFS=$'\t' read -r mf _; do cp -L "data/lm/$mf" "$RES/"; done < data/models.tsv   # -L: the worktree's model may be a symlink; models.tsv is the one list
 cp data/models.tsv "$RES/"
@@ -248,7 +251,7 @@ cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (docs/spec/semantic-rerank.md §4.7); no corpus text in it.
 cp -L data/lm/colloquial-attribution.tsv "$RES/LICENSES/"
 cat > "$RES/LICENSES/CC-BY-SA-4.0-attribution.txt" <<'EOF'
-overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, packs/meme-add.tsv, packs/meme-sources.tsv, packs/meme.json, demote.tsv, std-exempt.tsv, digits.tsv, bigram.sjlm,
+overlay-add.tsv, names-add.tsv, packs/acg-add.tsv, packs/acg-sources.tsv, packs/acg.json, packs/it-add.tsv, packs/it-sources.tsv, packs/it.json, packs/meme-add.tsv, packs/meme-sources.tsv, packs/meme.json, demote.tsv, std-exempt.tsv, digits.tsv, english.tsv, bigram.sjlm,
 classes.sjc, kn.sjkn, trigram.sjt3, trigram-chat.sjt3, tinylm.sjtl and colloquial.sjlm are licensed under the Creative Commons Attribution-ShareAlike 4.0 International license
 (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
@@ -289,9 +292,10 @@ demote.tsv: written for this project; no third-party data.
 variant-order.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. It is not part of the CC BY-SA list above.
 rerank-protect.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. The words the semantic rerank may not
   take out of the n-gram's first choice. It is not part of the CC BY-SA list above.
-std-exempt.tsv: the 12 (reading, character) pairs the decoder's reading term does not charge. Chosen by comparing the readings of
-  mcbpmf-data.txt with the first reading of each character in the Ministry of Education's 《國語辭典簡編本》
-  (CC BY-ND 3.0 Taiwan; only used to decide these readings, none of its data is in the file or distributed).
+std-exempt.tsv: the 16 (reading, character) pairs the decoder's reading term does not charge. Chosen by comparing the readings of
+  mcbpmf-data.txt with the first reading of each character in the Ministry of Education's 《國語辭典簡編本》 (12 pairs) and with
+  the characters its 《重編國語辭典修訂本》 gives a single reading (4 pairs)
+  (both CC BY-ND 3.0 Taiwan; only used to decide these readings, none of their data is in the file or distributed).
 bigram.sjlm: word counts from Wikipedia articles, Mozilla Common Voice
   sentences (CC0), Tatoeba sentences (CC BY 2.0 FR), synthetic sentences,
   public messages of the g0v Slack #rand0m channel (CC0) and articles and

@@ -1,10 +1,10 @@
-use cli::common::{dev_rows, format_rowstats, levenshtein, load_forms, load_lenient, read_rows, root, three_field_rows};
+use cli::common::{dev_rows, dev_rows_raw, format_rowstats, levenshtein, load_accept, load_forms, load_forms_v2, load_lenient, read_rows, read_rows_raw, root, three_field_rows};
 use core::colloquial::{self, Colloquial};
 use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_MEME, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
-use core::lm::{decode_from_fuzzy_scored, history, rerank_pool, CappedLexicon, Demote, Lm, Profile};
+use core::lm::{decode_from_fuzzy_scored, history, pool_order, rerank_pool, CappedLexicon, Demote, Lm, Profile, RecurGrams};
 use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, BATCH, TOPK};
 use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
@@ -57,16 +57,109 @@ fn oov_words(name: &str) -> Vec<String> {
 }
 
 /// Option combinations of `lm`, checked before any file is read. The holdout never prints its sentences, so
-/// `--dump` and `--dump-words` (`dump` is true for either) are refused there; `--rowstats` holds numbers only and is allowed.
-fn check_lm_opts(set: Option<&str>, dump: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
+/// `--dump`, `--dump-words` (`dump` is true for either) and `--picks` are refused there; `--rowstats` holds numbers only and is allowed.
+fn check_lm_opts(set: Option<&str>, dump: bool, picks: bool, packs: u32, packs_dir: bool) -> Result<(), String> {
     if set == Some("holdout") && dump {
         return Err("--dump and --dump-words are not allowed with --set holdout".into());
+    }
+    // `--picks` writes each row's chosen sentence, row content like the dumps: refused with the holdout too, before any file is read.
+    if set == Some("holdout") && picks {
+        return Err("--picks is not allowed with --set holdout".into());
     }
     // (--tinylm-scores with the holdout is refused in run_lm: its per-candidate record is what alpha and tau are tuned on.)
     if packs == 0 && packs_dir {
         return Err("--packs-dir needs --packs".into());
     }
     Ok(())
+}
+
+/// `--judge`, `--accept` and `--rejudge` combinations (docs/spec/evaluation.md §3.5), checked before any file is read. The acceptable-sentence
+/// file and the re-judging of picks are for rows that may be shown; the holdout refuses both (its `--judge v2 --rowstats` stays allowed: numbers only).
+fn check_judge_opts(set: Option<&str>, v2: bool, accept: bool, rejudge: bool) -> Result<(), String> {
+    if accept && !v2 {
+        return Err("--accept needs --judge v2".into());
+    }
+    if set == Some("holdout") && accept {
+        return Err("--accept is not allowed with --set holdout".into());
+    }
+    if set == Some("holdout") && rejudge {
+        return Err("--rejudge is not allowed with --set holdout".into());
+    }
+    Ok(())
+}
+
+/// `--rejudge PICKS` input: one line per row, either a `--picks` line (`row TAB rank TAB sentence`, the row number checked) or the bare sentence.
+fn parse_picks(text: &str, n: usize) -> Result<Vec<String>, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() != n {
+        return Err(format!("--rejudge: the picks file has {} lines for {n} rows", lines.len()));
+    }
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| match l.split('\t').collect::<Vec<_>>().as_slice() {
+            [_] => Ok(l.to_string()),
+            [row, _, sent] if row.parse::<usize>() == Ok(i + 1) => Ok(sent.to_string()),
+            _ => Err(format!("--rejudge: picks line {} is not a pick of row {}", i + 1, i + 1)),
+        })
+        .collect()
+}
+
+/// `--rejudge PICKS` (docs/spec/evaluation.md §3.5): no decoding and no model: the sentence picked for each row is judged again under `--judge` and
+/// `--accept`, and written as `--rowstats`. The summary line has the rows, the top1 and `top1_sha256` of the picks (the decoding run's own value
+/// when the picks are its `--picks`), tagged `rejudge` and the judge's `+jv2:` tag.
+#[allow(clippy::too_many_arguments)]
+fn run_rejudge(picks: &str, dev: Option<usize>, rows_file: Option<String>, limit: Option<usize>, name: Option<String>, rowstats: Option<String>, v2: bool, accept: Option<String>, len: &Lenient) -> Result<(), String> {
+    let (default_name, rows, raw) = match (dev, &rows_file) {
+        (Some(n), None) => (format!("dev{n}"), dev_rows(n)?, accept.as_ref().map(|_| dev_rows_raw(n)).transpose()?),
+        (None, Some(f)) => {
+            let mut rows = read_rows(f)?;
+            if let Some(n) = limit.filter(|&n| n != 0) {
+                rows.truncate(n);
+            }
+            (Path::new(f).file_name().map_or(String::new(), |s| s.to_string_lossy().into_owned()), rows, accept.as_ref().map(|_| read_rows_raw(f, limit)).transpose()?)
+        }
+        _ => return Err("--rejudge needs exactly one of --dev, --rows".into()),
+    };
+    let judge = if v2 { Some(load_judge(accept.as_deref(), raw.as_deref())?) } else { None };
+    let text = fs::read_to_string(picks).map_err(|e| format!("--rejudge: cannot read the picks file ({:?})", e.kind()))?;
+    let picked = parse_picks(&text, rows.len())?;
+    let rowstats = match rowstats {
+        Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create rowstats ({:?})", e.kind()))?),
+        None => None,
+    };
+    let mut rs = Vec::new();
+    for (i, ((truth, syls, _), pick)) in rows.iter().zip(&picked).enumerate() {
+        let ok = match &judge {
+            Some(j) => Judge2::new(&j.forms, len, truth, syls, j.accept.as_ref().map_or(&[][..], |a| a.get(i))).ok(pick),
+            None => len.apply(pick) == len.apply(truth),
+        };
+        rs.push((ok, pick.clone(), truth.clone()));
+    }
+    if let Some(mut f) = rowstats {
+        f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
+    }
+    let sha = sha256_hex(picked.join("\n").as_bytes());
+    println!("## {}  rejudge{}  {{'n': {}, 'top1': {}, 'top1_sha256': '{sha}'}}", name.unwrap_or(default_name), judge.as_ref().map_or(String::new(), |j| j.tag.clone()), rows.len(), rs.iter().filter(|r| r.0).count());
+    Ok(())
+}
+
+/// What `--judge v2` loads: the forms-v2 table, the row's acceptable sentences when `--accept` is given, and the summary tag `+jv2:<A>:<B>:<C>` (the
+/// first 8 hex of forms.tsv, forms-extra.tsv and the accept file; `none` without one).
+struct JudgeV2 {
+    forms: Forms,
+    accept: Option<Accept>,
+    tag: String,
+}
+
+/// Loads the judge-v2 tables and the accept file (tied to `raw`, the rows' original text), before any output file is created.
+fn load_judge(accept: Option<&str>, raw: Option<&[String]>) -> Result<JudgeV2, String> {
+    let (forms, a, b) = load_forms_v2()?;
+    let (accept, c) = match (accept, raw) {
+        (Some(f), Some(rows)) => load_accept(f, rows).map(|(acc, c)| (Some(acc), c))?,
+        _ => (None, "none".to_string()),
+    };
+    Ok(JudgeV2 { forms, accept, tag: format!("+jv2:{a}:{b}:{c}") })
 }
 
 /// `--packs acg|quotes|it|meme|beauty` or a comma list of them: sets the pack bits; anything else is refused.
@@ -161,12 +254,30 @@ fn load_tinylm(path: &str, lm: &Lm, classes: bool, demote: bool) -> Result<(Tiny
     Ok((tl, load, sha8))
 }
 
+/// `--pool-mask-diff` (docs/spec/evaluation.md): whether a row's mask differs from the one the exploration slice recur-rerank (research repository) used.
+/// That patch took the readings of the reordered first path and made `manual_mask` with it as the base; this slice makes it once with the decoder's first
+/// path as the base (`masked0`, pool order) and permutes it with the order. A row counts when it was reordered and the two masks differ at any position,
+/// or when it was not reordered only because the new first candidate is masked (`unmasked_order`: `pool_order` without the mask gives one).
+/// `reordered_readings` are the readings of the reordered first path (asked for only when the row was reordered and the lexicon has manual words).
+fn mask_differs(
+    reordered: &Option<(Vec<usize>, Vec<f64>)>, unmasked_order: bool, masked0: &[bool], top0: &[&str], reordered_readings: impl FnOnce() -> Vec<String>,
+    manual: &core::ManualSet,
+) -> bool {
+    let Some((order, _)) = reordered else { return unmasked_order };
+    if manual.is_empty() {
+        return false;
+    }
+    let top: Vec<&str> = order.iter().map(|&k| top0[k]).collect();
+    let theirs = manual_mask(&reordered_readings(), &top, manual);
+    order.iter().zip(&theirs).any(|(&k, &m)| masked0[k] != m)
+}
+
 /// One `--tinylm-scores` line, the research scoring record without the key columns and the two other LLs:
 /// `i, n, ng, ok, ed, glen`, then `c` (the 0-based index the rerank chose, 0 when it did not run), for n >= 2 `ll`, and `masked`, the
 /// 0-based indices `tinylm::manual_mask` kept the rerank from choosing (docs/spec/decoder.md §7; empty when none, always present).
 /// With a fuzzy-sound bit (`--fuzzy`, docs/spec/decoder.md §6.5) `n`, `ng`, `ok`, `ed`, `ll` and `masked` list the rerank pool in pool order, `c` is still an index
 /// into the decoder's n-best (the dump's order), and `idx` gives each pool entry's n-best index. Numbers only.
-/// `col` (`--colloquial-core`, only a row where the colloquial term ran: chat, the paired core and an `ll`) is the last key, one entry per pool candidate. See run_lm.
+/// `col` (`--colloquial-core`, only a row where the colloquial term ran: chat, the paired core or `--tinylm-paired`, and an `ll`) is the last key, one entry per pool candidate. See run_lm.
 /// `extra` (`--tinylm-scores-topk`) continues the `ll` list past the 8 the rerank scored: one entry per further candidate, `null` for a
 /// candidate the small model could not score (longer than its context); it is empty without the option, so the line is then unchanged.
 #[allow(clippy::too_many_arguments)]
@@ -216,6 +327,8 @@ struct RowOut {
     long: bool,
     /// `--tinylm-scores-topk`: candidates 9..N the small model could not score (longer than its context).
     no_ll: usize,
+    /// `--pool-mask-diff`: the row is one of `mask_differs`.
+    mask_diff: bool,
     rerank: Option<Duration>,
     /// The row's chosen candidate (the `top1_sha256` input and the rowstats `top1`).
     first: String,
@@ -225,6 +338,8 @@ struct RowOut {
     scores: String,
     dump: String,
     words: String,
+    /// `--picks`: `row\trank\tsentence` of the row (`row\t-\t` when it has no candidate).
+    picks: String,
 }
 
 /// LM mode (docs/spec/evaluation.md §1.4): the one summary line of lm_eval.py, plus the optional `--dump` and `--rowstats`.
@@ -243,11 +358,15 @@ struct RowOut {
 /// `--colloquial-core FILE.sjlm` (docs/spec/semantic-rerank.md §4.6): loads the colloquial table like the engine's
 /// `load_colloquial` (word sets of k from `data/lexicon` and the `--packs` rows) and decides per run, by the engine's conditions (chat
 /// profile, any rerank level (each with its own alpha, tau and delta: docs/spec/semantic-rerank.md §4.4), a `--tinylm` whose SHA-256 is the one
-/// the term was measured with), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
+/// the term was measured with, or any `--tinylm` with `--tinylm-paired`), whether each row's rerank is `TinyLm::rerank_colloquial` (the word split of each of the first 8 candidates goes in,
 /// and the `--rerank-level`) or the plain `rerank`. It refuses no setting, so
 /// "everything else is unchanged" can be checked with the same option; a missing file stops the run before anything is read. The summary
-/// line gains `+colloq:<sha8 of the table>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
-/// On a row where the term is in effect (chat, paired `.sjtl`, an `ll`), `--tinylm-scores` ends with `"col": [...]`, the colloquial score of each
+/// line gains `+colloq:<sha8 of the table>`; in chat, when the term is not in effect (no `--tinylm`, or an unpaired one without `--tinylm-paired`), it is
+/// `-colloq:<sha8>` instead (no `+colloq:` in the line) and stderr says why; formal keeps `+colloq:<sha8>`. The files follow the n-gram order as without the option; `--tinylm-scores` `c` is the pick.
+/// `--tinylm-paired` (needs `--tinylm` and `--colloquial-core`) takes the loaded model as the paired one, so the term acts on it as it ships; the tag gains
+/// `+pair:<sha8 of the .sjtl>` after the colloquial one. `--picks FILE`: per row `row\trank\tsentence`, the sentence the row is scored on and its n-best
+/// index (the `--tinylm-scores` `c`; `row\t-\t` for a `--fuzzy` row with no candidate), in row order whatever `--threads`; refused with the holdout.
+/// On a row where the term is in effect (chat, paired `.sjtl` or `--tinylm-paired`, an `ll`), `--tinylm-scores` ends with `"col": [...]`, the colloquial score of each
 /// candidate in the line's order (`null` if not finite, then `c` is the plain pick), so the fused pick can be recomputed offline
 /// (`colloquial::fused_pick` with `colloquial::cell(level)`; tools/lib/fusegrid.py `fuse_pick`). Other lines (formal, no `--colloquial-core`) are unchanged.
 ///
@@ -265,19 +384,27 @@ struct RowOut {
 /// other score fields, the rowstats, the dump and the summary line are those of a run without it. It needs `--tinylm-scores`.
 ///
 /// The reading term (docs/spec/decoder.md §5): the n-gram decoder adds `core::reading`'s term
-/// (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words, the 12 pairs of
+/// (lambda 2.0, c 4, the sandhi readings of 一 and 不 free, the lexicon's floor-score readings estimated from the multi-character words, the 16 pairs of
 /// `data/lexicon/std-exempt.tsv` free) to the path score of every single-character word, in every setting, so the beam, the n-best, the dump,
 /// `--tinylm-scores` `ng` and the pick all see it. The table is built by `core::engine::load_reading_decode` from the merged lexicon and the data folder, the one
-/// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>+rm` in every setting (`+rm`: the reading-mass rule). `--no-reading-decode`
-/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has no `+rd`, `+rx` or `+rm`. There is no reading-channel term in the
+/// function `Engine::load_lm` calls too. The summary tag ends with `+rd+rx:<first 8 hex of std-exempt.tsv's SHA-256>+rm+rn` in every setting (`+rm`: the reading-mass rule). `--no-reading-decode`
+/// (evaluation only) leaves the term out: the decoder is the one without it and the tag has no `+rd`, `+rx`, `+rm` or `+rn`. There is no reading-channel term in the
 /// fusion (docs/spec/decoder.md §5; no `+rc` tag), so the colloquial tag is just `+colloq:<sha8>`.
+///
+/// `--auto-english on|off`, `--auto-theta F`, `--auto-kappa F`, `--auto-kappa-dup F` (docs/spec/english-mixed.md §16.4) are accepted and checked (on or off; a finite
+/// number) and change nothing here: the comparison happens at a closing key, and this tool decodes readings. `english-sim` is where they act.
 ///
 /// `--reading-table FILE` (evaluation only; experiments/reading-counts-b3 in the research repository; not in the engine or the C ABI): the reading term's t comes from
 /// the file's `character TAB reading TAB t` rows (t before the `lambda * max(t, -c)` step) instead of the built-in table; a pair of the lexicon the file lacks
 /// reads t = 0, and a malformed row, a character or reading the lexicon has no single-character pair for, or a pair twice stops the run naming the line. The tag
-/// gains `+rt:<first 8 hex of the file's SHA-256>` after `+rd+rx:...+rm`. `--dump-reading-table FILE` writes the built-in table (every (character, reading) pair of
+/// gains `+rt:<first 8 hex of the file's SHA-256>` after `+rd+rx:...+rm+rn`. `--dump-reading-table FILE` writes the built-in table (every (character, reading) pair of
 /// a character with at least two single-character readings, t as the term's input, sorted, shortest round-trip float text) and stops, printing nothing; it refuses
 /// to overwrite. A run with the file it wrote gives the picks and `top1_sha256` of a run without `--reading-table`. Both need the reading term (no `--no-reading-decode`).
+///
+/// Third-tone sandhi (docs/spec/decoder.md §6.6) is on: each row's position table is `tone3::positions` over its syllables, the decoder reads the sandhi source and
+/// `path_readings` maps a sandhi word to its lexicon reading; the tag ends `+t3` after the reading marks (`+uc` too). `--no-tone3` (evaluation only) hands the switch off
+/// to the table function and leaves the mark out: the output is byte for byte that of the tree before the feature. `--tone3-delta D` (evaluation only, D >= 0, not with
+/// `--no-tone3`) replaces `DELTA_TONE3`; off the default the mark is `+t3:dD`.
 fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let (mut lm_path, mut profile, mut name, mut dev, mut rows_file) = (None, None, None, None, None);
     let (mut limit, mut set, mut dump, mut ctx_mode, mut demote) = (None::<usize>, None, None, false, true);
@@ -286,7 +413,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     // docs/spec/lexicon-and-packs.md §1.1, §3: the names layer is always on; `--no-names` (evaluation only: the per-layer breakdown, and
     // tools/build_names.py, which passes its own candidate list as --extra-overlay) leaves it out.
     let mut names = true;
+    // `--no-recur` (evaluation only): leave the context recurrence term out (docs/spec/decoder.md §4.6); the pool weight goes with it.
+    let mut recur = true;
+    // `--no-pool-recur` (evaluation only): leave the context recurrence weight on the semantic correction's pool out (docs/spec/semantic-rerank.md §3.1.1).
+    let mut pool_recur = true;
+    // `--pool-mask-diff FILE` (evaluation only): the row numbers where the exploration's mask and this one differ (see `mask_differs`).
+    let mut pool_mask_diff = None::<String>;
     let mut forms_rowstats = None::<String>;
+    // docs/spec/evaluation.md §3.5: `--judge v1|v2` (default v1), `--accept FILE` (v2 only), `--rejudge PICKS` (no decoding).
+    let (mut judge_v2, mut accept, mut rejudge) = (false, None::<String>, None::<String>);
     let (mut rowstats, mut tinylm, mut tinylm_scores) = (None::<String>, None::<String>, None::<String>);
     let mut scores_topk = None::<usize>;
     let mut level = None::<RerankLevel>;
@@ -295,6 +430,11 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut extra_overlay = None::<String>;
     let mut threads = 1usize;
     let mut colloquial_core = None::<String>;
+    // `--tinylm-paired`: the loaded small model counts as the colloquial term's paired model (the SHA-256 condition of
+    // `colloquial::applies` is taken as met; chat and a loaded table still required). Evaluation only; the engine is unchanged.
+    let mut tinylm_paired = false;
+    // `--picks FILE`: per row `row\trank\tsentence`, the sentence the row is scored on (rank = its n-best index, `--tinylm-scores` `c`).
+    let mut picks = None::<String>;
     let mut first_unigram = false;
     let mut no_unseen_start = false;
     // docs/spec/decoder.md §6.1: `--fuzzy FLAGS` (the bits of shanjie_engine_set_fuzzy). Given, the summary line gets
@@ -304,7 +444,13 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     let mut delta_sound = core::fuzzy::DELTA_SOUND;
     let mut delta_given = false;
     let mut reading_decode = true;
+    // docs/spec/decoder.md §6.6: third-tone sandhi is on unless `--no-tone3`; the summary tag then ends `+t3` (`+t3:dD` with `--tone3-delta D`, evaluation only,
+    // not the default `tone3::DELTA_TONE3`).
+    let (mut tone3, mut delta_t3, mut delta_t3_given) = (true, core::tone3::DELTA_TONE3, false);
     let (mut reading_table, mut dump_reading_table) = (None::<String>, None::<String>);
+    // `--unseen-ceiling K` (evaluation only, `CappedLexicon::with_packs_ceil`): a generated overlay word the model never saw is scored at most
+    // log10(K / N). The summary line gets `+uc:K`; without the option the output is unchanged.
+    let mut unseen_ceil = None::<f64>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -328,6 +474,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--dump-words" => dump_words = Some(val()?),
             "--rowstats" => rowstats = Some(val()?),
             "--forms-rowstats" => forms_rowstats = Some(val()?),
+            "--judge" => {
+                judge_v2 = match val()?.as_str() {
+                    "v1" => false,
+                    "v2" => true,
+                    _ => return Err("--judge must be v1 or v2".into()),
+                }
+            }
+            "--accept" => accept = Some(val()?),
+            "--rejudge" => rejudge = Some(val()?),
             "--tinylm" => tinylm = Some(val()?),
             "--tinylm-scores" => tinylm_scores = Some(val()?),
             "--tinylm-scores-topk" => match val().ok().and_then(|v| v.parse::<usize>().ok()) {
@@ -352,6 +507,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             "--packs-dir" => packs_dir = Some(val()?),
             "--extra-overlay" => extra_overlay = Some(val()?),
             "--colloquial-core" => colloquial_core = Some(val()?),
+            "--tinylm-paired" => tinylm_paired = true,
+            "--picks" => picks = Some(val()?),
             "--colloquial-first-unigram" => first_unigram = true,
             "--colloquial-no-unseen-start-unigram" => no_unseen_start = true,
             "--fuzzy-delta-sound" => {
@@ -359,19 +516,57 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 delta_given = true;
             }
             "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
+            "--no-recur" => recur = false,
+            "--no-pool-recur" => pool_recur = false,
+            "--pool-mask-diff" => pool_mask_diff = Some(val()?),
             "--no-reading-decode" => reading_decode = false,
+            "--no-tone3" => tone3 = false,
+            "--tone3-delta" => {
+                delta_t3 = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d >= 0.0).ok_or("--tone3-delta takes a number of at least 0")?;
+                delta_t3_given = true;
+            }
             "--reading-table" => reading_table = Some(val()?),
+            "--unseen-ceiling" => unseen_ceil = Some(val()?.parse::<f64>().ok().filter(|k| k.is_finite() && *k > 0.0).ok_or("--unseen-ceiling takes a positive count")?),
             "--dump-reading-table" => dump_reading_table = Some(val()?),
+            // docs/spec/english-mixed.md §16.4: the comparison's options, taken and checked so one option list serves this tool and `english-sim`. Decoding rows from
+            // their readings has no closing key, so they change no byte of the output here.
+            "--auto-english" => {
+                if !matches!(val()?.as_str(), "on" | "off") {
+                    return Err("--auto-english takes on or off".into());
+                }
+            }
+            "--auto-theta" | "--auto-kappa" | "--auto-kappa-dup" => {
+                val()?.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or("--auto-theta, --auto-kappa and --auto-kappa-dup take a finite number")?;
+            }
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), packs, packs_dir.is_some())?;
+    check_lm_opts(set.as_deref(), dump.is_some() || dump_words.is_some(), picks.is_some(), packs, packs_dir.is_some())?;
+    check_judge_opts(set.as_deref(), judge_v2, accept.is_some(), rejudge.is_some())?;
+    if let Some(pk) = &rejudge {
+        // No decoding: only --rowstats has anything to write.
+        if dump.is_some() || dump_words.is_some() || picks.is_some() || tinylm_scores.is_some() || forms_rowstats.is_some() {
+            return Err("--rejudge writes only --rowstats".into());
+        }
+        if set.is_some() {
+            return Err("--rejudge takes the rows from --rows or --dev, not --set".into());
+        }
+        return run_rejudge(pk, dev, rows_file, limit, name, rowstats, judge_v2, accept, len);
+    }
     if tinylm_scores.is_some() && tinylm.is_none() {
         return Err("--tinylm-scores needs --tinylm".into());
+    }
+    // Without a small model there is no pool: the file would silently stay empty.
+    if pool_mask_diff.is_some() && tinylm.is_none() {
+        return Err("--pool-mask-diff needs --tinylm".into());
     }
     // docs/spec/semantic-rerank.md §9: without a small model a level (standard included) would silently measure the n-gram alone.
     if level.is_some() && tinylm.is_none() {
         return Err("--rerank-level needs --tinylm".into());
+    }
+    // Without the sandhi source the penalty would silently change nothing.
+    if delta_t3_given && !tone3 {
+        return Err("--tone3-delta cannot be combined with --no-tone3".into());
     }
     // The sound penalty only exists on a fuzzy-sound bit; without one the option would silently change nothing.
     if delta_given && fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND == 0 {
@@ -388,6 +583,14 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if tinylm_scores.is_some() && set.as_deref() == Some("holdout") {
         return Err("--tinylm-scores is not allowed with --set holdout".into());
     }
+    // The holdout prints numbers only through --rowstats; the row numbers of --pool-mask-diff are per-row output like --tinylm-scores.
+    if pool_mask_diff.is_some() && set.as_deref() == Some("holdout") {
+        return Err("--pool-mask-diff is not allowed with --set holdout".into());
+    }
+    // Without the pool weight (no --context, --no-recur or --no-pool-recur) no row is reordered: the file would silently stay empty.
+    if pool_mask_diff.is_some() && !(ctx_mode && recur && pool_recur) {
+        return Err("--pool-mask-diff needs --context and the pool weight (not --no-recur or --no-pool-recur)".into());
+    }
     if (reading_table.is_some() || dump_reading_table.is_some()) && !reading_decode {
         return Err("--reading-table and --dump-reading-table need the reading term (not --no-reading-decode)".into());
     }
@@ -402,6 +605,10 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if no_unseen_start && colloquial_core.is_none() {
         return Err("--colloquial-no-unseen-start-unigram needs --colloquial-core".into());
+    }
+    // Without a small model or a table the override would silently do nothing.
+    if tinylm_paired && (tinylm.is_none() || colloquial_core.is_none()) {
+        return Err("--tinylm-paired needs --tinylm and --colloquial-core".into());
     }
     // Summary-line marker `+xo:<sha8 of the file>`, only with the option, so a names-layer run never prints the baseline's label.
     let xo = match &extra_overlay {
@@ -442,15 +649,25 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         }
         None => None,
     };
-    // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test.
-    let colloq_on = colloq.as_ref().filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m)));
+    // The engine's conditions for the term (the table is loaded by here): `colloquial::applies` is the engine's own test. `--tinylm-paired`
+    // takes its model condition (the paired SHA-256) as met and keeps the profile one, so the term acts on the given model as it ships.
+    let colloq_on = colloq
+        .as_ref()
+        .filter(|_| tl.as_ref().is_some_and(|(m, _, _)| colloquial::applies(prof, m) || (tinylm_paired && prof == Profile::Chat)));
+    // A table loaded in chat whose term is not in effect is tagged `-colloq:` and named on stderr, so a check for `+colloq:` cannot
+    // take it for the shipping setting (contract colloq-off-tag). Formal never applies the term, so its tag is left as it was.
+    let colloq_off = prof == Profile::Chat && colloq.is_some() && colloq_on.is_none();
+    if colloq_off {
+        let why = if tl.is_none() { "no --tinylm is loaded" } else { "the --tinylm model is not the one the term is paired with" };
+        eprintln!("warning: --colloquial-core is loaded but the colloquial term is off ({why}); the tag says -colloq:. To measure the term as it ships on this model, add --tinylm-paired.");
+    }
     let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
     // The rows of the pack-oov packs (not `--extra-overlay`, not other packs): their words are unknown to the model and keep the pack's score (docs/spec/decoder.md §2.5).
     let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
-    let capped = CappedLexicon::with_packs(lex.clone(), &overlay, &pack_rows, &lm, Some(&table)).ok_or("bad demote.tsv")?;
+    let capped = CappedLexicon::with_packs_ceil(lex.clone(), &overlay, &pack_rows, &lm, Some(&table), unseen_ceil).ok_or("bad demote.tsv")?;
     // The reading term: the engine's own table (mcbpmf-data.txt for the mc estimate of the floor readings, std-exempt.tsv for the exemptions) and its tag.
     let (capped, rd_tag) = if reading_decode {
         let rd = load_reading_decode(&lex, &dir).map_err(|e| e.to_string())?;
@@ -477,6 +694,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         (capped, String::new())
     };
 
+    // `--accept` ties to the rows' original text; read here, where `dev` and `rows_file` are still whole (the holdout was refused above).
+    let raw_rows = match (&accept, dev, &rows_file) {
+        (Some(_), Some(n), None) => Some(dev_rows_raw(n)?),
+        (Some(_), None, Some(f)) => Some(read_rows_raw(f, limit)?),
+        _ => None,
+    };
     // (display name, [(truth, reading)])
     let (default_name, rows): (String, Vec<(String, Syls, String)>) = match (dev, rows_file, set.as_deref()) {
         (Some(n), None, None) => (format!("dev{n}"), dev_rows(n)?),
@@ -505,6 +728,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(_) => Some(load_forms()?),
         None => None,
     };
+    // `--judge v2`: forms.tsv, forms-extra.tsv and the accept file are read (and the accept file checked against the rows) here, also before any output file.
+    let v2 = if judge_v2 { Some(load_judge(accept.as_deref(), raw_rows.as_deref())?) } else { None };
+    let jtag = v2.as_ref().map_or(String::new(), |j| j.tag.clone());
     let mut dump = match dump {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create dump ({:?})", e.kind()))?)),
         None => None,
@@ -522,24 +748,41 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Some(f) => Some(fs::File::create(f).map_err(|e| format!("cannot create forms rowstats ({:?})", e.kind()))?),
         None => None,
     };
+    // Opened before decoding, like the dump.
+    let mut picks = match picks {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create picks ({:?})", e.kind()))?)),
+        None => None,
+    };
+    let mut mask_diff = match pool_mask_diff {
+        Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create pool mask diff ({:?})", e.kind()))?)),
+        None => None,
+    };
     let mut scores = match tinylm_scores {
         Some(f) => Some(std::io::BufWriter::new(fs::File::create(f).map_err(|e| format!("cannot create tinylm scores ({:?})", e.kind()))?)),
         None => None,
     };
-    let (want_scores, want_dump, want_words) = (scores.is_some(), dump.is_some(), dump_words.is_some());
+    let (want_scores, want_dump, want_words, want_picks) = (scores.is_some(), dump.is_some(), dump_words.is_some(), picks.is_some());
     // `--threads N`: the rows are decoded in blocks of BLOCK contiguous rows; no more workers than blocks.
     const BLOCK: usize = 32;
     let (nrows, nblocks) = (rows.len(), rows.len().div_ceil(BLOCK));
     let threads = threads.min(nblocks.max(1));
     // One row, a function of the row alone (nothing carries over from one row to the next), so the rows can be decoded in any
     // order or at once. Everything the row writes is built here as text; the loop below puts it in the files, in row order.
+    let recur_on = ctx_mode && recur;
+    // docs/spec/semantic-rerank.md §3.1.1: the pool weight needs the decoder's term and a pool (a small model).
+    let pool_on = recur_on && pool_recur && tl.is_some();
+    let want_mask_diff = mask_diff.is_some();
     let work = |i: usize| -> Result<RowOut, String> {
         let (truth, syls, ctx) = &rows[i];
         // S2h: the first word is conditioned on the row's context, cut like the engine cuts it.
         let left = if ctx_mode { Some(context_key(ctx)) } else { None };
         let start = left.as_deref().filter(|k| *k != SENTINEL).map_or("<s>", |k| history(k, &lm));
         let mut out = RowOut::default();
-        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound) {
+        let grams = recur_on.then(|| RecurGrams::from_text(ctx));
+        // docs/spec/decoder.md §6.6: the engine's position table (`tone3::positions`) over the row's syllables; empty with `--no-tone3`.
+        let t3 = core::tone3::positions(syls, &lex, tone3);
+        let t3_arg = tone3.then_some((t3.as_slice(), delta_t3));
+        let scored = match decode_from_fuzzy_scored(&capped, syls, &lm, prof, BEAM_S1, start, demote, fuzzy.unwrap_or(0), delta_sound, grams.as_ref(), t3_arg) {
             Ok(nb) => nb,
             // --fuzzy: a row no reading covers is a wrong answer with an empty first candidate, and the set goes on.
             Err(Error::NoPath { .. }) if fuzzy.is_some() => {
@@ -547,38 +790,67 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                     let gold = lex.segment_words(truth).map_or("-".to_string(), |ws| ws.iter().map(|(w, _)| w.as_str()).collect::<Vec<_>>().join(" "));
                     writeln!(out.words, "{}\t0\t{gold}", i + 1).unwrap();
                 }
+                if want_picks {
+                    writeln!(out.picks, "{}\t-\t", i + 1).unwrap();
+                }
                 return Ok(out);
             }
             Err(e) => return Err(e.to_string()),
         };
         let mut surf: Vec<String> = scored.iter().map(|(_, ws)| ws.iter().map(|w| w.0).collect()).collect();
         let t = len.apply(truth);
+        // The judgment of a candidate: v1 is the lenient comparison, v2 the judge of docs/spec/evaluation.md §3.5.
+        let judge = v2.as_ref().map(|j| Judge2::new(&j.forms, len, truth, syls, j.accept.as_ref().map_or(&[][..], |a| a.get(i))));
+        let ok = |s: &str| match &judge {
+            Some(j) => j.ok(s),
+            None => len.apply(s) == t,
+        };
         // The row's chosen candidate: the first, or the small model's pick among the pool (below; the dump keeps the decoder's order).
         let mut chosen = 0;
         if let Some((tl, _, _)) = &tl {
             // The engine's rule (docs/spec/decoder.md §6.5, `rerank_pool`): the pool is the first 8 paths with no fuzzy word, in n-best order; a
             // fuzzy n-gram first path is not reranked (a pool of just that path: n 1, `c` 0, no `ll`). `pool` holds the paths' n-best indices.
             let pool: Vec<usize> = rerank_pool(&scored, TOPK).unwrap_or_else(|| vec![0]);
-            let top: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
-            let ng: Vec<f64> = pool.iter().map(|&p| scored[p].0).collect();
+            let top0: Vec<&str> = pool.iter().map(|&p| surf[p].as_str()).collect();
+            let ng0: Vec<f64> = pool.iter().map(|&p| scored[p].0).collect();
             // The key is the engine's (`TinyLm::key_for` of the row's context, the display before the one stretch being empty): the
             // context key for versions 1 to 4 (its SENTINEL is the empty k, in TinyLm::rerank), the last L characters as they are for
             // a model declaring L (docs/spec/semantic-rerank.md §5.2); without --context, no key.
             let t0 = Instant::now();
             let key = if ctx_mode { tl.key_for(ctx) } else { String::new() };
             let key = key.as_str();
-            // What `manual_mask` matches the manual words against: the readings the n-gram's first path used (the engine's `Stretch::used`).
-            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3))) };
+            // The manual mask, once, in the decoder's order with its first path as the base (the engine's `Stretch::masked`; docs/spec/decoder.md §7):
+            // `manual_mask` matches the manual words against the readings that path used.
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3)), &t3) };
+            let masked0 = manual_mask(&used, &top0, lex.manual());
+            // docs/spec/semantic-rerank.md §3.1.1: the pool weight and the order it gives (`lm::pool_order`, the engine's function); `view` holds the
+            // pool positions in the order the rerank sees them (the pool's own when the weight does not apply).
+            let bonus: Vec<f64> = top0.iter().map(|c| grams.as_ref().filter(|_| pool_on).map_or(0.0, |g| g.pool_bonus(c))).collect();
+            let reordered = pool_order(&ng0, &bonus, &masked0);
+            if want_mask_diff && pool_on {
+                out.mask_diff = mask_differs(&reordered, pool_order(&ng0, &bonus, &[]).is_some(), &masked0, &top0, || {
+                    lex.path_readings(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)), &t3)
+                }, lex.manual());
+            }
+            let (view, ng): (Vec<usize>, Vec<f64>) = match &reordered {
+                Some((o, s)) => (o.clone(), s.clone()),
+                None => ((0..pool.len()).collect(), ng0.clone()),
+            };
+            // The n-best index of each candidate the rerank sees.
+            let nbest: Vec<usize> = view.iter().map(|&k| pool[k]).collect();
+            let top: Vec<&str> = view.iter().map(|&k| top0[k]).collect();
+            let masked: Vec<bool> = view.iter().map(|&k| masked0[k]).collect();
             let picked = match colloq_on {
                 Some(co) => {
-                    let words: Vec<Vec<&str>> = pool.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, level, &used, lex.manual(), &Default::default())
-               }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &used, lex.manual(), &Default::default()),
+                    let words: Vec<Vec<&str>> = nbest.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
+                    tl.rerank_colloquial(&ng, &top, &words, key, co, level, &masked, &Default::default())
+                }
+                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &masked, &Default::default()),
             };
             let ll = match picked {
+                // A position outside the list is no choice: the rerank's first candidate.
                 Ok((c, ll)) => {
-                    chosen = pool[c];
+                    chosen = nbest.get(c).copied().unwrap_or(nbest[0]);
                     ll
                 }
                 // A candidate longer than the model's context: this row keeps the n-gram first (counted on stderr), the set goes on.
@@ -621,24 +893,25 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             }
             if want_scores {
                 // The engine's col, the one `rerank_colloquial` fused (same words, same table); only where it ran with an `ll`.
-                let col: Option<Vec<f64>> = colloq_on.filter(|_| ll.is_some()).map(|co| pool.iter().map(|&p| co.col(&scored[p].1.iter().map(|w| w.0).collect::<Vec<_>>())).collect());
-                let oks: Vec<bool> = top.iter().map(|s| len.apply(s) == t).collect();
+                let col: Option<Vec<f64>> = colloq_on.filter(|_| ll.is_some()).map(|co| nbest.iter().map(|&p| co.col(&scored[p].1.iter().map(|w| w.0).collect::<Vec<_>>())).collect());
+                let oks: Vec<bool> = top.iter().map(|s| ok(s)).collect();
                 let ed: Vec<u32> = top.iter().zip(&oks).map(|(s, &ok)| if ok { 0 } else { levenshtein(s, truth) }).collect();
-                // With a sound bit the record lists the pool and says which n-best paths it is (`idx`); without one the pool is the first 8, as before.
-                // `masked` is over the same list: the pool's entries (`top`) that are a manual word's span taken out.
-                let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0).then_some(pool.as_slice());
-                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &extra, &manual_mask(&used, &top, lex.manual()), idx, col.as_deref())?;
+                // With a sound bit, or a pool the recurrence weight reordered, the record lists the pool as the rerank saw it and says which n-best paths
+                // it is (`idx`); without either the pool is the first 8, as before. `masked` is over the same list (the mask made with the decoder's
+                // first path as the base) and `ng` is the score the rerank used (`ng + bonus` on a reordered row).
+                let idx = (fuzzy.unwrap_or(0) & core::fuzzy::FUZZY_SOUND != 0 || reordered.is_some()).then_some(nbest.as_slice());
+                out.scores = scores_line(i + 1, &ng, &oks, &ed, truth.chars().count(), chosen, ll.as_deref(), &extra, &masked, idx, col.as_deref())?;
             }
         }
         let pick = len.apply(&surf[chosen]);
-        out.ok = pick == t;
+        out.ok = ok(&surf[chosen]);
         if let Some(fm) = &forms {
             // Lenient first, then the forms table (a fixed order, docs/spec/evaluation.md §3); both sides use the row's own reading.
             let ((p, p_ran), (g, g_ran)) = (fm.apply_checked(&pick, syls), fm.apply_checked(&t, syls));
             out.forms_ok = p == g;
             out.forms_no_char_step = !(p_ran && g_ran);
         }
-        out.in64 = surf.iter().any(|s| len.apply(s) == t);
+        out.in64 = surf.iter().any(|s| ok(s));
         if want_dump {
             for (r, ((sc, _), s)) in scored.iter().zip(&surf).enumerate() {
                 writeln!(out.dump, "{}\t{}\t{s}\t{sc:?}", i + 1, r + 1).unwrap();   // a String: cannot fail
@@ -651,11 +924,15 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 writeln!(out.words, "{}\t{}\t{}", i + 1, r + 1, ws.iter().map(|w| w.0).collect::<Vec<_>>().join(" ")).unwrap();
             }
         }
+        if want_picks {
+            writeln!(out.picks, "{}\t{chosen}\t{}", i + 1, surf[chosen]).unwrap();
+        }
         out.first = surf.swap_remove(chosen);
         Ok(out)
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
     let mut no_ll = 0usize;
+    let mut mask_diffs = 0usize;
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
     let (mut frs, mut no_char_step) = (Vec::new(), 0usize);
     let mut emit = |i: usize, out: RowOut| -> Result<(), String> {
@@ -663,12 +940,19 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         o64 += out.in64 as usize;
         long += out.long as usize;
         no_ll += out.no_ll;
+        if let (Some(w), true) = (mask_diff.as_mut(), out.mask_diff) {
+            mask_diffs += 1;
+            writeln!(w, "{}", i + 1).map_err(|_| "cannot write pool mask diff".to_string())?;
+        }
         rerank.extend(out.rerank);
         if let Some(w) = scores.as_mut() {
             w.write_all(out.scores.as_bytes()).map_err(|_| "cannot write tinylm scores".to_string())?;
         }
         if let Some(d) = dump.as_mut() {
             d.write_all(out.dump.as_bytes()).map_err(|_| "cannot write dump".to_string())?;
+        }
+        if let Some(d) = picks.as_mut() {
+            d.write_all(out.picks.as_bytes()).map_err(|_| "cannot write picks".to_string())?;
         }
         if let Some(d) = dump_words.as_mut() {
             d.write_all(out.words.as_bytes()).map_err(|_| "cannot write word dump".to_string())?;
@@ -746,6 +1030,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if let Some(mut w) = scores {
         w.flush().map_err(|_| "cannot write tinylm scores".to_string())?;
     }
+    if let Some(mut w) = mask_diff {
+        w.flush().map_err(|_| "cannot write pool mask diff".to_string())?;
+    }
     if scores_topk.is_some_and(|n| n > TOPK) {
         // stderr only, in the style of the latency line below: candidates 9..N the small model could not score (`null` in the record).
         eprintln!("tinylm: --tinylm-scores-topk candidates without ll (candidate over the context) {no_ll}");
@@ -773,6 +1060,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     if let Some(mut d) = dump_words {
         d.flush().map_err(|_| "cannot write word dump".to_string())?;
     }
+    if let Some(mut d) = picks {
+        d.flush().map_err(|_| "cannot write picks".to_string())?;
+    }
     if let Some(mut f) = rowstats {
         f.write_all(format_rowstats(&rs).as_bytes()).map_err(|e| format!("cannot write rowstats ({:?})", e.kind()))?;
     }
@@ -787,8 +1077,16 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         RerankLevel::Conservative => "+rl:conservative",
         RerankLevel::Aggressive => "+rl:aggressive",
     };
+    // `--pool-mask-diff`: the number of rows it wrote, the last key of the summary (absent without the option).
+    let md = if want_mask_diff { format!(", 'pool_mask_diff': {mask_diffs}") } else { String::new() };
+    let t3_tag = match (tone3, delta_t3 == core::tone3::DELTA_TONE3) {
+        (false, _) => String::new(),
+        (true, true) => "+t3".to_string(),
+        (true, false) => format!("+t3:d{delta_t3}"),
+    };
+    let rd_tag = format!("{rd_tag}{}{t3_tag}", unseen_ceil.map_or(String::new(), |k| format!("+uc:{k}")));
     let fz = fuzzy.map_or(String::new(), |f| if delta_sound == core::fuzzy::DELTA_SOUND { format!("+fz:{f}") } else { format!("+fz:{f}:d{delta_sound}") });
-    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'}}", if ctx_mode { "+ctx" } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("+colloq:{}{}", &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" })), rd_tag, rows.len());
+    println!("## {name}  lm-{profile_name}{}{}{}{}{}{}{}{}{}{xo}{}{}{fz}{}{jtag}  {{'n': {}, 'top1': {top1}, 'oracle@64': {o64}, 'top1_sha256': '{sha}'{md}}}", if ctx_mode { "+ctx" } else { "" }, if recur_on { if pool_on { "+recur+pr" } else { "+recur" } } else { "" }, if demote { "" } else { "-nodemote" }, if classes { "" } else { "-noclasses" }, if names { "" } else { "-nonames" }, lm.kn_tag(prof).unwrap_or_default(), tl.as_ref().map_or(String::new(), |(_, _, sha8)| format!("+tl:{sha8}")), rl_tag, pack_tag(packs), if lm.uses_tri(scoring) { lm.tri_tag(prof).unwrap_or("") } else { "" }, colloq.as_ref().map_or(String::new(), |co| format!("{}colloq:{}{}", if colloq_off { "-" } else { "+" }, &co.sha256()[..8], if co.first_unigram() { "+fu" } else if co.unseen_start_unigram() { "" } else { "+us0" }) + &tl.as_ref().filter(|_| tinylm_paired).map_or(String::new(), |(_, _, sha8)| format!("+pair:{sha8}"))), rd_tag, rows.len());
     Ok(())
 }
 
@@ -853,7 +1151,7 @@ fn run_predict(args: &[String]) -> Result<(), String> {
             _ => return Err("unknown argument".into()),
         }
     }
-    check_lm_opts(None, false, packs, packs_dir.is_some())?;
+    check_lm_opts(None, false, false, packs, packs_dir.is_some())?;
     let pdir = packs_dir_checked(packs, packs_dir)?;
     let profile = match profile.ok_or("--profile is required")?.as_str() {
         "chat" => Profile::Chat,
@@ -1082,14 +1380,58 @@ fn main() {
 mod tests {
     use super::*;
 
+    /// `--pool-mask-diff`: D 我們他去 (holds the manual word 我們), R 我們你好 (holds 我們 and the manual word 你好) and X 你們他去 (holds neither). Reordered
+    /// to R, D, X: with D as the base (this slice) only X is masked; with R as the base (the exploration patch) D is masked too, so the row counts. With
+    /// only 我們 manual the two agree; a row not reordered counts only when the order without the mask would have been one; no manual word, no difference.
+    #[test]
+    fn mask_differs_compares_the_two_bases() {
+        let top0 = ["我們他去", "我們你好", "你們他去"];
+        let both = core::ManualSet::from_pairs([("我們", "ㄨㄛˇ-ㄇㄣ˙"), ("你好", "ㄋㄧˇ-ㄏㄠˇ")]);
+        let one = core::ManualSet::from_pairs([("我們", "ㄨㄛˇ-ㄇㄣ˙")]);
+        let syl = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (d_read, r_read) = (syl(&["ㄨㄛˇ", "ㄇㄣ˙", "ㄊㄚ", "ㄑㄩˋ"]), syl(&["ㄨㄛˇ", "ㄇㄣ˙", "ㄋㄧˇ", "ㄏㄠˇ"]));
+        let reordered = Some((vec![1, 0, 2], vec![0.0, -1.0, -3.0]));
+        for manual in [&both, &one] {
+            let masked0 = manual_mask(&d_read, &top0, manual);
+            assert_eq!(masked0, [false, false, true]);
+            let differs = mask_differs(&reordered, true, &masked0, &top0, || r_read.clone(), manual);
+            assert_eq!(differs, std::ptr::eq(manual, &both));
+        }
+        assert!(mask_differs(&None, true, &[false, true, false], &top0, || unreachable!(), &both), "not reordered because the new first is masked");
+        assert!(!mask_differs(&None, false, &[false; 3], &top0, || unreachable!(), &both), "not reordered at all");
+        assert!(!mask_differs(&reordered, true, &[false; 3], &top0, || unreachable!(), &core::ManualSet::default()), "no manual word");
+    }
+
     #[test]
     fn lm_opts_holdout_allows_rowstats_not_dump() {
         // --rowstats is not an argument: it is allowed everywhere, holdout included.
-        assert!(check_lm_opts(Some("holdout"), false, 0, false).is_ok());
-        assert!(check_lm_opts(Some("holdout"), true, 0, false).is_err());
-        assert!(check_lm_opts(None, true, 0, false).is_ok());
-        assert!(check_lm_opts(None, false, 0, true).is_err(), "--packs-dir without --packs");
-        assert!(check_lm_opts(None, false, PACK_ACG, true).is_ok());
+        assert!(check_lm_opts(Some("holdout"), false, false, 0, false).is_ok());
+        assert!(check_lm_opts(Some("holdout"), true, false, 0, false).is_err());
+        assert!(check_lm_opts(Some("holdout"), false, true, 0, false).is_err(), "--picks with the holdout");
+        assert!(check_lm_opts(None, false, true, 0, false).is_ok());
+        assert!(check_lm_opts(None, true, false, 0, false).is_ok());
+        assert!(check_lm_opts(None, false, false, 0, true).is_err(), "--packs-dir without --packs");
+        assert!(check_lm_opts(None, false, false, PACK_ACG, true).is_ok());
+    }
+
+    #[test]
+    fn judge_opts_accept_needs_v2_and_the_holdout_refuses_accept_and_rejudge() {
+        assert!(check_judge_opts(None, false, false, false).is_ok());
+        assert!(check_judge_opts(None, true, true, false).is_ok());
+        assert!(check_judge_opts(None, false, true, false).is_err(), "--accept without --judge v2");
+        assert!(check_judge_opts(Some("holdout"), true, false, false).is_ok(), "--judge v2 --rowstats on the holdout stays allowed");
+        assert!(check_judge_opts(Some("holdout"), true, true, false).is_err(), "--accept with --set holdout");
+        assert!(check_judge_opts(Some("holdout"), true, false, true).is_err(), "--rejudge with --set holdout");
+        assert!(check_judge_opts(None, true, false, true).is_ok());
+    }
+
+    #[test]
+    fn picks_file_takes_picks_lines_and_bare_sentences() {
+        assert_eq!(parse_picks("1\t0\t你好\n2\t-\t\n", 2), Ok(vec!["你好".to_string(), String::new()]));
+        assert_eq!(parse_picks("你好\n再見\n", 2), Ok(vec!["你好".to_string(), "再見".to_string()]));
+        assert!(parse_picks("你好\n", 2).is_err(), "row count");
+        assert!(parse_picks("2\t0\t你好\n", 1).is_err(), "row number");
+        assert!(parse_picks("1\t0\t你好\t多\n", 1).is_err(), "four fields");
     }
 
     /// `--packs` takes acg, quotes, it, meme, beauty and comma lists (and the flag can repeat); anything else is refused; a requested pack's file must exist; the summary marker follows the bits.

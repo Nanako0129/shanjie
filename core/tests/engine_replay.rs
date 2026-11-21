@@ -102,6 +102,18 @@ fn replay_with_english_on_and_the_revert_switches_off() {
 /// switch off, no key puts a digit token into the composition, and the keys stay under 16 ms at p95 (release).
 #[test]
 fn replay_with_english_and_digits_on() {
+    digits_replay(false);
+}
+
+/// The same 302 rows through the engine the App builds (`Engine::new` reads the digit table, `load_lm`; mixing on, overwrite off, key order on, reversal guard
+/// on): every row commits what the same engine commits with mixing off, and no key reverts, splits or makes a digit token. The reversal rules of
+/// docs/spec/english-mixed.md §7.3, §7.4 and §4.2 must leave Chinese typed right as it is.
+#[test]
+fn replay_with_english_and_digits_on_the_apps_engine() {
+    digits_replay(true);
+}
+
+fn digits_replay(app: bool) {
     use core::digits::DigitTable;
     use core::engine::capping_overlay;
     use core::lm::{CappedLexicon, Lm};
@@ -127,9 +139,17 @@ fn replay_with_english_and_digits_on() {
     assert!(rows.len() == 302, "dev set has 302 usable rows");
 
     let build = |on: bool| {
-        let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
-        e.set_lm(lm.clone(), capped.clone());
-        e.set_digit_table(Some(table.clone()));
+        let mut e = if app {
+            let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+            e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
+            e.set_english_overwrite(false).unwrap();
+            e
+        } else {
+            let mut e = Engine::with_lexicon(lex.clone(), Layout::Standard);
+            e.set_lm(lm.clone(), capped.clone());
+            e.set_digit_table(Some(table.clone()));
+            e
+        };
         e.set_english(on).unwrap();
         e
     };

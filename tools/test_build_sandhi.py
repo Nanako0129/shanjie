@@ -1,4 +1,4 @@
-"""Unit tests for the `neutral` rows of tools/build_sandhi.py on tiny synthetic lexicons (docs/spec/decoder.md §8.3).
+"""Unit tests for the `neutral` (§8.3) and `fusion` (R7, §8.1) rows of tools/build_sandhi.py on tiny synthetic lexicons (docs/spec/decoder.md §8.3).
 Run: python3 -W ignore -m unittest tools/test_build_sandhi.py"""
 import os
 import sys
@@ -70,6 +70,33 @@ class Neutral(unittest.TestCase):
 
     def test_overlay_only_neutral_word_gets_no_row(self):
         self.assertEqual(run("ㄗˇ 子 -4.0\n", "ㄓㄨㄛ-ㄗ˙\t桌子\t-5.0\toverlay\n"), {})
+
+
+def run_tagged(base_lines, tag):
+    with tempfile.TemporaryDirectory() as d:
+        b, o = os.path.join(d, "base.txt"), os.path.join(d, "overlay.tsv")
+        open(b, "w", encoding="utf-8").write(base_lines)
+        open(o, "w", encoding="utf-8").write("")
+        text, per_rule = bs.build(b, o)
+    return {(r, w): s for r, w, s, t in (line.split("\t") for line in text.splitlines()) if t == tag}, per_rule
+
+
+class Fusion(unittest.TestCase):
+    """R7（docs/spec/decoder.md §8.1）：詞首的這／那／哪接量詞時加合音 ㄓㄟˋ／ㄋㄟˋ／ㄋㄟˇ 的列，分數照抄。"""
+
+    def test_word_initial_demonstrative_before_a_classifier(self):
+        got, per_rule = run_tagged("ㄋㄚˋ-ㄍㄜ˙ 那個 -4.0\nㄋㄚˇ-ㄍㄜ˙ 哪個 -5.0\nㄓㄜˋ-ㄒㄧㄝ 這些 -4.5\nㄓㄜˋ-ㄅㄣˇ-ㄕㄨ 這本書 -6.0\n", "fusion")
+        self.assertEqual(got, {("ㄋㄟˋ-ㄍㄜ˙", "那個"): "-4.0", ("ㄋㄟˇ-ㄍㄜ˙", "哪個"): "-5.0",
+                               ("ㄓㄟˋ-ㄒㄧㄝ", "這些"): "-4.5", ("ㄓㄟˋ-ㄅㄣˇ-ㄕㄨ", "這本書"): "-6.0"})
+        self.assertEqual(per_rule["R7"], 4)
+
+    def test_not_a_classifier_not_word_initial_or_other_reading(self):
+        base = ("ㄋㄚˋ-ㄅㄚˋ 那霸 -5.0\nㄋㄚˋ-ㄇㄜ˙ 那麼 -4.0\nㄅㄛ-ㄓㄚˊ-ㄋㄚˋ 波札那 -6.0\nㄓㄜˋ-ㄧ-ㄍㄜ˙ 這一個 -6.0\n"
+                "ㄋㄚˇ-ㄍㄜ˙ 那個 -7.0\nㄓㄜˋ 這 -2.0\n")
+        self.assertEqual(run_tagged(base, "fusion")[0], {})
+
+    def test_existing_reading_not_written(self):
+        self.assertEqual(run_tagged("ㄋㄚˋ-ㄍㄜ˙ 那個 -4.0\nㄋㄟˋ-ㄍㄜ˙ 那個 -4.5\n", "fusion")[0], {})
 
 
 if __name__ == "__main__":

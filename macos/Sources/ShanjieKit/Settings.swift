@@ -31,6 +31,8 @@ public final class SettingsModel: ObservableObject {
     /// value is kept).
     @Published public private(set) var fuzzyFlags: UInt32 = 0
     @Published public private(set) var fuzzyAdjacentEnabled = true
+    /// The 三聲變調 checkbox in the same section (docs/spec/decoder.md §6.6), default on.
+    @Published public private(set) var tone3 = true
     /// The 重打同一個位置算英文 choice under the 中英混打 toggle (docs/spec/english-mixed.md §11): a key over the symbol already in its column reverts
     /// to the raw keys as English. Default false since docs/spec/english-mixed.md §10.1. Enabled when the toggle is enabled and on.
     @Published public private(set) var englishOverwrite = false
@@ -118,6 +120,7 @@ public final class SettingsModel: ObservableObject {
         englishEnabled = shell.englishEnabled
         fuzzyFlags = shell.fuzzyFlags
         fuzzyAdjacentEnabled = shell.fuzzyAdjacentEnabled
+        tone3 = shell.tone3On
         englishOverwrite = shell.englishOverwriteOn
         englishOverwriteEnabled = shell.englishOverwriteEnabled
         englishKeyOrder = shell.englishKeyOrderOn
@@ -184,6 +187,7 @@ public final class SettingsModel: ObservableObject {
         precondition((0..<5).contains(bit))
         shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
     }
+    public func setTone3(_ on: Bool) { shell.applyTone3(on) }
     public func setEnglishOverwrite(_ on: Bool) { shell.applyEnglishOverwrite(on) }
     public func setEnglishKeyOrder(_ on: Bool) { shell.applyEnglishKeyOrder(on) }
     public func setEnglishReversalGuard(_ on: Bool) { shell.applyEnglishReversalGuard(on) }

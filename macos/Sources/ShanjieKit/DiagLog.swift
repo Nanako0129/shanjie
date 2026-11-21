@@ -35,6 +35,8 @@ public final class DiagLog {
         case deactivate(bundle: String, owner: Bool, english: Bool)
         case owner(bundle: String)
         case ascii(bundle: String, english: Bool)
+        /// docs/spec/macos-shell.md §13.1: over one session interval, whether the modifier events the system counted reached this process.
+        case flags(bundle: String, delivery: Delivery)
 
         var line: String {
             func lang(_ english: Bool) -> String { english ? "en" : "zh" }
@@ -46,8 +48,22 @@ public final class DiagLog {
             case .deactivate(let b, let o, let en): return "deactivate \(b) \(own(o)) \(lang(en))"
             case .owner(let b): return "owner \(b)"
             case .ascii(let b, let en): return "ascii \(b) \(lang(en))"
+            case .flags(let b, let d): return "flags \(b) \(d.rawValue)"
             }
         }
+    }
+
+    /// The three values of a `flags` line. The counts they come from are never recorded.
+    public enum Delivery: String, CaseIterable {
+        case all, some
+        case nothing = "none"  // not `none`: that would read as Optional.none
+    }
+
+    /// docs/spec/macos-shell.md §13.1: `system` and `seen` are how far the system's `flagsChanged` counter and this process's own count moved
+    /// over an interval (wrapping differences). `nil`: the system saw none, nothing to say. More seen than counted (a repeated
+    /// delivery) is `all`.
+    static func delivery(system: UInt32, seen: UInt32) -> Delivery? {
+        system == 0 ? nil : seen >= system ? .all : seen == 0 ? .nothing : .some
     }
 
     /// The two buffers' sizes: Shift releases are frequent (capitals), so they have their own and cannot push the switches and app
@@ -64,6 +80,9 @@ public final class DiagLog {
     private var others: [(at: TimeInterval, event: Event)] = []
 
     public init(store: DiagLogStore) { self.store = store }
+
+    /// Called whenever the buffers are emptied (off, on, `storeChanged()`): the shell drops its `flags` interval starts with them.
+    var onClear: (() -> Void)?
 
     /// How many times the buffers were emptied: a preview taken before an emptying is not copied after it (`SettingsModel.copyDiagPreview`).
     public private(set) var clears = 0
@@ -84,20 +103,25 @@ public final class DiagLog {
         shifts = []
         others = []
         clears += 1
+        onClear?()
     }
 
     /// Off counts as empty: until the change notification is handled, the store can already say off.
     public var isEmpty: Bool { !enabled || (shifts.isEmpty && others.isEmpty) }
 
-    func record(_ event: Event) {
+    /// Several events in one call share one reading of the clock (`deactivate` and its `flags`: one moment, not two).
+    func record(_ events: Event...) {
         guard enabled else { if !(shifts.isEmpty && others.isEmpty) { clear() }; return }
-        let entry = (at: clock(), event: event)
-        if case .shift = event {
-            shifts.append(entry)
-            if shifts.count > Self.shiftLimit { shifts.removeFirst() }
-        } else {
-            others.append(entry)
-            if others.count > Self.otherLimit { others.removeFirst() }
+        let at = clock()
+        for event in events {
+            let entry = (at: at, event: event)
+            if case .shift = event {
+                shifts.append(entry)
+                if shifts.count > Self.shiftLimit { shifts.removeFirst() }
+            } else {
+                others.append(entry)
+                if others.count > Self.otherLimit { others.removeFirst() }
+            }
         }
     }
 

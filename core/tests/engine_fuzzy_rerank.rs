@@ -34,7 +34,7 @@ fn engine(flags: u32) -> Engine {
 fn nbest(syls: &[&str], flags: u32) -> Vec<(String, bool, f64)> {
     let s = shared();
     let v: Vec<String> = syls.iter().map(|x| x.to_string()).collect();
-    decode_from_fuzzy_scored(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND)
+    decode_from_fuzzy_scored(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND, None, None)
         .unwrap()
         .into_iter()
         .map(|(sc, ws)| (ws.iter().map(|w| w.0).collect(), ws.iter().any(|w| w.4), sc))
@@ -58,7 +58,7 @@ fn pooled(syls: &[&str], flags: u32, alpha: f64) -> Pooled {
     let model = sjtl_with_vocab(alpha, f64::INFINITY, Some(&lm_path()), &cands.concat());
     let tl = TinyLm::load(&model).unwrap();
     let ng: Vec<f64> = pool.iter().map(|&i| nb[i].2).collect();
-    let pick = tl.rerank(&ng, &cands, &context_key(""), tl.alpha_tau_delta(Profile::Chat), &[], &Default::default(), &Default::default()).unwrap().0;
+    let pick = tl.rerank(&ng, &cands, &context_key(""), tl.alpha_tau_delta(Profile::Chat), &[], &Default::default()).unwrap().0;
     Pooled { nb, pool, model, pick }
 }
 

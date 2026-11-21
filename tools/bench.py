@@ -916,6 +916,17 @@ PROFILES2 = ["chat", "formal"]
 # A version that ships the decoder's reading term (docs/spec/decoder.md §5; its data/lexicon/std-exempt.tsv is in the export) has `"reading": True`: the CLI
 # then ends EVERY setting's tag (chat, formal, the anchor run, the replay-setting cell) with `+rd+rx:{rx8}+rm` (the first 8 hex of that file, then the reading-mass rule's mark) and no longer marks the colloquial
 # tag with `+rc` (the reading-channel term was removed with it). The row of the new version is added at its release (a checkout that has the reading-mass rule, docs/spec/decoder.md §5); a version without the key keeps `+rc` and no `+rd`.
+# A version that ships the reading term's syllable normalisation (docs/spec/decoder.md §5) has `"reading_norm": True` besides `"reading": True`: the CLI then ends
+# every tag with `+rd+rx:{rx8}+rm+rn`. The row of the new version is added at its release; a version without the key (v0.7.0, v0.8.0) ends in `+rm`, and each
+# refuses the other form (the current checkout's replay prints `+rn`, so tools/kpi.py cannot backfill a version without the key, docs/spec/evaluation.md §7).
+# A version that ships the context recurrence term (docs/spec/decoder.md §4.6) has `"recur": True`: with `--context` the CLI marks every cell's tag `+recur` right after
+# `+ctx` (the anchor run too; the replay-setting cell has no `--context`, so no mark), and the replay's tag has it before the reading marks. The row of the new version is added at its
+# release; a version without the key has no mark (its binary has no such term).
+# A version that also ships the context recurrence weight on the semantic correction's pool (docs/spec/semantic-rerank.md §3.1.1) has `"pool_recur": True`
+# besides `"recur": True`: the CLI then marks `+recur+pr` instead of `+recur` in every cell that has the small model (`--tinylm`; a cell without it has no
+# pool, so `+recur` alone), and the replay's tag reads `+recur+pr` with the small model. A version without the key keeps `+recur`.
+# A version that ships third-tone sandhi (docs/spec/decoder.md §6.6) has `"tone3": True`: the CLI (with the switch on, its default) then ends every tag, the replay-setting
+# cell's included, with `+t3` after the reading marks. A version without the key has no mark, and each refuses the other form.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -944,6 +955,11 @@ VERSIONS2 = {
     "v0.7.0": {"release": "v0.7.0", "flags": ["--context", "--packs", "acg,it,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "reading": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+beauty+tri:{tri8}"},
+    # v0.8.0: v0.7.0's models, the meme pack on by default too (Shell.swift memePackOn = true, packs acg,it,meme,beauty), the context recurrence term (docs/spec/decoder.md §4.6)
+    # and its weight on the semantic correction's pool (semantic-rerank.md §3.1.1): `"recur"` and `"pool_recur"` make the tag `+ctx+recur+pr` (copied from CLI summary lines on typing76).
+    "v0.8.0": {"release": "v0.8.0", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "reading": True, "recur": True, "pool_recur": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+acg+it+meme+beauty+tri:{tri8}"},
 }
 # Anchor (docs/spec/evaluation.md §7.7): S7h's measurement, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
@@ -1031,7 +1047,11 @@ def ship_flags(ver, anchor):
 def spec_tag(ver, prof):
     """The setting tag the settings table gives `ver` for `prof` (the formal profile has its own when the version ships a trigram table)."""
     t = ver.spec["formal_tag"] if prof == "formal" and "formal_tag" in ver.spec else ver.spec["tag"]
-    return t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", "")) + colloq_tag(ver, prof) + reading_tag(ver)
+    t = t.format(tl8=ver.tl8, kn8=getattr(ver, "kn8", ""), tri8=getattr(ver, "tri8", ""), trichat8=getattr(ver, "trichat8", ""))
+    if ver.spec.get("recur"):   # the CLI prints `+recur` after `+ctx` (docs/spec/decoder.md §4.6), `+recur+pr` with the pool weight and a small model
+        pr = "+pr" if ver.spec.get("pool_recur") and getattr(ver, "tl", None) else ""
+        t = t.replace("+ctx", "+ctx+recur" + pr, 1)
+    return t + colloq_tag(ver, prof) + reading_tag(ver)
 
 
 def colloq_tag(ver, prof):
@@ -1042,8 +1062,10 @@ def colloq_tag(ver, prof):
 
 
 def reading_tag(ver):
-    """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule), else ""."""
-    return f"+rd+rx:{ver.rx8}+rm" if getattr(ver, "rx8", "") else ""
+    """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule),
+    then `+rn` for a `"reading_norm"` version (the syllable normalisation), else ""; then `+t3` for a `"tone3"` version (third-tone sandhi, docs/spec/decoder.md §6.6)."""
+    rd = f"+rd+rx:{ver.rx8}+rm" + ("+rn" if ver.spec.get("reading_norm") else "") if getattr(ver, "rx8", "") else ""
+    return rd + ("+t3" if ver.spec.get("tone3") else "")
 
 
 def expected_tag(ver, prof, anchor):
@@ -1191,6 +1213,11 @@ def measure_speed2(ctx, vers):
                          "p95_us": statistics.median(x["p95_us"] for x in r), "max_us": max(x["max_us"] for x in r),
                          "load_ms": statistics.median(x["load_ms"] for x in r), "rss_mb": max(x["rss_mb"] for x in r)}
         out[v.sha] = {**res["chat"], "formal": res["formal"]}
+        # every round's raw values, kept beside the medians above (which are computed from the same numbers and mean what they always did)
+        out[v.sha]["speed_rounds"] = {
+            **{prof: [{k: x[k] for k in ("p95_us", "max_us", "load_ms", "rss_mb")} for x in runs[v.sha, prof]]
+               for prof in PROFILES2 if (v.sha, prof) not in errs},
+            "rerank_ms": [{"p50": a, "p95": b} for a, b in rr[v.sha]]}
         if rr[v.sha] and "error" not in res["chat"]:
             out[v.sha]["rerank_p50_ms"] = statistics.median(a for a, _ in rr[v.sha])
             out[v.sha]["rerank_p95_ms"] = statistics.median(b for _, b in rr[v.sha])

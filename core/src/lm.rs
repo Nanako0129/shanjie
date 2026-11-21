@@ -872,11 +872,15 @@ pub struct CappedLexicon {
     /// without a pack.
     overlay_bits: Vec<u64>,
     pack_bits: Vec<u64>,
+    /// The unseen ceiling (`with_packs_ceil`): the count, and one bit per entry position whose word is in a generated overlay row
+    /// (kept beside `overlay_bits` so `readings` redoes the same capping). `None` and empty without it: today's scores.
+    unseen_ceil: Option<f64>,
+    ceil_bits: Vec<u64>,
     /// `Lm::identity` of the model the lexicon was capped with: `readings` must get the same one.
     built_for: (u64, usize, usize),
     /// The reading term (docs/spec/decoder.md §5, `with_reading`): while `reading_active` the decoder adds it to the path score of every
     /// single-character word that learning did not lift. `None` for a lexicon built without it (unit tests, `CappedLexicon::new`), whose arithmetic is then untouched.
-    reading: Option<crate::reading::ReadingDecode>,
+    reading: Option<Arc<crate::reading::ReadingDecode>>,
     /// Evaluation switch (`set_reading_active`, `Engine::set_reading_decode`, the CLIs' `--no-reading-decode`): off, the decoder ignores `reading`.
     /// Atomic because the capped lexicon is shared (`Arc`) and the switch is flipped on a loaded model.
     reading_active: std::sync::atomic::AtomicBool,
@@ -887,10 +891,21 @@ pub struct CappedLexicon {
 pub const PACK_OOV_TAG: &str = "acg-oov";
 
 /// An overlay word's score capped at its corpus frequency, or lowered by the unseen penalty when the model never saw it.
-fn capped_score(lm: &Lm, score: f64, w: &str) -> f64 {
+/// `ceil` (`with_packs_ceil`, evaluation only): for a never-seen word of a generated overlay source the count it may at most be scored as.
+fn capped_score(lm: &Lm, score: f64, w: &str, ceil: Option<f64>) -> f64 {
     let c = lm.count(w);
-    if c != 0 { score.min((c as f64 / lm.n as f64).log10()) } else { score - UNSEEN_OVERLAY_PENALTY }
+    if c != 0 {
+        score.min((c as f64 / lm.n as f64).log10())
+    } else {
+        let s = score - UNSEEN_OVERLAY_PENALTY;
+        ceil.map_or(s, |k| s.min((k / lm.n as f64).log10()))
+    }
 }
+
+/// Column 4 of the overlay rows built from title lists and dictionary headwords without any usage count (tools/build_overlay.py:
+/// wiki titles and the dictionary supplement). Only their words take the unseen ceiling; hand-kept rows (manual, slang), the names layer
+/// and the packs carry a deliberate bonus and keep today's rule.
+pub const GENERATED_OVERLAY_TAGS: [&str; 3] = ["wikt", "zhwiki", "萌典補詞"];
 
 /// Best first, the one order both the decoder's entries and `readings` sort by (stable, NaN as equal).
 fn desc(a: f64, b: f64) -> std::cmp::Ordering {
@@ -910,9 +925,15 @@ impl CappedLexicon {
     /// Gives the decoder the reading term (docs/spec/decoder.md §5): `rd` is built by `engine::load_reading_decode` from this lexicon's
     /// merged `Lexicon` and the data directory, the one function the engine, the evaluation CLI and the replay all call. It is active from here
     /// (`set_reading_active` switches it).
-    pub fn with_reading(mut self, rd: crate::reading::ReadingDecode) -> CappedLexicon {
-        self.reading = Some(rd);
+    /// `rd` is shared, not copied: an engine built from another's loaded parts reuses the same table (`Engine::new_shared`).
+    pub fn with_reading(mut self, rd: impl Into<Arc<crate::reading::ReadingDecode>>) -> CappedLexicon {
+        self.reading = Some(rd.into());
         self
+    }
+
+    /// The reading table this lexicon decodes with, for an engine that shares it.
+    pub fn reading_table(&self) -> Option<&Arc<crate::reading::ReadingDecode>> {
+        self.reading.as_ref()
     }
 
     /// The summary-line tag of the table the decoder adds (`ReadingDecode::tag`), `None` without one or while it is switched off.
@@ -964,6 +985,18 @@ impl CappedLexicon {
     /// no unseen penalty) and score as unknown to the model (`model_id`); the other pack words are capped as in main, except that a word
     /// the model never saw keeps the pack's score instead of losing `UNSEEN_OVERLAY_PENALTY`. An empty `pack_text` is `new`.
     pub fn with_packs(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>) -> Option<CappedLexicon> {
+        Self::with_packs_ceil(base, overlay, pack_text, lm, demote, None)
+    }
+
+    /// `with_packs` with the unseen ceiling (evaluation only, `shanjie-eval --unseen-ceiling K`; the engine passes `None`): a word of a
+    /// generated overlay row (`GENERATED_OVERLAY_TAGS`) that the model never saw is scored `min(score − UNSEEN_OVERLAY_PENALTY, log10(K / N))`,
+    /// so with K < 1 it sits below every word the corpus saw once. The flat score of those rows minus the penalty is otherwise the score of
+    /// a word seen about 4 (2 characters) to 15 (4 characters) times. `None` is `with_packs`, bit for bit.
+    pub fn with_packs_ceil(base: Arc<Lexicon>, overlay: &str, pack_text: &str, lm: &Lm, demote: Option<&Demote>, unseen_ceil: Option<f64>) -> Option<CappedLexicon> {
+        let generated: HashSet<&str> = match unseen_ceil {
+            Some(_) => overlay.lines().filter(|l| l.split('\t').nth(3).is_some_and(|t| GENERATED_OVERLAY_TAGS.contains(&t))).filter_map(|l| l.split('\t').nth(1)).collect(),
+            None => HashSet::new(),
+        };
         let words: HashSet<&str> = overlay.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let pack: HashSet<&str> = pack_text.lines().filter_map(|l| l.split('\t').nth(1)).collect();
         let forced: HashSet<&str> = pack_text.lines().filter(|l| l.split('\t').nth(3) == Some(PACK_OOV_TAG)).filter_map(|l| l.split('\t').nth(1)).collect();
@@ -971,6 +1004,7 @@ impl CappedLexicon {
         let mut ents = base.ents.clone();
         let bits = if pack.is_empty() { 0 } else { ents.len().div_ceil(64) };
         let (mut overlay_bits, mut pack_bits) = (vec![0u64; bits], vec![0u64; bits]);
+        let mut ceil_bits = vec![0u64; if unseen_ceil.is_some() { bits } else { 0 }];
         for i in 0..base.readings.len() {
             let range = base.range(i);
             for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
@@ -981,10 +1015,14 @@ impl CappedLexicon {
                     overlay_bits[p / 64] |= (in_overlay as u64) << (p % 64);
                     pack_bits[p / 64] |= ((in_forced || unseen_pack) as u64) << (p % 64);
                 }
+                let ceil = unseen_ceil.filter(|_| generated.contains(w));
+                if ceil.is_some() && !ceil_bits.is_empty() {
+                    ceil_bits[p / 64] |= 1 << (p % 64);
+                }
                 if in_forced {
                     packs.push((e.off, e.len));
                 } else if in_overlay && !unseen_pack {
-                    e.score = capped_score(lm, e.score, w);
+                    e.score = capped_score(lm, e.score, w, ceil);
                 }
             }
             ents[range].sort_by(|a, b| desc(a.score, b.score));
@@ -1008,7 +1046,7 @@ impl CappedLexicon {
         };
         packs.sort_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize].cmp(&base.words[b.0 as usize..(b.0 + b.1) as usize]));
         packs.dedup_by(|a, b| base.words[a.0 as usize..(a.0 + a.1) as usize] == base.words[b.0 as usize..(b.0 + b.1) as usize]);
-        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, built_for: lm.identity(), reading: None, reading_active: std::sync::atomic::AtomicBool::new(true) })
+        Some(CappedLexicon { index: OnceLock::new(), base, ents, deltas, packs, overlay_bits, pack_bits, unseen_ceil, ceil_bits, built_for: lm.identity(), reading: None, reading_active: std::sync::atomic::AtomicBool::new(true) })
     }
 
     /// Demotion deltas of the entries at positions `range` (usually none): `(position, delta)`.
@@ -1064,7 +1102,7 @@ impl CappedLexicon {
                 let mut l: Vec<(&str, f64)> = range
                     .map(|p| {
                         let (b, w) = (&self.base.ents[p], self.word_of(&self.base.ents[p]));
-                        (w, if bit(&self.overlay_bits, p) { capped_score(lm, b.score, w) } else { b.score })
+                        (w, if bit(&self.overlay_bits, p) { capped_score(lm, b.score, w, self.unseen_ceil.filter(|_| bit(&self.ceil_bits, p))) } else { b.score })
                     })
                     .collect();
                 l.sort_by(|a, b| desc(a.1, b.1));
@@ -1265,7 +1303,89 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND)
+    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None, None)
+}
+
+/// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/spec/decoder.md §4.6: the long-context set and the chat sets were measured with 64).
+pub const RECUR_CHARS: usize = 64;
+/// The weight (log10, the n-gram score's scale) of one recurring adjacent pair on a path. The long-context set's two halves chose 2 and 3, and the
+/// typo reports are 0/0 at 2 (docs/spec/decoder.md §4.6).
+pub const RECUR_BETA: f64 = 2.0;
+/// The extra weight (log10, the n-gram score's scale) of one recurring pair on the n-gram score of a semantic correction pool candidate
+/// (docs/spec/semantic-rerank.md §3.1.1); with the decoder's `RECUR_BETA` a pair weighs 4 there. The exploration slice recur-rerank (research
+/// repository) measured 2 on both long-context development sets.
+pub const POOL_RECUR_GAMMA: f64 = 2.0;
+/// The pool weight applies only when the left context holds at least this many Unicode scalar values after the `RECUR_CHARS` cut
+/// (docs/spec/semantic-rerank.md §3.1.1): at 32 the typo reports were row for row unchanged in the same exploration slice.
+pub const POOL_RECUR_MIN_CHARS: usize = 32;
+
+/// The adjacent character pairs of the left context's last `RECUR_CHARS` characters (both characters Han), and how many scalar values that cut
+/// held. Private fields, no `Debug`/`Display`, no read access to either: what is observable is the number of pairs (`len`) and the pool weight of one
+/// string (`pool_bonus`). `Default` is the empty set of a context of 0 characters.
+#[derive(Default)]
+pub struct RecurGrams {
+    pairs: HashSet<(char, char)>,
+    /// The scalar values of the context after the `RECUR_CHARS` cut (0 to `RECUR_CHARS`); `pool_bonus` compares it with `POOL_RECUR_MIN_CHARS`.
+    chars: usize,
+}
+
+impl RecurGrams {
+    /// The pairs of `text`'s last `RECUR_CHARS` characters of which both characters are Han (`learn::is_han`, the test `context_key` uses).
+    pub fn from_text(text: &str) -> RecurGrams {
+        let cs: Vec<char> = text.chars().rev().take(RECUR_CHARS).collect::<Vec<_>>().into_iter().rev().collect();
+        let han = crate::learn::is_han;
+        RecurGrams { pairs: cs.windows(2).filter(|w| han(w[0]) && han(w[1])).map(|w| (w[0], w[1])).collect(), chars: cs.len() }
+    }
+    /// docs/spec/semantic-rerank.md §3.1.1: what a pool candidate whose shown text is `surface` gains on its n-gram score,
+    /// `POOL_RECUR_GAMMA` times the positions of `surface` whose adjacent pair is in the set, when the context held at least `POOL_RECUR_MIN_CHARS`
+    /// scalar values after the cut; else 0 (an empty set gives 0 too).
+    pub fn pool_bonus(&self, surface: &str) -> f64 {
+        if self.chars < POOL_RECUR_MIN_CHARS {
+            return 0.0;
+        }
+        POOL_RECUR_GAMMA * self.hits(surface) as f64
+    }
+    pub fn len(&self) -> usize {
+        self.pairs.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty()
+    }
+    /// Adjacent pairs of `s` in the set.
+    fn hits(&self, s: &str) -> usize {
+        let mut it = s.chars();
+        let Some(mut p) = it.next() else { return 0 };
+        it.filter(|&c| {
+            let hit = self.pairs.contains(&(p, c));
+            p = c;
+            hit
+        })
+        .count()
+    }
+}
+
+/// docs/spec/semantic-rerank.md §3.1.1: the order of a semantic correction pool after the context recurrence weight. `ng` are the pool's n-gram
+/// scores and `bonus` each candidate's `RecurGrams::pool_bonus`, both in the decoder's order; `masked` is `tinylm::manual_mask` of that same order
+/// (made with the decoder's first candidate as the base; a missing entry is false). `None` (keep the pool as it is) when there are fewer than two
+/// candidates, every bonus is 0, the two lists differ in length, any `ng + bonus` is not finite, or the new first candidate is masked (the weight
+/// never puts a candidate that takes out a manual or protected word first). Else the indices into the decoder's order, best first (`ng + bonus`
+/// descending, ties in the decoder's order: `f64::total_cmp`, then the index, a total order), and the scores `ng + bonus` in that order. The
+/// engine's rerank job and the evaluation CLI both call this one function.
+pub fn pool_order(ng: &[f64], bonus: &[f64], masked: &[bool]) -> Option<(Vec<usize>, Vec<f64>)> {
+    if ng.len() < 2 || ng.len() != bonus.len() || bonus.iter().all(|&b| b == 0.0) {
+        return None;
+    }
+    let s: Vec<f64> = ng.iter().zip(bonus).map(|(a, b)| a + b).collect();
+    if !s.iter().all(|x| x.is_finite()) {
+        return None;
+    }
+    let mut order: Vec<usize> = (0..s.len()).collect();
+    order.sort_by(|&a, &b| s[b].total_cmp(&s[a]).then(a.cmp(&b)));
+    if masked.get(order[0]) == Some(&true) {
+        return None;
+    }
+    let scores = order.iter().map(|&i| s[i]).collect();
+    Some((order, scores))
 }
 
 /// One reading a span's words are looked up under (fuzzy input, docs/spec/decoder.md §6.2).
@@ -1287,23 +1407,35 @@ impl CappedLexicon {
     /// The readings the words of one span are looked up under: the typed reading, then (a span with an unknown syllable, or the
     /// sound pairs in `fuzzy` on) the tolerant ones: words of a reading with one syllable replaced, not already words of the typed
     /// reading, each word at its best score, the best `PER_KEY` over all of them (the research's `tolerant_entries`).
-    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64) -> Vec<Source> {
+    ///
+    /// Then the sandhi source (docs/spec/decoder.md §6.6) when `tone3` holds the span's slice of the position table with a replacement in it: the words of the
+    /// span's sandhi readings (`Lexicon::tone3_pick`), at most `PER_KEY` per reading and `PER_KEY` over all of them, counted apart from the fuzzy ones, each
+    /// `delta` lower once. They are no fuzzy words (`sound` false).
+    fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64, tone3: Option<(&[crate::tone3::Pos], f64)>) -> Vec<Source> {
         let base = &*self.base;
         let exact = base.find(ids);
         let mut out = vec![Source { r: exact, pen: 0.0, names: None, sound: false, picked: Vec::new() }];
-        if fuzzy & crate::fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
-            return out;
-        }
-        let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
-        // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
-        // capped scores and the cap per key.
-        let (readings, words) = base.tolerant_pick(ids, span, fuzzy, PER_KEY, PER_KEY, |p| (self.word_of(&self.ents[p]), self.ents[p].score));
-        for (a, (r, k)) in readings.iter().enumerate() {
-            let picked: Vec<usize> = words.iter().filter(|w| w.3 == a).map(|w| w.2).collect();
-            if !picked.is_empty() {
-                let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
-                out.push(Source { r: Some(*r), pen, names: Some(names), sound: !ids.contains(&u32::MAX), picked });
+        let entry = |p: usize| (self.word_of(&self.ents[p]), self.ents[p].score);
+        let mut put = |readings: Vec<(usize, Vec<u32>)>, words: Vec<(&str, f64, usize, usize)>, pen: f64, sound: bool| {
+            for (a, (r, k)) in readings.iter().enumerate() {
+                let picked: Vec<usize> = words.iter().filter(|w| w.3 == a).map(|w| w.2).collect();
+                if !picked.is_empty() {
+                    let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
+                    out.push(Source { r: Some(*r), pen, names: Some(names), sound, picked });
+                }
             }
+        };
+        if fuzzy & crate::fuzzy::FUZZY_SOUND != 0 || ids.contains(&u32::MAX) {
+            let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
+            // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
+            // capped scores and the cap per key.
+            // An unaccepted syllable of the sandhi table has no adjacent reading (docs/spec/decoder.md §6.6): it is read through the sandhi source only.
+            let (readings, words) = base.tolerant_pick(ids, span, fuzzy, tone3.map_or(&[][..], |t| t.0), PER_KEY, PER_KEY, entry);
+            put(readings, words, pen, !ids.contains(&u32::MAX));
+        }
+        if let Some((t3, delta)) = tone3 {
+            let (readings, words) = base.tone3_pick(ids, t3, PER_KEY, PER_KEY, entry);
+            put(readings, words, delta, false);
         }
         out
     }
@@ -1328,7 +1460,10 @@ pub fn decode_segment_fuzzy<'a>(
     demote: bool,
     fuzzy: u32,
     delta_sound: f64,
+    recur: Option<&RecurGrams>,
+    tone3: Option<(&[crate::tone3::Pos], f64)>,
 ) -> Result<Vec<Scored<'a>>, Error> {
+    let recur = recur.filter(|r| !r.is_empty());
     let base = &*lex.base;
     // New words are 2..=NEWWORD_MAX syllables and their reading may be no lexicon reading at all.
     let fresh_on = learn.filter(|ln| ln.learner.has_new_words());
@@ -1366,7 +1501,8 @@ pub fn decode_segment_fuzzy<'a>(
             if hyps[i - l].is_empty() {
                 continue;
             }
-            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound) {
+            let t3 = tone3.and_then(|(t, d)| Some((t.get(i - l..i)?, d)));
+            for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound, t3) {
                 let found = src.r;
                 // A tolerant source is learned under its lexicon reading (docs/spec/decoder.md §6.2): a pick of its word was recorded there.
                 let span = src.names.as_deref().unwrap_or(&syls[i - l..i]);
@@ -1447,6 +1583,8 @@ pub fn decode_segment_fuzzy<'a>(
                 let items = entries.into_iter().map(|(p, extra)| (Some(p), extra, lex.word_of(&lex.ents[p]), lex.ents[p].score));
                 for (p, extra, word, lp0) in items.chain(fresh.iter().map(|&(w, lp)| (None, false, w, lp))) {
                     let (wid, pb0) = (lex.model_id(lm, word), pow10(lp0));
+                    // Context recurrence (docs/spec/decoder.md §4.6): the pairs inside the word, once per word.
+                    let (in_word, first) = recur.map_or((0, None), |r| (r.hits(word), word.chars().next()));
                     // The tolerance penalty rides in the delta (subtracted from the word's term, kept in the path), so that
                     // `Engine::total_score` and the rerank job see the score the decoder used.
                     let delta = p.and_then(|p| dl.iter().find(|&&(q, _)| q == p)).map_or(0.0, |x| x.1) + src.pen;
@@ -1507,6 +1645,14 @@ pub fn decode_segment_fuzzy<'a>(
                         }
                         // The reading term (R1) rides on every path of every `Sinit` mode, a lifted word included (`was_boosted` is set only by a learned boost):
                         // it is the same in the lifted and the unlifted score, so the marker's gain above is the whole difference.
+                        // The recurrence gain rides in the delta as a negative part, like the tolerance penalty above (`Engine::total_score` and the rerank
+                        // job read the delta), so the path score, `total_score` and the pool's n-gram scores all hold it. Pairs inside the word and
+                        // across the boundary with the hypothesis's text (none for the first word of the segment).
+                        let delta = match (recur, first, h.surface.chars().next_back()) {
+                            (Some(r), Some(f), Some(l)) => delta - RECUR_BETA * (in_word + usize::from(r.pairs.contains(&(l, f)))) as f64,
+                            (Some(_), ..) => delta - RECUR_BETA * in_word as f64,
+                            _ => delta,
+                        };
                         let sc = h.score + (term - delta) + if was_boosted { 0.0 } else { rd_term };
                         let before = if tri_on { h.words.last().map_or(start, |w| w.0) } else { "" };
                         let key = (format!("{}{word}", h.surface), before, word);
@@ -1604,7 +1750,7 @@ pub fn decode_from(
     start: &str,
     demote: bool,
 ) -> Result<Vec<(f64, Vec<String>)>, Error> {
-    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND)?
+    Ok(decode_from_fuzzy_scored(lex, syls, lm, profile, beam, start, demote, 0, crate::fuzzy::DELTA_SOUND, None, None)?
         .into_iter()
         .map(|(s, ws)| (s, ws.into_iter().map(|(w, ..)| w.to_string()).collect()))
         .collect())
@@ -1612,7 +1758,8 @@ pub fn decode_from(
 
 /// `decode_from` with the fuzzy flags of `decode_segment_fuzzy` (the evaluation CLI's `--fuzzy`) and its fuzzy-sound penalty `delta_sound`
 /// (the CLI's evaluation-only `--fuzzy-delta-sound`; `fuzzy::DELTA_SOUND` by default), and the paths as the decoder has them, fuzzy-word
-/// markers included (what `rerank_pool` reads).
+/// markers included (what `rerank_pool` reads). `tone3`: the position table of `syls` (`tone3::positions`) and the sandhi penalty (`tone3::DELTA_TONE3`
+/// unless the CLI's evaluation-only option changes it), `None` for the switch off (docs/spec/decoder.md §6.6).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_from_fuzzy_scored<'a>(
     lex: &'a CappedLexicon,
@@ -1624,8 +1771,10 @@ pub fn decode_from_fuzzy_scored<'a>(
     demote: bool,
     fuzzy: u32,
     delta_sound: f64,
+    recur: Option<&RecurGrams>,
+    tone3: Option<(&[crate::tone3::Pos], f64)>,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound)
+    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound, recur, tone3)
 }
 
 #[cfg(test)]
@@ -1782,6 +1931,126 @@ mod tests {
         assert_eq!(bits(&on), bits(&off));
         on.set_reading_active(true);
         assert_ne!(bits(&on), bits(&off));
+    }
+
+    /// `RecurGrams::from_text` keeps only pairs of two Han characters out of the last `RECUR_CHARS` scalar values.
+    #[test]
+    fn recur_grams_hold_the_han_pairs_of_the_last_64_chars() {
+        let n = |t: &str| RecurGrams::from_text(t).len();
+        assert!(RecurGrams::from_text("").is_empty());
+        assert!(RecurGrams::from_text("甲").is_empty());
+        assert_eq!(n("甲乙"), 1);
+        // ASCII, digits, punctuation and an emoji break the pairs; a 4-byte Han character (U+20000) is one character.
+        assert_eq!(n("甲a乙丙1丁，戊😀己\u{20000}庚"), 3, "乙丙, 己𠀀 and 𠀀庚");
+        // Only the last 64 characters are read: 64 distinct Han characters give at most 63 pairs, a first one outside them is not a pair.
+        let han: String = (0..70).map(|i| char::from_u32(0x4E00 + i).unwrap()).collect();
+        assert_eq!(n(&han), 63);
+        let g = RecurGrams::from_text(&han);
+        assert!(!g.pairs.contains(&('\u{4E00}', '\u{4E01}')) && g.pairs.contains(&('\u{4E06}', '\u{4E07}')));
+    }
+
+    /// docs/spec/semantic-rerank.md §3.1.1: the pool weight is `POOL_RECUR_GAMMA` per recurring position of the string, only for a context of at least
+    /// `POOL_RECUR_MIN_CHARS` scalar values after the `RECUR_CHARS` cut (counted in scalar values: an emoji of five is five); an empty set gives 0.
+    #[test]
+    fn pool_bonus_needs_32_scalar_values_and_counts_positions() {
+        let ctx = |n: usize| RecurGrams::from_text(&format!("{}甲乙", "a".repeat(n - 2)));
+        assert_eq!((POOL_RECUR_GAMMA, POOL_RECUR_MIN_CHARS), (2.0, 32));
+        assert_eq!(ctx(31).pool_bonus("甲乙"), 0.0, "31 scalar values");
+        assert_eq!(ctx(32).pool_bonus("甲乙"), POOL_RECUR_GAMMA);
+        assert_eq!(ctx(32).pool_bonus("甲乙甲乙"), 2.0 * POOL_RECUR_GAMMA, "two positions (乙甲 is not in the set)");
+        assert_eq!(ctx(32).pool_bonus("丙丁"), 0.0);
+        assert_eq!(ctx(32).pool_bonus(""), 0.0);
+        // A long text: only the last 64 count, and they are 64 >= 32.
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}", "丙".repeat(70))).pool_bonus("甲乙"), 0.0, "the pair was cut off");
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}", "a".repeat(62))).pool_bonus("甲乙"), POOL_RECUR_GAMMA, "64 after the cut");
+        // An empty set, however long the context.
+        let ascii = RecurGrams::from_text(&"a".repeat(40));
+        assert!(ascii.is_empty());
+        assert_eq!(ascii.pool_bonus("甲乙"), 0.0);
+        assert_eq!(RecurGrams::default().pool_bonus("甲乙"), 0.0);
+        // Scalar values, not grapheme clusters: a family emoji (man ZWJ woman ZWJ girl) is five.
+        let fam = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        assert_eq!(fam.chars().count(), 5);
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}", fam.repeat(6))).pool_bonus("甲乙"), POOL_RECUR_GAMMA, "2 + 30");
+        assert_eq!(RecurGrams::from_text(&format!("甲乙{}aaaa", fam.repeat(5))).pool_bonus("甲乙"), 0.0, "2 + 29");
+    }
+
+    /// `pool_order`: by `ng + bonus` descending, ties in the decoder's order; `None` for every case the pool stays as it is, never a panic.
+    #[test]
+    fn pool_order_sorts_stably_and_refuses_what_it_cannot_order() {
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[]), Some((vec![1, 0, 2], vec![0.0, -1.0, -3.0])));
+        // Ties keep the decoder's order (2 and 0 tie at -1, 1 and 3 at -2).
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0, -2.0], &[0.0, 0.0, 2.0, 0.0], &[]).unwrap().0, [0, 2, 1, 3]);
+        // A weight that leaves the order as it is still gives the new scores.
+        assert_eq!(pool_order(&[-1.0, -2.0], &[2.0, 0.0], &[]), Some((vec![0, 1], vec![1.0, -2.0])));
+        assert_eq!(pool_order(&[-1.0, -2.0], &[0.0, 0.0], &[]), None, "every weight 0");
+        assert_eq!(pool_order(&[-1.0, -2.0], &[-0.0, 0.0], &[]), None, "-0 is 0");
+        assert_eq!(pool_order(&[-1.0], &[2.0], &[]), None, "one candidate");
+        assert_eq!(pool_order(&[], &[], &[]), None);
+        assert_eq!(pool_order(&[-1.0, -2.0], &[0.0, 2.0, 0.0], &[]), None, "lengths differ");
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0], &[]), None, "lengths differ");
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(pool_order(&[-1.0, bad, -3.0], &[0.0, 2.0, 0.0], &[]), None, "ng {bad}");
+            assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, bad, 0.0], &[]), None, "bonus {bad}");
+        }
+        assert_eq!(pool_order(&[f64::MAX, -2.0], &[f64::MAX, 0.0], &[]), None, "overflows to infinity");
+        // The new first is masked: not reordered. A masked candidate elsewhere does not matter.
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[false, true, false]), None);
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[false, false, true]).unwrap().0, [1, 0, 2]);
+        assert_eq!(pool_order(&[-1.0, -2.0, -3.0], &[0.0, 2.0, 0.0], &[false]).unwrap().0, [1, 0, 2], "a missing entry is false");
+    }
+
+    /// The recurrence term: a pair inside a word or across a word boundary of the path counts, the first word of a segment has no boundary,
+    /// and `None` or an empty set is bit for bit the decoder without the argument.
+    #[test]
+    fn recurrence_term_reorders_homophones_and_none_is_the_old_decode() {
+        let lm = Lm::parse(&tiny()).unwrap();
+        let decode = |lex: &str, syls: &[&str], g: Option<&RecurGrams>| {
+            let lex = Arc::new(Lexicon::parse(lex).unwrap());
+            let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+            let syls: Vec<String> = syls.iter().map(|s| s.to_string()).collect();
+            let r = decode_segment_fuzzy(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true, 0, crate::fuzzy::DELTA_SOUND, g, None).unwrap();
+            r.into_iter().map(|(s, ws)| (s, ws.iter().map(|w| w.0.to_string()).collect::<String>(), ws.iter().map(|w| w.2).sum::<f64>())).collect::<Vec<_>>()
+        };
+        let text = |r: &[(f64, String, f64)]| -> Vec<String> { r.iter().map(|x| x.1.clone()).collect() };
+        // Inside a word: two two-syllable homophones of equal score.
+        let within = "ㄧ-ㄨ 甲丙 -1.0\nㄧ-ㄨ 乙丁 -1.0\n";
+        let (a, b) = (RecurGrams::from_text("乙丁"), RecurGrams::from_text("甲丙"));
+        assert_eq!(text(&decode(&within, &["ㄧ", "ㄨ"], Some(&a)))[0], "乙丁");
+        assert_eq!(text(&decode(&within, &["ㄧ", "ㄨ"], Some(&b)))[0], "甲丙");
+        // A pair counts at every position it stands: 乙丁乙丁 gains two RECUR_BETA (丁乙 is not in the set).
+        let twice = decode(within, &["ㄧ", "ㄨ", "ㄧ", "ㄨ"], Some(&a));
+        let plain = decode(within, &["ㄧ", "ㄨ", "ㄧ", "ㄨ"], None);
+        assert_eq!(twice[0].1, "乙丁乙丁");
+        let gain = twice[0].0 - plain.iter().find(|x| x.1 == "乙丁乙丁").unwrap().0;
+        assert!((gain - 2.0 * RECUR_BETA).abs() < 1e-9, "two positions, two RECUR_BETA: {gain}");
+        // Across a boundary only: one-syllable words, the pair (乙, 丙) joins two words.
+        let across = "ㄧ 甲 -1.0\nㄧ 乙 -1.0\nㄨ 丙 -1.0\nㄨ 丁 -1.0\n";
+        let g = RecurGrams::from_text("乙丙");
+        let r = decode(across, &["ㄧ", "ㄨ"], Some(&g));
+        assert_eq!(text(&r)[0], "乙丙");
+        let plain = decode(across, &["ㄧ", "ㄨ"], None);
+        let gain = r[0].0 - plain.iter().find(|x| x.1 == "乙丙").unwrap().0;
+        assert!((gain - RECUR_BETA).abs() < 1e-9, "one pair, one RECUR_BETA: {gain}");
+        // The path's delta holds the gain (what `Engine::total_score` and the rerank job read).
+        assert!((r[0].2 + RECUR_BETA).abs() < 1e-9);
+        // The first word of the segment has nothing on its left: a pair (乙, 丙) does not help 丙 alone, nor 乙 count a left neighbour.
+        let single = "ㄨ 丙 -1.0\nㄨ 丁 -1.0\n";
+        let before = decode(single, &["ㄨ"], None);
+        let after = decode(single, &["ㄨ"], Some(&RecurGrams::from_text("乙丙")));
+        assert_eq!(before.iter().map(|r| r.0.to_bits()).collect::<Vec<_>>(), after.iter().map(|r| r.0.to_bits()).collect::<Vec<_>>());
+        // None and an empty set: the old arithmetic, bit for bit.
+        let bits = |r: &[(f64, String, f64)]| r.iter().map(|(s, w, d)| (s.to_bits(), w.clone(), d.to_bits())).collect::<Vec<_>>();
+        let old = bits(&decode(across, &["ㄧ", "ㄨ"], None));
+        assert_eq!(old, bits(&decode(across, &["ㄧ", "ㄨ"], Some(&RecurGrams::from_text("")))));
+        assert_eq!(old, bits(&decode(across, &["ㄧ", "ㄨ"], Some(&RecurGrams::from_text("乙")))));
+        // The old entry point is the same decode.
+        let lex = Arc::new(Lexicon::parse(across).unwrap());
+        let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
+        let syls = ["ㄧ".to_string(), "ㄨ".to_string()];
+        let wrapped = decode_segment_learned(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true).unwrap();
+        let wrapped: Vec<_> = wrapped.into_iter().map(|(s, ws)| (s, ws.iter().map(|w| w.0.to_string()).collect::<String>(), ws.iter().map(|w| w.2).sum::<f64>())).collect();
+        assert_eq!(old, bits(&wrapped));
     }
 
     /// 4.3: classes.sjc must be this model's (SHA-256), with the right magic and exact length; the parse never panics.
@@ -2248,7 +2517,7 @@ mod tests {
         let lm = Lm::parse(&tiny()).unwrap();
         let lex = Arc::new(Lexicon::parse(lex_text).unwrap());
         let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse(demote).unwrap())).unwrap();
-        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND)
+        decode_from_fuzzy_scored(&capped, &[syl.to_string()], &lm, Profile::Chat, 64, "<s>", true, flags, crate::fuzzy::DELTA_SOUND, None, None)
             .unwrap()
             .into_iter()
             .map(|(_, ws)| (ws[0].0.to_string(), ws[0].2, ws[0].4))
@@ -2290,11 +2559,11 @@ mod tests {
         let lex = Arc::new(Lexicon::parse(&text).unwrap());
         let capped = CappedLexicon::new(lex.clone(), "", &lm, None).unwrap();
         let syls = vec!["ㄗ".to_string()];
-        let window: Vec<&str> = lex.tolerant_words(&syls, 0b0010).into_iter().map(|(w, _)| w).collect();
+        let window: Vec<&str> = lex.tolerant_words(&syls, 0b0010, &[]).into_iter().map(|(w, _)| w).collect();
         assert_eq!(window.len(), 14, "the window lists every tolerant word: {window:?}");
         assert!(!window.contains(&"乙"), "a word of the typed reading is not a tolerant one");
         let picked: Vec<&str> = capped
-            .sources(&lex.ids(&syls), &syls, 0b0010, crate::fuzzy::DELTA_SOUND)
+            .sources(&lex.ids(&syls), &syls, 0b0010, crate::fuzzy::DELTA_SOUND, None)
             .iter()
             .flat_map(|src| src.picked.iter().map(|&p| capped.word_of(&capped.ents[p])))
             .collect();

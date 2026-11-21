@@ -76,7 +76,9 @@ fn the_switches_take_on_or_off() {
 /// Recall mode: every word of eval/golden/english-tiny.txt typed letter by letter on an engine of its own, then Space. The first revert of
 /// the six words is (a) four times (google, dip, hello, rust: a key over a symbol in its column), (b) once (law: `a`, the initial, after the
 /// final `l`) and (c) once (cup: typed in order, and the syllable ㄏㄧㄣ is missing at Space); every one ends as one English token equal
-/// to the word. With both switches off only (c) is left, and `cup` is the one word that ends as a token.
+/// to the word. With both switches off only (c) is left: four words revert at Space (their columns make no syllable) and each is the whole
+/// word, because the token is the key record, the replaced keys included (docs/spec/english-mixed.md §2; it was 1, `cup`, while the token
+/// was the keys left in the columns); the other two end as Chinese.
 #[test]
 fn recall_counts_the_classes_and_the_probes() {
     let sha = "d4907dc4b4fffa8c0f450e3321b0837d90447af45747ef0cb49fee12fd9cbd80";
@@ -96,7 +98,7 @@ fn recall_counts_the_classes_and_the_probes() {
         assert_eq!(*line, format!("probe\t{w}\t{what}"));
     }
     let off = run(&["--words", LIST, "--recall", "--overwrite", "off", "--key-order", "off"]);
-    assert_eq!(off.lines().next().unwrap(), format!("{sha}\t6\t1\t0\t0\t4\t2"));
+    assert_eq!(off.lines().next().unwrap(), format!("{sha}\t6\t4\t0\t0\t4\t2"));
     assert!(off.contains("probe\tcup\ttoken\n") && off.contains("probe\tgo\ttoken\n") && off.contains("probe\tok\t中文\n"), "{off}");
 }
 
@@ -133,16 +135,21 @@ fn digits_columns() {
     let rows = dir.join("rows.txt");
     std::fs::write(&rows, "|蛋|ㄉㄢˋ\n|八|ㄅㄚ\n|百|ㄅㄞˇ\n").unwrap();
     let rows = rows.to_str().unwrap();
-    let go = |p: &str, repair: &str| run(&["--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair]);
+    let go = |p: &str, repair: &str| run(&["--rows", rows, "--digits", "--repeat", "2", "--p", p, "--repair", repair, "--auto-english", "off"]);
     let sha = "1265d1e6ad6805a31af90872f00b75447742d3a261cdfab90a0073fd6d30d348";
     let zeros = "0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000";
-    assert_eq!(go("0", "overwrite"), format!("{sha}\t3\t3\t24\t0\t{zeros}\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\n"));
-    assert_eq!(go("0.3", "backspace"), format!("{sha}\t3\t3\t34\t5\t{zeros}\t0.000\t0.000\t333.333\t666.667\t0.000\t0.000\n"));
+    assert_eq!(go("0", "overwrite"), format!("{sha}\t3\t3\t24\t0\t{zeros}\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0.000\t0\n"));
+    assert_eq!(go("0.3", "backspace"), format!("{sha}\t3\t3\t34\t5\t{zeros}\t0.000\t0.000\t333.333\t666.667\t0.000\t0.000\t0.000\t0.000\t0\n"));
     let over = go("0.3", "overwrite");
-    assert_eq!(over, format!("{sha}\t3\t3\t29\t5\t{zeros}\t2666.667\t4000.000\t2333.333\t3666.667\t0.000\t0.000\n"));
+    assert_eq!(over, format!("{sha}\t3\t3\t29\t5\t{zeros}\t2666.667\t4000.000\t2333.333\t3666.667\t0.000\t0.000\t0.000\t0.000\t0\n"));
     assert_eq!(go("0.3", "overwrite"), over, "the output depends on nothing but the arguments");
-    // `--digits` is for the typing mode, and `--lm` goes with it.
-    assert!(fails(&["--words", LIST, "--recall", "--digits"]));
+    // `--lm` goes with `--digits`; recall with `--digits` types the words on this engine and prints a fifth class (the comparison's) after `none`.
+    assert!(fails(&["--words", LIST, "--recall", "--lm", "x"]));
+    let plain = run(&["--words", LIST, "--recall", "--overwrite", "off", "--reversal-guard", "on"]);
+    let full = run(&["--words", LIST, "--recall", "--overwrite", "off", "--reversal-guard", "on", "--digits", "--auto-english", "off"]);
+    let (head, head5) = (plain.lines().next().unwrap(), full.lines().next().unwrap());
+    assert_eq!((head.split('\t').count(), head5.split('\t').count()), (7, 8));
+    assert!(head5.ends_with("\t0"), "no comparison with the switch off: {head5}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -157,11 +164,11 @@ fn digits_backspace_repair_reads_the_screen() {
     std::fs::write(&rows, "|不|ㄅㄨˋ\n".repeat(100)).unwrap();
     let out = run(&["--rows", rows.to_str().unwrap(), "--digits", "--repeat", "2", "--p", "0.5", "--repair", "backspace"]);
     let c: Vec<&str> = out.trim_end().split('\t').collect();
-    assert_eq!(c.len(), 21, "{c:?}");
+    assert_eq!(c.len(), 24, "{c:?}");
     assert_eq!(c[15..17], ["0.000", "0.000"], "no digit left in what the rows commit: {c:?}");
     let (shown, extra): (f64, f64) = (c[17].parse().unwrap(), c[19].parse().unwrap());
     assert!(shown > 0.0 && extra > 0.0, "premise: slips made digit tokens that cost an extra Backspace: {c:?}");
-    assert_eq!(c[19..], ["535.000", "570.000"], "{c:?}");
+    assert_eq!(c[19..21], ["535.000", "570.000"], "{c:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -203,5 +210,172 @@ fn a_row_that_keeps_reverting_is_stopped_and_the_run_goes_on() {
     // The same run with the default retries stops nothing and writes nothing about rows.
     let (ok, stdout, stderr) = go("3");
     assert!(ok && !stderr.contains("stopped") && stdout.split('\t').count() == 15, "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--keys` (the reversal-digits probe, docs/spec/english-mixed.md §13.3): the engine as the App builds it, three fixed lines, ten columns each (the tenth, the decision points of docs/spec/english-mixed.md §16, is empty for the first two; `wlu6` closes at a decision point: one key out of column order).
+/// The lines: `.u3` (a hurried ㄧㄡˇ: the digit layer first reads `.` as a digit, one token, and the syllable takes it back at the tone key: `有`; the engine
+/// before the column-order rule gave `.以`), `8su06` after the prefix `ji3` (one unit before, then the digit and ㄋㄧㄢˊ), `wlu6` (a hurried ㄊㄧㄠˊ, which
+/// only the reversal guard keeps from becoming English).
+#[test]
+fn keys_probe_columns() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-keys-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("keys.tsv");
+    std::fs::write(&input, "a1\t\t\t.u3\na2\t\tji3\t8su06\na3\t\t\twlu6\n").unwrap();
+    let (input, out) = (input.to_str().unwrap(), dir.join("out.tsv"));
+    let o = out.to_str().unwrap();
+    let sha = run(&["--keys", input, "--out", o]);
+    assert_eq!(sha, "a649b13673ecaf5af43fcbff500b2072c85b4e31cbffe6c12a381eabf0909db7\t3\n");
+    let want = "a1\t0\tㄧㄡˇ\t\t0\t\t0\t1\t有\t\na2\t1\t_punct_8 ㄋㄧㄢˊ\t\t0\t\t0\t1\t我8年\t\na3\t0\tㄊㄧㄠˊ\t\t0\t\t0\t0\t條\t3:0,0,1\n";
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), want);
+    // An existing output is never overwritten.
+    assert!(fails(&["--keys", input, "--out", o]));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), want);
+    // The switches default to the App's: the same output with them spelled out, a different one with the guard off (`wlu6` reverts to English).
+    let (spelled, off) = (dir.join("spelled.tsv"), dir.join("off.tsv"));
+    run(&["--keys", input, "--out", spelled.to_str().unwrap(), "--overwrite", "off", "--key-order", "on", "--reversal-guard", "on"]);
+    assert_eq!(std::fs::read_to_string(&spelled).unwrap(), want);
+    // `--rho` sets the two penalties: the constants (7, 4) give the bytes no option gives; with 0 the rejoin is free, and `8g4` (8是 with the constants) is read as ㄕㄚˋ
+    // (煞) with the 8 taken back; a bad value is refused.
+    let (rho74, rho0, one) = (dir.join("rho74.tsv"), dir.join("rho0.tsv"), dir.join("one.tsv"));
+    run(&["--keys", input, "--out", rho74.to_str().unwrap(), "--rho", "7,4"]);
+    assert_eq!(std::fs::read_to_string(&rho74).unwrap(), want, "--rho 7,4 is the constants");
+    std::fs::write(&one, "r1\t\t\t8g4\n").unwrap();
+    run(&["--keys", one.to_str().unwrap(), "--out", rho0.to_str().unwrap(), "--rho", "0,0"]);
+    assert_eq!(std::fs::read_to_string(&rho0).unwrap(), "r1\t0\tㄕㄚˋ\t\t0\t\t0\t1\t煞\t\n", "--rho 0,0");
+    for bad in ["8", "8,", "x,4", "-1,4", "8,inf", "8,4,2"] {
+        assert!(fails(&["--keys", input, "--out", dir.join("bad.tsv").to_str().unwrap(), "--rho", bad]), "--rho {bad}");
+    }
+    assert!(fails(&["--rows", input, "--rho", "7,4"]));
+    run(&["--keys", input, "--out", off.to_str().unwrap(), "--reversal-guard", "off"]);
+    assert!(std::fs::read_to_string(&off).unwrap().ends_with("a3\t0\t\t\t4\t2:b\t0\t0\twlu6\t\n"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--swap` and `--tone-early` (docs/spec/english-mixed.md §13.3): hurried syllables through the App's engine (`--digits`), one more column at the end, the hurried
+/// syllables after which the composition's last unit is not the syllable, per 1000 syllables of the rows (mean over the seeds). Four rows: 有 ㄧㄡˇ, 爬 ㄆㄚˊ,
+/// 頭 ㄊㄡˊ, 他 ㄊㄚ (tone 1: no tone key to press early). Every syllable swapped (`--swap 1`): all four come out as typed in order with the guard on, none with it off.
+/// Every tone key early (`--tone-early 1`, three syllables): 爬 and 頭 come back, 有 does not (ㄧˇ is a syllable of its own, so no English revert for the next key
+/// to undo): 250 per 1000. The columns before are the ones of `--digits`.
+#[test]
+fn hurried_syllables_column() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-hurried", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|有|ㄧㄡˇ\n|爬|ㄆㄚˊ\n|頭|ㄊㄡˊ\n|他|ㄊㄚ\n").unwrap();
+    let rows = rows.to_str().unwrap();
+    let sha = "9301720785562ee7cef6718d4e426bc93e6e11f4f74478b997593c3341ece987";
+    let go = |extra: &[&str]| {
+        let mut a = vec!["--rows", rows, "--digits", "--overwrite", "off", "--reversal-guard", "on", "--p", "0", "--repeat", "3", "--auto-english", "off"];
+        a.extend(extra);
+        run(&a)
+    };
+    let z = "0.000\t0.000";
+    // rows syllables keys typos | revert a, b, c, split, english_final | digits final, shown, extra | hurried_bad | auto_english (a mean and a max), auto_points
+    assert_eq!(go(&["--swap", "1"]), format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t{z}\t{z}\t{z}\t{z}\t2000.000\t2000.000\t{z}\t0.000\t{z}\t0\n"));
+    assert_eq!(go(&["--tone-early", "1"]), format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t500.000\t500.000\t{z}\t{z}\t{z}\t{z}\t{z}\t250.000\t{z}\t0\n"));
+    assert_eq!(
+        go(&["--swap", "1", "--reversal-guard", "off"]),
+        format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t500.000\t500.000\t{z}\t{z}\t{z}\t2000.000\t2000.000\t{z}\t1000.000\t{z}\t0\n")
+    );
+    assert_eq!(go(&["--swap", "0.5", "--tone-early", "0.5"]), format!("{sha}\t4\t4\t48\t0\t{z}\t{z}\t166.667\t250.000\t{z}\t{z}\t{z}\t1333.333\t1500.000\t{z}\t0.000\t{z}\t0\n"));
+    // Without both options the line has no extra column; the options are for the typing mode and between 0 and 1.
+    assert_eq!(go(&[]).matches('\t').count(), 4 + 10 + 6 + 3);
+    assert!(fails(&["--words", LIST, "--recall", "--swap", "0.5"]));
+    assert!(fails(&["--rows", rows, "--swap", "1.5"]));
+    std::fs::remove_dir_all(std::path::Path::new(rows).parent().unwrap()).unwrap();
+}
+
+// ---- docs/spec/english-mixed.md §16: English or Zhuyin at the closing key ----
+
+const AUTO_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../core/tests/fixtures/english-tiny.tsv");
+
+/// The comparison in the typing mode: 400 rows of ㄍㄜ (keys `e k`), p 0.02, mistakes mended by overwriting. A mended slip leaves the keys `wek`, `rek`
+/// or `elk` over the syllable: a decision point. The table here has rows for those three strings, and theta -100 lets English win every comparison, so
+/// `auto_english` is positive; with the core switch off, or without a table, it is 0 and the decision points are counted all the same. The simulator
+/// takes each English back with one Esc: no row is left with English in it. The constants spelled out give the bytes no option gives.
+#[test]
+fn auto_english_columns() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-auto", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (rows, table) = (dir.join("rows.txt"), dir.join("english.tsv"));
+    std::fs::write(&rows, "|哥|ㄍㄜ\n".repeat(400)).unwrap();
+    std::fs::write(&table, "T\t100000\nN\t3000\nA\t0\nE\twek\t1000\nE\trek\t1000\nE\telk\t1000\n").unwrap();
+    let (rows, table) = (rows.to_str().unwrap(), table.to_str().unwrap());
+    let go = |extra: &[&str]| {
+        let mut a = vec!["--rows", rows, "--digits", "--p", "0.02", "--repair", "overwrite", "--overwrite", "off", "--key-order", "on", "--reversal-guard", "on", "--repeat", "2"];
+        a.extend(extra);
+        let out = run(&a);
+        let c: Vec<String> = out.trim_end().split('\t').map(String::from).collect();
+        assert_eq!(c.len(), 24, "{c:?}");
+        (out, c)
+    };
+    let (_, forced) = go(&["--auto-table", table, "--auto-theta", "-100"]);
+    let (mean, max, points): (f64, f64, u64) = (forced[21].parse().unwrap(), forced[22].parse().unwrap(), forced[23].parse().unwrap());
+    assert!(mean > 0.0 && max >= mean && points > 0, "{forced:?}");
+    assert_eq!(forced[13..15], ["0.000", "0.000"], "every English was taken back: {forced:?}");
+    let (_, off) = go(&["--auto-table", table, "--auto-theta", "-100", "--auto-english", "off"]);
+    assert_eq!((&off[21..23], &off[23]), (&["0.000".to_string(), "0.000".to_string()][..], &forced[23]), "{off:?}");
+    let (_, none) = go(&["--auto-theta", "-100", "--auto-english", "off"]);
+    assert_eq!(none[5..], off[5..], "the switch off is the same with or without --auto-table (the data folder's own table is loaded but off)");
+    // The constants (core/src/english_auto.rs: theta 1, kappa 2, kappa_dup 3) as options change no byte.
+    let (plain, _) = go(&["--auto-table", table]);
+    let (spelled, _) = go(&["--auto-table", table, "--auto-english", "on", "--auto-theta", "1", "--auto-kappa", "2", "--auto-kappa-dup", "3"]);
+    assert_eq!(plain, spelled);
+    // The options need the engine with a model, a finite number, on or off, and a table that parses.
+    assert!(fails(&["--rows", rows, "--auto-theta", "1"]));
+    for bad in [&["--auto-theta", "x"][..], &["--auto-kappa", "inf"], &["--auto-kappa-dup", "nan"], &["--auto-english", "maybe"], &["--auto-table", rows]] {
+        let mut a = vec!["--rows", rows, "--digits"];
+        a.extend(bad);
+        assert!(fails(&a), "{bad:?}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `--keys` with the comparison (the fixture table, the constants): `speech_` is the English token, key 6 (the Space) marked `e`, and the tenth column
+/// names the decision point with its counts; with the core switch off it is the Chinese syllable and still a decision point (how the probe builder
+/// finds its rows). After 我們用 the same.
+#[test]
+fn keys_probe_auto_english() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-keys-auto-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("keys.tsv");
+    std::fs::write(&input, "p1\t\t\tspeech_\np2\t我們用\t\tspeech_\np3\t\t\tai_\n").unwrap();
+    let input = input.to_str().unwrap();
+    let (on, off) = (dir.join("on.tsv"), dir.join("off.tsv"));
+    run(&["--keys", input, "--out", on.to_str().unwrap(), "--auto-table", AUTO_FIXTURE]);
+    assert_eq!(
+        std::fs::read_to_string(&on).unwrap(),
+        "p1\t0\t_punct_speech\t\t0\t6:e\t0\t0\tspeech\t6:4,1,0\np2\t0\t_punct_speech\t\t0\t6:e\t0\t0\tspeech\t6:4,1,0\np3\t0\tㄇㄛ\t\t0\t\t0\t0\t摸\t\n"
+    );
+    run(&["--keys", input, "--out", off.to_str().unwrap(), "--auto-table", AUTO_FIXTURE, "--auto-english", "off"]);
+    let off = std::fs::read_to_string(&off).unwrap();
+    let rows: Vec<Vec<&str>> = off.lines().map(|l| l.split('\t').collect()).collect();
+    assert!(rows.len() == 3 && rows.iter().all(|r| r.len() == 10));
+    assert_eq!((rows[0][2], rows[0][5], rows[0][9]), ("ㄘㄣ", "", "6:4,1,0"));
+    assert_eq!((rows[1][2], rows[1][5], rows[1][9]), ("ㄘㄣ", "", "6:4,1,0"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `shanjie-eval` itself takes the four options and checks them; decoding rows has no closing key, so the output does not change.
+#[test]
+fn the_main_mode_takes_the_options_and_changes_nothing() {
+    let dir = std::env::temp_dir().join(format!("shanjie-english-sim-{}-main", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|今天天氣很好|ㄐㄧㄣ ㄊㄧㄢ ㄊㄧㄢ ㄑㄧˋ ㄏㄣˇ ㄏㄠˇ\n").unwrap();
+    let eval = |extra: &[&str]| {
+        let mut a = vec!["--lm", "data/lm/bigram.sjlm", "--rows", rows.to_str().unwrap(), "--profile", "chat"];
+        a.extend(extra);
+        Command::new(env!("CARGO_BIN_EXE_shanjie-eval")).args(&a).current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).output().unwrap()
+    };
+    let base = eval(&[]);
+    assert!(base.status.success() && !base.stdout.is_empty());
+    let with = eval(&["--auto-english", "off", "--auto-theta", "1", "--auto-kappa", "1.5", "--auto-kappa-dup", "0"]);
+    assert!(with.status.success() && with.stdout == base.stdout);
+    for bad in [&["--auto-english", "yes"][..], &["--auto-theta", "x"], &["--auto-kappa"], &["--auto-kappa-dup", "inf"]] {
+        assert!(!eval(bad).status.success(), "{bad:?}");
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

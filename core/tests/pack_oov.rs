@@ -255,3 +255,28 @@ fn unforced_pack_words_are_capped_as_in_main_except_the_unseen_penalty() {
     assert_eq!(forced.model_id(&lm, "占"), None);
     assert_eq!(forced.best_lp(&syls("ㄓㄢˋ"), "占"), Some(-0.05));
 }
+
+/// `with_packs_ceil` (evaluation only, `shanjie-eval --unseen-ceiling K`): a never-seen word of a generated overlay row (`wikt`) is scored
+/// `min(score − 1, log10(K / N))`; a never-seen word of a hand-kept row (`slang`), a seen word, and every score without the option stay as they are,
+/// and the ceiling never raises a score.
+#[test]
+fn unseen_ceiling_takes_only_never_seen_words_of_generated_rows() {
+    let lm = lm_with(true);
+    let lex = Arc::new(Lexicon::parse_with("ㄓㄢˋ 占 -0.05\nㄓㄢˋ 站 -3.0\nㄓㄢˋ 棧 -3.0\n", None).unwrap());
+    let overlay = "x\t占\t-1.0\twikt\nx\t站\t-1.0\twikt\nx\t棧\t-1.0\tslang\n";
+    let k = syls("ㄓㄢˋ");
+    let plain = CappedLexicon::with_packs(lex.clone(), overlay, "", &lm, None).unwrap();
+    let lp = |c: &CappedLexicon, w: &str| c.best_lp(&k, w).unwrap();
+    assert_eq!((lp(&plain, "站"), lp(&plain, "棧")), (-4.0, -4.0), "premise: both never seen, file score minus the penalty");
+    assert!(lp(&plain, "占") < -0.05, "premise: 占 is seen and capped");
+    let low = CappedLexicon::with_packs_ceil(lex.clone(), overlay, "", &lm, None, Some(1e-200)).unwrap();
+    assert!(lp(&low, "站") < -100.0, "the generated row's never-seen word goes under the ceiling");
+    assert_eq!(lp(&low, "棧"), -4.0, "the slang row keeps today's rule");
+    assert_eq!(lp(&low, "占"), lp(&plain, "占"), "a seen word is untouched");
+    let high = CappedLexicon::with_packs_ceil(lex.clone(), overlay, "", &lm, None, Some(1e200)).unwrap();
+    assert_eq!(lp(&high, "站"), -4.0, "the ceiling never raises a score");
+    let none = CappedLexicon::with_packs_ceil(lex, overlay, "", &lm, None, None).unwrap();
+    for w in ["占", "站", "棧"] {
+        assert_eq!(lp(&none, w), lp(&plain, w));
+    }
+}

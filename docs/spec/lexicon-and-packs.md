@@ -105,6 +105,13 @@
 
 候選詞若只是別的寫法（簡體寫法轉成繁體後的詞、台灣字形摺疊後與基底或已留下的疊加層詞同讀音同字串的異體），就不寫進檔案；被拿掉的詞與它的落點寫到 `build/overlay/overlay-removed.tsv`、`overlay-variant-removed.tsv`（不進版控）。規則的內容（簡繁判斷、`MERGE` 摺疊表、落點分兩階段判定）見 `docs/spec/decoder.md`。粵語詞在候選階段就拿掉，所以這兩條規則看不到它們。
 
+上面兩條之後，產生的列（維基來源、`萌典補詞`、`lexgap`）再過兩道，被拿掉的詞每一列都拿掉（含變調列）：
+
+- **整詞的簡體寫法**（`phrase_twin`）：詞整個是簡繁詞組表（OpenCC `STPhrases` 加 `tw-conv.tsv` 選定的值）的鍵、值是另一個寫法、那個寫法在基底，而且詞不是萌典詞目，就拿掉（松散→鬆散、取舍→取捨、船只→船隻）；記進 `overlay-removed.tsv`。上一條的簡體判斷（`is_simplified`）只數簡體專用字與標記字，這些詞的每個字台灣也用，句子判成繁體，詞組表就沒被查到。只查整詞的鍵（最長比對會把「花卷市」改成「花捲市」）；目標只在疊加層、不在基底的不動。
+- **審過的錯字寫法**（`data/lexicon/overlay-drop.tsv`，CC0）：每列 `詞<TAB>基底的正確寫法<TAB>備註`，`#` 與空行略過；詞不能在基底、正確寫法要在基底、同一個詞只能一列，不符就中止並指出行號。清單裡的詞不寫，記進 `overlay-variant-removed.tsv`。錯字寫法沒有表可查（「好高鶩遠」的「鶩」與「騖」不是異體字，讀音又和基底的「好高騖遠」不同列），所以是清單，不是規則。
+
+`--tails-only` 也套用清單（清單在 repo 裡，不必有 dump）；`--tails-only --refilter` 另外把整詞的簡體寫法規則套到留著的列（要 OpenCC 表與 `SHANJIE_MOEDICT`，缺了就中止），給沒有 dump 的機器用。測試：`tools/test_build_overlay.py` 的 `LateRemovals`（真值表、清單格式、完整建置兩道都走、已提交的檔裡沒有清單的詞；有 OpenCC 表與萌典的機器另外核對已提交的檔沒有任何一列會被整詞規則拿掉，沒有時印 NOTE）。
+
 ### 2.4 讀音
 
 - 預設：`ime.Lexicon.to_syllables`（把詞切成基底詞，每段取分數最高的讀音），轉不出讀音的詞略過；不做人工確認。
@@ -155,7 +162,7 @@
 
 - `python3 tools/build_overlay.py`：產生並寫入（需要 dump；萌典補詞需要 `--moedict-supplement` 給語料檔；§2.7、§2.8 與 `--lexgap`（§2.1）的旗標預設關，不帶旗標的輸出只含維基來源的列，所以和含 `萌典補詞` 列的提交檔不同）。
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
-- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞或網路用語時用。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
+- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞、網路用語或 `overlay-drop.tsv` 時用（`--refilter` 見 §2.3）。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
 
 ### 2.12 重排保護詞（`data/lexicon/rerank-protect.tsv`）
@@ -247,7 +254,7 @@
 | 美妝與保養詞 | 16（`SHANJIE_PACK_BEAUTY`／`PACK_BEAUTY`） | `beauty-add.tsv` | `beauty` |
 
 - `shanjie_engine_new_packs(data_dir, layout, packs_dir, packs, out)`：`packs` 是位元遮罩，遮罩 0 忽略 `packs_dir`（可為 NULL），等於 `shanjie_engine_new`。回傳碼：1 = `packs_dir` 是 NULL 而遮罩非 0（或其他空指標）、2 = 遮罩有未知的位元或路徑不是 UTF-8、3 = 詞包檔存在卻讀不了或解析失敗（也包括基底、疊加層、名單層、變調層載入失敗）。
-- 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼用「釋放引擎、再建一個」切換，和換鍵盤排列相同。遮罩內缺檔的詞包什麼都不貢獻。
+- 詞包列併進詞庫，所以一個引擎的詞包組合是固定的；殼在背景建另一個引擎（現行引擎繼續處理按鍵，可沿用它已載入的模型與表，`docs/spec/macos-shell.md` §2.1），建好、組字區空了才換掉舊的。遮罩內缺檔的詞包什麼都不貢獻。
 - 關掉的詞包不讀檔：選字結果、候選清單與預測和沒有那個詞包檔的引擎逐位元組相同。
 - 評測 CLI：`--packs acg|quotes|it|meme|beauty` 或逗號串列，`--packs-dir DIR`（預設 `data/packs`）。要求的詞包檔不存在時 CLI 報錯並印路徑（引擎不報錯，這是 CLI 與引擎的差別）；單用 `--packs-dir` 沒有 `--packs` 是錯誤；兩個檢查都在讀模型之前。摘要行在載入詞包時依序多 `+acg`、`+quotes`、`+it`、`+meme`、`+beauty` 標記，沒有詞包時一字不變。`PACKS=acg,it,meme,beauty`（`PACKS_DIR` 預設 `data/packs`）讓 `core/tests/engine_predict.rs` 的延遲測試載入出貨的遮罩，並斷言詞庫列數等於基底加所列詞包。
 - 驗證：`core/tests/engine_pack.rs`（`the_pack_switch_changes_the_result_and_off_is_identical_to_no_pack_file`、`the_it_pack_has_its_own_bit_and_file`、`the_meme_pack_has_its_own_bit_and_file`、`an_unknown_pack_bit_is_refused`、`the_quote_bit_reads_quotes_add_tsv_only`、`the_names_layer_is_capped_on_the_engine_path`、`an_anime_pack_word_keeps_its_score_on_the_engine_path`）；`cli/tests/golden.rs` 的 `packs_options_fail_loudly`、`unreadable_pack_file_names_the_path_and_kind`、`unparsable_pack_is_a_parse_error`。
@@ -263,20 +270,20 @@
 | 迷因與實況用語 | `memePack` | 開 | 迷因與實況用語 |
 
 - 開關只在設定視窗「詞包」區塊，依序動漫、經典台詞、資訊、美妝、迷因；新詞包加在這一區。「動漫與遊戲詞」下方有一行灰字「資料更新至 YYYY-MM-DD（維基百科）」，日期取 `Resources/packs/acg.json` 的 `latest_source_revision`（UTC 日期，讀一次；檔案缺、欄位缺或讀不了就不顯示）；詞包關掉時照樣顯示。
-- 切換一個詞包：先把組字送出，再改設定並寫入偏好，再重建引擎（同值不做任何事）。
+- 切換一個詞包：改開關、寫入偏好、發 `didChangeSettings`，再交給背景建置（同值不做任何事）；不送出組字，現行引擎繼續用，新引擎建好、組字區空了才換上，換上之後選單才列新的組合（`docs/spec/macos-shell.md` §2.1）。
 - 輸入選單沒有詞包開關，只有一段不能點的「已開啟的詞包」：系統的選單小標題「已開啟的詞包」，下面依設定順序每個詞包一行，列引擎**實際載入**的詞包（`loadedPackMask`：照設定的遮罩建成功就是它，缺檔的詞包不算；退回後只含留下的詞包），前後各一條分隔線（`docs/spec/macos-shell.md` §7）。每個詞包各一行，不寫成一長行，選單不會隨詞包變多而變寬。一個都沒載入就整段不顯示。選單不讀偏好值。
 - 遮罩（`packMask`）= 各開關為開的位元；一個從沒動過任何開關的 App 建出遮罩 29（動漫、資訊、迷因、美妝）。
 
 ### 4.3 載入失敗的退回
 
-合併建置失敗時（`Shell.build`）：
+合併建置失敗時（同步的 `Shell.build` 與詞包切換的背景建置共用 `PackBuild.run`；背景建置走共用路徑時，每一次嘗試都是 `shanjie_engine_new_shared`，順序與次數相同）：
 
-1. 先建一個不帶詞包的引擎，只為判斷是不是詞包的錯，建完立刻釋放；
-2. 它也失敗：原因不是詞包，記兩個回傳碼，不再嘗試，沒有引擎（所有按鍵直通）；
-3. 它成功：對每個啟用的詞包依設定順序各試「少這一個」（`mask & ~bit`），第一個成功的留下，其餘詞包照開，記一行含回傳碼與留下遮罩的日誌；
+1. 先建一個不帶詞包的引擎，只為判斷是不是詞包的錯，建完立刻釋放；只有一個啟用的詞包檔案在時（只開一個詞包，或其他開著的詞包缺檔）沒有「少一個」可試，這個引擎成功就直接留下當引擎（共建兩次），不釋放再建；
+2. 它也失敗：原因不是詞包，記兩個回傳碼，不再嘗試；同步建置沒有引擎（所有按鍵直通），詞包切換的背景建置沒有結果、留在現行引擎；
+3. 它成功：對每個啟用、檔案也在的詞包依設定順序各試「少這一個」（`mask & ~bit`；缺檔的詞包本來就沒載入，拿掉它幫不上忙，不試），第一個成功的留下，其餘詞包照開，記一行含回傳碼與留下遮罩的日誌；
 4. 沒有任何一個少一個的組合成功（兩個以上的檔壞了）：建不帶詞包的引擎。
 
-偏好值不動，也不顯示錯誤，下一次重建會再試。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testBrokenMemeFileKeepsTheOtherPacks`（引擎建置次數 6：合併、不帶詞包、少動漫、少資訊、少美妝、少迷因）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheMemePackLast`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testMemePackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
+偏好值不動，也不顯示錯誤，下一次重建會再試。背景建置換上的引擎若載入的詞包比要求的少（缺檔或壞檔），仍照樣換上，之後不會因為「載入的和要求的不同」而一直重建（殼比的是要求的遮罩與排列）。驗證：`ShellTests` 的 `testCorruptPackFallsBackToAnEngineWithoutIt`、`testWithBothPacksOnABrokenFileKeepsTheOtherPack`、`testBrokenQuotesFileKeepsAcgAndIt`（引擎建置次數 4）、`testBrokenItPackDropsBothPacksFromTheMenuLine`、`testBrokenNonPackFileStopsAfterTwoBuilds`、`testOnlyPackBrokenKeepsTheProbeEngine`（只開一個詞包，引擎建置次數 2）、`testOnePresentPackBrokenWithAnotherFileMissingKeepsTheProbeEngine`（開兩個、一個缺檔，建置次數 2）、`testBrokenBeautyFileKeepsAcgAndIt`（引擎建置次數 5）、`testBrokenMemeFileKeepsTheOtherPacks`（引擎建置次數 6：合併、不帶詞包、少動漫、少資訊、少美妝、少迷因）、`testPackLineNamesTheBeautyPackInSettingsOrder`、`testPackLineNamesTheMemePackLast`、`testPackLineNamesTheQuotePackAfterAcg`、`testPackLineNamesTheLoadedPacks`、`testAcgPackMenuItemTogglesStoresAndSurvivesRestart`、`testItPackMenuItemTogglesStoresAndSurvivesRestart`、`testAcgDataDateLineComesFromTheManifest`；`PackSwitchTests` 的 `testBrokenPackIsDroppedInTheBackgroundAndSwapped`（同樣壞迷因檔，經切換、引擎建置次數 6、載入遮罩 21）、`testMissingPackFileSwapsWithOneBuild`（缺檔建置 1 次）、`testFailureKeepsTheCurrentEngine`、`testLateFailureOfTheSharedPathKeepsTheCurrentEngine`（沒有結果、留在現行引擎、建置多 2 次）；`SettingsTests` 的 `testBeautyPackSwitchFromTheWindowReachesStoreMaskAndTypedResult`、`testMemePackSwitchFromTheWindowReachesStoreMaskAndTypedResult`。
 
 ### 4.4 打包與自測
 
@@ -526,7 +533,7 @@
 
 照 §8.2（同一支工具、同樣的三段），差別：
 
-- **另外的讀音**（`data/packs/meme-extra-readings.tsv`，建置輸入，不隨 App 出貨）：`詞<TAB>讀音（空白分隔）`，一列一個另外的讀音，`#` 開頭與空行略過。給句尾語助詞有兩種打法的詞（啦 `ㄌㄚ`／`ㄌㄚ˙`、嗎 `ㄇㄚ`／`ㄇㄚ˙`、耶 `ㄧㄝˊ`／`ㄧㄝ`）與疊字有兩種打法的詞用：主要讀音照舊，這裡的每個讀音在 `meme-add.tsv` 多一列（含它的變調列），分數和主要讀音的列相同，兩種都打得到。只在最後一段用（`--extra-readings FILE`，預設這個檔，不存在就沒有；`--pack beauty` 給這個旗標就停）；解碼表只看主要讀音。同音衝突 (a)(b)(c) 在另外的讀音上照樣偵測。列裡的詞沒有收進詞包（含因為另外的讀音被 (c) 丟掉）、音節數不等於字數、和主要讀音相同、同一個詞重複同一個讀音，都以非 0 結束、不寫 `data/packs`。`words-all.txt` 在原本的列之後接上這些讀音各一列（確認過的讀音，所以主要讀音標 `CHECK` 的詞也列）；`meme.json` 多記 `extra_readings`（列數）。
+- **另外的讀音**（`data/packs/meme-extra-readings.tsv`，建置輸入，不隨 App 出貨）：`詞<TAB>讀音（空白分隔）`，一列一個另外的讀音，`#` 開頭與空行略過。給句尾語助詞有兩種打法的詞（啦 `ㄌㄚ`／`ㄌㄚ˙`、嗎 `ㄇㄚ`／`ㄇㄚ˙`、耶 `ㄧㄝˊ`／`ㄧㄝ`）與疊字有兩種打法的詞用：主要讀音照舊，這裡的每個讀音在 `meme-add.tsv` 多一列（含它的變調列），分數和主要讀音的列相同，兩種都打得到。只在最後一段用（`--extra-readings FILE`，預設這個檔，不存在就沒有；`--pack beauty` 給這個旗標就停）；解碼表只看主要讀音。同音衝突 (a)(b)(c) 在另外的讀音上照樣偵測。列裡的詞沒有收進詞包（含因為另外的讀音被 (c) 丟掉，訊息寫出那個讀音與被擠下的詞）、音節數不等於字數、和主要讀音相同、它或它的「一」「不」變調列和主要讀音或同一個詞的另一個另外讀音寫出的列重複、同一個詞重複同一個讀音，都以非 0 結束、不寫 `data/packs`；檔頭的 BOM 略過。`words-all.txt` 在原本的列之後接上這些讀音各一列（確認過的讀音，所以主要讀音標 `CHECK` 的詞也列）；`meme.json` 多記 `extra_readings`（列數）。
 - **審定清單只在最後一段套用**：`--emit-x` 照舊對所有過用量門檻的候選解碼（輸出不看清單，只檢查清單檔存在、能解析），所以解碼表與清單無關；最後一段在核對解碼表之後、判規則之前拿掉不在清單裡的候選（`meme.json` 的 `stages.not_allowed`）。這些候選不擋同讀音的清單詞，也不在 (b) 的參考名單裡。`--allow FILE` 預設 `data/packs/meme-allow.tsv`；`--pack beauty` 不收這個旗標；別的類別、缺類別欄、重複的詞（NFKC 之後比）都點名行號後停止。
 - **現在就打得對的清單詞照收**（§6.2 的「已經打得對」只對 `--pack beauty` 生效）；「讓不讓第一名」（X 是更常見的寫法就不收）與 (c) 不變。
 - **同讀音**：處置檔 `meme-collisions.tsv` 有 `+` 列點名的兩個詞都留（詞包詞在前）；沒有 `+` 列只留文章數多的。處置檔只放同讀音的處置，要不收的詞不放進審定清單即可。
@@ -549,7 +556,7 @@
 
 - 檢查集（`eval/dev/meme/`）：
   - `words.txt`：建置輸出的 `words.txt`（種子 20261025，讀音 `CHECK` 的詞不抽，抽 60 個，不到就全收），一列一詞、沒有前文，讀音照建置用的；
-  - `words-all.txt`：建置輸出的同名檔，詞包全部的詞（讀音 `CHECK` 的除外），格式同上，照 `meme-add.tsv` 的順序、每個詞取第一次出現的列；
+  - `words-all.txt`：建置輸出的同名檔，詞包全部的詞（讀音 `CHECK` 的除外），格式同上，照 `meme-add.tsv` 的順序、每個詞取第一次出現的列；之後接另外的讀音各一列（主要讀音標 `CHECK` 的詞也列）；
   - `embedded.txt`：`tools/gen_meme_embedded.py` 由 `words-all.txt` 產生的嵌入句，每個詞前面接三個固定開頭（他說、真的是、我覺得）、後面接兩個固定結尾（了、吧），讀音寫在工具裡；同一份輸入產生兩次逐位元組相同，`make test-python` 核對已提交的檔和重新產生的相同。
 - 驗證（出貨前，詞包預設開，所以都對現在出貨的預設比；量測腳本、臂與強度見 `docs/spec/evaluation.md`）：
   1. 關掉時與沒有詞包相同：dev302、打字測驗、錯字回報，聊天與書面，rowstats 逐位元組相同。
@@ -559,7 +566,7 @@
   5. 嵌入句（會意關與標準檔，聊天與書面）：會意關時逐字比對，開了變錯的列是 0；標準檔用 rowstats 的對錯（寬鬆對照），開了變錯的列是 0，修好的列數在聊天、書面都大於 0。這個集合是工具造的句子，只確認方向，不當出貨標準的證據。
   6. 預測列：`core/tests/engine_pack.rs` 的 `the_meme_pack_offers_whole_words_in_the_prediction_row`（讀真的 `data/packs` 與 `words-all.txt`，不是夾具）：取三個音節以上的詞照檔案順序的前 30 個，各打到剩最後一個音節為止，聊天設定、沒有前文、預測開著，開著詞包時被動預測列含整個詞的詞數嚴格多於不開時，而且大於 0；測試印出兩個數字與沒出現的詞。
   7. 記憶體與延遲（Mac 閒置窗）：尖峰 RSS 對 `acg,it,beauty` 增加不超過 40 MiB；`PACKS=acg,it,meme,beauty` 的 `timing_typing76_keys` p95 不超過 16 ms。
-- 測試（`make test-python`）：`tools/test_build_meme_pack.py`（`MIN_WORDS`、`candidate_files` 只記檔名、同名就停、列的先後、解碼的詞包組合、`--native-pack`、審定清單的各項規則與 `allow-missing.tsv`、`words-all.txt`、另外的讀音）、`tools/gen_meme_embedded.py` 的重建核對。引擎與 App 的測試見 §4.1–§4.4。
+- 測試（`make test-python`）：`tools/test_build_meme_pack.py`（`MIN_WORDS`、`candidate_files` 只記檔名、同名就停、列的先後、解碼的詞包組合、`--native-pack`、審定清單的各項規則與 `allow-missing.tsv`、`words-all.txt`、另外的讀音（含另外讀音上的 (a)(b)(c)、和變調列重複、BOM））、`tools/gen_meme_embedded.py` 的重建核對。引擎與 App 的測試見 §4.1–§4.4。
 - 這一版：139 個詞、155 列（9 列變調列、7 列另外的讀音），`meme` 類 112 個、`offensive` 類 27 個；審定清單 139 筆全部收進；未處置衝突 0。檢查集：`words.txt` 60 列、`words-all.txt` 138 列（131 個詞的主要讀音加 7 列另外的讀音）、`embedded.txt` 828 列。
 
 ## 10. 已知限制
