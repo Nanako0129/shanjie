@@ -13,7 +13,7 @@ use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::System::Registry::{RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ};
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, ITfCategoryMgr, ITfInputProcessorProfileMgr, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER, GUID_TFCAT_TIPCAP_COMLESS,
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, ITfCategoryMgr, ITfInputProcessorProfileMgr, ITfInputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER, GUID_TFCAT_TIPCAP_COMLESS,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIP_KEYBOARD,
 };
 use windows_core::{implement, Error, IUnknown, Interface, Ref, Result};
@@ -202,7 +202,7 @@ fn register_tsf() -> Result<()> {
     })
 }
 
-/// Everything of `register_*` is removed one item at a time. The TSF calls (UnregisterCategory, UnregisterProfile) are best effort and
+/// Everything of `register_*` is removed one item at a time. The TSF calls (UnregisterCategory, UnregisterProfile, Unregister) are best effort and
 /// their results are ignored; only the registry delete decides the return (a missing key is not an error). The driver checks the keys
 /// afterwards (docs/spec/windows-tip.md §3.13 (h)).
 fn unregister_all() -> Result<()> {
@@ -221,6 +221,11 @@ fn unregister_all() -> Result<()> {
             }
             let profiles: ITfInputProcessorProfileMgr = CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
             let _ = profiles.UnregisterProfile(&CLSID_SHANJIE, LANGID_ZH_TW, &PROFILE_SHANJIE, 0);
+            // UnregisterProfile leaves HKLM\SOFTWARE\Microsoft\CTF\TIP\{CLSID} (with its Category and LanguageProfile subkeys) behind;
+            // only the older interface's Unregister removes the text service's TIP key (measured in the test VM, slot 4).
+            if let Ok(old) = profiles.cast::<ITfInputProcessorProfiles>() {
+                let _ = old.Unregister(&CLSID_SHANJIE);
+            }
         }
         Ok(())
     }));

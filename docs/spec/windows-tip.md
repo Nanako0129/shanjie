@@ -134,8 +134,8 @@ Linux `debug` job 在既有步驟之後加三步：
   - `ITfInputProcessorProfileMgr::RegisterProfile`（語言 0x0404，啟用）。
   - `ITfCategoryMgr::RegisterCategory` 登記四個類別：`GUID_TFCAT_TIP_KEYBOARD`、`GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT`、`GUID_TFCAT_TIPCAP_COMLESS`、`GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER`。
   - **不**登記 `TIPCAP_UIELEMENTENABLED`：候選窗是 DLL 自己畫的（§3.15），沒有 `ITfCandidateListUIElement`，不能宣稱支援 UILess。也不登記 `TIPCAP_SECUREMODE`（安全桌面）：要登記得先過資安審查。
-- 取消註冊（`DllUnregisterServer`）：逐個 `UnregisterCategory`、`UnregisterProfile`（盡力而為，結果忽略），再 `RegDeleteTree` 刪 CLSID 鍵（鍵不存在不算錯）；回傳值只看登錄刪除的結果。
-- 驗證：`regsvr32 /s <dll>` 結束碼 0、讀登錄核對 CLSID 與設定檔鍵存在；`regsvr32 /s /u <dll>` 後鍵不在、輸入法清單沒有善解。
+- 取消註冊（`DllUnregisterServer`）：逐個 `UnregisterCategory`、`UnregisterProfile`、`ITfInputProcessorProfiles::Unregister`（盡力而為，結果忽略），再 `RegDeleteTree` 刪 CLSID 鍵（鍵不存在不算錯）；回傳值只看登錄刪除的結果。只呼叫前兩個時，`HKLM\SOFTWARE\Microsoft\CTF\TIP\{CLSID}`（含 `Category`、`LanguageProfile` 子鍵）會留下（測試 VM 量到，2026-11-21 第 4 時段）；補上 `Unregister` 之後這個鍵在不在：待驗收（第 5 時段）。
+- 驗證：`regsvr32 /s <dll>` 結束碼 0、讀登錄核對 CLSID 與設定檔鍵存在；`regsvr32 /s /u <dll>` 後鍵不在（含 `CTF\TIP\{CLSID}`）、輸入法清單沒有善解。
 
 ### 3.3 安裝位置與信任
 
@@ -655,7 +655,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 - 標記符號：`release-ids` 開著時，DLL 與 exe 各多匯出一個 `SjMarkReleaseIds`；`timing` 開著時各多匯出 `SjMarkTiming`。DLL 用 `#[no_mangle]`；exe 預設不匯出任何符號，由 `windows/host/build.rs` 在 feature 開著時加連結器參數 `/EXPORT:<符號>`。名稱不以 `shanjie_` 開頭（§3.1 的匯出檢查看的是那個開頭）。CI 用 `dumpbin /exports` 看它們（§6.9）。
 - 測試：兩組名稱表互不相同（`ids::tests::the_two_identities_share_nothing`）；這個建置的值等於上表的字面值（`this_build_has_the_documented_literals`，`windows-msi` job 以 `--features release-ids` 跑正式版的那一半，`windows` job 跑開發版的一半）；常駐程序讀設定的路徑是名稱表的值（`startup::tests::the_key_scheme_is_read_from_this_builds_settings_key`）；`pipe_name` 的測試也分兩種身分。
 - MSI 只裝正式版身分、**不帶 `timing`** 的建置。
-- 兩種身分並存、解除安裝其中一個不影響另一個（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，D1）：開發版身分（`regsvr32` 手動註冊）與 MSI 裝的正式版同時在，兩個設定檔都註冊著；兩支常駐程序同時在跑（映像路徑各在自己的安裝資料夾、都是 Medium、都沒有視窗），Explorer 同時載著兩個 DLL；開發版在「執行」對話框與記事本都打得出「測試」。無介面解除安裝正式版之後，正式版的資料夾、註冊、Run 值、常駐程序都不在，開發版常駐程序的 PID 不變、照樣打得出字；重開機後正式版仍都不在、開發版的註冊還在。沒拍到的一格：兩版並存時用正式版打字的讀回（正式版的常駐程序有被 Explorer 啟動）。
+- 兩種身分並存、解除安裝其中一個不影響另一個（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，D1）：開發版身分（`regsvr32` 手動註冊）與 MSI 裝的正式版同時在，兩個設定檔都註冊著；兩支常駐程序同時在跑（映像路徑各在自己的安裝資料夾、都是 Medium、都沒有視窗），Explorer 同時載著兩個 DLL；開發版在「執行」對話框與記事本都打得出「測試」。無介面解除安裝正式版之後，正式版的資料夾、CLSID 與設定檔的註冊、Run 值、常駐程序都不在（`CTF\TIP\{CLSID}` 鍵留著，見 §6.3），開發版常駐程序的 PID 不變、照樣打得出字；重開機後正式版仍都不在、開發版的註冊還在。沒拍到的一格：兩版並存時用正式版打字的讀回（正式版的常駐程序有被 Explorer 啟動）。
 
 ### 6.2 MSI 的內容
 
@@ -695,7 +695,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   | `InstallLayoutOrTip` 加入後 | 1 | 0x3 | 0x0 | 有 |
   | `InstallLayoutOrTip` 拿掉後 | 0 | 0x3 | 0x2 | 沒有 |
 
-  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同（真的 MSI，測試 VM 驗收符合：裝完切換清單有善解，重新登入後直接打得出字；I1、I3）。其他使用者也一樣（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，U7）：裝好之後才第一次登入的第二個帳號（一般使用者），按一次 Win+Space 就切到善解（工作列從微軟注音的「英 ㄅ」變成「繁體」），在「執行」對話框打得出「測試」；完整介面升級之後再登入，同樣切得過去、打得出字。安裝程式不碰任何使用者的清單。解除安裝後正式版的 TSF 註冊不在，重開機後也不在（同一時段，D1）；切換清單本身沒有直接讀到：驗收工具讀的兩個值（`Get-WinUserLanguageList` 的清單裡有沒有這個設定檔、`IsEnabledLanguageProfile`）在沒裝的乾淨機器、裝好之後、連從沒註冊過的設定檔都是同一組答案（不在清單、enabled=1），分不出裝了沒有，所以清單以 Win+Space 切得過去、打得出字為準。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
+  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同（真的 MSI，測試 VM 驗收符合：裝完切換清單有善解，重新登入後直接打得出字；I1、I3）。其他使用者也一樣（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，U7）：裝好之後才第一次登入的第二個帳號（一般使用者），按一次 Win+Space 就切到善解（工作列從微軟注音的「英 ㄅ」變成「繁體」），在「執行」對話框打得出「測試」；完整介面升級之後再登入，同樣切得過去、打得出字。安裝程式不碰任何使用者的清單。解除安裝後正式版的 CLSID、InprocServer32 與 zh-TW 設定檔鍵不在，重開機後也不在（同一時段，D1）；`HKLM\SOFTWARE\Microsoft\CTF\TIP\{CLSID}` 與兩個子鍵卻留著（那時的取消註冊沒呼叫 `Unregister`，§3.2；修正後待第 5 時段重量）；切換清單本身沒有直接讀到：驗收工具讀的兩個值（`Get-WinUserLanguageList` 的清單裡有沒有這個設定檔、`IsEnabledLanguageProfile`）在沒裝的乾淨機器、裝好之後、連從沒註冊過的設定檔都是同一組答案（不在清單、enabled=1），分不出裝了沒有，所以清單以 Win+Space 切得過去、打得出字為準。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
 
 ### 6.4 登入時預先啟動，與裝完不用登出
 
@@ -792,7 +792,7 @@ DLL 幾乎一定被 explorer 等程序載著。設定：Property 表 `MSIRESTART
 
   winget 用哪一種沒量（推論：winget 對 MSI 的預設是 `/passive`，那樣 `winget uninstall` 會停在問話視窗等人按）。完整介面的「要保留什麼」頁的勾預設勾著，會蓋掉命令列給的 `KEEPSETTINGS`（推論，沒量）。
 - **「保留設定」的效果**：值是 `0` 時，`DeleteSettings` 刪掉執行解除安裝的那個使用者的 `HKCU\Software\Shanjie`（目前只有按鍵習慣 `KeyScheme` 一個值，§5.2）；值是 `1` 時留著。其他使用者的設定碰不到，留著。一般帳號請另一個管理員帳號過 UAC 時（真的 MSI，測試 VM，2026-11-21，MSI 0.0.261／0.0.262，O1）：一般帳號執行 `/x /qb KEEPSETTINGS=0`、在 UAC 輸入管理員的密碼，結束碼 0，被刪的是**那個一般帳號**的 `HKCU\Software\Shanjie`，管理員帳號的還在。量的時候管理員帳號沒有登入桌面。
-- **不論哪個選項，解除安裝一律清掉**：檔案與資料夾、TSF 註冊、Run 值、正在跑的正式版常駐程序（`KillHost`）。
+- **不論哪個選項，解除安裝一律清掉**：檔案與資料夾、TSF 註冊（`CTF\TIP\{CLSID}` 鍵：待第 5 時段驗收，§3.2）、Run 值、正在跑的正式版常駐程序（`KillHost`）。
 - **不刪**：`%LOCALAPPDATA%\Shanjie\`（MSI 裝的建置不帶 `timing`，不會建它）、常駐程序在 HKCU 留下的 WER 排除項（以檔名 `shanjie-host.exe` 登記，§5.2）。
 - **`KillHost`**（常駐程序沒有結束指令，會活到登出）：結束映像完整路徑（`QueryFullProcessImageNameW`，ASCII 字母不分大小寫）等於參數那個路徑的每一個程序，所有工作階段都算；不用檔名比對，因為開發版身分的常駐程序也叫 `shanjie-host.exe`。查路徑與結束用同一個 handle（`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`）。查映像路徑的緩衝是 1024 個 UTF-16 單位，更長的路徑查不到、不結束。修復時也跑：修復會把執行中的 `shanjie-host.exe` 搬到 `C:\Config.Msi` 再放新檔，之後那支程序的映像路徑變成搬過去的名字，解除安裝時就比對不到。量到（測試 VM，修復時只在移除時跑的那一版）：常駐程序在跑時修復（結束碼 3010）再解除安裝，`KillHost` 記 `ended 0`，產品移除了、常駐程序還在（只放英文直通），安裝資料夾留到重開機後剩一個空資料夾。
 
