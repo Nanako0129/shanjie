@@ -79,7 +79,7 @@ jobs:
     # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
     runs-on: xcode-27
     # A hung FFI child process should not hold the runner for the 6-hour default. The release tests took 16.3-18.5 min on main
-    # (2026-11-09); by 2026-11-21 the last 25 runs that finished took 23-33 min and three were cut off at the old 35-min limit
+    # (2026-11-09); by 2026-11-21 the last 25 runs that finished took 23-33 min and five were cut off at the old 35-min limit
     # (GitHub reports a timeout as "cancelled"), so the limit leaves room above that.
     timeout-minutes: 50
     steps:

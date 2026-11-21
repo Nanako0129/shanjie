@@ -39,8 +39,8 @@
 | job | runner | 內容 | 逾時 |
 |---|---|---|---|
 | `changes` | ubuntu-latest | §1.2 | 5 分 |
-| `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 35 分 |
-| `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 20 分 |
+| `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 50 分 |
+| `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 30 分 |
 | `windows` | windows-2025 | 見 §3.3；`needs: changes`，和其他 job 同時開跑 | 45 分 |
 | `windows-cap` | windows-2025 | `core/tests/engine_cap.rs`（release），與 `windows` 並行（§3.3） | 30 分 |
 | `rowstats` | ubuntu-24.04 | Linux 與 Windows 的六份 rowstats 逐位元組比對（§3.3）；`needs: [changes, debug, windows]` | 5 分 |
@@ -57,7 +57,7 @@
 - 每個跑 cargo 的 job（`core`、`debug`、`windows`、`windows-cap`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。
 - repo 沒有 `rust-toolchain` 檔，工具鏈只靠這一步固定。理由：評測分數要與 Python 參考實作的 golden 逐位元組相同，編譯器的程式碼生成變動曾讓一個分數差 1 ulp（`powf` 被降成 `exp10`）。
 - `release.yml` 的 `build` 用同一個版本與同一個 action；改版本要兩個檔一起改。
-- 工作區的 debug 測試用 `[profile.test] opt-level = 1`（`Cargo.toml`），保留 debug assertions 與整數溢位檢查；完全不最佳化時，逐鍵的預測掃描讓 dev302 重播超過 20 分鐘的 job 上限。
+- 工作區的 debug 測試用 `[profile.test] opt-level = 1`（`Cargo.toml`），保留 debug assertions 與整數溢位檢查；完全不最佳化時，逐鍵的預測掃描讓 dev302 重播超過 job 上限（當時 20 分鐘，現在 30 分鐘）。
 
 ### 2.2 模型下載：`scripts/fetch-models.sh`
 
@@ -177,6 +177,7 @@
 - CI 不在 tag 上跑，所以 `gate` 執行 `scripts/check-ci-gate.sh "$GITHUB_SHA"`：被 tag 的那個 commit 在 `main` 上最新一次 `ci.yml` 的 push run 必須已結束且結論是 `success`。它防的是失誤，不是安全邊界（tag 的 commit 自己帶著這支腳本）。
 - 只看整個 run 的結論，不看個別 job 名稱，所以 job 怎麼拆都不影響關卡。
 - 參數：`CI_GATE_INTERVAL`（輪詢間隔，預設 30 秒）、`CI_GATE_TIMEOUT`（run 還在跑時最多等 1800 秒）、`CI_GATE_GRACE`（run 還不存在時最多等 300 秒：tag 可能比 CI 先到）；`CI_GATE_GH` 可替換 `gh`（給測試用）。
+- 等待上限（1800 秒）比 `ci.yml` 的 `core` job 上限（50 分，§1）短：合併後馬上推 tag，CI 還在跑時關卡可能逾時失敗，所以推 tag 前先等被 tag 的 commit 在 `main` 上的 CI run 結束而且是綠的，再推。
 - 失敗的情形：run 的結論不是 `success`；等待逾時；連續三次讀不到 API；commit SHA 不是 40 個十六進位字元（結束碼 2）。失敗訊息附復原做法：`main` 上 CI 綠了之後重跑這個 Release run；tag 打在錯的 commit 要在合併 commit 上重打。
 - **appcast 的 commit**：`publish` 會用 `GITHUB_TOKEN` 把 `appcast.xml` 寫回 main，這種 push 不觸發 `ci.yml`。關卡看到某個 commit 相對於它唯一的父 commit 只改了 `appcast.xml`，就改看父 commit 的 run，最多往回走 20 個；有兩個父 commit、或除了 `appcast.xml` 還改了別的檔，都不往回走。
 - 測試：`scripts/test-check-ci-gate.sh`（對假 `gh`，無網路）涵蓋 appcast-only 的 commit 用父 commit 的 run 判斷，以及同時改了 `appcast.xml` 與其他檔的 commit 不被略過；`ci.yml` 的 `shell` job 執行它。
