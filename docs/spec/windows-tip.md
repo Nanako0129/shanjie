@@ -674,10 +674,10 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   | `data\lm\` | `data/models.tsv` 列的全部 7 個：`bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm` |
   | `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`CC-BY-SA-4.0-attribution.txt` |
 
-  - 和 Mac 版 `scripts/build-app.sh` 的差別：沒有美妝與台詞詞包（§3.4：Windows 版只帶 `acg`、`it`）、沒有 Sparkle 的授權檔、沒有 `models.tsv`；`LICENSE` 在根而不在 `LICENSES\`。模型和 Mac 版一樣是全部 7 個：常駐程序載入 `bigram.sjlm` 時連旁邊的辨類、承接與兩個 trigram 表一起載，少了 `classes.sjc` 會載入失敗，少了其他的那一項會默默關掉，解碼結果就和量過的不同（§3.4）。`mixed-words.tsv` 核心有就讀。
+  - 和 Mac 版 `scripts/build-app.sh` 的差別：沒有美妝與台詞詞包（§3.4：Windows 版只帶 `acg`、`it`）、沒有 `english.tsv`（「英文或注音」比較用的計數表：Windows 的常駐程序把英文直打關著，§3.4，那項比較不會跑）、沒有 Sparkle 的授權檔、沒有 `models.tsv`；`LICENSE` 在根而不在 `LICENSES\`。模型和 Mac 版一樣是全部 7 個：常駐程序載入 `bigram.sjlm` 時連旁邊的辨類、承接與兩個 trigram 表一起載，少了 `classes.sjc` 會載入失敗，少了其他的那一項會默默關掉，解碼結果就和量過的不同（§3.4）。`mixed-words.tsv` 核心有就讀。
   - 模型與 `colloquial-attribution.tsv` 的 SHA-256 要符合 `data/*.sha256`（`check-msi.ps1` 核對）。
-  - `CC-BY-SA-4.0-attribution.txt` 是建置時產生的（`build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段，拿掉 Windows 版不帶的迷因詞包（第一段的三個檔名與 `packs/meme-add.tsv` 那一段；每一處都要剛好找到一次，否則建置失敗），在「Details: data.md.」那一行後面多一段，點名靜態連結進來的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0），最後接 name-suggestion-index 的聲明全文；文字裡出現 Sparkle 就失敗。`check-msi.ps1` 只解析第一段（到「are licensed」為止）的檔名，必須剛好是這 18 個（`check-msi.ps1` 寫死的清單，和 `build-app.sh` 那一段列的相同）。`LICENSES/data.md` 兩個平台共用。
-- **安裝位置不能改、只有系統管理員能寫**：安裝資料夾的目錄 Id 含小寫字母（私有屬性，命令列改不到），介面沒有「瀏覽」；帶 `TARGETDIR`、`ProgramFiles64Folder` 這類屬性也不改位置（待驗收，I1）。資料夾繼承 Program Files 的 ACL，安裝程式不改 ACL；因此只有系統管理員能寫是推論，要在 VM 用 §3.3 的 `Get-Acl` 方法核對（待驗收，I1）。已知限制：資料夾在安裝前就存在時，安裝程式不重設它的 ACL；只有系統管理員能預先建它。
+  - `CC-BY-SA-4.0-attribution.txt` 是建置時產生的（`build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段，拿掉 Windows 版不帶的迷因詞包（第一段的三個檔名與 `packs/meme-add.tsv` 那一段）與 `english.tsv`（第一段的檔名；每一處都要剛好找到一次，否則建置失敗），在「Details: data.md.」那一行後面多一段，點名靜態連結進來的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0），最後接 name-suggestion-index 的聲明全文；文字裡出現 Sparkle 就失敗。`check-msi.ps1` 只解析第一段（到「are licensed」為止）的檔名，必須剛好是這 18 個（`check-msi.ps1` 寫死的清單，`build-app.sh` 那一段列的去掉迷因詞包的三個與 `english.tsv`）。`LICENSES/data.md` 兩個平台共用。
+- **安裝位置不能改、只有系統管理員能寫**：安裝資料夾的目錄 Id 含小寫字母（私有屬性，命令列改不到），介面沒有「瀏覽」；帶安裝資料夾的目錄 Id、`TARGETDIR`、`ProgramFiles64Folder` 這類屬性也不改位置（真的 MSI，測試 VM 驗收符合，I1）。資料夾繼承 Program Files 的 ACL，安裝程式不改 ACL；只有系統管理員能寫（真的 MSI，測試 VM 驗收符合，I1）。已知限制：資料夾在安裝前就存在時，安裝程式不重設它的 ACL；只有系統管理員能預先建它。
 - **介面**：WiX 內建的歡迎、確認、進度、完成與維護歡迎頁，加兩頁自己的：「修復或移除」（只有「修復」「移除」，沒有「變更」：沒有功能可選）與「要保留什麼」（一個勾，§6.7）。不引用 `WixUI_Common`（它帶進來的自訂動作與 DLL 不能出現在套件裡），頁面用到的點陣圖與圖示是 WixUIExtension 內建的（WiX 的頁面自己會帶進來；套件自己定義會和它們重複，連結失敗）。沒有授權頁、選資料夾頁、功能樹、`MsiRMFilesInUse`（重新啟動管理員關著，用不到）。有 WiX 的 `FilesInUse` 頁（§6.5）。
   - 連結時所有 ICE 驗證都跑。量到兩條警告：ICE61（同版號升級）是預期的，ICE63（有動作排在 `InstallInitialize` 與 `RemoveExistingProducts` 之間）不該出現，`build-msi.ps1` 在 `light` 輸出有 ICE63 時失敗。
   - 完成頁的固定文字「善解已經裝好。已經開著的 App 切一次輸入法就能用。」只在 `NOT Installed`（全新安裝與升級）時顯示；同一頁在移除與修復結束時不顯示這句（WiX 的 `OptionalText` 控制項，`check-msi.ps1` 核對條件）。量到：註冊前就開著的記事本，在常駐程序已經跑著時，切到善解就打得出字；記事本是封裝 App，自己不會啟動常駐程序（§5.2）。完成頁文字與修復完成頁：待驗收（I1、U4）。
@@ -695,15 +695,15 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   | `InstallLayoutOrTip` 加入後 | 1 | 0x3 | 0x0 | 有 |
   | `InstallLayoutOrTip` 拿掉後 | 0 | 0x3 | 0x2 | 沒有 |
 
-  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同：推論，待驗收（I1、I3）；不成立就停下回報。其他使用者的清單裡有沒有善解：沒量，待驗收（U7 的第二個使用者）。安裝程式不碰任何使用者的清單；取消註冊後它從清單消失：待驗收（U6）。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
+  只註冊、還沒加入之前，善解已經在這位使用者的切換清單裡，Win+Space 切得過去。MSI 以系統身分註冊時結果相同（真的 MSI，測試 VM 驗收符合：裝完切換清單有善解，重新登入後直接打得出字；I1、I3）。其他使用者的清單裡有沒有善解：沒量，待驗收（U7 的第二個使用者）。安裝程式不碰任何使用者的清單；取消註冊後它從清單消失：待驗收（U6）。沒有繁體中文語言的帳號沒量；清單裡沒看到善解時，使用者要自己加（說明在 `docs/windows/install.md`）。
 
 ### 6.4 登入時預先啟動，與裝完不用登出
 
 - **Run 值**：`HKLM\Software\Microsoft\Windows\CurrentVersion\Run` 的值 `Shanjie`，內容 `"C:\Program Files\Shanjie\shanjie-host.exe" --resident --logon`（MSI 的 Registry 表，KeyPath 在 HKLM）。量到：重開機後由 Explorer 以登入者、Medium 啟動，父程序 Explorer，約在開機後 13 秒。安裝後 Windows 自己跳一則通知「現在已設定 probe-host 以在您登入時執行…」，顯示的是 exe 的檔名；真的 MSI 顯示的是 `shanjie-host`（推論，待驗收）。
-- **`--logon`**（§5.2）：先問這位使用者的輸入法清單有沒有善解，沒有就直接結束，不載模型、不建 pipe。註冊之後這個值是 1，用 `InstallLayoutOrTip` 把善解從清單拿掉後是 0（量到，§6.3）；使用者在設定頁拿掉也一樣：推論，待驗收（I3）。所以意思是「使用者自己拿掉了就不留」；沒拿掉的每位使用者，每次登入都有一支常駐程序（私有記憶體約 300 MB，§5.11）。
+- **`--logon`**（§5.2）：先問這位使用者的輸入法清單有沒有善解，沒有就直接結束，不載模型、不建 pipe。註冊之後這個值是 1，用 `InstallLayoutOrTip` 把善解從清單拿掉後是 0（量到，§6.3）；真的 MSI 在測試 VM 驗收符合（I3）：把善解從清單拿掉後再登入，沒有常駐程序留著。所以意思是「使用者自己拿掉了就不留」；沒拿掉的每位使用者，每次登入都有一支常駐程序（私有記憶體約 300 MB，§5.11）。
 - **完成頁啟動**：完成頁的「完成」鈕啟動常駐程序，裝完不用登出。
   - 動作 `StartHost`：執行檔型（type 34）自訂動作，`Directory` 是安裝資料夾，命令列 `"[#FHost]" --resident --logon`，`Return="asyncNoWait"`，不排進任何序列；只由 `ExitDialog` 的 `Finish` 鈕的 `DoAction` 觸發，條件 `NOT Installed`（全新安裝與升級成立；修復與維護模式不成立；失敗與取消走別的頁）。
-  - 量到：完成頁觸發的 DLL 型動作直接啟動程序，雙擊安裝與完整介面升級時是登入者、Medium。執行檔型動作在同一條路上也是這樣：推論，待驗收（I2：父程序、完整性等級、工作目錄、沒有視窗、繼承的 handle 與所屬 Job）。
+  - 量到：完成頁觸發的 DLL 型動作直接啟動程序，雙擊安裝與完整介面升級時是登入者、Medium。執行檔型動作在同一條路上也是這樣（真的 MSI，測試 VM 驗收符合，I2：登入者、Medium、父程序 msiexec、工作目錄是安裝資料夾、沒有視窗；安裝前就開著的記事本與新開的記事本都打得出字）。
   - 從已提升的命令列跑完整介面時，啟動出來的程序是 High，常駐程序的自我檢查（§5.2）讓它結束：推論，待驗收（I4）。量到的是立即動作與模擬動作直接啟動，在已提升的 `/qn`、`/passive`（工作階段 0）下是 High、工作階段 0。
   - 基本介面與無介面的安裝（`/qb`、`/passive`、`/qn`、部署工具）沒有完成頁，不啟動：下次登入由 Run 值啟動；在那之前，一般的桌面程式第一次打字時會啟動它（§5.2）。
   - 不做「請桌面的 Explorer 代為啟動」：量到那樣啟動出來的程序在每條路上都是登入者、Medium，但它讓提升權限的程序使用一般權限程序回傳的 COM 物件。
@@ -815,7 +815,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
     - 第一次計時器通知時（`TDF_CALLBACK_TIMER`，只做一次）：對話框還不是前景，而且前景視窗屬於這次安裝的用戶端程序（Windows Installer 的 `CLIENTPROCESSID`：從命令列或設定頁是 msiexec.exe，從「程式和功能」是 explorer.exe；不用類別或標題找視窗），對話框的執行緒暫時把輸入接到前景視窗的執行緒（`AttachThreadInput`），`BringWindowToTop`＋`SetForegroundWindow` 一次後解開；接之前先送 `WM_NULL`（`SendMessageTimeoutW`，`SMTO_ABORTIFHUNG | SMTO_BLOCK`，500 ms）確認前景執行緒在處理訊息：接上之後，換前景時會同步送訊息給它，不處理訊息的執行緒（例如在 `MsiConfigureProduct` 裡等的 explorer 執行緒）會卡住解除安裝。前景是別的程式、沒有用戶端 PID 或探測失敗時只要求前景。MSI log 記一行：`AskKeep: front attach=1 set=…`，或 `front attach=0 client=none|client=other|busy set=…`，已是前景時 `front already`。已知限制：探測之後才停止處理訊息的執行緒仍會卡住。量到（測試 VM）：按過 Windows 的「檔案使用中」視窗之後，建立時的要求只讓對話框置頂、鍵盤不在它身上（前景留在用戶端的進度框）；接輸入之後設定頁的解除安裝、不帶參數的 `/x` 記 `attach=1 set=1`，焦點在「解除安裝」鈕。只比對 msiexec.exe 的那一版在「程式和功能」記 `attach=0 set=0`（用戶端是 explorer），所以改成比對 `CLIENTPROCESSID`。量到（加了探測的這一版）：「程式和功能」（用戶端 explorer）與設定頁（用戶端 msiexec）按過「檔案使用中」之後都記 `attach=1 set=1`，焦點在「解除安裝」鈕。已知限制：前景的執行緒卡住時，接輸入可能跟著等。
   - 量到：設定頁「解除安裝」與 `/x /qb` 的對話框是 High、拿到前景；`/x /passive`：假安裝檔量到對話框是 Medium、出現在 UAC 之前、沒有拿到前景；真的 MSI（測試 VM）量到 UAC 在前、對話框是 High、一出來就是前景（`front already`）。Medium 的程式對 High 的對話框送滑鼠點擊無效（UIPI）。
   - 權杖是 SYSTEM、LocalService、NetworkService，在工作階段 0，或視窗站不是互動的：不顯示，都保留。自己出錯（`TaskDialogIndirect` 回錯誤、panic）：照沒有畫面處理（都保留）、繼續解除安裝、記進 MSI 的 log。只有使用者按「取消」才回「使用者取消」。讀寫的只有 MSI 的屬性。
-- **`DeleteSettings`**：用 `RegOpenCurrentUser` 開使用者的 hive，路徑是名稱表的常數（`Software\Shanjie`）；不跟隨登錄連結：每一層都用 `REG_OPTION_OPEN_LINK` 開出 handle，是連結就只刪連結本身；往下列舉與刪除（`NtDeleteKey`）都經過同一個 handle，不先查名稱再刪；不用 `RegDeleteTree`。往下最多 32 層、每層最多 4096 個子機碼，超過的留著、log 記「not all deleted」（程式只寫一層）。行程權杖或（若有）執行緒權杖是 SYSTEM、LocalService、NetworkService，或查不到權杖時，什麼都不做（量到：SYSTEM 身分的排程工作裡，模擬動作就是 SYSTEM，§6.6）。連結的行為：待驗收（L1）。
+- **`DeleteSettings`**：用 `RegOpenCurrentUser` 開使用者的 hive，路徑是名稱表的常數（`Software\Shanjie`）；不跟隨登錄連結：每一層都用 `REG_OPTION_OPEN_LINK` 開出 handle，是連結就只刪連結本身；往下列舉與刪除（`NtDeleteKey`）都經過同一個 handle，不先查名稱再刪；不用 `RegDeleteTree`。往下最多 32 層、每層最多 4096 個子機碼，超過的留著、log 記「not all deleted」（程式只寫一層）。行程權杖或（若有）執行緒權杖是 SYSTEM、LocalService、NetworkService，或查不到權杖時，什麼都不做（量到：SYSTEM 身分的排程工作裡，模擬動作就是 SYSTEM，§6.6）。連結的行為（真的 MSI，測試 VM 驗收符合，L1）：`HKCU\Software\Shanjie` 本身是連結、或連結放在子機碼時，以 `KEEPSETTINGS=0` 解除安裝後被指向的機碼與值都還在。
 - **載入 DLL 的規則**：沒有 delay-load；不呼叫 `SetDefaultDllDirectories`（它改的是自訂動作宿主整個程序的狀態）；除了 comctl32 沒有別的執行時載入。靜態匯入只能是 msi、kernel32、user32、advapi32、imm32、ntdll 與 API set（`check-msi.ps1` 寫死這份名單）。
 
 ### 6.9 建置與 CI 的核對
@@ -829,7 +829,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
   - **C**：只給 VM 驗收用，版號 `0.0.<run_number+1>`，DLL 與 exe 另建一次，位元組與 A 不同（job 印出兩組 SHA-256 並斷言不同），檔名 `…-x64-test-upgrade.msi`。
   - artifact `windows-msi`：三份 MSI 與 A 的 SHA-256 檔。
 - **`check-msi.ps1`**（對象是建好的 A）：用 WiX 的 `dark.exe` 反組譯成 `.wxs` 並解出檔案（`-x`），讀那份 XML，再用 `dumpbin` 看解出來的檔；每一列讀到的都印出來，任何一條不符就失敗，失敗的行以 `FAIL [<區域>]` 開頭。（量到：用 Windows Installer 的 COM 讀欄位，pwsh 7 丟 `DISP_E_TYPEMISMATCH`、Windows PowerShell 5.1 讀回空字串，所以改讀反組譯的結果。）核對的是：
-  - 檔案清單與 §6.2 的表完全相同；模型與 `colloquial-attribution.tsv` 的雜湊符合 `data/*.sha256`；署名檔第一段的檔名剛好是 `build-app.sh` 那一段列的那些、去掉迷因詞包的三個。
+  - 檔案清單與 §6.2 的表完全相同；模型與 `colloquial-attribution.tsv` 的雜湊符合 `data/*.sha256`；署名檔第一段的檔名剛好是 `build-app.sh` 那一段列的那些、去掉迷因詞包的三個與 `english.tsv`。
   - DLL 與 exe 沒有 C 執行階段的匯入；exe 是視窗子系統（`dumpbin /headers`）；`SjMarkTiming` 不存在、`SjMarkReleaseIds` 在 DLL 與 exe 都存在。
   - `installer-ca.dll` 是 Binary 表裡唯一的 DLL；靜態匯入在 §6.8 的名單內、沒有 delay-load；三個匯出都在。
   - 自訂動作：Id、種類、命令列或匯出名、執行方式（立即、延後、rollback、模擬、`TerminalServerAware`、不等待）、失敗時、排的位置與條件，逐列等於 §6.6 的表；沒有表以外的自訂動作；從對話框觸發的動作剛好一個（`ExitDialog`、`Finish`、`DoAction`、`StartHost`、條件 `NOT Installed`）；`InstallUISequence` 等其他序列沒有自訂動作。
@@ -842,7 +842,7 @@ Rust、`cdylib`、靜態 CRT，三個匯出函式（`windows/installer-ca`）：
 
 ### 6.10 怎麼打英文
 
-善解是目前輸入法時怎麼打英文（Win+Space 切到別的輸入法、Ctrl+Space、Caps Lock 開著打字母）：待 VM 驗收量測（E 項，記錄項），量完照結果寫在這裡。Ctrl+Space 與單按 Shift 的切換不做（§3.14）。
+善解是目前輸入法時怎麼打英文，測試 VM 量到（E 項，記錄項）：Win+Space 換到別的輸入法；Ctrl+Space 切中英（Windows 自己的快速鍵，不是善解做的）；Caps Lock 開著時打字母，大寫字母直通。輸入法指示器看不出現在是中文還是英文。善解自己不做 Ctrl+Space 與單按 Shift 的切換（§3.14）。
 
 ### 6.11 已知限制
 

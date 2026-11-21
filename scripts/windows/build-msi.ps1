@@ -105,8 +105,10 @@ foreach ($line in $buildApp[($starts[0] + 1)..($end - 1)]) {
 if (@($body | Where-Object { $_.EndsWith('Details: data.md.') }).Count -ne 1) { throw 'build-app.sh: expected one line ending "Details: data.md."' }
 $attribution = ($body -join "`n") + "`n" + ([IO.File]::ReadAllText((Join-Path $Repo 'LICENSES\name-suggestion-index-BSD-3-Clause.txt')) -replace "`r`n", "`n")
 # The meme pack is not in the Windows package (windows/host/src/engine.rs PACKS): its three names leave the first paragraph and its
-# paragraph goes. Each piece of text must be found exactly once, so a change of the App's text stops the build here.
-foreach ($name in 'packs/meme-add.tsv', 'packs/meme-sources.tsv', 'packs/meme.json') {
+# paragraph goes. english.tsv (the count table of the core's "English or Zhuyin" comparison) is not in it either: the resident host turns
+# English typing off (shanjie_engine_set_english 0 in the same file), so the comparison never runs; its name leaves the first paragraph
+# (the text has no paragraph of its own for it). Each piece of text must be found exactly once, so a change of the App's text stops the build here.
+foreach ($name in 'packs/meme-add.tsv', 'packs/meme-sources.tsv', 'packs/meme.json', 'english.tsv') {
     $n = ([regex]::Matches($attribution, [regex]::Escape(", $name"))).Count
     if ($n -ne 1) { throw "the attribution text names ', $name' $n times, expected once" }
     $attribution = $attribution.Replace(", $name", '')
@@ -115,6 +117,7 @@ $memeBlock = [regex]'(?m)^packs/meme-add\.tsv: .*\n(?:  .*\n)*'
 if ($memeBlock.Matches($attribution).Count -ne 1) { throw 'the attribution text has not exactly one packs/meme-add.tsv paragraph' }
 $attribution = $memeBlock.Replace($attribution, '', 1)
 if ($attribution -match 'packs/meme') { throw 'the attribution text still names the meme pack, which the Windows package does not ship' }
+if ($attribution -match 'english\.tsv') { throw 'the attribution text still names english.tsv, which the Windows package does not ship' }
 if ($attribution -match 'Sparkle') { throw 'the attribution text names Sparkle, which the Windows package does not ship' }
 [IO.File]::WriteAllText((Join-Path $gen 'CC-BY-SA-4.0-attribution.txt'), $attribution, [Text.UTF8Encoding]::new($false))
 
