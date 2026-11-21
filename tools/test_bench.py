@@ -826,8 +826,8 @@ class SuiteV2(Tmp):
                 self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
                 with self.assertRaises(RuntimeError):
                     bench.run_cell2(self.ctx, v, "pub", "chat", False)
-        for label in bench.VERSIONS2:
-            self.assertNotIn("tone3", bench.VERSIONS2[label], "no released version ships it yet")
+        for label in bench.VERSIONS2:   # v0.9.0 is the first release with it
+            self.assertEqual("tone3" in bench.VERSIONS2[label], label == "v0.9.0")
 
     def test_recur_version_marks_every_context_tag_after_ctx(self):
         """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
