@@ -257,8 +257,12 @@ class Gate:
             self.rec("b.rss_failed", rnd, arm, "dev302", rc, "rc", l0, l1)
             self.fail("B", "head", arm, "(B) %s stopped after %d s" % (name, T_DEV))
             return
-        if rc != 0 or kib is None or not tag_ok(self.b_tag(arm, out), tl8):
-            raise Broken("(B) %s: exit %d, peak RSS %s, summary tag %s (wanted +tl:%s)" % (name, rc, kib, summary_tag(out), tl8))
+        if rc != 0 or kib is None:   # a failed run: a failed gate for the head tree, no verdict for the base tree
+            self.rec("b.rss_failed", rnd, arm, "dev302", rc, "rc", l0, l1)
+            self.fail("B", "head", arm, "(B) %s: exit %d, peak RSS %s" % (name, rc, kib))
+            return
+        if not tag_ok(self.b_tag(arm, out), tl8):   # the wrong model in the tree: a broken setup on either side
+            raise Broken("(B) %s: summary tag %s (wanted +tl:%s)" % (name, summary_tag(out), tl8))
         self.rec("b.rss", rnd, arm, "dev302", kib, "KiB", l0, l1)
 
     def b_lat(self, rnd, arm, s):
@@ -273,8 +277,10 @@ class Gate:
             return
         p95, n = p95_ms(open(kt).read()) if os.path.exists(kt) else (None, 0)
         kib = peak_rss_kib(err)
-        if rc != 0 or p95 is None or kib is None or self.b_tag(arm, out) is None:
-            raise Broken("(B) %s: exit %d, p95 %s over %d keys, peak RSS %s, summary tag %s (wanted one summary line)" % (name, rc, p95, n, kib, summary_tag(out)))
+        if rc != 0 or p95 is None or kib is None or self.b_tag(arm, out) is None:   # a failed gate for the head tree, no verdict for the base tree
+            self.rec("b.lat_failed", rnd, arm, s, rc, "rc", l0, l1)
+            self.fail("B", "head", arm, "(B) %s: exit %d, p95 %s over %d keys, peak RSS %s, summary tag %s (wanted one summary line)" % (name, rc, p95, n, kib, summary_tag(out)))
+            return
         self.rec("b.p95", rnd, arm, s, "%.3f" % p95, "ms", l0, l1)
         self.rec("b.keys", rnd, arm, s, n, "keys", l0, l1)
         self.rec("b.rss_replay", rnd, arm, s, kib, "KiB", l0, l1)
@@ -410,7 +416,7 @@ class Gate:
                 add("B", "key p95, %s, round %d (%s keys)" % (s, r, v.get(("b.keys", r, "head", s))), x, y, d, "ms",
                     "head - base <= %g ms and head < %g ms" % (DELTA_GATE_MS, P95_GATE_MS), d is not None and d <= DELTA_GATE_MS and y < P95_GATE_MS)
         if self.failed["B"]:
-            add("B", "a run of the head tree hit its time limit (see the log)", None, None, None, "rc", "every run completes", False)
+            add("B", "a run of the head tree failed or hit its time limit (see the log)", None, None, None, "rc", "every run completes", False)
 
     def write(self):
         rows, ok, notes = self.verdict()
@@ -485,6 +491,16 @@ def self_test():
     assert ok and not notes and all(r[0] == "B" for r in rows)
     g.vals[("b.p95", 1, "head", SETS[0])] = "4.001"
     assert not g.verdict()[1]
+    g.vals[("b.p95", 1, "head", SETS[0])] = "3.900"
+    g.fail("B", "head", "head", "(B) a head run: exit 101")   # a failed head run: a failed gate (exit 1), not a broken setup
+    rows, ok, notes = g.verdict()
+    assert not ok and g.failed["B"] and [r[6] for r in rows if "failed or hit its time limit" in r[1]] == ["FAIL"]
+    try:
+        g.fail("B", "head", "base", "(B) a base run: exit 101")   # a failed base run: no verdict (exit 2)
+    except Broken:
+        pass
+    else:
+        raise AssertionError("a failed base run did not stop the measurement")
     print("self-test ok")
 
 
@@ -523,7 +539,7 @@ def main():
     g = Gate(a)
     try:
         g.measure()
-    except Broken as e:
+    except (Broken, OSError, subprocess.CalledProcessError, ValueError) as e:   # a missing file or a failed git call is a broken setup (2), not a failed gate (1)
         print("STOP %s: no verdict (the raw values so far are in %s/raw.tsv)" % (e, a.out), file=sys.stderr)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
