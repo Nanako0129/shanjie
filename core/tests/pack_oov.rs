@@ -157,7 +157,7 @@ fn total_score_treats_a_pack_word_as_unknown_in_every_place() {
 #[test]
 fn pack_oov_decode_matches_python_golden() {
     // The golden's f64 bits come from a Mac Python run; Linux's libm differs in the last bit of log10 (as for engine_digits.rs's goldens).
-    // CI's core job runs on macOS, so this is checked there.
+    // CI's `core` jobs run on macOS, so this is checked there.
     if !cfg!(target_os = "macos") {
         return;
     }
