@@ -125,12 +125,15 @@ jobs:
           set -euo pipefail
           cargo build --release --locked -p cli --bin shanjie-eval
           rc=0
-          cargo test --release --locked -p core --test engine_predict --no-run 2> "$RUNNER_TEMP/test-build.err" || rc=$?
+          cargo test --release --locked -p core --test engine_predict --no-run --color never 2> "$RUNNER_TEMP/test-build.err" || rc=$?
           cat "$RUNNER_TEMP/test-build.err" >&2
           [ "$rc" = 0 ]
           exe=$(sed -n 's/^ *Executable tests\/engine_predict\.rs (\(.*\))$/\1/p' "$RUNNER_TEMP/test-build.err")
+          # The job sets CARGO_TERM_COLOR=always; without --color never the line carries escape codes and the sed finds nothing.
+          # An empty match would turn into "$PWD/", a directory, which -x alone accepts: require a regular file.
+          [ -n "$exe" ] || { echo "error: no 'Executable tests/engine_predict.rs' line in the cargo output" >&2; exit 1; }
           case "$exe" in /*) ;; *) exe="$PWD/$exe";; esac
-          [ -x "$exe" ] || { echo "error: no test executable ('$exe')" >&2; exit 1; }
+          [ -f "$exe" ] && [ -x "$exe" ] || { echo "error: no test executable ('$exe')" >&2; exit 1; }
           echo "TEST_EXE=$exe" >> "$GITHUB_ENV"
 
       - name: Build (B) base, the evaluation CLI and shanjie-replay
