@@ -58,11 +58,11 @@ shasum -a 256 -c data/classes.sjc.sha256 >/dev/null \
   gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm"
 shasum -a 256 -c data/kn.sjkn.sha256 >/dev/null \
   || fail "data/lm/kn.sjkn does not match data/kn.sjkn.sha256; download sj-kn-2-397k again"
-# The small model behind 語意校正 (docs/spec/semantic-rerank.md §8.3), paired with sj-lm-7-9.7m's and sj-kn-2-397k's hashes (SJTL0004).
-[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-8-15m release asset:
-  gh release download sj-sr-8-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
+# The small model behind 語意校正 (docs/spec/semantic-rerank.md §8.3), paired with sj-lm-7-9.7m's and sj-kn-2-397k's hashes (SJTL0006).
+[ -f data/lm/tinylm.sjtl ] || fail "data/lm/tinylm.sjtl is missing (the small model of 語意校正, S7c). Download the sj-sr-10-31m release asset (會意 SJ-SR-10-31M):
+  gh release download sj-sr-10-31m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm"
 shasum -a 256 -c data/tinylm.sjtl.sha256 >/dev/null \
-  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-8-15m again"
+  || fail "data/lm/tinylm.sjtl does not match data/tinylm.sjtl.sha256; download sj-sr-10-31m (會意 SJ-SR-10-31M) again"
 # The trigram table of the formal profile (docs/spec/decoder.md §3.4): bound to the bigram model's hash; the core loads it from beside the model.
 [ -f data/lm/trigram.sjt3 ] || fail "data/lm/trigram.sjt3 is missing (the trigram table of the formal profile). Download the sj-cx-2-7.7m release asset:
   gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D data/lm"
