@@ -485,7 +485,11 @@ final class RerankTests: XCTestCase {
     /// and relabels). From a version 3 file it is the file itself. From a version 4 file (SJTL0004, tinylm-v5) it is the file without its
     /// 32 kn.sjkn hash bytes (212..<244), relabelled, so its conservative and aggressive sets are tinylm-v5's real values, not copies of
     /// the standard ones (in tinylm-v5: chat conservative 1/2/3, aggressive equal to standard; formal standard 1/1/3, conservative
-    /// 1/1/4; sj-sr-6-14m changes only the formal standard and aggressive sets to 0.7/2/1).
+    /// 1/1/4; sj-sr-6-14m changes only the formal standard and aggressive sets to 0.7/2/1). From a version 6 file in the boundary format (SJTL0006,
+    /// 會意 SJ-SR-10-31M) it is the file without its bytes 212..<256 (the kn.sjkn hash, the declared left length, the flags and K), relabelled, with one
+    /// code point (U+E000, private use) added at the end of the character list: a boundary file lists V - 4 characters and keeps [SEP] as id V - 1,
+    /// a version 3 file lists V - 3, so the added code point names that id and every tensor stays where it was. The derived files read the short
+    /// context key of versions 1 to 4, not the 62-character one.
     /// Under model-v6 + kn-v1 + tinylm-v5 (chat standard 0.3/2/0.25) the RerankTests passed on 2026-10-15 (`make test-swift`).
     private func versionedResources() throws -> (v2: URL, v3: URL) {
         let real = try Data(contentsOf: TestData.repo.appendingPathComponent("data/lm/tinylm.sjtl"))
@@ -505,6 +509,15 @@ final class RerankTests: XCTestCase {
             var d2 = d3
             d2.removeSubrange(116..<212)
             (v2, v3) = (label(d2, 2), label(d3, 3))
+        case "SJTL0006":
+            let u32 = { (at: Int) -> Int in (0..<4).reduce(0) { $0 | Int(real[at + $1]) << (8 * $1) } }
+            guard u32(248) == 1 else { throw CocoaError(.fileReadCorruptFile) }  // only the boundary format ships
+            var d3 = real
+            d3.insert(contentsOf: [0x00, 0xE0, 0x00, 0x00], at: 256 + 4 * (u32(32) - 4))
+            d3.removeSubrange(212..<256)
+            var d2 = d3
+            d2.removeSubrange(116..<212)
+            (v2, v3) = (label(d2, 2), label(d3, 3))
         case "SJTL0002":
             let chat = real[36..<52] + real[100..<108], formal = real[52..<68] + real[108..<116]
             var d = real
@@ -515,14 +528,14 @@ final class RerankTests: XCTestCase {
             d.removeSubrange(116..<212)
             (v2, v3) = (label(d, 2), real)
         default:
-            throw CocoaError(.fileReadCorruptFile)  // fails the test: neither version 2 nor 3 ships
+            throw CocoaError(.fileReadCorruptFile)  // fails the test: a version this helper cannot derive version 2 and 3 files from
         }
         XCTAssertEqual(v3.count, v2.count + 96)
         let names: Set<String> = ["mcbpmf-data.txt", "overlay-add.tsv", "sandhi-add.tsv", "names-add.tsv", "demote.tsv", "variant-order.tsv", "std-exempt.tsv", "rerank-protect.tsv", "bigram.sjlm", "classes.sjc"]
         let dirs = (try XCTUnwrap(TestData.resources(only: names)), try XCTUnwrap(TestData.resources(only: names)))
         try v2.write(to: dirs.0.appendingPathComponent(Shell.tinyLMFile))
         try v3.write(to: dirs.1.appendingPathComponent(Shell.tinyLMFile))
-        addTeardownBlock { for d in [dirs.0, dirs.1] { try? FileManager.default.removeItem(at: d) } }  // two 14.6 MB files each
+        addTeardownBlock { for d in [dirs.0, dirs.1] { try? FileManager.default.removeItem(at: d) } }  // two model files each (about 31 MB with 會意 SJ-SR-10-31M)
         // Each derived file must actually pair (the model loaded): a refused one would grey the strength control for the wrong reason.
         for d in [dirs.0, dirs.1] {
             XCTAssertFalse(FileManager.default.fileExists(atPath: d.appendingPathComponent("kn.sjkn").path), "no kn.sjkn beside a version 2 or 3 file")
