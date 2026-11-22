@@ -75,17 +75,28 @@ jobs:
   core:
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    # docs/spec/release-and-ci.md: the release tests of both packages (the shipping profile, with the per-key p95 assertions and the
-    # f64 goldens made on macOS); the C header smoke test is in `swift`. The debug run is the `debug` job and the Python steps the `python` job, both on Linux.
+    # docs/spec/release-and-ci.md §3.1: the release tests of the whole workspace (the shipping profile, with the per-key p95 assertions and the
+    # f64 goldens made on macOS) on three runners. `cli` runs the cli package; `share` the core package's unit and doc tests, its test files
+    # that scripts/ci-shards.tsv gives it, the example's build and the three Windows crates; `rest` every other core/tests file. Together they
+    # run what `cargo test --release --locked` runs (compare with scripts/ci-testset.py). The C header smoke test is in `swift`; the debug run
+    # is `debug` and `debug-tests` and the Python steps the `python` job, on Linux.
+    strategy:
+      fail-fast: false
+      matrix:
+        # The names scripts/ci-shard.sh knows for `macos`; the first step fails when the two differ.
+        shard: [cli, share, rest]
     runs-on: xcode-27
-    # A hung FFI child process should not hold the runner for the 6-hour default. The release tests took 16.3-18.5 min on main
-    # (2026-11-09); by 2026-11-21 the last 25 runs that finished took 23-33 min and five were cut off at the old 35-min limit
-    # (GitHub reports a timeout as "cancelled"), so the limit leaves room above that.
-    timeout-minutes: 50
+    # A hung FFI child process should not hold the runner for the 6-hour default. As one job the release tests took 23-33 min
+    # (2026-11-21); a shard is about a third of that plus the build (the measured times: docs/spec/release-and-ci.md §4).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+
+      # The matrix above against scripts/ci-shard.sh's names, and the table's own checks (every core/tests file in exactly one shard).
+      - name: Shard names
+        run: scripts/ci-shard.sh macos --check-matrix
 
       # Pinned to the toolchain the golden files were generated with: scores
       # must be bit-identical to the Python reference, and a codegen change
@@ -104,23 +115,66 @@ jobs:
         run: scripts/fetch-models.sh
 
       # Release also enforces the per-key p95 < 16 ms assertions in the replays.
-      - name: Tests (release)
-        run: cargo test --release --locked
+      - name: Tests (release, cli package)
+        if: matrix.shard == 'cli'
+        run: cargo test -p cli --release --locked
+
+      # core/examples/pack_switch_bench.rs is built and never run. A `cargo test` that names its targets no longer builds it,
+      # and `cargo test --examples` would run it as an executable with no tests, so it has its own build.
+      - name: Example builds (release)
+        if: matrix.shard == 'share'
+        run: |
+          cargo build -p core --release --locked --examples
+          test -f target/release/examples/pack_switch_bench
+
+      # `set -x` prints each cargo command as it runs: scripts/ci-testset.py reads the package of a test executable from that line.
+      - name: Tests (release, core unit tests, this shard's test files, doc tests)
+        if: matrix.shard == 'share'
+        run: |
+          set -euo pipefail
+          targets=$(scripts/ci-shard.sh macos share)
+          read -ra t <<< "$targets"
+          set -x
+          cargo test -p core --release --locked --lib --bins "${t[@]}"
+          cargo test -p core --release --locked --doc
+
+      # docs/spec/windows-tip.md §5.10: the three Windows crates are plain Rust outside cfg(windows) and are tested on every platform.
+      - name: Tests (release, Windows wire format)
+        if: matrix.shard == 'share'
+        run: cargo test -p shanjie-win-proto --release --locked
+
+      - name: Tests (release, Windows client)
+        if: matrix.shard == 'share'
+        run: cargo test -p shanjie-tip --release --locked
+
+      - name: Tests (release, Windows host)
+        if: matrix.shard == 'share'
+        run: cargo test -p shanjie-host --release --locked
+
+      - name: Tests (release, this shard's core test files)
+        if: matrix.shard == 'rest'
+        run: |
+          set -euo pipefail
+          targets=$(scripts/ci-shard.sh macos rest)
+          read -ra t <<< "$targets"
+          set -x
+          cargo test -p core --release --locked "${t[@]}"
 
   # docs/spec/release-and-ci.md: the debug run (overflow checks and the standard library's debug-only checks) on Linux, beside the
   # release tests instead of on a second macOS runner. Linux runs the core package's tests faster than the macOS runner; the cli
   # package's integration tests score with the small model, which has no Accelerate on Linux (the portable kernels, slower than macOS), so they run
-  # in release only (the `core` job) and here only the cli package's unit tests run. Not checked in debug any more: the macOS-only
+  # in release only (the `core` jobs) and here only the cli package's unit tests run. The core package's test files run beside this job in
+  # `debug-tests`. Not checked in debug any more: the macOS-only
   # branches (the small model's Accelerate calls, learn_store.rs's macOS constants) and the two f64 goldens in engine_digits.rs that
   # return early on Linux (row49_scores_match_the_python_golden_bit_for_bit, predict_digits_matches_the_python_golden_bit_for_bit);
-  # all of them run in the `core` job. Skipped exactly when `core` is.
+  # all of them run in the `core` jobs. Skipped exactly when `core` is.
   debug:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     # The image the Linux results were measured on, not ubuntu-latest: the goldens and libm-dependent tests are image facts.
     runs-on: ubuntu-24.04
-    # A hung child process should not hold the runner for the 6-hour default. The last 25 runs that finished took 14-16 min and
-    # two were cut off at the old 20-min limit (2026-11-21), so the limit leaves room above that.
+    # A hung child process should not hold the runner for the 6-hour default. With the core test files still in this job, the last 25 runs
+    # that finished took 14-16 min and two were cut off at the old 20-min limit (2026-11-21).
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -138,14 +192,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-models.sh
 
-      - name: Tests (debug, core package)
-        run: cargo test --locked -p core
+      # core/examples/pack_switch_bench.rs is built and never run, here in the dev profile (why its own build: the `core` job's comment).
+      - name: Example builds (debug)
+        run: |
+          cargo build --locked -p core --examples
+          test -f target/debug/examples/pack_switch_bench
+
+      # The core package's unit tests and doc tests; its test files are the `debug-tests` job.
+      - name: Tests (debug, core unit tests)
+        run: cargo test --locked -p core --lib --bins
+
+      - name: Tests (debug, core doc tests)
+        run: cargo test --locked -p core --doc
 
       - name: Tests (debug, cli unit tests)
         run: cargo test --locked -p cli --lib --bins
 
       # docs/spec/windows-tip.md §5.10: the wire format of the Windows client and host is plain Rust and is tested on every
-      # platform (macOS runs it in the `core` job's workspace test, Windows in the `windows` job).
+      # platform (macOS runs it in the `core (share)` job, Windows in the `windows` job).
       - name: Tests (debug, Windows wire format)
         run: cargo test --locked -p shanjie-win-proto
 
@@ -165,11 +229,55 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # docs/spec/release-and-ci.md §3.2: the core package's test files in debug, on two runners beside `debug` (scripts/ci-shards.tsv says which
+  # file runs where; an unlisted file runs in shard 2). Skipped exactly when `core` is.
+  debug-tests:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # The names scripts/ci-shard.sh knows for `debug`; the first step fails when the two differ.
+        shard: [1, 2]
+    # The measured image, as in `debug`.
+    runs-on: ubuntu-24.04
+    # A hung child process should not hold the runner for the 6-hour default (the measured times: docs/spec/release-and-ci.md §4).
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Shard names
+        run: scripts/ci-shard.sh debug --check-matrix
+
+      # The pinned toolchain of the core job (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.97.1
+
+      # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
+      - name: Fetch the language model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-models.sh
+
+      # `set -x`: see the `core` job.
+      - name: Tests (debug, this shard's core test files)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          targets=$(scripts/ci-shard.sh debug "$SHARD")
+          read -ra t <<< "$targets"
+          set -x
+          cargo test --locked -p core "${t[@]}"
+
   # docs/spec/windows-tip.md §2.9: the core on x86_64-pc-windows-msvc. The tests pass (minus the per-key p95 assertions, which a
   # 4 vCPU runner cannot measure and which the Linux and macOS jobs keep), the evaluation CLI's six rowstats go up as an artifact for the
   # `rowstats` job, the checkout has LF line endings where the data and tests need them, and the core also builds for i686 and aarch64 (build only).
   # Starts beside the other jobs (the comparison with `debug` is the `rowstats` job); skipped exactly when `core` is. Every step runs in bash
-  # (Git Bash on the runner), not PowerShell. core/tests/engine_cap.rs runs in `windows-cap` beside it.
+  # (Git Bash on the runner), not PowerShell. The core package's test files run in `windows-tests` beside it.
   windows:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -195,30 +303,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-models.sh
 
-      # Every core test target but core/tests/engine_cap.rs (the `windows-cap` job), listed from the file names so that a new test file
-      # runs here without an edit (core has no [[test]] renames, examples or benches, so a file stem is its target name); then the doc tests.
-      # The seven tests that assert a per-key p95 under 16 ms in release are skipped (a 4 vCPU runner measures them wrongly; the 188 WSL run
-      # skips them for the same reason). Their selection assertions run in the Linux and macOS jobs.
-      - name: Tests (release, core package, all but engine_cap)
-        run: |
-          set -euo pipefail
-          targets=()
-          n=0
-          for f in core/tests/*.rs; do
-            n=$((n + 1))
-            t=$(basename "$f" .rs)
-            [ "$t" = engine_cap ] || targets+=(--test "$t")
-          done
-          [ "${#targets[@]}" -gt 0 ] && [ "${#targets[@]}" -eq $(( (n - 1) * 2 )) ] || { echo "error: ${#targets[@]} target arguments for $n test files" >&2; exit 1; }
-          cargo test -p core --release --locked --lib --bins "${targets[@]}" -- \
-            --skip replay_standard_chat_production_path \
-            --skip replay_standard_302_of_302 \
-            --skip replay_eten_302_of_302 \
-            --skip replay_with_english_on \
-            --skip replay_with_english_on_and_the_revert_switches_off \
-            --skip replay_with_english_and_digits_on \
-            --skip perf_two_thousand_new_words_per_key
-          cargo test -p core --release --locked --doc
+      # The core package's unit tests and doc tests; its test files are the `windows-tests` job.
+      - name: Tests (release, core unit tests)
+        run: cargo test -p core --release --locked --lib --bins
+
+      - name: Tests (release, core doc tests)
+        run: cargo test -p core --release --locked --doc
 
       - name: Evaluation CLI (release)
         run: cargo build --release --locked -p cli --bin shanjie-eval
@@ -317,14 +407,21 @@ jobs:
       - name: Windows client and host tests (release)
         run: cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host
 
-  # docs/spec/windows-tip.md §2.9: core/tests/engine_cap.rs on x86_64-pc-windows-msvc in release, beside `windows`. It is a third to a half of
-  # the Windows core test time (no Accelerate on Windows: the small model's rerank runs on the portable kernels for every key of 70-128 syllables), and it
-  # has none of the per-key p95 tests. Skipped exactly when `core` is.
-  windows-cap:
+  # docs/spec/windows-tip.md §2.9: the core package's test files on x86_64-pc-windows-msvc in release, on two runners beside `windows`
+  # (scripts/ci-shards.tsv says which file runs where; an unlisted file runs in shard 2, so a new test file runs without an edit).
+  # core/tests/engine_cap.rs is the longest file here (no Accelerate on Windows: the small model's rerank runs on the portable kernels for
+  # every key of 70-128 syllables). Skipped exactly when `core` is.
+  windows-tests:
     needs: changes
     if: needs.changes.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # The names scripts/ci-shard.sh knows for `windows`; the first step fails when the two differ.
+        shard: [1, 2]
     runs-on: windows-2025
-    timeout-minutes: 30
+    # A hung child process should not hold the runner for the 6-hour default (the measured times: docs/spec/release-and-ci.md §4).
+    timeout-minutes: 25
     defaults:
       run:
         shell: bash
@@ -332,6 +429,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+
+      - name: Shard names
+        run: scripts/ci-shard.sh windows --check-matrix
 
       # The pinned toolchain of the core job (why: its comment).
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
@@ -344,8 +444,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-models.sh
 
-      - name: Tests (release, core/tests/engine_cap.rs)
-        run: cargo test -p core --release --locked --test engine_cap
+      # The seven tests that assert a per-key p95 under 16 ms in release are skipped in every shard (a 4 vCPU runner measures them wrongly).
+      # Their selection assertions run in the Linux and macOS jobs. `set -x`: see the `core` job.
+      - name: Tests (release, this shard's core test files)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          targets=$(scripts/ci-shard.sh windows "$SHARD")
+          read -ra t <<< "$targets"
+          set -x
+          cargo test -p core --release --locked "${t[@]}" -- \
+            --skip replay_standard_chat_production_path \
+            --skip replay_standard_302_of_302 \
+            --skip replay_eten_302_of_302 \
+            --skip replay_with_english_on \
+            --skip replay_with_english_on_and_the_revert_switches_off \
+            --skip replay_with_english_and_digits_on \
+            --skip perf_two_thousand_new_words_per_key
 
   # docs/spec/windows-tip.md §2.9: the six Windows rowstats equal the Linux job's byte for byte. Its own job so that `windows` need not
   # wait for `debug`. It runs whenever both succeed (the implicit success() of `if`); when either fails it is skipped and the run fails anyway.
@@ -640,8 +756,8 @@ jobs:
         run: scripts/fetch-models.sh
 
       # docs/spec/install-and-update.md §10.2, in its order: no step before
-      # step 3 launches any sandboxed build. cargo test runs in the core and
-      # debug jobs and the Swift tests in the swift job.
+      # step 3 launches any sandboxed build. cargo test runs in the core,
+      # debug and debug-tests jobs and the Swift tests in the swift job.
       # Step 0: the default build has the development ID, the development names
       # (docs/spec/install-and-update.md §2.1), and no migration list. Build only.
       - name: "Step 0: default build (development ID), build only"
@@ -714,6 +830,11 @@ jobs:
       # release.yml's CI gate against a stub gh: a tag on an appcast.xml-only commit uses its parent's run.
       - name: CI gate script
         run: scripts/test-check-ci-gate.sh
+
+      # scripts/ci-shard.sh against this ci.yml's three matrices and against fake trees (a row for a missing file, a file listed twice,
+      # an unknown shard, a new test file).
+      - name: CI shard script
+        run: scripts/test-ci-shard.sh
 
       # The model list of the About page (docs/spec/models.md §1): scripts/check-models.sh on fake folders.
       - name: Model list check

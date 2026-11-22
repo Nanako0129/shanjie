@@ -635,7 +635,7 @@ EOF
 2a. 本機防呆：`CI= EXPECTED_BUNDLE_ID=<正式 ID> scripts/check-app.sh` 必須非 0 並印 `check 6 refused`，正式 container 仍不存在；`SKIP_RUN=1` 的同一個指令必須 0。
 3. `scripts/test-sandbox-migration.sh <正式組建> <無清單組建>`（`timeout-minutes: 10`；讀 container 若在 CI 上跳 App Data 的詢問會卡住）：這個 job 第一次啟動沙盒組建。
 4. 同一個腳本的拒絕測試：`CI=` 空與 `CI=true HOME=<暫存目錄>` 都必須非 0、暫存目錄沒有新檔案，log 分別有 `refused: CI is not true` 與「is not this account's home directory」。
-5. `scripts/test-install-ime.sh`、`scripts/test-check-ci-gate.sh`、`scripts/test-check-models.sh`。
+5. `scripts/test-install-ime.sh`、`scripts/test-check-ci-gate.sh`、`scripts/test-ci-shard.sh`、`scripts/test-check-models.sh`。
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=…selftest-$GITHUB_RUN_ID`：前後各檢查一次 `~/Library/Containers/<該 ID>`，之前不存在、之後存在（證明沙盒有套上）。
 7. `EXPECTED_BUNDLE_ID=<正式 ID> scripts/check-app.sh`（check 2、3、6）。
 8. `scripts/test-sandbox-mutations.sh`（§10.3）。

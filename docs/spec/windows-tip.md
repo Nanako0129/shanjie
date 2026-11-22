@@ -12,7 +12,7 @@
 - `windows/host`：常駐程序 `shanjie-host.exe`，每個使用者的每個登入工作階段一支，只有它載入模型（§5）。
 - `windows/proto`：DLL 與常駐程序之間的線上格式，純 Rust、不分平台（§5.3）。
 - `windows/tip`：TSF 文字服務 DLL，常駐程序的薄客戶端，不相依核心，自己用 Direct2D 與 DirectWrite 畫候選窗（§3.15）。`crate-type = ["cdylib", "rlib"]`（rlib 給單元測試），除了兩個純函式模組（`keys`、`candlayout`，各平台都編、都測）之外都在 `cfg(windows)` 裡，在 macOS 與 Linux 上其餘是空的，不影響既有的建置與測試。
-- CI 的 `windows` 與 `windows-cap` job，以及 `windows` 與 Linux `debug` job 的 rowstats 比對（`rowstats` job，§2.9）。
+- CI 的 `windows` 與 `windows-tests` job，以及 `windows` 與 Linux `debug` job 的 rowstats 比對（`rowstats` job，§2.9）。
 - 微軟注音量測（§4）：只是參考資料，程式不讀它。
 
 ### 1.2 現況
@@ -91,14 +91,14 @@ Linux `debug` job 在既有步驟之後加三步：
 1. Rust 1.97.1（與 Linux 比對的那一邊相同）；
 2. checkout（`.gitattributes` 讓資料是 LF）；
 3. `scripts/fetch-models.sh` 取模型並核對 `data/*.sha256`；Git Bash 沒有 `shasum` 時改用 `sha256sum -c`（同一種檢查檔格式）；
-4. 核心套件除了 `core/tests/engine_cap.rs` 以外的全部測試（`cargo test -p core --release --locked --lib --bins --test <每個其他測試檔> -- --skip …`，測試檔清單由 `core/tests/*.rs` 的檔名產生，再另跑 `--doc`；`engine_cap.rs` 在並行的 `windows-cap` job 跑），跳過七個在 release 下斷言每鍵 p95 < 16 ms 的測試：`replay_standard_chat_production_path`、`replay_standard_302_of_302`、`replay_eten_302_of_302`、`replay_with_english_on`、`replay_with_english_on_and_the_revert_switches_off`、`replay_with_english_and_digits_on`、`perf_two_thousand_new_words_per_key`（4 vCPU 的 runner 量不準；它們的選字斷言在 Linux 與 macOS job 照跑）；
+4. 核心套件的單元測試與 doc-test（`cargo test -p core --release --locked --lib --bins`，再另跑 `--doc`）；`core/tests/*.rs` 在並行的 `windows-tests` job 跑；
 5. 建 `shanjie-eval`，`scripts/ci-rowstats.sh rowstats-windows` 產生同樣六份；
 6. 這六份以 artifact `rowstats-windows` 上傳；
 7. 換行檢查：`git ls-files --eol data eval scripts core/tests cli/tests` 沒有 `w/crlf` 或 `w/mixed`，每個 `i/lf` 的檔工作區都是 `w/lf`；
 8. 只編不測：`rustup target add i686-pc-windows-msvc aarch64-pc-windows-msvc` 後 `cargo build --locked -p core --target` 這兩個目標；
 9. `shanjie-tip` 的建置與測試（§3.13）。
 
-`windows-cap` job（映像 `windows-2025`，`needs: changes`，`if` 與其他 job 相同，逾時 30 分鐘，所有步驟用 bash）：Rust 1.97.1、checkout、`scripts/fetch-models.sh`，然後 `cargo test -p core --release --locked --test engine_cap`（這個檔沒有逐鍵 p95 的測試，一個都不跳過）。
+`windows-tests` job（映像 `windows-2025`，matrix 分兩片 `windows-tests (1)`、`windows-tests (2)`，`fail-fast: false`，`needs: changes`，`if` 與其他 job 相同，各逾時 25 分鐘，所有步驟用 bash）：checkout、`scripts/ci-shard.sh windows --check-matrix`（matrix 的片名與腳本的相同）、Rust 1.97.1、`scripts/fetch-models.sh`，然後 `cargo test -p core --release --locked --test <這一片的每個測試檔> -- --skip …`。兩片合起來是 `core/tests/*.rs` 的每個檔各一次（含 `engine_cap.rs`）；哪個檔在哪一片由 `scripts/ci-shards.tsv` 決定，沒列到的檔（含新增的）在第 2 片，`scripts/ci-shard.sh` 印出 `--test` 清單並檢查沒有漏掉或重複的檔（`docs/spec/release-and-ci.md` §3.1）。每一片都跳過七個在 release 下斷言每鍵 p95 < 16 ms 的測試：`replay_standard_chat_production_path`、`replay_standard_302_of_302`、`replay_eten_302_of_302`、`replay_with_english_on`、`replay_with_english_on_and_the_revert_switches_off`、`replay_with_english_and_digits_on`、`perf_two_thousand_new_words_per_key`（4 vCPU 的 runner 量不準；它們的選字斷言在 Linux 與 macOS job 照跑）。
 
 `rowstats` job（ubuntu-24.04，`needs: [changes, debug, windows]`，`if` 與其他 job 相同，逾時 5 分鐘）下載兩邊的 artifact，逐檔 `cmp`，數量必須是 6 對 6，任何一份不同就失敗。`debug` 與 `windows` 都成功時它一定會跑；其中一個失敗時它被略過，但整個 run 照樣失敗。
 
@@ -595,7 +595,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 ### 5.10 CI
 
 - `windows` job：建 `shanjie-tip`、`shanjie-host`（各自先帶 `timing`、再不帶，檢查的是不帶的那一份），`dumpbin /dependents` 核對 DLL 與 exe 都沒有 C 執行階段的匯入、DLL 的匯入表列得到 `d2d1.dll` 與 `dwrite.dll` 而且沒有 delay-load 的匯入，`dumpbin /exports` 核對 DLL 沒有 `shanjie_` 開頭的匯出（另核對 `DllGetClassObject` 在），`cargo tree -p shanjie-tip` 沒有 `core`，印出大小；跑三個 crate 的測試（線上格式、客戶端的模擬等級、對真的伺服器與引擎的兩條連線與限流、DLL 與常駐程序的 R2 行為測試）。
-- Linux `debug` job 跑 `shanjie-win-proto` 的測試；macOS 的 core job 跑整個 workspace。
+- Linux `debug` job 跑 `shanjie-win-proto` 的測試；macOS 的 `core (share)` job 跑三個 crate 的測試（`cfg(windows)` 以外的部分）。
 
 ### 5.11 驗證方式
 
