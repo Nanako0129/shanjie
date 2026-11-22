@@ -1,45 +1,97 @@
 name: Latency gate
 
-# Two latency gates measured on one macOS runner, the arms alternating (old, new, old, new) so that both see the same machine
-# state: scripts/ci/latency_gate.py says what is measured, how it is read and what the gates are.
-#   (A) TREE_A, one set of binaries, the tree's own small model against the candidate file of a draft release
-#   (B) TREE_BASE against TREE_HEAD
-# The three trees are fixed commits, checked out beside this branch's own checkout (which only supplies scripts/ci).
-env:
-  TREE_A: c93a539724b45f80461345a4b0db5ba91275e34c
-  TREE_BASE: 4f7a831cdf2c06c4b097afbc8dd5b33cb95825d6
-  TREE_HEAD: 32319266c67480d5baa144cd451b337a96469420
-  # The candidate small model: an asset of a draft release (a draft has no tag to look it up by, so the release id is used).
-  NEW_MODEL_RELEASE_ID: "454336190"
-  NEW_MODEL_ASSET: blp-20261012-int8-v6.sjtl
-  NEW_MODEL_SHA256: 5dce15a6077561aae15e3b6166aaf1cca0a9184ee03032b912d5700f91c37730
-  ROUNDS: "2"
-
+# Two latency measurements on macOS runners, started by hand, each with its arms alternating (old, new, old, new) so that both
+# arms see the same machine state: scripts/ci/latency_gate.py says what is measured, how it is read and what the gates are;
+# docs/spec/release-and-ci.md §8 says how to start a run and read its result.
+#   (A) job `model`: one tree's binaries, that tree's own small model against a candidate file that is an asset of a release
+#   (B) job `trees`: a base commit against a head commit
+# Give the inputs of (A), of (B), or of both; a group that is not given is not checked out, downloaded or built.
+#   gh workflow run latency-gate.yml --ref main -f b_base=<commit> -f b_head=<commit>
 on:
-  push:
-    branches: [ci/latency-gate]
   workflow_dispatch:
-
-concurrency:
-  group: latency-gate-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      a_tree:
+        description: "(A) commit whose binaries and current small model are measured (40 hex digits); empty = no (A)"
+        type: string
+        default: ""
+      a_release_id:
+        description: "(A) numeric id of the release that holds the candidate small model (a draft has no tag, so the id)"
+        type: string
+        default: ""
+      a_asset:
+        description: "(A) asset name of the candidate small model in that release"
+        type: string
+        default: ""
+      a_sha256:
+        description: "(A) SHA-256 of the candidate small model (64 hex digits)"
+        type: string
+        default: ""
+      b_base:
+        description: "(B) base commit (40 hex digits); empty = no (B)"
+        type: string
+        default: ""
+      b_head:
+        description: "(B) head commit (40 hex digits)"
+        type: string
+        default: ""
+      rounds:
+        description: "Rounds per measurement, 2 to 9 (each round runs both arms)"
+        type: string
+        default: "2"
 
 permissions:
   contents: read
 
 jobs:
-  measure:
+  # Checks the inputs before anything is checked out, downloaded or built on a macOS runner: a bad or half-given group fails the run here.
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      a: ${{ steps.check.outputs.a }}
+      b: ${{ steps.check.outputs.b }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      # The inputs reach the script through the environment, never as text of the script.
+      - id: check
+        shell: bash
+        env:
+          IN_A_TREE: ${{ inputs.a_tree }}
+          IN_A_RELEASE_ID: ${{ inputs.a_release_id }}
+          IN_A_ASSET: ${{ inputs.a_asset }}
+          IN_A_SHA256: ${{ inputs.a_sha256 }}
+          IN_B_BASE: ${{ inputs.b_base }}
+          IN_B_HEAD: ${{ inputs.b_head }}
+          IN_ROUNDS: ${{ inputs.rounds }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/latency_gate.py --self-test
+          python3 scripts/ci/latency_gate.py --check-inputs
+
+  model:
+    needs: inputs
+    if: needs.inputs.outputs.a == 'true'
     # The runner of ci.yml's macOS jobs: the small model's rerank runs on Accelerate here, as in the App.
     runs-on: xcode-27
     timeout-minutes: 120
-    # A draft release is only visible to a token that can write contents; this is the only job, and no checkout keeps the token.
+    # A draft release is only visible to a token that can write contents, so this job, and only this job, has it. The two steps
+    # that are given the token run code of this workflow's own ref only (gate/), never of the tree under measurement; no
+    # checkout keeps the token, and the tree's code (cargo build, the measurement) runs in steps without it.
     permissions:
       contents: write
     defaults:
       run:
         shell: bash
+    env:
+      A_TREE: ${{ inputs.a_tree }}
+      A_RELEASE_ID: ${{ inputs.a_release_id }}
+      A_ASSET: ${{ inputs.a_asset }}
+      A_SHA256: ${{ inputs.a_sha256 }}
+      ROUNDS: ${{ inputs.rounds }}
     steps:
-      - name: This branch (scripts/ci)
+      - name: This workflow's ref (scripts/ci, scripts/fetch-models.sh)
         timeout-minutes: 5
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -50,24 +102,8 @@ jobs:
         timeout-minutes: 5
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ env.TREE_A }}
+          ref: ${{ inputs.a_tree }}
           path: a
-          persist-credentials: false
-
-      - name: Tree (B) base
-        timeout-minutes: 5
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ env.TREE_BASE }}
-          path: base
-          persist-credentials: false
-
-      - name: Tree (B) head
-        timeout-minutes: 5
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ env.TREE_HEAD }}
-          path: head
           persist-credentials: false
 
       # The pinned toolchain of ci.yml (why: its comment).
@@ -76,49 +112,44 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      - name: The trees are the commits named above
+      - name: The tree is the commit named in the inputs
         timeout-minutes: 2
         run: |
           set -euo pipefail
-          [ "$(git -C a rev-parse HEAD)" = "$TREE_A" ]
-          [ "$(git -C base rev-parse HEAD)" = "$TREE_BASE" ]
-          [ "$(git -C head rev-parse HEAD)" = "$TREE_HEAD" ]
+          [ "$(git -C a rev-parse HEAD)" = "$A_TREE" ]
           sw_vers
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
           uptime
 
-      # One download (the base tree's scripts/fetch-models.sh), copied into the other two trees; every tree then checks the files
-      # against its own data/*.sha256, so a tree that names another model set fails here instead of measuring the wrong files.
-      - name: Models of the three trees
+      # Downloaded by this ref's scripts/fetch-models.sh and copied into the tree, which then checks the files against its own
+      # data/*.sha256: a tree that names another model set fails here instead of measuring the wrong files (start the
+      # workflow from a ref whose fetch-models.sh names the tree's models).
+      - name: Models of the tree
         timeout-minutes: 15
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          base/scripts/fetch-models.sh
-          for t in a head; do
-            mkdir -p "$t/data/lm"
-            cp base/data/lm/* "$t/data/lm/"
-          done
-          for t in a base head; do
-            (cd "$t" && shasum -a 256 -c data/*.sha256)
-          done
+          gate/scripts/fetch-models.sh
+          mkdir -p a/data/lm
+          cp gate/data/lm/* a/data/lm/
+          (cd a && shasum -a 256 -c data/*.sha256)
           mkdir -p "$RUNNER_TEMP/models"
           cp a/data/lm/tinylm.sjtl "$RUNNER_TEMP/models/old.sjtl"
 
-      - name: The candidate small model (draft release asset)
+      # Looked up by release id: a draft has no tag. The asset name was checked by the `inputs` job (letters, digits, `.`, `_`, `-`).
+      - name: The candidate small model (release asset)
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          aid=$(gh api "repos/$GITHUB_REPOSITORY/releases/$NEW_MODEL_RELEASE_ID" --jq ".assets[] | select(.name == \"$NEW_MODEL_ASSET\") | .id")
-          [[ "$aid" =~ ^[0-9]+$ ]] || { echo "error: release $NEW_MODEL_RELEASE_ID has no asset $NEW_MODEL_ASSET (got '$aid')" >&2; exit 1; }
+          aid=$(gh api "repos/$GITHUB_REPOSITORY/releases/$A_RELEASE_ID" --jq ".assets[] | select(.name == \"$A_ASSET\") | .id")
+          [[ "$aid" =~ ^[0-9]+$ ]] || { echo "error: release $A_RELEASE_ID has no asset $A_ASSET (got '$aid')" >&2; exit 1; }
           gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > "$RUNNER_TEMP/models/new.sjtl"
-          echo "$NEW_MODEL_SHA256  $RUNNER_TEMP/models/new.sjtl" | shasum -a 256 -c
+          echo "$A_SHA256  $RUNNER_TEMP/models/new.sjtl" | shasum -a 256 -c
 
-      # Each tree builds in its own target folder: the evaluation CLI and the test executable carry the path of the tree they were built in.
-      - name: Build (A), the evaluation CLI and the test executable of core/tests/engine_predict.rs
+      - name: Build, the evaluation CLI and the test executable of core/tests/engine_predict.rs
         timeout-minutes: 30
         working-directory: a
         run: |
@@ -136,39 +167,117 @@ jobs:
           [ -f "$exe" ] && [ -x "$exe" ] || { echo "error: no test executable ('$exe')" >&2; exit 1; }
           echo "TEST_EXE=$exe" >> "$GITHUB_ENV"
 
-      - name: Build (B) base, the evaluation CLI and shanjie-replay
-        timeout-minutes: 30
-        working-directory: base
-        run: cargo build --release --locked -p cli --bin shanjie-eval --bin shanjie-replay
-
-      - name: Build (B) head, the evaluation CLI and shanjie-replay
-        timeout-minutes: 30
-        working-directory: head
-        run: cargo build --release --locked -p cli --bin shanjie-eval --bin shanjie-replay
-
       # Rows whose every left context is 64 Han characters, put together from tracked public rows (the script says how).
       - name: Long-context rows
         timeout-minutes: 2
-        run: |
-          set -euo pipefail
-          python3 gate/scripts/ci/latency_gate.py --self-test
-          python3 gate/scripts/ci/longctx_rows.py --out "$RUNNER_TEMP/longctx.txt"
+        run: python3 gate/scripts/ci/longctx_rows.py --out "$RUNNER_TEMP/longctx.txt"
 
-      # Exit 0: every gate passes; 1: a gate fails; 2: a run of the old model or the base tree failed (no verdict). The result table goes to the job summary.
+      # Exit 0: every gate passes; 1: a gate fails; 2: a run of the old model failed (no verdict). The result table goes to the job summary.
       - name: Measure
         timeout-minutes: 60
         run: |
           set -euo pipefail
           uptime
-          python3 gate/scripts/ci/latency_gate.py --a a --base base --head head \
-            --old-model "$RUNNER_TEMP/models/old.sjtl" --new-model "$RUNNER_TEMP/models/new.sjtl" --new-sha256 "$NEW_MODEL_SHA256" \
+          python3 gate/scripts/ci/latency_gate.py --a a \
+            --old-model "$RUNNER_TEMP/models/old.sjtl" --new-model "$RUNNER_TEMP/models/new.sjtl" --new-sha256 "$A_SHA256" \
             --lc-rows "$RUNNER_TEMP/longctx.txt" --test-exe "$TEST_EXE" --rounds "$ROUNDS" --out "$GITHUB_WORKSPACE/latency-gate"
+
+      # result.txt, raw.tsv and every run's stdout and stderr (numbers and summary lines of public rows only; never the model file).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 5
+        with:
+          name: latency-gate-a
+          path: latency-gate
+          if-no-files-found: warn
+
+  trees:
+    needs: inputs
+    if: needs.inputs.outputs.b == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      B_BASE: ${{ inputs.b_base }}
+      B_HEAD: ${{ inputs.b_head }}
+      ROUNDS: ${{ inputs.rounds }}
+    steps:
+      - name: This workflow's ref (scripts/ci)
+        timeout-minutes: 5
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: gate
+          persist-credentials: false
+
+      - name: Tree (B) base
+        timeout-minutes: 5
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ inputs.b_base }}
+          path: base
+          persist-credentials: false
+
+      - name: Tree (B) head
+        timeout-minutes: 5
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ inputs.b_head }}
+          path: head
+          persist-credentials: false
+
+      # The pinned toolchain of ci.yml (why: its comment).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        timeout-minutes: 10
+        with:
+          toolchain: 1.97.1
+
+      - name: The trees are the commits named in the inputs
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          [ "$(git -C base rev-parse HEAD)" = "$B_BASE" ]
+          [ "$(git -C head rev-parse HEAD)" = "$B_HEAD" ]
+          sw_vers
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          uptime
+
+      # Each tree downloads and checks its own model set (its scripts/fetch-models.sh, published releases, a read-only token),
+      # so a head that switches to another published model is measured with that model.
+      - name: Models of the two trees
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base/scripts/fetch-models.sh
+          head/scripts/fetch-models.sh
+
+      # Each tree builds in its own target folder: the evaluation CLI carries the path of the tree it was built in.
+      - name: Build base, the evaluation CLI and shanjie-replay
+        timeout-minutes: 30
+        working-directory: base
+        run: cargo build --release --locked -p cli --bin shanjie-eval --bin shanjie-replay
+
+      - name: Build head, the evaluation CLI and shanjie-replay
+        timeout-minutes: 30
+        working-directory: head
+        run: cargo build --release --locked -p cli --bin shanjie-eval --bin shanjie-replay
+
+      # Exit 0: every gate passes; 1: a gate fails; 2: a run of the base tree failed (no verdict). The result table goes to the job summary.
+      - name: Measure
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          uptime
+          python3 gate/scripts/ci/latency_gate.py --base base --head head --rounds "$ROUNDS" --out "$GITHUB_WORKSPACE/latency-gate"
 
       # result.txt, raw.tsv and every run's stdout, stderr and key times (numbers and summary lines of public rows only).
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         timeout-minutes: 5
         with:
-          name: latency-gate
+          name: latency-gate-b
           path: latency-gate
           if-no-files-found: warn

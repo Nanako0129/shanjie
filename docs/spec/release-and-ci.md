@@ -2,7 +2,7 @@
 
 這份寫的是現在的行為。
 
-範圍：`.github/workflows/ci.yml` 的 job 分工與略過判斷、`scripts/fetch-models.sh`、`scripts/ci-changes.sh`、`scripts/check-ci-gate.sh`；`.github/workflows/release.yml` 的關卡、發版說明與 GitHub Release 的建立。簽章、公證與 Sparkle 的細節見 `docs/spec/install-and-update.md`；模型的命名與檔案見 `docs/spec/models.md`；評測與基準測試的量法見 `docs/spec/evaluation.md`。
+範圍：`.github/workflows/ci.yml` 的 job 分工與略過判斷、`scripts/fetch-models.sh`、`scripts/ci-changes.sh`、`scripts/check-ci-gate.sh`；`.github/workflows/release.yml` 的關卡、發版說明與 GitHub Release 的建立；`.github/workflows/latency-gate.yml`（在 macOS runner 上量延遲，§8）。簽章、公證與 Sparkle 的細節見 `docs/spec/install-and-update.md`；模型的命名與檔案見 `docs/spec/models.md`；評測與基準測試的量法見 `docs/spec/evaluation.md`。
 
 ## 1. CI 的觸發與略過
 
@@ -260,3 +260,82 @@
   mdfind -name 善解輸入法.app | grep -F "$PWD/build"; mdfind -name '善解（開發版）.app' | grep -F "$PWD/build"; mdfind -name shanjie.app | grep -F "$PWD/build"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -E 'build/(selftest/)?(善解輸入法|善解（開發版）|shanjie)\.app'
   ```
+
+## 8. 在 CI 上量延遲：`latency-gate.yml`
+
+換會意的模型檔，或 PR 改到按鍵路徑、重排的速度時，用這個 workflow 在 macOS runner 上量。兩臂在同一台 runner 上交錯跑（舊、新、舊、新），兩邊看到的機器狀態相同。量什麼、怎麼判寫在 `scripts/ci/latency_gate.py` 的檔頭。
+
+### 8.1 觸發與輸入
+
+只有 `workflow_dispatch`（手動）；不在 push 或 PR 上自動跑。兩組量測各自可選，給哪一組的輸入就量哪一組，可以兩組都給：
+
+- **(A) 換模型**（job `model`）：同一個 commit 建出的同一份執行檔，那個 commit 自己的會意模型（舊）對候選模型檔（新）。
+- **(B) 換程式**（job `trees`）：base commit 對 head commit，各用自己的模型。
+
+| 輸入 | 意思 | 格式 |
+|---|---|---|
+| `a_tree` | (A) 用哪個 commit 建執行檔；舊模型是它的 `data/tinylm.sjtl.sha256` 記的那一個 | 40 位小寫十六進位 |
+| `a_release_id` | (A) 放候選模型檔的 Release 的數字 id。草稿 Release 沒有 tag，所以一律用 id；已發佈的 Release 也用 id | 數字 |
+| `a_asset` | (A) 候選模型檔在那個 Release 裡的資產名 | 英數字與 `.`、`_`、`-`，不含 `/` |
+| `a_sha256` | (A) 候選模型檔的 SHA-256；下載後核對，量測前再核對一次 | 64 位小寫十六進位 |
+| `b_base`、`b_head` | (B) 兩個 commit | 各 40 位小寫十六進位，不能相同 |
+| `rounds` | 每組量幾輪，每輪兩臂各跑一次；預設 2 | 2～9 |
+
+- commit 要給完整的 SHA（不收分支名、tag、短 SHA），而且是這個 repo 裡拿得到的 commit。
+- Release 的 id：`gh api repos/<擁有者>/<repo>/releases --jq '.[] | [.id, .draft, .tag_name, .name] | @tsv'`（草稿只有能寫入 repo 的帳號列得出來）。
+- 第一個 job `inputs`（Linux）先跑 `latency_gate.py --self-test` 與 `--check-inputs`：格式不合、一組只給一部分、兩組都沒給、base 與 head 相同，都在這裡失敗，macOS 的 job 不會開始，不下載、不建置。沒給的那一組整個 job 略過，不 checkout、不下載、不建置它的樹。
+
+```sh
+# 只量 (B)：一個改到按鍵路徑的 PR
+gh workflow run latency-gate.yml --ref main -f b_base=<base 的完整 SHA> -f b_head=<head 的完整 SHA>
+
+# 只量 (A)：換會意模型，候選檔在草稿 Release 裡
+gh workflow run latency-gate.yml --ref main -f a_tree=<完整 SHA> -f a_release_id=<Release id> \
+  -f a_asset=<資產名> -f a_sha256=<候選檔的 SHA-256>
+
+# 兩組都量，各 3 輪
+gh workflow run latency-gate.yml --ref main -f a_tree=<完整 SHA> -f a_release_id=<Release id> \
+  -f a_asset=<資產名> -f a_sha256=<候選檔的 SHA-256> -f b_base=<完整 SHA> -f b_head=<完整 SHA> -f rounds=3
+```
+
+- `--ref` 決定用哪個分支的 workflow 與 `scripts/ci/`（量測程式、長前文列檔的來源列），和被量的 commit 無關。
+- 等結果：`gh run list --workflow latency-gate.yml` 取 run id，輪詢 `gh run view <id> --json status,conclusion,jobs`。
+
+### 8.2 量什麼、關卡
+
+| 組 | 項目 | 關卡 |
+|---|---|---|
+| A | 長前文重排：每列前文 64 個漢字（`scripts/ci/longctx_rows.py` 由進版控的公開列拼出，3,000 列）、最多 8 個候選，讀 CLI 的 `tinylm: rerank … p95` | 每輪新模型 p95 < 300 ms |
+| A | `timing_composition_cap_128_syllables`（`docs/spec/keys-and-composition.md` §5.4）的結束碼 | 每輪新模型結束碼 0；**只在同一輪舊模型也是 0 時才判**（§8.4） |
+| A | dev302 的尖峰 RSS、載入模型前後的 RSS、短前文的重排 p95、128 音節測試印出的各個 p95 | 只報 |
+| B | `shanjie-replay` 在打字測驗與錯字回報的每鍵 p95（`--key-times` 的 `k` 行，最近名次法） | 每個集合每一輪：head − base ≤ 1 ms 且 head < 16 ms |
+| B | `shanjie-eval` 在 dev302、`shanjie-replay` 在兩個集合的尖峰 RSS | 只報 |
+
+- (A) 的每次 CLI 執行都核對摘要行的設定標記帶著那個模型的 `+tl:`、`+pair:` 雜湊與該有的 `+sep:`，stderr 有重排那一行；對不上就當成那一次沒有照預期跑。
+- (B) 兩棵樹各用自己的旗標與模型，設定標記不預設；每一臂出現過的標記列在結果開頭的 `(B) summary tags`，判讀時先看兩邊是不是預期的設定。
+
+### 8.3 讀結果
+
+- 每個 job 的 summary 有一張表（項目、舊／base、新／head、差、關卡、PASS／FAIL／`-`），最後是 `ITEM A: PASS|FAIL`、`ITEM B: PASS|FAIL`；`-` 是只報的列。
+- job 的結束碼就是 `latency_gate.py` 的結束碼：0＝關卡全過；1＝有關卡不過（新模型或 head 的某次執行失敗、逾時也算）；2＝舊模型或 base 的執行失敗，或前置核對不符，沒有結論（summary 只有 `No verdict` 一行，原因在 log）。
+- artifact `latency-gate-a`、`latency-gate-b`：`result.txt`（同一張表）、`raw.tsv`（每次執行的每個值與前後的 1 分鐘負載）、每次執行的 stdout、stderr 與每鍵時間。內容只有數字與公開列的摘要行，不含模型檔。
+- CI 過就算過；CI 不過時在閒置的 Mac 上照同樣的交錯量法再量一次，以 Mac 的結果為準。
+
+### 8.4 runner 的限制
+
+- runner 是共用硬體的虛擬機（量到的是 Apple M1 虛擬機、3 核），比出貨目標的 Mac 慢，各次執行之間的快慢也有差。所以 (B) 的關卡以同場交錯的差值為主。
+- **128 音節測試在 runner 上判不了**：這個測試斷言的是絕對門檻（每鍵 p95 < 16 ms）。在 runner 上新舊模型的結束碼都是 101，連語意校正關的每鍵 p95 也量到 25～31 ms。舊模型自己都不過的那一輪，結束碼分不出新舊模型的差別，所以那一輪這一項不當關卡：表上的關卡欄寫 `NOT JUDGED`、判定欄是 `-`，結果最後多一行 `ITEM A, 128-syllable test: NOT JUDGED in round …`。看到這一行，這一項就要在閒置的 Mac 上跑 §5.4 的指令（新模型放在 `data/lm/tinylm.sjtl`）才算量過；`ITEM A: PASS` 不包含它。
+- 新模型的那一次沒有印出數字或逾時，不論舊模型結果如何，(A) 都算不過。
+- 每個 macOS job 上限 120 分鐘、量測步驟 60 分鐘；輪數越多越久。兩組同時佔 2 個 macOS runner（帳號的名額見 §2）。
+- (A) 的模型由觸發的那個分支的 `scripts/fetch-models.sh` 下載、複製進 `a_tree`，再用 `a_tree` 自己的 `data/*.sha256` 核對；`a_tree` 記的是另一組模型時在這一步失敗，改從 `fetch-models.sh` 記著那一組模型的分支觸發（`--ref`）。(B) 的兩棵樹各跑自己的 `fetch-models.sh`，所以只量得了模型都已發佈的 commit。
+
+### 8.5 權限
+
+- 預設 `contents: read`。只有 job `model` 是 `contents: write`：草稿 Release 只有能寫入內容的 token 才讀得到。
+- 在 `model` 裡拿到 token 的只有兩步（下載現行模型、下載候選檔），兩步都只執行觸發分支自己的程式；被量的 commit 的程式（`cargo build`、測試執行檔、量測）在沒有 token 的步驟裡跑。所有 checkout 都 `persist-credentials: false`，所有 action 用 commit SHA 釘住。
+- 輸入只經環境變數進到腳本，不直接寫進腳本文字；資產名在 `inputs` job 驗過字元集之後才用在查詢裡。
+
+### 8.6 驗證
+
+- `python3 scripts/ci/latency_gate.py --self-test`（`make test-python` 與 workflow 的 `inputs` job 都跑）：各個解析器、輸入檢查（合格的三種組合；長度不對、大寫、分支名、結尾換行、資產名含 `/`、空白或引號、一組只給一部分、base 等於 head、輪數超出範圍、兩組都沒給，各自被拒）、判定（新舊都不過 128 音節測試時不判並附註；舊的過而新的不過時 FAIL；長前文 p95 到 300 ms 時 FAIL；每鍵差超過 1 ms 時 FAIL；只給一組時表上只有那一組的列）。
+- 改 workflow 後跑 `actionlint .github/workflows/latency-gate.yml`；它不認得 `xcode-27` 這個 runner 標籤（`ci.yml` 也一樣），其餘不得有訊息。
