@@ -184,7 +184,7 @@ impl RerankJob {
     /// A stretch's context key is `context_key` of the left context and the text before it as it will be shown,
     /// i.e. with the earlier stretches' chosen candidates (one stretch: the n-gram text before it, as before). A model declaring a
     /// left-context length L (SJTL0005) gets the last L characters of that same text instead, not through `context_key`
-    /// (`TinyLm::key_for`, docs/spec/semantic-rerank.md §5.2).
+    /// (`TinyLm::key_for_len`, docs/spec/semantic-rerank.md §5.2).
     ///
     /// docs/spec/semantic-rerank.md §3.1.1: with a non-empty `order` the rerank sees the candidates, words, scores `ng + bonus`, `b` and `masked` in that
     /// order (put together here, once per stretch): the gate, the colloquial term, the fusion, delta and the learning term all take the new first
@@ -197,7 +197,6 @@ impl RerankJob {
             .iter()
             .map(|s| {
                 before.push_str(&s.gap);
-                let key = self.model.key_for(&before);
                 let surfaces: Vec<String> = s.paths.iter().map(|p| p.iter().map(|w| w.0.as_str()).collect()).collect();
                 // The rerank's view: `paths` indices in the order the rerank sees them, and the lists in that order.
                 let view: Vec<usize> = if s.order.is_empty() { (0..s.paths.len()).collect() } else { s.order.clone() };
@@ -205,6 +204,8 @@ impl RerankJob {
                 let b: Vec<f64> = view.iter().map(|&i| s.b.get(i).copied().unwrap_or(0.0)).collect();
                 let masked: Vec<bool> = view.iter().map(|&i| s.masked.get(i).copied().unwrap_or(false)).collect();
                 let cands: Vec<&str> = view.iter().map(|&i| surfaces[i].as_str()).collect();
+                // The key of a boundary-format model depends on the longest candidate the rerank scores (docs/spec/semantic-rerank.md §5.2).
+                let key = self.model.key_for_len(&before, cands.iter().take(TOPK).map(|c| c.chars().count()).max().unwrap_or(0));
                 let learn = Learning { layer: s.layer, b: b.clone(), scale: self.eps_sinit };
                 let alpha = if self.colloquial.is_some() { colloquial::cell(self.level).0 } else { self.params.0 };
                 let picked = match &self.colloquial {

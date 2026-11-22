@@ -10,6 +10,10 @@
     另外四組（聊天保守、聊天積極、書面保守、書面積極）是 LEVELS 的 12 個互不相同、也和標準值不同的數（位移或順序錯都抓得到）。
   tiny-int8-v4.sjtl（docs/spec/models.md §3.5, §8.1）：v3 檔的 SJTL0004，位移 212 多 32 bytes：eval/golden/kn-tiny/kn.sjkn 的
     SHA-256（Python hashlib）。和 kn-tiny 的模型＋側檔配對，Rust 的 `Lm::kn_sha256` 要算出同一個值才載入得了（跨語言的雜湊核對）。
+  tiny-int8-v6.sjtl、items-v6.tsv（docs/spec/semantic-rerank.md §2.1, §5.2）：另一份固定種子的隨機小模型，字表 VOC6（CHARS 加幾個常用字與各擴充區的字）加 [SEP]
+    （V＝字數＋4，[SEP] 是 id V - 1），匯出成 SJTL0006（int8，L 62、K 4，標準三元組與四組同 v4，kn 側檔同 v4）。items-v6.tsv：
+    `前文<TAB>n<TAB>候選<TAB>鍵（邊界寫成 |）<TAB>LL`，鍵是 `tinylm.key_b(前文, n, 62, 4)`，LL 是 numpy（float64）在還原後權重上以邊界格式的鍵算的。
+    eval/golden/sep-keys/ 的鍵 golden（tools/gen_sep_keys.py）也用這份模型。
   pick.tsv（docs/spec/semantic-rerank.md §10）：`fusegrid.pick` 在固定種子的隨機 ng／ll 與幾組融合差剛好是 0.25、2 的手寫例子上的選擇。
     前三列是格點（`alpha`／`tau`／`delta<TAB>逗號分隔`），之後每列 `ng<TAB>ll<TAB>選擇`，選擇依 alpha、tau、delta 的巢狀順序；
     數值都用 repr 寫出，Rust 讀回來是同一個 f64。
@@ -46,6 +50,35 @@ ITEMS = [
     ("", "不"),
     ("我們都", "要去"),
     ("我們都", "要來"),                      # more than 8 items: two batches, padded
+]
+
+
+# The vocabulary of tiny-int8-v6.sjtl: CHARS, a few more everyday characters, and one character of each Han block the core's `is_han` covers
+# (extension A to G, compatibility ideographs, 〇). 龘 stays outside the table on purpose (a Han character the model reads as UNK, never [SEP]).
+VOC6 = CHARS + "今天熱真大" + "\u3400\U00020000\U0002A700\U0002B740\U0002B820\U0002CEB0\U00030000\uF900\u3007"
+V6_L, V6_K = 62, 4
+# (before, n, candidate) of items-v6.tsv; n is the longest candidate of the pool (here at least the candidate's own length)
+ITEMS6 = [
+    ("今天好熱。", 1, "大"),
+    ("好熱，今天真", 1, "大"),
+    ("，，A1 好", 1, "大"),
+    ("好）。「今天", 2, "我們"),
+    ("「」", 1, "大"),
+    ("", 2, "你好"),
+    ("我們都說，你好嗎？他說：要去。", 3, "我們"),
+    ("你們說了hello world之後，他們都來了，我們就去。", 2, "好嗎"),
+    ("我" * 30 + "hello world" + "你" * 30 + "。。。" + "他" * 20, 1, "好"),     # longer than L: only the last 62 characters count
+    ("我，" * 40, 1, "好"),
+    ("我，" * 40, 2, "好嗎"),
+    ("不" * 70, 4, "我們都是"),
+    ("好" * 10 + "，", 62, "你" * 62),                                      # keep = 1: one token of the key
+    ("好嗎", 63, "你" * 63),                                                 # n >= 63: no key
+    ("\u3400\U00020000\U0002A700 \U00030000\uF900\u3007，我", 3, "好嗎"),   # one block of each extension in the key
+    ("你龘好，他", 2, "好嗎"),                                                # 龘: UNK in the key, a Han character for the threshold
+    ("我們都說，A\u0301你", 2, "好嗎"),
+    ("我   你   他，要去", 1, "好"),
+    ("你好，他們", 4, "好A|嗎"),                                              # a candidate's A and | are UNK, never [SEP]
+    ("他們說要來，", 1, "你好"),
 ]
 
 
@@ -87,9 +120,44 @@ def build():
         path = os.path.join(tmp, "tiny-int8-v4.sjtl")
         export_sjtl.export(npz, path, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), sha, LEVELS, kn_sha)
         files["tiny-int8-v4.sjtl"] = open(path, "rb").read()
+        files.update(v6_files(tmp, sha, kn_sha))
     files["items.tsv"] = "".join(f"{k}\t{c}\t{float(a)!r}\t{float(b)!r}\n" for (k, c), a, b in zip(ITEMS, *lls)).encode()
     files["pick.tsv"] = pick_table().encode()
     return files
+
+
+def v6_hashes():
+    """(the n-gram model's SHA-256, the kn side file's) as `build` records them."""
+    with open(os.path.join(ROOT, "eval", "golden", "kn-tiny", "bigram.sjlm"), "rb") as f:
+        sha = hashlib.sha256(f.read()).digest()
+    with open(os.path.join(ROOT, "eval", "golden", "kn-tiny", "kn.sjkn"), "rb") as f:
+        return sha, export_sjtl.check_kn_side(f.read(), sha)
+
+
+def v6_model(tmp, sha, kn_sha):
+    """(sjtl path, the numpy-readable npz of its restored weights) of tiny-int8-v6.sjtl."""
+    params = tinylm.random_params(list(VOC6), n_layer=2, d=16, n_head=2, seed=11, n_extra=1)
+    for k in params:
+        if k == "emb" or k.endswith(("qkv_w", "fc1_w")):
+            params[k] = params[k] * 3
+    npz = os.path.join(tmp, "tiny6.npz")
+    tinylm.save_params(npz, params, VOC6, n_layer=2, n_head=2, extra_tokens=["[SEP]"])
+    path = os.path.join(tmp, "tiny-int8-v6.sjtl")
+    export_sjtl.export(npz, path, "int8", (0.7, 2.0, 0.25), (0.5, 1.0, 2.0), sha, LEVELS, kn_sha, V6_L, V6_K)
+    head, chars, restored = export_sjtl.read_sjtl(path)
+    assert (head["version"], head["left_len"], head["boundary_k"], "".join(chars)) == (6, V6_L, V6_K, VOC6)
+    rpath = os.path.join(tmp, "restored6.npz")
+    tinylm.save_params(rpath, restored, chars, n_layer=2, n_head=2, extra_tokens=["[SEP]"])
+    return path, rpath
+
+
+def v6_files(tmp, sha, kn_sha):
+    path, rpath = v6_model(tmp, sha, kn_sha)
+    m = tinylm.NumpyLM(rpath)
+    keys = [tinylm.key_b(b, n, V6_L, V6_K) for b, n, _ in ITEMS6]
+    lls = [tinylm.ll_many(m, [(k, c)], sep_keys=True)[0] for k, (_, _, c) in zip(keys, ITEMS6)]
+    tsv = "".join(f"{b}\t{n}\t{c}\t{k.replace(tinylm.SEP_CHAR, '|')}\t{float(ll)!r}\n" for (b, n, c), k, ll in zip(ITEMS6, keys, lls))
+    return {"tiny-int8-v6.sjtl": open(path, "rb").read(), "items-v6.tsv": tsv.encode()}
 
 
 # The pick grid: 0.5 and 1 keep the hand lists' sums exact; 0.25 and 2 are the S7e deltas (chat, formal).
