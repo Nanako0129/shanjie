@@ -17,7 +17,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | `kn.sjkn` | 承接 | SJ-KN-2-397K | Kneser–Ney 接續次數側檔 |
 | `trigram.sjt3` | 連文 | SJ-CX-2-7.7M | 書面設定的三連詞表 |
 | `trigram-chat.sjt3` | 連文 | SJ-CX-2-950K | 聊天設定的三連詞表 |
-| `tinylm.sjtl` | 會意 | SJ-SR-8-15M | 語意校正用的小型字元模型 |
+| `tinylm.sjtl` | 會意 | SJ-SR-10-31M | 語意校正用的小型字元模型 |
 | `colloquial.sjlm` | 常談 | SJ-CL-2-69K | 口語詞頻表 |
 
 - 形狀規則（建置檢查與 Swift 解析器共用）：檔尾是換行、整檔沒有 CR、每列剛好四個非空的 tab 分隔欄位（所以前導 tab、多一個 tab 都不合格）。建置檢查另外要求第二欄是 64 位小寫十六進位、同一個檔名不出現兩次；Swift 解析器不重複這兩條。
@@ -75,7 +75,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | `colloquial.sjlm` | 不綁通語 | 常談只在載入的會意檔的 SHA-256 等於核心常數 `PAIRED_TINYLM_SHA256` 時生效（§8.3） |
 
 - 換通語就要重建辨類、承接、兩張連文、重新匯出會意（檔頭記新的通語與承接雜湊），再把 `PAIRED_TINYLM_SHA256`（會意檔換了的話）、`data/*.sha256` 與 `models.tsv` 一起換。
-- 目前這組：通語 `e3fb6056…6148eb5a`，會意 `356a37be…0a97c5de`，常數 `PAIRED_TINYLM_SHA256` 與 `models.tsv` 的會意列相同（`core/src/colloquial.rs`、`data/models.tsv`）。
+- 目前這組：通語 `e3fb6056…6148eb5a`，會意 `ee109fb284cbd5fea8db825752fec5b8a08deb6541d772dc682091e2c99c70d4`，常數 `PAIRED_TINYLM_SHA256` 與 `models.tsv` 的會意列相同（`core/src/colloquial.rs`、`data/models.tsv`）。
 
 ### 2.2 載入規則
 
@@ -335,12 +335,14 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 - 繁體句不套 OpenCC `TWPhrases`，所以「權限」「插件」之類台灣原文不會被改寫；簡體來源的句子只換 §9.3 的 331 條大陸用詞。取捨：若繁體句也套，訓練文字裡的「權限」會變成「許可權」，會意從沒看過「權限」這個寫法，分數就偏向「全線」。
 - 訓練文字經由 §9 的 `native`／`mixed` 分類：已轉換過的口語池標 `native`，不轉第二次。
 - 每一步都開保留集比對守門。
-- 現行 SJ-SR-8-15M 的權重是從上一版（SJ-SR-7-15M）的權重接續訓練的（3,000 步、峰值學習率 1e-4、暖身 100 步、weight decay 0、沿用上一版字表），架構不變：6 層、寬 384、6 頭、前文 64、字表 10,351 個 id、14,646,912 個參數、int8（每列對稱量化）；檔案 14,886,880 bytes。匯出用 `export_sjtl.py --type int8 --ngram-model <通語> --kn-side <承接>`，格式 `SJTL0004`。匯出的方法核對：用上一版的 npz 與上一版檔頭的全部值重匯出，結果必須與上一版出貨檔逐位元組相同。（訓練與核對記錄來自 Release 說明，訓練腳本不在追蹤的樹裡，未在此驗證。）
+- 現行 SJ-SR-10-31M 的權重是從頭訓練的（不接續上一版、不蒸餾；一個 epoch、63,724 步），字表在訓練文字上重算（10,374 個字）：8 層、寬 512、8 頭、前文 64、字表 10,378 個 id（字，加 PAD、UNK、BOS、`[SEP]`）、30,566,400 個參數、int8（每列對稱量化）；檔案 30,927,424 bytes。上一版 SJ-SR-8-15M 是 6 層、寬 384、6 頭、字表 10,351 個 id、14,646,912 個參數、14,886,880 bytes。
+- 現行權重的訓練序列有兩種：每段一條一般格式（`[BOS] 段`）；固定選中的一半的段裡，同一行前面有文字的，另外多一條帶前文的（`[BOS] 前文 段`，前文裡每一段連續的非漢字是一個 `[SEP]`，整條不超過 64 個 token，只有段的 token 算損失）。所以模型讀邊界格式的長前文（`docs/spec/semantic-rerank.md` §5.2）。
+- 匯出用 `export_sjtl.py --type int8 --left-len 62 --boundary 4 --ngram-model <通語> --kn-side <承接>`，格式 `SJTL0006`（宣告的前文長度 L 62、政策鍵的門檻 K 4）。匯出的方法核對：同一份 npz、檔頭的格子改用先前量測那一次的值重匯出，結果必須與那次的檔（`5dce15a6…c37730`）逐位元組相同；出貨檔只差檔頭的格子。（訓練與核對記錄來自 Release 說明 `docs/releases/sj-sr-10-31m.md`，訓練腳本不在追蹤的樹裡，未在此驗證。）
 - 會意只在 n-gram 解碼出的前 8 名候選之間重排，不會產生新的文字；重排模型記憶體上限 250 MiB。
 
 ### 8.3 常談配對
 
-- 常談（`colloquial.sjlm`）只在聊天設定、載入的會意檔的 SHA-256 等於 `core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256`（`356a37be…0a97c5de`）時生效（`colloquial::applies`）；其他情形核心的行為與沒有常談表時相同。（評測 CLI 的 `--tinylm-paired` 量測時略過這個雜湊條件，`docs/spec/semantic-rerank.md` §4.6；出貨的判斷不變）。換了會意檔卻沒換這個常數，常談會悄悄關掉，所以兩者要在同一個變更裡一起改，並用 CLI 聊天三檔的摘要行都有 `+colloq:81c2470d` 與新的 `+tl:<會意前 8 碼>` 確認。
+- 常談（`colloquial.sjlm`）只在聊天設定、載入的會意檔的 SHA-256 等於 `core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256`（`ee109fb284cbd5fea8db825752fec5b8a08deb6541d772dc682091e2c99c70d4`）時生效（`colloquial::applies`）；其他情形核心的行為與沒有常談表時相同。（評測 CLI 的 `--tinylm-paired` 量測時略過這個雜湊條件，`docs/spec/semantic-rerank.md` §4.6；出貨的判斷不變）。換了會意檔卻沒換這個常數，常談會悄悄關掉，所以兩者要在同一個變更裡一起改，並用 CLI 聊天三檔的摘要行都有 `+colloq:81c2470d` 與新的 `+tl:<會意前 8 碼>` 確認。
 - 常談表的內容與融合：見 `docs/spec/semantic-rerank.md`。常談表只有口語計數（詞彙 69,457、二元組合 365,888 條），用通語的計數詞表重數：口語計數檔 ×1 加公開口語池 ×1，繁體句不套 `TWPhrases`，剪枝門檻 2；不含 g0v 與論壇語料（含了之後記憶體超過預算，保守檔在私人的聊天集合上顯著變差）。
 - 常談表的署名清單 `colloquial-attribution.tsv` 與常談表同一次建置，每列有來源與句數，不含句子文字；`data/lm/colloquial-attribution.tsv` 的雜湊記在 `data/colloquial-attribution.tsv.sha256`，App 打包進 `Resources/LICENSES/`。
 
@@ -485,7 +487,7 @@ OpenCC 的對照表（`STCharacters`、`STPhrases`、`TWVariants`、`TWPhrases`�
 | `kn.sjkn` | `sj-kn-2-397k` | 1,587,772 | `data/kn.sjkn.sha256` |
 | `trigram.sjt3` | `sj-cx-2-7.7m` | 133,297,536 | `data/trigram.sjt3.sha256` |
 | `trigram-chat.sjt3` | `sj-cx-2-950k` | 15,114,784 | `data/trigram-chat.sjt3.sha256` |
-| `tinylm.sjtl` | `sj-sr-8-15m` | 14,886,880 | `data/tinylm.sjtl.sha256` |
+| `tinylm.sjtl` | `sj-sr-10-31m` | 30,927,424 | `data/tinylm.sjtl.sha256` |
 | `colloquial.sjlm` | `sj-cl-2-69k` | 4,713,933 | `data/colloquial.sjlm.sha256` |
 | `colloquial-attribution.tsv` | `sj-cl-2-69k`（同一個 Release 的另一個附件） | 2,000,233 | `data/colloquial-attribution.tsv.sha256` |
 
@@ -497,7 +499,7 @@ OpenCC 的對照表（`STCharacters`、`STPhrases`、`TWVariants`、`TWPhrases`�
 gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-gh release download sj-sr-8-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-sr-10-31m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
 t=$(mktemp -d) && gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D "$t" && mv "$t/trigram.sjt3" data/lm/ && rmdir "$t"
 t=$(mktemp -d) && gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D "$t" && mv "$t/trigram-chat.sjt3" data/lm/ && rmdir "$t"

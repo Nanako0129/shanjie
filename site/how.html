@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>怎麼選字：看前文選同音字的做法與實測｜善解輸入法</title>
-<meta name="description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 1,465 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
+<meta name="description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 3,057 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
 <meta property="og:title" content="怎麼選字：看前文選同音字的做法與實測｜善解輸入法">
-<meta property="og:description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 1,465 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
+<meta property="og:description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 3,057 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://shanjie.nyanako.com/how">
 <meta property="og:site_name" content="善解輸入法">
@@ -17,7 +17,7 @@
 <meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="怎麼選字：看前文選同音字的做法與實測｜善解輸入法">
-<meta name="twitter:description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 1,465 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
+<meta name="twitter:description" content="傳統注音靠詞頻，善解每一鍵在本機解碼整句，停頓時用約 3,057 萬參數的小模型看前文重排前 8 名。這頁寫選字流程、內附的模型、開發集與保留集的實測數字，以及試過沒出貨的做法。">
 <meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
 <link rel="canonical" href="https://shanjie.nyanako.com/how">
 <meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
@@ -49,7 +49,7 @@
 <h2 id="flow">選字的流程</h2>
 <div class="layers">
   <div class="layer"><div><h3>整句解碼</h3><p>詞庫列出每一段可能的詞，語言模型依詞與詞的搭配算出整句的分數，產生前 64 名候選；接著你送出過的前文選第一個詞；同一行、游標前最多 64 個字出現過的詞，再打同音詞時比較會選同一個寫法（前文重現）。每個字也看它讀成你打的音的機率，讀音對不上的字比較不會被選上；兩個上聲連在一起、前一個字唸成陽平的三聲變調，照唸的打也收。聊天設定另外參考口語詞頻表，書面設定多看前兩個詞。</p><div class="when">每次按鍵・本機・每鍵 p95 約 2.3 毫秒</div></div></div>
-  <div class="layer"><div><h3>語意校正</h3><p>約 1,465 萬參數的小型字元語言模型（會意）看前文，在前 8 名之間重新排序。它不產生新字，只能從候選裡挑；有把握時才換掉第一名。</p><div class="when">停頓或送出前・本機背景・每列 p95 約 9.1 毫秒</div></div></div>
+  <div class="layer"><div><h3>語意校正</h3><p>約 3,057 萬參數的小型字元語言模型（會意）看游標前最多 62 個字的前文，在前 8 名之間重新排序。它不產生新字，只能從候選裡挑；有把握時才換掉第一名。</p><div class="when">停頓或送出前・本機背景</div></div></div>
   <div class="layer"><div><h3>選字記憶</h3><p>你在候選窗改選的字，依前文分開記住；單字只在前文相同時套用，不會一次改選就污染所有句子。</p><div class="when">你改選時・只存在這台 Mac</div></div></div>
 </div>
 <p class="note">前文：輸入法讀取同一行、游標前最多 64 個字。整句解碼的前文重現用到這 64 個字（在終端機裡只用游標前緊接的兩個漢字）；語意校正的小模型本身只讀最後 2 個字，語意校正開著、前文 32 個字以上時，候選池也會加重和前文同一個寫法的候選。按鍵與設定見<a href="/guide">使用說明</a>。</p>
@@ -64,7 +64,7 @@
 <tr><td>辨類</td><td>SJ-WC-6-512C</td><td>詞類表：兩個詞沒一起出現過時，用「哪類詞後面常接哪類詞」補估計</td></tr>
 <tr><td>承接</td><td>SJ-KN-2-397K</td><td>Kneser–Ney 平滑：看一個詞接在幾種不同的詞後面</td></tr>
 <tr><td>連文</td><td>SJ-CX-2-7.7M、SJ-CX-2-950K</td><td>前兩個詞接下一個詞（三元表），書面與聊天各一張</td></tr>
-<tr><td>會意</td><td>SJ-SR-8-15M</td><td>語意校正：小型字元語言模型，重排前 8 名</td></tr>
+<tr><td>會意</td><td>SJ-SR-10-31M</td><td>語意校正：小型字元語言模型，重排前 8 名</td></tr>
 <tr><td>常談</td><td>SJ-CL-2-69K</td><td>口語詞頻表，聊天設定用</td></tr>
 </tbody>
 </table>

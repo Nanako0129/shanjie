@@ -1531,9 +1531,9 @@ mod tests {
         unsafe { shanjie_engine_free(e) };
     }
 
-    /// docs/spec/semantic-rerank.md §3.1.1 over the C ABI: the real lexicon, n-gram model, small model and colloquial table, rerank on. The fixture of
-    /// core/tests/engine_pool_recur.rs: after its 44-character left text the jobs of ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ carry a pool weight and 語義也錯字 stays;
-    /// with no left text they carry none.
+    /// docs/spec/semantic-rerank.md §3.1.1 over the C ABI: the real lexicon, n-gram model, small model and colloquial table, rerank on. The fixture
+    /// core/tests/engine_pool_recur.rs had until 會意 SJ-SR-10-31M: after its 44-character left text the jobs of ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ carry a pool weight and
+    /// 語義也錯字 stays; with no left text they carry none (the comparison here is with no left text, so the fixture still serves).
     const POOL_LEFT: &str = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（";
     const POOL_READING: [&str; 5] = ["ㄩˇ", "ㄧˋ", "ㄧㄝˇ", "ㄘㄨㄛˋ", "ㄗˋ"];
 

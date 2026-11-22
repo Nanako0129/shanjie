@@ -1,6 +1,10 @@
 //! The colloquial term in the engine (docs/spec/semantic-rerank.md §4, §10): on the real lexicon, n-gram model,
 //! small model and colloquial table (data/lm/, fail loudly without them). The sentence is row 25 of eval/bench/suite-v1/dev302.txt (row 202 until
 //! 通語 SJ-LM-7-9.7M, whose n-gram gets it right): the shipping rerank keeps the n-gram first (candidate 0, `城市`), the term picks candidate 1 (`程式`).
+//! Both indices are the evaluation CLI's `--tinylm-scores` `c` on the 會意 SJ-SR-10-31M file (measured 2026-11-23: `target/release/shanjie-eval --lm
+//! data/lm/bigram.sjlm --profile chat --context --tinylm data/lm/tinylm.sjtl [--colloquial-core data/lm/colloquial.sjlm] --rows <row 25>`: 0 without the table,
+//! 1 with it, the CLI's default cell), so `the_term_applies_only_under_its_conditions` is also the check that `Engine::load_colloquial` on the shipping
+//! `.sjtl` picks what the CLI picks: with `PAIRED_TINYLM_SHA256` left at another file's hash the term is off and that test fails.
 use core::engine::*;
 use core::lm::Profile;
 use core::tinylm::RerankLevel;
@@ -156,6 +160,7 @@ fn load_order_does_not_matter() {
 /// `--colloquial-no-unseen-start-unigram` (measured 2026-11-06 on the 會意 SJ-SR-8-15M file: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat
 /// --context --packs acg --tinylm data/lm/tinylm.sjtl --colloquial-core data/lm/colloquial.sjlm [--colloquial-no-unseen-start-unigram] --rows <that row>
 /// --tinylm-scores OUT`), so an engine without the estimate picks 3 and fails the second assertion; without the line in `load_colloquial` the first fails too.
+/// (Since 權限 is a rerank-protect word the mask keeps candidate 0 with and without the estimate; so it is on the 會意 SJ-SR-10-31M file, same command, 2026-11-23.)
 #[test]
 fn load_colloquial_turns_the_first_word_estimate_on() {
     let (tl, table) = (data("tinylm.sjtl"), data("colloquial.sjlm"));
@@ -201,7 +206,7 @@ fn k_counts_the_pack_words_the_engine_was_built_with() {
 
 /// Rows 81 and 159 of eval/dev/user-reported.txt (public), the two rows where the reading-channel term (removed by
 /// docs/spec/decoder.md §5) changed the colloquial term's choice on the 通語 SJ-LM-7-9.7M files in v0.6.1: (context, syllables, the pick with the
-/// colloquial term alone, the pick v0.6.1 gave with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27; the `alone` picks 0 and 4 re-measured 2026-11-06 with the 會意 SJ-SR-8-15M file, standard
+/// colloquial term alone, the pick v0.6.1 gave with the channel too). The indices are those of the CLI's `--tinylm-scores` `c` (measured 2026-10-27; the `alone` picks 0 and 4 re-measured 2026-11-06 with the 會意 SJ-SR-8-15M file and 2026-11-23 with the 會意 SJ-SR-10-31M file, standard
 /// strength, `--packs acg --colloquial-core`: the same).
 const CHANNEL_ROWS: [(&str, &str, usize, usize); 2] = [("", "ㄓㄤˇ ㄨㄞ ㄌㄜ˙", 0, 2), ("", "ㄧㄡˇ ㄉㄧㄢˇ ㄌㄟˇ ㄓㄨㄟˋ", 4, 0)];
 
@@ -223,7 +228,7 @@ fn the_colloquial_term_stands_alone() {
 
 /// Public rows where a level's own cell picks a candidate that the standard cell or the level's header triple (the plain `rerank`) does not pick,
 /// with the picks of `--rerank-level L --colloquial-core` and the two it must differ from (the CLI's `--tinylm-scores` `c`, measured 2026-11-06 on the
-/// 會意 SJ-SR-8-15M file `data/lm/tinylm.sjtl` and the shipping cells: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg
+/// 會意 SJ-SR-8-15M file and again 2026-11-23 on the 會意 SJ-SR-10-31M file `data/lm/tinylm.sjtl` with its cells, every index the same: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context --packs acg
 /// --tinylm data/lm/tinylm.sjtl --rerank-level L [--colloquial-core data/lm/colloquial.sjlm] --dev 302 --tinylm-scores OUT`, the row's `c`):
 /// (level, context, syllables, cell's pick, standard cell's pick, header triple's pick). Rows 25 and 36 of eval/bench/suite-v1/dev302.txt at the conservative
 /// strength (25: the conservative delta 1 keeps the n-gram first where the standard cell, delta 0, takes the term's pick; 36: the term's pick 忠於 that the
