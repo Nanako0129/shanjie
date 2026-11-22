@@ -39,18 +39,27 @@ fn tmp(name: &str) -> Dir {
 /// 會意 SJ-SR-8-15M file, taken again on 2026-11-06 (the file changed the small model's picks; chat has no `--colloquial-core` here): they are the
 /// `--no-reading-decode` run of this binary, equal to the same run of main's binary built before SR-TW (the decoder is untouched), and the same lines with the reading
 /// term on (the next test). The chat dev302 and typing76 rows were 265 and 74, the formal ones 271 and 74 with the 會意 SJ-SR-7-15M file.
+/// Taken again on 2026-11-23 with the 會意 SJ-SR-10-31M file (`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile P --context --packs acg --rows
+/// eval/bench/suite-v1/<set>.txt --tinylm data/lm/tinylm.sjtl --no-reading-decode --no-recur --no-tone3`): the four lines are byte for byte those of main's binary
+/// (0729130c, before the model switch) on the same file. With the 會意 SJ-SR-8-15M file they were chat 267 and 74, formal 280 and 74 (`59429922…`, `18cc1a1c…`,
+/// `c45111c8…`, `c6f729c3…`). With the new file one of them is not the default's line: `FORMAL_TYPING76_DEFAULT`.
 // The two rerank-on dev302 rows moved with the rerank-protect list (data/lexicon/rerank-protect.tsv, 2026-11-10), not with the reading term: the mask keeps
 // 祭出 (row 156, both profiles) and 改期 (row 138, formal), so chat 266 -> 267 and formal 278 -> 280; `--no-reading-decode` and the default still print the same line.
 const BEFORE: [(&str, bool, &str, usize, usize, usize, &str); 8] = [
     ("chat", false, "dev302", 302, 249, 300, "3f8a405ff0de1a327f6bfa1935b10bf24cd54b15305c1cf79b09d406da9de17c"),
     ("chat", false, "typing76", 76, 70, 75, "0b9e970b7ed1c0897711257c45ceb0e6dc7c9d8458fc3747a46d96ee752deed9"),
-    ("chat", true, "dev302", 302, 267, 300, "59429922561f5db26f4446a3e5ea438912fcbacb2bb3931d19915cbff7bdc2d8"),
+    ("chat", true, "dev302", 302, 268, 300, "f0b64d70bfa72e2e43840a5c239aa3ed321a4049933d2754da33a8c578a4db66"),
     ("chat", true, "typing76", 76, 74, 75, "18cc1a1c71f6096a1383168226abdd8539043a3b30739adb679e749c455defd2"),
     ("formal", false, "dev302", 302, 260, 300, "3c6f177cdd786ae2b28c852a065e99318bc22693c1a87bbc8b7f6f1386dee66c"),
     ("formal", false, "typing76", 76, 69, 75, "0d5dbcbb7f2913a8f8a98c6cb30a7ad0d75791f9ac6966fa63c58d7828c306a9"),
-    ("formal", true, "dev302", 302, 280, 300, "c45111c843f5ab0ee085217e36cc9b005c16bc37da1a511151e4733d4e7ff003"),
-    ("formal", true, "typing76", 76, 74, 75, "c6f729c37ffc6096151ab4acdbfd8f55457b6045cb5ea9e8186da7ba57dc8e9d"),
+    ("formal", true, "dev302", 302, 289, 300, "f509beecb4fde32865ecdd65e18e24f9c5dc8a0e9b010d56c1a55caa0c1497a4"),
+    ("formal", true, "typing76", 76, 73, 75, "2436f17667ba734e63f5787fc1a43e120922814265916dbfd7479afb59790864"),
 ];
+
+/// The default's `top1_sha256` of formal typing76 with `--tinylm` (top1 74): the one setting of `BEFORE` whose default line is not the `--no-reading-decode` one
+/// with the 會意 SJ-SR-10-31M file. Without the reading term the rerank takes row 65 to 我把向量資料庫夾好了 (rank 2); with it the choice is 架好了 (rank 1).
+/// `--no-reading-decode` alone gives the 夾好了 line; `--no-recur` alone and `--no-tone3` alone change nothing (measured 2026-11-23 with `--picks`).
+const FORMAL_TYPING76_DEFAULT: &str = "c6f729c37ffc6096151ab4acdbfd8f55457b6045cb5ea9e8186da7ba57dc8e9d";
 
 /// sha256 of the `--dump` file (all 64 candidates and their path scores) of the n-gram-only runs before the option existed.
 const DUMP_BEFORE: [(&str, &str, &str); 4] = [
@@ -99,8 +108,8 @@ fn exempt_sha8() -> String {
     core::eval::sha256_hex(&std::fs::read(root().join("data/lexicon/std-exempt.tsv")).unwrap())[..8].to_string()
 }
 
-/// By default every one of the eight settings ends its tag `+rd+rx:<sha8 of std-exempt.tsv>+rm+rn` (the numbers of these two public sets do not move: the term acts on
-/// other rows, see the next test).
+/// By default every one of the eight settings ends its tag `+rd+rx:<sha8 of std-exempt.tsv>+rm+rn` (the numbers of these two public sets do not move, formal
+/// typing76 with the small model aside, `FORMAL_TYPING76_DEFAULT`: the term acts on other rows, see the next test).
 #[test]
 fn every_setting_ends_its_tag_with_rd_and_rx() {
     let want = format!("+rd+rx:{}+rm+rn+t3  {{'n': ", exempt_sha8());
@@ -110,6 +119,7 @@ fn every_setting_ends_its_tag_with_rd_and_rx() {
         assert!(o.status.success(), "{}", text(&o.stderr));
         let line = text(&o.stdout);
         assert!(line.contains(&want), "{profile} {tinylm} {set}: {line}");
+        let sha = if (profile, tinylm, set) == ("formal", true, "typing76") { FORMAL_TYPING76_DEFAULT } else { sha };
         assert!(line.contains(sha), "{profile} {tinylm} {set}: public sets are not moved by the term: {line}");
     }
 }

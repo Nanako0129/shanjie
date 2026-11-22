@@ -133,18 +133,21 @@ fn typed(e: &mut Engine, row: &str) -> (String, String) {
     (ngram, shown)
 }
 
-/// Row 179 of eval/dev/user-reported.txt (權限加好了, empty context), formal, standard strength: the n-gram's first path is right, and the small
-/// model prefers the homophone 全線 (measured 2026-11-10: ll −12.557 against −13.224, fused +0.43). With 權限 protected the shown sentence stays
-/// right; with a comment-only list (the same lexicon directory otherwise) the rerank puts 全線 in its place (the premise).
+/// Row 156 of eval/bench/suite-v1/dev302.txt (商家祭出半價優惠吸引客人, empty context), formal, standard strength: the n-gram's first path is right, and the
+/// small model prefers the homophone 寄出. With 祭出 protected the shown sentence stays right; with a comment-only list (the same lexicon directory otherwise)
+/// the rerank puts 寄出 in its place (the premise). Measured 2026-11-23 on the 會意 SJ-SR-10-31M file: `target/release/shanjie-eval --lm data/lm/bigram.sjlm
+/// --profile formal --context --packs acg,it --tinylm data/lm/tinylm.sjtl --rows eval/bench/suite-v1/dev302.txt --tinylm-scores OUT`: the row's `c` is 0 with
+/// `masked` holding candidate 1, and the pick over the same `ng` and `ll` without the mask (tools/lib/fusegrid.py `pick` at the header's 1.8, 2, 0) is 1.
+/// (Until 會意 SJ-SR-10-31M this was row 179 of eval/dev/user-reported.txt, 權限加好了: the new model no longer prefers 全線 there.)
 #[test]
-fn row_179_is_right_with_the_protect_list() {
-    const ROW: &str = "ㄑㄩㄢˊ ㄒㄧㄢˋ ㄐㄧㄚ ㄏㄠˇ ㄌㄜ˙";
+fn row_156_is_right_with_the_protect_list() {
+    const ROW: &str = "ㄕㄤ ㄐㄧㄚ ㄐㄧˋ ㄔㄨ ㄅㄢˋ ㄐㄧㄚˋ ㄧㄡ ㄏㄨㄟˋ ㄒㄧ ㄧㄣˇ ㄎㄜˋ ㄖㄣˊ";
     let d = scratch("empty");
     link_lexicon_dir(&d.0, Some("# no protect words\n"));
     let mut bare = shipping(&d.0, Profile::Formal);
-    assert_eq!(typed(&mut bare, ROW), ("權限加好了".to_string(), "全線加好了".to_string()), "premise: without the list the rerank takes 權限 out");
+    assert_eq!(typed(&mut bare, ROW), ("商家祭出半價優惠吸引客人".to_string(), "商家寄出半價優惠吸引客人".to_string()), "premise: without the list the rerank takes 祭出 out");
     let mut e = shipping(&root().join("data/lexicon"), Profile::Formal);
-    assert_eq!(typed(&mut e, ROW), ("權限加好了".to_string(), "權限加好了".to_string()));
+    assert_eq!(typed(&mut e, ROW), ("商家祭出半價優惠吸引客人".to_string(), "商家祭出半價優惠吸引客人".to_string()));
 }
 
 struct Dir(PathBuf);

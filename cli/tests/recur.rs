@@ -88,14 +88,14 @@ fn a_context_with_the_homophone_turns_the_choice() {
 }
 
 /// The context recurrence weight on the pool (docs/spec/semantic-rerank.md §3.1.1) in the CLI, on a hand-written row whose left text holds 44 characters,
-/// 語義 and 錯字: `+recur+pr` with `--context` and `--tinylm`, none with `--no-pool-recur`, `--no-recur` or no `--context`; without `--tinylm` there is no
+/// 神祕 and 錯字: `+recur+pr` with `--context` and `--tinylm`, none with `--no-pool-recur`, `--no-recur` or no `--context`; without `--tinylm` there is no
 /// pool and the option changes nothing (byte for byte). The reordered row's `--tinylm-scores` lists the pool as the rerank saw it (`idx`, the n-best index
 /// of each entry; `ng` the decoder's score plus the weight, best first); `--pool-mask-diff` writes numbers only and the summary counts them.
 #[test]
 fn the_pool_weight_marks_and_records() {
     let d = tmp("pool");
     let file = d.0.join("rows.txt");
-    std::fs::write(&file, "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（|語意也錯字|ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ\n").unwrap();
+    std::fs::write(&file, "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是神祕模型太爛啊（|神秘也錯字|ㄕㄣˊ ㄇㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ\n").unwrap();
     let file = file.to_str().unwrap();
     let path = |n: &str| d.0.join(n).to_str().unwrap().to_string();
     let base = ["--lm", "data/lm/bigram.sjlm", "--profile", "formal", "--rows", file];
