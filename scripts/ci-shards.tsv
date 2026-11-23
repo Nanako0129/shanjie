@@ -19,3 +19,4 @@ debug	1	core/engine_lm
 debug	1	core/engine_learn
 debug	1	core/engine_share
 debug	1	core/engine_replay
+macos	share	core/engine_share
