@@ -28,9 +28,12 @@ enum LeftContext {
     /// (CFBundleIdentifier) on a Mac; org.alacritty was corrected; the other five are
     /// the IDs listed here, not checked against an installed app or a published Info.plist.
     /// An editor with a built-in terminal is not here: the panel has the editor's bundle ID (a known limit, out of scope).
+    /// com.stablyai.orca (Orca, an Electron terminal on xterm.js) is here because what it hands an input method is the text
+    /// accumulated in xterm.js's hidden input field, not the terminal line (measured in a VM); as a terminal it gives only the
+    /// Han tail, so a stale tail can still pass and English never does (docs/spec/semantic-rerank.md §5.1).
     static let terminals: Set<String> = [
         "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.github.wez.wezterm",
-        "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
+        "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty", "com.stablyai.orca",
     ]
 
     /// The range to request: at most `maxUTF16` units ending at `insertion`.

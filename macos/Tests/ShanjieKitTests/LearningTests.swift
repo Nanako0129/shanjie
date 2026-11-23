@@ -133,7 +133,7 @@ final class LearningTests: XCTestCase {
     func testTerminalAppsGetOnlyTheHanTail() {
         XCTAssertEqual(LeftContext.terminals, [
             "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "com.github.wez.wezterm",
-            "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty",
+            "org.alacritty", "co.zeit.hyper", "com.mitchellh.ghostty", "com.stablyai.orca",
         ])
         let shell = makeShell()
         for bundle in LeftContext.terminals {
