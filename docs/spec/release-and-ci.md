@@ -161,7 +161,7 @@
 - `workflow_dispatch`（只能在 `main` 上）：乾跑，做關卡、建置、簽章與驗證，不簽 feed、不發佈；兩個簽好的 zip 留成一天的 artifact `signed`，給虛擬機與實機驗收。
 - 其他事件與 ref 一律拒絕（`gate`、`sign`、`publish` 各自再檢查一次）。
 - 頂層 `permissions: {}`，每個 job 自己寫權限。簽章材料與 tap 金鑰只存在 `release` Environment 的 secret，不放 repo secret；`sign` 與 `publish` 進這個 Environment，且各自只引用自己需要的 secret。
-- `gate`（ubuntu-latest，105 分）：§5.2、§5.3。
+- `gate`（ubuntu-latest，120 分）：§5.2、§5.3。
 - `build`（xcode-27，30 分，沒有 secret）：用同一個 `rust-toolchain` 1.97.1；自己下載與核對七個模型資產（`release.yml` 內的一份，雜湊檔與 `scripts/fetch-models.sh` 相同）；`scripts/build-app.sh`（`SHANJIE_RELEASE_BUILD=1`、正式 bundle ID）與 `scripts/build-installer.sh build`，產物以 tar 傳給 `sign`（tar 保留模式與符號連結，upload-artifact 不保留）。
 - `sign`、`publish`：見 `docs/spec/install-and-update.md`；本份只涵蓋發版說明與 Release 的建立（§5.4–§5.6）。
 
@@ -176,8 +176,8 @@
 
 - CI 不在 tag 上跑，所以 `gate` 執行 `scripts/check-ci-gate.sh "$GITHUB_SHA"`：被 tag 的那個 commit 在 `main` 上最新一次 `ci.yml` 的 push run 必須已結束且結論是 `success`。它防的是失誤，不是安全邊界（tag 的 commit 自己帶著這支腳本）。
 - 只看整個 run 的結論，不看個別 job 名稱，所以 job 怎麼拆都不影響關卡。
-- 參數：`CI_GATE_INTERVAL`（輪詢間隔，預設 30 秒）、`CI_GATE_TIMEOUT`（run 還在跑時最多等 5700 秒）、`CI_GATE_GRACE`（run 還不存在時最多等 300 秒：tag 可能比 CI 先到）；`CI_GATE_GH` 可替換 `gh`（給測試用）。
-- 等待上限（5700 秒）比 `ci.yml` 的 `core` job 上限（90 分，§1）長，`release.yml` 的 gate job 上限 105 分（寬限 300 秒加等待 5700 秒再留餘裕）：合併後馬上推 tag 時，關卡等 CI 跑完再判，不會先逾時；CI 失敗照樣拒絕。
+- 參數：`CI_GATE_INTERVAL`（輪詢間隔，預設 30 秒）、`CI_GATE_TIMEOUT`（run 還在跑時最多等 6600 秒）、`CI_GATE_GRACE`（run 還不存在時最多等 300 秒：tag 可能比 CI 先到）；`CI_GATE_GH` 可替換 `gh`（給測試用）。
+- 等待上限 6600 秒＝`ci.yml` 最長的路徑（changes 5 分接 core 90 分，§1）再留 15 分給 runner 排隊；寬限與等待都從關卡開始時起算，最長等的是兩者較大的那個。`release.yml` 的 gate job 上限 120 分，蓋住等待加輪詢、API 重試與 checkout。CI 在各 job 上限內跑完、排隊不超過 15 分時，合併後馬上推 tag 不會讓關卡先逾時；超過時關卡逾時失敗，照失敗訊息在 CI 綠了之後重跑 Release run。CI 失敗照樣拒絕。
 - 失敗的情形：run 的結論不是 `success`；等待逾時；連續三次讀不到 API；commit SHA 不是 40 個十六進位字元（結束碼 2）。失敗訊息附復原做法：`main` 上 CI 綠了之後重跑這個 Release run；tag 打在錯的 commit 要在合併 commit 上重打。
 - **appcast 的 commit**：`publish` 會用 `GITHUB_TOKEN` 把 `appcast.xml` 寫回 main，這種 push 不觸發 `ci.yml`。關卡看到某個 commit 相對於它唯一的父 commit 只改了 `appcast.xml`，就改看父 commit 的 run，最多往回走 20 個；有兩個父 commit、或除了 `appcast.xml` 還改了別的檔，都不往回走。
 - 測試：`scripts/test-check-ci-gate.sh`（對假 `gh`，無網路）涵蓋 appcast-only 的 commit 用父 commit 的 run 判斷，以及同時改了 `appcast.xml` 與其他檔的 commit 不被略過；`ci.yml` 的 `shell` job 執行它。
