@@ -6,8 +6,9 @@
 #
 # CI does not run on tags, so release.yml runs this first: the newest push run of ci.yml on main
 # for this exact commit must have concluded `success`. Waits while it is queued or running (up to
-# CI_GATE_TIMEOUT s) and while it does not exist yet (up to CI_GATE_GRACE s: a tag pushed right
-# after a merge can arrive first). Anything else fails, including three unreadable API answers in a
+# CI_GATE_TIMEOUT s, default 6600: ci.yml's longest path, changes 5 min + core 90 min, plus 15 min of
+# runner queueing) and while it does not exist yet (up to CI_GATE_GRACE s: a tag pushed right after a
+# merge can arrive first). Both count from the gate's start, so the longest wait is the larger one. Anything else fails, including three unreadable API answers in a
 # row. A mistake guard, not a security boundary: the tagged commit carries this script.
 #
 # A commit whose only change against its single parent is appcast.xml is the feed release.yml's
@@ -21,7 +22,7 @@ set -euo pipefail
 sha="${1:-}"
 repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
 interval="${CI_GATE_INTERVAL:-30}"
-timeout="${CI_GATE_TIMEOUT:-1800}"
+timeout="${CI_GATE_TIMEOUT:-6600}"
 grace="${CI_GATE_GRACE:-300}"
 
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::expected a 40-character commit SHA"; exit 2; }
