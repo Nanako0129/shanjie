@@ -436,7 +436,7 @@
 ### 13.4 句首單字（SINIT）的測試與重播
 
 - 選字函式（`core/src/tinylm.rs`）：學習項全 0 時三條路與沒有學習項逐一相同（隨機分數，固定種子的 LCG）；細鍵正負兩向、中鍵與粗鍵受 `ll_i > ll_0` 門檻、錨點學過候選沒學時是 0、只用最長一層、τ 的三條路各一例。
-- `core/tests/engine_learn.rs` 的 `sinit_*`：沒有重排工作時紀錄沒有作用（`sinit_row16_without_a_rerank_job_the_record_has_no_effect`）、改選取代的單字在改選當下的中鍵與細鍵下減半、兩個漢字的前文後面不作用且下一個音節不同時解碼和沒有紀錄時相同（`sinit_not_after_two_han_characters_and_not_before_another_syllable`）、單字在最後不學（`sinit_single_character_at_the_end_is_not_learned`）、英文與數字鄰居不學、規則 10 的紀錄不觸發守門、池是不抬升的 n-best 且換進的路徑帶不抬升的分數、`sinit_at_eps_0_a_record_changes_nothing_and_a_large_eps_takes_it`、`sinit_the_job_reads_the_longest_layer_that_has_a_record`、`sinit_mid_and_fine_keys_are_learned_by_what_follows_and_forgotten_with_the_coarse_one`、模糊音路徑上的學到字不改變結果、`sinit_taught_zai_does_not_pollute_zai_jia_xiu_xi`（不污染）、`sinit_dai_wo_chu_xi_hui_yi_does_not_take_dai_wo_chu_qu_wan`（細鍵分得出第四個音節不同的句子）、`sinit_learned_once`（出貨模型下錯字回報的幾列教一次就對）。
+- `core/tests/engine_learn.rs` 的 `sinit_*`：沒有重排工作時紀錄沒有作用（`sinit_row16_without_a_rerank_job_the_record_has_no_effect`）、改選取代的單字在改選當下的中鍵與細鍵下減半、兩個漢字的前文後面不作用且下一個音節不同時解碼和沒有紀錄時相同（`sinit_not_after_two_han_characters_and_not_before_another_syllable`）、單字在最後不學（`sinit_single_character_at_the_end_is_not_learned`）、英文與數字鄰居不學、規則 10 的紀錄不觸發守門、池是不抬升的 n-best 且換進的路徑帶不抬升的分數、`sinit_at_eps_0_a_record_changes_nothing_and_a_large_eps_takes_it`、`sinit_the_job_reads_the_longest_layer_that_has_a_record`、`sinit_mid_and_fine_keys_are_learned_by_what_follows_and_forgotten_with_the_coarse_one`、模糊音路徑上的學到字不改變結果、`sinit_taught_zai_does_not_pollute_zai_jia_xiu_xi`（不污染）、`sinit_dai_ni_bao_guan_does_not_take_dai_ni_bao_hu_zi_ji`（細鍵分得出第四個音節不同的句子）、`sinit_learned_once`（出貨模型下錯字回報的幾列教一次就對）。
 - `shanjie-replay`（逐列逐鍵經真引擎重播）：`--learn off|on`、`--learn-file FILE`、`--rerank-level conservative|standard|aggressive`（只用於評測，三個常數不隨檔位改）、`--sinit-stretches FILE`（規則 10 各段的 `Δng` 與 `α·Δll`）；`--learn on` 時 stderr 有 `sinit:` 計數行（`stretches`、`swaps`、`missing`、`overturned`、`tau_opened`）。指令與評測方式見 `docs/spec/evaluation.md`。
 
 ### 13.5 這份規格沒有自動測試的部分
@@ -472,7 +472,7 @@
 
 - 半衰期 14 天：教一次大約兩週有效，常用的詞靠再次改選保持；`PRUNE_FLOOR` 0.05 約 60 天沒再用到，權重 1 的紀錄在那之前還能累積。
 - `LEARN_EPS` ＝ 6.0：在 `eval/learn/cases.tsv` 的鏡像測試上，2.0 學會 4／10、4.0 學會 8／10、6.0 與 8.0 都是 9／10，取最小的 6.0。
-- 句首單字的三個常數（4、4、2）：由離線投影選出；單用下一個音節的鍵分不出「再加一」與「在家睡覺」，所以粗層只在小模型也偏向時抬升、數值只有中層的一半；兩個音節的鍵分不出前三個音節相同的句子（「代我出席會議」與「帶我出去玩」），所以細層看三個音節，中層受模型門檻。
+- 句首單字的三個常數（4、4、2）：由離線投影選出；單用下一個音節的鍵分不出「再加一」與「在家睡覺」，所以粗層只在小模型也偏向時抬升、數值只有中層的一半；兩個音節的鍵分不出前三個音節相同的句子（「代你保管」與「帶你保護自己」），所以細層看三個音節，中層受模型門檻。
 - 句首單字的紀錄不直接加在 n-gram 分數上，而是只把候選送進池、偏好交給融合分數：單字拿一般加分時，同鍵的常用句（「在寫報告」「在找鑰匙」）被拉走。
 
 ### 15.3 新詞的參數
