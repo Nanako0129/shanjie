@@ -210,7 +210,7 @@
 
 ### 5.7 中英混合詞
 
-英文後面接中文、合起來是一個詞的（CP值、SIM卡、QR碼、hold住、get不到）不在詞庫裡，也解不出來：英文 token 切開解碼的段落，候選範圍遇到 token 就停。它們另外放一張表，只當候選，解碼不變。
+英文後面接中文、合起來是一個詞的（CP值、SIM卡、QR碼、hold住、get不到）不在詞庫裡，也解不出來：英文 token 切開解碼的段落，候選範圍遇到 token 就停。它們另外放一張表：Shift 開的英文段打完讀音時自動套用（見下面），也是候選清單的一項。
 
 - **表** `data/lexicon/mixed-words.tsv`（本專案自寫，CC0；每列寫法的依據在 `mixed-words-sources.tsv`）：`英文\t讀音\t寫法\t次數`，`#` 開頭的行與空行略過。英文是小寫 `[a-z][a-z0-9]{0,15}`（可以只有一個字母：`t`、`k`）；讀音是 1 到 4 個詞庫有的音節，以空白分隔；寫法的開頭不分大小寫等於英文，後面是和音節數一樣多的漢字；次數是正整數；同一組（英文、讀音）只能有一列；最多 5,000 列、256 KiB。`Engine::new` 從資料夾讀它（和 `digits.tsv` 同一處）；沒有這個檔、或任何一列不合規時整張表不載入（檔頭帶 BOM 也算不合規），引擎和沒有這個功能時相同，不回錯誤碼。沒有開關、沒有 C ABI 函式；中英混打關掉之後，組字區裡既有的英文 token 照樣會列出混合詞（清單那一項不看開關；下面的自動套用與 §4.3 的收尾鍵切分要中英混打開著）。次數只用來排 Shift＋字母的預測列（`docs/spec/prediction.md` §3.5）。單一字母與 `ok`、`po` 開頭的 55 列（T恤、K書、A片、N次、C語言…）的次數是台灣公開論壇的計數。
 - **什麼時候出現**：游標在組字區尾端、沒有未完成音節，游標前是一個英文 token 加 k 個音節（k ≥ 1，token 到游標之間全部的音節），而且表裡有（token 讀音裡照打的文字轉小寫、這 k 個音節）這一列。只比對打的讀音，模糊輸入的替代讀音不比。游標在中間、token 和游標之間有其他 token、或音節數對不上時沒有這一項。
@@ -225,7 +225,7 @@
   - 改選：↓ 清單照舊，第一項是混合詞（選它仍換成一個 token，見「選了之後」）；改選別的詞只換漢字部分，英文部分不變，這個 token 之後不再自動套用，直到 token 本身被刪掉。從寫法清單替 token 另選寫法之後也不再套用。
   - Backspace、方向鍵照各單位：Backspace 先刪漢字的音節（刪掉後再打同一個讀音會再套用一次），再輪到 token；token 被 Backspace 重開成英文段時回到使用者打的內容（「CP」重開是 `c`，§5.3）。
 - **前文結尾是英文**：組字區從頭到游標的音節（起點 0）也可以接在游標前文字結尾的英文後面。條件：中英混打開著；引擎載入了宣告前文長度 L 的會意（`docs/spec/semantic-rerank.md` §5.2：這時核心留著的前文才含單一字母與數字；和語意校正開不開無關，`set_rerank` 不卸載模型）；留著的前文結尾是 1 到 16 個 ASCII 字母或數字，再前一個字元不是字母或數字，而且這一段不是從被截斷的開頭算起。這時把這段英文當成英文 token 查表，其餘同自動套用（前文「T」＋ㄒㄩˋ 是「恤」；之後打 ㄕˋ「恤」不變）。只用核心已經留著的前文，不多留資料、不經 C ABI 回傳；前文裡的英文不會被改寫。只影響表裡有的（英文、讀音）：前文「Tx」「9T」、前文「T」＋ㄕˋ 都和沒有這條規則時相同。
-- **建表檢查**（`core/tests/engine_mixed.rs` 的 `no_english_word_runs_into_a_shipped_row`）：`english.tsv` 的 `E` 列、`data/english-extra.txt`、`data/lexicon/names-english.txt` 的每個字，取「首字母大寫」與「全部大寫」兩種寫法，各用 Shift 打進引擎再按空白；有表和沒有表的結果不同就算撞到（直接跑 §4.3 的判斷，含同欄取代）。撞到的列照收，撞到的（列、英文字）與「切開後 ↓ 清單裡有沒有那個英文字」列在 §14 的表，測試 `the_words_that_run_into_shipped_rows_are_the_documented_ones` 斷言檢查的結果恰好等於那張表。`the_table_check_finds_a_word_that_replays_into_a_row` 用合成的表（`k ㄍㄜ`）與字（`keke`）確認這個檢查抓得到。
+- **建表檢查**（`core/tests/engine_mixed.rs` 的 `the_table_check_finds_a_word_that_replays_into_a_row` 與 `the_words_that_run_into_shipped_rows_are_the_documented_ones`）：`english.tsv` 的 `E` 列、`data/english-extra.txt`、`data/lexicon/names-english.txt` 的每個字，取「首字母大寫」與「全部大寫」兩種寫法，各用 Shift 打進引擎再按空白；有表和沒有表的結果不同就算撞到（直接跑 §4.3 的判斷，含同欄取代）。撞到的列照收，撞到的（列、英文字）與「切開後 ↓ 清單裡有沒有那個英文字」列在 §14 的表，測試 `the_words_that_run_into_shipped_rows_are_the_documented_ones` 斷言檢查的結果恰好等於那張表。`the_table_check_finds_a_word_that_replays_into_a_row` 用合成的表（`k ㄍㄜ`）與字（`keke`）確認這個檢查抓得到。
 - 限制：英文要先成為 token（Shift 開頭打，或回退成英文），或照 §4.3 整段用 Shift 打成大寫後直接接注音；照欄位順序剛好是合法注音的英文（短詞清單的字）與鄰鍵打錯開著時被收成中文的（§3.4）不會成為 token。只收英文在前、中文在後的詞。Windows 版中英混打關著：沒有自動套用與收尾鍵切分，清單的那一項照舊。其他見 §14。
 
 ## 6. 短詞清單與覆寫過的音節的英文項
