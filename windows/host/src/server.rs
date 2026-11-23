@@ -7,7 +7,7 @@
 //!   this process) and reused forever; each has its own thread, and each connection runs inside `guard::run`.
 //! - A connection: `Hello` within 1 s; the client's impersonation token is checked (same user, same session, every query must answer);
 //!   `NotReady` while the model loads; at most `PER_CLIENT` connections per client (its AppContainer SID, else its PID: a rate limit,
-//!   never authority); then `Welcome` and keys. A malformed message drops the connection without an answer.
+//!   never authority); then `Welcome`, keys and polls for the rerank. A malformed message drops the connection without an answer.
 //! - The host never acts as the client: the impersonation is only long enough to read the token, and `RevertToSelf` failing ends the
 //!   process.
 use crate::engine::{self, Answer, Owner};
@@ -17,6 +17,7 @@ use crate::startup::{self, Launch};
 use crate::timing;
 use crate::token::{self, Facts};
 use shanjie_win_proto::ids::IDS;
+pub use crate::startup::exit;
 use shanjie_win_proto::{self as proto, Accept, ClientMsg, HostSession, ServerMsg};
 use std::collections::BTreeMap;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -57,16 +58,12 @@ pub const EXIT_SELF_CHECK: i32 = 2;
 pub const EXIT_SETUP: i32 = 3;
 pub const EXIT_PIPE: i32 = 4;
 pub const EXIT_LOAD: i32 = 5;
-pub const EXIT_POISONED: i32 = 6;
+// 6 (`EXIT_POISONED`) and 9 (`EXIT_RERANK`) are in `startup`, for the modules built on every platform.
 pub const EXIT_REVERT: i32 = 7;
 /// `--logon` and this build's profile is not enabled for the user (or the question could not be asked): no model, no pipe.
 pub const EXIT_NOT_ENABLED: i32 = 8;
 /// The language of the profile (zh-TW).
 const LANGID_ZH_TW: u16 = 0x0404;
-
-pub fn exit(code: i32) -> ! {
-    std::process::exit(code)
-}
 
 /// §5.5 item 2, the one SDDL string: the user gets `FILE_GENERIC_READ | FILE_GENERIC_WRITE` (no `WRITE_DAC`, `WRITE_OWNER`,
 /// `DELETE`); ALL APPLICATION PACKAGES and ALL RESTRICTED APPLICATION PACKAGES get read data, write data, read attributes,
@@ -119,7 +116,8 @@ pub fn key_scheme_from(rc: u32, data: u32) -> (u32, u64) {
     }
 }
 
-fn read_key_scheme() -> (u32, u64) {
+/// One DWORD of this build's settings key: the return code of `RegGetValueW` and the value (0 unless the code is `ERROR_SUCCESS`).
+fn read_setting(name: PCWSTR) -> (u32, u32) {
     let mut data = 0u32;
     let mut size = std::mem::size_of::<u32>() as u32;
     let subkey: Vec<u16> = startup::settings_subkey().encode_utf16().chain([0]).collect();
@@ -128,14 +126,14 @@ fn read_key_scheme() -> (u32, u64) {
         RegGetValueW(
             HKEY_CURRENT_USER,
             PCWSTR(subkey.as_ptr()),
-            w!("KeyScheme"),
+            name,
             RRF_RT_REG_DWORD,
             None,
             Some((&mut data as *mut u32).cast::<std::ffi::c_void>()),
             Some(&mut size),
         )
     };
-    key_scheme_from(rc.0, data)
+    (rc.0, data)
 }
 
 /// The `--logon` question: is this build's profile (CLSID, zh-TW, profile GUID) enabled for the user? Any failure, COM initialisation included,
@@ -177,15 +175,19 @@ pub fn run(launch: Launch) -> ! {
     if !start(&name, INSTANCES, me) {
         exit(EXIT_PIPE);
     }
-    // The key scheme (§5.2): read once here, never in `engine::load`; event 71 records it with where it came from.
-    let (scheme, source) = read_key_scheme();
+    // The key scheme and the rerank switch (§5.2): read once here, never in `engine::load`; events 71 and 76 record them with where they came from.
+    let (rc, data) = read_setting(w!("KeyScheme"));
+    let (scheme, source) = key_scheme_from(rc, data);
     timing::record(timing::EV_KEY_SCHEME, u64::from(scheme), source);
+    let (rc, data) = read_setting(w!("Rerank"));
+    let (rerank, source) = startup::rerank_from(rc, data);
+    timing::record(timing::EV_RERANK_SETTING, u64::from(rerank), source);
     let t0 = timing::now_us();
-    let e = engine::load(&dir, scheme).unwrap_or_else(|| exit(EXIT_LOAD));
+    let e = engine::load(&dir, scheme, rerank).unwrap_or_else(|| exit(EXIT_LOAD));
     let t1 = timing::now_us();
     // Warm-up before `install`: until then every client passes through (§5.2).
-    let e = engine::warmed(&dir, scheme, e).unwrap_or_else(|| exit(EXIT_LOAD));
-    engine::install(e, scheme);
+    let e = engine::warmed(&dir, scheme, rerank, e).unwrap_or_else(|| exit(EXIT_LOAD));
+    engine::install(e, scheme, rerank);
     timing::record(timing::EV_LOAD, t0, t1);
     // Lives until logoff (§5.2): the instance threads do the work.
     loop {
@@ -230,6 +232,12 @@ pub fn start(name: &str, n: u32, me: Facts) -> bool {
 static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 static LIVE: AtomicU32 = AtomicU32::new(0);
 static PEAK: AtomicU32 = AtomicU32::new(0);
+
+/// Connections being served right now, their cleanup (`engine::drop_connection`) included: the tests wait for 0 before they look at the engine's state.
+#[cfg(test)]
+pub fn live() -> u32 {
+    LIVE.load(Ordering::Acquire)
+}
 
 /// One instance, forever: wait for a client, serve it, drop it.
 fn instance(p: Pipe, me: &'static Facts) {
@@ -404,6 +412,12 @@ fn serve(p: &Pipe, conn: u64, me: &Facts) {
                     return;
                 }
                 timing::record(timing::EV_KEY, t0, timing::now_us());
+            }
+            // The connection id is the host's own; the client names only its ctx. A non-owner gets the fixed answer (`engine::poll`).
+            Accept::Msg(seq, ClientMsg::Poll { ctx, snap }) => {
+                if !send(p, seq, &ServerMsg::Polled(engine::poll(Owner { conn, ctx }, snap))) {
+                    return;
+                }
             }
             Accept::Msg(_, ClientMsg::Release { ctx }) => engine::release(Owner { conn, ctx }),
             Accept::Msg(_, ClientMsg::Reset { .. }) => engine::drop_connection(conn),
