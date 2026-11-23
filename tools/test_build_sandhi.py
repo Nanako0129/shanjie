@@ -1,6 +1,7 @@
-"""Unit tests for the `neutral` (§8.3) and `fusion` (R7, §8.1) rows of tools/build_sandhi.py on tiny synthetic lexicons (docs/spec/decoder.md §8.3).
+"""Unit tests for the `neutral` (§8.3), `fusion` (R7, §8.1) and `colloq` (§8.7) rows of tools/build_sandhi.py on tiny synthetic lexicons (docs/spec/decoder.md §8).
 Run: python3 -W ignore -m unittest tools/test_build_sandhi.py"""
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -79,6 +80,65 @@ def run_tagged(base_lines, tag):
         open(o, "w", encoding="utf-8").write("")
         text, per_rule = bs.build(b, o)
     return {(r, w): s for r, w, s, t in (line.split("\t") for line in text.splitlines()) if t == tag}, per_rule
+
+
+def run_colloq(base_lines, table, overlay_lines=""):
+    """回傳 ({(讀音, 詞): 分數文字} 只含 colloq 列, per_rule)。"""
+    with tempfile.TemporaryDirectory() as d:
+        b, o = os.path.join(d, "base.txt"), os.path.join(d, "overlay.tsv")
+        open(b, "w", encoding="utf-8").write(base_lines)
+        open(o, "w", encoding="utf-8").write(overlay_lines)
+        text, per_rule = bs.build(b, o, colloq=table)
+    return {(r, w): s for r, w, s, t in (line.split("\t") for line in text.splitlines()) if t == "colloq"}, per_rule
+
+
+class Colloq(unittest.TestCase):
+    """docs/spec/decoder.md §8.4: the words of the list get a row with the listed positions changed (level: the tone mark goes; neutral: it becomes ˙)."""
+    REDUP = "ㄖㄜˋ-ㄊㄥˊ-ㄊㄥˊ 熱騰騰 -5.0\n"
+    TABLE = {"熱騰騰": [(1, "level"), (2, "level")]}
+
+    def test_the_rule_truth_table(self):
+        v = lambda r, ch: bs.colloq_variant(r.split("-"), ch)
+        self.assertEqual(v("ㄖㄜˋ-ㄊㄥˊ-ㄊㄥˊ", [(1, "level"), (2, "level")]), ["ㄖㄜˋ", "ㄊㄥ", "ㄊㄥ"])
+        self.assertEqual(v("ㄇㄧˊ-ㄇㄧˊ-ㄏㄨˊ-ㄏㄨˊ", [(1, "neutral"), (2, "level"), (3, "level")]), ["ㄇㄧˊ", "ㄇㄧ˙", "ㄏㄨ", "ㄏㄨ"])
+        self.assertEqual(v("ㄌㄧˋ-ㄏㄞˋ", [(1, "neutral")]), ["ㄌㄧˋ", "ㄏㄞ˙"])
+        self.assertEqual(v("ㄉㄨㄥ-ㄒㄧ", [(1, "neutral")]), ["ㄉㄨㄥ", "ㄒㄧ˙"], "a first tone has no mark to replace")
+        self.assertIsNone(v("ㄏㄟ-ㄉㄨㄥ-ㄉㄨㄥ", [(1, "level"), (2, "level")]), "already level: no row")
+        self.assertIsNone(v("ㄉㄨㄥ-ㄒㄧ˙", [(1, "neutral")]), "already neutral: no row")
+        self.assertEqual(v("ㄖㄜˋ-ㄊㄥˊ", [(1, "level"), (2, "level")]), ["ㄖㄜˋ", "ㄊㄥ"], "a position past the reading is ignored")
+
+    def test_the_row_has_the_penalty_and_the_tag_and_counts_once(self):
+        got, per_rule = run_colloq(self.REDUP + "ㄖㄜˋ 熱 -3.0\n", self.TABLE)
+        self.assertEqual(got, {("ㄖㄜˋ-ㄊㄥ-ㄊㄥ", "熱騰騰"): f"{-5.0 - bs.COLLOQ_PENALTY:.8f}"})
+        self.assertEqual(per_rule["colloq"], 1)
+
+    def test_every_base_reading_of_the_word_and_the_higher_score_for_one_new_reading(self):
+        got, per_rule = run_colloq(self.REDUP + "ㄖㄜˋ-ㄊㄥˇ-ㄊㄥˇ 熱騰騰 -4.0\nㄖㄜ-ㄊㄥˊ-ㄊㄥˊ 熱騰騰 -6.0\n", self.TABLE)
+        self.assertEqual(got, {("ㄖㄜˋ-ㄊㄥ-ㄊㄥ", "熱騰騰"): f"{-4.0 - bs.COLLOQ_PENALTY:.8f}", ("ㄖㄜ-ㄊㄥ-ㄊㄥ", "熱騰騰"): f"{-6.0 - bs.COLLOQ_PENALTY:.8f}"})
+        self.assertEqual(per_rule["colloq"], 2)
+
+    def test_existing_reading_word_not_written(self):
+        self.assertEqual(run_colloq(self.REDUP + "ㄖㄜˋ-ㄊㄥ-ㄊㄥ 熱騰騰 -9.0\n", self.TABLE)[0], {})                       # 基底已有
+        self.assertEqual(run_colloq(self.REDUP, self.TABLE, "ㄖㄜˋ-ㄊㄥ-ㄊㄥ\t熱騰騰\t-9.0\toverlay\n")[0], {})          # 疊加層已有
+        self.assertEqual(len(run_colloq(self.REDUP, self.TABLE, "ㄖㄜˋ-ㄊㄥ-ㄊㄥ\t熱鼟鼟\t-9.0\toverlay\n")[0]), 1)       # 別的詞的同一個讀音不擋
+
+    def test_a_word_outside_the_list_or_only_in_the_overlay_gets_no_row(self):
+        self.assertEqual(run_colloq("ㄌㄧˋ-ㄏㄞˋ 厲害 -5.0\n", self.TABLE)[0], {})
+        self.assertEqual(run_colloq("ㄖㄜˋ 熱 -3.0\n", self.TABLE, "ㄖㄜˋ-ㄊㄥˊ-ㄊㄥˊ\t熱騰騰\t-5.0\toverlay\n")[0], {})
+
+    def test_the_shipped_file_has_the_rows_of_the_list_and_check_counts_them(self):
+        text, per_rule = bs.build()
+        shipped = open(bs.OUT, encoding="utf-8").read()
+        self.assertEqual(text, shipped, "data/lexicon/sandhi-add.tsv is a fresh build")
+        rows = [l.split("\t") for l in shipped.splitlines() if l.endswith("\tcolloq")]
+        self.assertEqual(per_rule["colloq"], len(rows))
+        table = bs.colloq_table()
+        self.assertTrue(rows and all(r[1] in table for r in rows))
+        self.assertIn(("ㄖㄜˋ-ㄊㄥ-ㄊㄥ", "熱騰騰"), {(r[0], r[1]) for r in rows})
+
+    def test_the_penalty_is_the_cores_delta_neutral(self):
+        src = open(os.path.join(bs.ROOT, "core", "src", "tone3.rs"), encoding="utf-8").read()
+        self.assertEqual(float(re.search(r"pub const DELTA_NEUTRAL: f64 = ([0-9.]+);", src).group(1)), bs.COLLOQ_PENALTY)
 
 
 class Fusion(unittest.TestCase):

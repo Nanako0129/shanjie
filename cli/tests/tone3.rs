@@ -102,7 +102,7 @@ fn typo_report_row_192_is_right() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// docs/spec/evaluation.md §1.4: the tag ends `+t3` with the switch on, `+t3:d<δ>` with `--tone3-delta`, and has no mark with `--no-tone3`; the two options
+/// docs/spec/evaluation.md §1.4: the tag ends `+t3c` with the switch on, `+t3c:d<δ>` with `--tone3-delta`, and has no mark with `--no-tone3`; the two options
 /// together are an error. Contract tone3-sandhi §3.4: the arm off with `--fuzzy 0` counts a row that holds an unaccepted syllable with no adjacent-key
 /// reading as wrong, rc 0, and goes on.
 #[test]
@@ -130,9 +130,9 @@ fn tags_and_the_off_arm_with_fuzzy_0() {
     let on = with(&[]);
     assert!(on.status.success());
     let s = String::from_utf8(on.stdout).unwrap();
-    assert!(summary(&s).contains("+rm+rn+t3  {"), "{s}");
+    assert!(summary(&s).contains("+rm+rn+t3c  {"), "{s}");
     let d = String::from_utf8(with(&["--tone3-delta", "1.5"]).stdout).unwrap();
-    assert!(summary(&d).contains("+rm+rn+t3:d1.5  {"), "{d}");
+    assert!(summary(&d).contains("+rm+rn+t3c:d1.5  {"), "{d}");
     assert!(!with(&["--no-tone3", "--tone3-delta", "1.5"]).status.success());
     assert!(!with(&["--no-tone3"]).status.success(), "premise: off without --fuzzy, the row stops the run as before");
     let off = with(&["--no-tone3", "--fuzzy", "0"]);
@@ -189,7 +189,7 @@ fn replay_and_cli_agree_on_the_sandhi_probes() {
                 let b: Vec<&str> = b.iter().map(String::as_str).collect();
                 let (cli, rep) = (run(eval, &a), run(replay, &b));
                 assert_eq!(sha_of(summary(&cli)), sha_of(summary(&rep)), "{set} {variant} off {off}: {}\n{}", summary(&cli), summary(&rep));
-                assert_eq!(summary(&rep).contains("+t3  {"), !off);
+                assert_eq!(summary(&rep).contains("+t3c  {"), !off);
             }
         }
     }

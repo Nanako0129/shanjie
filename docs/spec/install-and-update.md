@@ -103,6 +103,7 @@ Sparkle 的程式碼位置、善解更新、安裝程式一律沒有 entitlement
 - 善解更新的 Info.plist：沒有 `SUFeedURL`、`SUPublicEDKey`、任何 `SUEnable*` 鍵、`LSUIElement`；`CFBundleLocalizations` 含 `zh-Hant`，`CFBundleAllowMixedLocalizations` 為 true（沒有這兩個，Sparkle 的對話框照開發語言顯示英文）。
 - 權限（root 擁有的 `/Library` 副本必須所有人讀得到、載得起來，又沒有任何人能改）：每個非符號連結的檔案 `o+r`；目錄與有 `u+x` 的檔案 `o+x`；沒有群組或其他人可寫（符號連結除外，macOS 不看連結自己的模式）；沒有 setuid／setgid。`build-app.sh` 在簽章前 `chmod -R a+rX,go-w`；release 的 sign 步驟解開建置產物用 `tar -xpf`（`umask 077` 下 `tar -xf` 會把 bundle 變成 0700／0600），公證蓋章之後、打包 zip 之前再 `chmod -R a+rX,go-w`（`stapler` 與 `codesign` 在 `umask 077` 下會把檔案寫成 0600）。
 - Sparkle 的 MIT 授權與它附帶的第三方授權放在 `Resources/LICENSES/Sparkle-MIT.txt`，`check-app.sh` 斷言與 repo 的 `LICENSES/Sparkle-MIT.txt` 相同且含 `EXTERNAL LICENSES`。
+- 教育部兩部辭典的公眾授權使用說明（《重編國語辭典修訂本》《國語辭典簡編本》，CC BY-ND 3.0 臺灣；使用說明第二點要求完整保留）放在 `Resources/LICENSES/MOE-dict-revised-terms.txt`、`MOE-dict-concised-terms.txt`，檔頭寫版本編號與標示；`check-app.sh` 斷言兩個檔都在、和 repo 的 `LICENSES/` 逐位元組相同。辭典只用來決定詞庫裡哪些詞有口語讀音與某些讀音（`docs/spec/decoder.md` §8.7、`LICENSES/data.md`）。
 
 ### 2.5 簽章（本機 ad-hoc）
 

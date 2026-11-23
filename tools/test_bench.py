@@ -806,9 +806,11 @@ class SuiteV2(Tmp):
         """docs/spec/decoder.md §6.6: a version with `"tone3": True` ships third-tone sandhi and ends every tag (the replay-setting cell's too) in `+t3` after the
         reading marks; one without the key has no mark. A cell is scored against its own form only: each refuses the other."""
         base = {"release": "vN", "flags": ["--context", "--packs", "acg"], "tinylm": True, "reading": True, "reading_norm": True, "tag": "+ctx+tl:{tl8}+acg"}
-        for spec, own, other in ((dict(base, tone3=True), "+rm+rn+t3", "+rm+rn"), (base, "+rm+rn", "+rm+rn+t3")):
-            label = "vT" + own.replace("+", "")
-            with self.subTest(own=own), mock.patch.dict(bench.VERSIONS2, {label: spec}):
+        # `"colloq_sandhi"` besides `"tone3"` (colloquial sandhi on the same switch, docs/spec/decoder.md §8.7): `+t3c`, which `+t3` and it refuse mutually.
+        for spec, own, other in ((dict(base, tone3=True), "+rm+rn+t3", "+rm+rn"), (base, "+rm+rn", "+rm+rn+t3"),
+                                 (dict(base, tone3=True, colloq_sandhi=True), "+rm+rn+t3c", "+rm+rn+t3"), (dict(base, tone3=True), "+rm+rn+t3", "+rm+rn+t3c")):
+            label = "vT" + own.replace("+", "") + "x" + other.replace("+", "")
+            with self.subTest(own=own, other=other), mock.patch.dict(bench.VERSIONS2, {label: spec}):
                 v = self.stage_models(label, HEX)
                 for n in HEX:
                     self.put_model(n)
@@ -816,7 +818,7 @@ class SuiteV2(Tmp):
                 with open(os.path.join(v.dir, "data", "lexicon", "std-exempt.tsv"), "w", encoding="utf-8") as f:
                     f.write("ㄅㄛ\t波\n")
                 with mock_hash():
-                    bench.setup_models(v, spec, os.path.join(self.td, "mft" + str(len(own))))
+                    bench.setup_models(v, spec, os.path.join(self.td, "mft" + label))
                 for prof in ("chat", "formal"):
                     self.assertEqual(bench.expected_tag(v, prof, False), f"lm-{prof}+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{own}")
                 self.assertEqual(bench.expected_tag(v, "chat", True), f"lm-chat+ctx+tl:7e73ef67+rd+rx:{v.rx8}{own}")
@@ -826,8 +828,11 @@ class SuiteV2(Tmp):
                 self.fake_cli(f"lm-chat+ctx+tl:7e73ef67+acg+rd+rx:{v.rx8}{other}", [True, True], ("你好", "世界"))
                 with self.assertRaises(RuntimeError):
                     bench.run_cell2(self.ctx, v, "pub", "chat", False)
-        for label in bench.VERSIONS2:   # v0.9.0 is the first release with it
+        with self.assertRaises(RuntimeError):
+            bench.tone3_tag({"colloq_sandhi": True})     # the colloquial mark is a form of the sandhi mark: never without `"tone3"`
+        for label in bench.VERSIONS2:   # v0.9.0 is the first release with tone3; no released version ships the colloquial readings yet
             self.assertEqual("tone3" in bench.VERSIONS2[label], label == "v0.9.0")
+            self.assertNotIn("colloq_sandhi", bench.VERSIONS2[label], "no released version ships it yet")
 
     def test_recur_version_marks_every_context_tag_after_ctx(self):
         """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every

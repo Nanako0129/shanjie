@@ -204,7 +204,8 @@ def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=Fals
     `+rm+rn` when it also has `"reading_norm": True` (the syllable normalisation); each refuses the other form.
     A version with `"recur": True` (the context recurrence term, docs/spec/decoder.md §4.6) has `+recur` before the reading marks, `+recur+pr` when it also has
     `"pool_recur": True` (the weight on the semantic correction's pool, docs/spec/semantic-rerank.md §3.1.1) and the replay runs the small model.
-    A version with `"tone3": True` (third-tone sandhi, docs/spec/decoder.md §6.6) ends its tag in `+t3` after the reading marks; each refuses the other form."""
+    A version with `"tone3": True` (third-tone sandhi, docs/spec/decoder.md §6.6) ends its tag in `+t3` after the reading marks, `+t3c` when it also has
+    `"colloq_sandhi": True` (`tone3` is then the mark itself, `bench.tone3_tag`; `True` is `+t3`); each refuses the other forms."""
     cmd = [binary, "--rows", rows, "--profile", "chat", "--correct", "--learn", "on" if learn else "off", "--rowstats", rowstats]
     if "tinylm.sjtl" not in models:
         cmd.append("--no-tinylm")
@@ -228,7 +229,7 @@ def replay_cell(binary, root, rows, models, learn, rowstats, packs, reading=Fals
     if reading:
         want += f"+rd+rx:{bench.sha_file(os.path.join(root, 'data', 'lexicon', 'std-exempt.tsv'))[:8]}+rm" + ("+rn" if reading_norm else "")
     if tone3:
-        want += "+t3"
+        want += tone3 if isinstance(tone3, str) else "+t3"
     if tag != want:
         raise RuntimeError(f"setting tag {tag} != {want}")
     n = len(bench.truths(rows))
@@ -262,7 +263,7 @@ def cmd_replay(a, root=ROOT, kpi_dir=KPI_DIR, build=build_replay):
         def cell(name, learn):
             rs = os.path.join(td, f"{name}.{'on' if learn else 'off'}.rs")
             try:
-                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs, pack_tag(bench.VERSIONS2[label]), bool(bench.VERSIONS2[label].get("reading")), bool(bench.VERSIONS2[label].get("recur")), bool(bench.VERSIONS2[label].get("pool_recur")), bool(bench.VERSIONS2[label].get("reading_norm")), bool(bench.VERSIONS2[label].get("tone3"))), rs
+                return replay_cell(binary, root, REPLAY_ROWS[name][0], models, learn, rs, pack_tag(bench.VERSIONS2[label]), bool(bench.VERSIONS2[label].get("reading")), bool(bench.VERSIONS2[label].get("recur")), bool(bench.VERSIONS2[label].get("pool_recur")), bool(bench.VERSIONS2[label].get("reading_norm")), bench.tone3_tag(bench.VERSIONS2[label])), rs
             except RuntimeError as e:
                 die(f"{name}: {e}")
         for name in ("user-reported", "dev302"):

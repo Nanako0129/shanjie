@@ -705,7 +705,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   | `data\lexicon\` | `mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`、`mixed-words.tsv` |
   | `data\packs\` | `acg-add.tsv`、`acg-sources.tsv`、`acg.json`、`it-add.tsv`、`it-sources.tsv`、`it.json` |
   | `data\lm\` | `data/models.tsv` 列的全部 7 個：`bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm` |
-  | `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`CC-BY-SA-4.0-attribution.txt` |
+  | `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`MOE-dict-revised-terms.txt`、`MOE-dict-concised-terms.txt`、`CC-BY-SA-4.0-attribution.txt` |
 
   - 和 Mac 版 `scripts/build-app.sh` 的差別：沒有美妝與台詞詞包（§3.4：Windows 版只帶 `acg`、`it`）、沒有 `english.tsv`（「英文或注音」比較用的計數表：Windows 的常駐程序把英文直打關著，§3.4，那項比較不會跑）、沒有 Sparkle 的授權檔、沒有 `models.tsv`；`LICENSE` 在根而不在 `LICENSES\`。模型和 Mac 版一樣是全部 7 個：常駐程序載入 `bigram.sjlm` 時連旁邊的辨類、承接與兩個 trigram 表一起載，少了 `classes.sjc` 會載入失敗，少了其他的那一項會默默關掉，解碼結果就和量過的不同（§3.4）。`mixed-words.tsv` 核心有就讀。
   - 模型與 `colloquial-attribution.tsv` 的 SHA-256 要符合 `data/*.sha256`（`check-msi.ps1` 核對）。

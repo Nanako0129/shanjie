@@ -1005,8 +1005,8 @@ impl CappedLexicon {
         let bits = if pack.is_empty() { 0 } else { ents.len().div_ceil(64) };
         let (mut overlay_bits, mut pack_bits) = (vec![0u64; bits], vec![0u64; bits]);
         let mut ceil_bits = vec![0u64; if unseen_ceil.is_some() { bits } else { 0 }];
-        for i in 0..base.readings.len() {
-            let range = base.range(i);
+        // The colloquial rows' words are capped like any other (their ranges follow the readings').
+        for range in (0..base.readings.len()).map(|i| base.range(i)).chain(base.colloq_ranges()) {
             for (p, e) in range.clone().zip(&mut ents[range.clone()]) {
                 let w = &base.words[e.off as usize..(e.off + e.len) as usize];
                 let (in_overlay, in_forced) = (words.contains(w), forced.contains(w));
@@ -1059,14 +1059,20 @@ impl CappedLexicon {
     /// Highest capped score of `word` under the reading `key` together with that entry's demotion delta
     /// (0.0 when the table has none; callers apply the on/off flag).
     pub fn best_lp_delta(&self, key: &[String], word: &str) -> Option<(f64, f64)> {
-        let r = self.base.find(&self.base.ids(key))?;
-        let range = self.base.range(r);
-        let dl = self.deltas_in(&range);
+        self.best_lp_delta_with(key, word, false)
+    }
+
+    /// `best_lp_delta` with the colloquial rows of `key` too when `colloq` (the switch on; docs/spec/decoder.md §8.7).
+    pub fn best_lp_delta_with(&self, key: &[String], word: &str, colloq: bool) -> Option<(f64, f64)> {
+        let main = self.base.find(&self.base.ids(key)).map(|r| self.base.range(r));
         let mut best: Option<(f64, f64)> = None;
-        for p in range {
-            let e = &self.ents[p];
-            if self.word_of(e) == word && best.is_none_or(|(b, _)| e.score > b) {
-                best = Some((e.score, dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1)));
+        for range in main.into_iter().chain(self.base.colloq_range(key).filter(|_| colloq)) {
+            let dl = self.deltas_in(&range);
+            for p in range {
+                let e = &self.ents[p];
+                if self.word_of(e) == word && best.is_none_or(|(b, _)| e.score > b) {
+                    best = Some((e.score, dl.iter().find(|&&(q, _)| q == p).map_or(0.0, |x| x.1)));
+                }
             }
         }
         best
@@ -1122,13 +1128,12 @@ impl CappedLexicon {
 
     /// Highest capped score of `word` under the reading `key` (duplicate entries: the maximum).
     pub fn best_lp(&self, key: &[String], word: &str) -> Option<f64> {
-        let mut best: Option<f64> = None;
-        for (w, s) in self.entries(key) {
-            if w == word && best.is_none_or(|b| s > b) {
-                best = Some(s);
-            }
-        }
-        best
+        self.best_lp_with(key, word, false)
+    }
+
+    /// `best_lp` with the colloquial rows of `key` too when `colloq` (the switch on).
+    pub fn best_lp_with(&self, key: &[String], word: &str, colloq: bool) -> Option<f64> {
+        self.best_lp_delta_with(key, word, colloq).map(|x| x.0)
     }
 }
 
@@ -1390,8 +1395,10 @@ pub fn pool_order(ng: &[f64], bonus: &[f64], masked: &[bool]) -> Option<(Vec<usi
 
 /// One reading a span's words are looked up under (fuzzy input, docs/spec/decoder.md §6.2).
 struct Source {
-    /// Index of the reading in the lexicon (`None`: the typed reading is no lexicon reading).
-    r: Option<usize>,
+    /// The entry positions of the reading in the lexicon (`None`: the typed reading is no lexicon reading).
+    range: Option<std::ops::Range<usize>>,
+    /// The colloquial rows of the typed reading (docs/spec/decoder.md §8.7): entries like the typed reading's, read only with the switch on; no new words.
+    colloq: bool,
     /// Taken off the score of every word of this source (`fuzzy::DELTA_*`; 0 for the exact reading).
     pen: f64,
     /// The reading's syllables when it is a tolerant one (what learning is looked up under); `None` for the typed one.
@@ -1414,14 +1421,14 @@ impl CappedLexicon {
     fn sources(&self, ids: &[u32], span: &[String], fuzzy: u32, delta_sound: f64, tone3: Option<(&[crate::tone3::Pos], f64)>) -> Vec<Source> {
         let base = &*self.base;
         let exact = base.find(ids);
-        let mut out = vec![Source { r: exact, pen: 0.0, names: None, sound: false, picked: Vec::new() }];
+        let mut out = vec![Source { range: exact.map(|r| base.range(r)), colloq: false, pen: 0.0, names: None, sound: false, picked: Vec::new() }];
         let entry = |p: usize| (self.word_of(&self.ents[p]), self.ents[p].score);
         let mut put = |readings: Vec<(usize, Vec<u32>)>, words: Vec<(&str, f64, usize, usize)>, pen: f64, sound: bool| {
             for (a, (r, k)) in readings.iter().enumerate() {
                 let picked: Vec<usize> = words.iter().filter(|w| w.3 == a).map(|w| w.2).collect();
                 if !picked.is_empty() {
                     let names = k.iter().map(|&i| base.syl_names[i as usize].clone()).collect();
-                    out.push(Source { r: Some(*r), pen, names: Some(names), sound, picked });
+                    out.push(Source { range: Some(base.range(*r)), colloq: false, pen, names: Some(names), sound, picked });
                 }
             }
         };
@@ -1435,7 +1442,19 @@ impl CappedLexicon {
         }
         if let Some((t3, delta)) = tone3 {
             let (readings, words) = base.tone3_pick(ids, t3, PER_KEY, PER_KEY, entry);
+            let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
             put(readings, words, delta, false);
+            // K: the one-syllable words of a neutral syllable's alternatives, those not read under Xˇ above; then the neutral source for the longer
+            // spans. Both take `DELTA_NEUTRAL` once, and neither is a fuzzy word.
+            let neutral = crate::tone3::neutral_delta();
+            let (readings, words) = base.single_pick(ids, t3, PER_KEY, PER_KEY, entry, &taken);
+            put(readings, words, neutral, false);
+            let (readings, words) = base.neutral_pick(ids, t3, PER_KEY, PER_KEY, entry);
+            put(readings, words, neutral, false);
+            // The colloquial rows of the typed reading: with the switch on they are entries of it (their penalty is in the row's score).
+            if let Some(range) = base.colloq_range(span) {
+                out.push(Source { range: Some(range), colloq: true, pen: 0.0, names: None, sound: false, picked: Vec::new() });
+            }
         }
         out
     }
@@ -1503,12 +1522,12 @@ pub fn decode_segment_fuzzy<'a>(
             }
             let t3 = tone3.and_then(|(t, d)| Some((t.get(i - l..i)?, d)));
             for src in lex.sources(&ids[i - l..i], &syls[i - l..i], fuzzy, delta_sound, t3) {
-                let found = src.r;
+                let found = src.range.clone();
                 // A tolerant source is learned under its lexicon reading (docs/spec/decoder.md §6.2): a pick of its word was recorded there.
                 let span = src.names.as_deref().unwrap_or(&syls[i - l..i]);
                 // New words of this span the lexicon lacks under it (docs/spec/learning.md §8.4), tried after the lexicon's entries.
                 let fresh: Vec<(&'a str, f64)> = match fresh_on {
-                    Some(ln) if src.names.is_none() && (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) => ln
+                    Some(ln) if src.names.is_none() && !src.colloq && (NEWWORD_MIN..=NEWWORD_MAX).contains(&l) => ln
                         .learner
                         .new_words(span, ln.today)
                         .into_iter()
@@ -1521,7 +1540,7 @@ pub fn decode_segment_fuzzy<'a>(
                     continue;
                 }
                 let learned = learn.filter(|ln| found.is_some() && ln.learner.has_reading(span));
-                let range = found.map_or(0..0, |r| base.range(r));
+                let range = found.clone().unwrap_or(0..0);
                 let best = lex.ents.get(range.start).map_or(0.0, |e| e.score);
                 let dl = if demote { lex.deltas_in(&range) } else { &[] };
                 // Entries to try: the top PER_KEY, plus learned words ranked below it (`extra`: only

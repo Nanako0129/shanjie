@@ -91,6 +91,12 @@ pub struct Lexicon {
     /// Fuzzy input tables (docs/spec/decoder.md §6.2), built once, at the first lookup that needs them (`tol`): a
     /// lexicon that is only ever read without fuzzy input never builds them.
     tol: OnceLock<fuzzy::Tolerance>,
+    /// The colloquial rows (overlay rows tagged `tone3::COLLOQ_TAG`; docs/spec/decoder.md §8.7), kept apart from everything above: their readings sorted like
+    /// `readings` (keys in `key_pool`, entries in `ents[main_ents..]`), and the syllables only they use, numbered after `syl_names`. Nothing but
+    /// `colloq_range` finds them, so a lexicon read without it is the lexicon without these rows (the switch off, `Engine::set_tone3`).
+    colloq: Vec<Reading>,
+    colloq_syls: HashMap<String, u32>,
+    main_ents: usize,
 }
 
 /// The words added by hand (`manual` rows of overlay-add.tsv) and the rerank-protect words (`Lexicon::with_protected`) as (word, reading):
@@ -275,8 +281,13 @@ impl Lexicon {
         // A bad overlay row stops parsing but is reported only if no earlier row is a duplicate.
         let mut bad_row = None;
         let mut manual = ManualSet::default();
+        // The colloquial rows (reading, word, score) in file order, put in after everything else (`Builder::finish`).
+        let mut colloq: Vec<(&str, &str, f64)> = Vec::new();
+        // The rows carry `tone3::DELTA_NEUTRAL`; the evaluation CLI's `--neutral-delta` moves them with the constant (0.0 otherwise).
+        let shift = tone3::DELTA_NEUTRAL - tone3::neutral_delta();
         for line in overlay.unwrap_or("").lines() {
             match overlay_row(line) {
+                Some((r, w, s, tag)) if tag == tone3::COLLOQ_TAG => colloq.push((r, w, s + shift)),
                 Some((r, w, s, tag)) => {
                     b.push(r, w, s);
                     if tag == MANUAL_TAG {
@@ -289,7 +300,7 @@ impl Lexicon {
                 }
             }
         }
-        b.finish(base_n, bad_row, manual, variants, apply)
+        b.finish(base_n, bad_row, manual, variants, apply, &colloq)
     }
 }
 
@@ -368,7 +379,7 @@ fn apply_variant_order_scanning(raw: &mut [Raw], words: &str, key_pool: &[u32], 
 }
 
 impl Builder {
-    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
+    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>, apply: ApplyVariants, colloq_rows: &[(&str, &str, f64)]) -> Result<Lexicon, Error> {
         let Builder { syl_ids, syl_names, key_pool, mut raw, words } = self;
         let n = raw.len();
         // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
@@ -444,8 +455,34 @@ impl Builder {
             pos[f as usize] = p as u32;
         }
         let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
-        let ents = order.iter().map(|&f| raw[f as usize].ent).collect();
-        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual), variants: Vec::new(), tol: OnceLock::new() };
+        let mut ents: Vec<Ent> = order.iter().map(|&f| raw[f as usize].ent).collect();
+        let main_ents = ents.len();
+        let (mut fkeys, mut words) = (fkeys, words);
+        // The colloquial rows: their own syllable numbers after the lexicon's, their readings sorted by key (file order kept under one), best score first.
+        let mut colloq_syls: HashMap<String, u32> = HashMap::new();
+        let mut rows: Vec<(Vec<u32>, Ent)> = Vec::with_capacity(colloq_rows.len());
+        for &(reading, word, score) in colloq_rows {
+            let mut key = Vec::new();
+            for s in reading.split('-') {
+                let next = (syl_names.len() + colloq_syls.len()) as u32;
+                key.push(syl_ids.get(s).copied().unwrap_or_else(|| *colloq_syls.entry(s.to_string()).or_insert(next)));
+            }
+            if word.chars().count() != key.len() {
+                continue;
+            }
+            rows.push((key, Ent { off: words.len() as u32, len: word.len() as u32, score }));
+            words.push_str(word);
+        }
+        rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal)));
+        let mut colloq: Vec<Reading> = Vec::new();
+        for (i, (key, ent)) in rows.iter().enumerate() {
+            if i == 0 || rows[i - 1].0 != *key {
+                colloq.push(Reading { key_off: fkeys.len() as u32, key_len: key.len() as u32, start: ents.len() as u32 });
+                fkeys.extend_from_slice(key);
+            }
+            ents.push(*ent);
+        }
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual), variants: Vec::new(), tol: OnceLock::new(), colloq, colloq_syls, main_ents };
         let found: Vec<(usize, VariantRow)> = variants.map_or(&[][..], |v| &v.rows[..]).iter().filter_map(|(_, v)| Some((lex.find(&lex.ids(&v.reading))?, v.clone()))).collect();
         lex.variants = found;
         lex.words.shrink_to_fit();
@@ -511,8 +548,35 @@ impl Lexicon {
         self.readings.binary_search_by(|r| self.key_of(r).cmp(ids)).ok()
     }
     fn range(&self, r: usize) -> std::ops::Range<usize> {
-        let end = self.readings.get(r + 1).map_or(self.ents.len(), |n| n.start as usize);
+        let end = self.readings.get(r + 1).map_or(self.main_ents, |n| n.start as usize);
         self.readings[r].start as usize..end
+    }
+    /// The entry positions of the colloquial rows under the typed reading `syls` (docs/spec/decoder.md §8.7); `None` when it has none. The one way to them:
+    /// the caller is who knows the switch (`Engine::set_tone3`, `--no-tone3`).
+    pub(crate) fn colloq_range(&self, syls: &[String]) -> Option<std::ops::Range<usize>> {
+        if self.colloq.is_empty() {
+            return None;
+        }
+        let ids: Vec<u32> = syls.iter().map(|s| self.syl_ids.get(s).or_else(|| self.colloq_syls.get(s)).copied().unwrap_or(u32::MAX)).collect();
+        let i = self.colloq.binary_search_by(|r| self.key_of(r).cmp(&ids)).ok()?;
+        Some(self.colloq[i].start as usize..self.colloq.get(i + 1).map_or(self.ents.len(), |n| n.start as usize))
+    }
+    /// The entry ranges of all colloquial readings (for `CappedLexicon`, which caps their words like any other).
+    pub(crate) fn colloq_ranges(&self) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+        (0..self.colloq.len()).map(|i| self.colloq[i].start as usize..self.colloq.get(i + 1).map_or(self.ents.len(), |n| n.start as usize))
+    }
+    /// `entries` with the colloquial rows of `key` too when `colloq` (the switch on), in one list, best first (a tie keeps the plain entry first).
+    pub fn entries_with(&self, key: &[String], colloq: bool) -> Vec<(&str, f64)> {
+        let mut out = self.entries(key);
+        if let Some(r) = self.colloq_range(key).filter(|_| colloq) {
+            out.extend(r.map(|p| (self.word(p), self.ents[p].score)));
+            out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        out
+    }
+    /// `has` with the colloquial rows of `key` too when `colloq`.
+    pub fn has_with(&self, key: &[String], word: &str, colloq: bool) -> bool {
+        self.has(key, word) || (colloq && self.colloq_range(key).is_some_and(|r| r.into_iter().any(|p| self.word(p) == word)))
     }
     fn reading_entries(&self, r: usize) -> impl Iterator<Item = (&str, f64)> {
         self.range(r).map(|p| (self.word(p), self.ents[p].score))
@@ -614,7 +678,7 @@ impl Lexicon {
         if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return (Vec::new(), Vec::new());
         }
-        self.pick(self.tolerant_readings(ids, syls, flags, t3), ids, per_reading, total, entry)
+        self.pick(self.tolerant_readings(ids, syls, flags, t3), ids, per_reading, total, entry, &HashSet::new())
     }
 
     /// The sandhi source of a span (docs/spec/decoder.md §6.6): `tolerant_pick` over the readings `tone3::readings` gives for the span's slice `t3` of the
@@ -630,7 +694,41 @@ impl Lexicon {
         if !t3.iter().any(|p| p.alt.is_some()) {
             return (Vec::new(), Vec::new());
         }
-        self.pick(tone3::readings(ids, t3), ids, per_reading, total, entry)
+        self.pick(tone3::readings(ids, t3), ids, per_reading, total, entry, &HashSet::new())
+    }
+
+    /// K (docs/spec/decoder.md §6.6): the one-syllable words of a neutral syllable's alternatives (`tone3::singles`), without the words in `taken` (those
+    /// `tone3_pick` found under Xˇ, which keep their source and penalty). Nothing for a span of two or more syllables.
+    pub(crate) fn single_pick<'a>(
+        &self,
+        ids: &[u32],
+        t3: &[tone3::Pos],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+        taken: &HashSet<&str>,
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        let cands = tone3::singles(t3);
+        if ids.len() != 1 || cands.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        self.pick(cands, ids, per_reading, total, entry, taken)
+    }
+
+    /// The neutral source (docs/spec/decoder.md §6.6): the multi-syllable words of `tone3::neutral_readings`, not words of the typed reading.
+    pub(crate) fn neutral_pick<'a>(
+        &self,
+        ids: &[u32],
+        t3: &[tone3::Pos],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        let cands = tone3::neutral_readings(ids, t3);
+        if cands.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        self.pick(cands, ids, per_reading, total, entry, &HashSet::new())
     }
 
     /// The pick of `tolerant_pick` over the candidate readings `cands` (syllable ids; those that are no lexicon reading are dropped).
@@ -641,9 +739,11 @@ impl Lexicon {
         per_reading: usize,
         total: usize,
         entry: impl Fn(usize) -> (&'a str, f64),
+        taken: &HashSet<&str>,
     ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
         let readings: Vec<(usize, Vec<u32>)> = cands.into_iter().filter_map(|k| self.find(&k).map(|r| (r, k))).collect();
-        let exact: HashSet<&str> = self.find(ids).into_iter().flat_map(|r| self.range(r)).map(|p| entry(p).0).collect();
+        let mut exact: HashSet<&str> = self.find(ids).into_iter().flat_map(|r| self.range(r)).map(|p| entry(p).0).collect();
+        exact.extend(taken);
         let mut best: HashMap<&str, (f64, usize, usize)> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
         for (a, (r, _)) in readings.iter().enumerate() {
@@ -679,9 +779,13 @@ impl Lexicon {
         let (readings, words) = self.tolerant_pick(&ids, key, flags, t3, usize::MAX, usize::MAX, entry);
         let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
         let (readings, words) = self.tone3_pick(&ids, t3, usize::MAX, usize::MAX, entry);
-        for (w, _, _, a) in words {
-            if !out.iter().any(|(x, _)| *x == w) {
-                out.push((w, name(&readings[a].1)));
+        let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
+        // Then K's one-syllable words and the neutral source's, the order the decoder reads them in.
+        for (readings, words) in [(readings, words), self.single_pick(&ids, t3, usize::MAX, usize::MAX, entry, &taken), self.neutral_pick(&ids, t3, usize::MAX, usize::MAX, entry)] {
+            for (w, _, _, a) in words {
+                if !out.iter().any(|(x, _)| *x == w) {
+                    out.push((w, name(&readings[a].1)));
+                }
             }
         }
         out
@@ -712,11 +816,15 @@ impl Lexicon {
     /// The lexicon reading `word` was found under through the sandhi source of `span` (`t3` its slice of the position table): `None` when the typed reading
     /// has the word, or no sandhi reading of the span has it. The first such reading in subset order.
     pub fn tone3_reading(&self, span: &[String], t3: &[tone3::Pos], word: &str) -> Option<Vec<String>> {
-        if !t3.iter().any(|p| p.alt.is_some()) || self.has(span, word) {
+        if self.has(span, word) {
             return None;
         }
-        tone3::readings(&self.ids(span), t3)
+        let ids = self.ids(span);
+        // The sandhi readings, then K's (a one-syllable span) and the neutral source's, as `tolerant_words` lists them.
+        tone3::readings(&ids, t3)
             .into_iter()
+            .chain(tone3::singles(t3).into_iter().filter(|_| ids.len() == 1))
+            .chain(tone3::neutral_readings(&ids, t3))
             .find(|k| self.find(k).is_some_and(|r| self.range(r).any(|p| self.word(p) == word)))
             .map(|k| k.iter().map(|&i| self.syl_names[i as usize].clone()).collect())
     }

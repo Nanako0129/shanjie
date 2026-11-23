@@ -791,9 +791,10 @@ jobs:
       - name: Names lexicon builder (Python)
         run: python3 -m unittest tools.test_build_names
 
-      # docs/spec/decoder.md §8.3: the neutral-tone rows of tools/build_sandhi.py against synthetic fixtures.
+      # docs/spec/decoder.md §8.3, §8.7: the neutral-tone and colloquial rows of tools/build_sandhi.py against synthetic fixtures, and the colloquial word lists
+      # (their rules on synthetic rows and the committed files' format; the dictionaries are not in the repository, so that one test is skipped here).
       - name: Sandhi builder (Python)
-        run: python3 -m unittest tools.test_build_sandhi
+        run: python3 -W ignore -m unittest tools.test_build_sandhi tools.test_colloq_words
 
       # docs/spec/models.md §4.2, §4.3: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.

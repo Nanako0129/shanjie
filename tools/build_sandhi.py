@@ -2,11 +2,14 @@
 以及「紮」的口語讀音 ㄓㄚ（R6，docs/spec/decoder.md §8.2）、「這／那／哪」接量詞的合音（R7，標籤 fusion），
 再加輕聲詞的本調讀音（標籤 neutral，docs/spec/decoder.md §8.3）。
 
+最後是口語變調的疊字陰平化（標籤 colloq，docs/spec/decoder.md §8.7）：tools/colloq-words.tsv 列出的詞，把指定位置改成陰平（同時標輕聲的音節改輕聲）。
+
 輸入 data/lexicon/mcbpmf-data.txt（小麥基底，MIT）；讀 data/lexicon/overlay-add.tsv 只為了去重。
-輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\t標籤」（sandhi、fusion 或 neutral），依（讀音, 詞）的 UTF-8 位元組序排序。
+輸出 data/lexicon/sandhi-add.tsv，每列「讀音\\t詞\\t分數\\t標籤」（sandhi、fusion、neutral 或 colloq），依（讀音, 詞）的 UTF-8 位元組序排序。
 
 R1–R5 的規則依據：《國語辭典簡編本》〈單一音讀〉（https://dict.concised.moe.edu.tw/page.jsp?ID=55&la=0&powerMode=0 ）、
-88 年《國語一字多音審訂表》；R6 的 ㄓㄚ 是口語讀音，不是審訂音（逐字核可，docs/spec/decoder.md §8.2）。規則本身是事實，這個檔案不含任何教育部資料。
+88 年《國語一字多音審訂表》；R6 的 ㄓㄚ 是口語讀音，不是審訂音（逐字核可，docs/spec/decoder.md §8.2）。規則本身是事實；colloq 列的詞由 tools/colloq-words.tsv 決定
+（教育部兩部辭典，CC BY-ND 3.0 臺灣，標示與版本在那個檔的檔頭與 LICENSES/data.md），讀音由這裡的規則從基底讀音推出，其餘標籤的列只依規則。
 
 用法：python3 tools/build_sandhi.py [--check] [--neutral-penalty δ]
 """
@@ -25,6 +28,11 @@ OUT = os.path.join(ROOT, "data", "lexicon", "sandhi-add.tsv")
 # --neutral-penalty 可蓋過（量格點用）。
 NEUTRAL_PENALTY = 2.0
 TONE_MARKS = "ˊˇˋ˙"
+# colloq 列的分數 = 原列分數 − δ，δ 和核心輕聲來源的扣分 DELTA_NEUTRAL（core/src/tone3.rs）是同一個值（docs/spec/decoder.md §6.6）：格點
+# {1.0, 2.0, 3.0, 4.0} 裡 3.0、4.0 讓 cvtune-clean-tw0、wikitune-clean-tw0 原讀音都不退步、探針 top1 同為 94／99，同分取大的。
+# tools/test_build_sandhi.py 核對兩邊相同。
+COLLOQ_PENALTY = 4.0
+COLLOQ_WORDS = os.path.join(ROOT, "tools", "colloq-words.tsv")
 
 # 「一」只讀本調的上下文（docs/spec/decoder.md §8.1 排除）：前一字是「第」或數字字、後一字是數字字或「月」、詞尾、疊字動詞中間、
 # 詞中的詞尾（final_words）、序詞與專名（LISTED）。
@@ -236,7 +244,21 @@ def neutral_variants(word, syls, singles):
     return out
 
 
-def build(base=BASE, overlay=OVERLAY, penalty=NEUTRAL_PENALTY):
+def colloq_variant(syls, changes):
+    """colloq：changes＝[(位置, 改法)]；neutral 把那個音節的聲調符號換成 ˙，level 去掉聲調符號。沒有改到回 None。生成器、疊加層與探針共用。"""
+    out = list(syls)
+    for i, change in changes:
+        if i < len(out):
+            out[i] = out[i].rstrip(TONE_MARKS) + ("˙" if change == "neutral" else "")
+    return out if out != list(syls) else None
+
+
+def colloq_table(path=COLLOQ_WORDS):
+    import colloq_words
+    return colloq_words.load(path)
+
+
+def build(base=BASE, overlay=OVERLAY, penalty=NEUTRAL_PENALTY, colloq=None, colloq_penalty=COLLOQ_PENALTY):
     existing = set()
     rows = list(base_rows(base))
     singles = collections.defaultdict(dict)   # 字 -> {單字詞的讀音: 分數}（neutral 找本調用）
@@ -273,6 +295,18 @@ def build(base=BASE, overlay=OVERLAY, penalty=NEUTRAL_PENALTY):
                 if key not in best:
                     per_rule["neutral"] += 1
                 best[key] = (score - penalty, f"{score - penalty:.8f}", "neutral")
+    colloq = colloq_table() if colloq is None else colloq
+    for word, syls, score, _ in rows:   # colloq 最後做：任何一層或前面的規則已有的（讀音, 詞）不寫；同一個新讀音取分數高的那一列
+        new = colloq_variant(syls, colloq[word]) if word in colloq else None
+        if new is None:
+            continue
+        key = ("-".join(new), word)
+        if key in existing or (key in best and best[key][2] != "colloq"):
+            continue
+        if key not in best or score - colloq_penalty > best[key][0]:
+            if key not in best:
+                per_rule["colloq"] += 1
+            best[key] = (score - colloq_penalty, f"{score - colloq_penalty:.8f}", "colloq")
     lines = [f"{r}\t{w}\t{t}\t{tag}\n" for (r, w), (_, t, tag) in sorted(best.items(), key=lambda kv: (kv[0][0].encode(), kv[0][1].encode()))]
     return "".join(lines), per_rule
 

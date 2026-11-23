@@ -777,6 +777,30 @@ class ReplayRunWithTone3(ReplayRunWithTheSyllableNorm):
             self.replay()                               # the same binary under a version without the key: refused
 
 
+class ReplayRunWithColloqSandhi(ReplayRunWithTone3):
+    """A version with `"colloq_sandhi": True` besides `"tone3": True` (colloquial sandhi on the same switch, docs/spec/decoder.md §8.7): its replay tag ends in
+    `+t3c`; `+t3` is refused under it, and `+t3c` under a version with `"tone3"` alone."""
+    SPEC = dict(ReplayRunWithTone3.SPEC, colloq_sandhi=True)
+
+    def tag_parts(self):
+        return {**super().tag_parts(), "rd": f"+rd+rx:{self.rx8()}+rm+rn+t3c"}
+
+    def test_each_form_passes_the_tag_check_of_its_own_version_only(self):
+        lm8, tl8, co8, rows = self.models["bigram.sjlm"][:8], self.models["tinylm.sjtl"][:8], self.models["colloquial.sjlm"][:8], self.rows["user-reported"][0]
+        for mark in ("+t3c", "+t3"):
+            for tail in ("+rm+rn+t3c", "+rm+rn+t3"):
+                out = f"## r  replay-chat+ctx+acg+nopred+noen+lm:{lm8}+tl:{tl8}+correct+colloq:{co8}+recur+pr+rd+rx:{self.rx8()}{tail}  {{'n': 0}}"
+                with mock.patch.object(kpi.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stderr=kpi.models_line(self.models), stdout=out)):
+                    with self.assertRaises(RuntimeError) as e:
+                        kpi.replay_cell("b", self.root, rows, self.models, False, os.path.join(self.td, "rs"), "+acg", True, True, True, True, mark)
+                self.assertIn("replay scored" if tail.endswith(mark) else "setting tag", str(e.exception), (mark, tail))
+
+    def test_the_run_passes_the_versions_key_on(self):
+        self.replay()                                   # the fake binary prints `+t3c`: accepted with both keys
+        with mock.patch.object(self, "SPEC", ReplayRunWithTone3.SPEC), self.assertRaises(SystemExit):
+            self.replay()                               # the same binary under a version with `"tone3"` alone: refused
+
+
 # ---------- run ----------
 CLI = """#!{py}
 import os, sys

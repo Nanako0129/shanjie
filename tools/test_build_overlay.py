@@ -63,6 +63,25 @@ class ManualRows(unittest.TestCase):
                 manual(text, taken)
 
 
+class ColloqRows(unittest.TestCase):
+    """docs/spec/decoder.md §8.7: the overlay's own rows of a listed word get a `colloq` row each (the rule and the penalty are tools/build_sandhi.py's)."""
+    TABLE = {"毛毛騰騰": [(2, "level"), (3, "level")]}
+
+    def test_a_row_per_reading_with_the_penalty_and_existing_ones_not_written(self):
+        rows = ["ㄇㄠˊ-ㄇㄠˊ-ㄊㄥˊ-ㄊㄥˊ\t毛毛騰騰\t-6.6\twikt\n", "ㄇㄠˊ-ㄇㄠˊ-ㄊㄥˇ-ㄊㄥˇ\t毛毛騰騰\t-7.1\twikt\n", "ㄅㄧㄥˇ-ㄉㄧㄥ\t丙丁\t-7.0\twikt\n"]
+        self.assertEqual(B.colloq_rows(rows, self.TABLE, 4.0), ["ㄇㄠˊ-ㄇㄠˊ-ㄊㄥ-ㄊㄥ\t毛毛騰騰\t-10.6\tcolloq\n"], "one new reading: the higher score")
+        self.assertEqual(B.colloq_rows(rows + ["ㄇㄠˊ-ㄇㄠˊ-ㄊㄥ-ㄊㄥ\t毛毛騰騰\t-9.0\twikt\n"], self.TABLE, 4.0), [])
+        self.assertEqual(B.colloq_rows(rows[2:], self.TABLE, 4.0), [])
+
+    def test_the_shipped_overlay_has_the_rows_before_its_manual_tail(self):
+        with open(B.OUT, encoding="utf-8") as f:
+            lines = f.readlines()
+        tags = [l.rstrip("\n").split("\t")[3] for l in lines]
+        at = [i for i, t in enumerate(tags) if t == "colloq"]
+        self.assertTrue(at and at == list(range(at[0], at[-1] + 1)) and all(t in ("manual", "slang") for t in tags[at[-1] + 1:]))
+        self.assertEqual([lines[i] for i in at], B.colloq_rows(lines[:at[0]]))
+
+
 class LexgapRows(unittest.TestCase):
     """--lexgap: a word list in overlay format, appended with the tag lexgap after the supplement rows and before the manual tail."""
     FOLD = {"臺": "台"}

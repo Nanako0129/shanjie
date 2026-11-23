@@ -108,6 +108,7 @@ $expectedFiles = @(
     'data\packs\acg-add.tsv', 'data\packs\acg-sources.tsv', 'data\packs\acg.json', 'data\packs\it-add.tsv', 'data\packs\it-sources.tsv', 'data\packs\it.json',
     'data\lm\bigram.sjlm', 'data\lm\classes.sjc', 'data\lm\kn.sjkn', 'data\lm\trigram.sjt3', 'data\lm\trigram-chat.sjt3', 'data\lm\tinylm.sjtl', 'data\lm\colloquial.sjlm',
     'LICENSES\McBopomofo-MIT.txt', 'LICENSES\data.md', 'LICENSES\name-suggestion-index-BSD-3-Clause.txt', 'LICENSES\colloquial-attribution.tsv',
+    'LICENSES\MOE-dict-revised-terms.txt', 'LICENSES\MOE-dict-concised-terms.txt',
     'LICENSES\CC-BY-SA-4.0-attribution.txt'
 )
 $files = @{}
