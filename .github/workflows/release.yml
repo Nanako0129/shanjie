@@ -43,7 +43,8 @@ jobs:
   # green. A mistake guard, not a security boundary (see the script).
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # CI_GATE_TIMEOUT 6600 s (grace counts from the same start), plus polling, API retries and checkout
+    timeout-minutes: 120
     permissions:
       actions: read
       contents: read
@@ -62,7 +63,7 @@ jobs:
             docs/releases
       # docs/spec/release-and-ci.md: a tag is published only with its hand-written notes in the
       # repo. The dry run on main publishes nothing, so it is not checked. Before the CI gate, which
-      # can wait for ci.yml for half an hour: a missing file fails in a second.
+      # can wait for ci.yml for up to 110 minutes: a missing file fails in a second.
       - name: Require the release notes
         run: |
           set -euo pipefail
