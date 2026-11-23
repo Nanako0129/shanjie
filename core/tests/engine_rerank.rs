@@ -1124,7 +1124,7 @@ fn a_manual_word_typed_with_an_adjacent_key_slip_survives_the_rerank() {
 /// may be the cut tail of a longer word leave every output as it is without the table.
 #[test]
 fn english_before_the_composition_takes_the_mixed_word() {
-    const TABLE: &str = "t\tㄒㄩˋ\tT恤\t1\nabcdefgh\tㄒㄩˋ\tabcdefgh恤\t1\n";
+    const TABLE: &str = "t\tㄒㄩˋ\tT恤\t1\nabcdefgh\tㄒㄩˋ\tabcdefgh恤\t1\nqq\tㄒㄩˋ\tQQ恤\t1\n";
     let v5 = upgraded(&rerank_model(), Some(8));
     let make = |model: Option<&Path>, table: bool| {
         let mut e = engine_with(model);
@@ -1137,6 +1137,7 @@ fn english_before_the_composition_takes_the_mixed_word() {
         e.set_left_context(left);
         type_syls(e, syls).preedit
     };
+    let e_model = || make(Some(&v5), true);
     let (mut e, mut plain) = (make(Some(&v5), true), make(Some(&v5), false));
     let today = shown(&mut plain, "T", &["ㄒㄩˋ"]);
     assert!(today != "恤" && plain.left_full_chars() == 1, "premise: the model keeps the letter, the decoder shows another character: {today}");
@@ -1168,5 +1169,9 @@ fn english_before_the_composition_takes_the_mixed_word() {
         let (mut e, mut plain) = (make(model, true), make(model, false));
         assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), shown(&mut plain, "T", &["ㄒㄩˋ"]));
         assert!(e.left_full_chars() == 0 && e.frozen_words().is_empty());
+        // Two letters are kept without such a model (for the row behind English, docs/spec/semantic-rerank.md §5.2), and still nothing is fixed.
+        assert_eq!(shown(&mut e, "QQ", &["ㄒㄩˋ"]), shown(&mut plain, "QQ", &["ㄒㄩˋ"]));
+        assert!(e.left_full_chars() == 2 && e.frozen_words().is_empty(), "premise: the two letters are kept");
     }
+    assert_eq!(shown(&mut e_model(), "QQ", &["ㄒㄩˋ"]), "恤", "control: with the model the same row applies");
 }

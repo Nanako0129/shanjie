@@ -794,6 +794,18 @@ fn the_automatic_word_is_not_learned() {
     run(&mut e, "c p _ 5 6 f u 0 6");
     assert_eq!(run(&mut e, "Enter").commit, "CP值錢");
     assert_eq!(records(&e), before);
+    // Nor in a commit that learns something else: a re-pick behind the automatic word is recorded, the word is not.
+    run(&mut e, "S-k g j _ 2 k 7");
+    let text = type_syls(&mut e, "ㄕˋ ㄕˊ").preedit;
+    assert!(text.starts_with("K書的"), "premise: ㄉㄜ˙ makes no word with ㄕㄨ, 書 stays fixed: {text}");
+    let shown: String = text.chars().skip(3).collect();
+    let o = run(&mut e, "_");
+    let other = items(&mut e, &o).into_iter().find(|w| *w != shown && w.chars().count() == 2).expect("another word of the two syllables");
+    run(&mut e, "Esc");
+    choose_span(&mut e, &other);
+    assert_eq!(run(&mut e, "Enter").commit, format!("K書的{other}"));
+    let new: Vec<(String, String)> = records(&e).into_iter().filter(|r| !before.contains(r)).collect();
+    assert!(new.len() == 1 && new[0].1 == other && !new[0].0.starts_with("^en:"), "premise: the re-pick is learned, nothing under an en key: {new:?}");
 }
 
 /// The whole path of the App's engine (`Engine::new`: the digit table is read, so `5 6` goes through the digit layer) gives the same words.
@@ -944,6 +956,9 @@ fn a_chosen_item_is_learned_under_the_en_key() {
     assert_eq!(run(&mut e, "Enter").commit, format!("K{other}"));
     run(&mut e, "S-k Tab 2 BS");
     assert_eq!(run(&mut e, "Enter").commit, "K");
+    // Deleted and typed again: the word stands again, but it is no longer the pick.
+    assert_eq!(run(&mut e, "S-k Tab 2 BS e k _").preedit, "K歌");
+    assert_eq!(run(&mut e, "Enter").commit, "K歌");
     assert!(lines(&file).is_empty() && en_records(&e).is_empty(), "Esc, reset, another word, a deleted word: nothing recorded");
     // Chosen and sent.
     assert_eq!(run(&mut e, "S-k").candidates, ["K書", "K歌", "K金"], "premise: the count order");
