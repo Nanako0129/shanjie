@@ -337,6 +337,26 @@ Windows 版的殼分成兩半：引擎在常駐程序 `shanjie-host.exe`，每�
 - 鎖的順序固定是引擎鎖 → 重排鎖。`take` 或 `apply` 回 4 時引擎已自己重設：擁有者清掉，客戶端下一個鍵照換擁有者處理。常駐程序不寫任何與工作有關的 log。
 - 驗證：`windows/host/src/rerank.rs` 的單元測試與 `rerank_tests.rs`（對真的核心），`windows/tip/src/poll.rs` 的單元測試（`docs/spec/windows-tip.md` §5.11 第 12 點）。
 
+### 8.6 計時建置（macOS，只用來量測，不出貨）
+
+- 編譯旗標 `SHANJIE_TIMING`：計時的程式碼全部在 `#if SHANJIE_TIMING … #endif` 裡（`Timing.swift` 與殼裡各個既有程式點旁邊的幾行），拿掉這些區塊後原始碼和沒有計時時逐字相同；不改任何分支、順序、佇列或優先順序。出貨的 App 不帶這個旗標：`scripts/build-app.sh` 只在 `SHANJIE_TIMING=1` 時加 `-Xswiftc -DSHANJIE_TIMING`，並拒絕和 `SHANJIE_RELEASE_BUILD` 同時設。測試是 `make test-swift-timing`（CI 的 `swift` job 多跑一次帶旗標的測試，testcase 數要比不帶旗標的多）。
+- 寫入：事件是幾個整數，存進預先配置的固定緩衝（65,536 筆）；主執行緒與重排佇列只用 `os_unfair_lock_trylock`，拿不到鎖或緩衝滿了就不寫、把略過計數加一。另一條 `.background` 序列佇列每 2 秒取走緩衝（持鎖時只交換指標），每筆用 `Logger`（subsystem `com.nyanako.inputmethod.shanjie.timing`、category `t`）的 `.notice` 寫一行。不寫檔。
+- 每行只有數字與 tab：`<事件>\t<uptime 微秒>\t<欄位…>`，沒有任何文字、讀音、候選或前文。
+
+| 事件 | 時刻 | 欄位 |
+|---|---|---|
+| 1 | 按鍵進 `Session.send` | 按鍵序號（每次 `send` 加一） |
+| 2 | `send` 回來 | 按鍵序號、這一鍵有沒有呼叫 `setMarkedText`（1／0） |
+| 3 | 取出重排工作 | 工作序號、正在處理的按鍵序號（不在 `send` 裡是 0） |
+| 4 | 工作在重排佇列開始跑 | 工作序號 |
+| 5 | `run()` 回來 | 工作序號、回傳碼 |
+| 6 | 工作的終點（每個工作剛好一筆） | 工作序號、原因碼 |
+| 7 | Enter 的有界等待（每次 Enter 一筆，沒有東西可等時三欄都是 0） | 等了幾微秒、等到幾個工作、是否逾時（1／0） |
+| 8 | 每次寫出的最後一行 | 到目前為止略過幾筆、到目前為止寫出幾行事件 |
+
+- 事件 6 的原因碼：0 套用而組字區有改變（時刻是那次 `setMarkedText` 呼叫回來的時刻，不是客戶端畫完）、1 套用但沒有改變（碼 5）、2 套用回其他碼、3 等著的時候被新工作取代、4 引擎重建或 session 不符而丟掉、5 語意校正關掉而丟掉、6 `run()` 的回傳碼不是 0。殼結束時還在跑或等著的工作沒有終點。
+- 驗證：`TimingTests`（只在旗標下編譯）：寫出的行只有數字與 tab、各事件的欄位數；寫入不等鎖（另一條執行緒持鎖時 `record` 直接回來、略過計數加一）；七種原因碼各造一次，每個事件 3 剛好一個事件 6、每個事件 1 都有事件 2；Enter 一次一筆；App 的佇列 runner 上同一個工作的 3、4、5、6 依時間排列。
+
 ## 9. 評測 CLI 與重播
 
 - `--tinylm FILE.sjtl`：用 `load_paired` 載入；n-gram 雜湊不符、KN 側檔不符、`--no-classes`、`--no-demote` 都是錯誤（α、τ 只對辨類與降權表開著的分數成立）。每列取候選池（3.1）的前 8 名重排，top1、`--rowstats`、摘要行都用重排後的第一名；前文鍵用 `tl.key_for_len(ctx, 那一列候選池裡最長的候選字數)`（`--context` 時；不加 `--context` 時為空；版本 1 到 5 忽略第二個參數，等於 `key_for(ctx)`）。摘要行設定標記加 `+tl:<檔 SHA-256 前 8 碼>`，版本 6 的邊界格式再加 `+sep:<K>`。CLI 不實作研究端的 `ctxbs`（在 cdev、ctune 這類前文欄是一段連續漢字、沒有標點的集合上，研究端對政策鍵的長鍵補一個非漢字再取；產品裡殼傳的是原文、含標點，不需要）：版本 6 在這兩份集合上的 CLI 讀數和研究讀數不同。

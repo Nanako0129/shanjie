@@ -28,6 +28,8 @@
 #                    a release or an update test build (Info.plist ShanjieUpdateBuild: release, test, or local for
 #                    every other build), so a copy built here and installed never reads the production feed. Requires
 #                    the shipping BUNDLE_ID.
+#   SHANJIE_TIMING   1: the timing build (docs/spec/semantic-rerank.md §8.6), compiled with -DSHANJIE_TIMING. A measuring build only:
+#                    refused together with SHANJIE_RELEASE_BUILD. Unset, the swift build command is the same as without it.
 #
 # The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
 # the release asset (shanjie-<version>.zip) keep the ASCII name.
@@ -138,9 +140,17 @@ esac
 # An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='.
 [[ "$ED_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "the Sparkle public key is not 44 base64 characters"
 
+TIMING_FLAGS=()
+case "${SHANJIE_TIMING:-}" in
+  "") ;;
+  1) [ -z "${SHANJIE_RELEASE_BUILD:-}" ] || fail "SHANJIE_TIMING and SHANJIE_RELEASE_BUILD exclude each other"
+     TIMING_FLAGS=(-Xswiftc -DSHANJIE_TIMING) ;;
+  *) fail "SHANJIE_TIMING must be 1 or unset" ;;
+esac
+
 cargo build --release --locked -p core
 # --force-resolved-versions: Sparkle exactly as macos/Package.resolved pins it, never re-resolved.
-swift build -c release --package-path macos --force-resolved-versions
+swift build -c release --package-path macos --force-resolved-versions ${TIMING_FLAGS[@]+"${TIMING_FLAGS[@]}"}
 BIN_DIR="$(swift build -c release --package-path macos --force-resolved-versions --show-bin-path)"
 BIN="$BIN_DIR/Shanjie"
 [ -x "$BIN" ] || fail "the Swift build produced no executable"

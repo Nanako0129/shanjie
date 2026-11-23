@@ -1,7 +1,7 @@
 # Local entry point (docs/spec/release-and-ci.md §7), modeled on syrtis's Makefile. Run from the repo root.
 # Build order matters: the Rust staticlib must exist before the Swift package links it.
 
-.PHONY: rust build test test-rust test-golden test-python test-swift bundle installer selftest-bundled clean-bundle
+.PHONY: rust build test test-rust test-golden test-python test-swift test-swift-timing bundle installer selftest-bundled clean-bundle
 
 SWIFT_OUT := macos/.build/out
 # The bundle folders (docs/spec/macos-shell.md §1.3, docs/spec/install-and-update.md §2.1, §2.6, §6.1): APP_NAME for the shipping bundle ID,
@@ -97,6 +97,12 @@ test-swift: rust
 	@$(call relink_if_stale,Debug)
 	@$(call rebuild_if_header_stale,Debug)
 	swift test --package-path macos --force-resolved-versions
+
+# The timing build's tests (docs/spec/semantic-rerank.md §8.6): the same suite with the SHANJIE_TIMING blocks compiled in, so it runs more tests.
+test-swift-timing: rust
+	@$(call relink_if_stale,Debug)
+	@$(call rebuild_if_header_stale,Debug)
+	swift test --package-path macos --force-resolved-versions -Xswiftc -DSHANJIE_TIMING
 
 # build/$(DEV_APP_NAME) with the development bundle ID by default; build/$(APP_NAME) with
 # `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie` (scripts/build-app.sh reads BUNDLE_ID and OUT_DIR from the

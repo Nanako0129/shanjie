@@ -319,6 +319,9 @@ func runServer() -> Never {
         say("shanjie: cannot create the input method server")
         exit(1)
     }
+#if SHANJIE_TIMING
+    Timing.start()
+#endif
     // docs/spec/macos-shell.md §2.2: the engine is built after the IMK server exists.
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),
