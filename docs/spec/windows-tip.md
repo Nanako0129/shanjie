@@ -21,6 +21,7 @@
 - 核心與它全部的測試在 Windows 上編得過、測得過，評測 CLI 的逐列結果和 Linux 逐位元組相同。
 - TSF 文字服務可在測試 VM 的記事本與「執行」對話框打出一句注音並送出，送出的字和 Mac 上 `shanjie-replay --packs acg,it`（Windows 版的詞包，見 §3.4）用同一串鍵解出的字逐字相同。
 - 模型只在常駐程序裡載一份；DLL 每按一鍵經 named pipe 同步問常駐程序（§5）。
+- 語意校正預設開（標準強度，會意只看組字區裡的字，沒有前文）：按鍵先顯示 n-gram 的字，重排在常駐程序的背景執行緒算，DLL 用計時器來問、算完就換上（§5.2、§5.4）。選字和 Mac 開語意校正、沒有前文時相同。登錄值 `Rerank` 設 0 關掉。
 - 組字中按空白鍵或 ↓ 開出直排候選窗（每頁 9 列、編號 1–9），數字鍵、Enter 選字，Esc 關窗；窗在 DLL 裡畫，所以開始功能表與 Windows 搜尋也看得到（§3.15）。
 - 按鍵預設照微軟注音（核心的按鍵習慣 1，§3.4；不照微軟的列在 §4.6）；登錄值 `KeyScheme` 設 0 改回 Mac 版的規則，還沒有設定頁。中英切換不做（§3.14）。
 - 有安裝程式：一份每台機器安裝的 MSI，裝正式版身分，和開發版身分可以並存（§6）。真的 MSI 在測試 VM 驗收過大部分的路（§6 寫「真的 MSI」「測試 VM」的那些）；標「推論」與「待驗收」的還沒在真的 MSI 上量過。
@@ -85,7 +86,7 @@ Windows 只建 `shanjie-eval`（`cargo build -p cli --release --bin shanjie-eval
 Linux `debug` job 在既有步驟之後加三步：
 
 1. `cargo build --release --locked -p cli --bin shanjie-eval`；
-2. `scripts/ci-rowstats.sh rowstats-linux`：跑六組評測（dev302 `--dev 302`、打字測驗 `eval/dev/user-typing.txt`、錯字回報 `eval/dev/user-reported.txt`，各在聊天與書面設定下），Windows 輸入法出貨的旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`，`--threads 4`，各寫一份 `--rowstats`（`--threads` 不改輸出的任何位元組）；
+2. `scripts/ci-rowstats.sh rowstats-linux`：跑六組評測（dev302 `--dev 302`、打字測驗 `eval/dev/user-typing.txt`、錯字回報 `eval/dev/user-reported.txt`，各在聊天與書面設定下），Windows 輸入法出貨的旗標 `--context --packs acg,it --tinylm data/lm/tinylm.sjtl`，聊天另加 `--colloquial-core data/lm/colloquial.sjlm`，`--threads 4`，各寫一份 `--rowstats`（`--threads` 不改輸出的任何位元組）。這一組旗標驗的是兩個平台的核心逐位元組相同，不是常駐程序的設定：常駐程序不傳前文（沒有 `--context`），它的對照指令在 §5.11 第 12 點；
 3. `actions/upload-artifact` 上傳這六份（artifact `rowstats-linux`）。
 
 `windows` job（映像 `windows-2025`，`needs: changes`，和其他 job 同時開跑，`if` 與其他 job 相同，逾時 45 分鐘，所有步驟用 bash）：
@@ -150,11 +151,11 @@ Linux `debug` job 在既有步驟之後加三步：
 - 常駐程序先建好 pipe 再載模型（§5.2）。建引擎的呼叫順序與值照 `cli::replay::build_engine_packs`（不是照 Mac App 的設定：App 的中英混打預設開，replay 是關的）：
   1. `shanjie_engine_new_packs(<data>\lexicon, layout 0, <data>\packs, 5)`（5 ＝ `SHANJIE_PACK_ACG | SHANJIE_PACK_IT`；replay 不給 `--packs` 時是 29，多了 Mac App 預設開的迷因與美妝詞包，Windows 版不帶它）；
   2. `load_lm(lm\bigram.sjlm)`、`load_tinylm(lm\tinylm.sjtl)`、`load_colloquial(lm\colloquial.sjlm)`（`load_lm` 一併讀同一資料夾的承接、trigram 與辨類檔，所以 `data\lm` 要放 `data/*.sha256` 列的全部模型）；
-  3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(1)`（候選窗一律是直排，§3.15）、`set_key_scheme(<按鍵習慣>)`（見下一條）、`set_rerank(0)`（各 setter 的回傳快照立刻釋放）；
+  3. `set_demote(1)`、`set_prediction(0)`、`set_abbreviation(0)`、`set_english(0)`、`set_candidate_vertical(1)`（候選窗一律是直排，§3.15）、`set_key_scheme(<按鍵習慣>)`（見下一條）、`set_rerank(<語意校正>)`（預設 1，登錄值 `Rerank` 是 0 時 0，§5.2；各 setter 的回傳快照立刻釋放）；
   4. `set_learning(0)`。重排強度與設定檔類型用核心預設（標準、聊天）；不呼叫 `set_fuzzy`、`set_left_context`、`learning_open`。
 - **按鍵習慣**（`set_key_scheme`，`docs/spec/keys-and-composition.md` §4.1.1）：0 是核心現行的規則（Mac 版），1 是微軟注音的做法（`m` 規則，§4.6）；沒有設定值時是 1，Windows 版的預設照微軟注音。值在 `server::run` 讀一次（§5.2：`HKCU\<這個建置的設定機碼>\KeyScheme`，開發版 `Software\shanjie-dev`、正式版 `Software\Shanjie`），當參數傳給 `engine::load`，`engine::load` 本身不讀登錄，所以測試不受跑測試那台機器的登錄影響。所有按鍵行為都由核心算，Windows 這一側只把值經 `Welcome` 轉給 DLL，供 `OnTestKeyDown` 判斷（§3.6）。
 - 中英混打關，所以數字層（`digits.tsv`）也不開；`1`、`0` 鍵照注音處理，與 replay 相同。
-- 與 replay 的差別：`set_rerank(0)`，會意與常談表照樣載入，但不跑背景重排工作；replay 帶 `--no-tinylm` 時連會意與常談表都不載。兩者解出的字相同，因為會意與常談表只在重排工作裡起作用；另一個差別是凍結視窗 W（有沒有小模型時不同），只影響約 45 字以上的組字。
+- 與 replay 的差別：replay 每一鍵之後當場把重排算完、套用；常駐程序在背景算，客戶端來問才套用（§5.2）。重排在下一個重新解碼的鍵之前套用完的話，兩者解出的字相同；來不及套用時，那一刻顯示與送出的是 n-gram 的字。`Rerank` 是 0 時 `set_rerank(0)`：會意與常談表照樣載入，但不產生重排工作，解出的字等於 replay 帶 `--no-tinylm`（它連會意與常談表都不載；會意與常談表只在重排工作裡起作用），差別只有凍結視窗 W（有沒有小模型時不同），只影響約 45 字以上的組字。
 - 載入失敗或引擎的鎖 poisoned：常駐程序結束（§5.2），不留任何錯誤文字（`shanjie.h` 規定不能記 LM 路徑）。
 - 引擎指標需要 `unsafe impl Send`；旁邊有編譯期斷言「核心的引擎型別本身是 `Send`」，斷言不成立就不可寫這行 `unsafe impl`。
 - **組字的擁有者**：好幾個 App、`explorer.exe` 這類程序的好幾個 UI 執行緒共用這個引擎。常駐程序記下目前組字的擁有者 `(連線 ID, ctx)`（§5.3）。別的擁有者送來按鍵時，先 `reset(mode 1)`（丟掉，**不能用 mode 0**：那會把前一個視窗的字送進這個視窗），擁有者換成新的，再照常處理，回應帶 `took_over`。DLL 在 `OnSetFocus`、`OnKillThreadFocus`、`Deactivate`、`OnCompositionTerminated` 與文件改動失敗時送 `Release`，panic 之後送 `Reset` 並關連線；常駐程序只在擁有者相符時 reset。
@@ -222,13 +223,13 @@ Linux `debug` job 在既有步驟之後加三步：
 ### 3.11 計時檔（量測用）
 
 - 只在開了 cargo feature `timing` 的建置裡有（CI 兩種都建）。每行三欄 `<事件代碼>\t<開始>\t<結束>\n`，**只有數字、tab、換行**；開始與結束是同一個時鐘（`QueryPerformanceCounter` 換成微秒）。格式函式 `format_line` 永遠編譯，檔案只在 `timing` 下存在。
-- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65、69–71 見 §5.8；66–68 見 §3.15。
+- 事件代碼：1 `ActivateEx`；2 引擎載入（只有常駐程序寫：`new_packs` 之前到 §3.4 最後一個呼叫回來）；3 每個送進常駐程序的按鍵（DLL：進入 `OnKeyDown` 到 edit session 改完文件、**候選窗更新完**、回傳之前（顯示、移動、重畫或隱藏都回來之後；沒有候選窗變化時照舊）；常駐程序：收到到送回）。60–65、69–76 見 §5.8；66–68 見 §3.15。
 - 診斷事件（兩欄都是當下時間，除非另註）：40 `OnTestKeyDown` 回 TRUE（兩欄為 OS 執行緒 ID）；41–44 `OnTestKeyDown` 回 FALSE 的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空）；45 `OnKeyDown` 的同步 edit session 沒拿到（兩欄為 HRESULT）；47 `ActivateEx` 註冊 sink 失敗；48 `ActivateEx` 在安全模式；49 `ActivateEx` 進來的執行緒（兩欄為執行緒 ID）；50 進入 `OnKeyDown`（兩欄為執行緒 ID）；51–55 `OnKeyDown` 在送出之前就回不吃的原因（實例未啟用、客戶端被擋住、鍵盤隔間關著、context 停用或為空、鍵沒有對應）；56 焦點換過來時鍵盤隔間讀到關、被 TIP 重新打開。都只有數字，不含任何按鍵或文字。
 - **只有完整性等級剛好是 Medium 的程序才寫**（程序 token 的 `TokenIntegrityLevel`，RID 0x2000）：High、Low 與 AppContainer 的程序一律不寫。理由：同一個使用者的一般程序改得了該使用者的資料夾（例如把中間的資料夾換成 junction），提升權限的程序照那條路徑建檔就是跨權限寫檔；限定 Medium 後寫入不跨權限。
 - 位置：目前使用者的 `%LOCALAPPDATA%\<計時資料夾>\timing\timing-<pid>.txt`（計時資料夾：開發版身分 `shanjie-dev`、正式版身分 `Shanjie`，§6.1；MSI 裝的建置不帶 `timing`，不會建它），資料夾路徑用 `SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_NO_PACKAGE_REDIRECTION)` 取，不讀環境變數。封裝的宿主（例如 MSIX 封裝的記事本）寫 AppData 可能被檔案系統虛擬化而導到 `%LOCALAPPDATA%\Packages\<套件>\LocalCache\Local\<計時資料夾>\timing\`，讀取時兩個位置都要看。
 - 資料夾由驅動腳本事先建立，TIP 不建；開檔用 `CREATE_NEW`（不開已存在的檔）。資料夾不存在、檔案已存在、開不了或程序不是 Medium 時，這個程序就不寫計時，`ActivateEx` 照常成功，不顯示、不記錄任何錯誤。
 - DLL 的檔案在第一次 `ActivateEx` 時開、常駐程序的在啟動時開（每個程序一次），每行寫完就 flush；DLL 寫入用 `try_lock`，鎖忙時那一行直接略過，常駐程序等鎖（§5.8）；寫入失敗則關閉該程序的計時。
-- 驗證：`timing::tests::a_line_has_three_numeric_columns`；VM 裡讀回每個計時檔，內容只有 `[0-9\t\n]`、每行三欄、事件代碼只有上面列出的、每行開始 ≤ 結束（事件 70、71 的兩欄不是時間，不套這一條）。
+- 驗證：`timing::tests::a_line_has_three_numeric_columns`；VM 裡讀回每個計時檔，內容只有 `[0-9\t\n]`、每行三欄、事件代碼只有上面列出的、每行開始 ≤ 結束（事件 70、71、72、76 的兩欄不是時間，不套這一條）。
 
 ### 3.12 R2（隱私）
 
@@ -239,12 +240,12 @@ Linux `debug` job 在既有步驟之後加三步：
 CI（`windows` job 最後幾步，§5.10）：
 
 - `shanjie-tip` 與 `shanjie-host` 各建帶與不帶 `timing` 兩種，核對匯入與匯出；
-- `cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host`：DLL 的單元測試只測純函式（鍵碼對應表、`OnTestKeyDown` 判斷、計時行格式、模擬等級）；常駐程序的測試對真的伺服器與引擎（§5.11 第 10 點）；COM 與 TSF 不在 CI 裡起，靠 VM 實測。
+- `cargo test --release --locked -p shanjie-win-proto -p shanjie-tip -p shanjie-host`：DLL 的單元測試只測純函式（鍵碼對應表、`OnTestKeyDown` 判斷、計時行格式、問重排的規則 `poll`）、模擬等級，與對測試 pipe 的「問」（逾時、讀到一半、遲到的回應）；常駐程序的測試對真的伺服器與引擎（§5.11 第 10、12 點）；COM 與 TSF 不在 CI 裡起，靠 VM 實測。
 - R2 行為測試（`r2_tests`，DLL 與常駐程序各一份，子程序的寫法同 `core/src/ffi.rs` 的子程序測試）：
   - `r2_panic_marker_never_reaches_stdout_or_stderr`：子程序什麼都不先裝，直接呼叫正式的包裝（`guard::com`），在裡面 panic（訊息帶標記字串）。斷言包裝回 `E_FAIL`（panic 沒穿出去）、`GetErrorInfo` 回 `S_FALSE`（沒有掛上錯誤物件）、子程序的 stdout 與 stderr 都找不到標記；正向對照：另一個子程序用預設 hook、不經包裝 panic，標記必須出現在 stderr。
   - `r2_panic_marker_never_reaches_the_debug_output`：父程序以 `DEBUG_ONLY_THIS_PROCESS` 開子程序，收 `OUTPUT_DEBUG_STRING_EVENT`，斷言沒有標記；子程序先送一個 `R2CHILDRAN` 證明真的跑了；正向對照的子程序自己 `OutputDebugStringW(標記)`，父程序必須收到（UTF-8 與 UTF-16LE 兩種都找）。
   - `r2_candidate_text_never_reaches_stdout_stderr_or_the_debug_output`：子程序真的畫一次候選窗（標記字串當候選字），先斷言窗存在、可見、標題長度 0、`hide` 之後不可見；父程序在 stdout、stderr 與偵錯輸出（兩種編碼）裡都找不到標記。
-- macOS 與 Linux 上 `shanjie-tip` 只有 `keys`、`candlayout` 兩個純函式模組（單元測試照跑），`shanjie-host` 是空的 bin，照樣編得過。
+- macOS 與 Linux 上 `shanjie-tip` 只有純函式模組 `keys`、`candlayout`、`poll` 與計時檔的行格式（單元測試照跑）；`shanjie-host` 是空的 bin，照樣編得過，它的測試執行檔另外編進引擎模組（`engine`、`rerank`，沒有 Windows 的程式），所以語意校正在常駐程序的測試（`rerank_tests`，對真的核心與模型）在 macOS 的 `core` job 也跑。
 
 VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 乾淨檢查點；按鍵從主機送進 VM 主控台、用縮圖截圖、PowerShell Direct 讀狀態；每次跑從同一個檢查點還原）：
 
@@ -258,7 +259,7 @@ VM 實測（常駐程序加上的步驟見 §5.11；Hyper-V、zh-TW Windows 11 �
 
 - 按鍵行為由核心的按鍵習慣（`set_key_scheme`，§3.4）決定：預設 1（微軟注音的做法，§4.6 的差異表），登錄值 `KeyScheme` 設 0 改回 Mac 版的做法（改了要重新登入或結束常駐程序才生效；沒有設定頁，§5.2）。單按 Shift 切中英、Ctrl+Space、各視窗各自記中英模式都不做；Caps Lock 開著時打字母，核心照規則 1 直通（§3.6）；測試 VM 量到大寫字母直通（§6.10，E 項）。組字中核心照規則 21 送出組字再直通的鍵（兩種 `scheme` 都有：例如不在 `docs/spec/keys-and-composition.md` §8.1 的 Shift＋數字鍵、Shift+-；`scheme` 0 另有 Shift＋字母、Tab、Shift+Tab），在「執行」對話框這類 IMM32 宿主裡會被吞掉（`OnTestKeyDown` 回 TRUE 而 `OnKeyDown` 放行的鍵會消失，§5.4，已接受的限制）。
 - 沒有預測列、UILess（`ITfCandidateListUIElement`）、完整的 UIA 候選清單（候選窗只送 `EVENT_OBJECT_IME_*`）；候選窗沒有底部列（▲▼、兩個圖示）、捲動點、展開成三欄與滑鼠點選（§3.15、§4.6）。
-- 沒有背景重排（`rerank_take/run/apply`）。常駐程序的限制與範圍外見 §5.2、§5.12。
+- 語意校正只看組字區裡的字：不傳前文（`set_left_context` 不呼叫），強度固定是標準，沒有設定頁。重排算完之前按 Enter，最多等 100 ms（§5.2），等不到就送出 n-gram 的字。常駐程序的限制與範圍外見 §5.2、§5.12。
 - 沒有學習檔（§2.5）、設定檔與設定頁、語言列或工作列的模式圖示。
 - 安裝程式見 §6；沒有自動更新與簽章，DLL、常駐程序與 MSI 都未簽章（建置流程留了簽章步驟的位置，§6.9）。給使用者的建置不能開 `timing`（每個按鍵的時間戳就是打字節奏），要用看得到的方式驗證：feature 開著時多匯出一個符號（`SjMarkTiming`），`check-msi.ps1` 核對 MSI 裡的 DLL 與 exe 沒有它（§6.9），而不是掃原始碼。
 - 只出 x64；x86、ARM64 的 TIP、Chrome、Office、遊戲等其他宿主的相容性尚未驗證；CI 裡沒有離螢幕的 TSF 測試宿主。
@@ -486,13 +487,13 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 
 ## 5. 常駐程序（`windows/host`）
 
-每個使用者的每個登入工作階段一支 x64 常駐程序 `shanjie-host.exe`，**只有它**載入模型、只有一個引擎；TSF 文字服務 DLL 是薄客戶端，不相依核心，每按一鍵經 named pipe 同步往返一次。連不上就直通，不退回 DLL 內核心。候選窗由 DLL 在 App 的程序裡畫（§3.15），資料走同一條連線（`Out` 的候選欄位）；協定預留了常駐程序主動推送的訊息型別，這一版沒有用。
+每個使用者的每個登入工作階段一支 x64 常駐程序 `shanjie-host.exe`，**只有它**載入模型、只有一個引擎；TSF 文字服務 DLL 是薄客戶端，不相依核心，每按一鍵經 named pipe 同步往返一次。連不上就直通，不退回 DLL 內核心。候選窗由 DLL 在 App 的程序裡畫（§3.15），資料走同一條連線（`Out` 的候選欄位）；常駐程序不主動推送：語意校正的結果由 DLL 來問（`Poll`，§5.3、§5.4）；協定保留的推送型別號碼不用。
 
 ### 5.1 程式放哪裡
 
 - 三個 crate，都是 workspace 成員：
   - `windows/proto`（`shanjie-win-proto`）：線上格式與兩種身分的名稱表（`ids.rs`，§6.1）。純 Rust、不分平台、不相依 `windows` crate，三個平台的 CI 都編、都測。
-  - `windows/host`（`shanjie-host`，產出 `shanjie-host.exe`）：pipe 伺服器、引擎、擁有者切換、計時檔。`#![cfg(windows)]` 包住主程式，macOS 與 Linux 上是空的 bin。相依 `shanjie_core`（§3.1 的改名寫法，只放在 `cfg(windows)`）、`shanjie-win-proto`、`windows`／`windows-core` 0.62。只呼叫核心的 C ABI。
+  - `windows/host`（`shanjie-host`，產出 `shanjie-host.exe`）：pipe 伺服器、引擎、擁有者切換、重排執行緒、計時檔。主程式與 pipe 伺服器在 `cfg(windows)` 裡，macOS 與 Linux 上是空的 bin；引擎模組（`engine.rs`、`rerank.rs`）沒有 Windows 的程式（只有重排執行緒的優先順序那一個呼叫），測試執行檔在每個平台都編它。相依 `shanjie_core`（§3.1 的改名寫法，放在 `cfg(windows)`；其他平台只列為測試用的相依）、`shanjie-win-proto`、`windows`／`windows-core` 0.62。只呼叫核心的 C ABI。
   - `windows/tip`：不相依核心，改相依 `shanjie-win-proto`。`client.rs`（連線、伺服器核對、逾時、斷路器、啟動常駐程序）取代 DLL 內的引擎；`tip.rs`、`doc.rs`、`keys.rs` 只改呼叫引擎的地方。`pipeio.rs`（有期限的 overlapped I/O）、`token.rs`（權杖查詢）與 `timing.rs` 兩端共用，常駐程序以 `#[path]` 引入。
 - DLL、常駐程序、資料都在同一個安裝資料夾（開發版身分 `C:\Program Files\shanjie-dev\`、正式版身分 `C:\Program Files\Shanjie\`，§3.3、§6.2）；常駐程序從自己的 `GetModuleFileNameW` 推資料夾，資料在旁邊的 `data\`。
 - 只出 x64。
@@ -503,8 +504,21 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 - pipe 名稱 `\\.\pipe\<前綴><使用者 SID>-<工作階段 ID>`，前綴開發版身分是 `shanjie-dev-`、正式版身分是 `shanjie-`（§6.1）。名稱不帶協定版本：版本不同的兩端要碰得到彼此，才會走到 `Refuse { 1 }`。提升權限的 App 也連這一支（§5.5 第 5 點）。
 - **實例**：啟動時一次建好全部 N＝64 個實例（`nMaxInstances = N`，第一個帶 `FILE_FLAG_FIRST_PIPE_INSTANCE`），之後以 `DisconnectNamedPipe`、`ConnectNamedPipe` 重複使用、永遠不關。第一個實例建不起來（已經有一支在跑）就結束。實例數已滿，誰都加不了實例，與 DACL 無關。不另外用具名 mutex。VM 驗收讀事件 65（同時連線數的最高值）核對 N。
 - **先建 pipe、再載模型**：載入期間收到 `Hello` 或 `Key` 立刻回 `NotReady`，客戶端直通。模型載入失敗、或引擎的鎖 poisoned，常駐程序就結束，讓下一個客戶端啟動新的一支。
-- **預熱**：模型載完之後、`install()` 之前，常駐程序用同一個引擎送一串固定的假按鍵（`a u / 6 w u 0 space y l 3 g ; 4`，ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ，不按 ↓、不開候選窗、不送出），讓第一個真的按鍵不必面對還沒進記憶體的模型頁面（這是推論，量測見 §5.8 的事件 69）；不論成敗，最後一律 `reset`（模式 1），所以引擎之後沒有組字、沒有前文，學習本來就關。預熱期間 `ready()` 仍是假，客戶端照 `NotReady` 直通。某一鍵被核心拒絕就停止預熱、記事件 70，照常 `install()`，不讓常駐程序起不來；`reset` 本身失敗時，這個引擎不放上線，釋放後重新載入一次（不再預熱），再失敗就照模型載入失敗結束。只有帶 `timing` 的量測版讀環境變數 `SHANJIE_HOST_NO_WARM=1` 來跳過預熱，不帶 `timing` 的建置（含 MSI 裝的）不讀、設定頁也沒有。DLL 啟動常駐程序時環境區塊只有 `SystemRoot`；Run 值與安裝程式完成頁啟動的常駐程序，環境區塊來自啟動它的程序（推論，待驗收：§6.4）；不帶 `timing` 的建置不讀這個變數，所以每一種啟動方式下，使用者環境裡的它都影響不了常駐程序。事件 2 的結束仍是載入完成的時刻（預熱之前），它在 `install()` 之後才寫。
+- **預熱**：模型載完之後、`install()` 之前，常駐程序用同一個引擎送一串固定的假按鍵（`a u / 6 w u 0 space y l 3 g ; 4`，ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄠˇ ㄕㄤˋ，不按 ↓、不開候選窗、不送出），讓第一個真的按鍵不必面對還沒進記憶體的模型頁面（這是推論，量測見 §5.8 的事件 69）；不論成敗，最後一律 `reset`（模式 1），所以引擎之後沒有組字、沒有前文，學習本來就關；語意校正開著時，假按鍵留下的重排工作在 `reset` 之前取出、直接釋放，不執行。預熱期間 `ready()` 仍是假，客戶端照 `NotReady` 直通。某一鍵被核心拒絕就停止預熱、記事件 70，照常 `install()`，不讓常駐程序起不來；`reset` 本身失敗時，這個引擎不放上線，釋放後重新載入一次（不再預熱），再失敗就照模型載入失敗結束。只有帶 `timing` 的量測版讀環境變數 `SHANJIE_HOST_NO_WARM=1` 來跳過預熱，不帶 `timing` 的建置（含 MSI 裝的）不讀、設定頁也沒有。DLL 啟動常駐程序時環境區塊只有 `SystemRoot`；Run 值與安裝程式完成頁啟動的常駐程序，環境區塊來自啟動它的程序（推論，待驗收：§6.4）；不帶 `timing` 的建置不讀這個變數，所以每一種啟動方式下，使用者環境裡的它都影響不了常駐程序。事件 2 的結束仍是載入完成的時刻（預熱之前），它在 `install()` 之後才寫。
 - **按鍵習慣**：載模型之前讀一次 `HKCU\<這個建置的設定機碼>\KeyScheme`（DWORD；開發版身分 `Software\shanjie-dev`、正式版身分 `Software\Shanjie`，路徑取自名稱表，`windows/host/src/startup.rs` 的 `settings_subkey`，§6.1），用 `RegGetValueW(HKEY_CURRENT_USER, <設定機碼>, "KeyScheme", RRF_RT_REG_DWORD, …)` 讀進一個 `u32`：值是 0 或 1 就照用；沒有這個值、型別不對、`ERROR_MORE_DATA` 等任何錯誤、或值不是 0 與 1，一律當 1（Windows 預設照微軟注音）；夾完再傳給 `engine::load`，不讓 `set_key_scheme` 回 2 而讓常駐程序結束。`engine::load` 本身不讀登錄。值只在啟動時讀一次，改了要重新登入或結束常駐程序才生效；之後每條連線的 `Welcome` 帶這個值（§5.3）。信任：寫得進 `HKCU\Software` 的只有同一個使用者的 Medium 以上程序，它們本來就能影響常駐程序（§5.5 第 1、5 點已接受），所以這個值沒有跨過權限邊界。事件 71（§5.8）記讀到的結果。
+- **語意校正的開關**：和 `KeyScheme` 一起讀同一個機碼的 `Rerank`（DWORD，同一個 `RegGetValueW` 的讀法，`startup::rerank_from`）：讀到 DWORD 0 才關；沒有這個值、型別不是 DWORD、任何其他錯誤、或值不是 0 與 1，一律是開。結果傳給 `engine::load`（`set_rerank`，§3.4），強度用核心預設（標準）。只在啟動時讀一次，改了要重新登入或結束常駐程序才生效；信任邊界同 `KeyScheme`。事件 76（§5.8）記讀到的結果。
+- **語意校正（背景重排）**：核心的重排工作介面是 `shanjie_engine_rerank_take`／`shanjie_rerank_run`／`shanjie_engine_rerank_apply`／`shanjie_rerank_free`（`docs/spec/semantic-rerank.md` §6、§7）；常駐程序的做法（`engine.rs`、`rerank.rs`；同一份寫在 `docs/spec/semantic-rerank.md` §8.5）：
+  - **取**：每處理完一個 `Key`，仍握著引擎鎖時 `rerank_take`。有工作就放進「排隊」那一格、叫醒重排執行緒；它取代還沒開始的舊工作與已跑完還沒套用的舊工作（核心只在重新解碼時產生工作，所以新工作出現時舊的都已過期），正在跑的那一個只標成不要。沒有新工作時，原有的工作留著（不重新解碼的鍵不讓工作過期）。這一鍵讓組字結束（送出或清空）時，丟掉這個擁有者的工作。
+  - **算**：整個常駐程序一條重排執行緒（`THREAD_PRIORITY_BELOW_NORMAL`），一次只跑一個工作，只呼叫 `rerank_run` 與 `rerank_free`：不碰引擎、不拿引擎鎖。跑完在重排鎖裡核對這個工作還要不要（擁有者沒變，而且它是這個擁有者最新的工作）：要就放進「跑完」那一格，不要就由這條執行緒自己釋放。
+  - **套用是拉取**：跑完不主動推送。擁有者的客戶端來問（`Poll`，§5.3、§5.4）時，才在引擎鎖裡 `rerank_apply`：回 0 就把整個組字記成快照、編一個快照號、回給客戶端；回 5（過期、候選窗開著、每段都維持第一名）回「沒有變化」。套用過的工作當場釋放。
+  - **快照**：整個常駐程序只有一格，記著擁有者 `(連線 ID, ctx)` 與快照號（`u64`，整個程序單調遞增，從 1 起；0 是客戶端「還沒有」的值），只在引擎鎖裡存與清。客戶端在之後的 `Poll` 帶回這個號碼（表示已寫進文件）才清掉；在那之前每次 `Poll` 都回同一份，不再套用。任何一個 `Key`（它的回應本來就帶完整組字）、任何連線的 `Release`、`Reset`、斷線、換擁有者，都清掉它。
+  - **`Poll` 的擁有者核對**：先用一份不必拿鎖的擁有者副本（只在引擎鎖裡更新）比對 `(連線 ID, ctx)`：不是擁有者就回固定的回應（「沒有變化」、旗標 0），不碰任何鎖、不動工作，內容不含任何組字，除了標頭的 `seq` 之外逐位元組固定。副本說是擁有者才 `try_lock` 引擎鎖：拿不到回「還在跑」，拿到之後用真的擁有者、工作的擁有者與快照的擁有者再核對一次，不符照樣回固定的回應。
+  - **旗標**：每個 `Out` 與 `Polled` 帶 `pending`：這個擁有者還有沒套用的工作（排隊中、正在跑、已跑完），或有已套用、客戶端還沒確認的快照。非擁有者拿到的一律是 0。
+  - **Enter**（`kind` 3，擁有者送的、候選窗沒開；同 Mac 殼的 `waitForRerank`）：有已跑完還沒套用的工作時不等，直接套用再處理這個 Enter；有排隊中或正在跑的工作時，先放掉引擎鎖，最多等 100 ms（`ENTER_WAIT`）等它跑完，再等鎖（`lock_wait`，不是 `try_lock`：這個鍵已經收下了），確認擁有者沒變才套用，接著處理這個 Enter；等不到就照當下的組字處理。等待期間其他連線照常拿鎖；擁有者在等待期間換了就不套用，這個 Enter 照「別的擁有者送來的鍵」處理（§5.3）。等待算在這一鍵的回應時間裡。
+  - **兩把鎖的順序**：引擎鎖（`SHARED`）→ 重排鎖（`RR`）；握著重排鎖時絕不去拿引擎鎖。重排鎖 poisoned 和引擎鎖一樣結束程序（結束碼 6）；重排執行緒起不來或結束了（它不會返回，結束就是 panic）以結束碼 9 結束程序，免得旗標永遠是 1、每個 Enter 白等 100 ms。
+  - **工作的釋放**：每個工作恰好釋放一次（`engine::Job` 在 `Drop` 裡 `rerank_free`，一個工作同時只在一個地方：排隊格、重排執行緒手上、跑完格）。正在跑的只由重排執行緒釋放；其餘（沒開始跑的、跑完的，不論套用過沒有）由連線執行緒在重排鎖裡釋放：被新工作取代、換擁有者、`Release`／`Reset`、斷線、組字結束、套用之後。
+  - **核心回 4**（`rerank_take` 或 `rerank_apply` 攔下 panic，引擎已自己重設）：擁有者清成沒有，下一個鍵照換擁有者處理（客戶端收到 `took_over`，結束手上的組字、字留著）。
+  - 狀態全部是單格（一個排隊、一個在跑、一個跑完、一份快照、一個擁有者副本），不按 `(連線, ctx)` 開表。
 - **誰啟動**：DLL 連線得到 `ERROR_FILE_NOT_FOUND`，而且呼叫端同時符合以下全部條件時，才 `CreateProcessW`；`ERROR_PIPE_BUSY` 不啟動、直通。
   - 呼叫端完整性剛好是 Medium、不是 AppContainer、不是提升權限、不是受限權杖、工作階段不是 0、使用者不是 SYSTEM／LocalService／NetworkService、沒有套件身分（`GetCurrentPackageFullName` 回 `APPMODEL_ERROR_NO_PACKAGE`；封裝 App 開的子程序會留在它的套件執行環境裡）。
   - 不等：送出 `CreateProcessW` 就讓這一鍵直通，不在 `OnKeyDown` 或 `ActivateEx` 裡等 pipe 出現。每個程序同時只啟動一次；啟動後 10 秒內不再啟動，期間的鍵直通。啟動 15 秒後、或它啟動的常駐程序已經結束，連線仍是 `ERROR_FILE_NOT_FOUND`，記一次「啟動後仍找不到」（事件 63 原因 5），照退避重試；永久直通只由 `Refuse { 1 }` 觸發。
@@ -519,9 +533,9 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 ### 5.3 線上格式（`windows/proto`）
 
 - 固定寬度、小端，不用自描述的序列化。每則：`u32 len`、`u16 proto`、`u16 type`、`u64 seq`，後面是型別專屬的內容。字串一律 UTF-16 長度加資料。
-- 客戶端 → 常駐程序：`Hello { build_hash, pid, tid }`（pid、tid 只是資訊，不拿來授權）；`Key { ctx, ShanjieKey }`；`Release { ctx }`；`Reset { ctx }`（DLL 接住 panic 之後；送出後客戶端關掉這條連線，因為 panic 可能發生在一次交換的中間）。
-- 常駐程序 → 客戶端：`Welcome { build_hash, key_scheme }`（`key_scheme` 是一個位元組，0 或 1：這支常駐程序引擎的按鍵習慣，§5.2；DLL 的 `OnTestKeyDown` 只從這裡得知，§3.6；其他值解碼就拒絕）；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, commit, preedit, cursor_utf16, candidate_selected, candidate_first, candidate_total, candidates }`（`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理；`candidates` 是直排候選窗**可見的列**，最多 9 項，`candidate_selected` 是可見列裡的位置，`candidate_first` 是第一列在全部清單裡的位置，`candidate_total` 是全部清單的長度；窗沒開時 `candidate_selected` 是 −1、`candidates` 為空、兩個數字都是 0）；預留 `Pushed`，客戶端收到就丟掉。
-- `proto` 不同 → `Refuse { 1 }`（`PROTO` 目前是 3：2 是 `Out` 加了 `candidate_first`、`candidate_total` 並填入 `candidates`，3 是 `Welcome` 加了 `key_scheme`）；`build_hash` 不同不拒絕、不記錄。PROTO 3 的 DLL 遇到還在跑的 PROTO 2 常駐程序（PROTO 2 的常駐程序對 PROTO 3 的 `Hello` 也回 `Refuse { 1 }`）會收到 `Refuse { 1 }`，那個 App 直通到重開；更新由安裝程式做：升級（或解除安裝）時 `KillHost` 結束舊的正式版常駐程序（§6.5、§6.7），已經載著舊 DLL 的 App 在協定版本有變的那一版會收到 `Refuse { 1 }`、只有英文，到重開 App 為止（到時寫進發版說明）。開發版身分沒有安裝程式，要先自己結束舊的常駐程序。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
+- 客戶端 → 常駐程序：`Hello { build_hash, pid, tid }`（pid、tid 只是資訊，不拿來授權）；`Key { ctx, ShanjieKey }`；`Release { ctx }`；`Reset { ctx }`（DLL 接住 panic 之後；送出後客戶端關掉這條連線，因為 panic 可能發生在一次交換的中間）；`Poll { ctx, snap }`（問這條連線在 `ctx` 的組字的重排結果；`snap` 是客戶端上一次寫進文件的快照號，還沒有是 0；內容固定 16 位元組，解碼不配置記憶體；和其他型別一樣只在 `Hello` 之後接受；連線 ID 只由常駐程序給，§5.2）。
+- 常駐程序 → 客戶端：`Welcome { build_hash, key_scheme }`（`key_scheme` 是一個位元組，0 或 1：這支常駐程序引擎的按鍵習慣，§5.2；DLL 的 `OnTestKeyDown` 只從這裡得知，§3.6；其他值解碼就拒絕）；`Refuse { reason }`（1 協定版本不同、2 這個客戶端的連線數已滿、3 客戶端核對不過；之後再加的碼也只是數字）；`NotReady`；`Busy`；`Out { ran, core_error, took_over, handled, pending, commit, preedit, cursor_utf16, candidate_selected, candidate_first, candidate_total, candidates }`（`pending` 是 §5.2 的旗標；`core_error` 為真表示核心回非 0：客戶端不改文件，照 `handled = 0` 處理；`candidates` 是直排候選窗**可見的列**，最多 9 項，`candidate_selected` 是可見列裡的位置，`candidate_first` 是第一列在全部清單裡的位置，`candidate_total` 是全部清單的長度；窗沒開時 `candidate_selected` 是 −1、`candidates` 為空、兩個數字都是 0）；`Polled { kind, pending, … }`（`Poll` 的回應：`kind` 一個位元組，0「沒有變化」、1「還在跑」、2「快照」，其他值解碼就拒絕；`pending` 同 `Out` 的旗標；快照另帶快照號 `u64` 與一份 `Out`，就是重排之後的整個組字）。型別號碼 `0x86`（推送）保留不用：兩端都不送，收到就是格式錯誤。
+- `proto` 不同 → `Refuse { 1 }`（`PROTO` 目前是 4：2 是 `Out` 加了 `candidate_first`、`candidate_total` 並填入 `candidates`，3 是 `Welcome` 加了 `key_scheme`，4 是 `Out` 加了 `pending`、新增 `Poll` 與 `Polled`、推送型別改成格式錯誤）；`build_hash` 不同不拒絕、不記錄。`Refuse` 的格式在任何版本都不變（沒有旗標），所以版本不同的兩端讀得懂它。新的 DLL 遇到還在跑的舊常駐程序、舊的 DLL 遇到新的常駐程序（例如 PROTO 3 的 DLL 連到 PROTO 4 的常駐程序），都收到 `Refuse { 1 }`，那個 App 直通到重開；更新由安裝程式做：升級（或解除安裝）時 `KillHost` 結束舊的正式版常駐程序（§6.5、§6.7），已經載著舊 DLL 的 App 在協定版本有變的那一版會收到 `Refuse { 1 }`、只有英文，到重開 App 為止（到時寫進發版說明）。開發版身分沒有安裝程式，要先自己結束舊的常駐程序。收到 `NotReady`、`Busy` 時客戶端關掉連線，下一鍵再連。`Release`、`Reset` 沒有回應。
 - **擁有者由常駐程序指定**：`owner = (連線 ID, ctx)`，連線 ID 單調遞增、不重用；客戶端只送自己的 `ctx`（`ITfContext` 的指標值），它只在自己那條連線裡有意義。換擁有者先 `reset(mode 1)`（§3.4 的那一套：一個引擎）；新擁有者的 `Out` 不帶舊擁有者的候選窗（reset 之後窗是關的）。`Release` 要 `(連線, ctx)` 完全相符才 reset；`Reset` 與斷線只看連線，是目前的擁有者才 reset 並清掉擁有者。
 - **解析規則**（兩端共用）：
   - 讀到 `len` 之後、配置記憶體之前，先檢查 16 ≤ `len` ≤ 64 KiB，而且等於這則訊息實際的位元組數。
@@ -529,8 +543,9 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
   - 字串長度不得超過剩下的內容，結尾不能有多出來的位元組，旗標只收 0 或 1。
   - 任何一條不符就斷線、不回應。
   - 候選清單在解碼時就拒絕超過 9 項（不先配置）。
+  - 快照裡的 `Out` 客戶端另外核對（`snapshot_ok`）：通過 `out_ok`、`ran` 為真、不是 `core_error`、不是 `took_over`、`commit` 為空、`preedit` 非空、`candidate_selected == -1`。不符就是格式錯誤（重排只改開著的組字，不送出、不開窗）。
   - 客戶端另外核對（`out_ok`，所有加法用 `u64`）：`seq` 等於送出的那一則；`ran` 為真；`cursor_utf16` 不大於 `preedit` 的長度；`commit`、`preedit` 不含 C0、C1 控制字元與落單的代理字元（偽造的伺服器打換行進終端機的縱深防禦；核心的送出路徑本來就不送控制字元）；`candidate_selected == -1` 時 `candidates` 為空而且 `candidate_first == candidate_total == 0`；否則 `0 <= candidate_selected < candidates 的項數 <= 9`、`preedit` 非空、`candidate_first + 項數 <= candidate_total`，每項非空、不超過 `CAND_MAX_UTF16`（64 個 UTF-16 單位；量到詞庫與詞包最長的詞條是 10 個單位，取 64 是寧鬆勿緊：被拒絕的 `Out` 會結束使用者的組字）、不含控制字元、落單的代理字元、U+2028、U+2029 與雙向控制字元（U+202A–202E、U+2066–2069）。
-- 驗證：`shanjie-win-proto` 的單元測試（每個型別編解碼往返、長度上限、壞的或截斷的訊息被拒絕、超過 9 項的候選清單被拒絕、`out_ok` 的每個邊界：−1 但有候選或 first／total 非 0、selected 為 −2 與 `i32::MIN`、超出、10 項、空字串、超長、控制字元、U+2028、雙向字元、first 為 `u32::MAX`、total 為 0、有候選但 `preedit` 空，亂數位元組解碼不會 panic），三個平台都跑。
+- 驗證：`shanjie-win-proto` 的單元測試（每個型別編解碼往返、長度上限、壞的或截斷的訊息被拒絕、超過 9 項的候選清單被拒絕、`out_ok` 的每個邊界：−1 但有候選或 first／total 非 0、selected 為 −2 與 `i32::MIN`、超出、10 項、空字串、超長、控制字元、U+2028、雙向字元、first 為 `u32::MAX`、total 為 0、有候選但 `preedit` 空，亂數位元組解碼不會 panic；PROTO 4 的部分：`proto_4`（`PROTO` 等於 4、`Refuse` 的位元組不變、帶 PROTO 3 的 `Hello` 是版本不符、推送型別被拒絕）、`poll_and_polled`（`Poll` 剛好 16 位元組、`Hello` 之前不收、固定回應的位元組、`kind` 與旗標的壞值、快照缺內容或多內容）、`the_client_checks_of_a_snapshot`，`Poll` 與 `Polled` 也在截斷、補位元組與 20 萬筆亂數與變造訊息的測試裡），三個平台都跑。
 
 ### 5.4 通訊
 
@@ -542,6 +557,14 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 - **逾時 200 ms**（寫入與讀取共用一個期限）。overlapped I/O，不做可警示的等待、不 pump 訊息；逾時就 `CancelIoEx`，再 `GetOverlappedResult(bWait = TRUE)` 等取消完成，才釋放 `OVERLAPPED` 與緩衝。
 - 寫入失敗：組字區是空的時候重連一次、重送一次；組字開著時照 §5.6 第一列。寫完之後讀取失敗或逾時不重送。
 - **斷路器**：連續兩次逾時，這個程序 10 秒內不再連線、直通。
+- **Enter 的等待**：有重排工作還沒跑完時，常駐程序處理 Enter 最多多等 100 ms（§5.2），在 200 ms 的期限之內。
+- **問重排結果**（`poll.rs` 是規則，`tip.rs` 接計時器與 edit session，`client::poll` 是一次交換）：
+  - **計時器**：任何 `Key` 的回應帶 `pending` 而且組字開著，DLL 就開這個 UI 執行緒的計時器（`SetTimer` 的執行緒計時器，30 ms 一次，從宿主的訊息迴圈觸發；已開就續用），並從這個回應起算 600 ms；每個帶旗標的 `Key` 回應重新起算，`Poll` 的回應不重新起算。停的時機：組字結束、焦點離開、任何回應的旗標是 0、600 ms 到了、一次 `Poll` 逾時（停到下一個帶旗標的 `Key` 回應）。**下一個按鍵不取消**：不重新解碼的鍵讓工作維持有效（`shanjie.h`）。候選窗開著時不問（核心不會套用），計時器照跑。
+  - **問與寫在同一個非同步 edit session**（`TF_ES_ASYNCDONTCARE | TF_ES_READWRITE`，對組字所在的 context 要）：計時器觸發時只要一個 edit session，記下當下的世代號（每個按鍵、組字結束、焦點改變都加一）與組字物件；上一個要來的 session 還沒跑時不再要。session 執行時，**送出 `Poll` 之前**核對：仍有組字、是同一個組字物件（比指標）、世代號沒變；任一不符就不問、不寫、不開新組字。核對通過才送 `Poll`（帶 `ctx` 與上一次寫入的快照號），拿到快照就在同一個 session 裡寫入並記下快照號。問與寫之間 UI 執行緒沒有放開，所以快照不會比組字舊。
+  - **寫入**（`doc::apply_snapshot`）：只對原本那個組字物件設文字、底線與游標；不開組字、不插入、不結束組字。
+  - **期限 40 ms**（寫入與讀取共用，`POLL_MS`），不是按鍵的 200 ms：它在 UI 執行緒上、不在任何按鍵裡。**斷路器不算 `Poll`**：`Poll` 的逾時與失敗只記事件 62，不計入「連續兩次逾時」。`Poll` 不連線、不啟動常駐程序：沒有連線或客戶端被擋住時不問、計時器停，由下一個按鍵照 §5.6 處理。
+  - **遲到的回應**：`Poll` 在讀到任何位元組之前逾時，連線不關，客戶端在連線物件裡記下它的 `seq`；之後讀回應時，先丟掉 `seq` 小於或等於記下那個值的回應，丟的則數不超過還沒收到回應的逾時 `Poll` 數，丟完就清掉紀錄。介於紀錄與目前 `seq` 之間的 `seq` 照舊是格式錯誤。紀錄跟著連線消失。常駐程序若已套用，快照留著（§5.2），下一個 `Poll` 或下一個 `Key` 的回應會帶回來。
+  - **讀到一半**：逾時的當下已經從 pipe 讀走位元組（`pipeio` 在取消之後回報實際讀到的位元組數；取消輸給完成的那一次讀取算完成），串流不在訊息邊界上，照讀寫錯誤處理（關連線，§5.6）。
 - 常駐程序是組字狀態的唯一來源；DLL 不留按鍵紀錄、不重放。
 
 ### 5.5 安全
@@ -562,7 +585,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 5. **提升權限的 App**：連同一支 Medium 常駐程序，絕不啟動它（§5.2 的條件）；常駐程序的自我檢查保證它不會以提升權限執行；客戶端照第 1 點核對伺服器。**接受的風險**：管理員 App 的按鍵經 pipe 進到一般權限的常駐程序，送出的字再回到管理員 App，同一個帳號下的一般權限惡意程式可以注入或讀取常駐程序，因此能讀到、也能偽造打進管理員視窗的字（Windows 的 UIPI 原本擋住的事）。Mozc、小狼毫、PIME 都是同樣的設計。縮小的措施：安裝資料夾只有系統管理員能寫（§3.3）、第 1 點的伺服器核對、§5.3 的控制字元檢查。常駐程序維持 Medium（之後的學習要寫 `%LOCALAPPDATA%`，Low 寫不了）。
 6. **R2**：線上訊息就是組字內容。兩端都不得把它寫進任何 log、檔案、錯誤訊息或 `OutputDebugString`；型別不 derive `Debug`；錯誤只有 Win32 碼與結束碼；計時檔只有數字，事件 62、63 只放錯誤碼或原因碼。R2 行為測試（§3.13）在常駐程序也跑一份。常駐程序關掉自己的 WER dump（§5.2）。
 7. 常駐程序只用 `LOAD_LIBRARY_SEARCH_SYSTEM32`，正式版不讀環境變數（只有帶 `timing` 的量測版讀 `SHANJIE_HOST_NO_WARM`，§5.2），不開網路。
-8. **接受並記錄**：單一引擎共用，任何連得上的客戶端都能讓正在打字那個 App 的組字被丟掉（換擁有者就 reset），也能從 `took_over` 看出別的 App 有沒有在打字。
+8. **接受並記錄**：單一引擎共用，任何連得上的客戶端都能讓正在打字那個 App 的組字被丟掉（換擁有者就 reset），也能從 `took_over` 看出別的 App 有沒有在打字。語意校正沒有多開一條看得到別人組字的路：非擁有者的 `Poll` 只得到固定的回應（不碰引擎鎖、內容不含組字、旗標是 0，§5.2），快照只回給「快照的擁有者＝現在的擁有者＝發問者」；任何連線的 `Release`、`Reset`、斷線都會清掉別人還沒確認的快照（畫面停在 n-gram 的字，引擎裡是重排後的字，下一個鍵的回應帶完整組字）。連線數的限流以 PID 計，Low 完整性的程式可以開多個程序佔滿 64 個實例，這是原本就有的問題。
 
 ### 5.6 故障時怎麼做
 
@@ -578,6 +601,10 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 | 常駐程序拒絕這個客戶端 | `Refuse { 3 }` | 直通，60 秒內不再連 | 那個 App 只有英文 |
 | 沙箱 App 連不上 | `ERROR_ACCESS_DENIED` | 直通。AppContainer 寫不了計時檔，連不上的這一端沒有紀錄；常駐程序在 AppContainer 客戶端連上時記事件 64 | 那個 App 只有英文 |
 | 伺服器核對不過 | 擁有者、工作階段或權杖不符 | 斷線、直通，Medium 客戶端記事件 63 原因 9 | 那個 App 只有英文 |
+| `Poll` 在讀到任何位元組之前逾時（40 ms） | 逾時、讀到 0 個位元組 | 連線不關、不計入斷路器；記下 `seq`，遲到的回應之後丟掉；計時器停到下一個帶旗標的 `Key` 回應（§5.4） | 重排的字晚一點出現：下一個鍵之後的 `Poll` 帶回快照；Enter 送出的仍是引擎裡的字 |
+| `Poll` 的回應讀到一半逾時、格式不對（含快照帶 `commit`、沒有 `preedit` 或開著候選窗）、型別不對、管線斷了，或寫入失敗 | 讀寫失敗或不能用的回應 | 照第一列：在這個非同步 edit session 裡結束組字（先清底線、字留著）、關連線、計時器停 | 打到一半的字留在文件、沒有底線 |
+| 快照寫不進文件（`SetText` 等失敗） | 文件改動失敗 | 同上一列（雙方都丟掉） | 同上 |
+| 要 `Poll` 的非同步 edit session 被宿主拒絕，或執行時組字已結束、換了組字、之間有按鍵 | `RequestEditSession` 失敗，或 session 裡的核對不符 | 不問、不寫、不開組字；計時器照跑，下一次觸發再要 | 沒有變化 |
 
 都不顯示任何視窗、對話框或通知。
 
@@ -592,6 +619,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 - DLL 與常駐程序各自照 §3.11 寫（同樣的 Medium 閘門、`CREATE_NEW`、只有數字）；常駐程序的檔名 `host-<pid>.txt`，同一個資料夾。DLL 寫入用 `try_lock`（UI 執行緒不等計時檔），常駐程序等鎖（64 條連線執行緒共用一個檔，略過會丟掉事件 2）。
 - 常駐程序記 2（模型載入）、3（每鍵：收到到送回）、64（一個 AppContainer 客戶端連上，兩欄都是 1）、65（同時連線數創新高時的值，兩欄都是那個數）。DLL 不再寫 2 與 46。
 - 常駐程序另記 69（預熱：開始＝第一鍵之前、結束＝`reset` 之後，單位 µs；沒預熱時不寫）、70（預熱的某一鍵被核心拒絕：兩欄都是數字，依序是那一鍵在按鍵串裡的位置（從 0 起）與核心的回傳碼；只有失敗時寫）、71（啟動時的按鍵習慣：兩欄都是數字，不是時間，依序是交給核心的值（0 或 1）與來源碼（0 沒有值、1 有效的值、2 無效的值而當 1）；70、71 都不套「開始 ≤ 結束」）。只有數字、不含任何按鍵或文字（R2）。
+- 語意校正的事件。DLL 記：72 一次 `Poll` 的往返，兩欄都是數字、不是時間：第一欄是長度（µs，開始＝送出 `Poll` 之前，結束＝讀完回應或逾時），第二欄是結果碼（0 快照、1 沒有變化、2 還在跑、3 逾時而連線留著、4 其他失敗而連線關閉）；73 重排上畫面（開始＝最近一個帶旗標的 `Key` 回應回來的時刻，結束＝非同步 session 寫完組字區，µs）；74 按鍵時重排未完（每個帶旗標的 `Key` 回應寫一筆，兩欄都是 1）。常駐程序記：75 重排執行緒跑一個工作（開始、結束，µs）；76 啟動時的語意校正開關（同 71：兩欄依序是交給核心的值（0 或 1）與來源碼（0 沒有值、1 有效的值、2 無效的值而當 1））。72、76 不套「開始 ≤ 結束」。
 - DLL 記：60 等常駐程序回應（開始＝送出、結束＝收到）；61 `CreateProcessW` 成功的時刻（同一個 QPC 時鐘；冷啟動秒數＝常駐程序事件 2 的結束減這個時刻）；62 逾時或斷線（兩欄都是 Win32 錯誤碼）；63 不符條件而直通（兩欄都是原因碼：1 不准連線、2 不符啟動條件、3 退避中或另一條執行緒正在啟動、4 `CreateProcessW` 失敗（含 Job 不准脫離）、5 啟動後仍找不到、6 `ERROR_PIPE_BUSY`、7 `NotReady`、8 `Busy`、9 伺服器核對不過、10 `Refuse { 1 }`、11 `Refuse { 2 }`（含不認得的原因碼）、12 `Refuse { 3 }`、13 回應型別不對）。42 的意思是「被擋住」（斷路器、`Refuse { 1 }` 之後、`Refuse { 3 }` 的冷卻，或組字區空時連不上常駐程序，§5.4），52 是同樣的擋住出現在 `OnKeyDown`。
 
 ### 5.9 介面的層級
@@ -600,9 +628,9 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 
 ### 5.10 CI
 
-- `windows` job：建 `shanjie-tip`、`shanjie-host`（各自先帶 `timing`、再不帶，檢查的是不帶的那一份），`dumpbin /dependents` 核對 DLL 與 exe 都沒有 C 執行階段的匯入、DLL 的匯入表列得到 `d2d1.dll` 與 `dwrite.dll` 而且沒有 delay-load 的匯入，`dumpbin /exports` 核對 DLL 沒有 `shanjie_` 開頭的匯出（另核對 `DllGetClassObject` 在），`cargo tree -p shanjie-tip` 沒有 `core`，印出大小；跑三個 crate 的測試（線上格式、客戶端的模擬等級、對真的伺服器與引擎的兩條連線與限流、DLL 與常駐程序的 R2 行為測試）。
+- `windows` job：建 `shanjie-tip`、`shanjie-host`（各自先帶 `timing`、再不帶，檢查的是不帶的那一份），`dumpbin /dependents` 核對 DLL 與 exe 都沒有 C 執行階段的匯入、DLL 的匯入表列得到 `d2d1.dll` 與 `dwrite.dll` 而且沒有 delay-load 的匯入，`dumpbin /exports` 核對 DLL 沒有 `shanjie_` 開頭的匯出（另核對 `DllGetClassObject` 在），`cargo tree -p shanjie-tip` 沒有 `core`，印出大小；跑三個 crate 的測試（線上格式、客戶端的模擬等級與「問」、問重排的規則、對真的伺服器與引擎的兩條連線與限流、常駐程序的語意校正、DLL 與常駐程序的 R2 行為測試）。
 - `windows-msi` job：正式版身分的測試、MSI 的建置與核對（§6.9）。
-- Linux `debug` job 跑 `shanjie-win-proto` 的測試；macOS 的 core job 跑整個 workspace。
+- Linux `debug` job 跑 `shanjie-win-proto` 的測試；macOS 的 core job 跑整個 workspace，含 `shanjie-tip` 的純函式模組與 `shanjie-host` 的引擎模組測試（`rerank`、`rerank_tests`，對真的核心）。
 
 ### 5.11 驗證方式
 
@@ -615,7 +643,7 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
 5. **記憶體**：記事本與 explorer 各做兩組（微軟注音、善解），取樣點相同、兩組之間開「執行」對話框的次數相同。判準：善解的差減掉微軟注音的差 < 10 MB。常駐程序的私有記憶體照實報。
 6. **延遲**：DLL 的每鍵（事件 3）中位數、p95、最大值，p95 < 16 ms；事件 60 的 p95 另報；首鍵分常駐程序已在跑（目標 < 16 ms）與冷啟動兩種報。另報事件 65 的最高值。
 7. **故障**：(k1) 記事本組字中結束常駐程序，下一鍵照 §5.6 第一列（組字結束、字留著、這一鍵被吃掉），記事本沒有當掉、沒有啟動常駐程序；在「執行」對話框送一鍵重起常駐程序後，記事本打同一句逐字相同。只記錄、不擋：(k2) 設定 App 的搜尋框（字對不對、事件 64）；(k3) 以系統管理員身分開的記事本（字對不對、常駐程序沒有換、仍是 Medium；常駐程序沒在跑時直通、不啟動）；(k4) 模型載入期間打字（不卡 200 ms、之後不重複出字）；(k5) Low 完整性的測試程序對真的 pipe 呼叫 `CreateNamedPipeW`，應該被拒絕或拿到 `ERROR_PIPE_BUSY`。
-8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～71；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
+8. **R2 掃描**照 §3.13 (g)，計時資料夾收 `timing-*.txt` 與 `host-*.txt`、事件代碼收 60～76；`%LOCALAPPDATA%\shanjie-dev\` 底下只有計時檔。
 9. **取消註冊**照 §3.13 (h)，另外核對重開之後沒有 `shanjie-host` 在跑。
 10. 單元測試（CI）：兩條連線，B 用 A 的 `ctx` 送 `Release`、`Reset`，A 的狀態不變；B 用 A 的 `ctx` 送 `Key`，B 只拿到自己那一鍵、拿不到 A 的 `preedit`（單一引擎下這一鍵接手，A 下一鍵看到 `took_over`）；限流（`Refuse { 2 }`）之後下一條連線照常可用；模擬等級是 `SecurityIdentification`；`proto` 的解析規則。
 11. **量測結果**（測試 VM，常駐程序版；延遲是 DLL 裡花的時間，不含 App 畫字）：
@@ -623,11 +651,16 @@ Windows 版的按鍵預設照這張表（核心的按鍵習慣 1，`docs/spec/ke
     - 每鍵延遲（DLL 事件 3）：記事本中位數 1.1 ms、p95 4.5 ms、最大 10.7 ms；「執行」對話框 p95 4.0 ms；設定 App 搜尋框 p95 4.1 ms。等常駐程序回應（事件 60）p95 2.9～3.9 ms。常駐程序已在跑時的首鍵 0.7～3.5 ms。
     - 冷啟動（`CreateProcessW` 到模型載完）2.3～2.9 秒；同時連線數最高 2。
     - 記錄、不擋的格：常駐程序還沒起來時與載入期間，「執行」對話框裡直通的鍵照原樣出現；常駐程序在跑時，空白鍵、Shift＋A 也照原樣出現；設定 App 的搜尋框字對（它是封裝 App、不是 AppContainer，沒有事件 64）；Low 完整性的程序對真的 pipe 建實例得到 `ERROR_PIPE_BUSY`；以系統管理員身分開的記事本沒有跑到前景，沒有量到。
+12. **語意校正**：
+    - 對照用的 CLI（repo 根目錄，Linux 或 Mac 的評測 CLI，常駐程序的設定：聊天、ACG 與 IT 詞包、常談、標準強度、不帶 `--context`）。開：`shanjie-eval --lm data/lm/bigram.sjlm --profile chat --packs acg,it --colloquial-core data/lm/colloquial.sjlm --tinylm data/lm/tinylm.sjtl --rows <檔> --picks <輸出>`；關：同一串去掉 `--tinylm data/lm/tinylm.sjtl`。VM 用的三句是公開集合裡「開與關選字不同、而且開的對」的列（`rerank_tests::VM_RERANK_SENTENCES`：按鍵、關的字、開的字），`the_vm_sentences_read_as_the_cli_says_with_the_rerank_on_and_off` 用常駐程序自己的引擎在兩種按鍵習慣下逐鍵打出同樣的字。
+    - 單元測試（CI；常駐程序的在每個有模型的平台跑，直接呼叫連線執行緒呼叫的 `engine::key`／`poll`／`release`／`drop_connection`）：一次只跑一個工作、新工作取代排隊中的舊工作；換擁有者就丟工作；Enter 最多等 100 ms，等不到送出畫面上的字；工作已跑完、沒人問過就 Enter，送出重排的字而且沒有等；候選窗開著的 Enter 不等；A 的 Enter 等待時 B 的按鍵不是 `Busy`、擁有者換了就不套用；等待期間別的連線的 `Release` 與斷線不會死結；`Poll` 拿不到引擎鎖回「還在跑」，非擁有者（B 用 A 的 `ctx`、A 用別的 `ctx`）在鎖被握著時也拿到固定回應、除了 `seq` 逐位元組相同，之後 A 仍拿到快照；快照在確認前每次都是同一份，確認後旗標是 0；有快照時 `Release`、`Reset`、斷線、B 接手之後 A 用原 `ctx` 問不到；跑完沒人問的工作在重新解碼的鍵、B 接手、`Release`、斷線四種情形都釋放，`rerank_free` 次數等於 `rerank_take` 次數（每份恰好一次由 `rerank::tests` 用會記錄釋放的假工作驗，含隨機順序）；不重新解碼的鍵不讓工作過期；`Rerank` 的讀法與 `set_rerank(0)` 不產生工作；預熱留下的工作被釋放。對真的 pipe（Windows）：`the_rerank_comes_back_through_a_poll_and_only_to_its_owner`、`a_proto_3_hello_is_refused_with_reason_1`。
+    - 客戶端（`poll::tests`，各平台；用模擬的常駐程序與文件驅動同一份規則）：旗標→計時器→session 裡問→寫入；工作進行中送不重新解碼的鍵，之後仍拿到快照；session 執行前有按鍵就不問，下一次觸發寫入；組字結束或換了組字的 session 不問、不寫、不開組字；600 ms 內持續問、之後停、下一個帶旗標的回應重開，`Poll` 的回應不重新起算；常駐程序已套用而 `Poll` 逾時：計時器停、連線留著，下一個帶旗標的按鍵回應之後寫入；失敗的 `Poll` 結束組字、關連線；快照帶 `commit`、沒有組字或開著窗都不改文件；遲到回應的 `seq` 等於記下的值時丟掉、不多丟；讀到一半就關連線；三個計時事件的時刻與內容。對測試 pipe（Windows，`client::tests`）：逾時而沒讀到位元組時連線留著、不計入斷路器、遲到的回應被丟掉而下一鍵的組字正確、紀錄不跟到新連線；讀到一半逾時關連線；推送型別是格式錯誤。
+    - 測試 VM（這一片的 MSI）：三句在記事本與「執行」對話框打完、Enter，讀回的字等於上面「開」的結果（最後一鍵後停 1 秒再 Enter；連打後立刻 Enter 時是「開」或「關」的結果，照記）；`Rerank` 設 0、重新登入後等於「關」的結果。延遲的門檻：非送出鍵的事件 3 在 `Rerank` 1 時 p95 < 16 ms，而且比 `Rerank` 0 多不超過 2 ms（同一台 VM、同一串鍵、按鍵間隔 60 ms、交替兩輪，事件 74 的次數大於 0）；Enter 的最大值 ≤ 130 ms；事件 72 的 p95 ≤ 5 ms、最大值 ≤ 30 ms；事件 73 報 p50、p95、最大值；常駐程序的 CPU 與工作集照報。這一項還沒有量測結果。
 
 ### 5.12 範圍外
 
 - 自動更新、簽章。安裝與解除安裝見 §6；登入時預先啟動用 Run 值，不用排程工作（§6.4）。
-- 學習檔（含 AppContainer 客戶端的學習政策，以及輸入範圍含 `IS_PRIVATE` 的 context 不學，§3.15）；背景重排與 `Pushed` 的實際使用；預測列；候選窗的底部列、捲動點、展開成三欄與滑鼠點選；聊天／書面、分級等設定。
+- 學習檔（含 AppContainer 客戶端的學習政策，以及輸入範圍含 `IS_PRIVATE` 的 context 不學，§3.15）；語意校正的前文（經 TSF 取 App 的文字、傳給常駐程序）與強度設定；推送型別的實際使用（號碼保留）；預測列；候選窗的底部列、捲動點、展開成三欄與滑鼠點選；聊天／書面、分級等設定。
 - x86、ARM64 的 DLL 與 ARM64 的常駐程序；每個客戶端一個引擎；可 mmap 的零拷貝模型格式；常駐程序在沒有連線時自己結束。
 - 之後新增送往常駐程序的資料（前文回傳、學習的查詢）時，要重審 §5.5 第 1、5 點與 AppContainer 客戶端的政策。
 

@@ -39,7 +39,7 @@
 | job | runner | 內容 | 逾時 |
 |---|---|---|---|
 | `changes` | ubuntu-latest | §1.2 | 5 分 |
-| `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（兩個套件全部） | 90 分 |
+| `core` | xcode-27（macOS） | 下載並核對模型；`cargo test --release --locked`（整個 workspace：`core`、`cli` 兩個套件全部，加上 Windows 的 crate 在 macOS 編得出來的部分：線上格式、文字服務的純函式模組、常駐程序的引擎模組對真的核心，`docs/spec/windows-tip.md` §5.10） | 90 分 |
 | `debug` | ubuntu-24.04 | 下載並核對模型；`cargo test --locked -p core`；`cargo test --locked -p cli --lib --bins`；評測 CLI 的 release 建置與六份 rowstats（Windows 比對的 Linux 側） | 30 分 |
 | `windows` | windows-2025 | 見 §3.3；`needs: changes`，和其他 job 同時開跑 | 45 分 |
 | `windows-cap` | windows-2025 | `core/tests/engine_cap.rs`（release），與 `windows` 並行（§3.3） | 30 分 |

@@ -1,5 +1,5 @@
-//! shanjie TSF text input processor (docs/spec/windows-tip.md §3.1). Windows only, except the two pure modules (`keys`, `candlayout`), which are
-//! built everywhere so their unit tests run on every CI platform; the rest is an empty crate elsewhere.
+//! shanjie TSF text input processor (docs/spec/windows-tip.md §3.1). Windows only, except the pure modules (`keys`, `candlayout`, `poll`, and the line format
+//! and event codes of `timing`), which are built everywhere so their unit tests run on every CI platform; the rest is an empty crate elsewhere.
 //!
 //! The core, in the resident host `shanjie-host.exe` (docs/spec/windows-tip.md §5), decides what a key does; this crate is its thin
 //! client: it maps keys in, carries them to the host and back (`client`), applies the answer to the TSF document, draws the candidate window
@@ -9,6 +9,7 @@
 
 pub mod candlayout;
 pub mod keys;
+pub mod poll;
 
 #[cfg(windows)]
 mod cand;
@@ -26,7 +27,7 @@ mod guard;
 mod guids;
 #[cfg(windows)]
 mod pipeio;
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 mod timing;
 #[cfg(windows)]
 mod tip;

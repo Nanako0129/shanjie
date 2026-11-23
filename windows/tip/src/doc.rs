@@ -134,6 +134,19 @@ fn ending(ec: u32, c: &Comp, f: impl FnOnce() -> Result<()>) -> Result<()> {
     r
 }
 
+/// The composition after a rerank (docs/spec/windows-tip.md §5.4), in an edit session on `c`'s own context: the text of the open composition `c`, its underline and the
+/// caret, nothing else. It never starts a composition, never inserts at the selection and never ends anything: the caller has checked that `out` commits
+/// nothing and has a composition (`proto::snapshot_ok`) and that `c` is the composition it asked about.
+pub fn apply_snapshot(ec: u32, c: &Comp, atom: u32, out: &Out) -> Result<()> {
+    // SAFETY: live interfaces; the attribute value is a TfGuidAtom as VT_I4.
+    unsafe {
+        let range = c.composition.GetRange()?;
+        range.SetText(ec, 0, &out.preedit)?;
+        c.ctx.GetProperty(&GUID_PROP_ATTRIBUTE)?.SetValue(ec, &range, &VARIANT::from(atom as i32))?;
+        caret_at(ec, &c.ctx, &range, out.cursor_utf16)
+    }
+}
+
 /// `OnKeyDown` step 3 (docs/spec/windows-tip.md §3.7), in this order: `commit` replaces the composition range (or goes in at the selection) and ends the
 /// composition; `preedit` starts or continues one, with the underline and the caret; nothing at all with a composition open empties the
 /// range first and then ends it. A composition that stays in `slot` when this fails is ended by the caller.

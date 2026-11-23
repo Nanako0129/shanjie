@@ -7,7 +7,7 @@
 //! The parsing rules of both ends live here: the length is checked before anything is allocated (`frame_len`), types are
 //! white-listed per direction, a string may not run past the body, a body may not have bytes left over, and a host connection starts
 //! with exactly one `Hello` (`HostSession`). Every failure is `None` or `Accept::Drop`: the caller drops the connection without an
-//! answer. `out_ok` holds the client's extra checks of an `Out`.
+//! answer. `out_ok` holds the client's extra checks of an `Out`, `snapshot_ok` those of the `Out` a `Polled` carries.
 //!
 //! R2: the messages carry typed text, so nothing here derives `Debug` (no composition reaches a log through `{:?}`).
 
@@ -17,7 +17,9 @@ pub mod ids;
 /// `Refuse { 1 }` and the app then passes every key through until the host is replaced.
 /// 3: `Welcome` carries `key_scheme` (the key-habit setting of the host's engine, 0 or 1; docs/spec/windows-tip.md §5.3). A PROTO 2 host answers a PROTO 3 `Hello` with
 /// `Refuse { 1 }`, as a PROTO 1 host does a PROTO 2 one.
-pub const PROTO: u16 = 3;
+/// 4: the semantic rerank (docs/spec/windows-tip.md §5.3): `Out` carries `pending`, the client may send `Poll` and the host answers it with `Polled`; `T_PUSHED` is
+/// malformed from now on (the number stays reserved). A PROTO 3 host answers a PROTO 4 `Hello` with `Refuse { 1 }`, and the other way round.
+pub const PROTO: u16 = 4;
 /// The most candidates one `Out` may carry: the rows of the vertical window (docs/spec/windows-tip.md §5.3, `shanjie.h`).
 pub const CAND_MAX: usize = 9;
 /// The longest candidate text of an `Out`, in UTF-16 units. Measured on the tree (a script over the tracked data files, `eval/holdout` excluded): the longest
@@ -34,14 +36,18 @@ pub const T_HELLO: u16 = 1;
 pub const T_KEY: u16 = 2;
 pub const T_RELEASE: u16 = 3;
 pub const T_RESET: u16 = 4;
+/// "Is the rerank of my composition done?" (PROTO 4). Only after the `Hello`, like every type but `Hello`.
+pub const T_POLL: u16 = 5;
 // Host to client.
 pub const T_WELCOME: u16 = 0x81;
 pub const T_REFUSE: u16 = 0x82;
 pub const T_NOT_READY: u16 = 0x83;
 pub const T_BUSY: u16 = 0x84;
 pub const T_OUT: u16 = 0x85;
-/// Reserved for pushes from the host (background rerank); not sent in this slice, dropped by the client. The candidate window rides on `Out`.
+/// Reserved, never sent and never accepted: from PROTO 4 a message of this type is malformed at both ends (the rerank is pulled with `Poll`, not pushed).
 pub const T_PUSHED: u16 = 0x86;
+/// The answer to a `Poll` (PROTO 4).
+pub const T_POLLED: u16 = 0x87;
 
 /// `Refuse` reasons; a later code is only another number.
 pub const REFUSE_PROTO: u32 = 1;
@@ -88,18 +94,23 @@ pub enum ClientMsg {
     Release { ctx: u64 },
     /// Sent after the DLL caught a panic.
     Reset { ctx: u64 },
+    /// Asks for the result of the rerank of the composition this connection owns in `ctx`. `snap` is the number of the last snapshot the client wrote
+    /// into its document (0: none yet): the host keeps an applied snapshot until it sees its number here. Exactly 16 bytes of body, nothing allocated.
+    Poll { ctx: u64, snap: u64 },
 }
 
 /// The answer to a `Key`: what the in-DLL `engine::key` (docs/spec/windows-tip.md §3.4) gave the text service. `core_error` means the core returned non-zero: the
 /// client edits nothing and treats the key as not handled. `candidates` are the visible rows of the vertical window (at most `CAND_MAX`), `candidate_selected` the
 /// selected row among them, `candidate_first` the position of the first row in the whole list and `candidate_total` its length; with no window open
-/// `candidate_selected` is -1, `candidates` is empty and both numbers are 0.
-#[derive(PartialEq)]
+/// `candidate_selected` is -1, `candidates` is empty and both numbers are 0. `pending` (PROTO 4): the host still holds something of the rerank for this
+/// owner, a job queued, running or run and not applied, or an applied snapshot the client has not confirmed; the client polls while it is set.
+#[derive(Clone, PartialEq)]
 pub struct Out {
     pub ran: bool,
     pub core_error: bool,
     pub took_over: bool,
     pub handled: bool,
+    pub pending: bool,
     pub commit: Vec<u16>,
     pub preedit: Vec<u16>,
     pub cursor_utf16: u32,
@@ -118,7 +129,26 @@ pub enum ServerMsg {
     NotReady,
     Busy,
     Out(Out),
-    Pushed(Vec<u8>),
+    Polled(Polled),
+}
+
+/// The answer to a `Poll`. `Idle` with `pending` false is also the fixed answer to anyone who does not own the engine: it says nothing about the owner.
+#[derive(PartialEq)]
+pub struct Polled {
+    /// As `Out.pending`, for the asker only.
+    pub pending: bool,
+    pub what: PollResult,
+}
+
+#[derive(PartialEq)]
+pub enum PollResult {
+    /// Nothing changed and nothing is being computed.
+    Idle,
+    /// A job of the asker is queued or running, or the engine was busy: ask again.
+    Running,
+    /// The rerank changed the composition: the whole composition as it is now (`commit` empty, no window), and the number the next `Poll` hands back
+    /// once the client has written it.
+    Snapshot { snap: u64, out: Out },
 }
 
 // ---- encoding ----
@@ -167,6 +197,7 @@ pub fn encode_client(seq: u64, m: &ClientMsg) -> Option<Vec<u8>> {
         ClientMsg::Key { .. } => T_KEY,
         ClientMsg::Release { .. } => T_RELEASE,
         ClientMsg::Reset { .. } => T_RESET,
+        ClientMsg::Poll { .. } => T_POLL,
     };
     let mut e = Enc::new(PROTO, ty, seq);
     match m {
@@ -182,8 +213,30 @@ pub fn encode_client(seq: u64, m: &ClientMsg) -> Option<Vec<u8>> {
             e.u32(key.modifiers);
         }
         ClientMsg::Release { ctx } | ClientMsg::Reset { ctx } => e.u64(*ctx),
+        ClientMsg::Poll { ctx, snap } => {
+            e.u64(*ctx);
+            e.u64(*snap);
+        }
     }
     e.finish()
+}
+
+fn enc_out(e: &mut Enc, o: &Out) {
+    e.flag(o.ran);
+    e.flag(o.core_error);
+    e.flag(o.took_over);
+    e.flag(o.handled);
+    e.flag(o.pending);
+    e.u32(o.cursor_utf16);
+    e.u32(o.candidate_selected as u32);
+    e.u32(o.candidate_first);
+    e.u32(o.candidate_total);
+    e.text(&o.commit);
+    e.text(&o.preedit);
+    e.u32(o.candidates.len() as u32);
+    for c in &o.candidates {
+        e.text(c);
+    }
 }
 
 pub fn encode_server(seq: u64, m: &ServerMsg) -> Option<Vec<u8>> {
@@ -193,7 +246,7 @@ pub fn encode_server(seq: u64, m: &ServerMsg) -> Option<Vec<u8>> {
         ServerMsg::NotReady => T_NOT_READY,
         ServerMsg::Busy => T_BUSY,
         ServerMsg::Out(_) => T_OUT,
-        ServerMsg::Pushed(_) => T_PUSHED,
+        ServerMsg::Polled(_) => T_POLLED,
     };
     let mut e = Enc::new(PROTO, ty, seq);
     match m {
@@ -203,23 +256,20 @@ pub fn encode_server(seq: u64, m: &ServerMsg) -> Option<Vec<u8>> {
         }
         ServerMsg::Refuse { reason } => e.u32(*reason),
         ServerMsg::NotReady | ServerMsg::Busy => {}
-        ServerMsg::Out(o) => {
-            e.flag(o.ran);
-            e.flag(o.core_error);
-            e.flag(o.took_over);
-            e.flag(o.handled);
-            e.u32(o.cursor_utf16);
-            e.u32(o.candidate_selected as u32);
-            e.u32(o.candidate_first);
-            e.u32(o.candidate_total);
-            e.text(&o.commit);
-            e.text(&o.preedit);
-            e.u32(o.candidates.len() as u32);
-            for c in &o.candidates {
-                e.text(c);
+        ServerMsg::Out(o) => enc_out(&mut e, o),
+        // `kind` (0 idle, 1 running, 2 snapshot), the flag, then for a snapshot its number and the `Out`.
+        ServerMsg::Polled(p) => {
+            e.0.push(match p.what {
+                PollResult::Idle => 0,
+                PollResult::Running => 1,
+                PollResult::Snapshot { .. } => 2,
+            });
+            e.flag(p.pending);
+            if let PollResult::Snapshot { snap, out } = &p.what {
+                e.u64(*snap);
+                enc_out(&mut e, out);
             }
         }
-        ServerMsg::Pushed(b) => e.0.extend_from_slice(b),
     }
     e.finish()
 }
@@ -270,6 +320,22 @@ impl<'a> Dec<'a> {
         }
         (0..n).map(|_| self.text()).collect()
     }
+    fn out(&mut self) -> Option<Out> {
+        Some(Out {
+            ran: self.flag()?,
+            core_error: self.flag()?,
+            took_over: self.flag()?,
+            handled: self.flag()?,
+            pending: self.flag()?,
+            cursor_utf16: self.u32()?,
+            candidate_selected: self.u32()? as i32,
+            candidate_first: self.u32()?,
+            candidate_total: self.u32()?,
+            commit: self.text()?,
+            preedit: self.text()?,
+            candidates: self.texts(CAND_MAX)?,
+        })
+    }
     /// No bytes may be left over.
     fn end<T>(&self, v: T) -> Option<T> {
         self.0.is_empty().then_some(v)
@@ -311,13 +377,14 @@ pub fn decode_client(frame: &[u8]) -> Option<(u64, ClientMsg)> {
         T_KEY => ClientMsg::Key { ctx: d.u64()?, key: Key { kind: d.u32()?, ch: d.u32()?, modifiers: d.u32()? } },
         T_RELEASE => ClientMsg::Release { ctx: d.u64()? },
         T_RESET => ClientMsg::Reset { ctx: d.u64()? },
+        T_POLL => ClientMsg::Poll { ctx: d.u64()?, snap: d.u64()? },
         _ => return None,
     };
     d.end((h.seq, m))
 }
 
 /// A message to the client: only the host types. `Refuse` is read at any protocol version (its layout is frozen); every other type
-/// only at the current one.
+/// only at the current one. `T_PUSHED` is not a type any more: malformed.
 pub fn decode_server(frame: &[u8]) -> Option<(u64, ServerMsg)> {
     let h = header(frame)?;
     if h.proto != PROTO && h.ty != T_REFUSE {
@@ -329,20 +396,18 @@ pub fn decode_server(frame: &[u8]) -> Option<(u64, ServerMsg)> {
         T_REFUSE => ServerMsg::Refuse { reason: d.u32()? },
         T_NOT_READY => ServerMsg::NotReady,
         T_BUSY => ServerMsg::Busy,
-        T_OUT => ServerMsg::Out(Out {
-            ran: d.flag()?,
-            core_error: d.flag()?,
-            took_over: d.flag()?,
-            handled: d.flag()?,
-            cursor_utf16: d.u32()?,
-            candidate_selected: d.u32()? as i32,
-            candidate_first: d.u32()?,
-            candidate_total: d.u32()?,
-            commit: d.text()?,
-            preedit: d.text()?,
-            candidates: d.texts(CAND_MAX)?,
-        }),
-        T_PUSHED => ServerMsg::Pushed(d.take(d.0.len())?.to_vec()),
+        T_OUT => ServerMsg::Out(d.out()?),
+        T_POLLED => {
+            let kind = d.u8()?;
+            let pending = d.flag()?;
+            let what = match kind {
+                0 => PollResult::Idle,
+                1 => PollResult::Running,
+                2 => PollResult::Snapshot { snap: d.u64()?, out: d.out()? },
+                _ => return None,
+            };
+            ServerMsg::Polled(Polled { pending, what })
+        }
         _ => return None,
     };
     d.end((h.seq, m))
@@ -409,6 +474,12 @@ pub fn out_ok(o: &Out) -> bool {
         && o.candidates.iter().all(|c| cand_ok(c))
 }
 
+/// The client's checks of the `Out` inside a `Polled` snapshot, beyond `out_ok` (docs/spec/windows-tip.md §5.3): a rerank only rewrites a composition that is open,
+/// so the snapshot ran, commits nothing, has a composition and no candidate window, and did not come from a change of owner. Anything else is a malformed answer.
+pub fn snapshot_ok(o: &Out) -> bool {
+    out_ok(o) && o.ran && !o.core_error && !o.took_over && o.commit.is_empty() && !o.preedit.is_empty() && o.candidate_selected == -1
+}
+
 /// One candidate text of `out_ok`.
 fn cand_ok(c: &[u16]) -> bool {
     !c.is_empty()
@@ -436,6 +507,7 @@ mod tests {
             core_error: false,
             took_over: true,
             handled: true,
+            pending: true,
             commit: w("你好"),
             preedit: w("ㄋㄧ"),
             cursor_utf16: 2,
@@ -462,7 +534,14 @@ mod tests {
             ClientMsg::Key { ctx: u64::MAX, key: Key { kind: 1, ch: 's' as u32, modifiers: 1 | 2 | 16 } },
             ClientMsg::Release { ctx: 7 },
             ClientMsg::Reset { ctx: 0 },
+            ClientMsg::Poll { ctx: u64::MAX - 1, snap: 0 },
+            ClientMsg::Poll { ctx: 3, snap: u64::MAX },
         ]
+    }
+
+    /// A snapshot as the host sends it: the composition after a rerank, nothing committed, no window.
+    fn snapshot() -> Out {
+        Out { took_over: false, commit: vec![], preedit: w("我等一下再過去"), cursor_utf16: 7, ..out() }
     }
 
     fn servers() -> Vec<ServerMsg> {
@@ -478,8 +557,11 @@ mod tests {
             ServerMsg::Busy,
             ServerMsg::Out(out()),
             ServerMsg::Out(with_candidates),
-            ServerMsg::Pushed(vec![1, 2, 3]),
-            ServerMsg::Pushed(vec![]),
+            ServerMsg::Polled(Polled { pending: false, what: PollResult::Idle }),
+            ServerMsg::Polled(Polled { pending: true, what: PollResult::Idle }),
+            ServerMsg::Polled(Polled { pending: true, what: PollResult::Running }),
+            ServerMsg::Polled(Polled { pending: true, what: PollResult::Snapshot { snap: 1, out: snapshot() } }),
+            ServerMsg::Polled(Polled { pending: false, what: PollResult::Snapshot { snap: u64::MAX, out: snapshot() } }),
         ]
     }
 
@@ -539,18 +621,13 @@ mod tests {
             for cut in HEADER_LEN..f.len() {
                 let mut g = f[..cut].to_vec();
                 g[..4].copy_from_slice(&(cut as u32).to_le_bytes());
-                // A Pushed body is opaque: any length is a Pushed.
-                if !matches!(m, ServerMsg::Pushed(_)) {
-                    assert!(decode_server(&g).is_none(), "a truncated server body is refused");
-                }
+                assert!(decode_server(&g).is_none(), "a truncated server body is refused");
             }
-            if !matches!(m, ServerMsg::Pushed(_)) {
-                let mut g = f.clone();
-                g.push(0);
-                let n = g.len() as u32;
-                g[..4].copy_from_slice(&n.to_le_bytes());
-                assert!(decode_server(&g).is_none(), "a trailing byte is refused");
-            }
+            let mut g = f.clone();
+            g.push(0);
+            let n = g.len() as u32;
+            g[..4].copy_from_slice(&n.to_le_bytes());
+            assert!(decode_server(&g).is_none(), "a trailing byte is refused");
         }
     }
 
@@ -570,8 +647,8 @@ mod tests {
     #[test]
     fn a_string_may_not_run_past_the_body_and_flags_are_zero_or_one() {
         let f = encode_server(1, &ServerMsg::Out(out())).unwrap();
-        // The commit count sits after 4 flags, cursor, selection, first and total: header + 20.
-        let at = HEADER_LEN + 20;
+        // The commit count sits after 5 flags, cursor, selection, first and total: header + 21.
+        let at = HEADER_LEN + 21;
         let mut g = f.clone();
         g[at..at + 4].copy_from_slice(&1000u32.to_le_bytes());
         assert!(decode_server(&g).is_none());
@@ -581,6 +658,13 @@ mod tests {
         let mut g = f.clone();
         g[HEADER_LEN] = 2;
         assert!(decode_server(&g).is_none(), "a flag byte other than 0 or 1");
+        // The fifth flag is `pending`.
+        let mut g = f.clone();
+        assert!(g[HEADER_LEN + 4] == 1, "out() has pending set");
+        g[HEADER_LEN + 4] = 0;
+        assert!(matches!(decode_server(&g), Some((1, ServerMsg::Out(o))) if !o.pending), "pending 0 decodes");
+        g[HEADER_LEN + 4] = 2;
+        assert!(decode_server(&g).is_none(), "a pending byte other than 0 or 1");
         // A candidate count larger than the bytes left.
         let mut g = f.clone();
         let n = g.len();
@@ -621,6 +705,105 @@ mod tests {
         let n = short.len() as u32;
         short[..4].copy_from_slice(&n.to_le_bytes());
         assert!(decode_server(&short).is_none(), "a PROTO 2 shaped Welcome");
+    }
+
+    /// PROTO 4 (docs/spec/windows-tip.md §5.3).
+    #[test]
+    fn proto_4() {
+        assert!(PROTO == 4);
+        // `Refuse` keeps its frozen layout: the header and one u32, no flag.
+        let f = encode_server(7, &ServerMsg::Refuse { reason: REFUSE_PROTO }).unwrap();
+        let mut want = vec![20, 0, 0, 0, 4, 0, 0x82, 0];
+        want.extend_from_slice(&7u64.to_le_bytes());
+        want.extend_from_slice(&1u32.to_le_bytes());
+        assert!(f == want, "the bytes of a Refuse");
+        // A PROTO 3 `Hello` (same layout as today's, version 3 in the header) gets `Refuse { 1 }` from this host; this client reads the `Refuse { 1 }` of a PROTO 3 host.
+        let mut hello = encode_client(9, &ClientMsg::Hello { build_hash: 1, pid: 2, tid: 3 }).unwrap();
+        set_proto(&mut hello, 3);
+        assert!(matches!(HostSession::default().accept(&hello), Accept::VersionMismatch(9)), "a PROTO 3 Hello is a version mismatch");
+        let mut refuse = f.clone();
+        set_proto(&mut refuse, 3);
+        assert!(decode_server(&refuse) == Some((7, ServerMsg::Refuse { reason: REFUSE_PROTO })));
+        // `T_PUSHED` is malformed, whatever its body.
+        for body in [&[][..], &[1, 2, 3][..]] {
+            let mut f = encode_server(1, &ServerMsg::Busy).unwrap();
+            f[6..8].copy_from_slice(&T_PUSHED.to_le_bytes());
+            f.extend_from_slice(body);
+            let n = f.len() as u32;
+            f[..4].copy_from_slice(&n.to_le_bytes());
+            assert!(header(&f).is_some() && decode_server(&f).is_none(), "T_PUSHED is refused");
+            assert!(decode_client(&f).is_none());
+        }
+    }
+
+    /// The `Poll` and its answer (docs/spec/windows-tip.md §5.3).
+    #[test]
+    fn poll_and_polled() {
+        // 16 bytes of body exactly: ctx, snap.
+        let f = encode_client(5, &ClientMsg::Poll { ctx: 0x0102_0304_0506_0708, snap: 9 }).unwrap();
+        assert!(f.len() == HEADER_LEN + 16 && f[6..8] == T_POLL.to_le_bytes());
+        assert!(f[HEADER_LEN..HEADER_LEN + 8] == 0x0102_0304_0506_0708u64.to_le_bytes() && f[HEADER_LEN + 8..] == 9u64.to_le_bytes());
+        assert!(decode_client(&f) == Some((5, ClientMsg::Poll { ctx: 0x0102_0304_0506_0708, snap: 9 })));
+        // Only after the Hello; fine after it, any number of times.
+        assert!(matches!(HostSession::default().accept(&f), Accept::Drop), "a Poll before the Hello drops the connection");
+        let mut s = HostSession::default();
+        assert!(matches!(s.accept(&encode_client(1, &clients().remove(0)).unwrap()), Accept::Msg(..)));
+        assert!(matches!(s.accept(&f), Accept::Msg(5, ClientMsg::Poll { .. })) && matches!(s.accept(&f), Accept::Msg(5, ClientMsg::Poll { .. })));
+        // The fixed answer to a non-owner: two body bytes, both 0; only the seq differs between two of them.
+        let idle = |seq| encode_server(seq, &ServerMsg::Polled(Polled { pending: false, what: PollResult::Idle })).unwrap();
+        let (a, b) = (idle(1), idle(u64::MAX));
+        assert!(a.len() == HEADER_LEN + 2 && a[HEADER_LEN..] == [0, 0] && a[..8] == b[..8] && a[HEADER_LEN..] == b[HEADER_LEN..]);
+        // A kind other than 0, 1, 2, a flag other than 0 or 1, a snapshot without its body, an idle answer with one.
+        let mut g = a.clone();
+        g[HEADER_LEN] = 3;
+        assert!(decode_server(&g).is_none(), "kind 3");
+        let mut g = a.clone();
+        g[HEADER_LEN + 1] = 2;
+        assert!(decode_server(&g).is_none(), "pending 2");
+        let mut g = a.clone();
+        g[HEADER_LEN] = 2;
+        assert!(decode_server(&g).is_none(), "a snapshot with no number and no Out");
+        let snap = encode_server(1, &ServerMsg::Polled(Polled { pending: true, what: PollResult::Snapshot { snap: 4, out: snapshot() } })).unwrap();
+        let mut g = snap.clone();
+        g[HEADER_LEN] = 0;
+        assert!(decode_server(&g).is_none(), "an idle answer with bytes left over");
+        assert!(matches!(decode_server(&snap), Some((1, ServerMsg::Polled(Polled { pending: true, what: PollResult::Snapshot { snap: 4, out } }))) if out == snapshot()));
+    }
+
+    /// What the client accepts as the composition after a rerank.
+    #[test]
+    fn the_client_checks_of_a_snapshot() {
+        assert!(snapshot_ok(&snapshot()));
+        let bad: [fn(&mut Out); 8] = [
+            |o| o.commit = w("你"),
+            |o| {
+                o.preedit = vec![];
+                o.cursor_utf16 = 0;
+            },
+            |o| {
+                o.candidates = vec![w("你")];
+                o.candidate_selected = 0;
+                o.candidate_total = 1;
+            },
+            |o| o.ran = false,
+            |o| o.core_error = true,
+            |o| o.took_over = true,
+            |o| o.cursor_utf16 = 99,
+            |o| {
+                o.preedit = w("我\n");
+                o.cursor_utf16 = 0;
+            },
+        ];
+        for (i, f) in bad.iter().enumerate() {
+            let mut o = snapshot();
+            f(&mut o);
+            assert!(!snapshot_ok(&o), "bad snapshot {i}");
+        }
+        // `handled` and `pending` are not part of the check.
+        let mut o = snapshot();
+        o.handled = false;
+        o.pending = false;
+        assert!(snapshot_ok(&o));
     }
 
     #[test]
@@ -763,8 +946,12 @@ mod tests {
         let _ = decode_client(f);
         let _ = decode_server(f);
         let _ = HostSession::default().accept(f);
-        if let Some((_, ServerMsg::Out(o))) = decode_server(f) {
-            let _ = out_ok(&o);
+        match decode_server(f) {
+            Some((_, ServerMsg::Out(o))) | Some((_, ServerMsg::Polled(Polled { what: PollResult::Snapshot { out: o, .. }, .. }))) => {
+                let _ = out_ok(&o);
+                let _ = snapshot_ok(&o);
+            }
+            _ => {}
         }
         if f.len() >= 4 {
             let _ = frame_len(f[..4].try_into().unwrap());
