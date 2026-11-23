@@ -19,4 +19,3 @@ debug	1	core/engine_lm
 debug	1	core/engine_learn
 debug	1	core/engine_share
 debug	1	core/engine_replay
-macos	shard	core/engine_lm
