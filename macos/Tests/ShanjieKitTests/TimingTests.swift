@@ -5,7 +5,8 @@ import XCTest
 @testable import ShanjieKit
 
 /// docs/spec/semantic-rerank.md §8.6: the timing build's events. Compiled and run only with `-DSHANJIE_TIMING` (`make test-swift-timing`).
-/// The shell tests read `Timing.shared` themselves: no test starts the flushing queue, so nothing reaches the unified log.
+/// The shell tests read `Timing.shared` themselves. Only `testTheTimerFlushesOffTheMainThread` runs a flush timer, for well under
+/// a second, so a test run writes a few integer lines to the unified log under the timing subsystem.
 @MainActor
 final class TimingTests: XCTestCase {
     private typealias Event = TimingBuffer.Event
@@ -222,18 +223,20 @@ final class TimingTests: XCTestCase {
         checkPairs(e)
     }
 
-    /// The timer's handler runs on a background queue: it must not carry the main actor's isolation (Swift 6 traps when a
-    /// main-actor closure runs off the main thread; the first VM run of the timing build crashed there at launch).
-    func testTheFlushRunsOffTheMainThread() {
+    /// The timer `start()` builds fires its handler on a background queue: the handler must not carry the main actor's
+    /// isolation (Swift 6 traps when a main-actor closure runs off the main thread; the first VM run of the timing build crashed
+    /// there at launch). With a closure in `makeTimer` this test process traps instead of passing.
+    func testTheTimerFlushesOffTheMainThread() {
         _ = Timing.shared.drain()
         Timing.keyEnd(Timing.keyBegin())
-        let done = expectation(description: "flushed on a background queue")
-        DispatchQueue(label: "timing-test", qos: .background).async {
-            Timing.flushTick()
-            done.fulfill()
+        let t = Timing.makeTimer(after: 0.01, every: 0.05)
+        defer { t.cancel() }
+        let flushed = expectation(description: "the timer took the events")
+        func poll() {
+            if Timing.shared.pending == 0 { flushed.fulfill() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: poll) }
         }
-        wait(for: [done], timeout: 5)
-        XCTAssertTrue(Timing.shared.drain().isEmpty, "the background flush took the events")
+        poll()
+        wait(for: [flushed], timeout: 5)
     }
 
     /// The app's queue runner: the applied job has its take, start, run and end in that order, with run's code 0.

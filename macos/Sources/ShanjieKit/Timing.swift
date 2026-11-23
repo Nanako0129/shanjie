@@ -69,6 +69,9 @@ final class TimingBuffer: @unchecked Sendable {
         return body()
     }
 
+    /// Events waiting for the next drain (tests watch the timer take them).
+    var pending: Int { locked { count } }
+
     /// Takes what was written so far. The lock is held for a pointer swap only; the copy is made outside it. One caller at a time.
     func drain() -> [Event] {
         let (taken, n) = locked { () -> (UnsafeMutablePointer<Event>, Int) in
@@ -190,13 +193,18 @@ public enum Timing {
     @MainActor public static func start() {
         guard timer == nil else { return }
         _ = shared  // allocate the buffers here, not on the first key
+        timer = makeTimer(after: 2, every: 2)
+    }
+
+    /// The running flush timer, built on the main actor like `start()` builds it; `testTheTimerFlushesOffTheMainThread` runs one.
+    @MainActor static func makeTimer(after first: Double, every interval: Double) -> DispatchSourceTimer {
         let t = DispatchSource.makeTimerSource(queue: flushQueue)
-        t.schedule(deadline: .now() + 2, repeating: 2.0)
+        t.schedule(deadline: .now() + first, repeating: interval)
         // The handler runs on flushQueue. A closure written here would inherit the main actor's isolation, and Swift 6
         // traps when it runs off the main thread (the first VM run crashed in dispatch_assert_queue): pass a nonisolated function.
         t.setEventHandler(handler: flushTick)
         t.resume()
-        timer = t
+        return t
     }
 
     /// One drain of the buffer into the unified log; runs on flushQueue, never on the main actor.
