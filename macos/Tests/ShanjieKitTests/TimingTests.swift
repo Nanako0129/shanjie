@@ -222,6 +222,20 @@ final class TimingTests: XCTestCase {
         checkPairs(e)
     }
 
+    /// The timer's handler runs on a background queue: it must not carry the main actor's isolation (Swift 6 traps when a
+    /// main-actor closure runs off the main thread; the first VM run of the timing build crashed there at launch).
+    func testTheFlushRunsOffTheMainThread() {
+        _ = Timing.shared.drain()
+        Timing.keyEnd(Timing.keyBegin())
+        let done = expectation(description: "flushed on a background queue")
+        DispatchQueue(label: "timing-test", qos: .background).async {
+            Timing.flushTick()
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        XCTAssertTrue(Timing.shared.drain().isEmpty, "the background flush took the events")
+    }
+
     /// The app's queue runner: the applied job has its take, start, run and end in that order, with run's code 0.
     func testQueueRunnerWritesStartAndRunAroundTheJob() throws {
         _ = Timing.shared.drain()

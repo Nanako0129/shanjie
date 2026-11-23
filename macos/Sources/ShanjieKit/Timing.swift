@@ -189,11 +189,17 @@ public enum Timing {
     /// the main thread and the rerank queue never wait for this queue.
     @MainActor public static func start() {
         guard timer == nil else { return }
+        _ = shared  // allocate the buffers here, not on the first key
         let t = DispatchSource.makeTimerSource(queue: flushQueue)
         t.schedule(deadline: .now() + 2, repeating: 2.0)
-        t.setEventHandler { shared.flush { line in logger.notice("\(line, privacy: .public)") } }
+        // The handler runs on flushQueue. A closure written here would inherit the main actor's isolation, and Swift 6
+        // traps when it runs off the main thread (the first VM run crashed in dispatch_assert_queue): pass a nonisolated function.
+        t.setEventHandler(handler: flushTick)
         t.resume()
         timer = t
     }
+
+    /// One drain of the buffer into the unified log; runs on flushQueue, never on the main actor.
+    nonisolated static func flushTick() { shared.flush { line in logger.notice("\(line, privacy: .public)") } }
 }
 #endif
