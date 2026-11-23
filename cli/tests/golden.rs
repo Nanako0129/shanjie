@@ -466,8 +466,11 @@ fn predict_no_kn_scores_differently_from_the_golden() {
 /// which fixed row 4 `米雅歌` in formal at standard and aggressive strength (the rerank used to pick 米亞哥; measured 2026-10-27 on the final files).
 /// Measured 2026-10-27 on the final files (`rowstats`, i.e. after the rerank; chat is run without and with `--colloquial-core`, the two rerank paths) and pinned
 /// exactly, so any other row dropping, or a miss going away, fails here; the remaining misses are not the rerank's (their `--tinylm-scores` rows have `c` 0):
-/// formal row 8 `米雅歌唱得很好` at all three strengths (the n-gram's first is already 米亞歌唱得很好; known since classes-v5, μ 0.8 → 0.2, docs/spec/models.md §5.2)
-/// and chat row 8 at conservative strength without the colloquial table (the n-gram's first holds 米雅歌 but reads 唱的, not 唱得; the mask removed the other six candidates).
+/// chat row 8 `米雅歌唱得很好` without the colloquial table (the n-gram's first holds 米雅歌 but reads 唱的, not 唱得; the mask removed six of the other seven candidates).
+/// Measured again 2026-11-23 on the 會意 SJ-SR-10-31M file (`target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile P --context --packs acg --tinylm
+/// data/lm/tinylm.sjtl --rerank-level L [--colloquial-core data/lm/colloquial.sjlm] --rows eval/golden/manual-words-rows.txt --tinylm-scores OUT --dump OUT2`):
+/// that chat miss is now at all three strengths (`c` 0 each time; with the 會意 SJ-SR-8-15M file only at conservative), and formal has none (row 8 was missed at all
+/// three strengths with the earlier file).
 #[test]
 fn manual_words_come_first_in_the_shipping_setting() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
@@ -479,9 +482,9 @@ fn manual_words_come_first_in_the_shipping_setting() {
     let none: Vec<&str> = vec![];
     // (profile, with the colloquial table, [conservative, standard, aggressive] misses)
     let settings = [
-        ("chat", false, [vec!["8"], none.clone(), none.clone()]),
+        ("chat", false, [vec!["8"], vec!["8"], vec!["8"]]),
         ("chat", true, [none.clone(), none.clone(), none.clone()]),
-        ("formal", false, [vec!["8"], vec!["8"], vec!["8"]]),
+        ("formal", false, [none.clone(), none.clone(), none.clone()]),
     ];
     for (profile, with_colloquial, per_level) in settings {
         for (level, misses) in ["conservative", "standard", "aggressive"].into_iter().zip(per_level) {

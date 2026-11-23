@@ -1,6 +1,6 @@
 # 資料與模型授權清單
 
-每個檔一列：來源類型與規模／授權／署名。程式碼是 Apache-2.0。「隨 App 內附」指檔案或其衍生檔放進 App 的 `Resources/`；沒有寫的檔是建置輸入或評測資料，不隨 App 內附。
+每個檔一列：來源類型與規模／授權／署名。程式碼是 Apache-2.0。「隨 App 內附」指檔案或其衍生檔放進 macOS App 的 `Resources/`；Windows 安裝程式（MSI）帶哪些檔，見最後的「Windows 安裝程式」一節。兩邊都沒有帶的檔是建置輸入或評測資料，不隨安裝檔內附。
 
 通用的署名：Wikipedia 與 Wiktionary 貢獻者（CC BY-SA 4.0，https://creativecommons.org/licenses/by-sa/4.0/ ）。
 
@@ -62,7 +62,7 @@
 | `data/lm/kn.sjkn`（Release `sj-kn-2-397k`，承接 SJ-KN-2-397K） | 由 `tools/kn_cont.py` 從和 `bigram.sjlm` 同一批計數算出的 Kneser–Ney 接續次數，只配 `sj-lm-7-9.7m` | CC BY-SA 4.0（來源同 `bigram.sjlm`） | Wikipedia contributors、Tatoeba contributors |
 | `data/lm/trigram.sjt3`（Release `sj-cx-2-7.7m`，連文 SJ-CX-2-7.7M） | 書面設定用的 trigram 表：由維基百科與口語池（Mozilla Common Voice、Tatoeba、合成句；不含 g0v 與論壇）的計數，相對熵剪枝後重新對應到 `sj-lm-7-9.7m` 的詞 id（`tools/build_trigram.py`） | CC BY-SA 4.0（來源同 `bigram.sjlm`） | Wikipedia contributors、Tatoeba contributors |
 | `data/lm/trigram-chat.sjt3`（Release `sj-cx-2-950k`，連文 SJ-CX-2-950K） | 聊天設定用的 trigram 表：由和 `bigram.sjlm` 同一批語料（維基百科、口語語料，含 g0v `#rand0m` 與台灣公開論壇的文章與推文，只用於詞頻計數，不含原文）的計數，相對熵剪枝成 950,000 條，重新對應到 `sj-lm-7-9.7m` 的詞 id | CC BY-SA 4.0（來源同 `bigram.sjlm`） | Wikipedia contributors、Tatoeba contributors |
-| `data/lm/tinylm.sjtl`（Release `sj-sr-8-15m`，會意 SJ-SR-8-15M） | 「語意校正」用的小型字元語言模型，格式 SJTL0004，權重 int8。訓練文字和 `bigram.sjlm` 同類：中文維基百科 2026-10-01 dump 的前 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句、g0v Slack `#rand0m` 頻道的公開訊息、台灣公開論壇的文章與推文，以及 OPUS OpenSubtitles v2018 繁體字幕（清理後 4,432,866 句）；都只用於訓練，不含原文，繁體句不套 OpenCC `TWPhrases` | **CC BY-SA 4.0**（來源同 `bigram.sjlm`）；OpenSubtitles 只用於訓練，字幕文字不在檔案內，照 OPUS 的要求引用 P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles, LREC 2016 | Wikipedia contributors、Tatoeba contributors；OpenSubtitles（Lison and Tiedemann 2016，http://www.opensubtitles.org/ ） |
+| `data/lm/tinylm.sjtl`（Release `sj-sr-10-31m`，會意 SJ-SR-10-31M） | 「語意校正」用的小型字元語言模型，格式 SJTL0006，權重 int8。訓練文字和 `bigram.sjlm` 同類：中文維基百科 2026-10-01 dump 的前 20 萬篇條目、Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句、g0v Slack `#rand0m` 頻道的公開訊息、台灣公開論壇的文章與推文，以及 OPUS OpenSubtitles v2018 繁體字幕（清理後 4,432,866 句）；都只用於訓練，不含原文，繁體句不套 OpenCC `TWPhrases` | **CC BY-SA 4.0**（來源同 `bigram.sjlm`）；OpenSubtitles 只用於訓練，字幕文字不在檔案內，照 OPUS 的要求引用 P. Lison and J. Tiedemann, 2016, OpenSubtitles2016: Extracting Large Parallel Corpora from Movie and TV Subtitles, LREC 2016 | Wikipedia contributors、Tatoeba contributors；OpenSubtitles（Lison and Tiedemann 2016，http://www.opensubtitles.org/ ） |
 | `data/lm/colloquial.sjlm`（Release `sj-cl-2-69k`，常談 SJ-CL-2-69K） | 聊天設定的語意校正多參考的口語詞頻表，只有詞與詞對的次數、沒有句子文字，由 `tools/build_lm.py --corpora` 產生：(1) `sj-lm-7-9.7m` 計數詞表下的口語計數（Mozilla Common Voice 繁中（台灣）句子、Tatoeba 中文句子、gpt-oss-120b 產生的台灣口語合成句；不含 g0v 與論壇）；(2) 一份 143,895 句的公開口語池（約 300 萬漢字，已對公開評測集去重）：WildChat-1M 台灣子集 3,491 句（allenai/WildChat-1M，Allen Institute for AI）、YODAS zh000 繁體字幕 90,080 句（espnet/yodas，1,138 支 CC BY YouTube 影片的字幕）、Tatoeba 繁體中文句 36,839 句（208 位作者）、MASSIVE zh-TW 13,485 句（AmazonScience/massive，Amazon.com Inc.） | **CC BY-SA 4.0**（來源同 `bigram.sjlm`）。口語池四個來源：WildChat-1M ODC-BY 1.0（https://opendatacommons.org/licenses/by/1-0/ ）、YODAS CC BY 3.0（https://creativecommons.org/licenses/by/3.0/ ）、Tatoeba CC BY 2.0 FR（https://creativecommons.org/licenses/by/2.0/fr/ ）、MASSIVE CC BY 4.0（https://creativecommons.org/licenses/by/4.0/ ）；四個都只要求署名，可以併進 BY-SA | Tatoeba contributors 與上面口語池的四個來源；逐支影片與逐句的署名在 `colloquial-attribution.tsv`（下一列），App 的 `Resources/LICENSES/CC-BY-SA-4.0-attribution.txt` 與資料 Release 的 NOTICE 列出全部。YODAS 只給影片 id，照資料集提供的內容署名：資料集名稱、授權、影片 id、網址、句數 |
 | `data/lm/colloquial-attribution.tsv`（`sj-cl-2-69k` 的另一個附件，雜湊在 `data/colloquial-attribution.tsv.sha256`） | 由 `tools/build_attribution.py` 從口語池的來源欄位產生：每個來源單位一列（YODAS 影片 id 與影片網址、Tatoeba 句子 id 與作者、WildChat 與 MASSIVE 的資料集出處與授權）與涵蓋的句數，不含句子文字。隨 App 打包（`Resources/LICENSES/colloquial-attribution.tsv`），也是資料 Release 的附件 | 整份清單跟著 `colloquial.sjlm` 以 **CC BY-SA 4.0** 散布 | 作者與影片 id 是 CC BY 系列授權要求的署名資訊，原樣沿用資料集提供的內容 |
 
@@ -102,5 +102,21 @@
 
 | 路徑 | 來源類型與規模 | 授權 | 署名 |
 |---|---|---|---|
-| `packaging/AppIcon.icon/`（App 與安裝程式的圖示） | 本專案的設計；圖層 `glyph.svg` 的「解」是 Noto Serif CJK TC Black（Adobe／Google）的字形外框，由 `scripts/make-app-icon.swift` 轉成路徑；字型檔不進 repo、不隨 App 內附 | 圖示：Apache-2.0（和專案程式一致）；字型：SIL Open Font License 1.1。OFL FAQ 1.1 允許把字型用在 logo 與設計，1.13 寫明用字型做出的圖不受 OFL 約束（https://openfontlicense.org/ofl-faq/ ） | Noto Serif CJK TC（Adobe／Google） |
+| `packaging/AppIcon.icon/`（macOS App 與 macOS 安裝程式的圖示） | 本專案的設計；圖層 `glyph.svg` 的「解」是 Noto Serif CJK TC Black（Adobe／Google）的字形外框，由 `scripts/make-app-icon.swift` 轉成路徑；字型檔不進 repo、不隨 App 內附 | 圖示：Apache-2.0（和專案程式一致）；字型：SIL Open Font License 1.1。OFL FAQ 1.1 允許把字型用在 logo 與設計，1.13 寫明用字型做出的圖不受 OFL 約束（https://openfontlicense.org/ofl-faq/ ） | Noto Serif CJK TC（Adobe／Google） |
 | 執行期模型（S5 起） | Gemma 4 E2B 等；不隨安裝檔散布，第一次啟用時下載並顯示授權 | 各自授權（Gemma 4：Apache-2.0） | — |
+
+## Windows 安裝程式（MSI）
+
+Windows 安裝程式裝在 `C:\Program Files\Shanjie\`。檔案本身和 macOS App 帶的是同一批，來源、授權、署名都以上面各列為準；這一節只列 MSI 帶哪些檔。清單的唯一來源是 `windows/installer/shanjie.wxs`，`scripts/windows/check-msi.ps1` 逐一核對（`docs/spec/windows-tip.md` §6.2、§6.9）。
+
+| 位置（相對於安裝資料夾） | 檔案 | 授權與署名 |
+|---|---|---|
+| 根 | `shanjie_tip.dll`、`shanjie-host.exe` | 程式碼 Apache-2.0；靜態連結進去的 Rust 標準函式庫與 `windows`、`windows-core`、`windows-sys` 等套件是 MIT 或 Apache-2.0，寫在署名檔（見下） |
+| 根 | `LICENSE` | Apache-2.0 |
+| `data\lexicon\` | `mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`、`std-exempt.tsv`、`rerank-protect.tsv`、`digits.tsv`、`mixed-words.tsv` | 各檔的列在「詞庫與詞包」 |
+| `data\packs\` | `acg-add.tsv`、`acg-sources.tsv`、`acg.json`、`it-add.tsv`、`it-sources.tsv`、`it.json` | 各檔的列在「詞庫與詞包」 |
+| `data\lm\` | `bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm` | 各檔的列在「模型檔」 |
+| `LICENSES\` | `McBopomofo-MIT.txt`、`data.md`（本檔，原樣）、`name-suggestion-index-BSD-3-Clause.txt`、`colloquial-attribution.tsv`、`CC-BY-SA-4.0-attribution.txt` | 同 macOS App 的 `Resources/LICENSES/` 裡同名的檔 |
+
+- `LICENSES\CC-BY-SA-4.0-attribution.txt` 在建置時產生（`scripts/windows/build-msi.ps1`）：內容是 `scripts/build-app.sh` 寫同名檔的那一段，拿掉 Windows 版沒有的檔（迷因詞包的三個檔名與它那一段、`english.tsv`），其餘的檔案清單與各來源的署名和 macOS App 相同；另加一段，點名靜態連結進 DLL 與 exe 的 Rust 套件（`windows`、`windows-core`、`windows-sys` 與它們用到的其他 `windows-*` 套件、標準函式庫，MIT 或 Apache-2.0）；最後接 name-suggestion-index 的聲明全文。
+- 和 macOS App 的差別：沒有美妝詞包與經典台詞詞包（兩者都是 CC0）、沒有迷因詞包、沒有 `english.tsv`（Windows 版的常駐程序不開英文比較）、沒有 Sparkle 的授權檔（Windows 版沒有 Sparkle）、沒有 `models.tsv`。

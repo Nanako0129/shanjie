@@ -58,9 +58,12 @@ test-python:
 	python3 tools/gen_meme_embedded.py --check eval/dev/meme/words-all.txt eval/dev/meme/embedded.txt
 	python3 -W ignore -m unittest tools/test_build_lm.py tools/test_extra_lexicon.py
 	python3 -m unittest tools/test_export_sjtl.py
+	python3 -m unittest tools/test_fusegrid.py
 	python3 -W ignore -m unittest tools/test_kn_cont.py tools/test_extra_overlay.py
 	python3 -W ignore -m unittest tools/test_evalstats.py
 	python3 -m unittest tools/test_bench.py
+	# docs/spec/release-and-ci.md §8: the parsers, the input check and the verdict of the latency workflow's script.
+	python3 scripts/ci/latency_gate.py --self-test
 	python3 -m unittest tools/test_std_exempt.py
 	python3 -W ignore -m unittest tools/test_kpi.py
 	python3 -m unittest tools/test_build_english_words.py

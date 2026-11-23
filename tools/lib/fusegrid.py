@@ -38,11 +38,14 @@ LL_CHANGED = 1e-6                                  # a candidate's LL counts as 
 # ------------------------------------------------------------------ pure functions
 def pick(r, alpha, tau, col="ll", delta=0):
     """Index of the chosen candidate. Rerank only when the n-gram margin (first minus second) is < tau; ties go to the better n-gram rank.
-    S7e: the fused winner replaces the first only if its fused score is at least `delta` above the first's (0: always, as before)."""
+    S7e: the fused winner replaces the first only if its fused score is at least `delta` above the first's (0: always, as before).
+    A candidate the record's `masked` lists (`--tinylm-scores`; absent or empty: none) cannot be chosen, as in core/src/tinylm.rs `pick_masked`:
+    the threshold and every score are those of the whole list, and the first candidate is never masked."""
     if r["n"] < 2 or r["ng"][0] - r["ng"][1] >= tau:
         return 0
+    masked = set(r.get("masked", ()))
     s = [g + alpha * l for g, l in zip(r["ng"], r[col])]
-    j = max(range(len(s)), key=lambda i: (s[i], -i))
+    j = max((i for i in range(len(s)) if i == 0 or i not in masked), key=lambda i: (s[i], -i))
     return j if s[j] - s[0] >= delta else 0
 
 

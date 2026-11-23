@@ -98,7 +98,10 @@ fn row25(dir: &Path) -> String {
 /// before that, from the binary that had no option at all, on the model-v6 files). The dump, words and rowstats hashes are those of 2026-10-27 still with the
 /// 會意 SJ-SR-8-15M file (the n-gram's candidates and the plain rerank's picks on these 16 rows do not change); the scores and the summary line carry the new
 /// small model's numbers and its `tl:` tag, so their hashes were taken again on 2026-11-06 from this binary and checked equal to the same run of main's binary
-/// (the one built before SR-TW, which has no colloquial default and no cell change in this path) on the same `data/lm/tinylm.sjtl`.
+/// (the one built before SR-TW, which has no colloquial default and no cell change in this path) on the same `data/lm/tinylm.sjtl`. With the 會意
+/// SJ-SR-10-31M file (2026-11-23) the dump, words and rowstats hashes are still those of 2026-10-27; the scores and the summary line (new LLs, `+tl:ee109fb2+sep:4`)
+/// were taken again from this binary and are byte for byte those of main's binary (0729130c, the tree before the model switch) run with the same
+/// arguments on the same new file.
 // macOS only: the dump and scores carry f64 values that the Linux libm rounds differently in the last bit (the WSL runner skips the existing
 // tests of that kind too); this is the one check against the binary from before the option existed.
 #[cfg(target_os = "macos")]
@@ -113,11 +116,11 @@ fn no_option_is_byte_identical_to_before() {
     assert_eq!(h(&o.words), "5c8e89a037daa1056ac9295d95995c8504c70a529272621cc45dcaf312a26bc9");
     assert_eq!(h(&o.rs), "a795b9d2c943e64587906438de9439fc5302cff79341a63684328ba44f9b960b");
     // The scores gained a `masked` field in docs/spec/decoder.md §7 (empty on every one of these 16 rows); without it they are what they were.
-    assert_eq!(h(&o.sc), "729efe518ebc940400134b92d7e3a9d263de9dc4e3595ae780dab70b9bb9983d");
-    assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "0a8e3d25171398c95806afe96ec6b781c89174f7422947ce69a06b52bf81800c");
+    assert_eq!(h(&o.sc), "30fd932f7a00ba59862b4bd24a5a1c07b97b17ffdd0e704a92605ecd2b62d040");
+    assert_eq!(h(&o.sc.replace(", \"masked\": []", "")), "33cd6098c279955602420d68844fdfb3f1b062f39ea1909de9181c6acdabd038");
     // The summary line carries the model tags; with the fingerprint entries (new bigram, kn and tinylm hashes) only those 8-character tags changed
     // (the old hash 03876095… is this line with the old tags put back).
-    assert_eq!(h(&o.stdout), "bcbd01639fc673ad390e1e2a9609cae9674a3f3bd8bdd8c141afdd473e83e2f7");
+    assert_eq!(h(&o.stdout), "1ace393106b98f690cc4eac440bbac6c054add130f32df2833fc8510235e89b5");
 }
 
 /// The acceptance row: the shipping rerank keeps `城市` (c 0; it was row 202, 羅斯松 against 螺絲鬆, until 通語 SJ-LM-7-9.7M, whose n-gram gets that one right), the
@@ -184,25 +187,27 @@ fn nothing_changes_elsewhere() {
     }
 }
 
-/// Four public rows: 25, 119 and 22 of eval/bench/suite-v1/dev302.txt, 19 of eval/dev/user-reported.txt.
+/// Four public rows: 25, 67 and 22 of eval/bench/suite-v1/dev302.txt, 19 of eval/dev/user-reported.txt.
 fn level_rows(dir: &Path) -> String {
     let dev = std::fs::read_to_string(root().join("eval/bench/suite-v1/dev302.txt")).unwrap();
     let user = std::fs::read_to_string(root().join("eval/dev/user-reported.txt")).unwrap();
     let (dev, user): (Vec<&str>, Vec<&str>) = (dev.lines().collect(), user.lines().collect());
-    let rows = [dev[24], dev[118], dev[21], user[18]];
-    assert!(rows[0].starts_with("|執行這個程式|") && rows[1].starts_with("|政府決定廢止這項舊規定|") && rows[2].starts_with("|台北是一個很大的城市|") && rows[3].starts_with("|打開診斷頁閃退|"));
+    let rows = [dev[24], dev[66], dev[21], user[18]];
+    assert!(rows[0].starts_with("|執行這個程式|") && rows[1].starts_with("|他說得很有道理|") && rows[2].starts_with("|台北是一個很大的城市|") && rows[3].starts_with("|打開診斷頁閃退|"));
     let p = dir.join("level-rows.txt");
     std::fs::write(&p, rows.join("\n") + "\n").unwrap();
     p.to_string_lossy().into_owned()
 }
 
 /// docs/spec/semantic-rerank.md §4.4: with `--colloquial-core` the terms apply at every strength, each with its own (alpha, tau, delta), and the summary
-/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:…+rm+rn`). The picks are those the CLI gives on the final 會意 SJ-SR-8-15M
-/// file with the cells of docs/spec/semantic-rerank.md §4.4 (measured 2026-11-06 with `--rows` over the four rows, `--tinylm-scores` `c`; the cell arithmetic itself is
-/// `core/src/colloquial.rs`'s unit tests): standard (1.1, 2, 0) [1, 5, 2, 3]; conservative (1.3, 2, 1) keeps the n-gram first on rows 25 and 22 of dev302 where
-/// the standard cell picks 1 and 2 (the conservative delta), and picks the standard's 5 and 3 on the other two; aggressive is the standard cell, so the same
-/// [1, 5, 2, 3]. The header triple without the term picks [0, 0, 0, 3] at every strength (only the user-reported row is right without it), so the term changes
-/// the pick of all three dev302 rows at standard and aggressive and of row 119 at conservative.
+/// tag says so (`+colloq:`, after `+rl:` at the other two; then the reading term's `+rd+rx:…+rm+rn`). The picks are those the CLI gives on the final 會意 SJ-SR-10-31M
+/// file with the cells of docs/spec/semantic-rerank.md §4.4 (measured 2026-11-23: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile chat --context
+/// --packs acg --tinylm data/lm/tinylm.sjtl --rerank-level L [--colloquial-core data/lm/colloquial.sjlm] --rows <set> --tinylm-scores OUT` over dev302 and
+/// user-reported, the rows' `c`; the cell arithmetic itself is `core/src/colloquial.rs`'s unit tests): standard (1.4, 2, 0) [1, 1, 2, 3]; conservative (1.2, 2, 1)
+/// keeps the n-gram first on rows 25 and 22 of dev302 where the standard cell picks 1 and 2 (the conservative delta), and picks the standard's 1 and 3 on the other
+/// two; aggressive is the standard cell, so the same [1, 1, 2, 3]. The header triple without the term picks [0, 0, 0, 3] at the conservative and the aggressive
+/// strength (only the user-reported row is right without it), so the term changes the pick of all three dev302 rows at aggressive and of row 67 at conservative.
+/// (Row 67 replaces row 119, 舊規定, of the 會意 SJ-SR-8-15M version: the conservative cell now keeps the n-gram first there, with and without the term.)
 #[test]
 fn the_term_applies_at_every_strength() {
     let d = tmp("lvrows");
@@ -210,9 +215,9 @@ fn the_term_applies_at_every_strength() {
     let set = ["--rows", rows.as_str()];
     let mut by_level = Vec::new();
     for (i, (level, with, without)) in [
-        ("standard", vec![1, 5, 2, 3], None),
-        ("conservative", vec![0, 5, 0, 3], Some(vec![0, 0, 0, 3])),
-        ("aggressive", vec![1, 5, 2, 3], Some(vec![0, 0, 0, 3])),
+        ("standard", vec![1, 1, 2, 3], None),
+        ("conservative", vec![0, 1, 0, 3], Some(vec![0, 0, 0, 3])),
+        ("aggressive", vec![1, 1, 2, 3], Some(vec![0, 0, 0, 3])),
     ]
     .into_iter()
     .enumerate()

@@ -36,12 +36,13 @@
 | 3 | `SJTL0003` | 212 | 同版本 2，之後四組 f64 (α, τ, δ)：116 聊天保守、140 聊天積極、164 書面保守、188 書面積極；標準組是偏移 36–60 與 100、108 |
 | 4 | `SJTL0004` | 244 | 同版本 3，偏移 212 起 32 bytes：調參時用的 Kneser–Ney 側檔（`kn.sjkn`）的 SHA-256；全 0 表示調參時沒開 KN |
 | 5 | `SJTL0005` | 248 | 同版本 4，偏移 244 一個 u32：宣告的前文長度 L（字元數，1 ≤ L ≤ ctx − 2，越界拒絕載入）。版本 1 到 4 沒有宣告 |
+| 6 | `SJTL0006` | 256 | 同版本 5，偏移 248 一個 u32：格式旗標（bit 0＝邊界格式，其他位元必須是 0，否則拒絕載入）；偏移 252 一個 u32：政策鍵的門檻 K（漢字數；bit 0 為 1 時 1 ≤ K ≤ ctx − 2，bit 0 為 0 時必須是 0；越界拒絕載入）。bit 0 為 1 時字表只有 V − 4 個碼位，id V − 1 是 `[SEP]`（不在碼位清單裡）；bit 0 為 0 時字表同版本 5 |
 
-檔頭之後：字表 (V − 3) 個 u32 Unicode 碼位（id 3 起；id 0、1、2 是 PAD、UNK、BOS）；再來是張量，順序固定：`emb`(V, d)、`pos`(ctx, d)、`lnf_w`(d)、`lnf_b`(d)，然後每層依序 `ln1_w`、`ln1_b`、`qkv_w`(d, 3d)、`qkv_b`、`proj_w`(d, d)、`proj_b`、`ln2_w`、`ln2_b`、`fc1_w`(d, 4d)、`fc1_b`、`fc2_w`(4d, d)、`fc2_b`。二維矩陣：f32 型別照原樣，int8 型別是每列 int8 加一個 f32 縮放（每列對稱量化，縮放 = max(|列|, 1e-12) / 127，還原為 `q as f32 * scale`）；一維向量一律 f32。
+檔頭之後：字表 (V − 3) 個 u32 Unicode 碼位（id 3 起；id 0、1、2 是 PAD、UNK、BOS；版本 6 的邊界格式是 V − 4 個，id V − 1 是 `[SEP]`，所以 `[SEP]` 的 id ＝ 字數 + 3，和訓練端相同）；再來是張量，順序固定：`emb`(V, d)、`pos`(ctx, d)、`lnf_w`(d)、`lnf_b`(d)，然後每層依序 `ln1_w`、`ln1_b`、`qkv_w`(d, 3d)、`qkv_b`、`proj_w`(d, d)、`proj_b`、`ln2_w`、`ln2_b`、`fc1_w`(d, 4d)、`fc1_b`、`fc2_w`(4d, d)、`fc2_b`。二維矩陣：f32 型別照原樣，int8 型別是每列 int8 加一個 f32 縮放（每列對稱量化，縮放 = max(|列|, 1e-12) / 127，還原為 `q as f32 * scale`）；一維向量一律 f32。
 
 融合參數三組依 `RerankLevel`（0 保守、1 標準、2 積極）取用：版本 3 以上各有自己的值；版本 1、2 三個等級都用標準組。每一組都過同一個檢查（`valid_params`）：α 有限、τ 不是 NaN（可以是 +∞，等於沒有門檻）、δ ∈ [0, 1000]（`MAX_DELTA`；−0.0 視同 0）；任何一組不合法整個檔拒絕。取參數的方法：`TinyLm::params(profile, level)`；`alpha_tau_delta(profile)` 是標準組。
 
-出貨的會意 SJ-SR-8-15M 是版本 4：6 層、寬 384、6 頭、ctx 64、字表 10,351 個 id、int8，14,886,880 bytes；沒有宣告前文長度（見 5.2）。
+出貨的會意 SJ-SR-10-31M 是版本 6：8 層、寬 512、8 頭、ctx 64、字表 10,378 個 id（含 `[SEP]`）、int8，30,927,424 bytes；邊界格式（旗標 bit 0 為 1），宣告的前文長度 L 是 62、政策鍵的門檻 K 是 4（見 5.2）。上一版 SJ-SR-8-15M 是版本 4（6 層、寬 384、6 頭、字表 10,351 個 id，14,886,880 bytes），沒有宣告前文長度。
 
 ### 2.2 讀檔檢查
 
@@ -78,8 +79,11 @@
 ### 2.5 匯出工具與小模型 golden
 
 - `tools/lib/export_sjtl.py`：`--chat ALPHA TAU [DELTA]`、`--formal ALPHA TAU [DELTA]`，兩個 DELTA 都給才寫版本 2 以上，只給一個報錯；`--levels` 四組（聊天保守、聊天積極、書面保守、書面積極，各 α τ δ，共 12 個數）寫版本 4，並需要 `--kn-side`（側檔必須是記著 `--ngram-model` 雜湊的 `SJKN0002` 檔，寫入前檢查）或不給（全 0）；`--kn-side` 沒有 `--levels` 是用法錯誤。每一組值寫檔前過與讀檔相同的檢查，壞值丟 `ValueError`、不寫檔。命令列不寫版本 3（只有 `export` 帶 `levels` 且無 KN 雜湊時寫，給 golden 用）。
-- 版本 5 目前沒有匯出工具：只有 Rust 讀得了，測試檔由測試程式把版本 1 的檔改寫成版本 5（`core/src/ffi.rs` 的 `as_v5`、`core/tests/common/toy.rs`）。
-- `tools/gen_tinylm_tiny.py` 產生 `eval/golden/tinylm-tiny/`：固定種子的隨機小模型（`tiny-f32.sjtl`、`tiny-int8.sjtl`、`tiny-int8-v2.sjtl`、`tiny-int8-v3.sjtl`、`tiny-int8-v4.sjtl`）、`items.tsv`（numpy float64 在同一份還原後權重上算的 LL）、`pick.tsv`（`fusegrid.pick` 在固定種子隨機資料與融合差剛好是 0.25、2 的手寫例子上的選擇）。權重事後放大，讓 attention 與 GELU 的非線性真的被用到。
+- 版本 5 與 6：`--left-len L`（要 `--levels`，版本 4 的欄位都要有；`--kn-side` 照版本 4 的規則可給可不給）寫版本 5；再加 `--boundary K`（必須同時給 `--left-len`）寫版本 6，旗標 bit 0 為 1。`--boundary` 要求 npz 的 `extra_tokens` 恰好是 `['[SEP]']`、V ＝ 字數 + 4，否則 `ValueError`、不寫檔；沒有 `--boundary` 的 npz 帶 `extra_tokens` 也是 `ValueError`。L、K 寫檔前過與讀檔相同的範圍檢查；缺 `--levels` 是用法錯誤。`read_sjtl` 讀得了版本 1 到 6（`head['left_len']`、`head['flags']`、`head['boundary_k']`）。核心的測試仍有用測試程式把版本 1 的檔改寫成版本 5、6 的做法（`core/src/ffi.rs` 的 `as_v5`、`core/tests/common/toy.rs` 的 `upgraded`、`upgraded_boundary`）。
+- `tools/lib/tinylm.py` 的 numpy 參考讀得了帶 `[SEP]` 的 npz（`extra_tokens`）：`NumpyLM.vocab.sep_id`、`ll_many(..., sep_keys=True)`（鍵裡的 NUL 是 `[SEP]`，候選永遠不是）、`key_b(before, n, L, K, is_han)`（5.2 的邊界格式鍵）、`ll_key_b`。研究端的 `keys.py` 是另一份實作，兩者由 `eval/golden/sep-keys/` 互相核對（下一項）。
+- `tools/gen_tinylm_tiny.py` 產生 `eval/golden/tinylm-tiny/`：固定種子的隨機小模型（`tiny-f32.sjtl`、`tiny-int8.sjtl`、`tiny-int8-v2.sjtl`、`tiny-int8-v3.sjtl`、`tiny-int8-v4.sjtl`）、`items.tsv`（numpy float64 在同一份還原後權重上算的 LL）、`pick.tsv`（`fusegrid.pick` 在固定種子隨機資料與融合差剛好是 0.25、2 的手寫例子上的選擇）。另有 `tiny-int8-v6.sjtl`（固定種子、字表 VOC6 加 `[SEP]`、L 62、K 4）與 `items-v6.tsv`（`前文、n、候選、鍵（邊界寫 |）、LL`；LL 是 numpy float64 在同一份還原後權重上、以邊界格式的鍵算的）。權重事後放大，讓 attention 與 GELU 的非線性真的被用到。
+
+- `tools/gen_sep_keys.py` 產生 `eval/golden/sep-keys/keys.tsv`：一份固定的前文清單（ensemble-distill-3 §3.1 的五個例子、各種邊界、漢字區段的邊緣、64 token 的長度、政策鍵在 K − 1、K、K + 1、前文超過 L 且窗內有非漢字段、候選含非漢字）的 `備註、L、K、n、前文、候選（碼位十六進位）→ 鍵（邊界寫 |）、送進模型的 id 序列`。`core/tests/tinylm_tiny.rs` 的 `the_sep_key_golden` 把 `tiny-int8-v6.sjtl` 檔頭的 L、K 逐列改成該列的值，核對 `key_for_len` 與 `TinyLm::sequence`；`make test-python` 重產並和檔案逐位元組比對；研究 repo 的 `experiments/cand-loss-2/test_sep_golden.py` 用它自己的 `keys.py`、`formats.py` 對同一份檔核對（記公開 repo 的 commit 與檔的雜湊）。
 
 ## 3. 打分與選字
 
@@ -131,13 +135,13 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 | 設定 | 保守 | 標準 | 積極 |
 |---|---|---|---|
-| 聊天，常談生效（4.4，核心常數） | 1.3、2、1 | 1.1、2、0 | 1.1、2、0 |
-| 書面（`.sjtl` 檔頭，會意 SJ-SR-8-15M） | 0.8、2、1.5 | 0.8、2、0 | 0.8、2、0 |
+| 聊天，常談生效（4.4，核心常數） | 1.2、2、1 | 1.4、2、0 | 1.4、2、0 |
+| 書面（`.sjtl` 檔頭，會意 SJ-SR-10-31M） | 1.4、1、1.5 | 1.8、2、0 | 1.8、2、0 |
 
 - 聊天檔頭的標準組是 (0.3, 2, 0.25)；聊天檔頭只在常談不生效時（別的會意檔、沒有常談表）與常談分數不是有限值時當退路。檔頭其餘聊天值此處不列。
 - 積極等於標準是選定的值，不是漏寫。
 - 這些格在私人的聊天集合與公開集合上選出，量測方式見 `docs/spec/evaluation.md`；格是跟著會意檔與通語底層量的，換了其中一個要重量。
-- 取捨：書面用 δ 把「小模型要贏過 n-gram 一個固定分差才換」做成門檻，是因為書面的改壞代價高；聊天保守檔用 δ = 1 同理。
+- 取捨：保守檔用 δ 把「小模型要贏過 n-gram 一個固定分差才換」做成門檻，是因為改壞的代價高。會意 SJ-SR-10-31M 的保守格在調參層照「改壞不超過標準格的一半、改對多於改壞、取改對 − 4×改壞最大」選出（改對 F、改壞 B 都對 n-gram 第一名算）：聊天 (1.2, 2, 1)，兩份聊天調參集合計 F 295、B 20（標準格 F 422、B 78）；書面 (1.4, 1, 1.5)，兩份書面調參集合計 F 246、B 20（標準格 F 376、B 86）。上一版 SJ-SR-8-15M 是書面 δ 1.5、聊天 δ 1。
 
 ## 4. 常談
 
@@ -169,14 +173,14 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 一次重排用不用常談項，由 `colloquial::applies(profile, model)` 加「已載入常談表」判斷，三個條件同時成立：
 
 1. 聊天設定（書面不用）。
-2. 載入的 `.sjtl` 的 SHA-256 等於 `PAIRED_TINYLM_SHA256`（`356a37be…c5de`，會意 SJ-SR-8-15M；`data/tinylm.sjtl.sha256` 記的同一個值）。換了會意檔常談就靜靜地不生效，所以 selftest 要抓它（8.4）。
+2. 載入的 `.sjtl` 的 SHA-256 等於 `PAIRED_TINYLM_SHA256`（`ee109fb284cbd5fea8db825752fec5b8a08deb6541d772dc682091e2c99c70d4`，會意 SJ-SR-10-31M；`data/tinylm.sjtl.sha256` 記的同一個值）。換了會意檔常談就靜靜地不生效，所以 selftest 要抓它（8.4）。
 3. 引擎載入了常談表。
 
 強度不是條件：保守、標準、積極都生效，各用自己的格（4.4）。不成立時行為與沒有常談的引擎逐位元組相同。引擎在建工作時判斷（記在工作裡），所以換會意檔、換設定、換強度，下一次解碼就生效。
 
 ### 4.4 三檔的格
 
-`colloquial::cell(level)` 取具名常數，不讀 `.sjtl` 檔頭：`STANDARD` (1.1, 2.0, 0.0)、`CONSERVATIVE` (1.3, 2.0, 1.0)、`AGGRESSIVE` (1.1, 2.0, 0.0)（積極等於標準）。`MU`、`GATE_T`、`GAMMA_PER_MU` 與 `PAIRED_TINYLM_SHA256` 是同檔的具名常數。工作建立時記下當時的強度（`RerankJob` 的 `level`），融合、退路的檔頭三元組都用那一檔；之後改強度只讓舊工作作廢，不影響它。
+`colloquial::cell(level)` 取具名常數，不讀 `.sjtl` 檔頭：`STANDARD` (1.4, 2.0, 0.0)、`CONSERVATIVE` (1.2, 2.0, 1.0)、`AGGRESSIVE` (1.4, 2.0, 0.0)（積極等於標準）。`MU`、`GATE_T`、`GAMMA_PER_MU` 與 `PAIRED_TINYLM_SHA256` 是同檔的具名常數。工作建立時記下當時的強度（`RerankJob` 的 `level`），融合、退路的檔頭三元組都用那一檔；之後改強度只讓舊工作作廢，不影響它。
 
 ### 4.5 句首單字估計
 
@@ -223,7 +227,16 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - 不外流：`left_full` 與 `recur` 不經 C ABI 回傳、不進 `ShanjieOutput`、不寫學習檔、不寫 log、不跨程序、不給網路功能；重排工作只帶最後 L 個字元（沒有宣告 L 時帶 `left`），不帶 `recur`（也不帶它的指標或那個數），只帶從它算出來的每條候選的加分與重排索引。已經排進佇列的工作複本活到那次執行結束，Rust `String` 與 Swift 字串、工作複本裡的加分與索引釋放時不清零。
 - `set_left_context` 不作廢進行中的工作（殼在可能開始組字的鍵之前呼叫它，那時組字區是空的、沒有進行中的工作）。
 
-**會意的前文鍵**（`TinyLm::key_for(before)`，引擎與 CLI 共用）：`before` 是組字區這一段之前的全部文字（前文，加上前面各段選定後的字與中間的固定詞、標點）。宣告 L 的模型（版本 5）：`before` 的最後 L 個字元，原文，不經 `context_key`；版本 1 到 4：`context_key(before)`（結尾 ≤ 2 個漢字，沒有則 `SENTINEL`，在 3.2 變空字串）。`RerankJob::run` 依序處理各段，後一段的前文用前面各段**選定後**的字重算（不用 n-gram 第一名）。出貨的會意 SJ-SR-8-15M 沒有宣告 L，所以出貨行為是結尾 ≤ 2 個漢字；模型是否讀長前文取決於檔頭，不取決於殼傳了多少。
+**會意的前文鍵**（`TinyLm::key_for_len(before, n)`，引擎與 CLI 共用；n 是這一段重排的候選裡最長的候選字數（前 `TOPK` 個）；版本 1 到 5 與旗標 bit 0 為 0 的版本 6 忽略 n，等於 `key_for(before)`，`key_for` 保留、行為不變）：`before` 是組字區這一段之前的全部文字（前文，加上前面各段選定後的字與中間的固定詞、標點）。宣告 L 的模型（版本 5）：`before` 的最後 L 個字元，原文，不經 `context_key`；版本 1 到 4：`context_key(before)`（結尾 ≤ 2 個漢字，沒有則 `SENTINEL`，在 3.2 變空字串）。`RerankJob::run` 依序處理各段，後一段的前文用前面各段**選定後**的字重算（不用 n-gram 第一名）。出貨的會意 SJ-SR-10-31M 是版本 6 的邊界格式（L 62、K 4），走下面「邊界格式的鍵」：長鍵含 ≥ 4 個漢字時讀長鍵，否則是結尾 ≤ 2 個漢字；模型是否讀長前文取決於檔頭，不取決於殼傳了多少。
+
+**邊界格式的鍵**（版本 6、旗標 bit 0 為 1；等於研究端的 `keys.policy_key_b(before[-L:], n, K)`，逐 token 相同）：
+1. 原料：`before` 的最後 L 個字元（`chars()`）。核心只看得到這 L 個字元，研究端的前文可以更長，所以窗內有長度 ≥ 2 的非漢字段（英文詞、數字、「……」）時，邊界化之後鍵比 62 短，研究端能往窗外多取更舊的字、核心不行：兩邊的鍵在這些列上不同（殼的讀取範圍與 L 都不改；這些列的數量由研究端量，照報）。
+2. 邊界化：每一段連續的非漢字（換行、空白、標點、英文、數字、emoji、NUL 與任何其他符號；漢字是 `is_han`，同研究端 `_HAN`）變成一個邊界，開頭的邊界拿掉；沒有漢字時是空字串。鍵字串裡邊界是 U+0000（NUL），只會由這一步產生。
+3. 截長：取最後 63 − n 個 token（漢字與邊界各算一個），截完開頭是邊界再丟一個；n ≥ 63 時是空字串。同一段的所有候選共用一把鍵、按最長的候選截，所以 `[BOS]` + 鍵 + 候選不超過 ctx。
+4. 政策鍵：第 3 步的長鍵含 ≥ K 個漢字時用它；否則用出貨的鍵（`context_key` 作用在 L 個字元上，`SENTINEL` 當空，同樣照 n 截）。
+5. 送進模型的序列：`[BOS]`、鍵的每個 token、候選。鍵的位置裡漢字查字表（字表外是 UNK），NUL 是 id V − 1（`[SEP]`）；候選的每個字元一律查字表，字表外（含 NUL）是 UNK，永遠不會變成 `[SEP]`。LL 只算候選的 token。
+
+不支援 `ctxbs`（見評測 CLI 一節）。殼讀什麼、核心保留什麼（`left_full` 只留 L 個字元）、清除與不外流的規則都不變，版本 6 的重排工作也只帶最後 L 個字元。
 
 ### 5.3 英文前文
 
@@ -249,7 +262,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 ### 6.3 執行
 
-`RerankJob::run` 只用工作裡的資料，不碰引擎，可在任何執行緒；`RerankJob`、`RerankResult` 是 `Send`（編譯期斷言，沒有 `unsafe impl`）。依序處理各段：`before` = 前文 + `gap` + 前面各段選定的字；`key = model.key_for(before)`；聊天且 `applies`（工作建立時已判斷）用 `rerank_colloquial`，否則用 `rerank`；錯誤（含 `TooLong`）選 0（`paths[0]`）。`order` 不是空的時，候選、詞、`ng'`（`ng + bonus`）、`b` 與 `masked` 照 `order` 組一次再交給重排函式，選中的位置 p 先檢查 `p < order.len()`（超出就當成沒有選到別的候選，也就是重排後的第一名）再對回 `paths` 的索引；`overturned` 與 `sinit_diag` 在重排後的陣列上算（錨點是重排後的第一名）。`order` 是空的時和沒有這一項的時候相同。每段記下起點、預期的詞列（n-gram 第一條）、選中的索引（一律是 `paths` 的索引，0＝不換）、選中路徑、用的 key。測試介面 `candidates()`、`ng_scores()`、`sinit_weights()` 回解碼器順序，`pool_order()`、`pool_bonus()` 回 `order` 與 `bonus`（都只有 Rust API，不在 `shanjie.h`）。工作與結果含候選文字，沒有 `Debug`、不寫進任何紀錄。
+`RerankJob::run` 只用工作裡的資料，不碰引擎，可在任何執行緒；`RerankJob`、`RerankResult` 是 `Send`（編譯期斷言，沒有 `unsafe impl`）。依序處理各段：`before` = 前文 + `gap` + 前面各段選定的字；`key = model.key_for_len(before, 這一段送去重排的候選（前 TOPK 個）裡最長的字數)`；聊天且 `applies`（工作建立時已判斷）用 `rerank_colloquial`，否則用 `rerank`；錯誤（含 `TooLong`）選 0（`paths[0]`）。`order` 不是空的時，候選、詞、`ng'`（`ng + bonus`）、`b` 與 `masked` 照 `order` 組一次再交給重排函式，選中的位置 p 先檢查 `p < order.len()`（超出就當成沒有選到別的候選，也就是重排後的第一名）再對回 `paths` 的索引；`overturned` 與 `sinit_diag` 在重排後的陣列上算（錨點是重排後的第一名）。`order` 是空的時和沒有這一項的時候相同。每段記下起點、預期的詞列（n-gram 第一條）、選中的索引（一律是 `paths` 的索引，0＝不換）、選中路徑、用的 key。測試介面 `candidates()`、`ng_scores()`、`sinit_weights()` 回解碼器順序，`pool_order()`、`pool_bonus()` 回 `order` 與 `bonus`（都只有 Rust API，不在 `shanjie.h`）。工作與結果含候選文字，沒有 `Debug`、不寫進任何紀錄。
 
 ### 6.4 套用
 
@@ -314,7 +327,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 ## 9. 評測 CLI 與重播
 
-- `--tinylm FILE.sjtl`：用 `load_paired` 載入；n-gram 雜湊不符、KN 側檔不符、`--no-classes`、`--no-demote` 都是錯誤（α、τ 只對辨類與降權表開著的分數成立）。每列取候選池（3.1）的前 8 名重排，top1、`--rowstats`、摘要行都用重排後的第一名；前文鍵用 `tl.key_for(ctx)`（`--context` 時；不加 `--context` 時為空）。摘要行設定標記加 `+tl:<檔 SHA-256 前 8 碼>`。
+- `--tinylm FILE.sjtl`：用 `load_paired` 載入；n-gram 雜湊不符、KN 側檔不符、`--no-classes`、`--no-demote` 都是錯誤（α、τ 只對辨類與降權表開著的分數成立）。每列取候選池（3.1）的前 8 名重排，top1、`--rowstats`、摘要行都用重排後的第一名；前文鍵用 `tl.key_for_len(ctx, 那一列候選池裡最長的候選字數)`（`--context` 時；不加 `--context` 時為空；版本 1 到 5 忽略第二個參數，等於 `key_for(ctx)`）。摘要行設定標記加 `+tl:<檔 SHA-256 前 8 碼>`，版本 6 的邊界格式再加 `+sep:<K>`。CLI 不實作研究端的 `ctxbs`（在 cdev、ctune 這類前文欄是一段連續漢字、沒有標點的集合上，研究端對政策鍵的長鍵補一個非漢字再取；產品裡殼傳的是原文、含標點，不需要）：版本 6 在這兩份集合上的 CLI 讀數和研究讀數不同。
 - `--rerank-level conservative|standard|aggressive`（預設 standard）：需要 `--tinylm`（沒有 `--tinylm` 時任何值都是用法錯誤）；用在版本 1、2 的檔且不是 standard 時結束碼 2 並說明；不是 standard 時摘要行在 `+tl:…` 後加 `+rl:conservative` 或 `+rl:aggressive`。`tools/bench.py` 與不在本 repo 的研究工具因此把它當作不是出貨設定。
 - `--tinylm-scores OUT`：每列一行 JSON，只有數字沒有文字：`i`、`n`、`ng`、`ok`、`ed`、`glen`、`c`（選中的索引，沒重排為 0）、`ll`（n ≥ 2 的列）、`masked`（手動詞遮罩擋掉的索引，空也寫）；有 `--colloquial-core` 且常談實際跑過的列最後多 `col`（4.6）。有模糊音位元時 `n`、`ng`、`ok`、`ed`、`ll`、`masked` 列的是候選池，`c` 仍是 n-best 的索引。前文重現的加重（3.1.1）重排過的列：各欄照重排後的順序，`ng` 寫加分後的 `ng'`，`idx` 是各項對應的 n-best 索引（紀錄裡只有一個 `idx`），`c` 仍是 n-best 索引，`masked` 是對解碼器第一名算、照重排排列的遮罩；沒有重排的列和以前相同。`--tinylm-scores-topk N`（研究用，N ≥ 8）把 `ll` 延伸到前 N 個候選，不改其他欄位；需要 `--tinylm-scores`，不能與 `--fuzzy` 並用。`--tinylm-scores` 與 `--set holdout` 不能並用（逐候選記錄是調 α、τ 的資料）。
 - `--tinylm-paired`：見 4.6；常談項對 `--tinylm` 給的模型照出貨方式作用，`col` 欄也在這種列出現。
@@ -326,7 +339,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 ## 10. 驗證
 
 - **核心**（`make test-rust`）
-  - `core/tests/tinylm_tiny.rs`：LL 對 numpy（`ll_matches_numpy_on_both_files`，|ΔLL| < 1e-4）、批次不改 LL、前文長度規則、各版本檔頭讀值與壞檔（任何前綴長度、magic 與版本交叉、壞值、長度差 1 byte）都是 `Format` 不 panic、`pick` 的手算案例與 δ 邊界（含等號）、`pick` 對 `pick.tsv` 逐列相同、`rerank` 把檔頭的 δ 傳給 `pick`、版本 2 到 4 除檔頭外與前一版相同、KN 配對（`load_paired_binds_the_kn_side_file`）、版本 5 的前文長度與 key（`v5_declares_the_left_context_length`、`v5_keys_with_the_raw_last_l_characters`、`a_long_candidate_sees_only_the_tail_of_a_declared_key`）。
+  - `core/tests/tinylm_tiny.rs`：LL 對 numpy（`ll_matches_numpy_on_both_files`，|ΔLL| < 1e-4）、批次不改 LL、前文長度規則、各版本檔頭讀值與壞檔（任何前綴長度、magic 與版本交叉、壞值、長度差 1 byte）都是 `Format` 不 panic、`pick` 的手算案例與 δ 邊界（含等號）、`pick` 對 `pick.tsv` 逐列相同、`rerank` 把檔頭的 δ 傳給 `pick`、版本 2 到 4 除檔頭外與前一版相同、KN 配對（`load_paired_binds_the_kn_side_file`）、版本 5 的前文長度與 key（`v5_declares_the_left_context_length`、`v5_keys_with_the_raw_last_l_characters`、`a_long_candidate_sees_only_the_tail_of_a_declared_key`）、版本 6（`v6_declares_the_boundary_format_and_k`：旗標、K、字表長度與壞檔；`v6_matches_numpy_on_the_boundary_format`：LL 對 `items-v6.tsv`；`only_a_boundary_models_key_reads_nul_as_sep`；`the_sep_key_golden`；`key_for_len_is_key_for_without_the_boundary_flag`：版本 1 到 5 逐位元組不變）；`core/tests/engine_rerank.rs` 的 `a_boundary_model_keys_each_stretch_with_key_for_len`；`cli/tests/tinylm.rs` 的 `a_boundary_model_keys_cli_rows_with_key_for_len`。
   - `core/src/colloquial.rs` 單元測試：sigmoid 不溢位、融合相對錨點且閘門讀 ll_0、`fused_pick_uses_the_registered_cell`、`each_level_picks_with_its_own_cell`、`the_term_weighs_the_same_at_every_alpha`（權重與 α 無關）、非有限 col 退回 plain pick 與遮罩在退路上也有效、學習項在每條路徑上都在。
   - `core/tests/colloquial.rs`：`lc`、`k`、`col` 在合成表上的手算值、疊加層與基本詞表都有的詞不算 k、詞包列只在給定時算、`rerank_colloquial_fuses_with_the_levels_cell`、`a_non_finite_col_falls_back_to_the_levels_header_triple`。
   - `core/tests/engine_colloquial.rs`：`the_term_applies_only_under_its_conditions`、`applies_is_chat_and_the_paired_model`、`each_level_uses_its_own_cell`、`load_order_does_not_matter`、`load_colloquial_turns_the_first_word_estimate_on`、`a_failed_load_changes_nothing_but_the_job`、`k_counts_the_pack_words_the_engine_was_built_with`、`the_colloquial_term_stands_alone`。
@@ -345,11 +358,11 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 - 重排非同步：組字區先顯示 n-gram 的結果，小模型算完可能換一次字；每個鍵都從 n-gram 重新解碼再重排，已顯示的重排結果可能在下一個鍵先變回 n-gram 的字、算完再換回來（不是已鎖定的字）。
 - 重排只在前 8 名（沒有模糊音詞的）候選之間選；n-gram 前 8 名裡沒有正確字的句子，語意校正救不回來。
-- 小模型的視窗是 ctx 64：宣告 L 的模型看到的前文是 min(L, ctx − 1 − 候選字數) 個字元；出貨的模型沒有宣告 L，只看結尾 ≤ 2 個漢字。
-- 常談只在聊天設定、且只與會意 SJ-SR-8-15M 配對；書面設定與別的會意檔沒有常談項。
+- 小模型的視窗是 ctx 64：宣告 L 的模型看到的前文是 min(L, ctx − 1 − 候選字數) 個字元；出貨的模型（邊界格式，L 62、K 4）看最後 62 個字元邊界化、照候選長度截短後的鍵，鍵裡不到 4 個漢字時只看結尾 ≤ 2 個漢字。
+- 常談只在聊天設定、且只與會意 SJ-SR-10-31M 配對；書面設定與別的會意檔沒有常談項。
 - 書面設定教過一次的字詞，有時還會被重排蓋回去（學習守門只擋 n-gram 第一條路徑上有被加分詞的段，細節見 `docs/spec/learning.md`）。
-- 終端機類 App 之外的 App，殼傳 64 個 grapheme 的原文，出貨的會意模型不使用（n-gram 解碼只另外用它最後 64 個字元的漢字對，§5.2）；編輯器的內建終端機面板分不出來，照一般 App 處理。
+- 終端機類 App 之外的 App，殼傳 64 個 grapheme 的原文，出貨的會意模型讀它的最後 62 個字元（n-gram 解碼另外用它最後 64 個字元的漢字對，§5.2）；編輯器的內建終端機面板分不出來，照一般 App 處理。
 - `left_full`、重排工作內的文字與 `recur` 在釋放時不清零（`recur` 沒有原文，但可以從它拼回前文裡大部分的漢字片段，所以照原文的等級對待）。
 - 前文重現項（`docs/spec/decoder.md` §4.6）看字元的原樣：前文裡留著的錯字或另一種寫法會被延續（前文寫「馬克斯」，之後同音的詞偏向「馬克斯」）；使用者改對一次之後，同一行裡會跟著對。
 - 錯字回報集的「權限加好了」書面標準與積極兩檔仍選錯（聊天對）。
-- SJTL0005 沒有匯出工具，只有測試檔能產生。
+- 版本 6 的核心只認一份會意模型；兩份模型的合議（pair-ship）不在這一版。

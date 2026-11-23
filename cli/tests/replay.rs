@@ -50,9 +50,11 @@ fn row(line: &'static str) -> Row {
     let f: Vec<&str> = line.split('|').collect();
     Row { ctx: f[0], gold: f[1], syls: f[2].split_whitespace().map(String::from).collect() }
 }
-/// 我在重打 is shown for it; the gold text is 我再重打. Fix: Left, Left, Space, digit (cursor 4 -> 2).
+/// 我在重打 is shown for it; the gold text is 我再重打. Fix: Left, Left, Space, digit (cursor 4 -> 2). (The context was 我打錯了我看成號碼 until 會意 SJ-SR-10-31M, which
+/// reads the whole left text and shows 我再重打 after it; after 我打錯了, and after no context, it shows 我在重打: `target/release/shanjie-replay --rows <these rows>
+/// --no-colloquial --firsts OUT`, 2026-11-23.)
 fn zai() -> Row {
-    row("我打錯了我看成號碼|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ")
+    row("我打錯了|我再重打|ㄨㄛˇ ㄗㄞˋ ㄔㄨㄥˊ ㄉㄚˇ")
 }
 /// 這隻乾脆留下來了 is shown; the gold text has 支 at the second place. Fix: Home, Right, Right (3 keys, not 6 Lefts), Space, digit. (This row replaced
 /// 這家速度很快你看一下, which the 通語 SJ-LM-7-9.7M model shows right.)
@@ -509,13 +511,13 @@ fn recurrence_replay_agrees_with_the_cli() {
 fn pool_weight_replay_agrees_with_the_cli() {
     let dir = std::env::temp_dir().join(format!("shanjie-replay-poolrecur-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let left = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（";
+    let left = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是神祕模型太爛啊（";
     let cut: String = left.chars().skip(left.chars().count() - 31).collect();
-    let line = |ctx: &str| format!("{ctx}|語意也錯字|ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ\n");
+    let line = |ctx: &str| format!("{ctx}|神秘也錯字|ㄕㄣˊ ㄇㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ\n");
     let long = dir.join("long.txt");
-    std::fs::write(&long, line(left) + &line(&format!("語義{}", "a".repeat(30))) + "|反應|ㄈㄢˇ ㄧㄥˋ\n").unwrap();
+    std::fs::write(&long, line(left) + &line(&format!("神祕{}", "a".repeat(30))) + "|反應|ㄈㄢˇ ㄧㄥˋ\n").unwrap();
     let short = dir.join("short.txt");
-    std::fs::write(&short, line(&cut) + &line(&format!("語義{}", "a".repeat(29)))).unwrap();
+    std::fs::write(&short, line(&cut) + &line(&format!("神祕{}", "a".repeat(29)))).unwrap();
     let _g = slot();
     let (replay, eval, r) = (env!("CARGO_BIN_EXE_shanjie-replay"), env!("CARGO_BIN_EXE_shanjie-eval"), root());
     let (lm, tl, co) = (r.join("data/lm/bigram.sjlm"), r.join("data/lm/tinylm.sjtl"), r.join("data/lm/colloquial.sjlm"));

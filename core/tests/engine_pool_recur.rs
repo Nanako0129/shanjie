@@ -1,7 +1,8 @@
 //! The context recurrence weight on the semantic correction's pool in the engine (docs/spec/semantic-rerank.md §3.1.1): the real lexicon, n-gram
 //! model, small model and colloquial table (data/lm/, fail loudly without them), the App's settings (rerank on, standard level), the job run and applied
-//! after every key as the replay's `each`. The fixture is ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ after a left text of 44 characters that ends in one holding 語義 and
-//! 錯字: with the weight 語義也錯字 stays, without it the small model takes 語意也錯字.
+//! after every key as the replay's `each`. The fixture is ㄕㄣˊ ㄇㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ after a left text of 44 characters that ends in one holding 神祕 and
+//! 錯字: with the weight 神祕也錯字 stays, without it the small model takes 神秘也錯字 (the
+//! decoder's first is 神祕也錯字 in chat and 神秘也錯字 in formal).
 use core::engine::*;
 use core::lm::Profile;
 use std::path::{Path, PathBuf};
@@ -15,16 +16,20 @@ fn data(f: &str) -> PathBuf {
     p
 }
 
-const LEFT: &str = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是語義模型太爛啊（";
-const READING: &str = "ㄩˇ ㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ";
+const LEFT: &str = "我們今天下午在會議室討論了很多事情最後大家都同意先這樣做。錯字，這是不是神祕模型太爛啊（";
+const READING: &str = "ㄕㄣˊ ㄇㄧˋ ㄧㄝˇ ㄘㄨㄛˋ ㄗˋ";
 const PROFILES: [(Profile, &str); 2] = [(Profile::Chat, "chat"), (Profile::Formal, "formal")];
-/// What the merge base (7d12b7d1, before this term) showed for the fixture, per profile (chat, formal): the default engine (the term did not exist), with
-/// `set_recur(false)`, with the left text cut to its last 31 characters, and with no small model. Recorded on that tree with this file's `shown`, then
-/// written here; never computed from the new code.
-const BASE_DEFAULT: [&str; 2] = ["語意也錯字", "語意也錯字"];
-const BASE_NO_RECUR: [&str; 2] = ["語意也錯字", "語意也錯字"];
-const BASE_CUT_31: [&str; 2] = ["語意也錯字", "語意也錯字"];
-const BASE_NO_TINYLM: [&str; 2] = ["語義也錯字", "羽曳野錯字"];
+/// What the fixture shows where the weight does not act, per profile (chat, formal): with the weight off, with `set_recur(false)`, with the left text cut to
+/// its last 31 characters, and with no small model. Written from the evaluation CLI's `--picks` (not from the engine), measured 2026-11-23 on the 會意
+/// SJ-SR-10-31M file: `target/release/shanjie-eval --lm data/lm/bigram.sjlm --profile P --context --tinylm data/lm/tinylm.sjtl [--colloquial-core
+/// data/lm/colloquial.sjlm in chat] --rows <the fixture row> --picks OUT` with `--no-pool-recur`, with `--no-recur`, on the 31-character row, and without
+/// `--tinylm`. (Until 會意 SJ-SR-10-31M the fixture was 語義也錯字 against 語意也錯字 and the constants were the merge base's, 7d12b7d1, from before the term; the new
+/// model reads the left text and keeps 語義 in chat without the weight. With 神祕 the model takes 神秘 back whenever
+/// the weight is off, also when it reads the left text that holds 神祕.)
+const BASE_DEFAULT: [&str; 2] = ["神秘也錯字", "神秘也錯字"];
+const BASE_NO_RECUR: [&str; 2] = ["神秘也錯字", "神秘也錯字"];
+const BASE_CUT_31: [&str; 2] = ["神秘也錯字", "神秘也錯字"];
+const BASE_NO_TINYLM: [&str; 2] = ["神祕也錯字", "神秘也錯字"];
 
 fn keys_of(syl: &str) -> Vec<Key> {
     let layout = Layout::Standard;
@@ -92,7 +97,7 @@ fn where_the_weight_does_not_act_the_choice_is_the_merge_bases() {
     for (i, (p, name)) in PROFILES.into_iter().enumerate() {
         let on = shown(&mut engine(p, true), LEFT, READING);
         assert_ne!(on, BASE_DEFAULT[i], "{name}: premise, the weight changes the choice");
-        assert_eq!(on, "語義也錯字", "{name}");
+        assert_eq!(on, "神祕也錯字", "{name}");
         let mut e = engine(p, true);
         e.set_pool_recur(false);
         assert_eq!(shown(&mut e, LEFT, READING), BASE_DEFAULT[i], "{name}: set_pool_recur(false)");
@@ -104,18 +109,18 @@ fn where_the_weight_does_not_act_the_choice_is_the_merge_bases() {
     }
 }
 
-/// The threshold counts Unicode scalar values after the 64 cut: 語義 and 30 ASCII letters acts, with 29 it does not; 40 ASCII letters hold no pair; 語義
+/// The threshold counts Unicode scalar values after the 64 cut: 神祕 and 30 ASCII letters acts, with 29 it does not; 40 ASCII letters hold no pair; 神祕
 /// and six family emoji (five scalar values each, eight characters on screen) acts, five and four letters (31) do not. "Does not act" is what the engine
 /// with `set_pool_recur(false)` shows, and the job's weights are all 0.
 #[test]
 fn the_threshold_counts_scalar_values() {
     let fam = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
     let cases = [
-        (format!("語義{}", "a".repeat(30)), true),
-        (format!("語義{}", "a".repeat(29)), false),
+        (format!("神祕{}", "a".repeat(30)), true),
+        (format!("神祕{}", "a".repeat(29)), false),
         ("a".repeat(40), false),
-        (format!("語義{}", fam.repeat(6)), true),
-        (format!("語義{}aaaa", fam.repeat(5)), false),
+        (format!("神祕{}", fam.repeat(6)), true),
+        (format!("神祕{}aaaa", fam.repeat(5)), false),
     ];
     for (p, name) in PROFILES {
         for (left, acts) in &cases {
@@ -141,11 +146,11 @@ fn a_shorter_left_text_replaces_a_longer_one() {
         e.set_left_context(LEFT);
         e.set_left_context(&cut);
         let (s, bonus) = type_reading(&mut e, READING);
-        assert!(s != "語義也錯字" && no_weight(&bonus), "{name}: {s} {bonus:?}");
+        assert!(s != "神祕也錯字" && no_weight(&bonus), "{name}: {s} {bonus:?}");
         e.reset(ResetMode::Discard);
         e.set_left_context(&cut);
         e.set_left_context(LEFT);
-        assert_eq!(type_reading(&mut e, READING).0, "語義也錯字", "{name}: premise, the long one acts");
+        assert_eq!(type_reading(&mut e, READING).0, "神祕也錯字", "{name}: premise, the long one acts");
     }
 }
 
@@ -202,7 +207,7 @@ fn after_every_clear_point_the_weight_does_not_act() {
         assert!(no_weight(&bonus), "{what}: {bonus:?}");
         // Premise: the same engine with the left text set again acts.
         e.reset(ResetMode::Discard);
-        assert_eq!(shown(&mut e, LEFT, READING), "語義也錯字", "{what}: premise");
+        assert_eq!(shown(&mut e, LEFT, READING), "神祕也錯字", "{what}: premise");
     }
 }
 
@@ -216,14 +221,14 @@ fn a_model_change_while_composing_keeps_the_weight() {
         type_reading(&mut e, &syls[..2].join(" "));
         e.load_tinylm(&data("tinylm.sjtl")).unwrap();
         let (s, bonus) = type_reading(&mut e, &syls[2..].join(" "));
-        assert_eq!(s, "語義也錯字", "{name}");
+        assert_eq!(s, "神祕也錯字", "{name}");
         assert!(!no_weight(&bonus), "{name}");
         assert_ne!(s, BASE_DEFAULT[i], "premise: {name}");
     }
 }
 
 /// The job's accessors keep the decoder's order and `pool_order` is a permutation of it whose first is not the decoder's first in formal (the
-/// small model's pool order: 語義也錯字 is the decoder's second).
+/// small model's pool order: 神祕也錯字 is not the decoder's first).
 #[test]
 fn the_job_keeps_the_decoders_order() {
     let mut e = engine(Profile::Formal, true);
@@ -240,7 +245,7 @@ fn the_job_keeps_the_decoders_order() {
     sorted.sort();
     assert_eq!(sorted, (0..cands[0].len()).collect::<Vec<_>>(), "a permutation");
     assert!(ng[0].windows(2).all(|w| w[0] >= w[1]), "the decoder's scores, best first: {:?}", ng[0]);
-    assert_eq!(cands[0][order[0][0]], "語義也錯字");
+    assert_eq!(cands[0][order[0][0]], "神祕也錯字");
     assert_ne!(order[0][0], 0);
     let s: Vec<f64> = order[0].iter().map(|&i| ng[0][i] + bonus[0][i]).collect();
     assert!(s.windows(2).all(|w| w[0] >= w[1]), "the order sorts ng + bonus");

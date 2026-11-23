@@ -278,7 +278,7 @@
   - `the_freeze_has_a_buffer_and_needs_neither_the_rerank_nor_the_model`：四種設定各連打 128 個音節，每個自由段都 ≤ W，解碼兩次的鍵數 ≤ ⌈(字數 − W) ÷ H⌉ + 1（拿掉緩衝或把條件寫成「語意校正開」時失敗）。
   - `a_word_the_user_picked_is_never_frozen_over`：手動改選的詞不被固定動到。
   - `a_forgotten_head_word_is_not_frozen_back_in_the_same_key`、`a_composition_typed_before_a_model_has_no_path_to_freeze_from`、`rows_rebuilt_by_a_forget_come_from_the_decode_after_the_freeze`。
-- 延遲：`core/tests/engine_predict.rs` 的 `timing_composition_cap_128_syllables`（`cargo test --release -p core --test engine_predict timing_composition_cap -- --ignored --nocapture`，低負載下跑）。重播 128 個音節的長句（語意校正開、會意與常談載入），5 輪取中位數，斷言語意校正開的按鍵路徑 p95 < 16 ms、`RerankJob::run` 的 p95 < 300 ms、語意校正關的按鍵路徑 p95 < 16 ms。驗收時量到按鍵路徑 p95 約 13 ms、`RerankJob::run` 約 40 ms，單鍵最大值低於 50 ms。
+- 延遲：`core/tests/engine_predict.rs` 的 `timing_composition_cap_128_syllables`（`cargo test --release -p core --test engine_predict timing_composition_cap -- --ignored --nocapture`，低負載下跑）。重播 128 個音節的長句（語意校正開、會意與常談載入），5 輪取中位數，斷言語意校正開的按鍵路徑 p95 < 16 ms、`RerankJob::run` 的 p95 < 300 ms、語意校正關的按鍵路徑 p95 < 16 ms。驗收時量到按鍵路徑 p95 約 13 ms、`RerankJob::run` 約 40 ms，單鍵最大值低於 50 ms。GitHub Actions 的 macOS runner 太慢，這個測試在那裡不過（語意校正關的每鍵 p95 量到 25～31 ms），所以只在閒置的 Mac 上判；`latency-gate.yml` 照報它的數字（`docs/spec/release-and-ci.md` §8.4）。
 - 重播評測：`shanjie-replay --rerank each`（與 `core/tests/engine_replay.rs`）在 dev302、打字測驗、錯字回報，聊天與書面兩種設定，`top1_sha256` 和固定規則加入前相同（評測集沒有超過 32 個音節的列，不會碰到這條規則）。
 
 ## 6. 候選與固定詞

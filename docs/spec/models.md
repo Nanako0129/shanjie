@@ -17,7 +17,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | `kn.sjkn` | 承接 | SJ-KN-2-397K | Kneser–Ney 接續次數側檔 |
 | `trigram.sjt3` | 連文 | SJ-CX-2-7.7M | 書面設定的三連詞表 |
 | `trigram-chat.sjt3` | 連文 | SJ-CX-2-950K | 聊天設定的三連詞表 |
-| `tinylm.sjtl` | 會意 | SJ-SR-8-15M | 語意校正用的小型字元模型 |
+| `tinylm.sjtl` | 會意 | SJ-SR-10-31M | 語意校正用的小型字元模型 |
 | `colloquial.sjlm` | 常談 | SJ-CL-2-69K | 口語詞頻表 |
 
 - 形狀規則（建置檢查與 Swift 解析器共用）：檔尾是換行、整檔沒有 CR、每列剛好四個非空的 tab 分隔欄位（所以前導 tab、多一個 tab 都不合格）。建置檢查另外要求第二欄是 64 位小寫十六進位、同一個檔名不出現兩次；Swift 解析器不重複這兩條。
@@ -75,7 +75,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | `colloquial.sjlm` | 不綁通語 | 常談只在載入的會意檔的 SHA-256 等於核心常數 `PAIRED_TINYLM_SHA256` 時生效（§8.3） |
 
 - 換通語就要重建辨類、承接、兩張連文、重新匯出會意（檔頭記新的通語與承接雜湊），再把 `PAIRED_TINYLM_SHA256`（會意檔換了的話）、`data/*.sha256` 與 `models.tsv` 一起換。
-- 目前這組：通語 `e3fb6056…6148eb5a`，會意 `356a37be…0a97c5de`，常數 `PAIRED_TINYLM_SHA256` 與 `models.tsv` 的會意列相同（`core/src/colloquial.rs`、`data/models.tsv`）。
+- 目前這組：通語 `e3fb6056…6148eb5a`，會意 `ee109fb284cbd5fea8db825752fec5b8a08deb6541d772dc682091e2c99c70d4`，常數 `PAIRED_TINYLM_SHA256` 與 `models.tsv` 的會意列相同（`core/src/colloquial.rs`、`data/models.tsv`）。
 
 ### 2.2 載入規則
 
@@ -177,7 +177,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 - `build_trigram.py --src-lm … --tri … --dst-lm … --out …` 把一張表改綁到另一個通語（詞用字串對應、前文重新排序、次數與剪枝前總數照抄）；來源詞不在目的詞彙裡預設停止，`--drop-missing` 才丟掉那些詞與含它們的前文與條目。寫檔先寫暫存檔再 rename，因為舊檔可能正被映射。
 - 連文項如何參與解碼（地板、回退）見 `docs/spec/decoder.md`。
 
-### 3.5 會意（`SJTL0001`～`SJTL0005`）
+### 3.5 會意（`SJTL0001`～`SJTL0006`）
 
 `tools/lib/export_sjtl.py` 寫，`core/src/tinylm.rs` 讀。魔術字串與版本欄一起選定標頭長度與有哪些欄位，檔案必須完整含有標頭才讀任何版本欄之後的欄位：
 
@@ -188,12 +188,13 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | 3 | 212 | 四組 (α, τ, δ) f64：聊天保守 116、聊天積極 140、書面保守 164、書面積極 188 |
 | 4 | 244 | 位移 212 的 32 bytes：調參時用的 `kn.sjkn` 的 SHA-256，全 0 表示沒有開 KN 時調的；版本 1～3 視為全 0 |
 | 5 | 248 | 位移 244 的 u32：模型讀的左側前文字數 L，必須 1 ≤ L ≤ 前文長 − 2，超出範圍整個檔拒絕 |
+| 6 | 256 | 位移 248 的 u32 格式旗標（bit 0＝邊界格式，其他位元必須是 0）、位移 252 的 u32 政策鍵門檻 K（有 bit 0 時 1 ≤ K ≤ 前文長 − 2，否則 0）；有 bit 0 時字表是 V − 4 個碼位，id V − 1 是 `[SEP]`。細節見 `docs/spec/semantic-rerank.md` §2.1、§5.2 |
 
-- 標頭之後：字表 (V − 3) 個 u32 碼位（id 0、1、2 是 PAD、UNK、BOS），然後依固定順序的張量（`emb`、`pos`、`lnf_w`、`lnf_b`，再每層 `ln1_w`、`ln1_b`、`qkv_w`、`qkv_b`、`proj_w`、`proj_b`、`ln2_w`、`ln2_b`、`fc1_w`、`fc1_b`、`fc2_w`、`fc2_b`），沒有逐張量標頭。二維矩陣是 f32 列主序，或 int8 列主序後接每列一個 f32 縮放（每列對稱量化，縮放 = max(|列|, 1e-12) ÷ 127，還原 = q × 縮放）；一維向量一律 f32。
+- 標頭之後：字表 (V − 3) 個 u32 碼位（id 0、1、2 是 PAD、UNK、BOS；版本 6 的邊界格式是 V − 4 個，最後一個 id 是 `[SEP]`），然後依固定順序的張量（`emb`、`pos`、`lnf_w`、`lnf_b`，再每層 `ln1_w`、`ln1_b`、`qkv_w`、`qkv_b`、`proj_w`、`proj_b`、`ln2_w`、`ln2_b`、`fc1_w`、`fc1_b`、`fc2_w`、`fc2_b`），沒有逐張量標頭。二維矩陣是 f32 列主序，或 int8 列主序後接每列一個 f32 縮放（每列對稱量化，縮放 = max(|列|, 1e-12) ÷ 127，還原 = q × 縮放）；一維向量一律 f32。
 - 載入限制：檔案 ≤ 64 MiB、一般檔案；權重型別 ≤ 1；層數 ≥ 1 且 ≤ 64、頭數 ≥ 1 且整除寬度、寬度 ≤ 2,048、前文長 ≥ 2 且 ≤ 1,024、字表 ≥ 3 且 ≤ 65,536；長度必須剛好；還原後的權重必須有限。
 - 每組 (α, τ, δ) 的檢查：α 有限、τ 不是 NaN、δ ∈ [0, 1000]。這三個值如何用在融合與強度，見 `docs/spec/semantic-rerank.md`。
-- 寫檔：`export_sjtl.py` 只寫版本 1～4。命令列給 `--levels` 就寫版本 4（沒給 `--kn-side` 時 32 bytes 全 0）；沒給 `--levels` 照舊寫版本 1 或 2；只給 `--kn-side` 是用法錯誤。`--kn-side` 的檔必須是 `SJKN0002` 而且記的通語雜湊等於 `--ngram-model`，寫檔前先驗證。版本 3 只由函式 `export` 在有 `levels` 而沒有 `kn_sha` 時寫（測試用的黃金檔）。
-- 驗證：`core/tests/tinylm_tiny.rs`（`header_fields_are_read`、`bad_files_are_format_errors`、`v2_reads_delta_and_otherwise_equals_v1`、`v3_reads_levels_and_otherwise_equals_v2`、`v4_reads_levels_and_the_kn_hash_and_otherwise_equals_v3`、`v4_bad_files_are_format_errors`、`v5_declares_the_left_context_length`）；`tools/test_export_sjtl.py`（`test_levels_write_version_3`、`test_levels_with_kn_side_write_version_4_with_its_hash`、`test_levels_without_kn_side_write_version_4_all_zero`、`test_without_levels_the_output_is_version_1_or_2_as_before`、`test_kn_side_alone_and_bad_side_files_write_nothing`、`test_committed_v4_golden_records_hashlib_of_kn_tiny`）。
+- 寫檔：`export_sjtl.py` 寫版本 1～6（版本 5 加 `--left-len`，版本 6 再加 `--boundary K`，都要 `--levels`；見 `docs/spec/semantic-rerank.md` §2.5）。命令列給 `--levels` 就寫版本 4（沒給 `--kn-side` 時 32 bytes 全 0）；沒給 `--levels` 照舊寫版本 1 或 2；只給 `--kn-side` 是用法錯誤。`--kn-side` 的檔必須是 `SJKN0002` 而且記的通語雜湊等於 `--ngram-model`，寫檔前先驗證。版本 3 只由函式 `export` 在有 `levels` 而沒有 `kn_sha` 時寫（測試用的黃金檔）。
+- 驗證：`core/tests/tinylm_tiny.rs`（`header_fields_are_read`、`bad_files_are_format_errors`、`v2_reads_delta_and_otherwise_equals_v1`、`v3_reads_levels_and_otherwise_equals_v2`、`v4_reads_levels_and_the_kn_hash_and_otherwise_equals_v3`、`v4_bad_files_are_format_errors`、`v5_declares_the_left_context_length`、`v6_declares_the_boundary_format_and_k`、`v6_matches_numpy_on_the_boundary_format`、`only_a_boundary_models_key_reads_nul_as_sep`、`the_sep_key_golden`、`key_for_len_is_key_for_without_the_boundary_flag`）；`tools/test_export_sjtl.py`（`TestBoundaryVersions`、`TestSepKeys`、`test_levels_write_version_3`、`test_levels_with_kn_side_write_version_4_with_its_hash`、`test_levels_without_kn_side_write_version_4_all_zero`、`test_without_levels_the_output_is_version_1_or_2_as_before`、`test_kn_side_alone_and_bad_side_files_write_nothing`、`test_committed_v4_golden_records_hashlib_of_kn_tiny`）。
 
 ## 4. 通語的建置
 
@@ -334,12 +335,14 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 - 繁體句不套 OpenCC `TWPhrases`，所以「權限」「插件」之類台灣原文不會被改寫；簡體來源的句子只換 §9.3 的 331 條大陸用詞。取捨：若繁體句也套，訓練文字裡的「權限」會變成「許可權」，會意從沒看過「權限」這個寫法，分數就偏向「全線」。
 - 訓練文字經由 §9 的 `native`／`mixed` 分類：已轉換過的口語池標 `native`，不轉第二次。
 - 每一步都開保留集比對守門。
-- 現行 SJ-SR-8-15M 的權重是從上一版（SJ-SR-7-15M）的權重接續訓練的（3,000 步、峰值學習率 1e-4、暖身 100 步、weight decay 0、沿用上一版字表），架構不變：6 層、寬 384、6 頭、前文 64、字表 10,351 個 id、14,646,912 個參數、int8（每列對稱量化）；檔案 14,886,880 bytes。匯出用 `export_sjtl.py --type int8 --ngram-model <通語> --kn-side <承接>`，格式 `SJTL0004`。匯出的方法核對：用上一版的 npz 與上一版檔頭的全部值重匯出，結果必須與上一版出貨檔逐位元組相同。（訓練與核對記錄來自 Release 說明，訓練腳本不在追蹤的樹裡，未在此驗證。）
+- 現行 SJ-SR-10-31M 的權重是從頭訓練的（不接續上一版、不蒸餾；一個 epoch、63,724 步），字表在訓練文字上重算（10,374 個字）：8 層、寬 512、8 頭、前文 64、字表 10,378 個 id（字，加 PAD、UNK、BOS、`[SEP]`）、30,566,400 個參數、int8（每列對稱量化）；檔案 30,927,424 bytes。上一版 SJ-SR-8-15M 是 6 層、寬 384、6 頭、字表 10,351 個 id、14,646,912 個參數、14,886,880 bytes。
+- 現行權重的訓練序列有兩種：每段一條一般格式（`[BOS] 段`）；固定選中的一半的段裡，同一行前面有文字的，另外多一條帶前文的（`[BOS] 前文 段`，前文裡每一段連續的非漢字是一個 `[SEP]`，整條不超過 64 個 token，只有段的 token 算損失）。所以模型讀邊界格式的長前文（`docs/spec/semantic-rerank.md` §5.2）。
+- 匯出用 `export_sjtl.py --type int8 --left-len 62 --boundary 4 --ngram-model <通語> --kn-side <承接>`，格式 `SJTL0006`（宣告的前文長度 L 62、政策鍵的門檻 K 4）。匯出的方法核對：同一份 npz、檔頭的格子改用先前量測那一次的值重匯出，結果必須與那次的檔（`5dce15a6…c37730`）逐位元組相同；出貨檔只差檔頭的格子。（訓練與核對記錄來自 Release 說明 `docs/releases/sj-sr-10-31m.md`，訓練腳本不在追蹤的樹裡，未在此驗證。）
 - 會意只在 n-gram 解碼出的前 8 名候選之間重排，不會產生新的文字；重排模型記憶體上限 250 MiB。
 
 ### 8.3 常談配對
 
-- 常談（`colloquial.sjlm`）只在聊天設定、載入的會意檔的 SHA-256 等於 `core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256`（`356a37be…0a97c5de`）時生效（`colloquial::applies`）；其他情形核心的行為與沒有常談表時相同。（評測 CLI 的 `--tinylm-paired` 量測時略過這個雜湊條件，`docs/spec/semantic-rerank.md` §4.6；出貨的判斷不變）。換了會意檔卻沒換這個常數，常談會悄悄關掉，所以兩者要在同一個變更裡一起改，並用 CLI 聊天三檔的摘要行都有 `+colloq:81c2470d` 與新的 `+tl:<會意前 8 碼>` 確認。
+- 常談（`colloquial.sjlm`）只在聊天設定、載入的會意檔的 SHA-256 等於 `core/src/colloquial.rs` 的 `PAIRED_TINYLM_SHA256`（`ee109fb284cbd5fea8db825752fec5b8a08deb6541d772dc682091e2c99c70d4`）時生效（`colloquial::applies`）；其他情形核心的行為與沒有常談表時相同。（評測 CLI 的 `--tinylm-paired` 量測時略過這個雜湊條件，`docs/spec/semantic-rerank.md` §4.6；出貨的判斷不變）。換了會意檔卻沒換這個常數，常談會悄悄關掉，所以兩者要在同一個變更裡一起改，並用 CLI 聊天三檔的摘要行都有 `+colloq:81c2470d` 與新的 `+tl:<會意前 8 碼>` 確認。
 - 常談表的內容與融合：見 `docs/spec/semantic-rerank.md`。常談表只有口語計數（詞彙 69,457、二元組合 365,888 條），用通語的計數詞表重數：口語計數檔 ×1 加公開口語池 ×1，繁體句不套 `TWPhrases`，剪枝門檻 2；不含 g0v 與論壇語料（含了之後記憶體超過預算，保守檔在私人的聊天集合上顯著變差）。
 - 常談表的署名清單 `colloquial-attribution.tsv` 與常談表同一次建置，每列有來源與句數，不含句子文字；`data/lm/colloquial-attribution.tsv` 的雜湊記在 `data/colloquial-attribution.tsv.sha256`，App 打包進 `Resources/LICENSES/`。
 
@@ -484,7 +487,7 @@ OpenCC 的對照表（`STCharacters`、`STPhrases`、`TWVariants`、`TWPhrases`�
 | `kn.sjkn` | `sj-kn-2-397k` | 1,587,772 | `data/kn.sjkn.sha256` |
 | `trigram.sjt3` | `sj-cx-2-7.7m` | 133,297,536 | `data/trigram.sjt3.sha256` |
 | `trigram-chat.sjt3` | `sj-cx-2-950k` | 15,114,784 | `data/trigram-chat.sjt3.sha256` |
-| `tinylm.sjtl` | `sj-sr-8-15m` | 14,886,880 | `data/tinylm.sjtl.sha256` |
+| `tinylm.sjtl` | `sj-sr-10-31m` | 30,927,424 | `data/tinylm.sjtl.sha256` |
 | `colloquial.sjlm` | `sj-cl-2-69k` | 4,713,933 | `data/colloquial.sjlm.sha256` |
 | `colloquial-attribution.tsv` | `sj-cl-2-69k`（同一個 Release 的另一個附件） | 2,000,233 | `data/colloquial-attribution.tsv.sha256` |
 
@@ -496,7 +499,7 @@ OpenCC 的對照表（`STCharacters`、`STPhrases`、`TWVariants`、`TWPhrases`�
 gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
 gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm
 gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm
-gh release download sj-sr-8-15m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
+gh release download sj-sr-10-31m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
 gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
 t=$(mktemp -d) && gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D "$t" && mv "$t/trigram.sjt3" data/lm/ && rmdir "$t"
 t=$(mktemp -d) && gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D "$t" && mv "$t/trigram-chat.sjt3" data/lm/ && rmdir "$t"

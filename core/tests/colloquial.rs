@@ -225,10 +225,10 @@ fn picks_by_level(tl: &TinyLm, ng: &[f64], cands: &[&str], words: &[Vec<&str>], 
     LEVELS.map(|l| tl.rerank_colloquial(ng, cands, words, "", co, l, &[], &Default::default()).unwrap().0)
 }
 
-/// `rerank_colloquial` fuses with the level's own cell (docs/spec/semantic-rerank.md §4.4; the 會意 SJ-SR-8-15M cells of docs/spec/semantic-rerank.md §4.4), not the
+/// `rerank_colloquial` fuses with the level's own cell (docs/spec/semantic-rerank.md §4.4; the 會意 SJ-SR-10-31M cells of docs/spec/semantic-rerank.md §4.4), not the
 /// toy file's header triple. One list, equal col everywhere (so the colloquial term is 0 and only alpha, tau and delta of the cell decide), the toy model's
-/// LLs (candidate 1 is 0.8252 above candidate 0) and an n-gram gap of 0.5: candidate 1 gains 1.1 * 0.8252 - 0.5 = 0.41 at the standard and aggressive cell
-/// (delta 0 takes it; the toy header's standard triple (0.7, 2, 0.25) would not: 0.08) and 1.3 * 0.8252 - 0.5 = 0.57 at the conservative one, below its delta 1.
+/// LLs (candidate 1 is 0.8252 above candidate 0) and an n-gram gap of 0.5: candidate 1 gains 1.4 * 0.8252 - 0.5 = 0.66 at the standard and aggressive cell
+/// (delta 0 takes it; the toy header's standard triple (0.7, 2, 0.25) would not: 0.08) and 1.2 * 0.8252 - 0.5 = 0.49 at the conservative one, below its delta 1.
 /// The aggressive cell is the standard one by design (docs/spec/semantic-rerank.md §4), so two levels share a pick and the conservative one differs: only the conservative delta 1 separates the two cells' picks.
 #[test]
 fn rerank_colloquial_fuses_with_the_levels_cell() {
@@ -240,8 +240,8 @@ fn rerank_colloquial_fuses_with_the_levels_cell() {
     assert!((ll[1] - ll[0] - 0.8252).abs() < 1e-3, "premise: the toy model's LLs {ll:?}");
     assert_eq!(picks_by_level(&tl, &ng, &cands, &words, &co), [1, 0, 1]);
     // the cells themselves (the fusion with the level's alpha and delta decides, whatever the header says)
-    assert_eq!(colloquial::cell(RerankLevel::Standard), (1.1, 2.0, 0.0));
-    assert_eq!(colloquial::cell(RerankLevel::Conservative), (1.3, 2.0, 1.0));
+    assert_eq!(colloquial::cell(RerankLevel::Standard), (1.4, 2.0, 0.0));
+    assert_eq!(colloquial::cell(RerankLevel::Conservative), (1.2, 2.0, 1.0));
     assert_eq!(colloquial::cell(RerankLevel::Aggressive), colloquial::cell(RerankLevel::Standard));
 }
 
