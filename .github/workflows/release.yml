@@ -43,7 +43,8 @@ jobs:
   # green. A mistake guard, not a security boundary (see the script).
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # CI_GATE_GRACE 300 s + CI_GATE_TIMEOUT 5700 s, plus slack
+    timeout-minutes: 105
     permissions:
       actions: read
       contents: read
