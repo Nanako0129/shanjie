@@ -3253,7 +3253,7 @@
      "top1": 69
     }
    },
-   "date": "2026-11-21",
+   "date": "2026-11-23",
    "holdout_chat": {
     "commit": "5409c526bfdb0731b4df5432c5bd7f0d01a5eb86",
     "n": 150,
@@ -3261,8 +3261,8 @@
     "top1": 132
    },
    "label": "v0.8.0+v0.9.0",
-   "load_avg_end": 2.92529296875,
-   "load_avg_start": 1.97900390625,
+   "load_avg_end": 2.96923828125,
+   "load_avg_start": 1.89404296875,
    "machine": "Mac18,1",
    "macos": "27.0",
    "models": {
@@ -3279,22 +3279,22 @@
    "speed": {
     "formal": {
      "keys": 8336,
-     "load_ms": 1059.9,
-     "max_us": 8593.8,
-     "p95_us": 2416.3,
+     "load_ms": 824.5,
+     "max_us": 7422.8,
+     "p95_us": 1951.2,
      "rounds": 3,
      "rows_match": "302/302",
-     "rss_mb": 489.0625
+     "rss_mb": 488.96875
     },
     "keys": 8336,
-    "load_ms": 1042.4,
-    "max_us": 10799.3,
-    "p95_us": 2282.9,
-    "rerank_p50_ms": 5.951,
-    "rerank_p95_ms": 8.284,
+    "load_ms": 824.5,
+    "max_us": 7006.0,
+    "p95_us": 1923.8,
+    "rerank_p50_ms": 5.523,
+    "rerank_p95_ms": 7.06,
     "rounds": 3,
     "rows_match": "302/302",
-    "rss_mb": 490.296875
+    "rss_mb": 488.6875
    },
    "version": "v0.8.0"
   },
@@ -3303,12 +3303,12 @@
     "dev302/chat": {
      "n": 302,
      "oracle64": 300,
-     "top1": 282
+     "top1": 287
     },
     "dev302/formal": {
      "n": 302,
      "oracle64": 300,
-     "top1": 280
+     "top1": 289
     },
     "fw/chat": {
      "n": 186,
@@ -3318,12 +3318,12 @@
     "fw/formal": {
      "n": 186,
      "oracle64": 186,
-     "top1": 176
+     "top1": 175
     },
     "probe/chat": {
      "n": 83,
      "oracle64": 82,
-     "top1": 79
+     "top1": 78
     },
     "probe/formal": {
      "n": 83,
@@ -3343,27 +3343,27 @@
     "user-reported/chat": {
      "n": 80,
      "oracle64": 78,
-     "top1": 70
+     "top1": 71
     },
     "user-reported/formal": {
      "n": 80,
      "oracle64": 78,
-     "top1": 69
+     "top1": 73
     }
    },
-   "date": "2026-11-21",
+   "date": "2026-11-23",
    "holdout_chat": {
-    "broken": 0,
-    "commit": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
-    "fixed": 0,
+    "broken": 3,
+    "commit": "530a80bdac4adfc9feb2e386a8b9729c775663f8",
+    "fixed": 6,
     "n": 150,
-    "p": 1.0,
+    "p": 0.5078,
     "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e",
-    "top1": 132
+    "top1": 135
    },
    "label": "v0.8.0+v0.9.0",
-   "load_avg_end": 2.92529296875,
-   "load_avg_start": 1.97900390625,
+   "load_avg_end": 2.96923828125,
+   "load_avg_start": 1.89404296875,
    "machine": "Mac18,1",
    "macos": "27.0",
    "models": {
@@ -3371,44 +3371,44 @@
     "classes.sjc": "4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43",
     "colloquial.sjlm": "81c2470d3956ee3a2c9377d7b8bc317739c1fe5b0c4793c29d6228a848fec8c4",
     "kn.sjkn": "880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a",
-    "tinylm.sjtl": "356a37beede1a754cb6e963a52d0f20ae6574cbcd332d0b1bfc9686c0a97c5de",
+    "tinylm.sjtl": "ee109fb284cbd5fea8db825752fec5b8a08deb6541d772dc682091e2c99c70d4",
     "trigram-chat.sjt3": "24ee8645817060508f12ec2731995244df00b913b305161f46e46527ea122275",
     "trigram.sjt3": "34305a2d749dcd7f8528250e03f24a8cb7f1042a940669a415374cdfbbc8d8eb"
    },
-   "ref": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
-   "sha": "af9b7f41a93a446641cb6c493310f2593b52a8c0",
+   "ref": "d0e32def34fef343ecd813b8655b87f9b6000607",
+   "sha": "d0e32def34fef343ecd813b8655b87f9b6000607",
    "speed": {
     "formal": {
      "keys": 8336,
-     "load_ms": 965.7,
-     "max_us": 8956.2,
-     "p95_us": 2253.3,
+     "load_ms": 821.5,
+     "max_us": 6634.3,
+     "p95_us": 1921.0,
      "rounds": 3,
      "rows_match": "302/302",
-     "rss_mb": 495.453125
+     "rss_mb": 496.8125
     },
     "keys": 8336,
-    "load_ms": 956.8,
-    "max_us": 9920.5,
-    "p95_us": 2342.4,
-    "rerank_p50_ms": 5.947,
-    "rerank_p95_ms": 9.076,
+    "load_ms": 837.7,
+    "max_us": 11366.6,
+    "p95_us": 1906.3,
+    "rerank_p50_ms": 10.255,
+    "rerank_p95_ms": 17.095,
     "rounds": 3,
     "rows_match": "302/302",
-    "rss_mb": 495.78125
+    "rss_mb": 496.859375
    },
    "version": "v0.9.0",
    "vs": "v0.8.0",
    "vs_prev": {
     "dev302/chat": {
-     "broken": 0,
-     "fixed": 0,
-     "p": 1.0
+     "broken": 1,
+     "fixed": 6,
+     "p": 0.125
     },
     "dev302/formal": {
-     "broken": 0,
-     "fixed": 0,
-     "p": 1.0
+     "broken": 1,
+     "fixed": 10,
+     "p": 0.01171875
     },
     "fw/chat": {
      "broken": 0,
@@ -3416,18 +3416,18 @@
      "p": 1.0
     },
     "fw/formal": {
-     "broken": 0,
-     "fixed": 0,
+     "broken": 3,
+     "fixed": 2,
      "p": 1.0
     },
     "probe/chat": {
-     "broken": 0,
+     "broken": 1,
      "fixed": 0,
      "p": 1.0
     },
     "probe/formal": {
-     "broken": 0,
-     "fixed": 0,
+     "broken": 1,
+     "fixed": 1,
      "p": 1.0
     },
     "typing76/chat": {
@@ -3441,14 +3441,14 @@
      "p": 1.0
     },
     "user-reported/chat": {
-     "broken": 0,
-     "fixed": 0,
+     "broken": 2,
+     "fixed": 3,
      "p": 1.0
     },
     "user-reported/formal": {
-     "broken": 0,
-     "fixed": 0,
-     "p": 1.0
+     "broken": 1,
+     "fixed": 5,
+     "p": 0.21875
     }
    }
   }
