@@ -52,6 +52,11 @@ fn engine_no_table(tag: &str) -> Engine {
     e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap(); // reads the overlay and demote files again
     std::fs::remove_dir_all(&dir).unwrap();
     e.set_english(true).unwrap();
+    // The base commit's mixed-word table had no row with a one-letter English part: with those rows Shift+A alone shows the row of
+    // docs/spec/prediction.md §3.5 (`A咖`), the only difference from the fixture (the `S-A` key of r02, r26 and r27). The shipped table without them.
+    let table = std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap();
+    let old: String = table.lines().filter(|l| l.starts_with('#') || !l.split('\t').next().is_some_and(|e| e.len() == 1)).map(|l| format!("{l}\n")).collect();
+    assert!(old.len() < table.len() && e.set_mixed_words(&old), "premise: the shipped table has one-letter rows, and loads without them");
     e
 }
 

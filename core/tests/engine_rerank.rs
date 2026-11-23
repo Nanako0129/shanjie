@@ -1117,3 +1117,56 @@ fn a_manual_word_typed_with_an_adjacent_key_slip_survives_the_rerank() {
     }
     assert!(tried >= 4, "{tried} slips tried");
 }
+
+/// docs/spec/english-mixed.md §5.7 (the English before the composition): with a small model that declares a left length loaded and English mixing
+/// on, a composition whose syllables are the reading of a mixed word of the letters the left text ends with shows the word's Han part. The
+/// rerank switch does not matter (the model stays loaded); English mixing off, no such model, other letters, another reading, or letters that
+/// may be the cut tail of a longer word leave every output as it is without the table.
+#[test]
+fn english_before_the_composition_takes_the_mixed_word() {
+    const TABLE: &str = "t\tㄒㄩˋ\tT恤\t1\nabcdefgh\tㄒㄩˋ\tabcdefgh恤\t1\n";
+    let v5 = upgraded(&rerank_model(), Some(8));
+    let make = |model: Option<&Path>, table: bool| {
+        let mut e = engine_with(model);
+        e.set_english(true).unwrap();
+        assert!(!table || e.set_mixed_words(TABLE));
+        e
+    };
+    let shown = |e: &mut Engine, left: &str, syls: &[&str]| {
+        e.reset(ResetMode::Discard);
+        e.set_left_context(left);
+        type_syls(e, syls).preedit
+    };
+    let (mut e, mut plain) = (make(Some(&v5), true), make(Some(&v5), false));
+    let today = shown(&mut plain, "T", &["ㄒㄩˋ"]);
+    assert!(today != "恤" && plain.left_full_chars() == 1, "premise: the model keeps the letter, the decoder shows another character: {today}");
+    assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), "恤");
+    assert_eq!(e.frozen_words(), [(0, 1, "恤".to_string())]);
+    assert_eq!(shown(&mut e, "今天穿T", &["ㄒㄩˋ"]), "恤", "a Han character before the letter");
+    assert_eq!(shown(&mut e, "abcdefgh", &["ㄒㄩˋ"]), "恤", "eight letters that are the whole text: not cut");
+    // Released like any frozen word, and not put back.
+    let o = type_syls(&mut e, &["ㄕˋ"]);
+    assert!(e.frozen_words().is_empty() && !o.preedit.starts_with('恤'), "{}", o.preedit);
+    assert_eq!(o.preedit, shown(&mut plain, "abcdefgh", &["ㄒㄩˋ", "ㄕˋ"]));
+    // Not these.
+    for (left, syls) in [("Tx", &["ㄒㄩˋ"][..]), ("9T", &["ㄒㄩˋ"]), ("xabcdefgh", &["ㄒㄩˋ"]), ("T", &["ㄕˋ"]), ("T ", &["ㄒㄩˋ"]), ("", &["ㄒㄩˋ"]), ("T", &["ㄒㄩˋ", "ㄒㄩˋ"])] {
+        assert_eq!(shown(&mut e, left, syls), shown(&mut plain, left, syls), "{left:?} {syls:?}");
+        assert!(e.frozen_words().is_empty(), "{left:?}");
+    }
+    assert_eq!(e.left_full_chars(), 1, "premise of the last case: the letter is kept");
+    // The rerank switch off: the model is still loaded.
+    e.set_rerank(false).unwrap();
+    assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), "恤");
+    // English mixing off.
+    e.set_english(false).unwrap();
+    plain.set_english(false).unwrap();
+    assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), shown(&mut plain, "T", &["ㄒㄩˋ"]));
+    assert!(e.frozen_words().is_empty());
+    // No model, or one that declares no length: the letter is not kept.
+    let v4 = upgraded(&rerank_model(), None);
+    for model in [None, Some(&*v4)] {
+        let (mut e, mut plain) = (make(model, true), make(model, false));
+        assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), shown(&mut plain, "T", &["ㄒㄩˋ"]));
+        assert!(e.left_full_chars() == 0 && e.frozen_words().is_empty());
+    }
+}

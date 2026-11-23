@@ -92,7 +92,7 @@
 ### 3.5 回退當下的輸出
 
 - `preedit` 是組字區加英文段；`english_run_utf16_start`／`english_run_utf16_len` 指向英文段（UTF-16 單位），殼畫粗底線並顯示提示（§4.6）。
-- 回退不送出任何東西（英文留在組字區）、不學習；英文段開著時沒有預測列、沒有候選窗。游標不在尾端時，英文段在中間，其餘的字分開解碼（§4.7）。
+- 回退不送出任何東西（英文留在組字區）、不學習；英文段開著時沒有候選窗，也沒有預測列（唯一的例外是 Shift 開的、只有大寫字母的英文段，`docs/spec/prediction.md` §3.5）。游標不在尾端時，英文段在中間，其餘的字分開解碼（§4.7）。
 
 ## 4. 英文段
 
@@ -117,7 +117,8 @@
 | Esc | 見 §4.5 |
 | 標點、Enter、Shift＋Enter、Tab、方向鍵、Home／End、Delete、其他 | 先結束英文段（成為 token），再照原本規則處理這個鍵；結束時若第 128 個單位使組字區整串送出，送出的文字放在這個鍵的輸出的 `commit`；Enter 遇到這種情況就到此為止 |
 
-- 英文段開著時，預測列清空，Tab 因此先結束英文段，沒有預測列可進。
+- 英文段開著時，預測列清空，Tab 因此先結束英文段，沒有預測列可進。例外：英文段只有 Shift 打的大寫字母、中英混合詞表有這些字母的列時，核心給出那些詞的預測列，Tab 進的是它（`docs/spec/prediction.md` §3.5）。
+- 空白鍵與聲調鍵在 Shift 開的英文段上，先看 §4.3 的「收尾鍵切分」；不成立才照上表。
 - **聲調提前**（T，同時成立才轉）：(1) 「快打時鍵序顛倒不當英文」開；(2) 這個英文段是 (c) 在聲調鍵開的、之後沒被改過：有還原點（§3.3），英文段最後一個字元是聲調鍵，英文段長度＝還原點的按鍵紀錄長度加 1（有覆寫的音節照樣成立：`a q 6 8`，ㄆ 蓋掉 ㄇ、ㄆˊ 不成字、再補 ㄚ，是「爬」）；(3) 還原點的這一欄是空的（這個鍵補的是聲調提前時還沒打的那一欄）；(4) 還原點的欄位加這個鍵的符號、再加那個聲調，是詞庫有的音節（`q 6 8`：ㄆ、ㄚ、ˊ＝ㄆㄚˊ「爬」）。只處理聲調鍵；空白鍵的 (c) 已經成 token（沒有還原點），不涵蓋。英文段多打了字或 Backspace 過，還原點就丟了，條件 (2) 不成立。還原時按鍵紀錄重設為還原點的影子的鍵加這一鍵（被覆寫掉的鍵忘掉，所以這個音節沒有 §6 的英文項）。
   - 代價：不按 Shift、打「字母＋聲調數字＋字母」，而且前兩個字元能成注音時，會變成中文（`a3o` 變「美」）。要英文用 Shift 開頭，或先按空白。量到的比例見 §14。
 
@@ -126,12 +127,22 @@
 - 英文段結尾能組成注音的**尾音節**，從英文段的文字當場算出（不另存狀態，所以 Backspace 不會讓它和畫面分歧）：從最後一個字元往前，每個字元必須是標準排列的注音鍵（小寫字母，或 `1 2 5 8 9 0 , . ; / -`；大寫字母、聲調數字與其他字元都停住），欄位嚴格遞增（往前看嚴格遞減），最多 3 個。例：`okji` 的尾音節是 `ji`（ㄨㄛ）；`gta` 的是 `a`；`A123` 的是空的。
 - 聲調鍵到達時：尾音節至少 2 個符號，而且「尾音節加這個聲調」在詞庫裡，就**切分**——尾音節前面的字元（非空時）成為英文 token，尾音節成為一個完成的音節單位（讀音含聲調），英文段關掉；`english_split()` 為真。否則這個數字接在英文段後面。
 - 例：`o k j i 3` 是 token `ok` 加 ㄨㄛˇ；`o k 1 8 7` 是 `ok` 加 ㄅㄚ˙；`o k g o 4` 不切（`go` 加四聲 ㄕㄟˋ 不在詞庫），成為英文段 `okgo4`；`r u s t 3 ␣` 是 token `rust3`（單一符號不切）。
+- **收尾鍵切分**（以中英混合詞表為閘，§5.7；先於上一條判斷）。同時成立才切：
+  1. 中英混打開著，游標在組字區尾端，英文段不是英數狀態打的、也不是回退開的（§3.3 的標記為假）。
+  2. 英文段的內容是「開頭連續的大寫字母 U（1 到 16 個）」加「其後全部是沒按 Shift 的注音鍵 t」（t 至少一個鍵；有聲調數字或其他字元就不成立）。判斷只看英文段現在的文字，所以用 Backspace 從 token 重開的段（§5.3）內容符合時也算。
+  3. 這個鍵是空白或聲調鍵。
+  4. t 加這個鍵照注音重播（§2，含同欄取代）恰好是一個詞庫有的音節 s：空白鍵是「沒有完成的音節、剩下的欄位加一聲在詞庫裡」，聲調鍵是「恰好完成一個音節、沒有剩下的符號」。
+  5. 表裡有英文等於 U 的小寫、讀音第一個音節是 s 的列。
+  - 動作：U 成為英文 token（寫法照 §4.4），s 成為完成的音節，英文段關掉，`english_split()` 為真；接著照 §5.7 自動套用。
+  - 例（表裡有 `k ㄕㄨ`、`t ㄗˋ`、`ok ㄅㄥ`）：Shift+K `g j ␣` 是 token `K` 加 ㄕㄨ，畫面「K書」（沒有這一列時是 token `Kgj`）；Shift+T `y 4` 是「T字」（單一符號也切）；Shift+O Shift+K `1 / ␣` 是「OK繃」；Shift+K `e k e ␣`（同欄取代，重播是 ㄍㄜ）在有 `k ㄍㄜ` 的表裡會切。
+  - 不成立就照原本的規則：`Kevin ␣`、`OK ␣`、`Windows ␣` 逐鍵輸出不變。英文單字會不會撞到表，由建表檢查擋（§5.7）。
 
 ### 4.4 結束成英文 token
 
 - 英文段變成 token 有兩條路：結束英文段（`end_run`：空白、標點、Enter、其他鍵、設定呼叫）與聲調鍵切分（§4.3，尾音節前面的字元）。兩者都用 `insert_token` 在游標處插入英文 token，讀音 `_punct_` 加照打的文字，固定詞是那串文字的**寫法**（`english_writing`）。
 - **寫法**：照打的文字全小寫、或只有第一個字母大寫，而且它的小寫等於正式寫法表某一行的小寫時，寫法是那一行（`chatgpt`、`Chatgpt` → `ChatGPT`；`macos` → `macOS`）；其他情況就是照打的文字（`CHATGPT`、`cHatgpt` 是使用者自己按 Shift 打的，不蓋掉；表裡沒有的 `rust`、`Rust` 照舊）。讀音不變，所以解碼的段落、學習的鄰居鍵與英文後預測（以小寫查表）都不受寫法影響。
 - **正式寫法表**由兩份檔組成，都是本專案自寫（CC0）、都編進核心（不經 C ABI、不打包成資源、沒有開關）：`data/english-extra.txt`（產品、品牌與縮寫；只收確定官方寫法的，常用英文字（rust、swift、line）與聊天裡多半刻意打小寫的縮寫不收）與 `data/lexicon/names-english.txt`（名單層的英文寫法，`docs/spec/lexicon-and-packs.md` §3）。兩份格式相同：一行一個寫法，`[A-Za-z]{3,32}` 而且至少一個大寫字母，`#` 開頭的行與空行略過；小寫在同一份或兩份之間都不得重複。格式錯誤在測試就失敗。
+- **中英混合詞自動套用時的例外**：英文 token 後面的音節被表固定成混合詞時（§5.7），token 的寫法換成表的寫法欄的英文部分，使用者自己按 Shift 打的大小寫也照換（`BETA` 接 ㄅㄢˇ 是「Beta版」、`cp` 接 ㄓˊ 是「CP值」），之後保持這個寫法；讀音仍是照打的文字。
 - **英數狀態下打的英文段不換**（英數狀態下用 Backspace 重開的英文段也算）：單按 Shift 的英數狀態（`set_ascii(1)`）下開的、接了字的，或打開英數時由未完成音節的鍵變成的英文段，不管由哪個鍵或呼叫結束（包括 `set_ascii(0)`，它先改狀態再結束英文段）都照打的留著，和組字區空著時字母直接交給 App 的結果一致。
 - **系統送出**：`reset` 模式 0（失焦、切換 App 時殼送出整個組字區）遇到開著的英文段，送出的那一段是它的寫法，和先按 Enter 相同；英數狀態下打的照打的送出。英文段開著時畫面上仍是照打的字。
 - 短詞清單的兩項（§6）、數字串與寫法清單的選擇不經過寫法：它們不是英文段結束，清單的選擇是使用者自己挑的。
@@ -156,6 +167,7 @@
 
 - 輸出多兩個欄位 `english_run_utf16_start`、`english_run_utf16_len`：英文段開著時是那段字母在 `preedit` 裡的 UTF-16 起點與長度，其他時候都是 0。
 - 殼：組字區的 marked text 整段細底線，英文段範圍改粗底線（`NSUnderlineStyle.thick`）；英文段開著、沒有候選時，候選窗的位置顯示一行不能選的提示「空白：英文斷開」，樣式與預測列相同（直式候選窗時用直式預測列樣式），沒有數字、沒有展開箭頭，點它不會送到核心。提示對齊英文段的起點，每個英文段只向輸入 App 問一次行位置，不隨每個字母重問。英文段結束時粗底線與提示一起消失。
+- **提示與預測列**：英文段開著而核心給了預測列時（`docs/spec/prediction.md` §3.5：Shift 打的大寫字母、表裡有它的混合詞），同一個位置顯示的是預測列，不顯示提示；樣式、Tab 圖示、點選都和一般預測列相同，粗底線照舊。殼只看輸出：`candidates` 非空就顯示預測列，空的而且英文段開著才顯示提示，所以不需要新的輸出欄位。英文段多了小寫或注音鍵之後核心不再給預測列，提示回來。
 
 ### 4.7 英文段在組字區中間
 
@@ -199,14 +211,21 @@
 
 英文後面接中文、合起來是一個詞的（CP值、SIM卡、QR碼、hold住、get不到）不在詞庫裡，也解不出來：英文 token 切開解碼的段落，候選範圍遇到 token 就停。它們另外放一張表，只當候選，解碼不變。
 
-- **表** `data/lexicon/mixed-words.tsv`（本專案自寫，CC0；每列寫法的依據在 `mixed-words-sources.tsv`）：`英文\t讀音\t寫法\t次數`，`#` 開頭的行與空行略過。英文是小寫 `[a-z][a-z0-9]{1,15}`；讀音是 1 到 4 個詞庫有的音節，以空白分隔；寫法的開頭不分大小寫等於英文，後面是和音節數一樣多的漢字；次數是正整數；同一組（英文、讀音）只能有一列；最多 5,000 列、256 KiB。`Engine::new` 從資料夾讀它（和 `digits.tsv` 同一處）；沒有這個檔、或任何一列不合規時整張表不載入（檔頭帶 BOM 也算不合規），引擎和沒有這個功能時相同，不回錯誤碼。沒有開關、沒有 C ABI 函式；中英混打關掉之後，組字區裡既有的英文 token 照樣會列出混合詞。
+- **表** `data/lexicon/mixed-words.tsv`（本專案自寫，CC0；每列寫法的依據在 `mixed-words-sources.tsv`）：`英文\t讀音\t寫法\t次數`，`#` 開頭的行與空行略過。英文是小寫 `[a-z][a-z0-9]{0,15}`（可以只有一個字母：`t`、`k`）；讀音是 1 到 4 個詞庫有的音節，以空白分隔；寫法的開頭不分大小寫等於英文，後面是和音節數一樣多的漢字；次數是正整數；同一組（英文、讀音）只能有一列；最多 5,000 列、256 KiB。`Engine::new` 從資料夾讀它（和 `digits.tsv` 同一處）；沒有這個檔、或任何一列不合規時整張表不載入（檔頭帶 BOM 也算不合規），引擎和沒有這個功能時相同，不回錯誤碼。沒有開關、沒有 C ABI 函式；中英混打關掉之後，組字區裡既有的英文 token 照樣會列出混合詞（清單那一項不看開關；下面的自動套用與 §4.3 的收尾鍵切分要中英混打開著）。次數只用來排 Shift＋字母的預測列（`docs/spec/prediction.md` §3.5）；次數是 1 的列是暫列，等計數補上。
 - **什麼時候出現**：游標在組字區尾端、沒有未完成音節，游標前是一個英文 token 加 k 個音節（k ≥ 1，token 到游標之間全部的音節），而且表裡有（token 讀音裡照打的文字轉小寫、這 k 個音節）這一列。只比對打的讀音，模糊輸入的替代讀音不比。游標在中間、token 和游標之間有其他 token、或音節數對不上時沒有這一項。
 - **位置**：↓ 或空白開的候選窗（按鍵規則表第 15 條；按鍵方案 1 的空白是空白，只有 ↓ 開窗）第一項就是混合詞，後面照舊是詞庫的詞、容錯詞、數字項與短詞的兩項（§6）。開窗時游標在第一項，所以 Enter 或 `1` 就選它；組字區顯示的字在選之前不變。這個窗不帶預測列的項目（`docs/spec/prediction.md` §5），即使開窗前預測列正顯示著。按鍵方案 1 的第 15d 條照舊把畫面上的那個詞選起來，它排在混合詞後面（第二項）。
 - **選了之後**：英文 token 和那 k 個音節換成**一個 token**，讀音 `_punct_` 加寫法（`_punct_CP值`），固定詞是寫法。寫法含漢字，所以它不是英文 token（§5.1），而是和標點同一種單位：切開解碼的段落（後面的字從句首開始解碼）、選它本身不學習、方向鍵一次跳過、Backspace 與 Delete 整個拿掉、Enter 送出寫法、Esc 清掉整個組字區；游標緊接在它後面按 ↓ 或空白開一個只有寫法一項的窗，選了不改任何東西。
 - **學習看到的前文**：混合詞之後打的字，學習的前文鍵取的是畫面文字尾端的漢字，所以是混合詞的最後一個字（`CP值` 之後改選的詞記在「值」底下；逗號之後的記在句首的鍵）。句首的詞後面緊接混合詞時，鄰居鍵是 `^>_punct_` 加那個寫法，每個混合詞各一個（英文 token 共用 `^>_punct_en`，§5.5）。
 - **⌘⌫**：對混合詞這一項不做任何事（它不是學來的）。遺忘清單裡別的新詞之後，混合詞仍是第一項、仍然選得到。
-- 不讓解碼器自己選混合詞：沒有從清單選它的話，任何按鍵序列的組字區與送出文字都和沒有這張表時相同。
-- 限制：英文要先成為 token（Shift 開頭打，或回退成英文）；照欄位順序剛好是合法注音的英文（短詞清單的字）與鄰鍵打錯開著時被收成中文的（§3.4）不會成為 token。只收英文在前、中文在後的詞。Windows 版中英混打關著，沒有這個功能。
+- **自動套用**（整張表都適用）：
+  - 觸發：只在補完一個音節的那一鍵檢查一次（聲調鍵或空白完成音節、數字列的尾段完成音節、聲調提前、§4.3 的兩種切分、選了 Shift＋字母的預測列）。條件和「什麼時候出現」相同，另外要中英混打開著：游標在組字區尾端、沒有未完成的音節、從英文 token 之後到游標的音節恰好等於表裡某一列的讀音。命中就把那幾個音節固定成那一列的漢字部分，token 的寫法換成那一列的英文部分（§4.4）。
+  - 這是引擎固定的詞（凍結，`docs/spec/keys-and-composition.md` §6.3），不學習。漢字部分整個是那幾個音節底下的詞庫詞時固定成一個詞；不是時（「不到」「海力士」）逐字固定，每個字都要是它那個音節的單字條目；兩種都做不到的列不套用（出貨的表每一列都套得上，由測試鎖住）。範圍裡有使用者自己選的詞時不套用。
+  - 釋放：後面再打的音節和它併成詞庫詞時照 `docs/spec/keys-and-composition.md` §6.4 釋放（T＋ㄒㄩˋ 是「T恤」，再打 ㄕˋ 是「T敘事」）。釋放之後這個 token 不再自動套用，直到 token 本身被刪掉；token 的寫法保持表的寫法（`cp ␣ 5 6` 是「CP值」，再打 ㄑㄧㄢˊ 是「CP值錢」）。沒有併成詞的音節不釋放（「T恤的」）。表裡有更長的列、而且較短的那一列沒被釋放時，打完更長的讀音就改成更長的那一列。
+  - 改選：↓ 清單照舊，第一項是混合詞（選它仍換成一個 token，見「選了之後」）；改選別的詞只換漢字部分，英文部分不變，這個 token 之後不再自動套用。從寫法清單替 token 另選寫法之後也不再套用。
+  - Backspace、方向鍵照各單位：Backspace 先刪漢字的音節（刪掉後再打同一個讀音會再套用一次），再輪到 token；token 被 Backspace 重開成英文段時回到使用者打的內容（「CP」重開是 `c`，§5.3）。
+- **前文結尾是英文**：組字區從頭到游標的音節（起點 0）也可以接在游標前文字結尾的英文後面。條件：中英混打開著；引擎載入了宣告前文長度 L 的會意（`docs/spec/semantic-rerank.md` §5.2：這時核心留著的前文才含單一字母與數字；和語意校正開不開無關，`set_rerank` 不卸載模型）；留著的前文結尾是 1 到 16 個 ASCII 字母或數字，再前一個字元不是字母或數字，而且這一段不是從被截斷的開頭算起。這時把這段英文當成英文 token 查表，其餘同自動套用（前文「T」＋ㄒㄩˋ 是「恤」；之後打 ㄕˋ 釋放成「敘事」）。只用核心已經留著的前文，不多留資料、不經 C ABI 回傳；前文裡的英文不會被改寫。只影響表裡有的（英文、讀音）：前文「Tx」「9T」、前文「T」＋ㄕˋ 都和沒有這條規則時相同。
+- **建表檢查**（`core/tests/engine_mixed.rs` 的 `no_english_word_runs_into_a_shipped_row`）：`english.tsv` 的 `E` 列、`data/english-extra.txt`、`data/lexicon/names-english.txt` 的每個字，取「首字母大寫」與「全部大寫」兩種寫法，各用 Shift 打進引擎再按空白；有表和沒有表的結果不同就算撞到（直接跑 §4.3 的判斷，含同欄取代）。撞到的列不收：`k ㄍㄜ K歌` 因此不在表裡（`Karaoke`、`Keke`、`Kek` 等 7 個字的重播是 ㄍㄜ）。`the_table_check_finds_a_word_that_replays_into_a_row` 用合成的表（`k ㄍㄜ`）與字（`keke`）確認這個檢查抓得到。
+- 限制：英文要先成為 token（Shift 開頭打，或回退成英文），或照 §4.3 整段用 Shift 打成大寫後直接接注音；照欄位順序剛好是合法注音的英文（短詞清單的字）與鄰鍵打錯開著時被收成中文的（§3.4）不會成為 token。只收英文在前、中文在後的詞。Windows 版中英混打關著：沒有自動套用與收尾鍵切分，清單的那一項照舊。其他見 §14。
 
 ## 6. 短詞清單與覆寫過的音節的英文項
 
@@ -378,6 +397,7 @@
 
 - `core/tests/engine_english.rs`（真實詞庫、標準排列）：回退——`overwrite_reverts_to_the_keys`、`order_reverts_to_the_keys`、`missing_syllable_on_space_is_one_token`、`missing_syllable_on_tone_opens_a_run`、`missing_syllable_on_tone_needs_key_order`、`missing_syllable_defers_to_adjacent_key_fuzzy`、`overwrite_switch_off_is_today`、`key_order_switch_off_is_today`、`eten_abbreviation_and_off_are_bitwise_today`、`revert_hook_describes_only_the_latest_key`、`backspace_before_a_revert_clears_the_column_key`；英文段——`letters_and_digits_go_on_the_run`、`tone_splits_a_two_symbol_tail`、`tone_does_not_split_one_symbol`、`tone_split_needs_the_lexicon`、`space_never_splits`、`shift_run_takes_digits_too`、`run_takes_the_shadow_letters_and_the_shift_letter`、`run_keeps_every_unfinished_key_a_run_accepts`、`run_is_32_letters_and_the_33rd_starts_the_next`、`run_backspace_and_escape`、`backspace_and_escape_on_a_reverted_run`、`other_keys_end_the_run_first`、`run_at_the_unit_limit_sends_in_the_output_of_the_ending_key`、`run_fields_point_at_the_run`、`a_run_in_the_middle_decodes_its_two_sides_apart`、`revert_in_the_middle_decodes_apart`、`esc_after_a_space_token_is_esc_after_any_token`；token——`chinese_item_follows_the_revert`、`english_token_definition_covers_digits`、`down_after_the_token_lists_its_three_writings_and_space_types_a_space`、`space_twice_types_a_space_unit_and_one_backspace_takes_it`、`a_space_unit_has_no_list_and_space_in_front_of_a_token_opens_nothing`、`backspace_after_an_english_token_deletes_one_letter_at_a_time`、`token_next_key_is_the_fixed_en_for_learning_and_lookup`；短詞——`english_short_is_as_documented`、`short_list_adds_two_items_at_the_end`、`short_list_after_preceding_syllables`、`short_list_is_only_for_the_syllable_just_made`、`short_list_never_reverts`、`every_setting_clears_the_short_word_mark`、`keys_that_change_nothing_keep_the_short_word_mark`；窮舉——`every_syllable_alone_and_sampled_readings_never_revert`（取樣 40,000 個讀音，固定種子）、`every_reversed_key_order_of_every_syllable_is_never_english`、`reversal_guard_chinese_in_a_hurry_english_words_still_come`、`reversal_guard_keeps_the_typed_order_in_every_run`；聲調提前（§4.2）——`a_tone_key_one_place_early_is_put_back_behind_the_next_zhuyin_key`、`a_tone_moved_up_is_not_guessed_when_the_conditions_fail`（`q 6 g`、`q 6 m`、`S-A 3 o`、`q 6 z 8`、`c p ␣`）、`a_tone_moved_up_after_a_replaced_key`（`a q 6 8`）；按鍵紀錄、注音重播與中文項——`the_english_of_a_revert_is_every_key_typed`（預設設定的 `meeting`、`trigger`、`hello`、`paper`）、`an_overwritten_syllable_lists_the_english_of_its_keys`（`speech`、`test`、`qai`）、`esc_on_a_reverted_run_is_the_zhuyin_replay`、`the_token_of_a_reverted_run_has_the_chinese_item_of_its_characters`、`the_record_follows_the_shadow_when_it_catches_up`、`the_record_after_esc_drops_the_ignored_tone`、`the_record_is_capped_so_a_revert_fits_a_run`、`the_zhuyin_replay_is_the_engine_with_mixing_off`（注音重播與比對引擎逐項相同：詞庫取樣的讀音加隨機覆寫鍵 2,500 串、英文段可能裝的字元的隨機串 2,500 串、五個固定例，固定種子）；單按 Shift 的英數狀態——`ascii_*`；正式寫法（§4.4、§5.3）——`a_word_of_the_table_takes_its_writing`、`a_name_of_the_names_layer_takes_its_writing`、`other_casings_stay_as_typed`、`the_chinese_item_stays_after_the_writing`、`the_head_of_a_tone_split_takes_its_writing`、`backspace_reopens_what_was_typed`、`a_run_typed_in_the_ascii_state_stays_as_typed`、`reset_commit_sends_an_open_run_in_its_writing`。表本身的檢查在 `core/src/engine.rs` 的 `english_table_tests`（兩份檔都載入、壞行與同一份或兩份之間的重複被拒絕）。
 - `core/tests/engine_mixed.rs`（真實詞庫與模型、測試用小表）：§5.7 的每一條——`revert_token_then_syllable_lists_the_mixed_word`、`shift_token_then_syllables`、`pick_makes_one_token`、`pick_then_more_syllables_decode_alone`、`pick_is_not_learned`、`edit_after_pick`、`down_and_space_after_pick`、`forget_on_mixed_item_does_nothing`、`forgetting_a_new_word_leaves_the_mixed_item`、`middle_cursor_no_table_and_no_match_are_today`、`bad_table_is_not_loaded`、`mixed_item_sits_before_the_short_items`、`the_mixed_word_is_first_with_a_prediction_row_showing`、`key_scheme_1_keeps_the_mixed_word_first`、`the_table_comes_with_the_data_folder`、`the_learning_context_after_the_mixed_word`；`every_check_set_word_is_listed` 用出貨的表逐列打檢查集 `eval/dev/mixed-words/words.txt`（英文第一個字母按 Shift），每一列都要在清單裡，檢查集與表逐列相同。
+- `core/tests/engine_mixed.rs` 的字母詞部分（合成的表，不讀出貨列的次數）：收尾鍵切分 `shift_letter_and_a_reading_split_at_space`、`shift_letter_and_a_reading_split_at_a_tone_key`、`a_one_symbol_syllable_splits_with_a_row`、`two_letters_and_a_reading`、`only_a_shift_run_at_the_end_splits`、`english_words_are_untouched`、`without_a_hit_every_key_is_as_without_the_table`；自動套用 `a_longer_word_releases_the_han_part_for_good`、`the_token_takes_the_tables_writing_and_keeps_it`、`another_word_stays`、`backspace_goes_unit_by_unit`、`the_automatic_word_is_not_learned`、`the_digit_layer_closes_the_syllable_too`（App 的建法，`5 6` 經過數字列）；預測列與學習見 `docs/spec/prediction.md` §10；建表檢查 `the_table_check_finds_a_word_that_replays_into_a_row`、`no_english_word_runs_into_a_shipped_row`。`every_check_set_word_is_listed` 另外斷言出貨的表每一列兩種打法（token 再接讀音；整段 Shift 大寫直接接讀音）畫面都是寫法欄。前文結尾是英文：`core/tests/engine_rerank.rs` 的 `english_before_the_composition_takes_the_mixed_word`（宣告 L 的小模型；語意校正關、中英混打關、沒有模型、被截斷的開頭各一種）。
 - `core/tests/engine_digits.rs`：`row01`–`row47`（每一列對應一個按鍵序列的預期，句首語境下的評分列斷言最後的 `syls` 與 golden 記的每鍵顯示，不是手寫的直覺）、`a12_*`（↓／Enter 照畫面）、`review_p2_*`／`p3_*`／`p4_*`（128 單位送出不帶舊尾段、Enter 送出剩餘緩衝、⌘⌫ 後保留數字項、點預測列清 `last_digits`、設定函式清 `last_digits`、↑ 不吐 token）。`row49_scores_match_the_python_golden_bit_for_bit` 與 `predict_digits_matches_the_python_golden_bit_for_bit` 把每鍵的切分與分數（解析成 f64 比位元）、預測列與 `reference/proto/digits_score.py` 產生的 `eval/golden/digits-score.txt`、`digits-pred.txt` 比對；golden 在 macOS 產生，Linux 的 libm 末位不同，這兩個測試只在 macOS 的 CI 跑（Linux／WSL 跳過）。`goldens_name_the_files_they_were_made_with` 核對 golden 檔頭記的表、模型與詞庫雜湊。
 - `core/tests/engine_digits.rs` 的第二部分（用 App 的建法：`Engine::new` ＋ `load_lm`，英打開關是 App 的預設，所以和上面的 `row*` 分開）：`hurried_syllables_are_read_as_typed_in_order`（`. u 3` 句首與接在「我」後、`. w 6`、`8 w ␣`、`5 / j ␣`、`/ 5 4`、`8 q 6`、`2 i j 6`、`q 6 8`，每鍵的畫面都斷言）、`hurried_syllables_that_stay_numbers_at_the_sentence_start`（句首 `9 y 4`、`2 0 u 4`、`0 1 4` 仍是數字，§14）、`a_number_before_chinese_stays_a_number`（`8 s u 0 6`、`8 e k 7`、`9 2 u 0 3`、`2 0 2 6 s u 0 6`、`8 g 4`、`9 h 4`、`3 . 5`、`9 5 5 k 6`、`1 9 8 4 ⏎`、`. . .`、`- -`、`1 / 2`）、`the_rejoin_does_not_depend_on_the_key_order_switch`、`with_the_guard_off_every_key_is_the_baselines`（fixture `core/tests/fixtures/reversal-guard-off.tsv`：基準 `98385de9` 的每鍵輸出，保護關著時兩種「依按鍵順序」設定、保護開著而它關著的 `q 6 8`、以及 T 不該轉的五串）、`a_key_that_is_passed_on_keeps_the_late_tokens`（第 1、5q 條的直通鍵）、`any_other_key_makes_the_late_tokens_final`（Backspace、←→、Esc、標點、Shift＋1、Shift＋A、`reset(Commit)` 七條，每鍵的畫面與單位）、`two_late_keys_and_the_next_key_hits_one_column`（`1 . u s ␣`）、`the_128th_unit_is_sent_and_not_taken_back`（127 個單位之後不併回、126 個併回）、`the_cursor_in_the_middle`、`every_reversed_key_order_is_never_an_english_run_with_the_digit_layer_on`（詞庫每個音節的每種顛倒鍵序，3,457 種：英文＝0，仍是數字的種數 ≤ 410；實測 372）、`the_penalty_hook_with_the_constants_changes_nothing`、`reorder_scores_match_the_python_golden_bit_for_bit`（`eval/golden/digits-reorder.txt` 的 `decide` 列與 `late_decision` 列，Python 的位元）、`late_inputs_in_the_engine_are_the_golden_rows`（引擎在收尾鍵交給 `late_decision` 的輸入逐欄等於 golden 帶 `script=` 的列）。golden 檔頭的雜湊由 `digits_goldens_were_made_from_the_current_inputs` 核對（三個檔）。
 - `core/tests/engine_digits_off.rs`：總開關關著、或開著而沒有數字表時，`digits-off.txt`／`digits-off-en.txt` 兩個 fixture 逐欄與沒有數字功能的引擎相同（fixture 是功能加入前的程式產生的輸出，不是和自己比）。
@@ -391,6 +411,7 @@
 - `CJKSpacingTests`：純函式表格、送出與 p 的生命週期（分兩次送出、學習暫停只略過開頭、直通鍵清 p、組字開始的鍵帶修飾鍵清舊 p、異體字選擇符的漢字算漢字）、`testSettingsModelFollowsTheShellAndTheNoteIsTheContractsLine`（設定模型跟 `Shell`，說明文字逐字等於 §11）。
 - `EnglishDefaultsNoticeTests`：重設邏輯（空 domain、舊設定鍵、其他任何鍵、只有標記鍵、只有學習檔、已有標記、沒存值預設關、存開仍開）、說明視窗決策（activate 後第一個鍵顯示且照常處理、沒有 activate 的換手、`flagsChanged` 不觸發、按鈕與關閉鈕、activate 與晚到的 deactivate 兩種順序、新程序旗標還在再跳）、位置與文字。
 - 設定與選單測試：各存值預設、每次 `build()` 送四個開關、反灰條件、選單位置。
+- `ShellTests.testRunRowTakesTheHintsPlace`（§4.6）：Shift+K 時面板是核心給的預測列、不是提示，粗底線照舊；多打一個小寫字母後提示回來；Tab、Enter 與點選都選得到。測試資源清單（`Support.swift`）含 `mixed-words.tsv`。
 
 ### 13.3 `english-sim`（`cargo run --release -q -p cli -- english-sim`）
 
@@ -444,6 +465,13 @@
   - 覆寫過的音節的英文項只在剛完成的那個音節上（§6）；按了別的鍵之後要英文，得刪掉重打。兩個鍵都是數字鍵（沒有數字列時的 `1 1 ␣`）時兩項相同。
 - 數字列：畫面顯示「ㄅ」（或 ㄉ ㄓ ㄚ ㄞ ㄢ ㄦ ㄡ ㄥ 開頭的單一鍵）時按 Enter 送出的是「ㄅ」，不是「1」（§7.5）；ㄅ、ㄉ、ㄓ 開頭的音節第二個鍵打錯成不合法的組合時，前面的鍵會先變成數字，要多按一次 Backspace。
 - 說明視窗：游標位置未知時視窗放在上半部（§10.3）；游標在螢幕正中線時算上半部。
+- 中英混合詞的自動套用（§5.7、§4.3）：
+  - 「前文結尾是英文」只在載入宣告前文長度的會意時生效。沒載入會意的引擎（量測 CLI 不帶 `--tinylm`、測試用的引擎）只留前文結尾 2 到 32 個字母的英文字，前文「T」不會留下，這條不生效、行為和沒有這條規則時相同。App 一律載入會意，所以 App 裡只看中英混打開關。
+  - 直接接注音（不先按空白）時，英文要整段用 Shift 打成大寫（`CP56`、`T vm4`）；`Cp56` 的 U 只有 `C`，不切。英文部分含數字的列只能用「先成為 token 再接讀音」的打法。
+  - 多音節的列，直接接注音時切分看的是第一個音節；第一個音節切出去之後，其餘音節不是這一列的讀音時，前面已經是 token 加音節，不會變回一個英文字。
+  - `K歌` 不在表裡（建表檢查，§5.7），Shift+K 接 ㄍㄜ 仍是 `Kek`。
+  - 自動套用蓋過使用者按 Shift 打的大小寫（§4.4）；要保留自己的大小寫，從寫法清單另選一次（之後這個 token 不再套用）。
+  - 按鍵方案 1（Windows 版）下 Shift＋字母插入的半形大寫字母單位也是英文 token，所以 ↓ 清單會列出單一字母的混合詞（T恤）；自動套用要中英混打開著，Windows 版關著，沒有。
 
 ## 15. 設計取捨
 

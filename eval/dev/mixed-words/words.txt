@@ -1,3 +1,4 @@
+a|ㄎㄚ|A咖
 ban|ㄉㄧㄠˋ|ban掉
 beta|ㄅㄢˇ|Beta版
 cp|ㄓˊ|CP值
@@ -11,19 +12,26 @@ hold|ㄅㄨˋ ㄓㄨˋ|hold不住
 hold|ㄓㄨˋ|hold住
 ic|ㄎㄚˇ|IC卡
 jr|ㄉㄨㄥ ㄖˋ ㄅㄣˇ|JR東日本
+k|ㄕㄨ|K書
 keroro|ㄐㄩㄣ ㄘㄠˊ|Keroro軍曹
 lamigo|ㄊㄠˊ ㄩㄢˊ|Lamigo桃猿
 ns|ㄅㄢˇ|NS版
+ok|ㄅㄥ|OK繃
 pdf|ㄉㄤˇ|PDF檔
 ph|ㄓˊ|pH值
 pin|ㄇㄚˇ|PIN碼
+po|ㄨㄣˊ|PO文
 polo|ㄕㄢ|Polo衫
 pos|ㄐㄧ|POS機
 pr|ㄓˊ|PR值
+q|ㄅㄢˇ|Q版
 qr|ㄇㄚˇ|QR碼
 raw|ㄉㄤˇ|RAW檔
 san|ㄓˊ|SAN值
 sd|ㄎㄚˇ|SD卡
 sim|ㄎㄚˇ|SIM卡
 sk|ㄏㄞˇ ㄌㄧˋ ㄕˋ|SK海力士
+t|ㄒㄩˋ|T恤
+t|ㄗˋ|T字
 visa|ㄎㄚˇ|VISA卡
+x|ㄍㄨㄤ|X光

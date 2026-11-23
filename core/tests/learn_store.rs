@@ -211,6 +211,44 @@ fn synthetic_keys_round_trip_and_old_records_are_dropped() {
     assert!(again == kept, "records differ (contents not printed: R2)");
 }
 
+/// docs/spec/learning.md §5.2: the key of a pick from the row of an open English run, `^en:` plus the English part in lower case, survives a save and
+/// a load; `valid` accepts only a word that is that English part and one Han character per syllable. (A build without this key drops the line at
+/// load and its first full rewrite leaves it out: measured on the commit before this key, docs/spec/learning.md §5.2.)
+#[test]
+fn en_keys_round_trip_and_malformed_ones_are_dropped() {
+    let (_p, dir) = temp();
+    let (store, _, _) = LearnStore::open(&dir).unwrap();
+    let kept = vec![
+        rec("^en:k", "ㄕㄨ", "K書", 1.0, 20_000),
+        rec("^en:get", "ㄅㄨˊ-ㄉㄠˋ", "get不到", 1.0, 20_000),
+        rec("^en:ph", "ㄓˊ", "pH值", 1.0, 20_000),
+        rec("^en:mp3", "ㄐㄧ", "MP3機", 1.0, 20_000),
+    ];
+    let dropped = vec![
+        rec("^en:", "ㄕㄨ", "書", 1.0, 20_000),            // no English part
+        rec("^en:K", "ㄕㄨ", "K書", 1.0, 20_000),          // not lower case
+        rec("^en:3c", "ㄕㄨ", "3C書", 1.0, 20_000),        // starts with a digit
+        rec("^en:k", "ㄕㄨ", "書", 1.0, 20_000),           // the word lacks the English part
+        rec("^en:k", "ㄕㄨ", "T書", 1.0, 20_000),          // another English part
+        rec("^en:k", "ㄕㄨ", "K書書", 1.0, 20_000),        // more characters than syllables
+        rec("^en:k", "ㄕㄨ", "Kx", 1.0, 20_000),           // not a Han character
+        rec("^en:k", "_punct_，", "K書", 1.0, 20_000),     // a token's reading
+        rec("^en:abcdefghijklmnopq", "ㄕㄨ", "abcdefghijklmnopq書", 1.0, 20_000), // seventeen letters
+    ];
+    let all: Vec<Record> = dropped.iter().take(1).chain(&kept).chain(dropped.iter().skip(1)).cloned().collect();
+    store.save(&all).unwrap();
+    let want = format!("{HEADER}\n{}", kept.iter().map(|r| format!("{}\t{}\t{}\t1\t20000\n", r.context, r.reading.join("-"), r.word)).collect::<String>());
+    assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), want, "save writes no malformed key");
+    let mut text = want.clone();
+    for r in &dropped {
+        let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{}\t{}\t{}\t1\t20000\n", r.context, r.reading.join("-"), r.word));
+    }
+    fs::write(dir.join(FILE), text).unwrap();
+    let (_, records, opened) = LearnStore::open(&dir).unwrap();
+    assert_eq!(opened, Opened::Loaded { skipped: dropped.len() });
+    assert!(records == kept, "records differ (contents not printed: R2)");
+}
+
 /// docs/spec/learning.md §7.1: the mid key (`^>` plus two syllables joined by FINE_SEP, a control character) and the fine key (three syllables, or two
 /// and `$`) of a single character survive a save and a load as written; `valid` accepts exactly the well-formed shapes: not a word of two or more characters, not an
 /// empty or missing part, not four parts, not `$` anywhere but the third part, not an English/digit/punctuation neighbour (`_punct_...`) or a control character in

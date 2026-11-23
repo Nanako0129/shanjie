@@ -664,6 +664,42 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.panel.visible)
     }
 
+    /// docs/spec/english-mixed.md §4.6, docs/spec/prediction.md §3.5: when the core gives a prediction row for the open run (Shift+K: the mixed words of K), the
+    /// panel shows the row in the hint's place, with the run still under the thick underline; once the run is no longer the letters alone the
+    /// core gives none and the hint is back. Tab and Enter choose the first item; a click chooses too.
+    func testRunRowTakesTheHintsPlace() {
+        let c = englishController()
+        c.session.activate()
+        c.type("w", flags: .shift)
+        XCTAssertEqual(c.panel.hint, "空白：英文斷開", "premise: a run without a row shows the hint")
+        c.press(Keys.esc)
+        c.type("k", flags: .shift)
+        XCTAssertEqual(c.client.marked, "K")
+        XCTAssertNil(c.panel.hint, "the row, not the hint")
+        XCTAssertTrue(c.panel.visible)
+        XCTAssertEqual(c.panel.items, ["K書"])
+        XCTAssertEqual(c.panel.selected, -1, "a passive row")
+        XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 1), style: NSUnderlineStyle.thick.rawValue)])
+        c.type("e")
+        XCTAssertEqual(c.panel.hint, "空白：英文斷開", "a lower-case letter: no row, the hint again")
+        c.press(51)  // Backspace: the letters alone again
+        XCTAssertNil(c.panel.hint)
+        XCTAssertEqual(c.panel.items, ["K書"])
+        c.press(48)  // Tab enters the row
+        XCTAssertEqual(c.panel.selected, 0)
+        c.press(36)  // Return chooses
+        XCTAssertEqual(c.client.marked, "K書")
+        XCTAssertNil(c.panel.hint)
+        XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 2), style: NSUnderlineStyle.single.rawValue)], "the run ended")
+        c.press(36)
+        XCTAssertEqual(c.client.text, "K書")
+        // A click on the passive row chooses too (the hint takes no click, `testClickOnTheHintPicksNothing`).
+        c.type("k", flags: .shift)
+        XCTAssertEqual(c.panel.items, ["K書"])
+        XCTAssertTrue(c.session.candidateSelected(at: 0))
+        XCTAssertEqual(c.client.marked, "K書")
+    }
+
     /// The hint is not a candidate: a click on it never reaches the core (`Session.candidateSelected` returns false and the
     /// composition is as it was), where a click on a real candidate does (true control).
     func testClickOnTheHintPicksNothing() {

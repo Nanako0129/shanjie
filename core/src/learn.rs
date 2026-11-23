@@ -206,6 +206,11 @@ pub enum Level {
     Global,
 }
 
+/// docs/spec/learning.md §4.4: the key prefix of a pick from the prediction row of an open English run (`^en:k` for Shift+K): the prefix and
+/// the English part in lower case. Only that row's order reads these records (`Learner::en_weight`): no decode, window, ordinary row or
+/// rerank weight looks a context up that starts with it, and they never count toward the global level.
+pub const EN_PREFIX: &str = "^en:";
+
 /// A one-character word: no global level, no last-character level, learned only under a full two-character
 /// context (docs/spec/learning.md §5.3) or at sentence start under `^>` plus the next syllable's reading (rule 10, `single_key_ok`).
 pub fn is_single(word: &str) -> bool {
@@ -483,7 +488,7 @@ impl Learner {
         let keys: std::collections::HashSet<&str> = ix
             .iter()
             .map(|&i| &self.records[i])
-            .filter(|r| r.word == word && r.context != GLOBAL && r.context != NEWWORD && decayed(r, today) >= ACTIVE)
+            .filter(|r| r.word == word && r.context != GLOBAL && r.context != NEWWORD && !r.context.starts_with(EN_PREFIX) && decayed(r, today) >= ACTIVE)
             .map(|r| if r.context.starts_with(NEXT_PREFIX) { NEXT_PREFIX } else { r.context.as_str() })
             .collect();
         if keys.len() >= 2 {
@@ -497,6 +502,17 @@ impl Learner {
         }
         touched
     }
+    /// docs/spec/learning.md §4.4: one pick from the row of an open English run, at the commit: weight + 1 under the `EN_PREFIX` key `context`.
+    /// Nothing is halved and nothing globalizes. Returns the record as it now is.
+    pub fn teach_en(&mut self, context: &str, reading: &[String], word: &str, today: i64) -> Record {
+        debug_assert!(context.starts_with(EN_PREFIX));
+        self.bump(context, reading, word, today, 1.0)
+    }
+    /// The decayed weight of the `EN_PREFIX` record (context, reading, word) when it is active (`ACTIVE`), else 0: what orders the row of an
+    /// open English run.
+    pub fn en_weight(&self, context: &str, reading: &[String], word: &str, today: i64) -> f64 {
+        self.find(context, reading, word).map(|i| decayed(&self.records[i], today)).filter(|&w| w >= ACTIVE).unwrap_or(0.0)
+    }
     /// Words with an active record for `reading` reachable from `context` by the docs/spec/learning.md §6.1 lookup order
     /// (exact, last character, global), with their decayed weight, and the level that answered. The
     /// first level that has any usable record answers; a word found by several records of that level
@@ -509,7 +525,7 @@ impl Learner {
         let last = context.chars().next_back().filter(|_| context != SENTINEL && context != GLOBAL && !context.starts_with(NEXT_PREFIX));
         let levels: [(Level, &dyn Fn(&str) -> bool); 3] = [
             (Level::Exact, &|c| c == context),
-            (Level::LastChar, &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && !c.starts_with(NEXT_PREFIX) && c.chars().next_back() == Some(l))),
+            (Level::LastChar, &|c| last.is_some_and(|l| c != SENTINEL && c != GLOBAL && !c.starts_with(NEXT_PREFIX) && !c.starts_with(EN_PREFIX) && c.chars().next_back() == Some(l))),
             (Level::Global, &|c| c == GLOBAL),
         ];
         for (lv, level) in levels {
@@ -595,6 +611,29 @@ fn over_cap<'a>(live: &'a mut [usize], cap: usize, w: &[f64]) -> &'a [usize] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// docs/spec/learning.md §4.3, §5.4: a record under an `EN_PREFIX` key is one teach of weight 1 and never a key of the global level: with it and one
+    /// ordinary key there is no global record (two ordinary keys make one); no lookup from another context returns it, and pruning keeps it.
+    #[test]
+    fn an_en_record_is_no_context_of_the_global_level() {
+        let reading = vec!["ㄕㄨ".to_string()];
+        let mut l = Learner::default();
+        let r = l.teach_en("^en:k", &reading, "K書", 100);
+        assert!(r.context == "^en:k" && r.weight == 1.0 && l.records().len() == 1);
+        assert_eq!(l.en_weight("^en:k", &reading, "K書", 100), 1.0);
+        assert_eq!(l.en_weight("^en:k", &reading, "K書", 100 + 28), 0.0, "below ACTIVE after two half-lives");
+        l.teach("去唱", &reading, "K書", "", 100);
+        assert!(l.records().iter().all(|r| r.context != GLOBAL), "one ordinary key and the en key: not global");
+        for key in ["去唱", "唱", "^>$", "^>ㄕㄨ", "k", "^en:ok"] {
+            let (_, hits) = l.lookup(key, &reading, 100);
+            assert!(key == "去唱" || key == "唱" || hits.is_empty(), "{key}");
+        }
+        l.teach("要去", &reading, "K書", "", 100);
+        assert_eq!(l.records().iter().filter(|r| r.context == GLOBAL).count(), 1, "control: two ordinary keys globalize");
+        l.prune(100);
+        assert_eq!(l.records().iter().filter(|r| r.context.starts_with(EN_PREFIX)).count(), 1);
+        assert_eq!(l.en_weight("^en:k", &reading, "K書", 100), 1.0);
+    }
 
     /// docs/spec/learning.md §7.1: the mid key holds two syllable readings; none when one is missing or is English, a space unit, digits or
     /// punctuation (any `_punct_` reading), `$` or empty. `is_mid_key` accepts exactly what `mid_key` makes, and `single_key_ok` takes it next to the coarse and

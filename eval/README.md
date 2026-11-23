@@ -25,7 +25,7 @@
 | `english/probe-common.txt`、`english/probe-ai.txt` | 208、56 | 不適用（英文字，一行一個，小寫） | 中英混打正式寫法表（`data/english-extra.txt`，`docs/spec/english-mixed.md` §4.4）的涵蓋清單：常見的技術、品牌與 App 名稱，以及 AI 廠商與產品名，專案自寫（CC0）。只用來數「幾個字在表裡」，不是評測列 |
 | `dev/reading-norm/context.txt` | 851 | 目標字用被檢查的讀音，鄰詞用 `data/lexicon/mcbpmf-data.txt` 分數最高的讀音 | 讀音項音節歸零（`docs/spec/decoder.md` §5）的句中檢查集：`tools/reading_norm_probe.py` 從規則動到的 61 對（字, 讀音）（`core/tests/fixtures/reading-norm-pins.tsv`）產生，每對取通語模型裡它前面、後面最常見的詞各最多 10 個（詞對計數 ≥ 100，依計數、詞由大到小），一列是兩個詞、沒有前文；正解是合成的（該音節唯一有計數的單字），不是真人打的句子。同一組輸入重跑逐位元組相同，`make test-python` 核對已提交的檔和重新產生的相同。聊天與書面、出貨設定與只看 n-gram 各量一次，報對的列數與對上一版的改對、改壞 |
 | `dev/reading-norm/target.txt` | 4 | 手動定（啦 ㄌㄚ˙、這 ㄓㄟˋ、卡 ㄑㄧㄚˇ） | 音節歸零的目標列：他啦、是他啦、這是什麼、換卡，沒有前文；CC0。和 `context.txt` 同樣的四格都要等於正解 |
-| `dev/mixed-words/words.txt` | 29 | 讀音同 `data/lexicon/mixed-words.tsv` | 中英混合詞（`docs/spec/english-mixed.md` §5.7）的檢查集，`英文\|讀音\|寫法`，和詞表逐列相同；`core/tests/engine_mixed.rs` 逐列打（英文第一個字母按 Shift），要在 ↓ 清單裡。專案自寫（CC0） |
+| `dev/mixed-words/words.txt` | 37 | 讀音同 `data/lexicon/mixed-words.tsv` | 中英混合詞（`docs/spec/english-mixed.md` §5.7）的檢查集，`英文\|讀音\|寫法`，和詞表逐列相同；`core/tests/engine_mixed.rs` 逐列用兩種打法打（英文第一個字母按 Shift、空白、再接讀音；英文整段按 Shift 直接接讀音），畫面要是寫法欄，而且在 ↓ 清單第一項。專案自寫（CC0） |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 | `ablation/v0.7.0/` | — | — | v0.7.0 標準檔的逐項拿掉表（三個集合的結果、每一格的 CLI 指令）與兩個閘門列的離線重算 `gate_offline.py`；不是評測列，只有結果與重跑方法 |
 

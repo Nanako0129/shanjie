@@ -1093,6 +1093,12 @@ fn with_the_guard_off_every_key_is_the_baselines() {
     let text = std::fs::read_to_string(root().join("core/tests/fixtures/reversal-guard-off.tsv")).unwrap();
     let (mut lines, mut keys) = (0, 0);
     let mut e = app();
+    // The baselines are the engine's before the one-letter rows of the mixed-word table: with them Shift+A alone shows the row of docs/spec/prediction.md §3.5
+    // (`A咖`), which is the only difference from the fixture (the first key of the seven `S-A` lines). The table here is the shipped one without
+    // the rows whose English part is one letter, so every key is compared as the fixture recorded it.
+    let table = std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap();
+    let old: String = table.lines().filter(|l| l.starts_with('#') || !l.split('\t').next().is_some_and(|e| e.len() == 1)).map(|l| format!("{l}\n")).collect();
+    assert!(old.len() < table.len() && e.set_mixed_words(&old), "premise: the shipped table has one-letter rows, and loads without them");
     // The baselines are the engine's before third-tone sandhi: with it on, `finish_syllable` accepts ㄨㄛˊ typed `i j 6` after the digit 2 (docs/spec/keys-and-composition.md §3.3).
     e.set_tone3(false).unwrap();
     for l in text.lines() {
