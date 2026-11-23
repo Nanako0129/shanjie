@@ -389,6 +389,9 @@ fn bad_table_is_not_loaded() {
         "cp\tㄓˊ ㄓˊ ㄓˊ ㄓˊ ㄓˊ\tCP值值值值值\t100\n", // five syllables
         "cp\tㄓˊ\tCP值\t0\n",                       // the count is not positive
         "cp\tㄓˊ\tCP值\n",                          // three fields
+        "cp\tㄓˊ\tCP值\t100\thidden\n",             // a fifth field that is not the mark
+        "cp\tㄓˊ\tCP值\t100\t\n",                   // an empty fifth field
+        "cp\tㄓˊ\tCP值\t100\tnopredict\tx\n",        // six fields
         many.as_str(),                              // over the row limit
     ];
     for t in bad {
@@ -890,6 +893,38 @@ fn one_writing_is_listed_once() {
     assert_eq!(run(&mut e, "S-h S-o S-l S-d").candidates, ["hold不住"]);
     run(&mut e, "Tab 1");
     assert_eq!(units(&e), [token("HOLD"), "ㄅㄨˋ".to_string(), "ㄓㄨˋ".to_string()], "the row with the larger count");
+}
+
+/// A row marked `nopredict` is left out of the run's row and is otherwise a row: the split at the closing key, the automatic word and the list's
+/// first item are as without the mark. Of two rows with one writing, the unmarked one is still listed. The shipped table marks `A片`.
+#[test]
+fn a_nopredict_row_is_not_in_the_run_row() {
+    const T: &str = "a\tㄆㄧㄢˋ\tA片\t9\tnopredict\na\tㄎㄚ\tA咖\t5\nget\tㄅㄨˊ ㄉㄠˋ\tget不到\t50\tnopredict\nget\tㄅㄨˋ ㄉㄠˋ\tget不到\t50\n";
+    let unmarked = T.replace("\tnopredict", "");
+    let make = |t: &str| {
+        let mut e = plain();
+        e.set_prediction(true).unwrap();
+        e.set_english_complete(false);
+        assert!(e.set_mixed_words(t) && e.mixed_words().len() == 4);
+        e
+    };
+    assert_eq!(run(&mut make(&unmarked), "S-a").candidates, ["A片", "A咖"], "premise: without the mark the row leads by its count");
+    let mut e = make(T);
+    assert_eq!(run(&mut e, "S-a").candidates, ["A咖"]);
+    let o = run(&mut e, "q u 0 4");
+    assert!(o.preedit == "A片" && o.commit.is_empty(), "the automatic word: {}", o.preedit);
+    assert_eq!(units(&e), [token("A"), "ㄆㄧㄢˋ".to_string()]);
+    assert_eq!(listed(&mut e).first().map(String::as_str), Some("A片"), "the list's first item");
+    let mut e = make(T);
+    assert_eq!(run(&mut e, "S-g S-e S-t").candidates, ["get不到"]);
+    run(&mut e, "Tab Enter");
+    assert_eq!(units(&e), [token("GET"), "ㄅㄨˋ".to_string(), "ㄉㄠˋ".to_string()], "the unmarked row's reading");
+    // The shipped table, as the App has it.
+    let mut e = app_row_engine();
+    let o = run(&mut e, "S-a");
+    assert!(o.candidates.contains(&"A卡".to_string()) && !o.candidates.contains(&"A片".to_string()), "{:?}", o.candidates);
+    assert_eq!(run(&mut e, "q u 0 4").preedit, "A片");
+    assert_eq!(listed(&mut e).first().map(String::as_str), Some("A片"));
 }
 
 /// Choosing the first item (Tab, Enter), another by its digit, or by a click: the token, the row's syllables, the writing shown, nothing sent.

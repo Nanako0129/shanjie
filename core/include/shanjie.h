@@ -257,7 +257,7 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   apart is an item of the window Down opens right behind the syllable, and choosing it puts the word back as one token)
 //   (docs/spec/english-mixed.md §4.3); (3) while a run that Shift opened is letters only and set_prediction is 1, the output carries a
 //   prediction row (candidates, candidate_selected -1, candidate_total; english_run_utf16_len stays > 0): the writings of the table's
-//   rows for the letters while they are all upper case, then the English words of english.tsv and the built-in lists that start
+//   rows for the letters (but the rows whose fifth field is the mark `nopredict`) while they are all upper case, then the English words of english.tsv and the built-in lists that start
 //   with the run's letters; entered with TAB and chosen like any row item (docs/spec/prediction.md §3.5). A shell shows the row
 //   instead of its hint for the open run, and the hint when the row is empty. Other keys of
 //   docs/spec/english-mixed.md §4 stand:
