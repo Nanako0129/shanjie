@@ -794,6 +794,46 @@ fn another_word_stays() {
     assert_eq!(run(&mut e, "2 k 7").preedit, "CP值的");
 }
 
+/// A writing chosen for the token from its list before any syllable stands behind it: the token keeps it and no mixed word is a candidate behind it
+/// (docs/spec/english-mixed.md §4.4, §5.7). `cp`, `Cp` chosen, then ㄓˊ: `Cp` and what the engine without the table shows behind `cp`.
+#[test]
+fn a_chosen_writing_stops_the_edge() {
+    let mut p = plain();
+    let today: String = run(&mut p, "c p _ 5 6").preedit.chars().skip(2).collect();
+    let mut e = letters();
+    run(&mut e, "c p _");
+    assert_eq!(listed(&mut e), ["cp", "Cp", "CP"], "premise: the token's writings");
+    assert_eq!(choose(&mut e, "Cp").preedit, "Cp");
+    assert_eq!(run(&mut e, "5 6").preedit, format!("Cp{today}"));
+    assert_eq!(run(&mut e, "BS 5 6").preedit, format!("Cp{today}"), "and typed again");
+    // The writing it already had counts as chosen too.
+    let mut e = letters();
+    run(&mut e, "c p _");
+    assert_eq!(choose(&mut e, "cp").preedit, "cp");
+    assert_eq!(run(&mut e, "5 6").preedit, format!("cp{today}"));
+    // Control: not chosen, the mixed word.
+    let mut e = letters();
+    assert_eq!(run(&mut e, "c p _ 5 6").preedit, "CP值");
+}
+
+/// The same with the mixed word already shown, and a token whose own text is the table's writing (`T`): choosing `t` in front of `T恤` gives the
+/// token that writing. 恤 stays for now as every word outside a pick does (frozen as shown, docs/spec/keys-and-composition.md §6.3); the reading
+/// typed again behind the token is the decoder's (續, as without the table), not the mixed word.
+#[test]
+fn a_chosen_writing_takes_the_mixed_word_away() {
+    let mut p = plain();
+    assert_eq!(run(&mut p, "S-t v m 4").preedit, "T續", "premise: the decoder's word without the table");
+    let mut e = letters();
+    assert_eq!(run(&mut e, "S-t v m 4").preedit, "T恤", "premise");
+    run(&mut e, "Left");
+    assert_eq!(listed(&mut e), ["T", "t"], "premise: the cursor is behind the token, the list is its writings");
+    assert_eq!(choose(&mut e, "t").preedit, "t恤");
+    assert_eq!(e.frozen_words(), [(1, 2, "恤".to_string())], "the pick froze the word shown outside it");
+    assert_eq!(run(&mut e, "End BS v m 4").preedit, "t續");
+    // Deleting the token starts over: a new token has its edge.
+    assert_eq!(run(&mut e, "BS BS S-t v m 4").preedit, "T恤");
+}
+
 /// Backspace takes one unit at a time; with the Han part gone the token shows what was typed.
 #[test]
 fn backspace_goes_unit_by_unit() {
@@ -1204,7 +1244,6 @@ fn the_word_a_split_took_apart_is_listed() {
     assert!(o.preedit == "Karaoke" && o.commit.is_empty() && units(&e) == [token("Karaoke")]);
     let before = records(&e);
     assert_eq!(run(&mut e, "e k _").preedit.chars().take(7).collect::<String>(), "Karaoke");
-    assert!(e.frozen_words().is_empty(), "the table applies behind no such token");
     assert_eq!(run(&mut e, "Enter").commit.chars().take(7).collect::<String>(), "Karaoke");
     assert_eq!(records(&e), before, "not learned");
     // A tone key closed the run: the key is part of the word.

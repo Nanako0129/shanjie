@@ -2228,15 +2228,15 @@ impl Engine {
         self.fixed.iter().find(|f| f.start == i).map_or(1, |f| f.word.chars().count())
     }
 
-    /// docs/spec/english-mixed.md §5.7: takes `text` as the mixed-words table. A table with any row that breaks a rule is not loaded
-    /// and the table before it goes too (the engine is as it is without one). `Engine::new` calls this with `mixed-words.tsv`;
-    /// tests call it on `with_lexicon` engines.
     /// Evaluation and test hook (docs/spec/decoder.md §4.7; Rust only, not in shanjie.h): the bonus of the mixed word's edge instead of `lm::MIXED_BONUS`.
     #[doc(hidden)]
     pub fn set_mixed_bonus(&mut self, bonus: f64) {
         self.invalidate();
         self.mixed_bonus = bonus;
     }
+    /// docs/spec/english-mixed.md §5.7: takes `text` as the mixed-words table. A table with any row that breaks a rule is not loaded
+    /// and the table before it goes too (the engine is as it is without one). `Engine::new` calls this with `mixed-words.tsv`;
+    /// tests call it on `with_lexicon` engines.
     pub fn set_mixed_words(&mut self, text: &str) -> bool {
         self.mixed = MixedTable::parse(text, &self.lex).map(Arc::new);
         self.mixed.is_some()
@@ -5558,9 +5558,9 @@ impl Engine {
         let (mut zh, mut mixed) = (None, MixedMark::default());
         if end == start + 1 && english_of(&self.syls[start]).is_some() {
             zh = self.fixed.iter().find(|f| f.start == start).and_then(|f| f.zh.clone());
-            // docs/spec/english-mixed.md §5.7: a writing chosen for a token the table wrote (or stopped applying behind) stays: the table leaves it alone.
-            let old = self.fixed.iter().find(|f| f.start == start);
-            mixed = MixedMark { dead: old.is_some_and(|f| f.mixed.dead || f.own.is_some()), picked: 0 };
+            // docs/spec/english-mixed.md §4.4, §5.7: a writing the user chose for the token stays, whichever it is (the one it had too) and whether or not
+            // the table had written the token: no mixed word is a candidate behind this token again.
+            mixed = MixedMark { dead: true, picked: 0 };
             if let Some(syl) = c.zh.filter(|_| idx + 1 == c.list.len()) {
                 self.syls[start] = syl;
                 zh = None;
