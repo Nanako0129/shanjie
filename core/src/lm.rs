@@ -1206,12 +1206,12 @@ pub const LEARN_EPS_GLOBAL: f64 = 0.0;
 /// docs/spec/learning.md §7.4, the fine key's learning term in the semantic correction's fused score (the key is `^>` plus the next
 /// three syllables, or two and `$`): `EPS_SINIT_FINE * (b_i - b_0)` with `b_i = w / (w + 1)` of the sentence-start single character candidate `i` starts with; both signs
 /// (a learned anchor is also held against a better-scoring unlearned candidate). 4: the size of the fine key (offline projections over the first candidates only, no colloquial term; a single size 4 had learned the teach-once rows, error report rows 31 and 163 and 代你保管), kept
-/// for the key that tells 代我出席會議 from 帶我出去玩. Shared by the three strengths (learning is
+/// for the key that tells 代你保管 from 帶你保護自己. Shared by the three strengths (learning is
 /// not the strength of the semantic correction). Without a rerank job a rule 10 record has no effect.
 pub const EPS_SINIT_FINE: f64 = 4.0;
 /// The mid key's learning term (`^>` plus the next two syllables), used only when the stretch has no fine-key record: `EPS_SINIT_MID * max(b_i - b_0, 0)`, and only for a
 /// candidate the rerank model scores above the anchor (`ll_i > ll_0`), else 0. 4: the size of the fine key, gated by the model because two
-/// syllables do not tell 代我出席會議 from 帶我出去玩.
+/// syllables do not tell 代你保管 from 帶你保護自己.
 pub const EPS_SINIT_MID: f64 = 4.0;
 /// The coarse key's learning term (`^>` plus the next syllable), used only when the stretch has no mid- or fine-key record: `EPS_SINIT_COARSE * max(b_i - b_0, 0)`,
 /// and only for a candidate the rerank model scores above the anchor (`ll_i > ll_0`), else 0. 2: the same projections; the coarse key alone does not
