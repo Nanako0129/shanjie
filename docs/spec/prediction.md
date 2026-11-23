@@ -23,7 +23,7 @@
 
 ### 1.2 什麼時候有預測列
 
-- 必須同時成立：已載入語言模型、`set_prediction` 開著（預設開）、游標在組字區尾端、候選窗關閉、沒有開著的英文段（`run`）。
+- 必須同時成立：已載入語言模型、`set_prediction` 開著（預設開）、游標在組字區尾端、候選窗關閉、沒有開著的英文段（`run`）。例外：Shift 開的、全是字母的英文段有自己的預測列（§3.5：中英混合詞與英文補完），不需要語言模型。
 - 重算的時機：注音鍵放進未完成音節、完成一個音節、Backspace 刪未完成音節的符號、開始新的未完成音節；這些處理完仍符合上一條時才重算（引擎內以 `pred_dirty` 標記，鍵處理完統一重算一次）。詞庫沒有的音節不完成時（`finish_syllable` 提早返回），預測列不變。
 - 其他所有狀態變化都清掉預測列：標點、聲調符號放進空組字區、開候選窗、候選窗裡的按鍵、游標移動、刪音節、送出、Esc、`reset`、`set_profile`、`pick`、選了預測、回傳碼 4、組字區達到 `MAX_SYLLABLES`（128）而自動送出。
 - 什麼都不做的鍵（例如游標已在尾端時按 → 或 End）不清預測列。
@@ -131,6 +131,20 @@
 - 預測選取的詞，在候選窗對同一段再選一次同一個詞時，保留原本的預測待學記錄。
 - 前文鍵是 `^` 的兩個字以上的詞，送出時換成 `^>` 加後面那個音節的讀音（後面沒有音節就是 `^>$`）。前文鍵不是剛好兩個漢字的單字不記。
 - 組字區達到 128（`MAX_SYLLABLES`）個單位時照一般規則自動送出，送出的文字放在這個輸出的 `commit`。
+
+### 3.5 英文段開著時的預測列（中英混合詞與英文補完）
+
+- **條件**：英文段是 Shift＋字母開的、內容全是字母（1 到 32 個，第一個是大寫，其餘大小寫都可以；有數字、符號或聲調數字就不算），不是英數狀態打的、不是回退開的；`set_prediction` 開著、中英混打開著、游標在組字區尾端。判斷只看英文段現在的文字，所以用 Backspace 從 token 重開的段內容符合時也算。不需要語言模型。
+- **項目分兩類，先混合詞、後英文補完**：
+  - **混合詞**：只在內容恰好是 1 到 16 個大寫字母 U 時有，是中英混合詞表（`docs/spec/english-mixed.md` §5.7）裡英文等於 U 的小寫、而且沒有標 `nopredict` 的列的寫法欄（標了的列不進預測列，其餘照舊：Shift+A 的預測列沒有「A片」，打完 ㄆㄧㄢˋ 照樣是「A片」）。同一個寫法只列一次：有好幾列時取次數最大的那一列，同次數取讀音字串（音節以空白相接）最小的那一列，選取時接的就是這一列的讀音（`get不到` 的 ㄅㄨˊ ㄉㄠˋ）。排序：有學習紀錄的在前，依衰減後權重由大到小（紀錄的鍵是 `^en:`＋U 的小寫，衰減後權重 ≥ 0.5 才算，`docs/spec/learning.md` §4.3）；其餘依次數由大到小；同分依寫法字串。
+  - **英文補完**：英文表 `english.tsv` 的 `E` 列（字母開頭的）、`data/english-extra.txt`、`data/lexicon/names-english.txt` 裡，小寫以目前內容的小寫開頭、而且比目前內容長的字；同一個小寫只列一次。寫法：正式寫法表有這個字就用正式寫法（`Chatg` → `ChatGPT`）；沒有時，目前內容以兩個以上的大寫字母開頭的整個字大寫（`OK` → `OKAY`），否則是照打的內容接上這個字其餘的小寫字母（`Kar` → `Karaoke`）。排序：有 `E` 列次數的依次數由大到小，沒有次數的（只在另外兩份裡的字）排在後面；同次數或同為沒有次數時依小寫字串。沒載入英文表的引擎只有另外兩份的字。
+  - **格數**：兩類合計最多 `PREDICT_MAX` 個；英文補完至少佔 min(3, 英文補完數) 格，混合詞多時從混合詞那邊少放。
+- **輸出**：和一般預測列相同的欄位（`candidates`、`selected` −1、`total`），英文段的範圍照舊在 `english_run_utf16_*`。殼在候選窗的位置顯示預測列、不顯示「空白：英文斷開」的提示（`docs/spec/english-mixed.md` §4.6）；兩類項目同一種樣式。兩類都沒有項目時沒有預測列，殼顯示提示。
+- **按鍵**：Tab 進入（§4.1），進入後的鍵照 §4.2（Enter、數字鍵選取，←→ 移動，Esc 或 Shift+Tab 退出）；點選照 §4.3；⌘⌫ 在混合詞上照 §4.4 忘掉那一項的紀錄，在英文補完上不做任何事。不進入、繼續打鍵時，組字區與送出文字和沒有這一列時相同。
+- **重算**：開英文段、每打一個字母、Backspace 之後重算。多了小寫字母之後混合詞消失、只剩英文補完；Backspace 刪回純大寫字母時混合詞再出現。英文段不論由按鍵還是設定呼叫結束，預測列跟著清掉。
+- **選混合詞**：英文段關掉，U 成為英文 token，後面插入那一列的音節，之後和照按鍵打完那一列的讀音相同：由解碼器決定（`docs/spec/decoder.md` §4.7，不固定），游標在尾端，不送出；選完到下一個鍵之前沒有預測列。Shift+K、Tab、Enter 之後 `syls` 是 `_punct_K`、ㄕㄨ，畫面「K書」；再打 ㄕˋ 是「K書是」。學習見 `docs/spec/learning.md` §4.3；只有這一列讀 `^en:` 的紀錄。
+- **選英文補完**：英文段換成那個字（上面的寫法）、關掉，成為一個英文 token，游標在尾端，不送出；不學習、不改字表。
+- **每鍵時間**：補完每鍵在出貨字表上查一次（字表在第一次用到時排好，之後是二分搜尋加一段前綴）。`core/tests/engine_mixed.rs` 的 `timing_english_completions`（只在 macOS 跑）：`english.tsv` 次數最高的 200 個全字母的字，每個字 Shift＋首字母、其餘字母、空白、`reset`，在 App 建法的引擎上；五輪，每輪補完開與關（測試鉤子 `set_english_complete`）交替，取各輪每鍵 p95 的中位數，開著不得比關著多 1 ms 以上。本機量到開 0.018 ms、關 0.001 ms。
 
 ## 4. 按鍵
 
@@ -285,6 +299,7 @@ Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（�
   - 縮寫：`abbreviation_two_units_show_and_select_milk_tea`、`abbreviation_needs_the_setting_the_row_and_the_end_of_the_composition`、`abbreviation_needs_a_model_and_stops_at_the_unit_cap`、`abbreviation_keys_with_two_units`、`abbreviation_esc_drops_only_the_units`、`abbreviation_off_or_row_off_drops_two_units_only`、`abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time`、`reading_matches_follows_the_query_mode`。
   - 直排：`the_prediction_row_carries_two_when_vertical_and_zero_when_horizontal`、`the_setter_snapshot_re_renders_a_shown_row_in_the_new_orientation`、`the_entered_vertical_row_moves_with_up_and_down_and_stops_at_both_ends`、`the_passive_vertical_row_keeps_down_as_open_and_up_as_ignore`、`the_horizontal_prediction_row_keeps_its_keys_and_output`。
   - ↓ 開窗：`down_opens_the_window_with_the_row_in_front`、`space_opens_the_same_window_as_down`、`down_with_a_pending_syllable_lists_only_the_row`、`down_with_a_pending_syllable_and_no_row_is_ignored`、`a_row_item_chosen_with_a_pending_syllable_equals_tab_then_the_digit`、`a_row_item_chosen_from_the_window_equals_tab_then_the_digit`、`a_lexicon_item_chosen_from_the_window_is_a_repick`、`an_exact_row_item_chosen_from_the_window_is_a_repick`、`pick_on_a_row_item_in_the_window_equals_the_digit`、`the_window_after_punctuation_has_no_row_items`、`esc_closes_the_window_and_the_row_stays_gone`、`cmd_backspace_on_a_row_item_in_the_window_forgets_it`、`cmd_backspace_on_the_only_row_item_closes_the_window`、`prediction_off_or_a_profile_change_closes_a_window_with_row_items`；異體表：`variant_order_in_the_window_with_the_prediction_row` 等。直排窗：`core/tests/engine_vertical.rs` 的 `vertical_window_lists_the_row_first`。
+- 英文段開著時的預測列（§3.5，`core/tests/engine_mixed.rs`）：混合詞 `the_run_row_lists_the_rows_by_count`、`one_writing_is_listed_once`、`a_nopredict_row_is_not_in_the_run_row`、`choosing_from_the_run_row`、`no_run_row_without_its_conditions`、`a_chosen_item_is_learned_under_the_en_key`、`forgetting_an_item_of_the_run_row`（這幾個用測試鉤子關掉英文補完，只看混合詞）；英文補完 `the_run_row_completes_english_words`、`the_run_row_keeps_three_places_for_english`、`timing_english_completions`；殼 `ShellTests.testRunRowTakesTheHintsPlace`。
 - C ABI：`core/tests/c/abi_smoke.c`、`core/src/ffi.rs` 內的 `set_prediction` 與 `set_abbreviation` 回傳碼測試。
 - 殼：`macos/Tests/ShanjieKitTests/ShellTests.swift` 的 `testPredictionRowShowsNoNumbersUntilTabEnters`（第一鍵就有預測列、沒有選取與數字、Tab 後有數字與圖示）、`testPredictionMenuItemTogglesStoresAndSurvivesRestart`、`testAbbreviationMenuItemTogglesStoresRebuildsAndSurvivesRestart`；`CandidateCellTests.swift` 的 `testPassiveRowShowsTheTabGlyphOnTheFirstCell`、`testNumberSlotCoversTheTabGlyph`、`testEnteringTheRowReusesTheFirstCell`。
 - 不變的檢查：預測不影響解碼，選字結果與既有 golden 一個位元組都不改；重播測試的解碼結果不變。
@@ -298,5 +313,6 @@ Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（�
 - 詞中間的起點排在游標起點之前會讓第二音節第一鍵多命中 12 個、新詞第一鍵少命中 4 個，目前維持排最後。
 - 預測列原本是空的狀態，會因為詞中間的項目變成不是空的，Tab 的行為跟著改；在 typing76 的 904 個量測狀態裡只有 2 個。
 - 預測項目的學習與重排只重排預測列的項目，不把選字記憶當候選來源。
+- 英文段的預測列（§3.5）：混合詞只在內容是純大寫字母時有，多打一個小寫字母或注音鍵之後不依它篩選、直接消失（Shift+K 再打 `g` 不會只留 ㄍ 開頭的詞）；英文補完只看字母，內容有數字（`Gta6`）就沒有。游標不在尾端時整列沒有。英文補完的來源是出貨的字表，不看前文、不學習。
 - 詞庫候選窗的清單不用語言模型排序。
 - 瀏覽器第一個音節的位置問題見 §9.6。

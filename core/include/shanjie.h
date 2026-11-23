@@ -247,7 +247,22 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   the end, an English token and the syllables after it that the table `mixed-words.tsv` (in data_dir, optional: absent or bad,
 //   nothing is added) has as one word (`cp` + ㄓˊ = `CP值`) put that word first in the candidate list Down or Space opens, which
 //   then carries no prediction row items; choosing it puts one punctuation-kind token (not learned, removed whole) in place of the
-//   token and the syllables (docs/spec/english-mixed.md §5.7). Other keys of
+//   token and the syllables (docs/spec/english-mixed.md §5.7). The same table, while set_english is 1: (1) the syllables
+//   right behind an English token (or, with a small model that declares a left length loaded, at the composition's start behind the
+//   1 to 16 ASCII letters or digits the left text ends with) that start with the reading of a row of that English part are, to the
+//   decoder, one more word they can be: the row's Han part, scored as the best ordinary path over them plus a bonus. Typed alone it is
+//   what shows, and the token shows the row's writing of the English part while the path shown takes it (`cp` + ㄓˊ shows `CP值`).
+//   Nothing is fixed or learned: what is typed behind it is decoded with it, and the semantic correction keeps the word for the job
+//   whose first path took it (docs/spec/decoder.md §4.7);
+//   (2) a run that is upper-case letters typed with Shift and then Zhuyin keys splits at Space or a tone key into the token and the
+//   syllable when the table has a row of those letters whose reading starts with that syllable (Shift+K `g j` Space is `K書`; one
+//   symbol and a same-column replacement count; `Kevin` Space is as it was; an English word the core knows that such a split took
+//   apart is an item of the window Down opens right behind the syllable, and choosing it puts the word back as one token)
+//   (docs/spec/english-mixed.md §4.3); (3) while a run that Shift opened is letters only and set_prediction is 1, the output carries a
+//   prediction row (candidates, candidate_selected -1, candidate_total; english_run_utf16_len stays > 0): the writings of the table's
+//   rows for the letters (but the rows whose fifth field is the mark `nopredict`) while they are all upper case, then the English words of english.tsv and the built-in lists that start
+//   with the run's letters; entered with TAB and chosen like any row item (docs/spec/prediction.md §3.5). A shell shows the row
+//   instead of its hint for the open run, and the hint when the row is empty. Other keys of
 //   docs/spec/english-mixed.md §4 stand:
 //   - Backspace deletes English one letter at a time (docs/spec/english-mixed.md §5.3): with the cursor right after an English token (no unfinished
 //     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes; a writing the

@@ -681,7 +681,8 @@ fn run_keeps_every_unfinished_key_a_run_accepts() {
     let o = run(&mut e, "_");
     assert!(!o.candidates.is_empty(), "premise: the window is open");
     let o = run(&mut e, "S-w");
-    assert!(o.candidates.is_empty() && o.preedit == format!("{zh}W"), "{}", o.preedit);
+    // What the output lists now is the run's own row (docs/spec/prediction.md §3.5: English words of W), not the window.
+    assert!(o.selected.is_none() && o.columns == 0 && o.candidates.iter().all(|w| w.to_ascii_lowercase().starts_with('w')) && o.preedit == format!("{zh}W"), "{}", o.preedit);
 }
 
 #[test]
@@ -825,10 +826,12 @@ fn switching_mixing_off_keeps_the_run_as_a_token() {
 }
 
 #[test]
-fn no_prediction_row_while_the_run_is_open_and_tab_ends_the_run_first() {
-    // With a model loaded, Backspace inside a run must not bring the row back: Tab would enter it before the run (and a pick
-    // would put the word in front of the run's letters). The row comes back when the run is gone.
+fn the_row_of_the_composition_stays_away_while_the_run_is_open() {
+    // With a model loaded, Backspace inside a run must not bring the composition's row back: Tab would enter it before the run (and a
+    // pick would put the word in front of the run's letters). The row comes back when the run is gone. The run's own row
+    // (docs/spec/prediction.md §3.5) is switched off here by the test hook; the test below has it.
     let mut e = lm_eng();
+    e.set_english_complete(false);
     syllable(&mut e, "ㄨㄛˇ");
     syllable(&mut e, "ㄗㄞˋ");
     let o = syllable(&mut e, "ㄩㄥˋ");
@@ -847,6 +850,23 @@ fn no_prediction_row_while_the_run_is_open_and_tab_ends_the_run_first() {
     three(&mut e);
     let o = run(&mut e, "S-w BS");
     assert!(o.preedit == zh && !o.candidates.is_empty(), "the row is back: {:?}", o.candidates);
+}
+
+/// docs/spec/prediction.md §3.5: the open run has a row of its own, the English words that start with its letters; Tab enters that row and a
+/// pick replaces the run, never anything in front of it.
+#[test]
+fn the_run_has_its_own_row_and_tab_enters_it() {
+    let mut e = lm_eng();
+    let zh = three(&mut e);
+    let o = run(&mut e, "S-w i n");
+    assert!(!o.candidates.is_empty() && o.candidates.iter().all(|w| w.starts_with("Win") && w.len() > 3), "{:?}", o.candidates);
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == format!("{zh}Wi") && o.candidates.iter().all(|w| w.starts_with("Wi")) && o.selected.is_none(), "{:?}", o.candidates);
+    let o = run(&mut e, "Tab");
+    assert!(o.handled && o.commit.is_empty() && o.selected == Some(0) && o.preedit == format!("{zh}Wi"));
+    let first = o.candidates[0].clone();
+    let o = run(&mut e, "Enter");
+    assert!(o.preedit == format!("{zh}{first}") && o.commit.is_empty() && fields(&o) == (0, 0), "{}", o.preedit);
 }
 
 #[test]

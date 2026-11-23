@@ -22,6 +22,7 @@ enum TestData {
         ("rerank-protect.tsv", "data/lexicon/rerank-protect.tsv"),  // docs/spec/lexicon-and-packs.md §2.12: required by the core (engine creation fails with 3 without it)
         ("digits.tsv", "data/lexicon/digits.tsv"),  // docs/spec/english-mixed.md §7.2, §7.8: optional for the core, but the app bundles it
         ("english.tsv", "data/lexicon/english.tsv"),  // docs/spec/english-mixed.md §16.5: optional for the core like digits.tsv; the app bundles it
+        ("mixed-words.tsv", "data/lexicon/mixed-words.tsv"),  // docs/spec/english-mixed.md §5.7: optional for the core like digits.tsv; the app bundles it
         ("bigram.sjlm", "data/lm/bigram.sjlm"),
         ("classes.sjc", "data/lm/classes.sjc"),
         ("kn.sjkn", "data/lm/kn.sjkn"),  // model-v6: the Kneser-Ney side file the shipped tinylm.sjtl (SJTL0004) records

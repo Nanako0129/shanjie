@@ -143,6 +143,11 @@ impl AutoTable {
     pub fn has(&self, e: &str) -> bool {
         self.e.contains_key(e)
     }
+
+    /// Every `E` row: the word and its count (docs/spec/prediction.md §3.5: the English completions of an open run).
+    pub fn words(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.e.iter().map(|(w, n)| (w.as_str(), *n))
+    }
 }
 
 /// lpZ of a decision point: the log10 sum of the compatible words' probabilities, plus the reading term of the best of them, minus the
