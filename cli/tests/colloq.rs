@@ -55,7 +55,8 @@ fn picks(rows: &Path, profile: &str, extra: &[&str], dir: &Path) -> Vec<String> 
     std::fs::read_to_string(&p).unwrap().lines().map(|l| l.splitn(3, '\t').nth(2).unwrap_or("").to_string()).collect()
 }
 
-/// With the shipping flags, chat and formal, the words typed as said come first: the reduplicated words of the `colloq` rows (熱騰騰, 迷迷糊糊, 紅彤彤), the words
+/// With the shipping flags, chat and formal, the words typed as said come first: the reduplicated words of the `colloq` rows (熱騰騰, 迷迷糊糊; 紅彤彤 counts as
+/// right when the lexicon's 紅通通 comes first, which it does with or without the rows), the words
 /// the neutral source reads (厲害, 燈籠, 賠不是; 早上, 便當, 窗戶, 運氣, 喉嚨, which the two dictionaries read with a neutral tone; 知道, 漂亮, which only
 /// the revised one does). Typed in their lexicon reading they are as with `--no-tone3`, and with `--no-tone3` none of the colloquial readings gives its word.
 #[test]

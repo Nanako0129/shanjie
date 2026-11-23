@@ -299,8 +299,8 @@ int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieO
 //   X, Xˊ, Xˇ or Xˋ there (ㄌㄧˋ ㄏㄞ˙ is 厲害, ㄓ ㄉㄠ˙ is 知道), lower than an exact reading, listed and chosen like the sandhi words above; a tone key
 //   accepts ˙X the lexicon has no one-syllable entry for, after any syllable of the composition, when one of the four has one (alone it shows a
 //   one-syllable word of theirs); and the lexicon's rows for the colloquial reading of reduplicated words (ㄖㄜˋ ㄊㄥ ㄊㄥ is 熱騰騰) are read.
-//   With 0 the accepted syllables already in the composition are stored as Xˇ (the third-tone ones) or as the best-scoring of the four (the neutral
-//   ones), so the composition keeps a path; nothing reads the sandhi readings, and those rows are not read. Call it after every engine creation, like set_fuzzy.
+//   With 0 the accepted syllables already in the composition are stored as Xˇ (the third-tone ones, and a neutral tail whose stored previous syllable
+//   still has the second tone) or as the best-scoring of the four (every other neutral one), so the composition keeps a path; nothing reads the sandhi readings, and those rows are not read. Call it after every engine creation, like set_fuzzy.
 int32_t shanjie_engine_set_tone3(ShanjieEngine *engine, uint32_t on, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation (0 before docs/spec/english-mixed.md §3), like
 //   set_english_overwrite in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL

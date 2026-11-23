@@ -33,7 +33,7 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var fuzzyAdjacentEnabled = true
     /// The 變調與口語讀音 checkbox in the same section (docs/spec/decoder.md §6.6: third-tone and colloquial sandhi, one switch), default on.
     @Published public private(set) var tone3 = true
-    /// The checkbox's title and the sentence about it in the section's note (the settings window shows both; SettingsModelTests pins them).
+    /// The checkbox's title and the sentence about it in the section's note (the settings window shows both; Tone3ShellTests pins them).
     public static let tone3Title = "變調與口語讀音"
     public static let tone3Note = "變調與口語讀音：照實際讀音打的變調（眨眼打 ㄓㄚˊ ㄧㄢˇ、小姐打 ㄒㄧㄠˊ ˙ㄐㄧㄝ）與口語讀音（厲害打 ㄌㄧˋ ˙ㄏㄞ、熱騰騰打 ㄖㄜˋ ㄊㄥ ㄊㄥ）也解得出來。"
     /// The 重打同一個位置算英文 choice under the 中英混打 toggle (docs/spec/english-mixed.md §11): a key over the symbol already in its column reverts
