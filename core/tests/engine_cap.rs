@@ -1,6 +1,6 @@
 //! Composition cap (docs/spec/keys-and-composition.md §5).
 //! Release only: every test types 70-128 syllables with the small model's rerank, which took 957 s in the debug job on Linux (no
-//! Accelerate there; the first CI run), over that job's 20-minute limit. The `core` job runs this file in release on macOS.
+//! Accelerate there; the first CI run), over that job's 20-minute limit. The CI `core` jobs run this file in release on macOS (scripts/ci-shards.tsv says in which of them).
 #![cfg(not(debug_assertions))]
 use core::engine::*;
 use core::eval::{parse_rows, usable};
