@@ -481,6 +481,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - **速度段前後的狀態**（`speed_window`）：速度量測排在準確率格之後、整輪的最後；`bench.py` 在它開始前與結束後各讀一次 1 分鐘負載與 Time Machine 是否正在備份，寫進 `env` 的四個欄位 `speed_load_before`、`speed_tm_before`、`speed_load_after`、`speed_tm_after`（四個一起寫；沒有 dev302、不量速度時都不寫）。備份狀態由 `tm_running()` 讀：只在 macOS 上執行 `tmutil status`（逾時 30 秒），輸出有 `Running = 1` 是 `true`、沒有是 `false`；不是 macOS、指令失敗或逾時是 `null`。開始前的負載會帶著前面準確率格（多核心）的殘留。這四欄只有加入之後量的結果檔才有，舊檔不回填；KPI 表用它們判斷速度算不算數（§8.2）。
 - **每一輪的原始值**：結果檔每版的 `speed` 底下有 `speed_rounds`，存每一輪的原始值：`chat`、`formal`（兩個設定各是每輪一筆 `p95_us`、`max_us`、`load_ms`、`rss_mb`）與 `rerank_ms`（每輪一筆 `p50`、`p95`，單位毫秒）。`speed` 裡其餘欄位（中位數與最大值）照舊由同樣的數字算出；網站不讀 `speed_rounds`。
 - 速度只報、不設門檻；數字只在同一次執行、同一台機器裡比較才有意義。
+- 換模型或改到延遲的 PR 另有一個在 macOS runner 上新舊交錯量、有關卡的 workflow（`latency-gate.yml`，`docs/spec/release-and-ci.md` §8）。
 
 ### 7.6 保留集欄
 
