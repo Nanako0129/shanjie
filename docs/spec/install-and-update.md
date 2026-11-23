@@ -481,7 +481,7 @@ root 階段成功之後（或 `moveToSystem` 時不經 root 階段），在安�
 - 資產：`shanjie-<版本>.zip` 與 `.sha256`（輸入法）；`shanjie-installer-<版本>.zip` 與 `.sha256`（安裝程式）；main 上的 `appcast.xml`；tap 裡的 cask。
 - job 順序：`gate`（要求這個 tag 的 `docs/releases/<tag>.md` 存在且非空；要求這個 commit 在 main 上的 `ci.yml` push run 是 `success`，`scripts/check-ci-gate.sh`）→ `build`（無 secret，唯讀 token）→ `sign`（進 `release` Environment）→ `publish`（只有 tag）。
 - `build`：以 `SHANJIE_RELEASE_BUILD=1`、`BUNDLE_ID=com.nyanako.inputmethod.shanjie` 呼叫 `build-app.sh`（ad-hoc，沒有 runtime）；再用 `build-installer.sh` 組出**未簽章的安裝程式骨架**（除了輸入法 zip 都在），好讓 `sign` 不跑任何 repo 的程式；兩者用 tar 上傳（tar 保留模式與符號連結，`upload-artifact` 不保留）。
-- `check-ci-gate.sh`：對這個 commit 的 `ci.yml` push run（`head_sha`、`main`、`push`）輪詢到 `completed`；run 還不存在最多寬限 `CI_GATE_GRACE`（預設 300 秒，tag 可能比 CI 先到）；進行中最多等 `CI_GATE_TIMEOUT`（預設 6600 秒：`ci.yml` 最長的路徑 changes 5 分加 core 90 分，再留 15 分排隊；gate job 上限 120 分）；API 連續三次讀不到就失敗；失敗訊息附復原方法。**只改 `appcast.xml` 的 commit**（對唯一的父 commit 只改了 `appcast.xml`；它是 publish 工作以 `GITHUB_TOKEN` 寫到 main 的 feed，這種 push 不會觸發 `ci.yml`）往回跳過，最多 20 個，用第一個別的 commit 的 CI 結果——`appcast.xml` 是沒有任何建置或測試讀的資料。`CI_GATE_GH` 可替換 `gh`（`scripts/test-check-ci-gate.sh` 用替身測）。
+- `check-ci-gate.sh`：對這個 commit 的 `ci.yml` push run（`head_sha`、`main`、`push`）輪詢到 `completed`；run 還不存在最多寬限 `CI_GATE_GRACE`（預設 300 秒，tag 可能比 CI 先到）；進行中最多等 `CI_GATE_TIMEOUT`（預設 6600 秒：比 `ci.yml` 最長的路徑 changes 5 分接 windows 45 分接 rowstats 5 分再加 15 分排隊還長；gate job 上限 120 分）；API 連續三次讀不到就失敗；失敗訊息附復原方法。**只改 `appcast.xml` 的 commit**（對唯一的父 commit 只改了 `appcast.xml`；它是 publish 工作以 `GITHUB_TOKEN` 寫到 main 的 feed，這種 push 不會觸發 `ci.yml`）往回跳過，最多 20 個，用第一個別的 commit 的 CI 結果——`appcast.xml` 是沒有任何建置或測試讀的資料。`CI_GATE_GH` 可替換 `gh`（`scripts/test-check-ci-gate.sh` 用替身測）。
 
 ### 7.2 簽章與檢查（sign 工作）
 
@@ -635,7 +635,7 @@ EOF
 2a. 本機防呆：`CI= EXPECTED_BUNDLE_ID=<正式 ID> scripts/check-app.sh` 必須非 0 並印 `check 6 refused`，正式 container 仍不存在；`SKIP_RUN=1` 的同一個指令必須 0。
 3. `scripts/test-sandbox-migration.sh <正式組建> <無清單組建>`（`timeout-minutes: 10`；讀 container 若在 CI 上跳 App Data 的詢問會卡住）：這個 job 第一次啟動沙盒組建。
 4. 同一個腳本的拒絕測試：`CI=` 空與 `CI=true HOME=<暫存目錄>` 都必須非 0、暫存目錄沒有新檔案，log 分別有 `refused: CI is not true` 與「is not this account's home directory」。
-5. `scripts/test-install-ime.sh`、`scripts/test-check-ci-gate.sh`、`scripts/test-check-models.sh`。
+5. `scripts/test-install-ime.sh`、`scripts/test-check-ci-gate.sh`、`scripts/test-ci-shard.sh`、`scripts/test-check-models.sh`。
 6. `make selftest-bundled SELFTEST_BUNDLE_ID=…selftest-$GITHUB_RUN_ID`：前後各檢查一次 `~/Library/Containers/<該 ID>`，之前不存在、之後存在（證明沙盒有套上）。
 7. `EXPECTED_BUNDLE_ID=<正式 ID> scripts/check-app.sh`（check 2、3、6）。
 8. `scripts/test-sandbox-mutations.sh`（§10.3）。

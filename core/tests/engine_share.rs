@@ -78,10 +78,10 @@ fn file_rows(name: &str) -> Vec<Row> {
 
 /// Smoke size (Windows; the opt-level 1 debug build skips the row comparisons altogether, see below). The sampled run (about 100 rows, 7 transitions plus a chain,
 /// every profile and rerank setting) is the work of about three minutes in a release build on macOS. In the opt-level 1 debug build it is an order of magnitude more: even the
-/// smoke subset took 451 s in the CI `debug` job, whose whole 20-minute limit the core tests then used up, so in a debug build (`debug_assertions`) the tests
+/// smoke subset took 451 s in the CI `debug` job (the core test files ran there then; now `debug-tests`), whose whole 20-minute limit the core tests then used up, so in a debug build (`debug_assertions`) the tests
 /// that build engines from the files and compare rows are `#[ignore]`d (`cargo test -- --ignored` runs them); the cheap ones (the reading table, the
-/// missing and bad file paths, the shared parts' addresses) and the one-syllable pack (slower, but kept in debug) still run. The Windows job runs the release build with this smoke subset.
-/// The full sampled comparison is the release build on macOS: `make test-rust` (`cargo test --release`) and the CI `core` job. The whole sets are
+/// missing and bad file paths, the shared parts' addresses) and the one-syllable pack (slower, but kept in debug) still run. The Windows job (`windows-tests`) runs the release build with this smoke subset.
+/// The full sampled comparison is the release build on macOS: `make test-rust` (`cargo test --release`) and the CI `core` jobs (scripts/ci-shards.tsv says which of them). The whole sets are
 /// `SHANJIE_SHARE_STRIDE=1` in a release build.
 fn smoke() -> bool {
     cfg!(debug_assertions) || cfg!(windows)
