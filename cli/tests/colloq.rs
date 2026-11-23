@@ -55,7 +55,7 @@ fn picks(rows: &Path, profile: &str, extra: &[&str], dir: &Path) -> Vec<String> 
     std::fs::read_to_string(&p).unwrap().lines().map(|l| l.splitn(3, '\t').nth(2).unwrap_or("").to_string()).collect()
 }
 
-/// With the shipping flags, chat and formal, the words typed as said come first: the reduplicated words of the `colloq` rows (熱騰騰, 迷迷糊糊), the words
+/// With the shipping flags, chat and formal, the words typed as said come first: the reduplicated words of the `colloq` rows (熱騰騰, 迷迷糊糊, 紅彤彤), the words
 /// the neutral source reads (厲害, 燈籠, 賠不是; 早上, 便當, 窗戶, 運氣, 喉嚨, which the two dictionaries read with a neutral tone; 知道, 漂亮, which only
 /// the revised one does). Typed in their lexicon reading they are as with `--no-tone3`, and with `--no-tone3` none of the colloquial readings gives its word.
 #[test]
@@ -72,6 +72,7 @@ fn colloquial_readings_decode_to_the_word_in_both_profiles() {
         ("窗戶", "ㄔㄨㄤ ㄏㄨ˙", "ㄔㄨㄤ ㄏㄨˋ"),
         ("運氣", "ㄩㄣˋ ㄑㄧ˙", "ㄩㄣˋ ㄑㄧˋ"),
         ("喉嚨", "ㄏㄡˊ ㄌㄨㄥ˙", "ㄏㄡˊ ㄌㄨㄥˊ"),
+        ("紅彤彤", "ㄏㄨㄥˊ ㄊㄨㄥ ㄊㄨㄥ", "ㄏㄨㄥˊ ㄊㄨㄥˊ ㄊㄨㄥˊ"),
         ("知道", "ㄓ ㄉㄠ˙", "ㄓ ㄉㄠˋ"),
         ("漂亮", "ㄆㄧㄠˋ ㄌㄧㄤ˙", "ㄆㄧㄠˋ ㄌㄧㄤˋ"),
     ];
@@ -79,10 +80,12 @@ fn colloquial_readings_decode_to_the_word_in_both_profiles() {
     std::fs::write(&said, cases.iter().map(|(w, r, _)| format!("|{w}|{r}\n")).collect::<String>()).unwrap();
     std::fs::write(&plain, cases.iter().map(|(w, _, r)| format!("|{w}|{r}\n")).collect::<String>()).unwrap();
     let want: Vec<String> = cases.iter().map(|(w, ..)| w.to_string()).collect();
+    // 紅彤彤 and 紅通通 are two common writings of one word under one reading (docs/spec contract §4): either is right.
+    let norm = |v: Vec<String>| v.into_iter().map(|w| if w == "紅通通" { "紅彤彤".to_string() } else { w }).collect::<Vec<_>>();
     for profile in ["chat", "formal"] {
-        assert_eq!(picks(&said, profile, &["--fuzzy", "0"], &dir), want, "{profile}");
-        assert_eq!(picks(&plain, profile, &[], &dir), want, "{profile}: the lexicon readings");
-        assert_eq!(picks(&plain, profile, &["--no-tone3"], &dir), want, "{profile}: the lexicon readings, off");
+        assert_eq!(norm(picks(&said, profile, &["--fuzzy", "0"], &dir)), want, "{profile}");
+        assert_eq!(norm(picks(&plain, profile, &[], &dir)), want, "{profile}: the lexicon readings");
+        assert_eq!(norm(picks(&plain, profile, &["--no-tone3"], &dir)), want, "{profile}: the lexicon readings, off");
         // Off: no `colloq` row, no neutral source, and a neutral syllable without an entry has no path (wrong with `--fuzzy 0`, the run goes on).
         let off = picks(&said, profile, &["--no-tone3", "--fuzzy", "0"], &dir);
         assert!(off.iter().zip(&want).all(|(a, b)| a != b), "{profile}: {off:?}");
