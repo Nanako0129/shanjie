@@ -10,6 +10,8 @@ publish = false
 [features]
 # §5.8: numbers-only timing file (host-<pid>.txt), for the VM measurements; never in a build given to users.
 timing = []
+# The identity of the installer's build (shanjie-win-proto, ids.rs); off: the development identity.
+release-ids = ["shanjie-win-proto/release-ids"]
 
 [dependencies]
 shanjie-win-proto = { path = "../proto" }
@@ -34,4 +36,5 @@ windows = { version = "0.62.2", features = [
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_UI_Shell",
+    "Win32_UI_TextServices",
 ] }
