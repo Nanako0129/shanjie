@@ -595,6 +595,9 @@ struct PathWord {
     syllables: usize,
 }
 
+/// docs/spec/prediction.md §3.5: the key of an English completion in the row of an open run (no record is ever kept under it).
+const EN_WORD_KEY: &str = "^enword";
+
 /// docs/spec/keys-and-composition.md §5.3: the window W (characters) when no small model is loaded, so the head freeze does not depend on one: the shipping
 /// model's `ctx` 64 minus 3. With a model loaded W is its `ctx - 3`.
 const CAP_WINDOW_NO_MODEL: usize = 61;
@@ -653,6 +656,10 @@ struct Fixed {
     displaced_new: Vec<(Vec<String>, String)>,
     /// docs/spec/english-mixed.md §5.7: for an English token, what the mixed-word table did behind it. Default for every other fixed word.
     mixed: MixedMark,
+    /// docs/spec/english-mixed.md §4.3: for the token a split at the closing key made, when the keys of the run (with the tone key that closed it) are an
+    /// English word the core knows: those keys and the syllable the split made. The window lists the word while that syllable alone stands
+    /// behind the token with the cursor at the end (`mixed_sweep` drops it otherwise).
+    whole: Option<(String, String)>,
 }
 
 /// docs/spec/english-mixed.md §5.7: the state of the automatic mixed word behind one English part (an English token, or at the composition's start the
@@ -661,8 +668,7 @@ struct Fixed {
 struct MixedMark {
     /// The table's Han part is fixed over this many syllables right behind the English part (0: nothing is).
     k: usize,
-    /// The fixed Han part was released into a longer word, or the user chose another word or writing: the table never applies behind this English
-    /// part again.
+    /// The user chose another word or writing: the table never applies behind this English part again.
     dead: bool,
     /// The token's text is the table's writing of the English part, not what the user typed or chose.
     wrote: bool,
@@ -673,7 +679,7 @@ struct MixedMark {
 impl Fixed {
     /// A word the engine fixed on its own (docs/spec/keys-and-composition.md §6.3): not learned, not a user choice.
     fn frozen(start: usize, end: usize, word: String) -> Self {
-        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default() }
+        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), whole: None }
     }
 }
 
@@ -1074,6 +1080,12 @@ pub struct Engine {
     /// docs/spec/english-mixed.md §5.7: the mark of the English the text before the composition ends with (the token's is on its fixed word). Reset with
     /// the composition (`clear_all`, the first key on an empty one).
     mixed_left: MixedMark,
+    /// docs/spec/prediction.md §3.5: the English words the completions of an open run are taken from, in lower case with the count of the `E` row
+    /// (`None`: only in the lists of official writings), sorted by the word; built at the first use from the English table (`auto_table`, when one is
+    /// loaded) and those lists, dropped when the table changes.
+    en_index: Option<Arc<Vec<(String, Option<u64>)>>>,
+    /// Test hook (`set_english_complete`, default on): whether the row of an open run carries English completions.
+    en_complete: bool,
     digit_cache: Option<Arc<DigitCache>>,
     /// English before Chinese (docs/spec/english-mixed.md §8): the count table (`english-next.tsv`, optional) and the best entry of every
     /// word it names, built once per (lexicon, model). Only the prediction row reads them.
@@ -1486,6 +1498,8 @@ impl Engine {
             digit_table: None,
             mixed: None,
             mixed_left: MixedMark::default(),
+            en_index: None,
+            en_complete: true,
             digit_cache: None,
             en_table: None,
             en_words: None,
@@ -2713,14 +2727,22 @@ impl Engine {
 
     /// The split `mixed_split` found: U becomes an English token, the syllable a finished syllable behind it, the run closes; the table then
     /// applies as after any closing key (`mixed_auto`).
-    fn run_split(&mut self, u: String, syl: String) -> Result<Output, EngineError> {
-        self.run.clear();
+    fn run_split(&mut self, u: String, syl: String, tone: usize) -> Result<Output, EngineError> {
+        // docs/spec/english-mixed.md §4.3: the keys as an English word (a tone key that closed the run is one of them, Space is not).
+        let mut keys = std::mem::take(&mut self.run);
+        keys.extend((tone > 0).then(|| TONE_KEYS_STANDARD[tone - 1]));
+        let lower = keys.to_ascii_lowercase();
+        let word = english_table().contains_key(&lower) || self.auto_table.as_ref().is_some_and(|t| t.has(&lower));
         self.run_rev = false;
         self.revert_point = None;
         self.split = true;
         let writing = english_writing(&u);
         let mut commit = self.put_english(format!("{PUNCT_PREFIX}{u}"), writing, None)?;
-        commit.push_str(&self.insert_token(syl, None, None)?.commit);
+        let at = self.cursor;
+        commit.push_str(&self.insert_token(syl.clone(), None, None)?.commit);
+        if let Some(f) = self.fixed.iter_mut().find(|f| word && commit.is_empty() && f.end == at && f.start + 1 == at) {
+            f.whole = Some((keys, syl));
+        }
         self.mixed_auto()?;
         Ok(self.view(true, commit))
     }
@@ -2806,10 +2828,18 @@ impl Engine {
     }
 
     /// docs/spec/english-mixed.md §5.7, after every key and pick: an English part whose fixed Han part is no longer there. The syllables are still the
-    /// row's: it was released into a longer word or the user chose another word, and the table does not apply behind this English part again.
+    /// row's: the user chose another word, and the table does not apply behind this English part again.
     /// The syllables changed (Backspace): it may apply again. Either way a pick from the run's row is no longer what stands, and is not recorded.
+    /// The English word a split took apart (`Fixed::whole`) is kept only while its one syllable stands behind the token with the cursor at the end.
     fn mixed_sweep(&mut self) {
         let Some(table) = self.mixed.clone() else { return };
+        let (n, at_end) = (self.syls.len(), self.cursor == self.syls.len());
+        let syls = &self.syls;
+        for f in self.fixed.iter_mut() {
+            if f.whole.as_ref().is_some_and(|(_, syl)| !(at_end && f.end + 1 == n && syls[f.end] == *syl)) {
+                f.whole = None;
+            }
+        }
         let anchors: Vec<usize> = std::iter::once(0).chain(self.fixed.iter().filter(|f| f.mixed.k > 0).map(|f| f.end)).collect();
         for a in anchors {
             let Some(mark) = self.mixed_mark(a).map(|m| *m).filter(|m| m.k > 0) else { continue };
@@ -2825,25 +2855,95 @@ impl Engine {
         }
     }
 
-    /// docs/spec/prediction.md §3.5: the row of an open English run that is 1 to 16 upper-case letters U, typed outside the ASCII state and not from a
-    /// revert, with the cursor at the end: the writings of the table's rows for U, those with a learned `^en:` record first by weight, the rest
-    /// by count, then by writing.
-    fn mixed_row(&self) -> Vec<Pred> {
-        let u = &self.run;
-        let pure = (1..=16).contains(&u.len()) && u.bytes().all(|b| b.is_ascii_uppercase());
-        let Some(table) = self.mixed.as_ref().filter(|_| pure && self.predict_on && self.english && !self.run_ascii && !self.run_rev && self.cursor == self.syls.len()) else {
+    /// docs/spec/prediction.md §3.5: the English words completions come from (see the field).
+    fn english_index(&mut self) -> Arc<Vec<(String, Option<u64>)>> {
+        if let Some(i) = &self.en_index {
+            return i.clone();
+        }
+        let mut words: HashMap<String, Option<u64>> = english_table().keys().map(|w| (w.clone(), None)).collect();
+        if let Some(t) = &self.auto_table {
+            words.extend(t.words().filter(|(w, _)| w.as_bytes()[0].is_ascii_alphabetic()).map(|(w, n)| (w.to_string(), Some(n))));
+        }
+        let mut v: Vec<(String, Option<u64>)> = words.into_iter().collect();
+        v.sort();
+        let i = Arc::new(v);
+        self.en_index = Some(i.clone());
+        i
+    }
+
+    /// Test hook (docs/spec/prediction.md §3.5): false leaves the English completions out of the row of an open run; the mixed words stay.
+    #[doc(hidden)]
+    pub fn set_english_complete(&mut self, on: bool) {
+        self.en_complete = on;
+    }
+
+    /// docs/spec/prediction.md §3.5: the row of an open English run that Shift opened (it starts with an upper-case letter, is letters only, was not typed in
+    /// the ASCII state nor opened by a revert), with the cursor at the end. First the mixed words when the run is 1 to 16 upper-case letters U: the
+    /// writings of the table's rows for U, those with a learned `^en:` record first by weight, the rest by count, then by writing. Then the English
+    /// words that start with the run's letters and are longer, by count (those without one last), then by the word. `PREDICT_MAX` items in all, of
+    /// which the completions get at least three (or all of them, when fewer).
+    fn run_row(&mut self) -> Vec<Pred> {
+        let u = self.run.clone();
+        let shift = (1..=ENGLISH_RUN_MAX).contains(&u.len()) && u.bytes().all(|b| b.is_ascii_alphabetic()) && u.as_bytes()[0].is_ascii_uppercase();
+        if !(shift && self.predict_on && self.english && !self.run_ascii && !self.run_rev && self.cursor == self.syls.len()) {
             return Vec::new();
-        };
-        let key = format!("{EN_PREFIX}{}", u.to_ascii_lowercase());
-        let today = if self.learner.is_empty() { 0 } else { self.today() };
-        let mut rows: Vec<Pred> = table
-            .of_english(u)
-            .into_iter()
-            .map(|(w, r, _)| Pred { word: w.to_string(), reading: r.to_vec(), start: self.cursor, weight: self.learner.en_weight(&key, r, w, today), key: key.clone() })
-            .collect();
-        rows.sort_by(|a, b| b.weight.total_cmp(&a.weight)); // stable: `of_english` gives the count order
-        rows.truncate(PREDICT_MAX);
+        }
+        let mut rows: Vec<Pred> = Vec::new();
+        if let Some(table) = self.mixed.as_ref().filter(|_| u.len() <= 16 && u.bytes().all(|b| b.is_ascii_uppercase())) {
+            let key = format!("{EN_PREFIX}{}", u.to_ascii_lowercase());
+            let today = if self.learner.is_empty() { 0 } else { self.today() };
+            rows = table
+                .of_english(&u)
+                .into_iter()
+                .map(|(w, r, _)| Pred { word: w.to_string(), reading: r.to_vec(), start: self.cursor, weight: self.learner.en_weight(&key, r, w, today), key: key.clone() })
+                .collect();
+            rows.sort_by(|a, b| b.weight.total_cmp(&a.weight)); // stable: `of_english` gives the count order
+        }
+        let mut words: Vec<Pred> = Vec::new();
+        if self.en_complete {
+            let index = self.english_index();
+            let lower = u.to_ascii_lowercase();
+            let from = index.partition_point(|(w, _)| *w < lower);
+            let mut hits: Vec<&(String, Option<u64>)> = index[from..].iter().take_while(|(w, _)| w.starts_with(&lower)).filter(|(w, _)| w.len() > lower.len()).collect();
+            // A count of `None` sorts last: `Some(n)` compares above it.
+            let order = |a: &&(String, Option<u64>), b: &&(String, Option<u64>)| b.1.cmp(&a.1).then(a.0.cmp(&b.0));
+            if hits.len() > PREDICT_MAX {
+                hits.select_nth_unstable_by(PREDICT_MAX - 1, order);
+                hits.truncate(PREDICT_MAX);
+            }
+            hits.sort_by(order);
+            let caps = u.len() >= 2 && u.bytes().take(2).all(|b| b.is_ascii_uppercase());
+            words = hits
+                .into_iter()
+                .map(|(w, _)| {
+                    let word = match english_table().get(w) {
+                        Some(official) => official.to_string(),
+                        None if caps => w.to_ascii_uppercase(),
+                        None => format!("{u}{}", &w[u.len()..]),
+                    };
+                    Pred { word, reading: Vec::new(), start: self.cursor, weight: 0.0, key: EN_WORD_KEY.to_string() }
+                })
+                .collect();
+        }
+        rows.truncate(PREDICT_MAX - words.len().min(3));
+        words.truncate(PREDICT_MAX - rows.len());
+        rows.extend(words);
         rows
+    }
+
+    /// docs/spec/prediction.md §3.5: an English completion of the run's row is chosen. The run becomes the English token of that word; nothing is sent,
+    /// nothing is learned.
+    fn apply_word_pred(&mut self, p: Pred) -> Result<Output, EngineError> {
+        if self.run.is_empty() {
+            return self.handled();
+        }
+        self.run.clear();
+        self.run_rev = false;
+        self.revert_point = None;
+        self.clear_pred();
+        let commit = self.put_english(format!("{PUNCT_PREFIX}{}", p.word), p.word, None)?;
+        self.pred_dirty = false; // as after any row pick: no row until the next key
+        Ok(self.view(true, commit))
     }
 
     /// docs/spec/prediction.md §3.5: an item of the run's row is chosen. The run closes, U becomes an English token, the row's syllables go in behind it and
@@ -2970,8 +3070,8 @@ impl Engine {
             KeyKind::Char if m == 0 => Layout::Standard.tone_of(k.ch),
             _ => None,
         };
-        if let Some((u, syl)) = closing.and_then(|t| self.mixed_split(t)) {
-            return self.run_split(u, syl);
+        if let Some((t, (u, syl))) = closing.and_then(|t| Some((t, self.mixed_split(t)?))) {
+            return self.run_split(u, syl, t);
         }
         if k.kind == KeyKind::Char && (m == 0 || m == MOD_SHIFT) && k.ch.is_ascii_alphabetic() {
             let c = if m == MOD_SHIFT { k.ch.to_ascii_uppercase() } else { k.ch.to_ascii_lowercase() };
@@ -3446,7 +3546,7 @@ impl Engine {
     fn recompute_pred(&mut self) {
         self.clear_pred();
         if !self.run.is_empty() {
-            self.pred = self.mixed_row(); // docs/spec/prediction.md §3.5
+            self.pred = self.run_row(); // docs/spec/prediction.md §3.5
             return;
         }
         let n = self.syls.len();
@@ -3577,6 +3677,9 @@ impl Engine {
 
     /// `choose_pred` for an item already taken out of the row (or out of a window that carried the row, docs/spec/prediction.md §5).
     fn apply_pred(&mut self, mut p: Pred) -> Result<Output, EngineError> {
+        if p.key == EN_WORD_KEY {
+            return self.apply_word_pred(p);
+        }
         if p.key.starts_with(EN_PREFIX) {
             return self.apply_mixed_pred(p);
         }
@@ -3599,7 +3702,7 @@ impl Engine {
         self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default() });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), whole: None });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -4029,6 +4132,9 @@ impl Engine {
         }
         // docs/spec/prediction.md §4.4: ⌘⌫ while the prediction row is entered forgets the selected item (before rule 1).
         if let (KeyKind::Backspace, true, Some(sel)) = (k.kind, m & MOD_COMMAND != 0, self.pred_sel) {
+            if self.pred[sel].key == EN_WORD_KEY {
+                return self.handled(); // an English completion is no record: nothing to forget
+            }
             let Pred { word, reading, .. } = &self.pred[sel];
             let (word, reading) = (word.clone(), reading.clone());
             self.note_forgot(&reading);
@@ -4689,7 +4795,7 @@ impl Engine {
         let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default() });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), whole: None });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -4707,8 +4813,10 @@ impl Engine {
     /// covers all its syllables plus the new one. docs/spec/keys-and-composition.md §6.4: a released neighbour and the new syllable stay free (a later
     /// syllable can still rewrite them).
     fn release_frozen(&mut self, c: usize, excluded: &[usize]) -> Result<(), EngineError> {
+        // docs/spec/english-mixed.md §5.7: the Han part the mixed-word table fixed is never released.
+        let held: Vec<(usize, usize)> = std::iter::once((0, self.mixed_left.k)).chain(self.fixed.iter().map(|f| (f.end, f.end + f.mixed.k))).filter(|r| r.1 > r.0).collect();
         let is_cand = |s: &Self, f: &Fixed| {
-            f.frozen && !s.is_punct(f.start) && !s.is_punct(c) && !excluded.contains(&f.start) && (f.end == c || f.start == c + 1)
+            f.frozen && !held.iter().any(|&(a, b)| a <= f.start && f.end <= b) && !s.is_punct(f.start) && !s.is_punct(c) && !excluded.contains(&f.start) && (f.end == c || f.start == c + 1)
         };
         let (cands, rest): (Vec<Fixed>, Vec<Fixed>) = std::mem::take(&mut self.fixed).into_iter().partition(|f| is_cand(self, f));
         self.fixed = rest;
@@ -4902,10 +5010,13 @@ impl Engine {
         // docs/spec/english-mixed.md §5.7: the mixed word is the first item of the list; the window then carries no row items (they are
         // told apart by being the first `rows.len()` entries), and no lexicon word has its text.
         let mixed = self.mixed_item();
-        let mut rows = if mixed.is_some() { Vec::new() } else { rows };
+        // docs/spec/english-mixed.md §4.3: the English word a split took apart follows it (or is first), told apart like the mixed word.
+        let whole = self.whole_item();
+        let mut rows = if mixed.is_some() || whole.is_some() { Vec::new() } else { rows };
         let mut seen: HashSet<String> = rows.iter().map(|p| p.word.clone()).collect();
         let mut list: Vec<(String, usize)> = rows.iter().map(|p| (p.word.clone(), p.reading.len())).collect();
         list.extend(mixed.clone());
+        list.extend(whole);
         if self.pend.iter().any(Option::is_some) {
             self.variant_move(&mut list, &mut rows);
             return (list, HashMap::new(), rows, None);
@@ -4958,6 +5069,17 @@ impl Engine {
         }
         let english = english_of(&self.syls[a - k - 1])?;
         self.mixed.as_ref()?.get(english, &self.syls[a - k..a]).map(|w| (w.to_string(), k + 1))
+    }
+
+    /// docs/spec/english-mixed.md §4.3: with the cursor at the end and nothing unfinished, right behind the token and the one syllable a split at the
+    /// closing key made of an English word: that word in its writing, and its length (the token and the syllable).
+    fn whole_item(&self) -> Option<(String, usize)> {
+        let a = self.cursor;
+        if a != self.syls.len() || a < 2 || self.pend.iter().any(Option::is_some) {
+            return None;
+        }
+        let (keys, syl) = self.fixed.iter().find(|f| f.start == a - 2 && f.end == a - 1)?.whole.as_ref()?;
+        (self.syls[a - 1] == *syl).then(|| (english_writing(keys), 2))
     }
 
     /// Variant order (docs/spec/decoder.md §2.3): under one reading, a less-typed spelling that the window lists before its
@@ -5331,6 +5453,23 @@ impl Engine {
         let Some((word, l)) = c.list.get(idx).cloned() else { return Ok(()) };
         // docs/spec/english-mixed.md §5.7: the mixed word takes the place of the English token and its syllables as one token of the
         // punctuation kind (reading `PUNCT_PREFIX` + the writing, fixed to the writing): not a re-pick, nothing is learned.
+        // docs/spec/english-mixed.md §4.3: the English word the split took apart goes back in as one English token; the table leaves it alone.
+        if idx >= c.rows.len() && l == 2 && c.mixed.as_ref() != Some(&(word.clone(), l)) && self.whole_item() == Some((word.clone(), l)) {
+            let start = self.cursor - l;
+            let keys = self.fixed.iter().find(|f| f.start == start).and_then(|f| f.whole.clone()).map_or(word.clone(), |w| w.0);
+            for i in (start..self.cursor).rev() {
+                self.remove_syllable(i)?;
+            }
+            self.cursor = start;
+            let commit = self.put_english(format!("{PUNCT_PREFIX}{keys}"), word, None)?;
+            if let Some(f) = self.fixed.iter_mut().find(|f| f.start == start && commit.is_empty()) {
+                f.mixed.dead = true;
+            }
+            if !commit.is_empty() {
+                self.commit_out = Some(commit);
+            }
+            return Ok(());
+        }
         if idx >= c.rows.len() && c.mixed.as_ref() == Some(&(word.clone(), l)) && l <= self.cursor {
             let start = self.cursor - l;
             for i in (start..self.cursor).rev() {
@@ -5409,7 +5548,7 @@ impl Engine {
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, mixed });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, mixed, whole: None });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

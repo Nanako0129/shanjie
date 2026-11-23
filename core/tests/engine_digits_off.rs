@@ -57,6 +57,7 @@ fn engine_no_table(tag: &str) -> Engine {
     let table = std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap();
     let old: String = table.lines().filter(|l| l.starts_with('#') || !l.split('\t').next().is_some_and(|e| e.len() == 1)).map(|l| format!("{l}\n")).collect();
     assert!(old.len() < table.len() && e.set_mixed_words(&old), "premise: the shipped table has one-letter rows, and loads without them");
+    e.set_english_complete(false); // nor had it the English completions of that row
     e
 }
 

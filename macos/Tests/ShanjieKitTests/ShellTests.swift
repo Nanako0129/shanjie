@@ -644,6 +644,7 @@ final class ShellTests: XCTestCase {
     func testEnglishRunHasThickUnderlineAndTheHint() {
         let c = englishController()
         c.session.activate()
+        c.session.perform(.togglePrediction)  // the row off: with it on, the run's own row takes the hint's place (testRunRowTakesTheHintsPlace)
         let single = NSUnderlineStyle.single.rawValue, thick = NSUnderlineStyle.thick.rawValue
         c.type("su3")  // ㄋㄧˇ, one Chinese character before the run
         XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 1), style: single)])
@@ -664,40 +665,47 @@ final class ShellTests: XCTestCase {
         XCTAssertFalse(c.panel.visible)
     }
 
-    /// docs/spec/english-mixed.md §4.6, docs/spec/prediction.md §3.5: when the core gives a prediction row for the open run (Shift+K: the mixed words of K), the
-    /// panel shows the row in the hint's place, with the run still under the thick underline; once the run is no longer the letters alone the
-    /// core gives none and the hint is back. Tab and Enter choose the first item; a click chooses too.
+    /// docs/spec/english-mixed.md §4.6, docs/spec/prediction.md §3.5: when the core gives a prediction row for the open run (Shift+K: the mixed words of K,
+    /// then English words of K), the panel shows the row in the hint's place, with the run still under the thick underline; a lower-case
+    /// letter leaves the English completions; once nothing completes the run the core gives no row and the hint is back. Tab and Enter choose
+    /// the first item; a click chooses too.
     func testRunRowTakesTheHintsPlace() {
         let c = englishController()
         c.session.activate()
-        c.type("w", flags: .shift)
-        XCTAssertEqual(c.panel.hint, "空白：英文斷開", "premise: a run without a row shows the hint")
-        c.press(Keys.esc)
         c.type("k", flags: .shift)
         XCTAssertEqual(c.client.marked, "K")
         XCTAssertNil(c.panel.hint, "the row, not the hint")
         XCTAssertTrue(c.panel.visible)
-        XCTAssertEqual(c.panel.items, ["K書"])
+        let row = c.panel.items
+        XCTAssertEqual(row.count, 9)
+        XCTAssertTrue(row.contains("K書"), "the mixed words of K")
+        XCTAssertFalse(row[0].allSatisfy(\.isASCII), "a mixed word first")
+        XCTAssertTrue(row.suffix(3).allSatisfy { $0.hasPrefix("K") && $0.allSatisfy(\.isASCII) }, "at least three English words of K")
         XCTAssertEqual(c.panel.selected, -1, "a passive row")
         XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 1), style: NSUnderlineStyle.thick.rawValue)])
         c.type("e")
-        XCTAssertEqual(c.panel.hint, "空白：英文斷開", "a lower-case letter: no row, the hint again")
-        c.press(51)  // Backspace: the letters alone again
+        XCTAssertNil(c.panel.hint, "a lower-case letter: still a row")
+        XCTAssertTrue(!c.panel.items.isEmpty && c.panel.items.allSatisfy { $0.hasPrefix("Ke") && $0.allSatisfy(\.isASCII) }, "English completions only")
+        c.type("zqxj")
+        XCTAssertEqual(c.client.marked, "Kezqxj")
+        XCTAssertEqual(c.panel.hint, "空白：英文斷開", "nothing completes the run: the hint again")
+        c.press(Keys.esc)
+        c.type("k", flags: .shift)
         XCTAssertNil(c.panel.hint)
-        XCTAssertEqual(c.panel.items, ["K書"])
+        XCTAssertEqual(c.panel.items, row)
         c.press(48)  // Tab enters the row
         XCTAssertEqual(c.panel.selected, 0)
-        c.press(36)  // Return chooses
-        XCTAssertEqual(c.client.marked, "K書")
+        c.press(36)  // Return chooses the first item, a mixed word
+        XCTAssertEqual(c.client.marked, row[0])
         XCTAssertNil(c.panel.hint)
         XCTAssertEqual(c.client.underlineRuns, [.init(range: NSRange(location: 0, length: 2), style: NSUnderlineStyle.single.rawValue)], "the run ended")
         c.press(36)
-        XCTAssertEqual(c.client.text, "K書")
-        // A click on the passive row chooses too (the hint takes no click, `testClickOnTheHintPicksNothing`).
+        XCTAssertEqual(c.client.text, row[0])
+        // A click on the passive row chooses too (the hint takes no click, `testClickOnTheHintPicksNothing`): here the last item, an English word.
         c.type("k", flags: .shift)
-        XCTAssertEqual(c.panel.items, ["K書"])
-        XCTAssertTrue(c.session.candidateSelected(at: 0))
-        XCTAssertEqual(c.client.marked, "K書")
+        XCTAssertEqual(c.panel.items, row)
+        XCTAssertTrue(c.session.candidateSelected(at: 8))
+        XCTAssertEqual(c.client.marked, row[8])
     }
 
     /// The hint is not a candidate: a click on it never reaches the core (`Session.candidateSelected` returns false and the
@@ -705,6 +713,7 @@ final class ShellTests: XCTestCase {
     func testClickOnTheHintPicksNothing() {
         let c = englishController()
         c.session.activate()
+        c.session.perform(.togglePrediction)  // the row off: with it on, the run's own row takes the hint's place (testRunRowTakesTheHintsPlace)
         c.type("su3 ")  // a candidate window for ㄋㄧˇ
         XCTAssertTrue(c.panel.visible && c.panel.hint == nil)
         XCTAssertTrue(c.session.candidateSelected(at: 0), "control: a click on a candidate is a pick")
@@ -729,6 +738,7 @@ final class ShellTests: XCTestCase {
     func testHintAsksTheClientForTheLineOnlyOncePerRun() {
         let c = englishController()
         c.session.activate()
+        c.session.perform(.togglePrediction)  // the row off: with it on, the run's own row takes the hint's place (testRunRowTakesTheHintsPlace)
         c.type("su3")
         c.type("w", flags: .shift)
         let asked = c.client.lineAsks
@@ -748,6 +758,7 @@ final class ShellTests: XCTestCase {
     func testHintFollowsTheVerticalOrientation() {
         let c = englishController(vertical: true)
         c.session.activate()
+        c.session.perform(.togglePrediction)  // the row off: with it on, the run's own row takes the hint's place (testRunRowTakesTheHintsPlace)
         c.type("w", flags: .shift)
         XCTAssertEqual(c.panel.hint, "空白：英文斷開")
         XCTAssertEqual(c.panel.vertical, VerticalLayout.predictions)

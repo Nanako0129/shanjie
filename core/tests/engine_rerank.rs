@@ -1145,16 +1145,17 @@ fn english_before_the_composition_takes_the_mixed_word() {
     assert_eq!(e.frozen_words(), [(0, 1, "恤".to_string())]);
     assert_eq!(shown(&mut e, "今天穿T", &["ㄒㄩˋ"]), "恤", "a Han character before the letter");
     assert_eq!(shown(&mut e, "abcdefgh", &["ㄒㄩˋ"]), "恤", "eight letters that are the whole text: not cut");
-    // Released like any frozen word, and not put back.
+    // Not released: the next syllable decodes behind it (without the table the two are one word).
     let o = type_syls(&mut e, &["ㄕˋ"]);
-    assert!(e.frozen_words().is_empty() && !o.preedit.starts_with('恤'), "{}", o.preedit);
-    assert_eq!(o.preedit, shown(&mut plain, "abcdefgh", &["ㄒㄩˋ", "ㄕˋ"]));
+    assert!(e.frozen_words() == [(0, 1, "恤".to_string())] && o.preedit.starts_with('恤'), "{}", o.preedit);
+    assert!(!shown(&mut plain, "abcdefgh", &["ㄒㄩˋ", "ㄕˋ"]).starts_with('恤'), "premise");
     // Not these.
-    for (left, syls) in [("Tx", &["ㄒㄩˋ"][..]), ("9T", &["ㄒㄩˋ"]), ("xabcdefgh", &["ㄒㄩˋ"]), ("T", &["ㄕˋ"]), ("T ", &["ㄒㄩˋ"]), ("", &["ㄒㄩˋ"]), ("T", &["ㄒㄩˋ", "ㄒㄩˋ"])] {
+    for (left, syls) in [("Tx", &["ㄒㄩˋ"][..]), ("9T", &["ㄒㄩˋ"]), ("xabcdefgh", &["ㄒㄩˋ"]), ("T", &["ㄕˋ"]), ("T ", &["ㄒㄩˋ"]), ("", &["ㄒㄩˋ"])] {
         assert_eq!(shown(&mut e, left, syls), shown(&mut plain, left, syls), "{left:?} {syls:?}");
         assert!(e.frozen_words().is_empty(), "{left:?}");
     }
-    assert_eq!(e.left_full_chars(), 1, "premise of the last case: the letter is kept");
+    // The row's reading and then the same syllable again: the first is the row's, the second decodes behind it.
+    assert!(shown(&mut e, "T", &["ㄒㄩˋ", "ㄒㄩˋ"]).starts_with('恤') && e.left_full_chars() == 1);
     // The rerank switch off: the model is still loaded.
     e.set_rerank(false).unwrap();
     assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), "恤");

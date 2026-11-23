@@ -36,6 +36,7 @@ impl Engine {
     #[doc(hidden)]
     pub fn set_auto_table(&mut self, table: Option<Arc<AutoTable>>) {
         self.auto_table = table;
+        self.en_index = None; // the completions' word list is built from the table
     }
 
     /// Test and tool hook: read `english.tsv` at `path`; false (nothing changes) when it is missing or malformed.
@@ -43,6 +44,7 @@ impl Engine {
     pub fn load_auto_english(&mut self, path: &Path) -> bool {
         let Some(t) = std::fs::read_to_string(path).ok().and_then(|t| AutoTable::parse(&t)) else { return false };
         self.auto_table = Some(Arc::new(t));
+        self.en_index = None;
         true
     }
 

@@ -624,34 +624,41 @@ fn two_letters_and_a_reading() {
     assert_eq!(units(&e), [token("OK"), "ㄅㄥ".to_string()]);
 }
 
-/// docs/spec/keys-and-composition.md §6.4: the fixed Han part is released when the next syllable makes a lexicon word with it. The pair is ㄒㄩˋ ㄕˋ:
-/// the row's reading is ㄒㄩˋ (恤) and with ㄕˋ the decoder has 敘事, so the character changes. After the release the table does not apply behind this
-/// token again.
+/// The fixed Han part is never released (docs/spec/english-mixed.md §5.7): the syllables typed behind it decode apart from it, where a frozen word
+/// of any other kind would merge with the next syllable into a lexicon word (docs/spec/keys-and-composition.md §6.4). ㄒㄩˋ ㄕˋ is 敘事 to the
+/// decoder; behind `T` with the row, 恤 stays.
 #[test]
-fn a_longer_word_releases_the_han_part_for_good() {
+fn the_han_part_is_not_released() {
+    let mut p = plain();
+    let free = run(&mut p, "S-t v m 4 g 4").preedit;
+    assert_eq!(free, "T敘事", "premise: without the table the two syllables are one word");
     let mut e = letters();
     assert_eq!(run(&mut e, "S-t v m 4").preedit, "T恤", "premise: the table's word is fixed");
     assert_eq!(e.frozen_words(), [(1, 2, "恤".to_string())], "premise: as a frozen word");
-    assert_eq!(run(&mut e, "g 4").preedit, "T敘事", "released: without the release the composition starts with T恤");
-    assert!(e.frozen_words().is_empty());
-    let o = run(&mut e, "2 k 7");
-    assert!(!o.preedit.starts_with("T恤") && o.preedit.starts_with("T敘事"), "{}", o.preedit);
-    // Not put back when the syllables are again the row's: Backspace twice leaves `T` ㄒㄩˋ, then the syllable is typed again.
-    run(&mut e, "BS BS");
-    assert_eq!(units(&e), [token("T"), "ㄒㄩˋ".to_string()]);
-    let mut p = plain();
-    let today = run(&mut p, "S-t v m 4").preedit;
-    assert_eq!(run(&mut e, "BS v m 4").preedit, today, "the token is as one without the table");
-    // A new token starts over.
-    run(&mut e, "BS BS");
-    assert!(is_empty(&mut e));
-    assert_eq!(run(&mut e, "S-t v m 4").preedit, "T恤");
-    // A word that does not merge leaves it fixed.
-    assert_eq!(run(&mut e, "2 k 7").preedit, "T恤的");
+    let o = run(&mut e, "g 4");
+    assert!(o.preedit.starts_with("T恤") && o.preedit.chars().count() == 3 && o.preedit != free, "{}", o.preedit);
+    assert_eq!(e.frozen_words(), [(1, 2, "恤".to_string())]);
+    assert!(run(&mut e, "2 k 7").preedit.starts_with("T恤"));
+    // Backspace and the syllable again: the word again; a new token starts over.
+    run(&mut e, "BS BS BS");
+    assert_eq!(units(&e), [token("T")]);
+    assert_eq!(run(&mut e, "v m 4").preedit, "T恤");
+    // The shipped rows that a following syllable took apart while the release applied: the fixed characters stay.
+    let table = std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap();
+    for (script, word) in [("S-k g j _ g 4", "K書"), ("S-t y 4 d j 4", "T字"), ("S-q 1 0 3 1 p 3", "Q版"), ("S-k g j _ 5 j 4 j 3", "K書")] {
+        let mut e = plain();
+        assert!(e.set_mixed_words(&table));
+        let o = run(&mut e, script);
+        assert!(o.preedit.starts_with(word) && o.preedit.chars().count() > 2, "{script}: {}", o.preedit);
+    }
+    // A longer row of the same letters takes the place of the shorter one when its reading is complete.
+    let mut e = plain();
+    assert!(e.set_mixed_words("cp\tㄓˊ\tCP直\t1\ncp\tㄓˊ ㄑㄧㄢˊ\tCP值錢\t1\n"));
+    assert_eq!(run(&mut e, "c p _ 5 6").preedit, "CP直");
+    assert_eq!(run(&mut e, "f u 0 6").preedit, "CP值錢");
 }
 
-/// The English part takes the table's writing and keeps it: `cp` is `CP` in CP值, and still when 值 is released into 值錢 (ㄓˊ ㄑㄧㄢˊ: the row's
-/// reading, and a lexicon word with the next syllable).
+/// The English part takes the table's writing and keeps it: `cp` is `CP` in CP值, and still when more is typed behind it.
 #[test]
 fn the_token_takes_the_tables_writing_and_keeps_it() {
     let mut e = letters();
@@ -659,9 +666,10 @@ fn the_token_takes_the_tables_writing_and_keeps_it() {
     assert_eq!(units(&e), [token("cp")], "premise: the keys are an English token, its reading as typed");
     assert_eq!(run(&mut e, "5 6").preedit, "CP值");
     assert_eq!(units(&e), [token("cp"), "ㄓˊ".to_string()], "the reading stays as typed");
-    assert_eq!(run(&mut e, "f u 0 6").preedit, "CP值錢");
-    assert!(e.frozen_words().is_empty(), "premise: 值 was released into the word");
-    assert_eq!(run(&mut e, "Enter").commit, "CP值錢");
+    let o = run(&mut e, "f u 0 6");
+    assert!(o.preedit.starts_with("CP值") && o.preedit.chars().count() == 4, "值 stays and the next syllable decodes behind it: {}", o.preedit);
+    assert_eq!(e.frozen_words(), [(1, 2, "值".to_string())]);
+    assert!(run(&mut e, "Enter").commit.starts_with("CP值"));
     // The Shift letters of the user are written by the table too (`Beta版` for `BETA`).
     let mut e = plain();
     assert!(e.set_mixed_words("beta\tㄅㄢˇ\tBeta版\t1\n"));
@@ -792,12 +800,12 @@ fn the_automatic_word_is_not_learned() {
     run(&mut e, "S-k g j _");
     assert_eq!(run(&mut e, "Enter").commit, "K書");
     run(&mut e, "c p _ 5 6 f u 0 6");
-    assert_eq!(run(&mut e, "Enter").commit, "CP值錢");
+    assert!(run(&mut e, "Enter").commit.starts_with("CP值"));
     assert_eq!(records(&e), before);
     // Nor in a commit that learns something else: a re-pick behind the automatic word is recorded, the word is not.
     run(&mut e, "S-k g j _ 2 k 7");
     let text = type_syls(&mut e, "ㄕˋ ㄕˊ").preedit;
-    assert!(text.starts_with("K書的"), "premise: ㄉㄜ˙ makes no word with ㄕㄨ, 書 stays fixed: {text}");
+    assert!(text.starts_with("K書的"), "premise: 書 stays fixed: {text}");
     let shown: String = text.chars().skip(3).collect();
     let o = run(&mut e, "_");
     let other = items(&mut e, &o).into_iter().find(|w| *w != shown && w.chars().count() == 2).expect("another word of the two syllables");
@@ -824,9 +832,19 @@ fn the_digit_layer_closes_the_syllable_too() {
 
 // ---- The row of an open English run (docs/spec/prediction.md §3.5) and its learning (docs/spec/learning.md §4.3) ----
 
+/// The row switch on, the English completions off (the test hook): the mixed words of the row alone.
 fn row_engine() -> Engine {
     let mut e = letters();
     e.set_prediction(true).unwrap();
+    e.set_english_complete(false);
+    e
+}
+/// As the App has it: the shipped table of mixed words, the shipped English table, the row with its completions.
+fn app_row_engine() -> Engine {
+    let mut e = plain();
+    e.set_prediction(true).unwrap();
+    assert!(e.set_mixed_words(&std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap()));
+    assert!(e.load_auto_english(&root().join("data/lexicon/english.tsv")));
     e
 }
 fn en_records(e: &Engine) -> Vec<(String, String, String, f64)> {
@@ -839,8 +857,9 @@ fn en_records(e: &Engine) -> Vec<(String, String, String, f64)> {
 fn the_run_row_lists_the_rows_by_count() {
     let mut p = plain();
     p.set_prediction(true).unwrap();
+    p.set_english_complete(false);
     let o = run(&mut p, "S-k");
-    assert!(o.candidates.is_empty() && o.english_run_utf16_len == 1, "premise: without the table an open run has no row");
+    assert!(o.candidates.is_empty() && o.english_run_utf16_len == 1, "premise: without the table an open run has no mixed words");
     let mut e = row_engine();
     let o = run(&mut e, "S-k");
     assert_eq!(o.candidates, ["K書", "K歌", "K金"]);
@@ -905,6 +924,7 @@ fn no_run_row_without_its_conditions() {
     assert!(same(&outputs(&mut e, "S-k S-o BS"), &outputs(&mut p, "S-k S-o BS")), "the row switch is off in both");
     let (mut e, mut p) = (row_engine(), plain());
     p.set_prediction(true).unwrap();
+    p.set_english_complete(false);
     assert!(same(&outputs(&mut e, "S-z S-z BS"), &outputs(&mut p, "S-z S-z BS")), "no row of the table for Z");
     for x in [&mut e, &mut p] {
         x.reset(ResetMode::Discard);
@@ -1045,9 +1065,11 @@ fn the_table_check_finds_a_word_that_replays_into_a_row() {
     assert!(collisions("k\tㄕㄨ\tK書\t1\n", &["keke".to_string()]).is_empty());
 }
 
-/// The shipped table against the English words the core knows: the `E` rows of `english.tsv` that start with a letter, and the two lists of official writings.
+/// The shipped table against the English words the core knows (the `E` rows of `english.tsv` that start with a letter, and the two lists of official
+/// writings), row by row: the (row, word) pairs that run into each other are exactly the list of docs/spec/english-mixed.md §14, and so is whether the
+/// word is still to be had (typed with Shift on its first letter and then Space, the window Down opens lists it).
 #[test]
-fn no_english_word_runs_into_a_shipped_row() {
+fn the_words_that_run_into_shipped_rows_are_the_documented_ones() {
     let read = |p: &str| std::fs::read_to_string(root().join(p)).unwrap();
     let table = read("data/lexicon/mixed-words.tsv");
     let mut words: Vec<String> =
@@ -1057,6 +1079,224 @@ fn no_english_word_runs_into_a_shipped_row() {
     }
     words.retain(|w| w.as_bytes()[0].is_ascii_alphabetic() && w.is_ascii());
     assert!(words.len() > 30_000, "premise: the word lists are read ({})", words.len());
-    let hit = collisions(&table, &words);
-    assert!(hit.is_empty(), "{} words run into a row of the table: {:?}", hit.len(), &hit[..hit.len().min(40)]);
+    let mut e = Engine::with_lexicon(shared().lex.clone(), Layout::Standard);
+    e.set_prediction(false).unwrap();
+    e.set_english(true).unwrap();
+    assert!(e.set_mixed_words(&table) && e.load_auto_english(&root().join("data/lexicon/english.tsv")));
+    let mut got: Vec<String> = Vec::new();
+    for row in table.lines().filter(|l| !l.starts_with('#')) {
+        let f: Vec<&str> = row.split('\t').collect();
+        let first = row.as_bytes()[0];
+        let of_letter: Vec<String> = words.iter().filter(|w| w.as_bytes()[0].to_ascii_lowercase() == first).cloned().collect();
+        for form in collisions(&format!("{row}\n"), &of_letter) {
+            e.reset(ResetMode::Discard);
+            for c in form.chars() {
+                e.key(Key::ch(c.to_ascii_lowercase(), if c.is_ascii_uppercase() { MOD_SHIFT } else { 0 })).unwrap();
+            }
+            e.key(Key::new(KeyKind::Space)).unwrap();
+            let kept = listed(&mut e).contains(&form);
+            got.push(format!("{} {} {}|{form}|{}", f[0], f[1], f[2], if kept { "是" } else { "否" }));
+        }
+    }
+    got.sort();
+    // The list of §14: table lines `| `row` | word | 是 or 否 ... |` under the marker line.
+    let spec = read("docs/spec/english-mixed.md");
+    let part = spec.split("<!-- mixed-collisions -->").nth(1).expect("the marker of the list in docs/spec/english-mixed.md §14");
+    let mut want: Vec<String> = part
+        .lines()
+        .skip(1)
+        .take_while(|l| l.trim_start().starts_with('|'))
+        .filter(|l| l.contains('`'))
+        .map(|l| {
+            let c: Vec<&str> = l.trim().trim_matches('|').split('|').map(str::trim).collect();
+            format!("{}|{}|{}", c[0].trim_matches('`'), c[1], c[2].chars().next().unwrap())
+        })
+        .collect();
+    want.sort();
+    assert!(got.len() >= 6, "premise: the shipped table has rows English words run into");
+    assert_eq!(got, want, "the list of docs/spec/english-mixed.md §14 is not what the check finds");
+}
+
+/// The English word a split took apart is in the window (docs/spec/english-mixed.md §4.3): behind the mixed word, or first when the row has more
+/// syllables to come; choosing it gives the word back as one token that the table leaves alone. The three are shipped rows that English words of
+/// `english.tsv` run into: `Karaoke` and Space replays to ㄍㄜ (K歌), `Nh4` closes ㄘˋ with its own `4` (N次), `Cm3` closes ㄩˇ with its `3`
+/// (the first syllable of C語言).
+#[test]
+fn the_word_a_split_took_apart_is_listed() {
+    let mut e = app_row_engine();
+    e.set_prediction(false).unwrap();
+    let o = run(&mut e, "S-k a r a o k e _");
+    assert!(o.preedit == "K歌" && units(&e) == [token("K"), "ㄍㄜ".to_string()], "premise: the split took the word: {}", o.preedit);
+    let list = listed(&mut e);
+    assert!(list[0] == "K歌" && list[1] == "Karaoke", "{:?}", &list[..3]);
+    let o = choose(&mut e, "Karaoke");
+    assert!(o.preedit == "Karaoke" && o.commit.is_empty() && units(&e) == [token("Karaoke")]);
+    let before = records(&e);
+    assert_eq!(run(&mut e, "e k _").preedit.chars().take(7).collect::<String>(), "Karaoke");
+    assert!(e.frozen_words().is_empty(), "the table applies behind no such token");
+    assert_eq!(run(&mut e, "Enter").commit.chars().take(7).collect::<String>(), "Karaoke");
+    assert_eq!(records(&e), before, "not learned");
+    // A tone key closed the run: the key is part of the word.
+    let o = run(&mut e, "S-n h 4");
+    assert!(o.preedit == "N次" && units(&e) == [token("N"), "ㄘˋ".to_string()], "premise: {}", o.preedit);
+    let list = listed(&mut e);
+    assert!(list[0] == "N次" && list[1] == "Nh4", "{:?}", &list[..3]);
+    assert_eq!(choose(&mut e, "Nh4").preedit, "Nh4");
+    assert_eq!(units(&e), [token("Nh4")]);
+    e.reset(ResetMode::Discard);
+    // The first syllable of a longer row: no mixed word yet, the English word is the first item.
+    let o = run(&mut e, "S-c m 3");
+    assert!(units(&e) == [token("C"), "ㄩˇ".to_string()] && e.frozen_words().is_empty(), "premise: split, nothing fixed: {}", o.preedit);
+    assert_eq!(listed(&mut e)[0], "Cm3");
+    // Gone once another syllable is typed, or the cursor has left.
+    run(&mut e, "u 0 6");
+    assert!(!listed(&mut e).contains(&"Cm3".to_string()));
+    e.reset(ResetMode::Discard);
+    run(&mut e, "S-k a r a o k e _ Left Right");
+    assert!(!listed(&mut e).contains(&"Karaoke".to_string()));
+    // Keys that are no English word leave nothing: `Kgj` is none.
+    e.reset(ResetMode::Discard);
+    run(&mut e, "S-k g j _");
+    let list = listed(&mut e);
+    assert!(list[0] == "K書" && !list.iter().any(|w| w.eq_ignore_ascii_case("kgj")), "{:?}", &list[..3]);
+}
+
+/// English completions (docs/spec/prediction.md §3.5): behind the mixed words of the letters, the English words that start with the run's letters, by
+/// count; at least three of the nine places are theirs.
+#[test]
+fn the_run_row_completes_english_words() {
+    let mut e = app_row_engine();
+    let table = std::fs::read_to_string(root().join("data/lexicon/mixed-words.tsv")).unwrap();
+    let k_rows = table.lines().filter(|l| l.starts_with("k\t")).count();
+    let o = run(&mut e, "S-k");
+    assert!(k_rows >= 2 && o.candidates.len() == 9 && o.selected.is_none() && o.english_run_utf16_len == 1, "{:?}", o.candidates);
+    let (mixed, words) = o.candidates.split_at(k_rows.min(6));
+    assert!(mixed.iter().all(|w| w.chars().any(|c| !c.is_ascii())) && words.len() >= 3, "the mixed words first: {:?}", o.candidates);
+    assert!(words.iter().all(|w| w.starts_with('K') && w.is_ascii() && w.len() > 1), "then English words of K: {words:?}");
+    assert!(words[0] == "Kd" && words[1] == "Kt", "by the count of the E rows (kd 24134, kt 18684): {words:?}");
+    // A lower-case letter: the mixed words go, the completions of `Ke` stay; the typed letters are kept as typed.
+    let o = run(&mut e, "e");
+    assert!(!o.candidates.is_empty() && o.candidates.iter().all(|w| w.starts_with("Ke") && w.len() > 2), "{:?}", o.candidates);
+    assert_eq!(o.candidates[0], "Kerr", "the most counted word of `ke` (kerr 8426)");
+    assert!(run(&mut e, "v").candidates.contains(&"Kevin".to_string()));
+    // `Kar...`: every item starts with what is typed; `Karaoke` is reached.
+    e.reset(ResetMode::Discard);
+    let o = run(&mut e, "S-k a r");
+    assert!(o.candidates.len() >= 3 && o.candidates.iter().all(|w| w.starts_with("Kar")), "{:?}", o.candidates);
+    assert!(run(&mut e, "a o").candidates.contains(&"Karaoke".to_string()));
+    // Choosing one: the run is that word as an English token; nothing is sent, nothing learned.
+    let before = records(&e);
+    let o = run(&mut e, "Tab");
+    let first = o.candidates[0].clone();
+    let o = run(&mut e, "Enter");
+    assert!(o.preedit == first && o.commit.is_empty() && o.english_run_utf16_len == 0 && o.candidates.is_empty(), "{}", o.preedit);
+    assert_eq!(units(&e), [token(&first)]);
+    assert_eq!(run(&mut e, "Enter").commit, first);
+    assert_eq!(records(&e), before);
+    // A click chooses too; ⌘⌫ on an entered completion forgets nothing and changes nothing.
+    run(&mut e, "S-w");
+    let o = run(&mut e, "Tab");
+    assert!(!o.candidates.is_empty() && o.candidates.iter().all(|w| w.starts_with('W') && w.is_ascii()), "a letter without mixed words lists English only: {:?}", o.candidates);
+    let again = e.key(key_of(FORGET)).unwrap();
+    assert!(again.candidates == o.candidates && again.selected == o.selected);
+    let word = o.candidates[1].clone();
+    assert_eq!(e.pick(1).unwrap().unwrap().preedit, word);
+    e.reset(ResetMode::Discard);
+    // Two upper-case letters first: a word without an official writing is all upper case; one with an official writing keeps it.
+    let o = run(&mut e, "S-o S-k");
+    let ok_rows = table.lines().filter(|l| l.starts_with("ok\t")).count();
+    assert!(o.candidates[..ok_rows].iter().all(|w| w.starts_with("OK") && !w.is_ascii()), "{:?}", o.candidates);
+    assert!(o.candidates[ok_rows..].iter().all(|w| w.starts_with("OK") && *w == w.to_ascii_uppercase()) && o.candidates.contains(&"OKAY".to_string()), "{:?}", o.candidates);
+    e.reset(ResetMode::Discard);
+    assert!(run(&mut e, "S-c h a t g").candidates.contains(&"ChatGPT".to_string()), "the official writing");
+    // No completion at all: no row (the shell shows its hint).
+    e.reset(ResetMode::Discard);
+    let o = run(&mut e, "S-z q x j z");
+    assert!(o.candidates.is_empty() && o.english_run_utf16_len == 5);
+    // Not in the ASCII state, not with the row off, not for a run a revert opened, not with a digit on the run.
+    e.reset(ResetMode::Discard);
+    assert!(run(&mut e, "S-k 8").candidates.is_empty());
+    e.reset(ResetMode::Discard);
+    assert!(run(&mut e, "s p e e").candidates.is_empty(), "premise: a revert's run `spee`: no row");
+    e.reset(ResetMode::Discard);
+    let mut p = plain();
+    for x in [&mut e, &mut p] {
+        x.set_prediction(false).unwrap();
+    }
+    assert!(same(&outputs(&mut e, "S-k e v i n _"), &outputs(&mut p, "S-k e v i n _")), "the row off: today's outputs");
+    for x in [&mut e, &mut p] {
+        x.set_prediction(true).unwrap();
+        x.set_ascii(true).unwrap();
+    }
+    let (a, b) = (e.key(Key::ch('K', 0)).unwrap(), p.key(Key::ch('K', 0)).unwrap());
+    assert!(a.candidates.is_empty() && a.preedit == b.preedit && a.english_run_utf16_len == 1, "the ASCII state's run has no row");
+}
+
+/// The places of the row: nine in all; the English completions get three when the mixed words alone would fill it.
+#[test]
+fn the_run_row_keeps_three_places_for_english() {
+    let rows: String = "書歌金卡車站線路片".chars().zip(["ㄕㄨ", "ㄍㄜ", "ㄐㄧㄣ", "ㄎㄚˇ", "ㄔㄜ", "ㄓㄢˋ", "ㄒㄧㄢˋ", "ㄌㄨˋ", "ㄆㄧㄢˋ"]).enumerate().map(|(i, (c, r))| format!("k\t{r}\tK{c}\t{}\n", 100 - i)).collect();
+    let mut e = plain();
+    e.set_prediction(true).unwrap();
+    assert!(e.set_mixed_words(&rows) && e.load_auto_english(&root().join("data/lexicon/english.tsv")));
+    let o = run(&mut e, "S-k");
+    assert_eq!(o.candidates[..6], ["K書", "K歌", "K金", "K卡", "K車", "K站"], "six of the nine mixed words");
+    assert!(o.candidates.len() == 9 && o.candidates[6..].iter().all(|w| w.is_ascii()), "{:?}", o.candidates);
+    e.set_english_complete(false);
+    e.reset(ResetMode::Discard);
+    assert_eq!(run(&mut e, "S-k").candidates.len(), 9, "without completions all nine are mixed words");
+}
+
+/// docs/spec/prediction.md §3.5, the cost of the completions per key: the 200 most counted words of `english.tsv`, each typed with Shift on its first
+/// letter, the other letters, Space, then a reset, on the App's engine. Five rounds, in each the completions on and off in turn; the p95 of the key
+/// time with them on is not more than 1 ms above the p95 with them off (the medians of the rounds). macOS only: the CI job that measures.
+#[cfg(target_os = "macos")]
+#[test]
+fn timing_english_completions() {
+    use std::time::{Duration, Instant};
+    let text = std::fs::read_to_string(root().join("data/lexicon/english.tsv")).unwrap();
+    let mut words: Vec<(u64, &str)> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("E\t"))
+        .filter_map(|l| l.split_once('\t'))
+        .filter(|(w, _)| w.bytes().all(|b| b.is_ascii_lowercase()))
+        .map(|(w, n)| (n.parse().unwrap(), w))
+        .collect();
+    words.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+    words.truncate(200);
+    assert_eq!(words.len(), 200);
+    let mut e = Engine::new(&root().join("data/lexicon"), Layout::Standard).unwrap();
+    e.load_lm(&root().join("data/lm/bigram.sjlm")).unwrap();
+    e.set_english(true).unwrap();
+    assert!(e.mixed_words_loaded() && e.auto_table_loaded(), "premise: the App's tables");
+    let pass = |e: &mut Engine, on: bool| -> (Duration, usize) {
+        e.set_english_complete(on);
+        let (mut times, mut rows) = (Vec::new(), 0);
+        for (_, w) in &words {
+            let mut keys: Vec<Key> = w.chars().enumerate().map(|(i, c)| Key::ch(c, if i == 0 { MOD_SHIFT } else { 0 })).collect();
+            keys.push(Key::new(KeyKind::Space));
+            for k in keys {
+                let t = Instant::now();
+                let o = e.key(k).unwrap();
+                times.push(t.elapsed());
+                rows += usize::from(!o.candidates.is_empty() && o.english_run_utf16_len > 0);
+            }
+            e.reset(ResetMode::Discard);
+        }
+        times.sort();
+        (times[times.len() * 95 / 100], rows)
+    };
+    pass(&mut e, true); // warm: the word list is built at the first use
+    let (mut on, mut off) = (Vec::new(), Vec::new());
+    for _ in 0..5 {
+        let (t, rows) = pass(&mut e, true);
+        assert!(rows > 400, "premise: the keys show rows with the completions on ({rows})");
+        on.push(t);
+        off.push(pass(&mut e, false).0);
+    }
+    on.sort();
+    off.sort();
+    let (on, off) = (on[2], off[2]);
+    println!("english completions: key p95 {:.3} ms on, {:.3} ms off", on.as_secs_f64() * 1e3, off.as_secs_f64() * 1e3);
+    assert!(on <= off + Duration::from_millis(1), "the completions add more than 1 ms to the key p95");
 }

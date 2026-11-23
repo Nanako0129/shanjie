@@ -1,22 +1,59 @@
+a|ㄆㄧㄢˋ|A片
+a|ㄇㄧㄢˋ|A面
+a|ㄉㄠˋ|A到
+a|ㄍㄨˇ|A股
 a|ㄎㄚ|A咖
+a|ㄎㄚˇ|A卡
+a|ㄐㄧˊ|A級
+a|ㄑㄧㄢˊ|A錢
+a|ㄒㄧㄥˊ|A型
+b|ㄎㄚ|B咖
+b|ㄐㄧˊ|B級
+b|ㄑㄩㄣˊ|B群
+b|ㄒㄧㄥˊ|B型
+b|ㄓㄢˋ|B站
 ban|ㄉㄧㄠˋ|ban掉
 beta|ㄅㄢˇ|Beta版
+c|ㄌㄨㄛˊ|C羅
+c|ㄎㄚ|C咖
+c|ㄐㄧˊ|C級
+c|ㄒㄧㄥˊ|C型
+c|ㄘㄠˊ|C槽
+c|ㄨㄟˋ|C位
+c|ㄩˇ ㄧㄢˊ|C語言
 cp|ㄓˊ|CP值
+d|ㄘㄠˊ|D槽
 debit|ㄎㄚˇ|debit卡
 discord|ㄑㄩㄣˊ|Discord群
+e|ㄖㄣˊ|E人
+g|ㄉㄧㄢˇ|G點
+g|ㄌㄧˋ|G力
 get|ㄅㄨˊ ㄉㄠˋ|get不到
 get|ㄅㄨˋ ㄉㄠˋ|get不到
 hdmi|ㄒㄧㄢˋ|HDMI線
 hold|ㄅㄨˊ ㄓㄨˋ|hold不住
 hold|ㄅㄨˋ ㄓㄨˋ|hold不住
 hold|ㄓㄨˋ|hold住
+i|ㄖㄣˊ|I人
 ic|ㄎㄚˇ|IC卡
 jr|ㄉㄨㄥ ㄖˋ ㄅㄣˇ|JR東日本
+k|ㄍㄜ|K歌
+k|ㄒㄧㄢˋ|K線
 k|ㄕㄨ|K書
 keroro|ㄐㄩㄣ ㄘㄠˊ|Keroro軍曹
+l|ㄏㄠˋ|L號
+l|ㄒㄧㄥˊ|L型
 lamigo|ㄊㄠˊ ㄩㄢˊ|Lamigo桃猿
+m|ㄏㄠˋ|M號
+m|ㄒㄧㄥˊ|M型
+n|ㄎㄚˇ|N卡
+n|ㄘˋ|N次
 ns|ㄅㄢˇ|NS版
+o|ㄒㄧㄥˊ|O型
 ok|ㄅㄥ|OK繃
+p|ㄅㄧˋ|P幣
+p|ㄊㄨˊ|P圖
+p|ㄓˊ|P值
 pdf|ㄉㄤˇ|PDF檔
 ph|ㄓˊ|pH值
 pin|ㄇㄚˇ|PIN碼
@@ -25,13 +62,23 @@ polo|ㄕㄢ|Polo衫
 pos|ㄐㄧ|POS機
 pr|ㄓˊ|PR值
 q|ㄅㄢˇ|Q版
+q|ㄊㄢˊ|Q彈
 qr|ㄇㄚˇ|QR碼
 raw|ㄉㄤˇ|RAW檔
+s|ㄏㄠˋ|S號
+s|ㄐㄧˊ|S級
+s|ㄒㄧㄥˊ|S型
 san|ㄓˊ|SAN值
 sd|ㄎㄚˇ|SD卡
 sim|ㄎㄚˇ|SIM卡
 sk|ㄏㄞˇ ㄌㄧˋ ㄕˋ|SK海力士
+t|ㄊㄞˊ|T台
 t|ㄒㄩˋ|T恤
 t|ㄗˋ|T字
+u|ㄒㄧㄥˊ|U型
+v|ㄌㄧㄥˇ|V領
+v|ㄒㄧㄥˊ|V型
 visa|ㄎㄚˇ|VISA卡
+x|ㄉㄤˇ ㄢˋ|X檔案
 x|ㄍㄨㄤ|X光
+z|ㄕˋ ㄉㄞˋ|Z世代
