@@ -33,7 +33,7 @@ fn next_generation() -> u64 {
 }
 
 /// A word of a job's path as `PathWord` keeps it: (word, lp, demotion delta, syllables, SINIT marker).
-type JobWord = (String, f64, f64, usize, bool);
+type JobWord = (String, f64, f64, usize, bool, bool);
 
 /// docs/spec/learning.md §7.4: `b` of a path, the weight of the learned sentence-start character it starts with (the literal first character of its
 /// text, whatever words the path cuts it into); 0 when it starts with none.
@@ -57,7 +57,7 @@ enum Swap {
 /// and the score without what the lift added to it (the word's marker holds both, `DecodedWord`). The marker stays on the word.
 fn sinit_unlift<'a>(path: &Scored<'a>) -> Scored<'a> {
     let gain: f64 = path.1.iter().filter_map(|w| w.5).map(|m| m.1).sum();
-    (path.0 - gain, path.1.iter().map(|&(w, lp, delta, n, fuzzy, mark)| (w, mark.map_or(lp, |m| m.0), delta, n, fuzzy, mark)).collect())
+    (path.0 - gain, path.1.iter().map(|&(w, lp, delta, n, fuzzy, mark, mixed)| (w, mark.map_or(lp, |m| m.0), delta, n, fuzzy, mark, mixed)).collect())
 }
 
 fn text_of(path: &[DecodedWord]) -> String {
@@ -85,8 +85,13 @@ fn sinit_swap<'a>(best: &mut Vec<Scored<'a>>, lifted: &[Scored<'a>], pool: &mut 
 /// `sinit_swap`) with the n-gram scores `ng`: the manual mask with `cands[0]` (the decoder's first) as the base (`used`, the readings that path used, is
 /// asked for only when `manual` has words), each candidate's pool weight (`RecurGrams::pool_bonus`; all 0 without `recur`), and `lm::pool_order` of the
 /// three (empty: not reordered).
-fn pool_lists(cands: &[&str], ng: &[f64], used: impl FnOnce() -> Vec<String>, manual: &ManualSet, recur: Option<&RecurGrams>) -> (Vec<bool>, Vec<f64>, Vec<usize>) {
-    let masked = if manual.is_empty() { vec![false; cands.len()] } else { manual_mask(&used(), cands, manual) };
+fn pool_lists(cands: &[&str], ng: &[f64], used: impl FnOnce() -> Vec<String>, manual: &ManualSet, recur: Option<&RecurGrams>, mixed: Option<&str>) -> (Vec<bool>, Vec<f64>, Vec<usize>) {
+    let mut masked = if manual.is_empty() { vec![false; cands.len()] } else { manual_mask(&used(), cands, manual) };
+    // docs/spec/decoder.md §7: the Han part of a mixed word the decoder's first path took through the edge (it starts the stretch) is protected for this job
+    // only, by the rule of `manual_mask`: a candidate that does not hold it there cannot be chosen.
+    if let Some(han) = mixed {
+        masked.iter_mut().zip(cands).for_each(|(m, c)| *m |= !c.starts_with(han));
+    }
     let bonus: Vec<f64> = cands.iter().map(|c| recur.map_or(0.0, |r| r.pool_bonus(c))).collect();
     let order = pool_order(ng, &bonus, &masked).map_or_else(Vec::new, |(o, _)| o);
     (masked, bonus, order)
@@ -593,6 +598,8 @@ struct PathWord {
     delta: f64,
     /// Syllables the word covers (punctuation is 1).
     syllables: usize,
+    /// The Han part of a mixed word, put out through the decoder's edge (`DecodedWord.6`, docs/spec/decoder.md §4.7): `lp` is the edge's whole score.
+    mixed: bool,
 }
 
 /// docs/spec/prediction.md §3.5: the key of an English completion in the row of an open run (no record is ever kept under it).
@@ -654,32 +661,31 @@ struct Fixed {
     /// docs/spec/learning.md §8.5: the new words (reading, word) of the path this pick displaced, chosen while learning was on;
     /// each is halved at a commit with learning on.
     displaced_new: Vec<(Vec<String>, String)>,
-    /// docs/spec/english-mixed.md §5.7: for an English token, what the mixed-word table did behind it. Default for every other fixed word.
+    /// docs/spec/english-mixed.md §5.7: for an English token, the mixed word behind it. Default for every other fixed word.
     mixed: MixedMark,
+    /// docs/spec/english-mixed.md §4.4: for an English token that shows the table's writing of the English part (the path shown takes the mixed word behind
+    /// it), the text it had before: it comes back when the path no longer takes the mixed word. `None` for every other fixed word.
+    own: Option<String>,
     /// docs/spec/english-mixed.md §4.3: for the token a split at the closing key made, when the keys of the run (with the tone key that closed it) are an
     /// English word the core knows: those keys and the syllable the split made. The window lists the word while that syllable alone stands
     /// behind the token with the cursor at the end (`mixed_sweep` drops it otherwise).
     whole: Option<(String, String)>,
 }
 
-/// docs/spec/english-mixed.md §5.7: the state of the automatic mixed word behind one English part (an English token, or at the composition's start the
-/// English the text before it ends with).
+/// docs/spec/english-mixed.md §5.7: the mixed word behind one English token.
 #[derive(Clone, Copy, Default, PartialEq)]
 struct MixedMark {
-    /// The table's Han part is fixed over this many syllables right behind the English part (0: nothing is).
-    k: usize,
-    /// The user chose another word or writing: the table never applies behind this English part again.
+    /// The user chose the token's writing, or the English word a split took apart: the table's word is no candidate behind this token again.
     dead: bool,
-    /// The token's text is the table's writing of the English part, not what the user typed or chose.
-    wrote: bool,
-    /// The word came from the row of the open English run with learning on (docs/spec/learning.md §4.3): recorded at the commit while `k` holds.
-    picked: bool,
+    /// The syllables behind the token came from the row of the open English run with learning on (docs/spec/learning.md §4.3), this many: recorded at the
+    /// commit when the text shown over the token and them is that row's writing. 0: no such pick.
+    picked: usize,
 }
 
 impl Fixed {
     /// A word the engine fixed on its own (docs/spec/keys-and-composition.md §6.3): not learned, not a user choice.
     fn frozen(start: usize, end: usize, word: String) -> Self {
-        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), whole: None }
+        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None }
     }
 }
 
@@ -1077,9 +1083,8 @@ pub struct Engine {
     digit_table: Option<Arc<DigitTable>>,
     /// docs/spec/english-mixed.md §5.7: the mixed words (`mixed-words.tsv`, optional). `None`: no item is ever added.
     mixed: Option<Arc<MixedTable>>,
-    /// docs/spec/english-mixed.md §5.7: the mark of the English the text before the composition ends with (the token's is on its fixed word). Reset with
-    /// the composition (`clear_all`, the first key on an empty one).
-    mixed_left: MixedMark,
+    /// docs/spec/decoder.md §4.7: the bonus of the mixed word's edge: `lm::MIXED_BONUS`, or the evaluation hook's value (`set_mixed_bonus`).
+    mixed_bonus: f64,
     /// docs/spec/prediction.md §3.5: the English words the completions of an open run are taken from, in lower case with the count of the `E` row
     /// (`None`: only in the lists of official writings), sorted by the word; built at the first use from the English table (`auto_table`, when one is
     /// loaded) and those lists, dropped when the table changes.
@@ -1497,7 +1502,7 @@ impl Engine {
             run_rev: false,
             digit_table: None,
             mixed: None,
-            mixed_left: MixedMark::default(),
+            mixed_bonus: crate::lm::MIXED_BONUS,
             en_index: None,
             en_complete: true,
             digit_cache: None,
@@ -1724,10 +1729,11 @@ impl Engine {
         }
         // Right to left, so the earlier ranges still point at their words.
         for c in changes.into_iter().rev() {
-            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(word, lp, delta, syllables, sinit)| PathWord { word, lp, sinit, is_punct: false, delta, syllables }));
+            self.path.splice(c.at..c.at + c.expect.len(), c.words.into_iter().map(|(word, lp, delta, syllables, sinit, mixed)| PathWord { word, lp, sinit, is_punct: false, delta, syllables, mixed }));
         }
         // `refresh_lm` builds the display from exactly the strings of `path`.
         self.display = self.path.iter().map(|p| p.word.as_str()).collect();
+        self.mixed_sync(); // docs/spec/english-mixed.md §4.4: the token's writing follows the path the rerank chose
         if !self.pred.is_empty() {
             self.recompute_pred();
         }
@@ -1792,7 +1798,7 @@ impl Engine {
             self.fixed.iter_mut().for_each(|f| {
                 f.pre = None;
                 f.displaced_new.clear();
-                f.mixed.picked = false;
+                f.mixed.picked = 0;
             });
             if !self.syls.is_empty() || self.pend.iter().any(Option::is_some) {
                 self.paused = true;
@@ -1836,7 +1842,7 @@ impl Engine {
         self.fixed.iter_mut().for_each(|f| {
             f.pre = None;
             f.displaced_new.clear();
-            f.mixed.picked = false;
+            f.mixed.picked = 0;
         });
         let store = self.store.as_ref().ok_or(StoreError::Io)?;
         store.clear()?;
@@ -1940,8 +1946,8 @@ impl Engine {
             return;
         }
         let new_on = self.newword && !self.paused;
-        self.mixed_sweep(); // a pick the commit's own key changed is not recorded
-        if !(new_on && self.learner.has_new_words()) && self.fixed.iter().all(|f| f.pre.is_none() && f.displaced_new.is_empty() && !f.mixed.picked) {
+        self.mixed_sweep(); // a pick whose syllables the commit's own key changed is not recorded
+        if !(new_on && self.learner.has_new_words()) && self.fixed.iter().all(|f| f.pre.is_none() && f.displaced_new.is_empty() && f.mixed.picked == 0) {
             return;
         }
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -1988,16 +1994,20 @@ impl Engine {
                     touched.extend(self.learner.halve(k, reading, displaced, today));
                 }
             }
-            // docs/spec/learning.md §4.3: a pick from the row of an open English run that still stands as picked: weight + 1 under `^en:` + the English part.
+            // docs/spec/learning.md §4.3: a pick from the row of an open English run, when the text sent over the token and the row's syllables is the row's
+            // writing: weight + 1 under `^en:` + the English part.
             let en: Vec<(String, Vec<String>, String)> = self
                 .fixed
                 .iter()
-                .filter(|f| f.mixed.picked && f.mixed.k > 0)
+                .filter(|f| f.mixed.picked > 0)
                 .filter_map(|f| {
                     let english = english_of(&self.syls[f.start])?;
-                    let reading = self.syls.get(f.end..f.end + f.mixed.k)?;
+                    let reading = self.syls.get(f.end..f.end + f.mixed.picked)?;
                     let word = self.mixed.as_ref()?.get(english, reading)?;
-                    Some((format!("{EN_PREFIX}{}", english.to_ascii_lowercase()), reading.to_vec(), word.to_string()))
+                    // `display` is the text being sent (`self.display` is taken by now): the token's characters, then one per syllable.
+                    let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
+                    let sent: String = display.chars().skip(off).take(self.token_width(f.start) + f.mixed.picked).collect();
+                    (sent == word).then(|| (format!("{EN_PREFIX}{}", english.to_ascii_lowercase()), reading.to_vec(), word.to_string()))
                 })
                 .collect();
             for (key, reading, word) in &en {
@@ -2221,6 +2231,12 @@ impl Engine {
     /// docs/spec/english-mixed.md §5.7: takes `text` as the mixed-words table. A table with any row that breaks a rule is not loaded
     /// and the table before it goes too (the engine is as it is without one). `Engine::new` calls this with `mixed-words.tsv`;
     /// tests call it on `with_lexicon` engines.
+    /// Evaluation and test hook (docs/spec/decoder.md §4.7; Rust only, not in shanjie.h): the bonus of the mixed word's edge instead of `lm::MIXED_BONUS`.
+    #[doc(hidden)]
+    pub fn set_mixed_bonus(&mut self, bonus: f64) {
+        self.invalidate();
+        self.mixed_bonus = bonus;
+    }
     pub fn set_mixed_words(&mut self, text: &str) -> bool {
         self.mixed = MixedTable::parse(text, &self.lex).map(Arc::new);
         self.mixed.is_some()
@@ -2603,7 +2619,7 @@ impl Engine {
         // it again ends as the first time did (`ChatGPT` reopens as `Chatgp`, never `ChatGP`). Any other text is one the user chose
         // (picked from the list, or typed in the ASCII state): it reopens as it stands and the table leaves it alone when it ends.
         // docs/spec/english-mixed.md §5.7: so does the writing the mixed-word table put there.
-        let by_table = word == english_writing(typed) || self.fixed.iter().any(|f| f.start == at && f.mixed.wrote);
+        let by_table = word == english_writing(typed) || self.fixed.iter().any(|f| f.start == at && f.own.is_some());
         let mut letters = if by_table { typed.to_string() } else { word.to_string() };
         letters.pop();
         self.run = letters;
@@ -2700,7 +2716,6 @@ impl Engine {
         let mut commit = if head.is_empty() { String::new() } else { self.put_english(format!("{PUNCT_PREFIX}{head}"), writing, None)? };
         self.pred_dirty = true;
         commit.push_str(&self.insert_token(syl, None, None)?.commit);
-        self.mixed_auto()?;
         Ok(self.view(true, commit))
     }
 
@@ -2725,8 +2740,8 @@ impl Engine {
         table.starts(u, &syl).then(|| (u.to_string(), syl))
     }
 
-    /// The split `mixed_split` found: U becomes an English token, the syllable a finished syllable behind it, the run closes; the table then
-    /// applies as after any closing key (`mixed_auto`).
+    /// The split `mixed_split` found: U becomes an English token, the syllable a finished syllable behind it, the run closes; the decoder
+    /// then has the table's word behind the token as behind any other (`mixed_edges`).
     fn run_split(&mut self, u: String, syl: String, tone: usize) -> Result<Output, EngineError> {
         // docs/spec/english-mixed.md §4.3: the keys as an English word (a tone key that closed the run is one of them, Space is not).
         let mut keys = std::mem::take(&mut self.run);
@@ -2743,11 +2758,10 @@ impl Engine {
         if let Some(f) = self.fixed.iter_mut().find(|f| word && commit.is_empty() && f.end == at && f.start + 1 == at) {
             f.whole = Some((keys, syl));
         }
-        self.mixed_auto()?;
         Ok(self.view(true, commit))
     }
 
-    // ---- docs/spec/english-mixed.md §5.7: the automatic mixed word ----
+    // ---- docs/spec/english-mixed.md §5.7: the mixed word in the decoder ----
 
     /// The English part the syllables from `a` on stand behind: the English token right before `a`; at the composition's start, with a small
     /// model that declares a left length loaded (only then does `left_full` keep a lone letter), the 1 to 16 ASCII letters and digits the text before
@@ -2762,75 +2776,79 @@ impl Engine {
         ((1..=16).contains(&n) && !cut).then(|| last_chars(&self.left_full, n))
     }
 
-    fn mixed_mark(&mut self, a: usize) -> Option<&mut MixedMark> {
-        match a {
-            0 => Some(&mut self.mixed_left),
-            _ => self.fixed.iter_mut().find(|f| f.start == a - 1 && f.end == a).map(|f| &mut f.mixed),
+    /// docs/spec/decoder.md §4.7, the one rule of the edge: with English mixing on, the stretch `[a, stop)` stands right behind an English part (`mixed_english`;
+    /// not behind a token whose mark is dead) and its first syllables are a reading the table has for it: (how many syllables, the row's Han part), one for
+    /// every such row. Only a Han part that can stand as a fixed word (a lexicon word under those syllables, or one single-character entry per
+    /// syllable) gives an edge, so a later freeze of the path never holds a word the lexicon cannot score.
+    fn mixed_edges<'t>(&self, table: &'t MixedTable, capped: &CappedLexicon, a: usize, stop: usize) -> Vec<(usize, &'t str)> {
+        let dead = a > 0 && self.fixed.iter().any(|f| f.end == a && f.start + 1 == a && f.mixed.dead);
+        let Some(english) = self.mixed_english(a).filter(|_| self.english && !dead) else { return Vec::new() };
+        (1..=crate::mixed::MIXED_MAX_SYLLABLES.min(stop - a))
+            .filter_map(|k| {
+                let r = &self.syls[a..a + k];
+                let han = &table.get(&english, r)?[english.len()..];
+                let singles = || han.chars().zip(r).all(|(c, s)| self.lex.has(std::slice::from_ref(s), c.encode_utf8(&mut [0; 4])));
+                (capped.best_lp_delta(r, han).is_some() || singles()).then_some((k, han))
+            })
+            .collect()
+    }
+
+    /// docs/spec/english-mixed.md §4.4, after every decode and every applied rerank: an English token shows the table's writing of the English part while the
+    /// text shown takes a mixed word behind it, and its own text again when it does not. Taken: the word after the token carries the decoder's marker, or
+    /// fixed words stand over exactly a row's syllables and show its Han part (the user chose the same word in the window). `path` and `display` follow.
+    fn mixed_sync(&mut self) {
+        let Some(table) = self.mixed.clone() else { return };
+        let (mut at, mut changed) = (0, false);
+        for i in 0..self.path.len() {
+            let n = self.path[i].syllables;
+            let token = self.fixed.iter().position(|f| self.path[i].is_punct && f.start == at && f.end == at + 1 && !f.mixed.dead);
+            if let Some((fi, e)) = token.zip(english_of(&self.syls[at])) {
+                let row = |k: usize| table.get(e, self.syls.get(at + 1..at + 1 + k)?);
+                let marked = self.path.get(i + 1).filter(|w| w.mixed).and_then(|w| row(w.syllables));
+                let fixed = || (1..=crate::mixed::MIXED_MAX_SYLLABLES).filter(|_| self.english).filter_map(row).find(|w| self.fixed_show(at + 1, &w[e.len()..]));
+                let writing = marked.or_else(fixed).map(|w| w[..e.len()].to_string());
+                let f = &mut self.fixed[fi];
+                match writing {
+                    Some(w) if w != f.word => {
+                        let old = std::mem::replace(&mut f.word, w);
+                        f.own.get_or_insert(old);
+                    }
+                    Some(_) => {}
+                    None => {
+                        if let Some(own) = f.own.take() {
+                            f.word = own;
+                        }
+                    }
+                }
+                if self.path[i].word != f.word {
+                    self.path[i].word = f.word.clone();
+                    changed = true;
+                }
+            }
+            at += n;
+        }
+        if changed {
+            // `refresh_lm` builds the display from exactly the strings of `path`.
+            self.display = self.path.iter().map(|p| p.word.as_str()).collect();
         }
     }
 
-    /// The frozen words that show `han` over `[a, a + k)`: the word itself when the lexicon has it under those syllables, else its characters one per
-    /// syllable (get不到: 不到 is no entry under ㄅㄨˊ ㄉㄠˋ, 不 and 到 are). `None`: neither can be fixed (`refresh_lm` scores a fixed word under
-    /// its reading), so the table does not apply.
-    fn mixed_fixes(&self, a: usize, k: usize, han: &str) -> Option<Vec<Fixed>> {
-        let whole = || Some(vec![Fixed::frozen(a, a + k, han.to_string())]);
-        let Some(st) = &self.lm else { return whole() };
-        let r = &self.syls[a..a + k];
-        if st.capped.best_lp_delta(r, han).is_some() && (k < NEWWORD_MIN || self.lex.has(r, han)) {
-            return whole();
-        }
-        let pieces = self.pieces(a, a + k, han, None);
-        (pieces.len() == k).then_some(pieces)
-    }
-
-    /// Frozen words stand over exactly `[a, a + k)` and show `han`.
-    fn mixed_holds(&self, a: usize, k: usize, han: &str) -> bool {
-        let (mut text, mut pos) = (String::new(), a);
-        for f in self.fixed.iter().filter(|f| f.frozen && f.start >= a && f.end <= a + k) {
+    /// Fixed words stand over exactly the syllables from `a` that `han` has characters for, and show `han`.
+    fn fixed_show(&self, a: usize, han: &str) -> bool {
+        let (end, mut text, mut pos) = (a + han.chars().count(), String::new(), a);
+        for f in self.fixed.iter().filter(|f| f.start >= a && f.end <= end) {
             if f.start != pos {
                 return false;
             }
             text.push_str(&f.word);
             pos = f.end;
         }
-        pos == a + k && text == han
+        pos == end && text == han
     }
 
-    /// docs/spec/english-mixed.md §5.7, called by the key that closed a syllable: with English mixing on, the cursor at the end and nothing unfinished,
-    /// the syllables from the English part to the cursor are a reading the table has for it. Then they are fixed as the table's Han part (frozen:
-    /// never learned, released as any frozen word is) and the token shows the table's writing of the English part. Not behind an English part
-    /// whose mark is dead, and not over a word the user chose. `true`: applied.
-    fn mixed_auto(&mut self) -> Result<bool, EngineError> {
-        let (end, k) = (self.cursor, self.avail());
-        let Some(table) = self.mixed.clone().filter(|_| self.english && end == self.syls.len() && k > 0 && self.pend.iter().all(Option::is_none)) else {
-            return Ok(false);
-        };
-        let a = end - k;
-        let Some(english) = self.mixed_english(a) else { return Ok(false) };
-        let Some(writing) = table.get(&english, &self.syls[a..end]) else { return Ok(false) };
-        let (en, han) = writing.split_at(english.len());
-        let chosen = self.fixed.iter().any(|f| !f.frozen && f.start < end && a < f.end);
-        if chosen || self.mixed_mark(a).is_none_or(|m| m.dead) {
-            return Ok(false);
-        }
-        let Some(fixes) = self.mixed_fixes(a, k, han) else { return Ok(false) };
-        self.fixed.retain(|f| !(f.start < end && a < f.end));
-        self.fixed.extend(fixes);
-        self.fixed.sort_by_key(|f| f.start);
-        if let Some(f) = self.fixed.iter_mut().find(|f| a > 0 && f.end == a && f.start == a - 1) {
-            f.word = en.to_string();
-        }
-        if let Some(m) = self.mixed_mark(a) {
-            *m = MixedMark { k, dead: false, wrote: a > 0, picked: m.picked };
-        }
-        self.refresh()?;
-        Ok(true)
-    }
-
-    /// docs/spec/english-mixed.md §5.7, after every key and pick: an English part whose fixed Han part is no longer there. The syllables are still the
-    /// row's: the user chose another word, and the table does not apply behind this English part again.
-    /// The syllables changed (Backspace): it may apply again. Either way a pick from the run's row is no longer what stands, and is not recorded.
-    /// The English word a split took apart (`Fixed::whole`) is kept only while its one syllable stands behind the token with the cursor at the end.
+    /// After every key and pick. docs/spec/learning.md §4.3: a pick from the run's row is no longer one once the syllables behind the token are not that
+    /// row's reading (Backspace took one). docs/spec/english-mixed.md §4.3: the English word a split took apart (`Fixed::whole`) is kept only while its one
+    /// syllable stands behind the token with the cursor at the end.
     fn mixed_sweep(&mut self) {
         let Some(table) = self.mixed.clone() else { return };
         let (n, at_end) = (self.syls.len(), self.cursor == self.syls.len());
@@ -2839,18 +2857,8 @@ impl Engine {
             if f.whole.as_ref().is_some_and(|(_, syl)| !(at_end && f.end + 1 == n && syls[f.end] == *syl)) {
                 f.whole = None;
             }
-        }
-        let anchors: Vec<usize> = std::iter::once(0).chain(self.fixed.iter().filter(|f| f.mixed.k > 0).map(|f| f.end)).collect();
-        for a in anchors {
-            let Some(mark) = self.mixed_mark(a).map(|m| *m).filter(|m| m.k > 0) else { continue };
-            let row = self.syls.get(a..a + mark.k).zip(self.mixed_english(a)).and_then(|(r, e)| Some(table.get(&e, r)?[e.len()..].to_string()));
-            let dead = match row {
-                Some(han) if self.mixed_holds(a, mark.k, &han) => continue,
-                Some(_) => true,
-                None => mark.dead,
-            };
-            if let Some(m) = self.mixed_mark(a) {
-                *m = MixedMark { k: 0, dead, picked: false, ..mark };
+            if f.mixed.picked > 0 && !english_of(&syls[f.start]).zip(syls.get(f.end..f.end + f.mixed.picked)).is_some_and(|(e, r)| table.get(e, r).is_some()) {
+                f.mixed.picked = 0;
             }
         }
     }
@@ -2947,7 +2955,7 @@ impl Engine {
     }
 
     /// docs/spec/prediction.md §3.5: an item of the run's row is chosen. The run closes, U becomes an English token, the row's syllables go in behind it and
-    /// the table applies as if they had been typed; nothing is sent. With learning on the pick is marked for the commit (docs/spec/learning.md §4.3).
+    /// are decoded as if they had been typed (docs/spec/decoder.md §4.7); nothing is sent. With learning on the pick is marked for the commit (docs/spec/learning.md §4.3).
     fn apply_mixed_pred(&mut self, p: Pred) -> Result<Output, EngineError> {
         if self.run.is_empty() {
             return self.handled(); // the row is the open run's: without one there is nothing to choose
@@ -2962,10 +2970,9 @@ impl Engine {
             // ponytail: a composition that reached `MAX_SYLLABLES` on the way was sent whole; what is left of the word starts the next one unfixed.
             commit.push_str(&self.insert_token(syl, None, None)?.commit);
         }
-        if commit.is_empty() && self.mixed_auto()? && self.learning {
-            if let Some(m) = self.mixed_mark(self.cursor - k) {
-                m.picked = true;
-            }
+        let token = self.cursor.checked_sub(k + 1);
+        if let Some(f) = self.fixed.iter_mut().find(|f| commit.is_empty() && self.learning && Some(f.start) == token && f.end == f.start + 1) {
+            f.mixed.picked = k;
         }
         self.pred_dirty = false; // as after any row pick: no row until the next key
         Ok(self.view(true, commit))
@@ -3257,7 +3264,7 @@ impl Engine {
         fn close_u<'a>(before: Option<&'a str>, unknown: bool, count: usize) -> Option<&'a str> {
             if unknown && count == 1 { None } else { before }
         }
-        for PathWord { word: w, lp, sinit, is_punct, delta, syllables: n } in &self.path {
+        for PathWord { word: w, lp, sinit, is_punct, delta, syllables: n, mixed } in &self.path {
             if cut == Some(at) {
                 if open {
                     total += st.lm.eos3_in(&mut memo, cfg, close_u(before, unknown, count).and_then(id), id(prev));
@@ -3281,7 +3288,9 @@ impl Engine {
             // A fixed word is the right neighbour that closes the stretch before it (`End::Next`), so (b') applies to its term.
             let fixed_here = self.fixed.iter().any(|f| f.start == at);
             let u = if fixed_here { close_u(before, unknown, count) } else { before };
-            total += if learned {
+            total += if *mixed {
+                *lp + delta // docs/spec/decoder.md §4.7: the edge's whole score (its delta is 0)
+            } else if learned {
                 st.lm.word_learned_by_id(cfg.lam, id(prev), id(w), *lp)
             } else {
                 st.lm.word3_in(&mut memo, cfg, u.and_then(id), id(prev), id(w), *lp)
@@ -3335,7 +3344,6 @@ impl Engine {
         // composition starts a new one (however the last one emptied: commit, Esc, Backspace), so the mark goes first.
         if self.syls.is_empty() && self.run.is_empty() && self.pending().is_empty() {
             self.paused = false;
-            self.mixed_left = MixedMark::default();
         }
         if !self.learning {
             self.paused = true;
@@ -3702,7 +3710,7 @@ impl Engine {
         self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), whole: None });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -3737,7 +3745,6 @@ impl Engine {
         self.late_in = None;
         self.clear_pred();
         self.paused = false;
-        self.mixed_left = MixedMark::default();
     }
 
     fn pending(&self) -> String {
@@ -3881,6 +3888,7 @@ impl Engine {
         // docs/spec/english-mixed.md §4.7: an open English run is a boundary like a token: `cut` is its place among the units, `cut_out` the byte
         // offset in `out` where it sits (the run's letters are not in `out`).
         let (cut, mut cut_out) = (self.run_cut(), None);
+        let table = self.mixed.clone();
         for gap in 0..=self.fixed.len() {
             let from = if gap == 0 { 0 } else { self.fixed[gap - 1].end };
             let right = self.fixed.get(gap);
@@ -3919,9 +3927,12 @@ impl Engine {
                     learner: &self.learner, before: &before, after, today, eps_global: self.eps_global, sinit: Sinit::Off,
                 });
                 let tone3 = t3_on.map(|_| (&t3[start..stop], crate::tone3::DELTA_TONE3));
+                // docs/spec/decoder.md §4.7: the mixed words that may start this stretch (none behind an open run: it is no token yet).
+                let edges = table.as_deref().filter(|_| !after_run && start == from).map_or_else(Vec::new, |t| self.mixed_edges(t, &st.capped, start, stop));
+                let mixed = (!edges.is_empty()).then_some((edges.as_slice(), self.mixed_bonus));
                 let mut best = decode_segment_fuzzy(
                     &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
-                    crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3,
+                    crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3, mixed,
                 )
                 .map_err(|_| EngineError::Internal)?;
                 let eligible = jobs && best.len() >= 2;
@@ -3941,7 +3952,7 @@ impl Engine {
                     let lift = Learn { sinit: Sinit::Lift, ..*ln };
                     let lifted = decode_segment_fuzzy(
                         &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&lift), self.demote, self.fuzzy,
-                        crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3,
+                        crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3, mixed,
                     )
                     .map_err(|_| EngineError::Internal)?;
                     match sinit_swap(&mut best, &lifted, pool, &sinit_chars) {
@@ -3951,6 +3962,18 @@ impl Engine {
                     }
                 }
                 let in_job = pool.is_some();
+                // docs/spec/english-mixed.md §4.4: the token before a path that takes the mixed word shows the table's writing of the English part (the same
+                // bytes in another case), so the text the job and the next stretches see is the text shown; `mixed_sync` then sets the token itself.
+                let taken = best[0].1.first().filter(|w| w.6).map(|w| (w.0, w.3));
+                if let (Some((_, k)), Some(t), true) = (taken, &table, start > 0) {
+                    if let Some(w) = english_of(&self.syls[start - 1]).and_then(|e| Some(&t.get(e, &self.syls[start..start + k])?[..e.len()])) {
+                        if let Some(last) = path.last_mut().filter(|p: &&mut PathWord| p.is_punct && out.ends_with(p.word.as_str())) {
+                            out.truncate(out.len() - last.word.len());
+                            out.push_str(w);
+                            last.word = w.to_string();
+                        }
+                    }
+                }
                 if let Some(pool) = pool {
                     let top: Vec<&Scored> = pool.iter().map(|&i| &best[i]).collect();
                     let mut gap_text = out[job_end..].to_string();
@@ -3963,10 +3986,10 @@ impl Engine {
                     let cands: Vec<&str> = texts.iter().map(String::as_str).collect();
                     let ng: Vec<f64> = top.iter().map(|(score, _)| *score).collect();
                     let used = || self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3)), &t3[start..stop]);
-                    let (masked, bonus, order) = pool_lists(&cands, &ng, used, &manual, pool_recur.then_some(&self.recur));
+                    let (masked, bonus, order) = pool_lists(&cands, &ng, used, &manual, pool_recur.then_some(&self.recur), taken.map(|t| t.0));
                     stretches.push(Stretch {
                         at: path.len(),
-                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _, sinit)| (w.to_string(), lp, delta, l, sinit.is_some())).collect()).collect(),
+                        paths: top.iter().map(|(_, ws)| ws.iter().map(|&(w, lp, delta, l, _, sinit, mixed)| (w.to_string(), lp, delta, l, sinit.is_some(), mixed)).collect()).collect(),
                         ng,
                         bonus,
                         order,
@@ -3976,9 +3999,9 @@ impl Engine {
                         gap: gap_text,
                     });
                 }
-                for (w, lp, delta, l, _, sinit) in &best[0].1 {
+                for (w, lp, delta, l, _, sinit, mixed) in &best[0].1 {
                     out.push_str(w);
-                    path.push(PathWord { word: w.to_string(), lp: *lp, sinit: sinit.is_some(), is_punct: false, delta: *delta, syllables: *l });
+                    path.push(PathWord { word: w.to_string(), lp: *lp, sinit: sinit.is_some(), is_punct: false, delta: *delta, syllables: *l, mixed: *mixed });
                 }
                 if in_job {
                     job_end = out.len();
@@ -3989,12 +4012,15 @@ impl Engine {
                 start = stop;
             }
             if let Some(f) = right {
-                out.push_str(&f.word);
-                path.push(PathWord { word: f.word.clone(), lp: lp_fixed[gap], sinit: false, is_punct: self.is_punct(f.start), delta: delta_fixed[gap], syllables: f.end - f.start });
+                // A token that shows the table's writing goes in as its own text; the stretch behind it puts the table's writing back when it takes the mixed word.
+                let word = f.own.as_ref().unwrap_or(&f.word);
+                out.push_str(word);
+                path.push(PathWord { word: word.clone(), lp: lp_fixed[gap], sinit: false, is_punct: self.is_punct(f.start), delta: delta_fixed[gap], syllables: f.end - f.start, mixed: false });
             }
         }
         self.display = out;
         self.path = path;
+        self.mixed_sync();
         if let (false, Some(model)) = (stretches.is_empty(), &self.tinylm) {
             // `left_full` holds at most this model's L characters: it is cleared whenever the model changes (`set_tinylm`).
             let left = if model.left_len().is_some() { self.left_full.clone() } else { self.left.clone() };
@@ -4053,9 +4079,13 @@ impl Engine {
             return false;
         }
         let mut at = from;
-        words.iter().any(|&(w, lp, _, n, _, sinit)| {
+        words.iter().any(|&(w, lp, _, n, _, sinit, mixed)| {
             let span = self.syls.get(at..at + n);
             at += n;
+            // The Han part of a mixed word (docs/spec/decoder.md §4.7) is the table's, not a taught boost: its lp is the edge's score.
+            if mixed {
+                return false;
+            }
             // A word that matched a rule 10 record (the marker) is not a taught boost, whatever lp it carries: the model may choose against it.
             if sinit.is_some() {
                 return false;
@@ -4735,10 +4765,7 @@ impl Engine {
         });
         self.clear_pend();
         self.pred_dirty = true;
-        let mut o = self.insert_token(syl, None, None)?;
-        if o.commit.is_empty() && self.mixed_auto()? {
-            o = self.handled()?; // docs/spec/english-mixed.md §5.7: the table's word shows at once
-        }
+        let o = self.insert_token(syl, None, None)?;
         if let Some((_, word)) = short.filter(|(over, w)| *over || ENGLISH_SHORT.contains(&w.as_str())).filter(|_| o.commit.is_empty()) {
             self.last_short = Some((self.cursor - 1, word));
         }
@@ -4795,7 +4822,7 @@ impl Engine {
         let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), whole: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -4813,10 +4840,8 @@ impl Engine {
     /// covers all its syllables plus the new one. docs/spec/keys-and-composition.md §6.4: a released neighbour and the new syllable stay free (a later
     /// syllable can still rewrite them).
     fn release_frozen(&mut self, c: usize, excluded: &[usize]) -> Result<(), EngineError> {
-        // docs/spec/english-mixed.md §5.7: the Han part the mixed-word table fixed is never released.
-        let held: Vec<(usize, usize)> = std::iter::once((0, self.mixed_left.k)).chain(self.fixed.iter().map(|f| (f.end, f.end + f.mixed.k))).filter(|r| r.1 > r.0).collect();
         let is_cand = |s: &Self, f: &Fixed| {
-            f.frozen && !held.iter().any(|&(a, b)| a <= f.start && f.end <= b) && !s.is_punct(f.start) && !s.is_punct(c) && !excluded.contains(&f.start) && (f.end == c || f.start == c + 1)
+            f.frozen && !s.is_punct(f.start) && !s.is_punct(c) && !excluded.contains(&f.start) && (f.end == c || f.start == c + 1)
         };
         let (cands, rest): (Vec<Fixed>, Vec<Fixed>) = std::mem::take(&mut self.fixed).into_iter().partition(|f| is_cand(self, f));
         self.fixed = rest;
@@ -5534,8 +5559,8 @@ impl Engine {
         if end == start + 1 && english_of(&self.syls[start]).is_some() {
             zh = self.fixed.iter().find(|f| f.start == start).and_then(|f| f.zh.clone());
             // docs/spec/english-mixed.md §5.7: a writing chosen for a token the table wrote (or stopped applying behind) stays: the table leaves it alone.
-            let old = self.fixed.iter().find(|f| f.start == start).map_or(MixedMark::default(), |f| f.mixed);
-            mixed = MixedMark { dead: old.dead || old.wrote, wrote: false, picked: false, k: old.k };
+            let old = self.fixed.iter().find(|f| f.start == start);
+            mixed = MixedMark { dead: old.is_some_and(|f| f.mixed.dead || f.own.is_some()), picked: 0 };
             if let Some(syl) = c.zh.filter(|_| idx + 1 == c.list.len()) {
                 self.syls[start] = syl;
                 zh = None;
@@ -5548,7 +5573,7 @@ impl Engine {
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, mixed, whole: None });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, mixed, own: None, whole: None });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }
@@ -5665,7 +5690,7 @@ mod sinit_tests {
     /// A path of one-character words `text`; `fuzzy` marks its last word as a fuzzy-sound one. `score` is its (unlifted) score.
     fn scored(text: &'static str, score: f64, fuzzy: bool) -> Scored<'static> {
         let n = text.chars().count();
-        (score, text.char_indices().enumerate().map(|(i, (at, c))| (&text[at..at + c.len_utf8()], 0.0, 0.0, 1, fuzzy && i + 1 == n, None)).collect())
+        (score, text.char_indices().enumerate().map(|(i, (at, c))| (&text[at..at + c.len_utf8()], 0.0, 0.0, 1, fuzzy && i + 1 == n, None, false)).collect())
     }
     fn path(text: &'static str, fuzzy: bool) -> Scored<'static> {
         scored(text, 0.0, fuzzy)
@@ -5681,7 +5706,7 @@ mod sinit_tests {
         assert_eq!(sinit_b(&path("照建議", false).1, &LEARNED), 0.5);
         assert_eq!(sinit_b(&path("趙建議", false).1, &LEARNED), 0.0);
         assert_eq!(sinit_b(&path("建議照", false).1, &LEARNED), 0.0, "only the first character counts");
-        assert_eq!(sinit_b(&[("照建", 0.0, 0.0, 2, false, None), ("議", 0.0, 0.0, 1, false, None)], &LEARNED), 0.5, "inside a two-character word");
+        assert_eq!(sinit_b(&[("照建", 0.0, 0.0, 2, false, None, false), ("議", 0.0, 0.0, 1, false, None, false)], &LEARNED), 0.5, "inside a two-character word");
         assert_eq!(sinit_b(&[], &LEARNED), 0.0);
         assert_eq!(sinit_b(&path("照", false).1, &[]), 0.0);
     }
@@ -5695,7 +5720,7 @@ mod sinit_tests {
         let mut pool: Vec<usize> = (0..8).collect();
         // The lifted n-best: its best learned path carries the lifted lp 0.0 and a score 2.0 above its unlifted -7.5 (lp0 -5.0 and the gain 2.0 in the marker).
         let mut learned = scored("照9", -5.5, false);
-        learned.1[0] = ("照", 0.0, 0.0, 1, false, Some((-5.0, 2.0)));
+        learned.1[0] = ("照", 0.0, 0.0, 1, false, Some((-5.0, 2.0)), false);
         let lifted = vec![path("趙0", false), learned.clone(), scored("照10", -9.0, false)];
         assert_eq!(sinit_swap(&mut best, &lifted, &mut pool, &LEARNED), Swap::In);
         assert_eq!(pool, [0, 1, 2, 3, 4, 5, 6, 10], "the best learned path, in the last place; the first is where it was");
@@ -5826,10 +5851,10 @@ mod pool_recur_tests {
     }
     #[allow(clippy::too_many_arguments)]
     fn stretch(texts: &[&str], ng: &[f64], b: &[f64], layer: SinitLayer, used: &[&str], manual: &ManualSet, g: Option<&RecurGrams>) -> Stretch {
-        let (masked, bonus, order) = pool_lists(texts, ng, || used.iter().map(|s| s.to_string()).collect(), manual, g);
+        let (masked, bonus, order) = pool_lists(texts, ng, || used.iter().map(|s| s.to_string()).collect(), manual, g, None);
         Stretch {
             at: 0,
-            paths: texts.iter().map(|t| vec![(t.to_string(), 0.0, 0.0, t.chars().count(), false)]).collect(),
+            paths: texts.iter().map(|t| vec![(t.to_string(), 0.0, 0.0, t.chars().count(), false, false)]).collect(),
             ng: ng.to_vec(),
             bonus,
             order,
@@ -5838,6 +5863,14 @@ mod pool_recur_tests {
             layer,
             gap: String::new(),
         }
+    }
+    /// docs/spec/decoder.md §7: the Han part of a mixed word the decoder's first path took protects itself for the one job: the candidates that do not
+    /// start with it are masked (so is one that holds it elsewhere), and without it (`None`: the same texts with no English part before them) none is.
+    #[test]
+    fn the_mixed_word_masks_for_its_job_only() {
+        let (cands, ng, manual) = (["恤是", "敘事", "續恤", "恤事"], [0.0, -1.0, -2.0, -3.0], ManualSet::default());
+        assert_eq!(pool_lists(&cands, &ng, Vec::new, &manual, None, Some("恤")).0, [false, true, true, false]);
+        assert_eq!(pool_lists(&cands, &ng, Vec::new, &manual, None, None).0, [false; 4]);
     }
     fn job(s: Stretch, params: (f64, f64, f64)) -> RerankJob {
         RerankJob { generation: 1, model: toy(), params, colloquial: None, level: RerankLevel::Standard, eps_sinit: 1.0, left: String::new(), stretches: vec![s] }
@@ -5975,7 +6008,7 @@ mod pool_recur_tests {
         assert!(ll("我們", "的嗎") > ll("我們", "人去") && ll("你好", "人去") > ll("你好", "的嗎"), "premise: the key flips the toy model's choice");
         let run = |g: Option<&RecurGrams>| {
             let mut e = Engine::with_lexicon(Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap()), Layout::Standard);
-            let word = |w: &str| PathWord { word: w.to_string(), lp: 0.0, sinit: false, is_punct: false, delta: 0.0, syllables: 2 };
+            let word = |w: &str| PathWord { word: w.to_string(), lp: 0.0, sinit: false, is_punct: false, delta: 0.0, syllables: 2, mixed: false };
             e.path = vec![word("我們"), word("人去")];
             e.display = "我們人去".to_string();
             let mut s1 = stretch(&["我們", "你好"], &[-1.0, -2.0], &[0.0; 2], SinitLayer::Coarse, &[], &none(), g);

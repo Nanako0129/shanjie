@@ -246,11 +246,13 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   the end, an English token and the syllables after it that the table `mixed-words.tsv` (in data_dir, optional: absent or bad,
 //   nothing is added) has as one word (`cp` + ㄓˊ = `CP值`) put that word first in the candidate list Down or Space opens, which
 //   then carries no prediction row items; choosing it puts one punctuation-kind token (not learned, removed whole) in place of the
-//   token and the syllables (docs/spec/english-mixed.md §5.7). The same table, while set_english is 1: (1) the key that closes a
-//   syllable, with the cursor at the end, fixes the syllables from the English token (or, with a small model that declares a left
-//   length loaded, from the 1 to 16 ASCII letters or digits the left text ends with) to the cursor as the Han part of the row whose
-//   reading they are, and the token shows the row's writing of the English part (`cp` + ㄓˊ shows `CP值`; a frozen word: not
-//   learned and never released: what is typed behind it decodes apart from it);
+//   token and the syllables (docs/spec/english-mixed.md §5.7). The same table, while set_english is 1: (1) the syllables
+//   right behind an English token (or, with a small model that declares a left length loaded, at the composition's start behind the
+//   1 to 16 ASCII letters or digits the left text ends with) that start with the reading of a row of that English part are, to the
+//   decoder, one more word they can be: the row's Han part, scored as the best ordinary path over them plus a bonus. Typed alone it is
+//   what shows, and the token shows the row's writing of the English part while the path shown takes it (`cp` + ㄓˊ shows `CP值`).
+//   Nothing is fixed or learned: what is typed behind it is decoded with it, and the semantic correction keeps the word for the job
+//   whose first path took it (docs/spec/decoder.md §4.7);
 //   (2) a run that is upper-case letters typed with Shift and then Zhuyin keys splits at Space or a tone key into the token and the
 //   syllable when the table has a row of those letters whose reading starts with that syllable (Shift+K `g j` Space is `K書`; one
 //   symbol and a same-column replacement count; `Kevin` Space is as it was; an English word the core knows that such a split took

@@ -26,6 +26,7 @@
 | `dev/reading-norm/context.txt` | 851 | 目標字用被檢查的讀音，鄰詞用 `data/lexicon/mcbpmf-data.txt` 分數最高的讀音 | 讀音項音節歸零（`docs/spec/decoder.md` §5）的句中檢查集：`tools/reading_norm_probe.py` 從規則動到的 61 對（字, 讀音）（`core/tests/fixtures/reading-norm-pins.tsv`）產生，每對取通語模型裡它前面、後面最常見的詞各最多 10 個（詞對計數 ≥ 100，依計數、詞由大到小），一列是兩個詞、沒有前文；正解是合成的（該音節唯一有計數的單字），不是真人打的句子。同一組輸入重跑逐位元組相同，`make test-python` 核對已提交的檔和重新產生的相同。聊天與書面、出貨設定與只看 n-gram 各量一次，報對的列數與對上一版的改對、改壞 |
 | `dev/reading-norm/target.txt` | 4 | 手動定（啦 ㄌㄚ˙、這 ㄓㄟˋ、卡 ㄑㄧㄚˇ） | 音節歸零的目標列：他啦、是他啦、這是什麼、換卡，沒有前文；CC0。和 `context.txt` 同樣的四格都要等於正解 |
 | `dev/mixed-words/words.txt` | 84 | 讀音同 `data/lexicon/mixed-words.tsv` | 中英混合詞（`docs/spec/english-mixed.md` §5.7）的檢查集，`英文\|讀音\|寫法`，和詞表逐列相同；`core/tests/engine_mixed.rs` 逐列用兩種打法打（英文第一個字母按 Shift、空白、再接讀音；英文整段按 Shift 直接接讀音），畫面要是寫法欄，而且在 ↓ 清單第一項。專案自寫（CC0） |
+| `dev/mixed-words/follow.tsv` | 2,100（A 420、B 1,680） | 後接的詞用詞庫的讀音，後接的常見字詞用標準讀音 | 中英混合詞進解碼器（`docs/spec/decoder.md` §4.7）的掃描子集，`掃描\t英文\t列讀音\t寫法\t後接\t後接讀音`：A 是每一列後面接「第一個音節等於這一列最後一個音節、第一個字不同」的詞各 5 個（想打的是字母加那個詞），B 是每一列後面接 12 個常見單字與 8 個常見雙字詞（想打的是混合詞加後續）；`core/tests/engine_mixed.rs` 的 `the_scan_rows_split_no_more_than_measured` 用 App 的建法在聊天、標準檔逐列打，錯的組數不得多於選定加分時量到的（`docs/spec/english-mixed.md` §14）。公開詞庫與本專案詞表的組合（CC0） |
 | `learn/cases.tsv` | 14 組 × 5 列 | 確認過 | 學習模擬（teach／common／rare＋same_ctx） |
 | `ablation/v0.7.0/` | — | — | v0.7.0 標準檔的逐項拿掉表（三個集合的結果、每一格的 CLI 指令）與兩個閘門列的離線重算 `gate_offline.py`；不是評測列，只有結果與重跑方法 |
 

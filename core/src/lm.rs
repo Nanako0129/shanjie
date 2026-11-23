@@ -1148,7 +1148,17 @@ pub enum End<'a> {
 /// path's score (the word's term lifted minus unlifted, 0 when its lp was not below its reading's best). Its recorded lp (`.1`) is lifted to its
 /// reading's best, above its own best lp without being a learned boost. The engine turns a path with the marker into the path the `Sinit::Off`
 /// decode would have (lp0, score minus the gain) before it enters the pool (`Engine::sinit_unlift`).
-pub type DecodedWord<'a> = (&'a str, f64, f64, usize, bool, Option<(f64, f64)>);
+/// And the mixed-word marker (`.6`, docs/spec/decoder.md §4.7): the word is the Han part of a mixed word, put out through the edge of `MixedEdges`. Its
+/// recorded lp is the whole score of the edge (the best ordinary path over its syllables plus the bonus) and its delta 0: it has no word term of its own.
+pub type DecodedWord<'a> = (&'a str, f64, f64, usize, bool, Option<(f64, f64)>, bool);
+
+/// docs/spec/decoder.md §4.7: what the edge of a mixed word adds to the score of the best ordinary path over the same syllables (log10, the unit of the lexicon
+/// scores). Chosen on the grid {0.5, 1, 2, 3, 4, 6} by the two scans of docs/spec/english-mixed.md §14; always above 0, so the edge never ties with that path.
+pub const MIXED_BONUS: f64 = 2.0;
+
+/// docs/spec/decoder.md §4.7: the mixed words that may start the segment: each (the syllables its Han part covers from the segment's start, the Han part), and
+/// the bonus (`MIXED_BONUS`; another value only from the engine's evaluation hook). The caller decides that the segment stands right behind the English part.
+pub type MixedEdges<'e, 'a> = (&'e [(usize, &'a str)], f64);
 
 /// A path: total score and its words.
 pub type Scored<'a> = (f64, Vec<DecodedWord<'a>>);
@@ -1303,7 +1313,7 @@ pub fn decode_segment_learned<'a>(
     learn: Option<&Learn<'a>>,
     demote: bool,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None, None)
+    decode_segment_fuzzy(lex, syls, lm, scoring, start, end, beam, learn, demote, 0, crate::fuzzy::DELTA_SOUND, None, None, None)
 }
 
 /// The last `RECUR_CHARS` Unicode scalar values of the left context are what the recurrence set is built from (docs/spec/decoder.md §4.6: the long-context set and the chat sets were measured with 64).
@@ -1462,6 +1472,7 @@ pub fn decode_segment_fuzzy<'a>(
     delta_sound: f64,
     recur: Option<&RecurGrams>,
     tone3: Option<(&[crate::tone3::Pos], f64)>,
+    mixed: Option<MixedEdges<'_, 'a>>,
 ) -> Result<Vec<Scored<'a>>, Error> {
     let recur = recur.filter(|r| !r.is_empty());
     let base = &*lex.base;
@@ -1660,7 +1671,7 @@ pub fn decode_segment_fuzzy<'a>(
                             Some(q) if !(sc > cand[q].score) => {}
                             found => {
                                 let mut words = h.words.clone();
-                                words.push((word, lp, delta, l, src.sound, sinit_mark));
+                                words.push((word, lp, delta, l, src.sound, sinit_mark, false));
                                 // The surface is cloned only for a new slot (the index keeps one copy); a replacement moves it.
                                 let surface = match found {
                                     Some(_) => key.0,
@@ -1679,6 +1690,19 @@ pub fn decode_segment_fuzzy<'a>(
                         }
                     }
                 }
+            }
+        }
+        // docs/spec/decoder.md §4.7: the edge of a mixed word whose Han part covers the first `i` syllables. It leaves the start state and scores the best
+        // ordinary path over those syllables (no path that took a shorter edge) plus the bonus; nothing else is added to it. The next word sees the Han part
+        // as the last word (unknown to the model unless it is one model word) and the start word before it. It has the merge key of the same word reached
+        // the ordinary way and, scoring higher, takes its place.
+        for &(_, han) in mixed.iter().flat_map(|m| m.0).filter(|e| e.0 == i) {
+            let Some(s) = cand.iter().filter(|h| !h.words[0].6).map(|h| h.score).max_by(f64::total_cmp) else { continue };
+            let sc = s + mixed.map_or(0.0, |m| m.1);
+            let nh = Hyp { score: sc, surface: han.to_string(), words: vec![(han, sc, 0.0, i, false, None, true)], prev: start_id, last: lex.model_id(lm, han), ctx: lm.ctx_of(None), tri: None };
+            match idx.get(&(han.to_string(), if tri_on { start } else { "" }, han)).copied() {
+                Some(q) => cand[q] = nh,
+                None => cand.push(nh),
             }
         }
         cand.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
@@ -1774,7 +1798,7 @@ pub fn decode_from_fuzzy_scored<'a>(
     recur: Option<&RecurGrams>,
     tone3: Option<(&[crate::tone3::Pos], f64)>,
 ) -> Result<Vec<Scored<'a>>, Error> {
-    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound, recur, tone3)
+    decode_segment_fuzzy(lex, syls, lm, lm.scoring(profile), start, End::Eos, beam, None, demote, fuzzy, delta_sound, recur, tone3, None)
 }
 
 #[cfg(test)]
@@ -2009,7 +2033,7 @@ mod tests {
             let lex = Arc::new(Lexicon::parse(lex).unwrap());
             let capped = CappedLexicon::new(lex, "", &lm, Some(&Demote::parse("").unwrap())).unwrap();
             let syls: Vec<String> = syls.iter().map(|s| s.to_string()).collect();
-            let r = decode_segment_fuzzy(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true, 0, crate::fuzzy::DELTA_SOUND, g, None).unwrap();
+            let r = decode_segment_fuzzy(&capped, &syls, &lm, 0.5, "<s>", End::Eos, 64, None, true, 0, crate::fuzzy::DELTA_SOUND, g, None, None).unwrap();
             r.into_iter().map(|(s, ws)| (s, ws.iter().map(|w| w.0.to_string()).collect::<String>(), ws.iter().map(|w| w.2).sum::<f64>())).collect::<Vec<_>>()
         };
         let text = |r: &[(f64, String, f64)]| -> Vec<String> { r.iter().map(|x| x.1.clone()).collect() };
@@ -2573,7 +2597,7 @@ mod tests {
     /// The pool rule on hand-made n-bests: a fuzzy first path is a skip; otherwise the first `topk` paths without a fuzzy word, in order.
     #[test]
     fn rerank_pool_takes_the_first_non_fuzzy_paths_and_skips_a_fuzzy_first() {
-        let path = |f: bool| (0.0, vec![("x", 0.0, 0.0, 1, false, None), ("y", 0.0, 0.0, 1, f, None)]);
+        let path = |f: bool| (0.0, vec![("x", 0.0, 0.0, 1, false, None, false), ("y", 0.0, 0.0, 1, f, None, false)]);
         let nb = |fz: &[bool]| fz.iter().map(|&f| path(f)).collect::<Vec<Scored>>();
         assert_eq!(rerank_pool(&nb(&[false, true, false, false, true, false]), 3), Some(vec![0, 2, 3]));
         assert_eq!(rerank_pool(&nb(&[false, true, false]), 8), Some(vec![0, 2]), "fewer than topk: all of them");

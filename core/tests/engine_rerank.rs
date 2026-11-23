@@ -1142,19 +1142,19 @@ fn english_before_the_composition_takes_the_mixed_word() {
     let today = shown(&mut plain, "T", &["ㄒㄩˋ"]);
     assert!(today != "恤" && plain.left_full_chars() == 1, "premise: the model keeps the letter, the decoder shows another character: {today}");
     assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), "恤");
-    assert_eq!(e.frozen_words(), [(0, 1, "恤".to_string())]);
+    assert!(e.frozen_words().is_empty(), "the decoder's word (docs/spec/decoder.md §4.7): nothing is fixed");
     assert_eq!(shown(&mut e, "今天穿T", &["ㄒㄩˋ"]), "恤", "a Han character before the letter");
     assert_eq!(shown(&mut e, "abcdefgh", &["ㄒㄩˋ"]), "恤", "eight letters that are the whole text: not cut");
-    // Not released: the next syllable decodes behind it (without the table the two are one word).
+    // The next syllable is decoded with it: the edge stands (without the table the two are one word).
     let o = type_syls(&mut e, &["ㄕˋ"]);
-    assert!(e.frozen_words() == [(0, 1, "恤".to_string())] && o.preedit.starts_with('恤'), "{}", o.preedit);
+    assert!(e.frozen_words().is_empty() && o.preedit == "恤是", "{}", o.preedit);
     assert!(!shown(&mut plain, "abcdefgh", &["ㄒㄩˋ", "ㄕˋ"]).starts_with('恤'), "premise");
     // Not these.
     for (left, syls) in [("Tx", &["ㄒㄩˋ"][..]), ("9T", &["ㄒㄩˋ"]), ("xabcdefgh", &["ㄒㄩˋ"]), ("T", &["ㄕˋ"]), ("T ", &["ㄒㄩˋ"]), ("", &["ㄒㄩˋ"])] {
         assert_eq!(shown(&mut e, left, syls), shown(&mut plain, left, syls), "{left:?} {syls:?}");
         assert!(e.frozen_words().is_empty(), "{left:?}");
     }
-    // The row's reading and then the same syllable again: the first is the row's, the second decodes behind it.
+    // The row's reading and then the same syllable again: the first is the row's, the second is decoded behind it.
     assert!(shown(&mut e, "T", &["ㄒㄩˋ", "ㄒㄩˋ"]).starts_with('恤') && e.left_full_chars() == 1);
     // The rerank switch off: the model is still loaded.
     e.set_rerank(false).unwrap();
@@ -1170,7 +1170,7 @@ fn english_before_the_composition_takes_the_mixed_word() {
         let (mut e, mut plain) = (make(model, true), make(model, false));
         assert_eq!(shown(&mut e, "T", &["ㄒㄩˋ"]), shown(&mut plain, "T", &["ㄒㄩˋ"]));
         assert!(e.left_full_chars() == 0 && e.frozen_words().is_empty());
-        // Two letters are kept without such a model (for the row behind English, docs/spec/semantic-rerank.md §5.2), and still nothing is fixed.
+        // Two letters are kept without such a model (for the row behind English, docs/spec/semantic-rerank.md §5.2), and still the table's word is no candidate.
         assert_eq!(shown(&mut e, "QQ", &["ㄒㄩˋ"]), shown(&mut plain, "QQ", &["ㄒㄩˋ"]));
         assert!(e.left_full_chars() == 2 && e.frozen_words().is_empty(), "premise: the two letters are kept");
     }
