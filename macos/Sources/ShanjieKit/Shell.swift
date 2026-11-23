@@ -427,7 +427,13 @@ public final class QueueRerankRunner: RerankRunner {
     public func run(_ job: RerankJob, done: @escaping @MainActor @Sendable (Int32) -> Void) -> RerankHandle {
         let waiter = RerankWaiter()
         queue.async {
+#if SHANJIE_TIMING
+            Timing.shared.record(4, job.timingSeq)
+#endif
             let code = job.run()
+#if SHANJIE_TIMING
+            Timing.shared.record(5, job.timingSeq, UInt64(UInt32(bitPattern: code)))
+#endif
             waiter.code.withLock { $0 = code }  // before the signal
             waiter.signal.signal()
             DispatchQueue.main.async { done(code) }
@@ -1312,6 +1318,9 @@ public final class Shell {
     func setRerank(_ on: Bool) -> CoreResult? {
         rerankOn = on
         rerankStore.rerank = on
+#if SHANJIE_TIMING
+        if !on, let dropped = rerankPending { Timing.end(dropped.job.timingSeq, 5) }
+#endif
         if !on { rerankPending = nil }
         defer { changed() }
         return engine?.setRerank(on)
@@ -1332,6 +1341,9 @@ public final class Shell {
     func enqueueRerank(_ job: RerankJob, session: Session, engine: CoreEngine) {
         rerankTaken += 1
         let pending = PendingRerank(job: job, session: session, engine: engine)
+#if SHANJIE_TIMING
+        if rerankRunning != nil, let replaced = rerankPending { Timing.end(replaced.job.timingSeq, 3) }
+#endif
         if rerankRunning != nil { rerankPending = pending } else { startRerank(pending) }
     }
 
@@ -1359,9 +1371,19 @@ public final class Shell {
             }
         }
         guard code == 0 else {
+#if SHANJIE_TIMING
+            Timing.end(slot.job.timingSeq, 6)
+#endif
             Log.shell.error("shanjie_rerank_run failed, code \(code)")
             return
         }
+#if SHANJIE_TIMING
+        if !rerankOn {
+            Timing.end(slot.job.timingSeq, 5)
+        } else if slot.session.map({ $0 === owner }) != true || slot.engine.map({ $0 === self.engine }) != true {
+            Timing.end(slot.job.timingSeq, 4)
+        }
+#endif
         guard rerankOn, let session = slot.session, session === owner, let engine = slot.engine, engine === self.engine else { return }
         session.applyRerankJob(slot.job, on: engine)
     }
@@ -1376,9 +1398,20 @@ public final class Shell {
             rerankOn && composing && candidateSelected < 0
                 && (rerankRunning.map { mine($0.session, $0.engine) } ?? false || rerankPending.map { mine($0.session, $0.engine) } ?? false)
         }
+#if SHANJIE_TIMING
+        if !relevant() { Timing.enterWait(micros: 0, jobs: 0, timedOut: false) }
+#endif
         guard relevant() else { return }
         let deadline = DispatchTime.now() + .milliseconds(enterRerankWaitMS)
+#if SHANJIE_TIMING
+        let timingStart = Timing.now()
+        var timingJobs: UInt64 = 0
+        defer { Timing.enterWait(micros: Timing.now() - timingStart, jobs: timingJobs, timedOut: relevant()) }
+#endif
         while relevant(), let slot = rerankRunning, let handle = slot.handle, let code = rerankRunner.wait(handle, until: deadline) {
+#if SHANJIE_TIMING
+            timingJobs += 1
+#endif
             rerankFinished(slot, code: code)
         }
     }
@@ -1462,6 +1495,9 @@ public final class Shell {
         engine = nil  // free the old engine first: the layout's build is the only one running
         rerankAvailable = false
         rerankLevels = 0
+#if SHANJIE_TIMING
+        if let dropped = rerankPending { Timing.end(dropped.job.timingSeq, 4) }
+#endif
         rerankPending = nil  // the old engine's; one still running is not applied (its engine is gone)
         loadedPackMask = 0
         engineRequested = nil
@@ -1640,6 +1676,9 @@ public final class Shell {
         hideCandidates()
         engine = nil
         rerankAvailable = false
+#if SHANJIE_TIMING
+        if let dropped = rerankPending { Timing.end(dropped.job.timingSeq, 4) }
+#endif
         rerankLevels = 0
         rerankPending = nil
         guard let e = CoreEngine.adopt(result.takeEngine()) else { return }
@@ -2103,6 +2142,10 @@ public final class Session {
     /// docs/spec/semantic-rerank.md §8.1: a finished job, for the engine it was taken from (the shell checked that it is current). 0 shows the
     /// snapshot like any output; 5 changes nothing; anything else (4: the engine has reset itself) is handled like a failed key.
     func applyRerankJob(_ job: RerankJob, on engine: CoreEngine) {
+#if SHANJIE_TIMING
+        let timingSaved = Timing.beginApply()
+        defer { Timing.endApply(job.timingSeq, timingSaved) }
+#endif
         switch shell.rerankApply(job, engine) {
         case .ok(let o): apply(o)
         case .failed(let c) where c == SHANJIE_NO_CHANGE: break
@@ -2118,6 +2161,9 @@ public final class Session {
         if code != 0 {
             _ = fail(code)
         } else if let job {
+#if SHANJIE_TIMING
+            job.timingSeq = Timing.took()
+#endif
             shell.enqueueRerank(job, session: self, engine: engine)
         }
     }
@@ -2152,6 +2198,10 @@ public final class Session {
 
     /// The single place a key reaches the core.
     func send(_ key: ShanjieKey) -> Bool {
+#if SHANJIE_TIMING
+        let timingKey = Timing.keyBegin()
+        defer { Timing.keyEnd(timingKey) }
+#endif
         guard let engine = shell.engine else { return false }
         let bundle = client.bundleIdentifier  // a synchronous IPC: read once, for the gate and the left context's terminal check
         self.bundle = bundle
@@ -2197,6 +2247,9 @@ public final class Session {
     /// docs/spec/macos-shell.md §4: commit first, then the preedit (single underline with a thick one over the open English run, caret at
     /// cursor_utf16), then the candidates.
     private func apply(_ o: CoreOutput) {
+#if SHANJIE_TIMING
+        Timing.applyHit(0)
+#endif
         shell.composingCursor = Int(o.cursorUTF16)
         if !o.commit.isEmpty {
             var text = o.commit
@@ -2212,6 +2265,9 @@ public final class Session {
             let marked = Marked(text: o.preedit, cursor: o.cursorUTF16, runStart: o.englishRunStart, runLength: o.englishRunLength)
             if marked != sentMarked || !o.commit.isEmpty {
                 client.setMarkedText(Self.marked(o), selectionRange: NSRange(location: o.cursorUTF16, length: 0))
+#if SHANJIE_TIMING
+                Timing.marked()
+#endif
                 sentMarked = marked
             }
         } else if shell.composing {
@@ -2274,6 +2330,9 @@ public final class Session {
     /// does so by itself only on code 4), then the marked text and the panel are cleared and the
     /// key passes. Nothing but the code is recorded.
     private func fail(_ code: Int32) -> Bool {
+#if SHANJIE_TIMING
+        Timing.applyHit(2)
+#endif
         Log.shell.error("core call failed, code \(code)")
         if case .failed(let c)? = shell.engine?.reset(mode: 1) {
             Log.shell.error("shanjie_engine_reset failed, code \(c)")
@@ -2287,6 +2346,9 @@ public final class Session {
     private func clearMarkedText() {
         client.setMarkedText(NSAttributedString(string: ""), selectionRange: NSRange(location: 0, length: 0))
         sentMarked = nil
+#if SHANJIE_TIMING
+        Timing.marked()
+#endif
     }
 
     /// docs/spec/macos-shell.md §4: the marked text this session last sent to its client (nil after clearing it).
