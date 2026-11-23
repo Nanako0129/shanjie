@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 基底 | `mcbpmf-data.txt`（小麥注音詞庫，MIT） | 無（三欄） | 無，原封不動 | 載入失敗 |
 | 疊加層 | `overlay-add.tsv` | `wikt`、`zhwiki`、`萌典補詞`、`manual`、`slang` | `tools/build_overlay.py` | 載入失敗 |
-| 變調層 | `sandhi-add.tsv` | `sandhi`、`neutral` | `tools/build_sandhi.py` | 載入失敗 |
+| 變調層 | `sandhi-add.tsv` | `sandhi`、`fusion`、`neutral`、`colloq` | `tools/build_sandhi.py` | 載入失敗 |
 | 名單層 | `names-add.tsv` | `names`、`creator`、`store` | `tools/build_names.py` | 載入失敗（評測 CLI 的 `--no-names` 例外） |
 | 動漫與遊戲詞包 | `acg-add.tsv` | `acg`、`acg-oov` | `tools/build_acg_pack.py` | 當作沒有這個詞包 |
 | 經典台詞詞包 | `quotes-add.tsv` | `quotes` | `tools/build_quote_pack.py` | 當作沒有這個詞包 |
@@ -35,6 +35,7 @@
 - 疊加層類（疊加層、變調層、名單層、詞包）：每行 `讀音<TAB>詞<TAB>分數<TAB>標籤`，剛好四欄，沒有標頭、沒有註解行。四欄不足、超過或分數不是數字的列是壞列：解析到它就停；它只在沒有更早的重複列時才被回報（`BadOverlayRow`，只帶那一行的字數）。
 - 疊加層列接在基底後面：同一個（讀音, 詞）若已出現在更早的列（基底或疊加層），回 `OverlayDuplicate`（只帶詞的字數；同時有好幾個時回檔案順序最前的那一個）；全部沒有列是 `EmptyLexicon`。
 - 錯誤只帶種類與長度，不帶輸入文字（隱私規則見 `docs/spec/privacy.md`）。
+- 標籤是 `colloq` 的列（疊字陰平化的口語讀音，`docs/spec/decoder.md` §8.7；`sandhi-add.tsv` 與 `overlay-add.tsv` 都有）不進上面的詞條，另外存一份：讀音各自排序、同讀音照分數排，只用到它們的音節另外編號（不算詞庫的音節，`has_syllable`、容錯表、單字詞條的判斷都看不到）。只有 `Lexicon::colloq_range`（以及帶開關參數的 `entries_with`、`has_with`、`CappedLexicon::best_lp_with`、`best_lp_delta_with`）讀得到，呼叫的人決定開關：解碼器與引擎在「變調與口語讀音」開著時把它們當成那個讀音的詞條，關掉時等於沒有這些列（`docs/spec/decoder.md` §6.6）。它們的詞照一般規則封頂（§1.4），不參加重複列檢查、異體排序與 `by_word`；字數不等於音節數的列不收。
 - 標籤是 `manual` 的列另外收成 `ManualSet`（詞的字與讀音音節序列；字數不等於音節數的列不收），由引擎與評測 CLI 共用，供語意校正保護手動詞（`docs/spec/semantic-rerank.md`）。
 
 ### 1.3 內部結構與排序
@@ -162,7 +163,7 @@
 
 - `python3 tools/build_overlay.py`：產生並寫入（需要 dump；萌典補詞需要 `--moedict-supplement` 給語料檔；§2.7、§2.8 與 `--lexgap`（§2.1）的旗標預設關，不帶旗標的輸出只含維基來源的列，所以和含 `萌典補詞` 列的提交檔不同）。
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
-- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang` 的列，只重算檔尾；改了手動詞、網路用語或 `overlay-drop.tsv` 時用（`--refilter` 見 §2.3）。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
+- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang`、`colloq` 的列，重算 `colloq` 列（`docs/spec/decoder.md` §8.7，接在產生的列之後）與檔尾；改了手動詞、網路用語或 `overlay-drop.tsv` 時用（`--refilter` 見 §2.3）。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
 
 ### 2.12 重排保護詞（`data/lexicon/rerank-protect.tsv`）
@@ -582,4 +583,4 @@
 - 經典台詞詞包的衝突偵測只在動漫與資訊詞包都開的組合下做；只開台詞時，被另外兩包的詞蓋過的基底詞，可能被台詞分句擠掉而建置看不到（分句 2–10 字且與基底詞同讀音的少，未量）。
 - 資訊詞包的頻率門檻 50 與加分 3 是在探索格點上選的；詞包的詞只在模型沒看過時才拿到完整加分。
 - 讀音工具對破音字只能猜，名單層、資訊詞包與動漫詞包的 `CHECK` 讀音靠人工核對檔（`names-readings.tsv`、`it-readings.tsv`、`reading_overrides.tsv`）修正；沒進這些檔的 `CHECK` 讀音會照工具的暫定值收進詞包。
-- 疊加層的來源 dump、簡編本、OpenCC 表、萌典與小麥破音字表都不進 repo，需要時從環境變數（`SHANJIE_CACHE`、`SHANJIE_CONCISED`、`SHANJIE_MOEDICT`、`SHANJIE_HETERO`、`SHANJIE_UNIHAN`）找；沒設時對應的測試跳過並印 NOTE，跳過不等於通過。
+- 疊加層的來源 dump、簡編本、《重編國語辭典修訂本》的試算表（`tools/colloq_words.py` 用，`docs/spec/decoder.md` §8.7）、OpenCC 表、萌典與小麥破音字表都不進 repo，需要時從環境變數（`SHANJIE_CACHE`、`SHANJIE_CONCISED`、`SHANJIE_REVISED`、`SHANJIE_MOEDICT`、`SHANJIE_HETERO`、`SHANJIE_UNIHAN`）找；沒設時對應的測試跳過並印 NOTE，跳過不等於通過。

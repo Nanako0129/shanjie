@@ -1,8 +1,8 @@
 import XCTest
 @testable import ShanjieKit
 
-/// docs/spec/decoder.md §6.6 (Swift): the 三聲變調 checkbox is stored under `tone3Sandhi` (absent is on), sent to every engine the shell builds, and the
-/// checkbox reaches the core (typing ㄨㄛˊ ㄒㄧㄤˇ shows 我想 only while it is on).
+/// docs/spec/decoder.md §6.6 (Swift): the 變調與口語讀音 checkbox is stored under `tone3Sandhi` (absent is on), sent to every engine the shell builds, and the
+/// checkbox reaches the core (typing ㄨㄛˊ ㄒㄧㄤˇ shows 我想, and ㄌㄧˋ ˙ㄏㄞ shows 厲害, only while it is on).
 @MainActor
 final class Tone3ShellTests: XCTestCase {
     private var resources: URL!
@@ -54,5 +54,23 @@ final class Tone3ShellTests: XCTestCase {
         off.session.activate()
         off.type(Layouts.keys("ㄨㄛˊ ㄒㄧㄤˇ", eten: false))
         XCTAssertNotEqual(off.client.marked, "我想", "off: ㄨㄛˊ is not accepted")
+    }
+
+    /// The one checkbox is both: its title, and colloquial sandhi through the same switch (docs/spec/decoder.md §6.6, §8.7): ㄌㄧˋ ˙ㄏㄞ shows 厲害 (˙ㄏㄞ has no
+    /// word of its own: accepted after a syllable, the word read under ㄌㄧˋ ㄏㄞˋ) and ㄖㄜˋ ㄊㄥ ㄊㄥ shows 熱騰騰 (a row of the lexicon read only while it is on);
+    /// with a stored off neither does.
+    func testTheTitleAndColloquialSandhiOnTheSameSwitch() {
+        XCTAssertEqual(SettingsModel.tone3Title, "變調與口語讀音")
+        XCTAssertTrue(SettingsModel.tone3Note.hasPrefix("變調與口語讀音："))
+        for (reading, word) in [("ㄌㄧˋ ㄏㄞ˙", "厲害"), ("ㄖㄜˋ ㄊㄥ ㄊㄥ", "熱騰騰")] {
+            let on = Controller(makeShell(MemoryFuzzyStore()))
+            on.session.activate()
+            on.type(Layouts.keys(reading, eten: false))
+            XCTAssertEqual(on.client.marked, word)
+            let off = Controller(makeShell(MemoryFuzzyStore(tone3Sandhi: false)))
+            off.session.activate()
+            off.type(Layouts.keys(reading, eten: false))
+            XCTAssertNotEqual(off.client.marked, word, "off: \(reading)")
+        }
     }
 }

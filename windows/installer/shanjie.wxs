@@ -84,6 +84,8 @@
       <Component Id="CLicMcbpmf" Directory="LicensesDir" Guid="*"><File Id="FLicMcbpmf" Source="$(var.Repo)\LICENSES\McBopomofo-MIT.txt" KeyPath="yes" /></Component>
       <Component Id="CLicData" Directory="LicensesDir" Guid="*"><File Id="FLicData" Source="$(var.Repo)\LICENSES\data.md" KeyPath="yes" /></Component>
       <Component Id="CLicNsi" Directory="LicensesDir" Guid="*"><File Id="FLicNsi" Source="$(var.Repo)\LICENSES\name-suggestion-index-BSD-3-Clause.txt" KeyPath="yes" /></Component>
+      <Component Id="CLicMoeRevised" Directory="LicensesDir" Guid="*"><File Id="FLicMoeRevised" Source="$(var.Repo)\LICENSES\MOE-dict-revised-terms.txt" KeyPath="yes" /></Component>
+      <Component Id="CLicMoeConcised" Directory="LicensesDir" Guid="*"><File Id="FLicMoeConcised" Source="$(var.Repo)\LICENSES\MOE-dict-concised-terms.txt" KeyPath="yes" /></Component>
       <Component Id="CLicColloquial" Directory="LicensesDir" Guid="*"><File Id="FLicColloquial" Source="$(var.Repo)\data\lm\colloquial-attribution.tsv" KeyPath="yes" /></Component>
       <Component Id="CLicCcBySa" Directory="LicensesDir" Guid="*"><File Id="FLicCcBySa" Source="$(var.Gen)\CC-BY-SA-4.0-attribution.txt" KeyPath="yes" /></Component>
 

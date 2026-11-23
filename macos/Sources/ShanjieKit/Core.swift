@@ -338,6 +338,10 @@ final class CoreEngine {
 ///    any thread once run returned), and the runner's closure holds this wrapper, never the pointer, while run is running.
 public final class RerankJob: @unchecked Sendable {
     private let job: OpaquePointer
+#if SHANJIE_TIMING
+    /// The timing build's job number (docs/spec/semantic-rerank.md §8.6): set on the main thread when the job is taken, before the runner gets it.
+    var timingSeq: UInt64 = 0
+#endif
     private let free: @Sendable (OpaquePointer) -> Void
 
     fileprivate init(_ job: OpaquePointer, free: @escaping @Sendable (OpaquePointer) -> Void) {

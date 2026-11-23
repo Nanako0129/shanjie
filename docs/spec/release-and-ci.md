@@ -137,7 +137,7 @@
 
 - 下載並核對模型；`cargo build --release --locked -p core`（產生 `macos/Package.swift` 連結的 `target/release/libcore.a`）；不需要 `make bundle`。
 - **C 標頭冒煙測試**：先用 `cargo rustc … --print native-static-libs` 取得需要連結的系統函式庫並確認非空（macOS 的 `cc` 少了這些也能連結，空的擷取會無聲地通過），再用 `cc -std=c11 -Wall -Wextra -Werror` 編 `core/tests/c/abi_smoke.c`，執行兩次：一次只給詞庫與模型，一次再給一個全新的學習資料夾（跑學習的檢查）。
-- **Swift 測試**：`swift test --package-path macos --force-resolved-versions --parallel --xunit-output <暫存檔>`，之後從 xUnit 檔印出 testcase 數。
+- **Swift 測試**：`swift test --package-path macos --force-resolved-versions --parallel --xunit-output <暫存檔>`，之後從 xUnit 檔印出 testcase 數。接著同一個指令加 `-Xswiftc -DSHANJIE_TIMING` 再跑一次（計時建置的區塊也編進去，`docs/spec/semantic-rerank.md` §8.6），testcase 數要比前一次多，否則這一步失敗。
   - `--parallel` 每個測試方法一個 xctest 程序。
   - 並行時 XCTest 不印 `Executed N tests` 總計，所以數量從 xUnit 數；SwiftPM 並行時 xUnit 不標 `XCTSkip`，所以沒有略過數，要確認某個被略過的測試仍在，就看 testcase 名稱清單。
   - 包含行為測試 `LogTests.testShellLogsNothingButStaticTextAndCodes`，它需要 `/usr/bin/log stream`，runner 的使用者可以執行（`docs/spec/privacy.md`）。
@@ -273,6 +273,7 @@
 | `make test-rust` | `cargo test --release --locked` |
 | `make test-python` | Python 單元測試（工具與評測，清單在 `Makefile`；需要 python3、numpy、真的模型與 cargo 建出來的評測 CLI）；詞包建置工具的兩個真 CLI 測試（`test_build_acg_pack`、`test_build_quote_pack`）需要環境變數 `SHANJIE_MOEDICT`（教育部辭典 JSON）與 `SHANJIE_HETERO`（破音字表），沒設時印 `NOTE: SHANJIE_MOEDICT and SHANJIE_HETERO are not both set …` 並跳過那兩個測試，所以「跳過」不等於「通過」 |
 | `make test-swift` | `macos/` 的 `swift test`（真核心＋真模型的殼測試、`log stream` 日誌測試、自測嚴格度） |
+| `make test-swift-timing` | 同一套 Swift 測試加上 `-Xswiftc -DSHANJIE_TIMING`（計時建置，`docs/spec/semantic-rerank.md` §8.6；`TimingTests` 只在這個旗標下編譯） |
 | `make selftest-bundled` | 用 release 設定、拋棄式 ID 組出 `build/selftest/善解（開發版）.app`（沙盒、沒有移轉清單），從 bundle 自己的 `Resources/` 跑 `--selftest`（含用 `Resources/packs` 打一個詞包詞） |
 | `scripts/test-install-ime.sh` | 在暫存 HOME 用只會 `exit 1` 的假 app 跑 `install-ime.sh` 的檔案處理（`SHANJIE_INSTALL_FILES_ONLY=1`，不結束行程、不註冊）；`lsregister`、`pkill`、`pgrep` 換成只記錄呼叫的替身，每個情況都斷言沒被呼叫 |
 | `make bundle` ＋ `scripts/check-app.sh` | 不帶參數時組出開發版 `build/善解（開發版）.app`；`make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie` 組出正式版 `build/善解輸入法.app`（多一份 `container-migration.plist`）。兩者都是 ad-hoc、App 沙盒的三個 entitlements。要檢查的 ID 由 `EXPECTED_BUNDLE_ID` 給（沒給時是正式 ID）；`SKIP_RUN=1` 只做 check 2、3、不執行 bundle；`CI` 以外遇到正式 ID 時 check 6 拒絕執行 |

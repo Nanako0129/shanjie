@@ -791,9 +791,10 @@ jobs:
       - name: Names lexicon builder (Python)
         run: python3 -m unittest tools.test_build_names
 
-      # docs/spec/decoder.md §8.3: the neutral-tone rows of tools/build_sandhi.py against synthetic fixtures.
+      # docs/spec/decoder.md §8.3, §8.7: the neutral-tone and colloquial rows of tools/build_sandhi.py against synthetic fixtures, and the colloquial word lists
+      # (their rules on synthetic rows and the committed files' format; the dictionaries are not in the repository, so that one test is skipped here).
       - name: Sandhi builder (Python)
-        run: python3 -m unittest tools.test_build_sandhi
+        run: python3 -W ignore -m unittest tools.test_build_sandhi tools.test_colloq_words
 
       # docs/spec/models.md §4.2, §4.3: the count scripts' --extra-lexicon (additive counting), the
       # out-of-vocabulary bigram filter in tools/build_lm.py, the count comparison and the counting lexicon rule.
@@ -850,7 +851,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: xcode-27
-    timeout-minutes: 30  # the Swift tests took 394-479 s on runners up to twice as slow as each other
+    timeout-minutes: 45  # the Swift tests took 394-479 s on runners up to twice as slow as each other; the timing-build run doubles it (first run 2026-11-23: 16 min untimed, still running at 12 min when the 30-minute limit hit)
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -899,6 +900,14 @@ jobs:
           set -euo pipefail
           swift test --package-path macos --force-resolved-versions --parallel --xunit-output "$RUNNER_TEMP/swift-tests.xml"
           python3 -c 'import sys, xml.etree.ElementTree as E; print("swift tests: %d testcases" % sum(1 for _ in E.parse(sys.argv[1]).iter("testcase")))' "$RUNNER_TEMP/swift-tests.xml"
+
+      # docs/spec/semantic-rerank.md §8.6: the same tests with the timing build's blocks compiled in (never shipped). Its own tests exist only
+      # under the flag, so this run must have more test cases than the step above.
+      - name: Swift tests with the timing build
+        run: |
+          set -euo pipefail
+          swift test --package-path macos --force-resolved-versions --parallel -Xswiftc -DSHANJIE_TIMING --xunit-output "$RUNNER_TEMP/swift-tests-timing.xml"
+          python3 -c 'import sys, xml.etree.ElementTree as E; a, b = (sum(1 for _ in E.parse(p).iter("testcase")) for p in sys.argv[1:3]); print("swift tests with the timing build: %d testcases (without: %d)" % (b, a)); sys.exit(0 if b > a else 1)' "$RUNNER_TEMP/swift-tests.xml" "$RUNNER_TEMP/swift-tests-timing.xml"
 
   # The Swift input method (docs/spec/release-and-ci.md, docs/spec/install-and-update.md
   # §10.2): the ad-hoc sandboxed builds, the container migration, the

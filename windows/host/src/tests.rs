@@ -4,87 +4,25 @@
 //! (one PID), so they run one at a time. The candidate window tests (docs/spec/windows-tip.md §3.15) also drive the core directly (`Direct`: the engine
 //! of `engine::load`, the host's own build, no pipe) to say what the host must hand over, and to check the DLL's key predicate against it.
 use crate::pipeio::Pipe;
+use crate::testkit::{check, chr, fail, installed, kind, parse_keys, quiet, w, Direct, Need, Snap, DOWN, ENTER, ESC, ONE_AT_A_TIME, PAGE_DOWN, SPACE};
 use crate::{engine, server, token};
-use shanjie_core::ffi::{self as core_ffi, ShanjieEngine, ShanjieKey, ShanjieOutput};
-use shanjie_win_proto::{self as proto, ClientMsg, Key, Out, ServerMsg};
-use std::ffi::CStr;
-use std::path::Path;
+use shanjie_core::ffi::{self as core_ffi, ShanjieKey, ShanjieOutput};
+use shanjie_win_proto::{self as proto, ClientMsg, Key, Out, PollResult, Polled, ServerMsg};
 use std::ptr;
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED, FILE_SHARE_MODE, OPEN_EXISTING, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT};
-
-static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
-
-/// The R2 guard installs a silent panic hook for the whole process (guard.rs), so a plain `assert!` or `expect` fails with no
-/// message. Each check names its step on stderr first (libtest prints captured stderr of a failed test); the names are test labels,
-/// never composition text.
-fn fail(what: &str) -> ! {
-    eprintln!("check failed: {what}");
-    panic!("check failed");
-}
-
-fn check(ok: bool, what: &str) {
-    if !ok {
-        fail(what);
-    }
-}
-
-trait Need<T> {
-    fn need(self, what: &str) -> T;
-}
-
-impl<T> Need<T> for Option<T> {
-    fn need(self, what: &str) -> T {
-        self.unwrap_or_else(|| fail(what))
-    }
-}
-
-impl<T, E: std::fmt::Debug> Need<T> for Result<T, E> {
-    fn need(self, what: &str) -> T {
-        match self {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("error: {e:?}");
-                fail(what)
-            }
-        }
-    }
-}
 
 fn server_name() -> &'static [u16] {
     static NAME: OnceLock<Vec<u16>> = OnceLock::new();
     NAME.get_or_init(|| {
         let name = format!(r"\\.\pipe\shanjie-test-host-{}", std::process::id());
         check(server::start(&name, 8, token::process_facts().need("own token")), "the test server starts");
-        // The shared server runs the current rules (key scheme 0, named here): the tests that use it were written for them.
-        engine::install(engine::load(repo_root(), 0).need("the engine loads from data/ (scripts/fetch-models.sh)"), 0);
+        // The shared server runs the engine of `testkit::installed`: the current rules (key scheme 0) and the rerank on.
+        installed();
         name.encode_utf16().chain([0]).collect()
     })
-}
-
-fn w(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
-}
-
-/// A character key (kind 1, no modifier) and a key of the other kinds of shanjie.h.
-fn chr(c: char) -> Key {
-    Key { kind: 1, ch: c as u32, modifiers: 0 }
-}
-
-fn kind(kind: u32) -> Key {
-    Key { kind, ch: 0, modifiers: 0 }
-}
-
-const SPACE: u32 = 2;
-const ENTER: u32 = 3;
-const ESC: u32 = 6;
-const DOWN: u32 = 10;
-const PAGE_DOWN: u32 = 15;
-
-fn repo_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(Path::parent).need("repository root")
 }
 
 fn deadline() -> Option<Instant> {
@@ -130,11 +68,23 @@ impl Client {
     }
 
     fn call(&mut self, m: &ClientMsg) -> ServerMsg {
+        self.call_raw(m).1
+    }
+
+    /// The answer and its bytes as they came off the pipe.
+    fn call_raw(&mut self, m: &ClientMsg) -> (Vec<u8>, ServerMsg) {
         let seq = self.send(m);
         let f = self.pipe.read_frame(deadline()).need("an answer");
         let (s, m) = proto::decode_server(&f).need("a well-formed answer");
         check(s == seq, "the answer carries the seq of the request");
-        m
+        (f, m)
+    }
+
+    fn poll(&mut self, ctx: u64, snap: u64) -> (Vec<u8>, Polled) {
+        match self.call_raw(&ClientMsg::Poll { ctx, snap }) {
+            (f, ServerMsg::Polled(p)) => (f, p),
+            _ => fail("the host did not answer the poll with a Polled"),
+        }
     }
 
     fn key(&mut self, ctx: u64, ch: char) -> Out {
@@ -189,66 +139,63 @@ fn a_rate_limited_client_gets_a_usable_connection_next() {
     check(o.preedit == w("ㄋ"), "the next connection types");
 }
 
+// ---- the semantic rerank over the pipe (docs/spec/windows-tip.md §5.3, §5.5 item 8; the engine's side is `rerank_tests`) ----
+
+/// ㄨㄛˇ ㄉㄥˇ ㄧ ㄒㄧㄚˋ ㄗㄞˋ ㄍㄨㄛˋ ㄑㄩˋ, the sentence of `rerank_tests`.
+const RERANK_SENTENCE: &str = "j i 3 2 / 3 u space v u 8 4 y 9 4 e j i 4 f m 4";
+
+#[test]
+fn the_rerank_comes_back_through_a_poll_and_only_to_its_owner() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    server_name();
+    quiet();
+    let mut a = Client::welcomed();
+    let mut b = Client::welcomed();
+    let ctx = 11;
+    let shown = parse_keys(RERANK_SENTENCE).into_iter().map(|k| a.keyk(ctx, k)).last().need("keys");
+    check(shown.pending && shown.preedit == w("我等一下在過去"), "the last key shows the n-gram's text and says a rerank is pending");
+    // A asks until the job has run: `running` on the way, then the snapshot.
+    let until = Instant::now() + Duration::from_secs(60);
+    let (id, snap) = loop {
+        match a.poll(ctx, 0).1 {
+            Polled { pending: true, what: PollResult::Snapshot { snap, out } } => break (snap, out),
+            Polled { pending: true, what: PollResult::Running } if Instant::now() < until => std::thread::sleep(Duration::from_millis(5)),
+            _ => fail("A's poll gave neither `running` nor the snapshot"),
+        }
+    };
+    check(proto::snapshot_ok(&snap) && snap.preedit == w("我等一下再過去"), "the snapshot is the reranked composition");
+    // B with A's ctx, and A with another ctx: the fixed answer, the same bytes but for the seq, 18 of them: none of A's text.
+    let (fb, pb) = b.poll(ctx, 0);
+    let (fa, pa) = a.poll(ctx + 1, id);
+    let fixed = Polled { pending: false, what: PollResult::Idle };
+    check(pb == fixed && pa == fixed, "a non-owner gets `idle`, flag 0");
+    check(fb.len() == proto::HEADER_LEN + 2 && fa.len() == fb.len() && fb[..8] == fa[..8] && fb[proto::HEADER_LEN..] == fa[proto::HEADER_LEN..], "byte for byte the same but for the seq");
+    // A, with its own ctx, still gets the same snapshot, until it hands the number back.
+    check(matches!(a.poll(ctx, 0).1, Polled { pending: true, what: PollResult::Snapshot { snap: again, out } } if again == id && out == snap), "the same snapshot again");
+    check(a.poll(ctx, id).1 == fixed, "confirmed: idle, flag 0");
+    let sent = a.keyk(ctx, kind(ENTER));
+    check(sent.commit == w("我等一下再過去") && !sent.pending, "Enter sends the reranked text");
+}
+
+/// A client of the protocol before this one (PROTO 3) is told so, and nothing else (docs/spec/windows-tip.md §5.3).
+#[test]
+fn a_proto_3_hello_is_refused_with_reason_1() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let name = server_name();
+    let access = 0x0000_0001 | 0x0000_0002 | 0x0010_0000 | 0x0002_0000;
+    let flags = FILE_FLAGS_AND_ATTRIBUTES(FILE_FLAG_OVERLAPPED.0 | SECURITY_SQOS_PRESENT.0 | SECURITY_IDENTIFICATION.0);
+    // SAFETY: NUL-terminated name.
+    let h = unsafe { CreateFileW(PCWSTR(name.as_ptr()), access, FILE_SHARE_MODE(0), None, OPEN_EXISTING, flags, None) }.need("the test pipe opens");
+    let pipe = Pipe::new(h).need("event");
+    let mut hello = proto::encode_client(5, &ClientMsg::Hello { build_hash: proto::BUILD_HASH, pid: std::process::id(), tid: 0 }).need("encode");
+    hello[4..6].copy_from_slice(&3u16.to_le_bytes());
+    pipe.write_all(&hello, deadline()).need("write");
+    let f = pipe.read_frame(deadline()).need("an answer");
+    check(proto::decode_server(&f) == Some((5, ServerMsg::Refuse { reason: proto::REFUSE_PROTO })), "Refuse { 1 } with the seq of the Hello");
+}
+
 // ---- the candidate window (docs/spec/windows-tip.md §3.15) ----
-
-/// What one core output holds, copied and freed at once.
-#[derive(Clone, PartialEq)]
-struct Snap {
-    handled: bool,
-    commit: Vec<u16>,
-    preedit: Vec<u16>,
-    cursor: u32,
-    selected: i32,
-    first: u32,
-    total: u32,
-    candidates: Vec<Vec<u16>>,
-}
-
-/// An engine of the host's own build (`engine::load`: the packs, the vertical window, the rerank off, the learning off), called with no pipe in between.
-struct Direct(*mut ShanjieEngine);
-
-impl Direct {
-    /// Key scheme 0, named: the existing tests were written for the current rules.
-    fn new() -> Direct {
-        Direct::with_scheme(0)
-    }
-
-    fn with_scheme(scheme: u32) -> Direct {
-        Direct(engine::load(repo_root(), scheme).need("the engine loads from data/ (scripts/fetch-models.sh)"))
-    }
-
-    fn key(&self, k: Key) -> Snap {
-        let mut o: *mut ShanjieOutput = ptr::null_mut();
-        // SAFETY: a live engine of this struct; `o` is a valid out pointer.
-        let rc = unsafe { core_ffi::shanjie_engine_key(self.0, ShanjieKey { kind: k.kind, ch: k.ch, modifiers: k.modifiers }, &mut o) };
-        check(rc == 0 && !o.is_null(), "the core accepts the key");
-        // SAFETY: a live output; its strings are valid NUL-terminated UTF-8 until freed, and it is freed once, after the copy.
-        unsafe {
-            let r = &*o;
-            let s = |p: *const std::os::raw::c_char| CStr::from_ptr(p).to_string_lossy().encode_utf16().collect::<Vec<u16>>();
-            let candidates = if r.candidates.is_null() { Vec::new() } else { (0..r.candidate_count as usize).map(|i| s(*r.candidates.add(i))).collect() };
-            let snap = Snap { handled: r.handled != 0, commit: s(r.commit), preedit: s(r.preedit), cursor: r.cursor_utf16, selected: r.candidate_selected, first: r.candidate_first, total: r.candidate_total, candidates };
-            core_ffi::shanjie_output_free(o);
-            snap
-        }
-    }
-
-    fn reset(&self) {
-        let mut o: *mut ShanjieOutput = ptr::null_mut();
-        // SAFETY: a live engine; the snapshot is freed at once.
-        unsafe {
-            check(core_ffi::shanjie_engine_reset(self.0, 1, &mut o) == 0, "the core resets");
-            core_ffi::shanjie_output_free(o);
-        }
-    }
-}
-
-impl Drop for Direct {
-    fn drop(&mut self) {
-        // SAFETY: the engine of `new`, freed once.
-        unsafe { core_ffi::shanjie_engine_free(self.0) };
-    }
-}
+// `Direct` (testkit) is the core with the rerank off: what the host shows for a key before any rerank is applied is the n-gram's answer, rerank on or off.
 
 /// The host's answer is the core's output: the rows, the selection, first and total, the text and the caret.
 fn same(o: &Out, d: &Snap, step: &str) {
@@ -338,38 +285,6 @@ const REPLAY_KEYS_VERTICAL: &str = "a u / 6 w u 0 space y l 3 g ; 4 down down do
 /// The text the core sends for `REPLAY_KEYS_VERTICAL`, UTF-16 units as `\uXXXX`. EMPTY until it is filled in: run
 /// `cargo test -p shanjie-host print_replay_keys_vertical -- --ignored --nocapture` once (on the machine that has the models) and paste the `const` line it prints over this one (a raw string).
 const REPLAY_KEYS_VERTICAL_EXPECTED: &str = r"\u660e\u5929\u65e9\u5c1a\u6211\u8981";
-
-fn parse_keys(line: &str) -> Vec<Key> {
-    line.split(' ')
-        .map(|t| {
-            // `S+` Shift, `C+` Control (MOD_SHIFT 1, MOD_CONTROL 2 of shanjie.h), in front of any other token.
-            let (modifiers, t) = match (t.strip_prefix("S+"), t.strip_prefix("C+")) {
-                (Some(r), _) => (1, r),
-                (_, Some(r)) => (2, r),
-                _ => (0, t),
-            };
-            let k = match t {
-                "space" => kind(SPACE),
-                "enter" => kind(ENTER),
-                "bksp" => kind(4),
-                "del" => kind(5),
-                "esc" => kind(ESC),
-                "left" => kind(7),
-                "right" => kind(8),
-                "up" => kind(9),
-                "down" => kind(DOWN),
-                "home" => kind(11),
-                "end" => kind(12),
-                "tab" => kind(13),
-                "pgup" => kind(14),
-                "pgdn" => kind(PAGE_DOWN),
-                t if t.chars().count() == 1 => chr(t.chars().next().need("a character")),
-                _ => fail("an unknown key token"),
-            };
-            Key { modifiers, ..k }
-        })
-        .collect()
-}
 
 /// Feeds the keys to a fresh engine and returns everything it sent as text; the composition is empty at the end, and a window opened on the way iff `want_window`.
 fn replay(line: &str, want_window: bool) -> Vec<u16> {
@@ -816,6 +731,7 @@ fn out_of(s: &Snap) -> Out {
         core_error: false,
         took_over: false,
         handled: s.handled,
+        pending: false,
         commit: s.commit.clone(),
         preedit: s.preedit.clone(),
         cursor_utf16: s.cursor,

@@ -4,7 +4,8 @@
 //! service (`timing-<pid>.txt`) and the resident host (`host-<pid>.txt`, which includes this file by path): the event codes of both
 //! are listed here, in one place.
 
-#![cfg_attr(not(feature = "timing"), allow(dead_code))]
+// Each program uses its own events of the one list, and a build without the feature records nothing.
+#![allow(dead_code)]
 
 pub const EV_ACTIVATE: u32 = 1;
 /// The model load: written by the host only since the resident host (§5; the DLL loads nothing).
@@ -63,6 +64,28 @@ pub const EV_WARM_FAILED: u32 = 70;
 /// docs/spec/windows-tip.md §5.2, §5.8, written by the host only. 71: the key scheme the host started with: both columns are numbers, not times: the scheme given to the core
 /// (0 or 1) and where it came from (0 no value, 1 a valid value, 2 an invalid one, which gave 1).
 pub const EV_KEY_SCHEME: u32 = 71;
+/// The semantic rerank (docs/spec/windows-tip.md §5.8). Written by the DLL: 72 one `Poll` exchange: the first column is its length in µs (from just before the `Poll` is sent
+/// to its answer read, or to the timeout), the second its result (`poll_result` below); both are numbers, not times. 73: a rerank reached the screen (start = the
+/// answer to the last key that carried the pending flag arrived, end = the asynchronous edit session wrote the composition, µs). 74: the answer to a key
+/// carried the pending flag, so a rerank was not finished when the key was answered (both columns 1).
+/// Written by the host: 75 one run of a rerank job on the rerank thread (start, end, µs). 76: the `Rerank` setting the host started with, as 71: the value given to the
+/// core (0 or 1) and where it came from (0 no value, 1 a valid value, 2 an invalid one, which gave 1); numbers, not times.
+pub const EV_POLL: u32 = 72;
+pub const EV_RERANK_SHOWN: u32 = 73;
+pub const EV_KEY_PENDING: u32 = 74;
+pub const EV_RERANK_RUN: u32 = 75;
+pub const EV_RERANK_SETTING: u32 = 76;
+
+/// The second column of event 72.
+pub mod poll_result {
+    pub const SNAPSHOT: u64 = 0;
+    pub const IDLE: u64 = 1;
+    pub const RUNNING: u64 = 2;
+    /// No byte of the answer arrived in time; the connection stays.
+    pub const TIMEOUT: u64 = 3;
+    /// Any other failure; the connection is closed.
+    pub const FAILED: u64 = 4;
+}
 
 /// Reasons of event 63.
 pub mod pass {
@@ -105,7 +128,7 @@ pub fn format_line(event: u32, start_us: u64, end_us: u64) -> String {
     format!("{event}\t{start_us}\t{end_us}\n")
 }
 
-#[cfg(feature = "timing")]
+#[cfg(all(windows, feature = "timing"))]
 mod file {
     use std::io::Write;
     use std::sync::{Mutex, Once};
@@ -205,16 +228,17 @@ mod file {
     }
 }
 
-#[cfg(feature = "timing")]
+#[cfg(all(windows, feature = "timing"))]
 pub use file::{init, now_us, record};
 
-#[cfg(not(feature = "timing"))]
+// Off Windows only the host's portable tests include this file: no file there, whatever the feature.
+#[cfg(not(all(windows, feature = "timing")))]
 pub fn init(_prefix: &str) {}
-#[cfg(not(feature = "timing"))]
+#[cfg(not(all(windows, feature = "timing")))]
 pub fn now_us() -> u64 {
     0
 }
-#[cfg(not(feature = "timing"))]
+#[cfg(not(all(windows, feature = "timing")))]
 pub fn record(_event: u32, _start_us: u64, _end_us: u64) {}
 
 #[cfg(test)]
@@ -227,7 +251,7 @@ mod tests {
         assert!(l == "3\t12\t4000000000000\n");
         assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         assert!(l.matches('\t').count() == 2 && l.matches('\n').count() == 1 && l.ends_with('\n'));
-        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK, EV_CAND_UPDATE, EV_CAND_FIRST, EV_CAND_POS, EV_WARM, EV_WARM_FAILED, EV_KEY_SCHEME] {
+        for ev in [EV_ACTIVATE, EV_LOAD, EV_KEY, EV_WAIT, EV_LAUNCHED, EV_IO_FAILED, EV_PASS, EV_HOST_APPCONTAINER, EV_HOST_PEAK, EV_CAND_UPDATE, EV_CAND_FIRST, EV_CAND_POS, EV_WARM, EV_WARM_FAILED, EV_KEY_SCHEME, EV_POLL, EV_RERANK_SHOWN, EV_KEY_PENDING, EV_RERANK_RUN, EV_RERANK_SETTING] {
             let l = format_line(ev, 0, u64::MAX);
             assert!(l.bytes().all(|b| b.is_ascii_digit() || b == b'\t' || b == b'\n'));
         }
