@@ -259,11 +259,15 @@ fn the_window_lists_the_colloquial_word() {
     for on in [true, false] {
         let mut e = app(on);
         if !on {
-            keys(&mut e, &["ㄉㄥ", "ㄌㄨㄥˊ"]);
+            keys(&mut e, &["ㄖㄜˋ", "ㄊㄥ", "ㄊㄥ"]);
             let o = press(&mut e, KeyKind::Down);
-            assert!(find_and_pick(&mut e, o, "厲害").is_none());
+            assert!(find_and_pick(&mut e, o, "熱騰騰").is_none());
             continue;
         }
+        keys(&mut e, &["ㄖㄜˋ", "ㄊㄥ", "ㄊㄥ"]);
+        let o = press(&mut e, KeyKind::Down);
+        find_and_pick(&mut e, o, "熱騰騰").expect("熱騰騰 is listed for ㄖㄜˋ ㄊㄥ ㄊㄥ");
+        let mut e = app(true);
         caps(&mut e, "xu4c97");
         let o = press(&mut e, KeyKind::Down);
         find_and_pick(&mut e, o, "厲害").expect("厲害 is listed for ㄌㄧˋ ㄏㄞ˙");
@@ -307,4 +311,22 @@ fn the_penalties_are_taken_once() {
     let ws = &on.iter().find(|(_, ws)| ws.len() == 1 && ws[0].0 == "熱騰騰").expect("熱騰騰").1;
     assert_eq!((ws[0].2, ws[0].4), (0.0, false));
     assert!(decode(&typed, false).iter().all(|(_, ws)| ws.iter().all(|w| w.0 != "熱騰騰")), "off: the row is not read");
+}
+
+/// docs/spec/decoder.md §6.6: switching off stores an unaccepted neutral tail after an unaccepted second tone as Xˇ, judged on the syllables as typed (not after the
+/// earlier syllable was rewritten to Xˇ); any other neutral syllable K took as its best-scoring alternative.
+#[test]
+fn switching_off_judges_the_tail_on_the_syllables_as_typed() {
+    let mut e = app(true);
+    e.set_english(false).unwrap();
+    keys(&mut e, &["ㄓㄢˊ", "ㄉㄠ˙"]);
+    assert_eq!(syls(&e), ["ㄓㄢˊ", "ㄉㄠ˙"], "premise");
+    e.set_tone3(false).unwrap();
+    assert_eq!(syls(&e), ["ㄓㄢˇ", "ㄉㄠˇ"]);
+    let mut e = app(true);
+    e.set_english(false).unwrap();
+    keys(&mut e, &["ㄒㄧㄢˊ", "ㄉㄠ˙"]);
+    assert_eq!(syls(&e), ["ㄒㄧㄢˊ", "ㄉㄠ˙"], "premise");
+    e.set_tone3(false).unwrap();
+    assert_eq!(syls(&e), ["ㄒㄧㄢˊ", "ㄉㄠˇ"]);
 }

@@ -2301,14 +2301,16 @@ impl Engine {
                 let r = &syls[f.start..f.end];
                 lex.has(r, &f.word) || !lex.has_with(r, &f.word, true)
             });
+            // The rule reads the syllables as typed: an earlier rewrite to Xˇ must not change whether the previous one rose.
+            let orig = self.syls.clone();
             for i in 0..self.syls.len() {
-                let s = &self.syls[i];
+                let s = &orig[i];
                 let fixed = self.fixed.iter().any(|f| f.start <= i && i < f.end);
                 if fixed {
                     continue;
                 }
                 // The neutral tail the sandhi rule took (after a second tone) is stored as Xˇ, as before K; any other neutral syllable K took as its best alternative.
-                let prev_rises = i.checked_sub(1).is_some_and(|j| self.syls[j].ends_with('ˊ') && !self.syls[j].starts_with(PUNCT_PREFIX));
+                let prev_rises = i.checked_sub(1).is_some_and(|j| orig[j].ends_with('ˊ') && !orig[j].starts_with(PUNCT_PREFIX));
                 if crate::tone3::unaccepted(&self.lex, s) || (prev_rises && crate::tone3::unaccepted_tail(&self.lex, s)) {
                     if let Some(t) = crate::tone3::third(s) {
                         self.syls[i] = t;
