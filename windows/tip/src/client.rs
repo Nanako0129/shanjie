@@ -9,14 +9,18 @@
 //!   a row open the circuit breaker for 10 s. `Refuse { 1 }` passes every key through for the life of the process, `Refuse { 3 }`
 //!   for 60 s.
 //! - `ERROR_FILE_NOT_FOUND` starts the host without waiting for it, only from a process that meets every condition of §5.2.
+//! - The semantic rerank is pulled (`poll`, from the timer of `tip.rs`, inside an asynchronous edit session): one `Poll`, one `Polled`, a 40 ms deadline of
+//!   its own. A poll whose answer has not begun to arrive in time keeps the connection and is not counted by the circuit breaker; its late answer is dropped
+//!   by its seq when it turns up (`poll::Late`, kept in the connection). An answer cut off part-way closes the connection like any other read failure.
 //!
 //! The host is the only holder of composition state: nothing typed is kept or replayed here. R2: no key or text reaches a log, a file
 //! or an error; the timing file gets numbers only.
 use crate::guard;
 use crate::pipeio::{self, Pipe, ERR_BAD_DATA, ERR_TIMEOUT};
+use crate::poll::{Asked, Late, Seq, POLL_MS};
 use crate::timing::{self, pass};
 use crate::token::{self, Facts};
-use shanjie_win_proto::{self as proto, ClientMsg, Key, Out, ServerMsg};
+use shanjie_win_proto::{self as proto, ClientMsg, Key, Out, PollResult, ServerMsg};
 use std::cell::RefCell;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -100,8 +104,8 @@ fn me() -> Option<&'static Me> {
     .as_ref()
 }
 
-/// Milliseconds since this process first asked (for the process-wide deadlines below, kept in atomics).
-fn now_ms() -> u64 {
+/// Milliseconds since this process first asked (for the process-wide deadlines below, kept in atomics, and for the poll timer of `tip.rs`).
+pub fn now_ms() -> u64 {
     static BASE: OnceLock<Instant> = OnceLock::new();
     BASE.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
@@ -178,6 +182,8 @@ struct Link {
     timer: usize,
     /// The host engine's key scheme (0 or 1), from this connection's `Welcome`; the only place the text service learns it (docs/spec/windows-tip.md §3.6).
     scheme: u8,
+    /// The polls of this connection whose answers are still to come after a timeout; gone with the connection.
+    late: Late,
 }
 
 impl Drop for Link {
@@ -203,20 +209,27 @@ impl Link {
         Ok(self.seq)
     }
 
-    /// The answer to the message `seq`; a `Pushed` in between is dropped (reserved, §5.3).
+    /// The answer to the message `seq`.
     fn answer(&mut self, seq: u64, deadline: Instant) -> Result<ServerMsg, u32> {
+        self.answer_counted(seq, deadline).map_err(|(code, _)| code)
+    }
+
+    /// The answer to the message `seq`. The late answer of a poll that timed out is dropped in front of it (`Late`); any other seq, a type this direction does
+    /// not have (`T_PUSHED` among them) and an `Out` that fails the client's checks are malformed. A failure also says how many bytes of the message it
+    /// stopped in had been read: 0 means the stream still stands at a message boundary.
+    fn answer_counted(&mut self, seq: u64, deadline: Instant) -> Result<ServerMsg, (u32, usize)> {
         loop {
-            let f = self.pipe.read_frame(Some(deadline))?;
-            let (s, m) = proto::decode_server(&f).ok_or(ERR_BAD_DATA)?;
-            if matches!(m, ServerMsg::Pushed(_)) {
-                continue;
-            }
-            if s != seq {
-                return Err(ERR_BAD_DATA);
+            let f = self.pipe.read_frame_counted(Some(deadline))?;
+            let bad = (ERR_BAD_DATA, f.len());
+            let (s, m) = proto::decode_server(&f).ok_or(bad)?;
+            match self.late.judge(s, seq) {
+                Seq::Mine => {}
+                Seq::Late => continue,
+                Seq::Bad => return Err(bad),
             }
             if let ServerMsg::Out(o) = &m {
                 if !o.ran || !proto::out_ok(o) {
-                    return Err(ERR_BAD_DATA);
+                    return Err(bad);
                 }
             }
             return Ok(m);
@@ -290,6 +303,60 @@ pub fn key(ctx: u64, k: Key, composing: bool) -> Reply {
         Reply::Pass
     })
     .unwrap_or(Reply::Pass)
+}
+
+/// One poll for the rerank of the composition in `ctx` (docs/spec/windows-tip.md §5.4), from an asynchronous edit session: `acked` is the number of the last snapshot written.
+/// Never connects and never starts the host: with no connection (or the client blocked) there is nothing to ask, and the next key deals with that (§5.6).
+/// - No byte of the answer within `POLL_MS`: `TimedOut`. The connection stays, the circuit breaker does not count it, the late answer is dropped later.
+/// - The answer cut off part-way, a failed write, a malformed message, a broken pipe, an answer of another type: `Failed`, the connection is closed.
+/// The snapshot's own checks (`proto::snapshot_ok`) are the caller's (`poll::Poller::session`).
+pub fn poll(ctx: u64, acked: u64) -> Asked {
+    const NOTHING: Asked = Asked::Idle { pending: false };
+    if blocked() {
+        return NOTHING;
+    }
+    LINK.try_with(|cell| {
+        let Ok(mut slot) = cell.try_borrow_mut() else { return NOTHING };
+        let Some(link) = slot.as_mut() else { return NOTHING };
+        let asked = poll_on(link, ctx, acked);
+        if matches!(asked, Asked::Failed) {
+            *slot = None;
+        }
+        asked
+    })
+    .unwrap_or(NOTHING)
+}
+
+fn poll_on(link: &mut Link, ctx: u64, acked: u64) -> Asked {
+    let deadline = Instant::now() + Duration::from_millis(POLL_MS);
+    // A poll's failures are noted (event 62) but never counted by the circuit breaker: that is for keys.
+    let note = |code: u32| timing::diag_value(timing::EV_IO_FAILED, u64::from(code));
+    let seq = match link.send(&ClientMsg::Poll { ctx, snap: acked }, deadline) {
+        Ok(seq) => seq,
+        Err(e) => {
+            note(e);
+            return Asked::Failed;
+        }
+    };
+    match link.answer_counted(seq, deadline) {
+        Ok(ServerMsg::Polled(p)) => match p.what {
+            PollResult::Snapshot { snap, out } => Asked::Snapshot { snap, out, pending: p.pending },
+            PollResult::Idle => Asked::Idle { pending: p.pending },
+            PollResult::Running => Asked::Running,
+        },
+        Ok(m) => {
+            refused(&m);
+            Asked::Failed
+        }
+        Err((code, read)) => {
+            note(code);
+            if code == ERR_TIMEOUT && link.late.timed_out(seq, read) {
+                Asked::TimedOut
+            } else {
+                Asked::Failed
+            }
+        }
+    }
 }
 
 /// Called from `OnTestKeyDown` with an empty composition (§5.4): makes sure this thread has a working connection, connecting (and
@@ -426,7 +493,7 @@ fn connect(me: &Me) -> Option<Link> {
         passed(pass::SERVER_CHECK);
         return None;
     }
-    let mut link = Link { pipe, seq: 0, last: Instant::now(), composing: false, timer: 0, scheme: 0 };
+    let mut link = Link { pipe, seq: 0, last: Instant::now(), composing: false, timer: 0, scheme: 0, late: Late::default() };
     let deadline = Instant::now() + REPLY;
     // SAFETY: plain queries.
     let (pid, tid) = unsafe { (GetCurrentProcessId(), GetCurrentThreadId()) };
@@ -706,5 +773,123 @@ mod tests {
         assert!(level == SecurityIdentification, "the client allows identification only");
         server.write_all(&[1], Some(Instant::now() + Duration::from_secs(5))).expect("release the client");
         client.join().expect("client thread");
+    }
+
+    /// A one-instance test pipe and the server's end of it, connected to a client opened with the production `open`.
+    fn pair(tag: &str) -> (Pipe, Pipe) {
+        let name: Vec<u16> = format!(r"\\.\pipe\shanjie-test-{tag}-{}", std::process::id()).encode_utf16().chain([0]).collect();
+        // SAFETY: plain calls; the handles are owned by `Pipe`; `ov` stays alive until the connect has completed.
+        unsafe {
+            let h = CreateNamedPipeW(PCWSTR(name.as_ptr()), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 4096, 4096, 0, None);
+            assert!(h != INVALID_HANDLE_VALUE, "test pipe created");
+            let server = Pipe::new(h).expect("event");
+            let mut ov = OVERLAPPED { hEvent: server.event(), ..Default::default() };
+            let pending = ConnectNamedPipe(server.handle(), Some(&mut ov));
+            let client = open(&name).expect("the production open reaches the test pipe");
+            if let Err(e) = pending {
+                if pipeio::win32(&e) == ERROR_IO_PENDING.0 {
+                    let mut n = 0u32;
+                    GetOverlappedResult(server.handle(), &ov, &mut n, true).expect("client connected");
+                } else {
+                    assert!(pipeio::win32(&e) == ERROR_PIPE_CONNECTED.0, "client connected");
+                }
+            }
+            (server, client)
+        }
+    }
+
+    fn soon() -> Option<Instant> {
+        Some(Instant::now() + Duration::from_secs(5))
+    }
+
+    fn composition(text: &str, pending: bool) -> super::Out {
+        let preedit: Vec<u16> = text.encode_utf16().collect();
+        super::Out {
+            ran: true,
+            core_error: false,
+            took_over: false,
+            handled: true,
+            pending,
+            commit: vec![],
+            cursor_utf16: preedit.len() as u32,
+            preedit,
+            candidate_selected: -1,
+            candidate_first: 0,
+            candidate_total: 0,
+            candidates: vec![],
+        }
+    }
+
+    fn link(pipe: Pipe) -> super::Link {
+        super::Link { pipe, seq: 0, last: Instant::now(), composing: true, timer: 0, scheme: 0, late: super::Late::default() }
+    }
+
+    /// docs/spec/windows-tip.md §5.6: a poll whose answer has not begun to arrive in 40 ms keeps the connection and is not counted by the circuit breaker; its late answer is
+    /// dropped in front of the next key's answer, whose composition is then the right one. The test server never reads: a new connection numbers its messages
+    /// from 1, so the answers are written ahead with the seqs the client will use.
+    #[test]
+    fn a_poll_that_times_out_with_nothing_read_keeps_the_connection_and_its_late_answer_is_dropped() {
+        use super::{proto, Asked, ClientMsg, Key, PollResult, ServerMsg};
+        let (server, client) = pair("late");
+        let mut l = link(client);
+        let before = super::TIMEOUTS.load(std::sync::atomic::Ordering::Acquire);
+        let t0 = Instant::now();
+        assert!(matches!(super::poll_on(&mut l, 7, 0), Asked::TimedOut), "no answer in time: a timeout, not a failure");
+        let took = t0.elapsed();
+        assert!(took >= Duration::from_millis(35) && took < Duration::from_millis(1000), "the poll has its own short deadline (40 ms)");
+        assert!(super::TIMEOUTS.load(std::sync::atomic::Ordering::Acquire) == before, "the circuit breaker does not count a poll");
+        // The host answers the poll (seq 1) late (it had applied a rerank: a snapshot), then the key (seq 2).
+        let late = proto::encode_server(1, &ServerMsg::Polled(proto::Polled { pending: true, what: PollResult::Snapshot { snap: 1, out: composition("我再", true) } })).unwrap();
+        server.write_all(&late, soon()).expect("late answer written");
+        server.write_all(&proto::encode_server(2, &ServerMsg::Out(composition("我再ㄋ", true))).unwrap(), soon()).expect("key answer written");
+        match super::call(&mut l, 7, Key { kind: 1, ch: 's' as u32, modifiers: 0 }) {
+            Ok(o) => assert!(o.preedit == "我再ㄋ".encode_utf16().collect::<Vec<u16>>(), "the key's own answer is taken, the late one dropped"),
+            Err(_) => panic!("the key after a timed-out poll failed"),
+        }
+        // The record is used up: one more answer with the old seq is malformed.
+        let seq = l.send(&ClientMsg::Release { ctx: 7 }, Instant::now() + Duration::from_secs(1)).expect("write");
+        assert!(seq == 3);
+        server.write_all(&late, soon()).expect("written");
+        assert!(l.answer(seq, Instant::now() + Duration::from_secs(1)).is_err(), "an old seq with nothing owed is malformed");
+        // A new connection starts with no record.
+        let (_server2, client2) = pair("late2");
+        assert!(matches!(link(client2).late.judge(1, 2), super::Seq::Bad), "the record of late answers does not outlive its connection");
+    }
+
+    /// An answer cut off part-way (bytes already taken off the pipe when the deadline passes) closes the connection: the stream no longer stands at a message boundary.
+    #[test]
+    fn a_poll_whose_answer_is_cut_off_part_way_fails_and_the_connection_is_closed() {
+        use super::{proto, Asked, PollResult, ServerMsg, LINK};
+        for cut in [1usize, 4, 17] {
+            let (server, client) = pair(&format!("cut{cut}"));
+            // The first bytes of the answer to the poll (seq 1) are there before it is sent; the rest never comes.
+            let f = proto::encode_server(1, &ServerMsg::Polled(proto::Polled { pending: true, what: PollResult::Running })).unwrap();
+            assert!(f.len() == 18);
+            server.write_all(&f[..cut], soon()).expect("part of an answer written");
+            // Through the thread's connection slot, as `tip.rs` asks.
+            LINK.with(|cell| *cell.borrow_mut() = Some(link(client)));
+            assert!(matches!(super::poll(7, 0), Asked::Failed), "{cut} bytes read, then the deadline: a failure");
+            assert!(LINK.with(|cell| cell.borrow().is_none()), "the connection is closed");
+            assert!(matches!(super::poll(7, 0), Asked::Idle { pending: false }), "with no connection a poll asks nothing");
+        }
+    }
+
+    /// The answers of a poll, and a message of the reserved pushed type.
+    #[test]
+    fn a_poll_reads_polled_and_nothing_else() {
+        use super::{proto, Asked, PollResult, ServerMsg};
+        let (server, client) = pair("types");
+        let mut l = link(client);
+        for (seq, what) in [(1, PollResult::Running), (2, PollResult::Idle), (3, PollResult::Snapshot { snap: 3, out: composition("我再", true) })] {
+            server.write_all(&proto::encode_server(seq, &ServerMsg::Polled(proto::Polled { pending: true, what })).unwrap(), soon()).expect("written");
+        }
+        // A message of the reserved pushed type: malformed since PROTO 4.
+        let mut f = proto::encode_server(4, &ServerMsg::Busy).unwrap();
+        f[6..8].copy_from_slice(&proto::T_PUSHED.to_le_bytes());
+        server.write_all(&f, soon()).expect("written");
+        assert!(matches!(super::poll_on(&mut l, 7, 0), Asked::Running));
+        assert!(matches!(super::poll_on(&mut l, 7, 0), Asked::Idle { pending: true }));
+        assert!(matches!(super::poll_on(&mut l, 7, 0), Asked::Snapshot { snap: 3, pending: true, .. }));
+        assert!(matches!(super::poll_on(&mut l, 7, 3), Asked::Failed), "T_PUSHED is malformed");
     }
 }
