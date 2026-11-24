@@ -3506,6 +3506,12 @@
     }
    },
    "date": "2026-11-24",
+   "holdout_chat": {
+    "commit": "85cdc9a1dccec3e13db2367a5de39e6058079534",
+    "n": 150,
+    "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e",
+    "top1": 135
+   },
    "label": "v0.9.0+v0.9.1",
    "load_avg_end": 3.90771484375,
    "load_avg_start": 1.9306640625,
