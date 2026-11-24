@@ -830,9 +830,9 @@ class SuiteV2(Tmp):
                     bench.run_cell2(self.ctx, v, "pub", "chat", False)
         with self.assertRaises(RuntimeError):
             bench.tone3_tag({"colloq_sandhi": True})     # the colloquial mark is a form of the sandhi mark: never without `"tone3"`
-        for label in bench.VERSIONS2:   # v0.9.0 is the first release with tone3; no released version ships the colloquial readings yet
-            self.assertEqual("tone3" in bench.VERSIONS2[label], label == "v0.9.0")
-            self.assertNotIn("colloq_sandhi", bench.VERSIONS2[label], "no released version ships it yet")
+        for label in bench.VERSIONS2:   # v0.9.0 is the first release with tone3, v0.9.1 the first with the colloquial readings
+            self.assertEqual("tone3" in bench.VERSIONS2[label], label in ("v0.9.0", "v0.9.1"))
+            self.assertEqual("colloq_sandhi" in bench.VERSIONS2[label], label == "v0.9.1")
 
     def test_recur_version_marks_every_context_tag_after_ctx(self):
         """docs/spec/decoder.md §4.6: a version with `"recur": True` ships the context recurrence term. The CLI prints `+recur` right after `+ctx` in every
