@@ -221,8 +221,9 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   column (`o k` is `ok`; the switch set_english_overwrite), (b) a Zhuyin key in a column before one that is filled (`l s` is
 //   `ls`; only with set_english_key_order 1 and set_english_reversal_guard 0, so not by default), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
 //   `cup`, `s 7` is `s7`; Space under set_english alone, a tone key under set_english_key_order), except when the adjacent-key rule
-//   of set_fuzzy (bit 4) or third-tone sandhi (set_tone3: Xˊ without a one-syllable entry whose Xˇ has one, ㄨㄛˊ; or X˙ without one whose Xˇ has one, right after a
-//   second-tone syllable) accepts the syllable. The digit row never reads such a syllable from digit keys: `5 0 6` stays 506 whatever set_tone3 says. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
+//   of set_fuzzy (bit 4) or sandhi (set_tone3: Xˊ without a one-syllable entry whose Xˇ has one, ㄨㄛˊ; X˙ without one whose Xˇ has one, right after a
+//   second-tone syllable; or X˙ without one, after any syllable of the composition, when one of X, Xˊ, Xˇ, Xˋ has one: ㄌㄧˋ ㄏㄞ˙) accepts the syllable.
+//   The digit row never reads such a syllable from digit keys: `5 0 6` stays 506 and `1 0 7` 107 whatever set_tone3 says. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
 //   never reverts: the candidate list opened right after it adds its lower and upper case as its last two items, and choosing one
 //   swaps that one syllable for an English token. A syllable that completes as Chinese after some key replaced another in its column
 //   (set_english_overwrite 0: `s p e e c h` Space is ㄘㄣ) gets the same two items for every key typed (`speech`, `SPEECH`).
@@ -246,7 +247,22 @@ int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled,
 //   the end, an English token and the syllables after it that the table `mixed-words.tsv` (in data_dir, optional: absent or bad,
 //   nothing is added) has as one word (`cp` + ㄓˊ = `CP值`) put that word first in the candidate list Down or Space opens, which
 //   then carries no prediction row items; choosing it puts one punctuation-kind token (not learned, removed whole) in place of the
-//   token and the syllables (docs/spec/english-mixed.md §5.7). Other keys of
+//   token and the syllables (docs/spec/english-mixed.md §5.7). The same table, while set_english is 1: (1) the syllables
+//   right behind an English token (or, with a small model that declares a left length loaded, at the composition's start behind the
+//   1 to 16 ASCII letters or digits the left text ends with) that start with the reading of a row of that English part are, to the
+//   decoder, one more word they can be: the row's Han part, scored as the best ordinary path over them plus a bonus. Typed alone it is
+//   what shows, and the token shows the row's writing of the English part while the path shown takes it (`cp` + ㄓˊ shows `CP值`).
+//   Nothing is fixed or learned: what is typed behind it is decoded with it, and the semantic correction keeps the word for the job
+//   whose first path took it (docs/spec/decoder.md §4.7);
+//   (2) a run that is upper-case letters typed with Shift and then Zhuyin keys splits at Space or a tone key into the token and the
+//   syllable when the table has a row of those letters whose reading starts with that syllable (Shift+K `g j` Space is `K書`; one
+//   symbol and a same-column replacement count; `Kevin` Space is as it was; an English word the core knows that such a split took
+//   apart is an item of the window Down opens right behind the syllable, and choosing it puts the word back as one token)
+//   (docs/spec/english-mixed.md §4.3); (3) while a run that Shift opened is letters only and set_prediction is 1, the output carries a
+//   prediction row (candidates, candidate_selected -1, candidate_total; english_run_utf16_len stays > 0): the writings of the table's
+//   rows for the letters (but the rows whose fifth field is the mark `nopredict`) while they are all upper case, then the English words of english.tsv and the built-in lists that start
+//   with the run's letters; entered with TAB and chosen like any row item (docs/spec/prediction.md §3.5). A shell shows the row
+//   instead of its hint for the open run, and the hint when the row is empty. Other keys of
 //   docs/spec/english-mixed.md §4 stand:
 //   - Backspace deletes English one letter at a time (docs/spec/english-mixed.md §5.3): with the cursor right after an English token (no unfinished
 //     syllable, no run) it removes the token and opens a run with its text less the last letter (a one-letter token just goes; a writing the
@@ -288,13 +304,18 @@ int32_t shanjie_engine_set_english_overwrite(ShanjieEngine *engine, uint32_t ena
 //   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
 //   every engine creation, like set_english.
 int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
-// third-tone sandhi (docs/spec/decoder.md §6.6, docs/spec/keys-and-composition.md §3.2): set_tone3 0 or 1 (2 otherwise, state unchanged),
+// third-tone and colloquial sandhi, one switch (docs/spec/decoder.md §6.6, §8.7, docs/spec/keys-and-composition.md §3.2): set_tone3 0 or 1 (2 otherwise, state unchanged),
 //   default 1 at engine creation; the codes and the snapshot (handled 1, commit "") are those of set_fuzzy, and the composition is recomputed.
 //   With 1 and a loaded model, a second-tone syllable typed as said (ㄓㄚˊ ㄧㄢˇ) also reads the words whose lexicon reading has the third tone there
 //   (眨眼), a little lower than an exact reading; the candidate window lists them after the exact ones and choosing one makes the span the word's lexicon
 //   reading. A tone key also accepts Xˊ the lexicon has no one-syllable entry for when Xˇ has one (ㄨㄛˊ), and ˙X without one when Xˇ has one right after a
-//   second tone (ㄒㄧㄤˊ ㄒㄧㄤ˙); they show the word read as Xˇ. With 0 those syllables already in the composition are stored as Xˇ (the composition keeps a path)
-//   and nothing reads the sandhi readings. Call it after every engine creation, like set_fuzzy.
+//   second tone (ㄒㄧㄤˊ ㄒㄧㄤ˙); they show the word read as Xˇ.
+//   Colloquial sandhi on the same switch: a neutral syllable ˙X typed after another syllable also reads the multi-syllable words whose lexicon reading has
+//   X, Xˊ, Xˇ or Xˋ there (ㄌㄧˋ ㄏㄞ˙ is 厲害, ㄓ ㄉㄠ˙ is 知道), lower than an exact reading, listed and chosen like the sandhi words above; a tone key
+//   accepts ˙X the lexicon has no one-syllable entry for, after any syllable of the composition, when one of the four has one (alone it shows a
+//   one-syllable word of theirs); and the lexicon's rows for the colloquial reading of reduplicated words (ㄖㄜˋ ㄊㄥ ㄊㄥ is 熱騰騰) are read.
+//   With 0 the accepted syllables already in the composition are stored as Xˇ (the third-tone ones, and a neutral tail whose stored previous syllable
+//   still has the second tone) or as the best-scoring of the four (every other neutral one), so the composition keeps a path; nothing reads the sandhi readings, and those rows are not read. Call it after every engine creation, like set_fuzzy.
 int32_t shanjie_engine_set_tone3(ShanjieEngine *engine, uint32_t on, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // set_english_key_order 0 or 1 (2 otherwise, state unchanged), default 1 at engine creation (0 before docs/spec/english-mixed.md §3), like
 //   set_english_overwrite in its codes and its snapshot (handled 1, commit ""); 1 when engine or out is NULL

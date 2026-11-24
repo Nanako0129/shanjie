@@ -9,7 +9,7 @@
 ### 1.1 學什麼
 
 - **改選**：在候選窗把某段的詞改成另一個詞，按 Enter 送出後，記下「前文、讀音、選到的詞」，被換掉的詞權重減半。下次在相同前文下打相同讀音，選到的詞排在前面。
-- **預測列選取**：從預測列選的詞也記，沒有被取代的詞，所以不減半（見 4.3）。
+- **預測列選取**：從預測列選的詞也記，沒有被取代的詞，所以不減半（見 4.3）。Shift＋字母的預測列（中英混合詞）選的詞另用 `^en:` 開頭的鍵記，只用來排那一列。
 - **句首單字**：句首（前文沒有漢字）的單字改選，用「後面接的一到三個音節」當鍵（見 7）。
 - **新詞**：逐字改選出詞庫沒有的 2 到 4 字詞，記成不看前文的詞（見 8）。
 - 沒有開候選窗、直接打字送出的字不學；唯一的更新是新詞的「用到」（只動既有紀錄的權重與日期，不新增內容，見 8.5）。
@@ -96,6 +96,13 @@
 
 預測列選的詞固定時，學習開著就記下 `pre ＝ ""`（沒有被取代的詞），其餘照改選處理：鍵是該詞起點的前文鍵、讀音是那一段、權重 +1、不減半。共用同一份記錄、檔案、衰減、全域化、修剪、忘記與清除。預測列選取發生在組字區尾端，後面沒有音節，所以前文鍵是 `^` 時一律存成 `^>$`（5.3），單字因此不記。
 
+**英文段的預測列**（`docs/spec/prediction.md` §3.5，Shift＋字母列出的中英混合詞）選的詞另有一種紀錄，只有這裡會產生：
+
+- 選取時與送出時學習都開著，送出時記一筆：前文鍵 `^en:`＋英文部分的小寫（Shift+K 是 `^en:k`）、讀音是那一列的中文讀音（`ㄕㄨ`，不含 `_punct_`）、詞是寫法欄（`K書`）、權重 +1、不減半。
+- 送出時要仍是選取時的樣子：token 還在、後面的音節仍是那一列的讀音（中途刪掉過就不算，再用按鍵打回同一個詞也一樣），而且送出的文字裡 token 加那幾個音節的那一段就是那一列的寫法（後面的字把它併成別的詞、或改選了別的字，就不是）。Esc、`reset`、回傳碼 4 都不記。
+- 共用同一份學習檔、衰減、修剪、⌘⌫ 忘記與清除。不全域化（不算進 5.4 的鍵數，也不產生全域紀錄）；解碼、候選窗、一般預測列、重排的學習加權都查不到它（查詢的鍵是漢字或 `^>…`，「最後一個字」那一層也排除 `^en:`）；只有 `docs/spec/prediction.md` §3.5 的排序讀它。
+- 解碼器自己解出的中英混合詞（打完讀音就是「K書」，`docs/spec/english-mixed.md` §5.7）不學；同一列預測列裡的英文補完（Karaoke）選了也不學、不改字表。
+
 ### 4.4 失敗
 
 - 學習在算出 commit 文字之後才執行，包在內層 `catch_unwind` 裡；學習或寫檔出錯（含 panic）只放棄這一次學習，`key()` 照樣帶著 commit 回 0。
@@ -122,8 +129,11 @@
 | 中鍵、細鍵 | `^>`＋後兩個／三個音節，音節間隔 `FINE_SEP`（U+001F） | 只有單字（7.1） |
 | 空字串（`GLOBAL`） | 全域 | 只有 2 字以上的詞 |
 | `#`（`NEWWORD`） | 新詞，不看前文 | 只有新詞（8） |
+| `^en:`＋英文小寫（`EN_PREFIX`） | Shift＋字母的預測列選的中英混合詞；英文是 `[a-z][a-z0-9]{0,15}` | 只有那一列的項目（4.3）：詞是那段英文（不分大小寫）接上和音節數一樣多的漢字 |
 
 單獨的 `^` 永遠不是紀錄的鍵：`Learner::teach` 不產生，`learn_store` 載入時丟掉。
+
+`^en:` 的紀錄格式不合（英文不是小寫、詞不是那段英文接漢字、字數和音節數不同、讀音是 `_punct_` 開頭）時也當壞行丟掉。沒有這種鍵的舊版讀到它時：載入時當成不合法的鍵略過（不佔容量、查不到），檔案裡那一行留著，到那個版本下一次完整重寫時才消失；在加這種鍵之前的 commit 上實測過（檔案放一筆 `^en:k`，`LearnStore::open` 載入 0 筆這種紀錄，`save` 之後檔案裡沒有那一行）。所以降版後這些紀錄會丟掉，其他紀錄不受影響。
 
 ### 5.3 單字與句首的鍵規則
 
@@ -136,7 +146,7 @@
 
 ### 5.4 全域化
 
-同一組（讀音、詞）在 ≥ 2 種不同的完整前文鍵下都有衰減後權重 ≥ 0.5 的紀錄時，產生一筆前文為空的全域紀錄（把全域紀錄補到權重 1）。計數時：所有 `^>…` 句首鍵合起來算一種；全域鍵與 `#` 不算。單字不全域化。全域紀錄照常寫檔、衰減、遺忘，但解碼時加分是 0（6.2）。
+同一組（讀音、詞）在 ≥ 2 種不同的完整前文鍵下都有衰減後權重 ≥ 0.5 的紀錄時，產生一筆前文為空的全域紀錄（把全域紀錄補到權重 1）。計數時：所有 `^>…` 句首鍵合起來算一種；全域鍵、`#` 與 `^en:…` 不算。單字不全域化。全域紀錄照常寫檔、衰減、遺忘，但解碼時加分是 0（6.2）。
 
 ### 5.5 取代的詞減半
 
@@ -390,6 +400,8 @@
 
 ### 13.1 核心測試
 
+`^en:` 的紀錄（4.3、5.2）：`core/src/learn.rs` 的 `an_en_record_is_no_context_of_the_global_level`、`core/tests/learn_store.rs` 的 `en_keys_round_trip_and_malformed_ones_are_dropped`、`core/tests/engine_mixed.rs` 的 `a_chosen_item_is_learned_under_the_en_key`（學習開與關、Esc、`reset`、改選、刪掉都不記；送出後檔案多一筆權重 1；下一次排第一；有這筆紀錄時單打同一個讀音的每鍵輸出與候選窗和沒有紀錄時相同；清除後回到次數順序）、`forgetting_an_item_of_the_run_row`。
+
 指令（需要 `data/lm/bigram.sjlm`，與其他引擎測試相同）：`make test-rust`（等於 `cargo test --release --locked`）；單跑：`cargo test --release --locked -p core --test engine_learn`、`--test learn_store`、`--test engine_newword`、`--lib learn`。
 
 - `core/src/learn.rs` 的單元測試：中鍵、細鍵的建構與格式（`the_mid_key_is_two_syllables_and_nothing_else`、`the_fine_key_is_three_syllables_or_two_and_the_end`）、單字教中鍵與細鍵（`teach_takes_the_mid_and_fine_keys_for_a_single_character`）、`context_key_is_the_han_tail`、新詞不被前文查詢比對（`new_words_never_answer_a_context_lookup`）、新詞不算全域化的前文（`globalization_does_not_count_the_new_word_record`）、新詞權重與上限。
@@ -424,7 +436,7 @@
 ### 13.4 句首單字（SINIT）的測試與重播
 
 - 選字函式（`core/src/tinylm.rs`）：學習項全 0 時三條路與沒有學習項逐一相同（隨機分數，固定種子的 LCG）；細鍵正負兩向、中鍵與粗鍵受 `ll_i > ll_0` 門檻、錨點學過候選沒學時是 0、只用最長一層、τ 的三條路各一例。
-- `core/tests/engine_learn.rs` 的 `sinit_*`：沒有重排工作時紀錄沒有作用（`sinit_row16_without_a_rerank_job_the_record_has_no_effect`）、改選取代的單字在改選當下的中鍵與細鍵下減半、兩個漢字的前文後面不作用且下一個音節不同時解碼和沒有紀錄時相同（`sinit_not_after_two_han_characters_and_not_before_another_syllable`）、單字在最後不學（`sinit_single_character_at_the_end_is_not_learned`）、英文與數字鄰居不學、規則 10 的紀錄不觸發守門、池是不抬升的 n-best 且換進的路徑帶不抬升的分數、`sinit_at_eps_0_a_record_changes_nothing_and_a_large_eps_takes_it`、`sinit_the_job_reads_the_longest_layer_that_has_a_record`、`sinit_mid_and_fine_keys_are_learned_by_what_follows_and_forgotten_with_the_coarse_one`、模糊音路徑上的學到字不改變結果、`sinit_taught_zai_does_not_pollute_zai_jia_xiu_xi`（不污染）、`sinit_dai_wo_chu_xi_hui_yi_does_not_take_dai_wo_chu_qu_wan`（細鍵分得出第四個音節不同的句子）、`sinit_learned_once`（出貨模型下錯字回報的幾列教一次就對）。
+- `core/tests/engine_learn.rs` 的 `sinit_*`：沒有重排工作時紀錄沒有作用（`sinit_row16_without_a_rerank_job_the_record_has_no_effect`）、改選取代的單字在改選當下的中鍵與細鍵下減半、兩個漢字的前文後面不作用且下一個音節不同時解碼和沒有紀錄時相同（`sinit_not_after_two_han_characters_and_not_before_another_syllable`）、單字在最後不學（`sinit_single_character_at_the_end_is_not_learned`）、英文與數字鄰居不學、規則 10 的紀錄不觸發守門、池是不抬升的 n-best 且換進的路徑帶不抬升的分數、`sinit_at_eps_0_a_record_changes_nothing_and_a_large_eps_takes_it`、`sinit_the_job_reads_the_longest_layer_that_has_a_record`、`sinit_mid_and_fine_keys_are_learned_by_what_follows_and_forgotten_with_the_coarse_one`、模糊音路徑上的學到字不改變結果、`sinit_taught_zai_does_not_pollute_zai_jia_xiu_xi`（不污染）、`sinit_dai_ni_bao_guan_does_not_take_dai_ni_bao_hu_zi_ji`（細鍵分得出第四個音節不同的句子）、`sinit_learned_once`（出貨模型下錯字回報的幾列教一次就對）。
 - `shanjie-replay`（逐列逐鍵經真引擎重播）：`--learn off|on`、`--learn-file FILE`、`--rerank-level conservative|standard|aggressive`（只用於評測，三個常數不隨檔位改）、`--sinit-stretches FILE`（規則 10 各段的 `Δng` 與 `α·Δll`）；`--learn on` 時 stderr 有 `sinit:` 計數行（`stretches`、`swaps`、`missing`、`overturned`、`tau_opened`）。指令與評測方式見 `docs/spec/evaluation.md`。
 
 ### 13.5 這份規格沒有自動測試的部分
@@ -460,7 +472,7 @@
 
 - 半衰期 14 天：教一次大約兩週有效，常用的詞靠再次改選保持；`PRUNE_FLOOR` 0.05 約 60 天沒再用到，權重 1 的紀錄在那之前還能累積。
 - `LEARN_EPS` ＝ 6.0：在 `eval/learn/cases.tsv` 的鏡像測試上，2.0 學會 4／10、4.0 學會 8／10、6.0 與 8.0 都是 9／10，取最小的 6.0。
-- 句首單字的三個常數（4、4、2）：由離線投影選出；單用下一個音節的鍵分不出「再加一」與「在家睡覺」，所以粗層只在小模型也偏向時抬升、數值只有中層的一半；兩個音節的鍵分不出前三個音節相同的句子（「代我出席會議」與「帶我出去玩」），所以細層看三個音節，中層受模型門檻。
+- 句首單字的三個常數（4、4、2）：由離線投影選出；單用下一個音節的鍵分不出「再加一」與「在家睡覺」，所以粗層只在小模型也偏向時抬升、數值只有中層的一半；兩個音節的鍵分不出前三個音節相同的句子（「代你保管」與「帶你保護自己」），所以細層看三個音節，中層受模型門檻。
 - 句首單字的紀錄不直接加在 n-gram 分數上，而是只把候選送進池、偏好交給融合分數：單字拿一般加分時，同鍵的常用句（「在寫報告」「在找鑰匙」）被拉走。
 
 ### 15.3 新詞的參數

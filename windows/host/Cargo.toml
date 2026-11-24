@@ -16,6 +16,10 @@ release-ids = ["shanjie-win-proto/release-ids"]
 [dependencies]
 shanjie-win-proto = { path = "../proto" }
 
+# The engine module's tests run on every platform (main.rs); off Windows the core is needed only by them.
+[target.'cfg(not(windows))'.dev-dependencies]
+shanjie_core = { package = "core", path = "../../core" }
+
 [target.'cfg(windows)'.dependencies]
 # The core's package is named `core`, which shadows `::core` paths emitted by the windows macros: renamed (docs/spec/windows-tip.md §3.1).
 shanjie_core = { package = "core", path = "../../core" }

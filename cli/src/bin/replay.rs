@@ -28,7 +28,7 @@
 //! (`--no-recur` turns both off). `--key-times FILE` writes the microseconds of every `Engine::key` call and of each row's `set_left_context`
 //! (`cli::replay::format_key_times`); the summary line does not change.
 //!
-//! Third-tone sandhi (docs/spec/decoder.md §6.6) is on, as in the App, and the tag ends `+t3` after the reading marks; `--no-tone3` (evaluation only,
+//! Third-tone and colloquial sandhi (docs/spec/decoder.md §6.6) are on, as in the App, and the tag ends `+t3c` after the reading marks; `--no-tone3` (evaluation only,
 //! `Engine::set_tone3(false)`) turns it off and leaves the mark out.
 use cli::common::{dev_rows, format_rowstats, load_lenient, read_rows, root};
 use cli::replay::{build_engine_packs, format_key_times, format_keys, format_sinit_stretches, replay_row, sinit_line, summary_line, Cfg, Rerank, RowIn};
@@ -244,7 +244,7 @@ fn run() -> Result<(), String> {
             (true, true) => "+recur+pr",
         },
         e.reading_tag(),
-        if tone3 { "+t3" } else { "" },
+        if tone3 { "+t3c" } else { "" },
     );
     let tag = if cfg.strict { format!("{tag}+strict") } else { tag };
     if let Some(l) = level {

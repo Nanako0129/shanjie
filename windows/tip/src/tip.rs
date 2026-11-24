@@ -1,6 +1,10 @@
 //! The text service object (docs/spec/windows-tip.md §3.5): activation, the key sink, the focus sinks and the composition sink.
 //! One instance per UI thread. The core, in the resident host, decides what a key does (`client` carries it there and back,
 //! docs/spec/windows-tip.md §5); this file maps keys in, applies the answer to the document (`doc`), and ends compositions in time.
+//!
+//! The semantic rerank (docs/spec/windows-tip.md §5.4): the host computes it off the key path and never pushes it. While an answer says something is pending, a thread timer
+//! (`poll_timer`, every 30 ms, on this UI thread's message loop) asks for an asynchronous edit session on the composition's context; inside it the host is
+//! asked and the snapshot written (`poll::Poller` holds the rules, `PollSession` is its view of TSF and the pipe).
 use crate::cand;
 use crate::client::{self, Reply};
 use crate::display::{DisplayEnum, DisplayInfo};
@@ -8,11 +12,14 @@ use crate::doc::{self, Comp, CompSlot};
 use crate::guard;
 use crate::guids::DISPLAY_ATTR_COMPOSING;
 use crate::keys::{map_key, may_eat, may_eat_either, Mods};
+use crate::poll::{self, Asked, Poller};
 use crate::timing;
+use shanjie_win_proto::Out;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
-use windows::Win32::Foundation::{E_INVALIDARG, FALSE, LPARAM, WPARAM};
+use windows::Win32::Foundation::{E_INVALIDARG, FALSE, HWND, LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 use windows::core::BOOL;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -24,7 +31,7 @@ use windows::Win32::UI::TextServices::{
     ITfTextInputProcessorEx_Impl, ITfTextInputProcessor_Impl, ITfThreadFocusSink, ITfThreadFocusSink_Impl, ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl,
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_PROP_ATTRIBUTE, TF_TMAE_SECUREMODE,
 };
-use windows_core::{implement, Error, IUnknown, IUnknownImpl, Interface, Ref, Result, GUID};
+use windows_core::{implement, ComObject, Error, IUnknown, IUnknownImpl, Interface, Ref, Result, GUID};
 
 #[implement(ITfTextInputProcessorEx, ITfThreadMgrEventSink, ITfThreadFocusSink, ITfKeyEventSink, ITfCompositionSink, ITfDisplayAttributeProvider)]
 pub struct TextService {
@@ -46,6 +53,71 @@ pub struct TextService {
     /// the user changed later (for example Ctrl+Space in that window) is kept. Holding the references keeps their addresses unique;
     /// a manager is removed when TSF uninitialises it (`OnUninitDocumentMgr`), and the list is cleared on Deactivate.
     seen_dims: RefCell<Vec<ITfDocumentMgr>>,
+    /// When to ask the host for the rerank of the open composition (docs/spec/windows-tip.md §5.4).
+    poller: RefCell<Poller>,
+}
+
+thread_local! {
+    /// The poll timer of this UI thread and the instance it asks for (one text service per thread): set exactly while the instance's poller is armed.
+    static POLLING: RefCell<Option<(usize, ComObject<TextService>)>> = const { RefCell::new(None) };
+}
+
+/// The poll timer (a thread timer: it runs on this UI thread, from the host app's message loop, never inside a key's exchange). A timer whose instance is
+/// gone is killed.
+unsafe extern "system" fn poll_timer(_hwnd: HWND, _msg: u32, id: usize, _time: u32) {
+    guard::run(
+        (),
+        || {
+            let svc = POLLING.try_with(|cell| cell.try_borrow().ok().and_then(|slot| slot.as_ref().filter(|(timer, _)| *timer == id).map(|(_, svc)| svc.clone()))).ok().flatten();
+            match svc {
+                Some(svc) => svc.poll_tick(),
+                // SAFETY: a timer of this thread.
+                None => unsafe {
+                    let _ = KillTimer(None, id);
+                },
+            }
+        },
+        || {},
+    );
+}
+
+/// What one asynchronous edit session of the poll timer sees of TSF and the pipe (`poll::Port`).
+struct PollSession<'a> {
+    ec: u32,
+    svc: &'a TextService_Impl,
+}
+
+impl poll::Port for PollSession<'_> {
+    fn comp(&self) -> Option<usize> {
+        self.svc.comp.borrow().as_ref().map(|c| c.composition.as_raw() as usize)
+    }
+    fn now_us(&self) -> u64 {
+        timing::now_us()
+    }
+    fn ask(&mut self, acked: u64) -> Asked {
+        let ctx = self.svc.comp.borrow().as_ref().map(|c| ctx_id(&c.ctx));
+        match ctx {
+            Some(ctx) => client::poll(ctx, acked),
+            None => Asked::Idle { pending: false },
+        }
+    }
+    fn write(&mut self, out: &Out) -> bool {
+        let comp = self.svc.comp.borrow().clone();
+        comp.is_some_and(|c| doc::apply_snapshot(self.ec, &c, self.svc.atom.get(), out).is_ok())
+    }
+    /// docs/spec/windows-tip.md §5.6, first row: the composition ends here (underline off, the text stays) and the connection closes, so the host drops its side too.
+    fn give_up(&mut self) {
+        let open = self.svc.comp.borrow_mut().take();
+        if let Some(c) = open {
+            let _ = doc::end_composition(self.ec, &c);
+        }
+        client::close();
+        self.svc.cand_open.set(false);
+        cand::hide_later();
+    }
+    fn record(&mut self, event: u32, a: u64, b: u64) {
+        timing::record(event, a, b);
+    }
 }
 
 impl TextService {
@@ -62,6 +134,7 @@ impl TextService {
             comp: RefCell::new(None),
             cand_open: Cell::new(false),
             seen_dims: RefCell::new(Vec::new()),
+            poller: RefCell::new(Poller::default()),
         }
     }
 }
@@ -116,6 +189,9 @@ struct Outcome {
     window: bool,
     /// What to draw for it, read inside the edit session (`cand::capture`); `None` for a password field or when the rectangle was unavailable.
     show: Option<cand::Show>,
+    /// The answer carried the pending flag (the host has a rerank of this composition under way or waiting), and when it arrived (µs).
+    pending: bool,
+    t_out: u64,
 }
 
 impl TextService_Impl {
@@ -124,6 +200,7 @@ impl TextService_Impl {
         guard::com_with(f, || {
             drop(self.comp.try_borrow_mut().map(|mut c| c.take()));
             self.cand_closed();
+            self.poll_ended();
         })
     }
 
@@ -133,8 +210,69 @@ impl TextService_Impl {
             client::reset_after_panic();
             drop(self.comp.try_borrow_mut().map(|mut c| c.take()));
             self.cand_closed();
+            self.poll_ended();
         });
         Ok(eaten.into())
+    }
+
+    /// The composition ended or the focus left: no more polls, and a session already asked for will do nothing.
+    fn poll_ended(&self) {
+        if let Ok(mut p) = self.poller.try_borrow_mut() {
+            p.ended();
+        }
+        self.poll_sync();
+    }
+
+    /// Starts or stops this thread's poll timer to match the poller. Not from inside an edit session's poll (the poller is borrowed there): the next tick does it.
+    fn poll_sync(&self) {
+        let Ok(armed) = self.poller.try_borrow().map(|p| p.armed()) else { return };
+        let _ = POLLING.try_with(|cell| {
+            let Ok(mut slot) = cell.try_borrow_mut() else { return };
+            if armed && slot.is_none() {
+                // SAFETY: a thread timer; its procedure is guarded, and this DLL never unloads once a connection existed (the flag comes from one).
+                let id = unsafe { SetTimer(None, 0, poll::TICK_MS, Some(poll_timer)) };
+                if id != 0 {
+                    *slot = Some((id, self.to_object()));
+                }
+            } else if !armed {
+                if let Some((id, _svc)) = slot.take() {
+                    // SAFETY: a timer this thread set.
+                    unsafe {
+                        let _ = KillTimer(None, id);
+                    }
+                }
+            }
+        });
+    }
+
+    /// The poll timer fired: when the poller says so, ask for an asynchronous edit session on the context the composition lives in; the poll and the write
+    /// happen inside it (`poll_session`), now if the app grants it at once, else when it runs it.
+    fn poll_tick(&self) {
+        let comp = self.comp.borrow().clone();
+        let req = match self.poller.try_borrow_mut() {
+            Ok(mut p) => p.tick(client::now_ms(), comp.as_ref().map(|c| c.composition.as_raw() as usize), self.cand_open.get()),
+            Err(_) => None,
+        };
+        if let (Some(req), Some(c)) = (req, comp) {
+            let svc = self.to_object();
+            let asked = doc::request(&c.ctx, self.tid.get(), doc::ASYNC_WRITE, move |ec| {
+                svc.poll_session(ec, req);
+                Ok(())
+            });
+            if asked.is_err() {
+                // The app refused the session: the next tick may ask again.
+                if let Ok(mut p) = self.poller.try_borrow_mut() {
+                    p.refused();
+                }
+            }
+        }
+        self.poll_sync();
+    }
+
+    fn poll_session(&self, ec: u32, req: poll::Req) {
+        if let Ok(mut p) = self.poller.try_borrow_mut() {
+            p.session(req, &mut PollSession { ec, svc: self });
+        }
     }
 
     /// The core's candidate window is gone, or the composition it belonged to ended: Page Up and Page Down stop being claimed and the window hides.
@@ -263,6 +401,7 @@ impl TextService_Impl {
             doc::end_composition_later(self.tid.get(), c);
         }
         self.cand_closed();
+        self.poll_ended();
     }
 
     fn deactivate(&self) -> Result<()> {
@@ -344,6 +483,8 @@ impl TextService_Impl {
 
     fn key_down(&self, pic: Ref<'_, ITfContext>, wparam: WPARAM) -> Result<bool> {
         let t0 = timing::now_us();
+        // Every key: an edit session the poll timer asked for before it must not ask or write after it.
+        self.poller.borrow_mut().key();
         // SAFETY: no preconditions.
         timing::diag_value(timing::EV_KEYDOWN_THREAD, unsafe { GetCurrentThreadId() } as u64);
         if !self.active.get() {
@@ -412,7 +553,7 @@ impl TextService_Impl {
                     let window = out.candidate_selected >= 0;
                     let comp = if window { svc.comp.borrow().clone() } else { None };
                     let show = comp.and_then(|c| cand::capture(ec, &ctx2, &c.composition, &out, t_out));
-                    o2.set(Outcome { ran: true, eaten: out.handled, window, show });
+                    o2.set(Outcome { ran: true, eaten: out.handled, window, show, pending: out.pending, t_out });
                 }
                 Err(_) => {
                     // The document and the engine disagree now: drop both sides.
@@ -453,6 +594,13 @@ impl TextService_Impl {
                 self.comp.borrow_mut().take();
                 client::release(me);
             }
+            // The answer's flag, for a composition that is open: the poll timer runs (again) for 600 ms from now. No flag, or no composition: it stops.
+            let pending = o.pending && granted.is_ok() && self.comp.borrow().is_some();
+            self.poller.borrow_mut().key_answered(pending, client::now_ms(), o.t_out, timing::record);
+            self.poll_sync();
+        } else if o.eaten {
+            // The composition was ended because the host was out of reach (§5.6).
+            self.poll_ended();
         }
         Ok(o.eaten && granted.is_ok())
     }
@@ -473,6 +621,7 @@ impl TextService_Impl {
                 // The window goes with the composition; this runs inside an edit session, so the window hides a moment later from its own timer (cand.rs).
                 self.cand_open.set(false);
                 cand::hide_later();
+                self.poll_ended();
                 // The app ended it; the text is already in the document as displayed. Only the underline and the host's state are left.
                 // SAFETY: live interfaces; best effort.
                 unsafe {

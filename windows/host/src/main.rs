@@ -7,10 +7,16 @@
 //! streams). The command line is `--resident` or `--resident --logon` (`startup`).
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
-#[cfg(windows)]
+// The engine, its rerank bookkeeping and the connection wrapper have no Windows code (but one thread priority): built into the test binary on every
+// platform, so the rerank tests run against the real core wherever the models are (`rerank_tests`). Outside the tests the binary is empty off Windows.
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
 mod engine;
-#[cfg(windows)]
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
 mod guard;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod rerank;
 // The pipe I/O, the token checks and the timing file are the text service's own modules, shared by path (one copy of each).
 #[cfg(windows)]
 #[path = "../../tip/src/pipeio.rs"]
@@ -19,7 +25,7 @@ mod pipeio;
 mod server;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod startup;
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 #[allow(dead_code)]
 #[path = "../../tip/src/timing.rs"]
 mod timing;
@@ -36,6 +42,10 @@ mod keys;
 
 #[cfg(all(windows, test))]
 mod r2_tests;
+#[cfg(test)]
+mod rerank_tests;
+#[cfg(test)]
+mod testkit;
 #[cfg(all(windows, test))]
 mod tests;
 

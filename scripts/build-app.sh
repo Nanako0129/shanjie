@@ -28,6 +28,8 @@
 #                    a release or an update test build (Info.plist ShanjieUpdateBuild: release, test, or local for
 #                    every other build), so a copy built here and installed never reads the production feed. Requires
 #                    the shipping BUNDLE_ID.
+#   SHANJIE_TIMING   1: the timing build (docs/spec/semantic-rerank.md §8.6), compiled with -DSHANJIE_TIMING. A measuring build only:
+#                    refused together with SHANJIE_RELEASE_BUILD. Unset, the swift build command is the same as without it.
 #
 # The folder name is the user-facing name; the executable (Contents/MacOS/shanjie), the bundle ID and
 # the release asset (shanjie-<version>.zip) keep the ASCII name.
@@ -84,7 +86,7 @@ shasum -a 256 -c data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha
   || fail "data/lm/colloquial.sjlm or colloquial-attribution.tsv does not match its data/*.sha256; download sj-cl-2-69k again"
 # The one list of bundled models and their About-page names (docs/spec/models.md): hashes against data/*.sha256 and data/lm.
 scripts/check-models.sh build "$ROOT" || exit 1
-for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/mixed-words.tsv data/lexicon/english.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt; do
+for f in data/lexicon/mcbpmf-data.txt data/lexicon/overlay-add.tsv data/lexicon/sandhi-add.tsv data/lexicon/names-add.tsv data/lexicon/mixed-words.tsv data/lexicon/english.tsv data/lexicon/demote.tsv data/lexicon/variant-order.tsv data/lexicon/std-exempt.tsv data/lexicon/rerank-protect.tsv data/lexicon/digits.tsv data/packs/acg-add.tsv data/packs/acg-sources.tsv data/packs/acg.json data/packs/it-add.tsv data/packs/it-sources.tsv data/packs/it.json data/packs/beauty-add.tsv data/packs/beauty-sources.tsv data/packs/beauty.json data/packs/meme-add.tsv data/packs/meme-sources.tsv data/packs/meme.json data/packs/quotes-add.tsv data/packs/quotes.json LICENSE LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt LICENSES/Sparkle-MIT.txt LICENSES/MOE-dict-revised-terms.txt LICENSES/MOE-dict-concised-terms.txt; do
   [ -f "$f" ] || fail "$f is missing"
 done
 
@@ -138,9 +140,17 @@ esac
 # An EdDSA public key is 32 bytes: 44 base64 characters ending in one '='.
 [[ "$ED_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "the Sparkle public key is not 44 base64 characters"
 
+TIMING_FLAGS=()
+case "${SHANJIE_TIMING:-}" in
+  "") ;;
+  1) [ -z "${SHANJIE_RELEASE_BUILD:-}" ] || fail "SHANJIE_TIMING and SHANJIE_RELEASE_BUILD exclude each other"
+     TIMING_FLAGS=(-Xswiftc -DSHANJIE_TIMING) ;;
+  *) fail "SHANJIE_TIMING must be 1 or unset" ;;
+esac
+
 cargo build --release --locked -p core
 # --force-resolved-versions: Sparkle exactly as macos/Package.resolved pins it, never re-resolved.
-swift build -c release --package-path macos --force-resolved-versions
+swift build -c release --package-path macos --force-resolved-versions ${TIMING_FLAGS[@]+"${TIMING_FLAGS[@]}"}
 BIN_DIR="$(swift build -c release --package-path macos --force-resolved-versions --show-bin-path)"
 BIN="$BIN_DIR/Shanjie"
 [ -x "$BIN" ] || fail "the Swift build produced no executable"
@@ -246,6 +256,9 @@ plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
 cp LICENSE "$RES/LICENSES/LICENSE"
 cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md LICENSES/name-suggestion-index-BSD-3-Clause.txt "$RES/LICENSES/"
+# The Ministry of Education's notices of use for its two dictionaries (CC BY-ND 3.0 TW), whole, as their section 二 requires: the dictionaries decide which
+# words get the `colloq` rows of sandhi-add.tsv and overlay-add.tsv (docs/spec/decoder.md §8.7) and readings of overlay-add.tsv and std-exempt.tsv.
+cp LICENSES/MOE-dict-revised-terms.txt LICENSES/MOE-dict-concised-terms.txt "$RES/LICENSES/"
 # Sparkle.framework ships in Contents/Frameworks/Updater: its MIT notice with the bundled third-party notices (Sparkle's LICENSE, 2.10.0).
 cp LICENSES/Sparkle-MIT.txt "$RES/LICENSES/"
 # The per-unit attribution of the colloquial table's public sentences (docs/spec/semantic-rerank.md §4.7); no corpus text in it.

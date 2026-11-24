@@ -27,7 +27,7 @@
 //! store needs its own ACL and reparse-point design and a security review (a later slice).
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
-use crate::learn::{context_key, is_han, is_single, single_key_ok, FINE_SEP, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
+use crate::learn::{context_key, is_han, is_single, single_key_ok, EN_PREFIX, FINE_SEP, Record, GLOBAL, NEWWORD, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX, SENTINEL};
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
 use std::io::{ErrorKind, Read, Write};
@@ -163,6 +163,17 @@ fn legal_context(r: &Record) -> bool {
     if c == NEWWORD {
         let n = r.word.chars().count();
         return (NEWWORD_MIN..=NEWWORD_MAX).contains(&n) && r.word.chars().all(is_han) && r.reading.len() == n;
+    }
+    // docs/spec/learning.md §4.4: `^en:` plus the English part of a mixed word in lower case (`[a-z][a-z0-9]{0,15}`); the word is that English
+    // part in any case and then one Han character per syllable, and no syllable is a token's reading.
+    if let Some(en) = c.strip_prefix(EN_PREFIX) {
+        let e = en.as_bytes();
+        let english = (1..=16).contains(&e.len()) && e[0].is_ascii_lowercase() && e.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+        return english
+            && r.word.get(..en.len()).is_some_and(|head| head.eq_ignore_ascii_case(en))
+            && r.word[en.len()..].chars().count() == r.reading.len()
+            && r.word[en.len()..].chars().all(is_han)
+            && r.reading.iter().all(|s| !s.starts_with(crate::learn::PUNCT_PREFIX));
     }
     if let Some(next) = c.strip_prefix(NEXT_PREFIX) {
         // A mid or fine key (docs/spec/learning.md §7.1): a single character only, and exactly the well-formed shape (`single_key_ok`); it holds a control character, so `clean` would refuse it.

@@ -114,7 +114,7 @@ final class DefaultsFuzzyStore: FuzzyStore {
         get { (UserDefaults.standard.object(forKey: "fuzzyFlags") as? Int).flatMap { UInt32(exactly: $0) } }
         set { UserDefaults.standard.set(newValue.map { Int($0) }, forKey: "fuzzyFlags") }
     }
-    /// The 三聲變調 switch (docs/spec/decoder.md §6.6), key `tone3Sandhi`; absent means true.
+    /// The 變調與口語讀音 switch (docs/spec/decoder.md §6.6), key `tone3Sandhi`; absent means true.
     var tone3Sandhi: Bool? {
         get { UserDefaults.standard.object(forKey: "tone3Sandhi") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "tone3Sandhi") }
@@ -319,6 +319,9 @@ func runServer() -> Never {
         say("shanjie: cannot create the input method server")
         exit(1)
     }
+#if SHANJIE_TIMING
+    Timing.start()
+#endif
     // docs/spec/macos-shell.md §2.2: the engine is built after the IMK server exists.
     App.shell = Shell(
         resources: resources.absoluteURL, panel: CandidatePanelAdapter(),

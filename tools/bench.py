@@ -931,6 +931,8 @@ PROFILES2 = ["chat", "formal"]
 # pool, so `+recur` alone), and the replay's tag reads `+recur+pr` with the small model. A version without the key keeps `+recur`.
 # A version that ships third-tone sandhi (docs/spec/decoder.md §6.6) has `"tone3": True`: the CLI (with the switch on, its default) then ends every tag, the replay-setting
 # cell's included, with `+t3` after the reading marks. A version without the key has no mark, and each refuses the other form.
+# A version that also ships colloquial sandhi on the same switch (docs/spec/decoder.md §6.6, §8.7) has `"colloq_sandhi": True` besides `"tone3": True`: the mark
+# is then `+t3c`. `+t3` (a version with `"tone3"` alone) and `+t3c` refuse each other like the rest.
 # The App also learns locally, re-ranks asynchronously after every key, takes the context from the text field: the CLI does none of that.
 VERSIONS2 = {
     "v0.4.0": {"release": "v0.4.0", "flags": ["--context", "--packs", "acg"], "tinylm": False, "tag": "+ctx+acg"},
@@ -1072,9 +1074,17 @@ def colloq_tag(ver, prof):
 
 def reading_tag(ver):
     """`+rd+rx:<sha8 of std-exempt.tsv>+rm`, the last marks of every setting's tag of a `"reading"` version (docs/spec/decoder.md §5; `+rm` is the reading-mass rule),
-    then `+rn` for a `"reading_norm"` version (the syllable normalisation), else ""; then `+t3` for a `"tone3"` version (third-tone sandhi, docs/spec/decoder.md §6.6)."""
+    then `+rn` for a `"reading_norm"` version (the syllable normalisation), else ""; then the sandhi mark (`tone3_tag`)."""
     rd = f"+rd+rx:{ver.rx8}+rm" + ("+rn" if ver.spec.get("reading_norm") else "") if getattr(ver, "rx8", "") else ""
-    return rd + ("+t3" if ver.spec.get("tone3") else "")
+    return rd + tone3_tag(ver.spec)
+
+
+def tone3_tag(spec):
+    """The sandhi mark of a version's tags (the CLI's and the replay's): `+t3` for a `"tone3"` version (third-tone sandhi, docs/spec/decoder.md §6.6), `+t3c` when it
+    also has `"colloq_sandhi"` (colloquial sandhi on the same switch, §8.7), "" without the key."""
+    if spec.get("colloq_sandhi") and not spec.get("tone3"):
+        raise RuntimeError('a version with "colloq_sandhi" needs "tone3" too')
+    return ("+t3c" if spec.get("colloq_sandhi") else "+t3") if spec.get("tone3") else ""
 
 
 def expected_tag(ver, prof, anchor):

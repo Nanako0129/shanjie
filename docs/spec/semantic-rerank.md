@@ -125,7 +125,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 ### 3.4 遮罩與學習項
 
-- **手動詞遮罩**（`manual_mask`，詞庫的 `manual` 詞加上重排保護詞，見 `docs/spec/lexicon-and-packs.md`）：n-gram 第一名在某些音節上用了手動詞（或 `data/lexicon/rerank-protect.tsv` 的重排保護詞，`docs/spec/lexicon-and-packs.md` §2.12）時，這些詞受保護；沒有把每個受保護詞留在同一位置的候選不可選。手動詞在別的音節上、或第一名沒用它，就不保護任何東西；沒有受保護的詞就沒有遮罩。書面與聊天、一般與常談兩條路都套用。判斷用的是第一名實際使用的讀音（相鄰鍵誤觸時是詞所經過的詞庫音節）。遮罩不在重排函式裡算：引擎建重排工作時、評測 CLI 建池時，照解碼器的順序、以解碼器的第一名為基準呼叫一次 `manual_mask`，有前文重現的加重時照 `order` 排列後交給 `rerank`／`rerank_colloquial`（3.1.1）。
+- **手動詞遮罩**（`manual_mask`，詞庫的 `manual` 詞加上重排保護詞，見 `docs/spec/lexicon-and-packs.md`）：n-gram 第一名在某些音節上用了手動詞（或 `data/lexicon/rerank-protect.tsv` 的重排保護詞，`docs/spec/lexicon-and-packs.md` §2.12）時，這些詞受保護；沒有把每個受保護詞留在同一位置的候選不可選。手動詞在別的音節上、或第一名沒用它，就不保護任何東西；沒有受保護的詞就沒有遮罩。書面與聊天、一般與常談兩條路都套用。判斷用的是第一名實際使用的讀音（相鄰鍵誤觸時是詞所經過的詞庫音節）。遮罩不在重排函式裡算：引擎建重排工作時、評測 CLI 建池時，照解碼器的順序、以解碼器的第一名為基準呼叫一次 `manual_mask`，有前文重現的加重時照 `order` 排列後交給 `rerank`／`rerank_colloquial`（3.1.1）。 引擎另有一個只對這一次工作的來源：n-gram 第一名經由中英混合詞的邊解出的漢字部分（`docs/spec/decoder.md` §4.7、§7），建工作時併進同一份遮罩（沒在段落開頭保有它的候選不可選）；它不進保護集合，第一名沒走那條邊就不存在，評測 CLI 沒有。
 - **學習項**（句首單字的紀錄，見 `docs/spec/learning.md`）：`Learning::term(ll)` 給每個候選一個相對第一名的加分：細鍵層 `EPS_SINIT_FINE·(b_i − b_0)`（兩個方向）；中鍵、粗鍵層 `EPS_SINIT_MID`、`EPS_SINIT_COARSE` 乘 `max(b_i − b_0, 0)`，且只在 `ll_i > ll_0` 時；`b` 是紀錄權重 w / (w + 1)。三層只用命中的最長一層，不相加。三檔強度共用同一組常數（學習不屬於強度）。
 - **學習守門**：某段 n-gram 第一條路徑有任何一個詞被學習加分（lp 高於該詞在該讀音下不加分時的最佳 lp）時，這段不放進工作，使用者教過的選擇不被重排改掉。句首單字紀錄（SINIT）不算加分；相鄰鍵誤觸的詞不算被教過；詞庫沒有的學到的新詞算被教過。只給評測用的 `set_learn_guard(false)`（`shanjie-replay --learn-guard off`）關閉，App 不呼叫。
 
@@ -252,7 +252,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 2. 通過學習守門（3.4）；
 3. 句首單字紀錄（SINIT）：有紀錄的段，候選池、n-gram 分數、第一條與守門看的路徑都用不看句首單字紀錄的解碼；另一次抬升的解碼只用來找含學到的字的路徑，那條路徑以不抬升的 lp 與分數換進池（取代池的最後一條，不取代第一條）。偏好由融合分數的學習項帶出（3.4）。
 
-一個工作含：世代號、`Arc<TinyLm>`、該檔的 (α, τ, δ)（`model.params(profile, level)`）、常談表（`applies` 成立才帶）、強度、學習項的倍率（出貨為 1）、前文（宣告 L 的模型：`left_full`；否則 `left`）、各段（在 `path` 裡的起點、候選路徑 `(詞, lp, 降權 δ, 音節數, 是否 SINIT 標記)`、n-gram 分數、`b`、層、手動詞遮罩 `masked`、前文重現的加分 `bonus`、重排索引 `order`、這一段與前一段之間的顯示文字 `gap`）。各段的每一欄都照解碼器的順序存（池在 `sinit_swap` 之後的順序；`paths[0]` 是顯示中的那條，`ng` 是解碼器的分數、不含加分）：`masked` 是建工作時對 `paths[0]` 與它實際用的讀音算的 `manual_mask`，`bonus` 是每條的 `RecurGrams::pool_bonus`（這一項不生效時全 0），`order` 是 `lm::pool_order` 給的重排後第 k 名在 `paths` 裡的索引（不重排時是空的）。字對集合、它的指標與那個數都不進工作（3.1.1、5.2）。沒有任何一段可重排時不產生工作。只有最新一次的工作留著；`take_rerank_job` 交出一次。
+一個工作含：世代號、`Arc<TinyLm>`、該檔的 (α, τ, δ)（`model.params(profile, level)`）、常談表（`applies` 成立才帶）、強度、學習項的倍率（出貨為 1）、前文（宣告 L 的模型：`left_full`；否則 `left`）、各段（在 `path` 裡的起點、候選路徑 `(詞, lp, 降權 δ, 音節數, 是否 SINIT 標記, 是否混合詞標記)`、n-gram 分數、`b`、層、手動詞遮罩 `masked`、前文重現的加分 `bonus`、重排索引 `order`、這一段與前一段之間的顯示文字 `gap`）。各段的每一欄都照解碼器的順序存（池在 `sinit_swap` 之後的順序；`paths[0]` 是顯示中的那條，`ng` 是解碼器的分數、不含加分）：`masked` 是建工作時對 `paths[0]` 與它實際用的讀音算的 `manual_mask`，`bonus` 是每條的 `RecurGrams::pool_bonus`（這一項不生效時全 0），`order` 是 `lm::pool_order` 給的重排後第 k 名在 `paths` 裡的索引（不重排時是空的）。字對集合、它的指標與那個數都不進工作（3.1.1、5.2）。沒有任何一段可重排時不產生工作。只有最新一次的工作留著；`take_rerank_job` 交出一次。
 
 ### 6.2 世代與作廢
 
@@ -294,11 +294,11 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 `shanjie_engine_set_left_context(engine, utf8)`：見 5.2。
 
-## 8. 殼（macOS）
+## 8. 殼（macOS，與 Windows 的常駐程序）
 
 ### 8.1 佇列
 
-- `Shell` 必填一個 `RerankRunner`：App 傳 `QueueRerankRunner`，在 label 固定的 `DispatchQueue`（QoS `.utility`）上跑 `shanjie_rerank_run`，跑完回主執行緒；測試傳自己完成的 runner。
+- `Shell` 必填一個 `RerankRunner`：App 傳 `QueueRerankRunner`，在 label 固定的 `DispatchQueue`（QoS `.userInitiated`：使用者在組字區等這個結果；`.utility` 在每個核心都忙時，一個工作的排隊加計算從約 50 ms 拉長到 2 秒以上）上跑 `shanjie_rerank_run`，跑完回主執行緒；測試傳自己完成的 runner。
 - 每次把引擎輸出套到組字區之後呼叫 `take`；一次只跑一個：已有在跑的，新工作留著（只留最新一個，被取代的立刻 free），跑完再接著跑。`take` 回非 0 與 `apply` 回 4 一樣處理（清組字區與候選窗，只記回傳碼）。
 - 完成時在主執行緒：用 weak 參照以 `===` 確認 session 仍擁有組字、引擎仍是目前的那個（不用位址比較，不強參照舊引擎），開關仍開，才 `apply`；0 套用輸出、5 不做事、4 照處理碼 4。核心的世代號是第二道防線。無論結果為何，完成處理一進來就用 `defer` 清掉「執行中」並接著跑留著的工作，不會卡住。
 - 工作由 Swift 包裝類別持有：原始指標私有，只提供 `run()`（nonisolated）與 `apply(on:)`（主執行緒）；`deinit` 呼叫可注入的 free 函式，所以每條路徑（被取代、引擎重建、開關關掉、過期、碼 4、正常套用）都恰好 free 一次；runner 的 closure 持有包裝物件而不是指標。`@unchecked Sendable` 的三個不變條件：一次只跑一個；apply 只在 run 回傳之後；free 只在 deinit。
@@ -324,6 +324,38 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 2. 載入常談表回 0，重排開、前文「這間店的蛋糕很好吃」，打第 108 列：「你要不要嚐嚐看」。
 
 沒載入模型、模型配不上、常談沒作用時 selftest 失敗，所以語意校正與常談不會靜靜地沒作用地出貨。selftest 不寫檔、不碰偏好。
+
+### 8.5 Windows 的常駐程序
+
+Windows 版的殼分成兩半：引擎在常駐程序 `shanjie-host.exe`，每個 App 裡的文字服務 DLL 是它的客戶端（`docs/spec/windows-tip.md` §5）。重排工作的四個呼叫都在常駐程序（`windows/host/src/engine.rs`、`rerank.rs`），和 8.1 的佇列對應如下：
+
+- 引擎建好後 `set_rerank(1)`（登錄值 `Rerank` 是 0 時 0），強度是核心預設的標準；不傳前文（`set_left_context` 不呼叫），所以會意只看組字區裡的字。
+- **取**：每處理完一個按鍵，握著引擎鎖時 `take`。一次只跑一個：整個程序一條重排執行緒（低於一般的優先順序），只呼叫 `run` 與 `free`，不碰引擎、不拿引擎鎖。新工作取代排隊中的舊工作，也取代已跑完還沒套用的舊工作；正在跑的那一個標成不要，跑完由重排執行緒釋放。
+- **套用是拉取，不是完成時回主執行緒**：跑完的工作等擁有者 `(連線, ctx)` 的客戶端來問（`Poll`），那時才在引擎鎖裡 `apply`：0 把整個組字當快照回給客戶端（客戶端確認寫入之前，常駐程序留著同一份），5 回「沒有變化」。客戶端在帶旗標的按鍵回應之後每 30 ms 問一次、最多 600 ms，在非同步 edit session 裡問與寫（`docs/spec/windows-tip.md` §5.4）。非擁有者的問只得到固定的回應。
+- **Enter**：同 8.1 的等候，由常駐程序做：擁有者的 Enter、候選窗沒開時，已跑完的工作直接套用；排隊中或正在跑的最多等 100 ms（等的時候放掉引擎鎖），等不到就送出畫面上的字。
+- **釋放**：工作由一個在 `Drop` 裡 `free` 的型別持有，同時只在一個地方（排隊格、重排執行緒手上、跑完格），所以每條路徑恰好 free 一次：正在跑的只由重排執行緒 free（跑完時在重排鎖裡核對擁有者與工作的號碼，不要就自己 free）；其餘由連線執行緒在重排鎖裡 free（被新的 `take` 取代、換擁有者、`Release`／`Reset`、斷線、組字結束、套用之後）。
+- 鎖的順序固定是引擎鎖 → 重排鎖。`take` 或 `apply` 回 4 時引擎已自己重設：擁有者清掉，客戶端下一個鍵照換擁有者處理。常駐程序不寫任何與工作有關的 log。
+- 驗證：`windows/host/src/rerank.rs` 的單元測試與 `rerank_tests.rs`（對真的核心），`windows/tip/src/poll.rs` 的單元測試（`docs/spec/windows-tip.md` §5.11 第 12 點）。
+
+### 8.6 計時建置（macOS，只用來量測，不出貨）
+
+- 編譯旗標 `SHANJIE_TIMING`：計時的程式碼全部在 `#if SHANJIE_TIMING … #endif` 裡（`Timing.swift` 與殼裡各個既有程式點旁邊的幾行），拿掉這些區塊後原始碼和沒有計時時逐字相同；不改任何分支、順序、佇列或優先順序。出貨的 App 不帶這個旗標：`scripts/build-app.sh` 只在 `SHANJIE_TIMING=1` 時加 `-Xswiftc -DSHANJIE_TIMING`，並拒絕和 `SHANJIE_RELEASE_BUILD` 同時設。測試是 `make test-swift-timing`（CI 的 `swift` job 多跑一次帶旗標的測試，testcase 數要比不帶旗標的多）。
+- 寫入：事件是幾個整數，存進預先配置的固定緩衝（65,536 筆）；主執行緒與重排佇列只用 `os_unfair_lock_trylock`，拿不到鎖或緩衝滿了就不寫、把略過計數加一。另一條 `.background` 序列佇列每 2 秒取走緩衝（持鎖時只交換指標），每筆用 `Logger`（subsystem `com.nyanako.inputmethod.shanjie.timing`、category `t`）的 `.notice` 寫一行。不寫檔。
+- 每行只有數字與 tab：`<事件>\t<uptime 微秒>\t<欄位…>`，沒有任何文字、讀音、候選或前文。
+
+| 事件 | 時刻 | 欄位 |
+|---|---|---|
+| 1 | 按鍵進 `Session.send` | 按鍵序號（每次 `send` 加一） |
+| 2 | `send` 回來 | 按鍵序號、這一鍵有沒有呼叫 `setMarkedText`（1／0） |
+| 3 | 取出重排工作 | 工作序號、正在處理的按鍵序號（不在 `send` 裡是 0） |
+| 4 | 工作在重排佇列開始跑 | 工作序號 |
+| 5 | `run()` 回來 | 工作序號、回傳碼 |
+| 6 | 工作的終點（每個工作剛好一筆） | 工作序號、原因碼 |
+| 7 | Enter 的有界等待（每次 Enter 一筆，沒有東西可等時三欄都是 0） | 等了幾微秒、等到幾個工作、是否逾時（1／0） |
+| 8 | 每次寫出的最後一行 | 到目前為止略過幾筆、到目前為止寫出幾行事件 |
+
+- 事件 6 的原因碼：0 套用而組字區有改變（時刻是那次 `setMarkedText` 呼叫回來的時刻，不是客戶端畫完）、1 套用但沒有改變（碼 5）、2 套用回其他碼、3 等著的時候被新工作取代、4 引擎重建或 session 不符而丟掉、5 語意校正關掉而丟掉、6 `run()` 的回傳碼不是 0。殼結束時還在跑或等著的工作沒有終點。
+- 驗證：`TimingTests`（只在旗標下編譯）：寫出的行只有數字與 tab、各事件的欄位數；寫入不等鎖（另一條執行緒持鎖時 `record` 直接回來、略過計數加一）；七種原因碼各造一次，每個事件 3 剛好一個事件 6、每個事件 1 都有事件 2；Enter 一次一筆；App 的佇列 runner 上同一個工作的 3、4、5、6 依時間排列；`start()` 建的定時器在背景佇列觸發 flush，handler 不帶主執行緒隔離（`testTheTimerFlushesOffTheMainThread`，handler 寫成主執行緒的閉包時測試程序會中斷）。
 
 ## 9. 評測 CLI 與重播
 

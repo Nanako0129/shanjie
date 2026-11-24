@@ -13,8 +13,13 @@
 - 單雙版（sd）：三個以上連續上聲的段，第一個保留上聲、其餘照雙單版；兩個連續上聲的段和雙單版相同。
 - 沒有任何位置改到的列不進探針。探針檔不進 repo：`--tone3 ds|sd --rows IN --out OUT` 寫到 repo 外（例如 ~/.cache/shanjie/），不覆寫已有的檔。
 
+口語變調探針（docs/spec/evaluation.md §1.1、docs/spec/decoder.md §8.7）：評測列的句子含詞表（tools/colloq-words.tsv 的格式）裡的詞時，
+把那個詞的讀音照 build_sandhi.colloq_variant 改成口語讀音（由左到右、同一個起點取最長的詞、不重疊）；沒改到的列不進探針。
+探針檔不進 repo：`--colloq LIST --rows IN --out OUT` 寫到 repo 外，不覆寫已有的檔。
+
 用法：python3 tools/build_probe.py [--check]   （--check 只重產並比對 commit 的那份）
       python3 tools/build_probe.py --tone3 ds|sd --rows IN --out OUT
+      python3 tools/build_probe.py --colloq LIST --rows IN --out OUT
 """
 import argparse
 import glob
@@ -106,6 +111,23 @@ def tone3_flip(sent, syls, variant, third_neutral=is_third_neutral):
     return out if out != list(syls) else None
 
 
+def colloq_flip(sent, syls, table):
+    """回傳把句子裡詞表的詞改成口語讀音的音節列（table：詞 → [(位置, 改法)]）；沒有改到任何位置時回 None。字數和音節數不同的列回 None。"""
+    if len(sent) != len(syls):
+        return None
+    out = list(syls)
+    lens = sorted({len(w) for w in table}, reverse=True)
+    i = 0
+    while i < len(sent):
+        n = next((n for n in lens if sent[i:i + n] in table), None)
+        if n is None:
+            i += 1
+            continue
+        out[i:i + n] = sd.colloq_variant(syls[i:i + n], table[sent[i:i + n]]) or syls[i:i + n]
+        i += n
+    return out if out != list(syls) else None
+
+
 def probe_lines(rows):
     lines = []
     for sent, syls in rows:
@@ -119,24 +141,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--tone3", choices=("ds", "sd"), help="三聲變調探針：ds 雙單版、sd 單雙版（需要 --rows 與 --out）")
+    ap.add_argument("--colloq", metavar="LIST", help="口語變調探針：詞表檔（tools/colloq-words.tsv 的格式；需要 --rows 與 --out）")
     ap.add_argument("--rows")
     ap.add_argument("--out")
     a = ap.parse_args()
-    if a.tone3:
+    if a.tone3 or a.colloq:
+        if a.tone3 and a.colloq:
+            sys.exit("error: --tone3 and --colloq are two probes")
         if not a.rows or not a.out:
-            sys.exit("error: --tone3 needs --rows and --out")
+            sys.exit("error: --tone3 and --colloq need --rows and --out")
         if os.path.exists(a.out):
             sys.exit("error: --out exists (not overwritten)")
+        table = sd.colloq_table(a.colloq) if a.colloq else None
         lines = []
         for line in open(a.rows, encoding="utf-8"):
             p = line.rstrip("\n").split("|")
             if len(p) == 3:
-                new = tone3_flip(p[1], p[2].split(), a.tone3)
+                new = colloq_flip(p[1], p[2].split(), table) if a.colloq else tone3_flip(p[1], p[2].split(), a.tone3)
                 if new is not None:
                     lines.append(f"{p[0]}|{p[1]}|{' '.join(new)}\n")
         with open(a.out, "x", encoding="utf-8") as f:
             f.write("".join(lines))
-        print("tone3 probe rows:", len(lines))
+        print("colloq probe rows:" if a.colloq else "tone3 probe rows:", len(lines))
         return
     dev302, typing76 = public_sets()
     public = probe_lines(dev302) + probe_lines(typing76)

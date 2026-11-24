@@ -1,0 +1,31 @@
+# python3 tools/colloq_words.py
+# 中華民國教育部（Ministry of Education, R.O.C.）。《重編國語辭典修訂本》（版本編號：dict_revised_2015_20260625）網址：http://dict.revised.moe.edu.tw/
+# 創用 CC 姓名標示-禁止改作 3.0 臺灣；只用於決定哪些詞的哪個位置有口語讀音，辭典的注音字串與釋義不在檔內（LICENSES/data.md）
+# dict_revised_1.xlsx sha256 df94ae4384ae3f33f573ded5c2f142041ea7530d381a285163593d6252ea4a9a
+# 詞	位置	改法	來源
+慢慢騰騰	2	neutral	修訂本變
+慢慢騰騰	3	level	修訂本變
+慢慢騰騰	4	level	修訂本變
+慢騰騰	2	level	修訂本變
+慢騰騰	3	level	修訂本變
+抓抓撓撓	4	level	修訂本變
+毛毛騰騰	3	level	修訂本變
+毛毛騰騰	4	level	修訂本變
+漫騰騰	2	level	修訂本變
+漫騰騰	3	level	修訂本變
+熱騰騰	2	level	修訂本變
+熱騰騰	3	level	修訂本變
+紅彤彤	2	level	修訂本變
+紅彤彤	3	level	修訂本變
+迷迷糊糊	2	neutral	修訂本變
+迷迷糊糊	3	level	修訂本變
+迷迷糊糊	4	level	修訂本變
+黑咕籠咚	3	level	修訂本變
+黑沉沉	2	level	修訂本變
+黑沉沉	3	level	修訂本變
+黑油油	2	level	修訂本變
+黑油油	3	level	修訂本變
+黑洞洞	2	level	修訂本變
+黑洞洞	3	level	修訂本變
+黑黝黝	2	level	修訂本變
+黑黝黝	3	level	修訂本變

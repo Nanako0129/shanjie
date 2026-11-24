@@ -1,0 +1,21 @@
+# Which core/tests/*.rs file runs in which CI shard: platform (macos, windows, debug), shard, core/<test file>, tab-separated.
+# Read and checked by scripts/ci-shard.sh. Only files that leave a platform's last shard (macos `rest`, windows and debug `2`)
+# are listed: every other file, a new one included, runs in the last shard. The split only balances time (the seconds are
+# one main run of 2026-11-22); any split runs every file once.
+# macos share, about 465 s; rest about 490 s; the cli package's job about 560 s.
+macos	share	core/engine_share
+macos	share	core/engine_auto_english
+macos	share	core/engine_cap
+# windows 1, about 512 s; 2 about 512 s.
+windows	1	core/engine_cap
+windows	1	core/engine_share
+windows	1	core/engine_auto_english
+windows	1	core/engine_learn
+windows	1	core/engine_pool_recur
+# debug 1, about 415 s; 2 about 412 s.
+debug	1	core/engine_auto_english
+debug	1	core/engine_pool_recur
+debug	1	core/engine_lm
+debug	1	core/engine_learn
+debug	1	core/engine_share
+debug	1	core/engine_replay

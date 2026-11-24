@@ -30,7 +30,7 @@
 
 - **新增函式**：加在標頭與 `ffi.rs`，不改既有函式的簽名與意義。
 - **輸出結構新增欄位**：只加在 `ShanjieOutput` 的尾端（`candidate_vertical`、`english_run_utf16_start`、`english_run_utf16_len` 就是這樣加的）；既有欄位的位置、型別、意義不改。輸出由核心配置、殼只讀，尾端新欄位不會破壞只讀前面欄位的程式，但殼仍要用新標頭重編，不混用。
-- **新設定**：預設值要讓引擎和沒有這個功能時逐位元相同（例如 `set_fuzzy` 的 0 什麼都不改）；例外是 `set_tone3`，預設開（`docs/spec/decoder.md` §6.6），0 才和沒有這個功能時相同。殼在每次建引擎後把所有設定重送一遍，因為重建的引擎一律從核心預設值開始（§6）。
+- **新設定**：預設值要讓引擎和沒有這個功能時逐位元相同（例如 `set_fuzzy` 的 0 什麼都不改）；例外是 `set_tone3`（三聲變調與口語變調共用），預設開（`docs/spec/decoder.md` §6.6），0 才和沒有這兩個功能時相同。殼在每次建引擎後把所有設定重送一遍，因為重建的引擎一律從核心預設值開始（§6）。
 - **位元遮罩**：未定義的位元回 2 且狀態不變（`new_packs` 的 `packs`、`set_fuzzy` 的 `flags`）；新增位元就是延伸可接受的遮罩。
 - **移除或改簽名**：核心與殼在同一個改動裡改（舊的 `set_english_inline` 就是被 `set_english_overwrite` 取代後刪除，單字表的載入函式也是）。
 - **改按鍵行為**：`docs/spec/keys-and-composition.md` 的規則表與 `shanjie.h` 在同一個改動裡一起改。
@@ -158,7 +158,7 @@
 | `set_english_reversal_guard` | 1 |
 | `set_english_auto` | 1（沒有 `english.tsv` 時不生效） |
 | `set_fuzzy` | 0 |
-| `set_tone3` | 1（三聲變調，`docs/spec/decoder.md` §6.6） |
+| `set_tone3` | 1（三聲變調與口語變調，一個開關；`docs/spec/decoder.md` §6.6、§8.7） |
 | `set_ascii` | 0 |
 | `set_rerank` | 0 |
 | `set_rerank_level` | 1（標準） |
@@ -180,7 +180,7 @@
 
 - 建立時：`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、`variant-order.tsv`、`demote.tsv`、`rerank-protect.tsv`。疊加層依 `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、啟用的詞包這個固定順序接起來（前一份沒有結尾換行就補一個）。
 - `load_lm`：再讀一次 `overlay-add.tsv`、`names-add.tsv`、`demote.tsv`、`variant-order.tsv`（建構之後被移走也是 3）、`std-exempt.tsv`（`rerank-protect.tsv` 只在建立時讀，`load_lm` 不再讀）；模型檔旁必須有 `classes.sjc`；有選用的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3` 時，壞了或與模型不配對就整個載入失敗（缺哪張只關哪個設定的那一層）。
-- 選用：`digits.tsv`（缺或壞時數字層靜靜關閉）、`mixed-words.tsv`（缺或壞時候選清單沒有中英混合詞，`docs/spec/english-mixed.md` §5.7）、`english.tsv`（缺或壞時完成鍵上不比較英文或注音，`docs/spec/english-mixed.md` §16.5）、`english-next.tsv`（不存在就關閉；存在卻讀不了或解析失敗回 3，免得出貨錯誤讓功能無聲消失）。
+- 選用：`digits.tsv`（缺或壞時數字層靜靜關閉）、`mixed-words.tsv`（缺或壞時沒有中英混合詞：候選清單的那一項、解碼器裡的混合詞、Shift＋字母的切分與預測列都沒有，`docs/spec/english-mixed.md` §5.7）、`english.tsv`（缺或壞時完成鍵上不比較英文或注音，`docs/spec/english-mixed.md` §16.5）、`english-next.tsv`（不存在就關閉；存在卻讀不了或解析失敗回 3，免得出貨錯誤讓功能無聲消失）。
 - 詞包：`new_packs` 的 `packs` 是位元遮罩（1 動漫與遊戲、2 經典台詞、4 資訊與 AI、8 迷因與實況用語、16 美妝與保養；檔案 `acg-add.tsv`、`quotes-add.tsv`、`it-add.tsv`、`meme-add.tsv`、`beauty-add.tsv` 依這個順序讀）。遮罩有未定義的位元、layout 超出範圍、路徑不是 UTF-8 回 2；`packs` 非 0 而 `packs_dir` 為 NULL 回 1；檔案存在卻讀不了或解析失敗回 3；檔案不存在就什麼都不加（引擎和沒有詞包時逐位元相同）。詞包的詞怎麼計分見 `docs/spec/lexicon-and-packs.md`。
 
 ## 9. 驗證
