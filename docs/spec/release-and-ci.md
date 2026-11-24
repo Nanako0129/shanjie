@@ -101,7 +101,7 @@
 - 目的：debug 才有的檢查（整數溢位、標準函式庫的 debug 專屬檢查），放在 Linux runner 上跑，與 macOS 的 release 測試並行。
 - 跑 `core` 套件的全部測試、`cli` 套件的單元測試（`--lib --bins`），與 Windows 線上格式 `shanjie-win-proto` 的測試（純 Rust，三個平台都跑）。`core` 套件分在三個 job：
   - `debug`：`cargo test --locked -p core --lib --bins` 與 `--doc`；另外 `cargo build --locked -p core --examples`，再 `test -f target/debug/examples/pack_switch_bench`（理由同 §3.1）。
-  - `debug-tests (1)`、`debug-tests (2)`（ubuntu-24.04，各逾時 45 分（第 2 片從 11-23 `engine_mixed` 變大以後平常 15–18 分；兩次跑滿 25 分被取消，當時 `engine_mixed` 跑了 19 分以上、其他測試慢 1.35–1.55 倍，推論是慢的 runner，從 log 排除不了卡住），`needs: changes`，略過條件與 `core` 相同）：下載並核對模型，`cargo test --locked -p core` 帶 `scripts/ci-shard.sh debug <片名>` 印出的 `--test` 清單（§3.1 的「分片」）。
+  - `debug-tests (1)`、`debug-tests (2)`（ubuntu-24.04，各逾時 45 分（第 2 片從 11-23 `engine_mixed` 變大以後平常 15–18 分、最慢一次約 21 分；兩次跑滿 25 分被取消，當時 `engine_mixed` 跑了 19 分以上、其他測試執行檔慢 1.16–1.56 倍，推論是慢的 runner，從 log 排除不了卡住），`needs: changes`，略過條件與 `core` 相同）：下載並核對模型，`cargo test --locked -p core` 帶 `scripts/ci-shard.sh debug <片名>` 印出的 `--test` 清單（§3.1 的「分片」）。
 - 評測 CLI（`shanjie-eval`）用 release 建置，再由 `scripts/ci-rowstats.sh rowstats-linux` 跑六份 rowstats：dev302、打字測驗、錯字回報，各在聊天與書面設定下，用出貨的旗標（前文、`acg` 與 `it` 詞包、會意小模型；聊天另加常談表）。檔案以 artifact 上傳（保留 1 天）；比對在 `rowstats` job 做，對象是 `windows` 上傳的那六份。
 - `scripts/ci-rowstats.sh` 是這六條指令的唯一一份；`--threads` 不改輸出的任何位元組。
 
