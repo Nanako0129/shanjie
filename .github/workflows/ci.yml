@@ -247,7 +247,7 @@ jobs:
     # The measured image, as in `debug`.
     runs-on: ubuntu-24.04
     # A hung child process should not hold the runner for the 6-hour default (the measured times: docs/spec/release-and-ci.md §4).
-    timeout-minutes: 45  # shard 2 ran 8-18 min and twice hit a 25-minute limit (2e5bca39 on main, PR #107), with no hung process: a slow runner
+    timeout-minutes: 45  # shard 2 takes 15-18 min since engine_mixed grew on 2026-11-23 (498 s on a good runner); twice it hit 25 min with engine_mixed past 19 min while other files ran 1.35-1.55x slow: a slow runner by inference, a hang not ruled out
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
