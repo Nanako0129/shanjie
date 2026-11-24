@@ -971,6 +971,11 @@ VERSIONS2 = {
     "v0.9.0": {"release": "v0.9.0", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "reading": True, "reading_norm": True, "recur": True, "pool_recur": True, "tone3": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{tri8}"},
+    # v0.9.1: v0.9.0's models, packs and context terms, with colloquial sandhi on the same switch as third-tone sandhi (docs/spec/decoder.md §8.7, Shell.swift
+    # tone3On = true: `"colloq_sandhi"`, the mark becomes +t3c) (copied from CLI summary lines on typing76).
+    "v0.9.1": {"release": "v0.9.1", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+               "reading": True, "reading_norm": True, "recur": True, "pool_recur": True, "tone3": True, "colloq_sandhi": True,
+               "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{tri8}"},
 }
 # Anchor (docs/spec/evaluation.md §7.7): S7h's measurement, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
