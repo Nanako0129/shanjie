@@ -24,8 +24,8 @@ enum LeftContext {
     static let maxGraphemes = 64
 
     /// Terminal apps get only `han`, as before (docs/spec/semantic-rerank.md §5.1): a terminal
-    /// line holds commands and their output. com.apple.Terminal and com.googlecode.iterm2 were read from the apps' Info.plist
-    /// (CFBundleIdentifier) on a Mac; org.alacritty was corrected; the other five are
+    /// line holds commands and their output. com.apple.Terminal, com.googlecode.iterm2 and com.stablyai.orca were read from the
+    /// apps' Info.plist (CFBundleIdentifier) on a Mac; org.alacritty was corrected; the other five are
     /// the IDs listed here, not checked against an installed app or a published Info.plist.
     /// An editor with a built-in terminal is not here: the panel has the editor's bundle ID (a known limit, out of scope).
     /// com.stablyai.orca (Orca, an Electron terminal on xterm.js) is here because what it hands an input method is the text
