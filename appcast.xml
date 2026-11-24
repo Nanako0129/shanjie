@@ -6,6 +6,37 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>善解輸入法</title>
         <item>
+            <title>0.9.1</title>
+            <pubDate>Tue, 24 Nov 2026 18:04:30 +0000</pubDate>
+            <sparkle:version>0.9.1</sparkle:version>
+            <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[電腦很忙時語意校正不再跟不上打字；口語的輕聲與疊字讀法照唸的打也會出對的詞；英文字母接中文的詞（K書、T恤、CP值）直接打得出來；在 Orca 裡打字的前文改成和其他終端機一樣。
+
+- **電腦很忙時語意校正不再跟不上打字**：語意校正的計算以前排在一般程式後面，所有核心都被別的程式佔滿時，一次計算要約 2 秒，多半來不及換上畫面，字要等到打開選字清單才換（例如「分之」才變「分支」）。現在它排在一般程式前面，同樣滿載時約 0.05 秒算完，和閒著時一樣。
+  - 在虛擬機裡量（4 核、每核一支佔滿 CPU 的程式，打字測驗裡前文最長的三句）：計算時間中位數約 2.0 秒 → 約 55 毫秒；快、慢兩種打字節奏各 24 個重排，舊版換上畫面 0 個、新版 24 個；按 Enter 等重排逾時，9 次裡從 8 次變成 0 次。閒著時新舊逐句相同。
+  - 記憶體被大量壓縮又快打時，有一格的到換字 p95 從 93 毫秒變成 143 毫秒（那一格只有 10 個重排，p95 就是最慢的那一個；同狀態慢打 94 → 92 毫秒）。
+- **口語的輕聲與疊字讀法，照唸的打也解得出來**：ㄌㄧˋ ㄏㄞ˙ 是「厲害」、ㄖㄜˋ ㄊㄥ ㄊㄥ 是「熱騰騰」。語意校正開或關、三檔強度都一樣有效。設定 → 選字 →「模糊輸入」的勾選框改名「變調與口語讀音」：三聲變調與口語讀音共用這一個勾選框，關掉時兩者都不生效。
+  - 把我們自己的聊天判讀集（不公開）裡的詞改成口語讀音打的 148 句：v0.9.0 對 27 句，這一版對 141 句（改對 114、改壞 0）。照原本讀音打的句子：同一份判讀集 4,993 句改對 0、改壞 1（p 1.0）；公開的打字測驗、開發集 dev302、口語調參集（2,992 句）與錯字回報逐句相同。
+- **英文字母接中文的詞自己出對**：按住 Shift 打 K 再接著打「書」的注音，直接是「K書」；T恤、T字、Q版、X光、N次、C語言、OK繃、PO文、CP值、SIM卡也一樣，不用再從清單挑（新增 55 個字母開頭的詞）。後面接著打字時，這個詞會和後面的字一起選字：「K書」再打「是」的注音是「K書是」，A 接著打「前面」的注音是「A前面」。
+  - 按 Shift 打英文時，候選列會列出可以接的詞：先是這個字母開頭的中英混合詞（K書、K歌），再是英文字（打 Karao 列出 Karaoke），按 Tab 就能選。
+  - 開發用的探針（聊天、書面三檔，六種設定合計）：單獨打完 84 個混合詞，每一種設定都是 84／84。字母後面打的其實是另一個同音開頭的詞、不是混合詞時（例如 K 後面的 ㄕㄨ 是別的詞的開頭，15,168 組），如果把混合詞固定不動就一組都打不出來，現在的做法 8,092 組打得出想要的詞。
+  - 代價（和固定不動的做法比）：混合詞後面接一般的字或詞（10,080 組），打錯的從 72 組變成 158 組。
+- **在 Orca 裡打字，前文改成和其他終端機一樣，只看結尾最多兩個漢字**：Orca 交給輸入法的是它隱藏輸入框裡累積的舊字，不是畫面上那一行，以前會讓選字參考到不相干的字。
+- **跨版本比較**（v0.9.0 → v0.9.1，出貨設定；公開集合的逐格數字見 https://shanjie.nyanako.com/benchmark ）：
+  - 照原本讀音打的句子幾乎沒有變：基準測試的十個集合（開發集、打字測驗、探針句、錯字回報、功能字測試句、口語、維基與立法院調參集、維基錯字集、我們自己的聊天調參集，聊天與書面）兩版選字逐句相同；維基書面 KPI 集 1,706 → 1,706；錯字回報與開發集的逐鍵重播逐項相同。
+  - 新評測集：長前文集兩份與分類難題集逐句相同；我們自己的聊天判讀集（不公開，4,993 句）4,729 → 4,728（改壞 1 句，口語讀音那一項帶來的）。
+  - 保留集（發版前量一次）：口語半邊（聊天，150 句）135 → 135、新聞半邊（書面，150 句）131 → 131，兩邊都沒有改對或改壞。
+  - 速度與記憶體（同一場輪流跑，3 輪取中位數；速度這一段開始與結束時 load avg 3.70、3.91，量測前後都沒有在備份，低於門檻（5.0），所以這次的速度算有效）：每鍵 p95 聊天 1.93 → 1.91 ms、書面 1.94 → 1.93 ms；記憶體（RSS）495 → 496 MB；引擎載入 0.84 → 0.87 秒；語意校正每列 p95 16.96 → 16.89 ms。
+- **更新後如果某個 App 打不出字**：請把那個 App 完全結束（⌘Q）再打開。
+- 其餘是文件、網站、評測工具、測試與 CI 的更新；Windows 版還在開發，不在這一版。
+
+安裝與使用說明：https://shanjie.nyanako.com/ 
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/shanjie/releases/download/v0.9.1/shanjie-0.9.1.zip" length="126204221" type="application/octet-stream" sparkle:edSignature="smv0nlhPIqOXi9BPLQcB6XzlJJUw3Fq/useNqltL8Mv5LL0wYecwHrxgp069j1uxziOMUVJeri48HbuhWIFgDg=="/>
+        </item>
+        <item>
             <title>0.9.0</title>
             <pubDate>Mon, 23 Nov 2026 01:09:16 +0000</pubDate>
             <sparkle:version>0.9.0</sparkle:version>
@@ -196,6 +227,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: hPYAbAEJaUw458wlydMaMLPcyiYnZpSl4tfrpkU1aV+xcInxdx1BlGmOCo9yPuhOsTN4GVYhfEaHVDw3Yg1gDA==
-length: 45295
+edSignature: 68uvKGH0Lb2utLj1W1zx5HxMpcjxpMZ2yVjn6XOgGbmHu2EE1ewOS9yTNIhZ1IyuWW2XzpEi/pfVQ12JnrluBQ==
+length: 40438
 -->
