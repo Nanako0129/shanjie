@@ -365,7 +365,7 @@
 - 等候放在 `claim()`、`applyProfile`、`syncAscii` 之後、Enter 的 `send` 之前（放在前面，設定變更會讓工作過期）。
 - 上限 `ENTER_RERANK_WAIT_MS` = 100 ms，**整次 Enter 一個期限**：Enter 到時用單調時鐘算期限，有一個在跑、一個在排隊時每次等候只給剩下的時間；過了期限就送出畫面上的字（沒有等候時的行為），還在跑的工作完成後被丟掉。等候期間主執行緒不處理別的事件，所以按鍵順序不變。
 - 實作約束：阻塞式等候，用每個工作各自的信號量（初始 0，`run()` 回傳之後才發訊號，不共用一個）；不用巢狀 run loop，不用無上限的 `wait()`；碼在發訊號之前寫進盒子（`Synchronization.Mutex`）。等到之後由殼直接呼叫完成處理（`rerankFinished`，與非同步完成同一條路徑），原本排進主佇列的那次回呼只在「handle 還是殼目前的執行中 handle 而且還沒完成」時才處理，比對用強參照 `===`，所以同一個工作只完成一次、`rerankRunning` 不會卡住。
-- 已知限制：等候不提升推論佇列（`.utility`）的優先權，負載高時可能逾時，退回舊行為。同步套用回 4（引擎重設）時照舊由 `fail()` 處理。
+- 已知限制：推論佇列的 QoS 是 `.userInitiated`，等候本身不再另外提升它的優先權；負載高時仍可能逾時，退回舊行為。同步套用回 4（引擎重設）時照舊由 `fail()` 處理。
 - 設計取捨：上限取高於量到的最大值（虛擬機上最後一個重排工作 33 到 84 ms，Mac 上 dev302 每列 p95 約 12.6 ms）。這是「按鍵不等語意校正」的唯一例外，只有 Enter 等，而且只在有工作時；其他送出路徑（換 App、點滑鼠、`commitComposition`、自動送出）不等。
 - 驗證：`macos/Tests/ShanjieKitTests/RerankTests.swift` 的 `testEnterWaitsForTheRunningJobAndSendsTheRerankedText`、`testEnterWaitsForTheRunningAndTheWaitingJob`、`testEnterAfterTheLimitSendsTheShownTextAndTheQueueGoesOn`、`testEnterDoesNotWaitWithoutAJobOrWithTheSwitchOffOrAnEmptyOrSelectedComposition`、`testOneDeadlineForTheWholeEnter`、`testEnterWaitsForTheRealQueue`（真實佇列；出貨常數 100 ms 另斷言）。指令：`make test-swift`；資料競爭另用 `swift test --sanitize=thread --filter RerankTests` 檢查。
 

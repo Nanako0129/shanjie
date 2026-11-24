@@ -15,7 +15,8 @@ public protocol PackBuilder: AnyObject {
     func dispose(_ engine: consuming BuiltEngine)
 }
 
-/// The app's builder: one serial `.utility` queue with a fixed label, like `QueueRerankRunner`. The result comes back through `DispatchQueue.main.async`.
+/// The app's builder: one serial `.utility` queue with a fixed label, built like `QueueRerankRunner` (whose queue is `.userInitiated`: the
+/// user waits at the composition for a rerank, never for a pack build). The result comes back through `DispatchQueue.main.async`.
 public final class QueuePackBuilder: PackBuilder {
     private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.packbuild", qos: .utility)
 

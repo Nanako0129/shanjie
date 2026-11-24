@@ -298,7 +298,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 ### 8.1 佇列
 
-- `Shell` 必填一個 `RerankRunner`：App 傳 `QueueRerankRunner`，在 label 固定的 `DispatchQueue`（QoS `.utility`）上跑 `shanjie_rerank_run`，跑完回主執行緒；測試傳自己完成的 runner。
+- `Shell` 必填一個 `RerankRunner`：App 傳 `QueueRerankRunner`，在 label 固定的 `DispatchQueue`（QoS `.userInitiated`：使用者在組字區等這個結果；`.utility` 在每個核心都忙時，一個工作的排隊加計算從約 50 ms 拉長到 2 秒以上）上跑 `shanjie_rerank_run`，跑完回主執行緒；測試傳自己完成的 runner。
 - 每次把引擎輸出套到組字區之後呼叫 `take`；一次只跑一個：已有在跑的，新工作留著（只留最新一個，被取代的立刻 free），跑完再接著跑。`take` 回非 0 與 `apply` 回 4 一樣處理（清組字區與候選窗，只記回傳碼）。
 - 完成時在主執行緒：用 weak 參照以 `===` 確認 session 仍擁有組字、引擎仍是目前的那個（不用位址比較，不強參照舊引擎），開關仍開，才 `apply`；0 套用輸出、5 不做事、4 照處理碼 4。核心的世代號是第二道防線。無論結果為何，完成處理一進來就用 `defer` 清掉「執行中」並接著跑留著的工作，不會卡住。
 - 工作由 Swift 包裝類別持有：原始指標私有，只提供 `run()`（nonisolated）與 `apply(on:)`（主執行緒）；`deinit` 呼叫可注入的 free 函式，所以每條路徑（被取代、引擎重建、開關關掉、過期、碼 4、正常套用）都恰好 free 一次；runner 的 closure 持有包裝物件而不是指標。`@unchecked Sendable` 的三個不變條件：一次只跑一個；apply 只在 run 回傳之後；free 只在 deinit。
@@ -355,7 +355,7 @@ Windows 版的殼分成兩半：引擎在常駐程序 `shanjie-host.exe`，每�
 | 8 | 每次寫出的最後一行 | 到目前為止略過幾筆、到目前為止寫出幾行事件 |
 
 - 事件 6 的原因碼：0 套用而組字區有改變（時刻是那次 `setMarkedText` 呼叫回來的時刻，不是客戶端畫完）、1 套用但沒有改變（碼 5）、2 套用回其他碼、3 等著的時候被新工作取代、4 引擎重建或 session 不符而丟掉、5 語意校正關掉而丟掉、6 `run()` 的回傳碼不是 0。殼結束時還在跑或等著的工作沒有終點。
-- 驗證：`TimingTests`（只在旗標下編譯）：寫出的行只有數字與 tab、各事件的欄位數；寫入不等鎖（另一條執行緒持鎖時 `record` 直接回來、略過計數加一）；七種原因碼各造一次，每個事件 3 剛好一個事件 6、每個事件 1 都有事件 2；Enter 一次一筆；App 的佇列 runner 上同一個工作的 3、4、5、6 依時間排列。
+- 驗證：`TimingTests`（只在旗標下編譯）：寫出的行只有數字與 tab、各事件的欄位數；寫入不等鎖（另一條執行緒持鎖時 `record` 直接回來、略過計數加一）；七種原因碼各造一次，每個事件 3 剛好一個事件 6、每個事件 1 都有事件 2；Enter 一次一筆；App 的佇列 runner 上同一個工作的 3、4、5、6 依時間排列；`start()` 建的定時器在背景佇列觸發 flush，handler 不帶主執行緒隔離（`testTheTimerFlushesOffTheMainThread`，handler 寫成主執行緒的閉包時測試程序會中斷）。
 
 ## 9. 評測 CLI 與重播
 

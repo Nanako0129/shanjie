@@ -415,12 +415,14 @@ private final class QueueRerankHandle: RerankHandle {
     init(_ waiter: RerankWaiter) { self.waiter = waiter }
 }
 
-/// The app's runner: one serial `.utility` queue with a fixed label. The closure holds the job wrapper (never its
+/// The app's runner: one serial `.userInitiated` queue with a fixed label (the user is waiting at the composition for the result:
+/// at `.utility`, with every core busy, a job's queueing plus compute grew from about 50 ms to over 2 s and none reached the screen,
+/// mac-rerank-latency 2026-11-23). The closure holds the job wrapper (never its
 /// pointer) until run returns. Two orderings put the run before the main-thread apply (RerankJob invariant 2): the code comes
 /// back through `DispatchQueue.main.async`, or the main thread is woken by this job's semaphore, which is signalled only after
 /// `run()` returned (Enter's bounded wait, `wait(_:until:)`, docs/spec/keys-and-composition.md §7.3). The main thread otherwise never waits for the queue.
 public final class QueueRerankRunner: RerankRunner {
-    private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.rerank", qos: .utility)
+    private let queue = DispatchQueue(label: "com.nyanako.inputmethod.shanjie.rerank", qos: .userInitiated)
 
     public init() {}
 
