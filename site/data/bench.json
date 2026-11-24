@@ -3598,6 +3598,15 @@
     }
    },
    "date": "2026-11-24",
+   "holdout_chat": {
+    "broken": 0,
+    "commit": "fb9b853dcb4779b99d86cf0585a164ec005829fa",
+    "fixed": 0,
+    "n": 150,
+    "p": 1.0,
+    "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e",
+    "top1": 135
+   },
    "label": "v0.9.0+v0.9.1",
    "load_avg_end": 3.90771484375,
    "load_avg_start": 1.9306640625,

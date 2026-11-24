@@ -610,7 +610,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - McNemar 與 bootstrap 假設列獨立，同一則訊息的子句彼此相關時區間偏窄；`--cluster` 只改 bootstrap，不改 McNemar。
 - 保留集的 150 列在聊天與書面各一份，淨值要到約 6 比 0 或 9 比 1 才達顯著，只抓得到明顯的退步；份與份之間的雜訊可到約 4%。
 - 保留集與私人新聞檔的「不洩漏」靠流程（指示、旗標禁令、`rows_sha256`），`--rows` 路徑沒有技術防護。
-- `tools/kpi.py replay` 用目前 checkout 的 `shanjie-replay`，它的設定標記一律以 `+rd+rx:<8 碼>+rm+rn` 結尾；`VERSIONS2` 裡沒有 `reading` 鍵的版本（讀音項進核心之前的版本）因此無法用現行重播程式回填，沒有 `reading_norm` 鍵的版本（音節歸零進核心之前的版本，尾端是 `+rm`）也一樣。重播的標記同樣在讀音項標記之前帶 `+recur`（沒有 `recur` 鍵的版本不收這個標記），所以前文重現項進核心之前的版本也無法回填；小模型開著時現行重播程式印 `+recur+pr`，沒有 `pool_recur` 鍵的版本因此也無法用現行重播程式回填。現行重播程式預設印 `+t3`，沒有 `tone3` 鍵的版本也一樣無法回填。
+- `tools/kpi.py replay` 用目前 checkout 的 `shanjie-replay`，它的設定標記一律以 `+rd+rx:<8 碼>+rm+rn` 結尾；`VERSIONS2` 裡沒有 `reading` 鍵的版本（讀音項進核心之前的版本）因此無法用現行重播程式回填，沒有 `reading_norm` 鍵的版本（音節歸零進核心之前的版本，尾端是 `+rm`）也一樣。重播的標記同樣在讀音項標記之前帶 `+recur`（沒有 `recur` 鍵的版本不收這個標記），所以前文重現項進核心之前的版本也無法回填；小模型開著時現行重播程式印 `+recur+pr`，沒有 `pool_recur` 鍵的版本因此也無法用現行重播程式回填。現行重播程式預設印 `+t3c`（三聲變調與口語讀音同一個開關），沒有 `tone3` 與 `colloq_sandhi` 鍵的版本也一樣無法回填。
 - 一致性檢查只比 `top1_sha256`（與必要時的 `--firsts`）；引擎和 CLI 真的不同的列要人工歸因。
 - forms 表只收辭典明載的寫法關係；人名、有分工的字、「通」字關係不收。
 - 寬鬆對照與 forms 都只用於評測，來源授權不允許改作散布。

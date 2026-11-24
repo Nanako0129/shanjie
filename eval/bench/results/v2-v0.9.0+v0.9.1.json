@@ -659,6 +659,25 @@
     },
     "rerank_p50_ms": 10.217,
     "rerank_p95_ms": 16.89
+   },
+   "holdout": {
+    "commit": "fb9b853dcb4779b99d86cf0585a164ec005829fa",
+    "chat": {
+     "n": 150,
+     "top1": 135,
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0,
+     "rows_sha256": "71f8a5e1a422c00a37598d237744ff49a229ce04dc3f37a1170ea98fe8b6e67e"
+    },
+    "formal": {
+     "n": 150,
+     "top1": 131,
+     "fixed": 0,
+     "broken": 0,
+     "p": 1.0,
+     "rows_sha256": "637c9bf96b27b83d498e1b3550ce93fc08e8f0ea061dcaefb9c5b2d434b05a38"
+    }
    }
   }
  ],
