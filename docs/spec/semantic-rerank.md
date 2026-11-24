@@ -212,7 +212,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - 條件：該次按鍵是沒有（Shift 以外）修飾鍵的字元鍵且目前不在組字；學習閘門（安全輸入、黑名單 App、取不到 bundle ID）擋住時不讀、傳 NULL；有標記文字（組字中）時不讀；選取範圍不可讀時不讀。
 - 範圍：插入點之前最多 `LeftContext.maxUTF16`（256）個 UTF-16 單位。App 回傳比要求長時只取最後 256 個單位並當作被截過。
 - 處理（`LeftContext.raw`）：被截過時先去掉開頭可能被切斷的第一個 grapheme；從最後一個換行（Swift `Character.isNewline`：`\n`、`\r\n`、U+2028、U+2029、VT、FF、NEL）或 NUL 之後開始（NUL 當換行，不刪除，刪除會把 `中\0文` 接成「中文」）；以 grapheme 計數，留最後 `maxGraphemes`（64）個；不濾標點、空白、英文、emoji。
-- **終端機類 App**（bundle ID 在 `LeftContext.terminals`：Terminal、iTerm2、Warp、kitty、WezTerm、Alacritty、Hyper、Ghostty）只傳結尾 ≤ 2 個漢字（`LeftContext.han`），因為終端機的一行裝著指令與輸出。編輯器內建的終端機面板與編輯區是同一個 bundle ID，分不出來，不在其內。
+- **終端機類 App**（bundle ID 在 `LeftContext.terminals`：Terminal、iTerm2、Warp、kitty、WezTerm、Alacritty、Hyper、Ghostty、Orca）只傳結尾 ≤ 2 個漢字（`LeftContext.han`），因為終端機的一行裝著指令與輸出。Orca（Electron＋xterm.js，`com.stablyai.orca`）交給輸入法的是 xterm.js 隱藏輸入框累積的舊字、不是終端機那一行（虛擬機實測），照終端機處理後只剩結尾的漢字：殘留的漢字仍可能被當成前文，英文字母不會。編輯器內建的終端機面板與編輯區是同一個 bundle ID，分不出來，不在其內。
 - 只在記憶體：不寫檔、不寫偏好、不記 log。`cjk-spacing` 用的前一個字元從同一次讀取取。
 
 ### 5.2 核心保存與會意的前文鍵
