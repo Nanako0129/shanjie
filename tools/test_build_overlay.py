@@ -55,6 +55,16 @@ class ManualRefill(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, r"s\.tsv:1: bad manual row"):
                 B.tail_rows({"甲乙"}, SCORES, SYLLABLES, manual=m, slang=sl, fixed=self.BASE)
 
+    def test_a_base_word_in_a_pack_or_the_names_layer_is_no_refill(self):
+        with tempfile.TemporaryDirectory() as d:
+            m, sl = os.path.join(d, "m.tsv"), os.path.join(d, "absent.tsv")
+            with open(m, "w", encoding="utf-8") as f:
+                f.write("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n")
+            with mock.patch.object(B, "other_layers", lambda: set()):
+                self.assertEqual(len(B.tail_rows({"甲乙"}, SCORES, SYLLABLES, manual=m, slang=sl, fixed=self.BASE)), 1)
+            with mock.patch.object(B, "other_layers", lambda: {"甲乙"}), self.assertRaisesRegex(SystemExit, r"m\.tsv:1: bad manual row"):
+                B.tail_rows({"甲乙"}, SCORES, SYLLABLES, manual=m, slang=sl, fixed=self.BASE)
+
     def test_fixed_pairs_has_the_base_and_every_sandhi_add_row(self):
         base = ime.Lexicon(B.BASE)
         fixed = B.fixed_pairs(base)
@@ -780,8 +790,7 @@ class ShippedOverlay(unittest.TestCase):
         fixed = B.fixed_pairs(base)
         with tempfile.TemporaryDirectory() as d:
             without = B.tail_rows(*args, slang=os.path.join(d, "absent.tsv"), fixed=fixed)
-        meme = B.pack_words(B.MEME_PACK) if os.path.exists(B.MEME_PACK) else set()
-        layers = B.pack_words() | B.pack_words(B.IT_PACK) | meme | B.names_words()
+        layers = B.other_layers()
         self.assertEqual(without, B.manual_rows(args[0] | layers, *args[1:], refill={w for _, w in fixed} - layers, fixed=fixed))
         self.assertNotIn("slang", {r.rstrip("\n").split("\t")[3] for r in without})
 

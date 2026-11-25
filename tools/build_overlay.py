@@ -60,7 +60,6 @@ SUPPLEMENT_SRC = "萌典補詞"
 SUPPLEMENT_MIN = 2   # docs/spec/lexicon-and-packs.md §2.7：語料裡子字串出現的次數下限
 PACK = os.path.join(ROOT, "data", "packs", "acg-add.tsv")   # 手動詞也不能是詞包的詞：引擎把詞包接在疊加層後面，同詞同讀音重複就整個載入失敗
 IT_PACK = os.path.join(ROOT, "data", "packs", "it-add.tsv")
-MEME_PACK = os.path.join(ROOT, "data", "packs", "meme-add.tsv")   # 迷因詞包（#293）；沒有這個檔時是空集合
 # 手動詞的分數＝同字數的 length_scores ＋ 這個值（log10）。量過：書面設定下「米雅歌」輸給「米亞哥」0.25（加 0.25 仍輸，
 # 加 0.5 時四個名字（五列）單獨打與放在句子裡，兩種設定 9 句都是第一名）。手動加的是明確指定的詞，所以比一般疊加層詞高一點。
 # docs/spec/lexicon-and-packs.md §2.9 規則 2：0.5 是 model-v5 上剛好過關的最小值；開 KN 的 model-v6 書面「米雅歌唱得很好」輸，改 0.75。
@@ -397,7 +396,8 @@ def colloq_rows(rows, table=None, penalty=None):
 
 def fixed_pairs(base, sandhi=SANDHI_ADD):
     """基底與 sandhi-add.tsv 的（讀音, 詞）：手動詞補基底詞的讀音時，產生的每一對都不能在這裡（docs/spec/lexicon-and-packs.md §2.9）。
-    sandhi-add.tsv 接在 overlay-add.tsv 後面當同一份疊加層文字，同一對出現在兩個檔，引擎載入失敗。"""
+    sandhi-add.tsv 接在 overlay-add.tsv 後面當同一份疊加層文字，同一對出現在兩個檔的一般列，引擎載入失敗；colloq 列不查重複，
+    但 build_sandhi.py 重產時會拿掉 sandhi-add.tsv 的那一列。"""
     pairs = {("-".join(syls), w) for syls, entries in base.by_reading.items() for w, _ in entries}
     with open(sandhi, encoding="utf-8") as f:
         pairs |= {tuple(l.split("\t")[:2]) for l in f if "\t" in l}
@@ -407,9 +407,8 @@ def fixed_pairs(base, sandhi=SANDHI_ADD):
 def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG, fixed=frozenset()):
     """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、兩個詞包或手動詞的詞。
     fixed＝fixed_pairs(base)：手動詞可以是基底詞（補讀音），只要它不在詞包、名單層，產生的（讀音, 詞）也都不在 fixed；空集合時手動詞照舊不能是基底詞。"""
-    meme = pack_words(MEME_PACK) if os.path.exists(MEME_PACK) else set()
-    layers = pack_words() | pack_words(IT_PACK) | meme | names_words()
-    taken = taken | layers   # 同詞同讀音和詞包、名單層重複，引擎整個載入失敗
+    layers = other_layers()   # 名單層與每一個 *-add.tsv 詞包：同詞同讀音和它們重複，引擎整個載入失敗
+    taken = taken | layers
     refill = {w for _, w in fixed} - layers
     rows = manual_rows(taken, scores, syllables, manual, refill=refill, fixed=fixed)
     if os.path.exists(slang):
