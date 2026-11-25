@@ -349,11 +349,12 @@
   - 接著，字元鍵（修飾鍵只允許 Shift）且學習沒有暫停時，用同一次讀取前文的結果的最後一個字元當 p（與設定核心前文用的是同一次讀取）；讀不到時 p 維持未知。
   - 每次送出之後，p 改成這次送出（加空白之後）的最後一個字元，所以同一個組字分兩次送出（碰到 128 單位）或送出後直接從預測列選字，都依上一次送出的最後一個字判斷。
   - 核心回「不處理」的鍵（直通）一律清成未知（方向鍵、Cmd＋V、數字鍵盤可能移動游標或插入文字）；`deactivate` 與換擁有者清成未知。
+  - 英數狀態、組字區空時的鍵不經過核心，p 照下面「英數狀態」那一條改。
 - 關閉時 `insertText` 收到的字串與 `commit` 逐字相同。
-- **英數狀態**（單按 Shift，`docs/spec/keys-and-composition.md` §9.2）、組字區空、鍵沒有 Command／Control／Option、可印字元（`asciiKey`，套 Shift，`0x21`–`0x7E`）時：
+- **英數狀態**（單按 Shift，`docs/spec/keys-and-composition.md` §9.2）、組字區空、鍵沒有 Command／Control／Option／Caps Lock、可印字元（`asciiKey`，套 Shift，`0x21`–`0x7E`）時：
   - 先決定 p：p 已知而且不是漢字就直接用；p 未知或是漢字時，學習沒有暫停就讀一次前文取最後一個字元（點滑鼠可能移了游標），暫停或讀不到時 p 未知。
   - 字元是半形英數、p 是漢字：殼自己 `insertText(" " + 字元)`、吃掉這個鍵，p 改成這個字元。其他情況照舊直通，p 改成這個字元（App 會插入它）。所以只補開頭一個空白，接著連續打的英文不再讀前文、不補（打字更新慢的 App 也只會有一個空白）。
-  - 這個狀態下其他的鍵（空白、方向鍵這類不是可印字元的鍵、帶 Command／Control 的鍵）照舊直通，p 改成未知；Option 的鍵照規則 1o（Option＋可印字元由殼送出），不論送出或直通，p 都改成未知。
+  - 這個狀態下其他的鍵（空白、方向鍵這類不是可印字元的鍵、帶 Command／Control 的鍵，以及 Caps Lock 開著時打的字母：`asciiKey` 不收，所以不補空白）照舊直通，p 改成未知；Option 的鍵照規則 1o：Option＋可印字元由殼送出，p 改成那個字元（同每次送出之後，更新慢的 App 也不會讓下一個字母讀到漢字而多補空白）；Option 加其他鍵（Option＋Backspace、Option＋方向鍵）直通，p 改成未知。
   - **排除清單**（`CJKSpacing.asciiExcluded`）：終端機（`LeftContext.terminals`）與有 Vim 模式的程式碼編輯器（VS Code、VS Code Insiders、Cursor、Zed、Xcode、Obsidian、JetBrains 全部）照舊直通、p 改成未知：英數狀態下的字母可能是 vim、less、tmux 或編輯器 Vim 模式的指令，插入空白會改變指令。bundle ID 讀到 nil 或空字串時也照舊直通、p 改成未知（這種 client 的學習是暫停的，前文本來就不讀）。
   - 已知限制：清單外、會把字母當指令的 App（網頁裡的 Vim 編輯器、遠端桌面）在英數狀態下仍會被補空白，這種 App 關掉這個設定；切到別的輸入法打的英文善解碰不到。
 - 不寫進紀錄。

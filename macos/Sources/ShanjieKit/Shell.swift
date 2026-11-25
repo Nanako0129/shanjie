@@ -1827,7 +1827,9 @@ public final class Session {
                 spacingPrev = nil  // an Option key that passes on (Option+Backspace, Option+arrow) may change the text before the cursor
                 return false
             }
-            spacingPrev = nil  // as after any key this state passes on
+            // p is the character the shell typed, as after any commit: an app that updates its text late cannot make the next letter read a Han
+            // character and get a space.
+            spacingPrev = Character(c)
             client.insertText(String(Character(c)), replacementRange: NSRange(location: NSNotFound, length: 0))
             return true
         }

@@ -349,14 +349,23 @@ final class CJKSpacingAsciiTests: XCTestCase {
     }
 
     /// Command and Control keys pass on and make p unknown: the next letter reads again and gets its space.
+    /// p is made known (A) first, so the test fails if the key leaves p as it was.
     func testCommandAndControlPassOnAndClearP() {
         for flags: NSEvent.ModifierFlags in [.command, .control] {
             let c = english(before: "測試")
-            XCTAssertFalse(key(c, "a", flags: flags), "\(flags)")
-            XCTAssertEqual(inserts(c), [], "\(flags)")
-            XCTAssertTrue(key(c, "B", flags: .shift), "\(flags)")
-            XCTAssertEqual(inserts(c), [" B"], "\(flags)")
+            XCTAssertTrue(key(c, "A", flags: .shift), "\(flags)")
+            c.client.replyOverride = "測試"  // e.g. Command+Z took the A out
+            XCTAssertFalse(key(c, "z", flags: flags), "\(flags)")
+            XCTAssertTrue(key(c, "B", flags: .shift), "\(flags): p was cleared, so B reads 測試 again")
+            XCTAssertEqual(inserts(c), [" A", " B"], "\(flags)")
         }
+    }
+
+    /// Caps Lock on: asciiKey takes no key, so the letter passes on with no space (docs/spec/english-mixed.md §9).
+    func testCapsLockPassesOn() {
+        let c = english(before: "測試")
+        XCTAssertFalse(key(c, "A", flags: .capsLock))
+        XCTAssertEqual(inserts(c), [])
     }
 
     /// An Option key that is not a character (Option+Backspace) passes on and makes p unknown, like any other key that passes on.
@@ -369,10 +378,16 @@ final class CJKSpacingAsciiTests: XCTestCase {
         XCTAssertEqual(inserts(c), [" A", " B"])
     }
 
-    /// Option keeps rule 1o: the character goes in by itself, no space.
+    /// Option keeps rule 1o: the character goes in by itself, no space. p becomes that character, so a late app that still answers 測試 does not
+    /// give the next letter a space.
     func testOptionKeepsItsRule() {
         let c = english(before: "測試")
         XCTAssertTrue(key(c, "a", flags: .option))
         XCTAssertEqual(inserts(c), ["a"])
+        c.client.replyOverride = "測試"
+        let reads = c.client.reads
+        XCTAssertFalse(key(c, "B", flags: .shift))
+        XCTAssertEqual(inserts(c), ["a"])
+        XCTAssertEqual(c.client.reads, reads, "no read: p was known")
     }
 }
