@@ -319,8 +319,10 @@ final class CJKSpacingAsciiTests: XCTestCase {
 
     func testOffPassesOn() {
         let c = english(nil, before: "測試")
+        let reads = c.client.reads
         XCTAssertFalse(key(c, "A", flags: .shift))
         XCTAssertEqual(inserts(c), [])
+        XCTAssertEqual(c.client.reads, reads, "off: nothing is read")
     }
 
     /// Terminals and code editors with a Vim mode: a letter may be a command.
@@ -332,13 +334,9 @@ final class CJKSpacingAsciiTests: XCTestCase {
         }
     }
 
-    /// A nil bundle now: the one known from activate decides the exclusion; with none known the key passes on. The learning gate still takes the
-    /// bundle read now, and a nil bundle pauses learning (docs/spec/learning.md §3), so even a known TextEdit gets no read and no space.
-    func testANilBundleFallsBackToTheKnownOne() {
-        let terminal = english(before: "測試", bundle: "com.apple.Terminal")
-        terminal.client.bundle = nil
-        XCTAssertFalse(key(terminal, "A", flags: .shift))
-        XCTAssertEqual(inserts(terminal), [])
+    /// A bundle ID that reads nil: learning is paused for such a client (docs/spec/learning.md §3), so p is never read and the key passes on,
+    /// whatever app the session last saw.
+    func testANilBundlePassesOn() {
         let none = english(before: "測試", bundle: nil)
         XCTAssertFalse(key(none, "A", flags: .shift))
         XCTAssertEqual(inserts(none), [])
@@ -348,6 +346,27 @@ final class CJKSpacingAsciiTests: XCTestCase {
         XCTAssertFalse(key(textEdit, "A", flags: .shift))
         XCTAssertEqual(inserts(textEdit), [])
         XCTAssertEqual(textEdit.client.reads, reads, "a nil bundle pauses learning: no read")
+    }
+
+    /// Command and Control keys pass on and make p unknown: the next letter reads again and gets its space.
+    func testCommandAndControlPassOnAndClearP() {
+        for flags: NSEvent.ModifierFlags in [.command, .control] {
+            let c = english(before: "測試")
+            XCTAssertFalse(key(c, "a", flags: flags), "\(flags)")
+            XCTAssertEqual(inserts(c), [], "\(flags)")
+            XCTAssertTrue(key(c, "B", flags: .shift), "\(flags)")
+            XCTAssertEqual(inserts(c), [" B"], "\(flags)")
+        }
+    }
+
+    /// An Option key that is not a character (Option+Backspace) passes on and makes p unknown, like any other key that passes on.
+    func testAnOptionNonCharacterKeyClearsP() {
+        let c = english(before: "測試")
+        XCTAssertTrue(key(c, "A", flags: .shift))
+        c.client.replyOverride = "測試"  // the app deleted the A
+        XCTAssertFalse(c.session.handle(Keys.event(51, flags: .option)))  // Option+Backspace
+        XCTAssertTrue(key(c, "B", flags: .shift), "p was cleared, so B reads 測試 again")
+        XCTAssertEqual(inserts(c), [" A", " B"])
     }
 
     /// Option keeps rule 1o: the character goes in by itself, no space.
