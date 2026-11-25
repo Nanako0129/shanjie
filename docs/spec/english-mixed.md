@@ -340,7 +340,7 @@
 
 ## 9. 中英文之間自動加空格
 
-- 設定「中英文之間自動加空格」（鍵 `cjkSpacing`，預設關），只改善解**送出的文字**：殼呼叫 `insertText` 之前對 `commit` 套 `CJKSpacing.apply(previous:text:)`。核心送出、學習、前文用的字串不變；組字區顯示的 marked text 不加。
+- 設定「中英文之間自動加空格」（鍵 `cjkSpacing`，預設關），只改善解**送出的文字**（英數狀態另有一條，見本節最後）：殼呼叫 `insertText` 之前對 `commit` 套 `CJKSpacing.apply(previous:text:)`。核心送出、學習、前文用的字串不變；組字區顯示的 marked text 不加。
 - **字元分類**：漢字＝一個字（grapheme）的**第一個 scalar** 符合 `LeftContext.isHan`（與核心逐 scalar 的 `is_han` 一致，所以帶異體字選擇符的漢字也算）；半形英數＝ASCII `A–Z a–z 0–9`；其他一律不觸發（全形與半形標點、符號、空白、注音符號、全形英數、emoji）。
 - **送出的文字裡面**：漢字與半形英數直接相鄰（兩個方向）時插入一個 U+0020。「我用claude寫」→「我用 claude 寫」；「2026下午3點」→「2026 下午 3 點」；已有空白的、「（2026）」、「，claude」不變。
 - **開頭**：令 p 是送出前游標前面的最後一個字元；p 是半形英數而送出文字第一個字元是漢字，或 p 是漢字而第一個字元是半形英數時，在開頭補一個空白；p 未知時不補。結尾不補。
@@ -350,6 +350,12 @@
   - 每次送出之後，p 改成這次送出（加空白之後）的最後一個字元，所以同一個組字分兩次送出（碰到 128 單位）或送出後直接從預測列選字，都依上一次送出的最後一個字判斷。
   - 核心回「不處理」的鍵（直通）一律清成未知（方向鍵、Cmd＋V、數字鍵盤可能移動游標或插入文字）；`deactivate` 與換擁有者清成未知。
 - 關閉時 `insertText` 收到的字串與 `commit` 逐字相同。
+- **英數狀態**（單按 Shift，`docs/spec/keys-and-composition.md` §9.2）、組字區空、鍵沒有 Command／Control／Option、可印字元（`asciiKey`，套 Shift，`0x21`–`0x7E`）時：
+  - 先決定 p：p 已知而且不是漢字就直接用；p 未知或是漢字時，學習沒有暫停就讀一次前文取最後一個字元（點滑鼠可能移了游標），暫停或讀不到時 p 未知。
+  - 字元是半形英數、p 是漢字：殼自己 `insertText(" " + 字元)`、吃掉這個鍵，p 改成這個字元。其他情況照舊直通，p 改成這個字元（App 會插入它）。所以只補開頭一個空白，接著連續打的英文不再讀前文、不補（打字更新慢的 App 也只會有一個空白）。
+  - 這個狀態下其他的鍵（空白、方向鍵這類不是可印字元的鍵、帶 Command／Control 的鍵）照舊直通，p 改成未知；Option 的鍵照規則 1o（Option＋可印字元由殼送出），不論送出或直通，p 都改成未知。
+  - **排除清單**（`CJKSpacing.asciiExcluded`）：終端機（`LeftContext.terminals`）與有 Vim 模式的程式碼編輯器（VS Code、VS Code Insiders、Cursor、Zed、Xcode、Obsidian、JetBrains 全部）照舊直通、p 改成未知：英數狀態下的字母可能是 vim、less、tmux 或編輯器 Vim 模式的指令，插入空白會改變指令。bundle ID 讀到 nil 或空字串時也照舊直通、p 改成未知（這種 client 的學習是暫停的，前文本來就不讀）。
+  - 已知限制：清單外、會把字母當指令的 App（網頁裡的 Vim 編輯器、遠端桌面）在英數狀態下仍會被補空白，這種 App 關掉這個設定；切到別的輸入法打的英文善解碰不到。
 - 不寫進紀錄。
 
 ## 10. 英打預設值、一次性重設與說明視窗
@@ -411,7 +417,7 @@
 
 ### 13.2 殼測試（`make test-swift`）
 
-- `CJKSpacingTests`：純函式表格、送出與 p 的生命週期（分兩次送出、學習暫停只略過開頭、直通鍵清 p、組字開始的鍵帶修飾鍵清舊 p、異體字選擇符的漢字算漢字）、`testSettingsModelFollowsTheShellAndTheNoteIsTheContractsLine`（設定模型跟 `Shell`，說明文字逐字等於 §11）。
+- `CJKSpacingTests`：純函式表格、送出與 p 的生命週期（分兩次送出、學習暫停只略過開頭、直通鍵清 p、組字開始的鍵帶修飾鍵清舊 p、異體字選擇符的漢字算漢字）、英數狀態（`CJKSpacingAsciiTests`：漢字後第一個字母補空白之後直通、更新慢的 App 不補第二個、前文不是漢字時直通、學習暫停不讀、關閉時直通也不讀、排除清單直通、bundle 是 nil 時直通、Command 與 Control 直通並清 p、Option 的非字元鍵清 p、Option 照規則 1o）、`testSettingsModelFollowsTheShellAndTheNoteIsTheContractsLine`（設定模型跟 `Shell`，說明文字逐字等於 §11）。
 - `EnglishDefaultsNoticeTests`：重設邏輯（空 domain、舊設定鍵、其他任何鍵、只有標記鍵、只有學習檔、已有標記、沒存值預設關、存開仍開）、說明視窗決策（activate 後第一個鍵顯示且照常處理、沒有 activate 的換手、`flagsChanged` 不觸發、按鈕與關閉鈕、activate 與晚到的 deactivate 兩種順序、新程序旗標還在再跳）、位置與文字。
 - 設定與選單測試：各存值預設、每次 `build()` 送四個開關、反灰條件、選單位置。
 - `ShellTests.testRunRowTakesTheHintsPlace`（§4.6）：Shift+K 時面板是核心給的預測列（先是 K 的混合詞，再是英文補完）、不是提示，粗底線照舊；多打一個小寫字母後仍是預測列，只剩英文補完；打到沒有任何補完時提示回來；Tab、Enter 與點選都選得到。測試資源清單（`Support.swift`）含 `mixed-words.tsv`。

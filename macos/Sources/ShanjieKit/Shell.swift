@@ -1763,7 +1763,8 @@ public final class Session {
     let client: TextClient
     /// docs/spec/english-mixed.md §9: the character before the cursor as far as this session knows it; `nil` when unknown. Cleared when
     /// a composition may start, read from the client by the key that may start it, set to the last character of every commit,
-    /// cleared by a pass-through key, a deactivation and an owner change. Never logged.
+    /// cleared by a pass-through key, a deactivation and an owner change. In the English state with nothing composed (`asciiSpacing`) a
+    /// printable key sets it to its character and any other key clears it. Never logged.
     private var spacingPrev: Character?
     /// docs/spec/prediction.md §9.4: this client's bundle ID as last read by `send` or passed to `applyProfile`; never read
     /// for this rule alone.
@@ -1816,11 +1817,16 @@ public final class Session {
             showModeHint = due && !shell.composing && shell.shiftToggleOn
         }
         defer { if showModeHint { showShiftHint(shell.engineAscii ? "英" : "中") } }
-        // docs/spec/keys-and-composition.md §9.2: English state with nothing composed: every key goes to the app untouched, not through the core.
+        // docs/spec/keys-and-composition.md §9.2: English state with nothing composed: keys go to the app, not through the core, except the first letter
+        // or digit after a Han character when cjk-spacing is on (`asciiSpacing`, docs/spec/english-mixed.md §9).
         // Rule 1o there (docs/spec/keys-and-composition.md §9.2): Option with a key of the main block types the character the key gives without Option, as Apple
         // Zhuyin's half-width mode does (measured 2026-11-20); the shell sends it itself and eats the key.
         if shell.engineAscii && !shell.composing {
-            guard let event, event.modifierFlags.contains(.option), let key = Self.asciiKey(event), let c = UnicodeScalar(key.ch) else { return false }
+            if let event, !event.modifierFlags.contains(.option) { return asciiSpacing(event) }
+            guard let event, event.modifierFlags.contains(.option), let key = Self.asciiKey(event), let c = UnicodeScalar(key.ch) else {
+                spacingPrev = nil  // an Option key that passes on (Option+Backspace, Option+arrow) may change the text before the cursor
+                return false
+            }
             spacingPrev = nil  // as after any key this state passes on
             client.insertText(String(Character(c)), replacementRange: NSRange(location: NSNotFound, length: 0))
             return true
@@ -1859,6 +1865,28 @@ public final class Session {
               let chars = option ? event.characters(byApplyingModifiers: flags.intersection(.shift)) : event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
               (0x21...0x7E).contains(c.value) else { return nil }
         return ShanjieKey(kind: KeyMap.char, ch: c.value, modifiers: 0)
+    }
+
+    /// docs/spec/english-mixed.md §9 (英數狀態): a key in the English state with nothing composed and no Option. With 中英文之間自動加空格 on, a letter or
+    /// digit typed right after a Han character goes in as " " + the character, inserted by the shell (the key is eaten); every other key passes on
+    /// as before. p: known and not Han -> used as is (no read, so a run of English typed fast in an app that updates its text late gets one space);
+    /// unknown or Han -> read again from the client (a click may have moved the cursor), unless learning is paused. A printable key that passes on
+    /// sets p to its character; any other key makes p unknown. Terminals and code editors with a Vim mode (`CJKSpacing.asciiExcluded`) always pass on,
+    /// as does a client whose bundle ID reads nil or empty (learning is paused for it, so p could never be read). Off: nothing changes.
+    private func asciiSpacing(_ event: NSEvent) -> Bool {
+        guard shell.spacingOn else { return false }
+        guard let key = Self.asciiKey(event), let scalar = UnicodeScalar(key.ch) else { spacingPrev = nil; return false }
+        guard let bundle = client.bundleIdentifier, !bundle.isEmpty, !CJKSpacing.asciiExcluded(bundle) else { spacingPrev = nil; return false }
+        let c = Character(scalar)
+        var p = spacingPrev
+        if p.map(CJKSpacing.isHan) ?? true {
+            p = shell.learningPause(bundle: bundle) != nil ? nil : leftContext(bundle: bundle).last
+        }
+        spacingPrev = c
+        let text = CJKSpacing.apply(previous: p, text: String(c))
+        guard text.count > 1 else { return false }
+        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        return true
     }
 
     /// docs/spec/keys-and-composition.md §9.1: a `flagsChanged` event is never consumed (the app sees Shift as always); a lone tap switches.

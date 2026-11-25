@@ -12,6 +12,18 @@ enum CJKSpacing {
 
     private static func needsSpace(_ a: Kind, _ b: Kind) -> Bool { (a == .han && b == .ascii) || (a == .ascii && b == .han) }
 
+    /// docs/spec/english-mixed.md §9 (英數狀態): whether `c` counts as Han for the spacing rule.
+    static func isHan(_ c: Character) -> Bool { kind(c) == .han }
+
+    /// docs/spec/english-mixed.md §9 (英數狀態): apps where a letter typed in the English state may be a command (terminals: vim, less, tmux;
+    /// code editors with a Vim mode), so the shell never inserts a space for them and keys pass through as before.
+    static let asciiEditors: Set<String> = [
+        "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed", "com.apple.dt.Xcode", "md.obsidian",
+    ]
+    static func asciiExcluded(_ bundle: String) -> Bool {
+        LeftContext.terminals.contains(bundle) || asciiEditors.contains(bundle) || bundle.hasPrefix("com.jetbrains.")
+    }
+
     /// `previous` is the character before the insertion point, `nil` when unknown (no leading space then).
     static func apply(previous: Character?, text: String) -> String {
         var out = ""
