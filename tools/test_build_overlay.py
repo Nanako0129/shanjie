@@ -14,12 +14,54 @@ SCORES = {2: -7.0, 3: -7.04116568, 4: -6.6, 5: -6.17843815}
 SYLLABLES = {"ㄐㄧㄚˇ", "ㄧˇ", "ㄅㄧㄥˇ", "ㄉㄧㄥ", "ㄨˋ", "ㄧ", "ㄧˋ", "ㄒㄧㄡ", "ㄍㄜ"}
 
 
-def manual(text, taken=frozenset(), encoding="utf-8", tag="manual"):
+def manual(text, taken=frozenset(), encoding="utf-8", tag="manual", refill=frozenset(), fixed=frozenset()):
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "m.tsv")
         with open(p, "w", encoding=encoding) as f:
             f.write(text)
-        return B.manual_rows(set(taken), SCORES, SYLLABLES, p, tag)
+        return B.manual_rows(set(taken), SCORES, SYLLABLES, p, tag, refill=refill, fixed=fixed)
+
+
+class ManualRefill(unittest.TestCase):
+    """docs/spec/lexicon-and-packs.md §2.9: a manual row may name a base word (refill) only with readings that neither the base nor
+    sandhi-add.tsv has, the sandhi row overlay_rows adds included; slang rows never take a base word."""
+    BASE = {("ㄐㄧㄚˇ-ㄧˇ", "甲乙")}
+
+    def test_a_base_word_takes_a_reading_the_base_lacks(self):
+        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n", taken={"甲乙"}, refill={"甲乙"}, fixed=self.BASE),
+                         [f"ㄐㄧㄚˇ-ㄧˋ\t甲乙\t{round(SCORES[2] + B.MANUAL_BONUS, 8)!r}\tmanual\n"])
+
+    def test_a_reading_the_base_has_stops_the_build_with_the_line(self):
+        with self.assertRaisesRegex(SystemExit, r"m\.tsv:2: '甲乙' already has the reading ㄐㄧㄚˇ-ㄧˇ"):
+            manual("# c\n甲乙\tㄐㄧㄚˇ ㄧˇ\tx\n", taken={"甲乙"}, refill={"甲乙"}, fixed=self.BASE)
+
+    def test_a_pair_in_sandhi_add_stops_the_build_main_row_or_sandhi_row(self):
+        # 一 before a first tone gets the sandhi row ㄧˋ: either row colliding with sandhi-add.tsv stops the build
+        for pair in (("ㄧ-ㄒㄧㄡ-ㄍㄜ", "一休哥"), ("ㄧˋ-ㄒㄧㄡ-ㄍㄜ", "一休哥")):
+            with self.assertRaisesRegex(SystemExit, r"m\.tsv:1: .*sandhi-add\.tsv", msg=pair[0]):
+                manual("一休哥\tㄧ ㄒㄧㄡ ㄍㄜ\tx\n", taken={"一休哥"}, refill={"一休哥"}, fixed={("ㄐㄧㄚˇ-ㄧˇ", "一休哥"), pair})
+
+    def test_a_word_outside_refill_still_stops_the_build(self):
+        with self.assertRaises(SystemExit):     # in a pack, a name layer or the overlay: taken but not refill
+            manual("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n", taken={"甲乙"}, fixed=self.BASE)
+
+    def test_slang_never_takes_a_base_word(self):
+        with tempfile.TemporaryDirectory() as d:
+            m, sl = os.path.join(d, "m.tsv"), os.path.join(d, "s.tsv")
+            with open(m, "w", encoding="utf-8") as f:
+                f.write("")
+            with open(sl, "w", encoding="utf-8") as f:
+                f.write("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n")
+            with self.assertRaisesRegex(SystemExit, r"s\.tsv:1: bad manual row"):
+                B.tail_rows({"甲乙"}, SCORES, SYLLABLES, manual=m, slang=sl, fixed=self.BASE)
+
+    def test_fixed_pairs_has_the_base_and_every_sandhi_add_row(self):
+        base = ime.Lexicon(B.BASE)
+        fixed = B.fixed_pairs(base)
+        with open(B.SANDHI_ADD, encoding="utf-8") as f:
+            sandhi = [tuple(l.split("\t")[:2]) for l in f]
+        self.assertTrue(sandhi and set(sandhi) <= fixed)
+        self.assertIn(("ㄨㄟˊ-ㄕㄚˊ", "為啥"), fixed)
 
 
 class ManualRows(unittest.TestCase):
@@ -729,15 +771,18 @@ class ShippedOverlay(unittest.TestCase):
         self.assertEqual(tags[tail:], sorted(tags[tail:], key=("manual", "slang").index), "manual rows, then slang rows, are the tail")
         base = ime.Lexicon(B.BASE)
         taken = set(base.by_word) | {l.split("\t")[1] for l in lines[:tail]}
-        self.assertEqual(lines[tail:], B.tail_rows(taken, B.length_scores(base), B.base_syllables(base)))
+        self.assertEqual(lines[tail:], B.tail_rows(taken, B.length_scores(base), B.base_syllables(base), fixed=B.fixed_pairs(base)))
         self.assertEqual(lines, B.rebuild_tails())
 
     def test_no_slang_file_leaves_the_manual_tail_alone(self):
         base = ime.Lexicon(B.BASE)
         args = (set(base.by_word), B.length_scores(base), B.base_syllables(base))
+        fixed = B.fixed_pairs(base)
         with tempfile.TemporaryDirectory() as d:
-            without = B.tail_rows(*args, slang=os.path.join(d, "absent.tsv"))
-        self.assertEqual(without, B.manual_rows(args[0] | B.pack_words() | B.pack_words(B.IT_PACK) | B.names_words(), *args[1:]))
+            without = B.tail_rows(*args, slang=os.path.join(d, "absent.tsv"), fixed=fixed)
+        meme = B.pack_words(B.MEME_PACK) if os.path.exists(B.MEME_PACK) else set()
+        layers = B.pack_words() | B.pack_words(B.IT_PACK) | meme | B.names_words()
+        self.assertEqual(without, B.manual_rows(args[0] | layers, *args[1:], refill={w for _, w in fixed} - layers, fixed=fixed))
         self.assertNotIn("slang", {r.rstrip("\n").split("\t")[3] for r in without})
 
 
