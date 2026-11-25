@@ -418,7 +418,7 @@
 
 ### 13.2 殼測試（`make test-swift`）
 
-- `CJKSpacingTests`：純函式表格、送出與 p 的生命週期（分兩次送出、學習暫停只略過開頭、直通鍵清 p、組字開始的鍵帶修飾鍵清舊 p、異體字選擇符的漢字算漢字）、英數狀態（`CJKSpacingAsciiTests`：漢字後第一個字母補空白之後直通、更新慢的 App 不補第二個、前文不是漢字時直通、學習暫停不讀、關閉時直通也不讀、排除清單直通、bundle 是 nil 時直通、Command 與 Control 直通並清 p、Option 的非字元鍵清 p、Option 照規則 1o）、`testSettingsModelFollowsTheShellAndTheNoteIsTheContractsLine`（設定模型跟 `Shell`，說明文字逐字等於 §11）。
+- `CJKSpacingTests`：純函式表格、送出與 p 的生命週期（分兩次送出、學習暫停只略過開頭、直通鍵清 p、組字開始的鍵帶修飾鍵清舊 p、異體字選擇符的漢字算漢字）、英數狀態（`CJKSpacingAsciiTests`：漢字後第一個字母補空白之後直通、更新慢的 App 不補第二個、前文不是漢字時直通、學習暫停不讀、關閉時直通也不讀、排除清單直通、bundle 是 nil 時直通、Command 與 Control 直通並清已知的 p、Caps Lock 開著時直通不補、Option 的非字元鍵清 p、Option 照規則 1o 且 p 改成送出的字元，更新慢的 App 不再讀前文）、`testSettingsModelFollowsTheShellAndTheNoteIsTheContractsLine`（設定模型跟 `Shell`，說明文字逐字等於 §11）。
 - `EnglishDefaultsNoticeTests`：重設邏輯（空 domain、舊設定鍵、其他任何鍵、只有標記鍵、只有學習檔、已有標記、沒存值預設關、存開仍開）、說明視窗決策（activate 後第一個鍵顯示且照常處理、沒有 activate 的換手、`flagsChanged` 不觸發、按鈕與關閉鈕、activate 與晚到的 deactivate 兩種順序、新程序旗標還在再跳）、位置與文字。
 - 設定與選單測試：各存值預設、每次 `build()` 送四個開關、反灰條件、選單位置。
 - `ShellTests.testRunRowTakesTheHintsPlace`（§4.6）：Shift+K 時面板是核心給的預測列（先是 K 的混合詞，再是英文補完）、不是提示，粗底線照舊；多打一個小寫字母後仍是預測列，只剩英文補完；打到沒有任何補完時提示回來；Tab、Enter 與點選都選得到。測試資源清單（`Support.swift`）含 `mixed-words.tsv`。

@@ -14,7 +14,7 @@ SCORES = {2: -7.0, 3: -7.04116568, 4: -6.6, 5: -6.17843815}
 SYLLABLES = {"ㄐㄧㄚˇ", "ㄧˇ", "ㄅㄧㄥˇ", "ㄉㄧㄥ", "ㄨˋ", "ㄧ", "ㄧˋ", "ㄒㄧㄡ", "ㄍㄜ"}
 
 
-def manual(text, taken=frozenset(), encoding="utf-8", tag="manual", refill=frozenset(), fixed=frozenset()):
+def manual(text, taken=frozenset(), encoding="utf-8", tag="manual", refill=None, fixed=frozenset()):
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "m.tsv")
         with open(p, "w", encoding=encoding) as f:
@@ -25,21 +25,33 @@ def manual(text, taken=frozenset(), encoding="utf-8", tag="manual", refill=froze
 class ManualRefill(unittest.TestCase):
     """docs/spec/lexicon-and-packs.md §2.9: a manual row may name a base word (refill) only with readings that neither the base nor
     sandhi-add.tsv has, the sandhi row overlay_rows adds included; slang rows never take a base word."""
-    BASE = {("ㄐㄧㄚˇ-ㄧˇ", "甲乙")}
+    BASE = {("ㄐㄧㄚˇ-ㄧˇ", "甲乙"): -9.0}   # a base score under the manual score, so the manual score stands
 
     def test_a_base_word_takes_a_reading_the_base_lacks(self):
-        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n", taken={"甲乙"}, refill={"甲乙"}, fixed=self.BASE),
+        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n", taken={"甲乙"}, refill={"甲乙": -9.0}, fixed=self.BASE),
                          [f"ㄐㄧㄚˇ-ㄧˋ\t甲乙\t{round(SCORES[2] + B.MANUAL_BONUS, 8)!r}\tmanual\n"])
+
+    def test_a_refill_takes_the_base_score_when_it_is_higher(self):
+        # the same word under another reading: as common as under the base reading, so the manual score does not pull it down
+        self.assertEqual(manual("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n", taken={"甲乙"}, refill={"甲乙": -5.0}, fixed=self.BASE),
+                         ["ㄐㄧㄚˇ-ㄧˋ\t甲乙\t-5.0\tmanual\n"])
+        with tempfile.TemporaryDirectory() as d:
+            m = os.path.join(d, "m.tsv")
+            with open(m, "w", encoding="utf-8") as f:
+                f.write("甲乙\tㄐㄧㄚˇ ㄧˋ\tx\n")
+            high = {("ㄐㄧㄚˇ-ㄧˇ", "甲乙"): -5.5, ("ㄐㄧㄚˇ-ㄧˇ-x", "甲乙"): -5.0}   # the word's highest score over its rows
+            self.assertEqual(B.tail_rows({"甲乙"}, SCORES, SYLLABLES, manual=m, slang=os.path.join(d, "absent.tsv"), fixed=high),
+                             ["ㄐㄧㄚˇ-ㄧˋ\t甲乙\t-5.0\tmanual\n"])
 
     def test_a_reading_the_base_has_stops_the_build_with_the_line(self):
         with self.assertRaisesRegex(SystemExit, r"m\.tsv:2: '甲乙' already has the reading ㄐㄧㄚˇ-ㄧˇ"):
-            manual("# c\n甲乙\tㄐㄧㄚˇ ㄧˇ\tx\n", taken={"甲乙"}, refill={"甲乙"}, fixed=self.BASE)
+            manual("# c\n甲乙\tㄐㄧㄚˇ ㄧˇ\tx\n", taken={"甲乙"}, refill={"甲乙": -9.0}, fixed=self.BASE)
 
     def test_a_pair_in_sandhi_add_stops_the_build_main_row_or_sandhi_row(self):
         # 一 before a first tone gets the sandhi row ㄧˋ: either row colliding with sandhi-add.tsv stops the build
         for pair in (("ㄧ-ㄒㄧㄡ-ㄍㄜ", "一休哥"), ("ㄧˋ-ㄒㄧㄡ-ㄍㄜ", "一休哥")):
             with self.assertRaisesRegex(SystemExit, r"m\.tsv:1: .*sandhi-add\.tsv", msg=pair[0]):
-                manual("一休哥\tㄧ ㄒㄧㄡ ㄍㄜ\tx\n", taken={"一休哥"}, refill={"一休哥"}, fixed={("ㄐㄧㄚˇ-ㄧˇ", "一休哥"), pair})
+                manual("一休哥\tㄧ ㄒㄧㄡ ㄍㄜ\tx\n", taken={"一休哥"}, refill={"一休哥": -9.0}, fixed={("ㄐㄧㄚˇ-ㄧˇ", "一休哥"), pair})
 
     def test_a_word_outside_refill_still_stops_the_build(self):
         with self.assertRaises(SystemExit):     # in a pack, a name layer or the overlay: taken but not refill
@@ -70,7 +82,7 @@ class ManualRefill(unittest.TestCase):
         fixed = B.fixed_pairs(base)
         with open(B.SANDHI_ADD, encoding="utf-8") as f:
             sandhi = [tuple(l.split("\t")[:2]) for l in f]
-        self.assertTrue(sandhi and set(sandhi) <= fixed)
+        self.assertTrue(sandhi and set(sandhi) <= fixed.keys())
         self.assertIn(("ㄨㄟˊ-ㄕㄚˊ", "為啥"), fixed)
 
 
@@ -791,7 +803,11 @@ class ShippedOverlay(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             without = B.tail_rows(*args, slang=os.path.join(d, "absent.tsv"), fixed=fixed)
         layers = B.other_layers()
-        self.assertEqual(without, B.manual_rows(args[0] | layers, *args[1:], refill={w for _, w in fixed} - layers, fixed=fixed))
+        best = {}
+        for (_, w), sc in fixed.items():
+            if w not in layers:
+                best[w] = max(sc, best.get(w, sc))
+        self.assertEqual(without, B.manual_rows(args[0] | layers, *args[1:], refill=best, fixed=fixed))
         self.assertNotIn("slang", {r.rstrip("\n").split("\t")[3] for r in without})
 
 

@@ -395,21 +395,32 @@ def colloq_rows(rows, table=None, penalty=None):
 
 
 def fixed_pairs(base, sandhi=SANDHI_ADD):
-    """基底與 sandhi-add.tsv 的（讀音, 詞）：手動詞補基底詞的讀音時，產生的每一對都不能在這裡（docs/spec/lexicon-and-packs.md §2.9）。
+    """基底與 sandhi-add.tsv 的（讀音, 詞）→ 分數：手動詞補基底詞的讀音時，產生的每一對都不能在這裡（docs/spec/lexicon-and-packs.md §2.9），
+    補的讀音的分數不低於這個詞在這裡的最高分（tail_rows 的 refill）。
     sandhi-add.tsv 接在 overlay-add.tsv 後面當同一份疊加層文字，同一對出現在兩個檔的一般列，引擎載入失敗；colloq 列不查重複，
     但 build_sandhi.py 重產時會拿掉 sandhi-add.tsv 的那一列。"""
-    pairs = {("-".join(syls), w) for syls, entries in base.by_reading.items() for w, _ in entries}
+    pairs = {}
+    for syls, entries in base.by_reading.items():
+        for w, sc in entries:
+            k = ("-".join(syls), w)
+            pairs[k] = max(sc, pairs.get(k, sc))
     with open(sandhi, encoding="utf-8") as f:
-        pairs |= {tuple(l.split("\t")[:2]) for l in f if "\t" in l}
+        for l in f:
+            p = l.rstrip("\n").split("\t")
+            if len(p) >= 3:
+                pairs[(p[0], p[1])] = max(float(p[2]), pairs.get((p[0], p[1]), float(p[2])))
     return pairs
 
 
-def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG, fixed=frozenset()):
-    """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、兩個詞包或手動詞的詞。
+def tail_rows(taken, scores, syllables, manual=MANUAL, slang=SLANG, fixed=None):
+    """overlay-add.tsv 的檔尾：手動詞（manual），再接網路用語（slang，檔案存在才有）。網路用語也不能是名單層、任何 *-add.tsv 詞包或手動詞的詞。
     fixed＝fixed_pairs(base)：手動詞可以是基底詞（補讀音），只要它不在詞包、名單層，產生的（讀音, 詞）也都不在 fixed；空集合時手動詞照舊不能是基底詞。"""
     layers = other_layers()   # 名單層與每一個 *-add.tsv 詞包：同詞同讀音和它們重複，引擎整個載入失敗
     taken = taken | layers
-    refill = {w for _, w in fixed} - layers
+    fixed, refill = fixed or {}, {}
+    for (_, w), sc in fixed.items():
+        if w not in layers:
+            refill[w] = max(sc, refill.get(w, sc))
     rows = manual_rows(taken, scores, syllables, manual, refill=refill, fixed=fixed)
     if os.path.exists(slang):
         rows += slang_behind(manual_rows(taken | {r.split("\t")[1] for r in rows}, scores, syllables, slang, "slang"), boosted_words(slang))
@@ -775,12 +786,14 @@ def names_words(path=NAMES):
         return {l.split("\t")[1] for l in f if "\t" in l}
 
 
-def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual", refill=frozenset(), fixed=frozenset()):
+def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual", refill=None, fixed=frozenset()):
     """overlay-manual.tsv 的列（詞、讀音、備註；# 開頭與空行略過），照檔案順序。每列都要：三欄（網路用語可以有第四欄，見最後）；詞是純漢字、字數在 scores 裡（2 字以上）、
     不在 taken（基底、疊加層、詞包）；讀音的音節數等於字數，每個音節都是基底有的音節。產生的列（含 overlay_rows 自動加的變調列）
     同一個（讀音, 詞）不能出現兩次。不符就中止並指出行號。分數＝scores[字數]＋MANUAL_BONUS＋可選的第四欄「加分」（只有網路用語，tag="slang"；
     0.5 的倍數、0 < 加分 ≤ BOOST_MAX；網路用語輸給沒人這樣講的組合時加分，見 docs/spec/lexicon-and-packs.md §2.10）。
-    refill 裡的詞（基底詞，不在詞包與名單層）在 taken 裡也收，但產生的每一個（讀音, 詞）都不能在 fixed（基底與 sandhi-add.tsv）：這種列是補讀音（§2.9）。"""
+    refill（詞 → 它在基底與 sandhi-add.tsv 的最高分）裡的詞（基底詞，不在詞包與名單層）在 taken 裡也收，但產生的每一個（讀音, 詞）都不能在
+    fixed（基底與 sandhi-add.tsv）：這種列是補讀音（§2.9），分數取上面的分數與那個最高分的較大者（同一個詞換一個讀音，常用的程度不變）。"""
+    refill = refill or {}
     rows, seen = [], set()
     with open(path, encoding="utf-8-sig") as f:
         lines = f.read().splitlines()
@@ -802,7 +815,10 @@ def manual_rows(taken, scores, syllables, path=MANUAL, tag="manual", refill=froz
             ok = bool(MANUAL_WORD.match(w)) and len(w) in scores and len(syls) == len(w) and all(s in syllables for s in syls) and (w not in taken or w in refill)
         if not ok:
             raise SystemExit(f"{path}:{n}: bad manual row")
-        for r in overlay_rows(w, syls, round(scores[len(w)] + MANUAL_BONUS + boost, 8), tag):
+        score = scores[len(w)] + MANUAL_BONUS + boost
+        if w in refill:
+            score = max(score, refill[w])
+        for r in overlay_rows(w, syls, round(score, 8), tag):
             key = tuple(r.split("\t")[:2])
             if key in fixed:
                 raise SystemExit(f"{path}:{n}: {w!r} already has the reading {key[0]} in the base lexicon or sandhi-add.tsv (sandhi rows count)")
