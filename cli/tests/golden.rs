@@ -473,6 +473,7 @@ fn predict_no_kn_scores_differently_from_the_golden() {
 /// three strengths with the earlier file).
 /// Rows 16-19 (2026-11-25) are the two base words whose manual row adds a reading the base lacks (§2.9 of docs/spec/lexicon-and-packs.md):
 /// 為啥 under ㄨㄟˋ ㄕㄚˊ and 不足為外人道 under ㄨㄟˋ, alone and in a sentence; measured first at all nine settings, so the misses are unchanged.
+/// Rows 20-21 (2026-11-25): 部署 under ㄅㄨˋ ㄕㄨˇ (the reported typo, row 199 of eval/dev/user-reported.txt), alone and in that sentence; first at all nine.
 #[test]
 fn manual_words_come_first_in_the_shipping_setting() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
@@ -498,7 +499,7 @@ fn manual_words_come_first_in_the_shipping_setting() {
             args.extend(["--rowstats", stats.to_str().unwrap()]);
             run(&args);
             let got = std::fs::read_to_string(&stats).unwrap();
-            assert_eq!(got.lines().count(), 19, "{profile} {level}");
+            assert_eq!(got.lines().count(), 21, "{profile} {level}");
             let got: Vec<&str> = got.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "0").map(|f| f[0]).collect();
             assert_eq!(got, misses, "{profile} colloquial {with_colloquial} {level}: rows whose manual word is not first");
         }
@@ -510,6 +511,8 @@ fn manual_words_come_first_in_the_shipping_setting() {
 /// shipping packs and no rerank. That is what the App sends when the rerank, which runs in the background, has not finished before the next key; with
 /// the rerank the shipping CLI already sent 為啥 before the row existed (it was the n-gram's third in chat and second in formal, under 位啥), so only
 /// this setting tells whether the row is there. The base reading ㄨㄟˊ keeps giving the same word. No `--colloquial-core`: without `--tinylm` that term is off.
+/// 部署 under ㄅㄨˋ ㄕㄨˇ (2026-11-25) is the n-gram's first only because a refill row takes the base word's own score when that is higher (§2.9): with the
+/// length score plus the bonus (-6.42 against the base -5.19) the chat n-gram gave 部屬.
 #[test]
 fn manual_reading_refills_are_the_ngram_first_choice() {
     let dir = std::env::temp_dir().join(format!("shanjie-refill-{}", std::process::id()));
@@ -517,7 +520,7 @@ fn manual_reading_refills_are_the_ngram_first_choice() {
     let (rows, stats) = (dir.join("rows.txt"), dir.join("rows.rowstats"));
     std::fs::write(
         &rows,
-        "|為啥|ㄨㄟˋ ㄕㄚˊ\n|為啥|ㄨㄟˊ ㄕㄚˊ\n|不足為外人道|ㄅㄨˋ ㄗㄨˊ ㄨㄟˋ ㄨㄞˋ ㄖㄣˊ ㄉㄠˋ\n|不足為外人道|ㄅㄨˋ ㄗㄨˊ ㄨㄟˊ ㄨㄞˋ ㄖㄣˊ ㄉㄠˋ\n",
+        "|為啥|ㄨㄟˋ ㄕㄚˊ\n|為啥|ㄨㄟˊ ㄕㄚˊ\n|不足為外人道|ㄅㄨˋ ㄗㄨˊ ㄨㄟˋ ㄨㄞˋ ㄖㄣˊ ㄉㄠˋ\n|不足為外人道|ㄅㄨˋ ㄗㄨˊ ㄨㄟˊ ㄨㄞˋ ㄖㄣˊ ㄉㄠˋ\n|部署|ㄅㄨˋ ㄕㄨˇ\n|部署|ㄅㄨˋ ㄕㄨˋ\n",
     )
     .unwrap();
     let lm = lm_path();
@@ -526,7 +529,7 @@ fn manual_reading_refills_are_the_ngram_first_choice() {
         run(&["--lm", &lm, "--profile", profile, "--context", "--packs", "acg,it,meme,beauty", "--rows", rows.to_str().unwrap(), "--rowstats", stats.to_str().unwrap()]);
         let got = std::fs::read_to_string(&stats).unwrap();
         let misses: Vec<&str> = got.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "0").map(|f| f[0]).collect();
-        assert_eq!(got.lines().count(), 4, "{profile}");
+        assert_eq!(got.lines().count(), 6, "{profile}");
         assert!(misses.is_empty(), "{profile}: rows whose word is not the n-gram's first choice: {misses:?}");
     }
     std::fs::remove_dir_all(&dir).unwrap();
