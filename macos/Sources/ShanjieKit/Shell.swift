@@ -1820,6 +1820,7 @@ public final class Session {
         // Rule 1o there (docs/spec/keys-and-composition.md §9.2): Option with a key of the main block types the character the key gives without Option, as Apple
         // Zhuyin's half-width mode does (measured 2026-11-20); the shell sends it itself and eats the key.
         if shell.engineAscii && !shell.composing {
+            if let event, !event.modifierFlags.contains(.option) { return asciiSpacing(event) }
             guard let event, event.modifierFlags.contains(.option), let key = Self.asciiKey(event), let c = UnicodeScalar(key.ch) else { return false }
             spacingPrev = nil  // as after any key this state passes on
             client.insertText(String(Character(c)), replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -1859,6 +1860,29 @@ public final class Session {
               let chars = option ? event.characters(byApplyingModifiers: flags.intersection(.shift)) : event.characters, chars.unicodeScalars.count == 1, let c = chars.unicodeScalars.first,
               (0x21...0x7E).contains(c.value) else { return nil }
         return ShanjieKey(kind: KeyMap.char, ch: c.value, modifiers: 0)
+    }
+
+    /// docs/spec/english-mixed.md §9 (英數狀態): a key in the English state with nothing composed and no Option. With 中英文之間自動加空格 on, a letter or
+    /// digit typed right after a Han character goes in as " " + the character, inserted by the shell (the key is eaten); every other key passes on
+    /// as before. p: known and not Han -> used as is (no read, so a run of English typed fast in an app that updates its text late gets one space);
+    /// unknown or Han -> read again from the client (a click may have moved the cursor), unless learning is paused. A printable key that passes on
+    /// sets p to its character; any other key makes p unknown. Terminals and code editors with a Vim mode (`CJKSpacing.asciiExcluded`) always pass on;
+    /// the bundle is the one read now, or `knownBundle` when that is nil or empty, and with neither the key passes on. Off: nothing changes.
+    private func asciiSpacing(_ event: NSEvent) -> Bool {
+        guard shell.spacingOn else { return false }
+        guard let key = Self.asciiKey(event), let scalar = UnicodeScalar(key.ch) else { spacingPrev = nil; return false }
+        let read = client.bundleIdentifier
+        guard let bundle = (read?.isEmpty == false ? read : knownBundle), !CJKSpacing.asciiExcluded(bundle) else { spacingPrev = nil; return false }
+        let c = Character(scalar)
+        var p = spacingPrev
+        if p.map(CJKSpacing.isHan) ?? true {
+            p = shell.learningPause(bundle: read) != nil ? nil : leftContext(bundle: read).last
+        }
+        spacingPrev = c
+        let text = CJKSpacing.apply(previous: p, text: String(c))
+        guard text.count > 1 else { return false }
+        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        return true
     }
 
     /// docs/spec/keys-and-composition.md §9.1: a `flagsChanged` event is never consumed (the app sees Shift as always); a lone tap switches.

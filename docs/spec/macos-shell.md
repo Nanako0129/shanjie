@@ -130,7 +130,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - `modifiers`：bit0 Shift、bit1 Control、bit2 Option、bit3 Command、bit4 Caps Lock。
 - **表外的鍵**（數字鍵盤、功能鍵等）與 IMK 傳入的 `nil` 事件不送進核心：組字區有字時先 `finish(mode: 0)` 送出，再回傳「不處理」；組字區空時直接回傳「不處理」。
 - **例外：Page Up／Down**。`KeyMap.pageKeys` 把 `kVK_PageUp`（116）、`kVK_PageDown`（121）對到 14／15，但 `KeyMap.translate` 不含它們；`Session.handle` 只在直排候選窗開著（最後套用的輸出 `candidate_vertical` 為 1）而且沒有任何修飾鍵（Shift、Control、Option、Command、Caps Lock）時才轉送，其餘情況（橫排候選、網格、組字中、未完成音節、預測列、組字區空、帶修飾鍵）都走上一條的表外鍵路徑，行為和沒有這個功能時完全相同。核心收到 14／15 而當下不是直排候選窗時不處理、不改狀態、不送出（`handled` 0）。
-- 英文狀態（單按 Shift 切換）下組字區空時，按鍵直接交給 App，不經過核心；組字中且核心有影子時以 `event.characters` 產生字元鍵。例外是帶 Option 的字元鍵（規則 1o 的那些鍵）：字元用 `event.characters(byApplyingModifiers:)` 只套事件的 Shift 取（不用 `charactersIgnoringModifiers`，它在 Option 與 Shift 同時按著時不帶 Shift），組字區空時殼自己送出並吃掉這一鍵，組字中且核心有影子時當字元鍵送進核心，組字中而核心沒有影子時吃掉。見 `docs/spec/keys-and-composition.md` §9.2 與 `docs/spec/english-mixed.md`。
+- 英文狀態（單按 Shift 切換）下組字區空時，按鍵直接交給 App，不經過核心（例外：「中英文之間自動加空格」開著時，漢字後面的第一個英數字由殼以 `insertText` 補空白送出，`docs/spec/english-mixed.md` §9「英數狀態」）；組字中且核心有影子時以 `event.characters` 產生字元鍵。例外是帶 Option 的字元鍵（規則 1o 的那些鍵）：字元用 `event.characters(byApplyingModifiers:)` 只套事件的 Shift 取（不用 `charactersIgnoringModifiers`，它在 Option 與 Shift 同時按著時不帶 Shift），組字區空時殼自己送出並吃掉這一鍵，組字中且核心有影子時當字元鍵送進核心，組字中而核心沒有影子時吃掉。見 `docs/spec/keys-and-composition.md` §9.2 與 `docs/spec/english-mixed.md`。
 - 中文狀態下帶 Option 的字元鍵照上面的表送進核心（`ch` 是鍵位不按 Shift 的字元，`modifiers` 帶 bit2，有 Shift 再帶 bit0），由核心的規則 1o 處理（`docs/spec/keys-and-composition.md` §4.1、§8.1）。
 - 按 Enter 時（候選窗沒開），送進核心前先讓畫面上的組字追上正在跑的語意校正（最多等 `ENTER_RERANK_WAIT_MS`），見 `docs/spec/semantic-rerank.md`。
 
@@ -142,7 +142,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 `Session.apply` 的順序：
 
-1. `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`；「中英文之間自動加空格」開著時先交給 `CJKSpacing.apply`（`docs/spec/english-mixed.md`）。
+1. `commit` 非空：`insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))`；「中英文之間自動加空格」開著時先交給 `CJKSpacing.apply`（`docs/spec/english-mixed.md`）。英文狀態、組字區空時另有一條補空白的路徑，不經過這裡（`docs/spec/english-mixed.md` §9「英數狀態」）。
 2. `preedit` 非空：`setMarkedText`，整段單線底線，中英混打的英文段改粗底線（範圍夾在文字長度內，核心給錯範圍也不會丟例外）；選取範圍 `NSRange(location: cursor_utf16, length: 0)`。`preedit` 變成空而原本有組字時，用空字串清掉。組字字串、游標、英文段的起點與長度都和這個 session 上一次送出的相同、而且這次沒有 `commit` 時，不重送 `setMarkedText`（例如 Tab 進入或移動預測列）：Chromium 先把輸入法吃下的鍵交給網頁（keyCode 229、`key` 保留原鍵），再套用這次的組字；網頁在 Tab 上移走焦點時（對話框的焦點陷阱），遲到的組字會讓欄位拿回焦點、多出一份文字。用空字串清掉組字時一併忘記上一次送出的值，所以之後打出相同的組字照樣會送；有 `commit` 時一定重送，因為 `insertText` 已經換掉 client 的 marked text。
 3. `handled = 0` 且 `commit` 為空是純直通（核心狀態沒變）：殼完全不碰 client，App 看到的和沒按過一樣。`handled = 0` 但有 `commit`：先套用再回傳 `false` 讓 App 處理這個鍵。
 4. 候選：`candidates` 為空且沒有英文段提示，或被「瀏覽器第一個字不顯示預測」隱藏（`docs/spec/prediction.md`）時，隱藏候選窗並清掉游標行快取；否則取游標所在行矩形（同一個 `preedit` 與游標的重複輸出重用上一次的答案，因為問 client 是同步 IPC）交給候選窗。英文段開著時，候選窗的位置改以那一段的起點為準，並顯示一行提示（`docs/spec/english-mixed.md`）。

@@ -220,3 +220,140 @@ final class CJKSpacingShellTests: XCTestCase {
         XCTAssertEqual(MenuEntry.Text.spacingNote, "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。")
     }
 }
+
+/// docs/spec/english-mixed.md §9 (英數狀態): with 中英文之間自動加空格 on, the first letter or digit typed in the English state (single Shift) right
+/// after a Han character goes in as " " + the character, inserted by the shell; everything else passes on as before.
+@MainActor
+final class CJKSpacingAsciiTests: XCTestCase {
+    private var resources: URL!
+    private var uptimeNow: TimeInterval = 0
+    private var time: TimeInterval = 100
+    private let leftShift: UInt16 = 56
+
+    override func setUp() async throws {
+        resources = try XCTUnwrap(TestData.resources())
+    }
+
+    final class Gate { var secure = false }
+
+    private func makeShell(spacing: Bool?, gate: Gate = Gate()) -> Shell {
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { gate.secure }, layoutStore: MemoryLayoutStore(), learningDirectory: nil,
+                          dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(),
+                          quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
+                          rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
+                          appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(spacing),
+                          shiftToggleStore: MemoryShiftToggleStore(true), shiftHint: FakeShiftHint())
+        shell.mouseAgo = { 1000 }
+        shell.uptime = { [unowned self] in self.uptimeNow }
+        XCTAssertNotNil(shell.engine)
+        return shell
+    }
+
+    private func shift(_ c: Controller, down: Bool, at: TimeInterval) {
+        uptimeNow = at
+        let flags: NSEvent.ModifierFlags = down ? NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x2) : []
+        _ = c.session.handle(Keys.event(leftShift, flags: flags, type: .flagsChanged, time: at))
+    }
+
+    /// A lone Shift tap: into the English state from Chinese.
+    private func toEnglish(_ c: Controller) {
+        time += 5
+        shift(c, down: true, at: time)
+        shift(c, down: false, at: time + 0.1)
+        XCTAssertTrue(c.session.shell.engineAscii, "a lone Shift tap switched to English")
+    }
+
+    private func key(_ c: Controller, _ ch: Character, flags: NSEvent.ModifierFlags = []) -> Bool {
+        c.session.handle(Keys.event(Keys.code(for: Character(ch.lowercased())), flags: flags, characters: String(ch)))
+    }
+
+    private func inserts(_ c: Controller) -> [String] {
+        c.client.calls.compactMap { if case .insert(let s) = $0 { s } else { nil } }
+    }
+
+    private func english(_ spacing: Bool? = true, before: String, bundle: String? = "com.apple.TextEdit", gate: Gate = Gate()) -> Controller {
+        let c = Controller(makeShell(spacing: spacing, gate: gate))
+        c.client.bundle = bundle
+        c.client.before = before
+        c.session.activate()
+        toEnglish(c)
+        return c
+    }
+
+    func testHanBeforeTheCursorGetsOneSpaceThenTheRunPassesOn() {
+        let c = english(before: "測試")
+        XCTAssertTrue(key(c, "A", flags: .shift), "the first letter is eaten")
+        XCTAssertEqual(inserts(c), [" A"])
+        XCTAssertFalse(key(c, "1"), "the next key passes on")
+        XCTAssertEqual(inserts(c), [" A"])
+    }
+
+    /// An app that updates its text late still answers 測試 after A went in: p is A (known, not Han), so B is not read and passes on.
+    func testALateClientDoesNotGetASecondSpace() {
+        let c = english(before: "測試")
+        XCTAssertTrue(key(c, "A", flags: .shift))
+        c.client.replyOverride = "測試"
+        let reads = c.client.reads
+        XCTAssertFalse(key(c, "B", flags: .shift))
+        XCTAssertEqual(inserts(c), [" A"])
+        XCTAssertEqual(c.client.reads, reads, "no read: p was known")
+    }
+
+    func testNoHanBeforeTheCursorPassesOn() {
+        for before in ["Claude", "測試，", "測試 ", ""] {
+            let c = english(before: before)
+            XCTAssertFalse(key(c, "A", flags: .shift), "before: \(before)")
+            XCTAssertEqual(inserts(c), [], "before: \(before)")
+        }
+    }
+
+    func testPausedLearningReadsNothingAndPassesOn() {
+        let gate = Gate()
+        gate.secure = true
+        let c = english(before: "測試", gate: gate)
+        XCTAssertFalse(key(c, "A", flags: .shift))
+        XCTAssertEqual(inserts(c), [])
+        XCTAssertEqual(c.client.reads, 0)
+    }
+
+    func testOffPassesOn() {
+        let c = english(nil, before: "測試")
+        XCTAssertFalse(key(c, "A", flags: .shift))
+        XCTAssertEqual(inserts(c), [])
+    }
+
+    /// Terminals and code editors with a Vim mode: a letter may be a command.
+    func testExcludedAppsPassOn() {
+        for bundle in ["com.apple.Terminal", "com.microsoft.VSCode", "com.jetbrains.intellij", "md.obsidian"] {
+            let c = english(before: "測試", bundle: bundle)
+            XCTAssertFalse(key(c, "x"), bundle)
+            XCTAssertEqual(inserts(c), [], bundle)
+        }
+    }
+
+    /// A nil bundle now: the one known from activate decides the exclusion; with none known the key passes on. The learning gate still takes the
+    /// bundle read now, and a nil bundle pauses learning (docs/spec/learning.md §3), so even a known TextEdit gets no read and no space.
+    func testANilBundleFallsBackToTheKnownOne() {
+        let terminal = english(before: "測試", bundle: "com.apple.Terminal")
+        terminal.client.bundle = nil
+        XCTAssertFalse(key(terminal, "A", flags: .shift))
+        XCTAssertEqual(inserts(terminal), [])
+        let none = english(before: "測試", bundle: nil)
+        XCTAssertFalse(key(none, "A", flags: .shift))
+        XCTAssertEqual(inserts(none), [])
+        let textEdit = english(before: "測試")
+        textEdit.client.bundle = nil
+        let reads = textEdit.client.reads
+        XCTAssertFalse(key(textEdit, "A", flags: .shift))
+        XCTAssertEqual(inserts(textEdit), [])
+        XCTAssertEqual(textEdit.client.reads, reads, "a nil bundle pauses learning: no read")
+    }
+
+    /// Option keeps rule 1o: the character goes in by itself, no space.
+    func testOptionKeepsItsRule() {
+        let c = english(before: "測試")
+        XCTAssertTrue(key(c, "a", flags: .option))
+        XCTAssertEqual(inserts(c), ["a"])
+    }
+}
