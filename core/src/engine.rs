@@ -3790,6 +3790,21 @@ impl Engine {
         self.pend_prev.iter().chain([&self.pend]).flatten().flatten().collect()
     }
 
+    /// Measurement hook (not in the C ABI): the unfinished units in typing order, each one's symbols in initial, medial, final order;
+    /// empty with nothing unfinished. Reads only.
+    #[doc(hidden)]
+    pub fn pending_units(&self) -> Vec<String> {
+        self.pend_prev.iter().chain([&self.pend]).map(|u| u.iter().flatten().collect::<String>()).filter(|u| !u.is_empty()).collect()
+    }
+
+    /// Measurement hook (not in the C ABI): hands `f` what `recompute_pred` queries with: the prediction index, the model and the
+    /// profile's scoring. `None` without a model. Reads only; no second index is built.
+    #[doc(hidden)]
+    pub fn with_predict_parts<R>(&self, f: impl FnOnce(&crate::predict::Index, &Lm, crate::lm::Scoring) -> R) -> Option<R> {
+        let st = self.lm.as_ref()?;
+        Some(f(st.capped.predict_index(&st.lm), &st.lm, st.lm.scoring(self.profile)))
+    }
+
     /// The composition as shown: the display text with the unfinished symbols at the cursor, the cursor after
     /// them in UTF-16 code units, and the open English run's (start, length) in UTF-16 code units (0, 0 without a run).
     fn shown(&self) -> (String, u32, (u32, u32)) {
@@ -5853,6 +5868,64 @@ mod english_table_tests {
         // The shipped files, one at a time: each is well formed alone, and each adds lines the other lacks.
         let (a, b) = (english_table_of(&ENGLISH_FILES[..1]).unwrap(), english_table_of(&ENGLISH_FILES[1..]).unwrap());
         assert!(a.len() > 200 && b.len() >= 5 && a.len() + b.len() == english_table().len());
+    }
+}
+
+/// The two measurement hooks, on the real lexicon and model (data/lm/bigram.sjlm; fails loudly without it, never skips).
+#[cfg(test)]
+mod measure_hook_tests {
+    use super::*;
+
+    fn engine() -> Engine {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut e = Engine::new(&root.join("data/lexicon"), Layout::Standard).unwrap();
+        e.load_lm(&root.join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required");
+        e.set_abbreviation(true).unwrap();
+        e
+    }
+    fn typ(e: &mut Engine, symbols: &str) {
+        for c in symbols.chars() {
+            e.key(Key::ch(Layout::Standard.key_of_symbol(c).unwrap(), 0)).unwrap();
+        }
+    }
+
+    /// The units the abbreviation composer really makes (docs/spec/prediction.md §6): a symbol goes into the last unit's empty column,
+    /// an occupied column opens the next unit.
+    #[test]
+    fn pending_units_are_the_composers_units() {
+        let mut e = engine();
+        assert!(e.pending_units().is_empty(), "nothing unfinished");
+        for (keys, want) in [("ㄧㄍ", vec!["ㄍㄧ"]), ("ㄧㄑㄧ", vec!["ㄑㄧ", "ㄧ"]), ("ㄉㄚㄢ", vec!["ㄉㄚ", "ㄢ"]), ("ㄋㄔ", vec!["ㄋ", "ㄔ"])] {
+            e.reset(ResetMode::Discard);
+            typ(&mut e, keys);
+            assert_eq!(e.pending_units(), want, "{keys}");
+        }
+        e.reset(ResetMode::Discard);
+        assert!(e.pending_units().is_empty(), "after a reset");
+    }
+
+    /// After `reset` and `set_left_context` only the cursor start is queried, so the row is one `predict` call of the hook's parts.
+    #[test]
+    fn predict_parts_give_the_engines_own_row() {
+        let mut e = engine();
+        let left = "我想喝一杯";
+        for (keys, units, mode) in [("ㄋㄔ", vec!["ㄋ", "ㄔ"], Mode::PA), ("ㄋㄞ", vec!["ㄋㄞ"], Mode::P)] {
+            e.reset(ResetMode::Discard);
+            e.set_left_context(left);
+            typ(&mut e, keys);
+            let own: Vec<(String, Vec<String>)> = e.pred.iter().map(|p| (p.word.clone(), p.reading.clone())).collect();
+            assert!(!own.is_empty(), "{keys}: the engine shows a row");
+            let units: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
+            let got = e
+                .with_predict_parts(|idx, lm, cfg| {
+                    assert_eq!(cfg, lm.scoring(Profile::Chat));
+                    predict(idx, lm, cfg, history(&context_key(left), lm), &units, mode, 9)
+                })
+                .unwrap();
+            assert_eq!(got.into_iter().map(|(w, _, _, r)| (w, r)).collect::<Vec<_>>(), own, "{keys}");
+        }
+        let bare = Engine::with_lexicon(Arc::new(Lexicon::parse("ㄅㄚ 爸 -1.0\n").unwrap()), Layout::Standard);
+        assert!(bare.with_predict_parts(|_, _, _| ()).is_none(), "no model, no parts");
     }
 }
 

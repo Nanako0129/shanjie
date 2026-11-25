@@ -1,14 +1,14 @@
 use cli::common::{dev_rows, dev_rows_raw, format_rowstats, levenshtein, load_accept, load_forms, load_forms_v2, load_lenient, read_rows, read_rows_raw, root, three_field_rows};
 use core::colloquial::{self, Colloquial};
-use core::engine::{capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_MEME, PACK_OOV, PACK_QUOTES};
+use core::engine::{Engine, Key, Layout, ResetMode, capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_MEME, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
 use core::lm::{decode_from_fuzzy_scored, history, pool_order, rerank_pool, CappedLexicon, Demote, Lm, Profile, RecurGrams};
 use core::tinylm::{manual_mask, KnPairing, RerankLevel, TinyLm, TinyLmError, BATCH, TOPK};
-use core::predict::{parse_units, predict, units_of, units_str, Index, Mode};
+use core::predict::{parse_units, predict, units_of, units_str, Index, Mode, Unit};
 use core::{decode_beam, Error, Lexicon, NoLearning, Syls, BEAM_S1};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
@@ -1229,8 +1229,331 @@ fn run_predict(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The three abbreviated typing styles `--abbr` measures: A initials only, B no initial, C no tone key.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Abbr {
+    A,
+    B,
+    C,
+}
+
+const ABBR_TONES: [char; 4] = ['ˊ', 'ˇ', 'ˋ', '˙'];
+
+fn is_zhuyin(c: char) -> bool {
+    ('ㄅ'..='ㄩ').contains(&c)
+}
+
+/// The symbols typed for one syllable of a reading. No style types the tone (the neutral mark included). A keeps the first symbol (the
+/// initial, or the first symbol of a syllable without one); B drops the initial unless it is the whole syllable; C keeps every symbol.
+fn abbr_syllable(syl: &str, style: Abbr) -> String {
+    let s: Vec<char> = syl.chars().filter(|c| !ABBR_TONES.contains(c)).collect();
+    let initial = s.first().is_some_and(|c| ('ㄅ'..='ㄙ').contains(c));
+    match style {
+        Abbr::A => s.iter().take(1).collect(),
+        Abbr::B if initial && s.len() > 1 => s[1..].iter().collect(),
+        _ => s.into_iter().collect(),
+    }
+}
+
+/// Greedy longest match, left to right: (start, length, found). `has(start, length)` says whether the lexicon has the characters with the
+/// syllables of that span as one entry. A position where not even the single character is an entry is one piece of length 1, not found.
+fn abbr_segment(n: usize, has: impl Fn(usize, usize) -> bool) -> Vec<(usize, usize, bool)> {
+    let (mut out, mut i) = (Vec::new(), 0);
+    while i < n {
+        let len = (1..=n - i).rev().find(|&l| has(i, l));
+        out.push((i, len.unwrap_or(1), len.is_some()));
+        i += len.unwrap_or(1);
+    }
+    out
+}
+
+/// Style B's offline sets (no engine): every lexicon entry under the `-`-joined B rewriting of its reading, each list in the prediction
+/// index's order (-lp, word length, reading, word) with a word listed once, at its best compatible reading. `readings` is
+/// `CappedLexicon::readings`; a reading with a syllable that has no Zhuyin symbol is left out, as in the index.
+fn abbr_b_sets<'a>(readings: impl Iterator<Item = (Vec<&'a str>, Vec<(&'a str, f64)>)>) -> HashMap<String, Vec<&'a str>> {
+    let mut sets: HashMap<String, Vec<(f64, usize, String, &str)>> = HashMap::new();
+    for (key, words) in readings {
+        let units: Vec<String> = key.iter().map(|s| abbr_syllable(s, Abbr::B)).collect();
+        if units.iter().any(String::is_empty) {
+            continue;
+        }
+        let list = sets.entry(units.join("-")).or_default();
+        list.extend(words.into_iter().map(|(w, lp)| (lp, w.chars().count(), key.join("-"), w)));
+    }
+    sets.into_iter()
+        .map(|(k, mut v)| {
+            v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2)).then(a.3.cmp(b.3)));
+            let mut seen = std::collections::HashSet::new();
+            (k, v.into_iter().filter(|e| seen.insert(e.3)).map(|e| e.3).collect())
+        })
+        .collect()
+}
+
+/// 1-based rank of `word` in the offline set of its B units; `None` when the set does not hold it.
+fn abbr_b_rank(sets: &HashMap<String, Vec<&str>>, b_units: &[String], word: &str) -> Option<usize> {
+    sets.get(&b_units.join("-"))?.iter().position(|w| *w == word).map(|p| p + 1)
+}
+
+/// The engine `--abbr` types into: `replay::build_engine`'s (standard layout, the App's default packs, chat, English mixing and learning off)
+/// without the small model, the colloquial table and the English table (none of them is read by the row of unfinished units), with the
+/// prediction row and the abbreviation composer on.
+fn abbr_engine(lm: &Path) -> Result<Engine, String> {
+    let mut e = cli::replay::build_engine_packs(&root(), lm, None, None, Profile::Chat, false, true, cli::replay::PACKS)?;
+    e.set_prediction(true).map_err(|_| "cannot switch the prediction row on".to_string())?;
+    e.set_abbreviation(true).map_err(|_| "cannot switch the abbreviation composer on".to_string())?;
+    Ok(e)
+}
+
+/// One word typed from a clean engine: `reset`, the left context, then the units' symbols as keys of the standard layout. Returns the
+/// units the composer made (`Engine::pending_units`) and the prediction row after the last key.
+fn abbr_type(e: &mut Engine, left: &str, units: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
+    e.reset(ResetMode::Discard);
+    e.set_left_context(left);
+    let mut row = Vec::new();
+    for c in units.iter().flat_map(|u| u.chars()) {
+        let k = Layout::Standard.key_of_symbol(c).ok_or("a reading holds a symbol with no key")?;
+        let o = e.key(Key::ch(k, 0)).map_err(|_| "engine error on a key".to_string())?;
+        if o.selected.is_some() || !o.commit.is_empty() {
+            return Err("a Zhuyin key opened a window or committed text".into());
+        }
+        row = o.candidates;
+    }
+    let got = e.pending_units();
+    // The composer may regroup the symbols, never lose one: anything else is not the abbreviation composer (the caller must not count it as a merge).
+    let sorted = |u: &[String]| {
+        let mut v: Vec<char> = u.iter().flat_map(|s| s.chars()).collect();
+        v.sort_unstable();
+        v
+    };
+    if sorted(&got) != sorted(units) {
+        return Err("the composer did not keep the typed symbols as unfinished units".into());
+    }
+    Ok((got, row))
+}
+
+/// One measured item of `--abbr`: a segmented word, or a character no entry covers.
+struct AbbrItem {
+    len: usize,
+    /// Index into `ABBR_EXCLUDED`; `None`: measurable.
+    excluded: Option<usize>,
+    b_eq_c: bool,
+    /// 1-based rank in the engine's row (at most 9) and in the unlimited `predict` list.
+    row_rank: Option<usize>,
+    full_rank: Option<usize>,
+    keys_full: usize,
+    keys_abbr: usize,
+    /// Style B's offline rank; the outer `None`: not looked up (another style, a stray character, a Zhuyin-letter word, over 10 units).
+    b_rank: Option<Option<usize>>,
+}
+
+/// Exclusion reasons in the order they are tested (the first that holds counts).
+const ABBR_EXCLUDED: [&str; 4] = ["excl_zhuyin_word", "excl_unsegmented", "excl_over10", "excl_merged"];
+
+/// (rank 1, ranks 2-9, rank 10 and later, absent, sum of 1/rank over ranks 1-9) of a list of ranks.
+fn abbr_buckets(ranks: impl Iterator<Item = Option<usize>>) -> ([usize; 4], f64) {
+    let (mut b, mut rr) = ([0usize; 4], 0.0);
+    for r in ranks {
+        b[match r {
+            Some(1) => 0,
+            Some(2..=9) => 1,
+            Some(_) => 2,
+            None => 3,
+        }] += 1;
+        rr += r.filter(|&r| r <= 9).map_or(0.0, |r| 1.0 / r as f64);
+    }
+    (b, rr)
+}
+
+/// One summary line body for a subset of items. `top1`, `top9` and `mrr` read the engine's row; the four `rank*` buckets the unlimited list.
+/// The key counts cover the measurable words: Zhuyin and tone keys only (first tone: the space bar), no key that selects from the row.
+fn abbr_summary(items: &[&AbbrItem]) -> String {
+    let ok: Vec<&&AbbrItem> = items.iter().filter(|i| i.excluded.is_none()).collect();
+    let mut s = format!("{{'words': {}", items.len());
+    for (k, name) in ABBR_EXCLUDED.iter().enumerate() {
+        s += &format!(", '{name}': {}", items.iter().filter(|i| i.excluded == Some(k)).count());
+    }
+    let ((row, rr), (full, _)) = (abbr_buckets(ok.iter().map(|i| i.row_rank)), abbr_buckets(ok.iter().map(|i| i.full_rank)));
+    let mrr = if ok.is_empty() { 0.0 } else { rr / ok.len() as f64 };
+    s += &format!(", 'measurable': {}, 'top1': {}, 'top9': {}, 'mrr': {mrr:.4}", ok.len(), row[0], row[0] + row[1]);
+    s += &format!(", 'rank1': {}, 'rank2_9': {}, 'rank10plus': {}, 'absent': {}", full[0], full[1], full[2], full[3]);
+    s + &format!(", 'keys_full': {}, 'keys_abbr': {}}}", ok.iter().map(|i| i.keys_full).sum::<usize>(), ok.iter().map(|i| i.keys_abbr).sum::<usize>())
+}
+
+/// Style B's offline line body for a subset: the words looked up, how many are missing from their own set (must be 0), and the ranks.
+fn abbr_b_summary(items: &[&AbbrItem]) -> String {
+    let ranks: Vec<Option<usize>> = items.iter().filter_map(|i| i.b_rank).collect();
+    let (b, rr) = abbr_buckets(ranks.iter().copied());
+    let mrr = if ranks.is_empty() { 0.0 } else { rr / ranks.len() as f64 };
+    format!("{{'words': {}, 'missing': {}, 'top1': {}, 'top9': {}, 'mrr': {mrr:.4}, 'rank1': {}, 'rank2_9': {}, 'rank10plus': {}}}", ranks.len(), b[3], b[0], b[0] + b[1], b[0], b[1], b[2])
+}
+
+/// `--abbr A|B|C --rows FILE [--rows FILE …] --lm FILE [--abbr-dump FILE]`: how the prediction row ranks each word of the rows when it is
+/// typed abbreviated (A: initials only; B: without the initial; C: without the tone key). Measures only; nothing here changes the engine.
+///
+/// Rows are `context|sentence|reading` lines, one character per syllable; a line seen before (in any file) is dropped. Each sentence is cut
+/// greedily into the longest lexicon entries whose reading is the row's syllables, tones included (the App's default packs are in the
+/// lexicon); a character no entry covers is its own excluded item. Every word starts from a reset engine with the left context "the row's
+/// context + the sentence before the word", and its abbreviated symbols are typed on the standard layout. Fixed settings (in the summary
+/// tag): chat, packs acg,it,meme,beauty, prediction row and abbreviation composer on, English mixing and learning off.
+///
+/// A word is excluded, by the first reason that holds, when its text holds a Zhuyin symbol, when it has more than `ABBR_MAX_UNITS`
+/// syllables, or when the units the composer made (`Engine::pending_units`) are not one per syllable (a composer merge). For the others the
+/// row gives top1, top9 and MRR, and one unlimited `predict` call on the engine's own index, model and scoring
+/// (`Engine::with_predict_parts`; same history word, units and mode) gives the word's full rank. The run fails, printing no number, when a row
+/// is not the first nine of that list, when a measurable word of A or C is absent from it, or when style B's offline set misses its own word.
+///
+/// Output: one line per subset (`all`, the word lengths 1, 2, 3-4, 5-10, and for B the words whose B keys equal their C keys and the others,
+/// each by length too); for B also the offline lines (`abbr_b_sets`, every word with at most 10 syllables and no Zhuyin symbol, merged or not).
+/// `--abbr-dump` writes each measurable word's query and row in the format of `--predict` without the score columns, so
+/// `--predict DUMP --lm … --profile chat --packs acg,it,meme,beauty` must print the same words.
+fn run_abbr(args: &[String]) -> Result<(), String> {
+    let (mut style, mut files, mut lm_path, mut dump) = (None, Vec::new(), None, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
+        match a.as_str() {
+            "--abbr" => {
+                style = Some(match val()?.as_str() {
+                    "A" => Abbr::A,
+                    "B" => Abbr::B,
+                    "C" => Abbr::C,
+                    _ => return Err("--abbr takes A, B or C".into()),
+                })
+            }
+            "--rows" => files.push(val()?),
+            "--lm" => lm_path = Some(val()?),
+            "--abbr-dump" => dump = Some(val()?),
+            _ => return Err("unknown argument".into()),
+        }
+    }
+    let (style, lm_path) = (style.ok_or("--abbr is required")?, PathBuf::from(lm_path.ok_or("--lm is required")?));
+    if files.is_empty() {
+        return Err("--abbr needs --rows".into());
+    }
+    let (mut seen, mut rows, mut read) = (std::collections::HashSet::new(), Vec::new(), 0usize);
+    for f in &files {
+        let text = fs::read_to_string(f).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
+        for line in text.lines().filter(|l| l.split('|').count() == 3) {
+            read += 1;
+            if seen.insert(line.to_string()) {
+                rows.extend(three_field_rows(line));
+            }
+        }
+    }
+    let packs = cli::replay::PACKS;
+    let pdir = packs_dir_checked(packs, None)?;
+    // The tool's own lexicon, for cutting words and for style B's offline sets: built as `--predict` builds it (the engine's is private, and its
+    // model with it, so the model file is read twice). The row and the full rank come from the engine alone.
+    let lm = Lm::load(&lm_path).map_err(|e| e.to_string())?;
+    let (lex, overlay) = load_with_packs(&root().join("data/lexicon"), packs, &pdir, None, true)?;
+    let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
+    let capped = CappedLexicon::with_packs(lex, &overlay, &pack_rows, &lm, None).ok_or("cannot build the capped lexicon")?;
+    let sets = if style == Abbr::B { abbr_b_sets(capped.readings(&lm)) } else { HashMap::new() };
+    let mut e = abbr_engine(&lm_path)?;
+    let (mut items, mut out, mut bad_rows, mut absent) = (Vec::new(), String::new(), Vec::new(), Vec::new());
+    for (sent, syls, ctx) in &rows {
+        let chars: Vec<char> = sent.chars().collect();
+        if chars.len() != syls.len() {
+            return Err("a row's sentence and reading differ in length".into());
+        }
+        let text = |i: usize, l: usize| chars[i..i + l].iter().collect::<String>();
+        for (i, l, found) in abbr_segment(chars.len(), |i, l| capped.entries(&syls[i..i + l]).iter().any(|(w, _)| *w == text(i, l))) {
+            let (word, reading) = (text(i, l), &syls[i..i + l]);
+            let units: Vec<String> = reading.iter().map(|s| abbr_syllable(s, style)).collect();
+            let b_units: Vec<String> = reading.iter().map(|s| abbr_syllable(s, Abbr::B)).collect();
+            let mut item = AbbrItem {
+                len: l,
+                excluded: None,
+                b_eq_c: b_units.iter().zip(reading).all(|(b, s)| *b == abbr_syllable(s, Abbr::C)),
+                row_rank: None,
+                full_rank: None,
+                keys_full: reading.iter().map(|s| abbr_syllable(s, Abbr::C).chars().count() + 1).sum(),
+                keys_abbr: units.iter().map(|u| u.chars().count()).sum(),
+                b_rank: None,
+            };
+            item.excluded = if found && word.chars().any(is_zhuyin) {
+                Some(0)
+            } else if !found {
+                Some(1)
+            } else if l > core::engine::ABBR_MAX_UNITS {
+                Some(2)
+            } else {
+                None
+            };
+            if item.excluded.is_none() {
+                if style == Abbr::B {
+                    item.b_rank = Some(abbr_b_rank(&sets, &b_units, &word));
+                }
+                let left = format!("{ctx}{}", text(0, i));
+                let (got, row) = abbr_type(&mut e, &left, &units)?;
+                if got != units {
+                    item.excluded = Some(3);
+                } else {
+                    let u: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
+                    let mode = if u.len() > 1 { Mode::PA } else { Mode::P };
+                    let (v, full) = e
+                        .with_predict_parts(|idx, lm, cfg| {
+                            let key = context_key(&left);
+                            let v = history(if key == SENTINEL { "" } else { &key }, lm).to_string();
+                            let full: Vec<String> = predict(idx, lm, cfg, &v, &u, mode, usize::MAX).into_iter().map(|x| x.0).collect();
+                            (v, full)
+                        })
+                        .ok_or("the engine has no model")?;
+                    let query = format!("{}\t{v}\t-\t{}", if mode == Mode::P { "P" } else { "PA" }, units_str(&u));
+                    if row[..] != full[..full.len().min(9)] {
+                        bad_rows.push(query.clone());
+                    }
+                    item.row_rank = row.iter().position(|w| *w == word).map(|p| p + 1);
+                    item.full_rank = full.iter().position(|w| *w == word).map(|p| p + 1);
+                    if item.full_rank.is_none() {
+                        absent.push(format!("{query}\t{word}"));
+                    }
+                    out += &format!("## {query}\n");
+                    row.iter().for_each(|w| out += &format!("{w}\n"));
+                }
+            }
+            items.push(item);
+        }
+    }
+    if let Some(f) = dump {
+        fs::write(f, &out).map_err(|e| format!("cannot write the dump ({:?})", e.kind()))?;
+    }
+    // The stops (the rows are public development rows, so the offending queries are named).
+    if !bad_rows.is_empty() {
+        bad_rows.iter().for_each(|q| eprintln!("row differs from predict: {q}"));
+        return Err(format!("{} rows are not the first nine of the unlimited predict list", bad_rows.len()));
+    }
+    if style != Abbr::B && !absent.is_empty() {
+        absent.iter().for_each(|q| eprintln!("absent: {q}"));
+        return Err(format!("{} measurable words are not among the candidates", absent.len()));
+    }
+    let missing = items.iter().filter(|i| i.b_rank == Some(None)).count();
+    if missing > 0 {
+        return Err(format!("style B's offline set misses {missing} of its own words"));
+    }
+    let tag = format!("abbr-{style:?}  lm-chat{}", pack_tag(packs));
+    println!("## rows  {tag}  {{'read': {read}, 'distinct': {}}}", rows.len());
+    type Pick = fn(&AbbrItem) -> bool;
+    let groups: &[(&str, Pick)] = if style == Abbr::B { &[("", |_| true), ("b=c:", |i| i.b_eq_c), ("b!=c:", |i| !i.b_eq_c)] } else { &[("", |_| true)] };
+    let lens: [(&str, Pick); 5] = [("all", |_| true), ("len1", |i| i.len == 1), ("len2", |i| i.len == 2), ("len3-4", |i| (3..=4).contains(&i.len)), ("len5-10", |i| (5..=10).contains(&i.len))];
+    for (g, in_group) in groups {
+        for (l, in_len) in lens {
+            let sub: Vec<&AbbrItem> = items.iter().filter(|i| in_group(i) && in_len(i)).collect();
+            println!("## {g}{l}  {tag}  {}", abbr_summary(&sub));
+            if style == Abbr::B {
+                println!("## {g}{l}  {tag}  b-offline  {}", abbr_b_summary(&sub));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let all: Vec<String> = std::env::args().skip(1).collect();
+    // The abbreviated-typing measurement: drives the engine; reads no lenient table.
+    if all.iter().any(|a| a == "--abbr") {
+        return run_abbr(&all);
+    }
     // docs/spec/english-mixed.md §13.3: a subcommand of its own, before anything the evaluation modes read.
     if all.first().map(String::as_str) == Some("english-sim") {
         return english::run(&all[1..], &root());
@@ -1497,6 +1820,100 @@ mod tests {
         fs::remove_file(&file).unwrap();
         assert_eq!(with, Some(-8.5));
         assert_eq!(without, None);
+    }
+
+    /// `--abbr`: the rewriting table. The six example words, the neutral tone (dropped wherever it is written) and a word written with
+    /// Zhuyin letters (rewritten like any reading; `run_abbr` excludes it by its text).
+    #[test]
+    fn abbr_rewrites_each_syllable_by_the_table() {
+        let all = |reading: &str| [Abbr::A, Abbr::B, Abbr::C].map(|st| reading.split(' ').map(|s| abbr_syllable(s, st)).collect::<Vec<_>>().join(" "));
+        for (reading, want) in [
+            ("ㄐㄧㄣ ㄊㄧㄢ", ["ㄐ ㄊ", "ㄧㄣ ㄧㄢ", "ㄐㄧㄣ ㄊㄧㄢ"]),
+            ("ㄢ ㄑㄩㄢˊ", ["ㄢ ㄑ", "ㄢ ㄩㄢ", "ㄢ ㄑㄩㄢ"]),
+            ("ㄓ ㄉㄠˋ", ["ㄓ ㄉ", "ㄓ ㄠ", "ㄓ ㄉㄠ"]),
+            ("ㄕˋ ㄑㄧㄥˊ", ["ㄕ ㄑ", "ㄕ ㄧㄥ", "ㄕ ㄑㄧㄥ"]),
+            ("ㄉㄜ˙", ["ㄉ", "ㄜ", "ㄉㄜ"]),
+            ("ㄨㄛˇ ㄇㄣ˙", ["ㄨ ㄇ", "ㄨㄛ ㄣ", "ㄨㄛ ㄇㄣ"]),
+            ("˙ㄅㄚ", ["ㄅ", "ㄚ", "ㄅㄚ"]),
+            ("ㄏㄠˇ ㄉㄜ˙", ["ㄏ ㄉ", "ㄠ ㄜ", "ㄏㄠ ㄉㄜ"]),
+        ] {
+            assert_eq!(all(reading), want, "{reading}");
+        }
+        assert!("好ㄉ".chars().any(is_zhuyin) && "ㄅㄅ".chars().any(is_zhuyin) && !"好的ˇ".chars().any(is_zhuyin), "the Zhuyin-letter word test");
+    }
+
+    /// `--abbr`: longest entry first; a character no entry covers is one piece that is not found, and cutting goes on behind it.
+    #[test]
+    fn abbr_segment_takes_the_longest_entry_and_steps_over_a_stray_character() {
+        // Positions 0-1 and 3 are entries; so is 0 alone (shorter, not taken). Position 2 is none.
+        let has = |i: usize, l: usize| matches!((i, l), (0, 2) | (0, 1) | (3, 1));
+        assert_eq!(abbr_segment(4, has), [(0, 2, true), (2, 1, false), (3, 1, true)]);
+        assert!(abbr_segment(0, has).is_empty());
+    }
+
+    /// `--abbr`: the units the engine's composer really makes for 一個 typed A and 一起 typed C are not one per syllable (a merge); for 答案
+    /// typed C and 今天 typed A they are.
+    #[test]
+    fn abbr_detects_a_composer_merge() {
+        let mut e = abbr_engine(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        for (reading, style, want, merged) in [
+            ("ㄧˊ ㄍㄜ˙", Abbr::A, vec!["ㄍㄧ"], true),
+            ("ㄧˋ ㄑㄧˇ", Abbr::C, vec!["ㄑㄧ", "ㄧ"], true),
+            ("ㄉㄚˊ ㄢˋ", Abbr::C, vec!["ㄉㄚ", "ㄢ"], false),
+            ("ㄐㄧㄣ ㄊㄧㄢ", Abbr::A, vec!["ㄐ", "ㄊ"], false),
+        ] {
+            let units: Vec<String> = reading.split(' ').map(|s| abbr_syllable(s, style)).collect();
+            let (got, _) = abbr_type(&mut e, "", &units).unwrap();
+            assert_eq!(got, want, "{reading} {style:?}");
+            assert_eq!(got != units, merged, "{reading} {style:?}: what run_abbr tests");
+        }
+        let units = vec!["ㄐ".to_string(), "ㄊ".to_string()];
+        assert!(abbr_type(&mut e, "", &units).unwrap().1.contains(&"今天".to_string()));
+    }
+
+    /// `--abbr B`, the offline sets: an entry is in the set of its reading's B rewriting, syllable for syllable; a word is listed once, at its
+    /// best compatible reading; the order is (-lp, word length, reading, word). 知道 is found with ㄓ ㄠ (a syllable that is only an initial keeps it).
+    #[test]
+    fn abbr_b_offline_sets_rank_by_the_index_order() {
+        let readings = vec![
+            (vec!["ㄓ", "ㄉㄠˋ"], vec![("知道", -3.0), ("之道", -5.0)]),
+            (vec!["ㄓˊ", "ㄉㄠˋ"], vec![("直到", -2.5)]),
+            (vec!["ㄓˇ", "ㄏㄠˇ"], vec![("只好", -3.5)]),
+            (vec!["ㄓ", "ㄏㄠˋ"], vec![("之道", -4.0)]), // made up: 之道's better reading, also compatible
+            (vec!["ㄓ", "ㄧㄠˋ"], vec![("只要", -1.0)]),  // ㄓ ㄧㄠ: another set
+            (vec!["ㄐㄧㄣ", "ㄊㄧㄢ"], vec![("今天", -2.0)]),
+            (vec!["ㄒㄧㄣ", "ㄒㄧㄢ"], vec![("新鮮", -2.0)]),
+            (vec!["ㄑㄧㄣ", "ㄌㄧㄢˊ"], vec![("清廉", -2.0)]),
+            (vec!["ㄧㄣ", "ㄧㄢˊ"], vec![("陰嚴", -1.0), ("音", -0.5)]),
+            (vec!["ㄉㄜ˙"], vec![("的", -1.0)]),
+            (vec!["ㄜˋ"], vec![("餓", -3.0)]),
+            (vec!["ㄉㄜˊ"], vec![("得", -2.0), ("的", -9.0)]),
+            (vec!["˙"], vec![("˙", -5.0)]),
+        ];
+        let sets = abbr_b_sets(readings.into_iter());
+        let units = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(sets[&"ㄓ-ㄠ".to_string()], ["直到", "知道", "只好", "之道"], "之道 once, at -4.0");
+        assert_eq!(abbr_b_rank(&sets, &units("ㄓ ㄠ"), "知道"), Some(2));
+        assert_eq!(abbr_b_rank(&sets, &units("ㄓ ㄠ"), "只要"), None, "ㄓ ㄧㄠ is another set");
+        // Same score: the shorter word, then the reading text (ㄐ < ㄑ < ㄒ), then the word.
+        assert_eq!(sets[&"ㄧㄣ-ㄧㄢ".to_string()], ["音", "陰嚴", "今天", "清廉", "新鮮"]);
+        assert_eq!(abbr_b_rank(&sets, &units("ㄧㄣ ㄧㄢ"), "今天"), Some(3));
+        assert_eq!(sets[&"ㄜ".to_string()], ["的", "得", "餓"], "one syllable; the neutral tone is dropped");
+        assert_eq!(abbr_b_rank(&sets, &units("ㄜ"), "的"), Some(1));
+        assert!(!sets.contains_key(""), "a reading without a Zhuyin symbol is left out");
+    }
+
+    /// `--abbr`: the four rank buckets add up to the measurable words; top1, top9 and MRR read the row; the reasons add up to the excluded.
+    #[test]
+    fn abbr_summary_counts() {
+        let item = |excluded, row_rank, full_rank| AbbrItem { len: 2, excluded, b_eq_c: false, row_rank, full_rank, keys_full: 7, keys_abbr: 2, b_rank: Some(full_rank) };
+        let items = [item(None, Some(1), Some(1)), item(None, Some(4), Some(4)), item(None, None, Some(12)), item(None, None, None), item(Some(1), None, None), item(Some(3), None, None)];
+        let refs: Vec<&AbbrItem> = items.iter().collect();
+        assert_eq!(
+            abbr_summary(&refs),
+            "{'words': 6, 'excl_zhuyin_word': 0, 'excl_unsegmented': 1, 'excl_over10': 0, 'excl_merged': 1, 'measurable': 4, 'top1': 1, 'top9': 2, 'mrr': 0.3125, 'rank1': 1, 'rank2_9': 1, 'rank10plus': 1, 'absent': 1, 'keys_full': 28, 'keys_abbr': 8}"
+        );
+        assert_eq!(abbr_b_summary(&refs), "{'words': 6, 'missing': 3, 'top1': 1, 'top9': 2, 'mrr': 0.2083, 'rank1': 1, 'rank2_9': 1, 'rank10plus': 1}");
     }
 
     #[test]
