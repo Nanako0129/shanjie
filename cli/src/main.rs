@@ -1492,6 +1492,38 @@ fn abbr_mix<'a>(lists: &[&'a [AbbrCand]]) -> Vec<(&'a AbbrCand, usize)> {
     out
 }
 
+/// `--abbr-beta`: the knives of each cut, the units it has beyond the cut that joins wherever it may (the one with the fewest units;
+/// `abbr_cuts` always keeps it). That is the number of optional split places the cut uses: a forced split is in every cut, so it is no knife.
+fn abbr_knives(cuts: &[Vec<String>]) -> Vec<usize> {
+    let joined = cuts.iter().map(Vec::len).min().unwrap_or(0);
+    cuts.iter().map(|c| c.len() - joined).collect()
+}
+
+/// `--abbr-beta`: `abbr_mix` on adjusted scores. An entry of `lists[k]` scores `beta * knives[k]` less than `predict` gave it; the adjusted
+/// score picks a word's best entry and orders the list. Successors still come first, so `beta` only moves entries inside a tier. Written
+/// apart from `abbr_mix` on purpose: `run_abbr` checks that `beta` 0 gives what `abbr_mix` gives.
+fn abbr_mix_beta<'a>(lists: &[&'a [AbbrCand]], knives: &[usize], beta: f64) -> Vec<(&'a AbbrCand, usize)> {
+    let adj = |c: &AbbrCand, k: usize| c.1 - beta * knives[k] as f64;
+    let mut best: HashMap<&str, (&AbbrCand, usize)> = HashMap::new();
+    for (k, list) in lists.iter().enumerate() {
+        for c in list.iter() {
+            let better = |&(o, ko): &(&AbbrCand, usize)| (c.2 && !o.2) || (c.2 == o.2 && adj(c, k) > adj(o, ko));
+            if best.get(c.0.as_str()).is_none_or(better) {
+                best.insert(&c.0, (c, k));
+            }
+        }
+    }
+    let mut out: Vec<(&AbbrCand, usize)> = best.into_values().collect();
+    out.sort_by(|&(a, ka), &(b, kb)| {
+        (b.2.cmp(&a.2))
+            .then(adj(b, kb).partial_cmp(&adj(a, ka)).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.0.chars().count().cmp(&b.0.chars().count()))
+            .then_with(|| a.3.join("-").cmp(&b.3.join("-")))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    out
+}
+
 /// The unlimited `predict` list of each cut (all units unfinished; `Mode::PA` with two or more units, `Mode::P` with one), on the engine's
 /// own index, model and scoring, with the history word of `left`.
 fn abbr_cut_lists(e: &Engine, left: &str, cuts: &[Vec<String>]) -> Result<Vec<Vec<AbbrCand>>, String> {
@@ -1628,8 +1660,15 @@ fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usiz
 /// composer merge it takes each cut of the typed symbols that keeps the typing order (`abbr_cuts`; the composer's own units are not one
 /// of them when it merged backward), calls the unlimited `predict` on each (`abbr_cut_lists`) and mixes the lists (`abbr_mix`). The run
 /// fails when a measurable word with a single cut has a mixed list that is not that cut's `predict` list, or when the groups do not add up.
+///
+/// `--abbr-beta B[,B…]` (needs `--abbr-mix`) prints one group of the mix lines per value instead, tagged `beta=B`: the lists are mixed on
+/// the score minus B for every knife of the entry's cut (`abbr_knives`, `abbr_mix_beta`). The cuts and their `predict` lists are computed
+/// once per word. When a value is 0 the run also mixes with `abbr_mix` and fails unless that group's lines are the same.
+/// `--abbr-half select|read` measures only the 1st, 3rd, 5th… (`select`) or the 2nd, 4th, 6th… (`read`) of the distinct rows, in the order
+/// they were read, and adds a `## half` line after `## rows`. Without the two options every output is what it was before them.
 fn run_abbr(args: &[String]) -> Result<(), String> {
     let (mut style, mut files, mut lm_path, mut dump, mut mix) = (None, Vec::new(), None, None, false);
+    let (mut betas, mut half): (Option<Vec<f64>>, Option<(usize, &str)>) = (None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -1646,12 +1685,31 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
             "--lm" => lm_path = Some(val()?),
             "--abbr-dump" => dump = Some(val()?),
             "--abbr-mix" => mix = true,
+            "--abbr-beta" => {
+                let ok = |s: &str| s.parse::<f64>().ok().filter(|b| b.is_finite() && !b.is_sign_negative());
+                betas = Some(val()?.split(',').map(ok).collect::<Option<Vec<f64>>>().ok_or("--abbr-beta takes non-negative numbers separated by commas")?);
+            }
+            "--abbr-half" => {
+                half = Some(match val()?.as_str() {
+                    "select" => (0, "select"),
+                    "read" => (1, "read"),
+                    _ => return Err("--abbr-half takes select or read".into()),
+                })
+            }
             _ => return Err("unknown argument".into()),
         }
     }
     let (style, lm_path) = (style.ok_or("--abbr is required")?, PathBuf::from(lm_path.ok_or("--lm is required")?));
     if files.is_empty() {
         return Err("--abbr needs --rows".into());
+    }
+    if betas.is_some() && !mix {
+        return Err("--abbr-beta needs --abbr-mix".into());
+    }
+    // How each word's lists are mixed, a group of lines each: every β, and `abbr_mix` itself (`None`, last) when there is no β or one of them is 0.
+    let mut variants: Vec<Option<f64>> = betas.iter().flatten().map(|&b| Some(b)).collect();
+    if betas.as_ref().is_none_or(|b| b.contains(&0.0)) {
+        variants.push(None);
     }
     // `origin[k]` is the file and 1-based line of `rows[k]`, so a bad row can be named without printing its text.
     let (mut seen, mut rows, mut origin, mut read) = (std::collections::HashSet::new(), Vec::new(), Vec::new(), 0usize);
@@ -1667,6 +1725,13 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
             }
         }
     }
+    let distinct = rows.len();
+    if let Some((h, _)) = half {
+        // The row's place among the distinct rows decides its half; every word of the row goes with it.
+        let (mut k, mut j) = (0, 0);
+        rows.retain(|_| (k % 2 == h, k += 1).0);
+        origin.retain(|_| (j % 2 == h, j += 1).0);
+    }
     let packs = cli::replay::PACKS;
     let pdir = packs_dir_checked(packs, None)?;
     // The tool's own lexicon, for cutting words and for style B's offline sets: built as `--predict` builds it (the engine's is private, and its
@@ -1678,7 +1743,8 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     let sets = if style == Abbr::B { abbr_b_sets(capped.readings(&lm)) } else { HashMap::new() };
     let mut e = abbr_engine(&lm_path)?;
     let (mut items, mut out, mut bad_rows, mut absent) = (Vec::new(), String::new(), Vec::new(), Vec::new());
-    let (mut mixes, mut bad_mix): (Vec<AbbrMix>, usize) = (Vec::new(), 0);
+    // `mixes[k]` is the words mixed as `variants[k]` says.
+    let (mut mixes, mut bad_mix): (Vec<Vec<AbbrMix>>, usize) = (variants.iter().map(|_| Vec::new()).collect(), 0);
     for ((sent, syls, ctx), &(file, line)) in rows.iter().zip(&origin) {
         let chars: Vec<char> = sent.chars().collect();
         abbr_row_lengths_match(chars.len(), syls.len(), file, line)?;
@@ -1751,24 +1817,32 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                     if let Some(p) = own {
                         cuts[..=p].rotate_right(1);
                     }
+                    // The cuts and their lists once; each variant only mixes them again.
                     let lists = abbr_cut_lists(&e, &left, &cuts)?;
-                    let mixed = abbr_mix(&lists.iter().map(Vec::as_slice).collect::<Vec<_>>());
-                    let merged = item.excluded.is_some();
-                    if !merged && cuts.len() == 1 && !mixed.iter().map(|(c, _)| &c.0).eq(lists[0].iter().map(|c| &c.0)) {
+                    let (lists, knives): (Vec<&[AbbrCand]>, Vec<usize>) = (lists.iter().map(Vec::as_slice).collect(), abbr_knives(&cuts));
+                    let (merged, mut bad) = (item.excluded.is_some(), false);
+                    for (v, m) in variants.iter().zip(mixes.iter_mut()) {
+                        let mixed = match v {
+                            None => abbr_mix(&lists),
+                            Some(beta) => abbr_mix_beta(&lists, &knives, *beta),
+                        };
+                        bad |= !merged && cuts.len() == 1 && !mixed.iter().map(|(c, _)| &c.0).eq(lists[0].iter().map(|c| &c.0));
+                        let at = mixed.iter().position(|(c, _)| c.0 == word);
+                        m.push(AbbrMix {
+                            merged,
+                            row_before: item.row_rank,
+                            full_before: item.full_rank,
+                            after: at.map(|p| p + 1),
+                            by_answer_cut: at.is_some_and(|p| own.is_some() && mixed[p].1 == 0),
+                            cuts: cuts.len(),
+                            capped,
+                            answer_cut_dropped: own.is_none(),
+                        });
+                    }
+                    if bad {
                         bad_mix += 1;
                         eprintln!("{file}:{line}: the mixed list of a single cut is not its predict list");
                     }
-                    let at = mixed.iter().position(|(c, _)| c.0 == word);
-                    mixes.push(AbbrMix {
-                        merged,
-                        row_before: item.row_rank,
-                        full_before: item.full_rank,
-                        after: at.map(|p| p + 1),
-                        by_answer_cut: at.is_some_and(|p| own.is_some() && mixed[p].1 == 0),
-                        cuts: cuts.len(),
-                        capped,
-                        answer_cut_dropped: own.is_none(),
-                    });
                 }
             }
             items.push(item);
@@ -1794,8 +1868,26 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     if bad_mix > 0 {
         return Err(format!("{bad_mix} single-cut words have a mixed list that is not the predict list"));
     }
-    let mix_lines = if mix { abbr_mix_lines(&mixes, &tag)? } else { Vec::new() };
-    println!("## rows  {tag}  {{'read': {read}, 'distinct': {}}}", rows.len());
+    let mut mix_lines = Vec::new();
+    for (v, m) in variants.iter().zip(&mixes).filter(|_| mix) {
+        match v {
+            None if betas.is_none() => mix_lines = abbr_mix_lines(m, &tag)?,
+            None => {}
+            Some(beta) => {
+                let t = format!("beta={beta}  {tag}");
+                let lines = abbr_mix_lines(m, &t)?;
+                // β = 0 is the mix without β: the same lines under the same tag (`abbr_mix`'s words are the last of `mixes`).
+                if *beta == 0.0 && mixes.last().map(|plain| abbr_mix_lines(plain, &t)) != Some(Ok(lines.clone())) {
+                    return Err("--abbr-beta 0 does not give the lines of --abbr-mix without it".into());
+                }
+                mix_lines.extend(lines);
+            }
+        }
+    }
+    println!("## rows  {tag}  {{'read': {read}, 'distinct': {distinct}}}");
+    if let Some((_, name)) = half {
+        println!("## half  {tag}  {{'half': '{name}', 'rows': {}}}", rows.len());
+    }
     type Pick = fn(&AbbrItem) -> bool;
     let groups: &[(&str, Pick)] = if style == Abbr::B { &[("", |_| true), ("b=c:", |i| i.b_eq_c), ("b!=c:", |i| !i.b_eq_c)] } else { &[("", |_| true)] };
     let lens: [(&str, Pick); 5] = [("all", |_| true), ("len1", |i| i.len == 1), ("len2", |i| i.len == 2), ("len3-4", |i| (3..=4).contains(&i.len)), ("len5-10", |i| (5..=10).contains(&i.len))];
@@ -2231,6 +2323,61 @@ mod tests {
         let (lists, mixed) = mix_of(&['ㄒ', 'ㄧ']);
         let both = lists[0].iter().filter(|c| lists[1].iter().any(|d| d.0 == c.0)).count();
         assert!(both > 0 && mixed.len() == lists[0].len() + lists[1].len() - both, "words that two cuts give are kept once");
+    }
+
+    /// `--abbr-beta`: a knife is an optional split a cut uses. 西安 typed C: 0, 1, 1, 2; a forced split (ㄒ after ㄢ) is no knife; the
+    /// order of the cuts does not matter (`run_abbr` moves the answer's cut to the front).
+    #[test]
+    fn abbr_knives_count_the_optional_splits() {
+        let cuts = |s: &str| abbr_cuts(&s.chars().collect::<Vec<_>>()).0;
+        assert_eq!(abbr_knives(&cuts("ㄒㄧㄢ")), [0, 1, 1, 2]);
+        assert_eq!(abbr_knives(&cuts("ㄧㄍ")), [0]);
+        assert_eq!(cuts("ㄢㄒㄧ"), [vec!["ㄢ".to_string(), "ㄒㄧ".to_string()], vec!["ㄢ".to_string(), "ㄒ".to_string(), "ㄧ".to_string()]]);
+        assert_eq!(abbr_knives(&cuts("ㄢㄒㄧ")), [0, 1]);
+        let mut moved = cuts("ㄒㄧㄢ");
+        moved[..=3].rotate_right(1);
+        assert_eq!(abbr_knives(&moved), [2, 0, 1, 1]);
+        assert!(abbr_knives(&[]).is_empty());
+    }
+
+    /// `--abbr-beta` on made-up lists: 腳 of the joined cut against 就要 that a cut with one knife brings in. β 0 is `abbr_mix`; a β larger
+    /// than the gap puts the knife's words behind; a word both cuts give changes to the entry with the better adjusted score; a successor
+    /// stays first whatever β is.
+    #[test]
+    fn abbr_mix_beta_lowers_the_entries_of_cuts_with_knives() {
+        let c = |w: &str, s: f64, succ: bool, r: &str| (w.to_string(), s, succ, r.split('-').map(String::from).collect::<Vec<_>>());
+        let joined = [c("腳", -3.0, false, "ㄐㄧㄠˇ"), c("叫", -3.5, false, "ㄐㄧㄠˋ"), c("兩讀", -4.0, false, "ㄐㄧㄠ")];
+        let split = [c("就要", -2.0, false, "ㄐㄧㄡˋ-ㄧㄠˋ"), c("兩讀", -3.2, false, "ㄐ-ㄧㄠ"), c("接", -9.0, true, "ㄐㄧㄝ-ㄧㄠ")];
+        let (lists, knives) = ([&joined[..], &split[..]], [0, 1]);
+        let words = |beta: f64| abbr_mix_beta(&lists, &knives, beta).into_iter().map(|(x, k)| (x.0.as_str(), k)).collect::<Vec<_>>();
+        assert_eq!(words(0.0), [("接", 1), ("就要", 1), ("腳", 0), ("兩讀", 1), ("叫", 0)]);
+        assert_eq!(words(0.0), abbr_mix(&lists).into_iter().map(|(x, k)| (x.0.as_str(), k)).collect::<Vec<_>>());
+        // −2 − 0.5 still beats 腳; 兩讀 at −3.2 − 0.5 = −3.7 is still its better entry but falls behind 叫.
+        assert_eq!(words(0.5), [("接", 1), ("就要", 1), ("腳", 0), ("叫", 0), ("兩讀", 1)]);
+        // β 2: 就要 at −4 goes last, 兩讀 is now the joined cut's entry (−4 against −5.2; the same score and length as 就要, so the reading text decides, ㄐㄧㄠ first).
+        assert_eq!(words(2.0), [("接", 1), ("腳", 0), ("叫", 0), ("兩讀", 0), ("就要", 1)]);
+        // The answer's cut first, as `run_abbr` passes them: the knives go with their lists.
+        let got: Vec<(&str, usize)> = abbr_mix_beta(&[&split[..], &joined[..]], &[1, 0], 2.0).into_iter().map(|(x, k)| (x.0.as_str(), k)).collect();
+        assert_eq!(got, [("接", 0), ("腳", 1), ("叫", 1), ("兩讀", 1), ("就要", 0)]);
+        // Equal adjusted scores: the earlier list keeps the word.
+        assert_eq!(abbr_mix_beta(&[&split[..], &joined[..]], &[1, 0], 0.8).iter().find(|(x, _)| x.0 == "兩讀").map(|x| x.1), Some(0));
+    }
+
+    /// `--abbr-beta 0` on the model: 西安 typed C, four cuts with 0 to 2 knives. The mixed list is `abbr_mix`'s entry for entry; a large β
+    /// keeps the same words and puts every entry of the joined cut before every non-successor entry of the cuts with knives.
+    #[test]
+    fn abbr_mix_beta_zero_is_abbr_mix_on_the_model() {
+        let e = abbr_engine(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        let cuts = abbr_cuts(&['ㄒ', 'ㄧ', 'ㄢ']).0;
+        let lists = abbr_cut_lists(&e, "", &cuts).unwrap();
+        let (lists, knives): (Vec<&[AbbrCand]>, Vec<usize>) = (lists.iter().map(Vec::as_slice).collect(), abbr_knives(&cuts));
+        let plain = abbr_mix(&lists);
+        assert!(plain.iter().any(|(_, k)| *k > 0) && plain.iter().any(|(_, k)| *k == 0));
+        assert_eq!(abbr_mix_beta(&lists, &knives, 0.0), plain);
+        let far = abbr_mix_beta(&lists, &knives, 1000.0);
+        assert_eq!(far.len(), plain.len());
+        let first_knife = far.iter().position(|(c, k)| !c.2 && knives[*k] > 0).unwrap();
+        assert!(first_knife > 0 && far[first_knife..].iter().all(|(c, k)| c.2 || knives[*k] > 0), "the joined cut's entries come first in the tier");
     }
 
     /// `--abbr-mix`: the groups add up, the moved words count by the row and by the full lists, and the cut counts are reported.
