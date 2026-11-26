@@ -103,7 +103,7 @@
 
 單一管線，依序執行：
 
-1. 查詢：每個起點呼叫 `predict(…, limit)`（字數上限開著時走 `predict_capped`／`predict_digits_capped`／`predict_english_capped`，見下段）。學習記錄裡有任何一筆的讀音可能符合這個起點的單位序列（`reading_matches_in`）時 `limit = PREDICT_SCAN`（27），其餘（含學習記錄是空的）`limit = PREDICT_MAX`（9）。新詞記錄（`NEWWORD`）不算「可能符合」。沒有符合的記錄時所有權重都是 0，兩種做法結果相同。
+1. 查詢：每個起點呼叫 `predict(…, limit)`（引擎一律走 `predict_capped`／`predict_digits_capped`／`predict_english_capped`，字數上限關著時上限是空的，結果和 `predict` 相同；見下段）。學習記錄裡有任何一筆的讀音可能符合這個起點的單位序列（`reading_matches_in`）時 `limit = PREDICT_SCAN`（27），其餘（含學習記錄是空的）`limit = PREDICT_MAX`（9）。新詞記錄（`NEWWORD`）不算「可能符合」。沒有符合的記錄時所有權重都是 0，兩種做法結果相同。
 2. 保留：每個起點只留兩種項目，在 `predict` 原始輸出裡的索引小於 9 的，或學習權重 > 0 的；索引在下面第 3 步顯示字串過濾之前算（字數上限開著時，超過字數上限的候選已在 `tiered` 掃描時略過，不佔這個索引）。
 3. 過濾：拿掉與「該起點到游標目前顯示的字串」相同的項目（例如已經解成「奶茶」就不再列「奶茶」）。
 4. 長起點串接：依起點由遠到近串成一串 L，同一個詞留第一個位置、權重取所有副本中最大者。

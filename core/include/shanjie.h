@@ -65,7 +65,7 @@
  *    malformed, or a row whose word is not in the lexicon under that reading fails with 3. shanjie_engine_load_lm does not read it again.
  *  - Load the LM once at startup while the composition is empty: loading does not recompute the
  *    current display; the next change to the composition decodes with the new model.
- *  - shanjie_engine_reset (both modes) and the automatic reset after code 4 clear the composition only;
+ *  - shanjie_engine_reset (every mode) and the automatic reset after code 4 clear the composition only;
  *    the loaded LM and the current profile are kept.
  *  - The logging rules above apply to set_profile snapshots too; never log the LM path either.
  */
@@ -150,7 +150,7 @@ int32_t shanjie_engine_key(ShanjieEngine *engine, ShanjieKey key, ShanjieOutput 
 //   1 when engine or out is NULL; 2 when there is neither a candidate window nor a prediction row, or
 //   index is outside that output (state unchanged); 4 internal (engine reset). *out is NULL on any error.
 int32_t shanjie_engine_pick(ShanjieEngine *engine, uint32_t index, ShanjieOutput **out);
-int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit what is shown (unfinished zhuyin included, like ENTER; an open English run goes out in its writing, docs/spec/english-mixed.md §4.4, like ENTER too) then clear, 1 discard
+int32_t shanjie_engine_reset(ShanjieEngine *engine, uint32_t mode, ShanjieOutput **out); // mode 0 commit what is shown (unfinished zhuyin included, like ENTER; an open English run goes out in its writing, docs/spec/english-mixed.md §4.4, like ENTER too) then clear, 1 discard, 2 drop the unfinished syllable (every unfinished unit of the abbreviation composer, what ESC clears under rule 12) and then as mode 0 ("" when there was nothing else); any other value returns 2
 void    shanjie_output_free(ShanjieOutput *output);
 // S2c (docs/spec/c-abi.md)
 int32_t shanjie_engine_load_lm(ShanjieEngine *engine, const char *path);               // does not change the current display
@@ -195,11 +195,21 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 //   row; after the last page, the first), Page Up the previous (before the first page, the last), End goes to the last row, Shift+Enter closes the window
 //   and keeps the composition, and Backspace, Tab, Left, Right, Home, Delete, Zhuyin keys, Shift+letter and Shift+, Shift+. are
 //   eaten with the window left open (the punctuation keys of rule 2, such as [ ] \ ' = ` and Shift+/ Shift+1, still close the window and insert the
-//   full-width mark, in both schemes). The scheme in force for a key is read once when the key arrives: the one the open window opened with, else the
+//   full-width mark, in both schemes; the keys punctuation layout 1 adds, set_punct_layout, are rule 2 keys in both schemes too). The scheme in force for a key is read once when the key arrives: the one the open window opened with, else the
 //   current setting. So a window that is already open keeps its scheme for every key, also for the keys it closes under and lets go on (Ctrl+, Shift+,
 //   Shift+letter, Tab, Space ...); a setting changed with a window open reaches the next key after the window closed. Call it after every engine
 //   creation, like set_candidate_vertical.
 int32_t shanjie_engine_set_key_scheme(ShanjieEngine *engine, uint32_t scheme, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// punctuation layout (docs/spec/keys-and-composition.md §8.1): set_punct_layout 0 or 1 (2 otherwise, state unchanged), default 0, like
+//   set_candidate_vertical in its codes and its snapshot (handled 1, commit ""; nothing shown changes); 1 when engine or out is NULL. 0 is
+//   Apple Zhuyin's punctuation keys. 1 is McBopomofo's, from its lexicon data/lexicon/mcbpmf-data.txt: ten cells differ and every other key
+//   is as with 0. ' is U+3001 (0: U+2018), SHIFT+' U+FF1B (0: U+201C), \ U+FF3C (0: U+3001), and SHIFT+2 to SHIFT+8 are U+FF20 U+FF03 U+FF04
+//   U+FF05 U+FE3F U+FF06 U+FF0A (0: no punctuation, rules 21 and 22). The added keys are rule 2 keys like the others (the unfinished syllable
+//   goes, a window closes, the mark goes into the composition), an unshifted one only where it is no Zhuyin or tone key of the keyboard layout
+//   (ETen's ' stays a Zhuyin key). Rules 1 and 1o, the ASCII state, an open English or digit run and the punctuation candidates are untouched.
+//   The next key reads the value. Call it after every engine creation, like set_candidate_vertical (the macOS shell does; the Windows text
+//   service never calls it).
+int32_t shanjie_engine_set_punct_layout(ShanjieEngine *engine, uint32_t layout, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/spec/prediction.md §6): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the
 //   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol or
@@ -362,10 +372,12 @@ int32_t shanjie_engine_set_english_auto(ShanjieEngine *engine, uint32_t enabled,
 // set_ascii 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation; the ASCII state of the shell's per-app Shift toggle
 //   (docs/spec/keys-and-composition.md §9). Returns a snapshot like set_english (handled 1; `commit` may be non-empty, the composition when
 //   a unit reaches the 128th); 1 when engine or out is NULL. With 1, in order: an open candidate window or prediction row closes
-//   without choosing; the digit run ends as the digit layer's boundary rule does; the unfinished syllable's key record (every key in the order typed)
-//   opens the English run, as Shift+letter does (`c` stays `c`); with no syllable the run opens with the first character. Where the
-//   core has no English run to keep a composition in (the ETen layout, the abbreviation composer, set_english 0) 1 only records the
-//   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first). From then
+//   without choosing; the digit run ends as the digit layer's boundary rule does; with set_english 1 the unfinished syllable's key record (every key in the order typed)
+//   opens the English run, as Shift+letter does (`c` stays `c`), and with set_english 0 the unfinished syllable is dropped, as ESC drops it (there is
+//   no key record); with no syllable the run opens with the first character. The state is available with the standard layout and the abbreviation
+//   composer off, whatever set_english says (with set_english 0 nothing else of English mixing applies: no revert, no digit layer, no Shift+letter run,
+//   Backspace takes an English token whole and Space after one types no space). Where it is not available (the ETen layout, the abbreviation composer) 1 only records the
+//   state: the composition is left untouched and the rules below do not apply (the shell sends the composition first, reset mode 2). From then
 //   on a CHAR key without modifier bits whose ch is 0x21-0x7E is handled right after rule 1 (Caps Lock / Option / Command / Control
 //   pass through; rule 1o does not apply in this state, the shell turns an Option key into the character without Option first), before the prediction row, the digit run, the English run and the window: a letter, digit or one of `,.;/-` goes
 //   on the English run as it is (no lower case, no tone key, no punctuation or Zhuyin meaning, no revert or split, at most 32

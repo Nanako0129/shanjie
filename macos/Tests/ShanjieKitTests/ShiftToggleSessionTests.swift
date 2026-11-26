@@ -348,18 +348,113 @@ final class ShiftToggleSessionTests: XCTestCase {
         XCTAssertTrue(shell.asciiApps.isEmpty)
     }
 
+    /// Where the core's ASCII state is not available (the Eten layout) the composition is sent first.
     func testWithoutAShadowTheCompositionIsSentFirst() {
-        for (name, shell) in [("English mixing off", makeShell(english: MemoryEnglishStore(false), hint: FakeShiftHint())),
-                              ("Eten layout", makeShell(layout: MemoryLayoutStore("eten"), hint: FakeShiftHint()))] {
-            let c = Controller(shell)
-            c.session.activate()
-            c.type(name == "Eten layout" ? Layouts.keys("ㄋㄧˇ ㄏㄠˇ", eten: true) : "su3cl3")
-            XCTAssertEqual(c.client.marked, "你好", name)
-            tap(c)
-            XCTAssertEqual(c.client.text, "你好", name)
-            XCTAssertEqual(c.client.marked, "", name)
-            XCTAssertFalse(c.press(Keys.code(for: "h")), name)
+        let c = Controller(makeShell(layout: MemoryLayoutStore("eten"), hint: FakeShiftHint()))
+        c.session.activate()
+        c.type(Layouts.keys("ㄋㄧˇ ㄏㄠˇ", eten: true))
+        XCTAssertEqual(c.client.marked, "你好")
+        tap(c)
+        XCTAssertEqual(c.client.text, "你好")
+        XCTAssertEqual(c.client.marked, "")
+        XCTAssertFalse(c.press(Keys.code(for: "h")))
+    }
+
+    /// English mixing off, standard layout: the composition is kept (nothing is sent) and the next letter goes on it.
+    func testWithMixingOffTheCompositionIsKept() {
+        let c = Controller(makeShell(english: MemoryEnglishStore(false), hint: FakeShiftHint()))
+        c.session.activate()
+        c.type("su3cl3")
+        XCTAssertEqual(c.client.marked, "你好")
+        tap(c)
+        XCTAssertEqual(c.client.text, "", "nothing sent")
+        XCTAssertEqual(c.client.marked, "你好", "kept")
+        XCTAssertTrue(c.press(Keys.code(for: "h")))
+        XCTAssertEqual(c.client.marked, "你好h")
+        XCTAssertEqual(c.client.text, "")
+    }
+
+    /// English mixing off: the unfinished syllable is dropped by the switch itself.
+    func testWithMixingOffTheUnfinishedSyllableIsDropped() {
+        let c = Controller(makeShell(english: MemoryEnglishStore(false), hint: FakeShiftHint()))
+        c.session.activate()
+        c.type("283" + "28")  // 打, then ㄉㄚ without a tone
+        XCTAssertEqual(c.client.marked, "打ㄉㄚ")
+        tap(c)
+        XCTAssertEqual(c.client.marked, "打")
+        XCTAssertEqual(c.client.text, "")
+    }
+
+    /// Eten, or the abbreviation composer: the composition is sent first, without its unfinished syllable (reset mode 2).
+    func testTheCompositionSentFirstLeavesOutTheUnfinishedSyllable() {
+        let eten = Controller(makeShell(layout: MemoryLayoutStore("eten"), hint: FakeShiftHint()))
+        eten.session.activate()
+        eten.type(Layouts.keys("ㄉㄚˇ", eten: true) + "da")
+        XCTAssertEqual(eten.client.marked, "打ㄉㄚ")
+        tap(eten)
+        XCTAssertEqual(eten.client.text, "打", "no Zhuyin symbol is sent")
+        XCTAssertEqual(eten.client.marked, "")
+        let shell = makeShell(english: MemoryEnglishStore(false), hint: FakeShiftHint())
+        shell.applyAbbreviation(true)
+        let c = Controller(shell)
+        c.session.activate()
+        c.type("283" + "28")
+        XCTAssertEqual(c.client.marked, "打ㄉㄚ")
+        tap(c)
+        XCTAssertEqual(c.client.text, "打", "no Zhuyin symbol is sent")
+        XCTAssertEqual(c.client.marked, "")
+    }
+
+    /// English mixing off: an Option key in the English state with a composition reaches the core as its character, as with mixing on.
+    func testOptionInEnglishWithMixingOffSendsTheCharacterToTheCore() {
+        let c = Controller(makeShell(english: MemoryEnglishStore(false), hint: FakeShiftHint()))
+        c.session.activate()
+        c.type("su3cl3")
+        tap(c)
+        XCTAssertTrue(c.session.handle(option(";", shift: true, characters: "Ú")))
+        XCTAssertEqual(c.client.marked, "你好:")
+        XCTAssertEqual(c.client.text, "")
+    }
+
+    // MARK: 用哪一側的 Shift (docs/spec/keys-and-composition.md §9.1)
+
+    /// A lone tap of the left (56) or right (60) Shift, with its device bit.
+    private func tap(_ c: Controller, key: UInt16) {
+        time += 5
+        uptimeNow = time
+        let bit: UInt = key == 56 ? 0x2 : 0x4
+        _ = c.session.handle(Keys.event(key, flags: NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | bit), type: .flagsChanged, time: time))
+        uptimeNow = time + 0.1
+        _ = c.session.handle(Keys.event(key, flags: [], type: .flagsChanged, time: time + 0.1))
+    }
+
+    /// The stored side is read at start, kept when the toggle is switched off and on, and a change from the settings window reaches the
+    /// running shell at the next release.
+    func testShiftSideSurvivesRestartAndToggle() {
+        let store = MemoryShiftToggleStore(true, side: "right")
+        let shell = makeShell(shift: store, hint: FakeShiftHint())
+        let c = Controller(shell)
+        c.session.activate()
+        /// Whether a tap of `key` switched; the state is put back when it did.
+        func switches(_ key: UInt16) -> Bool {
+            let before = shell.engineAscii
+            tap(c, key: key)
+            guard shell.engineAscii != before else { return false }
+            tap(c, key: key)
+            XCTAssertEqual(shell.engineAscii, before, "the second tap switches back")
+            return true
         }
+        XCTAssertEqual(shell.shiftSide, .right, "read from the store")
+        XCTAssertFalse(switches(56), "left")
+        XCTAssertTrue(switches(60), "right")
+        shell.applyShiftToggle(false)
+        shell.applyShiftToggle(true)
+        XCTAssertFalse(switches(56), "left, after the toggle went off and on")
+        XCTAssertTrue(switches(60), "right, after the toggle went off and on")
+        SettingsModel(shell: shell).setShiftSide(.left)
+        XCTAssertEqual(store.shiftSide, "left")
+        XCTAssertFalse(switches(60), "right, after the change to left")
+        XCTAssertTrue(switches(56), "left, after the change to left")
     }
 
     func testSettingOffStopsTheTapAndClearsEveryApp() {
@@ -519,7 +614,7 @@ final class ShiftToggleSessionTests: XCTestCase {
         c.type("su3")
         tap(c)
         shell.applyAbbreviation(true)
-        XCTAssertTrue(shell.engineAscii && !shell.shadowOn && shell.composing, "the state the rule is about")
+        XCTAssertTrue(shell.engineAscii && !shell.asciiOn && shell.composing, "the state the rule is about")
         let before = c.client.calls
         XCTAssertTrue(c.session.handle(option(";", characters: "…")))
         XCTAssertTrue(c.session.handle(option(";", shift: true, characters: "Ú")))

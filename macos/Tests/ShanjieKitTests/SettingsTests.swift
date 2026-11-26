@@ -20,17 +20,19 @@ final class SettingsTests: XCTestCase {
         var layout: MemoryLayoutStore, demote: MemoryDemoteStore, prediction: MemoryPredictionStore, abbreviation: MemoryAbbreviationStore, english: MemoryEnglishStore
         var acg: MemoryAcgPackStore, quote: MemoryQuotePackStore, tint: MemoryGlassTintStore, beauty: MemoryBeautyPackStore, meme: MemoryMemePackStore
         var dialogs: FakeDialogs
+        var shift: MemoryShiftToggleStore
     }
 
     private func rig(secure: Bool = false, learning: URL? = nil, savedQuote: Bool? = nil) -> Rig {
+        let shift = MemoryShiftToggleStore()
         let layout = MemoryLayoutStore(), demote = MemoryDemoteStore(), prediction = MemoryPredictionStore(), abbreviation = MemoryAbbreviationStore()
         let acg = MemoryAcgPackStore(), quote = MemoryQuotePackStore(savedQuote), beauty = MemoryBeautyPackStore(), meme = MemoryMemePackStore(), tint = MemoryGlassTintStore(), dialogs = FakeDialogs(), english = MemoryEnglishStore(false)  // saved off: the default is on (docs/spec/english-mixed.md §1.1, §11), the tests below start from off
         let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { secure }, layoutStore: layout,
                           learningDirectory: learning, dialogs: dialogs, demoteStore: demote, predictionStore: prediction, abbreviationStore: abbreviation, englishStore: english,
-                          acgPackStore: acg, quotePackStore: quote, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), beautyPackStore: beauty, memePackStore: meme)
+                          acgPackStore: acg, quotePackStore: quote, glassTintStore: tint, candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore(), beautyPackStore: beauty, memePackStore: meme, shiftToggleStore: shift)
         XCTAssertNotNil(shell.engine)
         return Rig(shell: shell, model: SettingsModel(shell: shell), controller: Controller(shell),
-                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, quote: quote, tint: tint, beauty: beauty, meme: meme, dialogs: dialogs)
+                   layout: layout, demote: demote, prediction: prediction, abbreviation: abbreviation, english: english, acg: acg, quote: quote, tint: tint, beauty: beauty, meme: meme, dialogs: dialogs, shift: shift)
     }
 
     private func item(_ r: Rig, _ a: MenuEntry.Action) -> MenuEntry? { r.controller.session.menu.first { $0.action == a } }
@@ -217,6 +219,40 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(item(r, .toggleDemote)?.checked, false)
         r.controller.session.perform(.toggleDemote)
         XCTAssertTrue(r.model.demote, "the model did not follow the menu")
+    }
+
+    /// 用哪一側的 Shift (docs/spec/keys-and-composition.md §9.1): both when nothing is stored, stored by raw value, greyed while the toggle is off.
+    func testShiftSidePickerDefaultsStoresAndFollowsTheToggle() {
+        let r = rig()
+        XCTAssertEqual(r.model.shiftSide, .both, "nothing stored")
+        XCTAssertNil(r.shift.shiftSide)
+        XCTAssertFalse(r.model.shiftSideEnabled, "greyed: the toggle is off")
+        r.model.setShiftToggle(true)
+        XCTAssertTrue(r.model.shiftSideEnabled)
+        for side in [ShiftTap.Side.right, .left, .both] {
+            r.model.setShiftSide(side)
+            XCTAssertEqual(r.shift.shiftSide, side.rawValue)
+            XCTAssertEqual(r.model.shiftSide, side)
+            XCTAssertEqual(r.shell.shiftSide, side)
+        }
+        r.model.setShiftToggle(false)
+        XCTAssertFalse(r.model.shiftSideEnabled)
+    }
+
+    /// 標點排列 (docs/spec/keys-and-composition.md §8.1): macOS 注音 when nothing is stored or the value is unknown, stored by raw value.
+    func testPunctLayoutPickerDefaultsAndStores() {
+        let r = rig()
+        XCTAssertEqual(r.model.punctLayout, .apple, "nothing stored")
+        XCTAssertNil(r.layout.punctLayout)
+        r.model.setPunctLayout(.mcbopomofo)
+        XCTAssertEqual(r.layout.punctLayout, "mcbopomofo")
+        XCTAssertEqual(r.model.punctLayout, .mcbopomofo)
+        r.model.setPunctLayout(.apple)
+        XCTAssertEqual(r.layout.punctLayout, "apple")
+        XCTAssertEqual(r.model.punctLayout, .apple)
+        XCTAssertEqual(PunctLayout(stored: "vchewing"), .apple, "an unknown value")
+        XCTAssertEqual(PunctLayout(stored: nil), .apple)
+        XCTAssertEqual(PunctLayout(stored: "mcbopomofo"), .mcbopomofo)
     }
 
     func testLayoutPickerCallsSelectLayout() {

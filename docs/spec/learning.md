@@ -82,7 +82,7 @@
 | Enter（Shift+Enter 也是，之後把按鍵放行給 App） | 學 |
 | 規則 21：組字中按了引擎不處理的鍵，先送出再交給 App（見 `docs/spec/keys-and-composition.md`） | 學 |
 | 滿 `MAX_SYLLABLES`（128）的自動送出，含預測列選取、英文詞造成的 | 學 |
-| `reset`（Commit 或 Discard，殼從 deactivate、commitComposition、換擁有者、切換排列等任何地方呼叫） | 不學：這些多半是焦點或 App 改變，常和安全輸入切換同時發生 |
+| `reset`（Commit、Discard 或先丟掉未完成音節的模式 2，殼從 deactivate、commitComposition、換擁有者、切換排列等任何地方呼叫） | 不學：這些多半是焦點或 App 改變，常和安全輸入切換同時發生 |
 | Esc、Backspace／Delete 清空 | 不學 |
 | 解碼失敗（`key()` 回 4，引擎重置） | 不學 |
 
