@@ -819,52 +819,57 @@ class SlangBehind(unittest.TestCase):
 
 
 class LateRemovals(unittest.TestCase):
-    """docs/spec/lexicon-and-packs.md §2.3: whole-word Simplified forms written with characters Taiwan also uses (松散, when the base target shares
-    the row's reading), and the reviewed drop list of typo forms (好高鶩遠). Neither was caught before: the sentence test only counts S and marker
-    characters, and no table pairs 鶩 with 騖."""
+    """docs/spec/lexicon-and-packs.md §2.3: whole-word Simplified forms written with characters Taiwan also uses (松散, with overlay-twin-keep.tsv
+    exempting valid Taiwan words like 系上 and 挨到), and the reviewed drop list of typo forms (好高鶩遠). Neither was caught before: the sentence
+    test only counts S and marker characters, and no table pairs 鶩 with 騖."""
     def test_phrase_twin(self):
         phrase = {"松散": "鬆散", "系上": "繫上", "挨到": "捱到", "干涉": "干涉", "花卷": "花捲", "谷城": "穀城", "面條": "麵條"}
-        by_reading = {
-            ("ㄙㄨㄥ", "ㄙㄢˇ"): [("鬆散", -5.6)],
-            ("ㄐㄧˋ", "ㄕㄤˋ"): [("繫上", -6.0)],
-            ("ㄞˊ", "ㄉㄠˋ"): [("捱到", -7.4)],
-            ("ㄍㄢ", "ㄕㄜˋ"): [("干涉", -5.0)],
-            ("ㄏㄨㄚ", "ㄐㄩㄢˇ"): [("花捲", -6.0)],
-            ("ㄇㄧㄢˋ", "ㄊㄧㄠˊ"): [("麵條", -5.0)],
-        }
-        heads = {"面條"}
-        self.assertEqual(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˇ"), phrase, by_reading, heads), "鬆散")
-        self.assertIsNone(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˋ"), phrase, by_reading, heads), "a different reading from the base target stays")
-        self.assertIsNone(B.phrase_twin("系上", ("ㄒㄧˋ", "ㄕㄤˋ"), phrase, by_reading, heads), "系上 (ㄒㄧˋ ㄕㄤˋ) is not 繫上 (ㄐㄧˋ ㄕㄤˋ)")
-        self.assertIsNone(B.phrase_twin("挨到", ("ㄞ", "ㄉㄠˋ"), phrase, by_reading, heads), "挨到 (ㄞ ㄉㄠˋ) is not 捱到 (ㄞˊ ㄉㄠˋ)")
-        self.assertEqual(B.phrase_twin("系上", ("ㄐㄧˋ", "ㄕㄤˋ"), phrase, by_reading, heads), "繫上", "same reading as 繫上 is dropped")
-        self.assertIsNone(B.phrase_twin("干涉", ("ㄍㄢ", "ㄕㄜˋ"), phrase, by_reading, heads), "an identity entry is not a twin")
-        self.assertIsNone(B.phrase_twin("花卷市", ("ㄏㄨㄚ", "ㄐㄩㄢˇ", "ㄕˋ"), phrase, by_reading, heads), "only the whole word is looked up, never a part of it")
-        self.assertIsNone(B.phrase_twin("谷城", ("ㄍㄨˇ", "ㄔㄥˊ"), phrase, by_reading, heads), "the target has to be a base word")
-        self.assertIsNone(B.phrase_twin("面條", ("ㄇㄧㄢˋ", "ㄊㄧㄠˊ"), phrase, by_reading, heads), "a dictionary headword stays")
-        self.assertIsNone(B.phrase_twin("鬆散", ("ㄙㄨㄥ", "ㄙㄢˇ"), phrase, by_reading, heads))
+        words, heads, keep = {"鬆散", "繫上", "捱到", "干涉", "花捲", "麵條"}, {"面條"}, {"系上", "挨到"}
+        self.assertEqual(B.phrase_twin("松散", phrase, words, heads, keep), "鬆散")
+        self.assertIsNone(B.phrase_twin("系上", phrase, words, heads, keep), "an exception-list word stays")
+        self.assertIsNone(B.phrase_twin("挨到", phrase, words, heads, keep), "an exception-list word stays")
+        self.assertEqual(B.phrase_twin("系上", phrase, words, heads), "繫上", "without the exception list the phrase table drops it")
+        self.assertIsNone(B.phrase_twin("干涉", phrase, words, heads, keep), "an identity entry is not a twin")
+        self.assertIsNone(B.phrase_twin("花卷市", phrase, words, heads, keep), "only the whole word is looked up, never a part of it")
+        self.assertIsNone(B.phrase_twin("谷城", phrase, words, heads, keep), "the target has to be a base word")
+        self.assertIsNone(B.phrase_twin("面條", phrase, words, heads, keep), "a dictionary headword stays")
+        self.assertIsNone(B.phrase_twin("鬆散", phrase, words, heads, keep))
 
-    def test_phrase_twin_against_real_base_readings(self):
-        base = ime.Lexicon(B.BASE)
-        phrase = {"系上": "繫上", "挨到": "捱到", "松散": "鬆散"}
-        self.assertIsNone(B.phrase_twin("系上", ("ㄒㄧˋ", "ㄕㄤˋ"), phrase, base.by_reading, set()))
-        self.assertIsNone(B.phrase_twin("挨到", ("ㄞ", "ㄉㄠˋ"), phrase, base.by_reading, set()))
-        self.assertEqual(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˇ"), phrase, base.by_reading, set()), "鬆散")
-        self.assertIsNone(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˋ"), phrase, base.by_reading, set()))
+    def keeps(self, text, words=frozenset({"繫上", "捱到"}), syls=frozenset({"ㄒㄧˋ", "ㄕㄤˋ", "ㄞ", "ㄉㄠˋ", "ㄐㄧˋ"}), encoding="utf-8"):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "keep.tsv")
+            with open(path, "w", encoding=encoding) as f:
+                f.write(text)
+            return B.twin_keep_list(set(words), set(syls), path)
 
-    def test_prune_takes_matching_rows_and_records_the_landing(self):
+    def test_twin_keep_list_rows(self):
+        self.assertEqual(self.keeps("# note\n\n系上\tㄒㄧˋ ㄕㄤˋ\t科系\n挨到\tㄞ ㄉㄠˋ\t靠近\n", encoding="utf-8-sig"),
+                         {"系上": ("ㄒㄧˋ", "ㄕㄤˋ"), "挨到": ("ㄞ", "ㄉㄠˋ")})
+        self.assertEqual(B.twin_keep_list(set(), set(), os.path.join(tempfile.gettempdir(), "no-such-overlay-twin-keep.tsv")), {}, "no file, no rows")
+        for why, bad in (("two fields", "系上\tㄒㄧˋ ㄕㄤˋ\n"),
+                         ("four fields", "系上\tㄒㄧˋ ㄕㄤˋ\ta\tb\n"),
+                         ("blank reason", "系上\tㄒㄧˋ ㄕㄤˋ\t   \n"),
+                         ("not Han", "ab\tㄒㄧˋ ㄕㄤˋ\t理由\n"),
+                         ("one character", "系\tㄒㄧˋ\t理由\n"),
+                         ("already a base word", "繫上\tㄐㄧˋ ㄕㄤˋ\t理由\n"),
+                         ("syllable count", "系上\tㄒㄧˋ\t理由\n"),
+                         ("hyphen reading", "系上\tㄒㄧˋ-ㄕㄤˋ\t理由\n"),
+                         ("unknown syllable", "系上\txi4 ㄕㄤˋ\t理由\n"),
+                         ("duplicate word", "系上\tㄒㄧˋ ㄕㄤˋ\ta\n系上\tㄒㄧˋ ㄕㄤˋ\tb\n")):
+            with self.assertRaisesRegex(SystemExit, r"keep\.tsv:\d+: bad twin-keep row", msg=why):
+                self.keeps(bad)
+
+    def test_prune_takes_every_row_of_the_word_and_records_the_landing(self):
         rows = ["ㄅㄨˋ-a\t甲\t-7.0\twikt\n", "ㄅㄨˊ-a\t甲\t-7.5\twikt\n", "b\t乙\t-7.0\twikt\n"]
-        kept, gone = B.prune(rows, lambda w, _: {"甲": "丙"}.get(w))
+        kept, gone = B.prune(rows, {"甲": "丙"}.get)
         self.assertEqual(kept, rows[2:])
         self.assertEqual(gone, ["甲\t丙\tㄅㄨˋ-a\n", "甲\t丙\tㄅㄨˊ-a\n"])
-        kept_r, gone_r = B.prune(rows, lambda w, r: "丙" if w == "甲" and r == ("ㄅㄨˋ", "a") else None)
-        self.assertEqual(kept_r, rows[1:])
-        self.assertEqual(gone_r, ["甲\t丙\tㄅㄨˋ-a\n"])
 
     def drops(self, text, words=frozenset({"好高騖遠"})):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "drop.tsv")
-            open(path, "w", encoding="utf-8").write(text)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
             return B.drop_list(set(words), path)
 
     def test_drop_list_rows(self):
@@ -877,35 +882,34 @@ class LateRemovals(unittest.TestCase):
             with self.assertRaises(SystemExit, msg=bad):
                 self.drops(bad)
 
-    def test_a_full_build_applies_both(self):
+    def test_a_full_build_applies_both_and_honors_twin_keep(self):
         b = BuildFlags("test_default_is_the_old_method"); BuildFlags.setUpClass()
-        # Pick a candidate whose reading has a base 2-character word (same-reading twin -> dropped)
-        # and a second candidate whose reading lacks that base word (different-reading twin -> kept).
-        same, target = next((w, bw) for w in b.words for bw, _ in b.base.by_reading.get(tuple(b.syls(w)), ()) if len(bw) == 2)
-        diff = next(w for w in b.words if w != same and all(bw != target for bw, _ in b.base.by_reading.get(tuple(b.syls(w)), ())))
-        (rows, removed, variant_removed, _), _ = b.build(titles=[same, diff])
-        self.assertTrue(b.row(rows, same) and b.row(rows, diff) and b.row(rows, b.other))
-        # Run build() with real phrase_twin (not mocked) and drop_list over synthetic dumps.
+        target = next(w for w in b.base.by_word if len(w) == 2)
+        kept_w = b.words[0]
+        (rows, removed, variant_removed, _), _ = b.build(titles=[kept_w])
+        self.assertTrue(b.row(rows, b.title) and b.row(rows, kept_w) and b.row(rows, b.other))
+        # Run build() with real phrase_twin (not mocked), twin_keep_list and drop_list over synthetic dumps.
         d = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, d)
         wikt = os.path.join(d, "t.gz")
         with gzip.open(wikt, "wt", encoding="utf-8") as f:
-            f.write(f"{same}\n{diff}\n{b.other}\n")
+            f.write(f"{b.title}\n{kept_w}\n{b.other}\n")
         empty = os.path.join(d, "e.gz")
         gzip.open(empty, "wt").close()
         with mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), \
                 mock.patch.object(bc, "is_simplified", lambda _: False), \
-                mock.patch.object(bc, "load_conv", lambda: ({same: target, diff: target}, {}, 2)), \
+                mock.patch.object(bc, "load_conv", lambda: ({b.title: target, kept_w: target}, {}, 2)), \
                 mock.patch.object(bc, "TRAD_SIMP_ONLY", set()), \
                 mock.patch.object(B, "moe_titles", lambda: set()), \
+                mock.patch.object(B, "twin_keep_list", lambda words, syls: {kept_w: tuple(b.syls(kept_w))}), \
                 mock.patch.object(B, "drop_list", lambda words: {b.other: target}), \
                 contextlib.redirect_stdout(io.StringIO()):
             rows, removed, variant_removed, _ = B.build()
-        self.assertEqual((b.row(rows, same), b.row(rows, b.other)), ([], []))
-        self.assertTrue(b.row(rows, diff), "a phrase_twin target on a different base reading stays")
-        self.assertEqual([r.split("\t")[:2] for r in removed], [[same, target]])
+        self.assertEqual((b.row(rows, b.title), b.row(rows, b.other)), ([], []))
+        self.assertTrue(b.row(rows, kept_w), "a word on overlay-twin-keep.tsv stays")
+        self.assertEqual([r.split("\t")[:2] for r in removed], [[b.title, target]])
         self.assertEqual([r.split("\t")[:2] for r in variant_removed], [[b.other, target]])
 
-    def test_rebuild_tails_refilter_checks_reading(self):
+    def test_rebuild_tails_refilter_honors_twin_keep_regardless_of_reading(self):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "overlay.tsv")
             gen = [
@@ -926,18 +930,21 @@ class LateRemovals(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 filtered = B.rebuild_tails(out=out, refilter=True)
             kept_pairs = {(r.split("\t")[0], r.split("\t")[1]) for r in filtered if r.rstrip("\n").split("\t")[3] == "wikt"}
-            self.assertNotIn(("ㄙㄨㄥ-ㄙㄢˇ", "松散"), kept_pairs)
-            self.assertEqual(kept_pairs, {("ㄙㄨㄥ-ㄙㄢˋ", "松散"), ("ㄒㄧˋ-ㄕㄤˋ", "系上"), ("ㄞ-ㄉㄠˋ", "挨到")})
+            self.assertEqual(kept_pairs, {("ㄒㄧˋ-ㄕㄤˋ", "系上"), ("ㄞ-ㄉㄠˋ", "挨到")},
+                             "松散 is dropped on every reading; committed overlay-twin-keep.tsv keeps 系上 and 挨到")
 
     def test_the_shipped_overlay_has_none_of_them(self):
-        """The committed file: no row of a drop-list word (so editing overlay-drop.tsv without `--tails-only` fails here and in ShippedOverlay), and,
-        where the OpenCC tables and the dictionary are on this machine (not in CI), no generated row that phrase_twin would remove."""
-        base = ime.Lexicon(B.BASE)
+        """The committed files: overlay-drop.tsv and overlay-twin-keep.tsv parse cleanly and are disjoint; no row of a drop-list word stays in
+        overlay-add.tsv; and where the OpenCC tables and the dictionary are on this machine (not in CI), no generated row that phrase_twin would remove."""
+        lex = ime.Lexicon(B.BASE)
+        base, syllables = set(lex.by_word), B.base_syllables(lex)
         with open(B.OUT, encoding="utf-8") as f:
-            gen_rows = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang", "colloq")]
-        gen = {l.split("\t")[1] for l in gen_rows}
-        drop = B.drop_list(set(base.by_word))
+            gen = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang", "colloq")}
+        drop = B.drop_list(base)
+        keep = B.twin_keep_list(base, syllables)
         self.assertIn("好高鶩遠", drop)
+        self.assertTrue({"系上", "挨到"} <= keep.keys())
+        self.assertEqual(set(drop) & set(keep), set())
         self.assertEqual(gen & (set(drop) | {"松散", "好高鶩遠"}), set())
         moedict = os.environ.get("SHANJIE_MOEDICT")
         if not (moedict and os.path.isfile(moedict) and os.path.isfile(os.path.join(bc.SRC, "opencc", "STPhrases.txt"))):
@@ -946,8 +953,7 @@ class LateRemovals(unittest.TestCase):
         with mock.patch.dict(os.environ, {"SHANJIE_TW_CLEAN": "off"}), contextlib.redirect_stderr(io.StringIO()):
             phrase = bc.load_conv()[0]
         heads = B.moe_titles()
-        self.assertEqual(sorted((l.split("\t")[0], l.split("\t")[1]) for l in gen_rows
-                                if B.phrase_twin(l.split("\t")[1], tuple(l.split("\t")[0].split("-")), phrase, base.by_reading, heads)), [])
+        self.assertEqual(sorted(w for w in gen if B.phrase_twin(w, phrase, base, heads, keep)), [])
 
 
 if __name__ == "__main__":

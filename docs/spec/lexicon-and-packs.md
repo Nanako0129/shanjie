@@ -106,12 +106,13 @@
 
 候選詞若只是別的寫法（簡體寫法轉成繁體後的詞、台灣字形摺疊後與基底或已留下的疊加層詞同讀音同字串的異體），就不寫進檔案；被拿掉的詞與它的落點寫到 `build/overlay/overlay-removed.tsv`、`overlay-variant-removed.tsv`（不進版控）。規則的內容（簡繁判斷、`MERGE` 摺疊表、落點分兩階段判定）見 `docs/spec/decoder.md`。粵語詞在候選階段就拿掉，所以這兩條規則看不到它們。
 
-上面兩條之後，產生的列（維基來源、`萌典補詞`、`lexgap`）再過兩道：
+上面兩條之後，產生的列（維基來源、`萌典補詞`、`lexgap`）再過兩道，被拿掉的詞每一列都拿掉（含變調列）：
 
-- **整詞的簡體寫法**（`phrase_twin`）：詞整個是簡繁詞組表（OpenCC `STPhrases` 加 `tw-conv.tsv` 選定的值）的鍵、值是另一個寫法 w₂、基底在這一列的讀音底下有 w₂，而且詞不是萌典詞目，就把這一列拿掉（例如同讀音的松散 ㄙㄨㄥ ㄙㄢˇ→鬆散、五谷 ㄨˇ ㄍㄨˇ→五穀、制作 ㄓˋ ㄗㄨㄛˋ→製作）；記進 `overlay-removed.tsv`。上一條的簡體判斷（`is_simplified`）只數簡體專用字與標記字，這些詞的每個字台灣也用，句子判成繁體，詞組表就沒被查到。要求同讀音才拿掉，避免把台灣正常寫法誤殺（例：「系上」ㄒㄧˋ ㄕㄤˋ 與基底「繫上」ㄐㄧˋ ㄕㄤˋ、「挨到」ㄞ ㄉㄠˋ 與基底「捱到」ㄞˊ ㄉㄠˋ 讀音不同，保留）。只查整詞的鍵（最長比對會把「花卷市」改成「花捲市」）；目標只在疊加層、不在基底的不動。
-- **審過的錯字寫法**（`data/lexicon/overlay-drop.tsv`，CC0）：每列 `詞<TAB>基底的正確寫法<TAB>備註`，`#` 與空行略過；詞不能在基底、正確寫法要在基底、同一個詞只能一列，不符就中止並指出行號。清單裡的詞每一列都拿掉（含變調列），記進 `overlay-variant-removed.tsv`。錯字寫法沒有表可查（「好高鶩遠」的「鶩」與「騖」不是異體字，讀音又和基底的「好高騖遠」不同列），所以是清單，不是規則。
+- **整詞的簡體寫法**（`phrase_twin`）：詞整個是簡繁詞組表（OpenCC `STPhrases` 加 `tw-conv.tsv` 選定的值）的鍵、值是另一個寫法、那個寫法在基底、詞不是萌典詞目，而且不在例外清單 `data/lexicon/overlay-twin-keep.tsv`（見下）裡，就拿掉（松散→鬆散、取舍→取捨、船只→船隻，不論該列讀音）；記進 `overlay-removed.tsv`。上一條的簡體判斷（`is_simplified`）只數簡體專用字與標記字，這些詞的每個字台灣也用，句子判成繁體，詞組表就沒被查到；它們常因單字猜音而與基底目標不同調，所以不以讀音過濾，改由例外清單保住與目標寫法不同義的台灣正常寫法。只查整詞的鍵（最長比對會把「花卷市」改成「花捲市」）；目標只在疊加層、不在基底的不動。
+  - **台灣正常寫法例外清單**（`data/lexicon/overlay-twin-keep.tsv`，CC0，`twin_keep_list`）：每列 `詞<TAB>讀音<TAB>理由`，讀音音節以空白分隔，`#` 與空行略過，檔案不存在時為空表；詞須為 2 字以上純漢字、不在基底、不重複，讀音音節數等於字數且每個音節基底都有、理由非空，不符就中止並指出行號。清單裡的詞即使在簡繁詞組表裡也不拿掉（目前收錄「系上」ㄒㄧˋ ㄕㄤˋ、「挨到」ㄞ ㄉㄠˋ，與基底目標「繫上」「捱到」不同義）。
+- **審過的錯字寫法**（`data/lexicon/overlay-drop.tsv`，CC0）：每列 `詞<TAB>基底的正確寫法<TAB>備註`，`#` 與空行略過；詞不能在基底、正確寫法要在基底、同一個詞只能一列，不符就中止並指出行號。清單裡的詞不寫，記進 `overlay-variant-removed.tsv`。錯字寫法沒有表可查（「好高鶩遠」的「鶩」與「騖」不是異體字，讀音又和基底的「好高騖遠」不同列），所以是清單，不是規則。
 
-`--tails-only` 也套用清單（清單在 repo 裡，不必有 dump）；`--tails-only --refilter` 另外把整詞的簡體寫法規則套到留著的列（呼叫 `build_counts.load_conv()` 與 `moe_titles()`，要 OpenCC 表、`tw-clean` 表或 `SHANJIE_TW_CLEAN=off`（`docs/spec/models.md` §9.8）以及 `SHANJIE_MOEDICT`，缺了就中止），給沒有 dump 的機器用。測試：`tools/test_build_overlay.py` 的 `LateRemovals`（真值表與實基底讀音比對、`prune`、`--tails-only --refilter`、清單格式、完整建置兩道都走、已提交的檔裡沒有清單的詞；有 OpenCC 表與萌典的機器另外核對已提交的檔沒有任何一列會被整詞規則拿掉，沒有時印 NOTE）。
+`--tails-only` 也套用清單（清單在 repo 裡，不必有 dump）；`--tails-only --refilter` 另外把整詞的簡體寫法規則（含例外清單 `overlay-twin-keep.tsv`）套到留著的列（呼叫 `build_counts.load_conv()` 與 `moe_titles()`，要 OpenCC 表、`tw-clean` 表或 `SHANJIE_TW_CLEAN=off`（`docs/spec/models.md` §9.8）以及 `SHANJIE_MOEDICT`，缺了就中止），給沒有 dump 的機器用。測試：`tools/test_build_overlay.py` 的 `LateRemovals`（真值表、`overlay-twin-keep.tsv` 與 `overlay-drop.tsv` 格式檢查、`prune`、`--tails-only --refilter`、完整建置兩道都走並遵守例外清單、已提交的檔裡沒有清單的詞且兩份清單無交集；有 OpenCC 表與萌典的機器另外核對已提交的檔沒有任何一列會被整詞規則拿掉，沒有時印 NOTE）。
 
 ### 2.4 讀音
 
