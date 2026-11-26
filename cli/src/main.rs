@@ -1,6 +1,6 @@
 use cli::common::{dev_rows, dev_rows_raw, format_rowstats, levenshtein, load_accept, load_forms, load_forms_v2, load_lenient, read_rows, read_rows_raw, root, three_field_rows};
 use core::colloquial::{self, Colloquial};
-use core::engine::{Engine, Key, Layout, ResetMode, capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_MEME, PACK_OOV, PACK_QUOTES};
+use core::engine::{Engine, Key, KeyKind, Layout, ResetMode, capping_overlay_detailed, load_lexicon_extra_detailed, load_reading_decode, load_lexicon_packs_detailed, read_packs_detailed, PACK_ACG, PACK_BEAUTY, PACK_FILES, PACK_IT, PACK_MEME, PACK_OOV, PACK_QUOTES};
 use core::eval::*;
 use core::learn::{context_key, SENTINEL};
 use core::fuzzy::FUZZY_ALL;
@@ -1624,6 +1624,136 @@ fn abbr_mix_lines(mixes: &[AbbrMix], tag: &str) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
+/// One line of `--abbr-mix-dump`, 16 tab-separated columns, one line per word of `## mix:all`:
+/// 1-4 `mode`, `history`, `-`, `units`: the query of the answer's own cut, the columns of a `--abbr-dump` (`--predict`) query line without its `## `;
+/// 5 `word`: the answer;
+/// 6 `class`: `measurable` or `merged` (a composer merge), the split of `## mix:measurable` and `## mix:merged`;
+/// 7 `before`: the answer's 1-based rank before mixing, in the unlimited `predict` list of its own cut (what `## mix:moved-full` reads; over 9 is
+///   no rank for `## mix:moved-row`); `-` for a merged word, which had no rank before mixing;
+/// 8-16 `top1`…`top9`: the first nine words of the mixed list (`abbr_mix`, no β), an empty column where the list is shorter.
+fn abbr_mix_dump_line(query: &str, word: &str, merged: bool, before: Option<usize>, top: &[&str]) -> String {
+    let mut s = format!("{query}\t{word}\t{}\t{}", if merged { "merged" } else { "measurable" }, before.map_or("-".to_string(), |r| r.to_string()));
+    for k in 0..9 {
+        s.push('\t');
+        s += top.get(k).copied().unwrap_or("");
+    }
+    s + "\n"
+}
+
+/// `--abbr-time`: the day of the synthetic records and of the engine that reads them (as `DAY` of core/tests/engine_predict.rs), so no record
+/// has decayed.
+const ABBR_TIME_DAY: i64 = 20_000;
+
+/// `--abbr-time`: fills `dir` with the learning file of core/tests/engine_predict.rs `timing_typing76_keys_with_taught_picks_and_50k` and
+/// leaves `e` reading it with learning on. As that test does (`teach_typing76_picks`, `synthetic_records`), on eval/dev/user-typing.txt: for each
+/// sample, after the first key of its first syllable and after the first key of its second, the row's second item is picked (Tab, Right,
+/// Enter) and committed (Enter), with the composer off; then synthetic records up to `CAPACITY` on the samples' readings (every run of 1 to 4
+/// syllables) under two-character keys. The engine is `--abbr`'s (packs, chat), not the test's. Returns the number of records `e` holds.
+fn abbr_time_store(e: &mut Engine, dir: &Path) -> Result<usize, String> {
+    let (l, bad) = (Layout::Standard, |_| "engine error on a key".to_string());
+    let text = fs::read_to_string(root().join("eval/dev/user-typing.txt")).map_err(|e| format!("cannot read eval/dev/user-typing.txt ({:?})", e.kind()))?;
+    let lines: Vec<Vec<&str>> = text.lines().filter(|l| !l.is_empty()).map(|l| l.split('|').collect()).collect();
+    if lines.iter().any(|f| f.len() != 3) {
+        return Err("eval/dev/user-typing.txt: a line is not context|sentence|reading".into());
+    }
+    // A syllable's keys; the first tone ends with the space bar.
+    let syl_keys = |syl: &str| -> Vec<Key> {
+        let mut v: Vec<Key> = syl.chars().filter_map(|c| if ABBR_TONES.contains(&c) { l.key_of_tone(c) } else { l.key_of_symbol(c) }).map(|k| Key::ch(k, 0)).collect();
+        if !syl.chars().any(|c| ABBR_TONES.contains(&c)) {
+            v.push(Key::new(KeyKind::Space));
+        }
+        v
+    };
+    e.reset(ResetMode::Discard);
+    e.set_today(Some(ABBR_TIME_DAY));
+    e.set_learning(true);
+    e.set_abbreviation(false).map_err(bad)?;
+    e.learning_open(dir).map_err(|_| "cannot open the learning directory".to_string())?;
+    for f in &lines {
+        let syls: Vec<&str> = f[2].split(' ').collect();
+        for upto in 0..syls.len().min(2) {
+            e.set_left_context(f[0]);
+            let mut keys: Vec<Key> = syls[..upto].iter().flat_map(|y| syl_keys(y)).collect();
+            keys.extend(syl_keys(syls[upto]).into_iter().take(1));
+            let mut row = 0;
+            for k in keys {
+                row = e.key(k).map_err(bad)?.candidates.len();
+            }
+            if row > 1 {
+                for k in [KeyKind::Tab, KeyKind::Right, KeyKind::Enter, KeyKind::Enter] {
+                    e.key(Key::new(k)).map_err(bad)?;
+                }
+            } else {
+                e.reset(ResetMode::Discard);
+            }
+        }
+    }
+    let taught = e.learner().records().len();
+    if taught == 0 {
+        return Err("--abbr-time: no pick was learned".into());
+    }
+    let mut readings: Vec<Vec<String>> = Vec::new();
+    for f in &lines {
+        let syls: Vec<String> = f[2].split(' ').map(String::from).collect();
+        for n in 1..=syls.len().min(4) {
+            for st in 0..=(syls.len() - n) {
+                if !readings.contains(&syls[st..st + n].to_vec()) {
+                    readings.push(syls[st..st + n].to_vec());
+                }
+            }
+        }
+    }
+    let keys: Vec<String> = "我你他想要去吃喝一杯這那有是不了的們".chars().flat_map(|a| "我你他想要去吃喝一杯這那".chars().map(move |b| format!("{a}{b}"))).collect();
+    let store_err = |_| "cannot write the learning file".to_string();
+    let (store, mut records, _) = core::learn_store::LearnStore::open(dir).map_err(store_err)?;
+    records.extend((0..core::learn::CAPACITY.saturating_sub(taught)).map(|i| core::learn::Record {
+        context: keys[i % keys.len()].clone(),
+        reading: readings[i % readings.len()].clone(),
+        word: format!("測{i}"),
+        weight: 1.0,
+        day: ABBR_TIME_DAY,
+    }));
+    store.save(&records).map_err(store_err)?;
+    e.learning_open(dir).map_err(|_| "cannot reopen the learning directory".to_string())?;
+    e.set_abbreviation(true).map_err(bad)?;
+    e.reset(ResetMode::Discard);
+    Ok(e.learner().records().len())
+}
+
+/// `--abbr-time`: types every word (left context, keys, whether `abbr_cuts` hit `ABBR_MIX_CUTS`) from a reset engine and returns the time of
+/// each `Engine::key` call: all of them, and those of the words at the cap. The first word is typed once more before, untimed.
+fn abbr_time_pass(e: &mut Engine, words: &[(String, Vec<Key>, bool)]) -> Result<(Vec<Duration>, Vec<Duration>), String> {
+    let (mut all, mut capped) = (Vec::new(), Vec::new());
+    for (n, (left, keys, cap)) in words.iter().take(1).chain(words).enumerate() {
+        e.reset(ResetMode::Discard);
+        e.set_left_context(left);
+        for &k in keys {
+            let t = Instant::now();
+            let o = e.key(k);
+            let d = t.elapsed();
+            o.map_err(|_| "engine error on a key".to_string())?;
+            if n > 0 {
+                all.push(d);
+                if *cap {
+                    capped.push(d);
+                }
+            }
+        }
+    }
+    e.reset(ResetMode::Discard);
+    Ok((all, capped))
+}
+
+/// One line of `--abbr-time`, the same fields in every cell and every build so two runs compare line by line: the learning records the
+/// engine holds, the words typed, the `Engine::key` calls timed, and their p50, p95 (the sorted times at len/2 and len*95/100, as
+/// core/tests/engine_predict.rs) and max in milliseconds (`None` without a key).
+fn abbr_time_line(cell: &str, tag: &str, records: usize, words: usize, times: &mut [Duration]) -> String {
+    times.sort();
+    let ms = |i: usize| times.get(i).map_or("None".to_string(), |d| format!("{:.3}", d.as_secs_f64() * 1000.0));
+    let n = times.len();
+    format!("## time:{cell}  {tag}  {{'records': {records}, 'words': {words}, 'keys': {n}, 'p50_ms': {}, 'p95_ms': {}, 'max_ms': {}}}", ms(n / 2), ms(n * 95 / 100), ms(n.wrapping_sub(1)))
+}
+
 /// `--abbr` cuts a row character by character against its reading, so the two must have the same length. The error names the file and
 /// line and gives both counts, never the row's text.
 fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usize) -> Result<(), String> {
@@ -1666,9 +1796,18 @@ fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usiz
 /// once per word. When a value is 0 the run also mixes with `abbr_mix` and fails unless that group's lines are the same.
 /// `--abbr-half select|read` measures only the 1st, 3rd, 5th… (`select`) or the 2nd, 4th, 6th… (`read`) of the distinct rows, in the order
 /// they were read, and adds a `## half` line after `## rows`. Without the two options every output is what it was before them.
+///
+/// `--abbr-mix-dump FILE` (needs `--abbr-mix`) writes one line per word of `## mix:all`: its class, its rank before mixing and the first nine
+/// of the list `abbr_mix` gives (no β, whatever `--abbr-beta` says); the columns are `abbr_mix_dump_line`'s.
+/// `--abbr-time` (needs `--abbr C`) adds three lines last, `## time:off`, `## time:learn50k` and `## time:learn50k-capped`
+/// (`abbr_time_line`): the time of every `Engine::key` call when each word that is typed (measurable or merged) is typed again from a reset
+/// engine. `off`: the engine as above; `learn50k`: learning on with the file of `abbr_time_store` (in a temporary directory, removed
+/// after); `learn50k-capped`: of that pass, the keys of the words whose `abbr_cuts` list hit `ABBR_MIX_CUTS`.
+/// Without the two options every output is what it was before them.
 fn run_abbr(args: &[String]) -> Result<(), String> {
     let (mut style, mut files, mut lm_path, mut dump, mut mix) = (None, Vec::new(), None, None, false);
     let (mut betas, mut half): (Option<Vec<f64>>, Option<(usize, &str)>) = (None, None);
+    let (mut mix_dump, mut time): (Option<String>, bool) = (None, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -1685,6 +1824,8 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
             "--lm" => lm_path = Some(val()?),
             "--abbr-dump" => dump = Some(val()?),
             "--abbr-mix" => mix = true,
+            "--abbr-mix-dump" => mix_dump = Some(val()?),
+            "--abbr-time" => time = true,
             "--abbr-beta" => {
                 let ok = |s: &str| s.parse::<f64>().ok().filter(|b| b.is_finite() && !b.is_sign_negative());
                 betas = Some(val()?.split(',').map(ok).collect::<Option<Vec<f64>>>().ok_or("--abbr-beta takes non-negative numbers separated by commas")?);
@@ -1706,9 +1847,16 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     if betas.is_some() && !mix {
         return Err("--abbr-beta needs --abbr-mix".into());
     }
-    // How each word's lists are mixed, a group of lines each: every β, and `abbr_mix` itself (`None`, last) when there is no β or one of them is 0.
+    if mix_dump.is_some() && !mix {
+        return Err("--abbr-mix-dump needs --abbr-mix".into());
+    }
+    if time && style != Abbr::C {
+        return Err("--abbr-time needs --abbr C".into());
+    }
+    // How each word's lists are mixed, a group of lines each: every β, and `abbr_mix` itself (`None`, last) when there is no β, one of them is
+    // 0, or `--abbr-mix-dump` reads it (it prints no line of its own next to a β).
     let mut variants: Vec<Option<f64>> = betas.iter().flatten().map(|&b| Some(b)).collect();
-    if betas.as_ref().is_none_or(|b| b.contains(&0.0)) {
+    if betas.as_ref().is_none_or(|b| b.contains(&0.0)) || mix_dump.is_some() {
         variants.push(None);
     }
     // `origin[k]` is the file and 1-based line of `rows[k]`, so a bad row can be named without printing its text.
@@ -1745,6 +1893,8 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     let (mut items, mut out, mut bad_rows, mut absent) = (Vec::new(), String::new(), Vec::new(), Vec::new());
     // `mixes[k]` is the words mixed as `variants[k]` says.
     let (mut mixes, mut bad_mix): (Vec<Vec<AbbrMix>>, usize) = (variants.iter().map(|_| Vec::new()).collect(), 0);
+    // `--abbr-mix-dump`'s lines; `--abbr-time`'s words (left context, keys, at the cap of `abbr_cuts`).
+    let (mut mix_out, mut timed): (String, Vec<(String, Vec<Key>, bool)>) = (String::new(), Vec::new());
     for ((sent, syls, ctx), &(file, line)) in rows.iter().zip(&origin) {
         let chars: Vec<char> = sent.chars().collect();
         abbr_row_lengths_match(chars.len(), syls.len(), file, line)?;
@@ -1778,6 +1928,11 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                     item.b_rank = Some(abbr_b_rank(&sets, &b_units, &word));
                 }
                 let left = format!("{ctx}{}", text(0, i));
+                if time {
+                    let symbols: Vec<char> = units.iter().flat_map(|u| u.chars()).collect();
+                    let keys: Option<Vec<Key>> = symbols.iter().map(|&c| Layout::Standard.key_of_symbol(c).map(|k| Key::ch(k, 0))).collect();
+                    timed.push((left.clone(), keys.ok_or("a reading holds a symbol with no key")?, abbr_cuts(&symbols).1));
+                }
                 let (got, row) = abbr_type(&mut e, &left, &units)?;
                 let kind = abbr_merge_kind(&units);
                 // The simulated rule must name exactly the words the engine merges (a word is not printed, only counted).
@@ -1828,6 +1983,14 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                         };
                         bad |= !merged && cuts.len() == 1 && !mixed.iter().map(|(c, _)| &c.0).eq(lists[0].iter().map(|c| &c.0));
                         let at = mixed.iter().position(|(c, _)| c.0 == word);
+                        if v.is_none() && mix_dump.is_some() {
+                            let u: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
+                            let key = context_key(&left);
+                            let h = e.with_predict_parts(|_, lm, _| history(if key == SENTINEL { "" } else { &key }, lm).to_string()).ok_or("the engine has no model")?;
+                            let query = format!("{}\t{h}\t-\t{}", if u.len() > 1 { "PA" } else { "P" }, units_str(&u));
+                            let top: Vec<&str> = mixed.iter().take(9).map(|(c, _)| c.0.as_str()).collect();
+                            mix_out += &abbr_mix_dump_line(&query, &word, merged, item.full_rank, &top);
+                        }
                         m.push(AbbrMix {
                             merged,
                             row_before: item.row_rank,
@@ -1850,6 +2013,9 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     }
     if let Some(f) = dump {
         fs::write(f, &out).map_err(|e| format!("cannot write the dump ({:?})", e.kind()))?;
+    }
+    if let Some(f) = mix_dump {
+        fs::write(f, &mix_out).map_err(|e| format!("cannot write the mix dump ({:?})", e.kind()))?;
     }
     // The stops (the rows are public development rows, so the offending queries are named).
     if !bad_rows.is_empty() {
@@ -1905,6 +2071,18 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     let backward = merged.iter().filter(|i| i.merge_backward == Some(true)).count();
     println!("## merges  {tag}  {{'merged': {}, 'backward_only': {backward}, 'has_forward': {}}}", merged.len(), merged.len() - backward);
     mix_lines.iter().for_each(|l| println!("{l}"));
+    if time {
+        let words = timed.len();
+        let (mut off, _) = abbr_time_pass(&mut e, &timed)?;
+        println!("{}", abbr_time_line("off", &tag, 0, words, &mut off));
+        let dir = std::env::temp_dir().join(format!("shanjie-abbr-time-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let run = abbr_time_store(&mut e, &dir).and_then(|n| Ok((n, abbr_time_pass(&mut e, &timed)?)));
+        let _ = fs::remove_dir_all(&dir);
+        let (n, (mut all, mut capped)) = run?;
+        println!("{}", abbr_time_line("learn50k", &tag, n, words, &mut all));
+        println!("{}", abbr_time_line("learn50k-capped", &tag, n, timed.iter().filter(|w| w.2).count(), &mut capped));
+    }
     Ok(())
 }
 
@@ -2252,6 +2430,21 @@ mod tests {
         }
         let units = vec!["ㄐ".to_string(), "ㄊ".to_string()];
         assert!(abbr_type(&mut e, "", &units).unwrap().1.contains(&"今天".to_string()));
+    }
+
+    /// `--abbr-mix-dump` and `--abbr-time`: every line has the same columns whatever the word has (no rank before, a short list, no key).
+    #[test]
+    fn abbr_mix_dump_and_time_lines_have_fixed_fields() {
+        let a = abbr_mix_dump_line("PA\t我\t-\tㄒ ㄧㄢ", "西安", false, Some(12), &["先", "西安"]);
+        let b = abbr_mix_dump_line("P\t\t-\tㄍㄧ", "一個", true, None, &["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]);
+        assert_eq!(a, "PA\t我\t-\tㄒ ㄧㄢ\t西安\tmeasurable\t12\t先\t西安\t\t\t\t\t\t\t\n");
+        assert_eq!(b, "P\t\t-\tㄍㄧ\t一個\tmerged\t-\t一\t二\t三\t四\t五\t六\t七\t八\t九\n");
+        assert!([&a, &b].iter().all(|l| l.matches('\t').count() == 15 && l.ends_with('\n')));
+        let ms = |v: &[u64]| v.iter().map(|&m| Duration::from_millis(m)).collect::<Vec<_>>();
+        let mut t: Vec<u64> = (1..=100).rev().collect();
+        t[0] = 250;
+        assert_eq!(abbr_time_line("off", "T", 0, 7, &mut ms(&t)), "## time:off  T  {'records': 0, 'words': 7, 'keys': 100, 'p50_ms': 51.000, 'p95_ms': 96.000, 'max_ms': 250.000}");
+        assert_eq!(abbr_time_line("x", "T", 5, 0, &mut []), "## time:x  T  {'records': 5, 'words': 0, 'keys': 0, 'p50_ms': None, 'p95_ms': None, 'max_ms': None}");
     }
 
     /// `--abbr-mix`: the cuts keep the typing order. 一個 typed A (ㄧ then ㄍ) has one cut, never ㄍㄧ; 西安 typed C has four, the joined one
