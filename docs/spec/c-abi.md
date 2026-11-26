@@ -151,6 +151,7 @@
 | `set_prediction` | 1 |
 | `set_candidate_vertical` | 0（橫排） |
 | `set_key_scheme` | 0（現行規則；1 是微軟注音的按鍵習慣，只有 Windows 版的文字服務呼叫） |
+| `set_punct_layout` | 0（蘋果注音的標點鍵；1 是小麥注音的排列，`docs/spec/keys-and-composition.md` §8.1，只有 macOS 的殼呼叫） |
 | `set_abbreviation` | 0 |
 | `set_english` | 0 |
 | `set_english_overwrite` | 1 |
