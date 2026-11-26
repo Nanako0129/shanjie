@@ -143,6 +143,7 @@ pub struct Index<'a> {
     pool: Vec<u32>,
     off: Vec<u32>,
     by_prefix: HashMap<Vec<char>, Vec<u32>>,
+    toneless: HashSet<Vec<char>>,
 }
 
 impl<'a> Index<'a> {
@@ -217,8 +218,88 @@ impl<'a> Index<'a> {
                 by_prefix.entry(c0[..j].to_vec()).or_default().push(i as u32);
             }
         }
-        Index { ents, syls, names, pool, off, by_prefix }
+        let toneless: HashSet<Vec<char>> = syls.iter().filter(|s| !s.chars.is_empty()).map(|s| s.chars.clone()).collect();
+        Index { ents, syls, names, pool, off, by_prefix, toneless }
     }
+
+    /// Whether `chars` equals a syllable in `syls` once its tone is stripped (docs/spec/prediction.md §6).
+    pub fn has_toneless_syllable(&self, chars: &[char]) -> bool {
+        self.toneless.contains(chars)
+    }
+}
+
+/// At most this many cuts of the unfinished symbols are queried (docs/spec/prediction.md §6).
+pub const ABBR_MAX_CUTS: usize = 64;
+
+/// The column of a Zhuyin symbol: 0 initial, 1 medial (ㄧㄨㄩ), 2 final.
+pub fn abbr_column(c: char) -> usize {
+    match c {
+        'ㄅ'..='ㄙ' => 0,
+        'ㄧ' | 'ㄨ' | 'ㄩ' => 1,
+        _ => 2,
+    }
+}
+
+/// Every cut of `symbols` (in typing order) into units that keeps the typing order (docs/spec/prediction.md §6):
+/// inside a unit the columns (`abbr_column`) only go strictly forward, so a symbol whose column is not after the
+/// one typed before it must open a unit (a forced split), and any other symbol may join the unit or open one.
+/// When a run between forced splits satisfies `is_syllable`, a cut splits that run into at most `split` units.
+/// No cut has more than `max_units` units, and `completed_syls` plus a cut's units never exceeds `max_composition`.
+/// Both filters run before truncating to `ABBR_MAX_CUTS`; the flag reports whether a valid cut was truncated there.
+/// Order: the cut that joins wherever it may first, then by increasing unit count, a later split before an earlier one.
+pub fn abbr_cuts(
+    symbols: &[char],
+    completed_syls: usize,
+    max_units: usize,
+    max_composition: usize,
+    split: u8,
+    is_syllable: impl Fn(&[char]) -> bool,
+) -> (Vec<Vec<String>>, bool) {
+    if symbols.is_empty() || split == 0 {
+        return (Vec::new(), false);
+    }
+    let free = |i: usize| abbr_column(symbols[i]) > abbr_column(symbols[i - 1]);
+    let opt: Vec<usize> = (1..symbols.len()).rev().filter(|&i| free(i)).collect();
+    let forced = symbols.len() - 1 - opt.len();
+    let mut constrained: Vec<(usize, usize)> = Vec::new();
+    let mut run_start = 0;
+    for i in 1..=symbols.len() {
+        if i == symbols.len() || !free(i) {
+            if i - run_start > split as usize && is_syllable(&symbols[run_start..i]) {
+                constrained.push((run_start, i));
+            }
+            run_start = i;
+        }
+    }
+    let limit = max_units.min(max_composition.saturating_sub(completed_syls));
+    let mut out: Vec<Vec<String>> = Vec::new();
+    for j in 0..=opt.len() {
+        if forced + 1 + j > limit {
+            break;
+        }
+        let mut pick: Vec<usize> = (0..j).collect();
+        loop {
+            if constrained.iter().all(|&(a, b)| pick.iter().filter(|&&p| a < opt[p] && opt[p] < b).count() < split as usize) {
+                if out.len() == ABBR_MAX_CUTS {
+                    return (out, true);
+                }
+                let mut cut: Vec<String> = Vec::new();
+                for (i, &c) in symbols.iter().enumerate() {
+                    if i == 0 || !free(i) || pick.iter().any(|&p| opt[p] == i) {
+                        cut.push(String::new());
+                    }
+                    cut.last_mut().expect("the first symbol opens a unit").push(c);
+                }
+                out.push(cut);
+            }
+            let Some(t) = (0..j).rev().find(|&t| pick[t] != t + opt.len() - j) else { break };
+            pick[t] += 1;
+            for u in t + 1..j {
+                pick[u] = pick[u - 1] + 1;
+            }
+        }
+    }
+    (out, false)
 }
 
 /// Candidates of `units` in order S, at most `limit`: (word, score, is a successor of `v`, reading). The reading is the

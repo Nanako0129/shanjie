@@ -1371,12 +1371,24 @@ fn abbr_b_rank(sets: &HashMap<String, Vec<&str>>, b_units: &[String], word: &str
 
 /// The engine `--abbr` types into: `replay::build_engine`'s (standard layout, the App's default packs, chat, English mixing and learning off)
 /// without the small model, the colloquial table and the English table (none of them is read by the row of unfinished units), with the
-/// prediction row and the abbreviation composer on.
-fn abbr_engine(lm: &Path) -> Result<Engine, String> {
+/// prediction row, the abbreviation composer and `split` (`1..=3`) set.
+fn abbr_engine(lm: &Path, split: u32) -> Result<Engine, String> {
     let mut e = cli::replay::build_engine_packs(&root(), lm, None, None, Profile::Chat, false, true, cli::replay::PACKS)?;
     e.set_prediction(true).map_err(|_| "cannot switch the prediction row on".to_string())?;
     e.set_abbreviation(true).map_err(|_| "cannot switch the abbreviation composer on".to_string())?;
+    e.set_abbreviation_split(split)
+        .map_err(|_| "cannot set the abbreviation split".to_string())?
+        .ok_or_else(|| "invalid abbreviation split".to_string())?;
     Ok(e)
+}
+
+/// Whether `got` (`Engine::pending_units`) keeps `units`' symbols in exact typing order, with strictly advancing columns inside each unit
+/// and a new unit wherever the column does not advance.
+fn abbr_units_in_order(got: &[String], units: &[String]) -> bool {
+    !got.is_empty()
+        && got.iter().flat_map(|u| u.chars()).eq(units.iter().flat_map(|u| u.chars()))
+        && got.iter().all(|u| !u.is_empty() && u.chars().map(abbr_column).collect::<Vec<_>>().windows(2).all(|w| w[0] < w[1]))
+        && got.windows(2).all(|w| abbr_column(w[1].chars().next().unwrap()) <= abbr_column(w[0].chars().last().unwrap()))
 }
 
 /// One word typed from a clean engine: `reset`, the left context, then the units' symbols as keys of the standard layout. Returns the
@@ -1394,13 +1406,7 @@ fn abbr_type(e: &mut Engine, left: &str, units: &[String]) -> Result<(Vec<String
         row = o.candidates;
     }
     let got = e.pending_units();
-    // The composer may regroup the symbols, never lose one: anything else is not the abbreviation composer (the caller must not count it as a merge).
-    let sorted = |u: &[String]| {
-        let mut v: Vec<char> = u.iter().flat_map(|s| s.chars()).collect();
-        v.sort_unstable();
-        v
-    };
-    if sorted(&got) != sorted(units) {
+    if !got.iter().flat_map(|s| s.chars()).eq(units.iter().flat_map(|s| s.chars())) {
         return Err("the composer did not keep the typed symbols as unfinished units".into());
     }
     Ok((got, row))
@@ -1799,6 +1805,8 @@ fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usiz
 ///
 /// `--abbr-mix-dump FILE` (needs `--abbr-mix`) writes one line per word of `## mix:all`: its class, its rank before mixing and the first nine
 /// of the list `abbr_mix` gives (no β, whatever `--abbr-beta` says); the columns are `abbr_mix_dump_line`'s.
+/// `--abbr-engine-dump FILE` writes one line in the same format per word, with the engine's own prediction row in columns 8-16 and the
+/// baseline class and `before` rank in columns 6-7; `--abbr-split 1|2|3` sets the engine's syllable split limit (default 3).
 /// `--abbr-time` (needs `--abbr C`) adds three lines last, `## time:off`, `## time:learn50k` and `## time:learn50k-capped`
 /// (`abbr_time_line`): the time of every `Engine::key` call when each word that is typed (measurable or merged) is typed again from a reset
 /// engine. `off`: the engine as above; `learn50k`: learning on with the file of `abbr_time_store` (in a temporary directory, removed
@@ -1807,7 +1815,7 @@ fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usiz
 fn run_abbr(args: &[String]) -> Result<(), String> {
     let (mut style, mut files, mut lm_path, mut dump, mut mix) = (None, Vec::new(), None, None, false);
     let (mut betas, mut half): (Option<Vec<f64>>, Option<(usize, &str)>) = (None, None);
-    let (mut mix_dump, mut time): (Option<String>, bool) = (None, false);
+    let (mut mix_dump, mut engine_dump, mut split, mut time): (Option<String>, Option<String>, u32, bool) = (None, None, 3, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| "missing option value".to_string());
@@ -1825,6 +1833,15 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
             "--abbr-dump" => dump = Some(val()?),
             "--abbr-mix" => mix = true,
             "--abbr-mix-dump" => mix_dump = Some(val()?),
+            "--abbr-engine-dump" => engine_dump = Some(val()?),
+            "--abbr-split" => {
+                split = match val()?.as_str() {
+                    "1" => 1,
+                    "2" => 2,
+                    "3" => 3,
+                    _ => return Err("--abbr-split takes 1, 2 or 3".into()),
+                };
+            }
             "--abbr-time" => time = true,
             "--abbr-beta" => {
                 let ok = |s: &str| s.parse::<f64>().ok().filter(|b| b.is_finite() && !b.is_sign_negative());
@@ -1889,12 +1906,13 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     let pack_rows = read_packs_detailed(&pdir, packs & PACK_OOV).map_err(|e| e.to_string())?;
     let capped = CappedLexicon::with_packs(lex, &overlay, &pack_rows, &lm, None).ok_or("cannot build the capped lexicon")?;
     let sets = if style == Abbr::B { abbr_b_sets(capped.readings(&lm)) } else { HashMap::new() };
-    let mut e = abbr_engine(&lm_path)?;
+    let mut e = abbr_engine(&lm_path, split)?;
     let (mut items, mut out, mut bad_rows, mut absent) = (Vec::new(), String::new(), Vec::new(), Vec::new());
     // `mixes[k]` is the words mixed as `variants[k]` says.
     let (mut mixes, mut bad_mix): (Vec<Vec<AbbrMix>>, usize) = (variants.iter().map(|_| Vec::new()).collect(), 0);
-    // `--abbr-mix-dump`'s lines; `--abbr-time`'s words (left context, keys, at the cap of `abbr_cuts`).
-    let (mut mix_out, mut timed): (String, Vec<(String, Vec<Key>, bool)>) = (String::new(), Vec::new());
+    // `--abbr-mix-dump` / `--abbr-engine-dump` lines; `--abbr-time`'s words (left context, keys, at the cap of `abbr_cuts`).
+    let (mut mix_out, mut eng_dump_out) = (String::new(), String::new());
+    let mut timed: Vec<(String, Vec<Key>, bool)> = Vec::new();
     for ((sent, syls, ctx), &(file, line)) in rows.iter().zip(&origin) {
         let chars: Vec<char> = sent.chars().collect();
         abbr_row_lengths_match(chars.len(), syls.len(), file, line)?;
@@ -1928,45 +1946,55 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                     item.b_rank = Some(abbr_b_rank(&sets, &b_units, &word));
                 }
                 let left = format!("{ctx}{}", text(0, i));
+                let symbols: Vec<char> = units.iter().flat_map(|u| u.chars()).collect();
+                let (eng_cuts, eng_capped) = e
+                    .with_predict_parts(|idx, _, _| {
+                        core::predict::abbr_cuts(&symbols, 0, core::engine::ABBR_MAX_UNITS, core::engine::MAX_SYLLABLES, split as u8, |s| idx.has_toneless_syllable(s))
+                    })
+                    .ok_or("the engine has no model")?;
                 if time {
-                    let symbols: Vec<char> = units.iter().flat_map(|u| u.chars()).collect();
                     let keys: Option<Vec<Key>> = symbols.iter().map(|&c| Layout::Standard.key_of_symbol(c).map(|k| Key::ch(k, 0))).collect();
-                    timed.push((left.clone(), keys.ok_or("a reading holds a symbol with no key")?, abbr_cuts(&symbols).1));
+                    timed.push((left.clone(), keys.ok_or("a reading holds a symbol with no key")?, eng_capped));
                 }
                 let (got, row) = abbr_type(&mut e, &left, &units)?;
-                let kind = abbr_merge_kind(&units);
-                // The simulated rule must name exactly the words the engine merges (a word is not printed, only counted).
-                if (got != units) != kind.is_some() {
-                    return Err(format!("{file}:{line}: the composer simulation and the engine disagree on a merge"));
+                if !abbr_units_in_order(&got, &units) {
+                    return Err(format!("{file}:{line}: the composer units are not in typing order"));
                 }
+                let u: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
+                let mode = if u.len() > 1 { Mode::PA } else { Mode::P };
+                let (v, full) = e
+                    .with_predict_parts(|idx, lm, cfg| {
+                        let key = context_key(&left);
+                        let v = history(if key == SENTINEL { "" } else { &key }, lm).to_string();
+                        let full: Vec<String> = predict(idx, lm, cfg, &v, &u, mode, usize::MAX).into_iter().map(|x| x.0).collect();
+                        (v, full)
+                    })
+                    .ok_or("the engine has no model")?;
+                let query = format!("{}\t{v}\t-\t{}", if mode == Mode::P { "P" } else { "PA" }, units_str(&u));
+                let ans_full = full.iter().position(|w| *w == word).map(|p| p + 1);
+                let base_merged = abbr_merge_kind(&units).is_some();
+                let base_before = (!base_merged).then_some(ans_full).flatten();
                 if got != units {
                     item.excluded = Some(3);
-                    item.merge_backward = kind;
+                    item.merge_backward = Some(false);
                 } else {
-                    let u: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
-                    let mode = if u.len() > 1 { Mode::PA } else { Mode::P };
-                    let (v, full) = e
-                        .with_predict_parts(|idx, lm, cfg| {
-                            let key = context_key(&left);
-                            let v = history(if key == SENTINEL { "" } else { &key }, lm).to_string();
-                            let full: Vec<String> = predict(idx, lm, cfg, &v, &u, mode, usize::MAX).into_iter().map(|x| x.0).collect();
-                            (v, full)
-                        })
-                        .ok_or("the engine has no model")?;
-                    let query = format!("{}\t{v}\t-\t{}", if mode == Mode::P { "P" } else { "PA" }, units_str(&u));
-                    if row[..] != full[..full.len().min(9)] {
+                    if eng_cuts.len() == 1 && row[..] != full[..full.len().min(9)] {
                         bad_rows.push(query.clone());
                     }
                     item.row_rank = row.iter().position(|w| *w == word).map(|p| p + 1);
-                    item.full_rank = full.iter().position(|w| *w == word).map(|p| p + 1);
+                    item.full_rank = ans_full;
                     if item.full_rank.is_none() {
                         absent.push(format!("{query}\t{word}"));
                     }
                     out += &format!("## {query}\n");
                     row.iter().for_each(|w| out += &format!("{w}\n"));
                 }
+                if engine_dump.is_some() {
+                    let top: Vec<&str> = row.iter().take(9).map(String::as_str).collect();
+                    eng_dump_out += &abbr_mix_dump_line(&query, &word, base_merged, base_before, &top);
+                }
                 if mix {
-                    let (mut cuts, capped) = abbr_cuts(&units.iter().flat_map(|u| u.chars()).collect::<Vec<char>>());
+                    let (mut cuts, capped) = abbr_cuts(&symbols);
                     // The answer's own cut goes first, so an entry it gives as well as another cut counts as its own (`abbr_mix` keeps the earlier list).
                     let own = cuts.iter().position(|c| *c == units);
                     if let Some(p) = own {
@@ -1975,26 +2003,22 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                     // The cuts and their lists once; each variant only mixes them again.
                     let lists = abbr_cut_lists(&e, &left, &cuts)?;
                     let (lists, knives): (Vec<&[AbbrCand]>, Vec<usize>) = (lists.iter().map(Vec::as_slice).collect(), abbr_knives(&cuts));
-                    let (merged, mut bad) = (item.excluded.is_some(), false);
+                    let mut bad = false;
                     for (v, m) in variants.iter().zip(mixes.iter_mut()) {
                         let mixed = match v {
                             None => abbr_mix(&lists),
                             Some(beta) => abbr_mix_beta(&lists, &knives, *beta),
                         };
-                        bad |= !merged && cuts.len() == 1 && !mixed.iter().map(|(c, _)| &c.0).eq(lists[0].iter().map(|c| &c.0));
+                        bad |= !base_merged && cuts.len() == 1 && !mixed.iter().map(|(c, _)| &c.0).eq(lists[0].iter().map(|c| &c.0));
                         let at = mixed.iter().position(|(c, _)| c.0 == word);
                         if v.is_none() && mix_dump.is_some() {
-                            let u: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
-                            let key = context_key(&left);
-                            let h = e.with_predict_parts(|_, lm, _| history(if key == SENTINEL { "" } else { &key }, lm).to_string()).ok_or("the engine has no model")?;
-                            let query = format!("{}\t{h}\t-\t{}", if u.len() > 1 { "PA" } else { "P" }, units_str(&u));
                             let top: Vec<&str> = mixed.iter().take(9).map(|(c, _)| c.0.as_str()).collect();
-                            mix_out += &abbr_mix_dump_line(&query, &word, merged, item.full_rank, &top);
+                            mix_out += &abbr_mix_dump_line(&query, &word, base_merged, base_before, &top);
                         }
                         m.push(AbbrMix {
-                            merged,
-                            row_before: item.row_rank,
-                            full_before: item.full_rank,
+                            merged: base_merged,
+                            row_before: base_before.filter(|&r| r <= 9),
+                            full_before: base_before,
                             after: at.map(|p| p + 1),
                             by_answer_cut: at.is_some_and(|p| own.is_some() && mixed[p].1 == 0),
                             cuts: cuts.len(),
@@ -2016,6 +2040,9 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     }
     if let Some(f) = mix_dump {
         fs::write(f, &mix_out).map_err(|e| format!("cannot write the mix dump ({:?})", e.kind()))?;
+    }
+    if let Some(f) = engine_dump {
+        fs::write(f, &eng_dump_out).map_err(|e| format!("cannot write the engine dump ({:?})", e.kind()))?;
     }
     // The stops (the rows are public development rows, so the offending queries are named).
     if !bad_rows.is_empty() {
@@ -2411,22 +2438,23 @@ mod tests {
         assert!(abbr_segment(0, has).is_empty());
     }
 
-    /// `--abbr`: the units the engine's composer really makes for 一個 typed A and 一起 typed C are not one per syllable (a merge); for 答案
-    /// typed C and 今天 typed A they are.
+    /// `--abbr`: the composer keeps every typed symbol in order; backward transitions (一個 typed A, 一起 typed C) open a new unit, while
+    /// forward transitions across syllables (西安 typed C) merge into the previous unit.
     #[test]
     fn abbr_detects_a_composer_merge() {
-        let mut e = abbr_engine(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        let mut e = abbr_engine(&root().join("data/lm/bigram.sjlm"), 3).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
         for (reading, style, want, merged) in [
-            ("ㄧˊ ㄍㄜ˙", Abbr::A, vec!["ㄍㄧ"], true),
-            ("ㄧˋ ㄑㄧˇ", Abbr::C, vec!["ㄑㄧ", "ㄧ"], true),
+            ("ㄧˊ ㄍㄜ˙", Abbr::A, vec!["ㄧ", "ㄍ"], false),
+            ("ㄧˋ ㄑㄧˇ", Abbr::C, vec!["ㄧ", "ㄑㄧ"], false),
+            ("ㄒㄧ ㄢ", Abbr::C, vec!["ㄒㄧㄢ"], true),
             ("ㄉㄚˊ ㄢˋ", Abbr::C, vec!["ㄉㄚ", "ㄢ"], false),
             ("ㄐㄧㄣ ㄊㄧㄢ", Abbr::A, vec!["ㄐ", "ㄊ"], false),
         ] {
             let units: Vec<String> = reading.split(' ').map(|s| abbr_syllable(s, style)).collect();
             let (got, _) = abbr_type(&mut e, "", &units).unwrap();
             assert_eq!(got, want, "{reading} {style:?}");
+            assert!(abbr_units_in_order(&got, &units), "{reading} {style:?}: in typing order");
             assert_eq!(got != units, merged, "{reading} {style:?}: what run_abbr tests");
-            assert_eq!(abbr_merge_kind(&units).is_some(), merged, "{reading} {style:?}: the simulation agrees with the engine");
         }
         let units = vec!["ㄐ".to_string(), "ㄊ".to_string()];
         assert!(abbr_type(&mut e, "", &units).unwrap().1.contains(&"今天".to_string()));
@@ -2493,14 +2521,16 @@ mod tests {
     /// the one-syllable ㄒㄧㄢ words. ㄒ ㄧ: a word both cuts give (ㄒㄧ… as a prefix, ㄒ… ㄧ… as an abbreviation) is listed once.
     #[test]
     fn abbr_mix_of_the_initials_of_yi_ge_never_reads_them_backward() {
-        let mut e = abbr_engine(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        let mut e = abbr_engine(&root().join("data/lm/bigram.sjlm"), 3).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
         let u = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
-        assert_eq!(abbr_type(&mut e, "", &u("ㄧ ㄍ")).unwrap().0, u("ㄍㄧ"));
+        let (got, eng_row) = abbr_type(&mut e, "", &u("ㄧ ㄍ")).unwrap();
+        assert_eq!(got, u("ㄧ ㄍ"));
         let (cuts, _) = abbr_cuts(&['ㄧ', 'ㄍ']);
         assert_eq!(cuts, [u("ㄧ ㄍ")]);
         let lists = abbr_cut_lists(&e, "", &cuts).unwrap();
         let mixed = abbr_mix(&[&lists[0][..]]);
         assert!(mixed.iter().map(|(c, _)| *c).eq(lists[0].iter()), "one cut: the mixed list is its predict list, in its order");
+        assert_eq!(eng_row, mixed.iter().take(9).map(|(c, _)| c.0.clone()).collect::<Vec<_>>());
         assert!(mixed.iter().any(|(c, _)| c.0 == "一個"));
         assert!(mixed.iter().all(|(c, _)| c.3.len() == 2 && c.3[0].starts_with('ㄧ') && c.3[1].starts_with('ㄍ')), "every entry reads ㄧ then ㄍ");
 
@@ -2560,7 +2590,7 @@ mod tests {
     /// keeps the same words and puts every entry of the joined cut before every non-successor entry of the cuts with knives.
     #[test]
     fn abbr_mix_beta_zero_is_abbr_mix_on_the_model() {
-        let e = abbr_engine(&root().join("data/lm/bigram.sjlm")).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
+        let e = abbr_engine(&root().join("data/lm/bigram.sjlm"), 3).expect("data/lm/bigram.sjlm and classes.sjc are required (see cli/tests/golden.rs)");
         let cuts = abbr_cuts(&['ㄒ', 'ㄧ', 'ㄢ']).0;
         let lists = abbr_cut_lists(&e, "", &cuts).unwrap();
         let (lists, knives): (Vec<&[AbbrCand]>, Vec<usize>) = (lists.iter().map(Vec::as_slice).collect(), abbr_knives(&cuts));

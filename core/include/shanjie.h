@@ -202,15 +202,23 @@ int32_t shanjie_engine_set_candidate_vertical(ShanjieEngine *engine, uint32_t en
 int32_t shanjie_engine_set_key_scheme(ShanjieEngine *engine, uint32_t scheme, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // V3 (docs/spec/prediction.md §6): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the
-//   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol
-//   opens a new unfinished unit instead of replacing it, so ㄋㄔ is two units, and the prediction row reads them as
-//   the initials of a word's syllables (奶茶). With two or more units a tone key and space do nothing, Enter sends the
+//   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol or
+//   comes before the last filled column of the unit opens a new unfinished unit instead of replacing or filling back (so
+//   ㄋㄔ and ㄧㄍ are each two units in typing order); at the unit cap (10 units, or completed syllables plus units == 128)
+//   with two or more units, a key that would open a new unit is eaten with no change. The prediction row mixes the
+//   candidates of all cuts in typing order (up to 64, filtered by set_abbreviation_split). With two or more units a tone key and space do nothing, Enter sends the
 //   shown symbols, Esc drops all units (the composition, fixed words and cursor stay) and Backspace takes the last symbol.
 //   Turning it off, or the prediction row off, while there are two or more units drops them all (as Esc) and returns
 //   that state; with one unit nothing changes. Turning it on closes an open English window and ends an open English run
 //   (see set_english) as a token; if that is the 128th unit the snapshot carries the composition in `commit`.
 //   No effect without a loaded model.
 int32_t shanjie_engine_set_abbreviation(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
+// set_abbreviation_split 1, 2 or 3 (2 otherwise, state unchanged), default 3 at engine creation (docs/spec/prediction.md §6);
+//   1 when engine or out is NULL. Limits how many units a toneless syllable of the prediction index between forced splits
+//   may be split into when the abbreviation composer is on (1: never split a complete syllable; 3: unrestricted). With the
+//   abbreviation composer on and unfinished units present, recomputes the prediction row and returns the snapshot; when the
+//   abbreviation composer is off, only remembers `n` without recomputing.
+int32_t shanjie_engine_set_abbreviation_split(ShanjieEngine *engine, uint32_t n, ShanjieOutput **out); // 1, 2 or 3; returns a snapshot
 // set_english 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation, like set_abbreviation in its codes and its
 //   snapshot (handled 1; commit "" except as noted for turning it off, below); 1 when engine or out is NULL. With 1, and only with the
 //   standard layout and the abbreviation composer off, the engine reverts to the raw keys the moment the

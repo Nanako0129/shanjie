@@ -2241,12 +2241,43 @@ fn abbreviation_needs_a_model_and_stops_at_the_unit_cap() {
     let mut e = Engine::with_lexicon(shared().lex.clone(), L);
     e.set_abbreviation(true).unwrap();
     assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
-    // The cap: ten presses make ten units, the next ones replace the last unit.
+    // §1.1: ten units hit ABBR_MAX_UNITS; same-column and backward keys are eaten with composition and row unchanged,
+    // while a forward symbol into an empty column still joins the tenth unit.
     let mut e = abbr_engine("");
-    let o = send(&mut e, (0..12).map(|_| Key::ch('s', 0)).collect());
-    assert_eq!(o.preedit, "ㄋ".repeat(ABBR_MAX_UNITS));
-    let o = e.key(Key::ch('t', 0)).unwrap();
-    assert_eq!(o.preedit, format!("{}ㄔ", "ㄋ".repeat(ABBR_MAX_UNITS - 1)));
+    let ten = send(&mut e, (0..ABBR_MAX_UNITS).map(|_| Key::ch('u', 0)).collect()); // ten ㄧ (medial, col 1)
+    assert_eq!(ten.preedit, "ㄧ".repeat(ABBR_MAX_UNITS));
+    assert_eq!(e.pending_units(), vec!["ㄧ".to_string(); ABBR_MAX_UNITS]);
+    for c in ['u', 'e'] {
+        // 'u' (ㄧ, same col 1) and 'e' (ㄍ, backward col 0) would open an 11th unit -> eaten, unchanged.
+        let after = e.key(Key::ch(c, 0)).unwrap();
+        assert!(after == ten, "{c} eaten at ABBR_MAX_UNITS");
+        assert_eq!(e.pending_units(), vec!["ㄧ".to_string(); ABBR_MAX_UNITS]);
+    }
+    let joined = e.key(Key::ch('0', 0)).unwrap(); // '0' (ㄢ, col 2 > col 1): joins the 10th unit
+    assert_eq!(joined.preedit, format!("{}ㄧㄢ", "ㄧ".repeat(ABBR_MAX_UNITS - 1)));
+    let mut want = vec!["ㄧ".to_string(); ABBR_MAX_UNITS - 1];
+    want.push("ㄧㄢ".to_string());
+    assert_eq!(e.pending_units(), want);
+    // Backward key after ㄧㄢ at 10 units is also eaten.
+    let after_back = e.key(Key::ch('e', 0)).unwrap();
+    assert!(after_back == joined);
+    assert_eq!(e.pending_units(), want);
+
+    // MAX_SYLLABLES (128) cap: 126 completed syllables + 2 unfinished units == 128 -> backward key eaten;
+    // 127 completed syllables + 1 unfinished unit == 128 -> single unit follows ordinary replacement rule.
+    let mut e = abbr_engine("");
+    let prefix = vec!["ㄋㄧˇ"; MAX_SYLLABLES - 2];
+    let at_128 = typ(&mut e, &prefix, "ㄧㄍ");
+    assert_eq!(e.pending_units(), vec!["ㄧ", "ㄍ"]);
+    let eaten = e.key(Key::ch('s', 0)).unwrap(); // 's' (ㄋ, col 0 == col 0): eaten
+    assert!(eaten == at_128);
+    assert_eq!(e.pending_units(), vec!["ㄧ", "ㄍ"]);
+    let mut e = abbr_engine("");
+    let prefix_127 = vec!["ㄋㄧˇ"; MAX_SYLLABLES - 1];
+    typ(&mut e, &prefix_127, "ㄋ");
+    assert_eq!(e.pending_units(), vec!["ㄋ"]);
+    typ(&mut e, &[], "ㄔ"); // only 1 unit at 128: ordinary replacement
+    assert_eq!(e.pending_units(), vec!["ㄔ"]);
 }
 
 #[test]
@@ -2339,6 +2370,171 @@ fn abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time() {
     e.set_left_context(A.0);
     let again = row(&typ(&mut e, &[], "ㄋㄔ"));
     assert_eq!(again[0], word, "{base:?} -> {again:?}");
+}
+
+#[test]
+fn abbreviation_cuts_follow_split_n_and_match_64_cap() {
+    use core::predict::{abbr_column, abbr_cuts, ABBR_MAX_CUTS};
+    let s = shared();
+    let idx = s.capped.predict_index(&s.lm);
+    let cuts = |sym: &str, completed: usize, n: u8| {
+        let chars: Vec<char> = sym.chars().collect();
+        abbr_cuts(&chars, completed, ABBR_MAX_UNITS, MAX_SYLLABLES, n, |c| idx.has_toneless_syllable(c))
+    };
+    let u = |t: &str| t.split(' ').map(String::from).collect::<Vec<_>>();
+
+    // 西安 C (ㄒ ㄧ ㄢ) and 腳 C (ㄐ ㄧ ㄠ): ㄒㄧㄢ and ㄐㄧㄠ are toneless syllables in Index::syls.
+    assert_eq!(cuts("ㄒㄧㄢ", 0, 1), (vec![u("ㄒㄧㄢ")], false));
+    assert_eq!(cuts("ㄒㄧㄢ", 0, 2), (vec![u("ㄒㄧㄢ"), u("ㄒㄧ ㄢ"), u("ㄒ ㄧㄢ")], false));
+    assert_eq!(cuts("ㄒㄧㄢ", 0, 3), (vec![u("ㄒㄧㄢ"), u("ㄒㄧ ㄢ"), u("ㄒ ㄧㄢ"), u("ㄒ ㄧ ㄢ")], false));
+
+    assert_eq!(cuts("ㄐㄧㄠ", 0, 1), (vec![u("ㄐㄧㄠ")], false));
+    assert_eq!(cuts("ㄐㄧㄠ", 0, 2), (vec![u("ㄐㄧㄠ"), u("ㄐㄧ ㄠ"), u("ㄐ ㄧㄠ")], false));
+    assert_eq!(cuts("ㄐㄧㄠ", 0, 3), (vec![u("ㄐㄧㄠ"), u("ㄐㄧ ㄠ"), u("ㄐ ㄧㄠ"), u("ㄐ ㄧ ㄠ")], false));
+
+    // 一個 A (ㄧ ㄍ): backward forced split, always ㄧ / ㄍ for every N.
+    for n in 1..=3 {
+        assert_eq!(cuts("ㄧㄍ", 0, n), (vec![u("ㄧ ㄍ")], false), "N={n}");
+    }
+
+    // A forward run that is NOT a toneless syllable in Index::syls (ㄈㄩㄢ) is unrestricted even at N = 1.
+    assert!(!idx.has_toneless_syllable(&['ㄈ', 'ㄩ', 'ㄢ']));
+    assert_eq!(cuts("ㄈㄩㄢ", 0, 1), (vec![u("ㄈㄩㄢ"), u("ㄈㄩ ㄢ"), u("ㄈ ㄩㄢ"), u("ㄈ ㄩ ㄢ")], false));
+
+    // Hitting the 64-cut cap ("ㄒㄧㄢ" x 4 at N = 3): matches reference `abbr_cuts` item by item.
+    let ref_cuts = |symbols: &[char]| -> (Vec<Vec<String>>, bool) {
+        let free = |i: usize| abbr_column(symbols[i]) > abbr_column(symbols[i - 1]);
+        let opt: Vec<usize> = (1..symbols.len()).rev().filter(|&i| free(i)).collect();
+        let forced = symbols.len() - 1 - opt.len();
+        let mut out: Vec<Vec<String>> = Vec::new();
+        for j in 0..=opt.len() {
+            if forced + 1 + j > ABBR_MAX_UNITS {
+                break;
+            }
+            let mut pick: Vec<usize> = (0..j).collect();
+            loop {
+                if out.len() == ABBR_MAX_CUTS {
+                    return (out, true);
+                }
+                let mut cut: Vec<String> = Vec::new();
+                for (i, &c) in symbols.iter().enumerate() {
+                    if i == 0 || !free(i) || pick.iter().any(|&p| opt[p] == i) {
+                        cut.push(String::new());
+                    }
+                    cut.last_mut().unwrap().push(c);
+                }
+                out.push(cut);
+                let Some(t) = (0..j).rev().find(|&t| pick[t] != t + opt.len() - j) else { break };
+                pick[t] += 1;
+                for k in t + 1..j {
+                    pick[k] = pick[k - 1] + 1;
+                }
+            }
+        }
+        (out, false)
+    };
+    let four = "ㄒㄧㄢ".repeat(4);
+    let (got, capped) = cuts(&four, 0, 3);
+    let (want, want_capped) = ref_cuts(&four.chars().collect::<Vec<_>>());
+    assert!(capped && want_capped && got.len() == ABBR_MAX_CUTS);
+    assert_eq!(got, want);
+    // At N = 1 each of the 4 ㄒㄧㄢ runs is unsplit -> only 1 cut (filtered before the 64 cap).
+    assert_eq!(cuts(&four, 0, 1), (vec![vec!["ㄒㄧㄢ".to_string(); 4]], false));
+    // MAX_SYLLABLES upper bound also filters before truncating.
+    assert_eq!(cuts("ㄒㄧㄢ", MAX_SYLLABLES - 2, 3), (vec![u("ㄒㄧㄢ"), u("ㄒㄧ ㄢ"), u("ㄒ ㄧㄢ")], false));
+}
+
+#[test]
+fn abbreviation_learned_pick_from_another_cut_keeps_its_weight() {
+    // Left context "他", type ㄑ ㄧ ㄝ (composer keeps one unit ["ㄑㄧㄝ"], while ["ㄑ", "ㄧㄝ"] is a second cut):
+    // pick "企業" (ㄑㄧˋ ㄧㄝˋ, which is not first initially and comes only from the 2-unit cut), commit to learn it,
+    // and verify that typing ㄑ ㄧ ㄝ again under "他" surfaces "企業" first via its learned weight.
+    let mut e = learner_engine(Profile::Chat, None);
+    e.set_abbreviation(true).unwrap();
+    e.set_left_context("他");
+    let initial = row(&typ(&mut e, &[], "ㄑㄧㄝ"));
+    assert_eq!(e.pending_units(), vec!["ㄑㄧㄝ"]);
+    assert!(initial.contains(&"企業".to_string()) && initial[0] != "企業", "{initial:?}");
+    pick_word(&mut e, "企業");
+    assert_eq!(e.key(kind(KeyKind::Enter)).unwrap().commit, "企業");
+    e.set_left_context("他");
+    let again = row(&typ(&mut e, &[], "ㄑㄧㄝ"));
+    assert_eq!(again[0], "企業", "{initial:?} -> {again:?}");
+}
+
+#[test]
+fn abbreviation_single_cut_matches_plain_prediction_entry_for_entry() {
+    // §2.2: with abbreviation on and only one cut, the prediction row equals the non-abbreviated row item for item:
+    // (1) N = 1 typing ㄒ ㄧ ㄢ; (2) any N typing a single symbol; (3) with completed syllables before cursor; (4) with learned records.
+    for with_learn in [false, true] {
+        let make = |abbr: bool, split: u32| {
+            let mut e = if with_learn { learner_engine(Profile::Chat, None) } else { engine() };
+            if with_learn {
+                teach(&mut e, A.0, "ㄋ", "奶茶");
+                teach(&mut e, "我要", "ㄒ", "先");
+                e.reset(ResetMode::Discard);
+            }
+            e.set_abbreviation_split(split).unwrap();
+            e.set_abbreviation(abbr).unwrap();
+            e
+        };
+        // (1) N = 1 typing ㄒ ㄧ ㄢ
+        for left in ["", "我要"] {
+            let (mut on, mut off) = (make(true, 1), make(false, 3));
+            on.set_left_context(left);
+            off.set_left_context(left);
+            assert_eq!(row(&typ(&mut on, &[], "ㄒㄧㄢ")), row(&typ(&mut off, &[], "ㄒㄧㄢ")), "N=1 xian learn={with_learn} left={left}");
+        }
+        // (2) Any N = 1, 2, 3 typing a single symbol
+        for n in 1..=3 {
+            for sym in ["ㄋ", "ㄒ", "ㄧ"] {
+                let (mut on, mut off) = (make(true, n), make(false, 3));
+                on.set_left_context(A.0);
+                off.set_left_context(A.0);
+                assert_eq!(row(&typ(&mut on, &[], sym)), row(&typ(&mut off, &[], sym)), "N={n} sym={sym} learn={with_learn}");
+            }
+        }
+        // (3) Completed syllables before the cursor (long starts + mid starts active)
+        for (split, pend) in [(1, "ㄒㄧㄢ"), (1, "ㄋ"), (2, "ㄋ"), (3, "ㄋ")] {
+            let (mut on, mut off) = (make(true, split), make(false, 3));
+            on.set_left_context(A.0);
+            off.set_left_context(A.0);
+            let r_on = row(&typ(&mut on, &["ㄋㄧˇ", "ㄏㄠˇ"], pend));
+            let r_off = row(&typ(&mut off, &["ㄋㄧˇ", "ㄏㄠˇ"], pend));
+            assert_eq!(r_on, r_off, "completed syls split={split} pend={pend} learn={with_learn}");
+        }
+    }
+}
+
+#[test]
+fn abbreviation_split_setting_recomputes_when_on_and_only_remembers_when_off() {
+    let mut e = abbr_engine("他");
+    for bad in [0, 4, u32::MAX] {
+        assert!(e.set_abbreviation_split(bad).unwrap().is_none(), "bad={bad}");
+    }
+    let o3 = typ(&mut e, &[], "ㄑㄧㄝ");
+    assert!(row(&o3).contains(&"企業".to_string()));
+    let o2 = e.set_abbreviation_split(2).unwrap().unwrap();
+    assert!(row(&o2).contains(&"企業".to_string()), "N=2 still allows ㄑ/ㄧㄝ");
+    let o1 = e.set_abbreviation_split(1).unwrap().unwrap();
+    assert!(!row(&o1).contains(&"企業".to_string()), "N=1 forbids splitting ㄑㄧㄝ");
+    let o3_again = e.set_abbreviation_split(3).unwrap().unwrap();
+    assert_eq!(row(&o3_again), row(&o3));
+
+    // When abbreviation is off: remembers N without recomputing (even an entered prediction row stays entered).
+    let mut e = engine();
+    typ(&mut e, &[], "ㄑㄧㄝ");
+    let entered = e.key(kind(KeyKind::Tab)).unwrap();
+    assert_eq!(entered.selected, Some(0));
+    let snap = e.set_abbreviation_split(1).unwrap().unwrap();
+    assert_eq!(snap.selected, Some(0), "off: did not clear/recompute the entered row");
+    assert_eq!(row(&snap), row(&entered));
+    // Turning abbreviation on afterwards and typing uses the remembered N = 1.
+    e.reset(ResetMode::Discard);
+    e.set_left_context("他");
+    e.set_abbreviation(true).unwrap();
+    let after_on = typ(&mut e, &[], "ㄑㄧㄝ");
+    assert!(!row(&after_on).contains(&"企業".to_string()), "remembered N=1 took effect");
 }
 
 #[test]

@@ -14,6 +14,13 @@ static int str_eq(const char *a, const char *b) {
   return *a == *b;
 }
 
+static int has_cand(const ShanjieOutput *o, const char *w) {
+  for (uint32_t i = 0; o && i < o->candidate_count; i++) {
+    if (str_eq(o->candidates[i], w)) return 1;
+  }
+  return 0;
+}
+
 static ShanjieKey ch_key(char c) { ShanjieKey k = {1u, (uint32_t)(unsigned char)c, 0u}; return k; }
 static ShanjieKey kind_key(uint32_t kind) { ShanjieKey k = {kind, 0u, 0u}; return k; }
 
@@ -247,13 +254,32 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = 0;
   CHECK(854, shanjie_engine_set_key_scheme(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
-  /* set_abbreviation (docs/spec/prediction.md §6): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), and turning it off drops them. */
+  /* set_abbreviation / set_abbreviation_split (docs/spec/prediction.md §6): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), changing n recomputes the row, and turning it off drops them. */
   o = 0;
   CHECK(820, shanjie_engine_set_abbreviation(0, 1, &o) == 1 && o == 0);
   CHECK(821, shanjie_engine_set_abbreviation(e, 1, 0) == 1);
   o = &dummy;
   CHECK(822, shanjie_engine_set_abbreviation(e, 2, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(860, shanjie_engine_set_abbreviation_split(0, 3, &o) == 1 && o == 0);
+  CHECK(861, shanjie_engine_set_abbreviation_split(e, 3, 0) == 1);
+  o = &dummy;
+  CHECK(862, shanjie_engine_set_abbreviation_split(e, 0, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(863, shanjie_engine_set_abbreviation_split(e, 4, &o) == 2 && o == 0);
   CHECK(823, shanjie_engine_set_abbreviation(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = type_last(e, "ak"); /* ㄇㄜ: N=3 splits ㄇ/ㄜ -> 名額 */
+  CHECK(864, o != 0 && has_cand(o, "\xe5\x90\x8d\xe9\xa1\x8d"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(865, shanjie_engine_set_abbreviation_split(e, 1, &o) == 0 && o != 0 && !has_cand(o, "\xe5\x90\x8d\xe9\xa1\x8d"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(866, shanjie_engine_set_abbreviation_split(e, 3, &o) == 0 && o != 0 && has_cand(o, "\xe5\x90\x8d\xe9\xa1\x8d"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(867, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
   o = type_last(e, "st");
   CHECK(824, o != 0 && str_eq(o->preedit, "\xe3\x84\x8b\xe3\x84\x94"));
