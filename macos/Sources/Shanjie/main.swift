@@ -39,6 +39,11 @@ final class DefaultsLayoutStore: LayoutStore {
         get { UserDefaults.standard.string(forKey: "layout") }
         set { UserDefaults.standard.set(newValue, forKey: "layout") }
     }
+    /// The 標點排列 choice (docs/spec/keys-and-composition.md §8.1), key `punctLayout`: `apple` or `mcbopomofo`; absent means `apple`.
+    var punctLayout: String? {
+        get { UserDefaults.standard.string(forKey: "punctLayout") }
+        set { UserDefaults.standard.set(newValue, forKey: "punctLayout") }
+    }
 }
 
 /// The "avoid ranking sensitive words first" switch (docs/spec/decoder.md §2.4),
@@ -172,6 +177,11 @@ final class DefaultsShiftToggleStore: ShiftToggleStore {
     var shiftToggle: Bool? {
         get { UserDefaults.standard.object(forKey: "shiftToggle") as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: "shiftToggle") }
+    }
+    /// The 用哪一側的 Shift choice (docs/spec/keys-and-composition.md §9.1), key `shiftSide`: `both`, `right` or `left`; absent means `both`.
+    var shiftSide: String? {
+        get { UserDefaults.standard.string(forKey: "shiftSide") }
+        set { UserDefaults.standard.set(newValue, forKey: "shiftSide") }
     }
 }
 

@@ -25,6 +25,53 @@ final class ShiftTapTests: XCTestCase {
         }
     }
 
+    // MARK: 用哪一側的 Shift (docs/spec/keys-and-composition.md §9.1)
+
+    /// One press and release of `key` 0.1 s apart; the release's outcome.
+    private func outcome(_ t: inout ShiftTap, _ key: UInt16, at: TimeInterval, alsoHeld: Bool = false) -> ShiftTap.Outcome? {
+        let l = key == left, r = key == right
+        _ = t.event(keyCode: key, leftDown: l || alsoHeld, rightDown: r || alsoHeld, others: false, capsLock: false, now: at, processedAt: at, mouseAgo: noMouse)
+        return t.event(keyCode: key, leftDown: !l && alsoHeld, rightDown: !r && alsoHeld, others: false, capsLock: false, now: at + 0.1, processedAt: at + 0.1,
+                       mouseAgo: noMouse)
+    }
+
+    func testOnlyTheChosenSideSwitches() {
+        for (side, chosen, other) in [(ShiftTap.Side.right, right, left), (.left, left, right)] {
+            var t = ShiftTap(side: side)
+            XCTAssertEqual(outcome(&t, other, at: 1), .wrongSide, "\(side): the other side does not switch")
+            XCTAssertEqual(outcome(&t, chosen, at: 2), .toggled, "\(side)")
+            XCTAssertEqual(outcome(&t, other, at: 3), .wrongSide, "\(side): still not, after a tap of the chosen side")
+            // Holding one side and tapping the other: only the tapped side counts.
+            XCTAssertEqual(outcome(&t, chosen, at: 4, alsoHeld: true), .toggled, "\(side): the other side held, the chosen one tapped")
+            XCTAssertEqual(outcome(&t, other, at: 5, alsoHeld: true), .wrongSide, "\(side): the chosen side held, the other one tapped")
+            // A change while running is read at the next release.
+            t.side = .both
+            XCTAssertEqual(outcome(&t, other, at: 6), .toggled)
+        }
+        var both = ShiftTap()
+        XCTAssertEqual(both.side, .both, "the default")
+        XCTAssertEqual(outcome(&both, left, at: 1), .toggled)
+        XCTAssertEqual(outcome(&both, right, at: 2), .toggled)
+    }
+
+    /// `wrongSide` comes after every other reason: a release that was no tap anyway keeps its own reason.
+    func testWrongSideIsTheLastReason() {
+        var t = ShiftTap(side: .right)
+        _ = t.event(keyCode: left, leftDown: true, rightDown: false, others: false, capsLock: false, now: 1, processedAt: 1, mouseAgo: noMouse)
+        XCTAssertEqual(t.event(keyCode: left, leftDown: false, rightDown: false, others: false, capsLock: false, now: 2, processedAt: 2, mouseAgo: noMouse), .tooLong)
+        _ = t.event(keyCode: left, leftDown: true, rightDown: false, others: false, capsLock: false, now: 3, processedAt: 3, mouseAgo: noMouse)
+        XCTAssertEqual(t.event(keyCode: left, leftDown: false, rightDown: false, others: false, capsLock: false, now: 3.1, processedAt: 3.1, mouseAgo: { 0.05 }), .mouse)
+    }
+
+    func testTheStoredSideIsBothWhenAbsentOrUnknown() {
+        XCTAssertEqual(ShiftTap.Side(stored: nil), .both)
+        XCTAssertEqual(ShiftTap.Side(stored: "top"), .both)
+        XCTAssertEqual(ShiftTap.Side(stored: ""), .both)
+        XCTAssertEqual(ShiftTap.Side(stored: "right"), .right)
+        XCTAssertEqual(ShiftTap.Side(stored: "left"), .left)
+        XCTAssertEqual(ShiftTap.Side(stored: "both"), .both)
+    }
+
     /// A release whose press was never seen (secure field, app switch) must not turn every later tap upside down.
     func testAnUnpairedReleaseDoesNotInvertLaterTaps() {
         var t = ShiftTap()

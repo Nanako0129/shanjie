@@ -244,6 +244,11 @@ struct SettingsPageForm: View {
                         Text("標準").tag(InputMode.standard)
                         Text("倚天").tag(InputMode.eten)
                     }
+                    // docs/spec/keys-and-composition.md §8.1: a native Picker; the next key follows it.
+                    Picker(MenuEntry.Text.punctLayout, selection: Binding(get: { model.punctLayout }, set: { model.setPunctLayout($0) })) {
+                        Text(MenuEntry.Text.punctLayoutApple).tag(PunctLayout.apple)
+                        Text(MenuEntry.Text.punctLayoutMcbopomofo).tag(PunctLayout.mcbopomofo)
+                    }
                 }
                 Section("聊天／書面") {
                     Picker("切換方式", selection: Binding(get: { model.profileMode }, set: { model.setProfileMode($0) })) {
@@ -309,8 +314,15 @@ struct SettingsPageForm: View {
                         .disabled(!model.englishOverwriteEnabled)
                     Text(MenuEntry.Text.englishOverwriteNote)
                         .font(.caption).foregroundStyle(.secondary)
-                    // docs/spec/keys-and-composition.md §9.1: always enabled (it works with the English mixing off too: then the composition is sent first).
+                    // docs/spec/keys-and-composition.md §9.1: always enabled (it works with the English mixing off too).
                     Toggle(MenuEntry.Text.shiftToggle, isOn: Binding(get: { model.shiftToggle }, set: { model.setShiftToggle($0) }))
+                    // Which Shift key: a native Picker right under the toggle that greys it.
+                    Picker(MenuEntry.Text.shiftSide, selection: Binding(get: { model.shiftSide }, set: { model.setShiftSide($0) })) {
+                        Text(MenuEntry.Text.shiftSideBoth).tag(ShiftTap.Side.both)
+                        Text(MenuEntry.Text.shiftSideRight).tag(ShiftTap.Side.right)
+                        Text(MenuEntry.Text.shiftSideLeft).tag(ShiftTap.Side.left)
+                    }
+                    .disabled(!model.shiftSideEnabled)
                     Text(MenuEntry.Text.shiftToggleNote)
                         .font(.caption).foregroundStyle(.secondary)
                     // docs/spec/english-mixed.md §9, §11: always enabled, independent of the 中英混打 switch.

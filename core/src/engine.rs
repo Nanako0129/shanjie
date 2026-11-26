@@ -379,6 +379,11 @@ const SHIFT_PUNCT: [(char, char); 13] = [
 /// Unshifted key -> punctuation, from the same probe: [ 「, ] 」, \ 、, ' ‘, = ＝, ` ·. Only when the key is
 /// neither a Zhuyin nor a tone key in the current layout (Eten uses ' and = for Zhuyin).
 const PLAIN_PUNCT: [(char, char); 6] = [('[', '「'), (']', '」'), ('\\', '、'), ('\'', '‘'), ('=', '＝'), ('`', '·')];
+/// Punctuation layout 1 (`set_punct_layout`, docs/spec/keys-and-composition.md §8.1): the cells that differ from layout 0, from the McBopomofo lexicon
+/// `data/lexicon/mcbpmf-data.txt` (`_punctuation_Standard_<c>`, else `_punctuation_<c>`, first row; `c` the character the US keyboard gives for the key).
+/// A key not listed here is layout 0's. The test `punct_layout_1_cells_are_the_lexicon_rows` reads the file.
+const SHIFT_PUNCT_1: [(char, char); 8] = [('\'', '；'), ('2', '＠'), ('3', '＃'), ('4', '＄'), ('5', '％'), ('6', '︿'), ('7', '＆'), ('8', '＊')];
+const PLAIN_PUNCT_1: [(char, char); 2] = [('\'', '、'), ('\\', '＼')];
 /// Option + key and Option + Shift + key -> the character rule 1o puts into the composition (docs/spec/keys-and-composition.md §8.1), position by position
 /// the keys of `OPTION_KEYS`. Apple's Zhuyin, measured 2026-11-20 in a VM (macOS 26.6.2) with HID-level key events, every cell.
 const OPTION_KEYS: &str = "`1234567890-=[]\\;',./";
@@ -544,6 +549,9 @@ impl Key {
 pub enum ResetMode {
     Commit,
     Discard,
+    /// The unfinished syllable goes first (every unit of the abbreviation composer, what Esc clears under rule 12), then as `Commit`
+    /// (docs/spec/keys-and-composition.md §7.2; the shell's switch to English where the ASCII state cannot keep the composition, §9.2).
+    CommitFinished,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -903,6 +911,8 @@ pub struct Engine {
     cand_vertical: bool,
     /// Key scheme (`set_key_scheme`): 0 the rules of docs/spec/keys-and-composition.md §4.1 (default), 1 the `m` rows. A candidate window keeps the one it opened with (`Cands::ms`).
     key_scheme: u8,
+    /// Punctuation layout (`set_punct_layout`): 0 Apple Zhuyin's (default), 1 McBopomofo's.
+    punct_layout: u8,
     /// docs/spec/keys-and-composition.md §4.1.1 rule 16u: the run of Up presses in a composition under key scheme 1, set by each swap. Every key past rule 1 and
     /// 5q that is not Up clears it, and so does the third press (it opens the window); a call that is not a key is caught by `UpRun`'s check.
     up_run: Option<UpRun>,
@@ -1432,6 +1442,7 @@ impl Engine {
             predict_on: true,
             cand_vertical: false,
             key_scheme: 0,
+            punct_layout: 0,
             up_run: None,
             abbr: false,
             scan_gate: true,
@@ -2306,6 +2317,18 @@ impl Engine {
         self.handled().map(Some)
     }
 
+    /// The punctuation layout (docs/spec/keys-and-composition.md §8.1; default 0): 0 Apple Zhuyin's keys, 1 McBopomofo's (ten cells differ, `SHIFT_PUNCT_1` and
+    /// `PLAIN_PUNCT_1`). Any other value changes nothing and gives `Ok(None)` (the C ABI's 2). The next key reads it; nothing shown changes, so the snapshot equals
+    /// the output before the call.
+    pub fn set_punct_layout(&mut self, layout: u32) -> Result<Option<Output>, EngineError> {
+        if layout > 1 {
+            return Ok(None);
+        }
+        self.setting_changed();
+        self.punct_layout = layout as u8;
+        self.handled().map(Some)
+    }
+
     /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, docs/spec/prediction.md §6).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
@@ -2456,7 +2479,8 @@ impl Engine {
 
     /// docs/spec/keys-and-composition.md §9.3: the ASCII state of the shell's per-app Shift toggle. `on` ends what the composition has open, in
     /// order: the window or the row (closed, nothing chosen), the digit run (flushed as `set_english(false)` does), the unfinished
-    /// syllable (its shadow keys open the English run, as Shift+letter does). Without a syllable the run opens with the first
+    /// syllable (with English mixing on its shadow keys open the English run, as Shift+letter does; with it off the syllable is dropped,
+    /// as Esc drops it). Without a syllable the run opens with the first
     /// character. `off` ends an open run as a token (no space) and the usual rules return. An empty composition only records the
     /// state. Returns the snapshot (`commit` is what a unit that reaches `MAX_SYLLABLES` sent).
     pub fn set_ascii(&mut self, on: bool) -> Result<Output, EngineError> {
@@ -2468,22 +2492,26 @@ impl Engine {
         if !on {
             return self.settle_run();
         }
-        // Without a shadow (Eten, abbreviation composer, mixing off) there is no English run to keep a composition in: only the state
-        // is recorded, the composition stays as it is and the ASCII branch of `dispatch_key` does not apply (the shell sends the
+        // Where the ASCII state is not available (Eten, abbreviation composer) the engine keeps no English run in a composition: only the
+        // state is recorded, the composition stays as it is and the ASCII branch of `dispatch_key` does not apply (the shell sends the
         // composition first, docs/spec/keys-and-composition.md §9.2).
-        if !self.shadow_on() {
+        if !self.ascii_on() {
             return self.handled();
         }
         self.cands = None;
         self.clear_pred();
         let (commit, _) = self.digit_flush()?;
         if self.pend.iter().any(Option::is_some) {
+            // English mixing off: there is no key record, and the unfinished syllable is dropped (docs/spec/keys-and-composition.md §9.3 step 3).
+            let mixing = self.shadow_on();
             let keep = std::mem::take(&mut self.typed);
             self.clear_pend();
-            self.run = keep;
-            self.run_ascii = true;
-            if self.cursor < self.syls.len() {
-                self.refresh()?;
+            if mixing {
+                self.run = keep;
+                self.run_ascii = true;
+                if self.cursor < self.syls.len() {
+                    self.refresh()?;
+                }
             }
         }
         let mut o = self.view(true, String::new());
@@ -2533,10 +2561,17 @@ impl Engine {
         self.pend
     }
 
-    /// docs/spec/english-mixed.md §1.2: where the shadow is recorded and the reverts can happen: English mixing on, the standard layout and the
-    /// abbreviation composer off.
+    /// docs/spec/english-mixed.md §1.2: where the shadow is recorded and the reverts can happen (English is told apart automatically): English mixing on,
+    /// and where the ASCII state is available (`ascii_on`).
     fn shadow_on(&self) -> bool {
-        self.english && !self.abbr && self.layout == Layout::Standard
+        self.english && self.ascii_on()
+    }
+
+    /// docs/spec/keys-and-composition.md §9.3: where the ASCII state is available (`set_ascii(1)` converts the composition and the ASCII branch of
+    /// `dispatch_key` applies): the standard layout and the abbreviation composer off, whatever the English mixing switch says. Everything else that
+    /// English mixing brings (reverts, the digit layer, Shift+letter, the mixed-word edges, Backspace reopening a token, Space after a token) asks `shadow_on`.
+    fn ascii_on(&self) -> bool {
+        !self.abbr && self.layout == Layout::Standard
     }
 
     fn clear_shadow(&mut self) {
@@ -3344,8 +3379,14 @@ impl Engine {
     }
 
     /// docs/spec/c-abi.md §1, reset: Commit returns the composition as shown, unfinished symbols included, like Enter (
-    /// docs/spec/keys-and-composition.md §7.1; no learning here); both clear everything.
+    /// docs/spec/keys-and-composition.md §7.1; no learning here); CommitFinished drops the unfinished syllable first; all clear everything.
     pub fn reset(&mut self, mode: ResetMode) -> Output {
+        let mode = if mode == ResetMode::CommitFinished {
+            self.clear_pend();
+            ResetMode::Commit
+        } else {
+            mode
+        };
         // docs/spec/english-mixed.md §7.4: the buffered digits are tokens before the composition is sent (Commit); Discard drops them with the rest.
         let digits = if mode == ResetMode::Commit { self.digit_flush().unwrap_or_default().0 } else { String::new() };
         if mode == ResetMode::Commit && !self.run.is_empty() && !self.run_ascii {
@@ -4270,21 +4311,21 @@ impl Engine {
         if k.kind != KeyKind::Up {
             self.up_run = None;
         }
-        // docs/spec/keys-and-composition.md §9.3: in the ASCII state, with a shadow, a printable ASCII character
+        // docs/spec/keys-and-composition.md §9.3: in the ASCII state, where it is available (`ascii_on`), a printable ASCII character
         // closes an open window or row without choosing (so `1` is a character, never a pick) and then either goes on the English run as
         // typed (the characters `english_of` accepts: no lower case, no tone key, no revert or split) or, being any other character,
         // settles the open run as a token and goes in as its own half-width punctuation unit, so every English token keeps `english_of`'s
         // invariants.
         // Space with no run open, right after a token unit (English token, space unit, digit token, or a half-width mark of this branch),
         // types a space unit as rule 16a does after an English token; with a run open it ends the run (the next Space types the space).
-        if self.ascii && k.kind == KeyKind::Space && m == 0 && self.shadow_on() && self.run.is_empty() && self.cands.is_none()
+        if self.ascii && k.kind == KeyKind::Space && m == 0 && self.ascii_on() && self.run.is_empty() && self.cands.is_none()
             && self.pred_sel.is_none() && self.drun.is_none() && self.cursor > 0 && self.is_ascii_token(self.cursor - 1)
         {
             self.clear_pred();
             self.pred_dirty = true;
             return self.insert_token(format!("{PUNCT_PREFIX} "), Some(" ".to_string()), None);
         }
-        if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) && self.shadow_on() {
+        if self.ascii && is_char && m == 0 && ('!'..='~').contains(&k.ch) && self.ascii_on() {
             self.cands = None;
             self.clear_pred();
             let opened = self.run.is_empty();
@@ -4374,9 +4415,9 @@ impl Engine {
         let punct = if ctrl_bs {
             Some('、')
         } else if is_char && m == MOD_SHIFT {
-            SHIFT_PUNCT.iter().find(|(c, _)| *c == k.ch).map(|(_, p)| *p)
+            self.punct_of(&SHIFT_PUNCT_1, &SHIFT_PUNCT, k.ch)
         } else if is_char && m == 0 && self.layout.symbol_of(k.ch).is_none() && self.layout.tone_of(k.ch).is_none() {
-            PLAIN_PUNCT.iter().find(|(c, _)| *c == k.ch).map(|(_, p)| *p)
+            self.punct_of(&PLAIN_PUNCT_1, &PLAIN_PUNCT, k.ch)
         } else {
             None
         };
@@ -4727,6 +4768,12 @@ impl Engine {
             _ => {}
         }
         Ok(true)
+    }
+
+    /// Rule 2's table: the key's cell in punctuation layout 1 (`one`) when that layout is chosen and has the key, else layout 0's (`base`).
+    fn punct_of(&self, one: &[(char, char)], base: &[(char, char)], ch: char) -> Option<char> {
+        let find = |t: &[(char, char)]| t.iter().find(|(c, _)| *c == ch).map(|(_, p)| *p);
+        (self.punct_layout == 1).then(|| find(one)).flatten().or_else(|| find(base))
     }
 
     /// Rule 2's insertion, also the key scheme 1 rows that put a character into the composition: anything unfinished goes, an open window closes, and `p` becomes a
