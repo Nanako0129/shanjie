@@ -1420,6 +1420,15 @@ fn abbr_b_summary(items: &[&AbbrItem]) -> String {
     format!("{{'words': {}, 'missing': {}, 'top1': {}, 'top9': {}, 'mrr': {mrr:.4}, 'rank1': {}, 'rank2_9': {}, 'rank10plus': {}}}", ranks.len(), b[3], b[0], b[0] + b[1], b[0], b[1], b[2])
 }
 
+/// `--abbr` cuts a row character by character against its reading, so the two must have the same length. The error names the file and
+/// line and gives both counts, never the row's text.
+fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usize) -> Result<(), String> {
+    if chars == syllables {
+        return Ok(());
+    }
+    Err(format!("{file}:{line}: the sentence has {chars} characters but the reading has {syllables} syllables"))
+}
+
 /// `--abbr A|B|C --rows FILE [--rows FILE …] --lm FILE [--abbr-dump FILE]`: how the prediction row ranks each word of the rows when it is
 /// typed abbreviated (A: initials only; B: without the initial; C: without the tone key). Measures only; nothing here changes the engine.
 ///
@@ -1437,17 +1446,11 @@ fn abbr_b_summary(items: &[&AbbrItem]) -> String {
 ///
 /// Output: one line per subset (`all`, the word lengths 1, 2, 3-4, 5-10, and for B the words whose B keys equal their C keys and the others,
 /// each by length too); for B also the offline lines (`abbr_b_sets`, every word with at most 10 syllables and no Zhuyin symbol, merged or not).
+/// A row whose sentence length and syllable count differ stops the run with its file and line (`abbr_row_lengths_match`); so does a
+/// word the composer simulation (`abbr_merge_kind`) and the engine disagree on. The last line, `## merges`, splits the composer merges
+/// into backward-only and has-forward.
 /// `--abbr-dump` writes each measurable word's query and row in the format of `--predict` without the score columns, so
 /// `--predict DUMP --lm … --profile chat --packs acg,it,meme,beauty` must print the same words.
-/// `--abbr` cuts a row character by character against its reading, so the two must have the same length. The error names the file and
-/// line and gives both counts, never the row's text.
-fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usize) -> Result<(), String> {
-    if chars == syllables {
-        return Ok(());
-    }
-    Err(format!("{file}:{line}: the sentence has {chars} characters but the reading has {syllables} syllables"))
-}
-
 fn run_abbr(args: &[String]) -> Result<(), String> {
     let (mut style, mut files, mut lm_path, mut dump) = (None, Vec::new(), None, None);
     let mut it = args.iter();
