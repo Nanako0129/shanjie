@@ -1,10 +1,6 @@
 //! S0 core: port of reference/proto/ime.py (lexicon, to_syllables, beam decode, learners).
 //! R2 (docs/spec/privacy.md): errors carry a kind and a length only, never input text.
 
-// IOS-CI reverse check (temporary, reverted in the next commit): the iOS check in CI must fail here.
-#[cfg(target_os = "ios")]
-compile_error!("IOS-CI reverse check: this commit is reverted");
-
 pub mod colloquial;
 pub mod digits;
 pub mod engine;
