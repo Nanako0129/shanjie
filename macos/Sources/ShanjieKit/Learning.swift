@@ -136,7 +136,7 @@ public struct MenuEntry: Equatable, Sendable {
         public static let englishOverwriteNote = "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。"
         /// The Shift-toggle switch in the settings window and the line under it (docs/spec/keys-and-composition.md §9.1).
         public static let shiftToggle = "單按 Shift 切換中英"
-        public static let shiftToggleNote = "單按一下 Shift 在中文和英文之間切換（用哪一側可以在下面選），游標旁會短暫顯示「英」或「中」，換 App 或停打一陣子後開始打字時也會顯示。每個 App 各自記住；組字區有字時，之後打的字母接在後面當英文。中英混打關著，或用倚天鍵盤、開著可省略韻母時，還沒打完的注音會丟掉。"
+        public static let shiftToggleNote = "單按一下 Shift 在中文和英文之間切換（用哪一側可以在下面選），游標旁會短暫顯示「英」或「中」，換 App 或停打一陣子後開始打字時也會顯示。每個 App 各自記住；組字區有字時，之後打的字母接在後面當英文；倚天鍵盤或開著可省略韻母時，會先送出組字區。中英混打關著，或用倚天鍵盤、開著可省略韻母時，還沒打完的注音會丟掉。"
         /// The picker under the switch (docs/spec/keys-and-composition.md §9.1) and its three choices.
         public static let shiftSide = "用哪一側的 Shift"
         public static let shiftSideBoth = "左右都可"
