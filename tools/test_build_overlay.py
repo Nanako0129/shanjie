@@ -819,23 +819,47 @@ class SlangBehind(unittest.TestCase):
 
 
 class LateRemovals(unittest.TestCase):
-    """docs/spec/lexicon-and-packs.md §2.3: whole-word Simplified forms written with characters Taiwan also uses (松散), and the reviewed drop list
-    of typo forms (好高鶩遠). Neither was caught before: the sentence test only counts S and marker characters, and no table pairs 鶩 with 騖."""
+    """docs/spec/lexicon-and-packs.md §2.3: whole-word Simplified forms written with characters Taiwan also uses (松散, when the base target shares
+    the row's reading), and the reviewed drop list of typo forms (好高鶩遠). Neither was caught before: the sentence test only counts S and marker
+    characters, and no table pairs 鶩 with 騖."""
     def test_phrase_twin(self):
-        phrase = {"松散": "鬆散", "干涉": "干涉", "花卷": "花捲", "谷城": "穀城", "面條": "麵條"}
-        words, heads = {"鬆散", "干涉", "花捲", "麵條"}, {"面條"}
-        self.assertEqual(B.phrase_twin("松散", phrase, words, heads), "鬆散")
-        self.assertIsNone(B.phrase_twin("干涉", phrase, words, heads), "an identity entry is not a twin")
-        self.assertIsNone(B.phrase_twin("花卷市", phrase, words, heads), "only the whole word is looked up, never a part of it")
-        self.assertIsNone(B.phrase_twin("谷城", phrase, words, heads), "the target has to be a base word")
-        self.assertIsNone(B.phrase_twin("面條", phrase, words, heads), "a dictionary headword stays")
-        self.assertIsNone(B.phrase_twin("鬆散", phrase, words, heads))
+        phrase = {"松散": "鬆散", "系上": "繫上", "挨到": "捱到", "干涉": "干涉", "花卷": "花捲", "谷城": "穀城", "面條": "麵條"}
+        by_reading = {
+            ("ㄙㄨㄥ", "ㄙㄢˇ"): [("鬆散", -5.6)],
+            ("ㄐㄧˋ", "ㄕㄤˋ"): [("繫上", -6.0)],
+            ("ㄞˊ", "ㄉㄠˋ"): [("捱到", -7.4)],
+            ("ㄍㄢ", "ㄕㄜˋ"): [("干涉", -5.0)],
+            ("ㄏㄨㄚ", "ㄐㄩㄢˇ"): [("花捲", -6.0)],
+            ("ㄇㄧㄢˋ", "ㄊㄧㄠˊ"): [("麵條", -5.0)],
+        }
+        heads = {"面條"}
+        self.assertEqual(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˇ"), phrase, by_reading, heads), "鬆散")
+        self.assertIsNone(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˋ"), phrase, by_reading, heads), "a different reading from the base target stays")
+        self.assertIsNone(B.phrase_twin("系上", ("ㄒㄧˋ", "ㄕㄤˋ"), phrase, by_reading, heads), "系上 (ㄒㄧˋ ㄕㄤˋ) is not 繫上 (ㄐㄧˋ ㄕㄤˋ)")
+        self.assertIsNone(B.phrase_twin("挨到", ("ㄞ", "ㄉㄠˋ"), phrase, by_reading, heads), "挨到 (ㄞ ㄉㄠˋ) is not 捱到 (ㄞˊ ㄉㄠˋ)")
+        self.assertEqual(B.phrase_twin("系上", ("ㄐㄧˋ", "ㄕㄤˋ"), phrase, by_reading, heads), "繫上", "same reading as 繫上 is dropped")
+        self.assertIsNone(B.phrase_twin("干涉", ("ㄍㄢ", "ㄕㄜˋ"), phrase, by_reading, heads), "an identity entry is not a twin")
+        self.assertIsNone(B.phrase_twin("花卷市", ("ㄏㄨㄚ", "ㄐㄩㄢˇ", "ㄕˋ"), phrase, by_reading, heads), "only the whole word is looked up, never a part of it")
+        self.assertIsNone(B.phrase_twin("谷城", ("ㄍㄨˇ", "ㄔㄥˊ"), phrase, by_reading, heads), "the target has to be a base word")
+        self.assertIsNone(B.phrase_twin("面條", ("ㄇㄧㄢˋ", "ㄊㄧㄠˊ"), phrase, by_reading, heads), "a dictionary headword stays")
+        self.assertIsNone(B.phrase_twin("鬆散", ("ㄙㄨㄥ", "ㄙㄢˇ"), phrase, by_reading, heads))
 
-    def test_prune_takes_every_row_of_the_word_and_records_the_landing(self):
+    def test_phrase_twin_against_real_base_readings(self):
+        base = ime.Lexicon(B.BASE)
+        phrase = {"系上": "繫上", "挨到": "捱到", "松散": "鬆散"}
+        self.assertIsNone(B.phrase_twin("系上", ("ㄒㄧˋ", "ㄕㄤˋ"), phrase, base.by_reading, set()))
+        self.assertIsNone(B.phrase_twin("挨到", ("ㄞ", "ㄉㄠˋ"), phrase, base.by_reading, set()))
+        self.assertEqual(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˇ"), phrase, base.by_reading, set()), "鬆散")
+        self.assertIsNone(B.phrase_twin("松散", ("ㄙㄨㄥ", "ㄙㄢˋ"), phrase, base.by_reading, set()))
+
+    def test_prune_takes_matching_rows_and_records_the_landing(self):
         rows = ["ㄅㄨˋ-a\t甲\t-7.0\twikt\n", "ㄅㄨˊ-a\t甲\t-7.5\twikt\n", "b\t乙\t-7.0\twikt\n"]
-        kept, gone = B.prune(rows, {"甲": "丙"}.get)
+        kept, gone = B.prune(rows, lambda w, _: {"甲": "丙"}.get(w))
         self.assertEqual(kept, rows[2:])
         self.assertEqual(gone, ["甲\t丙\tㄅㄨˋ-a\n", "甲\t丙\tㄅㄨˊ-a\n"])
+        kept_r, gone_r = B.prune(rows, lambda w, r: "丙" if w == "甲" and r == ("ㄅㄨˋ", "a") else None)
+        self.assertEqual(kept_r, rows[1:])
+        self.assertEqual(gone_r, ["甲\t丙\tㄅㄨˋ-a\n"])
 
     def drops(self, text, words=frozenset({"好高騖遠"})):
         with tempfile.TemporaryDirectory() as d:
@@ -855,22 +879,64 @@ class LateRemovals(unittest.TestCase):
 
     def test_a_full_build_applies_both(self):
         b = BuildFlags("test_default_is_the_old_method"); BuildFlags.setUpClass()
-        target = next(w for w in b.base.by_word if len(w) == 2)
-        (rows, removed, variant_removed, _), _ = b.build()
-        self.assertTrue(b.row(rows, b.title) and b.row(rows, b.other))
-        with mock.patch.object(B, "phrase_twin", lambda w, *a: target if w == b.title else None), mock.patch.object(B, "drop_list", lambda words: {b.other: target}):
-            (rows, removed, variant_removed, _), _ = b.build()
-        self.assertEqual((b.row(rows, b.title), b.row(rows, b.other)), ([], []))
-        self.assertEqual([r.split("\t")[:2] for r in removed], [[b.title, target]])
+        # Pick a candidate whose reading has a base 2-character word (same-reading twin -> dropped)
+        # and a second candidate whose reading lacks that base word (different-reading twin -> kept).
+        same, target = next((w, bw) for w in b.words for bw, _ in b.base.by_reading.get(tuple(b.syls(w)), ()) if len(bw) == 2)
+        diff = next(w for w in b.words if w != same and all(bw != target for bw, _ in b.base.by_reading.get(tuple(b.syls(w)), ())))
+        (rows, removed, variant_removed, _), _ = b.build(titles=[same, diff])
+        self.assertTrue(b.row(rows, same) and b.row(rows, diff) and b.row(rows, b.other))
+        # Run build() with real phrase_twin (not mocked) and drop_list over synthetic dumps.
+        d = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, d)
+        wikt = os.path.join(d, "t.gz")
+        with gzip.open(wikt, "wt", encoding="utf-8") as f:
+            f.write(f"{same}\n{diff}\n{b.other}\n")
+        empty = os.path.join(d, "e.gz")
+        gzip.open(empty, "wt").close()
+        with mock.patch.object(B, "fetch", lambda name: wikt if name == "enwiktionary" else empty), \
+                mock.patch.object(bc, "is_simplified", lambda _: False), \
+                mock.patch.object(bc, "load_conv", lambda: ({same: target, diff: target}, {}, 2)), \
+                mock.patch.object(bc, "TRAD_SIMP_ONLY", set()), \
+                mock.patch.object(B, "moe_titles", lambda: set()), \
+                mock.patch.object(B, "drop_list", lambda words: {b.other: target}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rows, removed, variant_removed, _ = B.build()
+        self.assertEqual((b.row(rows, same), b.row(rows, b.other)), ([], []))
+        self.assertTrue(b.row(rows, diff), "a phrase_twin target on a different base reading stays")
+        self.assertEqual([r.split("\t")[:2] for r in removed], [[same, target]])
         self.assertEqual([r.split("\t")[:2] for r in variant_removed], [[b.other, target]])
+
+    def test_rebuild_tails_refilter_checks_reading(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "overlay.tsv")
+            gen = [
+                "ㄙㄨㄥ-ㄙㄢˇ\t松散\t-7.17149945\twikt\n",
+                "ㄙㄨㄥ-ㄙㄢˋ\t松散\t-7.17149945\twikt\n",
+                "ㄒㄧˋ-ㄕㄤˋ\t系上\t-7.17149945\twikt\n",
+                "ㄞ-ㄉㄠˋ\t挨到\t-7.17149945\twikt\n",
+            ]
+            with open(out, "w", encoding="utf-8") as f:
+                f.writelines(gen)
+            phrase = {"松散": "鬆散", "系上": "繫上", "挨到": "捱到"}
+            with mock.patch.object(bc, "load_conv", side_effect=AssertionError("called without refilter")), \
+                    mock.patch.object(B, "moe_titles", side_effect=AssertionError("called without refilter")):
+                plain = B.rebuild_tails(out=out, refilter=False)
+            self.assertEqual(plain[:len(gen)], gen)
+            with mock.patch.object(bc, "load_conv", lambda: (phrase, {}, 2)), \
+                    mock.patch.object(B, "moe_titles", lambda: set()), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                filtered = B.rebuild_tails(out=out, refilter=True)
+            kept_pairs = {(r.split("\t")[0], r.split("\t")[1]) for r in filtered if r.rstrip("\n").split("\t")[3] == "wikt"}
+            self.assertNotIn(("ㄙㄨㄥ-ㄙㄢˇ", "松散"), kept_pairs)
+            self.assertEqual(kept_pairs, {("ㄙㄨㄥ-ㄙㄢˋ", "松散"), ("ㄒㄧˋ-ㄕㄤˋ", "系上"), ("ㄞ-ㄉㄠˋ", "挨到")})
 
     def test_the_shipped_overlay_has_none_of_them(self):
         """The committed file: no row of a drop-list word (so editing overlay-drop.tsv without `--tails-only` fails here and in ShippedOverlay), and,
         where the OpenCC tables and the dictionary are on this machine (not in CI), no generated row that phrase_twin would remove."""
-        base = set(ime.Lexicon(B.BASE).by_word)
+        base = ime.Lexicon(B.BASE)
         with open(B.OUT, encoding="utf-8") as f:
-            gen = {l.split("\t")[1] for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang")}
-        drop = B.drop_list(base)
+            gen_rows = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang", "colloq")]
+        gen = {l.split("\t")[1] for l in gen_rows}
+        drop = B.drop_list(set(base.by_word))
         self.assertIn("好高鶩遠", drop)
         self.assertEqual(gen & (set(drop) | {"松散", "好高鶩遠"}), set())
         moedict = os.environ.get("SHANJIE_MOEDICT")
@@ -880,7 +946,8 @@ class LateRemovals(unittest.TestCase):
         with mock.patch.dict(os.environ, {"SHANJIE_TW_CLEAN": "off"}), contextlib.redirect_stderr(io.StringIO()):
             phrase = bc.load_conv()[0]
         heads = B.moe_titles()
-        self.assertEqual(sorted(w for w in gen if B.phrase_twin(w, phrase, base, heads)), [])
+        self.assertEqual(sorted((l.split("\t")[0], l.split("\t")[1]) for l in gen_rows
+                                if B.phrase_twin(l.split("\t")[1], tuple(l.split("\t")[0].split("-")), phrase, base.by_reading, heads)), [])
 
 
 if __name__ == "__main__":

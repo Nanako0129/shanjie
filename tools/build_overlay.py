@@ -303,9 +303,10 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
         rows += lexgap_rows(lexgap, words | {r.split("\t")[1] for r in rows} | other_layers(), length_scores(base), syllables, base.by_reading, fold_w,
                             [r.split("\t")[:2] for r in rows])
     phrase = conv[0] if conv else {}
-    rows, gone = prune(rows, lambda w: phrase_twin(w, phrase, words, moe))   # 整詞的簡體寫法（每個字台灣也用，S2n 的句子判斷看不到）
+    rows, gone = prune(rows, lambda w, r: phrase_twin(w, r, phrase, base.by_reading, moe))   # 整詞的簡體寫法（每個字台灣也用，S2n 的句子判斷看不到；同讀音才拿掉）
     removed += gone
-    rows, gone = prune(rows, drop_list(words).get)   # 審過的錯字寫法
+    drop = drop_list(words)
+    rows, gone = prune(rows, lambda w, _: drop.get(w))   # 審過的錯字寫法
     variant_removed += gone
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
@@ -326,12 +327,16 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
 
 
 
-def phrase_twin(w, phrase, words, headwords):
-    """docs/spec/lexicon-and-packs.md §2.3：w 整個詞是簡繁詞組表（STPhrases 加 tw-conv.tsv 選定的值）的鍵、值是另一個寫法、那個寫法在基底，而且 w 不是
-    萌典詞目 → 回那個寫法，否則 None。is_simplified 只看字（S 與標記字），「松散」「取舍」「船只」每個字台灣也用，句子判成繁體，表裡的 松散→鬆散 就沒人查。
-    只查整詞的鍵：最長比對會把 花卷市 改成 花捲市。目標要在基底（人工整理過的詞庫），目標只在疊加層的不動。"""
+def phrase_twin(w, reading, phrase, by_reading, headwords):
+    """docs/spec/lexicon-and-packs.md §2.3：w 整個詞是簡繁詞組表（STPhrases 加 tw-conv.tsv 選定的值）的鍵、值是另一個寫法 w2、
+    基底在 w 這一列的讀音 reading（音節 tuple）底下有 w2，而且 w 不是萌典詞目 → 回 w2，否則 None。
+    is_simplified 只看字（S 與標記字），「松散」「五谷」「制作」這類每個字台灣也用的簡體寫法，句子判成繁體，詞組表就沒人查；
+    不看讀音會把「系上」（ㄒㄧˋ ㄕㄤˋ，基底是 ㄐㄧˋ ㄕㄤˋ 的「繫上」）、「挨到」（ㄞ ㄉㄠˋ，基底是 ㄞˊ ㄉㄠˋ 的「捱到」）這類台灣正常寫法也拿掉，
+    所以要求基底在同一個讀音下有 w2。只查整詞的鍵：最長比對會把 花卷市 改成 花捲市。目標只在疊加層、不在基底的不動。"""
     w2 = phrase.get(w)
-    return w2 if w2 and w2 != w and w2 in words and w not in headwords else None
+    if not (w2 and w2 != w and w not in headwords):
+        return None
+    return w2 if any(b == w2 for b, _ in by_reading.get(reading, ())) else None
 
 
 def drop_list(words, path=DROP):
@@ -352,11 +357,11 @@ def drop_list(words, path=DROP):
 
 
 def prune(rows, twin):
-    """rows 裡 twin(詞) 有回值的列都拿掉（一個詞的每一列，含變調列）。回 (留下的列, 被拿掉的紀錄「詞、落點、讀音」)。"""
+    """rows 裡 twin(詞, 讀音 tuple) 有回值的列都拿掉（不看讀音的 twin 會拿掉一個詞的每一列，含變調列；看讀音的只拿同讀音的列）。回 (留下的列, 被拿掉的紀錄「詞、落點、讀音」)。"""
     kept, gone = [], []
     for r in rows:
         key, w = r.split("\t")[:2]
-        to = twin(w)
+        to = twin(w, tuple(key.split("-")))
         if to:
             gone.append(f"{w}\t{to}\t{key}\n")
         else:
@@ -365,15 +370,19 @@ def prune(rows, twin):
 
 
 def rebuild_tails(out=OUT, refilter=False):
-    """overlay-add.tsv 產生的列（標籤不是 manual、slang）照舊，檔尾照 tail_rows 重算；給只改了手動詞或網路用語的時候用，不必有 dump。"""
+    """保留 overlay-add.tsv 產生的列（標籤不是 manual、slang、colloq），套用 overlay-drop.tsv（drop_list），再重算 colloq 列與檔尾（manual、slang）；
+    給只改了手動詞、網路用語或 overlay-drop.tsv 時用，不必有 dump。
+    refilter=True（--tails-only --refilter）另把完整建置才有的整詞簡體規則（phrase_twin，比對每列讀音）套到留著的列：
+    會呼叫 build_counts.load_conv() 與 moe_titles()，需要 OpenCC 表、tw-clean 表（或 SHANJIE_TW_CLEAN=off，見 docs/spec/models.md §9.8）與 SHANJIE_MOEDICT，缺了就中止。"""
     with open(out, encoding="utf-8") as f:
         kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang", "colloq")]
     base = ime.Lexicon(BASE)
     words = set(base.by_word)
-    kept, _ = prune(kept, drop_list(words).get)     # 清單是 repo 裡的檔，不必有 dump：改了清單用 --tails-only 就生效
-    if refilter:                                    # --refilter：完整建置才有的整詞簡體規則也套到留著的列（要 OpenCC 表與萌典，缺了就中止）
+    drop = drop_list(words)
+    kept, _ = prune(kept, lambda w, _: drop.get(w))     # 清單是 repo 裡的檔，不必有 dump：改了清單用 --tails-only 就生效
+    if refilter:                                        # --refilter：完整建置才有的整詞簡體規則也套到留著的列（要 OpenCC 表、tw-clean 表或 SHANJIE_TW_CLEAN=off、萌典，缺了就中止）
         phrase, moe = bc.load_conv()[0], moe_titles()
-        kept, gone = prune(kept, lambda w: phrase_twin(w, phrase, words, moe))
+        kept, gone = prune(kept, lambda w, r: phrase_twin(w, r, phrase, base.by_reading, moe))
         print(f"--refilter: {len(gone)} rows of {len({g.split(chr(9))[0] for g in gone})} words are whole-word Simplified forms of a base word")
     return kept + colloq_rows(kept) + tail_rows(words | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base), fixed=fixed_pairs(base))
 
@@ -871,8 +880,8 @@ def main():
     ap = argparse.ArgumentParser()
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
-    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
-    ap.add_argument("--refilter", action="store_true", help="（搭配 --tails-only）留著的列也套整詞簡體規則；要 OpenCC 表與 SHANJIE_MOEDICT")
+    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列、套 overlay-drop.tsv，並重算 colloq 與檔尾的手動詞與網路用語")
+    ap.add_argument("--refilter", action="store_true", help="（搭配 --tails-only）留著的列也套整詞簡體規則；要 OpenCC 表、tw-clean 表（或 SHANJIE_TW_CLEAN=off）與 SHANJIE_MOEDICT")
     ap.add_argument("--moedict-readings", action="store_true")
     ap.add_argument("--reading-report", metavar="PATH")
     ap.add_argument("--moedict-supplement", nargs="+", metavar="FILE")

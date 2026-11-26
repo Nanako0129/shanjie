@@ -36,7 +36,7 @@
 
 - 疊加層（`overlay-add.tsv`、`names-add.tsv`、詞包）裡的詞，不論它是疊加層新增或和基底同詞，分數都封頂到語料頻率：`min(分數, log10(次數 / N))`；通語沒看過的（次數 0）扣 `UNSEEN_OVERLAY_PENALTY` = 1.0。封頂後每個讀音重新排序。
 - 例外只有選用詞包，見 §2.5。`sandhi-add.tsv` 的列不在封頂清單裡（它們是基底詞的讀音變體）。
-- 評測專用的 `shanjie-eval --unseen-ceiling K`（`CappedLexicon::with_packs_ceil`，引擎不用、預設關、不帶時輸出不變）：產生的疊加層列（標籤 `wikt`、`zhwiki`、`萌典補詞`，`GENERATED_OVERLAY_TAGS`）裡通語沒看過的詞，分數改成 `min(分數 − 1.0, log10(K / N))`；手動詞、網路用語、名單層、詞包照舊。摘要行加 `+uc:K`。背景：這些列的分數是固定的 `S_len`，扣 1.0 之後相當於語料出現 4.2 次（2 字）、5.6 次（3 字）、15.2 次（4 字）的詞（N = 617,862,688），比出現過 1 次的詞還高；K < 1 時沒看過的詞排在所有看過的詞之下。測試：`core/tests/pack_oov.rs` 的 `unseen_ceiling_takes_only_never_seen_words_of_generated_rows`。
+- 評測專用的 `shanjie-eval --unseen-ceiling K`（`CappedLexicon::with_packs_ceil`，引擎不用、預設關、不帶時輸出不變；K 須為有限正數）：產生的疊加層列（標籤 `wikt`、`zhwiki`、`萌典補詞`，`GENERATED_OVERLAY_TAGS`）裡通語沒看過的詞，分數改成 `min(分數 − 1.0, log10(K / N))`；手動詞、網路用語、名單層、詞包照舊。摘要行在讀音項標記之後、`+t3c` 之前加 `+uc:<K>`（`<K>` 為 Rust `f64` 的 `Display` 最短十進位寫法，例如 `1.0` 印成 `+uc:1`、`0.5` 印成 `+uc:0.5`）。背景：這些列的分數是固定的 `S_len`，扣 1.0 之後相當於語料出現 4.2 次（2 字）、5.6 次（3 字）、15.2 次（4 字）的詞（N = 617,862,688），比出現過 1 次的詞還高；K < 1 時沒看過的詞排在所有看過的詞之下。測試：`core/tests/pack_oov.rs` 的 `unseen_ceiling_takes_only_never_seen_words_of_generated_rows`。
 - `CappedLexicon::readings()`（預測列與數字層用）重建出和「沒有詞包例外」時相同的封頂清單，所以詞包的分數規則不影響預測與數字層。
 
 ### 2.3 異體排序表（`variant-order.tsv`）
@@ -375,7 +375,7 @@
   - 標記句：先詞組，再只轉「台灣幾乎不寫」的集合 N（装、痒、苹、价 之類）的字，再用詞、摺疊。
   - 繁體句含 S 字：只套保留詞（原樣）與含 S 字或 R2 字的詞組，再轉 S、N、R2 的字，最後摺疊；沒轉到的「咸」原樣保留、沒轉到的「涌」只在特定後字前轉成「湧」。
   - 繁體句不含 S 字：只轉 N 的字、再摺疊。
-- **疊加層拿掉簡體寫法**（`build_overlay.py`）：疊加層候選詞 w 同時滿足 (i) `is_simplified(w)`、w 不在基底詞庫也不是萌典詞目、轉換後變成另一個寫法 w′，(ii) w′ 有落點（本身在基底，或有讀音），就拿掉 w（之后、最后、由于）；「台灣」「里長」「干涉」這類本身在詞庫或萌典的詞保留。被拿掉的清單輸出到建置目錄。每個字台灣也用的整詞簡體寫法（松散、取舍）與審過的錯字寫法（好高鶩遠）由另外兩道拿掉，見 `docs/spec/lexicon-and-packs.md` §2.3。
+- **疊加層拿掉簡體寫法**（`build_overlay.py`）：疊加層候選詞 w 同時滿足 (i) `is_simplified(w)`、w 不在基底詞庫也不是萌典詞目、轉換後變成另一個寫法 w′，(ii) w′ 有落點（本身在基底，或有讀音），就拿掉 w（之后、最后、由于）；「台灣」「里長」「干涉」這類本身在詞庫或萌典的詞保留。被拿掉的清單輸出到建置目錄。每個字台灣也用、且目標寫法在基底有同讀音的整詞簡體寫法與審過的錯字寫法（好高鶩遠）由另外兩道拿掉，見 `docs/spec/lexicon-and-packs.md` §2.3。
 - **異體寫法併類**（`MERGE`）：爲→為 衆→眾 綫→線 麪→麵 僞→偽 裏→裡 峯→峰 羣→群 啓→啟 敎→教 着→著 説→說 佔→占 佈→布 祕→秘 臺→台 牀→床 汙→污，套到兩邊後字串相同、而且在詞庫裡的讀音集合完全相同的詞併成一類（占 另有 ㄓㄢ，就不和 佔 併）；週／周、唸／念、嚐／嘗、它／牠、妳 台灣用法有分工，不併。類的代表成員依序取：詞庫最高分最大、是 `MERGE` 正規形、字串 code point 最小（`build_lm.variant_classes`）。
 - **計數時的併類**（`build_lm.merge_variants`）：各語料加權相加、四捨五入、去 0 之後、算總數與剪枝之前做：unigram 以類加總後寫回每個成員（每個寫法都要在詞彙表裡才能當前文）；二元組以（類, 類）加總，「後一個詞」的次數只放在代表成員上，前文則寫給類裡每個成員（條目相同），這樣每個前文的總數 t 只算類一次；N 與 `</s>` 計數每類也只算一次。結果：同讀音兩種寫法在模型裡次數相同，預設由詞庫分數排定，使用者改選一次由選字記憶記住。
 - **疊加層的異體拿掉**：疊加層詞 w 若 `fold(w) ≠ w`（`fold` ＝ `MERGE` 加 tw-conv 的摺疊列），而且 `fold(w)` 在同一個讀音下出現在基底或留下的疊加層裡，就拿掉 w；被拿掉的每個詞都要有一個在基底或留下的疊加層裡的替代寫法（落點），拿掉簡體寫法與拿掉異體寫法兩條規則的落點互相指向時分兩階段判定，不繞圈。
@@ -411,8 +411,8 @@
 ## 9. Python 參考實作與 CLI
 
 - `reference/proto/lm.py`、`trigram.py`、`ime.py` 實作 bigram、詞類、KN、trigram、異體排序表（`ime.py` 的 `load_variant_order`、`lm.py` 的 `cap_overlay`）、降權表（`load_demote`）、詞包詞當未知詞與前後同樣的合併規則，與 Rust 逐位元組相同；`fuzzy_ref.py` 是容錯表的對照。Python **不實作**讀音項、模糊輸入的解碼、學習。golden 由 Python 產生、Rust 比對。
-- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--no-pool-recur`、`--pool-mask-diff`、`--fuzzy`、`--fuzzy-delta-sound`、`--no-tone3`、`--tone3-delta`、`--neutral-delta`（§6.6）、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
-- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後；有 `--tinylm` 而且沒有 `--no-pool-recur` 時是 `+recur+pr`，`docs/spec/semantic-rerank.md` §3.1.1）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm+rn`、`+t3c[:d<δ>][:n<δ>]`（三聲變調與口語變調開著時，在讀音項標記之後；§6.6）。
+- 評測 CLI `shanjie-eval --lm MODEL --profile chat|formal`：預設載入 `classes.sjc`、旁邊的 `kn.sjkn` 與該設定自己的 trigram 表；旗標 `--context`（用每列前文定出第一個詞的歷史，摘要行設定欄寫成 `lm-chat+ctx`／`lm-formal+ctx`）、`--no-demote`、`--no-classes`、`--no-kn`、`--no-tri`、`--no-reading-decode`、`--no-recur`、`--no-pool-recur`、`--pool-mask-diff`、`--fuzzy`、`--fuzzy-delta-sound`、`--no-tone3`、`--tone3-delta`、`--neutral-delta`（§6.6）、`--unseen-ceiling`（§2.2）、`--packs`、`--rowstats`、`--dump`、`--picks`（每列送出的句子與它的名次），以及語意校正的 `--tinylm`、`--tinylm-paired`（`docs/spec/semantic-rerank.md` §4.6、§10）。
+- 摘要行標記一覽：`+recur`（有 `--context` 且沒有 `--no-recur`，緊接在 `+ctx` 之後；有 `--tinylm` 而且沒有 `--no-pool-recur` 時是 `+recur+pr`，`docs/spec/semantic-rerank.md` §3.1.1）、`-nodemote`、`-noclasses`、`+kn:<sha8>:θ<θ>:β<β>`、`+tri:<sha8>`、`+fz:<flags>[:d<δ>]`、`+rd+rx:<sha8>+rm+rn`、`+uc:<K>`（有 `--unseen-ceiling K` 時，在讀音項標記之後、`+t3c` 之前；`<K>` 為 Rust `f64` `Display` 寫法；§2.2）、`+t3c[:d<δ>][:n<δ>]`（三聲變調與口語變調開著時，在讀音項標記與 `+uc` 之後；§6.6）。
 - 重播程式（`shanjie-replay`）走引擎的 `load_lm`（三聲變調與口語變調照引擎預設開，`--no-tone3` 關），標記與模型列同 CLI（`+recur` 在讀音項標記之前，有小模型時是 `+recur+pr`，`--no-pool-recur` 時只有 `+recur`，`--no-recur` 時都沒有），另列出實際載入的每個模型檔。
 
 ## 10. 驗證
