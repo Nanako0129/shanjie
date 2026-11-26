@@ -857,10 +857,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # The pinned toolchain of the core job (why: its comment).
+      # The pinned toolchain of the core job (why: its comment), plus the two iOS targets for the check below.
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.97.1
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
 
       # docs/spec/release-and-ci.md: the one copy of the model download and hash check (the assets and why are in the script).
       - name: Fetch the language model
@@ -871,6 +872,16 @@ jobs:
       # `make rust`: the static library macos/Package.swift links.
       - name: Core static library
         run: cargo build --release --locked -p core
+
+      # docs/spec/release-and-ci.md §3.5: the core still compiles for iOS (device and Apple-silicon simulator), lib, tests and
+      # examples. `check` only: nothing is linked or run; the iOS tests run in a local simulator (docs/spec/release-and-ci.md §3.1).
+      # Here and not in a job of its own: a run already holds the account's five concurrent macOS runners (§2), a sixth job would queue.
+      - name: Core check for iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p core --lib --tests --examples --target aarch64-apple-ios
+          cargo check --locked -p core --lib --tests --examples --target aarch64-apple-ios-sim
 
       # docs/spec/c-abi.md §9: compile the C header against the
       # staticlib and drive both layouts, the LM and the profile switch.

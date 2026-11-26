@@ -47,7 +47,7 @@
 | `windows-msi` | windows-2025 | 正式版身分的測試；建 Windows 安裝程式（MSI）三份並核對；見 §3.7；`needs: changes`，略過條件與 `core` 相同，與 `windows` 並行 | 45 分 |
 | `rowstats` | ubuntu-24.04 | Linux 與 Windows 的六份 rowstats 逐位元組比對（§3.3）；`needs: [changes, debug, windows]` | 5 分 |
 | `python` | ubuntu-24.04 | 下載並核對模型；Python 工具與資料建置腳本的測試 | 20 分 |
-| `swift` | xcode-27 | 下載並核對模型；核心靜態庫；C 標頭冒煙測試；Swift 測試 | 30 分 |
+| `swift` | xcode-27 | 下載並核對模型；核心靜態庫；核心對兩個 iOS 目標平台的 `cargo check`；C 標頭冒煙測試；Swift 測試 | 30 分 |
 | `shell` | xcode-27 | 沙盒組建、容器移轉、selftest、驗收檢查、安裝程式、Homebrew cask（不含 Swift 測試） | 30 分 |
 
 - 每次 run 同時佔 5 個 macOS runner（`core` 的三片、`swift`、`shell`）。GitHub 免費與 Pro 方案整個帳號同時最多 5 個 macOS job，名額由帳號下所有專案共用：一趟 run 就用滿，兩趟重疊（或帳號下別的專案也在跑 macOS job）時，後到的 macOS job 排隊。所以 macOS 的 release 測試只拆三片，不再多拆。
@@ -57,7 +57,7 @@
 
 ### 2.1 工具鏈
 
-- 每個跑 cargo 的 job（`core`、`debug`、`debug-tests`、`windows`、`windows-tests`、`windows-msi`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。
+- 每個跑 cargo 的 job（`core`、`debug`、`debug-tests`、`windows`、`windows-tests`、`windows-msi`、`python`、`swift`、`shell`）都有同一個 `dtolnay/rust-toolchain` 步驟，`toolchain: 1.97.1`；action 本身釘在 master 的一個 commit（它的 `stable` 分支每次合併都重生）。`swift` 的這一步另外用 `targets` 輸入裝 `aarch64-apple-ios` 與 `aarch64-apple-ios-sim`（§3.5 的 iOS 檢查）。
 - repo 沒有 `rust-toolchain` 檔，工具鏈只靠這一步固定。理由：評測分數要與 Python 參考實作的 golden 逐位元組相同，編譯器的程式碼生成變動曾讓一個分數差 1 ulp（`powf` 被降成 `exp10`）。
 - `release.yml` 的 `build` 用同一個版本與同一個 action；改版本要兩個檔一起改。
 - 工作區的 debug 測試用 `[profile.test] opt-level = 1`（`Cargo.toml`），保留 debug assertions 與整數溢位檢查；完全不最佳化時，逐鍵的預測掃描讓 dev302 重播超過 job 上限（當時 20 分鐘；重播現在在 `debug-tests`，每片 45 分鐘）。
@@ -94,7 +94,7 @@
 - 必須在 release 與 macOS 上跑的原因：
   - 重播測試的逐鍵 p95 < 16 ms 斷言只有 release 才有意義；
   - 兩個 f64 golden（`core/tests/engine_digits.rs` 的 `row49_scores_match_the_python_golden_bit_for_bit`、`predict_digits_matches_the_python_golden_bit_for_bit`）在 Linux 的 libm 末位不同，只有 macOS 實際比對；
-  - 小模型在 Apple 平台（macOS；iOS 只有交叉編譯與模擬器測試，CI 不跑）走 Accelerate，在 Linux 走可攜路徑（純 Rust，x86-64 上依執行期偵測用 AVX2 或 AVX-512F；`docs/spec/semantic-rerank.md` §2.4）。
+  - 小模型在 Apple 平台（macOS；iOS 在 CI 只檢查編譯（§3.5），測試只在本機模擬器跑）走 Accelerate，在 Linux 走可攜路徑（純 Rust，x86-64 上依執行期偵測用 AVX2 或 AVX-512F；`docs/spec/semantic-rerank.md` §2.4）。
 
 ### 3.2 `debug`（Linux）
 
@@ -136,6 +136,7 @@
 ### 3.5 `swift`（macOS）
 
 - 下載並核對模型；`cargo build --release --locked -p core`（產生 `macos/Package.swift` 連結的 `target/release/libcore.a`）；不需要 `make bundle`。
+- **iOS 檢查**：`cargo check --locked -p core --lib --tests --examples`，對 `aarch64-apple-ios`（實機）與 `aarch64-apple-ios-sim`（Apple 晶片 Mac 上的模擬器）各一次；任一個編不過，這個 job 就失敗。只檢查編譯，不連結、不跑測試：iOS 的測試在本機的模擬器跑（`xcrun simctl spawn`，一支接一支），CI 不開模擬器。放在 `swift` 而不另開 job：每趟 run 已經用滿帳號的 5 個 macOS runner（§2），多一個 macOS job 就要排隊。
 - **C 標頭冒煙測試**：先用 `cargo rustc … --print native-static-libs` 取得需要連結的系統函式庫並確認非空（macOS 的 `cc` 少了這些也能連結，空的擷取會無聲地通過），再用 `cc -std=c11 -Wall -Wextra -Werror` 編 `core/tests/c/abi_smoke.c`，執行兩次：一次只給詞庫與模型，一次再給一個全新的學習資料夾（跑學習的檢查）。
 - **Swift 測試**：`swift test --package-path macos --force-resolved-versions --parallel --xunit-output <暫存檔>`，之後從 xUnit 檔印出 testcase 數。接著同一個指令加 `-Xswiftc -DSHANJIE_TIMING` 再跑一次（計時建置的區塊也編進去，`docs/spec/semantic-rerank.md` §8.6），testcase 數要比前一次多，否則這一步失敗。
   - `--parallel` 每個測試方法一個 xctest 程序。
