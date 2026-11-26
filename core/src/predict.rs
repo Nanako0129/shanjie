@@ -243,7 +243,8 @@ pub fn abbr_column(c: char) -> usize {
 /// Every cut of `symbols` (in typing order) into units that keeps the typing order (docs/spec/prediction.md §6):
 /// inside a unit the columns (`abbr_column`) only go strictly forward, so a symbol whose column is not after the
 /// one typed before it must open a unit (a forced split), and any other symbol may join the unit or open one.
-/// When a run between forced splits satisfies `is_syllable`, a cut splits that run into at most `split` units.
+/// Under R3, when a run between forced splits satisfies `is_syllable`, a cut may either keep the whole run as one
+/// unit or split every symbol into its own unit; runs that are not syllables are unrestricted.
 /// No cut has more than `max_units` units, and `completed_syls` plus a cut's units never exceeds `max_composition`.
 /// Both filters run before truncating to `ABBR_MAX_CUTS`; the flag reports whether a valid cut was truncated there.
 /// Order: the cut that joins wherever it may first, then by increasing unit count, a later split before an earlier one.
@@ -252,10 +253,9 @@ pub fn abbr_cuts(
     completed_syls: usize,
     max_units: usize,
     max_composition: usize,
-    split: u8,
     is_syllable: impl Fn(&[char]) -> bool,
 ) -> (Vec<Vec<String>>, bool) {
-    if symbols.is_empty() || split == 0 {
+    if symbols.is_empty() {
         return (Vec::new(), false);
     }
     let free = |i: usize| abbr_column(symbols[i]) > abbr_column(symbols[i - 1]);
@@ -265,7 +265,7 @@ pub fn abbr_cuts(
     let mut run_start = 0;
     for i in 1..=symbols.len() {
         if i == symbols.len() || !free(i) {
-            if i - run_start > split as usize && is_syllable(&symbols[run_start..i]) {
+            if i - run_start >= 3 && is_syllable(&symbols[run_start..i]) {
                 constrained.push((run_start, i));
             }
             run_start = i;
@@ -279,7 +279,11 @@ pub fn abbr_cuts(
         }
         let mut pick: Vec<usize> = (0..j).collect();
         loop {
-            if constrained.iter().all(|&(a, b)| pick.iter().filter(|&&p| a < opt[p] && opt[p] < b).count() < split as usize) {
+            let ok = constrained.iter().all(|&(a, b)| {
+                let s = pick.iter().filter(|&&p| a < opt[p] && opt[p] < b).count();
+                s == 0 || s == b - a - 1
+            });
+            if ok {
                 if out.len() == ABBR_MAX_CUTS {
                     return (out, true);
                 }
@@ -308,13 +312,29 @@ pub fn abbr_cuts(
 /// (-score, word length, reading, word), where the reading is the smallest compatible one reaching the word's best
 /// compatible score. That score (`lp_max`) is the first compatible entry of the word in bucket order.
 pub fn predict(idx: &Index, lm: &Lm, cfg: impl Into<Scoring>, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, bool, Vec<String>)> {
+    predict_capped(idx, lm, cfg, v, units, mode, limit, None)
+}
+
+/// `predict` with an optional upper bound `max_chars` on candidate word length (in Unicode scalar values), skipped during
+/// the bucket scan before `limit` applies (docs/spec/prediction.md §3.3, §6).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn predict_capped(
+    idx: &Index,
+    lm: &Lm,
+    cfg: impl Into<Scoring>,
+    v: &str,
+    units: &[Unit],
+    mode: Mode,
+    limit: usize,
+    max_chars: Option<usize>,
+) -> Vec<(String, f64, bool, Vec<String>)> {
     let cfg = cfg.into();
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
     let classify = |e: &Ent| {
         let wid = (e.wid != u32::MAX).then_some(e.wid);
         (!wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
     };
-    tiered(idx, units, mode, limit, classify).into_iter().map(|(e, s, t)| (e.word.to_string(), s, t == 0, reading_of(idx, e))).collect()
+    tiered(idx, units, mode, limit, max_chars, classify).into_iter().map(|(e, s, t)| (e.word.to_string(), s, t == 0, reading_of(idx, e))).collect()
 }
 
 fn reading_of(idx: &Index, e: &Ent) -> Vec<String> {
@@ -323,13 +343,24 @@ fn reading_of(idx: &Index, e: &Ent) -> Vec<String> {
 
 /// The words compatible with `units` (prefix reading, or also the abbreviation reading in `Mode::PA`), one entry per word in bucket order,
 /// split into tiers by `classify` (tier, score), each tier ordered by (-score, word length, reading, word) and cut to `limit`, the tiers
-/// in order, at most `limit` in all: (entry, score, tier). Shared by `predict`, `predict_digits` and `predict_english`.
-fn tiered<'i>(idx: &'i Index, units: &[Unit], mode: Mode, limit: usize, mut classify: impl FnMut(&'i Ent) -> (usize, f64)) -> Vec<(&'i Ent<'i>, f64, usize)> {
+/// in order, at most `limit` in all: (entry, score, tier). When `max_chars` is `Some(mc)`, words longer than `mc` characters are skipped
+/// during the scan before `limit`. Shared by `predict`, `predict_digits` and `predict_english`.
+fn tiered<'i>(
+    idx: &'i Index,
+    units: &[Unit],
+    mode: Mode,
+    limit: usize,
+    max_chars: Option<usize>,
+    mut classify: impl FnMut(&'i Ent) -> (usize, f64),
+) -> Vec<(&'i Ent<'i>, f64, usize)> {
     let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
     let mut seen = HashSet::new();
     let mut tiers: [Vec<(f64, &Ent)>; 3] = Default::default();
     for &i in bucket {
         let e = &idx.ents[i as usize];
+        if max_chars.is_some_and(|mc| e.wlen as usize > mc) {
+            continue;
+        }
         let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
         if (compat_prefix(units, syls, &idx.syls) || (mode == Mode::PA && compat_abbr(units, syls, &idx.syls))) && seen.insert(e.wix) {
             let (t, s) = classify(e);
@@ -400,6 +431,21 @@ impl Index<'_> {
 /// scored `lam * log10 P(w | v, D) + (1 - lam) * lp`, the successor layer (N(v,D->w) > 0 or N(D->w) > 0) first. Without units: the words of
 /// the successor layer that the lexicon has, scored `log10 P(w | v, D)` alone, ordered the same way.
 pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWords, cfg: impl Into<Scoring>, v: &str, units: &[Unit], limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    predict_digits_capped(idx, lm, table, words, cfg, v, units, limit, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn predict_digits_capped(
+    idx: &Index,
+    lm: &Lm,
+    table: &DigitTable,
+    words: &DigitWords,
+    cfg: impl Into<Scoring>,
+    v: &str,
+    units: &[Unit],
+    limit: usize,
+    max_chars: Option<usize>,
+) -> Vec<(String, f64, Vec<String>)> {
     let cfg = cfg.into();
     if units.is_empty() {
         let rows = table.successors(v).filter_map(|w| {
@@ -412,7 +458,7 @@ pub fn predict_digits(idx: &Index, lm: &Lm, table: &DigitTable, words: &DigitWor
         let p = table.p_w_given_vd(e.word, v, lm.unigram_back(cfg, (e.wid != u32::MAX).then_some(e.wid), e.lp));
         (!table.is_successor(v, e.word) as usize, if p > 0.0 { cfg.lam * p.log10() + (1.0 - cfg.lam) * e.lp } else { f64::NEG_INFINITY })
     };
-    tiered(idx, units, Mode::P, limit, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
+    tiered(idx, units, Mode::P, limit, max_chars, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
 }
 
 /// The words of a set that the lexicon has, ordered by (-score, word length, reading, word), at most `limit`: (word, score, reading).
@@ -428,6 +474,22 @@ fn known_row<'a>(rows: impl Iterator<Item = (f64, &'a str, &'a DigitWord)>, limi
 /// compatible come first, scored `lam * log10 P(w | e) + (1 - lam) * lp`; then the other compatible words as `predict` orders them
 /// (successors of `v` first). Without units: the words of `f` that the lexicon has, scored `log10 P(w | e)`.
 pub fn predict_english(idx: &Index, lm: &Lm, f: &Followers, words: &DigitWords, cfg: impl Into<Scoring>, v: &str, units: &[Unit], mode: Mode, limit: usize) -> Vec<(String, f64, Vec<String>)> {
+    predict_english_capped(idx, lm, f, words, cfg, v, units, mode, limit, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn predict_english_capped(
+    idx: &Index,
+    lm: &Lm,
+    f: &Followers,
+    words: &DigitWords,
+    cfg: impl Into<Scoring>,
+    v: &str,
+    units: &[Unit],
+    mode: Mode,
+    limit: usize,
+    max_chars: Option<usize>,
+) -> Vec<(String, f64, Vec<String>)> {
     let cfg = cfg.into();
     if units.is_empty() {
         let rows = f.words().filter_map(|w| {
@@ -445,5 +507,5 @@ pub fn predict_english(idx: &Index, lm: &Lm, f: &Followers, words: &DigitWords, 
             (1 + !wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
         }
     };
-    tiered(idx, units, mode, limit, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
+    tiered(idx, units, mode, limit, max_chars, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
 }

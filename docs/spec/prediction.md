@@ -103,8 +103,8 @@
 
 單一管線，依序執行：
 
-1. 查詢：每個起點呼叫 `predict(…, limit)`。學習記錄裡有任何一筆的讀音可能符合這個起點的單位序列（`reading_matches_in`）時 `limit = PREDICT_SCAN`（27），其餘（含學習記錄是空的）`limit = PREDICT_MAX`（9）。新詞記錄（`NEWWORD`）不算「可能符合」。沒有符合的記錄時所有權重都是 0，兩種做法結果相同。
-2. 保留：每個起點只留兩種項目，在 `predict` 原始輸出裡的索引小於 9 的，或學習權重 > 0 的；索引在任何過濾之前算。
+1. 查詢：每個起點呼叫 `predict(…, limit)`（字數上限開著時走 `predict_capped`／`predict_digits_capped`／`predict_english_capped`，見下段）。學習記錄裡有任何一筆的讀音可能符合這個起點的單位序列（`reading_matches_in`）時 `limit = PREDICT_SCAN`（27），其餘（含學習記錄是空的）`limit = PREDICT_MAX`（9）。新詞記錄（`NEWWORD`）不算「可能符合」。沒有符合的記錄時所有權重都是 0，兩種做法結果相同。
+2. 保留：每個起點只留兩種項目，在 `predict` 原始輸出裡的索引小於 9 的，或學習權重 > 0 的；索引在下面第 3 步顯示字串過濾之前算（字數上限開著時，超過字數上限的候選已在 `tiered` 掃描時略過，不佔這個索引）。
 3. 過濾：拿掉與「該起點到游標目前顯示的字串」相同的項目（例如已經解成「奶茶」就不再列「奶茶」）。
 4. 長起點串接：依起點由遠到近串成一串 L，同一個詞留第一個位置、權重取所有副本中最大者。
 5. 組合：head = L 裡權重 > 0 的項目（照 L 的順序）加 L 前 3 個位置（`PREDICT_LONG_CAP = 3`）裡權重 0 的項目；tail = L 其餘權重 0 的項目；整串 = head、游標起點的項目、tail、詞中間起點的項目（由遠到近）。
@@ -112,6 +112,8 @@
 7. 去重（同一個詞留第一個）並取前 9 個。
 
 學習權重 = `learner.lookup(起點的前文鍵, 讀音, 今天)` 命中裡該詞的權重；只算 `Exact` 與 `LastChar` 層，`Global` 層算 0（全域記錄不能蓋過模型有把握的結果）。前文鍵是句首 `^` 時查 `^>$`（預測的詞結束在游標，後面還沒有音節）。學習記錄是空的時，預測列與沒有學習機制時逐項相同。
+
+候選字數上限（`set_candidate_length_cap`，預設關；iOS 鍵盤打開，macOS 殼不碰）：開著而且組字區有未送出的注音音節或未完成單位時，每一種帶注音的查詢（起點之後有完整音節或未完成單位，含多個起點、縮寫的各切法、只有完整音節而沒有未完成單位的查詢，以及數字脈絡 `predict_digits_capped`、英文脈絡 `predict_english_capped` 在有音節或單位時的查詢）中，候選詞的字數（`chars().count()`）不得超過「從起點到組字區結尾的完整音節數＋那種切法的未完成單位數」。超過上限的候選在 `tiered` 掃描桶時直接略過，不進已見詞集合、不算進 `PREDICT_MAX`／`PREDICT_SCAN` 的視窗，也不佔第 2 步 `i < 9` 的名次，因此預測列照樣補滿。音節與單位都沒有的那一列（送出後組字區空了、或數字／英文後面還沒打注音，只有後繼詞），以及英文段的預測列（`run_row`），不套用字數上限。上限關著時，預測列逐項和沒有這個開關時相同。
 
 設計取捨：
 
@@ -206,9 +208,7 @@
 
 這個功能在核心完整實作，但 App 目前不提供開關：`Shell(showsAbbreviation: false)`（`macos/Sources/Shanjie/main.swift`），選單與設定視窗都不顯示，狀態一律關。
 
-- 核心設定：
-  - `shanjie_engine_set_abbreviation(engine, 0|1, out)`，預設 0；其他值回 2，狀態不變；`engine` 或 `out` 為 NULL 回 1。
-  - `shanjie_engine_set_abbreviation_split(engine, n, out)`，設拆法 N，只收 1、2、3，預設 3；`n` 超出範圍回 2、狀態不變；`engine` 或 `out` 為 NULL 回 1。可省略韻母開著而且有未完成單位時，預測列照新的 N 重算，`out` 回傳快照；可省略韻母關著時只記住 N，不重算。
+- 核心設定：`shanjie_engine_set_abbreviation(engine, 0|1, out)`，預設 0；其他值回 2，狀態不變；`engine` 或 `out` 為 NULL 回 1。切法使用固定規則 R3，沒有拆法設定項（候選字數上限 `shanjie_engine_set_candidate_length_cap` 是獨立開關，見 §3.3、§7）。
 - 生效條件（組字器單位規則）：縮寫設定開、預測列開、已載入模型、游標在組字區尾端。其他時候照一般規則「同一欄再按一次是取代」。`ABBR_MAX_UNITS` = 10 是 ACG 詞包最長的名字的字數，縮寫只有在最長的詞以內才有用。
 - 組字器：未完成音節變成有順序的未完成單位清單，組字區照按鍵順序顯示符號（只有一個單位時顯示方式和一般規則相同）：
   - 注音鍵：所在的欄排在最後一個單位已填的最後一欄之後（往後走），放進最後一個單位；排在最後一欄之前（往回走）或那一欄已有符號，開新單位，不再放回前一個單位的空欄。
@@ -221,32 +221,32 @@
   - Tab 進入預測列（預測列是空的就吃掉）；標點照一般規則，丟掉全部單位再插入標點。
 - 切法（`predict::abbr_cuts`）：把未完成符號照按鍵順序切成單位，每個單位裡符號的欄（聲母、介音、韻母）只能嚴格往後；不往後的地方一定切開（強制切點），往後的地方可切可不切。
   - 順序：能接就接的那一種最先，再照單位數由少到多；同單位數時，切點靠後的在前。
-  - 拆法 N 的過濾：兩個強制切點之間的一段符號，去掉聲調後若等於預測索引 `Index` 的音節表（`syls`，不分聲調）裡的一個音節，一種切法最多把這一段拆成 N 段；不是音節的那一段不受限（例：「西安」C 打 `ㄒ ㄧ ㄢ`，N = 1 只有 `ㄒㄧㄢ`；N = 2 多 `ㄒㄧ／ㄢ`、`ㄒ／ㄧㄢ`；N = 3 再多 `ㄒ／ㄧ／ㄢ`；「一個」A 打 `ㄧ ㄍ`，不論 N 都只有 `ㄧ／ㄍ`）。
-  - 上限：一種切法的單位數不超過 `ABBR_MAX_UNITS`，前面已有的完整音節數加單位數不超過 `MAX_SYLLABLES`。N 的過濾與單位數上限都在截到 `ABBR_MAX_CUTS`（64）種之前做，最後取前 64 種。
-- 查詢與混排：每種切法各自的單位序列（起點後的完整音節＋那種切法的單位），模式照單位數（一個單位的切法用現有的多個起點與 P 模式；兩個以上單位只查游標、用 PA 模式）；`PREDICT_MAX`／`PREDICT_SCAN` 的上限、學習的權重與 gate（`reading_matches_in`）都用那一種切法自己的單位與模式。混排只取代游標那一步的候選（`cursor_items`）：各切法的候選合成一張清單，同一個詞只留最好的一筆（先比是否後繼詞，再比分數），照 `tiered` 的順序排，之後的排序與去重步驟不變。數字脈絡與英文的分支照舊用組字器的單位（能接就接的那一種切法）。只有一種切法時，預測列逐項和單一切法相同。縮寫選取與前綴補完的選取同樣被學習，從另一種切法出來時照樣有學習權重。
+  - R3 的過濾：兩個強制切點之間的一段符號，去掉聲調後若等於預測索引 `Index` 的音節表（`syls`，不分聲調）裡的一個音節，一種切法只能把這一段當一個單位，或拆成每個符號各一個單位；不是音節的那一段不受限（例：「西安」C 打 `ㄒ ㄧ ㄢ` 只有 `ㄒㄧㄢ`、`ㄒ／ㄧ／ㄢ`；「得意」A 打 `ㄉ ㄧ` 有 `ㄉㄧ`、`ㄉ／ㄧ`；「一個」A 打 `ㄧ ㄍ` 只有 `ㄧ／ㄍ`；「腳」C 打 `ㄐ ㄧ ㄠ` 有 `ㄐㄧㄠ`、`ㄐ／ㄧ／ㄠ`）。
+  - 上限：一種切法的單位數不超過 `ABBR_MAX_UNITS`，前面已有的完整音節數加單位數不超過 `MAX_SYLLABLES`。R3 的過濾與單位數上限都在截到 `ABBR_MAX_CUTS`（64）種之前做，最後取前 64 種（撞到 64 種上限＝過濾後還有第 65 種切法）。
+- 查詢與混排：每種切法各自的單位序列（起點後的完整音節＋那種切法的單位），模式照單位數（一個單位的切法用現有的多個起點與 P 模式；兩個以上單位只查游標、用 PA 模式）；`PREDICT_MAX`／`PREDICT_SCAN` 的上限、候選字數上限（開著時照那一種切法的單位數）、學習的權重與 gate（`reading_matches_in`）都用那一種切法自己的單位與模式。混排只取代游標那一步的候選（`cursor_items`）：各切法的候選合成一張清單，同一個詞只留最好的一筆（先比是否後繼詞，再比分數），照 `tiered` 的順序排，之後的排序與去重步驟不變。數字脈絡與英文的分支照舊用組字器的單位（能接就接的那一種切法）。只有一種切法時，預測列逐項和單一切法相同。縮寫選取與前綴補完的選取同樣被學習，從另一種切法出來時照樣有學習權重。
 - 關掉縮寫，或關掉預測列，而當時有兩個以上單位：清掉全部單位並回傳清掉後的狀態；只有一個單位時不動。打開縮寫不改任何已有狀態；同時結束進行中的英文段（見 `docs/spec/english-mixed.md`）。
 - 殼：存在 UserDefaults 鍵 `abbreviation`，預設關；`Shell.build()` 每建一個引擎就送一次設定（換排列、開關詞包都會重建引擎，新引擎的預設是 0）。選單項目「可省略韻母」緊接在「即時預測」之後，預測列關閉時反灰（仍顯示勾選狀態）。
 - 打開縮寫時瀏覽器第一個音節的隱藏規則不生效（見 §9），因為「ㄋㄔ」是兩個未完成單位，只能靠預測列解決。
 
 ### 6.1 縮寫的離線量測 `shanjie-eval --abbr`
 
-- 用法：`shanjie-eval --abbr A|B|C --rows <列檔> [--rows <列檔> …] --lm <模型> [--abbr-split <1|2|3>] [--abbr-dump <檔>] [--abbr-engine-dump <檔>] [--abbr-mix [--abbr-beta <β,β,…>] [--abbr-mix-dump <檔>]] [--abbr-half select|read] [--abbr-time]`。只量、不改引擎。A 每個字只打聲母（沒有聲母的字打第一個符號）；B 去掉聲母（只有聲母的字留聲母）；C 符號全打、不按聲調。三種都不打聲調、去掉輕聲符號。`--abbr-split` 設引擎的拆法 N（1、2、3，預設 3）。
-- 單位是詞：每一列（`前文|句子|讀音`，同一行在所有檔案裡只算一次）由左到右切成最長的「詞與讀音都在詞庫裡」的詞條（含 App 預設的詞包），沒有詞條蓋得到的字自己算一個排除項。每個詞都從 `reset` 之後的引擎開始，左前文是「這一列的前文＋句子裡在它前面的部分」。固定設定：聊天、詞包 `acg,it,meme,beauty`、預測列與可省略韻母開、中英混打與學習關、標準排列；摘要行的標記只寫打法、profile 與詞包（例如 `abbr-A  lm-chat+acg+it+meme+beauty`），其餘是寫死的，不另標。
+- 用法：`shanjie-eval --abbr A|B|C --rows <列檔> [--rows <列檔> …] --lm <模型> [--abbr-lencap] [--abbr-dump <檔>] [--abbr-engine-dump <檔>] [--abbr-mix [--abbr-beta <β,β,…>] [--abbr-mix-dump <檔>]] [--abbr-half select|read] [--abbr-time] [--abbr-time-keys <檔>]`。另有獨立子模式 `shanjie-eval --abbr-time-keys <檔> --lm <模型> [--abbr-lencap]` 與對照傾印 `shanjie-eval --pred-row-dump <檔> --rows <列檔> [--rows <列檔> …] --lm <模型> [--profile chat|formal]`。只量、不改引擎。A 每個字只打聲母（沒有聲母的字打第一個符號）；B 去掉聲母（只有聲母的字留聲母）；C 符號全打、不按聲調。三種都不打聲調、去掉輕聲符號。`--abbr-lencap` 打開引擎的候選字數上限（`set_candidate_length_cap(true)`）。
+- 單位是詞：每一列（`前文|句子|讀音`，同一行在所有檔案裡只算一次）由左到右切成最長的「詞與讀音都在詞庫裡」的詞條（含 App 預設的詞包），沒有詞條蓋得到的字自己算一個排除項。每個詞都從 `reset` 之後的引擎開始，左前文是「這一列的前文＋句子裡在它前面的部分」。固定設定：聊天、詞包 `acg,it,meme,beauty`、預測列與可省略韻母開、中英混打與學習關、標準排列；摘要行的標記寫打法、profile 與詞包（例如 `abbr-A  lm-chat+acg+it+meme+beauty`；開 `--abbr-lencap` 時後面接 `+lencap`），其餘是寫死的，不另標。
 - 排除（照這個順序取第一個成立的）：詞裡有注音符號、超過 `ABBR_MAX_UNITS` 個音節、組字器切出的單位（`Engine::pending_units`）不是一個音節一個（往後走的跨音節合併，例如不打聲調時「西安」的 `ㄢ` 接在 `ㄒㄧ` 後面變成一個單位 `ㄒㄧㄢ`；往回走如「一個」A 的 `ㄧ ㄍ` 已開成兩個單位 `ㄧ`、`ㄍ`，不再合併）。其餘的詞報預測列的第一名、前 9 名與 MRR，另用引擎自己的索引、模型與計分設定呼叫一次正解切法不設上限的 `predict`，把完整名次分成第 1 名、第 2–9 名、第 10 名以後、不在候選四桶。B 另分「B 的按鍵等於 C 的按鍵」與其他詞兩組，並報離線的相容集合（每個音節套用同一條 B 改寫後等於單位的詞條）裡的名次。
-- 工具自己檢查、不成立就不印數字並以非 0 結束：只有一種切法（依目前的 `--abbr-split`）的詞，引擎預測列必須是正解切法不設上限 `predict` 清單的前 9 名；A、C 的可量詞都在候選裡；B 的離線集合含正解；組字器切出的單位（`pending_units`）一定保留全部已打符號且嚴格照按鍵順序（單位內欄序嚴格往後、單位間欄序不往後）；每一列的句子字數等於讀音音節數（不等時錯誤訊息寫出檔名與行號、兩邊的數目，不印列的內容）。`--abbr-dump` 照 `--predict` 的格式寫出每個可量詞的查詢與引擎預測列（沒有分數欄）。
-- `--abbr-engine-dump <檔>`：對沒有被前三個原因（注音字母詞、未切分單字、超過 `ABBR_MAX_UNITS`）排除的每個詞寫出一列 16 欄 tab 分隔 TSV，格式與 `--abbr-mix-dump` 相同：第 1–4 欄是正解切法的查詢，第 5 欄是正解的詞，第 6、7 欄沿用舊組字器規則（`abbr_merge_kind`）判定的基準分類（`measurable`／`merged`）與混合前名次（`merged` 寫 `-`），第 8–16 欄是引擎實際的預測列前 9 名（不滿 9 個留空）。在預設 N = 3 下，輸出與基準的 `--abbr-mix-dump` 逐位元組相同。
+- 工具自己檢查、不成立就不印數字並以非 0 結束：只有一種切法（R3 下）且沒開 `--abbr-lencap` 的詞，引擎預測列必須是正解切法不設上限 `predict` 清單的前 9 名；A、C 的可量詞都在候選裡；B 的離線集合含正解；組字器切出的單位（`pending_units`）一定保留全部已打符號且嚴格照按鍵順序（單位內欄序嚴格往後、單位間欄序不往後）；每一列的句子字數等於讀音音節數（不等時錯誤訊息寫出檔名與行號、兩邊的數目，不印列的內容）。`--abbr-dump` 照 `--predict` 的格式寫出每個可量詞的查詢與引擎預測列（沒有分數欄）。
+- `--abbr-engine-dump <檔>`：對沒有被前三個原因（注音字母詞、未切分單字、超過 `ABBR_MAX_UNITS`）排除的每個詞寫出一列 16 欄 tab 分隔 TSV，格式與 `--abbr-mix-dump` 相同：第 1–4 欄是正解切法的查詢，第 5 欄是正解的詞，第 6、7 欄沿用舊組字器規則（`abbr_merge_kind`）判定的基準分類（`measurable`／`merged`）與混合前名次（`merged` 寫 `-`），第 8–16 欄是引擎實際的預測列前 9 名（不滿 9 個留空）。在上限關與 `--abbr-lencap` 兩種設定下，輸出都與同設定的 `--abbr-mix-dump` 逐位元組相同。
 - 最後一行 `## merges` 把組字器合併分成 `backward_only` 與 `has_forward`（新組字器往回走一律開新單位，所以 `backward_only` 為 0，剩下的合併都是往後接的 `has_forward`，加起來等於 `excl_merged`）。
-- `--abbr-mix`（離線混合切法的基準量測）：開著時另在最後加幾行 `## mix:…`，對同一組詞用工具自己的不限 N `abbr_cuts` 與 `abbr_mix` 計算，分類（`measurable`／`merged`）與混合前名次以舊組字器規則（`abbr_merge_kind`）為準。
+- `--abbr-mix`（離線混合切法的量測）：開著時另在最後加幾行 `## mix:…`，對同一組詞用工具自己的 R3 `abbr_cuts` 與 `abbr_mix` 計算，分類（`measurable`／`merged`）與混合前名次以舊組字器規則（`abbr_merge_kind`）為準。
   - 範圍：沒有被前三個排除原因刷掉的詞（基準的 `measurable` 與 `merged` 兩組，加起來是 `all`）。
-  - 切法（工具內的 `abbr_cuts`）：把這個詞打的符號照按鍵順序切成單位，每個單位裡符號的欄（聲母、介音、韻母）只能嚴格往後；下一個符號的欄不在前一個符號的欄之後（往回走，或同一欄）就一定開新單位，往後走的地方可切可不切，單位數不超過 `ABBR_MAX_UNITS`。例：只打聲母的「一個」（ㄧ ㄍ）只有 ㄧ、ㄍ 一種；不打聲調的「西安」（ㄒ ㄧ ㄢ）有 ㄒㄧㄢ／ㄒㄧ、ㄢ／ㄒ、ㄧㄢ／ㄒ、ㄧ、ㄢ 四種。
-  - 每個詞最多 64 種切法，順序是「能接就接」的那一種最先，再照單位數由少到多（同單位數時切點靠後的在前），超過就只取前 64 種。正解切法（一個字一個單位）本身照順序，所以一定在切法裡，除非被這個上限截掉。
-  - 混合清單（`abbr_mix`）：每種切法各呼叫一次不設上限的 `predict`（引擎自己的索引、模型、計分設定與歷史詞；兩個以上單位用 PA，一個用 P），同一個詞只留最好的一筆（先比是否後繼詞，再比分數），再照 §2.2 的順序排：後繼詞在前，同層依序比 -分數、字數、讀音字串、詞。工具拿到的是讀音字串而不是索引裡的讀音編號，所以讀音用 `-` 相接的字串比；編號本來就照這個字串的順序編，兩者順序相同。
+  - 切法（工具內的 `abbr_cuts`）：把這個詞打的符號照按鍵順序切成單位，每個單位裡符號的欄（聲母、介音、韻母）只能嚴格往後；下一個符號的欄不在前一個符號的欄之後（往回走，或同一欄）就一定開新單位，往後走的地方可切可不切；兩個強制切點之間的一段符號若等於預測索引的音節（不分聲調），照 R3 只留整段一個單位或逐符號拆開兩種，不是音節的段不受限；單位數不超過 `ABBR_MAX_UNITS`。例：只打聲母的「一個」（ㄧ ㄍ）只有 ㄧ、ㄍ 一種；只打聲母的「得意」（ㄉ ㄧ）有 ㄉㄧ／ㄉ、ㄧ 兩種；不打聲調的「西安」（ㄒ ㄧ ㄢ）有 ㄒㄧㄢ／ㄒ、ㄧ、ㄢ 兩種。
+  - R3 過濾與單位數上限都在截到 64 種之前做；每個詞最多留前 64 種切法，順序是「能接就接」的那一種最先，再照單位數由少到多（同單位數時切點靠後的在前），`capped` 代表過濾後還有第 65 種切法。
+  - 混合清單（`abbr_mix`）：每種切法各呼叫一次不設上限的 `predict`（引擎自己的索引、模型、計分設定與歷史詞；兩個以上單位用 PA，一個用 P）；開 `--abbr-lencap` 時先略過字數超過該切法單位數的候選；同一個詞只留最好的一筆（先比是否後繼詞，再比分數），再照 §2.2 的順序排：後繼詞在前，同層依序比 -分數、字數、讀音字串、詞。工具拿到的是讀音字串而不是索引裡的讀音編號，所以讀音用 `-` 相接的字串比；編號本來就照這個字串的順序編，兩者順序相同。
   - `## mix:all`、`mix:measurable`、`mix:merged`：正解在混合清單的第一名、前 9 名、MRR 與四桶；`top9_by_answer_cut` 是前 9 名裡、正解留下的那一筆由正解切法得到的詞數，`top9_by_other_cut` 是只有別的切法給出那一筆（分數更高）的詞數。兩種切法給出同樣好的一筆時算正解切法的。
-  - `## mix:moved-row`、`mix:moved-full`：原本可量的詞，混合前與混合後的名次逐詞比較，報變好、不變、變差的詞數，以及變差的詞在混合清單落在第 2–9 名、第 10 名以後、不在候選各幾個。`moved-row` 比的是預測列（混合前是引擎的預測列，混合後是混合清單的前 9 名，不在列裡算沒有名次）；`moved-full` 比的是不設上限的清單裡的名次。
-  - `## mix:cuts`：切法總數、只有一種切法的詞數（`one_cut`）、撞到 64 種上限的詞數（`capped`）、正解切法被上限截掉的詞數（`answer_cut_dropped`）。
-  - 檢查（不成立就不印數字並以非 0 結束）：原本可量、而且只有一種切法的詞，混合清單必須和那一種切法的 `predict` 清單整份相同（所以前 9 名就是預測列）；兩組加起來等於全部、四桶加起來等於詞數、變好不變變差加起來等於可量詞數。
+  - `## mix:moved-row`、`mix:moved-full`：原本可量的詞，混合前與混合後的名次逐詞比較，報變好、不變、變差的詞數，以及變差的詞在混合清單落在第 2–9 名、第 10 名以後、不在候選各幾個。`moved-row` 比的是預測列（混合前是正解切法 `predict` 清單前 9 名的名次，混合後是混合清單的前 9 名，不在列裡算沒有名次）；`moved-full` 比的是不設上限的清單裡的名次。
+  - `## mix:cuts`：切法總數、只有一種切法的詞數（`one_cut`）、撞到 64 種上限的詞數（`capped`）、正解切法不在保留切法裡的詞數（`answer_cut_dropped`）。
+  - 檢查（不成立就不印數字並以非 0 結束）：原本可量、而且只有一種切法的詞，混合清單必須和那一種切法的 `predict` 清單（開 `--abbr-lencap` 時為套過字數上限後的清單）整份相同（所以前 9 名就是預測列）；兩組加起來等於全部、四桶加起來等於詞數、變好不變變差加起來等於可量詞數。
   - `--abbr-beta <β,β,…>`（多切扣分的量測；逗號分隔、不小於 0 的小數，只在 `--abbr-mix` 開著時有效，否則報錯）：不開時 `--abbr-mix` 的輸出逐位元組不變；開著時 `## mix:…` 六行改成每個 β 各印一組，照 β 給的順序，標籤前面多一段 `beta=<β>`（例如 `## mix:all  beta=0.3  abbr-C  lm-chat+acg+it+meme+beauty  …`），不帶 `beta=` 的那一組不印。
-    - 刀數（`abbr_knives`）：一種切法比「能接就接」那一種多出來的單位數，也就是它用到幾個可選的切點。一定要切的地方（往回走或同一欄）每種切法都有，不算。例：不打聲調的「西安」四種切法 ㄒㄧㄢ／ㄒㄧ、ㄢ／ㄒ、ㄧㄢ／ㄒ、ㄧ、ㄢ 的刀數是 0、1、1、2。
+    - 刀數（`abbr_knives`）：一種切法比「能接就接」那一種多出來的單位數，也就是它用到幾個可選的切點。一定要切的地方（往回走或同一欄）每種切法都有，不算。例：R3 下不打聲調的「西安」兩種切法 ㄒㄧㄢ／ㄒ、ㄧ、ㄢ 的刀數是 0、2；不是音節的三符號段（如 ㄅㄩㄢ）四種切法的刀數是 0、1、1、2。
     - 調整後的分數（`abbr_mix_beta`）：`predict` 的分數（log10）減去 β × 那一筆所屬切法的刀數。同一個詞留哪一筆、清單怎麼排，都把混合清單規則裡的「分數」換成調整後的分數；後繼詞那一層仍在最前面，β 只改同一層裡的先後。兩種切法調整後同分時仍算排在前面的切法（正解切法最先）。
     - 切法與每種切法的 `predict` 每個詞只算一次，各個 β 只重新合併與排序。
     - 檢查（不成立就不印數字並以非 0 結束）：β 清單裡有 0 時，工具另用不帶 β 的 `abbr_mix` 合併一次，`beta=0` 那一組的六行必須和它在同一個標籤下印出的六行相同；也就是 `beta=0` 那一組除了標籤多的 `beta=0`，和不帶 `--abbr-beta` 的六行相同。`--abbr-mix` 的檢查對每一組都做。
@@ -256,17 +256,20 @@
     - 第 6 欄：分類，`measurable`（原本可量）或 `merged`（原本因組字器合併排除），和 `## mix:measurable`、`## mix:merged` 的分法相同。
     - 第 7 欄：混合前的名次，也就是正解切法不設上限的 `predict` 清單裡的名次（`mix:moved-full` 讀的那個；超過 9 在 `mix:moved-row` 算沒有名次）。`merged` 的詞混合前沒有名次，寫 `-`。
     - 第 8–16 欄：混合清單（`abbr_mix`，不帶 β；和 `--abbr-beta` 一起用時寫的仍是這一份）的前 9 名，不滿 9 個的欄留空。
-- `--abbr-time`（每鍵時間；只收 `--abbr C`，其他打法報錯）：不開時所有輸出不變；開著時上面各行照舊，最後多三行。量測的詞是打得進引擎的每個詞（原本可量的加上組字器合併的），每個詞從 `reset` 開始、設左前文、逐鍵打，記每一次 `Engine::key` 的時間；每一趟開始前先把第一個詞不計時地打一次。
+- `--abbr-time`（每鍵時間；只收 `--abbr C`，其他打法報錯）：不開時所有輸出不變；開著時上面各行照舊，最後多三行。量測的詞是打得進引擎的每個詞（原本可量的加上組字器合併的），每個詞從 `reset` 開始、設左前文、逐鍵打，記每一次 `Engine::key` 的時間；每一趟開始前先把第一個詞不計時地打一次。可搭配 `--abbr-lencap` 量字數上限開著時的每鍵時間。
   - `## time:off`：上面的固定設定（學習關、沒有紀錄）。
-  - `## time:learn50k`：同一個引擎打開學習、讀進一份 5 萬筆的學習檔。造法和 `timing_typing76_keys_with_taught_picks_and_50k` 相同（打字測驗每一列在第一、第二個音節的第一鍵後選預測列的第二項並送出，再用合成紀錄補到容量），只是引擎是這個工具的（含詞包、聊天）。學習檔放暫存資料夾，量完刪掉。
+  - `## time:learn50k`：同一個引擎打開學習、讀進一份 5 萬筆的學習檔。造法和 `timing_typing76_keys_with_taught_picks_and_50k` 相同（打字測驗每一列在第一、第二個音節的第一鍵後選預測列的第二項並送出，造檔期間字數上限暫關以維持同一份紀錄，再用合成紀錄補到容量，重開學習檔後恢復 `--abbr-lencap` 設定），只是引擎是這個工具的（含詞包、聊天）。學習檔放暫存資料夾，量完刪掉。
   - `## time:learn50k-capped`：`learn50k` 那一趟裡，切法數撞到 64 種上限的詞的按鍵。
   - 每行的欄位固定：`records`（引擎裡的學習紀錄數）、`words`、`keys`（計時的按鍵數）、`p50_ms`、`p95_ms`、`max_ms`（排序後第 `keys/2`、第 `keys*95/100` 個與最大值，毫秒；沒有按鍵時是 `None`）。
+- `--abbr-time-keys <檔>`（合成長輸入的每鍵時間；可單獨搭配 `--lm` 與選用的 `--abbr-lencap`，或接在 `--abbr C` 後面）：檔案每列為 `左文|注音符號序列`（不帶聲調，例如 `eval/golden/abbr-time-keys-capped.txt` 的四段非音節三符號序列）。在同上的 5 萬筆學習紀錄設定下，每列從 `reset` 開始設左前文、逐鍵打完符號序列，印出一行 `## time:learn50k-keys`，除上述時間欄位外另報各列在 R3 下的最大切法數 `cuts` 與是否全部撞到上限 `capped`。
+- `--pred-row-dump <檔>`（無省略打法、字數上限關的逐鍵預測列傾印；搭配 `--rows <列檔> … --lm <模型> [--profile chat|formal]`）：標準排列、預設四詞包、預測列開、可省略韻母關、字數上限關，對每列從 `reset` 開始設左前文後照 `keys_of` 逐鍵打完，每一鍵寫出一列 tab 分隔 TSV（`列序\t鍵序\t候選1\t…`，不按 Enter），供跨分支比對上限關時的組字中預測列逐項不變。
 - `--abbr-half select|read`（只量一半的列）：不開時所有輸出不變。讀進、去重後的列照順序編號，第 1、3、5…列是 `select`，第 2、4、6…列是 `read`；一列切出的所有詞都跟著那一列。開著時只量那一半，上面各行、`--abbr-dump` 與 `## mix:…` 都只含那一半的詞。`## rows` 行照舊印讀進與去重後的全部列數，緊接著多一行 `## half  <標記>  {'half': 'select', 'rows': <這一半的列數>}`。
 - 為此核心有兩支不進 C 介面的唯讀函式（`#[doc(hidden)]`）：`Engine::pending_units`（目前的未完成單位，照打字順序）與 `Engine::with_predict_parts`（交出預測列用的那一份索引、模型與計分設定；沒有模型時是 `None`）。兩者都不改引擎狀態；加上它們之前與之後，dev302、打字測驗、錯字回報的聊天與書面 rowstats 和 dev302 的重播 rowstats 逐位元組相同。
 
 ## 7. 設定與 C ABI
 
 - `shanjie_engine_set_prediction(engine, 0|1, out)`：預設 1；0 或 1 回 0，其他值回 2（狀態不變），NULL 回 1。關閉時清掉預測列、已進入的列退出（之後 Tab 照被動規則）、有兩個以上未完成單位時一併清掉、帶預測項目的窗關閉；開啟時重算並回傳快照，符合 §1.2 就馬上出現。關閉時 `recompute_pred` 直接返回。沒有載入模型時沒有效果。
+- `shanjie_engine_set_candidate_length_cap(engine, 0|1, out)`：預設 0（關）；0 或 1 回 0，其他值回 2（狀態不變），`engine` 或 `out` 為 NULL 回 1，內部錯誤回 4 並重置組字。組字區不空且預測列開著時依新設定重算預測列並回傳快照；其他時候只記住設定。與 `set_abbreviation` 開關獨立（見 §3.3）。iOS 鍵盤打開它，macOS 殼不呼叫。
 - `set_profile` 的快照同時清掉預測列再重算。
 - `shanjie_engine_pick` 的規則見 §4.3，回傳碼：1（engine 或 out 為 NULL）、2（沒有候選窗也沒有預測列，或 index 超出）、4（內部錯誤，引擎重置）；錯誤時 `*out` 是 NULL。
 - `core/include/shanjie.h` 的註解與 `core/tests/c/abi_smoke.c`（第一鍵就有預測列、`set_prediction` 的 0、1、2 回傳碼）一致。ABI 的整體說明見 `docs/spec/c-abi.md`。
@@ -340,11 +343,11 @@ Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（�
   - 進出與按鍵：`tab_enters_and_shift_tab_leaves`、`another_key_leaves_and_is_handled_as_usual`、`digits_select_and_out_of_range_digits_are_swallowed`、`enter_selects_the_highlighted_item`、`enter_commits_with_a_passive_row_and_selects_with_an_entered_one`、`backspace_with_a_pending_unit_leaves_deletes_the_symbol_and_recomputes`、`backspace_with_only_whole_syllables_leaves_deletes_the_syllable_and_clears_the_row`、`the_row_is_cleared_by_other_state_changes`、`keys_that_do_nothing_keep_the_row`、`the_row_is_empty_when_the_cursor_is_not_at_the_end`、`no_model_no_row`、`pick_selects_from_the_passive_row_and_fails_without_any_row`。
   - 選取：`selection_replaces_the_readings_moves_the_cursor_and_fixes_the_word`、`a_prediction_pick_is_learned_like_a_repick`。
   - 學習（T1 至 T20 系列）：`t1_the_written_milk_case`、`t2_gates_record_nothing`、`t3_a_single_character_needs_a_han_context`、`t4_*`、`t5_a_global_record_does_not_move_the_row`、`t6_the_order_survives_a_restart`、`t7_cmd_backspace_on_the_entered_row_forgets_the_item`、`t8_the_switch`、`t10_*` 至 `t14_*`（學過的項目不受長起點上限限制）、`t15_*`、`t16*`（記錄的鍵）、`t17_*`、`t18_*`、`t19_*`、`t20_the_scan_gate_changes_nothing_but_time`。
-  - 縮寫：`abbreviation_two_units_show_and_select_milk_tea`、`abbreviation_needs_the_setting_the_row_and_the_end_of_the_composition`、`abbreviation_needs_a_model_and_stops_at_the_unit_cap`、`abbreviation_keys_with_two_units`、`abbreviation_esc_drops_only_the_units`、`abbreviation_off_or_row_off_drops_two_units_only`、`abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time`、`abbreviation_cuts_follow_split_n_and_match_64_cap`、`abbreviation_learned_pick_from_another_cut_keeps_its_weight`、`abbreviation_single_cut_matches_plain_prediction_entry_for_entry`、`abbreviation_split_setting_recomputes_when_on_and_only_remembers_when_off`、`reading_matches_follows_the_query_mode`。
+  - 縮寫與候選字數上限：`abbreviation_two_units_show_and_select_milk_tea`、`abbreviation_needs_the_setting_the_row_and_the_end_of_the_composition`、`abbreviation_needs_a_model_and_stops_at_the_unit_cap`、`abbreviation_keys_with_two_units`、`abbreviation_esc_drops_only_the_units`、`abbreviation_off_or_row_off_drops_two_units_only`、`abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time`、`abbreviation_cuts_follow_r3_and_match_64_cap`、`abbreviation_learned_pick_from_another_cut_keeps_its_weight`、`abbreviation_single_cut_matches_plain_prediction_entry_for_entry`、`candidate_length_cap_covers_all_composition_branches_and_exemptions`、`set_candidate_length_cap_recomputes_when_composing_and_remembers_otherwise`、`reading_matches_follows_the_query_mode`。
   - 直排：`the_prediction_row_carries_two_when_vertical_and_zero_when_horizontal`、`the_setter_snapshot_re_renders_a_shown_row_in_the_new_orientation`、`the_entered_vertical_row_moves_with_up_and_down_and_stops_at_both_ends`、`the_passive_vertical_row_keeps_down_as_open_and_up_as_ignore`、`the_horizontal_prediction_row_keeps_its_keys_and_output`。
   - ↓ 開窗：`down_opens_the_window_with_the_row_in_front`、`space_opens_the_same_window_as_down`、`down_with_a_pending_syllable_lists_only_the_row`、`down_with_a_pending_syllable_and_no_row_is_ignored`、`a_row_item_chosen_with_a_pending_syllable_equals_tab_then_the_digit`、`a_row_item_chosen_from_the_window_equals_tab_then_the_digit`、`a_lexicon_item_chosen_from_the_window_is_a_repick`、`an_exact_row_item_chosen_from_the_window_is_a_repick`、`pick_on_a_row_item_in_the_window_equals_the_digit`、`the_window_after_punctuation_has_no_row_items`、`esc_closes_the_window_and_the_row_stays_gone`、`cmd_backspace_on_a_row_item_in_the_window_forgets_it`、`cmd_backspace_on_the_only_row_item_closes_the_window`、`prediction_off_or_a_profile_change_closes_a_window_with_row_items`；異體表：`variant_order_in_the_window_with_the_prediction_row` 等。直排窗：`core/tests/engine_vertical.rs` 的 `vertical_window_lists_the_row_first`。
 - 英文段開著時的預測列（§3.5，`core/tests/engine_mixed.rs`）：混合詞 `the_run_row_lists_the_rows_by_count`、`one_writing_is_listed_once`、`a_nopredict_row_is_not_in_the_run_row`、`choosing_from_the_run_row`、`no_run_row_without_its_conditions`、`a_chosen_item_is_learned_under_the_en_key`、`forgetting_an_item_of_the_run_row`（這幾個用測試鉤子關掉英文補完，只看混合詞）；英文補完 `the_run_row_completes_english_words`、`the_run_row_keeps_three_places_for_english`、`timing_english_completions`；殼 `ShellTests.testRunRowTakesTheHintsPlace`。
-- C ABI：`core/tests/c/abi_smoke.c`、`core/src/ffi.rs` 內的 `set_prediction`、`set_abbreviation` 與 `set_abbreviation_split` 回傳碼及重算測試。
+- C ABI：`core/tests/c/abi_smoke.c`、`core/src/ffi.rs` 內的 `set_prediction`、`set_abbreviation` 與 `set_candidate_length_cap` 回傳碼及重算測試。
 - 殼：`macos/Tests/ShanjieKitTests/ShellTests.swift` 的 `testPredictionRowShowsNoNumbersUntilTabEnters`（第一鍵就有預測列、沒有選取與數字、Tab 後有數字與圖示）、`testPredictionMenuItemTogglesStoresAndSurvivesRestart`、`testAbbreviationMenuItemTogglesStoresRebuildsAndSurvivesRestart`；`CandidateCellTests.swift` 的 `testPassiveRowShowsTheTabGlyphOnTheFirstCell`、`testNumberSlotCoversTheTabGlyph`、`testEnteringTheRowReusesTheFirstCell`。
 - 不變的檢查：預測不影響解碼，選字結果與既有 golden 一個位元組都不改；重播測試的解碼結果不變。
 - 計時（`#[ignore]`，release、低負載時跑）：`cargo test --release -p core --test engine_predict timing_typing76_keys -- --ignored --nocapture --exact`，另有學習 5 萬筆記錄與縮寫變體（`timing_typing76_keys_with_taught_picks_and_50k`、`timing_typing76_keys_abbreviation`、`timing_typing76_keys_with_taught_picks_and_50k_abbreviation`）。每鍵 p95 必須小於 16 ms。往回 5 個音節的起點在 5 萬筆學習記錄下 p95 約 3 ms（10 核機器、負載高於核心數時量到 2.9 至 3.2 ms），沒有學習記錄時與往回 0 的差別在雜訊範圍內。

@@ -4,7 +4,10 @@
 use crate::colloquial::{self, Colloquial, ColloquialTable};
 use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, fine_key, mid_key, local_day, newword_score, next_key, record_key, Learner, Level, Record, EN_PREFIX, NEXT_PREFIX, SENTINEL, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{abbr_cuts, predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
+use crate::predict::{
+    abbr_cuts, predict_capped, predict_digits_capped, predict_english_capped, reading_matches_in, unit_of_syllable, DigitWords,
+    Mode, Unit,
+};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
 use crate::lm::{decode_segment_fuzzy, history, pool_order, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, RecurGrams, Scored, Sinit, SinitLayer};
 use crate::trigram::TriMemo;
@@ -908,8 +911,8 @@ pub struct Engine {
     up_run: Option<UpRun>,
     /// Whether a non-advancing symbol opens a new unfinished unit (default off; `set_abbreviation`, docs/spec/prediction.md §6).
     abbr: bool,
-    /// Maximum units a toneless syllable between forced splits may be split into (`1..=3`, default 3; `set_abbreviation_split`).
-    abbr_split: u8,
+    /// Whether each prediction query skips candidates longer than its queried unit count (default off; `set_candidate_length_cap`, docs/spec/prediction.md §3.3).
+    cand_len_cap: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
     scan_gate: bool,
     /// Set by the key rules that recompute the row; `key` recomputes after the rule ran.
@@ -1436,7 +1439,7 @@ impl Engine {
             key_scheme: 0,
             up_run: None,
             abbr: false,
-            abbr_split: 3,
+            cand_len_cap: false,
             scan_gate: true,
             pred_dirty: false,
             left: String::new(),
@@ -2325,20 +2328,16 @@ impl Engine {
         self.handled()
     }
 
-    /// Maximum number of units a toneless syllable of the prediction index between forced splits may be split into when the
-    /// abbreviation composer is on (`1..=3`, default 3; docs/spec/prediction.md §6). Out of range returns `Ok(None)` without
-    /// changing state. With the abbreviation composer on and unfinished units present, recomputes the prediction row; when the
-    /// abbreviation composer is off, only remembers `n`.
-    pub fn set_abbreviation_split(&mut self, n: u32) -> Result<Option<Output>, EngineError> {
-        if !(1..=3).contains(&n) {
-            return Ok(None);
-        }
+    /// Whether each prediction query skips candidates whose character count exceeds the queried unit count (default off;
+    /// docs/spec/prediction.md §3.3, §7). Recomputes the prediction row when the composition is non-empty and prediction is
+    /// on; otherwise only remembers `on`. Returns the snapshot.
+    pub fn set_candidate_length_cap(&mut self, on: bool) -> Result<Output, EngineError> {
         self.setting_changed();
-        self.abbr_split = n as u8;
-        if self.abbr && self.pend.iter().any(Option::is_some) {
+        self.cand_len_cap = on;
+        if !self.composition_empty() && self.predict_on {
             self.recompute_pred();
         }
-        self.handled().map(Some)
+        self.handled()
     }
 
     /// zhen-mixed (docs/spec/english-mixed.md §1.1): the switch, default off. Takes effect only with the standard layout and the
@@ -3674,12 +3673,21 @@ impl Engine {
                 && (!self.scan_gate
                     || self.learner.records().iter().any(|r| r.context != NEWWORD && !r.context.starts_with(EN_PREFIX) && reading_matches_in(&units, &r.reading, mode)));
             let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
+            let max_chars = self.cand_len_cap.then_some(units.len());
             let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable, english) {
                 (Some(dv), Some(c), Some(t), _) if digits_here => {
-                    predict_digits(idx, &st.lm, t, &c.words, cfg, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
+                    predict_digits_capped(idx, &st.lm, t, &c.words, cfg, dv, &units, limit, max_chars)
+                        .into_iter()
+                        .map(|(w, _, r)| (w, r))
+                        .collect()
                 }
-                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, cfg, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
-                _ => predict(idx, &st.lm, cfg, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
+                (_, _, _, Some((f, w))) => {
+                    predict_english_capped(idx, &st.lm, f, w, cfg, v, &units, mode, limit, max_chars)
+                        .into_iter()
+                        .map(|(w, _, r)| (w, r))
+                        .collect()
+                }
+                _ => predict_capped(idx, &st.lm, cfg, v, &units, mode, limit, max_chars).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
             };
             hits.into_iter()
                 .enumerate()
@@ -3716,7 +3724,7 @@ impl Engine {
                 query(n)
             } else {
                 let symbols: Vec<char> = pending.iter().flatten().copied().collect();
-                let (cuts, _) = abbr_cuts(&symbols, n, ABBR_MAX_UNITS, MAX_SYLLABLES, self.abbr_split, |s| idx.has_toneless_syllable(s));
+                let (cuts, _) = abbr_cuts(&symbols, n, ABBR_MAX_UNITS, MAX_SYLLABLES, |s| idx.has_toneless_syllable(s));
                 if cuts.len() <= 1 {
                     query(n)
                 } else {
@@ -3727,13 +3735,16 @@ impl Engine {
                     for cut in &cuts {
                         let units: Vec<Unit> = cut.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect();
                         let mode_c = if units.len() > 1 { Mode::PA } else { Mode::P };
+                        let max_chars = self.cand_len_cap.then_some(units.len());
                         let gate = learned
                             && (!self.scan_gate
                                 || self.learner.records().iter().any(|r| {
                                     r.context != NEWWORD && !r.context.starts_with(EN_PREFIX) && reading_matches_in(&units, &r.reading, mode_c)
                                 }));
                         let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
-                        for (i, (word, score, is_succ, reading)) in predict(idx, &st.lm, cfg, v, &units, mode_c, limit).into_iter().enumerate() {
+                        for (i, (word, score, is_succ, reading)) in
+                            predict_capped(idx, &st.lm, cfg, v, &units, mode_c, limit, max_chars).into_iter().enumerate()
+                        {
                             let weight = if gate { self.learned_weight(&key, None, &reading, &word, today) } else { 0.0 };
                             if (i < PREDICT_MAX || weight > 0.0) && !word.is_empty() {
                                 let better = |o: &(Pred, f64, bool)| (is_succ && !o.2) || (is_succ == o.2 && score > o.1);
@@ -5945,6 +5956,7 @@ mod english_table_tests {
 #[cfg(test)]
 mod measure_hook_tests {
     use super::*;
+    use crate::predict::predict;
 
     fn engine() -> Engine {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -5978,9 +5990,8 @@ mod measure_hook_tests {
     #[test]
     fn predict_parts_give_the_engines_own_row() {
         let mut e = engine();
-        e.set_abbreviation_split(1).unwrap();
         let left = "我想喝一杯";
-        for (keys, units, mode) in [("ㄋㄔ", vec!["ㄋ", "ㄔ"], Mode::PA), ("ㄋㄞ", vec!["ㄋㄞ"], Mode::P)] {
+        for (keys, units, mode) in [("ㄋㄔ", vec!["ㄋ", "ㄔ"], Mode::PA), ("ㄋ", vec!["ㄋ"], Mode::P)] {
             e.reset(ResetMode::Discard);
             e.set_left_context(left);
             typ(&mut e, keys);
