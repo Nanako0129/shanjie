@@ -2397,6 +2397,7 @@ fn abbreviation_cuts_follow_r3_and_match_64_cap() {
     assert_eq!(cuts("ㄅㄩㄢ", 0), (vec![u("ㄅㄩㄢ"), u("ㄅㄩ ㄢ"), u("ㄅ ㄩㄢ"), u("ㄅ ㄩ ㄢ")], false));
 
     // Independent R3 reference (by unit end positions, as cli/src/main.rs does).
+    // This closure is a copy of `abbr_cuts` in cli/src/main.rs (the offline measurement's cuts): change both together.
     let ref_r3_cuts = |symbols: &[char]| -> (Vec<Vec<String>>, bool) {
         let free = |i: usize| abbr_column(symbols[i]) > abbr_column(symbols[i - 1]);
         let mut segs: Vec<(usize, usize)> = Vec::new();
@@ -3343,4 +3344,98 @@ fn variant_order_cmd_backspace_forgets_only_the_highlighted_word() {
         drop(e);
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+// ---------- the abbreviation mix (docs/spec/prediction.md §6) ----------
+
+/// The mixed list of every R3 cut of the unfinished `symbols` after `left` (docs/spec/prediction.md §6, cli/src/main.rs `abbr_mix`), computed from the
+/// engine's own index, model and scoring: one unlimited `predict` per cut, the best entry of a word (a successor beats a non-successor, then the
+/// higher score; the earlier cut keeps a tie), then the order of `tiered`. `successors_first` false drops the successor tier from the final order,
+/// which is what the mutation of the engine's sort key would do.
+fn abbr_mix_oracle(e: &Engine, left: &str, symbols: &str, successors_first: bool) -> Vec<String> {
+    use core::predict::abbr_cuts;
+    let chars: Vec<char> = symbols.chars().collect();
+    e.with_predict_parts(|idx, lm, cfg| {
+        let (cuts, _) = abbr_cuts(&chars, 0, ABBR_MAX_UNITS, MAX_SYLLABLES, |c| idx.has_toneless_syllable(c));
+        let key = context_key(left);
+        let v = history(if key == "^" { "" } else { &key }, lm);
+        let mut best: Vec<(String, f64, bool, Vec<String>)> = Vec::new();
+        for cut in &cuts {
+            let units: Vec<Unit> = cut.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect();
+            let mode = if units.len() > 1 { Mode::PA } else { Mode::P };
+            for c in predict(idx, lm, cfg, v, &units, mode, usize::MAX) {
+                match best.iter_mut().find(|b| b.0 == c.0) {
+                    Some(b) if (c.2 && !b.2) || (c.2 == b.2 && c.1 > b.1) => *b = c,
+                    Some(_) => {}
+                    None => best.push(c),
+                }
+            }
+        }
+        best.sort_by(|a, b| {
+            (if successors_first { b.2.cmp(&a.2) } else { std::cmp::Ordering::Equal })
+                .then(b.1.partial_cmp(&a.1).unwrap())
+                .then_with(|| a.0.chars().count().cmp(&b.0.chars().count()))
+                .then_with(|| a.3.join("-").cmp(&b.3.join("-")))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        best.into_iter().map(|b| b.0).take(9).collect()
+    })
+    .expect("the engine has a model")
+}
+
+/// How many R3 cuts the unfinished `symbols` have (a mix needs two or more; with one the engine takes the plain start query).
+fn abbr_cut_count(e: &Engine, symbols: &str) -> usize {
+    let chars: Vec<char> = symbols.chars().collect();
+    e.with_predict_parts(|idx, _, _| core::predict::abbr_cuts(&chars, 0, ABBR_MAX_UNITS, MAX_SYLLABLES, |c| idx.has_toneless_syllable(c)).0.len()).unwrap()
+}
+
+/// docs/spec/prediction.md §6: in the mixed row a successor of the word before the cursor comes before a non-successor with a higher score.
+/// Each input is one where the row differs when the tier is dropped, in the unlimited lists (asserted below) and in the row the engine builds from nine
+/// words per cut (measured with the sort key of `recompute_pred` replaced by `Equal`: both inputs then fail the last assertion).
+#[test]
+fn abbreviation_mix_puts_successors_before_higher_scored_words() {
+    for (left, symbols) in [("覺得", "ㄇㄣ"), ("真的", "ㄏㄠㄔ")] {
+        let mut e = abbr_engine(left);
+        let got = row(&typ(&mut e, &[], symbols));
+        assert!(abbr_cut_count(&e, symbols) >= 2, "{left}|{symbols}: needs the mix");
+        let (with, without) = (abbr_mix_oracle(&e, left, symbols, true), abbr_mix_oracle(&e, left, symbols, false));
+        assert_ne!(with, without, "{left}|{symbols}: the successor tier must change this row");
+        assert_eq!(got, with, "{left}|{symbols}: successors first (without the tier: {without:?})");
+    }
+}
+
+/// docs/spec/english-mixed.md §8 with the abbreviation composer on: behind an English word (the text before the composition ends with one) the row
+/// is the table's followers of that word (`predict_english`), not the mix of the cuts. 書/輸 are the table's, and the mix has 說 first.
+#[test]
+fn abbreviation_behind_an_english_word_gives_the_english_follower_row() {
+    use core::english_next::EnglishTable;
+    let table = Arc::new(EnglishTable::parse("E\tjoe\t400\nW\tjoe\t輸\t90\nW\tjoe\t書\t60\nW\tjoe\t輸入\t50\nW\tjoe\t什麼\t5\n").unwrap());
+    let make = |left: &str| {
+        let mut e = abbr_engine("");
+        e.set_english_next(Some(table.clone()));
+        e.set_left_context(left);
+        e
+    };
+    for (left, symbols, units) in [("我說Joe", "ㄕㄨ", &["ㄕㄨ"][..]), ("Joe", "ㄕㄨ", &["ㄕㄨ"]), ("我說joe ", "ㄕㄨㄖ", &["ㄕㄨ", "ㄖ"])] {
+        let mut e = make(left);
+        let got = row(&typ(&mut e, &[], symbols));
+        assert!(abbr_cut_count(&e, symbols) >= 2, "{left}|{symbols}: needs the mix");
+        let english: Vec<String> = e
+            .with_predict_parts(|idx, lm, cfg| {
+                let words = idx.digit_words(&table.all_words());
+                let key = context_key(left);
+                let v = history(if key == "^" { "" } else { &key }, lm);
+                let u: Vec<Unit> = units.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect();
+                let mode = if u.len() > 1 { Mode::PA } else { Mode::P };
+                core::predict::predict_english(idx, lm, table.get("joe").unwrap(), &words, cfg, v, &u, mode, 9).into_iter().map(|x| x.0).collect()
+            })
+            .unwrap();
+        let mix = abbr_mix_oracle(&e, left, symbols, true);
+        assert_ne!(english, mix, "{left}|{symbols}: the English row must differ from the mix");
+        assert_eq!(got, english, "{left}|{symbols}: the English follower row (the mix is {mix:?})");
+    }
+    // The same engine without an English word before the composition mixes the cuts as usual.
+    let mut e = make("我說");
+    let got = row(&typ(&mut e, &[], "ㄕㄨ"));
+    assert_eq!(got, abbr_mix_oracle(&e, "我說", "ㄕㄨ", true));
 }
