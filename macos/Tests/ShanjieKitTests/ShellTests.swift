@@ -821,7 +821,7 @@ final class ShellTests: XCTestCase {
         c.session.activate()
         let item = { c.session.menu.first { $0.action == .toggleEnglish } }
         let titles = c.session.menu.map(\.title)
-        // After 即時預測 and before 語意校正 (here with 可省略韻母 shown, it is between; the app hides it, HiddenAbbreviationTests).
+        // After 即時預測 and before 語意校正 (with 可省略韻母 shown, as in the app, it is between; a shell that hides it is HiddenAbbreviationTests).
         let at = try! XCTUnwrap(titles.firstIndex(of: "中英混打（實驗）"))
         XCTAssertGreaterThan(at, try! XCTUnwrap(titles.firstIndex(of: "即時預測")))
         XCTAssertEqual(titles.firstIndex(of: "語意校正"), at + 1)
